@@ -34,7 +34,7 @@
     <center>
         <TableView fx:id="seatTable" BorderPane.alignment="CENTER">
             <columns>
-                <TableColumn fx:id="colPresentation" prefWidth="120.0" text="Vorstellung" />
+                <TableColumn fx:id="colPresentation" prefWidth="180.0" text="Vorstellung" />
                 <TableColumn fx:id="colTableNumber" prefWidth="60.0" text="Tisch" />
                 <TableColumn fx:id="colCategory" prefWidth="100.0" text="Kategorie" />
                 <TableColumn fx:id="colSeatNumber" prefWidth="60.0" text="Platz" />

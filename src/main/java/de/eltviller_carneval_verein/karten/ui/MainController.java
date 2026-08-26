@@ -21,6 +21,9 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.cell.CheckBoxTableCell;
+import javafx.scene.control.cell.TextFieldTableCell;
+import javafx.util.converter.IntegerStringConverter;
 
 public class MainController {
 
@@ -65,26 +68,60 @@ public class MainController {
 
 	@FXML
 	public void initialize() {
-		// 1. Spalten-ValueFactorys konfigurieren ...
+		// 1. Spalten-ValueFactorys konfigurieren
 		colPresentation.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getPresentation().getName()));
 		colTableNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getTable().getTableNumber()).asObject());
-		colPresentation.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getTable().getCategory()));
+		colCategory.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getTable().getCategory()));
 		colSeatNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getSeat().getSeatNumber()).asObject());
 		colLastName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getSeat().getLastName()));
 		colFirstName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getSeat().getFirstName()));
-		colPaid.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().getSeat().isPaid()));
-		colCollected.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().getSeat().isCollected()));
-		colWheelchair.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().getSeat().isWheelchairAccessible()));
+		colPaid.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
+		    SeatDTO seatDTO = seatTable.getItems().get(index);
+		    SimpleBooleanProperty paid = new SimpleBooleanProperty(seatDTO.getSeat().isPaid());
+		    paid.addListener((obs, oldVal, newVal) -> {
+		    	seatDTO.getSeat().setCollected(newVal);
+		        saveCurrentState(seatDTO);
+		    });
+		    return paid;
+		}));
+		colCollected.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
+		    SeatDTO seatDTO = seatTable.getItems().get(index);
+		    SimpleBooleanProperty collected = new SimpleBooleanProperty(seatDTO.getSeat().isCollected());
+		    collected.addListener((obs, oldVal, newVal) -> {
+		    	seatDTO.getSeat().setCollected(newVal);
+		        saveCurrentState(seatDTO);
+		    });
+		    return collected;
+		}));
+		colWheelchair.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
+		    SeatDTO seatDTO = seatTable.getItems().get(index);
+		    SimpleBooleanProperty whellchair = new SimpleBooleanProperty(seatDTO.getSeat().isWheelchairAccessible());
+		    whellchair.addListener((obs, oldVal, newVal) -> {
+		    	seatDTO.getSeat().setCollected(newVal);
+		        saveCurrentState(seatDTO);
+		    });
+		    return whellchair;
+		}));
 		colComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getSeat().getComment()));
 		colPrice.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getSeat().getPriceDouble()).asObject());
 		colReserved.setCellValueFactory(cell -> {
 			boolean reserved = cell.getValue().getSeat().isReserved();
 			return new SimpleBooleanProperty(reserved);
 		});
+		colReserved.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
+		    SeatDTO seatDTO = seatTable.getItems().get(index);
+		    SimpleBooleanProperty reserved = new SimpleBooleanProperty(seatDTO.getSeat().isReserved());
+		    reserved.addListener((obs, oldVal, newVal) -> {
+		    	seatDTO.getSeat().setCollected(newVal);
+		        saveCurrentState(seatDTO);
+		    });
+		    return reserved;
+		}));
 
 		// 2. FilteredList um die Master-Daten legen & an Tabelle binden
 		filteredData = new FilteredList<>(masterData, p -> true);
 		seatTable.setItems(filteredData);
+		//setTableEditable(false);
 
 		// 3. Spaltenkopf-Filter von ControlsFX aktivieren
 		TableFilter.forTableView(seatTable).apply();
@@ -138,13 +175,18 @@ public class MainController {
 					|| (dto.getSeat().getComment() != null && dto.getSeat().getComment().toLowerCase().contains(lowerCaseFilter));
 		});
 	}
+	
+	private void setTableEditable(boolean editable) {
+		seatTable.setEditable(editable);
+		colLastName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colFirstName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colTableNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
+		//colPaidStatus.setCellFactory(CheckBoxTableCell.forTableColu);
+	}
 
-	// Änderungen in der JSON-Datei persistieren
 	@FXML
-	private void handleSave() {
-		Event selectedEvent = eventComboBox.getValue();
-		if (selectedEvent != null) {
-			repository.saveEvent(selectedEvent);
-		}
+	private void saveCurrentState(SeatDTO seatDTO) {
+		// Aktuellen Stand speichern
+		repository.saveEvent(seatDTO.getEvent());
 	}
 }
