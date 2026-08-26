@@ -1,0 +1,11 @@
+# Build- & IDE-Ordner
+target/
+.settings/
+.classpath
+.project
+.idea/
+*.iml
+
+# Lokale Testdaten & Logs
+events_data/
+*.log
