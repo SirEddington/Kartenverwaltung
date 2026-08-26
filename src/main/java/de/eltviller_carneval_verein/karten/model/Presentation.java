@@ -50,7 +50,7 @@ public class Presentation {
 	}
 	// <-- Getter und Setter
 
-	public void changeLastName(String name) {
+	public void changeName(String name) {
 		if (name == null || name.isBlank()) {
 			throw new IllegalArgumentException("Name darf nicht leer sein.");
 		} else {
