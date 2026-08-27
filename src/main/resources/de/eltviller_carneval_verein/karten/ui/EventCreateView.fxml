@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox spacing="15.0" prefWidth="700.0" prefHeight="550.0" 
+      xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" 
+      fx:controller="de.eltviller_carneval_verein.karten.ui.EventCreateController">
+    <padding>
+        <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
+    </padding>
+
+    <HBox alignment="CENTER_LEFT" spacing="10.0">
+        <Button text="← Menü" onAction="#handleBackToMenu" />
+        <Label fx:id="lblTitle" text="Neues Event anlegen" style="-fx-font-size: 18px; -fx-font-weight: bold;" />
+    </HBox>
+
+    <Separator />
+
+    <!-- Stammdaten des Events -->
+    <GridPane vgap="10.0" hgap="10.0">
+        <Label text="Event Name:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+        <TextField fx:id="txtEventName" promptText="z.B. Prunksitzung 2027" GridPane.rowIndex="0" GridPane.columnIndex="1" prefWidth="300.0" />
+
+        <Label text="Vorstellung(en):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+        <TextField fx:id="txtPresentations" promptText="Kommagetrennt, z.B. Abendsitzung, Nachmittagssitzung" GridPane.rowIndex="1" GridPane.columnIndex="1" prefWidth="300.0" />
+    </GridPane>
+
+    <Separator />
+
+    <!-- Bestuhlungs-Generator -->
+    <Label text="Grundstruktur Bestuhlung generieren" style="-fx-font-weight: bold;" />
+    <GridPane vgap="10.0" hgap="10.0">
+        <Label text="Anzahl Tische:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnTableCount" min="1" max="100" initialValue="10" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
+
+        <Label text="Sitze pro Tisch:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnSeatsPerTable" min="1" max="30" initialValue="8" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
+
+        <Label text="Kategorie Standard:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
+        <TextField fx:id="txtCategory" text="Saal" GridPane.rowIndex="2" GridPane.columnIndex="1" />
+    </GridPane>
+
+    <Region VBox.vgrow="ALWAYS" />
+
+    <!-- Aktionen -->
+    <HBox alignment="CENTER_RIGHT" spacing="10.0">
+        <Button text="Abbrechen" onAction="#handleCancel" />
+        <Button text="Event Speichern" onAction="#handleSave" style="-fx-base: #28a745; -fx-text-fill: white;" />
+    </HBox>
+</VBox>

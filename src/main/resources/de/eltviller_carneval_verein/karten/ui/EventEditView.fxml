@@ -14,45 +14,38 @@
 
 <BorderPane xmlns="http://javafx.com/javafx/17" 
             xmlns:fx="http://javafx.com/fxml/1" 
-            fx:controller="de.eltviller_carneval_verein.karten.ui.MainController">
+            fx:controller="de.eltviller_carneval_verein.karten.ui.EventEditController">
 
-    <!-- Oberer Bereich: Auswahllisten -->
+    <!-- Oberer Bereich: Menüleiste -->
     <top>
         <HBox spacing="10.0" BorderPane.alignment="CENTER">
             <padding>
                 <Insets bottom="10.0" left="10.0" right="10.0" top="10.0" />
             </padding>
             <children>
-            <Button text="← Menü" onAction="#handleBackToMenu" />
-                <Label text="Event:" />
-                <ComboBox fx:id="eventComboBox" prefWidth="180.0" promptText="Event wählen..." />
+                <Button text="← Menü" onAction="#handleBackToMenu" />
+            	<Button fx:id="btnCreateEvent" text="Anlegen" prefWidth="90.0" onAction="#createEvent"/>
                 
-                <Label text="Suche:" />
-                <TextField fx:id="searchField" prefWidth="180.0" promptText="Suche..." />
+            	<Label text="Suche:" />
+            	<TextField fx:id="searchField" prefWidth="180.0" promptText="Suche..." />
                 
-                <Region HBox.hgrow="ALWAYS" />
+            	<Region HBox.hgrow="ALWAYS" />
                 
-                <Button fx:id="btnToggleEdit" text="Bearbeiten" prefWidth="90.0" onAction="#toggleEditMode"/>
+            	<Button fx:id="btnToggleEdit" text="Bearbeiten" prefWidth="90.0" onAction="#toggleEditMode"/>
                 
             </children>
         </HBox>
     </top>
 
-    <!-- Mittlerer Bereich: Sitzplatz-Tabelle -->
+    <!-- Mittlerer Bereich: Tabelle -->
     <center>
-        <TableView fx:id="seatTable" BorderPane.alignment="CENTER">
+        <TableView fx:id="eventTable" BorderPane.alignment="CENTER">
             <columns>
-                <TableColumn fx:id="colPresentation" prefWidth="180.0" text="Vorstellung" />
+                <TableColumn fx:id="colEventName" prefWidth="180.0" text="Vorstellung" />
+                <TableColumn fx:id="colCountPresentations" prefWidth="180.0" text="Vorstellung" />
                 <TableColumn fx:id="colTableNumber" prefWidth="60.0" text="Tisch" />
                 <TableColumn fx:id="colCategory" prefWidth="100.0" text="Kategorie" />
                 <TableColumn fx:id="colSeatNumber" prefWidth="60.0" text="Platz" />
-                <TableColumn fx:id="colLastName" prefWidth="120.0" text="Nachname" />
-                <TableColumn fx:id="colFirstName" prefWidth="120.0" text="Vorname" />
-                <TableColumn fx:id="colReserved" prefWidth="80.0" text="Reserviert" />
-                <TableColumn fx:id="colPrice" prefWidth="80.0" text="Preis (€)" />
-                <TableColumn fx:id="colPaid" prefWidth="75.0" text="Bezahlt" />
-                <TableColumn fx:id="colCollected" prefWidth="75.0" text="Abgeholt" />
-                <TableColumn fx:id="colWheelchair" prefWidth="75.0" text="Rollstuhl" />
                 <TableColumn fx:id="colComment" prefWidth="150.0" text="Kommentar" />
             </columns>
         </TableView>

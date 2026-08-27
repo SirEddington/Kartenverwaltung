@@ -5,6 +5,7 @@ import java.util.List;
 
 import org.controlsfx.control.table.TableFilter;
 
+import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Table;
@@ -254,6 +255,11 @@ public class MainController {
 			return prop;
 		}));
 
+	}
+
+	@FXML
+	private void handleBackToMenu() {
+		MainApp.showMenuView();
 	}
 
 	@FXML

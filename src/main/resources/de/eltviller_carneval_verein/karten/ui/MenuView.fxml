@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.text.Font?>
+
+<VBox alignment="CENTER" spacing="15.0" prefWidth="600.0" prefHeight="400.0" 
+      xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" 
+      fx:controller="de.eltviller_carneval_verein.karten.ui.MenuController">
+    <padding>
+        <Insets top="30.0" right="30.0" bottom="30.0" left="30.0" />
+    </padding>
+    
+    <Label text="Eltviller Carneval Verein">
+        <font>
+            <Font name="System Bold" size="22.0" />
+        </font>
+    </Label>
+    <Label text="Kartenverwaltung Hauptmenü">
+        <font>
+            <Font size="14.0" />
+        </font>
+        <VBox.margin>
+            <Insets bottom="20.0" />
+        </VBox.margin>
+    </Label>
+
+    <!-- Menü-Buttons -->
+    <Button text="Kartenansicht" prefWidth="250.0" prefHeight="40.0" onAction="#handleOpenTable" />
+    <Button text="Events anlegen/bearbeiten" prefWidth="250.0" prefHeight="40.0" onAction="#handleCreateEvent" />
+    
+    <!-- Platzhalter für zukünftige Module (z.B. Statistik, Export) -->
+</VBox>
