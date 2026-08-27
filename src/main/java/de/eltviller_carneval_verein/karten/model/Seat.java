@@ -1,8 +1,11 @@
 package de.eltviller_carneval_verein.karten.model;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
-public class Seat {
+public class Seat implements EventObject {
 	private int seatNumber;						//get
 	private int price;									//get,set
 	private boolean paid;							//get,set
@@ -119,6 +122,23 @@ public class Seat {
 	@Override
 	public String toString() {
 		return "Sitz "+ seatNumber + (wheelchairAccessible == true ? "Rollstuhlgeeignet" : "");
+	}
+
+	@Override
+	public List<Presentation> getPresentations() {
+		return null;
+	}
+
+	@Override
+	public List<Table> getTables() {
+		return null;
+	}
+
+	@Override
+	public List<Seat> getSeats() {
+		List<Seat> seats = new ArrayList<Seat>();
+		seats.add()
+		return null;
 	}
 	
 }

@@ -5,7 +5,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
-public class Event {
+public class Event implements EventObject {
 	private String name; // get
 	private List<Presentation> presentations = new ArrayList<>(); // get,set
 

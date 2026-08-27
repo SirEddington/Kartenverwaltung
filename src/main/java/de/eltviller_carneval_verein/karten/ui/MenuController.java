@@ -12,6 +12,6 @@ public class MenuController {
 
 	@FXML
 	private void handleCreateEvent() {
-		MainApp.showEventEditView(null);
+		MainApp.showEventOverviewView();
 	}
 }

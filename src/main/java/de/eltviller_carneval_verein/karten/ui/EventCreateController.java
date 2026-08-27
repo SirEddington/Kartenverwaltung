@@ -104,8 +104,8 @@ public class EventCreateController {
 	}
 
 	@FXML
-	private void handleBackToMenu() {
-		MainApp.showMenuView();
+	private void handleBackToEventOverview() {
+		MainApp.showEventOverviewView();;
 	}
 
 	@FXML

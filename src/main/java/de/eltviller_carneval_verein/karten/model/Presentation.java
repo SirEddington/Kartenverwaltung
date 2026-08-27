@@ -5,7 +5,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
-public class Presentation {
+public class Presentation implements EventObject {
 	private String name; // get
 	private String date; // get,set
 	private String time; // get,set
