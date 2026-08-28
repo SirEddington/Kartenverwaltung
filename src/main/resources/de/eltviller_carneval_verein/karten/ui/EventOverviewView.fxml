@@ -31,8 +31,11 @@
 		<TreeTableView fx:id="treeTableView" showRoot="false" VBox.vgrow="ALWAYS">
     		<columns>
         		<TreeTableColumn fx:id="colName" text="Bezeichnung / Name" prefWidth="300.0" />
-        		<TreeTableColumn fx:id="colCategory" text="Kategorie" prefWidth="150.0" />
-       			<TreeTableColumn fx:id="colStatus" text="Status / Details" prefWidth="250.0" />
+        		<TreeTableColumn fx:id="colPresCount" text="Vorstellungen (Anzahl)" prefWidth="200.0" />
+       			<TreeTableColumn fx:id="colTableCount" text="Tische (Anzahl)" prefWidth="200.0" />
+        		<TreeTableColumn fx:id="colSeatCount" text="Stühle (Bezahlt / Reserviert / Anzahl)" prefWidth="350.0" />
+        		<TreeTableColumn fx:id="colRevenue" text="Einnahmen (Tatsächlich / Erwartet / Potenziell)" prefWidth="350.0" />
+       			<TreeTableColumn fx:id="colArchive" text="Archiviert" prefWidth="250.0" />
     		</columns>
     		<columnResizePolicy>
         		<TreeTableView fx:constant="CONSTRAINED_RESIZE_POLICY" />

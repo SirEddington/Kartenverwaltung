@@ -5,7 +5,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
-public class Table implements EventObject {
+public class Table {
 	private int tableNumber; // get
 	private String description; // get,set
 	private String category; // get,set

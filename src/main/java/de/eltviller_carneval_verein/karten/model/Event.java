@@ -5,8 +5,9 @@ import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
-public class Event implements EventObject {
+public class Event {
 	private String name; // get
+	private boolean archived;
 	private List<Presentation> presentations = new ArrayList<>(); // get,set
 
 	// Konstuktoren -->
@@ -21,6 +22,14 @@ public class Event implements EventObject {
 	// Getter und Setter -->
 	public String getName() {
 		return name;
+	}
+
+	public boolean isArchived() {
+		return archived;
+	}
+
+	public void setArchived(boolean archived) {
+		this.archived = archived;
 	}
 
 	public List<Presentation> getPresentations() {
@@ -61,6 +70,15 @@ public class Event implements EventObject {
 			seatNumbers.addAll(presentation.getSeatNumbers());
 		}
 		return seatNumbers.stream().distinct().sorted().toList();
+	}
+
+	@JsonIgnore
+	public List<Table> getTables() {
+		List<Table> tables = new ArrayList<Table>();
+		for (Presentation presentation : presentations) {
+			tables.addAll(presentation.getTables());
+		}
+		return tables;
 	}
 
 	@JsonIgnore
