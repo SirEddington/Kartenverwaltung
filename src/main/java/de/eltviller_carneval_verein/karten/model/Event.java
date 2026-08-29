@@ -49,6 +49,18 @@ public class Event {
 		}
 	}
 
+	public void addPresentation(Presentation presentation) {
+		if (presentation == null) {
+			throw new IllegalArgumentException("Presentation ist null");
+		}
+		for (Presentation pres : presentations) {
+			if (pres.getName() == presentation.getName()) {
+				throw new IllegalArgumentException("Presentation existiert bereits");
+			}
+		}
+		presentations.add(presentation);
+	}
+
 	@Override
 	public String toString() {
 		return name != null ? name : "Unbenanntes Event";

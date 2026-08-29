@@ -58,6 +58,32 @@ public class Presentation {
 		}
 	}
 
+	public void addTable(Table newTable) {
+		if (newTable == null) {
+			throw new IllegalArgumentException("Table ist null");
+		}
+		if (newTable.getTableNumber() > 0) {
+			for (Table table : tables) {
+				if (table.getTableNumber() == newTable.getTableNumber()) {
+					throw new IllegalArgumentException("Table existiert bereits");
+				}
+			}
+		} else {
+			newTable.changeTableNumber(createTableNumber());
+		}
+		tables.add(newTable);
+	}
+
+	public int createTableNumber() {
+		int tableNumber = 1;
+		for (Table table : tables) {
+			if (table.getTableNumber() == tableNumber) {
+				tableNumber++;
+			}
+		}
+		return tableNumber;
+	}
+
 	@Override
 	public String toString() {
 		return name != null ? name : "Unbenannte Vorstellung";

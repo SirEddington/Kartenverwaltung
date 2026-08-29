@@ -211,7 +211,7 @@ public class MainController {
 		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(new DoubleStringConverter()));
 		colPrice.setOnEditCommit(event -> {
 			SeatDTO seatDTO = event.getRowValue();
-			seatDTO.getSeat().setPrice(event.getNewValue());
+			seatDTO.getSeat().setPriceDouble(event.getNewValue());
 		});
 		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
 		colComment.setOnEditCommit(event -> {

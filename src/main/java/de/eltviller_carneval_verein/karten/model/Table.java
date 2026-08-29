@@ -58,6 +58,32 @@ public class Table {
 		}
 	}
 
+	public void addSeat(Seat newSeat) {
+		if (newSeat == null) {
+			throw new IllegalArgumentException("Seat ist null");
+		}
+		if (newSeat.getSeatNumber() > 0) {
+			for (Seat seat : seats) {
+				if (seat.getSeatNumber() == newSeat.getSeatNumber()) {
+					throw new IllegalArgumentException("Table existiert bereits");
+				}
+			}
+		} else {
+			newSeat.changeSeatNumber(createSeatNumber());
+		}
+		seats.add(newSeat);
+	}
+
+	public int createSeatNumber() {
+		int seatNumber = 1;
+		for (Seat seat : seats) {
+			if (seat.getSeatNumber() == seatNumber) {
+				seatNumber++;
+			}
+		}
+		return seatNumber;
+	}
+
 	@Override
 	public String toString() {
 		return "Tisch " + tableNumber + (category != null ? "(" + category + ")" : "");

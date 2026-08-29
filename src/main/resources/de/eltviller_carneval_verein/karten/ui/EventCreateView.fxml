@@ -24,7 +24,7 @@
         <TextField fx:id="txtEventName" promptText="z.B. Prunksitzung 2027" GridPane.rowIndex="0" GridPane.columnIndex="1" prefWidth="300.0" />
 
         <Label text="Vorstellung(en):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-        <TextField fx:id="txtPresentations" promptText="Kommagetrennt, z.B. Abendsitzung, Nachmittagssitzung" GridPane.rowIndex="1" GridPane.columnIndex="1" prefWidth="300.0" />
+        <Spinner fx:id="spnPresCount" min="0" max="10" initialValue="3" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
     </GridPane>
 
     <Separator />
@@ -32,14 +32,14 @@
     <!-- Bestuhlungs-Generator -->
     <Label text="Grundstruktur Bestuhlung generieren" style="-fx-font-weight: bold;" />
     <GridPane vgap="10.0" hgap="10.0">
-        <Label text="Anzahl Tische:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnTableCount" min="1" max="100" initialValue="10" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
+        <Label text="Tische pro Vorstellung:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnTablePerPres" min="0" max="100" initialValue="40" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
 
         <Label text="Sitze pro Tisch:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnSeatsPerTable" min="1" max="30" initialValue="8" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
+        <Spinner fx:id="spnSeatsPerTable" min="0" max="30" initialValue="12" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
 
-        <Label text="Kategorie Standard:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
-        <TextField fx:id="txtCategory" text="Saal" GridPane.rowIndex="2" GridPane.columnIndex="1" />
+        <Label text="Preis bei Anlage:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnDoublePrice" min="0" max="100" initialValue="17.0" editable="true" GridPane.rowIndex="2" GridPane.columnIndex="1" />
     </GridPane>
 
     <Region VBox.vgrow="ALWAYS" />

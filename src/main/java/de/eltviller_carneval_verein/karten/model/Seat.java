@@ -49,7 +49,7 @@ public class Seat {
 	}
 
 	@JsonIgnore
-	public void setPrice(double price) {
+	public void setPriceDouble(double price) {
 		this.price = (int) Math.round(price * 100);
 	}
 

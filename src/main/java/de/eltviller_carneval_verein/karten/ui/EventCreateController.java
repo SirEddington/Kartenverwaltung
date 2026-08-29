@@ -1,9 +1,5 @@
 package de.eltviller_carneval_verein.karten.ui;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -23,13 +19,13 @@ public class EventCreateController {
 	@FXML
 	private TextField txtEventName;
 	@FXML
-	private TextField txtPresentations;
+	private Spinner<Integer> spnPresCount;
 	@FXML
-	private Spinner<Integer> spnTableCount;
+	private Spinner<Integer> spnTablePerPres;
 	@FXML
 	private Spinner<Integer> spnSeatsPerTable;
 	@FXML
-	private TextField txtCategory;
+	private Spinner<Double> spnDoublePrice;
 
 	private final JsonTicketRepository repository = new JsonTicketRepository();
 	private Event currentEvent;
@@ -63,49 +59,44 @@ public class EventCreateController {
 
 	private Event buildNewEvent(String name) {
 		Event event = new Event(name);
-		List<Presentation> presentations = new ArrayList<>();
 
-		// Vorstellungen aus Kommaliste lesen
-		String rawPres = txtPresentations.getText().trim();
-		List<String> presNames = rawPres.isEmpty() ? List.of("Hauptvorstellung") : Arrays.asList(rawPres.split("\\s*,\\s*"));
-
-		for (String presName : presNames) {
-			Presentation pres = new Presentation(presName);
-			pres.setTables(generateTables());
-			presentations.add(pres);
+		// Vorstellungen
+		for (int i = 1; i <= spnPresCount.getValue(); i++) {
+			String presName = "Vorstellung " + i;
+			event.addPresentation(buildNewPresentation(presName));
 		}
-
-		event.setPresentations(presentations);
 		return event;
 	}
 
-	private List<Table> generateTables() {
-		List<Table> tables = new ArrayList<>();
-		int tableCount = spnTableCount.getValue();
-		int seatsPerTable = spnSeatsPerTable.getValue();
-		String category = txtCategory.getText().trim();
-
-		for (int t = 1; t <= tableCount; t++) {
-			Table table = new Table(t);
-			table.setCategory(category.isEmpty() ? "Standard" : category);
-
-			List<Seat> seats = new ArrayList<>();
-			for (int s = 1; s <= seatsPerTable; s++) {
-				Seat seat = new Seat(s);
-				seat.setPaid(false);
-				seat.setCollected(false);
-				seat.setWheelchairAccessible(false);
-				seats.add(seat);
-			}
-			table.setSeats(seats);
-			tables.add(table);
+	private Presentation buildNewPresentation(String name) {
+		Presentation presentation = new Presentation(name);
+		// Tische
+		for (int i = 1; i <= spnTablePerPres.getValue(); i++) {
+			presentation.addTable(buildNewTable());
 		}
-		return tables;
+		return presentation;
+	}
+
+	private Table buildNewTable() {
+		Table table = new Table();
+		// Stühle
+		for (int i = 1; i <= spnSeatsPerTable.getValue(); i++) {
+			table.addSeat(buildNewSeat());
+		}
+		return table;
+	}
+
+	private Seat buildNewSeat() {
+		Seat seat = new Seat();
+		// Details am Stuhl
+		seat.setPriceDouble(spnDoublePrice.getValue());
+		return seat;
 	}
 
 	@FXML
 	private void handleBackToEventOverview() {
-		MainApp.showEventOverviewView();;
+		MainApp.showEventOverviewView();
+		;
 	}
 
 	@FXML

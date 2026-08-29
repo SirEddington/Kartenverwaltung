@@ -99,23 +99,23 @@ public class EventOverviewController {
 				int count = event.getSeats() != null ? event.getSeats().size() : 0;
 				long countReserved = event.getSeats().stream().filter(Seat::isReserved) != null ? event.getSeats().stream().filter(Seat::isReserved).count() : 0;
 				long countPaid = event.getSeats().stream().filter(Seat::isPaid) != null ? event.getSeats().stream().filter(Seat::isPaid).count() : 0;
-				return new SimpleStringProperty(countPaid + "/" + countReserved + "/" + count);
+				return new SimpleStringProperty(countPaid + " / " + countReserved + " / " + count);
 			}
 			if (data instanceof Presentation presentation) {
 				int count = presentation.getSeats() != null ? presentation.getSeats().size() : 0;
 				long countReserved = presentation.getSeats().stream().filter(Seat::isReserved) != null ? presentation.getSeats().stream().filter(Seat::isReserved).count() : 0;
 				long countPaid = presentation.getSeats().stream().filter(Seat::isPaid) != null ? presentation.getSeats().stream().filter(Seat::isPaid).count() : 0;
-				return new SimpleStringProperty(countPaid + "/" + countReserved + "/" + count);
+				return new SimpleStringProperty(countPaid + " / " + countReserved + " / " + count);
 			}
 			if (data instanceof Table table) {
 				int count = table.getSeats() != null ? table.getSeats().size() : 0;
 				long countReserved = table.getSeats().stream().filter(Seat::isReserved) != null ? table.getSeats().stream().filter(Seat::isReserved).count() : 0;
 				long countPaid = table.getSeats().stream().filter(Seat::isPaid) != null ? table.getSeats().stream().filter(Seat::isPaid).count() : 0;
-				return new SimpleStringProperty(countPaid + "/" + countReserved + "/" + count);
+				return new SimpleStringProperty(countPaid + " / " + countReserved + " / " + count);
 			}
 			if (data instanceof Seat seat) {
 				String value = seat.isPaid() == true ? "Bezahlt" : seat.isReserved() == true ? "Reserviert" : "Frei";
-				value += seat.isCollected() == true ? "und abgeholt" : "";
+				value += seat.isCollected() == true ? " und abgeholt" : "";
 				return new SimpleStringProperty(value);
 			}
 			return null;
@@ -136,7 +136,7 @@ public class EventOverviewController {
 				sum = 0.0;
 				sum = event.getSeats().stream().filter(Seat::isPaid).mapToDouble(Seat::getPriceDouble).sum();
 				revenue += sum;
-				return new SimpleStringProperty(revenue + "€ /" + expected + "€ /" + potential + "€");
+				return new SimpleStringProperty(revenue + "€ / " + expected + "€ / " + potential + "€");
 			}
 			if (data instanceof Presentation presentation) {
 				double sum = presentation.getSeats().stream().mapToDouble(Seat::getPriceDouble).sum();
@@ -147,7 +147,7 @@ public class EventOverviewController {
 				sum = 0.0;
 				sum = presentation.getSeats().stream().filter(Seat::isPaid).mapToDouble(Seat::getPriceDouble).sum();
 				revenue += sum;
-				return new SimpleStringProperty(revenue + "€ /" + expected + "€ /" + potential + "€");
+				return new SimpleStringProperty(revenue + "€ / " + expected + "€ / " + potential + "€");
 			}
 			if (data instanceof Table table) {
 				double sum = table.getSeats().stream().mapToDouble(Seat::getPriceDouble).sum();
@@ -158,13 +158,13 @@ public class EventOverviewController {
 				sum = 0.0;
 				sum = table.getSeats().stream().filter(Seat::isPaid).mapToDouble(Seat::getPriceDouble).sum();
 				revenue += sum;
-				return new SimpleStringProperty(revenue + "€ /" + expected + "€ /" + potential + "€");
+				return new SimpleStringProperty(revenue + "€ / " + expected + "€ / " + potential + "€");
 			}
 			if (data instanceof Seat seat) {
 				potential = seat.getPriceDouble();
 				expected = (seat.isReserved() == true ? seat.getPriceDouble() : 0.0);
 				revenue = (seat.isPaid() == true ? seat.getPriceDouble() : 0.0);
-				return new SimpleStringProperty(revenue + "€ /" + expected + "€ /" + potential + "€");
+				return new SimpleStringProperty(revenue + "€ / " + expected + "€ / " + potential + "€");
 			}
 			return null;
 		});
