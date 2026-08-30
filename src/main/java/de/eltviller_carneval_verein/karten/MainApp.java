@@ -11,14 +11,16 @@ import javafx.stage.Stage;
 public class MainApp extends Application {
 
 	private static Stage primaryStage;
-	private static int width;
-	private static int height;
+	private static double width;
+	private static double height;
 
 	@Override
 	public void start(Stage stage) throws Exception {
 		primaryStage = stage;
 		width = 1000;
 		height = 600;
+		primaryStage.setWidth(width);
+		primaryStage.setHeight(height);
 
 		stage.setTitle("ECV Kartenverwaltung");
 
@@ -28,23 +30,25 @@ public class MainApp extends Application {
 	}
 
 	public static void showMenuView() {
-		loadScene("/de/eltviller_carneval_verein/karten/ui/MenuView.fxml", width, height);
+		loadScene("/de/eltviller_carneval_verein/karten/ui/MenuView.fxml");
 	}
 
 	public static void showTableView() {
-		loadScene("/de/eltviller_carneval_verein/karten/ui/MainView.fxml", width, height);
+		loadScene("/de/eltviller_carneval_verein/karten/ui/MainView.fxml");
 	}
-	
+
 	public static void showEventOverviewView() {
-	    loadScene("/de/eltviller_carneval_verein/karten/ui/EventOverviewView.fxml", width, height);
+		loadScene("/de/eltviller_carneval_verein/karten/ui/EventOverviewView.fxml");
 	}
 
 	public static void showEventCreateView() {
-	    loadScene("/de/eltviller_carneval_verein/karten/ui/EventCreateView.fxml", width, height);
+		loadScene("/de/eltviller_carneval_verein/karten/ui/EventCreateView.fxml");
 	}
 
-	private static void loadScene(String fxmlPath, double width, double height) {
+	private static void loadScene(String fxmlPath) {
 		try {
+			width = primaryStage.getWidth();
+			height = primaryStage.getHeight();
 			FXMLLoader loader = new FXMLLoader(MainApp.class.getResource(fxmlPath));
 			Parent root = loader.load();
 			Scene scene = new Scene(root, width, height);

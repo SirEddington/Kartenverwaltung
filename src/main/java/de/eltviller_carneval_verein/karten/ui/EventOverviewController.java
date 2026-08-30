@@ -14,6 +14,8 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
@@ -50,6 +52,7 @@ public class EventOverviewController {
 	@FXML
 	public void initialize() {
 		setupColumns();
+		setupContextMenu();
 		loadEventTree();
 	}
 
@@ -181,6 +184,19 @@ public class EventOverviewController {
 		// CellFactory für die grafische Checkbox
 		colArchive.setCellFactory(column -> new TreeTableCell<Object, Boolean>());
 
+	}
+
+	private void setupContextMenu() {
+		ContextMenu contextMenu = new ContextMenu();
+
+		MenuItem editItem = new MenuItem("Bearbeiten");
+		editItem.setOnAction(e -> {
+			SeatDTO selectedSeat = seatTa
+			if (selected) {
+				
+			}
+		});
+		
 	}
 
 	private void loadEventTree() {
