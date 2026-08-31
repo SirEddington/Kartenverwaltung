@@ -62,13 +62,13 @@ public class EventCreateController {
 
 		// Vorstellungen
 		for (int i = 1; i <= spnPresCount.getValue(); i++) {
-			String presName = "Vorstellung " + i;
-			event.addPresentation(buildNewPresentation(presName));
+			Presentation pres = event.addPresentation();
+			buildNewPresentation(pres);
 		}
 		return event;
 	}
 
-	private Presentation buildNewPresentation(String name) {
+	private Presentation buildNewPresentation(Presentation parentPresentation) {
 		Presentation presentation = new Presentation(name);
 		// Tische
 		for (int i = 1; i <= spnTablePerPres.getValue(); i++) {

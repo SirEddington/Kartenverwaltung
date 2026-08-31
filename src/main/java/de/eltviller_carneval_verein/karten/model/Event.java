@@ -2,6 +2,8 @@ package de.eltviller_carneval_verein.karten.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -49,16 +51,25 @@ public class Event {
 		}
 	}
 
-	public void addPresentation(Presentation presentation) {
-		if (presentation == null) {
-			throw new IllegalArgumentException("Presentation ist null");
-		}
-		for (Presentation pres : presentations) {
-			if (pres.getName() == presentation.getName()) {
-				throw new IllegalArgumentException("Presentation existiert bereits");
-			}
-		}
-		presentations.add(presentation);
+	public Presentation addPresentation() {
+		Presentation newPres = new Presentation(this, createPresName());
+		presentations.add(newPres);
+		return newPres;
+	}
+	
+	//ToDo addPresentation mit Name
+	
+	private String createPresName() {
+		// 1. Alle aktuell vorhandenen Namen einsammeln
+	    Set<String> existingNames = presentations.stream().map(Presentation::getName).collect(Collectors.toSet());
+
+	    // 2. Ersten freien Namen finden
+	    int i = 1;
+	    while (existingNames.contains("Vorstellung " + i)) {
+	        i++;
+	    }
+
+	    return "Vorstellung " + i;
 	}
 
 	@Override

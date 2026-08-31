@@ -2,6 +2,8 @@ package de.eltviller_carneval_verein.karten.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -10,17 +12,25 @@ public class Presentation {
 	private String date; // get,set
 	private String time; // get,set
 	private List<Table> tables = new ArrayList<>(); // get,set
+	@JsonIgnore
+	private Event parentEvent;
 
 	// Konstuktoren -->
 	public Presentation() {
 	} // Leerer Konstruktor ist Pflicht für Jackson
 
-	public Presentation(String name) {
+	public Presentation(Event parentEvent, String name) {
+		this.parentEvent = parentEvent;
 		this.name = name;
 	}
 	// <-- Konstuktoren
 
 	// Getter und Setter -->
+	@JsonIgnore
+	public Event getParent() {
+		return parentEvent;
+	}
+	
 	public String getName() {
 		return name;
 	}
@@ -58,30 +68,25 @@ public class Presentation {
 		}
 	}
 
-	public void addTable(Table newTable) {
-		if (newTable == null) {
-			throw new IllegalArgumentException("Table ist null");
-		}
-		if (newTable.getTableNumber() > 0) {
-			for (Table table : tables) {
-				if (table.getTableNumber() == newTable.getTableNumber()) {
-					throw new IllegalArgumentException("Table existiert bereits");
-				}
-			}
-		} else {
-			newTable.changeTableNumber(createTableNumber());
-		}
+	public Table addTable() {
+		Table newTable = new Table(this, createTableNumber());
 		tables.add(newTable);
+		return newTable;
 	}
+	
+	//ToDO addTable mit TableNumber
 
-	public int createTableNumber() {
-		int tableNumber = 1;
-		for (Table table : tables) {
-			if (table.getTableNumber() == tableNumber) {
-				tableNumber++;
-			}
-		}
-		return tableNumber;
+	private int createTableNumber() {
+		// 1. Alle aktuell vorhandenen Namen einsammeln
+	    Set<Integer> existingNumbers = tables.stream().map(Table::getTableNumber).collect(Collectors.toSet());
+
+	    // 2. Ersten freien Namen finden
+	    int i = 1;
+	    while (existingNumbers.contains(i)) {
+	        i++;
+	    }
+
+	    return i;
 	}
 
 	@Override

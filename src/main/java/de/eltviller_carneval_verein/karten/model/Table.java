@@ -2,6 +2,8 @@ package de.eltviller_carneval_verein.karten.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -10,17 +12,25 @@ public class Table {
 	private String description; // get,set
 	private String category; // get,set
 	private List<Seat> seats = new ArrayList<Seat>(); // get,set
+	@JsonIgnore
+	private Presentation parentPresentation;
 
 	// Konstuktoren -->
 	public Table() {
 	} // Leerer Konstruktor ist Pflicht für Jackson
 
-	public Table(int tableNumber) {
+	public Table(Presentation parentPres, int tableNumber) {
+		this.parentPresentation = parentPres;
 		this.tableNumber = tableNumber;
 	}
 	// <-- Konstuktoren
 
 	// Getter und Setter -->
+	@JsonIgnore
+	public Presentation getParent() {
+		return parentPresentation;
+	}
+	
 	public int getTableNumber() {
 		return tableNumber;
 	}
@@ -58,30 +68,23 @@ public class Table {
 		}
 	}
 
-	public void addSeat(Seat newSeat) {
-		if (newSeat == null) {
-			throw new IllegalArgumentException("Seat ist null");
-		}
-		if (newSeat.getSeatNumber() > 0) {
-			for (Seat seat : seats) {
-				if (seat.getSeatNumber() == newSeat.getSeatNumber()) {
-					throw new IllegalArgumentException("Table existiert bereits");
-				}
-			}
-		} else {
-			newSeat.changeSeatNumber(createSeatNumber());
-		}
+	public Seat addSeat() {
+		Seat newSeat = new Seat(this, createSeatNumber());
 		seats.add(newSeat);
+		return newSeat;
 	}
 
-	public int createSeatNumber() {
-		int seatNumber = 1;
-		for (Seat seat : seats) {
-			if (seat.getSeatNumber() == seatNumber) {
-				seatNumber++;
-			}
-		}
-		return seatNumber;
+	private int createSeatNumber() {
+		// 1. Alle aktuell vorhandenen Namen einsammeln
+	    Set<Integer> existingNumbers = seats.stream().map(Seat::getSeatNumber).collect(Collectors.toSet());
+
+	    // 2. Ersten freien Namen finden
+	    int i = 1;
+	    while (existingNumbers.contains(i)) {
+	        i++;
+	    }
+
+	    return i;
 	}
 
 	@Override

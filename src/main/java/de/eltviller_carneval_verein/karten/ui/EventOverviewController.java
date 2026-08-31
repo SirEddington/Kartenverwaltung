@@ -20,6 +20,7 @@ import javafx.scene.control.TextField;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
+import javafx.scene.control.TreeTableRow;
 import javafx.scene.control.TreeTableView;
 
 public class EventOverviewController {
@@ -187,14 +188,43 @@ public class EventOverviewController {
 	}
 
 	private void setupContextMenu() {
-		ContextMenu contextMenu = new ContextMenu();
+		treeTableView.setRowFactory(ttv -> {
+		    TreeTableRow<Object> tableRow = new TreeTableRow<>();
+		    ContextMenu contextMenu = new ContextMenu();
 
-		MenuItem editItem = new MenuItem("Bearbeiten");
-		editItem.setOnAction(e -> {
-			SeatDTO selectedSeat = seatTa
-			if (selected) {
-				
-			}
+		    MenuItem addPresItem = new MenuItem("+ Vorstellung hinzufügen");
+		    addPresItem.setOnAction(e -> {
+		        Object item = tableRow.getItem();
+		        if (item instanceof Event event) {
+		            // Logik: neue Vorstellung zu Event hinzufügen
+		        }
+		    });
+
+		    MenuItem deleteItem = new MenuItem("Löschen");
+		    deleteItem.setOnAction(e -> {
+		        TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
+		        if (selectedItem != null && selectedItem.getParent() != null) {
+		            selectedItem.getParent().getChildren().remove(selectedItem);
+		        }
+		    });
+
+		    // Menü-Einträge zusammenstellen
+		    contextMenu.getItems().addAll(addPresItem, deleteItem);
+
+		    // Event-Listener: Menü nur anzeigen, wenn die Zeile nicht leer ist
+		    tableRow.emptyProperty().addListener((obs, wasEmpty, isEmpty) -> {
+		        if (isEmpty) {
+		            tableRow.setContextMenu(null);
+		        } else {
+		            // Optional: Bestimmte Menüpunkte je nach Objekt-Typ aktivieren/deaktivieren
+		            Object data = tableRow.getItem();
+		            addPresItem.setVisible(data instanceof Event); // Nur bei Events anzeigen
+
+		            tableRow.setContextMenu(contextMenu);
+		        }
+		    });
+
+		    return tableRow;
 		});
 		
 	}

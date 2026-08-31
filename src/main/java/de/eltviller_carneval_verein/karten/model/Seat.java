@@ -15,22 +15,26 @@ public class Seat {
 	private String eMail; // get,set
 
 	private String comment; // get,set
+	
+	@JsonIgnore
+	private Table parentTable;
 
 	// Konstuktoren -->
 	public Seat() {
 	} // Leerer Konstruktor ist Pflicht für Jackson
 
-	public Seat(int seatNumber) {
+	public Seat(Table parentTable, int seatNumber) {
+		this.parentTable = parentTable;
 		this.seatNumber = seatNumber;
-	}
-
-	public Seat(int seatNumber, boolean wheelchairAccessible) {
-		this(seatNumber);
-		this.wheelchairAccessible = wheelchairAccessible;
 	}
 	// <-- Konstuktoren
 
 	// Getter und Setter -->
+	@JsonIgnore
+	public Table getParent() {
+		return parentTable;
+	}
+	
 	public int getSeatNumber() {
 		return seatNumber;
 	}
