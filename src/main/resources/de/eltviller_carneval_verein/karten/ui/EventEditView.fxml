@@ -6,7 +6,7 @@
 
 <VBox spacing="15.0" prefWidth="700.0" prefHeight="550.0" 
       xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" 
-      fx:controller="de.eltviller_carneval_verein.karten.ui.EventCreateController">
+      fx:controller="de.eltviller_carneval_verein.karten.ui.EventEditController">
     <padding>
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
