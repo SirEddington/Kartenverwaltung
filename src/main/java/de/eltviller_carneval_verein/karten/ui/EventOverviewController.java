@@ -18,10 +18,10 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TreeItem;
-import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableRow;
 import javafx.scene.control.TreeTableView;
+import javafx.scene.control.cell.CheckBoxTreeTableCell;
 
 public class EventOverviewController {
 
@@ -183,7 +183,7 @@ public class EventOverviewController {
 			return null;
 		});
 		// CellFactory für die grafische Checkbox
-		colArchive.setCellFactory(column -> new TreeTableCell<Object, Boolean>());
+		colArchive.setCellFactory(CheckBoxTreeTableCell.forTreeTableColumn(colArchive));
 
 	}
 
@@ -201,7 +201,7 @@ public class EventOverviewController {
 			});
 
 			MenuItem addTableItem = new MenuItem("+ Tisch hinzufügen");
-			addPresItem.setOnAction(e -> {
+			addTableItem.setOnAction(e -> {
 				Object item = tableRow.getItem();
 				if (item instanceof Event event) {
 					// Logik: neuen Tisch zu Vorstellung hinzufügen
@@ -209,7 +209,7 @@ public class EventOverviewController {
 			});
 
 			MenuItem addSeatItem = new MenuItem("+ Sitz hinzufügen");
-			addPresItem.setOnAction(e -> {
+			addSeatItem.setOnAction(e -> {
 				Object item = tableRow.getItem();
 				if (item instanceof Event event) {
 					// Logik: neue Sitz zu Tisch hinzufügen
@@ -227,15 +227,19 @@ public class EventOverviewController {
 			// Menü-Einträge zusammenstellen
 			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, deleteItem);
 
+			contextMenu.setOnShowing(e -> {
+				Object data = tableRow.getItem();
+				addPresItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
+				addTableItem.setVisible(data instanceof Presentation || data instanceof Table || data instanceof Seat);
+				addSeatItem.setVisible(data instanceof Table || data instanceof Seat);
+				deleteItem.setVisible(data != null);
+			});
+
 			// Event-Listener: Menü nur anzeigen, wenn die Zeile nicht leer ist
 			tableRow.emptyProperty().addListener((obs, wasEmpty, isEmpty) -> {
 				if (isEmpty) {
 					tableRow.setContextMenu(null);
 				} else {
-					// Optional: Bestimmte Menüpunkte je nach Objekt-Typ aktivieren/deaktivieren
-					Object data = tableRow.getItem();
-					addPresItem.setVisible(data instanceof Event); // Nur bei Events anzeigen
-
 					tableRow.setContextMenu(contextMenu);
 				}
 			});

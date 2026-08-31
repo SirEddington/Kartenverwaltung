@@ -45,6 +45,10 @@ public class MainApp extends Application {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/EventCreateView.fxml");
 	}
 
+	public static void showEventEditView() {
+		loadScene("/de/eltviller_carneval_verein/karten/ui/EventEditView.fxml");
+	}
+
 	private static void loadScene(String fxmlPath) {
 		try {
 			width = primaryStage.getWidth();

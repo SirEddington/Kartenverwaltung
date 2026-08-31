@@ -35,7 +35,7 @@
        			<TreeTableColumn fx:id="colTableCount" text="Tische (Anzahl)" prefWidth="200.0" />
         		<TreeTableColumn fx:id="colSeatCount" text="Stühle (Bezahlt / Reserviert / Anzahl)" prefWidth="350.0" />
         		<TreeTableColumn fx:id="colRevenue" text="Einnahmen (Tatsächlich / Erwartet / Potenziell)" prefWidth="350.0" />
-       			<TreeTableColumn fx:id="colArchive" text="Archiviert" prefWidth="250.0" />
+       			<TreeTableColumn fx:id="colArchive" text="Archiviert" style="-fx-alignment: CENTER;" prefWidth="250.0" />
     		</columns>
     		<columnResizePolicy>
         		<TreeTableView fx:constant="CONSTRAINED_RESIZE_POLICY" />
