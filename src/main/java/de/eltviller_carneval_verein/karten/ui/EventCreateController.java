@@ -61,36 +61,19 @@ public class EventCreateController {
 		Event event = new Event(name);
 
 		// Vorstellungen
-		for (int i = 1; i <= spnPresCount.getValue(); i++) {
+		for (int i = 0; i < spnPresCount.getValue(); i++) {
 			Presentation pres = event.addPresentation();
-			buildNewPresentation(pres);
+			// Tische
+			for (int j = 0; j < spnTablePerPres.getValue(); j++) {
+				Table table = pres.addTable();
+				// Sitzplätze
+				for (int k = 0; k < spnTablePerPres.getValue(); k++) {
+					Seat seat = table.addSeat();
+					seat.setPriceDouble(spnDoublePrice.getValue());
+				}
+			}
 		}
 		return event;
-	}
-
-	private Presentation buildNewPresentation(Presentation parentPresentation) {
-		Presentation presentation = new Presentation(name);
-		// Tische
-		for (int i = 1; i <= spnTablePerPres.getValue(); i++) {
-			presentation.addTable(buildNewTable());
-		}
-		return presentation;
-	}
-
-	private Table buildNewTable() {
-		Table table = new Table();
-		// Stühle
-		for (int i = 1; i <= spnSeatsPerTable.getValue(); i++) {
-			table.addSeat(buildNewSeat());
-		}
-		return table;
-	}
-
-	private Seat buildNewSeat() {
-		Seat seat = new Seat();
-		// Details am Stuhl
-		seat.setPriceDouble(spnDoublePrice.getValue());
-		return seat;
 	}
 
 	@FXML

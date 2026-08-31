@@ -130,7 +130,7 @@ public class MainController {
 		TableFilter.forTableView(seatTable).apply();
 
 		// 4. Events in ComboBox laden (Tabelle bleibt initial leer)
-		eventComboBox.getItems().setAll(repository.loadEvents());
+		eventComboBox.getItems().setAll(repository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
 
 		// 5. Event-Auswahl: Erst hier werden Daten geladen
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {

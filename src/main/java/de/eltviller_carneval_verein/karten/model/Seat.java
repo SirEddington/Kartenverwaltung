@@ -15,7 +15,7 @@ public class Seat {
 	private String eMail; // get,set
 
 	private String comment; // get,set
-	
+
 	@JsonIgnore
 	private Table parentTable;
 
@@ -34,7 +34,7 @@ public class Seat {
 	public Table getParent() {
 		return parentTable;
 	}
-	
+
 	public int getSeatNumber() {
 		return seatNumber;
 	}

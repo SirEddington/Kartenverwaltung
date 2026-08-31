@@ -9,7 +9,8 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 public class Event {
 	private String name; // get
-	private boolean archived;
+	private String description; // get, set
+	private boolean archived; // get, set
 	private List<Presentation> presentations = new ArrayList<>(); // get,set
 
 	// Konstuktoren -->
@@ -24,6 +25,14 @@ public class Event {
 	// Getter und Setter -->
 	public String getName() {
 		return name;
+	}
+
+	public String getDescription() {
+		return description;
+	}
+
+	public void setDescription(String description) {
+		this.description = description;
 	}
 
 	public boolean isArchived() {
@@ -56,20 +65,20 @@ public class Event {
 		presentations.add(newPres);
 		return newPres;
 	}
-	
-	//ToDo addPresentation mit Name
-	
+
+	// ToDo addPresentation mit Name
+
 	private String createPresName() {
 		// 1. Alle aktuell vorhandenen Namen einsammeln
-	    Set<String> existingNames = presentations.stream().map(Presentation::getName).collect(Collectors.toSet());
+		Set<String> existingNames = presentations.stream().map(Presentation::getName).collect(Collectors.toSet());
 
-	    // 2. Ersten freien Namen finden
-	    int i = 1;
-	    while (existingNames.contains("Vorstellung " + i)) {
-	        i++;
-	    }
+		// 2. Ersten freien Namen finden
+		int i = 1;
+		while (existingNames.contains("Vorstellung " + i)) {
+			i++;
+		}
 
-	    return "Vorstellung " + i;
+		return "Vorstellung " + i;
 	}
 
 	@Override

@@ -11,6 +11,7 @@ public class Presentation {
 	private String name; // get
 	private String date; // get,set
 	private String time; // get,set
+	private String description; // get, set
 	private List<Table> tables = new ArrayList<>(); // get,set
 	@JsonIgnore
 	private Event parentEvent;
@@ -30,7 +31,7 @@ public class Presentation {
 	public Event getParent() {
 		return parentEvent;
 	}
-	
+
 	public String getName() {
 		return name;
 	}
@@ -49,6 +50,14 @@ public class Presentation {
 
 	public void setTime(String time) {
 		this.time = time;
+	}
+
+	public String getDescription() {
+		return description;
+	}
+
+	public void setDescription(String description) {
+		this.description = description;
 	}
 
 	public List<Table> getTables() {
@@ -73,20 +82,20 @@ public class Presentation {
 		tables.add(newTable);
 		return newTable;
 	}
-	
-	//ToDO addTable mit TableNumber
+
+	// ToDO addTable mit TableNumber
 
 	private int createTableNumber() {
 		// 1. Alle aktuell vorhandenen Namen einsammeln
-	    Set<Integer> existingNumbers = tables.stream().map(Table::getTableNumber).collect(Collectors.toSet());
+		Set<Integer> existingNumbers = tables.stream().map(Table::getTableNumber).collect(Collectors.toSet());
 
-	    // 2. Ersten freien Namen finden
-	    int i = 1;
-	    while (existingNumbers.contains(i)) {
-	        i++;
-	    }
+		// 2. Ersten freien Namen finden
+		int i = 1;
+		while (existingNumbers.contains(i)) {
+			i++;
+		}
 
-	    return i;
+		return i;
 	}
 
 	@Override

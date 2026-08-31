@@ -189,44 +189,60 @@ public class EventOverviewController {
 
 	private void setupContextMenu() {
 		treeTableView.setRowFactory(ttv -> {
-		    TreeTableRow<Object> tableRow = new TreeTableRow<>();
-		    ContextMenu contextMenu = new ContextMenu();
+			TreeTableRow<Object> tableRow = new TreeTableRow<>();
+			ContextMenu contextMenu = new ContextMenu();
 
-		    MenuItem addPresItem = new MenuItem("+ Vorstellung hinzufügen");
-		    addPresItem.setOnAction(e -> {
-		        Object item = tableRow.getItem();
-		        if (item instanceof Event event) {
-		            // Logik: neue Vorstellung zu Event hinzufügen
-		        }
-		    });
+			MenuItem addPresItem = new MenuItem("+ Vorstellung hinzufügen");
+			addPresItem.setOnAction(e -> {
+				Object item = tableRow.getItem();
+				if (item instanceof Event event) {
+					// Logik: neue Vorstellung zu Event hinzufügen
+				}
+			});
 
-		    MenuItem deleteItem = new MenuItem("Löschen");
-		    deleteItem.setOnAction(e -> {
-		        TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
-		        if (selectedItem != null && selectedItem.getParent() != null) {
-		            selectedItem.getParent().getChildren().remove(selectedItem);
-		        }
-		    });
+			MenuItem addTableItem = new MenuItem("+ Tisch hinzufügen");
+			addPresItem.setOnAction(e -> {
+				Object item = tableRow.getItem();
+				if (item instanceof Event event) {
+					// Logik: neuen Tisch zu Vorstellung hinzufügen
+				}
+			});
 
-		    // Menü-Einträge zusammenstellen
-		    contextMenu.getItems().addAll(addPresItem, deleteItem);
+			MenuItem addSeatItem = new MenuItem("+ Sitz hinzufügen");
+			addPresItem.setOnAction(e -> {
+				Object item = tableRow.getItem();
+				if (item instanceof Event event) {
+					// Logik: neue Sitz zu Tisch hinzufügen
+				}
+			});
 
-		    // Event-Listener: Menü nur anzeigen, wenn die Zeile nicht leer ist
-		    tableRow.emptyProperty().addListener((obs, wasEmpty, isEmpty) -> {
-		        if (isEmpty) {
-		            tableRow.setContextMenu(null);
-		        } else {
-		            // Optional: Bestimmte Menüpunkte je nach Objekt-Typ aktivieren/deaktivieren
-		            Object data = tableRow.getItem();
-		            addPresItem.setVisible(data instanceof Event); // Nur bei Events anzeigen
+			MenuItem deleteItem = new MenuItem("Löschen");
+			deleteItem.setOnAction(e -> {
+				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
+				if (selectedItem != null && selectedItem.getParent() != null) {
+					selectedItem.getParent().getChildren().remove(selectedItem);
+				}
+			});
 
-		            tableRow.setContextMenu(contextMenu);
-		        }
-		    });
+			// Menü-Einträge zusammenstellen
+			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, deleteItem);
 
-		    return tableRow;
+			// Event-Listener: Menü nur anzeigen, wenn die Zeile nicht leer ist
+			tableRow.emptyProperty().addListener((obs, wasEmpty, isEmpty) -> {
+				if (isEmpty) {
+					tableRow.setContextMenu(null);
+				} else {
+					// Optional: Bestimmte Menüpunkte je nach Objekt-Typ aktivieren/deaktivieren
+					Object data = tableRow.getItem();
+					addPresItem.setVisible(data instanceof Event); // Nur bei Events anzeigen
+
+					tableRow.setContextMenu(contextMenu);
+				}
+			});
+
+			return tableRow;
 		});
-		
+
 	}
 
 	private void loadEventTree() {
