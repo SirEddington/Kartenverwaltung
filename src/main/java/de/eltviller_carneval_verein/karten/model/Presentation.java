@@ -1,5 +1,7 @@
 package de.eltviller_carneval_verein.karten.model;
 
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -9,8 +11,8 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 public class Presentation {
 	private String name; // get
-	private String date; // get,set
-	private String time; // get,set
+	private LocalDate date; // get,set
+	private LocalTime time; // get,set
 	private String description; // get, set
 	private List<Table> tables = new ArrayList<>(); // get,set
 	@JsonIgnore
@@ -36,19 +38,19 @@ public class Presentation {
 		return name;
 	}
 
-	public String getDate() {
+	public LocalDate getDate() {
 		return date;
 	}
 
-	public void setDate(String date) {
+	public void setDate(LocalDate date) {
 		this.date = date;
 	}
 
-	public String getTime() {
+	public LocalTime getTime() {
 		return time;
 	}
 
-	public void setTime(String time) {
+	public void setTime(LocalTime time) {
 		this.time = time;
 	}
 

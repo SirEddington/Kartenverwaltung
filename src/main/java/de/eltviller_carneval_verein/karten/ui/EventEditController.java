@@ -1,5 +1,11 @@
 package de.eltviller_carneval_verein.karten.ui;
 
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+
+import org.controlsfx.control.table.TableFilter;
+
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -7,6 +13,8 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -15,10 +23,12 @@ import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Spinner;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.CheckBoxTableCell;
+import javafx.scene.control.cell.TextFieldTableCell;
 
 public class EventEditController {
 
@@ -55,13 +65,13 @@ public class EventEditController {
 
 	// Vorstellung Tabelle
 	@FXML
-	private TableView<Presentation> PresTable;
+	private TableView<Presentation> presTable;
 	@FXML
 	private TableColumn<Presentation, String> colPresName;
 	@FXML
-	private TableColumn<Presentation, String> colPresDate;
+	private TableColumn<Presentation, LocalDate> colPresDate;
 	@FXML
-	private TableColumn<Presentation, String> colPresTime;
+	private TableColumn<Presentation, LocalTime> colPresTime;
 	@FXML
 	private TableColumn<Presentation, String> colPresDesc;
 
@@ -100,13 +110,18 @@ public class EventEditController {
 	@FXML
 	private TextField txtComment;
 
+	DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+	DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
+
 	private boolean editMode = true;
 
 	@FXML
 	public void initialize() {
+		// 1. Spalten-ValueFactorys konfigurieren
+		// Eventtabelle
 		colEventName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
 		colEventDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
-		colEventArchived.setCellValueFactory(cellData -> new SimpleBooleanProperty(cellData.getValue().isArchived()));
+		colEventArchived.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().isArchived()));
 		colEventArchived.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
 			Event event = eventTable.getItems().get(index);
 			SimpleBooleanProperty archived = new SimpleBooleanProperty(event.isArchived());
@@ -118,16 +133,140 @@ public class EventEditController {
 
 			return archived;
 		}));
+		
+		// Verstellungstabelle
+		colPresName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
+		colPresDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
+		colPresDate.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getDate()));
+		colPresDate.setCellFactory(col -> new TableCell<>() {
+			@Override
+			protected void updateItem(LocalDate date, boolean empty) {
+				super.updateItem(date, empty);
+		        if (empty || date == null) {
+		            setText(null);
+		        } else {
+		            setText(dateFormatter.format(date));
+		        }
+			}
+		});
+		colPresTime.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getTime()));
+		colPresTime.setCellFactory(col -> new TableCell<>() {
+			@Override
+			protected void updateItem(LocalTime time, boolean empty) {
+				super.updateItem(time, empty);
+				if (empty || time == null) {
+					setText(null);
+				} else {
+					setText(timeFormatter.format(time) + " Uhr");
+				}
+			}
+		});
+		
+		// Tischtabelle
+		colTableNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getTableNumber()).asObject());
+		colTableCategory.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getCategory()));
+		colTableDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDesc()));
+		
+		// Sitztabelle
+		colSeatNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getSeatNumber()).asObject());
+		colSeatComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getComment()));
+
+		// 2. FilteredList um die Master-Daten legen & an Tabelle binden
+		filteredEventData = new FilteredList<>(masterEventData, p -> true);
+		eventTable.setItems(filteredEventData);
+		
+		filteredPresData = new FilteredList<>(masterPresData, p -> true);
+		presTable.setItems(filteredPresData);
+		
+		filteredTableData = new FilteredList<>(masterTableData, p -> true);
+		tableTable.setItems(filteredTableData);
+		
+		filteredSeatData = new FilteredList<>(masterSeatData, p -> true);
+		seatTable.setItems(filteredSeatData);
+
+		// 3. Spaltenkopf-Filter von ControlsFX aktivieren
+		TableFilter.forTableView(eventTable).apply();
+		TableFilter.forTableView(presTable).apply();
+		TableFilter.forTableView(tableTable).apply();
+		TableFilter.forTableView(seatTable).apply();
+
+		// 4. Events in Tabelle laden
+		masterEventData.clear();
+		masterEventData.setAll(repository.loadEvents());
+
+		// 5. Auswahl: Erst hier werden Daten geladen
+		eventTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
+			masterPresData.clear();
+			masterPresData.setAll(selectedEvent.getPresentations());
+		});
+		presTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedPres) -> {
+			masterTableData.clear();
+			masterTableData.setAll(selectedPres.getTables());
+		});
+		tableTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedTable) -> {
+			masterSeatData.clear();
+			masterSeatData.setAll(selectedTable.getSeats());
+		});
+		seatTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedSeat) -> {
+			loadDetailsOfSeat(selectedSeat);
+		});
+
+		// 7. Anzeigemodus starten
+		toggleEditMode();
 	}
 
-	private void loadSeatsForEvent(Event event) {
-	}
-
-	private void updateSearchFilter(String searchText) {
+	private void loadDetailsOfSeat(Seat selectedSeat) {
+		// Felder initialisieren
+		spnDoublePrice.getValueFactory().setValue(0.0);
+		checkPaid.setSelected(false);
+		checkCollected.setSelected(false);
+		checkWheelchairAccessible.setSelected(false);
+		txtLastName.clear();
+		txtFirstName.clear();
+		txtMail.clear();
+		txtComment.clear();
+		
+		// Felder befüllen
+		spnDoublePrice.getValueFactory().setValue(selectedSeat.getPriceDouble());
+		checkPaid.setSelected(selectedSeat.isPaid());
+		checkCollected.setSelected(selectedSeat.isCollected());
+		checkWheelchairAccessible.setSelected(selectedSeat.isWheelchairAccessible());
+		txtLastName.setText(selectedSeat.getLastName());
+		txtFirstName.setText(selectedSeat.getFirstName());
+		txtMail.setText(selectedSeat.getEMail());
+		txtComment.setText(selectedSeat.getComment());
 	}
 
 	@FXML
 	private void toggleEditMode() {
+		// Editmode wechseln
+		editMode = !editMode;
+		seatTable.setEditable(editMode);
+		btnSave.setDisable(!editMode);
+		btnToggleEdit.setText(editMode ? "Anzeigen" : "Bearbeiten");
+		
+		colEventName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colEventName.setOnEditCommit(editEvent -> {
+			Event event = editEvent.getRowValue();
+			event.changeName(editEvent.getNewValue());
+		});
+		colEventDesc.setCellFactory(TextFieldTableCell.forTableColumn());
+		colEventDesc.setOnEditCommit(editEvent -> {
+			Event event = editEvent.getRowValue();
+			event.setDescription(editEvent.getNewValue());
+		});
+		colEventArchived.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
+			Event event = eventTable.getItems().get(index);
+			SimpleBooleanProperty prop = new SimpleBooleanProperty(event.isArchived());
+			prop.addListener((obs, oldVal, newVal) -> {
+				event.setArchived(newVal);
+			});
+			return prop;
+		}));
+		colEventArchived.setOnEditCommit(editEvent -> {
+			Event event = editEvent.getRowValue();
+			event.setArchived(editEvent.getNewValue());
+		});
 	}
 
 	@FXML
@@ -138,7 +277,7 @@ public class EventEditController {
 	@FXML
 	private void saveCurrentState() {
 		// Aktuellen Stand speichern
-		repository.saveEvent(eventComboBox.getValue());
+		//repository.saveEvent(eventComboBox.getValue());
 	}
 
 }

@@ -199,28 +199,28 @@ public class MainController {
 
 		// Eingaben akzeptieren
 		colLastName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colLastName.setOnEditCommit(event -> {
-			SeatDTO seatDTO = event.getRowValue();
-			seatDTO.getSeat().setLastName(event.getNewValue());
+		colLastName.setOnEditCommit(editEvent -> {
+			SeatDTO seatDTO = editEvent.getRowValue();
+			seatDTO.getSeat().setLastName(editEvent.getNewValue());
 		});
 		colFirstName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colFirstName.setOnEditCommit(event -> {
-			SeatDTO seatDTO = event.getRowValue();
-			seatDTO.getSeat().setFirstName(event.getNewValue());
+		colFirstName.setOnEditCommit(editEvent -> {
+			SeatDTO seatDTO = editEvent.getRowValue();
+			seatDTO.getSeat().setFirstName(editEvent.getNewValue());
 		});
 		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(new DoubleStringConverter()));
-		colPrice.setOnEditCommit(event -> {
-			SeatDTO seatDTO = event.getRowValue();
-			seatDTO.getSeat().setPriceDouble(event.getNewValue());
+		colPrice.setOnEditCommit(editEvent -> {
+			SeatDTO seatDTO = editEvent.getRowValue();
+			seatDTO.getSeat().setPriceDouble(editEvent.getNewValue());
 		});
 		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
-		colComment.setOnEditCommit(event -> {
-			SeatDTO seatDTO = event.getRowValue();
-			seatDTO.getSeat().setComment(event.getNewValue());
+		colComment.setOnEditCommit(editEvent -> {
+			SeatDTO seatDTO = editEvent.getRowValue();
+			seatDTO.getSeat().setComment(editEvent.getNewValue());
 		});
-		colPaid.setOnEditCommit(event -> {
-			SeatDTO seatDTO = event.getRowValue();
-			seatDTO.getSeat().setPaid(event.getNewValue());
+		colPaid.setOnEditCommit(editEvent -> {
+			SeatDTO seatDTO = editEvent.getRowValue();
+			seatDTO.getSeat().setPaid(editEvent.getNewValue());
 		});
 		colPaid.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
 			SeatDTO seatDTO = seatTable.getItems().get(index);
@@ -230,9 +230,9 @@ public class MainController {
 			});
 			return prop;
 		}));
-		colCollected.setOnEditCommit(event -> {
-			SeatDTO seatDTO = event.getRowValue();
-			seatDTO.getSeat().setCollected(event.getNewValue());
+		colCollected.setOnEditCommit(editEvent -> {
+			SeatDTO seatDTO = editEvent.getRowValue();
+			seatDTO.getSeat().setCollected(editEvent.getNewValue());
 		});
 		colCollected.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
 			SeatDTO seatDTO = seatTable.getItems().get(index);
@@ -242,9 +242,9 @@ public class MainController {
 			});
 			return prop;
 		}));
-		colWheelchair.setOnEditCommit(event -> {
-			SeatDTO seatDTO = event.getRowValue();
-			seatDTO.getSeat().setWheelchairAccessible(event.getNewValue());
+		colWheelchair.setOnEditCommit(editEvent -> {
+			SeatDTO seatDTO = editEvent.getRowValue();
+			seatDTO.getSeat().setWheelchairAccessible(editEvent.getNewValue());
 		});
 		colWheelchair.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
 			SeatDTO seatDTO = seatTable.getItems().get(index);
