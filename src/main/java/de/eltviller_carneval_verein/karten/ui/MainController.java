@@ -131,6 +131,9 @@ public class MainController {
 
 		// 4. Events in ComboBox laden (Tabelle bleibt initial leer)
 		eventComboBox.getItems().setAll(repository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
+		if (eventComboBox.getItems().size() == 1) {
+			eventComboBox.setValue(eventComboBox.getItems().get(0));
+		}
 
 		// 5. Event-Auswahl: Erst hier werden Daten geladen
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {

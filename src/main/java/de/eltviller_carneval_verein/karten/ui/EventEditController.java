@@ -23,12 +23,13 @@ import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.TableCell;
+import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
+import javafx.scene.layout.HBox;
 import javafx.util.converter.IntegerStringConverter;
 import javafx.util.converter.LocalDateStringConverter;
 import javafx.util.converter.LocalTimeStringConverter;
@@ -50,9 +51,14 @@ public class EventEditController {
 	private FilteredList<Seat> filteredSeatData;
 
 	@FXML
-	private Button btnToggleEdit = new Button();
+	private HBox eventPerfHBox;
 	@FXML
-	private Button btnSave = new Button();
+	private HBox tableSeatHBox;
+
+	@FXML
+	private Button btnToggleEdit;
+	@FXML
+	private Button btnSave;
 
 	// TableViews und Spalten
 
@@ -116,65 +122,95 @@ public class EventEditController {
 	DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 	DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
 
+	Event currentEvent;
+	Presentation currentPres;
+	Table currentTable;
+	Seat currentSeat;
+
 	private boolean editMode = true;
+
+	public void initData(Event event, Presentation presentation, Table table, Seat seat) {
+		this.currentEvent = event;
+		this.currentPres = presentation;
+		this.currentTable = table;
+		this.currentSeat = seat;
+
+		if (event != null) {
+			eventTable.getSelectionModel().select(currentEvent);
+			eventTable.scrollTo(event);
+
+			// Daten in die UI laden / Tabellen selektieren etc.
+			masterPresData.setAll(event.getPresentations());
+		}
+	}
 
 	@FXML
 	public void initialize() {
-		// 1. Spalten-ValueFactorys konfigurieren
-		// Eventtabelle
+		// 1. Spalten-ValueFactorys & CellFactorys EINMALIG konfigurieren
+
+		// --- Event Tabelle ---
 		colEventName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
+		colEventName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colEventName.setOnEditCommit(e -> e.getRowValue().changeName(e.getNewValue()));
+
 		colEventDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
+		colEventDesc.setCellFactory(TextFieldTableCell.forTableColumn());
+		colEventDesc.setOnEditCommit(e -> e.getRowValue().setDescription(e.getNewValue()));
+
 		colEventArchived.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().isArchived()));
 		colEventArchived.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
+			if (index < 0 || index >= eventTable.getItems().size()) {
+				return new SimpleBooleanProperty(false);
+			}
 			Event event = eventTable.getItems().get(index);
-			SimpleBooleanProperty archived = new SimpleBooleanProperty(event.isArchived());
-
-			// Wenn die CheckBox geklickt wird, den neuen Wert im Event speichern
-			archived.addListener((obs, oldVal, newVal) -> {
-				event.setArchived(newVal);
-			});
-
-			return archived;
+			SimpleBooleanProperty prop = new SimpleBooleanProperty(event.isArchived());
+			prop.addListener((obs, oldVal, newVal) -> event.setArchived(newVal));
+			return prop;
 		}));
 
-		// Verstellungstabelle
+		// --- Vorstellung Tabelle ---
 		colPresName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
+		colPresName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colPresName.setOnEditCommit(e -> e.getRowValue().changeName(e.getNewValue()));
+
 		colPresDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
+		colPresDesc.setCellFactory(TextFieldTableCell.forTableColumn());
+		colPresDesc.setOnEditCommit(e -> e.getRowValue().setDescription(e.getNewValue()));
+
 		colPresDate.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getDate()));
-		colPresDate.setCellFactory(col -> new TableCell<>() {
-			@Override
-			protected void updateItem(LocalDate date, boolean empty) {
-				super.updateItem(date, empty);
-				if (empty || date == null) {
-					setText(null);
-				} else {
-					setText(dateFormatter.format(date));
-				}
-			}
-		});
+		colPresDate.setCellFactory(TextFieldTableCell.forTableColumn(new LocalDateStringConverter(dateFormatter, null)));
+		colPresDate.setOnEditCommit(e -> e.getRowValue().setDate(e.getNewValue()));
+
 		colPresTime.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getTime()));
-		colPresTime.setCellFactory(col -> new TableCell<>() {
-			@Override
-			protected void updateItem(LocalTime time, boolean empty) {
-				super.updateItem(time, empty);
-				if (empty || time == null) {
-					setText(null);
-				} else {
-					setText(timeFormatter.format(time) + " Uhr");
-				}
-			}
-		});
+		colPresTime.setCellFactory(TextFieldTableCell.forTableColumn(new LocalTimeStringConverter(timeFormatter, null)));
+		colPresTime.setOnEditCommit(e -> e.getRowValue().setTime(e.getNewValue()));
 
-		// Tischtabelle
+		// --- Tisch Tabelle ---
 		colTableNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getTableNumber()).asObject());
+		colTableNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
+		colTableNumber.setOnEditCommit(e -> e.getRowValue().changeTableNumber(e.getNewValue()));
+
 		colTableCategory.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getCategory()));
+		colTableCategory.setCellFactory(TextFieldTableCell.forTableColumn());
+		colTableCategory.setOnEditCommit(e -> e.getRowValue().setCategory(e.getNewValue()));
+
 		colTableDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDesc()));
+		colTableDesc.setCellFactory(TextFieldTableCell.forTableColumn());
+		colTableDesc.setOnEditCommit(e -> e.getRowValue().setDesc(e.getNewValue()));
 
-		// Sitztabelle
+		// --- Sitz Tabelle ---
 		colSeatNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getSeatNumber()).asObject());
-		colSeatComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getComment()));
+		colSeatNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
+		colSeatNumber.setOnEditCommit(e -> e.getRowValue().changeSeatNumber(e.getNewValue()));
 
-		// 2. FilteredList um die Master-Daten legen & an Tabelle binden
+		colSeatComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getComment()));
+		colSeatComment.setCellFactory(TextFieldTableCell.forTableColumn());
+		colSeatComment.setOnEditCommit(e -> e.getRowValue().setComment(e.getNewValue()));
+
+		// --- Sitzdetails ---
+		spnDoublePrice.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 100.0, 0.0, 0.5));
+
+		// 2. FilteredList um Master-Daten legen
 		filteredEventData = new FilteredList<>(masterEventData, p -> true);
 		eventTable.setItems(filteredEventData);
 
@@ -197,37 +233,60 @@ public class EventEditController {
 		masterEventData.clear();
 		masterEventData.setAll(repository.loadEvents());
 
-		// 5. Auswahl: Erst hier werden Daten geladen
+		// 5. Auswahl-Listener mit Null-Checks gegen NPEs
 		eventTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			masterPresData.clear();
-			masterPresData.setAll(selectedEvent.getPresentations());
-		});
-		presTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedPres) -> {
 			masterTableData.clear();
-			masterTableData.setAll(selectedPres.getTables());
-		});
-		tableTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedTable) -> {
 			masterSeatData.clear();
-			masterSeatData.setAll(selectedTable.getSeats());
-		});
-		seatTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedSeat) -> {
-			loadDetailsOfSeat(selectedSeat);
+			clearDetails();
+			if (selectedEvent != null && selectedEvent.getPresentations() != null) {
+				masterPresData.setAll(selectedEvent.getPresentations());
+			}
+			setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
+			setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
 		});
 
-		// 7. Anzeigemodus starten
-		toggleEditMode();
+		presTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedPres) -> {
+			masterTableData.clear();
+			masterSeatData.clear();
+			clearDetails();
+			if (selectedPres != null && selectedPres.getTables() != null) {
+				masterTableData.setAll(selectedPres.getTables());
+			}
+			setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
+			setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
+		});
+
+		tableTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedTable) -> {
+			masterSeatData.clear();
+			clearDetails();
+			if (selectedTable != null && selectedTable.getSeats() != null) {
+				masterSeatData.setAll(selectedTable.getSeats());
+			}
+			setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
+			setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
+		});
+
+		seatTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedSeat) -> {
+			if (selectedSeat != null) {
+				loadDetailsOfSeat(selectedSeat);
+			} else {
+				clearDetails();
+			}
+		});
+
+		// Initialen EditMode anwenden
+		applyEditMode();
+
+		// Tabellenhöhe automatisch ermitteln
+		setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
+		setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
+
 	}
 
 	private void loadDetailsOfSeat(Seat selectedSeat) {
 		// Felder initialisieren
-		spnDoublePrice.getValueFactory().setValue(0.0);
-		checkPaid.setSelected(false);
-		checkCollected.setSelected(false);
-		checkWheelchairAccessible.setSelected(false);
-		txtLastName.clear();
-		txtFirstName.clear();
-		txtMail.clear();
-		txtComment.clear();
+		clearDetails();
 
 		// Felder befüllen
 		spnDoublePrice.getValueFactory().setValue(selectedSeat.getPriceDouble());
@@ -240,93 +299,37 @@ public class EventEditController {
 		txtComment.setText(selectedSeat.getComment());
 	}
 
+	private void clearDetails() {
+		spnDoublePrice.getValueFactory().setValue(0.0);
+		checkPaid.setSelected(false);
+		checkCollected.setSelected(false);
+		checkWheelchairAccessible.setSelected(false);
+		txtLastName.clear();
+		txtFirstName.clear();
+		txtMail.clear();
+		txtComment.clear();
+	}
+
 	@FXML
 	private void toggleEditMode() {
 		// Editmode wechseln
 		editMode = !editMode;
+		applyEditMode();
+	}
+
+	private void applyEditMode() {
 		eventTable.setEditable(editMode);
 		presTable.setEditable(editMode);
 		tableTable.setEditable(editMode);
 		seatTable.setEditable(editMode);
-		btnSave.setDisable(!editMode);
-		btnToggleEdit.setText(editMode ? "Anzeigen" : "Bearbeiten");
 
-		// Eventtabelle
-		colEventName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colEventName.setOnEditCommit(editEvent -> {
-			Event event = editEvent.getRowValue();
-			event.changeName(editEvent.getNewValue());
-		});
-		colEventDesc.setCellFactory(TextFieldTableCell.forTableColumn());
-		colEventDesc.setOnEditCommit(editEvent -> {
-			Event event = editEvent.getRowValue();
-			event.setDescription(editEvent.getNewValue());
-		});
-		colEventArchived.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
-			Event event = eventTable.getItems().get(index);
-			SimpleBooleanProperty prop = new SimpleBooleanProperty(event.isArchived());
-			prop.addListener((obs, oldVal, newVal) -> {
-				event.setArchived(newVal);
-			});
-			return prop;
-		}));
-		colEventArchived.setOnEditCommit(editEvent -> {
-			Event event = editEvent.getRowValue();
-			event.setArchived(editEvent.getNewValue());
-		});
+		if (btnSave != null) {
+			btnSave.setDisable(!editMode);
+		}
+		if (btnToggleEdit != null) {
+			btnToggleEdit.setText(editMode ? "Anzeigen" : "Bearbeiten");
+		}
 
-		// Vorstellunstabelle
-		colPresName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colPresName.setOnEditCommit(editEvent -> {
-			Presentation pres = editEvent.getRowValue();
-			pres.changeName(editEvent.getNewValue());
-		});
-		colPresDesc.setCellFactory(TextFieldTableCell.forTableColumn());
-		colPresDesc.setOnEditCommit(editEvent -> {
-			Presentation pres = editEvent.getRowValue();
-			pres.setDescription(editEvent.getNewValue());
-		});
-		colPresDate.setCellFactory(TextFieldTableCell.forTableColumn(new LocalDateStringConverter()));
-		colPresDate.setOnEditCommit(editEvent -> {
-			Presentation pres = editEvent.getRowValue();
-			pres.setDate(editEvent.getNewValue());
-		}); // ToDo umwandlung/integration eines DatePickers
-		colPresTime.setCellFactory(TextFieldTableCell.forTableColumn(new LocalTimeStringConverter()));
-		colPresTime.setOnEditCommit(editEvent -> {
-			Presentation pres = editEvent.getRowValue();
-			pres.setTime(editEvent.getNewValue());
-		});
-
-		// Tischtabelle
-		colTableNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
-		colTableNumber.setOnEditCommit(editEvent -> {
-			Table table = editEvent.getRowValue();
-			table.changeTableNumber(editEvent.getNewValue());
-		});
-		colTableCategory.setCellFactory(TextFieldTableCell.forTableColumn());
-		colTableCategory.setOnEditCommit(editEvent -> {
-			Table table = editEvent.getRowValue();
-			table.setCategory(editEvent.getNewValue());
-		});
-		colTableDesc.setCellFactory(TextFieldTableCell.forTableColumn());
-		colTableDesc.setOnEditCommit(editEvent -> {
-			Table table = editEvent.getRowValue();
-			table.setDesc(editEvent.getNewValue());
-		});
-
-		// Sitztabelle
-		colSeatNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
-		colSeatNumber.setOnEditCommit(editEvent -> {
-			Seat seat = editEvent.getRowValue();
-			seat.changeSeatNumber(editEvent.getNewValue());
-		});
-		colSeatComment.setCellFactory(TextFieldTableCell.forTableColumn());
-		colSeatComment.setOnEditCommit(editEvent -> {
-			Seat seat = editEvent.getRowValue();
-			seat.setComment(editEvent.getNewValue());
-		});
-
-		// Sitzdetails
 		spnDoublePrice.setEditable(editMode);
 		checkPaid.setDisable(!editMode);
 		checkCollected.setDisable(!editMode);
@@ -337,6 +340,24 @@ public class EventEditController {
 		txtComment.setEditable(editMode);
 	}
 
+	private void setupAutoHeight(HBox hbox, TableView<?> leftTable, TableView<?> rightTable, int maxRows) {
+		double rowHeight = 25.0; // Höhe einer einzelnen Zeile in Pixel
+		double headerHeight = 28.0; // Höhe des Spaltenkopfs
+		double minHeight = 103;
+		double maxHeight = headerHeight + (rowHeight * maxRows);
+		double prefHeight;
+
+		hbox.setMinHeight(minHeight);
+		hbox.setMaxHeight(maxHeight);
+
+		leftTable.setFixedCellSize(rowHeight);
+		rightTable.setFixedCellSize(rowHeight);
+
+		prefHeight = leftTable.getItems().size() > rightTable.getItems().size() ? (leftTable.getItems().size() * rowHeight) + headerHeight : (rightTable.getItems().size() * rowHeight) + headerHeight;
+
+		hbox.setPrefHeight(prefHeight);
+	}
+
 	@FXML
 	private void handleBackToEventOverview() {
 		MainApp.showEventOverviewView();
@@ -345,6 +366,17 @@ public class EventEditController {
 	@FXML
 	private void saveCurrentState() {
 		// Aktuellen Stand speichern
+		Seat selectedSeat = seatTable.getSelectionModel().getSelectedItem();
+		if (selectedSeat != null) {
+			selectedSeat.setFirstName(txtFirstName.getText());
+			selectedSeat.setLastName(txtLastName.getText());
+			selectedSeat.setEMail(txtMail.getText());
+			selectedSeat.setComment(txtComment.getText());
+			selectedSeat.setPriceDouble(spnDoublePrice.getValue());
+			selectedSeat.setPaid(checkPaid.isSelected());
+			selectedSeat.setCollected(checkCollected.isSelected());
+			selectedSeat.setWheelchairAccessible(checkWheelchairAccessible.isSelected());
+		}
 		// repository.saveEvent(eventComboBox.getValue());
 	}
 

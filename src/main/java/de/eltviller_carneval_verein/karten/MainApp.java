@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 
+import de.eltviller_carneval_verein.karten.ui.EventEditController;
 import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
@@ -46,15 +47,46 @@ public class MainApp extends Application {
 	}
 
 	public static void showEventEditView() {
-		loadScene("/de/eltviller_carneval_verein/karten/ui/EventEditView.fxml");
+		try {
+			String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/EventEditView.fxml";
+
+			// Aktuelle Fenstergröße holen
+			width = primaryStage.getWidth();
+			height = primaryStage.getHeight();
+
+			// 1. FXMLLoader mit dem Pfad zur FXML instanziieren
+			FXMLLoader loader = new FXMLLoader(MainApp.class.getResource(fxmlPath));
+
+			// 2. Layout laden (erzeugt auch die Controller-Instanz)
+			Parent root = loader.load();
+
+			// 3. Controller-Instanz von JavaFX anfordern
+			EventEditController controller = loader.getController();
+
+			// 4. Parameter direkt an den Controller übergeben
+			// controller.initData(selectedEvent);
+
+			// 5. Scene setzen
+			Scene scene = new Scene(root, width, height);
+			primaryStage.setScene(scene);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 	}
 
 	private static void loadScene(String fxmlPath) {
 		try {
+			// Aktuelle Fenstergröße holen
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
+
+			// 1. FXMLLoader mit dem Pfad zur FXML instanziieren
 			FXMLLoader loader = new FXMLLoader(MainApp.class.getResource(fxmlPath));
+
+			// 2. Layout laden (erzeugt auch die Controller-Instanz)
 			Parent root = loader.load();
+
+			// 3. Scene setzen
 			Scene scene = new Scene(root, width, height);
 			primaryStage.setScene(scene);
 		} catch (IOException e) {

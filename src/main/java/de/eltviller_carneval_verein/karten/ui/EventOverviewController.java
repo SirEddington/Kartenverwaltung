@@ -203,6 +203,7 @@ public class EventOverviewController {
 			MenuItem addTableItem = new MenuItem("+ Tisch hinzufügen");
 			addTableItem.setOnAction(e -> {
 				Object item = tableRow.getItem();
+				MainApp.showEventEditView();
 				if (item instanceof Event event) {
 					// Logik: neuen Tisch zu Vorstellung hinzufügen
 				}
@@ -216,22 +217,31 @@ public class EventOverviewController {
 				}
 			});
 
+			MenuItem editItem = new MenuItem("Bearbeiten");
+			editItem.setOnAction(e -> {
+				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
+				if (selectedItem != null && selectedItem.getParent() != null) {
+
+				}
+			});
+
 			MenuItem deleteItem = new MenuItem("Löschen");
 			deleteItem.setOnAction(e -> {
 				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
 				if (selectedItem != null && selectedItem.getParent() != null) {
-					selectedItem.getParent().getChildren().remove(selectedItem);
+					// ToDo Logik: Eintrag löschen
 				}
 			});
 
 			// Menü-Einträge zusammenstellen
-			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, deleteItem);
+			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, editItem, deleteItem);
 
 			contextMenu.setOnShowing(e -> {
 				Object data = tableRow.getItem();
 				addPresItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
 				addTableItem.setVisible(data instanceof Presentation || data instanceof Table || data instanceof Seat);
 				addSeatItem.setVisible(data instanceof Table || data instanceof Seat);
+				editItem.setVisible(data != null);
 				deleteItem.setVisible(data != null);
 			});
 
