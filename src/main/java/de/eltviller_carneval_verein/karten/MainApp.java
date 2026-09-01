@@ -2,6 +2,10 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 
+import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.ui.EventEditController;
 import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
@@ -46,7 +50,7 @@ public class MainApp extends Application {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/EventCreateView.fxml");
 	}
 
-	public static void showEventEditView() {
+	public static void showEventEditView(Event selectedEvent, Presentation selectedPres, Table selectedTable, Seat selectedSeat, boolean editable) {
 		try {
 			String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/EventEditView.fxml";
 
@@ -64,7 +68,7 @@ public class MainApp extends Application {
 			EventEditController controller = loader.getController();
 
 			// 4. Parameter direkt an den Controller übergeben
-			// controller.initData(selectedEvent);
+			controller.initData(selectedEvent, selectedPres, selectedTable, selectedSeat, editable);
 
 			// 5. Scene setzen
 			Scene scene = new Scene(root, width, height);

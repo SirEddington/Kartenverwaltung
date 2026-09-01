@@ -194,34 +194,58 @@ public class EventOverviewController {
 
 			MenuItem addPresItem = new MenuItem("+ Vorstellung hinzufügen");
 			addPresItem.setOnAction(e -> {
-				Object item = tableRow.getItem();
-				if (item instanceof Event event) {
-					// Logik: neue Vorstellung zu Event hinzufügen
+				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
+				if (selectedItem != null) {
+					Event event = findParentInTree(selectedItem, Event.class);
+					Presentation pres = event.addPresentation();
+					MainApp.showEventEditView(event, pres, null, null, true);
 				}
 			});
 
 			MenuItem addTableItem = new MenuItem("+ Tisch hinzufügen");
 			addTableItem.setOnAction(e -> {
-				Object item = tableRow.getItem();
-				MainApp.showEventEditView();
-				if (item instanceof Event event) {
-					// Logik: neuen Tisch zu Vorstellung hinzufügen
+				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
+				if (selectedItem != null) {
+					Event event = findParentInTree(selectedItem, Event.class);
+					Presentation pres = findParentInTree(selectedItem, Presentation.class);
+					Table table = pres.addTable();
+					MainApp.showEventEditView(event, pres, table, null, true);
 				}
 			});
 
 			MenuItem addSeatItem = new MenuItem("+ Sitz hinzufügen");
 			addSeatItem.setOnAction(e -> {
-				Object item = tableRow.getItem();
-				if (item instanceof Event event) {
-					// Logik: neue Sitz zu Tisch hinzufügen
+				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
+				if (selectedItem != null) {
+					Event event = findParentInTree(selectedItem, Event.class);
+					Presentation pres = findParentInTree(selectedItem, Presentation.class);
+					Table table = findParentInTree(selectedItem, Table.class);
+					Seat seat = table.addSeat();
+					MainApp.showEventEditView(event, pres, table, seat, true);
 				}
 			});
 
 			MenuItem editItem = new MenuItem("Bearbeiten");
 			editItem.setOnAction(e -> {
 				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
-				if (selectedItem != null && selectedItem.getParent() != null) {
+				if (selectedItem != null) {
+					Event event = findParentInTree(selectedItem, Event.class);
+					Presentation pres = findParentInTree(selectedItem, Presentation.class);
+					Table table = findParentInTree(selectedItem, Table.class);
+					Seat seat = findParentInTree(selectedItem, Seat.class);
+					MainApp.showEventEditView(event, pres, table, seat, true);
+				}
+			});
 
+			MenuItem seeDetails = new MenuItem("Details");
+			seeDetails.setOnAction(e -> {
+				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
+				if (selectedItem != null) {
+					Event event = findParentInTree(selectedItem, Event.class);
+					Presentation pres = findParentInTree(selectedItem, Presentation.class);
+					Table table = findParentInTree(selectedItem, Table.class);
+					Seat seat = findParentInTree(selectedItem, Seat.class);
+					MainApp.showEventEditView(event, pres, table, seat, false);
 				}
 			});
 
@@ -234,7 +258,7 @@ public class EventOverviewController {
 			});
 
 			// Menü-Einträge zusammenstellen
-			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, editItem, deleteItem);
+			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, editItem, deleteItem, seeDetails);
 
 			contextMenu.setOnShowing(e -> {
 				Object data = tableRow.getItem();
@@ -242,6 +266,7 @@ public class EventOverviewController {
 				addTableItem.setVisible(data instanceof Presentation || data instanceof Table || data instanceof Seat);
 				addSeatItem.setVisible(data instanceof Table || data instanceof Seat);
 				editItem.setVisible(data != null);
+				seeDetails.setVisible(data != null);
 				deleteItem.setVisible(data != null);
 			});
 
@@ -289,6 +314,18 @@ public class EventOverviewController {
 		}
 
 		treeTableView.setRoot(dummyRoot);
+	}
+	
+	@SuppressWarnings("unchecked")
+	private <T> T findParentInTree(TreeItem<Object> item, Class<T> clazz) {
+	    TreeItem<Object> current = item;
+	    while (current != null) {
+	        if (current.getValue() != null && clazz.isInstance(current.getValue())) {
+	            return (T) current.getValue();
+	        }
+	        current = current.getParent();
+	    }
+	    return null;
 	}
 
 	@FXML

@@ -2,33 +2,50 @@ package de.eltviller_carneval_verein.karten.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 public class Table {
+	private final String id;
+	@JsonBackReference("presentation-table")
+	private Presentation parentPresentation;
+	
 	private int tableNumber; // get
 	private String description; // get,set
 	private String category; // get,set
+	
+	@JsonManagedReference("table-seat")
 	private List<Seat> seats = new ArrayList<Seat>(); // get,set
-	@JsonIgnore
-	private Presentation parentPresentation;
 
 	// Konstuktoren -->
 	public Table() {
-	} // Leerer Konstruktor ist Pflicht für Jackson
-
-	public Table(Presentation parentPres, int tableNumber) {
-		this.parentPresentation = parentPres;
-		this.tableNumber = tableNumber;
-	}
+		this.id = UUID.randomUUID().toString();
+	} 
+	
+	public Table(String id) {
+		this.id = (id != null) ? id : UUID.randomUUID().toString();
+	} 
 	// <-- Konstuktoren
 
 	// Getter und Setter -->
+	public String getId() {
+		return id;
+	}
+	
 	@JsonIgnore
 	public Presentation getParent() {
 		return parentPresentation;
+	}
+	
+	@JsonIgnore
+	public void setParent(Presentation parentPresentation) {
+		this.parentPresentation = parentPresentation;
 	}
 	
 	public int getTableNumber() {
@@ -57,6 +74,9 @@ public class Table {
 
 	public void setSeats(List<Seat> seats) {
 		this.seats = seats;
+		if (seats != null) {
+			seats.forEach(t -> t.setParent(this));
+	    }
 	}
 	// <-- Getter und Setter
 
@@ -69,7 +89,9 @@ public class Table {
 	}
 
 	public Seat addSeat() {
-		Seat newSeat = new Seat(this, createSeatNumber());
+		Seat newSeat = new Seat();
+		newSeat.setParent(this);
+		newSeat.changeSeatNumber(createSeatNumber());
 		seats.add(newSeat);
 		return newSeat;
 	}
@@ -100,4 +122,17 @@ public class Table {
 		}
 		return seatNumbers.stream().distinct().sorted().toList();
 	}
+	
+	@Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Table table = (Table) o;
+        return Objects.equals(id, table.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
 }

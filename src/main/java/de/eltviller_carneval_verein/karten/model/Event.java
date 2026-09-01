@@ -2,27 +2,39 @@ package de.eltviller_carneval_verein.karten.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 public class Event {
-	private String name; // get
-	private String description; // get, set
-	private boolean archived; // get, set
+	private final String id;
+	
+	private String name;
+	private String description;
+	private boolean archived;
+	
+	@JsonManagedReference("event-presentation")
 	private List<Presentation> presentations = new ArrayList<>(); // get,set
 
 	// Konstuktoren -->
 	public Event() {
-	} // Leerer Konstruktor ist Pflicht für Jackson
-
-	public Event(String name) {
-		this.name = name;
+		this.id = UUID.randomUUID().toString();
+	}
+	
+	public Event(String id) {
+		this.id = (id != null) ? id : UUID.randomUUID().toString();
 	}
 	// <-- Konstuktoren
 
 	// Getter und Setter -->
+	public String getId() {
+		return id;
+	}
+	
 	public String getName() {
 		return name;
 	}
@@ -49,6 +61,9 @@ public class Event {
 
 	public void setPresentations(List<Presentation> presentations) {
 		this.presentations = presentations;
+		if (presentations != null) {
+	        presentations.forEach(p -> p.setParent(this));
+	    }
 	}
 	// <-- Getter und Setter
 
@@ -61,7 +76,9 @@ public class Event {
 	}
 
 	public Presentation addPresentation() {
-		Presentation newPres = new Presentation(this, createPresName());
+		Presentation newPres = new Presentation();
+		newPres.setParent(this);
+		newPres.changeName(createPresName());
 		presentations.add(newPres);
 		return newPres;
 	}
@@ -121,4 +138,17 @@ public class Event {
 		}
 		return tableNumbers.stream().distinct().sorted().toList();
 	}
+	
+	@Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Event event = (Event) o;
+        return Objects.equals(id, event.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
 }

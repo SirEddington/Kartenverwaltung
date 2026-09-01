@@ -4,34 +4,51 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 public class Presentation {
+	private final String id;
+	@JsonBackReference("event-presentation")
+	private Event parentEvent;
+	
 	private String name; // get
 	private LocalDate date; // get,set
 	private LocalTime time; // get,set
 	private String description; // get, set
+	
+	@JsonManagedReference("presentation-table")
 	private List<Table> tables = new ArrayList<>(); // get,set
-	@JsonIgnore
-	private Event parentEvent;
 
 	// Konstuktoren -->
 	public Presentation() {
-	} // Leerer Konstruktor ist Pflicht für Jackson
-
-	public Presentation(Event parentEvent, String name) {
-		this.parentEvent = parentEvent;
-		this.name = name;
+		this.id = UUID.randomUUID().toString();
+	}
+	
+	public Presentation(String id) {
+		this.id = (id != null) ? id : UUID.randomUUID().toString();
 	}
 	// <-- Konstuktoren
 
 	// Getter und Setter -->
+	public String getId() {
+		return id;
+	}
+	
 	@JsonIgnore
 	public Event getParent() {
 		return parentEvent;
+	}
+
+	@JsonIgnore
+	public void setParent(Event parentEvent) {
+		this.parentEvent = parentEvent;
 	}
 
 	public String getName() {
@@ -68,6 +85,9 @@ public class Presentation {
 
 	public void setTables(List<Table> tables) {
 		this.tables = tables;
+		if (tables != null) {
+	        tables.forEach(t -> t.setParent(this));
+	    }
 	}
 	// <-- Getter und Setter
 
@@ -80,7 +100,9 @@ public class Presentation {
 	}
 
 	public Table addTable() {
-		Table newTable = new Table(this, createTableNumber());
+		Table newTable = new Table();
+		newTable.setParent(this);
+		newTable.changeTableNumber(createTableNumber());
 		tables.add(newTable);
 		return newTable;
 	}
@@ -131,4 +153,17 @@ public class Presentation {
 		}
 		return tableNumbers.stream().distinct().sorted().toList();
 	}
+	
+	@Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Presentation pres = (Presentation) o;
+        return Objects.equals(id, pres.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
 }

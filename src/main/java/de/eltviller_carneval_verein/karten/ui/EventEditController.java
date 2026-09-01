@@ -127,21 +127,35 @@ public class EventEditController {
 	Table currentTable;
 	Seat currentSeat;
 
-	private boolean editMode = true;
+	private boolean editMode = false;
 
-	public void initData(Event event, Presentation presentation, Table table, Seat seat) {
-		this.currentEvent = event;
-		this.currentPres = presentation;
-		this.currentTable = table;
-		this.currentSeat = seat;
+	public void initData(Event event, Presentation presentation, Table table, Seat seat, boolean editable) {
 
 		if (event != null) {
-			eventTable.getSelectionModel().select(currentEvent);
+			eventTable.getSelectionModel().select(event);
 			eventTable.scrollTo(event);
+			this.currentEvent = event;
 
-			// Daten in die UI laden / Tabellen selektieren etc.
-			masterPresData.setAll(event.getPresentations());
+			if (presentation != null && presTable.getItems().contains(presentation)) {
+				presTable.getSelectionModel().select(presentation);
+				presTable.scrollTo(presentation);
+				this.currentPres = presentation;
+				
+				if (table != null && tableTable.getItems().contains(table)) {
+					tableTable.getSelectionModel().select(table);
+					tableTable.scrollTo(table);
+					this.currentTable = table;
+					
+					if (seat != null && seatTable.getItems().contains(seat)) {
+						seatTable.getSelectionModel().select(seat);
+						seatTable.scrollTo(seat);
+						this.currentSeat = seat;
+					}
+				}
+			}
 		}
+		
+		setEditable(editable);
 	}
 
 	@FXML
@@ -316,6 +330,11 @@ public class EventEditController {
 		editMode = !editMode;
 		applyEditMode();
 	}
+	
+	private void setEditable(boolean editable) {
+		editMode = editable;
+		applyEditMode();
+	}
 
 	private void applyEditMode() {
 		eventTable.setEditable(editMode);
@@ -360,6 +379,7 @@ public class EventEditController {
 
 	@FXML
 	private void handleBackToEventOverview() {
+		setEditable(false);
 		MainApp.showEventOverviewView();
 	}
 

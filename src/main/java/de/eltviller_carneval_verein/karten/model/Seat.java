@@ -1,8 +1,16 @@
 package de.eltviller_carneval_verein.karten.model;
 
+import java.util.Objects;
+import java.util.UUID;
+
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 public class Seat {
+	private final String id;
+	@JsonBackReference("table-seat")
+	private Table parentTable;
+	
 	private int seatNumber; // get
 	private int price; // get,set
 	private boolean paid; // get,set
@@ -16,23 +24,30 @@ public class Seat {
 
 	private String comment; // get,set
 
-	@JsonIgnore
-	private Table parentTable;
 
 	// Konstuktoren -->
 	public Seat() {
-	} // Leerer Konstruktor ist Pflicht für Jackson
-
-	public Seat(Table parentTable, int seatNumber) {
-		this.parentTable = parentTable;
-		this.seatNumber = seatNumber;
+		this.id = UUID.randomUUID().toString();
 	}
+	
+	public Seat(String id) {
+		this.id = (id != null) ? id : UUID.randomUUID().toString();
+	} 
 	// <-- Konstuktoren
 
 	// Getter und Setter -->
+	public String getId() {
+		return id;
+	}
+	
 	@JsonIgnore
 	public Table getParent() {
 		return parentTable;
+	}
+	
+	@JsonIgnore
+	public void setParent(Table parentTable) {
+		this.parentTable = parentTable;
 	}
 
 	public int getSeatNumber() {
@@ -135,5 +150,18 @@ public class Seat {
 	public String toString() {
 		return "Sitz " + seatNumber + (wheelchairAccessible == true ? "Rollstuhlgeeignet" : "");
 	}
+	
+	@Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Seat seat = (Seat) o;
+        return Objects.equals(id, seat.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
 
 }
