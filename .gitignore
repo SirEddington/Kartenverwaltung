@@ -9,3 +9,5 @@ target/
 # Lokale Testdaten & Logs
 events_data/
 *.log
+
+conveyor.local.conf

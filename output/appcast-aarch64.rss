@@ -1,0 +1,23 @@
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
+    <channel>
+        <title>Kartenverwaltung - Eltviller Carneval Verein Changelog</title>
+        <link>https://SirEddington.github.io/Kartenverwaltung/appcast-aarch64.rss</link>
+        <description>Most recent changes with links to updates.</description>
+        <language>en</language>
+        <item>
+            <title>Version 0.1.0</title>
+            <link>https://SirEddington.github.io/Kartenverwaltung/</link>
+            <sparkle:version>0.1.0.0</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+            <description>
+                <![CDATA[ New release: version 0.1.0 ]]>
+            </description>
+            <pubDate>Wed, 2 Sep 2026 08:49:12 GMT</pubDate>
+            <enclosure url="https://SirEddington.github.io/Kartenverwaltung/eltviller-carneval-karten-0.1.0-mac-aarch64.zip" 
+                       length="30920788" 
+                       type="application/octet-stream" 
+                       sparkle:edSignature="Z2ncrmai10BKBLLXynsasV8QtJvrG2lIMjzbqQ4ieeBX62quN+Gq9dty0/2YIQWVZk5IeVQkWzaJV8TsHMAJBg=="/>
+        </item>
+    </channel>
+</rss>
