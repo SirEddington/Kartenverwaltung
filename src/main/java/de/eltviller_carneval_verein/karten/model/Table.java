@@ -15,39 +15,45 @@ public class Table {
 	private final String id;
 	@JsonBackReference("presentation-table")
 	private Presentation parentPresentation;
-	
+
 	private int tableNumber; // get
 	private String description; // get,set
 	private String category; // get,set
-	
+
+	// Daten für Saalansicht
+	private double posX;
+	private double posY;
+	private double width;
+	private double height;
+
 	@JsonManagedReference("table-seat")
 	private List<Seat> seats = new ArrayList<Seat>(); // get,set
 
 	// Konstuktoren -->
 	public Table() {
 		this.id = UUID.randomUUID().toString();
-	} 
-	
+	}
+
 	public Table(String id) {
 		this.id = (id != null) ? id : UUID.randomUUID().toString();
-	} 
+	}
 	// <-- Konstuktoren
 
 	// Getter und Setter -->
 	public String getId() {
 		return id;
 	}
-	
+
 	@JsonIgnore
 	public Presentation getParent() {
 		return parentPresentation;
 	}
-	
+
 	@JsonIgnore
 	public void setParent(Presentation parentPresentation) {
 		this.parentPresentation = parentPresentation;
 	}
-	
+
 	public int getTableNumber() {
 		return tableNumber;
 	}
@@ -76,7 +82,39 @@ public class Table {
 		this.seats = seats;
 		if (seats != null) {
 			seats.forEach(t -> t.setParent(this));
-	    }
+		}
+	}
+
+	public double getPosX() {
+		return posX;
+	}
+
+	public void setPosX(double posX) {
+		this.posX = posX;
+	}
+
+	public double getPosY() {
+		return posY;
+	}
+
+	public void setPosY(double posY) {
+		this.posY = posY;
+	}
+
+	public double getWidth() {
+		return width;
+	}
+
+	public void setWidth(double width) {
+		this.width = width;
+	}
+
+	public double getHeight() {
+		return height;
+	}
+
+	public void setHeight(double height) {
+		this.height = height;
 	}
 	// <-- Getter und Setter
 
@@ -98,15 +136,15 @@ public class Table {
 
 	private int createSeatNumber() {
 		// 1. Alle aktuell vorhandenen Namen einsammeln
-	    Set<Integer> existingNumbers = seats.stream().map(Seat::getSeatNumber).collect(Collectors.toSet());
+		Set<Integer> existingNumbers = seats.stream().map(Seat::getSeatNumber).collect(Collectors.toSet());
 
-	    // 2. Ersten freien Namen finden
-	    int i = 1;
-	    while (existingNumbers.contains(i)) {
-	        i++;
-	    }
+		// 2. Ersten freien Namen finden
+		int i = 1;
+		while (existingNumbers.contains(i)) {
+			i++;
+		}
 
-	    return i;
+		return i;
 	}
 
 	@Override
@@ -122,17 +160,19 @@ public class Table {
 		}
 		return seatNumbers.stream().distinct().sorted().toList();
 	}
-	
-	@Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Table table = (Table) o;
-        return Objects.equals(id, table.id);
-    }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(id);
-    }
+	@Override
+	public boolean equals(Object o) {
+		if (this == o)
+			return true;
+		if (o == null || getClass() != o.getClass())
+			return false;
+		Table table = (Table) o;
+		return Objects.equals(id, table.id);
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(id);
+	}
 }

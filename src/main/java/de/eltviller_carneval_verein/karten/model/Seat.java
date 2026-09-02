@@ -10,7 +10,7 @@ public class Seat {
 	private final String id;
 	@JsonBackReference("table-seat")
 	private Table parentTable;
-	
+
 	private int seatNumber; // get
 	private int price; // get,set
 	private boolean paid; // get,set
@@ -24,27 +24,32 @@ public class Seat {
 
 	private String comment; // get,set
 
+	// Daten für Saalansicht
+	private double posX;
+	private double posY;
+	private double width;
+	private double height;
 
 	// Konstuktoren -->
 	public Seat() {
 		this.id = UUID.randomUUID().toString();
 	}
-	
+
 	public Seat(String id) {
 		this.id = (id != null) ? id : UUID.randomUUID().toString();
-	} 
+	}
 	// <-- Konstuktoren
 
 	// Getter und Setter -->
 	public String getId() {
 		return id;
 	}
-	
+
 	@JsonIgnore
 	public Table getParent() {
 		return parentTable;
 	}
-	
+
 	@JsonIgnore
 	public void setParent(Table parentTable) {
 		this.parentTable = parentTable;
@@ -127,6 +132,38 @@ public class Seat {
 	public void setComment(String comment) {
 		this.comment = comment;
 	}
+
+	public double getPosX() {
+		return posX;
+	}
+
+	public void setPosX(double posX) {
+		this.posX = posX;
+	}
+
+	public double getPosY() {
+		return posY;
+	}
+
+	public void setPosY(double posY) {
+		this.posY = posY;
+	}
+
+	public double getWidth() {
+		return width;
+	}
+
+	public void setWidth(double width) {
+		this.width = width;
+	}
+
+	public double getHeight() {
+		return height;
+	}
+
+	public void setHeight(double height) {
+		this.height = height;
+	}
 	// <-- Getter und Setter
 
 	public void changeSeatNumber(int seatNumber) {
@@ -146,22 +183,35 @@ public class Seat {
 		}
 	}
 
+	@JsonIgnore
+	public SeatStatus getStatus() {
+		if (isPaid()) {
+			return SeatStatus.SOLD;
+		}
+		if (isReserved()) {
+			return SeatStatus.RESERVED;
+		}
+		return SeatStatus.FREE;
+	}
+
 	@Override
 	public String toString() {
 		return "Sitz " + seatNumber + (wheelchairAccessible == true ? "Rollstuhlgeeignet" : "");
 	}
-	
-	@Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Seat seat = (Seat) o;
-        return Objects.equals(id, seat.id);
-    }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(id);
-    }
+	@Override
+	public boolean equals(Object o) {
+		if (this == o)
+			return true;
+		if (o == null || getClass() != o.getClass())
+			return false;
+		Seat seat = (Seat) o;
+		return Objects.equals(id, seat.id);
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(id);
+	}
 
 }

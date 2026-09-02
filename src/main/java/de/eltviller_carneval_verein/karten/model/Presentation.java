@@ -17,12 +17,18 @@ public class Presentation {
 	private final String id;
 	@JsonBackReference("event-presentation")
 	private Event parentEvent;
-	
+
 	private String name; // get
 	private LocalDate date; // get,set
 	private LocalTime time; // get,set
 	private String description; // get, set
-	
+
+	// Daten für Saalansicht
+	private double defaultTableWidth;
+	private double defaultTableHeight;
+	private double defaultSeatWidth;
+	private double defaultSeatHeight;
+
 	@JsonManagedReference("presentation-table")
 	private List<Table> tables = new ArrayList<>(); // get,set
 
@@ -30,7 +36,7 @@ public class Presentation {
 	public Presentation() {
 		this.id = UUID.randomUUID().toString();
 	}
-	
+
 	public Presentation(String id) {
 		this.id = (id != null) ? id : UUID.randomUUID().toString();
 	}
@@ -40,7 +46,7 @@ public class Presentation {
 	public String getId() {
 		return id;
 	}
-	
+
 	@JsonIgnore
 	public Event getParent() {
 		return parentEvent;
@@ -86,8 +92,40 @@ public class Presentation {
 	public void setTables(List<Table> tables) {
 		this.tables = tables;
 		if (tables != null) {
-	        tables.forEach(t -> t.setParent(this));
-	    }
+			tables.forEach(t -> t.setParent(this));
+		}
+	}
+
+	public double getDefaultTableWidth() {
+		return defaultTableWidth;
+	}
+
+	public void setDefaultTableWidth(double defaultTableWidth) {
+		this.defaultTableWidth = defaultTableWidth;
+	}
+
+	public double getDefaultTableHeight() {
+		return defaultTableHeight;
+	}
+
+	public void setDefaultTableHeight(double defaultTableHeight) {
+		this.defaultTableHeight = defaultTableHeight;
+	}
+
+	public double getDefaultSeatWidth() {
+		return defaultSeatWidth;
+	}
+
+	public void setDefaultSeatWidth(double defaultSeatWidth) {
+		this.defaultSeatWidth = defaultSeatWidth;
+	}
+
+	public double getDefaultSeatHeight() {
+		return defaultSeatHeight;
+	}
+
+	public void setDefaultSeatHeight(double defaultSeatHeight) {
+		this.defaultSeatHeight = defaultSeatHeight;
 	}
 	// <-- Getter und Setter
 
@@ -153,17 +191,19 @@ public class Presentation {
 		}
 		return tableNumbers.stream().distinct().sorted().toList();
 	}
-	
-	@Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Presentation pres = (Presentation) o;
-        return Objects.equals(id, pres.id);
-    }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(id);
-    }
+	@Override
+	public boolean equals(Object o) {
+		if (this == o)
+			return true;
+		if (o == null || getClass() != o.getClass())
+			return false;
+		Presentation pres = (Presentation) o;
+		return Objects.equals(id, pres.id);
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(id);
+	}
 }
