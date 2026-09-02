@@ -16,6 +16,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableColumn;
@@ -258,7 +259,7 @@ public class EventOverviewController {
 			});
 
 			// Menü-Einträge zusammenstellen
-			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, editItem, deleteItem, seeDetails);
+			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, editItem, new SeparatorMenuItem(), deleteItem, new SeparatorMenuItem(), seeDetails);
 
 			contextMenu.setOnShowing(e -> {
 				Object data = tableRow.getItem();
@@ -315,17 +316,17 @@ public class EventOverviewController {
 
 		treeTableView.setRoot(dummyRoot);
 	}
-	
+
 	@SuppressWarnings("unchecked")
 	private <T> T findParentInTree(TreeItem<Object> item, Class<T> clazz) {
-	    TreeItem<Object> current = item;
-	    while (current != null) {
-	        if (current.getValue() != null && clazz.isInstance(current.getValue())) {
-	            return (T) current.getValue();
-	        }
-	        current = current.getParent();
-	    }
-	    return null;
+		TreeItem<Object> current = item;
+		while (current != null) {
+			if (current.getValue() != null && clazz.isInstance(current.getValue())) {
+				return (T) current.getValue();
+			}
+			current = current.getParent();
+		}
+		return null;
 	}
 
 	@FXML

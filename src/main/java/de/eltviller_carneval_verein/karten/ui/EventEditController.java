@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.function.Consumer;
 
 import org.controlsfx.control.table.TableFilter;
 
@@ -12,6 +13,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
+import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -22,9 +24,13 @@ import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.CheckBoxTableCell;
@@ -140,12 +146,12 @@ public class EventEditController {
 				presTable.getSelectionModel().select(presentation);
 				presTable.scrollTo(presentation);
 				this.currentPres = presentation;
-				
+
 				if (table != null && tableTable.getItems().contains(table)) {
 					tableTable.getSelectionModel().select(table);
 					tableTable.scrollTo(table);
 					this.currentTable = table;
-					
+
 					if (seat != null && seatTable.getItems().contains(seat)) {
 						seatTable.getSelectionModel().select(seat);
 						seatTable.scrollTo(seat);
@@ -154,12 +160,17 @@ public class EventEditController {
 				}
 			}
 		}
-		
+
 		setEditable(editable);
 	}
 
 	@FXML
 	public void initialize() {
+		setupCollums();
+		setupContextMenu();
+	}
+
+	private void setupCollums() {
 		// 1. Spalten-ValueFactorys & CellFactorys EINMALIG konfigurieren
 
 		// --- Event Tabelle ---
@@ -298,6 +309,82 @@ public class EventEditController {
 
 	}
 
+	private void setupContextMenu() {
+		// 1. Kontextmenü für Event-Tabelle
+		setupTableContextMenu(eventTable, event -> handleAddEvent(), event -> handleDeleteEvent(event));
+
+		// 2. Kontextmenü für Aufführungen/Vorstellungen
+		setupTableContextMenu(presTable, pres -> handleAddPres(), pres -> handleDeletePres(pres));
+
+		// 3. Kontextmenü für Tisch-Tabelle
+		setupTableContextMenu(tableTable, table -> handleAddTable(), table -> handleDeleteTable(table));
+
+		// 4. Kontextmenü für Sitzplatz-Tabelle
+		setupTableContextMenu(seatTable, seat -> handleAddSeat(), seat -> handleDeleteSeat(seat));
+	}
+
+	private <T> void setupTableContextMenu(TableView<T> tableView, Consumer<T> onAdd, Consumer<T> onDelete) {
+		tableView.setRowFactory(tv -> {
+			TableRow<T> row = new TableRow<>();
+			ContextMenu contextMenu = new ContextMenu();
+
+			MenuItem addItem = new MenuItem("+ Hinzufügen");
+			addItem.setOnAction(e -> {
+				T item = row.getItem();
+				if (item != null && onAdd != null) {
+					onAdd.accept(item);
+				}
+			});
+
+			MenuItem deleteItem = new MenuItem("Löschen");
+			deleteItem.setOnAction(e -> {
+				T item = row.getItem();
+				if (item != null && onDelete != null) {
+					onDelete.accept(item);
+				}
+			});
+
+			contextMenu.getItems().addAll(addItem, new SeparatorMenuItem(), deleteItem);
+
+			// Menü nur binden, wenn die Zeile nicht leer ist
+			row.contextMenuProperty().bind(Bindings.when(row.emptyProperty()).then((ContextMenu) null).otherwise(contextMenu));
+
+			return row;
+		});
+	}
+
+	private void handleAddEvent() {
+
+	}
+
+	private void handleDeleteEvent(Event event) {
+
+	}
+
+	private void handleAddPres() {
+
+	}
+
+	private void handleDeletePres(Presentation presentation) {
+
+	}
+
+	private void handleAddTable() {
+
+	}
+
+	private void handleDeleteTable(Table table) {
+
+	}
+
+	private void handleAddSeat() {
+
+	}
+
+	private void handleDeleteSeat(Seat seat) {
+
+	}
+
 	private void loadDetailsOfSeat(Seat selectedSeat) {
 		// Felder initialisieren
 		clearDetails();
@@ -330,7 +417,7 @@ public class EventEditController {
 		editMode = !editMode;
 		applyEditMode();
 	}
-	
+
 	private void setEditable(boolean editable) {
 		editMode = editable;
 		applyEditMode();
