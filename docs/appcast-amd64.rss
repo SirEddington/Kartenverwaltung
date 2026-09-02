@@ -13,11 +13,11 @@
             <description>
                 <![CDATA[ New release: version 0.1.0 ]]>
             </description>
-            <pubDate>Wed, 2 Sep 2026 08:49:06 GMT</pubDate>
-            <enclosure url="https://SirEddington.github.io/Kartenverwaltung/eltviller-carneval-karten-0.1.0-mac-amd64.zip" 
-                       length="31553186" 
+            <pubDate>Wed, 2 Sep 2026 09:31:45 GMT</pubDate>
+            <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.0-mac-amd64.zip" 
+                       length="31553174" 
                        type="application/octet-stream" 
-                       sparkle:edSignature="48foa62VI1J+LGDJfwGSV0cwXYtPpBnlbYmrISMYIwdVJE/xlvq9GJZ+gNaje3V8CQlOG2XNRR+awEbQYp5lDw=="/>
+                       sparkle:edSignature="B59QjfYn6YFEjy8e1dZwo0VoCsP4QMl1MM6CzqU7w/odVr49CPBIYKQZm7EvINnN2XU9qqgng7v4DSvCFK86Ag=="/>
         </item>
     </channel>
 </rss>

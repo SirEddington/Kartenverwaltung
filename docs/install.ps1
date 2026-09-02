@@ -2,8 +2,8 @@
 # Startup script for self-signed MSIX packaged apps.
 
 $CertName = "CN=Kartenverwaltung - Eltviller Carneval Verein"
-$FSName = "eltviller-carneval-karten"
-$PackageName = "EltvillerCarnevalKarten"
+$FSName = "ecv-karten"
+$PackageName = "EcvKarten"
 $Site = "https://SirEddington.github.io/Kartenverwaltung"
 
 
@@ -34,4 +34,4 @@ if (!((dir cert:\LocalMachine\TrustedPeople).Subject -contains $CertName))
 # Every attempt using Win32 fails, presumably because it's running elevated and windows UAC screws things up.
 Add-AppxPackage -AppInstallerFile "${Site}/${FSName}.appinstaller"
 
-start "shell:appsFolder\EltvillerCarnevalKarten_0cs1gtds5d9x0!EltvillerCarnevalKarten"
+start "shell:appsFolder\EcvKarten_0cs1gtds5d9x0!EcvKarten"

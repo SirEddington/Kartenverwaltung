@@ -10,4 +10,6 @@ target/
 events_data/
 *.log
 
+# Lokales Deployment
 conveyor.local.conf
+build.bat
