@@ -1,0 +1,14 @@
+Architecture: amd64
+Built-With: Hydraulic Conveyor
+Depends: libc6, libgcc-s1, libstdc++6, zlib1g
+Description: Kartenverwaltung - Eltviller Carneval Verein
+Installed-Size: 62271
+Maintainer: Eltviller Carneval Verein <nobody@nowhere>
+Package: eltviller-carneval-verein-ecv-karten
+Priority: optional
+Provides: eltviller-carneval-verein-ecv-karten
+Section: misc
+Version: 0.1.0
+Filename: debian/eltviller-carneval-verein-ecv-karten_0.1.0_amd64.deb
+Size: 28131264
+SHA256: 045bb514301b5d315f330b704b806a5295bf3a0022daa9cb414c050269948a91
