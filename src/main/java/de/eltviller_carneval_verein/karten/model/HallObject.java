@@ -6,20 +6,20 @@ import java.util.UUID;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
-import javafx.scene.paint.Color;
-
 public class HallObject {
 	private final String id;
 	@JsonBackReference("presentation-hallObject")
 	private Presentation parentPresentation;
 
+	private String name;
+	private String desc;
+
 	private double posX;
 	private double posY;
 	private double width;
 	private double height;
-	private Color color;
+	private String color;
 	private Shape shape;
-	
 
 	// Konstuktoren -->
 	public HallObject() {
@@ -44,6 +44,22 @@ public class HallObject {
 	@JsonIgnore
 	public void setParent(Presentation parentPresentation) {
 		this.parentPresentation = parentPresentation;
+	}
+
+	public String getName() {
+		return name;
+	}
+
+	public void setName(String name) {
+		this.name = name;
+	}
+
+	public String getDesc() {
+		return desc;
+	}
+
+	public void setDesc(String desc) {
+		this.desc = desc;
 	}
 
 	public double getPosX() {
@@ -78,13 +94,11 @@ public class HallObject {
 		this.height = height;
 	}
 
-	@SuppressWarnings("exports")
-	public Color getColor() {
+	public String getColor() {
 		return color;
 	}
 
-	@SuppressWarnings("exports")
-	public void setColor(Color color) {
+	public void setColor(String color) {
 		this.color = color;
 	}
 

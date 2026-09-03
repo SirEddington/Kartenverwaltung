@@ -40,6 +40,8 @@ public class MainController {
 	@FXML
 	private TextField searchField;
 	@FXML
+	private Button btnHallView = new Button();
+	@FXML
 	private Button btnToggleEdit = new Button();
 	@FXML
 	private Button btnSave = new Button();
@@ -258,6 +260,11 @@ public class MainController {
 			return prop;
 		}));
 
+	}
+
+	@FXML
+	private void toHallView() {
+		MainApp.showHallView();
 	}
 
 	@FXML

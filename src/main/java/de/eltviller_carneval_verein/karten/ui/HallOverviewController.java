@@ -6,6 +6,8 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
 import de.eltviller_carneval_verein.karten.model.Table;
 import javafx.fxml.FXML;
+import javafx.scene.Group;
+import javafx.scene.Node;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
@@ -19,98 +21,87 @@ public class HallOverviewController {
 	@FXML
 	private Pane hallPane;
 
-	@FXML
-	public void initialize() {
-		// Initialization logic
-	}
-
-	/**
-	 * Renders all tables and seats for the selected performance.
-	 */
 	public void renderHall(Presentation pres) {
-		if (pres == null) {
-			throw new IllegalArgumentException("Vorstellung ist leer");
-		}
-		hallPane.getChildren().clear();
 
+		hallPane.getChildren().clear();
 		for (HallObject hallObject : pres.getHallObjects()) {
 			drawHallObject(hallObject);
 		}
-		
+
 		for (Table table : pres.getTables()) {
 			drawTable(table);
 		}
 	}
 
 	private void drawTable(Table table) {
-		// Render table shape
+		Node tableNode = createTableNode(table);
+		hallPane.getChildren().add(tableNode);
+
+		if (table.getSeats() != null) {
+			for (Seat seat : table.getSeats()) {
+				drawSeat(seat);
+			}
+		}
+	}
+
+	private Node createTableNode(Table table) {
+
 		Rectangle tableShape = new Rectangle(table.getPosX(), table.getPosY(), table.getWidth(), table.getHeight());
-		tableShape.setFill(Color.LIGHTGRAY);
-		tableShape.setStroke(Color.DARKGRAY);
 		tableShape.setArcWidth(10);
 		tableShape.setArcHeight(10);
 
-		// Table label
-		Text tableLabel = new Text(table.getPosX() + 10, table.getPosY() + 25, "Table " + table.getTableNumber());
+		tableShape.setFill(Color.LIGHTGRAY);
+		tableShape.setStroke(Color.DARKGRAY);
 
-		hallPane.getChildren().addAll(tableShape, tableLabel);
+		Text tableLabel = new Text("Tisch " + table.getTableNumber());
+		tableLabel.setX(table.getPosX() + 10);
+		tableLabel.setY(table.getPosY() + 20);
 
-		// Render associated seats
-		if (table.getSeats() != null) {
-			for (Seat seat : table.getSeats()) {
-				drawSeat(seat);
-			}
-		}
-	}
-
-	private void drawHallObject(HallObject hallObject) {
-		// Render table shape
-		Shape shape = switch (hallObject.getShape()) {
-		case Circle: {
-			// Bei Kreisen ist die X/Y-Koordinate der Mittelpunkt
-            double radius = hallObject.getWidth() / 2.0;
-            double centerX = hallObject.getPosX() + radius;
-            double centerY = hallObject.getPosY() + radius;
-            yield new Circle(centerX, centerY, radius);
-		}
-		case Rectangle: {
-			Rectangle rect = new Rectangle(hallObject.getPosX(), hallObject.getPosY(), hallObject.getWidth(), hallObject.getHeight());
-            rect.setArcWidth(10);  // Abgerundete Ecken
-            rect.setArcHeight(10);
-            yield rect;
-		}
-		};
-		shape.setFill(Color.LIGHTGRAY);
-		shape.setStroke(Color.DARKGRAY);
-		shape.setStrokeWidth(1.5);
-
-		// Table label
-		Text tableLabel = new Text(table.getPosX() + 10, table.getPosY() + 25, "Table " + table.getTableNumber());
-
-		hallPane.getChildren().addAll(tableShape, tableLabel);
-
-		// Render associated seats
-		if (table.getSeats() != null) {
-			for (Seat seat : table.getSeats()) {
-				drawSeat(seat);
-			}
-		}
+		return new Group(tableShape, tableLabel);
 	}
 
 	private void drawSeat(Seat seat) {
-		Circle seatShape = new Circle(seat.getPosX(), seat.getPosY(), 12);
-		seatShape.setFill(getColorForStatus(seat.getStatus()));
-		seatShape.setStroke(Color.BLACK);
+		Circle seatCircle = new Circle(seat.getPosX(), seat.getPosY(), 10);
+		seatCircle.setFill(getColorForSeatStatus(seat.getStatus()));
+		seatCircle.setStroke(Color.BLACK);
 
-		Tooltip tooltip = new Tooltip("Seat " + seat.getSeatNumber() + " (" + seat.getStatus() + ")");
-		Tooltip.install(seatShape, tooltip);
+		Tooltip.install(seatCircle, new Tooltip("Seat " + seat.getSeatNumber() + " (" + seat.getStatus() + ")"));
+		seatCircle.setOnMouseClicked(e -> handleSeatClick(seat));
 
-		seatShape.setOnMouseClicked(e -> handleSeatClick(seat));
-
-		hallPane.getChildren().add(seatShape);
+		hallPane.getChildren().add(seatCircle);
 	}
 
-	private Color getColorForStatus(SeatStatus status) {
+	private void drawHallObject(HallObject hallObject) {
+		Node hallObjectNode = createHallObjectNode(hallObject);
+		hallPane.getChildren().add(hallObjectNode);
+	}
+
+	private Node createHallObjectNode(HallObject hallObject) {
+		// Java 21 Switch Expression für Shapes
+		Shape hallObjectShape = switch (hallObject.getShape()) {
+		case CIRCLE -> {
+			double radius = hallObject.getWidth() / 2.0;
+			yield new Circle(hallObject.getPosX() + radius, hallObject.getPosY() + radius, radius);
+		}
+		case RECTANGLE -> {
+			Rectangle rect = new Rectangle(hallObject.getPosX(), hallObject.getPosY(), hallObject.getWidth(), hallObject.getHeight());
+			rect.setArcWidth(10);
+			rect.setArcHeight(10);
+			yield rect;
+		}
+		};
+
+		hallObjectShape.setFill(Color.LIGHTGRAY);
+		hallObjectShape.setStroke(Color.DARKGRAY);
+
+		Text hallObjectLabel = new Text(hallObject.getName());
+		hallObjectLabel.setX(hallObject.getPosX() + 10);
+		hallObjectLabel.setY(hallObject.getPosY() + 20);
+
+		return new Group(hallObjectShape, hallObjectLabel);
+	}
+
+	private Color getColorForSeatStatus(SeatStatus status) {
 		if (status == null)
 			return Color.GREEN;
 		return switch (status) {
@@ -122,6 +113,6 @@ public class HallOverviewController {
 	}
 
 	private void handleSeatClick(Seat seat) {
-		System.out.println("Seat clicked: " + seat.getSeatNumber());
+		System.out.println("Clicked seat: " + seat.getSeatNumber());
 	}
 }
