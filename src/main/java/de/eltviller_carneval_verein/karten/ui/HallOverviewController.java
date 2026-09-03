@@ -1,7 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui;
 
-import java.util.List;
-
+import de.eltviller_carneval_verein.karten.model.HallObject;
+import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
 import de.eltviller_carneval_verein.karten.model.Table;
@@ -11,6 +11,7 @@ import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
+import javafx.scene.shape.Shape;
 import javafx.scene.text.Text;
 
 public class HallOverviewController {
@@ -26,10 +27,17 @@ public class HallOverviewController {
 	/**
 	 * Renders all tables and seats for the selected performance.
 	 */
-	public void renderHall(List<Table> tables) {
+	public void renderHall(Presentation pres) {
+		if (pres == null) {
+			throw new IllegalArgumentException("Vorstellung ist leer");
+		}
 		hallPane.getChildren().clear();
 
-		for (Table table : tables) {
+		for (HallObject hallObject : pres.getHallObjects()) {
+			drawHallObject(hallObject);
+		}
+		
+		for (Table table : pres.getTables()) {
 			drawTable(table);
 		}
 	}
@@ -41,6 +49,40 @@ public class HallOverviewController {
 		tableShape.setStroke(Color.DARKGRAY);
 		tableShape.setArcWidth(10);
 		tableShape.setArcHeight(10);
+
+		// Table label
+		Text tableLabel = new Text(table.getPosX() + 10, table.getPosY() + 25, "Table " + table.getTableNumber());
+
+		hallPane.getChildren().addAll(tableShape, tableLabel);
+
+		// Render associated seats
+		if (table.getSeats() != null) {
+			for (Seat seat : table.getSeats()) {
+				drawSeat(seat);
+			}
+		}
+	}
+
+	private void drawHallObject(HallObject hallObject) {
+		// Render table shape
+		Shape shape = switch (hallObject.getShape()) {
+		case Circle: {
+			// Bei Kreisen ist die X/Y-Koordinate der Mittelpunkt
+            double radius = hallObject.getWidth() / 2.0;
+            double centerX = hallObject.getPosX() + radius;
+            double centerY = hallObject.getPosY() + radius;
+            yield new Circle(centerX, centerY, radius);
+		}
+		case Rectangle: {
+			Rectangle rect = new Rectangle(hallObject.getPosX(), hallObject.getPosY(), hallObject.getWidth(), hallObject.getHeight());
+            rect.setArcWidth(10);  // Abgerundete Ecken
+            rect.setArcHeight(10);
+            yield rect;
+		}
+		};
+		shape.setFill(Color.LIGHTGRAY);
+		shape.setStroke(Color.DARKGRAY);
+		shape.setStrokeWidth(1.5);
 
 		// Table label
 		Text tableLabel = new Text(table.getPosX() + 10, table.getPosY() + 25, "Table " + table.getTableNumber());

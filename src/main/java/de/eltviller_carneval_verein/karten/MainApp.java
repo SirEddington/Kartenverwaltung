@@ -11,6 +11,8 @@ import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
 import javafx.stage.Stage;
 
 public class MainApp extends Application {
@@ -19,6 +21,7 @@ public class MainApp extends Application {
 	private static double width;
 	private static double height;
 
+	@SuppressWarnings("exports")
 	@Override
 	public void start(Stage stage) throws Exception {
 		primaryStage = stage;
@@ -96,6 +99,15 @@ public class MainApp extends Application {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+	}
+	
+	@SuppressWarnings("exports")
+	public static void showAlert(String title, String content, AlertType alertType) {
+		Alert alert = new Alert(alertType);
+		alert.setTitle(title);
+		alert.setHeaderText(null);
+		alert.setContentText(content);
+		alert.showAndWait();
 	}
 
 	public static void main(String[] args) {

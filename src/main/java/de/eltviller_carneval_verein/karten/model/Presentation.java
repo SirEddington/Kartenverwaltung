@@ -31,6 +31,7 @@ public class Presentation {
 
 	@JsonManagedReference("presentation-table")
 	private List<Table> tables = new ArrayList<>(); // get,set
+	private List<HallObject> hallObjects = new ArrayList<>(); // get,set
 
 	// Konstuktoren -->
 	public Presentation() {
@@ -93,6 +94,17 @@ public class Presentation {
 		this.tables = tables;
 		if (tables != null) {
 			tables.forEach(t -> t.setParent(this));
+		}
+	}
+
+	public List<HallObject> getHallObjects() {
+		return hallObjects;
+	}
+
+	public void setHallObjects(List<HallObject> hallObjects) {
+		this.hallObjects = hallObjects;
+		if (hallObjects != null) {
+			hallObjects.forEach(t -> t.setParent(this));
 		}
 	}
 
