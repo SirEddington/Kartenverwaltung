@@ -18,28 +18,53 @@
 
     <Separator />
 
-    <!-- Stammdaten des Events -->
+    <!-- Eventdaten -->
+    <Label text="Event" style="-fx-font-weight: bold;" />
     <GridPane vgap="10.0" hgap="10.0">
-        <Label text="Event Name:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+        <Label text="Name:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
         <TextField fx:id="txtEventName" promptText="z.B. Prunksitzung 2027" GridPane.rowIndex="0" GridPane.columnIndex="1" prefWidth="300.0" />
-
-        <Label text="Vorstellung(en):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnPresCount" min="0" max="10" initialValue="3" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
     </GridPane>
 
     <Separator />
 
-    <!-- Bestuhlungs-Generator -->
-    <Label text="Grundstruktur Bestuhlung generieren" style="-fx-font-weight: bold;" />
+    <!-- Vorstellungsdaten -->
+    <Label text="Vorstellungen" style="-fx-font-weight: bold;" />
+    <GridPane vgap="10.0" hgap="10.0">
+        <Label text="Anzahl der Vorstellungen:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnPresCount" min="0" max="10" initialValue="3" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
+        <Label text="Saalbreite (m):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnDoubleHallWidth" min="0.0" max="100.0" initialValue="20.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
+        <Label text="Saallänge (m):" GridPane.rowIndex="1" GridPane.columnIndex="2" />
+        <Spinner fx:id="spnDoubleHallHeight" min="0.0" max="100.0" initialValue="40.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="3" />
+    </GridPane>
+
+    <Separator />
+
+    <!-- Tischdaten -->
+    <Label text="Tische" style="-fx-font-weight: bold;" />
     <GridPane vgap="10.0" hgap="10.0">
         <Label text="Tische pro Vorstellung:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
         <Spinner fx:id="spnTablePerPres" min="0" max="100" initialValue="40" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
+        <Label text="Tischbreite (cm):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnDoubleTableWidth" min="0.0" max="1000.0" initialValue="70.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
+        <Label text="Tischlänge (cm):" GridPane.rowIndex="1" GridPane.columnIndex="2" />
+        <Spinner fx:id="spnDoubleTableHeight" min="0.0" max="1000.0" initialValue="150.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="3" />
+    </GridPane>
 
-        <Label text="Sitze pro Tisch:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnSeatsPerTable" min="0" max="30" initialValue="12" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
+    <Separator />
+
+    <!-- Sitzdaten -->
+    <Label text="Sitze" style="-fx-font-weight: bold;" />
+    <GridPane vgap="10.0" hgap="10.0">
+        <Label text="Sitze pro Tisch:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnSeatsPerTable" min="0" max="30" initialValue="12" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
+        <Label text="Sitzebreite (cm):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnDoubleSeatWidth" min="0.0" max="100.0" initialValue="30.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
+        <Label text="Sitzelänge (cm):" GridPane.rowIndex="1" GridPane.columnIndex="2" />
+        <Spinner fx:id="spnDoubleSeatHeight" min="0.0" max="100.0" initialValue="30.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="3" />
 
         <Label text="Preis bei Anlage:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnDoublePrice" min="0" max="100" initialValue="17.0" editable="true" GridPane.rowIndex="2" GridPane.columnIndex="1" />
+        <Spinner fx:id="spnDoublePrice" min="0.0" max="100.0" initialValue="17.0" editable="true" GridPane.rowIndex="2" GridPane.columnIndex="1" />
     </GridPane>
 
     <Region VBox.vgrow="ALWAYS" />

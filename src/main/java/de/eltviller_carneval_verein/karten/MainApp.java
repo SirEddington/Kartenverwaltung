@@ -25,10 +25,12 @@ public class MainApp extends Application {
 	@Override
 	public void start(Stage stage) throws Exception {
 		primaryStage = stage;
-		width = 1000;
-		height = 600;
+		width = 1200;
+		height = 720;
 		primaryStage.setWidth(width);
 		primaryStage.setHeight(height);
+		primaryStage.setMinWidth(width);
+		primaryStage.setMinHeight(height);
 
 		stage.setTitle("ECV Kartenverwaltung");
 
@@ -41,8 +43,8 @@ public class MainApp extends Application {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/MenuView.fxml");
 	}
 
-	public static void showTableView() {
-		loadScene("/de/eltviller_carneval_verein/karten/ui/MainView.fxml");
+	public static void showTicketShellView() {
+		loadScene("/de/eltviller_carneval_verein/karten/ui/TicketShellView.fxml");
 	}
 
 	public static void showEventOverviewView() {
@@ -54,8 +56,8 @@ public class MainApp extends Application {
 	}
 
 	public static void showEventEditView(Event selectedEvent, Presentation selectedPres, Table selectedTable, Seat selectedSeat, boolean editable) {
+		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/EventEditView.fxml";
 		try {
-			String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/EventEditView.fxml";
 
 			// Aktuelle Fenstergröße holen
 			width = primaryStage.getWidth();

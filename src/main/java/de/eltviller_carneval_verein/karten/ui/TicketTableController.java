@@ -5,7 +5,6 @@ import java.util.List;
 
 import org.controlsfx.control.table.TableFilter;
 
-import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Table;
@@ -18,33 +17,22 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
-import javafx.scene.control.Button;
-import javafx.scene.control.ComboBox;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
-import javafx.scene.control.TextField;
 import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.util.converter.DoubleStringConverter;
 
-public class MainController {
+public class TicketTableController implements ContentController {
 
 	private final JsonTicketRepository repository = new JsonTicketRepository();
+	private Event selectedEvent;
+	private Presentation selectedPres;
+	private boolean editMode = false;
 
 	// Enthält NUR die Sitze des aktuell gewählten Events
 	private final ObservableList<SeatDTO> masterData = FXCollections.observableArrayList();
 	private FilteredList<SeatDTO> filteredData;
-
-	@FXML
-	private ComboBox<Event> eventComboBox;
-	@FXML
-	private TextField searchField;
-	@FXML
-	private Button btnHallView = new Button();
-	@FXML
-	private Button btnToggleEdit = new Button();
-	@FXML
-	private Button btnSave = new Button();
 
 	// TableView und Spalten
 	@FXML
@@ -74,7 +62,6 @@ public class MainController {
 	@FXML
 	private TableColumn<SeatDTO, Boolean> colReserved;
 
-	private boolean editMode = true;
 
 	@FXML
 	public void initialize() {
@@ -131,70 +118,37 @@ public class MainController {
 		// 3. Spaltenkopf-Filter von ControlsFX aktivieren
 		TableFilter.forTableView(seatTable).apply();
 
-		// 4. Events in ComboBox laden (Tabelle bleibt initial leer)
-		eventComboBox.getItems().setAll(repository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
-		if (eventComboBox.getItems().size() == 1) {
-			eventComboBox.setValue(eventComboBox.getItems().get(0));
-		}
-
-		// 5. Event-Auswahl: Erst hier werden Daten geladen
-		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
-			loadSeatsForEvent(selectedEvent);
-		});
-
-		// 6. Freitext-Suche auf den geladenen Event-Daten
-		searchField.textProperty().addListener((obs, oldVal, newValue) -> {
-			updateSearchFilter(newValue);
-		});
-
-		// 7. Anzeigemodus starten
-		toggleEditMode();
-
 	}
 
-	private void loadSeatsForEvent(Event event) {
+	private void loadSeats() {
+		List<Presentation> presentations = new ArrayList<Presentation>();
 		masterData.clear(); // Vorherige Daten leeren
 
-		if (event == null || event.getPresentations() == null) {
+		if (selectedPres != null) {
+			presentations.add(selectedPres);
+		} else if (selectedEvent != null && selectedEvent.getPresentations() != null) {
+			presentations.addAll(selectedEvent.getPresentations());
+		} else {
 			return;
 		}
+		
+		// Liste an Vorstellungen erstellen und mitgegeben anhängen. Dann so oder so über die Verstellungen loopen
 
-		List<SeatDTO> eventSeats = new ArrayList<>();
-		for (Presentation presentation : event.getPresentations()) {
+		List<SeatDTO> seats = new ArrayList<>();
+		for (Presentation presentation : presentations) {
 			if (presentation.getTables() != null) {
 				for (Table table : presentation.getTables()) {
 					if (table.getSeats() != null) {
-						table.getSeats().forEach(seat -> eventSeats.add(new SeatDTO(event, presentation, table, seat)));
+						table.getSeats().forEach(seat -> seats.add(new SeatDTO(presentation.getParent(), presentation, table, seat)));
 					}
 				}
 			}
 		}
-		masterData.setAll(eventSeats);
+		masterData.setAll(seats);
 	}
 
-	private void updateSearchFilter(String searchText) {
-
-		String lowerCaseFilter = (searchText == null) ? "" : searchText.toLowerCase().trim();
-
-		filteredData.setPredicate(dto -> {
-			if (lowerCaseFilter.isEmpty()) {
-				return true;
-			}
-
-			// Prüft Nachname, Vorname und Kommentar
-			return (dto.getSeat().getLastName() != null && dto.getSeat().getLastName().toLowerCase().contains(lowerCaseFilter))
-					|| (dto.getSeat().getFirstName() != null && dto.getSeat().getFirstName().toLowerCase().contains(lowerCaseFilter))
-					|| (dto.getSeat().getComment() != null && dto.getSeat().getComment().toLowerCase().contains(lowerCaseFilter));
-		});
-	}
-
-	@FXML
-	private void toggleEditMode() {
-		// Editmode wechseln
-		editMode = !editMode;
+	private void applyEditMode() {
 		seatTable.setEditable(editMode);
-		btnSave.setDisable(!editMode);
-		btnToggleEdit.setText(editMode ? "Anzeigen" : "Bearbeiten");
 
 		// Spalten die nicht bearbeitet werden können sperren
 		colPresentation.setEditable(false);
@@ -259,22 +213,50 @@ public class MainController {
 			});
 			return prop;
 		}));
-
 	}
 
-	@FXML
-	private void toHallView() {
-		MainApp.showHallView();
+	@Override
+	public void setEvent(Event event) {
+		this.selectedEvent = event;
+		selectedPres = null;
+		loadSeats();
 	}
 
-	@FXML
-	private void handleBackToMenu() {
-		MainApp.showMenuView();
+	@Override
+	public void setPresentation(Presentation presentation) {
+		this.selectedPres = presentation;
+		if (selectedPres != null) {
+			this.selectedEvent = presentation.getParent();
+		} else {
+			selectedEvent = null;
+		}
+		loadSeats();
 	}
 
-	@FXML
-	private void saveCurrentState() {
+	@Override
+	public void save() {
 		// Aktuellen Stand speichern
-		repository.saveEvent(eventComboBox.getValue());
+		repository.saveEvent(selectedEvent);
+	}
+
+	@Override
+	public void filter(String query) {
+
+		filteredData.setPredicate(dto -> {
+			if (query.isEmpty()) {
+				return true;
+			}
+
+			// Prüft Nachname, Vorname und Kommentar
+			return (dto.getSeat().getLastName() != null && dto.getSeat().getLastName().toLowerCase().contains(query))
+					|| (dto.getSeat().getFirstName() != null && dto.getSeat().getFirstName().toLowerCase().contains(query))
+					|| (dto.getSeat().getComment() != null && dto.getSeat().getComment().toLowerCase().contains(query));
+		});
+	}
+
+	@Override
+	public void setEditMode(boolean enabled) {
+		editMode = enabled;
+		applyEditMode();
 	}
 }

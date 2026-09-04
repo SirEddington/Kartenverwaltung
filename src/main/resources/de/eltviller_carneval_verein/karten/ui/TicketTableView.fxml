@@ -9,28 +9,10 @@
 <VBox spacing="15.0" prefWidth="900.0" prefHeight="600.0" 
 	xmlns="http://javafx.com/javafx/17" 
     xmlns:fx="http://javafx.com/fxml/1" 
-	fx:controller="de.eltviller_carneval_verein.karten.ui.MainController">
+	fx:controller="de.eltviller_carneval_verein.karten.ui.TicketTableController">
     <padding>
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
-
-    <!-- Oberer Bereich: Auswahllisten -->
-        <HBox alignment="CENTER_LEFT" spacing="10.0">
-            <Button text="← Menü" onAction="#handleBackToMenu" />
-            <Label text="Event:" />
-            <ComboBox fx:id="eventComboBox" prefWidth="180.0" promptText="Event wählen..." />
-                
-            <Label text="Suche:" />
-            <TextField fx:id="searchField" prefWidth="180.0" promptText="Suche..." />
-                
-            <Region HBox.hgrow="ALWAYS" />
-            
-            <Button fx:id="btnHallView" text="Saalansicht" prefWidth="90.0" onAction="#toHallView"/>
-            <Button fx:id="btnToggleEdit" text="Bearbeiten" prefWidth="90.0" onAction="#toggleEditMode"/>
-                
-        </HBox>
-    
-    <Separator />
 
     <!-- Mittlerer Bereich: Sitzplatz-Tabelle -->
     	<StackPane VBox.vgrow="ALWAYS" style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5;">
@@ -54,17 +36,5 @@
     			</columnResizePolicy>
         	</TableView>
     	</StackPane>
-    
-    <!-- Unterer Bereich: Speichern und Meldungen -->
-        <HBox spacing="10.0" BorderPane.alignment="CENTER">
-            <padding>
-                <Insets bottom="10.0" left="10.0" right="10.0" top="10.0" />
-            </padding>
-            <children>
-            
-                <Region HBox.hgrow="ALWAYS" />
-                <Button fx:id="btnSave" text="Speichern" prefWidth="90.0"  onAction="#saveCurrentState" disable="true"/>
-                
-            </children>
-        </HBox>
+
 </VBox>

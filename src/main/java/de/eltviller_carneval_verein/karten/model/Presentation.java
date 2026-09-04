@@ -24,6 +24,11 @@ public class Presentation {
 	private String description; // get, set
 
 	// Daten für Saalansicht
+	private double hallWidth;
+	private double hallHeight;
+	private int tableRows;
+	
+	// Standardwerte
 	private double defaultTableWidth;
 	private double defaultTableHeight;
 	private double defaultSeatWidth;
@@ -108,6 +113,30 @@ public class Presentation {
 		}
 	}
 
+	public double getHallWidth() {
+		return hallWidth;
+	}
+
+	public void setHallWidth(double hallWidth) {
+		this.hallWidth = hallWidth;
+	}
+
+	public double getHallHeight() {
+		return hallHeight;
+	}
+
+	public void setHallHeight(double hallHeight) {
+		this.hallHeight = hallHeight;
+	}
+
+	public int getTableRows() {
+		return tableRows;
+	}
+
+	public void setTableRows(int tableRows) {
+		this.tableRows = tableRows;
+	}
+
 	public double getDefaultTableWidth() {
 		return defaultTableWidth;
 	}
@@ -153,6 +182,11 @@ public class Presentation {
 		Table newTable = new Table();
 		newTable.setParent(this);
 		newTable.changeTableNumber(createTableNumber());
+		
+		// Maße initialisieren
+		newTable.setHeight(defaultTableHeight);
+		newTable.setWidth(defaultTableWidth);
+		
 		tables.add(newTable);
 		return newTable;
 	}

@@ -21,9 +21,21 @@ public class EventCreateController {
 	@FXML
 	private Spinner<Integer> spnPresCount;
 	@FXML
+	private Spinner<Double> spnDoubleHallWidth;
+	@FXML
+	private Spinner<Double> spnDoubleHallHeight;
+	@FXML
 	private Spinner<Integer> spnTablePerPres;
 	@FXML
+	private Spinner<Double> spnDoubleTableWidth;
+	@FXML
+	private Spinner<Double> spnDoubleTableHeight;
+	@FXML
 	private Spinner<Integer> spnSeatsPerTable;
+	@FXML
+	private Spinner<Double> spnDoubleSeatWidth;
+	@FXML
+	private Spinner<Double> spnDoubleSeatHeight;
 	@FXML
 	private Spinner<Double> spnDoublePrice;
 
@@ -59,15 +71,22 @@ public class EventCreateController {
 
 	private Event buildNewEvent(String name) {
 		Event event = new Event(name);
+		event.changeName(txtEventName.getText());
 
 		// Vorstellungen
 		for (int i = 0; i < spnPresCount.getValue(); i++) {
 			Presentation pres = event.addPresentation();
+			pres.setHallHeight(spnDoubleHallHeight.getValue());
+			pres.setHallWidth(spnDoubleHallWidth.getValue());
+			pres.setDefaultTableHeight(spnDoubleTableHeight.getValue());
+			pres.setDefaultTableWidth(spnDoubleTableWidth.getValue());
+			pres.setDefaultSeatHeight(spnDoubleSeatHeight.getValue());
+			pres.setDefaultSeatWidth(spnDoubleSeatWidth.getValue());
 			// Tische
 			for (int j = 0; j < spnTablePerPres.getValue(); j++) {
 				Table table = pres.addTable();
 				// Sitzplätze
-				for (int k = 0; k < spnTablePerPres.getValue(); k++) {
+				for (int k = 0; k < spnSeatsPerTable.getValue(); k++) {
 					Seat seat = table.addSeat();
 					seat.setPriceDouble(spnDoublePrice.getValue());
 				}

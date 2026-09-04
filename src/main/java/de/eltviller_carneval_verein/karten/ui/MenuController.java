@@ -7,7 +7,7 @@ public class MenuController {
 
 	@FXML
 	private void handleOpenTable() {
-		MainApp.showTableView();
+		MainApp.showTicketShellView();
 	}
 
 	@FXML

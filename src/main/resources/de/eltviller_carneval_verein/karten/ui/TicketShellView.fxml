@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox spacing="15.0" prefWidth="1000.0" prefHeight="700.0" 
+      xmlns="http://javafx.com/javafx/17" 
+      xmlns:fx="http://javafx.com/fxml/1" 
+      fx:controller="de.eltviller_carneval_verein.karten.ui.TicketShellController">
+    <padding>
+        <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
+    </padding>
+
+    <!-- OBERER BEREICH: Identischer Header -->
+    <HBox alignment="CENTER_LEFT" spacing="10.0">
+        <Button text="← Menü" onAction="#handleBackToMenu" />
+        <Label text="Event:" />
+        <ComboBox fx:id="eventComboBox" prefWidth="180.0" promptText="Event wählen..." />
+        
+        <Label text="Vorstellung:" />
+        <ComboBox fx:id="presComboBox" prefWidth="180.0" promptText="Vorstellung wählen..." />
+            
+        <Label text="Suche:" />
+        <TextField fx:id="searchField" prefWidth="180.0" promptText="Suche..." />
+            
+        <Region HBox.hgrow="ALWAYS" />
+        
+        <!-- Toggle-Buttons zum Umschalten der Mitte -->
+        <RadioButton fx:id="btnTableView" text="Tabelle" onAction="#showTicketTableView" selected="true"/>
+        <RadioButton fx:id="btnHallView" text="Saalansicht" onAction="#showHallView"/>
+        
+        <Button fx:id="btnToggleEdit" text="Bearbeiten" onAction="#toggleEditMode" />
+    </HBox>
+    
+    <Separator />
+
+    <!-- MITTLERER BEREICH: Wechselnder Inhalt -->
+    <StackPane fx:id="contentArea" VBox.vgrow="ALWAYS" />
+
+    <Separator />
+
+    <!-- UNTERER BEREICH: Identischer Footer -->
+    <HBox spacing="10.0" alignment="CENTER_RIGHT">
+        <Button fx:id="btnSave" text="Speichern" prefWidth="100.0" onAction="#handleSave" />
+    </HBox>
+</VBox>

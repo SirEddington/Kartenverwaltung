@@ -25,6 +25,7 @@ public class Seat {
 	private String comment; // get,set
 
 	// Daten für Saalansicht
+	private boolean manualPos;
 	private double posX;
 	private double posY;
 	private double width;
@@ -131,6 +132,14 @@ public class Seat {
 
 	public void setComment(String comment) {
 		this.comment = comment;
+	}
+
+	public boolean isManualPos() {
+		return manualPos;
+	}
+
+	public void setManualPos(boolean manualPos) {
+		this.manualPos = manualPos;
 	}
 
 	public double getPosX() {

@@ -21,6 +21,7 @@ public class Table {
 	private String category; // get,set
 
 	// Daten für Saalansicht
+	private boolean manualPos;
 	private double posX;
 	private double posY;
 	private double width;
@@ -85,6 +86,14 @@ public class Table {
 		}
 	}
 
+	public boolean isManualPos() {
+		return manualPos;
+	}
+
+	public void setManualPos(boolean manualPos) {
+		this.manualPos = manualPos;
+	}
+
 	public double getPosX() {
 		return posX;
 	}
@@ -130,6 +139,11 @@ public class Table {
 		Seat newSeat = new Seat();
 		newSeat.setParent(this);
 		newSeat.changeSeatNumber(createSeatNumber());
+		
+		// Maße initialisieren
+		newSeat.setHeight(getParent().getDefaultSeatHeight());
+		newSeat.setWidth(getParent().getDefaultSeatWidth());
+		
 		seats.add(newSeat);
 		return newSeat;
 	}
