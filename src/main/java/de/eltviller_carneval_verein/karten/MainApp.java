@@ -102,7 +102,7 @@ public class MainApp extends Application {
 			e.printStackTrace();
 		}
 	}
-	
+
 	@SuppressWarnings("exports")
 	public static void showAlert(String title, String content, AlertType alertType) {
 		Alert alert = new Alert(alertType);

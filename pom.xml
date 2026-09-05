@@ -5,7 +5,7 @@
   
   <groupId>de.eltviller-carneval-verein.karten</groupId>
   <artifactId>Kartenverwaltung</artifactId>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>

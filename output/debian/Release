@@ -1,18 +1,18 @@
 Architectures: amd64
 Components: main
-Date: Wed, 2 Sep 2026 09:32:04 GMT
+Date: Sat, 5 Sep 2026 17:09:22 GMT
 Description: Public archive for Kartenverwaltung - Eltviller Carneval Verein
 Origin: Kartenverwaltung - Eltviller Carneval Verein
 Suite: debian
 MD5Sum:
- e0806e7ce00fc78f53928b338b2478b2               531 Packages
- 946fbf802d83ff22dbda05c51f35a43f               408 Packages.xz
+ 8c02b09df15c6284ab085b71a1a9edd9               531 Packages
+ 82355004fca9d1893a9386c5a7602e2c               412 Packages.xz
 SHA1:
- d5fc777bbe49a28ad2d8c719ab2dc0926bb7f4f6               531 Packages
- 77047cc3c44730ff9c222d2798c50377bef1be7a               408 Packages.xz
+ 42c8857a365fe52312ca65b7972ee7ab2bc38710               531 Packages
+ 6e29587d4eb60ec572ad45a900fb4215c205b422               412 Packages.xz
 SHA256:
- 20a7a39b2db9db404af5f6edf27c85f5055ea4512076d10da0b8210f3bb7cff9               531 Packages
- d277c7f5708e5391ec94af937cb19528d4b1f2e68c728d9ac92ecbad092e01e4               408 Packages.xz
+ 457b3e6a23dfeeb8d5e84e574ac93c8ae13b668b0cc8097d7c587878de736f3b               531 Packages
+ cc7079ab2109d83b792728267df6e9d96e173967aa4dfa4a0a9687aab54427bd               412 Packages.xz
 SHA512:
- d6f94e4718a4cb94d10693d247c59ae1ccc8762724d71bb4343704437c9656f0261fed113c9b787e9348e535106db6fb71beb8beef05ab0dbb07980ad74b9ef8               531 Packages
- fe61c5eaa1126aaadd5d7c71195a155a379e0f9a518740560ed5a59480e1b4470a3ccf3262f9536b0e164b499c80452b2a7709d6b2f5e325502c18ba9d4b5b5d               408 Packages.xz
+ 3499fc45f6c501a254caebba2b85950ecd8902b622b603631244e9fa13e4d8029d1a80364e3780524ed8e6308e98fd0c9d14b5aa0dc64bd055fa46fa746b8e9e               531 Packages
+ c9bc6315aa74baa6dc36dd10a36299ef52d44019ed8fee5b35dea5c7f164b9cb38ea5107fd2429f61326c65a5722669cefd26474c5557a057e6813b37c8433ac               412 Packages.xz

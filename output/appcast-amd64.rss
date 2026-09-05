@@ -5,19 +5,26 @@
         <description>Most recent changes with links to updates.</description>
         <language>en</language>
         <item>
-            <title>Version 0.1.0</title>
+            <title>Version 0.1.1</title>
             <link>https://SirEddington.github.io/Kartenverwaltung/</link>
-            <sparkle:version>0.1.0.0</sparkle:version>
-            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:version>0.1.1.0</sparkle:version>
+            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
             <description>
-                <![CDATA[ New release: version 0.1.0 ]]>
+                <![CDATA[ New release: version 0.1.1 ]]>
             </description>
-            <pubDate>Wed, 2 Sep 2026 09:31:45 GMT</pubDate>
-            <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.0-mac-amd64.zip" 
-                       length="31553174" 
+            <pubDate>Sat, 5 Sep 2026 17:08:56 GMT</pubDate>
+            <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.1-mac-amd64.zip" 
+                       length="33224842" 
                        type="application/octet-stream" 
-                       sparkle:edSignature="B59QjfYn6YFEjy8e1dZwo0VoCsP4QMl1MM6CzqU7w/odVr49CPBIYKQZm7EvINnN2XU9qqgng7v4DSvCFK86Ag=="/>
+                       sparkle:edSignature="bXEr2WKv4WiT/DrQYCK6jKVfxfEVF+a6P58X7bEyO1A1f+BBCF4R/mKRHfPfIN9UNdFWQuvT+LpvWz6Vfk1MAw=="/>
+            <sparkle:deltas>
+                <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.0-0.1.1-mac-amd64.delta"
+                           sparkle:deltaFrom="0.1.0.0"
+                           length="24998030"
+                           type="application/octet-stream"
+                           sparkle:edSignature="2lhaIPy1SBA9IQGkcl1oVNyIDdkzflKWpOcgEyaIn+OIinBL0NZwC4ACyn+nfTNVsZLS8r1NJoSZjn57kfwkBg=="/>
+            </sparkle:deltas>
         </item>
     </channel>
 </rss>

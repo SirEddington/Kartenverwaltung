@@ -5,19 +5,26 @@
         <description>Most recent changes with links to updates.</description>
         <language>en</language>
         <item>
-            <title>Version 0.1.0</title>
+            <title>Version 0.1.1</title>
             <link>https://SirEddington.github.io/Kartenverwaltung/</link>
-            <sparkle:version>0.1.0.0</sparkle:version>
-            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:version>0.1.1.0</sparkle:version>
+            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
             <description>
-                <![CDATA[ New release: version 0.1.0 ]]>
+                <![CDATA[ New release: version 0.1.1 ]]>
             </description>
-            <pubDate>Wed, 2 Sep 2026 09:31:45 GMT</pubDate>
-            <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.0-mac-aarch64.zip" 
-                       length="30920747" 
+            <pubDate>Sat, 5 Sep 2026 17:09:03 GMT</pubDate>
+            <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.1-mac-aarch64.zip" 
+                       length="32430785" 
                        type="application/octet-stream" 
-                       sparkle:edSignature="pXBz6GJNw+ssMxvq/NoB7yPd68VsUkyNxb+Mk0H7BaAgBztKYbP/WJP2AMuDAXBBlDZKOZWkV3bG1rctbsOSCQ=="/>
+                       sparkle:edSignature="0vA7qXPVQihCvLRwLoo/RGi9Su2kXizefEa7eGEBx302YCTZKS/wdRw8EcbIHMV7+esa35WtR0uw93GVLc2mCg=="/>
+            <sparkle:deltas>
+                <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.0-0.1.1-mac-aarch64.delta"
+                           sparkle:deltaFrom="0.1.0.0"
+                           length="24040150"
+                           type="application/octet-stream"
+                           sparkle:edSignature="/O4LsxwdNWof+g3+HMYCcOYnpPp92htm6VzJ0WuajE2F4a2wDaNLeUtfPkGoqq8hn77avpVXQWhiTJDNLaXqDQ=="/>
+            </sparkle:deltas>
         </item>
     </channel>
 </rss>
