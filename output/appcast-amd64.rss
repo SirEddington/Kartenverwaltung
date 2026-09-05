@@ -13,17 +13,17 @@
             <description>
                 <![CDATA[ New release: version 0.1.1 ]]>
             </description>
-            <pubDate>Sat, 5 Sep 2026 17:08:56 GMT</pubDate>
+            <pubDate>Sat, 5 Sep 2026 17:35:49 GMT</pubDate>
             <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.1-mac-amd64.zip" 
-                       length="33224842" 
+                       length="33224850" 
                        type="application/octet-stream" 
-                       sparkle:edSignature="bXEr2WKv4WiT/DrQYCK6jKVfxfEVF+a6P58X7bEyO1A1f+BBCF4R/mKRHfPfIN9UNdFWQuvT+LpvWz6Vfk1MAw=="/>
+                       sparkle:edSignature="/7EnfyuRl/OIwOm+XCpB/rGq8QG3Of45lvHIGnrYFqNdoTU3QQlTypZtg8dvWZtxsgwnDI8U1ypwqslaqZYWBw=="/>
             <sparkle:deltas>
                 <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.0-0.1.1-mac-amd64.delta"
                            sparkle:deltaFrom="0.1.0.0"
-                           length="24998030"
+                           length="24998938"
                            type="application/octet-stream"
-                           sparkle:edSignature="2lhaIPy1SBA9IQGkcl1oVNyIDdkzflKWpOcgEyaIn+OIinBL0NZwC4ACyn+nfTNVsZLS8r1NJoSZjn57kfwkBg=="/>
+                           sparkle:edSignature="vHmQV7pHxOpR68BT+NFnPzz1jbK5HujnTbhlqu5QqsqALAwJB0jm2XnaIk7W3kcwcPGpJkWIPZLH/TlQx2sDCg=="/>
             </sparkle:deltas>
         </item>
     </channel>

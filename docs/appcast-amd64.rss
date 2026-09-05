@@ -1,0 +1,30 @@
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
+    <channel>
+        <title>Kartenverwaltung - Eltviller Carneval Verein Changelog</title>
+        <link>https://SirEddington.github.io/Kartenverwaltung/appcast-amd64.rss</link>
+        <description>Most recent changes with links to updates.</description>
+        <language>en</language>
+        <item>
+            <title>Version 0.1.1</title>
+            <link>https://SirEddington.github.io/Kartenverwaltung/</link>
+            <sparkle:version>0.1.1.0</sparkle:version>
+            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+            <description>
+                <![CDATA[ New release: version 0.1.1 ]]>
+            </description>
+            <pubDate>Sat, 5 Sep 2026 17:35:49 GMT</pubDate>
+            <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.1-mac-amd64.zip" 
+                       length="33224850" 
+                       type="application/octet-stream" 
+                       sparkle:edSignature="/7EnfyuRl/OIwOm+XCpB/rGq8QG3Of45lvHIGnrYFqNdoTU3QQlTypZtg8dvWZtxsgwnDI8U1ypwqslaqZYWBw=="/>
+            <sparkle:deltas>
+                <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.0-0.1.1-mac-amd64.delta"
+                           sparkle:deltaFrom="0.1.0.0"
+                           length="24998938"
+                           type="application/octet-stream"
+                           sparkle:edSignature="vHmQV7pHxOpR68BT+NFnPzz1jbK5HujnTbhlqu5QqsqALAwJB0jm2XnaIk7W3kcwcPGpJkWIPZLH/TlQx2sDCg=="/>
+            </sparkle:deltas>
+        </item>
+    </channel>
+</rss>
