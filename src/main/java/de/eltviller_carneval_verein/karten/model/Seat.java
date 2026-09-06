@@ -5,7 +5,12 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Seat {
 	private final String id;
 	@JsonBackReference("table-seat")
@@ -13,7 +18,7 @@ public class Seat {
 
 	private int seatNumber; // get
 	private int price; // get,set
-	private boolean paid; // get,set
+	private final ObjectProperty<PaymentStatus> paymentStatus = new SimpleObjectProperty<>(PaymentStatus.NONE); // get,set
 	private boolean collected; // get,set
 	private boolean wheelchairAccessible; // get,set
 
@@ -78,12 +83,16 @@ public class Seat {
 		this.price = (int) Math.round(price * 100);
 	}
 
-	public boolean isPaid() {
-		return paid;
+	public ObjectProperty<PaymentStatus> getPaymentStatusProperty() {
+		return paymentStatus;
 	}
 
-	public void setPaid(boolean paid) {
-		this.paid = paid;
+	public PaymentStatus getPaymentStatus() {
+		return paymentStatus.get();
+	}
+
+	public void setPaymentStatus(PaymentStatus paymentStatus) {
+		this.paymentStatus.set(paymentStatus);
 	}
 
 	public boolean isCollected() {
@@ -181,6 +190,10 @@ public class Seat {
 		} else {
 			this.seatNumber = seatNumber;
 		}
+	}
+
+	public boolean isPaid() {
+		return getPaymentStatus() != PaymentStatus.NONE;
 	}
 
 	@JsonIgnore

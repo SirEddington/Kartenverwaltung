@@ -6,6 +6,7 @@ import java.util.List;
 import org.controlsfx.control.table.TableFilter;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
@@ -20,7 +21,9 @@ import javafx.fxml.FXML;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.CheckBoxTableCell;
+import javafx.scene.control.cell.ComboBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
+import javafx.util.StringConverter;
 import javafx.util.converter.DoubleStringConverter;
 
 public class TicketTableController implements ContentController {
@@ -52,7 +55,7 @@ public class TicketTableController implements ContentController {
 	@FXML
 	private TableColumn<SeatDTO, Double> colPrice;
 	@FXML
-	private TableColumn<SeatDTO, Boolean> colPaid;
+	private TableColumn<SeatDTO, PaymentStatus> colPaymentStatus;
 	@FXML
 	private TableColumn<SeatDTO, Boolean> colCollected;
 	@FXML
@@ -61,7 +64,6 @@ public class TicketTableController implements ContentController {
 	private TableColumn<SeatDTO, String> colComment;
 	@FXML
 	private TableColumn<SeatDTO, Boolean> colReserved;
-
 
 	@FXML
 	public void initialize() {
@@ -72,56 +74,85 @@ public class TicketTableController implements ContentController {
 		colSeatNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getSeat().getSeatNumber()).asObject());
 		colLastName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getSeat().getLastName()));
 		colFirstName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getSeat().getFirstName()));
-		colPaid.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
-			SeatDTO seatDTO = seatTable.getItems().get(index);
-			SimpleBooleanProperty paid = new SimpleBooleanProperty(seatDTO.getSeat().isPaid());
-			paid.addListener((obs, oldVal, newVal) -> {
-				seatDTO.getSeat().setCollected(newVal);
-			});
-			return paid;
-		}));
-		colCollected.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
-			SeatDTO seatDTO = seatTable.getItems().get(index);
-			SimpleBooleanProperty collected = new SimpleBooleanProperty(seatDTO.getSeat().isCollected());
-			collected.addListener((obs, oldVal, newVal) -> {
-				seatDTO.getSeat().setCollected(newVal);
-			});
-			return collected;
-		}));
-		colWheelchair.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
-			SeatDTO seatDTO = seatTable.getItems().get(index);
-			SimpleBooleanProperty whellchair = new SimpleBooleanProperty(seatDTO.getSeat().isWheelchairAccessible());
-			whellchair.addListener((obs, oldVal, newVal) -> {
-				seatDTO.getSeat().setCollected(newVal);
-			});
-			return whellchair;
-		}));
-		colComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getSeat().getComment()));
 		colPrice.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getSeat().getPriceDouble()).asObject());
-		colReserved.setCellValueFactory(cell -> {
-			boolean reserved = cell.getValue().getSeat().isReserved();
-			return new SimpleBooleanProperty(reserved);
-		});
-		colReserved.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
-			SeatDTO seatDTO = seatTable.getItems().get(index);
-			SimpleBooleanProperty reserved = new SimpleBooleanProperty(seatDTO.getSeat().isReserved());
-			reserved.addListener((obs, oldVal, newVal) -> {
-				seatDTO.getSeat().setCollected(newVal);
-			});
-			return reserved;
-		}));
+		colPaymentStatus.setCellValueFactory(cell -> cell.getValue().getSeat().getPaymentStatusProperty());
+		colComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getSeat().getComment()));
 
-		// 2. FilteredList um die Master-Daten legen & an Tabelle binden
+		colCollected.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().getSeat().isCollected()));
+		colWheelchair.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().getSeat().isWheelchairAccessible()));
+		colReserved.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().getSeat().isReserved()));
+
+		// 2. CellFactories & Edit-Handler einmalig aufsetzen
+		setupCellFactories();
+
+		// 3. FilteredList um die Master-Daten legen & an Tabelle binden
 		filteredData = new FilteredList<>(masterData, p -> true);
 		seatTable.setItems(filteredData);
 
-		// 3. Spaltenkopf-Filter von ControlsFX aktivieren
+		// 4. Spaltenkopf-Filter von ControlsFX aktivieren
 		TableFilter.forTableView(seatTable).apply();
+	}
 
+	private void setupCellFactories() {
+		// Textfelder
+		colLastName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colLastName.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setLastName(editEvent.getNewValue()));
+
+		colFirstName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colFirstName.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setFirstName(editEvent.getNewValue()));
+
+		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(new DoubleStringConverter()));
+		colPrice.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setPriceDouble(editEvent.getNewValue()));
+
+		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
+		colComment.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setComment(editEvent.getNewValue()));
+
+		// Enum / ComboBox
+		colPaymentStatus.setCellFactory(ComboBoxTableCell.forTableColumn(PaymentStatus.values()));
+		colPaymentStatus.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setPaymentStatus(editEvent.getNewValue()));
+		StringConverter<PaymentStatus> converter = new StringConverter<>() {
+			@Override
+			public String toString(PaymentStatus status) {
+				if (status == null)
+					return "";
+				return switch (status) {
+				case NONE -> "Offen";
+				case CASH -> "Barzahlung";
+				case CARD -> "Kartenzahlung";
+				case TRANSFER -> "Überweisung";
+				};
+			}
+
+			@Override
+			public PaymentStatus fromString(String string) {
+				return null; // Bei fixer ComboBox-Auswahl nicht erforderlich
+			}
+		};
+
+		// Converter an die CellFactory übergeben:
+		colPaymentStatus.setCellFactory(ComboBoxTableCell.forTableColumn(converter, PaymentStatus.values()));
+
+		// Checkboxen mit korrekt zugewiesenen Setter-Aufrufen
+		colCollected.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
+			SeatDTO seatDTO = seatTable.getItems().get(index);
+			SimpleBooleanProperty prop = new SimpleBooleanProperty(seatDTO.getSeat().isCollected());
+			prop.addListener((obs, oldVal, newVal) -> seatDTO.getSeat().setCollected(newVal));
+			return prop;
+		}));
+
+		colWheelchair.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
+			SeatDTO seatDTO = seatTable.getItems().get(index);
+			SimpleBooleanProperty prop = new SimpleBooleanProperty(seatDTO.getSeat().isWheelchairAccessible());
+			prop.addListener((obs, oldVal, newVal) -> seatDTO.getSeat().setWheelchairAccessible(newVal));
+			return prop;
+		}));
+
+		colReserved.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().getSeat().isReserved()));
+		colReserved.setCellFactory(CheckBoxTableCell.forTableColumn(colReserved));
 	}
 
 	private void loadSeats() {
-		List<Presentation> presentations = new ArrayList<Presentation>();
+		List<Presentation> presentations = new ArrayList<>();
 		masterData.clear(); // Vorherige Daten leeren
 
 		if (selectedPres != null) {
@@ -131,8 +162,6 @@ public class TicketTableController implements ContentController {
 		} else {
 			return;
 		}
-		
-		// Liste an Vorstellungen erstellen und mitgegeben anhängen. Dann so oder so über die Verstellungen loopen
 
 		List<SeatDTO> seats = new ArrayList<>();
 		for (Presentation presentation : presentations) {
@@ -150,69 +179,21 @@ public class TicketTableController implements ContentController {
 	private void applyEditMode() {
 		seatTable.setEditable(editMode);
 
-		// Spalten die nicht bearbeitet werden können sperren
+		// Nicht editierbare Spalten
 		colPresentation.setEditable(false);
 		colTableNumber.setEditable(false);
 		colCategory.setEditable(false);
+		colSeatNumber.setEditable(false);
 		colReserved.setEditable(false);
 
-		// Eingaben akzeptieren
-		colLastName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colLastName.setOnEditCommit(editEvent -> {
-			SeatDTO seatDTO = editEvent.getRowValue();
-			seatDTO.getSeat().setLastName(editEvent.getNewValue());
-		});
-		colFirstName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colFirstName.setOnEditCommit(editEvent -> {
-			SeatDTO seatDTO = editEvent.getRowValue();
-			seatDTO.getSeat().setFirstName(editEvent.getNewValue());
-		});
-		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(new DoubleStringConverter()));
-		colPrice.setOnEditCommit(editEvent -> {
-			SeatDTO seatDTO = editEvent.getRowValue();
-			seatDTO.getSeat().setPriceDouble(editEvent.getNewValue());
-		});
-		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
-		colComment.setOnEditCommit(editEvent -> {
-			SeatDTO seatDTO = editEvent.getRowValue();
-			seatDTO.getSeat().setComment(editEvent.getNewValue());
-		});
-		colPaid.setOnEditCommit(editEvent -> {
-			SeatDTO seatDTO = editEvent.getRowValue();
-			seatDTO.getSeat().setPaid(editEvent.getNewValue());
-		});
-		colPaid.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
-			SeatDTO seatDTO = seatTable.getItems().get(index);
-			SimpleBooleanProperty prop = new SimpleBooleanProperty(seatDTO.getSeat().isPaid());
-			prop.addListener((obs, oldVal, newVal) -> {
-				seatDTO.getSeat().setPaid(newVal);
-			});
-			return prop;
-		}));
-		colCollected.setOnEditCommit(editEvent -> {
-			SeatDTO seatDTO = editEvent.getRowValue();
-			seatDTO.getSeat().setCollected(editEvent.getNewValue());
-		});
-		colCollected.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
-			SeatDTO seatDTO = seatTable.getItems().get(index);
-			SimpleBooleanProperty prop = new SimpleBooleanProperty(seatDTO.getSeat().isCollected());
-			prop.addListener((obs, oldVal, newVal) -> {
-				seatDTO.getSeat().setCollected(newVal);
-			});
-			return prop;
-		}));
-		colWheelchair.setOnEditCommit(editEvent -> {
-			SeatDTO seatDTO = editEvent.getRowValue();
-			seatDTO.getSeat().setWheelchairAccessible(editEvent.getNewValue());
-		});
-		colWheelchair.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
-			SeatDTO seatDTO = seatTable.getItems().get(index);
-			SimpleBooleanProperty prop = new SimpleBooleanProperty(seatDTO.getSeat().isWheelchairAccessible());
-			prop.addListener((obs, oldVal, newVal) -> {
-				seatDTO.getSeat().setWheelchairAccessible(newVal);
-			});
-			return prop;
-		}));
+		// Editierbare Spalten (steuern sich über editMode)
+		colLastName.setEditable(editMode);
+		colFirstName.setEditable(editMode);
+		colPrice.setEditable(editMode);
+		colPaymentStatus.setEditable(editMode);
+		colCollected.setEditable(editMode);
+		colWheelchair.setEditable(editMode);
+		colComment.setEditable(editMode);
 	}
 
 	@Override
@@ -236,21 +217,24 @@ public class TicketTableController implements ContentController {
 	@Override
 	public void save() {
 		// Aktuellen Stand speichern
-		repository.saveEvent(selectedEvent);
+		if (selectedEvent != null) {
+			repository.saveEvent(selectedEvent);
+		}
 	}
 
 	@Override
 	public void filter(String query) {
-
 		filteredData.setPredicate(dto -> {
-			if (query.isEmpty()) {
+			if (query == null || query.isEmpty()) {
 				return true;
 			}
 
+			String lowerQuery = query.toLowerCase();
+
 			// Prüft Nachname, Vorname und Kommentar
-			return (dto.getSeat().getLastName() != null && dto.getSeat().getLastName().toLowerCase().contains(query))
-					|| (dto.getSeat().getFirstName() != null && dto.getSeat().getFirstName().toLowerCase().contains(query))
-					|| (dto.getSeat().getComment() != null && dto.getSeat().getComment().toLowerCase().contains(query));
+			return (dto.getSeat().getLastName() != null && dto.getSeat().getLastName().toLowerCase().contains(lowerQuery))
+					|| (dto.getSeat().getFirstName() != null && dto.getSeat().getFirstName().toLowerCase().contains(lowerQuery))
+					|| (dto.getSeat().getComment() != null && dto.getSeat().getComment().toLowerCase().contains(lowerQuery));
 		});
 	}
 

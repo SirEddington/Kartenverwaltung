@@ -101,26 +101,31 @@ public class EventOverviewController {
 			Object data = cell.getValue().getValue();
 			if (data instanceof Event event) {
 				int count = event.getSeats() != null ? event.getSeats().size() : 0;
-				long countReserved = event.getSeats().stream().filter(Seat::isReserved) != null ? event.getSeats().stream().filter(Seat::isReserved).count() : 0;
-				long countPaid = event.getSeats().stream().filter(Seat::isPaid) != null ? event.getSeats().stream().filter(Seat::isPaid).count() : 0;
+				long countReserved = event.getSeats().stream().filter(Seat::isReserved).count();
+				long countPaid = event.getSeats().stream().filter(Seat::isPaid).count();
 				return new SimpleStringProperty(countPaid + " / " + countReserved + " / " + count);
 			}
 			if (data instanceof Presentation presentation) {
 				int count = presentation.getSeats() != null ? presentation.getSeats().size() : 0;
-				long countReserved = presentation.getSeats().stream().filter(Seat::isReserved) != null ? presentation.getSeats().stream().filter(Seat::isReserved).count() : 0;
-				long countPaid = presentation.getSeats().stream().filter(Seat::isPaid) != null ? presentation.getSeats().stream().filter(Seat::isPaid).count() : 0;
+				long countReserved = presentation.getSeats().stream().filter(Seat::isReserved).count();
+				long countPaid = presentation.getSeats().stream().filter(Seat::isPaid).count();
 				return new SimpleStringProperty(countPaid + " / " + countReserved + " / " + count);
 			}
 			if (data instanceof Table table) {
 				int count = table.getSeats() != null ? table.getSeats().size() : 0;
-				long countReserved = table.getSeats().stream().filter(Seat::isReserved) != null ? table.getSeats().stream().filter(Seat::isReserved).count() : 0;
-				long countPaid = table.getSeats().stream().filter(Seat::isPaid) != null ? table.getSeats().stream().filter(Seat::isPaid).count() : 0;
+				long countReserved = table.getSeats().stream().filter(Seat::isReserved).count();
+				long countPaid = table.getSeats().stream().filter(Seat::isPaid).count();
 				return new SimpleStringProperty(countPaid + " / " + countReserved + " / " + count);
 			}
 			if (data instanceof Seat seat) {
-				String value = seat.isPaid() == true ? "Bezahlt" : seat.isReserved() == true ? "Reserviert" : "Frei";
-				value += seat.isCollected() == true ? " und abgeholt" : "";
-				return new SimpleStringProperty(value);
+				String paymentStatus = switch (seat.getPaymentStatus()) {
+				case CASH -> "Bezahlt (Bar)";
+				case CARD -> "Bezahlt (Karte)";
+				case TRANSFER -> "Bezahlt (Überweisung)";
+				case NONE -> seat.isReserved() ? "Reserviert" : "Frei";
+				};
+				paymentStatus += seat.isCollected() == true ? " und abgeholt" : "";
+				return new SimpleStringProperty(paymentStatus);
 			}
 			return null;
 		});

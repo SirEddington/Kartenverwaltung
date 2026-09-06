@@ -9,6 +9,7 @@ import org.controlsfx.control.table.TableFilter;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
@@ -24,6 +25,7 @@ import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
@@ -111,7 +113,7 @@ public class EventEditController {
 	@FXML
 	private Spinner<Double> spnDoublePrice;
 	@FXML
-	private CheckBox checkPaid;
+	private ComboBox<PaymentStatus> paymentComboBox;
 	@FXML
 	private CheckBox checkCollected;
 	@FXML
@@ -391,7 +393,8 @@ public class EventEditController {
 
 		// Felder befüllen
 		spnDoublePrice.getValueFactory().setValue(selectedSeat.getPriceDouble());
-		checkPaid.setSelected(selectedSeat.isPaid());
+		paymentComboBox.getItems().setAll(PaymentStatus.values());
+		paymentComboBox.getSelectionModel().select(selectedSeat.getPaymentStatus());
 		checkCollected.setSelected(selectedSeat.isCollected());
 		checkWheelchairAccessible.setSelected(selectedSeat.isWheelchairAccessible());
 		txtLastName.setText(selectedSeat.getLastName());
@@ -402,7 +405,7 @@ public class EventEditController {
 
 	private void clearDetails() {
 		spnDoublePrice.getValueFactory().setValue(0.0);
-		checkPaid.setSelected(false);
+		paymentComboBox.getItems().clear();
 		checkCollected.setSelected(false);
 		checkWheelchairAccessible.setSelected(false);
 		txtLastName.clear();
@@ -437,7 +440,7 @@ public class EventEditController {
 		}
 
 		spnDoublePrice.setEditable(editMode);
-		checkPaid.setDisable(!editMode);
+		paymentComboBox.setEditable(editMode);
 		checkCollected.setDisable(!editMode);
 		checkWheelchairAccessible.setDisable(!editMode);
 		txtLastName.setEditable(editMode);
@@ -480,7 +483,7 @@ public class EventEditController {
 			selectedSeat.setEMail(txtMail.getText());
 			selectedSeat.setComment(txtComment.getText());
 			selectedSeat.setPriceDouble(spnDoublePrice.getValue());
-			selectedSeat.setPaid(checkPaid.isSelected());
+			selectedSeat.setPaymentStatus(paymentComboBox.getSelectionModel().getSelectedItem());
 			selectedSeat.setCollected(checkCollected.isSelected());
 			selectedSeat.setWheelchairAccessible(checkWheelchairAccessible.isSelected());
 		}
