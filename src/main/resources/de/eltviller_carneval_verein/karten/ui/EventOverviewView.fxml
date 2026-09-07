@@ -14,7 +14,7 @@
     <!-- Top Toolbar -->
     <HBox alignment="CENTER_LEFT" spacing="10.0">
         <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" />
-        <Label text="Event-Übersicht" style="-fx-font-size: 18px; -fx-font-weight: bold;" />
+        <Label text="Event-Übersicht" styleClass="header-label" />
         
         <Region HBox.hgrow="ALWAYS" />
         

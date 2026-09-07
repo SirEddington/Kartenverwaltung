@@ -13,6 +13,7 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
 public class MainApp extends Application {
@@ -24,6 +25,9 @@ public class MainApp extends Application {
 	@SuppressWarnings("exports")
 	@Override
 	public void start(Stage stage) throws Exception {
+		Font.loadFont(MainApp.class.getResourceAsStream(
+				"/de/eltviller_carneval_verein/karten/ui/fonts/Yanone Kaffeesatz Bold.otf"), 12);
+
 		primaryStage = stage;
 		width = 1200;
 		height = 720;
