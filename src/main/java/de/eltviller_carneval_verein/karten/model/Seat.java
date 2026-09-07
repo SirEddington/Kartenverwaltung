@@ -192,10 +192,6 @@ public class Seat {
 		}
 	}
 
-	public boolean isPaid() {
-		return getPaymentStatus() != PaymentStatus.NONE;
-	}
-
 	@JsonIgnore
 	public boolean isReserved() {
 		if (lastName == null || lastName.isBlank()) {
@@ -204,10 +200,14 @@ public class Seat {
 			return true;
 		}
 	}
+	
+	public boolean isPaid() {
+	    return getPaymentStatus() != null && getPaymentStatus().isPaid();
+	}
 
 	@JsonIgnore
 	public SeatStatus getStatus() {
-		if (isPaid()) {
+		if (getPaymentStatus().isPaid()) {
 			return SeatStatus.SOLD;
 		}
 		if (isReserved()) {

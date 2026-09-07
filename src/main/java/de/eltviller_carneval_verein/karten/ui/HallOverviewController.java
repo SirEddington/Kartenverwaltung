@@ -197,12 +197,12 @@ public class HallOverviewController implements ContentController{
 
 	private Color getColorForSeatStatus(SeatStatus status) {
 		if (status == null)
-			return Color.GREEN;
+			return UiColors.GRAY.getFxColor();
 		return switch (status) {
-		case FREE -> Color.LIGHTGREEN;
-		case RESERVED -> Color.ORANGE;
-		case SOLD -> Color.INDIANRED;
-		case BLOCKED -> Color.GRAY;
+		case FREE -> UiColors.SEAT_FREE.getFxColor();
+		case RESERVED -> UiColors.SEAT_RESEREVED.getFxColor();
+		case SOLD -> UiColors.SEAT_SOLD.getFxColor();
+		case BLOCKED -> UiColors.SEAT_BLOCKED.getFxColor();
 		};
 	}
 

@@ -12,7 +12,7 @@
     </padding>
 
     <HBox alignment="CENTER_LEFT" spacing="10.0">
-        <Button text="← Event-Übersicht" onAction="#handleBackToEventOverview" />
+        <Button text="← Event-Übersicht" styleClass="button-default" onAction="#handleBackToEventOverview" />
         <Label fx:id="lblTitle" text="Neues Event anlegen" style="-fx-font-size: 18px; -fx-font-weight: bold;" />
     </HBox>
 
@@ -71,7 +71,7 @@
 
     <!-- Aktionen -->
     <HBox alignment="CENTER_RIGHT" spacing="10.0">
-        <Button text="Abbrechen" onAction="#handleCancel" />
-        <Button text="Event Speichern" onAction="#handleSave" style="-fx-base: #28a745; -fx-text-fill: white;" />
+        <Button text="Abbrechen" styleClass="button-secondary" onAction="#handleCancel" />
+        <Button text="Event Speichern" styleClass="button-primary" onAction="#handleSave" />
     </HBox>
 </VBox>

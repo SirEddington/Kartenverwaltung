@@ -28,8 +28,10 @@
     </Label>
 
     <!-- Menü-Buttons -->
-    <Button text="Kartenansicht" prefWidth="250.0" prefHeight="40.0" onAction="#handleOpenTable" />
-    <Button text="Events anlegen/bearbeiten" prefWidth="250.0" prefHeight="40.0" onAction="#handleCreateEvent" />
+    <Button text="Kartenansicht" prefWidth="250.0" prefHeight="40.0" styleClass="button-danger" onAction="#handleOpenTable" />
+    <Button text="Events anlegen/bearbeiten" prefWidth="250.0" prefHeight="40.0" styleClass="button-default" onAction="#handleCreateEvent" />
+    <Button text="Kartenansicht" prefWidth="250.0" prefHeight="40.0" styleClass="button-primary" onAction="#handleOpenTable" />
+    <Button text="Events anlegen/bearbeiten" prefWidth="250.0" prefHeight="40.0" styleClass="button-secondary" onAction="#handleCreateEvent" />
     
     <!-- Platzhalter für zukünftige Module (z.B. Statistik, Export) -->
 </VBox>

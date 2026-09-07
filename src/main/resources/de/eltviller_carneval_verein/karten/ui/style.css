@@ -1,0 +1,176 @@
+/* Central Root Colors */
+.root {
+    -fx-ecv-blue: #2C2F88;
+    -fx-ecv-red: #E83B3B;
+    -fx-ecv-yellow: #FFE000;
+    -fx-ecv-gold: #BE9F56;
+    
+    -fx-font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+    -fx-background-color: #F8F9FA;
+}
+
+	/* Buttons (ECV-Rot mit weißer Schrift) */
+	.button-danger {
+	    -fx-background-color: -fx-ecv-red;
+	    -fx-text-fill: white;
+	    -fx-font-weight: bold;
+	    -fx-padding: 8px 16px;
+	    -fx-background-radius: 4px;
+	    -fx-cursor: hand;
+	}
+
+	.button-danger:hover {
+	    -fx-opacity: 0.75;
+	}
+
+	/* Buttons (ECV-Weiß mit roter Schrift) */
+	.button-default {
+	    -fx-background-color: white;
+	    -fx-text-fill: -fx-ecv-red;
+		-fx-border-color: black;
+		-fx-border-width: 1px;
+		-fx-border-radius: 4px;
+	    -fx-font-weight: bold;
+	    -fx-padding: 8px 16px;
+	    -fx-background-radius: 4px;
+	    -fx-cursor: hand;
+	}
+
+	.button-default:hover {
+	    -fx-opacity: 0.75;
+	}
+
+	/* Buttons (ECV-Blau mit gelber Schrift) */
+	.button-primary {
+	    -fx-background-color: -fx-ecv-blue;
+	    -fx-text-fill: -fx-ecv-yellow;
+	    -fx-font-weight: bold;
+	    -fx-padding: 8px 16px;
+	    -fx-background-radius: 4px;
+	    -fx-cursor: hand;
+	}
+
+	.button-primary:hover {
+	    -fx-opacity: 0.75;
+	}
+
+	/* Buttons (ECV-Gelb mit blauer Schrift) */
+	.button-secondary {
+	    -fx-background-color: -fx-ecv-yellow;
+	    -fx-text-fill: -fx-ecv-blue;
+	    -fx-font-weight: bold;
+	    -fx-padding: 8px 16px;
+	    -fx-background-radius: 4px;
+	    -fx-cursor: hand;
+	}
+
+	.button-secondary:hover {
+	    -fx-opacity: 0.75;
+	}
+
+	/* Jubiläums-Buttons (ECV-Gold) */
+	.button-gold {
+    	-fx-background-color: -fx-ecv-gold;
+    	-fx-text-fill: white;
+    	-fx-font-weight: bold;
+   		-fx-padding: 8px 16px;
+   		-fx-background-radius: 4px;
+	}
+
+	.button-gold:hover {
+	    -fx-opacity: 0.75;
+	}
+	
+	/* 1. Haupt-Box der ComboBox (Dezentes Formular-Element) */
+	.combo-box {
+	    -fx-background-color: white;
+	    -fx-border-color: #CCCCCC;         /* Neutraler grauer Rahmen */
+	    -fx-border-width: 1px;
+	    -fx-border-radius: 4px;
+	    -fx-background-radius: 4px;
+	    -fx-padding: 2px 4px;
+	}
+
+	/* Hover- & Fokus-Zustand */
+	.combo-box:hover {
+	    -fx-border-color: #999999;
+	}
+
+	.combo-box:focused {
+	    -fx-border-color: -fx-ecv-blue;   /* Nur bei aktivem Klick/Fokus ein blauer Rahmen */
+	}
+
+	/* Text in der ComboBox (Standard Dunkelgrau) */
+	.combo-box .cell {
+	    -fx-text-fill: #333333;
+	    -fx-font-weight: normal;
+	}
+
+	/* 2. Pfeil-Icon (Dezentes Dunkelgrau) */
+	.combo-box .arrow-button {
+	    -fx-background-color: transparent;
+	}
+
+	.combo-box .arrow {
+	    -fx-background-color: #666666;
+	}
+
+	/* 3. Dropdown-Liste */
+	.combo-box-popup .list-view {
+	    -fx-background-color: white;
+	    -fx-border-color: #CCCCCC;
+	    -fx-border-width: 1px;
+	    -fx-border-radius: 4px;
+	    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.1), 5, 0, 0, 2);
+	}
+
+	.combo-box-popup .list-cell {
+	    -fx-padding: 6px 10px;
+	    -fx-text-fill: #333333;
+	    -fx-background-color: white;
+	}
+
+	/* Hover in der Dropdown-Liste */
+	.combo-box-popup .list-cell:hover {
+	    -fx-background-color: #F0F4F8;
+	    -fx-text-fill: -fx-ecv-blue;
+	}
+
+	/* Ausgewählter Eintrag im Dropdown */
+	.combo-box-popup .list-cell:filled:selected {
+	    -fx-background-color: -fx-ecv-blue;
+	    -fx-text-fill: white;
+	}
+
+/* Standard-Überschriften in ECV-Blau laut Gestaltungsrichtlinie */
+.header-label {
+    -fx-text-fill: -fx-ecv-blue;
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+}
+
+/* Tabellen-Styling (greift automatisch auf alle TableViews) */
+.table-view {
+    -fx-background-color: transparent;
+    -fx-border-color: -fx-ecv-blue;
+    -fx-border-radius: 4px;
+}
+
+/* Tabellenkopf (Header) in ECV-Blau */
+.table-view .column-header-background {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+.table-view .column-header .label {
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+/* Abwechselnde Zeilenfarben */
+.table-row-cell:odd {
+    -fx-background-color: #F0F4F8;
+}
+
+.table-row-cell:selected {
+    -fx-background-color: -fx-ecv-gold;
+}

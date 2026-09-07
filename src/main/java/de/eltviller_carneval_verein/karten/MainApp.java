@@ -77,6 +77,8 @@ public class MainApp extends Application {
 
 			// 5. Scene setzen
 			Scene scene = new Scene(root, width, height);
+			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
+			scene.getStylesheets().add(css);
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -97,6 +99,8 @@ public class MainApp extends Application {
 
 			// 3. Scene setzen
 			Scene scene = new Scene(root, width, height);
+			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
+			scene.getStylesheets().add(css);
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
 			e.printStackTrace();

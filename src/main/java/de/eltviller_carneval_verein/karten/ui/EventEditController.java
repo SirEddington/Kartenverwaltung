@@ -235,6 +235,7 @@ public class EventEditController {
 		colSeatComment.setOnEditCommit(e -> e.getRowValue().setComment(e.getNewValue()));
 
 		// --- Sitzdetails ---
+		paymentComboBox.getItems().setAll(PaymentStatus.values());
 		spnDoublePrice.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 100.0, 0.0, 0.5));
 
 		// 2. FilteredList um Master-Daten legen
@@ -393,7 +394,6 @@ public class EventEditController {
 
 		// Felder befüllen
 		spnDoublePrice.getValueFactory().setValue(selectedSeat.getPriceDouble());
-		paymentComboBox.getItems().setAll(PaymentStatus.values());
 		paymentComboBox.getSelectionModel().select(selectedSeat.getPaymentStatus());
 		checkCollected.setSelected(selectedSeat.isCollected());
 		checkWheelchairAccessible.setSelected(selectedSeat.isWheelchairAccessible());
@@ -405,7 +405,7 @@ public class EventEditController {
 
 	private void clearDetails() {
 		spnDoublePrice.getValueFactory().setValue(0.0);
-		paymentComboBox.getItems().clear();
+		paymentComboBox.getSelectionModel().clearSelection();;
 		checkCollected.setSelected(false);
 		checkWheelchairAccessible.setSelected(false);
 		txtLastName.clear();

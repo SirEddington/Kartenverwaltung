@@ -13,7 +13,7 @@
 
     <!-- Top Toolbar -->
     <HBox alignment="CENTER_LEFT" spacing="10.0">
-        <Button text="← Menü" onAction="#handleBackToMenu" />
+        <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" />
         <Label text="Event-Übersicht" style="-fx-font-size: 18px; -fx-font-weight: bold;" />
         
         <Region HBox.hgrow="ALWAYS" />
@@ -21,7 +21,7 @@
         <Label text="Suche:" />
         <TextField fx:id="searchField" promptText="Event / Vorstellung..." prefWidth="200.0" />
         
-        <Button text="+ Neues Event" onAction="#handleCreateNewEvent" style="-fx-base: #28a745; -fx-text-fill: white;" />
+        <Button text="+ Neues Event" styleClass="button-primary" onAction="#handleCreateNewEvent" style="-fx-base: #28a745; -fx-text-fill: white;" />
     </HBox>
 
     <Separator />
