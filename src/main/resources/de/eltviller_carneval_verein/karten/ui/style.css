@@ -156,17 +156,18 @@
 /* Tabellen-Styling (greift automatisch auf alle TableViews) */
 .table-view {
     -fx-background-color: transparent;
-    -fx-border-color: -fx-ecv-blue;
+    -fx-border-color: -fx-ecv-red;
     -fx-border-radius: 4px;
 }
 
 /* Tabellenkopf (Header) in ECV-Blau */
 .table-view .column-header-background {
-    -fx-background-color: -fx-ecv-blue;
+    -fx-background-color: white;
 }
 
 .table-view .column-header .label {
-    -fx-text-fill: white;
+    -fx-text-fill: -fx-ecv-red;
+	-fx-background-color: white;
     -fx-font-weight: bold;
 }
 

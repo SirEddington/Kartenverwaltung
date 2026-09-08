@@ -15,7 +15,7 @@
     </padding>
 
     <!-- Mittlerer Bereich: Sitzplatz-Tabelle -->
-    	<StackPane VBox.vgrow="ALWAYS" style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5;">
+    	<StackPane VBox.vgrow="ALWAYS">
         	<TableView fx:id="seatTable" BorderPane.alignment="CENTER">
             	<columns>
                 	<TableColumn fx:id="colPresentation" prefWidth="150.0" text="Vorstellung" />

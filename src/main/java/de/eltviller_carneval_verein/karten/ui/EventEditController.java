@@ -419,7 +419,6 @@ public class EventEditController {
 	private void clearDetails() {
 		spnDoublePrice.getValueFactory().setValue(0.0);
 		paymentComboBox.getSelectionModel().clearSelection();
-		;
 		checkCollected.setSelected(false);
 		checkWheelchairAccessible.setSelected(false);
 		txtLastName.clear();

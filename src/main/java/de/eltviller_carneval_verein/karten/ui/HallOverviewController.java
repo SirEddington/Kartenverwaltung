@@ -273,7 +273,7 @@ public class HallOverviewController implements ContentController {
 		seatCircle.setFill(seat.getStatus().getSeatColor().getFxColor());
 		seatCircle.setStroke(Color.BLACK);
 
-		Tooltip.install(seatCircle, new Tooltip("Sitz " + seat.getSeatNumber() + " (" + seat.getStatus() + ")"));
+		Tooltip.install(seatCircle, new Tooltip("Sitz " + seat.getSeatNumber() + " (" + seat.getStatus().getDisplayName() + ")"));
 		seatCircle.setOnMouseClicked(e -> handleSeatClick(seat));
 
 		hallPane.getChildren().add(seatCircle);
@@ -321,6 +321,7 @@ public class HallOverviewController implements ContentController {
 	public void setEvent(Event event) {
 		this.selectedEvent = event;
 		selectedPres = null;
+		hallPane.getChildren().clear();
 	}
 
 	@Override
