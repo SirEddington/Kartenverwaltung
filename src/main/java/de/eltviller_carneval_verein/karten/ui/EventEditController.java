@@ -38,6 +38,7 @@ import javafx.scene.control.TextField;
 import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.layout.HBox;
+import javafx.util.StringConverter;
 import javafx.util.converter.IntegerStringConverter;
 import javafx.util.converter.LocalDateStringConverter;
 import javafx.util.converter.LocalTimeStringConverter;
@@ -237,6 +238,18 @@ public class EventEditController {
 		// --- Sitzdetails ---
 		paymentComboBox.getItems().setAll(PaymentStatus.values());
 		spnDoublePrice.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 100.0, 0.0, 0.5));
+		StringConverter<PaymentStatus> converter = new StringConverter<>() {
+			@Override
+			public String toString(PaymentStatus status) {
+				return status == null ? "" : status.getDisplayName();
+			}
+
+			@Override
+			public PaymentStatus fromString(String string) {
+				return null; // Bei fixer ComboBox-Auswahl nicht erforderlich
+			}
+		};
+		paymentComboBox.setConverter(converter);
 
 		// 2. FilteredList um Master-Daten legen
 		filteredEventData = new FilteredList<>(masterEventData, p -> true);
@@ -405,7 +418,8 @@ public class EventEditController {
 
 	private void clearDetails() {
 		spnDoublePrice.getValueFactory().setValue(0.0);
-		paymentComboBox.getSelectionModel().clearSelection();;
+		paymentComboBox.getSelectionModel().clearSelection();
+		;
 		checkCollected.setSelected(false);
 		checkWheelchairAccessible.setSelected(false);
 		txtLastName.clear();
