@@ -48,7 +48,7 @@
         <Label text="Tischbreite (cm):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
         <Spinner fx:id="spnDoubleTableWidth" min="0.0" max="1000.0" initialValue="70.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
         <Label text="Tischlänge (cm):" GridPane.rowIndex="1" GridPane.columnIndex="2" />
-        <Spinner fx:id="spnDoubleTableHeight" min="0.0" max="1000.0" initialValue="150.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="3" />
+        <Spinner fx:id="spnDoubleTableHeight" min="0.0" max="1000.0" initialValue="300.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="3" />
     </GridPane>
 
     <Separator />
@@ -58,9 +58,9 @@
     <GridPane vgap="10.0" hgap="10.0">
         <Label text="Sitze pro Tisch:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
         <Spinner fx:id="spnSeatsPerTable" min="0" max="30" initialValue="12" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
-        <Label text="Sitzebreite (cm):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+        <Label text="Sitzbreite (cm):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
         <Spinner fx:id="spnDoubleSeatWidth" min="0.0" max="100.0" initialValue="30.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
-        <Label text="Sitzelänge (cm):" GridPane.rowIndex="1" GridPane.columnIndex="2" />
+        <Label text="Sitzlänge (cm):" GridPane.rowIndex="1" GridPane.columnIndex="2" />
         <Spinner fx:id="spnDoubleSeatHeight" min="0.0" max="100.0" initialValue="30.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="3" />
 
         <Label text="Preis bei Anlage:" GridPane.rowIndex="2" GridPane.columnIndex="0" />

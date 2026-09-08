@@ -113,14 +113,7 @@ public class TicketTableController implements ContentController {
 		StringConverter<PaymentStatus> converter = new StringConverter<>() {
 			@Override
 			public String toString(PaymentStatus status) {
-				if (status == null)
-					return "";
-				return switch (status) {
-				case NONE -> "Offen";
-				case CASH -> "Barzahlung";
-				case CARD -> "Kartenzahlung";
-				case TRANSFER -> "Überweisung";
-				};
+				return status == null ? "" : status.getDisplayName();
 			}
 
 			@Override

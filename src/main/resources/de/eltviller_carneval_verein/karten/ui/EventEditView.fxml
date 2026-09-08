@@ -118,7 +118,7 @@
             <Label text="Preis (€):" GridPane.rowIndex="0" GridPane.columnIndex="0" />
             <Spinner fx:id="spnDoublePrice" GridPane.rowIndex="0" GridPane.columnIndex="1" maxWidth="Infinity" />
 
-            <Label text="Bezahlt:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+            <Label text="Zahlungsstatus:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
             <ComboBox fx:id="paymentComboBox" GridPane.rowIndex="1" GridPane.columnIndex="1" />
 
             <Label text="Abgeholt:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
