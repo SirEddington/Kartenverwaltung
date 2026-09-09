@@ -276,44 +276,19 @@ public class EventEditController {
 
 		// 5. Auswahl-Listener mit Null-Checks gegen NPEs
 		eventTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
-			masterPresData.clear();
-			masterTableData.clear();
-			masterSeatData.clear();
-			clearDetails();
-			if (selectedEvent != null && selectedEvent.getPresentations() != null) {
-				masterPresData.setAll(selectedEvent.getPresentations());
-			}
-			setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
-			setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
+			refreshEventTable(selectedEvent);
 		});
 
 		presTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedPres) -> {
-			masterTableData.clear();
-			masterSeatData.clear();
-			clearDetails();
-			if (selectedPres != null && selectedPres.getTables() != null) {
-				masterTableData.setAll(selectedPres.getTables());
-			}
-			setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
-			setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
+			refreshPresentationTable(selectedPres);
 		});
 
 		tableTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedTable) -> {
-			masterSeatData.clear();
-			clearDetails();
-			if (selectedTable != null && selectedTable.getSeats() != null) {
-				masterSeatData.setAll(selectedTable.getSeats());
-			}
-			setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
-			setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
+			refreshTableTable(selectedTable);
 		});
 
 		seatTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedSeat) -> {
-			if (selectedSeat != null) {
-				loadDetailsOfSeat(selectedSeat);
-			} else {
-				clearDetails();
-			}
+			refreshSeatTable(selectedSeat);
 		});
 
 		// Initialen EditMode anwenden
@@ -327,78 +302,114 @@ public class EventEditController {
 
 	private void setupContextMenu() {
 		// 1. Kontextmenü für Event-Tabelle
-		setupTableContextMenu(eventTable, event -> handleAddEvent(), event -> handleDeleteEvent(event));
+		setupTableContextMenu(eventTable, event -> handleAddEvent(), event -> handleCopyEvent(event), event -> handleDeleteEvent(event));
 
 		// 2. Kontextmenü für Aufführungen/Vorstellungen
-		setupTableContextMenu(presTable, pres -> handleAddPres(), pres -> handleDeletePres(pres));
+		setupTableContextMenu(presTable, pres -> handleAddPres(), pres -> handleCopyPres(pres), pres -> handleDeletePres(pres));
 
 		// 3. Kontextmenü für Tisch-Tabelle
-		setupTableContextMenu(tableTable, table -> handleAddTable(), table -> handleDeleteTable(table));
+		setupTableContextMenu(tableTable, table -> handleAddTable(), table -> handleCopyTable(table), table -> handleDeleteTable(table));
 
 		// 4. Kontextmenü für Sitzplatz-Tabelle
-		setupTableContextMenu(seatTable, seat -> handleAddSeat(), seat -> handleDeleteSeat(seat));
+		setupTableContextMenu(seatTable, seat -> handleAddSeat(), seat -> handleCopySeat(seat), seat -> handleDeleteSeat(seat));
 	}
 
-	private <T> void setupTableContextMenu(TableView<T> tableView, Consumer<T> onAdd, Consumer<T> onDelete) {
+	private <T> void setupTableContextMenu(TableView<T> tableView, Consumer<T> onAdd, Consumer<T> onCopy, Consumer<T> onDelete) {
 		tableView.setRowFactory(tv -> {
-			TableRow<T> row = new TableRow<>();
+			TableRow<T> tableRow = new TableRow<>();
 			ContextMenu contextMenu = new ContextMenu();
+			SeparatorMenuItem separator = new SeparatorMenuItem();
 
 			MenuItem addItem = new MenuItem("+ Hinzufügen");
 			addItem.setOnAction(e -> {
-				T item = row.getItem();
+				T item = tableRow.getItem();
 				if (item != null && onAdd != null) {
 					onAdd.accept(item);
 				}
 			});
 
+			MenuItem copyItem = new MenuItem("+ als Vorlage Verwenden");
+			copyItem.setOnAction(e -> {
+				T item = tableRow.getItem();
+				if (item != null && onCopy != null) {
+					onCopy.accept(item);
+				}
+			});
+
 			MenuItem deleteItem = new MenuItem("Löschen");
 			deleteItem.setOnAction(e -> {
-				T item = row.getItem();
+				T item = tableRow.getItem();
 				if (item != null && onDelete != null) {
 					onDelete.accept(item);
 				}
 			});
 
-			contextMenu.getItems().addAll(addItem, new SeparatorMenuItem(), deleteItem);
+			contextMenu.getItems().addAll(addItem, copyItem, separator, deleteItem);
+
+			contextMenu.setOnShowing(e -> {
+				Object data = tableRow.getItem();
+				addItem.setVisible(true);
+				copyItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
+				separator.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
+				deleteItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
+			});
 
 			// Menü nur binden, wenn die Zeile nicht leer ist
-			row.contextMenuProperty().bind(Bindings.when(row.emptyProperty()).then((ContextMenu) null).otherwise(contextMenu));
+			tableRow.contextMenuProperty().bind(Bindings.when(tableRow.emptyProperty()).then((ContextMenu) contextMenu).otherwise(contextMenu));
 
-			return row;
+			return tableRow;
 		});
 	}
 
 	private void handleAddEvent() {
+		
+	}
 
+	private void handleCopyEvent(Event event) {
+		
 	}
 
 	private void handleDeleteEvent(Event event) {
-
+		
 	}
 
 	private void handleAddPres() {
+		Presentation newPres = eventTable.getSelectionModel().getSelectedItem().addPresentation();
+		refreshPresentationTable(newPres);
+	}
 
+	private void handleCopyPres(Presentation presentation) {
+		
 	}
 
 	private void handleDeletePres(Presentation presentation) {
-
+		
 	}
 
 	private void handleAddTable() {
+		Table newTable = presTable.getSelectionModel().getSelectedItem().addTable();
+		refreshTableTable(newTable);
+	}
 
+	private void handleCopyTable(Table table) {
+		
 	}
 
 	private void handleDeleteTable(Table table) {
-
+		
 	}
 
 	private void handleAddSeat() {
+		Seat newSeat = tableTable.getSelectionModel().getSelectedItem().addSeat();
+		refreshSeatTable(newSeat);
+	}
 
+	private void handleCopySeat(Seat seat) {
+		
 	}
 
 	private void handleDeleteSeat(Seat seat) {
-
+		
 	}
 
 	private void loadDetailsOfSeat(Seat selectedSeat) {
@@ -414,6 +425,52 @@ public class EventEditController {
 		txtFirstName.setText(selectedSeat.getFirstName());
 		txtMail.setText(selectedSeat.getEMail());
 		txtComment.setText(selectedSeat.getComment());
+	}
+	
+	private void refreshEventTable(Event selectedEvent) {
+		currentEvent = selectedEvent;
+		masterPresData.clear();
+		masterTableData.clear();
+		masterSeatData.clear();
+		clearDetails();
+		if (selectedEvent != null && selectedEvent.getPresentations() != null) {
+			masterPresData.setAll(selectedEvent.getPresentations());
+		}
+		setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
+		setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
+	}
+	
+	private void refreshPresentationTable(Event selectedEvent, Presentation selectedPresentation) {
+		currentPres = selectedPresentation;
+		masterTableData.clear();
+		masterSeatData.clear();
+		clearDetails();
+		if (selectedPresentation != null && selectedPresentation.getTables() != null) {
+			masterTableData.setAll(selectedPresentation.getTables());
+		}
+		setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
+		setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
+	}
+	
+	private void refreshTableTable(Presentation selectedPresentation, Table selectedTable) {
+		currentTable = selectedTable;
+		masterSeatData.clear();
+		clearDetails();
+		if (selectedTable != null && selectedTable.getSeats() != null) {
+			masterSeatData.setAll(selectedTable.getSeats());
+		}
+		setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
+		setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
+	}
+	
+	private void refreshSeatTable(Table selectedTable, Seat selectedSeat) {
+		currentSeat = selectedSeat;
+		if (currentSeat != null) {
+			seatTable.getSelectionModel().select(currentSeat);
+			loadDetailsOfSeat(currentSeat);
+		} else {
+			clearDetails();
+		}
 	}
 
 	private void clearDetails() {
@@ -500,7 +557,7 @@ public class EventEditController {
 			selectedSeat.setCollected(checkCollected.isSelected());
 			selectedSeat.setWheelchairAccessible(checkWheelchairAccessible.isSelected());
 		}
-		// repository.saveEvent(eventComboBox.getValue());
+		repository.saveEvent(eventTable.getSelectionModel().getSelectedItem());
 	}
 
 }

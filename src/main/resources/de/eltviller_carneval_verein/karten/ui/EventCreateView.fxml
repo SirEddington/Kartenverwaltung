@@ -19,7 +19,7 @@
     <Separator />
 
     <!-- Eventdaten -->
-    <Label text="Event" style="-fx-font-weight: bold;" />
+    <Label text="Event" />
     <GridPane vgap="10.0" hgap="10.0">
         <Label text="Name:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
         <TextField fx:id="txtEventName" promptText="z.B. Prunksitzung 2027" GridPane.rowIndex="0" GridPane.columnIndex="1" prefWidth="300.0" />
@@ -28,7 +28,7 @@
     <Separator />
 
     <!-- Vorstellungsdaten -->
-    <Label text="Vorstellungen" style="-fx-font-weight: bold;" />
+    <Label text="Vorstellungen" />
     <GridPane vgap="10.0" hgap="10.0">
         <Label text="Anzahl der Vorstellungen:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
         <Spinner fx:id="spnPresCount" min="0" max="10" initialValue="3" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
@@ -41,7 +41,7 @@
     <Separator />
 
     <!-- Tischdaten -->
-    <Label text="Tische" style="-fx-font-weight: bold;" />
+    <Label text="Tische" />
     <GridPane vgap="10.0" hgap="10.0">
         <Label text="Tische pro Vorstellung:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
         <Spinner fx:id="spnTablePerPres" min="0" max="100" initialValue="40" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
@@ -54,7 +54,7 @@
     <Separator />
 
     <!-- Sitzdaten -->
-    <Label text="Sitze" style="-fx-font-weight: bold;" />
+    <Label text="Sitze" />
     <GridPane vgap="10.0" hgap="10.0">
         <Label text="Sitze pro Tisch:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
         <Spinner fx:id="spnSeatsPerTable" min="0" max="30" initialValue="12" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />

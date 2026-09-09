@@ -13,15 +13,8 @@
         <Insets top="30.0" right="30.0" bottom="30.0" left="30.0" />
     </padding>
     
-    <Label text="Eltviller Carneval Verein">
-        <font>
-            <Font name="System Bold" size="22.0" />
-        </font>
-    </Label>
-    <Label text="Kartenverwaltung Hauptmenü">
-        <font>
-            <Font size="14.0" />
-        </font>
+    <Label text="Eltviller Carneval Verein" styleClass="mainheader-label" />
+    <Label text="Kartenverwaltung Hauptmenü" styleClass="header-label" >
         <VBox.margin>
             <Insets bottom="20.0" />
         </VBox.margin>
@@ -29,9 +22,9 @@
 
     <!-- Menü-Buttons -->
     <Button text="Kartenansicht" prefWidth="250.0" prefHeight="40.0" styleClass="button-danger" onAction="#handleOpenTable" />
-    <Button text="Events anlegen/bearbeiten" prefWidth="250.0" prefHeight="40.0" styleClass="button-default" onAction="#handleCreateEvent" />
+    <Button text="Eventübersicht" prefWidth="250.0" prefHeight="40.0" styleClass="button-default" onAction="#handleCreateEvent" />
     <Button text="Kartenansicht" prefWidth="250.0" prefHeight="40.0" styleClass="button-primary" onAction="#handleOpenTable" />
-    <Button text="Events anlegen/bearbeiten" prefWidth="250.0" prefHeight="40.0" styleClass="button-secondary" onAction="#handleCreateEvent" />
+    <Button text="Eventübersicht" prefWidth="250.0" prefHeight="40.0" styleClass="button-secondary" onAction="#handleCreateEvent" />
     
     <!-- Platzhalter für zukünftige Module (z.B. Statistik, Export) -->
 </VBox>

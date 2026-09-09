@@ -21,7 +21,7 @@
         <Label text="Suche:" />
         <TextField fx:id="searchField" promptText="Event / Vorstellung..." prefWidth="200.0" />
         
-        <Button text="+ Neues Event" styleClass="button-primary" onAction="#handleCreateNewEvent" style="-fx-base: #28a745; -fx-text-fill: white;" />
+        <Button text="+ Neues Event" styleClass="button-primary" onAction="#handleCreateNewEvent" />
     </HBox>
 
     <Separator />

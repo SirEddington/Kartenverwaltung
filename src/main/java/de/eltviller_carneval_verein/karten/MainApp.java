@@ -19,18 +19,15 @@ import javafx.stage.Stage;
 public class MainApp extends Application {
 
 	private static Stage primaryStage;
-	private static double width;
-	private static double height;
+	private static double width = 1300.0;
+	private static double height = 780.0;
 
 	@SuppressWarnings("exports")
 	@Override
 	public void start(Stage stage) throws Exception {
-		Font.loadFont(MainApp.class.getResourceAsStream(
-				"/de/eltviller_carneval_verein/karten/ui/fonts/Yanone Kaffeesatz Bold.otf"), 12);
+		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/Yanone Kaffeesatz Bold.otf"), 12);
 
 		primaryStage = stage;
-		width = 1200;
-		height = 720;
 		primaryStage.setWidth(width);
 		primaryStage.setHeight(height);
 		primaryStage.setMinWidth(width);

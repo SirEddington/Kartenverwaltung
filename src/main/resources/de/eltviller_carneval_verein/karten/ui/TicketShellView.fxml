@@ -15,6 +15,11 @@
     <!-- OBERER BEREICH: Identischer Header -->
     <HBox alignment="CENTER_LEFT" spacing="10.0">
         <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" />
+        
+        <Label  fx:id="lblHeader" text="Kartentabelle" styleClass="header-label" />
+            
+        <Region HBox.hgrow="ALWAYS" />
+        
         <Label text="Event:" />
         <ComboBox fx:id="eventComboBox" prefWidth="180.0" promptText="Event wählen..." />
         

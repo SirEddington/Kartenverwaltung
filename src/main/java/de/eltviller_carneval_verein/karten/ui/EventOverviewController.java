@@ -196,6 +196,8 @@ public class EventOverviewController {
 		treeTableView.setRowFactory(ttv -> {
 			TreeTableRow<Object> tableRow = new TreeTableRow<>();
 			ContextMenu contextMenu = new ContextMenu();
+			SeparatorMenuItem EditDeleteSeparator = new SeparatorMenuItem();
+			SeparatorMenuItem DeleteDetailsSeparator = new SeparatorMenuItem();
 
 			MenuItem addPresItem = new MenuItem("+ Vorstellung hinzufügen");
 			addPresItem.setOnAction(e -> {
@@ -263,7 +265,7 @@ public class EventOverviewController {
 			});
 
 			// Menü-Einträge zusammenstellen
-			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, editItem, new SeparatorMenuItem(), deleteItem, new SeparatorMenuItem(), seeDetails);
+			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, editItem, EditDeleteSeparator, deleteItem, DeleteDetailsSeparator, seeDetails);
 
 			contextMenu.setOnShowing(e -> {
 				Object data = tableRow.getItem();
@@ -273,6 +275,8 @@ public class EventOverviewController {
 				editItem.setVisible(data != null);
 				seeDetails.setVisible(data != null);
 				deleteItem.setVisible(data != null);
+				EditDeleteSeparator.setVisible(data != null);
+				DeleteDetailsSeparator.setVisible(data != null);
 			});
 
 			// Event-Listener: Menü nur anzeigen, wenn die Zeile nicht leer ist

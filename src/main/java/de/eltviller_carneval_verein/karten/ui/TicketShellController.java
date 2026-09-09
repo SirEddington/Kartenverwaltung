@@ -12,6 +12,7 @@ import javafx.scene.Node;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.StackPane;
@@ -27,6 +28,7 @@ public class TicketShellController {
     @FXML private RadioButton btnHallView;
     @FXML private Button btnToggleEdit;
     @FXML private StackPane contentArea;
+    @FXML private Label lblHeader;
 
     private ContentController activeContentController;
     private Event currentEvent;
@@ -71,6 +73,7 @@ public class TicketShellController {
     private void showTicketTableView() {
     	btnTableView.setSelected(true);
     	btnHallView.setSelected(false);
+    	lblHeader.setText("Kartentabelle");
         loadContentView("/de/eltviller_carneval_verein/karten/ui/TicketTableView.fxml");
     }
 
@@ -83,6 +86,7 @@ public class TicketShellController {
 		} else {
 	    	btnTableView.setSelected(false);
 	    	btnHallView.setSelected(true);
+	    	lblHeader.setText("Saalübersicht");
 	        loadContentView("/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml");
 		}
     }

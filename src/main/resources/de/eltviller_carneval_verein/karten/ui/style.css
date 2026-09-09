@@ -1,187 +1,407 @@
-
 /*
- * Central Root Colors
+ * ==============================================================================
+ * ECV Kartenverwaltung - Master Stylesheet
+ * Offizielle Designvorgaben Eltviller Carneval Verein e.V.
+ * ==============================================================================
  */
+
+/* ------------------------------------------------------------------------------
+ * 1. FARBVARIABLEN & ROOT-EINSTELLUNGEN
+ * ------------------------------------------------------------------------------ */
 .root {
-    -fx-ecv-blue: #2C2F88;
+    /* ECV Markenfarben (Designvorgaben 13.01.2025) */
     -fx-ecv-red: #E83B3B;
+    -fx-ecv-blue: #2C2F88;
     -fx-ecv-yellow: #FFE000;
     -fx-ecv-gold: #BE9F56;
-    
-    -fx-font-family: "Segoe UI", Helvetica, Arial, sans-serif;
-    -fx-background-color: #F8F9FA;
+
+    /* Neutrale Formular- & UI-Töne */
+    -fx-bg-app: #F8F9FA;
+    -fx-surface-white: #FFFFFF;
+    -fx-border-neutral: #CCCCCC;
+    -fx-text-dark: #222222;
+
+    /* Standardschrift für Office/Desktop-Anwendungen */
+    -fx-font-family: "Calibri", "Segoe UI", Helvetica, Arial, sans-serif;
+    -fx-background-color: -fx-bg-app;
 }
 
-	/* Buttons (ECV-Rot mit weißer Schrift) */
-	.button-danger {
-	    -fx-background-color: -fx-ecv-red;
-	    -fx-text-fill: white;
+/* ------------------------------------------------------------------------------
+ * 2. TYPOGRAFIE & LABELS
+ * ------------------------------------------------------------------------------ */
+.label {
+    -fx-text-fill: -fx-text-dark;
+    -fx-font-size: 13px;
+}
+
+	/* Überschriften (Yanone Kaffeesatz Bold in ECV-Blau) */
+	.header-title, .mainheader-label {
+	    -fx-font-family: "Yanone Kaffeesatz"/*, "Calibri", sans-serif*/;
 	    -fx-font-weight: bold;
-	    -fx-padding: 8px 16px;
-	    -fx-background-radius: 4px;
-	    -fx-cursor: hand;
-	}
-
-	.button-danger:hover {
-	    -fx-opacity: 0.75;
-	}
-
-	/* Buttons (ECV-Weiß mit roter Schrift) */
-	.button-default {
-	    -fx-background-color: white;
-	    -fx-text-fill: -fx-ecv-red;
-		-fx-border-color: black;
-		-fx-border-width: 1px;
-		-fx-border-radius: 4px;
-	    -fx-font-weight: bold;
-	    -fx-padding: 8px 16px;
-	    -fx-background-radius: 4px;
-	    -fx-cursor: hand;
-	}
-
-	.button-default:hover {
-	    -fx-opacity: 0.75;
-	}
-
-	/* Buttons (ECV-Blau mit gelber Schrift) */
-	.button-primary {
-	    -fx-background-color: -fx-ecv-blue;
-	    -fx-text-fill: -fx-ecv-yellow;
-	    -fx-font-weight: bold;
-	    -fx-padding: 8px 16px;
-	    -fx-background-radius: 4px;
-	    -fx-cursor: hand;
-	}
-
-	.button-primary:hover {
-	    -fx-opacity: 0.75;
-	}
-
-	/* Buttons (ECV-Gelb mit blauer Schrift) */
-	.button-secondary {
-	    -fx-background-color: -fx-ecv-yellow;
-	    -fx-text-fill: -fx-ecv-blue;
-	    -fx-font-weight: bold;
-	    -fx-padding: 8px 16px;
-	    -fx-background-radius: 4px;
-	    -fx-cursor: hand;
-	}
-
-	.button-secondary:hover {
-	    -fx-opacity: 0.75;
-	}
-
-	/* Jubiläums-Buttons (ECV-Gold) */
-	.button-gold {
-    	-fx-background-color: -fx-ecv-gold;
-    	-fx-text-fill: white;
-    	-fx-font-weight: bold;
-   		-fx-padding: 8px 16px;
-   		-fx-background-radius: 4px;
-	}
-
-	.button-gold:hover {
-	    -fx-opacity: 0.75;
-	}
-	
-	/* 1. Haupt-Box der ComboBox (Dezentes Formular-Element) */
-	.combo-box {
-	    -fx-background-color: white;
-	    -fx-border-color: #CCCCCC;         /* Neutraler grauer Rahmen */
-	    -fx-border-width: 1px;
-	    -fx-border-radius: 4px;
-	    -fx-background-radius: 4px;
-	    -fx-padding: 2px 4px;
-	}
-
-	/* Hover- & Fokus-Zustand */
-	.combo-box:hover {
-	    -fx-border-color: #999999;
-	}
-
-	.combo-box:focused {
-	    -fx-border-color: -fx-ecv-blue;   /* Nur bei aktivem Klick/Fokus ein blauer Rahmen */
-	}
-
-	/* Text in der ComboBox (Standard Dunkelgrau) */
-	.combo-box .cell {
-	    -fx-text-fill: #333333;
-	    -fx-font-weight: normal;
-	}
-
-	/* 2. Pfeil-Icon (Dezentes Dunkelgrau) */
-	.combo-box .arrow-button {
-	    -fx-background-color: transparent;
-	}
-
-	.combo-box .arrow {
-	    -fx-background-color: #666666;
-	}
-
-	/* 3. Dropdown-Liste */
-	.combo-box-popup .list-view {
-	    -fx-background-color: white;
-	    -fx-border-color: #CCCCCC;
-	    -fx-border-width: 1px;
-	    -fx-border-radius: 4px;
-	    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.1), 5, 0, 0, 2);
-	}
-
-	.combo-box-popup .list-cell {
-	    -fx-padding: 6px 10px;
-	    -fx-text-fill: #333333;
-	    -fx-background-color: white;
-	}
-
-	/* Hover in der Dropdown-Liste */
-	.combo-box-popup .list-cell:hover {
-	    -fx-background-color: #F0F4F8;
+	    -fx-font-size: 55px;
 	    -fx-text-fill: -fx-ecv-blue;
 	}
 
-	/* Ausgewählter Eintrag im Dropdown */
-	.combo-box-popup .list-cell:filled:selected {
-	    -fx-background-color: -fx-ecv-blue;
-	    -fx-text-fill: white;
-	}
-
-/* Standard-Überschriften in ECV-Blau laut Gestaltungsrichtlinie */
-.header-label {
-    -fx-font-family: "Yanone Kaffeesatz";
-    -fx-text-fill: -fx-ecv-blue;
-    -fx-font-size: 18px;
+/* Überschriften (Yanone Kaffeesatz Bold in ECV-Blau) */
+.header-title, .header-label {
+    -fx-font-family: "Yanone Kaffeesatz"/*, "Calibri", sans-serif*/;
     -fx-font-weight: bold;
+    -fx-font-size: 33px;
+    -fx-text-fill: -fx-ecv-blue;
 }
 
-/* Tabellen-Styling (greift automatisch auf alle TableViews) */
-.table-view {
-    -fx-background-color: transparent;
+/* Unterüberschriften (Yanone Kaffeesatz Regular) */
+.subheader-label {
+    -fx-font-family: "Yanone Kaffeesatz"/*, "Calibri", sans-serif*/;
+    -fx-font-weight: normal;
+    -fx-font-size: 22px;
+    -fx-text-fill: -fx-ecv-blue;
+}
+
+/* ------------------------------------------------------------------------------
+ * 3. BUTTONS (Aktions-Hierarchie)
+ * ------------------------------------------------------------------------------ */
+.button {
+    -fx-font-family: "Calibri", "Segoe UI", sans-serif;
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+    -fx-padding: 7px 16px;
+    -fx-background-radius: 4px;
+    -fx-border-radius: 4px;
+    -fx-cursor: hand;
+}
+
+.button:hover {
+    -fx-opacity: 0.85;
+}
+
+.button:pressed {
+    -fx-opacity: 0.70;
+}
+
+/* Primärbutton: ECV-Blau mit ECV-Gelber Schrift (z.B. Speichern, Neues Event) */
+.button-primary {
+    -fx-background-color: -fx-ecv-blue;
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+/* Sekundärbutton: ECV-Gelb mit ECV-Blauer Schrift (z.B. Bearbeiten) */
+.button-secondary {
+    -fx-background-color: -fx-ecv-yellow;
+    -fx-text-fill: -fx-ecv-blue;
+}
+
+/* Standard/Basic Button: Weiß mit ECV-Roter Umrandung & Schrift (z.B. Zurück/Menü) */
+.button-default {
+    -fx-background-color: -fx-surface-white;
+    -fx-text-fill: -fx-ecv-red;
     -fx-border-color: -fx-ecv-red;
+    -fx-border-width: 1px;
+}
+
+/* Gefahrenbutton: ECV-Rot mit weißer Schrift (z.B. Löschen, Stornieren) */
+.button-danger {
+    -fx-background-color: -fx-ecv-red;
+    -fx-text-fill: white;
+}
+
+/* Jubiläumsbutton: ECV-Gold mit weißer Schrift */
+.button-gold {
+    -fx-background-color: -fx-ecv-gold;
+    -fx-text-fill: white;
+}
+
+/* ------------------------------------------------------------------------------
+ * 4. TEXTFELDER & TEXTAREAS (TextField, TextArea)
+ * ------------------------------------------------------------------------------ */
+.text-field, .text-area {
+    -fx-background-color: -fx-surface-white;
+    -fx-border-color: -fx-border-neutral;
+    -fx-border-width: 1px;
+    -fx-border-radius: 4px;
+    -fx-background-radius: 4px;
+    -fx-padding: 5px 8px;
+    -fx-text-fill: -fx-text-dark;
+}
+
+.text-field:focused, .text-area:focused {
+    -fx-border-color: -fx-ecv-blue;
+    -fx-border-width: 1.5px;
+}
+
+/* ------------------------------------------------------------------------------
+ * 5. COMBOBOX & DROPDOWNS
+ * ------------------------------------------------------------------------------ */
+.combo-box {
+    -fx-background-color: -fx-surface-white;
+    -fx-border-color: -fx-border-neutral;
+    -fx-border-width: 1px;
+    -fx-border-radius: 4px;
+    -fx-background-radius: 4px;
+    -fx-padding: 2px 4px;
+    -fx-cursor: hand;
+}
+
+.combo-box:hover {
+    -fx-border-color: #999999;
+}
+
+.combo-box:focused {
+    -fx-border-color: -fx-ecv-blue;
+    -fx-border-width: 1.5px;
+}
+
+.combo-box .cell {
+    -fx-text-fill: -fx-text-dark;
+    -fx-font-weight: normal;
+}
+
+.combo-box .arrow-button {
+    -fx-background-color: transparent;
+}
+
+.combo-box .arrow {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+/* Dropdown Popup-Liste */
+.combo-box-popup .list-view {
+    -fx-background-color: -fx-surface-white;
+    -fx-border-color: -fx-border-neutral;
+    -fx-border-width: 1px;
+    -fx-border-radius: 4px;
+    -fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.12), 6, 0, 0, 2);
+}
+
+.combo-box-popup .list-cell {
+    -fx-padding: 6px 10px;
+    -fx-text-fill: -fx-text-dark;
+    -fx-background-color: -fx-surface-white;
+}
+
+.combo-box-popup .list-cell:hover {
+    -fx-background-color: -fx-ecv-yellow;
+    -fx-text-fill: -fx-ecv-blue;
+}
+
+.combo-box-popup .list-cell:filled:selected {
+    -fx-background-color: -fx-ecv-blue;
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+/* ------------------------------------------------------------------------------
+ * 6. TABELLEN (TableView und TreeTableView)
+ * ------------------------------------------------------------------------------ */
+ .table-view,
+ .tree-table-view {
+     -fx-background-color: transparent;
+     -fx-border-color: -fx-border-neutral;
+     -fx-border-width: 1px;
+     -fx-border-radius: 4px;
+ }
+
+ /* Header in ECV-Blau */
+ .table-view .column-header-background,
+ .tree-table-view .column-header-background,
+ .table-view .filler,
+ .tree-table-view .filler {
+     -fx-background-color: -fx-ecv-blue;
+     -fx-border-color: transparent;
+ }
+
+ .table-view .column-header,
+ .tree-table-view .column-header {
+     -fx-background-color: transparent;
+     -fx-border-color: transparent -fx-ecv-yellow transparent transparent;
+     -fx-border-width: 1px;
+ }
+ 
+ /* Leerraum ganz rechts im Header (Filler) auf ECV-Blau setzen */
+ .table-view .filler,
+ .tree-table-view .filler {
+	 -fx-background-color: -fx-ecv-blue;
+	 -fx-border-color: transparent;
+ }
+ 
+ /* Spalten-Auswahl-Button (falls aktiviert, ganz rechts im Header) */
+ .table-view .show-hide-columns-button,
+ .tree-table-view .show-hide-columns-button {
+     -fx-background-color: -fx-ecv-blue;
+ }
+ 
+ .table-view .show-hide-columns-button .show-hide-column-image,
+ .tree-table-view .show-hide-columns-button .show-hide-column-image {
+     -fx-background-color: white;
+ }
+
+ .table-view .column-header .label,
+ .tree-table-view .column-header .label {
+     -fx-text-fill: white;
+     -fx-font-weight: bold;
+ }
+
+ /* Zeilen & Hover/Selection */
+ .table-row-cell,
+ .tree-table-row-cell {
+     -fx-background-color: -fx-surface-white;
+ }
+
+ .table-row-cell:odd,
+ .tree-table-row-cell:odd {
+     -fx-background-color: #F0F4F8;
+ }
+
+ .table-row-cell:hover,
+ .tree-table-row-cell:hover {
+     -fx-background-color: #E2E8F0;
+ }
+
+ .table-row-cell:selected,
+ .tree-table-row-cell:selected {
+     -fx-background-color: -fx-ecv-yellow;
+ }
+
+ .table-row-cell:selected .table-cell,
+ .tree-table-row-cell:selected .tree-table-cell {
+	-fx-text-fill: -fx-ecv-blue;
+    -fx-border-color: transparent -fx-ecv-blue transparent transparent;
+    -fx-border-width: 1px;
+ }
+
+ .table-view .table-cell,
+ .tree-table-view .tree-table-cell {
+     -fx-padding: 6px 8px;
+ }
+
+ /* Textfarbe bei Ausführung der Auswahl */
+ .table-row-cell:selected .table-cell,
+ .tree-table-row-cell:selected .tree-table-cell {
+     -fx-text-fill: -fx-ecv-blue;
+ }
+
+/* ------------------------------------------------------------------------------
+ * 7. CHECKBOX & RADIOBUTTON
+ * ------------------------------------------------------------------------------ */
+.check-box, .radio-button {
+    -fx-text-fill: -fx-text-dark;
+    -fx-cursor: hand;
+}
+
+.check-box .box, .radio-button .radio {
+    -fx-background-color: -fx-surface-white;
+    -fx-border-color: -fx-ecv-blue;
+    -fx-border-radius: 3px;
+    -fx-border-width: 1px;
+}
+
+.radio-button .radio {
+    -fx-background-radius: 10px;
+}
+
+.check-box:selected .box, .radio-button:selected .radio {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+.check-box:selected .mark {
+    -fx-background-color: -fx-ecv-yellow;
+}
+
+.radio-button:selected .dot {
+    -fx-background-color: -fx-ecv-yellow;
+}
+
+/* ------------------------------------------------------------------------------
+ * 8. SPINNER (Zahlen-Eingabefelder)
+ * ------------------------------------------------------------------------------ */
+.spinner {
+    -fx-background-color: -fx-surface-white;
+    -fx-border-color: -fx-border-neutral;
+    -fx-border-width: 1px;
     -fx-border-radius: 4px;
 }
 
-/* Tabellenkopf (Header) in ECV-Blau */
-.table-view .column-header-background {
-    -fx-background-color: white;
+.spinner .text-field {
+    -fx-border-color: transparent;
 }
 
-.table-view .column-header .label {
-    -fx-text-fill: -fx-ecv-red;
-	-fx-background-color: white;
+.spinner .increment-arrow-button, .spinner .decrement-arrow-button {
+    -fx-background-color: transparent;
+    -fx-cursor: hand;
+}
+
+.spinner .increment-arrow, .spinner .decrement-arrow {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+/* ------------------------------------------------------------------------------
+ * 9. TABPANE (Reiter / Tab-Navigation)
+ * ------------------------------------------------------------------------------ */
+.tab-pane .tab-header-area .tab-header-background {
+    -fx-background-color: transparent;
+}
+
+.tab {
+    -fx-background-color: #E0E0E0;
+    -fx-background-radius: 4px 4px 0 0;
+    -fx-padding: 6px 12px;
+    -fx-cursor: hand;
+}
+
+.tab .tab-label {
+    -fx-text-fill: -fx-text-dark;
     -fx-font-weight: bold;
 }
 
-/* Abwechselnde Zeilenfarben */
-.table-row-cell:odd {
-    -fx-background-color: #F0F4F8;
-}
-
-.table-row-cell:hover {
-    -fx-background-color: -fx-ecv-yellow;
-    -fx-text-color: -fx-ecv-blue;
-}
-
-.table-row-cell:selected {
+.tab:selected {
     -fx-background-color: -fx-ecv-blue;
-    -fx-text-color: -fx-ecv-yellow;
+}
+
+.tab:selected .tab-label {
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+/* ------------------------------------------------------------------------------
+ * 10. SCROLLBARS
+ * ------------------------------------------------------------------------------ */
+.scroll-bar {
+    -fx-background-color: transparent;
+}
+
+.scroll-bar .thumb {
+    -fx-background-color: #CCCCCC;
+    -fx-background-radius: 4px;
+}
+
+.scroll-bar .thumb:hover {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+/* ------------------------------------------------------------------------------
+ * 11. TOOLTIPS, MENÜS & DIALOGE
+ * ------------------------------------------------------------------------------ */
+.tooltip {
+    -fx-background-color: -fx-ecv-blue;
+    -fx-text-fill: white;
+    -fx-padding: 6px 10px;
+    -fx-background-radius: 4px;
+}
+
+.context-menu {
+    -fx-background-color: -fx-surface-white;
+    -fx-border-color: -fx-border-neutral;
+    -fx-border-radius: 4px;
+}
+
+/* Hintergrund auf ECV-Gelb bei Hover, Fokus oder Aktivierung (:armed) */
+.menu-item:hover,
+.menu-item:focused,
+.menu-item:armed {
+    -fx-background-color: -fx-ecv-yellow;
+}
+
+/* Textfarbe auf ECV-Blau setzen */
+.menu-item:hover .label,
+.menu-item:focused .label,
+.menu-item:armed .label {
+    -fx-text-fill: -fx-ecv-blue;
 }

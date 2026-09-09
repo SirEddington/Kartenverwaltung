@@ -89,7 +89,7 @@
     <Separator />
 
 <!-- Sitzdetails (3-Spalten-Layout) -->
-    <Label text="Sitzdetails" style="-fx-font-weight: bold;" />
+    <Label text="Sitzdetails" />
     <HBox spacing="20.0">
         <!-- Spalte Links: Personendaten -->
         <GridPane hgap="8.0" vgap="10.0" HBox.hgrow="ALWAYS">
