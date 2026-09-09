@@ -27,7 +27,7 @@ public class Presentation {
 	private double hallWidth;
 	private double hallHeight;
 	private int tableRows;
-	
+
 	// Standardwerte
 	private double defaultTableWidth;
 	private double defaultTableHeight;
@@ -182,16 +182,32 @@ public class Presentation {
 		Table newTable = new Table();
 		newTable.setParent(this);
 		newTable.changeTableNumber(createTableNumber());
-		
+
 		// Maße initialisieren
 		newTable.setHeight(defaultTableHeight);
 		newTable.setWidth(defaultTableWidth);
-		
+
 		tables.add(newTable);
 		return newTable;
 	}
 
-	// ToDO addTable mit TableNumber
+	public Table addTable(int tableNumber) {
+		Table newTable = new Table();
+		newTable.setParent(this);
+
+		if (!getTableNumbers().contains(tableNumber)) {
+			newTable.changeTableNumber(tableNumber);
+		} else {
+			newTable.changeTableNumber(createTableNumber());
+		}
+
+		// Maße initialisieren
+		newTable.setHeight(defaultTableHeight);
+		newTable.setWidth(defaultTableWidth);
+
+		tables.add(newTable);
+		return newTable;
+	}
 
 	private int createTableNumber() {
 		// 1. Alle aktuell vorhandenen Namen einsammeln

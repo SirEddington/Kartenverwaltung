@@ -12,11 +12,11 @@ import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 public class Event {
 	private final String id;
-	
+
 	private String name;
 	private String description;
 	private boolean archived;
-	
+
 	@JsonManagedReference("event-presentation")
 	private List<Presentation> presentations = new ArrayList<>(); // get,set
 
@@ -24,7 +24,7 @@ public class Event {
 	public Event() {
 		this.id = UUID.randomUUID().toString();
 	}
-	
+
 	public Event(String id) {
 		this.id = (id != null) ? id : UUID.randomUUID().toString();
 	}
@@ -34,7 +34,7 @@ public class Event {
 	public String getId() {
 		return id;
 	}
-	
+
 	public String getName() {
 		return name;
 	}
@@ -62,8 +62,8 @@ public class Event {
 	public void setPresentations(List<Presentation> presentations) {
 		this.presentations = presentations;
 		if (presentations != null) {
-	        presentations.forEach(p -> p.setParent(this));
-	    }
+			presentations.forEach(p -> p.setParent(this));
+		}
 	}
 	// <-- Getter und Setter
 
@@ -83,7 +83,19 @@ public class Event {
 		return newPres;
 	}
 
-	// ToDo addPresentation mit Name
+	public Presentation addPresentation(String presentationName) {
+		Presentation newPres = new Presentation();
+		newPres.setParent(this);
+
+		if (!getPresentationNames().contains(presentationName)) {
+			newPres.changeName(presentationName);
+		} else {
+			newPres.changeName(createPresName());
+		}
+
+		presentations.add(newPres);
+		return newPres;
+	}
 
 	private String createPresName() {
 		// 1. Alle aktuell vorhandenen Namen einsammeln
@@ -138,17 +150,28 @@ public class Event {
 		}
 		return tableNumbers.stream().distinct().sorted().toList();
 	}
-	
-	@Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Event event = (Event) o;
-        return Objects.equals(id, event.id);
-    }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(id);
-    }
+	@JsonIgnore
+	public List<String> getPresentationNames() {
+		List<String> presNames = new ArrayList<String>();
+		for (Presentation pres : presentations) {
+			presNames.add(pres.getName());
+		}
+		return presNames.stream().distinct().sorted().toList();
+	}
+
+	@Override
+	public boolean equals(Object o) {
+		if (this == o)
+			return true;
+		if (o == null || getClass() != o.getClass())
+			return false;
+		Event event = (Event) o;
+		return Objects.equals(id, event.id);
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(id);
+	}
 }

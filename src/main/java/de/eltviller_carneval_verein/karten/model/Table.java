@@ -139,11 +139,29 @@ public class Table {
 		Seat newSeat = new Seat();
 		newSeat.setParent(this);
 		newSeat.changeSeatNumber(createSeatNumber());
-		
+
 		// Maße initialisieren
 		newSeat.setHeight(getParent().getDefaultSeatHeight());
 		newSeat.setWidth(getParent().getDefaultSeatWidth());
-		
+
+		seats.add(newSeat);
+		return newSeat;
+	}
+
+	public Seat addSeat(int seatNumber) {
+		Seat newSeat = new Seat();
+		newSeat.setParent(this);
+
+		if (!getSeatNumbers().contains(seatNumber)) {
+			newSeat.changeSeatNumber(seatNumber);
+		} else {
+			newSeat.changeSeatNumber(createSeatNumber());
+		}
+
+		// Maße initialisieren
+		newSeat.setHeight(getParent().getDefaultSeatHeight());
+		newSeat.setWidth(getParent().getDefaultSeatWidth());
+
 		seats.add(newSeat);
 		return newSeat;
 	}
