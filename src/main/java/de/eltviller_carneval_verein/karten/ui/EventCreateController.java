@@ -39,7 +39,7 @@ public class EventCreateController {
 	@FXML
 	private Spinner<Double> spnDoublePrice;
 
-	private final JsonTicketRepository repository = new JsonTicketRepository();
+	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
 	private Event currentEvent;
 
 	public void setEventToEdit(Event event) {

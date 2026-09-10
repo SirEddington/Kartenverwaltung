@@ -19,7 +19,7 @@ import javafx.scene.layout.StackPane;
 
 public class TicketShellController {
 	
-	private final JsonTicketRepository repository = new JsonTicketRepository();
+	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
 
     @FXML private ComboBox<Event> eventComboBox;
     @FXML private ComboBox<Presentation> presComboBox;
