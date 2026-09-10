@@ -221,6 +221,10 @@ public class Presentation {
 
 		return i;
 	}
+	
+	public boolean deleteTable(Table table) {
+		return tables.remove(table);
+	}
 
 	@Override
 	public String toString() {

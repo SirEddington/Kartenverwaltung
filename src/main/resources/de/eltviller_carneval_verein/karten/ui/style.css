@@ -282,33 +282,51 @@
 /* ------------------------------------------------------------------------------
  * 7. CHECKBOX & RADIOBUTTON
  * ------------------------------------------------------------------------------ */
-.check-box, .radio-button {
-    -fx-text-fill: -fx-text-dark;
-    -fx-cursor: hand;
-}
+ .check-box, .radio-button {
+     -fx-text-fill: -fx-text-dark;
+     -fx-cursor: hand;
+ }
 
-.check-box .box, .radio-button .radio {
-    -fx-background-color: -fx-surface-white;
-    -fx-border-color: -fx-ecv-blue;
-    -fx-border-radius: 3px;
-    -fx-border-width: 1px;
-}
+ /* --- CheckBox (Klassisch eckig mit leicht abgerundeten Ecken) --- */
+ .check-box .box {
+     -fx-background-color: -fx-surface-white;
+     -fx-border-color: -fx-ecv-blue;
+     -fx-border-width: 1px;
+     -fx-border-radius: 3px;
+     -fx-background-radius: 3px;
+ }
 
-.radio-button .radio {
-    -fx-background-radius: 10px;
-}
+ .check-box:selected .box {
+     -fx-background-color: -fx-ecv-blue;
+ }
 
-.check-box:selected .box, .radio-button:selected .radio {
-    -fx-background-color: -fx-ecv-blue;
-}
+ .check-box:selected .mark {
+     -fx-background-color: -fx-ecv-yellow;
+ }
 
-.check-box:selected .mark {
-    -fx-background-color: -fx-ecv-yellow;
-}
+ /* --- RadioButton (Perfekt kreisrund) --- */
+ .radio-button .radio {
+     -fx-background-color: -fx-surface-white;
+     -fx-border-color: -fx-ecv-blue;
+     -fx-border-width: 1px;
+     -fx-border-radius: 1em;       /* Erzeugt den kreisrunden Rahmen */
+     -fx-background-radius: 1em;   /* Erzeugt den kreisrunden Hintergrund */
+     -fx-padding: 3px;
+ }
 
-.radio-button:selected .dot {
-    -fx-background-color: -fx-ecv-yellow;
-}
+ .radio-button:selected .radio {
+     -fx-background-color: -fx-ecv-blue;
+ }
+
+ .radio-button .dot {
+     -fx-background-color: transparent;
+     -fx-background-radius: 1em;
+ }
+
+ .radio-button:selected .dot {
+     -fx-background-color: -fx-ecv-yellow;
+     -fx-background-radius: 1em;
+ }
 
 /* ------------------------------------------------------------------------------
  * 8. SPINNER (Zahlen-Eingabefelder)

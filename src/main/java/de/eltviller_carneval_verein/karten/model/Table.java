@@ -178,6 +178,10 @@ public class Table {
 
 		return i;
 	}
+	
+	public boolean deleteSeat(Seat seat) {
+		return seats.remove(seat);
+	}
 
 	@Override
 	public String toString() {

@@ -109,6 +109,10 @@ public class Event {
 
 		return "Vorstellung " + i;
 	}
+	
+	public boolean deletePresentation(Presentation presentation) {
+		return presentations.remove(presentation);
+	}
 
 	@Override
 	public String toString() {

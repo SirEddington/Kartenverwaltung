@@ -393,7 +393,11 @@ public class EventEditController {
 		}
 
 		repository.deleteEvent(event);
-		refreshEventTable(null);
+		
+		if (currentEvent.equals(event)) {
+			currentEvent = null;
+		}
+		refreshEventTable(currentEvent);
 	}
 
 	private void handleAddPres() {
@@ -433,7 +437,20 @@ public class EventEditController {
 	}
 
 	private void handleDeletePres(Presentation presentation) {
+		Alert confirmation = new Alert(AlertType.CONFIRMATION);
+		confirmation.setTitle("Event löschen");
+		confirmation.setHeaderText(null);
+		confirmation.setContentText("Soll die Vorstellung \"" + presentation.getName() + "\" wirklich unwiderruflich gelöscht werden?");
 
+		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
+			return;
+		}
+
+		presentation.getParent().deletePresentation(presentation);
+		if (currentPres.equals(presentation)) {
+			currentPres = null;
+		}
+		refreshPresentationTable(currentEvent, currentPres);
 	}
 
 	private void handleAddTable() {
@@ -466,7 +483,20 @@ public class EventEditController {
 	}
 
 	private void handleDeleteTable(Table table) {
+		Alert confirmation = new Alert(AlertType.CONFIRMATION);
+		confirmation.setTitle("Event löschen");
+		confirmation.setHeaderText(null);
+		confirmation.setContentText("Soll Tisch " + table.getTableNumber() + " wirklich unwiderruflich gelöscht werden?");
 
+		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
+			return;
+		}
+
+		table.getParent().deleteTable(table);
+		if (currentTable.equals(table)) {
+			currentTable = null;
+		}
+		refreshTableTable(currentPres, currentTable);
 	}
 
 	private void handleAddSeat() {
@@ -496,7 +526,20 @@ public class EventEditController {
 	}
 
 	private void handleDeleteSeat(Seat seat) {
+		Alert confirmation = new Alert(AlertType.CONFIRMATION);
+		confirmation.setTitle("Event löschen");
+		confirmation.setHeaderText(null);
+		confirmation.setContentText("Soll Sitz " + seat.getSeatNumber() + " wirklich unwiderruflich gelöscht werden?");
 
+		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
+			return;
+		}
+
+		seat.getParent().deleteSeat(seat);
+		if (currentSeat.equals(seat)) {
+			currentSeat = null;
+		}
+		refreshSeatTable(currentTable, currentSeat);
 	}
 
 	private void loadDetailsOfSeat(Seat selectedSeat) {
