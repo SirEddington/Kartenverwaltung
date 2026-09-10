@@ -25,7 +25,7 @@ import javafx.scene.control.cell.CheckBoxTreeTableCell;
 
 public class EventOverviewController {
 
-	private final JsonTicketRepository repository = new JsonTicketRepository();
+	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
 
 	@FXML
 	private TextField searchField;
