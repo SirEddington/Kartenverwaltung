@@ -48,7 +48,7 @@ import javafx.util.converter.LocalTimeStringConverter;
 
 public class EventEditController {
 
-	private final JsonTicketRepository repository = new JsonTicketRepository();
+	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
 
 	private final ObservableList<Event> masterEventData = FXCollections.observableArrayList();
 	private FilteredList<Event> filteredEventData;
@@ -144,24 +144,24 @@ public class EventEditController {
 	public void initData(Event event, Presentation presentation, Table table, Seat seat, boolean editable) {
 
 		if (event != null) {
+			this.currentEvent = event;
 			eventTable.getSelectionModel().select(event);
 			eventTable.scrollTo(event);
-			this.currentEvent = event;
 
 			if (presentation != null && presTable.getItems().contains(presentation)) {
+				this.currentPres = presentation;
 				presTable.getSelectionModel().select(presentation);
 				presTable.scrollTo(presentation);
-				this.currentPres = presentation;
 
 				if (table != null && tableTable.getItems().contains(table)) {
+					this.currentTable = table;
 					tableTable.getSelectionModel().select(table);
 					tableTable.scrollTo(table);
-					this.currentTable = table;
 
 					if (seat != null && seatTable.getItems().contains(seat)) {
+						this.currentSeat = seat;
 						seatTable.getSelectionModel().select(seat);
 						seatTable.scrollTo(seat);
-						this.currentSeat = seat;
 					}
 				}
 			}
@@ -393,7 +393,7 @@ public class EventEditController {
 		}
 
 		repository.deleteEvent(event);
-		
+
 		if (currentEvent.equals(event)) {
 			currentEvent = null;
 		}

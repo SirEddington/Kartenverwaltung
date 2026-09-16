@@ -28,7 +28,7 @@ import javafx.util.converter.DoubleStringConverter;
 
 public class TicketTableController implements ContentController {
 
-	private final JsonTicketRepository repository = new JsonTicketRepository();
+	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
 	private Event selectedEvent;
 	private Presentation selectedPres;
 	private boolean editMode = false;
