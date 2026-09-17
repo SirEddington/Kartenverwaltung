@@ -411,7 +411,7 @@ public class HallOverviewController implements ContentController {
 	private void openSeatDetailPopup(Seat seat, Window window, double screenX, double screenY) {
 		closePopup();
 		activePopup = buildSeatDetailPopup(seat);
-		activePopup.show(window, screenX, screenY);
+		showDetailPopup(activePopup, window, screenX, screenY);
 	}
 
 	/**
@@ -422,7 +422,7 @@ public class HallOverviewController implements ContentController {
 	private void openTableDetailPopup(Table table, Window window, double screenX, double screenY) {
 		closePopup();
 		activePopup = buildTableDetailPopup(table);
-		activePopup.show(window, screenX, screenY);
+		showDetailPopup(activePopup, window, screenX, screenY);
 	}
 
 	private void closePopup() {
@@ -440,6 +440,19 @@ public class HallOverviewController implements ContentController {
 	 * werden müssen.
 	 */
 	private static final String DETAIL_POPUP_STYLE = "-fx-background-color: white; -fx-border-color: #999999; -fx-border-width: 1; " + "-fx-padding: 12; -fx-background-radius: 4; -fx-border-radius: 4;";
+
+	private static final String APP_STYLESHEET = HallOverviewController.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
+
+	/**
+	 * Zeigt das Popup an und hängt danach das App-Stylesheet an dessen (erst beim
+	 * Anzeigen erzeugte) eigene Szene, damit Buttons, TextFields, ComboBoxen usw.
+	 * im Popup genauso aussehen wie im Rest der App. Ein Popup bekommt sonst keine
+	 * Stylesheets von der Haupt-Szene mit, da es eine eigenständige Szene ist.
+	 */
+	private void showDetailPopup(Popup popup, Window window, double screenX, double screenY) {
+		popup.show(window, screenX, screenY);
+		popup.getScene().getStylesheets().add(APP_STYLESHEET);
+	}
 
 	private Popup createDetailPopup() {
 		Popup popup = new Popup();
@@ -463,7 +476,8 @@ public class HallOverviewController implements ContentController {
 	}
 
 	private void addCloseButtonRow(GridPane grid, Popup popup, int row) {
-		Button closeButton = new Button("Schließen");
+		Button closeButton = new Button("Anwenden");
+		closeButton.getStyleClass().add("button-primary");
 		closeButton.setOnAction(event -> popup.hide());
 		HBox buttonBar = new HBox(closeButton);
 		buttonBar.setAlignment(Pos.CENTER_RIGHT);
@@ -602,6 +616,7 @@ public class HallOverviewController implements ContentController {
 
 		Button resetPositionButton = new Button("Position zurücksetzen");
 		resetPositionButton.setDisable(!editMode || !table.isManualPos());
+		resetPositionButton.getStyleClass().add("button-danger");
 		resetPositionButton.setOnAction(event -> {
 			table.setManualPos(false);
 			popup.hide();

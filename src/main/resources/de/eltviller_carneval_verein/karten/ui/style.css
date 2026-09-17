@@ -69,6 +69,10 @@
     -fx-background-radius: 4px;
     -fx-border-radius: 4px;
     -fx-cursor: hand;
+    -fx-background-color: -fx-surface-white;
+    -fx-text-fill: -fx-ecv-red;
+    -fx-border-color: -fx-ecv-red;
+    -fx-border-width: 1px;
 }
 
 .button:hover {
@@ -83,12 +87,14 @@
 .button-primary {
     -fx-background-color: -fx-ecv-blue;
     -fx-text-fill: -fx-ecv-yellow;
+    -fx-border-width: 0px;
 }
 
 /* Sekundärbutton: ECV-Gelb mit ECV-Blauer Schrift (z.B. Bearbeiten) */
 .button-secondary {
     -fx-background-color: -fx-ecv-yellow;
     -fx-text-fill: -fx-ecv-blue;
+    -fx-border-width: 0px;
 }
 
 /* Standard/Basic Button: Weiß mit ECV-Roter Umrandung & Schrift (z.B. Zurück/Menü) */
@@ -103,12 +109,14 @@
 .button-danger {
     -fx-background-color: -fx-ecv-red;
     -fx-text-fill: white;
+    -fx-border-width: 0px;
 }
 
 /* Jubiläumsbutton: ECV-Gold mit weißer Schrift */
 .button-gold {
     -fx-background-color: -fx-ecv-gold;
     -fx-text-fill: white;
+    -fx-border-width: 0px;
 }
 
 /* ------------------------------------------------------------------------------
@@ -126,7 +134,8 @@
 
 .text-field:focused, .text-area:focused {
     -fx-border-color: -fx-ecv-blue;
-    -fx-border-width: 1.5px;
+    /* Breite bewusst gleich wie im Normalzustand, sonst verschiebt sich beim Fokussieren das Layout (Border zählt zur Kontrollgröße) */
+    -fx-border-width: 1px;
 }
 
 /* ------------------------------------------------------------------------------
@@ -148,10 +157,12 @@
 
 .combo-box:focused {
     -fx-border-color: -fx-ecv-blue;
-    -fx-border-width: 1.5px;
+    /* Breite bewusst gleich wie im Normalzustand, sonst verschiebt sich beim Fokussieren das Layout (Border zählt zur Kontrollgröße) */
+    -fx-border-width: 1px;
 }
 
-.combo-box .cell {
+/* Anzeige-Zelle des geschlossenen ComboBox: intern ".list-cell", nicht ".cell" (letzteres matcht nie) */
+.combo-box .list-cell {
     -fx-text-fill: -fx-text-dark;
     -fx-font-weight: normal;
 }
@@ -422,4 +433,75 @@
 .menu-item:focused .label,
 .menu-item:armed .label {
     -fx-text-fill: -fx-ecv-blue;
+}
+
+/* ------------------------------------------------------------------------------
+ * 12. ANZEIGEMODUS (deaktivierte Eingabefelder)
+ * ------------------------------------------------------------------------------
+ * Das Standard-Theme dimmt deaktivierte Controls pauschal über -fx-opacity,
+ * was Rahmen UND Text gleichermaßen ausbleicht und schlecht lesbar macht.
+ * Stattdessen: volle Deckkraft, flacher grauer "Nur-Lese"-Look ohne Rahmen,
+ * Text bleibt dunkel und lesbar. Farbe/Look unterscheidet sich trotzdem klar
+ * vom weißen, umrandeten Bearbeitungsmodus.
+ * ------------------------------------------------------------------------------ */
+.text-field:disabled, .text-area:disabled {
+    -fx-opacity: 1;
+    -fx-background-color: -fx-bg-app;
+    -fx-border-color: transparent;
+    -fx-text-fill: -fx-text-dark;
+}
+
+/* Modenas eigene Deaktivierungs-Regel (-fx-opacity: 0.4) greift auf .combo-box-base:disabled,
+ * nicht auf .combo-box:disabled – deshalb hier beide Selektoren, sonst gewinnt Modena. */
+.combo-box:disabled, .combo-box-base:disabled {
+    -fx-opacity: 1;
+    -fx-background-color: -fx-bg-app;
+    -fx-border-color: transparent;
+}
+
+/* Die Anzeige-Zelle des geschlossenen ComboBox heißt intern ".list-cell", nicht ".cell". */
+.combo-box:disabled .list-cell, .combo-box-base:disabled .list-cell {
+    -fx-text-fill: -fx-text-dark;
+}
+
+/* Die Anzeige-Zelle trägt immer :filled:selected (da die ComboBox stets einen Wert hat).
+ * Modena dimmt genau diese Kombination separat nochmal auf 0.4 Opacity
+ * (".list-cell:filled:selected:disabled"), unabhängig von der ComboBox selbst - deshalb
+ * hier zusätzlich mit derselben Spezifität gekontert. */
+.combo-box:disabled .list-cell:filled:selected, .combo-box-base:disabled .list-cell:filled:selected {
+    -fx-opacity: 1;
+    -fx-text-fill: -fx-text-dark;
+}
+
+.combo-box:disabled .arrow {
+    -fx-background-color: -fx-border-neutral;
+}
+
+.spinner:disabled {
+    -fx-opacity: 1;
+    -fx-background-color: -fx-bg-app;
+    -fx-border-color: transparent;
+}
+
+.spinner:disabled .text-field {
+    -fx-background-color: transparent;
+    -fx-text-fill: -fx-text-dark;
+}
+
+.spinner:disabled .increment-arrow-button,
+.spinner:disabled .decrement-arrow-button {
+    -fx-opacity: 0;
+}
+
+.check-box:disabled {
+    -fx-opacity: 1;
+}
+
+.check-box:disabled .box {
+    -fx-background-color: -fx-bg-app;
+    -fx-border-color: -fx-border-neutral;
+}
+
+.check-box:disabled:selected .mark {
+    -fx-background-color: -fx-text-dark;
 }
