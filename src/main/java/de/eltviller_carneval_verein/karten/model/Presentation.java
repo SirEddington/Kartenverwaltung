@@ -34,6 +34,9 @@ public class Presentation {
 	private double defaultSeatWidth;
 	private double defaultSeatHeight;
 
+	// Kassenabgleich
+	private int actualCashAmount; // tatsächlicher Bar-Kasseninhalt in Cent
+
 	@JsonManagedReference("presentation-table")
 	private List<Table> tables = new ArrayList<>(); // get,set
 	private List<HallObject> hallObjects = new ArrayList<>(); // get,set
@@ -167,6 +170,24 @@ public class Presentation {
 
 	public void setDefaultSeatHeight(double defaultSeatHeight) {
 		this.defaultSeatHeight = defaultSeatHeight;
+	}
+
+	public int getActualCashAmount() {
+		return actualCashAmount;
+	}
+
+	public void setActualCashAmount(int actualCashAmount) {
+		this.actualCashAmount = actualCashAmount;
+	}
+
+	@JsonIgnore
+	public double getActualCashAmountDouble() {
+		return actualCashAmount / 100.0;
+	}
+
+	@JsonIgnore
+	public void setActualCashAmountDouble(double actualCashAmount) {
+		this.actualCashAmount = (int) Math.round(actualCashAmount * 100);
 	}
 	// <-- Getter und Setter
 

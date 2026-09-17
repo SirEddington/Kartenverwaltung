@@ -34,6 +34,7 @@
         <!-- Toggle-Buttons zum Umschalten der Mitte -->
         <RadioButton fx:id="btnTableView" text="Tabelle" onAction="#showTicketTableView" selected="true"/>
         <RadioButton fx:id="btnHallView" text="Saalansicht" onAction="#showHallView"/>
+        <RadioButton fx:id="btnCashView" text="Kassenabgleich" onAction="#showCashReconciliationView"/>
         
         <Button fx:id="btnToggleEdit" styleClass="button-secondary" text="Bearbeiten" onAction="#toggleEditMode" />
     </HBox>
