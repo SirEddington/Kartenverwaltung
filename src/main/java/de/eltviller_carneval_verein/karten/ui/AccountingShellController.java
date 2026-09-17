@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.MainApp;
@@ -14,6 +15,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.layout.StackPane;
+import javafx.util.StringConverter;
 
 /**
  * Eigenständiger Bereich "Abrechnung", losgelöst vom Kartenverkauf: eigene
@@ -44,16 +46,35 @@ public class AccountingShellController {
 
 	@FXML
 	public void initialize() {
+		// "Alle" ist als echter (null-)Eintrag Teil der Liste, damit er wie eine
+		// normale Auswahl wirkt, statt ein Sonderfall über einen extra Button zu sein.
+		presComboBox.setConverter(new StringConverter<Presentation>() {
+			@Override
+			public String toString(Presentation presentation) {
+				return presentation == null ? "Alle (Gesamtbilanz)" : presentation.getName();
+			}
+
+			@Override
+			public Presentation fromString(String string) {
+				return null; // Bei fixer ComboBox-Auswahl nicht erforderlich
+			}
+		});
+
 		reloadEventItems();
 
 		chkIncludeArchived.selectedProperty().addListener((obs, oldVal, newVal) -> reloadEventItems());
 
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			currentEvent = selectedEvent;
-			presComboBox.getItems().clear();
+
+			List<Presentation> presentationItems = new ArrayList<>();
+			presentationItems.add(null); // "Alle (Gesamtbilanz)"
 			if (currentEvent != null) {
-				presComboBox.getItems().setAll(currentEvent.getPresentations());
+				presentationItems.addAll(currentEvent.getPresentations());
 			}
+			presComboBox.getItems().setAll(presentationItems);
+			presComboBox.getSelectionModel().selectFirst();
+
 			if (activeContentController != null) {
 				activeContentController.setEvent(currentEvent);
 			}
@@ -124,11 +145,6 @@ public class AccountingShellController {
 		if (activeContentController != null) {
 			activeContentController.setEditMode(editMode);
 		}
-	}
-
-	@FXML
-	private void clearPresentationSelection() {
-		presComboBox.getSelectionModel().clearSelection();
 	}
 
 	@FXML

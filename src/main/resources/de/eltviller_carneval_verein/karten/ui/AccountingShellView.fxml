@@ -25,8 +25,7 @@
         <CheckBox fx:id="chkIncludeArchived" text="Archivierte einschließen" />
 
         <Label text="Vorstellung:" />
-        <ComboBox fx:id="presComboBox" prefWidth="180.0" promptText="Alle (Gesamtbilanz)" />
-        <Button text="Alle" styleClass="button-default" onAction="#clearPresentationSelection" />
+        <ComboBox fx:id="presComboBox" prefWidth="180.0" />
 
         <Region HBox.hgrow="ALWAYS" />
 
