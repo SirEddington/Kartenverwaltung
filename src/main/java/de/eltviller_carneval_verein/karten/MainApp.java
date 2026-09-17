@@ -13,6 +13,7 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import javafx.scene.image.Image;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
@@ -34,6 +35,7 @@ public class MainApp extends Application {
 		primaryStage.setMinHeight(height);
 
 		stage.setTitle("ECV Kartenverwaltung");
+		stage.getIcons().add(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/harlekin_logo.png")));
 
 		// Startet direkt im Hauptmenü
 		showMenuView();
