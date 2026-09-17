@@ -6,12 +6,17 @@ import javafx.fxml.FXML;
 public class MenuController {
 
 	@FXML
-	private void handleOpenTable() {
+	private void handleOpenSales() {
 		MainApp.showTicketShellView();
 	}
 
 	@FXML
-	private void handleCreateEvent() {
+	private void handleOpenAccounting() {
+		MainApp.showAccountingShellView();
+	}
+
+	@FXML
+	private void handleOpenEventManagement() {
 		MainApp.showEventOverviewView();
 	}
 }

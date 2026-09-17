@@ -4,43 +4,36 @@
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
 
-<VBox spacing="15.0" prefWidth="1000.0" prefHeight="700.0" 
-      xmlns="http://javafx.com/javafx/17" 
-      xmlns:fx="http://javafx.com/fxml/1" 
-      fx:controller="de.eltviller_carneval_verein.karten.ui.TicketShellController">
+<VBox spacing="15.0" prefWidth="1000.0" prefHeight="700.0"
+      xmlns="http://javafx.com/javafx/17"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="de.eltviller_carneval_verein.karten.ui.AccountingShellController">
     <padding>
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
 
-    <!-- OBERER BEREICH: Identischer Header -->
+    <!-- OBERER BEREICH: Header, unabhängig vom Kartenverkauf -->
     <HBox alignment="CENTER_LEFT" spacing="10.0">
         <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" />
-        
-        <Label  fx:id="lblHeader" text="Kartentabelle" styleClass="header-label" />
-            
+
+        <Label text="Abrechnung" styleClass="header-label" />
+
         <Region HBox.hgrow="ALWAYS" />
-        
+
         <Label text="Event:" />
         <ComboBox fx:id="eventComboBox" prefWidth="180.0" promptText="Event wählen..." />
-        
+
         <Label text="Vorstellung:" />
         <ComboBox fx:id="presComboBox" prefWidth="180.0" promptText="Vorstellung wählen..." />
-            
-        <Label text="Suche:" />
-        <TextField fx:id="searchField" prefWidth="180.0" promptText="Suche..." />
-            
+
         <Region HBox.hgrow="ALWAYS" />
-        
-        <!-- Toggle-Buttons zum Umschalten der Mitte -->
-        <RadioButton fx:id="btnTableView" text="Tabelle" onAction="#showTicketTableView" selected="true"/>
-        <RadioButton fx:id="btnHallView" text="Saalansicht" onAction="#showHallView"/>
-        
+
         <Button fx:id="btnToggleEdit" styleClass="button-secondary" text="Bearbeiten" onAction="#toggleEditMode" />
     </HBox>
-    
+
     <Separator />
 
-    <!-- MITTLERER BEREICH: Wechselnder Inhalt -->
+    <!-- MITTLERER BEREICH: Kassenabgleich (Platz für künftige Statistik-Ansichten) -->
     <StackPane fx:id="contentArea" VBox.vgrow="ALWAYS" />
 
     <Separator />

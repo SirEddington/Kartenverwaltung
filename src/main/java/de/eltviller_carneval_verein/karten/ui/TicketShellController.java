@@ -26,7 +26,6 @@ public class TicketShellController {
     @FXML private TextField searchField;
     @FXML private RadioButton btnTableView;
     @FXML private RadioButton btnHallView;
-    @FXML private RadioButton btnCashView;
     @FXML private Button btnToggleEdit;
     @FXML private StackPane contentArea;
     @FXML private Label lblHeader;
@@ -74,7 +73,6 @@ public class TicketShellController {
     private void showTicketTableView() {
     	btnTableView.setSelected(true);
     	btnHallView.setSelected(false);
-    	btnCashView.setSelected(false);
     	lblHeader.setText("Kartentabelle");
         loadContentView("/de/eltviller_carneval_verein/karten/ui/TicketTableView.fxml");
     }
@@ -84,30 +82,12 @@ public class TicketShellController {
     	if (currentPresentation == null) {
 	    	btnTableView.setSelected(true);
 	    	btnHallView.setSelected(false);
-	    	btnCashView.setSelected(false);
 			MainApp.showAlert("Fehler", "Erst eine Vostellung auswählen", AlertType.ERROR);
 		} else {
 	    	btnTableView.setSelected(false);
 	    	btnHallView.setSelected(true);
-	    	btnCashView.setSelected(false);
 	    	lblHeader.setText("Saalübersicht");
 	        loadContentView("/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml");
-		}
-    }
-
-    @FXML
-    private void showCashReconciliationView() {
-    	if (currentPresentation == null) {
-	    	btnTableView.setSelected(true);
-	    	btnHallView.setSelected(false);
-	    	btnCashView.setSelected(false);
-			MainApp.showAlert("Fehler", "Erst eine Vostellung auswählen", AlertType.ERROR);
-		} else {
-	    	btnTableView.setSelected(false);
-	    	btnHallView.setSelected(false);
-	    	btnCashView.setSelected(true);
-	    	lblHeader.setText("Kassenabgleich");
-	        loadContentView("/de/eltviller_carneval_verein/karten/ui/CashReconciliationView.fxml");
 		}
     }
 

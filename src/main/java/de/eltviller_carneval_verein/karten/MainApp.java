@@ -48,6 +48,10 @@ public class MainApp extends Application {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/TicketShellView.fxml");
 	}
 
+	public static void showAccountingShellView() {
+		loadScene("/de/eltviller_carneval_verein/karten/ui/AccountingShellView.fxml");
+	}
+
 	public static void showEventOverviewView() {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/EventOverviewView.fxml");
 	}
