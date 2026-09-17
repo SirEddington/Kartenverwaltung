@@ -21,8 +21,8 @@
     </Label>
 
     <!-- Menü-Buttons: getrennt nach Einsatzgebiet (Kundennähe vs. Vor-/Nachbereitung) -->
-    <Button text="Kartenverkauf" prefWidth="250.0" prefHeight="40.0" styleClass="button-primary" onAction="#handleOpenSales" />
     <Button text="Abrechnung" prefWidth="250.0" prefHeight="40.0" styleClass="button-secondary" onAction="#handleOpenAccounting" />
+    <Button text="Kartenverkauf" prefWidth="250.0" prefHeight="40.0" styleClass="button-primary" onAction="#handleOpenSales" />
     <Button text="Event-Verwaltung" prefWidth="250.0" prefHeight="40.0" styleClass="button-default" onAction="#handleOpenEventManagement" />
 
     <!-- Platzhalter für zukünftige Module (z.B. Statistik, Export) -->

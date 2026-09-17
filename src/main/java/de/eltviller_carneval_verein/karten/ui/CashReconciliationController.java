@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui;
 
+import java.util.List;
 import java.util.Locale;
 
 import de.eltviller_carneval_verein.karten.model.Event;
@@ -26,6 +27,8 @@ public class CashReconciliationController implements ContentController {
 	private long sollCashCents;
 
 	@FXML
+	private Label lblScopeHeader;
+	@FXML
 	private Label lblCountCash;
 	@FXML
 	private Label lblSollCash;
@@ -45,6 +48,8 @@ public class CashReconciliationController implements ContentController {
 	private Spinner<Double> actualCashSpinner;
 	@FXML
 	private Label lblDifference;
+	@FXML
+	private Label lblIstHint;
 
 	@FXML
 	public void initialize() {
@@ -55,14 +60,30 @@ public class CashReconciliationController implements ContentController {
 				return;
 			}
 			selectedPres.setActualCashAmountDouble(newVal);
-			updateDifference();
+			updateDifference(Math.round(newVal * 100.0));
 		});
 
 		applyEditMode();
 	}
 
+	/**
+	 * Ohne gewählte Vorstellung wird über alle Vorstellungen des Events
+	 * aggregiert (Gesamtbilanz); mit gewählter Vorstellung nur über deren
+	 * eigene Sitze.
+	 */
+	private List<Presentation> resolvePresentations() {
+		if (selectedPres != null) {
+			return List.of(selectedPres);
+		}
+		if (selectedEvent != null) {
+			return selectedEvent.getPresentations();
+		}
+		return List.of();
+	}
+
 	private void refresh() {
-		if (selectedPres == null) {
+		List<Presentation> presentations = resolvePresentations();
+		if (presentations.isEmpty()) {
 			clear();
 			return;
 		}
@@ -72,29 +93,43 @@ public class CashReconciliationController implements ContentController {
 		int countCash = 0;
 		int countCard = 0;
 		int countTransfer = 0;
+		long istCents = 0;
 		sollCashCents = 0;
 
-		for (Seat seat : selectedPres.getSeats()) {
-			PaymentStatus status = seat.getPaymentStatus();
-			if (status == null || !status.isPaid()) {
-				continue;
+		for (Presentation pres : presentations) {
+			istCents += Math.round(pres.getActualCashAmountDouble() * 100.0);
+
+			for (Seat seat : pres.getSeats()) {
+				PaymentStatus status = seat.getPaymentStatus();
+				if (status == null || !status.isPaid()) {
+					continue;
+				}
+				switch (status) {
+				case CASH -> {
+					sollCashCents += seat.getPrice();
+					countCash++;
+				}
+				case CARD -> {
+					sollCard += seat.getPrice();
+					countCard++;
+				}
+				case TRANSFER -> {
+					sollTransfer += seat.getPrice();
+					countTransfer++;
+				}
+				default -> {
+				}
+				}
 			}
-			switch (status) {
-			case CASH -> {
-				sollCashCents += seat.getPrice();
-				countCash++;
-			}
-			case CARD -> {
-				sollCard += seat.getPrice();
-				countCard++;
-			}
-			case TRANSFER -> {
-				sollTransfer += seat.getPrice();
-				countTransfer++;
-			}
-			default -> {
-			}
-			}
+		}
+
+		if (selectedPres != null) {
+			lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart – " + selectedPres.getName());
+			lblIstHint.setText("");
+		} else {
+			int count = presentations.size();
+			lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart – Gesamtbilanz (" + count + " Vorstellung" + (count == 1 ? "" : "en") + ")");
+			lblIstHint.setText("Summe der Kasseninhalte der einzelnen Vorstellungen, hier nicht direkt bearbeitbar.");
 		}
 
 		lblCountCash.setText(String.valueOf(countCash));
@@ -107,14 +142,14 @@ public class CashReconciliationController implements ContentController {
 		lblSollTotal.setText(formatCents(sollCashCents + sollCard + sollTransfer));
 
 		updatingFromModel = true;
-		actualCashSpinner.getValueFactory().setValue(selectedPres.getActualCashAmountDouble());
+		actualCashSpinner.getValueFactory().setValue(istCents / 100.0);
 		updatingFromModel = false;
 
-		updateDifference();
+		updateSpinnerDisabledState();
+		updateDifference(istCents);
 	}
 
-	private void updateDifference() {
-		long istCents = Math.round(selectedPres.getActualCashAmountDouble() * 100.0);
+	private void updateDifference(long istCents) {
 		long diffCents = istCents - sollCashCents;
 
 		lblDifference.setText((diffCents > 0 ? "+" : "") + formatCents(diffCents));
@@ -122,6 +157,8 @@ public class CashReconciliationController implements ContentController {
 	}
 
 	private void clear() {
+		lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart");
+		lblIstHint.setText("");
 		lblCountCash.setText("0");
 		lblSollCash.setText(formatCents(0));
 		lblCountCard.setText("0");
@@ -138,14 +175,20 @@ public class CashReconciliationController implements ContentController {
 		sollCashCents = 0;
 		lblDifference.setText("–");
 		lblDifference.setTextFill(UiColors.TEXT_DARK.getFxColor());
+		updateSpinnerDisabledState();
 	}
 
 	private String formatCents(long cents) {
 		return String.format(Locale.GERMANY, "%,.2f €", cents / 100.0);
 	}
 
+	/** Der Ist-Betrag lässt sich nur für eine konkrete Vorstellung eintragen, nicht für die Gesamtbilanz. */
+	private void updateSpinnerDisabledState() {
+		actualCashSpinner.setDisable(!editMode || selectedPres == null);
+	}
+
 	private void applyEditMode() {
-		actualCashSpinner.setDisable(!editMode);
+		updateSpinnerDisabledState();
 	}
 
 	@Override

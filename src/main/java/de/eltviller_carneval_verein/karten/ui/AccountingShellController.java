@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui;
 
 import java.io.IOException;
+import java.util.List;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
@@ -10,6 +11,7 @@ import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.layout.StackPane;
 
@@ -27,6 +29,8 @@ public class AccountingShellController {
 	@FXML
 	private ComboBox<Event> eventComboBox;
 	@FXML
+	private CheckBox chkIncludeArchived;
+	@FXML
 	private ComboBox<Presentation> presComboBox;
 	@FXML
 	private Button btnToggleEdit;
@@ -40,28 +44,60 @@ public class AccountingShellController {
 
 	@FXML
 	public void initialize() {
-		eventComboBox.getItems().setAll(repository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
-		if (eventComboBox.getItems().size() == 1) {
-			eventComboBox.setValue(eventComboBox.getItems().get(0));
-		}
+		reloadEventItems();
+
+		chkIncludeArchived.selectedProperty().addListener((obs, oldVal, newVal) -> reloadEventItems());
 
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			currentEvent = selectedEvent;
 			presComboBox.getItems().clear();
-			presComboBox.getItems().setAll(currentEvent.getPresentations());
+			if (currentEvent != null) {
+				presComboBox.getItems().setAll(currentEvent.getPresentations());
+			}
 			if (activeContentController != null) {
 				activeContentController.setEvent(currentEvent);
 			}
 		});
 
+		// Ohne konkrete Vorstellung gibt es nichts Vorstellungs-Spezifisches zu
+		// speichern (der Ist-Kasseninhalt hängt an genau einer Vorstellung) -
+		// der Bearbeiten-Modus ist dann gesperrt.
 		presComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedPresentation) -> {
 			currentPresentation = selectedPresentation;
+			updateEditAvailability();
 			if (activeContentController != null) {
 				activeContentController.setPresentation(currentPresentation);
 			}
 		});
 
 		loadContent();
+		updateEditAvailability();
+	}
+
+	private void reloadEventItems() {
+		Event previousSelection = eventComboBox.getValue();
+
+		List<Event> events = repository.loadEvents().stream().filter(event -> chkIncludeArchived.isSelected() || !event.isArchived()).toList();
+
+		eventComboBox.getItems().setAll(events);
+
+		if (events.contains(previousSelection)) {
+			eventComboBox.setValue(previousSelection);
+		} else if (events.size() == 1) {
+			eventComboBox.setValue(events.get(0));
+		}
+	}
+
+	private void updateEditAvailability() {
+		btnToggleEdit.setDisable(currentPresentation == null);
+
+		if (currentPresentation == null && editMode) {
+			editMode = false;
+			btnToggleEdit.setText("Bearbeiten");
+			if (activeContentController != null) {
+				activeContentController.setEditMode(false);
+			}
+		}
 	}
 
 	private void loadContent() {
@@ -88,6 +124,11 @@ public class AccountingShellController {
 		if (activeContentController != null) {
 			activeContentController.setEditMode(editMode);
 		}
+	}
+
+	@FXML
+	private void clearPresentationSelection() {
+		presComboBox.getSelectionModel().clearSelection();
 	}
 
 	@FXML

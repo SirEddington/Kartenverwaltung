@@ -12,7 +12,7 @@
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
 
-    <Label text="Soll-Einnahmen nach Zahlungsart" styleClass="subheader-label" />
+    <Label fx:id="lblScopeHeader" text="Soll-Einnahmen nach Zahlungsart" styleClass="subheader-label" />
 
     <GridPane hgap="24.0" vgap="8.0">
         <columnConstraints>
@@ -51,6 +51,8 @@
         <Spinner fx:id="actualCashSpinner" prefWidth="140.0" />
         <Label text="€" />
     </HBox>
+
+    <Label fx:id="lblIstHint" text="" style="-fx-font-style: italic; -fx-text-fill: #666666;" />
 
     <HBox spacing="10.0" alignment="CENTER_LEFT">
         <Label text="Differenz zum Bar-Soll:" style="-fx-font-weight: bold;" />
