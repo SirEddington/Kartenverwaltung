@@ -9,6 +9,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
+import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
 import javafx.geometry.Point2D;
@@ -57,10 +58,11 @@ public class HallOverviewController implements ContentController {
 	private double dragAnchorTranslateX;
 	private double dragAnchorTranslateY;
 
-	private double tableDragAnchorSceneX;
-	private double tableDragAnchorSceneY;
+	private Popup activePopup;
 
-	private Popup activeSeatPopup;
+	private Table placingTable;
+	private final EventHandler<MouseEvent> placingMoveHandler = this::handlePlacingMouseMoved;
+	private final EventHandler<MouseEvent> placingClickHandler = this::handlePlacingMouseClicked;
 
 	@FXML
 	private StackPane viewportPane;
@@ -166,7 +168,8 @@ public class HallOverviewController implements ContentController {
 		double startY = 40; // Start-Y im Pane
 		double defaultWidth = 70; // Standard-Tischbreite
 		double defaultHeight = 300; // Standard-Tischhöhe
-		double tableGap = 20; // Sichtbarer Abstand zwischen benachbarten Tischen
+		double tableRowGap = 0; // Sichtbarer Abstand zwischen benachbarten Tischen
+		double tableColGap = 20; // Sichtbarer Abstand zwischen benachbarten Tischen
 
 		// Fallback für Tischgrößen, falls diese 0 sind (muss vor der Breitenberechnung stehen)
 		for (Table table : tables) {
@@ -189,7 +192,7 @@ public class HallOverviewController implements ContentController {
 		double[] columnX = new double[columnCount];
 		columnX[0] = startX;
 		for (int col = 1; col < columnCount; col++) {
-			columnX[col] = columnX[col - 1] + columnFootprint[col - 1] + tableGap;
+			columnX[col] = columnX[col - 1] + columnFootprint[col - 1] + tableColGap;
 		}
 
 		double[] rowCursorY = new double[columnCount];
@@ -206,7 +209,7 @@ public class HallOverviewController implements ContentController {
 				table.setPosX(columnX[col] + getSeatMargin(table));
 				table.setPosY(rowCursorY[col]);
 			}
-			rowCursorY[col] += table.getHeight() + tableGap;
+			rowCursorY[col] += table.getHeight() + tableRowGap;
 
 			// --- STUHL POSITIONIERUNG ---
 			if (table.getSeats() != null && !table.getSeats().isEmpty()) {
@@ -274,7 +277,7 @@ public class HallOverviewController implements ContentController {
 			}
 		}
 
-		setupTableDragHandlers(tableShapeNode, tableGroup, table);
+		setupTableClickHandler(tableShapeNode, table);
 
 		hallPane.getChildren().add(tableGroup);
 	}
@@ -293,50 +296,77 @@ public class HallOverviewController implements ContentController {
 		tableLabel.setY(table.getPosY() + table.getHeight() / 2.0);
 
 		Group tableShapeNode = new Group(tableShape, tableLabel);
-		tableShapeNode.setCursor(editMode ? Cursor.OPEN_HAND : Cursor.DEFAULT);
+		tableShapeNode.setCursor(Cursor.HAND);
 		return tableShapeNode;
 	}
 
 	/**
-	 * Im Bearbeitungsmodus lässt sich ein Tisch (inkl. seiner Stühle) per Drag
-	 * verschieben. Während des Ziehens wird nur die gesamte Tischgruppe visuell
-	 * verschoben (per translateX/Y); erst beim Loslassen wird die neue Position
-	 * ins Modell übernommen und der Tisch als manuell positioniert markiert.
+	 * Ein Klick auf einen Tisch öffnet immer das Tisch-Detail-Popup (in beiden
+	 * Modi; im Anzeigemodus sind die Felder dort nur lesbar). Das Verschieben
+	 * der Position passiert nicht mehr per Drag direkt am Tisch, sondern über
+	 * den Knopf "Position festlegen" im Popup (siehe {@link #startPlacingTable}).
 	 */
-	private void setupTableDragHandlers(Node tableShapeNode, Group tableGroup, Table table) {
-		tableShapeNode.setOnMousePressed(event -> {
-			if (!editMode) {
-				return;
+	private void setupTableClickHandler(Node tableShapeNode, Table table) {
+		tableShapeNode.setOnMouseClicked(event -> {
+			if (!event.isStillSincePress()) {
+				return; // z.B. nach einem Schwenk/Zoom der Ansicht, sicherheitshalber ignorieren
 			}
 			event.consume();
-			tableDragAnchorSceneX = event.getSceneX();
-			tableDragAnchorSceneY = event.getSceneY();
+			Window window = tableShapeNode.getScene().getWindow();
+			openTableDetailPopup(table, window, event.getScreenX() + 12, event.getScreenY() + 12);
 		});
+	}
 
-		tableShapeNode.setOnMouseDragged(event -> {
-			if (!editMode) {
-				return;
-			}
-			event.consume();
-			double scale = hallPane.getScaleX();
-			double deltaX = (event.getSceneX() - tableDragAnchorSceneX) / scale;
-			double deltaY = (event.getSceneY() - tableDragAnchorSceneY) / scale;
-			tableGroup.setTranslateX(deltaX);
-			tableGroup.setTranslateY(deltaY);
-		});
+	/**
+	 * Versetzt die Saalübersicht in einen Platzierungsmodus: Der Tisch folgt
+	 * bis zum nächsten Klick dem Mauszeiger; dieser Klick bestätigt die neue
+	 * Position und markiert den Tisch als manuell positioniert.
+	 */
+	private void startPlacingTable(Table table) {
+		cancelPlacingTable();
 
-		tableShapeNode.setOnMouseReleased(event -> {
-			if (!editMode) {
-				return;
-			}
-			event.consume();
-			table.setPosX(table.getPosX() + tableGroup.getTranslateX());
-			table.setPosY(table.getPosY() + tableGroup.getTranslateY());
-			table.setManualPos(true);
-			tableGroup.setTranslateX(0);
-			tableGroup.setTranslateY(0);
-			renderHall();
-		});
+		placingTable = table;
+		// Muss bereits hier gesetzt werden: sonst überschreibt applyDefaultPositions()
+		// die per Cursor gesetzte Position bei jedem renderHall() während des Verschiebens wieder.
+		placingTable.setManualPos(true);
+		hallPane.setCursor(Cursor.CROSSHAIR);
+		hallPane.addEventFilter(MouseEvent.MOUSE_MOVED, placingMoveHandler);
+		hallPane.addEventFilter(MouseEvent.MOUSE_CLICKED, placingClickHandler);
+	}
+
+	private void handlePlacingMouseMoved(MouseEvent event) {
+		if (placingTable == null) {
+			return;
+		}
+		Point2D localPoint = hallPane.sceneToLocal(event.getSceneX(), event.getSceneY());
+		placingTable.setPosX(localPoint.getX() - placingTable.getWidth() / 2.0);
+		placingTable.setPosY(localPoint.getY() - placingTable.getHeight() / 2.0);
+		renderHall();
+	}
+
+	private void handlePlacingMouseClicked(MouseEvent event) {
+		if (placingTable == null) {
+			return;
+		}
+		event.consume();
+		placingTable.setManualPos(true);
+		finishPlacingTable();
+	}
+
+	/** Bestätigter Abschluss der Platzierung: räumt auf und zeichnet den Saal an der neuen Position neu. */
+	private void finishPlacingTable() {
+		cancelPlacingTable();
+		renderHall();
+	}
+
+	/** Räumt einen laufenden Platzierungsvorgang ohne Neuzeichnen auf (z.B. bei Moduswechsel). */
+	private void cancelPlacingTable() {
+		if (placingTable != null) {
+			placingTable = null;
+			hallPane.setCursor(Cursor.DEFAULT);
+			hallPane.removeEventFilter(MouseEvent.MOUSE_MOVED, placingMoveHandler);
+			hallPane.removeEventFilter(MouseEvent.MOUSE_CLICKED, placingClickHandler);
+		}
 	}
 
 	private Node createSeatNode(Seat seat) {
@@ -368,8 +398,7 @@ public class HallOverviewController implements ContentController {
 		String firstName = seat.getFirstName();
 		String comment = seat.getComment();
 
-		return (lastName != null && lastName.toLowerCase().contains(currentQuery))
-				|| (firstName != null && firstName.toLowerCase().contains(currentQuery))
+		return (lastName != null && lastName.toLowerCase().contains(currentQuery)) || (firstName != null && firstName.toLowerCase().contains(currentQuery))
 				|| (comment != null && comment.toLowerCase().contains(currentQuery));
 	}
 
@@ -380,44 +409,90 @@ public class HallOverviewController implements ContentController {
 	 * Tooltip etc.).
 	 */
 	private void openSeatDetailPopup(Seat seat, Window window, double screenX, double screenY) {
-		closeSeatPopup();
-		activeSeatPopup = buildSeatDetailPopup(seat);
-		activeSeatPopup.show(window, screenX, screenY);
+		closePopup();
+		activePopup = buildSeatDetailPopup(seat);
+		activePopup.show(window, screenX, screenY);
 	}
 
-	private void closeSeatPopup() {
-		if (activeSeatPopup != null) {
-			Popup popupToClose = activeSeatPopup;
-			activeSeatPopup = null;
+	/**
+	 * Öffnet ein Popup mit den Tisch-Stammdaten (Nummer, Kategorie, Beschreibung,
+	 * Maße) sowie einer Möglichkeit, eine manuell gesetzte Position wieder auf
+	 * die automatische Anordnung zurückzusetzen.
+	 */
+	private void openTableDetailPopup(Table table, Window window, double screenX, double screenY) {
+		closePopup();
+		activePopup = buildTableDetailPopup(table);
+		activePopup.show(window, screenX, screenY);
+	}
+
+	private void closePopup() {
+		if (activePopup != null) {
+			Popup popupToClose = activePopup;
+			activePopup = null;
 			popupToClose.setOnHidden(null);
 			popupToClose.hide();
 		}
 	}
 
-	private Popup buildSeatDetailPopup(Seat seat) {
+	/**
+	 * Gemeinsame Bausteine für die Sitz- und Tisch-Detail-Popups, damit beide
+	 * dasselbe Erscheinungsbild teilen und nicht unabhängig voneinander gepflegt
+	 * werden müssen.
+	 */
+	private static final String DETAIL_POPUP_STYLE = "-fx-background-color: white; -fx-border-color: #999999; -fx-border-width: 1; " + "-fx-padding: 12; -fx-background-radius: 4; -fx-border-radius: 4;";
+
+	private Popup createDetailPopup() {
 		Popup popup = new Popup();
 		popup.setAutoHide(true);
 		popup.setHideOnEscape(true);
+		return popup;
+	}
 
+	private GridPane createDetailGrid() {
 		GridPane grid = new GridPane();
 		grid.setHgap(8);
 		grid.setVgap(6);
-		grid.setStyle("-fx-background-color: white; -fx-border-color: #999999; -fx-border-width: 1; "
-				+ "-fx-padding: 12; -fx-background-radius: 4; -fx-border-radius: 4;");
+		grid.setStyle(DETAIL_POPUP_STYLE);
+		return grid;
+	}
 
-		Label header = new Label("Tisch " + seat.getParent().getTableNumber() + " · Sitz " + seat.getSeatNumber());
+	private Label createHeaderLabel(String text) {
+		Label header = new Label(text);
 		header.setStyle("-fx-font-weight: bold;");
-		grid.add(header, 0, 0, 2, 1);
+		return header;
+	}
+
+	private void addCloseButtonRow(GridPane grid, Popup popup, int row) {
+		Button closeButton = new Button("Schließen");
+		closeButton.setOnAction(event -> popup.hide());
+		HBox buttonBar = new HBox(closeButton);
+		buttonBar.setAlignment(Pos.CENTER_RIGHT);
+		grid.add(buttonBar, 0, row, 2, 1);
+	}
+
+	/** Hängt das Grid in das Popup ein und sorgt dafür, dass die Saalübersicht beim Schließen neu gezeichnet wird. */
+	private Popup finalizePopup(Popup popup, GridPane grid) {
+		popup.getContent().add(grid);
+		popup.setOnHidden(event -> renderHall());
+		return popup;
+	}
+
+	private Popup buildSeatDetailPopup(Seat seat) {
+		Popup popup = createDetailPopup();
+		GridPane grid = createDetailGrid();
+		int row = 0;
+
+		grid.add(createHeaderLabel("Tisch " + seat.getParent().getTableNumber() + " · Sitz " + seat.getSeatNumber()), 0, row++, 2, 1);
 
 		TextField lastNameField = new TextField(seat.getLastName() != null ? seat.getLastName() : "");
 		lastNameField.setPromptText("Nachname");
 		lastNameField.setDisable(!editMode);
-		grid.addRow(1, new Label("Nachname:"), lastNameField);
+		grid.addRow(row++, new Label("Nachname:"), lastNameField);
 
 		TextField firstNameField = new TextField(seat.getFirstName() != null ? seat.getFirstName() : "");
 		firstNameField.setPromptText("Vorname");
 		firstNameField.setDisable(!editMode);
-		grid.addRow(2, new Label("Vorname:"), firstNameField);
+		grid.addRow(row++, new Label("Vorname:"), firstNameField);
 
 		ComboBox<PaymentStatus> paymentCombo = new ComboBox<>();
 		paymentCombo.getItems().setAll(PaymentStatus.values());
@@ -434,14 +509,14 @@ public class HallOverviewController implements ContentController {
 			}
 		});
 		paymentCombo.setDisable(!editMode);
-		grid.addRow(3, new Label("Zahlung:"), paymentCombo);
+		grid.addRow(row++, new Label("Zahlung:"), paymentCombo);
 
 		Spinner<Double> priceSpinner = new Spinner<>();
 		priceSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 1000.0, seat.getPriceDouble(), 0.5));
 		priceSpinner.setEditable(true);
 		priceSpinner.setPrefWidth(100);
 		priceSpinner.setDisable(!editMode);
-		grid.addRow(4, new Label("Preis (€):"), priceSpinner);
+		grid.addRow(row++, new Label("Preis (€):"), priceSpinner);
 
 		CheckBox collectedCheck = new CheckBox("Abgeholt");
 		collectedCheck.setSelected(seat.isCollected());
@@ -452,18 +527,14 @@ public class HallOverviewController implements ContentController {
 		wheelchairCheck.setDisable(!editMode);
 
 		HBox checkboxRow = new HBox(12, collectedCheck, wheelchairCheck);
-		grid.add(checkboxRow, 0, 5, 2, 1);
+		grid.add(checkboxRow, 0, row++, 2, 1);
 
 		TextField commentField = new TextField(seat.getComment() != null ? seat.getComment() : "");
 		commentField.setPromptText("Kommentar");
 		commentField.setDisable(!editMode);
-		grid.addRow(6, new Label("Kommentar:"), commentField);
+		grid.addRow(row++, new Label("Kommentar:"), commentField);
 
-		Button closeButton = new Button("Schließen");
-		closeButton.setOnAction(event -> popup.hide());
-		HBox buttonBar = new HBox(closeButton);
-		buttonBar.setAlignment(Pos.CENTER_RIGHT);
-		grid.add(buttonBar, 0, 7, 2, 1);
+		addCloseButtonRow(grid, popup, row++);
 
 		// Änderungen sofort ins Modell übernehmen; Anzeige aktualisiert sich beim Schließen (siehe unten)
 		lastNameField.textProperty().addListener((obs, oldVal, newVal) -> seat.setLastName(newVal));
@@ -478,9 +549,103 @@ public class HallOverviewController implements ContentController {
 		wheelchairCheck.selectedProperty().addListener((obs, oldVal, newVal) -> seat.setWheelchairAccessible(newVal));
 		commentField.textProperty().addListener((obs, oldVal, newVal) -> seat.setComment(newVal));
 
-		popup.getContent().add(grid);
-		popup.setOnHidden(event -> renderHall());
-		return popup;
+		return finalizePopup(popup, grid);
+	}
+
+	private Popup buildTableDetailPopup(Table table) {
+		Popup popup = createDetailPopup();
+		GridPane grid = createDetailGrid();
+		int row = 0;
+
+		grid.add(createHeaderLabel("Tisch " + table.getTableNumber()), 0, row++, 2, 1);
+
+		TextField categoryField = new TextField(table.getCategory() != null ? table.getCategory() : "");
+		categoryField.setPromptText("Kategorie");
+		categoryField.setDisable(!editMode);
+		grid.addRow(row++, new Label("Kategorie:"), categoryField);
+
+		TextField descField = new TextField(table.getDesc() != null ? table.getDesc() : "");
+		descField.setPromptText("Beschreibung");
+		descField.setDisable(!editMode);
+		grid.addRow(row++, new Label("Beschreibung:"), descField);
+
+		Spinner<Double> widthSpinner = new Spinner<>();
+		widthSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(10.0, 1000.0, table.getWidth(), 5));
+		widthSpinner.setEditable(true);
+		widthSpinner.setPrefWidth(100);
+		widthSpinner.setDisable(!editMode);
+		grid.addRow(row++, new Label("Breite:"), widthSpinner);
+
+		Spinner<Double> heightSpinner = new Spinner<>();
+		heightSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(10.0, 1000.0, table.getHeight(), 5));
+		heightSpinner.setEditable(true);
+		heightSpinner.setPrefWidth(100);
+		heightSpinner.setDisable(!editMode);
+		grid.addRow(row++, new Label("Höhe:"), heightSpinner);
+
+		Spinner<Double> posXSpinner = new Spinner<>();
+		posXSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-10000.0, 10000.0, table.getPosX(), 5));
+		posXSpinner.setEditable(true);
+		posXSpinner.setPrefWidth(100);
+		posXSpinner.setDisable(!editMode);
+		grid.addRow(row++, new Label("PosX:"), posXSpinner);
+
+		Spinner<Double> posYSpinner = new Spinner<>();
+		posYSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-10000.0, 10000.0, table.getPosY(), 5));
+		posYSpinner.setEditable(true);
+		posYSpinner.setPrefWidth(100);
+		posYSpinner.setDisable(!editMode);
+		grid.addRow(row++, new Label("PosY:"), posYSpinner);
+
+		Label positionLabel = new Label(table.isManualPos() ? "Position: manuell gesetzt" : "Position: automatisch");
+		grid.add(positionLabel, 0, row++, 2, 1);
+
+		Button resetPositionButton = new Button("Position zurücksetzen");
+		resetPositionButton.setDisable(!editMode || !table.isManualPos());
+		resetPositionButton.setOnAction(event -> {
+			table.setManualPos(false);
+			popup.hide();
+		});
+
+		Button placeButton = new Button("Position festlegen");
+		placeButton.setDisable(!editMode);
+		placeButton.setOnAction(event -> {
+			popup.hide();
+			startPlacingTable(table);
+		});
+
+		HBox positionButtonRow = new HBox(8, resetPositionButton, placeButton);
+		grid.add(positionButtonRow, 0, row++, 2, 1);
+
+		addCloseButtonRow(grid, popup, row++);
+
+		// Änderungen sofort ins Modell übernehmen; Anzeige aktualisiert sich beim Schließen (siehe unten)
+		categoryField.textProperty().addListener((obs, oldVal, newVal) -> table.setCategory(newVal));
+		descField.textProperty().addListener((obs, oldVal, newVal) -> table.setDesc(newVal));
+		widthSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (newVal != null) {
+				table.setWidth(newVal);
+			}
+		});
+		heightSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (newVal != null) {
+				table.setHeight(newVal);
+			}
+		});
+		posXSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (newVal != null) {
+				table.setPosX(newVal);
+				table.setManualPos(true);
+			}
+		});
+		posYSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (newVal != null) {
+				table.setPosY(newVal);
+				table.setManualPos(true);
+			}
+		});
+
+		return finalizePopup(popup, grid);
 	}
 
 	private void drawHallObject(HallObject hallObject) {
@@ -514,13 +679,15 @@ public class HallOverviewController implements ContentController {
 	}
 
 	private void applyEditMode() {
-		closeSeatPopup();
+		closePopup();
+		cancelPlacingTable();
 		renderHall();
 	}
 
 	@Override
 	public void setEvent(Event event) {
-		closeSeatPopup();
+		closePopup();
+		cancelPlacingTable();
 		this.selectedEvent = event;
 		selectedPres = null;
 		hallPane.getChildren().clear();
@@ -528,7 +695,8 @@ public class HallOverviewController implements ContentController {
 
 	@Override
 	public void setPresentation(Presentation presentation) {
-		closeSeatPopup();
+		closePopup();
+		cancelPlacingTable();
 		this.selectedPres = presentation;
 		if (selectedPres != null) {
 			this.selectedEvent = presentation.getParent();
