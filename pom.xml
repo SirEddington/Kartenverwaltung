@@ -5,7 +5,7 @@
   
   <groupId>de.eltviller-carneval-verein.karten</groupId>
   <artifactId>Kartenverwaltung</artifactId>
-  <version>0.5</version>
+  <version>0.6</version>
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
@@ -14,11 +14,15 @@
   </properties>
 
   <dependencies>
-    <!-- JavaFX Controls (Standard-Buttons, Tabellen etc.) -->
+    <!-- JavaFX Controls (Standard-Buttons, Tabellen etc.)
+         Classifier "win" fest gesetzt: Nutzer sind ausschliesslich unter Windows
+         unterwegs, und ohne festen Classifier haengt es sonst vom Betriebssystem
+         der Build-Maschine ab (lokal Windows, CI-Runner Linux -> falsche Natives). -->
     <dependency>
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-controls</artifactId>
       <version>${javafx.version}</version>
+      <classifier>win</classifier>
     </dependency>
 
     <!-- JavaFX FXML (optional, falls du Scene Builder / FXML nutzen willst) -->
@@ -26,6 +30,7 @@
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-fxml</artifactId>
       <version>${javafx.version}</version>
+      <classifier>win</classifier>
     </dependency>
 
     <!-- ControlsFX (Erweiterte UI-Komponenten) -->
