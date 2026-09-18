@@ -5,7 +5,7 @@
   
   <groupId>de.eltviller-carneval-verein.karten</groupId>
   <artifactId>Kartenverwaltung</artifactId>
-  <version>0.6.1</version>
+  <version>0.6.2</version>
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
@@ -15,11 +15,14 @@
 
   <dependencies>
     <!-- JavaFX-Module mit fest gesetztem Classifier "win": Nutzer sind ausschliesslich
-         unter Windows unterwegs. javafx-controls/javafx-fxml haengen selbst transitiv
-         OHNE Classifier von javafx-graphics/javafx-base ab, deshalb muessen auch diese
-         beiden hier explizit mit "win" deklariert werden, sonst zieht Maven zusaetzlich
-         eine classifierlose (bzw. je nach Build-Maschine falsche) Variante rein, die im
-         Shade-Plugin die richtigen Natives im fertigen Jar ueberschreibt. -->
+         unter Windows unterwegs. Die JavaFX-POMs selbst haben OS-aktivierte Profile,
+         die UNABHAENGIG vom hier gewaehlten Classifier zusaetzlich javafx-graphics/
+         javafx-base passend zum Build-Rechner (auf dem CI-Runner: Linux) transitiv
+         reinziehen. Deshalb muessen diese automatischen transitiven Abhaengigkeiten
+         explizit ausgeschlossen werden, sonst landen je nach Build-Maschine sowohl
+         Windows- als auch Linux-Natives im selben Jar, und die zuletzt zusammen-
+         gefuehrte Service-Registrierung entscheidet zufaellig, welche Plattform beim
+         Start verwendet wird ("No toolkit found" unter Windows, wenn Linux gewinnt). -->
     <dependency>
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-base</artifactId>
@@ -32,6 +35,12 @@
       <artifactId>javafx-graphics</artifactId>
       <version>${javafx.version}</version>
       <classifier>win</classifier>
+      <exclusions>
+        <exclusion>
+          <groupId>org.openjfx</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <dependency>
@@ -39,6 +48,12 @@
       <artifactId>javafx-controls</artifactId>
       <version>${javafx.version}</version>
       <classifier>win</classifier>
+      <exclusions>
+        <exclusion>
+          <groupId>org.openjfx</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <!-- JavaFX FXML (optional, falls du Scene Builder / FXML nutzen willst) -->
@@ -47,6 +62,12 @@
       <artifactId>javafx-fxml</artifactId>
       <version>${javafx.version}</version>
       <classifier>win</classifier>
+      <exclusions>
+        <exclusion>
+          <groupId>org.openjfx</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <!-- ControlsFX (Erweiterte UI-Komponenten) -->
