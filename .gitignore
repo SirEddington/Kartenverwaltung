@@ -12,6 +12,5 @@ dependency-reduced-pom.xml
 events_data/
 *.log
 
-# Lokales Deployment
-conveyor.local.conf
-build.bat
+# Lokales Deployment (Release läuft jetzt über .github/workflows/release.yml)
+deployment/
