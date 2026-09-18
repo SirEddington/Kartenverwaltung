@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox spacing="15.0" prefWidth="1000.0" prefHeight="700.0"
+      xmlns="http://javafx.com/javafx/17"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="de.eltviller_carneval_verein.karten.ui.AccountingShellController">
+    <padding>
+        <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
+    </padding>
+
+    <!-- OBERER BEREICH: Header, unabhängig vom Kartenverkauf -->
+    <HBox alignment="CENTER_LEFT" spacing="10.0">
+        <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" />
+
+        <Label text="Abrechnung" styleClass="header-label" />
+
+        <Region HBox.hgrow="ALWAYS" />
+
+        <Label text="Event:" />
+        <ComboBox fx:id="eventComboBox" prefWidth="180.0" promptText="Event wählen..." />
+        <CheckBox fx:id="chkIncludeArchived" text="Archivierte einschließen" />
+
+        <Label text="Vorstellung:" />
+        <ComboBox fx:id="presComboBox" prefWidth="180.0" />
+
+        <Region HBox.hgrow="ALWAYS" />
+
+        <Button fx:id="btnToggleEdit" styleClass="button-secondary" text="Bearbeiten" onAction="#toggleEditMode" disable="true" />
+    </HBox>
+
+    <Separator />
+
+    <!-- MITTLERER BEREICH: Kassenabgleich (Platz für künftige Statistik-Ansichten) -->
+    <StackPane fx:id="contentArea" VBox.vgrow="ALWAYS" />
+
+    <Separator />
+
+    <!-- UNTERER BEREICH: Identischer Footer -->
+    <HBox spacing="10.0" alignment="CENTER_RIGHT">
+        <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" />
+    </HBox>
+</VBox>

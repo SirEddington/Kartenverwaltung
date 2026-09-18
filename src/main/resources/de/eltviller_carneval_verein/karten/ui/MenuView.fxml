@@ -3,28 +3,42 @@
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.image.Image?>
+<?import javafx.scene.image.ImageView?>
+<?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
 <?import javafx.scene.text.Font?>
 
-<VBox alignment="CENTER" spacing="15.0" prefWidth="600.0" prefHeight="400.0" 
-      xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" 
-      fx:controller="de.eltviller_carneval_verein.karten.ui.MenuController">
-    <padding>
-        <Insets top="30.0" right="30.0" bottom="30.0" left="30.0" />
-    </padding>
-    
-    <Label text="Eltviller Carneval Verein" styleClass="mainheader-label" />
-    <Label text="Kartenverwaltung Hauptmenü" styleClass="header-label" >
-        <VBox.margin>
-            <Insets bottom="20.0" />
-        </VBox.margin>
-    </Label>
+<StackPane prefWidth="600.0" prefHeight="400.0"
+           xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+           fx:controller="de.eltviller_carneval_verein.karten.ui.MenuController">
 
-    <!-- Menü-Buttons -->
-    <Button text="Kartenansicht" prefWidth="250.0" prefHeight="40.0" styleClass="button-danger" onAction="#handleOpenTable" />
-    <Button text="Eventübersicht" prefWidth="250.0" prefHeight="40.0" styleClass="button-default" onAction="#handleCreateEvent" />
-    <Button text="Kartenansicht" prefWidth="250.0" prefHeight="40.0" styleClass="button-primary" onAction="#handleOpenTable" />
-    <Button text="Eventübersicht" prefWidth="250.0" prefHeight="40.0" styleClass="button-secondary" onAction="#handleCreateEvent" />
-    
-    <!-- Platzhalter für zukünftige Module (z.B. Statistik, Export) -->
-</VBox>
+    <!-- Wappen groß im Hintergrund; MULTIPLY lässt den weißen Bildhintergrund im
+         Hauptmenü-Hintergrund verschwinden (kein Rand), zusätzlich abgedunkelte
+         Deckkraft damit Text/Buttons gut lesbar bleiben -->
+    <ImageView fitHeight="700.0" preserveRatio="true" opacity="0.3" blendMode="MULTIPLY" StackPane.alignment="CENTER">
+        <image>
+            <Image url="@images/wappen.png" />
+        </image>
+    </ImageView>
+
+    <VBox alignment="CENTER" spacing="15.0">
+        <padding>
+            <Insets top="30.0" right="30.0" bottom="30.0" left="30.0" />
+        </padding>
+
+        <Label text="Eltviller Carneval Verein" styleClass="mainheader-label" />
+        <Label text="Kartenverwaltung Hauptmenü" styleClass="header-label" >
+            <VBox.margin>
+                <Insets bottom="20.0" />
+            </VBox.margin>
+        </Label>
+
+        <!-- Menü-Buttons: getrennt nach Einsatzgebiet (Kundennähe vs. Vor-/Nachbereitung) -->
+        <Button text="Abrechnung" prefWidth="250.0" prefHeight="40.0" styleClass="button-secondary" onAction="#handleOpenAccounting" />
+        <Button text="Kartenverkauf" prefWidth="250.0" prefHeight="40.0" styleClass="button-primary" onAction="#handleOpenSales" />
+        <Button text="Event-Verwaltung" prefWidth="250.0" prefHeight="40.0" styleClass="button-default" onAction="#handleOpenEventManagement" />
+
+        <!-- Platzhalter für zukünftige Module (z.B. Statistik, Export) -->
+    </VBox>
+</StackPane>

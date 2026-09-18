@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox spacing="20.0" prefWidth="900.0" prefHeight="600.0"
+      xmlns="http://javafx.com/javafx/17"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="de.eltviller_carneval_verein.karten.ui.CashReconciliationController">
+    <padding>
+        <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
+    </padding>
+
+    <Label fx:id="lblScopeHeader" text="Soll-Einnahmen nach Zahlungsart" styleClass="subheader-label" />
+
+    <GridPane hgap="24.0" vgap="8.0">
+        <columnConstraints>
+            <ColumnConstraints minWidth="140.0" />
+            <ColumnConstraints minWidth="100.0" />
+            <ColumnConstraints minWidth="120.0" />
+        </columnConstraints>
+
+        <Label text="Zahlungsart" style="-fx-font-weight: bold;" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+        <Label text="Anzahl Karten" style="-fx-font-weight: bold;" GridPane.rowIndex="0" GridPane.columnIndex="1" />
+        <Label text="Soll" style="-fx-font-weight: bold;" GridPane.rowIndex="0" GridPane.columnIndex="2" />
+
+        <Label text="Bar" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+        <Label fx:id="lblCountCash" text="0" GridPane.rowIndex="1" GridPane.columnIndex="1" />
+        <Label fx:id="lblSollCash" text="0,00 €" GridPane.rowIndex="1" GridPane.columnIndex="2" />
+
+        <Label text="Karte" GridPane.rowIndex="2" GridPane.columnIndex="0" />
+        <Label fx:id="lblCountCard" text="0" GridPane.rowIndex="2" GridPane.columnIndex="1" />
+        <Label fx:id="lblSollCard" text="0,00 €" GridPane.rowIndex="2" GridPane.columnIndex="2" />
+
+        <Label text="Überweisung" GridPane.rowIndex="3" GridPane.columnIndex="0" />
+        <Label fx:id="lblCountTransfer" text="0" GridPane.rowIndex="3" GridPane.columnIndex="1" />
+        <Label fx:id="lblSollTransfer" text="0,00 €" GridPane.rowIndex="3" GridPane.columnIndex="2" />
+
+        <Label text="Gesamt" style="-fx-font-weight: bold;" GridPane.rowIndex="4" GridPane.columnIndex="0" />
+        <Label fx:id="lblCountTotal" text="0" style="-fx-font-weight: bold;" GridPane.rowIndex="4" GridPane.columnIndex="1" />
+        <Label fx:id="lblSollTotal" text="0,00 €" style="-fx-font-weight: bold;" GridPane.rowIndex="4" GridPane.columnIndex="2" />
+    </GridPane>
+
+    <Separator />
+
+    <Label text="Kassensturz (Bar)" styleClass="subheader-label" />
+
+    <HBox spacing="10.0" alignment="CENTER_LEFT">
+        <Label text="Tatsächlicher Kasseninhalt:" />
+        <Spinner fx:id="actualCashSpinner" prefWidth="140.0" />
+        <Label text="€" />
+    </HBox>
+
+    <Label fx:id="lblIstHint" text="" style="-fx-font-style: italic; -fx-text-fill: #666666;" />
+
+    <HBox spacing="10.0" alignment="CENTER_LEFT">
+        <Label text="Differenz zum Bar-Soll:" style="-fx-font-weight: bold;" />
+        <Label fx:id="lblDifference" text="–" style="-fx-font-weight: bold;" />
+    </HBox>
+
+    <Region VBox.vgrow="ALWAYS" />
+</VBox>
