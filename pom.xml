@@ -5,7 +5,7 @@
   
   <groupId>de.eltviller-carneval-verein.karten</groupId>
   <artifactId>Kartenverwaltung</artifactId>
-  <version>0.6</version>
+  <version>0.6.1</version>
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
@@ -14,10 +14,26 @@
   </properties>
 
   <dependencies>
-    <!-- JavaFX Controls (Standard-Buttons, Tabellen etc.)
-         Classifier "win" fest gesetzt: Nutzer sind ausschliesslich unter Windows
-         unterwegs, und ohne festen Classifier haengt es sonst vom Betriebssystem
-         der Build-Maschine ab (lokal Windows, CI-Runner Linux -> falsche Natives). -->
+    <!-- JavaFX-Module mit fest gesetztem Classifier "win": Nutzer sind ausschliesslich
+         unter Windows unterwegs. javafx-controls/javafx-fxml haengen selbst transitiv
+         OHNE Classifier von javafx-graphics/javafx-base ab, deshalb muessen auch diese
+         beiden hier explizit mit "win" deklariert werden, sonst zieht Maven zusaetzlich
+         eine classifierlose (bzw. je nach Build-Maschine falsche) Variante rein, die im
+         Shade-Plugin die richtigen Natives im fertigen Jar ueberschreibt. -->
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-base</artifactId>
+      <version>${javafx.version}</version>
+      <classifier>win</classifier>
+    </dependency>
+
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-graphics</artifactId>
+      <version>${javafx.version}</version>
+      <classifier>win</classifier>
+    </dependency>
+
     <dependency>
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-controls</artifactId>
