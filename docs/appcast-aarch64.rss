@@ -5,25 +5,25 @@
         <description>Most recent changes with links to updates.</description>
         <language>en</language>
         <item>
-            <title>Version 0.1.1</title>
+            <title>Version 0.5</title>
             <link>https://SirEddington.github.io/Kartenverwaltung/</link>
-            <sparkle:version>0.1.1.0</sparkle:version>
-            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+            <sparkle:version>0.5.0</sparkle:version>
+            <sparkle:shortVersionString>0.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
             <description>
-                <![CDATA[ New release: version 0.1.1 ]]>
+                <![CDATA[ New release: version 0.5 ]]>
             </description>
-            <pubDate>Sat, 5 Sep 2026 17:35:49 GMT</pubDate>
-            <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.1-mac-aarch64.zip" 
-                       length="32430792" 
+            <pubDate>Fri, 18 Sep 2026 06:41:57 GMT</pubDate>
+            <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.5-mac-aarch64.zip" 
+                       length="31679346" 
                        type="application/octet-stream" 
-                       sparkle:edSignature="2FBuyQIzZgeNfsMzHSUgpIyOsP7zFbJVPkespiND5B1Fq0j/UzDt7y7P/HT5UchLhvIPspfPzofvfzYso/eYCQ=="/>
+                       sparkle:edSignature="fdKQnPiJ89ow+w9zxmLlQDmaWMnUaFqmIl8RHt/m4ZPt9yqXAtCd4UUYLLe5erSva4YzI8GrtwPHtXxXR/DvAg=="/>
             <sparkle:deltas>
-                <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.0-0.1.1-mac-aarch64.delta"
-                           sparkle:deltaFrom="0.1.0.0"
-                           length="24038246"
+                <enclosure url="https://SirEddington.github.io/Kartenverwaltung/ecv-karten-0.1.1-0.5-mac-aarch64.delta"
+                           sparkle:deltaFrom="0.1.1.0"
+                           length="14817566"
                            type="application/octet-stream"
-                           sparkle:edSignature="o0T/M+2FXYPccEx7sT5RvPk8rERgYVtCHTO5m7oF2VJrlZLOe5rJKfdGwrhRE35STrJRToNUSxCJGHwm0vd2DA=="/>
+                           sparkle:edSignature="rfDmV9lVKOgdsr1sFP/IvCHsX0059ZKMT/5ljMw+clLEr9U2jB/ab3aTqVhs4PnCDybI8w+R3xlqmraGA+GoAA=="/>
             </sparkle:deltas>
         </item>
     </channel>
