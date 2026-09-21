@@ -12,6 +12,10 @@
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
 
+    <fx:define>
+        <ToggleGroup fx:id="viewToggleGroup" />
+    </fx:define>
+
     <!-- OBERER BEREICH: Header, unabhängig vom Kartenverkauf -->
     <HBox alignment="CENTER_LEFT" spacing="10.0">
         <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" />
@@ -29,18 +33,24 @@
 
         <Region HBox.hgrow="ALWAYS" />
 
+        <RadioButton fx:id="btnViewCash" text="Kassenabgleich" toggleGroup="$viewToggleGroup" selected="true" />
+        <RadioButton fx:id="btnViewStats" text="Statistik" toggleGroup="$viewToggleGroup" />
+
+        <Region HBox.hgrow="ALWAYS" />
+
         <Button fx:id="btnToggleEdit" styleClass="button-secondary" text="Bearbeiten" onAction="#toggleEditMode" disable="true" />
     </HBox>
 
     <Separator />
 
-    <!-- MITTLERER BEREICH: Kassenabgleich (Platz für künftige Statistik-Ansichten) -->
+    <!-- MITTLERER BEREICH: Kassenabgleich oder Statistik, je nach Auswahl oben -->
     <StackPane fx:id="contentArea" VBox.vgrow="ALWAYS" />
 
     <Separator />
 
     <!-- UNTERER BEREICH: Identischer Footer -->
     <HBox spacing="10.0" alignment="CENTER_RIGHT">
+        <SplitMenuButton fx:id="btnExport" styleClass="button-secondary" text="Exportieren" />
         <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" />
     </HBox>
 </VBox>

@@ -59,5 +59,8 @@
         <Label fx:id="lblDifference" text="–" style="-fx-font-weight: bold;" />
     </HBox>
 
+    <Label text="Kommentar bei Abweichung:" />
+    <TextArea fx:id="txtDifferenceComment" promptText="Erklärung bei Abweichung (optional)" wrapText="true" prefRowCount="3" />
+
     <Region VBox.vgrow="ALWAYS" />
 </VBox>

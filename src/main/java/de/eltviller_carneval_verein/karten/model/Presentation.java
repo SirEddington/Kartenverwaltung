@@ -36,6 +36,7 @@ public class Presentation {
 
 	// Kassenabgleich
 	private int actualCashAmount; // tatsächlicher Bar-Kasseninhalt in Cent
+	private String cashDifferenceComment; // Erklärung bei Kassen-Differenz
 
 	@JsonManagedReference("presentation-table")
 	private List<Table> tables = new ArrayList<>(); // get,set
@@ -188,6 +189,14 @@ public class Presentation {
 	@JsonIgnore
 	public void setActualCashAmountDouble(double actualCashAmount) {
 		this.actualCashAmount = (int) Math.round(actualCashAmount * 100);
+	}
+
+	public String getCashDifferenceComment() {
+		return cashDifferenceComment;
+	}
+
+	public void setCashDifferenceComment(String cashDifferenceComment) {
+		this.cashDifferenceComment = cashDifferenceComment;
 	}
 	// <-- Getter und Setter
 

@@ -120,6 +120,61 @@
 }
 
 /* ------------------------------------------------------------------------------
+ * 3b. SPLITMENUBUTTON
+ * SplitMenuButton hat eine andere interne Struktur als Button (kein ".button"-
+ * Style, sondern zwei Teilbereiche ".label" und ".arrow-button"), deshalb reichen
+ * die .button-* Klassen dafür nicht aus - eigene Regeln, gleiche Optik wie Button.
+ * ------------------------------------------------------------------------------ */
+.split-menu-button {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+.split-menu-button > .label,
+.split-menu-button > .arrow-button {
+    -fx-font-family: "Calibri", "Segoe UI", sans-serif;
+    -fx-font-weight: bold;
+    -fx-font-size: 13px;
+    -fx-cursor: hand;
+    -fx-background-insets: 0;
+}
+
+.split-menu-button > .label {
+    -fx-padding: 7px 10px 7px 16px;
+    -fx-background-radius: 4px 0 0 4px;
+}
+
+.split-menu-button > .arrow-button {
+    -fx-padding: 7px 12px 7px 8px;
+    -fx-background-radius: 0 4px 4px 0;
+}
+
+.split-menu-button:hover > .label,
+.split-menu-button:hover > .arrow-button {
+    -fx-opacity: 0.85;
+}
+
+.split-menu-button:pressed > .label,
+.split-menu-button:pressed > .arrow-button {
+    -fx-opacity: 0.70;
+}
+
+/* Sekundär-Variante (ECV-Gelb/Blau), passend zu .button-secondary */
+.split-menu-button.button-secondary > .label,
+.split-menu-button.button-secondary > .arrow-button {
+    -fx-background-color: -fx-ecv-yellow;
+}
+
+.split-menu-button.button-secondary > .label {
+    -fx-text-fill: -fx-ecv-blue;
+}
+
+.split-menu-button.button-secondary > .arrow-button > .arrow {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+/* ------------------------------------------------------------------------------
  * 4. TEXTFELDER & TEXTAREAS (TextField, TextArea)
  * ------------------------------------------------------------------------------ */
 .text-field, .text-area {
@@ -505,3 +560,22 @@
 .check-box:disabled:selected .mark {
     -fx-background-color: -fx-text-dark;
 }
+
+/* ------------------------------------------------------------------------------
+ * 13. STATISTIK-DIAGRAMME
+ * Serienfarben nach ECV-Palette statt der Modena-Standardfarben. Reihenfolge
+ * (Blau/Rot/Gold) mit dem dataviz-Skill-Validator geprüft: CVD-Trennung und
+ * Normalsicht bestehen klar (ΔE 9,0 / 20,8); Gold hat nur 2,4:1 Kontrast zum
+ * Hintergrund (Ziel 3:1) - dafür sind Legende + Datenpunkt-Marker Pflicht,
+ * damit die Zuordnung nie an der Linienfarbe allein hängt.
+ * ------------------------------------------------------------------------------ */
+#trendChart .default-color0.chart-series-line { -fx-stroke: -fx-ecv-blue; }
+#trendChart .default-color0.chart-line-symbol { -fx-background-color: -fx-ecv-blue, white; }
+
+#trendChart .default-color1.chart-series-line { -fx-stroke: -fx-ecv-red; }
+#trendChart .default-color1.chart-line-symbol { -fx-background-color: -fx-ecv-red, white; }
+
+#trendChart .default-color2.chart-series-line { -fx-stroke: -fx-ecv-yellow; }
+#trendChart .default-color2.chart-line-symbol { -fx-background-color: -fx-ecv-yellow, white; }
+
+#revenueChart .default-color0.chart-bar { -fx-bar-fill: -fx-ecv-blue; }

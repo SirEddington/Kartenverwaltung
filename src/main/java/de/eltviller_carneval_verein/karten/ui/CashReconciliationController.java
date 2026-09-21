@@ -1,7 +1,22 @@
 package de.eltviller_carneval_verein.karten.ui;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
+
+import com.lowagie.text.Document;
+import com.lowagie.text.Font;
+import com.lowagie.text.FontFactory;
+import com.lowagie.text.PageSize;
+import com.lowagie.text.Paragraph;
+import com.lowagie.text.pdf.PdfPTable;
+import com.lowagie.text.pdf.PdfWriter;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
@@ -12,8 +27,9 @@ import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
+import javafx.scene.control.TextArea;
 
-public class CashReconciliationController implements ContentController {
+public class CashReconciliationController implements ContentController, Exportable {
 
 	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
 
@@ -21,10 +37,20 @@ public class CashReconciliationController implements ContentController {
 	private Presentation selectedPres;
 	private boolean editMode = false;
 
-	// Verhindert, dass das programmatische Setzen des Spinner-Werts (beim Laden
-	// einer Vorstellung) fälschlich als Nutzereingabe interpretiert wird.
+	// Verhindert, dass das programmatische Setzen von Spinner/Kommentarfeld (beim
+	// Laden einer Vorstellung) fälschlich als Nutzereingabe interpretiert wird.
 	private boolean updatingFromModel = false;
+
+	// Zuletzt in refresh() berechnete Rohwerte (Cent/Anzahl), damit der Export
+	// dieselben Zahlen nutzt wie die Anzeige, ohne formatierte Label-Strings
+	// zurückparsen zu müssen.
 	private long sollCashCents;
+	private long sollCardCents;
+	private long sollTransferCents;
+	private int countCash;
+	private int countCard;
+	private int countTransfer;
+	private long istCentsCache;
 
 	@FXML
 	private Label lblScopeHeader;
@@ -50,6 +76,8 @@ public class CashReconciliationController implements ContentController {
 	private Label lblDifference;
 	@FXML
 	private Label lblIstHint;
+	@FXML
+	private TextArea txtDifferenceComment;
 
 	@FXML
 	public void initialize() {
@@ -60,7 +88,15 @@ public class CashReconciliationController implements ContentController {
 				return;
 			}
 			selectedPres.setActualCashAmountDouble(newVal);
-			updateDifference(Math.round(newVal * 100.0));
+			istCentsCache = Math.round(newVal * 100.0);
+			updateDifference(istCentsCache);
+		});
+
+		txtDifferenceComment.textProperty().addListener((obs, oldVal, newVal) -> {
+			if (updatingFromModel || selectedPres == null) {
+				return;
+			}
+			selectedPres.setCashDifferenceComment(newVal);
 		});
 
 		applyEditMode();
@@ -88,13 +124,13 @@ public class CashReconciliationController implements ContentController {
 			return;
 		}
 
-		long sollCard = 0;
-		long sollTransfer = 0;
-		int countCash = 0;
-		int countCard = 0;
-		int countTransfer = 0;
-		long istCents = 0;
 		sollCashCents = 0;
+		sollCardCents = 0;
+		sollTransferCents = 0;
+		countCash = 0;
+		countCard = 0;
+		countTransfer = 0;
+		long istCents = 0;
 
 		for (Presentation pres : presentations) {
 			istCents += Math.round(pres.getActualCashAmountDouble() * 100.0);
@@ -110,11 +146,11 @@ public class CashReconciliationController implements ContentController {
 					countCash++;
 				}
 				case CARD -> {
-					sollCard += seat.getPrice();
+					sollCardCents += seat.getPrice();
 					countCard++;
 				}
 				case TRANSFER -> {
-					sollTransfer += seat.getPrice();
+					sollTransferCents += seat.getPrice();
 					countTransfer++;
 				}
 				default -> {
@@ -122,6 +158,7 @@ public class CashReconciliationController implements ContentController {
 				}
 			}
 		}
+		istCentsCache = istCents;
 
 		if (selectedPres != null) {
 			lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart – " + selectedPres.getName());
@@ -135,17 +172,18 @@ public class CashReconciliationController implements ContentController {
 		lblCountCash.setText(String.valueOf(countCash));
 		lblSollCash.setText(formatCents(sollCashCents));
 		lblCountCard.setText(String.valueOf(countCard));
-		lblSollCard.setText(formatCents(sollCard));
+		lblSollCard.setText(formatCents(sollCardCents));
 		lblCountTransfer.setText(String.valueOf(countTransfer));
-		lblSollTransfer.setText(formatCents(sollTransfer));
+		lblSollTransfer.setText(formatCents(sollTransferCents));
 		lblCountTotal.setText(String.valueOf(countCash + countCard + countTransfer));
-		lblSollTotal.setText(formatCents(sollCashCents + sollCard + sollTransfer));
+		lblSollTotal.setText(formatCents(sollCashCents + sollCardCents + sollTransferCents));
 
 		updatingFromModel = true;
 		actualCashSpinner.getValueFactory().setValue(istCents / 100.0);
+		txtDifferenceComment.setText(selectedPres != null && selectedPres.getCashDifferenceComment() != null ? selectedPres.getCashDifferenceComment() : "");
 		updatingFromModel = false;
 
-		updateSpinnerDisabledState();
+		updateEditableControlsState();
 		updateDifference(istCents);
 	}
 
@@ -170,25 +208,133 @@ public class CashReconciliationController implements ContentController {
 
 		updatingFromModel = true;
 		actualCashSpinner.getValueFactory().setValue(0.0);
+		txtDifferenceComment.setText("");
 		updatingFromModel = false;
 
 		sollCashCents = 0;
+		sollCardCents = 0;
+		sollTransferCents = 0;
+		countCash = 0;
+		countCard = 0;
+		countTransfer = 0;
+		istCentsCache = 0;
 		lblDifference.setText("–");
 		lblDifference.setTextFill(UiColors.TEXT_DARK.getFxColor());
-		updateSpinnerDisabledState();
+		updateEditableControlsState();
 	}
 
 	private String formatCents(long cents) {
 		return String.format(Locale.GERMANY, "%,.2f €", cents / 100.0);
 	}
 
-	/** Der Ist-Betrag lässt sich nur für eine konkrete Vorstellung eintragen, nicht für die Gesamtbilanz. */
-	private void updateSpinnerDisabledState() {
-		actualCashSpinner.setDisable(!editMode || selectedPres == null);
+	/**
+	 * Ist-Kasseninhalt und Differenz-Kommentar lassen sich nur für eine
+	 * konkrete Vorstellung eintragen, nicht für die Gesamtbilanz.
+	 */
+	private void updateEditableControlsState() {
+		boolean fieldsEditable = editMode && selectedPres != null;
+		actualCashSpinner.setDisable(!fieldsEditable);
+		txtDifferenceComment.setDisable(!fieldsEditable);
 	}
 
 	private void applyEditMode() {
-		updateSpinnerDisabledState();
+		updateEditableControlsState();
+	}
+
+	@Override
+	public boolean canExport() {
+		return selectedEvent != null;
+	}
+
+	@Override
+	public String suggestedFileBaseName() {
+		if (selectedEvent == null) {
+			return "Kassenbericht";
+		}
+		String baseName = selectedPres != null ? selectedEvent.getName() + "_" + selectedPres.getName() : selectedEvent.getName() + "_Gesamtbilanz";
+		return "Kassenbericht_" + baseName;
+	}
+
+	@Override
+	public void exportCsv(File file) throws IOException {
+		StringBuilder csv = new StringBuilder();
+		csv.append("Zahlungsart;Anzahl;Soll\n");
+		csv.append("Bar;").append(countCash).append(';').append(formatCents(sollCashCents)).append('\n');
+		csv.append("Karte;").append(countCard).append(';').append(formatCents(sollCardCents)).append('\n');
+		csv.append("Überweisung;").append(countTransfer).append(';').append(formatCents(sollTransferCents)).append('\n');
+		csv.append("Gesamt;").append(countCash + countCard + countTransfer).append(';').append(formatCents(sollCashCents + sollCardCents + sollTransferCents)).append('\n');
+
+		if (selectedPres != null) {
+			csv.append('\n');
+			csv.append("Tatsächlicher Kasseninhalt (Bar);;").append(formatCents(istCentsCache)).append('\n');
+			csv.append("Differenz zum Bar-Soll;;").append(formatCents(istCentsCache - sollCashCents)).append('\n');
+			String comment = selectedPres.getCashDifferenceComment();
+			csv.append("Kommentar;;").append(comment != null ? comment.replace(';', ',').replace("\n", " ") : "").append('\n');
+		}
+
+		Files.writeString(file.toPath(), csv.toString(), StandardCharsets.UTF_8);
+	}
+
+	@Override
+	public void exportPdf(File file) throws IOException {
+		Document document = new Document(PageSize.A4);
+		try {
+			PdfWriter.getInstance(document, new FileOutputStream(file));
+			document.open();
+
+			Font titleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 18);
+			Font headerFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 11);
+			Font cellFont = FontFactory.getFont(FontFactory.HELVETICA, 11);
+			Font boldCellFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 11);
+
+			String scope = selectedPres != null ? selectedEvent.getName() + " – " + selectedPres.getName() : selectedEvent.getName() + " – Gesamtbilanz";
+			Paragraph title = new Paragraph("Kassenbericht: " + scope, titleFont);
+			title.setSpacingAfter(4f);
+			document.add(title);
+
+			Paragraph dateLine = new Paragraph("Erstellt am " + LocalDate.now().format(DateTimeFormatter.ofPattern("dd.MM.yyyy")), cellFont);
+			dateLine.setSpacingAfter(16f);
+			document.add(dateLine);
+
+			PdfPTable table = new PdfPTable(3);
+			table.setWidthPercentage(100);
+			table.setWidths(new float[] { 2f, 1f, 1.5f });
+
+			table.addCell(PdfCellUtils.headerCell("Zahlungsart", headerFont));
+			table.addCell(PdfCellUtils.headerCell("Anzahl", headerFont));
+			table.addCell(PdfCellUtils.headerCell("Soll", headerFont));
+
+			addRow(table, "Bar", String.valueOf(countCash), formatCents(sollCashCents), cellFont);
+			addRow(table, "Karte", String.valueOf(countCard), formatCents(sollCardCents), cellFont);
+			addRow(table, "Überweisung", String.valueOf(countTransfer), formatCents(sollTransferCents), cellFont);
+			addRow(table, "Gesamt", String.valueOf(countCash + countCard + countTransfer), formatCents(sollCashCents + sollCardCents + sollTransferCents), boldCellFont);
+
+			document.add(table);
+
+			if (selectedPres != null) {
+				Paragraph spacer = new Paragraph(" ");
+				spacer.setSpacingAfter(12f);
+				document.add(spacer);
+
+				document.add(new Paragraph("Tatsächlicher Kasseninhalt (Bar): " + formatCents(istCentsCache), cellFont));
+				document.add(new Paragraph("Differenz zum Bar-Soll: " + formatCents(istCentsCache - sollCashCents), cellFont));
+
+				String comment = selectedPres.getCashDifferenceComment();
+				if (comment != null && !comment.isBlank()) {
+					Paragraph commentParagraph = new Paragraph("Kommentar: " + comment, cellFont);
+					commentParagraph.setSpacingBefore(8f);
+					document.add(commentParagraph);
+				}
+			}
+		} finally {
+			document.close();
+		}
+	}
+
+	private void addRow(PdfPTable table, String label, String count, String soll, Font font) {
+		table.addCell(PdfCellUtils.bodyCell(label, font));
+		table.addCell(PdfCellUtils.bodyCell(count, font));
+		table.addCell(PdfCellUtils.bodyCell(soll, font));
 	}
 
 	@Override
