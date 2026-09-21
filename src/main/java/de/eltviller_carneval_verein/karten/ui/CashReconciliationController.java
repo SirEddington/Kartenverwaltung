@@ -11,12 +11,10 @@ import java.util.List;
 import java.util.Locale;
 
 import com.lowagie.text.Document;
-import com.lowagie.text.Element;
 import com.lowagie.text.Font;
 import com.lowagie.text.FontFactory;
 import com.lowagie.text.PageSize;
 import com.lowagie.text.Paragraph;
-import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 
@@ -302,9 +300,9 @@ public class CashReconciliationController implements ContentController, Exportab
 			table.setWidthPercentage(100);
 			table.setWidths(new float[] { 2f, 1f, 1.5f });
 
-			addHeaderCell(table, "Zahlungsart", headerFont);
-			addHeaderCell(table, "Anzahl", headerFont);
-			addHeaderCell(table, "Soll", headerFont);
+			table.addCell(PdfCellUtils.headerCell("Zahlungsart", headerFont));
+			table.addCell(PdfCellUtils.headerCell("Anzahl", headerFont));
+			table.addCell(PdfCellUtils.headerCell("Soll", headerFont));
 
 			addRow(table, "Bar", String.valueOf(countCash), formatCents(sollCashCents), cellFont);
 			addRow(table, "Karte", String.valueOf(countCard), formatCents(sollCardCents), cellFont);
@@ -333,23 +331,10 @@ public class CashReconciliationController implements ContentController, Exportab
 		}
 	}
 
-	private void addHeaderCell(PdfPTable table, String text, Font font) {
-		PdfPCell cell = new PdfPCell(new Paragraph(text, font));
-		cell.setHorizontalAlignment(Element.ALIGN_LEFT);
-		cell.setPadding(6f);
-		table.addCell(cell);
-	}
-
 	private void addRow(PdfPTable table, String label, String count, String soll, Font font) {
-		addBodyCell(table, label, font);
-		addBodyCell(table, count, font);
-		addBodyCell(table, soll, font);
-	}
-
-	private void addBodyCell(PdfPTable table, String text, Font font) {
-		PdfPCell cell = new PdfPCell(new Paragraph(text, font));
-		cell.setPadding(6f);
-		table.addCell(cell);
+		table.addCell(PdfCellUtils.bodyCell(label, font));
+		table.addCell(PdfCellUtils.bodyCell(count, font));
+		table.addCell(PdfCellUtils.bodyCell(soll, font));
 	}
 
 	@Override

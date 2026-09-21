@@ -16,12 +16,10 @@ import java.util.Locale;
 import javax.imageio.ImageIO;
 
 import com.lowagie.text.Document;
-import com.lowagie.text.Element;
 import com.lowagie.text.Font;
 import com.lowagie.text.FontFactory;
 import com.lowagie.text.PageSize;
 import com.lowagie.text.Paragraph;
-import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 
@@ -180,11 +178,11 @@ public class StatisticsController implements ContentController, Exportable {
 			table.setSpacingBefore(12f);
 			table.setWidths(new float[] { 2.5f, 1f, 1f, 1.2f, 1.2f });
 
-			addHeaderCell(table, "Event", headerFont);
-			addHeaderCell(table, "Auslastung", headerFont);
-			addHeaderCell(table, "Einnahmen", headerFont);
-			addHeaderCell(table, "% vom Maximum", headerFont);
-			addHeaderCell(table, "% vom Durchschnitt", headerFont);
+			table.addCell(PdfCellUtils.headerCell("Event", headerFont));
+			table.addCell(PdfCellUtils.headerCell("Auslastung", headerFont));
+			table.addCell(PdfCellUtils.headerCell("Einnahmen", headerFont));
+			table.addCell(PdfCellUtils.headerCell("% vom Maximum", headerFont));
+			table.addCell(PdfCellUtils.headerCell("% vom Durchschnitt", headerFont));
 
 			long maxRevenueCents = lastStats.stream().mapToLong(EventStats::revenueCents).max().orElse(0);
 			double avgRevenueCents = lastStats.stream().mapToLong(EventStats::revenueCents).average().orElse(0);
@@ -192,11 +190,11 @@ public class StatisticsController implements ContentController, Exportable {
 			for (EventStats s : lastStats) {
 				double pctOfMax = maxRevenueCents > 0 ? (s.revenueCents() * 100.0 / maxRevenueCents) : 0;
 				double pctOfAvg = avgRevenueCents > 0 ? (s.revenueCents() * 100.0 / avgRevenueCents) : 0;
-				addBodyCell(table, s.name(), cellFont);
-				addBodyCell(table, formatNumber(s.occupancyPct()) + " %", cellFont);
-				addBodyCell(table, formatEuro(s.revenueCents()), cellFont);
-				addBodyCell(table, formatNumber(pctOfMax) + " %", cellFont);
-				addBodyCell(table, formatNumber(pctOfAvg) + " %", cellFont);
+				table.addCell(PdfCellUtils.bodyCell(s.name(), cellFont));
+				table.addCell(PdfCellUtils.bodyCell(formatNumber(s.occupancyPct()) + " %", cellFont));
+				table.addCell(PdfCellUtils.bodyCell(formatEuro(s.revenueCents()), cellFont));
+				table.addCell(PdfCellUtils.bodyCell(formatNumber(pctOfMax) + " %", cellFont));
+				table.addCell(PdfCellUtils.bodyCell(formatNumber(pctOfAvg) + " %", cellFont));
 			}
 
 			document.add(table);
@@ -234,19 +232,6 @@ public class StatisticsController implements ContentController, Exportable {
 			}
 		}
 		return bufferedImage;
-	}
-
-	private void addHeaderCell(PdfPTable table, String text, Font font) {
-		PdfPCell cell = new PdfPCell(new Paragraph(text, font));
-		cell.setHorizontalAlignment(Element.ALIGN_LEFT);
-		cell.setPadding(5f);
-		table.addCell(cell);
-	}
-
-	private void addBodyCell(PdfPTable table, String text, Font font) {
-		PdfPCell cell = new PdfPCell(new Paragraph(text, font));
-		cell.setPadding(5f);
-		table.addCell(cell);
 	}
 
 	private String formatNumber(double value) {

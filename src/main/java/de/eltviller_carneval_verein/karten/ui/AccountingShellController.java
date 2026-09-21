@@ -100,8 +100,6 @@ public class AccountingShellController {
 			}
 		});
 
-		reloadEventItems();
-
 		chkIncludeArchived.selectedProperty().addListener((obs, oldVal, newVal) -> {
 			reloadEventItems();
 			if (activeContentController instanceof StatisticsController stats) {
@@ -146,6 +144,12 @@ public class AccountingShellController {
 		});
 
 		setupExportButton();
+
+		// Muss NACH den obigen Listenern laufen: setzt bei genau einem Event
+		// automatisch dessen Auswahl, was den eventComboBox-Listener auslöst -
+		// wäre er noch nicht registriert, bliebe currentEvent fälschlich null.
+		reloadEventItems();
+
 		loadCashReconciliationView();
 	}
 
