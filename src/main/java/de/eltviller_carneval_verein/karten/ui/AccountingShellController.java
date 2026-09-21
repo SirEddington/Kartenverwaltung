@@ -14,6 +14,8 @@ import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.RadioButton;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.StackPane;
 import javafx.util.StringConverter;
 
@@ -21,8 +23,8 @@ import javafx.util.StringConverter;
  * Eigenständiger Bereich "Abrechnung", losgelöst vom Kartenverkauf: eigene
  * Event-/Vorstellungsauswahl, da die Nutzung zeitlich und fachlich getrennt
  * vom Verkauf am Stand stattfindet (siehe Roadmap-Diskussion zur
- * Navigationsstruktur). Aktuell nur der Kassenabgleich; Platz für künftige
- * Umsatz-Statistiken im selben Bereich.
+ * Navigationsstruktur). Zwei Unteransichten über RadioButtons umschaltbar:
+ * Kassenabgleich (pro Event/Vorstellung) und Statistik (über alle Events).
  */
 public class AccountingShellController {
 
@@ -34,6 +36,12 @@ public class AccountingShellController {
 	private CheckBox chkIncludeArchived;
 	@FXML
 	private ComboBox<Presentation> presComboBox;
+	@FXML
+	private ToggleGroup viewToggleGroup;
+	@FXML
+	private RadioButton btnViewCash;
+	@FXML
+	private RadioButton btnViewStats;
 	@FXML
 	private Button btnToggleEdit;
 	@FXML
@@ -62,7 +70,12 @@ public class AccountingShellController {
 
 		reloadEventItems();
 
-		chkIncludeArchived.selectedProperty().addListener((obs, oldVal, newVal) -> reloadEventItems());
+		chkIncludeArchived.selectedProperty().addListener((obs, oldVal, newVal) -> {
+			reloadEventItems();
+			if (activeContentController instanceof StatisticsController stats) {
+				stats.refresh(newVal);
+			}
+		});
 
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			currentEvent = selectedEvent;
@@ -91,8 +104,15 @@ public class AccountingShellController {
 			}
 		});
 
-		loadContent();
-		updateEditAvailability();
+		viewToggleGroup.selectedToggleProperty().addListener((obs, oldToggle, newToggle) -> {
+			if (newToggle == btnViewStats) {
+				loadStatisticsView();
+			} else {
+				loadCashReconciliationView();
+			}
+		});
+
+		loadCashReconciliationView();
 	}
 
 	private void reloadEventItems() {
@@ -109,10 +129,13 @@ public class AccountingShellController {
 		}
 	}
 
+	/** Statistik ist rein lesend (aggregiert über alle Events), Bearbeiten ergibt dort keinen Sinn. */
 	private void updateEditAvailability() {
-		btnToggleEdit.setDisable(currentPresentation == null);
+		boolean statisticsActive = viewToggleGroup.getSelectedToggle() == btnViewStats;
+		boolean shouldDisable = statisticsActive || currentPresentation == null;
+		btnToggleEdit.setDisable(shouldDisable);
 
-		if (currentPresentation == null && editMode) {
+		if (shouldDisable && editMode) {
 			editMode = false;
 			btnToggleEdit.setText("Bearbeiten");
 			if (activeContentController != null) {
@@ -121,15 +144,30 @@ public class AccountingShellController {
 		}
 	}
 
-	private void loadContent() {
+	private void loadCashReconciliationView() {
+		loadContent("/de/eltviller_carneval_verein/karten/ui/CashReconciliationView.fxml");
+		updateEditAvailability();
+	}
+
+	private void loadStatisticsView() {
+		loadContent("/de/eltviller_carneval_verein/karten/ui/StatisticsView.fxml");
+		if (activeContentController instanceof StatisticsController stats) {
+			stats.refresh(chkIncludeArchived.isSelected());
+		}
+		updateEditAvailability();
+	}
+
+	private void loadContent(String fxmlPath) {
 		try {
-			FXMLLoader loader = new FXMLLoader(getClass().getResource("/de/eltviller_carneval_verein/karten/ui/CashReconciliationView.fxml"));
+			FXMLLoader loader = new FXMLLoader(getClass().getResource(fxmlPath));
 			Node view = loader.load();
 
+			// Aktiven Inhalts-Controller merken
 			this.activeContentController = loader.getController();
 
 			contentArea.getChildren().setAll(view);
 
+			// Aktuelles Event und Vorstellung direkt an den neuen Inhalt übergeben
 			activeContentController.setEvent(currentEvent);
 			activeContentController.setPresentation(currentPresentation);
 			activeContentController.setEditMode(editMode);

@@ -7,6 +7,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 
@@ -45,6 +46,8 @@ public class JsonTicketRepository implements TicketRepository {
 
 		this.objectMapper = new ObjectMapper();
 		this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
+		this.objectMapper.registerModule(new JavaTimeModule());
+		this.objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 	}
 	// <-- Konstuktoren
 

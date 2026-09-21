@@ -4,6 +4,7 @@ module Kartenverwaltung {
     requires org.controlsfx.controls;
     requires com.fasterxml.jackson.databind;
     requires com.fasterxml.jackson.annotation;
+    requires com.fasterxml.jackson.datatype.jsr310;
     requires com.github.librepdf.openpdf;
     requires java.prefs;
 

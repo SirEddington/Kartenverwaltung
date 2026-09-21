@@ -308,7 +308,7 @@ public class CashReconciliationController implements ContentController {
 		}
 
 		FileChooser fileChooser = new FileChooser();
-		String baseName = selectedPres != null ? selectedPres.getName() : "Gesamtbilanz_" + selectedEvent.getName();
+		String baseName = selectedPres != null ? selectedEvent.getName() + "_" + selectedPres.getName() : selectedEvent.getName() + "_Gesamtbilanz";
 		fileChooser.setInitialFileName(sanitizeFileName("Kassenbericht_" + baseName + "_" + LocalDate.now().format(FILE_DATE_FORMAT)) + "." + format.extension);
 		fileChooser.getExtensionFilters().add(new ExtensionFilter(format.name() + "-Datei", "*." + format.extension));
 
@@ -362,7 +362,7 @@ public class CashReconciliationController implements ContentController {
 			Font cellFont = FontFactory.getFont(FontFactory.HELVETICA, 11);
 			Font boldCellFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 11);
 
-			String scope = selectedPres != null ? selectedPres.getName() : "Gesamtbilanz – " + selectedEvent.getName();
+			String scope = selectedPres != null ? selectedEvent.getName() + " – " + selectedPres.getName() : selectedEvent.getName() + " – Gesamtbilanz";
 			Paragraph title = new Paragraph("Kassenbericht: " + scope, titleFont);
 			title.setSpacingAfter(4f);
 			document.add(title);
