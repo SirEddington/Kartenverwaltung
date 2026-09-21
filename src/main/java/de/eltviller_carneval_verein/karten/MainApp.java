@@ -9,11 +9,14 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.ui.EventEditController;
 import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
+import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.layout.StackPane;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
@@ -83,7 +86,7 @@ public class MainApp extends Application {
 			controller.initData(selectedEvent, selectedPres, selectedTable, selectedSeat, editable);
 
 			// 5. Scene setzen
-			Scene scene = new Scene(root, width, height);
+			Scene scene = new Scene(wrapWithBackground(root), width, height);
 			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 			scene.getStylesheets().add(css);
 			primaryStage.setScene(scene);
@@ -105,13 +108,31 @@ public class MainApp extends Application {
 			Parent root = loader.load();
 
 			// 3. Scene setzen
-			Scene scene = new Scene(root, width, height);
+			Scene scene = new Scene(wrapWithBackground(root), width, height);
 			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 			scene.getStylesheets().add(css);
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+	}
+
+	/**
+	 * Legt das ECV-Wappen groß und dezent transparent hinter den eigentlichen
+	 * Bildschirminhalt, damit es auf jedem Screen einheitlich im Hintergrund
+	 * erscheint, statt es in jeder FXML einzeln nachzubauen. Skaliert mit der
+	 * tatsächlichen Fenstergröße mit.
+	 */
+	private static Parent wrapWithBackground(Parent content) {
+		ImageView background = new ImageView(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/wappen.png")));
+		background.setPreserveRatio(true);
+		background.setOpacity(0.12);
+		background.setMouseTransparent(true);
+
+		StackPane wrapper = new StackPane(background, content);
+		background.fitHeightProperty().bind(wrapper.heightProperty().multiply(0.85));
+		StackPane.setAlignment(background, Pos.CENTER);
+		return wrapper;
 	}
 
 	@SuppressWarnings("exports")
