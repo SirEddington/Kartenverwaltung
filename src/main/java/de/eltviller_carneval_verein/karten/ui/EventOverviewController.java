@@ -131,49 +131,21 @@ public class EventOverviewController {
 		});
 
 		// 5. Spalte: aktuelle Einnahmen, erwatete Einnahmen, potenzielle Einnahmen
+		// Rechnet in Cent (wie CashReconciliationController), damit hier nie eine andere
+		// Zahl herauskommt als in der Bilanz für dieselben Daten.
 		colRevenue.setCellValueFactory(cell -> {
 			Object data = cell.getValue().getValue();
-			Double revenue = 0.0;
-			Double expected = 0.0;
-			Double potential = 0.0;
 			if (data instanceof Event event) {
-				double sum = event.getSeats().stream().mapToDouble(Seat::getPriceDouble).sum();
-				potential += sum;
-				sum = 0.0;
-				sum = event.getSeats().stream().filter(Seat::isReserved).mapToDouble(Seat::getPriceDouble).sum();
-				expected += sum;
-				sum = 0.0;
-				sum = event.getSeats().stream().filter(Seat::isPaid).mapToDouble(Seat::getPriceDouble).sum();
-				revenue += sum;
-				return new SimpleStringProperty(revenue + "€ / " + expected + "€ / " + potential + "€");
+				return new SimpleStringProperty(formatRevenue(event.getSeats()));
 			}
 			if (data instanceof Presentation presentation) {
-				double sum = presentation.getSeats().stream().mapToDouble(Seat::getPriceDouble).sum();
-				potential += sum;
-				sum = 0.0;
-				sum = presentation.getSeats().stream().filter(Seat::isReserved).mapToDouble(Seat::getPriceDouble).sum();
-				expected += sum;
-				sum = 0.0;
-				sum = presentation.getSeats().stream().filter(Seat::isPaid).mapToDouble(Seat::getPriceDouble).sum();
-				revenue += sum;
-				return new SimpleStringProperty(revenue + "€ / " + expected + "€ / " + potential + "€");
+				return new SimpleStringProperty(formatRevenue(presentation.getSeats()));
 			}
 			if (data instanceof Table table) {
-				double sum = table.getSeats().stream().mapToDouble(Seat::getPriceDouble).sum();
-				potential += sum;
-				sum = 0.0;
-				sum = table.getSeats().stream().filter(Seat::isReserved).mapToDouble(Seat::getPriceDouble).sum();
-				expected += sum;
-				sum = 0.0;
-				sum = table.getSeats().stream().filter(Seat::isPaid).mapToDouble(Seat::getPriceDouble).sum();
-				revenue += sum;
-				return new SimpleStringProperty(revenue + "€ / " + expected + "€ / " + potential + "€");
+				return new SimpleStringProperty(formatRevenue(table.getSeats()));
 			}
 			if (data instanceof Seat seat) {
-				potential = seat.getPriceDouble();
-				expected = (seat.isReserved() == true ? seat.getPriceDouble() : 0.0);
-				revenue = (seat.isPaid() == true ? seat.getPriceDouble() : 0.0);
-				return new SimpleStringProperty(revenue + "€ / " + expected + "€ / " + potential + "€");
+				return new SimpleStringProperty(formatRevenue(List.of(seat)));
 			}
 			return null;
 		});
@@ -190,6 +162,17 @@ public class EventOverviewController {
 		// CellFactory für die grafische Checkbox
 		colArchive.setCellFactory(CheckBoxTreeTableCell.forTreeTableColumn(colArchive));
 
+	}
+
+	/**
+	 * "Einnahmen (bezahlt) / erwartet (reserviert) / potenziell (alle Sitze)" - einheitlich
+	 * in Cent aufsummiert und über MoneyFormat formatiert (siehe colRevenue oben).
+	 */
+	private String formatRevenue(List<Seat> seats) {
+		long potentialCents = seats.stream().mapToLong(Seat::getPrice).sum();
+		long expectedCents = seats.stream().filter(Seat::isReserved).mapToLong(Seat::getPrice).sum();
+		long revenueCents = seats.stream().filter(Seat::isPaid).mapToLong(Seat::getPrice).sum();
+		return MoneyFormat.formatCents(revenueCents) + " / " + MoneyFormat.formatCents(expectedCents) + " / " + MoneyFormat.formatCents(potentialCents);
 	}
 
 	private void setupContextMenu() {

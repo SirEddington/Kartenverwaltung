@@ -8,7 +8,6 @@ import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Locale;
 
 import com.lowagie.text.Document;
 import com.lowagie.text.Font;
@@ -224,7 +223,7 @@ public class CashReconciliationController implements ContentController, Exportab
 	}
 
 	private String formatCents(long cents) {
-		return String.format(Locale.GERMANY, "%,.2f €", cents / 100.0);
+		return MoneyFormat.formatCents(cents);
 	}
 
 	/**
