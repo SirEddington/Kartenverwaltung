@@ -50,6 +50,7 @@
 
     <!-- UNTERER BEREICH: Identischer Footer -->
     <HBox spacing="10.0" alignment="CENTER_RIGHT">
+        <SplitMenuButton fx:id="btnExport" styleClass="button-secondary" text="Exportieren" />
         <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" />
     </HBox>
 </VBox>
