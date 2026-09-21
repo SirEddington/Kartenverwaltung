@@ -575,7 +575,7 @@
 #trendChart .default-color1.chart-series-line { -fx-stroke: -fx-ecv-red; }
 #trendChart .default-color1.chart-line-symbol { -fx-background-color: -fx-ecv-red, white; }
 
-#trendChart .default-color2.chart-series-line { -fx-stroke: -fx-ecv-gold; }
-#trendChart .default-color2.chart-line-symbol { -fx-background-color: -fx-ecv-gold, white; }
+#trendChart .default-color2.chart-series-line { -fx-stroke: -fx-ecv-yellow; }
+#trendChart .default-color2.chart-line-symbol { -fx-background-color: -fx-ecv-yellow, white; }
 
 #revenueChart .default-color0.chart-bar { -fx-bar-fill: -fx-ecv-blue; }
