@@ -111,6 +111,7 @@ public class EventCreateController {
 		alert.setTitle(title);
 		alert.setHeaderText(null);
 		alert.setContentText(content);
+		MainApp.applyAppIcon(alert);
 		alert.showAndWait();
 	}
 }

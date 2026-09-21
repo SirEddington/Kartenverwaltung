@@ -388,6 +388,7 @@ public class EventEditController {
 		confirmation.setHeaderText(null);
 		confirmation.setContentText("Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?");
 
+		MainApp.applyAppIcon(confirmation);
 		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
 			return;
 		}
@@ -442,6 +443,7 @@ public class EventEditController {
 		confirmation.setHeaderText(null);
 		confirmation.setContentText("Soll die Vorstellung \"" + presentation.getName() + "\" wirklich unwiderruflich gelöscht werden?");
 
+		MainApp.applyAppIcon(confirmation);
 		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
 			return;
 		}
@@ -488,6 +490,7 @@ public class EventEditController {
 		confirmation.setHeaderText(null);
 		confirmation.setContentText("Soll Tisch " + table.getTableNumber() + " wirklich unwiderruflich gelöscht werden?");
 
+		MainApp.applyAppIcon(confirmation);
 		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
 			return;
 		}
@@ -531,6 +534,7 @@ public class EventEditController {
 		confirmation.setHeaderText(null);
 		confirmation.setContentText("Soll Sitz " + seat.getSeatNumber() + " wirklich unwiderruflich gelöscht werden?");
 
+		MainApp.applyAppIcon(confirmation);
 		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
 			return;
 		}

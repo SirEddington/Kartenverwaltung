@@ -135,12 +135,24 @@ public class MainApp extends Application {
 		return wrapper;
 	}
 
+	/**
+	 * Setzt das App-Icon auf die Dialog-Stage eines Alerts, damit auch
+	 * Bestätigungen/Fehlermeldungen das Harlekin-Icon statt des
+	 * Standard-Java-Symbols zeigen.
+	 */
+	@SuppressWarnings("exports")
+	public static void applyAppIcon(Alert alert) {
+		Stage alertStage = (Stage) alert.getDialogPane().getScene().getWindow();
+		alertStage.getIcons().add(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/harlekin_logo.png")));
+	}
+
 	@SuppressWarnings("exports")
 	public static void showAlert(String title, String content, AlertType alertType) {
 		Alert alert = new Alert(alertType);
 		alert.setTitle(title);
 		alert.setHeaderText(null);
 		alert.setContentText(content);
+		applyAppIcon(alert);
 		alert.showAndWait();
 	}
 
