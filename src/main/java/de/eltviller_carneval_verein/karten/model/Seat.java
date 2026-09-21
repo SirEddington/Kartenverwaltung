@@ -83,6 +83,7 @@ public class Seat {
 		this.price = (int) Math.round(price * 100);
 	}
 
+	@JsonIgnore
 	public ObjectProperty<PaymentStatus> getPaymentStatusProperty() {
 		return paymentStatus;
 	}
@@ -201,6 +202,7 @@ public class Seat {
 		}
 	}
 	
+	@JsonIgnore
 	public boolean isPaid() {
 	    return getPaymentStatus() != null && getPaymentStatus().isPaid();
 	}

@@ -1,11 +1,13 @@
 package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
+import java.util.List;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
 import de.eltviller_carneval_verein.karten.ui.EventEditController;
 import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
@@ -39,6 +41,15 @@ public class MainApp extends Application {
 
 		stage.setTitle("ECV Kartenverwaltung");
 		stage.getIcons().add(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/harlekin_logo.png")));
+
+		// Events einmalig beim Start laden, damit unlesbare/doppelte Dateien sofort
+		// sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
+		JsonTicketRepository repository = JsonTicketRepository.getInstance();
+		repository.loadEvents();
+		List<String> loadWarnings = repository.getAndClearLoadWarnings();
+		if (!loadWarnings.isEmpty()) {
+			showAlert("Warnung beim Laden der Events", String.join("\n\n", loadWarnings), AlertType.WARNING);
+		}
 
 		// Startet direkt im Hauptmenü
 		showMenuView();
@@ -92,6 +103,7 @@ public class MainApp extends Application {
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
 			e.printStackTrace();
+			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}
 
@@ -114,6 +126,7 @@ public class MainApp extends Application {
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
 			e.printStackTrace();
+			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}
 

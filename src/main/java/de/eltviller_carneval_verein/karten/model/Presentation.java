@@ -11,8 +11,10 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Presentation {
 	private final String id;
 	@JsonBackReference("event-presentation")

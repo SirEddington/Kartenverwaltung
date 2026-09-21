@@ -7,6 +7,7 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.SeatStatus;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
 import javafx.event.EventHandler;
@@ -369,9 +370,19 @@ public class HallOverviewController implements ContentController {
 		}
 	}
 
+	/** Farbzuordnung für den Saalplan - gehört hierher in die UI-Schicht, nicht ins Modell. */
+	private static Color seatColorFor(SeatStatus status) {
+		return switch (status) {
+		case FREE -> UiColors.SEAT_FREE.getFxColor();
+		case RESERVED -> UiColors.SEAT_RESEREVED.getFxColor();
+		case SOLD -> UiColors.SEAT_SOLD.getFxColor();
+		case BLOCKED -> UiColors.SEAT_BLOCKED.getFxColor();
+		};
+	}
+
 	private Node createSeatNode(Seat seat) {
 		Circle seatCircle = new Circle(seat.getPosX(), seat.getPosY(), seat.getWidth() / 2.0);
-		seatCircle.setFill(seat.getStatus().getSeatColor().getFxColor());
+		seatCircle.setFill(seatColorFor(seat.getStatus()));
 
 		boolean matchesQuery = matchesQuery(seat);
 		boolean searchActive = !currentQuery.isEmpty();

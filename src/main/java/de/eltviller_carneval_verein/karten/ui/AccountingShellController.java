@@ -270,6 +270,7 @@ public class AccountingShellController {
 			activeContentController.setEditMode(editMode);
 		} catch (IOException e) {
 			e.printStackTrace();
+			MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}
 

@@ -8,8 +8,10 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Event {
 	private final String id;
 

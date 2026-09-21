@@ -19,37 +19,21 @@ jobs:
           java-version: '21'
 
       - name: Build jar with Maven
-        run: |
-          chmod +x mvnw
-          ./mvnw --batch-mode clean package
+        run: ./mvnw --batch-mode clean package
 
       # IMPORTANT: check https://conveyor.hydraulic.dev/latest/ for the current
       # version and bump the tag below (@v22.2) when it changes.
-      - name: Build download site with Conveyor
+      #
+      # "make copied-site" statt "make site": Conveyor laedt die Installer direkt als
+      # GitHub-Release-Assets hoch (ueber die API, per OAUTH_TOKEN) und pflegt die kleine
+      # Download-Seite in einem separaten "gh-pages"-Branch (siehe conveyor.conf). Damit
+      # landen die 40-90 MB großen MSIX-/ZIP-Dateien nie mehr in der Git-Historie von main.
+      - name: Build and publish with Conveyor
         uses: hydraulic-software/conveyor/actions/build@v22.2
+        env:
+          OAUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          command: make site
+          command: make copied-site
           signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
           agree_to_license: 1
           extra_flags: -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
-
-      - name: Copy site into docs/
-        run: |
-          mkdir -p docs
-          rm -rf docs/*
-          cp -r output/* docs/
-          if [ -f docs/download.html ]; then
-            mv docs/download.html docs/index.html
-          fi
-
-      - name: Commit and push docs/
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/
-          if git diff --cached --quiet; then
-            echo "No changes to publish."
-          else
-            git commit -m "Download-Site aktualisieren (Release ${{ github.run_number }})"
-            git push
-          fi

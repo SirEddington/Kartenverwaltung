@@ -107,9 +107,10 @@ public class TicketShellController {
             activeContentController.setPresentation(currentPresentation);
         } catch (IOException e) {
             e.printStackTrace();
+            MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
         }
     }
-    
+
     @FXML
     private void toggleEditMode() {
         this.editMode = !this.editMode;

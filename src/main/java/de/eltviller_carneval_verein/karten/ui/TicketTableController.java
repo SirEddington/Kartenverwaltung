@@ -24,9 +24,10 @@ import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.control.cell.ComboBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.util.StringConverter;
-import javafx.util.converter.DoubleStringConverter;
 
 public class TicketTableController implements ContentController {
+
+	private static final GermanDecimalStringConverter PRICE_CONVERTER = new GermanDecimalStringConverter();
 
 	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
 	private Event selectedEvent;
@@ -101,7 +102,7 @@ public class TicketTableController implements ContentController {
 		colFirstName.setCellFactory(TextFieldTableCell.forTableColumn());
 		colFirstName.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setFirstName(editEvent.getNewValue()));
 
-		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(new DoubleStringConverter()));
+		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(PRICE_CONVERTER));
 		colPrice.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setPriceDouble(editEvent.getNewValue()));
 
 		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
