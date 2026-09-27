@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<VBox spacing="15.0" prefWidth="900.0" prefHeight="600.0"
+      xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="de.eltviller_carneval_verein.karten.ui.hall.HallManagementController">
+    <padding>
+        <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
+    </padding>
+
+    <!-- Top Toolbar -->
+    <HBox alignment="CENTER_LEFT" spacing="10.0">
+        <Button text="← Verwaltung" styleClass="button-default" onAction="#handleBackToManagement" />
+        <Label text="Hallen-Verwaltung" styleClass="header-label" />
+
+        <Region HBox.hgrow="ALWAYS" />
+
+        <Label text="Suche:" />
+        <TextField fx:id="searchField" promptText="Event / Vorstellung..." prefWidth="200.0" />
+        <Button text="Löschen" styleClass="button-danger" onAction="#handleDeleteHall" />
+        <Button text="+ Neue Halle" styleClass="button-primary" onAction="#handleCreateNewHall" />
+        <Button text="Speichern" styleClass="button-secondary" onAction="#handleSave" />
+    </HBox>
+
+    <Separator />
+
+    <TableView fx:id="hallTable" VBox.vgrow="ALWAYS" editable="true">
+        <columns>
+            <TableColumn fx:id="colName" text="Name" prefWidth="200.0" />
+            <TableColumn fx:id="colDescription" text="Beschreibung" prefWidth="220.0" />
+            <TableColumn fx:id="colHallWidth" text="Saalbreite (m)" prefWidth="110.0" />
+            <TableColumn fx:id="colHallHeight" text="Saallänge (m)" prefWidth="110.0" />
+            <TableColumn fx:id="colDefaultObjectWidth" text="Std.-Objektbreite" prefWidth="110.0" />
+            <TableColumn fx:id="colDefaultObjectHeight" text="Std.-Objekthöhe" prefWidth="110.0" />
+            <TableColumn fx:id="colObjectCount" text="Hallenobjekte" prefWidth="100.0" />
+        </columns>
+        <columnResizePolicy>
+            <TableView fx:constant="CONSTRAINED_RESIZE_POLICY" />
+        </columnResizePolicy>
+    </TableView>
+</VBox>

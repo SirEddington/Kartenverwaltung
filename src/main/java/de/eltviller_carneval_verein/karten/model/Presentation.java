@@ -20,15 +20,15 @@ public class Presentation {
 	@JsonBackReference("event-presentation")
 	private Event parentEvent;
 
-	private String name; // get
-	private LocalDate date; // get,set
-	private LocalTime time; // get,set
-	private String description; // get, set
+	private String name;
+	private LocalDate date;
+	private LocalTime time;
+	private String description;
 
-	// Daten für Saalansicht
-	private double hallWidth;
-	private double hallHeight;
-	private int tableRows;
+	// Referenz auf eine wiederverwendbare Halle (siehe Hall-Klasse). Bewusst nur die ID,
+	// damit mehrere Vorstellungen - auch über verschiedene Events hinweg - dieselbe Halle
+	// referenzieren können, ohne dass Jackson sie beim Speichern mehrfach einbettet.
+	private String hallId;
 
 	// Standardwerte
 	private double defaultTableWidth;
@@ -42,7 +42,6 @@ public class Presentation {
 
 	@JsonManagedReference("presentation-table")
 	private List<Table> tables = new ArrayList<>(); // get,set
-	private List<HallObject> hallObjects = new ArrayList<>(); // get,set
 
 	// Konstuktoren -->
 	public Presentation() {
@@ -108,41 +107,6 @@ public class Presentation {
 		}
 	}
 
-	public List<HallObject> getHallObjects() {
-		return hallObjects;
-	}
-
-	public void setHallObjects(List<HallObject> hallObjects) {
-		this.hallObjects = hallObjects;
-		if (hallObjects != null) {
-			hallObjects.forEach(t -> t.setParent(this));
-		}
-	}
-
-	public double getHallWidth() {
-		return hallWidth;
-	}
-
-	public void setHallWidth(double hallWidth) {
-		this.hallWidth = hallWidth;
-	}
-
-	public double getHallHeight() {
-		return hallHeight;
-	}
-
-	public void setHallHeight(double hallHeight) {
-		this.hallHeight = hallHeight;
-	}
-
-	public int getTableRows() {
-		return tableRows;
-	}
-
-	public void setTableRows(int tableRows) {
-		this.tableRows = tableRows;
-	}
-
 	public double getDefaultTableWidth() {
 		return defaultTableWidth;
 	}
@@ -202,6 +166,14 @@ public class Presentation {
 	}
 	// <-- Getter und Setter
 
+	public String getHallId() {
+		return hallId;
+	}
+
+	public void setHallId(String hallId) {
+		this.hallId = hallId;
+	}
+
 	public void changeName(String name) {
 		if (name == null || name.isBlank()) {
 			throw new IllegalArgumentException("Name darf nicht leer sein.");
@@ -242,7 +214,7 @@ public class Presentation {
 	}
 
 	private int createTableNumber() {
-		// 1. Alle aktuell vorhandenen Namen einsammeln
+		// 1. Alle aktuell vorhandenen Nummern einsammeln
 		Set<Integer> existingNumbers = tables.stream().map(Table::getTableNumber).collect(Collectors.toSet());
 
 		// 2. Ersten freien Namen finden

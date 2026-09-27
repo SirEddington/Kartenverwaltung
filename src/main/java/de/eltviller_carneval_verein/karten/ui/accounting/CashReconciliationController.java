@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.ui;
+package de.eltviller_carneval_verein.karten.ui.accounting;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -21,7 +21,10 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.MoneyFormat;
+import de.eltviller_carneval_verein.karten.ui.UiColors;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
@@ -30,7 +33,7 @@ import javafx.scene.control.TextArea;
 
 public class CashReconciliationController implements ContentController, Exportable {
 
-	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
+	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 
 	private Event selectedEvent;
 	private Presentation selectedPres;

@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.ui;
+package de.eltviller_carneval_verein.karten.ui.event;
 
 import java.util.List;
 
@@ -7,7 +7,8 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.MoneyFormat;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
@@ -25,30 +26,20 @@ import javafx.scene.control.cell.CheckBoxTreeTableCell;
 
 public class EventOverviewController {
 
-	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
+	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 
-	@FXML
-	private TextField searchField;
-	@FXML
-	private Button btnToggleEdit = new Button();
-	@FXML
-	private Button btnSave = new Button();
+	@FXML private TextField searchField;
+	@FXML private Button btnToggleEdit = new Button();
+	@FXML private Button btnSave = new Button();
 
 	// TableView und Spalten
-	@FXML
-	private TreeTableView<Object> treeTableView;
-	@FXML
-	private TreeTableColumn<Object, String> colName;
-	@FXML
-	private TreeTableColumn<Object, Integer> colPresCount;
-	@FXML
-	private TreeTableColumn<Object, Integer> colTableCount;
-	@FXML
-	private TreeTableColumn<Object, String> colSeatCount;
-	@FXML
-	private TreeTableColumn<Object, String> colRevenue;
-	@FXML
-	private TreeTableColumn<Object, Boolean> colArchive;
+	@FXML private TreeTableView<Object> treeTableView;
+	@FXML private TreeTableColumn<Object, String> colName;
+	@FXML private TreeTableColumn<Object, Integer> colPresCount;
+	@FXML private TreeTableColumn<Object, Integer> colTableCount;
+	@FXML private TreeTableColumn<Object, String> colSeatCount;
+	@FXML private TreeTableColumn<Object, String> colRevenue;
+	@FXML private TreeTableColumn<Object, Boolean> colArchive;
 
 	@FXML
 	public void initialize() {
@@ -322,7 +313,7 @@ public class EventOverviewController {
 
 	@FXML
 	private void handleBackToMenu() {
-		MainApp.showMenuView();
+		MainApp.showManagementMenuView();
 	}
 
 	@FXML

@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.ui;
+package de.eltviller_carneval_verein.karten.ui.event;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -13,7 +13,7 @@ import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -48,7 +48,7 @@ import javafx.util.converter.LocalTimeStringConverter;
 
 public class EventEditController {
 
-	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
+	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 
 	private final ObservableList<Event> masterEventData = FXCollections.observableArrayList();
 	private FilteredList<Event> filteredEventData;
@@ -424,10 +424,7 @@ public class EventEditController {
 		newPres.setDefaultSeatWidth(presentation.getDefaultSeatWidth());
 		newPres.setDefaultTableHeight(presentation.getDefaultTableHeight());
 		newPres.setDefaultTableWidth(presentation.getDefaultTableWidth());
-		newPres.setHallHeight(presentation.getHallHeight());
-		newPres.setHallWidth(presentation.getHallWidth());
-		newPres.setHallObjects(presentation.getHallObjects());
-		newPres.setTableRows(presentation.getTableRows());
+		newPres.setHallId(presentation.getHallId());
 
 		for (Table table : presentation.getTables()) {
 			handleCopyTable(table, newPres);

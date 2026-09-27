@@ -15,9 +15,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 
-public class JsonTicketRepository implements TicketRepository {
+public class JsonEventRepository implements EventRepository {
 
-	private static JsonTicketRepository instance;
+	private static JsonEventRepository instance;
 
 	private final File storageDir;
 	private final ObjectMapper objectMapper;
@@ -37,9 +37,9 @@ public class JsonTicketRepository implements TicketRepository {
 	 * darüber die Instanz holen, statt selbst eine eigene zu erzeugen, damit
 	 * nicht an mehreren Stellen unabhängig von der Festplatte gelesen wird.
 	 */
-	public static synchronized JsonTicketRepository getInstance() {
+	public static synchronized JsonEventRepository getInstance() {
 		if (instance == null) {
-			instance = new JsonTicketRepository(resolveDefaultStorageDir());
+			instance = new JsonEventRepository(resolveDefaultStorageDir());
 		}
 		return instance;
 	}
@@ -61,7 +61,7 @@ public class JsonTicketRepository implements TicketRepository {
 	 * Paketsichtbar statt privat, damit Tests direkt ein temporäres Verzeichnis
 	 * injizieren können, ohne den Produktions-Singleton anzufassen.
 	 */
-	JsonTicketRepository(File storageDir) {
+	JsonEventRepository(File storageDir) {
 		this.storageDir = storageDir;
 
 		this.objectMapper = new ObjectMapper();
@@ -72,44 +72,9 @@ public class JsonTicketRepository implements TicketRepository {
 		boolean isNewStorageDir = !storageDir.exists();
 		if (isNewStorageDir) {
 			storageDir.mkdirs();
-			migrateLegacyStorage();
 		}
 	}
 	// <-- Konstuktoren
-
-	/**
-	 * Übernimmt Event-Dateien aus dem alten, arbeitsverzeichnis-relativen "events_data"-Ordner
-	 * in den neuen festen Speicherort, falls dieser gerade erst angelegt wurde. Kopiert nur -
-	 * die alten Dateien bleiben unangetastet liegen, damit dabei nichts verloren gehen kann.
-	 */
-	private void migrateLegacyStorage() {
-		File legacyDir = new File("events_data");
-		if (!legacyDir.isDirectory()) {
-			return;
-		}
-
-		try {
-			if (legacyDir.getCanonicalFile().equals(storageDir.getCanonicalFile())) {
-				return;
-			}
-		} catch (IOException e) {
-			return;
-		}
-
-		File[] legacyFiles = legacyDir.listFiles((dir, name) -> name.endsWith(".json"));
-		if (legacyFiles == null) {
-			return;
-		}
-
-		for (File legacyFile : legacyFiles) {
-			File target = new File(storageDir, legacyFile.getName());
-			try {
-				Files.copy(legacyFile.toPath(), target.toPath(), StandardCopyOption.COPY_ATTRIBUTES);
-			} catch (IOException e) {
-				loadWarnings.add("Alte Datei '" + legacyFile.getName() + "' konnte nicht in den neuen Datenordner übernommen werden: " + e.getMessage());
-			}
-		}
-	}
 
 	@Override
 	public List<Event> loadEvents() {

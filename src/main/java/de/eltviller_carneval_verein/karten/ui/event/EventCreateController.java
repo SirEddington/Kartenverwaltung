@@ -1,11 +1,11 @@
-package de.eltviller_carneval_verein.karten.ui;
+package de.eltviller_carneval_verein.karten.ui.event;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Label;
@@ -21,10 +21,6 @@ public class EventCreateController {
 	@FXML
 	private Spinner<Integer> spnPresCount;
 	@FXML
-	private Spinner<Double> spnDoubleHallWidth;
-	@FXML
-	private Spinner<Double> spnDoubleHallHeight;
-	@FXML
 	private Spinner<Integer> spnTablePerPres;
 	@FXML
 	private Spinner<Double> spnDoubleTableWidth;
@@ -39,7 +35,7 @@ public class EventCreateController {
 	@FXML
 	private Spinner<Double> spnDoublePrice;
 
-	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
+	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 	private Event currentEvent;
 
 	public void setEventToEdit(Event event) {
@@ -76,8 +72,6 @@ public class EventCreateController {
 		// Vorstellungen
 		for (int i = 0; i < spnPresCount.getValue(); i++) {
 			Presentation pres = event.addPresentation();
-			pres.setHallHeight(spnDoubleHallHeight.getValue());
-			pres.setHallWidth(spnDoubleHallWidth.getValue());
 			pres.setDefaultTableHeight(spnDoubleTableHeight.getValue());
 			pres.setDefaultTableWidth(spnDoubleTableWidth.getValue());
 			pres.setDefaultSeatHeight(spnDoubleSeatHeight.getValue());

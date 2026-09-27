@@ -17,9 +17,25 @@ module Kartenverwaltung {
     opens de.eltviller_carneval_verein.karten.model to com.fasterxml.jackson.databind, javafx.base;
     exports de.eltviller_carneval_verein.karten.model;
 
-    // UI-Paket für FXML-Reflection öffnen
+    // UI-Pakete für FXML-Reflection öffnen (je Unterpaket, seit die Controller
+    // nach Zuständigkeit aufgeteilt wurden statt alle in einem Paket zu liegen)
     opens de.eltviller_carneval_verein.karten.ui to javafx.fxml;
     exports de.eltviller_carneval_verein.karten.ui;
+
+    opens de.eltviller_carneval_verein.karten.ui.menu to javafx.fxml;
+    exports de.eltviller_carneval_verein.karten.ui.menu;
+
+    opens de.eltviller_carneval_verein.karten.ui.event to javafx.fxml;
+    exports de.eltviller_carneval_verein.karten.ui.event;
+
+    opens de.eltviller_carneval_verein.karten.ui.hall to javafx.fxml;
+    exports de.eltviller_carneval_verein.karten.ui.hall;
+
+    opens de.eltviller_carneval_verein.karten.ui.sales to javafx.fxml;
+    exports de.eltviller_carneval_verein.karten.ui.sales;
+
+    opens de.eltviller_carneval_verein.karten.ui.accounting to javafx.fxml;
+    exports de.eltviller_carneval_verein.karten.ui.accounting;
 
     // Repository-Paket exportieren
     exports de.eltviller_carneval_verein.karten.repository;

@@ -7,8 +7,8 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
-import de.eltviller_carneval_verein.karten.ui.EventEditController;
+import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Pos;
@@ -44,7 +44,7 @@ public class MainApp extends Application {
 
 		// Events einmalig beim Start laden, damit unlesbare/doppelte Dateien sofort
 		// sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
-		JsonTicketRepository repository = JsonTicketRepository.getInstance();
+		JsonEventRepository repository = JsonEventRepository.getInstance();
 		repository.loadEvents();
 		List<String> loadWarnings = repository.getAndClearLoadWarnings();
 		if (!loadWarnings.isEmpty()) {
@@ -68,8 +68,16 @@ public class MainApp extends Application {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/AccountingShellView.fxml");
 	}
 
+	public static void showManagementMenuView() {
+		loadScene("/de/eltviller_carneval_verein/karten/ui/ManagementMenuView.fxml");
+	}
+
 	public static void showEventOverviewView() {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/EventOverviewView.fxml");
+	}
+
+	public static void showHallManagementView() {
+		loadScene("/de/eltviller_carneval_verein/karten/ui/HallManagementView.fxml");
 	}
 
 	public static void showEventCreateView() {

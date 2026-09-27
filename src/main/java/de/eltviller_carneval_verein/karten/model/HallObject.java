@@ -8,8 +8,8 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 public class HallObject {
 	private final String id;
-	@JsonBackReference("presentation-hallObject")
-	private Presentation parentPresentation;
+	@JsonBackReference("hall-hallObject")
+	private Hall parentHall;
 
 	private String name;
 	private String desc;
@@ -37,21 +37,25 @@ public class HallObject {
 	}
 
 	@JsonIgnore
-	public Presentation getParent() {
-		return parentPresentation;
+	public Hall getParent() {
+		return parentHall;
 	}
 
 	@JsonIgnore
-	public void setParent(Presentation parentPresentation) {
-		this.parentPresentation = parentPresentation;
+	public void setParent(Hall parentHall) {
+		this.parentHall = parentHall;
 	}
 
 	public String getName() {
 		return name;
 	}
 
-	public void setName(String name) {
-		this.name = name;
+	public void changeName(String name) {
+		if (name == null || name.isBlank()) {
+			throw new IllegalArgumentException("Name darf nicht leer sein.");
+		} else {
+			this.name = name;
+		}
 	}
 
 	public String getDesc() {
@@ -110,6 +114,11 @@ public class HallObject {
 		this.shape = shape;
 	}
 	// <-- Getter und Setter
+
+	@Override
+	public String toString() {
+		return name != null ? name : "Unbenanntes Hallenobjekt";
+	}
 
 	@Override
 	public boolean equals(Object o) {

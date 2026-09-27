@@ -1,15 +1,19 @@
-package de.eltviller_carneval_verein.karten.ui;
+package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.UiColors;
 import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
@@ -48,7 +52,8 @@ public class HallOverviewController implements ContentController {
 	private static final double MAX_SCALE = 4.0;
 	private static final double ZOOM_FACTOR_PER_NOTCH = 1.1;
 
-	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
+	private final JsonEventRepository repository = JsonEventRepository.getInstance();
+	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
 	private Event selectedEvent;
 	private Presentation selectedPres;
 	private boolean editMode = false;
@@ -140,9 +145,12 @@ public class HallOverviewController implements ContentController {
 		// 1. Automatische Positionierung für Tische & Stühle ohne manuelle Position anwenden
 		applyDefaultPositions();
 
-		// 2. Zeichnen der Hallen-Objekte
-		for (HallObject hallObject : selectedPres.getHallObjects()) {
-			drawHallObject(hallObject);
+		// 2. Zeichnen der Hallen-Objekte (nur falls der Vorstellung bereits eine Halle zugeordnet ist)
+		Hall hall = hallRepository.findById(selectedPres.getHallId());
+		if (hall != null) {
+			for (HallObject hallObject : hall.getHallObjects()) {
+				drawHallObject(hallObject);
+			}
 		}
 
 		// 3. Zeichnen der Tische und Stühle

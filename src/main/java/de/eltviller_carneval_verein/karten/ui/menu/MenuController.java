@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.ui;
+package de.eltviller_carneval_verein.karten.ui.menu;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import javafx.fxml.FXML;
@@ -16,7 +16,7 @@ public class MenuController {
 	}
 
 	@FXML
-	private void handleOpenEventManagement() {
-		MainApp.showEventOverviewView();
+	private void handleOpenManagement() {
+		MainApp.showManagementMenuView();
 	}
 }

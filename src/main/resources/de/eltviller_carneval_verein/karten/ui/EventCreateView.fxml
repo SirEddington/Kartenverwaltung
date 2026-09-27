@@ -6,7 +6,7 @@
 
 <VBox spacing="15.0" prefWidth="700.0" prefHeight="550.0" 
       xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" 
-      fx:controller="de.eltviller_carneval_verein.karten.ui.EventCreateController">
+      fx:controller="de.eltviller_carneval_verein.karten.ui.event.EventCreateController">
     <padding>
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
@@ -32,10 +32,6 @@
     <GridPane vgap="10.0" hgap="10.0">
         <Label text="Anzahl der Vorstellungen:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
         <Spinner fx:id="spnPresCount" min="0" max="10" initialValue="3" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
-        <Label text="Saalbreite (m):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnDoubleHallWidth" min="0.0" max="100.0" initialValue="20.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
-        <Label text="Saallänge (m):" GridPane.rowIndex="1" GridPane.columnIndex="2" />
-        <Spinner fx:id="spnDoubleHallHeight" min="0.0" max="100.0" initialValue="40.0" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="3" />
     </GridPane>
 
     <Separator />
