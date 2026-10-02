@@ -11,21 +11,24 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.TextFieldTableCell;
 
-public class HallManagementController {
+public class HallManagementController implements ContentController {
 
 	private static final GermanDecimalStringConverter DOUBLE_CONVERTER = new GermanDecimalStringConverter();
 
@@ -33,9 +36,14 @@ public class HallManagementController {
 	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
 
 	private final ObservableList<Hall> masterData = FXCollections.observableArrayList();
+	private final FilteredList<Hall> filteredData = new FilteredList<>(masterData, hall -> true);
 
 	@FXML
 	private TableView<Hall> hallTable;
+	@FXML
+	private Button btnCreate;
+	@FXML
+	private Button btnDelete;
 	@FXML
 	private TableColumn<Hall, String> colName;
 	@FXML
@@ -95,7 +103,7 @@ public class HallManagementController {
 
 	private void loadHalls() {
 		masterData.setAll(hallRepository.loadHalls());
-		hallTable.setItems(masterData);
+		hallTable.setItems(filteredData);
 	}
 
 	@FXML
@@ -158,14 +166,40 @@ public class HallManagementController {
 		return usages;
 	}
 
-	@FXML
-	private void handleSave() {
+	@Override
+	public void save() {
 		hallRepository.saveHalls(masterData);
 	}
 
-	@FXML
-	private void handleBackToManagement() {
-		MainApp.showManagementMenuView();
+	@Override
+	public void setEvent(Event event) {
+	}
+
+	@Override
+	public void setPresentation(Presentation presentation) {
+	}
+
+	@Override
+	public void setHall(Hall hall) {
+		hallTable.getSelectionModel().select(hall);
+	}
+
+	@Override
+	public void filter(String query) {
+		filteredData.setPredicate(hall -> {
+			if (query == null || query.isEmpty()) {
+				return true;
+			}
+			return (hall.getName() != null && hall.getName().toLowerCase().contains(query))
+					|| (hall.getDescription() != null && hall.getDescription().toLowerCase().contains(query));
+		});
+	}
+
+	@Override
+	public void setEditMode(boolean enabled) {
+		hallTable.setEditable(enabled);
+		btnCreate.setDisable(!enabled);
+		btnDelete.setDisable(!enabled);
 	}
 
 	private void showAlert(String title, String content, AlertType alertType) {

@@ -3,100 +3,84 @@ package de.eltviller_carneval_verein.karten.ui.hall;
 import java.io.IOException;
 
 import de.eltviller_carneval_verein.karten.MainApp;
-import de.eltviller_carneval_verein.karten.model.Event;
-import de.eltviller_carneval_verein.karten.model.Hall;
-import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.control.RadioButton;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.StackPane;
 
-public class HallShellController implements ContentController {
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
-	
-    @FXML private TextField searchField;
-    @FXML private RadioButton btnTableView;
-    @FXML private RadioButton btnHallView;
-    @FXML private StackPane contentArea;
-    @FXML private Label lblHeader;
+/**
+ * Shell der Hallen-Verwaltung (Header, wechselnder Inhalt, Footer), analog zur
+ * Ticket- und Abrechnungs-Shell. Aktuell gibt es nur die Hallenliste als Inhalt;
+ * der Hallenplan-Editor folgt als weitere Unteransicht.
+ */
+public class HallShellController {
 
-    private ContentController activeContentController;
-    private Hall currentHall;
-    private boolean editMode = false;
-    
-    @FXML
-    public void initialize() {
-		// Freitext-Suche auf den geladenen Event-Daten
+	@FXML private TextField searchField;
+	@FXML private Button btnToggleEdit;
+	@FXML private StackPane contentArea;
+	@FXML private Label lblHeader;
+
+	private ContentController activeContentController;
+	private boolean editMode = false;
+
+	@FXML
+	public void initialize() {
+		// Freitext-Suche an die aktive Ansicht weiterreichen
 		searchField.textProperty().addListener((obs, oldVal, newValue) -> {
-			activeContentController.filter((newValue == null) ? "" : newValue.toLowerCase().trim());
+			if (activeContentController != null) {
+				activeContentController.filter((newValue == null) ? "" : newValue.toLowerCase().trim());
+			}
 		});
-		
-		showHallManagementView();
-    }
-    
-    @FXML
-    public void showHallManagementView() {
-    	
-    }
 
-    public void loadContentView(String fxmlPath) {
-        try {
-            FXMLLoader loader = new FXMLLoader(getClass().getResource(fxmlPath));
-            Node view = loader.load();
-
-            // Aktiven Inhalts-Controller merken
-            this.activeContentController = loader.getController();
-
-            // Inhalt im mittleren Bereich austauschen
-            contentArea.getChildren().setAll(view);
-
-            // Aktuelles Event und  Vorstellung direkt an den neuen Inhalt übergeben
-            activeContentController.setHall(currentHall);
-        } catch (IOException e) {
-            e.printStackTrace();
-            MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
-        }
-    }
-
-	@Override
-	public void setEvent(Event event) {
-		// TODO Auto-generated method stub
-		
+		showHallListView();
 	}
 
-	@Override
-	public void setPresentation(Presentation presentation) {
-		// TODO Auto-generated method stub
-		
+	private void showHallListView() {
+		lblHeader.setText("Hallen-Verwaltung");
+		loadContentView("/de/eltviller_carneval_verein/karten/ui/HallManagementView.fxml");
 	}
 
-	@Override
-	public void setHall(Hall hall) {
-		// TODO Auto-generated method stub
-		
+	private void loadContentView(String fxmlPath) {
+		try {
+			FXMLLoader loader = new FXMLLoader(getClass().getResource(fxmlPath));
+			Node view = loader.load();
+
+			// Aktiven Inhalts-Controller merken
+			this.activeContentController = loader.getController();
+
+			// Inhalt im mittleren Bereich austauschen
+			contentArea.getChildren().setAll(view);
+
+			activeContentController.setEditMode(editMode);
+		} catch (IOException e) {
+			e.printStackTrace();
+			MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
+		}
 	}
 
-	@Override
-	public void save() {
-		// TODO Auto-generated method stub
-		
+	@FXML
+	private void toggleEditMode() {
+		editMode = !editMode;
+		btnToggleEdit.setText(editMode ? "Anzeigen" : "Bearbeiten");
+		if (activeContentController != null) {
+			activeContentController.setEditMode(editMode);
+		}
 	}
 
-	@Override
-	public void filter(String query) {
-		// TODO Auto-generated method stub
-		
+	@FXML
+	private void handleBackToManagement() {
+		MainApp.showManagementMenuView();
 	}
 
-	@Override
-	public void setEditMode(boolean enabled) {
-		// TODO Auto-generated method stub
-		
+	@FXML
+	private void handleSave() {
+		if (activeContentController != null) {
+			activeContentController.save();
+		}
 	}
 }

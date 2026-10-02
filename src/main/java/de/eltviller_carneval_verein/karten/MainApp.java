@@ -76,8 +76,8 @@ public class MainApp extends Application {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/EventOverviewView.fxml");
 	}
 
-	public static void showHallManagementView() {
-		loadScene("/de/eltviller_carneval_verein/karten/ui/HallManagementView.fxml");
+	public static void showHallShellView() {
+		loadScene("/de/eltviller_carneval_verein/karten/ui/HallShellView.fxml");
 	}
 
 	public static void showEventCreateView() {
