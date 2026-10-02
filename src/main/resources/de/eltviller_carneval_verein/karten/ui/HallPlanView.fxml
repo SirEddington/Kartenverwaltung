@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<!-- Zoom (Mausrad) & Verschieben (Ziehen) der Fläche sowie Objekt-Drag werden im Controller behandelt -->
+<BorderPane xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="de.eltviller_carneval_verein.karten.ui.hall.HallPlanController">
+
+    <center>
+        <StackPane fx:id="viewportPane"
+                   style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5; -fx-background-color: transparent;">
+            <Pane fx:id="hallPane" prefWidth="1200.0" prefHeight="800.0" />
+        </StackPane>
+    </center>
+
+    <right>
+        <VBox spacing="10.0" prefWidth="240.0">
+            <padding>
+                <Insets left="15.0" />
+            </padding>
+
+            <Label text="Hallenobjekte" styleClass="subheader-label" />
+            <HBox spacing="10.0">
+                <Button fx:id="btnAddObject" text="+ Neues Objekt" styleClass="button-primary" onAction="#handleAddObject" />
+                <Button fx:id="btnDeleteObject" text="Löschen" styleClass="button-danger" onAction="#handleDeleteObject" />
+            </HBox>
+
+            <Separator />
+
+            <VBox fx:id="propertiesPanel" spacing="8.0">
+                <Label text="Name:" />
+                <TextField fx:id="nameField" />
+                <Label text="Beschreibung:" />
+                <TextField fx:id="descField" />
+                <Label text="Breite:" />
+                <Spinner fx:id="widthSpinner" prefWidth="120.0" />
+                <Label text="Höhe (nur Rechteck):" />
+                <Spinner fx:id="heightSpinner" prefWidth="120.0" />
+                <Label text="Form:" />
+                <ComboBox fx:id="shapeCombo" prefWidth="120.0" />
+                <Label text="Farbe:" />
+                <ColorPicker fx:id="colorPicker" />
+            </VBox>
+        </VBox>
+    </right>
+</BorderPane>

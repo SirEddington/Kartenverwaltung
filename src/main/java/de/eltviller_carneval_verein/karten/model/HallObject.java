@@ -19,7 +19,7 @@ public class HallObject {
 	private double width;
 	private double height;
 	private String color;
-	private Shape shape;
+	private Shape shape = Shape.RECTANGLE;
 
 	// Konstuktoren -->
 	public HallObject() {

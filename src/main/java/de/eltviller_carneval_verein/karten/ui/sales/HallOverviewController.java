@@ -689,7 +689,7 @@ public class HallOverviewController implements ContentController {
 
 	private Node createHallObjectNode(HallObject hallObject) {
 		// Java 21 Switch Expression für Shapes
-		Shape hallObjectShape = switch (hallObject.getShape()) {
+		Shape hallObjectShape = switch (hallObject.getShape() != null ? hallObject.getShape() : de.eltviller_carneval_verein.karten.model.Shape.RECTANGLE) {
 		case CIRCLE -> {
 			double radius = hallObject.getWidth() / 2.0;
 			yield new Circle(hallObject.getPosX() + radius, hallObject.getPosY() + radius, radius);
@@ -702,7 +702,7 @@ public class HallOverviewController implements ContentController {
 		}
 		};
 
-		hallObjectShape.setFill(Color.LIGHTGRAY);
+		hallObjectShape.setFill(parseHallObjectColor(hallObject.getColor()));
 		hallObjectShape.setStroke(Color.DARKGRAY);
 
 		Text hallObjectLabel = new Text(hallObject.getName());
@@ -710,6 +710,17 @@ public class HallOverviewController implements ContentController {
 		hallObjectLabel.setY(hallObject.getPosY() + 20);
 
 		return new Group(hallObjectShape, hallObjectLabel);
+	}
+
+	private static Color parseHallObjectColor(String color) {
+		if (color == null || color.isBlank()) {
+			return Color.LIGHTGRAY;
+		}
+		try {
+			return Color.web(color);
+		} catch (IllegalArgumentException e) {
+			return Color.LIGHTGRAY;
+		}
 	}
 
 	private void applyEditMode() {
