@@ -12,10 +12,12 @@ public interface ContentController {
     void setPresentation(Presentation presentation);
 
     // Wird aufgerufen, wenn sich die gewählte Halle im Header ändert
-    void setHall(Hall hall);
+    default void setHall(Hall hall) {
+    }
     
     // Wird aufgerufen, um den Content zu laden
-    void loadContentView(String fxmlPath);
+    default void loadContentView(String fxmlPath) {
+    }
 
     // Wird aufgerufen, wenn der Benutzer auf "Speichern" klickt
     void save();
