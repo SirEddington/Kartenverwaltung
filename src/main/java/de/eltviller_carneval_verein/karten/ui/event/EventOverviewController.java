@@ -8,7 +8,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
+import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.MoneyFormat;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -25,15 +25,24 @@ import javafx.scene.control.cell.CheckBoxTreeTableCell;
 
 public class EventOverviewController extends AbstractOverviewController {
 
-	private final JsonEventRepository repository = JsonEventRepository.getInstance();
+	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
+	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
 
 	// TableView und Spalten
-	@FXML private TreeTableColumn<Object, String> colName;
-	@FXML private TreeTableColumn<Object, Integer> colPresCount;
-	@FXML private TreeTableColumn<Object, Integer> colTableCount;
-	@FXML private TreeTableColumn<Object, String> colSeatCount;
-	@FXML private TreeTableColumn<Object, String> colRevenue;
-	@FXML private TreeTableColumn<Object, Boolean> colArchive;
+	@FXML
+	private TreeTableColumn<Object, String> colName;
+	@FXML
+	private TreeTableColumn<Object, Integer> colPresCount;
+	@FXML
+	private TreeTableColumn<Object, Integer> colTableCount;
+	@FXML
+	private TreeTableColumn<Object, String> colSeatCount;
+	@FXML
+	private TreeTableColumn<Object, String> colRevenue;
+	@FXML
+	private TreeTableColumn<Object, String> colHallName;
+	@FXML
+	private TreeTableColumn<Object, Boolean> colArchive;
 
 	@Override
 	protected void setupColumns() {
@@ -129,7 +138,16 @@ public class EventOverviewController extends AbstractOverviewController {
 			return null;
 		});
 
-		// 6. Spalte: Archiviert
+		// 6. Spalte: Hallenname
+		colHallName.setCellValueFactory(cell -> {
+			Object data = cell.getValue().getValue();
+			if (data instanceof Presentation presentation) {
+				return new SimpleStringProperty(hallRepository.findById(presentation.getHallId()).getName());
+			}
+			return null;
+		});
+
+		// 7. Spalte: Archiviert
 		colArchive.setCellValueFactory(cell -> {
 			Object data = cell.getValue().getValue();
 			if (data instanceof Event event) {
@@ -255,28 +273,28 @@ public class EventOverviewController extends AbstractOverviewController {
 
 		if (data instanceof Event) {
 			if (confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
-				repository.deleteEvent(event);
+				eventRepository.deleteEvent(event);
 			} else {
 				return;
 			}
 		} else if (data instanceof Presentation) {
 			if (confirmDelete("Vorstellung löschen", "Soll die Vorstellung \"" + pres.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
 				event.deletePresentation(pres);
-				repository.saveEvent(event);
+				eventRepository.saveEvent(event);
 			} else {
 				return;
 			}
 		} else if (data instanceof Table) {
 			if (confirmDelete("Tisch löschen", "Soll Tisch " + table.getTableNumber() + " wirklich unwiderruflich gelöscht werden?")) {
 				pres.deleteTable(table);
-				repository.saveEvent(event);
+				eventRepository.saveEvent(event);
 			} else {
 				return;
 			}
 		} else if (data instanceof Seat seat) {
 			if (confirmDelete("Sitz löschen", "Soll Sitz " + seat.getSeatNumber() + " wirklich unwiderruflich gelöscht werden?")) {
 				table.deleteSeat(seat);
-				repository.saveEvent(event);
+				eventRepository.saveEvent(event);
 			} else {
 				return;
 			}
@@ -287,7 +305,7 @@ public class EventOverviewController extends AbstractOverviewController {
 	@Override
 	protected TreeItem<Object> buildTree() {
 		TreeItem<Object> dummyRoot = new TreeItem<>("Root");
-		List<Event> events = repository.loadEvents();
+		List<Event> events = eventRepository.loadEvents();
 
 		for (Event event : events) {
 			TreeItem<Object> eventNode = new TreeItem<>(event);
@@ -321,4 +339,4 @@ public class EventOverviewController extends AbstractOverviewController {
 	private void handleCreateNewEvent() {
 		MainApp.showEventCreateView();
 	}
-}
+}
