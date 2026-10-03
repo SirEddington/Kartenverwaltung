@@ -2,15 +2,19 @@ package de.eltviller_carneval_verein.karten.ui.event;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
+import javafx.util.StringConverter;
 
 public class EventCreateController {
 
@@ -20,6 +24,8 @@ public class EventCreateController {
 	private TextField txtEventName;
 	@FXML
 	private Spinner<Integer> spnPresCount;
+	@FXML
+	private ComboBox<Hall> cmbHall;
 	@FXML
 	private Spinner<Integer> spnTablePerPres;
 	@FXML
@@ -37,6 +43,26 @@ public class EventCreateController {
 
 	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 	private Event currentEvent;
+
+	@FXML
+	public void initialize() {
+		// Optional: null = keine Halle (kann später je Vorstellung in den Event-Details zugeordnet werden)
+		cmbHall.getItems().add(null);
+		cmbHall.getItems().addAll(JsonHallRepository.getInstance().loadHalls());
+		cmbHall.setConverter(new StringConverter<Hall>() {
+			@Override
+			public String toString(Hall hall) {
+				return hall == null ? "– keine Halle –" : hall.getName();
+			}
+
+			@Override
+			public Hall fromString(String string) {
+				return null; // Bei fixer Auswahl nicht erforderlich
+			}
+		});
+		// Gibt es genau eine Halle, ist sie vorausgewählt
+		cmbHall.getSelectionModel().select(cmbHall.getItems().size() == 2 ? 1 : 0);
+	}
 
 	public void setEventToEdit(Event event) {
 		this.currentEvent = event;
@@ -72,6 +98,9 @@ public class EventCreateController {
 		// Vorstellungen
 		for (int i = 0; i < spnPresCount.getValue(); i++) {
 			Presentation pres = event.addPresentation();
+			if (cmbHall.getValue() != null) {
+				pres.setHallId(cmbHall.getValue().getId());
+			}
 			pres.setDefaultTableHeight(spnDoubleTableHeight.getValue());
 			pres.setDefaultTableWidth(spnDoubleTableWidth.getValue());
 			pres.setDefaultSeatHeight(spnDoubleSeatHeight.getValue());

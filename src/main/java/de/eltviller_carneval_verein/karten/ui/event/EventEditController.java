@@ -9,10 +9,12 @@ import org.controlsfx.control.table.TableFilter;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -39,6 +41,7 @@ import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.CheckBoxTableCell;
+import javafx.scene.control.cell.ComboBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
@@ -95,6 +98,8 @@ public class EventEditController {
 	private TableColumn<Presentation, LocalTime> colPresTime;
 	@FXML
 	private TableColumn<Presentation, String> colPresDesc;
+	@FXML
+	private TableColumn<Presentation, Hall> colPresHall;
 
 	// Tisch Tabelle
 	@FXML
@@ -215,6 +220,24 @@ public class EventEditController {
 		colPresTime.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getTime()));
 		colPresTime.setCellFactory(TextFieldTableCell.forTableColumn(new LocalTimeStringConverter(timeFormatter, null)));
 		colPresTime.setOnEditCommit(e -> e.getRowValue().setTime(e.getNewValue()));
+
+		// Halle der Vorstellung: Auswahl aus den angelegten Hallen (null = keine Halle zugeordnet)
+		ObservableList<Hall> hallChoices = FXCollections.observableArrayList();
+		hallChoices.add(null);
+		hallChoices.addAll(JsonHallRepository.getInstance().loadHalls());
+		colPresHall.setCellValueFactory(cell -> new SimpleObjectProperty<>(JsonHallRepository.getInstance().findById(cell.getValue().getHallId())));
+		colPresHall.setCellFactory(ComboBoxTableCell.forTableColumn(new StringConverter<Hall>() {
+			@Override
+			public String toString(Hall hall) {
+				return hall == null ? "– keine Halle –" : hall.getName();
+			}
+
+			@Override
+			public Hall fromString(String string) {
+				return null; // Bei fixer Auswahl nicht erforderlich
+			}
+		}, hallChoices));
+		colPresHall.setOnEditCommit(e -> e.getRowValue().setHallId(e.getNewValue() == null ? null : e.getNewValue().getId()));
 
 		// --- Tisch Tabelle ---
 		colTableNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getTableNumber()).asObject());

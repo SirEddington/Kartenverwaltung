@@ -32,6 +32,9 @@
     <GridPane vgap="10.0" hgap="10.0">
         <Label text="Anzahl der Vorstellungen:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
         <Spinner fx:id="spnPresCount" min="0" max="10" initialValue="3" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
+
+        <Label text="Halle:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+        <ComboBox fx:id="cmbHall" promptText="– keine Halle –" prefWidth="300.0" GridPane.rowIndex="1" GridPane.columnIndex="1" />
     </GridPane>
 
     <Separator />
