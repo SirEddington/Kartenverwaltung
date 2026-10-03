@@ -8,6 +8,7 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Shape;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
+import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
 import javafx.scene.Group;
@@ -106,7 +107,6 @@ public class HallPlanController {
 		setupPanel();
 		updatePanel();
 
-		fitToView();
 	}
 
 	private void setupPanel() {
@@ -282,17 +282,19 @@ public class HallPlanController {
 
 		double scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, 0.95 * Math.min(viewWidth / contentWidth, viewHeight / contentHeight)));
 
-		// Skalierung erfolgt um die Mitte der Fläche (siehe handleScroll); Inhaltsmitte auf Viewport-Mitte schieben
-		Bounds layoutBounds = hallPane.getLayoutBounds();
-		double pivotX = layoutBounds.getWidth() / 2.0;
-		double pivotY = layoutBounds.getHeight() / 2.0;
+		// Skalierung erfolgt um die Mitte der Fläche (siehe handleScroll). Beim ersten Einpassen läuft der Aufruf noch
+		// mitten im Layout, die hallPane hat dann noch keine Größe - ihr getLayoutBounds() taugt hier nicht.
+		// Das StackPane streckt die hallPane später auf seine Innenfläche, daher wird deren Mitte als Drehpunkt verwendet.
+		Insets insets = viewportPane.getInsets();
+		double pivotX = (viewWidth - insets.getLeft() - insets.getRight()) / 2.0;
+		double pivotY = (viewHeight - insets.getTop() - insets.getBottom()) / 2.0;
 		double centerX = (minX + maxX) / 2.0;
 		double centerY = (minY + maxY) / 2.0;
 
 		hallPane.setScaleX(scale);
 		hallPane.setScaleY(scale);
-		hallPane.setTranslateX(viewWidth / 2.0 - pivotX - scale * (centerX - pivotX));
-		hallPane.setTranslateY(viewHeight / 2.0 - pivotY - scale * (centerY - pivotY));
+		hallPane.setTranslateX(viewWidth / 2.0 - insets.getLeft() - pivotX - scale * (centerX - pivotX));
+		hallPane.setTranslateY(viewHeight / 2.0 - insets.getTop() - pivotY - scale * (centerY - pivotY));
 	}
 
 	/** Zeichnet den Plan neu, z.B. nach geänderten Hallenmaßen. */
