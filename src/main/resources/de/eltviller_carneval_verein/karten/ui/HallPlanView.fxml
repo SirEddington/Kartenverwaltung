@@ -9,14 +9,17 @@
             fx:controller="de.eltviller_carneval_verein.karten.ui.hall.HallPlanController">
 
     <center>
-        <StackPane fx:id="viewportPane"
+        <StackPane fx:id="viewportPane" minHeight="200.0"
                    style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5; -fx-background-color: transparent;">
             <Pane fx:id="hallPane" prefWidth="1200.0" prefHeight="800.0" />
         </StackPane>
     </center>
 
     <right>
-        <VBox spacing="10.0" prefWidth="240.0">
+        <!-- Scrollbar, damit das Seitenpanel die Mindesthöhe des Screens nicht nach oben treibt -->
+        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" prefWidth="270.0"
+                    style="-fx-background-color: transparent; -fx-background: transparent;">
+        <VBox spacing="10.0">
             <padding>
                 <Insets left="15.0" />
             </padding>
@@ -50,5 +53,6 @@
                 <ColorPicker fx:id="colorPicker" />
             </VBox>
         </VBox>
+        </ScrollPane>
     </right>
 </BorderPane>
