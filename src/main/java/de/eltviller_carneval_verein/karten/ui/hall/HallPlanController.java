@@ -34,7 +34,7 @@ import javafx.scene.text.Text;
  */
 public class HallPlanController {
 
-	private static final double MIN_SCALE = 0.2;
+	private static final double MIN_SCALE = 0.05;
 	private static final double MAX_SCALE = 4.0;
 	private static final double ZOOM_FACTOR_PER_NOTCH = 1.1;
 	private static final double FALLBACK_OBJECT_WIDTH = 100;
@@ -55,6 +55,8 @@ public class HallPlanController {
 	private double dragAnchorTranslateY;
 	private double objectAnchorX;
 	private double objectAnchorY;
+	// Einpassen wartet, bis die Fläche eine Größe hat (beim Öffnen des Screens noch 0)
+	private boolean fitPending = false;
 
 	@FXML private StackPane viewportPane;
 	@FXML private Pane hallPane;
@@ -78,6 +80,8 @@ public class HallPlanController {
 		viewportPane.setOnScroll(this::handleScroll);
 		viewportPane.setOnMousePressed(this::handleDragStart);
 		viewportPane.setOnMouseDragged(this::handleDrag);
+		viewportPane.widthProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
+		viewportPane.heightProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
 
 		setupPanel();
 		updatePanel();
@@ -186,6 +190,67 @@ public class HallPlanController {
 		hallPane.setTranslateY(dragAnchorTranslateY + (event.getSceneY() - dragAnchorSceneY));
 	}
 	// <-- Zoom und Verschieben
+
+	@FXML
+	private void handleFit() {
+		fitToView();
+	}
+
+	private void fitIfPending() {
+		if (fitPending && viewportPane.getWidth() > 0 && viewportPane.getHeight() > 0) {
+			fitPending = false;
+			fitToView();
+		}
+	}
+
+	/**
+	 * Passt Zoom und Verschiebung so an, dass der Hallenumriss (bzw. ohne Maße alle
+	 * Hallenobjekte) mittig und vollständig in der Fläche sichtbar ist (1 cm = 1 px bei 100 %).
+	 */
+	private void fitToView() {
+		double minX = 0, minY = 0, maxX = 0, maxY = 0;
+		if (hall != null && hall.getHallWidth() > 0 && hall.getHallHeight() > 0) {
+			maxX = hall.getHallWidth();
+			maxY = hall.getHallHeight();
+		} else if (hall != null && !hall.getHallObjects().isEmpty()) {
+			minX = Double.MAX_VALUE;
+			minY = Double.MAX_VALUE;
+			maxX = -Double.MAX_VALUE;
+			maxY = -Double.MAX_VALUE;
+			for (HallObject object : hall.getHallObjects()) {
+				minX = Math.min(minX, object.getPosX());
+				minY = Math.min(minY, object.getPosY());
+				maxX = Math.max(maxX, object.getPosX() + object.getWidth());
+				maxY = Math.max(maxY, object.getPosY() + object.getHeight());
+			}
+		}
+
+		double contentWidth = maxX - minX;
+		double contentHeight = maxY - minY;
+		double viewWidth = viewportPane.getWidth();
+		double viewHeight = viewportPane.getHeight();
+		if (contentWidth <= 0 || contentHeight <= 0 || viewWidth <= 0 || viewHeight <= 0) {
+			hallPane.setScaleX(1);
+			hallPane.setScaleY(1);
+			hallPane.setTranslateX(0);
+			hallPane.setTranslateY(0);
+			return;
+		}
+
+		double scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, 0.95 * Math.min(viewWidth / contentWidth, viewHeight / contentHeight)));
+
+		// Skalierung erfolgt um die Mitte der Fläche (siehe handleScroll); Inhaltsmitte auf Viewport-Mitte schieben
+		Bounds layoutBounds = hallPane.getLayoutBounds();
+		double pivotX = layoutBounds.getWidth() / 2.0;
+		double pivotY = layoutBounds.getHeight() / 2.0;
+		double centerX = (minX + maxX) / 2.0;
+		double centerY = (minY + maxY) / 2.0;
+
+		hallPane.setScaleX(scale);
+		hallPane.setScaleY(scale);
+		hallPane.setTranslateX(viewWidth / 2.0 - pivotX - scale * (centerX - pivotX));
+		hallPane.setTranslateY(viewHeight / 2.0 - pivotY - scale * (centerY - pivotY));
+	}
 
 	/** Zeichnet den Plan neu, z.B. nach geänderten Hallenmaßen. */
 	public void refresh() {
@@ -339,6 +404,8 @@ public class HallPlanController {
 		this.selectedObject = null;
 		updatePanel();
 		renderHall();
+		fitPending = true;
+		fitIfPending();
 	}
 
 	/** Markiert ein Hallenobjekt im Plan (z.B. wenn der Screen aus der Übersicht für ein Objekt geöffnet wurde). */

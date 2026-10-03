@@ -44,24 +44,11 @@
                 <ColumnConstraints hgrow="ALWAYS" />
             </columnConstraints>
 
-            <Label text="Saalbreite:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+            <Label text="Saalbreite (cm):" GridPane.rowIndex="0" GridPane.columnIndex="0" />
             <Spinner fx:id="spnHallWidth" GridPane.rowIndex="0" GridPane.columnIndex="1" maxWidth="Infinity" />
 
-            <Label text="Saalhöhe:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+            <Label text="Saalhöhe (cm):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
             <Spinner fx:id="spnHallHeight" GridPane.rowIndex="1" GridPane.columnIndex="1" maxWidth="Infinity" />
-        </GridPane>
-
-        <GridPane hgap="8.0" vgap="10.0" HBox.hgrow="ALWAYS">
-            <columnConstraints>
-                <ColumnConstraints halignment="LEFT" />
-                <ColumnConstraints hgrow="ALWAYS" />
-            </columnConstraints>
-
-            <Label text="Std.-Objektbreite:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
-            <Spinner fx:id="spnDefaultObjectWidth" GridPane.rowIndex="0" GridPane.columnIndex="1" maxWidth="Infinity" />
-
-            <Label text="Std.-Objekthöhe:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-            <Spinner fx:id="spnDefaultObjectHeight" GridPane.rowIndex="1" GridPane.columnIndex="1" maxWidth="Infinity" />
         </GridPane>
     </HBox>
 

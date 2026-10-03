@@ -27,6 +27,8 @@
                 <Button fx:id="btnDeleteObject" text="Löschen" styleClass="button-danger" onAction="#handleDeleteObject" />
             </HBox>
 
+            <Button fx:id="btnFit" text="Plan einpassen" styleClass="button-default" onAction="#handleFit" />
+
             <Separator />
 
             <VBox fx:id="propertiesPanel" spacing="8.0">
@@ -34,9 +36,9 @@
                 <TextField fx:id="nameField" />
                 <Label text="Beschreibung:" />
                 <TextField fx:id="descField" />
-                <Label text="Breite:" />
+                <Label text="Breite (cm):" />
                 <Spinner fx:id="widthSpinner" prefWidth="120.0" />
-                <Label text="Höhe (nur Rechteck):" />
+                <Label text="Höhe (cm, nur Rechteck):" />
                 <Spinner fx:id="heightSpinner" prefWidth="120.0" />
                 <Label text="Form:" />
                 <ComboBox fx:id="shapeCombo" prefWidth="120.0" />

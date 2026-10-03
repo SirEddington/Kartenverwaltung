@@ -32,8 +32,7 @@
             <columns>
                 <TreeTableColumn fx:id="colName" text="Bezeichnung / Name" prefWidth="260.0" />
                 <TreeTableColumn fx:id="colDescription" text="Beschreibung" prefWidth="260.0" />
-                <TreeTableColumn fx:id="colSize" text="Maße (Breite × Höhe)" prefWidth="170.0" />
-                <TreeTableColumn fx:id="colDefaultObjectSize" text="Std.-Objektmaße" prefWidth="150.0" />
+                <TreeTableColumn fx:id="colSize" text="Maße (Breite × Höhe, cm)" prefWidth="170.0" />
                 <TreeTableColumn fx:id="colObjectCount" text="Hallenobjekte (Anzahl)" prefWidth="170.0" />
                 <TreeTableColumn fx:id="colUsage" text="Vorstellungen (Anzahl)" prefWidth="170.0" />
                 <TreeTableColumn fx:id="colShape" text="Form" prefWidth="100.0" />

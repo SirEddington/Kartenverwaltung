@@ -29,17 +29,22 @@ public class HallEditController {
 	// Verhindert, dass das Befüllen der Felder die Listener auslöst und zurückschreibt
 	private boolean updating = false;
 
-	@FXML private Button btnToggleEdit;
-	@FXML private Button btnSave;
-	@FXML private TextField txtName;
-	@FXML private TextField txtDescription;
-	@FXML private Spinner<Double> spnHallWidth;
-	@FXML private Spinner<Double> spnHallHeight;
-	@FXML private Spinner<Double> spnDefaultObjectWidth;
-	@FXML private Spinner<Double> spnDefaultObjectHeight;
+	@FXML
+	private Button btnToggleEdit;
+	@FXML
+	private Button btnSave;
+	@FXML
+	private TextField txtName;
+	@FXML
+	private TextField txtDescription;
+	@FXML
+	private Spinner<Double> spnHallWidth;
+	@FXML
+	private Spinner<Double> spnHallHeight;
 
 	// Vom FXMLLoader aus fx:id="hallPlan" des fx:include injiziert (Name + "Controller")
-	@FXML private HallPlanController hallPlanController;
+	@FXML
+	private HallPlanController hallPlanController;
 
 	@FXML
 	public void initialize() {
@@ -51,8 +56,6 @@ public class HallEditController {
 			hall.setHallHeight(value);
 			hallPlanController.refresh();
 		});
-		setupSpinner(spnDefaultObjectWidth, 10000.0, 5, value -> hall.setDefaultObjectWidth(value));
-		setupSpinner(spnDefaultObjectHeight, 10000.0, 5, value -> hall.setDefaultObjectHeight(value));
 
 		txtName.setOnAction(e -> commitName());
 		txtName.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
@@ -95,8 +98,6 @@ public class HallEditController {
 			txtDescription.setText(hall.getDescription() != null ? hall.getDescription() : "");
 			spnHallWidth.getValueFactory().setValue(hall.getHallWidth());
 			spnHallHeight.getValueFactory().setValue(hall.getHallHeight());
-			spnDefaultObjectWidth.getValueFactory().setValue(hall.getDefaultObjectWidth());
-			spnDefaultObjectHeight.getValueFactory().setValue(hall.getDefaultObjectHeight());
 		} finally {
 			updating = false;
 		}
@@ -132,7 +133,7 @@ public class HallEditController {
 
 		txtName.setEditable(editMode);
 		txtDescription.setEditable(editMode);
-		for (Spinner<Double> spinner : List.of(spnHallWidth, spnHallHeight, spnDefaultObjectWidth, spnDefaultObjectHeight)) {
+		for (Spinner<Double> spinner : List.of(spnHallWidth, spnHallHeight)) {
 			spinner.setDisable(!editMode);
 		}
 		hallPlanController.setEditMode(editMode);

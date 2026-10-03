@@ -42,13 +42,18 @@ public class HallManagementController extends AbstractOverviewController {
 	// Anzahl der Vorstellungen je Halle (hallId), wird bei jedem Neuaufbau des Baums berechnet
 	private Map<String, Integer> usageCounts = new HashMap<>();
 
-	@FXML private TreeTableColumn<Object, String> colName;
-	@FXML private TreeTableColumn<Object, String> colDescription;
-	@FXML private TreeTableColumn<Object, String> colSize;
-	@FXML private TreeTableColumn<Object, String> colDefaultObjectSize;
-	@FXML private TreeTableColumn<Object, Integer> colObjectCount;
-	@FXML private TreeTableColumn<Object, String> colUsage;
-	@FXML private TreeTableColumn<Object, String> colShape;
+	@FXML
+	private TreeTableColumn<Object, String> colName;
+	@FXML
+	private TreeTableColumn<Object, String> colDescription;
+	@FXML
+	private TreeTableColumn<Object, String> colSize;
+	@FXML
+	private TreeTableColumn<Object, Integer> colObjectCount;
+	@FXML
+	private TreeTableColumn<Object, String> colUsage;
+	@FXML
+	private TreeTableColumn<Object, String> colShape;
 
 	@Override
 	protected void setupColumns() {
@@ -77,12 +82,6 @@ public class HallManagementController extends AbstractOverviewController {
 				return new SimpleStringProperty(formatSize(hall.getHallWidth(), hall.getHallHeight()));
 			if (data instanceof HallObject object)
 				return new SimpleStringProperty(formatSize(object.getWidth(), object.getHeight()));
-			return null;
-		});
-
-		colDefaultObjectSize.setCellValueFactory(cell -> {
-			if (cell.getValue().getValue() instanceof Hall hall)
-				return new SimpleStringProperty(formatSize(hall.getDefaultObjectWidth(), hall.getDefaultObjectHeight()));
 			return null;
 		});
 
@@ -202,9 +201,7 @@ public class HallManagementController extends AbstractOverviewController {
 		} else {
 			List<String> usages = findUsages(hall);
 			if (!usages.isEmpty()) {
-				MainApp.showAlert("Halle wird noch verwendet",
-						"Diese Halle ist noch folgenden Vorstellungen zugeordnet und kann nicht gelöscht werden:\n\n" + String.join("\n", usages),
-						AlertType.WARNING);
+				MainApp.showAlert("Halle wird noch verwendet", "Diese Halle ist noch folgenden Vorstellungen zugeordnet und kann nicht gelöscht werden:\n\n" + String.join("\n", usages), AlertType.WARNING);
 				return;
 			}
 			if (!confirmDelete("Halle löschen", "Soll die Halle \"" + hall.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
@@ -217,11 +214,8 @@ public class HallManagementController extends AbstractOverviewController {
 
 	/** Liefert "Event > Vorstellung"-Beschreibungen aller Vorstellungen, die die übergebene Halle noch referenzieren. */
 	private List<String> findUsages(Hall hall) {
-		return eventRepository.loadEvents().stream()
-				.filter(event -> event.getPresentations() != null)
-				.flatMap(event -> event.getPresentations().stream()
-						.filter(presentation -> hall.getId().equals(presentation.getHallId()))
-						.map(presentation -> event.getName() + " > " + presentation.getName()))
+		return eventRepository.loadEvents().stream().filter(event -> event.getPresentations() != null)
+				.flatMap(event -> event.getPresentations().stream().filter(presentation -> hall.getId().equals(presentation.getHallId())).map(presentation -> event.getName() + " > " + presentation.getName()))
 				.collect(Collectors.toList());
 	}
 

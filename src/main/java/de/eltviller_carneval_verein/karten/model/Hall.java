@@ -13,22 +13,17 @@ import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Hall {
-  private final String id;
-  
-  private String name;
-  private String description;
-  
+	private final String id;
+
+	private String name;
+	private String description;
+
 	// Daten für Saalansicht
 	private double hallWidth;
 	private double hallHeight;
 
-	// Standardwerte
-	private double defaultObjectWidth;
-	private double defaultObjectHeight;
-	
 	@JsonManagedReference("hall-hallObject")
 	private List<HallObject> hallObjects = new ArrayList<>();
-	
 
 	// Konstuktoren -->
 	public Hall() {
@@ -39,7 +34,7 @@ public class Hall {
 		this.id = (id != null) ? id : UUID.randomUUID().toString();
 	}
 	// <-- Konstuktoren
-	
+
 	public String getId() {
 		return id;
 	}
@@ -80,23 +75,6 @@ public class Hall {
 		this.hallHeight = hallHeight;
 	}
 
-	public double getDefaultObjectWidth() {
-		return defaultObjectWidth;
-	}
-
-	public void setDefaultObjectWidth(double defaultObjectWidth) {
-		this.defaultObjectWidth = defaultObjectWidth;
-	}
-
-	public double getDefaultObjectHeight() {
-		return defaultObjectHeight;
-	}
-
-	public void setDefaultObjectHeight(double defaultObjectHeight) {
-		this.defaultObjectHeight = defaultObjectHeight;
-	}
-
-
 	public List<HallObject> getHallObjects() {
 		return hallObjects;
 	}
@@ -112,10 +90,6 @@ public class Hall {
 		HallObject newObject = new HallObject();
 		newObject.setParent(this);
 		newObject.changeName(createHallObjectName());
-		
-		// Maße initialisieren
-		newObject.setHeight(defaultObjectHeight);
-		newObject.setWidth(defaultObjectWidth);
 
 		hallObjects.add(newObject);
 		return newObject;
@@ -130,10 +104,6 @@ public class Hall {
 		} else {
 			newObject.changeName(createHallObjectName());
 		}
-		
-		// Maße initialisieren
-		newObject.setHeight(defaultObjectHeight);
-		newObject.setWidth(defaultObjectWidth);
 
 		hallObjects.add(newObject);
 		return newObject;
