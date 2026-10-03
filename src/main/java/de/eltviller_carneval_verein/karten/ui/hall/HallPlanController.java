@@ -1,12 +1,8 @@
 package de.eltviller_carneval_verein.karten.ui.hall;
 
-import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
-import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Shape;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
-import de.eltviller_carneval_verein.karten.ui.ContentController;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
 import javafx.geometry.Point2D;
@@ -36,7 +32,7 @@ import javafx.scene.text.Text;
  * Farbe) anpassen. Koordinaten und Maße sind dieselben Einheiten wie in der
  * Saalübersicht des Kartenverkaufs.
  */
-public class HallPlanController implements ContentController {
+public class HallPlanController {
 
 	private static final double MIN_SCALE = 0.2;
 	private static final double MAX_SCALE = 4.0;
@@ -46,7 +42,6 @@ public class HallPlanController implements ContentController {
 	private static final Color DEFAULT_FILL = Color.LIGHTGRAY;
 	private static final Color SELECTION_STROKE = Color.DODGERBLUE;
 
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
 
 	private Hall hall;
 	private HallObject selectedObject;
@@ -192,6 +187,11 @@ public class HallPlanController implements ContentController {
 	}
 	// <-- Zoom und Verschieben
 
+	/** Zeichnet den Plan neu, z.B. nach geänderten Hallenmaßen. */
+	public void refresh() {
+		renderHall();
+	}
+
 	private void renderHall() {
 		hallPane.getChildren().clear();
 		if (hall == null) {
@@ -334,15 +334,6 @@ public class HallPlanController implements ContentController {
 		return String.format("#%02X%02X%02X", Math.round(color.getRed() * 255), Math.round(color.getGreen() * 255), Math.round(color.getBlue() * 255));
 	}
 
-	@Override
-	public void setEvent(Event event) {
-	}
-
-	@Override
-	public void setPresentation(Presentation presentation) {
-	}
-
-	@Override
 	public void setHall(Hall hall) {
 		this.hall = hall;
 		this.selectedObject = null;
@@ -350,19 +341,11 @@ public class HallPlanController implements ContentController {
 		renderHall();
 	}
 
-	@Override
-	public void save() {
-		if (hall != null) {
-			hallRepository.saveHall(hall);
-		}
+	/** Markiert ein Hallenobjekt im Plan (z.B. wenn der Screen aus der Übersicht für ein Objekt geöffnet wurde). */
+	public void setSelectedObject(HallObject hallObject) {
+		selectObject(hallObject);
 	}
 
-	@Override
-	public void filter(String query) {
-		// Keine Filterung im Hallenplan
-	}
-
-	@Override
 	public void setEditMode(boolean enabled) {
 		this.editMode = enabled;
 		updatePanel();

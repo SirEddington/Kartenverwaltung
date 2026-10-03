@@ -1,208 +1,259 @@
 package de.eltviller_carneval_verein.karten.ui.hall;
 
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
-import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
-import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
-import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
-import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
-import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
-import javafx.scene.control.TableColumn;
-import javafx.scene.control.TableView;
-import javafx.scene.control.cell.TextFieldTableCell;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeTableColumn;
+import javafx.scene.control.TreeTableRow;
 
-public class HallManagementController implements ContentController {
+/**
+ * Hallen-Verwaltung: Baum-Tabelle Halle &rarr; Hallenobjekte, aufgebaut wie die
+ * Event-Verwaltung (Basis: {@link AbstractOverviewController}). Bearbeitet wird
+ * nicht in der Tabelle, sondern im Detail-Screen (siehe {@link HallEditController}).
+ */
+public class HallManagementController extends AbstractOverviewController {
 
 	private static final GermanDecimalStringConverter DOUBLE_CONVERTER = new GermanDecimalStringConverter();
 
 	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
 	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
 
-	private final ObservableList<Hall> masterData = FXCollections.observableArrayList();
-	private final FilteredList<Hall> filteredData = new FilteredList<>(masterData, hall -> true);
+	// Anzahl der Vorstellungen je Halle (hallId), wird bei jedem Neuaufbau des Baums berechnet
+	private Map<String, Integer> usageCounts = new HashMap<>();
 
-	@FXML
-	private TableView<Hall> hallTable;
-	@FXML
-	private Button btnCreate;
-	@FXML
-	private Button btnDelete;
-	@FXML
-	private TableColumn<Hall, String> colName;
-	@FXML
-	private TableColumn<Hall, String> colDescription;
-	@FXML
-	private TableColumn<Hall, Double> colHallWidth;
-	@FXML
-	private TableColumn<Hall, Double> colHallHeight;
-	@FXML
-	private TableColumn<Hall, Double> colDefaultObjectWidth;
-	@FXML
-	private TableColumn<Hall, Double> colDefaultObjectHeight;
-	@FXML
-	private TableColumn<Hall, Integer> colObjectCount;
+	@FXML private TreeTableColumn<Object, String> colName;
+	@FXML private TreeTableColumn<Object, String> colDescription;
+	@FXML private TreeTableColumn<Object, String> colSize;
+	@FXML private TreeTableColumn<Object, String> colDefaultObjectSize;
+	@FXML private TreeTableColumn<Object, Integer> colObjectCount;
+	@FXML private TreeTableColumn<Object, String> colUsage;
+	@FXML private TreeTableColumn<Object, String> colShape;
 
-	@FXML
-	public void initialize() {
-		setupColumns();
-		loadHalls();
+	@Override
+	protected void setupColumns() {
+		colName.setCellValueFactory(cell -> {
+			Object data = cell.getValue().getValue();
+			if (data instanceof Hall hall)
+				return new SimpleStringProperty("Halle: " + hall.getName());
+			if (data instanceof HallObject object)
+				return new SimpleStringProperty("Hallenobjekt: " + object.getName());
+			return new SimpleStringProperty("");
+		});
+
+		colDescription.setCellValueFactory(cell -> {
+			Object data = cell.getValue().getValue();
+			if (data instanceof Hall hall)
+				return new SimpleStringProperty(nullToEmpty(hall.getDescription()));
+			if (data instanceof HallObject object)
+				return new SimpleStringProperty(nullToEmpty(object.getDesc()));
+			return null;
+		});
+
+		// Saalmaße der Halle bzw. Maße des Objekts
+		colSize.setCellValueFactory(cell -> {
+			Object data = cell.getValue().getValue();
+			if (data instanceof Hall hall)
+				return new SimpleStringProperty(formatSize(hall.getHallWidth(), hall.getHallHeight()));
+			if (data instanceof HallObject object)
+				return new SimpleStringProperty(formatSize(object.getWidth(), object.getHeight()));
+			return null;
+		});
+
+		colDefaultObjectSize.setCellValueFactory(cell -> {
+			if (cell.getValue().getValue() instanceof Hall hall)
+				return new SimpleStringProperty(formatSize(hall.getDefaultObjectWidth(), hall.getDefaultObjectHeight()));
+			return null;
+		});
+
+		colObjectCount.setCellValueFactory(cell -> {
+			if (cell.getValue().getValue() instanceof Hall hall)
+				return new SimpleIntegerProperty(hall.getHallObjects().size()).asObject();
+			return null;
+		});
+
+		colUsage.setCellValueFactory(cell -> {
+			if (cell.getValue().getValue() instanceof Hall hall)
+				return new SimpleStringProperty(String.valueOf(usageCounts.getOrDefault(hall.getId(), 0)));
+			return null;
+		});
+
+		colShape.setCellValueFactory(cell -> {
+			if (cell.getValue().getValue() instanceof HallObject object)
+				return new SimpleStringProperty(object.getShape() == Shape.CIRCLE ? "Kreis" : "Rechteck");
+			return null;
+		});
 	}
 
-	private void setupColumns() {
-		colName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
-		colName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colName.setOnEditCommit(event -> {
-			try {
-				event.getRowValue().changeName(event.getNewValue());
-			} catch (IllegalArgumentException e) {
-				showAlert("Fehler", e.getMessage(), AlertType.WARNING);
-			} finally {
-				hallTable.refresh();
+	private String formatSize(double width, double height) {
+		return DOUBLE_CONVERTER.toString(width) + " × " + DOUBLE_CONVERTER.toString(height);
+	}
+
+	private String nullToEmpty(String text) {
+		return text == null ? "" : text;
+	}
+
+	@Override
+	protected TreeItem<Object> buildTree() {
+		usageCounts = countUsages();
+
+		TreeItem<Object> dummyRoot = new TreeItem<>("Root");
+		for (Hall hall : hallRepository.loadHalls()) {
+			TreeItem<Object> hallNode = new TreeItem<>(hall);
+			for (HallObject object : hall.getHallObjects()) {
+				hallNode.getChildren().add(new TreeItem<>(object));
+			}
+			dummyRoot.getChildren().add(hallNode);
+		}
+		return dummyRoot;
+	}
+
+	@Override
+	protected String searchText(Object data) {
+		if (data instanceof Hall hall)
+			return hall.getName() + " " + hall.getDescription();
+		if (data instanceof HallObject object)
+			return object.getName() + " " + object.getDesc();
+		return null;
+	}
+
+	@Override
+	protected ContextMenu createContextMenu(TreeTableRow<Object> tableRow) {
+		ContextMenu contextMenu = new ContextMenu();
+		SeparatorMenuItem editDeleteSeparator = new SeparatorMenuItem();
+		SeparatorMenuItem deleteDetailsSeparator = new SeparatorMenuItem();
+
+		MenuItem addObjectItem = new MenuItem("+ Hallenobjekt hinzufügen");
+		addObjectItem.setOnAction(e -> {
+			TreeItem<Object> selectedItem = selectedItem();
+			if (selectedItem != null) {
+				Hall hall = findParentInTree(selectedItem, Hall.class);
+				HallObject object = hall.addHallObject();
+				MainApp.showHallEditView(hall, object, true);
 			}
 		});
 
-		colDescription.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
-		colDescription.setCellFactory(TextFieldTableCell.forTableColumn());
-		colDescription.setOnEditCommit(event -> event.getRowValue().setDescription(event.getNewValue()));
+		MenuItem editItem = new MenuItem("Bearbeiten");
+		editItem.setOnAction(e -> openEditView(true));
 
-		colHallWidth.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getHallWidth()).asObject());
-		colHallWidth.setCellFactory(TextFieldTableCell.forTableColumn(DOUBLE_CONVERTER));
-		colHallWidth.setOnEditCommit(event -> event.getRowValue().setHallWidth(event.getNewValue()));
+		MenuItem seeDetails = new MenuItem("Details");
+		seeDetails.setOnAction(e -> openEditView(false));
 
-		colHallHeight.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getHallHeight()).asObject());
-		colHallHeight.setCellFactory(TextFieldTableCell.forTableColumn(DOUBLE_CONVERTER));
-		colHallHeight.setOnEditCommit(event -> event.getRowValue().setHallHeight(event.getNewValue()));
+		MenuItem deleteItem = new MenuItem("Löschen");
+		deleteItem.setOnAction(e -> handleDelete());
 
-		colDefaultObjectWidth.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getDefaultObjectWidth()).asObject());
-		colDefaultObjectWidth.setCellFactory(TextFieldTableCell.forTableColumn(DOUBLE_CONVERTER));
-		colDefaultObjectWidth.setOnEditCommit(event -> event.getRowValue().setDefaultObjectWidth(event.getNewValue()));
+		contextMenu.getItems().addAll(addObjectItem, editItem, editDeleteSeparator, deleteItem, deleteDetailsSeparator, seeDetails);
 
-		colDefaultObjectHeight.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getDefaultObjectHeight()).asObject());
-		colDefaultObjectHeight.setCellFactory(TextFieldTableCell.forTableColumn(DOUBLE_CONVERTER));
-		colDefaultObjectHeight.setOnEditCommit(event -> event.getRowValue().setDefaultObjectHeight(event.getNewValue()));
-
-		colObjectCount.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getHallObjects().size()).asObject());
+		contextMenu.setOnShowing(e -> {
+			Object data = tableRow.getItem();
+			addObjectItem.setVisible(data instanceof Hall || data instanceof HallObject);
+			editItem.setVisible(data != null);
+			seeDetails.setVisible(data != null);
+			deleteItem.setVisible(data != null);
+			editDeleteSeparator.setVisible(data != null);
+			deleteDetailsSeparator.setVisible(data != null);
+		});
+		return contextMenu;
 	}
 
-	private void loadHalls() {
-		masterData.setAll(hallRepository.loadHalls());
-		hallTable.setItems(filteredData);
+	private void openEditView(boolean editable) {
+		TreeItem<Object> selectedItem = selectedItem();
+		if (selectedItem != null) {
+			Hall hall = findParentInTree(selectedItem, Hall.class);
+			HallObject object = findParentInTree(selectedItem, HallObject.class);
+			MainApp.showHallEditView(hall, object, editable);
+		}
+	}
+
+	/** Löscht den gewählten Eintrag nach Rückfrage und speichert die betroffene Halle sofort. */
+	private void handleDelete() {
+		TreeItem<Object> selectedItem = selectedItem();
+		if (selectedItem == null || selectedItem.getParent() == null) {
+			return;
+		}
+		Hall hall = findParentInTree(selectedItem, Hall.class);
+
+		if (selectedItem.getValue() instanceof HallObject object) {
+			if (!confirmDelete("Hallenobjekt löschen", "Soll das Hallenobjekt \"" + object.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
+				return;
+			}
+			hall.getHallObjects().remove(object);
+			hallRepository.saveHall(hall);
+		} else {
+			List<String> usages = findUsages(hall);
+			if (!usages.isEmpty()) {
+				MainApp.showAlert("Halle wird noch verwendet",
+						"Diese Halle ist noch folgenden Vorstellungen zugeordnet und kann nicht gelöscht werden:\n\n" + String.join("\n", usages),
+						AlertType.WARNING);
+				return;
+			}
+			if (!confirmDelete("Halle löschen", "Soll die Halle \"" + hall.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
+				return;
+			}
+			hallRepository.deleteHall(hall);
+		}
+		reload();
+	}
+
+	/** Liefert "Event > Vorstellung"-Beschreibungen aller Vorstellungen, die die übergebene Halle noch referenzieren. */
+	private List<String> findUsages(Hall hall) {
+		return eventRepository.loadEvents().stream()
+				.filter(event -> event.getPresentations() != null)
+				.flatMap(event -> event.getPresentations().stream()
+						.filter(presentation -> hall.getId().equals(presentation.getHallId()))
+						.map(presentation -> event.getName() + " > " + presentation.getName()))
+				.collect(Collectors.toList());
+	}
+
+	private Map<String, Integer> countUsages() {
+		Map<String, Integer> counts = new HashMap<>();
+		for (Event event : eventRepository.loadEvents()) {
+			if (event.getPresentations() == null) {
+				continue;
+			}
+			for (Presentation presentation : event.getPresentations()) {
+				if (presentation.getHallId() != null) {
+					counts.merge(presentation.getHallId(), 1, Integer::sum);
+				}
+			}
+		}
+		return counts;
 	}
 
 	@FXML
 	private void handleCreateNewHall() {
 		Hall hall = new Hall();
 		hall.changeName(createHallName());
-		masterData.add(hall);
-		hallTable.getSelectionModel().select(hall);
+		// Noch nicht gespeichert: Die Halle entsteht erst mit "Speichern" im Detail-Screen
+		MainApp.showHallEditView(hall, null, true);
 	}
 
 	private String createHallName() {
-		Set<String> existingNames = masterData.stream().map(Hall::getName).collect(Collectors.toSet());
+		Set<String> existingNames = hallRepository.loadHalls().stream().map(Hall::getName).collect(Collectors.toSet());
 		int i = 1;
 		while (existingNames.contains("Halle " + i)) {
 			i++;
 		}
 		return "Halle " + i;
-	}
-
-	@FXML
-	private void handleDeleteHall() {
-		Hall selected = hallTable.getSelectionModel().getSelectedItem();
-		if (selected == null) {
-			showAlert("Keine Auswahl", "Bitte zuerst eine Halle in der Tabelle auswählen.", AlertType.INFORMATION);
-			return;
-		}
-
-		List<String> usages = findUsages(selected);
-		if (!usages.isEmpty()) {
-			showAlert("Halle wird noch verwendet",
-					"Diese Halle ist noch folgenden Vorstellungen zugeordnet und kann nicht gelöscht werden:\n\n" + String.join("\n", usages),
-					AlertType.WARNING);
-			return;
-		}
-
-		Alert confirm = new Alert(AlertType.CONFIRMATION, "Halle '" + selected.getName() + "' wirklich löschen?", ButtonType.YES, ButtonType.NO);
-		confirm.setHeaderText(null);
-		MainApp.applyAppIcon(confirm);
-		confirm.showAndWait().ifPresent(response -> {
-			if (response == ButtonType.YES) {
-				hallRepository.deleteHall(selected);
-				masterData.remove(selected);
-			}
-		});
-	}
-
-	/** Liefert "Event > Vorstellung"-Beschreibungen aller Vorstellungen, die die übergebene Halle noch referenzieren. */
-	private List<String> findUsages(Hall hall) {
-		List<String> usages = new ArrayList<>();
-		for (Event event : eventRepository.loadEvents()) {
-			if (event.getPresentations() == null) {
-				continue;
-			}
-			for (Presentation presentation : event.getPresentations()) {
-				if (hall.getId().equals(presentation.getHallId())) {
-					usages.add(event.getName() + " > " + presentation.getName());
-				}
-			}
-		}
-		return usages;
-	}
-
-	@Override
-	public void save() {
-		hallRepository.saveHalls(masterData);
-	}
-
-	@Override
-	public void setEvent(Event event) {
-	}
-
-	@Override
-	public void setPresentation(Presentation presentation) {
-	}
-
-	@Override
-	public void setHall(Hall hall) {
-		hallTable.getSelectionModel().select(hall);
-	}
-
-	@Override
-	public void filter(String query) {
-		filteredData.setPredicate(hall -> {
-			if (query == null || query.isEmpty()) {
-				return true;
-			}
-			return (hall.getName() != null && hall.getName().toLowerCase().contains(query))
-					|| (hall.getDescription() != null && hall.getDescription().toLowerCase().contains(query));
-		});
-	}
-
-	@Override
-	public void setEditMode(boolean enabled) {
-		hallTable.setEditable(enabled);
-		btnCreate.setDisable(!enabled);
-		btnDelete.setDisable(!enabled);
-	}
-
-	private void showAlert(String title, String content, AlertType alertType) {
-		MainApp.showAlert(title, content, alertType);
 	}
 }

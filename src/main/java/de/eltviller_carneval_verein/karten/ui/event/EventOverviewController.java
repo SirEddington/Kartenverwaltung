@@ -8,32 +8,26 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
+import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.MoneyFormat;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.fxml.FXML;
-import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
-import javafx.scene.control.TextField;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableRow;
-import javafx.scene.control.TreeTableView;
 import javafx.scene.control.cell.CheckBoxTreeTableCell;
 
-public class EventOverviewController {
+public class EventOverviewController extends AbstractOverviewController {
 
 	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 
-	@FXML private TextField searchField;
-	@FXML private Button btnToggleEdit = new Button();
-	@FXML private Button btnSave = new Button();
-
 	// TableView und Spalten
-	@FXML private TreeTableView<Object> treeTableView;
 	@FXML private TreeTableColumn<Object, String> colName;
 	@FXML private TreeTableColumn<Object, Integer> colPresCount;
 	@FXML private TreeTableColumn<Object, Integer> colTableCount;
@@ -41,14 +35,8 @@ public class EventOverviewController {
 	@FXML private TreeTableColumn<Object, String> colRevenue;
 	@FXML private TreeTableColumn<Object, Boolean> colArchive;
 
-	@FXML
-	public void initialize() {
-		setupColumns();
-		setupContextMenu();
-		loadEventTree();
-	}
-
-	private void setupColumns() {
+	@Override
+	protected void setupColumns() {
 		// 1. Spalte: Name / Bezeichnung je nach Ebene
 		colName.setCellValueFactory(param -> {
 			Object data = param.getValue().getValue();
@@ -166,108 +154,138 @@ public class EventOverviewController {
 		return MoneyFormat.formatCents(revenueCents) + " / " + MoneyFormat.formatCents(expectedCents) + " / " + MoneyFormat.formatCents(potentialCents);
 	}
 
-	private void setupContextMenu() {
-		treeTableView.setRowFactory(ttv -> {
-			TreeTableRow<Object> tableRow = new TreeTableRow<>();
-			ContextMenu contextMenu = new ContextMenu();
-			SeparatorMenuItem EditDeleteSeparator = new SeparatorMenuItem();
-			SeparatorMenuItem DeleteDetailsSeparator = new SeparatorMenuItem();
-
-			MenuItem addPresItem = new MenuItem("+ Vorstellung hinzufügen");
-			addPresItem.setOnAction(e -> {
-				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
-				if (selectedItem != null) {
-					Event event = findParentInTree(selectedItem, Event.class);
-					Presentation pres = event.addPresentation();
-					MainApp.showEventEditView(event, pres, null, null, true);
-				}
-			});
-
-			MenuItem addTableItem = new MenuItem("+ Tisch hinzufügen");
-			addTableItem.setOnAction(e -> {
-				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
-				if (selectedItem != null) {
-					Event event = findParentInTree(selectedItem, Event.class);
-					Presentation pres = findParentInTree(selectedItem, Presentation.class);
-					Table table = pres.addTable();
-					MainApp.showEventEditView(event, pres, table, null, true);
-				}
-			});
-
-			MenuItem addSeatItem = new MenuItem("+ Sitz hinzufügen");
-			addSeatItem.setOnAction(e -> {
-				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
-				if (selectedItem != null) {
-					Event event = findParentInTree(selectedItem, Event.class);
-					Presentation pres = findParentInTree(selectedItem, Presentation.class);
-					Table table = findParentInTree(selectedItem, Table.class);
-					Seat seat = table.addSeat();
-					MainApp.showEventEditView(event, pres, table, seat, true);
-				}
-			});
-
-			MenuItem editItem = new MenuItem("Bearbeiten");
-			editItem.setOnAction(e -> {
-				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
-				if (selectedItem != null) {
-					Event event = findParentInTree(selectedItem, Event.class);
-					Presentation pres = findParentInTree(selectedItem, Presentation.class);
-					Table table = findParentInTree(selectedItem, Table.class);
-					Seat seat = findParentInTree(selectedItem, Seat.class);
-					MainApp.showEventEditView(event, pres, table, seat, true);
-				}
-			});
-
-			MenuItem seeDetails = new MenuItem("Details");
-			seeDetails.setOnAction(e -> {
-				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
-				if (selectedItem != null) {
-					Event event = findParentInTree(selectedItem, Event.class);
-					Presentation pres = findParentInTree(selectedItem, Presentation.class);
-					Table table = findParentInTree(selectedItem, Table.class);
-					Seat seat = findParentInTree(selectedItem, Seat.class);
-					MainApp.showEventEditView(event, pres, table, seat, false);
-				}
-			});
-
-			MenuItem deleteItem = new MenuItem("Löschen");
-			deleteItem.setOnAction(e -> {
-				TreeItem<Object> selectedItem = treeTableView.getSelectionModel().getSelectedItem();
-				if (selectedItem != null && selectedItem.getParent() != null) {
-					// ToDo Logik: Eintrag löschen
-				}
-			});
-
-			// Menü-Einträge zusammenstellen
-			contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, editItem, EditDeleteSeparator, deleteItem, DeleteDetailsSeparator, seeDetails);
-
-			contextMenu.setOnShowing(e -> {
-				Object data = tableRow.getItem();
-				addPresItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
-				addTableItem.setVisible(data instanceof Presentation || data instanceof Table || data instanceof Seat);
-				addSeatItem.setVisible(data instanceof Table || data instanceof Seat);
-				editItem.setVisible(data != null);
-				seeDetails.setVisible(data != null);
-				deleteItem.setVisible(data != null);
-				EditDeleteSeparator.setVisible(data != null);
-				DeleteDetailsSeparator.setVisible(data != null);
-			});
-
-			// Event-Listener: Menü nur anzeigen, wenn die Zeile nicht leer ist
-			tableRow.emptyProperty().addListener((obs, wasEmpty, isEmpty) -> {
-				if (isEmpty) {
-					tableRow.setContextMenu(null);
-				} else {
-					tableRow.setContextMenu(contextMenu);
-				}
-			});
-
-			return tableRow;
-		});
-
+	@Override
+	protected String searchText(Object data) {
+		if (data instanceof Event event)
+			return event.getName() + " " + event.getDescription();
+		if (data instanceof Presentation presentation)
+			return presentation.getName() + " " + presentation.getDescription();
+		if (data instanceof Table table)
+			return "Tisch " + table.getTableNumber();
+		if (data instanceof Seat seat)
+			return "Sitz " + seat.getSeatNumber() + " " + seat.getFirstName() + " " + seat.getLastName() + " " + seat.getComment();
+		return null;
 	}
 
-	private void loadEventTree() {
+	@Override
+	protected ContextMenu createContextMenu(TreeTableRow<Object> tableRow) {
+		ContextMenu contextMenu = new ContextMenu();
+		SeparatorMenuItem editDeleteSeparator = new SeparatorMenuItem();
+		SeparatorMenuItem deleteDetailsSeparator = new SeparatorMenuItem();
+
+		MenuItem addPresItem = new MenuItem("+ Vorstellung hinzufügen");
+		addPresItem.setOnAction(e -> {
+			TreeItem<Object> selectedItem = selectedItem();
+			if (selectedItem != null) {
+				Event event = findParentInTree(selectedItem, Event.class);
+				Presentation pres = event.addPresentation();
+				MainApp.showEventEditView(event, pres, null, null, true);
+			}
+		});
+
+		MenuItem addTableItem = new MenuItem("+ Tisch hinzufügen");
+		addTableItem.setOnAction(e -> {
+			TreeItem<Object> selectedItem = selectedItem();
+			if (selectedItem != null) {
+				Event event = findParentInTree(selectedItem, Event.class);
+				Presentation pres = findParentInTree(selectedItem, Presentation.class);
+				Table table = pres.addTable();
+				MainApp.showEventEditView(event, pres, table, null, true);
+			}
+		});
+
+		MenuItem addSeatItem = new MenuItem("+ Sitz hinzufügen");
+		addSeatItem.setOnAction(e -> {
+			TreeItem<Object> selectedItem = selectedItem();
+			if (selectedItem != null) {
+				Event event = findParentInTree(selectedItem, Event.class);
+				Presentation pres = findParentInTree(selectedItem, Presentation.class);
+				Table table = findParentInTree(selectedItem, Table.class);
+				Seat seat = table.addSeat();
+				MainApp.showEventEditView(event, pres, table, seat, true);
+			}
+		});
+
+		MenuItem editItem = new MenuItem("Bearbeiten");
+		editItem.setOnAction(e -> openEditView(true));
+
+		MenuItem seeDetails = new MenuItem("Details");
+		seeDetails.setOnAction(e -> openEditView(false));
+
+		MenuItem deleteItem = new MenuItem("Löschen");
+		deleteItem.setOnAction(e -> handleDelete());
+
+		contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, editItem, editDeleteSeparator, deleteItem, deleteDetailsSeparator, seeDetails);
+
+		contextMenu.setOnShowing(e -> {
+			Object data = tableRow.getItem();
+			addPresItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
+			addTableItem.setVisible(data instanceof Presentation || data instanceof Table || data instanceof Seat);
+			addSeatItem.setVisible(data instanceof Table || data instanceof Seat);
+			editItem.setVisible(data != null);
+			seeDetails.setVisible(data != null);
+			deleteItem.setVisible(data != null);
+			editDeleteSeparator.setVisible(data != null);
+			deleteDetailsSeparator.setVisible(data != null);
+		});
+		return contextMenu;
+	}
+
+	private void openEditView(boolean editable) {
+		TreeItem<Object> selectedItem = selectedItem();
+		if (selectedItem != null) {
+			Event event = findParentInTree(selectedItem, Event.class);
+			Presentation pres = findParentInTree(selectedItem, Presentation.class);
+			Table table = findParentInTree(selectedItem, Table.class);
+			Seat seat = findParentInTree(selectedItem, Seat.class);
+			MainApp.showEventEditView(event, pres, table, seat, editable);
+		}
+	}
+
+	/** Löscht den gewählten Eintrag nach Rückfrage und speichert das betroffene Event sofort. */
+	private void handleDelete() {
+		TreeItem<Object> selectedItem = selectedItem();
+		if (selectedItem == null || selectedItem.getParent() == null) {
+			return;
+		}
+		Object data = selectedItem.getValue();
+		Event event = findParentInTree(selectedItem, Event.class);
+		Presentation pres = findParentInTree(selectedItem, Presentation.class);
+		Table table = findParentInTree(selectedItem, Table.class);
+
+		if (data instanceof Event) {
+			if (confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
+				repository.deleteEvent(event);
+			} else {
+				return;
+			}
+		} else if (data instanceof Presentation) {
+			if (confirmDelete("Vorstellung löschen", "Soll die Vorstellung \"" + pres.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
+				event.deletePresentation(pres);
+				repository.saveEvent(event);
+			} else {
+				return;
+			}
+		} else if (data instanceof Table) {
+			if (confirmDelete("Tisch löschen", "Soll Tisch " + table.getTableNumber() + " wirklich unwiderruflich gelöscht werden?")) {
+				pres.deleteTable(table);
+				repository.saveEvent(event);
+			} else {
+				return;
+			}
+		} else if (data instanceof Seat seat) {
+			if (confirmDelete("Sitz löschen", "Soll Sitz " + seat.getSeatNumber() + " wirklich unwiderruflich gelöscht werden?")) {
+				table.deleteSeat(seat);
+				repository.saveEvent(event);
+			} else {
+				return;
+			}
+		}
+		reload();
+	}
+
+	@Override
+	protected TreeItem<Object> buildTree() {
 		TreeItem<Object> dummyRoot = new TreeItem<>("Root");
 		List<Event> events = repository.loadEvents();
 
@@ -296,28 +314,11 @@ public class EventOverviewController {
 			dummyRoot.getChildren().add(eventNode);
 		}
 
-		treeTableView.setRoot(dummyRoot);
-	}
-
-	@SuppressWarnings("unchecked")
-	private <T> T findParentInTree(TreeItem<Object> item, Class<T> clazz) {
-		TreeItem<Object> current = item;
-		while (current != null) {
-			if (current.getValue() != null && clazz.isInstance(current.getValue())) {
-				return (T) current.getValue();
-			}
-			current = current.getParent();
-		}
-		return null;
-	}
-
-	@FXML
-	private void handleBackToMenu() {
-		MainApp.showManagementMenuView();
+		return dummyRoot;
 	}
 
 	@FXML
 	private void handleCreateNewEvent() {
 		MainApp.showEventCreateView();
 	}
-}
+}

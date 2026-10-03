@@ -12,7 +12,7 @@ public class ManagementMenuController {
 
 	@FXML
 	private void handleOpenHallManagement() {
-		MainApp.showHallShellView();
+		MainApp.showHallManagementView();
 	}
 
 	@FXML
