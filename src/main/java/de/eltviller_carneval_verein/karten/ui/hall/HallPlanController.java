@@ -1,17 +1,16 @@
 package de.eltviller_carneval_verein.karten.ui.hall;
 
-import de.eltviller_carneval_verein.karten.model.Hall;
-import de.eltviller_carneval_verein.karten.model.HallObject;
-import de.eltviller_carneval_verein.karten.model.Shape;
 import java.util.HashMap;
 import java.util.Map;
 
+import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.HallObject;
+import de.eltviller_carneval_verein.karten.model.Shape;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
 import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
 import javafx.scene.Group;
-import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ColorPicker;
 import javafx.scene.control.ComboBox;
@@ -46,7 +45,6 @@ public class HallPlanController {
 	private static final Color DEFAULT_FILL = Color.LIGHTGRAY;
 	private static final Color SELECTION_STROKE = Color.DODGERBLUE;
 
-
 	private Hall hall;
 	private HallObject selectedObject;
 	private boolean editMode = false;
@@ -65,19 +63,32 @@ public class HallPlanController {
 	private final Map<HallObject, Group> nodeByObject = new HashMap<>();
 	private boolean objectDragged = false;
 
-	@FXML private StackPane viewportPane;
-	@FXML private Pane hallPane;
-	@FXML private VBox propertiesPanel;
-	@FXML private Button btnAddObject;
-	@FXML private Button btnDeleteObject;
-	@FXML private TextField nameField;
-	@FXML private TextField descField;
-	@FXML private Spinner<Double> posXSpinner;
-	@FXML private Spinner<Double> posYSpinner;
-	@FXML private Spinner<Double> widthSpinner;
-	@FXML private Spinner<Double> heightSpinner;
-	@FXML private ComboBox<Shape> shapeCombo;
-	@FXML private ColorPicker colorPicker;
+	@FXML
+	private StackPane viewportPane;
+	@FXML
+	private Pane hallPane;
+	@FXML
+	private VBox propertiesPanel;
+	@FXML
+	private Button btnAddObject;
+	@FXML
+	private Button btnDeleteObject;
+	@FXML
+	private TextField nameField;
+	@FXML
+	private TextField descField;
+	@FXML
+	private Spinner<Double> posXSpinner;
+	@FXML
+	private Spinner<Double> posYSpinner;
+	@FXML
+	private Spinner<Double> widthSpinner;
+	@FXML
+	private Spinner<Double> heightSpinner;
+	@FXML
+	private ComboBox<Shape> shapeCombo;
+	@FXML
+	private ColorPicker colorPicker;
 
 	@FXML
 	public void initialize() {
@@ -94,6 +105,8 @@ public class HallPlanController {
 
 		setupPanel();
 		updatePanel();
+
+		fitToView();
 	}
 
 	private void setupPanel() {
