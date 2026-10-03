@@ -31,6 +31,7 @@ import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
+import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.GridPane;
@@ -118,7 +119,11 @@ public class HallOverviewController implements ContentController {
 		hallPane.setTranslateY(parentPoint.getY() - pivotY - newScale * (localPoint.getY() - pivotY));
 	}
 
+	// Der Plan wird immer mit der rechten Maustaste verschoben (links: Klicks auf Tisch/Sitz)
 	private void handleDragStart(MouseEvent event) {
+		if (event.getButton() != MouseButton.SECONDARY) {
+			return;
+		}
 		dragAnchorSceneX = event.getSceneX();
 		dragAnchorSceneY = event.getSceneY();
 		dragAnchorTranslateX = hallPane.getTranslateX();
@@ -126,6 +131,9 @@ public class HallOverviewController implements ContentController {
 	}
 
 	private void handleDrag(MouseEvent event) {
+		if (event.getButton() != MouseButton.SECONDARY) {
+			return;
+		}
 		hallPane.setTranslateX(dragAnchorTranslateX + (event.getSceneX() - dragAnchorSceneX));
 		hallPane.setTranslateY(dragAnchorTranslateY + (event.getSceneY() - dragAnchorSceneY));
 	}
@@ -317,7 +325,7 @@ public class HallOverviewController implements ContentController {
 	 */
 	private void setupTableClickHandler(Node tableShapeNode, Table table) {
 		tableShapeNode.setOnMouseClicked(event -> {
-			if (!event.isStillSincePress()) {
+			if (event.getButton() != MouseButton.PRIMARY || !event.isStillSincePress()) {
 				return; // z.B. nach einem Schwenk/Zoom der Ansicht, sicherheitshalber ignorieren
 			}
 			event.consume();
@@ -354,7 +362,7 @@ public class HallOverviewController implements ContentController {
 	}
 
 	private void handlePlacingMouseClicked(MouseEvent event) {
-		if (placingTable == null) {
+		if (placingTable == null || event.getButton() != MouseButton.PRIMARY) {
 			return;
 		}
 		event.consume();
@@ -400,6 +408,9 @@ public class HallOverviewController implements ContentController {
 
 		Tooltip.install(seatCircle, new Tooltip("Sitz " + seat.getSeatNumber() + " (" + seat.getStatus().getDisplayName() + ")"));
 		seatCircle.setOnMouseClicked(event -> {
+			if (event.getButton() != MouseButton.PRIMARY || !event.isStillSincePress()) {
+				return;
+			}
 			event.consume();
 			Window window = seatCircle.getScene().getWindow();
 			openSeatDetailPopup(seat, window, event.getScreenX() + 12, event.getScreenY() + 12);

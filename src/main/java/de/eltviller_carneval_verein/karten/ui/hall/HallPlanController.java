@@ -3,6 +3,9 @@ package de.eltviller_carneval_verein.karten.ui.hall;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Shape;
+import java.util.HashMap;
+import java.util.Map;
+
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
 import javafx.geometry.Point2D;
@@ -15,6 +18,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextField;
+import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.Pane;
@@ -57,6 +61,9 @@ public class HallPlanController {
 	private double objectAnchorY;
 	// Einpassen wartet, bis die Fläche eine Größe hat (beim Öffnen des Screens noch 0)
 	private boolean fitPending = false;
+	// Knoten je Hallenobjekt, damit Auswahl und Ziehen den laufenden Knoten nicht durch Neuzeichnen ersetzen müssen
+	private final Map<HallObject, Group> nodeByObject = new HashMap<>();
+	private boolean objectDragged = false;
 
 	@FXML private StackPane viewportPane;
 	@FXML private Pane hallPane;
@@ -65,6 +72,8 @@ public class HallPlanController {
 	@FXML private Button btnDeleteObject;
 	@FXML private TextField nameField;
 	@FXML private TextField descField;
+	@FXML private Spinner<Double> posXSpinner;
+	@FXML private Spinner<Double> posYSpinner;
 	@FXML private Spinner<Double> widthSpinner;
 	@FXML private Spinner<Double> heightSpinner;
 	@FXML private ComboBox<Shape> shapeCombo;
@@ -90,7 +99,7 @@ public class HallPlanController {
 	private void setupPanel() {
 		widthSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_WIDTH, 5));
 		heightSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_HEIGHT, 5));
-		for (Spinner<Double> spinner : java.util.List.of(widthSpinner, heightSpinner)) {
+		for (Spinner<Double> spinner : java.util.List.of(widthSpinner, heightSpinner, posXSpinner, posYSpinner)) {
 			spinner.setEditable(true);
 			// Getippte Werte beim Verlassen des Feldes übernehmen
 			spinner.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
@@ -99,6 +108,8 @@ public class HallPlanController {
 				}
 			});
 		}
+		posXSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-100000.0, 100000.0, 0.0, 5));
+		posYSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-100000.0, 100000.0, 0.0, 5));
 		shapeCombo.getItems().setAll(Shape.values());
 
 		nameField.setOnAction(e -> commitName());
@@ -110,6 +121,18 @@ public class HallPlanController {
 		descField.textProperty().addListener((obs, oldVal, newVal) -> {
 			if (!updatingPanel && selectedObject != null) {
 				selectedObject.setDesc(newVal);
+			}
+		});
+		posXSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (!updatingPanel && selectedObject != null && newVal != null) {
+				selectedObject.setPosX(newVal);
+				renderHall();
+			}
+		});
+		posYSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (!updatingPanel && selectedObject != null && newVal != null) {
+				selectedObject.setPosY(newVal);
+				renderHall();
 			}
 		});
 		widthSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
@@ -178,7 +201,11 @@ public class HallPlanController {
 		hallPane.setTranslateY(parentPoint.getY() - pivotY - newScale * (localPoint.getY() - pivotY));
 	}
 
+	// Der Plan wird immer mit der rechten Maustaste verschoben (links: Auswählen/Objekte ziehen)
 	private void handleDragStart(MouseEvent event) {
+		if (event.getButton() != MouseButton.SECONDARY) {
+			return;
+		}
 		dragAnchorSceneX = event.getSceneX();
 		dragAnchorSceneY = event.getSceneY();
 		dragAnchorTranslateX = hallPane.getTranslateX();
@@ -186,6 +213,9 @@ public class HallPlanController {
 	}
 
 	private void handleDrag(MouseEvent event) {
+		if (event.getButton() != MouseButton.SECONDARY) {
+			return;
+		}
 		hallPane.setTranslateX(dragAnchorTranslateX + (event.getSceneX() - dragAnchorSceneX));
 		hallPane.setTranslateY(dragAnchorTranslateY + (event.getSceneY() - dragAnchorSceneY));
 	}
@@ -259,6 +289,7 @@ public class HallPlanController {
 
 	private void renderHall() {
 		hallPane.getChildren().clear();
+		nodeByObject.clear();
 		if (hall == null) {
 			return;
 		}
@@ -274,11 +305,13 @@ public class HallPlanController {
 		}
 
 		for (HallObject hallObject : hall.getHallObjects()) {
-			hallPane.getChildren().add(createHallObjectNode(hallObject));
+			Group node = createHallObjectNode(hallObject);
+			nodeByObject.put(hallObject, node);
+			hallPane.getChildren().add(node);
 		}
 	}
 
-	private Node createHallObjectNode(HallObject hallObject) {
+	private Group createHallObjectNode(HallObject hallObject) {
 		javafx.scene.shape.Shape shape;
 		if (hallObject.getShape() == Shape.CIRCLE) {
 			double radius = hallObject.getWidth() / 2.0;
@@ -304,15 +337,22 @@ public class HallPlanController {
 		node.setCursor(editMode ? Cursor.MOVE : Cursor.HAND);
 		node.setOnMousePressed(event -> startObjectDrag(event, hallObject));
 		node.setOnMouseDragged(event -> dragObject(event, hallObject));
-		node.setOnMouseReleased(event -> event.consume());
+		node.setOnMouseReleased(event -> endObjectDrag(event));
 		return node;
 	}
 
 	private void startObjectDrag(MouseEvent event, HallObject hallObject) {
-		// Nicht an die Fläche durchreichen, sonst würde gleichzeitig die Ansicht verschoben
+		// Rechte/mittlere Taste nicht behandeln, damit sie zum Verschieben des Plans durchgereicht werden
+		if (event.getButton() != MouseButton.PRIMARY) {
+			return;
+		}
 		event.consume();
+		objectDragged = false;
 		if (!hallObject.equals(selectedObject)) {
-			selectObject(hallObject);
+			// Nur markieren, nicht neu zeichnen: der gedrückte Knoten muss für die folgende Drag-Geste bestehen bleiben
+			selectedObject = hallObject;
+			updatePanel();
+			applySelectionStyle();
 		}
 		dragAnchorSceneX = event.getSceneX();
 		dragAnchorSceneY = event.getSceneY();
@@ -321,14 +361,59 @@ public class HallPlanController {
 	}
 
 	private void dragObject(MouseEvent event, HallObject hallObject) {
+		if (event.getButton() != MouseButton.PRIMARY) {
+			return;
+		}
 		event.consume();
 		if (!editMode) {
 			return;
 		}
 		double scale = hallPane.getScaleX();
-		hallObject.setPosX(objectAnchorX + (event.getSceneX() - dragAnchorSceneX) / scale);
-		hallObject.setPosY(objectAnchorY + (event.getSceneY() - dragAnchorSceneY) / scale);
-		renderHall();
+		double deltaX = (event.getSceneX() - dragAnchorSceneX) / scale;
+		double deltaY = (event.getSceneY() - dragAnchorSceneY) / scale;
+		hallObject.setPosX(objectAnchorX + deltaX);
+		hallObject.setPosY(objectAnchorY + deltaY);
+		objectDragged = true;
+
+		// Knoten nur verschieben (kein Neuzeichnen während der Geste)
+		Group node = nodeByObject.get(hallObject);
+		if (node != null) {
+			node.setTranslateX(deltaX);
+			node.setTranslateY(deltaY);
+		}
+		updatePositionSpinners(hallObject);
+	}
+
+	private void endObjectDrag(MouseEvent event) {
+		if (event.getButton() != MouseButton.PRIMARY) {
+			return;
+		}
+		event.consume();
+		if (objectDragged) {
+			objectDragged = false;
+			// Einmal sauber neu zeichnen, damit Geometrie wieder aus dem Modell stammt (Translate zurück auf 0)
+			renderHall();
+		}
+	}
+
+	private void updatePositionSpinners(HallObject obj) {
+		updatingPanel = true;
+		try {
+			posXSpinner.getValueFactory().setValue(obj.getPosX());
+			posYSpinner.getValueFactory().setValue(obj.getPosY());
+		} finally {
+			updatingPanel = false;
+		}
+	}
+
+	/** Färbt den Rahmen der Knoten je nach Auswahl um, ohne die Knoten neu zu erzeugen. */
+	private void applySelectionStyle() {
+		nodeByObject.forEach((object, node) -> {
+			boolean selected = object.equals(selectedObject);
+			javafx.scene.shape.Shape shape = (javafx.scene.shape.Shape) node.getChildren().get(0);
+			shape.setStroke(selected ? SELECTION_STROKE : Color.DARKGRAY);
+			shape.setStrokeWidth(selected ? 3 : 1);
+		});
 	}
 
 	private void selectObject(HallObject hallObject) {
@@ -343,6 +428,8 @@ public class HallPlanController {
 		try {
 			HallObject obj = selectedObject;
 			nameField.setText(obj != null ? obj.getName() : "");
+			posXSpinner.getValueFactory().setValue(obj != null ? obj.getPosX() : 0.0);
+			posYSpinner.getValueFactory().setValue(obj != null ? obj.getPosY() : 0.0);
 			descField.setText(obj != null && obj.getDesc() != null ? obj.getDesc() : "");
 			widthSpinner.getValueFactory().setValue(obj != null ? obj.getWidth() : FALLBACK_OBJECT_WIDTH);
 			heightSpinner.getValueFactory().setValue(obj != null ? obj.getHeight() : FALLBACK_OBJECT_HEIGHT);
@@ -372,6 +459,11 @@ public class HallPlanController {
 			newObject.setHeight(FALLBACK_OBJECT_HEIGHT);
 		}
 		newObject.setShape(Shape.RECTANGLE);
+		// Startposition: Hallenmitte (sofern Saalmaße gesetzt sind), sonst obere linke Ecke
+		if (hall.getHallWidth() > 0 && hall.getHallHeight() > 0) {
+			newObject.setPosX(Math.max(0, (hall.getHallWidth() - newObject.getWidth()) / 2.0));
+			newObject.setPosY(Math.max(0, (hall.getHallHeight() - newObject.getHeight()) / 2.0));
+		}
 		selectObject(newObject);
 	}
 

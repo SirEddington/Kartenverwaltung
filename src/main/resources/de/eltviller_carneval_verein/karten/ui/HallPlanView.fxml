@@ -36,6 +36,10 @@
                 <TextField fx:id="nameField" />
                 <Label text="Beschreibung:" />
                 <TextField fx:id="descField" />
+                <Label text="X (cm, von links):" />
+                <Spinner fx:id="posXSpinner" prefWidth="120.0" />
+                <Label text="Y (cm, von oben):" />
+                <Spinner fx:id="posYSpinner" prefWidth="120.0" />
                 <Label text="Breite (cm):" />
                 <Spinner fx:id="widthSpinner" prefWidth="120.0" />
                 <Label text="Höhe (cm, nur Rechteck):" />
