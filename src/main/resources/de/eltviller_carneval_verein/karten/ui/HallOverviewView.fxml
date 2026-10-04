@@ -6,7 +6,7 @@
 <!-- Zoom (Mausrad) & Verschieben (Ziehen mit gedrückter Maustaste) werden im Controller behandelt -->
 <StackPane fx:id="viewportPane" xmlns="http://javafx.com/javafx/17"
            xmlns:fx="http://javafx.com/fxml/1"
-           fx:controller="de.eltviller_carneval_verein.karten.ui.HallOverviewController"
+           fx:controller="de.eltviller_carneval_verein.karten.ui.sales.HallOverviewController"
            style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5; -fx-background-color: transparent;">
 
     <!-- Mittlerer Bereich: Saalplan-Zeichenfläche -->

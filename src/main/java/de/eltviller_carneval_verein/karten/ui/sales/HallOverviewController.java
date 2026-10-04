@@ -1,18 +1,23 @@
-package de.eltviller_carneval_verein.karten.ui;
+package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.UiColors;
 import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
+import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.geometry.VPos;
@@ -27,6 +32,7 @@ import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
+import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.GridPane;
@@ -44,11 +50,14 @@ import javafx.util.StringConverter;
 
 public class HallOverviewController implements ContentController {
 
-	private static final double MIN_SCALE = 0.2;
+	private static final double MIN_SCALE = 0.05;
 	private static final double MAX_SCALE = 4.0;
 	private static final double ZOOM_FACTOR_PER_NOTCH = 1.1;
+	// Randabstand der automatischen Anordnung zur Hallenwand (cm), wenn der Vorstellung eine Halle zugeordnet ist
+	private static final double HALL_MARGIN = 50;
 
-	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
+	private final JsonEventRepository repository = JsonEventRepository.getInstance();
+	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
 	private Event selectedEvent;
 	private Presentation selectedPres;
 	private boolean editMode = false;
@@ -60,6 +69,10 @@ public class HallOverviewController implements ContentController {
 	private double dragAnchorTranslateY;
 
 	private Popup activePopup;
+
+	// Einpassen auf die Halle: wartet, bis die Fläche eine Größe hat; erfolgt nur, wenn sich die Halle ändert (Zoom bleibt beim Vorstellungswechsel)
+	private boolean fitPending = false;
+	private String fittedHallId = null;
 
 	private Table placingTable;
 	private final EventHandler<MouseEvent> placingMoveHandler = this::handlePlacingMouseMoved;
@@ -81,6 +94,8 @@ public class HallOverviewController implements ContentController {
 		viewportPane.setOnScroll(this::handleScroll);
 		viewportPane.setOnMousePressed(this::handleDragStart);
 		viewportPane.setOnMouseDragged(this::handleDrag);
+		viewportPane.widthProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
+		viewportPane.heightProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
 	}
 
 	/**
@@ -113,7 +128,11 @@ public class HallOverviewController implements ContentController {
 		hallPane.setTranslateY(parentPoint.getY() - pivotY - newScale * (localPoint.getY() - pivotY));
 	}
 
+	// Der Plan wird immer mit der rechten Maustaste verschoben (links: Klicks auf Tisch/Sitz)
 	private void handleDragStart(MouseEvent event) {
+		if (event.getButton() != MouseButton.SECONDARY) {
+			return;
+		}
 		dragAnchorSceneX = event.getSceneX();
 		dragAnchorSceneY = event.getSceneY();
 		dragAnchorTranslateX = hallPane.getTranslateX();
@@ -121,12 +140,52 @@ public class HallOverviewController implements ContentController {
 	}
 
 	private void handleDrag(MouseEvent event) {
+		if (event.getButton() != MouseButton.SECONDARY) {
+			return;
+		}
 		hallPane.setTranslateX(dragAnchorTranslateX + (event.getSceneX() - dragAnchorSceneX));
 		hallPane.setTranslateY(dragAnchorTranslateY + (event.getSceneY() - dragAnchorSceneY));
 	}
 
 	private double clamp(double value, double min, double max) {
 		return Math.max(min, Math.min(max, value));
+	}
+
+	private boolean hasHallBounds(Hall hall) {
+		return hall.getHallWidth() > 0 && hall.getHallHeight() > 0;
+	}
+
+	private void fitIfPending() {
+		if (fitPending && selectedPres != null && viewportPane.getWidth() > 0 && viewportPane.getHeight() > 0) {
+			fitPending = false;
+			Hall hall = hallRepository.findById(selectedPres.getHallId());
+			if (hall != null && hasHallBounds(hall)) {
+				fittedHallId = hall.getId();
+				fitToHall(hall);
+			}
+		}
+	}
+
+	/**
+	 * Passt Zoom und Verschiebung so an, dass die ganze Halle mittig in der Fläche sichtbar ist.
+	 * Die Skalierung erfolgt um die Mitte der Fläche (siehe handleScroll); beim ersten Aufruf läuft das noch
+	 * mitten im Layout, daher wird deren Mitte aus der Viewport-Innenfläche statt aus der hallPane berechnet.
+	 */
+	private void fitToHall(Hall hall) {
+		double viewWidth = viewportPane.getWidth();
+		double viewHeight = viewportPane.getHeight();
+		double scale = clamp(0.95 * Math.min(viewWidth / hall.getHallWidth(), viewHeight / hall.getHallHeight()), MIN_SCALE, MAX_SCALE);
+
+		Insets insets = viewportPane.getInsets();
+		double pivotX = (viewWidth - insets.getLeft() - insets.getRight()) / 2.0;
+		double pivotY = (viewHeight - insets.getTop() - insets.getBottom()) / 2.0;
+		double centerX = hall.getHallWidth() / 2.0;
+		double centerY = hall.getHallHeight() / 2.0;
+
+		hallPane.setScaleX(scale);
+		hallPane.setScaleY(scale);
+		hallPane.setTranslateX(viewWidth / 2.0 - insets.getLeft() - pivotX - scale * (centerX - pivotX));
+		hallPane.setTranslateY(viewHeight / 2.0 - insets.getTop() - pivotY - scale * (centerY - pivotY));
 	}
 
 	public void renderHall() {
@@ -140,9 +199,21 @@ public class HallOverviewController implements ContentController {
 		// 1. Automatische Positionierung für Tische & Stühle ohne manuelle Position anwenden
 		applyDefaultPositions();
 
-		// 2. Zeichnen der Hallen-Objekte
-		for (HallObject hallObject : selectedPres.getHallObjects()) {
-			drawHallObject(hallObject);
+		// 2. Hallenumriss und Hallen-Objekte (nur falls der Vorstellung eine Halle zugeordnet ist).
+		// Koordinaten sind cm ab der oberen linken Hallenecke (0/0), wie im Hallen-Editor.
+		Hall hall = hallRepository.findById(selectedPres.getHallId());
+		if (hall != null) {
+			if (hasHallBounds(hall)) {
+				Rectangle outline = new Rectangle(0, 0, hall.getHallWidth(), hall.getHallHeight());
+				outline.setFill(Color.WHITE);
+				outline.setStroke(Color.GRAY);
+				outline.getStrokeDashArray().addAll(8.0, 6.0);
+				outline.setMouseTransparent(true);
+				hallPane.getChildren().add(outline);
+			}
+			for (HallObject hallObject : hall.getHallObjects()) {
+				drawHallObject(hallObject);
+			}
 		}
 
 		// 3. Zeichnen der Tische und Stühle
@@ -164,9 +235,13 @@ public class HallOverviewController implements ContentController {
 			return;
 		}
 
-		int tablesPerColumn = 7;// selectedPres.getTableRows(); // Max. Tische pro Spalte
-		double startX = 60; // Start-X im Pane
-		double startY = 40; // Start-Y im Pane
+		// Mit zugeordneter Halle beginnt die Anordnung mit Randabstand an der Hallenecke und bricht
+		// Spalten nach der Hallenhöhe um; ohne Halle bleibt es bei 7 Tischen pro Spalte ab festem Startpunkt.
+		Hall hall = hallRepository.findById(selectedPres.getHallId());
+		boolean inHall = hall != null && hasHallBounds(hall);
+		int tablesPerColumn = 7; // nur ohne Halle
+		double startX = inHall ? HALL_MARGIN : 60; // Start-X im Pane
+		double startY = inHall ? HALL_MARGIN : 40; // Start-Y im Pane
 		double defaultWidth = 70; // Standard-Tischbreite
 		double defaultHeight = 300; // Standard-Tischhöhe
 		double tableRowGap = 0; // Sichtbarer Abstand zwischen benachbarten Tischen
@@ -182,10 +257,27 @@ public class HallOverviewController implements ContentController {
 
 		// Breiteste Tisch-Stuhl-Kombination je Spalte ermitteln, damit die nächste
 		// Spalte erst dahinter beginnt
-		int columnCount = (tables.size() - 1) / tablesPerColumn + 1;
+		int[] columnOf = new int[tables.size()];
+		int currentColumn = 0;
+		double columnCursorY = startY;
+		for (int i = 0; i < tables.size(); i++) {
+			if (inHall) {
+				double tableHeight = tables.get(i).getHeight();
+				if (columnCursorY > startY && columnCursorY + tableHeight > hall.getHallHeight() - startY) {
+					currentColumn++;
+					columnCursorY = startY;
+				}
+				columnCursorY += tableHeight + tableRowGap;
+				columnOf[i] = currentColumn;
+			} else {
+				columnOf[i] = i / tablesPerColumn;
+			}
+		}
+
+		int columnCount = columnOf[tables.size() - 1] + 1;
 		double[] columnFootprint = new double[columnCount];
 		for (int i = 0; i < tables.size(); i++) {
-			int col = i / tablesPerColumn;
+			int col = columnOf[i];
 			double footprint = tables.get(i).getWidth() + 2 * getSeatMargin(tables.get(i));
 			columnFootprint[col] = Math.max(columnFootprint[col], footprint);
 		}
@@ -203,7 +295,7 @@ public class HallOverviewController implements ContentController {
 
 		for (int i = 0; i < tables.size(); i++) {
 			Table table = tables.get(i);
-			int col = i / tablesPerColumn;
+			int col = columnOf[i];
 
 			// --- TISCH POSITIONIERUNG ---
 			if (!table.isManualPos()) {
@@ -309,7 +401,7 @@ public class HallOverviewController implements ContentController {
 	 */
 	private void setupTableClickHandler(Node tableShapeNode, Table table) {
 		tableShapeNode.setOnMouseClicked(event -> {
-			if (!event.isStillSincePress()) {
+			if (event.getButton() != MouseButton.PRIMARY || !event.isStillSincePress()) {
 				return; // z.B. nach einem Schwenk/Zoom der Ansicht, sicherheitshalber ignorieren
 			}
 			event.consume();
@@ -346,7 +438,7 @@ public class HallOverviewController implements ContentController {
 	}
 
 	private void handlePlacingMouseClicked(MouseEvent event) {
-		if (placingTable == null) {
+		if (placingTable == null || event.getButton() != MouseButton.PRIMARY) {
 			return;
 		}
 		event.consume();
@@ -392,6 +484,9 @@ public class HallOverviewController implements ContentController {
 
 		Tooltip.install(seatCircle, new Tooltip("Sitz " + seat.getSeatNumber() + " (" + seat.getStatus().getDisplayName() + ")"));
 		seatCircle.setOnMouseClicked(event -> {
+			if (event.getButton() != MouseButton.PRIMARY || !event.isStillSincePress()) {
+				return;
+			}
 			event.consume();
 			Window window = seatCircle.getScene().getWindow();
 			openSeatDetailPopup(seat, window, event.getScreenX() + 12, event.getScreenY() + 12);
@@ -681,7 +776,7 @@ public class HallOverviewController implements ContentController {
 
 	private Node createHallObjectNode(HallObject hallObject) {
 		// Java 21 Switch Expression für Shapes
-		Shape hallObjectShape = switch (hallObject.getShape()) {
+		Shape hallObjectShape = switch (hallObject.getShape() != null ? hallObject.getShape() : de.eltviller_carneval_verein.karten.model.Shape.RECTANGLE) {
 		case CIRCLE -> {
 			double radius = hallObject.getWidth() / 2.0;
 			yield new Circle(hallObject.getPosX() + radius, hallObject.getPosY() + radius, radius);
@@ -694,7 +789,7 @@ public class HallOverviewController implements ContentController {
 		}
 		};
 
-		hallObjectShape.setFill(Color.LIGHTGRAY);
+		hallObjectShape.setFill(parseHallObjectColor(hallObject.getColor()));
 		hallObjectShape.setStroke(Color.DARKGRAY);
 
 		Text hallObjectLabel = new Text(hallObject.getName());
@@ -702,6 +797,17 @@ public class HallOverviewController implements ContentController {
 		hallObjectLabel.setY(hallObject.getPosY() + 20);
 
 		return new Group(hallObjectShape, hallObjectLabel);
+	}
+
+	private static Color parseHallObjectColor(String color) {
+		if (color == null || color.isBlank()) {
+			return Color.LIGHTGRAY;
+		}
+		try {
+			return Color.web(color);
+		} catch (IllegalArgumentException e) {
+			return Color.LIGHTGRAY;
+		}
 	}
 
 	private void applyEditMode() {
@@ -727,6 +833,11 @@ public class HallOverviewController implements ContentController {
 		if (selectedPres != null) {
 			this.selectedEvent = presentation.getParent();
 			renderHall();
+			Hall hall = hallRepository.findById(selectedPres.getHallId());
+			if (hall != null && hasHallBounds(hall) && !hall.getId().equals(fittedHallId)) {
+				fitPending = true;
+			}
+			fitIfPending();
 		} else {
 			selectedEvent = null;
 		}

@@ -4,7 +4,7 @@ import java.util.List;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 
-public interface TicketRepository {
+public interface EventRepository {
 
 	List<Event> loadEvents();
 

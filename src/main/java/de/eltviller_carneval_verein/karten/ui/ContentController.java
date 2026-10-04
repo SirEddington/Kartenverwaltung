@@ -18,4 +18,4 @@ public interface ContentController {
     
     // Aktiviert/Deaktiviert die Bearbeitung
     void setEditMode(boolean enabled);
-}
+}

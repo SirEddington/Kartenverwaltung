@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.ui;
+package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -9,7 +9,9 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -29,7 +31,7 @@ public class TicketTableController implements ContentController {
 
 	private static final GermanDecimalStringConverter PRICE_CONVERTER = new GermanDecimalStringConverter();
 
-	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
+	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 	private Event selectedEvent;
 	private Presentation selectedPres;
 	private boolean editMode = false;

@@ -17,16 +17,16 @@ import org.junit.jupiter.api.io.TempDir;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 
-class JsonTicketRepositoryTest {
+class JsonEventRepositoryTest {
 
 	@Test
 	void saveAndLoad_roundTrip(@TempDir File storageDir) {
-		JsonTicketRepository repository = new JsonTicketRepository(storageDir);
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
 		event.changeName("Testevent");
 		repository.saveEvent(event);
 
-		JsonTicketRepository reopened = new JsonTicketRepository(storageDir);
+		JsonEventRepository reopened = new JsonEventRepository(storageDir);
 		List<Event> loaded = reopened.loadEvents();
 
 		assertEquals(1, loaded.size());
@@ -36,7 +36,7 @@ class JsonTicketRepositoryTest {
 
 	@Test
 	void renamingEvent_doesNotLeaveOrphanFile(@TempDir File storageDir) {
-		JsonTicketRepository repository = new JsonTicketRepository(storageDir);
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
 		event.changeName("Sitzung 2026");
 		repository.saveEvent(event);
@@ -52,7 +52,7 @@ class JsonTicketRepositoryTest {
 
 	@Test
 	void twoEventsWithCollidingSanitizedNames_bothSaveable(@TempDir File storageDir) {
-		JsonTicketRepository repository = new JsonTicketRepository(storageDir);
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
 
 		Event first = new Event();
 		first.changeName("Sitzung/2026");
@@ -70,7 +70,7 @@ class JsonTicketRepositoryTest {
 
 	@Test
 	void secondSave_createsBackupOfPreviousVersion(@TempDir File storageDir) {
-		JsonTicketRepository repository = new JsonTicketRepository(storageDir);
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
 		event.changeName("Testevent");
 		repository.saveEvent(event);
@@ -87,7 +87,7 @@ class JsonTicketRepositoryTest {
 		File corruptFile = new File(storageDir, "kaputt.json");
 		Files.writeString(corruptFile.toPath(), "das ist kein gueltiges JSON", StandardCharsets.UTF_8);
 
-		JsonTicketRepository repository = new JsonTicketRepository(storageDir);
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		List<Event> loaded = repository.loadEvents();
 
 		assertTrue(loaded.isEmpty());
@@ -98,7 +98,7 @@ class JsonTicketRepositoryTest {
 
 	@Test
 	void duplicateEventId_keepsNewerFileAndSetsOlderAside(@TempDir File storageDir) throws IOException {
-		JsonTicketRepository repository = new JsonTicketRepository(storageDir);
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
 		event.changeName("Altlast");
 		repository.saveEvent(event);
@@ -109,7 +109,7 @@ class JsonTicketRepositoryTest {
 		Files.copy(new File(storageDir, event.getId() + ".json").toPath(), legacyNamedFile.toPath());
 		legacyNamedFile.setLastModified(System.currentTimeMillis() - 60_000);
 
-		JsonTicketRepository reopened = new JsonTicketRepository(storageDir);
+		JsonEventRepository reopened = new JsonEventRepository(storageDir);
 		List<Event> loaded = reopened.loadEvents();
 
 		assertEquals(1, loaded.size(), "Zwei Dateien mit derselben Event-ID sollten beim Laden zu genau einem Event zusammengefuehrt werden.");

@@ -7,7 +7,7 @@
 <VBox spacing="20.0" prefWidth="900.0" prefHeight="600.0"
       xmlns="http://javafx.com/javafx/17"
       xmlns:fx="http://javafx.com/fxml/1"
-      fx:controller="de.eltviller_carneval_verein.karten.ui.CashReconciliationController">
+      fx:controller="de.eltviller_carneval_verein.karten.ui.accounting.CashReconciliationController">
     <padding>
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>

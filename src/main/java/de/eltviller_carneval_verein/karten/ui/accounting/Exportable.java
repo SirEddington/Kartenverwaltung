@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.ui;
+package de.eltviller_carneval_verein.karten.ui.accounting;
 
 import java.io.File;
 import java.io.IOException;

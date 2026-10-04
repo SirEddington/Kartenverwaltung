@@ -6,15 +6,15 @@
 
 <VBox spacing="15.0" prefWidth="900.0" prefHeight="600.0" 
       xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" 
-      fx:controller="de.eltviller_carneval_verein.karten.ui.EventOverviewController">
+      fx:controller="de.eltviller_carneval_verein.karten.ui.event.EventOverviewController">
     <padding>
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
 
     <!-- Top Toolbar -->
     <HBox alignment="CENTER_LEFT" spacing="10.0">
-        <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" />
-        <Label text="Event-Übersicht" styleClass="header-label" />
+        <Button text="← Verwaltung" styleClass="button-default" onAction="#handleBackToMenu" />
+        <Label text="Event-Verwaltung" styleClass="header-label" />
         
         <Region HBox.hgrow="ALWAYS" />
         
@@ -35,6 +35,7 @@
        			<TreeTableColumn fx:id="colTableCount" text="Tische (Anzahl)" prefWidth="200.0" />
         		<TreeTableColumn fx:id="colSeatCount" text="Stühle (Bezahlt / Reserviert / Anzahl)" prefWidth="350.0" />
         		<TreeTableColumn fx:id="colRevenue" text="Einnahmen (Tatsächlich / Erwartet / Potenziell)" prefWidth="350.0" />
+        		<TreeTableColumn fx:id="colHallName" text="Halle" prefWidth="100.0" />
        			<TreeTableColumn fx:id="colArchive" text="Archiviert" style="-fx-alignment: CENTER;" prefWidth="250.0" />
     		</columns>
     		<columnResizePolicy>

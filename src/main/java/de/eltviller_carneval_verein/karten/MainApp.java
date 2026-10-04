@@ -4,11 +4,14 @@ import java.io.IOException;
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
-import de.eltviller_carneval_verein.karten.ui.EventEditController;
+import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
+import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
 import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Pos;
@@ -44,7 +47,7 @@ public class MainApp extends Application {
 
 		// Events einmalig beim Start laden, damit unlesbare/doppelte Dateien sofort
 		// sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
-		JsonTicketRepository repository = JsonTicketRepository.getInstance();
+		JsonEventRepository repository = JsonEventRepository.getInstance();
 		repository.loadEvents();
 		List<String> loadWarnings = repository.getAndClearLoadWarnings();
 		if (!loadWarnings.isEmpty()) {
@@ -68,8 +71,38 @@ public class MainApp extends Application {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/AccountingShellView.fxml");
 	}
 
+	public static void showManagementMenuView() {
+		loadScene("/de/eltviller_carneval_verein/karten/ui/ManagementMenuView.fxml");
+	}
+
 	public static void showEventOverviewView() {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/EventOverviewView.fxml");
+	}
+
+	public static void showHallManagementView() {
+		loadScene("/de/eltviller_carneval_verein/karten/ui/HallManagementView.fxml");
+	}
+
+	public static void showHallEditView(Hall selectedHall, HallObject selectedObject, boolean editable) {
+		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/HallEditView.fxml";
+		try {
+			width = primaryStage.getWidth();
+			height = primaryStage.getHeight();
+
+			FXMLLoader loader = new FXMLLoader(MainApp.class.getResource(fxmlPath));
+			Parent root = loader.load();
+
+			HallEditController controller = loader.getController();
+			controller.initData(selectedHall, selectedObject, editable);
+
+			Scene scene = new Scene(wrapWithBackground(root), width, height);
+			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
+			scene.getStylesheets().add(css);
+			primaryStage.setScene(scene);
+		} catch (IOException e) {
+			e.printStackTrace();
+			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
+		}
 	}
 
 	public static void showEventCreateView() {

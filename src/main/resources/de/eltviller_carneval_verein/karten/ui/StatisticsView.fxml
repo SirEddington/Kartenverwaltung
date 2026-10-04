@@ -10,7 +10,7 @@
 <VBox spacing="16.0" prefWidth="1000.0" prefHeight="700.0"
       xmlns="http://javafx.com/javafx/17"
       xmlns:fx="http://javafx.com/fxml/1"
-      fx:controller="de.eltviller_carneval_verein.karten.ui.StatisticsController">
+      fx:controller="de.eltviller_carneval_verein.karten.ui.accounting.StatisticsController">
     <padding>
         <Insets top="10.0" right="10.0" bottom="10.0" left="10.0" />
     </padding>

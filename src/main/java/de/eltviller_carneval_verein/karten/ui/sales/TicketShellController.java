@@ -1,11 +1,12 @@
-package de.eltviller_carneval_verein.karten.ui;
+package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.io.IOException;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.JsonTicketRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.ContentController;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -19,7 +20,7 @@ import javafx.scene.layout.StackPane;
 
 public class TicketShellController {
 	
-	private final JsonTicketRepository repository = JsonTicketRepository.getInstance();
+	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
 
     @FXML private ComboBox<Event> eventComboBox;
     @FXML private ComboBox<Presentation> presComboBox;
@@ -38,10 +39,7 @@ public class TicketShellController {
     @FXML
     public void initialize() {
 		// Events in ComboBox laden (Tabelle bleibt initial leer)
-		eventComboBox.getItems().setAll(repository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
-		if (eventComboBox.getItems().size() == 1) {
-			eventComboBox.setValue(eventComboBox.getItems().get(0));
-		}
+		eventComboBox.getItems().setAll(eventRepository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
 		
         // Event- & Vorstellungs-Listener einrichten
     	eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
@@ -67,6 +65,14 @@ public class TicketShellController {
 
         // Standardsicht laden
         showTicketTableView();
+    	
+		if (eventComboBox.getItems().size() == 1) {
+			eventComboBox.getSelectionModel().select(0);
+		}
+    	
+		if (presComboBox.getItems().size() == 1) {
+			presComboBox.getSelectionModel().select(0);
+		}
     }
 
     @FXML

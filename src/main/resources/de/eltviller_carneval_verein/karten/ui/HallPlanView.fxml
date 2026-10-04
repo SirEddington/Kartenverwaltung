@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<!-- Zoom (Mausrad) & Verschieben (Ziehen) der Fläche sowie Objekt-Drag werden im Controller behandelt -->
+<BorderPane xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="de.eltviller_carneval_verein.karten.ui.hall.HallPlanController">
+
+    <center>
+        <StackPane fx:id="viewportPane" minHeight="200.0"
+                   style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5; -fx-background-color: transparent;">
+            <Pane fx:id="hallPane" prefWidth="1200.0" prefHeight="800.0" />
+        </StackPane>
+    </center>
+
+    <right>
+        <!-- Scrollbar, damit das Seitenpanel die Mindesthöhe des Screens nicht nach oben treibt -->
+        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" prefWidth="270.0"
+                    style="-fx-background-color: transparent; -fx-background: transparent;">
+        <VBox spacing="10.0">
+            <padding>
+                <Insets left="15.0" />
+            </padding>
+
+            <Label text="Hallenobjekte" styleClass="subheader-label" />
+            <HBox spacing="10.0">
+                <Button fx:id="btnAddObject" text="+ Neues Objekt" styleClass="button-primary" onAction="#handleAddObject" />
+                <Button fx:id="btnDeleteObject" text="Löschen" styleClass="button-danger" onAction="#handleDeleteObject" />
+            </HBox>
+
+            <Button fx:id="btnFit" text="Plan einpassen" styleClass="button-default" onAction="#handleFit" />
+
+            <Separator />
+
+            <VBox fx:id="propertiesPanel" spacing="8.0">
+                <Label text="Name:" />
+                <TextField fx:id="nameField" />
+                <Label text="Beschreibung:" />
+                <TextField fx:id="descField" />
+                <Label text="X (cm, von links):" />
+                <Spinner fx:id="posXSpinner" prefWidth="120.0" />
+                <Label text="Y (cm, von oben):" />
+                <Spinner fx:id="posYSpinner" prefWidth="120.0" />
+                <Label text="Breite (cm):" />
+                <Spinner fx:id="widthSpinner" prefWidth="120.0" />
+                <Label text="Höhe (cm, nur Rechteck):" />
+                <Spinner fx:id="heightSpinner" prefWidth="120.0" />
+                <Label text="Form:" />
+                <ComboBox fx:id="shapeCombo" prefWidth="120.0" />
+                <Label text="Farbe:" />
+                <ColorPicker fx:id="colorPicker" />
+            </VBox>
+        </VBox>
+        </ScrollPane>
+    </right>
+</BorderPane>
