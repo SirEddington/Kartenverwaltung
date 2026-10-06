@@ -12,6 +12,9 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.validation.SalesValidator;
+import de.eltviller_carneval_verein.karten.validation.ValidationResult;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -30,6 +33,24 @@ import javafx.util.StringConverter;
 public class TicketTableController implements ContentController {
 
 	private static final GermanDecimalStringConverter PRICE_CONVERTER = new GermanDecimalStringConverter();
+
+	// Wie PRICE_CONVERTER, liefert bei nicht lesbarem Text aber null statt eine Exception zu werfen;
+	// der EditCommit-Handler meldet das dann als SLS-002.
+	private static final StringConverter<Double> LENIENT_PRICE_CONVERTER = new StringConverter<>() {
+		@Override
+		public String toString(Double value) {
+			return PRICE_CONVERTER.toString(value);
+		}
+
+		@Override
+		public Double fromString(String text) {
+			try {
+				return PRICE_CONVERTER.fromString(text);
+			} catch (NumberFormatException e) {
+				return null;
+			}
+		}
+	};
 
 	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 	private Event selectedEvent;
@@ -104,8 +125,18 @@ public class TicketTableController implements ContentController {
 		colFirstName.setCellFactory(TextFieldTableCell.forTableColumn());
 		colFirstName.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setFirstName(editEvent.getNewValue()));
 
-		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(PRICE_CONVERTER));
-		colPrice.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setPriceDouble(editEvent.getNewValue()));
+		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(LENIENT_PRICE_CONVERTER));
+		colPrice.setOnEditCommit(editEvent -> {
+			ValidationResult result = SalesValidator.validatePrice(editEvent.getNewValue());
+			if (!result.isValid()) {
+				// Ungültige Eingabe: Meldung zeigen und den bisherigen Preis wieder anzeigen
+				StatusMessage.getInstance().show(result);
+				seatTable.refresh();
+				return;
+			}
+			StatusMessage.getInstance().clear();
+			editEvent.getRowValue().getSeat().setPriceDouble(editEvent.getNewValue());
+		});
 
 		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
 		colComment.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setComment(editEvent.getNewValue()));
