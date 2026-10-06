@@ -3,6 +3,7 @@
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
+<?import de.eltviller_carneval_verein.karten.ui.StatusLabel?>
 
 <VBox spacing="15.0" prefWidth="1000.0" prefHeight="700.0"
       xmlns="http://javafx.com/javafx/17"
@@ -50,6 +51,8 @@
 
     <!-- UNTERER BEREICH: Identischer Footer -->
     <HBox spacing="10.0" alignment="CENTER_RIGHT">
+        <StatusLabel />
+        <Region HBox.hgrow="ALWAYS" />
         <SplitMenuButton fx:id="btnExport" styleClass="button-secondary" text="Exportieren" />
         <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" />
     </HBox>

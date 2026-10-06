@@ -7,6 +7,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -98,6 +99,7 @@ public class TicketShellController {
 
 	@FXML
 	private void showTicketTableView() {
+		StatusMessage.getInstance().clear();
 		lblHeader.setText("Kartentabelle");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/TicketTableView.fxml");
 		activeContentController.filter(searchText);
@@ -105,6 +107,7 @@ public class TicketShellController {
 
 	@FXML
 	private void showHallView() {
+		StatusMessage.getInstance().clear();
 		lblHeader.setText("Saalübersicht");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml");
 		activeContentController.filter(searchText);

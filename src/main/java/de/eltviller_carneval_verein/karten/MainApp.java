@@ -10,6 +10,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
 import javafx.application.Application;
@@ -86,6 +87,7 @@ public class MainApp extends Application {
 	public static void showHallEditView(Hall selectedHall, HallObject selectedObject, boolean editable) {
 		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/HallEditView.fxml";
 		try {
+			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
 
@@ -114,6 +116,7 @@ public class MainApp extends Application {
 		try {
 
 			// Aktuelle Fenstergröße holen
+			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
 
@@ -143,6 +146,7 @@ public class MainApp extends Application {
 	private static void loadScene(String fxmlPath) {
 		try {
 			// Aktuelle Fenstergröße holen
+			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
 
