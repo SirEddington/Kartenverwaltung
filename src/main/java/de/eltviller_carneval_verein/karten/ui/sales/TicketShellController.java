@@ -1,6 +1,8 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.io.IOException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
@@ -21,6 +23,8 @@ import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.StackPane;
 
 public class TicketShellController {
+
+	private static final Logger LOG = Logger.getLogger(TicketShellController.class.getName());
 
 	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
 
@@ -128,7 +132,7 @@ public class TicketShellController {
 			activeContentController.setEvent(currentEvent);
 			activeContentController.setPresentation(currentPresentation);
 		} catch (IOException e) {
-			e.printStackTrace();
+			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}

@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
+import de.eltviller_carneval_verein.karten.AppPaths;
 import de.eltviller_carneval_verein.karten.model.Hall;
 
 public class JsonHallRepository implements HallRepository {
@@ -50,11 +51,7 @@ public class JsonHallRepository implements HallRepository {
 	 * Entwickeln) auf das Nutzerverzeichnis zurück.
 	 */
 	private static File resolveDefaultStorageDir() {
-		String localAppData = System.getenv("LOCALAPPDATA");
-		File appDataDir = (localAppData != null && !localAppData.isBlank())
-				? new File(localAppData, "EltvillerCarnevalVerein" + File.separator + "Kartenverwaltung")
-				: new File(System.getProperty("user.home"), ".kartenverwaltung");
-		return new File(appDataDir, "halls_data");
+		return new File(AppPaths.appDataDir(), "halls_data");
 	}
 
 	// Konstuktoren -->

@@ -2,6 +2,8 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
@@ -27,6 +29,8 @@ import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
 public class MainApp extends Application {
+
+	private static final Logger LOG = Logger.getLogger(MainApp.class.getName());
 
 	private static Stage primaryStage;
 	private static double width = 1300.0;
@@ -102,7 +106,7 @@ public class MainApp extends Application {
 			scene.getStylesheets().add(css);
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
-			e.printStackTrace();
+			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}
@@ -138,7 +142,7 @@ public class MainApp extends Application {
 			scene.getStylesheets().add(css);
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
-			e.printStackTrace();
+			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}
@@ -162,7 +166,7 @@ public class MainApp extends Application {
 			scene.getStylesheets().add(css);
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
-			e.printStackTrace();
+			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}
@@ -207,6 +211,8 @@ public class MainApp extends Application {
 	}
 
 	public static void main(String[] args) {
+		AppLogging.init();
+		GlobalErrorHandler.install();
 		launch(args);
 	}
 

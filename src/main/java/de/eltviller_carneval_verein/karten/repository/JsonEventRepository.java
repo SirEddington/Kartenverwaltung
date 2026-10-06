@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
+import de.eltviller_carneval_verein.karten.AppPaths;
 import de.eltviller_carneval_verein.karten.model.Event;
 
 public class JsonEventRepository implements EventRepository {
@@ -49,11 +50,7 @@ public class JsonEventRepository implements EventRepository {
 	 * Fällt außerhalb von Windows (z.B. beim Entwickeln) auf das Nutzerverzeichnis zurück.
 	 */
 	private static File resolveDefaultStorageDir() {
-		String localAppData = System.getenv("LOCALAPPDATA");
-		File appDataDir = (localAppData != null && !localAppData.isBlank())
-				? new File(localAppData, "EltvillerCarnevalVerein" + File.separator + "Kartenverwaltung")
-				: new File(System.getProperty("user.home"), ".kartenverwaltung");
-		return new File(appDataDir, "events_data");
+		return new File(AppPaths.appDataDir(), "events_data");
 	}
 
 	// Konstuktoren -->
