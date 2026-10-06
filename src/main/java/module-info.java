@@ -39,4 +39,7 @@ module Kartenverwaltung {
 
     // Repository-Paket exportieren
     exports de.eltviller_carneval_verein.karten.repository;
+
+    // Plausibilitätsprüfungen (ohne JavaFX, von UI und Tests genutzt)
+    exports de.eltviller_carneval_verein.karten.validation;
 }
