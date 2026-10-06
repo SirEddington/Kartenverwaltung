@@ -246,6 +246,7 @@ public class TicketTableController implements ContentController {
 		// Aktuellen Stand speichern
 		if (selectedEvent != null) {
 			repository.saveEvent(selectedEvent);
+			StatusMessage.getInstance().showSaved();
 		}
 	}
 

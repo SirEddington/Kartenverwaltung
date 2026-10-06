@@ -61,6 +61,11 @@ public final class StatusMessage {
 		show(new Entry(severity, text, text));
 	}
 
+	/** Rückmeldung nach erfolgreichem Speichern. */
+	public void showSaved() {
+		show(Severity.SUCCESS, "Gespeichert");
+	}
+
 	/** Zeigt das Ergebnis einer Plausibilitätsprüfung (wichtigste Meldung + "(+n weitere)"); leer = nichts tun. */
 	public void show(ValidationResult result) {
 		if (result.isEmpty()) {

@@ -7,6 +7,7 @@ import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
@@ -157,5 +158,6 @@ public class HallEditController {
 			return;
 		}
 		hallRepository.saveHall(hall);
+		StatusMessage.getInstance().showSaved();
 	}
 }

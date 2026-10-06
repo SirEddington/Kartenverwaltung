@@ -24,6 +24,7 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.MoneyFormat;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
@@ -359,6 +360,7 @@ public class CashReconciliationController implements ContentController, Exportab
 	public void save() {
 		if (selectedEvent != null) {
 			repository.saveEvent(selectedEvent);
+			StatusMessage.getInstance().showSaved();
 		}
 	}
 

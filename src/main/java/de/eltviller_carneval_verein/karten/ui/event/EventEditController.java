@@ -16,6 +16,7 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -726,6 +727,7 @@ public class EventEditController {
 			selectedSeat.setWheelchairAccessible(checkWheelchairAccessible.isSelected());
 		}
 		repository.saveEvent(eventTable.getSelectionModel().getSelectedItem());
+		StatusMessage.getInstance().showSaved();
 	}
 
 }
