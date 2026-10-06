@@ -12,6 +12,10 @@
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
 
+    <fx:define>
+        <ToggleGroup fx:id="viewToggleGroup" />
+    </fx:define>
+
     <!-- OBERER BEREICH: Identischer Header -->
     <HBox alignment="CENTER_LEFT" spacing="10.0">
         <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" />
@@ -32,8 +36,8 @@
         <Region HBox.hgrow="ALWAYS" />
         
         <!-- Toggle-Buttons zum Umschalten der Mitte -->
-        <RadioButton fx:id="btnTableView" text="Tabelle" onAction="#showTicketTableView" selected="true"/>
-        <RadioButton fx:id="btnHallView" text="Saalansicht" onAction="#showHallView"/>
+        <RadioButton fx:id="btnTableView" text="Tabelle" toggleGroup="$viewToggleGroup" selected="true"/>
+        <RadioButton fx:id="btnHallView" text="Saalansicht" toggleGroup="$viewToggleGroup"/>
         
         <Button fx:id="btnToggleEdit" styleClass="button-secondary" text="Bearbeiten" onAction="#toggleEditMode" />
     </HBox>
