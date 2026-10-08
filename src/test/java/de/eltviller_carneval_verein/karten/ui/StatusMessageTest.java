@@ -30,4 +30,29 @@ class StatusMessageTest {
 		assertEquals("TST-001: Fehler (+1 weitere)", entry.text());
 		assertEquals("TST-001: Fehler\nTST-002: Warnung", entry.details());
 	}
+
+	@Test
+	void prefixIsPlacedBeforeTheMostSevereMessageOnly() {
+		StatusMessage.Entry entry = StatusMessage.describe(ValidationResult.ok().add(WARNING).add(ERROR), "Nicht gespeichert: ");
+
+		assertEquals(Severity.ERROR, entry.severity());
+		assertEquals("Nicht gespeichert: TST-001: Fehler (+1 weitere)", entry.text());
+		assertEquals("TST-001: Fehler\nTST-002: Warnung", entry.details());
+	}
+
+	@Test
+	void tooltipListsAtMostTwentyIssues() {
+		ValidationResult result = ValidationResult.ok();
+		for (int i = 1; i <= 25; i++) {
+			result.add(new ValidationIssue("TST-" + String.format("%03d", i), Severity.WARNING, "Meldung " + i));
+		}
+
+		StatusMessage.Entry entry = StatusMessage.describe(result);
+
+		assertEquals("TST-001: Meldung 1 (+24 weitere)", entry.text());
+		String[] lines = entry.details().split("\n");
+		assertEquals(21, lines.length);
+		assertEquals("TST-020: Meldung 20", lines[19]);
+		assertEquals("... und 5 weitere", lines[20]);
+	}
 }

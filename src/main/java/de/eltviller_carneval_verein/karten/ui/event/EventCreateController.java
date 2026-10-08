@@ -6,8 +6,8 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.ComboBox;
@@ -41,7 +41,6 @@ public class EventCreateController {
 	@FXML
 	private Spinner<Double> spnDoublePrice;
 
-	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 	private Event currentEvent;
 
 	@FXML
@@ -87,7 +86,9 @@ public class EventCreateController {
 			currentEvent.changeName(name);
 		}
 
-		repository.saveEvent(currentEvent);
+		if (!EventSaver.save(currentEvent)) {
+			return;
+		}
 		MainApp.showMenuView();
 	}
 

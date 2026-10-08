@@ -40,6 +40,7 @@ public final class StatusMessage {
 
 	private static final StatusMessage INSTANCE = new StatusMessage();
 	private static final Duration AUTO_CLEAR_AFTER = Duration.seconds(5);
+	private static final int MAX_DETAIL_LINES = 20;
 
 	private final ObjectProperty<Entry> current = new SimpleObjectProperty<>();
 	private final List<WeakReference<StatusLabel>> labels = new ArrayList<>();
@@ -68,10 +69,15 @@ public final class StatusMessage {
 
 	/** Zeigt das Ergebnis einer Plausibilitätsprüfung (wichtigste Meldung + "(+n weitere)"); leer = nichts tun. */
 	public void show(ValidationResult result) {
+		show(result, "");
+	}
+
+	/** Wie {@link #show(ValidationResult)}, mit einem Text vor der wichtigsten Meldung (z. B. "Nicht gespeichert: "). */
+	public void show(ValidationResult result, String prefix) {
 		if (result.isEmpty()) {
 			return;
 		}
-		show(describe(result));
+		show(describe(result, prefix));
 	}
 
 	/** Entfernt die aktuelle Meldung, z. B. beim Wechsel des Screens oder der Ansicht. */
@@ -82,13 +88,24 @@ public final class StatusMessage {
 
 	/** Meldung für die Fußzeile aus einem Prüfergebnis bilden (paketsichtbar für Tests). */
 	static Entry describe(ValidationResult result) {
+		return describe(result, "");
+	}
+
+	/**
+	 * Meldung aus einem Prüfergebnis: wichtigste Meldung mit Präfix und "(+n weitere)", der Tooltip listet
+	 * die Meldungen (höchstens {@value #MAX_DETAIL_LINES} Zeilen, danach "... und n weitere").
+	 */
+	static Entry describe(ValidationResult result, String prefix) {
 		List<ValidationIssue> issues = result.getIssues();
 		ValidationIssue first = issues.get(0);
-		String text = first.toDisplayText();
+		String text = prefix + first.toDisplayText();
 		if (issues.size() > 1) {
 			text += " (+" + (issues.size() - 1) + " weitere)";
 		}
-		String details = issues.stream().map(ValidationIssue::toDisplayText).collect(Collectors.joining("\n"));
+		String details = issues.stream().limit(MAX_DETAIL_LINES).map(ValidationIssue::toDisplayText).collect(Collectors.joining("\n"));
+		if (issues.size() > MAX_DETAIL_LINES) {
+			details += "\n... und " + (issues.size() - MAX_DETAIL_LINES) + " weitere";
+		}
 		return new Entry(first.severity(), text, details);
 	}
 
