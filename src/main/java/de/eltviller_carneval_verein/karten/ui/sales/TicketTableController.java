@@ -14,7 +14,8 @@ import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
-import de.eltviller_carneval_verein.karten.validation.SeatValidator;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.SeatIssue;
 import de.eltviller_carneval_verein.karten.validation.ValidationResult;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
@@ -35,8 +36,8 @@ public class TicketTableController implements ContentController {
 
 	private static final GermanDecimalStringConverter PRICE_CONVERTER = new GermanDecimalStringConverter();
 
-	// Wie PRICE_CONVERTER, liefert bei nicht lesbarem Text aber null statt eine Exception zu werfen;
-	// der EditCommit-Handler meldet das dann als SEA-002.
+	// Wie PRICE_CONVERTER, liefert bei nicht lesbarem Text (auch NaN/Infinity) aber null statt eine
+	// Exception zu werfen; der EditCommit-Handler meldet das dann als SEA-002.
 	private static final StringConverter<Double> LENIENT_PRICE_CONVERTER = new StringConverter<>() {
 		@Override
 		public String toString(Double value) {
@@ -46,7 +47,8 @@ public class TicketTableController implements ContentController {
 		@Override
 		public Double fromString(String text) {
 			try {
-				return PRICE_CONVERTER.fromString(text);
+				Double value = PRICE_CONVERTER.fromString(text);
+				return (value.isNaN() || value.isInfinite()) ? null : value;
 			} catch (NumberFormatException e) {
 				return null;
 			}
@@ -129,15 +131,16 @@ public class TicketTableController implements ContentController {
 		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(LENIENT_PRICE_CONVERTER));
 		colPrice.setOnEditCommit(editEvent -> {
 			Seat seat = editEvent.getRowValue().getSeat();
-			ValidationResult result = SeatValidator.validatePriceInput(seat, editEvent.getNewValue());
-			if (!result.isValid()) {
-				// Ungültige Eingabe: Meldung zeigen und den bisherigen Preis wieder anzeigen
-				StatusMessage.getInstance().show(result);
+			Double price = editEvent.getNewValue();
+			if (price == null) {
+				// Nur Parsing: nicht lesbarer Text kann nicht ins Modell übernommen werden. Fachliche
+				// Prüfungen (negativ, zu hoch) laufen zentral beim Speichern über die Validatoren.
+				StatusMessage.getInstance().show(ValidationResult.of(SeatIssue.PRICE_NOT_A_NUMBER.toIssue(EntityLabels.seat(seat))));
 				seatTable.refresh();
 				return;
 			}
 			StatusMessage.getInstance().clear();
-			seat.setPriceDouble(editEvent.getNewValue());
+			seat.setPriceDouble(price);
 		});
 
 		colComment.setCellFactory(TextFieldTableCell.forTableColumn());

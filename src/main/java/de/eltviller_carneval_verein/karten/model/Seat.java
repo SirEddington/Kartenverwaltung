@@ -80,7 +80,7 @@ public class Seat {
 
 	@JsonIgnore
 	public void setPriceDouble(double price) {
-		this.price = (int) Math.round(price * 100);
+		this.price = (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, Math.round(price * 100)));
 	}
 
 	@JsonIgnore

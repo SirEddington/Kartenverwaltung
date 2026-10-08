@@ -48,30 +48,25 @@ class SeatValidatorTest {
 	}
 
 	@Test
-	void inputInEuroIsConvertedToCents() {
+	void hugeEnteredPricesAreClampedAndStillRejected() {
 		Seat seat = seatWithPriceCents(0);
 
-		assertTrue(SeatValidator.validatePriceInput(seat, 12.5).isValid());
-		assertTrue(SeatValidator.validatePriceInput(seat, 1000.0).isValid());
-		assertEquals("SEA-003", SeatValidator.validatePriceInput(seat, 1000.01).mostSevere().orElseThrow().code());
-		assertEquals("SEA-001", SeatValidator.validatePriceInput(seat, -0.01).mostSevere().orElseThrow().code());
+		seat.setPriceDouble(1e300);
+		assertEquals("SEA-003", SeatValidator.validate(seat).mostSevere().orElseThrow().code());
+
+		seat.setPriceDouble(-1e300);
+		assertEquals("SEA-001", SeatValidator.validate(seat).mostSevere().orElseThrow().code());
 	}
 
 	@Test
-	void unreadableInputIsRejected() {
+	void priceEnteredInEuroIsStoredInCentsAndChecked() {
 		Seat seat = seatWithPriceCents(0);
 
-		assertEquals("SEA-002", SeatValidator.validatePriceInput(seat, null).mostSevere().orElseThrow().code());
-		assertEquals("SEA-002", SeatValidator.validatePriceInput(seat, Double.NaN).mostSevere().orElseThrow().code());
-		assertEquals("SEA-002", SeatValidator.validatePriceInput(seat, Double.POSITIVE_INFINITY).mostSevere().orElseThrow().code());
-		assertFalse(SeatValidator.validatePriceInput(seat, null).isValid());
-	}
+		seat.setPriceDouble(12.5);
+		assertEquals(1250, seat.getPrice());
+		assertTrue(SeatValidator.validate(seat).isValid());
 
-	@Test
-	void hugeInputDoesNotOverflow() {
-		Seat seat = seatWithPriceCents(0);
-
-		assertEquals("SEA-003", SeatValidator.validatePriceInput(seat, 1e300).mostSevere().orElseThrow().code());
-		assertEquals("SEA-001", SeatValidator.validatePriceInput(seat, -1e300).mostSevere().orElseThrow().code());
+		seat.setPriceDouble(-5);
+		assertFalse(SeatValidator.validate(seat).isValid());
 	}
 }

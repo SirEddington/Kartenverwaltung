@@ -17,18 +17,6 @@ public final class SeatValidator {
 		return validatePriceCents(seat, seat.getPrice());
 	}
 
-	/**
-	 * Prüft einen frisch eingegebenen Preis in Euro, bevor er in den Sitz übernommen wird.
-	 *
-	 * @param euros der Preis; {@code null} steht für nicht lesbaren Text (SEA-002)
-	 */
-	public static ValidationResult validatePriceInput(Seat seat, Double euros) {
-		if (euros == null || euros.isNaN() || euros.isInfinite()) {
-			return ValidationResult.of(SeatIssue.PRICE_NOT_A_NUMBER.toIssue(EntityLabels.seat(seat)));
-		}
-		return validatePriceCents(seat, Math.round(euros * 100));
-	}
-
 	private static ValidationResult validatePriceCents(Seat seat, long cents) {
 		if (cents < 0) {
 			return ValidationResult.of(SeatIssue.PRICE_NEGATIVE.toIssue(EntityLabels.seat(seat)));
