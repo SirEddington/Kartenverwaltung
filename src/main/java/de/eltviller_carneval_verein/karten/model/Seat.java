@@ -201,10 +201,10 @@ public class Seat {
 			return true;
 		}
 	}
-	
+
 	@JsonIgnore
 	public boolean isPaid() {
-	    return getPaymentStatus() != null && getPaymentStatus().isPaid();
+		return getPaymentStatus() != null && getPaymentStatus().isPaid();
 	}
 
 	@JsonIgnore

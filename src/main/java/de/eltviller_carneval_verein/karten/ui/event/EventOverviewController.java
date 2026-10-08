@@ -10,7 +10,7 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
-import de.eltviller_carneval_verein.karten.ui.MoneyFormat;
+import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;

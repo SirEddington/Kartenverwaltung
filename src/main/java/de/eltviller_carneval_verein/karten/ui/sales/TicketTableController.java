@@ -8,6 +8,7 @@ import org.controlsfx.control.table.TableFilter;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
@@ -127,7 +128,8 @@ public class TicketTableController implements ContentController {
 
 		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(LENIENT_PRICE_CONVERTER));
 		colPrice.setOnEditCommit(editEvent -> {
-			ValidationResult result = SeatValidator.validatePrice(editEvent.getNewValue());
+			Seat seat = editEvent.getRowValue().getSeat();
+			ValidationResult result = SeatValidator.validatePriceInput(seat, editEvent.getNewValue());
 			if (!result.isValid()) {
 				// Ungültige Eingabe: Meldung zeigen und den bisherigen Preis wieder anzeigen
 				StatusMessage.getInstance().show(result);
@@ -135,7 +137,7 @@ public class TicketTableController implements ContentController {
 				return;
 			}
 			StatusMessage.getInstance().clear();
-			editEvent.getRowValue().getSeat().setPriceDouble(editEvent.getNewValue());
+			seat.setPriceDouble(editEvent.getNewValue());
 		});
 
 		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
