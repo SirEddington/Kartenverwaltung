@@ -10,15 +10,21 @@
  * betroffenen Entität ({@link EntityLabels}); weitere Parameter sind Werte aus der Prüfung.
  * Aufruf: {@code SeatIssue.PRICE_TOO_HIGH.toIssue(EntityLabels.seat(seat), preis, maximum)}.
  *
+ * <p>Aufbau jedes Validators: statischer Einstieg {@code XValidator.validate(x)}, der für jede Prüfung
+ * eine frische Instanz anlegt (privater Konstruktor). Die Instanz hält die Entität und das
+ * {@link ValidationResult} als Attribute, die Regeln sind parameterlose Methoden, die Ergebnisse der
+ * Kinder werden per {@code addAll} eingesammelt. So bleibt kein Zustand zwischen zwei Prüfungen.
+ * Beispiel: {@link SeatValidator}.
+ *
  * <p>Eine Prüfung gehört zu der Entität, deren Daten sie braucht; Prüfungen, die Geschwister
  * vergleichen (z. B. überlappende Tische), gehören zum Elternteil.
  *
  * <table>
  * <caption>Entitäten und Code-Kürzel</caption>
  * <tr><th>Entität</th><th>Kürzel</th><th>Validator / Enum</th><th>Stand</th></tr>
- * <tr><td>Event</td><td>EVT</td><td>EventValidator / EventIssue</td><td>geplant</td></tr>
- * <tr><td>Vorstellung</td><td>PRS</td><td>PresentationValidator / PresentationIssue</td><td>geplant</td></tr>
- * <tr><td>Tisch</td><td>TBL</td><td>TableValidator / TableIssue</td><td>geplant</td></tr>
+ * <tr><td>Event</td><td>EVT</td><td>{@link EventValidator} / EventIssue</td><td>Gerüst (nur Weitergabe an die Kinder)</td></tr>
+ * <tr><td>Vorstellung</td><td>PRS</td><td>{@link PresentationValidator} / PresentationIssue</td><td>Gerüst (nur Weitergabe an die Kinder)</td></tr>
+ * <tr><td>Tisch</td><td>TBL</td><td>{@link TableValidator} / TableIssue</td><td>Gerüst (nur Weitergabe an die Kinder)</td></tr>
  * <tr><td>Sitz</td><td>SEA</td><td>{@link SeatValidator} / {@link SeatIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Halle</td><td>HLL</td><td>HallValidator / HallIssue</td><td>geplant</td></tr>
  * <tr><td>Hallenobjekt</td><td>HOB</td><td>HallObjectValidator / HallObjectIssue</td><td>geplant</td></tr>
