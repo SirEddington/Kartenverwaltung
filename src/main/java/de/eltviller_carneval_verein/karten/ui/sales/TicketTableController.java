@@ -8,15 +8,11 @@ import org.controlsfx.control.table.TableFilter;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
-import de.eltviller_carneval_verein.karten.validation.EntityLabels;
-import de.eltviller_carneval_verein.karten.validation.SeatIssue;
-import de.eltviller_carneval_verein.karten.validation.ValidationResult;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -35,25 +31,6 @@ import javafx.util.StringConverter;
 public class TicketTableController implements ContentController {
 
 	private static final GermanDecimalStringConverter PRICE_CONVERTER = new GermanDecimalStringConverter();
-
-	// Wie PRICE_CONVERTER, liefert bei nicht lesbarem Text (auch NaN/Infinity) aber null statt eine
-	// Exception zu werfen; der EditCommit-Handler meldet das dann als SEA-002.
-	private static final StringConverter<Double> LENIENT_PRICE_CONVERTER = new StringConverter<>() {
-		@Override
-		public String toString(Double value) {
-			return PRICE_CONVERTER.toString(value);
-		}
-
-		@Override
-		public Double fromString(String text) {
-			try {
-				Double value = PRICE_CONVERTER.fromString(text);
-				return (value.isNaN() || value.isInfinite()) ? null : value;
-			} catch (NumberFormatException e) {
-				return null;
-			}
-		}
-	};
 
 	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 	private Event selectedEvent;
@@ -128,20 +105,8 @@ public class TicketTableController implements ContentController {
 		colFirstName.setCellFactory(TextFieldTableCell.forTableColumn());
 		colFirstName.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setFirstName(editEvent.getNewValue()));
 
-		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(LENIENT_PRICE_CONVERTER));
-		colPrice.setOnEditCommit(editEvent -> {
-			Seat seat = editEvent.getRowValue().getSeat();
-			Double price = editEvent.getNewValue();
-			if (price == null) {
-				// Nur Parsing: nicht lesbarer Text kann nicht ins Modell übernommen werden. Fachliche
-				// Prüfungen (negativ, zu hoch) laufen zentral beim Speichern über die Validatoren.
-				StatusMessage.getInstance().show(ValidationResult.of(SeatIssue.PRICE_NOT_A_NUMBER.toIssue(EntityLabels.seat(seat))));
-				seatTable.refresh();
-				return;
-			}
-			StatusMessage.getInstance().clear();
-			seat.setPriceDouble(price);
-		});
+		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(PRICE_CONVERTER));
+		colPrice.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setPriceDouble(editEvent.getNewValue()));
 
 		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
 		colComment.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setComment(editEvent.getNewValue()));

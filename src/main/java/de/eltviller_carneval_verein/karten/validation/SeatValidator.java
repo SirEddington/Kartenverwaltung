@@ -6,7 +6,8 @@ import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 /**
  * Plausibilitätsprüfungen für einen Sitz (Kürzel SEA, siehe {@link SeatIssue}).
  *
- * <p>Aufbau aller Validatoren: statischer Einstieg {@link #validate(Seat)}, der für jede Prüfung eine
+ * <p>
+ * Aufbau aller Validatoren: statischer Einstieg {@link #validate(Seat)}, der für jede Prüfung eine
  * frische Instanz anlegt. Die Instanz hält die Entität und das Ergebnis als Attribute, die einzelnen
  * Regeln sind parameterlose Methoden. Dadurch bleibt kein Zustand zwischen zwei Prüfungen übrig.
  */
@@ -22,7 +23,7 @@ public final class SeatValidator {
 		this.seat = seat;
 	}
 
-	/** Prüft einen Sitz (derzeit nur den Preis). */
+	/** Prüft einen Sitz */
 	public static ValidationResult validate(Seat seat) {
 		return new SeatValidator(seat).run();
 	}
