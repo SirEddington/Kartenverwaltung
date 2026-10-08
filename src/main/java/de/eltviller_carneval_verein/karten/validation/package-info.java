@@ -22,9 +22,9 @@
  * <table>
  * <caption>Entitäten und Code-Kürzel</caption>
  * <tr><th>Entität</th><th>Kürzel</th><th>Validator / Enum</th><th>Stand</th></tr>
- * <tr><td>Event</td><td>EVT</td><td>{@link EventValidator} / EventIssue</td><td>Gerüst (nur Weitergabe an die Kinder)</td></tr>
- * <tr><td>Vorstellung</td><td>PRS</td><td>{@link PresentationValidator} / PresentationIssue</td><td>Gerüst (nur Weitergabe an die Kinder)</td></tr>
- * <tr><td>Tisch</td><td>TBL</td><td>{@link TableValidator} / TableIssue</td><td>Gerüst (nur Weitergabe an die Kinder)</td></tr>
+ * <tr><td>Event</td><td>EVT</td><td>{@link EventValidator} / {@link EventIssue}</td><td>vorhanden</td></tr>
+ * <tr><td>Vorstellung</td><td>PRS</td><td>{@link PresentationValidator} / {@link PresentationIssue}</td><td>vorhanden</td></tr>
+ * <tr><td>Tisch</td><td>TBL</td><td>{@link TableValidator} / {@link TableIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Sitz</td><td>SEA</td><td>{@link SeatValidator} / {@link SeatIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Halle</td><td>HLL</td><td>HallValidator / HallIssue</td><td>geplant</td></tr>
  * <tr><td>Hallenobjekt</td><td>HOB</td><td>HallObjectValidator / HallObjectIssue</td><td>geplant</td></tr>

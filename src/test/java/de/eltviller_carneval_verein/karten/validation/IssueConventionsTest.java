@@ -17,7 +17,7 @@ class IssueConventionsTest {
 	private static final Pattern CODE = Pattern.compile("[A-Z]{3}-\\d{3}");
 
 	private static List<Issue[]> allEnums() {
-		return List.<Issue[]>of(SeatIssue.values());
+		return List.<Issue[]>of(EventIssue.values(), PresentationIssue.values(), TableIssue.values(), SeatIssue.values());
 	}
 
 	private static List<Issue> allIssues() {
