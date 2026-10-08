@@ -18,7 +18,9 @@ public enum SeatIssue implements Issue {
 	/** &1 = Sitz, &2 = eingegebene E-Mail-Adresse. */
 	EMAIL_INVALID("SEA-005", Severity.WARNING, "Die E-Mail-Adresse &2 bei &1 ist nicht gültig."),
 	/** &1 = Sitz, &2 = Preis. */
-	PAID_WITHOUT_PRICE("SEA-006", Severity.WARNING, "&1 ist als bezahlt markiert, der Preis beträgt aber &2.");
+	PAID_WITHOUT_PRICE("SEA-006", Severity.WARNING, "&1 ist als bezahlt markiert, der Preis beträgt aber &2."),
+	/** &1 = Sitz. */
+	PAID_WITHOUT_NAME("SEA-007", Severity.WARNING, "&1 ist als bezahlt markiert, es ist aber kein Nachname eingetragen.");
 
 	private final String code;
 	private final Severity severity;

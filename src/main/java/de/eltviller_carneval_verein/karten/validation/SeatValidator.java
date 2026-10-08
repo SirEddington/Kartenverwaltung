@@ -38,6 +38,7 @@ public final class SeatValidator {
 		validateCollectedWithoutPayment();
 		validateEmail();
 		validatePaidWithoutPrice();
+		validatePaidWithoutName();
 		return result;
 	}
 
@@ -68,6 +69,17 @@ public final class SeatValidator {
 	private void validatePaidWithoutPrice() {
 		if (seat.isPaid() && seat.getPrice() == 0) {
 			result.add(SeatIssue.PAID_WITHOUT_PRICE.toIssue(EntityLabels.seat(seat), MoneyFormat.formatCents(0)));
+		}
+	}
+
+	/**
+	 * Ein bezahlter Sitz sollte einen Nachnamen haben (an der Abendkasse nicht zwingend, deshalb nur eine
+	 * Warnung). Es zählt der Nachname, weil auch {@link Seat#isReserved()} danach entscheidet.
+	 */
+	private void validatePaidWithoutName() {
+		String lastName = seat.getLastName();
+		if (seat.isPaid() && (lastName == null || lastName.isBlank())) {
+			result.add(SeatIssue.PAID_WITHOUT_NAME.toIssue(EntityLabels.seat(seat)));
 		}
 	}
 }

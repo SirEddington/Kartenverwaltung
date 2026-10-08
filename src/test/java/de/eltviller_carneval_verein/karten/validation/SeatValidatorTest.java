@@ -98,6 +98,7 @@ class SeatValidatorTest {
 		Seat seat = seatWithPriceCents(1000);
 		seat.setCollected(true);
 		seat.setPaymentStatus(PaymentStatus.CASH);
+		seat.setLastName("Müller");
 
 		assertTrue(SeatValidator.validate(seat).isEmpty());
 	}
@@ -141,6 +142,7 @@ class SeatValidatorTest {
 	void paidWithoutPriceIsAWarning() {
 		Seat seat = seatWithPriceCents(0);
 		seat.setPaymentStatus(PaymentStatus.CASH);
+		seat.setLastName("Müller");
 
 		ValidationResult result = SeatValidator.validate(seat);
 
@@ -153,6 +155,7 @@ class SeatValidatorTest {
 	void paidWithPriceOrOpenWithoutPriceIsFine() {
 		Seat paid = seatWithPriceCents(500);
 		paid.setPaymentStatus(PaymentStatus.CARD);
+		paid.setLastName("Müller");
 		assertTrue(SeatValidator.validate(paid).isEmpty());
 
 		assertTrue(SeatValidator.validate(seatWithPriceCents(0)).isEmpty());
@@ -169,5 +172,52 @@ class SeatValidatorTest {
 		assertEquals(3, result.getIssues().size());
 		assertEquals("SEA-001", result.mostSevere().orElseThrow().code());
 		assertFalse(result.isValid());
+	}
+
+	// --- bezahlt, aber kein Nachname (SEA-007) ---
+
+	@Test
+	void paidWithoutLastNameIsAWarning() {
+		Seat seat = seatWithPriceCents(1000);
+		seat.setPaymentStatus(PaymentStatus.CASH);
+
+		ValidationResult result = SeatValidator.validate(seat);
+
+		assertTrue(result.isValid(), "Warnungen blockieren nicht");
+		assertEquals("SEA-007", only(result).code());
+		assertEquals(Severity.WARNING, only(result).severity());
+		assertEquals("Prunksitzung, Tisch 4, Sitz 2 ist als bezahlt markiert, es ist aber kein Nachname eingetragen.", only(result).message());
+	}
+
+	@Test
+	void blankLastNameCountsAsMissing() {
+		Seat seat = seatWithPriceCents(1000);
+		seat.setPaymentStatus(PaymentStatus.TRANSFER);
+
+		for (String lastName : new String[] { null, "", "   " }) {
+			seat.setLastName(lastName);
+			assertEquals("SEA-007", only(SeatValidator.validate(seat)).code(), "Nachname '" + lastName + "' sollte fehlen");
+		}
+	}
+
+	@Test
+	void firstNameAloneDoesNotCount() {
+		// Der Nachname entscheidet auch bei Seat.isReserved(); nur ein Vorname ergibt keinen reservierten Sitz
+		Seat seat = seatWithPriceCents(1000);
+		seat.setPaymentStatus(PaymentStatus.CASH);
+		seat.setFirstName("Anna");
+
+		assertEquals("SEA-007", only(SeatValidator.validate(seat)).code());
+	}
+
+	@Test
+	void paidWithLastNameOrOpenWithoutNameIsFine() {
+		Seat paid = seatWithPriceCents(1000);
+		paid.setPaymentStatus(PaymentStatus.CASH);
+		paid.setLastName("Müller");
+		assertTrue(SeatValidator.validate(paid).isEmpty());
+
+		// Offener Sitz ohne Namen (noch nicht verkauft) ist normal
+		assertTrue(SeatValidator.validate(seatWithPriceCents(1000)).isEmpty());
 	}
 }
