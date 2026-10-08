@@ -13,7 +13,7 @@ import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
-import de.eltviller_carneval_verein.karten.validation.SalesValidator;
+import de.eltviller_carneval_verein.karten.validation.SeatValidator;
 import de.eltviller_carneval_verein.karten.validation.ValidationResult;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
@@ -35,7 +35,7 @@ public class TicketTableController implements ContentController {
 	private static final GermanDecimalStringConverter PRICE_CONVERTER = new GermanDecimalStringConverter();
 
 	// Wie PRICE_CONVERTER, liefert bei nicht lesbarem Text aber null statt eine Exception zu werfen;
-	// der EditCommit-Handler meldet das dann als SLS-002.
+	// der EditCommit-Handler meldet das dann als SEA-002.
 	private static final StringConverter<Double> LENIENT_PRICE_CONVERTER = new StringConverter<>() {
 		@Override
 		public String toString(Double value) {
@@ -127,7 +127,7 @@ public class TicketTableController implements ContentController {
 
 		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(LENIENT_PRICE_CONVERTER));
 		colPrice.setOnEditCommit(editEvent -> {
-			ValidationResult result = SalesValidator.validatePrice(editEvent.getNewValue());
+			ValidationResult result = SeatValidator.validatePrice(editEvent.getNewValue());
 			if (!result.isValid()) {
 				// Ungültige Eingabe: Meldung zeigen und den bisherigen Preis wieder anzeigen
 				StatusMessage.getInstance().show(result);
