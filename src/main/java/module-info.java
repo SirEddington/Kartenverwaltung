@@ -8,6 +8,7 @@ module Kartenverwaltung {
     requires com.github.librepdf.openpdf;
     requires java.prefs;
     requires java.desktop;
+    requires java.logging;
 
     // Hauptpaket für JavaFX (für MainApp)
     opens de.eltviller_carneval_verein.karten to javafx.fxml, javafx.graphics;
@@ -39,4 +40,7 @@ module Kartenverwaltung {
 
     // Repository-Paket exportieren
     exports de.eltviller_carneval_verein.karten.repository;
+
+    // Plausibilitätsprüfungen (ohne JavaFX, von UI und Tests genutzt)
+    exports de.eltviller_carneval_verein.karten.validation;
 }

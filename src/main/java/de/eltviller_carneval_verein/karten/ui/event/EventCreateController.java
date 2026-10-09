@@ -6,10 +6,10 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import javafx.fxml.FXML;
-import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
@@ -41,7 +41,6 @@ public class EventCreateController {
 	@FXML
 	private Spinner<Double> spnDoublePrice;
 
-	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 	private Event currentEvent;
 
 	@FXML
@@ -77,7 +76,7 @@ public class EventCreateController {
 	private void handleSave() {
 		String name = txtEventName.getText().trim();
 		if (name.isEmpty()) {
-			showAlert("Fehler", "Bitte gib einen Namen für das Event ein.");
+			MainApp.showAlert("Fehler", "Bitte gib einen Namen für das Event ein.", AlertType.WARNING);
 			return;
 		}
 
@@ -87,7 +86,9 @@ public class EventCreateController {
 			currentEvent.changeName(name);
 		}
 
-		repository.saveEvent(currentEvent);
+		if (!EventSaver.save(currentEvent)) {
+			return;
+		}
 		MainApp.showMenuView();
 	}
 
@@ -127,14 +128,5 @@ public class EventCreateController {
 	@FXML
 	private void handleCancel() {
 		MainApp.showMenuView();
-	}
-
-	private void showAlert(String title, String content) {
-		Alert alert = new Alert(Alert.AlertType.WARNING);
-		alert.setTitle(title);
-		alert.setHeaderText(null);
-		alert.setContentText(content);
-		MainApp.applyAppIcon(alert);
-		alert.showAndWait();
 	}
 }

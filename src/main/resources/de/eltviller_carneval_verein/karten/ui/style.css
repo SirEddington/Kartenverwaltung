@@ -15,6 +15,16 @@
     -fx-ecv-yellow: #FFE000;
     -fx-ecv-gold: #BE9F56;
 
+    /* Statusmeldungen (Fußzeile): Grün gespiegelt aus UiColors.STATUS_SUCCESS; Tints = ca. 10 % der Farbe auf Weiß,
+       dunkle Schriftfarben = ca. 55 % der Farbe auf Schwarz, Amber = Schrift auf ECV-Gelb (Kontrast >= 4.5:1) */
+    -fx-status-success: #2ECC71;
+    -fx-status-error-tint: #FCE7E7;
+    -fx-status-error-text: #802020;
+    -fx-status-warning-text: #7A4F00;
+    -fx-status-info-tint: #EAEAF3;
+    -fx-status-success-tint: #E6F9EE;
+    -fx-status-success-text: #12522D;
+
     /* Neutrale Formular- & UI-Töne */
     -fx-bg-app: #F8F9FA;
     -fx-surface-white: #FFFFFF;
@@ -463,6 +473,12 @@
 /* ------------------------------------------------------------------------------
  * 11. TOOLTIPS, MENÜS & DIALOGE
  * ------------------------------------------------------------------------------ */
+/* Die Wurzel jedes Popups (Tooltip, Menüs) hat auch die Klasse .root und bekäme sonst den App-Hintergrund:
+   ein eckiges, hellgraues Rechteck hinter abgerundeten Popup-Inhalten. */
+.root.popup {
+    -fx-background-color: transparent;
+}
+
 .tooltip {
     -fx-background-color: -fx-ecv-blue;
     -fx-text-fill: white;
@@ -579,3 +595,49 @@
 #trendChart .default-color2.chart-line-symbol { -fx-background-color: -fx-ecv-yellow, white; }
 
 #revenueChart .default-color0.chart-bar { -fx-bar-fill: -fx-ecv-blue; }
+
+/* ------------------------------------------------------------------------------
+ * STATUSMELDUNG IN DER FUSSZEILE (StatusLabel)
+ * Heller Tint als Hintergrund, dunkle Schrift, Icon und Rand in der reinen Farbe.
+ * Tints und dunkle Schriftfarben stehen als Variablen in .root (-fx-status-*).
+ * ------------------------------------------------------------------------------ */
+.status-label {
+    -fx-padding: 4px 10px;
+    /* Rand = unterste Hintergrundebene (Insets 0), Fläche eine Ebene darüber (Insets 1, Radius 1 kleiner).
+       So gibt es keine hellen Pixel an den Ecken, die ein separater Rahmen mit gleichem Radius lässt. */
+    -fx-background-radius: 4px, 3px;
+    -fx-background-insets: 0, 1;
+    -fx-font-size: 13px;
+}
+
+.status-label.status-error {
+    -fx-background-color: -fx-ecv-red, -fx-status-error-tint;
+    -fx-text-fill: -fx-status-error-text;
+}
+.status-label.status-error .status-icon { -fx-text-fill: -fx-ecv-red; }
+
+.status-label.status-warning {
+    -fx-background-color: -fx-status-warning-text, -fx-ecv-yellow;
+    -fx-text-fill: -fx-status-warning-text;
+}
+.status-label.status-warning .status-icon { -fx-text-fill: -fx-status-warning-text; }
+
+.status-label.status-info {
+    -fx-background-color: -fx-ecv-blue, -fx-status-info-tint;
+    -fx-text-fill: -fx-ecv-blue;
+}
+.status-label.status-info .status-icon { -fx-text-fill: -fx-ecv-blue; }
+
+.status-label.status-success {
+    -fx-background-color: -fx-status-success, -fx-status-success-tint;
+    -fx-text-fill: -fx-status-success-text;
+}
+.status-label.status-success .status-icon { -fx-text-fill: -fx-status-success; }
+
+/* Tooltip der Statusmeldung: heller Rahmen, darin die farbigen Zeilen je Meldung */
+.tooltip.status-tooltip {
+    -fx-background-color: #B8B8B8, -fx-surface-white;
+    -fx-background-insets: 0, 1;
+    -fx-background-radius: 8px, 7px;
+    -fx-padding: 6px;
+}

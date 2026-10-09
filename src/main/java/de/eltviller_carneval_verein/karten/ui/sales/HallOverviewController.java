@@ -10,9 +10,9 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import javafx.event.EventHandler;
 import javafx.fxml.FXML;
@@ -56,7 +56,6 @@ public class HallOverviewController implements ContentController {
 	// Randabstand der automatischen Anordnung zur Hallenwand (cm), wenn der Vorstellung eine Halle zugeordnet ist
 	private static final double HALL_MARGIN = 50;
 
-	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
 	private Event selectedEvent;
 	private Presentation selectedPres;
@@ -846,7 +845,9 @@ public class HallOverviewController implements ContentController {
 	@Override
 	public void save() {
 		// Aktuellen Stand speichern
-		repository.saveEvent(selectedEvent);
+		if (selectedEvent != null) {
+			EventSaver.save(selectedEvent);
+		}
 	}
 
 	@Override

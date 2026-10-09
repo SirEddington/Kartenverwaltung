@@ -2,6 +2,8 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
@@ -10,6 +12,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
 import javafx.application.Application;
@@ -26,6 +29,8 @@ import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
 public class MainApp extends Application {
+
+	private static final Logger LOG = Logger.getLogger(MainApp.class.getName());
 
 	private static Stage primaryStage;
 	private static double width = 1300.0;
@@ -86,6 +91,7 @@ public class MainApp extends Application {
 	public static void showHallEditView(Hall selectedHall, HallObject selectedObject, boolean editable) {
 		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/HallEditView.fxml";
 		try {
+			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
 
@@ -100,7 +106,7 @@ public class MainApp extends Application {
 			scene.getStylesheets().add(css);
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
-			e.printStackTrace();
+			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}
@@ -114,6 +120,7 @@ public class MainApp extends Application {
 		try {
 
 			// Aktuelle Fenstergröße holen
+			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
 
@@ -135,7 +142,7 @@ public class MainApp extends Application {
 			scene.getStylesheets().add(css);
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
-			e.printStackTrace();
+			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}
@@ -143,6 +150,7 @@ public class MainApp extends Application {
 	private static void loadScene(String fxmlPath) {
 		try {
 			// Aktuelle Fenstergröße holen
+			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
 
@@ -158,7 +166,7 @@ public class MainApp extends Application {
 			scene.getStylesheets().add(css);
 			primaryStage.setScene(scene);
 		} catch (IOException e) {
-			e.printStackTrace();
+			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}
@@ -203,6 +211,8 @@ public class MainApp extends Application {
 	}
 
 	public static void main(String[] args) {
+		AppLogging.init();
+		GlobalErrorHandler.install();
 		launch(args);
 	}
 

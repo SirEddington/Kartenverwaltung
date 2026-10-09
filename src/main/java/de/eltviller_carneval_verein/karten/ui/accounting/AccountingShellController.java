@@ -2,6 +2,8 @@ package de.eltviller_carneval_verein.karten.ui.accounting;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -40,6 +42,8 @@ import javafx.util.StringConverter;
  * Ansicht, sofern diese {@link Exportable} implementiert.
  */
 public class AccountingShellController {
+
+	private static final Logger LOG = Logger.getLogger(AccountingShellController.class.getName());
 
 	/** Verfügbare Export-Formate, samt Anzeigename und Dateiendung. */
 	private enum ExportFormat {
@@ -270,7 +274,7 @@ public class AccountingShellController {
 			activeContentController.setPresentation(currentPresentation);
 			activeContentController.setEditMode(editMode);
 		} catch (IOException e) {
-			e.printStackTrace();
+			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}

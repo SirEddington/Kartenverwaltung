@@ -1,12 +1,15 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.io.IOException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -20,6 +23,8 @@ import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.StackPane;
 
 public class TicketShellController {
+
+	private static final Logger LOG = Logger.getLogger(TicketShellController.class.getName());
 
 	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
 
@@ -98,6 +103,7 @@ public class TicketShellController {
 
 	@FXML
 	private void showTicketTableView() {
+		StatusMessage.getInstance().clear();
 		lblHeader.setText("Kartentabelle");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/TicketTableView.fxml");
 		activeContentController.filter(searchText);
@@ -105,6 +111,7 @@ public class TicketShellController {
 
 	@FXML
 	private void showHallView() {
+		StatusMessage.getInstance().clear();
 		lblHeader.setText("Saalübersicht");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml");
 		activeContentController.filter(searchText);
@@ -125,7 +132,7 @@ public class TicketShellController {
 			activeContentController.setEvent(currentEvent);
 			activeContentController.setPresentation(currentPresentation);
 		} catch (IOException e) {
-			e.printStackTrace();
+			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
 	}

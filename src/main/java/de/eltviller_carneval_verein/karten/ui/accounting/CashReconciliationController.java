@@ -21,9 +21,9 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
-import de.eltviller_carneval_verein.karten.ui.MoneyFormat;
+import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
@@ -33,7 +33,6 @@ import javafx.scene.control.TextArea;
 
 public class CashReconciliationController implements ContentController, Exportable {
 
-	private final JsonEventRepository repository = JsonEventRepository.getInstance();
 
 	private Event selectedEvent;
 	private Presentation selectedPres;
@@ -358,7 +357,7 @@ public class CashReconciliationController implements ContentController, Exportab
 	@Override
 	public void save() {
 		if (selectedEvent != null) {
-			repository.saveEvent(selectedEvent);
+			EventSaver.save(selectedEvent);
 		}
 	}
 
