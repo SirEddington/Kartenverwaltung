@@ -3,10 +3,14 @@ package de.eltviller_carneval_verein.karten.ui;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.OverrunStyle;
 import javafx.scene.control.Tooltip;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
 import javafx.stage.Window;
+import javafx.util.Duration;
 
 /**
  * Zeigt die aktuelle {@link StatusMessage} an. Wird in der Footer-Zeile eines Screens links
@@ -31,6 +35,11 @@ public class StatusLabel extends Label {
 		setGraphicTextGap(8);
 		setMinWidth(0);
 		setTextOverrun(OverrunStyle.ELLIPSIS);
+		// Der Tooltip besteht aus farbigen Zeilen (eine je Meldung) und bleibt lange genug sichtbar zum Lesen
+		tooltip.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+		tooltip.getStyleClass().add("status-tooltip");
+		tooltip.setShowDelay(Duration.millis(300));
+		tooltip.setShowDuration(Duration.seconds(60));
 
 		StatusMessage message = StatusMessage.getInstance();
 		message.register(this);
@@ -60,10 +69,26 @@ public class StatusLabel extends Label {
 		getStyleClass().add("status-" + entry.severity().name().toLowerCase());
 		icon.setText(symbolFor(entry.severity()));
 		setText(entry.text());
-		tooltip.setText(entry.details());
+		tooltip.setGraphic(buildTooltipContent(entry));
 		setTooltip(tooltip);
 		setVisible(true);
 		setManaged(true);
+	}
+
+	/** Eine Zeile je Meldung, jede in den Farben ihres Schweregrads wie die Meldung in der Fußzeile. */
+	private static VBox buildTooltipContent(StatusMessage.Entry entry) {
+		VBox rows = new VBox(4);
+		for (StatusMessage.Line line : entry.lines()) {
+			Label icon = new Label(symbolFor(line.severity()));
+			icon.getStyleClass().add("status-icon");
+			Label row = new Label(line.text(), icon);
+			row.getStyleClass().addAll(BASE_STYLE_CLASS, "status-" + line.severity().name().toLowerCase());
+			row.setGraphicTextGap(8);
+			// Kein Zeilenumbruch: umbrechende Labels liefern im Tooltip eine viel zu große Höhe
+			row.setMinWidth(Region.USE_PREF_SIZE);
+			rows.getChildren().add(row);
+		}
+		return rows;
 	}
 
 	private static String symbolFor(Severity severity) {

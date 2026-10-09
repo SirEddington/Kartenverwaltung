@@ -28,14 +28,24 @@ import javafx.util.Duration;
  */
 public final class StatusMessage {
 
+	/** Eine Zeile des Tooltips mit dem Schweregrad der jeweiligen Meldung (bestimmt ihre Farbe). */
+	public record Line(Severity severity, String text) {
+	}
+
 	/**
 	 * Eine anzuzeigende Meldung.
 	 *
 	 * @param severity Schweregrad (bestimmt die Farbe)
 	 * @param text     Text für die Fußzeile
-	 * @param details  vollständiger Text für den Tooltip (bei mehreren Meldungen alle, je eine pro Zeile)
+	 * @param details  vollständiger Text als reiner Text (bei mehreren Meldungen je eine pro Zeile), z. B. für den Dialog
+	 * @param lines    die Zeilen des Tooltips, jede mit eigenem Schweregrad
 	 */
-	public record Entry(Severity severity, String text, String details) {
+	public record Entry(Severity severity, String text, String details, List<Line> lines) {
+
+		/** Einzelne Meldung: der Tooltip zeigt denselben Text in der Farbe des Schweregrads. */
+		public Entry(Severity severity, String text, String details) {
+			this(severity, text, details, List.of(new Line(severity, details)));
+		}
 	}
 
 	private static final StatusMessage INSTANCE = new StatusMessage();
@@ -102,11 +112,15 @@ public final class StatusMessage {
 		if (issues.size() > 1) {
 			text += " (+" + (issues.size() - 1) + " weitere)";
 		}
-		String details = issues.stream().limit(MAX_DETAIL_LINES).map(ValidationIssue::toDisplayText).collect(Collectors.joining("\n"));
-		if (issues.size() > MAX_DETAIL_LINES) {
-			details += "\n... und " + (issues.size() - MAX_DETAIL_LINES) + " weitere";
+		List<Line> lines = new ArrayList<>();
+		for (ValidationIssue issue : issues.subList(0, Math.min(issues.size(), MAX_DETAIL_LINES))) {
+			lines.add(new Line(issue.severity(), issue.toDisplayText()));
 		}
-		return new Entry(first.severity(), text, details);
+		if (issues.size() > MAX_DETAIL_LINES) {
+			lines.add(new Line(Severity.INFO, "... und " + (issues.size() - MAX_DETAIL_LINES) + " weitere"));
+		}
+		String details = lines.stream().map(Line::text).collect(Collectors.joining("\n"));
+		return new Entry(first.severity(), text, details, List.copyOf(lines));
 	}
 
 	/** Meldet ein Label an, damit {@link #show} weiß, ob die Fußzeile gerade sichtbar ist. */
