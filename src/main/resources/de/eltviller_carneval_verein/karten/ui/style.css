@@ -473,6 +473,12 @@
 /* ------------------------------------------------------------------------------
  * 11. TOOLTIPS, MENÜS & DIALOGE
  * ------------------------------------------------------------------------------ */
+/* Die Wurzel jedes Popups (Tooltip, Menüs) hat auch die Klasse .root und bekäme sonst den App-Hintergrund:
+   ein eckiges, hellgraues Rechteck hinter abgerundeten Popup-Inhalten. */
+.root.popup {
+    -fx-background-color: transparent;
+}
+
 .tooltip {
     -fx-background-color: -fx-ecv-blue;
     -fx-text-fill: white;
@@ -630,8 +636,8 @@
 
 /* Tooltip der Statusmeldung: heller Rahmen, darin die farbigen Zeilen je Meldung */
 .tooltip.status-tooltip {
-    -fx-background-color: -fx-border-neutral, -fx-surface-white;
+    -fx-background-color: #B8B8B8, -fx-surface-white;
     -fx-background-insets: 0, 1;
-    -fx-background-radius: 6px, 5px;
+    -fx-background-radius: 8px, 7px;
     -fx-padding: 6px;
 }
