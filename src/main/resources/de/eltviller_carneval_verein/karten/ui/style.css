@@ -100,6 +100,15 @@
     -fx-border-width: 0px;
 }
 
+/* Speichern-Button mit ungespeicherten Änderungen ("Speichern *"): kehrt die Farben um und hebt sich ab */
+.button-primary.button-dirty {
+    -fx-background-color: -fx-ecv-yellow;
+    -fx-text-fill: -fx-ecv-blue;
+    -fx-border-color: -fx-ecv-blue;
+    -fx-border-width: 2px;
+    -fx-effect: dropshadow(gaussian, rgba(44, 47, 136, 0.45), 8, 0.2, 0, 1);
+}
+
 /* Sekundärbutton: ECV-Gelb mit ECV-Blauer Schrift (z.B. Bearbeiten) */
 .button-secondary {
     -fx-background-color: -fx-ecv-yellow;
@@ -484,6 +493,21 @@
     -fx-text-fill: white;
     -fx-padding: 6px 10px;
     -fx-background-radius: 4px;
+}
+
+/* Dialoge (Alert): Hintergrund und Schrift kommen aus .root bzw. .label; der Standard-Button (Enter) im
+   ECV-Blau, damit Dialoge ohne eigene Stilklassen an den Buttons nicht im Modena-Grau stehen. Weitere Buttons
+   bekommen ihre Klasse (button-danger, button-default, ...) vom Dialog selbst: ButtonData.NO zählt wie CANCEL
+   als :cancel, eine Regel dafür würde beide gleich färben. */
+.dialog-pane .content.label {
+    -fx-font-size: 14px;
+    -fx-padding: 8px 4px 8px 8px;
+}
+
+.dialog-pane .button:default {
+    -fx-background-color: -fx-ecv-blue;
+    -fx-text-fill: -fx-ecv-yellow;
+    -fx-border-width: 0px;
 }
 
 .context-menu {

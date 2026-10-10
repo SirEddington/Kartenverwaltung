@@ -6,8 +6,9 @@ import java.util.function.Consumer;
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
-import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.HallSaver;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
@@ -22,8 +23,6 @@ import javafx.scene.control.TextField;
  * Screen ohne Speichern verlässt, verwirft die Änderungen an neuen Hallen.
  */
 public class HallEditController {
-
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
 
 	private Hall hall;
 	private boolean editMode = false;
@@ -49,6 +48,8 @@ public class HallEditController {
 
 	@FXML
 	public void initialize() {
+		DirtyIndicator.bind(btnSave, ChangeTracker.halls());
+
 		setupSpinner(spnHallWidth, 100000.0, 10, value -> {
 			hall.setHallWidth(value);
 			hallPlanController.refresh();
@@ -108,6 +109,9 @@ public class HallEditController {
 			hallPlanController.setSelectedObject(selectedObject);
 		}
 		setEditable(editable);
+
+		// Erst jetzt, damit alles, was das Befüllen der Ansicht am Modell zurechtrückt, nicht als Änderung zählt
+		ChangeTracker.halls().track(hall);
 	}
 
 	private void commitName() {
@@ -142,8 +146,14 @@ public class HallEditController {
 
 	@FXML
 	private void handleBackToHallOverview() {
+		boolean wasEditable = editMode;
 		setEditable(false);
 		MainApp.showHallManagementView();
+		// Hat der Nutzer im Dialog "Abbrechen" gewählt, bleibt dieser Screen stehen: Bearbeitungsmodus zurückgeben,
+		// sonst wäre der Speichern-Button gesperrt, obwohl ungespeicherte Änderungen da sind
+		if (btnSave.getScene() != null && btnSave.getScene().getWindow() != null) {
+			setEditable(wasEditable);
+		}
 	}
 
 	@FXML
@@ -157,7 +167,6 @@ public class HallEditController {
 			MainApp.showAlert("Fehler", e.getMessage(), AlertType.WARNING);
 			return;
 		}
-		hallRepository.saveHall(hall);
-		StatusMessage.getInstance().showSaved();
+		HallSaver.save(hall);
 	}
 }

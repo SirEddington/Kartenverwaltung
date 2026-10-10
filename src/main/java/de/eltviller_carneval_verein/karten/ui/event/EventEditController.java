@@ -3,6 +3,8 @@ package de.eltviller_carneval_verein.karten.ui.event;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 import org.controlsfx.control.table.TableFilter;
@@ -16,6 +18,8 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -146,6 +150,8 @@ public class EventEditController {
 	Seat currentSeat;
 
 	private boolean editMode = false;
+	// true, solange die Detailfelder aus einem Sitz befüllt werden (siehe setupDetailWriteThrough)
+	private boolean loadingDetails = false;
 
 	public void initData(Event event, Presentation presentation, Table table, Seat seat, boolean editable) {
 
@@ -179,7 +185,36 @@ public class EventEditController {
 	@FXML
 	public void initialize() {
 		setupCollums();
+		setupDetailWriteThrough();
 		setupContextMenu();
+		DirtyIndicator.bind(btnSave, ChangeTracker.events());
+	}
+
+	/**
+	 * Übernimmt Eingaben in den Sitzdetails sofort ins Modell (wie die Detail-Popups der Saalübersicht), damit die
+	 * Änderungserkennung sie sieht. Zuvor landeten sie erst beim Speichern im Sitz und gingen beim Wechsel auf einen
+	 * anderen Sitz lautlos verloren.
+	 */
+	private void setupDetailWriteThrough() {
+		txtFirstName.textProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setFirstName(newVal)));
+		txtLastName.textProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setLastName(newVal)));
+		txtMail.textProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setEMail(newVal)));
+		txtComment.textProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setComment(newVal)));
+		spnDoublePrice.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (newVal != null) {
+				writeToSeat(seat -> seat.setPriceDouble(newVal));
+			}
+		});
+		paymentComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setPaymentStatus(newVal)));
+		checkCollected.selectedProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setCollected(newVal)));
+		checkWheelchairAccessible.selectedProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setWheelchairAccessible(newVal)));
+	}
+
+	private void writeToSeat(Consumer<Seat> change) {
+		// Beim Befüllen der Felder aus einem Sitz darf nichts zurückgeschrieben werden
+		if (!loadingDetails && currentSeat != null) {
+			change.accept(currentSeat);
+		}
 	}
 
 	private void setupCollums() {
@@ -300,6 +335,7 @@ public class EventEditController {
 		// 4. Events in Tabelle laden
 		masterEventData.clear();
 		masterEventData.setAll(repository.loadEvents());
+		masterEventData.forEach(ChangeTracker.events()::ensureTracked);
 
 		// 5. Auswahl-Listener mit Null-Checks gegen NPEs
 		eventTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
@@ -585,6 +621,7 @@ public class EventEditController {
 	private void refreshEventTable(Event selectEvent) {
 		currentEvent = selectEvent;
 		masterEventData.setAll(repository.loadEvents());
+		masterEventData.forEach(ChangeTracker.events()::ensureTracked);
 		if (currentEvent != null && masterEventData.contains(selectEvent)) {
 			eventTable.getSelectionModel().select(selectEvent);
 		} else {
@@ -635,10 +672,15 @@ public class EventEditController {
 
 	private void refreshSeatDetails(Seat selectedSeat) {
 		currentSeat = selectedSeat;
-		if (currentSeat != null) {
-			loadDetailsOfSeat(currentSeat);
-		} else {
-			clearDetails();
+		loadingDetails = true;
+		try {
+			if (currentSeat != null) {
+				loadDetailsOfSeat(currentSeat);
+			} else {
+				clearDetails();
+			}
+		} finally {
+			loadingDetails = false;
 		}
 	}
 
@@ -708,8 +750,13 @@ public class EventEditController {
 
 	@FXML
 	private void handleBackToEventOverview() {
+		boolean wasEditable = editMode;
 		setEditable(false);
 		MainApp.showEventOverviewView();
+		// Hat der Nutzer im Dialog "Abbrechen" gewählt, bleibt dieser Screen stehen: Bearbeitungsmodus zurückgeben
+		if (btnSave.getScene() != null && btnSave.getScene().getWindow() != null) {
+			setEditable(wasEditable);
+		}
 	}
 
 	@FXML
@@ -726,9 +773,18 @@ public class EventEditController {
 			selectedSeat.setCollected(checkCollected.isSelected());
 			selectedSeat.setWheelchairAccessible(checkWheelchairAccessible.isSelected());
 		}
+		// Alle geänderten Events speichern, nicht nur das gewählte: "Speichern *" zeigt Änderungen an allen Events
+		// dieses Screens an und müsste sonst nach dem Speichern stehen bleiben
+		ChangeTracker.events().checkAll();
+		List<Event> toSave = new ArrayList<>(ChangeTracker.events().dirtyEntities());
 		Event event = eventTable.getSelectionModel().getSelectedItem();
-		if (event != null) {
-			EventSaver.save(event);
+		if (event != null && !toSave.contains(event)) {
+			toSave.add(0, event);
+		}
+		for (Event changed : toSave) {
+			if (!EventSaver.save(changed)) {
+				break; // die Fehler stehen in der Fußzeile
+			}
 		}
 	}
 

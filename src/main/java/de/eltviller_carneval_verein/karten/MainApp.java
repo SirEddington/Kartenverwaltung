@@ -12,6 +12,12 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
+import de.eltviller_carneval_verein.karten.ui.LiveValidator;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
@@ -54,6 +60,20 @@ public class MainApp extends Application {
 		// sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
 		JsonEventRepository repository = JsonEventRepository.getInstance();
 		repository.loadEvents();
+
+		// Jedes Speichern und Löschen führt den gespeicherten Stand der Änderungserkennung nach, egal von wo aus
+		repository.addListener(trackerUpdater(ChangeTracker.events()));
+		JsonHallRepository.getInstance().addListener(trackerUpdater(ChangeTracker.halls()));
+		ChangeTrigger.install();
+		LiveValidator.install();
+
+		// Schließen der App mit ungespeicherten Änderungen: erst nachfragen
+		primaryStage.setOnCloseRequest(e -> {
+			if (!LeaveGuard.confirmLeave()) {
+				e.consume();
+			}
+		});
+
 		List<String> loadWarnings = repository.getAndClearLoadWarnings();
 		if (!loadWarnings.isEmpty()) {
 			showAlert("Warnung beim Laden der Events", String.join("\n\n", loadWarnings), AlertType.WARNING);
@@ -62,6 +82,20 @@ public class MainApp extends Application {
 		// Startet direkt im Hauptmenü
 		showMenuView();
 		primaryStage.show();
+	}
+
+	private static <T> RepositoryListener<T> trackerUpdater(ChangeTracker<T> tracker) {
+		return new RepositoryListener<>() {
+			@Override
+			public void saved(T entity) {
+				tracker.markSaved(entity);
+			}
+
+			@Override
+			public void deleted(T entity) {
+				tracker.untrack(entity);
+			}
+		};
 	}
 
 	public static void showMenuView() {
@@ -91,6 +125,9 @@ public class MainApp extends Application {
 	public static void showHallEditView(Hall selectedHall, HallObject selectedObject, boolean editable) {
 		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/HallEditView.fxml";
 		try {
+			if (!LeaveGuard.confirmLeave()) {
+				return;
+			}
 			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
@@ -101,10 +138,7 @@ public class MainApp extends Application {
 			HallEditController controller = loader.getController();
 			controller.initData(selectedHall, selectedObject, editable);
 
-			Scene scene = new Scene(wrapWithBackground(root), width, height);
-			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
-			scene.getStylesheets().add(css);
-			primaryStage.setScene(scene);
+			primaryStage.setScene(createScene(root));
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
@@ -120,6 +154,9 @@ public class MainApp extends Application {
 		try {
 
 			// Aktuelle Fenstergröße holen
+			if (!LeaveGuard.confirmLeave()) {
+				return;
+			}
 			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
@@ -137,10 +174,7 @@ public class MainApp extends Application {
 			controller.initData(selectedEvent, selectedPres, selectedTable, selectedSeat, editable);
 
 			// 5. Scene setzen
-			Scene scene = new Scene(wrapWithBackground(root), width, height);
-			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
-			scene.getStylesheets().add(css);
-			primaryStage.setScene(scene);
+			primaryStage.setScene(createScene(root));
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
@@ -150,6 +184,9 @@ public class MainApp extends Application {
 	private static void loadScene(String fxmlPath) {
 		try {
 			// Aktuelle Fenstergröße holen
+			if (!LeaveGuard.confirmLeave()) {
+				return;
+			}
 			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
@@ -161,14 +198,24 @@ public class MainApp extends Application {
 			Parent root = loader.load();
 
 			// 3. Scene setzen
-			Scene scene = new Scene(wrapWithBackground(root), width, height);
-			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
-			scene.getStylesheets().add(css);
-			primaryStage.setScene(scene);
+			primaryStage.setScene(createScene(root));
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
+	}
+
+	/**
+	 * Die einzige Stelle, an der die Scenes der App entstehen: Hintergrund und Stylesheet.
+	 */
+	private static Scene createScene(Parent content) {
+		Scene scene = new Scene(wrapWithBackground(content), width, height);
+		scene.getStylesheets().add(stylesheetUrl());
+		return scene;
+	}
+
+	private static String stylesheetUrl() {
+		return MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 	}
 
 	/**
@@ -190,12 +237,14 @@ public class MainApp extends Application {
 	}
 
 	/**
-	 * Setzt das App-Icon auf die Dialog-Stage eines Alerts, damit auch
-	 * Bestätigungen/Fehlermeldungen das Harlekin-Icon statt des
-	 * Standard-Java-Symbols zeigen.
+	 * Gibt einem Alert das Aussehen der App: das App-Icon auf der Dialog-Stage (statt des
+	 * Standard-Java-Symbols) und das Stylesheet der App, damit Dialoge nicht im
+	 * Standard-Theme erscheinen. Der Alert muss schon alle Buttons haben, bevor der
+	 * Aufrufer ihnen Stilklassen gibt.
 	 */
 	@SuppressWarnings("exports")
 	public static void applyAppIcon(Alert alert) {
+		alert.getDialogPane().getStylesheets().add(stylesheetUrl());
 		Stage alertStage = (Stage) alert.getDialogPane().getScene().getWindow();
 		alertStage.getIcons().add(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/harlekin_logo.png")));
 	}

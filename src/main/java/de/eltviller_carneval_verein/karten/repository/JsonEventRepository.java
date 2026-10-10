@@ -10,8 +10,6 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import de.eltviller_carneval_verein.karten.AppPaths;
 import de.eltviller_carneval_verein.karten.model.Event;
@@ -32,6 +30,8 @@ public class JsonEventRepository implements EventRepository {
 	// Duplikate, gescheiterte Migration). Das Repository kennt keine UI, daher werden sie
 	// hier nur gesammelt - anzeigen muss die aufrufende Schicht (siehe getAndClearLoadWarnings()).
 	private final List<String> loadWarnings = new ArrayList<>();
+
+	private final RepositoryListeners<Event> listeners = new RepositoryListeners<>();
 
 	/**
 	 * Liefert die einzige Instanz des Repositorys. Alle Controller sollen sich
@@ -61,10 +61,7 @@ public class JsonEventRepository implements EventRepository {
 	JsonEventRepository(File storageDir) {
 		this.storageDir = storageDir;
 
-		this.objectMapper = new ObjectMapper();
-		this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
-		this.objectMapper.registerModule(new JavaTimeModule());
-		this.objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+		this.objectMapper = JsonMapperFactory.create();
 
 		boolean isNewStorageDir = !storageDir.exists();
 		if (isNewStorageDir) {
@@ -197,6 +194,28 @@ public class JsonEventRepository implements EventRepository {
 		if (!cachedEvents.contains(event)) {
 			cachedEvents.add(event);
 		}
+
+		listeners.notifySaved(event);
+	}
+
+	/** Meldet einen Listener an, der nach jedem Speichern und Löschen eines Events benachrichtigt wird. */
+	public void addListener(RepositoryListener<Event> listener) {
+		listeners.add(listener);
+	}
+
+	/**
+	 * Ersetzt das Event mit derselben ID im Cache durch ein anderes Objekt, z. B. nach dem Wiederherstellen eines
+	 * früheren Zustands. Die Datei bleibt unberührt, und es wird kein Listener benachrichtigt. Ist das Event nicht
+	 * im Cache (noch nie gespeichert), passiert nichts.
+	 */
+	public void replaceCachedEvent(Event replacement) {
+		if (cachedEvents == null) {
+			return;
+		}
+		int index = cachedEvents.indexOf(replacement);
+		if (index >= 0) {
+			cachedEvents.set(index, replacement);
+		}
 	}
 
 	@Override
@@ -226,6 +245,8 @@ public class JsonEventRepository implements EventRepository {
 		if (cachedEvents != null) {
 			cachedEvents.remove(event);
 		}
+
+		listeners.notifyDeleted(event);
 	}
 
 }

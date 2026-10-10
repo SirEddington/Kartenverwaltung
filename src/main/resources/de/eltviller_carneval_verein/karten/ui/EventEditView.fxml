@@ -148,6 +148,6 @@
     <HBox alignment="CENTER_RIGHT" spacing="10.0">
         <StatusLabel />
         <Region HBox.hgrow="ALWAYS" />
-        <Button text="Speichern" styleClass="button-primary" onAction="#saveCurrentState" />
+        <Button fx:id="btnSave" text="Speichern" styleClass="button-primary" onAction="#saveCurrentState" />
     </HBox>
 </VBox>
