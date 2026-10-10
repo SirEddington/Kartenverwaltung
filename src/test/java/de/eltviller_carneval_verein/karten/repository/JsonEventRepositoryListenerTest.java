@@ -19,16 +19,16 @@ import de.eltviller_carneval_verein.karten.model.Event;
 
 class JsonEventRepositoryListenerTest {
 
-	private static final class Recorder implements EventRepositoryListener {
+	private static final class Recorder implements RepositoryListener<Event> {
 		final List<String> calls = new ArrayList<>();
 
 		@Override
-		public void eventSaved(Event event) {
+		public void saved(Event event) {
 			calls.add("saved " + event.getName());
 		}
 
 		@Override
-		public void eventDeleted(Event event) {
+		public void deleted(Event event) {
 			calls.add("deleted " + event.getName());
 		}
 	}

@@ -59,7 +59,7 @@ public class TicketShellController {
 
 	@FXML
 	public void initialize() {
-		DirtyIndicator.bind(btnSave);
+		DirtyIndicator.bind(btnSave, ChangeTracker.events());
 
 		// Events in ComboBox laden (Tabelle bleibt initial leer)
 		eventComboBox.getItems().setAll(eventRepository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
@@ -68,7 +68,7 @@ public class TicketShellController {
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			currentEvent = selectedEvent;
 			if (currentEvent != null) {
-				ChangeTracker.getInstance().ensureTracked(currentEvent);
+				ChangeTracker.events().ensureTracked(currentEvent);
 			}
 			presComboBox.getItems().clear();
 			presComboBox.getItems().setAll(currentEvent.getPresentations());
@@ -173,4 +173,4 @@ public class TicketShellController {
 			activeContentController.save();
 		}
 	}
-}
+}

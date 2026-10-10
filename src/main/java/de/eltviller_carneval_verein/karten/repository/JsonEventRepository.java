@@ -31,7 +31,7 @@ public class JsonEventRepository implements EventRepository {
 	// hier nur gesammelt - anzeigen muss die aufrufende Schicht (siehe getAndClearLoadWarnings()).
 	private final List<String> loadWarnings = new ArrayList<>();
 
-	private final List<EventRepositoryListener> listeners = new ArrayList<>();
+	private final List<RepositoryListener<Event>> listeners = new ArrayList<>();
 
 	/**
 	 * Liefert die einzige Instanz des Repositorys. Alle Controller sollen sich
@@ -61,7 +61,7 @@ public class JsonEventRepository implements EventRepository {
 	JsonEventRepository(File storageDir) {
 		this.storageDir = storageDir;
 
-		this.objectMapper = EventMapperFactory.create();
+		this.objectMapper = JsonMapperFactory.create();
 
 		boolean isNewStorageDir = !storageDir.exists();
 		if (isNewStorageDir) {
@@ -195,13 +195,13 @@ public class JsonEventRepository implements EventRepository {
 			cachedEvents.add(event);
 		}
 
-		for (EventRepositoryListener listener : new ArrayList<>(listeners)) {
-			listener.eventSaved(event);
+		for (RepositoryListener<Event> listener : new ArrayList<>(listeners)) {
+			listener.saved(event);
 		}
 	}
 
 	/** Meldet einen Listener an, der nach jedem Speichern und Löschen eines Events benachrichtigt wird. */
-	public void addListener(EventRepositoryListener listener) {
+	public void addListener(RepositoryListener<Event> listener) {
 		listeners.add(listener);
 	}
 
@@ -248,8 +248,8 @@ public class JsonEventRepository implements EventRepository {
 			cachedEvents.remove(event);
 		}
 
-		for (EventRepositoryListener listener : new ArrayList<>(listeners)) {
-			listener.eventDeleted(event);
+		for (RepositoryListener<Event> listener : new ArrayList<>(listeners)) {
+			listener.deleted(event);
 		}
 	}
 

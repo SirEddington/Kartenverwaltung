@@ -11,8 +11,9 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.EventRepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
@@ -60,18 +61,8 @@ public class MainApp extends Application {
 		repository.loadEvents();
 
 		// Jedes Speichern und Löschen führt den gespeicherten Stand der Änderungserkennung nach, egal von wo aus
-		ChangeTracker tracker = ChangeTracker.getInstance();
-		repository.addListener(new EventRepositoryListener() {
-			@Override
-			public void eventSaved(Event event) {
-				tracker.markSaved(event);
-			}
-
-			@Override
-			public void eventDeleted(Event event) {
-				tracker.untrack(event);
-			}
-		});
+		repository.addListener(trackerUpdater(ChangeTracker.events()));
+		JsonHallRepository.getInstance().addListener(trackerUpdater(ChangeTracker.halls()));
 
 		// Schließen der App mit ungespeicherten Änderungen: erst nachfragen
 		primaryStage.setOnCloseRequest(e -> {
@@ -88,6 +79,20 @@ public class MainApp extends Application {
 		// Startet direkt im Hauptmenü
 		showMenuView();
 		primaryStage.show();
+	}
+
+	private static <T> RepositoryListener<T> trackerUpdater(ChangeTracker<T> tracker) {
+		return new RepositoryListener<>() {
+			@Override
+			public void saved(T entity) {
+				tracker.markSaved(entity);
+			}
+
+			@Override
+			public void deleted(T entity) {
+				tracker.untrack(entity);
+			}
+		};
 	}
 
 	public static void showMenuView() {
@@ -203,10 +208,13 @@ public class MainApp extends Application {
 	 */
 	private static Scene createScene(Parent content) {
 		Scene scene = new Scene(wrapWithBackground(content), width, height);
-		String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
-		scene.getStylesheets().add(css);
+		scene.getStylesheets().add(stylesheetUrl());
 		ChangeTrigger.install(scene);
 		return scene;
+	}
+
+	private static String stylesheetUrl() {
+		return MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 	}
 
 	/**
@@ -228,12 +236,14 @@ public class MainApp extends Application {
 	}
 
 	/**
-	 * Setzt das App-Icon auf die Dialog-Stage eines Alerts, damit auch
-	 * Bestätigungen/Fehlermeldungen das Harlekin-Icon statt des
-	 * Standard-Java-Symbols zeigen.
+	 * Gibt einem Alert das Aussehen der App: das App-Icon auf der Dialog-Stage (statt des
+	 * Standard-Java-Symbols) und das Stylesheet der App, damit Dialoge nicht im
+	 * Standard-Theme erscheinen. Der Alert muss schon alle Buttons haben, bevor der
+	 * Aufrufer ihnen Stilklassen gibt.
 	 */
 	@SuppressWarnings("exports")
 	public static void applyAppIcon(Alert alert) {
+		alert.getDialogPane().getStylesheets().add(stylesheetUrl());
 		Stage alertStage = (Stage) alert.getDialogPane().getScene().getWindow();
 		alertStage.getIcons().add(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/harlekin_logo.png")));
 	}

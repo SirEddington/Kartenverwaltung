@@ -28,17 +28,22 @@ public final class ChangeTrigger {
 	private ChangeTrigger() {
 	}
 
+	private static void checkAll(ChangeTracker<?> tracker) {
+		try {
+			tracker.checkAll();
+		} catch (RuntimeException ex) {
+			// Nur ins Log: Bei jeder Bedienung einen Fehlerdialog zu zeigen, wäre schlimmer als eine
+			// ausbleibende Anzeige. Beim Verlassen des Screens wird erneut geprüft (LeaveGuard).
+			LOG.log(Level.SEVERE, "Änderungserkennung fehlgeschlagen", ex);
+		}
+	}
+
 	/** Installiert den Filter an der Scene (je Scene einmal; die Scenes der App werden bei jedem Screen neu erzeugt). */
 	public static void install(Scene scene) {
 		PauseTransition pause = new PauseTransition(Duration.millis(DEBOUNCE_MILLIS));
 		pause.setOnFinished(e -> {
-			try {
-				ChangeTracker.getInstance().checkAll();
-			} catch (RuntimeException ex) {
-				// Nur ins Log: Bei jeder Bedienung einen Fehlerdialog zu zeigen, wäre schlimmer als eine
-				// ausbleibende Anzeige. Beim Verlassen des Screens wird erneut geprüft (LeaveGuard).
-				LOG.log(Level.SEVERE, "Änderungserkennung fehlgeschlagen", ex);
-			}
+			checkAll(ChangeTracker.events());
+			checkAll(ChangeTracker.halls());
 		});
 
 		EventHandler<javafx.event.Event> restart = e -> pause.playFromStart();

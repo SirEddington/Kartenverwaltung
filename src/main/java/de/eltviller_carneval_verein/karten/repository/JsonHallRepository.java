@@ -10,8 +10,6 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import de.eltviller_carneval_verein.karten.AppPaths;
 import de.eltviller_carneval_verein.karten.model.Hall;
@@ -32,6 +30,8 @@ public class JsonHallRepository implements HallRepository {
 	// Duplikate). Das Repository kennt keine UI, daher werden sie hier nur gesammelt -
 	// anzeigen muss die aufrufende Schicht (siehe getAndClearLoadWarnings()).
 	private final List<String> loadWarnings = new ArrayList<>();
+
+	private final List<RepositoryListener<Hall>> listeners = new ArrayList<>();
 
 	/**
 	 * Liefert die einzige Instanz des Repositorys. Alle Controller sollen sich
@@ -62,10 +62,7 @@ public class JsonHallRepository implements HallRepository {
 	JsonHallRepository(File storageDir) {
 		this.storageDir = storageDir;
 
-		this.objectMapper = new ObjectMapper();
-		this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
-		this.objectMapper.registerModule(new JavaTimeModule());
-		this.objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+		this.objectMapper = JsonMapperFactory.create();
 
 		if (!storageDir.exists()) {
 			storageDir.mkdirs();
@@ -205,6 +202,30 @@ public class JsonHallRepository implements HallRepository {
 		if (!cachedHalls.contains(hall)) {
 			cachedHalls.add(hall);
 		}
+
+		for (RepositoryListener<Hall> listener : new ArrayList<>(listeners)) {
+			listener.saved(hall);
+		}
+	}
+
+	/** Meldet einen Listener an, der nach jedem Speichern und Löschen einer Halle benachrichtigt wird. */
+	public void addListener(RepositoryListener<Hall> listener) {
+		listeners.add(listener);
+	}
+
+	/**
+	 * Ersetzt die Halle mit derselben ID im Cache durch ein anderes Objekt, z. B. nach dem Wiederherstellen eines
+	 * früheren Zustands. Die Datei bleibt unberührt, und es wird kein Listener benachrichtigt. Ist die Halle nicht
+	 * im Cache (noch nie gespeichert), passiert nichts.
+	 */
+	public void replaceCachedHall(Hall replacement) {
+		if (cachedHalls == null) {
+			return;
+		}
+		int index = cachedHalls.indexOf(replacement);
+		if (index >= 0) {
+			cachedHalls.set(index, replacement);
+		}
 	}
 
 	@Override
@@ -233,6 +254,10 @@ public class JsonHallRepository implements HallRepository {
 
 		if (cachedHalls != null) {
 			cachedHalls.remove(hall);
+		}
+
+		for (RepositoryListener<Hall> listener : new ArrayList<>(listeners)) {
+			listener.deleted(hall);
 		}
 	}
 

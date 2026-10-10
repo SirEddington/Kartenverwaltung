@@ -21,20 +21,21 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.repository.EventMapperFactory;
+import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker.Snapshot;
 
-class EventRestorerTest {
+class StateRestorerTest {
 
-	private ChangeTracker tracker;
+	private ChangeTracker<Event> tracker;
 	private final List<Event> cache = new ArrayList<>();
-	private EventRestorer restorer;
+	private StateRestorer<Event> restorer;
 
 	@BeforeEach
 	void setUp() {
-		tracker = new ChangeTracker();
-		restorer = new EventRestorer(tracker, cache::add);
+		tracker = new ChangeTracker<>(Event::getId);
+		restorer = new StateRestorer<>(Event.class, tracker, cache::add);
 	}
 
 	private static Event event() {
@@ -73,6 +74,32 @@ class EventRestorerTest {
 		assertFalse(tracker.isDirty(restored));
 		assertFalse(tracker.anyDirty());
 		assertFalse(tracker.check(restored), "Das wiederhergestellte Event darf nicht sofort wieder als geändert gelten");
+	}
+
+	@Test
+	void hallsAreRestoredTheSameWay() {
+		ChangeTracker<Hall> hallTracker = new ChangeTracker<>(Hall::getId);
+		List<Hall> hallCache = new ArrayList<>();
+		StateRestorer<Hall> hallRestorer = new StateRestorer<>(Hall.class, hallTracker, hallCache::add);
+		Hall hall = new Hall();
+		hall.changeName("Stadthalle");
+		hall.setHallWidth(3000);
+		hall.addHallObject("Bühne").setPosX(100);
+		hallTracker.track(hall);
+		hall.setHallWidth(1);
+		hall.getHallObjects().get(0).setPosX(999);
+		hallTracker.check(hall);
+		assertTrue(hallTracker.isDirty(hall));
+
+		Hall restored = hallRestorer.restoreBaseline(hall);
+
+		assertNotSame(hall, restored);
+		assertEquals(3000, restored.getHallWidth());
+		assertEquals(100, restored.getHallObjects().get(0).getPosX());
+		assertSame(restored, restored.getHallObjects().get(0).getParent(), "Rückverweis der Hallenobjekte gesetzt");
+		assertEquals(List.of(restored), hallCache);
+		assertFalse(hallTracker.isDirty(restored));
+		assertFalse(hallTracker.check(restored), "Wiederhergestellte Halle ergibt dieselben Bytes");
 	}
 
 	@Test
@@ -155,14 +182,14 @@ class EventRestorerTest {
 		tracker.track(event);
 		Event restored = restorer.restoreBaseline(event);
 
-		assertArrayEquals(tracker.baseline(event).bytes(), EventMapperFactory.create().writeValueAsBytes(restored));
+		assertArrayEquals(tracker.baseline(event).bytes(), JsonMapperFactory.create().writeValueAsBytes(restored));
 	}
 
 	@Test
 	void serializationIsStableForTheRealTestData() throws IOException {
 		// Darauf beruht alles: Ein wiederhergestelltes Event muss wieder genau dieselben Bytes ergeben,
 		// sonst würde es nach dem Verwerfen sofort wieder als geändert gelten.
-		ObjectMapper mapper = EventMapperFactory.create();
+		ObjectMapper mapper = JsonMapperFactory.create();
 		File[] files = new File("events_data").listFiles((dir, name) -> name.endsWith(".json"));
 		if (files == null || files.length == 0) {
 			return; // Testdaten nicht vorhanden (z. B. anderes Arbeitsverzeichnis)

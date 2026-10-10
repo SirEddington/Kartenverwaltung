@@ -27,12 +27,12 @@ class ChangeTrackerTest {
 	private record Call(Event event, Snapshot before, Snapshot after) {
 	}
 
-	private ChangeTracker tracker;
+	private ChangeTracker<Event> tracker;
 	private final List<Call> calls = new ArrayList<>();
 
 	@BeforeEach
 	void setUp() {
-		tracker = new ChangeTracker();
+		tracker = new ChangeTracker<>(Event::getId);
 		tracker.addListener((event, before, after) -> calls.add(new Call(event, before, after)));
 	}
 
@@ -215,7 +215,7 @@ class ChangeTrackerTest {
 
 	@Test
 	void removedListenerIsNotCalledAnymore() {
-		ChangeTracker.Listener extra = (event, before, after) -> calls.add(new Call(event, before, after));
+		ChangeTracker.Listener<Event> extra = (event, before, after) -> calls.add(new Call(event, before, after));
 		tracker.addListener(extra);
 		tracker.removeListener(extra);
 		Event event = event("Kampagne");
@@ -307,7 +307,7 @@ class ChangeTrackerTest {
 
 		assertFalse(tracker.isDirty(event));
 		assertFalse(tracker.anyDirty());
-		assertTrue(tracker.dirtyEvents().isEmpty());
+		assertTrue(tracker.dirtyEntities().isEmpty());
 		assertNull(tracker.baseline(event));
 	}
 
@@ -323,7 +323,7 @@ class ChangeTrackerTest {
 		firstSeat(first).setPrice(1);
 		tracker.checkAll();
 
-		assertEquals(List.of(first, third), tracker.dirtyEvents());
+		assertEquals(List.of(first, third), tracker.dirtyEntities());
 	}
 
 	@Test
@@ -338,7 +338,7 @@ class ChangeTrackerTest {
 		Event sameId = new Event(original.getId());
 		sameId.changeName("Kampagne");
 
-		tracker.replaceEvent(sameId, baseline);
+		tracker.replaceEntity(sameId, baseline);
 
 		assertFalse(tracker.isDirty(sameId));
 		assertEquals(baseline, tracker.baseline(sameId));
@@ -350,7 +350,7 @@ class ChangeTrackerTest {
 
 	@Test
 	void replaceEventRejectsAnUntrackedEvent() {
-		assertThrows(IllegalArgumentException.class, () -> tracker.replaceEvent(event("Unbekannt"), new Snapshot(new byte[0], "x")));
+		assertThrows(IllegalArgumentException.class, () -> tracker.replaceEntity(event("Unbekannt"), new Snapshot(new byte[0], "x")));
 	}
 
 	@Test

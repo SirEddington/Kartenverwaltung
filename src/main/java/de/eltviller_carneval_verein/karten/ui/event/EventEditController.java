@@ -185,7 +185,7 @@ public class EventEditController {
 		setupCollums();
 		setupDetailWriteThrough();
 		setupContextMenu();
-		DirtyIndicator.bind(btnSave);
+		DirtyIndicator.bind(btnSave, ChangeTracker.events());
 	}
 
 	/**
@@ -333,7 +333,7 @@ public class EventEditController {
 		// 4. Events in Tabelle laden
 		masterEventData.clear();
 		masterEventData.setAll(repository.loadEvents());
-		masterEventData.forEach(ChangeTracker.getInstance()::ensureTracked);
+		masterEventData.forEach(ChangeTracker.events()::ensureTracked);
 
 		// 5. Auswahl-Listener mit Null-Checks gegen NPEs
 		eventTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
@@ -619,7 +619,7 @@ public class EventEditController {
 	private void refreshEventTable(Event selectEvent) {
 		currentEvent = selectEvent;
 		masterEventData.setAll(repository.loadEvents());
-		masterEventData.forEach(ChangeTracker.getInstance()::ensureTracked);
+		masterEventData.forEach(ChangeTracker.events()::ensureTracked);
 		if (currentEvent != null && masterEventData.contains(selectEvent)) {
 			eventTable.getSelectionModel().select(selectEvent);
 		} else {

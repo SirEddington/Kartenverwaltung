@@ -95,7 +95,7 @@ public class AccountingShellController {
 
 	@FXML
 	public void initialize() {
-		DirtyIndicator.bind(btnSave);
+		DirtyIndicator.bind(btnSave, ChangeTracker.events());
 
 		// "Alle" ist als echter (null-)Eintrag Teil der Liste, damit er wie eine
 		// normale Auswahl wirkt, statt ein Sonderfall über einen extra Button zu sein.
@@ -121,7 +121,7 @@ public class AccountingShellController {
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			currentEvent = selectedEvent;
 			if (currentEvent != null) {
-				ChangeTracker.getInstance().ensureTracked(currentEvent);
+				ChangeTracker.events().ensureTracked(currentEvent);
 			}
 
 			List<Presentation> presentationItems = new ArrayList<>();

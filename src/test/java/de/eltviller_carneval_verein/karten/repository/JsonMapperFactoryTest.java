@@ -14,7 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 
-class EventMapperFactoryTest {
+class JsonMapperFactoryTest {
 
 	@Test
 	void savedFileIsByteIdenticalToTheFactorysSerialization(@TempDir File storageDir) throws IOException {
@@ -29,6 +29,6 @@ class EventMapperFactoryTest {
 
 		byte[] onDisk = Files.readAllBytes(new File(storageDir, event.getId() + ".json").toPath());
 		// Darauf beruht der ChangeTracker: "geändert" muss dem entsprechen, was gespeichert würde
-		assertArrayEquals(EventMapperFactory.create().writeValueAsBytes(event), onDisk);
+		assertArrayEquals(JsonMapperFactory.create().writeValueAsBytes(event), onDisk);
 	}
 }
