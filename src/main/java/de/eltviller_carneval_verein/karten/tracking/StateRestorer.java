@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -34,6 +36,8 @@ public final class StateRestorer<T> {
 	public interface Listener<T> {
 		void onRestored(T replaced, T restored);
 	}
+
+	private static final Logger LOG = Logger.getLogger(StateRestorer.class.getName());
 
 	private static StateRestorer<Event> eventRestorer;
 	private static StateRestorer<Hall> hallRestorer;
@@ -99,7 +103,12 @@ public final class StateRestorer<T> {
 		replaceInCache.accept(restored);
 		tracker.replaceEntity(restored, state);
 		for (Listener<T> listener : new ArrayList<>(listeners)) {
-			listener.onRestored(current, restored);
+			try {
+				listener.onRestored(current, restored);
+			} catch (RuntimeException e) {
+				// Wiederhergestellt ist wiederhergestellt: ein Listener darf das nicht wie einen Fehlschlag aussehen lassen
+				LOG.log(Level.SEVERE, "Listener des Wiederherstellens ist fehlgeschlagen: " + restored, e);
+			}
 		}
 		return restored;
 	}

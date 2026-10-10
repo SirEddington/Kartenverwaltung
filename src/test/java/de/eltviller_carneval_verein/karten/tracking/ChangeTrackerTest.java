@@ -16,6 +16,13 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
@@ -351,6 +358,55 @@ class ChangeTrackerTest {
 	@Test
 	void replaceEventRejectsAnUntrackedEvent() {
 		assertThrows(IllegalArgumentException.class, () -> tracker.replaceEntity(event("Unbekannt"), new Snapshot(new byte[0], "x")));
+	}
+
+	@Test
+	void throwingListenerNeitherStopsTheOthersNorTheComparisonOfOtherEvents() {
+		Event first = event("Eins");
+		Event second = event("Zwei");
+		tracker.track(first);
+		tracker.track(second);
+		tracker.addListener((e, before, after) -> {
+			throw new IllegalStateException("kaputte Live-Prüfung");
+		});
+		List<Event> seen = new ArrayList<>();
+		tracker.addListener((e, before, after) -> seen.add(e));
+		firstSeat(first).setPrice(1);
+		firstSeat(second).setPrice(2);
+
+		tracker.checkAll(); // darf nicht werfen
+
+		assertEquals(List.of(first, second), seen, "Die übrigen Listener und Events kommen trotzdem dran");
+		assertTrue(tracker.isDirty(first));
+		assertTrue(tracker.isDirty(second));
+	}
+
+	@Test
+	void failingSnapshotOfOneEventDoesNotBlockTheOthers() {
+		ObjectMapper failingForBoom = new ObjectMapper() {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public byte[] writeValueAsBytes(Object value) throws JsonProcessingException {
+				if (value instanceof Event event && "Boom".equals(event.getName())) {
+					throw JsonMappingException.from((JsonParser) null, "kaputt");
+				}
+				return super.writeValueAsBytes(value);
+			}
+		};
+		failingForBoom.registerModule(new JavaTimeModule());
+		failingForBoom.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+		ChangeTracker<Event> failing = new ChangeTracker<>(Event::getId, failingForBoom);
+		Event broken = event("Eins");
+		Event healthy = event("Zwei");
+		failing.track(broken);
+		failing.track(healthy);
+		broken.changeName("Boom");
+		firstSeat(healthy).setPrice(77);
+
+		assertThrows(IllegalStateException.class, failing::checkAll);
+
+		assertTrue(failing.isDirty(healthy), "Das gesunde Event wurde trotz des Fehlers verglichen");
 	}
 
 	@Test

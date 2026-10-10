@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -76,7 +77,7 @@ class JsonEventRepositoryListenerTest {
 		repository.deleteEvent(event);
 
 		assertEquals(List.of("saved Kampagne", "deleted Kampagne"), recorder.calls);
-		assertTrue(new File(storageDir, event.getId() + ".json").exists() == false, "gelöscht");
+		assertFalse(new File(storageDir, event.getId() + ".json").exists(), "gelöscht");
 	}
 
 	@Test

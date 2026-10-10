@@ -8,6 +8,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -88,10 +90,12 @@ public final class ChangeTracker<T> {
 		}
 	}
 
+	private static final Logger LOG = Logger.getLogger(ChangeTracker.class.getName());
+
 	private static ChangeTracker<Event> eventTracker;
 	private static ChangeTracker<Hall> hallTracker;
 
-	private final ObjectMapper mapper = JsonMapperFactory.create();
+	private final ObjectMapper mapper;
 	private final Function<T, String> idOf;
 	// Schlüssel ist die ID, nicht das Objekt: Das Objekt kann beim Wiederherstellen ausgetauscht werden.
 	private final Map<String, Entry<T>> entries = new LinkedHashMap<>();
@@ -121,7 +125,13 @@ public final class ChangeTracker<T> {
 	 * @param idOf liefert die ID der Entität (Schlüssel des Verfolgens)
 	 */
 	public ChangeTracker(Function<T, String> idOf) {
+		this(idOf, JsonMapperFactory.create());
+	}
+
+	/** Paketsichtbar für Tests, die das Serialisieren gezielt scheitern lassen. */
+	ChangeTracker(Function<T, String> idOf, ObjectMapper mapper) {
 		this.idOf = idOf;
+		this.mapper = mapper;
 	}
 
 	/**
@@ -188,9 +198,7 @@ public final class ChangeTracker<T> {
 		entry.dirty.set(!state.equals(entry.baseline));
 		updateAnyDirty();
 		if (!state.equals(before)) {
-			for (Listener<T> listener : new ArrayList<>(listeners)) {
-				listener.onChanged(replacement, before, state);
-			}
+			notifyListeners(replacement, before, state);
 		}
 	}
 
@@ -210,11 +218,24 @@ public final class ChangeTracker<T> {
 
 	/** Vergleicht alle verfolgten Entitäten (siehe {@link #check(Object)}). */
 	public void checkAll() {
+		RuntimeException firstFailure = null;
 		// Kopie, weil ein Listener track()/reset() aufrufen darf
 		for (Entry<T> entry : new ArrayList<>(entries.values())) {
-			if (entries.get(idOf.apply(entry.entity)) == entry) {
-				check(entry);
+			if (entries.get(idOf.apply(entry.entity)) != entry) {
+				continue;
 			}
+			try {
+				check(entry);
+			} catch (RuntimeException e) {
+				// Eine nicht serialisierbare Entität darf den Vergleich der übrigen nicht verhindern: Sonst
+				// bliebe deren Änderung unbemerkt, und beim Verlassen eines Screens ginge sie verloren.
+				if (firstFailure == null) {
+					firstFailure = e;
+				}
+			}
+		}
+		if (firstFailure != null) {
+			throw firstFailure;
 		}
 	}
 
@@ -290,10 +311,23 @@ public final class ChangeTracker<T> {
 		entry.last = current;
 		entry.dirty.set(!current.equals(entry.baseline));
 		updateAnyDirty();
-		for (Listener<T> listener : new ArrayList<>(listeners)) {
-			listener.onChanged(entry.entity, before, current);
-		}
+		notifyListeners(entry.entity, before, current);
 		return true;
+	}
+
+	/**
+	 * Meldet den Zustandswechsel allen Listenern. Eine Ausnahme in einem Listener (z. B. der Live-Prüfung) wird nur
+	 * geloggt: Die Änderungserkennung selbst hat schon richtig gearbeitet, und die übrigen Listener und
+	 * Entitäten sollen davon nichts merken.
+	 */
+	private void notifyListeners(T entity, Snapshot before, Snapshot after) {
+		for (Listener<T> listener : new ArrayList<>(listeners)) {
+			try {
+				listener.onChanged(entity, before, after);
+			} catch (RuntimeException e) {
+				LOG.log(Level.SEVERE, "Listener der Änderungserkennung ist fehlgeschlagen: " + entity, e);
+			}
+		}
 	}
 
 	private void updateAnyDirty() {
