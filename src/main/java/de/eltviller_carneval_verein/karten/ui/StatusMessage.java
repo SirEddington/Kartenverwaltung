@@ -90,6 +90,28 @@ public final class StatusMessage {
 		show(describe(result, prefix));
 	}
 
+	/**
+	 * Zeigt das Ergebnis der Live-Prüfung wie {@link #show(ValidationResult)}, öffnet aber nie einen Dialog: Ist
+	 * gerade keine Fußzeile sichtbar, wird nichts angezeigt (eine Komfortmeldung ist keinen Dialog wert).
+	 */
+	public void showLive(ValidationResult result) {
+		if (result.isEmpty() || !isAnyLabelDisplayed()) {
+			return;
+		}
+		show(describe(result, ""));
+	}
+
+	/**
+	 * Entfernt eine stehende Fehler- oder Warnmeldung, weil nichts mehr zu beanstanden ist (auch die eines
+	 * gescheiterten Speicherversuchs). Info und Erfolgsmeldungen ("Gespeichert") bleiben.
+	 */
+	public void clearIssues() {
+		Entry entry = current.get();
+		if (entry != null && (entry.severity() == Severity.ERROR || entry.severity() == Severity.WARNING)) {
+			clear();
+		}
+	}
+
 	/** Entfernt die aktuelle Meldung, z. B. beim Wechsel des Screens oder der Ansicht. */
 	public void clear() {
 		stopAutoClear();

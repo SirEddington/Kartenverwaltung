@@ -17,6 +17,7 @@ import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
+import de.eltviller_carneval_verein.karten.ui.LiveValidator;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
@@ -64,6 +65,7 @@ public class MainApp extends Application {
 		repository.addListener(trackerUpdater(ChangeTracker.events()));
 		JsonHallRepository.getInstance().addListener(trackerUpdater(ChangeTracker.halls()));
 		ChangeTrigger.install();
+		LiveValidator.install();
 
 		// Schließen der App mit ungespeicherten Änderungen: erst nachfragen
 		primaryStage.setOnCloseRequest(e -> {
