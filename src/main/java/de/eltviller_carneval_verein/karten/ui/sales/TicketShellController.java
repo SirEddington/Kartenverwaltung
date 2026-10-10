@@ -8,7 +8,9 @@ import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -43,6 +45,8 @@ public class TicketShellController {
 	@FXML
 	private Button btnToggleEdit;
 	@FXML
+	private Button btnSave;
+	@FXML
 	private StackPane contentArea;
 	@FXML
 	private Label lblHeader;
@@ -55,12 +59,17 @@ public class TicketShellController {
 
 	@FXML
 	public void initialize() {
+		DirtyIndicator.bind(btnSave);
+
 		// Events in ComboBox laden (Tabelle bleibt initial leer)
 		eventComboBox.getItems().setAll(eventRepository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
 
 		// Event- & Vorstellungs-Listener einrichten
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			currentEvent = selectedEvent;
+			if (currentEvent != null) {
+				ChangeTracker.getInstance().ensureTracked(currentEvent);
+			}
 			presComboBox.getItems().clear();
 			presComboBox.getItems().setAll(currentEvent.getPresentations());
 			if (activeContentController != null) {

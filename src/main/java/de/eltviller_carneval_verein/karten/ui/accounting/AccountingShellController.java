@@ -14,7 +14,9 @@ import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -79,6 +81,8 @@ public class AccountingShellController {
 	@FXML
 	private Button btnToggleEdit;
 	@FXML
+	private Button btnSave;
+	@FXML
 	private SplitMenuButton btnExport;
 	@FXML
 	private StackPane contentArea;
@@ -91,6 +95,8 @@ public class AccountingShellController {
 
 	@FXML
 	public void initialize() {
+		DirtyIndicator.bind(btnSave);
+
 		// "Alle" ist als echter (null-)Eintrag Teil der Liste, damit er wie eine
 		// normale Auswahl wirkt, statt ein Sonderfall über einen extra Button zu sein.
 		presComboBox.setConverter(new StringConverter<Presentation>() {
@@ -114,6 +120,9 @@ public class AccountingShellController {
 
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			currentEvent = selectedEvent;
+			if (currentEvent != null) {
+				ChangeTracker.getInstance().ensureTracked(currentEvent);
+			}
 
 			List<Presentation> presentationItems = new ArrayList<>();
 			presentationItems.add(null); // "Alle (Gesamtbilanz)"

@@ -91,8 +91,8 @@ public final class ChangeTracker {
 		return INSTANCE;
 	}
 
-	/** Paketsichtbar, damit Tests eine eigene Instanz nutzen können, ohne den Singleton anzufassen. */
-	ChangeTracker() {
+	/** Die App nutzt {@link #getInstance()}; eine eigene Instanz ist für Tests gedacht, ohne den Singleton anzufassen. */
+	public ChangeTracker() {
 	}
 
 	/**
@@ -115,11 +115,58 @@ public final class ChangeTracker {
 	}
 
 	/**
-	 * Das Event wurde erfolgreich gespeichert (aufgerufen vom {@code EventSaver}): Der aktuelle Zustand wird zur
-	 * neuen Baseline. War das Event noch nicht verfolgt, wird es jetzt verfolgt.
+	 * Wie {@link #track(Event)}, aber nur für ein noch nicht verfolgtes Event: Ein Screen meldet damit jedes Event,
+	 * das er anzeigt oder bearbeitet, ohne dass eine schon erkannte Änderung dabei verloren geht.
+	 */
+	public void ensureTracked(Event event) {
+		if (!entries.containsKey(event.getId())) {
+			track(event);
+		}
+	}
+
+	/**
+	 * Das Event wurde gespeichert (das Repository meldet jedes Speichern, auch am {@code EventSaver} vorbei): Der
+	 * aktuelle Zustand wird zur neuen Baseline. War das Event noch nicht verfolgt, wird es jetzt verfolgt.
 	 */
 	public void markSaved(Event event) {
 		track(event);
+	}
+
+	/** Das Event wurde gelöscht: Es wird nicht mehr verfolgt und kann beim Verlassen nicht wieder angeboten werden. */
+	public void untrack(Event event) {
+		Entry entry = entries.remove(event.getId());
+		if (entry != null) {
+			entry.dirty.set(false);
+			updateAnyDirty();
+		}
+	}
+
+	/**
+	 * Das verfolgte Event wurde durch ein anderes Objekt im Zustand {@code state} ersetzt (Wiederherstellen, siehe
+	 * {@code EventRestorer}). Die Baseline bleibt, damit ein Zustand vor dem Speichern wieder "geändert" heißen
+	 * kann und der gespeicherte Stand wieder "sauber". Die Listener erfahren den Zustandswechsel wie bei jeder
+	 * anderen Änderung.
+	 */
+	public void replaceEvent(Event replacement, Snapshot state) {
+		Entry entry = entries.get(replacement.getId());
+		if (entry == null) {
+			throw new IllegalArgumentException("Event wird nicht verfolgt: " + replacement);
+		}
+		Snapshot before = entry.last;
+		entry.event = replacement;
+		entry.last = state;
+		entry.dirty.set(!state.equals(entry.baseline));
+		updateAnyDirty();
+		if (!state.equals(before)) {
+			for (Listener listener : new ArrayList<>(listeners)) {
+				listener.onChanged(replacement, before, state);
+			}
+		}
+	}
+
+	/** Die Events mit ungespeicherten Änderungen (nach dem letzten Vergleich), in der Reihenfolge des Verfolgens. */
+	public List<Event> dirtyEvents() {
+		return entries.values().stream().filter(e -> e.dirty.get()).map(e -> e.event).toList();
 	}
 
 	/**

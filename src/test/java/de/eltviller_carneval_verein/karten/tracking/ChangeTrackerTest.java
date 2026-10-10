@@ -275,6 +275,85 @@ class ChangeTrackerTest {
 	}
 
 	@Test
+	void ensureTrackedKeepsAnAlreadyDetectedChange() {
+		Event event = event("Kampagne");
+		tracker.track(event);
+		firstSeat(event).setPrice(1500);
+		tracker.check(event);
+
+		tracker.ensureTracked(event);
+
+		assertTrue(tracker.isDirty(event));
+	}
+
+	@Test
+	void ensureTrackedStartsTrackingAnUnknownEvent() {
+		Event event = event("Kampagne");
+
+		tracker.ensureTracked(event);
+
+		assertFalse(tracker.isDirty(event));
+		assertEquals(tracker.baseline(event), tracker.last(event));
+	}
+
+	@Test
+	void untrackedEventCanNoLongerBeDirty() {
+		Event event = event("Kampagne");
+		tracker.track(event);
+		firstSeat(event).setPrice(1500);
+		tracker.check(event);
+
+		tracker.untrack(event);
+
+		assertFalse(tracker.isDirty(event));
+		assertFalse(tracker.anyDirty());
+		assertTrue(tracker.dirtyEvents().isEmpty());
+		assertNull(tracker.baseline(event));
+	}
+
+	@Test
+	void dirtyEventsListsOnlyChangedEventsInTrackingOrder() {
+		Event first = event("Eins");
+		Event second = event("Zwei");
+		Event third = event("Drei");
+		tracker.track(first);
+		tracker.track(second);
+		tracker.track(third);
+		firstSeat(third).setPrice(1);
+		firstSeat(first).setPrice(1);
+		tracker.checkAll();
+
+		assertEquals(List.of(first, third), tracker.dirtyEvents());
+	}
+
+	@Test
+	void replaceEventSwapsTheObjectAndKeepsTheBaseline() {
+		Event original = event("Kampagne");
+		tracker.track(original);
+		Snapshot baseline = tracker.baseline(original);
+		firstSeat(original).setPrice(1500);
+		tracker.check(original);
+		Snapshot changed = tracker.last(original);
+
+		Event sameId = new Event(original.getId());
+		sameId.changeName("Kampagne");
+
+		tracker.replaceEvent(sameId, baseline);
+
+		assertFalse(tracker.isDirty(sameId));
+		assertEquals(baseline, tracker.baseline(sameId));
+		assertEquals(baseline, tracker.last(sameId));
+		assertEquals(2, calls.size());
+		assertEquals(changed, calls.get(1).before());
+		assertEquals(baseline, calls.get(1).after());
+	}
+
+	@Test
+	void replaceEventRejectsAnUntrackedEvent() {
+		assertThrows(IllegalArgumentException.class, () -> tracker.replaceEvent(event("Unbekannt"), new Snapshot(new byte[0], "x")));
+	}
+
+	@Test
 	void listenerMayResetTheTrackerWhileChecking() {
 		Event first = event("Eins");
 		Event second = event("Zwei");

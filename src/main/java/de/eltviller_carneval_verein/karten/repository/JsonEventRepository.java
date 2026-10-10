@@ -31,6 +31,8 @@ public class JsonEventRepository implements EventRepository {
 	// hier nur gesammelt - anzeigen muss die aufrufende Schicht (siehe getAndClearLoadWarnings()).
 	private final List<String> loadWarnings = new ArrayList<>();
 
+	private final List<EventRepositoryListener> listeners = new ArrayList<>();
+
 	/**
 	 * Liefert die einzige Instanz des Repositorys. Alle Controller sollen sich
 	 * darüber die Instanz holen, statt selbst eine eigene zu erzeugen, damit
@@ -192,6 +194,30 @@ public class JsonEventRepository implements EventRepository {
 		if (!cachedEvents.contains(event)) {
 			cachedEvents.add(event);
 		}
+
+		for (EventRepositoryListener listener : new ArrayList<>(listeners)) {
+			listener.eventSaved(event);
+		}
+	}
+
+	/** Meldet einen Listener an, der nach jedem Speichern und Löschen eines Events benachrichtigt wird. */
+	public void addListener(EventRepositoryListener listener) {
+		listeners.add(listener);
+	}
+
+	/**
+	 * Ersetzt das Event mit derselben ID im Cache durch ein anderes Objekt, z. B. nach dem Wiederherstellen eines
+	 * früheren Zustands. Die Datei bleibt unberührt, und es wird kein Listener benachrichtigt. Ist das Event nicht
+	 * im Cache (noch nie gespeichert), passiert nichts.
+	 */
+	public void replaceCachedEvent(Event replacement) {
+		if (cachedEvents == null) {
+			return;
+		}
+		int index = cachedEvents.indexOf(replacement);
+		if (index >= 0) {
+			cachedEvents.set(index, replacement);
+		}
 	}
 
 	@Override
@@ -220,6 +246,10 @@ public class JsonEventRepository implements EventRepository {
 
 		if (cachedEvents != null) {
 			cachedEvents.remove(event);
+		}
+
+		for (EventRepositoryListener listener : new ArrayList<>(listeners)) {
+			listener.eventDeleted(event);
 		}
 	}
 

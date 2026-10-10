@@ -11,8 +11,11 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.repository.EventRepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
@@ -55,6 +58,28 @@ public class MainApp extends Application {
 		// sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
 		JsonEventRepository repository = JsonEventRepository.getInstance();
 		repository.loadEvents();
+
+		// Jedes Speichern und Löschen führt den gespeicherten Stand der Änderungserkennung nach, egal von wo aus
+		ChangeTracker tracker = ChangeTracker.getInstance();
+		repository.addListener(new EventRepositoryListener() {
+			@Override
+			public void eventSaved(Event event) {
+				tracker.markSaved(event);
+			}
+
+			@Override
+			public void eventDeleted(Event event) {
+				tracker.untrack(event);
+			}
+		});
+
+		// Schließen der App mit ungespeicherten Änderungen: erst nachfragen
+		primaryStage.setOnCloseRequest(e -> {
+			if (!LeaveGuard.confirmLeave()) {
+				e.consume();
+			}
+		});
+
 		List<String> loadWarnings = repository.getAndClearLoadWarnings();
 		if (!loadWarnings.isEmpty()) {
 			showAlert("Warnung beim Laden der Events", String.join("\n\n", loadWarnings), AlertType.WARNING);
@@ -92,6 +117,9 @@ public class MainApp extends Application {
 	public static void showHallEditView(Hall selectedHall, HallObject selectedObject, boolean editable) {
 		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/HallEditView.fxml";
 		try {
+			if (!LeaveGuard.confirmLeave()) {
+				return;
+			}
 			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
@@ -118,6 +146,9 @@ public class MainApp extends Application {
 		try {
 
 			// Aktuelle Fenstergröße holen
+			if (!LeaveGuard.confirmLeave()) {
+				return;
+			}
 			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();
@@ -145,6 +176,9 @@ public class MainApp extends Application {
 	private static void loadScene(String fxmlPath) {
 		try {
 			// Aktuelle Fenstergröße holen
+			if (!LeaveGuard.confirmLeave()) {
+				return;
+			}
 			StatusMessage.getInstance().clear();
 			width = primaryStage.getWidth();
 			height = primaryStage.getHeight();

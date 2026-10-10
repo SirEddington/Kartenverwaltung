@@ -3,7 +3,6 @@ package de.eltviller_carneval_verein.karten.ui;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.repository.EventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.validation.EventValidator;
 import de.eltviller_carneval_verein.karten.validation.ValidationResult;
 
@@ -33,9 +32,6 @@ public final class EventSaver {
 	 */
 	public static boolean save(Event event) {
 		SaveResult result = trySave(event, JsonEventRepository.getInstance());
-		if (result.saved()) {
-			ChangeTracker.getInstance().markSaved(event);
-		}
 		StatusMessage messages = StatusMessage.getInstance();
 		if (!result.saved()) {
 			messages.show(result.validation(), "Nicht gespeichert: ");
