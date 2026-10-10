@@ -10,8 +10,6 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import de.eltviller_carneval_verein.karten.AppPaths;
 import de.eltviller_carneval_verein.karten.model.Event;
@@ -61,10 +59,7 @@ public class JsonEventRepository implements EventRepository {
 	JsonEventRepository(File storageDir) {
 		this.storageDir = storageDir;
 
-		this.objectMapper = new ObjectMapper();
-		this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
-		this.objectMapper.registerModule(new JavaTimeModule());
-		this.objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+		this.objectMapper = EventMapperFactory.create();
 
 		boolean isNewStorageDir = !storageDir.exists();
 		if (isNewStorageDir) {

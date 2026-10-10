@@ -12,6 +12,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
@@ -101,10 +102,7 @@ public class MainApp extends Application {
 			HallEditController controller = loader.getController();
 			controller.initData(selectedHall, selectedObject, editable);
 
-			Scene scene = new Scene(wrapWithBackground(root), width, height);
-			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
-			scene.getStylesheets().add(css);
-			primaryStage.setScene(scene);
+			primaryStage.setScene(createScene(root));
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
@@ -137,10 +135,7 @@ public class MainApp extends Application {
 			controller.initData(selectedEvent, selectedPres, selectedTable, selectedSeat, editable);
 
 			// 5. Scene setzen
-			Scene scene = new Scene(wrapWithBackground(root), width, height);
-			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
-			scene.getStylesheets().add(css);
-			primaryStage.setScene(scene);
+			primaryStage.setScene(createScene(root));
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
@@ -161,14 +156,23 @@ public class MainApp extends Application {
 			Parent root = loader.load();
 
 			// 3. Scene setzen
-			Scene scene = new Scene(wrapWithBackground(root), width, height);
-			String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
-			scene.getStylesheets().add(css);
-			primaryStage.setScene(scene);
+			primaryStage.setScene(createScene(root));
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
 		}
+	}
+
+	/**
+	 * Die einzige Stelle, an der die Scenes der App entstehen: Hintergrund, Stylesheet und der Filter, der die
+	 * Änderungserkennung auslöst ({@link ChangeTrigger}).
+	 */
+	private static Scene createScene(Parent content) {
+		Scene scene = new Scene(wrapWithBackground(content), width, height);
+		String css = MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
+		scene.getStylesheets().add(css);
+		ChangeTrigger.install(scene);
+		return scene;
 	}
 
 	/**
