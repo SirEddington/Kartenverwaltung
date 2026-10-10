@@ -146,8 +146,14 @@ public class HallEditController {
 
 	@FXML
 	private void handleBackToHallOverview() {
+		boolean wasEditable = editMode;
 		setEditable(false);
 		MainApp.showHallManagementView();
+		// Hat der Nutzer im Dialog "Abbrechen" gewählt, bleibt dieser Screen stehen: Bearbeitungsmodus zurückgeben,
+		// sonst wäre der Speichern-Button gesperrt, obwohl ungespeicherte Änderungen da sind
+		if (btnSave.getScene() != null && btnSave.getScene().getWindow() != null) {
+			setEditable(wasEditable);
+		}
 	}
 
 	@FXML

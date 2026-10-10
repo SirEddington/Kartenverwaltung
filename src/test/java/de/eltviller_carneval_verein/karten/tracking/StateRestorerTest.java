@@ -177,6 +177,17 @@ class StateRestorerTest {
 	}
 
 	@Test
+	void restoringAnUntrackedEventLeavesTheCacheUntouched() {
+		Event tracked = event();
+		tracker.track(tracked);
+		Snapshot state = tracker.baseline(tracked);
+
+		assertThrows(IllegalArgumentException.class, () -> restorer.restore(event(), state));
+
+		assertTrue(cache.isEmpty(), "Der Cache darf nicht verändert sein, wenn der Tracker das Event nicht kennt");
+	}
+
+	@Test
 	void restoredBytesAreIdenticalToTheSnapshot() throws IOException {
 		Event event = event();
 		tracker.track(event);

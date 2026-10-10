@@ -31,7 +31,7 @@ public class JsonEventRepository implements EventRepository {
 	// hier nur gesammelt - anzeigen muss die aufrufende Schicht (siehe getAndClearLoadWarnings()).
 	private final List<String> loadWarnings = new ArrayList<>();
 
-	private final List<RepositoryListener<Event>> listeners = new ArrayList<>();
+	private final RepositoryListeners<Event> listeners = new RepositoryListeners<>();
 
 	/**
 	 * Liefert die einzige Instanz des Repositorys. Alle Controller sollen sich
@@ -195,9 +195,7 @@ public class JsonEventRepository implements EventRepository {
 			cachedEvents.add(event);
 		}
 
-		for (RepositoryListener<Event> listener : new ArrayList<>(listeners)) {
-			listener.saved(event);
-		}
+		listeners.notifySaved(event);
 	}
 
 	/** Meldet einen Listener an, der nach jedem Speichern und Löschen eines Events benachrichtigt wird. */
@@ -248,9 +246,7 @@ public class JsonEventRepository implements EventRepository {
 			cachedEvents.remove(event);
 		}
 
-		for (RepositoryListener<Event> listener : new ArrayList<>(listeners)) {
-			listener.deleted(event);
-		}
+		listeners.notifyDeleted(event);
 	}
 
 }

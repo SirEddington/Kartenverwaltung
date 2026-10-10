@@ -5,25 +5,35 @@ import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import javafx.animation.PauseTransition;
+import javafx.collections.ListChangeListener;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
-import javafx.scene.Scene;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
+import javafx.stage.Window;
 import javafx.util.Duration;
 
 /**
- * Löst den Vergleich des {@link ChangeTracker} aus, ohne dass einzelne Felder verdrahtet werden müssen: Ein
- * Event-Filter an der Scene hört auf Maus-, Tasten- und Aktionsereignisse und startet bei jedem davon eine
- * Wartezeit neu. Erst nach {@value #DEBOUNCE_MILLIS} ms Ruhe wird verglichen, weil die eigentlichen Handler
+ * Löst den Vergleich der {@link ChangeTracker} aus, ohne dass einzelne Felder verdrahtet werden müssen: Ein
+ * Event-Filter an jedem Fenster der App hört auf Maus-, Tasten- und Aktionsereignisse und startet bei jedem davon
+ * eine Wartezeit neu. Erst nach {@value #DEBOUNCE_MILLIS} ms Ruhe wird verglichen, weil die eigentlichen Handler
  * (Zellen-Commit, Spinner, Auswahl) erst nach dem Filter laufen und beim Tippen nicht bei jedem Zeichen
  * serialisiert werden soll.
+ *
+ * <p>
+ * Der Filter hängt an den Fenstern, nicht an der Scene des Hauptfensters: Popups (Detailfenster der
+ * Saalübersicht, Dropdown-Listen) und Dialoge sind eigene Fenster, ihre Ereignisse erreichen die Scene nie.
  */
 public final class ChangeTrigger {
 
 	private static final Logger LOG = Logger.getLogger(ChangeTrigger.class.getName());
 
 	static final int DEBOUNCE_MILLIS = 300;
+
+	/** Schlüssel in {@link Window#getProperties()}: Der Filter ist schon installiert (ein Fenster wird mehrfach gezeigt). */
+	private static final Object INSTALLED = new Object();
+
+	private static PauseTransition pause;
 
 	private ChangeTrigger() {
 	}
@@ -38,17 +48,34 @@ public final class ChangeTrigger {
 		}
 	}
 
-	/** Installiert den Filter an der Scene (je Scene einmal; die Scenes der App werden bei jedem Screen neu erzeugt). */
-	public static void install(Scene scene) {
-		PauseTransition pause = new PauseTransition(Duration.millis(DEBOUNCE_MILLIS));
+	/** Installiert den Filter an allen Fenstern, auch an später geöffneten (einmal beim Start, im FX-Thread). */
+	public static void install() {
+		if (pause != null) {
+			return;
+		}
+		pause = new PauseTransition(Duration.millis(DEBOUNCE_MILLIS));
 		pause.setOnFinished(e -> {
 			checkAll(ChangeTracker.events());
 			checkAll(ChangeTracker.halls());
 		});
 
+		Window.getWindows().forEach(ChangeTrigger::attach);
+		Window.getWindows().addListener((ListChangeListener<Window>) change -> {
+			while (change.next()) {
+				if (change.wasAdded()) {
+					change.getAddedSubList().forEach(ChangeTrigger::attach);
+				}
+			}
+		});
+	}
+
+	private static void attach(Window window) {
+		if (window.getProperties().putIfAbsent(INSTALLED, Boolean.TRUE) != null) {
+			return;
+		}
 		EventHandler<javafx.event.Event> restart = e -> pause.playFromStart();
-		scene.addEventFilter(MouseEvent.MOUSE_RELEASED, restart);
-		scene.addEventFilter(KeyEvent.KEY_RELEASED, restart);
-		scene.addEventFilter(ActionEvent.ACTION, restart);
+		window.addEventFilter(MouseEvent.MOUSE_RELEASED, restart);
+		window.addEventFilter(KeyEvent.KEY_RELEASED, restart);
+		window.addEventFilter(ActionEvent.ACTION, restart);
 	}
 }

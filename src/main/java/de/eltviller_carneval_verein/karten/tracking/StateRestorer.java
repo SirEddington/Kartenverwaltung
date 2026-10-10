@@ -86,6 +86,10 @@ public final class StateRestorer<T> {
 	 * @return das neue Objekt, das jetzt im Cache und im Tracker steht
 	 */
 	public T restore(T current, Snapshot state) {
+		// Vor dem Austausch im Cache prüfen: Sonst bliebe nach der Ausnahme das neue Objekt im Cache, ohne verfolgt zu sein
+		if (tracker.baseline(current) == null) {
+			throw new IllegalArgumentException("Wird nicht verfolgt: " + current);
+		}
 		T restored;
 		try {
 			restored = mapper.readValue(state.bytes(), type);

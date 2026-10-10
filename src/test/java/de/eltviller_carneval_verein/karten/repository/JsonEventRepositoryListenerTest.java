@@ -54,6 +54,32 @@ class JsonEventRepositoryListenerTest {
 	}
 
 	@Test
+	void failingListenerNeitherFailsTheSaveNorSkipsTheOthers(@TempDir File storageDir) {
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
+		repository.addListener(new RepositoryListener<Event>() {
+			@Override
+			public void saved(Event event) {
+				throw new IllegalStateException("kaputter Listener");
+			}
+
+			@Override
+			public void deleted(Event event) {
+				throw new IllegalStateException("kaputter Listener");
+			}
+		});
+		Recorder recorder = new Recorder();
+		repository.addListener(recorder);
+		Event event = named("Kampagne");
+
+		// Die Datei ist geschrieben, also darf der Aufrufer keine Ausnahme sehen
+		repository.saveEvent(event);
+		repository.deleteEvent(event);
+
+		assertEquals(List.of("saved Kampagne", "deleted Kampagne"), recorder.calls);
+		assertTrue(new File(storageDir, event.getId() + ".json").exists() == false, "gelöscht");
+	}
+
+	@Test
 	void failedSaveDoesNotNotifyListeners(@TempDir File storageDir) {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Recorder recorder = new Recorder();

@@ -63,6 +63,7 @@ public class MainApp extends Application {
 		// Jedes Speichern und Löschen führt den gespeicherten Stand der Änderungserkennung nach, egal von wo aus
 		repository.addListener(trackerUpdater(ChangeTracker.events()));
 		JsonHallRepository.getInstance().addListener(trackerUpdater(ChangeTracker.halls()));
+		ChangeTrigger.install();
 
 		// Schließen der App mit ungespeicherten Änderungen: erst nachfragen
 		primaryStage.setOnCloseRequest(e -> {
@@ -203,13 +204,11 @@ public class MainApp extends Application {
 	}
 
 	/**
-	 * Die einzige Stelle, an der die Scenes der App entstehen: Hintergrund, Stylesheet und der Filter, der die
-	 * Änderungserkennung auslöst ({@link ChangeTrigger}).
+	 * Die einzige Stelle, an der die Scenes der App entstehen: Hintergrund und Stylesheet.
 	 */
 	private static Scene createScene(Parent content) {
 		Scene scene = new Scene(wrapWithBackground(content), width, height);
 		scene.getStylesheets().add(stylesheetUrl());
-		ChangeTrigger.install(scene);
 		return scene;
 	}
 

@@ -31,7 +31,7 @@ public class JsonHallRepository implements HallRepository {
 	// anzeigen muss die aufrufende Schicht (siehe getAndClearLoadWarnings()).
 	private final List<String> loadWarnings = new ArrayList<>();
 
-	private final List<RepositoryListener<Hall>> listeners = new ArrayList<>();
+	private final RepositoryListeners<Hall> listeners = new RepositoryListeners<>();
 
 	/**
 	 * Liefert die einzige Instanz des Repositorys. Alle Controller sollen sich
@@ -203,9 +203,7 @@ public class JsonHallRepository implements HallRepository {
 			cachedHalls.add(hall);
 		}
 
-		for (RepositoryListener<Hall> listener : new ArrayList<>(listeners)) {
-			listener.saved(hall);
-		}
+		listeners.notifySaved(hall);
 	}
 
 	/** Meldet einen Listener an, der nach jedem Speichern und Löschen einer Halle benachrichtigt wird. */
@@ -256,9 +254,7 @@ public class JsonHallRepository implements HallRepository {
 			cachedHalls.remove(hall);
 		}
 
-		for (RepositoryListener<Hall> listener : new ArrayList<>(listeners)) {
-			listener.deleted(hall);
-		}
+		listeners.notifyDeleted(hall);
 	}
 
 }

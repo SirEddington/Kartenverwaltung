@@ -3,6 +3,8 @@ package de.eltviller_carneval_verein.karten.ui.event;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 import org.controlsfx.control.table.TableFilter;
@@ -748,8 +750,13 @@ public class EventEditController {
 
 	@FXML
 	private void handleBackToEventOverview() {
+		boolean wasEditable = editMode;
 		setEditable(false);
 		MainApp.showEventOverviewView();
+		// Hat der Nutzer im Dialog "Abbrechen" gewählt, bleibt dieser Screen stehen: Bearbeitungsmodus zurückgeben
+		if (btnSave.getScene() != null && btnSave.getScene().getWindow() != null) {
+			setEditable(wasEditable);
+		}
 	}
 
 	@FXML
@@ -766,9 +773,18 @@ public class EventEditController {
 			selectedSeat.setCollected(checkCollected.isSelected());
 			selectedSeat.setWheelchairAccessible(checkWheelchairAccessible.isSelected());
 		}
+		// Alle geänderten Events speichern, nicht nur das gewählte: "Speichern *" zeigt Änderungen an allen Events
+		// dieses Screens an und müsste sonst nach dem Speichern stehen bleiben
+		ChangeTracker.events().checkAll();
+		List<Event> toSave = new ArrayList<>(ChangeTracker.events().dirtyEntities());
 		Event event = eventTable.getSelectionModel().getSelectedItem();
-		if (event != null) {
-			EventSaver.save(event);
+		if (event != null && !toSave.contains(event)) {
+			toSave.add(0, event);
+		}
+		for (Event changed : toSave) {
+			if (!EventSaver.save(changed)) {
+				break; // die Fehler stehen in der Fußzeile
+			}
 		}
 	}
 
