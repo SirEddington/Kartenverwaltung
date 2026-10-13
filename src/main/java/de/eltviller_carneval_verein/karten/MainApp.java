@@ -45,7 +45,7 @@ public class MainApp extends Application {
 	@SuppressWarnings("exports")
 	@Override
 	public void start(Stage stage) throws Exception {
-		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/Yanone Kaffeesatz Bold.otf"), 12);
+		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/YanoneKaffeesatz-Bold.ttf"), 12);
 		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/Yanone Kaffeesatz Regular.ttf"), 12);
 
 		primaryStage = stage;
