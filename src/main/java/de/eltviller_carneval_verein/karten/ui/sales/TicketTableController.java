@@ -12,6 +12,7 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
+import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -155,6 +156,7 @@ public class TicketTableController implements ContentController {
 		} else if (selectedEvent != null && selectedEvent.getPresentations() != null) {
 			presentations.addAll(selectedEvent.getPresentations());
 		} else {
+			relayoutTable();
 			return;
 		}
 
@@ -169,6 +171,16 @@ public class TicketTableController implements ContentController {
 			}
 		}
 		masterData.setAll(seats);
+		relayoutTable();
+	}
+
+	/**
+	 * Erscheint oder verschwindet durch neue Daten der senkrechte Scroll-Balken, rechnet die Tabelle die Spaltenköpfe
+	 * mit der alten Breite, die Zeilen aber ohne den Balken: Köpfe und Spalten sitzen bis zum nächsten Layout (z. B. dem
+	 * ersten Scrollen) versetzt. Ein zweiter Layout-Durchgang nach dem Einfügen behebt das.
+	 */
+	private void relayoutTable() {
+		Platform.runLater(seatTable::requestLayout);
 	}
 
 	private void applyEditMode() {
