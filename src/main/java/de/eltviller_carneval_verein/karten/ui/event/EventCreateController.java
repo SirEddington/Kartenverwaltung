@@ -81,13 +81,16 @@ public class EventCreateController {
 			return;
 		}
 
-		if (currentEvent == null) {
-			currentEvent = buildNewEvent(name);
+		// Ein neues Event wird bei jedem Versuch aus den aktuellen Feldern gebaut und nicht gemerkt: Scheitert das
+		// Speichern, soll der nächste Versuch die inzwischen geänderten Eingaben übernehmen
+		Event event = currentEvent;
+		if (event == null) {
+			event = buildNewEvent(name);
 		} else {
-			currentEvent.changeName(name);
+			event.changeName(name);
 		}
 
-		if (!EventSaver.save(currentEvent)) {
+		if (!EventSaver.save(event)) {
 			return;
 		}
 		MainApp.showEventOverviewView();
