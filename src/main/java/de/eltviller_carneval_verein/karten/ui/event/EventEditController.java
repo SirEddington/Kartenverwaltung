@@ -19,6 +19,7 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import javafx.beans.binding.Bindings;
@@ -30,10 +31,7 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
-import javafx.scene.control.Alert;
-import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContextMenu;
@@ -443,13 +441,7 @@ public class EventEditController {
 	}
 
 	private void handleDeleteEvent(Event event) {
-		Alert confirmation = new Alert(AlertType.CONFIRMATION);
-		confirmation.setTitle("Event löschen");
-		confirmation.setHeaderText(null);
-		confirmation.setContentText("Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?");
-
-		MainApp.applyAppIcon(confirmation);
-		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
+		if (!ConfirmDialog.confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
 			return;
 		}
 
@@ -495,13 +487,7 @@ public class EventEditController {
 	}
 
 	private void handleDeletePres(Presentation presentation) {
-		Alert confirmation = new Alert(AlertType.CONFIRMATION);
-		confirmation.setTitle("Event löschen");
-		confirmation.setHeaderText(null);
-		confirmation.setContentText("Soll die Vorstellung \"" + presentation.getName() + "\" wirklich unwiderruflich gelöscht werden?");
-
-		MainApp.applyAppIcon(confirmation);
-		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
+		if (!ConfirmDialog.confirmDelete("Vorstellung löschen", "Soll die Vorstellung \"" + presentation.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
 			return;
 		}
 
@@ -542,13 +528,7 @@ public class EventEditController {
 	}
 
 	private void handleDeleteTable(Table table) {
-		Alert confirmation = new Alert(AlertType.CONFIRMATION);
-		confirmation.setTitle("Event löschen");
-		confirmation.setHeaderText(null);
-		confirmation.setContentText("Soll Tisch " + table.getTableNumber() + " wirklich unwiderruflich gelöscht werden?");
-
-		MainApp.applyAppIcon(confirmation);
-		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
+		if (!ConfirmDialog.confirmDelete("Tisch löschen", "Soll Tisch " + table.getTableNumber() + " wirklich unwiderruflich gelöscht werden?")) {
 			return;
 		}
 
@@ -586,13 +566,7 @@ public class EventEditController {
 	}
 
 	private void handleDeleteSeat(Seat seat) {
-		Alert confirmation = new Alert(AlertType.CONFIRMATION);
-		confirmation.setTitle("Event löschen");
-		confirmation.setHeaderText(null);
-		confirmation.setContentText("Soll Sitz " + seat.getSeatNumber() + " wirklich unwiderruflich gelöscht werden?");
-
-		MainApp.applyAppIcon(confirmation);
-		if (confirmation.showAndWait().filter(button -> button == ButtonType.OK).isEmpty()) {
+		if (!ConfirmDialog.confirmDelete("Sitz löschen", "Soll Sitz " + seat.getSeatNumber() + " wirklich unwiderruflich gelöscht werden?")) {
 			return;
 		}
 
