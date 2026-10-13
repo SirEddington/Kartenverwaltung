@@ -51,6 +51,16 @@
                 <ComboBox fx:id="shapeCombo" prefWidth="120.0" />
                 <Label text="Farbe:" />
                 <ColorPicker fx:id="colorPicker" />
+                <Separator />
+                <CheckBox fx:id="textAutoCheck" text="Text automatisch" selected="true" />
+                <Label text="Textgröße (cm):" />
+                <Spinner fx:id="textSizeSpinner" prefWidth="120.0" />
+                <Label text="Text horizontal:" />
+                <ComboBox fx:id="textAlignHCombo" prefWidth="120.0" />
+                <Label text="Text vertikal:" />
+                <ComboBox fx:id="textAlignVCombo" prefWidth="120.0" />
+                <Label text="Textdrehung (Grad):" />
+                <Spinner fx:id="textRotationSpinner" prefWidth="120.0" />
             </VBox>
         </VBox>
         </ScrollPane>

@@ -14,6 +14,7 @@ import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
+import de.eltviller_carneval_verein.karten.ui.hall.HallObjectText;
 import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
@@ -795,11 +796,7 @@ public class HallOverviewController implements ContentController {
 		hallObjectShape.setFill(parseHallObjectColor(hallObject.getColor()));
 		hallObjectShape.setStroke(Color.DARKGRAY);
 
-		Text hallObjectLabel = new Text(hallObject.getName());
-		hallObjectLabel.setX(hallObject.getPosX() + 10);
-		hallObjectLabel.setY(hallObject.getPosY() + 20);
-
-		return new Group(hallObjectShape, hallObjectLabel);
+		return new Group(hallObjectShape, HallObjectText.create(hallObject));
 	}
 
 	private static Color parseHallObjectColor(String color) {

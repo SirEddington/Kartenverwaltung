@@ -2,10 +2,13 @@ package de.eltviller_carneval_verein.karten.ui.hall;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Function;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Shape;
+import de.eltviller_carneval_verein.karten.model.TextAlignH;
+import de.eltviller_carneval_verein.karten.model.TextAlignV;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
@@ -13,6 +16,7 @@ import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
 import javafx.scene.Group;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ColorPicker;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Spinner;
@@ -27,7 +31,7 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
-import javafx.scene.text.Text;
+import javafx.util.StringConverter;
 
 /**
  * Hallenplan-Editor: zeigt die Hallenobjekte einer Halle auf einer zoom- und
@@ -90,6 +94,16 @@ public class HallPlanController {
 	private ComboBox<Shape> shapeCombo;
 	@FXML
 	private ColorPicker colorPicker;
+	@FXML
+	private CheckBox textAutoCheck;
+	@FXML
+	private Spinner<Double> textSizeSpinner;
+	@FXML
+	private ComboBox<TextAlignH> textAlignHCombo;
+	@FXML
+	private ComboBox<TextAlignV> textAlignVCombo;
+	@FXML
+	private Spinner<Double> textRotationSpinner;
 
 	@FXML
 	public void initialize() {
@@ -112,7 +126,12 @@ public class HallPlanController {
 	private void setupPanel() {
 		widthSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_WIDTH, 5));
 		heightSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_HEIGHT, 5));
-		for (Spinner<Double> spinner : java.util.List.of(widthSpinner, heightSpinner, posXSpinner, posYSpinner)) {
+		textSizeSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 1000.0, 20.0, 1));
+		SpinnerValueFactory.DoubleSpinnerValueFactory rotationFactory = new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 360.0, 0.0, 15);
+		// Über 360 Grad geht es bei 0 weiter
+		rotationFactory.setWrapAround(true);
+		textRotationSpinner.setValueFactory(rotationFactory);
+		for (Spinner<Double> spinner : java.util.List.of(widthSpinner, heightSpinner, posXSpinner, posYSpinner, textSizeSpinner, textRotationSpinner)) {
 			spinner.setEditable(true);
 			// Getippte Werte beim Verlassen des Feldes übernehmen
 			spinner.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
@@ -172,6 +191,109 @@ public class HallPlanController {
 				renderHall();
 			}
 		});
+		setupTextPanel();
+	}
+
+	/** Die Textfelder: Mit "Automatisch" sind sie gesperrt und zeigen die berechneten Werte. */
+	private void setupTextPanel() {
+		textAlignHCombo.getItems().setAll(TextAlignH.values());
+		textAlignHCombo.setConverter(displayNames(TextAlignH::getDisplayName));
+		textAlignVCombo.getItems().setAll(TextAlignV.values());
+		textAlignVCombo.setConverter(displayNames(TextAlignV::getDisplayName));
+
+		for (javafx.scene.Node field : java.util.List.of(textSizeSpinner, textAlignHCombo, textAlignVCombo, textRotationSpinner)) {
+			field.disableProperty().bind(textAutoCheck.selectedProperty());
+		}
+
+		textAutoCheck.selectedProperty().addListener((obs, oldVal, auto) -> {
+			if (updatingPanel || selectedObject == null) {
+				return;
+			}
+			if (!auto) {
+				// Von Hand weiter: Die Felder starten mit dem, was Auto gerade berechnet hat
+				HallObjectText.Layout current = HallObjectText.resolve(selectedObject);
+				selectedObject.setTextSize(roundForDisplay(current.fontSize()));
+				selectedObject.setTextRotation(roundForDisplay(current.rotation()));
+				selectedObject.setTextAlignH(current.alignH());
+				selectedObject.setTextAlignV(current.alignV());
+			}
+			selectedObject.setTextAuto(auto);
+			renderHall();
+		});
+		textSizeSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (isEditingText() && newVal != null) {
+				selectedObject.setTextSize(newVal);
+				renderHall();
+			}
+		});
+		textRotationSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (isEditingText() && newVal != null) {
+				selectedObject.setTextRotation(newVal);
+				renderHall();
+			}
+		});
+		textAlignHCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (isEditingText() && newVal != null) {
+				selectedObject.setTextAlignH(newVal);
+				renderHall();
+			}
+		});
+		textAlignVCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (isEditingText() && newVal != null) {
+				selectedObject.setTextAlignV(newVal);
+				renderHall();
+			}
+		});
+	}
+
+	/** Änderungen an den Textfeldern gelten nur für ein gewähltes Objekt ohne Auto und nicht beim Befüllen des Panels. */
+	private boolean isEditingText() {
+		return !updatingPanel && selectedObject != null && !selectedObject.isTextAuto();
+	}
+
+	private static <T> StringConverter<T> displayNames(Function<T, String> displayName) {
+		return new StringConverter<>() {
+			@Override
+			public String toString(T value) {
+				return value == null ? "" : displayName.apply(value);
+			}
+
+			@Override
+			public T fromString(String string) {
+				return null; // Bei fixer ComboBox-Auswahl nicht erforderlich
+			}
+		};
+	}
+
+	/** Auf eine Nachkommastelle, damit die Spinner keine langen Dezimalzahlen zeigen. */
+	private static double roundForDisplay(double value) {
+		return Math.round(value * 10) / 10.0;
+	}
+
+	/** Zeigt die Textwerte des Objekts im Panel; bei Auto die berechneten (gesperrt), sonst die gespeicherten. */
+	private void fillTextFields(HallObject obj) {
+		boolean wasUpdating = updatingPanel;
+		updatingPanel = true;
+		try {
+			textAutoCheck.setSelected(obj == null || obj.isTextAuto());
+			if (obj == null) {
+				return;
+			}
+			if (obj.isTextAuto()) {
+				HallObjectText.Layout layout = HallObjectText.resolve(obj);
+				textSizeSpinner.getValueFactory().setValue(roundForDisplay(layout.fontSize()));
+				textRotationSpinner.getValueFactory().setValue(roundForDisplay(layout.rotation()));
+				textAlignHCombo.setValue(layout.alignH());
+				textAlignVCombo.setValue(layout.alignV());
+			} else {
+				textSizeSpinner.getValueFactory().setValue(obj.getTextSize());
+				textRotationSpinner.getValueFactory().setValue(obj.getTextRotation());
+				textAlignHCombo.setValue(obj.getTextAlignH());
+				textAlignVCombo.setValue(obj.getTextAlignV());
+			}
+		} finally {
+			updatingPanel = wasUpdating;
+		}
 	}
 
 	private void commitName() {
@@ -324,6 +446,11 @@ public class HallPlanController {
 			nodeByObject.put(hallObject, node);
 			hallPane.getChildren().add(node);
 		}
+
+		// Ändern sich Maße oder Name, ändern sich auch die berechneten Textwerte im (gesperrten) Panel
+		if (selectedObject != null && selectedObject.isTextAuto()) {
+			fillTextFields(selectedObject);
+		}
 	}
 
 	private Group createHallObjectNode(HallObject hallObject) {
@@ -343,12 +470,7 @@ public class HallPlanController {
 		shape.setStroke(selected ? SELECTION_STROKE : Color.DARKGRAY);
 		shape.setStrokeWidth(selected ? 3 : 1);
 
-		Text label = new Text(hallObject.getName());
-		label.setX(hallObject.getPosX() + 10);
-		label.setY(hallObject.getPosY() + 20);
-		label.setMouseTransparent(true);
-
-		Group node = new Group(shape, label);
+		Group node = new Group(shape, HallObjectText.create(hallObject));
 		node.setCursor(editMode ? Cursor.MOVE : Cursor.HAND);
 		node.setOnMousePressed(event -> startObjectDrag(event, hallObject));
 		node.setOnMouseDragged(event -> dragObject(event, hallObject));
@@ -450,6 +572,7 @@ public class HallPlanController {
 			heightSpinner.getValueFactory().setValue(obj != null ? obj.getHeight() : FALLBACK_OBJECT_HEIGHT);
 			shapeCombo.setValue(obj != null ? obj.getShape() : null);
 			colorPicker.setValue(obj != null ? parseColor(obj.getColor()) : DEFAULT_FILL);
+			fillTextFields(obj);
 		} finally {
 			updatingPanel = false;
 		}
