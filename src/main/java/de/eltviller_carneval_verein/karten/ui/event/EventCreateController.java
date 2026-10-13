@@ -90,7 +90,7 @@ public class EventCreateController {
 		if (!EventSaver.save(currentEvent)) {
 			return;
 		}
-		MainApp.showMenuView();
+		MainApp.showEventOverviewView();
 	}
 
 	private Event buildNewEvent(String name) {
@@ -124,11 +124,10 @@ public class EventCreateController {
 	@FXML
 	private void handleBackToEventOverview() {
 		MainApp.showEventOverviewView();
-		;
 	}
 
 	@FXML
 	private void handleCancel() {
-		MainApp.showMenuView();
+		MainApp.showEventOverviewView();
 	}
 }
