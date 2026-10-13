@@ -14,7 +14,7 @@
 
     <HBox alignment="CENTER_LEFT" spacing="10.0">
         <Button text="← Event-Übersicht" styleClass="button-default" onAction="#handleBackToEventOverview" />
-        <Label fx:id="lblTitle" text="Neues Event anlegen" styleClass="header-label" />
+        <Label text="Neues Event anlegen" styleClass="header-label" />
     </HBox>
 
     <Separator />

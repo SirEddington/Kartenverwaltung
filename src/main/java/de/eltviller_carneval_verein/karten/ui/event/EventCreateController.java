@@ -12,15 +12,12 @@ import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
 import javafx.scene.control.ComboBox;
-import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
 import javafx.util.StringConverter;
 
 public class EventCreateController {
 
-	@FXML
-	private Label lblTitle;
 	@FXML
 	private TextField txtEventName;
 	@FXML
@@ -42,8 +39,6 @@ public class EventCreateController {
 	@FXML
 	private Spinner<Double> spnDoublePrice;
 
-	private Event currentEvent;
-
 	@FXML
 	public void initialize() {
 		// Optional: null = keine Halle (kann später je Vorstellung in den Event-Details zugeordnet werden)
@@ -64,15 +59,6 @@ public class EventCreateController {
 		cmbHall.getSelectionModel().select(cmbHall.getItems().size() == 2 ? 1 : 0);
 	}
 
-	public void setEventToEdit(Event event) {
-		this.currentEvent = event;
-		if (event != null) {
-			lblTitle.setText("Event bearbeiten: " + event.getName());
-			txtEventName.setText(event.getName());
-			// Falls das Event bereits existiert, können die Generierungsfelder deaktiviert oder vorbelegt werden
-		}
-	}
-
 	@FXML
 	private void handleSave() {
 		String name = txtEventName.getText().trim();
@@ -81,16 +67,9 @@ public class EventCreateController {
 			return;
 		}
 
-		// Ein neues Event wird bei jedem Versuch aus den aktuellen Feldern gebaut und nicht gemerkt: Scheitert das
+		// Das Event wird bei jedem Versuch aus den aktuellen Feldern gebaut und nicht gemerkt: Scheitert das
 		// Speichern, soll der nächste Versuch die inzwischen geänderten Eingaben übernehmen
-		Event event = currentEvent;
-		if (event == null) {
-			event = buildNewEvent(name);
-		} else {
-			event.changeName(name);
-		}
-
-		if (!EventSaver.save(event)) {
+		if (!EventSaver.save(buildNewEvent(name))) {
 			return;
 		}
 		MainApp.showEventOverviewView();
