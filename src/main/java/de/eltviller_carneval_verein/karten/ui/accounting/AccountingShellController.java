@@ -17,6 +17,8 @@ import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -216,7 +218,8 @@ public class AccountingShellController {
 			case PDF -> exportable.exportPdf(targetFile);
 			}
 		} catch (IOException | RuntimeException e) {
-			MainApp.showAlert("Fehler", "Export fehlgeschlagen: " + e.getMessage(), AlertType.ERROR);
+			LOG.log(Level.SEVERE, "Export fehlgeschlagen: " + targetFile, e);
+			StatusMessage.getInstance().show(Severity.ERROR, "Export fehlgeschlagen: " + e.getMessage());
 		}
 	}
 

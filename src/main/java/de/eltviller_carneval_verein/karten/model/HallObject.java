@@ -21,6 +21,14 @@ public class HallObject {
 	private String color;
 	private Shape shape = Shape.RECTANGLE;
 
+	// Text im Objekt (Größe in cm wie alle Hallenmaße, Drehung in Grad im Uhrzeigersinn). Mit textAuto bestimmt die
+	// Anzeige die übrigen Werte selbst aus Größe und Form des Objekts; sie gelten dann nur als Vorbelegung.
+	private boolean textAuto = true;
+	private double textSize = 20;
+	private TextAlignH textAlignH = TextAlignH.CENTER;
+	private TextAlignV textAlignV = TextAlignV.CENTER;
+	private double textRotation = 0;
+
 	// Konstuktoren -->
 	public HallObject() {
 		this.id = UUID.randomUUID().toString();
@@ -112,6 +120,46 @@ public class HallObject {
 
 	public void setShape(Shape shape) {
 		this.shape = shape;
+	}
+
+	public boolean isTextAuto() {
+		return textAuto;
+	}
+
+	public void setTextAuto(boolean textAuto) {
+		this.textAuto = textAuto;
+	}
+
+	public double getTextSize() {
+		return textSize;
+	}
+
+	public void setTextSize(double textSize) {
+		this.textSize = textSize;
+	}
+
+	public TextAlignH getTextAlignH() {
+		return textAlignH;
+	}
+
+	public void setTextAlignH(TextAlignH textAlignH) {
+		this.textAlignH = textAlignH;
+	}
+
+	public TextAlignV getTextAlignV() {
+		return textAlignV;
+	}
+
+	public void setTextAlignV(TextAlignV textAlignV) {
+		this.textAlignV = textAlignV;
+	}
+
+	public double getTextRotation() {
+		return textRotation;
+	}
+
+	public void setTextRotation(double textRotation) {
+		this.textRotation = textRotation;
 	}
 	// <-- Getter und Setter
 

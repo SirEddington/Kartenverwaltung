@@ -14,6 +14,7 @@ import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
+import de.eltviller_carneval_verein.karten.ui.hall.HallObjectText;
 import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
@@ -84,6 +85,9 @@ public class HallOverviewController implements ContentController {
 	private Pane hallPane;
 
 	@FXML
+	private Label lblHint;
+
+	@FXML
 	public void initialize() {
 		Rectangle clip = new Rectangle();
 		clip.widthProperty().bind(viewportPane.widthProperty());
@@ -95,6 +99,7 @@ public class HallOverviewController implements ContentController {
 		viewportPane.setOnMouseDragged(this::handleDrag);
 		viewportPane.widthProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
 		viewportPane.heightProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
+		updateHint();
 	}
 
 	/**
@@ -791,11 +796,7 @@ public class HallOverviewController implements ContentController {
 		hallObjectShape.setFill(parseHallObjectColor(hallObject.getColor()));
 		hallObjectShape.setStroke(Color.DARKGRAY);
 
-		Text hallObjectLabel = new Text(hallObject.getName());
-		hallObjectLabel.setX(hallObject.getPosX() + 10);
-		hallObjectLabel.setY(hallObject.getPosY() + 20);
-
-		return new Group(hallObjectShape, hallObjectLabel);
+		return new Group(hallObjectShape, HallObjectText.create(hallObject));
 	}
 
 	private static Color parseHallObjectColor(String color) {
@@ -822,6 +823,7 @@ public class HallOverviewController implements ContentController {
 		this.selectedEvent = event;
 		selectedPres = null;
 		hallPane.getChildren().clear();
+		updateHint();
 	}
 
 	@Override
@@ -838,8 +840,16 @@ public class HallOverviewController implements ContentController {
 			}
 			fitIfPending();
 		} else {
-			selectedEvent = null;
+			// "Alle Vorstellungen": Der Saalplan zeigt immer genau eine Vorstellung, das Event bleibt gewählt
+			hallPane.getChildren().clear();
 		}
+		updateHint();
+	}
+
+	/** Ohne gewählte Vorstellung bleibt der Plan leer: Ein Hinweis sagt, was zu tun ist. */
+	private void updateHint() {
+		lblHint.setText(selectedEvent == null ? "Bitte wähle oben ein Event und eine Vorstellung." : "Die Saalansicht zeigt eine einzelne Vorstellung. Bitte wähle oben eine Vorstellung.");
+		lblHint.setVisible(selectedPres == null);
 	}
 
 	@Override

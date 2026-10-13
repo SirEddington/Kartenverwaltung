@@ -5,9 +5,6 @@ import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import javafx.fxml.FXML;
-import javafx.scene.control.Alert;
-import javafx.scene.control.Alert.AlertType;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TreeItem;
@@ -142,12 +139,7 @@ public abstract class AbstractOverviewController {
 
 	/** Zeigt die Löschbestätigung; true, wenn der Benutzer bestätigt hat. */
 	protected boolean confirmDelete(String title, String message) {
-		Alert confirmation = new Alert(AlertType.CONFIRMATION);
-		confirmation.setTitle(title);
-		confirmation.setHeaderText(null);
-		confirmation.setContentText(message);
-		MainApp.applyAppIcon(confirmation);
-		return confirmation.showAndWait().filter(button -> button == ButtonType.OK).isPresent();
+		return ConfirmDialog.confirmDelete(title, message);
 	}
 
 	@FXML
