@@ -7,6 +7,7 @@ import de.eltviller_carneval_verein.karten.model.TextAlignV;
 import javafx.geometry.Bounds;
 import javafx.geometry.VPos;
 import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 
 /**
@@ -20,11 +21,13 @@ import javafx.scene.text.Text;
  */
 public final class HallObjectText {
 
+	private static final String FONT_FAMILY = "Yanone Kaffeesatz";
+
 	/** Schriftgröße, wenn sich ein Text nicht messen lässt (leerer Name). */
 	static final double DEFAULT_SIZE = 20;
 	static final double MIN_SIZE = 1;
 	/** Obergrenze der automatischen Größe, damit ein kurzer Name in einem großen Objekt nicht riesig wird. */
-	static final double MAX_AUTO_SIZE = 60;
+	static final double MAX_AUTO_SIZE = 120;
 	/** Abstand des Textes zum Rand, wenn er links/rechts/oben/unten ausgerichtet ist. */
 	static final double PADDING = 5;
 
@@ -46,7 +49,7 @@ public final class HallObjectText {
 	public static Text create(HallObject hallObject) {
 		Text text = new Text(hallObject.getName());
 		Layout layout = resolve(hallObject);
-		text.setFont(Font.font(layout.fontSize()));
+		text.setFont(font(layout.fontSize()));
 		text.setTextOrigin(VPos.TOP);
 		text.setRotate(layout.rotation());
 		text.setMouseTransparent(true);
@@ -60,10 +63,19 @@ public final class HallObjectText {
 		return text;
 	}
 
+	/**
+	 * Yanone Kaffeesatz Bold, die Überschriftenschrift der App ({@code MainApp} lädt sie beim Start, {@code style.css}
+	 * nutzt sie für die Überschriften). Messen und Zeichnen müssen dieselbe Schrift verwenden, sonst stimmt die
+	 * automatische Größe nicht. Ist sie nicht geladen, fällt JavaFX in beiden Fällen auf die Standardschrift zurück.
+	 */
+	private static Font font(double size) {
+		return Font.font(FONT_FAMILY, FontWeight.BOLD, size);
+	}
+
 	/** Größe, Drehung und Lage, mit denen der Text des Objekts gezeichnet wird (bei Auto die berechneten Werte). */
 	public static Layout resolve(HallObject hallObject) {
 		Text probe = new Text(hallObject.getName() == null ? "" : hallObject.getName());
-		probe.setFont(Font.font(MEASURE_SIZE));
+		probe.setFont(font(MEASURE_SIZE));
 		Bounds bounds = probe.getLayoutBounds();
 		return layout(hallObject, bounds.getWidth() / MEASURE_SIZE, bounds.getHeight() / MEASURE_SIZE);
 	}
