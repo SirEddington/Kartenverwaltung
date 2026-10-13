@@ -212,11 +212,10 @@ public class TicketTableController implements ContentController {
 
 	@Override
 	public void setPresentation(Presentation presentation) {
+		// Keine Vorstellung heißt "Alle Vorstellungen" des gewählten Events
 		this.selectedPres = presentation;
 		if (selectedPres != null) {
 			this.selectedEvent = presentation.getParent();
-		} else {
-			selectedEvent = null;
 		}
 		loadSeats();
 	}

@@ -1,6 +1,8 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -23,10 +25,12 @@ import javafx.scene.control.RadioButton;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.StackPane;
+import javafx.util.StringConverter;
 
 public class TicketShellController {
 
 	private static final Logger LOG = Logger.getLogger(TicketShellController.class.getName());
+	private static final String ALL_PRESENTATIONS = "Alle Vorstellungen";
 
 	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
 
@@ -51,6 +55,8 @@ public class TicketShellController {
 	@FXML
 	private Label lblHeader;
 
+	// Wird gerade die Vorstellungsliste neu gefüllt, soll die Auswahl nicht an den Inhalt gemeldet werden
+	private boolean updatingPresentations = false;
 	private String searchText = "";
 	private ContentController activeContentController;
 	private Event currentEvent;
@@ -61,23 +67,52 @@ public class TicketShellController {
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
 
+		// "Alle Vorstellungen" ist als echter (null-)Eintrag Teil der Liste, wie in der Abrechnung: So lässt sich die
+		// Auswahl einer Vorstellung wieder aufheben.
+		presComboBox.setConverter(new StringConverter<Presentation>() {
+			@Override
+			public String toString(Presentation presentation) {
+				return presentation == null ? ALL_PRESENTATIONS : presentation.getName();
+			}
+
+			@Override
+			public Presentation fromString(String string) {
+				return null; // Bei fixer ComboBox-Auswahl nicht erforderlich
+			}
+		});
+
 		// Events in ComboBox laden (Tabelle bleibt initial leer)
 		eventComboBox.getItems().setAll(eventRepository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
 
 		// Event- & Vorstellungs-Listener einrichten
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			currentEvent = selectedEvent;
+			currentPresentation = null;
 			if (currentEvent != null) {
 				ChangeTracker.events().ensureTracked(currentEvent);
 			}
-			presComboBox.getItems().clear();
-			presComboBox.getItems().setAll(currentEvent.getPresentations());
+			// Das Neufüllen der Liste meldet der Inhalt nicht einzeln: setEvent unten setzt ihn auf "Alle Vorstellungen"
+			updatingPresentations = true;
+			try {
+				List<Presentation> presentationItems = new ArrayList<>();
+				presentationItems.add(null); // "Alle Vorstellungen"
+				if (currentEvent != null) {
+					presentationItems.addAll(currentEvent.getPresentations());
+				}
+				presComboBox.getItems().setAll(presentationItems);
+				presComboBox.getSelectionModel().selectFirst();
+			} finally {
+				updatingPresentations = false;
+			}
 			if (activeContentController != null) {
 				activeContentController.setEvent(currentEvent);
 			}
 		});
 
 		presComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedPresentation) -> {
+			if (updatingPresentations) {
+				return;
+			}
 			currentPresentation = selectedPresentation;
 			if (activeContentController != null) {
 				activeContentController.setPresentation(currentPresentation);
@@ -105,8 +140,9 @@ public class TicketShellController {
 			eventComboBox.getSelectionModel().select(0);
 		}
 
-		if (presComboBox.getItems().size() == 1) {
-			presComboBox.getSelectionModel().select(0);
+		// Hat das einzige Event nur eine Vorstellung, ist sie gleich gewählt (Eintrag 0 ist "Alle Vorstellungen")
+		if (presComboBox.getItems().size() == 2) {
+			presComboBox.getSelectionModel().select(1);
 		}
 	}
 

@@ -84,6 +84,9 @@ public class HallOverviewController implements ContentController {
 	private Pane hallPane;
 
 	@FXML
+	private Label lblHint;
+
+	@FXML
 	public void initialize() {
 		Rectangle clip = new Rectangle();
 		clip.widthProperty().bind(viewportPane.widthProperty());
@@ -95,6 +98,7 @@ public class HallOverviewController implements ContentController {
 		viewportPane.setOnMouseDragged(this::handleDrag);
 		viewportPane.widthProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
 		viewportPane.heightProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
+		updateHint();
 	}
 
 	/**
@@ -822,6 +826,7 @@ public class HallOverviewController implements ContentController {
 		this.selectedEvent = event;
 		selectedPres = null;
 		hallPane.getChildren().clear();
+		updateHint();
 	}
 
 	@Override
@@ -838,8 +843,16 @@ public class HallOverviewController implements ContentController {
 			}
 			fitIfPending();
 		} else {
-			selectedEvent = null;
+			// "Alle Vorstellungen": Der Saalplan zeigt immer genau eine Vorstellung, das Event bleibt gewählt
+			hallPane.getChildren().clear();
 		}
+		updateHint();
+	}
+
+	/** Ohne gewählte Vorstellung bleibt der Plan leer: Ein Hinweis sagt, was zu tun ist. */
+	private void updateHint() {
+		lblHint.setText(selectedEvent == null ? "Bitte wähle oben ein Event und eine Vorstellung." : "Die Saalansicht zeigt eine einzelne Vorstellung. Bitte wähle oben eine Vorstellung.");
+		lblHint.setVisible(selectedPres == null);
 	}
 
 	@Override
