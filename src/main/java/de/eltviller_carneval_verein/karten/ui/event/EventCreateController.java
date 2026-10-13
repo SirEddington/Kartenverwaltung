@@ -8,8 +8,9 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
-import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
@@ -76,7 +77,7 @@ public class EventCreateController {
 	private void handleSave() {
 		String name = txtEventName.getText().trim();
 		if (name.isEmpty()) {
-			MainApp.showAlert("Fehler", "Bitte gib einen Namen für das Event ein.", AlertType.WARNING);
+			StatusMessage.getInstance().show(Severity.ERROR, "Bitte gib einen Namen für das Event ein.");
 			return;
 		}
 
@@ -93,8 +94,9 @@ public class EventCreateController {
 	}
 
 	private Event buildNewEvent(String name) {
-		Event event = new Event(name);
-		event.changeName(txtEventName.getText());
+		// Die ID bleibt eine UUID: Sie bestimmt den Dateinamen, der Name darf beliebige Zeichen enthalten
+		Event event = new Event();
+		event.changeName(name);
 
 		// Vorstellungen
 		for (int i = 0; i < spnPresCount.getValue(); i++) {

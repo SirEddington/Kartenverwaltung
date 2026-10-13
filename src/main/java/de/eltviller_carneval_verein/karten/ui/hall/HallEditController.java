@@ -9,8 +9,9 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
-import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
@@ -164,7 +165,7 @@ public class HallEditController {
 		try {
 			hall.changeName(txtName.getText());
 		} catch (IllegalArgumentException e) {
-			MainApp.showAlert("Fehler", e.getMessage(), AlertType.WARNING);
+			StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
 			return;
 		}
 		HallSaver.save(hall);
