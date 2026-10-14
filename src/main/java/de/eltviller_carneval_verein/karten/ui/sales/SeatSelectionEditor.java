@@ -16,6 +16,11 @@ final class SeatSelectionEditor {
 	private SeatSelectionEditor() {
 	}
 
+	/** Beschriftung des Menüeintrags, der den Dialog öffnet (für einen Sitz ohne Anzahl). */
+	static String menuText(int seatCount) {
+		return seatCount == 1 ? "Sitz verkaufen…" : "Ausgewählte Sitze verkaufen… (" + seatCount + ")";
+	}
+
 	/**
 	 * @param selected  die gewählten Sitze
 	 * @param owner     Fenster, über dem der Dialog erscheint

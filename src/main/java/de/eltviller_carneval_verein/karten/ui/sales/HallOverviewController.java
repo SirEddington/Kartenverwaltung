@@ -206,6 +206,20 @@ public class HallOverviewController implements ContentController {
 		}
 	}
 
+	private Seat seatAt(Object target) {
+		for (Node node = target instanceof Node n ? n : null; node != null; node = node.getParent()) {
+			Seat seat = seatNodes.get(node);
+			if (seat != null) {
+				return seat;
+			}
+		}
+		return null;
+	}
+
+	private boolean isDialogOpen() {
+		return activePopup != null && activePopup.isShowing();
+	}
+
 	private static boolean isOnSeatOrTable(Object target) {
 		for (Node node = target instanceof Node n ? n : null; node != null; node = node.getParent()) {
 			if (node.getStyleClass().contains(SEAT_STYLE_CLASS) || node.getStyleClass().contains(TABLE_STYLE_CLASS)) {
@@ -259,13 +273,26 @@ public class HallOverviewController implements ContentController {
 		renderHall();
 	}
 
-	/** Rechtsklick ohne Ziehen: Menü für die gewählten Sitze (mit gedrückter Taste zu ziehen verschiebt den Plan). */
+	/**
+	 * Rechtsklick ohne Ziehen (mit gedrückter Taste zu ziehen verschiebt den Plan): Das Menü gehört zu einem Sitz. Auf
+	 * einem gewählten Sitz gilt es für die ganze Auswahl, auf einem anderen Sitz wird dieser zur einzigen Auswahl, wie im
+	 * Explorer. Im Leeren, auf einem Tisch, auf einem vom Suchfilter ausgeblendeten Sitz und bei offenem Dialog (er
+	 * würde sonst samt Eingaben ersetzt) gibt es kein Menü.
+	 */
 	private void showSelectionMenu(MouseEvent event) {
 		if (selectionMenu != null) {
 			selectionMenu.hide();
 		}
-		MenuItem sellItem = new MenuItem(selectedSeats.isEmpty() ? "Ausgewählte Sitze verkaufen…" : "Ausgewählte Sitze verkaufen… (" + selectedSeats.size() + ")");
-		sellItem.setDisable(selectedSeats.isEmpty());
+		Seat seat = seatAt(event.getTarget());
+		if (seat == null || isDialogOpen() || !matchesQuery(seat)) {
+			return;
+		}
+		if (!selectedSeats.contains(seat)) {
+			selectedSeats.clear();
+			selectedSeats.add(seat);
+			renderHall();
+		}
+		MenuItem sellItem = new MenuItem(SeatSelectionEditor.menuText(selectedSeats.size()));
 		selectionMenu = new ContextMenu(sellItem);
 		sellItem.setOnAction(action -> sellSelection(selectionMenu.getAnchorX(), selectionMenu.getAnchorY()));
 		selectionMenu.show(viewportPane, event.getScreenX(), event.getScreenY());
