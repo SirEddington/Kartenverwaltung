@@ -38,6 +38,9 @@ module Kartenverwaltung {
     opens de.eltviller_carneval_verein.karten.ui.accounting to javafx.fxml;
     exports de.eltviller_carneval_verein.karten.ui.accounting;
 
+    // Wiederherstellen aus Backups (Dialog und Kataloge)
+    exports de.eltviller_carneval_verein.karten.ui.backup;
+
     // Repository-Paket exportieren
     exports de.eltviller_carneval_verein.karten.repository;
 
