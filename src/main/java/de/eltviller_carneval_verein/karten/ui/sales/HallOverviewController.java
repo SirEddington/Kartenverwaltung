@@ -161,7 +161,8 @@ public class HallOverviewController implements ContentController {
 	// klickt Tisch/Sitz und zieht im Bearbeitungsmodus einen Auswahlrahmen auf
 	private void handleDragStart(MouseEvent event) {
 		if (event.getButton() == MouseButton.PRIMARY) {
-			bandPressed = editMode && placingTable == null;
+			// Bei offenem Dialog bleibt die Auswahl unberührt: Ein Rahmen würde den Dialog samt Eingaben schließen
+			bandPressed = editMode && placingTable == null && !isDialogOpen();
 			bandActive = false;
 			bandAdditive = event.isShortcutDown();
 			bandStartSceneX = event.getSceneX();
@@ -569,6 +570,9 @@ public class HallOverviewController implements ContentController {
 				return; // z.B. nach einem Schwenk/Zoom der Ansicht, sicherheitshalber ignorieren
 			}
 			event.consume();
+			if (editMode && isDialogOpen()) {
+				return; // Siehe Sitzklick: Der offene Dialog behält seine Eingaben
+			}
 			Window window = tableShapeNode.getScene().getWindow();
 			openTableDetailPopup(table, window, event.getScreenX() + 12, event.getScreenY() + 12);
 		});
@@ -655,6 +659,9 @@ public class HallOverviewController implements ContentController {
 				return;
 			}
 			event.consume();
+			if (editMode && isDialogOpen()) {
+				return; // Ein zweiter Dialog würde den offenen samt Eingaben ersetzen: erst Anwenden oder Abbrechen
+			}
 			if (editMode && event.isShortcutDown()) {
 				toggleSelection(seat);
 				return;
@@ -716,9 +723,9 @@ public class HallOverviewController implements ContentController {
 	 * dasselbe Erscheinungsbild teilen und nicht unabhängig voneinander gepflegt
 	 * werden müssen.
 	 */
-	static final String DETAIL_POPUP_STYLE ="-fx-background-color: white; -fx-border-color: #999999; -fx-border-width: 1; " + "-fx-padding: 12; -fx-background-radius: 4; -fx-border-radius: 4;";
+	static final String DETAIL_POPUP_STYLE = "-fx-background-color: white; -fx-border-color: #999999; -fx-border-width: 1; " + "-fx-padding: 12; -fx-background-radius: 4; -fx-border-radius: 4;";
 
-	static final String APP_STYLESHEET =HallOverviewController.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
+	static final String APP_STYLESHEET = HallOverviewController.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 
 	/**
 	 * Zeigt das Popup an und hängt danach das App-Stylesheet an dessen (erst beim
@@ -917,6 +924,7 @@ public class HallOverviewController implements ContentController {
 		this.selectedEvent = event;
 		selectedPres = null;
 		hallPane.getChildren().clear();
+		seatNodes.clear();
 		updateHint();
 	}
 
@@ -937,6 +945,7 @@ public class HallOverviewController implements ContentController {
 		} else {
 			// "Alle Vorstellungen": Der Saalplan zeigt immer genau eine Vorstellung, das Event bleibt gewählt
 			hallPane.getChildren().clear();
+			seatNodes.clear();
 		}
 		updateHint();
 	}

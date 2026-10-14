@@ -81,6 +81,36 @@ class SeatListSummaryTest {
 	}
 
 	@Test
+	void tooltipOfAHugeSelectionShowsTheFirstSeatsAndTheRemainingCount() {
+		Table table = table("Prunksitzung", 1);
+		List<Seat> seats = new ArrayList<>();
+		for (int number = 1; number <= 60; number++) {
+			seats.add(seat(table, number));
+		}
+
+		String[] lines = SeatListSummary.tooltip(seats).split("\n");
+
+		assertEquals(41, lines.length);
+		assertEquals("Prunksitzung, Tisch 1, Sitz 1", lines[0]);
+		assertEquals("Prunksitzung, Tisch 1, Sitz 40", lines[39]);
+		assertEquals("… und 20 weitere Sitze", lines[40]);
+	}
+
+	@Test
+	void tooltipWithExactlyTheLimitIsNotCut() {
+		Table table = table("Prunksitzung", 1);
+		List<Seat> seats = new ArrayList<>();
+		for (int number = 1; number <= 40; number++) {
+			seats.add(seat(table, number));
+		}
+
+		String[] lines = SeatListSummary.tooltip(seats).split("\n");
+
+		assertEquals(40, lines.length);
+		assertEquals("Prunksitzung, Tisch 1, Sitz 40", lines[39]);
+	}
+
+	@Test
 	void emptyListGivesEmptyTexts() {
 		assertEquals("", SeatListSummary.headline(List.of()));
 		assertEquals("", SeatListSummary.tooltip(List.of()));

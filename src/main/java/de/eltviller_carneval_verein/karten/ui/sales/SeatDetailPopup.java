@@ -32,6 +32,7 @@ import javafx.util.StringConverter;
 public final class SeatDetailPopup {
 
 	private static final String MIXED = "verschieden";
+	private static final double SUMMARY_MAX_HEIGHT = 90;
 
 	private final SeatBulkEdit edit;
 	private final boolean editMode;
@@ -101,6 +102,7 @@ public final class SeatDetailPopup {
 		Label summary = new Label(SeatListSummary.headline(seats));
 		summary.setWrapText(true);
 		summary.setMaxWidth(340);
+		summary.setMaxHeight(SUMMARY_MAX_HEIGHT); // Bei der ganzen Halle wäre der Text höher als der Dialog: abgeschnitten mit "…"
 		Tooltip.install(summary, new Tooltip(SeatListSummary.tooltip(seats)));
 		return new VBox(2, boldLabel(seats.size() + " Sitze"), summary);
 	}

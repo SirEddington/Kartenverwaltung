@@ -3,8 +3,6 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.ui.StatusMessage;
-import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.stage.Window;
 
 /**
@@ -29,18 +27,19 @@ final class SeatSelectionEditor {
 	 */
 	static SeatDetailPopup edit(List<Seat> selected, Window owner, double screenX, double screenY, Runnable onApplied) {
 		if (selected.isEmpty()) {
-			StatusMessage.getInstance().show(Severity.INFO, "Es sind keine Sitze ausgewählt.");
-			return null;
+			return null; // Die Menüs gibt es nur für eine Auswahl; ohne Sitze gäbe es nichts zu zeigen
 		}
 
 		List<Seat> seats = selected;
 		SeatSelectionSplit split = SeatSelectionSplit.of(selected);
 		if (split.hasOccupied()) {
 			switch (OccupiedSeatsDialog.ask(split)) {
-			case OVERWRITE -> seats = selected;
 			case FREE_ONLY -> seats = split.free();
 			case CANCEL -> {
 				return null;
+			}
+			case OVERWRITE -> {
+				// Alle gewählten Sitze bleiben in der Liste
 			}
 			}
 		}

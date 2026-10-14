@@ -20,6 +20,8 @@ public final class SeatListSummary {
 	/** Ab so vielen aufeinanderfolgenden Sitznummern wird "3-12" statt "3, 4, 5" geschrieben. */
 	private static final int MIN_RANGE_LENGTH = 3;
 
+	private static final int MAX_TOOLTIP_LINES = 40;
+
 	private SeatListSummary() {
 	}
 
@@ -36,11 +38,20 @@ public final class SeatListSummary {
 		return String.join("; ", parts);
 	}
 
-	/** Jeder Sitz in einer eigenen Zeile ("Prunksitzung, Tisch 3, Sitz 3"); leer bei einer leeren Liste. */
+	/**
+	 * Jeder Sitz in einer eigenen Zeile ("Prunksitzung, Tisch 3, Sitz 3"); leer bei einer leeren Liste. Bei sehr vielen
+	 * Sitzen (z. B. der ganzen Halle) endet die Liste nach {@value #MAX_TOOLTIP_LINES} Zeilen mit der Anzahl der übrigen:
+	 * Ein Tooltip mit Hunderten Zeilen wäre höher als der Bildschirm.
+	 */
 	public static String tooltip(List<Seat> seats) {
 		List<String> lines = new ArrayList<>();
 		group(seats).forEach((presentation, tables) -> tables.forEach(
 				(tableNumber, seatNumbers) -> seatNumbers.forEach(seatNumber -> lines.add(nameOf(presentation) + ", Tisch " + tableNumber + ", Sitz " + seatNumber))));
+		if (lines.size() > MAX_TOOLTIP_LINES) {
+			int remaining = lines.size() - MAX_TOOLTIP_LINES;
+			lines.subList(MAX_TOOLTIP_LINES, lines.size()).clear();
+			lines.add("… und " + remaining + " weitere Sitze");
+		}
 		return String.join("\n", lines);
 	}
 
