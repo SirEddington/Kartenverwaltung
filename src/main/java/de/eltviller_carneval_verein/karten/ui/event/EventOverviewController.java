@@ -4,6 +4,7 @@ import java.util.List;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
@@ -143,7 +144,7 @@ public class EventOverviewController extends AbstractOverviewController {
 		colHallName.setCellValueFactory(cell -> {
 			Object data = cell.getValue().getValue();
 			if (data instanceof Presentation presentation) {
-				return new SimpleStringProperty(hallRepository.findById(presentation.getHallId()).getName());
+				return new SimpleStringProperty(hallDisplayName(hallRepository.findById(presentation.getHallId())));
 			}
 			return null;
 		});
@@ -259,6 +260,11 @@ public class EventOverviewController extends AbstractOverviewController {
 			Seat seat = findParentInTree(selectedItem, Seat.class);
 			MainApp.showEventEditView(event, pres, table, seat, editable);
 		}
+	}
+
+	/** Anzeigename der Halle einer Vorstellung; ein Strich, wenn keine (oder keine existierende) Halle zugeordnet ist. */
+	static String hallDisplayName(Hall hall) {
+		return hall == null ? "–" : hall.getName();
 	}
 
 	/** Löscht den gewählten Eintrag nach Rückfrage und speichert das betroffene Event sofort. */
