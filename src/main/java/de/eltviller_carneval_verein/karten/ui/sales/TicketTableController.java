@@ -8,6 +8,7 @@ import org.controlsfx.control.table.TableFilter;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
@@ -21,6 +22,9 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.CheckBoxTableCell;
@@ -39,6 +43,7 @@ public class TicketTableController implements ContentController {
 	// Enthält NUR die Sitze des aktuell gewählten Events
 	private final ObservableList<SeatDTO> masterData = FXCollections.observableArrayList();
 	private FilteredList<SeatDTO> filteredData;
+	private ContextMenu selectionMenu;
 
 	// TableView und Spalten
 	@FXML
@@ -94,6 +99,23 @@ public class TicketTableController implements ContentController {
 
 		// 4. Spaltenkopf-Filter von ControlsFX aktivieren
 		TableFilter.forTableView(seatTable).apply();
+
+		// 5. Mehrfachauswahl (Strg-/Shift-Klick); das Menü zum Sammelverkauf hängt nur im Bearbeitungsmodus an der Tabelle.
+		// Zeilen, die der Suchfilter ausblendet, fallen von selbst aus der Auswahl.
+		seatTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+		MenuItem sellItem = new MenuItem();
+		selectionMenu = new ContextMenu(sellItem);
+		selectionMenu.setOnShowing(event -> {
+			int count = seatTable.getSelectionModel().getSelectedItems().size();
+			sellItem.setText(count == 0 ? "Ausgewählte Sitze verkaufen…" : "Ausgewählte Sitze verkaufen… (" + count + ")");
+			sellItem.setDisable(count == 0);
+		});
+		sellItem.setOnAction(event -> sellSelection());
+	}
+
+	private void sellSelection() {
+		List<Seat> seats = seatTable.getSelectionModel().getSelectedItems().stream().map(SeatDTO::getSeat).toList();
+		SeatSelectionEditor.edit(seats, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), seatTable::refresh);
 	}
 
 	private void setupCellFactories() {
@@ -185,6 +207,7 @@ public class TicketTableController implements ContentController {
 
 	private void applyEditMode() {
 		seatTable.setEditable(editMode);
+		seatTable.setContextMenu(editMode ? selectionMenu : null);
 
 		// Nicht editierbare Spalten
 		colPresentation.setEditable(false);
