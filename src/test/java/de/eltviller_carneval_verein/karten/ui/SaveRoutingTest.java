@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 class SaveRoutingTest {
 
 	private static final Path SOURCE_ROOT = Path.of("src", "main", "java");
-	private static final Pattern DIRECT_SAVE = Pattern.compile("\\.save(Event|Hall)s?\\(");
+	private static final Pattern DIRECT_SAVE = Pattern.compile("(\\.|::)save(Event|Hall)\\w*\\b");
 
 	@Test
 	void noDirectRepositorySavesOutsideSavers() throws IOException {

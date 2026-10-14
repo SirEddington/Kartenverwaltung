@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -21,6 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Legt vor dem Überschreiben einer Event- oder Hallen-Datei zeitgestempelte Kopien an und verwaltet sie. Die Kopien
@@ -81,13 +83,32 @@ public final class BackupStore {
 	 * @return {@code true}, wenn eine neue Kopie entstand; wirft nie
 	 */
 	public boolean backupBeforeOverwrite(String id, File currentFile) {
+		return backup(id, currentFile) == Outcome.CREATED;
+	}
+
+	/**
+	 * Stellt sicher, dass der aktuelle Stand der Datei gesichert ist: {@code true}, wenn es nichts zu sichern gab
+	 * (Datei fehlt), sie schon der neuesten Kopie entspricht oder eine neue Kopie entstand; {@code false}, wenn das
+	 * Sichern scheiterte. Für Fälle, in denen der aktuelle Stand nicht ohne Sicherung überschrieben werden darf
+	 * (Wiederherstellen); wirft nie.
+	 */
+	public boolean ensureBackedUp(String id, File currentFile) {
+		return backup(id, currentFile) != Outcome.FAILED;
+	}
+
+	/** Ergebnis eines Sicherungsversuchs. */
+	private enum Outcome {
+		NOT_NEEDED, CREATED, FAILED
+	}
+
+	private Outcome backup(String id, File currentFile) {
 		try {
 			if (!currentFile.isFile()) {
-				return false;
+				return Outcome.NOT_NEEDED;
 			}
 			List<Backup> existing = list(id);
 			if (!existing.isEmpty() && Files.mismatch(currentFile.toPath(), existing.get(0).file()) == -1L) {
-				return false;
+				return Outcome.NOT_NEEDED;
 			}
 			Path idDir = new File(backupsDir, id).toPath();
 			Files.createDirectories(idDir);
@@ -97,10 +118,10 @@ public final class BackupStore {
 			Files.copy(currentFile.toPath(), partial, StandardCopyOption.REPLACE_EXISTING);
 			Files.move(partial, target, StandardCopyOption.ATOMIC_MOVE);
 			prune(id);
-			return true;
+			return Outcome.CREATED;
 		} catch (IOException | RuntimeException e) {
 			LOG.log(Level.SEVERE, "Backup von " + currentFile.getName() + " konnte nicht angelegt werden", e);
-			return false;
+			return Outcome.FAILED;
 		}
 	}
 
@@ -116,23 +137,30 @@ public final class BackupStore {
 	/** Die Kopien einer ID, neueste zuerst. Dateien mit anderem Namensmuster werden ignoriert. */
 	public List<Backup> list(String id) {
 		File[] files = new File(backupsDir, id).listFiles(File::isFile);
-		List<Backup> result = new ArrayList<>();
 		if (files == null) {
-			return result;
+			return new ArrayList<>();
 		}
+		List<Parsed> parsed = new ArrayList<>();
 		for (File file : files) {
 			Matcher matcher = NAME_PATTERN.matcher(file.getName());
-			if (matcher.matches()) {
-				result.add(new Backup(id, file.toPath(), LocalDateTime.parse(matcher.group(1), NAME_FORMAT), file.length()));
+			if (!matcher.matches()) {
+				continue;
+			}
+			try {
+				LocalDateTime timestamp = LocalDateTime.parse(matcher.group(1), NAME_FORMAT);
+				int counter = matcher.group(2) == null ? 1 : Integer.parseInt(matcher.group(2));
+				parsed.add(new Parsed(new Backup(id, file.toPath(), timestamp, file.length()), counter));
+			} catch (DateTimeParseException | NumberFormatException e) {
+				// Passt zum Muster, ist aber kein gültiger Zeitstempel (z. B. Monat 13): wie jede fremde Datei ignorieren
+				LOG.log(Level.WARNING, "Datei im Backup-Ordner ignoriert: " + file);
 			}
 		}
-		result.sort(Comparator.comparing(Backup::timestamp).thenComparingInt(BackupStore::counterOf).reversed());
-		return result;
+		parsed.sort(Comparator.comparing((Parsed p) -> p.backup().timestamp()).thenComparingInt(Parsed::counter).reversed());
+		return parsed.stream().map(Parsed::backup).collect(Collectors.toCollection(ArrayList::new));
 	}
 
-	private static int counterOf(Backup backup) {
-		Matcher matcher = NAME_PATTERN.matcher(backup.file().getFileName().toString());
-		return matcher.matches() && matcher.group(2) != null ? Integer.parseInt(matcher.group(2)) : 1;
+	/** Eine gelesene Kopie samt Zähler aus dem Dateinamen (1 ohne Zähler), nur zum Sortieren. */
+	private record Parsed(Backup backup, int counter) {
 	}
 
 	/** Alle IDs, zu denen es einen Backup-Ordner gibt (auch von gelöschten Events und Hallen), alphabetisch. */

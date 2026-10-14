@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -96,7 +97,7 @@ class JsonEventRepositoryTest {
 	}
 
 	@Test
-	void deleteEvent_removesFile_butKeepsBackups(@TempDir File storageDir) {
+	void deleteEvent_removesFile_butKeepsBackupsIncludingTheLastState(@TempDir File storageDir) throws IOException {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
 		event.changeName("Testevent");
@@ -107,7 +108,49 @@ class JsonEventRepositoryTest {
 		repository.deleteEvent(event);
 
 		assertFalse(new File(storageDir, event.getId() + ".json").exists());
-		assertEquals(1, repository.backups().list(event.getId()).size(), "Die Backups bleiben für das Wiederherstellen liegen.");
+		List<BackupStore.Backup> backups = repository.backups().list(event.getId());
+		assertEquals(2, backups.size(), "Die Backups bleiben liegen, dazu der Stand zum Zeitpunkt des Löschens.");
+		assertTrue(new String(repository.backups().read(backups.get(0)), StandardCharsets.UTF_8).contains("Testevent (geaendert)"));
+	}
+
+	@Test
+	void deleteEvent_afterSingleSave_stillLeavesABackup(@TempDir File storageDir) {
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
+		Event event = new Event();
+		event.changeName("Testevent");
+		repository.saveEvent(event);
+
+		repository.deleteEvent(event);
+
+		assertEquals(1, repository.backups().list(event.getId()).size());
+	}
+
+	@Test
+	void saveEventRequiringBackup_failsWithoutTouchingTheFile_whenBackupIsImpossible(@TempDir File storageDir) throws IOException {
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
+		Event event = new Event();
+		event.changeName("Testevent");
+		repository.saveEvent(event);
+		Files.writeString(new File(storageDir, "backups").toPath(), "ich bin eine Datei", StandardCharsets.UTF_8);
+		event.changeName("Ueberschrieben");
+
+		assertThrows(IllegalStateException.class, () -> repository.saveEventRequiringBackup(event));
+
+		assertEquals("Testevent", new JsonEventRepository(storageDir).loadEvents().get(0).getName());
+	}
+
+	@Test
+	void saveEventRequiringBackup_savesAndBacksUpTheCurrentState(@TempDir File storageDir) {
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
+		Event event = new Event();
+		event.changeName("Testevent");
+		repository.saveEvent(event);
+		event.changeName("Wiederhergestellt");
+
+		repository.saveEventRequiringBackup(event);
+
+		assertEquals(1, repository.backups().list(event.getId()).size());
+		assertEquals("Wiederhergestellt", new JsonEventRepository(storageDir).loadEvents().get(0).getName());
 	}
 
 	@Test

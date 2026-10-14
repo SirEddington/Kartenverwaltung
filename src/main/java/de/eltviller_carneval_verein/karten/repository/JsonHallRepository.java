@@ -178,6 +178,19 @@ public class JsonHallRepository implements HallRepository {
 
 	@Override
 	public void saveHall(Hall hall) {
+		save(hall, false);
+	}
+
+	/**
+	 * Wie {@link #saveHall(Hall)}, überschreibt den aktuellen Stand aber nur, wenn er vorher gesichert werden
+	 * konnte (oder schon gesichert ist). Sonst wirft es und lässt die Datei unberührt. Für das Wiederherstellen aus
+	 * einem Backup, das den aktuellen Stand sonst unwiederbringlich ersetzen würde.
+	 */
+	public void saveHallRequiringBackup(Hall hall) {
+		save(hall, true);
+	}
+
+	private void save(Hall hall, boolean requireBackup) {
 		if (hall == null) {
 			throw new IllegalArgumentException("Das Hall-Objekt darf nicht null sein.");
 		}
@@ -186,8 +199,15 @@ public class JsonHallRepository implements HallRepository {
 		File hallFile = new File(storageDir, fileName);
 
 		try {
-			// Den Stand sichern, der gleich überschrieben wird (ein Fehler dabei verhindert das Speichern nicht).
-			backupStore.backupBeforeOverwrite(hall.getId(), hallFile);
+			// Den Stand sichern, der gleich überschrieben wird. Ein Fehler dabei verhindert das normale Speichern nicht
+			// (die Arbeit des Nutzers wiegt schwerer als die Kopie), das Wiederherstellen aber schon.
+			if (requireBackup) {
+				if (!backupStore.ensureBackedUp(hall.getId(), hallFile)) {
+					throw new IllegalStateException("Der aktuelle Stand von \"" + hall.getName() + "\" konnte nicht gesichert werden, deshalb wurde nichts überschrieben.");
+				}
+			} else {
+				backupStore.backupBeforeOverwrite(hall.getId(), hallFile);
+			}
 
 			// In eine temporäre Datei im selben Verzeichnis schreiben und erst danach atomar
 			// umbenennen, damit ein Absturz mitten im Schreiben nicht die Hall-Datei zerstört.
@@ -246,7 +266,9 @@ public class JsonHallRepository implements HallRepository {
 		String fileName = hall.getId() + ".json";
 		File hallFile = new File(storageDir, fileName);
 
-		// Die Backups bleiben bewusst liegen: Sie sind die einzige Rettung für eine versehentlich gelöschte Halle.
+		// Der Stand zum Zeitpunkt des Löschens wird gesichert und die Backups bleiben liegen: Sie sind die einzige
+		// Rettung für eine versehentlich gelöschte Halle.
+		backupStore.backupBeforeOverwrite(hall.getId(), hallFile);
 		if (hallFile.exists() && !hallFile.delete()) {
 			throw new RuntimeException("Fehler beim Löschen der Datei: " + fileName);
 		}

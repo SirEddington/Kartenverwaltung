@@ -166,6 +166,19 @@ public class JsonEventRepository implements EventRepository {
 
 	@Override
 	public void saveEvent(Event event) {
+		save(event, false);
+	}
+
+	/**
+	 * Wie {@link #saveEvent(Event)}, überschreibt den aktuellen Stand aber nur, wenn er vorher gesichert werden
+	 * konnte (oder schon gesichert ist). Sonst wirft es und lässt die Datei unberührt. Für das Wiederherstellen aus
+	 * einem Backup, das den aktuellen Stand sonst unwiederbringlich ersetzen würde.
+	 */
+	public void saveEventRequiringBackup(Event event) {
+		save(event, true);
+	}
+
+	private void save(Event event, boolean requireBackup) {
 		if (event == null) {
 			throw new IllegalArgumentException("Das Event-Objekt darf nicht null sein.");
 		}
@@ -178,8 +191,15 @@ public class JsonEventRepository implements EventRepository {
 		File eventFile = new File(storageDir, fileName);
 
 		try {
-			// Den Stand sichern, der gleich überschrieben wird (ein Fehler dabei verhindert das Speichern nicht).
-			backupStore.backupBeforeOverwrite(event.getId(), eventFile);
+			// Den Stand sichern, der gleich überschrieben wird. Ein Fehler dabei verhindert das normale Speichern nicht
+			// (die Arbeit des Nutzers wiegt schwerer als die Kopie), das Wiederherstellen aber schon.
+			if (requireBackup) {
+				if (!backupStore.ensureBackedUp(event.getId(), eventFile)) {
+					throw new IllegalStateException("Der aktuelle Stand von \"" + event.getName() + "\" konnte nicht gesichert werden, deshalb wurde nichts überschrieben.");
+				}
+			} else {
+				backupStore.backupBeforeOverwrite(event.getId(), eventFile);
+			}
 
 			// In eine temporäre Datei im selben Verzeichnis schreiben und erst danach atomar
 			// umbenennen, damit ein Absturz mitten im Schreiben nicht die Event-Datei zerstört.
@@ -238,7 +258,9 @@ public class JsonEventRepository implements EventRepository {
 		String fileName = event.getId() + ".json";
 		File eventFile = new File(storageDir, fileName);
 
-		// Die Backups bleiben bewusst liegen: Sie sind die einzige Rettung für ein versehentlich gelöschtes Event.
+		// Der Stand zum Zeitpunkt des Löschens wird gesichert und die Backups bleiben liegen: Sie sind die einzige
+		// Rettung für ein versehentlich gelöschtes Event.
+		backupStore.backupBeforeOverwrite(event.getId(), eventFile);
 		if (eventFile.exists() && !eventFile.delete()) {
 			throw new RuntimeException("Fehler beim Löschen der Datei: " + fileName);
 		}

@@ -246,6 +246,47 @@ class BackupStoreTest {
 		assertEquals(List.of(LocalDateTime.of(2026, 10, 1, 18, 0)), timestamps("y"));
 	}
 
+	// --- Fehlerfälle aus dem Final Review ---
+
+	@Test
+	void list_ignoresFilesWithInvalidDateOrCounter_andBackupsKeepWorking() throws IOException {
+		File dir = new File(new File(dataDir, "backups"), "a");
+		dir.mkdirs();
+		Files.writeString(new File(dir, "2026-13-01_10-00-00-000.json").toPath(), "x", StandardCharsets.UTF_8);
+		Files.writeString(new File(dir, "2026-10-14_10-00-00-000-99999999999.json").toPath(), "x", StandardCharsets.UTF_8);
+		File current = writeCurrent("a", "v1");
+
+		assertTrue(store.list("a").isEmpty());
+		assertTrue(store.backupBeforeOverwrite("a", current));
+		assertEquals(1, store.list("a").size());
+	}
+
+	@Test
+	void ensureBackedUp_isTrueWhenNothingToSave() throws IOException {
+		assertTrue(store.ensureBackedUp("a", new File(dataDir, "a.json")), "Datei fehlt: nichts zu sichern");
+		File current = writeCurrent("a", "v1");
+		assertTrue(store.backupBeforeOverwrite("a", current));
+
+		assertTrue(store.ensureBackedUp("a", current), "Datei gleicht der neuesten Kopie: schon gesichert");
+		assertEquals(1, store.list("a").size());
+	}
+
+	@Test
+	void ensureBackedUp_createsCopyForChangedFile() throws IOException {
+		File current = writeCurrent("a", "v1");
+
+		assertTrue(store.ensureBackedUp("a", current));
+		assertEquals(1, store.list("a").size());
+	}
+
+	@Test
+	void ensureBackedUp_isFalseWhenBackupFails() throws IOException {
+		Files.writeString(new File(dataDir, "backups").toPath(), "ich bin eine Datei", StandardCharsets.UTF_8);
+		File current = writeCurrent("a", "v1");
+
+		assertFalse(store.ensureBackedUp("a", current));
+	}
+
 	// --- Start-Wartung ---
 
 	private File putFile(String name, String content, LocalDateTime lastModified) throws IOException {

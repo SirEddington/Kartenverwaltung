@@ -34,7 +34,7 @@ public final class EventBackupCatalog extends AbstractBackupCatalog<Event> {
 	public static EventBackupCatalog create() {
 		JsonEventRepository events = JsonEventRepository.getInstance();
 		JsonHallRepository halls = JsonHallRepository.getInstance();
-		return new EventBackupCatalog(events.backups(), events::loadEvents, hallId -> halls.findById(hallId) != null, EventSaver::saveStructureChange, events::replaceCachedEvent);
+		return new EventBackupCatalog(events.backups(), events::loadEvents, hallId -> halls.findById(hallId) != null, EventSaver::saveRestoredState, events::replaceCachedEvent);
 	}
 
 	@Override

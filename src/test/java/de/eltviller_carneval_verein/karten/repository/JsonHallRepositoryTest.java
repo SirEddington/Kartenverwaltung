@@ -137,6 +137,32 @@ class JsonHallRepositoryTest {
 	}
 
 	@Test
+	void saveHallRequiringBackup_failsWithoutTouchingTheFile_whenBackupIsImpossible(@TempDir File storageDir) throws IOException {
+		JsonHallRepository repository = new JsonHallRepository(storageDir);
+		Hall hall = newHall("Halle");
+		repository.saveHall(hall);
+		Files.writeString(new File(storageDir, "backups").toPath(), "ich bin eine Datei", StandardCharsets.UTF_8);
+		hall.changeName("Ueberschrieben");
+
+		assertThrows(IllegalStateException.class, () -> repository.saveHallRequiringBackup(hall));
+
+		assertEquals("Halle", new JsonHallRepository(storageDir).loadHalls().get(0).getName());
+	}
+
+	@Test
+	void saveHallRequiringBackup_savesAndBacksUpTheCurrentState(@TempDir File storageDir) {
+		JsonHallRepository repository = new JsonHallRepository(storageDir);
+		Hall hall = newHall("Halle");
+		repository.saveHall(hall);
+		hall.changeName("Wiederhergestellt");
+
+		repository.saveHallRequiringBackup(hall);
+
+		assertEquals(1, repository.backups().list(hall.getId()).size());
+		assertEquals("Wiederhergestellt", new JsonHallRepository(storageDir).loadHalls().get(0).getName());
+	}
+
+	@Test
 	void backupFailure_doesNotBlockSaving(@TempDir File storageDir) throws IOException {
 		JsonHallRepository repository = new JsonHallRepository(storageDir);
 		Hall hall = newHall("Halle");
@@ -150,7 +176,7 @@ class JsonHallRepositoryTest {
 	}
 
 	@Test
-	void deleteHall_removesFileAndCacheEntry_butKeepsBackups(@TempDir File storageDir) {
+	void deleteHall_removesFileAndCacheEntry_butKeepsBackupsIncludingTheLastState(@TempDir File storageDir) throws IOException {
 		JsonHallRepository repository = new JsonHallRepository(storageDir);
 		Hall keep = newHall("Bleibt");
 		Hall remove = newHall("Weg");
@@ -162,7 +188,9 @@ class JsonHallRepositoryTest {
 		repository.deleteHall(remove);
 
 		assertFalse(new File(storageDir, remove.getId() + ".json").exists());
-		assertEquals(1, repository.backups().list(remove.getId()).size(), "Die Backups bleiben für das Wiederherstellen liegen.");
+		List<BackupStore.Backup> backups = repository.backups().list(remove.getId());
+		assertEquals(2, backups.size(), "Die Backups bleiben liegen, dazu der Stand zum Zeitpunkt des Löschens.");
+		assertTrue(new String(repository.backups().read(backups.get(0)), StandardCharsets.UTF_8).contains("Weg (umbenannt)"));
 		assertNull(repository.findById(remove.getId()));
 		assertEquals(1, repository.loadHalls().size());
 		assertEquals(1, new JsonHallRepository(storageDir).loadHalls().size());
