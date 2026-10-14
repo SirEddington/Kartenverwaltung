@@ -6,12 +6,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -32,6 +36,10 @@ public final class BackupStore {
 	private static final Logger LOG = Logger.getLogger(BackupStore.class.getName());
 
 	private static final String BACKUP_DIR_NAME = "backups";
+	/** Alle Kopien dieses Zeitraums bleiben erhalten. */
+	private static final Duration KEEP_ALL = Duration.ofHours(24);
+	/** Ältere Kopien werden gelöscht. */
+	private static final Duration MAX_AGE = Duration.ofDays(90);
 	private static final DateTimeFormatter NAME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS");
 	/** Dateiname einer Kopie: Zeitstempel, optional ein Zähler ab 2 bei gleicher Millisekunde. */
 	private static final Pattern NAME_PATTERN = Pattern.compile("(\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2}-\\d{3})(?:-(\\d+))?\\.json");
@@ -81,6 +89,7 @@ public final class BackupStore {
 			Path partial = idDir.resolve(target.getFileName() + ".part");
 			Files.copy(currentFile.toPath(), partial, StandardCopyOption.REPLACE_EXISTING);
 			Files.move(partial, target, StandardCopyOption.ATOMIC_MOVE);
+			prune(id);
 			return true;
 		} catch (IOException | RuntimeException e) {
 			LOG.log(Level.SEVERE, "Backup von " + currentFile.getName() + " konnte nicht angelegt werden", e);
@@ -130,5 +139,43 @@ public final class BackupStore {
 
 	public byte[] read(Backup backup) throws IOException {
 		return Files.readAllBytes(backup.file());
+	}
+
+	/**
+	 * Räumt die Kopien einer ID auf: Alles der letzten 24 Stunden bleibt, aus jedem älteren Kalendertag nur die
+	 * letzte Kopie, und was älter als 90 Tage ist, wird gelöscht. Zeitstempel in der Zukunft zählen als "letzte
+	 * 24 Stunden". Wirft nie.
+	 */
+	public void prune(String id) {
+		try {
+			LocalDateTime now = LocalDateTime.now(clock);
+			LocalDateTime recentCutoff = now.minus(KEEP_ALL);
+			LocalDateTime maxAgeCutoff = now.minus(MAX_AGE);
+			Set<LocalDate> daysKept = new HashSet<>();
+			// Neueste zuerst: Die erste Kopie eines älteren Tages ist die letzte dieses Tages
+			for (Backup backup : list(id)) {
+				if (!backup.timestamp().isBefore(recentCutoff)) {
+					continue;
+				}
+				if (backup.timestamp().isBefore(maxAgeCutoff) || !daysKept.add(backup.timestamp().toLocalDate())) {
+					delete(backup);
+				}
+			}
+		} catch (RuntimeException e) {
+			LOG.log(Level.SEVERE, "Backups von " + id + " konnten nicht aufgeräumt werden", e);
+		}
+	}
+
+	/** Räumt alle IDs auf, auch die von gelöschten Events und Hallen. */
+	public void pruneAll() {
+		idsWithBackups().forEach(this::prune);
+	}
+
+	private static void delete(Backup backup) {
+		try {
+			Files.deleteIfExists(backup.file());
+		} catch (IOException e) {
+			LOG.log(Level.WARNING, "Backup konnte nicht gelöscht werden: " + backup.file(), e);
+		}
 	}
 }

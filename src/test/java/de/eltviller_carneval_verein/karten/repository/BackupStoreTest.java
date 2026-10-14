@@ -150,4 +150,111 @@ class BackupStoreTest {
 
 		assertFalse(store.backupBeforeOverwrite("a", current));
 	}
+
+	// --- Aufbewahrung ---
+
+	private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 14, 12, 0);
+
+	/** Legt direkt eine Kopie mit dem Zeitstempel im Namen an (ohne den Weg über das Backup). */
+	private void putBackup(String id, LocalDateTime timestamp) throws IOException {
+		File dir = new File(new File(dataDir, "backups"), id);
+		dir.mkdirs();
+		String name = timestamp.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS")) + ".json";
+		Files.writeString(new File(dir, name).toPath(), "x" + timestamp, StandardCharsets.UTF_8);
+	}
+
+	private List<LocalDateTime> timestamps(String id) {
+		return store.list(id).stream().map(Backup::timestamp).toList();
+	}
+
+	@Test
+	void keepsEverythingFromLast24Hours() throws IOException {
+		clock.set(NOW);
+		putBackup("a", LocalDateTime.of(2026, 10, 13, 12, 30));
+		putBackup("a", LocalDateTime.of(2026, 10, 14, 8, 0));
+		putBackup("a", LocalDateTime.of(2026, 10, 14, 11, 59));
+
+		store.prune("a");
+
+		assertEquals(3, store.list("a").size());
+	}
+
+	@Test
+	void olderThan24Hours_keepsOnlyLastPerDay() throws IOException {
+		clock.set(NOW);
+		putBackup("a", LocalDateTime.of(2026, 10, 12, 9, 0));
+		putBackup("a", LocalDateTime.of(2026, 10, 12, 14, 0));
+		putBackup("a", LocalDateTime.of(2026, 10, 12, 20, 0));
+		putBackup("a", LocalDateTime.of(2026, 10, 11, 8, 0));
+		putBackup("a", LocalDateTime.of(2026, 10, 11, 23, 0));
+
+		store.prune("a");
+
+		assertEquals(List.of(LocalDateTime.of(2026, 10, 12, 20, 0), LocalDateTime.of(2026, 10, 11, 23, 0)), timestamps("a"));
+	}
+
+	@Test
+	void olderThan90Days_isDeleted() throws IOException {
+		clock.set(NOW);
+		putBackup("a", LocalDateTime.of(2026, 7, 10, 10, 0));
+		putBackup("a", LocalDateTime.of(2026, 7, 20, 10, 0));
+
+		store.prune("a");
+
+		assertEquals(List.of(LocalDateTime.of(2026, 7, 20, 10, 0)), timestamps("a"));
+	}
+
+	@Test
+	void futureTimestamp_countsAsRecent() throws IOException {
+		clock.set(NOW);
+		putBackup("a", LocalDateTime.of(2026, 10, 15, 9, 0));
+		putBackup("a", LocalDateTime.of(2026, 10, 15, 10, 0));
+
+		store.prune("a");
+
+		assertEquals(2, store.list("a").size());
+	}
+
+	@Test
+	void foreignFiles_areIgnoredAndKept() throws IOException {
+		clock.set(NOW);
+		putBackup("a", LocalDateTime.of(2026, 10, 12, 9, 0));
+		File dir = new File(new File(dataDir, "backups"), "a");
+		File note = new File(dir, "notiz.txt");
+		File odd = new File(dir, "komisch.json");
+		Files.writeString(note.toPath(), "n", StandardCharsets.UTF_8);
+		Files.writeString(odd.toPath(), "k", StandardCharsets.UTF_8);
+
+		store.prune("a");
+
+		assertTrue(note.exists());
+		assertTrue(odd.exists());
+		assertEquals(1, store.list("a").size());
+	}
+
+	@Test
+	void pruneAll_cleansDeletedEntityIds() throws IOException {
+		clock.set(NOW);
+		for (String id : List.of("x", "y")) {
+			putBackup(id, LocalDateTime.of(2026, 10, 1, 9, 0));
+			putBackup(id, LocalDateTime.of(2026, 10, 1, 18, 0));
+		}
+
+		store.pruneAll();
+
+		assertEquals(List.of(LocalDateTime.of(2026, 10, 1, 18, 0)), timestamps("x"));
+		assertEquals(List.of(LocalDateTime.of(2026, 10, 1, 18, 0)), timestamps("y"));
+	}
+
+	@Test
+	void backupBeforeOverwrite_prunesAfterwards() throws IOException {
+		clock.set(NOW);
+		putBackup("a", LocalDateTime.of(2026, 10, 12, 9, 0));
+		putBackup("a", LocalDateTime.of(2026, 10, 12, 20, 0));
+		File current = writeCurrent("a", "neu");
+
+		assertTrue(store.backupBeforeOverwrite("a", current));
+
+		assertEquals(List.of(NOW, LocalDateTime.of(2026, 10, 12, 20, 0)), timestamps("a"));
+	}
 }
