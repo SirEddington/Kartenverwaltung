@@ -176,6 +176,8 @@ public class TicketShellController {
 			// Aktuelles Event und Vorstellung direkt an den neuen Inhalt übergeben
 			activeContentController.setEvent(currentEvent);
 			activeContentController.setPresentation(currentPresentation);
+			// Der Bearbeitungsmodus gilt für die ganze Shell, nicht nur für die Ansicht, in der er eingeschaltet wurde
+			activeContentController.setEditMode(editMode);
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
