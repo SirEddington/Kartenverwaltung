@@ -21,6 +21,7 @@
         <Label text="Suche:" />
         <TextField fx:id="searchField" promptText="Halle / Hallenobjekt..." prefWidth="200.0" />
 
+        <Button text="Wiederherstellen" styleClass="button-default" onAction="#handleRestore" />
         <Button text="+ Neue Halle" styleClass="button-primary" onAction="#handleCreateNewHall" />
     </HBox>
 

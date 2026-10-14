@@ -437,7 +437,7 @@ public class EventEditController {
 			handleCopyPres(pres, newEvent);
 		}
 
-		repository.saveEvent(newEvent);
+		EventSaver.save(newEvent);
 	}
 
 	private void handleDeleteEvent(Event event) {

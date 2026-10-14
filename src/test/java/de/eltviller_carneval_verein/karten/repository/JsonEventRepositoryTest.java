@@ -69,7 +69,7 @@ class JsonEventRepositoryTest {
 	}
 
 	@Test
-	void secondSave_createsBackupOfPreviousVersion(@TempDir File storageDir) {
+	void secondSave_createsBackupInBackupFolder(@TempDir File storageDir) {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
 		event.changeName("Testevent");
@@ -78,8 +78,64 @@ class JsonEventRepositoryTest {
 		event.changeName("Testevent (geaendert)");
 		repository.saveEvent(event);
 
-		File backupFile = new File(storageDir, event.getId() + ".json.bak");
-		assertTrue(backupFile.exists(), "Beim zweiten Speichern sollte die vorherige Fassung als .bak gesichert werden.");
+		assertEquals(1, repository.backups().list(event.getId()).size(), "Beim zweiten Speichern sollte die vorherige Fassung im Backup-Ordner liegen.");
+		assertFalse(new File(storageDir, event.getId() + ".json.bak").exists(), "Die einzelne .bak-Datei gibt es nicht mehr.");
+	}
+
+	@Test
+	void savingWithoutChange_createsNoSecondBackup(@TempDir File storageDir) {
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
+		Event event = new Event();
+		event.changeName("Testevent");
+		repository.saveEvent(event);
+		repository.saveEvent(event); // sichert die Datei von eben (noch keine Kopie vorhanden)
+
+		repository.saveEvent(event); // Datei ist unverändert, also gleich der neuesten Kopie
+
+		assertEquals(1, repository.backups().list(event.getId()).size());
+	}
+
+	@Test
+	void deleteEvent_removesFile_butKeepsBackupsIncludingTheLastState(@TempDir File storageDir) throws IOException {
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
+		Event event = new Event();
+		event.changeName("Testevent");
+		repository.saveEvent(event);
+		event.changeName("Testevent (geaendert)");
+		repository.saveEvent(event);
+
+		repository.deleteEvent(event);
+
+		assertFalse(new File(storageDir, event.getId() + ".json").exists());
+		List<BackupStore.Backup> backups = repository.backups().list(event.getId());
+		assertEquals(2, backups.size(), "Die Backups bleiben liegen, dazu der Stand zum Zeitpunkt des Löschens.");
+		assertTrue(new String(repository.backups().read(backups.get(0)), StandardCharsets.UTF_8).contains("Testevent (geaendert)"));
+	}
+
+	@Test
+	void deleteEvent_afterSingleSave_stillLeavesABackup(@TempDir File storageDir) {
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
+		Event event = new Event();
+		event.changeName("Testevent");
+		repository.saveEvent(event);
+
+		repository.deleteEvent(event);
+
+		assertEquals(1, repository.backups().list(event.getId()).size());
+	}
+
+	@Test
+	void backupFailure_doesNotBlockSaving(@TempDir File storageDir) throws IOException {
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
+		Event event = new Event();
+		event.changeName("Testevent");
+		repository.saveEvent(event);
+		Files.writeString(new File(storageDir, "backups").toPath(), "ich bin eine Datei", StandardCharsets.UTF_8);
+		event.changeName("Testevent (neu)");
+
+		assertDoesNotThrow(() -> repository.saveEvent(event));
+
+		assertEquals("Testevent (neu)", new JsonEventRepository(storageDir).loadEvents().get(0).getName());
 	}
 
 	@Test

@@ -132,6 +132,25 @@ class EventSaverTest {
 	}
 
 	@Test
+	void structureChangeIsSavedEvenWhenTheEventHasErrors() {
+		RecordingRepository repository = new RecordingRepository();
+		Event event = validEvent();
+		firstSeat(event, seat -> seat.setPrice(-100));
+
+		EventSaver.saveStructureChange(event, repository);
+
+		assertEquals(List.of(event), repository.saved, "Löschen darf nicht an einem bestehenden Fehler scheitern");
+	}
+
+	@Test
+	void structureChangePassesRepositoryFailureOn() {
+		RecordingRepository repository = new RecordingRepository();
+		repository.failWith = new IllegalStateException("Datei gesperrt");
+
+		assertThrows(IllegalStateException.class, () -> EventSaver.saveStructureChange(validEvent(), repository));
+	}
+
+	@Test
 	void repositoryFailureIsNotSwallowed() {
 		RecordingRepository repository = new RecordingRepository();
 		repository.failWith = new IllegalStateException("Datei gesperrt");

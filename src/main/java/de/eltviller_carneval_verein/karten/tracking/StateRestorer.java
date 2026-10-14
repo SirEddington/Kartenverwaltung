@@ -21,7 +21,9 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker.Snapshot;
  * Objekt, das im Repository-Cache und im {@link ChangeTracker} an die Stelle des bisherigen tritt. Es gibt genau
  * diesen einen Weg für alle Zustände, auch für den gespeicherten Stand ("Nicht speichern" beim Verlassen eines
  * Screens); eine zweite Variante "aus der Datei neu laden" gibt es bewusst nicht. Undo/Redo (KARV-25) nutzt
- * denselben Baustein.
+ * denselben Baustein. Einzige Ausnahme ist das Wiederherstellen aus einem Backup (Package {@code ui.backup}): Es
+ * liest die Sicherung von der Platte, weil dabei auch gelöschte Events und Hallen zurückkommen, die der
+ * {@link ChangeTracker} nicht (mehr) kennt.
  *
  * <p>
  * Das alte Objekt ist danach veraltet. Wer es noch hält (ein Screen, der stehen bleibt), erfährt vom Austausch

@@ -21,6 +21,7 @@
         <Label text="Suche:" />
         <TextField fx:id="searchField" promptText="Event / Vorstellung..." prefWidth="200.0" />
         
+        <Button text="Wiederherstellen" styleClass="button-default" onAction="#handleRestore" />
         <Button text="+ Neues Event" styleClass="button-primary" onAction="#handleCreateNewEvent" />
     </HBox>
 

@@ -27,6 +27,20 @@ public final class HallSaver {
 		return saved;
 	}
 
+	/**
+	 * Speichert eine Struktur-Änderung (Löschen eines Hallenobjekts, Wiederherstellen aus einem Backup) ohne
+	 * Meldung in der Fußzeile (Gegenstück zu {@link EventSaver#saveStructureChange(de.eltviller_carneval_verein.karten.model.Event)}).
+	 * Fehler des Repositories werden nicht abgefangen.
+	 */
+	public static void saveStructureChange(Hall hall) {
+		saveStructureChange(hall, JsonHallRepository.getInstance());
+	}
+
+	/** Wie {@link #saveStructureChange(Hall)} (paketsichtbar für Tests). */
+	static void saveStructureChange(Hall hall, HallRepository repository) {
+		repository.saveHall(hall);
+	}
+
 	/** Die Entscheidung ohne Oberfläche (paketsichtbar für Tests). Fehler des Repositories werden nicht abgefangen. */
 	static boolean trySave(Hall hall, HallRepository repository) {
 		repository.saveHall(hall);

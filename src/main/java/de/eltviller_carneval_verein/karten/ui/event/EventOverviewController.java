@@ -4,12 +4,16 @@ import java.util.List;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
+import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
+import de.eltviller_carneval_verein.karten.ui.backup.EventBackupCatalog;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -142,7 +146,7 @@ public class EventOverviewController extends AbstractOverviewController {
 		colHallName.setCellValueFactory(cell -> {
 			Object data = cell.getValue().getValue();
 			if (data instanceof Presentation presentation) {
-				return new SimpleStringProperty(hallRepository.findById(presentation.getHallId()).getName());
+				return new SimpleStringProperty(hallDisplayName(hallRepository.findById(presentation.getHallId())));
 			}
 			return null;
 		});
@@ -260,6 +264,16 @@ public class EventOverviewController extends AbstractOverviewController {
 		}
 	}
 
+	@Override
+	protected BackupCatalog backupCatalog() {
+		return EventBackupCatalog.create();
+	}
+
+	/** Anzeigename der Halle einer Vorstellung; ein Strich, wenn keine (oder keine existierende) Halle zugeordnet ist. */
+	static String hallDisplayName(Hall hall) {
+		return hall == null ? "–" : hall.getName();
+	}
+
 	/** Löscht den gewählten Eintrag nach Rückfrage und speichert das betroffene Event sofort. */
 	private void handleDelete() {
 		TreeItem<Object> selectedItem = selectedItem();
@@ -280,21 +294,21 @@ public class EventOverviewController extends AbstractOverviewController {
 		} else if (data instanceof Presentation) {
 			if (confirmDelete("Vorstellung löschen", "Soll die Vorstellung \"" + pres.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
 				event.deletePresentation(pres);
-				eventRepository.saveEvent(event);
+				EventSaver.saveStructureChange(event);
 			} else {
 				return;
 			}
 		} else if (data instanceof Table) {
 			if (confirmDelete("Tisch löschen", "Soll Tisch " + table.getTableNumber() + " wirklich unwiderruflich gelöscht werden?")) {
 				pres.deleteTable(table);
-				eventRepository.saveEvent(event);
+				EventSaver.saveStructureChange(event);
 			} else {
 				return;
 			}
 		} else if (data instanceof Seat seat) {
 			if (confirmDelete("Sitz löschen", "Soll Sitz " + seat.getSeatNumber() + " wirklich unwiderruflich gelöscht werden?")) {
 				table.deleteSeat(seat);
-				eventRepository.saveEvent(event);
+				EventSaver.saveStructureChange(event);
 			} else {
 				return;
 			}

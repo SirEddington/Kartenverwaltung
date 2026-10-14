@@ -10,6 +10,7 @@ dependency-reduced-pom.xml
 
 # Lokale Testdaten & Logs
 events_data/
+docs/superpowers/
 *.log
 
 # Lokales Deployment (Release läuft jetzt über .github/workflows/release.yml)

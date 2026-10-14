@@ -67,6 +67,24 @@ class HallSaverTest {
 	}
 
 	@Test
+	void structureChangeIsSavedThroughTheRepository() {
+		RecordingRepository repository = new RecordingRepository();
+		Hall hall = hall();
+
+		HallSaver.saveStructureChange(hall, repository);
+
+		assertEquals(List.of(hall), repository.saved);
+	}
+
+	@Test
+	void structureChangePassesRepositoryFailureOn() {
+		RecordingRepository repository = new RecordingRepository();
+		repository.failWith = new IllegalStateException("Datei gesperrt");
+
+		assertThrows(IllegalStateException.class, () -> HallSaver.saveStructureChange(hall(), repository));
+	}
+
+	@Test
 	void repositoryFailureIsNotSwallowed() {
 		RecordingRepository repository = new RecordingRepository();
 		repository.failWith = new IllegalStateException("Datei gesperrt");
