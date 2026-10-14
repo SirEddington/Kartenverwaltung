@@ -1,11 +1,14 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
-import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
@@ -17,6 +20,7 @@ import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.HallObjectText;
 import javafx.event.EventHandler;
 import javafx.fxml.FXML;
+import javafx.geometry.BoundingBox;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
@@ -26,9 +30,9 @@ import javafx.scene.Cursor;
 import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
-import javafx.scene.control.CheckBox;
-import javafx.scene.control.ComboBox;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextField;
@@ -47,7 +51,6 @@ import javafx.scene.shape.Shape;
 import javafx.scene.text.Text;
 import javafx.stage.Popup;
 import javafx.stage.Window;
-import javafx.util.StringConverter;
 
 public class HallOverviewController implements ContentController {
 
@@ -69,6 +72,21 @@ public class HallOverviewController implements ContentController {
 	private double dragAnchorTranslateY;
 
 	private Popup activePopup;
+
+	// Mehrfachauswahl (nur im Bearbeitungsmodus): Strg-Klick auf Sitze oder Aufziehen eines Rahmens mit der linken Taste
+	private static final double RUBBER_BAND_THRESHOLD = 4;
+	private static final String SEAT_STYLE_CLASS = "hall-seat";
+	private static final String TABLE_STYLE_CLASS = "hall-table";
+	private static final Color SELECTED_SEAT_STROKE = Color.web("#2C2F88");
+	private final Set<Seat> selectedSeats = new LinkedHashSet<>();
+	private final Map<Node, Seat> seatNodes = new HashMap<>();
+	private final Rectangle rubberBand = new Rectangle();
+	private ContextMenu selectionMenu;
+	private double bandStartSceneX;
+	private double bandStartSceneY;
+	private boolean bandPressed = false;
+	private boolean bandActive = false;
+	private boolean bandAdditive = false;
 
 	// Einpassen auf die Halle: wartet, bis die Fläche eine Größe hat; erfolgt nur, wenn sich die Halle ändert (Zoom bleibt beim Vorstellungswechsel)
 	private boolean fitPending = false;
@@ -97,6 +115,13 @@ public class HallOverviewController implements ContentController {
 		viewportPane.setOnScroll(this::handleScroll);
 		viewportPane.setOnMousePressed(this::handleDragStart);
 		viewportPane.setOnMouseDragged(this::handleDrag);
+		viewportPane.setOnMouseReleased(this::handleMouseReleased);
+		rubberBand.setManaged(false);
+		rubberBand.setMouseTransparent(true);
+		rubberBand.setVisible(false);
+		rubberBand.setFill(SELECTED_SEAT_STROKE.deriveColor(0, 1, 1, 0.15));
+		rubberBand.setStroke(SELECTED_SEAT_STROKE);
+		viewportPane.getChildren().add(rubberBand);
 		viewportPane.widthProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
 		viewportPane.heightProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
 		updateHint();
@@ -132,8 +157,17 @@ public class HallOverviewController implements ContentController {
 		hallPane.setTranslateY(parentPoint.getY() - pivotY - newScale * (localPoint.getY() - pivotY));
 	}
 
-	// Der Plan wird immer mit der rechten Maustaste verschoben (links: Klicks auf Tisch/Sitz)
+	// Der Plan wird mit der rechten Maustaste verschoben (ein Klick ohne Ziehen öffnet das Auswahlmenü); die linke Taste
+	// klickt Tisch/Sitz und zieht im Bearbeitungsmodus einen Auswahlrahmen auf
 	private void handleDragStart(MouseEvent event) {
+		if (event.getButton() == MouseButton.PRIMARY) {
+			bandPressed = editMode && placingTable == null;
+			bandActive = false;
+			bandAdditive = event.isShortcutDown();
+			bandStartSceneX = event.getSceneX();
+			bandStartSceneY = event.getSceneY();
+			return;
+		}
 		if (event.getButton() != MouseButton.SECONDARY) {
 			return;
 		}
@@ -144,11 +178,108 @@ public class HallOverviewController implements ContentController {
 	}
 
 	private void handleDrag(MouseEvent event) {
+		if (event.getButton() == MouseButton.PRIMARY) {
+			if (bandPressed) {
+				updateRubberBand(event);
+			}
+			return;
+		}
 		if (event.getButton() != MouseButton.SECONDARY) {
 			return;
 		}
 		hallPane.setTranslateX(dragAnchorTranslateX + (event.getSceneX() - dragAnchorSceneX));
 		hallPane.setTranslateY(dragAnchorTranslateY + (event.getSceneY() - dragAnchorSceneY));
+	}
+
+	private void handleMouseReleased(MouseEvent event) {
+		if (event.getButton() == MouseButton.PRIMARY && bandPressed) {
+			bandPressed = false;
+			if (bandActive) {
+				finishRubberBand(event);
+			} else if (event.isStillSincePress() && !bandAdditive && !selectedSeats.isEmpty() && !isOnSeatOrTable(event.getTarget())) {
+				// Klick ins Leere hebt die Auswahl auf
+				selectedSeats.clear();
+				renderHall();
+			}
+		} else if (event.getButton() == MouseButton.SECONDARY && editMode && event.isStillSincePress()) {
+			showSelectionMenu(event);
+		}
+	}
+
+	private static boolean isOnSeatOrTable(Object target) {
+		for (Node node = target instanceof Node n ? n : null; node != null; node = node.getParent()) {
+			if (node.getStyleClass().contains(SEAT_STYLE_CLASS) || node.getStyleClass().contains(TABLE_STYLE_CLASS)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void updateRubberBand(MouseEvent event) {
+		if (!bandActive) {
+			if (Math.hypot(event.getSceneX() - bandStartSceneX, event.getSceneY() - bandStartSceneY) < RUBBER_BAND_THRESHOLD) {
+				return;
+			}
+			bandActive = true;
+			closePopup();
+		}
+		Point2D start = viewportPane.sceneToLocal(bandStartSceneX, bandStartSceneY);
+		Point2D end = viewportPane.sceneToLocal(event.getSceneX(), event.getSceneY());
+		rubberBand.setX(Math.min(start.getX(), end.getX()));
+		rubberBand.setY(Math.min(start.getY(), end.getY()));
+		rubberBand.setWidth(Math.abs(end.getX() - start.getX()));
+		rubberBand.setHeight(Math.abs(end.getY() - start.getY()));
+		rubberBand.setVisible(true);
+	}
+
+	/** Wählt alle Sitze im aufgezogenen Rahmen, die der Suchfilter zeigt; mit Strg zusätzlich zur bisherigen Auswahl. */
+	private void finishRubberBand(MouseEvent event) {
+		bandActive = false;
+		rubberBand.setVisible(false);
+		Bounds band = new BoundingBox(Math.min(bandStartSceneX, event.getSceneX()), Math.min(bandStartSceneY, event.getSceneY()),
+				Math.abs(event.getSceneX() - bandStartSceneX), Math.abs(event.getSceneY() - bandStartSceneY));
+		if (!bandAdditive) {
+			selectedSeats.clear();
+		}
+		seatNodes.forEach((node, seat) -> {
+			if (matchesQuery(seat) && node.localToScene(node.getBoundsInLocal()).intersects(band)) {
+				selectedSeats.add(seat);
+			}
+		});
+		renderHall();
+	}
+
+	private void toggleSelection(Seat seat) {
+		if (!matchesQuery(seat)) {
+			return; // Was der Suchfilter ausblendet, lässt sich nicht auswählen
+		}
+		if (!selectedSeats.remove(seat)) {
+			selectedSeats.add(seat);
+		}
+		renderHall();
+	}
+
+	/** Rechtsklick ohne Ziehen: Menü für die gewählten Sitze (mit gedrückter Taste zu ziehen verschiebt den Plan). */
+	private void showSelectionMenu(MouseEvent event) {
+		if (selectionMenu != null) {
+			selectionMenu.hide();
+		}
+		MenuItem sellItem = new MenuItem(selectedSeats.isEmpty() ? "Ausgewählte Sitze verkaufen…" : "Ausgewählte Sitze verkaufen… (" + selectedSeats.size() + ")");
+		sellItem.setDisable(selectedSeats.isEmpty());
+		selectionMenu = new ContextMenu(sellItem);
+		sellItem.setOnAction(action -> sellSelection(selectionMenu.getAnchorX(), selectionMenu.getAnchorY()));
+		selectionMenu.show(viewportPane, event.getScreenX(), event.getScreenY());
+	}
+
+	private void sellSelection(double screenX, double screenY) {
+		closePopup();
+		SeatDetailPopup dialog = SeatSelectionEditor.edit(List.copyOf(selectedSeats), viewportPane.getScene().getWindow(), screenX, screenY, () -> {
+			selectedSeats.clear();
+			renderHall();
+		});
+		if (dialog != null) {
+			activePopup = dialog.popup();
+		}
 	}
 
 	private double clamp(double value, double min, double max) {
@@ -195,6 +326,7 @@ public class HallOverviewController implements ContentController {
 	public void renderHall() {
 
 		hallPane.getChildren().clear();
+		seatNodes.clear();
 
 		if (selectedPres == null) {
 			return;
@@ -393,6 +525,7 @@ public class HallOverviewController implements ContentController {
 		tableLabel.setY(table.getPosY() + table.getHeight() / 2.0);
 
 		Group tableShapeNode = new Group(tableShape, tableLabel);
+		tableShapeNode.getStyleClass().add(TABLE_STYLE_CLASS);
 		tableShapeNode.setCursor(Cursor.HAND);
 		return tableShapeNode;
 	}
@@ -483,8 +616,11 @@ public class HallOverviewController implements ContentController {
 		boolean matchesQuery = matchesQuery(seat);
 		boolean searchActive = !currentQuery.isEmpty();
 		seatCircle.setOpacity(matchesQuery ? 1.0 : 0.25);
-		seatCircle.setStroke(searchActive && matchesQuery ? Color.DODGERBLUE : Color.BLACK);
-		seatCircle.setStrokeWidth(searchActive && matchesQuery ? 3 : 1);
+		boolean selected = selectedSeats.contains(seat);
+		seatCircle.setStroke(selected ? SELECTED_SEAT_STROKE : searchActive && matchesQuery ? Color.DODGERBLUE : Color.BLACK);
+		seatCircle.setStrokeWidth(selected ? 4 : searchActive && matchesQuery ? 3 : 1);
+		seatCircle.getStyleClass().add(SEAT_STYLE_CLASS);
+		seatNodes.put(seatCircle, seat);
 
 		Tooltip.install(seatCircle, new Tooltip("Sitz " + seat.getSeatNumber() + " (" + seat.getStatus().getDisplayName() + ")"));
 		seatCircle.setOnMouseClicked(event -> {
@@ -492,6 +628,10 @@ public class HallOverviewController implements ContentController {
 				return;
 			}
 			event.consume();
+			if (editMode && event.isShortcutDown()) {
+				toggleSelection(seat);
+				return;
+			}
 			Window window = seatCircle.getScene().getWindow();
 			openSeatDetailPopup(seat, window, event.getScreenX() + 12, event.getScreenY() + 12);
 		});
@@ -514,14 +654,14 @@ public class HallOverviewController implements ContentController {
 
 	/**
 	 * Öffnet ein Popup mit den Kartendetails des angeklickten Sitzes direkt über
-	 * der Saalübersicht. Änderungen werden sofort ins Modell übernommen; erst
-	 * beim Schließen des Popups wird die Saalübersicht neu gezeichnet (Farbe,
-	 * Tooltip etc.).
+	 * der Saalübersicht. Änderungen gelten erst mit "Anwenden"; danach wird die
+	 * Saalübersicht neu gezeichnet (Farbe, Tooltip etc.).
 	 */
 	private void openSeatDetailPopup(Seat seat, Window window, double screenX, double screenY) {
 		closePopup();
-		activePopup = buildSeatDetailPopup(seat);
-		showDetailPopup(activePopup, window, screenX, screenY);
+		SeatDetailPopup dialog = new SeatDetailPopup(List.of(seat), editMode, this::renderHall);
+		activePopup = dialog.popup();
+		dialog.show(window, screenX, screenY);
 	}
 
 	/**
@@ -549,9 +689,9 @@ public class HallOverviewController implements ContentController {
 	 * dasselbe Erscheinungsbild teilen und nicht unabhängig voneinander gepflegt
 	 * werden müssen.
 	 */
-	private static final String DETAIL_POPUP_STYLE = "-fx-background-color: white; -fx-border-color: #999999; -fx-border-width: 1; " + "-fx-padding: 12; -fx-background-radius: 4; -fx-border-radius: 4;";
+	static final String DETAIL_POPUP_STYLE ="-fx-background-color: white; -fx-border-color: #999999; -fx-border-width: 1; " + "-fx-padding: 12; -fx-background-radius: 4; -fx-border-radius: 4;";
 
-	private static final String APP_STYLESHEET = HallOverviewController.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
+	static final String APP_STYLESHEET =HallOverviewController.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 
 	/**
 	 * Zeigt das Popup an und hängt danach das App-Stylesheet an dessen (erst beim
@@ -599,81 +739,6 @@ public class HallOverviewController implements ContentController {
 		popup.getContent().add(grid);
 		popup.setOnHidden(event -> renderHall());
 		return popup;
-	}
-
-	private Popup buildSeatDetailPopup(Seat seat) {
-		Popup popup = createDetailPopup();
-		GridPane grid = createDetailGrid();
-		int row = 0;
-
-		grid.add(createHeaderLabel("Tisch " + seat.getParent().getTableNumber() + " · Sitz " + seat.getSeatNumber()), 0, row++, 2, 1);
-
-		TextField lastNameField = new TextField(seat.getLastName() != null ? seat.getLastName() : "");
-		lastNameField.setPromptText("Nachname");
-		lastNameField.setDisable(!editMode);
-		grid.addRow(row++, new Label("Nachname:"), lastNameField);
-
-		TextField firstNameField = new TextField(seat.getFirstName() != null ? seat.getFirstName() : "");
-		firstNameField.setPromptText("Vorname");
-		firstNameField.setDisable(!editMode);
-		grid.addRow(row++, new Label("Vorname:"), firstNameField);
-
-		ComboBox<PaymentStatus> paymentCombo = new ComboBox<>();
-		paymentCombo.getItems().setAll(PaymentStatus.values());
-		paymentCombo.setValue(seat.getPaymentStatus());
-		paymentCombo.setConverter(new StringConverter<PaymentStatus>() {
-			@Override
-			public String toString(PaymentStatus status) {
-				return status == null ? "" : status.getDisplayName();
-			}
-
-			@Override
-			public PaymentStatus fromString(String string) {
-				return null; // Bei fixer ComboBox-Auswahl nicht erforderlich
-			}
-		});
-		paymentCombo.setDisable(!editMode);
-		grid.addRow(row++, new Label("Zahlung:"), paymentCombo);
-
-		Spinner<Double> priceSpinner = new Spinner<>();
-		priceSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 1000.0, seat.getPriceDouble(), 0.5));
-		priceSpinner.setEditable(true);
-		priceSpinner.setPrefWidth(100);
-		priceSpinner.setDisable(!editMode);
-		grid.addRow(row++, new Label("Preis (€):"), priceSpinner);
-
-		CheckBox collectedCheck = new CheckBox("Abgeholt");
-		collectedCheck.setSelected(seat.isCollected());
-		collectedCheck.setDisable(!editMode);
-
-		CheckBox wheelchairCheck = new CheckBox("Rollstuhlgeeignet");
-		wheelchairCheck.setSelected(seat.isWheelchairAccessible());
-		wheelchairCheck.setDisable(!editMode);
-
-		HBox checkboxRow = new HBox(12, collectedCheck, wheelchairCheck);
-		grid.add(checkboxRow, 0, row++, 2, 1);
-
-		TextField commentField = new TextField(seat.getComment() != null ? seat.getComment() : "");
-		commentField.setPromptText("Kommentar");
-		commentField.setDisable(!editMode);
-		grid.addRow(row++, new Label("Kommentar:"), commentField);
-
-		addCloseButtonRow(grid, popup, row++);
-
-		// Änderungen sofort ins Modell übernehmen; Anzeige aktualisiert sich beim Schließen (siehe unten)
-		lastNameField.textProperty().addListener((obs, oldVal, newVal) -> seat.setLastName(newVal));
-		firstNameField.textProperty().addListener((obs, oldVal, newVal) -> seat.setFirstName(newVal));
-		paymentCombo.valueProperty().addListener((obs, oldVal, newVal) -> seat.setPaymentStatus(newVal));
-		priceSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
-			if (newVal != null) {
-				seat.setPriceDouble(newVal);
-			}
-		});
-		collectedCheck.selectedProperty().addListener((obs, oldVal, newVal) -> seat.setCollected(newVal));
-		wheelchairCheck.selectedProperty().addListener((obs, oldVal, newVal) -> seat.setWheelchairAccessible(newVal));
-		commentField.textProperty().addListener((obs, oldVal, newVal) -> seat.setComment(newVal));
-
-		return finalizePopup(popup, grid);
 	}
 
 	private Popup buildTableDetailPopup(Table table) {
@@ -813,6 +878,7 @@ public class HallOverviewController implements ContentController {
 	private void applyEditMode() {
 		closePopup();
 		cancelPlacingTable();
+		selectedSeats.clear(); // Die Mehrfachauswahl gibt es nur im Bearbeitungsmodus
 		renderHall();
 	}
 
@@ -820,6 +886,7 @@ public class HallOverviewController implements ContentController {
 	public void setEvent(Event event) {
 		closePopup();
 		cancelPlacingTable();
+		selectedSeats.clear();
 		this.selectedEvent = event;
 		selectedPres = null;
 		hallPane.getChildren().clear();
@@ -830,6 +897,7 @@ public class HallOverviewController implements ContentController {
 	public void setPresentation(Presentation presentation) {
 		closePopup();
 		cancelPlacingTable();
+		selectedSeats.clear();
 		this.selectedPres = presentation;
 		if (selectedPres != null) {
 			this.selectedEvent = presentation.getParent();
@@ -863,6 +931,7 @@ public class HallOverviewController implements ContentController {
 	@Override
 	public void filter(String query) {
 		this.currentQuery = (query == null) ? "" : query.toLowerCase().trim();
+		selectedSeats.removeIf(seat -> !matchesQuery(seat)); // Ausgeblendete Sitze bleiben nicht ausgewählt
 		renderHall();
 	}
 
