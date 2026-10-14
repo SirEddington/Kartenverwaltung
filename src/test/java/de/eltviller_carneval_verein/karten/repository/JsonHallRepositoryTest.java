@@ -108,7 +108,7 @@ class JsonHallRepositoryTest {
 	}
 
 	@Test
-	void savingTwice_keepsSingleFileAndCreatesBackup(@TempDir File storageDir) {
+	void savingTwice_keepsSingleFileAndCreatesBackupInBackupFolder(@TempDir File storageDir) {
 		JsonHallRepository repository = new JsonHallRepository(storageDir);
 		Hall hall = newHall("Halle");
 		repository.saveHall(hall);
@@ -118,24 +118,51 @@ class JsonHallRepositoryTest {
 		File[] jsonFiles = storageDir.listFiles((dir, name) -> name.endsWith(".json"));
 		assertNotNull(jsonFiles);
 		assertEquals(1, jsonFiles.length);
-		assertTrue(new File(storageDir, hall.getId() + ".json.bak").exists(), "Beim Überschreiben wird die letzte Fassung gesichert.");
+		assertEquals(1, repository.backups().list(hall.getId()).size(), "Beim Überschreiben wird die letzte Fassung im Backup-Ordner gesichert.");
+		assertFalse(new File(storageDir, hall.getId() + ".json.bak").exists(), "Die einzelne .bak-Datei gibt es nicht mehr.");
 		assertEquals(1, repository.loadHalls().size(), "Mehrfaches Speichern darf die Halle nicht im Cache verdoppeln.");
 		assertEquals("Halle (umbenannt)", new JsonHallRepository(storageDir).loadHalls().get(0).getName());
 	}
 
 	@Test
-	void deleteHall_removesFilesAndCacheEntry(@TempDir File storageDir) {
+	void savingWithoutChange_createsNoSecondBackup(@TempDir File storageDir) {
+		JsonHallRepository repository = new JsonHallRepository(storageDir);
+		Hall hall = newHall("Halle");
+		repository.saveHall(hall);
+		repository.saveHall(hall); // sichert die Datei von eben (noch keine Kopie vorhanden)
+
+		repository.saveHall(hall); // Datei ist unverändert, also gleich der neuesten Kopie
+
+		assertEquals(1, repository.backups().list(hall.getId()).size());
+	}
+
+	@Test
+	void backupFailure_doesNotBlockSaving(@TempDir File storageDir) throws IOException {
+		JsonHallRepository repository = new JsonHallRepository(storageDir);
+		Hall hall = newHall("Halle");
+		repository.saveHall(hall);
+		Files.writeString(new File(storageDir, "backups").toPath(), "ich bin eine Datei", StandardCharsets.UTF_8);
+		hall.changeName("Halle (neu)");
+
+		repository.saveHall(hall);
+
+		assertEquals("Halle (neu)", new JsonHallRepository(storageDir).loadHalls().get(0).getName());
+	}
+
+	@Test
+	void deleteHall_removesFileAndCacheEntry_butKeepsBackups(@TempDir File storageDir) {
 		JsonHallRepository repository = new JsonHallRepository(storageDir);
 		Hall keep = newHall("Bleibt");
 		Hall remove = newHall("Weg");
 		repository.saveHall(keep);
 		repository.saveHall(remove);
-		repository.saveHall(remove); // erzeugt zusätzlich eine .bak-Datei
+		remove.changeName("Weg (umbenannt)");
+		repository.saveHall(remove); // erzeugt eine Kopie im Backup-Ordner
 
 		repository.deleteHall(remove);
 
 		assertFalse(new File(storageDir, remove.getId() + ".json").exists());
-		assertFalse(new File(storageDir, remove.getId() + ".json.bak").exists());
+		assertEquals(1, repository.backups().list(remove.getId()).size(), "Die Backups bleiben für das Wiederherstellen liegen.");
 		assertNull(repository.findById(remove.getId()));
 		assertEquals(1, repository.loadHalls().size());
 		assertEquals(1, new JsonHallRepository(storageDir).loadHalls().size());

@@ -63,6 +63,9 @@ public class MainApp extends Application {
 		// Events einmalig beim Start laden, damit unlesbare/doppelte Dateien sofort
 		// sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
 		JsonEventRepository repository = JsonEventRepository.getInstance();
+		// Alte Sicherungen übernehmen, verwaiste .tmp entfernen und Backups aufräumen, bevor etwas geladen wird
+		repository.backups().runStartupMaintenance();
+		JsonHallRepository.getInstance().backups().runStartupMaintenance();
 		repository.loadEvents();
 
 		// Jedes Speichern und Löschen führt den gespeicherten Stand der Änderungserkennung nach, egal von wo aus

@@ -20,6 +20,7 @@ public class JsonHallRepository implements HallRepository {
 
 	private final File storageDir;
 	private final ObjectMapper objectMapper;
+	private final BackupStore backupStore;
 
 	// Im-Speicher-Cache der Hallen. null bedeutet "noch nicht von der Platte geladen".
 	// Mehrere Vorstellungen (auch über verschiedene Events hinweg) teilen sich über
@@ -63,12 +64,18 @@ public class JsonHallRepository implements HallRepository {
 		this.storageDir = storageDir;
 
 		this.objectMapper = JsonMapperFactory.create();
+		this.backupStore = new BackupStore(storageDir);
 
 		if (!storageDir.exists()) {
 			storageDir.mkdirs();
 		}
 	}
 	// <-- Konstuktoren
+
+	/** Die Sicherungskopien der Hallen-Dateien (für Wiederherstellen und die Wartung beim Start). */
+	public BackupStore backups() {
+		return backupStore;
+	}
 
 	@Override
 	public List<Hall> loadHalls() {
@@ -179,11 +186,8 @@ public class JsonHallRepository implements HallRepository {
 		File hallFile = new File(storageDir, fileName);
 
 		try {
-			if (hallFile.exists()) {
-				// Letzte bekannte gute Fassung sichern, bevor sie überschrieben wird.
-				File backupFile = new File(storageDir, fileName + ".bak");
-				Files.copy(hallFile.toPath(), backupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-			}
+			// Den Stand sichern, der gleich überschrieben wird (ein Fehler dabei verhindert das Speichern nicht).
+			backupStore.backupBeforeOverwrite(hall.getId(), hallFile);
 
 			// In eine temporäre Datei im selben Verzeichnis schreiben und erst danach atomar
 			// umbenennen, damit ein Absturz mitten im Schreiben nicht die Hall-Datei zerstört.
@@ -241,13 +245,10 @@ public class JsonHallRepository implements HallRepository {
 
 		String fileName = hall.getId() + ".json";
 		File hallFile = new File(storageDir, fileName);
-		File backupFile = new File(storageDir, fileName + ".bak");
 
+		// Die Backups bleiben bewusst liegen: Sie sind die einzige Rettung für eine versehentlich gelöschte Halle.
 		if (hallFile.exists() && !hallFile.delete()) {
 			throw new RuntimeException("Fehler beim Löschen der Datei: " + fileName);
-		}
-		if (backupFile.exists()) {
-			backupFile.delete();
 		}
 
 		if (cachedHalls != null) {

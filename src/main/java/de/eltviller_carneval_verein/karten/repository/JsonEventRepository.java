@@ -20,6 +20,7 @@ public class JsonEventRepository implements EventRepository {
 
 	private final File storageDir;
 	private final ObjectMapper objectMapper;
+	private final BackupStore backupStore;
 
 	// Im-Speicher-Cache der Events. null bedeutet "noch nicht von der Platte geladen".
 	// Alle Controller bekommen über loadEvents() dieselben Event-Objektreferenzen,
@@ -62,6 +63,7 @@ public class JsonEventRepository implements EventRepository {
 		this.storageDir = storageDir;
 
 		this.objectMapper = JsonMapperFactory.create();
+		this.backupStore = new BackupStore(storageDir);
 
 		boolean isNewStorageDir = !storageDir.exists();
 		if (isNewStorageDir) {
@@ -69,6 +71,11 @@ public class JsonEventRepository implements EventRepository {
 		}
 	}
 	// <-- Konstuktoren
+
+	/** Die Sicherungskopien der Event-Dateien (für Wiederherstellen und die Wartung beim Start). */
+	public BackupStore backups() {
+		return backupStore;
+	}
 
 	@Override
 	public List<Event> loadEvents() {
@@ -171,11 +178,8 @@ public class JsonEventRepository implements EventRepository {
 		File eventFile = new File(storageDir, fileName);
 
 		try {
-			if (eventFile.exists()) {
-				// Letzte bekannte gute Fassung sichern, bevor sie überschrieben wird.
-				File backupFile = new File(storageDir, fileName + ".bak");
-				Files.copy(eventFile.toPath(), backupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-			}
+			// Den Stand sichern, der gleich überschrieben wird (ein Fehler dabei verhindert das Speichern nicht).
+			backupStore.backupBeforeOverwrite(event.getId(), eventFile);
 
 			// In eine temporäre Datei im selben Verzeichnis schreiben und erst danach atomar
 			// umbenennen, damit ein Absturz mitten im Schreiben nicht die Event-Datei zerstört.
@@ -233,13 +237,10 @@ public class JsonEventRepository implements EventRepository {
 
 		String fileName = event.getId() + ".json";
 		File eventFile = new File(storageDir, fileName);
-		File backupFile = new File(storageDir, fileName + ".bak");
 
+		// Die Backups bleiben bewusst liegen: Sie sind die einzige Rettung für ein versehentlich gelöschtes Event.
 		if (eventFile.exists() && !eventFile.delete()) {
 			throw new RuntimeException("Fehler beim Löschen der Datei: " + fileName);
-		}
-		if (backupFile.exists()) {
-			backupFile.delete();
 		}
 
 		if (cachedEvents != null) {
