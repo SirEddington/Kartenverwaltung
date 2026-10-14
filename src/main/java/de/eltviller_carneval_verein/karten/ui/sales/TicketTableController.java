@@ -8,6 +8,7 @@ import org.controlsfx.control.table.TableFilter;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
@@ -21,7 +22,11 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.control.cell.ComboBoxTableCell;
@@ -39,6 +44,8 @@ public class TicketTableController implements ContentController {
 	// Enthält NUR die Sitze des aktuell gewählten Events
 	private final ObservableList<SeatDTO> masterData = FXCollections.observableArrayList();
 	private FilteredList<SeatDTO> filteredData;
+	private ContextMenu selectionMenu;
+	private SeatDetailPopup activeDialog;
 
 	// TableView und Spalten
 	@FXML
@@ -94,6 +101,46 @@ public class TicketTableController implements ContentController {
 
 		// 4. Spaltenkopf-Filter von ControlsFX aktivieren
 		TableFilter.forTableView(seatTable).apply();
+
+		// 5. Mehrfachauswahl (Strg-/Shift-Klick). Zeilen, die der Suchfilter ausblendet, fallen von selbst aus der Auswahl.
+		seatTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+		MenuItem sellItem = new MenuItem();
+		selectionMenu = new ContextMenu(sellItem);
+		sellItem.setOnAction(event -> sellSelection());
+		// Das Menü zum Sammelverkauf gehört zu einer Zeile (nicht zur leeren Fläche) und gibt es nur im Bearbeitungsmodus
+		// und ohne offenen Dialog (er würde sonst samt Eingaben ersetzt). Auf einer nicht gewählten Zeile gilt das Menü nur
+		// für diese Zeile, auf einer gewählten für die ganze Auswahl, wie im Explorer.
+		seatTable.setRowFactory(table -> {
+			TableRow<SeatDTO> row = new TableRow<>();
+			row.setOnContextMenuRequested(event -> {
+				event.consume();
+				if (!editMode || row.isEmpty() || isDialogOpen()) {
+					return;
+				}
+				if (!row.isSelected()) {
+					seatTable.getSelectionModel().clearAndSelect(row.getIndex());
+				}
+				sellItem.setText(SeatSelectionEditor.menuText(seatTable.getSelectionModel().getSelectedItems().size()));
+				selectionMenu.show(row, event.getScreenX(), event.getScreenY());
+			});
+			return row;
+		});
+	}
+
+	private void sellSelection() {
+		List<Seat> seats = seatTable.getSelectionModel().getSelectedItems().stream().map(SeatDTO::getSeat).toList();
+		activeDialog = SeatSelectionEditor.edit(seats, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), seatTable::refresh);
+	}
+
+	private boolean isDialogOpen() {
+		return activeDialog != null && activeDialog.popup().isShowing();
+	}
+
+	private void closeDialog() {
+		if (activeDialog != null) {
+			activeDialog.popup().hide();
+			activeDialog = null;
+		}
 	}
 
 	private void setupCellFactories() {
@@ -184,6 +231,7 @@ public class TicketTableController implements ContentController {
 	}
 
 	private void applyEditMode() {
+		closeDialog();
 		seatTable.setEditable(editMode);
 
 		// Nicht editierbare Spalten
@@ -205,6 +253,7 @@ public class TicketTableController implements ContentController {
 
 	@Override
 	public void setEvent(Event event) {
+		closeDialog();
 		this.selectedEvent = event;
 		selectedPres = null;
 		loadSeats();
@@ -212,6 +261,7 @@ public class TicketTableController implements ContentController {
 
 	@Override
 	public void setPresentation(Presentation presentation) {
+		closeDialog();
 		// Keine Vorstellung heißt "Alle Vorstellungen" des gewählten Events
 		this.selectedPres = presentation;
 		if (selectedPres != null) {

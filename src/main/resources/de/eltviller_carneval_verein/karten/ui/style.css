@@ -510,10 +510,12 @@
     -fx-border-width: 0px;
 }
 
+/* Rand als unterste Hintergrundebene statt -fx-border-*: Die Fläche hatte keinen Radius (eckig hinter dem runden Rand),
+   und ein Rand mit gleichem Radius lässt helle Eckpixel. */
 .context-menu {
-    -fx-background-color: -fx-surface-white;
-    -fx-border-color: -fx-border-neutral;
-    -fx-border-radius: 4px;
+    -fx-background-color: -fx-border-neutral, -fx-surface-white;
+    -fx-background-insets: 0, 1;
+    -fx-background-radius: 4px, 3px;
 }
 
 /* Hintergrund auf ECV-Gelb bei Hover, Fokus oder Aktivierung (:armed) */

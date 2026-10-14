@@ -13,6 +13,7 @@ import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -170,12 +171,15 @@ public class TicketShellController {
 			// Aktiven Inhalts-Controller merken
 			this.activeContentController = loader.getController();
 
-			// Inhalt im mittleren Bereich austauschen
+			// Inhalt im mittleren Bereich austauschen; ein offener Dialog der alten Ansicht würde sonst stehen bleiben
+			PopupWindows.hideOwnedBy(contentArea.getScene() == null ? null : contentArea.getScene().getWindow());
 			contentArea.getChildren().setAll(view);
 
 			// Aktuelles Event und Vorstellung direkt an den neuen Inhalt übergeben
 			activeContentController.setEvent(currentEvent);
 			activeContentController.setPresentation(currentPresentation);
+			// Der Bearbeitungsmodus gilt für die ganze Shell, nicht nur für die Ansicht, in der er eingeschaltet wurde
+			activeContentController.setEditMode(editMode);
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);

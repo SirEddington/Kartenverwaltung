@@ -18,6 +18,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LiveValidator;
+import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
@@ -49,6 +50,8 @@ public class MainApp extends Application {
 		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/Yanone Kaffeesatz Regular.ttf"), 12);
 
 		primaryStage = stage;
+		// Popups gehören zum Fenster, nicht zur Scene: Sonst bliebe z. B. ein offener Sitz-Dialog über der nächsten Ansicht stehen
+		stage.sceneProperty().addListener((obs, oldScene, newScene) -> PopupWindows.hideOwnedBy(stage));
 		primaryStage.setWidth(width);
 		primaryStage.setHeight(height);
 		primaryStage.setMinWidth(width);
