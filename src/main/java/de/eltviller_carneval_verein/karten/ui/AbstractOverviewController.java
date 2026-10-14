@@ -4,6 +4,8 @@ import java.util.HashSet;
 import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
+import de.eltviller_carneval_verein.karten.ui.backup.BackupRestoreDialog;
 import javafx.fxml.FXML;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.TextField;
@@ -140,6 +142,17 @@ public abstract class AbstractOverviewController {
 	/** Zeigt die Löschbestätigung; true, wenn der Benutzer bestätigt hat. */
 	protected boolean confirmDelete(String title, String message) {
 		return ConfirmDialog.confirmDelete(title, message);
+	}
+
+	/** Der Katalog der Sicherungen dieser Übersicht (Events bzw. Hallen) für den Wiederherstellen-Dialog. */
+	protected abstract BackupCatalog backupCatalog();
+
+	/** Öffnet den Dialog zum Wiederherstellen aus den Sicherungen und lädt danach die Übersicht neu. */
+	@FXML
+	protected void handleRestore() {
+		if (BackupRestoreDialog.show(backupCatalog(), treeTableView.getScene().getWindow())) {
+			reload();
+		}
 	}
 
 	@FXML

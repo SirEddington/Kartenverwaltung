@@ -17,6 +17,8 @@ import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
+import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
+import de.eltviller_carneval_verein.karten.ui.backup.HallBackupCatalog;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.fxml.FXML;
@@ -111,6 +113,11 @@ public class HallManagementController extends AbstractOverviewController {
 
 	private String nullToEmpty(String text) {
 		return text == null ? "" : text;
+	}
+
+	@Override
+	protected BackupCatalog backupCatalog() {
+		return HallBackupCatalog.create();
 	}
 
 	@Override

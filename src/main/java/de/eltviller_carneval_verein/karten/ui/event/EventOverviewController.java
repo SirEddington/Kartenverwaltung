@@ -12,6 +12,8 @@ import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
+import de.eltviller_carneval_verein.karten.ui.backup.EventBackupCatalog;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -260,6 +262,11 @@ public class EventOverviewController extends AbstractOverviewController {
 			Seat seat = findParentInTree(selectedItem, Seat.class);
 			MainApp.showEventEditView(event, pres, table, seat, editable);
 		}
+	}
+
+	@Override
+	protected BackupCatalog backupCatalog() {
+		return EventBackupCatalog.create();
 	}
 
 	/** Anzeigename der Halle einer Vorstellung; ein Strich, wenn keine (oder keine existierende) Halle zugeordnet ist. */
