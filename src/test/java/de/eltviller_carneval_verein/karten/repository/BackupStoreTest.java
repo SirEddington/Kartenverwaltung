@@ -246,6 +246,71 @@ class BackupStoreTest {
 		assertEquals(List.of(LocalDateTime.of(2026, 10, 1, 18, 0)), timestamps("y"));
 	}
 
+	// --- Start-Wartung ---
+
+	private File putFile(String name, String content, LocalDateTime lastModified) throws IOException {
+		File file = new File(dataDir, name);
+		Files.writeString(file.toPath(), content, StandardCharsets.UTF_8);
+		assertTrue(file.setLastModified(lastModified.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()));
+		return file;
+	}
+
+	@Test
+	void legacyBak_isMovedAsFirstCopyWithModifiedTime() throws IOException {
+		clock.set(NOW);
+		LocalDateTime modified = LocalDateTime.of(2026, 10, 1, 10, 0);
+		File legacy = putFile("Test1.json.bak", "alt", modified);
+
+		store.runStartupMaintenance();
+
+		assertFalse(legacy.exists());
+		List<Backup> backups = store.list("Test1");
+		assertEquals(1, backups.size());
+		assertEquals(modified, backups.get(0).timestamp());
+		assertArrayEquals("alt".getBytes(StandardCharsets.UTF_8), store.read(backups.get(0)));
+	}
+
+	@Test
+	void duplicateBakFiles_areLeftAlone() throws IOException {
+		clock.set(NOW);
+		File duplicate = putFile("x.json.duplicate-123.bak", "dup", LocalDateTime.of(2026, 10, 1, 10, 0));
+
+		store.runStartupMaintenance();
+
+		assertTrue(duplicate.exists());
+		assertTrue(store.idsWithBackups().isEmpty());
+	}
+
+	@Test
+	void staleTmpFiles_olderThanOneDay_areDeleted() throws IOException {
+		clock.set(NOW);
+		File stale = putFile("a.tmp", "t", NOW.minusHours(25));
+		File fresh = putFile("b.tmp", "t", NOW.minusHours(23));
+
+		store.runStartupMaintenance();
+
+		assertFalse(stale.exists());
+		assertTrue(fresh.exists());
+	}
+
+	@Test
+	void maintenance_prunesAllIds() throws IOException {
+		clock.set(NOW);
+		putBackup("x", LocalDateTime.of(2026, 10, 1, 9, 0));
+		putBackup("x", LocalDateTime.of(2026, 10, 1, 18, 0));
+
+		store.runStartupMaintenance();
+
+		assertEquals(List.of(LocalDateTime.of(2026, 10, 1, 18, 0)), timestamps("x"));
+	}
+
+	@Test
+	void maintenance_survivesMissingDataDir() {
+		BackupStore missing = new BackupStore(new File(dataDir, "gibt-es-nicht"), clock);
+
+		missing.runStartupMaintenance();
+	}
+
 	@Test
 	void backupBeforeOverwrite_prunesAfterwards() throws IOException {
 		clock.set(NOW);

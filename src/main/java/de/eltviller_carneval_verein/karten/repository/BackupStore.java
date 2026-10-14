@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -40,6 +41,10 @@ public final class BackupStore {
 	private static final Duration KEEP_ALL = Duration.ofHours(24);
 	/** Ältere Kopien werden gelöscht. */
 	private static final Duration MAX_AGE = Duration.ofDays(90);
+	/** Ab diesem Alter gilt eine {@code *.tmp} im Datenordner als verwaist. */
+	private static final Duration STALE_TEMP_AGE = Duration.ofDays(1);
+	/** Endung der früheren einzelnen Sicherung. */
+	private static final String LEGACY_SUFFIX = ".json.bak";
 	private static final DateTimeFormatter NAME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS");
 	/** Dateiname einer Kopie: Zeitstempel, optional ein Zähler ab 2 bei gleicher Millisekunde. */
 	private static final Pattern NAME_PATTERN = Pattern.compile("(\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2}-\\d{3})(?:-(\\d+))?\\.json");
@@ -55,6 +60,7 @@ public final class BackupStore {
 	public record Backup(String entityId, Path file, LocalDateTime timestamp, long size) {
 	}
 
+	private final File dataDir;
 	private final File backupsDir;
 	private final Clock clock;
 
@@ -64,6 +70,7 @@ public final class BackupStore {
 
 	/** Mit eigener Uhr, damit Tests die Zeit stellen können. */
 	public BackupStore(File dataDir, Clock clock) {
+		this.dataDir = dataDir;
 		this.backupsDir = new File(dataDir, BACKUP_DIR_NAME);
 		this.clock = clock;
 	}
@@ -169,6 +176,50 @@ public final class BackupStore {
 	/** Räumt alle IDs auf, auch die von gelöschten Events und Hallen. */
 	public void pruneAll() {
 		idsWithBackups().forEach(this::prune);
+	}
+
+	/**
+	 * Wartung beim App-Start: übernimmt alte {@code <id>.json.bak} als erste Kopie, entfernt verwaiste
+	 * {@code *.tmp}-Reste von abgebrochenen Schreibvorgängen und räumt alle Backups auf. Jeder Schritt fängt seine
+	 * Fehler selbst (Log), ein Fehler stoppt die anderen nicht.
+	 */
+	public void runStartupMaintenance() {
+		adoptLegacyBackups();
+		deleteStaleTempFiles();
+		pruneAll();
+	}
+
+	/** Die früheren einzelnen {@code <id>.json.bak} (nicht {@code *.duplicate-*.bak}) wandern in den Backup-Ordner. */
+	private void adoptLegacyBackups() {
+		File[] legacyFiles = dataDir.listFiles((dir, name) -> name.endsWith(LEGACY_SUFFIX));
+		if (legacyFiles == null) {
+			return;
+		}
+		for (File legacy : legacyFiles) {
+			String id = legacy.getName().substring(0, legacy.getName().length() - LEGACY_SUFFIX.length());
+			try {
+				Path idDir = new File(backupsDir, id).toPath();
+				Files.createDirectories(idDir);
+				LocalDateTime modified = LocalDateTime.ofInstant(Instant.ofEpochMilli(legacy.lastModified()), clock.getZone());
+				Files.move(legacy.toPath(), freeTarget(idDir, modified));
+			} catch (IOException | RuntimeException e) {
+				LOG.log(Level.WARNING, "Alte Sicherung konnte nicht übernommen werden: " + legacy.getName(), e);
+			}
+		}
+	}
+
+	/** Die Repositories schreiben erst in eine {@code *.tmp}; nach einem Abbruch bleibt sie liegen und gilt ab einem Tag als verwaist. */
+	private void deleteStaleTempFiles() {
+		File[] tempFiles = dataDir.listFiles((dir, name) -> name.endsWith(".tmp"));
+		if (tempFiles == null) {
+			return;
+		}
+		long cutoff = clock.millis() - STALE_TEMP_AGE.toMillis();
+		for (File tempFile : tempFiles) {
+			if (tempFile.lastModified() < cutoff && !tempFile.delete()) {
+				LOG.log(Level.WARNING, "Verwaiste Datei konnte nicht gelöscht werden: " + tempFile.getName());
+			}
+		}
 	}
 
 	private static void delete(Backup backup) {
