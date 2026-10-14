@@ -10,6 +10,7 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
+import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -280,21 +281,21 @@ public class EventOverviewController extends AbstractOverviewController {
 		} else if (data instanceof Presentation) {
 			if (confirmDelete("Vorstellung löschen", "Soll die Vorstellung \"" + pres.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
 				event.deletePresentation(pres);
-				eventRepository.saveEvent(event);
+				EventSaver.saveStructureChange(event);
 			} else {
 				return;
 			}
 		} else if (data instanceof Table) {
 			if (confirmDelete("Tisch löschen", "Soll Tisch " + table.getTableNumber() + " wirklich unwiderruflich gelöscht werden?")) {
 				pres.deleteTable(table);
-				eventRepository.saveEvent(event);
+				EventSaver.saveStructureChange(event);
 			} else {
 				return;
 			}
 		} else if (data instanceof Seat seat) {
 			if (confirmDelete("Sitz löschen", "Soll Sitz " + seat.getSeatNumber() + " wirklich unwiderruflich gelöscht werden?")) {
 				table.deleteSeat(seat);
-				eventRepository.saveEvent(event);
+				EventSaver.saveStructureChange(event);
 			} else {
 				return;
 			}

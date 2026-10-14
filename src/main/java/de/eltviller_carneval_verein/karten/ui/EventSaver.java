@@ -43,6 +43,20 @@ public final class EventSaver {
 		return result.saved();
 	}
 
+	/**
+	 * Speichert eine Struktur-Änderung (Löschen von Vorstellung, Tisch oder Sitz, Wiederherstellen aus einem Backup)
+	 * ohne Prüfung und ohne Meldung in der Fußzeile, siehe Klassenbeschreibung. Fehler des Repositories werden nicht
+	 * abgefangen.
+	 */
+	public static void saveStructureChange(Event event) {
+		saveStructureChange(event, JsonEventRepository.getInstance());
+	}
+
+	/** Wie {@link #saveStructureChange(Event)} (paketsichtbar für Tests). */
+	static void saveStructureChange(Event event, EventRepository repository) {
+		repository.saveEvent(event);
+	}
+
 	/** Die Entscheidung ohne Oberfläche (paketsichtbar für Tests). Fehler des Repositories werden nicht abgefangen. */
 	static SaveResult trySave(Event event, EventRepository repository) {
 		ValidationResult validation = EventValidator.validate(event);
