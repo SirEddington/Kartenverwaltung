@@ -89,7 +89,6 @@ class BackupStoreTest {
 		Backup backup = backups.get(0);
 		assertEquals("2026-10-14_15-30-12-123.json", backup.file().getFileName().toString());
 		assertEquals(T0, backup.timestamp());
-		assertEquals("a", backup.entityId());
 		assertEquals(2, backup.size());
 		assertArrayEquals("v1".getBytes(StandardCharsets.UTF_8), store.read(backup));
 	}
@@ -263,28 +262,28 @@ class BackupStoreTest {
 
 	@Test
 	void ensureBackedUp_isTrueWhenNothingToSave() throws IOException {
-		assertTrue(store.ensureBackedUp("a", new File(dataDir, "a.json")), "Datei fehlt: nichts zu sichern");
+		assertTrue(store.ensureBackedUp("a"), "Datei fehlt: nichts zu sichern");
 		File current = writeCurrent("a", "v1");
 		assertTrue(store.backupBeforeOverwrite("a", current));
 
-		assertTrue(store.ensureBackedUp("a", current), "Datei gleicht der neuesten Kopie: schon gesichert");
+		assertTrue(store.ensureBackedUp("a"), "Datei gleicht der neuesten Kopie: schon gesichert");
 		assertEquals(1, store.list("a").size());
 	}
 
 	@Test
 	void ensureBackedUp_createsCopyForChangedFile() throws IOException {
-		File current = writeCurrent("a", "v1");
+		writeCurrent("a", "v1");
 
-		assertTrue(store.ensureBackedUp("a", current));
+		assertTrue(store.ensureBackedUp("a"));
 		assertEquals(1, store.list("a").size());
 	}
 
 	@Test
 	void ensureBackedUp_isFalseWhenBackupFails() throws IOException {
 		Files.writeString(new File(dataDir, "backups").toPath(), "ich bin eine Datei", StandardCharsets.UTF_8);
-		File current = writeCurrent("a", "v1");
+		writeCurrent("a", "v1");
 
-		assertFalse(store.ensureBackedUp("a", current));
+		assertFalse(store.ensureBackedUp("a"));
 	}
 
 	// --- Start-Wartung ---

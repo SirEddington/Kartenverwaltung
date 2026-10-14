@@ -27,7 +27,10 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 abstract class AbstractBackupCatalog<T> implements BackupCatalog {
 
 	private static final Logger LOG = Logger.getLogger(AbstractBackupCatalog.class.getName());
-	private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
+	/** Das Anzeigeformat eines Backup-Zeitpunkts, für Liste, Rückfrage und Bestätigung dasselbe. */
+	static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
+	/** Der Mapper ist nach der Konfiguration threadsicher; ein neuer je Dialog würde seine Deserializer-Caches verlieren. */
+	private static final ObjectMapper MAPPER = JsonMapperFactory.create();
 
 	private final BackupStore store;
 	private final Class<T> type;
@@ -35,7 +38,6 @@ abstract class AbstractBackupCatalog<T> implements BackupCatalog {
 	private final Supplier<List<T>> currentEntities;
 	private final Consumer<T> save;
 	private final Consumer<T> replaceInCache;
-	private final ObjectMapper mapper = JsonMapperFactory.create();
 
 	/**
 	 * @param save           speichert die wiederhergestellte Entität (wirft bei Fehlern)
@@ -90,7 +92,7 @@ abstract class AbstractBackupCatalog<T> implements BackupCatalog {
 			return null;
 		}
 		try {
-			return nameOf(mapper.readValue(store.read(backups.get(0)), type));
+			return nameOf(MAPPER.readValue(store.read(backups.get(0)), type));
 		} catch (IOException | RuntimeException e) {
 			LOG.log(Level.WARNING, "Name aus der Sicherung " + backups.get(0).file().getFileName() + " nicht lesbar", e);
 			return null;
@@ -107,13 +109,18 @@ abstract class AbstractBackupCatalog<T> implements BackupCatalog {
 		String fileName = backup.file().getFileName().toString();
 		T restored;
 		try {
-			restored = mapper.readValue(store.read(backup), type);
+			restored = MAPPER.readValue(store.read(backup), type);
 		} catch (IOException | RuntimeException e) {
 			LOG.log(Level.WARNING, "Sicherung nicht lesbar: " + backup.file(), e);
 			return RestoreResult.failure("Die Sicherung " + fileName + " konnte nicht gelesen werden: " + e.getMessage());
 		}
 		if (restored == null || !entry.id().equals(idOf(restored))) {
 			return RestoreResult.failure("Die Sicherung " + fileName + " gehört nicht zu \"" + entry.name() + "\".");
+		}
+
+		// Das Wiederherstellen ersetzt den aktuellen Stand: Ist er nicht gesichert (und lässt sich nicht sichern), bleibt alles wie es ist
+		if (!store.ensureBackedUp(entry.id())) {
+			return RestoreResult.failure("Der aktuelle Stand von \"" + entry.name() + "\" konnte nicht gesichert werden, deshalb wurde nichts überschrieben.");
 		}
 
 		List<String> notes = adjustForRestore(restored);

@@ -1,10 +1,11 @@
 package de.eltviller_carneval_verein.karten.ui.backup;
 
-import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.function.Function;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.repository.BackupStore.Backup;
+import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog.Entry;
 import javafx.event.ActionEvent;
 import javafx.geometry.Insets;
@@ -19,6 +20,7 @@ import javafx.scene.control.ListView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.Window;
+import javafx.util.Callback;
 
 /**
  * Der Dialog zum Wiederherstellen aus den Sicherungen: links die Events (bzw. Hallen) mit Sicherungen, auch
@@ -26,8 +28,6 @@ import javafx.stage.Window;
  * {@link BackupCatalog}.
  */
 public final class BackupRestoreDialog {
-
-	private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
 
 	private BackupRestoreDialog() {
 	}
@@ -38,7 +38,18 @@ public final class BackupRestoreDialog {
 
 	static String versionText(Backup backup) {
 		long kilobytes = Math.max(1, (backup.size() + 512) / 1024);
-		return backup.timestamp().format(TIME_FORMAT) + " (" + kilobytes + " KB)";
+		return backup.timestamp().format(AbstractBackupCatalog.TIME_FORMAT) + " (" + kilobytes + " KB)";
+	}
+
+	/** Eine Zellfabrik, die jeden Eintrag nur als Text anzeigt. */
+	private static <T> Callback<ListView<T>, ListCell<T>> textCells(Function<T, String> text) {
+		return list -> new ListCell<>() {
+			@Override
+			protected void updateItem(T item, boolean empty) {
+				super.updateItem(item, empty);
+				setText(empty || item == null ? null : text.apply(item));
+			}
+		};
 	}
 
 	/**
@@ -50,32 +61,20 @@ public final class BackupRestoreDialog {
 		ListView<Entry> entryList = new ListView<>();
 		entryList.setPrefSize(260, 320);
 		entryList.setPlaceholder(new Label("Keine Sicherungen vorhanden."));
-		entryList.setCellFactory(list -> new ListCell<>() {
-			@Override
-			protected void updateItem(Entry entry, boolean empty) {
-				super.updateItem(entry, empty);
-				setText(empty || entry == null ? null : entryText(entry));
-			}
-		});
+		entryList.setCellFactory(textCells(BackupRestoreDialog::entryText));
 		entryList.getItems().setAll(catalog.entries());
 
 		ListView<Backup> versionList = new ListView<>();
 		versionList.setPrefSize(280, 320);
 		versionList.setPlaceholder(new Label("Links einen Eintrag wählen."));
-		versionList.setCellFactory(list -> new ListCell<>() {
-			@Override
-			protected void updateItem(Backup backup, boolean empty) {
-				super.updateItem(backup, empty);
-				setText(empty || backup == null ? null : versionText(backup));
-			}
-		});
+		versionList.setCellFactory(textCells(BackupRestoreDialog::versionText));
 		entryList.getSelectionModel().selectedItemProperty().addListener((obs, oldEntry, entry) -> {
 			versionList.getItems().setAll(entry == null ? List.of() : catalog.versions(entry.id()));
 			versionList.getSelectionModel().selectFirst();
 		});
 
 		HBox content = new HBox(15, new VBox(5, new Label(catalog.entityLabel() + ":"), entryList), new VBox(5, new Label("Sicherungen (neueste zuerst):"), versionList));
-		content.setPadding(new Insets(5, 0, 0, 0));
+		content.setPadding(new Insets(15, 20, 5, 20));
 
 		ButtonType restore = new ButtonType("Wiederherstellen", ButtonData.OK_DONE);
 		ButtonType close = new ButtonType("Schließen", ButtonData.CANCEL_CLOSE);
@@ -124,21 +123,8 @@ public final class BackupRestoreDialog {
 
 	/** Die Rückfrage mit dem Hinweis, dass der aktuelle Stand vorher gesichert wird; Fokus auf "Abbrechen". */
 	private static boolean confirm(Alert parent, BackupCatalog catalog, Entry entry, Backup backup) {
-		ButtonType yes = new ButtonType("Wiederherstellen", ButtonData.OK_DONE);
-		ButtonType cancel = new ButtonType("Abbrechen", ButtonData.CANCEL_CLOSE);
-		String message = catalog.entityLabel() + " \"" + entry.name() + "\" auf den Stand vom " + backup.timestamp().format(TIME_FORMAT)
+		String message = catalog.entityLabel() + " \"" + entry.name() + "\" auf den Stand vom " + backup.timestamp().format(AbstractBackupCatalog.TIME_FORMAT)
 				+ " zurücksetzen?\n\nDer aktuelle Stand wird vorher gesichert.";
-		Alert alert = new Alert(AlertType.CONFIRMATION, message, yes, cancel);
-		alert.setTitle("Wiederherstellen");
-		alert.setHeaderText(null);
-		alert.initOwner(parent.getDialogPane().getScene().getWindow());
-		MainApp.applyAppIcon(alert);
-		Button yesButton = (Button) alert.getDialogPane().lookupButton(yes);
-		Button cancelButton = (Button) alert.getDialogPane().lookupButton(cancel);
-		yesButton.setDefaultButton(false);
-		yesButton.getStyleClass().add("button-primary");
-		cancelButton.getStyleClass().add("button-default");
-		alert.setOnShown(event -> cancelButton.requestFocus());
-		return alert.showAndWait().filter(button -> button == yes).isPresent();
+		return ConfirmDialog.confirm("Wiederherstellen", message, "Wiederherstellen", "button-primary", parent.getDialogPane().getScene().getWindow());
 	}
 }

@@ -137,32 +137,6 @@ class JsonHallRepositoryTest {
 	}
 
 	@Test
-	void saveHallRequiringBackup_failsWithoutTouchingTheFile_whenBackupIsImpossible(@TempDir File storageDir) throws IOException {
-		JsonHallRepository repository = new JsonHallRepository(storageDir);
-		Hall hall = newHall("Halle");
-		repository.saveHall(hall);
-		Files.writeString(new File(storageDir, "backups").toPath(), "ich bin eine Datei", StandardCharsets.UTF_8);
-		hall.changeName("Ueberschrieben");
-
-		assertThrows(IllegalStateException.class, () -> repository.saveHallRequiringBackup(hall));
-
-		assertEquals("Halle", new JsonHallRepository(storageDir).loadHalls().get(0).getName());
-	}
-
-	@Test
-	void saveHallRequiringBackup_savesAndBacksUpTheCurrentState(@TempDir File storageDir) {
-		JsonHallRepository repository = new JsonHallRepository(storageDir);
-		Hall hall = newHall("Halle");
-		repository.saveHall(hall);
-		hall.changeName("Wiederhergestellt");
-
-		repository.saveHallRequiringBackup(hall);
-
-		assertEquals(1, repository.backups().list(hall.getId()).size());
-		assertEquals("Wiederhergestellt", new JsonHallRepository(storageDir).loadHalls().get(0).getName());
-	}
-
-	@Test
 	void backupFailure_doesNotBlockSaving(@TempDir File storageDir) throws IOException {
 		JsonHallRepository repository = new JsonHallRepository(storageDir);
 		Hall hall = newHall("Halle");

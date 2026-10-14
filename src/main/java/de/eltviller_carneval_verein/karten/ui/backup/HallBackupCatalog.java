@@ -19,7 +19,7 @@ public final class HallBackupCatalog extends AbstractBackupCatalog<Hall> {
 	/** Der Katalog der App: echtes Repository, Speichern über den {@link HallSaver}. */
 	public static HallBackupCatalog create() {
 		JsonHallRepository halls = JsonHallRepository.getInstance();
-		return new HallBackupCatalog(halls.backups(), halls::loadHalls, HallSaver::saveRestoredState, halls::replaceCachedHall);
+		return new HallBackupCatalog(halls.backups(), halls::loadHalls, HallSaver::saveStructureChange, halls::replaceCachedHall);
 	}
 
 	@Override

@@ -10,6 +10,11 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -214,6 +219,27 @@ class EventBackupCatalogTest {
 		RestoreResult result = catalog().restore(new Entry(event.getId(), "Alpha", true), backup);
 
 		assertFalse(result.success());
+		assertTrue(replaced.isEmpty());
+	}
+
+	@Test
+	void restore_currentStateCannotBeBackedUp_changesNothing() throws IOException {
+		// Feste Uhr: Der Name der nächsten Kopie ist bekannt, ein Hindernis dort lässt das Sichern scheitern
+		Clock fixed = Clock.fixed(Instant.parse("2026-10-14T12:00:00Z"), ZoneId.systemDefault());
+		store = new BackupStore(dataDir, fixed);
+		Event event = event("Alpha");
+		Backup backup = makeBackup(event);
+		event.changeName("Neuer Stand");
+		mapper.writeValue(new File(dataDir, event.getId() + ".json"), event);
+		String nextCopy = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS").format(LocalDateTime.now(fixed)) + "-2.json.part";
+		File obstacle = new File(new File(new File(dataDir, "backups"), event.getId()), nextCopy);
+		assertTrue(new File(obstacle, "blockiert").mkdirs());
+
+		RestoreResult result = catalog().restore(new Entry(event.getId(), "Neuer Stand", false), backup);
+
+		assertFalse(result.success());
+		assertTrue(result.message().contains("nichts überschrieben"));
+		assertTrue(saved.isEmpty());
 		assertTrue(replaced.isEmpty());
 	}
 

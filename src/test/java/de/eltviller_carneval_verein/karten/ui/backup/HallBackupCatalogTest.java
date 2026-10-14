@@ -1,11 +1,17 @@
 package de.eltviller_carneval_verein.karten.ui.backup;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -64,6 +70,26 @@ class HallBackupCatalogTest {
 
 		assertEquals(List.of(new Entry(deleted.getId(), "Alte Halle", true), new Entry(existing.getId(), "Stadthalle", false)), catalog().entries());
 		assertEquals("Halle", catalog().entityLabel());
+	}
+
+	@Test
+	void restore_currentStateCannotBeBackedUp_changesNothing() throws IOException {
+		// Feste Uhr: Der Name der nächsten Kopie ist bekannt, ein Hindernis dort lässt das Sichern scheitern
+		Clock fixed = Clock.fixed(Instant.parse("2026-10-14T12:00:00Z"), ZoneId.systemDefault());
+		store = new BackupStore(dataDir, fixed);
+		Hall hall = hall("Stadthalle");
+		Backup backup = makeBackup(hall);
+		hall.changeName("Neuer Stand");
+		mapper.writeValue(new File(dataDir, hall.getId() + ".json"), hall);
+		String nextCopy = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS").format(LocalDateTime.now(fixed)) + "-2.json.part";
+		File obstacle = new File(new File(new File(dataDir, "backups"), hall.getId()), nextCopy);
+		assertTrue(new File(obstacle, "blockiert").mkdirs());
+
+		RestoreResult result = catalog().restore(new Entry(hall.getId(), "Neuer Stand", false), backup);
+
+		assertFalse(result.success());
+		assertTrue(saved.isEmpty());
+		assertTrue(replaced.isEmpty());
 	}
 
 	@Test

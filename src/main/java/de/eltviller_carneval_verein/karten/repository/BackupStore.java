@@ -22,7 +22,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * Legt vor dem Überschreiben einer Event- oder Hallen-Datei zeitgestempelte Kopien an und verwaltet sie. Die Kopien
@@ -54,12 +53,11 @@ public final class BackupStore {
 	/**
 	 * Eine Kopie.
 	 *
-	 * @param entityId  ID des Events bzw. der Halle
 	 * @param file      die Kopie
 	 * @param timestamp Zeitpunkt des Backups (aus dem Dateinamen, lokale Zeit)
 	 * @param size      Größe in Bytes
 	 */
-	public record Backup(String entityId, Path file, LocalDateTime timestamp, long size) {
+	public record Backup(Path file, LocalDateTime timestamp, long size) {
 	}
 
 	private final File dataDir;
@@ -87,13 +85,13 @@ public final class BackupStore {
 	}
 
 	/**
-	 * Stellt sicher, dass der aktuelle Stand der Datei gesichert ist: {@code true}, wenn es nichts zu sichern gab
-	 * (Datei fehlt), sie schon der neuesten Kopie entspricht oder eine neue Kopie entstand; {@code false}, wenn das
-	 * Sichern scheiterte. Für Fälle, in denen der aktuelle Stand nicht ohne Sicherung überschrieben werden darf
-	 * (Wiederherstellen); wirft nie.
+	 * Stellt sicher, dass der aktuelle Stand der Datei {@code <id>.json} gesichert ist: {@code true}, wenn es nichts
+	 * zu sichern gab (Datei fehlt), sie schon der neuesten Kopie entspricht oder eine neue Kopie entstand;
+	 * {@code false}, wenn das Sichern scheiterte. Für Fälle, in denen der aktuelle Stand nicht ohne Sicherung
+	 * überschrieben werden darf (Wiederherstellen); wirft nie.
 	 */
-	public boolean ensureBackedUp(String id, File currentFile) {
-		return backup(id, currentFile) != Outcome.FAILED;
+	public boolean ensureBackedUp(String id) {
+		return backup(id, new File(dataDir, id + ".json")) != Outcome.FAILED;
 	}
 
 	/** Ergebnis eines Sicherungsversuchs. */
@@ -107,7 +105,8 @@ public final class BackupStore {
 				return Outcome.NOT_NEEDED;
 			}
 			List<Backup> existing = list(id);
-			if (!existing.isEmpty() && Files.mismatch(currentFile.toPath(), existing.get(0).file()) == -1L) {
+			// Erst die Größe (billig), dann Byte für Byte: Meist unterscheiden sich schon die Längen
+			if (!existing.isEmpty() && existing.get(0).size() == currentFile.length() && Files.mismatch(currentFile.toPath(), existing.get(0).file()) == -1L) {
 				return Outcome.NOT_NEEDED;
 			}
 			Path idDir = new File(backupsDir, id).toPath();
@@ -138,7 +137,7 @@ public final class BackupStore {
 	public List<Backup> list(String id) {
 		File[] files = new File(backupsDir, id).listFiles(File::isFile);
 		if (files == null) {
-			return new ArrayList<>();
+			return List.of();
 		}
 		List<Parsed> parsed = new ArrayList<>();
 		for (File file : files) {
@@ -149,14 +148,14 @@ public final class BackupStore {
 			try {
 				LocalDateTime timestamp = LocalDateTime.parse(matcher.group(1), NAME_FORMAT);
 				int counter = matcher.group(2) == null ? 1 : Integer.parseInt(matcher.group(2));
-				parsed.add(new Parsed(new Backup(id, file.toPath(), timestamp, file.length()), counter));
+				parsed.add(new Parsed(new Backup(file.toPath(), timestamp, file.length()), counter));
 			} catch (DateTimeParseException | NumberFormatException e) {
 				// Passt zum Muster, ist aber kein gültiger Zeitstempel (z. B. Monat 13): wie jede fremde Datei ignorieren
 				LOG.log(Level.WARNING, "Datei im Backup-Ordner ignoriert: " + file);
 			}
 		}
 		parsed.sort(Comparator.comparing((Parsed p) -> p.backup().timestamp()).thenComparingInt(Parsed::counter).reversed());
-		return parsed.stream().map(Parsed::backup).collect(Collectors.toCollection(ArrayList::new));
+		return parsed.stream().map(Parsed::backup).toList();
 	}
 
 	/** Eine gelesene Kopie samt Zähler aus dem Dateinamen (1 ohne Zähler), nur zum Sortieren. */

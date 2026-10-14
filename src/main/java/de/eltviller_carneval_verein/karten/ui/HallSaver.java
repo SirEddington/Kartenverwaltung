@@ -36,15 +36,6 @@ public final class HallSaver {
 		saveStructureChange(hall, JsonHallRepository.getInstance());
 	}
 
-	/**
-	 * Speichert eine aus einem Backup wiederhergestellte Halle: wie {@link #saveStructureChange(Hall)}, aber der
-	 * aktuelle Stand wird nur überschrieben, wenn er vorher gesichert werden konnte (sonst wirft es, die Datei
-	 * bleibt unberührt).
-	 */
-	public static void saveRestoredState(Hall hall) {
-		JsonHallRepository.getInstance().saveHallRequiringBackup(hall);
-	}
-
 	/** Wie {@link #saveStructureChange(Hall)} (paketsichtbar für Tests). */
 	static void saveStructureChange(Hall hall, HallRepository repository) {
 		repository.saveHall(hall);

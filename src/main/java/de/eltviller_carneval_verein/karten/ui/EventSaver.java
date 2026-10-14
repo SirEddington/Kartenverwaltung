@@ -52,15 +52,6 @@ public final class EventSaver {
 		saveStructureChange(event, JsonEventRepository.getInstance());
 	}
 
-	/**
-	 * Speichert ein aus einem Backup wiederhergestelltes Event: wie {@link #saveStructureChange(Event)}, aber der
-	 * aktuelle Stand wird nur überschrieben, wenn er vorher gesichert werden konnte (sonst wirft es, die Datei
-	 * bleibt unberührt).
-	 */
-	public static void saveRestoredState(Event event) {
-		JsonEventRepository.getInstance().saveEventRequiringBackup(event);
-	}
-
 	/** Wie {@link #saveStructureChange(Event)} (paketsichtbar für Tests). */
 	static void saveStructureChange(Event event, EventRepository repository) {
 		repository.saveEvent(event);

@@ -22,8 +22,8 @@ class BackupRestoreDialogTest {
 	void versionText_showsTimeAndSizeInKilobytes() {
 		LocalDateTime time = LocalDateTime.of(2026, 10, 14, 15, 30, 12);
 
-		assertEquals("14.10.2026 15:30:12 (2 KB)", BackupRestoreDialog.versionText(new Backup("1", Path.of("x.json"), time, 2048)));
-		assertEquals("14.10.2026 15:30:12 (1 KB)", BackupRestoreDialog.versionText(new Backup("1", Path.of("x.json"), time, 100)));
-		assertEquals("14.10.2026 15:30:12 (461 KB)", BackupRestoreDialog.versionText(new Backup("1", Path.of("x.json"), time, 472_213)));
+		assertEquals("14.10.2026 15:30:12 (2 KB)", BackupRestoreDialog.versionText(new Backup(Path.of("x.json"), time, 2048)));
+		assertEquals("14.10.2026 15:30:12 (1 KB)", BackupRestoreDialog.versionText(new Backup(Path.of("x.json"), time, 100)));
+		assertEquals("14.10.2026 15:30:12 (461 KB)", BackupRestoreDialog.versionText(new Backup(Path.of("x.json"), time, 472_213)));
 	}
 }
