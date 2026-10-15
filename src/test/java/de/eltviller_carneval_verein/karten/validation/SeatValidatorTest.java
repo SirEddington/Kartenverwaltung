@@ -15,7 +15,7 @@ class SeatValidatorTest {
 	/** Sitz 2 an Tisch 4 der Vorstellung "Prunksitzung". */
 	private static Seat seatWithPriceCents(int cents) {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		Seat seat = event.addPresentation("Prunksitzung").addTable(4).addSeat(2);
 		seat.setPrice(cents);
 		return seat;

@@ -78,7 +78,7 @@ public class EventCreateController {
 	private Event buildNewEvent(String name) {
 		// Die ID bleibt eine UUID: Sie bestimmt den Dateinamen, der Name darf beliebige Zeichen enthalten
 		Event event = new Event();
-		event.changeName(name);
+		event.setName(name);
 
 		// Vorstellungen
 		for (int i = 0; i < spnPresCount.getValue(); i++) {

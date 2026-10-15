@@ -17,7 +17,7 @@ class PresentationAndTableValidatorTest {
 	/** Vollständig ausgefüllte Vorstellung "Prunksitzung", damit nur die zu prüfenden Fehler auftreten. */
 	private static Presentation presentation() {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		Presentation presentation = event.addPresentation("Prunksitzung");
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
@@ -70,8 +70,8 @@ class PresentationAndTableValidatorTest {
 	void duplicateSeatNumberIsReportedOncePerNumber() {
 		Table table = presentation().addTable(4);
 		table.addSeat(1);
-		table.addSeat(2).changeSeatNumber(1);
-		table.addSeat(3).changeSeatNumber(1);
+		table.addSeat(2).setSeatNumber(1);
+		table.addSeat(3).setSeatNumber(1);
 
 		ValidationIssue issue = only(TableValidator.validate(table));
 
@@ -95,7 +95,7 @@ class PresentationAndTableValidatorTest {
 	void duplicateTableNumberIsReportedOncePerNumber() {
 		Presentation presentation = presentation();
 		presentation.addTable(1);
-		presentation.addTable(2).changeTableNumber(1);
+		presentation.addTable(2).setTableNumber(1);
 
 		ValidationIssue issue = only(PresentationValidator.validate(presentation));
 

@@ -245,7 +245,7 @@ public class HallManagementController extends AbstractOverviewController {
 	@FXML
 	private void handleCreateNewHall() {
 		Hall hall = new Hall();
-		hall.changeName(createHallName());
+		hall.setName(createHallName());
 		// Noch nicht gespeichert: Die Halle entsteht erst mit "Speichern" im Detail-Screen
 		MainApp.showHallEditView(hall, null, true);
 	}

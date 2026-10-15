@@ -43,7 +43,7 @@ public class Hall {
 		return name;
 	}
 
-	public void changeName(String name) {
+	public void setName(String name) {
 		if (name == null || name.isBlank()) {
 			throw new IllegalArgumentException("Name darf nicht leer sein.");
 		} else {
@@ -89,7 +89,7 @@ public class Hall {
 	public HallObject addHallObject() {
 		HallObject newObject = new HallObject();
 		newObject.setParent(this);
-		newObject.changeName(createHallObjectName());
+		newObject.setName(createHallObjectName());
 
 		hallObjects.add(newObject);
 		return newObject;
@@ -100,9 +100,9 @@ public class Hall {
 		newObject.setParent(this);
 
 		if (!getHallObjectNames().contains(name)) {
-			newObject.changeName(name);
+			newObject.setName(name);
 		} else {
-			newObject.changeName(createHallObjectName());
+			newObject.setName(createHallObjectName());
 		}
 
 		hallObjects.add(newObject);

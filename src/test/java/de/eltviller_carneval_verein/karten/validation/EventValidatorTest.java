@@ -24,7 +24,7 @@ class EventValidatorTest {
 	/** Event mit zwei vollständigen Vorstellungen, je ein Tisch (Nr. 1) mit zwei Sitzen zu 10 Euro. */
 	private static Event eventWithTwoPresentations() {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		for (String name : List.of("Prunksitzung", "Damensitzung")) {
 			Presentation presentation = event.addPresentation(name);
 			complete(presentation);
@@ -59,9 +59,9 @@ class EventValidatorTest {
 	@Test
 	void issuesFromEveryEntityLevelAreCollected() {
 		Event event = eventWithTwoPresentations();
-		event.getPresentations().get(1).changeName("prunksitzung ");                              // EVT-001
+		event.getPresentations().get(1).setName("prunksitzung ");                              // EVT-001
 		event.getPresentations().get(0).setHallId(null);                                           // PRS-003
-		event.getPresentations().get(0).getTables().get(0).getSeats().get(1).changeSeatNumber(1);  // TBL-001
+		event.getPresentations().get(0).getTables().get(0).getSeats().get(1).setSeatNumber(1);  // TBL-001
 		event.getPresentations().get(0).getTables().get(0).getSeats().get(0).setPrice(-5);         // SEA-001
 
 		List<String> codes = EventValidator.validate(event).getIssues().stream().map(ValidationIssue::code).toList();
@@ -89,8 +89,8 @@ class EventValidatorTest {
 	@Test
 	void duplicatePresentationNameIsReportedOnceIgnoringCaseAndSpaces() {
 		Event event = eventWithTwoPresentations();
-		event.getPresentations().get(1).changeName("  PRUNKSITZUNG");
-		event.addPresentation("Kehraus").changeName("prunksitzung");
+		event.getPresentations().get(1).setName("  PRUNKSITZUNG");
+		event.addPresentation("Kehraus").setName("prunksitzung");
 		complete(event.getPresentations().get(2));
 
 		ValidationResult result = EventValidator.validate(event);

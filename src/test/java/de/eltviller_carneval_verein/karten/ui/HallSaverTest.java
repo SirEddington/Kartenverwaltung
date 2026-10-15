@@ -53,7 +53,7 @@ class HallSaverTest {
 
 	private static Hall hall() {
 		Hall hall = new Hall();
-		hall.changeName("Halle 1");
+		hall.setName("Halle 1");
 		return hall;
 	}
 

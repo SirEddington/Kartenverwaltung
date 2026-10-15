@@ -221,7 +221,7 @@ public class EventEditController {
 		// --- Event Tabelle ---
 		colEventName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
 		colEventName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colEventName.setOnEditCommit(e -> e.getRowValue().changeName(e.getNewValue()));
+		colEventName.setOnEditCommit(e -> e.getRowValue().setName(e.getNewValue()));
 
 		colEventDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
 		colEventDesc.setCellFactory(TextFieldTableCell.forTableColumn());
@@ -241,7 +241,7 @@ public class EventEditController {
 		// --- Vorstellung Tabelle ---
 		colPresName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
 		colPresName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colPresName.setOnEditCommit(e -> e.getRowValue().changeName(e.getNewValue()));
+		colPresName.setOnEditCommit(e -> e.getRowValue().setName(e.getNewValue()));
 
 		colPresDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
 		colPresDesc.setCellFactory(TextFieldTableCell.forTableColumn());
@@ -276,7 +276,7 @@ public class EventEditController {
 		// --- Tisch Tabelle ---
 		colTableNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getTableNumber()).asObject());
 		colTableNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
-		colTableNumber.setOnEditCommit(e -> e.getRowValue().changeTableNumber(e.getNewValue()));
+		colTableNumber.setOnEditCommit(e -> e.getRowValue().setTableNumber(e.getNewValue()));
 
 		colTableCategory.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getCategory()));
 		colTableCategory.setCellFactory(TextFieldTableCell.forTableColumn());
@@ -289,7 +289,7 @@ public class EventEditController {
 		// --- Sitz Tabelle ---
 		colSeatNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getSeatNumber()).asObject());
 		colSeatNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
-		colSeatNumber.setOnEditCommit(e -> e.getRowValue().changeSeatNumber(e.getNewValue()));
+		colSeatNumber.setOnEditCommit(e -> e.getRowValue().setSeatNumber(e.getNewValue()));
 
 		colSeatComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getComment()));
 		colSeatComment.setCellFactory(TextFieldTableCell.forTableColumn());

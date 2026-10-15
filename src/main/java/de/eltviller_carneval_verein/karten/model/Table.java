@@ -127,7 +127,7 @@ public class Table {
 	}
 	// <-- Getter und Setter
 
-	public void changeTableNumber(int tableNumber) {
+	public void setTableNumber(int tableNumber) {
 		if (tableNumber <= 0) {
 			throw new IllegalArgumentException("Tischnummer darf nicht kleiner als 1 sein.");
 		} else {
@@ -138,7 +138,7 @@ public class Table {
 	public Seat addSeat() {
 		Seat newSeat = new Seat();
 		newSeat.setParent(this);
-		newSeat.changeSeatNumber(createSeatNumber());
+		newSeat.setSeatNumber(createSeatNumber());
 
 		// Maße initialisieren
 		newSeat.setHeight(getParent().getDefaultSeatHeight());
@@ -153,9 +153,9 @@ public class Table {
 		newSeat.setParent(this);
 
 		if (!getSeatNumbers().contains(seatNumber)) {
-			newSeat.changeSeatNumber(seatNumber);
+			newSeat.setSeatNumber(seatNumber);
 		} else {
-			newSeat.changeSeatNumber(createSeatNumber());
+			newSeat.setSeatNumber(createSeatNumber());
 		}
 
 		// Maße initialisieren

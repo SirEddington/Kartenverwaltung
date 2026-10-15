@@ -120,7 +120,7 @@ public class HallEditController {
 			return;
 		}
 		try {
-			hall.changeName(txtName.getText());
+			hall.setName(txtName.getText());
 		} catch (IllegalArgumentException e) {
 			// Leerer Name: alten Namen wiederherstellen
 			txtName.setText(hall.getName());
@@ -163,7 +163,7 @@ public class HallEditController {
 			return;
 		}
 		try {
-			hall.changeName(txtName.getText());
+			hall.setName(txtName.getText());
 		} catch (IllegalArgumentException e) {
 			StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
 			return;

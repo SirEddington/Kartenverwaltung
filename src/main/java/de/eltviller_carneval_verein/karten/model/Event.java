@@ -69,7 +69,7 @@ public class Event {
 	}
 	// <-- Getter und Setter
 
-	public void changeName(String name) {
+	public void setName(String name) {
 		if (name == null || name.isBlank()) {
 			throw new IllegalArgumentException("Name darf nicht leer sein.");
 		} else {
@@ -80,7 +80,7 @@ public class Event {
 	public Presentation addPresentation() {
 		Presentation newPres = new Presentation();
 		newPres.setParent(this);
-		newPres.changeName(createPresName());
+		newPres.setName(createPresName());
 		presentations.add(newPres);
 		return newPres;
 	}
@@ -90,9 +90,9 @@ public class Event {
 		newPres.setParent(this);
 
 		if (!getPresentationNames().contains(presentationName)) {
-			newPres.changeName(presentationName);
+			newPres.setName(presentationName);
 		} else {
-			newPres.changeName(createPresName());
+			newPres.setName(createPresName());
 		}
 
 		presentations.add(newPres);

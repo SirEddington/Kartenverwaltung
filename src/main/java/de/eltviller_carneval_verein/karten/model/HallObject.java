@@ -58,7 +58,7 @@ public class HallObject {
 		return name;
 	}
 
-	public void changeName(String name) {
+	public void setName(String name) {
 		if (name == null || name.isBlank()) {
 			throw new IllegalArgumentException("Name darf nicht leer sein.");
 		} else {

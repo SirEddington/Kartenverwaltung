@@ -23,7 +23,7 @@ class JsonEventRepositoryTest {
 	void saveAndLoad_roundTrip(@TempDir File storageDir) {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
-		event.changeName("Testevent");
+		event.setName("Testevent");
 		repository.saveEvent(event);
 
 		JsonEventRepository reopened = new JsonEventRepository(storageDir);
@@ -38,10 +38,10 @@ class JsonEventRepositoryTest {
 	void renamingEvent_doesNotLeaveOrphanFile(@TempDir File storageDir) {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
-		event.changeName("Sitzung 2026");
+		event.setName("Sitzung 2026");
 		repository.saveEvent(event);
 
-		event.changeName("Sitzung 2026 (umbenannt)");
+		event.setName("Sitzung 2026 (umbenannt)");
 		repository.saveEvent(event);
 
 		File[] jsonFiles = storageDir.listFiles((dir, name) -> name.endsWith(".json"));
@@ -55,9 +55,9 @@ class JsonEventRepositoryTest {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 
 		Event first = new Event();
-		first.changeName("Sitzung/2026");
+		first.setName("Sitzung/2026");
 		Event second = new Event();
-		second.changeName("Sitzung 2026");
+		second.setName("Sitzung 2026");
 
 		assertDoesNotThrow(() -> {
 			repository.saveEvent(first);
@@ -72,10 +72,10 @@ class JsonEventRepositoryTest {
 	void secondSave_createsBackupInBackupFolder(@TempDir File storageDir) {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
-		event.changeName("Testevent");
+		event.setName("Testevent");
 		repository.saveEvent(event);
 
-		event.changeName("Testevent (geaendert)");
+		event.setName("Testevent (geaendert)");
 		repository.saveEvent(event);
 
 		assertEquals(1, repository.backups().list(event.getId()).size(), "Beim zweiten Speichern sollte die vorherige Fassung im Backup-Ordner liegen.");
@@ -86,7 +86,7 @@ class JsonEventRepositoryTest {
 	void savingWithoutChange_createsNoSecondBackup(@TempDir File storageDir) {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
-		event.changeName("Testevent");
+		event.setName("Testevent");
 		repository.saveEvent(event);
 		repository.saveEvent(event); // sichert die Datei von eben (noch keine Kopie vorhanden)
 
@@ -99,9 +99,9 @@ class JsonEventRepositoryTest {
 	void deleteEvent_removesFile_butKeepsBackupsIncludingTheLastState(@TempDir File storageDir) throws IOException {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
-		event.changeName("Testevent");
+		event.setName("Testevent");
 		repository.saveEvent(event);
-		event.changeName("Testevent (geaendert)");
+		event.setName("Testevent (geaendert)");
 		repository.saveEvent(event);
 
 		repository.deleteEvent(event);
@@ -116,7 +116,7 @@ class JsonEventRepositoryTest {
 	void deleteEvent_afterSingleSave_stillLeavesABackup(@TempDir File storageDir) {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
-		event.changeName("Testevent");
+		event.setName("Testevent");
 		repository.saveEvent(event);
 
 		repository.deleteEvent(event);
@@ -128,10 +128,10 @@ class JsonEventRepositoryTest {
 	void backupFailure_doesNotBlockSaving(@TempDir File storageDir) throws IOException {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
-		event.changeName("Testevent");
+		event.setName("Testevent");
 		repository.saveEvent(event);
 		Files.writeString(new File(storageDir, "backups").toPath(), "ich bin eine Datei", StandardCharsets.UTF_8);
-		event.changeName("Testevent (neu)");
+		event.setName("Testevent (neu)");
 
 		assertDoesNotThrow(() -> repository.saveEvent(event));
 
@@ -156,7 +156,7 @@ class JsonEventRepositoryTest {
 	void duplicateEventId_keepsNewerFileAndSetsOlderAside(@TempDir File storageDir) throws IOException {
 		JsonEventRepository repository = new JsonEventRepository(storageDir);
 		Event event = new Event();
-		event.changeName("Altlast");
+		event.setName("Altlast");
 		repository.saveEvent(event);
 
 		// Alte, namensbasierte Datei simulieren: dieselbe Event-ID, aber unter einem anderen

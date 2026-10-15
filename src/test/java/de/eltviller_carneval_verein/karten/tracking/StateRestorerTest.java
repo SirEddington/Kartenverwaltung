@@ -40,7 +40,7 @@ class StateRestorerTest {
 
 	private static Event event() {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		event.setDescription("Beschreibung");
 		var presentation = event.addPresentation("Prunksitzung");
 		presentation.setDate(LocalDate.of(2027, 2, 12));
@@ -82,7 +82,7 @@ class StateRestorerTest {
 		List<Hall> hallCache = new ArrayList<>();
 		StateRestorer<Hall> hallRestorer = new StateRestorer<>(Hall.class, hallTracker, hallCache::add);
 		Hall hall = new Hall();
-		hall.changeName("Stadthalle");
+		hall.setName("Stadthalle");
 		hall.setHallWidth(3000);
 		hall.addHallObject("Bühne").setPosX(100);
 		hallTracker.track(hall);

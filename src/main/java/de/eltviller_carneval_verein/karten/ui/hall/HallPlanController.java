@@ -301,7 +301,7 @@ public class HallPlanController {
 			return;
 		}
 		try {
-			selectedObject.changeName(nameField.getText());
+			selectedObject.setName(nameField.getText());
 			renderHall();
 		} catch (IllegalArgumentException e) {
 			// Leerer Name: alten Namen wiederherstellen

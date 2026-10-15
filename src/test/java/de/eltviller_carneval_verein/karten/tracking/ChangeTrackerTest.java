@@ -45,7 +45,7 @@ class ChangeTrackerTest {
 
 	private static Event event(String name) {
 		Event event = new Event();
-		event.changeName(name);
+		event.setName(name);
 		Presentation presentation = event.addPresentation("Prunksitzung");
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
@@ -343,7 +343,7 @@ class ChangeTrackerTest {
 		Snapshot changed = tracker.last(original);
 
 		Event sameId = new Event(original.getId());
-		sameId.changeName("Kampagne");
+		sameId.setName("Kampagne");
 
 		tracker.replaceEntity(sameId, baseline);
 
@@ -401,7 +401,7 @@ class ChangeTrackerTest {
 		Event healthy = event("Zwei");
 		failing.track(broken);
 		failing.track(healthy);
-		broken.changeName("Boom");
+		broken.setName("Boom");
 		firstSeat(healthy).setPrice(77);
 
 		assertThrows(IllegalStateException.class, failing::checkAll);

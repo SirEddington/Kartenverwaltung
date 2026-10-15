@@ -61,7 +61,7 @@ class EventBackupCatalogTest {
 
 	private static Event event(String name) {
 		Event event = new Event();
-		event.changeName(name);
+		event.setName(name);
 		return event;
 	}
 
@@ -84,7 +84,7 @@ class EventBackupCatalogTest {
 	void entries_listsExistingAndDeletedEvents_sortedByName() throws IOException {
 		Event existing = event("Alpha");
 		makeBackup(existing);
-		existing.changeName("Alpha neu");
+		existing.setName("Alpha neu");
 		current.add(existing);
 		Event deleted = event("Beta");
 		makeBackup(deleted);
@@ -105,7 +105,7 @@ class EventBackupCatalogTest {
 	void versions_areTheStoreCopiesNewestFirst() throws IOException {
 		Event event = event("Alpha");
 		makeBackup(event);
-		event.changeName("Alpha 2");
+		event.setName("Alpha 2");
 		Backup newest = makeBackup(event);
 
 		List<Backup> versions = catalog().versions(event.getId());
@@ -119,7 +119,7 @@ class EventBackupCatalogTest {
 		Event event = event("Alpha");
 		Backup backup = makeBackup(event);
 		current.add(event);
-		event.changeName("Kaputt");
+		event.setName("Kaputt");
 
 		RestoreResult result = catalog().restore(new Entry(event.getId(), "Kaputt", false), backup);
 
@@ -229,7 +229,7 @@ class EventBackupCatalogTest {
 		store = new BackupStore(dataDir, fixed);
 		Event event = event("Alpha");
 		Backup backup = makeBackup(event);
-		event.changeName("Neuer Stand");
+		event.setName("Neuer Stand");
 		mapper.writeValue(new File(dataDir, event.getId() + ".json"), event);
 		String nextCopy = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS").format(LocalDateTime.now(fixed)) + "-2.json.part";
 		File obstacle = new File(new File(new File(dataDir, "backups"), event.getId()), nextCopy);

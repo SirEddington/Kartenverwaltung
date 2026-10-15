@@ -56,7 +56,7 @@ class HallBackupCatalogTest {
 
 	private static Hall hall(String name) {
 		Hall hall = new Hall();
-		hall.changeName(name);
+		hall.setName(name);
 		return hall;
 	}
 
@@ -79,7 +79,7 @@ class HallBackupCatalogTest {
 		store = new BackupStore(dataDir, fixed);
 		Hall hall = hall("Stadthalle");
 		Backup backup = makeBackup(hall);
-		hall.changeName("Neuer Stand");
+		hall.setName("Neuer Stand");
 		mapper.writeValue(new File(dataDir, hall.getId() + ".json"), hall);
 		String nextCopy = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS").format(LocalDateTime.now(fixed)) + "-2.json.part";
 		File obstacle = new File(new File(new File(dataDir, "backups"), hall.getId()), nextCopy);

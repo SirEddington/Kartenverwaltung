@@ -36,7 +36,7 @@ class JsonEventRepositoryListenerTest {
 
 	private static Event named(String name) {
 		Event event = new Event();
-		event.changeName(name);
+		event.setName(name);
 		return event;
 	}
 
@@ -102,7 +102,7 @@ class JsonEventRepositoryListenerTest {
 		repository.addListener(recorder);
 
 		Event replacement = new Event(original.getId());
-		replacement.changeName("Nachher");
+		replacement.setName("Nachher");
 		repository.replaceCachedEvent(replacement);
 
 		assertEquals(1, repository.loadEvents().size());

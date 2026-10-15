@@ -41,7 +41,7 @@ class HallObjectTextAttributesTest {
 	@Test
 	void textFields_surviveSavingAndLoading() throws IOException {
 		HallObject object = new HallObject("h2");
-		object.changeName("Bar");
+		object.setName("Bar");
 		object.setTextAuto(false);
 		object.setTextSize(35.5);
 		object.setTextAlignH(TextAlignH.RIGHT);

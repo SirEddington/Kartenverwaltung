@@ -185,7 +185,7 @@ public class Seat {
 	}
 	// <-- Getter und Setter
 
-	public void changeSeatNumber(int seatNumber) {
+	public void setSeatNumber(int seatNumber) {
 		if (seatNumber <= 0) {
 			throw new IllegalArgumentException("Sitznummer darf nicht kleiner als 1 sein.");
 		} else {

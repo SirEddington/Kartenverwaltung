@@ -13,7 +13,7 @@ class EntityLabelsTest {
 	@Test
 	void seatLabelContainsPresentationTableAndSeat() {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		Seat seat = event.addPresentation("Prunksitzung").addTable(4).addSeat(2);
 
 		assertEquals("Prunksitzung, Tisch 4, Sitz 2", EntityLabels.seat(seat));
@@ -22,7 +22,7 @@ class EntityLabelsTest {
 	@Test
 	void seatWithoutParentsIsDescribedByNumberOnly() {
 		Seat seat = new Seat();
-		seat.changeSeatNumber(7);
+		seat.setSeatNumber(7);
 
 		assertEquals("Sitz 7", EntityLabels.seat(seat));
 	}
@@ -30,9 +30,9 @@ class EntityLabelsTest {
 	@Test
 	void seatAtTableWithoutPresentationOmitsPresentation() {
 		Table table = new Table();
-		table.changeTableNumber(3);
+		table.setTableNumber(3);
 		Seat seat = new Seat();
-		seat.changeSeatNumber(1);
+		seat.setSeatNumber(1);
 		seat.setParent(table);
 
 		assertEquals("Tisch 3, Sitz 1", EntityLabels.seat(seat));

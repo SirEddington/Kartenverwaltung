@@ -18,7 +18,7 @@ class HallObjectTextTest {
 
 	private static HallObject object(Shape shape, double width, double height) {
 		HallObject object = new HallObject();
-		object.changeName("Bühne");
+		object.setName("Bühne");
 		object.setShape(shape);
 		object.setWidth(width);
 		object.setHeight(height);

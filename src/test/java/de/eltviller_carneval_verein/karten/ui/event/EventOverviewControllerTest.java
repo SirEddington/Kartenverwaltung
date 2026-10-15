@@ -16,7 +16,7 @@ class EventOverviewControllerTest {
 	@Test
 	void hallDisplayName_returnsName() {
 		Hall hall = new Hall();
-		hall.changeName("Stadthalle");
+		hall.setName("Stadthalle");
 
 		assertEquals("Stadthalle", EventOverviewController.hallDisplayName(hall));
 	}
