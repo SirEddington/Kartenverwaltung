@@ -56,6 +56,7 @@ public final class CustomerDisplay {
 	private Scene scene;
 	private BorderPane contentLayout;
 	private VBox summaryPanel;
+	private Boolean summaryIsBelow;
 	private Runnable onClosed;
 	private boolean fullscreen = false;
 	private boolean switching = false;
@@ -132,7 +133,7 @@ public final class CustomerDisplay {
 
 		// Hintergrund und Wappen wie in allen Ansichten der App
 		scene = new Scene(MainApp.wrapWithBackground(contentLayout));
-		scene.getStylesheets().add(HallOverviewController.APP_STYLESHEET);
+		scene.getStylesheets().add(MainApp.stylesheetUrl());
 		// Im Hochformat steht die Kartenübersicht unter dem Plan, sonst rechts
 		scene.widthProperty().addListener((obs, oldValue, newValue) -> placeSummary(CustomerDisplayText.summaryBelow(scene.getWidth(), scene.getHeight())));
 		scene.heightProperty().addListener((obs, oldValue, newValue) -> placeSummary(CustomerDisplayText.summaryBelow(scene.getWidth(), scene.getHeight())));
@@ -155,6 +156,8 @@ public final class CustomerDisplay {
 
 		attach();
 		windowStage.show();
+		// Ein neues Fenster nimmt den Fokus: Der Verkäufer soll nach dem Haken weitertippen können (Suche, Tabelle)
+		mainWindow.requestFocus();
 		refresh();
 		applyView();
 	}
@@ -167,17 +170,12 @@ public final class CustomerDisplay {
 		}
 	}
 
-	public boolean isShowing() {
-		return windowStage.isShowing() || (borderlessStage != null && borderlessStage.isShowing());
-	}
-
-	/** Ob das Fenster gerade den ganzen Bildschirm einnimmt. */
-	boolean isFullscreen() {
-		return fullscreen;
-	}
-
 	/** Setzt die Kartenübersicht neben den Plan (Querformat) oder darunter (Hochformat). */
 	private void placeSummary(boolean below) {
+		if (summaryIsBelow != null && summaryIsBelow == below) {
+			return; // Beim Ziehen am Fensterrand kommen viele Größenänderungen: Die Leiste wird nur bei Wechsel umgehängt
+		}
+		summaryIsBelow = below;
 		contentLayout.setRight(null);
 		contentLayout.setBottom(null);
 		if (below) {
@@ -288,11 +286,13 @@ public final class CustomerDisplay {
 
 	private void place(Window mainWindow) {
 		List<Screen> screens = Screen.getScreens();
-		List<Rectangle2D> visualBounds = screens.stream().map(Screen::getVisualBounds).toList();
+		// Gewählt wird nach den ganzen Bildschirmen: Liegt die Mitte des Hauptfensters in der Taskleiste, ist es trotzdem
+		// derselbe Bildschirm. Platziert wird dann in den Sichtbereich ohne Taskleiste.
+		List<Rectangle2D> screenBounds = screens.stream().map(Screen::getBounds).toList();
 		Rectangle2D main = new Rectangle2D(mainWindow.getX(), mainWindow.getY(), mainWindow.getWidth(), mainWindow.getHeight());
-		int other = ScreenChoice.indexOfOtherScreen(visualBounds, main);
+		int other = ScreenChoice.indexOfOtherScreen(screenBounds, main);
 		if (other >= 0) {
-			Rectangle2D bounds = visualBounds.get(other);
+			Rectangle2D bounds = screens.get(other).getVisualBounds();
 			windowStage.setX(bounds.getMinX());
 			windowStage.setY(bounds.getMinY());
 			windowStage.setWidth(bounds.getWidth());
@@ -344,20 +344,19 @@ public final class CustomerDisplay {
 		Rectangle2D rect = state.visibleHallRectProperty().get();
 		Presentation presentation = state.presentationProperty().get();
 		Hall hall = presentation == null ? null : hallRepository.findById(presentation.getHallId());
-		boolean hallHasBounds = hall != null && hall.getHallWidth() > 0 && hall.getHallHeight() > 0;
+		Rectangle2D hallRect = HallViewport.hallRect(hall);
 		if (rect != null) {
 			double width = planPane.contentPane().getWidth();
 			double height = planPane.contentPane().getHeight();
-			if (hallHasBounds && width > 0 && height > 0) {
-				Rectangle2D hallRect = new Rectangle2D(0, 0, hall.getHallWidth(), hall.getHallHeight());
+			if (hallRect != null && width > 0 && height > 0) {
 				planPane.fit(HallViewport.relativeMirror(rect, hallRect, HallViewport.HALL_FIT_MARGIN, width / height), 1.0);
 			} else {
 				planPane.fit(rect, 1.0);
 			}
 			return;
 		}
-		if (hallHasBounds) {
-			planPane.fit(new Rectangle2D(0, 0, hall.getHallWidth(), hall.getHallHeight()), HallViewport.HALL_FIT_MARGIN);
+		if (hallRect != null) {
+			planPane.fit(hallRect, HallViewport.HALL_FIT_MARGIN);
 			return;
 		}
 		Rectangle2D bounds = planPane.contentBounds();

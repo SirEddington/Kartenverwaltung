@@ -243,10 +243,6 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		}
 	}
 
-	private boolean hasHallBounds(Hall hall) {
-		return hall.getHallWidth() > 0 && hall.getHallHeight() > 0;
-	}
-
 	public void renderHall() {
 		seatNodes.clear();
 		Hall hall = selectedPres == null ? null : hallRepository.findById(selectedPres.getHallId());
@@ -657,9 +653,10 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			this.selectedEvent = presentation.getParent();
 			renderHall();
 			Hall hall = hallRepository.findById(selectedPres.getHallId());
-			if (hall != null && hasHallBounds(hall) && !hall.getId().equals(fittedHallId)) {
+			Rectangle2D hallRect = HallViewport.hallRect(hall);
+			if (hallRect != null && !hall.getId().equals(fittedHallId)) {
 				fittedHallId = hall.getId();
-				viewportPane.fit(new Rectangle2D(0, 0, hall.getHallWidth(), hall.getHallHeight()), HallViewport.HALL_FIT_MARGIN);
+				viewportPane.fit(hallRect, HallViewport.HALL_FIT_MARGIN);
 			}
 		} else {
 			// "Alle Vorstellungen": Der Saalplan zeigt immer genau eine Vorstellung, das Event bleibt gewählt

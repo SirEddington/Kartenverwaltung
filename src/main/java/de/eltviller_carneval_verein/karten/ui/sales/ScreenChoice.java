@@ -18,10 +18,15 @@ final class ScreenChoice {
 		double centerX = window.getMinX() + window.getWidth() / 2.0;
 		double centerY = window.getMinY() + window.getHeight() / 2.0;
 		for (int i = 0; i < screens.size(); i++) {
-			if (!screens.get(i).contains(centerX, centerY)) {
+			if (!containsHalfOpen(screens.get(i), centerX, centerY)) {
 				return i;
 			}
 		}
 		return -1;
+	}
+
+	/** Rechte und untere Kante gehören nicht dazu, sonst läge ein Punkt auf der gemeinsamen Kante zweier Bildschirme auf beiden. */
+	private static boolean containsHalfOpen(Rectangle2D screen, double x, double y) {
+		return x >= screen.getMinX() && x < screen.getMaxX() && y >= screen.getMinY() && y < screen.getMaxY();
 	}
 }

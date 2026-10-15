@@ -29,6 +29,12 @@ class ScreenChoiceTest {
 	}
 
 	@Test
+	void aCenterExactlyOnTheSharedEdgeBelongsToTheRightScreenOnly() {
+		// Mitte bei x = 1520 + 400 = 1920: genau auf der Kante, sie gehört zum rechten Bildschirm
+		assertEquals(0, ScreenChoice.indexOfOtherScreen(List.of(left, right), new Rectangle2D(1520, 100, 800, 600)));
+	}
+
+	@Test
 	void windowBetweenScreensIsDecidedByItsCenter() {
 		// Mitte bei x = 1700 + 400 = 2100: liegt auf dem rechten Bildschirm
 		assertEquals(0, ScreenChoice.indexOfOtherScreen(List.of(left, right), new Rectangle2D(1700, 100, 800, 600)));

@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
+import de.eltviller_carneval_verein.karten.model.Hall;
 import javafx.geometry.Rectangle2D;
 
 /**
@@ -34,6 +35,14 @@ final class HallViewport {
 		double centerX = target.getMinX() + target.getWidth() / 2.0;
 		double centerY = target.getMinY() + target.getHeight() / 2.0;
 		return new View(scale, -scale * (centerX - pivotX), -scale * (centerY - pivotY));
+	}
+
+	/** Die Halle als Rechteck ab der oberen linken Ecke (0/0) in cm, {@code null} ohne Halle oder ohne Maße. */
+	static Rectangle2D hallRect(Hall hall) {
+		if (hall == null || hall.getHallWidth() <= 0 || hall.getHallHeight() <= 0) {
+			return null;
+		}
+		return new Rectangle2D(0, 0, hall.getHallWidth(), hall.getHallHeight());
 	}
 
 	/** Rand, mit dem die ganze Halle eingepasst wird (Saalübersicht, Kundenfenster). */

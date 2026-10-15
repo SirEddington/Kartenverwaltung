@@ -62,6 +62,7 @@ public class HallPlanPane extends StackPane {
 	private Rectangle2D fitTarget;
 	private double fitMargin = 1.0;
 	private boolean fitPending = false;
+	private boolean viewUpdating = false;
 
 	private double dragAnchorSceneX;
 	private double dragAnchorSceneY;
@@ -159,8 +160,9 @@ public class HallPlanPane extends StackPane {
 		HallLayout.apply(presentation, hall);
 
 		if (hall != null) {
-			if (hall.getHallWidth() > 0 && hall.getHallHeight() > 0) {
-				Rectangle outline = new Rectangle(0, 0, hall.getHallWidth(), hall.getHallHeight());
+			Rectangle2D hallRect = HallViewport.hallRect(hall);
+			if (hallRect != null) {
+				Rectangle outline = new Rectangle(0, 0, hallRect.getWidth(), hallRect.getHeight());
 				outline.setFill(Color.WHITE);
 				outline.setStroke(Color.GRAY);
 				outline.getStrokeDashArray().addAll(8.0, 6.0);
@@ -264,14 +266,30 @@ public class HallPlanPane extends StackPane {
 			}
 		}
 		fitPending = false;
-		contentPane.setScaleX(view.scale());
-		contentPane.setScaleY(view.scale());
-		contentPane.setTranslateX(view.translateX());
-		contentPane.setTranslateY(view.translateY());
+		applyView(view);
+	}
+
+	/**
+	 * Setzt Zoom und Verschiebung zusammen und meldet den sichtbaren Ausschnitt einmal danach: Einzeln gesetzt, würden
+	 * Zwischenwerte (neuer Zoom mit alter Verschiebung) als Ausschnitt gemeldet und vom Kundenfenster eingepasst.
+	 */
+	private void applyView(HallViewport.View view) {
+		viewUpdating = true;
+		try {
+			contentPane.setScaleX(view.scale());
+			contentPane.setScaleY(view.scale());
+			contentPane.setTranslateX(view.translateX());
+			contentPane.setTranslateY(view.translateY());
+		} finally {
+			viewUpdating = false;
+		}
 		updateVisibleRect();
 	}
 
 	private void updateVisibleRect() {
+		if (viewUpdating) {
+			return;
+		}
 		double width = contentPane.getWidth();
 		double height = contentPane.getHeight();
 		if (width <= 0 || height <= 0) {
@@ -309,10 +327,8 @@ public class HallPlanPane extends StackPane {
 		double pivotX = layoutBounds.getWidth() / 2.0;
 		double pivotY = layoutBounds.getHeight() / 2.0;
 
-		contentPane.setScaleX(newScale);
-		contentPane.setScaleY(newScale);
-		contentPane.setTranslateX(parentPoint.getX() - pivotX - newScale * (localPoint.getX() - pivotX));
-		contentPane.setTranslateY(parentPoint.getY() - pivotY - newScale * (localPoint.getY() - pivotY));
+		applyView(new HallViewport.View(newScale, parentPoint.getX() - pivotX - newScale * (localPoint.getX() - pivotX),
+				parentPoint.getY() - pivotY - newScale * (localPoint.getY() - pivotY)));
 	}
 
 	// Der Plan wird mit der rechten Maustaste verschoben; die linke Taste gehört den Klicks auf Tische und Sitze
@@ -330,8 +346,8 @@ public class HallPlanPane extends StackPane {
 		if (!interactive || event.getButton() != MouseButton.SECONDARY) {
 			return;
 		}
-		contentPane.setTranslateX(dragAnchorTranslateX + (event.getSceneX() - dragAnchorSceneX));
-		contentPane.setTranslateY(dragAnchorTranslateY + (event.getSceneY() - dragAnchorSceneY));
+		applyView(new HallViewport.View(contentPane.getScaleX(), dragAnchorTranslateX + (event.getSceneX() - dragAnchorSceneX),
+				dragAnchorTranslateY + (event.getSceneY() - dragAnchorSceneY)));
 	}
 
 	private static double clamp(double value, double min, double max) {

@@ -34,7 +34,7 @@ final class HallLayout {
 
 		// Mit zugeordneter Halle beginnt die Anordnung mit Randabstand an der Hallenecke und bricht
 		// Spalten nach der Hallenhöhe um; ohne Halle bleibt es bei 7 Tischen pro Spalte ab festem Startpunkt.
-		boolean inHall = hall != null && hall.getHallWidth() > 0 && hall.getHallHeight() > 0;
+		boolean inHall = HallViewport.hallRect(hall) != null;
 		int tablesPerColumn = 7; // nur ohne Halle
 		double startX = inHall ? HALL_MARGIN : 60; // Start-X im Pane
 		double startY = inHall ? HALL_MARGIN : 40; // Start-Y im Pane

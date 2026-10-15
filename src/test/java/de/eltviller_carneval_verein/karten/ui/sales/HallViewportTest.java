@@ -63,6 +63,30 @@ class HallViewportTest {
 		assertRect(target, HallViewport.visibleRect(1000, 500, view));
 	}
 
+	@Test
+	void centeredPutsTheTargetCenterInTheMiddleAtAnyScale() {
+		View view = HallViewport.centered(500, 400, new Rectangle2D(100, 100, 200, 200), 2);
+
+		// Die Mitte des Ziels (200 / 200) landet auf der Flächenmitte: der sichtbare Ausschnitt ist um sie zentriert
+		Rectangle2D visible = HallViewport.visibleRect(500, 400, view);
+		assertEquals(200, visible.getMinX() + visible.getWidth() / 2, EPS);
+		assertEquals(200, visible.getMinY() + visible.getHeight() / 2, EPS);
+		assertEquals(2, view.scale(), EPS);
+	}
+
+	@Test
+	void hallRectIsTheHallFromTheOriginAndNullWithoutSize() {
+		de.eltviller_carneval_verein.karten.model.Hall sized = new de.eltviller_carneval_verein.karten.model.Hall();
+		sized.setHallWidth(1500);
+		sized.setHallHeight(900);
+		de.eltviller_carneval_verein.karten.model.Hall noWidth = new de.eltviller_carneval_verein.karten.model.Hall();
+		noWidth.setHallHeight(900);
+
+		assertRect(new Rectangle2D(0, 0, 1500, 900), HallViewport.hallRect(sized));
+		assertEquals(null, HallViewport.hallRect(noWidth));
+		assertEquals(null, HallViewport.hallRect(null));
+	}
+
 	private final Rectangle2D hall = new Rectangle2D(0, 0, 1500, 900);
 
 	/** Der Ausschnitt, den eine Fläche w x h zeigt, wenn der ganze Saal mit Rand 0,95 eingepasst ist. */

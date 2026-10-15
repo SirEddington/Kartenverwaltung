@@ -221,7 +221,7 @@ public class MainApp extends Application {
 		return scene;
 	}
 
-	private static String stylesheetUrl() {
+	public static String stylesheetUrl() {
 		return MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 	}
 
