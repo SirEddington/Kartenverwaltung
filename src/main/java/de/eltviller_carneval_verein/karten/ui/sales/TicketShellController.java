@@ -16,6 +16,7 @@ import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -70,15 +71,31 @@ public class TicketShellController {
 	private Presentation currentPresentation;
 	private boolean editMode = false;
 	private CustomerDisplay customerDisplay;
+	private final ChangeListener<Boolean> windowShowing = (obs, wasShowing, isShowing) -> {
+		if (!isShowing) {
+			closeCustomerDisplay();
+		}
+	};
 
 	@FXML
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
 
-		// Wird die Ansicht verlassen (Menü, anderer Bildschirm), verschwindet auch das Kundenfenster
+		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das
+		// Hauptfenster geschlossen, schließt es mit (sonst hielte es die App am Leben). Die Szene bleibt an contentArea
+		// hängen, auch wenn das Fenster eine andere zeigt: Deshalb wird ihr Fenster beobachtet, nicht contentArea.
 		contentArea.sceneProperty().addListener((obs, oldScene, newScene) -> {
-			if (newScene == null) {
-				closeCustomerDisplay();
+			if (newScene != null) {
+				newScene.windowProperty().addListener((o, oldWindow, newWindow) -> {
+					if (oldWindow != null) {
+						oldWindow.showingProperty().removeListener(windowShowing);
+					}
+					if (newWindow == null) {
+						closeCustomerDisplay();
+					} else {
+						newWindow.showingProperty().addListener(windowShowing);
+					}
+				});
 			}
 		});
 
