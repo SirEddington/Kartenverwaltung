@@ -11,6 +11,7 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
+import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.collections.SetChangeListener;
@@ -20,10 +21,16 @@ import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Separator;
 import javafx.scene.image.Image;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.stage.Screen;
@@ -53,6 +60,11 @@ public final class CustomerDisplay {
 	private final Label titleLabel = new Label();
 	private final Label hintLabel = new Label(CustomerDisplayText.WAITING_HINT);
 	private final HallPlanPane planPane = new HallPlanPane();
+	// Seitenleiste: Was gerade gekauft wird (Anzahl, eine Zeile je Karte, Gesamtpreis)
+	private final Label countLabel = new Label();
+	private final VBox lineBox = new VBox(6);
+	private final Label totalLabel = new Label();
+	private final HBox totalRow = new HBox();
 	private boolean attached = false;
 
 	// Eine Auswahl von hundert Sitzen meldet hundert Änderungen: Der Plan wird trotzdem nur einmal neu gezeichnet
@@ -109,6 +121,9 @@ public final class CustomerDisplay {
 		StackPane.setAlignment(titleLabel, Pos.CENTER);
 		content.setTop(top);
 		content.setCenter(new StackPane(planPane, hintLabel));
+		Node summaryPanel = createSummaryPanel();
+		BorderPane.setMargin(summaryPanel, new Insets(0, 16, 16, 8));
+		content.setRight(summaryPanel);
 
 		// Hintergrund und Wappen wie in allen Ansichten der App
 		scene = new Scene(MainApp.wrapWithBackground(content));
@@ -151,6 +166,50 @@ public final class CustomerDisplay {
 	/** Ob das Fenster gerade den ganzen Bildschirm einnimmt. */
 	boolean isFullscreen() {
 		return fullscreen;
+	}
+
+	/** Die feste Spalte rechts neben dem Plan: Anzahl oben, scrollende Liste, Gesamtpreis unten. */
+	private Node createSummaryPanel() {
+		countLabel.getStyleClass().add("header-label");
+		totalLabel.getStyleClass().add("header-label");
+		Label totalCaption = new Label("Gesamt");
+		totalCaption.getStyleClass().add("subheader-label");
+		Region spacer = new Region();
+		HBox.setHgrow(spacer, Priority.ALWAYS);
+		totalRow.getChildren().setAll(totalCaption, spacer, totalLabel);
+		totalRow.setAlignment(Pos.BASELINE_LEFT);
+
+		ScrollPane lines = new ScrollPane(lineBox);
+		lines.setFitToWidth(true);
+		lines.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+		lines.setStyle("-fx-background-color: transparent; -fx-background: transparent;");
+		VBox.setVgrow(lines, Priority.ALWAYS);
+
+		VBox panel = new VBox(12, countLabel, lines, new Separator(), totalRow);
+		panel.setPadding(new Insets(16));
+		panel.setPrefWidth(380);
+		panel.setMinWidth(380);
+		panel.setStyle("-fx-background-color: white; -fx-border-color: #cccccc; -fx-border-radius: 5; -fx-background-radius: 5;");
+		return panel;
+	}
+
+	private Node lineRow(SelectionSummary.Line line) {
+		Label text = new Label(line.text());
+		text.getStyleClass().add("subheader-label");
+		Label price = new Label(MoneyFormat.formatCents(line.cents()));
+		price.getStyleClass().add("subheader-label");
+		Region spacer = new Region();
+		HBox.setHgrow(spacer, Priority.ALWAYS);
+		return new HBox(text, spacer, price);
+	}
+
+	private void updateSummary(Presentation presentation) {
+		SelectionSummary.Summary summary = SelectionSummary.of(state.selectedSeats(), presentation);
+		countLabel.setText(SelectionSummary.countText(summary.count()));
+		lineBox.getChildren().setAll(summary.lines().stream().map(this::lineRow).toList());
+		totalLabel.setText(MoneyFormat.formatCents(summary.totalCents()));
+		// Unsichtbar statt entfernt: Die Spalte behält ihre Höhe, nichts springt
+		totalRow.setVisible(summary.count() > 0);
 	}
 
 	private void configure(Stage target) {
@@ -245,6 +304,7 @@ public final class CustomerDisplay {
 		hintLabel.setVisible(presentation == null);
 		Hall hall = presentation == null ? null : hallRepository.findById(presentation.getHallId());
 		planPane.render(presentation, hall, decorator);
+		updateSummary(presentation);
 	}
 
 	/**
