@@ -10,6 +10,7 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
+import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.collections.SetChangeListener;
 import javafx.geometry.Insets;
@@ -45,14 +46,18 @@ public final class CustomerDisplay {
 	private final HallPlanPane planPane = new HallPlanPane();
 	private boolean attached = false;
 
-	private final ChangeListener<Object> contentChanged = (obs, oldValue, newValue) -> {
-		refresh();
-		applyView();
-	};
+	// Eine Auswahl von hundert Sitzen meldet hundert Änderungen: Der Plan wird trotzdem nur einmal neu gezeichnet
+	private final CoalescedAction redraw = new CoalescedAction(Platform::runLater, () -> {
+		if (attached) {
+			refresh();
+			applyView();
+		}
+	});
+	private final ChangeListener<Object> contentChanged = (obs, oldValue, newValue) -> redraw.request();
 	private final ChangeListener<Rectangle2D> viewChanged = (obs, oldValue, newValue) -> applyView();
-	private final SetChangeListener<Seat> selectionChanged = change -> refresh();
+	private final SetChangeListener<Seat> selectionChanged = change -> redraw.request();
 	// Ein Verkauf im Hauptfenster ändert Sitze: Die Änderungserkennung meldet es kurz nach der Bedienung
-	private final ChangeTracker.Listener<Event> dataChanged = (event, before, after) -> refresh();
+	private final ChangeTracker.Listener<Event> dataChanged = (event, before, after) -> redraw.request();
 
 	private final HallPlanPane.Decorator decorator = new HallPlanPane.Decorator() {
 		@Override
