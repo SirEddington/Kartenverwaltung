@@ -429,14 +429,17 @@ public class EventEditController {
 	private void handleCopyEvent(Event event) {
 		Event newEvent = new Event();
 
-		// ToDo Popup für name
+		// Die Kopie bekommt einen eigenen Namen ("<Name> (Kopie)"), sonst würde sie nie gespeichert (EVT-002); umbenennen geht in der Tabelle
+		newEvent.setName(Event.createCopyName(event.getName(), masterEventData.stream().map(Event::getName).toList()));
 		newEvent.setDescription(event.getDescription());
 
 		for (Presentation pres : event.getPresentations()) {
 			handleCopyPres(pres, newEvent);
 		}
 
-		EventSaver.save(newEvent);
+		// Bei Erfolg ist die Kopie gewählt; sonst bleibt das Original gewählt (handleCopyPres hat die Kopie schon angezeigt)
+		boolean saved = EventSaver.save(newEvent);
+		refreshEventTable(saved ? newEvent : event);
 	}
 
 	private void handleDeleteEvent(Event event) {

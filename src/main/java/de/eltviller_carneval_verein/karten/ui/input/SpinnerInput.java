@@ -32,6 +32,11 @@ public final class SpinnerInput {
 
 	/** Schlüssel in den Eigenschaften des Spinners: die zuletzt abgelehnte Eingabe, bis eine gültige bestätigt wird. */
 	private static final String PENDING_REJECTION = SpinnerInput.class.getName() + ".pendingRejection";
+	/**
+	 * Schlüssel: der Text, auf den {@link #reject} das Feld zurückgesetzt hat. Beim Fokuswechsel bestätigt der Spinner
+	 * zweimal; das zweite Mal liest er diesen zurückgesetzten (gültigen) Text und darf den Merker nicht löschen.
+	 */
+	private static final String RESTORED_TEXT = SpinnerInput.class.getName() + ".restoredText";
 
 	private SpinnerInput() {
 	}
@@ -67,6 +72,7 @@ public final class SpinnerInput {
 		spinner.getProperties().put(PENDING_REJECTION, issue);
 		InputFeedback.report(issue, spinner);
 		restoreText(spinner);
+		spinner.getProperties().put(RESTORED_TEXT, spinner.getEditor().getText());
 	}
 
 	/**
@@ -127,7 +133,10 @@ public final class SpinnerInput {
 					reject(spinner, InputIssue.OUT_OF_RANGE.toIssue(label, typed, NumberInput.format(min), NumberInput.format(max)));
 					return factory.getValue();
 				}
-				spinner.getProperties().remove(PENDING_REJECTION);
+				// Nur eine neue gültige Eingabe löscht den Merker, nicht das erneute Lesen des zurückgesetzten Textes
+				if (text == null || !text.trim().equals(spinner.getProperties().get(RESTORED_TEXT))) {
+					spinner.getProperties().remove(PENDING_REJECTION);
+				}
 				return parsed.get();
 			}
 		});

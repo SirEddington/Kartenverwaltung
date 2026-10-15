@@ -672,12 +672,16 @@
  * KURZE ROTE MARKIERUNG EINER NICHT UEBERNOMMENEN EINGABE (InputFeedback)
  * Die Klasse .input-error setzt InputFeedback an der Zelle oder dem Spinner und nimmt sie nach
  * etwa 1,5 Sekunden wieder weg. Farben aus den vorhandenen Variablen, keine neue Farbe.
+ * Tabellenzellen: kräftiges Rot (wie der Rand der Fehlermeldung) mit weißer Schrift, das helle Rot war dort kaum zu sehen.
  * ------------------------------------------------------------------------------ */
 .table-cell.input-error,
-.tree-table-cell.input-error {
-    -fx-background-color: -fx-status-error-tint;
+.tree-table-cell.input-error,
+.table-row-cell:filled .table-cell.input-error,
+.table-row-cell:filled:selected .table-cell.input-error {
+    -fx-background-color: -fx-ecv-red;
     -fx-border-color: -fx-ecv-red;
     -fx-border-width: 1.5px;
+    -fx-text-fill: white;
 }
 
 .spinner.input-error {

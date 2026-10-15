@@ -36,6 +36,22 @@ class DateTimeInputTest {
 	}
 
 	@Test
+	void timeAcceptsThreeOrFourDigitsWithoutColon() {
+		assertEquals(LocalTime.of(15, 0), DateTimeInput.parseTime("1500").orElseThrow());
+		assertEquals(LocalTime.of(9, 30), DateTimeInput.parseTime("930").orElseThrow());
+		assertEquals(LocalTime.of(9, 30), DateTimeInput.parseTime("0930").orElseThrow());
+		assertEquals(LocalTime.of(0, 0), DateTimeInput.parseTime("0000").orElseThrow());
+		assertEquals(LocalTime.of(23, 59), DateTimeInput.parseTime(" 2359 ").orElseThrow());
+	}
+
+	@Test
+	void timeWithoutColonRejectsInvalidValues() {
+		for (String text : new String[] { "2500", "1560", "12345", "15", "9", "2400", "-1500" }) {
+			assertTrue(DateTimeInput.parseTime(text).isEmpty(), "„" + text + "“ sollte keine Uhrzeit sein");
+		}
+	}
+
+	@Test
 	void timeRejectsInvalidValues() {
 		for (String text : new String[] { "25:00", "19.30", "19:60", "abc", "", "  ", "19", "19:30:15" }) {
 			assertTrue(DateTimeInput.parseTime(text).isEmpty(), "„" + text + "“ sollte keine Uhrzeit sein");

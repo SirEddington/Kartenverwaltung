@@ -198,6 +198,10 @@ public final class SeatDetailPopup {
 			Button applyButton = new Button("Anwenden");
 			applyButton.getStyleClass().add("button-primary");
 			applyButton.setOnAction(event -> {
+				// Eine abgelehnte Eingabe (der Klick auf Anwenden löst sie aus): nichts übernehmen, der Dialog und die Auswahl bleiben
+				if (SpinnerInput.blockSaveIfScreenInputRejected(applyButton)) {
+					return;
+				}
 				edit.apply();
 				popup.hide();
 				onApplied.run();

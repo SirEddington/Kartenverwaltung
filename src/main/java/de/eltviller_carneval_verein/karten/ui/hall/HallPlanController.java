@@ -131,17 +131,17 @@ public class HallPlanController {
 		heightSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_HEIGHT, 5));
 		textSizeSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 1000.0, 20.0, 1));
 		SpinnerValueFactory.DoubleSpinnerValueFactory rotationFactory = new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 360.0, 0.0, 15);
-		// Über 360 Grad geht es bei 0 weiter
+		// Über 360 Grad geht es bei 0 weiter; 360 selbst ist 0 und wird nie angezeigt (ein Klick von 345 geht auf 0)
 		rotationFactory.setWrapAround(true);
+		rotationFactory.valueProperty().addListener((obs, oldValue, newValue) -> {
+			if (newValue != null && newValue >= 360.0) {
+				rotationFactory.setValue(0.0);
+			}
+		});
 		textRotationSpinner.setValueFactory(rotationFactory);
+		// Getippte Werte beim Verlassen des Feldes übernimmt der Spinner selbst
 		for (Spinner<Double> spinner : java.util.List.of(widthSpinner, heightSpinner, posXSpinner, posYSpinner, textSizeSpinner, textRotationSpinner)) {
 			spinner.setEditable(true);
-			// Getippte Werte beim Verlassen des Feldes übernehmen
-			spinner.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-				if (!isFocused) {
-					spinner.increment(0);
-				}
-			});
 		}
 		posXSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-100000.0, 100000.0, 0.0, 5));
 		posYSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-100000.0, 100000.0, 0.0, 5));

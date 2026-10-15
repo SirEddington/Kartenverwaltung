@@ -77,12 +77,7 @@ public class HallEditController {
 		spinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, max, 0.0, step));
 		spinner.setEditable(true);
 		SpinnerInput.install(spinner, fieldName, () -> hall == null ? null : EntityLabels.hall(hall));
-		// Getippte Werte beim Verlassen des Feldes übernehmen
-		spinner.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-			if (!isFocused) {
-				spinner.increment(0);
-			}
-		});
+		// Getippte Werte beim Verlassen des Feldes übernimmt der Spinner selbst (ein zweites Bestätigen hier brächte nichts)
 		spinner.valueProperty().addListener((obs, oldVal, newVal) -> {
 			if (!updating && hall != null && newVal != null) {
 				onChange.accept(newVal);
