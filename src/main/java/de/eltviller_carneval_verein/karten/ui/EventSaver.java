@@ -32,14 +32,7 @@ public final class EventSaver {
 	 */
 	public static boolean save(Event event) {
 		SaveResult result = trySave(event, JsonEventRepository.getInstance());
-		StatusMessage messages = StatusMessage.getInstance();
-		if (!result.saved()) {
-			messages.show(result.validation(), "Nicht gespeichert: ");
-		} else if (result.validation().isEmpty()) {
-			messages.showSaved();
-		} else {
-			messages.show(result.validation(), "Gespeichert mit Warnungen: ");
-		}
+		StatusMessage.getInstance().showSaveResult(result.saved(), result.validation());
 		return result.saved();
 	}
 

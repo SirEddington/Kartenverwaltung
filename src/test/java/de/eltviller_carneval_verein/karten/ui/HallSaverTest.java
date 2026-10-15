@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,8 +63,37 @@ class HallSaverTest {
 		RecordingRepository repository = new RecordingRepository();
 		Hall hall = hall();
 
-		assertTrue(HallSaver.trySave(hall, repository));
+		HallSaver.SaveResult result = HallSaver.trySave(hall, repository);
+
+		assertTrue(result.saved());
+		assertTrue(result.validation().isEmpty());
 		assertEquals(List.of(hall), repository.saved);
+	}
+
+	@Test
+	void hallWithoutNameIsNotSaved() {
+		RecordingRepository repository = new RecordingRepository();
+		Hall hall = hall();
+		hall.setName(" ");
+
+		HallSaver.SaveResult result = HallSaver.trySave(hall, repository);
+
+		assertFalse(result.saved());
+		assertTrue(repository.saved.isEmpty(), "Ohne Namen darf nichts gespeichert werden");
+		assertEquals("HLL-001", result.validation().mostSevere().orElseThrow().code());
+	}
+
+	@Test
+	void hallObjectWithoutNameIsNotSaved() {
+		RecordingRepository repository = new RecordingRepository();
+		Hall hall = hall();
+		hall.addHallObject("Bühne").setName("");
+
+		HallSaver.SaveResult result = HallSaver.trySave(hall, repository);
+
+		assertFalse(result.saved());
+		assertTrue(repository.saved.isEmpty());
+		assertEquals("HOB-001", result.validation().mostSevere().orElseThrow().code());
 	}
 
 	@Test
