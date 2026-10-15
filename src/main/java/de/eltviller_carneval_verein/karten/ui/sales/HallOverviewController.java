@@ -211,7 +211,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	 * einem gewählten Sitz gilt es für die ganze Auswahl, auf einem anderen Sitz wird dieser zur einzigen Auswahl, wie im
 	 * Explorer. Im Leeren, auf einem Tisch, auf einem vom Suchfilter ausgeblendeten Sitz und bei offenem Dialog (er
 	 * würde sonst samt Eingaben ersetzt) gibt es kein Menü. Im Anzeigemodus ist der Eintrag sichtbar, aber nicht
-	 * ausführbar; die Auswahl bleibt dort unberührt, weil es sie nur im Bearbeitungsmodus gibt.
+	 * ausführbar; die Auswahl ändert der Rechtsklick dort nicht (der Text nennt die Auswahl nur, wenn der Sitz dazugehört).
 	 */
 	private void showSelectionMenu(MouseEvent event) {
 		if (selectionMenu != null) {
@@ -226,7 +226,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			selectedSeats.add(seat);
 			renderHall();
 		}
-		MenuItem sellItem = new MenuItem(SeatSelectionEditor.menuText(editMode ? selectedSeats.size() : 1));
+		MenuItem sellItem = new MenuItem(SeatSelectionEditor.menuText(selectedSeats.contains(seat) ? selectedSeats.size() : 1));
 		sellItem.setDisable(!editMode);
 		selectionMenu = new ContextMenu(sellItem);
 		sellItem.setOnAction(action -> sellSelection(selectionMenu.getAnchorX(), selectionMenu.getAnchorY()));
