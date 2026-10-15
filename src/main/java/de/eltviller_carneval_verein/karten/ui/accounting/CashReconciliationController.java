@@ -30,7 +30,6 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextArea;
 
 public class CashReconciliationController implements ContentController, Exportable {
@@ -84,7 +83,7 @@ public class CashReconciliationController implements ContentController, Exportab
 
 	@FXML
 	public void initialize() {
-		actualCashSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 1_000_000.0, 0.0, 5));
+		actualCashSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		actualCashSpinner.setEditable(true);
 		SpinnerInput.install(actualCashSpinner, "Ist-Betrag", () -> selectedPres == null ? null : EntityLabels.presentation(selectedPres));
 		actualCashSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {

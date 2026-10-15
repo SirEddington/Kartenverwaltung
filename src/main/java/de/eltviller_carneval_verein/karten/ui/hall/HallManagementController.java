@@ -156,7 +156,7 @@ public class HallManagementController extends AbstractOverviewController {
 			TreeItem<Object> selectedItem = selectedItem();
 			if (selectedItem != null) {
 				Hall hall = findParentInTree(selectedItem, Hall.class);
-				HallObject object = hall.addHallObject();
+				HallObject object = HallPlanController.addObjectWithDefaultSize(hall);
 				MainApp.showHallEditView(hall, object, true);
 			}
 		});

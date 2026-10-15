@@ -32,18 +32,19 @@ class PriceSpinnerValueFactoryTest {
 
 		PriceSpinnerValueFactory other = new PriceSpinnerValueFactory(null);
 		other.decrement(1);
-		assertEquals(0.0, other.getValue());
+		assertEquals(-0.5, other.getValue(), "Ohne Anschlag: ein leeres Feld zählt als 0, den negativen Preis meldet SEA-001");
 	}
 
 	@Test
-	void staysWithinZeroAndOneThousandEuro() {
+	void arrowButtonsHaveNoLimit() {
+		// Grenzen (0 bis 1.000 €) prüft der SeatValidator, nicht das Feld
 		PriceSpinnerValueFactory factory = new PriceSpinnerValueFactory(999.8);
 		factory.increment(1);
-		assertEquals(1000.0, factory.getValue());
+		assertEquals(1000.3, factory.getValue());
 
 		PriceSpinnerValueFactory low = new PriceSpinnerValueFactory(0.2);
 		low.decrement(1);
-		assertEquals(0.0, low.getValue());
+		assertEquals(-0.3, low.getValue());
 	}
 
 	/** Factory mit Startwert 7 Euro, die abgelehnte Eingaben in die Liste schreibt. */
@@ -67,17 +68,14 @@ class PriceSpinnerValueFactoryTest {
 	}
 
 	@Test
-	void outOfRangeIsRejectedInsteadOfClamped() {
+	void valuesOutsideTheValidRangeAreLeftToTheValidator() {
 		List<ValidationIssue> rejected = new ArrayList<>();
 		PriceSpinnerValueFactory factory = factoryWithRejections(rejected);
 
-		assertEquals(7.0, factory.getConverter().fromString("5000"));
-		assertEquals(7.0, factory.getConverter().fromString("-3"));
+		assertEquals(5000.0, factory.getConverter().fromString("5000"));
+		assertEquals(-3.0, factory.getConverter().fromString("-3"));
 
-		assertEquals(2, rejected.size());
-		assertEquals("INP-004", rejected.get(0).code());
-		assertEquals("Preis: 5000 liegt nicht zwischen 0 und 1000.", rejected.get(0).message());
-		assertEquals("INP-004", rejected.get(1).code());
+		assertTrue(rejected.isEmpty(), "Zu hohe oder negative Preise meldet SEA-003 bzw. SEA-001, nicht das Feld");
 	}
 
 	@Test
@@ -88,7 +86,7 @@ class PriceSpinnerValueFactoryTest {
 		assertEquals(12.5, factory.parseQuietly("12,5"));
 		assertEquals(12.0, factory.parseQuietly("12,"), "Ein Komma am Ende gilt: 12 Euro");
 		assertEquals(7.0, factory.parseQuietly("12,5,"), "Halb getippt und ungültig: bisheriger Wert");
-		assertEquals(7.0, factory.parseQuietly("5000"));
+		assertEquals(5000.0, factory.parseQuietly("5000"));
 		assertNull(factory.parseQuietly(""));
 		assertTrue(rejected.isEmpty(), "Die Live-Berechnung beim Tippen darf nichts melden");
 	}

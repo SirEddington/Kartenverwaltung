@@ -42,7 +42,6 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
@@ -295,7 +294,7 @@ public class EventEditController {
 
 		// --- Sitzdetails ---
 		paymentComboBox.getItems().setAll(PaymentStatus.values());
-		spnDoublePrice.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 100.0, 0.0, 0.5));
+		spnDoublePrice.setValueFactory(SpinnerInput.doubleFactory(0.0, 0.5));
 		SpinnerInput.install(spnDoublePrice, "Preis", () -> currentSeat == null ? null : EntityLabels.seat(currentSeat));
 		StringConverter<PaymentStatus> converter = new StringConverter<>() {
 			@Override

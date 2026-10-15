@@ -41,6 +41,30 @@ class SeatValidatorTest {
 		}
 	}
 
+	// --- Größe (SEA-009), früher Grenzen der Spinner ---
+
+	@Test
+	void seatSizeMustBeBetweenZeroAndOneHundred() {
+		for (double ok : new double[] { 0, 30, 100 }) {
+			Seat seat = seatWithPriceCents(1250);
+			seat.setWidth(ok);
+			seat.setHeight(ok);
+			assertTrue(SeatValidator.validate(seat).isEmpty(), "Gültig: " + ok);
+		}
+
+		Seat wide = seatWithPriceCents(1250);
+		wide.setWidth(100.5);
+		ValidationIssue width = only(SeatValidator.validate(wide));
+		assertEquals("SEA-009", width.code());
+		assertEquals("Breite von Prunksitzung, Tisch 4, Sitz 2 liegt mit 100,5 nicht zwischen 0 und 100.", width.message());
+
+		Seat negative = seatWithPriceCents(1250);
+		negative.setHeight(-1);
+		ValidationIssue height = only(SeatValidator.validate(negative));
+		assertEquals("SEA-009", height.code());
+		assertTrue(height.message().startsWith("Höhe von Prunksitzung, Tisch 4, Sitz 2"), height.message());
+	}
+
 	// --- Preis (SEA-001, SEA-003) ---
 
 	@Test

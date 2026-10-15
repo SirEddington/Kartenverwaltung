@@ -127,12 +127,15 @@ public class HallPlanController {
 	}
 
 	private void setupPanel() {
-		widthSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_WIDTH, 5));
-		heightSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_HEIGHT, 5));
-		textSizeSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 1000.0, 20.0, 1));
-		// Die Drehung läuft im Kreis von 0 bis unter 360: Die Pfeiltasten gehen von 345 auf 0 und von 0 auf 345. 360 selbst ist 0
-		// und wird nie angezeigt (der Standard-Umlauf von JavaFX würde bei 0 nach unten auf 360 springen)
-		SpinnerValueFactory.DoubleSpinnerValueFactory rotationFactory = new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 360.0, 0.0, 15) {
+		// Wertebereiche prüft der Validator (HOB-002 bis HOB-004), die Spinner haben keine Grenzen
+		widthSpinner.setValueFactory(SpinnerInput.doubleFactory(FALLBACK_OBJECT_WIDTH, 5));
+		heightSpinner.setValueFactory(SpinnerInput.doubleFactory(FALLBACK_OBJECT_HEIGHT, 5));
+		textSizeSpinner.setValueFactory(SpinnerInput.doubleFactory(20.0, 1));
+		// Die Drehung läuft im Kreis von 0 bis unter 360: Die Pfeiltasten gehen von 345 auf 0 und von 0 auf 345. Getippte Werte
+		// außerhalb davon werden auf den Kreis gebracht (360 = 0, 361 = 1, -90 = 270). Der Standard-Umlauf von JavaFX würde bei
+		// 0 nach unten auf 360 springen
+		SpinnerValueFactory.DoubleSpinnerValueFactory rotationFactory = new SpinnerValueFactory.DoubleSpinnerValueFactory(-Double.MAX_VALUE,
+				Double.MAX_VALUE, 0.0, 15) {
 			@Override
 			public void decrement(int steps) {
 				turn(-steps);
@@ -149,10 +152,9 @@ public class HallPlanController {
 				setValue(Math.round((next < 0 ? next + 360.0 : next) * 10000.0) / 10000.0);
 			}
 		};
-		// Ein getippter Wert von 360 wird zu 0
 		rotationFactory.valueProperty().addListener((obs, oldValue, newValue) -> {
-			if (newValue != null && newValue >= 360.0) {
-				rotationFactory.setValue(0.0);
+			if (newValue != null && (newValue < 0.0 || newValue >= 360.0)) {
+				rotationFactory.setValue(HallObjectText.normalizeRotation(newValue));
 			}
 		});
 		textRotationSpinner.setValueFactory(rotationFactory);
@@ -160,8 +162,8 @@ public class HallPlanController {
 		for (Spinner<Double> spinner : java.util.List.of(widthSpinner, heightSpinner, posXSpinner, posYSpinner, textSizeSpinner, textRotationSpinner)) {
 			spinner.setEditable(true);
 		}
-		posXSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-100000.0, 100000.0, 0.0, 5));
-		posYSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-100000.0, 100000.0, 0.0, 5));
+		posXSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
+		posYSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		// Tippfehler: alter Wert bleibt, Meldung in der Fußzeile; erst nach dem Setzen der Value-Factories
 		Supplier<String> selectedObjectLabel = () -> selectedObject == null ? null : EntityLabels.nameOrPlaceholder(selectedObject.getName());
 		SpinnerInput.install(posXSpinner, "Position X", selectedObjectLabel);
@@ -607,19 +609,24 @@ public class HallPlanController {
 		btnDeleteObject.setDisable(!editable);
 	}
 
-	@FXML
-	private void handleAddObject() {
-		if (hall == null) {
-			return;
-		}
+	/** Neues Hallenobjekt mit sichtbarer Größe: Ohne hinterlegte Standardmaße (0) wäre es unsichtbar und der Validator meldet HOB-002. */
+	static HallObject addObjectWithDefaultSize(Hall hall) {
 		HallObject newObject = hall.addHallObject();
-		// Ohne hinterlegte Standardmaße (0) wäre das Objekt unsichtbar
 		if (newObject.getWidth() <= 0) {
 			newObject.setWidth(FALLBACK_OBJECT_WIDTH);
 		}
 		if (newObject.getHeight() <= 0) {
 			newObject.setHeight(FALLBACK_OBJECT_HEIGHT);
 		}
+		return newObject;
+	}
+
+	@FXML
+	private void handleAddObject() {
+		if (hall == null) {
+			return;
+		}
+		HallObject newObject = addObjectWithDefaultSize(hall);
 		newObject.setShape(Shape.RECTANGLE);
 		// Startposition: Hallenmitte (sofern Saalmaße gesetzt sind), sonst obere linke Ecke
 		if (hall.getHallWidth() > 0 && hall.getHallHeight() > 0) {

@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.validation;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
@@ -26,6 +27,11 @@ public final class EntityLabels {
 	/** z. B. "Halle Festhalle" (ohne Namen oder ohne Halle: "Halle ohne Namen"). */
 	public static String hall(Hall hall) {
 		return named("Halle", hall == null ? null : hall.getName());
+	}
+
+	/** z. B. "Hallenobjekt Bühne in Halle Festhalle" (ohne Namen: "Hallenobjekt ohne Namen in ..."). */
+	public static String hallObject(HallObject object, Hall hall) {
+		return named("Hallenobjekt", object.getName()) + " in " + hall(hall);
 	}
 
 	/** z. B. "Vorstellung Prunksitzung" (ohne Namen: "Vorstellung ohne Namen"). */

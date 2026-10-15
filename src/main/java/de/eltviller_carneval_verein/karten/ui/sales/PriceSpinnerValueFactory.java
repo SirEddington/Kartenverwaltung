@@ -6,7 +6,6 @@ import java.util.function.Consumer;
 
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.NumberInput;
-import de.eltviller_carneval_verein.karten.validation.SeatValidator;
 import de.eltviller_carneval_verein.karten.validation.ValidationIssue;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.util.StringConverter;
@@ -14,10 +13,10 @@ import javafx.util.StringConverter;
 /**
  * Preisfeld in Euro für den Sitz-Dialog. Anders als {@code DoubleSpinnerValueFactory} darf das Feld leer sein (im
  * Sammel-Dialog: "verschieden"), ohne dass die Pfeiltasten eine NullPointerException auslösen. Eingaben werden mit
- * Komma oder Punkt gelesen ({@link NumberInput}). Unlesbarer Text und Preise außerhalb von 0 bis zur Obergrenze der
- * Plausibilitätsprüfung werden <strong>nicht übernommen</strong>: Der bisherige Wert bleibt, und der
- * {@linkplain #setRejectionHandler Handler} bekommt die Meldung (INP-001 bzw. INP-004). Die Pfeiltasten begrenzen am
- * Rand ohne Meldung.
+ * Komma oder Punkt gelesen ({@link NumberInput}). Unlesbarer Text wird <strong>nicht übernommen</strong>: Der bisherige
+ * Wert bleibt, und der {@linkplain #setRejectionHandler Handler} bekommt die Meldung (INP-001). Einen Wertebereich
+ * kennt das Feld nicht, auch die Pfeiltasten haben keinen Anschlag: Zu kleine oder zu große Preise meldet der
+ * {@code SeatValidator} (SEA-001, SEA-003).
  *
  * <p>
  * Der Converter meldet nur beim Bestätigen des Spinners. Wer den Text laufend auswertet (Gesamtpreis beim Tippen),
@@ -25,8 +24,6 @@ import javafx.util.StringConverter;
  */
 public class PriceSpinnerValueFactory extends SpinnerValueFactory<Double> {
 
-	private static final double MIN = 0.0;
-	private static final double MAX = SeatValidator.MAX_PRICE_CENTS / 100.0;
 	private static final double STEP = 0.5;
 
 	private String fieldLabel = "Preis";
@@ -60,8 +57,8 @@ public class PriceSpinnerValueFactory extends SpinnerValueFactory<Double> {
 	}
 
 	/**
-	 * Liest den Text wie der Converter, meldet aber nie: Bei leer {@code null}, bei unlesbarem oder unzulässigem
-	 * Preis der bisherige Wert. Für Auswertungen, die bei jedem Tastendruck laufen.
+	 * Liest den Text wie der Converter, meldet aber nie: Bei leer {@code null}, bei unlesbarem Preis der bisherige Wert.
+	 * Für Auswertungen, die bei jedem Tastendruck laufen.
 	 */
 	public Double parseQuietly(String text) {
 		return read(text, issue -> {
@@ -78,12 +75,7 @@ public class PriceSpinnerValueFactory extends SpinnerValueFactory<Double> {
 			onReject.accept(InputIssue.NOT_A_NUMBER.toIssue(fieldLabel, text.trim()));
 			return getValue();
 		}
-		double euros = round(parsed.getAsDouble());
-		if (euros < MIN || euros > MAX) {
-			onReject.accept(InputIssue.OUT_OF_RANGE.toIssue(fieldLabel, text.trim(), NumberInput.format(MIN), NumberInput.format(MAX)));
-			return getValue();
-		}
-		return euros;
+		return round(parsed.getAsDouble());
 	}
 
 	@Override
@@ -97,12 +89,8 @@ public class PriceSpinnerValueFactory extends SpinnerValueFactory<Double> {
 	}
 
 	private void step(int steps) {
-		double current = getValue() == null ? MIN : getValue();
-		setValue(clamp(current + steps * STEP));
-	}
-
-	private static double clamp(double value) {
-		return Math.max(MIN, Math.min(MAX, round(value)));
+		double current = getValue() == null ? 0.0 : getValue();
+		setValue(round(current + steps * STEP));
 	}
 
 	/** Auf ganze Cent gerundet. */

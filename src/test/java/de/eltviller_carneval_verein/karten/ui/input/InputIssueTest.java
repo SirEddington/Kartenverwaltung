@@ -35,11 +35,8 @@ class InputIssueTest {
 	}
 
 	@Test
-	void outOfRangeNamesTheLimits() {
-		ValidationIssue issue = InputIssue.OUT_OF_RANGE.toIssue("Breite", "5000", "1", "1000");
-
-		assertEquals("INP-004", issue.code());
-		assertEquals(Severity.ERROR, issue.severity());
-		assertEquals("Breite: 5000 liegt nicht zwischen 1 und 1000.", issue.message());
+	void thereAreOnlyThreeInputCodes() {
+		// Wertebereiche prüft der Validator (HLL-002 usw.); INP-004 (außerhalb des Bereichs) gibt es nicht mehr
+		assertEquals(3, InputIssue.values().length);
 	}
 }

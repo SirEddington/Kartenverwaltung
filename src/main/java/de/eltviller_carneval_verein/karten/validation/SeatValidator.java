@@ -33,14 +33,24 @@ public final class SeatValidator {
 		return new SeatValidator(seat).run();
 	}
 
+	/** Größte erlaubte Breite und Höhe eines Sitzes (wie bisher die Grenze der Spinner). */
+	static final double MAX_SIZE = 100;
+
 	private ValidationResult run() {
 		validateNumber();
+		validateSize();
 		validatePrice();
 		validateCollectedWithoutPayment();
 		validateEmail();
 		validatePaidWithoutPrice();
 		validatePaidWithoutName();
 		return result;
+	}
+
+	private void validateSize() {
+		String owner = EntityLabels.seat(seat);
+		RangeCheck.check(result, SeatIssue.SIZE_OUT_OF_RANGE, "Breite", owner, seat.getWidth(), 0, MAX_SIZE);
+		RangeCheck.check(result, SeatIssue.SIZE_OUT_OF_RANGE, "Höhe", owner, seat.getHeight(), 0, MAX_SIZE);
 	}
 
 	private void validateNumber() {

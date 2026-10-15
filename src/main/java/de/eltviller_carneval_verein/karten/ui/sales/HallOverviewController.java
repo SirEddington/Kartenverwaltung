@@ -38,7 +38,6 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.MouseButton;
@@ -818,7 +817,7 @@ public class HallOverviewController implements ContentController {
 		grid.addRow(row++, new Label("Beschreibung:"), descField);
 
 		Spinner<Double> widthSpinner = new Spinner<>();
-		widthSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(10.0, 1000.0, table.getWidth(), 5));
+		widthSpinner.setValueFactory(SpinnerInput.doubleFactory(table.getWidth(), 5));
 		widthSpinner.setEditable(true);
 		SpinnerInput.install(widthSpinner, "Breite", () -> EntityLabels.table(table));
 		widthSpinner.setPrefWidth(100);
@@ -826,7 +825,7 @@ public class HallOverviewController implements ContentController {
 		grid.addRow(row++, new Label("Breite:"), widthSpinner);
 
 		Spinner<Double> heightSpinner = new Spinner<>();
-		heightSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(10.0, 1000.0, table.getHeight(), 5));
+		heightSpinner.setValueFactory(SpinnerInput.doubleFactory(table.getHeight(), 5));
 		heightSpinner.setEditable(true);
 		SpinnerInput.install(heightSpinner, "Höhe", () -> EntityLabels.table(table));
 		heightSpinner.setPrefWidth(100);
@@ -834,7 +833,7 @@ public class HallOverviewController implements ContentController {
 		grid.addRow(row++, new Label("Höhe:"), heightSpinner);
 
 		Spinner<Double> posXSpinner = new Spinner<>();
-		posXSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-10000.0, 10000.0, table.getPosX(), 5));
+		posXSpinner.setValueFactory(SpinnerInput.doubleFactory(table.getPosX(), 5));
 		posXSpinner.setEditable(true);
 		SpinnerInput.install(posXSpinner, "Position X", () -> EntityLabels.table(table));
 		posXSpinner.setPrefWidth(100);
@@ -842,7 +841,7 @@ public class HallOverviewController implements ContentController {
 		grid.addRow(row++, new Label("PosX:"), posXSpinner);
 
 		Spinner<Double> posYSpinner = new Spinner<>();
-		posYSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-10000.0, 10000.0, table.getPosY(), 5));
+		posYSpinner.setValueFactory(SpinnerInput.doubleFactory(table.getPosY(), 5));
 		posYSpinner.setEditable(true);
 		SpinnerInput.install(posYSpinner, "Position Y", () -> EntityLabels.table(table));
 		posYSpinner.setPrefWidth(100);

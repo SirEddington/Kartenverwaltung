@@ -23,7 +23,9 @@ public enum SeatIssue implements Issue {
 	/** &1 = Sitz. */
 	PAID_WITHOUT_NAME("SEA-007", Severity.WARNING, "&1 ist als bezahlt markiert, es ist aber kein Nachname eingetragen."),
 	/** &1 = Sitz (mit der ungültigen Nummer). */
-	NUMBER_TOO_LOW("SEA-008", Severity.ERROR, "Die Sitznummer von &1 muss mindestens 1 sein.");
+	NUMBER_TOO_LOW("SEA-008", Severity.ERROR, "Die Sitznummer von &1 muss mindestens 1 sein."),
+	/** Breite oder Höhe außerhalb von 0 bis 100. &1 = "Breite" oder "Höhe", &2 = Sitz, &3 = Wert, &4 = Minimum, &5 = Maximum. */
+	SIZE_OUT_OF_RANGE("SEA-009", Severity.ERROR, RangeCheck.TEMPLATE);
 
 	private final String code;
 	private final Severity severity;

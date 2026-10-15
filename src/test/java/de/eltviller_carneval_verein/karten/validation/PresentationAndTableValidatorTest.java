@@ -53,6 +53,67 @@ class PresentationAndTableValidatorTest {
 		}
 	}
 
+	// --- Wertebereiche (TBL-003, TBL-004, PRS-005), früher Grenzen der Spinner ---
+
+	@Test
+	void tableSizeMustBeBetweenZeroAndOneThousand() {
+		for (double ok : new double[] { 0, 70, 1000 }) {
+			Table table = presentation().addTable(4);
+			table.setWidth(ok);
+			table.setHeight(ok);
+			assertTrue(TableValidator.validate(table).isEmpty(), "Gültig: " + ok);
+		}
+
+		Table wide = presentation().addTable(4);
+		wide.setWidth(1000.5);
+		ValidationIssue width = only(TableValidator.validate(wide));
+		assertEquals("TBL-003", width.code());
+		assertEquals("Breite von Prunksitzung, Tisch 4 liegt mit 1000,5 nicht zwischen 0 und 1000.", width.message());
+
+		Table negative = presentation().addTable(4);
+		negative.setHeight(-1);
+		ValidationIssue height = only(TableValidator.validate(negative));
+		assertEquals("TBL-003", height.code());
+		assertTrue(height.message().startsWith("Höhe von Prunksitzung, Tisch 4"), height.message());
+	}
+
+	@Test
+	void tablePositionMustBeWithinPlusMinusTenThousand() {
+		for (double ok : new double[] { -10_000, 0, 10_000 }) {
+			Table table = presentation().addTable(4);
+			table.setPosX(ok);
+			table.setPosY(ok);
+			assertTrue(TableValidator.validate(table).isEmpty(), "Gültig: " + ok);
+		}
+
+		Table far = presentation().addTable(4);
+		far.setPosX(10_001);
+		far.setPosY(-10_001);
+		ValidationResult result = TableValidator.validate(far);
+		assertEquals(2, result.getIssues().size(), result.getIssues().toString());
+		assertTrue(result.getIssues().stream().allMatch(i -> i.code().equals("TBL-004")));
+		assertTrue(result.getIssues().stream().anyMatch(i -> i.message().startsWith("Position X von Prunksitzung, Tisch 4")));
+	}
+
+	@Test
+	void actualCashMustBeBetweenZeroAndOneMillionEuro() {
+		for (int ok : new int[] { 0, 2500, 100_000_000 }) {
+			Presentation presentation = presentation();
+			presentation.setActualCashAmount(ok);
+			assertTrue(PresentationValidator.validate(presentation).isEmpty(), "Gültig: " + ok + " Cent");
+		}
+
+		Presentation tooMuch = presentation();
+		tooMuch.setActualCashAmount(100_000_001);
+		ValidationIssue high = only(PresentationValidator.validate(tooMuch));
+		assertEquals("PRS-005", high.code());
+		assertEquals("Ist-Betrag von Vorstellung Prunksitzung liegt mit 1.000.000,01 € nicht zwischen 0,00 € und 1.000.000,00 €.", high.message());
+
+		Presentation negative = presentation();
+		negative.setActualCashAmount(-1);
+		assertEquals("PRS-005", only(PresentationValidator.validate(negative)).code());
+	}
+
 	// --- Weitergabe an die Kinder ---
 
 	@Test

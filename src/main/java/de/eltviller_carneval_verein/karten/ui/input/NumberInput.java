@@ -1,11 +1,10 @@
 package de.eltviller_carneval_verein.karten.ui.input;
 
-import java.text.DecimalFormat;
-import java.text.DecimalFormatSymbols;
-import java.util.Locale;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.regex.Pattern;
+
+import de.eltviller_carneval_verein.karten.util.NumberText;
 
 /**
  * Liest und schreibt Zahlen, wie sie an der Abendkasse getippt werden (ohne JavaFX, mit JUnit testbar). Anders als
@@ -25,10 +24,6 @@ public final class NumberInput {
 	/** Ganzzahl oder Dezimalzahl mit genau einem Komma oder Punkt: "12", "12,5", "12.5", "-5", auch ",5" (0,5) und "12," (12). */
 	private static final Pattern PLAIN = Pattern.compile("-?(\\d+([.,]\\d*)?|[.,]\\d+)");
 	private static final Pattern INTEGER = Pattern.compile("-?\\d+");
-
-	// DecimalFormat ist nicht threadsicher und teuer zu bauen; format läuft u. a. bei jeder Mausbewegung im Hallenplan
-	private static final ThreadLocal<DecimalFormat> FORMAT = ThreadLocal
-			.withInitial(() -> new DecimalFormat("0.####", DecimalFormatSymbols.getInstance(Locale.GERMANY)));
 
 	private NumberInput() {
 	}
@@ -69,6 +64,6 @@ public final class NumberInput {
 
 	/** Deutsche Schreibweise ohne überflüssige Nachkommastellen: 1000.0 ergibt "1000", 0.5 ergibt "0,5". */
 	public static String format(double value) {
-		return FORMAT.get().format(value);
+		return NumberText.format(value);
 	}
 }

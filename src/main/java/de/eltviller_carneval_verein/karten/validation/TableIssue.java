@@ -9,7 +9,11 @@ public enum TableIssue implements Issue {
 	/** &1 = Tisch, &2 = mehrfach vergebene Sitznummer. */
 	SEAT_NUMBER_DUPLICATE("TBL-001", Severity.ERROR, "Sitznummer &2 kommt an &1 mehrfach vor."),
 	/** &1 = Tisch (mit der ungültigen Nummer). */
-	NUMBER_TOO_LOW("TBL-002", Severity.ERROR, "Die Tischnummer von &1 muss mindestens 1 sein.");
+	NUMBER_TOO_LOW("TBL-002", Severity.ERROR, "Die Tischnummer von &1 muss mindestens 1 sein."),
+	/** Breite oder Höhe außerhalb von 0 bis 1.000. &1 = "Breite" oder "Höhe", &2 = Tisch, &3 = Wert, &4 = Minimum, &5 = Maximum. */
+	SIZE_OUT_OF_RANGE("TBL-003", Severity.ERROR, RangeCheck.TEMPLATE),
+	/** Position X oder Y außerhalb von -10.000 bis 10.000 (Platzhalter wie bei {@link #SIZE_OUT_OF_RANGE}). */
+	POSITION_OUT_OF_RANGE("TBL-004", Severity.ERROR, RangeCheck.TEMPLATE);
 
 	private final String code;
 	private final Severity severity;

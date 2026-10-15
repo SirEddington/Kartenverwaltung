@@ -43,7 +43,16 @@ public class EventCreateController {
 
 	@FXML
 	public void initialize() {
-		// Tippfehler in den Spinnern: alter Wert bleibt, Meldung in der Fußzeile (die Value-Factories kommen aus der FXML)
+		// Startwerte der Spinner; sie haben keine Grenzen, die Anzahlen im Dialog bekommen keine Regel
+		spnPresCount.setValueFactory(SpinnerInput.integerFactory(3, 1));
+		spnTablePerPres.setValueFactory(SpinnerInput.integerFactory(40, 1));
+		spnDoubleTableWidth.setValueFactory(SpinnerInput.doubleFactory(70.0, 1.0));
+		spnDoubleTableHeight.setValueFactory(SpinnerInput.doubleFactory(300.0, 1.0));
+		spnSeatsPerTable.setValueFactory(SpinnerInput.integerFactory(12, 1));
+		spnDoubleSeatWidth.setValueFactory(SpinnerInput.doubleFactory(30.0, 1.0));
+		spnDoubleSeatHeight.setValueFactory(SpinnerInput.doubleFactory(30.0, 1.0));
+		spnDoublePrice.setValueFactory(SpinnerInput.doubleFactory(17.0, 1.0));
+		// Tippfehler in den Spinnern: alter Wert bleibt, Meldung in der Fußzeile
 		SpinnerInput.installInteger(spnPresCount, "Anzahl Vorstellungen", null);
 		SpinnerInput.installInteger(spnTablePerPres, "Tische je Vorstellung", null);
 		SpinnerInput.install(spnDoubleTableWidth, "Tischbreite", null);

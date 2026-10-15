@@ -24,9 +24,26 @@ public final class HallObjectValidator {
 		return new HallObjectValidator(object, hall).run();
 	}
 
+	// Wertebereiche, bisher die Grenzen der Spinner im Hallenplan
+	static final double MIN_SIZE = 1;
+	static final double MAX_SIZE = 10_000;
+	static final double MIN_TEXT_SIZE = 1;
+	static final double MAX_TEXT_SIZE = 1_000;
+	static final double MAX_POSITION = 100_000;
+
 	private ValidationResult run() {
 		validateName();
+		validateSizeAndPosition();
 		return result;
+	}
+
+	private void validateSizeAndPosition() {
+		String owner = EntityLabels.hallObject(object, hall);
+		RangeCheck.check(result, HallObjectIssue.SIZE_OUT_OF_RANGE, "Breite", owner, object.getWidth(), MIN_SIZE, MAX_SIZE);
+		RangeCheck.check(result, HallObjectIssue.SIZE_OUT_OF_RANGE, "Höhe", owner, object.getHeight(), MIN_SIZE, MAX_SIZE);
+		RangeCheck.check(result, HallObjectIssue.TEXT_SIZE_OUT_OF_RANGE, "Schriftgröße", owner, object.getTextSize(), MIN_TEXT_SIZE, MAX_TEXT_SIZE);
+		RangeCheck.check(result, HallObjectIssue.POSITION_OUT_OF_RANGE, "Position X", owner, object.getPosX(), -MAX_POSITION, MAX_POSITION);
+		RangeCheck.check(result, HallObjectIssue.POSITION_OUT_OF_RANGE, "Position Y", owner, object.getPosY(), -MAX_POSITION, MAX_POSITION);
 	}
 
 	private void validateName() {

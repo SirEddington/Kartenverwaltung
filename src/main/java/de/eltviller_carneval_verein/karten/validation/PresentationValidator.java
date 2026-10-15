@@ -23,13 +23,22 @@ public final class PresentationValidator {
 		return new PresentationValidator(presentation).run();
 	}
 
+	/** Größter erlaubter Ist-Betrag im Kassensturz in Cent: 1.000.000 € (wie bisher die Grenze des Spinners). */
+	static final long MAX_CASH_CENTS = 100_000_000L;
+
 	private ValidationResult run() {
 		validateName();
+		validateActualCash();
 		validateDateAndTime();
 		validateHall();
 		validateTableNumbersAreUnique();
 		validateTables();
 		return result;
+	}
+
+	private void validateActualCash() {
+		RangeCheck.checkCents(result, PresentationIssue.CASH_OUT_OF_RANGE, "Ist-Betrag", EntityLabels.presentation(presentation),
+				presentation.getActualCashAmount(), 0, MAX_CASH_CENTS);
 	}
 
 	private void validateName() {

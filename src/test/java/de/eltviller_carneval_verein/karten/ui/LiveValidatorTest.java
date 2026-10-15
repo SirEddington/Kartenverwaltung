@@ -72,7 +72,8 @@ class LiveValidatorTest {
 		ChangeTracker<Hall> hallTracker = hallTracker();
 		Hall hall = new Hall();
 		hall.setName("Festhalle");
-		hall.addHallObject("Bühne");
+		hall.addHallObject("Bühne").setWidth(100);
+		hall.getHallObjects().get(0).setHeight(60);
 		hallTracker.track(hall);
 
 		hall.getHallObjects().get(0).setName(" ");

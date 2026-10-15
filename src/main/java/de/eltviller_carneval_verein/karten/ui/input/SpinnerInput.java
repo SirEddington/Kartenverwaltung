@@ -19,11 +19,14 @@ import javafx.util.StringConverter;
  * {@code null} und begrenzt zu große Werte still.
  *
  * <p>
- * Mit {@code install} liest der Spinner Dezimalzahlen mit Komma und Punkt ({@link NumberInput}). Ein leeres Feld, ein
- * unlesbarer Text (INP-001) und ein Wert außerhalb von Minimum und Maximum der Value-Factory (INP-004) werden
- * <strong>nicht übernommen</strong>: Der bisherige Wert bleibt, der Editor-Text wird auf ihn zurückgesetzt, die
- * Fußzeile nennt Code und Grund, und der Spinner wird kurz rot ({@link InputFeedback}). Die Pfeiltasten begrenzen
- * weiter am Rand ohne Meldung.
+ * Mit {@code install} liest der Spinner Dezimalzahlen mit Komma und Punkt ({@link NumberInput}). Ein leeres Feld oder ein
+ * unlesbarer Text (INP-001) wird <strong>nicht übernommen</strong>: Der bisherige Wert bleibt, der Editor-Text wird auf
+ * ihn zurückgesetzt, die Fußzeile nennt Code und Grund, und der Spinner wird kurz rot ({@link InputFeedback}).
+ *
+ * <p>
+ * Der Spinner kennt <strong>keinen Wertebereich</strong>: {@code install} hebt Minimum und Maximum der Value-Factory
+ * auf, und die Pfeiltasten haben keinen Anschlag. Zu kleine oder zu große Werte meldet der Validator (z. B. HLL-002,
+ * HOB-002, TBL-003, SEA-003) live und beim Speichern.
  *
  * <p>
  * Aufruf nach dem Setzen der Value-Factory. Nur im JavaFX-Thread.
@@ -41,12 +44,25 @@ public final class SpinnerInput {
 	private SpinnerInput() {
 	}
 
+	/** Value-Factory ohne Wertebereich für Dezimalzahlen, Startwert {@code initial}, Pfeiltasten um {@code step}. */
+	public static SpinnerValueFactory.DoubleSpinnerValueFactory doubleFactory(double initial, double step) {
+		return new SpinnerValueFactory.DoubleSpinnerValueFactory(-Double.MAX_VALUE, Double.MAX_VALUE, initial, step);
+	}
+
+	/** Value-Factory ohne Wertebereich für ganze Zahlen, Startwert {@code initial}, Pfeiltasten um {@code step}. */
+	public static SpinnerValueFactory.IntegerSpinnerValueFactory integerFactory(int initial, int step) {
+		return new SpinnerValueFactory.IntegerSpinnerValueFactory(Integer.MIN_VALUE, Integer.MAX_VALUE, initial, step);
+	}
+
 	/** Für einen {@code Spinner<Double>} mit {@link SpinnerValueFactory.DoubleSpinnerValueFactory}. */
 	public static void install(Spinner<Double> spinner, String fieldName, Supplier<String> rowLabel) {
 		if (!(spinner.getValueFactory() instanceof SpinnerValueFactory.DoubleSpinnerValueFactory factory)) {
 			throw new IllegalArgumentException("Der Spinner braucht eine DoubleSpinnerValueFactory (zuerst setValueFactory aufrufen).");
 		}
-		install(spinner, factory, factory.getMin(), factory.getMax(), text -> {
+		// Wertebereiche prüft der Validator, nicht der Spinner: Die Grenzen der Factory fallen weg
+		factory.setMin(-Double.MAX_VALUE);
+		factory.setMax(Double.MAX_VALUE);
+		install(spinner, factory, text -> {
 			OptionalDouble parsed = NumberInput.parseDecimal(text);
 			return parsed.isPresent() ? Optional.of(parsed.getAsDouble()) : Optional.empty();
 		}, NumberInput::format, fieldName, rowLabel);
@@ -57,7 +73,9 @@ public final class SpinnerInput {
 		if (!(spinner.getValueFactory() instanceof SpinnerValueFactory.IntegerSpinnerValueFactory factory)) {
 			throw new IllegalArgumentException("Der Spinner braucht eine IntegerSpinnerValueFactory (zuerst setValueFactory aufrufen).");
 		}
-		install(spinner, factory, factory.getMin(), factory.getMax(), text -> {
+		factory.setMin(Integer.MIN_VALUE);
+		factory.setMax(Integer.MAX_VALUE);
+		install(spinner, factory, text -> {
 			OptionalInt parsed = NumberInput.parseInteger(text);
 			return parsed.isPresent() ? Optional.of(parsed.getAsInt()) : Optional.empty();
 		}, String::valueOf, fieldName, rowLabel);
@@ -111,8 +129,8 @@ public final class SpinnerInput {
 		return blockSaveIfInputRejected(spinners);
 	}
 
-	private static <T extends Number> void install(Spinner<T> spinner, SpinnerValueFactory<T> factory, double min, double max,
-			Function<String, Optional<T>> reader, Function<T, String> formatter, String fieldName, Supplier<String> rowLabel) {
+	private static <T extends Number> void install(Spinner<T> spinner, SpinnerValueFactory<T> factory, Function<String, Optional<T>> reader,
+			Function<T, String> formatter, String fieldName, Supplier<String> rowLabel) {
 		factory.setConverter(new StringConverter<T>() {
 			@Override
 			public String toString(T value) {
@@ -126,11 +144,6 @@ public final class SpinnerInput {
 				Optional<T> parsed = reader.apply(text);
 				if (parsed.isEmpty()) {
 					reject(spinner, InputIssue.NOT_A_NUMBER.toIssue(label, typed));
-					return factory.getValue();
-				}
-				double number = parsed.get().doubleValue();
-				if (number < min || number > max) {
-					reject(spinner, InputIssue.OUT_OF_RANGE.toIssue(label, typed, NumberInput.format(min), NumberInput.format(max)));
 					return factory.getValue();
 				}
 				// Nur eine neue gültige Eingabe löscht den Merker, nicht das erneute Lesen des zurückgesetzten Textes

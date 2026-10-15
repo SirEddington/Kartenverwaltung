@@ -21,10 +21,20 @@ public final class HallValidator {
 		return new HallValidator(hall).run();
 	}
 
+	/** Größte erlaubte Breite und Höhe der Halle (wie bisher die Grenze der Spinner); die kleinste ist 0 ("noch nicht festgelegt"). */
+	static final double MAX_SIZE = 100_000;
+
 	private ValidationResult run() {
 		validateName();
+		validateSize();
 		validateHallObjects();
 		return result;
+	}
+
+	private void validateSize() {
+		String owner = EntityLabels.hall(hall);
+		RangeCheck.check(result, HallIssue.SIZE_OUT_OF_RANGE, "Breite", owner, hall.getHallWidth(), 0, MAX_SIZE);
+		RangeCheck.check(result, HallIssue.SIZE_OUT_OF_RANGE, "Höhe", owner, hall.getHallHeight(), 0, MAX_SIZE);
 	}
 
 	private void validateName() {

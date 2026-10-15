@@ -14,7 +14,6 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextField;
 
 /**
@@ -51,11 +50,11 @@ public class HallEditController {
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.halls());
 
-		setupSpinner(spnHallWidth, "Hallenbreite", 100000.0, 10, value -> {
+		setupSpinner(spnHallWidth, "Hallenbreite", 10, value -> {
 			hall.setHallWidth(value);
 			hallPlanController.refresh();
 		});
-		setupSpinner(spnHallHeight, "Hallenhöhe", 100000.0, 10, value -> {
+		setupSpinner(spnHallHeight, "Hallenhöhe", 10, value -> {
 			hall.setHallHeight(value);
 			hallPlanController.refresh();
 		});
@@ -73,8 +72,8 @@ public class HallEditController {
 		});
 	}
 
-	private void setupSpinner(Spinner<Double> spinner, String fieldName, double max, double step, Consumer<Double> onChange) {
-		spinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, max, 0.0, step));
+	private void setupSpinner(Spinner<Double> spinner, String fieldName, double step, Consumer<Double> onChange) {
+		spinner.setValueFactory(SpinnerInput.doubleFactory(0.0, step));
 		spinner.setEditable(true);
 		SpinnerInput.install(spinner, fieldName, () -> hall == null ? null : EntityLabels.hall(hall));
 		// Getippte Werte beim Verlassen des Feldes übernimmt der Spinner selbst (ein zweites Bestätigen hier brächte nichts)

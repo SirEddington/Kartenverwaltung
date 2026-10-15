@@ -5,8 +5,10 @@ import java.util.Optional;
 
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.ui.input.InputFeedback;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.InvalidationListener;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -151,7 +153,10 @@ public final class SeatDetailPopup {
 		Spinner<Double> spinner = new Spinner<>();
 		spinner.setValueFactory(factory);
 		spinner.setEditable(true);
-		// Nicht übernommene Eingaben (unlesbar, außerhalb von 0 bis 1.000 €): Meldung in der Fußzeile, Editor-Text zurück
+		// Nicht übernommene Eingaben (unlesbar): Meldung in der Fußzeile, Editor-Text zurück. Die Meldung nennt den Sitz,
+		// bei mehreren die Anzahl ("Preis von 12 Sitzen")
+		List<Seat> seats = edit.seats();
+		factory.setFieldLabel(InputFeedback.label("Preis", seats.size() == 1 ? EntityLabels.seat(seats.get(0)) : seats.size() + " Sitzen"));
 		factory.setRejectionHandler(issue -> SpinnerInput.reject(spinner, issue));
 		spinner.setPrefWidth(115); // breit genug für "verschieden"
 		spinner.setDisable(!editMode);
