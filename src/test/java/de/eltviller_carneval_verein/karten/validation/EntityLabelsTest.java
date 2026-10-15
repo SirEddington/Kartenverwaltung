@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 
@@ -25,6 +26,25 @@ class EntityLabelsTest {
 		seat.setSeatNumber(7);
 
 		assertEquals("Sitz 7", EntityLabels.seat(seat));
+	}
+
+	@Test
+	void hallLabelContainsTheNameOrSaysItIsMissing() {
+		Hall hall = new Hall();
+		hall.setName("Festhalle");
+		assertEquals("Halle Festhalle", EntityLabels.hall(hall));
+
+		hall.setName("  ");
+		assertEquals("Halle ohne Namen", EntityLabels.hall(hall));
+		assertEquals("Halle ohne Namen", EntityLabels.hall(null));
+	}
+
+	@Test
+	void nameOrPlaceholderReplacesEmptyNames() {
+		assertEquals("(ohne Name)", EntityLabels.nameOrPlaceholder(null));
+		assertEquals("(ohne Name)", EntityLabels.nameOrPlaceholder(""));
+		assertEquals("(ohne Name)", EntityLabels.nameOrPlaceholder("  "));
+		assertEquals("Bar", EntityLabels.nameOrPlaceholder("Bar"));
 	}
 
 	@Test

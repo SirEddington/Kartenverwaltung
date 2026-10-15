@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.validation;
 
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
@@ -12,6 +13,20 @@ import de.eltviller_carneval_verein.karten.model.Table;
 public final class EntityLabels {
 
 	private EntityLabels() {
+	}
+
+	/** Platzhalter für einen leeren Namen in Anzeigen (Listen, Auswahlfelder). */
+	public static final String NAME_PLACEHOLDER = "(ohne Name)";
+
+	/** Der Name, oder {@value #NAME_PLACEHOLDER}, wenn er {@code null} oder leer ist. */
+	public static String nameOrPlaceholder(String name) {
+		return (name == null || name.isBlank()) ? NAME_PLACEHOLDER : name;
+	}
+
+	/** z. B. "Halle Festhalle" (ohne Namen oder ohne Halle: "Halle ohne Namen"). */
+	public static String hall(Hall hall) {
+		String name = hall == null ? null : hall.getName();
+		return (name == null || name.isBlank()) ? "Halle ohne Namen" : "Halle " + name;
 	}
 
 	/** z. B. "Vorstellung Prunksitzung" (ohne Namen: "Vorstellung ohne Namen"). */
