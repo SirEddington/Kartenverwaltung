@@ -407,6 +407,8 @@ public class EventEditController {
 
 			contextMenu.setOnShowing(e -> {
 				Object data = tableRow.getItem();
+				// Im Anzeigemodus bleiben die Einträge sichtbar, sind aber nicht ausführbar
+				contextMenu.getItems().forEach(item -> item.setDisable(!editMode));
 				addItem.setVisible(true);
 				copyItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
 				separator.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);

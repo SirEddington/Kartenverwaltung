@@ -111,19 +111,20 @@ public class TicketTableController implements ContentController, SalesStateAware
 		MenuItem sellItem = new MenuItem();
 		selectionMenu = new ContextMenu(sellItem);
 		sellItem.setOnAction(event -> sellSelection());
-		// Das Menü zum Sammelverkauf gehört zu einer Zeile (nicht zur leeren Fläche) und gibt es nur im Bearbeitungsmodus
-		// und ohne offenen Dialog (er würde sonst samt Eingaben ersetzt). Auf einer nicht gewählten Zeile gilt das Menü nur
-		// für diese Zeile, auf einer gewählten für die ganze Auswahl, wie im Explorer.
+		// Das Menü zum Sammelverkauf gehört zu einer Zeile (nicht zur leeren Fläche) und gibt es nicht bei offenem Dialog
+		// (er würde sonst samt Eingaben ersetzt). Im Anzeigemodus ist der Eintrag sichtbar, aber nicht ausführbar. Auf einer
+		// nicht gewählten Zeile gilt das Menü nur für diese Zeile, auf einer gewählten für die ganze Auswahl, wie im Explorer.
 		seatTable.setRowFactory(table -> {
 			TableRow<SeatDTO> row = new TableRow<>();
 			row.setOnContextMenuRequested(event -> {
 				event.consume();
-				if (!editMode || row.isEmpty() || isDialogOpen()) {
+				if (row.isEmpty() || isDialogOpen()) {
 					return;
 				}
 				if (!row.isSelected()) {
 					seatTable.getSelectionModel().clearAndSelect(row.getIndex());
 				}
+				sellItem.setDisable(!editMode);
 				sellItem.setText(SeatSelectionEditor.menuText(seatTable.getSelectionModel().getSelectedItems().size()));
 				selectionMenu.show(row, event.getScreenX(), event.getScreenY());
 			});
