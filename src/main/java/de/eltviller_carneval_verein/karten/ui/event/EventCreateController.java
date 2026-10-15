@@ -9,6 +9,7 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
@@ -42,6 +43,16 @@ public class EventCreateController {
 
 	@FXML
 	public void initialize() {
+		// Tippfehler in den Spinnern: alter Wert bleibt, Meldung in der Fußzeile (die Value-Factories kommen aus der FXML)
+		SpinnerInput.installInteger(spnPresCount, "Anzahl Vorstellungen", null);
+		SpinnerInput.installInteger(spnTablePerPres, "Tische je Vorstellung", null);
+		SpinnerInput.install(spnDoubleTableWidth, "Tischbreite", null);
+		SpinnerInput.install(spnDoubleTableHeight, "Tischhöhe", null);
+		SpinnerInput.installInteger(spnSeatsPerTable, "Sitze je Tisch", null);
+		SpinnerInput.install(spnDoubleSeatWidth, "Sitzbreite", null);
+		SpinnerInput.install(spnDoubleSeatHeight, "Sitzhöhe", null);
+		SpinnerInput.install(spnDoublePrice, "Preis", null);
+
 		// Optional: null = keine Halle (kann später je Vorstellung in den Event-Details zugeordnet werden)
 		cmbHall.getItems().add(null);
 		cmbHall.getItems().addAll(JsonHallRepository.getInstance().loadHalls());

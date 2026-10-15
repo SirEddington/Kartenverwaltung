@@ -1,0 +1,104 @@
+package de.eltviller_carneval_verein.karten.ui.input;
+
+import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.OptionalInt;
+import java.util.function.Function;
+import java.util.function.Supplier;
+
+import de.eltviller_carneval_verein.karten.validation.ValidationIssue;
+import javafx.application.Platform;
+import javafx.scene.control.Spinner;
+import javafx.scene.control.SpinnerValueFactory;
+import javafx.util.StringConverter;
+
+/**
+ * Macht einen editierbaren Spinner tolerant gegenüber Tippfehlern, überall gleich. Der Standard-Konverter von JavaFX
+ * wirft bei "abc" eine Exception, macht aus "12.5" still 12, aus "1e9" still das Minimum, aus einem leeren Feld
+ * {@code null} und begrenzt zu große Werte still.
+ *
+ * <p>
+ * Mit {@code install} liest der Spinner Dezimalzahlen mit Komma und Punkt ({@link NumberInput}). Ein leeres Feld, ein
+ * unlesbarer Text (INP-001) und ein Wert außerhalb von Minimum und Maximum der Value-Factory (INP-004) werden
+ * <strong>nicht übernommen</strong>: Der bisherige Wert bleibt, der Editor-Text wird auf ihn zurückgesetzt, die
+ * Fußzeile nennt Code und Grund, und der Spinner wird kurz rot ({@link InputFeedback}). Die Pfeiltasten begrenzen
+ * weiter am Rand ohne Meldung.
+ *
+ * <p>
+ * Aufruf nach dem Setzen der Value-Factory. Nur im JavaFX-Thread.
+ */
+public final class SpinnerInput {
+
+	private SpinnerInput() {
+	}
+
+	/** Für einen {@code Spinner<Double>} mit {@link SpinnerValueFactory.DoubleSpinnerValueFactory}. */
+	public static void install(Spinner<Double> spinner, String fieldName, Supplier<String> rowLabel) {
+		if (!(spinner.getValueFactory() instanceof SpinnerValueFactory.DoubleSpinnerValueFactory factory)) {
+			throw new IllegalArgumentException("Der Spinner braucht eine DoubleSpinnerValueFactory (zuerst setValueFactory aufrufen).");
+		}
+		install(spinner, factory, factory.getMin(), factory.getMax(), text -> {
+			OptionalDouble parsed = NumberInput.parseDecimal(text);
+			return parsed.isPresent() ? Optional.of(parsed.getAsDouble()) : Optional.empty();
+		}, NumberInput::format, fieldName, rowLabel);
+	}
+
+	/** Für einen {@code Spinner<Integer>} mit {@link SpinnerValueFactory.IntegerSpinnerValueFactory}. */
+	public static void installInteger(Spinner<Integer> spinner, String fieldName, Supplier<String> rowLabel) {
+		if (!(spinner.getValueFactory() instanceof SpinnerValueFactory.IntegerSpinnerValueFactory factory)) {
+			throw new IllegalArgumentException("Der Spinner braucht eine IntegerSpinnerValueFactory (zuerst setValueFactory aufrufen).");
+		}
+		install(spinner, factory, factory.getMin(), factory.getMax(), text -> {
+			OptionalInt parsed = NumberInput.parseInteger(text);
+			return parsed.isPresent() ? Optional.of(parsed.getAsInt()) : Optional.empty();
+		}, String::valueOf, fieldName, rowLabel);
+	}
+
+	/**
+	 * Meldet eine nicht übernommene Eingabe (Fußzeile, rote Markierung) und setzt den Editor-Text auf den aktuellen
+	 * Wert zurück. Das Zurücksetzen ist nötig, weil der Spinner den Text nur bei geändertem Wert selbst
+	 * aktualisiert: Bleibt der Wert gleich, stünde sonst weiter "abc" im Feld.
+	 */
+	public static void reject(Spinner<?> spinner, ValidationIssue issue) {
+		InputFeedback.report(issue, spinner);
+		Platform.runLater(() -> restoreText(spinner));
+	}
+
+	private static <T extends Number> void install(Spinner<T> spinner, SpinnerValueFactory<T> factory, double min, double max,
+			Function<String, Optional<T>> reader, Function<T, String> formatter, String fieldName, Supplier<String> rowLabel) {
+		factory.setConverter(new StringConverter<T>() {
+			@Override
+			public String toString(T value) {
+				return value == null ? "" : formatter.apply(value);
+			}
+
+			@Override
+			public T fromString(String text) {
+				String label = InputFeedback.label(fieldName, rowLabel == null ? null : rowLabel.get());
+				String typed = InputFeedback.displayText(text == null ? null : text.trim());
+				Optional<T> parsed = reader.apply(text);
+				if (parsed.isEmpty()) {
+					reject(spinner, InputIssue.NOT_A_NUMBER.toIssue(label, typed));
+					return factory.getValue();
+				}
+				double number = parsed.get().doubleValue();
+				if (number < min || number > max) {
+					reject(spinner, InputIssue.OUT_OF_RANGE.toIssue(label, typed, NumberInput.format(min), NumberInput.format(max)));
+					return factory.getValue();
+				}
+				return parsed.get();
+			}
+		});
+		// Der Spinner übernimmt den Text nicht von selbst, wenn nur der Converter getauscht wird
+		restoreText(spinner);
+	}
+
+	private static <T> void restoreText(Spinner<T> spinner) {
+		SpinnerValueFactory<T> factory = spinner.getValueFactory();
+		if (factory == null) {
+			return;
+		}
+		StringConverter<T> converter = factory.getConverter();
+		spinner.getEditor().setText(converter == null ? "" : converter.toString(factory.getValue()));
+	}
+}

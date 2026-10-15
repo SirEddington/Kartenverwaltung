@@ -9,6 +9,8 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.Spinner;
@@ -49,11 +51,11 @@ public class HallEditController {
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.halls());
 
-		setupSpinner(spnHallWidth, 100000.0, 10, value -> {
+		setupSpinner(spnHallWidth, "Hallenbreite", 100000.0, 10, value -> {
 			hall.setHallWidth(value);
 			hallPlanController.refresh();
 		});
-		setupSpinner(spnHallHeight, 100000.0, 10, value -> {
+		setupSpinner(spnHallHeight, "Hallenhöhe", 100000.0, 10, value -> {
 			hall.setHallHeight(value);
 			hallPlanController.refresh();
 		});
@@ -71,9 +73,10 @@ public class HallEditController {
 		});
 	}
 
-	private void setupSpinner(Spinner<Double> spinner, double max, double step, Consumer<Double> onChange) {
+	private void setupSpinner(Spinner<Double> spinner, String fieldName, double max, double step, Consumer<Double> onChange) {
 		spinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, max, 0.0, step));
 		spinner.setEditable(true);
+		SpinnerInput.install(spinner, fieldName, () -> hall == null ? null : EntityLabels.hall(hall));
 		// Getippte Werte beim Verlassen des Feldes übernehmen
 		spinner.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
 			if (!isFocused) {

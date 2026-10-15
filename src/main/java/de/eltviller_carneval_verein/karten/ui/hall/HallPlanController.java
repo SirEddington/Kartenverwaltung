@@ -3,12 +3,15 @@ package de.eltviller_carneval_verein.karten.ui.hall;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.model.TextAlignV;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
@@ -142,6 +145,14 @@ public class HallPlanController {
 		}
 		posXSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-100000.0, 100000.0, 0.0, 5));
 		posYSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-100000.0, 100000.0, 0.0, 5));
+		// Tippfehler: alter Wert bleibt, Meldung in der Fußzeile; erst nach dem Setzen der Value-Factories
+		Supplier<String> selectedObjectLabel = () -> selectedObject == null ? null : EntityLabels.nameOrPlaceholder(selectedObject.getName());
+		SpinnerInput.install(posXSpinner, "Position X", selectedObjectLabel);
+		SpinnerInput.install(posYSpinner, "Position Y", selectedObjectLabel);
+		SpinnerInput.install(widthSpinner, "Breite", selectedObjectLabel);
+		SpinnerInput.install(heightSpinner, "Höhe", selectedObjectLabel);
+		SpinnerInput.install(textSizeSpinner, "Schriftgröße", selectedObjectLabel);
+		SpinnerInput.install(textRotationSpinner, "Drehung", selectedObjectLabel);
 		shapeCombo.getItems().setAll(Shape.values());
 
 		nameField.setOnAction(e -> commitName());

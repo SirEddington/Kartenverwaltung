@@ -24,6 +24,7 @@ import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -295,6 +296,7 @@ public class EventEditController {
 		// --- Sitzdetails ---
 		paymentComboBox.getItems().setAll(PaymentStatus.values());
 		spnDoublePrice.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 100.0, 0.0, 0.5));
+		SpinnerInput.install(spnDoublePrice, "Preis", () -> currentSeat == null ? null : EntityLabels.seat(currentSeat));
 		StringConverter<PaymentStatus> converter = new StringConverter<>() {
 			@Override
 			public String toString(PaymentStatus status) {

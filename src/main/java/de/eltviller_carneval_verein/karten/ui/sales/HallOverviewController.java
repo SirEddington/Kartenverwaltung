@@ -18,6 +18,8 @@ import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.HallObjectText;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.geometry.BoundingBox;
@@ -795,6 +797,7 @@ public class HallOverviewController implements ContentController {
 		Spinner<Double> widthSpinner = new Spinner<>();
 		widthSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(10.0, 1000.0, table.getWidth(), 5));
 		widthSpinner.setEditable(true);
+		SpinnerInput.install(widthSpinner, "Breite", () -> EntityLabels.table(table));
 		widthSpinner.setPrefWidth(100);
 		widthSpinner.setDisable(!editMode);
 		grid.addRow(row++, new Label("Breite:"), widthSpinner);
@@ -802,6 +805,7 @@ public class HallOverviewController implements ContentController {
 		Spinner<Double> heightSpinner = new Spinner<>();
 		heightSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(10.0, 1000.0, table.getHeight(), 5));
 		heightSpinner.setEditable(true);
+		SpinnerInput.install(heightSpinner, "Höhe", () -> EntityLabels.table(table));
 		heightSpinner.setPrefWidth(100);
 		heightSpinner.setDisable(!editMode);
 		grid.addRow(row++, new Label("Höhe:"), heightSpinner);
@@ -809,6 +813,7 @@ public class HallOverviewController implements ContentController {
 		Spinner<Double> posXSpinner = new Spinner<>();
 		posXSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-10000.0, 10000.0, table.getPosX(), 5));
 		posXSpinner.setEditable(true);
+		SpinnerInput.install(posXSpinner, "Position X", () -> EntityLabels.table(table));
 		posXSpinner.setPrefWidth(100);
 		posXSpinner.setDisable(!editMode);
 		grid.addRow(row++, new Label("PosX:"), posXSpinner);
@@ -816,6 +821,7 @@ public class HallOverviewController implements ContentController {
 		Spinner<Double> posYSpinner = new Spinner<>();
 		posYSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-10000.0, 10000.0, table.getPosY(), 5));
 		posYSpinner.setEditable(true);
+		SpinnerInput.install(posYSpinner, "Position Y", () -> EntityLabels.table(table));
 		posYSpinner.setPrefWidth(100);
 		posYSpinner.setDisable(!editMode);
 		grid.addRow(row++, new Label("PosY:"), posYSpinner);

@@ -25,6 +25,7 @@ import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
@@ -85,6 +86,7 @@ public class CashReconciliationController implements ContentController, Exportab
 	public void initialize() {
 		actualCashSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 1_000_000.0, 0.0, 5));
 		actualCashSpinner.setEditable(true);
+		SpinnerInput.install(actualCashSpinner, "Ist-Betrag", () -> selectedPres == null ? null : EntityLabels.presentation(selectedPres));
 		actualCashSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
 			if (updatingFromModel || selectedPres == null || newVal == null) {
 				return;

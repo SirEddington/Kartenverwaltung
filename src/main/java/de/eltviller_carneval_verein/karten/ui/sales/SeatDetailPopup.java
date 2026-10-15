@@ -5,6 +5,7 @@ import java.util.Optional;
 
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.beans.InvalidationListener;
 import javafx.geometry.Pos;
@@ -150,13 +151,15 @@ public final class SeatDetailPopup {
 		Spinner<Double> spinner = new Spinner<>();
 		spinner.setValueFactory(factory);
 		spinner.setEditable(true);
+		// Nicht übernommene Eingaben (unlesbar, außerhalb von 0 bis 1.000 €): Meldung in der Fußzeile, Editor-Text zurück
+		factory.setRejectionHandler(issue -> SpinnerInput.reject(spinner, issue));
 		spinner.setPrefWidth(115); // breit genug für "verschieden"
 		spinner.setDisable(!editMode);
 		spinner.getEditor().setPromptText(field.common().isPresent() ? "" : MIXED);
 		// Auf den Text hören (nicht auf den bestätigten Wert): So stimmen Gesamtpreis und "Anwenden" auch mit
-		// noch nicht bestätigter Eingabe
+		// noch nicht bestätigter Eingabe. Still lesen: Halb getippte Preise sollen keine Meldung auslösen.
 		spinner.getEditor().textProperty().addListener((obs, oldVal, newVal) -> {
-			Double euros = factory.getConverter().fromString(newVal);
+			Double euros = factory.parseQuietly(newVal);
 			field.change(euros == null ? null : (int) Math.round(euros * 100));
 			refreshTotal();
 		});
