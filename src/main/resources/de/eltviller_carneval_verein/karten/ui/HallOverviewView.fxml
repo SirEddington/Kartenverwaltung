@@ -1,18 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.scene.control.Label?>
-<?import javafx.scene.layout.Pane?>
-<?import javafx.scene.layout.StackPane?>
+<?import de.eltviller_carneval_verein.karten.ui.sales.HallPlanPane?>
 
-<!-- Zoom (Mausrad) & Verschieben (Ziehen mit gedrückter Maustaste) werden im Controller behandelt -->
-<StackPane fx:id="viewportPane" xmlns="http://javafx.com/javafx/17"
+<!-- Zoom (Mausrad) & Verschieben (Ziehen mit der rechten Maustaste) übernimmt die HallPlanPane -->
+<HallPlanPane fx:id="viewportPane" xmlns="http://javafx.com/javafx/17"
            xmlns:fx="http://javafx.com/fxml/1"
            fx:controller="de.eltviller_carneval_verein.karten.ui.sales.HallOverviewController"
            style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5; -fx-background-color: transparent;">
 
-    <!-- Mittlerer Bereich: Saalplan-Zeichenfläche -->
-    <Pane fx:id="hallPane" prefWidth="1200.0" prefHeight="800.0" />
-
     <!-- Hinweis, solange keine einzelne Vorstellung gewählt ist (Text und Sichtbarkeit setzt der Controller) -->
     <Label fx:id="lblHint" styleClass="subheader-label" mouseTransparent="true" />
-</StackPane>
+</HallPlanPane>

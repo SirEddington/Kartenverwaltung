@@ -24,6 +24,11 @@ final class HallViewport {
 			return new View(1, 0, 0);
 		}
 		double scale = margin * Math.min(viewWidth / target.getWidth(), viewHeight / target.getHeight());
+		return centered(viewWidth, viewHeight, target, scale);
+	}
+
+	/** Die Verschiebung, die bei gegebenem Zoom die Mitte von {@code target} auf die Flächenmitte legt. */
+	static View centered(double viewWidth, double viewHeight, Rectangle2D target, double scale) {
 		double pivotX = viewWidth / 2.0;
 		double pivotY = viewHeight / 2.0;
 		double centerX = target.getMinX() + target.getWidth() / 2.0;
