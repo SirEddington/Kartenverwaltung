@@ -35,6 +35,8 @@ public class TicketShellController {
 	private static final String ALL_PRESENTATIONS = "Alle Vorstellungen";
 
 	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
+	// Gemeinsamer Zustand mit dem Kundenfenster: Die Shell und ihre Inhalte schreiben ihn, das Kundenfenster liest ihn
+	private final SalesViewState state = new SalesViewState();
 
 	@FXML
 	private ComboBox<Event> eventComboBox;
@@ -90,6 +92,8 @@ public class TicketShellController {
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			currentEvent = selectedEvent;
 			currentPresentation = null;
+			state.eventProperty().set(currentEvent);
+			state.presentationProperty().set(null);
 			if (currentEvent != null) {
 				ChangeTracker.events().ensureTracked(currentEvent);
 			}
@@ -116,6 +120,7 @@ public class TicketShellController {
 				return;
 			}
 			currentPresentation = selectedPresentation;
+			state.presentationProperty().set(currentPresentation);
 			if (activeContentController != null) {
 				activeContentController.setPresentation(currentPresentation);
 			}
@@ -175,6 +180,12 @@ public class TicketShellController {
 			// Inhalt im mittleren Bereich austauschen; ein offener Dialog der alten Ansicht würde sonst stehen bleiben
 			PopupWindows.hideOwnedBy(contentArea.getScene() == null ? null : contentArea.getScene().getWindow());
 			contentArea.getChildren().setAll(view);
+
+			// Auswahl und Ausschnitt der alten Ansicht gelten nicht mehr; der neue Inhalt meldet seine eigenen
+			state.resetView();
+			if (activeContentController instanceof SalesStateAware aware) {
+				aware.setSalesState(state);
+			}
 
 			// Aktuelles Event und Vorstellung direkt an den neuen Inhalt übergeben
 			activeContentController.setEvent(currentEvent);

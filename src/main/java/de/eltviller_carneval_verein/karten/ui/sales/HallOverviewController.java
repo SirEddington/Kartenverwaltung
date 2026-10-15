@@ -47,7 +47,7 @@ import javafx.scene.shape.Rectangle;
 import javafx.stage.Popup;
 import javafx.stage.Window;
 
-public class HallOverviewController implements ContentController {
+public class HallOverviewController implements ContentController, SalesStateAware {
 
 	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
 	private Event selectedEvent;
@@ -62,7 +62,8 @@ public class HallOverviewController implements ContentController {
 	private static final String SEAT_STYLE_CLASS = "hall-seat";
 	private static final String TABLE_STYLE_CLASS = "hall-table";
 	private static final Color SELECTED_SEAT_STROKE = HallPlanPane.SELECTED_SEAT_STROKE;
-	private final Set<Seat> selectedSeats = new LinkedHashSet<>();
+	// Mit gesetztem Verkaufszustand ist es dessen Auswahl (so sieht das Kundenfenster sie)
+	private Set<Seat> selectedSeats = new LinkedHashSet<>();
 	private final Map<Node, Seat> seatNodes = new HashMap<>();
 	private final Rectangle rubberBand = new Rectangle();
 	private ContextMenu selectionMenu;
@@ -624,6 +625,14 @@ public class HallOverviewController implements ContentController {
 		cancelPlacingTable();
 		selectedSeats.clear(); // Die Mehrfachauswahl gibt es nur im Bearbeitungsmodus
 		renderHall();
+	}
+
+	/** Die Auswahl im Saalplan und der sichtbare Ausschnitt gehen in den gemeinsamen Verkaufszustand. */
+	@Override
+	public void setSalesState(SalesViewState state) {
+		selectedSeats = state.selectedSeats();
+		viewportPane.visibleHallRectProperty().addListener((obs, oldRect, newRect) -> state.visibleHallRectProperty().set(newRect));
+		state.visibleHallRectProperty().set(viewportPane.visibleHallRectProperty().get());
 	}
 
 	@Override
