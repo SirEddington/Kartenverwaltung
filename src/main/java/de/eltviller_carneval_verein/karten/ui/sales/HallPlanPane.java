@@ -5,6 +5,7 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.HallObjectText;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
@@ -36,7 +37,7 @@ import javafx.scene.text.Text;
 public class HallPlanPane extends StackPane {
 
 	/** Rand für ausgewählte Sitze (Saalübersicht und Kundenfenster). */
-	public static final Color SELECTED_SEAT_STROKE = Color.web("#2C2F88");
+	public static final Color SELECTED_SEAT_STROKE = UiColors.ECV_BLAU.getFxColor();
 
 	private static final double MIN_SCALE = 0.05;
 	private static final double MAX_SCALE = 4.0;
@@ -51,14 +52,10 @@ public class HallPlanPane extends StackPane {
 		}
 	}
 
-	private static final Decorator NO_DECORATION = new Decorator() {
-	};
-
 	private final Pane contentPane = new Pane();
 	private final ReadOnlyObjectWrapper<Rectangle2D> visibleHallRect = new ReadOnlyObjectWrapper<>();
 
 	private boolean interactive = true;
-	private boolean refitOnResize = false;
 	private Rectangle2D fitTarget;
 	private double fitMargin = 1.0;
 	private boolean fitPending = false;
@@ -118,11 +115,6 @@ public class HallPlanPane extends StackPane {
 		applyFitIfPossible();
 	}
 
-	/** Bei {@code true} gilt die letzte {@link #fit}-Vorgabe nach jeder Größenänderung erneut (Kundenfenster). */
-	public void setRefitOnResize(boolean refitOnResize) {
-		this.refitOnResize = refitOnResize;
-	}
-
 	/** Grenzen der gezeichneten Inhalte in Hallenkoordinaten, {@code null} wenn nichts gezeichnet ist. */
 	public Rectangle2D contentBounds() {
 		double minX = Double.POSITIVE_INFINITY;
@@ -155,8 +147,6 @@ public class HallPlanPane extends StackPane {
 		if (presentation == null) {
 			return;
 		}
-		Decorator deco = decorator == null ? NO_DECORATION : decorator;
-
 		HallLayout.apply(presentation, hall);
 
 		if (hall != null) {
@@ -175,7 +165,7 @@ public class HallPlanPane extends StackPane {
 		}
 
 		for (Table table : presentation.getTables()) {
-			drawTable(table, deco);
+			drawTable(table, decorator);
 		}
 	}
 
@@ -246,7 +236,7 @@ public class HallPlanPane extends StackPane {
 	}
 
 	private void sizeChanged() {
-		if (fitPending || refitOnResize) {
+		if (fitPending) {
 			applyFitIfPossible();
 		}
 		updateVisibleRect();

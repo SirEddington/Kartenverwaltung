@@ -13,6 +13,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.application.Platform;
+import javafx.beans.InvalidationListener;
 import javafx.beans.value.ChangeListener;
 import javafx.collections.SetChangeListener;
 import javafx.geometry.Insets;
@@ -81,7 +82,7 @@ public final class CustomerDisplay {
 	private final ChangeListener<Rectangle2D> viewChanged = (obs, oldValue, newValue) -> applyView();
 	private final SetChangeListener<Seat> selectionChanged = change -> redraw.request();
 	// Ein Verkauf im Hauptfenster ändert Sitze: Die Änderungserkennung meldet es kurz nach der Bedienung
-	private final ChangeTracker.Listener<Event> dataChanged = (event, before, after) -> redraw.request();
+	private final ChangeTracker.Listener<Event> dataChanged = (changed, before, after) -> onDataChanged(changed);
 
 	private final HallPlanPane.Decorator decorator = new HallPlanPane.Decorator() {
 		@Override
@@ -115,28 +116,27 @@ public final class CustomerDisplay {
 		titleLabel.setWrapText(true);
 		hintLabel.getStyleClass().add("subheader-label");
 		planPane.setInteractive(false);
-		planPane.setRefitOnResize(true);
 		planPane.setMouseTransparent(true);
 
 		contentLayout = new BorderPane();
-		StackPane top = new StackPane(titleLabel);
-		top.setPadding(new Insets(16));
-		StackPane.setAlignment(titleLabel, Pos.CENTER);
-		contentLayout.setTop(top);
+		contentLayout.setTop(titleLabel);
+		BorderPane.setAlignment(titleLabel, Pos.CENTER);
+		BorderPane.setMargin(titleLabel, new Insets(16));
 		contentLayout.setCenter(new StackPane(planPane, hintLabel));
 		summaryPanel = createSummaryPanel();
 		placeSummary(false);
 
 		// Ändert sich die Form der Fläche, passt der Ausschnitt neu: Der relative Zoom hängt vom Seitenverhältnis ab
-		planPane.contentPane().widthProperty().addListener((obs, oldValue, newValue) -> applyView());
-		planPane.contentPane().heightProperty().addListener((obs, oldValue, newValue) -> applyView());
+		InvalidationListener refit = observable -> applyView();
+		planPane.contentPane().widthProperty().addListener(refit);
+		planPane.contentPane().heightProperty().addListener(refit);
 
-		// Hintergrund und Wappen wie in allen Ansichten der App
-		scene = new Scene(MainApp.wrapWithBackground(contentLayout));
-		scene.getStylesheets().add(MainApp.stylesheetUrl());
+		// Hintergrund, Wappen und Stylesheet wie in allen Ansichten der App
+		scene = MainApp.createScene(contentLayout);
 		// Im Hochformat steht die Kartenübersicht unter dem Plan, sonst rechts
-		scene.widthProperty().addListener((obs, oldValue, newValue) -> placeSummary(CustomerDisplayText.summaryBelow(scene.getWidth(), scene.getHeight())));
-		scene.heightProperty().addListener((obs, oldValue, newValue) -> placeSummary(CustomerDisplayText.summaryBelow(scene.getWidth(), scene.getHeight())));
+		InvalidationListener relayout = observable -> placeSummary(CustomerDisplayText.summaryBelow(scene.getWidth(), scene.getHeight()));
+		scene.widthProperty().addListener(relayout);
+		scene.heightProperty().addListener(relayout);
 		// F11 und Doppelklick schalten den Vollbildmodus um, Esc beendet ihn
 		scene.setOnKeyPressed(event -> {
 			if (event.getCode() == KeyCode.F11 || (event.getCode() == KeyCode.ESCAPE && fullscreen)) {
@@ -258,20 +258,19 @@ public final class CustomerDisplay {
 		switching = true;
 		try {
 			if (!fullscreen) {
-				Stage from = windowStage;
-				Rectangle2D screen = Screen.getScreensForRectangle(from.getX(), from.getY(), from.getWidth(), from.getHeight()).get(0).getBounds();
+				Rectangle2D screen = Screen.getScreensForRectangle(windowStage.getX(), windowStage.getY(), windowStage.getWidth(), windowStage.getHeight()).get(0).getBounds();
 				if (borderlessStage == null) {
 					borderlessStage = new Stage(StageStyle.UNDECORATED);
 					configure(borderlessStage);
 				}
-				from.setScene(null);
+				windowStage.setScene(null);
 				borderlessStage.setScene(scene);
 				borderlessStage.setX(screen.getMinX());
 				borderlessStage.setY(screen.getMinY());
 				borderlessStage.setWidth(screen.getWidth());
 				borderlessStage.setHeight(screen.getHeight());
 				borderlessStage.show();
-				from.hide();
+				windowStage.hide();
 			} else {
 				borderlessStage.setScene(null);
 				windowStage.setScene(scene);
@@ -324,13 +323,24 @@ public final class CustomerDisplay {
 		ChangeTracker.events().removeListener(dataChanged);
 	}
 
+	/** Nur Änderungen am gezeigten Event zeichnen neu; die Änderungserkennung meldet alle verfolgten Events. */
+	private void onDataChanged(Event changed) {
+		if (changed.equals(state.eventProperty().get())) {
+			redraw.request();
+		}
+	}
+
+	/** Die Halle der Vorstellung, {@code null} ohne Vorstellung oder ohne zugeordnete Halle. */
+	private Hall hallOf(Presentation presentation) {
+		return presentation == null ? null : hallRepository.findById(presentation.getHallId());
+	}
+
 	/** Zeichnet Titel und Plan der gewählten Vorstellung neu (Zoom und Verschiebung bleiben). */
 	private void refresh() {
 		Presentation presentation = state.presentationProperty().get();
 		titleLabel.setText(CustomerDisplayText.title(state.eventProperty().get(), presentation));
 		hintLabel.setVisible(presentation == null);
-		Hall hall = presentation == null ? null : hallRepository.findById(presentation.getHallId());
-		planPane.render(presentation, hall, decorator);
+		planPane.render(presentation, hallOf(presentation), decorator);
 		updateSummary(presentation);
 	}
 
@@ -342,14 +352,12 @@ public final class CustomerDisplay {
 	 */
 	private void applyView() {
 		Rectangle2D rect = state.visibleHallRectProperty().get();
-		Presentation presentation = state.presentationProperty().get();
-		Hall hall = presentation == null ? null : hallRepository.findById(presentation.getHallId());
-		Rectangle2D hallRect = HallViewport.hallRect(hall);
+		Rectangle2D hallRect = HallViewport.hallRect(hallOf(state.presentationProperty().get()));
 		if (rect != null) {
 			double width = planPane.contentPane().getWidth();
 			double height = planPane.contentPane().getHeight();
 			if (hallRect != null && width > 0 && height > 0) {
-				planPane.fit(HallViewport.relativeMirror(rect, hallRect, HallViewport.HALL_FIT_MARGIN, width / height), 1.0);
+				planPane.fit(HallViewport.relativeMirror(rect, hallRect, width / height), 1.0);
 			} else {
 				planPane.fit(rect, 1.0);
 			}

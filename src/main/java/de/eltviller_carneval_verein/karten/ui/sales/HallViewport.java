@@ -56,20 +56,21 @@ final class HallViewport {
 	 *
 	 * @param mainVisible der sichtbare Ausschnitt des Hauptfensters (Hallenkoordinaten)
 	 * @param hall        die Halle, {@code (0, 0, Breite, Höhe)}
-	 * @param margin      der Rand der Einpassung ({@link #HALL_FIT_MARGIN}), im Hauptfenster derselbe wie hier
+	 * @param paneAspect  Breite / Höhe der anderen Fläche
 	 */
-	static Rectangle2D relativeMirror(Rectangle2D mainVisible, Rectangle2D hall, double margin, double paneAspect) {
+	static Rectangle2D relativeMirror(Rectangle2D mainVisible, Rectangle2D hall, double paneAspect) {
 		// Zoom des Hauptfensters im Verhältnis zu seiner Einpassung: Dessen Fläche hat dasselbe Seitenverhältnis wie
-		// mainVisible, die Einpassung zeigt einen Ausschnitt mit min(w / Halle.w, h / Halle.h) = 1 / margin.
-		double relativeZoom = 1 / (margin * Math.min(mainVisible.getWidth() / hall.getWidth(), mainVisible.getHeight() / hall.getHeight()));
+		// mainVisible, die Einpassung zeigt einen Ausschnitt mit min(w / Halle.w, h / Halle.h) = 1 / HALL_FIT_MARGIN
+		// (das Hauptfenster passt mit demselben Rand ein).
+		double relativeZoom = 1 / (HALL_FIT_MARGIN * Math.min(mainVisible.getWidth() / hall.getWidth(), mainVisible.getHeight() / hall.getHeight()));
 		// Der eingepasste Saal auf einer Fläche mit paneAspect, dann um den relativen Zoom enger
 		double width;
 		double height;
 		if (paneAspect >= hall.getWidth() / hall.getHeight()) {
-			height = hall.getHeight() / margin;
+			height = hall.getHeight() / HALL_FIT_MARGIN;
 			width = paneAspect * height;
 		} else {
-			width = hall.getWidth() / margin;
+			width = hall.getWidth() / HALL_FIT_MARGIN;
 			height = width / paneAspect;
 		}
 		width /= relativeZoom;

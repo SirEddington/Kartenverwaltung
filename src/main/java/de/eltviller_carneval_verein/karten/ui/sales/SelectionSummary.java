@@ -15,7 +15,10 @@ final class SelectionSummary {
 	record Line(String text, long cents) {
 	}
 
-	record Summary(int count, List<Line> lines, long totalCents) {
+	record Summary(List<Line> lines, long totalCents) {
+		int count() {
+			return lines.size();
+		}
 	}
 
 	private SelectionSummary() {
@@ -27,13 +30,12 @@ final class SelectionSummary {
 	 */
 	static Summary of(Collection<Seat> selected, Presentation shown) {
 		if (shown == null) {
-			return new Summary(0, List.of(), 0);
+			return new Summary(List.of(), 0);
 		}
-		List<Seat> seats = selected.stream().filter(seat -> belongsTo(seat, shown))
-				.sorted(Comparator.comparingInt((Seat seat) -> seat.getParent().getTableNumber()).thenComparingInt(Seat::getSeatNumber)).toList();
-		List<Line> lines = seats.stream().map(seat -> new Line("Tisch " + seat.getParent().getTableNumber() + ", Sitz " + seat.getSeatNumber(), seat.getPrice())).toList();
-		long total = lines.stream().mapToLong(Line::cents).sum();
-		return new Summary(lines.size(), lines, total);
+		List<Line> lines = selected.stream().filter(seat -> belongsTo(seat, shown))
+				.sorted(Comparator.comparingInt((Seat seat) -> seat.getParent().getTableNumber()).thenComparingInt(Seat::getSeatNumber))
+				.map(seat -> new Line("Tisch " + seat.getParent().getTableNumber() + ", Sitz " + seat.getSeatNumber(), seat.getPrice())).toList();
+		return new Summary(lines, lines.stream().mapToLong(Line::cents).sum());
 	}
 
 	/** Die Überschrift der Liste: "Keine Karten ausgewählt", "1 Karte" oder "3 Karten". */

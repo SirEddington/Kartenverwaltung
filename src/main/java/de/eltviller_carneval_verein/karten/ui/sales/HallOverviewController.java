@@ -61,7 +61,6 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	private static final double RUBBER_BAND_THRESHOLD = 4;
 	private static final String SEAT_STYLE_CLASS = "hall-seat";
 	private static final String TABLE_STYLE_CLASS = "hall-table";
-	private static final Color SELECTED_SEAT_STROKE = HallPlanPane.SELECTED_SEAT_STROKE;
 	// Mit gesetztem Verkaufszustand ist es dessen Auswahl (so sieht das Kundenfenster sie)
 	private Set<Seat> selectedSeats = new LinkedHashSet<>();
 	private final Map<Node, Seat> seatNodes = new HashMap<>();
@@ -99,8 +98,8 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		rubberBand.setManaged(false);
 		rubberBand.setMouseTransparent(true);
 		rubberBand.setVisible(false);
-		rubberBand.setFill(SELECTED_SEAT_STROKE.deriveColor(0, 1, 1, 0.15));
-		rubberBand.setStroke(SELECTED_SEAT_STROKE);
+		rubberBand.setFill(HallPlanPane.SELECTED_SEAT_STROKE.deriveColor(0, 1, 1, 0.15));
+		rubberBand.setStroke(HallPlanPane.SELECTED_SEAT_STROKE);
 		viewportPane.getChildren().add(rubberBand);
 		updateHint();
 	}
@@ -353,7 +352,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		boolean searchActive = !currentQuery.isEmpty();
 		seatCircle.setOpacity(matchesQuery ? 1.0 : 0.25);
 		boolean selected = selectedSeats.contains(seat);
-		seatCircle.setStroke(selected ? SELECTED_SEAT_STROKE : searchActive && matchesQuery ? Color.DODGERBLUE : Color.BLACK);
+		seatCircle.setStroke(selected ? HallPlanPane.SELECTED_SEAT_STROKE : searchActive && matchesQuery ? Color.DODGERBLUE : Color.BLACK);
 		seatCircle.setStrokeWidth(selected ? 4 : searchActive && matchesQuery ? 3 : 1);
 		seatCircle.getStyleClass().add(SEAT_STYLE_CLASS);
 		seatNodes.put(seatCircle, seat);

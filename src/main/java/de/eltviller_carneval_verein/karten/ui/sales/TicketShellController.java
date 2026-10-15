@@ -67,8 +67,6 @@ public class TicketShellController {
 	private boolean updatingPresentations = false;
 	private String searchText = "";
 	private ContentController activeContentController;
-	private Event currentEvent;
-	private Presentation currentPresentation;
 	private boolean editMode = false;
 	private CustomerDisplay customerDisplay;
 	private final ChangeListener<Boolean> windowShowing = (obs, wasShowing, isShowing) -> {
@@ -118,20 +116,18 @@ public class TicketShellController {
 
 		// Event- & Vorstellungs-Listener einrichten
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
-			currentEvent = selectedEvent;
-			currentPresentation = null;
-			state.eventProperty().set(currentEvent);
+			state.eventProperty().set(selectedEvent);
 			state.presentationProperty().set(null);
-			if (currentEvent != null) {
-				ChangeTracker.events().ensureTracked(currentEvent);
+			if (selectedEvent != null) {
+				ChangeTracker.events().ensureTracked(selectedEvent);
 			}
 			// Das Neufüllen der Liste meldet der Inhalt nicht einzeln: setEvent unten setzt ihn auf "Alle Vorstellungen"
 			updatingPresentations = true;
 			try {
 				List<Presentation> presentationItems = new ArrayList<>();
 				presentationItems.add(null); // "Alle Vorstellungen"
-				if (currentEvent != null) {
-					presentationItems.addAll(currentEvent.getPresentations());
+				if (selectedEvent != null) {
+					presentationItems.addAll(selectedEvent.getPresentations());
 				}
 				presComboBox.getItems().setAll(presentationItems);
 				presComboBox.getSelectionModel().selectFirst();
@@ -139,7 +135,7 @@ public class TicketShellController {
 				updatingPresentations = false;
 			}
 			if (activeContentController != null) {
-				activeContentController.setEvent(currentEvent);
+				activeContentController.setEvent(selectedEvent);
 			}
 		});
 
@@ -147,10 +143,9 @@ public class TicketShellController {
 			if (updatingPresentations) {
 				return;
 			}
-			currentPresentation = selectedPresentation;
-			state.presentationProperty().set(currentPresentation);
+			state.presentationProperty().set(selectedPresentation);
 			if (activeContentController != null) {
-				activeContentController.setPresentation(currentPresentation);
+				activeContentController.setPresentation(selectedPresentation);
 			}
 		});
 
@@ -216,8 +211,8 @@ public class TicketShellController {
 			}
 
 			// Aktuelles Event und Vorstellung direkt an den neuen Inhalt übergeben
-			activeContentController.setEvent(currentEvent);
-			activeContentController.setPresentation(currentPresentation);
+			activeContentController.setEvent(state.eventProperty().get());
+			activeContentController.setPresentation(state.presentationProperty().get());
 			// Der Bearbeitungsmodus gilt für die ganze Shell, nicht nur für die Ansicht, in der er eingeschaltet wurde
 			activeContentController.setEditMode(editMode);
 		} catch (IOException e) {

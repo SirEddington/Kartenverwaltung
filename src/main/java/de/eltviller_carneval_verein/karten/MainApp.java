@@ -215,13 +215,13 @@ public class MainApp extends Application {
 	/**
 	 * Die einzige Stelle, an der die Scenes der App entstehen: Hintergrund und Stylesheet.
 	 */
-	private static Scene createScene(Parent content) {
+	public static Scene createScene(Parent content) {
 		Scene scene = new Scene(wrapWithBackground(content), width, height);
 		scene.getStylesheets().add(stylesheetUrl());
 		return scene;
 	}
 
-	public static String stylesheetUrl() {
+	private static String stylesheetUrl() {
 		return MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 	}
 
@@ -231,7 +231,7 @@ public class MainApp extends Application {
 	 * erscheint, statt es in jeder FXML einzeln nachzubauen. Skaliert mit der
 	 * tatsächlichen Fenstergröße mit.
 	 */
-	public static Parent wrapWithBackground(Parent content) {
+	private static Parent wrapWithBackground(Parent content) {
 		ImageView background = new ImageView(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/wappen.png")));
 		background.setPreserveRatio(true);
 		background.setOpacity(0.12);
