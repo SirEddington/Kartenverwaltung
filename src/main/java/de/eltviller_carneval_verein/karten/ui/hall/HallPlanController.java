@@ -130,9 +130,26 @@ public class HallPlanController {
 		widthSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_WIDTH, 5));
 		heightSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_HEIGHT, 5));
 		textSizeSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 1000.0, 20.0, 1));
-		SpinnerValueFactory.DoubleSpinnerValueFactory rotationFactory = new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 360.0, 0.0, 15);
-		// Über 360 Grad geht es bei 0 weiter; 360 selbst ist 0 und wird nie angezeigt (ein Klick von 345 geht auf 0)
-		rotationFactory.setWrapAround(true);
+		// Die Drehung läuft im Kreis von 0 bis unter 360: Die Pfeiltasten gehen von 345 auf 0 und von 0 auf 345. 360 selbst ist 0
+		// und wird nie angezeigt (der Standard-Umlauf von JavaFX würde bei 0 nach unten auf 360 springen)
+		SpinnerValueFactory.DoubleSpinnerValueFactory rotationFactory = new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 360.0, 0.0, 15) {
+			@Override
+			public void decrement(int steps) {
+				turn(-steps);
+			}
+
+			@Override
+			public void increment(int steps) {
+				turn(steps);
+			}
+
+			private void turn(int steps) {
+				double next = ((getValue() == null ? 0.0 : getValue()) + steps * getAmountToStepBy()) % 360.0;
+				// Auf vier Stellen gerundet, damit sich keine Rechenreste (14.990000000000009) anhäufen
+				setValue(Math.round((next < 0 ? next + 360.0 : next) * 10000.0) / 10000.0);
+			}
+		};
+		// Ein getippter Wert von 360 wird zu 0
 		rotationFactory.valueProperty().addListener((obs, oldValue, newValue) -> {
 			if (newValue != null && newValue >= 360.0) {
 				rotationFactory.setValue(0.0);
