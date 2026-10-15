@@ -23,6 +23,7 @@ import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Pos;
 import javafx.scene.Parent;
@@ -80,6 +81,8 @@ public class MainApp extends Application {
 				e.consume();
 			}
 		});
+		// Ein offenes Kundenfenster (Verkaufsmodus) darf die App nicht am Leben halten, wenn das Hauptfenster geschlossen ist
+		primaryStage.setOnHidden(e -> Platform.exit());
 
 		List<String> loadWarnings = repository.getAndClearLoadWarnings();
 		if (!loadWarnings.isEmpty()) {

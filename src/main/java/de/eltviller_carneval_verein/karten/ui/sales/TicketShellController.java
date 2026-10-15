@@ -21,6 +21,7 @@ import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
@@ -55,6 +56,8 @@ public class TicketShellController {
 	@FXML
 	private Button btnSave;
 	@FXML
+	private CheckBox chkSalesMode;
+	@FXML
 	private StackPane contentArea;
 	@FXML
 	private Label lblHeader;
@@ -66,10 +69,18 @@ public class TicketShellController {
 	private Event currentEvent;
 	private Presentation currentPresentation;
 	private boolean editMode = false;
+	private CustomerDisplay customerDisplay;
 
 	@FXML
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
+
+		// Wird die Ansicht verlassen (Menü, anderer Bildschirm), verschwindet auch das Kundenfenster
+		contentArea.sceneProperty().addListener((obs, oldScene, newScene) -> {
+			if (newScene == null) {
+				closeCustomerDisplay();
+			}
+		});
 
 		// "Alle Vorstellungen" ist als echter (null-)Eintrag Teil der Liste, wie in der Abrechnung: So lässt sich die
 		// Auswahl einer Vorstellung wieder aufheben.
@@ -210,6 +221,39 @@ public class TicketShellController {
 		// Edit-Status an die aktive Inhaltsansicht (Tabelle oder Saalplan) durchreichen
 		if (activeContentController != null) {
 			activeContentController.setEditMode(editMode);
+		}
+	}
+
+	/** Die Checkbox "Verkaufsmodus" öffnet und schließt das Kundenfenster. */
+	@FXML
+	private void toggleSalesMode() {
+		if (chkSalesMode.isSelected()) {
+			openCustomerDisplay();
+		} else {
+			closeCustomerDisplay();
+		}
+	}
+
+	private void openCustomerDisplay() {
+		if (customerDisplay != null) {
+			return;
+		}
+		CustomerDisplay display = new CustomerDisplay(state);
+		customerDisplay = display;
+		display.show(contentArea.getScene().getWindow(), () -> {
+			// Schließt der Anwender das Fenster selbst, ist der Verkaufsmodus aus
+			if (customerDisplay == display) {
+				customerDisplay = null;
+			}
+			chkSalesMode.setSelected(false);
+		});
+	}
+
+	private void closeCustomerDisplay() {
+		CustomerDisplay display = customerDisplay;
+		customerDisplay = null;
+		if (display != null) {
+			display.close();
 		}
 	}
 
