@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.validation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDate;
@@ -24,7 +25,7 @@ class EventValidatorTest {
 	/** Event mit zwei vollständigen Vorstellungen, je ein Tisch (Nr. 1) mit zwei Sitzen zu 10 Euro. */
 	private static Event eventWithTwoPresentations() {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		for (String name : List.of("Prunksitzung", "Damensitzung")) {
 			Presentation presentation = event.addPresentation(name);
 			complete(presentation);
@@ -33,6 +34,17 @@ class EventValidatorTest {
 			table.addSeat(2).setPrice(1000);
 		}
 		return event;
+	}
+
+	@Test
+	void blankEventNameIsAnError() {
+		Event event = eventWithTwoPresentations();
+		event.setName("   ");
+
+		ValidationResult result = EventValidator.validate(event);
+
+		assertFalse(result.isValid());
+		assertTrue(result.getIssues().stream().anyMatch(i -> i.code().equals("EVT-002")));
 	}
 
 	@Test
@@ -59,9 +71,9 @@ class EventValidatorTest {
 	@Test
 	void issuesFromEveryEntityLevelAreCollected() {
 		Event event = eventWithTwoPresentations();
-		event.getPresentations().get(1).changeName("prunksitzung ");                              // EVT-001
+		event.getPresentations().get(1).setName("prunksitzung ");                              // EVT-001
 		event.getPresentations().get(0).setHallId(null);                                           // PRS-003
-		event.getPresentations().get(0).getTables().get(0).getSeats().get(1).changeSeatNumber(1);  // TBL-001
+		event.getPresentations().get(0).getTables().get(0).getSeats().get(1).setSeatNumber(1);  // TBL-001
 		event.getPresentations().get(0).getTables().get(0).getSeats().get(0).setPrice(-5);         // SEA-001
 
 		List<String> codes = EventValidator.validate(event).getIssues().stream().map(ValidationIssue::code).toList();
@@ -81,7 +93,10 @@ class EventValidatorTest {
 
 	@Test
 	void eventWithoutPresentationsIsValid() {
-		assertTrue(EventValidator.validate(new Event()).isEmpty());
+		Event event = new Event();
+		event.setName("Kampagne");
+
+		assertTrue(EventValidator.validate(event).isEmpty());
 	}
 
 	// --- gleiche Vorstellungsnamen (EVT-001) ---
@@ -89,8 +104,8 @@ class EventValidatorTest {
 	@Test
 	void duplicatePresentationNameIsReportedOnceIgnoringCaseAndSpaces() {
 		Event event = eventWithTwoPresentations();
-		event.getPresentations().get(1).changeName("  PRUNKSITZUNG");
-		event.addPresentation("Kehraus").changeName("prunksitzung");
+		event.getPresentations().get(1).setName("  PRUNKSITZUNG");
+		event.addPresentation("Kehraus").setName("prunksitzung");
 		complete(event.getPresentations().get(2));
 
 		ValidationResult result = EventValidator.validate(event);

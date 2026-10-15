@@ -26,8 +26,8 @@
  * <tr><td>Vorstellung</td><td>PRS</td><td>{@link PresentationValidator} / {@link PresentationIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Tisch</td><td>TBL</td><td>{@link TableValidator} / {@link TableIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Sitz</td><td>SEA</td><td>{@link SeatValidator} / {@link SeatIssue}</td><td>vorhanden</td></tr>
- * <tr><td>Halle</td><td>HLL</td><td>HallValidator / HallIssue</td><td>geplant</td></tr>
- * <tr><td>Hallenobjekt</td><td>HOB</td><td>HallObjectValidator / HallObjectIssue</td><td>geplant</td></tr>
+ * <tr><td>Halle</td><td>HLL</td><td>{@link HallValidator} / {@link HallIssue}</td><td>vorhanden</td></tr>
+ * <tr><td>Hallenobjekt</td><td>HOB</td><td>{@link HallObjectValidator} / {@link HallObjectIssue}</td><td>vorhanden</td></tr>
  * <tr><td>technisch (unerwartet)</td><td>SYS</td><td>GlobalErrorHandler.CODE</td><td>vorhanden</td></tr>
  * </table>
  */

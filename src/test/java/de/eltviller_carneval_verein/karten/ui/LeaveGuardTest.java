@@ -39,14 +39,14 @@ class LeaveGuardTest {
 
 	private static Event event(String name) {
 		Event event = new Event();
-		event.changeName(name);
+		event.setName(name);
 		event.addPresentation("Prunksitzung").addTable(1).addSeat(1).setPrice(1000);
 		return event;
 	}
 
 	private static Hall hall(String name) {
 		Hall hall = new Hall();
-		hall.changeName(name);
+		hall.setName(name);
 		hall.setHallWidth(1000);
 		return hall;
 	}

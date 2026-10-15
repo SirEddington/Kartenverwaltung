@@ -15,7 +15,7 @@ class SeatValidatorTest {
 	/** Sitz 2 an Tisch 4 der Vorstellung "Prunksitzung". */
 	private static Seat seatWithPriceCents(int cents) {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		Seat seat = event.addPresentation("Prunksitzung").addTable(4).addSeat(2);
 		seat.setPrice(cents);
 		return seat;
@@ -24,6 +24,45 @@ class SeatValidatorTest {
 	private static ValidationIssue only(ValidationResult result) {
 		assertEquals(1, result.getIssues().size(), "Genau eine Meldung erwartet: " + result.getIssues());
 		return result.getIssues().get(0);
+	}
+
+	// --- Sitznummer (SEA-008) ---
+
+	@Test
+	void seatNumberBelowOneIsAnErrorAndNamesTheSeat() {
+		for (int number : new int[] { 0, -2 }) {
+			Seat seat = seatWithPriceCents(1250);
+			seat.setSeatNumber(number);
+
+			ValidationIssue issue = only(SeatValidator.validate(seat));
+
+			assertEquals("SEA-008", issue.code());
+			assertTrue(issue.message().contains("Sitz " + number), issue.message());
+		}
+	}
+
+	// --- Größe (SEA-009), früher Grenzen der Spinner ---
+
+	@Test
+	void seatSizeMustBeBetweenZeroAndOneHundred() {
+		for (double ok : new double[] { 0, 30, 100 }) {
+			Seat seat = seatWithPriceCents(1250);
+			seat.setWidth(ok);
+			seat.setHeight(ok);
+			assertTrue(SeatValidator.validate(seat).isEmpty(), "Gültig: " + ok);
+		}
+
+		Seat wide = seatWithPriceCents(1250);
+		wide.setWidth(100.5);
+		ValidationIssue width = only(SeatValidator.validate(wide));
+		assertEquals("SEA-009", width.code());
+		assertEquals("Breite von Prunksitzung, Tisch 4, Sitz 2 liegt mit 100,5 nicht zwischen 0 und 100.", width.message());
+
+		Seat negative = seatWithPriceCents(1250);
+		negative.setHeight(-1);
+		ValidationIssue height = only(SeatValidator.validate(negative));
+		assertEquals("SEA-009", height.code());
+		assertTrue(height.message().startsWith("Höhe von Prunksitzung, Tisch 4, Sitz 2"), height.message());
 	}
 
 	// --- Preis (SEA-001, SEA-003) ---

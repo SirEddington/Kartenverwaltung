@@ -25,7 +25,7 @@ class JsonHallRepositoryTest {
 
 	private static Hall newHall(String name) {
 		Hall hall = new Hall();
-		hall.changeName(name);
+		hall.setName(name);
 		return hall;
 	}
 
@@ -112,7 +112,7 @@ class JsonHallRepositoryTest {
 		JsonHallRepository repository = new JsonHallRepository(storageDir);
 		Hall hall = newHall("Halle");
 		repository.saveHall(hall);
-		hall.changeName("Halle (umbenannt)");
+		hall.setName("Halle (umbenannt)");
 		repository.saveHall(hall);
 
 		File[] jsonFiles = storageDir.listFiles((dir, name) -> name.endsWith(".json"));
@@ -142,7 +142,7 @@ class JsonHallRepositoryTest {
 		Hall hall = newHall("Halle");
 		repository.saveHall(hall);
 		Files.writeString(new File(storageDir, "backups").toPath(), "ich bin eine Datei", StandardCharsets.UTF_8);
-		hall.changeName("Halle (neu)");
+		hall.setName("Halle (neu)");
 
 		repository.saveHall(hall);
 
@@ -156,7 +156,7 @@ class JsonHallRepositoryTest {
 		Hall remove = newHall("Weg");
 		repository.saveHall(keep);
 		repository.saveHall(remove);
-		remove.changeName("Weg (umbenannt)");
+		remove.setName("Weg (umbenannt)");
 		repository.saveHall(remove); // erzeugt eine Kopie im Backup-Ordner
 
 		repository.deleteHall(remove);

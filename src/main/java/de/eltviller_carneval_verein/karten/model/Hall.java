@@ -43,12 +43,9 @@ public class Hall {
 		return name;
 	}
 
-	public void changeName(String name) {
-		if (name == null || name.isBlank()) {
-			throw new IllegalArgumentException("Name darf nicht leer sein.");
-		} else {
-			this.name = name;
-		}
+	/** Nimmt jeden Wert an; ein leerer Name wird beim Speichern und live gemeldet (HLL-001). */
+	public void setName(String name) {
+		this.name = name;
 	}
 
 	public String getDescription() {
@@ -89,7 +86,7 @@ public class Hall {
 	public HallObject addHallObject() {
 		HallObject newObject = new HallObject();
 		newObject.setParent(this);
-		newObject.changeName(createHallObjectName());
+		newObject.setName(createHallObjectName());
 
 		hallObjects.add(newObject);
 		return newObject;
@@ -100,9 +97,9 @@ public class Hall {
 		newObject.setParent(this);
 
 		if (!getHallObjectNames().contains(name)) {
-			newObject.changeName(name);
+			newObject.setName(name);
 		} else {
-			newObject.changeName(createHallObjectName());
+			newObject.setName(createHallObjectName());
 		}
 
 		hallObjects.add(newObject);

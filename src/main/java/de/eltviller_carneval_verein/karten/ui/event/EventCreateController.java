@@ -9,6 +9,8 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
 import javafx.scene.control.ComboBox;
@@ -41,13 +43,32 @@ public class EventCreateController {
 
 	@FXML
 	public void initialize() {
+		// Startwerte der Spinner; sie haben keine Grenzen, die Anzahlen im Dialog bekommen keine Regel
+		spnPresCount.setValueFactory(SpinnerInput.integerFactory(3, 1));
+		spnTablePerPres.setValueFactory(SpinnerInput.integerFactory(40, 1));
+		spnDoubleTableWidth.setValueFactory(SpinnerInput.doubleFactory(70.0, 1.0));
+		spnDoubleTableHeight.setValueFactory(SpinnerInput.doubleFactory(300.0, 1.0));
+		spnSeatsPerTable.setValueFactory(SpinnerInput.integerFactory(12, 1));
+		spnDoubleSeatWidth.setValueFactory(SpinnerInput.doubleFactory(30.0, 1.0));
+		spnDoubleSeatHeight.setValueFactory(SpinnerInput.doubleFactory(30.0, 1.0));
+		spnDoublePrice.setValueFactory(SpinnerInput.doubleFactory(17.0, 1.0));
+		// Tippfehler in den Spinnern: alter Wert bleibt, Meldung in der Fußzeile
+		SpinnerInput.installInteger(spnPresCount, "Anzahl Vorstellungen", null);
+		SpinnerInput.installInteger(spnTablePerPres, "Tische je Vorstellung", null);
+		SpinnerInput.install(spnDoubleTableWidth, "Tischbreite", null);
+		SpinnerInput.install(spnDoubleTableHeight, "Tischhöhe", null);
+		SpinnerInput.installInteger(spnSeatsPerTable, "Sitze je Tisch", null);
+		SpinnerInput.install(spnDoubleSeatWidth, "Sitzbreite", null);
+		SpinnerInput.install(spnDoubleSeatHeight, "Sitzhöhe", null);
+		SpinnerInput.install(spnDoublePrice, "Preis", null);
+
 		// Optional: null = keine Halle (kann später je Vorstellung in den Event-Details zugeordnet werden)
 		cmbHall.getItems().add(null);
 		cmbHall.getItems().addAll(JsonHallRepository.getInstance().loadHalls());
 		cmbHall.setConverter(new StringConverter<Hall>() {
 			@Override
 			public String toString(Hall hall) {
-				return hall == null ? "– keine Halle –" : hall.getName();
+				return hall == null ? "– keine Halle –" : EntityLabels.nameOrPlaceholder(hall.getName());
 			}
 
 			@Override
@@ -61,6 +82,10 @@ public class EventCreateController {
 
 	@FXML
 	private void handleSave() {
+		// Der Klick auf Speichern nimmt einem Spinner den Fokus: Wurde seine Eingabe abgelehnt, nicht stillschweigend mit dem alten Wert anlegen
+		if (SpinnerInput.blockSaveIfScreenInputRejected(txtEventName)) {
+			return;
+		}
 		String name = txtEventName.getText().trim();
 		if (name.isEmpty()) {
 			StatusMessage.getInstance().show(Severity.ERROR, "Bitte gib einen Namen für das Event ein.");
@@ -78,7 +103,7 @@ public class EventCreateController {
 	private Event buildNewEvent(String name) {
 		// Die ID bleibt eine UUID: Sie bestimmt den Dateinamen, der Name darf beliebige Zeichen enthalten
 		Event event = new Event();
-		event.changeName(name);
+		event.setName(name);
 
 		// Vorstellungen
 		for (int i = 0; i < spnPresCount.getValue(); i++) {

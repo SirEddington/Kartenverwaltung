@@ -58,12 +58,9 @@ public class HallObject {
 		return name;
 	}
 
-	public void changeName(String name) {
-		if (name == null || name.isBlank()) {
-			throw new IllegalArgumentException("Name darf nicht leer sein.");
-		} else {
-			this.name = name;
-		}
+	/** Nimmt jeden Wert an; ein leerer Name wird beim Speichern und live gemeldet (HOB-001). */
+	public void setName(String name) {
+		this.name = name;
 	}
 
 	public String getDesc() {

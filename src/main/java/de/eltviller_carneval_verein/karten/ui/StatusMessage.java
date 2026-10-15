@@ -91,6 +91,20 @@ public final class StatusMessage {
 	}
 
 	/**
+	 * Rückmeldung nach einem Speicherversuch mit Prüfung ({@code EventSaver}, {@code HallSaver}): bei Fehlern
+	 * "Nicht gespeichert: ...", sonst "Gespeichert", bei Warnungen "Gespeichert mit Warnungen: ...".
+	 */
+	public void showSaveResult(boolean saved, ValidationResult validation) {
+		if (!saved) {
+			show(validation, "Nicht gespeichert: ");
+		} else if (validation.isEmpty()) {
+			showSaved();
+		} else {
+			show(validation, "Gespeichert mit Warnungen: ");
+		}
+	}
+
+	/**
 	 * Zeigt das Ergebnis der Live-Prüfung wie {@link #show(ValidationResult)}, öffnet aber nie einen Dialog: Ist
 	 * gerade keine Fußzeile sichtbar, wird nichts angezeigt (eine Komfortmeldung ist keinen Dialog wert).
 	 */

@@ -1,7 +1,9 @@
 package de.eltviller_carneval_verein.karten.model;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -69,18 +71,15 @@ public class Event {
 	}
 	// <-- Getter und Setter
 
-	public void changeName(String name) {
-		if (name == null || name.isBlank()) {
-			throw new IllegalArgumentException("Name darf nicht leer sein.");
-		} else {
-			this.name = name;
-		}
+	/** Nimmt jeden Wert an; ein leerer Name wird vom {@code EventValidator} gemeldet (EVT-002). */
+	public void setName(String name) {
+		this.name = name;
 	}
 
 	public Presentation addPresentation() {
 		Presentation newPres = new Presentation();
 		newPres.setParent(this);
-		newPres.changeName(createPresName());
+		newPres.setName(createPresName());
 		presentations.add(newPres);
 		return newPres;
 	}
@@ -90,9 +89,9 @@ public class Event {
 		newPres.setParent(this);
 
 		if (!getPresentationNames().contains(presentationName)) {
-			newPres.changeName(presentationName);
+			newPres.setName(presentationName);
 		} else {
-			newPres.changeName(createPresName());
+			newPres.setName(createPresName());
 		}
 
 		presentations.add(newPres);
@@ -114,6 +113,21 @@ public class Event {
 	
 	public boolean deletePresentation(Presentation presentation) {
 		return presentations.remove(presentation);
+	}
+
+	/**
+	 * Name für die Kopie eines Events ("Event kopieren"): "&lt;Name&gt; (Kopie)", bei Kollision mit einem vorhandenen
+	 * Namen "&lt;Name&gt; (Kopie 2)", "(Kopie 3)" usw. Groß-/Kleinschreibung und Leerzeichen am Rand zählen beim Vergleich
+	 * nicht. Ein Event ohne Namen heißt "Event".
+	 */
+	public static String createCopyName(String name, Collection<String> existingNames) {
+		String base = (name == null || name.isBlank()) ? "Event" : name.trim();
+		Set<String> taken = existingNames.stream().filter(Objects::nonNull).map(n -> n.trim().toLowerCase(Locale.GERMAN)).collect(Collectors.toSet());
+		String candidate = base + " (Kopie)";
+		for (int i = 2; taken.contains(candidate.toLowerCase(Locale.GERMAN)); i++) {
+			candidate = base + " (Kopie " + i + ")";
+		}
+		return candidate;
 	}
 
 	@Override

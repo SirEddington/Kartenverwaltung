@@ -2,7 +2,6 @@ package de.eltviller_carneval_verein.karten.ui.event;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -22,6 +21,11 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
+import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
+import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -38,7 +42,6 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
@@ -48,9 +51,6 @@ import javafx.scene.control.cell.ComboBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
-import javafx.util.converter.IntegerStringConverter;
-import javafx.util.converter.LocalDateStringConverter;
-import javafx.util.converter.LocalTimeStringConverter;
 
 public class EventEditController {
 
@@ -139,9 +139,6 @@ public class EventEditController {
 	@FXML
 	private TextField txtComment;
 
-	DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
-	DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
-
 	Event currentEvent;
 	Presentation currentPres;
 	Table currentTable;
@@ -221,7 +218,7 @@ public class EventEditController {
 		// --- Event Tabelle ---
 		colEventName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
 		colEventName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colEventName.setOnEditCommit(e -> e.getRowValue().changeName(e.getNewValue()));
+		colEventName.setOnEditCommit(e -> e.getRowValue().setName(e.getNewValue()));
 
 		colEventDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
 		colEventDesc.setCellFactory(TextFieldTableCell.forTableColumn());
@@ -241,18 +238,18 @@ public class EventEditController {
 		// --- Vorstellung Tabelle ---
 		colPresName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
 		colPresName.setCellFactory(TextFieldTableCell.forTableColumn());
-		colPresName.setOnEditCommit(e -> e.getRowValue().changeName(e.getNewValue()));
+		colPresName.setOnEditCommit(e -> e.getRowValue().setName(e.getNewValue()));
 
 		colPresDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
 		colPresDesc.setCellFactory(TextFieldTableCell.forTableColumn());
 		colPresDesc.setOnEditCommit(e -> e.getRowValue().setDescription(e.getNewValue()));
 
 		colPresDate.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getDate()));
-		colPresDate.setCellFactory(TextFieldTableCell.forTableColumn(new LocalDateStringConverter(dateFormatter, null)));
+		colPresDate.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.date(), InputIssue.NOT_A_DATE, "Datum", EntityLabels::presentation));
 		colPresDate.setOnEditCommit(e -> e.getRowValue().setDate(e.getNewValue()));
 
 		colPresTime.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getTime()));
-		colPresTime.setCellFactory(TextFieldTableCell.forTableColumn(new LocalTimeStringConverter(timeFormatter, null)));
+		colPresTime.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.time(), InputIssue.NOT_A_TIME, "Uhrzeit", EntityLabels::presentation));
 		colPresTime.setOnEditCommit(e -> e.getRowValue().setTime(e.getNewValue()));
 
 		// Halle der Vorstellung: Auswahl aus den angelegten Hallen (null = keine Halle zugeordnet)
@@ -263,7 +260,7 @@ public class EventEditController {
 		colPresHall.setCellFactory(ComboBoxTableCell.forTableColumn(new StringConverter<Hall>() {
 			@Override
 			public String toString(Hall hall) {
-				return hall == null ? "– keine Halle –" : hall.getName();
+				return hall == null ? "– keine Halle –" : EntityLabels.nameOrPlaceholder(hall.getName());
 			}
 
 			@Override
@@ -275,8 +272,8 @@ public class EventEditController {
 
 		// --- Tisch Tabelle ---
 		colTableNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getTableNumber()).asObject());
-		colTableNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
-		colTableNumber.setOnEditCommit(e -> e.getRowValue().changeTableNumber(e.getNewValue()));
+		colTableNumber.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.integer(), InputIssue.NOT_A_NUMBER, "Tischnummer", EntityLabels::table));
+		colTableNumber.setOnEditCommit(e -> e.getRowValue().setTableNumber(e.getNewValue()));
 
 		colTableCategory.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getCategory()));
 		colTableCategory.setCellFactory(TextFieldTableCell.forTableColumn());
@@ -288,8 +285,8 @@ public class EventEditController {
 
 		// --- Sitz Tabelle ---
 		colSeatNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getSeatNumber()).asObject());
-		colSeatNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
-		colSeatNumber.setOnEditCommit(e -> e.getRowValue().changeSeatNumber(e.getNewValue()));
+		colSeatNumber.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.integer(), InputIssue.NOT_A_NUMBER, "Sitznummer", EntityLabels::seat));
+		colSeatNumber.setOnEditCommit(e -> e.getRowValue().setSeatNumber(e.getNewValue()));
 
 		colSeatComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getComment()));
 		colSeatComment.setCellFactory(TextFieldTableCell.forTableColumn());
@@ -297,7 +294,8 @@ public class EventEditController {
 
 		// --- Sitzdetails ---
 		paymentComboBox.getItems().setAll(PaymentStatus.values());
-		spnDoublePrice.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 100.0, 0.0, 0.5));
+		spnDoublePrice.setValueFactory(SpinnerInput.doubleFactory(0.0, 0.5));
+		SpinnerInput.install(spnDoublePrice, "Preis", () -> currentSeat == null ? null : EntityLabels.seat(currentSeat));
 		StringConverter<PaymentStatus> converter = new StringConverter<>() {
 			@Override
 			public String toString(PaymentStatus status) {
@@ -430,14 +428,17 @@ public class EventEditController {
 	private void handleCopyEvent(Event event) {
 		Event newEvent = new Event();
 
-		// ToDo Popup für name
+		// Die Kopie bekommt einen eigenen Namen ("<Name> (Kopie)"), sonst würde sie nie gespeichert (EVT-002); umbenennen geht in der Tabelle
+		newEvent.setName(Event.createCopyName(event.getName(), masterEventData.stream().map(Event::getName).toList()));
 		newEvent.setDescription(event.getDescription());
 
 		for (Presentation pres : event.getPresentations()) {
 			handleCopyPres(pres, newEvent);
 		}
 
-		EventSaver.save(newEvent);
+		// Bei Erfolg ist die Kopie gewählt; sonst bleibt das Original gewählt (handleCopyPres hat die Kopie schon angezeigt)
+		boolean saved = EventSaver.save(newEvent);
+		refreshEventTable(saved ? newEvent : event);
 	}
 
 	private void handleDeleteEvent(Event event) {
@@ -735,6 +736,10 @@ public class EventEditController {
 
 	@FXML
 	private void saveCurrentState() {
+		// Eine abgelehnte Spinner-Eingabe nicht mit "Gespeichert" überschreiben (der Klick auf Speichern löst die Ablehnung aus)
+		if (SpinnerInput.blockSaveIfScreenInputRejected(spnDoublePrice)) {
+			return;
+		}
 		// Aktuellen Stand speichern
 		Seat selectedSeat = seatTable.getSelectionModel().getSelectedItem();
 		if (selectedSeat != null) {

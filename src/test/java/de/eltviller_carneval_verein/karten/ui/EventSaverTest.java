@@ -54,7 +54,7 @@ class EventSaverTest {
 	/** Vollständige Vorstellung mit einem Tisch und einem Sitz zu 10 Euro, ohne jede Meldung. */
 	private static Event validEvent() {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		Presentation presentation = event.addPresentation("Prunksitzung");
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
@@ -73,11 +73,24 @@ class EventSaverTest {
 		RecordingRepository repository = new RecordingRepository();
 		Event event = validEvent();
 
-		EventSaver.SaveResult result = EventSaver.trySave(event, repository);
+		SaveResult result = EventSaver.trySave(event, repository);
 
 		assertTrue(result.saved());
 		assertTrue(result.validation().isEmpty());
 		assertEquals(List.of(event), repository.saved);
+	}
+
+	@Test
+	void eventWithoutNameIsNotSavedAndDoesNotThrow() {
+		RecordingRepository repository = new RecordingRepository();
+		Event event = validEvent();
+		event.setName("");
+
+		SaveResult result = EventSaver.trySave(event, repository);
+
+		assertFalse(result.saved());
+		assertTrue(repository.saved.isEmpty(), "Ohne Namen darf nichts gespeichert werden");
+		assertEquals("EVT-002", result.validation().mostSevere().orElseThrow().code());
 	}
 
 	@Test
@@ -86,7 +99,7 @@ class EventSaverTest {
 		Event event = validEvent();
 		firstSeat(event, seat -> seat.setPrice(-100));
 
-		EventSaver.SaveResult result = EventSaver.trySave(event, repository);
+		SaveResult result = EventSaver.trySave(event, repository);
 
 		assertFalse(result.saved());
 		assertTrue(repository.saved.isEmpty(), "Bei Fehlern darf nichts gespeichert werden");
@@ -100,7 +113,7 @@ class EventSaverTest {
 		event.getPresentations().get(0).addTable(2).addSeat(1).setPrice(-5);
 		firstSeat(event, seat -> seat.setPrice(2_000_000));
 
-		EventSaver.SaveResult result = EventSaver.trySave(event, repository);
+		SaveResult result = EventSaver.trySave(event, repository);
 
 		assertFalse(result.saved());
 		assertEquals(2, result.validation().getIssues().size());
@@ -112,7 +125,7 @@ class EventSaverTest {
 		Event event = validEvent();
 		event.getPresentations().get(0).setHallId(null);
 
-		EventSaver.SaveResult result = EventSaver.trySave(event, repository);
+		SaveResult result = EventSaver.trySave(event, repository);
 
 		assertTrue(result.saved());
 		assertEquals(List.of(event), repository.saved);

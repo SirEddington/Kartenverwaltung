@@ -19,6 +19,7 @@ import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.HallBackupCatalog;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.fxml.FXML;
@@ -63,9 +64,9 @@ public class HallManagementController extends AbstractOverviewController {
 		colName.setCellValueFactory(cell -> {
 			Object data = cell.getValue().getValue();
 			if (data instanceof Hall hall)
-				return new SimpleStringProperty("Halle: " + hall.getName());
+				return new SimpleStringProperty("Halle: " + EntityLabels.nameOrPlaceholder(hall.getName()));
 			if (data instanceof HallObject object)
-				return new SimpleStringProperty("Hallenobjekt: " + object.getName());
+				return new SimpleStringProperty("Hallenobjekt: " + EntityLabels.nameOrPlaceholder(object.getName()));
 			return new SimpleStringProperty("");
 		});
 
@@ -155,7 +156,7 @@ public class HallManagementController extends AbstractOverviewController {
 			TreeItem<Object> selectedItem = selectedItem();
 			if (selectedItem != null) {
 				Hall hall = findParentInTree(selectedItem, Hall.class);
-				HallObject object = hall.addHallObject();
+				HallObject object = HallPlanController.addObjectWithDefaultSize(hall);
 				MainApp.showHallEditView(hall, object, true);
 			}
 		});
@@ -245,7 +246,7 @@ public class HallManagementController extends AbstractOverviewController {
 	@FXML
 	private void handleCreateNewHall() {
 		Hall hall = new Hall();
-		hall.changeName(createHallName());
+		hall.setName(createHallName());
 		// Noch nicht gespeichert: Die Halle entsteht erst mit "Speichern" im Detail-Screen
 		MainApp.showHallEditView(hall, null, true);
 	}

@@ -18,6 +18,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -104,7 +105,7 @@ public class AccountingShellController {
 		presComboBox.setConverter(new StringConverter<Presentation>() {
 			@Override
 			public String toString(Presentation presentation) {
-				return presentation == null ? "Alle (Gesamtbilanz)" : presentation.getName();
+				return presentation == null ? "Alle (Gesamtbilanz)" : EntityLabels.nameOrPlaceholder(presentation.getName());
 			}
 
 			@Override

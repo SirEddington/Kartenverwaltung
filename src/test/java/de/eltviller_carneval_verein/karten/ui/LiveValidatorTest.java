@@ -12,9 +12,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.validation.EventValidator;
+import de.eltviller_carneval_verein.karten.validation.HallValidator;
 import de.eltviller_carneval_verein.karten.validation.ValidationResult;
 
 class LiveValidatorTest {
@@ -26,7 +29,11 @@ class LiveValidatorTest {
 	@BeforeEach
 	void setUp() {
 		tracker = new ChangeTracker<>(Event::getId);
-		tracker.addListener(new LiveValidator(new LiveValidator.Sink() {
+		tracker.addListener(new LiveValidator<>(Event.class, Event::getId, EventValidator::validate, recordingSink()));
+	}
+
+	private LiveValidator.Sink recordingSink() {
+		return new LiveValidator.Sink() {
 			@Override
 			public void show(ValidationResult result) {
 				shown.add(String.join(",", result.getIssues().stream().map(issue -> issue.code()).toList()));
@@ -36,13 +43,49 @@ class LiveValidatorTest {
 			public void clear() {
 				shown.add("clear");
 			}
-		}));
+		};
+	}
+
+	private ChangeTracker<Hall> hallTracker() {
+		ChangeTracker<Hall> hallTracker = new ChangeTracker<>(Hall::getId);
+		hallTracker.addListener(new LiveValidator<>(Hall.class, Hall::getId, HallValidator::validate, recordingSink()));
+		return hallTracker;
+	}
+
+	@Test
+	void hallWithEmptyNameIsReportedAndClearedWhenFixed() {
+		ChangeTracker<Hall> hallTracker = hallTracker();
+		Hall hall = new Hall();
+		hall.setName("Festhalle");
+		hallTracker.track(hall);
+
+		hall.setName("");
+		hallTracker.check(hall);
+		hall.setName("Festhalle");
+		hallTracker.check(hall);
+
+		assertEquals(List.of("HLL-001", "clear"), shown);
+	}
+
+	@Test
+	void hallObjectWithoutNameIsReported() {
+		ChangeTracker<Hall> hallTracker = hallTracker();
+		Hall hall = new Hall();
+		hall.setName("Festhalle");
+		hall.addHallObject("Bühne").setWidth(100);
+		hall.getHallObjects().get(0).setHeight(60);
+		hallTracker.track(hall);
+
+		hall.getHallObjects().get(0).setName(" ");
+		hallTracker.check(hall);
+
+		assertEquals(List.of("HOB-001"), shown);
 	}
 
 	/** Event ohne jede Meldung. */
 	private static Event validEvent() {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		Presentation presentation = event.addPresentation("Prunksitzung");
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));

@@ -11,13 +11,16 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
+import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
+
 /** Prüft die Konventionen aller Issue-Enums (Codes, Kürzel, Platzhalter). Neue Enums hier ergänzen. */
 class IssueConventionsTest {
 
 	private static final Pattern CODE = Pattern.compile("[A-Z]{3}-\\d{3}");
 
 	private static List<Issue[]> allEnums() {
-		return List.<Issue[]>of(EventIssue.values(), PresentationIssue.values(), TableIssue.values(), SeatIssue.values());
+		return List.<Issue[]>of(EventIssue.values(), PresentationIssue.values(), TableIssue.values(), SeatIssue.values(),
+				HallIssue.values(), HallObjectIssue.values(), InputIssue.values());
 	}
 
 	private static List<Issue> allIssues() {

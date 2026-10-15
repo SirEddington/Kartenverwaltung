@@ -174,18 +174,15 @@ public class Presentation {
 		this.hallId = hallId;
 	}
 
-	public void changeName(String name) {
-		if (name == null || name.isBlank()) {
-			throw new IllegalArgumentException("Name darf nicht leer sein.");
-		} else {
-			this.name = name;
-		}
+	/** Nimmt jeden Wert an; ein leerer Name wird vom {@code PresentationValidator} gemeldet (PRS-004). */
+	public void setName(String name) {
+		this.name = name;
 	}
 
 	public Table addTable() {
 		Table newTable = new Table();
 		newTable.setParent(this);
-		newTable.changeTableNumber(createTableNumber());
+		newTable.setTableNumber(createTableNumber());
 
 		// Maße initialisieren
 		newTable.setHeight(defaultTableHeight);
@@ -200,9 +197,9 @@ public class Presentation {
 		newTable.setParent(this);
 
 		if (!getTableNumbers().contains(tableNumber)) {
-			newTable.changeTableNumber(tableNumber);
+			newTable.setTableNumber(tableNumber);
 		} else {
-			newTable.changeTableNumber(createTableNumber());
+			newTable.setTableNumber(createTableNumber());
 		}
 
 		// Maße initialisieren

@@ -19,7 +19,7 @@ class JsonMapperFactoryTest {
 	@Test
 	void savedFileIsByteIdenticalToTheFactorysSerialization(@TempDir File storageDir) throws IOException {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		Presentation presentation = event.addPresentation("Prunksitzung");
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));

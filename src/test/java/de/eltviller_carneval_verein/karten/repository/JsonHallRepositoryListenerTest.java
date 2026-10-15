@@ -34,7 +34,7 @@ class JsonHallRepositoryListenerTest {
 
 	private static Hall named(String name) {
 		Hall hall = new Hall();
-		hall.changeName(name);
+		hall.setName(name);
 		return hall;
 	}
 
@@ -63,7 +63,7 @@ class JsonHallRepositoryListenerTest {
 		repository.addListener(recorder);
 
 		Hall replacement = new Hall(original.getId());
-		replacement.changeName("Nachher");
+		replacement.setName("Nachher");
 		repository.replaceCachedHall(replacement);
 
 		assertEquals(1, repository.loadHalls().size());

@@ -25,10 +25,11 @@ import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextArea;
 
 public class CashReconciliationController implements ContentController, Exportable {
@@ -82,8 +83,9 @@ public class CashReconciliationController implements ContentController, Exportab
 
 	@FXML
 	public void initialize() {
-		actualCashSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, 1_000_000.0, 0.0, 5));
+		actualCashSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		actualCashSpinner.setEditable(true);
+		SpinnerInput.install(actualCashSpinner, "Ist-Betrag", () -> selectedPres == null ? null : EntityLabels.presentation(selectedPres));
 		actualCashSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
 			if (updatingFromModel || selectedPres == null || newVal == null) {
 				return;
@@ -162,7 +164,7 @@ public class CashReconciliationController implements ContentController, Exportab
 		istCentsCache = istCents;
 
 		if (selectedPres != null) {
-			lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart – " + selectedPres.getName());
+			lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart – " + EntityLabels.nameOrPlaceholder(selectedPres.getName()));
 			lblIstHint.setText("");
 		} else {
 			int count = presentations.size();
@@ -356,6 +358,10 @@ public class CashReconciliationController implements ContentController, Exportab
 
 	@Override
 	public void save() {
+		// Eine abgelehnte Eingabe im Ist-Betrag nicht mit "Gespeichert" überschreiben
+		if (SpinnerInput.blockSaveIfScreenInputRejected(actualCashSpinner)) {
+			return;
+		}
 		if (selectedEvent != null) {
 			EventSaver.save(selectedEvent);
 		}

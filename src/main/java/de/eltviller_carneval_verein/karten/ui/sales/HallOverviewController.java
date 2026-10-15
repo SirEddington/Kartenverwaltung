@@ -4,7 +4,9 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
@@ -18,6 +20,8 @@ import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.HallObjectText;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.geometry.BoundingBox;
@@ -34,7 +38,6 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.MouseButton;
@@ -759,12 +762,28 @@ public class HallOverviewController implements ContentController {
 		return header;
 	}
 
-	private void addCloseButtonRow(GridPane grid, Popup popup, int row) {
-		Button closeButton = new Button("Anwenden");
-		closeButton.getStyleClass().add("button-primary");
-		closeButton.setOnAction(event -> popup.hide());
-		HBox buttonBar = new HBox(closeButton);
+	/** Knopfleiste des Tisch-Dialogs: "Abbrechen" und "Anwenden" im Bearbeitungsmodus, sonst nur "Schließen". */
+	private void addTableButtonRow(GridPane grid, Popup popup, int row, BooleanSupplier applyEdits) {
+		HBox buttonBar = new HBox(8);
 		buttonBar.setAlignment(Pos.CENTER_RIGHT);
+		if (editMode) {
+			Button cancelButton = new Button("Abbrechen");
+			cancelButton.getStyleClass().add("button-default");
+			cancelButton.setOnAction(event -> popup.hide());
+			Button applyButton = new Button("Anwenden");
+			applyButton.getStyleClass().add("button-primary");
+			applyButton.setOnAction(event -> {
+				if (applyEdits.getAsBoolean()) {
+					popup.hide();
+				}
+			});
+			buttonBar.getChildren().addAll(cancelButton, applyButton);
+		} else {
+			Button closeButton = new Button("Schließen");
+			closeButton.getStyleClass().add("button-primary");
+			closeButton.setOnAction(event -> popup.hide());
+			buttonBar.getChildren().add(closeButton);
+		}
 		grid.add(buttonBar, 0, row, 2, 1);
 	}
 
@@ -775,8 +794,13 @@ public class HallOverviewController implements ContentController {
 		return popup;
 	}
 
+	/**
+	 * Tisch-Dialog: Die Eingaben gelten erst mit "Anwenden" ("Abbrechen" und Esc verwerfen sie), wie beim Sitz-Dialog. Ist
+	 * eine Eingabe abgelehnt worden (z. B. "abc" in der Breite), wird nichts übernommen und der Dialog bleibt offen.
+	 */
 	private Popup buildTableDetailPopup(Table table) {
 		Popup popup = createDetailPopup();
+		popup.setAutoHide(!editMode); // Mit Eingaben im Dialog soll ein Klick daneben sie nicht verwerfen
 		GridPane grid = createDetailGrid();
 		int row = 0;
 
@@ -793,32 +817,72 @@ public class HallOverviewController implements ContentController {
 		grid.addRow(row++, new Label("Beschreibung:"), descField);
 
 		Spinner<Double> widthSpinner = new Spinner<>();
-		widthSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(10.0, 1000.0, table.getWidth(), 5));
+		widthSpinner.setValueFactory(SpinnerInput.doubleFactory(table.getWidth(), 5));
 		widthSpinner.setEditable(true);
+		SpinnerInput.install(widthSpinner, "Breite", () -> EntityLabels.table(table));
 		widthSpinner.setPrefWidth(100);
 		widthSpinner.setDisable(!editMode);
 		grid.addRow(row++, new Label("Breite:"), widthSpinner);
 
 		Spinner<Double> heightSpinner = new Spinner<>();
-		heightSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(10.0, 1000.0, table.getHeight(), 5));
+		heightSpinner.setValueFactory(SpinnerInput.doubleFactory(table.getHeight(), 5));
 		heightSpinner.setEditable(true);
+		SpinnerInput.install(heightSpinner, "Höhe", () -> EntityLabels.table(table));
 		heightSpinner.setPrefWidth(100);
 		heightSpinner.setDisable(!editMode);
 		grid.addRow(row++, new Label("Höhe:"), heightSpinner);
 
 		Spinner<Double> posXSpinner = new Spinner<>();
-		posXSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-10000.0, 10000.0, table.getPosX(), 5));
+		posXSpinner.setValueFactory(SpinnerInput.doubleFactory(table.getPosX(), 5));
 		posXSpinner.setEditable(true);
+		SpinnerInput.install(posXSpinner, "Position X", () -> EntityLabels.table(table));
 		posXSpinner.setPrefWidth(100);
 		posXSpinner.setDisable(!editMode);
 		grid.addRow(row++, new Label("PosX:"), posXSpinner);
 
 		Spinner<Double> posYSpinner = new Spinner<>();
-		posYSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(-10000.0, 10000.0, table.getPosY(), 5));
+		posYSpinner.setValueFactory(SpinnerInput.doubleFactory(table.getPosY(), 5));
 		posYSpinner.setEditable(true);
+		SpinnerInput.install(posYSpinner, "Position Y", () -> EntityLabels.table(table));
 		posYSpinner.setPrefWidth(100);
 		posYSpinner.setDisable(!editMode);
 		grid.addRow(row++, new Label("PosY:"), posYSpinner);
+
+		// Übernimmt die Eingaben ins Modell (nur geänderte Felder). Der Klick auf einen Knopf nimmt einem Spinner den Fokus und
+		// löst eine Ablehnung aus: Dann gilt nichts davon, und es wird nichts übernommen (false).
+		BooleanSupplier applyEdits = () -> {
+			if (SpinnerInput.blockSaveIfScreenInputRejected(widthSpinner)) {
+				return false;
+			}
+			if (!editMode) {
+				return true;
+			}
+			if (!categoryField.getText().equals(Objects.toString(table.getCategory(), ""))) {
+				table.setCategory(categoryField.getText());
+			}
+			if (!descField.getText().equals(Objects.toString(table.getDesc(), ""))) {
+				table.setDesc(descField.getText());
+			}
+			Double width = widthSpinner.getValue();
+			if (width != null && Double.compare(width, table.getWidth()) != 0) {
+				table.setWidth(width);
+			}
+			Double height = heightSpinner.getValue();
+			if (height != null && Double.compare(height, table.getHeight()) != 0) {
+				table.setHeight(height);
+			}
+			Double x = posXSpinner.getValue();
+			if (x != null && Double.compare(x, table.getPosX()) != 0) {
+				table.setPosX(x);
+				table.setManualPos(true);
+			}
+			Double y = posYSpinner.getValue();
+			if (y != null && Double.compare(y, table.getPosY()) != 0) {
+				table.setPosY(y);
+				table.setManualPos(true);
+			}
+			return true;
+		};
 
 		Label positionLabel = new Label(table.isManualPos() ? "Position: manuell gesetzt" : "Position: automatisch");
 		grid.add(positionLabel, 0, row++, 2, 1);
@@ -827,6 +891,9 @@ public class HallOverviewController implements ContentController {
 		resetPositionButton.setDisable(!editMode || !table.isManualPos());
 		resetPositionButton.getStyleClass().add("button-danger");
 		resetPositionButton.setOnAction(event -> {
+			if (!applyEdits.getAsBoolean()) {
+				return;
+			}
 			table.setManualPos(false);
 			popup.hide();
 		});
@@ -834,6 +901,9 @@ public class HallOverviewController implements ContentController {
 		Button placeButton = new Button("Position festlegen");
 		placeButton.setDisable(!editMode);
 		placeButton.setOnAction(event -> {
+			if (!applyEdits.getAsBoolean()) {
+				return;
+			}
 			popup.hide();
 			startPlacingTable(table);
 		});
@@ -841,33 +911,7 @@ public class HallOverviewController implements ContentController {
 		HBox positionButtonRow = new HBox(8, resetPositionButton, placeButton);
 		grid.add(positionButtonRow, 0, row++, 2, 1);
 
-		addCloseButtonRow(grid, popup, row++);
-
-		// Änderungen sofort ins Modell übernehmen; Anzeige aktualisiert sich beim Schließen (siehe unten)
-		categoryField.textProperty().addListener((obs, oldVal, newVal) -> table.setCategory(newVal));
-		descField.textProperty().addListener((obs, oldVal, newVal) -> table.setDesc(newVal));
-		widthSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
-			if (newVal != null) {
-				table.setWidth(newVal);
-			}
-		});
-		heightSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
-			if (newVal != null) {
-				table.setHeight(newVal);
-			}
-		});
-		posXSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
-			if (newVal != null) {
-				table.setPosX(newVal);
-				table.setManualPos(true);
-			}
-		});
-		posYSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
-			if (newVal != null) {
-				table.setPosY(newVal);
-				table.setManualPos(true);
-			}
-		});
+		addTableButtonRow(grid, popup, row++, applyEdits);
 
 		return finalizePopup(popup, grid);
 	}

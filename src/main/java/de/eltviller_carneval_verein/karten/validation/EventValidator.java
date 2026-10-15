@@ -25,9 +25,18 @@ public final class EventValidator {
 	}
 
 	private ValidationResult run() {
+		validateName();
 		validatePresentationNamesAreUnique();
 		validatePresentations();
 		return result;
+	}
+
+	/** Der Eventname darf nicht leer sein (auch nicht nur Leerzeichen): Er gibt dem Event seine Anzeige und Datei-Zuordnung. */
+	private void validateName() {
+		String name = event.getName();
+		if (name == null || name.isBlank()) {
+			result.add(EventIssue.NAME_EMPTY.toIssue());
+		}
 	}
 
 	/**

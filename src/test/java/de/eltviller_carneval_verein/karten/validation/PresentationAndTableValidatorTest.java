@@ -17,7 +17,7 @@ class PresentationAndTableValidatorTest {
 	/** Vollständig ausgefüllte Vorstellung "Prunksitzung", damit nur die zu prüfenden Fehler auftreten. */
 	private static Presentation presentation() {
 		Event event = new Event();
-		event.changeName("Kampagne");
+		event.setName("Kampagne");
 		Presentation presentation = event.addPresentation("Prunksitzung");
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
@@ -28,6 +28,90 @@ class PresentationAndTableValidatorTest {
 	private static ValidationIssue only(ValidationResult result) {
 		assertEquals(1, result.getIssues().size(), "Genau eine Meldung erwartet: " + result.getIssues());
 		return result.getIssues().get(0);
+	}
+
+	// --- Namen und Nummern (PRS-004, TBL-002) ---
+
+	@Test
+	void presentationWithoutNameIsAnError() {
+		Presentation presentation = presentation();
+		presentation.setName("");
+
+		assertEquals("PRS-004", only(PresentationValidator.validate(presentation)).code());
+	}
+
+	@Test
+	void tableNumberBelowOneIsAnErrorAndNamesTheTable() {
+		for (int number : new int[] { 0, -3 }) {
+			Table table = presentation().addTable(4);
+			table.setTableNumber(number);
+
+			ValidationIssue issue = only(TableValidator.validate(table));
+
+			assertEquals("TBL-002", issue.code());
+			assertTrue(issue.message().contains("Tisch " + number), issue.message());
+		}
+	}
+
+	// --- Wertebereiche (TBL-003, TBL-004, PRS-005), früher Grenzen der Spinner ---
+
+	@Test
+	void tableSizeMustBeBetweenZeroAndOneThousand() {
+		for (double ok : new double[] { 0, 70, 1000 }) {
+			Table table = presentation().addTable(4);
+			table.setWidth(ok);
+			table.setHeight(ok);
+			assertTrue(TableValidator.validate(table).isEmpty(), "Gültig: " + ok);
+		}
+
+		Table wide = presentation().addTable(4);
+		wide.setWidth(1000.5);
+		ValidationIssue width = only(TableValidator.validate(wide));
+		assertEquals("TBL-003", width.code());
+		assertEquals("Breite von Prunksitzung, Tisch 4 liegt mit 1000,5 nicht zwischen 0 und 1000.", width.message());
+
+		Table negative = presentation().addTable(4);
+		negative.setHeight(-1);
+		ValidationIssue height = only(TableValidator.validate(negative));
+		assertEquals("TBL-003", height.code());
+		assertTrue(height.message().startsWith("Höhe von Prunksitzung, Tisch 4"), height.message());
+	}
+
+	@Test
+	void tablePositionMustBeWithinPlusMinusTenThousand() {
+		for (double ok : new double[] { -10_000, 0, 10_000 }) {
+			Table table = presentation().addTable(4);
+			table.setPosX(ok);
+			table.setPosY(ok);
+			assertTrue(TableValidator.validate(table).isEmpty(), "Gültig: " + ok);
+		}
+
+		Table far = presentation().addTable(4);
+		far.setPosX(10_001);
+		far.setPosY(-10_001);
+		ValidationResult result = TableValidator.validate(far);
+		assertEquals(2, result.getIssues().size(), result.getIssues().toString());
+		assertTrue(result.getIssues().stream().allMatch(i -> i.code().equals("TBL-004")));
+		assertTrue(result.getIssues().stream().anyMatch(i -> i.message().startsWith("Position X von Prunksitzung, Tisch 4")));
+	}
+
+	@Test
+	void actualCashMustBeBetweenZeroAndOneMillionEuro() {
+		for (int ok : new int[] { 0, 2500, 100_000_000 }) {
+			Presentation presentation = presentation();
+			presentation.setActualCashAmount(ok);
+			assertTrue(PresentationValidator.validate(presentation).isEmpty(), "Gültig: " + ok + " Cent");
+		}
+
+		Presentation tooMuch = presentation();
+		tooMuch.setActualCashAmount(100_000_001);
+		ValidationIssue high = only(PresentationValidator.validate(tooMuch));
+		assertEquals("PRS-005", high.code());
+		assertEquals("Ist-Betrag von Vorstellung Prunksitzung liegt mit 1.000.000,01 € nicht zwischen 0,00 € und 1.000.000,00 €.", high.message());
+
+		Presentation negative = presentation();
+		negative.setActualCashAmount(-1);
+		assertEquals("PRS-005", only(PresentationValidator.validate(negative)).code());
 	}
 
 	// --- Weitergabe an die Kinder ---
@@ -70,8 +154,8 @@ class PresentationAndTableValidatorTest {
 	void duplicateSeatNumberIsReportedOncePerNumber() {
 		Table table = presentation().addTable(4);
 		table.addSeat(1);
-		table.addSeat(2).changeSeatNumber(1);
-		table.addSeat(3).changeSeatNumber(1);
+		table.addSeat(2).setSeatNumber(1);
+		table.addSeat(3).setSeatNumber(1);
 
 		ValidationIssue issue = only(TableValidator.validate(table));
 
@@ -95,7 +179,7 @@ class PresentationAndTableValidatorTest {
 	void duplicateTableNumberIsReportedOncePerNumber() {
 		Presentation presentation = presentation();
 		presentation.addTable(1);
-		presentation.addTable(2).changeTableNumber(1);
+		presentation.addTable(2).setTableNumber(1);
 
 		ValidationIssue issue = only(PresentationValidator.validate(presentation));
 
@@ -160,15 +244,11 @@ class PresentationAndTableValidatorTest {
 	void presentationWithoutNameIsStillDescribed() {
 		Presentation presentation = presentation();
 		presentation.setHallId(null);
-		// Name nachträglich leeren, wie es eine geladene Datei könnte
-		try {
-			var name = Presentation.class.getDeclaredField("name");
-			name.setAccessible(true);
-			name.set(presentation, " ");
-		} catch (ReflectiveOperationException e) {
-			throw new AssertionError(e);
-		}
+		presentation.setName(" ");
 
-		assertEquals("Für Vorstellung ohne Namen ist keine Halle ausgewählt.", only(PresentationValidator.validate(presentation)).message());
+		ValidationIssue hallIssue = PresentationValidator.validate(presentation).getIssues().stream()
+				.filter(issue -> issue.code().equals("PRS-003")).findFirst().orElseThrow();
+
+		assertEquals("Für Vorstellung ohne Namen ist keine Halle ausgewählt.", hallIssue.message());
 	}
 }

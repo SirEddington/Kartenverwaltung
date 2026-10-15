@@ -9,12 +9,11 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
-import de.eltviller_carneval_verein.karten.ui.StatusMessage;
-import de.eltviller_carneval_verein.karten.validation.Severity;
+import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextField;
 
 /**
@@ -51,11 +50,11 @@ public class HallEditController {
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.halls());
 
-		setupSpinner(spnHallWidth, 100000.0, 10, value -> {
+		setupSpinner(spnHallWidth, "Hallenbreite", 10, value -> {
 			hall.setHallWidth(value);
 			hallPlanController.refresh();
 		});
-		setupSpinner(spnHallHeight, 100000.0, 10, value -> {
+		setupSpinner(spnHallHeight, "Hallenhöhe", 10, value -> {
 			hall.setHallHeight(value);
 			hallPlanController.refresh();
 		});
@@ -73,15 +72,11 @@ public class HallEditController {
 		});
 	}
 
-	private void setupSpinner(Spinner<Double> spinner, double max, double step, Consumer<Double> onChange) {
-		spinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(0.0, max, 0.0, step));
+	private void setupSpinner(Spinner<Double> spinner, String fieldName, double step, Consumer<Double> onChange) {
+		spinner.setValueFactory(SpinnerInput.doubleFactory(0.0, step));
 		spinner.setEditable(true);
-		// Getippte Werte beim Verlassen des Feldes übernehmen
-		spinner.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
-			if (!isFocused) {
-				spinner.increment(0);
-			}
-		});
+		SpinnerInput.install(spinner, fieldName, () -> hall == null ? null : EntityLabels.hall(hall));
+		// Getippte Werte beim Verlassen des Feldes übernimmt der Spinner selbst (ein zweites Bestätigen hier brächte nichts)
 		spinner.valueProperty().addListener((obs, oldVal, newVal) -> {
 			if (!updating && hall != null && newVal != null) {
 				onChange.accept(newVal);
@@ -119,12 +114,8 @@ public class HallEditController {
 		if (updating || hall == null) {
 			return;
 		}
-		try {
-			hall.changeName(txtName.getText());
-		} catch (IllegalArgumentException e) {
-			// Leerer Name: alten Namen wiederherstellen
-			txtName.setText(hall.getName());
-		}
+		// Ein leerer Name wird übernommen und vom HallValidator gemeldet (HLL-001)
+		hall.setName(txtName.getText());
 	}
 
 	@FXML
@@ -162,12 +153,11 @@ public class HallEditController {
 		if (hall == null) {
 			return;
 		}
-		try {
-			hall.changeName(txtName.getText());
-		} catch (IllegalArgumentException e) {
-			StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
+		// Der Klick auf Speichern nimmt einem Spinner den Fokus: Eine abgelehnte Eingabe nicht mit "Gespeichert" überschreiben
+		if (SpinnerInput.blockSaveIfScreenInputRejected(txtName)) {
 			return;
 		}
+		hall.setName(txtName.getText());
 		HallSaver.save(hall);
 	}
 }

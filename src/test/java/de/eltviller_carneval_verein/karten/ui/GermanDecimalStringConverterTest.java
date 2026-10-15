@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
@@ -16,6 +17,17 @@ class GermanDecimalStringConverterTest {
 	@Test
 	void parsesDotAsDecimalSeparator() {
 		assertEquals(12.5, converter.fromString("12.50"));
+	}
+
+	@Test
+	void parsesDotAsThousandsSeparatorBeforeAComma() {
+		assertEquals(1234.5, converter.fromString("1.234,50"));
+	}
+
+	@Test
+	void unreadableTextThrowsNumberFormatException() {
+		assertThrows(NumberFormatException.class, () -> converter.fromString("abc"));
+		assertThrows(NumberFormatException.class, () -> converter.fromString("1e9"));
 	}
 
 	@Test

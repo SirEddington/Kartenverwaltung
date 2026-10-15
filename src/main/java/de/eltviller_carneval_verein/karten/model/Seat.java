@@ -185,12 +185,9 @@ public class Seat {
 	}
 	// <-- Getter und Setter
 
-	public void changeSeatNumber(int seatNumber) {
-		if (seatNumber <= 0) {
-			throw new IllegalArgumentException("Sitznummer darf nicht kleiner als 1 sein.");
-		} else {
-			this.seatNumber = seatNumber;
-		}
+	/** Nimmt jeden Wert an; eine Nummer unter 1 wird vom {@code SeatValidator} gemeldet (SEA-008). */
+	public void setSeatNumber(int seatNumber) {
+		this.seatNumber = seatNumber;
 	}
 
 	@JsonIgnore

@@ -1,5 +1,7 @@
 package de.eltviller_carneval_verein.karten.validation;
 
+import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
@@ -14,10 +16,32 @@ public final class EntityLabels {
 	private EntityLabels() {
 	}
 
+	/** Platzhalter für einen leeren Namen in Anzeigen (Listen, Auswahlfelder). */
+	public static final String NAME_PLACEHOLDER = "(ohne Name)";
+
+	/** Der Name, oder {@value #NAME_PLACEHOLDER}, wenn er {@code null} oder leer ist. */
+	public static String nameOrPlaceholder(String name) {
+		return (name == null || name.isBlank()) ? NAME_PLACEHOLDER : name;
+	}
+
+	/** z. B. "Halle Festhalle" (ohne Namen oder ohne Halle: "Halle ohne Namen"). */
+	public static String hall(Hall hall) {
+		return named("Halle", hall == null ? null : hall.getName());
+	}
+
+	/** z. B. "Hallenobjekt Bühne in Halle Festhalle" (ohne Namen: "Hallenobjekt ohne Namen in ..."). */
+	public static String hallObject(HallObject object, Hall hall) {
+		return named("Hallenobjekt", object.getName()) + " in " + hall(hall);
+	}
+
 	/** z. B. "Vorstellung Prunksitzung" (ohne Namen: "Vorstellung ohne Namen"). */
 	public static String presentation(Presentation presentation) {
-		String name = presentation.getName();
-		return (name == null || name.isBlank()) ? "Vorstellung ohne Namen" : "Vorstellung " + name;
+		return named("Vorstellung", presentation.getName());
+	}
+
+	/** "<Art> <Name>", ohne Namen "<Art> ohne Namen". */
+	private static String named(String kind, String name) {
+		return (name == null || name.isBlank()) ? kind + " ohne Namen" : kind + " " + name;
 	}
 
 	/** z. B. "Prunksitzung, Tisch 4" (ohne Vorstellung: "Tisch 4"). */

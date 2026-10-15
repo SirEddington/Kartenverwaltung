@@ -15,6 +15,7 @@ import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.EventBackupCatalog;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
@@ -54,9 +55,9 @@ public class EventOverviewController extends AbstractOverviewController {
 		colName.setCellValueFactory(param -> {
 			Object data = param.getValue().getValue();
 			if (data instanceof Event event)
-				return new SimpleStringProperty("Event: " + event.getName());
+				return new SimpleStringProperty("Event: " + EntityLabels.nameOrPlaceholder(event.getName()));
 			if (data instanceof Presentation presentation)
-				return new SimpleStringProperty("Vorstellung: " + presentation.getName());
+				return new SimpleStringProperty("Vorstellung: " + EntityLabels.nameOrPlaceholder(presentation.getName()));
 			if (data instanceof Table table)
 				return new SimpleStringProperty("Tisch " + table.getTableNumber());
 			if (data instanceof Seat seat)
@@ -269,9 +270,12 @@ public class EventOverviewController extends AbstractOverviewController {
 		return EventBackupCatalog.create();
 	}
 
-	/** Anzeigename der Halle einer Vorstellung; ein Strich, wenn keine (oder keine existierende) Halle zugeordnet ist. */
+	/**
+	 * Anzeigename der Halle einer Vorstellung; ein Strich, wenn keine (oder keine existierende) Halle zugeordnet ist,
+	 * "(ohne Name)" bei einer Halle ohne Namen.
+	 */
 	static String hallDisplayName(Hall hall) {
-		return hall == null ? "–" : hall.getName();
+		return hall == null ? "–" : EntityLabels.nameOrPlaceholder(hall.getName());
 	}
 
 	/** Löscht den gewählten Eintrag nach Rückfrage und speichert das betroffene Event sofort. */
