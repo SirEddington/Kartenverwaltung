@@ -22,6 +22,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -263,7 +264,7 @@ public class EventEditController {
 		colPresHall.setCellFactory(ComboBoxTableCell.forTableColumn(new StringConverter<Hall>() {
 			@Override
 			public String toString(Hall hall) {
-				return hall == null ? "– keine Halle –" : hall.getName();
+				return hall == null ? "– keine Halle –" : EntityLabels.nameOrPlaceholder(hall.getName());
 			}
 
 			@Override

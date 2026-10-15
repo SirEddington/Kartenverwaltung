@@ -19,6 +19,7 @@ import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.HallBackupCatalog;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.fxml.FXML;
@@ -63,9 +64,9 @@ public class HallManagementController extends AbstractOverviewController {
 		colName.setCellValueFactory(cell -> {
 			Object data = cell.getValue().getValue();
 			if (data instanceof Hall hall)
-				return new SimpleStringProperty("Halle: " + hall.getName());
+				return new SimpleStringProperty("Halle: " + EntityLabels.nameOrPlaceholder(hall.getName()));
 			if (data instanceof HallObject object)
-				return new SimpleStringProperty("Hallenobjekt: " + object.getName());
+				return new SimpleStringProperty("Hallenobjekt: " + EntityLabels.nameOrPlaceholder(object.getName()));
 			return new SimpleStringProperty("");
 		});
 

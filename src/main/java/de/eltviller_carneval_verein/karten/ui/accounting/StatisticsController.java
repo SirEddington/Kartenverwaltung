@@ -29,6 +29,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.SnapshotParameters;
 import javafx.scene.chart.BarChart;
@@ -120,7 +121,7 @@ public class StatisticsController implements ContentController, Exportable {
 		}
 
 		double occupancyPct = totalSeats > 0 ? (soldSeats * 100.0 / totalSeats) : 0;
-		return new EventStats(event.getName(), revenueCents, occupancyPct, earliest != null ? earliest : LocalDate.MAX);
+		return new EventStats(EntityLabels.nameOrPlaceholder(event.getName()), revenueCents, occupancyPct, earliest != null ? earliest : LocalDate.MAX);
 	}
 
 	private record EventStats(String name, long revenueCents, double occupancyPct, LocalDate sortDate) {

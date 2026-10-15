@@ -9,6 +9,7 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
 import javafx.scene.control.ComboBox;
@@ -47,7 +48,7 @@ public class EventCreateController {
 		cmbHall.setConverter(new StringConverter<Hall>() {
 			@Override
 			public String toString(Hall hall) {
-				return hall == null ? "– keine Halle –" : hall.getName();
+				return hall == null ? "– keine Halle –" : EntityLabels.nameOrPlaceholder(hall.getName());
 			}
 
 			@Override

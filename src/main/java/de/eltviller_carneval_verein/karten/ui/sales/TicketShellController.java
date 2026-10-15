@@ -15,6 +15,7 @@ import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -73,7 +74,7 @@ public class TicketShellController {
 		presComboBox.setConverter(new StringConverter<Presentation>() {
 			@Override
 			public String toString(Presentation presentation) {
-				return presentation == null ? ALL_PRESENTATIONS : presentation.getName();
+				return presentation == null ? ALL_PRESENTATIONS : EntityLabels.nameOrPlaceholder(presentation.getName());
 			}
 
 			@Override

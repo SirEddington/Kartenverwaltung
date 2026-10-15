@@ -25,6 +25,7 @@ import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
@@ -162,7 +163,7 @@ public class CashReconciliationController implements ContentController, Exportab
 		istCentsCache = istCents;
 
 		if (selectedPres != null) {
-			lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart – " + selectedPres.getName());
+			lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart – " + EntityLabels.nameOrPlaceholder(selectedPres.getName()));
 			lblIstHint.setText("");
 		} else {
 			int count = presentations.size();
