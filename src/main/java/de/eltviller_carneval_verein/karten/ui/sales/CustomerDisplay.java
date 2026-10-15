@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.List;
 
+import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -27,6 +28,7 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 import javafx.stage.Window;
 
 /**
@@ -40,7 +42,14 @@ public final class CustomerDisplay {
 
 	private final SalesViewState state;
 	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
-	private final Stage stage = new Stage();
+	// Der Vollbildmodus ist ein randloses Fenster in Bildschirmgröße und kein JavaFX-Vollbild: Ein Vollbildfenster wird
+	// minimiert, sobald das Hauptfenster den Fokus bekommt. Die Scene wandert beim Umschalten zwischen den Fenstern.
+	private final Stage windowStage = new Stage();
+	private Stage borderlessStage;
+	private Scene scene;
+	private Runnable onClosed;
+	private boolean fullscreen = false;
+	private boolean switching = false;
 	private final Label titleLabel = new Label();
 	private final Label hintLabel = new Label(CustomerDisplayText.WAITING_HINT);
 	private final HallPlanPane planPane = new HallPlanPane();
@@ -86,57 +95,109 @@ public final class CustomerDisplay {
 	 * @param onClosed   wird aufgerufen, wenn das Fenster geschlossen wurde (auch vom Anwender)
 	 */
 	public void show(Window mainWindow, Runnable onClosed) {
-		titleLabel.setStyle("-fx-font-size: 30px; -fx-font-weight: bold;");
+		// Wie die Titel im Hauptmenü: Yanone Kaffeesatz Bold in ECV-Blau
+		titleLabel.getStyleClass().add("header-label");
 		titleLabel.setWrapText(true);
-		hintLabel.setStyle("-fx-font-size: 28px;");
+		hintLabel.getStyleClass().add("subheader-label");
 		planPane.setInteractive(false);
 		planPane.setRefitOnResize(true);
 		planPane.setMouseTransparent(true);
 
-		BorderPane root = new BorderPane();
-		root.setStyle("-fx-background-color: white;");
+		BorderPane content = new BorderPane();
 		StackPane top = new StackPane(titleLabel);
 		top.setPadding(new Insets(16));
 		StackPane.setAlignment(titleLabel, Pos.CENTER);
-		root.setTop(top);
-		root.setCenter(new StackPane(planPane, hintLabel));
+		content.setTop(top);
+		content.setCenter(new StackPane(planPane, hintLabel));
 
-		Scene scene = new Scene(root);
+		// Hintergrund und Wappen wie in allen Ansichten der App
+		scene = new Scene(MainApp.wrapWithBackground(content));
 		scene.getStylesheets().add(HallOverviewController.APP_STYLESHEET);
+		// F11 und Doppelklick schalten den Vollbildmodus um, Esc beendet ihn
 		scene.setOnKeyPressed(event -> {
-			if (event.getCode() == KeyCode.F11) {
-				stage.setFullScreen(!stage.isFullScreen());
+			if (event.getCode() == KeyCode.F11 || (event.getCode() == KeyCode.ESCAPE && fullscreen)) {
+				toggleFullscreen();
 			}
 		});
 		scene.setOnMouseClicked(event -> {
 			if (event.getClickCount() == 2) {
-				stage.setFullScreen(!stage.isFullScreen());
+				toggleFullscreen();
 			}
 		});
 
-		stage.setTitle("ECV Kartenverwaltung – Verkaufsmodus");
-		stage.getIcons().add(new Image(CustomerDisplay.class.getResourceAsStream(LOGO)));
-		stage.setFullScreenExitHint("");
-		stage.setScene(scene);
+		this.onClosed = onClosed;
+		configure(windowStage);
+		windowStage.setScene(scene);
 		place(mainWindow);
-		stage.setOnHidden(event -> {
-			detach();
-			onClosed.run();
-		});
 
 		attach();
-		stage.show();
+		windowStage.show();
 		refresh();
 		applyView();
 	}
 
 	/** Schließt das Fenster; mehrfaches Aufrufen schadet nicht. */
 	public void close() {
-		stage.close();
+		windowStage.close();
+		if (borderlessStage != null) {
+			borderlessStage.close();
+		}
 	}
 
 	public boolean isShowing() {
-		return stage.isShowing();
+		return windowStage.isShowing() || (borderlessStage != null && borderlessStage.isShowing());
+	}
+
+	/** Ob das Fenster gerade den ganzen Bildschirm einnimmt. */
+	boolean isFullscreen() {
+		return fullscreen;
+	}
+
+	private void configure(Stage target) {
+		target.setTitle("ECV Kartenverwaltung – Verkaufsmodus");
+		target.getIcons().add(new Image(CustomerDisplay.class.getResourceAsStream(LOGO)));
+		target.setOnHidden(event -> {
+			// Beim Umschalten verschwindet das eine Fenster, das andere erscheint: Das ist kein Schließen
+			if (!switching) {
+				detach();
+				if (onClosed != null) {
+					Runnable notify = onClosed;
+					onClosed = null;
+					notify.run();
+				}
+			}
+		});
+	}
+
+	/** Schaltet zwischen dem Fenster und dem randlosen Fenster in Bildschirmgröße um; die Scene zieht dabei um. */
+	private void toggleFullscreen() {
+		switching = true;
+		try {
+			if (!fullscreen) {
+				Stage from = windowStage;
+				Rectangle2D screen = Screen.getScreensForRectangle(from.getX(), from.getY(), from.getWidth(), from.getHeight()).get(0).getBounds();
+				if (borderlessStage == null) {
+					borderlessStage = new Stage(StageStyle.UNDECORATED);
+					configure(borderlessStage);
+				}
+				from.setScene(null);
+				borderlessStage.setScene(scene);
+				borderlessStage.setX(screen.getMinX());
+				borderlessStage.setY(screen.getMinY());
+				borderlessStage.setWidth(screen.getWidth());
+				borderlessStage.setHeight(screen.getHeight());
+				borderlessStage.show();
+				from.hide();
+			} else {
+				borderlessStage.setScene(null);
+				windowStage.setScene(scene);
+				windowStage.show();
+				borderlessStage.hide();
+			}
+			fullscreen = !fullscreen;
+		} finally {
+			switching = false;
+		}
 	}
 
 	private void place(Window mainWindow) {
@@ -146,13 +207,13 @@ public final class CustomerDisplay {
 		int other = ScreenChoice.indexOfOtherScreen(visualBounds, main);
 		if (other >= 0) {
 			Rectangle2D bounds = visualBounds.get(other);
-			stage.setX(bounds.getMinX());
-			stage.setY(bounds.getMinY());
-			stage.setWidth(bounds.getWidth());
-			stage.setHeight(bounds.getHeight());
+			windowStage.setX(bounds.getMinX());
+			windowStage.setY(bounds.getMinY());
+			windowStage.setWidth(bounds.getWidth());
+			windowStage.setHeight(bounds.getHeight());
 		} else {
-			stage.setWidth(1024);
-			stage.setHeight(768);
+			windowStage.setWidth(1024);
+			windowStage.setHeight(768);
 		}
 	}
 

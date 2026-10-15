@@ -231,7 +231,7 @@ public class MainApp extends Application {
 	 * erscheint, statt es in jeder FXML einzeln nachzubauen. Skaliert mit der
 	 * tatsächlichen Fenstergröße mit.
 	 */
-	private static Parent wrapWithBackground(Parent content) {
+	public static Parent wrapWithBackground(Parent content) {
 		ImageView background = new ImageView(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/wappen.png")));
 		background.setPreserveRatio(true);
 		background.setOpacity(0.12);
