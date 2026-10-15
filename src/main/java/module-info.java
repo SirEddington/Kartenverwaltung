@@ -41,6 +41,9 @@ module Kartenverwaltung {
     // Wiederherstellen aus Backups (Dialog und Kataloge)
     exports de.eltviller_carneval_verein.karten.ui.backup;
 
+    // Eingabe in Tabellenzellen und Spinnern (Zellen, Leser, Rückmeldung)
+    exports de.eltviller_carneval_verein.karten.ui.input;
+
     // Repository-Paket exportieren
     exports de.eltviller_carneval_verein.karten.repository;
 
