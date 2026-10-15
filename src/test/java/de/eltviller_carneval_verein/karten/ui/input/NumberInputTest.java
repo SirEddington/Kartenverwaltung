@@ -30,6 +30,16 @@ class NumberInputTest {
 	}
 
 	@Test
+	void decimalAcceptsMissingDigitsBeforeOrAfterTheSeparator() {
+		assertDecimal(0.5, ",5");
+		assertDecimal(0.5, ".5");
+		assertDecimal(12.0, "12,");
+		assertDecimal(12.0, "12.");
+		assertDecimal(-0.5, "-,5");
+		assertDecimal(-12.0, "-12,");
+	}
+
+	@Test
 	void decimalTreatsDotBeforeCommaAsThousandsSeparator() {
 		assertDecimal(1234.5, "1.234,5");
 		assertDecimal(1234567.0, "1.234.567,0");
@@ -48,7 +58,12 @@ class NumberInputTest {
 		assertUnreadableDecimal("1,2,3");
 		assertUnreadableDecimal("1,234.5");
 		assertUnreadableDecimal("1.234.567");
-		assertUnreadableDecimal("12,");
+		assertUnreadableDecimal(",");
+		assertUnreadableDecimal(".");
+		assertUnreadableDecimal("-");
+		assertUnreadableDecimal("-,");
+		assertUnreadableDecimal(",,5");
+		assertUnreadableDecimal("12,,");
 		assertUnreadableDecimal("--5");
 	}
 

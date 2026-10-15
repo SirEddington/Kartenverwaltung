@@ -15,14 +15,15 @@ import java.util.regex.Pattern;
  * <p>
  * Regeln für Dezimalzahlen: Das Komma ist der Dezimaltrenner. Ein Punkt gilt auch als Dezimaltrenner, wenn kein
  * Komma vorkommt. Kommen beide vor, ist der Punkt Tausendertrenner und steht in Dreiergruppen vor dem Komma
- * ("1.234,5"). Leerzeichen am Rand zählen nicht. Exponenten, "NaN" und mehrere Dezimaltrenner sind nicht lesbar.
+ * ("1.234,5"). Ziffern vor oder nach dem Trenner dürfen fehlen (",5" ist 0,5, "12," ist 12). Leerzeichen am Rand
+ * zählen nicht. Exponenten, "NaN", ein Trenner allein und mehrere Dezimaltrenner sind nicht lesbar.
  */
 public final class NumberInput {
 
 	/** Mit Tausenderpunkten und Komma: "1.234,5", "-1.234.567,0". */
 	private static final Pattern GROUPED = Pattern.compile("-?\\d{1,3}(\\.\\d{3})+,\\d+");
-	/** Ganzzahl oder Dezimalzahl mit genau einem Komma oder Punkt: "12", "12,5", "12.5", "-5". */
-	private static final Pattern PLAIN = Pattern.compile("-?\\d+([.,]\\d+)?");
+	/** Ganzzahl oder Dezimalzahl mit genau einem Komma oder Punkt: "12", "12,5", "12.5", "-5", auch ",5" (0,5) und "12," (12). */
+	private static final Pattern PLAIN = Pattern.compile("-?(\\d+([.,]\\d*)?|[.,]\\d+)");
 	private static final Pattern INTEGER = Pattern.compile("-?\\d+");
 
 	// DecimalFormat ist nicht threadsicher und teuer zu bauen; format läuft u. a. bei jeder Mausbewegung im Hallenplan

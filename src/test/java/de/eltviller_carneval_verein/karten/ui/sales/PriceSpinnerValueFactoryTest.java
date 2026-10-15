@@ -86,7 +86,8 @@ class PriceSpinnerValueFactoryTest {
 		PriceSpinnerValueFactory factory = factoryWithRejections(rejected);
 
 		assertEquals(12.5, factory.parseQuietly("12,5"));
-		assertEquals(7.0, factory.parseQuietly("12,"), "Halb getippt: bisheriger Wert");
+		assertEquals(12.0, factory.parseQuietly("12,"), "Ein Komma am Ende gilt: 12 Euro");
+		assertEquals(7.0, factory.parseQuietly("12,5,"), "Halb getippt und ungültig: bisheriger Wert");
 		assertEquals(7.0, factory.parseQuietly("5000"));
 		assertNull(factory.parseQuietly(""));
 		assertTrue(rejected.isEmpty(), "Die Live-Berechnung beim Tippen darf nichts melden");
