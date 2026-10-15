@@ -2,7 +2,6 @@ package de.eltviller_carneval_verein.karten.ui.event;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -22,6 +21,9 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
+import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
+import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -49,9 +51,6 @@ import javafx.scene.control.cell.ComboBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
-import javafx.util.converter.IntegerStringConverter;
-import javafx.util.converter.LocalDateStringConverter;
-import javafx.util.converter.LocalTimeStringConverter;
 
 public class EventEditController {
 
@@ -139,9 +138,6 @@ public class EventEditController {
 	private TextField txtMail;
 	@FXML
 	private TextField txtComment;
-
-	DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy");
-	DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
 
 	Event currentEvent;
 	Presentation currentPres;
@@ -249,11 +245,11 @@ public class EventEditController {
 		colPresDesc.setOnEditCommit(e -> e.getRowValue().setDescription(e.getNewValue()));
 
 		colPresDate.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getDate()));
-		colPresDate.setCellFactory(TextFieldTableCell.forTableColumn(new LocalDateStringConverter(dateFormatter, null)));
+		colPresDate.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.date(), InputIssue.NOT_A_DATE, "Datum", EntityLabels::presentation));
 		colPresDate.setOnEditCommit(e -> e.getRowValue().setDate(e.getNewValue()));
 
 		colPresTime.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getTime()));
-		colPresTime.setCellFactory(TextFieldTableCell.forTableColumn(new LocalTimeStringConverter(timeFormatter, null)));
+		colPresTime.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.time(), InputIssue.NOT_A_TIME, "Uhrzeit", EntityLabels::presentation));
 		colPresTime.setOnEditCommit(e -> e.getRowValue().setTime(e.getNewValue()));
 
 		// Halle der Vorstellung: Auswahl aus den angelegten Hallen (null = keine Halle zugeordnet)
@@ -276,7 +272,7 @@ public class EventEditController {
 
 		// --- Tisch Tabelle ---
 		colTableNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getTableNumber()).asObject());
-		colTableNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
+		colTableNumber.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.integer(), InputIssue.NOT_A_NUMBER, "Tischnummer", EntityLabels::table));
 		colTableNumber.setOnEditCommit(e -> e.getRowValue().setTableNumber(e.getNewValue()));
 
 		colTableCategory.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getCategory()));
@@ -289,7 +285,7 @@ public class EventEditController {
 
 		// --- Sitz Tabelle ---
 		colSeatNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getSeatNumber()).asObject());
-		colSeatNumber.setCellFactory(TextFieldTableCell.forTableColumn(new IntegerStringConverter()));
+		colSeatNumber.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.integer(), InputIssue.NOT_A_NUMBER, "Sitznummer", EntityLabels::seat));
 		colSeatNumber.setOnEditCommit(e -> e.getRowValue().setSeatNumber(e.getNewValue()));
 
 		colSeatComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getComment()));

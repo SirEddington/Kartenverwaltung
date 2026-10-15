@@ -13,6 +13,8 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
+import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
+import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -152,7 +154,7 @@ public class TicketTableController implements ContentController {
 		colFirstName.setCellFactory(TextFieldTableCell.forTableColumn());
 		colFirstName.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setFirstName(editEvent.getNewValue()));
 
-		colPrice.setCellFactory(TextFieldTableCell.forTableColumn(PRICE_CONVERTER));
+		colPrice.setCellFactory(ParsingTextFieldTableCell.forTableColumn(PRICE_CONVERTER, InputIssue.NOT_A_NUMBER, "Preis", dto -> EntityLabels.seat(dto.getSeat())));
 		colPrice.setOnEditCommit(editEvent -> editEvent.getRowValue().getSeat().setPriceDouble(editEvent.getNewValue()));
 
 		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
