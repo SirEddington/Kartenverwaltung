@@ -29,6 +29,9 @@ import javafx.util.StringConverter;
  */
 public final class SpinnerInput {
 
+	/** Schlüssel in den Eigenschaften des Spinners: die zuletzt abgelehnte Eingabe, bis eine gültige bestätigt wird. */
+	private static final String PENDING_REJECTION = SpinnerInput.class.getName() + ".pendingRejection";
+
 	private SpinnerInput() {
 	}
 
@@ -60,8 +63,30 @@ public final class SpinnerInput {
 	 * aktualisiert: Bleibt der Wert gleich, stünde sonst weiter "abc" im Feld.
 	 */
 	public static void reject(Spinner<?> spinner, ValidationIssue issue) {
+		spinner.getProperties().put(PENDING_REJECTION, issue);
 		InputFeedback.report(issue, spinner);
 		Platform.runLater(() -> restoreText(spinner));
+	}
+
+	/**
+	 * Für die Speichern-Handler der Screens mit Spinnern: Wurde in einem der Spinner eine Eingabe abgelehnt und seither
+	 * keine gültige bestätigt, geht das Speichern <strong>nicht</strong> weiter. Der Klick auf "Speichern" nimmt dem
+	 * Spinner den Fokus und löst die Ablehnung aus, bevor die Speichern-Aktion läuft; ohne diese Abfrage würde "Gespeichert"
+	 * die Meldung überschreiben und der Nutzer merkt nicht, dass seine Eingabe (z. B. 150 bei Maximum 100) nicht galt.
+	 * Die Meldung wird wieder angezeigt, der Merker ist damit verbraucht: Der nächste Klick speichert.
+	 *
+	 * @return {@code true}, wenn nicht gespeichert werden soll
+	 */
+	public static boolean blockSaveIfInputRejected(Spinner<?>... spinners) {
+		boolean rejected = false;
+		for (Spinner<?> spinner : spinners) {
+			Object pending = spinner.getProperties().remove(PENDING_REJECTION);
+			if (pending instanceof ValidationIssue issue) {
+				InputFeedback.report(issue, spinner);
+				rejected = true;
+			}
+		}
+		return rejected;
 	}
 
 	private static <T extends Number> void install(Spinner<T> spinner, SpinnerValueFactory<T> factory, double min, double max,
@@ -86,6 +111,7 @@ public final class SpinnerInput {
 					reject(spinner, InputIssue.OUT_OF_RANGE.toIssue(label, typed, NumberInput.format(min), NumberInput.format(max)));
 					return factory.getValue();
 				}
+				spinner.getProperties().remove(PENDING_REJECTION);
 				return parsed.get();
 			}
 		});

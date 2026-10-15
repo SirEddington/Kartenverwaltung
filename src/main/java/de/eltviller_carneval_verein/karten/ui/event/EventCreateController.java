@@ -73,6 +73,11 @@ public class EventCreateController {
 
 	@FXML
 	private void handleSave() {
+		// Der Klick auf Speichern nimmt einem Spinner den Fokus: Wurde seine Eingabe abgelehnt, nicht stillschweigend mit dem alten Wert anlegen
+		if (SpinnerInput.blockSaveIfInputRejected(spnPresCount, spnTablePerPres, spnDoubleTableWidth, spnDoubleTableHeight, spnSeatsPerTable,
+				spnDoubleSeatWidth, spnDoubleSeatHeight, spnDoublePrice)) {
+			return;
+		}
 		String name = txtEventName.getText().trim();
 		if (name.isEmpty()) {
 			StatusMessage.getInstance().show(Severity.ERROR, "Bitte gib einen Namen für das Event ein.");

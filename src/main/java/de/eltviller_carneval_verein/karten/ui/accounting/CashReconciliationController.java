@@ -359,6 +359,10 @@ public class CashReconciliationController implements ContentController, Exportab
 
 	@Override
 	public void save() {
+		// Eine abgelehnte Eingabe im Ist-Betrag nicht mit "Gespeichert" überschreiben
+		if (SpinnerInput.blockSaveIfInputRejected(actualCashSpinner)) {
+			return;
+		}
 		if (selectedEvent != null) {
 			EventSaver.save(selectedEvent);
 		}
