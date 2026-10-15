@@ -16,11 +16,13 @@ import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
@@ -35,6 +37,8 @@ public class TicketShellController {
 	private static final String ALL_PRESENTATIONS = "Alle Vorstellungen";
 
 	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
+	// Gemeinsamer Zustand mit dem Kundenfenster: Die Shell und ihre Inhalte schreiben ihn, das Kundenfenster liest ihn
+	private final SalesViewState state = new SalesViewState();
 
 	@FXML
 	private ComboBox<Event> eventComboBox;
@@ -53,6 +57,8 @@ public class TicketShellController {
 	@FXML
 	private Button btnSave;
 	@FXML
+	private CheckBox chkSalesMode;
+	@FXML
 	private StackPane contentArea;
 	@FXML
 	private Label lblHeader;
@@ -61,13 +67,35 @@ public class TicketShellController {
 	private boolean updatingPresentations = false;
 	private String searchText = "";
 	private ContentController activeContentController;
-	private Event currentEvent;
-	private Presentation currentPresentation;
 	private boolean editMode = false;
+	private CustomerDisplay customerDisplay;
+	private final ChangeListener<Boolean> windowShowing = (obs, wasShowing, isShowing) -> {
+		if (!isShowing) {
+			closeCustomerDisplay();
+		}
+	};
 
 	@FXML
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
+
+		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das
+		// Hauptfenster geschlossen, schließt es mit (sonst hielte es die App am Leben). Die Szene bleibt an contentArea
+		// hängen, auch wenn das Fenster eine andere zeigt: Deshalb wird ihr Fenster beobachtet, nicht contentArea.
+		contentArea.sceneProperty().addListener((obs, oldScene, newScene) -> {
+			if (newScene != null) {
+				newScene.windowProperty().addListener((o, oldWindow, newWindow) -> {
+					if (oldWindow != null) {
+						oldWindow.showingProperty().removeListener(windowShowing);
+					}
+					if (newWindow == null) {
+						closeCustomerDisplay();
+					} else {
+						newWindow.showingProperty().addListener(windowShowing);
+					}
+				});
+			}
+		});
 
 		// "Alle Vorstellungen" ist als echter (null-)Eintrag Teil der Liste, wie in der Abrechnung: So lässt sich die
 		// Auswahl einer Vorstellung wieder aufheben.
@@ -88,18 +116,18 @@ public class TicketShellController {
 
 		// Event- & Vorstellungs-Listener einrichten
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
-			currentEvent = selectedEvent;
-			currentPresentation = null;
-			if (currentEvent != null) {
-				ChangeTracker.events().ensureTracked(currentEvent);
+			state.eventProperty().set(selectedEvent);
+			state.presentationProperty().set(null);
+			if (selectedEvent != null) {
+				ChangeTracker.events().ensureTracked(selectedEvent);
 			}
 			// Das Neufüllen der Liste meldet der Inhalt nicht einzeln: setEvent unten setzt ihn auf "Alle Vorstellungen"
 			updatingPresentations = true;
 			try {
 				List<Presentation> presentationItems = new ArrayList<>();
 				presentationItems.add(null); // "Alle Vorstellungen"
-				if (currentEvent != null) {
-					presentationItems.addAll(currentEvent.getPresentations());
+				if (selectedEvent != null) {
+					presentationItems.addAll(selectedEvent.getPresentations());
 				}
 				presComboBox.getItems().setAll(presentationItems);
 				presComboBox.getSelectionModel().selectFirst();
@@ -107,7 +135,7 @@ public class TicketShellController {
 				updatingPresentations = false;
 			}
 			if (activeContentController != null) {
-				activeContentController.setEvent(currentEvent);
+				activeContentController.setEvent(selectedEvent);
 			}
 		});
 
@@ -115,9 +143,9 @@ public class TicketShellController {
 			if (updatingPresentations) {
 				return;
 			}
-			currentPresentation = selectedPresentation;
+			state.presentationProperty().set(selectedPresentation);
 			if (activeContentController != null) {
-				activeContentController.setPresentation(currentPresentation);
+				activeContentController.setPresentation(selectedPresentation);
 			}
 		});
 
@@ -176,9 +204,15 @@ public class TicketShellController {
 			PopupWindows.hideOwnedBy(contentArea.getScene() == null ? null : contentArea.getScene().getWindow());
 			contentArea.getChildren().setAll(view);
 
+			// Auswahl und Ausschnitt der alten Ansicht gelten nicht mehr; der neue Inhalt meldet seine eigenen
+			state.resetView();
+			if (activeContentController instanceof SalesStateAware aware) {
+				aware.setSalesState(state);
+			}
+
 			// Aktuelles Event und Vorstellung direkt an den neuen Inhalt übergeben
-			activeContentController.setEvent(currentEvent);
-			activeContentController.setPresentation(currentPresentation);
+			activeContentController.setEvent(state.eventProperty().get());
+			activeContentController.setPresentation(state.presentationProperty().get());
 			// Der Bearbeitungsmodus gilt für die ganze Shell, nicht nur für die Ansicht, in der er eingeschaltet wurde
 			activeContentController.setEditMode(editMode);
 		} catch (IOException e) {
@@ -199,6 +233,39 @@ public class TicketShellController {
 		// Edit-Status an die aktive Inhaltsansicht (Tabelle oder Saalplan) durchreichen
 		if (activeContentController != null) {
 			activeContentController.setEditMode(editMode);
+		}
+	}
+
+	/** Die Checkbox "Verkaufsmodus" öffnet und schließt das Kundenfenster. */
+	@FXML
+	private void toggleSalesMode() {
+		if (chkSalesMode.isSelected()) {
+			openCustomerDisplay();
+		} else {
+			closeCustomerDisplay();
+		}
+	}
+
+	private void openCustomerDisplay() {
+		if (customerDisplay != null) {
+			return;
+		}
+		CustomerDisplay display = new CustomerDisplay(state);
+		customerDisplay = display;
+		display.show(contentArea.getScene().getWindow(), () -> {
+			// Schließt der Anwender das Fenster selbst, ist der Verkaufsmodus aus
+			if (customerDisplay == display) {
+				customerDisplay = null;
+			}
+			chkSalesMode.setSelected(false);
+		});
+	}
+
+	private void closeCustomerDisplay() {
+		CustomerDisplay display = customerDisplay;
+		customerDisplay = null;
+		if (display != null) {
+			display.close();
 		}
 	}
 

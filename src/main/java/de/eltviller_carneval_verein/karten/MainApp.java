@@ -215,7 +215,7 @@ public class MainApp extends Application {
 	/**
 	 * Die einzige Stelle, an der die Scenes der App entstehen: Hintergrund und Stylesheet.
 	 */
-	private static Scene createScene(Parent content) {
+	public static Scene createScene(Parent content) {
 		Scene scene = new Scene(wrapWithBackground(content), width, height);
 		scene.getStylesheets().add(stylesheetUrl());
 		return scene;

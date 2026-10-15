@@ -22,6 +22,7 @@ import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
@@ -36,7 +37,7 @@ import javafx.scene.control.cell.ComboBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.util.StringConverter;
 
-public class TicketTableController implements ContentController {
+public class TicketTableController implements ContentController, SalesStateAware {
 
 	private static final GermanDecimalStringConverter PRICE_CONVERTER = new GermanDecimalStringConverter();
 
@@ -252,6 +253,14 @@ public class TicketTableController implements ContentController {
 		colCollected.setEditable(editMode);
 		colWheelchair.setEditable(editMode);
 		colComment.setEditable(editMode);
+	}
+
+	/** Meldet die gewählten Tabellenzeilen als ausgewählte Sitze (auch ohne Bearbeitungsmodus). */
+	@Override
+	public void setSalesState(SalesViewState state) {
+		seatTable.getSelectionModel().getSelectedItems().addListener((ListChangeListener<SeatDTO>) change -> {
+			state.replaceSelection(seatTable.getSelectionModel().getSelectedItems().stream().map(SeatDTO::getSeat).toList());
+		});
 	}
 
 	@Override

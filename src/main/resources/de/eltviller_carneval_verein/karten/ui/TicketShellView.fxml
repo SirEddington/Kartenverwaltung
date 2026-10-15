@@ -40,6 +40,8 @@
         <RadioButton fx:id="btnTableView" text="Tabelle" toggleGroup="$viewToggleGroup" selected="true"/>
         <RadioButton fx:id="btnHallView" text="Saalansicht" toggleGroup="$viewToggleGroup"/>
         
+        <CheckBox fx:id="chkSalesMode" text="Verkaufsmodus" onAction="#toggleSalesMode" />
+
         <Button fx:id="btnToggleEdit" styleClass="button-secondary" text="Bearbeiten" onAction="#toggleEditMode" />
     </HBox>
     
