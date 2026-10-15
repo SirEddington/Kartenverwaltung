@@ -81,6 +81,19 @@ class EventSaverTest {
 	}
 
 	@Test
+	void eventWithoutNameIsNotSavedAndDoesNotThrow() {
+		RecordingRepository repository = new RecordingRepository();
+		Event event = validEvent();
+		event.setName("");
+
+		EventSaver.SaveResult result = EventSaver.trySave(event, repository);
+
+		assertFalse(result.saved());
+		assertTrue(repository.saved.isEmpty(), "Ohne Namen darf nichts gespeichert werden");
+		assertEquals("EVT-002", result.validation().mostSevere().orElseThrow().code());
+	}
+
+	@Test
 	void eventWithAnErrorIsNotSaved() {
 		RecordingRepository repository = new RecordingRepository();
 		Event event = validEvent();

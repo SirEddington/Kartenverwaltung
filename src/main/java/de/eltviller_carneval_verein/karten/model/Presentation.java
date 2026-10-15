@@ -174,12 +174,9 @@ public class Presentation {
 		this.hallId = hallId;
 	}
 
+	/** Nimmt jeden Wert an; ein leerer Name wird vom {@code PresentationValidator} gemeldet (PRS-004). */
 	public void setName(String name) {
-		if (name == null || name.isBlank()) {
-			throw new IllegalArgumentException("Name darf nicht leer sein.");
-		} else {
-			this.name = name;
-		}
+		this.name = name;
 	}
 
 	public Table addTable() {

@@ -20,7 +20,9 @@ public enum SeatIssue implements Issue {
 	/** &1 = Sitz, &2 = Preis. */
 	PAID_WITHOUT_PRICE("SEA-006", Severity.WARNING, "&1 ist als bezahlt markiert, der Preis beträgt aber &2."),
 	/** &1 = Sitz. */
-	PAID_WITHOUT_NAME("SEA-007", Severity.WARNING, "&1 ist als bezahlt markiert, es ist aber kein Nachname eingetragen.");
+	PAID_WITHOUT_NAME("SEA-007", Severity.WARNING, "&1 ist als bezahlt markiert, es ist aber kein Nachname eingetragen."),
+	/** &1 = Sitz (mit der ungültigen Nummer). */
+	NUMBER_TOO_LOW("SEA-008", Severity.ERROR, "Die Sitznummer von &1 muss mindestens 1 sein.");
 
 	private final String code;
 	private final Severity severity;

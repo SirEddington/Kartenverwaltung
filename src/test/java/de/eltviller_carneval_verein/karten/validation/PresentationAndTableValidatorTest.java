@@ -30,6 +30,29 @@ class PresentationAndTableValidatorTest {
 		return result.getIssues().get(0);
 	}
 
+	// --- Namen und Nummern (PRS-004, TBL-002) ---
+
+	@Test
+	void presentationWithoutNameIsAnError() {
+		Presentation presentation = presentation();
+		presentation.setName("");
+
+		assertEquals("PRS-004", only(PresentationValidator.validate(presentation)).code());
+	}
+
+	@Test
+	void tableNumberBelowOneIsAnErrorAndNamesTheTable() {
+		for (int number : new int[] { 0, -3 }) {
+			Table table = presentation().addTable(4);
+			table.setTableNumber(number);
+
+			ValidationIssue issue = only(TableValidator.validate(table));
+
+			assertEquals("TBL-002", issue.code());
+			assertTrue(issue.message().contains("Tisch " + number), issue.message());
+		}
+	}
+
 	// --- Weitergabe an die Kinder ---
 
 	@Test
@@ -160,15 +183,11 @@ class PresentationAndTableValidatorTest {
 	void presentationWithoutNameIsStillDescribed() {
 		Presentation presentation = presentation();
 		presentation.setHallId(null);
-		// Name nachträglich leeren, wie es eine geladene Datei könnte
-		try {
-			var name = Presentation.class.getDeclaredField("name");
-			name.setAccessible(true);
-			name.set(presentation, " ");
-		} catch (ReflectiveOperationException e) {
-			throw new AssertionError(e);
-		}
+		presentation.setName(" ");
 
-		assertEquals("Für Vorstellung ohne Namen ist keine Halle ausgewählt.", only(PresentationValidator.validate(presentation)).message());
+		ValidationIssue hallIssue = PresentationValidator.validate(presentation).getIssues().stream()
+				.filter(issue -> issue.code().equals("PRS-003")).findFirst().orElseThrow();
+
+		assertEquals("Für Vorstellung ohne Namen ist keine Halle ausgewählt.", hallIssue.message());
 	}
 }

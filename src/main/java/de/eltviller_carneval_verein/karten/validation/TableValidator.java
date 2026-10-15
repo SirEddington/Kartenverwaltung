@@ -24,9 +24,16 @@ public final class TableValidator {
 	}
 
 	private ValidationResult run() {
+		validateNumber();
 		validateSeatNumbersAreUnique();
 		validateSeats();
 		return result;
+	}
+
+	private void validateNumber() {
+		if (table.getTableNumber() < 1) {
+			result.add(TableIssue.NUMBER_TOO_LOW.toIssue(EntityLabels.table(table)));
+		}
 	}
 
 	/** Vergleich unter Geschwistern: eine Meldung je mehrfach vergebener Sitznummer. */

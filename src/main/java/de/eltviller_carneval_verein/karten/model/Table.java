@@ -127,12 +127,9 @@ public class Table {
 	}
 	// <-- Getter und Setter
 
+	/** Nimmt jeden Wert an; eine Nummer unter 1 wird vom {@code TableValidator} gemeldet (TBL-002). */
 	public void setTableNumber(int tableNumber) {
-		if (tableNumber <= 0) {
-			throw new IllegalArgumentException("Tischnummer darf nicht kleiner als 1 sein.");
-		} else {
-			this.tableNumber = tableNumber;
-		}
+		this.tableNumber = tableNumber;
 	}
 
 	public Seat addSeat() {

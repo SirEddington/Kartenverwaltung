@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.validation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDate;
@@ -33,6 +34,17 @@ class EventValidatorTest {
 			table.addSeat(2).setPrice(1000);
 		}
 		return event;
+	}
+
+	@Test
+	void blankEventNameIsAnError() {
+		Event event = eventWithTwoPresentations();
+		event.setName("   ");
+
+		ValidationResult result = EventValidator.validate(event);
+
+		assertFalse(result.isValid());
+		assertTrue(result.getIssues().stream().anyMatch(i -> i.code().equals("EVT-002")));
 	}
 
 	@Test
@@ -81,7 +93,10 @@ class EventValidatorTest {
 
 	@Test
 	void eventWithoutPresentationsIsValid() {
-		assertTrue(EventValidator.validate(new Event()).isEmpty());
+		Event event = new Event();
+		event.setName("Kampagne");
+
+		assertTrue(EventValidator.validate(event).isEmpty());
 	}
 
 	// --- gleiche Vorstellungsnamen (EVT-001) ---

@@ -34,12 +34,19 @@ public final class SeatValidator {
 	}
 
 	private ValidationResult run() {
+		validateNumber();
 		validatePrice();
 		validateCollectedWithoutPayment();
 		validateEmail();
 		validatePaidWithoutPrice();
 		validatePaidWithoutName();
 		return result;
+	}
+
+	private void validateNumber() {
+		if (seat.getSeatNumber() < 1) {
+			result.add(SeatIssue.NUMBER_TOO_LOW.toIssue(EntityLabels.seat(seat)));
+		}
 	}
 
 	private void validatePrice() {

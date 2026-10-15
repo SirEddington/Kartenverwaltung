@@ -300,13 +300,9 @@ public class HallPlanController {
 		if (updatingPanel || selectedObject == null) {
 			return;
 		}
-		try {
-			selectedObject.setName(nameField.getText());
-			renderHall();
-		} catch (IllegalArgumentException e) {
-			// Leerer Name: alten Namen wiederherstellen
-			nameField.setText(selectedObject.getName());
-		}
+		// Ein leerer Name wird übernommen und vom HallObjectValidator gemeldet (HOB-001)
+		selectedObject.setName(nameField.getText());
+		renderHall();
 	}
 
 	// --- Zoom und Verschieben der Fläche (wie in der Saalübersicht) -->

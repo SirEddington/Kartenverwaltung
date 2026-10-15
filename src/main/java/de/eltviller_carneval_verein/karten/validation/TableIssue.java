@@ -7,7 +7,9 @@ package de.eltviller_carneval_verein.karten.validation;
  */
 public enum TableIssue implements Issue {
 	/** &1 = Tisch, &2 = mehrfach vergebene Sitznummer. */
-	SEAT_NUMBER_DUPLICATE("TBL-001", Severity.ERROR, "Sitznummer &2 kommt an &1 mehrfach vor.");
+	SEAT_NUMBER_DUPLICATE("TBL-001", Severity.ERROR, "Sitznummer &2 kommt an &1 mehrfach vor."),
+	/** &1 = Tisch (mit der ungültigen Nummer). */
+	NUMBER_TOO_LOW("TBL-002", Severity.ERROR, "Die Tischnummer von &1 muss mindestens 1 sein.");
 
 	private final String code;
 	private final Severity severity;

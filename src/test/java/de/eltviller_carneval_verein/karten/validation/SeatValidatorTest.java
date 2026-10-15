@@ -26,6 +26,21 @@ class SeatValidatorTest {
 		return result.getIssues().get(0);
 	}
 
+	// --- Sitznummer (SEA-008) ---
+
+	@Test
+	void seatNumberBelowOneIsAnErrorAndNamesTheSeat() {
+		for (int number : new int[] { 0, -2 }) {
+			Seat seat = seatWithPriceCents(1250);
+			seat.setSeatNumber(number);
+
+			ValidationIssue issue = only(SeatValidator.validate(seat));
+
+			assertEquals("SEA-008", issue.code());
+			assertTrue(issue.message().contains("Sitz " + number), issue.message());
+		}
+	}
+
 	// --- Preis (SEA-001, SEA-003) ---
 
 	@Test

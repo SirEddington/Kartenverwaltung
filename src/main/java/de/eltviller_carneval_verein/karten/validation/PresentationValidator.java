@@ -24,11 +24,19 @@ public final class PresentationValidator {
 	}
 
 	private ValidationResult run() {
+		validateName();
 		validateDateAndTime();
 		validateHall();
 		validateTableNumbersAreUnique();
 		validateTables();
 		return result;
+	}
+
+	private void validateName() {
+		String name = presentation.getName();
+		if (name == null || name.isBlank()) {
+			result.add(PresentationIssue.NAME_EMPTY.toIssue());
+		}
 	}
 
 	private void validateDateAndTime() {
