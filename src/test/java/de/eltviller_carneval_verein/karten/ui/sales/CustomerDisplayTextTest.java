@@ -65,6 +65,13 @@ class CustomerDisplayTextTest {
 	}
 
 	@Test
+	void summaryGoesBelowThePlanOnlyInPortrait() {
+		assertTrue(CustomerDisplayText.summaryBelow(1080, 1920));
+		assertFalse(CustomerDisplayText.summaryBelow(1920, 1080));
+		assertFalse(CustomerDisplayText.summaryBelow(1000, 1000));
+	}
+
+	@Test
 	void freeSeatIsNotTaken() {
 		Seat seat = presentation.addTable(1).addSeat(1);
 

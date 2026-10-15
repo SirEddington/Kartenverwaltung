@@ -36,6 +36,40 @@ final class HallViewport {
 		return new View(scale, -scale * (centerX - pivotX), -scale * (centerY - pivotY));
 	}
 
+	/** Rand, mit dem die ganze Halle eingepasst wird (Saalübersicht, Kundenfenster). */
+	static final double HALL_FIT_MARGIN = 0.95;
+
+	/**
+	 * Der Ausschnitt für eine andere Fläche mit dem Seitenverhältnis {@code paneAspect} (Breite / Höhe), der
+	 * <em>relativ</em> zur eigenen Einpassung dasselbe zeigt wie {@code mainVisible} im Hauptfenster: dieselbe Mitte und
+	 * derselbe Zoom im Verhältnis zur ganz eingepassten Halle. Ist das Hauptfenster auf "ganzer Saal", ergibt das genau den
+	 * eingepassten Saal der anderen Fläche; die Halle behält so ihre Größe, egal wie die Fenster geformt sind.
+	 *
+	 * @param mainVisible der sichtbare Ausschnitt des Hauptfensters (Hallenkoordinaten)
+	 * @param hall        die Halle, {@code (0, 0, Breite, Höhe)}
+	 * @param margin      der Rand der Einpassung ({@link #HALL_FIT_MARGIN}), im Hauptfenster derselbe wie hier
+	 */
+	static Rectangle2D relativeMirror(Rectangle2D mainVisible, Rectangle2D hall, double margin, double paneAspect) {
+		// Zoom des Hauptfensters im Verhältnis zu seiner Einpassung: Dessen Fläche hat dasselbe Seitenverhältnis wie
+		// mainVisible, die Einpassung zeigt einen Ausschnitt mit min(w / Halle.w, h / Halle.h) = 1 / margin.
+		double relativeZoom = 1 / (margin * Math.min(mainVisible.getWidth() / hall.getWidth(), mainVisible.getHeight() / hall.getHeight()));
+		// Der eingepasste Saal auf einer Fläche mit paneAspect, dann um den relativen Zoom enger
+		double width;
+		double height;
+		if (paneAspect >= hall.getWidth() / hall.getHeight()) {
+			height = hall.getHeight() / margin;
+			width = paneAspect * height;
+		} else {
+			width = hall.getWidth() / margin;
+			height = width / paneAspect;
+		}
+		width /= relativeZoom;
+		height /= relativeZoom;
+		double centerX = mainVisible.getMinX() + mainVisible.getWidth() / 2.0;
+		double centerY = mainVisible.getMinY() + mainVisible.getHeight() / 2.0;
+		return new Rectangle2D(centerX - width / 2.0, centerY - height / 2.0, width, height);
+	}
+
 	/** Der Ausschnitt in Hallenkoordinaten, den die Fläche bei diesem Zoom und dieser Verschiebung zeigt. */
 	static Rectangle2D visibleRect(double viewWidth, double viewHeight, View view) {
 		double pivotX = viewWidth / 2.0;

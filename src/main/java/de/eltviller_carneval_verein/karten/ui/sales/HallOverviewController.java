@@ -659,7 +659,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			Hall hall = hallRepository.findById(selectedPres.getHallId());
 			if (hall != null && hasHallBounds(hall) && !hall.getId().equals(fittedHallId)) {
 				fittedHallId = hall.getId();
-				viewportPane.fit(new Rectangle2D(0, 0, hall.getHallWidth(), hall.getHallHeight()), 0.95);
+				viewportPane.fit(new Rectangle2D(0, 0, hall.getHallWidth(), hall.getHallHeight()), HallViewport.HALL_FIT_MARGIN);
 			}
 		} else {
 			// "Alle Vorstellungen": Der Saalplan zeigt immer genau eine Vorstellung, das Event bleibt gewählt

@@ -54,6 +54,8 @@ public final class CustomerDisplay {
 	private final Stage windowStage = new Stage();
 	private Stage borderlessStage;
 	private Scene scene;
+	private BorderPane contentLayout;
+	private VBox summaryPanel;
 	private Runnable onClosed;
 	private boolean fullscreen = false;
 	private boolean switching = false;
@@ -115,19 +117,25 @@ public final class CustomerDisplay {
 		planPane.setRefitOnResize(true);
 		planPane.setMouseTransparent(true);
 
-		BorderPane content = new BorderPane();
+		contentLayout = new BorderPane();
 		StackPane top = new StackPane(titleLabel);
 		top.setPadding(new Insets(16));
 		StackPane.setAlignment(titleLabel, Pos.CENTER);
-		content.setTop(top);
-		content.setCenter(new StackPane(planPane, hintLabel));
-		Node summaryPanel = createSummaryPanel();
-		BorderPane.setMargin(summaryPanel, new Insets(0, 16, 16, 8));
-		content.setRight(summaryPanel);
+		contentLayout.setTop(top);
+		contentLayout.setCenter(new StackPane(planPane, hintLabel));
+		summaryPanel = createSummaryPanel();
+		placeSummary(false);
+
+		// Ändert sich die Form der Fläche, passt der Ausschnitt neu: Der relative Zoom hängt vom Seitenverhältnis ab
+		planPane.contentPane().widthProperty().addListener((obs, oldValue, newValue) -> applyView());
+		planPane.contentPane().heightProperty().addListener((obs, oldValue, newValue) -> applyView());
 
 		// Hintergrund und Wappen wie in allen Ansichten der App
-		scene = new Scene(MainApp.wrapWithBackground(content));
+		scene = new Scene(MainApp.wrapWithBackground(contentLayout));
 		scene.getStylesheets().add(HallOverviewController.APP_STYLESHEET);
+		// Im Hochformat steht die Kartenübersicht unter dem Plan, sonst rechts
+		scene.widthProperty().addListener((obs, oldValue, newValue) -> placeSummary(CustomerDisplayText.summaryBelow(scene.getWidth(), scene.getHeight())));
+		scene.heightProperty().addListener((obs, oldValue, newValue) -> placeSummary(CustomerDisplayText.summaryBelow(scene.getWidth(), scene.getHeight())));
 		// F11 und Doppelklick schalten den Vollbildmodus um, Esc beendet ihn
 		scene.setOnKeyPressed(event -> {
 			if (event.getCode() == KeyCode.F11 || (event.getCode() == KeyCode.ESCAPE && fullscreen)) {
@@ -168,8 +176,29 @@ public final class CustomerDisplay {
 		return fullscreen;
 	}
 
-	/** Die feste Spalte rechts neben dem Plan: Anzahl oben, scrollende Liste, Gesamtpreis unten. */
-	private Node createSummaryPanel() {
+	/** Setzt die Kartenübersicht neben den Plan (Querformat) oder darunter (Hochformat). */
+	private void placeSummary(boolean below) {
+		contentLayout.setRight(null);
+		contentLayout.setBottom(null);
+		if (below) {
+			BorderPane.setMargin(summaryPanel, new Insets(0, 16, 16, 16));
+			summaryPanel.setMinWidth(0);
+			summaryPanel.setPrefWidth(Region.USE_COMPUTED_SIZE);
+			summaryPanel.setMinHeight(320);
+			summaryPanel.setPrefHeight(320);
+			contentLayout.setBottom(summaryPanel);
+		} else {
+			BorderPane.setMargin(summaryPanel, new Insets(0, 16, 16, 8));
+			summaryPanel.setMinWidth(380);
+			summaryPanel.setPrefWidth(380);
+			summaryPanel.setMinHeight(Region.USE_COMPUTED_SIZE);
+			summaryPanel.setPrefHeight(Region.USE_COMPUTED_SIZE);
+			contentLayout.setRight(summaryPanel);
+		}
+	}
+
+	/** Die feste Spalte (Querformat) bzw. Leiste (Hochformat): Anzahl oben, scrollende Liste, Gesamtpreis unten. */
+	private VBox createSummaryPanel() {
 		countLabel.getStyleClass().add("header-label");
 		totalLabel.getStyleClass().add("header-label");
 		Label totalCaption = new Label("Gesamt");
@@ -187,8 +216,6 @@ public final class CustomerDisplay {
 
 		VBox panel = new VBox(12, countLabel, lines, new Separator(), totalRow);
 		panel.setPadding(new Insets(16));
-		panel.setPrefWidth(380);
-		panel.setMinWidth(380);
 		panel.setStyle("-fx-background-color: white; -fx-border-color: #cccccc; -fx-border-radius: 5; -fx-background-radius: 5;");
 		return panel;
 	}
@@ -308,24 +335,34 @@ public final class CustomerDisplay {
 	}
 
 	/**
-	 * Wählt den gezeigten Ausschnitt: den des Hauptfensters; ohne ihn (Tabellenansicht) die ganze Halle, ohne Halle die
-	 * Grenzen der gezeichneten Inhalte.
+	 * Wählt den gezeigten Ausschnitt. Mit Halle zeigt das Kundenfenster dieselbe Mitte und denselben Zoom <em>relativ zur
+	 * eingepassten Halle</em> wie das Hauptfenster ({@link HallViewport#relativeMirror}): Die Halle behält ihre Größe,
+	 * auch wenn Kopf- und Fußzeile des Hauptfensters dessen Fläche anders formen als die des Kundenfensters. Ohne
+	 * Ausschnitt (Tabellenansicht) ist es die ganze Halle, ohne Halle die Grenzen der gezeichneten Inhalte.
 	 */
 	private void applyView() {
 		Rectangle2D rect = state.visibleHallRectProperty().get();
-		if (rect != null) {
-			planPane.fit(rect, 1.0);
-			return;
-		}
 		Presentation presentation = state.presentationProperty().get();
 		Hall hall = presentation == null ? null : hallRepository.findById(presentation.getHallId());
-		if (hall != null && hall.getHallWidth() > 0 && hall.getHallHeight() > 0) {
-			planPane.fit(new Rectangle2D(0, 0, hall.getHallWidth(), hall.getHallHeight()), 0.95);
+		boolean hallHasBounds = hall != null && hall.getHallWidth() > 0 && hall.getHallHeight() > 0;
+		if (rect != null) {
+			double width = planPane.contentPane().getWidth();
+			double height = planPane.contentPane().getHeight();
+			if (hallHasBounds && width > 0 && height > 0) {
+				Rectangle2D hallRect = new Rectangle2D(0, 0, hall.getHallWidth(), hall.getHallHeight());
+				planPane.fit(HallViewport.relativeMirror(rect, hallRect, HallViewport.HALL_FIT_MARGIN, width / height), 1.0);
+			} else {
+				planPane.fit(rect, 1.0);
+			}
+			return;
+		}
+		if (hallHasBounds) {
+			planPane.fit(new Rectangle2D(0, 0, hall.getHallWidth(), hall.getHallHeight()), HallViewport.HALL_FIT_MARGIN);
 			return;
 		}
 		Rectangle2D bounds = planPane.contentBounds();
 		if (bounds != null) {
-			planPane.fit(bounds, 0.95);
+			planPane.fit(bounds, HallViewport.HALL_FIT_MARGIN);
 		}
 	}
 }

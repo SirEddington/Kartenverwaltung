@@ -38,6 +38,11 @@ final class CustomerDisplayText {
 		return title.toString();
 	}
 
+	/** Im Hochformat steht die Kartenübersicht unter dem Plan, sonst rechts daneben (dort wäre im Hochformat zu wenig Breite). */
+	static boolean summaryBelow(double windowWidth, double windowHeight) {
+		return windowHeight > windowWidth;
+	}
+
 	/** Rot für Kunden: Jeder Sitz, der nicht frei ist (reserviert, verkauft, blockiert). */
 	static boolean isTaken(Seat seat) {
 		return seat.getStatus() != SeatStatus.FREE;
