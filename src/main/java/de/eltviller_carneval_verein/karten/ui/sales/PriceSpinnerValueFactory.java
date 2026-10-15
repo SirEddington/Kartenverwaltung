@@ -43,7 +43,7 @@ public class PriceSpinnerValueFactory extends SpinnerValueFactory<Double> {
 
 			@Override
 			public Double fromString(String text) {
-				return read(text, true);
+				return read(text, rejectionHandler);
 			}
 		});
 		setValue(initial);
@@ -64,25 +64,23 @@ public class PriceSpinnerValueFactory extends SpinnerValueFactory<Double> {
 	 * Preis der bisherige Wert. Für Auswertungen, die bei jedem Tastendruck laufen.
 	 */
 	public Double parseQuietly(String text) {
-		return read(text, false);
+		return read(text, issue -> {
+		});
 	}
 
-	private Double read(String text, boolean report) {
+	/** Liest den Text; bei einer abgelehnten Eingabe geht die Meldung an {@code onReject} und der bisherige Wert bleibt. */
+	private Double read(String text, Consumer<ValidationIssue> onReject) {
 		if (text == null || text.isBlank()) {
 			return null;
 		}
 		OptionalDouble parsed = NumberInput.parseDecimal(text);
 		if (parsed.isEmpty()) {
-			if (report) {
-				rejectionHandler.accept(InputIssue.NOT_A_NUMBER.toIssue(fieldLabel, text.trim()));
-			}
+			onReject.accept(InputIssue.NOT_A_NUMBER.toIssue(fieldLabel, text.trim()));
 			return getValue();
 		}
 		double euros = round(parsed.getAsDouble());
 		if (euros < MIN || euros > MAX) {
-			if (report) {
-				rejectionHandler.accept(InputIssue.OUT_OF_RANGE.toIssue(fieldLabel, text.trim(), NumberInput.format(MIN), NumberInput.format(MAX)));
-			}
+			onReject.accept(InputIssue.OUT_OF_RANGE.toIssue(fieldLabel, text.trim(), NumberInput.format(MIN), NumberInput.format(MAX)));
 			return getValue();
 		}
 		return euros;

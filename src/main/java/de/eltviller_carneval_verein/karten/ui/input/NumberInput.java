@@ -19,8 +19,15 @@ import java.util.regex.Pattern;
  */
 public final class NumberInput {
 
-	private static final Pattern DIGITS = Pattern.compile("\\d+");
-	private static final Pattern GROUPED_DIGITS = Pattern.compile("\\d{1,3}(\\.\\d{3})+");
+	/** Mit Tausenderpunkten und Komma: "1.234,5", "-1.234.567,0". */
+	private static final Pattern GROUPED = Pattern.compile("-?\\d{1,3}(\\.\\d{3})+,\\d+");
+	/** Ganzzahl oder Dezimalzahl mit genau einem Komma oder Punkt: "12", "12,5", "12.5", "-5". */
+	private static final Pattern PLAIN = Pattern.compile("-?\\d+([.,]\\d+)?");
+	private static final Pattern INTEGER = Pattern.compile("-?\\d+");
+
+	// DecimalFormat ist nicht threadsicher und teuer zu bauen; format läuft u. a. bei jeder Mausbewegung im Hallenplan
+	private static final ThreadLocal<DecimalFormat> FORMAT = ThreadLocal
+			.withInitial(() -> new DecimalFormat("0.####", DecimalFormatSymbols.getInstance(Locale.GERMANY)));
 
 	private NumberInput() {
 	}
@@ -31,53 +38,16 @@ public final class NumberInput {
 			return OptionalDouble.empty();
 		}
 		String trimmed = text.trim();
-		boolean negative = trimmed.startsWith("-");
-		String body = negative ? trimmed.substring(1) : trimmed;
-
-		String integerPart;
-		String fractionPart = null;
-		int commas = count(body, ',');
-		if (commas > 1) {
-			return OptionalDouble.empty();
-		} else if (commas == 1) {
-			int comma = body.indexOf(',');
-			String left = body.substring(0, comma);
-			fractionPart = body.substring(comma + 1);
-			if (!DIGITS.matcher(fractionPart).matches()) {
-				return OptionalDouble.empty();
-			}
-			if (left.contains(".")) {
-				if (!GROUPED_DIGITS.matcher(left).matches()) {
-					return OptionalDouble.empty();
-				}
-				integerPart = left.replace(".", "");
-			} else {
-				integerPart = left;
-			}
+		String normalized;
+		if (GROUPED.matcher(trimmed).matches()) {
+			normalized = trimmed.replace(".", "").replace(',', '.');
+		} else if (PLAIN.matcher(trimmed).matches()) {
+			normalized = trimmed.replace(',', '.');
 		} else {
-			int dots = count(body, '.');
-			if (dots > 1) {
-				return OptionalDouble.empty();
-			} else if (dots == 1) {
-				int dot = body.indexOf('.');
-				integerPart = body.substring(0, dot);
-				fractionPart = body.substring(dot + 1);
-				if (!DIGITS.matcher(fractionPart).matches()) {
-					return OptionalDouble.empty();
-				}
-			} else {
-				integerPart = body;
-			}
-		}
-		if (!DIGITS.matcher(integerPart).matches()) {
 			return OptionalDouble.empty();
 		}
-
-		double value = Double.parseDouble(integerPart + (fractionPart == null ? "" : "." + fractionPart));
-		if (Double.isInfinite(value)) {
-			return OptionalDouble.empty();
-		}
-		return OptionalDouble.of(negative ? -value : value);
+		double value = Double.parseDouble(normalized);
+		return Double.isInfinite(value) ? OptionalDouble.empty() : OptionalDouble.of(value);
 	}
 
 	/** Liest eine ganze Zahl (nur Ziffern, optional mit Minus); leer, wenn der Text nicht so lesbar ist. */
@@ -86,8 +56,7 @@ public final class NumberInput {
 			return OptionalInt.empty();
 		}
 		String trimmed = text.trim();
-		String digits = trimmed.startsWith("-") ? trimmed.substring(1) : trimmed;
-		if (!DIGITS.matcher(digits).matches()) {
+		if (!INTEGER.matcher(trimmed).matches()) {
 			return OptionalInt.empty();
 		}
 		try {
@@ -99,16 +68,6 @@ public final class NumberInput {
 
 	/** Deutsche Schreibweise ohne überflüssige Nachkommastellen: 1000.0 ergibt "1000", 0.5 ergibt "0,5". */
 	public static String format(double value) {
-		return new DecimalFormat("0.####", DecimalFormatSymbols.getInstance(Locale.GERMANY)).format(value);
-	}
-
-	private static int count(String text, char c) {
-		int count = 0;
-		for (int i = 0; i < text.length(); i++) {
-			if (text.charAt(i) == c) {
-				count++;
-			}
-		}
-		return count;
+		return FORMAT.get().format(value);
 	}
 }

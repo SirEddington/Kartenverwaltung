@@ -74,8 +74,7 @@ public class EventCreateController {
 	@FXML
 	private void handleSave() {
 		// Der Klick auf Speichern nimmt einem Spinner den Fokus: Wurde seine Eingabe abgelehnt, nicht stillschweigend mit dem alten Wert anlegen
-		if (SpinnerInput.blockSaveIfInputRejected(spnPresCount, spnTablePerPres, spnDoubleTableWidth, spnDoubleTableHeight, spnSeatsPerTable,
-				spnDoubleSeatWidth, spnDoubleSeatHeight, spnDoublePrice)) {
+		if (SpinnerInput.blockSaveIfScreenInputRejected(txtEventName)) {
 			return;
 		}
 		String name = txtEventName.getText().trim();

@@ -160,9 +160,7 @@ public class HallEditController {
 			return;
 		}
 		// Der Klick auf Speichern nimmt einem Spinner den Fokus: Eine abgelehnte Eingabe nicht mit "Gespeichert" überschreiben
-		boolean headerRejected = SpinnerInput.blockSaveIfInputRejected(spnHallWidth, spnHallHeight);
-		boolean planRejected = hallPlanController.blockSaveIfInputRejected();
-		if (headerRejected || planRejected) {
+		if (SpinnerInput.blockSaveIfScreenInputRejected(txtName)) {
 			return;
 		}
 		hall.setName(txtName.getText());

@@ -14,10 +14,6 @@ import de.eltviller_carneval_verein.karten.validation.ValidationResult;
  */
 public final class HallSaver {
 
-	/** Ergebnis eines Speicherversuchs: wurde gespeichert, und was hat die Prüfung ergeben. */
-	record SaveResult(boolean saved, ValidationResult validation) {
-	}
-
 	private HallSaver() {
 	}
 

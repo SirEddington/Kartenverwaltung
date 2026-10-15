@@ -5,6 +5,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.format.ResolverStyle;
+import java.time.temporal.TemporalQuery;
 import java.util.Optional;
 
 /**
@@ -24,23 +25,20 @@ public final class DateTimeInput {
 
 	/** Liest ein Datum; leer, wenn der Text leer oder kein gültiges Datum ist (auch bei ungültigem Tag wie 31.02.). */
 	public static Optional<LocalDate> parseDate(String text) {
-		if (text == null || text.isBlank()) {
-			return Optional.empty();
-		}
-		try {
-			return Optional.of(LocalDate.parse(text.trim(), DATE_IN));
-		} catch (DateTimeParseException e) {
-			return Optional.empty();
-		}
+		return parse(text, DATE_IN, LocalDate::from);
 	}
 
 	/** Liest eine Uhrzeit (Stunde und Minute); leer, wenn der Text leer oder keine gültige Uhrzeit ist. */
 	public static Optional<LocalTime> parseTime(String text) {
+		return parse(text, TIME_IN, LocalTime::from);
+	}
+
+	private static <T> Optional<T> parse(String text, DateTimeFormatter formatter, TemporalQuery<T> query) {
 		if (text == null || text.isBlank()) {
 			return Optional.empty();
 		}
 		try {
-			return Optional.of(LocalTime.parse(text.trim(), TIME_IN));
+			return Optional.of(formatter.parse(text.trim(), query));
 		} catch (DateTimeParseException e) {
 			return Optional.empty();
 		}

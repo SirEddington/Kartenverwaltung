@@ -63,7 +63,7 @@ class HallSaverTest {
 		RecordingRepository repository = new RecordingRepository();
 		Hall hall = hall();
 
-		HallSaver.SaveResult result = HallSaver.trySave(hall, repository);
+		SaveResult result = HallSaver.trySave(hall, repository);
 
 		assertTrue(result.saved());
 		assertTrue(result.validation().isEmpty());
@@ -76,7 +76,7 @@ class HallSaverTest {
 		Hall hall = hall();
 		hall.setName(" ");
 
-		HallSaver.SaveResult result = HallSaver.trySave(hall, repository);
+		SaveResult result = HallSaver.trySave(hall, repository);
 
 		assertFalse(result.saved());
 		assertTrue(repository.saved.isEmpty(), "Ohne Namen darf nichts gespeichert werden");
@@ -89,7 +89,7 @@ class HallSaverTest {
 		Hall hall = hall();
 		hall.addHallObject("Bühne").setName("");
 
-		HallSaver.SaveResult result = HallSaver.trySave(hall, repository);
+		SaveResult result = HallSaver.trySave(hall, repository);
 
 		assertFalse(result.saved());
 		assertTrue(repository.saved.isEmpty());

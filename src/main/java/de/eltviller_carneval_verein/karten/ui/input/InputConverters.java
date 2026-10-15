@@ -3,6 +3,8 @@ package de.eltviller_carneval_verein.karten.ui.input;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
+import java.util.Optional;
+import java.util.function.Function;
 
 import javafx.util.StringConverter;
 
@@ -19,37 +21,11 @@ public final class InputConverters {
 	}
 
 	public static StringConverter<LocalDate> date() {
-		return new StringConverter<>() {
-			@Override
-			public String toString(LocalDate date) {
-				return date == null ? "" : DateTimeInput.formatDate(date);
-			}
-
-			@Override
-			public LocalDate fromString(String text) {
-				if (text == null || text.isBlank()) {
-					return null;
-				}
-				return DateTimeInput.parseDate(text).orElseThrow(() -> new DateTimeParseException("Kein gültiges Datum", text, 0));
-			}
-		};
+		return optional(DateTimeInput::formatDate, DateTimeInput::parseDate, text -> new DateTimeParseException("Kein gültiges Datum", text, 0));
 	}
 
 	public static StringConverter<LocalTime> time() {
-		return new StringConverter<>() {
-			@Override
-			public String toString(LocalTime time) {
-				return time == null ? "" : DateTimeInput.formatTime(time);
-			}
-
-			@Override
-			public LocalTime fromString(String text) {
-				if (text == null || text.isBlank()) {
-					return null;
-				}
-				return DateTimeInput.parseTime(text).orElseThrow(() -> new DateTimeParseException("Keine gültige Uhrzeit", text, 0));
-			}
-		};
+		return optional(DateTimeInput::formatTime, DateTimeInput::parseTime, text -> new DateTimeParseException("Keine gültige Uhrzeit", text, 0));
 	}
 
 	public static StringConverter<Integer> integer() {
@@ -62,6 +38,25 @@ public final class InputConverters {
 			@Override
 			public Integer fromString(String text) {
 				return NumberInput.parseInteger(text).orElseThrow(() -> new NumberFormatException("Keine ganze Zahl: " + text));
+			}
+		};
+	}
+
+	/** Converter für einen Wert, den man leer lassen darf: leerer Text ist {@code null}, unlesbarer wirft {@code error}. */
+	private static <T> StringConverter<T> optional(Function<T, String> format, Function<String, Optional<T>> parse,
+			Function<String, RuntimeException> error) {
+		return new StringConverter<>() {
+			@Override
+			public String toString(T value) {
+				return value == null ? "" : format.apply(value);
+			}
+
+			@Override
+			public T fromString(String text) {
+				if (text == null || text.isBlank()) {
+					return null;
+				}
+				return parse.apply(text).orElseThrow(() -> error.apply(text));
 			}
 		};
 	}

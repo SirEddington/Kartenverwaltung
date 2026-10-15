@@ -57,8 +57,10 @@ public final class LiveValidator<T> implements ChangeTracker.Listener<T> {
 	private final Class<T> type;
 	private final Function<T, String> idOf;
 	private final Function<T, ValidationResult> validator;
+	// Der ObjectMapper ist nach der Konfiguration threadsicher und wird von allen Instanzen geteilt
+	private static final ObjectMapper MAPPER = JsonMapperFactory.create();
+
 	private final Sink sink;
-	private final ObjectMapper mapper = JsonMapperFactory.create();
 	// Je Entität der zuletzt geprüfte Zustand: Er ist beim nächsten Mal der "Zustand davor" und muss nicht neu gelesen werden
 	private final Map<String, Evaluated> evaluated = new HashMap<>();
 
@@ -77,8 +79,9 @@ public final class LiveValidator<T> implements ChangeTracker.Listener<T> {
 
 	/** Meldet die Live-Prüfung bei den Trackern der Events und der Hallen an; das Ergebnis geht in die Fußzeile. */
 	public static void install() {
-		ChangeTracker.events().addListener(new LiveValidator<>(Event.class, Event::getId, EventValidator::validate, footerSink()));
-		ChangeTracker.halls().addListener(new LiveValidator<>(Hall.class, Hall::getId, HallValidator::validate, footerSink()));
+		Sink footer = footerSink();
+		ChangeTracker.events().addListener(new LiveValidator<>(Event.class, Event::getId, EventValidator::validate, footer));
+		ChangeTracker.halls().addListener(new LiveValidator<>(Hall.class, Hall::getId, HallValidator::validate, footer));
 	}
 
 	private static Sink footerSink() {
@@ -120,7 +123,7 @@ public final class LiveValidator<T> implements ChangeTracker.Listener<T> {
 			return known.issues();
 		}
 		try {
-			T earlier = mapper.readValue(before.bytes(), type);
+			T earlier = MAPPER.readValue(before.bytes(), type);
 			return new HashSet<>(validator.apply(earlier).getIssues());
 		} catch (IOException e) {
 			// Ohne den früheren Zustand gilt "es gab nichts": im Zweifel lieber eine Meldung zu viel

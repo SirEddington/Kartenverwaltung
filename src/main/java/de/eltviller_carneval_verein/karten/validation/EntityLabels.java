@@ -25,14 +25,17 @@ public final class EntityLabels {
 
 	/** z. B. "Halle Festhalle" (ohne Namen oder ohne Halle: "Halle ohne Namen"). */
 	public static String hall(Hall hall) {
-		String name = hall == null ? null : hall.getName();
-		return (name == null || name.isBlank()) ? "Halle ohne Namen" : "Halle " + name;
+		return named("Halle", hall == null ? null : hall.getName());
 	}
 
 	/** z. B. "Vorstellung Prunksitzung" (ohne Namen: "Vorstellung ohne Namen"). */
 	public static String presentation(Presentation presentation) {
-		String name = presentation.getName();
-		return (name == null || name.isBlank()) ? "Vorstellung ohne Namen" : "Vorstellung " + name;
+		return named("Vorstellung", presentation.getName());
+	}
+
+	/** "<Art> <Name>", ohne Namen "<Art> ohne Namen". */
+	private static String named(String kind, String name) {
+		return (name == null || name.isBlank()) ? kind + " ohne Namen" : kind + " " + name;
 	}
 
 	/** z. B. "Prunksitzung, Tisch 4" (ohne Vorstellung: "Tisch 4"). */

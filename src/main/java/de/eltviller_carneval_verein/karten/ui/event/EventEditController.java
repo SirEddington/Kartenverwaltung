@@ -735,7 +735,7 @@ public class EventEditController {
 	@FXML
 	private void saveCurrentState() {
 		// Eine abgelehnte Spinner-Eingabe nicht mit "Gespeichert" überschreiben (der Klick auf Speichern löst die Ablehnung aus)
-		if (SpinnerInput.blockSaveIfInputRejected(spnDoublePrice)) {
+		if (SpinnerInput.blockSaveIfScreenInputRejected(spnDoublePrice)) {
 			return;
 		}
 		// Aktuellen Stand speichern

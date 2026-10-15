@@ -7,7 +7,8 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.validation.ValidationIssue;
-import javafx.application.Platform;
+import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.util.StringConverter;
@@ -65,7 +66,7 @@ public final class SpinnerInput {
 	public static void reject(Spinner<?> spinner, ValidationIssue issue) {
 		spinner.getProperties().put(PENDING_REJECTION, issue);
 		InputFeedback.report(issue, spinner);
-		Platform.runLater(() -> restoreText(spinner));
+		restoreText(spinner);
 	}
 
 	/**
@@ -87,6 +88,21 @@ public final class SpinnerInput {
 			}
 		}
 		return rejected;
+	}
+
+	/**
+	 * Wie {@link #blockSaveIfInputRejected(Spinner...)} für alle Spinner des Screens, in dem {@code anyNodeOfScreen}
+	 * liegt (auch eingebundene Teilansichten wie der Hallenplan). Ein neuer Spinner ist damit automatisch abgedeckt, ohne
+	 * dass jeder Speichern-Handler seine Spinner aufzählt.
+	 */
+	public static boolean blockSaveIfScreenInputRejected(Node anyNodeOfScreen) {
+		Scene scene = anyNodeOfScreen.getScene();
+		if (scene == null) {
+			return false;
+		}
+		Spinner<?>[] spinners = scene.getRoot().lookupAll(".spinner").stream().filter(Spinner.class::isInstance).map(node -> (Spinner<?>) node)
+				.toArray(Spinner<?>[]::new);
+		return blockSaveIfInputRejected(spinners);
 	}
 
 	private static <T extends Number> void install(Spinner<T> spinner, SpinnerValueFactory<T> factory, double min, double max,

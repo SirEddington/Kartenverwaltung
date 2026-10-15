@@ -126,14 +126,6 @@ public class HallPlanController {
 
 	}
 
-	/**
-	 * Für den Speichern-Handler des Hallen-Editors: Wurde im Seitenpanel eine Spinner-Eingabe abgelehnt, soll nicht
-	 * gespeichert werden (siehe {@link SpinnerInput#blockSaveIfInputRejected}).
-	 */
-	public boolean blockSaveIfInputRejected() {
-		return SpinnerInput.blockSaveIfInputRejected(posXSpinner, posYSpinner, widthSpinner, heightSpinner, textSizeSpinner, textRotationSpinner);
-	}
-
 	private void setupPanel() {
 		widthSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_WIDTH, 5));
 		heightSpinner.setValueFactory(new SpinnerValueFactory.DoubleSpinnerValueFactory(1.0, 10000.0, FALLBACK_OBJECT_HEIGHT, 5));
