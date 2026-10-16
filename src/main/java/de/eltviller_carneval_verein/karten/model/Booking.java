@@ -17,8 +17,15 @@ import javafx.beans.property.SimpleObjectProperty;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Booking {
-	/** Reihenfolge der Plätze: Reihenbuchstabe (leer zuerst), dann Tischnummer, dann Sitznummer. */
-	public static final Comparator<Booking> PLACE_ORDER = Comparator.comparing(Booking::sortLabel)
+	/**
+	 * Reihenfolge der Reihenbuchstaben wie bei Excel-Spalten: kürzere zuerst, dann alphabetisch ohne Groß- und
+	 * Kleinschreibung (A, B, …, Z, AA, AB). Ein leerer Buchstabe steht vor allen anderen; {@code null} zählt als leer.
+	 */
+	public static final Comparator<String> ROW_LABEL_ORDER = Comparator.comparing((String label) -> label != null ? label.trim() : "",
+			Comparator.comparingInt(String::length).thenComparing(String.CASE_INSENSITIVE_ORDER));
+
+	/** Reihenfolge der Plätze: Reihenbuchstabe ({@link #ROW_LABEL_ORDER}, leer zuerst), dann Tischnummer, dann Sitznummer. */
+	public static final Comparator<Booking> PLACE_ORDER = Comparator.comparing(Booking::getRowLabel, ROW_LABEL_ORDER)
 			.thenComparingInt(Booking::getTableNumber).thenComparingInt(Booking::getSeatNumber);
 
 	@JsonBackReference("presentation-booking")

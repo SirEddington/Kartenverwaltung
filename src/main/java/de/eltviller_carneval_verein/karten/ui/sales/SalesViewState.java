@@ -4,9 +4,9 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.FXCollections;
@@ -22,7 +22,7 @@ public final class SalesViewState {
 	private final ObjectProperty<Event> event = new SimpleObjectProperty<>();
 	private final ObjectProperty<Presentation> presentation = new SimpleObjectProperty<>();
 	private final ObjectProperty<Rectangle2D> visibleHallRect = new SimpleObjectProperty<>();
-	private final ObservableSet<Seat> selectedSeats = FXCollections.observableSet(new LinkedHashSet<>());
+	private final ObservableSet<Booking> selectedBookings = FXCollections.observableSet(new LinkedHashSet<>());
 
 	public ObjectProperty<Event> eventProperty() {
 		return event;
@@ -37,21 +37,21 @@ public final class SalesViewState {
 		return visibleHallRect;
 	}
 
-	/** Die ausgewählten Sitze der aktiven Ansicht (Tabellenzeilen oder Sitze im Saalplan). */
-	public ObservableSet<Seat> selectedSeats() {
-		return selectedSeats;
+	/** Die ausgewählten Buchungen der aktiven Ansicht (Tabellenzeilen oder Sitze im Saalplan). */
+	public ObservableSet<Booking> selectedBookings() {
+		return selectedBookings;
 	}
 
-	/** Setzt die Auswahl auf {@code seats}: entfernt fehlende und fügt neue hinzu, gemeinsame Sitze bleiben unberührt. */
-	public void replaceSelection(Collection<Seat> seats) {
-		Set<Seat> wanted = new LinkedHashSet<>(seats);
-		selectedSeats.retainAll(wanted);
-		selectedSeats.addAll(wanted);
+	/** Setzt die Auswahl auf {@code bookings}: entfernt fehlende und fügt neue hinzu, gemeinsame bleiben unberührt. */
+	public void replaceSelection(Collection<Booking> bookings) {
+		Set<Booking> wanted = new LinkedHashSet<>(bookings);
+		selectedBookings.retainAll(wanted);
+		selectedBookings.addAll(wanted);
 	}
 
 	/** Beim Wechsel der Ansicht: leert die Auswahl und den Ausschnitt, Event und Vorstellung bleiben. */
 	public void resetView() {
-		selectedSeats.clear();
+		selectedBookings.clear();
 		visibleHallRect.set(null);
 	}
 }

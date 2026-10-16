@@ -214,6 +214,32 @@ class BookingTest {
 	}
 
 	@Test
+	void PLACE_ORDER_sortiert_Reihen_wie_Excel_Spalten() {
+		Booking aa = bookingAt("AA", 1, 1);
+		Booking z = bookingAt("Z", 1, 1);
+		Booking none = bookingAt("", 1, 1);
+		Booking b = bookingAt("B", 1, 1);
+		Booking a = bookingAt("A", 1, 1);
+
+		List<Booking> sorted = new ArrayList<>(List.of(aa, z, none, b, a));
+		sorted.sort(Booking.PLACE_ORDER);
+
+		assertEquals(List.of(none, a, b, z, aa), sorted);
+	}
+
+	@Test
+	void PLACE_ORDER_vergleicht_Reihenbuchstaben_ohne_Gross_und_Kleinschreibung() {
+		Booking lowerA = bookingAt("a", 2, 1);
+		Booking upperB = bookingAt("B", 1, 1);
+		Booking upperA = bookingAt("A", 1, 1);
+
+		List<Booking> sorted = new ArrayList<>(List.of(upperB, lowerA, upperA));
+		sorted.sort(Booking.PLACE_ORDER);
+
+		assertEquals(List.of(upperA, lowerA, upperB), sorted);
+	}
+
+	@Test
 	void unassigned_ist_standardmaessig_falsch_und_aenderbar() {
 		Booking booking = new Booking();
 		assertFalse(booking.isUnassigned());

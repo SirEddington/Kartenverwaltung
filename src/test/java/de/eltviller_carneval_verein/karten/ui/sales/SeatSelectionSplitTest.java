@@ -8,37 +8,38 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
-import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.model.Presentation;
 
 class SeatSelectionSplitTest {
 
-	private final Table table = new Event().addPresentation("Prunksitzung").addTable(1);
+	private final Presentation presentation = new Event().addPresentation("Prunksitzung");
+	private final TestBookings bookings = new TestBookings();
 
-	private Seat freeSeat(int number) {
-		return table.addSeat(number);
+	private Booking freeSeat(int number) {
+		return bookings.booking(presentation, 1, number);
 	}
 
-	private Seat reservedSeat(int number) {
-		Seat seat = table.addSeat(number);
-		seat.setLastName("Meier");
-		return seat;
+	private Booking reservedSeat(int number) {
+		Booking booking = bookings.booking(presentation, 1, number);
+		booking.setLastName("Meier");
+		return booking;
 	}
 
-	private Seat soldSeat(int number) {
-		Seat seat = table.addSeat(number);
-		seat.setPaymentStatus(PaymentStatus.CASH);
-		return seat;
+	private Booking soldSeat(int number) {
+		Booking booking = bookings.booking(presentation, 1, number);
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		return booking;
 	}
 
 	@Test
 	void separatesFreeSeatsFromReservedAndSoldOnesKeepingTheOrder() {
-		Seat free1 = freeSeat(1);
-		Seat reserved = reservedSeat(2);
-		Seat free2 = freeSeat(3);
-		Seat sold = soldSeat(4);
+		Booking free1 = freeSeat(1);
+		Booking reserved = reservedSeat(2);
+		Booking free2 = freeSeat(3);
+		Booking sold = soldSeat(4);
 
 		SeatSelectionSplit split = SeatSelectionSplit.of(List.of(free1, reserved, free2, sold));
 

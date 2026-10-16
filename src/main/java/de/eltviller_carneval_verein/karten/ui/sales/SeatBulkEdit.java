@@ -6,48 +6,48 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
-import de.eltviller_carneval_verein.karten.model.Seat;
 
 /**
- * Sammelt die Eingaben des Sitz-Dialogs für eine Liste von Sitzen und überträgt sie erst mit {@link #apply()}.
+ * Sammelt die Eingaben des Sitz-Dialogs für eine Liste von Buchungen und überträgt sie erst mit {@link #apply()}.
  *
  * <p>
- * Jedes Feld kennt den {@link Field#common() gemeinsamen Wert} der Sitze (leer, wenn sie sich unterscheiden: im Dialog
- * "verschieden") und merkt sich nur, was der Nutzer wirklich geändert hat. Alles andere bleibt je Sitz erhalten. Die
+ * Jedes Feld kennt den {@link Field#common() gemeinsamen Wert} der Buchungen (leer, wenn sie sich unterscheiden: im
+ * Dialog "verschieden") und merkt sich nur, was der Nutzer wirklich geändert hat. Alles andere bleibt je Buchung
+ * erhalten. Der Preis ist der effektive Preis ({@link Booking#getEffectivePrice()}): Wer den Standardpreis der
+ * Vorstellung eingibt, entfernt den Einzelpreis. Der Rollstuhlplatz gehört zur Bestuhlung und ist hier kein Feld. Die
  * Klasse kennt kein JavaFX, damit sich die Regeln ohne Oberfläche testen lassen.
  */
 public final class SeatBulkEdit {
 
-	private final List<Seat> seats;
+	private final List<Booking> bookings;
 	private final Field<String> lastName;
 	private final Field<String> firstName;
 	private final Field<PaymentStatus> paymentStatus;
 	private final Field<Integer> price;
 	private final Field<Boolean> collected;
-	private final Field<Boolean> wheelchairAccessible;
 	private final Field<String> comment;
 	private final List<Field<?>> fields;
 
-	public SeatBulkEdit(List<Seat> seats) {
-		this.seats = List.copyOf(seats);
-		lastName = text(Seat::getLastName, Seat::setLastName);
-		firstName = text(Seat::getFirstName, Seat::setFirstName);
-		paymentStatus = new Field<>(Seat::getPaymentStatus, Seat::setPaymentStatus, null);
-		price = new Field<>(Seat::getPrice, Seat::setPrice, null);
-		collected = new Field<>(Seat::isCollected, Seat::setCollected, null);
-		wheelchairAccessible = new Field<>(Seat::isWheelchairAccessible, Seat::setWheelchairAccessible, null);
-		comment = text(Seat::getComment, Seat::setComment);
-		fields = List.of(lastName, firstName, paymentStatus, price, collected, wheelchairAccessible, comment);
+	public SeatBulkEdit(List<Booking> bookings) {
+		this.bookings = List.copyOf(bookings);
+		lastName = text(Booking::getLastName, Booking::setLastName);
+		firstName = text(Booking::getFirstName, Booking::setFirstName);
+		paymentStatus = new Field<>(Booking::getPaymentStatus, Booking::setPaymentStatus, null);
+		price = new Field<>(Booking::getEffectivePrice, Booking::setEffectivePrice, null);
+		collected = new Field<>(Booking::isCollected, Booking::setCollected, null);
+		comment = text(Booking::getComment, Booking::setComment);
+		fields = List.of(lastName, firstName, paymentStatus, price, collected, comment);
 	}
 
 	/** Textfelder: Kein Text ({@code null}) und leerer Text gelten als gleicher Wert. */
-	private Field<String> text(Function<Seat, String> getter, BiConsumer<Seat, String> setter) {
-		return new Field<>(seat -> Objects.requireNonNullElse(getter.apply(seat), ""), setter, "");
+	private Field<String> text(Function<Booking, String> getter, BiConsumer<Booking, String> setter) {
+		return new Field<>(booking -> Objects.requireNonNullElse(getter.apply(booking), ""), setter, "");
 	}
 
-	public List<Seat> seats() {
-		return seats;
+	public List<Booking> bookings() {
+		return bookings;
 	}
 
 	public Field<String> lastName() {
@@ -62,17 +62,13 @@ public final class SeatBulkEdit {
 		return paymentStatus;
 	}
 
-	/** Preis je Sitz in Cent. */
+	/** Effektiver Preis je Buchung in Cent. */
 	public Field<Integer> price() {
 		return price;
 	}
 
 	public Field<Boolean> collected() {
 		return collected;
-	}
-
-	public Field<Boolean> wheelchairAccessible() {
-		return wheelchairAccessible;
 	}
 
 	public Field<String> comment() {
@@ -83,37 +79,37 @@ public final class SeatBulkEdit {
 		return fields.stream().anyMatch(Field::changed);
 	}
 
-	/** Überträgt alle geänderten Felder auf jeden Sitz der Liste. */
+	/** Überträgt alle geänderten Felder auf jede Buchung der Liste. */
 	public void apply() {
 		fields.forEach(Field::apply);
 	}
 
 	/**
-	 * Gesamtpreis in Cent: Ist ein neuer Preis eingegeben, Sitzanzahl mal dieser Preis (so sieht man vor dem Übernehmen,
-	 * was die Auswahl kostet), sonst die Summe der bisherigen Einzelpreise.
+	 * Gesamtpreis in Cent: Ist ein neuer Preis eingegeben, Anzahl mal dieser Preis (so sieht man vor dem Übernehmen, was
+	 * die Auswahl kostet), sonst die Summe der bisherigen effektiven Preise.
 	 */
 	public long totalCents() {
 		if (price.changed()) {
-			return (long) seats.size() * price.pending;
+			return (long) bookings.size() * price.pending;
 		}
 		long sum = 0;
-		for (Seat seat : seats) {
-			sum += seat.getPrice();
+		for (Booking booking : bookings) {
+			sum += booking.getEffectivePrice();
 		}
 		return sum;
 	}
 
-	/** Ein Feld des Dialogs über alle Sitze der Liste. */
+	/** Ein Feld des Dialogs über alle Buchungen der Liste. */
 	public final class Field<T> {
 
-		private final Function<Seat, T> getter;
-		private final BiConsumer<Seat, T> setter;
-		/** Eingabe, die "nichts eingegeben" bedeutet, solange die Sitze verschiedene Werte haben (bei Texten ""). */
+		private final Function<Booking, T> getter;
+		private final BiConsumer<Booking, T> setter;
+		/** Eingabe, die "nichts eingegeben" bedeutet, solange die Buchungen verschiedene Werte haben (bei Texten ""). */
 		private final T blank;
 		private final Optional<T> common;
 		private T pending;
 
-		private Field(Function<Seat, T> getter, BiConsumer<Seat, T> setter, T blank) {
+		private Field(Function<Booking, T> getter, BiConsumer<Booking, T> setter, T blank) {
 			this.getter = getter;
 			this.setter = setter;
 			this.blank = blank;
@@ -121,15 +117,15 @@ public final class SeatBulkEdit {
 		}
 
 		private Optional<T> commonValue() {
-			if (seats.isEmpty()) {
+			if (bookings.isEmpty()) {
 				return Optional.empty();
 			}
-			T first = getter.apply(seats.get(0));
-			boolean allEqual = seats.stream().allMatch(seat -> Objects.equals(first, getter.apply(seat)));
+			T first = getter.apply(bookings.get(0));
+			boolean allEqual = bookings.stream().allMatch(booking -> Objects.equals(first, getter.apply(booking)));
 			return allEqual ? Optional.ofNullable(first) : Optional.empty();
 		}
 
-		/** Der Wert, den alle Sitze haben; leer, wenn sie sich unterscheiden. */
+		/** Der Wert, den alle Buchungen haben; leer, wenn sie sich unterscheiden. */
 		public Optional<T> common() {
 			return common;
 		}
@@ -149,7 +145,7 @@ public final class SeatBulkEdit {
 
 		private void apply() {
 			if (changed()) {
-				seats.forEach(seat -> setter.accept(seat, pending));
+				bookings.forEach(booking -> setter.accept(booking, pending));
 			}
 		}
 	}

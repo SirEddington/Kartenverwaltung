@@ -9,10 +9,10 @@ import java.time.LocalTime;
 
 import org.junit.jupiter.api.Test;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
 
 class CustomerDisplayTextTest {
 
@@ -73,14 +73,14 @@ class CustomerDisplayTextTest {
 
 	@Test
 	void freeSeatIsNotTaken() {
-		Seat seat = presentation.addTable(1).addSeat(1);
+		Booking seat = new TestBookings().booking(presentation, 1, 1);
 
 		assertFalse(CustomerDisplayText.isTaken(seat));
 	}
 
 	@Test
 	void reservedSeatIsTaken() {
-		Seat seat = presentation.addTable(1).addSeat(1);
+		Booking seat = new TestBookings().booking(presentation, 1, 1);
 		seat.setLastName("Meier");
 
 		assertTrue(CustomerDisplayText.isTaken(seat));
@@ -88,7 +88,7 @@ class CustomerDisplayTextTest {
 
 	@Test
 	void paidSeatIsTaken() {
-		Seat seat = presentation.addTable(1).addSeat(1);
+		Booking seat = new TestBookings().booking(presentation, 1, 1);
 		seat.setPaymentStatus(PaymentStatus.CASH);
 
 		assertTrue(CustomerDisplayText.isTaken(seat));

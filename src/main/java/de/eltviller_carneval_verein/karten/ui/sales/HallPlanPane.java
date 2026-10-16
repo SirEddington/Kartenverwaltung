@@ -1,20 +1,30 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
+import java.util.HashMap;
+import java.util.Map;
+
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.HallObjectText;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanNodeFactory;
+import de.eltviller_carneval_verein.karten.ui.hall.SeatingPlanLayout;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.geometry.Bounds;
+import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
+import javafx.geometry.Pos;
 import javafx.geometry.Rectangle2D;
-import javafx.geometry.VPos;
 import javafx.scene.Group;
 import javafx.scene.Node;
+import javafx.scene.control.Label;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
@@ -24,7 +34,6 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.Shape;
-import javafx.scene.text.Text;
 
 /**
  * Zeichenfläche für den Saalplan einer Vorstellung, gemeinsam für die Saalübersicht im Hauptfenster (interaktiv:
@@ -32,7 +41,8 @@ import javafx.scene.text.Text;
  *
  * <p>
  * Gezeichnet wird in Hallenkoordinaten (cm) auf {@link #contentPane()}; Zoom und Verschiebung wirken als Transformation
- * dieser Fläche. Wie ein Sitz oder Tisch aussieht und reagiert, bestimmt der {@link Decorator}.
+ * dieser Fläche. Reihen und Tische zeichnet {@link PlanNodeFactory} wie im Hallen-Editor; wie ein Sitz aussieht und
+ * reagiert, bestimmt der {@link Decorator}.
  */
 public class HallPlanPane extends StackPane {
 
@@ -43,16 +53,20 @@ public class HallPlanPane extends StackPane {
 	private static final double MAX_SCALE = 4.0;
 	private static final double ZOOM_FACTOR_PER_NOTCH = 1.1;
 
-	/** Bestimmt Aussehen und Verhalten der gezeichneten Tische und Sitze (Füllung, Rand, Klick, Tooltip ...). */
+	/** Bestimmt Aussehen und Verhalten der gezeichneten Sitze (Füllung, Rand, Klick, Tooltip ...). */
 	public interface Decorator {
-		default void decorateTable(Table table, Node tableNode) {
-		}
-
-		default void decorateSeat(Seat seat, Circle seatNode) {
+		/**
+		 * @param booking die Buchung der Vorstellung auf diesem Sitz
+		 * @param seat    der Sitz der Bestuhlung
+		 * @param node    der gezeichnete Sitz (ein {@link Shape})
+		 */
+		default void decorateSeat(Booking booking, Seat seat, Node node) {
 		}
 	}
 
 	private final Pane contentPane = new Pane();
+	// Hinweis anstelle der Bestuhlung (eingefroren oder keine gewählt); liegt über dem Plan und zoomt nicht mit
+	private final Label planHint = new Label();
 	private final ReadOnlyObjectWrapper<Rectangle2D> visibleHallRect = new ReadOnlyObjectWrapper<>();
 
 	private boolean interactive = true;
@@ -68,7 +82,12 @@ public class HallPlanPane extends StackPane {
 
 	public HallPlanPane() {
 		contentPane.setPrefSize(1200, 800);
-		getChildren().add(contentPane);
+		planHint.getStyleClass().add("subheader-label");
+		planHint.setMouseTransparent(true);
+		planHint.setVisible(false);
+		StackPane.setAlignment(planHint, Pos.TOP_CENTER);
+		StackPane.setMargin(planHint, new Insets(12));
+		getChildren().addAll(contentPane, planHint);
 
 		Rectangle clip = new Rectangle();
 		clip.widthProperty().bind(widthProperty());
@@ -134,20 +153,30 @@ public class HallPlanPane extends StackPane {
 		return new Rectangle2D(minX, minY, maxX - minX, maxY - minY);
 	}
 
+	/** Der Hinweis über dem Plan, wenn keine Bestuhlung gezeichnet wird; {@code null} wenn keiner sichtbar ist. */
+	public String planHintText() {
+		return planHint.isVisible() ? planHint.getText() : null;
+	}
+
 	/**
 	 * Zeichnet den Saalplan der Vorstellung neu: Hallenumriss und Hallenobjekte (falls eine Halle zugeordnet ist),
-	 * dann die Tische mit ihren Stühlen. Koordinaten sind cm ab der oberen linken Hallenecke (0/0), wie im
-	 * Hallen-Editor. Tische und Stühle ohne manuelle Position ordnet {@link HallLayout} an.
+	 * dann die Reihen, Tische und Sitze der Bestuhlung so, wie sie gespeichert sind (angeordnet hat sie der
+	 * Hallen-Editor; hier wird nichts berechnet). Koordinaten sind cm ab der oberen linken Hallenecke (0/0), wie im
+	 * Hallen-Editor. Ohne Bestuhlung (eingefroren oder keine gewählt) erscheinen nur die Hallenobjekte und ein Hinweis
+	 * ({@link SalesPlan#hint}).
 	 *
-	 * @param presentation die Vorstellung, {@code null} leert die Fläche
 	 * @param hall         die Halle der Vorstellung, {@code null} wenn keine zugeordnet ist
+	 * @param plan         die Bestuhlung ({@link SalesPlan#of}), {@code null} ohne Bestuhlung
+	 * @param presentation die Vorstellung, {@code null} leert die Fläche
 	 */
-	public void render(Presentation presentation, Hall hall, Decorator decorator) {
+	public void render(Hall hall, SeatingPlan plan, Presentation presentation, Decorator decorator) {
 		contentPane.getChildren().clear();
+		String hint = SalesPlan.hint(presentation, plan);
+		planHint.setText(hint);
+		planHint.setVisible(hint != null);
 		if (presentation == null) {
 			return;
 		}
-		HallLayout.apply(presentation, hall);
 
 		if (hall != null) {
 			Rectangle2D hallRect = HallViewport.hallRect(hall);
@@ -164,43 +193,52 @@ public class HallPlanPane extends StackPane {
 			}
 		}
 
-		for (Table table : presentation.getTables()) {
-			drawTable(table, decorator);
+		if (plan != null) {
+			drawPlan(plan, presentation, decorator);
 		}
 	}
 
-	private void drawTable(Table table, Decorator decorator) {
-		Group tableGroup = new Group();
+	/** Reihen, dann Tische, dann Sitze (oben, damit sie anklickbar bleiben). Reihen und Tische nehmen keine Klicks. */
+	private void drawPlan(SeatingPlan plan, Presentation presentation, Decorator decorator) {
+		for (TableRow row : plan.getRows()) {
+			if (plan.getTablesOf(row).isEmpty()) {
+				continue; // Eine leere Reihe hat keine Länge: nur ein Punkt ohne Bedeutung für den Verkauf
+			}
+			Node rowNode = PlanNodeFactory.rowNode(row, SeatingPlanLayout.rowLength(plan, row), false);
+			rowNode.setMouseTransparent(true);
+			contentPane.getChildren().add(rowNode);
+		}
+		for (Table table : plan.getTables()) {
+			Node tableNode = PlanNodeFactory.tableNode(table, false);
+			tableNode.setMouseTransparent(true);
+			contentPane.getChildren().add(tableNode);
+		}
+		Map<String, Booking> bookingBySeat = bookingsBySeat(presentation);
+		for (Seat seat : plan.getSeats()) {
+			Node seatNode = PlanNodeFactory.seatNode(seat);
+			Booking booking = bookingBySeat.get(seat.getId());
+			if (booking != null) {
+				decorator.decorateSeat(booking, seat, seatNode);
+			} else {
+				// Nach dem Abgleich hat jeder Sitz eine Buchung; sonst bleibt der Sitz grau und ohne Verhalten
+				seatNode.setOpacity(0.4);
+				seatNode.setMouseTransparent(true);
+			}
+			contentPane.getChildren().add(seatNode);
+		}
+	}
 
-		Node tableNode = createTableNode(table);
-		tableGroup.getChildren().add(tableNode);
-
-		if (table.getSeats() != null) {
-			for (Seat seat : table.getSeats()) {
-				Circle seatCircle = new Circle(seat.getPosX(), seat.getPosY(), seat.getWidth() / 2.0);
-				decorator.decorateSeat(seat, seatCircle);
-				tableGroup.getChildren().add(seatCircle);
+	/** Die Buchungen mit Platz nach Sitz-Id; bei mehreren auf einem Sitz gilt die erste (wie im Abgleich). */
+	private static Map<String, Booking> bookingsBySeat(Presentation presentation) {
+		Map<String, Booking> bySeat = new HashMap<>();
+		if (presentation.getBookings() != null) {
+			for (Booking booking : presentation.getBookings()) {
+				if (!booking.isUnassigned() && booking.getSeatId() != null) {
+					bySeat.putIfAbsent(booking.getSeatId(), booking);
+				}
 			}
 		}
-		decorator.decorateTable(table, tableNode);
-
-		contentPane.getChildren().add(tableGroup);
-	}
-
-	private Node createTableNode(Table table) {
-		Rectangle tableShape = new Rectangle(table.getPosX(), table.getPosY(), table.getWidth(), table.getHeight());
-		tableShape.setArcWidth(10);
-		tableShape.setArcHeight(10);
-
-		tableShape.setFill(Color.LIGHTGRAY);
-		tableShape.setStroke(Color.DARKGRAY);
-
-		Text tableLabel = new Text("Tisch " + table.getTableNumber());
-		tableLabel.setTextOrigin(VPos.CENTER);
-		tableLabel.setX(table.getPosX() + table.getWidth() / 2.0 - tableLabel.getLayoutBounds().getWidth() / 2.0);
-		tableLabel.setY(table.getPosY() + table.getHeight() / 2.0);
-
-		return new Group(tableShape, tableLabel);
+		return bySeat;
 	}
 
 	private Node createHallObjectNode(HallObject hallObject) {
