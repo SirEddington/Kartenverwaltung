@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.hall;
 
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.model.Seat;
@@ -333,7 +334,8 @@ public class TableSeatPanelController {
 
 	@FXML
 	private void handleDeleteTable() {
-		if (!isEditing(table) || !ConfirmDialog.confirmDelete("Tisch löschen", deleteTableMessage(table))) {
+		if (!isEditing(table) || !ConfirmDialog.confirmDelete("Tisch löschen",
+				deleteTableMessage(table) + PlanImpact.inEvents(table.getPlan(), PlanImpact.seatIds(List.of(table))).deleteNote())) {
 			return;
 		}
 		Table deleted = table;
@@ -345,7 +347,8 @@ public class TableSeatPanelController {
 
 	@FXML
 	private void handleDeleteSeat() {
-		if (!isEditing(seat) || !ConfirmDialog.confirmDelete("Sitz löschen", deleteSeatMessage(seat))) {
+		if (!isEditing(seat) || !ConfirmDialog.confirmDelete("Sitz löschen",
+				deleteSeatMessage(seat) + PlanImpact.inEvents(seat.getParent().getPlan(), Set.of(seat.getId())).deleteNote())) {
 			return;
 		}
 		Table parent = seat.getParent();

@@ -480,9 +480,10 @@ public class SeatingPlanController {
 		if (plan == null || !editMode || rows.isEmpty()) {
 			return;
 		}
-		int tables = rows.stream().mapToInt(row -> plan.getTablesOf(row).size()).sum();
-		// Leere Reihen ohne Rückfrage, mit Tischen kostet das Löschen Daten
-		if (tables > 0 && !ConfirmDialog.confirmDelete(rows.size() == 1 ? "Reihe löschen" : "Reihen löschen", deleteRowsMessage(rows, tables))) {
+		List<Table> tables = rows.stream().flatMap(row -> plan.getTablesOf(row).stream()).toList();
+		// Leere Reihen ohne Rückfrage, mit Tischen kostet das Löschen Daten (und nennt betroffene Buchungen)
+		if (!tables.isEmpty() && !ConfirmDialog.confirmDelete(rows.size() == 1 ? "Reihe löschen" : "Reihen löschen",
+				deleteRowsMessage(rows, tables.size()) + PlanImpact.inEvents(plan, PlanImpact.seatIds(tables)).deleteNote())) {
 			return;
 		}
 		rows.forEach(plan::deleteRow);
@@ -536,6 +537,11 @@ public class SeatingPlanController {
 	private void handleRenumber() {
 		TableRow row = singleEditableRow();
 		if (row == null) {
+			return;
+		}
+		// Rückfrage nur, wenn Buchungen mit Daten auf Tischen sitzen, die eine andere Nummer bekämen
+		String warning = PlanImpact.inEvents(plan, PlanImpact.seatIdsRenumbered(plan, row)).renumberMessage();
+		if (warning != null && !ConfirmDialog.confirm("Nummern neu vergeben", warning, "Neu vergeben", "button-primary", null)) {
 			return;
 		}
 		plan.renumber(row);
