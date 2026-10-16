@@ -56,6 +56,14 @@ class PresentationAndTableValidatorTest {
 		return result.getIssues().get(0);
 	}
 
+	@Test
+	void presentationWithoutBookingListHasNoIssues() {
+		Presentation presentation = presentation();
+		presentation.setBookings(null);
+
+		assertTrue(PresentationValidator.validate(presentation).isEmpty());
+	}
+
 	// --- Namen und Nummern (PRS-004, TBL-002) ---
 
 	@Test

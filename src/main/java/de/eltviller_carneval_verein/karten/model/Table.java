@@ -7,14 +7,15 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Table {
 	private final String id;
-	@JsonBackReference("plan-table")
-	private SeatingPlan parentPlan;
+	private SeatingPlan parentPlan; // gesetzt von SeatingPlan.setTables/addTable, wird nicht gespeichert
 
 	private String rowId; // get,set
 	private int tableNumber; // get
@@ -29,7 +30,7 @@ public class Table {
 	private double height;
 	private double rotation;
 
-	@JsonManagedReference("table-seat")
+	// Den Elternverweis setzt setSeats (keine @JsonManagedReference, siehe Event.presentations)
 	private List<Seat> seats = new ArrayList<Seat>(); // get,set
 
 	// Konstuktoren -->
@@ -105,6 +106,7 @@ public class Table {
 		return seats;
 	}
 
+	@JsonSetter(nulls = Nulls.AS_EMPTY) // "seats": null in einer Datei lädt als leere Liste
 	public void setSeats(List<Seat> seats) {
 		this.seats = seats;
 		if (seats != null) {

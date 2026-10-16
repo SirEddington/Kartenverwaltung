@@ -97,14 +97,28 @@ class BookingSyncServiceTest {
 	}
 
 	@Test
-	void prepare_ohne_Bestuhlung_an_der_Vorstellung_aendert_nichts() {
+	void prepare_ohne_Bestuhlung_an_der_Vorstellung_laesst_Buchungen_mit_Daten_ohne_Platz() {
 		presentation.setSeatingPlanId(null);
-		presentation.addBooking().setLastName("Müller");
+		Booking booking = presentation.addBooking();
+		booking.setLastName("Müller");
+		presentation.addBooking();
 
 		prepare();
 
 		assertFalse(presentation.isPlanMissing());
 		assertEquals(1, presentation.getBookings().size());
+		assertTrue(presentation.getBookings().contains(booking));
+		assertTrue(booking.isUnassigned());
+	}
+
+	@Test
+	void prepare_ueberspringt_fehlende_Listen() {
+		Event withoutPresentations = new Event();
+		withoutPresentations.setPresentations(null);
+		presentation.setBookings(null);
+
+		assertDoesNotThrow(() -> BookingSyncService.prepare(withoutPresentations, id -> null, tracker));
+		assertDoesNotThrow(() -> prepare());
 	}
 
 	@Test

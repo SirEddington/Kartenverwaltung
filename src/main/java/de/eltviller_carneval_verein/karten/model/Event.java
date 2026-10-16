@@ -11,7 +11,8 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Event {
@@ -21,7 +22,8 @@ public class Event {
 	private String description;
 	private boolean archived;
 
-	@JsonManagedReference("event-presentation")
+	// Den Elternverweis setzt setPresentations; keine @JsonManagedReference, denn Jackson 2.17 verträgt sie nicht mit
+	// @JsonSetter(nulls = AS_EMPTY) ("Should never try to reset delegate")
 	private List<Presentation> presentations = new ArrayList<>(); // get,set
 
 	// Konstuktoren -->
@@ -63,6 +65,7 @@ public class Event {
 		return presentations;
 	}
 
+	@JsonSetter(nulls = Nulls.AS_EMPTY) // "presentations": null in einer Datei lädt als leere Liste
 	public void setPresentations(List<Presentation> presentations) {
 		this.presentations = presentations;
 		if (presentations != null) {

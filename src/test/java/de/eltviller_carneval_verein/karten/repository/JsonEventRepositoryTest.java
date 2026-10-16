@@ -180,6 +180,14 @@ class JsonEventRepositoryTest {
 		assertEquals("halle-1", presentation.getHallId());
 		assertTrue(presentation.getBookings().isEmpty(), "Die alten Tische ergeben keine Buchungen");
 		assertSame(loaded.get(0), presentation.getParent());
+
+		// Beim Speichern werden die alten Felder nicht zurückgeschrieben
+		repository.saveEvent(loaded.get(0));
+		String saved = Files.readString(new File(storageDir, "evt-alt.json").toPath(), StandardCharsets.UTF_8);
+		assertTrue(saved.contains("Prunksitzung"), saved);
+		assertFalse(saved.contains("\"tables\""), saved);
+		assertFalse(saved.contains("defaultTableWidth"), saved);
+		assertFalse(JsonMapperFactory.create().writeValueAsString(loaded.get(0)).contains("\"tables\""));
 	}
 
 	@Test

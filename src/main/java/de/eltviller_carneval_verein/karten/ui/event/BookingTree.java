@@ -9,6 +9,7 @@ import java.util.Objects;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Die Buchungen einer Vorstellung für den Baum der Event-Übersicht: gruppiert nach Tisch (aus der Momentaufnahme der
@@ -73,7 +74,7 @@ final class BookingTree {
 
 	/** Anzeigetext einer Buchung: "Sitz 2", ohne Platz "Ohne Platz (bisher Tisch A3, Sitz 2)". */
 	static String bookingLabel(Booking booking) {
-		return booking.isUnassigned() ? UNASSIGNED_TEXT + " (bisher " + booking.getPlaceLabel() + ")" : "Sitz " + booking.getSeatNumber();
+		return booking.isUnassigned() ? EntityLabels.place(booking) : "Sitz " + booking.getSeatNumber();
 	}
 
 	/** Suchtext einer Buchung: Sitz, Vor- und Nachname, Kommentar (fehlende Teile bleiben weg, nie das Wort "null"). */

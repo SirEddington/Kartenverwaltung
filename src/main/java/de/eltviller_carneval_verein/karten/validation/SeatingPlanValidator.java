@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.validation;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
@@ -41,18 +42,24 @@ public final class SeatingPlanValidator {
 		}
 	}
 
-	/** Vergleich unter Geschwistern: eine Meldung je mehrfach verwendetem Buchstaben; Reihen ohne Buchstaben zählen nicht. */
+	/**
+	 * Vergleich unter Geschwistern: eine Meldung je mehrfach verwendetem Buchstaben (Groß-/Kleinschreibung und
+	 * Leerzeichen am Rand zählen nicht, die Meldung nennt die erste Schreibweise); Reihen ohne Buchstaben zählen nicht.
+	 */
 	private void validateRowLabelsAreUnique() {
 		Map<String, Integer> counts = new LinkedHashMap<>();
+		Map<String, String> firstLabels = new LinkedHashMap<>();
 		for (TableRow row : plan.getRows()) {
 			String label = row.getLabel();
 			if (label != null && !label.isBlank()) {
-				counts.merge(label.trim(), 1, Integer::sum);
+				String key = label.trim().toLowerCase(Locale.GERMAN);
+				counts.merge(key, 1, Integer::sum);
+				firstLabels.putIfAbsent(key, label.trim());
 			}
 		}
-		counts.forEach((label, count) -> {
+		counts.forEach((key, count) -> {
 			if (count > 1) {
-				result.add(TableRowIssue.LABEL_DUPLICATE.toIssue(EntityLabels.plan(plan), label));
+				result.add(TableRowIssue.LABEL_DUPLICATE.toIssue(EntityLabels.plan(plan), firstLabels.get(key)));
 			}
 		});
 	}

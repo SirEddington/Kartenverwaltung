@@ -29,7 +29,8 @@ public final class PlanSwitchDialog {
 	/**
 	 * Wechselt die Vorstellung auf die Bestuhlung, bei Bedarf nach Rückfrage.
 	 *
-	 * @param newPlan die neue Bestuhlung; {@code null} hebt die Zuordnung auf, die Buchungen bleiben dabei unverändert
+	 * @param newPlan die neue Bestuhlung; {@code null} hebt die Zuordnung auf: leere Buchungen entfallen, Buchungen mit
+	 *                Daten bleiben ohne Platz (siehe {@link BookingSync#sync})
 	 * @return {@code true}, wenn kein Wechsel nötig war oder der Wechsel angewendet wurde; {@code false} bei "Abbrechen"
 	 */
 	public static boolean confirm(Presentation p, SeatingPlan newPlan) {

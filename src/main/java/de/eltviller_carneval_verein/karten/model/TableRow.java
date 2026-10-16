@@ -3,7 +3,6 @@ package de.eltviller_carneval_verein.karten.model;
 import java.util.Objects;
 import java.util.UUID;
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
@@ -15,8 +14,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class TableRow {
 	private final String id;
-	@JsonBackReference("plan-row")
-	private SeatingPlan parentPlan;
+	private SeatingPlan parentPlan; // gesetzt von SeatingPlan.setRows/addRow, wird nicht gespeichert
 
 	/** Kennbuchstabe der Reihe; leer erlaubt (dann zählen die Tische über alle Reihen ohne Buchstaben). */
 	private String label = "";

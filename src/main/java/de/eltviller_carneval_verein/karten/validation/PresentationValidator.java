@@ -58,6 +58,9 @@ public final class PresentationValidator {
 	}
 
 	private void validateBookings() {
+		if (presentation.getBookings() == null) {
+			return;
+		}
 		for (Booking booking : presentation.getBookings()) {
 			result.addAll(BookingValidator.validate(booking));
 		}
@@ -65,6 +68,9 @@ public final class PresentationValidator {
 
 	/** Vergleich unter Geschwistern: eine Meldung je Sitz, den mehr als eine Buchung trägt (leere Sitzkennungen zählen nicht). */
 	private void validateSeatsAreBookedOnce() {
+		if (presentation.getBookings() == null) {
+			return;
+		}
 		Map<String, Booking> firstBookings = new LinkedHashMap<>();
 		Map<String, Integer> counts = new LinkedHashMap<>();
 		for (Booking booking : presentation.getBookings()) {

@@ -3,15 +3,13 @@ package de.eltviller_carneval_verein.karten.model;
 import java.util.Objects;
 import java.util.UUID;
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Seat {
 	private final String id;
-	@JsonBackReference("table-seat")
-	private Table parentTable;
+	private Table parentTable; // gesetzt von Table.setSeats/addSeat, wird nicht gespeichert
 
 	private int seatNumber; // get
 	private boolean wheelchairAccessible; // get,set

@@ -8,10 +8,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 
 /**
  * Eine Bestuhlung einer {@link Hall Halle}: Tischreihen, Tische und Sitze. Die Setter nehmen jeden Wert an; die
@@ -20,8 +20,7 @@ import com.fasterxml.jackson.annotation.JsonManagedReference;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SeatingPlan {
 	private final String id;
-	@JsonBackReference("hall-plan")
-	private Hall parentHall;
+	private Hall parentHall; // gesetzt von Hall.setSeatingPlans/addSeatingPlan, wird nicht gespeichert
 
 	private String name;
 	private String description;
@@ -32,10 +31,9 @@ public class SeatingPlan {
 	private double defaultSeatWidth;
 	private double defaultSeatHeight;
 
-	@JsonManagedReference("plan-row")
+	// Die Elternverweise setzen setRows und setTables (keine @JsonManagedReference, siehe Event.presentations)
 	private List<TableRow> rows = new ArrayList<>();
 
-	@JsonManagedReference("plan-table")
 	private List<Table> tables = new ArrayList<>();
 
 	// Konstuktoren -->
@@ -115,6 +113,7 @@ public class SeatingPlan {
 		return rows;
 	}
 
+	@JsonSetter(nulls = Nulls.AS_EMPTY) // "rows": null in einer Datei lädt als leere Liste
 	public void setRows(List<TableRow> rows) {
 		this.rows = rows;
 		if (rows != null) {
@@ -126,6 +125,7 @@ public class SeatingPlan {
 		return tables;
 	}
 
+	@JsonSetter(nulls = Nulls.AS_EMPTY) // "tables": null in einer Datei lädt als leere Liste
 	public void setTables(List<Table> tables) {
 		this.tables = tables;
 		if (tables != null) {

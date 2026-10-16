@@ -92,6 +92,18 @@ class SelectionSummaryTest {
 	}
 
 	@Test
+	void marksABookingWithoutPlaceAndKeepsItApartFromTheRealSeat() {
+		Booking real = seat(presentation, 3, 2, 2000);
+		Booking without = seat(presentation, 3, 2, 1500);
+		without.setUnassigned(true);
+
+		Summary summary = SelectionSummary.of(List.of(real, without), presentation);
+
+		assertEquals(List.of(new Line("Ohne Platz (bisher Tisch 3, Sitz 2)", 1500), new Line("Tisch 3, Sitz 2", 2000)), summary.lines());
+		assertEquals(3500, summary.totalCents());
+	}
+
+	@Test
 	void countTextUsesSingularAndPlural() {
 		assertEquals("Keine Karten ausgewählt", SelectionSummary.countText(0));
 		assertEquals("1 Karte", SelectionSummary.countText(1));

@@ -2,7 +2,6 @@ package de.eltviller_carneval_verein.karten.model;
 
 import java.util.Comparator;
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
@@ -28,8 +27,7 @@ public class Booking {
 	public static final Comparator<Booking> PLACE_ORDER = Comparator.comparing(Booking::getRowLabel, ROW_LABEL_ORDER)
 			.thenComparingInt(Booking::getTableNumber).thenComparingInt(Booking::getSeatNumber);
 
-	@JsonBackReference("presentation-booking")
-	private Presentation parentPresentation;
+	private Presentation parentPresentation; // gesetzt von Presentation.setBookings/addBooking, wird nicht gespeichert
 
 	private String seatId; // get,set
 

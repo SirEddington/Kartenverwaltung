@@ -158,16 +158,20 @@ class PlanSwitchDialogTest {
 	}
 
 	@Test
-	void ohne_neue_Bestuhlung_bleiben_die_Buchungen() {
+	void ohne_neue_Bestuhlung_bleiben_Buchungen_mit_Daten_ohne_Platz() {
 		Hall hall = new Hall();
 		SeatingPlan oldPlan = plan(hall, 1, 2);
 		Presentation presentation = presentationOn(oldPlan);
-		bookingAt(presentation, 1, 1).setLastName("Müller");
-		List<Booking> before = new ArrayList<>(presentation.getBookings());
+		Booking mueller = bookingAt(presentation, 1, 1);
+		mueller.setLastName("Müller");
+		String seatId = mueller.getSeatId();
 
 		assertTrue(PlanSwitchDialog.confirm(presentation, null, NEVER_ASKED));
 
 		assertNull(presentation.getSeatingPlanId());
-		assertEquals(before, presentation.getBookings());
+		// die leere Buchung entfällt, Müller bleibt ohne Platz mit seiner bisherigen seatId
+		assertEquals(List.of(mueller), presentation.getBookings());
+		assertTrue(mueller.isUnassigned());
+		assertEquals(seatId, mueller.getSeatId());
 	}
 }

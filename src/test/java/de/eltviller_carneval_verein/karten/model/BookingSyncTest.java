@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.model;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -342,19 +343,104 @@ class BookingSyncTest {
 	}
 
 	@Test
-	void ohne_Bestuhlung_ist_ein_No_Op() {
+	void ohne_Bestuhlung_bleiben_Buchungen_mit_Daten_ohne_Platz_und_leere_entfallen() {
 		Presentation presentation = new Presentation();
 		Booking booking = presentation.addBooking();
 		booking.setLastName("Müller");
+		booking.setSeatId("sitz-1");
+		booking.setTableNumber(3);
+		booking.setSeatNumber(2);
+		Booking empty = presentation.addBooking();
+		Booking onlyPrice = presentation.addBooking();
+		onlyPrice.setPrice(2000);
 		presentation.setPlanMissing(true);
 
 		Report report = BookingSync.sync(presentation, null);
 
+		assertEquals(new Report(0, 0, 2, 1), report);
 		assertFalse(presentation.isPlanMissing());
-		assertEquals(new Report(0, 0, 0, 0), report);
 		assertEquals(List.of(booking), presentation.getBookings());
-		assertFalse(booking.isUnassigned());
+		assertFalse(presentation.getBookings().contains(empty));
+		assertFalse(presentation.getBookings().contains(onlyPrice));
+		assertTrue(booking.isUnassigned());
+		assertEquals("sitz-1", booking.getSeatId());
+		assertEquals(3, booking.getTableNumber());
+		assertEquals(2, booking.getSeatNumber());
+		assertEquals("Müller", booking.getLastName());
 		assertNull(presentation.getSeatingPlanId());
+	}
+
+	@Test
+	void ohne_Bestuhlung_zaehlt_eine_leere_Id_wie_keine() {
+		Presentation presentation = new Presentation();
+		presentation.setSeatingPlanId("  ");
+		Booking booking = presentation.addBooking();
+		booking.setLastName("Müller");
+		presentation.addBooking();
+
+		BookingSync.sync(presentation, null);
+
+		assertFalse(presentation.isPlanMissing());
+		assertEquals(List.of(booking), presentation.getBookings());
+		assertTrue(booking.isUnassigned());
+	}
+
+	@Test
+	void ohne_Bestuhlung_wirft_nicht_bei_fehlender_Liste_und_fehlendem_Plan() {
+		Presentation presentation = new Presentation();
+		presentation.setBookings(null);
+
+		assertDoesNotThrow(() -> BookingSync.sync(presentation, null));
+		assertFalse(presentation.isPlanMissing());
+	}
+
+	@Test
+	void ohne_Bestuhlung_aendert_ein_zweiter_Lauf_nichts() {
+		Presentation presentation = new Presentation();
+		Booking booking = presentation.addBooking();
+		booking.setLastName("Müller");
+		presentation.addBooking();
+		BookingSync.sync(presentation, null);
+		List<Booking> before = List.copyOf(presentation.getBookings());
+
+		BookingSync.sync(presentation, null);
+
+		assertEquals(before, presentation.getBookings());
+		assertTrue(booking.isUnassigned());
+		assertFalse(presentation.isPlanMissing());
+	}
+
+	@Test
+	void zurueck_zur_alten_Bestuhlung_stellt_jede_Buchung_am_Sitz_wieder_her() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		BookingSync.sync(presentation, plan);
+		Seat paidSeat = seat(plan, 2, 1);
+		Booking paid = bookingOf(presentation, paidSeat);
+		paid.setLastName("Müller");
+		paid.setPaymentStatus(PaymentStatus.CASH);
+		// Hallenwechsel: die Vorstellung verliert ihre Bestuhlung
+		presentation.setSeatingPlanId(null);
+		BookingSync.sync(presentation, null);
+		assertEquals(List.of(paid), presentation.getBookings());
+		assertTrue(paid.isUnassigned());
+
+		// zurück zur alten Halle und Bestuhlung
+		presentation.setSeatingPlanId(plan.getId());
+		Report report = BookingSync.sync(presentation, plan);
+
+		assertEquals(new Report(1, 3, 0, 0), report);
+		assertEquals(4, presentation.getBookings().size());
+		assertSame(paid, bookingOf(presentation, paidSeat));
+		assertFalse(paid.isUnassigned());
+		assertEquals("Müller", paid.getLastName());
+		assertEquals(PaymentStatus.CASH, paid.getPaymentStatus());
+		for (Seat seat : plan.getSeats()) {
+			Booking booking = bookingOf(presentation, seat);
+			assertNotNull(booking, "Keine Buchung für " + seat.getId());
+			assertFalse(booking.isUnassigned());
+			assertSame(presentation, booking.getParent());
+		}
 	}
 
 	@Test

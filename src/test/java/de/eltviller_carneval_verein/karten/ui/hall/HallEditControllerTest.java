@@ -36,6 +36,15 @@ class HallEditControllerTest {
 	}
 
 	@Test
+	void deleteMessageSkipsEventsWithoutPresentationList() {
+		plan.setName("Prunksitzung");
+		Event event = new Event();
+		event.setPresentations(null);
+
+		assertEquals("Soll die Bestuhlung \"Prunksitzung\" wirklich gelöscht werden?", HallEditController.deletePlanMessage(plan, List.of(event)));
+	}
+
+	@Test
 	void newPlanGetsTheDefaultSizesOfTheFormerEventCreation() {
 		Hall hall = new Hall();
 

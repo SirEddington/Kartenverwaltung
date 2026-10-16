@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui;
 
+import java.util.List;
 import java.util.function.Function;
 
 import de.eltviller_carneval_verein.karten.model.BookingSync;
@@ -38,7 +39,11 @@ public final class BookingSyncService {
 			wasDirty = tracker.isDirty(event);
 		}
 
-		for (Presentation presentation : event.getPresentations()) {
+		// Fehlende Listen (etwa "presentations": null in einer Datei) werden übersprungen
+		for (Presentation presentation : event.getPresentations() != null ? event.getPresentations() : List.<Presentation>of()) {
+			if (presentation.getBookings() == null) {
+				continue;
+			}
 			Hall hall = presentation.getHallId() != null ? hallLookup.apply(presentation.getHallId()) : null;
 			SeatingPlan plan = hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
 			BookingSync.sync(presentation, plan);

@@ -10,6 +10,8 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Hall {
@@ -25,7 +27,7 @@ public class Hall {
 	@JsonManagedReference("hall-hallObject")
 	private List<HallObject> hallObjects = new ArrayList<>();
 
-	@JsonManagedReference("hall-plan")
+	// Den Elternverweis setzt setSeatingPlans (keine @JsonManagedReference, siehe Event.presentations)
 	private List<SeatingPlan> seatingPlans = new ArrayList<>();
 
 	// Konstuktoren -->
@@ -90,6 +92,7 @@ public class Hall {
 		return seatingPlans;
 	}
 
+	@JsonSetter(nulls = Nulls.AS_EMPTY) // "seatingPlans": null in einer Datei lädt als leere Liste
 	public void setSeatingPlans(List<SeatingPlan> seatingPlans) {
 		this.seatingPlans = seatingPlans;
 		if (seatingPlans != null) {
@@ -109,7 +112,7 @@ public class Hall {
 
 	/** Die Bestuhlung mit dieser Id; {@code null} bei unbekannter oder fehlender Id. */
 	public SeatingPlan findSeatingPlan(String id) {
-		if (id == null) {
+		if (id == null || seatingPlans == null) {
 			return null;
 		}
 		for (SeatingPlan plan : seatingPlans) {

@@ -7,16 +7,15 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Presentation {
 	private final String id;
-	@JsonBackReference("event-presentation")
-	private Event parentEvent;
+	private Event parentEvent; // gesetzt von Event.setPresentations/addPresentation, wird nicht gespeichert
 
 	private String name;
 	private LocalDate date;
@@ -38,7 +37,7 @@ public class Presentation {
 
 	// Ältere Dateien enthalten hier noch "tables" (Tische und Sitze mit Verkaufsdaten) und Standardmaße; dank
 	// ignoreUnknown werden sie beim Laden übergangen. Tische und Sitze gehören jetzt zur Bestuhlung der Halle.
-	@JsonManagedReference("presentation-booking")
+	// Den Elternverweis setzt setBookings (keine @JsonManagedReference, siehe Event.presentations)
 	private List<Booking> bookings = new ArrayList<>(); // get,set
 
 	/** Nur zur Laufzeit: die Bestuhlung der Vorstellung gibt es nicht (mehr) in der Halle. Wird nicht gespeichert. */
@@ -119,6 +118,7 @@ public class Presentation {
 		return bookings;
 	}
 
+	@JsonSetter(nulls = Nulls.AS_EMPTY) // "bookings": null in einer Datei lädt als leere Liste
 	public void setBookings(List<Booking> bookings) {
 		this.bookings = bookings;
 		if (bookings != null) {
@@ -179,6 +179,9 @@ public class Presentation {
 	public Booking addBooking() {
 		Booking newBooking = new Booking();
 		newBooking.setParent(this);
+		if (bookings == null) {
+			bookings = new ArrayList<>();
+		}
 		bookings.add(newBooking);
 		return newBooking;
 	}
@@ -191,9 +194,11 @@ public class Presentation {
 		if (newPrice == price) {
 			return;
 		}
-		for (Booking booking : bookings) {
-			if (booking.hasData() && booking.getPrice() == null) {
-				booking.setPrice(price);
+		if (bookings != null) {
+			for (Booking booking : bookings) {
+				if (booking.hasData() && booking.getPrice() == null) {
+					booking.setPrice(price);
+				}
 			}
 		}
 		this.price = newPrice;

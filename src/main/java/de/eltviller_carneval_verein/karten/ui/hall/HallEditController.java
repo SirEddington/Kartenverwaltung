@@ -284,6 +284,9 @@ public class HallEditController {
 				+ "\" wirklich gelöscht werden?");
 		List<String> users = new ArrayList<>();
 		for (Event event : events) {
+			if (event.getPresentations() == null) {
+				continue;
+			}
 			for (Presentation presentation : event.getPresentations()) {
 				if (plan.getId().equals(presentation.getSeatingPlanId())) {
 					users.add(EntityLabels.nameOrPlaceholder(event.getName()) + ": " + EntityLabels.nameOrPlaceholder(presentation.getName()));

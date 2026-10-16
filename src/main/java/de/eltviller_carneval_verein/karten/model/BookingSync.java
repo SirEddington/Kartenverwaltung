@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.model;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,16 +47,19 @@ public final class BookingSync {
 	 * Gleicht die Buchungen der Vorstellung mit der Bestuhlung ab, auf die {@code seatingPlanId} zeigt.
 	 *
 	 * <p>
-	 * Ohne {@code seatingPlanId} ändert sich nichts ({@code planMissing} wird {@code false}). Ist die
-	 * {@code seatingPlanId} gesetzt, die Bestuhlung aber {@code null} (nicht mehr in der Halle), wird
+	 * Ohne {@code seatingPlanId} (auch leer, etwa nach einem Hallenwechsel) gibt es keine Plätze: Leere Buchungen
+	 * werden entfernt, Buchungen mit Daten bleiben {@link Booking#isUnassigned() ohne Platz} erhalten, ihre
+	 * {@code seatId} und Momentaufnahme bleiben unverändert ({@code planMissing} wird {@code false}). Wählt man die
+	 * alte Bestuhlung wieder, findet der nächste Abgleich jede Buchung über ihre {@code seatId} und legt die leeren neu
+	 * an. Ist die {@code seatingPlanId} gesetzt, die Bestuhlung aber {@code null} (nicht mehr in der Halle), wird
 	 * {@code planMissing} gesetzt und nichts geändert: Die Buchungen bleiben, wie sie sind.
 	 *
 	 * @param plan die Bestuhlung der Vorstellung oder {@code null}, wenn sie nicht gefunden wurde
 	 */
 	public static Report sync(Presentation p, SeatingPlan plan) {
-		if (p.getSeatingPlanId() == null) {
+		if (p.getSeatingPlanId() == null || p.getSeatingPlanId().isBlank()) {
 			p.setPlanMissing(false);
-			return NOTHING;
+			return withoutPlan(p.getBookings());
 		}
 		if (plan == null) {
 			p.setPlanMissing(true);
@@ -123,6 +127,26 @@ public final class BookingSync {
 		booking.takeSnapshot(seat.getParent(), seat);
 		booking.setUnassigned(false);
 		return true;
+	}
+
+	/** Abgleich ohne Bestuhlung: leere Buchungen entfernen, Buchungen mit Daten ohne Platz behalten. */
+	private static Report withoutPlan(List<Booking> bookings) {
+		if (bookings == null) {
+			return NOTHING;
+		}
+		int removedEmpty = 0;
+		int unassigned = 0;
+		for (Iterator<Booking> iterator = bookings.iterator(); iterator.hasNext();) {
+			Booking booking = iterator.next();
+			if (booking.hasData()) {
+				booking.setUnassigned(true);
+				unassigned++;
+			} else {
+				iterator.remove();
+				removedEmpty++;
+			}
+		}
+		return new Report(0, 0, removedEmpty, unassigned);
 	}
 
 	/**

@@ -9,7 +9,8 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 
 /**
  * Plausibilitätsprüfungen für ein Event (Kürzel EVT, siehe {@link EventIssue}) und Einstieg für die
- * Prüfung des ganzen Baums Event, Vorstellung, Tisch, Sitz. Aufbau wie bei {@link SeatValidator}.
+ * Prüfung des ganzen Baums Event, Vorstellung, Buchung. Tische und Sitze gehören zur Bestuhlung der Halle und werden
+ * dort geprüft ({@link HallValidator}, {@link SeatingPlanValidator}). Aufbau wie bei {@link SeatValidator}.
  */
 public final class EventValidator {
 
@@ -41,8 +42,8 @@ public final class EventValidator {
 
 	/**
 	 * Vergleich unter Geschwistern: eine Meldung je mehrfach vorkommendem Namen (Groß-/Kleinschreibung
-	 * und Leerzeichen am Rand zählen nicht). Gleiche Namen machen die Beschreibung von Tischen und
-	 * Sitzen in den Meldungen mehrdeutig.
+	 * und Leerzeichen am Rand zählen nicht). Gleiche Namen machen die Beschreibung der Buchungen in den
+	 * Meldungen mehrdeutig ("Prunksitzung, Tisch A3, Sitz 2").
 	 */
 	private void validatePresentationNamesAreUnique() {
 		// Schlüssel: normalisierter Name, Wert: Anzahl und erster Name in Originalschreibweise

@@ -10,6 +10,7 @@ import java.util.function.Consumer;
 import org.controlsfx.control.table.TableFilter;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
@@ -232,8 +233,26 @@ public class EventEditController {
 		if (presentation.getSeatingPlanId() == null) {
 			return "–";
 		}
-		SeatingPlan plan = hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
+		SeatingPlan plan = modelPlan(presentation, hall);
 		return plan == null ? "nicht mehr vorhanden" : EntityLabels.nameOrPlaceholder(plan.getName());
+	}
+
+	/** Die Bestuhlung, auf die die Vorstellung im Modell zeigt; {@code null} ohne Halle, ohne oder mit unbekannter Id. */
+	static SeatingPlan modelPlan(Presentation presentation, Hall hall) {
+		return hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
+	}
+
+	/**
+	 * Die Rückfrage vor einem Hallenwechsel, wenn Buchungen mit Daten ({@link Booking#hasData()}) ihren Platz verlieren
+	 * würden; {@code null}, wenn es keine gibt (dann wird ohne Rückfrage gewechselt).
+	 */
+	static String hallChangeMessage(Presentation presentation) {
+		long withData = presentation.getBookings() == null ? 0 : presentation.getBookings().stream().filter(Booking::hasData).count();
+		if (withData == 0) {
+			return null;
+		}
+		String start = withData == 1 ? "1 Buchung mit Daten bleibt erhalten, hat" : withData + " Buchungen mit Daten bleiben erhalten, haben";
+		return start + " aber keinen Platz mehr, bis du eine Bestuhlung der neuen Halle wählst. Hallenwechsel fortsetzen?";
 	}
 
 	/**
@@ -279,14 +298,20 @@ public class EventEditController {
 
 		cmbPresHall.valueProperty().addListener((obs, oldHall, newHall) -> {
 			if (!loadingDetails && currentPres != null) {
-				changeHall(currentPres, newHall);
+				Presentation presentation = currentPres;
+				if (hallChangeMessage(presentation) == null) {
+					changeHall(presentation, newHall);
+				} else {
+					// Die Rückfrage erst nach der Auswahl zeigen, nicht mitten in der Benachrichtigung der ComboBox
+					Platform.runLater(() -> confirmHallChange(presentation, newHall));
+				}
 			}
 		});
 		cmbPresPlan.valueProperty().addListener((obs, oldPlan, newPlan) -> {
 			if (!loadingDetails && currentPres != null && newPlan != null) {
 				// Die Rückfrage erst nach der Auswahl zeigen, nicht mitten in der Benachrichtigung der ComboBox
 				Presentation presentation = currentPres;
-				Platform.runLater(() -> changePlan(presentation, oldPlan, newPlan));
+				Platform.runLater(() -> changePlan(presentation, newPlan));
 			}
 		});
 		spnPresPrice.valueProperty().addListener((obs, oldVal, newVal) -> {
@@ -298,7 +323,35 @@ public class EventEditController {
 		showPresentation(null);
 	}
 
-	/** Hallenwechsel: Die Bestuhlung wird zurückgesetzt, die Buchungen bleiben bis zur Wahl der neuen Bestuhlung unberührt. */
+	/**
+	 * Hallenwechsel mit Rückfrage ({@link #hallChangeMessage}), wenn Buchungen mit Daten ihren Platz verlieren; bei
+	 * "Abbrechen" kehrt die Auswahl zur Halle des Modells zurück, das Modell bleibt unverändert.
+	 */
+	private void confirmHallChange(Presentation presentation, Hall newHall) {
+		if (presentation != currentPres || cmbPresHall.getValue() != newHall) {
+			return; // die Auswahl hat sich inzwischen wieder geändert
+		}
+		String newHallId = newHall != null ? newHall.getId() : null;
+		if (Objects.equals(newHallId, presentation.getHallId())) {
+			return;
+		}
+		String message = hallChangeMessage(presentation);
+		if (message != null && !ConfirmDialog.confirm("Halle wechseln", message, "Wechseln", "button-primary", null)) {
+			loadingDetails = true;
+			try {
+				cmbPresHall.setValue(hallRepository.findById(presentation.getHallId()));
+			} finally {
+				loadingDetails = false;
+			}
+			return;
+		}
+		changeHall(presentation, newHall);
+	}
+
+	/**
+	 * Hallenwechsel: Die Bestuhlung wird zurückgesetzt. Der Abgleich ohne Bestuhlung ({@link BookingSync#sync}) entfernt
+	 * die leeren Buchungen, Buchungen mit Daten bleiben ohne Platz, bis eine Bestuhlung der neuen Halle gewählt ist.
+	 */
 	private void changeHall(Presentation presentation, Hall newHall) {
 		String newHallId = newHall != null ? newHall.getId() : null;
 		if (Objects.equals(newHallId, presentation.getHallId())) {
@@ -306,7 +359,7 @@ public class EventEditController {
 		}
 		presentation.setHallId(newHallId);
 		presentation.setSeatingPlanId(null);
-		presentation.setPlanMissing(false);
+		BookingSync.sync(presentation, null);
 		loadingDetails = true;
 		try {
 			showPlansOf(newHall, null);
@@ -316,15 +369,18 @@ public class EventEditController {
 		presTable.refresh();
 	}
 
-	/** Bestuhlungswechsel mit Rückfrage; bei "Abbrechen" kehrt die Auswahl zur bisherigen Bestuhlung zurück. */
-	private void changePlan(Presentation presentation, SeatingPlan oldPlan, SeatingPlan newPlan) {
+	/**
+	 * Bestuhlungswechsel mit Rückfrage; bei "Abbrechen" kehrt die Auswahl zur Bestuhlung des Modells zurück (nicht zum
+	 * vorigen Wert der Auswahl, der nach schnellen Mehrfachwechseln schon ein nie bestätigter sein kann).
+	 */
+	private void changePlan(Presentation presentation, SeatingPlan newPlan) {
 		if (presentation != currentPres || cmbPresPlan.getValue() != newPlan) {
 			return; // die Auswahl hat sich inzwischen wieder geändert
 		}
 		if (!PlanSwitchDialog.confirm(presentation, newPlan)) {
 			loadingDetails = true;
 			try {
-				cmbPresPlan.setValue(oldPlan);
+				cmbPresPlan.setValue(modelPlan(presentation, hallRepository.findById(presentation.getHallId())));
 			} finally {
 				loadingDetails = false;
 			}
@@ -360,7 +416,7 @@ public class EventEditController {
 			} else {
 				Hall hall = hallRepository.findById(presentation.getHallId());
 				cmbPresHall.setValue(hall);
-				showPlansOf(hall, hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null);
+				showPlansOf(hall, modelPlan(presentation, hall));
 				spnPresPrice.getValueFactory().setValue(presentation.getPrice() / 100.0);
 				lblPresDetails.setText(EntityLabels.presentation(presentation));
 			}

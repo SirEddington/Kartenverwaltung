@@ -117,6 +117,19 @@ class SeatListSummaryTest {
 	}
 
 	@Test
+	void bookingWithoutPlaceIsMarkedAndNotMergedWithTheRealSeat() {
+		Booking real = seat("Prunksitzung", "A", 3, 2);
+		Booking without = seat("Prunksitzung", "A", 3, 2);
+		without.setUnassigned(true);
+		Booking neighbour = seat("Prunksitzung", "A", 3, 1);
+
+		assertEquals("Prunksitzung; Ohne Platz (bisher Tisch A3, Sitz 2); Tisch A3; Sitz 1, 2",
+				SeatListSummary.headline(List.of(real, without, neighbour)));
+		assertEquals("Prunksitzung, Ohne Platz (bisher Tisch A3, Sitz 2)\nPrunksitzung, Tisch A3, Sitz 1\nPrunksitzung, Tisch A3, Sitz 2",
+				SeatListSummary.tooltip(List.of(real, without, neighbour)));
+	}
+
+	@Test
 	void emptyListGivesEmptyTexts() {
 		assertEquals("", SeatListSummary.headline(List.of()));
 		assertEquals("", SeatListSummary.tooltip(List.of()));

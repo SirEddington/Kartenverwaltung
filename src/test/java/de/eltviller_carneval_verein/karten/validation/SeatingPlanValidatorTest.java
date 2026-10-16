@@ -114,6 +114,18 @@ class SeatingPlanValidatorTest {
 	}
 
 	@Test
+	void lettersDifferingOnlyInCaseAreADuplicate() {
+		SeatingPlan plan = plan();
+		plan.addRow().setLabel(" a ");
+
+		ValidationIssue issue = only(SeatingPlanValidator.validate(plan));
+
+		assertEquals("ROW-001", issue.code());
+		assertEquals("Der Buchstabe A wird in Bestuhlung Prunksitzung in Halle Festhalle für mehrere Reihen verwendet.",
+				issue.message());
+	}
+
+	@Test
 	void severalRowsWithoutLetterAreNotADuplicate() {
 		SeatingPlan plan = plan();
 		plan.addRow();

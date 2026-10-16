@@ -86,6 +86,14 @@ public final class EntityLabels {
 	}
 
 	/**
+	 * Der Platz einer Buchung für Anzeigen: "Tisch A3, Sitz 2", bei einer Buchung ohne Platz "Ohne Platz (bisher
+	 * Tisch A3, Sitz 2)", damit sie nie mit der Buchung des echten Platzes verwechselt wird.
+	 */
+	public static String place(Booking booking) {
+		return booking.isUnassigned() ? "Ohne Platz (bisher " + booking.getPlaceLabel() + ")" : booking.getPlaceLabel();
+	}
+
+	/**
 	 * z. B. "Sitz 2 an Tisch A3 in Bestuhlung Prunksitzung in Halle Festhalle" (ohne Bestuhlung: "Sitz 2 an Tisch A3",
 	 * ohne Tisch: "Sitz 2").
 	 */
