@@ -9,8 +9,6 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
@@ -156,7 +154,7 @@ public class MainApp extends Application {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/EventCreateView.fxml");
 	}
 
-	public static void showEventEditView(Event selectedEvent, Presentation selectedPres, Table selectedTable, Seat selectedSeat, boolean editable) {
+	public static void showEventEditView(Event selectedEvent, Presentation selectedPres, boolean editable) {
 		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/EventEditView.fxml";
 		try {
 
@@ -178,7 +176,7 @@ public class MainApp extends Application {
 			EventEditController controller = loader.getController();
 
 			// 4. Parameter direkt an den Controller übergeben
-			controller.initData(selectedEvent, selectedPres, selectedTable, selectedSeat, editable);
+			controller.initData(selectedEvent, selectedPres, editable);
 
 			// 5. Scene setzen
 			primaryStage.setScene(createScene(root));

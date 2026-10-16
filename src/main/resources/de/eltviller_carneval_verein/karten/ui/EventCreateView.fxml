@@ -36,35 +36,12 @@
 
         <Label text="Halle:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
         <ComboBox fx:id="cmbHall" promptText="– keine Halle –" prefWidth="300.0" GridPane.rowIndex="1" GridPane.columnIndex="1" />
-    </GridPane>
 
-    <Separator />
+        <Label text="Bestuhlung:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
+        <ComboBox fx:id="cmbSeatingPlan" promptText="Keine Bestuhlung" prefWidth="300.0" GridPane.rowIndex="2" GridPane.columnIndex="1" />
 
-    <!-- Tischdaten -->
-    <Label text="Tische" />
-    <GridPane vgap="10.0" hgap="10.0">
-        <Label text="Tische pro Vorstellung:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnTablePerPres" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
-        <Label text="Tischbreite (cm):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnDoubleTableWidth" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
-        <Label text="Tischlänge (cm):" GridPane.rowIndex="1" GridPane.columnIndex="2" />
-        <Spinner fx:id="spnDoubleTableHeight" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="3" />
-    </GridPane>
-
-    <Separator />
-
-    <!-- Sitzdaten -->
-    <Label text="Sitze" />
-    <GridPane vgap="10.0" hgap="10.0">
-        <Label text="Sitze pro Tisch:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnSeatsPerTable" editable="true" GridPane.rowIndex="0" GridPane.columnIndex="1" />
-        <Label text="Sitzbreite (cm):" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnDoubleSeatWidth" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="1" />
-        <Label text="Sitzlänge (cm):" GridPane.rowIndex="1" GridPane.columnIndex="2" />
-        <Spinner fx:id="spnDoubleSeatHeight" editable="true" GridPane.rowIndex="1" GridPane.columnIndex="3" />
-
-        <Label text="Preis bei Anlage:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
-        <Spinner fx:id="spnDoublePrice" editable="true" GridPane.rowIndex="2" GridPane.columnIndex="1" />
+        <Label text="Standardpreis (€):" GridPane.rowIndex="3" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnDoublePrice" editable="true" GridPane.rowIndex="3" GridPane.columnIndex="1" />
     </GridPane>
 
     <Region VBox.vgrow="ALWAYS" />

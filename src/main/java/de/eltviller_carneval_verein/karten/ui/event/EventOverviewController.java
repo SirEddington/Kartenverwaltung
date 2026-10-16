@@ -202,30 +202,7 @@ public class EventOverviewController extends AbstractOverviewController {
 			if (selectedItem != null) {
 				Event event = findParentInTree(selectedItem, Event.class);
 				Presentation pres = event.addPresentation();
-				MainApp.showEventEditView(event, pres, null, null, true);
-			}
-		});
-
-		MenuItem addTableItem = new MenuItem("+ Tisch hinzufügen");
-		addTableItem.setOnAction(e -> {
-			TreeItem<Object> selectedItem = selectedItem();
-			if (selectedItem != null) {
-				Event event = findParentInTree(selectedItem, Event.class);
-				Presentation pres = findParentInTree(selectedItem, Presentation.class);
-				Table table = pres.addTable();
-				MainApp.showEventEditView(event, pres, table, null, true);
-			}
-		});
-
-		MenuItem addSeatItem = new MenuItem("+ Sitz hinzufügen");
-		addSeatItem.setOnAction(e -> {
-			TreeItem<Object> selectedItem = selectedItem();
-			if (selectedItem != null) {
-				Event event = findParentInTree(selectedItem, Event.class);
-				Presentation pres = findParentInTree(selectedItem, Presentation.class);
-				Table table = findParentInTree(selectedItem, Table.class);
-				Seat seat = table.addSeat();
-				MainApp.showEventEditView(event, pres, table, seat, true);
+				MainApp.showEventEditView(event, pres, true);
 			}
 		});
 
@@ -238,13 +215,11 @@ public class EventOverviewController extends AbstractOverviewController {
 		MenuItem deleteItem = new MenuItem("Löschen");
 		deleteItem.setOnAction(e -> handleDelete());
 
-		contextMenu.getItems().addAll(addPresItem, addTableItem, addSeatItem, editItem, editDeleteSeparator, deleteItem, deleteDetailsSeparator, seeDetails);
+		contextMenu.getItems().addAll(addPresItem, editItem, editDeleteSeparator, deleteItem, deleteDetailsSeparator, seeDetails);
 
 		contextMenu.setOnShowing(e -> {
 			Object data = tableRow.getItem();
 			addPresItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
-			addTableItem.setVisible(data instanceof Presentation || data instanceof Table || data instanceof Seat);
-			addSeatItem.setVisible(data instanceof Table || data instanceof Seat);
 			editItem.setVisible(data != null);
 			seeDetails.setVisible(data != null);
 			deleteItem.setVisible(data != null);
@@ -258,10 +233,9 @@ public class EventOverviewController extends AbstractOverviewController {
 		TreeItem<Object> selectedItem = selectedItem();
 		if (selectedItem != null) {
 			Event event = findParentInTree(selectedItem, Event.class);
+			// Bei einem Tisch- oder Sitzknoten öffnet die Bearbeitung die Vorstellung (Tische und Sitze stehen in der Halle)
 			Presentation pres = findParentInTree(selectedItem, Presentation.class);
-			Table table = findParentInTree(selectedItem, Table.class);
-			Seat seat = findParentInTree(selectedItem, Seat.class);
-			MainApp.showEventEditView(event, pres, table, seat, editable);
+			MainApp.showEventEditView(event, pres, editable);
 		}
 	}
 
