@@ -8,6 +8,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
@@ -336,9 +337,12 @@ public final class CustomerDisplay {
 	private void refresh() {
 		Presentation presentation = state.presentationProperty().get();
 		titleLabel.setText(CustomerDisplayText.title(state.eventProperty().get(), presentation));
-		hintLabel.setVisible(presentation == null);
 		Hall hall = hallOf(presentation);
-		planPane.render(hall, SalesPlan.of(presentation, hall), presentation, decorator);
+		SeatingPlan plan = SalesPlan.of(presentation, hall);
+		boolean waiting = CustomerDisplayText.showsWaitingHint(presentation, plan);
+		hintLabel.setVisible(waiting);
+		// Ohne Plan bleibt die Fläche leer wie ohne Vorstellung: Den internen Hinweis zur Bestuhlung zeigt nur das Hauptfenster
+		planPane.render(hall, plan, waiting ? null : presentation, decorator);
 		updateSummary(presentation);
 	}
 

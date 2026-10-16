@@ -4,16 +4,28 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.ui.input.DateTimeInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /** Texte und Regeln des Kundenfensters, die ohne JavaFX-Oberfläche prüfbar sind. */
 final class CustomerDisplayText {
 
-	/** Steht anstelle des Plans, solange keine Vorstellung gewählt ist. */
+	/** Steht anstelle des Plans, solange keine Vorstellung gewählt ist oder es keinen Plan zu zeigen gibt. */
 	static final String WAITING_HINT = "Bitte haben Sie einen Moment Geduld.";
 
 	private CustomerDisplayText() {
+	}
+
+	/**
+	 * Ob das Kundenfenster anstelle des Plans den Wartetext {@value #WAITING_HINT} zeigt: ohne Vorstellung und immer
+	 * dann, wenn die Verkaufsansicht statt der Bestuhlung einen internen Hinweis zeigt ({@link SalesPlan#hint}, etwa
+	 * "Bestuhlung nicht mehr vorhanden"). Diesen Hinweis sieht das Publikum nie.
+	 *
+	 * @param plan die Bestuhlung ({@link SalesPlan#of}), {@code null} ohne Bestuhlung
+	 */
+	static boolean showsWaitingHint(Presentation presentation, SeatingPlan plan) {
+		return presentation == null || SalesPlan.hint(presentation, plan) != null;
 	}
 
 	/**
