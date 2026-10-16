@@ -15,7 +15,14 @@ public enum PresentationIssue implements Issue {
 	/** Der Name einer Vorstellung ist leer. */
 	NAME_EMPTY("PRS-004", Severity.ERROR, "Der Name einer Vorstellung darf nicht leer sein."),
 	/** Ist-Betrag im Kassensturz außerhalb von 0 bis 1.000.000 €. &1 = "Ist-Betrag", &2 = Vorstellung, &3 = Betrag, &4 = Minimum, &5 = Maximum (in Euro). */
-	CASH_OUT_OF_RANGE("PRS-005", Severity.ERROR, RangeCheck.TEMPLATE);
+	CASH_OUT_OF_RANGE("PRS-005", Severity.ERROR, RangeCheck.TEMPLATE),
+	/** Die Halle ist gesetzt, die Bestuhlung nicht. &1 = Vorstellung. */
+	PLAN_MISSING("PRS-006", Severity.WARNING, "Für &1 ist keine Bestuhlung ausgewählt."),
+	/** Die gewählte Bestuhlung gibt es in der Halle nicht mehr. &1 = Vorstellung. */
+	PLAN_GONE("PRS-007", Severity.WARNING,
+			"Die Bestuhlung von &1 existiert nicht mehr. Die Buchungen bleiben erhalten, neue können nicht angelegt werden."),
+	/** Standardpreis außerhalb von 0 bis 1.000 €. &1 = "Standardpreis", &2 = Vorstellung, &3 = Betrag, &4 = Minimum, &5 = Maximum (in Euro). */
+	PRICE_OUT_OF_RANGE("PRS-008", Severity.ERROR, RangeCheck.TEMPLATE);
 
 	private final String code;
 	private final Severity severity;

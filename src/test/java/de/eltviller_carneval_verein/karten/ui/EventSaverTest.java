@@ -59,6 +59,7 @@ class EventSaverTest {
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
 		presentation.setHallId("halle-1");
+		presentation.setSeatingPlanId("plan-1");
 		Table table = presentation.addTable(1);
 		table.addSeat(1).setPrice(1000);
 		return event;

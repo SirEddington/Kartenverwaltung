@@ -2,10 +2,11 @@ package de.eltviller_carneval_verein.karten.validation;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 
 /**
  * Plausibilitätsprüfungen für eine Halle (Kürzel HLL, siehe {@link HallIssue}) und Weitergabe der Prüfung an die
- * Hallenobjekte. Die Halle ist nicht Teil des Event-Baums und hat deshalb einen eigenen Einstieg. Aufbau wie bei
+ * Hallenobjekte und Bestuhlungen. Die Halle ist nicht Teil des Event-Baums und hat deshalb einen eigenen Einstieg. Aufbau wie bei
  * {@link EventValidator}.
  */
 public final class HallValidator {
@@ -28,6 +29,7 @@ public final class HallValidator {
 		validateName();
 		validateSize();
 		validateHallObjects();
+		validateSeatingPlans();
 		return result;
 	}
 
@@ -47,6 +49,12 @@ public final class HallValidator {
 	private void validateHallObjects() {
 		for (HallObject object : hall.getHallObjects()) {
 			result.addAll(HallObjectValidator.validate(object, hall));
+		}
+	}
+
+	private void validateSeatingPlans() {
+		for (SeatingPlan plan : hall.getSeatingPlans()) {
+			result.addAll(SeatingPlanValidator.validate(plan));
 		}
 	}
 }

@@ -20,7 +20,8 @@ class IssueConventionsTest {
 
 	private static List<Issue[]> allEnums() {
 		return List.<Issue[]>of(EventIssue.values(), PresentationIssue.values(), TableIssue.values(), SeatIssue.values(),
-				HallIssue.values(), HallObjectIssue.values(), InputIssue.values());
+				HallIssue.values(), HallObjectIssue.values(), SeatingPlanIssue.values(), TableRowIssue.values(),
+				InputIssue.values());
 	}
 
 	private static List<Issue> allIssues() {

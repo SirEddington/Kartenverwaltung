@@ -8,7 +8,9 @@ import java.time.LocalTime;
 
 import org.junit.jupiter.api.Test;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Table;
 
@@ -22,6 +24,7 @@ class PresentationAndTableValidatorTest {
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
 		presentation.setHallId("halle-1");
+		presentation.setSeatingPlanId("plan-1");
 		return presentation;
 	}
 
@@ -238,6 +241,127 @@ class PresentationAndTableValidatorTest {
 			assertEquals("PRS-003", only(result).code());
 			assertEquals("Für Vorstellung Prunksitzung ist keine Halle ausgewählt.", only(result).message());
 		}
+	}
+
+	// --- Bestuhlung (PRS-006, PRS-007), Standardpreis (PRS-008), Buchungen (SEA-011) ---
+
+	@Test
+	void hallWithoutSeatingPlanIsAWarning() {
+		for (String planId : new String[] { null, "", "  " }) {
+			Presentation presentation = presentation();
+			presentation.setSeatingPlanId(planId);
+
+			ValidationIssue issue = only(PresentationValidator.validate(presentation));
+
+			assertEquals("PRS-006", issue.code());
+			assertEquals(Severity.WARNING, issue.severity());
+			assertEquals("Für Vorstellung Prunksitzung ist keine Bestuhlung ausgewählt.", issue.message());
+		}
+	}
+
+	@Test
+	void noSeatingPlanWithoutHallGivesOnlyTheHallWarning() {
+		Presentation presentation = presentation();
+		presentation.setHallId(null);
+		presentation.setSeatingPlanId(null);
+
+		assertEquals("PRS-003", only(PresentationValidator.validate(presentation)).code());
+	}
+
+	@Test
+	void selectedSeatingPlanIsFine() {
+		Presentation presentation = presentation();
+		presentation.setSeatingPlanId("plan-1");
+
+		assertTrue(PresentationValidator.validate(presentation).isEmpty());
+	}
+
+	@Test
+	void vanishedSeatingPlanIsAWarningOnlyWithPlanMissing() {
+		Presentation presentation = presentation();
+		presentation.setSeatingPlanId("plan-1");
+		assertTrue(PresentationValidator.validate(presentation).isEmpty());
+
+		presentation.setPlanMissing(true);
+		ValidationIssue issue = only(PresentationValidator.validate(presentation));
+
+		assertEquals("PRS-007", issue.code());
+		assertEquals(Severity.WARNING, issue.severity());
+		assertEquals("Die Bestuhlung von Vorstellung Prunksitzung existiert nicht mehr. Die Buchungen bleiben erhalten, neue können nicht angelegt werden.",
+				issue.message());
+	}
+
+	@Test
+	void standardPriceMustBeBetweenZeroAndOneThousandEuros() {
+		for (int ok : new int[] { 0, 1250, 100_000 }) {
+			Presentation presentation = presentation();
+			presentation.setSeatingPlanId("plan-1");
+			presentation.setPrice(ok);
+			assertTrue(PresentationValidator.validate(presentation).isEmpty(), "Gültig: " + ok);
+		}
+
+		Presentation presentation = presentation();
+		presentation.setSeatingPlanId("plan-1");
+		presentation.setPrice(100_001);
+		ValidationIssue issue = only(PresentationValidator.validate(presentation));
+		assertEquals("PRS-008", issue.code());
+		assertEquals(Severity.ERROR, issue.severity());
+		assertTrue(issue.message().startsWith("Standardpreis von Vorstellung Prunksitzung liegt mit "), issue.message());
+		assertTrue(issue.message().endsWith(" nicht zwischen 0,00 € und 1.000,00 €."), issue.message());
+
+		presentation.setPrice(-1);
+		assertEquals("PRS-008", only(PresentationValidator.validate(presentation)).code());
+	}
+
+	@Test
+	void presentationValidationIncludesTheBookings() {
+		Presentation presentation = presentation();
+		presentation.setSeatingPlanId("plan-1");
+		presentation.setPrice(1250);
+		Booking booking = presentation.addBooking();
+		booking.setSeatId("sitz-1");
+		booking.setRowLabel("A");
+		booking.setTableNumber(3);
+		booking.setSeatNumber(2);
+		booking.setPaymentStatus(PaymentStatus.CASH);
+
+		ValidationIssue issue = only(PresentationValidator.validate(presentation));
+
+		assertEquals("SEA-007", issue.code());
+		assertTrue(issue.message().startsWith("Prunksitzung, Tisch A3, Sitz 2 "), issue.message());
+	}
+
+	@Test
+	void sameSeatInSeveralBookingsGivesOneMessagePerSeat() {
+		Presentation presentation = presentation();
+		presentation.setSeatingPlanId("plan-1");
+		for (String seatId : new String[] { "sitz-1", "sitz-1", "sitz-1", "sitz-2", "sitz-2", "sitz-3" }) {
+			Booking booking = presentation.addBooking();
+			booking.setSeatId(seatId);
+			booking.setRowLabel("A");
+			booking.setTableNumber(3);
+			booking.setSeatNumber(seatId.charAt(5) - '0');
+		}
+
+		ValidationResult result = PresentationValidator.validate(presentation);
+
+		assertEquals(2, result.getIssues().size(), result.getIssues().toString());
+		assertTrue(result.getIssues().stream().allMatch(i -> i.code().equals("SEA-011") && i.severity() == Severity.ERROR));
+		assertEquals("Der Sitz von Prunksitzung, Tisch A3, Sitz 1 ist noch einer zweiten Buchung zugeordnet.",
+				result.getIssues().get(0).message());
+		assertEquals("Der Sitz von Prunksitzung, Tisch A3, Sitz 2 ist noch einer zweiten Buchung zugeordnet.",
+				result.getIssues().get(1).message());
+	}
+
+	@Test
+	void bookingsWithoutSeatIdAreNotDoubleBookings() {
+		Presentation presentation = presentation();
+		presentation.setSeatingPlanId("plan-1");
+		for (String seatId : new String[] { null, "", " " }) {
+			presentation.addBooking().setSeatId(seatId);
+		}
+
+		assertTrue(PresentationValidator.validate(presentation).isEmpty());
 	}
 
 	@Test

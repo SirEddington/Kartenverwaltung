@@ -20,6 +20,7 @@ class EventValidatorTest {
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
 		presentation.setHallId("halle-1");
+		presentation.setSeatingPlanId("plan-1");
 	}
 
 	/** Event mit zwei vollständigen Vorstellungen, je ein Tisch (Nr. 1) mit zwei Sitzen zu 10 Euro. */

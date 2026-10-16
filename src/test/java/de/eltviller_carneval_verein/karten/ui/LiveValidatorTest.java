@@ -90,6 +90,7 @@ class LiveValidatorTest {
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
 		presentation.setHallId("halle-1");
+		presentation.setSeatingPlanId("plan-1");
 		presentation.addTable(1).addSeat(1).setPrice(1000);
 		return event;
 	}

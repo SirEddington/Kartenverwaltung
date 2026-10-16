@@ -19,7 +19,7 @@ public final class SeatValidator {
 	public static final long MAX_PRICE_CENTS = 100_000;
 
 	/** Bewusst einfach: etwas vor und nach dem @, danach ein Punkt, keine Leerzeichen. */
-	private static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
+	static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
 	private final Seat seat;
 	private final ValidationResult result = ValidationResult.ok();
