@@ -32,6 +32,11 @@ public final class SeatingPlanLayout {
 	// Abstand der äußeren Stühle zur Ober-/Unterkante des Tischs (cm)
 	private static final double SEAT_MARGIN_Y = 20;
 
+	// "+ Reihe": Startpunkt der ersten Reihe (x und y), Gang zwischen zwei Reihen, Abstand neben einer Reihe ohne Tische (cm)
+	private static final double FIRST_ROW_START = 100;
+	private static final double ROW_GAP = 20;
+	private static final double EMPTY_ROW_SPACING = 150;
+
 	private SeatingPlanLayout() {
 	}
 
@@ -124,6 +129,35 @@ public final class SeatingPlanLayout {
 	}
 
 	/**
+	 * Ausdehnung der Reihe quer zu ihrer Achse: die größte Querausdehnung ihrer Tische samt Stühlen, 0 ohne Tische. Bei
+	 * Tischdrehung 0 (längs) ist das die Tischbreite mit den Stühlen links und rechts, bei 90 (quer) die Tischhöhe.
+	 * Verändert nichts.
+	 */
+	public static double crossExtent(SeatingPlan plan, TableRow row) {
+		double tableRotation = Math.toRadians(row.getTableRotation());
+		double max = 0;
+		for (Table table : plan.getTablesOf(row)) {
+			max = Math.max(max, crossExtent(table, tableRotation));
+		}
+		return max;
+	}
+
+	/**
+	 * Startpunkt {x, y} der Reihe, die "+ Reihe" hinter {@code previous} (der letzten Reihe) anlegt: neben ihr auf der
+	 * Seite von {@link #besideDirection}, im Abstand ihrer {@link #crossExtent Querausdehnung} plus 20 cm Gang (ohne
+	 * Tische 150 cm), auf gleicher Höhe entlang der Achse. Ohne vorige Reihe (100, 100).
+	 */
+	public static double[] nextRowStart(SeatingPlan plan, TableRow previous) {
+		if (previous == null) {
+			return new double[] { FIRST_ROW_START, FIRST_ROW_START };
+		}
+		double extent = crossExtent(plan, previous);
+		double distance = extent > 0 ? extent + ROW_GAP : EMPTY_ROW_SPACING;
+		double[] side = besideDirection(previous.getAngle());
+		return new double[] { previous.getPosX() + distance * side[0], previous.getPosY() + distance * side[1] };
+	}
+
+	/**
 	 * Ausdehnung eines Tischs samt Stuhlrand entlang der Reihenachse; Maße von 0 oder kleiner wie in {@code apply}. Bei
 	 * Tischdrehung 0 (längs) ist das die Tischhöhe, bei 90 (quer) die Breite mit den Stühlen links und rechts.
 	 */
@@ -131,6 +165,13 @@ public final class SeatingPlanLayout {
 		double width = table.getWidth() > 0 ? table.getWidth() : DEFAULT_TABLE_WIDTH;
 		double height = table.getHeight() > 0 ? table.getHeight() : DEFAULT_TABLE_HEIGHT;
 		return Math.abs((width + 2 * getSeatMargin(table)) * Math.sin(tableRotation)) + Math.abs(height * Math.cos(tableRotation));
+	}
+
+	/** Wie {@link #extent}, aber quer zur Reihenachse: Projektion desselben Rechtecks auf die Querrichtung. */
+	private static double crossExtent(Table table, double tableRotation) {
+		double width = table.getWidth() > 0 ? table.getWidth() : DEFAULT_TABLE_WIDTH;
+		double height = table.getHeight() > 0 ? table.getHeight() : DEFAULT_TABLE_HEIGHT;
+		return Math.abs((width + 2 * getSeatMargin(table)) * Math.cos(tableRotation)) + Math.abs(height * Math.sin(tableRotation));
 	}
 
 	/**

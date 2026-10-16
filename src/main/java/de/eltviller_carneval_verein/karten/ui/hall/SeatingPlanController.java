@@ -50,9 +50,6 @@ import javafx.scene.layout.VBox;
  */
 public class SeatingPlanController {
 
-	private static final double NEW_ROW_START = 100;
-	// Abstand einer neuen Reihe zur vorigen, quer zu deren Richtung (etwa eine Tischlänge plus Gang)
-	private static final double NEW_ROW_SPACING = 400;
 	private static final String MIXED = " verschieden";
 
 	private SeatingPlan plan;
@@ -455,15 +452,13 @@ public class SeatingPlanController {
 		}
 		List<TableRow> rows = plan.getRows();
 		TableRow previous = rows.isEmpty() ? null : rows.get(rows.size() - 1);
+		// Neben der vorigen Reihe (rechts bzw. darunter), im Abstand ihrer Breite quer zur Richtung plus Gang
+		double[] start = SeatingPlanLayout.nextRowStart(plan, previous);
 		TableRow row = plan.addRow();
-		if (previous == null) {
-			row.setPosX(NEW_ROW_START);
-			row.setPosY(NEW_ROW_START);
-		} else {
-			// Parallel zur vorigen Reihe, eine Reihenbreite daneben (quer zur Reihenrichtung, rechts bzw. darunter)
-			double[] side = SeatingPlanLayout.besideDirection(previous.getAngle());
-			row.setPosX(previous.getPosX() + NEW_ROW_SPACING * side[0]);
-			row.setPosY(previous.getPosY() + NEW_ROW_SPACING * side[1]);
+		row.setPosX(start[0]);
+		row.setPosY(start[1]);
+		if (previous != null) {
+			// Parallel zur vorigen Reihe und mit demselben Tischabstand; Mittelgang und Gangbreite bleiben beim Standard
 			row.setAngle(previous.getAngle());
 			row.setTableRotation(previous.getTableRotation());
 			row.setTableGap(previous.getTableGap());

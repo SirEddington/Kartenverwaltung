@@ -392,6 +392,89 @@ class SeatingPlanLayoutTest {
 		assertEquals(365, nine.getPosX(), EPS);
 	}
 
+	// --- Nächste Reihe ("+ Reihe"): neben der vorigen, Abstand = deren Querausdehnung + 20 cm ---
+
+	/** Tisch 70 x 300 mit zwei Sitzen der Breite 30 (Rand m = 15 + 15 = 30). */
+	private Table tableWithWideSeats() {
+		Table table = table();
+		table.getSeats().forEach(seat -> seat.setWidth(30));
+		return table;
+	}
+
+	private static void assertPoint(double[] point, double x, double y) {
+		assertEquals(x, point[0], EPS, "x");
+		assertEquals(y, point[1], EPS, "y");
+	}
+
+	@Test
+	void querausdehnung_stehender_tische_ist_breite_plus_stuehle() {
+		tableWithWideSeats();
+		tableWithWideSeats();
+
+		// 70 + 2 * 30
+		assertEquals(130, SeatingPlanLayout.crossExtent(plan, row), EPS);
+	}
+
+	@Test
+	void querausdehnung_zaehlt_den_breitesten_tisch() {
+		tableWithWideSeats();
+		tableWithWideSeats().setWidth(90);
+
+		assertEquals(150, SeatingPlanLayout.crossExtent(plan, row), EPS);
+	}
+
+	@Test
+	void naechste_reihe_neben_stehenden_tischen() {
+		tableWithWideSeats();
+		tableWithWideSeats();
+
+		// Reihe nach unten: die nächste rechts daneben, 130 + 20 weiter, auf gleicher Höhe
+		assertPoint(SeatingPlanLayout.nextRowStart(plan, row), 100 + 130 + 20, 50);
+	}
+
+	@Test
+	void naechste_reihe_neben_querer_reihe() {
+		tableWithWideSeats();
+		tableWithWideSeats();
+		row.setTableRotation(90);
+
+		// Quer: Ausdehnung quer zur Reihe = Tischhöhe 300
+		assertEquals(300, SeatingPlanLayout.crossExtent(plan, row), EPS);
+		assertPoint(SeatingPlanLayout.nextRowStart(plan, row), 100 + 300 + 20, 50);
+	}
+
+	@Test
+	void naechste_reihe_unter_reihe_nach_links() {
+		tableWithWideSeats();
+		tableWithWideSeats();
+		row.setAngle(90);
+
+		// Reihe nach links: die nächste darunter, gleicher Start entlang der Achse
+		assertPoint(SeatingPlanLayout.nextRowStart(plan, row), 100, 50 + 130 + 20);
+	}
+
+	@Test
+	void naechste_reihe_bei_schraeg_gedrehten_tischen() {
+		tableWithWideSeats();
+		row.setTableRotation(45);
+
+		// Projektion des Rechtecks 130 x 300 quer zur Achse: (130 + 300) * cos 45
+		double extent = (130 + 300) * Math.sqrt(0.5);
+		assertEquals(extent, SeatingPlanLayout.crossExtent(plan, row), EPS);
+		assertPoint(SeatingPlanLayout.nextRowStart(plan, row), 100 + extent + 20, 50);
+	}
+
+	@Test
+	void naechste_reihe_nach_reihe_ohne_tische_150_daneben() {
+		assertEquals(0, SeatingPlanLayout.crossExtent(plan, row), EPS);
+		assertPoint(SeatingPlanLayout.nextRowStart(plan, row), 100 + 150, 50);
+	}
+
+	@Test
+	void erste_reihe_am_standardstart() {
+		assertPoint(SeatingPlanLayout.nextRowStart(plan, null), 100, 100);
+	}
+
 	private List<Double> snapshot() {
 		List<Double> values = new ArrayList<>();
 		for (Table table : plan.getTables()) {
