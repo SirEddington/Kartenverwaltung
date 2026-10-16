@@ -9,13 +9,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import de.eltviller_carneval_verein.karten.model.BookingSync.Report;
+import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 
 class BookingSyncTest {
 
@@ -340,6 +344,35 @@ class BookingSyncTest {
 		// ist die Bestuhlung wieder da, hebt der nächste Lauf die Markierung auf
 		BookingSync.sync(presentation, plan);
 		assertFalse(presentation.isPlanMissing());
+	}
+
+	@Test
+	void fehlende_Bestuhlung_laesst_gespeichertes_ohne_Platz_stehen() throws IOException {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		BookingSync.sync(presentation, plan);
+		Booking seated = bookingOf(presentation, seat(plan, 1, 1));
+		seated.setLastName("Meier");
+		Booking lost = snapshotBooking(presentation, "A", 7, 1);
+		lost.setLastName("Müller");
+		lost.setPaymentStatus(PaymentStatus.CASH);
+		BookingSync.sync(presentation, plan);
+		assertTrue(lost.isUnassigned());
+
+		// gespeichert und neu geladen, die Bestuhlung gibt es inzwischen nicht mehr
+		ObjectMapper mapper = JsonMapperFactory.create();
+		Presentation loaded = mapper.readValue(mapper.writeValueAsString(presentation), Presentation.class);
+		Report report = BookingSync.sync(loaded, null);
+
+		assertEquals(new Report(0, 0, 0, 0), report);
+		assertTrue(loaded.isPlanMissing());
+		assertEquals(presentation.getBookings().size(), loaded.getBookings().size());
+		Booking loadedLost = loaded.getBookings().stream().filter(b -> "Müller".equals(b.getLastName())).findFirst().orElseThrow();
+		Booking loadedSeated = loaded.getBookings().stream().filter(b -> "Meier".equals(b.getLastName())).findFirst().orElseThrow();
+		assertTrue(loadedLost.isUnassigned());
+		assertEquals(7, loadedLost.getTableNumber());
+		assertFalse(loadedSeated.isUnassigned());
+		assertTrue(loaded.getBookings().stream().filter(b -> b != loadedLost).noneMatch(Booking::isUnassigned));
 	}
 
 	@Test

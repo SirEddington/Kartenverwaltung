@@ -6,10 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 
 class BookingTest {
 
@@ -248,6 +253,29 @@ class BookingTest {
 	}
 
 	@Test
+	void unassigned_wird_gespeichert_und_wieder_geladen() throws IOException {
+		Booking booking = bookingAt("A", 3, 1);
+		booking.setLastName("Müller");
+		booking.setUnassigned(true);
+		ObjectMapper mapper = JsonMapperFactory.create();
+
+		String json = mapper.writeValueAsString(booking);
+		Booking loaded = mapper.readValue(json, Booking.class);
+
+		assertTrue(mapper.readTree(json).path("unassigned").asBoolean(), json);
+		assertTrue(loaded.isUnassigned());
+		assertEquals("Müller", loaded.getLastName());
+	}
+
+	@Test
+	void aeltere_Datei_ohne_unassigned_laedt_mit_Platz() throws IOException {
+		Booking loaded = JsonMapperFactory.create().readValue("{\"lastName\":\"Müller\",\"tableNumber\":3}", Booking.class);
+
+		assertFalse(loaded.isUnassigned());
+		assertEquals(3, loaded.getTableNumber());
+	}
+
+	@Test
 	void copy_uebernimmt_alle_Felder_in_ein_neues_Objekt() {
 		Booking booking = bookingAt("A", 3, 2);
 		booking.setSeatId("s-1");
@@ -260,6 +288,7 @@ class BookingTest {
 		booking.setFirstName("Anna");
 		booking.setEMail("a@b.de");
 		booking.setComment("Hinweis");
+		booking.setUnassigned(true);
 
 		Booking copy = booking.copy();
 
@@ -277,6 +306,7 @@ class BookingTest {
 		assertEquals("Anna", copy.getFirstName());
 		assertEquals("a@b.de", copy.getEMail());
 		assertEquals("Hinweis", copy.getComment());
+		assertTrue(copy.isUnassigned());
 
 		copy.setLastName("Meier");
 		assertEquals("Müller", booking.getLastName());

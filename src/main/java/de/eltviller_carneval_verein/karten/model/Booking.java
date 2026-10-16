@@ -49,8 +49,12 @@ public class Booking {
 	private String eMail; // get,set
 	private String comment; // get,set
 
-	/** Nur zur Laufzeit: der Sitz der Buchung gehört nicht (mehr) zur Bestuhlung. Wird nicht gespeichert. */
-	private boolean unassigned;
+	/**
+	 * "Ohne Platz": der Sitz der Buchung gehört nicht (mehr) zur Bestuhlung. Setzt {@link BookingSync}; wird
+	 * gespeichert, damit die Markierung auch dann bleibt, wenn es die Bestuhlung später nicht mehr gibt (ältere Dateien
+	 * ohne das Feld laden als {@code false}).
+	 */
+	private boolean unassigned; // get,set
 
 	// Getter und Setter -->
 	@JsonIgnore
@@ -172,12 +176,10 @@ public class Booking {
 		this.comment = comment;
 	}
 
-	@JsonIgnore
 	public boolean isUnassigned() {
 		return unassigned;
 	}
 
-	@JsonIgnore
 	public void setUnassigned(boolean unassigned) {
 		this.unassigned = unassigned;
 	}
@@ -256,7 +258,7 @@ public class Booking {
 		this.wheelchairAccessible = seat.isWheelchairAccessible();
 	}
 
-	/** Kopie aller gespeicherten Felder; ohne Vorstellung als Elternteil und ohne die Laufzeitmarkierung. */
+	/** Kopie aller gespeicherten Felder (auch "Ohne Platz"); ohne Vorstellung als Elternteil. */
 	public Booking copy() {
 		Booking copy = new Booking();
 		copy.seatId = seatId;
@@ -272,6 +274,7 @@ public class Booking {
 		copy.firstName = firstName;
 		copy.eMail = eMail;
 		copy.comment = comment;
+		copy.unassigned = unassigned;
 		return copy;
 	}
 

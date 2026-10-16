@@ -52,7 +52,8 @@ public final class BookingSync {
 	 * {@code seatId} und Momentaufnahme bleiben unverändert ({@code planMissing} wird {@code false}). Wählt man die
 	 * alte Bestuhlung wieder, findet der nächste Abgleich jede Buchung über ihre {@code seatId} und legt die leeren neu
 	 * an. Ist die {@code seatingPlanId} gesetzt, die Bestuhlung aber {@code null} (nicht mehr in der Halle), wird
-	 * {@code planMissing} gesetzt und nichts geändert: Die Buchungen bleiben, wie sie sind.
+	 * {@code planMissing} gesetzt und nichts geändert: Die Buchungen bleiben, wie sie sind, auch ihre gespeicherte
+	 * Markierung {@link Booking#isUnassigned() ohne Platz} aus dem letzten Abgleich mit der Bestuhlung.
 	 *
 	 * @param plan die Bestuhlung der Vorstellung oder {@code null}, wenn sie nicht gefunden wurde
 	 */

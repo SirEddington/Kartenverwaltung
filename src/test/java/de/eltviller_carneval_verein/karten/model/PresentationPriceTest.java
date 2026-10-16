@@ -128,7 +128,8 @@ class PresentationPriceTest {
 		ObjectMapper mapper = JsonMapperFactory.create();
 		String json = mapper.writeValueAsString(presentation);
 
-		assertFalse(json.contains("unassigned"), json);
+		// "Ohne Platz" wird gespeichert (bleibt auch, wenn die Bestuhlung später fehlt), planMissing nicht
+		assertTrue(mapper.readTree(json).path("bookings").path(0).path("unassigned").asBoolean(), json);
 		assertFalse(json.contains("planMissing"), json);
 		assertFalse(json.contains("effectivePrice"), json);
 		assertFalse(json.contains("placeLabel"), json);
@@ -145,7 +146,8 @@ class PresentationPriceTest {
 		assertEquals("Müller", loadedReserved.getLastName());
 		assertEquals("seat-1", loadedReserved.getSeatId());
 		assertEquals("Tisch A3, Sitz 2", loadedReserved.getPlaceLabel());
-		assertFalse(loadedReserved.isUnassigned());
+		assertTrue(loadedReserved.isUnassigned());
+		assertFalse(loaded.getBookings().get(1).isUnassigned());
 		assertNull(loadedReserved.getPrice());
 		assertEquals(2500, loadedReserved.getEffectivePrice());
 

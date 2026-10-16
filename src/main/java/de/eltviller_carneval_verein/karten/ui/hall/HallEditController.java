@@ -16,6 +16,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
+import de.eltviller_carneval_verein.karten.ui.PlanFreezer;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
@@ -269,6 +270,8 @@ public class HallEditController {
 		if (!ConfirmDialog.confirmDelete("Bestuhlung löschen", deletePlanMessage(plan, JsonEventRepository.getInstance().loadEvents()))) {
 			return;
 		}
+		// Solange die Bestuhlung noch da ist: "Ohne Platz" und Momentaufnahmen der betroffenen Events festhalten
+		PlanFreezer.beforePlanDeletion(hall, plan);
 		int index = hall.getSeatingPlans().indexOf(plan);
 		hall.getSeatingPlans().remove(plan);
 		List<SeatingPlan> remaining = hall.getSeatingPlans();
