@@ -57,8 +57,7 @@ public final class SeatingPlanLayout {
 				table.setHeight(DEFAULT_TABLE_HEIGHT);
 			}
 
-			double extent = Math.abs((table.getWidth() + 2 * getSeatMargin(table)) * Math.cos(tableRotation))
-					+ Math.abs(table.getHeight() * Math.sin(tableRotation));
+			double extent = extent(table, tableRotation);
 
 			if (!table.isManualPos()) {
 				double centerX = row.getPosX() + (s + extent / 2) * ux;
@@ -76,6 +75,33 @@ public final class SeatingPlanLayout {
 
 			applySeatPositions(table);
 		}
+	}
+
+	/**
+	 * Länge der Reihe entlang ihrer Achse vom Startpunkt bis zum Ende des letzten Tischs (mit Abständen und Mittelgang,
+	 * ohne Abstand nach dem letzten Tisch), 0 ohne Tische. Rechnet wie {@link #apply(SeatingPlan)}, verändert aber nichts.
+	 */
+	public static double rowLength(SeatingPlan plan, TableRow row) {
+		double tableRotation = Math.toRadians(row.getTableRotation());
+		List<Table> tables = plan.getTablesOf(row);
+		double s = 0;
+		double end = 0;
+		for (int i = 0; i < tables.size(); i++) {
+			end = s + extent(tables.get(i), tableRotation);
+			s = end + row.getTableGap();
+			Integer aisleAfter = row.getAisleAfter();
+			if (aisleAfter != null && aisleAfter == i + 1) {
+				s += row.getAisleWidth();
+			}
+		}
+		return end;
+	}
+
+	/** Ausdehnung eines Tischs samt Stuhlrand entlang der Reihenachse; Maße von 0 oder kleiner wie in {@code apply}. */
+	private static double extent(Table table, double tableRotation) {
+		double width = table.getWidth() > 0 ? table.getWidth() : DEFAULT_TABLE_WIDTH;
+		double height = table.getHeight() > 0 ? table.getHeight() : DEFAULT_TABLE_HEIGHT;
+		return Math.abs((width + 2 * getSeatMargin(table)) * Math.cos(tableRotation)) + Math.abs(height * Math.sin(tableRotation));
 	}
 
 	/**

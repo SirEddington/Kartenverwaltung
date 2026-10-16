@@ -16,53 +16,72 @@
     </center>
 
     <right>
-        <!-- Scrollbar, damit das Seitenpanel die Mindesthöhe des Screens nicht nach oben treibt -->
-        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" prefWidth="270.0"
-                    style="-fx-background-color: transparent; -fx-background: transparent;">
-        <VBox spacing="10.0">
+        <!-- Zwei Reiter: angefasst und gezogen wird nur, was zum aktiven Reiter gehört -->
+        <VBox spacing="8.0" prefWidth="285.0">
             <padding>
                 <Insets left="15.0" />
             </padding>
-
-            <Label text="Hallenobjekte" styleClass="subheader-label" />
-            <HBox spacing="10.0">
-                <Button fx:id="btnAddObject" text="+ Neues Objekt" styleClass="button-primary" onAction="#handleAddObject" />
-                <Button fx:id="btnDeleteObject" text="Löschen" styleClass="button-danger" onAction="#handleDeleteObject" />
-            </HBox>
-
             <Button fx:id="btnFit" text="Plan einpassen" styleClass="button-default" onAction="#handleFit" />
+            <TabPane fx:id="sideTabs" tabClosingPolicy="UNAVAILABLE" VBox.vgrow="ALWAYS">
+                <Tab fx:id="hallObjectsTab" text="Hallenobjekte">
+                    <!-- Scrollbar, damit das Seitenpanel die Mindesthöhe des Screens nicht nach oben treibt -->
+                    <ScrollPane fitToWidth="true" hbarPolicy="NEVER"
+                                style="-fx-background-color: transparent; -fx-background: transparent;">
+                        <VBox spacing="10.0">
+                            <padding>
+                                <Insets top="10.0" right="5.0" />
+                            </padding>
 
-            <Separator />
+                            <Label text="Hallenobjekte" styleClass="subheader-label" />
+                            <HBox spacing="10.0">
+                                <Button fx:id="btnAddObject" text="+ Neues Objekt" styleClass="button-primary" onAction="#handleAddObject" />
+                                <Button fx:id="btnDeleteObject" text="Löschen" styleClass="button-danger" onAction="#handleDeleteObject" />
+                            </HBox>
 
-            <VBox fx:id="propertiesPanel" spacing="8.0">
-                <Label text="Name:" />
-                <TextField fx:id="nameField" />
-                <Label text="Beschreibung:" />
-                <TextField fx:id="descField" />
-                <Label text="X (cm, von links):" />
-                <Spinner fx:id="posXSpinner" prefWidth="120.0" />
-                <Label text="Y (cm, von oben):" />
-                <Spinner fx:id="posYSpinner" prefWidth="120.0" />
-                <Label text="Breite (cm):" />
-                <Spinner fx:id="widthSpinner" prefWidth="120.0" />
-                <Label text="Höhe (cm, nur Rechteck):" />
-                <Spinner fx:id="heightSpinner" prefWidth="120.0" />
-                <Label text="Form:" />
-                <ComboBox fx:id="shapeCombo" prefWidth="120.0" />
-                <Label text="Farbe:" />
-                <ColorPicker fx:id="colorPicker" />
-                <Separator />
-                <CheckBox fx:id="textAutoCheck" text="Text automatisch" selected="true" />
-                <Label text="Textgröße (cm):" />
-                <Spinner fx:id="textSizeSpinner" prefWidth="120.0" />
-                <Label text="Text horizontal:" />
-                <ComboBox fx:id="textAlignHCombo" prefWidth="120.0" />
-                <Label text="Text vertikal:" />
-                <ComboBox fx:id="textAlignVCombo" prefWidth="120.0" />
-                <Label text="Textdrehung (Grad):" />
-                <Spinner fx:id="textRotationSpinner" prefWidth="120.0" />
-            </VBox>
+                            <Separator />
+
+                            <VBox fx:id="propertiesPanel" spacing="8.0">
+                                <Label text="Name:" />
+                                <TextField fx:id="nameField" />
+                                <Label text="Beschreibung:" />
+                                <TextField fx:id="descField" />
+                                <Label text="X (cm, von links):" />
+                                <Spinner fx:id="posXSpinner" prefWidth="120.0" />
+                                <Label text="Y (cm, von oben):" />
+                                <Spinner fx:id="posYSpinner" prefWidth="120.0" />
+                                <Label text="Breite (cm):" />
+                                <Spinner fx:id="widthSpinner" prefWidth="120.0" />
+                                <Label text="Höhe (cm, nur Rechteck):" />
+                                <Spinner fx:id="heightSpinner" prefWidth="120.0" />
+                                <Label text="Form:" />
+                                <ComboBox fx:id="shapeCombo" prefWidth="120.0" />
+                                <Label text="Farbe:" />
+                                <ColorPicker fx:id="colorPicker" />
+                                <Separator />
+                                <CheckBox fx:id="textAutoCheck" text="Text automatisch" selected="true" />
+                                <Label text="Textgröße (cm):" />
+                                <Spinner fx:id="textSizeSpinner" prefWidth="120.0" />
+                                <Label text="Text horizontal:" />
+                                <ComboBox fx:id="textAlignHCombo" prefWidth="120.0" />
+                                <Label text="Text vertikal:" />
+                                <ComboBox fx:id="textAlignVCombo" prefWidth="120.0" />
+                                <Label text="Textdrehung (Grad):" />
+                                <Spinner fx:id="textRotationSpinner" prefWidth="120.0" />
+                            </VBox>
+                        </VBox>
+                    </ScrollPane>
+                </Tab>
+                <Tab fx:id="seatingTab" text="Bestuhlung">
+                    <ScrollPane fitToWidth="true" hbarPolicy="NEVER"
+                                style="-fx-background-color: transparent; -fx-background: transparent;">
+                        <padding>
+                            <Insets top="10.0" right="5.0" />
+                        </padding>
+                        <!-- Der Controller wird als seatingPanelController injiziert (fx:id + "Controller") -->
+                        <fx:include fx:id="seatingPanel" source="SeatingPlanPanel.fxml" />
+                    </ScrollPane>
+                </Tab>
+            </TabPane>
         </VBox>
-        </ScrollPane>
     </right>
 </BorderPane>

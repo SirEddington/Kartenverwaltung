@@ -60,6 +60,19 @@ class SeatingPlanLayoutTest {
 	}
 
 	@Test
+	void reihenlaenge_mit_abstand_und_mittelgang() {
+		table();
+		table();
+		row.setTableGap(10);
+		row.setAisleAfter(1);
+		row.setAisleWidth(100);
+
+		// je Tisch 70 + 2 * 25 = 120, dazwischen Abstand 10 und Gang 100; kein Abstand nach dem letzten
+		assertEquals(350, SeatingPlanLayout.rowLength(plan, row), EPS);
+		assertEquals(0, SeatingPlanLayout.rowLength(plan, plan.addRow()), EPS);
+	}
+
+	@Test
 	void tischabstand_und_mittelgang() {
 		table();
 		Table second = table();

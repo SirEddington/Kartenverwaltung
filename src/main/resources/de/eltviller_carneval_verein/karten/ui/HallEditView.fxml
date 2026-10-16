@@ -53,6 +53,17 @@
         </GridPane>
     </HBox>
 
+    <!-- Bestuhlung der Halle: Auswahl, Anlegen, Kopieren, Löschen, Name -->
+    <HBox alignment="CENTER_LEFT" spacing="8.0">
+        <Label text="Bestuhlung:" />
+        <ComboBox fx:id="cmbSeatingPlan" prefWidth="220.0" />
+        <Button fx:id="btnNewPlan" text="Neu" styleClass="button-default" onAction="#handleNewPlan" />
+        <Button fx:id="btnCopyPlan" text="Kopieren" styleClass="button-default" onAction="#handleCopyPlan" />
+        <Button fx:id="btnDeletePlan" text="Löschen" styleClass="button-danger" onAction="#handleDeletePlan" />
+        <Label text="Name:" />
+        <TextField fx:id="txtPlanName" HBox.hgrow="ALWAYS" />
+    </HBox>
+
     <Separator />
 
     <!-- Hallenplan-Editor -->
