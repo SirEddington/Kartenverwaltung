@@ -36,6 +36,19 @@ class HallEditControllerTest {
 	}
 
 	@Test
+	void newPlanGetsTheDefaultSizesOfTheFormerEventCreation() {
+		Hall hall = new Hall();
+
+		SeatingPlan created = HallEditController.addPlanWithDefaultSizes(hall);
+
+		assertEquals(List.of(created), hall.getSeatingPlans());
+		assertEquals(70, created.getDefaultTableWidth());
+		assertEquals(300, created.getDefaultTableHeight());
+		assertEquals(30, created.getDefaultSeatWidth());
+		assertEquals(30, created.getDefaultSeatHeight());
+	}
+
+	@Test
 	void deleteMessageForOneUserAndEmptyNames() {
 		plan.setName("");
 		Event event = new Event();

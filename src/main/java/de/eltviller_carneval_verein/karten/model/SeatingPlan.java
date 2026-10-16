@@ -197,6 +197,11 @@ public class SeatingPlan {
 		return newTable;
 	}
 
+	/** Löscht den Tisch samt seiner Sitze. */
+	public boolean deleteTable(Table table) {
+		return table != null && tables.remove(table);
+	}
+
 	/** Die Tische der Reihe, nach Nummer sortiert (so werden sie angezeigt). */
 	public List<Table> getTablesOf(TableRow row) {
 		String rowId = row.getId();

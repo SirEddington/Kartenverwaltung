@@ -3,7 +3,8 @@
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
 
-<!-- Reiter "Bestuhlung" im Hallenplan: Reihen der gewählten Bestuhlung; Zeichnung und Ziehen der Reihen im Controller -->
+<!-- Reiter "Bestuhlung" im Hallenplan: Reihen der gewählten Bestuhlung, Eigenschaften der Reihe bzw. des markierten
+     Tischs und Sitzes; Zeichnung und Ziehen in SeatingPlanDrawing -->
 <VBox spacing="10.0" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="de.eltviller_carneval_verein.karten.ui.hall.SeatingPlanController">
 
@@ -13,6 +14,11 @@
         <Button fx:id="btnAddRow" text="+ Reihe" styleClass="button-primary" onAction="#handleAddRow" />
         <Button fx:id="btnDeleteRow" text="Löschen" styleClass="button-danger" onAction="#handleDeleteRow" />
     </HBox>
+    <FlowPane hgap="10.0" vgap="8.0">
+        <Button fx:id="btnAddTable" text="Tisch hinzufügen" styleClass="button-default" onAction="#handleAddTable" />
+        <Button fx:id="btnFillRow" text="Reihe füllen…" styleClass="button-default" onAction="#handleFillRow" />
+        <Button fx:id="btnRenumber" text="Nummern neu vergeben" styleClass="button-default" onAction="#handleRenumber" />
+    </FlowPane>
 
     <Separator />
 
@@ -35,4 +41,7 @@
         <Label fx:id="aisleWidthLabel" text="Gangbreite (cm):" />
         <Spinner fx:id="aisleWidthSpinner" prefWidth="120.0" />
     </VBox>
+    <!-- Statt der Reiheneigenschaften, sobald im Plan ein Tisch oder Sitz markiert ist; der Controller wird als
+         tableSeatPanelController injiziert (fx:id + "Controller") -->
+    <fx:include fx:id="tableSeatPanel" source="TableSeatPanel.fxml" />
 </VBox>

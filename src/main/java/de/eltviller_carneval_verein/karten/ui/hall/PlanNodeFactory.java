@@ -70,10 +70,16 @@ public final class PlanNodeFactory {
 
 	/** Sitz als Kreis um {@code posX/posY} (der Mittelpunkt des Sitzes) mit der halben Sitzbreite als Radius. */
 	public static Node seatNode(Seat seat) {
+		return seatNode(seat, false);
+	}
+
+	/** Wie {@link #seatNode(Seat)}, ein markierter Sitz mit dem Rand der Auswahl. */
+	public static Node seatNode(Seat seat, boolean selected) {
 		double radius = seat.getWidth() > 0 ? seat.getWidth() / 2.0 : FALLBACK_SEAT_RADIUS;
 		Circle circle = new Circle(seat.getPosX(), seat.getPosY(), radius);
 		circle.setFill(SEAT_FILL);
-		circle.setStroke(SEAT_STROKE);
+		circle.setStroke(selected ? SELECTION_STROKE : SEAT_STROKE);
+		circle.setStrokeWidth(selected ? 4 : 1);
 		return circle;
 	}
 

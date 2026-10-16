@@ -1,12 +1,9 @@
 package de.eltviller_carneval_verein.karten.ui.hall;
 
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -19,9 +16,6 @@ import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.collections.ListChangeListener;
 import javafx.fxml.FXML;
-import javafx.geometry.Point2D;
-import javafx.scene.Cursor;
-import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
@@ -30,6 +24,7 @@ import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SelectionMode;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
 import javafx.scene.input.MouseButton;
@@ -38,42 +33,59 @@ import javafx.scene.layout.VBox;
 
 /**
  * Reiter "Bestuhlung" im Hallenplan-Editor: Liste der Tischreihen der gewählten Bestuhlung mit "+ Reihe" und
- * "Löschen", darunter die Eigenschaften der markierten Reihe. Bei mehreren markierten Reihen gelten Winkel,
- * Tischdrehung, Tischabstand und Mittelgang für alle ({@link TableRowBulkEdit}); Buchstabe und Position nur für eine.
+ * "Löschen", "Tisch hinzufügen", "Reihe füllen…" und "Nummern neu vergeben" für die markierte Reihe, darunter deren
+ * Eigenschaften. Bei mehreren markierten Reihen gelten Winkel, Tischdrehung, Tischabstand und Mittelgang für alle
+ * ({@link TableRowBulkEdit}); Buchstabe und Position nur für eine. Ist im Plan ein Tisch oder Sitz markiert, zeigt das
+ * Panel statt der Reiheneigenschaften dessen Eigenschaften ({@link TableSeatPanelController}).
  *
  * <p>
- * Die Zeichnung der Bestuhlung (Reihen, Tische, Sitze) liefert {@link #createLayer()}; der {@link HallPlanController}
- * legt sie über die Hallenobjekte. Reihen lassen sich dort ziehen. Jede Änderung ordnet die Bestuhlung neu an
- * ({@link SeatingPlanLayout#apply}) und zeichnet neu; die Änderungserkennung bemerkt sie über den {@code ChangeTrigger}.
- * Geprüft wird nichts, die Wertebereiche meldet der {@code TableRowValidator}.
+ * Die Zeichnung der Bestuhlung liefert {@link #createLayer()} ({@link SeatingPlanDrawing}); der
+ * {@link HallPlanController} legt sie über die Hallenobjekte. Reihen, Tische und Sitze lassen sich dort anklicken und
+ * ziehen. Jede Änderung ordnet die Bestuhlung neu an ({@link SeatingPlanLayout#apply}) und zeichnet neu; die
+ * Änderungserkennung bemerkt sie über den {@code ChangeTrigger}. Geprüft wird nichts, Wertebereiche und doppelte
+ * Nummern melden die Validatoren.
  */
 public class SeatingPlanController {
 
 	private static final double NEW_ROW_START = 100;
 	// Abstand einer neuen Reihe zur vorigen, quer zu deren Richtung (etwa eine Tischlänge plus Gang)
 	private static final double NEW_ROW_SPACING = 400;
-	// Sichtbare Länge einer Reihe ohne (oder mit sehr kurzen) Tischen
-	private static final double MIN_ROW_LENGTH = 100;
 	private static final String MIXED = " verschieden";
 
 	private SeatingPlan plan;
 	private boolean editMode = false;
 	// Verhindert, dass das Befüllen des Panels die Listener auslöst und zurückschreibt
 	private boolean updatingPanel = false;
-	// Während einer Maus-Geste auf einer Reihe nicht neu zeichnen: der gedrückte Knoten muss bestehen bleiben
-	private boolean suppressRedraw = false;
 	/**
 	 * Die Reihen, die das Panel gerade zeigt. Änderungen gehen an sie, nicht an die aktuelle Auswahl: Verlässt man ein
 	 * Feld per Klick in die Liste, kann die Auswahl schon gewechselt haben, bevor das Feld seinen Wert übernimmt.
 	 */
 	private List<TableRow> panelRows = List.of();
+	// Im Plan markierter Tisch und Sitz (der Sitz gehört immer zum markierten Tisch)
+	private Table selectedTable;
+	private Seat selectedSeat;
 
-	private final Group layer = new Group();
-	private final Map<TableRow, Group> nodeByRow = new HashMap<>();
-	private Point2D dragAnchor;
-	private double rowAnchorX;
-	private double rowAnchorY;
-	private boolean rowDragged = false;
+	private final SeatingPlanDrawing drawing = new SeatingPlanDrawing(new SeatingPlanDrawing.Callbacks() {
+		@Override
+		public void pressed(TableRow row, Table table, Seat seat) {
+			select(row, table, seat);
+		}
+
+		@Override
+		public void moving() {
+			showPositions();
+		}
+
+		@Override
+		public void moved() {
+			afterEdit();
+		}
+
+		@Override
+		public void clicked() {
+			redraw();
+		}
+	});
 
 	// Grundtexte der Beschriftungen, an die bei Mehrfachauswahl "verschieden" angehängt wird
 	private final Map<Label, String> baseTexts = new LinkedHashMap<>();
@@ -84,6 +96,12 @@ public class SeatingPlanController {
 	private Button btnAddRow;
 	@FXML
 	private Button btnDeleteRow;
+	@FXML
+	private Button btnAddTable;
+	@FXML
+	private Button btnFillRow;
+	@FXML
+	private Button btnRenumber;
 	@FXML
 	private Label selectionLabel;
 	@FXML
@@ -114,9 +132,27 @@ public class SeatingPlanController {
 	private Label aisleWidthLabel;
 	@FXML
 	private Spinner<Double> aisleWidthSpinner;
+	// Vom FXMLLoader aus fx:id="tableSeatPanel" des fx:include injiziert (Wurzel und Name + "Controller")
+	@FXML
+	private VBox tableSeatPanel;
+	@FXML
+	private TableSeatPanelController tableSeatPanelController;
 
 	@FXML
 	public void initialize() {
+		tableSeatPanelController.setHost(new TableSeatPanelController.Host() {
+			@Override
+			public void edited() {
+				afterEdit();
+			}
+
+			@Override
+			public void select(Table table, Seat seat) {
+				selectedTable = table;
+				selectedSeat = seat;
+				afterEdit();
+			}
+		});
 		rowList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
 		rowList.setCellFactory(list -> new ListCell<>() {
 			@Override
@@ -129,9 +165,19 @@ public class SeatingPlanController {
 			if (updatingPanel) {
 				return;
 			}
+			// Eine in der Liste gewählte Reihe zeigt deren Eigenschaften, nicht die eines Tischs
+			selectedTable = null;
+			selectedSeat = null;
 			updatePanel();
-			if (!suppressRedraw) {
-				redrawLayer();
+			redraw();
+		});
+		// Auch ein Klick auf die schon markierte Reihe kehrt vom Tisch zu den Reiheneigenschaften zurück
+		rowList.addEventHandler(MouseEvent.MOUSE_CLICKED, event -> {
+			if (event.getButton() == MouseButton.PRIMARY && selectedTable != null && !selectedRows().isEmpty()) {
+				selectedTable = null;
+				selectedSeat = null;
+				updatePanel();
+				redraw();
 			}
 		});
 		setupContextMenu();
@@ -148,10 +194,20 @@ public class SeatingPlanController {
 		addItem.setOnAction(e -> handleAddRow());
 		MenuItem deleteItem = new MenuItem("Löschen");
 		deleteItem.setOnAction(e -> handleDeleteRow());
-		ContextMenu menu = new ContextMenu(addItem, deleteItem);
+		MenuItem addTableItem = new MenuItem("Tisch hinzufügen");
+		addTableItem.setOnAction(e -> handleAddTable());
+		MenuItem fillItem = new MenuItem("Reihe füllen…");
+		fillItem.setOnAction(e -> handleFillRow());
+		MenuItem renumberItem = new MenuItem("Nummern neu vergeben");
+		renumberItem.setOnAction(e -> handleRenumber());
+		ContextMenu menu = new ContextMenu(addItem, deleteItem, new SeparatorMenuItem(), addTableItem, fillItem, renumberItem);
 		menu.setOnShowing(e -> {
 			addItem.setDisable(!editMode || plan == null);
 			deleteItem.setDisable(!editMode || selectedRows().isEmpty());
+			boolean oneRow = editMode && selectedRows().size() == 1;
+			addTableItem.setDisable(!oneRow);
+			fillItem.setDisable(!oneRow);
+			renumberItem.setDisable(!oneRow);
 		});
 		rowList.setContextMenu(menu);
 	}
@@ -235,13 +291,14 @@ public class SeatingPlanController {
 		}
 	}
 
-	/** Nach jeder Änderung: neu anordnen, Liste und Hinweise auffrischen, neu zeichnen. */
+	/** Nach jeder Änderung: neu anordnen, Liste, Hinweise und Tisch-/Sitzpanel auffrischen, neu zeichnen. */
 	private void afterEdit() {
 		SeatingPlanLayout.apply(plan);
 		rowList.refresh();
 		selectionLabel.setText(selectionText());
 		refreshMixedHints();
-		redrawLayer();
+		updateDetailPanel();
+		redraw();
 	}
 
 	// --- Liste und Panel -->
@@ -300,6 +357,62 @@ public class SeatingPlanController {
 		posYSpinner.setDisable(!single);
 		btnAddRow.setDisable(!editMode || plan == null);
 		btnDeleteRow.setDisable(!editable);
+		// Tische anlegen und nummerieren gilt für genau eine Reihe
+		btnAddTable.setDisable(!editMode || !single);
+		btnFillRow.setDisable(!editMode || !single);
+		btnRenumber.setDisable(!editMode || !single);
+		updateDetailPanel();
+	}
+
+	/** Mit markiertem Tisch dessen Eigenschaften (und die des Sitzes) statt der Reiheneigenschaften. */
+	private void updateDetailPanel() {
+		// Ein gelöschter Tisch oder Sitz (z. B. mit seiner Reihe) ist nicht mehr markiert
+		if (selectedTable != null && (plan == null || !plan.getTables().contains(selectedTable))) {
+			selectedTable = null;
+		}
+		if (selectedSeat != null && (selectedTable == null || !selectedTable.getSeats().contains(selectedSeat))) {
+			selectedSeat = null;
+		}
+		boolean tableShown = selectedTable != null;
+		rowPanel.setVisible(!tableShown);
+		rowPanel.setManaged(!tableShown);
+		tableSeatPanel.setVisible(tableShown);
+		tableSeatPanel.setManaged(tableShown);
+		tableSeatPanelController.show(selectedTable, selectedSeat, editMode);
+	}
+
+	/** Während des Ziehens: Positionsfelder der Reihe bzw. des Tischs oder Sitzes nachführen. */
+	private void showPositions() {
+		if (panelRows.size() == 1) {
+			updatingPanel = true;
+			try {
+				posXSpinner.getValueFactory().setValue(panelRows.get(0).getPosX());
+				posYSpinner.getValueFactory().setValue(panelRows.get(0).getPosY());
+			} finally {
+				updatingPanel = false;
+			}
+		}
+		tableSeatPanelController.show(selectedTable, selectedSeat, editMode);
+	}
+
+	/**
+	 * Markiert im Plan Angeklicktes: die Reihe in der Liste (bei einem Tisch ohne gültige Reihe keine) und Tisch bzw. Sitz.
+	 * Zeichnet nicht neu (der gedrückte Knoten muss die Geste überstehen).
+	 */
+	private void select(TableRow row, Table table, Seat seat) {
+		updatingPanel = true;
+		try {
+			rowList.getSelectionModel().clearSelection();
+			if (row != null) {
+				rowList.getSelectionModel().select(row);
+				rowList.scrollTo(row);
+			}
+		} finally {
+			updatingPanel = false;
+		}
+		selectedTable = table;
+		selectedSeat = seat;
+		updatePanel();
 	}
 
 	/** Bei mehreren Reihen mit unterschiedlichen Werten steht "verschieden" an der Beschriftung. */
@@ -317,8 +430,10 @@ public class SeatingPlanController {
 		label.setText(baseTexts.getOrDefault(label, label.getText()) + (mixed ? MIXED : ""));
 	}
 
-	/** Neue Liste der Reihen aus der Bestuhlung, die Markierung wird auf {@code toSelect} gesetzt. */
+	/** Neue Liste der Reihen aus der Bestuhlung, die Markierung wird auf {@code toSelect} gesetzt (kein Tisch markiert). */
 	private void reloadRows(List<TableRow> toSelect) {
+		selectedTable = null;
+		selectedSeat = null;
 		updatingPanel = true;
 		try {
 			rowList.getItems().setAll(plan == null ? List.of() : plan.getRows());
@@ -384,119 +499,63 @@ public class SeatingPlanController {
 	}
 	// <-- Reihen anlegen und löschen
 
+	// --- Tische einer Reihe -->
+
+	/** Die eine markierte Reihe, sonst {@code null} (auch im Anzeigemodus). */
+	private TableRow singleEditableRow() {
+		List<TableRow> rows = selectedRows();
+		return plan == null || !editMode || rows.size() != 1 ? null : rows.get(0);
+	}
+
+	/** Neuer Tisch hinten in der Reihe (höchste Nummer + 1), danach markiert. */
+	@FXML
+	private void handleAddTable() {
+		TableRow row = singleEditableRow();
+		if (row == null) {
+			return;
+		}
+		Table table = plan.addTable(row);
+		selectedTable = table;
+		selectedSeat = null;
+		afterEdit();
+	}
+
+	@FXML
+	private void handleFillRow() {
+		TableRow row = singleEditableRow();
+		if (row == null) {
+			return;
+		}
+		RowFillDialog.show(rowName(row), rowList.getScene() == null ? null : rowList.getScene().getWindow()).ifPresent(fill -> {
+			plan.fillRow(row, fill.tableCount(), fill.seatsPerTable());
+			afterEdit();
+		});
+	}
+
+	@FXML
+	private void handleRenumber() {
+		TableRow row = singleEditableRow();
+		if (row == null) {
+			return;
+		}
+		plan.renumber(row);
+		afterEdit();
+	}
+	// <-- Tische einer Reihe
+
 	// --- Zeichnung -->
 
 	/**
-	 * Die Zeichnung der Bestuhlung für den Hallenplan: je Reihe eine Gruppe aus Reihenlinie, Tischen und Sitzen, dazu
-	 * Tische ohne gültige Reihe. Liefert immer dieselbe Gruppe neu befüllt; der Hallenplan legt sie über die
-	 * Hallenobjekte und schaltet sie für den inaktiven Reiter mausdurchlässig.
+	 * Die Zeichnung der Bestuhlung für den Hallenplan ({@link SeatingPlanDrawing}). Liefert immer dieselbe Gruppe neu
+	 * befüllt; der Hallenplan legt sie über die Hallenobjekte und schaltet sie für den inaktiven Reiter mausdurchlässig.
 	 */
 	public Node createLayer() {
-		redrawLayer();
-		return layer;
+		redraw();
+		return drawing.layer();
 	}
 
-	private void redrawLayer() {
-		layer.getChildren().clear();
-		nodeByRow.clear();
-		if (plan == null) {
-			return;
-		}
-		Set<TableRow> selected = new HashSet<>(panelRows);
-		for (TableRow row : plan.getRows()) {
-			double length = Math.max(MIN_ROW_LENGTH, SeatingPlanLayout.rowLength(plan, row));
-			Group rowGroup = new Group(PlanNodeFactory.rowNode(row, length, selected.contains(row)));
-			for (Table table : plan.getTablesOf(row)) {
-				addTable(rowGroup, table);
-			}
-			rowGroup.setCursor(editMode ? Cursor.MOVE : Cursor.HAND);
-			rowGroup.setOnMousePressed(event -> startRowDrag(event, row));
-			rowGroup.setOnMouseDragged(event -> dragRow(event, row));
-			rowGroup.setOnMouseReleased(this::endRowDrag);
-			nodeByRow.put(row, rowGroup);
-			layer.getChildren().add(rowGroup);
-		}
-		// Tische ohne gültige Reihe (TBL-005) stehen da, wo sie zuletzt lagen
-		for (Table table : plan.getTables()) {
-			if (plan.findRow(table.getRowId()) == null) {
-				addTable(layer, table);
-			}
-		}
-	}
-
-	private static void addTable(Group parent, Table table) {
-		parent.getChildren().add(PlanNodeFactory.tableNode(table, false));
-		for (Seat seat : table.getSeats()) {
-			parent.getChildren().add(PlanNodeFactory.seatNode(seat));
-		}
-	}
-
-	private void startRowDrag(MouseEvent event, TableRow row) {
-		// Rechte/mittlere Taste nicht behandeln, damit sie zum Verschieben des Plans durchgereicht werden
-		if (event.getButton() != MouseButton.PRIMARY) {
-			return;
-		}
-		event.consume();
-		rowDragged = false;
-		if (!(panelRows.size() == 1 && panelRows.get(0).equals(row))) {
-			// Nur markieren; neu gezeichnet wird beim Loslassen, der gedrückte Knoten muss die Geste überstehen
-			suppressRedraw = true;
-			try {
-				rowList.getSelectionModel().clearSelection();
-				rowList.getSelectionModel().select(row);
-				rowList.scrollTo(row);
-			} finally {
-				suppressRedraw = false;
-			}
-		}
-		dragAnchor = layer.sceneToLocal(event.getSceneX(), event.getSceneY());
-		rowAnchorX = row.getPosX();
-		rowAnchorY = row.getPosY();
-	}
-
-	private void dragRow(MouseEvent event, TableRow row) {
-		if (event.getButton() != MouseButton.PRIMARY) {
-			return;
-		}
-		event.consume();
-		if (!editMode || dragAnchor == null) {
-			return;
-		}
-		Point2D current = layer.sceneToLocal(event.getSceneX(), event.getSceneY());
-		double deltaX = current.getX() - dragAnchor.getX();
-		double deltaY = current.getY() - dragAnchor.getY();
-		row.setPosX(rowAnchorX + deltaX);
-		row.setPosY(rowAnchorY + deltaY);
-		rowDragged = true;
-
-		// Gruppe nur verschieben (kein Neuzeichnen während der Geste)
-		Group node = nodeByRow.get(row);
-		if (node != null) {
-			node.setTranslateX(deltaX);
-			node.setTranslateY(deltaY);
-		}
-		updatingPanel = true;
-		try {
-			posXSpinner.getValueFactory().setValue(row.getPosX());
-			posYSpinner.getValueFactory().setValue(row.getPosY());
-		} finally {
-			updatingPanel = false;
-		}
-	}
-
-	private void endRowDrag(MouseEvent event) {
-		if (event.getButton() != MouseButton.PRIMARY) {
-			return;
-		}
-		event.consume();
-		dragAnchor = null;
-		if (rowDragged) {
-			rowDragged = false;
-			afterEdit();
-		} else {
-			// Markierung zeigen, die beim Drücken gesetzt wurde
-			redrawLayer();
-		}
+	private void redraw() {
+		drawing.redraw(plan, editMode, panelRows, selectedTable, selectedSeat);
 	}
 	// <-- Zeichnung
 
@@ -504,19 +563,19 @@ public class SeatingPlanController {
 	public void setPlan(SeatingPlan plan) {
 		this.plan = plan;
 		reloadRows(List.of());
-		redrawLayer();
+		redraw();
 	}
 
 	public void setEditMode(boolean enabled) {
 		this.editMode = enabled;
 		updatePanel();
-		redrawLayer();
+		redraw();
 	}
 
 	/** Liste, Panel und Zeichnung neu aus dem Modell, z. B. nach Änderungen von außen. */
 	public void refresh() {
 		rowList.refresh();
 		updatePanel();
-		redrawLayer();
+		redraw();
 	}
 }

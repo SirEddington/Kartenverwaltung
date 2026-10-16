@@ -239,6 +239,22 @@ class SeatingPlanTest {
 	}
 
 	@Test
+	void deleteTable_entfernt_nur_diesen_Tisch() {
+		SeatingPlan plan = newPlan();
+		TableRow row = plan.addRow();
+		plan.fillRow(row, 3, 2);
+		Table second = plan.getTablesOf(row).get(1);
+
+		assertTrue(plan.deleteTable(second));
+
+		assertEquals(2, plan.getTables().size());
+		assertTrue(!plan.getTables().contains(second));
+		assertEquals(4, plan.getSeats().size());
+		assertTrue(!plan.deleteTable(second));
+		assertTrue(!plan.deleteTable(null));
+	}
+
+	@Test
 	void addSeatingPlan_nimmt_ersten_freien_Namen_und_setzt_Parent() {
 		Hall hall = new Hall();
 
