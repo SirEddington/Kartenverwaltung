@@ -69,15 +69,12 @@ public final class EntityLabels {
 	}
 
 	/**
-	 * z. B. "Prunksitzung, Tisch 4" (ohne Vorstellung: "Tisch 4"). Ein Tisch einer Bestuhlung heißt mit Reihenbuchstabe
-	 * und Bestuhlung: "Tisch A3 in Bestuhlung Prunksitzung in Halle Festhalle".
+	 * z. B. "Tisch A3 in Bestuhlung Prunksitzung in Halle Festhalle" (Reihe ohne Buchstaben: "Tisch 3 in ..."; ohne
+	 * Bestuhlung nur "Tisch 3").
 	 */
 	public static String table(Table table) {
 		SeatingPlan plan = table.getPlan();
-		if (table.getParent() == null && plan != null) {
-			return table.getDisplayName() + " in " + plan(plan);
-		}
-		return presentationName(table) + "Tisch " + table.getTableNumber();
+		return plan == null ? table.getDisplayName() : table.getDisplayName() + " in " + plan(plan);
 	}
 
 	/** z. B. "Prunksitzung, Tisch A3, Sitz 2" (ohne Vorstellung oder ohne Namen derselben: "Tisch A3, Sitz 2"). */
@@ -88,19 +85,13 @@ public final class EntityLabels {
 		return prefix + booking.getPlaceLabel();
 	}
 
-	/** z. B. "Prunksitzung, Tisch 4, Sitz 2" (ohne Vorstellung/Tisch: "Tisch 4, Sitz 2" bzw. "Sitz 2"). */
+	/**
+	 * z. B. "Sitz 2 an Tisch A3 in Bestuhlung Prunksitzung in Halle Festhalle" (ohne Bestuhlung: "Sitz 2 an Tisch A3",
+	 * ohne Tisch: "Sitz 2").
+	 */
 	public static String seat(Seat seat) {
 		Table table = seat.getParent();
-		String prefix = (table == null) ? "" : table(table) + ", ";
-		return prefix + "Sitz " + seat.getSeatNumber();
-	}
-
-	/** "Prunksitzung, " oder leer, wenn Vorstellung oder Name fehlen. */
-	private static String presentationName(Table table) {
-		Presentation presentation = table.getParent();
-		if (presentation == null || presentation.getName() == null || presentation.getName().isBlank()) {
-			return "";
-		}
-		return presentation.getName() + ", ";
+		String kind = "Sitz " + seat.getSeatNumber();
+		return table == null ? kind : kind + " an " + table(table);
 	}
 }

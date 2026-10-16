@@ -135,15 +135,6 @@ public class Event {
 		return name != null ? name : "Unbenanntes Event";
 	}
 
-	@JsonIgnore
-	public List<Seat> getSeats() {
-		List<Seat> seats = new ArrayList<Seat>();
-		for (Presentation presentation : presentations) {
-			seats.addAll(presentation.getSeats());
-		}
-		return seats;
-	}
-
 	/** Alle Buchungen aller Vorstellungen. */
 	@JsonIgnore
 	public List<Booking> getBookings() {
@@ -152,33 +143,6 @@ public class Event {
 			bookings.addAll(presentation.getBookings());
 		}
 		return bookings;
-	}
-
-	@JsonIgnore
-	public List<Integer> getSeatNumbers() {
-		List<Integer> seatNumbers = new ArrayList<Integer>();
-		for (Presentation presentation : presentations) {
-			seatNumbers.addAll(presentation.getSeatNumbers());
-		}
-		return seatNumbers.stream().distinct().sorted().toList();
-	}
-
-	@JsonIgnore
-	public List<Table> getTables() {
-		List<Table> tables = new ArrayList<Table>();
-		for (Presentation presentation : presentations) {
-			tables.addAll(presentation.getTables());
-		}
-		return tables;
-	}
-
-	@JsonIgnore
-	public List<Integer> getTableNumbers() {
-		List<Integer> tableNumbers = new ArrayList<Integer>();
-		for (Presentation presentation : presentations) {
-			tableNumbers.addAll(presentation.getTableNumbers());
-		}
-		return tableNumbers.stream().distinct().sorted().toList();
 	}
 
 	@JsonIgnore

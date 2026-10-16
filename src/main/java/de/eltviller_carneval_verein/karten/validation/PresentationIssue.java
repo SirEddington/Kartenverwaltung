@@ -6,7 +6,10 @@ package de.eltviller_carneval_verein.karten.validation;
  * <p>{@code &1} steht für die Beschreibung der Vorstellung (siehe {@link EntityLabels#presentation}).
  */
 public enum PresentationIssue implements Issue {
-	/** &1 = Vorstellung, &2 = mehrfach vergebene Tischnummer. */
+	/**
+	 * Wird nicht mehr ausgegeben, Code bleibt reserviert: Tische gehören jetzt zur Bestuhlung der Halle, doppelte
+	 * Tischnummern meldet dort {@code SPL-002}. &1 = Vorstellung, &2 = mehrfach vergebene Tischnummer.
+	 */
 	TABLE_NUMBER_DUPLICATE("PRS-001", Severity.ERROR, "Tischnummer &2 kommt in &1 mehrfach vor."),
 	/** &1 = Vorstellung. */
 	DATE_OR_TIME_MISSING("PRS-002", Severity.WARNING, "Für &1 fehlen Datum oder Uhrzeit."),

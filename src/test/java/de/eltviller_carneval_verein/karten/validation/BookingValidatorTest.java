@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.validation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -82,8 +83,81 @@ class BookingValidatorTest {
 		assertTrue(issue.message().startsWith("Der Preis "), issue.message());
 		assertTrue(issue.message().contains("für Prunksitzung, Tisch A3, Sitz 2 ist zu hoch"), issue.message());
 
-		booking.setPrice((int) SeatValidator.MAX_PRICE_CENTS);
+		booking.setPrice((int) BookingValidator.MAX_PRICE_CENTS);
 		assertTrue(BookingValidator.validate(booking).isEmpty());
+	}
+
+	@Test
+	void priceAboveTheMaximumNamesBothValues() {
+		Booking booking = booking();
+		booking.setPrice(120_000);
+
+		assertEquals("Der Preis 1.200,00 € für Prunksitzung, Tisch A3, Sitz 2 ist zu hoch (maximal 1.000,00 €).",
+				only(BookingValidator.validate(booking)).message());
+	}
+
+	@Test
+	void zeroAndMaximumAreAcceptedForAnOpenBooking() {
+		Booking booking = booking();
+		booking.setPrice(0);
+		assertTrue(BookingValidator.validate(booking).isEmpty(), "Offen ohne Preis ist normal");
+
+		booking.setPrice((int) BookingValidator.MAX_PRICE_CENTS);
+		assertTrue(BookingValidator.validate(booking).isEmpty());
+	}
+
+	@Test
+	void paidWithOwnPriceIsFine() {
+		Booking booking = booking();
+		booking.setPrice(500);
+		booking.setPaymentStatus(PaymentStatus.CARD);
+		booking.setLastName("Müller");
+
+		assertTrue(BookingValidator.validate(booking).isEmpty());
+	}
+
+	@Test
+	void collectedAndPaidIsFine() {
+		Booking booking = booking();
+		booking.setCollected(true);
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setLastName("Müller");
+
+		assertTrue(BookingValidator.validate(booking).isEmpty());
+	}
+
+	@Test
+	void validOrEmptyEmailIsAccepted() {
+		Booking booking = booking();
+
+		for (String email : new String[] { null, "", "   ", "max@example.de", " max.mustermann@mail.example.de " }) {
+			booking.setEMail(email);
+			assertTrue(BookingValidator.validate(booking).isEmpty(), "Adresse sollte akzeptiert werden: '" + email + "'");
+		}
+	}
+
+	@Test
+	void obviouslyBrokenEmailsAreRejected() {
+		Booking booking = booking();
+
+		for (String email : new String[] { "max@", "@example.de", "max@example", "max example@mail.de", "max@@example.de" }) {
+			booking.setEMail(email);
+			assertEquals("SEA-005", only(BookingValidator.validate(booking)).code(), "Adresse sollte abgelehnt werden: '" + email + "'");
+		}
+	}
+
+	@Test
+	void severalProblemsAreAllReportedMostSevereFirst() {
+		Booking booking = booking();
+		booking.setPrice(-100);
+		booking.setCollected(true);
+		booking.setEMail("kaputt");
+
+		ValidationResult result = BookingValidator.validate(booking);
+
+		assertEquals(3, result.getIssues().size());
+		assertEquals("SEA-001", result.mostSevere().orElseThrow().code());
+		assertFalse(result.isValid());
 	}
 
 	@Test
@@ -127,8 +201,7 @@ class BookingValidatorTest {
 
 		assertEquals("SEA-006", issue.code());
 		assertEquals(Severity.WARNING, issue.severity());
-		assertTrue(issue.message().startsWith("Prunksitzung, Tisch A3, Sitz 2 ist als bezahlt markiert, der Preis beträgt aber"),
-				issue.message());
+		assertEquals("Prunksitzung, Tisch A3, Sitz 2 ist als bezahlt markiert, der Preis beträgt aber 0,00 €.", issue.message());
 	}
 
 	@Test
@@ -142,6 +215,27 @@ class BookingValidatorTest {
 		assertEquals(Severity.WARNING, issue.severity());
 		assertEquals("Prunksitzung, Tisch A3, Sitz 2 ist als bezahlt markiert, es ist aber kein Nachname eingetragen.",
 				issue.message());
+	}
+
+	@Test
+	void blankLastNameCountsAsMissing() {
+		Booking booking = booking();
+		booking.setPaymentStatus(PaymentStatus.TRANSFER);
+
+		for (String lastName : new String[] { null, "", "   " }) {
+			booking.setLastName(lastName);
+			assertEquals("SEA-007", only(BookingValidator.validate(booking)).code(), "Nachname '" + lastName + "' sollte fehlen");
+		}
+	}
+
+	@Test
+	void firstNameAloneDoesNotCount() {
+		// Der Nachname entscheidet auch bei Booking.isReserved(); nur ein Vorname ergibt keine Reservierung
+		Booking booking = booking();
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setFirstName("Anna");
+
+		assertEquals("SEA-007", only(BookingValidator.validate(booking)).code());
 	}
 
 	@Test

@@ -10,8 +10,12 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 
 class EventValidatorTest {
@@ -23,18 +27,29 @@ class EventValidatorTest {
 		presentation.setSeatingPlanId("plan-1");
 	}
 
-	/** Event mit zwei vollständigen Vorstellungen, je ein Tisch (Nr. 1) mit zwei Sitzen zu 10 Euro. */
+	/**
+	 * Event mit zwei vollständigen Vorstellungen auf derselben Bestuhlung (ein Tisch Nr. 1 mit zwei Sitzen), Standardpreis
+	 * 10 Euro, je eine Buchung pro Sitz.
+	 */
 	private static Event eventWithTwoPresentations() {
+		SeatingPlan plan = new Hall().addSeatingPlan();
+		Table table = plan.addTable(plan.addRow());
+		table.addSeat(1);
+		table.addSeat(2);
 		Event event = new Event();
 		event.setName("Kampagne");
 		for (String name : List.of("Prunksitzung", "Damensitzung")) {
 			Presentation presentation = event.addPresentation(name);
 			complete(presentation);
-			Table table = presentation.addTable(1);
-			table.addSeat(1).setPrice(1000);
-			table.addSeat(2).setPrice(1000);
+			presentation.setPrice(1000);
+			BookingSync.switchPlan(presentation, plan);
 		}
 		return event;
+	}
+
+	/** Buchung {@code index} (0 = Sitz 1, 1 = Sitz 2) der Vorstellung {@code presentation}. */
+	private static Booking booking(Event event, int presentation, int index) {
+		return event.getPresentations().get(presentation).getBookings().get(index);
 	}
 
 	@Test
@@ -59,8 +74,8 @@ class EventValidatorTest {
 	@Test
 	void collectsIssuesFromAllLevelsOfTheTree() {
 		Event event = eventWithTwoPresentations();
-		event.getPresentations().get(0).getTables().get(0).getSeats().get(1).setPrice(-100);
-		event.getPresentations().get(1).getTables().get(0).getSeats().get(0).setPrice(200_000);
+		booking(event, 0, 1).setPrice(-100);
+		booking(event, 1, 0).setPrice(200_000);
 
 		List<ValidationIssue> issues = EventValidator.validate(event).getIssues();
 
@@ -74,19 +89,19 @@ class EventValidatorTest {
 		Event event = eventWithTwoPresentations();
 		event.getPresentations().get(1).setName("prunksitzung ");                              // EVT-001
 		event.getPresentations().get(0).setHallId(null);                                           // PRS-003
-		event.getPresentations().get(0).getTables().get(0).getSeats().get(1).setSeatNumber(1);  // TBL-001
-		event.getPresentations().get(0).getTables().get(0).getSeats().get(0).setPrice(-5);         // SEA-001
+		booking(event, 0, 1).setSeatId(booking(event, 0, 0).getSeatId());                           // SEA-011
+		booking(event, 0, 0).setPrice(-5);                                                         // SEA-001
 
 		List<String> codes = EventValidator.validate(event).getIssues().stream().map(ValidationIssue::code).toList();
 
 		assertEquals(4, codes.size(), codes.toString());
-		assertTrue(codes.containsAll(List.of("EVT-001", "PRS-003", "TBL-001", "SEA-001")));
+		assertTrue(codes.containsAll(List.of("EVT-001", "PRS-003", "SEA-011", "SEA-001")));
 	}
 
 	@Test
 	void repeatedValidationDoesNotAccumulateIssues() {
 		Event event = eventWithTwoPresentations();
-		event.getPresentations().get(0).getTables().get(0).getSeats().get(0).setPrice(-1);
+		booking(event, 0, 0).setPrice(-1);
 
 		assertEquals(1, EventValidator.validate(event).getIssues().size());
 		assertEquals(1, EventValidator.validate(event).getIssues().size());

@@ -4,24 +4,27 @@ package de.eltviller_carneval_verein.karten.validation;
  * Plausibilitätsfehler am Sitz (Kürzel SEA). Codes sind stabil und werden nie
  * wiederverwendet; neue Fehler bekommen die nächste freie Nummer.
  *
- * <p>In allen Vorlagen steht {@code &1} für die Beschreibung des Sitzes (siehe {@link EntityLabels#seat}); bei Meldungen
- * zu einer Buchung für deren Beschreibung (siehe {@link EntityLabels#booking}).
+ * <p>Die Layoutregeln ({@code SEA-008}, {@code SEA-009}) prüft der {@link SeatValidator} am Sitz der Bestuhlung, dort
+ * steht {@code &1} für die Beschreibung des Sitzes (siehe {@link EntityLabels#seat}). Die Verkaufsregeln
+ * ({@code SEA-001}, {@code SEA-003} bis {@code SEA-007}, {@code SEA-010}, {@code SEA-011}) prüfen
+ * {@link BookingValidator} und {@link PresentationValidator} an der Buchung, dort steht {@code &1} für deren
+ * Beschreibung (siehe {@link EntityLabels#booking}).
  *
  * <p>{@code SEA-002} war für "Preis ist keine Zahl" vorgesehen, wurde nie ausgegeben und bleibt unvergeben: Nicht
  * lesbare Eingaben meldet {@code INP-001} (siehe {@code ui.input.InputIssue}).
  */
 public enum SeatIssue implements Issue {
-	/** &1 = Sitz. */
+	/** &1 = Buchung. */
 	PRICE_NEGATIVE("SEA-001", Severity.ERROR, "Der Preis für &1 darf nicht negativ sein."),
-	/** &1 = Sitz, &2 = eingegebener Preis, &3 = höchster erlaubter Preis. */
+	/** &1 = Buchung, &2 = eingegebener Preis, &3 = höchster erlaubter Preis. */
 	PRICE_TOO_HIGH("SEA-003", Severity.ERROR, "Der Preis &2 für &1 ist zu hoch (maximal &3)."),
-	/** &1 = Sitz. */
+	/** &1 = Buchung. */
 	COLLECTED_NOT_PAID("SEA-004", Severity.WARNING, "&1 ist als abgeholt markiert, aber nicht bezahlt."),
-	/** &1 = Sitz, &2 = eingegebene E-Mail-Adresse. */
+	/** &1 = Buchung, &2 = eingegebene E-Mail-Adresse. */
 	EMAIL_INVALID("SEA-005", Severity.WARNING, "Die E-Mail-Adresse &2 bei &1 ist nicht gültig."),
-	/** &1 = Sitz, &2 = Preis. */
+	/** &1 = Buchung, &2 = Preis. */
 	PAID_WITHOUT_PRICE("SEA-006", Severity.WARNING, "&1 ist als bezahlt markiert, der Preis beträgt aber &2."),
-	/** &1 = Sitz. */
+	/** &1 = Buchung. */
 	PAID_WITHOUT_NAME("SEA-007", Severity.WARNING, "&1 ist als bezahlt markiert, es ist aber kein Nachname eingetragen."),
 	/** &1 = Sitz (mit der ungültigen Nummer). */
 	NUMBER_TOO_LOW("SEA-008", Severity.ERROR, "Die Sitznummer von &1 muss mindestens 1 sein."),

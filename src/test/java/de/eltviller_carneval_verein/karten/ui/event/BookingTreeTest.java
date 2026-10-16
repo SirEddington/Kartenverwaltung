@@ -78,7 +78,6 @@ class BookingTreeTest {
 		List<TableGroup> groups = BookingTree.groups(presentation);
 
 		assertEquals(List.of("Tisch 3", "Tisch A3"), groups.stream().map(TableGroup::label).toList());
-		assertTrue(presentation.getTables().isEmpty());
 	}
 
 	@Test

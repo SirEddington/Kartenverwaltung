@@ -2,15 +2,14 @@ package de.eltviller_carneval_verein.karten.validation;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.TreeMap;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Table;
 
 /**
  * Plausibilitätsprüfungen für eine Vorstellung (Kürzel PRS, siehe {@link PresentationIssue}) und
- * Weitergabe der Prüfung an die Tische und Buchungen. Aufbau wie bei {@link SeatValidator}.
+ * Weitergabe der Prüfung an die Buchungen. Tische und Sitze gehören zur Bestuhlung der Halle und werden dort
+ * geprüft ({@link SeatingPlanValidator}). Aufbau wie bei {@link SeatValidator}.
  */
 public final class PresentationValidator {
 
@@ -35,8 +34,6 @@ public final class PresentationValidator {
 		validateHall();
 		validateSeatingPlan();
 		validateDefaultPrice();
-		validateTableNumbersAreUnique();
-		validateTables();
 		validateBookings();
 		validateSeatsAreBookedOnce();
 		return result;
@@ -57,7 +54,7 @@ public final class PresentationValidator {
 
 	private void validateDefaultPrice() {
 		RangeCheck.checkCents(result, PresentationIssue.PRICE_OUT_OF_RANGE, "Standardpreis", EntityLabels.presentation(presentation),
-				presentation.getPrice(), 0, SeatValidator.MAX_PRICE_CENTS);
+				presentation.getPrice(), 0, BookingValidator.MAX_PRICE_CENTS);
 	}
 
 	private void validateBookings() {
@@ -108,25 +105,6 @@ public final class PresentationValidator {
 		String hallId = presentation.getHallId();
 		if (hallId == null || hallId.isBlank()) {
 			result.add(PresentationIssue.HALL_MISSING.toIssue(EntityLabels.presentation(presentation)));
-		}
-	}
-
-	/** Vergleich unter Geschwistern: eine Meldung je mehrfach vergebener Tischnummer. */
-	private void validateTableNumbersAreUnique() {
-		Map<Integer, Integer> counts = new TreeMap<>();
-		for (Table table : presentation.getTables()) {
-			counts.merge(table.getTableNumber(), 1, Integer::sum);
-		}
-		counts.forEach((number, count) -> {
-			if (count > 1) {
-				result.add(PresentationIssue.TABLE_NUMBER_DUPLICATE.toIssue(EntityLabels.presentation(presentation), number));
-			}
-		});
-	}
-
-	private void validateTables() {
-		for (Table table : presentation.getTables()) {
-			result.addAll(TableValidator.validate(table));
 		}
 	}
 }

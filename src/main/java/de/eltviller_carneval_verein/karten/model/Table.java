@@ -13,8 +13,6 @@ import com.fasterxml.jackson.annotation.JsonManagedReference;
 
 public class Table {
 	private final String id;
-	@JsonBackReference("presentation-table")
-	private Presentation parentPresentation;
 	@JsonBackReference("plan-table")
 	private SeatingPlan parentPlan;
 
@@ -47,16 +45,6 @@ public class Table {
 	// Getter und Setter -->
 	public String getId() {
 		return id;
-	}
-
-	@JsonIgnore
-	public Presentation getParent() {
-		return parentPresentation;
-	}
-
-	@JsonIgnore
-	public void setParent(Presentation parentPresentation) {
-		this.parentPresentation = parentPresentation;
 	}
 
 	@JsonIgnore
@@ -197,14 +185,11 @@ public class Table {
 		return newSeat;
 	}
 
-	/** Übernimmt die Sitzmaße aus der Bestuhlung, wenn der Tisch zu einer gehört, sonst aus der Vorstellung. */
+	/** Übernimmt die Sitzmaße aus der Bestuhlung; ohne Bestuhlung bleiben sie 0. */
 	private void initSeatSize(Seat seat) {
-		if (getPlan() != null) {
-			seat.setHeight(getPlan().getDefaultSeatHeight());
-			seat.setWidth(getPlan().getDefaultSeatWidth());
-		} else {
-			seat.setHeight(getParent().getDefaultSeatHeight());
-			seat.setWidth(getParent().getDefaultSeatWidth());
+		if (parentPlan != null) {
+			seat.setHeight(parentPlan.getDefaultSeatHeight());
+			seat.setWidth(parentPlan.getDefaultSeatWidth());
 		}
 	}
 

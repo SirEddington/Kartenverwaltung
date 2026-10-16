@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Presentation;
 
 class JsonEventRepositoryTest {
 
@@ -150,6 +152,34 @@ class JsonEventRepositoryTest {
 		List<String> warnings = repository.getAndClearLoadWarnings();
 		assertFalse(warnings.isEmpty());
 		assertTrue(warnings.get(0).contains("kaputt.json"));
+	}
+
+	@Test
+	void oldFileWithTablesAtThePresentation_loadsWithoutThem(@TempDir File storageDir) throws IOException {
+		// So schrieb die Version vor der Bestuhlung an der Halle: Tische und Sitze mit Verkaufsdaten an der Vorstellung
+		String old = """
+				{"id":"evt-alt","name":"Kampagne 2026","description":null,"archived":false,
+				 "presentations":[{"id":"prs-alt","name":"Prunksitzung","date":"2026-02-12","time":"19:11:00","description":null,
+				  "hallId":"halle-1","defaultTableWidth":70.0,"defaultTableHeight":300.0,"defaultSeatWidth":30.0,"defaultSeatHeight":30.0,
+				  "actualCashAmount":0,"cashDifferenceComment":null,
+				  "tables":[{"id":"tbl-alt","tableNumber":4,"desc":null,"category":"Loge","manualPos":false,"posX":0.0,"posY":0.0,
+				   "width":70.0,"height":300.0,
+				   "seats":[{"id":"sea-alt","seatNumber":2,"price":1250,"paymentStatus":"CASH","collected":true,
+				    "wheelchairAccessible":false,"lastName":"Müller","firstName":"Anna","eMail":"anna@example.de","comment":"Fenster",
+				    "manualPos":false,"posX":0.0,"posY":0.0,"width":30.0,"height":30.0,"reserved":true,"paid":true,"status":"SOLD"}]}]}]}
+				""";
+		Files.writeString(new File(storageDir, "evt-alt.json").toPath(), old, StandardCharsets.UTF_8);
+
+		JsonEventRepository repository = new JsonEventRepository(storageDir);
+		List<Event> loaded = repository.loadEvents();
+
+		assertTrue(repository.getAndClearLoadWarnings().isEmpty(), "Die alten Felder werden übergangen, nicht gemeldet");
+		assertEquals(1, loaded.size());
+		Presentation presentation = loaded.get(0).getPresentations().get(0);
+		assertEquals("Prunksitzung", presentation.getName());
+		assertEquals("halle-1", presentation.getHallId());
+		assertTrue(presentation.getBookings().isEmpty(), "Die alten Tische ergeben keine Buchungen");
+		assertSame(loaded.get(0), presentation.getParent());
 	}
 
 	@Test

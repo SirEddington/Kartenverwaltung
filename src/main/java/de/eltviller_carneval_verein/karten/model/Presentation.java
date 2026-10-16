@@ -5,9 +5,7 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -34,19 +32,12 @@ public class Presentation {
 	private String seatingPlanId; // get,set
 	private int price; // get,set
 
-	// Standardwerte
-	private double defaultTableWidth;
-	private double defaultTableHeight;
-	private double defaultSeatWidth;
-	private double defaultSeatHeight;
-
 	// Kassenabgleich
 	private int actualCashAmount; // tatsächlicher Bar-Kasseninhalt in Cent
 	private String cashDifferenceComment; // Erklärung bei Kassen-Differenz
 
-	@JsonManagedReference("presentation-table")
-	private List<Table> tables = new ArrayList<>(); // get,set
-
+	// Ältere Dateien enthalten hier noch "tables" (Tische und Sitze mit Verkaufsdaten) und Standardmaße; dank
+	// ignoreUnknown werden sie beim Laden übergangen. Tische und Sitze gehören jetzt zur Bestuhlung der Halle.
 	@JsonManagedReference("presentation-booking")
 	private List<Booking> bookings = new ArrayList<>(); // get,set
 
@@ -106,17 +97,6 @@ public class Presentation {
 		this.description = description;
 	}
 
-	public List<Table> getTables() {
-		return tables;
-	}
-
-	public void setTables(List<Table> tables) {
-		this.tables = tables;
-		if (tables != null) {
-			tables.forEach(t -> t.setParent(this));
-		}
-	}
-
 	public String getSeatingPlanId() {
 		return seatingPlanId;
 	}
@@ -154,38 +134,6 @@ public class Presentation {
 	@JsonIgnore
 	public void setPlanMissing(boolean planMissing) {
 		this.planMissing = planMissing;
-	}
-
-	public double getDefaultTableWidth() {
-		return defaultTableWidth;
-	}
-
-	public void setDefaultTableWidth(double defaultTableWidth) {
-		this.defaultTableWidth = defaultTableWidth;
-	}
-
-	public double getDefaultTableHeight() {
-		return defaultTableHeight;
-	}
-
-	public void setDefaultTableHeight(double defaultTableHeight) {
-		this.defaultTableHeight = defaultTableHeight;
-	}
-
-	public double getDefaultSeatWidth() {
-		return defaultSeatWidth;
-	}
-
-	public void setDefaultSeatWidth(double defaultSeatWidth) {
-		this.defaultSeatWidth = defaultSeatWidth;
-	}
-
-	public double getDefaultSeatHeight() {
-		return defaultSeatHeight;
-	}
-
-	public void setDefaultSeatHeight(double defaultSeatHeight) {
-		this.defaultSeatHeight = defaultSeatHeight;
 	}
 
 	public int getActualCashAmount() {
@@ -228,54 +176,6 @@ public class Presentation {
 		this.name = name;
 	}
 
-	public Table addTable() {
-		Table newTable = new Table();
-		newTable.setParent(this);
-		newTable.setTableNumber(createTableNumber());
-
-		// Maße initialisieren
-		newTable.setHeight(defaultTableHeight);
-		newTable.setWidth(defaultTableWidth);
-
-		tables.add(newTable);
-		return newTable;
-	}
-
-	public Table addTable(int tableNumber) {
-		Table newTable = new Table();
-		newTable.setParent(this);
-
-		if (!getTableNumbers().contains(tableNumber)) {
-			newTable.setTableNumber(tableNumber);
-		} else {
-			newTable.setTableNumber(createTableNumber());
-		}
-
-		// Maße initialisieren
-		newTable.setHeight(defaultTableHeight);
-		newTable.setWidth(defaultTableWidth);
-
-		tables.add(newTable);
-		return newTable;
-	}
-
-	private int createTableNumber() {
-		// 1. Alle aktuell vorhandenen Nummern einsammeln
-		Set<Integer> existingNumbers = tables.stream().map(Table::getTableNumber).collect(Collectors.toSet());
-
-		// 2. Ersten freien Namen finden
-		int i = 1;
-		while (existingNumbers.contains(i)) {
-			i++;
-		}
-
-		return i;
-	}
-	
-	public boolean deleteTable(Table table) {
-		return tables.remove(table);
-	}
-
 	public Booking addBooking() {
 		Booking newBooking = new Booking();
 		newBooking.setParent(this);
@@ -302,33 +202,6 @@ public class Presentation {
 	@Override
 	public String toString() {
 		return name != null ? name : "Unbenannte Vorstellung";
-	}
-
-	@JsonIgnore
-	public List<Seat> getSeats() {
-		List<Seat> seats = new ArrayList<>();
-		for (Table table : tables) {
-			seats.addAll(table.getSeats());
-		}
-		return seats;
-	}
-
-	@JsonIgnore
-	public List<Integer> getSeatNumbers() {
-		List<Integer> seatNumbers = new ArrayList<Integer>();
-		for (Table table : tables) {
-			seatNumbers.addAll(table.getSeatNumbers());
-		}
-		return seatNumbers.stream().distinct().sorted().toList();
-	}
-
-	@JsonIgnore
-	public List<Integer> getTableNumbers() {
-		List<Integer> tableNumbers = new ArrayList<Integer>();
-		for (Table table : tables) {
-			tableNumbers.add(table.getTableNumber());
-		}
-		return tableNumbers.stream().distinct().sorted().toList();
 	}
 
 	@Override

@@ -244,8 +244,8 @@ public class SeatingPlan {
 
 	/**
 	 * Tiefe Kopie der Bestuhlung (ohne Halle als Elternteil gesetzt): neue Ids für Bestuhlung, Reihen, Tische und
-	 * Sitze, die {@code rowId} der kopierten Tische zeigt auf die kopierten Reihen. Von den Sitzen werden nur
-	 * Nummer, Rollstuhlkennzeichen und Maße übernommen, keine Verkaufsdaten.
+	 * Sitze, die {@code rowId} der kopierten Tische zeigt auf die kopierten Reihen. Von den Sitzen werden Nummer,
+	 * Rollstuhlkennzeichen, Position und Maße übernommen; Buchungen gehören zur Vorstellung und bleiben unberührt.
 	 */
 	public SeatingPlan copy() {
 		SeatingPlan copy = new SeatingPlan();

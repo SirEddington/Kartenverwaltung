@@ -313,8 +313,11 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colReserved.setCellFactory(CheckBoxTableCell.forTableColumn(colReserved));
 	}
 
-	/** Euro in Cent, gerundet und auf den int-Bereich begrenzt (wie bisher beim Sitz). */
-	private static int toCents(Double euros) {
+	/**
+	 * Euro in Cent, gerundet und auf den int-Bereich begrenzt, damit auch ein riesiger Betrag als zu hoch (SEA-003) bzw.
+	 * negativ (SEA-001) gemeldet wird.
+	 */
+	static int toCents(Double euros) {
 		if (euros == null) {
 			return 0;
 		}

@@ -11,6 +11,7 @@ import java.time.LocalTime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 
@@ -23,7 +24,12 @@ class JsonMapperFactoryTest {
 		Presentation presentation = event.addPresentation("Prunksitzung");
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
-		presentation.addTable(1).addSeat(1).setPrice(1000);
+		presentation.setPrice(1000);
+		Booking booking = presentation.addBooking();
+		booking.setSeatId("sitz-1");
+		booking.setTableNumber(1);
+		booking.setSeatNumber(1);
+		booking.setLastName("Müller");
 
 		new JsonEventRepository(storageDir).saveEvent(event);
 

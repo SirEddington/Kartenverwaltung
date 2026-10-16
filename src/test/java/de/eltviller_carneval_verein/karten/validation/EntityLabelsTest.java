@@ -16,12 +16,18 @@ import de.eltviller_carneval_verein.karten.model.TableRow;
 class EntityLabelsTest {
 
 	@Test
-	void seatLabelContainsPresentationTableAndSeat() {
-		Event event = new Event();
-		event.setName("Kampagne");
-		Seat seat = event.addPresentation("Prunksitzung").addTable(4).addSeat(2);
+	void seatLabelContainsSeatTableAndPlan() {
+		Hall hall = new Hall();
+		hall.setName("Festhalle");
+		SeatingPlan plan = hall.addSeatingPlan();
+		plan.setName("Prunksitzung");
+		TableRow row = plan.addRow();
+		row.setLabel("A");
+		Table table = plan.addTable(row);
+		table.setTableNumber(4);
+		Seat seat = table.addSeat(2);
 
-		assertEquals("Prunksitzung, Tisch 4, Sitz 2", EntityLabels.seat(seat));
+		assertEquals("Sitz 2 an Tisch A4 in Bestuhlung Prunksitzung in Halle Festhalle", EntityLabels.seat(seat));
 	}
 
 	@Test
@@ -94,6 +100,9 @@ class EntityLabelsTest {
 		Table table = plan.addTable(row);
 
 		assertEquals("Tisch A1 in Bestuhlung Prunksitzung in Halle Festhalle", EntityLabels.table(table));
+
+		row.setLabel("");
+		assertEquals("Tisch 1 in Bestuhlung Prunksitzung in Halle Festhalle", EntityLabels.table(table));
 	}
 
 	@Test
@@ -116,13 +125,14 @@ class EntityLabelsTest {
 	}
 
 	@Test
-	void seatAtTableWithoutPresentationOmitsPresentation() {
+	void seatAtTableWithoutPlanOmitsThePlan() {
 		Table table = new Table();
 		table.setTableNumber(3);
 		Seat seat = new Seat();
 		seat.setSeatNumber(1);
 		seat.setParent(table);
 
-		assertEquals("Tisch 3, Sitz 1", EntityLabels.seat(seat));
+		assertEquals("Tisch 3", EntityLabels.table(table));
+		assertEquals("Sitz 1 an Tisch 3", EntityLabels.seat(seat));
 	}
 }

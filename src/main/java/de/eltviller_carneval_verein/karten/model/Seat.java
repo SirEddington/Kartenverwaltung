@@ -7,9 +7,6 @@ import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
-
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Seat {
 	private final String id;
@@ -17,17 +14,10 @@ public class Seat {
 	private Table parentTable;
 
 	private int seatNumber; // get
-	private int price; // get,set
-	private final ObjectProperty<PaymentStatus> paymentStatus = new SimpleObjectProperty<>(PaymentStatus.NONE); // get,set
-	private boolean collected; // get,set
 	private boolean wheelchairAccessible; // get,set
 
-	// Daten zum Reservierer
-	private String lastName; // get,set
-	private String firstName; // get,set
-	private String eMail; // get,set
-
-	private String comment; // get,set
+	// Ältere Dateien enthalten hier noch Verkaufsdaten (Preis, Zahlstatus, Name ...); dank ignoreUnknown werden sie beim
+	// Laden übergangen. Verkauft wird über die Buchungen der Vorstellung (Booking).
 
 	// Daten für Saalansicht
 	private boolean manualPos;
@@ -65,83 +55,12 @@ public class Seat {
 		return seatNumber;
 	}
 
-	public int getPrice() {
-		return price;
-	}
-
-	@JsonIgnore
-	public double getPriceDouble() {
-		return price / 100.0;
-	}
-
-	public void setPrice(int price) {
-		this.price = price;
-	}
-
-	@JsonIgnore
-	public void setPriceDouble(double price) {
-		this.price = (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, Math.round(price * 100)));
-	}
-
-	@JsonIgnore
-	public ObjectProperty<PaymentStatus> getPaymentStatusProperty() {
-		return paymentStatus;
-	}
-
-	public PaymentStatus getPaymentStatus() {
-		return paymentStatus.get();
-	}
-
-	public void setPaymentStatus(PaymentStatus paymentStatus) {
-		this.paymentStatus.set(paymentStatus);
-	}
-
-	public boolean isCollected() {
-		return collected;
-	}
-
-	public void setCollected(boolean collected) {
-		this.collected = collected;
-	}
-
 	public boolean isWheelchairAccessible() {
 		return wheelchairAccessible;
 	}
 
 	public void setWheelchairAccessible(boolean wheelchairAccessible) {
 		this.wheelchairAccessible = wheelchairAccessible;
-	}
-
-	public String getLastName() {
-		return lastName;
-	}
-
-	public void setLastName(String lastName) {
-		this.lastName = lastName;
-	}
-
-	public String getFirstName() {
-		return firstName;
-	}
-
-	public void setFirstName(String firstName) {
-		this.firstName = firstName;
-	}
-
-	public String getEMail() {
-		return eMail;
-	}
-
-	public void setEMail(String eMail) {
-		this.eMail = eMail;
-	}
-
-	public String getComment() {
-		return comment;
-	}
-
-	public void setComment(String comment) {
-		this.comment = comment;
 	}
 
 	public boolean isManualPos() {
@@ -188,31 +107,6 @@ public class Seat {
 	/** Nimmt jeden Wert an; eine Nummer unter 1 wird vom {@code SeatValidator} gemeldet (SEA-008). */
 	public void setSeatNumber(int seatNumber) {
 		this.seatNumber = seatNumber;
-	}
-
-	@JsonIgnore
-	public boolean isReserved() {
-		if (lastName == null || lastName.isBlank()) {
-			return false;
-		} else {
-			return true;
-		}
-	}
-
-	@JsonIgnore
-	public boolean isPaid() {
-		return getPaymentStatus() != null && getPaymentStatus().isPaid();
-	}
-
-	@JsonIgnore
-	public SeatStatus getStatus() {
-		if (getPaymentStatus().isPaid()) {
-			return SeatStatus.SOLD;
-		}
-		if (isReserved()) {
-			return SeatStatus.RESERVED;
-		}
-		return SeatStatus.FREE;
 	}
 
 	@Override

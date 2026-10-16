@@ -1,14 +1,22 @@
 package de.eltviller_carneval_verein.karten.validation;
 
+import java.util.regex.Pattern;
+
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 
 /**
- * Plausibilitätsprüfungen für eine Buchung (Kürzel SEA, siehe {@link SeatIssue}). Die Verkaufsregeln sind dieselben wie
- * beim {@link SeatValidator}; die Meldungen nennen die Buchung ({@link EntityLabels#booking}). Aufbau wie bei
- * {@link SeatValidator}.
+ * Plausibilitätsprüfungen für eine Buchung (Kürzel SEA, siehe {@link SeatIssue}): die Verkaufsregeln (Preis, abgeholt,
+ * E-Mail, bezahlt ohne Preis oder Namen) und die Zuordnung zu einem Platz. Die Meldungen nennen die Buchung
+ * ({@link EntityLabels#booking}). Aufbau wie bei {@link SeatValidator}.
  */
 public final class BookingValidator {
+
+	/** Höchster erlaubter Kartenpreis in Cent (entspricht der Obergrenze der Preis-Spinner von 1.000 €). */
+	public static final long MAX_PRICE_CENTS = 100_000;
+
+	/** Bewusst einfach: etwas vor und nach dem @, danach ein Punkt, keine Leerzeichen. */
+	static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
 	private final Booking booking;
 	private final ValidationResult result = ValidationResult.ok();
@@ -43,9 +51,9 @@ public final class BookingValidator {
 		long cents = own;
 		if (cents < 0) {
 			result.add(SeatIssue.PRICE_NEGATIVE.toIssue(EntityLabels.booking(booking)));
-		} else if (cents > SeatValidator.MAX_PRICE_CENTS) {
+		} else if (cents > MAX_PRICE_CENTS) {
 			result.add(SeatIssue.PRICE_TOO_HIGH.toIssue(EntityLabels.booking(booking), MoneyFormat.formatCents(cents),
-					MoneyFormat.formatCents(SeatValidator.MAX_PRICE_CENTS)));
+					MoneyFormat.formatCents(MAX_PRICE_CENTS)));
 		}
 	}
 
@@ -58,7 +66,7 @@ public final class BookingValidator {
 	/** Nur wenn eine Adresse eingetragen ist; eine leere Adresse ist erlaubt. */
 	private void validateEmail() {
 		String email = booking.getEMail();
-		if (email != null && !email.isBlank() && !SeatValidator.EMAIL.matcher(email.trim()).matches()) {
+		if (email != null && !email.isBlank() && !EMAIL.matcher(email.trim()).matches()) {
 			result.add(SeatIssue.EMAIL_INVALID.toIssue(EntityLabels.booking(booking), email.trim()));
 		}
 	}
@@ -69,7 +77,10 @@ public final class BookingValidator {
 		}
 	}
 
-	/** Wie beim Sitz nur eine Warnung (an der Abendkasse nicht zwingend); es zählt der Nachname. */
+	/**
+	 * Eine bezahlte Buchung sollte einen Nachnamen haben (an der Abendkasse nicht zwingend, deshalb nur eine Warnung). Es
+	 * zählt der Nachname, weil auch {@link Booking#isReserved()} danach entscheidet.
+	 */
 	private void validatePaidWithoutName() {
 		String lastName = booking.getLastName();
 		if (booking.isPaid() && (lastName == null || lastName.isBlank())) {
