@@ -27,6 +27,14 @@ public final class EntityLabels {
 		return (name == null || name.isBlank()) ? NAME_PLACEHOLDER : name;
 	}
 
+	/**
+	 * Anzeigename einer Halle in Tabellen: ein Strich, wenn keine (oder keine existierende) Halle zugeordnet ist,
+	 * {@value #NAME_PLACEHOLDER} bei einer Halle ohne Namen.
+	 */
+	public static String hallDisplayName(Hall hall) {
+		return hall == null ? "–" : nameOrPlaceholder(hall.getName());
+	}
+
 	/** z. B. "Halle Festhalle" (ohne Namen oder ohne Halle: "Halle ohne Namen"). */
 	public static String hall(Hall hall) {
 		return named("Halle", hall == null ? null : hall.getName());

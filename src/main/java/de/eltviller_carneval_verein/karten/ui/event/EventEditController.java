@@ -189,7 +189,7 @@ public class EventEditController {
 		colPresTime.setOnEditCommit(e -> e.getRowValue().setTime(e.getNewValue()));
 
 		// Halle und Bestuhlung nur zur Anzeige: Gewählt werden sie unter der Tabelle (Wechsel mit Rückfrage)
-		colPresHall.setCellValueFactory(cell -> new SimpleStringProperty(EventOverviewController.hallDisplayName(hallRepository.findById(cell.getValue().getHallId()))));
+		colPresHall.setCellValueFactory(cell -> new SimpleStringProperty(EntityLabels.hallDisplayName(hallRepository.findById(cell.getValue().getHallId()))));
 		colPresHall.setEditable(false);
 		colPresPlan.setCellValueFactory(cell -> new SimpleStringProperty(planDisplayName(cell.getValue(), hallRepository.findById(cell.getValue().getHallId()))));
 		colPresPlan.setEditable(false);

@@ -1,20 +1,23 @@
 package de.eltviller_carneval_verein.karten.ui.event;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
+import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.EventBackupCatalog;
-import de.eltviller_carneval_verein.karten.util.MoneyFormat;
+import de.eltviller_carneval_verein.karten.ui.event.BookingTree.TableGroup;
+import de.eltviller_carneval_verein.karten.ui.event.BookingTree.UnassignedGroup;
+import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -28,6 +31,11 @@ import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableRow;
 import javafx.scene.control.cell.CheckBoxTreeTableCell;
 
+/**
+ * Die Event-Übersicht als Baum. Knoten: {@link Event}, {@link Presentation}, {@link TableGroup} (ein Tisch aus den
+ * Buchungen), {@link UnassignedGroup} ("Ohne Platz") und {@link Booking}. Tische und Sitze entstehen aus den
+ * Buchungen der Vorstellung ({@link BookingTree}), nicht aus der Bestuhlung; angelegt werden sie im Hallen-Editor.
+ */
 public class EventOverviewController extends AbstractOverviewController {
 
 	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
@@ -58,10 +66,12 @@ public class EventOverviewController extends AbstractOverviewController {
 				return new SimpleStringProperty("Event: " + EntityLabels.nameOrPlaceholder(event.getName()));
 			if (data instanceof Presentation presentation)
 				return new SimpleStringProperty("Vorstellung: " + EntityLabels.nameOrPlaceholder(presentation.getName()));
-			if (data instanceof Table table)
-				return new SimpleStringProperty("Tisch " + table.getTableNumber());
-			if (data instanceof Seat seat)
-				return new SimpleStringProperty("Sitz " + seat.getSeatNumber());
+			if (data instanceof TableGroup group)
+				return new SimpleStringProperty(group.label());
+			if (data instanceof UnassignedGroup group)
+				return new SimpleStringProperty(group.label());
+			if (data instanceof Booking booking)
+				return new SimpleStringProperty(BookingTree.bookingLabel(booking));
 			return new SimpleStringProperty("");
 		});
 
@@ -75,79 +85,42 @@ public class EventOverviewController extends AbstractOverviewController {
 			return null;
 		});
 
-		// 3. Spalte: Anzahl der Tische
+		// 3. Spalte: Anzahl der Tische (Tische mit Platz, "Ohne Platz" zählt nicht als Tisch)
 		colTableCount.setCellValueFactory(cell -> {
 			Object data = cell.getValue().getValue();
 			if (data instanceof Event event) {
-				int count = event.getTables() != null ? event.getTables().size() : 0;
+				int count = presentationsOf(event).stream().mapToInt(presentation -> BookingTree.groups(presentation).size()).sum();
 				return new SimpleIntegerProperty(count).asObject();
 			}
 			if (data instanceof Presentation presentation) {
-				int count = presentation.getTables() != null ? presentation.getTables().size() : 0;
-				return new SimpleIntegerProperty(count).asObject();
+				return new SimpleIntegerProperty(BookingTree.groups(presentation).size()).asObject();
 			}
 			return null;
 		});
 
-		// 4. Spalte: Anzahl der Stühle
+		// 4. Spalte: Anzahl der Stühle (bezahlt / reserviert / gesamt), bei einer Buchung ihr Status
 		colSeatCount.setCellValueFactory(cell -> {
 			Object data = cell.getValue().getValue();
-			if (data instanceof Event event) {
-				int count = event.getSeats() != null ? event.getSeats().size() : 0;
-				long countReserved = event.getSeats().stream().filter(Seat::isReserved).count();
-				long countPaid = event.getSeats().stream().filter(Seat::isPaid).count();
-				return new SimpleStringProperty(countPaid + " / " + countReserved + " / " + count);
+			if (data instanceof Booking booking) {
+				return new SimpleStringProperty(BookingTree.statusText(booking));
 			}
-			if (data instanceof Presentation presentation) {
-				int count = presentation.getSeats() != null ? presentation.getSeats().size() : 0;
-				long countReserved = presentation.getSeats().stream().filter(Seat::isReserved).count();
-				long countPaid = presentation.getSeats().stream().filter(Seat::isPaid).count();
-				return new SimpleStringProperty(countPaid + " / " + countReserved + " / " + count);
-			}
-			if (data instanceof Table table) {
-				int count = table.getSeats() != null ? table.getSeats().size() : 0;
-				long countReserved = table.getSeats().stream().filter(Seat::isReserved).count();
-				long countPaid = table.getSeats().stream().filter(Seat::isPaid).count();
-				return new SimpleStringProperty(countPaid + " / " + countReserved + " / " + count);
-			}
-			if (data instanceof Seat seat) {
-				String paymentStatus = switch (seat.getPaymentStatus()) {
-				case CASH -> "Bezahlt (Bar)";
-				case CARD -> "Bezahlt (Karte)";
-				case TRANSFER -> "Bezahlt (Überweisung)";
-				case NONE -> seat.isReserved() ? "Reserviert" : "Frei";
-				};
-				paymentStatus += seat.isCollected() == true ? " und abgeholt" : "";
-				return new SimpleStringProperty(paymentStatus);
-			}
-			return null;
+			List<Booking> bookings = bookingsOf(data);
+			return bookings == null ? null : new SimpleStringProperty(BookingTotals.of(bookings).countText());
 		});
 
-		// 5. Spalte: aktuelle Einnahmen, erwatete Einnahmen, potenzielle Einnahmen
-		// Rechnet in Cent (wie CashReconciliationController), damit hier nie eine andere
-		// Zahl herauskommt als in der Bilanz für dieselben Daten.
+		// 5. Spalte: aktuelle Einnahmen, erwartete Einnahmen, potenzielle Einnahmen
+		// Rechnet in Cent mit dem geltenden Preis jeder Buchung (BookingTotals, dieselbe Quelle wie Statistik und
+		// Kassenabgleich), damit hier nie eine andere Zahl herauskommt als dort für dieselben Daten.
 		colRevenue.setCellValueFactory(cell -> {
-			Object data = cell.getValue().getValue();
-			if (data instanceof Event event) {
-				return new SimpleStringProperty(formatRevenue(event.getSeats()));
-			}
-			if (data instanceof Presentation presentation) {
-				return new SimpleStringProperty(formatRevenue(presentation.getSeats()));
-			}
-			if (data instanceof Table table) {
-				return new SimpleStringProperty(formatRevenue(table.getSeats()));
-			}
-			if (data instanceof Seat seat) {
-				return new SimpleStringProperty(formatRevenue(List.of(seat)));
-			}
-			return null;
+			List<Booking> bookings = bookingsOf(cell.getValue().getValue());
+			return bookings == null ? null : new SimpleStringProperty(BookingTotals.of(bookings).revenueText());
 		});
 
 		// 6. Spalte: Hallenname
 		colHallName.setCellValueFactory(cell -> {
 			Object data = cell.getValue().getValue();
 			if (data instanceof Presentation presentation) {
-				return new SimpleStringProperty(hallDisplayName(hallRepository.findById(presentation.getHallId())));
+				return new SimpleStringProperty(EntityLabels.hallDisplayName(hallRepository.findById(presentation.getHallId())));
 			}
 			return null;
 		});
@@ -166,28 +139,58 @@ public class EventOverviewController extends AbstractOverviewController {
 
 	}
 
+	/** Die Vorstellungen des Events; eine fehlende Liste zählt als leer. */
+	private static List<Presentation> presentationsOf(Event event) {
+		return event.getPresentations() != null ? event.getPresentations() : List.of();
+	}
+
 	/**
-	 * "Einnahmen (bezahlt) / erwartet (reserviert) / potenziell (alle Sitze)" - einheitlich
-	 * in Cent aufsummiert und über MoneyFormat formatiert (siehe colRevenue oben).
+	 * Die Buchungen, über die ein Knoten Zahlen zeigt: Event, Vorstellung, Tisch, "Ohne Platz" oder eine einzelne
+	 * Buchung; {@code null} für alles andere (Wurzel).
 	 */
-	private String formatRevenue(List<Seat> seats) {
-		long potentialCents = seats.stream().mapToLong(Seat::getPrice).sum();
-		long expectedCents = seats.stream().filter(Seat::isReserved).mapToLong(Seat::getPrice).sum();
-		long revenueCents = seats.stream().filter(Seat::isPaid).mapToLong(Seat::getPrice).sum();
-		return MoneyFormat.formatCents(revenueCents) + " / " + MoneyFormat.formatCents(expectedCents) + " / " + MoneyFormat.formatCents(potentialCents);
+	private static List<Booking> bookingsOf(Object data) {
+		if (data instanceof Event event) {
+			List<Booking> bookings = new ArrayList<>();
+			for (Presentation presentation : presentationsOf(event)) {
+				bookings.addAll(bookingsOf(presentation));
+			}
+			return bookings;
+		}
+		if (data instanceof Presentation presentation)
+			return presentation.getBookings() != null ? presentation.getBookings() : List.of();
+		if (data instanceof TableGroup group)
+			return group.bookings();
+		if (data instanceof UnassignedGroup group)
+			return group.bookings();
+		if (data instanceof Booking booking)
+			return List.of(booking);
+		return null;
 	}
 
 	@Override
 	protected String searchText(Object data) {
 		if (data instanceof Event event)
-			return event.getName() + " " + event.getDescription();
+			return joinNonNull(event.getName(), event.getDescription());
 		if (data instanceof Presentation presentation)
-			return presentation.getName() + " " + presentation.getDescription();
-		if (data instanceof Table table)
-			return "Tisch " + table.getTableNumber();
-		if (data instanceof Seat seat)
-			return "Sitz " + seat.getSeatNumber() + " " + seat.getFirstName() + " " + seat.getLastName() + " " + seat.getComment();
+			return joinNonNull(presentation.getName(), presentation.getDescription());
+		if (data instanceof TableGroup group)
+			return group.label();
+		if (data instanceof UnassignedGroup group)
+			return group.label();
+		if (data instanceof Booking booking)
+			return BookingTree.bookingSearchText(booking);
 		return null;
+	}
+
+	/** Die vorhandenen Teile mit Leerzeichen verbunden; ein fehlender Teil wird nie als "null" gesucht. */
+	private static String joinNonNull(String... parts) {
+		StringBuilder text = new StringBuilder();
+		for (String part : parts) {
+			if (part != null) {
+				text.append(text.length() > 0 ? " " : "").append(part);
+			}
+		}
+		return text.toString();
 	}
 
 	@Override
@@ -215,16 +218,25 @@ public class EventOverviewController extends AbstractOverviewController {
 		MenuItem deleteItem = new MenuItem("Löschen");
 		deleteItem.setOnAction(e -> handleDelete());
 
-		contextMenu.getItems().addAll(addPresItem, editItem, editDeleteSeparator, deleteItem, deleteDetailsSeparator, seeDetails);
+		MenuItem hallEditorItem = new MenuItem("Im Hallen-Editor öffnen");
+		hallEditorItem.setOnAction(e -> openHallEditor());
+
+		contextMenu.getItems().addAll(addPresItem, editItem, editDeleteSeparator, deleteItem, deleteDetailsSeparator, seeDetails, hallEditorItem);
 
 		contextMenu.setOnShowing(e -> {
 			Object data = tableRow.getItem();
-			addPresItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
+			boolean deletable = data instanceof Event || data instanceof Presentation;
+			boolean belongsToPresentation = data instanceof Presentation || data instanceof TableGroup || data instanceof UnassignedGroup || data instanceof Booking;
+			addPresItem.setVisible(data instanceof Event || belongsToPresentation);
 			editItem.setVisible(data != null);
 			seeDetails.setVisible(data != null);
-			deleteItem.setVisible(data != null);
-			editDeleteSeparator.setVisible(data != null);
-			deleteDetailsSeparator.setVisible(data != null);
+			// Tische und Sitze stammen aus den Buchungen und werden nicht einzeln gelöscht
+			deleteItem.setVisible(deletable);
+			editDeleteSeparator.setVisible(deletable);
+			deleteDetailsSeparator.setVisible(deletable);
+			// Der Hallen-Editor braucht eine Halle, die es noch gibt
+			hallEditorItem.setVisible(belongsToPresentation);
+			hallEditorItem.setDisable(!belongsToPresentation || hallOf(tableRow.getTreeItem()) == null);
 		});
 		return contextMenu;
 	}
@@ -233,9 +245,23 @@ public class EventOverviewController extends AbstractOverviewController {
 		TreeItem<Object> selectedItem = selectedItem();
 		if (selectedItem != null) {
 			Event event = findParentInTree(selectedItem, Event.class);
-			// Bei einem Tisch- oder Sitzknoten öffnet die Bearbeitung die Vorstellung (Tische und Sitze stehen in der Halle)
+			// Bei einem Tisch- oder Buchungsknoten öffnet die Bearbeitung die Vorstellung (Tische und Sitze stammen aus der Halle)
 			Presentation pres = findParentInTree(selectedItem, Presentation.class);
 			MainApp.showEventEditView(event, pres, editable);
+		}
+	}
+
+	/** Die Halle der Vorstellung, zu der der Knoten gehört; {@code null} ohne Vorstellung, ohne Halle oder wenn sie gelöscht wurde. */
+	private Hall hallOf(TreeItem<Object> item) {
+		Presentation pres = item == null ? null : findParentInTree(item, Presentation.class);
+		return pres == null || pres.getHallId() == null ? null : hallRepository.findById(pres.getHallId());
+	}
+
+	/** Öffnet die Halle der gewählten Vorstellung im Hallen-Editor (nur Anzeige). */
+	private void openHallEditor() {
+		Hall hall = hallOf(selectedItem());
+		if (hall != null) {
+			MainApp.showHallEditView(hall, null, false);
 		}
 	}
 
@@ -244,15 +270,7 @@ public class EventOverviewController extends AbstractOverviewController {
 		return EventBackupCatalog.create();
 	}
 
-	/**
-	 * Anzeigename der Halle einer Vorstellung; ein Strich, wenn keine (oder keine existierende) Halle zugeordnet ist,
-	 * "(ohne Name)" bei einer Halle ohne Namen.
-	 */
-	static String hallDisplayName(Hall hall) {
-		return hall == null ? "–" : EntityLabels.nameOrPlaceholder(hall.getName());
-	}
-
-	/** Löscht den gewählten Eintrag nach Rückfrage und speichert das betroffene Event sofort. */
+	/** Löscht den gewählten Eintrag (Event oder Vorstellung) nach Rückfrage und speichert das betroffene Event sofort. */
 	private void handleDelete() {
 		TreeItem<Object> selectedItem = selectedItem();
 		if (selectedItem == null || selectedItem.getParent() == null) {
@@ -261,7 +279,6 @@ public class EventOverviewController extends AbstractOverviewController {
 		Object data = selectedItem.getValue();
 		Event event = findParentInTree(selectedItem, Event.class);
 		Presentation pres = findParentInTree(selectedItem, Presentation.class);
-		Table table = findParentInTree(selectedItem, Table.class);
 
 		if (data instanceof Event) {
 			if (confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
@@ -276,20 +293,8 @@ public class EventOverviewController extends AbstractOverviewController {
 			} else {
 				return;
 			}
-		} else if (data instanceof Table) {
-			if (confirmDelete("Tisch löschen", "Soll Tisch " + table.getTableNumber() + " wirklich unwiderruflich gelöscht werden?")) {
-				pres.deleteTable(table);
-				EventSaver.saveStructureChange(event);
-			} else {
-				return;
-			}
-		} else if (data instanceof Seat seat) {
-			if (confirmDelete("Sitz löschen", "Soll Sitz " + seat.getSeatNumber() + " wirklich unwiderruflich gelöscht werden?")) {
-				table.deleteSeat(seat);
-				EventSaver.saveStructureChange(event);
-			} else {
-				return;
-			}
+		} else {
+			return;
 		}
 		reload();
 	}
@@ -300,26 +305,28 @@ public class EventOverviewController extends AbstractOverviewController {
 		List<Event> events = eventRepository.loadEvents();
 
 		for (Event event : events) {
+			// Buchungen mit den Bestuhlungen abgleichen (keine Änderung des Nutzers), damit "Ohne Platz" und die Zahlen
+			// stimmen, auch wenn das Event in dieser Sitzung noch nirgends geöffnet wurde
+			BookingSyncService.prepare(event);
 			TreeItem<Object> eventNode = new TreeItem<>(event);
 
-			if (event.getPresentations() != null) {
-				for (Presentation pres : event.getPresentations()) {
-					TreeItem<Object> presNode = new TreeItem<>(pres);
+			for (Presentation pres : presentationsOf(event)) {
+				TreeItem<Object> presNode = new TreeItem<>(pres);
 
-					if (pres.getTables() != null) {
-						for (Table table : pres.getTables()) {
-							TreeItem<Object> tableNode = new TreeItem<>(table);
-
-							if (table.getSeats() != null) {
-								for (Seat seat : table.getSeats()) {
-									tableNode.getChildren().add(new TreeItem<>(seat));
-								}
-							}
-							presNode.getChildren().add(tableNode);
-						}
-					}
-					eventNode.getChildren().add(presNode);
+				for (TableGroup group : BookingTree.groups(pres)) {
+					TreeItem<Object> tableNode = new TreeItem<>(group);
+					group.bookings().forEach(booking -> tableNode.getChildren().add(new TreeItem<>(booking)));
+					presNode.getChildren().add(tableNode);
 				}
+
+				List<Booking> unassigned = BookingTree.unassigned(pres);
+				if (!unassigned.isEmpty()) {
+					UnassignedGroup group = new UnassignedGroup(pres, unassigned);
+					TreeItem<Object> unassignedNode = new TreeItem<>(group);
+					unassigned.forEach(booking -> unassignedNode.getChildren().add(new TreeItem<>(booking)));
+					presNode.getChildren().add(unassignedNode);
+				}
+				eventNode.getChildren().add(presNode);
 			}
 			dummyRoot.getChildren().add(eventNode);
 		}
