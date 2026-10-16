@@ -79,11 +79,11 @@ public final class SeatingPlanValidator {
 		});
 	}
 
-	/** Ein Tisch ohne Reihenkennung ({@code null}) gilt als noch keiner Reihe zugeordnet und wird hier nicht beanstandet. */
+	/** Jeder Tisch gehört zu einer vorhandenen Reihe; ohne Reihenkennung oder mit unbekannter Kennung bleibt er unplatziert. */
 	private void validateTableRows() {
 		for (Table table : plan.getTables()) {
 			String rowId = table.getRowId();
-			if (rowId != null && !rowId.isBlank() && plan.findRow(rowId) == null) {
+			if (rowId == null || rowId.isBlank() || plan.findRow(rowId) == null) {
 				result.add(TableIssue.ROW_MISSING.toIssue(EntityLabels.table(table)));
 			}
 		}

@@ -49,11 +49,26 @@ class BookingValidatorTest {
 	}
 
 	@Test
-	void negativeStandardPriceAppliesToTheBookingToo() {
-		Booking booking = booking();
-		booking.getParent().setPrice(-100);
+	void badStandardPriceIsNotReportedAgainPerBooking() {
+		for (int bad : new int[] { -100, 100_001 }) {
+			Booking booking = booking();
+			booking.getParent().setPrice(bad);
 
-		assertEquals("SEA-001", only(BookingValidator.validate(booking)).code());
+			assertTrue(BookingValidator.validate(booking).isEmpty(), "Standardpreis meldet nur PRS-008: " + bad);
+		}
+	}
+
+	@Test
+	void ownPriceOverrideIsCheckedEvenWhenTheStandardPriceIsBad() {
+		Booking negative = booking();
+		negative.getParent().setPrice(-100);
+		negative.setPrice(-5);
+		assertEquals("SEA-001", only(BookingValidator.validate(negative)).code());
+
+		Booking high = booking();
+		high.getParent().setPrice(100_001);
+		high.setPrice(100_001);
+		assertEquals("SEA-003", only(BookingValidator.validate(high)).code());
 	}
 
 	@Test

@@ -332,6 +332,39 @@ class PresentationAndTableValidatorTest {
 	}
 
 	@Test
+	void badStandardPriceIsReportedOnceNotPerBooking() {
+		Presentation presentation = presentation();
+		presentation.setPrice(-100);
+		for (int i = 1; i <= 3; i++) {
+			Booking booking = presentation.addBooking();
+			booking.setSeatId("sitz-" + i);
+			booking.setTableNumber(1);
+			booking.setSeatNumber(i);
+		}
+
+		assertEquals("PRS-008", only(PresentationValidator.validate(presentation)).code());
+	}
+
+	@Test
+	void unassignedBookingIsReportedThroughThePresentation() {
+		Presentation presentation = presentation();
+		presentation.setPrice(1250);
+		Booking booking = presentation.addBooking();
+		booking.setSeatId("sitz-1");
+		booking.setRowLabel("A");
+		booking.setTableNumber(3);
+		booking.setSeatNumber(2);
+		booking.setUnassigned(true);
+
+		ValidationIssue issue = only(PresentationValidator.validate(presentation));
+
+		assertEquals("SEA-010", issue.code());
+		assertEquals(Severity.WARNING, issue.severity());
+		assertEquals("Prunksitzung, Tisch A3, Sitz 2 hat keinen Platz in der Bestuhlung und muss neu zugewiesen werden.",
+				issue.message());
+	}
+
+	@Test
 	void sameSeatInSeveralBookingsGivesOneMessagePerSeat() {
 		Presentation presentation = presentation();
 		presentation.setSeatingPlanId("plan-1");

@@ -242,16 +242,23 @@ class SeatingPlanValidatorTest {
 
 		assertEquals("TBL-005", issue.code());
 		assertEquals(Severity.ERROR, issue.severity());
-		assertEquals("Tisch 1 in Bestuhlung Prunksitzung in Halle Festhalle verweist auf eine Reihe, die es nicht gibt.",
+		assertEquals("Tisch 1 in Bestuhlung Prunksitzung in Halle Festhalle gehört zu keiner vorhandenen Reihe.",
 				issue.message());
 	}
 
 	@Test
-	void tableWithoutRowIdIsLeftAlone() {
-		SeatingPlan plan = plan();
-		plan.getTables().get(0).setRowId(null);
+	void tableWithoutOrWithBlankRowIdIsAnError() {
+		for (String rowId : new String[] { null, "", "  " }) {
+			SeatingPlan plan = plan();
+			plan.getTables().get(0).setRowId(rowId);
 
-		assertTrue(SeatingPlanValidator.validate(plan).isEmpty());
+			ValidationIssue issue = only(SeatingPlanValidator.validate(plan));
+
+			assertEquals("TBL-005", issue.code());
+			assertEquals(Severity.ERROR, issue.severity());
+			assertEquals("Tisch 1 in Bestuhlung Prunksitzung in Halle Festhalle gehört zu keiner vorhandenen Reihe.",
+					issue.message());
+		}
 	}
 
 	@Test

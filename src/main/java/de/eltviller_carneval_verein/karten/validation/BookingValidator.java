@@ -31,9 +31,16 @@ public final class BookingValidator {
 		return result;
 	}
 
-	/** Es gilt der Preis, den die Buchung tatsächlich hat: der Einzelpreis oder der Standardpreis der Vorstellung. */
+	/**
+	 * Nur ein eigener Einzelpreis der Buchung wird geprüft. Der Standardpreis der Vorstellung wird einmal von
+	 * {@code PRS-008} gemeldet, sonst käme dieselbe Ursache bei jeder Buchung noch einmal.
+	 */
 	private void validatePrice() {
-		long cents = booking.getEffectivePrice();
+		Integer own = booking.getPrice();
+		if (own == null) {
+			return;
+		}
+		long cents = own;
 		if (cents < 0) {
 			result.add(SeatIssue.PRICE_NEGATIVE.toIssue(EntityLabels.booking(booking)));
 		} else if (cents > SeatValidator.MAX_PRICE_CENTS) {
