@@ -15,7 +15,10 @@ public class Table {
 	private final String id;
 	@JsonBackReference("presentation-table")
 	private Presentation parentPresentation;
+	@JsonBackReference("plan-table")
+	private SeatingPlan parentPlan;
 
+	private String rowId; // get,set
 	private int tableNumber; // get
 	private String description; // get,set
 	private String category; // get,set
@@ -26,6 +29,7 @@ public class Table {
 	private double posY;
 	private double width;
 	private double height;
+	private double rotation;
 
 	@JsonManagedReference("table-seat")
 	private List<Seat> seats = new ArrayList<Seat>(); // get,set
@@ -53,6 +57,40 @@ public class Table {
 	@JsonIgnore
 	public void setParent(Presentation parentPresentation) {
 		this.parentPresentation = parentPresentation;
+	}
+
+	@JsonIgnore
+	public SeatingPlan getPlan() {
+		return parentPlan;
+	}
+
+	@JsonIgnore
+	public void setPlan(SeatingPlan parentPlan) {
+		this.parentPlan = parentPlan;
+	}
+
+	public String getRowId() {
+		return rowId;
+	}
+
+	public void setRowId(String rowId) {
+		this.rowId = rowId;
+	}
+
+	public double getRotation() {
+		return rotation;
+	}
+
+	public void setRotation(double rotation) {
+		this.rotation = rotation;
+	}
+
+	/** "Tisch A3" bei einer Reihe mit Buchstaben, sonst "Tisch 3". */
+	@JsonIgnore
+	public String getDisplayName() {
+		TableRow row = parentPlan != null ? parentPlan.findRow(rowId) : null;
+		String label = row != null ? row.getLabel() : null;
+		return "Tisch " + (label != null ? label.trim() : "") + tableNumber;
 	}
 
 	public int getTableNumber() {
@@ -137,9 +175,7 @@ public class Table {
 		newSeat.setParent(this);
 		newSeat.setSeatNumber(createSeatNumber());
 
-		// Maße initialisieren
-		newSeat.setHeight(getParent().getDefaultSeatHeight());
-		newSeat.setWidth(getParent().getDefaultSeatWidth());
+		initSeatSize(newSeat);
 
 		seats.add(newSeat);
 		return newSeat;
@@ -155,12 +191,21 @@ public class Table {
 			newSeat.setSeatNumber(createSeatNumber());
 		}
 
-		// Maße initialisieren
-		newSeat.setHeight(getParent().getDefaultSeatHeight());
-		newSeat.setWidth(getParent().getDefaultSeatWidth());
+		initSeatSize(newSeat);
 
 		seats.add(newSeat);
 		return newSeat;
+	}
+
+	/** Übernimmt die Sitzmaße aus der Bestuhlung, wenn der Tisch zu einer gehört, sonst aus der Vorstellung. */
+	private void initSeatSize(Seat seat) {
+		if (getPlan() != null) {
+			seat.setHeight(getPlan().getDefaultSeatHeight());
+			seat.setWidth(getPlan().getDefaultSeatWidth());
+		} else {
+			seat.setHeight(getParent().getDefaultSeatHeight());
+			seat.setWidth(getParent().getDefaultSeatWidth());
+		}
 	}
 
 	private int createSeatNumber() {

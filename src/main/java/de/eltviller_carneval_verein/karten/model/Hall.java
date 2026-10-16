@@ -25,6 +25,9 @@ public class Hall {
 	@JsonManagedReference("hall-hallObject")
 	private List<HallObject> hallObjects = new ArrayList<>();
 
+	@JsonManagedReference("hall-plan")
+	private List<SeatingPlan> seatingPlans = new ArrayList<>();
+
 	// Konstuktoren -->
 	public Hall() {
 		this.id = UUID.randomUUID().toString();
@@ -81,6 +84,51 @@ public class Hall {
 		if (hallObjects != null) {
 			hallObjects.forEach(t -> t.setParent(this));
 		}
+	}
+
+	public List<SeatingPlan> getSeatingPlans() {
+		return seatingPlans;
+	}
+
+	public void setSeatingPlans(List<SeatingPlan> seatingPlans) {
+		this.seatingPlans = seatingPlans;
+		if (seatingPlans != null) {
+			seatingPlans.forEach(p -> p.setParent(this));
+		}
+	}
+
+	/** Legt eine neue, leere Bestuhlung mit dem ersten freien Namen "Bestuhlung n" an. */
+	public SeatingPlan addSeatingPlan() {
+		SeatingPlan newPlan = new SeatingPlan();
+		newPlan.setParent(this);
+		newPlan.setName(createSeatingPlanName());
+
+		seatingPlans.add(newPlan);
+		return newPlan;
+	}
+
+	/** Die Bestuhlung mit dieser Id; {@code null} bei unbekannter oder fehlender Id. */
+	public SeatingPlan findSeatingPlan(String id) {
+		if (id == null) {
+			return null;
+		}
+		for (SeatingPlan plan : seatingPlans) {
+			if (id.equals(plan.getId())) {
+				return plan;
+			}
+		}
+		return null;
+	}
+
+	private String createSeatingPlanName() {
+		Set<String> existingNames = seatingPlans.stream().map(SeatingPlan::getName).collect(Collectors.toSet());
+
+		int i = 1;
+		while (existingNames.contains("Bestuhlung " + i)) {
+			i++;
+		}
+
+		return "Bestuhlung " + i;
 	}
 
 	public HallObject addHallObject() {
