@@ -144,6 +144,16 @@ public class Event {
 		return seats;
 	}
 
+	/** Alle Buchungen aller Vorstellungen. */
+	@JsonIgnore
+	public List<Booking> getBookings() {
+		List<Booking> bookings = new ArrayList<Booking>();
+		for (Presentation presentation : presentations) {
+			bookings.addAll(presentation.getBookings());
+		}
+		return bookings;
+	}
+
 	@JsonIgnore
 	public List<Integer> getSeatNumbers() {
 		List<Integer> seatNumbers = new ArrayList<Integer>();

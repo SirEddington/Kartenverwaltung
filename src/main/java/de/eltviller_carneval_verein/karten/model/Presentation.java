@@ -30,6 +30,10 @@ public class Presentation {
 	// referenzieren können, ohne dass Jackson sie beim Speichern mehrfach einbettet.
 	private String hallId;
 
+	// Bestuhlung der Halle, die diese Vorstellung nutzt (nur die ID, siehe hallId), und Standardpreis in Cent
+	private String seatingPlanId; // get,set
+	private int price; // get,set
+
 	// Standardwerte
 	private double defaultTableWidth;
 	private double defaultTableHeight;
@@ -42,6 +46,12 @@ public class Presentation {
 
 	@JsonManagedReference("presentation-table")
 	private List<Table> tables = new ArrayList<>(); // get,set
+
+	@JsonManagedReference("presentation-booking")
+	private List<Booking> bookings = new ArrayList<>(); // get,set
+
+	/** Nur zur Laufzeit: die Bestuhlung der Vorstellung gibt es nicht (mehr) in der Halle. Wird nicht gespeichert. */
+	private boolean planMissing;
 
 	// Konstuktoren -->
 	public Presentation() {
@@ -105,6 +115,45 @@ public class Presentation {
 		if (tables != null) {
 			tables.forEach(t -> t.setParent(this));
 		}
+	}
+
+	public String getSeatingPlanId() {
+		return seatingPlanId;
+	}
+
+	public void setSeatingPlanId(String seatingPlanId) {
+		this.seatingPlanId = seatingPlanId;
+	}
+
+	/** Standardpreis pro Karte in Cent. */
+	public int getPrice() {
+		return price;
+	}
+
+	/** Setzt nur das Feld (Jackson ruft es beim Laden); für Änderungen durch den Nutzer {@link #changePrice(int)}. */
+	public void setPrice(int price) {
+		this.price = price;
+	}
+
+	public List<Booking> getBookings() {
+		return bookings;
+	}
+
+	public void setBookings(List<Booking> bookings) {
+		this.bookings = bookings;
+		if (bookings != null) {
+			bookings.forEach(b -> b.setParent(this));
+		}
+	}
+
+	@JsonIgnore
+	public boolean isPlanMissing() {
+		return planMissing;
+	}
+
+	@JsonIgnore
+	public void setPlanMissing(boolean planMissing) {
+		this.planMissing = planMissing;
 	}
 
 	public double getDefaultTableWidth() {
@@ -225,6 +274,29 @@ public class Presentation {
 	
 	public boolean deleteTable(Table table) {
 		return tables.remove(table);
+	}
+
+	public Booking addBooking() {
+		Booking newBooking = new Booking();
+		newBooking.setParent(this);
+		bookings.add(newBooking);
+		return newBooking;
+	}
+
+	/**
+	 * Ändert den Standardpreis. Buchungen mit Daten ({@link Booking#hasData()}), die noch den Standardpreis
+	 * verwenden, behalten vorher den bisherigen Preis als Einzelpreis; leere Buchungen folgen dem neuen Preis.
+	 */
+	public void changePrice(int newPrice) {
+		if (newPrice == price) {
+			return;
+		}
+		for (Booking booking : bookings) {
+			if (booking.hasData() && booking.getPrice() == null) {
+				booking.setPrice(price);
+			}
+		}
+		this.price = newPrice;
 	}
 
 	@Override
