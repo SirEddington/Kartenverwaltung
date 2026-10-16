@@ -7,7 +7,9 @@ import java.util.Set;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableSet;
@@ -23,6 +25,7 @@ public final class SalesViewState {
 	private final ObjectProperty<Presentation> presentation = new SimpleObjectProperty<>();
 	private final ObjectProperty<Rectangle2D> visibleHallRect = new SimpleObjectProperty<>();
 	private final ObservableSet<Booking> selectedBookings = FXCollections.observableSet(new LinkedHashSet<>());
+	private final BooleanProperty showRows = new SimpleBooleanProperty(true);
 
 	public ObjectProperty<Event> eventProperty() {
 		return event;
@@ -42,6 +45,14 @@ public final class SalesViewState {
 		return selectedBookings;
 	}
 
+	/**
+	 * Ob der Saalplan die Reihen (Linie mit Buchstabe) zeigt; Tische und Sitze sind immer zu sehen. Standard an, gilt
+	 * für Saalübersicht und Kundenfenster und bleibt beim Wechsel der Ansicht erhalten.
+	 */
+	public BooleanProperty showRowsProperty() {
+		return showRows;
+	}
+
 	/** Setzt die Auswahl auf {@code bookings}: entfernt fehlende und fügt neue hinzu, gemeinsame bleiben unberührt. */
 	public void replaceSelection(Collection<Booking> bookings) {
 		Set<Booking> wanted = new LinkedHashSet<>(bookings);
@@ -49,7 +60,7 @@ public final class SalesViewState {
 		selectedBookings.addAll(wanted);
 	}
 
-	/** Beim Wechsel der Ansicht: leert die Auswahl und den Ausschnitt, Event und Vorstellung bleiben. */
+	/** Beim Wechsel der Ansicht: leert die Auswahl und den Ausschnitt, Event, Vorstellung und "Reihen anzeigen" bleiben. */
 	public void resetView() {
 		selectedBookings.clear();
 		visibleHallRect.set(null);

@@ -22,6 +22,7 @@ import javafx.geometry.Bounds;
 import javafx.geometry.Point2D;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
@@ -37,7 +38,8 @@ import javafx.stage.Window;
 /**
  * Die Saalübersicht der Verkaufsansicht: zeichnet die Bestuhlung der gewählten Vorstellung (nur lesend, angeordnet wird
  * im Hallen-Editor) und verkauft über die Sitze. Ein Klick auf einen Sitz öffnet das Buchungs-Popup; im
- * Bearbeitungsmodus wählen Strg-Klick und ein aufgezogener Rahmen mehrere Sitze für den Sammelverkauf.
+ * Bearbeitungsmodus wählen Strg-Klick und ein aufgezogener Rahmen mehrere Sitze für den Sammelverkauf. "Reihen
+ * anzeigen" blendet die Reihen (Linie mit Buchstabe) aus, Tische und Sitze bleiben; das Kundenfenster folgt.
  */
 public class HallOverviewController implements ContentController, SalesStateAware {
 
@@ -72,8 +74,13 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	@FXML
 	private Label lblHint;
 
+	// "Reihen anzeigen": blendet nur die Reihen aus, Tische und Sitze bleiben (mit Verkaufszustand an dessen Wert gebunden)
+	@FXML
+	private CheckBox chkShowRows;
+
 	@FXML
 	public void initialize() {
+		chkShowRows.selectedProperty().addListener((obs, wasShown, shown) -> renderHall());
 		viewportPane.setOnMousePressed(this::handleDragStart);
 		viewportPane.setOnMouseDragged(this::handleDrag);
 		viewportPane.setOnMouseReleased(this::handleMouseReleased);
@@ -229,7 +236,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	public void renderHall() {
 		seatNodes.clear();
 		Hall hall = hallOf(selectedPres);
-		viewportPane.render(hall, SalesPlan.of(selectedPres, hall), selectedPres, planDecorator);
+		viewportPane.render(hall, SalesPlan.of(selectedPres, hall), selectedPres, chkShowRows.isSelected(), planDecorator);
 	}
 
 	private Hall hallOf(Presentation presentation) {
@@ -333,10 +340,14 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		renderHall();
 	}
 
-	/** Die Auswahl im Saalplan und der sichtbare Ausschnitt gehen in den gemeinsamen Verkaufszustand. */
+	/**
+	 * Die Auswahl im Saalplan, der sichtbare Ausschnitt und "Reihen anzeigen" gehen in den gemeinsamen Verkaufszustand;
+	 * der Schalter übernimmt dabei dessen Stand (z. B. nach dem Wechsel von der Tabelle zurück zur Saalansicht).
+	 */
 	@Override
 	public void setSalesState(SalesViewState state) {
 		selectedBookings = state.selectedBookings();
+		chkShowRows.selectedProperty().bindBidirectional(state.showRowsProperty());
 		viewportPane.visibleHallRectProperty().addListener((obs, oldRect, newRect) -> state.visibleHallRectProperty().set(newRect));
 		state.visibleHallRectProperty().set(viewportPane.visibleHallRectProperty().get());
 	}

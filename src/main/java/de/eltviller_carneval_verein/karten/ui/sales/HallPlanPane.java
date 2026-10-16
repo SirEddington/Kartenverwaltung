@@ -168,8 +168,9 @@ public class HallPlanPane extends StackPane {
 	 * @param hall         die Halle der Vorstellung, {@code null} wenn keine zugeordnet ist
 	 * @param plan         die Bestuhlung ({@link SalesPlan#of}), {@code null} ohne Bestuhlung
 	 * @param presentation die Vorstellung, {@code null} leert die Fläche
+	 * @param showRows     {@code false} lässt die Reihen (Linie mit Buchstabe) weg; Tische und Sitze bleiben
 	 */
-	public void render(Hall hall, SeatingPlan plan, Presentation presentation, Decorator decorator) {
+	public void render(Hall hall, SeatingPlan plan, Presentation presentation, boolean showRows, Decorator decorator) {
 		contentPane.getChildren().clear();
 		String hint = SalesPlan.hint(presentation, plan);
 		planHint.setText(hint);
@@ -194,19 +195,24 @@ public class HallPlanPane extends StackPane {
 		}
 
 		if (plan != null) {
-			drawPlan(plan, presentation, decorator);
+			drawPlan(plan, presentation, showRows, decorator);
 		}
 	}
 
-	/** Reihen, dann Tische, dann Sitze (oben, damit sie anklickbar bleiben). Reihen und Tische nehmen keine Klicks. */
-	private void drawPlan(SeatingPlan plan, Presentation presentation, Decorator decorator) {
-		for (TableRow row : plan.getRows()) {
-			if (plan.getTablesOf(row).isEmpty()) {
-				continue; // Eine leere Reihe hat keine Länge: nur ein Punkt ohne Bedeutung für den Verkauf
+	/**
+	 * Reihen (falls gewünscht), dann Tische, dann Sitze (oben, damit sie anklickbar bleiben). Reihen und Tische nehmen
+	 * keine Klicks.
+	 */
+	private void drawPlan(SeatingPlan plan, Presentation presentation, boolean showRows, Decorator decorator) {
+		if (showRows) {
+			for (TableRow row : plan.getRows()) {
+				if (plan.getTablesOf(row).isEmpty()) {
+					continue; // Eine leere Reihe hat keine Länge: nur ein Punkt ohne Bedeutung für den Verkauf
+				}
+				Node rowNode = PlanNodeFactory.rowNode(row, SeatingPlanLayout.rowLength(plan, row), false);
+				rowNode.setMouseTransparent(true);
+				contentPane.getChildren().add(rowNode);
 			}
-			Node rowNode = PlanNodeFactory.rowNode(row, SeatingPlanLayout.rowLength(plan, row), false);
-			rowNode.setMouseTransparent(true);
-			contentPane.getChildren().add(rowNode);
 		}
 		for (Table table : plan.getTables()) {
 			Node tableNode = PlanNodeFactory.tableNode(table, false);

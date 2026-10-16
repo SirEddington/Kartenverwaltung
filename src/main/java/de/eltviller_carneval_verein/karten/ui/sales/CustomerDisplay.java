@@ -42,8 +42,8 @@ import javafx.stage.Window;
 
 /**
  * Das Kundenfenster ("Verkaufsmodus"): Die Saalübersicht der im Hauptfenster gewählten Vorstellung als reine Anzeige,
- * ohne Bedienelemente. Sitze sind nur rot (nicht frei) oder grün (frei); ausgewählte Sitze und der sichtbare Ausschnitt
- * (Zoom, Verschieben) folgen dem Hauptfenster über den {@link SalesViewState}.
+ * ohne Bedienelemente. Sitze sind nur rot (nicht frei) oder grün (frei); ausgewählte Sitze, der sichtbare Ausschnitt
+ * (Zoom, Verschieben) und "Reihen anzeigen" folgen dem Hauptfenster über den {@link SalesViewState}.
  */
 public final class CustomerDisplay {
 
@@ -304,6 +304,7 @@ public final class CustomerDisplay {
 		attached = true;
 		state.eventProperty().addListener(contentChanged);
 		state.presentationProperty().addListener(contentChanged);
+		state.showRowsProperty().addListener(contentChanged);
 		state.visibleHallRectProperty().addListener(viewChanged);
 		state.selectedBookings().addListener(selectionChanged);
 		ChangeTracker.events().addListener(dataChanged);
@@ -316,6 +317,7 @@ public final class CustomerDisplay {
 		attached = false;
 		state.eventProperty().removeListener(contentChanged);
 		state.presentationProperty().removeListener(contentChanged);
+		state.showRowsProperty().removeListener(contentChanged);
 		state.visibleHallRectProperty().removeListener(viewChanged);
 		state.selectedBookings().removeListener(selectionChanged);
 		ChangeTracker.events().removeListener(dataChanged);
@@ -342,7 +344,7 @@ public final class CustomerDisplay {
 		boolean waiting = CustomerDisplayText.showsWaitingHint(presentation, plan);
 		hintLabel.setVisible(waiting);
 		// Ohne Plan bleibt die Fläche leer wie ohne Vorstellung: Den internen Hinweis zur Bestuhlung zeigt nur das Hauptfenster
-		planPane.render(hall, plan, waiting ? null : presentation, decorator);
+		planPane.render(hall, plan, waiting ? null : presentation, state.showRowsProperty().get(), decorator);
 		updateSummary(presentation);
 	}
 

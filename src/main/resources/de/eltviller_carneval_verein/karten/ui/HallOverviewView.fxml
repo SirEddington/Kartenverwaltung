@@ -1,14 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
+<?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.VBox?>
 <?import de.eltviller_carneval_verein.karten.ui.sales.HallPlanPane?>
 
-<!-- Zoom (Mausrad) & Verschieben (Ziehen mit der rechten Maustaste) übernimmt die HallPlanPane -->
-<HallPlanPane fx:id="viewportPane" xmlns="http://javafx.com/javafx/17"
-           xmlns:fx="http://javafx.com/fxml/1"
-           fx:controller="de.eltviller_carneval_verein.karten.ui.sales.HallOverviewController"
-           style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5; -fx-background-color: transparent;">
+<!-- Oben die Anzeige-Optionen, darunter der Plan -->
+<VBox spacing="8.0" xmlns="http://javafx.com/javafx/17"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="de.eltviller_carneval_verein.karten.ui.sales.HallOverviewController">
 
-    <!-- Hinweis, solange keine einzelne Vorstellung gewählt ist (Text und Sichtbarkeit setzt der Controller) -->
-    <Label fx:id="lblHint" styleClass="subheader-label" mouseTransparent="true" />
-</HallPlanPane>
+    <!-- Blendet nur die Reihen (Linie mit Buchstabe) aus, Tische und Sitze bleiben; das Kundenfenster folgt -->
+    <CheckBox fx:id="chkShowRows" text="Reihen anzeigen" selected="true" />
+
+    <!-- Zoom (Mausrad) & Verschieben (Ziehen mit der rechten Maustaste) übernimmt die HallPlanPane -->
+    <HallPlanPane fx:id="viewportPane" VBox.vgrow="ALWAYS"
+               style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5; -fx-background-color: transparent;">
+
+        <!-- Hinweis, solange keine einzelne Vorstellung gewählt ist (Text und Sichtbarkeit setzt der Controller) -->
+        <Label fx:id="lblHint" styleClass="subheader-label" mouseTransparent="true" />
+    </HallPlanPane>
+</VBox>

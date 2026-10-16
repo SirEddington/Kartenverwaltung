@@ -1,10 +1,12 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -14,6 +16,8 @@ import org.junit.jupiter.api.Test;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.geometry.Rectangle2D;
 
 class SalesViewStateTest {
@@ -53,6 +57,49 @@ class SalesViewStateTest {
 		state.replaceSelection(List.of(b, a));
 
 		assertEquals(0, changes.get());
+	}
+
+	@Test
+	void showRowsIsOnByDefault() {
+		assertTrue(state.showRowsProperty().get());
+	}
+
+	@Test
+	void togglingShowRowsNotifiesListeners() {
+		List<Boolean> seen = new ArrayList<>();
+		state.showRowsProperty().addListener((obs, oldValue, newValue) -> seen.add(newValue));
+
+		state.showRowsProperty().set(false);
+		state.showRowsProperty().set(true);
+
+		assertEquals(List.of(false, true), seen);
+	}
+
+	@Test
+	void showRowsFollowsTheSwitchOfTheOverviewAndAReloadedOverviewTakesItOver() {
+		// Der Schalter der Saalübersicht ist bidirektional gebunden; das Kundenfenster hört auf den Zustand
+		BooleanProperty overviewSwitch = new SimpleBooleanProperty(true);
+		overviewSwitch.bindBidirectional(state.showRowsProperty());
+		List<Boolean> customerSees = new ArrayList<>();
+		state.showRowsProperty().addListener((obs, oldValue, newValue) -> customerSees.add(newValue));
+
+		overviewSwitch.set(false);
+
+		assertFalse(state.showRowsProperty().get());
+		assertEquals(List.of(false), customerSees);
+		// Eine neu geladene Saalübersicht (Wechsel Tabelle -> Saalansicht) übernimmt den Stand
+		BooleanProperty reloadedSwitch = new SimpleBooleanProperty(true);
+		reloadedSwitch.bindBidirectional(state.showRowsProperty());
+		assertFalse(reloadedSwitch.get());
+	}
+
+	@Test
+	void resetViewKeepsShowRows() {
+		state.showRowsProperty().set(false);
+
+		state.resetView();
+
+		assertFalse(state.showRowsProperty().get());
 	}
 
 	@Test
