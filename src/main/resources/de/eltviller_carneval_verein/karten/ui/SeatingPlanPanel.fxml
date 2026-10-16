@@ -22,26 +22,33 @@
 
     <Separator />
 
+    <!-- Nur ohne Abschnitt zu sehen ("Keine Reihe markiert") -->
     <Label fx:id="selectionLabel" style="-fx-font-weight: bold;" wrapText="true" />
-    <VBox fx:id="rowPanel" spacing="8.0">
-        <Label text="Buchstabe:" />
-        <TextField fx:id="labelField" />
-        <Label text="X (cm, Startpunkt):" />
-        <Spinner fx:id="posXSpinner" prefWidth="120.0" />
-        <Label text="Y (cm, Startpunkt):" />
-        <Spinner fx:id="posYSpinner" prefWidth="120.0" />
-        <Label fx:id="angleLabel" text="Winkel (Grad, 0 = nach unten):" wrapText="true" />
-        <Spinner fx:id="angleSpinner" prefWidth="120.0" />
-        <Label fx:id="tableRotationLabel" text="Tischdrehung (Grad, 0 = längs):" wrapText="true" />
-        <Spinner fx:id="tableRotationSpinner" prefWidth="120.0" />
-        <Label fx:id="tableGapLabel" text="Tischabstand (cm):" />
-        <Spinner fx:id="tableGapSpinner" prefWidth="120.0" />
-        <Label fx:id="aisleAfterLabel" text="Mittelgang nach n Tischen (0 = keiner):" wrapText="true" />
-        <Spinner fx:id="aisleAfterSpinner" prefWidth="120.0" />
-        <Label fx:id="aisleWidthLabel" text="Gangbreite (cm):" />
-        <Spinner fx:id="aisleWidthSpinner" prefWidth="120.0" />
-    </VBox>
-    <!-- Statt der Reiheneigenschaften, sobald im Plan ein Tisch oder Sitz markiert ist; der Controller wird als
-         tableSeatPanelController injiziert (fx:id + "Controller") -->
+    <!-- Abschnitte Reihe, Tisch und Sitz untereinander, aufklappbar (SelectionSections); der Titel ist die Grafik -->
+    <TitledPane fx:id="rowSectionPane" styleClass="section-pane" animated="false">
+        <graphic>
+            <Label styleClass="subheader-label" />
+        </graphic>
+        <VBox fx:id="rowPanel" spacing="8.0">
+            <Label text="Buchstabe:" />
+            <TextField fx:id="labelField" />
+            <Label text="X (cm, Startpunkt):" />
+            <Spinner fx:id="posXSpinner" prefWidth="120.0" />
+            <Label text="Y (cm, Startpunkt):" />
+            <Spinner fx:id="posYSpinner" prefWidth="120.0" />
+            <Label fx:id="angleLabel" text="Winkel (Grad, 0 = nach unten):" wrapText="true" />
+            <Spinner fx:id="angleSpinner" prefWidth="120.0" />
+            <Label fx:id="tableRotationLabel" text="Tischdrehung (Grad, 0 = längs):" wrapText="true" />
+            <Spinner fx:id="tableRotationSpinner" prefWidth="120.0" />
+            <Label fx:id="tableGapLabel" text="Tischabstand (cm):" />
+            <Spinner fx:id="tableGapSpinner" prefWidth="120.0" />
+            <Label fx:id="aisleAfterLabel" text="Mittelgang nach n Tischen (0 = keiner):" wrapText="true" />
+            <Spinner fx:id="aisleAfterSpinner" prefWidth="120.0" />
+            <Label fx:id="aisleWidthLabel" text="Gangbreite (cm):" />
+            <Spinner fx:id="aisleWidthSpinner" prefWidth="120.0" />
+        </VBox>
+    </TitledPane>
+    <!-- Abschnitte Tisch und Sitz unter der Reihe, sobald im Plan ein Tisch oder Sitz markiert ist; der Controller wird
+         als tableSeatPanelController injiziert (fx:id + "Controller") -->
     <fx:include fx:id="tableSeatPanel" source="TableSeatPanel.fxml" />
 </VBox>

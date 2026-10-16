@@ -17,6 +17,7 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TitledPane;
 import javafx.scene.layout.VBox;
 
 /**
@@ -48,9 +49,7 @@ public class TableSeatPanelController {
 	private boolean updating = false;
 
 	@FXML
-	private VBox tableSection;
-	@FXML
-	private Label tableTitle;
+	private TitledPane tableSectionPane;
 	@FXML
 	private VBox tableFields;
 	@FXML
@@ -79,9 +78,7 @@ public class TableSeatPanelController {
 	private Button btnDeleteTable;
 
 	@FXML
-	private VBox seatSection;
-	@FXML
-	private Label seatTitle;
+	private TitledPane seatSectionPane;
 	@FXML
 	private VBox seatFields;
 	@FXML
@@ -116,6 +113,15 @@ public class TableSeatPanelController {
 
 	void setHost(Host host) {
 		this.host = host;
+	}
+
+	/** Die Abschnitte Tisch und Sitz; Titel, Sichtbarkeit und Zustand setzt {@link SelectionSections}. */
+	TitledPane tableSectionPane() {
+		return tableSectionPane;
+	}
+
+	TitledPane seatSectionPane() {
+		return seatSectionPane;
 	}
 
 	private void setupTableFields() {
@@ -221,8 +227,8 @@ public class TableSeatPanelController {
 
 	// --- Anzeige -->
 
-	/** "Sitz 2 an Tisch A3". */
-	static String seatTitle(Seat seat) {
+	/** "Sitz 2 an Tisch A3" (für Rückfragen; der Titel des Abschnitts ist kürzer, siehe {@link SelectionSections}). */
+	static String seatName(Seat seat) {
 		Table parent = seat.getParent();
 		return "Sitz " + seat.getSeatNumber() + (parent == null ? "" : " an " + parent.getDisplayName());
 	}
@@ -238,12 +244,13 @@ public class TableSeatPanelController {
 	}
 
 	static String deleteSeatMessage(Seat seat) {
-		return "Soll " + seatTitle(seat) + " wirklich gelöscht werden?";
+		return "Soll " + seatName(seat) + " wirklich gelöscht werden?";
 	}
 
 	/**
-	 * Zeigt Tisch und Sitz (ohne Tisch bleibt das Panel leer, ohne Sitz der Sitzteil); im Anzeigemodus gesperrt. Wird auch
-	 * nach jeder Änderung und während des Ziehens aufgerufen, um die Felder nachzuführen.
+	 * Befüllt die Felder von Tisch und Sitz; im Anzeigemodus gesperrt. Welche Abschnitte zu sehen sind, entscheidet
+	 * {@link SelectionSections}. Wird auch nach jeder Änderung und während des Ziehens aufgerufen, um die Felder
+	 * nachzuführen.
 	 */
 	void show(Table table, Seat seat, boolean editMode) {
 		this.table = table;
@@ -260,14 +267,11 @@ public class TableSeatPanelController {
 		} finally {
 			updating = false;
 		}
-		setShown(tableSection, this.table != null);
-		setShown(seatSection, this.seat != null);
 		tableFields.setDisable(!editMode);
 		seatFields.setDisable(!editMode);
 	}
 
 	private void fillTable(Table t) {
-		tableTitle.setText(t.getDisplayName());
 		tableNumberSpinner.getValueFactory().setValue(t.getTableNumber());
 		setText(tableDescField, t.getDesc());
 		setText(tableCategoryField, t.getCategory());
@@ -283,7 +287,6 @@ public class TableSeatPanelController {
 	}
 
 	private void fillSeat(Seat s) {
-		seatTitle.setText(seatTitle(s));
 		seatNumberSpinner.getValueFactory().setValue(s.getSeatNumber());
 		wheelchairCheck.setSelected(s.isWheelchairAccessible());
 		seatWidthSpinner.getValueFactory().setValue(s.getWidth());
@@ -300,11 +303,6 @@ public class TableSeatPanelController {
 		if (!value.equals(field.getText())) {
 			field.setText(value);
 		}
-	}
-
-	private static void setShown(VBox section, boolean shown) {
-		section.setVisible(shown);
-		section.setManaged(shown);
 	}
 	// <-- Anzeige
 

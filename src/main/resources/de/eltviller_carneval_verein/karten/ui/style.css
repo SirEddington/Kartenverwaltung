@@ -693,3 +693,28 @@
 .spinner.input-error .text-field {
     -fx-background-color: -fx-status-error-tint;
 }
+
+/* ------------------------------------------------------------------------------
+ * AUFKLAPPBARE ABSCHNITTE IM REITER BESTUHLUNG (Reihe, Tisch, Sitz; SelectionSections)
+ * Der Titel ist ein Label mit .subheader-label als Grafik, die Titelzeile klappt auf und zu.
+ * ------------------------------------------------------------------------------ */
+.section-pane > .title {
+    -fx-background-color: #E0E0E0;
+    -fx-background-radius: 4px;
+    -fx-padding: 2px 8px;
+    -fx-cursor: hand;
+}
+
+.section-pane:expanded > .title {
+    -fx-background-radius: 4px 4px 0 0;
+}
+
+.section-pane > .title > .arrow-button > .arrow {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+.section-pane > .content {
+    -fx-background-color: #E0E0E0, -fx-surface-white;
+    -fx-background-insets: 0, 0 1 1 1;
+    -fx-padding: 10px;
+}

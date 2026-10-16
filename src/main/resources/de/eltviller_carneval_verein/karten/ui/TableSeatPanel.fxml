@@ -3,12 +3,15 @@
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
 
-<!-- Eigenschaften des im Plan markierten Tischs und Sitzes (Teil des Reiters "Bestuhlung") -->
+<!-- Eigenschaften des im Plan markierten Tischs und Sitzes (Teil des Reiters "Bestuhlung") als aufklappbare Abschnitte;
+     Titel, Sichtbarkeit und Zustand setzt SelectionSections -->
 <VBox spacing="10.0" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="de.eltviller_carneval_verein.karten.ui.hall.TableSeatPanelController">
 
-    <VBox fx:id="tableSection" spacing="8.0">
-        <Label fx:id="tableTitle" styleClass="subheader-label" wrapText="true" />
+    <TitledPane fx:id="tableSectionPane" styleClass="section-pane" animated="false">
+        <graphic>
+            <Label styleClass="subheader-label" />
+        </graphic>
         <VBox fx:id="tableFields" spacing="8.0">
             <Label text="Nummer:" />
             <Spinner fx:id="tableNumberSpinner" prefWidth="120.0" />
@@ -33,11 +36,12 @@
                 <Button fx:id="btnDeleteTable" text="Tisch löschen" styleClass="button-danger" onAction="#handleDeleteTable" />
             </FlowPane>
         </VBox>
-    </VBox>
+    </TitledPane>
 
-    <VBox fx:id="seatSection" spacing="8.0">
-        <Separator />
-        <Label fx:id="seatTitle" styleClass="subheader-label" wrapText="true" />
+    <TitledPane fx:id="seatSectionPane" styleClass="section-pane" animated="false">
+        <graphic>
+            <Label styleClass="subheader-label" />
+        </graphic>
         <VBox fx:id="seatFields" spacing="8.0">
             <Label text="Nummer:" />
             <Spinner fx:id="seatNumberSpinner" prefWidth="120.0" />
@@ -56,5 +60,5 @@
                 <Button fx:id="btnDeleteSeat" text="Sitz löschen" styleClass="button-danger" onAction="#handleDeleteSeat" />
             </FlowPane>
         </VBox>
-    </VBox>
+    </TitledPane>
 </VBox>

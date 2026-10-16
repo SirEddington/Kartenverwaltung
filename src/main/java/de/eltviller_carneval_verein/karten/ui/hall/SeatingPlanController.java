@@ -28,6 +28,7 @@ import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TitledPane;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.VBox;
@@ -36,8 +37,9 @@ import javafx.scene.layout.VBox;
  * Reiter "Bestuhlung" im Hallenplan-Editor: Liste der Tischreihen der gewählten Bestuhlung mit "+ Reihe" und
  * "Löschen", "Tisch hinzufügen", "Reihe füllen…" und "Nummern neu vergeben" für die markierte Reihe, darunter deren
  * Eigenschaften. Bei mehreren markierten Reihen gelten Winkel, Tischdrehung, Tischabstand und Mittelgang für alle
- * ({@link TableRowBulkEdit}); Buchstabe und Position nur für eine. Ist im Plan ein Tisch oder Sitz markiert, zeigt das
- * Panel statt der Reiheneigenschaften dessen Eigenschaften ({@link TableSeatPanelController}).
+ * ({@link TableRowBulkEdit}); Buchstabe und Position nur für eine. Ist im Plan ein Tisch oder Sitz markiert, stehen
+ * unter der Reihe die Abschnitte von Tisch und Sitz ({@link TableSeatPanelController}); alle Abschnitte sind
+ * aufklappbar ({@link SelectionSections}).
  *
  * <p>
  * Die Zeichnung der Bestuhlung liefert {@link #createLayer()} ({@link SeatingPlanDrawing}); der
@@ -65,6 +67,8 @@ public class SeatingPlanController {
 	// Im Plan markierter Tisch und Sitz (der Sitz gehört immer zum markierten Tisch)
 	private Table selectedTable;
 	private Seat selectedSeat;
+	// Abschnitte Reihe/Tisch/Sitz; merkt sich, was der Nutzer auf- und zugeklappt hat
+	private final SelectionSections sections = new SelectionSections();
 
 	private final SeatingPlanDrawing drawing = new SeatingPlanDrawing(new SeatingPlanDrawing.Callbacks() {
 		@Override
@@ -105,6 +109,8 @@ public class SeatingPlanController {
 	private Button btnRenumber;
 	@FXML
 	private Label selectionLabel;
+	@FXML
+	private TitledPane rowSectionPane;
 	@FXML
 	private VBox rowPanel;
 	@FXML
@@ -154,6 +160,9 @@ public class SeatingPlanController {
 				afterEdit();
 			}
 		});
+		sections.bind(SelectionSections.Level.ROW, rowSectionPane);
+		sections.bind(SelectionSections.Level.TABLE, tableSeatPanelController.tableSectionPane());
+		sections.bind(SelectionSections.Level.SEAT, tableSeatPanelController.seatSectionPane());
 		rowList.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
 		rowList.setCellFactory(list -> new ListCell<>() {
 			@Override
@@ -293,11 +302,10 @@ public class SeatingPlanController {
 		}
 	}
 
-	/** Nach jeder Änderung: neu anordnen, Liste, Hinweise und Tisch-/Sitzpanel auffrischen, neu zeichnen. */
+	/** Nach jeder Änderung: neu anordnen, Liste, Hinweise und Abschnitte auffrischen, neu zeichnen. */
 	private void afterEdit() {
 		SeatingPlanLayout.apply(plan);
 		rowList.refresh();
-		selectionLabel.setText(selectionText());
 		refreshMixedHints();
 		updateDetailPanel();
 		redraw();
@@ -305,29 +313,16 @@ public class SeatingPlanController {
 
 	// --- Liste und Panel -->
 
-	/** "Reihe A" bzw. "Reihe ohne Buchstaben". */
-	private static String rowName(TableRow row) {
-		String label = row.getLabel() == null ? "" : row.getLabel().trim();
-		return label.isEmpty() ? "Reihe ohne Buchstaben" : "Reihe " + label;
-	}
-
 	/** Eintrag der Reihenliste, z. B. "2. Reihe B (4 Tische)"; die Nummer unterscheidet Reihen ohne Buchstaben. */
 	private static String rowText(TableRow row) {
 		SeatingPlan plan = row.getParent();
 		int tables = plan == null ? 0 : plan.getTablesOf(row).size();
 		String position = plan == null ? "" : (plan.getRows().indexOf(row) + 1) + ". ";
-		return position + rowName(row) + " (" + tables + (tables == 1 ? " Tisch)" : " Tische)");
+		return position + SelectionSections.rowName(row) + " (" + tables + (tables == 1 ? " Tisch)" : " Tische)");
 	}
 
 	private List<TableRow> selectedRows() {
 		return List.copyOf(rowList.getSelectionModel().getSelectedItems().filtered(Objects::nonNull));
-	}
-
-	private String selectionText() {
-		if (panelRows.isEmpty()) {
-			return plan == null ? "Keine Bestuhlung gewählt" : "Keine Reihe markiert";
-		}
-		return panelRows.size() == 1 ? rowText(panelRows.get(0)) : panelRows.size() + " Reihen: Mehrfachbearbeitung";
 	}
 
 	/** Befüllt das Panel mit den markierten Reihen (bei mehreren mit den Werten der ersten) und sperrt es im Anzeigemodus. */
@@ -347,7 +342,6 @@ public class SeatingPlanController {
 		} finally {
 			updatingPanel = false;
 		}
-		selectionLabel.setText(selectionText());
 		refreshMixedHints();
 
 		boolean editable = editMode && !panelRows.isEmpty();
@@ -366,7 +360,7 @@ public class SeatingPlanController {
 		updateDetailPanel();
 	}
 
-	/** Mit markiertem Tisch dessen Eigenschaften (und die des Sitzes) statt der Reiheneigenschaften. */
+	/** Die Abschnitte der Markierung untereinander: Reihe, darunter Tisch und Sitz; ohne Markierung nur ein Hinweis. */
 	private void updateDetailPanel() {
 		// Ein gelöschter Tisch oder Sitz (z. B. mit seiner Reihe) ist nicht mehr markiert
 		if (selectedTable != null && (plan == null || !plan.getTables().contains(selectedTable))) {
@@ -375,9 +369,11 @@ public class SeatingPlanController {
 		if (selectedSeat != null && (selectedTable == null || !selectedTable.getSeats().contains(selectedSeat))) {
 			selectedSeat = null;
 		}
+		boolean anyShown = sections.show(panelRows, selectedTable, selectedSeat);
+		selectionLabel.setText(plan == null ? "Keine Bestuhlung gewählt" : "Keine Reihe markiert");
+		selectionLabel.setVisible(!anyShown);
+		selectionLabel.setManaged(!anyShown);
 		boolean tableShown = selectedTable != null;
-		rowPanel.setVisible(!tableShown);
-		rowPanel.setManaged(!tableShown);
 		tableSeatPanel.setVisible(tableShown);
 		tableSeatPanel.setManaged(tableShown);
 		tableSeatPanelController.show(selectedTable, selectedSeat, editMode);
@@ -496,7 +492,7 @@ public class SeatingPlanController {
 	private static String deleteRowsMessage(List<TableRow> rows, int tables) {
 		String tableText = tables == 1 ? "1 Tisch" : tables + " Tischen";
 		if (rows.size() == 1) {
-			return "Soll die " + rowName(rows.get(0)) + " mit " + tableText + " wirklich gelöscht werden?";
+			return "Soll die " + SelectionSections.rowName(rows.get(0)) + " mit " + tableText + " wirklich gelöscht werden?";
 		}
 		return "Sollen " + rows.size() + " Reihen mit insgesamt " + tableText + " wirklich gelöscht werden?";
 	}
@@ -529,7 +525,7 @@ public class SeatingPlanController {
 		if (row == null) {
 			return;
 		}
-		RowFillDialog.show(rowName(row), rowList.getScene() == null ? null : rowList.getScene().getWindow()).ifPresent(fill -> {
+		RowFillDialog.show(SelectionSections.rowName(row), rowList.getScene() == null ? null : rowList.getScene().getWindow()).ifPresent(fill -> {
 			plan.fillRow(row, fill.tableCount(), fill.seatsPerTable());
 			afterEdit();
 		});

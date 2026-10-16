@@ -34,13 +34,13 @@ class TableSeatPanelControllerTest {
 	}
 
 	@Test
-	void seatTitleAndDeleteMessageNameTheTable() {
+	void seatNameAndDeleteMessageNameTheTable() {
 		row.setLabel("B");
 		Table table = plan.addTable(row);
 		table.addSeat();
 		Seat second = table.addSeat();
 
-		assertEquals("Sitz 2 an Tisch B1", TableSeatPanelController.seatTitle(second));
+		assertEquals("Sitz 2 an Tisch B1", TableSeatPanelController.seatName(second));
 		assertEquals("Soll Sitz 2 an Tisch B1 wirklich gelöscht werden?", TableSeatPanelController.deleteSeatMessage(second));
 	}
 
