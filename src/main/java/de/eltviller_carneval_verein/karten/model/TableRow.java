@@ -19,10 +19,12 @@ public class TableRow {
 	/** Kennbuchstabe der Reihe; leer erlaubt (dann zählen die Tische über alle Reihen ohne Buchstaben). */
 	private String label = "";
 
-	// Anordnung in der Halle
+	// Anordnung in der Halle: Startpunkt der Reihe
 	private double posX;
 	private double posY;
+	/** Richtung der Reihe in Grad im Uhrzeigersinn: 0 = von oben nach unten, 90 = nach links, 270 = nach rechts. */
 	private double angle;
+	/** Drehung der Tische gegenüber der Reihe in Grad: 0 = längs hintereinander, 90 = quer nebeneinander. */
 	private double tableRotation;
 	private double tableGap;
 	private double aisleWidth;
@@ -77,6 +79,7 @@ public class TableRow {
 		this.posY = posY;
 	}
 
+	/** Richtung der Reihe ab dem Startpunkt, Grad im Uhrzeigersinn: 0 = von oben nach unten, 90 = nach links. */
 	public double getAngle() {
 		return angle;
 	}
@@ -85,6 +88,10 @@ public class TableRow {
 		this.angle = angle;
 	}
 
+	/**
+	 * Drehung der Tische gegenüber der Reihe in Grad: 0 = längs hintereinander, 90 = quer nebeneinander. Ein automatisch
+	 * angeordneter Tisch hat die Drehung Winkel + Tischdrehung.
+	 */
 	public double getTableRotation() {
 		return tableRotation;
 	}

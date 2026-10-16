@@ -84,14 +84,15 @@ public final class PlanNodeFactory {
 	}
 
 	/**
-	 * Reihe als Linie ab {@code posX/posY} in Richtung {@link TableRow#getAngle()} mit der Länge {@code extent}, mit
-	 * Punkt am Startpunkt und dem Buchstaben kurz davor (ohne Buchstaben keine Beschriftung). Eine breite unsichtbare
-	 * Linie darunter macht die Reihe greifbar.
+	 * Reihe als Linie ab {@code posX/posY} in Richtung {@link TableRow#getAngle()} (0 Grad nach unten, im Uhrzeigersinn,
+	 * siehe {@link SeatingPlanLayout#direction}) mit der Länge {@code extent}, mit Punkt am Startpunkt und dem aufrechten
+	 * Buchstaben kurz davor (ohne Buchstaben keine Beschriftung). Eine breite unsichtbare Linie darunter macht die Reihe
+	 * greifbar.
 	 */
 	public static Node rowNode(TableRow row, double extent, boolean selected) {
-		double angle = Math.toRadians(row.getAngle());
-		double ux = Math.cos(angle);
-		double uy = Math.sin(angle);
+		double[] direction = SeatingPlanLayout.direction(row.getAngle());
+		double ux = direction[0];
+		double uy = direction[1];
 		double startX = row.getPosX();
 		double startY = row.getPosY();
 		double endX = startX + extent * ux;

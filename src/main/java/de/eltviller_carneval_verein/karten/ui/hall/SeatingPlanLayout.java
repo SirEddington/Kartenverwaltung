@@ -13,6 +13,13 @@ import de.eltviller_carneval_verein.karten.ui.input.RotationInput;
  * hintereinander und setzt die Stühle paarweise links und rechts an die Tische. Die Berechnung ist reine Geometrie
  * (ohne JavaFX), schreibt die Ergebnisse ins Modell und ist idempotent. Koordinaten: y zeigt nach unten, Winkel
  * laufen im Uhrzeigersinn, Grad.
+ *
+ * <p>
+ * Der Winkel der Reihe gibt ihre Richtung ab dem Startpunkt an: 0 Grad von oben nach unten, 90 nach links, 180 nach
+ * oben, 270 nach rechts ({@link #direction}). Die Tischdrehung der Reihe ist die Drehung der Tische gegenüber der
+ * Reihe: Bei 0 stehen sie längs hintereinander, bei 90 quer nebeneinander (die Stühle zwischen den Tischen). Ein
+ * automatisch angeordneter Tisch erhält die Drehung Winkel + Tischdrehung (0 bis unter 360); Drehung 0 heißt beim Tisch
+ * wie überall: lange Seite senkrecht, Sitz 1 links oben.
  */
 public final class SeatingPlanLayout {
 
@@ -41,11 +48,29 @@ public final class SeatingPlanLayout {
 		}
 	}
 
+	/**
+	 * Einheitsvektor {x, y} der Reihenrichtung zum Winkel {@link TableRow#getAngle()}: 0 Grad nach unten, 90 nach links,
+	 * 180 nach oben, 270 nach rechts (im Uhrzeigersinn, y nach unten).
+	 */
+	public static double[] direction(double angle) {
+		double radians = Math.toRadians(angle);
+		return new double[] { -Math.sin(radians), Math.cos(radians) };
+	}
+
+	/**
+	 * Einheitsvektor quer zur Reihenrichtung, auf der Seite rechts bzw. unterhalb der Reihe: Dort legt "+ Reihe" die
+	 * nächste Reihe an (eine Reihe nach unten bekommt ihre Nachbarin rechts, eine nach rechts darunter).
+	 */
+	public static double[] besideDirection(double angle) {
+		double[] side = direction(angle + 270);
+		return side[0] + side[1] < -1e-9 ? new double[] { -side[0], -side[1] } : side;
+	}
+
 	private static void layoutRow(SeatingPlan plan, TableRow row) {
-		double angle = Math.toRadians(row.getAngle());
 		double tableRotation = Math.toRadians(row.getTableRotation());
-		double ux = Math.cos(angle);
-		double uy = Math.sin(angle);
+		double[] direction = direction(row.getAngle());
+		double ux = direction[0];
+		double uy = direction[1];
 
 		List<Table> tables = plan.getTablesOf(row);
 		double s = 0; // Laufmaß entlang der Reihenachse
@@ -98,11 +123,14 @@ public final class SeatingPlanLayout {
 		return end;
 	}
 
-	/** Ausdehnung eines Tischs samt Stuhlrand entlang der Reihenachse; Maße von 0 oder kleiner wie in {@code apply}. */
+	/**
+	 * Ausdehnung eines Tischs samt Stuhlrand entlang der Reihenachse; Maße von 0 oder kleiner wie in {@code apply}. Bei
+	 * Tischdrehung 0 (längs) ist das die Tischhöhe, bei 90 (quer) die Breite mit den Stühlen links und rechts.
+	 */
 	private static double extent(Table table, double tableRotation) {
 		double width = table.getWidth() > 0 ? table.getWidth() : DEFAULT_TABLE_WIDTH;
 		double height = table.getHeight() > 0 ? table.getHeight() : DEFAULT_TABLE_HEIGHT;
-		return Math.abs((width + 2 * getSeatMargin(table)) * Math.cos(tableRotation)) + Math.abs(height * Math.sin(tableRotation));
+		return Math.abs((width + 2 * getSeatMargin(table)) * Math.sin(tableRotation)) + Math.abs(height * Math.cos(tableRotation));
 	}
 
 	/**

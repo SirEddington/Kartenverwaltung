@@ -42,10 +42,171 @@ class SeatingPlanLayoutTest {
 		assertEquals(y, seat.getPosY(), EPS, "Sitz posY");
 	}
 
+	/** Reihe nach rechts (270 Grad), Tische quer nebeneinander (Tischdrehung 90 Grad). */
+	private void rowToTheRightWithTablesSideBySide() {
+		row.setAngle(270);
+		row.setTableRotation(90);
+	}
+
+	// --- Richtung der Reihe ---
+
+	@Test
+	void richtung_0_grad_nach_unten_im_uhrzeigersinn() {
+		assertDirection(SeatingPlanLayout.direction(0), 0, 1);
+		assertDirection(SeatingPlanLayout.direction(90), -1, 0);
+		assertDirection(SeatingPlanLayout.direction(180), 0, -1);
+		assertDirection(SeatingPlanLayout.direction(270), 1, 0);
+	}
+
+	@Test
+	void naechste_reihe_liegt_rechts_bzw_darunter() {
+		assertDirection(SeatingPlanLayout.besideDirection(0), 1, 0);
+		assertDirection(SeatingPlanLayout.besideDirection(180), 1, 0);
+		assertDirection(SeatingPlanLayout.besideDirection(270), 0, 1);
+		assertDirection(SeatingPlanLayout.besideDirection(90), 0, 1);
+	}
+
+	private static void assertDirection(double[] direction, double x, double y) {
+		assertEquals(x, direction[0], EPS, "Richtung x");
+		assertEquals(y, direction[1], EPS, "Richtung y");
+	}
+
+	// --- Standardreihe: 0 Grad nach unten, Tische längs hintereinander ---
+
+	@Test
+	void standardreihe_tische_laengs_nach_unten() {
+		Table first = table();
+		Table second = table();
+
+		SeatingPlanLayout.apply(plan);
+
+		// Ausdehnung entlang der Reihe = Tischhöhe 300; Mittelpunkte (100, 200) und (100, 500)
+		assertEquals(65, first.getPosX(), EPS);
+		assertEquals(50, first.getPosY(), EPS);
+		assertEquals(0, first.getRotation(), EPS);
+		assertEquals(65, second.getPosX(), EPS);
+		assertEquals(350, second.getPosY(), EPS);
+		assertEquals(0, second.getRotation(), EPS);
+		// Sitze links und rechts des stehenden Tischs
+		assertSeat(first.getSeats().get(0), 50, 200);
+		assertSeat(first.getSeats().get(1), 150, 200);
+		assertEquals(600, SeatingPlanLayout.rowLength(plan, row), EPS);
+	}
+
+	@Test
+	void reihe_90_grad_laeuft_nach_links_mit_gedrehten_tischen() {
+		Table first = table();
+		Table second = table();
+		row.setAngle(90);
+
+		SeatingPlanLayout.apply(plan);
+
+		// Mittelpunkte (-50, 50) und (-350, 50)
+		assertEquals(-50, first.getPosX() + 35, EPS);
+		assertEquals(50, first.getPosY() + 150, EPS);
+		assertEquals(90, first.getRotation(), EPS);
+		assertEquals(-350, second.getPosX() + 35, EPS);
+		assertEquals(50, second.getPosY() + 150, EPS);
+		// Gedreht liegen die Sitze über und unter dem Tisch
+		assertSeat(first.getSeats().get(0), -50, 0);
+		assertSeat(first.getSeats().get(1), -50, 100);
+	}
+
+	@Test
+	void tischdrehung_90_grad_quer_in_reihe_nach_unten() {
+		Table first = table();
+		Table second = table();
+		row.setTableRotation(90);
+
+		SeatingPlanLayout.apply(plan);
+
+		// Ausdehnung entlang der Reihe = 70 + 2 * 25 = 120; Mittelpunkte (100, 110) und (100, 230)
+		assertEquals(100, first.getPosX() + 35, EPS);
+		assertEquals(110, first.getPosY() + 150, EPS);
+		assertEquals(90, first.getRotation(), EPS);
+		assertEquals(100, second.getPosX() + 35, EPS);
+		assertEquals(230, second.getPosY() + 150, EPS);
+		// Die Stühle stehen zwischen den Tischen
+		assertSeat(first.getSeats().get(0), 100, 60);
+		assertSeat(first.getSeats().get(1), 100, 160);
+	}
+
+	@Test
+	void abstand_und_mittelgang_in_reihe_nach_unten() {
+		table();
+		Table second = table();
+
+		row.setTableGap(10);
+		SeatingPlanLayout.apply(plan);
+		assertEquals(50 + 300 + 10 + 150, second.getPosY() + 150, EPS);
+
+		row.setTableGap(0);
+		row.setAisleAfter(1);
+		row.setAisleWidth(100);
+		SeatingPlanLayout.apply(plan);
+		assertEquals(50 + 300 + 100 + 150, second.getPosY() + 150, EPS);
+		assertEquals(100, second.getPosX() + 35, EPS);
+
+		row.setTableGap(10);
+		assertEquals(300 + 10 + 100 + 300, SeatingPlanLayout.rowLength(plan, row), EPS);
+	}
+
+	@Test
+	void manueller_tisch_behaelt_seinen_platz_in_reihe_nach_unten() {
+		Table first = table();
+		Table second = table();
+		first.setManualPos(true);
+		first.setPosX(7);
+		first.setPosY(8);
+		first.setRotation(33);
+
+		SeatingPlanLayout.apply(plan);
+
+		assertEquals(7, first.getPosX(), EPS);
+		assertEquals(8, first.getPosY(), EPS);
+		assertEquals(33, first.getRotation(), EPS);
+		assertEquals(350, second.getPosY(), EPS);
+		assertEquals(0, second.getRotation(), EPS);
+	}
+
+	@Test
+	void idempotent_in_reihe_nach_unten() {
+		row.setTableRotation(90);
+		row.setTableGap(5);
+		row.setAisleAfter(1);
+		row.setAisleWidth(60);
+		for (int i = 0; i < 3; i++) {
+			table();
+		}
+
+		SeatingPlanLayout.apply(plan);
+		List<Double> before = snapshot();
+		SeatingPlanLayout.apply(plan);
+
+		assertEquals(before, snapshot());
+	}
+
+	@Test
+	void drehung_aus_winkel_und_tischdrehung_wird_normalisiert() {
+		Table first = table();
+		row.setAngle(350);
+		row.setTableRotation(20);
+		SeatingPlanLayout.apply(plan);
+		assertEquals(10, first.getRotation(), EPS);
+
+		row.setAngle(270);
+		row.setTableRotation(180);
+		SeatingPlanLayout.apply(plan);
+		assertEquals(90, first.getRotation(), EPS);
+	}
+
+	// --- Umgerechnete Fälle der früheren Zählweise (alter Winkel - 90, alte Tischdrehung + 90) ---
+
 	@Test
 	void quer_ohne_Abstand() {
 		Table first = table();
 		Table second = table();
+		rowToTheRightWithTablesSideBySide();
 
 		SeatingPlanLayout.apply(plan);
 
@@ -63,6 +224,7 @@ class SeatingPlanLayoutTest {
 	void reihenlaenge_mit_abstand_und_mittelgang() {
 		table();
 		table();
+		rowToTheRightWithTablesSideBySide();
 		row.setTableGap(10);
 		row.setAisleAfter(1);
 		row.setAisleWidth(100);
@@ -76,6 +238,7 @@ class SeatingPlanLayoutTest {
 	void tischabstand_und_mittelgang() {
 		table();
 		Table second = table();
+		rowToTheRightWithTablesSideBySide();
 
 		row.setTableGap(10);
 		SeatingPlanLayout.apply(plan);
@@ -93,9 +256,10 @@ class SeatingPlanLayoutTest {
 	}
 
 	@Test
-	void laengs() {
+	void reihe_nach_rechts_tische_laengs() {
 		Table first = table();
-		row.setTableRotation(90);
+		row.setAngle(270);
+		row.setTableRotation(180);
 
 		SeatingPlanLayout.apply(plan);
 
@@ -108,9 +272,10 @@ class SeatingPlanLayoutTest {
 	}
 
 	@Test
-	void reihe_gedreht_um_90_grad() {
+	void reihe_nach_unten_tische_quer() {
 		Table first = table();
-		row.setAngle(90);
+		row.setAngle(0);
+		row.setTableRotation(90);
 
 		SeatingPlanLayout.apply(plan);
 
@@ -122,18 +287,18 @@ class SeatingPlanLayoutTest {
 	@Test
 	void tischdrehung_liegt_zwischen_0_und_unter_360() {
 		Table first = table();
-		row.setAngle(300);
-		row.setTableRotation(90);
+		row.setAngle(210);
+		row.setTableRotation(180);
 		SeatingPlanLayout.apply(plan);
 		assertEquals(30, first.getRotation(), EPS);
 
-		row.setAngle(-90);
-		row.setTableRotation(0);
+		row.setAngle(-180);
+		row.setTableRotation(90);
 		SeatingPlanLayout.apply(plan);
 		assertEquals(270, first.getRotation(), EPS);
 
-		row.setAngle(270);
-		row.setTableRotation(90);
+		row.setAngle(180);
+		row.setTableRotation(180);
 		SeatingPlanLayout.apply(plan);
 		assertEquals(0, first.getRotation(), EPS);
 	}
@@ -142,6 +307,7 @@ class SeatingPlanLayoutTest {
 	void manuelle_Tische_behalten_Position_und_Platz() {
 		Table first = table();
 		Table second = table();
+		rowToTheRightWithTablesSideBySide();
 		first.setManualPos(true);
 		first.setPosX(7);
 		first.setPosY(8);
@@ -157,8 +323,8 @@ class SeatingPlanLayoutTest {
 
 	@Test
 	void idempotent() {
-		row.setAngle(30);
-		row.setTableRotation(45);
+		row.setAngle(300);
+		row.setTableRotation(135);
 		row.setTableGap(12.5);
 		row.setAisleAfter(2);
 		row.setAisleWidth(80);
@@ -176,6 +342,7 @@ class SeatingPlanLayoutTest {
 
 	@Test
 	void unbekannte_Reihe_reihe_ohne_Tische_und_Maße_0_werfen_nicht() {
+		rowToTheRightWithTablesSideBySide();
 		plan.addRow(); // leere Reihe
 
 		Table stray = plan.addTable(row);
@@ -216,6 +383,7 @@ class SeatingPlanLayoutTest {
 		one.setTableNumber(1);
 		Table five = table();
 		five.setTableNumber(5);
+		rowToTheRightWithTablesSideBySide();
 
 		SeatingPlanLayout.apply(plan);
 

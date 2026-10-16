@@ -30,9 +30,9 @@
         <Spinner fx:id="posXSpinner" prefWidth="120.0" />
         <Label text="Y (cm, Startpunkt):" />
         <Spinner fx:id="posYSpinner" prefWidth="120.0" />
-        <Label fx:id="angleLabel" text="Winkel (Grad):" />
+        <Label fx:id="angleLabel" text="Winkel (Grad, 0 = nach unten):" wrapText="true" />
         <Spinner fx:id="angleSpinner" prefWidth="120.0" />
-        <Label fx:id="tableRotationLabel" text="Tischdrehung (Grad):" />
+        <Label fx:id="tableRotationLabel" text="Tischdrehung (Grad, 0 = längs):" wrapText="true" />
         <Spinner fx:id="tableRotationSpinner" prefWidth="120.0" />
         <Label fx:id="tableGapLabel" text="Tischabstand (cm):" />
         <Spinner fx:id="tableGapSpinner" prefWidth="120.0" />

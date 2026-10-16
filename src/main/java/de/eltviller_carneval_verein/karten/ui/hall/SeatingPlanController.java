@@ -464,10 +464,10 @@ public class SeatingPlanController {
 			row.setPosX(NEW_ROW_START);
 			row.setPosY(NEW_ROW_START);
 		} else {
-			// Parallel zur vorigen Reihe, eine Reihenbreite daneben (quer zur Reihenrichtung)
-			double angle = Math.toRadians(previous.getAngle());
-			row.setPosX(previous.getPosX() - NEW_ROW_SPACING * Math.sin(angle));
-			row.setPosY(previous.getPosY() + NEW_ROW_SPACING * Math.cos(angle));
+			// Parallel zur vorigen Reihe, eine Reihenbreite daneben (quer zur Reihenrichtung, rechts bzw. darunter)
+			double[] side = SeatingPlanLayout.besideDirection(previous.getAngle());
+			row.setPosX(previous.getPosX() + NEW_ROW_SPACING * side[0]);
+			row.setPosY(previous.getPosY() + NEW_ROW_SPACING * side[1]);
 			row.setAngle(previous.getAngle());
 			row.setTableRotation(previous.getTableRotation());
 			row.setTableGap(previous.getTableGap());
