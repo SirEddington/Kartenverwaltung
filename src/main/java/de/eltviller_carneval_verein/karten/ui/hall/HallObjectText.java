@@ -21,7 +21,7 @@ import javafx.scene.text.Text;
  */
 public final class HallObjectText {
 
-	private static final String FONT_FAMILY = "Yanone Kaffeesatz";
+	private static final String FONT_FAMILY = "Yanone Kaffeesatz Regular";
 
 	/** Schriftgröße, wenn sich ein Text nicht messen lässt (leerer Name). */
 	static final double DEFAULT_SIZE = 20;

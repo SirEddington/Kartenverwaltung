@@ -46,23 +46,23 @@
 
 	/* Überschriften (Yanone Kaffeesatz Bold in ECV-Blau) */
 	.header-title, .mainheader-label {
-	    -fx-font-family: "Yanone Kaffeesatz"/*, "Calibri", sans-serif*/;
-	    -fx-font-weight: bold;
+	    -fx-font-family: "Yanone Kaffeesatz Bold"/*, "Calibri", sans-serif*/;
+	    -fx-font-weight: normal;
 	    -fx-font-size: 55px;
 	    -fx-text-fill: -fx-ecv-blue;
 	}
 
 /* Überschriften (Yanone Kaffeesatz Bold in ECV-Blau) */
 .header-title, .header-label {
-    -fx-font-family: "Yanone Kaffeesatz"/*, "Calibri", sans-serif*/;
-    -fx-font-weight: bold;
+    -fx-font-family: "Yanone Kaffeesatz Bold"/*, "Calibri", sans-serif*/;
+    -fx-font-weight: normal;
     -fx-font-size: 33px;
     -fx-text-fill: -fx-ecv-blue;
 }
 
 /* Unterüberschriften (Yanone Kaffeesatz Regular) */
 .subheader-label {
-    -fx-font-family: "Yanone Kaffeesatz"/*, "Calibri", sans-serif*/;
+    -fx-font-family: "Yanone Kaffeesatz Regular"/*, "Calibri", sans-serif*/;
     -fx-font-weight: normal;
     -fx-font-size: 22px;
     -fx-text-fill: -fx-ecv-blue;

@@ -44,8 +44,8 @@ public class MainApp extends Application {
 	@SuppressWarnings("exports")
 	@Override
 	public void start(Stage stage) throws Exception {
-		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/YanoneKaffeesatz-Bold.ttf"), 12);
-		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/Yanone Kaffeesatz Regular.ttf"), 12);
+		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/YanoneKaffeesatzBold.otf"), 12);
+		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/YanoneKaffeesatzRegular.otf"), 12);
 
 		primaryStage = stage;
 		// Popups gehören zum Fenster, nicht zur Scene: Sonst bliebe z. B. ein offener Sitz-Dialog über der nächsten Ansicht stehen
