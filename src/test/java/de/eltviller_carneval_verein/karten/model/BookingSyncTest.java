@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import de.eltviller_carneval_verein.karten.model.BookingSync.Report;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.validation.PresentationValidator;
 
 class BookingSyncTest {
 
@@ -277,8 +278,124 @@ class BookingSyncTest {
 
 		assertSame(first, bookingOf(presentation, target));
 		assertTrue(second.isUnassigned());
-		assertEquals(1, presentation.getBookings().stream()
-				.filter(b -> target.getId().equals(b.getSeatId()) && !b.isUnassigned()).count());
+		assertNull(second.getSeatId());
+		assertEquals(1, presentation.getBookings().stream().filter(b -> target.getId().equals(b.getSeatId())).count());
+	}
+
+	/** Zwei Buchungen mit der {@code seatId} des Sitzes; ein Name {@code null} heißt: diese Buchung ist leer. */
+	private static Booking[] twoBookingsOnSeat(Presentation presentation, Seat target, String firstName, String secondName) {
+		Booking first = presentation.addBooking();
+		first.setSeatId(target.getId());
+		first.setLastName(firstName);
+		Booking second = presentation.addBooking();
+		second.setSeatId(target.getId());
+		second.setLastName(secondName);
+		return new Booking[] { first, second };
+	}
+
+	private static boolean hasSeatDouble(Presentation presentation) {
+		return PresentationValidator.validate(presentation).getIssues().stream().anyMatch(i -> "SEA-011".equals(i.code()));
+	}
+
+	@Test
+	void gleiche_seatId_die_Buchung_mit_Daten_gewinnt_auch_als_zweite() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		Seat target = seat(plan, 1, 1);
+		Booking[] pair = twoBookingsOnSeat(presentation, target, null, "Zweite");
+
+		Report report = BookingSync.sync(presentation, plan);
+
+		assertSame(pair[1], bookingOf(presentation, target));
+		assertFalse(pair[1].isUnassigned());
+		assertFalse(presentation.getBookings().contains(pair[0]));
+		assertEquals(new Report(1, 3, 1, 0), report);
+		assertEquals(4, presentation.getBookings().size());
+		assertFalse(hasSeatDouble(presentation));
+	}
+
+	@Test
+	void gleiche_seatId_die_leere_zweite_Buchung_wird_entfernt() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		Seat target = seat(plan, 1, 1);
+		Booking[] pair = twoBookingsOnSeat(presentation, target, "Erste", null);
+
+		Report report = BookingSync.sync(presentation, plan);
+
+		assertSame(pair[0], bookingOf(presentation, target));
+		assertFalse(pair[0].isUnassigned());
+		assertFalse(presentation.getBookings().contains(pair[1]));
+		assertEquals(new Report(1, 3, 1, 0), report);
+		assertEquals(4, presentation.getBookings().size());
+		assertFalse(hasSeatDouble(presentation));
+	}
+
+	@Test
+	void gleiche_seatId_beide_mit_Daten_die_zweite_bleibt_ohne_Platz_ohne_seatId() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		Seat target = seat(plan, 1, 1);
+		Booking[] pair = twoBookingsOnSeat(presentation, target, "Erste", "Zweite");
+		pair[1].setPaymentStatus(PaymentStatus.CASH);
+		assertTrue(hasSeatDouble(presentation));
+
+		Report report = BookingSync.sync(presentation, plan);
+
+		assertSame(pair[0], bookingOf(presentation, target));
+		assertFalse(pair[0].isUnassigned());
+		assertTrue(presentation.getBookings().contains(pair[1]));
+		assertTrue(pair[1].isUnassigned());
+		assertNull(pair[1].getSeatId());
+		assertEquals("Zweite", pair[1].getLastName());
+		assertEquals(PaymentStatus.CASH, pair[1].getPaymentStatus());
+		assertEquals(new Report(1, 3, 0, 1), report);
+		assertEquals(5, presentation.getBookings().size());
+		assertFalse(hasSeatDouble(presentation));
+	}
+
+	@Test
+	void gleiche_seatId_ein_zweiter_sync_aendert_nichts() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		Seat target = seat(plan, 1, 1);
+		Booking[] pair = twoBookingsOnSeat(presentation, target, "Erste", "Zweite");
+		BookingSync.sync(presentation, plan);
+		List<Booking> before = List.copyOf(presentation.getBookings());
+		String rowLabel = pair[1].getRowLabel();
+		int tableNumber = pair[1].getTableNumber();
+		int seatNumber = pair[1].getSeatNumber();
+
+		Report report = BookingSync.sync(presentation, plan);
+
+		assertEquals(before, presentation.getBookings());
+		assertEquals(new Report(4, 0, 0, 1), report);
+		assertSame(pair[0], bookingOf(presentation, target));
+		assertTrue(pair[1].isUnassigned());
+		assertNull(pair[1].getSeatId());
+		assertEquals(rowLabel, pair[1].getRowLabel());
+		assertEquals(tableNumber, pair[1].getTableNumber());
+		assertEquals(seatNumber, pair[1].getSeatNumber());
+		assertFalse(hasSeatDouble(presentation));
+	}
+
+	@Test
+	void verlierer_ohne_seatId_uebersteht_Speichern_und_Laden() throws IOException {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		twoBookingsOnSeat(presentation, seat(plan, 1, 1), "Erste", "Zweite");
+		BookingSync.sync(presentation, plan);
+
+		ObjectMapper mapper = JsonMapperFactory.create();
+		Presentation loaded = mapper.readValue(mapper.writeValueAsString(presentation), Presentation.class);
+		Report report = BookingSync.sync(loaded, plan);
+
+		assertEquals(new Report(4, 0, 0, 1), report);
+		Booking loser = loaded.getBookings().stream().filter(b -> "Zweite".equals(b.getLastName())).findFirst().orElseThrow();
+		assertNull(loser.getSeatId());
+		assertTrue(loser.isUnassigned());
+		assertNull(loser.copy().getSeatId());
+		assertFalse(hasSeatDouble(loaded));
 	}
 
 	@Test

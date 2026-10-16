@@ -17,13 +17,16 @@ import java.util.Set;
  * Reihenfolge des Abgleichs:
  * <ol>
  * <li>Buchungen, deren {@code seatId} einen Sitz der Bestuhlung trifft: Die Momentaufnahme wird aufgefrischt.
+ * Zeigen mehrere Buchungen auf denselben Sitz (nur bei beschädigten Daten), gewinnt die erste mit Daten, ohne solche
+ * die erste in der Liste. Leere Verlierer werden entfernt, Verlierer mit Daten laufen weiter.
  * <li>Übrige Buchungen: exakter Treffer auf (Reihenbuchstabe, Tischnummer, Sitznummer) mit einem noch unbelegten
  * Sitz; die {@code seatId} wird neu gesetzt.
  * <li>Buchungen ohne Treffer: mit Daten bleiben sie als {@link Booking#isUnassigned() ohne Platz} erhalten, ohne
- * Daten (auch mit nur einem Einzelpreis) werden sie entfernt.
+ * Daten (auch mit nur einem Einzelpreis) werden sie entfernt. Ein Verlierer aus Schritt 1 verliert dabei seine
+ * {@code seatId} (die Momentaufnahme bleibt), damit nicht zwei Buchungen auf denselben Sitz zeigen.
  * <li>Sitze ohne Buchung bekommen eine leere Buchung mit Momentaufnahme.
  * </ol>
- * Bei mehreren Buchungen auf denselben Sitz gewinnt die erste in der Liste. Die Klasse hat nur statische Methoden.
+ * Ein zweiter Abgleich ändert nichts. Die Klasse hat nur statische Methoden.
  */
 public final class BookingSync {
 
@@ -53,7 +56,8 @@ public final class BookingSync {
 	 * alte Bestuhlung wieder, findet der nächste Abgleich jede Buchung über ihre {@code seatId} und legt die leeren neu
 	 * an. Ist die {@code seatingPlanId} gesetzt, die Bestuhlung aber {@code null} (nicht mehr in der Halle), wird
 	 * {@code planMissing} gesetzt und nichts geändert: Die Buchungen bleiben, wie sie sind, auch ihre gespeicherte
-	 * Markierung {@link Booking#isUnassigned() ohne Platz} aus dem letzten Abgleich mit der Bestuhlung.
+	 * Markierung {@link Booking#isUnassigned() ohne Platz} aus dem letzten Abgleich mit der Bestuhlung. Mit Bestuhlung
+	 * läuft der Abgleich wie in der Klassenbeschreibung; mehrere Buchungen auf demselben Sitz löst er auf.
 	 *
 	 * @param plan die Bestuhlung der Vorstellung oder {@code null}, wenn sie nicht gefunden wurde
 	 */
@@ -151,7 +155,8 @@ public final class BookingSync {
 	}
 
 	/**
-	 * Der eigentliche Abgleich auf einer Buchungsliste.
+	 * Der eigentliche Abgleich auf einer Buchungsliste (Schritte siehe Klassenbeschreibung). Doppelte Sitzkennungen
+	 * werden aufgelöst: Danach zeigt höchstens eine Buchung auf jeden Sitz der Bestuhlung.
 	 *
 	 * @param owner die Vorstellung für neue Buchungen (setzt deren Elternteil); {@code null} bei der Vorschau
 	 */
@@ -164,17 +169,33 @@ public final class BookingSync {
 			seatsByKey.computeIfAbsent(key(seat), k -> new ArrayList<>()).add(seat);
 		}
 
+		// (1) auflösbare seatId: je Sitz gewinnt die erste Buchung mit Daten, ohne solche die erste überhaupt
+		Map<Seat, Booking> winners = new HashMap<>();
+		for (Booking booking : bookings) {
+			Seat seat = resolve(booking, seatsById);
+			if (seat != null) {
+				Booking winner = winners.get(seat);
+				if (winner == null || (!winner.hasData() && booking.hasData())) {
+					winners.put(seat, booking);
+				}
+			}
+		}
 		Set<Seat> taken = new HashSet<>();
 		List<Booking> leftovers = new ArrayList<>();
 		int matched = 0;
-
-		// (1) auflösbare seatId: Momentaufnahme auffrischen; die erste Buchung auf einem Sitz gewinnt
-		for (Booking booking : bookings) {
-			Seat seat = booking.getSeatId() != null ? seatsById.get(booking.getSeatId()) : null;
-			if (seat != null && taken.add(seat)) {
+		int removedEmpty = 0;
+		for (Iterator<Booking> iterator = bookings.iterator(); iterator.hasNext();) {
+			Booking booking = iterator.next();
+			Seat seat = resolve(booking, seatsById);
+			if (seat != null && winners.get(seat) == booking) {
+				taken.add(seat);
 				booking.takeSnapshot(seat.getParent(), seat);
 				booking.setUnassigned(false);
 				matched++;
+			} else if (seat != null && !booking.hasData()) {
+				// leerer Verlierer auf einem Sitz: es gehen keine Daten verloren
+				iterator.remove();
+				removedEmpty++;
 			} else {
 				leftovers.add(booking);
 			}
@@ -195,10 +216,13 @@ public final class BookingSync {
 		}
 
 		// (3) ohne Treffer: mit Daten ohne Platz behalten, sonst entfernen
-		int removedEmpty = 0;
 		int unassigned = 0;
 		for (Booking booking : unmatched) {
 			if (booking.hasData()) {
+				if (resolve(booking, seatsById) != null) {
+					// Verlierer auf einem Sitz, den eine andere Buchung trägt: die Sitzkennung entfällt (sonst SEA-011)
+					booking.setSeatId(null);
+				}
 				booking.setUnassigned(true);
 				unassigned++;
 			} else {
@@ -219,6 +243,11 @@ public final class BookingSync {
 			}
 		}
 		return new Report(matched, created, removedEmpty, unassigned);
+	}
+
+	/** Der Sitz der Bestuhlung, auf den die {@code seatId} der Buchung zeigt, sonst {@code null}. */
+	private static Seat resolve(Booking booking, Map<String, Seat> seatsById) {
+		return booking.getSeatId() != null ? seatsById.get(booking.getSeatId()) : null;
 	}
 
 	private static Seat firstFree(List<Seat> candidates, Set<Seat> taken) {
