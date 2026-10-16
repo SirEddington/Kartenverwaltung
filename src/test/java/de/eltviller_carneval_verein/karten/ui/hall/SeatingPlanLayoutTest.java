@@ -120,6 +120,25 @@ class SeatingPlanLayoutTest {
 	}
 
 	@Test
+	void tischdrehung_liegt_zwischen_0_und_unter_360() {
+		Table first = table();
+		row.setAngle(300);
+		row.setTableRotation(90);
+		SeatingPlanLayout.apply(plan);
+		assertEquals(30, first.getRotation(), EPS);
+
+		row.setAngle(-90);
+		row.setTableRotation(0);
+		SeatingPlanLayout.apply(plan);
+		assertEquals(270, first.getRotation(), EPS);
+
+		row.setAngle(270);
+		row.setTableRotation(90);
+		SeatingPlanLayout.apply(plan);
+		assertEquals(0, first.getRotation(), EPS);
+	}
+
+	@Test
 	void manuelle_Tische_behalten_Position_und_Platz() {
 		Table first = table();
 		Table second = table();

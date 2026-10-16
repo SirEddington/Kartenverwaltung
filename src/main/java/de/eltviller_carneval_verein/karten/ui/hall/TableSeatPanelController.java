@@ -7,6 +7,7 @@ import java.util.function.Supplier;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
+import de.eltviller_carneval_verein.karten.ui.input.RotationInput;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.value.ChangeListener;
@@ -124,14 +125,15 @@ public class TableSeatPanelController {
 		tableHeightSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		tablePosXSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		tablePosYSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
-		rotationSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 15));
+		// Die Drehung läuft im Kreis von 0 bis unter 360 (360 = 0, -10 = 350)
+		rotationSpinner.setValueFactory(RotationInput.factory(15));
 		Supplier<String> tableLabel = () -> table == null ? null : EntityLabels.table(table);
 		SpinnerInput.installInteger(tableNumberSpinner, "Tischnummer", tableLabel);
 		SpinnerInput.install(tableWidthSpinner, "Breite", tableLabel);
 		SpinnerInput.install(tableHeightSpinner, "Höhe", tableLabel);
 		SpinnerInput.install(tablePosXSpinner, "Position X", tableLabel);
 		SpinnerInput.install(tablePosYSpinner, "Position Y", tableLabel);
-		SpinnerInput.install(rotationSpinner, "Drehung", tableLabel);
+		RotationInput.install(rotationSpinner, "Drehung", tableLabel);
 
 		onTableValue(tableNumberSpinner, (t, value) -> t.setTableNumber(value));
 		onTableValue(tableWidthSpinner, (t, value) -> t.setWidth(value));

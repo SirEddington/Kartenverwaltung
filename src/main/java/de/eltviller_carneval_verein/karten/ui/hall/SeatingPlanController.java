@@ -12,6 +12,7 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
+import de.eltviller_carneval_verein.karten.ui.input.RotationInput;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.collections.ListChangeListener;
@@ -216,8 +217,9 @@ public class SeatingPlanController {
 		// Wertebereiche prüft der TableRowValidator (ROW-002), die Spinner haben keine Grenzen
 		posXSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 10));
 		posYSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 10));
-		angleSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 15));
-		tableRotationSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 90));
+		// Winkel und Tischdrehung laufen im Kreis von 0 bis unter 360 (360 = 0, -10 = 350)
+		angleSpinner.setValueFactory(RotationInput.factory(15));
+		tableRotationSpinner.setValueFactory(RotationInput.factory(90));
 		tableGapSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 10));
 		aisleAfterSpinner.setValueFactory(SpinnerInput.integerFactory(0, 1));
 		aisleWidthSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 10));
@@ -230,8 +232,8 @@ public class SeatingPlanController {
 				: panelRows.size() == 1 ? EntityLabels.row(panelRows.get(0)) : panelRows.size() + " Reihen";
 		SpinnerInput.install(posXSpinner, "Position X", rowLabel);
 		SpinnerInput.install(posYSpinner, "Position Y", rowLabel);
-		SpinnerInput.install(angleSpinner, "Winkel", rowLabel);
-		SpinnerInput.install(tableRotationSpinner, "Tischdrehung", rowLabel);
+		RotationInput.install(angleSpinner, "Winkel", rowLabel);
+		RotationInput.install(tableRotationSpinner, "Tischdrehung", rowLabel);
 		SpinnerInput.install(tableGapSpinner, "Tischabstand", rowLabel);
 		SpinnerInput.installInteger(aisleAfterSpinner, "Gang nach Tisch", rowLabel);
 		SpinnerInput.install(aisleWidthSpinner, "Gangbreite", rowLabel);

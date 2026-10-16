@@ -11,6 +11,7 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.model.TextAlignV;
+import de.eltviller_carneval_verein.karten.ui.input.RotationInput;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
@@ -25,7 +26,6 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ColorPicker;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextField;
@@ -152,33 +152,8 @@ public class HallPlanController {
 		widthSpinner.setValueFactory(SpinnerInput.doubleFactory(FALLBACK_OBJECT_WIDTH, 5));
 		heightSpinner.setValueFactory(SpinnerInput.doubleFactory(FALLBACK_OBJECT_HEIGHT, 5));
 		textSizeSpinner.setValueFactory(SpinnerInput.doubleFactory(20.0, 1));
-		// Die Drehung läuft im Kreis von 0 bis unter 360: Die Pfeiltasten gehen von 345 auf 0 und von 0 auf 345. Getippte Werte
-		// außerhalb davon werden auf den Kreis gebracht (360 = 0, 361 = 1, -90 = 270). Der Standard-Umlauf von JavaFX würde bei
-		// 0 nach unten auf 360 springen
-		SpinnerValueFactory.DoubleSpinnerValueFactory rotationFactory = new SpinnerValueFactory.DoubleSpinnerValueFactory(-Double.MAX_VALUE,
-				Double.MAX_VALUE, 0.0, 15) {
-			@Override
-			public void decrement(int steps) {
-				turn(-steps);
-			}
-
-			@Override
-			public void increment(int steps) {
-				turn(steps);
-			}
-
-			private void turn(int steps) {
-				double next = ((getValue() == null ? 0.0 : getValue()) + steps * getAmountToStepBy()) % 360.0;
-				// Auf vier Stellen gerundet, damit sich keine Rechenreste (14.990000000000009) anhäufen
-				setValue(Math.round((next < 0 ? next + 360.0 : next) * 10000.0) / 10000.0);
-			}
-		};
-		rotationFactory.valueProperty().addListener((obs, oldValue, newValue) -> {
-			if (newValue != null && (newValue < 0.0 || newValue >= 360.0)) {
-				rotationFactory.setValue(HallObjectText.normalizeRotation(newValue));
-			}
-		});
-		textRotationSpinner.setValueFactory(rotationFactory);
+		// Die Drehung läuft im Kreis von 0 bis unter 360 (360 = 0, -90 = 270)
+		textRotationSpinner.setValueFactory(RotationInput.factory(15));
 		// Getippte Werte beim Verlassen des Feldes übernimmt der Spinner selbst
 		for (Spinner<Double> spinner : java.util.List.of(widthSpinner, heightSpinner, posXSpinner, posYSpinner, textSizeSpinner, textRotationSpinner)) {
 			spinner.setEditable(true);
@@ -192,7 +167,7 @@ public class HallPlanController {
 		SpinnerInput.install(widthSpinner, "Breite", selectedObjectLabel);
 		SpinnerInput.install(heightSpinner, "Höhe", selectedObjectLabel);
 		SpinnerInput.install(textSizeSpinner, "Schriftgröße", selectedObjectLabel);
-		SpinnerInput.install(textRotationSpinner, "Drehung", selectedObjectLabel);
+		RotationInput.install(textRotationSpinner, "Drehung", selectedObjectLabel);
 		shapeCombo.getItems().setAll(Shape.values());
 
 		nameField.setOnAction(e -> commitName());
