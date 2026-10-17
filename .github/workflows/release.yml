@@ -18,8 +18,13 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Build jar with Maven
-        run: ./mvnw --batch-mode clean package
+      # Zwei Fat-JARs mit den jeweils passenden JavaFX-Natives (siehe pom.xml): zuerst
+      # Windows (Standardprofil, inkl. Tests), dann Linux ohne "clean", damit das
+      # Windows-Jar in target/ erhalten bleibt.
+      - name: Build jars with Maven
+        run: |
+          ./mvnw --batch-mode clean package
+          ./mvnw --batch-mode package -Plinux -DskipTests
 
       # IMPORTANT: check https://conveyor.hydraulic.dev/latest/ for the current
       # version and bump the tag below (@v22.2) when it changes.
