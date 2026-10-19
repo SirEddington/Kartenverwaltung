@@ -9,6 +9,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
@@ -129,9 +130,27 @@ public class MainApp extends Application {
 	}
 
 	public static void showHallEditView(Hall selectedHall, HallObject selectedObject, boolean editable) {
+		openHallEditView(selectedHall, selectedObject, null, editable, true);
+	}
+
+	/** Wie {@link #showHallEditView(Hall, HallObject, boolean)}, mit einer Bestuhlung, die im Editor gleich gewählt ist. */
+	public static void showHallEditView(Hall selectedHall, HallObject selectedObject, SeatingPlan selectedPlan, boolean editable) {
+		openHallEditView(selectedHall, selectedObject, selectedPlan, editable, true);
+	}
+
+	/**
+	 * Öffnet den Hallen-Editor, ohne wegen ungespeicherter Änderungen nachzufragen, und nimmt sie mit: Eine Halle, ein
+	 * Hallenobjekt oder eine Bestuhlung, die gerade in der Übersicht hinzugefügt wurde, ist noch nicht gespeichert und
+	 * soll im Editor mit "Speichern *" erscheinen. Die Änderungserkennung bleibt dabei bestehen (kein Zurücksetzen).
+	 */
+	public static void showHallEditViewWithChanges(Hall selectedHall, HallObject selectedObject, SeatingPlan selectedPlan, boolean editable) {
+		openHallEditView(selectedHall, selectedObject, selectedPlan, editable, false);
+	}
+
+	private static void openHallEditView(Hall selectedHall, HallObject selectedObject, SeatingPlan selectedPlan, boolean editable, boolean askToLeave) {
 		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/HallEditView.fxml";
 		try {
-			if (!LeaveGuard.confirmLeave()) {
+			if (askToLeave && !LeaveGuard.confirmLeave()) {
 				return;
 			}
 			StatusMessage.getInstance().clear();
@@ -142,7 +161,7 @@ public class MainApp extends Application {
 			Parent root = loader.load();
 
 			HallEditController controller = loader.getController();
-			controller.initData(selectedHall, selectedObject, editable);
+			controller.initData(selectedHall, selectedObject, selectedPlan, editable);
 
 			primaryStage.setScene(createScene(root));
 		} catch (IOException e) {

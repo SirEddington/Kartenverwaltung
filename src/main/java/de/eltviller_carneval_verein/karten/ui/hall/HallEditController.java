@@ -154,8 +154,9 @@ public class HallEditController {
 
 	/**
 	 * @param selectedObject optional: Hallenobjekt, das im Plan direkt markiert werden soll
+	 * @param selectedPlan   optional: Bestuhlung, die gleich gewählt ist (der Reiter "Bestuhlung" ist dann offen)
 	 */
-	public void initData(Hall hall, HallObject selectedObject, boolean editable) {
+	public void initData(Hall hall, HallObject selectedObject, SeatingPlan selectedPlan, boolean editable) {
 		this.hall = hall;
 
 		updating = true;
@@ -175,11 +176,17 @@ public class HallEditController {
 		// Anordnen vor dem Verfolgen (unten): Was das Öffnen an den Positionen zurechtrückt, zählt nicht als Änderung.
 		// Die Anordnung ist idempotent, bei einer schon angeordneten Bestuhlung ändert sich nichts
 		hall.getSeatingPlans().forEach(SeatingPlanLayout::apply);
-		reloadPlans(hall.getSeatingPlans().isEmpty() ? null : hall.getSeatingPlans().get(0));
+		boolean planGiven = selectedPlan != null && hall.getSeatingPlans().contains(selectedPlan);
+		reloadPlans(planGiven ? selectedPlan : hall.getSeatingPlans().isEmpty() ? null : hall.getSeatingPlans().get(0));
+		if (planGiven) {
+			hallPlanController.showSeatingTab();
+		}
 		setEditable(editable);
 
-		// Erst jetzt, damit alles, was das Befüllen der Ansicht am Modell zurechtrückt, nicht als Änderung zählt
-		ChangeTracker.halls().track(hall);
+		// Erst jetzt, damit alles, was das Befüllen der Ansicht am Modell zurechtrückt, nicht als Änderung zählt. Eine schon
+		// verfolgte Halle (gerade in der Übersicht hinzugefügtes Objekt oder Bestuhlung, noch nicht gespeichert) behält ihren
+		// gespeicherten Stand als Baseline und gilt weiter als geändert.
+		ChangeTracker.halls().ensureTracked(hall);
 	}
 
 	private void commitName() {
@@ -340,7 +347,12 @@ public class HallEditController {
 	 */
 	private void reloadRestoredData() {
 		Hall restored = hall == null ? null : JsonHallRepository.getInstance().findById(hall.getId());
-		MainApp.showHallEditView(restored == null ? hall : restored, null, false);
+		if (restored == null) {
+			// Eine nie gespeicherte Halle ist mit dem Verwerfen verschwunden
+			MainApp.showHallManagementView();
+			return;
+		}
+		MainApp.showHallEditView(restored, null, false);
 	}
 
 	private void setEditable(boolean editable) {

@@ -120,8 +120,8 @@ final class SeatingPlanDrawing {
 	/** Erst alle Tische, dann alle Sitze: Sitze liegen oben und bleiben anklickbar. */
 	private void addTables(Group parent, List<Table> tables, Table selectedTable, Seat selectedSeat) {
 		for (Table table : tables) {
-			// Bei markiertem Sitz ist der Sitz hervorgehoben, nicht der Tisch
-			Node tableNode = PlanNodeFactory.tableNode(table, table.equals(selectedTable) && selectedSeat == null, labels.tables());
+			// Ein markierter Sitz markiert seinen Tisch (und seine Reihe) mit: Der Tisch ist golden wie der Sitz
+			Node tableNode = PlanNodeFactory.tableNode(table, table.equals(selectedTable), labels.tables());
 			attachTableHandlers(tableNode, table);
 			nodeByTable.put(table, tableNode);
 			parent.getChildren().add(tableNode);

@@ -654,6 +654,14 @@
     -fx-text-fill: -fx-ecv-yellow;
 }
 
+/* Kein hellblauer Fokusring im gewählten Reiter (er saß als Rahmen in der ECV-blauen Fläche). Die Selektoren sind so
+   lang wie die des Standard-Themes, damit sie es überstimmen. */
+.tab-pane > .tab-header-area > .headers-region > .tab .focus-indicator,
+.tab-pane:focused > .tab-header-area > .headers-region > .tab:selected .focus-indicator {
+    -fx-border-color: transparent;
+    -fx-background-color: transparent;
+}
+
 /* ------------------------------------------------------------------------------
  * 10. SCROLLBARS
  * ------------------------------------------------------------------------------ */

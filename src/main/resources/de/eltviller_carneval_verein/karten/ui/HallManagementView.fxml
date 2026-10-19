@@ -32,9 +32,13 @@
         <TreeTableView fx:id="treeTableView" showRoot="false" VBox.vgrow="ALWAYS">
             <columns>
                 <TreeTableColumn fx:id="colName" text="Bezeichnung / Name" prefWidth="260.0" />
-                <TreeTableColumn fx:id="colDescription" text="Beschreibung" prefWidth="260.0" />
+                <TreeTableColumn fx:id="colDescription" text="Beschreibung" prefWidth="220.0" />
                 <TreeTableColumn fx:id="colSize" text="Maße (Breite × Höhe, cm)" prefWidth="170.0" />
-                <TreeTableColumn fx:id="colObjectCount" text="Hallenobjekte (Anzahl)" prefWidth="170.0" />
+                <TreeTableColumn fx:id="colObjectCount" text="Hallenobjekte (Anzahl)" prefWidth="160.0" />
+                <TreeTableColumn fx:id="colPlanCount" text="Bestuhlungen (Anzahl)" prefWidth="160.0" />
+                <TreeTableColumn fx:id="colRows" text="Reihen" prefWidth="70.0" />
+                <TreeTableColumn fx:id="colTables" text="Tische" prefWidth="70.0" />
+                <TreeTableColumn fx:id="colSeats" text="Sitze" prefWidth="70.0" />
                 <TreeTableColumn fx:id="colUsage" text="Vorstellungen (Anzahl)" prefWidth="170.0" />
                 <TreeTableColumn fx:id="colShape" text="Form" prefWidth="100.0" />
             </columns>

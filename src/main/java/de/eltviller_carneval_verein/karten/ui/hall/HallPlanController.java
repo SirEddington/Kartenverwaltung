@@ -448,6 +448,11 @@ public class HallPlanController {
 		renderHall();
 	}
 
+	/** Öffnet den Reiter "Bestuhlung" (z. B. wenn eine Bestuhlung aus der Übersicht gewählt oder neu angelegt wurde). */
+	public void showSeatingTab() {
+		sideTabs.getSelectionModel().select(seatingTab);
+	}
+
 	/**
 	 * Die Einstellungen des Menüs "Anzeige": Eine Änderung zeichnet Hallenobjekte und Bestuhlung neu. Die Bestuhlung
 	 * bekommt dazu den Zoom des Plans, denn die Sitznummern erscheinen erst bei genügend großen Sitzen.
