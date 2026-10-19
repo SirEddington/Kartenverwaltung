@@ -48,6 +48,7 @@
                     <TableColumn fx:id="colPresDate" prefWidth="60.0" text="Datum" />
                     <TableColumn fx:id="colPresTime" prefWidth="60.0" text="Uhrzeit" />
                     <TableColumn fx:id="colPresHall" prefWidth="100.0" text="Halle" />
+                    <TableColumn fx:id="colPresPlan" prefWidth="100.0" text="Bestuhlung" />
                 </columns>
                 <columnResizePolicy>
                     <TableView fx:constant="CONSTRAINED_RESIZE_POLICY" />
@@ -58,89 +59,18 @@
 
     <Separator />
 
-<!-- Tabellen nebeneinander: Tisch und Sitze -->
-    <HBox fx:id="tableSeatHBox" spacing="10.0">
-        <!-- Tisch-Tabelle (links) -->
-        <StackPane HBox.hgrow="ALWAYS" style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5;">
-            <TableView fx:id="tableTable">
-                <columns>
-                	<TableColumn fx:id="colTableNumber" prefWidth="60.0" text="Tisch" />
-                	<TableColumn fx:id="colTableCategory" prefWidth="90.0" text="Kategorie" />
-                	<TableColumn fx:id="colTableDesc" prefWidth="180.0" text="Beschreibung" />
-                </columns>
-                <columnResizePolicy>
-                    <TableView fx:constant="CONSTRAINED_RESIZE_POLICY" />
-                </columnResizePolicy>
-            </TableView>
-        </StackPane>
+<!-- Halle, Bestuhlung und Standardpreis der gewählten Vorstellung (Name, Datum, Zeit, Beschreibung stehen in der Tabelle) -->
+    <Label fx:id="lblPresDetails" text="Vorstellung" />
+    <GridPane fx:id="presDetails" hgap="8.0" vgap="10.0">
+        <Label text="Halle:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
+        <ComboBox fx:id="cmbPresHall" promptText="– keine Halle –" prefWidth="300.0" GridPane.rowIndex="0" GridPane.columnIndex="1" />
 
-        <!-- Sitz-Tabelle (rechts) -->
-        <StackPane HBox.hgrow="ALWAYS" style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5;">
-            <TableView fx:id="seatTable">
-                <columns>
-                	<TableColumn fx:id="colSeatNumber" prefWidth="60.0" text="Sitz" />
-                	<TableColumn fx:id="colSeatComment" prefWidth="180.0" text="Kommentar" />
-                </columns>
-                <columnResizePolicy>
-                    <TableView fx:constant="CONSTRAINED_RESIZE_POLICY" />
-                </columnResizePolicy>
-            </TableView>
-        </StackPane>
-    </HBox>
+        <Label text="Bestuhlung:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
+        <ComboBox fx:id="cmbPresPlan" promptText="Keine Bestuhlung" prefWidth="300.0" GridPane.rowIndex="1" GridPane.columnIndex="1" />
 
-    <Separator />
-
-<!-- Sitzdetails (3-Spalten-Layout) -->
-    <Label text="Sitzdetails" />
-    <HBox spacing="20.0">
-        <!-- Spalte Links: Personendaten -->
-        <GridPane hgap="8.0" vgap="10.0" HBox.hgrow="ALWAYS">
-            <columnConstraints>
-                <ColumnConstraints halignment="LEFT" />
-                <ColumnConstraints hgrow="ALWAYS" />
-            </columnConstraints>
-
-            <Label text="Vorname:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
-            <TextField fx:id="txtFirstName" GridPane.rowIndex="0" GridPane.columnIndex="1" />
-
-            <Label text="Nachname:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-            <TextField fx:id="txtLastName" GridPane.rowIndex="1" GridPane.columnIndex="1" />
-
-            <Label text="E-Mail:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
-            <TextField fx:id="txtMail" GridPane.rowIndex="2" GridPane.columnIndex="1" />
-        </GridPane>
-
-        <!-- Spalte Mitte: Preis & Status -->
-        <GridPane hgap="8.0" vgap="10.0" HBox.hgrow="ALWAYS">
-            <columnConstraints>
-                <ColumnConstraints halignment="LEFT" />
-                <ColumnConstraints hgrow="ALWAYS" />
-            </columnConstraints>
-
-            <Label text="Preis (€):" GridPane.rowIndex="0" GridPane.columnIndex="0" />
-            <Spinner fx:id="spnDoublePrice" GridPane.rowIndex="0" GridPane.columnIndex="1" maxWidth="Infinity" />
-
-            <Label text="Zahlungsstatus:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-            <ComboBox fx:id="paymentComboBox" GridPane.rowIndex="1" GridPane.columnIndex="1" />
-
-            <Label text="Abgeholt:" GridPane.rowIndex="2" GridPane.columnIndex="0" />
-            <CheckBox fx:id="checkCollected" GridPane.rowIndex="2" GridPane.columnIndex="1" />
-        </GridPane>
-
-        <!-- Spalte Rechts: Zusätze & Kommentar -->
-        <GridPane hgap="8.0" vgap="10.0" HBox.hgrow="ALWAYS">
-            <columnConstraints>
-                <ColumnConstraints halignment="LEFT" />
-                <ColumnConstraints hgrow="ALWAYS" />
-            </columnConstraints>
-
-            <Label text="Rollstuhl:" GridPane.rowIndex="0" GridPane.columnIndex="0" />
-            <CheckBox fx:id="checkWheelchairAccessible" GridPane.rowIndex="0" GridPane.columnIndex="1" />
-
-            <Label text="Kommentar:" GridPane.rowIndex="1" GridPane.columnIndex="0" />
-            <TextField fx:id="txtComment" GridPane.rowIndex="1" GridPane.columnIndex="1" />
-        </GridPane>
-    </HBox>
+        <Label text="Standardpreis (€):" GridPane.rowIndex="2" GridPane.columnIndex="0" />
+        <Spinner fx:id="spnPresPrice" editable="true" GridPane.rowIndex="2" GridPane.columnIndex="1" />
+    </GridPane>
 
     <Region VBox.vgrow="ALWAYS" />
 

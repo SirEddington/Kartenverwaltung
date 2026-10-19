@@ -122,10 +122,13 @@ class HallObjectTextTest {
 
 	@Test
 	void manual_rotationIsNormalizedToZeroUpTo360() {
-		assertEquals(270, HallObjectText.normalizeRotation(-90), DELTA);
-		assertEquals(0, HallObjectText.normalizeRotation(360), DELTA);
-		assertEquals(90, HallObjectText.normalizeRotation(450), DELTA);
-		assertEquals(0, HallObjectText.normalizeRotation(0), DELTA);
+		// Die Rechnung selbst prüft RotationInputTest, hier nur, dass das Layout sie nutzt
+		HallObject object = object(Shape.RECTANGLE, 300, 100);
+		object.setTextAuto(false);
+		object.setTextRotation(-90);
+		assertEquals(270, HallObjectText.layout(object, 5, 1.2).rotation(), DELTA);
+		object.setTextRotation(450);
+		assertEquals(90, HallObjectText.layout(object, 5, 1.2).rotation(), DELTA);
 	}
 
 	@Test

@@ -11,7 +11,8 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Event {
@@ -21,7 +22,8 @@ public class Event {
 	private String description;
 	private boolean archived;
 
-	@JsonManagedReference("event-presentation")
+	// Den Elternverweis setzt setPresentations; keine @JsonManagedReference, denn Jackson 2.17 verträgt sie nicht mit
+	// @JsonSetter(nulls = AS_EMPTY) ("Should never try to reset delegate")
 	private List<Presentation> presentations = new ArrayList<>(); // get,set
 
 	// Konstuktoren -->
@@ -63,6 +65,7 @@ public class Event {
 		return presentations;
 	}
 
+	@JsonSetter(nulls = Nulls.AS_EMPTY) // "presentations": null in einer Datei lädt als leere Liste
 	public void setPresentations(List<Presentation> presentations) {
 		this.presentations = presentations;
 		if (presentations != null) {
@@ -135,40 +138,14 @@ public class Event {
 		return name != null ? name : "Unbenanntes Event";
 	}
 
+	/** Alle Buchungen aller Vorstellungen. */
 	@JsonIgnore
-	public List<Seat> getSeats() {
-		List<Seat> seats = new ArrayList<Seat>();
+	public List<Booking> getBookings() {
+		List<Booking> bookings = new ArrayList<Booking>();
 		for (Presentation presentation : presentations) {
-			seats.addAll(presentation.getSeats());
+			bookings.addAll(presentation.getBookings());
 		}
-		return seats;
-	}
-
-	@JsonIgnore
-	public List<Integer> getSeatNumbers() {
-		List<Integer> seatNumbers = new ArrayList<Integer>();
-		for (Presentation presentation : presentations) {
-			seatNumbers.addAll(presentation.getSeatNumbers());
-		}
-		return seatNumbers.stream().distinct().sorted().toList();
-	}
-
-	@JsonIgnore
-	public List<Table> getTables() {
-		List<Table> tables = new ArrayList<Table>();
-		for (Presentation presentation : presentations) {
-			tables.addAll(presentation.getTables());
-		}
-		return tables;
-	}
-
-	@JsonIgnore
-	public List<Integer> getTableNumbers() {
-		List<Integer> tableNumbers = new ArrayList<Integer>();
-		for (Presentation presentation : presentations) {
-			tableNumbers.addAll(presentation.getTableNumbers());
-		}
-		return tableNumbers.stream().distinct().sorted().toList();
+		return bookings;
 	}
 
 	@JsonIgnore

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<!-- Eigenschaften des im Plan markierten Tischs und Sitzes (Teil des Reiters "Bestuhlung") als aufklappbare Abschnitte;
+     Titel, Sichtbarkeit und Zustand setzt SelectionSections -->
+<VBox spacing="10.0" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="de.eltviller_carneval_verein.karten.ui.hall.TableSeatPanelController">
+
+    <TitledPane fx:id="tableSectionPane" styleClass="section-pane" animated="false">
+        <graphic>
+            <Label styleClass="subheader-label" />
+        </graphic>
+        <VBox fx:id="tableFields" spacing="8.0">
+            <Label text="Nummer:" />
+            <Spinner fx:id="tableNumberSpinner" prefWidth="120.0" />
+            <Label text="Beschreibung:" />
+            <TextField fx:id="tableDescField" />
+            <Label text="Kategorie:" />
+            <TextField fx:id="tableCategoryField" />
+            <Label text="Breite (cm):" />
+            <Spinner fx:id="tableWidthSpinner" prefWidth="120.0" />
+            <Label text="Höhe (cm):" />
+            <Spinner fx:id="tableHeightSpinner" prefWidth="120.0" />
+            <Label text="X (cm, linke obere Ecke):" />
+            <Spinner fx:id="tablePosXSpinner" prefWidth="120.0" />
+            <Label text="Y (cm, linke obere Ecke):" />
+            <Spinner fx:id="tablePosYSpinner" prefWidth="120.0" />
+            <Label text="Drehung (Grad, nur bei manueller Position):" wrapText="true" />
+            <Spinner fx:id="rotationSpinner" prefWidth="120.0" />
+            <Label fx:id="tablePositionLabel" />
+            <Button fx:id="btnResetTablePosition" text="Position zurücksetzen" styleClass="button-default" onAction="#handleResetTablePosition" />
+            <FlowPane hgap="10.0" vgap="8.0">
+                <Button fx:id="btnAddSeat" text="Sitz hinzufügen" styleClass="button-primary" onAction="#handleAddSeat" />
+                <Button fx:id="btnDeleteTable" text="Tisch löschen" styleClass="button-danger" onAction="#handleDeleteTable" />
+            </FlowPane>
+        </VBox>
+    </TitledPane>
+
+    <TitledPane fx:id="seatSectionPane" styleClass="section-pane" animated="false">
+        <graphic>
+            <Label styleClass="subheader-label" />
+        </graphic>
+        <VBox fx:id="seatFields" spacing="8.0">
+            <Label text="Nummer:" />
+            <Spinner fx:id="seatNumberSpinner" prefWidth="120.0" />
+            <CheckBox fx:id="wheelchairCheck" text="Rollstuhlplatz" />
+            <Label text="Breite (cm):" />
+            <Spinner fx:id="seatWidthSpinner" prefWidth="120.0" />
+            <Label text="Höhe (cm):" />
+            <Spinner fx:id="seatHeightSpinner" prefWidth="120.0" />
+            <Label text="X (cm, Mittelpunkt):" />
+            <Spinner fx:id="seatPosXSpinner" prefWidth="120.0" />
+            <Label text="Y (cm, Mittelpunkt):" />
+            <Spinner fx:id="seatPosYSpinner" prefWidth="120.0" />
+            <Label fx:id="seatPositionLabel" />
+            <FlowPane hgap="10.0" vgap="8.0">
+                <Button fx:id="btnResetSeatPosition" text="Position zurücksetzen" styleClass="button-default" onAction="#handleResetSeatPosition" />
+                <Button fx:id="btnDeleteSeat" text="Sitz löschen" styleClass="button-danger" onAction="#handleDeleteSeat" />
+            </FlowPane>
+        </VBox>
+    </TitledPane>
+</VBox>

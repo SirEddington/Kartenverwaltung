@@ -2,12 +2,12 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.List;
 
-import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.Booking;
 import javafx.stage.Window;
 
 /**
- * Der Sammelverkauf für die ausgewählten Sitze, gemeinsam für Kartentabelle und Saalansicht: erst nachfragen, wenn
- * belegte Sitze dabei sind, dann der {@link SeatDetailPopup} für die übrig gebliebenen Sitze.
+ * Der Sammelverkauf für die ausgewählten Buchungen, gemeinsam für Kartentabelle und Saalansicht: erst nachfragen, wenn
+ * belegte Plätze dabei sind, dann der {@link SeatDetailPopup} für die übrig gebliebenen.
  */
 final class SeatSelectionEditor {
 
@@ -20,31 +20,31 @@ final class SeatSelectionEditor {
 	}
 
 	/**
-	 * @param selected  die gewählten Sitze
+	 * @param selected  die gewählten Buchungen
 	 * @param owner     Fenster, über dem der Dialog erscheint
 	 * @param onApplied wird aufgerufen, nachdem der Dialog mit "Anwenden" geschlossen wurde
 	 * @return der geöffnete Dialog, {@code null} wenn nichts zu bearbeiten ist oder abgebrochen wurde
 	 */
-	static SeatDetailPopup edit(List<Seat> selected, Window owner, double screenX, double screenY, Runnable onApplied) {
+	static SeatDetailPopup edit(List<Booking> selected, Window owner, double screenX, double screenY, Runnable onApplied) {
 		if (selected.isEmpty()) {
-			return null; // Die Menüs gibt es nur für eine Auswahl; ohne Sitze gäbe es nichts zu zeigen
+			return null; // Die Menüs gibt es nur für eine Auswahl; ohne Buchungen gäbe es nichts zu zeigen
 		}
 
-		List<Seat> seats = selected;
+		List<Booking> bookings = selected;
 		SeatSelectionSplit split = SeatSelectionSplit.of(selected);
 		if (split.hasOccupied()) {
 			switch (OccupiedSeatsDialog.ask(split)) {
-			case FREE_ONLY -> seats = split.free();
+			case FREE_ONLY -> bookings = split.free();
 			case CANCEL -> {
 				return null;
 			}
 			case OVERWRITE -> {
-				// Alle gewählten Sitze bleiben in der Liste
+				// Alle gewählten Buchungen bleiben in der Liste
 			}
 			}
 		}
 
-		SeatDetailPopup popup = new SeatDetailPopup(seats, true, onApplied);
+		SeatDetailPopup popup = new SeatDetailPopup(bookings, true, onApplied);
 		popup.show(owner, screenX, screenY);
 		return popup;
 	}

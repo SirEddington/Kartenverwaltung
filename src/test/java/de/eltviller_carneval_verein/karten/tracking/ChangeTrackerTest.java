@@ -23,9 +23,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker.Snapshot;
 
 class ChangeTrackerTest {
@@ -49,12 +52,16 @@ class ChangeTrackerTest {
 		Presentation presentation = event.addPresentation("Prunksitzung");
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
-		presentation.addTable(1).addSeat(1).setPrice(1000);
+		SeatingPlan plan = new Hall().addSeatingPlan();
+		plan.addTable(plan.addRow()).addSeat(1);
+		BookingSync.switchPlan(presentation, plan);
+		presentation.getBookings().get(0).setPrice(1000);
 		return event;
 	}
 
-	private static Seat firstSeat(Event event) {
-		return event.getPresentations().get(0).getTables().get(0).getSeats().get(0);
+	/** Die Buchung von Tisch 1, Sitz 1 (tief im Event: Event → Vorstellung → Buchung). */
+	private static Booking firstSeat(Event event) {
+		return event.getPresentations().get(0).getBookings().get(0);
 	}
 
 	@Test

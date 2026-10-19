@@ -5,20 +5,17 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Presentation {
 	private final String id;
-	@JsonBackReference("event-presentation")
-	private Event parentEvent;
+	private Event parentEvent; // gesetzt von Event.setPresentations/addPresentation, wird nicht gespeichert
 
 	private String name;
 	private LocalDate date;
@@ -30,18 +27,21 @@ public class Presentation {
 	// referenzieren können, ohne dass Jackson sie beim Speichern mehrfach einbettet.
 	private String hallId;
 
-	// Standardwerte
-	private double defaultTableWidth;
-	private double defaultTableHeight;
-	private double defaultSeatWidth;
-	private double defaultSeatHeight;
+	// Bestuhlung der Halle, die diese Vorstellung nutzt (nur die ID, siehe hallId), und Standardpreis in Cent
+	private String seatingPlanId; // get,set
+	private int price; // get,set
 
 	// Kassenabgleich
 	private int actualCashAmount; // tatsächlicher Bar-Kasseninhalt in Cent
 	private String cashDifferenceComment; // Erklärung bei Kassen-Differenz
 
-	@JsonManagedReference("presentation-table")
-	private List<Table> tables = new ArrayList<>(); // get,set
+	// Ältere Dateien enthalten hier noch "tables" (Tische und Sitze mit Verkaufsdaten) und Standardmaße; dank
+	// ignoreUnknown werden sie beim Laden übergangen. Tische und Sitze gehören jetzt zur Bestuhlung der Halle.
+	// Den Elternverweis setzt setBookings (keine @JsonManagedReference, siehe Event.presentations)
+	private List<Booking> bookings = new ArrayList<>(); // get,set
+
+	/** Nur zur Laufzeit: die Bestuhlung der Vorstellung gibt es nicht (mehr) in der Halle. Wird nicht gespeichert. */
+	private boolean planMissing;
 
 	// Konstuktoren -->
 	public Presentation() {
@@ -96,47 +96,44 @@ public class Presentation {
 		this.description = description;
 	}
 
-	public List<Table> getTables() {
-		return tables;
+	public String getSeatingPlanId() {
+		return seatingPlanId;
 	}
 
-	public void setTables(List<Table> tables) {
-		this.tables = tables;
-		if (tables != null) {
-			tables.forEach(t -> t.setParent(this));
+	public void setSeatingPlanId(String seatingPlanId) {
+		this.seatingPlanId = seatingPlanId;
+	}
+
+	/** Standardpreis pro Karte in Cent. */
+	public int getPrice() {
+		return price;
+	}
+
+	/** Setzt nur das Feld (Jackson ruft es beim Laden); für Änderungen durch den Nutzer {@link #changePrice(int)}. */
+	public void setPrice(int price) {
+		this.price = price;
+	}
+
+	public List<Booking> getBookings() {
+		return bookings;
+	}
+
+	@JsonSetter(nulls = Nulls.AS_EMPTY) // "bookings": null in einer Datei lädt als leere Liste
+	public void setBookings(List<Booking> bookings) {
+		this.bookings = bookings;
+		if (bookings != null) {
+			bookings.forEach(b -> b.setParent(this));
 		}
 	}
 
-	public double getDefaultTableWidth() {
-		return defaultTableWidth;
+	@JsonIgnore
+	public boolean isPlanMissing() {
+		return planMissing;
 	}
 
-	public void setDefaultTableWidth(double defaultTableWidth) {
-		this.defaultTableWidth = defaultTableWidth;
-	}
-
-	public double getDefaultTableHeight() {
-		return defaultTableHeight;
-	}
-
-	public void setDefaultTableHeight(double defaultTableHeight) {
-		this.defaultTableHeight = defaultTableHeight;
-	}
-
-	public double getDefaultSeatWidth() {
-		return defaultSeatWidth;
-	}
-
-	public void setDefaultSeatWidth(double defaultSeatWidth) {
-		this.defaultSeatWidth = defaultSeatWidth;
-	}
-
-	public double getDefaultSeatHeight() {
-		return defaultSeatHeight;
-	}
-
-	public void setDefaultSeatHeight(double defaultSeatHeight) {
-		this.defaultSeatHeight = defaultSeatHeight;
+	@JsonIgnore
+	public void setPlanMissing(boolean planMissing) {
+		this.planMissing = planMissing;
 	}
 
 	public int getActualCashAmount() {
@@ -179,84 +176,37 @@ public class Presentation {
 		this.name = name;
 	}
 
-	public Table addTable() {
-		Table newTable = new Table();
-		newTable.setParent(this);
-		newTable.setTableNumber(createTableNumber());
-
-		// Maße initialisieren
-		newTable.setHeight(defaultTableHeight);
-		newTable.setWidth(defaultTableWidth);
-
-		tables.add(newTable);
-		return newTable;
-	}
-
-	public Table addTable(int tableNumber) {
-		Table newTable = new Table();
-		newTable.setParent(this);
-
-		if (!getTableNumbers().contains(tableNumber)) {
-			newTable.setTableNumber(tableNumber);
-		} else {
-			newTable.setTableNumber(createTableNumber());
+	public Booking addBooking() {
+		Booking newBooking = new Booking();
+		newBooking.setParent(this);
+		if (bookings == null) {
+			bookings = new ArrayList<>();
 		}
-
-		// Maße initialisieren
-		newTable.setHeight(defaultTableHeight);
-		newTable.setWidth(defaultTableWidth);
-
-		tables.add(newTable);
-		return newTable;
+		bookings.add(newBooking);
+		return newBooking;
 	}
 
-	private int createTableNumber() {
-		// 1. Alle aktuell vorhandenen Nummern einsammeln
-		Set<Integer> existingNumbers = tables.stream().map(Table::getTableNumber).collect(Collectors.toSet());
-
-		// 2. Ersten freien Namen finden
-		int i = 1;
-		while (existingNumbers.contains(i)) {
-			i++;
+	/**
+	 * Ändert den Standardpreis. Buchungen mit Daten ({@link Booking#hasData()}), die noch den Standardpreis
+	 * verwenden, behalten vorher den bisherigen Preis als Einzelpreis; leere Buchungen folgen dem neuen Preis.
+	 */
+	public void changePrice(int newPrice) {
+		if (newPrice == price) {
+			return;
 		}
-
-		return i;
-	}
-	
-	public boolean deleteTable(Table table) {
-		return tables.remove(table);
+		if (bookings != null) {
+			for (Booking booking : bookings) {
+				if (booking.hasData() && booking.getPrice() == null) {
+					booking.setPrice(price);
+				}
+			}
+		}
+		this.price = newPrice;
 	}
 
 	@Override
 	public String toString() {
 		return name != null ? name : "Unbenannte Vorstellung";
-	}
-
-	@JsonIgnore
-	public List<Seat> getSeats() {
-		List<Seat> seats = new ArrayList<>();
-		for (Table table : tables) {
-			seats.addAll(table.getSeats());
-		}
-		return seats;
-	}
-
-	@JsonIgnore
-	public List<Integer> getSeatNumbers() {
-		List<Integer> seatNumbers = new ArrayList<Integer>();
-		for (Table table : tables) {
-			seatNumbers.addAll(table.getSeatNumbers());
-		}
-		return seatNumbers.stream().distinct().sorted().toList();
-	}
-
-	@JsonIgnore
-	public List<Integer> getTableNumbers() {
-		List<Integer> tableNumbers = new ArrayList<Integer>();
-		for (Table table : tables) {
-			tableNumbers.add(table.getTableNumber());
-		}
-		return tableNumbers.stream().distinct().sorted().toList();
 	}
 
 	@Override

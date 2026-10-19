@@ -11,6 +11,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
@@ -119,7 +120,8 @@ public class TicketShellController {
 			state.eventProperty().set(selectedEvent);
 			state.presentationProperty().set(null);
 			if (selectedEvent != null) {
-				ChangeTracker.events().ensureTracked(selectedEvent);
+				// Buchungen mit den Bestuhlungen abgleichen, bevor das Event angezeigt wird (gilt nicht als Änderung)
+				BookingSyncService.prepare(selectedEvent);
 			}
 			// Das Neufüllen der Liste meldet der Inhalt nicht einzeln: setEvent unten setzt ihn auf "Alle Vorstellungen"
 			updatingPresentations = true;

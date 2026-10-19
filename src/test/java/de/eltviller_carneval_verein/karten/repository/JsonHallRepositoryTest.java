@@ -19,7 +19,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
+import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Shape;
+import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.model.TableRow;
 
 class JsonHallRepositoryTest {
 
@@ -64,6 +68,76 @@ class JsonHallRepositoryTest {
 		assertEquals(Shape.CIRCLE, reloadedStage.getShape());
 		assertEquals("#FF0000", reloadedStage.getColor());
 		assertSame(reloaded, reloadedStage.getParent(), "Die Rückreferenz des Hallenobjekts auf die Halle muss nach dem Laden gesetzt sein.");
+	}
+
+	@Test
+	void speichert_und_laedt_Bestuhlung(@TempDir File storageDir) {
+		JsonHallRepository repository = new JsonHallRepository(storageDir);
+		Hall hall = newHall("Stadthalle");
+		SeatingPlan plan = hall.addSeatingPlan();
+		plan.setDescription("Mit Mittelgang");
+		plan.setDefaultSeatWidth(40);
+		plan.setDefaultSeatHeight(30);
+		TableRow rowA = plan.addRow();
+		rowA.setLabel("A");
+		rowA.setAngle(12.5);
+		rowA.setTableRotation(90);
+		rowA.setTableGap(15);
+		rowA.setAisleWidth(60);
+		TableRow rowB = plan.addRow();
+		rowB.setLabel("B");
+		rowB.setAisleAfter(3);
+		Table tableA = plan.addTable(rowA);
+		tableA.setRotation(45);
+		tableA.addSeat();
+		tableA.addSeat();
+		Table tableB = plan.addTable(rowB);
+		tableB.addSeat();
+		tableB.addSeat();
+		repository.saveHall(hall);
+
+		Hall reloaded = new JsonHallRepository(storageDir).loadHalls().get(0);
+
+		assertEquals(1, reloaded.getSeatingPlans().size());
+		SeatingPlan reloadedPlan = reloaded.getSeatingPlans().get(0);
+		assertEquals(plan.getId(), reloadedPlan.getId());
+		assertEquals("Bestuhlung 1", reloadedPlan.getName());
+		assertEquals("Mit Mittelgang", reloadedPlan.getDescription());
+		assertEquals(40, reloadedPlan.getDefaultSeatWidth());
+		assertEquals(30, reloadedPlan.getDefaultSeatHeight());
+		assertSame(reloaded, reloadedPlan.getParent());
+		assertEquals(2, reloadedPlan.getRows().size());
+		TableRow reloadedA = reloadedPlan.getRows().get(0);
+		TableRow reloadedB = reloadedPlan.getRows().get(1);
+		assertEquals(rowA.getId(), reloadedA.getId());
+		assertEquals("A", reloadedA.getLabel());
+		assertEquals(12.5, reloadedA.getAngle());
+		assertEquals(90, reloadedA.getTableRotation());
+		assertEquals(15, reloadedA.getTableGap());
+		assertEquals(60, reloadedA.getAisleWidth());
+		assertNull(reloadedA.getAisleAfter());
+		assertEquals(3, reloadedB.getAisleAfter());
+		assertSame(reloadedPlan, reloadedA.getParent());
+		assertSame(reloadedPlan, reloadedB.getParent());
+		assertEquals(2, reloadedPlan.getTables().size());
+		Table reloadedTableA = reloadedPlan.getTables().get(0);
+		Table reloadedTableB = reloadedPlan.getTables().get(1);
+		assertEquals(tableA.getId(), reloadedTableA.getId());
+		assertEquals(reloadedA.getId(), reloadedTableA.getRowId());
+		assertEquals(reloadedB.getId(), reloadedTableB.getRowId());
+		assertEquals(45, reloadedTableA.getRotation());
+		assertSame(reloadedPlan, reloadedTableA.getPlan());
+		assertSame(reloadedPlan, reloadedTableB.getPlan());
+		assertEquals(2, reloadedTableA.getSeats().size());
+		for (Seat seat : reloadedTableA.getSeats()) {
+			assertSame(reloadedTableA, seat.getParent());
+			assertEquals(40, seat.getWidth());
+		}
+		for (Seat seat : reloadedTableB.getSeats()) {
+			assertSame(reloadedTableB, seat.getParent());
+		}
+		assertEquals("Tisch A1", reloadedTableA.getDisplayName());
+		assertTrue(new JsonHallRepository(storageDir).getAndClearLoadWarnings().isEmpty());
 	}
 
 	@Test

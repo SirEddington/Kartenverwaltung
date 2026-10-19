@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 
 class HallValidatorTest {
 
@@ -178,6 +179,22 @@ class HallValidatorTest {
 		assertTrue(result.getIssues().stream().allMatch(i -> i.code().equals("HOB-004")));
 		assertTrue(result.getIssues().stream().anyMatch(i -> i.message().startsWith("Position X von")));
 		assertTrue(result.getIssues().stream().anyMatch(i -> i.message().startsWith("Position Y von")));
+	}
+
+	@Test
+	void hallValidationIncludesEverySeatingPlan() {
+		Hall hall = validHall();
+		hall.addSeatingPlan().setName("Prunksitzung");
+		SeatingPlan unnamed = hall.addSeatingPlan();
+		unnamed.setName("");
+		unnamed.addRow().setAngle(999);
+
+		ValidationResult result = HallValidator.validate(hall);
+
+		assertEquals(2, result.getIssues().size(), result.getIssues().toString());
+		assertTrue(result.getIssues().stream().anyMatch(i -> i.code().equals("SPL-001")
+				&& i.message().equals("Der Name einer Bestuhlung in Halle Halle 1 darf nicht leer sein.")));
+		assertTrue(result.getIssues().stream().anyMatch(i -> i.code().equals("ROW-002")));
 	}
 
 	@Test

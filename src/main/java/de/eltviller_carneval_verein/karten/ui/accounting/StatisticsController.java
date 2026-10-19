@@ -26,9 +26,10 @@ import com.lowagie.text.pdf.PdfWriter;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.SnapshotParameters;
@@ -95,8 +96,9 @@ public class StatisticsController implements ContentController, Exportable {
 	}
 
 	/**
-	 * Auslastung/Einnahmen zählen nur bezahlte Sitze (dieselbe Definition wie
-	 * im Kassenabgleich: {@link PaymentStatus#isPaid()}), nicht nur reservierte.
+	 * Auslastung/Einnahmen zählen nur bezahlte Buchungen (dieselbe Definition wie
+	 * im Kassenabgleich: {@link PaymentStatus#isPaid()}), nicht nur reservierte;
+	 * Buchungen ohne Platz zählen mit.
 	 * Das Event-Datum wird aus der frühesten Vorstellung abgeleitet, da Event
 	 * selbst kein eigenes Datum hat.
 	 */
@@ -106,17 +108,17 @@ public class StatisticsController implements ContentController, Exportable {
 		int totalSeats = 0;
 		LocalDate earliest = null;
 
+		// Buchungen mit den Bestuhlungen abgleichen (keine Änderung des Nutzers), damit alle Sitze gezählt werden
+		BookingSyncService.prepare(event);
 		for (Presentation pres : event.getPresentations()) {
 			if (pres.getDate() != null && (earliest == null || pres.getDate().isBefore(earliest))) {
 				earliest = pres.getDate();
 			}
-			for (Seat seat : pres.getSeats()) {
-				totalSeats++;
-				PaymentStatus status = seat.getPaymentStatus();
-				if (status != null && status.isPaid()) {
-					revenueCents += seat.getPrice();
-					soldSeats++;
-				}
+			if (pres.getBookings() != null) {
+				BookingTotals totals = BookingTotals.of(pres.getBookings());
+				totalSeats += totals.total();
+				soldSeats += totals.paid();
+				revenueCents += totals.revenueCents();
 			}
 		}
 

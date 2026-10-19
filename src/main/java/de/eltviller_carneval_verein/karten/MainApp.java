@@ -9,8 +9,6 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
@@ -46,8 +44,8 @@ public class MainApp extends Application {
 	@SuppressWarnings("exports")
 	@Override
 	public void start(Stage stage) throws Exception {
-		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/YanoneKaffeesatz-Bold.ttf"), 12);
-		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/Yanone Kaffeesatz Regular.ttf"), 12);
+		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/YanoneKaffeesatzBold.otf"), 12);
+		Font.loadFont(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/fonts/YanoneKaffeesatzRegular.otf"), 12);
 
 		primaryStage = stage;
 		// Popups gehören zum Fenster, nicht zur Scene: Sonst bliebe z. B. ein offener Sitz-Dialog über der nächsten Ansicht stehen
@@ -156,7 +154,7 @@ public class MainApp extends Application {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/EventCreateView.fxml");
 	}
 
-	public static void showEventEditView(Event selectedEvent, Presentation selectedPres, Table selectedTable, Seat selectedSeat, boolean editable) {
+	public static void showEventEditView(Event selectedEvent, Presentation selectedPres, boolean editable) {
 		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/EventEditView.fxml";
 		try {
 
@@ -178,7 +176,7 @@ public class MainApp extends Application {
 			EventEditController controller = loader.getController();
 
 			// 4. Parameter direkt an den Controller übergeben
-			controller.initData(selectedEvent, selectedPres, selectedTable, selectedSeat, editable);
+			controller.initData(selectedEvent, selectedPres, editable);
 
 			// 5. Scene setzen
 			primaryStage.setScene(createScene(root));

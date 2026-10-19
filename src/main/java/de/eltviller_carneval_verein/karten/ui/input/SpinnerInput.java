@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.input;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
+import java.util.function.DoubleUnaryOperator;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -56,6 +57,15 @@ public final class SpinnerInput {
 
 	/** Für einen {@code Spinner<Double>} mit {@link SpinnerValueFactory.DoubleSpinnerValueFactory}. */
 	public static void install(Spinner<Double> spinner, String fieldName, Supplier<String> rowLabel) {
+		install(spinner, fieldName, rowLabel, DoubleUnaryOperator.identity());
+	}
+
+	/**
+	 * Wie {@link #install(Spinner, String, Supplier)}, eine gelesene Zahl wird vor der Übernahme mit {@code adjust}
+	 * umgerechnet (z. B. eine Drehung auf 0 bis unter 360, {@link RotationInput}). So erreicht nur der umgerechnete Wert
+	 * den Spinner und die Listener.
+	 */
+	public static void install(Spinner<Double> spinner, String fieldName, Supplier<String> rowLabel, DoubleUnaryOperator adjust) {
 		if (!(spinner.getValueFactory() instanceof SpinnerValueFactory.DoubleSpinnerValueFactory factory)) {
 			throw new IllegalArgumentException("Der Spinner braucht eine DoubleSpinnerValueFactory (zuerst setValueFactory aufrufen).");
 		}
@@ -64,7 +74,15 @@ public final class SpinnerInput {
 		factory.setMax(Double.MAX_VALUE);
 		install(spinner, factory, text -> {
 			OptionalDouble parsed = NumberInput.parseDecimal(text);
-			return parsed.isPresent() ? Optional.of(parsed.getAsDouble()) : Optional.empty();
+			if (parsed.isEmpty()) {
+				return Optional.empty();
+			}
+			double adjusted = adjust.applyAsDouble(parsed.getAsDouble());
+			// Bleibt der Wert durch die Umrechnung gleich (0 und getippt 360), schreibt der Spinner den Text nicht neu
+			if (adjusted != parsed.getAsDouble() && Double.valueOf(adjusted).equals(factory.getValue())) {
+				restoreText(spinner);
+			}
+			return Optional.of(adjusted);
 		}, NumberInput::format, fieldName, rowLabel);
 	}
 

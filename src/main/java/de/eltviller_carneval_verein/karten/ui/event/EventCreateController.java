@@ -1,15 +1,16 @@
 package de.eltviller_carneval_verein.karten.ui.event;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
@@ -27,40 +28,18 @@ public class EventCreateController {
 	@FXML
 	private ComboBox<Hall> cmbHall;
 	@FXML
-	private Spinner<Integer> spnTablePerPres;
-	@FXML
-	private Spinner<Double> spnDoubleTableWidth;
-	@FXML
-	private Spinner<Double> spnDoubleTableHeight;
-	@FXML
-	private Spinner<Integer> spnSeatsPerTable;
-	@FXML
-	private Spinner<Double> spnDoubleSeatWidth;
-	@FXML
-	private Spinner<Double> spnDoubleSeatHeight;
+	private ComboBox<SeatingPlan> cmbSeatingPlan;
 	@FXML
 	private Spinner<Double> spnDoublePrice;
 
 	@FXML
 	public void initialize() {
-		// Startwerte der Spinner; sie haben keine Grenzen, die Anzahlen im Dialog bekommen keine Regel
+		// Startwerte der Spinner; sie haben keine Grenzen, die Anzahl im Dialog bekommt keine Regel, den Standardpreis prüft der Validator (PRS-008)
 		spnPresCount.setValueFactory(SpinnerInput.integerFactory(3, 1));
-		spnTablePerPres.setValueFactory(SpinnerInput.integerFactory(40, 1));
-		spnDoubleTableWidth.setValueFactory(SpinnerInput.doubleFactory(70.0, 1.0));
-		spnDoubleTableHeight.setValueFactory(SpinnerInput.doubleFactory(300.0, 1.0));
-		spnSeatsPerTable.setValueFactory(SpinnerInput.integerFactory(12, 1));
-		spnDoubleSeatWidth.setValueFactory(SpinnerInput.doubleFactory(30.0, 1.0));
-		spnDoubleSeatHeight.setValueFactory(SpinnerInput.doubleFactory(30.0, 1.0));
 		spnDoublePrice.setValueFactory(SpinnerInput.doubleFactory(17.0, 1.0));
 		// Tippfehler in den Spinnern: alter Wert bleibt, Meldung in der Fußzeile
 		SpinnerInput.installInteger(spnPresCount, "Anzahl Vorstellungen", null);
-		SpinnerInput.installInteger(spnTablePerPres, "Tische je Vorstellung", null);
-		SpinnerInput.install(spnDoubleTableWidth, "Tischbreite", null);
-		SpinnerInput.install(spnDoubleTableHeight, "Tischhöhe", null);
-		SpinnerInput.installInteger(spnSeatsPerTable, "Sitze je Tisch", null);
-		SpinnerInput.install(spnDoubleSeatWidth, "Sitzbreite", null);
-		SpinnerInput.install(spnDoubleSeatHeight, "Sitzhöhe", null);
-		SpinnerInput.install(spnDoublePrice, "Preis", null);
+		SpinnerInput.install(spnDoublePrice, "Standardpreis", null);
 
 		// Optional: null = keine Halle (kann später je Vorstellung in den Event-Details zugeordnet werden)
 		cmbHall.getItems().add(null);
@@ -76,8 +55,36 @@ public class EventCreateController {
 				return null; // Bei fixer Auswahl nicht erforderlich
 			}
 		});
+
+		// Bestuhlung: nur die der gewählten Halle, vorausgewählt ist die erste
+		cmbSeatingPlan.setConverter(new StringConverter<SeatingPlan>() {
+			@Override
+			public String toString(SeatingPlan plan) {
+				return plan == null ? "" : EntityLabels.nameOrPlaceholder(plan.getName());
+			}
+
+			@Override
+			public SeatingPlan fromString(String string) {
+				return null; // Bei fixer Auswahl nicht erforderlich
+			}
+		});
+		cmbHall.valueProperty().addListener((obs, oldHall, newHall) -> showPlansOf(newHall));
+
 		// Gibt es genau eine Halle, ist sie vorausgewählt
 		cmbHall.getSelectionModel().select(cmbHall.getItems().size() == 2 ? 1 : 0);
+		showPlansOf(cmbHall.getValue());
+	}
+
+	/** Füllt die Bestuhlungsauswahl mit den Bestuhlungen der Halle und wählt die erste (ohne Halle: leer und gesperrt). */
+	private void showPlansOf(Hall hall) {
+		if (hall == null) {
+			cmbSeatingPlan.getItems().clear();
+		} else {
+			cmbSeatingPlan.getItems().setAll(hall.getSeatingPlans());
+		}
+		cmbSeatingPlan.setValue(cmbSeatingPlan.getItems().isEmpty() ? null : cmbSeatingPlan.getItems().get(0));
+		cmbSeatingPlan.setDisable(cmbSeatingPlan.getItems().isEmpty());
+		cmbSeatingPlan.setPromptText(hall == null ? "– keine Halle –" : "Keine Bestuhlung");
 	}
 
 	@FXML
@@ -105,25 +112,23 @@ public class EventCreateController {
 		Event event = new Event();
 		event.setName(name);
 
-		// Vorstellungen
+		Hall hall = cmbHall.getValue();
+		SeatingPlan plan = hall != null ? cmbSeatingPlan.getValue() : null;
+		int priceCents = MoneyFormat.toCents(spnDoublePrice.getValue());
+
+		// Vorstellungen: Halle, Bestuhlung und Standardpreis, dann je Sitz eine leere Buchung. Ohne Halle oder
+		// Bestuhlung entsteht die Vorstellung ohne Bestuhlung (die Prüfregeln warnen wie gewohnt)
 		for (int i = 0; i < spnPresCount.getValue(); i++) {
 			Presentation pres = event.addPresentation();
-			if (cmbHall.getValue() != null) {
-				pres.setHallId(cmbHall.getValue().getId());
+			if (hall != null) {
+				pres.setHallId(hall.getId());
 			}
-			pres.setDefaultTableHeight(spnDoubleTableHeight.getValue());
-			pres.setDefaultTableWidth(spnDoubleTableWidth.getValue());
-			pres.setDefaultSeatHeight(spnDoubleSeatHeight.getValue());
-			pres.setDefaultSeatWidth(spnDoubleSeatWidth.getValue());
-			// Tische
-			for (int j = 0; j < spnTablePerPres.getValue(); j++) {
-				Table table = pres.addTable();
-				// Sitzplätze
-				for (int k = 0; k < spnSeatsPerTable.getValue(); k++) {
-					Seat seat = table.addSeat();
-					seat.setPriceDouble(spnDoublePrice.getValue());
-				}
+			if (plan != null) {
+				pres.setSeatingPlanId(plan.getId());
 			}
+			// Neue Vorstellung ohne Buchungen mit Daten: Es gibt keinen Preis festzuhalten, daher setPrice statt changePrice
+			pres.setPrice(priceCents);
+			BookingSync.sync(pres, plan);
 		}
 		return event;
 	}

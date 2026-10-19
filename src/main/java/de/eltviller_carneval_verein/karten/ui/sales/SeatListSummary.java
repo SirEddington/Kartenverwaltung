@@ -4,16 +4,18 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.TreeSet;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
- * Beschreibt eine Auswahl von Sitzen in Worten: kurz für die Kopfzeile des Sitz-Dialogs ("Prunksitzung; Tisch 3;
- * Sitz 3-12; Tisch 4; Sitz 1, 3") und ausführlich mit einer Zeile je Sitz für den Tooltip. Gruppiert wird nach
- * Vorstellung (in der Reihenfolge des ersten Auftretens), Tisch und Sitznummer (jeweils aufsteigend).
+ * Beschreibt eine Auswahl von Buchungen in Worten: kurz für die Kopfzeile des Sitz-Dialogs ("Prunksitzung; Tisch A3;
+ * Sitz 3-12; Tisch A4; Sitz 1, 3") und ausführlich mit einer Zeile je Platz für den Tooltip. Gruppiert wird nach
+ * Vorstellung (in der Reihenfolge des ersten Auftretens), Tisch (Reihenbuchstabe und Nummer, so dass "Tisch A3" und
+ * "Tisch 3" getrennt bleiben) und Sitznummer, sortiert nach {@link Booking#PLACE_ORDER}. Buchungen ohne Platz stehen je
+ * Vorstellung vorn und einzeln als "Ohne Platz (bisher Tisch A3, Sitz 2)".
  */
 public final class SeatListSummary {
 
@@ -25,13 +27,21 @@ public final class SeatListSummary {
 	private SeatListSummary() {
 	}
 
+	/**
+	 * Die Plätze einer Vorstellung: Buchungen ohne Platz einzeln ("Ohne Platz (bisher Tisch A3, Sitz 2)", nie mit dem
+	 * echten Sitz zusammengefasst) und Tischbezeichnung ("Tisch A3") → Sitznummern.
+	 */
+	private record Places(List<String> unassigned, Map<String, TreeSet<Integer>> tables) {
+	}
+
 	/** Kurzfassung mit zusammengefassten Sitznummern; leer bei einer leeren Liste. */
-	public static String headline(List<Seat> seats) {
+	public static String headline(List<Booking> bookings) {
 		List<String> parts = new ArrayList<>();
-		group(seats).forEach((presentation, tables) -> {
+		group(bookings).forEach((presentation, places) -> {
 			parts.add(nameOf(presentation));
-			tables.forEach((tableNumber, seatNumbers) -> {
-				parts.add("Tisch " + tableNumber);
+			parts.addAll(places.unassigned());
+			places.tables().forEach((tableLabel, seatNumbers) -> {
+				parts.add(tableLabel);
 				parts.add("Sitz " + formatSeatNumbers(new ArrayList<>(seatNumbers)));
 			});
 		});
@@ -39,14 +49,17 @@ public final class SeatListSummary {
 	}
 
 	/**
-	 * Jeder Sitz in einer eigenen Zeile ("Prunksitzung, Tisch 3, Sitz 3"); leer bei einer leeren Liste. Bei sehr vielen
-	 * Sitzen (z. B. der ganzen Halle) endet die Liste nach {@value #MAX_TOOLTIP_LINES} Zeilen mit der Anzahl der übrigen:
+	 * Jeder Platz in einer eigenen Zeile ("Prunksitzung, Tisch A3, Sitz 3"); leer bei einer leeren Liste. Bei sehr vielen
+	 * Plätzen (z. B. der ganzen Halle) endet die Liste nach {@value #MAX_TOOLTIP_LINES} Zeilen mit der Anzahl der übrigen:
 	 * Ein Tooltip mit Hunderten Zeilen wäre höher als der Bildschirm.
 	 */
-	public static String tooltip(List<Seat> seats) {
+	public static String tooltip(List<Booking> bookings) {
 		List<String> lines = new ArrayList<>();
-		group(seats).forEach((presentation, tables) -> tables.forEach(
-				(tableNumber, seatNumbers) -> seatNumbers.forEach(seatNumber -> lines.add(nameOf(presentation) + ", Tisch " + tableNumber + ", Sitz " + seatNumber))));
+		group(bookings).forEach((presentation, places) -> {
+			places.unassigned().forEach(place -> lines.add(nameOf(presentation) + ", " + place));
+			places.tables().forEach(
+					(tableLabel, seatNumbers) -> seatNumbers.forEach(seatNumber -> lines.add(nameOf(presentation) + ", " + tableLabel + ", Sitz " + seatNumber)));
+		});
 		if (lines.size() > MAX_TOOLTIP_LINES) {
 			int remaining = lines.size() - MAX_TOOLTIP_LINES;
 			lines.subList(MAX_TOOLTIP_LINES, lines.size()).clear();
@@ -55,18 +68,33 @@ public final class SeatListSummary {
 		return String.join("\n", lines);
 	}
 
-	private static Map<Presentation, TreeMap<Integer, TreeSet<Integer>>> group(List<Seat> seats) {
-		Map<Presentation, TreeMap<Integer, TreeSet<Integer>>> grouped = new LinkedHashMap<>();
-		for (Seat seat : seats) {
-			Presentation presentation = seat.getParent().getParent();
-			grouped.computeIfAbsent(presentation, key -> new TreeMap<>()).computeIfAbsent(seat.getParent().getTableNumber(), key -> new TreeSet<>())
-					.add(seat.getSeatNumber());
+	/**
+	 * Vorstellung → Plätze ({@link Places}): zuerst die Buchungen ohne Platz, dann die Tische, jeweils in der Reihenfolge
+	 * der Plätze.
+	 */
+	private static Map<Presentation, Places> group(List<Booking> bookings) {
+		// Erst die Vorstellungen in der Reihenfolge des ersten Auftretens, dann innerhalb jeder nach Platz sortiert
+		Map<Presentation, List<Booking>> byPresentation = new LinkedHashMap<>();
+		for (Booking booking : bookings) {
+			byPresentation.computeIfAbsent(booking.getParent(), key -> new ArrayList<>()).add(booking);
 		}
+		Map<Presentation, Places> grouped = new LinkedHashMap<>();
+		byPresentation.forEach((presentation, list) -> {
+			Places places = new Places(new ArrayList<>(), new LinkedHashMap<>());
+			list.stream().sorted(Booking.PLACE_ORDER).forEach(booking -> {
+				if (booking.isUnassigned()) {
+					places.unassigned().add(EntityLabels.place(booking));
+				} else {
+					places.tables().computeIfAbsent(booking.getTableLabel(), key -> new TreeSet<>()).add(booking.getSeatNumber());
+				}
+			});
+			grouped.put(presentation, places);
+		});
 		return grouped;
 	}
 
 	private static String nameOf(Presentation presentation) {
-		return presentation.getName() == null ? "" : presentation.getName();
+		return presentation == null || presentation.getName() == null ? "" : presentation.getName();
 	}
 
 	/** Aufsteigende, doppelfreie Nummern als "1-3, 5". */

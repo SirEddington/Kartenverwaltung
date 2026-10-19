@@ -10,6 +10,8 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Hall {
@@ -24,6 +26,9 @@ public class Hall {
 
 	@JsonManagedReference("hall-hallObject")
 	private List<HallObject> hallObjects = new ArrayList<>();
+
+	// Den Elternverweis setzt setSeatingPlans (keine @JsonManagedReference, siehe Event.presentations)
+	private List<SeatingPlan> seatingPlans = new ArrayList<>();
 
 	// Konstuktoren -->
 	public Hall() {
@@ -81,6 +86,52 @@ public class Hall {
 		if (hallObjects != null) {
 			hallObjects.forEach(t -> t.setParent(this));
 		}
+	}
+
+	public List<SeatingPlan> getSeatingPlans() {
+		return seatingPlans;
+	}
+
+	@JsonSetter(nulls = Nulls.AS_EMPTY) // "seatingPlans": null in einer Datei lädt als leere Liste
+	public void setSeatingPlans(List<SeatingPlan> seatingPlans) {
+		this.seatingPlans = seatingPlans;
+		if (seatingPlans != null) {
+			seatingPlans.forEach(p -> p.setParent(this));
+		}
+	}
+
+	/** Legt eine neue, leere Bestuhlung mit dem ersten freien Namen "Bestuhlung n" an. */
+	public SeatingPlan addSeatingPlan() {
+		SeatingPlan newPlan = new SeatingPlan();
+		newPlan.setParent(this);
+		newPlan.setName(createSeatingPlanName());
+
+		seatingPlans.add(newPlan);
+		return newPlan;
+	}
+
+	/** Die Bestuhlung mit dieser Id; {@code null} bei unbekannter oder fehlender Id. */
+	public SeatingPlan findSeatingPlan(String id) {
+		if (id == null || seatingPlans == null) {
+			return null;
+		}
+		for (SeatingPlan plan : seatingPlans) {
+			if (id.equals(plan.getId())) {
+				return plan;
+			}
+		}
+		return null;
+	}
+
+	private String createSeatingPlanName() {
+		Set<String> existingNames = seatingPlans.stream().map(SeatingPlan::getName).collect(Collectors.toSet());
+
+		int i = 1;
+		while (existingNames.contains("Bestuhlung " + i)) {
+			i++;
+		}
+
+		return "Bestuhlung " + i;
 	}
 
 	public HallObject addHallObject() {
