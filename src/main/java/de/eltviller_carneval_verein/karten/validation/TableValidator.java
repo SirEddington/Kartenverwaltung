@@ -23,7 +23,7 @@ public final class TableValidator {
 		return new TableValidator(table).run();
 	}
 
-	// Wertebereiche, bisher die Grenzen der Spinner (Breite und Höhe 0 = noch ohne Maße, siehe Presentation.addTable)
+	// Wertebereiche, bisher die Grenzen der Spinner (Breite und Höhe 0 = noch ohne Maße, siehe SeatingPlan.addTable)
 	static final double MAX_SIZE = 1_000;
 	static final double MAX_POSITION = 10_000;
 

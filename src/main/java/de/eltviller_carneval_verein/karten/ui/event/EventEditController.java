@@ -4,20 +4,22 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 import org.controlsfx.control.table.TableFilter;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
-import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
@@ -25,10 +27,11 @@ import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
-import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -36,25 +39,30 @@ import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
-import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
-import javafx.scene.control.TextField;
 import javafx.scene.control.cell.CheckBoxTableCell;
-import javafx.scene.control.cell.ComboBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
 
+/**
+ * Bearbeitung von Events und Vorstellungen. Tische und Sitze stehen in den Bestuhlungen der Halle (Hallen-Editor); eine
+ * Vorstellung wählt Halle, Bestuhlung und Standardpreis. Der Wechsel der Bestuhlung läuft über
+ * {@link PlanSwitchDialog}, der Standardpreis einer bestehenden Vorstellung über {@link Presentation#changePrice(int)}.
+ */
 public class EventEditController {
 
 	private final JsonEventRepository repository = JsonEventRepository.getInstance();
+	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
 
 	private final ObservableList<Event> masterEventData = FXCollections.observableArrayList();
 	private FilteredList<Event> filteredEventData;
@@ -62,16 +70,8 @@ public class EventEditController {
 	private final ObservableList<Presentation> masterPresData = FXCollections.observableArrayList();
 	private FilteredList<Presentation> filteredPresData;
 
-	private final ObservableList<Table> masterTableData = FXCollections.observableArrayList();
-	private FilteredList<Table> filteredTableData;
-
-	private final ObservableList<Seat> masterSeatData = FXCollections.observableArrayList();
-	private FilteredList<Seat> filteredSeatData;
-
 	@FXML
 	private HBox eventPerfHBox;
-	@FXML
-	private HBox tableSeatHBox;
 
 	@FXML
 	private Button btnToggleEdit;
@@ -102,53 +102,30 @@ public class EventEditController {
 	@FXML
 	private TableColumn<Presentation, String> colPresDesc;
 	@FXML
-	private TableColumn<Presentation, Hall> colPresHall;
+	private TableColumn<Presentation, String> colPresHall;
+	@FXML
+	private TableColumn<Presentation, String> colPresPlan;
 
-	// Tisch Tabelle
+	// Halle, Bestuhlung und Standardpreis der gewählten Vorstellung
 	@FXML
-	private TableView<Table> tableTable;
+	private Label lblPresDetails;
 	@FXML
-	private TableColumn<Table, Integer> colTableNumber;
+	private GridPane presDetails;
 	@FXML
-	private TableColumn<Table, String> colTableDesc;
+	private ComboBox<Hall> cmbPresHall;
 	@FXML
-	private TableColumn<Table, String> colTableCategory;
-
-	// Sitz Tabelle
+	private ComboBox<SeatingPlan> cmbPresPlan;
 	@FXML
-	private TableView<Seat> seatTable;
-	@FXML
-	private TableColumn<Seat, Integer> colSeatNumber;
-	@FXML
-	private TableColumn<Seat, String> colSeatComment;
-
-	@FXML
-	private Spinner<Double> spnDoublePrice;
-	@FXML
-	private ComboBox<PaymentStatus> paymentComboBox;
-	@FXML
-	private CheckBox checkCollected;
-	@FXML
-	private CheckBox checkWheelchairAccessible;
-	@FXML
-	private TextField txtLastName;
-	@FXML
-	private TextField txtFirstName;
-	@FXML
-	private TextField txtMail;
-	@FXML
-	private TextField txtComment;
+	private Spinner<Double> spnPresPrice;
 
 	Event currentEvent;
 	Presentation currentPres;
-	Table currentTable;
-	Seat currentSeat;
 
 	private boolean editMode = false;
-	// true, solange die Detailfelder aus einem Sitz befüllt werden (siehe setupDetailWriteThrough)
+	// true, solange die Detailfelder aus einer Vorstellung befüllt werden: Dabei wird nichts ins Modell geschrieben
 	private boolean loadingDetails = false;
 
-	public void initData(Event event, Presentation presentation, Table table, Seat seat, boolean editable) {
+	public void initData(Event event, Presentation presentation, boolean editable) {
 
 		if (event != null) {
 			this.currentEvent = event;
@@ -159,18 +136,6 @@ public class EventEditController {
 				this.currentPres = presentation;
 				presTable.getSelectionModel().select(presentation);
 				presTable.scrollTo(presentation);
-
-				if (table != null && tableTable.getItems().contains(table)) {
-					this.currentTable = table;
-					tableTable.getSelectionModel().select(table);
-					tableTable.scrollTo(table);
-
-					if (seat != null && seatTable.getItems().contains(seat)) {
-						this.currentSeat = seat;
-						seatTable.getSelectionModel().select(seat);
-						seatTable.scrollTo(seat);
-					}
-				}
 			}
 		}
 
@@ -180,36 +145,9 @@ public class EventEditController {
 	@FXML
 	public void initialize() {
 		setupCollums();
-		setupDetailWriteThrough();
+		setupPresentationDetails();
 		setupContextMenu();
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
-	}
-
-	/**
-	 * Übernimmt Eingaben in den Sitzdetails sofort ins Modell (wie die Detail-Popups der Saalübersicht), damit die
-	 * Änderungserkennung sie sieht. Zuvor landeten sie erst beim Speichern im Sitz und gingen beim Wechsel auf einen
-	 * anderen Sitz lautlos verloren.
-	 */
-	private void setupDetailWriteThrough() {
-		txtFirstName.textProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setFirstName(newVal)));
-		txtLastName.textProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setLastName(newVal)));
-		txtMail.textProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setEMail(newVal)));
-		txtComment.textProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setComment(newVal)));
-		spnDoublePrice.valueProperty().addListener((obs, oldVal, newVal) -> {
-			if (newVal != null) {
-				writeToSeat(seat -> seat.setPriceDouble(newVal));
-			}
-		});
-		paymentComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setPaymentStatus(newVal)));
-		checkCollected.selectedProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setCollected(newVal)));
-		checkWheelchairAccessible.selectedProperty().addListener((obs, oldVal, newVal) -> writeToSeat(seat -> seat.setWheelchairAccessible(newVal)));
-	}
-
-	private void writeToSeat(Consumer<Seat> change) {
-		// Beim Befüllen der Felder aus einem Sitz darf nichts zurückgeschrieben werden
-		if (!loadingDetails && currentSeat != null) {
-			change.accept(currentSeat);
-		}
 	}
 
 	private void setupCollums() {
@@ -252,12 +190,88 @@ public class EventEditController {
 		colPresTime.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.time(), InputIssue.NOT_A_TIME, "Uhrzeit", EntityLabels::presentation));
 		colPresTime.setOnEditCommit(e -> e.getRowValue().setTime(e.getNewValue()));
 
-		// Halle der Vorstellung: Auswahl aus den angelegten Hallen (null = keine Halle zugeordnet)
-		ObservableList<Hall> hallChoices = FXCollections.observableArrayList();
-		hallChoices.add(null);
-		hallChoices.addAll(JsonHallRepository.getInstance().loadHalls());
-		colPresHall.setCellValueFactory(cell -> new SimpleObjectProperty<>(JsonHallRepository.getInstance().findById(cell.getValue().getHallId())));
-		colPresHall.setCellFactory(ComboBoxTableCell.forTableColumn(new StringConverter<Hall>() {
+		// Halle und Bestuhlung nur zur Anzeige: Gewählt werden sie unter der Tabelle (Wechsel mit Rückfrage)
+		colPresHall.setCellValueFactory(cell -> new SimpleStringProperty(EntityLabels.hallDisplayName(hallRepository.findById(cell.getValue().getHallId()))));
+		colPresHall.setEditable(false);
+		colPresPlan.setCellValueFactory(cell -> new SimpleStringProperty(planDisplayName(cell.getValue(), hallRepository.findById(cell.getValue().getHallId()))));
+		colPresPlan.setEditable(false);
+
+		// 2. FilteredList um Master-Daten legen
+		filteredEventData = new FilteredList<>(masterEventData, p -> true);
+		eventTable.setItems(filteredEventData);
+
+		filteredPresData = new FilteredList<>(masterPresData, p -> true);
+		presTable.setItems(filteredPresData);
+
+		// 3. Spaltenkopf-Filter von ControlsFX aktivieren
+		TableFilter.forTableView(eventTable).apply();
+		TableFilter.forTableView(presTable).apply();
+
+		// 4. Events in Tabelle laden
+		loadEvents();
+
+		// 5. Auswahl-Listener mit Null-Checks gegen NPEs
+		eventTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
+			refreshPresentationTable(selectedEvent, null);
+		});
+
+		presTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedPres) -> {
+			showPresentation(selectedPres);
+		});
+
+		// Initialen EditMode anwenden
+		applyEditMode();
+
+		// Tabellenhöhe automatisch ermitteln
+		setupAutoHeight(eventPerfHBox, eventTable, presTable, 10);
+	}
+
+	/**
+	 * Anzeige der Bestuhlung in der Tabelle: "–" ohne Bestuhlung, der Name (leer: "(ohne Name)") oder "nicht mehr
+	 * vorhanden", wenn die Bestuhlung oder ihre Halle gelöscht wurde (paketsichtbar für Tests).
+	 */
+	static String planDisplayName(Presentation presentation, Hall hall) {
+		if (presentation.getSeatingPlanId() == null) {
+			return "–";
+		}
+		SeatingPlan plan = modelPlan(presentation, hall);
+		return plan == null ? "nicht mehr vorhanden" : EntityLabels.nameOrPlaceholder(plan.getName());
+	}
+
+	/** Die Bestuhlung, auf die die Vorstellung im Modell zeigt; {@code null} ohne Halle, ohne oder mit unbekannter Id. */
+	static SeatingPlan modelPlan(Presentation presentation, Hall hall) {
+		return hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
+	}
+
+	/**
+	 * Die Rückfrage vor einem Hallenwechsel, wenn Buchungen mit Daten ({@link Booking#hasData()}) ihren Platz verlieren
+	 * würden; {@code null}, wenn es keine gibt (dann wird ohne Rückfrage gewechselt).
+	 */
+	static String hallChangeMessage(Presentation presentation) {
+		long withData = presentation.getBookings() == null ? 0 : presentation.getBookings().stream().filter(Booking::hasData).count();
+		if (withData == 0) {
+			return null;
+		}
+		String start = withData == 1 ? "1 Buchung mit Daten bleibt erhalten, hat" : withData + " Buchungen mit Daten bleiben erhalten, haben";
+		return start + " aber keinen Platz mehr, bis du eine Bestuhlung der neuen Halle wählst. Hallenwechsel fortsetzen?";
+	}
+
+	/**
+	 * Lädt die Events: Vor dem Verfolgen der Änderungen werden die Buchungen mit den Bestuhlungen abgeglichen (das
+	 * gilt nicht als Änderung, siehe {@link BookingSyncService}).
+	 */
+	private void loadEvents() {
+		masterEventData.setAll(repository.loadEvents());
+		for (Event event : masterEventData) {
+			BookingSyncService.prepare(event);
+		}
+	}
+
+	/** Halle, Bestuhlung und Standardpreis der gewählten Vorstellung: Auswahl der Hallen und Bestuhlungen, Spinner in Euro. */
+	private void setupPresentationDetails() {
+		cmbPresHall.getItems().add(null);
+		cmbPresHall.getItems().addAll(hallRepository.loadHalls());
+		cmbPresHall.setConverter(new StringConverter<Hall>() {
 			@Override
 			public String toString(Hall hall) {
 				return hall == null ? "– keine Halle –" : EntityLabels.nameOrPlaceholder(hall.getName());
@@ -267,96 +281,149 @@ public class EventEditController {
 			public Hall fromString(String string) {
 				return null; // Bei fixer Auswahl nicht erforderlich
 			}
-		}, hallChoices));
-		colPresHall.setOnEditCommit(e -> e.getRowValue().setHallId(e.getNewValue() == null ? null : e.getNewValue().getId()));
-
-		// --- Tisch Tabelle ---
-		colTableNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getTableNumber()).asObject());
-		colTableNumber.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.integer(), InputIssue.NOT_A_NUMBER, "Tischnummer", EntityLabels::table));
-		colTableNumber.setOnEditCommit(e -> e.getRowValue().setTableNumber(e.getNewValue()));
-
-		colTableCategory.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getCategory()));
-		colTableCategory.setCellFactory(TextFieldTableCell.forTableColumn());
-		colTableCategory.setOnEditCommit(e -> e.getRowValue().setCategory(e.getNewValue()));
-
-		colTableDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDesc()));
-		colTableDesc.setCellFactory(TextFieldTableCell.forTableColumn());
-		colTableDesc.setOnEditCommit(e -> e.getRowValue().setDesc(e.getNewValue()));
-
-		// --- Sitz Tabelle ---
-		colSeatNumber.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getSeatNumber()).asObject());
-		colSeatNumber.setCellFactory(ParsingTextFieldTableCell.forTableColumn(InputConverters.integer(), InputIssue.NOT_A_NUMBER, "Sitznummer", EntityLabels::seat));
-		colSeatNumber.setOnEditCommit(e -> e.getRowValue().setSeatNumber(e.getNewValue()));
-
-		colSeatComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getComment()));
-		colSeatComment.setCellFactory(TextFieldTableCell.forTableColumn());
-		colSeatComment.setOnEditCommit(e -> e.getRowValue().setComment(e.getNewValue()));
-
-		// --- Sitzdetails ---
-		paymentComboBox.getItems().setAll(PaymentStatus.values());
-		spnDoublePrice.setValueFactory(SpinnerInput.doubleFactory(0.0, 0.5));
-		SpinnerInput.install(spnDoublePrice, "Preis", () -> currentSeat == null ? null : EntityLabels.seat(currentSeat));
-		StringConverter<PaymentStatus> converter = new StringConverter<>() {
+		});
+		cmbPresPlan.setConverter(new StringConverter<SeatingPlan>() {
 			@Override
-			public String toString(PaymentStatus status) {
-				return status == null ? "" : status.getDisplayName();
+			public String toString(SeatingPlan plan) {
+				return plan == null ? "" : EntityLabels.nameOrPlaceholder(plan.getName());
 			}
 
 			@Override
-			public PaymentStatus fromString(String string) {
-				return null; // Bei fixer ComboBox-Auswahl nicht erforderlich
+			public SeatingPlan fromString(String string) {
+				return null; // Bei fixer Auswahl nicht erforderlich
 			}
-		};
-		paymentComboBox.setConverter(converter);
-
-		// 2. FilteredList um Master-Daten legen
-		filteredEventData = new FilteredList<>(masterEventData, p -> true);
-		eventTable.setItems(filteredEventData);
-
-		filteredPresData = new FilteredList<>(masterPresData, p -> true);
-		presTable.setItems(filteredPresData);
-
-		filteredTableData = new FilteredList<>(masterTableData, p -> true);
-		tableTable.setItems(filteredTableData);
-
-		filteredSeatData = new FilteredList<>(masterSeatData, p -> true);
-		seatTable.setItems(filteredSeatData);
-
-		// 3. Spaltenkopf-Filter von ControlsFX aktivieren
-		TableFilter.forTableView(eventTable).apply();
-		TableFilter.forTableView(presTable).apply();
-		TableFilter.forTableView(tableTable).apply();
-		TableFilter.forTableView(seatTable).apply();
-
-		// 4. Events in Tabelle laden
-		masterEventData.clear();
-		masterEventData.setAll(repository.loadEvents());
-		masterEventData.forEach(ChangeTracker.events()::ensureTracked);
-
-		// 5. Auswahl-Listener mit Null-Checks gegen NPEs
-		eventTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
-			refreshPresentationTable(selectedEvent, null);
 		});
+		spnPresPrice.setValueFactory(SpinnerInput.doubleFactory(0.0, 1.0));
+		SpinnerInput.install(spnPresPrice, "Standardpreis", () -> currentPres == null ? null : EntityLabels.presentation(currentPres));
 
-		presTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedPres) -> {
-			refreshTableTable(selectedPres, null);
+		cmbPresHall.valueProperty().addListener((obs, oldHall, newHall) -> {
+			if (!loadingDetails && currentPres != null) {
+				Presentation presentation = currentPres;
+				if (hallChangeMessage(presentation) == null) {
+					changeHall(presentation, newHall);
+				} else {
+					// Die Rückfrage erst nach der Auswahl zeigen, nicht mitten in der Benachrichtigung der ComboBox
+					Platform.runLater(() -> confirmHallChange(presentation, newHall));
+				}
+			}
 		});
-
-		tableTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedTable) -> {
-			refreshSeatTable(selectedTable, null);
+		cmbPresPlan.valueProperty().addListener((obs, oldPlan, newPlan) -> {
+			if (!loadingDetails && currentPres != null && newPlan != null) {
+				// Die Rückfrage erst nach der Auswahl zeigen, nicht mitten in der Benachrichtigung der ComboBox
+				Presentation presentation = currentPres;
+				Platform.runLater(() -> changePlan(presentation, newPlan));
+			}
 		});
-
-		seatTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedSeat) -> {
-			refreshSeatDetails(selectedSeat);
+		spnPresPrice.valueProperty().addListener((obs, oldVal, newVal) -> {
+			if (!loadingDetails && currentPres != null && newVal != null) {
+				// Buchungen mit Daten behalten dabei den bisherigen Preis (nie setPrice: das hielte nichts fest)
+				currentPres.changePrice(MoneyFormat.toCents(newVal));
+			}
 		});
+		showPresentation(null);
+	}
 
-		// Initialen EditMode anwenden
+	/**
+	 * Hallenwechsel mit Rückfrage ({@link #hallChangeMessage}), wenn Buchungen mit Daten ihren Platz verlieren; bei
+	 * "Abbrechen" kehrt die Auswahl zur Halle des Modells zurück, das Modell bleibt unverändert.
+	 */
+	private void confirmHallChange(Presentation presentation, Hall newHall) {
+		if (presentation != currentPres || cmbPresHall.getValue() != newHall) {
+			return; // die Auswahl hat sich inzwischen wieder geändert
+		}
+		String newHallId = newHall != null ? newHall.getId() : null;
+		if (Objects.equals(newHallId, presentation.getHallId())) {
+			return;
+		}
+		String message = hallChangeMessage(presentation);
+		if (message != null && !ConfirmDialog.confirm("Halle wechseln", message, "Wechseln", "button-primary", null)) {
+			loadingDetails = true;
+			try {
+				cmbPresHall.setValue(hallRepository.findById(presentation.getHallId()));
+			} finally {
+				loadingDetails = false;
+			}
+			return;
+		}
+		changeHall(presentation, newHall);
+	}
+
+	/**
+	 * Hallenwechsel: Die Bestuhlung wird zurückgesetzt. Der Abgleich ohne Bestuhlung ({@link BookingSync#sync}) entfernt
+	 * die leeren Buchungen, Buchungen mit Daten bleiben ohne Platz, bis eine Bestuhlung der neuen Halle gewählt ist.
+	 */
+	private void changeHall(Presentation presentation, Hall newHall) {
+		String newHallId = newHall != null ? newHall.getId() : null;
+		if (Objects.equals(newHallId, presentation.getHallId())) {
+			return;
+		}
+		presentation.setHallId(newHallId);
+		presentation.setSeatingPlanId(null);
+		BookingSync.sync(presentation, null);
+		loadingDetails = true;
+		try {
+			showPlansOf(newHall, null);
+		} finally {
+			loadingDetails = false;
+		}
+		presTable.refresh();
+	}
+
+	/**
+	 * Bestuhlungswechsel mit Rückfrage; bei "Abbrechen" kehrt die Auswahl zur Bestuhlung des Modells zurück (nicht zum
+	 * vorigen Wert der Auswahl, der nach schnellen Mehrfachwechseln schon ein nie bestätigter sein kann).
+	 */
+	private void changePlan(Presentation presentation, SeatingPlan newPlan) {
+		if (presentation != currentPres || cmbPresPlan.getValue() != newPlan) {
+			return; // die Auswahl hat sich inzwischen wieder geändert
+		}
+		if (!PlanSwitchDialog.confirm(presentation, newPlan)) {
+			loadingDetails = true;
+			try {
+				cmbPresPlan.setValue(modelPlan(presentation, hallRepository.findById(presentation.getHallId())));
+			} finally {
+				loadingDetails = false;
+			}
+		}
+		presTable.refresh();
+	}
+
+	/** Füllt die Bestuhlungsauswahl mit den Bestuhlungen der Halle; {@code select} ist die gewählte (oder {@code null}). */
+	private void showPlansOf(Hall hall, SeatingPlan select) {
+		if (hall == null) {
+			cmbPresPlan.getItems().clear();
+		} else {
+			cmbPresPlan.getItems().setAll(hall.getSeatingPlans());
+		}
+		cmbPresPlan.setValue(select);
+		if (currentPres != null && currentPres.getSeatingPlanId() != null && select == null) {
+			cmbPresPlan.setPromptText("Bestuhlung nicht mehr vorhanden");
+		} else {
+			cmbPresPlan.setPromptText(hall == null ? "– keine Halle –" : "Keine Bestuhlung");
+		}
+	}
+
+	/** Zeigt Halle, Bestuhlung und Standardpreis der Vorstellung (ohne Vorstellung: leer und gesperrt). */
+	private void showPresentation(Presentation presentation) {
+		currentPres = presentation;
+		loadingDetails = true;
+		try {
+			if (presentation == null) {
+				cmbPresHall.setValue(null);
+				showPlansOf(null, null);
+				spnPresPrice.getValueFactory().setValue(0.0);
+				lblPresDetails.setText("Vorstellung");
+			} else {
+				Hall hall = hallRepository.findById(presentation.getHallId());
+				cmbPresHall.setValue(hall);
+				showPlansOf(hall, modelPlan(presentation, hall));
+				spnPresPrice.getValueFactory().setValue(presentation.getPrice() / 100.0);
+				lblPresDetails.setText(EntityLabels.presentation(presentation));
+			}
+		} finally {
+			loadingDetails = false;
+		}
 		applyEditMode();
-
-		// Tabellenhöhe automatisch ermitteln
-		setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
-		setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
-
 	}
 
 	private void setupContextMenu() {
@@ -365,12 +432,6 @@ public class EventEditController {
 
 		// 2. Kontextmenü für Aufführungen/Vorstellungen
 		setupTableContextMenu(presTable, pres -> handleAddPres(), pres -> handleCopyPres(pres, null), pres -> handleDeletePres(pres));
-
-		// 3. Kontextmenü für Tisch-Tabelle
-		setupTableContextMenu(tableTable, table -> handleAddTable(), table -> handleCopyTable(table, null), table -> handleDeleteTable(table));
-
-		// 4. Kontextmenü für Sitzplatz-Tabelle
-		setupTableContextMenu(seatTable, seat -> handleAddSeat(), seat -> handleCopySeat(seat, null), seat -> handleDeleteSeat(seat));
 	}
 
 	private <T> void setupTableContextMenu(TableView<T> tableView, Consumer<T> onAdd, Consumer<T> onCopy, Consumer<T> onDelete) {
@@ -410,9 +471,9 @@ public class EventEditController {
 				// Im Anzeigemodus bleiben die Einträge sichtbar, sind aber nicht ausführbar
 				contextMenu.getItems().forEach(item -> item.setDisable(!editMode));
 				addItem.setVisible(true);
-				copyItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
-				separator.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
-				deleteItem.setVisible(data instanceof Event || data instanceof Presentation || data instanceof Table || data instanceof Seat);
+				copyItem.setVisible(data instanceof Event || data instanceof Presentation);
+				separator.setVisible(data instanceof Event || data instanceof Presentation);
+				deleteItem.setVisible(data instanceof Event || data instanceof Presentation);
 			});
 
 			// Menü nur binden, wenn die Zeile nicht leer ist
@@ -450,7 +511,7 @@ public class EventEditController {
 
 		repository.deleteEvent(event);
 
-		if (currentEvent.equals(event)) {
+		if (event.equals(currentEvent)) {
 			currentEvent = null;
 		}
 		refreshEventTable(currentEvent);
@@ -461,6 +522,10 @@ public class EventEditController {
 		refreshPresentationTable(currentEvent, newPres);
 	}
 
+	/**
+	 * Kopiert die Vorstellung als Vorlage: Name, Beschreibung, Datum, Zeit, Halle, Bestuhlung und Standardpreis. Die
+	 * Buchungen werden nicht kopiert, die Kopie bekommt je Sitz der Bestuhlung eine leere Buchung.
+	 */
 	private void handleCopyPres(Presentation presentation, Event parentEvent) {
 		Event event;
 		Presentation newPres;
@@ -475,15 +540,10 @@ public class EventEditController {
 		newPres.setDescription(presentation.getDescription());
 		newPres.setDate(presentation.getDate());
 		newPres.setTime(presentation.getTime());
-		newPres.setDefaultSeatHeight(presentation.getDefaultSeatHeight());
-		newPres.setDefaultSeatWidth(presentation.getDefaultSeatWidth());
-		newPres.setDefaultTableHeight(presentation.getDefaultTableHeight());
-		newPres.setDefaultTableWidth(presentation.getDefaultTableWidth());
 		newPres.setHallId(presentation.getHallId());
-
-		for (Table table : presentation.getTables()) {
-			handleCopyTable(table, newPres);
-		}
+		newPres.setSeatingPlanId(presentation.getSeatingPlanId());
+		newPres.setPrice(presentation.getPrice());
+		BookingSync.sync(newPres, modelPlan(newPres, hallRepository.findById(newPres.getHallId())));
 
 		refreshPresentationTable(event, newPres);
 
@@ -495,110 +555,15 @@ public class EventEditController {
 		}
 
 		presentation.getParent().deletePresentation(presentation);
-		if (currentPres.equals(presentation)) {
+		if (presentation.equals(currentPres)) {
 			currentPres = null;
 		}
 		refreshPresentationTable(currentEvent, currentPres);
 	}
 
-	private void handleAddTable() {
-		Table newTable = presTable.getSelectionModel().getSelectedItem().addTable();
-		refreshTableTable(currentPres, newTable);
-	}
-
-	private void handleCopyTable(Table table, Presentation parentPresentation) {
-		Table newTable;
-		Presentation parentPres;
-		if (parentPresentation != null) {
-			parentPres = parentPresentation;
-		} else {
-			parentPres = table.getParent();
-		}
-
-		newTable = parentPres.addTable(table.getTableNumber());
-
-		newTable.setCategory(table.getCategory());
-		newTable.setDesc(table.getDesc());
-		newTable.setWidth(table.getWidth());
-		newTable.setHeight(table.getHeight());
-
-		for (Seat seat : table.getSeats()) {
-			handleCopySeat(seat, newTable);
-		}
-
-		refreshTableTable(parentPres, newTable);
-
-	}
-
-	private void handleDeleteTable(Table table) {
-		if (!ConfirmDialog.confirmDelete("Tisch löschen", "Soll Tisch " + table.getTableNumber() + " wirklich unwiderruflich gelöscht werden?")) {
-			return;
-		}
-
-		table.getParent().deleteTable(table);
-		if (currentTable.equals(table)) {
-			currentTable = null;
-		}
-		refreshTableTable(currentPres, currentTable);
-	}
-
-	private void handleAddSeat() {
-		Seat newSeat = tableTable.getSelectionModel().getSelectedItem().addSeat();
-		refreshSeatTable(currentTable, newSeat);
-	}
-
-	private void handleCopySeat(Seat seat, Table parentTable) {
-		Table table;
-		Seat newSeat;
-
-		if (parentTable != null) {
-			table = parentTable;
-		} else {
-			table = seat.getParent();
-		}
-
-		newSeat = table.addSeat(seat.getSeatNumber());
-
-		newSeat.setPrice(seat.getPrice());
-		newSeat.setWheelchairAccessible(seat.isWheelchairAccessible());
-		newSeat.setHeight(seat.getHeight());
-		newSeat.setWidth(seat.getWidth());
-
-		refreshSeatTable(table, newSeat);
-
-	}
-
-	private void handleDeleteSeat(Seat seat) {
-		if (!ConfirmDialog.confirmDelete("Sitz löschen", "Soll Sitz " + seat.getSeatNumber() + " wirklich unwiderruflich gelöscht werden?")) {
-			return;
-		}
-
-		seat.getParent().deleteSeat(seat);
-		if (currentSeat.equals(seat)) {
-			currentSeat = null;
-		}
-		refreshSeatTable(currentTable, currentSeat);
-	}
-
-	private void loadDetailsOfSeat(Seat selectedSeat) {
-		// Felder initialisieren
-		clearDetails();
-
-		// Felder befüllen
-		spnDoublePrice.getValueFactory().setValue(selectedSeat.getPriceDouble());
-		paymentComboBox.getSelectionModel().select(selectedSeat.getPaymentStatus());
-		checkCollected.setSelected(selectedSeat.isCollected());
-		checkWheelchairAccessible.setSelected(selectedSeat.isWheelchairAccessible());
-		txtLastName.setText(selectedSeat.getLastName());
-		txtFirstName.setText(selectedSeat.getFirstName());
-		txtMail.setText(selectedSeat.getEMail());
-		txtComment.setText(selectedSeat.getComment());
-	}
-
 	private void refreshEventTable(Event selectEvent) {
 		currentEvent = selectEvent;
-		masterEventData.setAll(repository.loadEvents());
-		masterEventData.forEach(ChangeTracker.events()::ensureTracked);
+		loadEvents();
 		if (currentEvent != null && masterEventData.contains(selectEvent)) {
 			eventTable.getSelectionModel().select(selectEvent);
 		} else {
@@ -612,64 +577,12 @@ public class EventEditController {
 		if (currentEvent != null) {
 			masterPresData.setAll(currentEvent.getPresentations());
 		}
+		setupAutoHeight(eventPerfHBox, eventTable, presTable, 10);
 		if (selectPresentation != null && masterPresData.contains(selectPresentation)) {
 			presTable.getSelectionModel().select(selectPresentation);
 		} else {
-			refreshTableTable(selectPresentation, null);
+			showPresentation(null);
 		}
-	}
-
-	private void refreshTableTable(Presentation selectedPresentation, Table selectTable) {
-		currentPres = selectedPresentation;
-		masterTableData.clear();
-		if (currentPres != null) {
-			masterTableData.setAll(currentPres.getTables());
-		}
-		if (selectTable != null && masterTableData.contains(selectTable)) {
-			tableTable.getSelectionModel().select(selectTable);
-		} else {
-			refreshSeatTable(selectTable, null);
-		}
-	}
-
-	private void refreshSeatTable(Table selectedTable, Seat selectSeat) {
-		currentTable = selectedTable;
-		masterSeatData.clear();
-		if (currentTable != null) {
-			masterSeatData.setAll(currentTable.getSeats());
-		}
-		setupAutoHeight(eventPerfHBox, eventTable, presTable, 5);
-		setupAutoHeight(tableSeatHBox, tableTable, seatTable, 15);
-		if (selectSeat != null && masterSeatData.contains(selectSeat)) {
-			seatTable.getSelectionModel().select(selectSeat);
-		} else {
-			refreshSeatDetails(selectSeat);
-		}
-	}
-
-	private void refreshSeatDetails(Seat selectedSeat) {
-		currentSeat = selectedSeat;
-		loadingDetails = true;
-		try {
-			if (currentSeat != null) {
-				loadDetailsOfSeat(currentSeat);
-			} else {
-				clearDetails();
-			}
-		} finally {
-			loadingDetails = false;
-		}
-	}
-
-	private void clearDetails() {
-		spnDoublePrice.getValueFactory().setValue(0.0);
-		paymentComboBox.getSelectionModel().clearSelection();
-		checkCollected.setSelected(false);
-		checkWheelchairAccessible.setSelected(false);
-		txtLastName.clear();
-		txtFirstName.clear();
-		txtMail.clear();
-		txtComment.clear();
 	}
 
 	@FXML
@@ -687,8 +600,6 @@ public class EventEditController {
 	private void applyEditMode() {
 		eventTable.setEditable(editMode);
 		presTable.setEditable(editMode);
-		tableTable.setEditable(editMode);
-		seatTable.setEditable(editMode);
 
 		if (btnSave != null) {
 			btnSave.setDisable(!editMode);
@@ -697,14 +608,8 @@ public class EventEditController {
 			btnToggleEdit.setText(editMode ? "Anzeigen" : "Bearbeiten");
 		}
 
-		spnDoublePrice.setEditable(editMode);
-		paymentComboBox.setEditable(editMode);
-		checkCollected.setDisable(!editMode);
-		checkWheelchairAccessible.setDisable(!editMode);
-		txtLastName.setEditable(editMode);
-		txtFirstName.setEditable(editMode);
-		txtMail.setEditable(editMode);
-		txtComment.setEditable(editMode);
+		// Halle, Bestuhlung und Standardpreis: im Anzeigemodus und ohne gewählte Vorstellung nicht änderbar
+		presDetails.setDisable(!editMode || currentPres == null);
 	}
 
 	private void setupAutoHeight(HBox hbox, TableView<?> leftTable, TableView<?> rightTable, int maxRows) {
@@ -739,20 +644,8 @@ public class EventEditController {
 	@FXML
 	private void saveCurrentState() {
 		// Eine abgelehnte Spinner-Eingabe nicht mit "Gespeichert" überschreiben (der Klick auf Speichern löst die Ablehnung aus)
-		if (SpinnerInput.blockSaveIfScreenInputRejected(spnDoublePrice)) {
+		if (SpinnerInput.blockSaveIfScreenInputRejected(spnPresPrice)) {
 			return;
-		}
-		// Aktuellen Stand speichern
-		Seat selectedSeat = seatTable.getSelectionModel().getSelectedItem();
-		if (selectedSeat != null) {
-			selectedSeat.setFirstName(txtFirstName.getText());
-			selectedSeat.setLastName(txtLastName.getText());
-			selectedSeat.setEMail(txtMail.getText());
-			selectedSeat.setComment(txtComment.getText());
-			selectedSeat.setPriceDouble(spnDoublePrice.getValue());
-			selectedSeat.setPaymentStatus(paymentComboBox.getSelectionModel().getSelectedItem());
-			selectedSeat.setCollected(checkCollected.isSelected());
-			selectedSeat.setWheelchairAccessible(checkWheelchairAccessible.isSelected());
 		}
 		// Alle geänderten Events speichern, nicht nur das gewählte: "Speichern *" zeigt Änderungen an allen Events
 		// dieses Screens an und müsste sonst nach dem Speichern stehen bleiben

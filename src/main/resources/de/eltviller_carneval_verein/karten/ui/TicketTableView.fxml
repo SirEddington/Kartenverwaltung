@@ -6,22 +6,29 @@
 <?import org.controlsfx.control.CheckComboBox?>
 
 
-<VBox spacing="15.0" prefWidth="900.0" prefHeight="600.0" 
-	xmlns="http://javafx.com/javafx/17" 
-    xmlns:fx="http://javafx.com/fxml/1" 
+<VBox spacing="15.0" prefWidth="900.0" prefHeight="600.0"
+	xmlns="http://javafx.com/javafx/17"
+    xmlns:fx="http://javafx.com/fxml/1"
 	fx:controller="de.eltviller_carneval_verein.karten.ui.sales.TicketTableController">
     <padding>
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
 
-    <!-- Mittlerer Bereich: Sitzplatz-Tabelle -->
+    <!-- Buchungen ohne Platz (nach einem Bestuhlungswechsel): nur sichtbar, wenn es welche gibt -->
+    <HBox fx:id="unassignedBar" spacing="10.0" alignment="CENTER_LEFT" visible="false" managed="false">
+        <Label fx:id="lblUnassigned" />
+        <Button fx:id="btnAssign" styleClass="button-secondary" text="Platz zuweisen…" onAction="#handleAssign" />
+    </HBox>
+
+    <!-- Mittlerer Bereich: Buchungs-Tabelle -->
     	<StackPane VBox.vgrow="ALWAYS">
         	<TableView fx:id="seatTable" BorderPane.alignment="CENTER">
             	<columns>
-                	<TableColumn fx:id="colPresentation" prefWidth="150.0" text="Vorstellung" />
-                	<TableColumn fx:id="colTableNumber" prefWidth="50.0" text="Tisch" />
+                	<TableColumn fx:id="colPresentation" prefWidth="120.0" text="Vorstellung" />
+                	<!-- breit genug für "Ohne Platz (bisher A3)" -->
+                	<TableColumn fx:id="colTable" prefWidth="120.0" text="Tisch" />
                 	<TableColumn fx:id="colCategory" prefWidth="100.0" text="Kategorie" />
-                	<TableColumn fx:id="colSeatNumber" prefWidth="50.0" text="Platz" />
+                	<TableColumn fx:id="colSeatNumber" prefWidth="50.0" text="Sitz" />
                 	<TableColumn fx:id="colLastName" prefWidth="120.0" text="Nachname" />
                 	<TableColumn fx:id="colFirstName" prefWidth="120.0" text="Vorname" />
                 	<TableColumn fx:id="colReserved" prefWidth="70.0" text="Reserviert" />

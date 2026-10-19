@@ -15,6 +15,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
@@ -124,7 +125,8 @@ public class AccountingShellController {
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
 			currentEvent = selectedEvent;
 			if (currentEvent != null) {
-				ChangeTracker.events().ensureTracked(currentEvent);
+				// Buchungen mit den Bestuhlungen abgleichen, bevor das Event angezeigt wird (gilt nicht als Änderung)
+				BookingSyncService.prepare(currentEvent);
 			}
 
 			List<Presentation> presentationItems = new ArrayList<>();

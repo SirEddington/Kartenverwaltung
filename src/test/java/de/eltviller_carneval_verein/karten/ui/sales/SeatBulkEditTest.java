@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -9,20 +10,21 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
-import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.model.Presentation;
 
 class SeatBulkEditTest {
 
-	private final Table table = new Event().addPresentation("Prunksitzung").addTable(1);
+	private final Presentation presentation = new Event().addPresentation("Prunksitzung");
+	private final TestBookings bookings = new TestBookings();
 
-	private Seat seat(int number, String lastName, int priceCents) {
-		Seat seat = table.addSeat(number);
-		seat.setLastName(lastName);
-		seat.setPrice(priceCents);
-		return seat;
+	private Booking seat(int number, String lastName, int priceCents) {
+		Booking booking = bookings.booking(presentation, 1, number);
+		booking.setLastName(lastName);
+		booking.setPrice(priceCents);
+		return booking;
 	}
 
 	// --- gemeinsamer Wert ---
@@ -50,12 +52,21 @@ class SeatBulkEditTest {
 		assertEquals(Optional.of(""), edit.lastName().common());
 	}
 
+	@Test
+	void commonPriceIsTheEffectivePrice() {
+		presentation.setPrice(2500);
+		Booking standard = bookings.booking(presentation, 1, 1);
+		Booking sameAsStandard = seat(2, "Meier", 2500);
+
+		assertEquals(Optional.of(2500), new SeatBulkEdit(List.of(standard, sameAsStandard)).price().common());
+	}
+
 	// --- Änderungen übernehmen ---
 
 	@Test
 	void appliesAChangedFieldToEverySeat() {
-		Seat first = seat(1, "Meier", 1000);
-		Seat second = seat(2, "Schulz", 1500);
+		Booking first = seat(1, "Meier", 1000);
+		Booking second = seat(2, "Schulz", 1500);
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
 
 		edit.lastName().change("Müller");
@@ -67,8 +78,8 @@ class SeatBulkEditTest {
 
 	@Test
 	void leavesUntouchedFieldsOfEachSeatAlone() {
-		Seat first = seat(1, "Meier", 1000);
-		Seat second = seat(2, "Schulz", 1500);
+		Booking first = seat(1, "Meier", 1000);
+		Booking second = seat(2, "Schulz", 1500);
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
 
 		edit.paymentStatus().change(PaymentStatus.CASH);
@@ -78,14 +89,60 @@ class SeatBulkEditTest {
 		assertEquals(PaymentStatus.CASH, second.getPaymentStatus());
 		assertEquals("Meier", first.getLastName());
 		assertEquals("Schulz", second.getLastName());
-		assertEquals(1000, first.getPrice());
-		assertEquals(1500, second.getPrice());
+		assertEquals(1000, first.getEffectivePrice());
+		assertEquals(1500, second.getEffectivePrice());
+	}
+
+	@Test
+	void aDeviatingSinglePriceSurvivesEditingOtherFieldsOfSeveralBookings() {
+		presentation.setPrice(2500);
+		Booking deviating = bookings.booking(presentation, 1, 1);
+		deviating.setPrice(1800);
+		Booking standard = bookings.booking(presentation, 1, 2);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(deviating, standard));
+
+		edit.lastName().change("Meier");
+		edit.paymentStatus().change(PaymentStatus.CASH);
+		edit.apply();
+
+		assertEquals(Integer.valueOf(1800), deviating.getPrice());
+		assertNull(standard.getPrice());
+		assertEquals(2500, standard.getEffectivePrice());
+	}
+
+	@Test
+	void settingTheStandardPriceStoresNoSinglePrice() {
+		presentation.setPrice(2500);
+		Booking first = seat(1, "Meier", 1800);
+		Booking second = seat(2, "Schulz", 2000);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
+
+		edit.price().change(2500);
+		edit.apply();
+
+		assertNull(first.getPrice());
+		assertNull(second.getPrice());
+		assertEquals(2500, first.getEffectivePrice());
+	}
+
+	@Test
+	void settingAnotherPriceStoresItAsSinglePrice() {
+		presentation.setPrice(2500);
+		Booking first = bookings.booking(presentation, 1, 1);
+		Booking second = bookings.booking(presentation, 1, 2);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
+
+		edit.price().change(1200);
+		edit.apply();
+
+		assertEquals(Integer.valueOf(1200), first.getPrice());
+		assertEquals(Integer.valueOf(1200), second.getPrice());
 	}
 
 	@Test
 	void anEmptyTextFieldOverDifferingValuesChangesNothing() {
-		Seat first = seat(1, "Meier", 1000);
-		Seat second = seat(2, "Schulz", 1500);
+		Booking first = seat(1, "Meier", 1000);
+		Booking second = seat(2, "Schulz", 1500);
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
 
 		edit.lastName().change("");
@@ -98,8 +155,8 @@ class SeatBulkEditTest {
 
 	@Test
 	void clearingAFieldAllSeatsShareDoesChangeIt() {
-		Seat first = seat(1, "Meier", 1000);
-		Seat second = seat(2, "Meier", 1000);
+		Booking first = seat(1, "Meier", 1000);
+		Booking second = seat(2, "Meier", 1000);
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
 
 		edit.lastName().change("");
@@ -122,8 +179,8 @@ class SeatBulkEditTest {
 
 	@Test
 	void nullMeansNoInputAndWithdrawsEarlierInput() {
-		Seat first = seat(1, "Meier", 1000);
-		Seat second = seat(2, "Schulz", 1500);
+		Booking first = seat(1, "Meier", 1000);
+		Booking second = seat(2, "Schulz", 1500);
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
 
 		edit.price().change(2000);
@@ -131,33 +188,31 @@ class SeatBulkEditTest {
 		edit.apply();
 
 		assertFalse(edit.hasChanges());
-		assertEquals(1000, first.getPrice());
-		assertEquals(1500, second.getPrice());
+		assertEquals(1000, first.getEffectivePrice());
+		assertEquals(1500, second.getEffectivePrice());
 	}
 
 	@Test
-	void appliesCheckboxesAndComment() {
-		Seat first = seat(1, "Meier", 1000);
-		Seat second = seat(2, "Schulz", 1500);
+	void appliesCheckboxAndComment() {
+		Booking first = seat(1, "Meier", 1000);
+		Booking second = seat(2, "Schulz", 1500);
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
 
 		edit.collected().change(true);
-		edit.wheelchairAccessible().change(true);
 		edit.firstName().change("Anna");
 		edit.comment().change("Familie");
 		edit.apply();
 
 		assertTrue(first.isCollected() && second.isCollected());
-		assertTrue(first.isWheelchairAccessible() && second.isWheelchairAccessible());
 		assertEquals("Anna", first.getFirstName());
 		assertEquals("Familie", second.getComment());
 	}
 
 	@Test
 	void unknownCheckboxStateIsNotApplied() {
-		Seat first = seat(1, "Meier", 1000);
+		Booking first = seat(1, "Meier", 1000);
 		first.setCollected(true);
-		Seat second = seat(2, "Schulz", 1500);
+		Booking second = seat(2, "Schulz", 1500);
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
 
 		assertEquals(Optional.empty(), edit.collected().common());
@@ -175,6 +230,14 @@ class SeatBulkEditTest {
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(seat(1, "A", 1000), seat(2, "B", 1550), seat(3, "C", 0)));
 
 		assertEquals(2550, edit.totalCents());
+	}
+
+	@Test
+	void totalCountsTheStandardPriceForBookingsWithoutSinglePrice() {
+		presentation.setPrice(2500);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(bookings.booking(presentation, 1, 1), seat(2, "B", 1000)));
+
+		assertEquals(3500, edit.totalCents());
 	}
 
 	@Test
@@ -198,7 +261,7 @@ class SeatBulkEditTest {
 
 	@Test
 	void totalDoesNotOverflowForManySeats() {
-		Seat[] seats = new Seat[3];
+		Booking[] seats = new Booking[3];
 		for (int index = 0; index < seats.length; index++) {
 			seats[index] = seat(index + 1, "X", Integer.MAX_VALUE);
 		}
@@ -208,8 +271,8 @@ class SeatBulkEditTest {
 
 	@Test
 	void seatsAreExposedUnchanged() {
-		Seat only = seat(1, "Meier", 1000);
+		Booking only = seat(1, "Meier", 1000);
 
-		assertEquals(List.of(only), new SeatBulkEdit(List.of(only)).seats());
+		assertEquals(List.of(only), new SeatBulkEdit(List.of(only)).bookings());
 	}
 }

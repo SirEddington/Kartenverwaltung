@@ -20,9 +20,12 @@ import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
-import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker.Snapshot;
 
@@ -46,14 +49,19 @@ class StateRestorerTest {
 		presentation.setDate(LocalDate.of(2027, 2, 12));
 		presentation.setTime(LocalTime.of(19, 11));
 		presentation.setHallId("halle-1");
-		var table = presentation.addTable(1);
-		table.addSeat(1).setPrice(1000);
-		table.addSeat(2).setPrice(1200);
+		SeatingPlan plan = new Hall().addSeatingPlan();
+		Table table = plan.addTable(plan.addRow());
+		table.addSeat(1);
+		table.addSeat(2);
+		BookingSync.switchPlan(presentation, plan);
+		presentation.getBookings().get(0).setPrice(1000);
+		presentation.getBookings().get(1).setPrice(1200);
 		return event;
 	}
 
-	private static Seat firstSeat(Event event) {
-		return event.getPresentations().get(0).getTables().get(0).getSeats().get(0);
+	/** Die Buchung von Tisch 1, Sitz 1. */
+	private static Booking firstSeat(Event event) {
+		return event.getPresentations().get(0).getBookings().get(0);
 	}
 
 	@Test
@@ -69,7 +77,7 @@ class StateRestorerTest {
 
 		assertNotSame(event, restored);
 		assertEquals(event, restored, "gleiche ID");
-		assertEquals(1000, firstSeat(restored).getPrice());
+		assertEquals(1000, firstSeat(restored).getEffectivePrice());
 		assertEquals(null, firstSeat(restored).getLastName());
 		assertFalse(tracker.isDirty(restored));
 		assertFalse(tracker.anyDirty());
@@ -134,7 +142,7 @@ class StateRestorerTest {
 
 		Event restored = restorer.restore(event, step1);
 
-		assertEquals(1500, firstSeat(restored).getPrice());
+		assertEquals(1500, firstSeat(restored).getEffectivePrice());
 		assertTrue(tracker.isDirty(restored), "Zustand vor dem Speichern weicht vom gespeicherten Stand ab");
 		assertEquals(saved, tracker.baseline(restored));
 		assertEquals(step1, tracker.last(restored));

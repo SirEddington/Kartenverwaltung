@@ -7,9 +7,11 @@ import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.model.TextAlignV;
+import de.eltviller_carneval_verein.karten.ui.input.RotationInput;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
@@ -18,12 +20,14 @@ import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
 import javafx.scene.Group;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ColorPicker;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Spinner;
-import javafx.scene.control.SpinnerValueFactory;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TextField;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
@@ -42,6 +46,12 @@ import javafx.util.StringConverter;
  * per Ziehen verschieben und im Seitenpanel (Name, Beschreibung, Maße, Form,
  * Farbe) anpassen. Koordinaten und Maße sind dieselben Einheiten wie in der
  * Saalübersicht des Kartenverkaufs.
+ *
+ * <p>
+ * Über den Hallenobjekten liegt die Zeichnung der gewählten Bestuhlung
+ * ({@link SeatingPlanController}, Reiter "Bestuhlung"). Angefasst und gezogen
+ * wird nur, was zum aktiven Reiter gehört; die andere Ebene ist blasser und
+ * mausdurchlässig.
  */
 public class HallPlanController {
 
@@ -52,6 +62,8 @@ public class HallPlanController {
 	private static final double FALLBACK_OBJECT_HEIGHT = 60;
 	private static final Color DEFAULT_FILL = Color.LIGHTGRAY;
 	private static final Color SELECTION_STROKE = Color.DODGERBLUE;
+	// Deckkraft der Ebene, die nicht zum aktiven Reiter gehört
+	private static final double INACTIVE_LAYER_OPACITY = 0.45;
 
 	private Hall hall;
 	private HallObject selectedObject;
@@ -107,6 +119,13 @@ public class HallPlanController {
 	private ComboBox<TextAlignV> textAlignVCombo;
 	@FXML
 	private Spinner<Double> textRotationSpinner;
+	@FXML
+	private TabPane sideTabs;
+	@FXML
+	private Tab seatingTab;
+	// Vom FXMLLoader aus fx:id="seatingPanel" des fx:include injiziert (Name + "Controller")
+	@FXML
+	private SeatingPlanController seatingPanelController;
 
 	@FXML
 	public void initialize() {
@@ -120,6 +139,8 @@ public class HallPlanController {
 		viewportPane.setOnMouseDragged(this::handleDrag);
 		viewportPane.widthProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
 		viewportPane.heightProperty().addListener((obs, oldVal, newVal) -> fitIfPending());
+		// Der Reiterwechsel entscheidet, welche Ebene Maus-Ereignisse bekommt
+		sideTabs.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> renderHall());
 
 		setupPanel();
 		updatePanel();
@@ -131,33 +152,8 @@ public class HallPlanController {
 		widthSpinner.setValueFactory(SpinnerInput.doubleFactory(FALLBACK_OBJECT_WIDTH, 5));
 		heightSpinner.setValueFactory(SpinnerInput.doubleFactory(FALLBACK_OBJECT_HEIGHT, 5));
 		textSizeSpinner.setValueFactory(SpinnerInput.doubleFactory(20.0, 1));
-		// Die Drehung läuft im Kreis von 0 bis unter 360: Die Pfeiltasten gehen von 345 auf 0 und von 0 auf 345. Getippte Werte
-		// außerhalb davon werden auf den Kreis gebracht (360 = 0, 361 = 1, -90 = 270). Der Standard-Umlauf von JavaFX würde bei
-		// 0 nach unten auf 360 springen
-		SpinnerValueFactory.DoubleSpinnerValueFactory rotationFactory = new SpinnerValueFactory.DoubleSpinnerValueFactory(-Double.MAX_VALUE,
-				Double.MAX_VALUE, 0.0, 15) {
-			@Override
-			public void decrement(int steps) {
-				turn(-steps);
-			}
-
-			@Override
-			public void increment(int steps) {
-				turn(steps);
-			}
-
-			private void turn(int steps) {
-				double next = ((getValue() == null ? 0.0 : getValue()) + steps * getAmountToStepBy()) % 360.0;
-				// Auf vier Stellen gerundet, damit sich keine Rechenreste (14.990000000000009) anhäufen
-				setValue(Math.round((next < 0 ? next + 360.0 : next) * 10000.0) / 10000.0);
-			}
-		};
-		rotationFactory.valueProperty().addListener((obs, oldValue, newValue) -> {
-			if (newValue != null && (newValue < 0.0 || newValue >= 360.0)) {
-				rotationFactory.setValue(HallObjectText.normalizeRotation(newValue));
-			}
-		});
-		textRotationSpinner.setValueFactory(rotationFactory);
+		// Die Drehung läuft im Kreis von 0 bis unter 360 (360 = 0, -90 = 270)
+		textRotationSpinner.setValueFactory(RotationInput.factory(15));
 		// Getippte Werte beim Verlassen des Feldes übernimmt der Spinner selbst
 		for (Spinner<Double> spinner : java.util.List.of(widthSpinner, heightSpinner, posXSpinner, posYSpinner, textSizeSpinner, textRotationSpinner)) {
 			spinner.setEditable(true);
@@ -171,7 +167,7 @@ public class HallPlanController {
 		SpinnerInput.install(widthSpinner, "Breite", selectedObjectLabel);
 		SpinnerInput.install(heightSpinner, "Höhe", selectedObjectLabel);
 		SpinnerInput.install(textSizeSpinner, "Schriftgröße", selectedObjectLabel);
-		SpinnerInput.install(textRotationSpinner, "Drehung", selectedObjectLabel);
+		RotationInput.install(textRotationSpinner, "Drehung", selectedObjectLabel);
 		shapeCombo.getItems().setAll(Shape.values());
 
 		nameField.setOnAction(e -> commitName());
@@ -467,11 +463,20 @@ public class HallPlanController {
 			hallPane.getChildren().add(outline);
 		}
 
+		boolean seatingActive = isSeatingTabActive();
 		for (HallObject hallObject : hall.getHallObjects()) {
 			Group node = createHallObjectNode(hallObject);
+			node.setMouseTransparent(seatingActive);
+			node.setOpacity(seatingActive ? INACTIVE_LAYER_OPACITY : 1.0);
 			nodeByObject.put(hallObject, node);
 			hallPane.getChildren().add(node);
 		}
+
+		// Darüber die Bestuhlung (Reihen, Tische, Sitze)
+		Node seatingLayer = seatingPanelController.createLayer();
+		seatingLayer.setMouseTransparent(!seatingActive);
+		seatingLayer.setOpacity(seatingActive ? 1.0 : INACTIVE_LAYER_OPACITY);
+		hallPane.getChildren().add(seatingLayer);
 
 		// Ändern sich Maße oder Name, ändern sich auch die berechneten Textwerte im (gesperrten) Panel
 		if (selectedObject != null && selectedObject.isTextAuto()) {
@@ -674,8 +679,19 @@ public class HallPlanController {
 		selectObject(hallObject);
 	}
 
+	/** Zeigt die Bestuhlung im Reiter "Bestuhlung" und im Plan ({@code null}: keine). */
+	public void setSeatingPlan(SeatingPlan plan) {
+		seatingPanelController.setPlan(plan);
+		renderHall();
+	}
+
+	private boolean isSeatingTabActive() {
+		return sideTabs.getSelectionModel().getSelectedItem() == seatingTab;
+	}
+
 	public void setEditMode(boolean enabled) {
 		this.editMode = enabled;
+		seatingPanelController.setEditMode(enabled);
 		updatePanel();
 		renderHall();
 	}

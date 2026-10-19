@@ -3,11 +3,12 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
@@ -33,7 +34,7 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
-import javafx.scene.shape.Circle;
+import javafx.scene.shape.Shape;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
@@ -41,8 +42,8 @@ import javafx.stage.Window;
 
 /**
  * Das Kundenfenster ("Verkaufsmodus"): Die Saalübersicht der im Hauptfenster gewählten Vorstellung als reine Anzeige,
- * ohne Bedienelemente. Sitze sind nur rot (nicht frei) oder grün (frei); ausgewählte Sitze und der sichtbare Ausschnitt
- * (Zoom, Verschieben) folgen dem Hauptfenster über den {@link SalesViewState}.
+ * ohne Bedienelemente. Sitze sind nur rot (nicht frei) oder grün (frei); ausgewählte Sitze, der sichtbare Ausschnitt
+ * (Zoom, Verschieben) und "Reihen anzeigen" folgen dem Hauptfenster über den {@link SalesViewState}.
  */
 public final class CustomerDisplay {
 
@@ -80,22 +81,19 @@ public final class CustomerDisplay {
 	});
 	private final ChangeListener<Object> contentChanged = (obs, oldValue, newValue) -> redraw.request();
 	private final ChangeListener<Rectangle2D> viewChanged = (obs, oldValue, newValue) -> applyView();
-	private final SetChangeListener<Seat> selectionChanged = change -> redraw.request();
-	// Ein Verkauf im Hauptfenster ändert Sitze: Die Änderungserkennung meldet es kurz nach der Bedienung
+	private final SetChangeListener<Booking> selectionChanged = change -> redraw.request();
+	// Ein Verkauf im Hauptfenster ändert Buchungen: Die Änderungserkennung meldet es kurz nach der Bedienung
 	private final ChangeTracker.Listener<Event> dataChanged = (changed, before, after) -> onDataChanged(changed);
 
 	private final HallPlanPane.Decorator decorator = new HallPlanPane.Decorator() {
 		@Override
-		public void decorateTable(Table table, Node tableNode) {
-			tableNode.setMouseTransparent(true);
-		}
-
-		@Override
-		public void decorateSeat(Seat seat, Circle seatNode) {
-			seatNode.setFill((CustomerDisplayText.isTaken(seat) ? UiColors.STATUS_DANGER : UiColors.STATUS_SUCCESS).getFxColor());
-			boolean selected = state.selectedSeats().contains(seat);
-			seatNode.setStroke(selected ? HallPlanPane.SELECTED_SEAT_STROKE : Color.BLACK);
-			seatNode.setStrokeWidth(selected ? 4 : 1);
+		public void decorateSeat(Booking booking, Seat seat, Node seatNode) {
+			if (seatNode instanceof Shape shape) {
+				shape.setFill((CustomerDisplayText.isTaken(booking) ? UiColors.STATUS_DANGER : UiColors.STATUS_SUCCESS).getFxColor());
+				boolean selected = state.selectedBookings().contains(booking);
+				shape.setStroke(selected ? HallPlanPane.SELECTED_SEAT_STROKE : Color.BLACK);
+				shape.setStrokeWidth(selected ? 4 : 1);
+			}
 			seatNode.setMouseTransparent(true);
 		}
 	};
@@ -229,7 +227,7 @@ public final class CustomerDisplay {
 	}
 
 	private void updateSummary(Presentation presentation) {
-		SelectionSummary.Summary summary = SelectionSummary.of(state.selectedSeats(), presentation);
+		SelectionSummary.Summary summary = SelectionSummary.of(state.selectedBookings(), presentation);
 		countLabel.setText(SelectionSummary.countText(summary.count()));
 		lineBox.getChildren().setAll(summary.lines().stream().map(this::lineRow).toList());
 		totalLabel.setText(MoneyFormat.formatCents(summary.totalCents()));
@@ -306,8 +304,9 @@ public final class CustomerDisplay {
 		attached = true;
 		state.eventProperty().addListener(contentChanged);
 		state.presentationProperty().addListener(contentChanged);
+		state.showRowsProperty().addListener(contentChanged);
 		state.visibleHallRectProperty().addListener(viewChanged);
-		state.selectedSeats().addListener(selectionChanged);
+		state.selectedBookings().addListener(selectionChanged);
 		ChangeTracker.events().addListener(dataChanged);
 	}
 
@@ -318,8 +317,9 @@ public final class CustomerDisplay {
 		attached = false;
 		state.eventProperty().removeListener(contentChanged);
 		state.presentationProperty().removeListener(contentChanged);
+		state.showRowsProperty().removeListener(contentChanged);
 		state.visibleHallRectProperty().removeListener(viewChanged);
-		state.selectedSeats().removeListener(selectionChanged);
+		state.selectedBookings().removeListener(selectionChanged);
 		ChangeTracker.events().removeListener(dataChanged);
 	}
 
@@ -339,8 +339,12 @@ public final class CustomerDisplay {
 	private void refresh() {
 		Presentation presentation = state.presentationProperty().get();
 		titleLabel.setText(CustomerDisplayText.title(state.eventProperty().get(), presentation));
-		hintLabel.setVisible(presentation == null);
-		planPane.render(presentation, hallOf(presentation), decorator);
+		Hall hall = hallOf(presentation);
+		SeatingPlan plan = SalesPlan.of(presentation, hall);
+		boolean waiting = CustomerDisplayText.showsWaitingHint(presentation, plan);
+		hintLabel.setVisible(waiting);
+		// Ohne Plan bleibt die Fläche leer wie ohne Vorstellung: Den internen Hinweis zur Bestuhlung zeigt nur das Hauptfenster
+		planPane.render(hall, plan, waiting ? null : presentation, state.showRowsProperty().get(), decorator);
 		updateSummary(presentation);
 	}
 

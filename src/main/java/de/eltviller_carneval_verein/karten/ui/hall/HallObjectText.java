@@ -4,6 +4,7 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.model.TextAlignV;
+import de.eltviller_carneval_verein.karten.util.Angles;
 import javafx.geometry.Bounds;
 import javafx.geometry.VPos;
 import javafx.scene.text.Font;
@@ -21,7 +22,7 @@ import javafx.scene.text.Text;
  */
 public final class HallObjectText {
 
-	private static final String FONT_FAMILY = "Yanone Kaffeesatz";
+	private static final String FONT_FAMILY = "Yanone Kaffeesatz Regular";
 
 	/** Schriftgröße, wenn sich ein Text nicht messen lässt (leerer Name). */
 	static final double DEFAULT_SIZE = 20;
@@ -86,7 +87,7 @@ public final class HallObjectText {
 	 */
 	static Layout layout(HallObject hallObject, double textWidth, double textHeight) {
 		if (!hallObject.isTextAuto()) {
-			return new Layout(Math.max(MIN_SIZE, hallObject.getTextSize()), normalizeRotation(hallObject.getTextRotation()), hallObject.getTextAlignH(), hallObject.getTextAlignV());
+			return new Layout(Math.max(MIN_SIZE, hallObject.getTextSize()), Angles.normalize(hallObject.getTextRotation()), hallObject.getTextAlignH(), hallObject.getTextAlignV());
 		}
 
 		double[] area = usableArea(hallObject);
@@ -99,12 +100,6 @@ public final class HallObjectText {
 			size = Math.min(MAX_AUTO_SIZE, Math.min(along / textWidth, across / textHeight));
 		}
 		return new Layout(Math.max(MIN_SIZE, size), rotate ? 90 : 0, TextAlignH.CENTER, TextAlignV.CENTER);
-	}
-
-	/** Drehung in Grad auf 0 bis unter 360 bringen. */
-	static double normalizeRotation(double degrees) {
-		double normalized = degrees % 360;
-		return normalized < 0 ? normalized + 360 : normalized;
 	}
 
 	/** Breite und Höhe der kleinsten achsenparallelen Box um einen um {@code degrees} gedrehten Text. */

@@ -3,8 +3,8 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 import java.util.List;
 import java.util.Optional;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
-import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.ui.input.InputFeedback;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
@@ -27,10 +27,11 @@ import javafx.stage.Window;
 import javafx.util.StringConverter;
 
 /**
- * Kartendetails eines Sitzes oder mehrerer Sitze in einem Popup. Der Dialog ändert das Modell erst mit "Anwenden";
- * "Abbrechen" (oder Esc) verwirft die Eingaben. Bei mehreren Sitzen stehen sie oben (kurz, Tooltip mit jedem Sitz),
- * die Felder zeigen den gemeinsamen Wert oder "verschieden", und nur geänderte Felder gelten für alle Sitze (siehe
- * {@link SeatBulkEdit}). Ohne Bearbeitungsmodus sind die Felder gesperrt und der Dialog hat nur "Schließen".
+ * Kartendetails einer Buchung oder mehrerer Buchungen in einem Popup. Der Dialog ändert das Modell erst mit
+ * "Anwenden"; "Abbrechen" (oder Esc) verwirft die Eingaben. Bei mehreren Buchungen stehen ihre Plätze oben (kurz,
+ * Tooltip mit jedem Platz), die Felder zeigen den gemeinsamen Wert oder "verschieden", und nur geänderte Felder gelten
+ * für alle (siehe {@link SeatBulkEdit}). Der Preis ist der effektive Preis; der Rollstuhlplatz gehört zur Bestuhlung
+ * und steht nur als Hinweis da. Ohne Bearbeitungsmodus sind die Felder gesperrt und der Dialog hat nur "Schließen".
  */
 public final class SeatDetailPopup {
 
@@ -44,12 +45,12 @@ public final class SeatDetailPopup {
 	private Label totalValue;
 
 	/**
-	 * @param seats     die Sitze, die der Dialog zeigt und ändert (mindestens einer)
+	 * @param bookings  die Buchungen, die der Dialog zeigt und ändert (mindestens eine)
 	 * @param editMode  {@code false}: nur ansehen
 	 * @param onApplied wird nach "Anwenden" aufgerufen, damit die Ansicht sich neu zeichnet
 	 */
-	public SeatDetailPopup(List<Seat> seats, boolean editMode, Runnable onApplied) {
-		this.edit = new SeatBulkEdit(seats);
+	public SeatDetailPopup(List<Booking> bookings, boolean editMode, Runnable onApplied) {
+		this.edit = new SeatBulkEdit(bookings);
 		this.editMode = editMode;
 		this.onApplied = onApplied;
 		popup.setAutoHide(!editMode); // Mit Eingaben im Dialog soll ein Klick daneben sie nicht verwerfen
@@ -81,14 +82,19 @@ public final class SeatDetailPopup {
 		grid.addRow(row++, new Label("Zahlung:"), paymentCombo());
 		grid.addRow(row++, new Label("Preis (€):"), priceSpinner());
 
-		if (edit.seats().size() > 1) {
+		if (edit.bookings().size() > 1) {
 			totalValue = new Label();
 			totalValue.setStyle("-fx-font-weight: bold;");
 			refreshTotal();
 			grid.addRow(row++, new Label("Gesamt:"), totalValue);
 		}
 
-		HBox checkboxRow = new HBox(12, checkBox("Abgeholt", edit.collected()), checkBox("Rollstuhlgeeignet", edit.wheelchairAccessible()));
+		HBox checkboxRow = new HBox(12, checkBox("Abgeholt", edit.collected()));
+		checkboxRow.setAlignment(Pos.CENTER_LEFT);
+		// Rollstuhlplatz: nur lesbar aus der Momentaufnahme (geändert wird er im Hallen-Editor)
+		if (edit.bookings().stream().allMatch(Booking::isWheelchairAccessible)) {
+			checkboxRow.getChildren().add(new Label(edit.bookings().size() == 1 ? "Rollstuhlplatz" : "Alle Rollstuhlplätze"));
+		}
 		grid.add(checkboxRow, 0, row++, 2, 1);
 
 		grid.addRow(row++, new Label("Kommentar:"), textField(edit.comment(), "Kommentar"));
@@ -97,17 +103,17 @@ public final class SeatDetailPopup {
 	}
 
 	private Node buildHeader() {
-		List<Seat> seats = edit.seats();
-		if (seats.size() == 1) {
-			Seat seat = seats.get(0);
-			return boldLabel("Tisch " + seat.getParent().getTableNumber() + " · Sitz " + seat.getSeatNumber());
+		List<Booking> bookings = edit.bookings();
+		if (bookings.size() == 1) {
+			Booking booking = bookings.get(0);
+			return boldLabel(booking.getTableLabel() + " · Sitz " + booking.getSeatNumber() + (booking.isUnassigned() ? " (ohne Platz)" : ""));
 		}
-		Label summary = new Label(SeatListSummary.headline(seats));
+		Label summary = new Label(SeatListSummary.headline(bookings));
 		summary.setWrapText(true);
 		summary.setMaxWidth(340);
 		summary.setMaxHeight(SUMMARY_MAX_HEIGHT); // Bei der ganzen Halle wäre der Text höher als der Dialog: abgeschnitten mit "…"
-		Tooltip.install(summary, new Tooltip(SeatListSummary.tooltip(seats)));
-		return new VBox(2, boldLabel(seats.size() + " Sitze"), summary);
+		Tooltip.install(summary, new Tooltip(SeatListSummary.tooltip(bookings)));
+		return new VBox(2, boldLabel(bookings.size() + " Sitze"), summary);
 	}
 
 	private static Label boldLabel(String text) {
@@ -153,10 +159,10 @@ public final class SeatDetailPopup {
 		Spinner<Double> spinner = new Spinner<>();
 		spinner.setValueFactory(factory);
 		spinner.setEditable(true);
-		// Nicht übernommene Eingaben (unlesbar): Meldung in der Fußzeile, Editor-Text zurück. Die Meldung nennt den Sitz,
+		// Nicht übernommene Eingaben (unlesbar): Meldung in der Fußzeile, Editor-Text zurück. Die Meldung nennt den Platz,
 		// bei mehreren die Anzahl ("Preis von 12 Sitzen")
-		List<Seat> seats = edit.seats();
-		factory.setFieldLabel(InputFeedback.label("Preis", seats.size() == 1 ? EntityLabels.seat(seats.get(0)) : seats.size() + " Sitzen"));
+		List<Booking> bookings = edit.bookings();
+		factory.setFieldLabel(InputFeedback.label("Preis", bookings.size() == 1 ? EntityLabels.booking(bookings.get(0)) : bookings.size() + " Sitzen"));
 		factory.setRejectionHandler(issue -> SpinnerInput.reject(spinner, issue));
 		spinner.setPrefWidth(115); // breit genug für "verschieden"
 		spinner.setDisable(!editMode);
@@ -165,7 +171,7 @@ public final class SeatDetailPopup {
 		// noch nicht bestätigter Eingabe. Still lesen: Halb getippte Preise sollen keine Meldung auslösen.
 		spinner.getEditor().textProperty().addListener((obs, oldVal, newVal) -> {
 			Double euros = factory.parseQuietly(newVal);
-			field.change(euros == null ? null : (int) Math.round(euros * 100));
+			field.change(euros == null ? null : MoneyFormat.toCents(euros));
 			refreshTotal();
 		});
 		return spinner;

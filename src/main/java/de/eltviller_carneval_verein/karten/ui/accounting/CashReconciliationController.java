@@ -17,10 +17,11 @@ import com.lowagie.text.Paragraph;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
@@ -138,28 +139,14 @@ public class CashReconciliationController implements ContentController, Exportab
 		for (Presentation pres : presentations) {
 			istCents += Math.round(pres.getActualCashAmountDouble() * 100.0);
 
-			for (Seat seat : pres.getSeats()) {
-				PaymentStatus status = seat.getPaymentStatus();
-				if (status == null || !status.isPaid()) {
-					continue;
-				}
-				switch (status) {
-				case CASH -> {
-					sollCashCents += seat.getPrice();
-					countCash++;
-				}
-				case CARD -> {
-					sollCardCents += seat.getPrice();
-					countCard++;
-				}
-				case TRANSFER -> {
-					sollTransferCents += seat.getPrice();
-					countTransfer++;
-				}
-				default -> {
-				}
-				}
-			}
+			// Buchungen ohne Platz sind echte Verkäufe und zählen mit
+			List<Booking> bookings = pres.getBookings() != null ? pres.getBookings() : List.of();
+			sollCashCents += BookingTotals.paidCents(bookings, PaymentStatus.CASH);
+			countCash += BookingTotals.paidCount(bookings, PaymentStatus.CASH);
+			sollCardCents += BookingTotals.paidCents(bookings, PaymentStatus.CARD);
+			countCard += BookingTotals.paidCount(bookings, PaymentStatus.CARD);
+			sollTransferCents += BookingTotals.paidCents(bookings, PaymentStatus.TRANSFER);
+			countTransfer += BookingTotals.paidCount(bookings, PaymentStatus.TRANSFER);
 		}
 		istCentsCache = istCents;
 

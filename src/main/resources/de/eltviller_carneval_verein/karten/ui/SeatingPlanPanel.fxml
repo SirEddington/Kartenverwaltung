@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<!-- Reiter "Bestuhlung" im Hallenplan: Reihen der gewählten Bestuhlung, Eigenschaften der Reihe bzw. des markierten
+     Tischs und Sitzes; Zeichnung und Ziehen in SeatingPlanDrawing -->
+<VBox spacing="10.0" xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="de.eltviller_carneval_verein.karten.ui.hall.SeatingPlanController">
+
+    <Label text="Reihen" styleClass="subheader-label" />
+    <ListView fx:id="rowList" prefHeight="150.0" />
+    <HBox spacing="10.0">
+        <Button fx:id="btnAddRow" text="+ Reihe" styleClass="button-primary" onAction="#handleAddRow" />
+        <Button fx:id="btnDeleteRow" text="Löschen" styleClass="button-danger" onAction="#handleDeleteRow" />
+    </HBox>
+    <FlowPane hgap="10.0" vgap="8.0">
+        <Button fx:id="btnAddTable" text="Tisch hinzufügen" styleClass="button-default" onAction="#handleAddTable" />
+        <Button fx:id="btnFillRow" text="Reihe füllen…" styleClass="button-default" onAction="#handleFillRow" />
+        <Button fx:id="btnRenumber" text="Nummern neu vergeben" styleClass="button-default" onAction="#handleRenumber" />
+    </FlowPane>
+
+    <Separator />
+
+    <!-- Nur ohne Abschnitt zu sehen ("Keine Reihe markiert") -->
+    <Label fx:id="selectionLabel" style="-fx-font-weight: bold;" wrapText="true" />
+    <!-- Abschnitte Reihe, Tisch und Sitz untereinander, aufklappbar (SelectionSections); der Titel ist die Grafik -->
+    <TitledPane fx:id="rowSectionPane" styleClass="section-pane" animated="false">
+        <graphic>
+            <Label styleClass="subheader-label" />
+        </graphic>
+        <VBox fx:id="rowPanel" spacing="8.0">
+            <Label text="Buchstabe:" />
+            <TextField fx:id="labelField" />
+            <Label text="X (cm, Startpunkt):" />
+            <Spinner fx:id="posXSpinner" prefWidth="120.0" />
+            <Label text="Y (cm, Startpunkt):" />
+            <Spinner fx:id="posYSpinner" prefWidth="120.0" />
+            <Label fx:id="angleLabel" text="Winkel (Grad, 0 = nach unten):" wrapText="true" />
+            <Spinner fx:id="angleSpinner" prefWidth="120.0" />
+            <Label fx:id="tableRotationLabel" text="Tischdrehung (Grad, 0 = längs):" wrapText="true" />
+            <Spinner fx:id="tableRotationSpinner" prefWidth="120.0" />
+            <Label fx:id="tableGapLabel" text="Tischabstand (cm):" />
+            <Spinner fx:id="tableGapSpinner" prefWidth="120.0" />
+            <Label fx:id="aisleAfterLabel" text="Mittelgang nach n Tischen (0 = keiner):" wrapText="true" />
+            <Spinner fx:id="aisleAfterSpinner" prefWidth="120.0" />
+            <Label fx:id="aisleWidthLabel" text="Gangbreite (cm):" />
+            <Spinner fx:id="aisleWidthSpinner" prefWidth="120.0" />
+        </VBox>
+    </TitledPane>
+    <!-- Abschnitte Tisch und Sitz unter der Reihe, sobald im Plan ein Tisch oder Sitz markiert ist; der Controller wird
+         als tableSeatPanelController injiziert (fx:id + "Controller") -->
+    <fx:include fx:id="tableSeatPanel" source="TableSeatPanel.fxml" />
+</VBox>

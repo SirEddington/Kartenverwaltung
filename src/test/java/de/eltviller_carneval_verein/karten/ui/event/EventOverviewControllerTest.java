@@ -5,12 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 class EventOverviewControllerTest {
 
 	@Test
 	void hallDisplayName_missingHall_returnsDash() {
-		assertEquals("–", EventOverviewController.hallDisplayName(null));
+		assertEquals("–", EntityLabels.hallDisplayName(null));
 	}
 
 	@Test
@@ -18,7 +19,7 @@ class EventOverviewControllerTest {
 		Hall hall = new Hall();
 		hall.setName("Stadthalle");
 
-		assertEquals("Stadthalle", EventOverviewController.hallDisplayName(hall));
+		assertEquals("Stadthalle", EntityLabels.hallDisplayName(hall));
 	}
 
 	@Test
@@ -26,6 +27,6 @@ class EventOverviewControllerTest {
 		Hall hall = new Hall();
 		hall.setName("  ");
 
-		assertEquals("(ohne Name)", EventOverviewController.hallDisplayName(hall));
+		assertEquals("(ohne Name)", EntityLabels.hallDisplayName(hall));
 	}
 }

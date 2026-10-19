@@ -40,7 +40,7 @@ class LeaveGuardTest {
 	private static Event event(String name) {
 		Event event = new Event();
 		event.setName(name);
-		event.addPresentation("Prunksitzung").addTable(1).addSeat(1).setPrice(1000);
+		event.addPresentation("Prunksitzung").addBooking().setPrice(1000);
 		return event;
 	}
 
@@ -52,7 +52,7 @@ class LeaveGuardTest {
 	}
 
 	private static void change(Event event) {
-		event.getPresentations().get(0).getTables().get(0).getSeats().get(0).setPrice(2500);
+		event.getPresentations().get(0).getBookings().get(0).setPrice(2500);
 	}
 
 	private static void change(Hall hall) {
@@ -227,7 +227,7 @@ class LeaveGuardTest {
 		assertTrue(leave(LeaveGuard.Decision.DISCARD));
 		assertEquals(1, eventCache.size());
 		assertEquals(changed, eventCache.get(0));
-		assertEquals(1000, eventCache.get(0).getPresentations().get(0).getTables().get(0).getSeats().get(0).getPrice());
+		assertEquals(1000, eventCache.get(0).getPresentations().get(0).getBookings().get(0).getEffectivePrice());
 		assertEquals(1, hallCache.size());
 		assertTrue(eventSaveAttempts.isEmpty() && hallSaveAttempts.isEmpty());
 	}

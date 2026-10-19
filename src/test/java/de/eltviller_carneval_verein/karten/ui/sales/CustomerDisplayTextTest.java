@@ -9,10 +9,12 @@ import java.time.LocalTime;
 
 import org.junit.jupiter.api.Test;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 
 class CustomerDisplayTextTest {
 
@@ -73,14 +75,14 @@ class CustomerDisplayTextTest {
 
 	@Test
 	void freeSeatIsNotTaken() {
-		Seat seat = presentation.addTable(1).addSeat(1);
+		Booking seat = new TestBookings().booking(presentation, 1, 1);
 
 		assertFalse(CustomerDisplayText.isTaken(seat));
 	}
 
 	@Test
 	void reservedSeatIsTaken() {
-		Seat seat = presentation.addTable(1).addSeat(1);
+		Booking seat = new TestBookings().booking(presentation, 1, 1);
 		seat.setLastName("Meier");
 
 		assertTrue(CustomerDisplayText.isTaken(seat));
@@ -88,9 +90,55 @@ class CustomerDisplayTextTest {
 
 	@Test
 	void paidSeatIsTaken() {
-		Seat seat = presentation.addTable(1).addSeat(1);
+		Booking seat = new TestBookings().booking(presentation, 1, 1);
 		seat.setPaymentStatus(PaymentStatus.CASH);
 
 		assertTrue(CustomerDisplayText.isTaken(seat));
+	}
+
+	@Test
+	void withoutPresentationTheCustomerWaits() {
+		assertTrue(CustomerDisplayText.showsWaitingHint(null, null));
+	}
+
+	@Test
+	void withAPlanTheCustomerSeesThePlan() {
+		Hall hall = new Hall();
+		SeatingPlan plan = hall.addSeatingPlan();
+		presentation.setHallId(hall.getId());
+		presentation.setSeatingPlanId(plan.getId());
+
+		assertFalse(CustomerDisplayText.showsWaitingHint(presentation, SalesPlan.of(presentation, hall)));
+	}
+
+	@Test
+	void aDeletedPlanShowsTheWaitingTextInsteadOfTheInternalHint() {
+		Hall hall = new Hall();
+		presentation.setHallId(hall.getId());
+		presentation.setSeatingPlanId("gibt-es-nicht");
+		SeatingPlan plan = SalesPlan.of(presentation, hall);
+		// die Verkaufsansicht zeigt den internen Hinweis, das Kundenfenster den Wartetext
+		assertEquals(SalesPlan.MISSING_HINT, SalesPlan.hint(presentation, plan));
+
+		assertTrue(CustomerDisplayText.showsWaitingHint(presentation, plan));
+	}
+
+	@Test
+	void aFrozenPresentationShowsTheWaitingText() {
+		Hall hall = new Hall();
+		SeatingPlan plan = hall.addSeatingPlan();
+		presentation.setHallId(hall.getId());
+		presentation.setSeatingPlanId(plan.getId());
+		presentation.setPlanMissing(true);
+
+		assertTrue(CustomerDisplayText.showsWaitingHint(presentation, SalesPlan.of(presentation, hall)));
+	}
+
+	@Test
+	void withoutSeatingPlanTheCustomerWaits() {
+		presentation.setHallId(new Hall().getId());
+		assertEquals(SalesPlan.NONE_HINT, SalesPlan.hint(presentation, null));
+
+		assertTrue(CustomerDisplayText.showsWaitingHint(presentation, null));
 	}
 }
