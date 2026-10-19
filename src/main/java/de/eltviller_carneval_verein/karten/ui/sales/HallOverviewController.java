@@ -257,13 +257,13 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	private void styleSeatNode(Booking booking, Node seatNode) {
 		boolean matchesQuery = matchesQuery(booking);
-		boolean searchActive = !currentQuery.isEmpty();
 		boolean selected = selectedBookings.contains(booking);
 		if (seatNode instanceof Shape shape) {
 			shape.setFill(seatColorFor(booking.getStatus()));
-			// Suchtreffer tragen einen hellblauen Rand, die Auswahl ein goldenes Halo hinter dem Sitz (HallPlanPane)
-			shape.setStroke(searchActive && matchesQuery ? Color.DODGERBLUE : Color.BLACK);
-			shape.setStrokeWidth(searchActive && matchesQuery ? 3 : 1);
+			// Suchtreffer bekommen keine eigene Hervorhebung: Die übrigen Sitze sind abgeblendet (unten), die Auswahl
+			// trägt ein goldenes Halo hinter dem Sitz (HallPlanPane)
+			shape.setStroke(Color.BLACK);
+			shape.setStrokeWidth(1);
 		}
 		if (selected) {
 			seatNode.getProperties().put(HallPlanPane.SELECTED_KEY, Boolean.TRUE);
@@ -350,6 +350,16 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		labelOptions.addListener(new WeakChangeListener<>(labelsChanged));
 		viewportPane.visibleHallRectProperty().addListener((obs, oldRect, newRect) -> state.visibleHallRectProperty().set(newRect));
 		state.visibleHallRectProperty().set(viewportPane.visibleHallRectProperty().get());
+	}
+
+	/** Markiert die Sitze der Vorstellung, die in der Auswahl der verlassenen Ansicht waren (nach dem Wechsel von der Tabelle). */
+	@Override
+	public void restoreSelection(java.util.Collection<Booking> bookings) {
+		selectedBookings.clear();
+		if (selectedPres != null) {
+			bookings.stream().filter(booking -> booking.getParent() == selectedPres && !booking.isUnassigned()).forEach(selectedBookings::add);
+		}
+		renderHall();
 	}
 
 	@Override

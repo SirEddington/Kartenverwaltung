@@ -31,9 +31,10 @@ import javafx.util.Duration;
  * Bedienung einer Tabelle wie in Excel, gemeinsam für alle Tabellen mit Eingabe:
  *
  * <ul>
- * <li>Ein Klick wählt die Zeile und setzt den Fokus auf die geklickte Zelle, startet aber nie das Bearbeiten. Das
- * Bearbeiten beginnt mit Tippen (bei genau einer gewählten Zeile; das Zeichen ersetzt den Inhalt), Enter, F2 oder
- * einem Doppelklick.</li>
+ * <li>Ein Klick wählt die Zeile und setzt den Fokus auf die geklickte Zelle. Ein weiterer Klick auf eine Zelle der
+ * einzigen gewählten Zeile startet das Bearbeiten (wie beim Umbenennen im Explorer). Es beginnt außerdem mit Tippen
+ * (bei genau einer gewählten Zeile; das Zeichen ersetzt den Inhalt), Enter, F2 oder einem Doppelklick. Bei mehreren
+ * gewählten Zeilen, mit Strg/Umschalt und nach dem Ziehen startet ein Klick es nie.</li>
  * <li>Tab und Umschalt+Tab setzen den Fokus auf die nächste bzw. vorherige bearbeitbare Zelle, am Zeilenende in die
  * nächste Zeile. Beim Bearbeiten übernimmt Tab erst die Eingabe, siehe {@link ParsingTextFieldTableCell}.</li>
  * <li>Drücken und Ziehen über mehrere Zeilen wählt sie aus; mit Strg bleibt die bisherige Auswahl erhalten. Am oberen
@@ -53,12 +54,16 @@ public final class TableInput {
 
 	public static <S> void install(TableView<S> table) {
 		DragSelection<S> dragSelection = new DragSelection<>(table);
-		table.addEventFilter(MouseEvent.MOUSE_PRESSED, dragSelection::onPressed);
+		boolean[] clickMayEdit = { false };
+		table.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
+			clickMayEdit[0] = pressedOnlySelectedRow(table, event);
+			dragSelection.onPressed(event);
+		});
 		table.addEventFilter(MouseEvent.MOUSE_DRAGGED, dragSelection::onDragged);
 		table.addEventFilter(MouseEvent.MOUSE_RELEASED, event -> {
 			if (dragSelection.onReleased(event)) {
 				event.consume();
-			} else {
+			} else if (!clickMayEdit[0]) {
 				suppressClickEdit(table, event);
 			}
 		});
@@ -67,10 +72,25 @@ public final class TableInput {
 	}
 
 	/**
-	 * JavaFX startet das Bearbeiten schon bei einem einzelnen Klick auf eine gewählte Zelle. Hier soll nur ein
-	 * Doppelklick (und Tippen, Enter, F2) es starten. Das Loslassen darf dafür nicht verworfen werden: JavaFX verschiebt
-	 * bei einem Klick auf eine schon gewählte Zeile die Auswahl auf das Loslassen. Stattdessen ist die Tabelle für die
-	 * Dauer dieses Loslassens nicht bearbeitbar (die Zelle fragt beim Start danach).
+	 * Ob der Druck eine Zeile trifft, die schon die einzige gewählte ist (ohne Umschalt oder Strg): Ein weiterer Klick
+	 * auf eine ihrer Zellen startet dann das Bearbeiten, wie beim Umbenennen im Explorer.
+	 */
+	private static <S> boolean pressedOnlySelectedRow(TableView<S> table, MouseEvent event) {
+		if (event.getButton() != MouseButton.PRIMARY || event.isShiftDown() || event.isControlDown() || event.isMetaDown() || insideControl(event.getTarget())) {
+			return false;
+		}
+		TableRow<?> row = rowOf(event.getTarget());
+		return row != null && !row.isEmpty() && table.getSelectionModel().getSelectedIndices().size() == 1
+				&& table.getSelectionModel().getSelectedIndex() == row.getIndex();
+	}
+
+	/**
+	 * JavaFX startet das Bearbeiten schon bei einem einzelnen Klick auf eine gewählte Zelle, auch wenn mehrere Zeilen
+	 * gewählt sind oder Strg/Umschalt gedrückt waren. Das soll nur gelten, wenn die Zeile schon die einzige gewählte war
+	 * ({@link #pressedOnlySelectedRow}); sonst startet nur ein Doppelklick (oder Tippen, Enter, F2) das Bearbeiten. Das
+	 * Loslassen darf dafür nicht verworfen werden: JavaFX verschiebt bei einem Klick auf eine schon gewählte Zeile die
+	 * Auswahl auf das Loslassen. Stattdessen ist die Tabelle für die Dauer dieses Loslassens nicht bearbeitbar (die
+	 * Zelle fragt beim Start danach).
 	 */
 	private static <S> void suppressClickEdit(TableView<S> table, MouseEvent event) {
 		if (event.getButton() != MouseButton.PRIMARY || event.getClickCount() != 1 || table.getEditingCell() != null

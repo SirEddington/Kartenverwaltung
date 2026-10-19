@@ -7,6 +7,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
@@ -74,6 +75,8 @@ public class TicketShellController {
 	// Wird gerade die Vorstellungsliste neu gefüllt, soll die Auswahl nicht an den Inhalt gemeldet werden
 	private boolean updatingPresentations = false;
 	private String searchText = "";
+	// Auswahl der verlassenen Ansicht, bis die neue sie zurückbekommt (restorePendingSelection)
+	private List<Booking> pendingSelection = List.of();
 	private ContentController activeContentController;
 	private boolean editMode = false;
 	private CustomerDisplay customerDisplay;
@@ -195,6 +198,7 @@ public class TicketShellController {
 		lblHeader.setText("Kartentabelle");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/TicketTableView.fxml");
 		activeContentController.filter(searchText);
+		restorePendingSelection();
 	}
 
 	@FXML
@@ -203,6 +207,19 @@ public class TicketShellController {
 		lblHeader.setText("Saalübersicht");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml");
 		activeContentController.filter(searchText);
+		restorePendingSelection();
+	}
+
+	/**
+	 * Gibt der neuen Ansicht die Auswahl der verlassenen zurück. Erst nach dem Suchfilter: Er baut die Auswahl der
+	 * Tabelle um und würde sie sonst auf eine Zeile verkleinern.
+	 */
+	private void restorePendingSelection() {
+		List<Booking> selection = pendingSelection;
+		pendingSelection = List.of();
+		if (activeContentController instanceof SalesStateAware aware) {
+			aware.restoreSelection(selection);
+		}
 	}
 
 	private void loadContentView(String fxmlPath) {
@@ -217,7 +234,8 @@ public class TicketShellController {
 			PopupWindows.hideOwnedBy(contentArea.getScene() == null ? null : contentArea.getScene().getWindow());
 			contentArea.getChildren().setAll(view);
 
-			// Auswahl und Ausschnitt der alten Ansicht gelten nicht mehr; der neue Inhalt meldet seine eigenen
+			// Der Ausschnitt der alten Ansicht gilt nicht mehr, die Auswahl bleibt: Die neue Ansicht bekommt sie unten zurück
+			List<Booking> keptSelection = new ArrayList<>(state.selectedBookings());
 			state.resetView();
 			if (activeContentController instanceof SalesStateAware aware) {
 				aware.setSalesState(state);
@@ -228,6 +246,7 @@ public class TicketShellController {
 			activeContentController.setPresentation(state.presentationProperty().get());
 			// Der Bearbeitungsmodus gilt für die ganze Shell, nicht nur für die Ansicht, in der er eingeschaltet wurde
 			activeContentController.setEditMode(editMode);
+			pendingSelection = keptSelection;
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);

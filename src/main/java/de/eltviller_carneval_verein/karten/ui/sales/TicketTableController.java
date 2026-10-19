@@ -402,6 +402,21 @@ public class TicketTableController implements ContentController, SalesStateAware
 		});
 	}
 
+	/** Wählt die Zeilen der Buchungen, die die Tabelle zeigt (nach dem Wechsel von der Saalansicht). */
+	@Override
+	public void restoreSelection(java.util.Collection<Booking> bookings) {
+		seatTable.getSelectionModel().clearSelection();
+		List<Integer> indices = new ArrayList<>();
+		for (int index = 0; index < filteredData.size(); index++) {
+			if (bookings.contains(filteredData.get(index).getBooking())) {
+				indices.add(index);
+			}
+		}
+		if (!indices.isEmpty()) {
+			seatTable.getSelectionModel().selectIndices(indices.get(0), indices.subList(1, indices.size()).stream().mapToInt(Integer::intValue).toArray());
+		}
+	}
+
 	@Override
 	public void setEvent(Event event) {
 		closeDialog();

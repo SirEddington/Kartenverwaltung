@@ -4,6 +4,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import javafx.css.PseudoClass;
+import javafx.geometry.Pos;
 import javafx.event.ActionEvent;
 import javafx.event.Event;
 import javafx.scene.control.TableCell;
@@ -79,6 +80,10 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 		parsing.takeFailure();
 		super.startEdit();
 		pseudoClassStateChanged(EDITING, isEditing());
+		if (isEditing()) {
+			// JavaFX richtet die Zelle beim Bearbeiten oben aus: Das Feld und der Cursor sollen links und mittig stehen
+			setAlignment(Pos.CENTER_LEFT);
+		}
 		if (isEditing() && getGraphic() instanceof TextField field) {
 			installEditorBehavior(field);
 		}

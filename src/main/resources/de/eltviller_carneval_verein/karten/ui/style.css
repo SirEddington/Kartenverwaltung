@@ -476,6 +476,12 @@
      -fx-padding: 6px 8px;
  }
 
+ /* Feste Zeilenhöhe: Bisher bestimmten die Checkbox-Zellen mit ihrem Zellenabstand die Höhe (30 px). Ohne ihren Abstand
+    (siehe .check-box-table-cell) bliebe es sonst bei 28 px. */
+ .table-view .table-row-cell {
+     -fx-cell-size: 30px;
+ }
+
  /* Bearbeitete Zelle: Die Zeile bleibt gleich hoch und die Spalte gleich breit. Das Eingabefeld erbt sonst die Maße
     der allgemeinen Textfelder (Innenabstand und Rahmen) und streckt die Zeile. Als Zeichen für "wird bearbeitet"
     trägt die Zelle selbst einen ECV-blauen Rahmen innerhalb ihrer Fläche; das Feld ist darin unsichtbar. Die
@@ -566,6 +572,12 @@
 
  .check-box:selected .mark {
      -fx-background-color: -fx-ecv-yellow;
+ }
+
+ /* Checkbox in einer Tabellenzelle: mittig, waagerecht und senkrecht (ohne den Zellenabstand saß das Kästchen oben) */
+ .table-view .check-box-table-cell {
+     -fx-alignment: center;
+     -fx-padding: 0;
  }
 
  /* --- RadioButton (Perfekt kreisrund) --- */
