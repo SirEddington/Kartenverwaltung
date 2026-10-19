@@ -446,19 +446,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	@Override
 	public void filter(String query) {
-		filteredData.setPredicate(dto -> {
-			if (query == null || query.isEmpty()) {
-				return true;
-			}
-
-			String lowerQuery = query.toLowerCase();
-			Booking booking = dto.getBooking();
-
-			// Prüft Nachname, Vorname und Kommentar
-			return (booking.getLastName() != null && booking.getLastName().toLowerCase().contains(lowerQuery))
-					|| (booking.getFirstName() != null && booking.getFirstName().toLowerCase().contains(lowerQuery))
-					|| (booking.getComment() != null && booking.getComment().toLowerCase().contains(lowerQuery));
-		});
+		// Vorname, Nachname und Kommentar zusammen, jedes Suchwort muss vorkommen (BookingSearch)
+		filteredData.setPredicate(dto -> BookingSearch.matches(dto.getBooking(), query));
 	}
 
 	@Override

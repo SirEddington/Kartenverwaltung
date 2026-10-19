@@ -290,16 +290,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	}
 
 	private boolean matchesQuery(Booking booking) {
-		if (currentQuery.isEmpty()) {
-			return true;
-		}
-
-		String lastName = booking.getLastName();
-		String firstName = booking.getFirstName();
-		String comment = booking.getComment();
-
-		return (lastName != null && lastName.toLowerCase().contains(currentQuery)) || (firstName != null && firstName.toLowerCase().contains(currentQuery))
-				|| (comment != null && comment.toLowerCase().contains(currentQuery));
+		return BookingSearch.matches(booking, currentQuery);
 	}
 
 	/**
