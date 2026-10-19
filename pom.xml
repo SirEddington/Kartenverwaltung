@@ -11,12 +11,24 @@
     <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <javafx.version>21.0.2</javafx.version>
+    <!-- Plattform der JavaFX-Natives (Classifier der org.openjfx-Artefakte). Standard "win"
+         (Entwicklung unter Windows); fuer das Linux-Paket mit -Plinux ueberschrieben. -->
+    <javafx.platform>win</javafx.platform>
   </properties>
 
+  <profiles>
+    <profile>
+      <id>linux</id>
+      <properties>
+        <javafx.platform>linux</javafx.platform>
+      </properties>
+    </profile>
+  </profiles>
+
   <dependencies>
-    <!-- JavaFX-Module mit fest gesetztem Classifier "win": Nutzer sind ausschliesslich
-         unter Windows unterwegs. Die JavaFX-POMs selbst haben OS-aktivierte Profile,
-         die UNABHAENGIG vom hier gewaehlten Classifier zusaetzlich javafx-graphics/
+    <!-- JavaFX-Module mit fest gesetztem Classifier (${javafx.platform}: "win" oder, mit
+         -Plinux, "linux"). Die JavaFX-POMs selbst haben OS-aktivierte Profile, die
+         UNABHAENGIG vom hier gewaehlten Classifier zusaetzlich javafx-graphics/
          javafx-base passend zum Build-Rechner (auf dem CI-Runner: Linux) transitiv
          reinziehen. Deshalb muessen diese automatischen transitiven Abhaengigkeiten
          explizit ausgeschlossen werden, sonst landen je nach Build-Maschine sowohl
@@ -27,14 +39,14 @@
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-base</artifactId>
       <version>${javafx.version}</version>
-      <classifier>win</classifier>
+      <classifier>${javafx.platform}</classifier>
     </dependency>
 
     <dependency>
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-graphics</artifactId>
       <version>${javafx.version}</version>
-      <classifier>win</classifier>
+      <classifier>${javafx.platform}</classifier>
       <exclusions>
         <exclusion>
           <groupId>org.openjfx</groupId>
@@ -47,7 +59,7 @@
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-controls</artifactId>
       <version>${javafx.version}</version>
-      <classifier>win</classifier>
+      <classifier>${javafx.platform}</classifier>
       <exclusions>
         <exclusion>
           <groupId>org.openjfx</groupId>
@@ -61,7 +73,7 @@
       <groupId>org.openjfx</groupId>
       <artifactId>javafx-fxml</artifactId>
       <version>${javafx.version}</version>
-      <classifier>win</classifier>
+      <classifier>${javafx.platform}</classifier>
       <exclusions>
         <exclusion>
           <groupId>org.openjfx</groupId>
@@ -135,6 +147,10 @@
                         <goal>shade</goal>
                     </goals>
                     <configuration>
+                        <!-- Fat-JAR je Plattform als eigene Datei (Kartenverwaltung-<version>-win.jar bzw.
+                             -linux.jar), damit beide Builds nebeneinander in target/ liegen koennen. -->
+                        <shadedArtifactAttached>true</shadedArtifactAttached>
+                        <shadedClassifierName>${javafx.platform}</shadedClassifierName>
                         <transformers>
                             <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                 <!-- Hier deine Hauptklasse angeben -->
