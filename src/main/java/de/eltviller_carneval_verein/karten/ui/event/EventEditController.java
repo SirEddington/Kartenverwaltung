@@ -23,6 +23,9 @@ import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
+import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
@@ -148,6 +151,7 @@ public class EventEditController {
 		setupPresentationDetails();
 		setupContextMenu();
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
+		SaveShortcut.install(btnSave);
 	}
 
 	private void setupCollums() {
@@ -587,9 +591,33 @@ public class EventEditController {
 
 	@FXML
 	private void toggleEditMode() {
+		// Keine ungespeicherten Änderungen im Anzeigemodus: erst nachfragen
+		if (editMode) {
+			Outcome outcome = LeaveGuard.confirmSwitchToViewMode();
+			if (outcome == Outcome.STAY) {
+				return;
+			}
+			if (outcome == Outcome.LEAVE_RESTORED) {
+				reloadRestoredData();
+				return;
+			}
+		}
 		// Editmode wechseln
 		editMode = !editMode;
 		applyEditMode();
+	}
+
+	/**
+	 * Nach "Nicht speichern" sind Event und Vorstellung neue Objekte (der gespeicherte Stand wurde wiederhergestellt):
+	 * Der Screen öffnet sich mit ihnen neu, im Anzeigemodus.
+	 */
+	private void reloadRestoredData() {
+		String eventId = currentEvent == null ? null : currentEvent.getId();
+		String presentationId = currentPres == null ? null : currentPres.getId();
+		Event event = JsonEventRepository.getInstance().loadEvents().stream().filter(candidate -> candidate.getId().equals(eventId)).findFirst().orElse(null);
+		Presentation presentation = event == null ? null
+				: event.getPresentations().stream().filter(candidate -> candidate.getId().equals(presentationId)).findFirst().orElse(null);
+		MainApp.showEventEditView(event, presentation, false);
 	}
 
 	private void setEditable(boolean editable) {

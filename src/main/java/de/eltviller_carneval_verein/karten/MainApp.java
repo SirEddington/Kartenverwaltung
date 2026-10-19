@@ -14,6 +14,7 @@ import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
+import de.eltviller_carneval_verein.karten.ui.EnterOnButtons;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LiveValidator;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
@@ -216,6 +217,7 @@ public class MainApp extends Application {
 	public static Scene createScene(Parent content) {
 		Scene scene = new Scene(wrapWithBackground(content), width, height);
 		scene.getStylesheets().add(stylesheetUrl());
+		EnterOnButtons.install(scene);
 		return scene;
 	}
 

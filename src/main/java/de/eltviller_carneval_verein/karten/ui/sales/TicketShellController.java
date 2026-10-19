@@ -14,7 +14,10 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
+import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.value.ChangeListener;
@@ -79,6 +82,8 @@ public class TicketShellController {
 	@FXML
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
+		SaveShortcut.install(btnSave);
+		btnSave.setDisable(!editMode); // Im Anzeigemodus gibt es nichts zu speichern
 
 		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das
 		// Hauptfenster geschlossen, schließt es mit (sonst hielte es die App am Leben). Die Szene bleibt an contentArea
@@ -225,7 +230,18 @@ public class TicketShellController {
 
 	@FXML
 	private void toggleEditMode() {
+		// Keine ungespeicherten Änderungen im Anzeigemodus: erst nachfragen
+		if (editMode) {
+			Outcome outcome = LeaveGuard.confirmSwitchToViewMode();
+			if (outcome == Outcome.STAY) {
+				return;
+			}
+			if (outcome == Outcome.LEAVE_RESTORED) {
+				rebindToRestoredData();
+			}
+		}
 		this.editMode = !this.editMode;
+		btnSave.setDisable(!editMode);
 
 		// Button-Text anpassen
 		if (btnToggleEdit != null) {
@@ -236,6 +252,24 @@ public class TicketShellController {
 		if (activeContentController != null) {
 			activeContentController.setEditMode(editMode);
 		}
+	}
+
+	/**
+	 * Nach "Nicht speichern" sind Event und Vorstellungen neue Objekte (der gespeicherte Stand wurde wiederhergestellt):
+	 * Die Auswahl wird mit ihnen neu belegt, die Inhalte laden sich daraus neu.
+	 */
+	private void rebindToRestoredData() {
+		Event previousEvent = state.eventProperty().get();
+		Presentation previousPresentation = state.presentationProperty().get();
+		String eventId = previousEvent == null ? null : previousEvent.getId();
+		String presentationId = previousPresentation == null ? null : previousPresentation.getId();
+
+		eventComboBox.getItems().setAll(eventRepository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
+		eventComboBox.getItems().stream().filter(event -> event.getId().equals(eventId)).findFirst().ifPresent(event -> {
+			eventComboBox.getSelectionModel().select(event);
+			presComboBox.getItems().stream().filter(presentation -> presentation != null && presentation.getId().equals(presentationId)).findFirst()
+					.ifPresent(presentation -> presComboBox.getSelectionModel().select(presentation));
+		});
 	}
 
 	/** Die Checkbox "Verkaufsmodus" öffnet und schließt das Kundenfenster. */

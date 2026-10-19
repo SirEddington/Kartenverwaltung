@@ -12,11 +12,15 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
 import de.eltviller_carneval_verein.karten.ui.PlanFreezer;
+import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
@@ -76,6 +80,7 @@ public class HallEditController {
 	@FXML
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.halls());
+		SaveShortcut.install(btnSave);
 
 		setupSpinner(spnHallWidth, "Hallenbreite", 10, value -> {
 			hall.setHallWidth(value);
@@ -307,7 +312,27 @@ public class HallEditController {
 
 	@FXML
 	private void toggleEditMode() {
+		// Keine ungespeicherten Änderungen im Anzeigemodus: erst nachfragen
+		if (editMode) {
+			Outcome outcome = LeaveGuard.confirmSwitchToViewMode();
+			if (outcome == Outcome.STAY) {
+				return;
+			}
+			if (outcome == Outcome.LEAVE_RESTORED) {
+				reloadRestoredData();
+				return;
+			}
+		}
 		setEditable(!editMode);
+	}
+
+	/**
+	 * Nach "Nicht speichern" ist die Halle ein neues Objekt (der gespeicherte Stand wurde wiederhergestellt): Der Screen
+	 * öffnet sich mit ihr neu, im Anzeigemodus.
+	 */
+	private void reloadRestoredData() {
+		Hall restored = hall == null ? null : JsonHallRepository.getInstance().findById(hall.getId());
+		MainApp.showHallEditView(restored == null ? hall : restored, null, false);
 	}
 
 	private void setEditable(boolean editable) {
