@@ -85,12 +85,14 @@
     -fx-border-width: 1px;
 }
 
+/* Hover und gedrückt ändern die Farbe statt die Deckkraft (nichts wird blass). Hier der Standardknopf (weiß mit
+   roter Umrandung): rosa getönt; die anderen Knopfarten haben eigene Regeln weiter unten, jeweils nach ihrer Farbe. */
 .button:hover {
-    -fx-opacity: 0.85;
+    -fx-background-color: #FDECEC;
 }
 
 .button:pressed {
-    -fx-opacity: 0.70;
+    -fx-background-color: #F9D5D5;
 }
 
 /* Primärbutton: ECV-Blau mit ECV-Gelber Schrift (z.B. Speichern, Neues Event) */
@@ -138,6 +140,86 @@
     -fx-border-width: 0px;
 }
 
+/* Hover und gedrückt je Knopfart. Blau und Gelb sind neutrale Markenfarben und tauschen die Rollen; die roten Knöpfe
+   bleiben in ihrer Farbfamilie, denn Rot warnt (Löschen) und Weiß ist harmlos: Eine Umkehr würde das vertauschen.
+   Die Regeln stehen nach den Knopfarten und die gedrückten nach den Hover-Regeln (gleiche Gewichtung, die spätere gilt). */
+
+/* Primär: Blau wird zu Gelb mit blauem Rand (als zweite Hintergrundebene, damit der Knopf nicht wächst) */
+.button-primary:hover {
+    -fx-background-color: -fx-ecv-blue, -fx-ecv-yellow;
+    -fx-background-insets: 0, 1;
+    -fx-background-radius: 4px, 3px;
+    -fx-text-fill: -fx-ecv-blue;
+}
+
+.button-primary:pressed {
+    -fx-background-color: -fx-ecv-blue, #E6CC00;
+}
+
+/* "Speichern *" ist schon gelb: Hover hellt es auf, gedrückt dunkelt es ab */
+.button-primary.button-dirty:hover {
+    -fx-background-color: #FFF27A;
+    -fx-background-insets: 0;
+    -fx-background-radius: 4px;
+}
+
+.button-primary.button-dirty:pressed {
+    -fx-background-color: #F2D900;
+}
+
+/* Sekundär: Gelb wird zu Blau mit gelber Schrift */
+.button-secondary:hover {
+    -fx-background-color: -fx-ecv-blue;
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+.button-secondary:pressed {
+    -fx-background-color: #1F2266;
+}
+
+/* Standard (weiß mit rotem Rand) hat seine Regeln oben bei .button; hier nur die Farbe der Schrift sicherstellen */
+.button-default:hover,
+.button-default:pressed {
+    -fx-text-fill: -fx-ecv-red;
+}
+
+/* Gefahr: Rot wird dunkler */
+.button-danger:hover {
+    -fx-background-color: #C92F2F;
+}
+
+.button-danger:pressed {
+    -fx-background-color: #A82525;
+}
+
+/* Jubiläum: Gold wird dunkler */
+.button-gold:hover {
+    -fx-background-color: #A8893F;
+}
+
+.button-gold:pressed {
+    -fx-background-color: #8F7535;
+}
+
+/* Auswahlmenü-Knopf in der Sekundär-Variante (z. B. "Anzeige"): wie der Sekundärknopf */
+.menu-button.button-secondary:hover {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+.menu-button.button-secondary:pressed {
+    -fx-background-color: #1F2266;
+}
+
+.menu-button.button-secondary:hover > .label,
+.menu-button.button-secondary:pressed > .label {
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+.menu-button.button-secondary:hover > .arrow-button > .arrow,
+.menu-button.button-secondary:pressed > .arrow-button > .arrow {
+    -fx-background-color: -fx-ecv-yellow;
+}
+
 /* ------------------------------------------------------------------------------
  * 3b. SPLITMENUBUTTON
  * SplitMenuButton hat eine andere interne Struktur als Button (kein ".button"-
@@ -169,16 +251,6 @@
     -fx-background-radius: 0 4px 4px 0;
 }
 
-.split-menu-button:hover > .label,
-.split-menu-button:hover > .arrow-button {
-    -fx-opacity: 0.85;
-}
-
-.split-menu-button:pressed > .label,
-.split-menu-button:pressed > .arrow-button {
-    -fx-opacity: 0.70;
-}
-
 /* Sekundär-Variante (ECV-Gelb/Blau), passend zu .button-secondary */
 .split-menu-button.button-secondary > .label,
 .split-menu-button.button-secondary > .arrow-button {
@@ -191,6 +263,27 @@
 
 .split-menu-button.button-secondary > .arrow-button > .arrow {
     -fx-background-color: -fx-ecv-blue;
+}
+
+/* Hover und gedrückt wie beim Sekundärknopf: Gelb wird zu Blau mit gelber Schrift */
+.split-menu-button.button-secondary:hover > .label,
+.split-menu-button.button-secondary:hover > .arrow-button {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+.split-menu-button.button-secondary:pressed > .label,
+.split-menu-button.button-secondary:pressed > .arrow-button {
+    -fx-background-color: #1F2266;
+}
+
+.split-menu-button.button-secondary:hover > .label,
+.split-menu-button.button-secondary:pressed > .label {
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+.split-menu-button.button-secondary:hover > .arrow-button > .arrow,
+.split-menu-button.button-secondary:pressed > .arrow-button > .arrow {
+    -fx-background-color: -fx-ecv-yellow;
 }
 
 /* ------------------------------------------------------------------------------
