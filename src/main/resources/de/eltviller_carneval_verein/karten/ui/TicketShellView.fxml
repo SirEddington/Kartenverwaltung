@@ -54,7 +54,7 @@
 
     <!-- UNTERER BEREICH: Identischer Footer -->
     <HBox spacing="10.0" alignment="CENTER_RIGHT">
-        <!-- Beschriftungen des Saalplans; nur in der Saalansicht aktiv (befüllt der Controller) -->
+        <!-- Beschriftungen des Saalplans; immer aktiv, auch vor der Saalansicht (befüllt der Controller) -->
         <MenuButton fx:id="menuDisplay" text="Anzeige" styleClass="button-secondary" />
         <StatusLabel />
         <Region HBox.hgrow="ALWAYS" />

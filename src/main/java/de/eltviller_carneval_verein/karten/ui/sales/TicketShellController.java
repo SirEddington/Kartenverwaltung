@@ -88,6 +88,7 @@ public class TicketShellController {
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
 		SaveShortcut.install(btnSave);
 		btnSave.setDisable(!editMode); // Im Anzeigemodus gibt es nichts zu speichern
+		// Immer aktiv, auch in der Tabelle: Die Einstellungen gelten für die Saalansicht und lassen sich vorher treffen
 		PlanLabelsMenu.bind(menuDisplay, state.planLabels());
 
 		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das
@@ -192,7 +193,6 @@ public class TicketShellController {
 	private void showTicketTableView() {
 		StatusMessage.getInstance().clear();
 		lblHeader.setText("Kartentabelle");
-		menuDisplay.setDisable(true); // Die Beschriftungen betreffen nur den Saalplan
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/TicketTableView.fxml");
 		activeContentController.filter(searchText);
 	}
@@ -201,7 +201,6 @@ public class TicketShellController {
 	private void showHallView() {
 		StatusMessage.getInstance().clear();
 		lblHeader.setText("Saalübersicht");
-		menuDisplay.setDisable(false);
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml");
 		activeContentController.filter(searchText);
 	}
