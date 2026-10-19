@@ -74,12 +74,18 @@ public class Table {
 		this.rotation = rotation;
 	}
 
+	/** Der Buchstabe der Reihe ohne Rand; leer ohne Reihe, ohne Buchstaben oder ohne Bestuhlung. */
+	@JsonIgnore
+	public String getRowLabel() {
+		TableRow row = parentPlan != null ? parentPlan.findRow(rowId) : null;
+		String label = row != null ? row.getLabel() : null;
+		return label != null ? label.trim() : "";
+	}
+
 	/** "Tisch A3" bei einer Reihe mit Buchstaben, sonst "Tisch 3". */
 	@JsonIgnore
 	public String getDisplayName() {
-		TableRow row = parentPlan != null ? parentPlan.findRow(rowId) : null;
-		String label = row != null ? row.getLabel() : null;
-		return "Tisch " + (label != null ? label.trim() : "") + tableNumber;
+		return "Tisch " + getRowLabel() + tableNumber;
 	}
 
 	public int getTableNumber() {

@@ -122,7 +122,6 @@ public class TicketShellController {
 			if (selectedEvent != null) {
 				// Buchungen mit den Bestuhlungen abgleichen, bevor das Event angezeigt wird (gilt nicht als Änderung)
 				BookingSyncService.prepare(selectedEvent);
-				ChangeTracker.events().ensureTracked(selectedEvent);
 			}
 			// Das Neufüllen der Liste meldet der Inhalt nicht einzeln: setEvent unten setzt ihn auf "Alle Vorstellungen"
 			updatingPresentations = true;

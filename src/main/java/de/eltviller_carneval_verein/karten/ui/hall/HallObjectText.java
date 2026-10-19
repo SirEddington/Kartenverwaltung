@@ -4,7 +4,7 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.model.TextAlignV;
-import de.eltviller_carneval_verein.karten.ui.input.RotationInput;
+import de.eltviller_carneval_verein.karten.util.Angles;
 import javafx.geometry.Bounds;
 import javafx.geometry.VPos;
 import javafx.scene.text.Font;
@@ -87,7 +87,7 @@ public final class HallObjectText {
 	 */
 	static Layout layout(HallObject hallObject, double textWidth, double textHeight) {
 		if (!hallObject.isTextAuto()) {
-			return new Layout(Math.max(MIN_SIZE, hallObject.getTextSize()), RotationInput.normalize(hallObject.getTextRotation()), hallObject.getTextAlignH(), hallObject.getTextAlignV());
+			return new Layout(Math.max(MIN_SIZE, hallObject.getTextSize()), Angles.normalize(hallObject.getTextRotation()), hallObject.getTextAlignH(), hallObject.getTextAlignV());
 		}
 
 		double[] area = usableArea(hallObject);

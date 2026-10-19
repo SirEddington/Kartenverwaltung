@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 import java.util.Comparator;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Der Wert der Spalte "Tisch" in der Kartentabelle: "A3" oder "3" aus der Momentaufnahme der Buchung, für alle
@@ -16,7 +17,7 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 record TableLabel(boolean unassigned, String rowLabel, int tableNumber) implements Comparable<TableLabel> {
 
 	/** Text der Gruppe der Buchungen ohne Platz. */
-	static final String UNASSIGNED_TEXT = "Ohne Platz";
+	static final String UNASSIGNED_TEXT = EntityLabels.UNASSIGNED_TEXT;
 
 	/** Reihenfolge der Kartentabelle: Buchungen ohne Platz zuerst, dann nach {@link Booking#PLACE_ORDER}. */
 	static final Comparator<Booking> BOOKING_ORDER = Comparator.comparing((Booking booking) -> !booking.isUnassigned()).thenComparing(Booking.PLACE_ORDER);

@@ -153,11 +153,6 @@ public class HallPlanPane extends StackPane {
 		return new Rectangle2D(minX, minY, maxX - minX, maxY - minY);
 	}
 
-	/** Der Hinweis über dem Plan, wenn keine Bestuhlung gezeichnet wird; {@code null} wenn keiner sichtbar ist. */
-	public String planHintText() {
-		return planHint.isVisible() ? planHint.getText() : null;
-	}
-
 	/**
 	 * Zeichnet den Saalplan der Vorstellung neu: Hallenumriss und Hallenobjekte (falls eine Halle zugeordnet ist),
 	 * dann die Reihen, Tische und Sitze der Bestuhlung so, wie sie gespeichert sind (angeordnet hat sie der

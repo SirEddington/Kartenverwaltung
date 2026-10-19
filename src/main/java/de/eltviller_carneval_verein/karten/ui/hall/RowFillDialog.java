@@ -4,7 +4,9 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.application.Platform;
 import javafx.event.ActionEvent;
 import javafx.geometry.Insets;
@@ -21,8 +23,8 @@ import javafx.stage.Window;
 
 /**
  * Der Dialog "Reihe füllen": fragt Tischzahl und Sitze je Tisch ab, mit denen der Aufrufer
- * {@link de.eltviller_carneval_verein.karten.model.SeatingPlan#fillRow} aufruft. Die Zahlen werden nicht geprüft (eine Zahl
- * unter 1 legt nichts an); ein unlesbarer Text hält den Dialog offen, die Fußzeile nennt den Grund (INP-001).
+ * {@link de.eltviller_carneval_verein.karten.model.SeatingPlan#fillRow} aufruft. Eine Zahl unter 1 legt nichts an, mehr als
+ * {@value #MAX_TABLES} Tische oder {@value #MAX_SEATS_PER_TABLE} Sitze je Tisch lehnt der Dialog ab; ein unlesbarer Text hält den Dialog offen, die Fußzeile nennt den Grund (INP-001).
  */
 public final class RowFillDialog {
 
@@ -33,6 +35,9 @@ public final class RowFillDialog {
 	// Startwerte: wie bisher eine Spalte der Saalübersicht (7 Tische) und die Sitze je Tisch der Event-Anlage
 	private static final int DEFAULT_TABLE_COUNT = 7;
 	private static final int DEFAULT_SEATS_PER_TABLE = 12;
+	// Obergrenzen je Aufruf, damit eine Tippfehler-Eingabe (z. B. 100000) die Oberfläche nicht einfriert
+	static final int MAX_TABLES = 200;
+	static final int MAX_SEATS_PER_TABLE = 100;
 
 	private RowFillDialog() {
 	}
@@ -77,6 +82,13 @@ public final class RowFillDialog {
 			tableCount.commitValue();
 			seatsPerTable.commitValue();
 			if (SpinnerInput.blockSaveIfInputRejected(tableCount, seatsPerTable)) {
+				event.consume();
+				return;
+			}
+			// Anzahlen sind keine Modellfelder, der Validator kann sie nicht prüfen: Zu große Werte würden die Oberfläche blockieren
+			if (tableCount.getValue() > MAX_TABLES || seatsPerTable.getValue() > MAX_SEATS_PER_TABLE) {
+				StatusMessage.getInstance().show(Severity.ERROR,
+						"Reihe füllen: höchstens " + MAX_TABLES + " Tische mit je " + MAX_SEATS_PER_TABLE + " Sitzen auf einmal.");
 				event.consume();
 			}
 		});

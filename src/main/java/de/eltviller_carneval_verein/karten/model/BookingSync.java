@@ -265,9 +265,7 @@ public final class BookingSync {
 	/** Schlüssel eines Sitzes aus Reihenbuchstabe, Tisch- und Sitznummer. */
 	private static String key(Seat seat) {
 		Table table = seat.getParent();
-		SeatingPlan plan = table.getPlan();
-		TableRow row = plan != null ? plan.findRow(table.getRowId()) : null;
-		return key(row != null ? row.getLabel() : null, table.getTableNumber(), seat.getSeatNumber());
+		return key(table.getRowLabel(), table.getTableNumber(), seat.getSeatNumber());
 	}
 
 	/** Schlüssel der Momentaufnahme einer Buchung. */

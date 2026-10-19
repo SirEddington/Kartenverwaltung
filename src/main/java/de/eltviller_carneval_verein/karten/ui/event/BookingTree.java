@@ -23,7 +23,7 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 final class BookingTree {
 
 	/** Text des Knotens der Buchungen ohne Platz. */
-	static final String UNASSIGNED_TEXT = "Ohne Platz";
+	static final String UNASSIGNED_TEXT = EntityLabels.UNASSIGNED_TEXT;
 
 	private BookingTree() {
 	}

@@ -127,7 +127,6 @@ public class AccountingShellController {
 			if (currentEvent != null) {
 				// Buchungen mit den Bestuhlungen abgleichen, bevor das Event angezeigt wird (gilt nicht als Änderung)
 				BookingSyncService.prepare(currentEvent);
-				ChangeTracker.events().ensureTracked(currentEvent);
 			}
 
 			List<Presentation> presentationItems = new ArrayList<>();

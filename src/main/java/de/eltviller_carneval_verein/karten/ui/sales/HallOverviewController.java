@@ -53,7 +53,6 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	// Mehrfachauswahl (nur im Bearbeitungsmodus): Strg-Klick auf Sitze oder Aufziehen eines Rahmens mit der linken Taste
 	private static final double RUBBER_BAND_THRESHOLD = 4;
-	private static final String SEAT_STYLE_CLASS = "hall-seat";
 	// Mit gesetztem Verkaufszustand ist es dessen Auswahl (so sieht das Kundenfenster sie)
 	private Set<Booking> selectedBookings = new LinkedHashSet<>();
 	private final Map<Node, Booking> seatNodes = new HashMap<>();
@@ -118,7 +117,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			bandPressed = false;
 			if (bandActive) {
 				finishRubberBand(event);
-			} else if (event.isStillSincePress() && !bandAdditive && !selectedBookings.isEmpty() && !isOnSeat(event.getTarget())) {
+			} else if (event.isStillSincePress() && !bandAdditive && !selectedBookings.isEmpty() && bookingAt(event.getTarget()) == null) {
 				// Klick ins Leere (auch auf einen Tisch) hebt die Auswahl auf
 				selectedBookings.clear();
 				renderHall();
@@ -140,15 +139,6 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	private boolean isDialogOpen() {
 		return activePopup != null && activePopup.isShowing();
-	}
-
-	private static boolean isOnSeat(Object target) {
-		for (Node node = target instanceof Node n ? n : null; node != null; node = node.getParent()) {
-			if (node.getStyleClass().contains(SEAT_STYLE_CLASS)) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	private void updateRubberBand(MouseEvent event) {
@@ -271,7 +261,6 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			shape.setStrokeWidth(selected ? 4 : searchActive && matchesQuery ? 3 : 1);
 		}
 		seatNode.setOpacity(matchesQuery ? 1.0 : 0.25);
-		seatNode.getStyleClass().add(SEAT_STYLE_CLASS);
 		seatNodes.put(seatNode, booking);
 
 		Tooltip.install(seatNode, new Tooltip(booking.getPlaceLabel() + " (" + booking.getStatus().getDisplayName() + ")"));

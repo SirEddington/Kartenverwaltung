@@ -22,6 +22,9 @@ public final class EntityLabels {
 	/** Platzhalter für einen leeren Namen in Anzeigen (Listen, Auswahlfelder). */
 	public static final String NAME_PLACEHOLDER = "(ohne Name)";
 
+	/** Bezeichnung der Buchungen, die keinen Platz in der Bestuhlung haben (Tabelle, Baum, Meldungen). */
+	public static final String UNASSIGNED_TEXT = "Ohne Platz";
+
 	/** Der Name, oder {@value #NAME_PLACEHOLDER}, wenn er {@code null} oder leer ist. */
 	public static String nameOrPlaceholder(String name) {
 		return (name == null || name.isBlank()) ? NAME_PLACEHOLDER : name;
@@ -90,7 +93,7 @@ public final class EntityLabels {
 	 * Tisch A3, Sitz 2)", damit sie nie mit der Buchung des echten Platzes verwechselt wird.
 	 */
 	public static String place(Booking booking) {
-		return booking.isUnassigned() ? "Ohne Platz (bisher " + booking.getPlaceLabel() + ")" : booking.getPlaceLabel();
+		return booking.isUnassigned() ? UNASSIGNED_TEXT + " (bisher " + booking.getPlaceLabel() + ")" : booking.getPlaceLabel();
 	}
 
 	/**

@@ -10,6 +10,7 @@ import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
@@ -113,7 +114,7 @@ public class EventCreateController {
 
 		Hall hall = cmbHall.getValue();
 		SeatingPlan plan = hall != null ? cmbSeatingPlan.getValue() : null;
-		int priceCents = (int) Math.round(spnDoublePrice.getValue() * 100);
+		int priceCents = MoneyFormat.toCents(spnDoublePrice.getValue());
 
 		// Vorstellungen: Halle, Bestuhlung und Standardpreis, dann je Sitz eine leere Buchung. Ohne Halle oder
 		// Bestuhlung entsteht die Vorstellung ohne Bestuhlung (die Prüfregeln warnen wie gewohnt)

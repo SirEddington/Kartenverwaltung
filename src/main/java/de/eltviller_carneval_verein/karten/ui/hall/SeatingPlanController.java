@@ -395,6 +395,9 @@ public class SeatingPlanController {
 	 * Zeichnet nicht neu (der gedrückte Knoten muss die Geste überstehen).
 	 */
 	private void select(TableRow row, Table table, Seat seat) {
+		// Ein Klick im Plan nimmt dem Eingabefeld den Fokus nicht: Getippter, noch nicht bestätigter Text würde sonst später in das
+		// neu markierte Objekt geschrieben. Der Fokus wechselt hier, solange die alte Markierung noch gilt.
+		rowList.requestFocus();
 		updatingPanel = true;
 		try {
 			rowList.getSelectionModel().clearSelection();
@@ -545,11 +548,11 @@ public class SeatingPlanController {
 	// --- Zeichnung -->
 
 	/**
-	 * Die Zeichnung der Bestuhlung für den Hallenplan ({@link SeatingPlanDrawing}). Liefert immer dieselbe Gruppe neu
-	 * befüllt; der Hallenplan legt sie über die Hallenobjekte und schaltet sie für den inaktiven Reiter mausdurchlässig.
+	 * Die Zeichnung der Bestuhlung für den Hallenplan ({@link SeatingPlanDrawing}). Liefert immer dieselbe Gruppe; sie wird
+	 * bei jeder Änderung der Bestuhlung neu befüllt, nicht erst beim Zeichnen des Hallenplans. Der Hallenplan legt sie über
+	 * die Hallenobjekte und schaltet sie für den inaktiven Reiter mausdurchlässig.
 	 */
 	public Node createLayer() {
-		redraw();
 		return drawing.layer();
 	}
 
@@ -567,13 +570,6 @@ public class SeatingPlanController {
 
 	public void setEditMode(boolean enabled) {
 		this.editMode = enabled;
-		updatePanel();
-		redraw();
-	}
-
-	/** Liste, Panel und Zeichnung neu aus dem Modell, z. B. nach Änderungen von außen. */
-	public void refresh() {
-		rowList.refresh();
 		updatePanel();
 		redraw();
 	}

@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui.input;
 
 import java.util.function.Supplier;
 
+import de.eltviller_carneval_verein.karten.util.Angles;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 
@@ -27,12 +28,7 @@ public final class RotationInput {
 
 	/** Drehung in Grad auf 0 bis unter 360 bringen (nie -0 und nie 360). */
 	public static double normalize(double degrees) {
-		double normalized = degrees % FULL_CIRCLE;
-		if (normalized < 0) {
-			normalized += FULL_CIRCLE;
-		}
-		// Ein winziger negativer Rest ergibt beim Aufaddieren genau 360; + 0.0 macht aus -0 eine 0
-		return normalized >= FULL_CIRCLE ? 0.0 : normalized + 0.0;
+		return Angles.normalize(degrees);
 	}
 
 	/** Der Wert nach {@code steps} Pfeiltasten-Schritten um {@code step} Grad, auf dem Kreis und gerundet. */

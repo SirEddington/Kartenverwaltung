@@ -6,7 +6,7 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
-import de.eltviller_carneval_verein.karten.ui.input.RotationInput;
+import de.eltviller_carneval_verein.karten.util.Angles;
 
 /**
  * Automatische Anordnung der Bestuhlung: Legt die Tische jeder Reihe nach Nummer sortiert entlang der Reihenachse
@@ -95,7 +95,7 @@ public final class SeatingPlanLayout {
 				double centerY = row.getPosY() + (s + extent / 2) * uy;
 				table.setPosX(centerX - table.getWidth() / 2);
 				table.setPosY(centerY - table.getHeight() / 2);
-				table.setRotation(RotationInput.normalize(row.getAngle() + row.getTableRotation()));
+				table.setRotation(Angles.normalize(row.getAngle() + row.getTableRotation()));
 			}
 
 			s += extent + row.getTableGap();

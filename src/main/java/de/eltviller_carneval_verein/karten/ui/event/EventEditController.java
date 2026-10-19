@@ -27,6 +27,7 @@ import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -263,7 +264,6 @@ public class EventEditController {
 		masterEventData.setAll(repository.loadEvents());
 		for (Event event : masterEventData) {
 			BookingSyncService.prepare(event);
-			ChangeTracker.events().ensureTracked(event);
 		}
 	}
 
@@ -317,7 +317,7 @@ public class EventEditController {
 		spnPresPrice.valueProperty().addListener((obs, oldVal, newVal) -> {
 			if (!loadingDetails && currentPres != null && newVal != null) {
 				// Buchungen mit Daten behalten dabei den bisherigen Preis (nie setPrice: das hielte nichts fest)
-				currentPres.changePrice((int) Math.round(newVal * 100));
+				currentPres.changePrice(MoneyFormat.toCents(newVal));
 			}
 		});
 		showPresentation(null);
@@ -543,8 +543,7 @@ public class EventEditController {
 		newPres.setHallId(presentation.getHallId());
 		newPres.setSeatingPlanId(presentation.getSeatingPlanId());
 		newPres.setPrice(presentation.getPrice());
-		Hall hall = hallRepository.findById(newPres.getHallId());
-		BookingSync.sync(newPres, hall != null ? hall.findSeatingPlan(newPres.getSeatingPlanId()) : null);
+		BookingSync.sync(newPres, modelPlan(newPres, hallRepository.findById(newPres.getHallId())));
 
 		refreshPresentationTable(event, newPres);
 

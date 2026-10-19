@@ -249,9 +249,7 @@ public class Booking {
 	/** Merkt sich den Sitz und hält den Platz (Reihe, Tisch, Sitz, Kategorie, Rollstuhl) als Momentaufnahme fest. */
 	public void takeSnapshot(Table table, Seat seat) {
 		this.seatId = seat.getId();
-		SeatingPlan plan = table.getPlan();
-		TableRow row = plan != null ? plan.findRow(table.getRowId()) : null;
-		this.rowLabel = row != null && row.getLabel() != null ? row.getLabel() : "";
+		this.rowLabel = table.getRowLabel();
 		this.tableNumber = table.getTableNumber();
 		this.seatNumber = seat.getSeatNumber();
 		this.category = table.getCategory();

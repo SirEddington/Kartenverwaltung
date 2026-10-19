@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.hall;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.util.Angles;
 import javafx.geometry.VPos;
 import javafx.scene.Group;
 import javafx.scene.Node;
@@ -131,7 +132,7 @@ public final class PlanNodeFactory {
 
 	/** Dreht eine Beschriftung mit, aber nie auf den Kopf (zwischen 90 und 270 Grad um 180 Grad weiter). */
 	static double readableRotation(double rotation) {
-		double normalized = ((rotation % 360) + 360) % 360;
+		double normalized = Angles.normalize(rotation);
 		return normalized > 90 && normalized < 270 ? normalized - 180 : normalized;
 	}
 }

@@ -11,8 +11,6 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.model.TableRow;
 import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
@@ -107,7 +105,7 @@ public final class AssignPlaceDialog {
 				}
 			}
 		}
-		Comparator<Seat> order = Comparator.comparing((Seat seat) -> rowLabel(seat), Booking.ROW_LABEL_ORDER)
+		Comparator<Seat> order = Comparator.comparing((Seat seat) -> seat.getParent().getRowLabel(), Booking.ROW_LABEL_ORDER)
 				.thenComparingInt(seat -> seat.getParent().getTableNumber()).thenComparingInt(Seat::getSeatNumber);
 		return plan.getSeats().stream().filter(seat -> !taken.contains(seat.getId())).sorted(order).toList();
 	}
@@ -115,12 +113,5 @@ public final class AssignPlaceDialog {
 	/** "Tisch A3, Sitz 2" bzw. "Tisch 3, Sitz 2" ohne Reihenbuchstaben. */
 	static String label(Seat seat) {
 		return seat.getParent().getDisplayName() + ", Sitz " + seat.getSeatNumber();
-	}
-
-	private static String rowLabel(Seat seat) {
-		Table table = seat.getParent();
-		SeatingPlan plan = table.getPlan();
-		TableRow row = plan != null ? plan.findRow(table.getRowId()) : null;
-		return row != null ? row.getLabel() : "";
 	}
 }

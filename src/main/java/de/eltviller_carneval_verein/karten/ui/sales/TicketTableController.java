@@ -20,6 +20,7 @@ import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
+import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.application.Platform;
@@ -321,7 +322,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		if (euros == null) {
 			return 0;
 		}
-		return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, Math.round(euros * 100)));
+		return MoneyFormat.toCents(euros);
 	}
 
 	private void loadBookings() {

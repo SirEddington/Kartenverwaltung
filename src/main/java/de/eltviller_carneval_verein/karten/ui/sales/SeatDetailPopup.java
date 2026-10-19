@@ -171,7 +171,7 @@ public final class SeatDetailPopup {
 		// noch nicht bestätigter Eingabe. Still lesen: Halb getippte Preise sollen keine Meldung auslösen.
 		spinner.getEditor().textProperty().addListener((obs, oldVal, newVal) -> {
 			Double euros = factory.parseQuietly(newVal);
-			field.change(euros == null ? null : (int) Math.round(euros * 100));
+			field.change(euros == null ? null : MoneyFormat.toCents(euros));
 			refreshTotal();
 		});
 		return spinner;

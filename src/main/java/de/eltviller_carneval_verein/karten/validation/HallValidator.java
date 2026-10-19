@@ -52,7 +52,18 @@ public final class HallValidator {
 		}
 	}
 
+	/**
+	 * Vergleich unter Geschwistern: eine Meldung je mehrfach vorkommendem Namen einer Bestuhlung (Groß-/Kleinschreibung
+	 * und Leerzeichen am Rand zählen nicht). Die Meldungen und Auswahlen nennen eine Bestuhlung nur über ihren Namen.
+	 */
+	private void validatePlanNamesAreUnique() {
+		for (String name : DuplicateNames.of(hall.getSeatingPlans().stream().map(SeatingPlan::getName))) {
+			result.add(SeatingPlanIssue.NAME_DUPLICATE.toIssue(EntityLabels.hall(hall), name));
+		}
+	}
+
 	private void validateSeatingPlans() {
+		validatePlanNamesAreUnique();
 		for (SeatingPlan plan : hall.getSeatingPlans()) {
 			result.addAll(SeatingPlanValidator.validate(plan));
 		}
