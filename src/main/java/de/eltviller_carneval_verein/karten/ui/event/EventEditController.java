@@ -15,6 +15,7 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
@@ -24,6 +25,7 @@ import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
@@ -31,11 +33,14 @@ import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.ui.event.PresentationTables.Item;
 import de.eltviller_carneval_verein.karten.ui.input.TableInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleDoubleProperty;
+import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -47,12 +52,15 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Spinner;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.CheckBoxTableCell;
+import javafx.scene.control.cell.ComboBoxTableCell;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
@@ -109,6 +117,45 @@ public class EventEditController {
 	@FXML
 	private TableColumn<Presentation, String> colPresPlan;
 
+	// Tisch Tabelle: die Tische der gewählten Vorstellung, aus ihren Buchungen gruppiert
+	@FXML
+	private HBox tableSeatHBox;
+	@FXML
+	private TableView<Item> tableTable;
+	@FXML
+	private TableColumn<Item, String> colTableName;
+	@FXML
+	private TableColumn<Item, Integer> colTableSeats;
+	@FXML
+	private TableColumn<Item, Integer> colTableOccupied;
+
+	// Sitz Tabelle: die Buchungen des gewählten Tisches
+	@FXML
+	private TableView<Booking> seatTable;
+	@FXML
+	private TableColumn<Booking, Integer> colSeat;
+	@FXML
+	private TableColumn<Booking, String> colSeatCategory;
+	@FXML
+	private TableColumn<Booking, Boolean> colSeatWheelchair;
+	@FXML
+	private TableColumn<Booking, String> colSeatLastName;
+	@FXML
+	private TableColumn<Booking, String> colSeatFirstName;
+	@FXML
+	private TableColumn<Booking, Double> colSeatPrice;
+	@FXML
+	private TableColumn<Booking, PaymentStatus> colSeatPayment;
+	@FXML
+	private TableColumn<Booking, Boolean> colSeatCollected;
+	@FXML
+	private TableColumn<Booking, String> colSeatComment;
+
+	private final ObservableList<Item> masterTableData = FXCollections.observableArrayList();
+	private final ObservableList<Booking> masterSeatData = FXCollections.observableArrayList();
+	// die Vorstellung, deren Tische die Tabelle Tisch zeigt (der gewählte Tisch bleibt nur innerhalb derselben Vorstellung)
+	private Presentation tablesOf;
+
 	// Halle, Bestuhlung und Standardpreis der gewählten Vorstellung
 	@FXML
 	private Label lblPresDetails;
@@ -147,9 +194,11 @@ public class EventEditController {
 
 	@FXML
 	public void initialize() {
+		setupBookingTables();
 		setupCollums();
 		TableInput.install(eventTable);
 		TableInput.install(presTable);
+		TableInput.install(seatTable);
 		setupPresentationDetails();
 		setupContextMenu();
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
@@ -230,6 +279,133 @@ public class EventEditController {
 
 		// Tabellenhöhe automatisch ermitteln
 		setupAutoHeight(eventPerfHBox, eventTable, presTable, 10);
+	}
+
+	/**
+	 * Die Tabellen Tisch und Sitz: Die Tische der gewählten Vorstellung stammen aus ihren Buchungen
+	 * ({@link PresentationTables}), die Sitze eines Tisches sind seine Buchungen. Bearbeitet werden die Buchungsdaten;
+	 * Sitz, Kategorie und Rollstuhlplatz gehören zur Bestuhlung (Hallen-Editor) und bleiben lesbar.
+	 */
+	private void setupBookingTables() {
+		// --- Tisch Tabelle ---
+		colTableName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().label()));
+		colTableSeats.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().seats()).asObject());
+		colTableOccupied.setCellValueFactory(cell -> new SimpleIntegerProperty((int) cell.getValue().occupied()).asObject());
+		tableTable.setItems(masterTableData);
+		TableFilter.forTableView(tableTable).apply();
+		tableTable.getSelectionModel().selectedItemProperty().addListener((obs, oldItem, item) -> masterSeatData.setAll(item == null ? List.of() : item.bookings()));
+
+		// --- Sitz Tabelle ---
+		colSeat.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getSeatNumber()).asObject());
+		colSeat.setCellFactory(column -> new TableCell<>() {
+			@Override
+			protected void updateItem(Integer seat, boolean empty) {
+				super.updateItem(seat, empty);
+				Booking booking = getTableRow() == null ? null : getTableRow().getItem();
+				setText(empty || seat == null || booking == null ? null : PresentationTables.seatText(booking));
+			}
+		});
+		colSeatCategory.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getCategory()));
+		colSeatWheelchair.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().isWheelchairAccessible()));
+		colSeatWheelchair.setCellFactory(CheckBoxTableCell.forTableColumn(colSeatWheelchair));
+		colSeat.setEditable(false);
+		colSeatCategory.setEditable(false);
+		colSeatWheelchair.setEditable(false);
+
+		colSeatLastName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getLastName()));
+		colSeatLastName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
+		colSeatLastName.setOnEditCommit(e -> {
+			e.getRowValue().setLastName(e.getNewValue());
+			bookingChanged();
+		});
+
+		colSeatFirstName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getFirstName()));
+		colSeatFirstName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
+		colSeatFirstName.setOnEditCommit(e -> {
+			e.getRowValue().setFirstName(e.getNewValue());
+			bookingChanged();
+		});
+
+		// Preis: der effektive Preis; der Standardpreis der Vorstellung als Eingabe entfernt den Einzelpreis
+		colSeatPrice.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getEffectivePrice() / 100.0).asObject());
+		colSeatPrice.setCellFactory(ParsingTextFieldTableCell.forTableColumn(new GermanDecimalStringConverter(), InputIssue.NOT_A_NUMBER, "Preis", EntityLabels::booking));
+		colSeatPrice.setOnEditCommit(e -> {
+			e.getRowValue().setEffectivePrice(e.getNewValue() == null ? 0 : MoneyFormat.toCents(e.getNewValue()));
+			bookingChanged();
+		});
+
+		colSeatPayment.setCellValueFactory(cell -> cell.getValue().getPaymentStatusProperty());
+		colSeatPayment.setCellFactory(ComboBoxTableCell.forTableColumn(new StringConverter<PaymentStatus>() {
+			@Override
+			public String toString(PaymentStatus status) {
+				return status == null ? "" : status.getDisplayName();
+			}
+
+			@Override
+			public PaymentStatus fromString(String string) {
+				return null; // Bei fixer ComboBox-Auswahl nicht erforderlich
+			}
+		}, PaymentStatus.values()));
+		colSeatPayment.setOnEditCommit(e -> {
+			e.getRowValue().setPaymentStatus(e.getNewValue());
+			bookingChanged();
+		});
+
+		colSeatCollected.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().isCollected()));
+		colSeatCollected.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
+			if (index < 0 || index >= seatTable.getItems().size()) {
+				return new SimpleBooleanProperty(false);
+			}
+			Booking booking = seatTable.getItems().get(index);
+			SimpleBooleanProperty prop = new SimpleBooleanProperty(booking.isCollected());
+			prop.addListener((obs, oldVal, newVal) -> {
+				booking.setCollected(newVal);
+				bookingChanged();
+			});
+			return prop;
+		}));
+
+		colSeatComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getComment()));
+		colSeatComment.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
+		colSeatComment.setOnEditCommit(e -> {
+			e.getRowValue().setComment(e.getNewValue());
+			bookingChanged();
+		});
+
+		seatTable.setItems(masterSeatData);
+		TableFilter.forTableView(seatTable).apply();
+		seatTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+		// Buchungen ohne Platz kursiv: Sie haben keinen Sitz in der Bestuhlung
+		seatTable.setRowFactory(table -> new TableRow<>() {
+			@Override
+			protected void updateItem(Booking item, boolean empty) {
+				super.updateItem(item, empty);
+				setStyle(!empty && item != null && item.isUnassigned() ? "-fx-font-style: italic;" : "");
+			}
+		});
+	}
+
+	/** Eine Buchung wurde bearbeitet: Die Zahl der belegten Sitze im Tisch ändert sich mit. */
+	private void bookingChanged() {
+		tableTable.refresh();
+	}
+
+	/**
+	 * Zeigt die Tische der Vorstellung (ohne Vorstellung: leer). Der gewählte Tisch bleibt gewählt, solange es ihn in
+	 * derselben Vorstellung noch gibt, sonst ist der erste gewählt.
+	 */
+	private void showBookingTables(Presentation presentation) {
+		Item previous = tableTable.getSelectionModel().getSelectedItem();
+		String keep = previous != null && presentation == tablesOf ? previous.label() : null;
+		tablesOf = presentation;
+		List<Item> items = presentation == null ? List.of() : PresentationTables.items(presentation);
+		masterTableData.setAll(items);
+		Item select = items.stream().filter(item -> item.label().equals(keep)).findFirst().orElse(items.isEmpty() ? null : items.get(0));
+		if (select == null) {
+			masterSeatData.clear();
+		} else {
+			tableTable.getSelectionModel().select(select);
+		}
 	}
 
 	/**
@@ -380,6 +556,7 @@ public class EventEditController {
 			loadingDetails = false;
 		}
 		presTable.refresh();
+		showBookingTables(presentation);
 	}
 
 	/**
@@ -399,6 +576,7 @@ public class EventEditController {
 			}
 		}
 		presTable.refresh();
+		showBookingTables(presentation);
 	}
 
 	/** Füllt die Bestuhlungsauswahl mit den Bestuhlungen der Halle; {@code select} ist die gewählte (oder {@code null}). */
@@ -436,6 +614,7 @@ public class EventEditController {
 		} finally {
 			loadingDetails = false;
 		}
+		showBookingTables(presentation);
 		applyEditMode();
 	}
 
@@ -645,6 +824,7 @@ public class EventEditController {
 	private void applyEditMode() {
 		eventTable.setEditable(editMode);
 		presTable.setEditable(editMode);
+		seatTable.setEditable(editMode);
 
 		if (btnSave != null) {
 			btnSave.setDisable(!editMode);
