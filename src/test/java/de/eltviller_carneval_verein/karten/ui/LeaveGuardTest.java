@@ -141,6 +141,37 @@ class LeaveGuardTest {
 	}
 
 	@Test
+	void discardingANewEntityForgetsItInsteadOfRestoringIt() {
+		Event created = event("Neu");
+		eventTracker.trackNew(created);
+
+		assertTrue(leave(LeaveGuard.Decision.DISCARD));
+
+		assertEquals(List.of(List.of("Event \"Neu\"")), questions, "Ein neues Event zählt wie jede andere Änderung");
+		assertTrue(eventCache.isEmpty(), "Es gab keinen gespeicherten Stand, der wiederhergestellt werden könnte");
+		assertNull(eventTracker.baseline(created));
+	}
+
+	@Test
+	void savingANewEntityKeepsIt() {
+		Event created = event("Neu");
+		eventTracker.trackNew(created);
+
+		assertTrue(leave(LeaveGuard.Decision.SAVE));
+
+		assertEquals(List.of(created), eventSaveAttempts);
+	}
+
+	@Test
+	void switchingToViewModeWithANewEntityAfterDiscardReportsRestored() {
+		Event created = event("Neu");
+		eventTracker.trackNew(created);
+
+		assertEquals(LeaveGuard.Outcome.LEAVE_RESTORED, outcome(LeaveGuard.Decision.DISCARD));
+		assertFalse(eventTracker.anyDirty());
+	}
+
+	@Test
 	void cleanEntitiesMeanLeavingWithoutAQuestion() {
 		Event event = event("Kampagne");
 		Hall hall = hall("Halle 1");

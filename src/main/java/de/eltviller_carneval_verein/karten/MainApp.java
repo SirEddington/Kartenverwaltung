@@ -156,11 +156,24 @@ public class MainApp extends Application {
 	}
 
 	public static void showEventEditView(Event selectedEvent, Presentation selectedPres, boolean editable) {
+		openEventEditView(selectedEvent, selectedPres, editable, true);
+	}
+
+	/**
+	 * Öffnet das Event-Detail, ohne wegen ungespeicherter Änderungen nachzufragen, und nimmt sie mit: Ein Event, das
+	 * gerade in der Übersicht hinzugefügt oder als Vorlage angelegt wurde, ist noch nicht gespeichert und soll im Detail
+	 * mit "Speichern *" erscheinen. Die Änderungserkennung bleibt dabei bestehen (kein Zurücksetzen).
+	 */
+	public static void showEventEditViewWithChanges(Event selectedEvent, Presentation selectedPres, boolean editable) {
+		openEventEditView(selectedEvent, selectedPres, editable, false);
+	}
+
+	private static void openEventEditView(Event selectedEvent, Presentation selectedPres, boolean editable, boolean askToLeave) {
 		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/EventEditView.fxml";
 		try {
 
 			// Aktuelle Fenstergröße holen
-			if (!LeaveGuard.confirmLeave()) {
+			if (askToLeave && !LeaveGuard.confirmLeave()) {
 				return;
 			}
 			StatusMessage.getInstance().clear();

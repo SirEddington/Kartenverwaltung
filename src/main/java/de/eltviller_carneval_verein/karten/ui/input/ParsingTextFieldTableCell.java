@@ -99,6 +99,12 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	public void commitEdit(T newValue) {
 		Optional<ParsingConverter.Failure> failure = parsing.takeFailure();
 		if (failure.isEmpty()) {
+			if (CellValues.isUnchanged(getItem(), newValue)) {
+				// Nichts geändert (ein leeres Feld ist auch "nichts"): Der Wert wird nicht erneut ins Modell geschrieben,
+				// sonst würde aus einem fehlenden Text "" und der Änderungsanzeiger sprang ohne Änderung an
+				cancelEdit();
+				return;
+			}
 			super.commitEdit(newValue);
 			pseudoClassStateChanged(EDITING, false);
 			return;

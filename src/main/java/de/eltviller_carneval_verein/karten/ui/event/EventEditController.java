@@ -5,6 +5,7 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import org.controlsfx.control.table.TableFilter;
@@ -34,7 +35,6 @@ import de.eltviller_carneval_verein.karten.ui.input.TableInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.application.Platform;
-import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
@@ -267,7 +267,14 @@ public class EventEditController {
 	 * gilt nicht als Änderung, siehe {@link BookingSyncService}).
 	 */
 	private void loadEvents() {
-		masterEventData.setAll(repository.loadEvents());
+		List<Event> events = new ArrayList<>(repository.loadEvents());
+		// Neue, noch nicht gespeicherte Events (Hinzufügen, Als Vorlage) stehen noch nicht im Repository, gehören aber hierher
+		for (Event unsaved : ChangeTracker.events().dirtyEntities()) {
+			if (ChangeTracker.events().isNew(unsaved) && !events.contains(unsaved)) {
+				events.add(unsaved);
+			}
+		}
+		masterEventData.setAll(events);
 		for (Event event : masterEventData) {
 			BookingSyncService.prepare(event);
 		}
@@ -434,25 +441,38 @@ public class EventEditController {
 
 	private void setupContextMenu() {
 		// 1. Kontextmenü für Event-Tabelle
-		setupTableContextMenu(eventTable, event -> handleAddEvent(), event -> handleCopyEvent(event), event -> handleDeleteEvent(event));
+		setupTableContextMenu(eventTable, "+ Event hinzufügen", this::handleAddEvent, () -> true, this::handleCopyEvent, this::handleDeleteEvent);
 
-		// 2. Kontextmenü für Aufführungen/Vorstellungen
-		setupTableContextMenu(presTable, pres -> handleAddPres(), pres -> handleCopyPres(pres, null), pres -> handleDeletePres(pres));
+		// 2. Kontextmenü für Aufführungen/Vorstellungen: Eine Vorstellung braucht ein gewähltes Event
+		setupTableContextMenu(presTable, "+ Vorstellung hinzufügen", this::handleAddPres, () -> eventTable.getSelectionModel().getSelectedItem() != null, this::handleCopyPres,
+				this::handleDeletePres);
 	}
 
-	private <T> void setupTableContextMenu(TableView<T> tableView, Consumer<T> onAdd, Consumer<T> onCopy, Consumer<T> onDelete) {
+	/**
+	 * Das Kontextmenü einer Tabelle. "Hinzufügen" gilt für die Tabelle, nicht für die Zeile darunter: Es funktioniert
+	 * auch bei einem Rechtsklick in leere Zeilen oder in die leere Fläche (dort das Menü der Tabelle), und fehlt, wenn
+	 * es nichts hinzuzufügen gibt ({@code canAdd}, z. B. keine Vorstellung ohne gewähltes Event). "Als Vorlage" und
+	 * "Löschen" gelten für die Zeile.
+	 */
+	private <T> void setupTableContextMenu(TableView<T> tableView, String addText, Runnable onAdd, BooleanSupplier canAdd, Consumer<T> onCopy, Consumer<T> onDelete) {
+		// Rechtsklick dorthin, wo gar keine Zeile ist (leere Tabelle): nur "Hinzufügen"
+		MenuItem tableAddItem = new MenuItem(addText);
+		tableAddItem.setOnAction(e -> onAdd.run());
+		ContextMenu tableMenu = new ContextMenu(tableAddItem);
+		tableMenu.setOnShowing(e -> {
+			tableAddItem.setDisable(!editMode);
+			tableAddItem.setVisible(canAdd.getAsBoolean());
+			hideIfNothingVisible(tableMenu);
+		});
+		tableView.setContextMenu(tableMenu);
+
 		tableView.setRowFactory(tv -> {
 			TableRow<T> tableRow = new TableRow<>();
 			ContextMenu contextMenu = new ContextMenu();
 			SeparatorMenuItem separator = new SeparatorMenuItem();
 
-			MenuItem addItem = new MenuItem("+ Hinzufügen");
-			addItem.setOnAction(e -> {
-				T item = tableRow.getItem();
-				if (item != null && onAdd != null) {
-					onAdd.accept(item);
-				}
-			});
+			MenuItem addItem = new MenuItem(addText);
+			addItem.setOnAction(e -> onAdd.run());
 
 			MenuItem copyItem = new MenuItem("+ als Vorlage Verwenden");
 			copyItem.setOnAction(e -> {
@@ -476,46 +496,54 @@ public class EventEditController {
 				Object data = tableRow.getItem();
 				// Im Anzeigemodus bleiben die Einträge sichtbar, sind aber nicht ausführbar
 				contextMenu.getItems().forEach(item -> item.setDisable(!editMode));
-				addItem.setVisible(true);
-				copyItem.setVisible(data instanceof Event || data instanceof Presentation);
-				separator.setVisible(data instanceof Event || data instanceof Presentation);
-				deleteItem.setVisible(data instanceof Event || data instanceof Presentation);
+				boolean entity = data instanceof Event || data instanceof Presentation;
+				addItem.setVisible(canAdd.getAsBoolean());
+				copyItem.setVisible(entity);
+				separator.setVisible(entity && addItem.isVisible());
+				deleteItem.setVisible(entity);
+				hideIfNothingVisible(contextMenu);
 			});
 
-			// Menü nur binden, wenn die Zeile nicht leer ist
-			tableRow.contextMenuProperty().bind(Bindings.when(tableRow.emptyProperty()).then((ContextMenu) contextMenu).otherwise(contextMenu));
+			// Auch leere Zeilen (die Tabelle füllt die Fläche damit auf) bekommen das Menü: "Hinzufügen" gilt dort ebenso
+			tableRow.setContextMenu(contextMenu);
 
 			return tableRow;
 		});
 	}
 
-	private void handleAddEvent() {
-		refreshEventTable(currentEvent);
-
+	/** Ein Menü ohne sichtbaren Eintrag erscheint nicht als leere Fläche. */
+	private static void hideIfNothingVisible(ContextMenu menu) {
+		if (menu.getItems().stream().noneMatch(MenuItem::isVisible)) {
+			Platform.runLater(menu::hide);
+		}
 	}
 
+	/** Ein neues Event, noch nicht gespeichert ("Speichern *"); es ist in der Tabelle gewählt. */
+	private void handleAddEvent() {
+		Event created = EventTemplates.newEvent(masterEventData.stream().map(Event::getName).toList());
+		ChangeTracker.events().trackNew(created);
+		refreshEventTable(created);
+	}
+
+	/** Das Event samt Vorstellungen als Vorlage für ein neues Event, noch nicht gespeichert; es ist in der Tabelle gewählt. */
 	private void handleCopyEvent(Event event) {
-		Event newEvent = new Event();
-
-		// Die Kopie bekommt einen eigenen Namen ("<Name> (Kopie)"), sonst würde sie nie gespeichert (EVT-002); umbenennen geht in der Tabelle
-		newEvent.setName(Event.createCopyName(event.getName(), masterEventData.stream().map(Event::getName).toList()));
-		newEvent.setDescription(event.getDescription());
-
-		for (Presentation pres : event.getPresentations()) {
-			handleCopyPres(pres, newEvent);
-		}
-
-		// Bei Erfolg ist die Kopie gewählt; sonst bleibt das Original gewählt (handleCopyPres hat die Kopie schon angezeigt)
-		boolean saved = EventSaver.save(newEvent);
-		refreshEventTable(saved ? newEvent : event);
+		Event copy = EventTemplates.copyEvent(event, masterEventData.stream().map(Event::getName).toList(), hallRepository::findById);
+		ChangeTracker.events().trackNew(copy);
+		refreshEventTable(copy);
 	}
 
 	private void handleDeleteEvent(Event event) {
-		if (!ConfirmDialog.confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
+		boolean neverSaved = ChangeTracker.events().isNew(event);
+		if (!neverSaved && !ConfirmDialog.confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
 			return;
 		}
 
-		repository.deleteEvent(event);
+		if (neverSaved) {
+			// Nie gespeichert: Es gibt nichts zu löschen, es verschwindet nur wieder aus der Tabelle
+			ChangeTracker.events().untrack(event);
+		} else {
+			repository.deleteEvent(event);
+		}
 
 		if (event.equals(currentEvent)) {
 			currentEvent = null;
@@ -523,36 +551,23 @@ public class EventEditController {
 		refreshEventTable(currentEvent);
 	}
 
+	/** Eine neue Vorstellung im gewählten Event, noch nicht gespeichert; sie ist in der Tabelle gewählt. */
 	private void handleAddPres() {
-		Presentation newPres = eventTable.getSelectionModel().getSelectedItem().addPresentation();
-		refreshPresentationTable(currentEvent, newPres);
+		Event event = eventTable.getSelectionModel().getSelectedItem();
+		if (event == null) {
+			return;
+		}
+		Presentation newPres = event.addPresentation();
+		ChangeTracker.events().check(event);
+		refreshPresentationTable(event, newPres);
 	}
 
-	/**
-	 * Kopiert die Vorstellung als Vorlage: Name, Beschreibung, Datum, Zeit, Halle, Bestuhlung und Standardpreis. Die
-	 * Buchungen werden nicht kopiert, die Kopie bekommt je Sitz der Bestuhlung eine leere Buchung.
-	 */
-	private void handleCopyPres(Presentation presentation, Event parentEvent) {
-		Event event;
-		Presentation newPres;
-		if (parentEvent != null) {
-			event = parentEvent;
-		} else {
-			event = presentation.getParent();
-		}
-
-		newPres = event.addPresentation(presentation.getName());
-
-		newPres.setDescription(presentation.getDescription());
-		newPres.setDate(presentation.getDate());
-		newPres.setTime(presentation.getTime());
-		newPres.setHallId(presentation.getHallId());
-		newPres.setSeatingPlanId(presentation.getSeatingPlanId());
-		newPres.setPrice(presentation.getPrice());
-		BookingSync.sync(newPres, modelPlan(newPres, hallRepository.findById(newPres.getHallId())));
-
-		refreshPresentationTable(event, newPres);
-
+	/** Kopiert die Vorstellung als Vorlage in dasselbe Event ({@link EventTemplates#copyPresentation}), noch nicht gespeichert. */
+	private void handleCopyPres(Presentation presentation) {
+		Event event = presentation.getParent();
+		Presentation copy = EventTemplates.copyPresentation(presentation, event, hallRepository::findById);
+		ChangeTracker.events().check(event);
+		refreshPresentationTable(event, copy);
 	}
 
 	private void handleDeletePres(Presentation presentation) {

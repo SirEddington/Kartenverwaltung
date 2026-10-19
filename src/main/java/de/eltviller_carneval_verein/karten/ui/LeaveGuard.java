@@ -69,7 +69,12 @@ public final class LeaveGuard {
 
 		void discardDirty() {
 			for (T entity : tracker.dirtyEntities()) {
-				restorer.restoreBaseline(entity);
+				if (tracker.isNew(entity)) {
+					// Nie gespeichert: Es gibt keinen Stand zum Wiederherstellen, die Entität verschwindet einfach
+					tracker.untrack(entity);
+				} else {
+					restorer.restoreBaseline(entity);
+				}
 			}
 		}
 	}

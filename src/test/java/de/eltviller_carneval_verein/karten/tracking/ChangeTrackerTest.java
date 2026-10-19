@@ -46,6 +46,48 @@ class ChangeTrackerTest {
 		tracker.addListener((event, before, after) -> calls.add(new Call(event, before, after)));
 	}
 
+	@Test
+	void aNewEntityCountsAsChangedUntilItIsSaved() {
+		Event created = event("Neu");
+		tracker.trackNew(created);
+
+		assertTrue(tracker.isNew(created));
+		assertTrue(tracker.isDirty(created), "Es gibt keinen gespeicherten Stand, mit dem es übereinstimmen könnte");
+		assertTrue(tracker.anyDirty());
+		assertEquals(List.of(created), tracker.dirtyEntities());
+
+		created.setName("Umbenannt");
+		tracker.check(created);
+		assertTrue(tracker.isDirty(created), "Auch nach weiteren Änderungen bleibt es neu und geändert");
+
+		tracker.markSaved(created);
+
+		assertFalse(tracker.isNew(created));
+		assertFalse(tracker.isDirty(created));
+		assertFalse(tracker.anyDirty());
+	}
+
+	@Test
+	void aNewEntityCanBeForgottenWithoutRestoringAnything() {
+		Event created = event("Neu");
+		tracker.trackNew(created);
+
+		tracker.untrack(created);
+
+		assertFalse(tracker.isNew(created));
+		assertFalse(tracker.anyDirty());
+		assertNull(tracker.baseline(created));
+	}
+
+	@Test
+	void trackedEntitiesAreNotNew() {
+		Event saved = event("Gespeichert");
+		tracker.track(saved);
+
+		assertFalse(tracker.isNew(saved));
+		assertFalse(tracker.isNew(event("Unbekannt")));
+	}
+
 	private static Event event(String name) {
 		Event event = new Event();
 		event.setName(name);
