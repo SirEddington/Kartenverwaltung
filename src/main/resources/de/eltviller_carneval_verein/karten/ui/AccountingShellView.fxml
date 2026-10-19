@@ -18,28 +18,39 @@
     </fx:define>
 
     <!-- OBERER BEREICH: Header, unabhängig vom Kartenverkauf -->
-    <HBox alignment="CENTER_LEFT" spacing="10.0">
-        <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" />
+    <!-- Wie in der Verkaufsshell: Beschriftungen über den Feldern, feste Elemente behalten ihre Breite, nur die Auswahlfelder schrumpfen -->
+    <HBox alignment="BOTTOM_LEFT" spacing="10.0">
+        <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" minWidth="-Infinity" />
 
-        <Label text="Abrechnung" styleClass="header-label" />
-
-        <Region HBox.hgrow="ALWAYS" />
-
-        <Label text="Event:" />
-        <ComboBox fx:id="eventComboBox" prefWidth="180.0" promptText="Event wählen..." />
-        <CheckBox fx:id="chkIncludeArchived" text="Archivierte einschließen" />
-
-        <Label text="Vorstellung:" />
-        <ComboBox fx:id="presComboBox" prefWidth="180.0" />
+        <Label text="Abrechnung" styleClass="header-label" minWidth="-Infinity" />
 
         <Region HBox.hgrow="ALWAYS" />
 
-        <RadioButton fx:id="btnViewCash" text="Kassenabgleich" toggleGroup="$viewToggleGroup" selected="true" />
-        <RadioButton fx:id="btnViewStats" text="Statistik" toggleGroup="$viewToggleGroup" />
+        <VBox spacing="2.0" HBox.hgrow="SOMETIMES">
+            <Label text="Event" styleClass="field-caption" />
+            <ComboBox fx:id="eventComboBox" prefWidth="160.0" minWidth="100.0" maxWidth="Infinity" promptText="Event wählen..." />
+        </VBox>
+        <CheckBox fx:id="chkIncludeArchived" text="Archivierte einschließen" minWidth="-Infinity">
+            <padding><Insets bottom="6.0" /></padding>
+        </CheckBox>
+
+        <VBox spacing="2.0" HBox.hgrow="SOMETIMES">
+            <Label text="Vorstellung" styleClass="field-caption" />
+            <ComboBox fx:id="presComboBox" prefWidth="160.0" minWidth="100.0" maxWidth="Infinity" />
+        </VBox>
 
         <Region HBox.hgrow="ALWAYS" />
 
-        <Button fx:id="btnToggleEdit" styleClass="button-secondary" text="Bearbeiten" onAction="#toggleEditMode" disable="true" />
+        <RadioButton fx:id="btnViewCash" text="Kassenabgleich" toggleGroup="$viewToggleGroup" selected="true" minWidth="-Infinity">
+            <padding><Insets bottom="6.0" /></padding>
+        </RadioButton>
+        <RadioButton fx:id="btnViewStats" text="Statistik" toggleGroup="$viewToggleGroup" minWidth="-Infinity">
+            <padding><Insets bottom="6.0" /></padding>
+        </RadioButton>
+
+        <Region HBox.hgrow="ALWAYS" />
+
+        <Button fx:id="btnToggleEdit" styleClass="button-secondary" text="Bearbeiten" onAction="#toggleEditMode" minWidth="-Infinity" disable="true" />
     </HBox>
 
     <Separator />

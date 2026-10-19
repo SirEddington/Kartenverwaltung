@@ -40,6 +40,8 @@ public class MainApp extends Application {
 	private static final Logger LOG = Logger.getLogger(MainApp.class.getName());
 
 	private static Stage primaryStage;
+	// Mindestbreite des Hauptfensters: So schmal darf es werden, die Kopfzeilen der Bildschirme sind darauf abgestimmt
+	private static final double MIN_WIDTH = 1250.0;
 	private static double width = 1300.0;
 	private static double height = 780.0;
 
@@ -54,7 +56,7 @@ public class MainApp extends Application {
 		stage.sceneProperty().addListener((obs, oldScene, newScene) -> PopupWindows.hideOwnedBy(stage));
 		primaryStage.setWidth(width);
 		primaryStage.setHeight(height);
-		primaryStage.setMinWidth(width);
+		primaryStage.setMinWidth(MIN_WIDTH);
 		primaryStage.setMinHeight(height);
 
 		stage.setTitle("ECV Kartenverwaltung");

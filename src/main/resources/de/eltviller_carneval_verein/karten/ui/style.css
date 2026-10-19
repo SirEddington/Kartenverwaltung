@@ -52,6 +52,12 @@
 	    -fx-text-fill: -fx-ecv-blue;
 	}
 
+/* Kleine Beschriftung über einem Feld (z. B. "Event" über der Eventauswahl in der Kopfzeile) */
+.field-caption {
+    -fx-font-size: 11px;
+    -fx-text-fill: #666666;
+}
+
 /* Überschriften (Yanone Kaffeesatz Bold in ECV-Blau) */
 .header-title, .header-label {
     -fx-font-family: "Yanone Kaffeesatz Bold"/*, "Calibri", sans-serif*/;
