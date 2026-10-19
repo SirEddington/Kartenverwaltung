@@ -69,7 +69,12 @@ public final class LeaveGuard {
 
 		void discardDirty() {
 			for (T entity : tracker.dirtyEntities()) {
-				restorer.restoreBaseline(entity);
+				if (tracker.isNew(entity)) {
+					// Nie gespeichert: Es gibt keinen Stand zum Wiederherstellen, die Entität verschwindet einfach
+					tracker.untrack(entity);
+				} else {
+					restorer.restoreBaseline(entity);
+				}
 			}
 		}
 	}
@@ -90,15 +95,42 @@ public final class LeaveGuard {
 		return List.of(new Scope<>("Event", ChangeTracker.events(), StateRestorer.events(), EventSaver::save), new Scope<>("Halle", ChangeTracker.halls(), StateRestorer.halls(), HallSaver::save));
 	}
 
+	/** Wie es nach der Rückfrage weitergeht. */
+	public enum Outcome {
+		/** Der Nutzer bleibt auf dem Screen (Abbrechen oder ein Speichern, das nicht gelang). */
+		STAY,
+		/** Weiter; die Entitäten sind unverändert oder gespeichert, die gehaltenen Objekte bleiben gültig. */
+		LEAVE,
+		/** Weiter, aber der gespeicherte Stand wurde wiederhergestellt: Gehaltene Objekte sind veraltet und neu zu holen. */
+		LEAVE_RESTORED
+	}
+
+	/**
+	 * Die Rückfrage beim Wechsel vom Bearbeitungs- in den Anzeigemodus: wie {@link #confirmLeave()}, nur bleibt der
+	 * Screen stehen. Deshalb vergessen die Tracker nichts: Im Bearbeitungsmodus, in den man gleich wieder wechseln
+	 * kann, soll weiter auf Änderungen geachtet werden.
+	 */
+	public static Outcome confirmSwitchToViewMode() {
+		return decide(appScopes(), LeaveGuard::askUser, false);
+	}
+
 	/** Die Entscheidung mit austauschbaren Teilen (paketsichtbar für Tests ohne Oberfläche). */
 	static boolean confirmLeave(List<Scope<?>> scopes, Function<List<String>, Decision> ask) {
+		return decide(scopes, ask, true) != Outcome.STAY;
+	}
+
+	/**
+	 * @param resetTrackers {@code true} beim Verlassen des Screens (die Tracker gelten nur je Screen-Sitzung), {@code false}
+	 *                      wenn der Screen stehen bleibt
+	 */
+	static Outcome decide(List<Scope<?>> scopes, Function<List<String>, Decision> ask, boolean resetTrackers) {
 		scopes.forEach(Scope::checkAll);
 
 		List<String> dirty = new ArrayList<>();
 		scopes.forEach(scope -> dirty.addAll(scope.describeDirty()));
 		if (dirty.isEmpty()) {
-			resetAll(scopes);
-			return true;
+			resetIf(resetTrackers, scopes);
+			return Outcome.LEAVE;
 		}
 
 		switch (ask.apply(dirty)) {
@@ -106,22 +138,24 @@ public final class LeaveGuard {
 			for (Scope<?> scope : scopes) {
 				if (!scope.saveDirty()) {
 					// Der Saver hat die Fehler in der Fußzeile gemeldet; der Nutzer bleibt auf dem Screen
-					return false;
+					return Outcome.STAY;
 				}
 			}
-			resetAll(scopes);
-			return true;
+			resetIf(resetTrackers, scopes);
+			return Outcome.LEAVE;
 		case DISCARD:
 			scopes.forEach(Scope::discardDirty);
-			resetAll(scopes);
-			return true;
+			resetIf(resetTrackers, scopes);
+			return Outcome.LEAVE_RESTORED;
 		default:
-			return false;
+			return Outcome.STAY;
 		}
 	}
 
-	private static void resetAll(List<Scope<?>> scopes) {
-		scopes.forEach(scope -> scope.tracker().reset());
+	private static void resetIf(boolean resetTrackers, List<Scope<?>> scopes) {
+		if (resetTrackers) {
+			scopes.forEach(scope -> scope.tracker().reset());
+		}
 	}
 
 	private static Decision askUser(List<String> dirty) {

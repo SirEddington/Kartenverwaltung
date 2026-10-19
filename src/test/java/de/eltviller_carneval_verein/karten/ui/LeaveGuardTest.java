@@ -86,6 +86,91 @@ class LeaveGuardTest {
 		return LeaveGuard.confirmLeave(scopes(), ask);
 	}
 
+	/** Die Rückfrage beim Wechsel in den Anzeigemodus: Der Screen bleibt stehen, die Tracker bleiben im Dienst. */
+	private LeaveGuard.Outcome outcome(LeaveGuard.Decision decision) {
+		return LeaveGuard.decide(scopes(), dirty -> decision, false);
+	}
+
+	@Test
+	void switchingToViewModeKeepsTrackingBecauseTheScreenStays() {
+		Event event = event("Kampagne");
+		eventTracker.track(event);
+		change(event);
+
+		assertEquals(LeaveGuard.Outcome.LEAVE, outcome(LeaveGuard.Decision.SAVE));
+
+		assertNotNull(eventTracker.baseline(event), "Danach wird im Bearbeitungsmodus weiter auf Änderungen geachtet");
+		event.setName("Andere Kampagne");
+		eventTracker.check(event);
+		assertTrue(eventTracker.isDirty(event));
+	}
+
+	@Test
+	void switchingToViewModeAfterDiscardKeepsTrackingTheRestoredState() {
+		Event event = event("Kampagne");
+		eventTracker.track(event);
+		change(event);
+
+		assertEquals(LeaveGuard.Outcome.LEAVE_RESTORED, outcome(LeaveGuard.Decision.DISCARD));
+
+		assertEquals(1, eventCache.size());
+		assertNotNull(eventTracker.baseline(eventCache.get(0)));
+		assertFalse(eventTracker.isDirty(eventCache.get(0)));
+	}
+
+	@Test
+	void outcomeTellsWhetherTheSavedStateWasRestored() {
+		Event event = event("Kampagne");
+		eventTracker.track(event);
+
+		assertEquals(LeaveGuard.Outcome.LEAVE, outcome(LeaveGuard.Decision.CANCEL), "Ohne Änderung gibt es nichts zu fragen und nichts wiederherzustellen");
+
+		eventTracker.track(event);
+		change(event);
+		assertEquals(LeaveGuard.Outcome.LEAVE_RESTORED, outcome(LeaveGuard.Decision.DISCARD));
+
+		Event another = event("Zwei");
+		eventTracker.track(another);
+		change(another);
+		assertEquals(LeaveGuard.Outcome.LEAVE, outcome(LeaveGuard.Decision.SAVE), "Gespeichert heißt: Die Objekte bleiben, wie sie sind");
+
+		Event third = event("Drei");
+		eventTracker.track(third);
+		change(third);
+		assertEquals(LeaveGuard.Outcome.STAY, outcome(LeaveGuard.Decision.CANCEL));
+	}
+
+	@Test
+	void discardingANewEntityForgetsItInsteadOfRestoringIt() {
+		Event created = event("Neu");
+		eventTracker.trackNew(created);
+
+		assertTrue(leave(LeaveGuard.Decision.DISCARD));
+
+		assertEquals(List.of(List.of("Event \"Neu\"")), questions, "Ein neues Event zählt wie jede andere Änderung");
+		assertTrue(eventCache.isEmpty(), "Es gab keinen gespeicherten Stand, der wiederhergestellt werden könnte");
+		assertNull(eventTracker.baseline(created));
+	}
+
+	@Test
+	void savingANewEntityKeepsIt() {
+		Event created = event("Neu");
+		eventTracker.trackNew(created);
+
+		assertTrue(leave(LeaveGuard.Decision.SAVE));
+
+		assertEquals(List.of(created), eventSaveAttempts);
+	}
+
+	@Test
+	void switchingToViewModeWithANewEntityAfterDiscardReportsRestored() {
+		Event created = event("Neu");
+		eventTracker.trackNew(created);
+
+		assertEquals(LeaveGuard.Outcome.LEAVE_RESTORED, outcome(LeaveGuard.Decision.DISCARD));
+		assertFalse(eventTracker.anyDirty());
+	}
+
 	@Test
 	void cleanEntitiesMeanLeavingWithoutAQuestion() {
 		Event event = event("Kampagne");

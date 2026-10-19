@@ -10,6 +10,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
@@ -200,14 +201,10 @@ public class EventOverviewController extends AbstractOverviewController {
 		SeparatorMenuItem deleteDetailsSeparator = new SeparatorMenuItem();
 
 		MenuItem addPresItem = new MenuItem("+ Vorstellung hinzufügen");
-		addPresItem.setOnAction(e -> {
-			TreeItem<Object> selectedItem = selectedItem();
-			if (selectedItem != null) {
-				Event event = findParentInTree(selectedItem, Event.class);
-				Presentation pres = event.addPresentation();
-				MainApp.showEventEditView(event, pres, true);
-			}
-		});
+		addPresItem.setOnAction(e -> addPresentation());
+
+		MenuItem templateItem = new MenuItem("+ Als Vorlage verwenden");
+		templateItem.setOnAction(e -> useAsTemplate());
 
 		MenuItem editItem = new MenuItem("Bearbeiten");
 		editItem.setOnAction(e -> openEditView(true));
@@ -221,13 +218,15 @@ public class EventOverviewController extends AbstractOverviewController {
 		MenuItem hallEditorItem = new MenuItem("Im Hallen-Editor öffnen");
 		hallEditorItem.setOnAction(e -> openHallEditor());
 
-		contextMenu.getItems().addAll(addPresItem, editItem, editDeleteSeparator, deleteItem, deleteDetailsSeparator, seeDetails, hallEditorItem);
+		contextMenu.getItems().addAll(addPresItem, templateItem, editItem, editDeleteSeparator, deleteItem, deleteDetailsSeparator, seeDetails, hallEditorItem);
 
 		contextMenu.setOnShowing(e -> {
 			Object data = tableRow.getItem();
 			boolean deletable = data instanceof Event || data instanceof Presentation;
 			boolean belongsToPresentation = data instanceof Presentation || data instanceof TableGroup || data instanceof UnassignedGroup || data instanceof Booking;
 			addPresItem.setVisible(data instanceof Event || belongsToPresentation);
+			// Als Vorlage dienen nur Events und Vorstellungen (Tische und Buchungen stammen aus der Bestuhlung)
+			templateItem.setVisible(deletable);
 			editItem.setVisible(data != null);
 			seeDetails.setVisible(data != null);
 			// Tische und Sitze stammen aus den Buchungen und werden nicht einzeln gelöscht
@@ -239,6 +238,42 @@ public class EventOverviewController extends AbstractOverviewController {
 			hallEditorItem.setDisable(!belongsToPresentation || hallOf(tableRow.getTreeItem()) == null);
 		});
 		return contextMenu;
+	}
+
+	/**
+	 * Legt im Event eine neue Vorstellung an und öffnet sie im Detail. Sie ist noch nicht gespeichert: Das Event gilt als
+	 * geändert ("Speichern *"), ohne dass beim Wechsel ins Detail nachgefragt wird.
+	 */
+	private void addPresentation() {
+		TreeItem<Object> selectedItem = selectedItem();
+		Event event = selectedItem == null ? null : findParentInTree(selectedItem, Event.class);
+		if (event == null) {
+			return;
+		}
+		ChangeTracker.events().ensureTracked(event); // Baseline ist der gespeicherte Stand vor dem Hinzufügen
+		Presentation presentation = event.addPresentation();
+		ChangeTracker.events().check(event);
+		MainApp.showEventEditViewWithChanges(event, presentation, true);
+	}
+
+	/**
+	 * "Als Vorlage verwenden": Eine Vorstellung wird im selben Event kopiert, ein Event samt Vorstellungen als neues Event.
+	 * Das Neue ist noch nicht gespeichert und öffnet sich im Detail, wie bei "Vorstellung hinzufügen".
+	 */
+	private void useAsTemplate() {
+		TreeItem<Object> selectedItem = selectedItem();
+		Object data = selectedItem == null ? null : selectedItem.getValue();
+		if (data instanceof Presentation presentation) {
+			Event event = presentation.getParent();
+			ChangeTracker.events().ensureTracked(event);
+			Presentation copy = EventTemplates.copyPresentation(presentation, event, hallRepository::findById);
+			ChangeTracker.events().check(event);
+			MainApp.showEventEditViewWithChanges(event, copy, true);
+		} else if (data instanceof Event event) {
+			Event copy = EventTemplates.copyEvent(event, eventRepository.loadEvents().stream().map(Event::getName).toList(), hallRepository::findById);
+			ChangeTracker.events().trackNew(copy);
+			MainApp.showEventEditViewWithChanges(copy, presentationsOf(copy).isEmpty() ? null : presentationsOf(copy).get(0), true);
+		}
 	}
 
 	private void openEditView(boolean editable) {

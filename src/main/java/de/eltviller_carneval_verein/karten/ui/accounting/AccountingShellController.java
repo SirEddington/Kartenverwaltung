@@ -18,6 +18,9 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
+import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
@@ -100,6 +103,8 @@ public class AccountingShellController {
 	@FXML
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
+		SaveShortcut.install(btnSave);
+		btnSave.setDisable(!editMode); // Im Anzeigemodus gibt es nichts zu speichern
 
 		// "Alle" ist als echter (null-)Eintrag Teil der Liste, damit er wie eine
 		// normale Auswahl wirkt, statt ein Sonderfall über einen extra Button zu sein.
@@ -257,6 +262,7 @@ public class AccountingShellController {
 				activeContentController.setEditMode(false);
 			}
 		}
+		btnSave.setDisable(!editMode);
 
 		btnExport.setDisable(!(activeContentController instanceof Exportable exportable) || !exportable.canExport());
 	}
@@ -296,11 +302,38 @@ public class AccountingShellController {
 
 	@FXML
 	private void toggleEditMode() {
+		// Keine ungespeicherten Änderungen im Anzeigemodus: erst nachfragen
+		if (editMode) {
+			Outcome outcome = LeaveGuard.confirmSwitchToViewMode();
+			if (outcome == Outcome.STAY) {
+				return;
+			}
+			if (outcome == Outcome.LEAVE_RESTORED) {
+				rebindToRestoredData();
+			}
+		}
 		editMode = !editMode;
+		btnSave.setDisable(!editMode);
 		btnToggleEdit.setText(editMode ? "Anzeigen" : "Bearbeiten");
 		if (activeContentController != null) {
 			activeContentController.setEditMode(editMode);
 		}
+	}
+
+	/**
+	 * Nach "Nicht speichern" sind Event und Vorstellungen neue Objekte (der gespeicherte Stand wurde wiederhergestellt):
+	 * Die Auswahl wird mit ihnen neu belegt, die Inhalte laden sich daraus neu.
+	 */
+	private void rebindToRestoredData() {
+		String eventId = currentEvent == null ? null : currentEvent.getId();
+		String presentationId = currentPresentation == null ? null : currentPresentation.getId();
+
+		reloadEventItems();
+		eventComboBox.getItems().stream().filter(event -> event.getId().equals(eventId)).findFirst().ifPresent(event -> {
+			eventComboBox.getSelectionModel().select(event);
+			presComboBox.getItems().stream().filter(presentation -> presentation != null && presentation.getId().equals(presentationId)).findFirst()
+					.ifPresent(presentation -> presComboBox.getSelectionModel().select(presentation));
+		});
 	}
 
 	@FXML

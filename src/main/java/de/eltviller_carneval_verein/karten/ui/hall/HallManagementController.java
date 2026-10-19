@@ -11,9 +11,11 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
@@ -32,19 +34,29 @@ import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableRow;
 
 /**
- * Hallen-Verwaltung: Baum-Tabelle Halle &rarr; Hallenobjekte, aufgebaut wie die
- * Event-Verwaltung (Basis: {@link AbstractOverviewController}). Bearbeitet wird
- * nicht in der Tabelle, sondern im Detail-Screen (siehe {@link HallEditController}).
+ * Hallen-Verwaltung: Baum-Tabelle Halle &rarr; (Knoten "Hallenobjekte" &rarr; Hallenobjekte, Knoten "Bestuhlungen"
+ * &rarr; Bestuhlungen), aufgebaut wie die Event-Verwaltung (Basis: {@link AbstractOverviewController}). Bearbeitet wird
+ * nicht in der Tabelle, sondern im Detail-Screen (siehe {@link HallEditController}). Was hier hinzugefügt wird (Halle,
+ * Hallenobjekt, Bestuhlung), ist noch nicht gespeichert und öffnet sich im Editor mit "Speichern *".
  */
 public class HallManagementController extends AbstractOverviewController {
 
 	private static final GermanDecimalStringConverter DOUBLE_CONVERTER = new GermanDecimalStringConverter();
 
+	/** Knoten über den Hallenobjekten einer Halle. */
+	record ObjectsGroup(Hall hall) {
+	}
+
+	/** Knoten über den Bestuhlungen einer Halle. */
+	record PlansGroup(Hall hall) {
+	}
+
 	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
 	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
 
-	// Anzahl der Vorstellungen je Halle (hallId), wird bei jedem Neuaufbau des Baums berechnet
+	// Anzahl der Vorstellungen je Halle (hallId) und je Bestuhlung (seatingPlanId), wird bei jedem Neuaufbau des Baums berechnet
 	private Map<String, Integer> usageCounts = new HashMap<>();
+	private Map<String, Integer> planUsageCounts = new HashMap<>();
 
 	@FXML
 	private TreeTableColumn<Object, String> colName;
@@ -54,6 +66,14 @@ public class HallManagementController extends AbstractOverviewController {
 	private TreeTableColumn<Object, String> colSize;
 	@FXML
 	private TreeTableColumn<Object, Integer> colObjectCount;
+	@FXML
+	private TreeTableColumn<Object, Integer> colPlanCount;
+	@FXML
+	private TreeTableColumn<Object, Integer> colRows;
+	@FXML
+	private TreeTableColumn<Object, Integer> colTables;
+	@FXML
+	private TreeTableColumn<Object, Integer> colSeats;
 	@FXML
 	private TreeTableColumn<Object, String> colUsage;
 	@FXML
@@ -65,8 +85,14 @@ public class HallManagementController extends AbstractOverviewController {
 			Object data = cell.getValue().getValue();
 			if (data instanceof Hall hall)
 				return new SimpleStringProperty("Halle: " + EntityLabels.nameOrPlaceholder(hall.getName()));
+			if (data instanceof ObjectsGroup)
+				return new SimpleStringProperty("Hallenobjekte");
+			if (data instanceof PlansGroup)
+				return new SimpleStringProperty("Bestuhlungen");
 			if (data instanceof HallObject object)
 				return new SimpleStringProperty("Hallenobjekt: " + EntityLabels.nameOrPlaceholder(object.getName()));
+			if (data instanceof SeatingPlan plan)
+				return new SimpleStringProperty("Bestuhlung: " + EntityLabels.nameOrPlaceholder(plan.getName()));
 			return new SimpleStringProperty("");
 		});
 
@@ -76,6 +102,8 @@ public class HallManagementController extends AbstractOverviewController {
 				return new SimpleStringProperty(nullToEmpty(hall.getDescription()));
 			if (data instanceof HallObject object)
 				return new SimpleStringProperty(nullToEmpty(object.getDesc()));
+			if (data instanceof SeatingPlan plan)
+				return new SimpleStringProperty(nullToEmpty(plan.getDescription()));
 			return null;
 		});
 
@@ -90,14 +118,34 @@ public class HallManagementController extends AbstractOverviewController {
 		});
 
 		colObjectCount.setCellValueFactory(cell -> {
-			if (cell.getValue().getValue() instanceof Hall hall)
-				return new SimpleIntegerProperty(hall.getHallObjects().size()).asObject();
+			Object data = cell.getValue().getValue();
+			if (data instanceof Hall hall)
+				return count(hall.getHallObjects().size());
+			if (data instanceof ObjectsGroup group)
+				return count(group.hall().getHallObjects().size());
 			return null;
 		});
 
+		colPlanCount.setCellValueFactory(cell -> {
+			Object data = cell.getValue().getValue();
+			if (data instanceof Hall hall)
+				return count(hall.getSeatingPlans().size());
+			if (data instanceof PlansGroup group)
+				return count(group.hall().getSeatingPlans().size());
+			return null;
+		});
+
+		// Reihen, Tische und Sitze einer Bestuhlung (bei Halle und Knoten leer: Die Bestuhlungen sind Alternativen, eine Summe wäre sinnlos)
+		colRows.setCellValueFactory(cell -> cell.getValue().getValue() instanceof SeatingPlan plan ? count(plan.getRows().size()) : null);
+		colTables.setCellValueFactory(cell -> cell.getValue().getValue() instanceof SeatingPlan plan ? count(plan.getTables().size()) : null);
+		colSeats.setCellValueFactory(cell -> cell.getValue().getValue() instanceof SeatingPlan plan ? count(plan.getSeats().size()) : null);
+
 		colUsage.setCellValueFactory(cell -> {
-			if (cell.getValue().getValue() instanceof Hall hall)
+			Object data = cell.getValue().getValue();
+			if (data instanceof Hall hall)
 				return new SimpleStringProperty(String.valueOf(usageCounts.getOrDefault(hall.getId(), 0)));
+			if (data instanceof SeatingPlan plan)
+				return new SimpleStringProperty(String.valueOf(planUsageCounts.getOrDefault(plan.getId(), 0)));
 			return null;
 		});
 
@@ -106,6 +154,10 @@ public class HallManagementController extends AbstractOverviewController {
 				return new SimpleStringProperty(object.getShape() == Shape.CIRCLE ? "Kreis" : "Rechteck");
 			return null;
 		});
+	}
+
+	private static javafx.beans.value.ObservableValue<Integer> count(int value) {
+		return new SimpleIntegerProperty(value).asObject();
 	}
 
 	private String formatSize(double width, double height) {
@@ -123,14 +175,23 @@ public class HallManagementController extends AbstractOverviewController {
 
 	@Override
 	protected TreeItem<Object> buildTree() {
-		usageCounts = countUsages();
+		countUsages();
 
 		TreeItem<Object> dummyRoot = new TreeItem<>("Root");
 		for (Hall hall : hallRepository.loadHalls()) {
 			TreeItem<Object> hallNode = new TreeItem<>(hall);
+
+			TreeItem<Object> objectsNode = new TreeItem<>(new ObjectsGroup(hall));
 			for (HallObject object : hall.getHallObjects()) {
-				hallNode.getChildren().add(new TreeItem<>(object));
+				objectsNode.getChildren().add(new TreeItem<>(object));
 			}
+			TreeItem<Object> plansNode = new TreeItem<>(new PlansGroup(hall));
+			for (SeatingPlan plan : hall.getSeatingPlans()) {
+				plansNode.getChildren().add(new TreeItem<>(plan));
+			}
+
+			hallNode.getChildren().add(objectsNode);
+			hallNode.getChildren().add(plansNode);
 			dummyRoot.getChildren().add(hallNode);
 		}
 		return dummyRoot;
@@ -142,6 +203,8 @@ public class HallManagementController extends AbstractOverviewController {
 			return hall.getName() + " " + hall.getDescription();
 		if (data instanceof HallObject object)
 			return object.getName() + " " + object.getDesc();
+		if (data instanceof SeatingPlan plan)
+			return plan.getName() + " " + plan.getDescription();
 		return null;
 	}
 
@@ -152,14 +215,10 @@ public class HallManagementController extends AbstractOverviewController {
 		SeparatorMenuItem deleteDetailsSeparator = new SeparatorMenuItem();
 
 		MenuItem addObjectItem = new MenuItem("+ Hallenobjekt hinzufügen");
-		addObjectItem.setOnAction(e -> {
-			TreeItem<Object> selectedItem = selectedItem();
-			if (selectedItem != null) {
-				Hall hall = findParentInTree(selectedItem, Hall.class);
-				HallObject object = HallPlanController.addObjectWithDefaultSize(hall);
-				MainApp.showHallEditView(hall, object, true);
-			}
-		});
+		addObjectItem.setOnAction(e -> addObject());
+
+		MenuItem addPlanItem = new MenuItem("+ Bestuhlung hinzufügen");
+		addPlanItem.setOnAction(e -> addPlan());
 
 		MenuItem editItem = new MenuItem("Bearbeiten");
 		editItem.setOnAction(e -> openEditView(true));
@@ -170,18 +229,56 @@ public class HallManagementController extends AbstractOverviewController {
 		MenuItem deleteItem = new MenuItem("Löschen");
 		deleteItem.setOnAction(e -> handleDelete());
 
-		contextMenu.getItems().addAll(addObjectItem, editItem, editDeleteSeparator, deleteItem, deleteDetailsSeparator, seeDetails);
+		contextMenu.getItems().addAll(addObjectItem, addPlanItem, editItem, editDeleteSeparator, deleteItem, deleteDetailsSeparator, seeDetails);
 
 		contextMenu.setOnShowing(e -> {
 			Object data = tableRow.getItem();
-			addObjectItem.setVisible(data instanceof Hall || data instanceof HallObject);
+			// Jede Zeile gehört zu einer Halle: Objekt und Bestuhlung lassen sich überall in ihr hinzufügen
+			addObjectItem.setVisible(data != null);
+			addPlanItem.setVisible(data != null);
 			editItem.setVisible(data != null);
 			seeDetails.setVisible(data != null);
-			deleteItem.setVisible(data != null);
-			editDeleteSeparator.setVisible(data != null);
-			deleteDetailsSeparator.setVisible(data != null);
+			// Gelöscht werden Hallen und Hallenobjekte; eine Bestuhlung löscht man im Hallen-Editor (dort mit dem Hinweis auf
+			// die Vorstellungen, die sie verwenden)
+			boolean deletable = data instanceof Hall || data instanceof HallObject;
+			deleteItem.setVisible(deletable);
+			editDeleteSeparator.setVisible(deletable);
+			deleteDetailsSeparator.setVisible(deletable);
 		});
 		return contextMenu;
+	}
+
+	/** Die Halle, zu der die gewählte Zeile gehört. */
+	private Hall selectedHall() {
+		TreeItem<Object> selectedItem = selectedItem();
+		return selectedItem == null ? null : findParentInTree(selectedItem, Hall.class);
+	}
+
+	/**
+	 * Legt in der Halle ein neues Hallenobjekt an und öffnet es im Editor. Es ist noch nicht gespeichert: Die Halle gilt
+	 * als geändert ("Speichern *"), ohne dass beim Wechsel in den Editor nachgefragt wird.
+	 */
+	private void addObject() {
+		Hall hall = selectedHall();
+		if (hall == null) {
+			return;
+		}
+		ChangeTracker.halls().ensureTracked(hall); // Baseline ist der gespeicherte Stand vor dem Hinzufügen
+		HallObject object = HallPlanController.addObjectWithDefaultSize(hall);
+		ChangeTracker.halls().check(hall);
+		MainApp.showHallEditViewWithChanges(hall, object, null, true);
+	}
+
+	/** Wie {@link #addObject()} mit einer neuen Bestuhlung: Sie ist im Editor gleich gewählt (Reiter "Bestuhlung"). */
+	private void addPlan() {
+		Hall hall = selectedHall();
+		if (hall == null) {
+			return;
+		}
+		ChangeTracker.halls().ensureTracked(hall);
+		SeatingPlan plan = HallEditController.addPlanWithDefaultSizes(hall);
+		ChangeTracker.halls().check(hall);
+		MainApp.showHallEditViewWithChanges(hall, null, plan, true);
 	}
 
 	private void openEditView(boolean editable) {
@@ -189,7 +286,8 @@ public class HallManagementController extends AbstractOverviewController {
 		if (selectedItem != null) {
 			Hall hall = findParentInTree(selectedItem, Hall.class);
 			HallObject object = findParentInTree(selectedItem, HallObject.class);
-			MainApp.showHallEditView(hall, object, editable);
+			SeatingPlan plan = findParentInTree(selectedItem, SeatingPlan.class);
+			MainApp.showHallEditView(hall, object, plan, editable);
 		}
 	}
 
@@ -207,7 +305,7 @@ public class HallManagementController extends AbstractOverviewController {
 			}
 			hall.getHallObjects().remove(object);
 			HallSaver.saveStructureChange(hall);
-		} else {
+		} else if (selectedItem.getValue() instanceof Hall) {
 			List<String> usages = findUsages(hall);
 			if (!usages.isEmpty()) {
 				MainApp.showAlert("Halle wird noch verwendet", "Diese Halle ist noch folgenden Vorstellungen zugeordnet und kann nicht gelöscht werden:\n\n" + String.join("\n", usages), AlertType.WARNING);
@@ -217,6 +315,8 @@ public class HallManagementController extends AbstractOverviewController {
 				return;
 			}
 			hallRepository.deleteHall(hall);
+		} else {
+			return;
 		}
 		reload();
 	}
@@ -228,27 +328,33 @@ public class HallManagementController extends AbstractOverviewController {
 				.collect(Collectors.toList());
 	}
 
-	private Map<String, Integer> countUsages() {
-		Map<String, Integer> counts = new HashMap<>();
+	private void countUsages() {
+		Map<String, Integer> halls = new HashMap<>();
+		Map<String, Integer> plans = new HashMap<>();
 		for (Event event : eventRepository.loadEvents()) {
 			if (event.getPresentations() == null) {
 				continue;
 			}
 			for (Presentation presentation : event.getPresentations()) {
 				if (presentation.getHallId() != null) {
-					counts.merge(presentation.getHallId(), 1, Integer::sum);
+					halls.merge(presentation.getHallId(), 1, Integer::sum);
+				}
+				if (presentation.getSeatingPlanId() != null) {
+					plans.merge(presentation.getSeatingPlanId(), 1, Integer::sum);
 				}
 			}
 		}
-		return counts;
+		usageCounts = halls;
+		planUsageCounts = plans;
 	}
 
 	@FXML
 	private void handleCreateNewHall() {
 		Hall hall = new Hall();
 		hall.setName(createHallName());
-		// Noch nicht gespeichert: Die Halle entsteht erst mit "Speichern" im Detail-Screen
-		MainApp.showHallEditView(hall, null, true);
+		// Noch nicht gespeichert: Die Halle entsteht erst mit "Speichern" im Detail-Screen und gilt bis dahin als geändert
+		ChangeTracker.halls().trackNew(hall);
+		MainApp.showHallEditViewWithChanges(hall, null, null, true);
 	}
 
 	private String createHallName() {

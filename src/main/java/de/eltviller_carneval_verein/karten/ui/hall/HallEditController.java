@@ -12,16 +12,21 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
 import de.eltviller_carneval_verein.karten.ui.PlanFreezer;
+import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.MenuButton;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
 import javafx.util.StringConverter;
@@ -68,6 +73,8 @@ public class HallEditController {
 	private Button btnDeletePlan;
 	@FXML
 	private TextField txtPlanName;
+	@FXML
+	private MenuButton menuDisplay;
 
 	// Vom FXMLLoader aus fx:id="hallPlan" des fx:include injiziert (Name + "Controller")
 	@FXML
@@ -76,6 +83,12 @@ public class HallEditController {
 	@FXML
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.halls());
+		SaveShortcut.install(btnSave);
+
+		// Beschriftungen des Plans (Reihen, Tische, Sitznummern, Hallenobjekte), nicht gespeichert
+		PlanLabelOptions planLabels = new PlanLabelOptions();
+		PlanLabelsMenu.bind(menuDisplay, planLabels);
+		hallPlanController.setLabelOptions(planLabels);
 
 		setupSpinner(spnHallWidth, "Hallenbreite", 10, value -> {
 			hall.setHallWidth(value);
@@ -141,8 +154,9 @@ public class HallEditController {
 
 	/**
 	 * @param selectedObject optional: Hallenobjekt, das im Plan direkt markiert werden soll
+	 * @param selectedPlan   optional: Bestuhlung, die gleich gewählt ist (der Reiter "Bestuhlung" ist dann offen)
 	 */
-	public void initData(Hall hall, HallObject selectedObject, boolean editable) {
+	public void initData(Hall hall, HallObject selectedObject, SeatingPlan selectedPlan, boolean editable) {
 		this.hall = hall;
 
 		updating = true;
@@ -162,11 +176,17 @@ public class HallEditController {
 		// Anordnen vor dem Verfolgen (unten): Was das Öffnen an den Positionen zurechtrückt, zählt nicht als Änderung.
 		// Die Anordnung ist idempotent, bei einer schon angeordneten Bestuhlung ändert sich nichts
 		hall.getSeatingPlans().forEach(SeatingPlanLayout::apply);
-		reloadPlans(hall.getSeatingPlans().isEmpty() ? null : hall.getSeatingPlans().get(0));
+		boolean planGiven = selectedPlan != null && hall.getSeatingPlans().contains(selectedPlan);
+		reloadPlans(planGiven ? selectedPlan : hall.getSeatingPlans().isEmpty() ? null : hall.getSeatingPlans().get(0));
+		if (planGiven) {
+			hallPlanController.showSeatingTab();
+		}
 		setEditable(editable);
 
-		// Erst jetzt, damit alles, was das Befüllen der Ansicht am Modell zurechtrückt, nicht als Änderung zählt
-		ChangeTracker.halls().track(hall);
+		// Erst jetzt, damit alles, was das Befüllen der Ansicht am Modell zurechtrückt, nicht als Änderung zählt. Eine schon
+		// verfolgte Halle (gerade in der Übersicht hinzugefügtes Objekt oder Bestuhlung, noch nicht gespeichert) behält ihren
+		// gespeicherten Stand als Baseline und gilt weiter als geändert.
+		ChangeTracker.halls().ensureTracked(hall);
 	}
 
 	private void commitName() {
@@ -307,7 +327,32 @@ public class HallEditController {
 
 	@FXML
 	private void toggleEditMode() {
+		// Keine ungespeicherten Änderungen im Anzeigemodus: erst nachfragen
+		if (editMode) {
+			Outcome outcome = LeaveGuard.confirmSwitchToViewMode();
+			if (outcome == Outcome.STAY) {
+				return;
+			}
+			if (outcome == Outcome.LEAVE_RESTORED) {
+				reloadRestoredData();
+				return;
+			}
+		}
 		setEditable(!editMode);
+	}
+
+	/**
+	 * Nach "Nicht speichern" ist die Halle ein neues Objekt (der gespeicherte Stand wurde wiederhergestellt): Der Screen
+	 * öffnet sich mit ihr neu, im Anzeigemodus.
+	 */
+	private void reloadRestoredData() {
+		Hall restored = hall == null ? null : JsonHallRepository.getInstance().findById(hall.getId());
+		if (restored == null) {
+			// Eine nie gespeicherte Halle ist mit dem Verwerfen verschwunden
+			MainApp.showHallManagementView();
+			return;
+		}
+		MainApp.showHallEditView(restored, null, false);
 	}
 
 	private void setEditable(boolean editable) {

@@ -7,9 +7,9 @@ import java.util.Set;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableSet;
@@ -25,7 +25,7 @@ public final class SalesViewState {
 	private final ObjectProperty<Presentation> presentation = new SimpleObjectProperty<>();
 	private final ObjectProperty<Rectangle2D> visibleHallRect = new SimpleObjectProperty<>();
 	private final ObservableSet<Booking> selectedBookings = FXCollections.observableSet(new LinkedHashSet<>());
-	private final BooleanProperty showRows = new SimpleBooleanProperty(true);
+	private final PlanLabelOptions planLabels = new PlanLabelOptions();
 
 	public ObjectProperty<Event> eventProperty() {
 		return event;
@@ -46,11 +46,17 @@ public final class SalesViewState {
 	}
 
 	/**
-	 * Ob der Saalplan die Reihen (Linie mit Buchstabe) zeigt; Tische und Sitze sind immer zu sehen. Standard an, gilt
-	 * für Saalübersicht und Kundenfenster und bleibt beim Wechsel der Ansicht erhalten.
+	 * Welche Beschriftungen der Saalplan zeigt (Menü "Anzeige"): Reihen, Tischnamen, Sitznummern, Namen der
+	 * Hallenobjekte. Standard alles an, gilt für Saalübersicht und Kundenfenster und bleibt beim Wechsel der Ansicht
+	 * erhalten.
 	 */
+	public PlanLabelOptions planLabels() {
+		return planLabels;
+	}
+
+	/** Ob der Saalplan die Reihen (Linie mit Buchstabe) zeigt; Tische und Sitze sind immer zu sehen. */
 	public BooleanProperty showRowsProperty() {
-		return showRows;
+		return planLabels.rowsProperty();
 	}
 
 	/** Setzt die Auswahl auf {@code bookings}: entfernt fehlende und fügt neue hinzu, gemeinsame bleiben unberührt. */

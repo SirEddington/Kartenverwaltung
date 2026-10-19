@@ -14,6 +14,8 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import javafx.beans.property.SimpleDoubleProperty;
+import javafx.beans.value.ObservableDoubleValue;
 import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
 import javafx.scene.Group;
@@ -58,6 +60,9 @@ final class SeatingPlanDrawing {
 
 	private SeatingPlan plan;
 	private boolean editMode;
+	private PlanLabels labels = PlanLabels.ALL;
+	// Zoom der Fläche, auf der gezeichnet wird: Sitznummern erscheinen erst, wenn die Sitze groß genug sind
+	private ObservableDoubleValue scale = new SimpleDoubleProperty(1);
 
 	// Laufende Geste: Ankerpunkt, die mitbewegten Knoten und was das Ziehen am Modell ändert
 	private boolean gesture = false;
@@ -79,9 +84,12 @@ final class SeatingPlanDrawing {
 	 * Zeichnet die Bestuhlung neu mit den markierten Reihen, dem markierten Tisch und Sitz. Während einer Geste geschieht
 	 * nichts: Der gedrückte Knoten muss bis zum Loslassen bestehen bleiben.
 	 */
-	void redraw(SeatingPlan plan, boolean editMode, Collection<TableRow> selectedRows, Table selectedTable, Seat selectedSeat) {
+	void redraw(SeatingPlan plan, boolean editMode, Collection<TableRow> selectedRows, Table selectedTable, Seat selectedSeat, PlanLabels labels,
+			ObservableDoubleValue scale) {
 		this.plan = plan;
 		this.editMode = editMode;
+		this.labels = labels;
+		this.scale = scale;
 		if (gesture) {
 			return;
 		}
@@ -94,7 +102,7 @@ final class SeatingPlanDrawing {
 		Set<TableRow> rows = new HashSet<>(selectedRows);
 		for (TableRow row : plan.getRows()) {
 			double length = Math.max(MIN_ROW_LENGTH, SeatingPlanLayout.rowLength(plan, row));
-			Node rowNode = PlanNodeFactory.rowNode(row, length, rows.contains(row));
+			Node rowNode = PlanNodeFactory.rowNode(row, length, rows.contains(row), labels.rows());
 			attachRowHandlers(rowNode, row);
 			Group rowGroup = new Group(rowNode);
 			addTables(rowGroup, plan.getTablesOf(row), selectedTable, selectedSeat);
@@ -112,8 +120,8 @@ final class SeatingPlanDrawing {
 	/** Erst alle Tische, dann alle Sitze: Sitze liegen oben und bleiben anklickbar. */
 	private void addTables(Group parent, List<Table> tables, Table selectedTable, Seat selectedSeat) {
 		for (Table table : tables) {
-			// Bei markiertem Sitz ist der Sitz hervorgehoben, nicht der Tisch
-			Node tableNode = PlanNodeFactory.tableNode(table, table.equals(selectedTable) && selectedSeat == null);
+			// Ein markierter Sitz markiert seinen Tisch (und seine Reihe) mit: Der Tisch ist golden wie der Sitz
+			Node tableNode = PlanNodeFactory.tableNode(table, table.equals(selectedTable), labels.tables());
 			attachTableHandlers(tableNode, table);
 			nodeByTable.put(table, tableNode);
 			parent.getChildren().add(tableNode);
@@ -121,6 +129,10 @@ final class SeatingPlanDrawing {
 		for (Table table : tables) {
 			for (Seat seat : table.getSeats()) {
 				Node seatNode = PlanNodeFactory.seatNode(seat, seat.equals(selectedSeat));
+				if (labels.seatNumbers()) {
+					// Die Nummer gehört zum Sitz: Sie wandert beim Ziehen mit und nimmt keine Mausereignisse an
+					seatNode = new Group(seatNode, PlanNodeFactory.seatNumberText(seat, scale));
+				}
 				attachSeatHandlers(seatNode, seat);
 				nodeBySeat.put(seat, seatNode);
 				parent.getChildren().add(seatNode);

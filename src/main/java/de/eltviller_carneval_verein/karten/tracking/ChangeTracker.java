@@ -92,6 +92,9 @@ public final class ChangeTracker<T> {
 
 	private static final Logger LOG = Logger.getLogger(ChangeTracker.class.getName());
 
+	/** Baseline einer neuen, noch nie gespeicherten Entität: Kein echter Zustand ist je gleich (der Hash ist kein SHA-256). */
+	private static final Snapshot NEW_STATE = new Snapshot(new byte[0], "neu-nicht-gespeichert");
+
 	private static ChangeTracker<Event> eventTracker;
 	private static ChangeTracker<Hall> hallTracker;
 
@@ -152,6 +155,33 @@ public final class ChangeTracker<T> {
 			entry.dirty.set(false);
 		}
 		updateAnyDirty();
+	}
+
+	/**
+	 * Eine neue Entität, die es noch nicht gespeichert gibt (etwa ein neues Event aus "Hinzufügen" oder "Als Vorlage
+	 * verwenden"): Sie gilt sofort als geändert und bleibt es bis zum Speichern, denn es gibt keinen gespeicherten
+	 * Stand, mit dem sie übereinstimmen könnte. Speichern ({@link #markSaved}) macht sie zur gewöhnlichen verfolgten
+	 * Entität; beim Verwerfen wird sie vergessen ({@link #untrack}), wiederhergestellt wird nichts.
+	 */
+	public void trackNew(T entity) {
+		String id = idOf.apply(entity);
+		Snapshot current = snapshot(entity);
+		Entry<T> entry = entries.get(id);
+		if (entry == null) {
+			entry = new Entry<>(entity, current);
+			entries.put(id, entry);
+		}
+		entry.entity = entity;
+		entry.baseline = NEW_STATE;
+		entry.last = current;
+		entry.dirty.set(true);
+		updateAnyDirty();
+	}
+
+	/** {@code true} für eine mit {@link #trackNew} angelegte Entität, die noch nicht gespeichert wurde. */
+	public boolean isNew(T entity) {
+		Entry<T> entry = entries.get(idOf.apply(entity));
+		return entry != null && NEW_STATE.equals(entry.baseline);
 	}
 
 	/**

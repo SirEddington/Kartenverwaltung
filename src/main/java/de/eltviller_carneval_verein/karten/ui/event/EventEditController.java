@@ -5,6 +5,7 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import org.controlsfx.control.table.TableFilter;
@@ -14,6 +15,7 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
@@ -23,15 +25,22 @@ import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
+import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.ui.event.PresentationTables.Item;
+import de.eltviller_carneval_verein.karten.ui.input.TableInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.application.Platform;
-import javafx.beans.binding.Bindings;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleDoubleProperty;
+import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -43,13 +52,15 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Spinner;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.CheckBoxTableCell;
-import javafx.scene.control.cell.TextFieldTableCell;
+import javafx.scene.control.cell.ComboBoxTableCell;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
@@ -106,6 +117,45 @@ public class EventEditController {
 	@FXML
 	private TableColumn<Presentation, String> colPresPlan;
 
+	// Tisch Tabelle: die Tische der gewählten Vorstellung, aus ihren Buchungen gruppiert
+	@FXML
+	private HBox tableSeatHBox;
+	@FXML
+	private TableView<Item> tableTable;
+	@FXML
+	private TableColumn<Item, String> colTableName;
+	@FXML
+	private TableColumn<Item, Integer> colTableSeats;
+	@FXML
+	private TableColumn<Item, Integer> colTableOccupied;
+
+	// Sitz Tabelle: die Buchungen des gewählten Tisches
+	@FXML
+	private TableView<Booking> seatTable;
+	@FXML
+	private TableColumn<Booking, Integer> colSeat;
+	@FXML
+	private TableColumn<Booking, String> colSeatCategory;
+	@FXML
+	private TableColumn<Booking, Boolean> colSeatWheelchair;
+	@FXML
+	private TableColumn<Booking, String> colSeatLastName;
+	@FXML
+	private TableColumn<Booking, String> colSeatFirstName;
+	@FXML
+	private TableColumn<Booking, Double> colSeatPrice;
+	@FXML
+	private TableColumn<Booking, PaymentStatus> colSeatPayment;
+	@FXML
+	private TableColumn<Booking, Boolean> colSeatCollected;
+	@FXML
+	private TableColumn<Booking, String> colSeatComment;
+
+	private final ObservableList<Item> masterTableData = FXCollections.observableArrayList();
+	private final ObservableList<Booking> masterSeatData = FXCollections.observableArrayList();
+	// die Vorstellung, deren Tische die Tabelle Tisch zeigt (der gewählte Tisch bleibt nur innerhalb derselben Vorstellung)
+	private Presentation tablesOf;
+
 	// Halle, Bestuhlung und Standardpreis der gewählten Vorstellung
 	@FXML
 	private Label lblPresDetails;
@@ -144,10 +194,15 @@ public class EventEditController {
 
 	@FXML
 	public void initialize() {
+		setupBookingTables();
 		setupCollums();
+		TableInput.install(eventTable);
+		TableInput.install(presTable);
+		TableInput.install(seatTable);
 		setupPresentationDetails();
 		setupContextMenu();
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
+		SaveShortcut.install(btnSave);
 	}
 
 	private void setupCollums() {
@@ -155,11 +210,11 @@ public class EventEditController {
 
 		// --- Event Tabelle ---
 		colEventName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
-		colEventName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colEventName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colEventName.setOnEditCommit(e -> e.getRowValue().setName(e.getNewValue()));
 
 		colEventDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
-		colEventDesc.setCellFactory(TextFieldTableCell.forTableColumn());
+		colEventDesc.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colEventDesc.setOnEditCommit(e -> e.getRowValue().setDescription(e.getNewValue()));
 
 		colEventArchived.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().isArchived()));
@@ -175,11 +230,11 @@ public class EventEditController {
 
 		// --- Vorstellung Tabelle ---
 		colPresName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
-		colPresName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colPresName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colPresName.setOnEditCommit(e -> e.getRowValue().setName(e.getNewValue()));
 
 		colPresDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
-		colPresDesc.setCellFactory(TextFieldTableCell.forTableColumn());
+		colPresDesc.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colPresDesc.setOnEditCommit(e -> e.getRowValue().setDescription(e.getNewValue()));
 
 		colPresDate.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getDate()));
@@ -227,6 +282,133 @@ public class EventEditController {
 	}
 
 	/**
+	 * Die Tabellen Tisch und Sitz: Die Tische der gewählten Vorstellung stammen aus ihren Buchungen
+	 * ({@link PresentationTables}), die Sitze eines Tisches sind seine Buchungen. Bearbeitet werden die Buchungsdaten;
+	 * Sitz, Kategorie und Rollstuhlplatz gehören zur Bestuhlung (Hallen-Editor) und bleiben lesbar.
+	 */
+	private void setupBookingTables() {
+		// --- Tisch Tabelle ---
+		colTableName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().label()));
+		colTableSeats.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().seats()).asObject());
+		colTableOccupied.setCellValueFactory(cell -> new SimpleIntegerProperty((int) cell.getValue().occupied()).asObject());
+		tableTable.setItems(masterTableData);
+		TableFilter.forTableView(tableTable).apply();
+		tableTable.getSelectionModel().selectedItemProperty().addListener((obs, oldItem, item) -> masterSeatData.setAll(item == null ? List.of() : item.bookings()));
+
+		// --- Sitz Tabelle ---
+		colSeat.setCellValueFactory(cell -> new SimpleIntegerProperty(cell.getValue().getSeatNumber()).asObject());
+		colSeat.setCellFactory(column -> new TableCell<>() {
+			@Override
+			protected void updateItem(Integer seat, boolean empty) {
+				super.updateItem(seat, empty);
+				Booking booking = getTableRow() == null ? null : getTableRow().getItem();
+				setText(empty || seat == null || booking == null ? null : PresentationTables.seatText(booking));
+			}
+		});
+		colSeatCategory.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getCategory()));
+		colSeatWheelchair.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().isWheelchairAccessible()));
+		colSeatWheelchair.setCellFactory(CheckBoxTableCell.forTableColumn(colSeatWheelchair));
+		colSeat.setEditable(false);
+		colSeatCategory.setEditable(false);
+		colSeatWheelchair.setEditable(false);
+
+		colSeatLastName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getLastName()));
+		colSeatLastName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
+		colSeatLastName.setOnEditCommit(e -> {
+			e.getRowValue().setLastName(e.getNewValue());
+			bookingChanged();
+		});
+
+		colSeatFirstName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getFirstName()));
+		colSeatFirstName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
+		colSeatFirstName.setOnEditCommit(e -> {
+			e.getRowValue().setFirstName(e.getNewValue());
+			bookingChanged();
+		});
+
+		// Preis: der effektive Preis; der Standardpreis der Vorstellung als Eingabe entfernt den Einzelpreis
+		colSeatPrice.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getEffectivePrice() / 100.0).asObject());
+		colSeatPrice.setCellFactory(ParsingTextFieldTableCell.forTableColumn(new GermanDecimalStringConverter(), InputIssue.NOT_A_NUMBER, "Preis", EntityLabels::booking));
+		colSeatPrice.setOnEditCommit(e -> {
+			e.getRowValue().setEffectivePrice(e.getNewValue() == null ? 0 : MoneyFormat.toCents(e.getNewValue()));
+			bookingChanged();
+		});
+
+		colSeatPayment.setCellValueFactory(cell -> cell.getValue().getPaymentStatusProperty());
+		colSeatPayment.setCellFactory(ComboBoxTableCell.forTableColumn(new StringConverter<PaymentStatus>() {
+			@Override
+			public String toString(PaymentStatus status) {
+				return status == null ? "" : status.getDisplayName();
+			}
+
+			@Override
+			public PaymentStatus fromString(String string) {
+				return null; // Bei fixer ComboBox-Auswahl nicht erforderlich
+			}
+		}, PaymentStatus.values()));
+		colSeatPayment.setOnEditCommit(e -> {
+			e.getRowValue().setPaymentStatus(e.getNewValue());
+			bookingChanged();
+		});
+
+		colSeatCollected.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().isCollected()));
+		colSeatCollected.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
+			if (index < 0 || index >= seatTable.getItems().size()) {
+				return new SimpleBooleanProperty(false);
+			}
+			Booking booking = seatTable.getItems().get(index);
+			SimpleBooleanProperty prop = new SimpleBooleanProperty(booking.isCollected());
+			prop.addListener((obs, oldVal, newVal) -> {
+				booking.setCollected(newVal);
+				bookingChanged();
+			});
+			return prop;
+		}));
+
+		colSeatComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getComment()));
+		colSeatComment.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
+		colSeatComment.setOnEditCommit(e -> {
+			e.getRowValue().setComment(e.getNewValue());
+			bookingChanged();
+		});
+
+		seatTable.setItems(masterSeatData);
+		TableFilter.forTableView(seatTable).apply();
+		seatTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+		// Buchungen ohne Platz kursiv: Sie haben keinen Sitz in der Bestuhlung
+		seatTable.setRowFactory(table -> new TableRow<>() {
+			@Override
+			protected void updateItem(Booking item, boolean empty) {
+				super.updateItem(item, empty);
+				setStyle(!empty && item != null && item.isUnassigned() ? "-fx-font-style: italic;" : "");
+			}
+		});
+	}
+
+	/** Eine Buchung wurde bearbeitet: Die Zahl der belegten Sitze im Tisch ändert sich mit. */
+	private void bookingChanged() {
+		tableTable.refresh();
+	}
+
+	/**
+	 * Zeigt die Tische der Vorstellung (ohne Vorstellung: leer). Der gewählte Tisch bleibt gewählt, solange es ihn in
+	 * derselben Vorstellung noch gibt, sonst ist der erste gewählt.
+	 */
+	private void showBookingTables(Presentation presentation) {
+		Item previous = tableTable.getSelectionModel().getSelectedItem();
+		String keep = previous != null && presentation == tablesOf ? previous.label() : null;
+		tablesOf = presentation;
+		List<Item> items = presentation == null ? List.of() : PresentationTables.items(presentation);
+		masterTableData.setAll(items);
+		Item select = items.stream().filter(item -> item.label().equals(keep)).findFirst().orElse(items.isEmpty() ? null : items.get(0));
+		if (select == null) {
+			masterSeatData.clear();
+		} else {
+			tableTable.getSelectionModel().select(select);
+		}
+	}
+
+	/**
 	 * Anzeige der Bestuhlung in der Tabelle: "–" ohne Bestuhlung, der Name (leer: "(ohne Name)") oder "nicht mehr
 	 * vorhanden", wenn die Bestuhlung oder ihre Halle gelöscht wurde (paketsichtbar für Tests).
 	 */
@@ -261,7 +443,14 @@ public class EventEditController {
 	 * gilt nicht als Änderung, siehe {@link BookingSyncService}).
 	 */
 	private void loadEvents() {
-		masterEventData.setAll(repository.loadEvents());
+		List<Event> events = new ArrayList<>(repository.loadEvents());
+		// Neue, noch nicht gespeicherte Events (Hinzufügen, Als Vorlage) stehen noch nicht im Repository, gehören aber hierher
+		for (Event unsaved : ChangeTracker.events().dirtyEntities()) {
+			if (ChangeTracker.events().isNew(unsaved) && !events.contains(unsaved)) {
+				events.add(unsaved);
+			}
+		}
+		masterEventData.setAll(events);
 		for (Event event : masterEventData) {
 			BookingSyncService.prepare(event);
 		}
@@ -367,6 +556,7 @@ public class EventEditController {
 			loadingDetails = false;
 		}
 		presTable.refresh();
+		showBookingTables(presentation);
 	}
 
 	/**
@@ -386,6 +576,7 @@ public class EventEditController {
 			}
 		}
 		presTable.refresh();
+		showBookingTables(presentation);
 	}
 
 	/** Füllt die Bestuhlungsauswahl mit den Bestuhlungen der Halle; {@code select} ist die gewählte (oder {@code null}). */
@@ -423,30 +614,44 @@ public class EventEditController {
 		} finally {
 			loadingDetails = false;
 		}
+		showBookingTables(presentation);
 		applyEditMode();
 	}
 
 	private void setupContextMenu() {
 		// 1. Kontextmenü für Event-Tabelle
-		setupTableContextMenu(eventTable, event -> handleAddEvent(), event -> handleCopyEvent(event), event -> handleDeleteEvent(event));
+		setupTableContextMenu(eventTable, "+ Event hinzufügen", this::handleAddEvent, () -> true, this::handleCopyEvent, this::handleDeleteEvent);
 
-		// 2. Kontextmenü für Aufführungen/Vorstellungen
-		setupTableContextMenu(presTable, pres -> handleAddPres(), pres -> handleCopyPres(pres, null), pres -> handleDeletePres(pres));
+		// 2. Kontextmenü für Aufführungen/Vorstellungen: Eine Vorstellung braucht ein gewähltes Event
+		setupTableContextMenu(presTable, "+ Vorstellung hinzufügen", this::handleAddPres, () -> eventTable.getSelectionModel().getSelectedItem() != null, this::handleCopyPres,
+				this::handleDeletePres);
 	}
 
-	private <T> void setupTableContextMenu(TableView<T> tableView, Consumer<T> onAdd, Consumer<T> onCopy, Consumer<T> onDelete) {
+	/**
+	 * Das Kontextmenü einer Tabelle. "Hinzufügen" gilt für die Tabelle, nicht für die Zeile darunter: Es funktioniert
+	 * auch bei einem Rechtsklick in leere Zeilen oder in die leere Fläche (dort das Menü der Tabelle), und fehlt, wenn
+	 * es nichts hinzuzufügen gibt ({@code canAdd}, z. B. keine Vorstellung ohne gewähltes Event). "Als Vorlage" und
+	 * "Löschen" gelten für die Zeile.
+	 */
+	private <T> void setupTableContextMenu(TableView<T> tableView, String addText, Runnable onAdd, BooleanSupplier canAdd, Consumer<T> onCopy, Consumer<T> onDelete) {
+		// Rechtsklick dorthin, wo gar keine Zeile ist (leere Tabelle): nur "Hinzufügen"
+		MenuItem tableAddItem = new MenuItem(addText);
+		tableAddItem.setOnAction(e -> onAdd.run());
+		ContextMenu tableMenu = new ContextMenu(tableAddItem);
+		tableMenu.setOnShowing(e -> {
+			tableAddItem.setDisable(!editMode);
+			tableAddItem.setVisible(canAdd.getAsBoolean());
+			hideIfNothingVisible(tableMenu);
+		});
+		tableView.setContextMenu(tableMenu);
+
 		tableView.setRowFactory(tv -> {
 			TableRow<T> tableRow = new TableRow<>();
 			ContextMenu contextMenu = new ContextMenu();
 			SeparatorMenuItem separator = new SeparatorMenuItem();
 
-			MenuItem addItem = new MenuItem("+ Hinzufügen");
-			addItem.setOnAction(e -> {
-				T item = tableRow.getItem();
-				if (item != null && onAdd != null) {
-					onAdd.accept(item);
-				}
-			});
+			MenuItem addItem = new MenuItem(addText);
+			addItem.setOnAction(e -> onAdd.run());
 
 			MenuItem copyItem = new MenuItem("+ als Vorlage Verwenden");
 			copyItem.setOnAction(e -> {
@@ -470,46 +675,54 @@ public class EventEditController {
 				Object data = tableRow.getItem();
 				// Im Anzeigemodus bleiben die Einträge sichtbar, sind aber nicht ausführbar
 				contextMenu.getItems().forEach(item -> item.setDisable(!editMode));
-				addItem.setVisible(true);
-				copyItem.setVisible(data instanceof Event || data instanceof Presentation);
-				separator.setVisible(data instanceof Event || data instanceof Presentation);
-				deleteItem.setVisible(data instanceof Event || data instanceof Presentation);
+				boolean entity = data instanceof Event || data instanceof Presentation;
+				addItem.setVisible(canAdd.getAsBoolean());
+				copyItem.setVisible(entity);
+				separator.setVisible(entity && addItem.isVisible());
+				deleteItem.setVisible(entity);
+				hideIfNothingVisible(contextMenu);
 			});
 
-			// Menü nur binden, wenn die Zeile nicht leer ist
-			tableRow.contextMenuProperty().bind(Bindings.when(tableRow.emptyProperty()).then((ContextMenu) contextMenu).otherwise(contextMenu));
+			// Auch leere Zeilen (die Tabelle füllt die Fläche damit auf) bekommen das Menü: "Hinzufügen" gilt dort ebenso
+			tableRow.setContextMenu(contextMenu);
 
 			return tableRow;
 		});
 	}
 
-	private void handleAddEvent() {
-		refreshEventTable(currentEvent);
-
+	/** Ein Menü ohne sichtbaren Eintrag erscheint nicht als leere Fläche. */
+	private static void hideIfNothingVisible(ContextMenu menu) {
+		if (menu.getItems().stream().noneMatch(MenuItem::isVisible)) {
+			Platform.runLater(menu::hide);
+		}
 	}
 
+	/** Ein neues Event, noch nicht gespeichert ("Speichern *"); es ist in der Tabelle gewählt. */
+	private void handleAddEvent() {
+		Event created = EventTemplates.newEvent(masterEventData.stream().map(Event::getName).toList());
+		ChangeTracker.events().trackNew(created);
+		refreshEventTable(created);
+	}
+
+	/** Das Event samt Vorstellungen als Vorlage für ein neues Event, noch nicht gespeichert; es ist in der Tabelle gewählt. */
 	private void handleCopyEvent(Event event) {
-		Event newEvent = new Event();
-
-		// Die Kopie bekommt einen eigenen Namen ("<Name> (Kopie)"), sonst würde sie nie gespeichert (EVT-002); umbenennen geht in der Tabelle
-		newEvent.setName(Event.createCopyName(event.getName(), masterEventData.stream().map(Event::getName).toList()));
-		newEvent.setDescription(event.getDescription());
-
-		for (Presentation pres : event.getPresentations()) {
-			handleCopyPres(pres, newEvent);
-		}
-
-		// Bei Erfolg ist die Kopie gewählt; sonst bleibt das Original gewählt (handleCopyPres hat die Kopie schon angezeigt)
-		boolean saved = EventSaver.save(newEvent);
-		refreshEventTable(saved ? newEvent : event);
+		Event copy = EventTemplates.copyEvent(event, masterEventData.stream().map(Event::getName).toList(), hallRepository::findById);
+		ChangeTracker.events().trackNew(copy);
+		refreshEventTable(copy);
 	}
 
 	private void handleDeleteEvent(Event event) {
-		if (!ConfirmDialog.confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
+		boolean neverSaved = ChangeTracker.events().isNew(event);
+		if (!neverSaved && !ConfirmDialog.confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
 			return;
 		}
 
-		repository.deleteEvent(event);
+		if (neverSaved) {
+			// Nie gespeichert: Es gibt nichts zu löschen, es verschwindet nur wieder aus der Tabelle
+			ChangeTracker.events().untrack(event);
+		} else {
+			repository.deleteEvent(event);
+		}
 
 		if (event.equals(currentEvent)) {
 			currentEvent = null;
@@ -517,36 +730,23 @@ public class EventEditController {
 		refreshEventTable(currentEvent);
 	}
 
+	/** Eine neue Vorstellung im gewählten Event, noch nicht gespeichert; sie ist in der Tabelle gewählt. */
 	private void handleAddPres() {
-		Presentation newPres = eventTable.getSelectionModel().getSelectedItem().addPresentation();
-		refreshPresentationTable(currentEvent, newPres);
+		Event event = eventTable.getSelectionModel().getSelectedItem();
+		if (event == null) {
+			return;
+		}
+		Presentation newPres = event.addPresentation();
+		ChangeTracker.events().check(event);
+		refreshPresentationTable(event, newPres);
 	}
 
-	/**
-	 * Kopiert die Vorstellung als Vorlage: Name, Beschreibung, Datum, Zeit, Halle, Bestuhlung und Standardpreis. Die
-	 * Buchungen werden nicht kopiert, die Kopie bekommt je Sitz der Bestuhlung eine leere Buchung.
-	 */
-	private void handleCopyPres(Presentation presentation, Event parentEvent) {
-		Event event;
-		Presentation newPres;
-		if (parentEvent != null) {
-			event = parentEvent;
-		} else {
-			event = presentation.getParent();
-		}
-
-		newPres = event.addPresentation(presentation.getName());
-
-		newPres.setDescription(presentation.getDescription());
-		newPres.setDate(presentation.getDate());
-		newPres.setTime(presentation.getTime());
-		newPres.setHallId(presentation.getHallId());
-		newPres.setSeatingPlanId(presentation.getSeatingPlanId());
-		newPres.setPrice(presentation.getPrice());
-		BookingSync.sync(newPres, modelPlan(newPres, hallRepository.findById(newPres.getHallId())));
-
-		refreshPresentationTable(event, newPres);
-
+	/** Kopiert die Vorstellung als Vorlage in dasselbe Event ({@link EventTemplates#copyPresentation}), noch nicht gespeichert. */
+	private void handleCopyPres(Presentation presentation) {
+		Event event = presentation.getParent();
+		Presentation copy = EventTemplates.copyPresentation(presentation, event, hallRepository::findById);
+		ChangeTracker.events().check(event);
+		refreshPresentationTable(event, copy);
 	}
 
 	private void handleDeletePres(Presentation presentation) {
@@ -587,9 +787,33 @@ public class EventEditController {
 
 	@FXML
 	private void toggleEditMode() {
+		// Keine ungespeicherten Änderungen im Anzeigemodus: erst nachfragen
+		if (editMode) {
+			Outcome outcome = LeaveGuard.confirmSwitchToViewMode();
+			if (outcome == Outcome.STAY) {
+				return;
+			}
+			if (outcome == Outcome.LEAVE_RESTORED) {
+				reloadRestoredData();
+				return;
+			}
+		}
 		// Editmode wechseln
 		editMode = !editMode;
 		applyEditMode();
+	}
+
+	/**
+	 * Nach "Nicht speichern" sind Event und Vorstellung neue Objekte (der gespeicherte Stand wurde wiederhergestellt):
+	 * Der Screen öffnet sich mit ihnen neu, im Anzeigemodus.
+	 */
+	private void reloadRestoredData() {
+		String eventId = currentEvent == null ? null : currentEvent.getId();
+		String presentationId = currentPres == null ? null : currentPres.getId();
+		Event event = JsonEventRepository.getInstance().loadEvents().stream().filter(candidate -> candidate.getId().equals(eventId)).findFirst().orElse(null);
+		Presentation presentation = event == null ? null
+				: event.getPresentations().stream().filter(candidate -> candidate.getId().equals(presentationId)).findFirst().orElse(null);
+		MainApp.showEventEditView(event, presentation, false);
 	}
 
 	private void setEditable(boolean editable) {
@@ -600,6 +824,7 @@ public class EventEditController {
 	private void applyEditMode() {
 		eventTable.setEditable(editMode);
 		presTable.setEditable(editMode);
+		seatTable.setEditable(editMode);
 
 		if (btnSave != null) {
 			btnSave.setDisable(!editMode);

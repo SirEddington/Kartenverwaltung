@@ -18,31 +18,45 @@
     </fx:define>
 
     <!-- OBERER BEREICH: Identischer Header -->
-    <HBox alignment="CENTER_LEFT" spacing="10.0">
-        <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" />
-        
-        <Label  fx:id="lblHeader" text="Kartentabelle" styleClass="header-label" />
-            
-        <Region HBox.hgrow="ALWAYS" />
-        
-        <Label text="Event:" />
-        <ComboBox fx:id="eventComboBox" prefWidth="180.0" promptText="Event wählen..." />
-        
-        <Label text="Vorstellung:" />
-        <ComboBox fx:id="presComboBox" prefWidth="180.0" />
-            
-        <Label text="Suche:" />
-        <TextField fx:id="searchField" prefWidth="180.0" promptText="Suche..." />
-            
-        <Region HBox.hgrow="ALWAYS" />
-        
-        <!-- Toggle-Buttons zum Umschalten der Mitte -->
-        <RadioButton fx:id="btnTableView" text="Tabelle" toggleGroup="$viewToggleGroup" selected="true"/>
-        <RadioButton fx:id="btnHallView" text="Saalansicht" toggleGroup="$viewToggleGroup"/>
-        
-        <CheckBox fx:id="chkSalesMode" text="Verkaufsmodus" onAction="#toggleSalesMode" />
+    <!-- Die Beschriftungen der Felder stehen über den Feldern (kosten keine Breite). Feste Elemente (Titel, Knöpfe, Radiobuttons,
+         Checkbox) behalten ihre volle Breite (minWidth -Infinity), nur die Auswahlfelder und die Suche dürfen schrumpfen. -->
+    <HBox alignment="BOTTOM_LEFT" spacing="10.0">
+        <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" minWidth="-Infinity" />
 
-        <Button fx:id="btnToggleEdit" styleClass="button-secondary" text="Bearbeiten" onAction="#toggleEditMode" />
+        <Label  fx:id="lblHeader" text="Kartentabelle" styleClass="header-label" minWidth="-Infinity" />
+
+        <Region HBox.hgrow="ALWAYS" />
+
+        <VBox spacing="2.0" HBox.hgrow="SOMETIMES">
+            <Label text="Event" styleClass="field-caption" />
+            <ComboBox fx:id="eventComboBox" prefWidth="160.0" minWidth="100.0" maxWidth="Infinity" promptText="Event wählen..." />
+        </VBox>
+
+        <VBox spacing="2.0" HBox.hgrow="SOMETIMES">
+            <Label text="Vorstellung" styleClass="field-caption" />
+            <ComboBox fx:id="presComboBox" prefWidth="160.0" minWidth="100.0" maxWidth="Infinity" />
+        </VBox>
+
+        <VBox spacing="2.0" HBox.hgrow="SOMETIMES">
+            <Label text="Suche" styleClass="field-caption" />
+            <TextField fx:id="searchField" prefWidth="160.0" minWidth="90.0" maxWidth="Infinity" promptText="Suche..." />
+        </VBox>
+
+        <Region HBox.hgrow="ALWAYS" />
+
+        <!-- Toggle-Buttons zum Umschalten der Mitte -->
+        <RadioButton fx:id="btnTableView" text="Tabelle" toggleGroup="$viewToggleGroup" selected="true" minWidth="-Infinity">
+            <padding><Insets bottom="6.0" /></padding>
+        </RadioButton>
+        <RadioButton fx:id="btnHallView" text="Saalansicht" toggleGroup="$viewToggleGroup" minWidth="-Infinity">
+            <padding><Insets bottom="6.0" /></padding>
+        </RadioButton>
+
+        <CheckBox fx:id="chkSalesMode" text="Verkaufsmodus" onAction="#toggleSalesMode" minWidth="-Infinity">
+            <padding><Insets bottom="6.0" /></padding>
+        </CheckBox>
+
+        <Button fx:id="btnToggleEdit" styleClass="button-secondary" text="Bearbeiten" onAction="#toggleEditMode" minWidth="-Infinity" />
     </HBox>
     
     <Separator />
@@ -54,6 +68,8 @@
 
     <!-- UNTERER BEREICH: Identischer Footer -->
     <HBox spacing="10.0" alignment="CENTER_RIGHT">
+        <!-- Beschriftungen des Saalplans; immer aktiv, auch vor der Saalansicht (befüllt der Controller) -->
+        <MenuButton fx:id="menuDisplay" text="Anzeige" styleClass="button-secondary" />
         <StatusLabel />
         <Region HBox.hgrow="ALWAYS" />
         <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" />

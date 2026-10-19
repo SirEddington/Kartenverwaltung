@@ -7,6 +7,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
@@ -14,8 +15,12 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
+import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
+import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelsMenu;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXML;
@@ -26,6 +31,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuButton;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
@@ -58,6 +64,8 @@ public class TicketShellController {
 	@FXML
 	private Button btnSave;
 	@FXML
+	private MenuButton menuDisplay;
+	@FXML
 	private CheckBox chkSalesMode;
 	@FXML
 	private StackPane contentArea;
@@ -67,6 +75,8 @@ public class TicketShellController {
 	// Wird gerade die Vorstellungsliste neu gefüllt, soll die Auswahl nicht an den Inhalt gemeldet werden
 	private boolean updatingPresentations = false;
 	private String searchText = "";
+	// Auswahl der verlassenen Ansicht, bis die neue sie zurückbekommt (restorePendingSelection)
+	private List<Booking> pendingSelection = List.of();
 	private ContentController activeContentController;
 	private boolean editMode = false;
 	private CustomerDisplay customerDisplay;
@@ -79,6 +89,10 @@ public class TicketShellController {
 	@FXML
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
+		SaveShortcut.install(btnSave);
+		btnSave.setDisable(!editMode); // Im Anzeigemodus gibt es nichts zu speichern
+		// Immer aktiv, auch in der Tabelle: Die Einstellungen gelten für die Saalansicht und lassen sich vorher treffen
+		PlanLabelsMenu.bind(menuDisplay, state.planLabels());
 
 		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das
 		// Hauptfenster geschlossen, schließt es mit (sonst hielte es die App am Leben). Die Szene bleibt an contentArea
@@ -184,6 +198,7 @@ public class TicketShellController {
 		lblHeader.setText("Kartentabelle");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/TicketTableView.fxml");
 		activeContentController.filter(searchText);
+		restorePendingSelection();
 	}
 
 	@FXML
@@ -192,6 +207,19 @@ public class TicketShellController {
 		lblHeader.setText("Saalübersicht");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml");
 		activeContentController.filter(searchText);
+		restorePendingSelection();
+	}
+
+	/**
+	 * Gibt der neuen Ansicht die Auswahl der verlassenen zurück. Erst nach dem Suchfilter: Er baut die Auswahl der
+	 * Tabelle um und würde sie sonst auf eine Zeile verkleinern.
+	 */
+	private void restorePendingSelection() {
+		List<Booking> selection = pendingSelection;
+		pendingSelection = List.of();
+		if (activeContentController instanceof SalesStateAware aware) {
+			aware.restoreSelection(selection);
+		}
 	}
 
 	private void loadContentView(String fxmlPath) {
@@ -206,7 +234,8 @@ public class TicketShellController {
 			PopupWindows.hideOwnedBy(contentArea.getScene() == null ? null : contentArea.getScene().getWindow());
 			contentArea.getChildren().setAll(view);
 
-			// Auswahl und Ausschnitt der alten Ansicht gelten nicht mehr; der neue Inhalt meldet seine eigenen
+			// Der Ausschnitt der alten Ansicht gilt nicht mehr, die Auswahl bleibt: Die neue Ansicht bekommt sie unten zurück
+			List<Booking> keptSelection = new ArrayList<>(state.selectedBookings());
 			state.resetView();
 			if (activeContentController instanceof SalesStateAware aware) {
 				aware.setSalesState(state);
@@ -217,6 +246,7 @@ public class TicketShellController {
 			activeContentController.setPresentation(state.presentationProperty().get());
 			// Der Bearbeitungsmodus gilt für die ganze Shell, nicht nur für die Ansicht, in der er eingeschaltet wurde
 			activeContentController.setEditMode(editMode);
+			pendingSelection = keptSelection;
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			MainApp.showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
@@ -225,7 +255,18 @@ public class TicketShellController {
 
 	@FXML
 	private void toggleEditMode() {
+		// Keine ungespeicherten Änderungen im Anzeigemodus: erst nachfragen
+		if (editMode) {
+			Outcome outcome = LeaveGuard.confirmSwitchToViewMode();
+			if (outcome == Outcome.STAY) {
+				return;
+			}
+			if (outcome == Outcome.LEAVE_RESTORED) {
+				rebindToRestoredData();
+			}
+		}
 		this.editMode = !this.editMode;
+		btnSave.setDisable(!editMode);
 
 		// Button-Text anpassen
 		if (btnToggleEdit != null) {
@@ -236,6 +277,24 @@ public class TicketShellController {
 		if (activeContentController != null) {
 			activeContentController.setEditMode(editMode);
 		}
+	}
+
+	/**
+	 * Nach "Nicht speichern" sind Event und Vorstellungen neue Objekte (der gespeicherte Stand wurde wiederhergestellt):
+	 * Die Auswahl wird mit ihnen neu belegt, die Inhalte laden sich daraus neu.
+	 */
+	private void rebindToRestoredData() {
+		Event previousEvent = state.eventProperty().get();
+		Presentation previousPresentation = state.presentationProperty().get();
+		String eventId = previousEvent == null ? null : previousEvent.getId();
+		String presentationId = previousPresentation == null ? null : previousPresentation.getId();
+
+		eventComboBox.getItems().setAll(eventRepository.loadEvents().stream().filter(event -> !event.isArchived()).toList());
+		eventComboBox.getItems().stream().filter(event -> event.getId().equals(eventId)).findFirst().ifPresent(event -> {
+			eventComboBox.getSelectionModel().select(event);
+			presComboBox.getItems().stream().filter(presentation -> presentation != null && presentation.getId().equals(presentationId)).findFirst()
+					.ifPresent(presentation -> presComboBox.getSelectionModel().select(presentation));
+		});
 	}
 
 	/** Die Checkbox "Verkaufsmodus" öffnet und schließt das Kundenfenster. */

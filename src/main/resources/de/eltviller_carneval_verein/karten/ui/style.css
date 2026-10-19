@@ -52,6 +52,12 @@
 	    -fx-text-fill: -fx-ecv-blue;
 	}
 
+/* Kleine Beschriftung über einem Feld (z. B. "Event" über der Eventauswahl in der Kopfzeile) */
+.field-caption {
+    -fx-font-size: 11px;
+    -fx-text-fill: #666666;
+}
+
 /* Überschriften (Yanone Kaffeesatz Bold in ECV-Blau) */
 .header-title, .header-label {
     -fx-font-family: "Yanone Kaffeesatz Bold"/*, "Calibri", sans-serif*/;
@@ -85,12 +91,14 @@
     -fx-border-width: 1px;
 }
 
+/* Hover und gedrückt ändern die Farbe statt die Deckkraft (nichts wird blass). Hier der Standardknopf (weiß mit
+   roter Umrandung): rosa getönt; die anderen Knopfarten haben eigene Regeln weiter unten, jeweils nach ihrer Farbe. */
 .button:hover {
-    -fx-opacity: 0.85;
+    -fx-background-color: #FDECEC;
 }
 
 .button:pressed {
-    -fx-opacity: 0.70;
+    -fx-background-color: #F9D5D5;
 }
 
 /* Primärbutton: ECV-Blau mit ECV-Gelber Schrift (z.B. Speichern, Neues Event) */
@@ -138,6 +146,110 @@
     -fx-border-width: 0px;
 }
 
+/* Hover und gedrückt je Knopfart. Blau und Gelb sind neutrale Markenfarben und tauschen die Rollen; die roten Knöpfe
+   bleiben in ihrer Farbfamilie, denn Rot warnt (Löschen) und Weiß ist harmlos: Eine Umkehr würde das vertauschen.
+   Die Regeln stehen nach den Knopfarten und die gedrückten nach den Hover-Regeln (gleiche Gewichtung, die spätere gilt). */
+
+/* Primär: Blau wird zu Gelb mit blauem Rand (als zweite Hintergrundebene, damit der Knopf nicht wächst) */
+.button-primary:hover {
+    -fx-background-color: -fx-ecv-blue, -fx-ecv-yellow;
+    -fx-background-insets: 0, 1;
+    -fx-background-radius: 4px, 3px;
+    -fx-text-fill: -fx-ecv-blue;
+}
+
+.button-primary:pressed {
+    -fx-background-color: -fx-ecv-blue, #E6CC00;
+}
+
+/* "Speichern *" ist schon gelb: Hover hellt es auf, gedrückt dunkelt es ab */
+.button-primary.button-dirty:hover {
+    -fx-background-color: #FFF27A;
+    -fx-background-insets: 0;
+    -fx-background-radius: 4px;
+}
+
+.button-primary.button-dirty:pressed {
+    -fx-background-color: #F2D900;
+}
+
+/* Sekundär: Gelb wird zu Blau mit gelber Schrift */
+.button-secondary:hover {
+    -fx-background-color: -fx-ecv-blue;
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+.button-secondary:pressed {
+    -fx-background-color: #1F2266;
+}
+
+/* Standard (weiß mit rotem Rand) hat seine Regeln oben bei .button; hier nur die Farbe der Schrift sicherstellen */
+.button-default:hover,
+.button-default:pressed {
+    -fx-text-fill: -fx-ecv-red;
+}
+
+/* Gefahr: Rot wird dunkler */
+.button-danger:hover {
+    -fx-background-color: #C92F2F;
+}
+
+.button-danger:pressed {
+    -fx-background-color: #A82525;
+}
+
+/* Jubiläum: Gold wird dunkler */
+.button-gold:hover {
+    -fx-background-color: #A8893F;
+}
+
+.button-gold:pressed {
+    -fx-background-color: #8F7535;
+}
+
+/* Auswahlmenü-Knopf in der Sekundär-Variante (z. B. "Anzeige"): wie der Sekundärknopf */
+.menu-button.button-secondary:hover {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+.menu-button.button-secondary:pressed {
+    -fx-background-color: #1F2266;
+}
+
+.menu-button.button-secondary:hover > .label,
+.menu-button.button-secondary:pressed > .label {
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+.menu-button.button-secondary:hover > .arrow-button > .arrow,
+.menu-button.button-secondary:pressed > .arrow-button > .arrow {
+    -fx-background-color: -fx-ecv-yellow;
+}
+
+/* Ausnahme Hauptmenü (Styleclass "main-menu" am Wurzelknoten von MenuView.fxml): Die großen Menüknöpfe behalten ihre
+   Farbfamilie und wechseln nur den Farbton, statt Blau und Gelb zu tauschen. Das Untermenü "Verwaltung" gehört nicht
+   dazu und folgt der allgemeinen Regel oben. Die Regeln sind länger als die allgemeinen, damit sie diese überstimmen. */
+.main-menu .button-primary:hover {
+    -fx-background-color: #4448B0;
+    -fx-background-insets: 0;
+    -fx-background-radius: 4px;
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+.main-menu .button-primary:pressed {
+    -fx-background-color: #202366;
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+.main-menu .button-secondary:hover {
+    -fx-background-color: #F2D400;
+    -fx-text-fill: -fx-ecv-blue;
+}
+
+.main-menu .button-secondary:pressed {
+    -fx-background-color: #D9BF00;
+}
+
 /* ------------------------------------------------------------------------------
  * 3b. SPLITMENUBUTTON
  * SplitMenuButton hat eine andere interne Struktur als Button (kein ".button"-
@@ -169,16 +281,6 @@
     -fx-background-radius: 0 4px 4px 0;
 }
 
-.split-menu-button:hover > .label,
-.split-menu-button:hover > .arrow-button {
-    -fx-opacity: 0.85;
-}
-
-.split-menu-button:pressed > .label,
-.split-menu-button:pressed > .arrow-button {
-    -fx-opacity: 0.70;
-}
-
 /* Sekundär-Variante (ECV-Gelb/Blau), passend zu .button-secondary */
 .split-menu-button.button-secondary > .label,
 .split-menu-button.button-secondary > .arrow-button {
@@ -191,6 +293,27 @@
 
 .split-menu-button.button-secondary > .arrow-button > .arrow {
     -fx-background-color: -fx-ecv-blue;
+}
+
+/* Hover und gedrückt wie beim Sekundärknopf: Gelb wird zu Blau mit gelber Schrift */
+.split-menu-button.button-secondary:hover > .label,
+.split-menu-button.button-secondary:hover > .arrow-button {
+    -fx-background-color: -fx-ecv-blue;
+}
+
+.split-menu-button.button-secondary:pressed > .label,
+.split-menu-button.button-secondary:pressed > .arrow-button {
+    -fx-background-color: #1F2266;
+}
+
+.split-menu-button.button-secondary:hover > .label,
+.split-menu-button.button-secondary:pressed > .label {
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+.split-menu-button.button-secondary:hover > .arrow-button > .arrow,
+.split-menu-button.button-secondary:pressed > .arrow-button > .arrow {
+    -fx-background-color: -fx-ecv-yellow;
 }
 
 /* ------------------------------------------------------------------------------
@@ -320,8 +443,10 @@
      -fx-background-color: white;
  }
 
- .table-view .column-header .label,
- .tree-table-view .column-header .label {
+ /* Nur die Beschriftung des Spaltenkopfes selbst (direktes Kind): Das Filter-Popup einer Spalte (ControlsFX) gehört
+    zum Spaltenkopf und erbte sonst die weiße Schrift für die Einträge seiner Werteliste (weiß auf hellem Grund). */
+ .table-view .column-header > .label,
+ .tree-table-view .column-header > .label {
      -fx-text-fill: white;
      -fx-font-weight: bold;
  }
@@ -357,6 +482,33 @@
  .table-view .table-cell,
  .tree-table-view .tree-table-cell {
      -fx-padding: 6px 8px;
+ }
+
+ /* Feste Zeilenhöhe: Bisher bestimmten die Checkbox-Zellen mit ihrem Zellenabstand die Höhe (30 px). Ohne ihren Abstand
+    (siehe .check-box-table-cell) bliebe es sonst bei 28 px. */
+ .table-view .table-row-cell {
+     -fx-cell-size: 30px;
+ }
+
+ /* Bearbeitete Zelle: Die Zeile bleibt gleich hoch und die Spalte gleich breit. Das Eingabefeld erbt sonst die Maße
+    der allgemeinen Textfelder (Innenabstand und Rahmen) und streckt die Zeile. Als Zeichen für "wird bearbeitet"
+    trägt die Zelle selbst einen ECV-blauen Rahmen innerhalb ihrer Fläche; das Feld ist darin unsichtbar. Die
+    Selektoren sind so lang, damit sie den Rand der gewählten Zeile (oben) überstimmen. */
+ .table-view .table-row-cell .table-cell:editing,
+ .tree-table-view .tree-table-row-cell .tree-table-cell:editing {
+     -fx-padding: 0 7px;
+     -fx-background-color: -fx-surface-white;
+     -fx-border-color: -fx-ecv-blue;
+     -fx-border-width: 1px;
+ }
+
+ .table-view .table-row-cell .table-cell:editing > .text-field,
+ .tree-table-view .tree-table-row-cell .tree-table-cell:editing > .text-field {
+     -fx-background-color: transparent;
+     -fx-border-width: 0;
+     -fx-background-radius: 0;
+     -fx-border-radius: 0;
+     -fx-padding: 0;
  }
 
  /* Textfarbe bei Ausführung der Auswahl */
@@ -428,6 +580,12 @@
 
  .check-box:selected .mark {
      -fx-background-color: -fx-ecv-yellow;
+ }
+
+ /* Checkbox in einer Tabellenzelle: mittig, waagerecht und senkrecht (ohne den Zellenabstand saß das Kästchen oben) */
+ .table-view .check-box-table-cell {
+     -fx-alignment: center;
+     -fx-padding: 0;
  }
 
  /* --- RadioButton (Perfekt kreisrund) --- */
@@ -502,6 +660,14 @@
 
 .tab:selected .tab-label {
     -fx-text-fill: -fx-ecv-yellow;
+}
+
+/* Kein hellblauer Fokusring im gewählten Reiter (er saß als Rahmen in der ECV-blauen Fläche). Die Selektoren sind so
+   lang wie die des Standard-Themes, damit sie es überstimmen. */
+.tab-pane > .tab-header-area > .headers-region > .tab .focus-indicator,
+.tab-pane:focused > .tab-header-area > .headers-region > .tab:selected .focus-indicator {
+    -fx-border-color: transparent;
+    -fx-background-color: transparent;
 }
 
 /* ------------------------------------------------------------------------------

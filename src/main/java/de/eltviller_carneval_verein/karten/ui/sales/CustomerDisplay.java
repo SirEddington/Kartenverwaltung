@@ -90,9 +90,11 @@ public final class CustomerDisplay {
 		public void decorateSeat(Booking booking, Seat seat, Node seatNode) {
 			if (seatNode instanceof Shape shape) {
 				shape.setFill((CustomerDisplayText.isTaken(booking) ? UiColors.STATUS_DANGER : UiColors.STATUS_SUCCESS).getFxColor());
-				boolean selected = state.selectedBookings().contains(booking);
-				shape.setStroke(selected ? HallPlanPane.SELECTED_SEAT_STROKE : Color.BLACK);
-				shape.setStrokeWidth(selected ? 4 : 1);
+				shape.setStroke(Color.BLACK);
+				shape.setStrokeWidth(1);
+			}
+			if (state.selectedBookings().contains(booking)) {
+				seatNode.getProperties().put(HallPlanPane.SELECTED_KEY, Boolean.TRUE);
 			}
 			seatNode.setMouseTransparent(true);
 		}
@@ -304,7 +306,7 @@ public final class CustomerDisplay {
 		attached = true;
 		state.eventProperty().addListener(contentChanged);
 		state.presentationProperty().addListener(contentChanged);
-		state.showRowsProperty().addListener(contentChanged);
+		state.planLabels().addListener(contentChanged);
 		state.visibleHallRectProperty().addListener(viewChanged);
 		state.selectedBookings().addListener(selectionChanged);
 		ChangeTracker.events().addListener(dataChanged);
@@ -317,7 +319,7 @@ public final class CustomerDisplay {
 		attached = false;
 		state.eventProperty().removeListener(contentChanged);
 		state.presentationProperty().removeListener(contentChanged);
-		state.showRowsProperty().removeListener(contentChanged);
+		state.planLabels().removeListener(contentChanged);
 		state.visibleHallRectProperty().removeListener(viewChanged);
 		state.selectedBookings().removeListener(selectionChanged);
 		ChangeTracker.events().removeListener(dataChanged);
@@ -344,7 +346,7 @@ public final class CustomerDisplay {
 		boolean waiting = CustomerDisplayText.showsWaitingHint(presentation, plan);
 		hintLabel.setVisible(waiting);
 		// Ohne Plan bleibt die Fläche leer wie ohne Vorstellung: Den internen Hinweis zur Bestuhlung zeigt nur das Hauptfenster
-		planPane.render(hall, plan, waiting ? null : presentation, state.showRowsProperty().get(), decorator);
+		planPane.render(hall, plan, waiting ? null : presentation, state.planLabels().snapshot(), decorator);
 		updateSummary(presentation);
 	}
 

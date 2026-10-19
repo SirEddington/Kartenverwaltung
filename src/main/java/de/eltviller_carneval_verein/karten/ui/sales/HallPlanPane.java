@@ -11,8 +11,8 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
-import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.HallObjectText;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanLabels;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanNodeFactory;
 import de.eltviller_carneval_verein.karten.ui.hall.SeatingPlanLayout;
 import javafx.beans.property.ReadOnlyObjectProperty;
@@ -34,6 +34,7 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.Shape;
+import javafx.scene.text.Text;
 
 /**
  * Zeichenfläche für den Saalplan einer Vorstellung, gemeinsam für die Saalübersicht im Hauptfenster (interaktiv:
@@ -46,8 +47,14 @@ import javafx.scene.shape.Shape;
  */
 public class HallPlanPane extends StackPane {
 
-	/** Rand für ausgewählte Sitze (Saalübersicht und Kundenfenster). */
-	public static final Color SELECTED_SEAT_STROKE = UiColors.ECV_BLAU.getFxColor();
+	/** Farbe der Auswahl (Saalübersicht und Kundenfenster): das Halo gewählter Sitze und das Auswahlrechteck. */
+	public static final Color SELECTION_COLOR = PlanNodeFactory.SELECTION_STROKE;
+
+	/**
+	 * Schlüssel in {@link Node#getProperties()} des Sitzes: Der {@link Decorator} markiert damit einen gewählten Sitz, die
+	 * Fläche legt dann das Halo hinter ihn.
+	 */
+	public static final Object SELECTED_KEY = new Object();
 
 	private static final double MIN_SCALE = 0.05;
 	private static final double MAX_SCALE = 4.0;
@@ -163,9 +170,10 @@ public class HallPlanPane extends StackPane {
 	 * @param hall         die Halle der Vorstellung, {@code null} wenn keine zugeordnet ist
 	 * @param plan         die Bestuhlung ({@link SalesPlan#of}), {@code null} ohne Bestuhlung
 	 * @param presentation die Vorstellung, {@code null} leert die Fläche
-	 * @param showRows     {@code false} lässt die Reihen (Linie mit Buchstabe) weg; Tische und Sitze bleiben
+	 * @param labels       welche Beschriftungen gezeigt werden: Ohne Reihen fehlen Linie und Buchstabe, Tische und Sitze
+	 *                     bleiben; Tischnamen, Sitznummern und Namen der Hallenobjekte lassen sich einzeln ausblenden
 	 */
-	public void render(Hall hall, SeatingPlan plan, Presentation presentation, boolean showRows, Decorator decorator) {
+	public void render(Hall hall, SeatingPlan plan, Presentation presentation, PlanLabels labels, Decorator decorator) {
 		contentPane.getChildren().clear();
 		String hint = SalesPlan.hint(presentation, plan);
 		planHint.setText(hint);
@@ -185,12 +193,12 @@ public class HallPlanPane extends StackPane {
 				contentPane.getChildren().add(outline);
 			}
 			for (HallObject hallObject : hall.getHallObjects()) {
-				contentPane.getChildren().add(createHallObjectNode(hallObject));
+				contentPane.getChildren().add(createHallObjectNode(hallObject, labels.hallObjects()));
 			}
 		}
 
 		if (plan != null) {
-			drawPlan(plan, presentation, showRows, decorator);
+			drawPlan(plan, presentation, labels, decorator);
 		}
 	}
 
@@ -198,8 +206,8 @@ public class HallPlanPane extends StackPane {
 	 * Reihen (falls gewünscht), dann Tische, dann Sitze (oben, damit sie anklickbar bleiben). Reihen und Tische nehmen
 	 * keine Klicks.
 	 */
-	private void drawPlan(SeatingPlan plan, Presentation presentation, boolean showRows, Decorator decorator) {
-		if (showRows) {
+	private void drawPlan(SeatingPlan plan, Presentation presentation, PlanLabels labels, Decorator decorator) {
+		if (labels.rows()) {
 			for (TableRow row : plan.getRows()) {
 				if (plan.getTablesOf(row).isEmpty()) {
 					continue; // Eine leere Reihe hat keine Länge: nur ein Punkt ohne Bedeutung für den Verkauf
@@ -210,7 +218,7 @@ public class HallPlanPane extends StackPane {
 			}
 		}
 		for (Table table : plan.getTables()) {
-			Node tableNode = PlanNodeFactory.tableNode(table, false);
+			Node tableNode = PlanNodeFactory.tableNode(table, false, labels.tables());
 			tableNode.setMouseTransparent(true);
 			contentPane.getChildren().add(tableNode);
 		}
@@ -225,7 +233,15 @@ public class HallPlanPane extends StackPane {
 				seatNode.setOpacity(0.4);
 				seatNode.setMouseTransparent(true);
 			}
+			if (Boolean.TRUE.equals(seatNode.getProperties().get(SELECTED_KEY))) {
+				contentPane.getChildren().add(PlanNodeFactory.seatHalo(seat));
+			}
 			contentPane.getChildren().add(seatNode);
+			if (labels.seatNumbers()) {
+				Text number = PlanNodeFactory.seatNumberText(seat, contentPane.scaleXProperty());
+				number.opacityProperty().bind(seatNode.opacityProperty());
+				contentPane.getChildren().add(number);
+			}
 		}
 	}
 
@@ -242,7 +258,7 @@ public class HallPlanPane extends StackPane {
 		return bySeat;
 	}
 
-	private Node createHallObjectNode(HallObject hallObject) {
+	private Node createHallObjectNode(HallObject hallObject, boolean showName) {
 		// Java 21 Switch Expression für Shapes
 		Shape hallObjectShape = switch (hallObject.getShape() != null ? hallObject.getShape() : de.eltviller_carneval_verein.karten.model.Shape.RECTANGLE) {
 		case CIRCLE -> {
@@ -260,7 +276,7 @@ public class HallPlanPane extends StackPane {
 		hallObjectShape.setFill(parseHallObjectColor(hallObject.getColor()));
 		hallObjectShape.setStroke(Color.DARKGRAY);
 
-		return new Group(hallObjectShape, HallObjectText.create(hallObject));
+		return showName ? new Group(hallObjectShape, HallObjectText.create(hallObject)) : new Group(hallObjectShape);
 	}
 
 	private static Color parseHallObjectColor(String color) {

@@ -15,6 +15,8 @@ import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.input.RotationInput;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import javafx.beans.property.SimpleDoubleProperty;
+import javafx.beans.value.ObservableDoubleValue;
 import javafx.collections.ListChangeListener;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
@@ -54,6 +56,9 @@ public class SeatingPlanController {
 
 	private SeatingPlan plan;
 	private boolean editMode = false;
+	// Anzeige im Plan: Menü "Anzeige" und Zoom (setPlanView); ohne beides ist alles beschriftet
+	private PlanLabelOptions labelOptions = new PlanLabelOptions();
+	private ObservableDoubleValue scale = new SimpleDoubleProperty(1);
 	// Verhindert, dass das Befüllen des Panels die Listener auslöst und zurückschreibt
 	private boolean updatingPanel = false;
 	/**
@@ -557,7 +562,18 @@ public class SeatingPlanController {
 	}
 
 	private void redraw() {
-		drawing.redraw(plan, editMode, panelRows, selectedTable, selectedSeat);
+		drawing.redraw(plan, editMode, panelRows, selectedTable, selectedSeat, labelOptions.snapshot(), scale);
+	}
+
+	/**
+	 * Die Einstellungen des Menüs "Anzeige" und der Zoom des Hallenplans: Eine Änderung zeichnet die Bestuhlung neu, der
+	 * Zoom entscheidet, ab wann die Sitznummern erscheinen.
+	 */
+	public void setPlanView(PlanLabelOptions options, ObservableDoubleValue zoom) {
+		this.labelOptions = options;
+		this.scale = zoom;
+		options.addListener((obs, oldValue, newValue) -> redraw());
+		redraw();
 	}
 	// <-- Zeichnung
 

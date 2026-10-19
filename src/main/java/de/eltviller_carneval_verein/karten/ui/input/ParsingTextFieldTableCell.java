@@ -3,12 +3,21 @@ package de.eltviller_carneval_verein.karten.ui.input;
 import java.util.Optional;
 import java.util.function.Function;
 
+import javafx.css.PseudoClass;
+import javafx.geometry.Pos;
+import javafx.event.ActionEvent;
+import javafx.event.Event;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
 import javafx.scene.control.cell.TextFieldTableCell;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.util.Callback;
 import javafx.util.StringConverter;
+import javafx.util.converter.DefaultStringConverter;
 
 /**
  * Textzelle, die eine nicht lesbare Eingabe an der Eingabestelle behandelt, statt eine Exception in den
@@ -20,14 +29,26 @@ import javafx.util.StringConverter;
  * Der Converter wird in einen {@link ParsingConverter} gepackt, der den Fehler merkt. Die Zelle prüft den Merker in
  * {@link #commitEdit}, unabhängig davon, ob JavaFX das Bestätigen per Enter oder beim Fokusverlust anstößt.
  *
+ * <p>
+ * Sie ist die gemeinsame Textzelle aller Tabellen mit Eingabe (auch für Spalten ohne Format, siehe
+ * {@link #forTextColumn()}): Enter, Fokusverlust und Tab übernehmen die Eingabe, Tab springt weiter, Esc verwirft. Wie
+ * das Bearbeiten beginnt (Tippen, Enter, F2, Doppelklick), regelt {@link TableInput}.
+ *
  * @param <S> Typ der Zeilen
  * @param <T> Typ des Zellwerts
  */
 public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 
+	/** JavaFX kennt keine Pseudoklasse für die bearbeitete Zelle; das Stylesheet (style.css) braucht sie für ihren Rahmen. */
+	private static final PseudoClass EDITING = PseudoClass.getPseudoClass("editing");
+
+	/** Schlüssel in {@link TextField#getProperties()}: Die Handler hängen schon am Feld. */
+	private static final Object EDITOR_BEHAVIOR_INSTALLED = new Object();
+
 	private final ParsingConverter<T> parsing;
 	private final String fieldName;
 	private final Function<S, String> rowLabel;
+	private boolean commitFailed;
 
 	/**
 	 * @param converter      liest den Text, darf bei unlesbarem Text eine {@link RuntimeException} werfen
@@ -48,22 +69,86 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 		return column -> new ParsingTextFieldTableCell<>(converter, issueOnFailure, fieldName, rowLabel);
 	}
 
+	/** Spaltenfabrik für Textspalten ohne Format (Namen, Beschreibungen, Kommentare): Es gibt nichts Unlesbares. */
+	public static <S> Callback<TableColumn<S, String>, TableCell<S, String>> forTextColumn() {
+		return forTableColumn(new DefaultStringConverter(), InputIssue.NOT_A_NUMBER, "Text", row -> null);
+	}
+
 	@Override
 	public void startEdit() {
 		// Ein Merker aus einer früheren Bearbeitung darf nicht an dieser hängen
 		parsing.takeFailure();
 		super.startEdit();
+		pseudoClassStateChanged(EDITING, isEditing());
+		if (isEditing()) {
+			// JavaFX richtet die Zelle beim Bearbeiten oben aus: Das Feld und der Cursor sollen links und mittig stehen
+			setAlignment(Pos.CENTER_LEFT);
+		}
+		if (isEditing() && getGraphic() instanceof TextField field) {
+			installEditorBehavior(field);
+		}
+	}
+
+	@Override
+	public void cancelEdit() {
+		super.cancelEdit();
+		pseudoClassStateChanged(EDITING, false);
 	}
 
 	@Override
 	public void commitEdit(T newValue) {
 		Optional<ParsingConverter.Failure> failure = parsing.takeFailure();
 		if (failure.isEmpty()) {
+			if (CellValues.isUnchanged(getItem(), newValue)) {
+				// Nichts geändert (ein leeres Feld ist auch "nichts"): Der Wert wird nicht erneut ins Modell geschrieben,
+				// sonst würde aus einem fehlenden Text "" und der Änderungsanzeiger sprang ohne Änderung an
+				cancelEdit();
+				return;
+			}
 			super.commitEdit(newValue);
+			pseudoClassStateChanged(EDITING, false);
 			return;
 		}
+		commitFailed = true;
 		cancelEdit();
 		InputFeedback.report(failure.get().issue().toIssue(label(), InputFeedback.displayText(failure.get().text())), this);
+	}
+
+	/**
+	 * Zusätzlich zu Enter (das JavaFX selbst übernimmt): Der Fokusverlust übernimmt die Eingabe, Tab übernimmt und springt
+	 * in die nächste bearbeitbare Zelle, Umschalt+Tab in die vorherige (siehe {@link TableInput}). Das Feld einer Zelle
+	 * bleibt über viele Bearbeitungen dasselbe: Die Handler hängen nur einmal daran.
+	 */
+	private void installEditorBehavior(TextField field) {
+		if (field.getProperties().putIfAbsent(EDITOR_BEHAVIOR_INSTALLED, Boolean.TRUE) != null) {
+			return;
+		}
+		field.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+			if (!isFocused && isEditing()) {
+				commitFromField(field);
+			}
+		});
+		field.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+			if (event.getCode() != KeyCode.TAB || event.isControlDown() || event.isAltDown() || event.isMetaDown()) {
+				return;
+			}
+			event.consume();
+			TableView<S> table = getTableView();
+			int row = getIndex();
+			TableColumn<S, T> column = getTableColumn();
+			commitFromField(field);
+			if (!commitFailed) {
+				if (!TableInput.moveFocus(table, row, column, !event.isShiftDown())) {
+					table.requestFocus();
+				}
+			}
+		});
+	}
+
+	/** Übernimmt den Text des Feldes auf demselben Weg wie Enter. */
+	private void commitFromField(TextField field) {
+		commitFailed = false;
+		Event.fireEvent(field, new ActionEvent(field, field));
 	}
 
 	private String label() {

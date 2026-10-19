@@ -1,17 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.layout.VBox?>
 <?import de.eltviller_carneval_verein.karten.ui.sales.HallPlanPane?>
 
-<!-- Oben die Anzeige-Optionen, darunter der Plan -->
+<!-- Der Plan; was beschriftet ist, stellt das Menü "Anzeige" in der Fußzeile der Shell ein -->
 <VBox spacing="8.0" xmlns="http://javafx.com/javafx/17"
       xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="de.eltviller_carneval_verein.karten.ui.sales.HallOverviewController">
-
-    <!-- Blendet nur die Reihen (Linie mit Buchstabe) aus, Tische und Sitze bleiben; das Kundenfenster folgt -->
-    <CheckBox fx:id="chkShowRows" text="Reihen anzeigen" selected="true" />
 
     <!-- Zoom (Mausrad) & Verschieben (Ziehen mit der rechten Maustaste) übernimmt die HallPlanPane -->
     <HallPlanPane fx:id="viewportPane" VBox.vgrow="ALWAYS"

@@ -61,7 +61,7 @@ public class HallPlanController {
 	private static final double FALLBACK_OBJECT_WIDTH = 100;
 	private static final double FALLBACK_OBJECT_HEIGHT = 60;
 	private static final Color DEFAULT_FILL = Color.LIGHTGRAY;
-	private static final Color SELECTION_STROKE = Color.DODGERBLUE;
+	private static final Color SELECTION_STROKE = PlanNodeFactory.SELECTION_STROKE;
 	// Deckkraft der Ebene, die nicht zum aktiven Reiter gehört
 	private static final double INACTIVE_LAYER_OPACITY = 0.45;
 
@@ -82,6 +82,8 @@ public class HallPlanController {
 	// Knoten je Hallenobjekt, damit Auswahl und Ziehen den laufenden Knoten nicht durch Neuzeichnen ersetzen müssen
 	private final Map<HallObject, Group> nodeByObject = new HashMap<>();
 	private boolean objectDragged = false;
+	// Menü "Anzeige" des Hallen-Editors (setLabelOptions); ohne Menü ist alles beschriftet
+	private PlanLabelOptions labelOptions = new PlanLabelOptions();
 
 	@FXML
 	private StackPane viewportPane;
@@ -446,6 +448,22 @@ public class HallPlanController {
 		renderHall();
 	}
 
+	/** Öffnet den Reiter "Bestuhlung" (z. B. wenn eine Bestuhlung aus der Übersicht gewählt oder neu angelegt wurde). */
+	public void showSeatingTab() {
+		sideTabs.getSelectionModel().select(seatingTab);
+	}
+
+	/**
+	 * Die Einstellungen des Menüs "Anzeige": Eine Änderung zeichnet Hallenobjekte und Bestuhlung neu. Die Bestuhlung
+	 * bekommt dazu den Zoom des Plans, denn die Sitznummern erscheinen erst bei genügend großen Sitzen.
+	 */
+	public void setLabelOptions(PlanLabelOptions options) {
+		this.labelOptions = options;
+		options.addListener((obs, oldValue, newValue) -> renderHall());
+		seatingPanelController.setPlanView(options, hallPane.scaleXProperty());
+		renderHall();
+	}
+
 	private void renderHall() {
 		hallPane.getChildren().clear();
 		nodeByObject.clear();
@@ -501,7 +519,7 @@ public class HallPlanController {
 		shape.setStroke(selected ? SELECTION_STROKE : Color.DARKGRAY);
 		shape.setStrokeWidth(selected ? 3 : 1);
 
-		Group node = new Group(shape, HallObjectText.create(hallObject));
+		Group node = labelOptions.hallObjectsProperty().get() ? new Group(shape, HallObjectText.create(hallObject)) : new Group(shape);
 		node.setCursor(editMode ? Cursor.MOVE : Cursor.HAND);
 		node.setOnMousePressed(event -> startObjectDrag(event, hallObject));
 		node.setOnMouseDragged(event -> dragObject(event, hallObject));

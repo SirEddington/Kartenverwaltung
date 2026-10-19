@@ -20,6 +20,7 @@ import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
+import de.eltviller_carneval_verein.karten.ui.input.TableInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
@@ -45,7 +46,6 @@ import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.control.cell.ComboBoxTableCell;
-import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
 
@@ -136,6 +136,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 		// 5. Mehrfachauswahl (Strg-/Shift-Klick). Zeilen, die der Suchfilter ausblendet, fallen von selbst aus der Auswahl.
 		seatTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+		TableInput.install(seatTable);
 		MenuItem sellItem = new MenuItem();
 		MenuItem assignItem = new MenuItem(ASSIGN_TEXT);
 		selectionMenu = new ContextMenu(sellItem, assignItem);
@@ -178,7 +179,17 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	private void sellSelection() {
 		List<Booking> bookings = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
-		activeDialog = SeatSelectionEditor.edit(bookings, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), seatTable::refresh);
+		activeDialog = SeatSelectionEditor.edit(bookings, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), seatTable::refresh,
+				this::deselect);
+	}
+
+	/** Nimmt die Zeilen dieser Buchungen aus der Auswahl der Tabelle (und damit aus dem gemeinsamen Verkaufszustand). */
+	private void deselect(List<Booking> bookings) {
+		for (BookingDTO dto : List.copyOf(seatTable.getSelectionModel().getSelectedItems())) {
+			if (bookings.contains(dto.getBooking())) {
+				seatTable.getSelectionModel().clearSelection(seatTable.getItems().indexOf(dto));
+			}
+		}
 	}
 
 	/** Knopf "Platz zuweisen…" der Leiste: für die eine gewählte Buchung ohne Platz. */
@@ -271,17 +282,17 @@ public class TicketTableController implements ContentController, SalesStateAware
 		});
 
 		// Textfelder
-		colLastName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colLastName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colLastName.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setLastName(editEvent.getNewValue()));
 
-		colFirstName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colFirstName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colFirstName.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setFirstName(editEvent.getNewValue()));
 
 		// Preis: der effektive Preis; der Standardpreis der Vorstellung als Eingabe entfernt den Einzelpreis
 		colPrice.setCellFactory(ParsingTextFieldTableCell.forTableColumn(PRICE_CONVERTER, InputIssue.NOT_A_NUMBER, "Preis", dto -> EntityLabels.booking(dto.getBooking())));
 		colPrice.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setEffectivePrice(toCents(editEvent.getNewValue())));
 
-		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
+		colComment.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colComment.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setComment(editEvent.getNewValue()));
 
 		// Enum / ComboBox
@@ -391,6 +402,21 @@ public class TicketTableController implements ContentController, SalesStateAware
 		});
 	}
 
+	/** Wählt die Zeilen der Buchungen, die die Tabelle zeigt (nach dem Wechsel von der Saalansicht). */
+	@Override
+	public void restoreSelection(java.util.Collection<Booking> bookings) {
+		seatTable.getSelectionModel().clearSelection();
+		List<Integer> indices = new ArrayList<>();
+		for (int index = 0; index < filteredData.size(); index++) {
+			if (bookings.contains(filteredData.get(index).getBooking())) {
+				indices.add(index);
+			}
+		}
+		if (!indices.isEmpty()) {
+			seatTable.getSelectionModel().selectIndices(indices.get(0), indices.subList(1, indices.size()).stream().mapToInt(Integer::intValue).toArray());
+		}
+	}
+
 	@Override
 	public void setEvent(Event event) {
 		closeDialog();
@@ -420,19 +446,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	@Override
 	public void filter(String query) {
-		filteredData.setPredicate(dto -> {
-			if (query == null || query.isEmpty()) {
-				return true;
-			}
-
-			String lowerQuery = query.toLowerCase();
-			Booking booking = dto.getBooking();
-
-			// Prüft Nachname, Vorname und Kommentar
-			return (booking.getLastName() != null && booking.getLastName().toLowerCase().contains(lowerQuery))
-					|| (booking.getFirstName() != null && booking.getFirstName().toLowerCase().contains(lowerQuery))
-					|| (booking.getComment() != null && booking.getComment().toLowerCase().contains(lowerQuery));
-		});
+		// Vorname, Nachname und Kommentar zusammen, jedes Suchwort muss vorkommen (BookingSearch)
+		filteredData.setPredicate(dto -> BookingSearch.matches(dto.getBooking(), query));
 	}
 
 	@Override

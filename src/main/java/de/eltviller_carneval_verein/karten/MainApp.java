@@ -9,11 +9,13 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
+import de.eltviller_carneval_verein.karten.ui.EnterOnButtons;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LiveValidator;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
@@ -38,6 +40,8 @@ public class MainApp extends Application {
 	private static final Logger LOG = Logger.getLogger(MainApp.class.getName());
 
 	private static Stage primaryStage;
+	// Mindestbreite des Hauptfensters: So schmal darf es werden, die Kopfzeilen der Bildschirme sind darauf abgestimmt
+	private static final double MIN_WIDTH = 1250.0;
 	private static double width = 1300.0;
 	private static double height = 780.0;
 
@@ -52,7 +56,7 @@ public class MainApp extends Application {
 		stage.sceneProperty().addListener((obs, oldScene, newScene) -> PopupWindows.hideOwnedBy(stage));
 		primaryStage.setWidth(width);
 		primaryStage.setHeight(height);
-		primaryStage.setMinWidth(width);
+		primaryStage.setMinWidth(MIN_WIDTH);
 		primaryStage.setMinHeight(height);
 
 		stage.setTitle("ECV Kartenverwaltung");
@@ -128,9 +132,27 @@ public class MainApp extends Application {
 	}
 
 	public static void showHallEditView(Hall selectedHall, HallObject selectedObject, boolean editable) {
+		openHallEditView(selectedHall, selectedObject, null, editable, true);
+	}
+
+	/** Wie {@link #showHallEditView(Hall, HallObject, boolean)}, mit einer Bestuhlung, die im Editor gleich gewählt ist. */
+	public static void showHallEditView(Hall selectedHall, HallObject selectedObject, SeatingPlan selectedPlan, boolean editable) {
+		openHallEditView(selectedHall, selectedObject, selectedPlan, editable, true);
+	}
+
+	/**
+	 * Öffnet den Hallen-Editor, ohne wegen ungespeicherter Änderungen nachzufragen, und nimmt sie mit: Eine Halle, ein
+	 * Hallenobjekt oder eine Bestuhlung, die gerade in der Übersicht hinzugefügt wurde, ist noch nicht gespeichert und
+	 * soll im Editor mit "Speichern *" erscheinen. Die Änderungserkennung bleibt dabei bestehen (kein Zurücksetzen).
+	 */
+	public static void showHallEditViewWithChanges(Hall selectedHall, HallObject selectedObject, SeatingPlan selectedPlan, boolean editable) {
+		openHallEditView(selectedHall, selectedObject, selectedPlan, editable, false);
+	}
+
+	private static void openHallEditView(Hall selectedHall, HallObject selectedObject, SeatingPlan selectedPlan, boolean editable, boolean askToLeave) {
 		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/HallEditView.fxml";
 		try {
-			if (!LeaveGuard.confirmLeave()) {
+			if (askToLeave && !LeaveGuard.confirmLeave()) {
 				return;
 			}
 			StatusMessage.getInstance().clear();
@@ -141,7 +163,7 @@ public class MainApp extends Application {
 			Parent root = loader.load();
 
 			HallEditController controller = loader.getController();
-			controller.initData(selectedHall, selectedObject, editable);
+			controller.initData(selectedHall, selectedObject, selectedPlan, editable);
 
 			primaryStage.setScene(createScene(root));
 		} catch (IOException e) {
@@ -155,11 +177,24 @@ public class MainApp extends Application {
 	}
 
 	public static void showEventEditView(Event selectedEvent, Presentation selectedPres, boolean editable) {
+		openEventEditView(selectedEvent, selectedPres, editable, true);
+	}
+
+	/**
+	 * Öffnet das Event-Detail, ohne wegen ungespeicherter Änderungen nachzufragen, und nimmt sie mit: Ein Event, das
+	 * gerade in der Übersicht hinzugefügt oder als Vorlage angelegt wurde, ist noch nicht gespeichert und soll im Detail
+	 * mit "Speichern *" erscheinen. Die Änderungserkennung bleibt dabei bestehen (kein Zurücksetzen).
+	 */
+	public static void showEventEditViewWithChanges(Event selectedEvent, Presentation selectedPres, boolean editable) {
+		openEventEditView(selectedEvent, selectedPres, editable, false);
+	}
+
+	private static void openEventEditView(Event selectedEvent, Presentation selectedPres, boolean editable, boolean askToLeave) {
 		String fxmlPath = "/de/eltviller_carneval_verein/karten/ui/EventEditView.fxml";
 		try {
 
 			// Aktuelle Fenstergröße holen
-			if (!LeaveGuard.confirmLeave()) {
+			if (askToLeave && !LeaveGuard.confirmLeave()) {
 				return;
 			}
 			StatusMessage.getInstance().clear();
@@ -216,6 +251,7 @@ public class MainApp extends Application {
 	public static Scene createScene(Parent content) {
 		Scene scene = new Scene(wrapWithBackground(content), width, height);
 		scene.getStylesheets().add(stylesheetUrl());
+		EnterOnButtons.install(scene);
 		return scene;
 	}
 
