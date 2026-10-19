@@ -20,6 +20,7 @@ import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
+import de.eltviller_carneval_verein.karten.ui.input.TableInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
@@ -45,7 +46,6 @@ import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.control.cell.ComboBoxTableCell;
-import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
 
@@ -136,6 +136,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 		// 5. Mehrfachauswahl (Strg-/Shift-Klick). Zeilen, die der Suchfilter ausblendet, fallen von selbst aus der Auswahl.
 		seatTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+		TableInput.install(seatTable);
 		MenuItem sellItem = new MenuItem();
 		MenuItem assignItem = new MenuItem(ASSIGN_TEXT);
 		selectionMenu = new ContextMenu(sellItem, assignItem);
@@ -281,17 +282,17 @@ public class TicketTableController implements ContentController, SalesStateAware
 		});
 
 		// Textfelder
-		colLastName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colLastName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colLastName.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setLastName(editEvent.getNewValue()));
 
-		colFirstName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colFirstName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colFirstName.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setFirstName(editEvent.getNewValue()));
 
 		// Preis: der effektive Preis; der Standardpreis der Vorstellung als Eingabe entfernt den Einzelpreis
 		colPrice.setCellFactory(ParsingTextFieldTableCell.forTableColumn(PRICE_CONVERTER, InputIssue.NOT_A_NUMBER, "Preis", dto -> EntityLabels.booking(dto.getBooking())));
 		colPrice.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setEffectivePrice(toCents(editEvent.getNewValue())));
 
-		colComment.setCellFactory(TextFieldTableCell.forTableColumn());
+		colComment.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colComment.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setComment(editEvent.getNewValue()));
 
 		// Enum / ComboBox

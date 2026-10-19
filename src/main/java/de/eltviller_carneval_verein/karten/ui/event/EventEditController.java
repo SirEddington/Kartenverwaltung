@@ -30,6 +30,7 @@ import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.ui.input.TableInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.application.Platform;
@@ -52,7 +53,6 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.CheckBoxTableCell;
-import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
@@ -148,6 +148,8 @@ public class EventEditController {
 	@FXML
 	public void initialize() {
 		setupCollums();
+		TableInput.install(eventTable);
+		TableInput.install(presTable);
 		setupPresentationDetails();
 		setupContextMenu();
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
@@ -159,11 +161,11 @@ public class EventEditController {
 
 		// --- Event Tabelle ---
 		colEventName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
-		colEventName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colEventName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colEventName.setOnEditCommit(e -> e.getRowValue().setName(e.getNewValue()));
 
 		colEventDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
-		colEventDesc.setCellFactory(TextFieldTableCell.forTableColumn());
+		colEventDesc.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colEventDesc.setOnEditCommit(e -> e.getRowValue().setDescription(e.getNewValue()));
 
 		colEventArchived.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().isArchived()));
@@ -179,11 +181,11 @@ public class EventEditController {
 
 		// --- Vorstellung Tabelle ---
 		colPresName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
-		colPresName.setCellFactory(TextFieldTableCell.forTableColumn());
+		colPresName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colPresName.setOnEditCommit(e -> e.getRowValue().setName(e.getNewValue()));
 
 		colPresDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
-		colPresDesc.setCellFactory(TextFieldTableCell.forTableColumn());
+		colPresDesc.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colPresDesc.setOnEditCommit(e -> e.getRowValue().setDescription(e.getNewValue()));
 
 		colPresDate.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getDate()));
