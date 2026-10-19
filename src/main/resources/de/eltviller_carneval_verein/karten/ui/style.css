@@ -220,6 +220,30 @@
     -fx-background-color: -fx-ecv-yellow;
 }
 
+/* Ausnahme Hauptmenü (Styleclass "main-menu" am Wurzelknoten von MenuView.fxml): Die großen Menüknöpfe behalten ihre
+   Farbfamilie und wechseln nur den Farbton, statt Blau und Gelb zu tauschen. Das Untermenü "Verwaltung" gehört nicht
+   dazu und folgt der allgemeinen Regel oben. Die Regeln sind länger als die allgemeinen, damit sie diese überstimmen. */
+.main-menu .button-primary:hover {
+    -fx-background-color: #4448B0;
+    -fx-background-insets: 0;
+    -fx-background-radius: 4px;
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+.main-menu .button-primary:pressed {
+    -fx-background-color: #202366;
+    -fx-text-fill: -fx-ecv-yellow;
+}
+
+.main-menu .button-secondary:hover {
+    -fx-background-color: #F2D400;
+    -fx-text-fill: -fx-ecv-blue;
+}
+
+.main-menu .button-secondary:pressed {
+    -fx-background-color: #D9BF00;
+}
+
 /* ------------------------------------------------------------------------------
  * 3b. SPLITMENUBUTTON
  * SplitMenuButton hat eine andere interne Struktur als Button (kein ".button"-
