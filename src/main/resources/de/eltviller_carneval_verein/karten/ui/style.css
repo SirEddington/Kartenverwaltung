@@ -443,8 +443,10 @@
      -fx-background-color: white;
  }
 
- .table-view .column-header .label,
- .tree-table-view .column-header .label {
+ /* Nur die Beschriftung des Spaltenkopfes selbst (direktes Kind): Das Filter-Popup einer Spalte (ControlsFX) gehört
+    zum Spaltenkopf und erbte sonst die weiße Schrift für die Einträge seiner Werteliste (weiß auf hellem Grund). */
+ .table-view .column-header > .label,
+ .tree-table-view .column-header > .label {
      -fx-text-fill: white;
      -fx-font-weight: bold;
  }
