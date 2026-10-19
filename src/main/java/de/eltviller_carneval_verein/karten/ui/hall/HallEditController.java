@@ -26,6 +26,7 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.MenuButton;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
 import javafx.util.StringConverter;
@@ -72,6 +73,8 @@ public class HallEditController {
 	private Button btnDeletePlan;
 	@FXML
 	private TextField txtPlanName;
+	@FXML
+	private MenuButton menuDisplay;
 
 	// Vom FXMLLoader aus fx:id="hallPlan" des fx:include injiziert (Name + "Controller")
 	@FXML
@@ -81,6 +84,11 @@ public class HallEditController {
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.halls());
 		SaveShortcut.install(btnSave);
+
+		// Beschriftungen des Plans (Reihen, Tische, Sitznummern, Hallenobjekte), nicht gespeichert
+		PlanLabelOptions planLabels = new PlanLabelOptions();
+		PlanLabelsMenu.bind(menuDisplay, planLabels);
+		hallPlanController.setLabelOptions(planLabels);
 
 		setupSpinner(spnHallWidth, "Hallenbreite", 10, value -> {
 			hall.setHallWidth(value);

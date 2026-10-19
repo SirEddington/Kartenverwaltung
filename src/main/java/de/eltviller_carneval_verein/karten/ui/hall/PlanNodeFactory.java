@@ -3,7 +3,10 @@ package de.eltviller_carneval_verein.karten.ui.hall;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.util.Angles;
+import javafx.beans.binding.Bindings;
+import javafx.beans.value.ObservableDoubleValue;
 import javafx.geometry.VPos;
 import javafx.scene.Group;
 import javafx.scene.Node;
@@ -24,8 +27,8 @@ import javafx.scene.text.TextAlignment;
  */
 public final class PlanNodeFactory {
 
-	/** Rand markierter Reihen und Tische (wie bei den Hallenobjekten). */
-	public static final Color SELECTION_STROKE = Color.DODGERBLUE;
+	/** Farbe der Auswahl im Hallenplan: Rand markierter Reihen, Tische und Sitze im Editor, Halo der gewählten Sitze im Verkauf. */
+	public static final Color SELECTION_STROKE = UiColors.ECV_GOLD.getFxColor();
 
 	private static final Color TABLE_FILL = Color.web("#E8E1CF");
 	private static final Color TABLE_STROKE = Color.DARKGRAY;
@@ -37,6 +40,12 @@ public final class PlanNodeFactory {
 	private static final double ROW_HIT_WIDTH = 30;
 	private static final double ROW_LABEL_SIZE = 36;
 	private static final double ROW_LABEL_DISTANCE = 30;
+	// Halo gewählter Sitze: mindestens so breit (cm) bzw. dieser Anteil des Sitzradius
+	private static final double HALO_MIN_WIDTH = 4;
+	private static final double HALO_RATIO = 0.35;
+	// Sitznummer: Schriftgröße als Anteil des Sitzdurchmessers; sichtbar ab dieser Sitzgröße auf dem Bildschirm (Pixel)
+	private static final double SEAT_NUMBER_FONT_RATIO = 0.55;
+	private static final double MIN_SEAT_NUMBER_PIXELS = 14;
 
 	private PlanNodeFactory() {
 	}
@@ -47,6 +56,11 @@ public final class PlanNodeFactory {
 	 * {@link Table#getRotation()} Grad im Uhrzeigersinn; die Schrift steht dabei nie auf dem Kopf.
 	 */
 	public static Group tableNode(Table table, boolean selected) {
+		return tableNode(table, selected, true);
+	}
+
+	/** Wie {@link #tableNode(Table, boolean)}; ohne {@code showName} bleibt nur das Rechteck. */
+	public static Group tableNode(Table table, boolean selected, boolean showName) {
 		Rectangle shape = new Rectangle(table.getPosX(), table.getPosY(), table.getWidth(), table.getHeight());
 		shape.setArcWidth(10);
 		shape.setArcHeight(10);
@@ -55,6 +69,9 @@ public final class PlanNodeFactory {
 		shape.setStrokeWidth(selected ? 4 : 1);
 		// setRotate dreht um die Mitte der Grenzen, beim Rechteck also um die Tischmitte
 		shape.setRotate(table.getRotation());
+		if (!showName) {
+			return new Group(shape);
+		}
 
 		Text label = new Text(table.getDisplayName());
 		label.setFont(Font.font(16));
@@ -76,12 +93,55 @@ public final class PlanNodeFactory {
 
 	/** Wie {@link #seatNode(Seat)}, ein markierter Sitz mit dem Rand der Auswahl. */
 	public static Node seatNode(Seat seat, boolean selected) {
-		double radius = seat.getWidth() > 0 ? seat.getWidth() / 2.0 : FALLBACK_SEAT_RADIUS;
+		double radius = seatRadius(seat);
 		Circle circle = new Circle(seat.getPosX(), seat.getPosY(), radius);
 		circle.setFill(SEAT_FILL);
 		circle.setStroke(selected ? SELECTION_STROKE : SEAT_STROKE);
 		circle.setStrokeWidth(selected ? 4 : 1);
 		return circle;
+	}
+
+	private static double seatRadius(Seat seat) {
+		return seat.getWidth() > 0 ? seat.getWidth() / 2.0 : FALLBACK_SEAT_RADIUS;
+	}
+
+	/**
+	 * Goldener Kreis hinter einem gewählten Sitz in der Saalansicht. Ein Rand auf dem Sitz hätte auf den Statusfarben
+	 * (grün, gelb, rot) zu wenig Kontrast; das Halo liegt auf dem hellen Plan, der Sitz bleibt davor unverändert.
+	 */
+	public static Node seatHalo(Seat seat) {
+		double radius = seatRadius(seat);
+		Circle halo = new Circle(seat.getPosX(), seat.getPosY(), radius + haloWidth(radius));
+		halo.setFill(SELECTION_STROKE);
+		halo.setMouseTransparent(true);
+		return halo;
+	}
+
+	/** Breite des Halos: gut sichtbar, auch bei kleinen Sitzen. */
+	static double haloWidth(double seatRadius) {
+		return Math.max(HALO_MIN_WIDTH, seatRadius * HALO_RATIO);
+	}
+
+	/**
+	 * Die Sitznummer mittig im Sitz. Sie erscheint erst, wenn der Sitz auf dem Bildschirm groß genug dafür ist (beim
+	 * Herauszoomen entstünde sonst ein Zahlenbrei); {@code scale} ist der Zoom der Fläche, auf der sie liegt.
+	 */
+	public static Text seatNumberText(Seat seat, ObservableDoubleValue scale) {
+		double diameter = seatRadius(seat) * 2;
+		Text text = new Text(String.valueOf(seat.getSeatNumber()));
+		text.setFont(Font.font(null, FontWeight.BOLD, diameter * SEAT_NUMBER_FONT_RATIO));
+		text.setFill(Color.BLACK);
+		text.setTextOrigin(VPos.CENTER);
+		text.setMouseTransparent(true);
+		text.setX(seat.getPosX() - text.getLayoutBounds().getWidth() / 2.0);
+		text.setY(seat.getPosY());
+		text.visibleProperty().bind(Bindings.createBooleanBinding(() -> isSeatNumberVisible(diameter, scale.get()), scale));
+		return text;
+	}
+
+	/** Ob ein Sitz mit diesem Durchmesser (cm) bei diesem Zoom groß genug für seine Nummer ist. */
+	static boolean isSeatNumberVisible(double diameter, double scale) {
+		return diameter * scale >= MIN_SEAT_NUMBER_PIXELS;
 	}
 
 	/**
@@ -91,6 +151,11 @@ public final class PlanNodeFactory {
 	 * greifbar.
 	 */
 	public static Node rowNode(TableRow row, double extent, boolean selected) {
+		return rowNode(row, extent, selected, true);
+	}
+
+	/** Wie {@link #rowNode(TableRow, double, boolean)}; ohne {@code showLetter} fehlt der Buchstabe, die Reihe bleibt greifbar. */
+	public static Node rowNode(TableRow row, double extent, boolean selected, boolean showLetter) {
 		double[] direction = SeatingPlanLayout.direction(row.getAngle());
 		double ux = direction[0];
 		double uy = direction[1];
@@ -115,7 +180,7 @@ public final class PlanNodeFactory {
 
 		Group group = new Group(hitArea, line, start);
 		String label = row.getLabel() == null ? "" : row.getLabel().trim();
-		if (!label.isEmpty()) {
+		if (showLetter && !label.isEmpty()) {
 			Text text = new Text(label);
 			text.setFont(Font.font(null, FontWeight.BOLD, ROW_LABEL_SIZE));
 			text.setFill(selected ? SELECTION_STROKE : ROW_STROKE);

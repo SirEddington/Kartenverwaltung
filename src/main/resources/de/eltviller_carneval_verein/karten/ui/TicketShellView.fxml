@@ -54,6 +54,8 @@
 
     <!-- UNTERER BEREICH: Identischer Footer -->
     <HBox spacing="10.0" alignment="CENTER_RIGHT">
+        <!-- Beschriftungen des Saalplans; nur in der Saalansicht aktiv (befüllt der Controller) -->
+        <MenuButton fx:id="menuDisplay" text="Anzeige" styleClass="button-secondary" />
         <StatusLabel />
         <Region HBox.hgrow="ALWAYS" />
         <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" />

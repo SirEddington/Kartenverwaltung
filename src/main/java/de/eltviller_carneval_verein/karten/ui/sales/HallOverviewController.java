@@ -16,13 +16,15 @@ import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.WeakChangeListener;
 import javafx.fxml.FXML;
 import javafx.geometry.BoundingBox;
 import javafx.geometry.Bounds;
 import javafx.geometry.Point2D;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
-import javafx.scene.control.CheckBox;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
@@ -73,21 +75,20 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	@FXML
 	private Label lblHint;
 
-	// "Reihen anzeigen": blendet nur die Reihen aus, Tische und Sitze bleiben (mit Verkaufszustand an dessen Wert gebunden)
-	@FXML
-	private CheckBox chkShowRows;
+	// Menü "Anzeige" der Shell: Mit gesetztem Verkaufszustand sind es dessen Einstellungen (so folgt das Kundenfenster)
+	private PlanLabelOptions labelOptions = new PlanLabelOptions();
+	private final ChangeListener<Boolean> labelsChanged = (obs, oldValue, newValue) -> renderHall();
 
 	@FXML
 	public void initialize() {
-		chkShowRows.selectedProperty().addListener((obs, wasShown, shown) -> renderHall());
 		viewportPane.setOnMousePressed(this::handleDragStart);
 		viewportPane.setOnMouseDragged(this::handleDrag);
 		viewportPane.setOnMouseReleased(this::handleMouseReleased);
 		rubberBand.setManaged(false);
 		rubberBand.setMouseTransparent(true);
 		rubberBand.setVisible(false);
-		rubberBand.setFill(HallPlanPane.SELECTED_SEAT_STROKE.deriveColor(0, 1, 1, 0.15));
-		rubberBand.setStroke(HallPlanPane.SELECTED_SEAT_STROKE);
+		rubberBand.setFill(HallPlanPane.SELECTION_COLOR.deriveColor(0, 1, 1, 0.15));
+		rubberBand.setStroke(HallPlanPane.SELECTION_COLOR);
 		viewportPane.getChildren().add(rubberBand);
 		updateHint();
 	}
@@ -229,7 +230,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	public void renderHall() {
 		seatNodes.clear();
 		Hall hall = hallOf(selectedPres);
-		viewportPane.render(hall, SalesPlan.of(selectedPres, hall), selectedPres, chkShowRows.isSelected(), planDecorator);
+		viewportPane.render(hall, SalesPlan.of(selectedPres, hall), selectedPres, labelOptions.snapshot(), planDecorator);
 	}
 
 	private Hall hallOf(Presentation presentation) {
@@ -260,8 +261,12 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		boolean selected = selectedBookings.contains(booking);
 		if (seatNode instanceof Shape shape) {
 			shape.setFill(seatColorFor(booking.getStatus()));
-			shape.setStroke(selected ? HallPlanPane.SELECTED_SEAT_STROKE : searchActive && matchesQuery ? Color.DODGERBLUE : Color.BLACK);
-			shape.setStrokeWidth(selected ? 4 : searchActive && matchesQuery ? 3 : 1);
+			// Suchtreffer tragen einen hellblauen Rand, die Auswahl ein goldenes Halo hinter dem Sitz (HallPlanPane)
+			shape.setStroke(searchActive && matchesQuery ? Color.DODGERBLUE : Color.BLACK);
+			shape.setStrokeWidth(searchActive && matchesQuery ? 3 : 1);
+		}
+		if (selected) {
+			seatNode.getProperties().put(HallPlanPane.SELECTED_KEY, Boolean.TRUE);
 		}
 		seatNode.setOpacity(matchesQuery ? 1.0 : 0.25);
 		seatNodes.put(seatNode, booking);
@@ -339,7 +344,10 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	@Override
 	public void setSalesState(SalesViewState state) {
 		selectedBookings = state.selectedBookings();
-		chkShowRows.selectedProperty().bindBidirectional(state.showRowsProperty());
+		labelOptions.removeListener(labelsChanged);
+		labelOptions = state.planLabels();
+		// Schwach: Der Verkaufszustand überlebt den Wechsel der Ansicht, diese Instanz nicht
+		labelOptions.addListener(new WeakChangeListener<>(labelsChanged));
 		viewportPane.visibleHallRectProperty().addListener((obs, oldRect, newRect) -> state.visibleHallRectProperty().set(newRect));
 		state.visibleHallRectProperty().set(viewportPane.visibleHallRectProperty().get());
 	}

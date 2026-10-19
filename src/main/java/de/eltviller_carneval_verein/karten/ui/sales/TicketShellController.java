@@ -19,6 +19,7 @@ import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelsMenu;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXML;
@@ -29,6 +30,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuButton;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
@@ -61,6 +63,8 @@ public class TicketShellController {
 	@FXML
 	private Button btnSave;
 	@FXML
+	private MenuButton menuDisplay;
+	@FXML
 	private CheckBox chkSalesMode;
 	@FXML
 	private StackPane contentArea;
@@ -84,6 +88,7 @@ public class TicketShellController {
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
 		SaveShortcut.install(btnSave);
 		btnSave.setDisable(!editMode); // Im Anzeigemodus gibt es nichts zu speichern
+		PlanLabelsMenu.bind(menuDisplay, state.planLabels());
 
 		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das
 		// Hauptfenster geschlossen, schließt es mit (sonst hielte es die App am Leben). Die Szene bleibt an contentArea
@@ -187,6 +192,7 @@ public class TicketShellController {
 	private void showTicketTableView() {
 		StatusMessage.getInstance().clear();
 		lblHeader.setText("Kartentabelle");
+		menuDisplay.setDisable(true); // Die Beschriftungen betreffen nur den Saalplan
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/TicketTableView.fxml");
 		activeContentController.filter(searchText);
 	}
@@ -195,6 +201,7 @@ public class TicketShellController {
 	private void showHallView() {
 		StatusMessage.getInstance().clear();
 		lblHeader.setText("Saalübersicht");
+		menuDisplay.setDisable(false);
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml");
 		activeContentController.filter(searchText);
 	}
