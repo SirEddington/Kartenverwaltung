@@ -178,7 +178,17 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	private void sellSelection() {
 		List<Booking> bookings = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
-		activeDialog = SeatSelectionEditor.edit(bookings, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), seatTable::refresh);
+		activeDialog = SeatSelectionEditor.edit(bookings, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), seatTable::refresh,
+				this::deselect);
+	}
+
+	/** Nimmt die Zeilen dieser Buchungen aus der Auswahl der Tabelle (und damit aus dem gemeinsamen Verkaufszustand). */
+	private void deselect(List<Booking> bookings) {
+		for (BookingDTO dto : List.copyOf(seatTable.getSelectionModel().getSelectedItems())) {
+			if (bookings.contains(dto.getBooking())) {
+				seatTable.getSelectionModel().clearSelection(seatTable.getItems().indexOf(dto));
+			}
+		}
 	}
 
 	/** Knopf "Platz zuweisen…" der Leiste: für die eine gewählte Buchung ohne Platz. */

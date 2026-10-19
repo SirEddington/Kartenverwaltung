@@ -217,6 +217,9 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		SeatDetailPopup dialog = SeatSelectionEditor.edit(List.copyOf(selectedBookings), viewportPane.getScene().getWindow(), screenX, screenY, () -> {
 			selectedBookings.clear();
 			renderHall();
+		}, occupied -> {
+			selectedBookings.removeAll(occupied);
+			renderHall();
 		});
 		if (dialog != null) {
 			activePopup = dialog.popup();
