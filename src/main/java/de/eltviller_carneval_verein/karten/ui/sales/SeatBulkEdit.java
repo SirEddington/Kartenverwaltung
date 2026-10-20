@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -8,6 +9,7 @@ import java.util.function.Function;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
+import de.eltviller_carneval_verein.karten.model.SaleDates;
 
 /**
  * Sammelt die Eingaben des Sitz-Dialogs für eine Liste von Buchungen und überträgt sie erst mit {@link #apply()}.
@@ -17,6 +19,8 @@ import de.eltviller_carneval_verein.karten.model.PaymentStatus;
  * Dialog "verschieden") und merkt sich nur, was der Nutzer wirklich geändert hat. Alles andere bleibt je Buchung
  * erhalten. Der Preis ist der effektive Preis ({@link Booking#getEffectivePrice()}): Wer den Standardpreis der
  * Vorstellung eingibt, entfernt den Einzelpreis. Der Rollstuhlplatz gehört zur Bestuhlung und ist hier kein Feld. Die
+ * Daten der Aktionen (Reservierung, Bezahlung, Abholung) lassen sich ändern und mit {@link Field#clear()} löschen; beim
+ * Übernehmen trägt {@link SaleDates} den heutigen Tag für neu gesetzte Aktionen ein. Die
  * Klasse kennt kein JavaFX, damit sich die Regeln ohne Oberfläche testen lassen.
  */
 public final class SeatBulkEdit {
@@ -28,6 +32,9 @@ public final class SeatBulkEdit {
 	private final Field<Integer> price;
 	private final Field<Boolean> collected;
 	private final Field<String> comment;
+	private final Field<LocalDate> reservationDate;
+	private final Field<LocalDate> paymentDate;
+	private final Field<LocalDate> collectionDate;
 	private final List<Field<?>> fields;
 
 	public SeatBulkEdit(List<Booking> bookings) {
@@ -38,7 +45,10 @@ public final class SeatBulkEdit {
 		price = new Field<>(Booking::getEffectivePrice, Booking::setEffectivePrice, null);
 		collected = new Field<>(Booking::isCollected, Booking::setCollected, null);
 		comment = text(Booking::getComment, Booking::setComment);
-		fields = List.of(lastName, firstName, paymentStatus, price, collected, comment);
+		reservationDate = new Field<>(Booking::getReservationDate, Booking::setReservationDate, null);
+		paymentDate = new Field<>(Booking::getPaymentDate, Booking::setPaymentDate, null);
+		collectionDate = new Field<>(Booking::getCollectionDate, Booking::setCollectionDate, null);
+		fields = List.of(lastName, firstName, paymentStatus, price, collected, comment, reservationDate, paymentDate, collectionDate);
 	}
 
 	/** Textfelder: Kein Text ({@code null}) und leerer Text gelten als gleicher Wert. */
@@ -75,13 +85,36 @@ public final class SeatBulkEdit {
 		return comment;
 	}
 
+	public Field<LocalDate> reservationDate() {
+		return reservationDate;
+	}
+
+	public Field<LocalDate> paymentDate() {
+		return paymentDate;
+	}
+
+	public Field<LocalDate> collectionDate() {
+		return collectionDate;
+	}
+
 	public boolean hasChanges() {
 		return fields.stream().anyMatch(Field::changed);
 	}
 
-	/** Überträgt alle geänderten Felder auf jede Buchung der Liste. */
+	/** Überträgt alle geänderten Felder auf jede Buchung der Liste; neu gesetzte Aktionen tragen den heutigen Tag ein. */
 	public void apply() {
-		fields.forEach(Field::apply);
+		apply(LocalDate.now());
+	}
+
+	/**
+	 * Wie {@link #apply()}, mit einem festen "heute" (für Tests). Je Buchung laufen alle Felder in einem Schritt über
+	 * {@link SaleDates#change}: Wechselt eine Aktion von "nein" auf "ja" (Name, Zahlung, abgeholt), trägt es das Datum ein,
+	 * es sei denn, das Datum wird im selben Schritt geändert. Das gilt vor dem Tagesdatum.
+	 */
+	public void apply(LocalDate today) {
+		for (Booking booking : bookings) {
+			SaleDates.change(booking, target -> fields.forEach(field -> field.applyTo(target)), today);
+		}
 	}
 
 	/**
@@ -108,6 +141,8 @@ public final class SeatBulkEdit {
 		private final T blank;
 		private final Optional<T> common;
 		private T pending;
+		/** Das Feld wurde bewusst geleert (siehe {@link #clear()}); gilt für alle Buchungen als Wert {@code null}. */
+		private boolean cleared;
 
 		private Field(Function<Booking, T> getter, BiConsumer<Booking, T> setter, T blank) {
 			this.getter = getter;
@@ -137,15 +172,33 @@ public final class SeatBulkEdit {
 		public void change(T value) {
 			boolean untouched = value == null || common.map(value::equals).orElse(false) || (common.isEmpty() && value.equals(blank));
 			pending = untouched ? null : value;
+			cleared = false;
+		}
+
+		/**
+		 * Leert das Feld bewusst: Der Wert wird bei allen Buchungen {@code null}. Nötig, weil {@code null} in
+		 * {@link #change} "nicht geändert" heißt (gedacht für Daten, die man löschen kann). Eine spätere
+		 * {@link #change}-Eingabe nimmt das Leeren zurück.
+		 */
+		public void clear() {
+			pending = null;
+			cleared = true;
+		}
+
+		/** Ob alle Buchungen im Feld keinen Wert haben ({@code null}); bei Datumsfeldern "leer", nicht "verschieden". */
+		public boolean allEmpty() {
+			return bookings.stream().allMatch(booking -> getter.apply(booking) == null);
 		}
 
 		private boolean changed() {
-			return pending != null;
+			return pending != null || cleared;
 		}
 
-		private void apply() {
-			if (changed()) {
-				bookings.forEach(booking -> setter.accept(booking, pending));
+		private void applyTo(Booking booking) {
+			if (cleared) {
+				setter.accept(booking, null);
+			} else if (pending != null) {
+				setter.accept(booking, pending);
 			}
 		}
 	}
