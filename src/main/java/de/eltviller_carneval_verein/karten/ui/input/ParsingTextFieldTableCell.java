@@ -1,7 +1,9 @@
 package de.eltviller_carneval_verein.karten.ui.input;
 
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import javafx.css.PseudoClass;
 import javafx.geometry.Pos;
@@ -48,6 +50,7 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	private final ParsingConverter<T> parsing;
 	private final String fieldName;
 	private final Function<S, String> rowLabel;
+	private final Supplier<T> fallbackIfEmpty;
 	private boolean commitFailed;
 
 	/**
@@ -57,9 +60,20 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	 * @param rowLabel       Bezeichnung der Zeile für die Meldung, z. B. "Tisch 4, Sitz 2" (darf {@code null} liefern)
 	 */
 	public ParsingTextFieldTableCell(StringConverter<T> converter, InputIssue issueOnFailure, String fieldName, Function<S, String> rowLabel) {
+		this(converter, issueOnFailure, fieldName, rowLabel, null);
+	}
+
+	/**
+	 * @param fallbackIfEmpty liefert den Wert, den ein <em>leeres</em> Feld nach nicht lesbarer Eingabe übernimmt (bei einem
+	 *                        Datum der heutige Tag); {@code null}: die Eingabe wird immer verworfen. Die Meldung erscheint
+	 *                        in beiden Fällen.
+	 */
+	public ParsingTextFieldTableCell(StringConverter<T> converter, InputIssue issueOnFailure, String fieldName, Function<S, String> rowLabel,
+			Supplier<T> fallbackIfEmpty) {
 		this.parsing = new ParsingConverter<>(converter, issueOnFailure, this::getItem);
 		this.fieldName = fieldName;
 		this.rowLabel = rowLabel;
+		this.fallbackIfEmpty = fallbackIfEmpty;
 		setConverter(parsing);
 	}
 
@@ -67,6 +81,15 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	public static <S, T> Callback<TableColumn<S, T>, TableCell<S, T>> forTableColumn(StringConverter<T> converter, InputIssue issueOnFailure,
 			String fieldName, Function<S, String> rowLabel) {
 		return column -> new ParsingTextFieldTableCell<>(converter, issueOnFailure, fieldName, rowLabel);
+	}
+
+	/**
+	 * Spaltenfabrik für eine Datumsspalte (Format {@code dd.MM.yyyy}, leere Eingabe = kein Datum). Ein nicht lesbarer Text
+	 * (Meldung {@code INP-002}) trägt in einem leeren Feld {@code today} ein, in einem gefüllten bleibt der alte Wert.
+	 */
+	public static <S> Callback<TableColumn<S, LocalDate>, TableCell<S, LocalDate>> forDateColumn(String fieldName, Function<S, String> rowLabel,
+			Supplier<LocalDate> today) {
+		return column -> new ParsingTextFieldTableCell<>(InputConverters.date(), InputIssue.NOT_A_DATE, fieldName, rowLabel, today);
 	}
 
 	/** Spaltenfabrik für Textspalten ohne Format (Namen, Beschreibungen, Kommentare): Es gibt nichts Unlesbares. */
@@ -106,6 +129,15 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 				return;
 			}
 			super.commitEdit(newValue);
+			pseudoClassStateChanged(EDITING, false);
+			return;
+		}
+		Optional<T> replacement = CellValues.replacementAfterFailure(getItem(), fallbackIfEmpty);
+		if (replacement.isPresent()) {
+			// Leeres Feld: Statt die Eingabe zu verwerfen, gilt der Ersatzwert (bei einem Datum der heutige Tag). Die Meldung
+			// bleibt, damit man sieht, dass der getippte Text nicht gelesen wurde.
+			InputFeedback.report(failure.get().issue().toIssue(label(), InputFeedback.displayText(failure.get().text())), this);
+			super.commitEdit(replacement.get());
 			pseudoClassStateChanged(EDITING, false);
 			return;
 		}
