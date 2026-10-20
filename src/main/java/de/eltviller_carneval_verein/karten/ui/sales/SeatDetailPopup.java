@@ -13,6 +13,7 @@ import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.ValidationIssue;
 import javafx.beans.InvalidationListener;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -164,8 +165,7 @@ public final class SeatDetailPopup {
 				} else {
 					field.change(null);
 				}
-				accepted[0] = "";
-				return;
+				return; // Leer ist nur ein Zwischenstand beim Tippen: "accepted" bleibt das letzte lesbare Datum
 			}
 			Optional<LocalDate> date = DateTimeInput.parseDate(newVal);
 			if (date.isPresent()) {
@@ -179,9 +179,16 @@ public final class SeatDetailPopup {
 			if (text == null || text.isBlank() || DateTimeInput.parseDate(text).isPresent()) {
 				return;
 			}
-			InputFeedback.report(InputIssue.NOT_A_DATE.toIssue(InputFeedback.label(name, rowLabel), InputFeedback.displayText(text)), textField);
-			// Alle Buchungen ohne Datum: heute statt verwerfen (wie in den Tabellen), sonst zurück auf den bisherigen Text
-			textField.setText(field.allEmpty() ? DateTimeInput.formatDate(LocalDate.now()) : accepted[0]);
+			ValidationIssue issue = InputIssue.NOT_A_DATE.toIssue(InputFeedback.label(name, rowLabel), InputFeedback.displayText(text));
+			// Wie in den Tabellen: Hatte das Feld noch nie ein Datum (keine Buchung hat eins und es wurde auch keins gelesen),
+			// gilt heute; sonst springt der Text auf das letzte lesbare Datum zurück ("" nach "×")
+			if (accepted[0].isEmpty() && field.allEmpty()) {
+				InputFeedback.reportAfterChange(issue, textField);
+				textField.setText(DateTimeInput.formatDate(LocalDate.now()));
+			} else {
+				InputFeedback.report(issue, textField);
+				textField.setText(accepted[0]);
+			}
 		};
 		dateResolvers.add(resolve);
 		textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
@@ -197,6 +204,7 @@ public final class SeatDetailPopup {
 		clearButton.setOnAction(event -> {
 			textField.clear(); // zuerst: der Text-Listener meldet "leer" und darf das Löschen nicht wieder zurücknehmen
 			field.clear();
+			accepted[0] = ""; // bewusst gelöscht: Dahin springt ein nicht lesbarer Text danach zurück
 			textField.setPromptText("tt.mm.jjjj");
 		});
 		HBox box = new HBox(4, textField, clearButton);

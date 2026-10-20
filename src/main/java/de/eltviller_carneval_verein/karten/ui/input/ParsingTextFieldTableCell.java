@@ -136,7 +136,7 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 		if (replacement.isPresent()) {
 			// Leeres Feld: Statt die Eingabe zu verwerfen, gilt der Ersatzwert (bei einem Datum der heutige Tag). Die Meldung
 			// bleibt, damit man sieht, dass der getippte Text nicht gelesen wurde.
-			InputFeedback.report(failure.get().issue().toIssue(label(), InputFeedback.displayText(failure.get().text())), this);
+			InputFeedback.reportAfterChange(failure.get().issue().toIssue(label(), InputFeedback.displayText(failure.get().text())), this);
 			super.commitEdit(replacement.get());
 			pseudoClassStateChanged(EDITING, false);
 			return;
