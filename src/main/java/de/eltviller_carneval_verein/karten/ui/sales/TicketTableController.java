@@ -33,14 +33,17 @@ import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
+import javafx.event.EventType;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.fxml.FXML;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.ScrollBar;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
@@ -48,6 +51,8 @@ import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.CheckBoxTableCell;
 import javafx.scene.control.cell.ComboBoxTableCell;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.util.StringConverter;
 
@@ -147,6 +152,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 		// 5. Mehrfachauswahl (Strg-/Shift-Klick). Zeilen, die der Suchfilter ausblendet, fallen von selbst aus der Auswahl.
 		seatTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+		freezeSelectionWhileDialogOpen();
 		TableInput.install(seatTable);
 		MenuItem sellItem = new MenuItem();
 		MenuItem assignItem = new MenuItem(ASSIGN_TEXT);
@@ -264,6 +270,39 @@ public class TicketTableController implements ContentController, SalesStateAware
 		List<BookingDTO> selected = seatTable.getSelectionModel().getSelectedItems();
 		boolean oneUnassigned = selected.size() == 1 && selected.get(0) != null && selected.get(0).getBooking().isUnassigned();
 		btnAssign.setDisable(!editMode || !oneUnassigned);
+	}
+
+	/**
+	 * Solange der Verkaufsdialog offen ist, ändert die Tabelle ihre Auswahl nicht: Klicks auf Zeilen (auch mit Strg, Umschalt
+	 * und beim Ziehen) und Tasten werden abgefangen, bevor die Tabelle sie auswertet. Der Dialog gehört zu genau dieser
+	 * Auswahl; die Spaltenköpfe und der Scroll-Balken bleiben bedienbar. Die Filter hängen vor denen von {@link TableInput}.
+	 */
+	private void freezeSelectionWhileDialogOpen() {
+		for (EventType<MouseEvent> type : List.of(MouseEvent.MOUSE_PRESSED, MouseEvent.MOUSE_RELEASED, MouseEvent.MOUSE_CLICKED, MouseEvent.MOUSE_DRAGGED)) {
+			seatTable.addEventFilter(type, event -> {
+				if (isDialogOpen() && isRowArea(event.getTarget())) {
+					event.consume();
+				}
+			});
+		}
+		seatTable.addEventFilter(KeyEvent.ANY, event -> {
+			if (isDialogOpen()) {
+				event.consume();
+			}
+		});
+	}
+
+	/** Ob das Ziel eine Zeile oder Zelle der Tabelle ist (und nicht Kopf oder Scroll-Balken). */
+	private static boolean isRowArea(Object target) {
+		for (Node node = target instanceof Node n ? n : null; node != null; node = node.getParent()) {
+			if (node instanceof ScrollBar) {
+				return false;
+			}
+			if (node instanceof TableRow<?> || node instanceof TableCell<?, ?>) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private boolean isDialogOpen() {

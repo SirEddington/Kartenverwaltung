@@ -479,9 +479,12 @@
     -fx-border-width: 1px;
  }
 
+ /* Inhalt links und senkrecht mittig: Modena richtet Zellen oben aus, und nur der Innenabstand ließ den Text in einer
+    30 px hohen Zeile mittig wirken; in höheren Zeilen oder ohne Abstand saß er zu weit oben. */
  .table-view .table-cell,
  .tree-table-view .tree-table-cell {
      -fx-padding: 6px 8px;
+     -fx-alignment: center-left;
  }
 
  /* Feste Zeilenhöhe: Bisher bestimmten die Checkbox-Zellen mit ihrem Zellenabstand die Höhe (30 px). Ohne ihren Abstand
@@ -500,6 +503,21 @@
      -fx-background-color: -fx-surface-white;
      -fx-border-color: -fx-ecv-blue;
      -fx-border-width: 1px;
+ }
+
+ /* Zahlungs-ComboBox in der Zelle: Die Zelle trug ihren Innenabstand (6px oben und unten) um die ComboBox herum und
+    machte die Zeile beim Wählen von 30 auf 42 px hoch (der Text der übrigen Zellen rutschte dabei nach oben). Ohne
+    senkrechten Innenabstand (der Text ist ohnehin mittig ausgerichtet) und mit einer 28 px hohen ComboBox bleibt die
+    Zeile bei 30 px. Es gibt keine Pseudoklasse "editing" für diese Zelle, deshalb gilt es für die Zelle allgemein. */
+ .table-view .combo-box-table-cell {
+     -fx-padding: 0 8px;
+ }
+
+ .table-view .combo-box-table-cell > .combo-box {
+     -fx-pref-height: 28px;
+     -fx-min-height: 28px;
+     -fx-max-height: 28px;
+     -fx-padding: 0 4px;
  }
 
  .table-view .table-row-cell .table-cell:editing > .text-field,

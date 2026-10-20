@@ -285,6 +285,12 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 				return;
 			}
 			Window window = seatNode.getScene().getWindow();
+			if (editMode && matchesQuery(booking)) {
+				// Ein Einzelklick wählt den Sitz aus (wie im Explorer ersetzt er die bisherige Auswahl) und öffnet seine Karte
+				selectedBookings.clear();
+				selectedBookings.add(booking);
+				renderHall();
+			}
 			openSeatDetailPopup(booking, window, event.getScreenX() + 12, event.getScreenY() + 12);
 		});
 	}
