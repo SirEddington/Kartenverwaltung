@@ -26,6 +26,7 @@ public final class SalesViewState {
 	private final ObjectProperty<Rectangle2D> visibleHallRect = new SimpleObjectProperty<>();
 	private final ObservableSet<Booking> selectedBookings = FXCollections.observableSet(new LinkedHashSet<>());
 	private final PlanLabelOptions planLabels = new PlanLabelOptions();
+	private final ObjectProperty<SummaryPlacement> summaryPlacement = new SimpleObjectProperty<>(SummaryPlacement.AUTO);
 
 	public ObjectProperty<Event> eventProperty() {
 		return event;
@@ -52,6 +53,11 @@ public final class SalesViewState {
 	 */
 	public PlanLabelOptions planLabels() {
 		return planLabels;
+	}
+
+	/** Wo das Kundenfenster die Kartenübersicht zeigt (Menü "Anzeige"); Standard automatisch, bleibt beim Wechsel der Ansicht erhalten. */
+	public ObjectProperty<SummaryPlacement> summaryPlacementProperty() {
+		return summaryPlacement;
 	}
 
 	/** Ob der Saalplan die Reihen (Linie mit Buchstabe) zeigt; Tische und Sitze sind immer zu sehen. */
