@@ -19,6 +19,7 @@ import javafx.beans.value.ChangeListener;
 import javafx.collections.SetChangeListener;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.geometry.Side;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -57,8 +58,9 @@ public final class CustomerDisplay {
 	private Stage borderlessStage;
 	private Scene scene;
 	private BorderPane contentLayout;
+	private BorderPane body;
 	private VBox summaryPanel;
-	private Boolean summaryIsBelow;
+	private Side summarySide;
 	private Runnable onClosed;
 	private boolean fullscreen = false;
 	private boolean switching = false;
@@ -81,6 +83,7 @@ public final class CustomerDisplay {
 	});
 	private final ChangeListener<Object> contentChanged = (obs, oldValue, newValue) -> redraw.request();
 	private final ChangeListener<Rectangle2D> viewChanged = (obs, oldValue, newValue) -> applyView();
+	private final InvalidationListener placementInvalidated = observable -> placeSummary();
 	private final SetChangeListener<Booking> selectionChanged = change -> redraw.request();
 	// Ein Verkauf im Hauptfenster ändert Buchungen: Die Änderungserkennung meldet es kurz nach der Bedienung
 	private final ChangeTracker.Listener<Event> dataChanged = (changed, before, after) -> onDataChanged(changed);
@@ -122,9 +125,12 @@ public final class CustomerDisplay {
 		contentLayout.setTop(titleLabel);
 		BorderPane.setAlignment(titleLabel, Pos.CENTER);
 		BorderPane.setMargin(titleLabel, new Insets(16));
-		contentLayout.setCenter(new StackPane(planPane, hintLabel));
+		// Der Titel steht immer ganz oben; die Kartenübersicht hängt an einer der vier Seiten des Plans darunter
+		body = new BorderPane();
+		body.setCenter(new StackPane(planPane, hintLabel));
+		contentLayout.setCenter(body);
 		summaryPanel = createSummaryPanel();
-		placeSummary(false);
+		placeSummary(Side.RIGHT);
 
 		// Ändert sich die Form der Fläche, passt der Ausschnitt neu: Der relative Zoom hängt vom Seitenverhältnis ab
 		InvalidationListener refit = observable -> applyView();
@@ -133,10 +139,9 @@ public final class CustomerDisplay {
 
 		// Hintergrund, Wappen und Stylesheet wie in allen Ansichten der App
 		scene = MainApp.createScene(contentLayout);
-		// Im Hochformat steht die Kartenübersicht unter dem Plan, sonst rechts
-		InvalidationListener relayout = observable -> placeSummary(CustomerDisplayText.summaryBelow(scene.getWidth(), scene.getHeight()));
-		scene.widthProperty().addListener(relayout);
-		scene.heightProperty().addListener(relayout);
+		// Automatisch steht die Kartenübersicht im Hochformat unter dem Plan, sonst rechts; die Wahl im Menü "Anzeige" geht vor
+		scene.widthProperty().addListener(placementInvalidated);
+		scene.heightProperty().addListener(placementInvalidated);
 		// F11 und Doppelklick schalten den Vollbildmodus um, Esc beendet ihn
 		scene.setOnKeyPressed(event -> {
 			if (event.getCode() == KeyCode.F11 || (event.getCode() == KeyCode.ESCAPE && fullscreen)) {
@@ -155,6 +160,7 @@ public final class CustomerDisplay {
 		place(mainWindow);
 
 		attach();
+		placeSummary(); // Eine vor dem Öffnen gewählte Platzierung gilt sofort
 		windowStage.show();
 		// Ein neues Fenster nimmt den Fokus: Der Verkäufer soll nach dem Haken weitertippen können (Suche, Tabelle)
 		mainWindow.requestFocus();
@@ -170,28 +176,50 @@ public final class CustomerDisplay {
 		}
 	}
 
-	/** Setzt die Kartenübersicht neben den Plan (Querformat) oder darunter (Hochformat). */
-	private void placeSummary(boolean below) {
-		if (summaryIsBelow != null && summaryIsBelow == below) {
+	/** Hängt die Kartenübersicht dorthin, wo die Wahl im Menü "Anzeige" und die Form des Fensters sie hinstellen. */
+	private void placeSummary() {
+		placeSummary(state.summaryPlacementProperty().get().sideFor(scene.getWidth(), scene.getHeight()));
+	}
+
+	/** Setzt die Kartenübersicht an die Seite des Plans: links oder rechts als Spalte, oben oder unten als Leiste. */
+	private void placeSummary(Side side) {
+		if (summarySide == side) {
 			return; // Beim Ziehen am Fensterrand kommen viele Größenänderungen: Die Leiste wird nur bei Wechsel umgehängt
 		}
-		summaryIsBelow = below;
-		contentLayout.setRight(null);
-		contentLayout.setBottom(null);
-		if (below) {
-			BorderPane.setMargin(summaryPanel, new Insets(0, 16, 16, 16));
-			summaryPanel.setMinWidth(0);
-			summaryPanel.setPrefWidth(Region.USE_COMPUTED_SIZE);
-			summaryPanel.setMinHeight(320);
-			summaryPanel.setPrefHeight(320);
-			contentLayout.setBottom(summaryPanel);
-		} else {
-			BorderPane.setMargin(summaryPanel, new Insets(0, 16, 16, 8));
+		summarySide = side;
+		body.setTop(null);
+		body.setBottom(null);
+		body.setLeft(null);
+		body.setRight(null);
+		boolean column = side == Side.LEFT || side == Side.RIGHT;
+		if (column) {
 			summaryPanel.setMinWidth(380);
 			summaryPanel.setPrefWidth(380);
 			summaryPanel.setMinHeight(Region.USE_COMPUTED_SIZE);
 			summaryPanel.setPrefHeight(Region.USE_COMPUTED_SIZE);
-			contentLayout.setRight(summaryPanel);
+		} else {
+			summaryPanel.setMinWidth(0);
+			summaryPanel.setPrefWidth(Region.USE_COMPUTED_SIZE);
+			summaryPanel.setMinHeight(320);
+			summaryPanel.setPrefHeight(320);
+		}
+		switch (side) {
+		case TOP -> {
+			BorderPane.setMargin(summaryPanel, new Insets(0, 16, 8, 16));
+			body.setTop(summaryPanel);
+		}
+		case BOTTOM -> {
+			BorderPane.setMargin(summaryPanel, new Insets(0, 16, 16, 16));
+			body.setBottom(summaryPanel);
+		}
+		case LEFT -> {
+			BorderPane.setMargin(summaryPanel, new Insets(0, 8, 16, 16));
+			body.setLeft(summaryPanel);
+		}
+		case RIGHT -> {
+			BorderPane.setMargin(summaryPanel, new Insets(0, 16, 16, 8));
+			body.setRight(summaryPanel);
+		}
 		}
 	}
 
@@ -308,6 +336,7 @@ public final class CustomerDisplay {
 		state.presentationProperty().addListener(contentChanged);
 		state.planLabels().addListener(contentChanged);
 		state.visibleHallRectProperty().addListener(viewChanged);
+		state.summaryPlacementProperty().addListener(placementInvalidated);
 		state.selectedBookings().addListener(selectionChanged);
 		ChangeTracker.events().addListener(dataChanged);
 	}
@@ -321,6 +350,7 @@ public final class CustomerDisplay {
 		state.presentationProperty().removeListener(contentChanged);
 		state.planLabels().removeListener(contentChanged);
 		state.visibleHallRectProperty().removeListener(viewChanged);
+		state.summaryPlacementProperty().removeListener(placementInvalidated);
 		state.selectedBookings().removeListener(selectionChanged);
 		ChangeTracker.events().removeListener(dataChanged);
 	}

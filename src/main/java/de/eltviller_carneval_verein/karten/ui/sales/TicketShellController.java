@@ -93,6 +93,7 @@ public class TicketShellController {
 		btnSave.setDisable(!editMode); // Im Anzeigemodus gibt es nichts zu speichern
 		// Immer aktiv, auch in der Tabelle: Die Einstellungen gelten für die Saalansicht und lassen sich vorher treffen
 		PlanLabelsMenu.bind(menuDisplay, state.planLabels());
+		SummaryPlacementMenu.append(menuDisplay, state.summaryPlacementProperty());
 
 		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das
 		// Hauptfenster geschlossen, schließt es mit (sonst hielte es die App am Leben). Die Szene bleibt an contentArea
