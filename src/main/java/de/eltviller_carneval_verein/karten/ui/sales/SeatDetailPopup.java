@@ -29,6 +29,8 @@ import javafx.scene.control.Tooltip;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.SVGPath;
+import javafx.scene.shape.StrokeLineCap;
 import javafx.stage.Popup;
 import javafx.stage.Window;
 import javafx.util.StringConverter;
@@ -215,7 +217,15 @@ public final class SeatDetailPopup {
 			}
 		});
 
-		Button clearButton = new Button("×");
+		// Das Kreuz ist gezeichnet, nicht als Zeichen "×" gesetzt: Das Zeichen sitzt in der Schrift tiefer als die Mitte
+		Button clearButton = new Button();
+		SVGPath cross = new SVGPath();
+		cross.setContent("M0,0 L8,8 M8,0 L0,8");
+		cross.setFill(null);
+		cross.setStrokeWidth(1.6);
+		cross.setStrokeLineCap(StrokeLineCap.BUTT);
+		cross.strokeProperty().bind(clearButton.textFillProperty()); // Farbe wie der Text des Knopfes (auch wenn gesperrt)
+		clearButton.setGraphic(cross);
 		clearButton.getStyleClass().add("button-default");
 		clearButton.setTooltip(new Tooltip("Datum löschen"));
 		clearButton.setDisable(!editMode);
