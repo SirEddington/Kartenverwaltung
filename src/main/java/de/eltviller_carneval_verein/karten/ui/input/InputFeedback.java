@@ -21,6 +21,8 @@ public final class InputFeedback {
 	public static final String ERROR_STYLE_CLASS = "input-error";
 
 	private static final Duration MARK_DURATION = Duration.millis(1500);
+	/** Etwas länger als die Ruhezeit des ChangeTrackers (300 ms), nach der die Live-Prüfung die Fußzeile ändert. */
+	private static final Duration LIVE_CHECK_DELAY = Duration.millis(500);
 
 	// Je Knoten die laufende Markierung: Ein neuer Fehler startet die Zeit neu, die Klasse wird nie doppelt gesetzt
 	private static final Map<Node, PauseTransition> MARKS = new WeakHashMap<>();
@@ -42,6 +44,19 @@ public final class InputFeedback {
 	public static void report(ValidationIssue issue, Node node) {
 		StatusMessage.getInstance().show(ValidationResult.of(issue));
 		mark(node);
+	}
+
+	/**
+	 * Wie {@link #report}, für einen Fall, in dem die Eingabe das Modell ändert (z. B. ein unlesbares Datum wird durch den
+	 * heutigen Tag ersetzt): Die Live-Prüfung läuft nach der Änderung und ersetzt oder löscht die Fußzeile, sobald sich die
+	 * Menge der Beanstandungen ändert. Die Meldung wird deshalb nach ihr noch einmal gezeigt, sonst sähe der Nutzer nie, dass
+	 * sein Text nicht gelesen wurde.
+	 */
+	public static void reportAfterChange(ValidationIssue issue, Node node) {
+		report(issue, node);
+		PauseTransition afterLiveCheck = new PauseTransition(LIVE_CHECK_DELAY);
+		afterLiveCheck.setOnFinished(event -> StatusMessage.getInstance().show(ValidationResult.of(issue)));
+		afterLiveCheck.play();
 	}
 
 	private static void mark(Node node) {

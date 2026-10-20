@@ -342,6 +342,7 @@ class PresentationAndTableValidatorTest {
 		booking.setTableNumber(3);
 		booking.setSeatNumber(2);
 		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaymentDate(java.time.LocalDate.of(2026, 10, 1));
 
 		ValidationIssue issue = only(PresentationValidator.validate(presentation));
 

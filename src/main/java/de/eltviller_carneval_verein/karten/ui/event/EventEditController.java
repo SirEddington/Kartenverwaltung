@@ -17,6 +17,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.SaleDates;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
@@ -143,11 +144,17 @@ public class EventEditController {
 	@FXML
 	private TableColumn<Booking, String> colSeatFirstName;
 	@FXML
+	private TableColumn<Booking, LocalDate> colSeatReservedOn;
+	@FXML
 	private TableColumn<Booking, Double> colSeatPrice;
 	@FXML
 	private TableColumn<Booking, PaymentStatus> colSeatPayment;
 	@FXML
+	private TableColumn<Booking, LocalDate> colSeatPaidOn;
+	@FXML
 	private TableColumn<Booking, Boolean> colSeatCollected;
+	@FXML
+	private TableColumn<Booking, LocalDate> colSeatCollectedOn;
 	@FXML
 	private TableColumn<Booking, String> colSeatComment;
 
@@ -314,8 +321,9 @@ public class EventEditController {
 
 		colSeatLastName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getLastName()));
 		colSeatLastName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
+		// Name, Zahlung und "Abgeholt" über SaleDates: Wird eine Aktion neu gesetzt, trägt es das Datum ein
 		colSeatLastName.setOnEditCommit(e -> {
-			e.getRowValue().setLastName(e.getNewValue());
+			SaleDates.change(e.getRowValue(), booking -> booking.setLastName(e.getNewValue()));
 			bookingChanged();
 		});
 
@@ -347,7 +355,7 @@ public class EventEditController {
 			}
 		}, PaymentStatus.values()));
 		colSeatPayment.setOnEditCommit(e -> {
-			e.getRowValue().setPaymentStatus(e.getNewValue());
+			SaleDates.change(e.getRowValue(), booking -> booking.setPaymentStatus(e.getNewValue()));
 			bookingChanged();
 		});
 
@@ -359,11 +367,23 @@ public class EventEditController {
 			Booking booking = seatTable.getItems().get(index);
 			SimpleBooleanProperty prop = new SimpleBooleanProperty(booking.isCollected());
 			prop.addListener((obs, oldVal, newVal) -> {
-				booking.setCollected(newVal);
+				SaleDates.change(booking, b -> b.setCollected(newVal));
 				bookingChanged();
 			});
 			return prop;
 		}));
+
+		// Die Daten der Aktionen: Datumsspalten mit strengem Format; leere Eingabe löscht das Datum, ein unlesbarer Text in
+		// einem leeren Feld trägt heute ein (INP-002 meldet es trotzdem)
+		colSeatReservedOn.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getReservationDate()));
+		colSeatReservedOn.setCellFactory(ParsingTextFieldTableCell.forDateColumn("Reservierungsdatum", EntityLabels::booking, LocalDate::now));
+		colSeatReservedOn.setOnEditCommit(e -> e.getRowValue().setReservationDate(e.getNewValue()));
+		colSeatPaidOn.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getPaymentDate()));
+		colSeatPaidOn.setCellFactory(ParsingTextFieldTableCell.forDateColumn("Bezahldatum", EntityLabels::booking, LocalDate::now));
+		colSeatPaidOn.setOnEditCommit(e -> e.getRowValue().setPaymentDate(e.getNewValue()));
+		colSeatCollectedOn.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getCollectionDate()));
+		colSeatCollectedOn.setCellFactory(ParsingTextFieldTableCell.forDateColumn("Abholdatum", EntityLabels::booking, LocalDate::now));
+		colSeatCollectedOn.setOnEditCommit(e -> e.getRowValue().setCollectionDate(e.getNewValue()));
 
 		colSeatComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getComment()));
 		colSeatComment.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
@@ -385,9 +405,14 @@ public class EventEditController {
 		});
 	}
 
-	/** Eine Buchung wurde bearbeitet: Die Zahl der belegten Sitze im Tisch ändert sich mit. */
+	/**
+	 * Eine Buchung wurde bearbeitet: Die Zahl der belegten Sitze im Tisch ändert sich mit, und eine neu gesetzte Aktion
+	 * hat ein Datum in einer anderen Spalte der Sitz-Tabelle gesetzt (erst nach dem laufenden Commit neu zeichnen:
+	 * Ein Neuzeichnen mittendrin lässt die Zahlungs-ComboBox im Bearbeiten hängen).
+	 */
 	private void bookingChanged() {
 		tableTable.refresh();
+		Platform.runLater(seatTable::refresh);
 	}
 
 	/**

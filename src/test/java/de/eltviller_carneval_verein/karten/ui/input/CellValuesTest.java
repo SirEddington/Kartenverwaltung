@@ -1,7 +1,10 @@
 package de.eltviller_carneval_verein.karten.ui.input;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
@@ -24,6 +27,21 @@ class CellValuesTest {
 		assertFalse(CellValues.isUnchanged("Müller", "Meier"));
 		assertFalse(CellValues.isUnchanged(null, "Meier"));
 		assertFalse(CellValues.isUnchanged("Meier", ""));
+	}
+
+	@Test
+	void anEmptyCellTakesTheReplacementAfterAFailedInput() {
+		assertEquals(Optional.of("heute"), CellValues.replacementAfterFailure(null, () -> "heute"));
+	}
+
+	@Test
+	void aFilledCellKeepsItsValueAfterAFailedInput() {
+		assertEquals(Optional.empty(), CellValues.replacementAfterFailure("alt", () -> "heute"));
+	}
+
+	@Test
+	void withoutAReplacementNothingIsTakenAfterAFailedInput() {
+		assertEquals(Optional.empty(), CellValues.replacementAfterFailure(null, null));
 	}
 
 	@Test

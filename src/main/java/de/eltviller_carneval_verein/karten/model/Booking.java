@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.model;
 
+import java.time.LocalDate;
 import java.util.Comparator;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -42,6 +43,15 @@ public class Booking {
 	private Integer price; // get,set
 	private final ObjectProperty<PaymentStatus> paymentStatus = new SimpleObjectProperty<>(PaymentStatus.NONE); // get,set
 	private boolean collected; // get,set
+
+	/**
+	 * Tag der Reservierung, der Bezahlung und der Abholung. {@code null} heißt: die Aktion ist nicht erfolgt, oder das
+	 * Datum ist unbekannt (ältere Dateien). Gesetzt werden sie über {@link SaleDates}, nicht in den Settern: Jackson ruft
+	 * die Setter beim Laden auf.
+	 */
+	private LocalDate reservationDate; // get,set
+	private LocalDate paymentDate; // get,set
+	private LocalDate collectionDate; // get,set
 
 	// Daten zum Reservierer
 	private String lastName; // get,set
@@ -142,6 +152,30 @@ public class Booking {
 
 	public void setCollected(boolean collected) {
 		this.collected = collected;
+	}
+
+	public LocalDate getReservationDate() {
+		return reservationDate;
+	}
+
+	public void setReservationDate(LocalDate reservationDate) {
+		this.reservationDate = reservationDate;
+	}
+
+	public LocalDate getPaymentDate() {
+		return paymentDate;
+	}
+
+	public void setPaymentDate(LocalDate paymentDate) {
+		this.paymentDate = paymentDate;
+	}
+
+	public LocalDate getCollectionDate() {
+		return collectionDate;
+	}
+
+	public void setCollectionDate(LocalDate collectionDate) {
+		this.collectionDate = collectionDate;
 	}
 
 	public String getLastName() {
@@ -268,6 +302,9 @@ public class Booking {
 		copy.price = price;
 		copy.setPaymentStatus(getPaymentStatus());
 		copy.collected = collected;
+		copy.reservationDate = reservationDate;
+		copy.paymentDate = paymentDate;
+		copy.collectionDate = collectionDate;
 		copy.lastName = lastName;
 		copy.firstName = firstName;
 		copy.eMail = eMail;

@@ -1,15 +1,22 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
+import de.eltviller_carneval_verein.karten.ui.input.DateTimeInput;
 import de.eltviller_carneval_verein.karten.ui.input.InputFeedback;
+import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.ValidationIssue;
 import javafx.beans.InvalidationListener;
+import javafx.beans.value.ObservableValue;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -22,6 +29,8 @@ import javafx.scene.control.Tooltip;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.SVGPath;
+import javafx.scene.shape.StrokeLineCap;
 import javafx.stage.Popup;
 import javafx.stage.Window;
 import javafx.util.StringConverter;
@@ -42,6 +51,8 @@ public final class SeatDetailPopup {
 	private final boolean editMode;
 	private final Runnable onApplied;
 	private final Popup popup = new Popup();
+	/** Je Datumsfeld: löst einen nicht lesbaren Text auf (siehe {@link #dateField}); läuft vor "Anwenden". */
+	private final List<Runnable> dateResolvers = new ArrayList<>();
 	private Label totalValue;
 
 	/**
@@ -77,9 +88,25 @@ public final class SeatDetailPopup {
 
 		grid.add(buildHeader(), 0, row++, 2, 1);
 
-		grid.addRow(row++, new Label("Nachname:"), textField(edit.lastName(), "Nachname"));
+		List<Booking> seats = edit.bookings();
+		TextField lastNameField = textField(edit.lastName(), "Nachname");
+		DateInput reservedOn = dateField(edit.reservationDate(), "Reservierungsdatum");
+		ComboBox<PaymentStatus> paymentBox = paymentCombo();
+		DateInput paidOn = dateField(edit.paymentDate(), "Bezahldatum");
+		CheckBox collectedBox = checkBox("Abgeholt", edit.collected());
+		DateInput collectedOn = dateField(edit.collectionDate(), "Abholdatum");
+		// Wird eine Aktion im Dialog gesetzt, zeigt ihr Datum gleich den heutigen Tag (wie es "Anwenden" einträgt)
+		prefillOnAction(reservedOn, seats.stream().noneMatch(Booking::isReserved), () -> !lastNameField.getText().isBlank(), lastNameField.textProperty());
+		prefillOnAction(paidOn, seats.stream().noneMatch(Booking::isPaid), () -> paymentBox.getValue() != null && paymentBox.getValue().isPaid(),
+				paymentBox.valueProperty());
+		prefillOnAction(collectedOn, seats.stream().noneMatch(Booking::isCollected), () -> collectedBox.isSelected() && !collectedBox.isIndeterminate(),
+				collectedBox.selectedProperty());
+
+		grid.addRow(row++, new Label("Nachname:"), lastNameField);
 		grid.addRow(row++, new Label("Vorname:"), textField(edit.firstName(), "Vorname"));
-		grid.addRow(row++, new Label("Zahlung:"), paymentCombo());
+		grid.addRow(row++, new Label("Reserviert am:"), reservedOn.box());
+		grid.addRow(row++, new Label("Zahlung:"), paymentBox);
+		grid.addRow(row++, new Label("Bezahlt am:"), paidOn.box());
 		grid.addRow(row++, new Label("Preis (€):"), priceSpinner());
 
 		if (edit.bookings().size() > 1) {
@@ -89,13 +116,14 @@ public final class SeatDetailPopup {
 			grid.addRow(row++, new Label("Gesamt:"), totalValue);
 		}
 
-		HBox checkboxRow = new HBox(12, checkBox("Abgeholt", edit.collected()));
+		HBox checkboxRow = new HBox(12, collectedBox);
 		checkboxRow.setAlignment(Pos.CENTER_LEFT);
 		// Rollstuhlplatz: nur lesbar aus der Momentaufnahme (geändert wird er im Hallen-Editor)
 		if (edit.bookings().stream().allMatch(Booking::isWheelchairAccessible)) {
 			checkboxRow.getChildren().add(new Label(edit.bookings().size() == 1 ? "Rollstuhlplatz" : "Alle Rollstuhlplätze"));
 		}
 		grid.add(checkboxRow, 0, row++, 2, 1);
+		grid.addRow(row++, new Label("Abgeholt am:"), collectedOn.box());
 
 		grid.addRow(row++, new Label("Kommentar:"), textField(edit.comment(), "Kommentar"));
 		grid.add(buildButtonBar(), 0, row, 2, 1);
@@ -129,6 +157,122 @@ public final class SeatDetailPopup {
 		textField.setDisable(!editMode);
 		textField.textProperty().addListener((obs, oldVal, newVal) -> field.change(newVal));
 		return textField;
+	}
+
+	/**
+	 * Datumsfeld einer Aktion (Reservierung, Bezahlung, Abholung) mit Knopf "×" zum Löschen. Der Text ist streng im Format
+	 * {@code dd.MM.yyyy}. Ein leeres Feld bei vorhandenem gemeinsamem Datum löscht es; bei "verschieden" heißt leer
+	 * "nicht geändert", gelöscht wird dort nur mit "×". Ein nicht lesbarer Text meldet {@code INP-002} (bei Fokusverlust und
+	 * vor "Anwenden"): In einem Feld, in dem alle Buchungen noch kein Datum haben, gilt dann heute, sonst springt der Text
+	 * auf den bisherigen Stand zurück.
+	 */
+	private DateInput dateField(SeatBulkEdit.Field<LocalDate> field, String name) {
+		TextField textField = new TextField(field.common().map(DateTimeInput::formatDate).orElse(""));
+		textField.setPromptText(field.common().isEmpty() && !field.allEmpty() ? MIXED : "tt.mm.jjjj");
+		textField.setPrefWidth(115); // breit genug für "verschieden"
+		textField.setAlignment(Pos.CENTER_LEFT); // Text senkrecht mittig, waagerecht links
+		textField.setDisable(!editMode);
+		String initialText = textField.getText();
+		// Der Text, der zum Stand des Feldes gehört: Dahin springt ein nicht lesbarer Text zurück
+		String[] accepted = { textField.getText() };
+		List<Booking> bookings = edit.bookings();
+		String rowLabel = bookings.size() == 1 ? EntityLabels.booking(bookings.get(0)) : bookings.size() + " Sitzen";
+
+		textField.textProperty().addListener((obs, oldVal, newVal) -> {
+			if (newVal == null || newVal.isBlank()) {
+				if (field.common().isPresent()) {
+					field.clear();
+				} else {
+					field.change(null);
+				}
+				return; // Leer ist nur ein Zwischenstand beim Tippen: "accepted" bleibt das letzte lesbare Datum
+			}
+			Optional<LocalDate> date = DateTimeInput.parseDate(newVal);
+			if (date.isPresent()) {
+				field.change(date.get());
+				accepted[0] = newVal;
+			}
+		});
+
+		Runnable resolve = () -> {
+			String text = textField.getText();
+			if (text == null || text.isBlank() || DateTimeInput.parseDate(text).isPresent()) {
+				return;
+			}
+			ValidationIssue issue = InputIssue.NOT_A_DATE.toIssue(InputFeedback.label(name, rowLabel), InputFeedback.displayText(text));
+			// Wie in den Tabellen: Hatte das Feld noch nie ein Datum (keine Buchung hat eins und es wurde auch keins gelesen),
+			// gilt heute; sonst springt der Text auf das letzte lesbare Datum zurück ("" nach "×")
+			if (accepted[0].isEmpty() && field.allEmpty()) {
+				InputFeedback.reportAfterChange(issue, textField);
+				textField.setText(DateTimeInput.formatDate(LocalDate.now()));
+			} else {
+				InputFeedback.report(issue, textField);
+				textField.setText(accepted[0]);
+			}
+		};
+		dateResolvers.add(resolve);
+		textField.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+			if (!isFocused) {
+				resolve.run();
+			}
+		});
+
+		// Das Kreuz ist gezeichnet, nicht als Zeichen "×" gesetzt: Das Zeichen sitzt in der Schrift tiefer als die Mitte
+		Button clearButton = new Button();
+		SVGPath cross = new SVGPath();
+		cross.setContent("M0,0 L8,8 M8,0 L0,8");
+		cross.setFill(null);
+		cross.setStrokeWidth(1.6);
+		cross.setStrokeLineCap(StrokeLineCap.BUTT);
+		cross.strokeProperty().bind(clearButton.textFillProperty()); // Farbe wie der Text des Knopfes (auch wenn gesperrt)
+		clearButton.setGraphic(cross);
+		clearButton.getStyleClass().add("button-default");
+		clearButton.setTooltip(new Tooltip("Datum löschen"));
+		clearButton.setDisable(!editMode);
+		// Genauso hoch wie das Eingabefeld daneben (der Knopf wäre sonst mit seinem Innenabstand höher)
+		clearButton.setStyle("-fx-padding: 0 10px;");
+		clearButton.minHeightProperty().bind(textField.heightProperty());
+		clearButton.prefHeightProperty().bind(textField.heightProperty());
+		clearButton.maxHeightProperty().bind(textField.heightProperty());
+		clearButton.setOnAction(event -> {
+			textField.clear(); // zuerst: der Text-Listener meldet "leer" und darf das Löschen nicht wieder zurücknehmen
+			field.clear();
+			accepted[0] = ""; // bewusst gelöscht: Dahin springt ein nicht lesbarer Text danach zurück
+			textField.setPromptText("tt.mm.jjjj");
+		});
+		HBox box = new HBox(4, textField, clearButton);
+		box.setAlignment(Pos.CENTER_LEFT);
+		return new DateInput(box, textField, initialText);
+	}
+
+	/** Ein Datumsfeld des Dialogs: die Zeile, das Textfeld und der Text beim Öffnen. */
+	private record DateInput(HBox box, TextField text, String initialText) {
+	}
+
+	/**
+	 * Zeigt im Datumsfeld gleich den heutigen Tag, sobald die zugehörige Aktion im Dialog gesetzt wird (Name eingetragen,
+	 * Zahlung gewählt, "Abgeholt" angehakt), und stellt den Text von vorhin wieder her, wenn sie zurückgenommen wird.
+	 * Das gilt nur, wenn keine der Buchungen die Aktion schon hat (sonst trägt "Anwenden" das Datum je Buchung ein) und
+	 * nur, solange der Nutzer das Datum nicht selbst geändert hat. Das Datum bleibt wie jedes Datum änderbar.
+	 */
+	private void prefillOnAction(DateInput date, boolean nothingDoneYet, BooleanSupplier actionDone, ObservableValue<?> trigger) {
+		if (!editMode || !nothingDoneYet) {
+			return;
+		}
+		String[] prefilled = { null };
+		trigger.addListener((obs, oldVal, newVal) -> {
+			if (actionDone.getAsBoolean()) {
+				if (prefilled[0] == null && date.text().getText().equals(date.initialText())) {
+					prefilled[0] = DateTimeInput.formatDate(LocalDate.now());
+					date.text().setText(prefilled[0]);
+				}
+			} else if (prefilled[0] != null) {
+				if (prefilled[0].equals(date.text().getText())) {
+					date.text().setText(date.initialText());
+				}
+				prefilled[0] = null;
+			}
+		});
 	}
 
 	private ComboBox<PaymentStatus> paymentCombo() {
@@ -213,6 +357,8 @@ public final class SeatDetailPopup {
 				if (SpinnerInput.blockSaveIfScreenInputRejected(applyButton)) {
 					return;
 				}
+				// Nicht lesbare Daten zuerst auflösen (heute bzw. alter Stand), der Klick löst den Fokusverlust nicht immer aus
+				dateResolvers.forEach(Runnable::run);
 				edit.apply();
 				popup.hide();
 				onApplied.run();

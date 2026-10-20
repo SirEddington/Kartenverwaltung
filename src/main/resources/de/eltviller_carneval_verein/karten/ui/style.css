@@ -479,9 +479,18 @@
     -fx-border-width: 1px;
  }
 
+ /* Inhalt links und senkrecht mittig (Modena richtet Zellen oben aus). */
  .table-view .table-cell,
  .tree-table-view .tree-table-cell {
      -fx-padding: 6px 8px;
+     -fx-alignment: center-left;
+ }
+
+ /* Tabellen haben eine feste Zeilenhöhe (30 px, siehe unten): Ein senkrechter Innenabstand von 6 px ließ den Text 3 px
+    über der Mitte sitzen (gemessen: Textmitte 12 statt 15 px) und machte die Zeile höher, sobald eine Zelle mehr als Text
+    enthält (z. B. die Zahlungs-ComboBox: 42 statt 30 px). Ohne ihn sitzt der Text mittig. */
+ .table-view .table-cell {
+     -fx-padding: 0 8px;
  }
 
  /* Feste Zeilenhöhe: Bisher bestimmten die Checkbox-Zellen mit ihrem Zellenabstand die Höhe (30 px). Ohne ihren Abstand
@@ -500,6 +509,15 @@
      -fx-background-color: -fx-surface-white;
      -fx-border-color: -fx-ecv-blue;
      -fx-border-width: 1px;
+ }
+
+ /* Zahlungs-ComboBox in der Zelle: 28 px hoch, damit die Zeile beim Wählen bei 30 px bleibt (ohne die Regel wurde sie
+    42 px hoch und der Text der übrigen Zellen rutschte nach oben). */
+ .table-view .combo-box-table-cell > .combo-box {
+     -fx-pref-height: 28px;
+     -fx-min-height: 28px;
+     -fx-max-height: 28px;
+     -fx-padding: 0 4px;
  }
 
  .table-view .table-row-cell .table-cell:editing > .text-field,

@@ -29,8 +29,11 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Tooltip;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
+import javafx.scene.input.ZoomEvent;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.Shape;
@@ -81,6 +84,12 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	@FXML
 	public void initialize() {
+		// Das Auswahlmenü schließt bei jeder Bedienung des Plans. JavaFX schließt ein Menü nur bei einem unverarbeiteten
+		// Ereignis daneben; die Sitze und der Plan verarbeiten Klick und Mausrad selbst, deshalb bliebe es sonst stehen.
+		viewportPane.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> hideSelectionMenu());
+		viewportPane.addEventFilter(ScrollEvent.ANY, event -> hideSelectionMenu());
+		viewportPane.addEventFilter(ZoomEvent.ANY, event -> hideSelectionMenu());
+		viewportPane.addEventFilter(KeyEvent.KEY_PRESSED, event -> hideSelectionMenu());
 		viewportPane.setOnMousePressed(this::handleDragStart);
 		viewportPane.setOnMouseDragged(this::handleDrag);
 		viewportPane.setOnMouseReleased(this::handleMouseReleased);
@@ -125,6 +134,12 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			}
 		} else if (event.getButton() == MouseButton.SECONDARY && event.isStillSincePress()) {
 			showSelectionMenu(event);
+		}
+	}
+
+	private void hideSelectionMenu() {
+		if (selectionMenu != null) {
+			selectionMenu.hide();
 		}
 	}
 
@@ -285,6 +300,12 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 				return;
 			}
 			Window window = seatNode.getScene().getWindow();
+			if (editMode && matchesQuery(booking)) {
+				// Ein Einzelklick wählt den Sitz aus (wie im Explorer ersetzt er die bisherige Auswahl) und öffnet seine Karte
+				selectedBookings.clear();
+				selectedBookings.add(booking);
+				renderHall();
+			}
 			openSeatDetailPopup(booking, window, event.getScreenX() + 12, event.getScreenY() + 12);
 		});
 	}

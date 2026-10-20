@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,6 +29,101 @@ class SeatBulkEditTest {
 	}
 
 	// --- gemeinsamer Wert ---
+
+	@Test
+	void salesDatesHaveACommonValueOnlyWhenAllSeatsAgree() {
+		Booking first = seat(1, "Meier", 1000);
+		Booking second = seat(2, "Schulz", 1000);
+
+		first.setPaymentDate(LocalDate.of(2026, 10, 2));
+		second.setPaymentDate(LocalDate.of(2026, 10, 2));
+		assertEquals(Optional.of(LocalDate.of(2026, 10, 2)), new SeatBulkEdit(List.of(first, second)).paymentDate().common());
+
+		second.setPaymentDate(LocalDate.of(2026, 10, 3));
+		SeatBulkEdit differing = new SeatBulkEdit(List.of(first, second));
+		assertEquals(Optional.empty(), differing.paymentDate().common());
+		assertFalse(differing.paymentDate().allEmpty());
+
+		SeatBulkEdit none = new SeatBulkEdit(List.of(seat(3, "A", 0), seat(4, "B", 0)));
+		assertEquals(Optional.empty(), none.reservationDate().common());
+		assertTrue(none.reservationDate().allEmpty());
+	}
+
+	@Test
+	void aChangedDateAppliesToEverySeat() {
+		Booking first = seat(1, "Meier", 1000);
+		Booking second = seat(2, "Schulz", 1000);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
+
+		edit.collectionDate().change(LocalDate.of(2026, 11, 7));
+		edit.apply(TODAY);
+
+		assertEquals(LocalDate.of(2026, 11, 7), first.getCollectionDate());
+		assertEquals(LocalDate.of(2026, 11, 7), second.getCollectionDate());
+	}
+
+	@Test
+	void clearRemovesTheDateOfEverySeatAndCountsAsAChange() {
+		Booking first = seat(1, "Meier", 1000);
+		Booking second = seat(2, "Schulz", 1000);
+		first.setReservationDate(LocalDate.of(2026, 10, 1));
+		second.setReservationDate(LocalDate.of(2026, 10, 5));
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(first, second));
+		assertFalse(edit.hasChanges());
+
+		edit.reservationDate().clear();
+		assertTrue(edit.hasChanges());
+		edit.apply(TODAY);
+
+		assertNull(first.getReservationDate());
+		assertNull(second.getReservationDate());
+	}
+
+	@Test
+	void aLaterInputTakesBackTheClear() {
+		Booking booking = seat(1, "Meier", 1000);
+		booking.setReservationDate(LocalDate.of(2026, 10, 1));
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(booking));
+
+		edit.reservationDate().clear();
+		edit.reservationDate().change(LocalDate.of(2026, 10, 9));
+		edit.apply(TODAY);
+		assertEquals(LocalDate.of(2026, 10, 9), booking.getReservationDate());
+
+		SeatBulkEdit untouched = new SeatBulkEdit(List.of(booking));
+		untouched.reservationDate().clear();
+		untouched.reservationDate().change(null);
+		assertFalse(untouched.hasChanges());
+	}
+
+	@Test
+	void aPaymentStampsTodayOnlyWhereTheSeatWasNotPaidBefore() {
+		Booking open = seat(1, "Meier", 1000);
+		Booking alreadyPaid = seat(2, "Schulz", 1000);
+		alreadyPaid.setPaymentStatus(PaymentStatus.CASH);
+		alreadyPaid.setPaymentDate(LocalDate.of(2026, 10, 3));
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(open, alreadyPaid));
+
+		edit.paymentStatus().change(PaymentStatus.CASH);
+		edit.apply(TODAY);
+
+		assertEquals(TODAY, open.getPaymentDate());
+		assertEquals(LocalDate.of(2026, 10, 3), alreadyPaid.getPaymentDate());
+	}
+
+	@Test
+	void aDateTypedWithTheActionWinsOverToday() {
+		Booking booking = seat(1, "Meier", 1000);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(booking));
+
+		edit.paymentStatus().change(PaymentStatus.CARD);
+		edit.paymentDate().change(LocalDate.of(2026, 10, 1));
+		edit.apply(TODAY);
+
+		assertEquals(LocalDate.of(2026, 10, 1), booking.getPaymentDate());
+	}
+
+	private static final LocalDate TODAY = LocalDate.of(2026, 10, 20);
 
 	@Test
 	void commonValueIsPresentWhenAllSeatsAgree() {

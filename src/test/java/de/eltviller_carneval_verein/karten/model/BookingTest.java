@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -273,6 +274,57 @@ class BookingTest {
 
 		assertFalse(loaded.isUnassigned());
 		assertEquals(3, loaded.getTableNumber());
+	}
+
+	@Test
+	void verkaufsdaten_werden_gespeichert_und_geladen() throws IOException {
+		Booking booking = bookingAt("A", 3, 1);
+		booking.setReservationDate(LocalDate.of(2026, 10, 1));
+		booking.setPaymentDate(LocalDate.of(2026, 10, 20));
+		booking.setCollectionDate(LocalDate.of(2026, 11, 7));
+		ObjectMapper mapper = JsonMapperFactory.create();
+
+		String json = mapper.writeValueAsString(booking);
+		Booking loaded = mapper.readValue(json, Booking.class);
+
+		assertEquals("2026-10-20", mapper.readTree(json).path("paymentDate").asText(), json);
+		assertEquals(LocalDate.of(2026, 10, 1), loaded.getReservationDate());
+		assertEquals(LocalDate.of(2026, 10, 20), loaded.getPaymentDate());
+		assertEquals(LocalDate.of(2026, 11, 7), loaded.getCollectionDate());
+	}
+
+	@Test
+	void aeltere_Datei_ohne_verkaufsdaten_laedt_mit_null() throws IOException {
+		Booking loaded = JsonMapperFactory.create().readValue("{\"lastName\":\"Müller\",\"paymentStatus\":\"CASH\"}", Booking.class);
+
+		assertNull(loaded.getReservationDate());
+		assertNull(loaded.getPaymentDate());
+		assertNull(loaded.getCollectionDate());
+		assertEquals("Müller", loaded.getLastName());
+	}
+
+	@Test
+	void copy_uebernimmt_die_verkaufsdaten() {
+		Booking booking = bookingAt("A", 3, 2);
+		booking.setReservationDate(LocalDate.of(2026, 10, 1));
+		booking.setPaymentDate(LocalDate.of(2026, 10, 2));
+		booking.setCollectionDate(LocalDate.of(2026, 10, 3));
+
+		Booking copy = booking.copy();
+
+		assertEquals(LocalDate.of(2026, 10, 1), copy.getReservationDate());
+		assertEquals(LocalDate.of(2026, 10, 2), copy.getPaymentDate());
+		assertEquals(LocalDate.of(2026, 10, 3), copy.getCollectionDate());
+	}
+
+	@Test
+	void ein_datum_allein_zaehlt_nicht_als_daten() {
+		Booking booking = bookingAt("A", 3, 2);
+		booking.setReservationDate(LocalDate.of(2026, 10, 1));
+		booking.setPaymentDate(LocalDate.of(2026, 10, 2));
+		booking.setCollectionDate(LocalDate.of(2026, 10, 3));
+
+		assertFalse(booking.hasData());
 	}
 
 	@Test
