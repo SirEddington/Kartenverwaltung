@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -11,6 +12,7 @@ import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.SaleDates;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
@@ -98,6 +100,12 @@ public class TicketTableController implements ContentController, SalesStateAware
 	private TableColumn<BookingDTO, String> colComment;
 	@FXML
 	private TableColumn<BookingDTO, Boolean> colReserved;
+	@FXML
+	private TableColumn<BookingDTO, LocalDate> colReservedOn;
+	@FXML
+	private TableColumn<BookingDTO, LocalDate> colPaidOn;
+	@FXML
+	private TableColumn<BookingDTO, LocalDate> colCollectedOn;
 
 	// Leiste über der Tabelle, solange Buchungen ohne Platz da sind
 	@FXML
@@ -123,6 +131,9 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colCollected.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().getBooking().isCollected()));
 		colWheelchair.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().getBooking().isWheelchairAccessible()));
 		colReserved.setCellValueFactory(cell -> new SimpleBooleanProperty(cell.getValue().getBooking().isReserved()));
+		colReservedOn.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getBooking().getReservationDate()));
+		colPaidOn.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getBooking().getPaymentDate()));
+		colCollectedOn.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().getBooking().getCollectionDate()));
 
 		// 2. CellFactories & Edit-Handler einmalig aufsetzen
 		setupCellFactories();
@@ -283,7 +294,12 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 		// Textfelder
 		colLastName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
-		colLastName.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setLastName(editEvent.getNewValue()));
+		// Name, Zahlung und "Abgeholt" über SaleDates: Wird eine Aktion neu gesetzt, trägt es das Datum ein; die Tabelle zeichnet
+		// sich danach neu, weil dabei ein Datum in einer anderen Spalte entsteht
+		colLastName.setOnEditCommit(editEvent -> {
+			SaleDates.change(editEvent.getRowValue().getBooking(), booking -> booking.setLastName(editEvent.getNewValue()));
+			refreshAfterCommit();
+		});
 
 		colFirstName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colFirstName.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setFirstName(editEvent.getNewValue()));
@@ -296,7 +312,10 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colComment.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setComment(editEvent.getNewValue()));
 
 		// Enum / ComboBox
-		colPaymentStatus.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setPaymentStatus(editEvent.getNewValue()));
+		colPaymentStatus.setOnEditCommit(editEvent -> {
+			SaleDates.change(editEvent.getRowValue().getBooking(), booking -> booking.setPaymentStatus(editEvent.getNewValue()));
+			refreshAfterCommit();
+		});
 		StringConverter<PaymentStatus> converter = new StringConverter<>() {
 			@Override
 			public String toString(PaymentStatus status) {
@@ -316,13 +335,33 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colCollected.setCellFactory(CheckBoxTableCell.forTableColumn(index -> {
 			BookingDTO dto = seatTable.getItems().get(index);
 			SimpleBooleanProperty prop = new SimpleBooleanProperty(dto.getBooking().isCollected());
-			prop.addListener((obs, oldVal, newVal) -> dto.getBooking().setCollected(newVal));
+			prop.addListener((obs, oldVal, newVal) -> {
+				SaleDates.change(dto.getBooking(), booking -> booking.setCollected(newVal));
+				refreshAfterCommit();
+			});
 			return prop;
 		}));
+
+		// Die Daten der Aktionen: Datumsspalten mit strengem Format; leere Eingabe löscht das Datum, ein unlesbarer Text in
+		// einem leeren Feld trägt heute ein (INP-002 meldet es trotzdem)
+		colReservedOn.setCellFactory(ParsingTextFieldTableCell.forDateColumn("Reservierungsdatum", dto -> EntityLabels.booking(dto.getBooking()), LocalDate::now));
+		colReservedOn.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setReservationDate(editEvent.getNewValue()));
+		colPaidOn.setCellFactory(ParsingTextFieldTableCell.forDateColumn("Bezahldatum", dto -> EntityLabels.booking(dto.getBooking()), LocalDate::now));
+		colPaidOn.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setPaymentDate(editEvent.getNewValue()));
+		colCollectedOn.setCellFactory(ParsingTextFieldTableCell.forDateColumn("Abholdatum", dto -> EntityLabels.booking(dto.getBooking()), LocalDate::now));
+		colCollectedOn.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setCollectionDate(editEvent.getNewValue()));
 
 		// Nur lesbar: Rollstuhlplatz (gehört zur Bestuhlung) und Reserviert (folgt aus dem Namen)
 		colWheelchair.setCellFactory(CheckBoxTableCell.forTableColumn(colWheelchair));
 		colReserved.setCellFactory(CheckBoxTableCell.forTableColumn(colReserved));
+	}
+
+	/**
+	 * Zeichnet die Tabelle nach einer Änderung neu, die ein Datum in einer anderen Spalte setzen kann. Erst nach dem
+	 * laufenden Commit: Ein Neuzeichnen mittendrin lässt die Zelle (z. B. die Zahlungs-ComboBox) im Bearbeiten hängen.
+	 */
+	private void refreshAfterCommit() {
+		Platform.runLater(seatTable::refresh);
 	}
 
 	/**
@@ -390,6 +429,9 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colPrice.setEditable(editMode);
 		colPaymentStatus.setEditable(editMode);
 		colCollected.setEditable(editMode);
+		colReservedOn.setEditable(editMode);
+		colPaidOn.setEditable(editMode);
+		colCollectedOn.setEditable(editMode);
 		colComment.setEditable(editMode);
 		updateUnassignedBar();
 	}
