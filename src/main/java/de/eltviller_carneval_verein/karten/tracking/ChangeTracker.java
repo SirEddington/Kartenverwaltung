@@ -22,9 +22,9 @@ import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
 
 /**
- * Erkennt ungespeicherte Änderungen an Events, Hallen und den Einstellungen durch <strong>Vergleich mit dem gespeicherten
- * Stand</strong>, statt die Setter des Modells zu instrumentieren: Beim Laden und nach jedem Speichern wird der
- * Zustand der Entität als JSON-Bytes (mit derselben Mapper-Konfiguration wie das Repository, siehe
+ * Erkennt ungespeicherte Änderungen an Events, Hallen und den Einstellungen durch <strong>Vergleich mit dem
+ * gespeicherten Stand</strong>, statt die Setter des Modells zu instrumentieren: Beim Laden und nach jedem Speichern
+ * wird der Zustand der Entität als JSON-Bytes (mit derselben Mapper-Konfiguration wie das Repository, siehe
  * {@link JsonMapperFactory}) samt SHA-256 festgehalten. "Geändert" heißt: der aktuelle Zustand weicht vom
  * gemerkten ab. Eine zurückgenommene Änderung ist damit wieder "sauber".
  *

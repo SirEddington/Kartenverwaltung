@@ -41,6 +41,10 @@ class SettingsStoreTest {
 		assertTrue(warnings.get(0).contains("settings.json"));
 		assertFalse(new File(dir, "settings.json").exists());
 		assertEquals(1, backups(dir).length);
+		// Die Warnung nennt die beiseitegelegte Datei und ist einzeilig (keine rohe Jackson-Meldung mit Quelltext)
+		assertTrue(warnings.get(0).contains("'" + backups(dir)[0].getName() + "'"));
+		assertFalse(warnings.get(0).contains("\n"));
+		assertFalse(warnings.get(0).contains("\r"));
 	}
 
 	@Test

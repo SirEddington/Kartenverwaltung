@@ -152,9 +152,24 @@ public final class SettingsStore {
 	/** Legt die defekte Datei beiseite (statt sie zu löschen oder beim nächsten Speichern zu überschreiben). */
 	private void setAside(IOException cause) {
 		File renamed = new File(settingsFile.getParentFile(), FILE_NAME + ".defekt-" + System.currentTimeMillis() + ".bak");
-		loadWarnings.add("Die Datei '" + FILE_NAME + "' konnte nicht gelesen werden, es gelten die Standardeinstellungen: " + cause.getMessage());
-		if (!settingsFile.renameTo(renamed)) {
+		boolean renamedOk = settingsFile.renameTo(renamed);
+		String aside = renamedOk ? "Sie wurde als '" + renamed.getName() + "' beiseitegelegt"
+				: "Sie konnte nicht beiseitegelegt werden";
+		loadWarnings.add("Die Einstellungsdatei '" + FILE_NAME + "' konnte nicht gelesen werden. " + aside
+				+ ", es gelten die Standardwerte. Ursache: " + firstLine(cause.getMessage()));
+		if (!renamedOk) {
 			loadWarnings.add("Die defekte Datei '" + FILE_NAME + "' konnte nicht umbenannt werden.");
 		}
+	}
+
+	/**
+	 * Nur die erste Zeile einer Fehlermeldung: Jackson hängt dahinter den Quelltext-Ausschnitt der Datei an, der
+	 * in einer Warnung für Anwender nur stört.
+	 */
+	private static String firstLine(String message) {
+		if (message == null || message.isBlank()) {
+			return "unbekannt";
+		}
+		return message.strip().lines().findFirst().orElse("unbekannt").strip();
 	}
 }

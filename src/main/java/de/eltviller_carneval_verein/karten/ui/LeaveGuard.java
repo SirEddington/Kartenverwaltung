@@ -18,11 +18,11 @@ import javafx.scene.control.ButtonType;
 
 /**
  * Schützt vor verlorenen Änderungen beim Verlassen eines Screens (Wechsel zu einem anderen Screen, Schließen der
- * App): Sind Events, Hallen oder die Einstellungen geändert, fragt ein Dialog nach <strong>Speichern</strong> (über
- * {@link EventSaver}, {@link HallSaver} bzw. {@link SettingsSaver}; bei Fehlern bleibt man auf dem Screen), <strong>Nicht
- * speichern</strong> (der gespeicherte Stand wird mit dem {@link StateRestorer} wiederhergestellt) oder
- * <strong>Abbrechen</strong>. Wird der Screen verlassen, vergessen die {@link ChangeTracker} danach alles: Sie
- * gelten nur je Screen-Sitzung.
+ * App): Sind Events, Hallen oder die Einstellungen geändert, fragt ein Dialog nach <strong>Speichern</strong>
+ * (über {@link EventSaver}, {@link HallSaver} bzw. {@link SettingsSaver}; bei Fehlern bleibt man auf dem Screen),
+ * <strong>Nicht speichern</strong> (der gespeicherte Stand wird mit dem {@link StateRestorer} wiederhergestellt)
+ * oder <strong>Abbrechen</strong>. Wird der Screen verlassen, vergessen die {@link ChangeTracker} danach alles:
+ * Sie gelten nur je Screen-Sitzung.
  */
 public final class LeaveGuard {
 

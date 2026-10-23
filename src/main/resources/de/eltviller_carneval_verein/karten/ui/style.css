@@ -704,6 +704,20 @@
     -fx-background-color: -fx-ecv-blue;
 }
 
+/* ScrollPane der Einstellungen: ohne Standardhintergrund und Rahmen, damit das Wappen dahinter durchscheint */
+.settings-scroll,
+.settings-scroll > .viewport {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+    -fx-border-color: transparent;
+}
+
+/* Hinweis bei leerer Einstellungsansicht ("Noch keine Einstellungen verfügbar", "Keine Treffer") */
+.settings-info {
+    -fx-font-size: 14px;
+    -fx-text-fill: #666666;
+}
+
 /* ------------------------------------------------------------------------------
  * 11. TOOLTIPS, MENÜS & DIALOGE
  * ------------------------------------------------------------------------------ */

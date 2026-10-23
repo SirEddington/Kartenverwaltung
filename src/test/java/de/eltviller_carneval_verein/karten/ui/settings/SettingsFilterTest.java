@@ -12,7 +12,8 @@ class SettingsFilterTest {
 	private static final SettingsSection SAVING = new SettingsSection("Speichern",
 			List.of(new SettingRow("Backup-Aufbewahrung", "Wie lange Sicherungen bleiben", null)));
 	private static final SettingsSection DISPLAY = new SettingsSection("Anzeige",
-			List.of(new SettingRow("Fenstergröße merken", "Größe und Position beim Start wiederherstellen", null)));
+			List.of(new SettingRow("Fenstergröße merken", "Größe und Position beim Start wiederherstellen", null),
+						new SettingRow("Sprache", "Oberfläche", null)));
 
 	private static SettingRow rowOf(SettingsSection section) {
 		return section.rows().get(0);
@@ -37,8 +38,25 @@ class SettingsFilterTest {
 
 	@Test
 	void titleMatchShowsAllRowsOfTheSection() {
-		assertTrue(SettingsFilter.rowVisible("anzeige", DISPLAY, rowOf(DISPLAY)));
+		SettingRow first = DISPLAY.rows().get(0);
+		SettingRow second = DISPLAY.rows().get(1);
+
+		// Die zweite Zeile passt für sich nicht zum Suchtext, bleibt aber über die Überschrift sichtbar
+		assertFalse(SettingsFilter.rowVisible("anzeige", new SettingsSection("Sonstiges", List.of(second)), second));
+		assertTrue(SettingsFilter.rowVisible("anzeige", DISPLAY, first));
+		assertTrue(SettingsFilter.rowVisible("anzeige", DISPLAY, second));
 		assertFalse(SettingsFilter.rowVisible("anzeige", SAVING, rowOf(SAVING)));
+	}
+
+	@Test
+	void missingLabelAndHintCountAsEmptyText() {
+		SettingRow empty = new SettingRow(null, null, null);
+		SettingsSection section = new SettingsSection("Anzeige", List.of(empty));
+
+		assertTrue(SettingsFilter.rowVisible(null, section, empty));
+		assertFalse(SettingsFilter.rowVisible("sprache", new SettingsSection("Sonstiges", List.of(empty)), empty));
+		assertFalse(SettingsFilter.sectionVisible("sprache", new SettingsSection("Sonstiges", List.of(empty))));
+		assertTrue(SettingsFilter.rowVisible("anzeige", section, empty));
 	}
 
 	@Test
