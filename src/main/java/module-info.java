@@ -52,4 +52,8 @@ module Kartenverwaltung {
 
     // Plausibilitätsprüfungen (ohne JavaFX, von UI und Tests genutzt)
     exports de.eltviller_carneval_verein.karten.validation;
+
+    // Einstellungen (AppSettings für Jackson, SettingsStore für UI und Start)
+    opens de.eltviller_carneval_verein.karten.settings to com.fasterxml.jackson.databind;
+    exports de.eltviller_carneval_verein.karten.settings;
 }
