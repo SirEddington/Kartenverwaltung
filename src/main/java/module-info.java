@@ -44,6 +44,10 @@ module Kartenverwaltung {
     // Eingabe in Tabellenzellen und Spinnern (Zellen, Leser, Rückmeldung)
     exports de.eltviller_carneval_verein.karten.ui.input;
 
+    // Einstellungsbildschirm (Abschnitte, Zeilen und Suche)
+    opens de.eltviller_carneval_verein.karten.ui.settings to javafx.fxml;
+    exports de.eltviller_carneval_verein.karten.ui.settings;
+
     // Repository-Paket exportieren
     exports de.eltviller_carneval_verein.karten.repository;
 
