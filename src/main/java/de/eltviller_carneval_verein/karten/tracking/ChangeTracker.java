@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
 
@@ -97,6 +98,7 @@ public final class ChangeTracker<T> {
 
 	private static ChangeTracker<Event> eventTracker;
 	private static ChangeTracker<Hall> hallTracker;
+	private static ChangeTracker<AppSettings> settingsTracker;
 
 	private final ObjectMapper mapper;
 	private final Function<T, String> idOf;
@@ -119,6 +121,14 @@ public final class ChangeTracker<T> {
 			hallTracker = new ChangeTracker<>(Hall::getId);
 		}
 		return hallTracker;
+	}
+
+	/** Der Tracker der App für die Einstellungen (es gibt genau ein Objekt, die ID ist fest). */
+	public static synchronized ChangeTracker<AppSettings> settings() {
+		if (settingsTracker == null) {
+			settingsTracker = new ChangeTracker<>(settings -> "settings");
+		}
+		return settingsTracker;
 	}
 
 	/**

@@ -57,6 +57,7 @@ public final class ChangeTrigger {
 		pause.setOnFinished(e -> {
 			checkAll(ChangeTracker.events());
 			checkAll(ChangeTracker.halls());
+			checkAll(ChangeTracker.settings());
 		});
 
 		Window.getWindows().forEach(ChangeTrigger::attach);

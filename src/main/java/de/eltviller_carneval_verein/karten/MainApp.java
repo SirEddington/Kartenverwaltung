@@ -13,6 +13,7 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
 import de.eltviller_carneval_verein.karten.ui.ContextMenuGuard;
@@ -65,6 +66,10 @@ public class MainApp extends Application {
 		stage.setTitle("ECV Kartenverwaltung");
 		stage.getIcons().add(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/harlekin_logo.png")));
 
+		// Die Einstellungen zuerst: Alles Weitere kann sich nach ihnen richten. Jedes Speichern führt den gespeicherten Stand der Änderungserkennung nach.
+		SettingsStore settingsStore = SettingsStore.getInstance();
+		settingsStore.addListener(ChangeTracker.settings()::markSaved);
+
 		// Events einmalig beim Start laden, damit unlesbare/doppelte Dateien sofort
 		// sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
 		JsonEventRepository repository = JsonEventRepository.getInstance();
@@ -89,6 +94,11 @@ public class MainApp extends Application {
 		List<String> loadWarnings = repository.getAndClearLoadWarnings();
 		if (!loadWarnings.isEmpty()) {
 			showAlert("Warnung beim Laden der Events", String.join("\n\n", loadWarnings), AlertType.WARNING);
+		}
+
+		List<String> settingsWarnings = settingsStore.getAndClearLoadWarnings();
+		if (!settingsWarnings.isEmpty()) {
+			showAlert("Warnung beim Laden der Einstellungen", String.join("\n\n", settingsWarnings), AlertType.WARNING);
 		}
 
 		// Startet direkt im Hauptmenü

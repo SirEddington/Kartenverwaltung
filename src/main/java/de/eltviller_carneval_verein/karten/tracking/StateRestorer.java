@@ -14,6 +14,8 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.settings.AppSettings;
+import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker.Snapshot;
 
 /**
@@ -43,6 +45,7 @@ public final class StateRestorer<T> {
 
 	private static StateRestorer<Event> eventRestorer;
 	private static StateRestorer<Hall> hallRestorer;
+	private static StateRestorer<AppSettings> settingsRestorer;
 
 	private final ObjectMapper mapper = JsonMapperFactory.create();
 	private final Class<T> type;
@@ -64,6 +67,14 @@ public final class StateRestorer<T> {
 			hallRestorer = new StateRestorer<>(Hall.class, ChangeTracker.halls(), JsonHallRepository.getInstance()::replaceCachedHall);
 		}
 		return hallRestorer;
+	}
+
+	/** Der Restorer der App für die Einstellungen. */
+	public static synchronized StateRestorer<AppSettings> settings() {
+		if (settingsRestorer == null) {
+			settingsRestorer = new StateRestorer<>(AppSettings.class, ChangeTracker.settings(), SettingsStore.getInstance()::replaceCurrent);
+		}
+		return settingsRestorer;
 	}
 
 	/**

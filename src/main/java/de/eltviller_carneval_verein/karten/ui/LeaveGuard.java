@@ -40,9 +40,15 @@ public final class LeaveGuard {
 	 * @param label    Bezeichnung im Dialog, z. B. "Event"
 	 * @param tracker  erkennt die Änderungen
 	 * @param restorer stellt den gespeicherten Stand wieder her
-	 * @param saver    speichert eine Entität; {@code false} heißt "nicht gespeichert" (der Saver hat es gemeldet)
+	 * @param saver  speichert eine Entität; {@code false} heißt "nicht gespeichert" (der Saver hat es gemeldet)
+	 * @param describe Zeile im Dialog für eine geänderte Entität
 	 */
-	record Scope<T>(String label, ChangeTracker<T> tracker, StateRestorer<T> restorer, Predicate<T> saver) {
+	record Scope<T>(String label, ChangeTracker<T> tracker, StateRestorer<T> restorer, Predicate<T> saver, Function<T, String> describe) {
+
+		/** Mit der Darstellung {@code Label "Name"}, wie sie für Events und Hallen gilt. */
+		Scope(String label, ChangeTracker<T> tracker, StateRestorer<T> restorer, Predicate<T> saver) {
+			this(label, tracker, restorer, saver, entity -> label + " \"" + entity + "\"");
+		}
 
 		void checkAll() {
 			try {
@@ -55,7 +61,7 @@ public final class LeaveGuard {
 		}
 
 		List<String> describeDirty() {
-			return tracker.dirtyEntities().stream().map(entity -> label + " \"" + entity + "\"").toList();
+			return tracker.dirtyEntities().stream().map(describe).toList();
 		}
 
 		boolean saveDirty() {
@@ -92,7 +98,8 @@ public final class LeaveGuard {
 	}
 
 	private static List<Scope<?>> appScopes() {
-		return List.of(new Scope<>("Event", ChangeTracker.events(), StateRestorer.events(), EventSaver::save), new Scope<>("Halle", ChangeTracker.halls(), StateRestorer.halls(), HallSaver::save));
+		return List.of(new Scope<>("Event", ChangeTracker.events(), StateRestorer.events(), EventSaver::save), new Scope<>("Halle", ChangeTracker.halls(), StateRestorer.halls(), HallSaver::save),
+				new Scope<>("Einstellungen", ChangeTracker.settings(), StateRestorer.settings(), settings -> SettingsSaver.save(), settings -> "Einstellungen"));
 	}
 
 	/** Wie es nach der Rückfrage weitergeht. */
