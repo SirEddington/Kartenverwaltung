@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import de.eltviller_carneval_verein.karten.ui.StatusLabel?>
+
+<VBox spacing="15.0" prefWidth="1000.0" prefHeight="700.0"
+      xmlns="http://javafx.com/javafx/17"
+      xmlns:fx="http://javafx.com/fxml/1"
+      fx:controller="de.eltviller_carneval_verein.karten.ui.settings.SettingsController">
+    <padding>
+        <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
+    </padding>
+
+    <!-- OBERER BEREICH: Header wie in den anderen Ansichten, rechts die Suche über die Einstellungen -->
+    <HBox alignment="BOTTOM_LEFT" spacing="10.0">
+        <Button text="← Menü" styleClass="button-default" onAction="#handleBackToMenu" minWidth="-Infinity" />
+
+        <Label text="Einstellungen" styleClass="header-label" minWidth="-Infinity" />
+
+        <Region HBox.hgrow="ALWAYS" />
+
+        <VBox spacing="2.0">
+            <Label text="Suche" styleClass="field-caption" />
+            <TextField fx:id="searchField" prefWidth="200.0" promptText="Suche..." />
+        </VBox>
+    </HBox>
+
+    <Separator />
+
+    <!-- MITTLERER BEREICH: Die Abschnitte baut der Controller auf -->
+    <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS">
+        <VBox fx:id="sectionsBox" spacing="20.0" />
+    </ScrollPane>
+
+    <Label fx:id="infoLabel" maxWidth="Infinity" alignment="CENTER" />
+
+    <Separator />
+
+    <!-- UNTERER BEREICH: Footer wie in den anderen Ansichten -->
+    <HBox spacing="10.0" alignment="CENTER_RIGHT">
+        <StatusLabel />
+        <Region HBox.hgrow="ALWAYS" />
+        <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" />
+    </HBox>
+</VBox>

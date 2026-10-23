@@ -136,6 +136,10 @@ public class MainApp extends Application {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/ManagementMenuView.fxml");
 	}
 
+	public static void showSettingsView() {
+		loadScene("/de/eltviller_carneval_verein/karten/ui/SettingsView.fxml");
+	}
+
 	public static void showEventOverviewView() {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/EventOverviewView.fxml");
 	}

@@ -19,4 +19,9 @@ public class MenuController {
 	private void handleOpenManagement() {
 		MainApp.showManagementMenuView();
 	}
+
+	@FXML
+	private void handleOpenSettings() {
+		MainApp.showSettingsView();
+	}
 }
