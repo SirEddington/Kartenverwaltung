@@ -18,8 +18,8 @@ import javafx.scene.control.ButtonType;
 
 /**
  * Schützt vor verlorenen Änderungen beim Verlassen eines Screens (Wechsel zu einem anderen Screen, Schließen der
- * App): Sind Events oder Hallen geändert, fragt ein Dialog nach <strong>Speichern</strong> (über
- * {@link EventSaver} bzw. {@link HallSaver}; bei Fehlern bleibt man auf dem Screen), <strong>Nicht
+ * App): Sind Events, Hallen oder die Einstellungen geändert, fragt ein Dialog nach <strong>Speichern</strong> (über
+ * {@link EventSaver}, {@link HallSaver} bzw. {@link SettingsSaver}; bei Fehlern bleibt man auf dem Screen), <strong>Nicht
  * speichern</strong> (der gespeicherte Stand wird mit dem {@link StateRestorer} wiederhergestellt) oder
  * <strong>Abbrechen</strong>. Wird der Screen verlassen, vergessen die {@link ChangeTracker} danach alles: Sie
  * gelten nur je Screen-Sitzung.
@@ -35,12 +35,12 @@ public final class LeaveGuard {
 	}
 
 	/**
-	 * Eine Art von Entität, die beim Verlassen geprüft wird.
+	 * Eine Art von Entität (Event, Halle oder Einstellungen), die beim Verlassen geprüft wird.
 	 *
 	 * @param label    Bezeichnung im Dialog, z. B. "Event"
 	 * @param tracker  erkennt die Änderungen
 	 * @param restorer stellt den gespeicherten Stand wieder her
-	 * @param saver  speichert eine Entität; {@code false} heißt "nicht gespeichert" (der Saver hat es gemeldet)
+	 * @param saver    speichert eine Entität; {@code false} heißt "nicht gespeichert" (der Saver hat es gemeldet)
 	 * @param describe Zeile im Dialog für eine geänderte Entität
 	 */
 	record Scope<T>(String label, ChangeTracker<T> tracker, StateRestorer<T> restorer, Predicate<T> saver, Function<T, String> describe) {

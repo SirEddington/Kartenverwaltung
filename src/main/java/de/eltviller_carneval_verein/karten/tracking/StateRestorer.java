@@ -31,7 +31,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker.Snapshot;
  * Das alte Objekt ist danach veraltet. Wer es noch hält (ein Screen, der stehen bleibt), erfährt vom Austausch
  * über {@link #addListener(Listener)} und bindet neu; beim Verlassen eines Screens ist das nicht nötig.
  *
- * @param <T> {@link Event} oder {@link Hall}
+ * @param <T> {@link Event}, {@link Hall} oder {@link AppSettings}
  */
 public final class StateRestorer<T> {
 

@@ -63,7 +63,8 @@ public class SettingsController {
 	}
 
 	/**
-	 * Ersetzt die angezeigten Abschnitte und wendet den aktuellen Suchtext darauf an.
+	 * Ersetzt die angezeigten Abschnitte und wendet den aktuellen Suchtext darauf an. Die Steuerelemente der Zeilen
+	 * dürfen nicht über mehrere Aufrufe wiederverwendet werden, weil ein Node nur einen Parent haben kann.
 	 *
 	 * @param sections die anzuzeigenden Abschnitte
 	 */
