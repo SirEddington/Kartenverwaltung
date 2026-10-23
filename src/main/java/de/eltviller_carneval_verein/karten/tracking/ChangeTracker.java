@@ -132,8 +132,8 @@ public final class ChangeTracker<T> {
 	}
 
 	/**
-	 * Die App nutzt {@link #events()} und {@link #halls()}; eine eigene Instanz ist für Tests gedacht, ohne die
-	 * Singletons anzufassen.
+	 * Die App nutzt {@link #events()}, {@link #halls()} und {@link #settings()}; eine eigene Instanz ist für Tests
+	 * gedacht, ohne die Singletons anzufassen.
 	 *
 	 * @param idOf liefert die ID der Entität (Schlüssel des Verfolgens)
 	 */

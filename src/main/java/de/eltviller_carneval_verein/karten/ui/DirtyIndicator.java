@@ -20,8 +20,8 @@ public final class DirtyIndicator {
 	}
 
 	/**
-	 * Bindet den Button an {@link ChangeTracker#anyDirtyProperty()} des Trackers (Events oder Hallen, je nachdem,
-	 * was der Screen bearbeitet); sein jetziger Text ist der Text im sauberen Zustand.
+	 * Bindet den Button an {@link ChangeTracker#anyDirtyProperty()} des Trackers (Events, Hallen oder Einstellungen, je
+	 * nachdem, was der Screen bearbeitet); sein jetziger Text ist der Text im sauberen Zustand.
 	 */
 	public static void bind(Button button, ChangeTracker<?> tracker) {
 		bind(button, tracker.anyDirtyProperty());

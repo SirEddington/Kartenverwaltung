@@ -149,16 +149,21 @@ public final class SettingsStore {
 		}
 	}
 
-	/** Legt die defekte Datei beiseite (statt sie zu löschen oder beim nächsten Speichern zu überschreiben). */
+	/**
+	 * Legt die defekte Datei beiseite (statt sie zu löschen oder beim nächsten Speichern zu überschreiben) und
+	 * sammelt dazu genau eine Warnung. Lässt sie sich nicht umbenennen, bleibt sie liegen und wird beim nächsten
+	 * Speichern überschrieben; die Warnung sagt das ausdrücklich.
+	 */
 	private void setAside(IOException cause) {
 		File renamed = new File(settingsFile.getParentFile(), FILE_NAME + ".defekt-" + System.currentTimeMillis() + ".bak");
-		boolean renamedOk = settingsFile.renameTo(renamed);
-		String aside = renamedOk ? "Sie wurde als '" + renamed.getName() + "' beiseitegelegt"
-				: "Sie konnte nicht beiseitegelegt werden";
-		loadWarnings.add("Die Einstellungsdatei '" + FILE_NAME + "' konnte nicht gelesen werden. " + aside
-				+ ", es gelten die Standardwerte. Ursache: " + firstLine(cause.getMessage()));
-		if (!renamedOk) {
-			loadWarnings.add("Die defekte Datei '" + FILE_NAME + "' konnte nicht umbenannt werden.");
+		if (settingsFile.renameTo(renamed)) {
+			loadWarnings.add("Die Einstellungsdatei '" + FILE_NAME + "' konnte nicht gelesen werden. Sie wurde als '"
+					+ renamed.getName() + "' beiseitegelegt, es gelten die Standardwerte. Ursache: "
+					+ firstLine(cause.getMessage()));
+		} else {
+			loadWarnings.add("Die Einstellungsdatei '" + FILE_NAME + "' konnte nicht gelesen werden und auch nicht"
+					+ " beiseitegelegt werden. Es gelten die Standardwerte; die defekte Datei wird beim nächsten"
+					+ " Speichern überschrieben. Ursache: " + firstLine(cause.getMessage()));
 		}
 	}
 
