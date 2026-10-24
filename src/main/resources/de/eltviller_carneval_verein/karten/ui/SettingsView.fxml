@@ -33,11 +33,14 @@
     <!-- Der Hinweis ("Noch keine Einstellungen" / "Keine Treffer") liegt mittig über der leeren Fläche -->
     <StackPane VBox.vgrow="ALWAYS">
         <ScrollPane fitToWidth="true" styleClass="settings-scroll">
-            <VBox fx:id="sectionsBox" spacing="20.0">
-                <padding>
-                    <Insets top="10.0" right="10.0" bottom="10.0" left="10.0" />
-                </padding>
-            </VBox>
+            <!-- Der Inhalt ist ein Block fester Höchstbreite, der in der Mitte steht; die Texte darin bleiben linksbündig -->
+            <HBox alignment="TOP_CENTER">
+                <VBox fx:id="sectionsBox" spacing="20.0" prefWidth="800.0" maxWidth="800.0">
+                    <padding>
+                        <Insets top="10.0" right="10.0" bottom="10.0" left="10.0" />
+                    </padding>
+                </VBox>
+            </HBox>
         </ScrollPane>
 
         <Label fx:id="infoLabel" styleClass="settings-info" StackPane.alignment="CENTER" />

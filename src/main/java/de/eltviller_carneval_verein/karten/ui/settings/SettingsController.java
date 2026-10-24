@@ -74,7 +74,7 @@ public class SettingsController {
 	List<SettingsSection> buildSections(AppSettings settings) {
 		return List.of(new SettingsSection("Datenspeicherung",
 				List.of(new SettingRow("Spiegelordner",
-						"Eine Kopie aller Events und Hallen wird zusätzlich hier abgelegt, z. B. auf einem Netzlaufwerk oder in Nextcloud. Gearbeitet wird weiter lokal.",
+						"Eine Kopie aller Events und Hallen wird zusätzlich hier abgelegt, z. B. auf einem Netzlaufwerk oder in Nextcloud. Gearbeitet wird weiter lokal. (Ein Mehrbenutzerbetrieb ist so zwar möglich, ist aber nicht getestet und wird noch nicht offizel unterstützt.)",
 						buildMirrorFolderControl(settings)),
 						new SettingRow("Status der Spiegelung", "", buildMirrorStatusControl()))));
 	}
@@ -192,10 +192,14 @@ public class SettingsController {
 			List<VBox> rowNodes = new ArrayList<>();
 			for (SettingRow row : section.rows()) {
 				VBox rowNode = new VBox(2.0);
-				rowNode.getChildren().add(new Label(row.label()));
+				Label label = new Label(row.label());
+				label.getStyleClass().add("settings-label");
+				rowNode.getChildren().add(label);
 				if (row.hint() != null && !row.hint().isBlank()) {
 					Label hint = new Label(row.hint());
-					hint.getStyleClass().add("field-caption");
+					hint.getStyleClass().add("settings-hint");
+					// Lange Erklärungen brechen um, statt am Rand des Blocks abgeschnitten zu werden
+					hint.setWrapText(true);
 					rowNode.getChildren().add(hint);
 				}
 				rowNode.getChildren().add(row.control());
