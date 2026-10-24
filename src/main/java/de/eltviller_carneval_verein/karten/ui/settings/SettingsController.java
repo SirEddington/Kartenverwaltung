@@ -1,27 +1,35 @@
 package de.eltviller_carneval_verein.karten.ui.settings;
 
+import java.io.File;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.mirror.MirrorService;
+import de.eltviller_carneval_verein.karten.mirror.MirrorState;
 import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.SettingsSaver;
+import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXML;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.stage.DirectoryChooser;
 
 /**
  * Der Einstellungsbildschirm: eine durchsuchbare Liste von Abschnitten mit ihren Einstellungen.
  * <p>
- * Das Gerüst kennt noch keine konkrete Einstellung; Folgetickets hängen ihre Abschnitte in
- * {@link #buildSections(AppSettings)} ein. Die Einstellungen werden über den
+ * Die Abschnitte entstehen in {@link #buildSections(AppSettings)}; Folgetickets hängen ihre Einstellungen dort
+ * ein. Die Einstellungen werden über den
  * {@link ChangeTracker#settings() Tracker} verfolgt, sodass Speichern-Knopf und Verlassen-Abfrage wie in den
  * anderen Ansichten arbeiten.
  */
@@ -59,7 +67,89 @@ public class SettingsController {
 	 * @param settings die bearbeiteten Einstellungen
 	 */
 	List<SettingsSection> buildSections(AppSettings settings) {
-		return List.of();
+		return List.of(new SettingsSection("Datenspeicherung",
+				List.of(new SettingRow("Spiegelordner",
+						"Eine Kopie aller Events und Hallen wird zusätzlich hier abgelegt, z. B. auf einem Netzlaufwerk oder in Nextcloud. Gearbeitet wird weiter lokal.",
+						buildMirrorFolderControl(settings)),
+						new SettingRow("Status der Spiegelung", "", buildMirrorStatusControl()))));
+	}
+
+	/** Pfad des Spiegelordners (nur lesbar) mit den Knöpfen zum Wählen und Entfernen. Gilt erst nach dem Speichern. */
+	private Node buildMirrorFolderControl(AppSettings settings) {
+		TextField pathField = new TextField(settings.getMirrorDir());
+		pathField.setEditable(false);
+		pathField.setPromptText("Keine Spiegelung");
+		pathField.setPrefWidth(420.0);
+
+		Button chooseButton = new Button("Ordner wählen …");
+		chooseButton.getStyleClass().add("button-default");
+		Button removeButton = new Button("Entfernen");
+		removeButton.getStyleClass().add("button-default");
+		removeButton.setDisable(isBlank(settings.getMirrorDir()));
+
+		chooseButton.setOnAction(event -> {
+			DirectoryChooser chooser = new DirectoryChooser();
+			chooser.setTitle("Spiegelordner wählen");
+			File current = isBlank(settings.getMirrorDir()) ? null : new File(settings.getMirrorDir());
+			if (current != null && current.isDirectory()) {
+				chooser.setInitialDirectory(current);
+			}
+			File chosen = chooser.showDialog(chooseButton.getScene().getWindow());
+			if (chosen != null) {
+				settings.setMirrorDir(chosen.getAbsolutePath());
+				pathField.setText(settings.getMirrorDir());
+				removeButton.setDisable(false);
+			}
+		});
+		removeButton.setOnAction(event -> {
+			settings.setMirrorDir(null);
+			pathField.clear();
+			removeButton.setDisable(true);
+		});
+
+		HBox box = new HBox(8.0, pathField, chooseButton, removeButton);
+		box.setAlignment(Pos.CENTER_LEFT);
+		return box;
+	}
+
+	/**
+	 * Zustand der aktiven Spiegelung (nicht des noch ungespeicherten Feldes) mit dem Knopf zum sofortigen Abgleich.
+	 * Die Listener am langlebigen {@link MirrorService} hängen nur, solange die Zeile in einer Szene liegt: Beim
+	 * Verlassen der Ansicht wird sie aus der Szene genommen und die Listener werden ausdrücklich abgemeldet.
+	 */
+	private Node buildMirrorStatusControl() {
+		MirrorService mirror = MirrorService.getInstance();
+		Label statusLabel = new Label();
+		Button syncButton = new Button("Jetzt abgleichen");
+		syncButton.getStyleClass().add("button-default");
+		syncButton.setOnAction(event -> mirror.syncNow());
+
+		HBox box = new HBox(12.0, statusLabel, syncButton);
+		box.setAlignment(Pos.CENTER_LEFT);
+
+		Runnable refresh = () -> {
+			MirrorState state = mirror.state().get();
+			statusLabel.setText(MirrorStatusText.of(state, mirror.lastSync().get(), ZoneId.systemDefault()));
+			syncButton.setDisable(state == MirrorState.AUS || state == MirrorState.ABGLEICH);
+		};
+		ChangeListener<Object> listener = (obs, oldValue, newValue) -> refresh.run();
+		refresh.run();
+		box.sceneProperty().addListener((obs, oldScene, newScene) -> {
+			if (oldScene != null) {
+				mirror.state().removeListener(listener);
+				mirror.lastSync().removeListener(listener);
+			}
+			if (newScene != null) {
+				mirror.state().addListener(listener);
+				mirror.lastSync().addListener(listener);
+				refresh.run();
+			}
+		});
+		return box;
+	}
+
+	private static boolean isBlank(String text) {
+		return text == null || text.isBlank();
 	}
 
 	/**
