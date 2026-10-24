@@ -7,12 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -408,5 +410,48 @@ class MirrorSyncTest {
 		assertEquals("datei", read(target, "events_data/E1.json"));
 		assertEquals("b", read(target, "halls_data/backups/H1/b.json"));
 		assertTrue(MirrorSync.compare(local, target).isEmpty());
+	}
+
+	@Test
+	void localFileWhereAFolderBelongsAbortsWithoutDeleting() throws IOException {
+		// Lokal steht eine Datei, wo events_data liegen muss; die Halle ist da, die Sicherung gegen leer greift also nicht
+		write(local, "events_data", "Datei statt Ordner", T0);
+		write(local, "halls_data/H1.json", "halle-neu", T0);
+		write(target, "events_data/E1.json", "eins", T0);
+		write(target, "events_data/backups/E1/b.json", "b", T0);
+		write(target, "halls_data/H1.json", "halle", T0);
+		List<String> before = allFiles(target);
+
+		IOException e = assertThrows(IOException.class, () -> MirrorSync.reconcile(local, target));
+
+		assertFalse(e instanceof MirrorAbortedException, e.toString());
+		assertEquals(before, allFiles(target));
+		assertEquals("eins", read(target, "events_data/E1.json"));
+		assertEquals("halle", read(target, "halls_data/H1.json"));
+	}
+
+	@Test
+	void entityVanishingBetweenCheckAndCopyIsTreatedAsDeleted() throws IOException {
+		write(local, "events_data/E1.json", "eins", T0);
+		write(local, "events_data/backups/E1/vor-loeschen.json", "b", T0);
+		write(target, "events_data/E1.json", "eins-alt", T0);
+		write(target, "events_data/E2.json", "zwei", T0);
+		// Die Prüfung sieht die Datei noch, gleich danach wird das Event gelöscht
+		Predicate<Path> vanishesAfterTheCheck = file -> {
+			boolean present = Files.isRegularFile(file);
+			try {
+				Files.delete(file);
+			} catch (IOException deleteError) {
+				throw new UncheckedIOException(deleteError);
+			}
+			return present;
+		};
+
+		MirrorSync.pushEntity(local, target, MirrorSync.EVENTS, "E1", vanishesAfterTheCheck);
+
+		assertFalse(exists(local, "events_data/E1.json"));
+		assertFalse(exists(target, "events_data/E1.json"));
+		assertEquals("b", read(target, "events_data/backups/E1/vor-loeschen.json"));
+		assertEquals("zwei", read(target, "events_data/E2.json"));
 	}
 }

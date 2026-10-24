@@ -6,6 +6,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
@@ -18,6 +19,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 
 /**
  * Die reine Dateilogik der Spiegelung: gleicht die Datenordner {@code events_data} und {@code halls_data}
@@ -171,20 +173,38 @@ public final class MirrorSync {
 
 	/**
 	 * Überträgt eine Entität: {@code <kind>/<id>.json} und den Teilbaum {@code <kind>/backups/<id>/} (kopieren,
-	 * überschreiben, überzählige Dateien im Teilbaum löschen). Fehlt die Datei lokal, wird sie im Ziel gelöscht.
+	 * überschreiben, überzählige Dateien im Teilbaum löschen). Fehlt die Datei lokal (auch, wenn sie erst während
+	 * der Übertragung verschwindet), wird sie im Ziel gelöscht.
 	 * Die Datei der Entität wird immer kopiert und nicht erst verglichen: Zwei Speichervorgänge kurz
 	 * hintereinander können bei gleicher Größe innerhalb der Zeittoleranz liegen und dürften nicht verloren gehen.
 	 *
 	 * @param kind {@link #EVENTS} oder {@link #HALLS}
 	 */
 	public static void pushEntity(Path local, Path target, String kind, String id) throws IOException {
+		pushEntity(local, target, kind, id, Files::isRegularFile);
+	}
+
+	/**
+	 * Wie {@link #pushEntity(Path, Path, String, String)}; {@code isFile} prüft, ob die Datei der Entität lokal
+	 * liegt. Ein Zugriffspunkt für Tests, die die Datei genau zwischen Prüfung und Kopie verschwinden lassen.
+	 */
+	static void pushEntity(Path local, Path target, String kind, String id, Predicate<Path> isFile) throws IOException {
 		checkEntity(kind, id);
 
 		String fileRel = kind + "/" + id + JSON_SUFFIX;
 		Path source = local.resolve(fileRel);
 		Path destination = target.resolve(fileRel);
-		if (Files.isRegularFile(source)) {
-			copyFile(source, destination, Files.getLastModifiedTime(source));
+		if (isFile.test(source)) {
+			try {
+				copyFile(source, destination, Files.getLastModifiedTime(source));
+			} catch (NoSuchFileException e) {
+				// Zwischen Prüfung und Kopie lokal gelöscht (Event gleich nach dem Speichern gelöscht): wie gelöscht
+				// behandeln. Fehlt dagegen etwas im Ziel, ist es ein echter Fehler.
+				if (!Files.notExists(source, LinkOption.NOFOLLOW_LINKS)) {
+					throw e;
+				}
+				Files.deleteIfExists(destination);
+			}
 		} else {
 			Files.deleteIfExists(destination);
 		}
@@ -221,11 +241,13 @@ public final class MirrorSync {
 	 * Alle Einträge unterhalb von {@code base/rel} (ohne den Ordner selbst), Schlüssel sind relative Pfade mit
 	 * {@code /} ab {@code base}. Fehlt der Ordner, ist das Ergebnis leer. {@code *.tmp}-Dateien fehlen darin.
 	 * Durch die Sortierung stehen Elternordner vor ihren Inhalten.
+	 *
+	 * @throws IOException wenn an der Stelle etwas liegt, das kein lesbarer Ordner ist; siehe {@link #checkFolder}
 	 */
 	private static SortedMap<String, Entry> scan(Path base, String rel) throws IOException {
 		SortedMap<String, Entry> entries = new TreeMap<>();
 		Path start = base.resolve(rel);
-		if (!Files.isDirectory(start)) {
+		if (!checkFolder(start)) {
 			return entries;
 		}
 		Files.walkFileTree(start, new SimpleFileVisitor<Path>() {
@@ -255,6 +277,21 @@ public final class MirrorSync {
 		return entries;
 	}
 
+	/**
+	 * Ob {@code dir} ein Ordner ist ({@code true}) oder sicher fehlt ({@code false}). Alles andere wirft: Eine Datei an
+	 * der Stelle oder ein Ordner, dessen Eigenschaften sich nicht lesen lassen, darf nicht als leer gelten, sonst
+	 * löschte der Abgleich im Ziel alles darunter.
+	 */
+	private static boolean checkFolder(Path dir) throws IOException {
+		if (Files.isDirectory(dir)) {
+			return true;
+		}
+		if (Files.notExists(dir, LinkOption.NOFOLLOW_LINKS)) {
+			return false;
+		}
+		throw new IOException("Kein lesbarer Ordner: " + dir);
+	}
+
 	// Symbolische Links und alles andere, was weder gewöhnliche Datei noch gewöhnlicher Ordner ist (Windows-Junctions)
 	private static boolean isLink(BasicFileAttributes attrs) {
 		return attrs.isSymbolicLink() || attrs.isOther();
@@ -276,9 +313,10 @@ public final class MirrorSync {
 		Path sourceRoot = from.resolve(rel);
 		Path destinationRoot = to.resolve(rel);
 
-		if (!Files.isDirectory(sourceRoot)) {
-			// Lokal gibt es nichts: im Ziel alles darunter entfernen (und bei Bedarf den Ordner selbst)
-			SortedMap<String, Entry> targetEntries = scan(to, rel);
+		if (!checkFolder(sourceRoot)) {
+			// Lokal gibt es nichts: im Ziel alles darunter entfernen (und bei Bedarf den Ordner selbst). Liegt im Ziel
+			// an der Stelle kein Ordner, gibt es darunter auch nichts.
+			SortedMap<String, Entry> targetEntries = Files.isDirectory(destinationRoot) ? scan(to, rel) : new TreeMap<>();
 			for (String key : reversed(targetEntries)) {
 				deleteTree(to.resolve(key));
 			}

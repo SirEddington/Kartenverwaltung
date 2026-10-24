@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.file.AccessDeniedException;
+
 import org.junit.jupiter.api.Test;
 
 class MirrorMessagesTest {
@@ -53,5 +56,16 @@ class MirrorMessagesTest {
 				MirrorMessages.syncFailed("X", "Y"));
 		assertEquals("SYS-004: Der Abgleich mit dem Spiegelordner X wurde abgebrochen: Lokal sind keine Events "
 				+ "und Hallen vorhanden, im Spiegelordner würde alles gelöscht.", MirrorMessages.aborted("X"));
+	}
+
+	@Test
+	void describeFallsBackToTheClassNameWithoutAMessage() {
+		assertEquals("IOException", MirrorMessages.describe(new IOException()));
+		assertEquals("IllegalStateException", MirrorMessages.describe(new IllegalStateException("  ")));
+		assertEquals("AccessDeniedException: E:\\ECV\\events_data\\E1.json",
+				MirrorMessages.describe(new AccessDeniedException("E:\\ECV\\events_data\\E1.json")));
+		// Im fertigen Text steht nie "null"
+		assertEquals("SYS-003: Der Abgleich mit dem Spiegelordner X ist fehlgeschlagen: NullPointerException",
+				MirrorMessages.syncFailed("X", MirrorMessages.describe(new NullPointerException())));
 	}
 }

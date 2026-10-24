@@ -117,6 +117,18 @@ class SettingsSaverTest {
 	}
 
 	@Test
+	void copyFailureWithoutMessageNamesTheExceptionInsteadOfNull() {
+		RecordingHook hook = new RecordingHook();
+		hook.prepareFailure = new IOException();
+
+		SettingsSaver.Outcome outcome = SettingsSaver.trySave(settingsWithMirror("X:\\spiegel"), LOCAL_ROOT, hook, () -> {
+		});
+
+		assertTrue(outcome.error().endsWith("fehlgeschlagen: IOException"), outcome.error());
+		assertFalse(outcome.error().contains("null"), outcome.error());
+	}
+
+	@Test
 	void successRunsPrepareThenSaveThenActivate() {
 		RecordingHook hook = new RecordingHook();
 		List<String> calls = hook.calls;

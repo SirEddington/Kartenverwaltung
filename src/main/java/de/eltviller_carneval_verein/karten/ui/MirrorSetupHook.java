@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 
 import de.eltviller_carneval_verein.karten.AppPaths;
+import de.eltviller_carneval_verein.karten.mirror.MirrorMessages;
 import de.eltviller_carneval_verein.karten.mirror.MirrorService;
 import de.eltviller_carneval_verein.karten.mirror.MirrorSetup;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
@@ -88,7 +89,7 @@ final class MirrorSetupHook implements SettingsSaver.MirrorHook {
 		} catch (IOException | RuntimeException e) {
 			throw e;
 		} catch (Exception e) {
-			throw new IOException(e.getMessage(), e);
+			throw new IOException(MirrorMessages.describe(e), e);
 		}
 	}
 }

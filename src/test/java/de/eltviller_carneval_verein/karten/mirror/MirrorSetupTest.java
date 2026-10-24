@@ -30,6 +30,7 @@ class MirrorSetupTest {
 
 	private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 24, 14, 30, 5);
 	private static final String SAFETY = "vor-Übernahme-2026-10-24_14-30-05";
+	private static final String OVERWRITE_SAFETY = "vor-Überschreiben-2026-10-24_14-30-05";
 
 	@TempDir
 	Path local;
@@ -170,8 +171,65 @@ class MirrorSetupTest {
 		assertEquals("halle", read(target, "halls_data/H1.json"));
 		assertFalse(Files.exists(target.resolve("events_data/E2.json")));
 		assertEquals("gehört dem Nutzer", read(target, "eigene-datei.txt"));
-		// Das Ziel wird nie gesichert; der lokale Ordner bleibt unberührt
+		// Der lokale Ordner bleibt unberührt
 		assertEquals(List.of("events_data/E1.json", "halls_data/H1.json"), allFiles(local));
+	}
+
+	@Test
+	void writeLocalCreatesSafetyCopyOfTheMirrorFirst() throws IOException {
+		write(local, "events_data/E1.json", "lokal");
+		write(local, "halls_data/H1.json", "halle");
+		write(target, "events_data/E1.json", "spiegel-alt");
+		write(target, "events_data/E2.json", "nur-im-spiegel");
+		write(target, "halls_data/backups/H1/b.json", "spiegel-backup");
+		write(target, "eigene-datei.txt", "gehört dem Nutzer");
+
+		MirrorSetup.execute(MirrorSetup.resolve(Decision.WRITE_LOCAL), local, target, NOW);
+
+		// Sicherung im Basisordner des Spiegelordners, neben den beiden Datenordnern, mit dem alten Stand
+		Path safety = target.resolve(OVERWRITE_SAFETY);
+		assertEquals(List.of("events_data/E1.json", "events_data/E2.json", "halls_data/backups/H1/b.json"),
+				allFiles(safety));
+		assertEquals("spiegel-alt", read(safety, "events_data/E1.json"));
+		assertEquals("nur-im-spiegel", read(safety, "events_data/E2.json"));
+		assertEquals("spiegel-backup", read(safety, "halls_data/backups/H1/b.json"));
+		// Der Spiegelordner entspricht danach den lokalen Daten; die Sicherung zählt dabei nicht
+		assertTrue(MirrorSync.compare(local, target).isEmpty());
+		assertEquals("lokal", read(target, "events_data/E1.json"));
+		assertEquals("gehört dem Nutzer", read(target, "eigene-datei.txt"));
+		assertEquals(List.of("events_data/E1.json", "halls_data/H1.json"), allFiles(local));
+		try (Stream<Path> stream = Files.list(target)) {
+			assertEquals(List.of(), stream.map(p -> p.getFileName().toString())
+					.filter(n -> n.endsWith(".unvollstaendig")).toList());
+		}
+	}
+
+	@Test
+	void writeLocalIntoAnEmptyMirrorMakesNoSafetyCopy() throws IOException {
+		write(local, "events_data/E1.json", "lokal");
+		Files.createDirectories(target.resolve("events_data"));
+
+		MirrorSetup.execute(Action.PUSH_LOCAL, local, target, NOW);
+
+		assertEquals(List.of("events_data/E1.json"), allFiles(target));
+		try (Stream<Path> stream = Files.list(target)) {
+			assertEquals(List.of("events_data"), stream.map(p -> p.getFileName().toString()).toList());
+		}
+	}
+
+	@Test
+	void writeLocalLeavesTheMirrorUntouchedWhenTheSafetyCopyFails() throws IOException {
+		write(local, "events_data/E1.json", "lokal");
+		write(target, "events_data/E1.json", "spiegel-alt");
+		// Ein Hindernis genau dort, wo die Sicherung liegen soll
+		write(target, OVERWRITE_SAFETY + "/inhalt.txt", "früherer Stand");
+		List<String> before = allFiles(target);
+
+		assertThrows(IOException.class, () -> MirrorSetup.execute(Action.PUSH_LOCAL, local, target, NOW));
+
+		assertEquals(before, allFiles(target));
+		assertEquals("spiegel-alt", read(target, "events_data/E1.json"));
+		assertEquals("früherer Stand", read(target, OVERWRITE_SAFETY + "/inhalt.txt"));
 	}
 
 	@Test

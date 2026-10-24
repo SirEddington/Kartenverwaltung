@@ -43,4 +43,14 @@ public final class MirrorMessages {
 	public static String aborted(String path) {
 		return SYS_ABORTED + ": " + MessageTemplate.format(ABORTED_TEXT, path);
 	}
+
+	/**
+	 * Die Ursache eines Fehlers für die Meldungstexte, zum Beispiel {@code "AccessDeniedException: E:\ECV\E1.json"}.
+	 * Ohne Meldung steht nur der Klassenname da: Manche Ausnahmen haben keine, und der Text endete sonst auf "null".
+	 */
+	public static String describe(Throwable e) {
+		String message = e.getMessage();
+		return message == null || message.isBlank() ? e.getClass().getSimpleName()
+				: e.getClass().getSimpleName() + ": " + message;
+	}
 }

@@ -57,6 +57,12 @@ public final class MirrorSetup {
 	/** Anfang des Ordnernamens der Sicherung, die vor dem Übernehmen im lokalen Basisordner angelegt wird. */
 	public static final String SAFETY_PREFIX = "vor-Übernahme-";
 
+	/**
+	 * Anfang des Ordnernamens der Sicherung, die vor dem Schreiben der lokalen Daten im Basisordner des
+	 * Spiegelordners angelegt wird.
+	 */
+	public static final String OVERWRITE_PREFIX = "vor-Überschreiben-";
+
 	private static final DateTimeFormatter SAFETY_STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 	private static final String UNFINISHED_SUFFIX = ".unvollstaendig";
 	private static final String STAGING_SUFFIX = ".staging";
@@ -141,6 +147,10 @@ public final class MirrorSetup {
 	 * <p>
 	 * Gesichert wird alles, was in {@code events_data} und {@code halls_data} liegt und beim Übernehmen verschwinden
 	 * würde, also auch Backups ohne eine einzige Entitätsdatei. Liegt lokal nichts, entsteht keine Sicherung.
+	 * <p>
+	 * Bei {@link Action#PUSH_LOCAL} wird genauso zuerst der Spiegelordner gesichert, nach
+	 * {@code <target>/vor-Überschreiben-<yyyy-MM-dd_HH-mm-ss>} (neben den beiden Datenordnern, die Spiegelung fasst
+	 * sie nie an), wenn dort Daten liegen. Scheitert die Sicherung, bleibt der Spiegelordner unverändert.
 	 *
 	 * @param now Zeitpunkt für den Namen der Sicherung
 	 */
@@ -160,15 +170,23 @@ public final class MirrorSetup {
 	 */
 	static void execute(Action action, Path local, Path target, LocalDateTime now, Copier copier) throws IOException {
 		switch (action) {
-		case PUSH_LOCAL -> MirrorSync.copyAll(local, target);
+		case PUSH_LOCAL -> pushLocal(local, target, now);
 		case ADOPT_TARGET -> adopt(local, target, now, copier);
 		case NOTHING, ASK -> {
 		}
 		}
 	}
 
+	// Die Daten im Spiegelordner werden ersetzt: erst sichern, dann schreiben
+	private static void pushLocal(Path local, Path target, LocalDateTime now) throws IOException {
+		if (hasAnyData(target)) {
+			backUp(target, OVERWRITE_PREFIX, now);
+		}
+		MirrorSync.copyAll(local, target);
+	}
+
 	private static void adopt(Path local, Path target, LocalDateTime now, Copier copier) throws IOException {
-		Path safety = hasAnyData(local) ? backUpLocal(local, now) : null;
+		Path safety = hasAnyData(local) ? backUp(local, SAFETY_PREFIX, now) : null;
 		String safetyInfo = safety == null ? "" : " Die bisherigen Daten liegen unter " + safety.toAbsolutePath() + ".";
 		Path staging = local.resolve(SAFETY_PREFIX + SAFETY_STAMP.format(now) + STAGING_SUFFIX);
 		try {
@@ -183,7 +201,7 @@ public final class MirrorSetup {
 				}
 			} catch (IOException | RuntimeException e) {
 				throw new IOException("Die Daten des Spiegelordners konnten nicht übernommen werden; die lokalen Daten"
-						+ " sind unverändert." + safetyInfo + " (" + e.getMessage() + ")", e);
+						+ " sind unverändert." + safetyInfo + " (" + MirrorMessages.describe(e) + ")", e);
 			}
 
 			try {
@@ -198,7 +216,7 @@ public final class MirrorSetup {
 
 	// Schritt 3 ist gescheitert: Die Sicherung zurückkopieren und dem Nutzer sagen, wo die alten Daten liegen
 	private static String replaceFailedMessage(Path local, Path safety, Exception cause) {
-		String base = "Das Übernehmen der Daten des Spiegelordners ist fehlgeschlagen (" + cause.getMessage() + ").";
+		String base = "Das Übernehmen der Daten des Spiegelordners ist fehlgeschlagen (" + MirrorMessages.describe(cause) + ").";
 		if (safety == null) {
 			return base + " Lokal waren vorher keine Daten vorhanden.";
 		}
@@ -222,7 +240,7 @@ public final class MirrorSetup {
 		};
 	}
 
-	// Ob in events_data oder halls_data irgendetwas liegt, das beim Übernehmen gelöscht würde (ohne *.tmp wie im Abgleich)
+	// Ob in events_data oder halls_data irgendetwas liegt, das beim Ersetzen gelöscht würde (ohne *.tmp wie im Abgleich)
 	private static boolean hasAnyData(Path root) throws IOException {
 		for (String kind : DATA_DIRS) {
 			Path dir = root.resolve(kind);
@@ -248,21 +266,22 @@ public final class MirrorSetup {
 	}
 
 	/**
-	 * Legt die Sicherung an: erst unter einem Namen mit {@value #UNFINISHED_SUFFIX} kopieren und mit dem lokalen
-	 * Stand vergleichen, dann umbenennen. Der endgültige Name steht damit nur für eine vollständige Sicherung. Bei
-	 * einem Fehler wird die unfertige Sicherung wieder entfernt.
+	 * Legt die Sicherung der Datenordner von {@code root} unter {@code <root>/<prefix><Zeitstempel>} an: erst unter
+	 * einem Namen mit {@value #UNFINISHED_SUFFIX} kopieren und mit dem Stand von {@code root} vergleichen, dann
+	 * umbenennen. Der endgültige Name steht damit nur für eine vollständige Sicherung. Bei einem Fehler wird die
+	 * unfertige Sicherung wieder entfernt.
 	 */
-	private static Path backUpLocal(Path local, LocalDateTime now) throws IOException {
-		Path safety = local.resolve(SAFETY_PREFIX + SAFETY_STAMP.format(now));
+	private static Path backUp(Path root, String prefix, LocalDateTime now) throws IOException {
+		Path safety = root.resolve(prefix + SAFETY_STAMP.format(now));
 		if (Files.exists(safety, LinkOption.NOFOLLOW_LINKS)) {
 			// Nie in eine vorhandene Sicherung schreiben: Der Abgleich würde ihren Inhalt löschen
 			throw new FileAlreadyExistsException(safety.toString());
 		}
-		Path unfinished = local.resolve(safety.getFileName() + UNFINISHED_SUFFIX);
+		Path unfinished = root.resolve(safety.getFileName() + UNFINISHED_SUFFIX);
 		deleteQuietly(unfinished);
 		try {
-			MirrorSync.copyAll(local, unfinished);
-			if (!MirrorSync.compare(local, unfinished).isEmpty()) {
+			MirrorSync.copyAll(root, unfinished);
+			if (!MirrorSync.compare(root, unfinished).isEmpty()) {
 				throw new IOException("Die Sicherung " + unfinished + " ist unvollständig.");
 			}
 			Files.move(unfinished, safety, StandardCopyOption.ATOMIC_MOVE);

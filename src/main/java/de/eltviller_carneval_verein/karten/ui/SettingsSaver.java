@@ -101,7 +101,7 @@ public final class SettingsSaver {
 			return new Outcome(false, ValidationResult.ok(), null);
 		} catch (IOException e) {
 			String path = settings.getMirrorDir() == null ? "" : settings.getMirrorDir().trim();
-			return new Outcome(false, validation, "Nicht gespeichert: " + MirrorMessages.syncFailed(path, e.getMessage()));
+			return new Outcome(false, validation, "Nicht gespeichert: " + MirrorMessages.syncFailed(path, MirrorMessages.describe(e)));
 		}
 
 		try {

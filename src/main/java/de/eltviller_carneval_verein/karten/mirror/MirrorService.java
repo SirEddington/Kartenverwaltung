@@ -435,7 +435,7 @@ public final class MirrorService {
 			if (!probe(path)) {
 				markUnreachable(gen, text);
 			} else {
-				markError(gen, MirrorMessages.syncFailed(text, describe(e)), e);
+				markError(gen, MirrorMessages.syncFailed(text, MirrorMessages.describe(e)), e);
 			}
 			return;
 		}
@@ -449,12 +449,6 @@ public final class MirrorService {
 		} catch (RuntimeException e) {
 			return false;
 		}
-	}
-
-	private static String describe(Exception e) {
-		String message = e.getMessage();
-		return message == null || message.isBlank() ? e.getClass().getSimpleName()
-				: e.getClass().getSimpleName() + ": " + message;
 	}
 
 	private void markSuccess(long gen, Op op) {
