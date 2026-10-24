@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import javafx.application.Platform;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
@@ -51,8 +52,9 @@ public final class ConfirmDialog {
 		actionButton.setDefaultButton(false);
 		actionButton.getStyleClass().add(actionStyleClass);
 		cancelButton.getStyleClass().add("button-default");
-		// Der Fokus liegt auf "Abbrechen": Leertaste und Enter lösen die Aktion nicht aus
-		alert.setOnShown(event -> cancelButton.requestFocus());
+		// Der Fokus liegt auf "Abbrechen": Leertaste und Enter lösen die Aktion nicht aus. Erst nach dem Anzeigen
+		// setzen, sonst überschreibt ihn der Fokus, den die Szene beim Öffnen selbst vergibt
+		alert.setOnShown(event -> Platform.runLater(cancelButton::requestFocus));
 
 		return alert.showAndWait().filter(button -> button == action).isPresent();
 	}

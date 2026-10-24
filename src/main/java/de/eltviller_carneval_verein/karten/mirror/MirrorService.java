@@ -189,7 +189,7 @@ public final class MirrorService {
 	/**
 	 * Beim Start der Anwendung: prüft den Spiegelordner synchron (blockiert höchstens das Zeitlimit der Prüfung)
 	 * und stößt bei Erfolg den Abgleich im Hintergrund an. Ruft {@code onUnreachable} <b>nicht</b>; der Aufrufer
-	 * zeigt das Startpopup selbst. Der Ausfall gilt damit aber als gemeldet und der Zustand ist
+	 * zeigt das Startpopup selbst; protokolliert wird SYS-002 aber hier. Der Ausfall gilt damit als gemeldet und der Zustand ist
 	 * {@link MirrorState#NICHT_ERREICHBAR}: Gelingt ein späterer Wiederholversuch, kommt {@code onReconnected}.
 	 *
 	 * @param mirrorDir der Spiegelordner aus den Einstellungen; leer oder {@code null} heißt aus
@@ -211,6 +211,7 @@ public final class MirrorService {
 			}
 		}
 		if (!up) {
+			LOGGER.warning(MirrorMessages.unreachable(dir));
 			return StartupResult.UNREACHABLE;
 		}
 		enqueue(new Op(OpKind.RECONCILE, null, null), true);
@@ -494,6 +495,8 @@ public final class MirrorService {
 			setState(MirrorState.NICHT_ERREICHBAR);
 			if (!unreachableNotified) {
 				unreachableNotified = true;
+				// Wie das Popup einmal je Ausfall; ein Stacktrace sagte hier nichts
+				LOGGER.warning(MirrorMessages.unreachable(text));
 				notifyUi(() -> {
 					Consumer<String> handler = onUnreachable;
 					if (handler != null) {

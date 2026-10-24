@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import javafx.application.Platform;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.Button;
@@ -46,8 +47,9 @@ final class OccupiedSeatsDialog {
 		freeOnlyButton.getStyleClass().add("button-primary");
 		freeOnlyButton.setDisable(!split.hasFree());
 		cancelButton.getStyleClass().add("button-default");
-		// Der Fokus liegt auf "Abbrechen": Leertaste und Enter überschreiben nichts
-		alert.setOnShown(event -> cancelButton.requestFocus());
+		// Der Fokus liegt auf "Abbrechen": Leertaste und Enter überschreiben nichts. Erst nach dem Anzeigen setzen,
+		// sonst überschreibt ihn der Fokus, den die Szene beim Öffnen selbst vergibt
+		alert.setOnShown(event -> Platform.runLater(cancelButton::requestFocus));
 
 		return alert.showAndWait().map(button -> button == overwrite ? Choice.OVERWRITE : button == freeOnly ? Choice.FREE_ONLY : Choice.CANCEL).orElse(Choice.CANCEL);
 	}

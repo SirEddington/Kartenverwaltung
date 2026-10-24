@@ -15,6 +15,10 @@ import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -494,6 +498,55 @@ class MirrorServiceTest {
 		service.retryTick();
 		assertEquals(MirrorState.AKTUELL, service.state().get());
 		assertEquals("eins", read(target, "events_data/E1.json"));
+	}
+
+	@Test
+	void unreachableIsLoggedOncePerOutage() throws IOException {
+		Logger logger = Logger.getLogger(MirrorService.class.getName());
+		List<LogRecord> records = new ArrayList<>();
+		Handler handler = new Handler() {
+			@Override
+			public void publish(LogRecord record) {
+				if (record.getMessage() != null && record.getMessage().startsWith(MirrorMessages.SYS_UNREACHABLE)) {
+					records.add(record);
+				}
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		logger.addHandler(handler);
+		try {
+			// Ausfall beim Start: einmal protokolliert, auch wenn der Wiederholversuch ihn erneut feststellt
+			reachable.set(false);
+			service.startup(target.toString());
+			service.retryTick();
+			assertEquals(1, records.size());
+
+			// Rückkehr, dann ein Ausfall während der Sitzung: wieder genau einmal
+			reachable.set(true);
+			service.retryTick();
+			assertEquals(MirrorState.AKTUELL, service.state().get());
+			reachable.set(false);
+			write(local, "events_data/E1.json", "eins");
+			service.entitySaved("events_data", "E1");
+			service.entitySaved("events_data", "E1");
+			service.retryTick();
+			assertEquals(2, records.size());
+
+			for (LogRecord record : records) {
+				assertEquals(Level.WARNING, record.getLevel());
+				assertEquals(MirrorMessages.unreachable(target.toString()), record.getMessage());
+				assertNull(record.getThrown());
+			}
+		} finally {
+			logger.removeHandler(handler);
+		}
 	}
 
 	private static void runAll(List<Runnable> queue) {

@@ -21,6 +21,7 @@ import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
@@ -80,7 +81,8 @@ public class SettingsController {
 
 	/** Pfad des Spiegelordners (nur lesbar) mit den Knöpfen zum Wählen und Entfernen. Gilt erst nach dem Speichern. */
 	private Node buildMirrorFolderControl(AppSettings settings) {
-		TextField pathField = new TextField(settings.getMirrorDir());
+		TextField pathField = new TextField();
+		showMirrorDir(pathField, settings.getMirrorDir());
 		pathField.setEditable(false);
 		pathField.setPromptText("Keine Spiegelung");
 		pathField.setPrefWidth(420.0);
@@ -101,13 +103,13 @@ public class SettingsController {
 			File chosen = chooser.showDialog(chooseButton.getScene().getWindow());
 			if (chosen != null) {
 				applyMirrorDir(settings, chosen.getAbsolutePath());
-				pathField.setText(settings.getMirrorDir());
+				showMirrorDir(pathField, settings.getMirrorDir());
 				removeButton.setDisable(false);
 			}
 		});
 		removeButton.setOnAction(event -> {
 			applyMirrorDir(settings, null);
-			pathField.clear();
+			showMirrorDir(pathField, null);
 			removeButton.setDisable(true);
 		});
 
@@ -160,6 +162,12 @@ public class SettingsController {
 	static void applyMirrorDir(AppSettings settings, String mirrorDir) {
 		settings.setMirrorDir(mirrorDir);
 		ChangeTracker.settings().check(settings);
+	}
+
+	/** Zeigt den Pfad im Feld; der Hinweis am Feld zeigt ihn ganz, falls er länger ist als das Feld (ohne Pfad keiner). */
+	static void showMirrorDir(TextField pathField, String mirrorDir) {
+		pathField.setText(mirrorDir);
+		pathField.setTooltip(isBlank(mirrorDir) ? null : new Tooltip(mirrorDir));
 	}
 
 	private static boolean isBlank(String text) {

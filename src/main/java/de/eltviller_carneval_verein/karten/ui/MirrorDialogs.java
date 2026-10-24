@@ -53,7 +53,8 @@ public final class MirrorDialogs {
 		cancelButton.getStyleClass().add("button-default");
 		adoptButton.setTooltip(new Tooltip("Die lokalen Daten werden vorher gesichert und ersetzt."));
 		writeButton.setTooltip(new Tooltip("Die Daten dort werden ersetzt."));
-		alert.setOnShown(event -> cancelButton.requestFocus());
+		// Erst nach dem Anzeigen: Den Fokus beim Öffnen setzt die Szene selbst und überschriebe ihn sonst
+		alert.setOnShown(event -> Platform.runLater(cancelButton::requestFocus));
 
 		ButtonType answer = alert.showAndWait().orElse(cancel);
 		if (answer == adopt) {
