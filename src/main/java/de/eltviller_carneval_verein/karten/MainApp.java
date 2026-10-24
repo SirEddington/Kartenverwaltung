@@ -2,9 +2,12 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import de.eltviller_carneval_verein.karten.mirror.MirrorService;
+import de.eltviller_carneval_verein.karten.mirror.MirrorSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
@@ -20,11 +23,14 @@ import de.eltviller_carneval_verein.karten.ui.ContextMenuGuard;
 import de.eltviller_carneval_verein.karten.ui.EnterOnButtons;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LiveValidator;
+import de.eltviller_carneval_verein.karten.ui.MirrorDialogs;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Pos;
 import javafx.scene.Parent;
@@ -76,11 +82,27 @@ public class MainApp extends Application {
 		// Alte Sicherungen übernehmen, verwaiste .tmp entfernen und Backups aufräumen, bevor etwas geladen wird
 		repository.backups().runStartupMaintenance();
 		JsonHallRepository.getInstance().backups().runStartupMaintenance();
+
+		// Der Spiegelordner erst nach der Backup-Wartung: Der Abgleich im Hintergrund sieht dann den bereinigten Stand
+		MirrorService mirror = MirrorService.getInstance();
+		if (mirror.startup(settingsStore.current().getMirrorDir()) == MirrorService.StartupResult.UNREACHABLE
+				&& !MirrorDialogs.askUnreachableAtStart(settingsStore.current().getMirrorDir().trim())) {
+			// "Beenden": das Hauptfenster erscheint gar nicht erst
+			Platform.exit();
+			return;
+		}
+		mirror.setHandlers(MirrorDialogs::infoUnreachable,
+				() -> StatusMessage.getInstance().show(Severity.INFO, "Spiegelordner wieder erreichbar, Änderungen übertragen"),
+				text -> StatusMessage.getInstance().show(Severity.ERROR, text));
+
 		repository.loadEvents();
 
 		// Jedes Speichern und Löschen führt den gespeicherten Stand der Änderungserkennung nach, egal von wo aus
 		repository.addListener(trackerUpdater(ChangeTracker.events()));
 		JsonHallRepository.getInstance().addListener(trackerUpdater(ChangeTracker.halls()));
+		// Und überträgt es in den Spiegelordner (tut nichts, solange keiner eingestellt ist)
+		repository.addListener(mirrorUpdater(mirror, MirrorSync.EVENTS, Event::getId));
+		JsonHallRepository.getInstance().addListener(mirrorUpdater(mirror, MirrorSync.HALLS, Hall::getId));
 		ChangeTrigger.install();
 		LiveValidator.install();
 
@@ -116,6 +138,20 @@ public class MainApp extends Application {
 			@Override
 			public void deleted(T entity) {
 				tracker.untrack(entity);
+			}
+		};
+	}
+
+	private static <T> RepositoryListener<T> mirrorUpdater(MirrorService mirror, String kind, Function<T, String> idOf) {
+		return new RepositoryListener<>() {
+			@Override
+			public void saved(T entity) {
+				mirror.entitySaved(kind, idOf.apply(entity));
+			}
+
+			@Override
+			public void deleted(T entity) {
+				mirror.entityDeleted(kind, idOf.apply(entity));
 			}
 		};
 	}
