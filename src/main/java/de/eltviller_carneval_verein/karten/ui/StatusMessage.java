@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import de.eltviller_carneval_verein.karten.MainApp;
@@ -48,6 +49,7 @@ public final class StatusMessage {
 		}
 	}
 
+	private static final Logger LOG = Logger.getLogger(StatusMessage.class.getName());
 	private static final StatusMessage INSTANCE = new StatusMessage();
 	private static final Duration AUTO_CLEAR_AFTER = Duration.seconds(5);
 	private static final int MAX_DETAIL_LINES = 20;
@@ -113,6 +115,18 @@ public final class StatusMessage {
 			return;
 		}
 		show(describe(result, ""));
+	}
+
+	/**
+	 * Zeigt eine Meldung nur, wenn gerade eine Fußzeile sichtbar ist, und öffnet nie einen Dialog: Sonst wird sie
+	 * nur ins Log geschrieben (für Hinweise, die keinen Dialog wert sind, z. B. "Spiegelordner wieder erreichbar").
+	 */
+	public void showIfFooterVisible(Severity severity, String text) {
+		if (!isAnyLabelDisplayed()) {
+			LOG.info(text);
+			return;
+		}
+		show(severity, text);
 	}
 
 	/**

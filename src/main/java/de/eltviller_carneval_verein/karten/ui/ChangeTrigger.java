@@ -14,11 +14,11 @@ import javafx.stage.Window;
 import javafx.util.Duration;
 
 /**
- * Löst den Vergleich der {@link ChangeTracker} aus, ohne dass einzelne Felder verdrahtet werden müssen: Ein
- * Event-Filter an jedem Fenster der App hört auf Maus-, Tasten- und Aktionsereignisse und startet bei jedem davon
- * eine Wartezeit neu. Erst nach {@value #DEBOUNCE_MILLIS} ms Ruhe wird verglichen, weil die eigentlichen Handler
- * (Zellen-Commit, Spinner, Auswahl) erst nach dem Filter laufen und beim Tippen nicht bei jedem Zeichen
- * serialisiert werden soll.
+ * Löst den Vergleich der {@link ChangeTracker} (für Events, Hallen und die Einstellungen) aus, ohne dass einzelne
+ * Felder verdrahtet werden müssen: Ein Event-Filter an jedem Fenster der App hört auf Maus-, Tasten- und
+ * Aktionsereignisse und startet bei jedem davon eine Wartezeit neu. Erst nach {@value #DEBOUNCE_MILLIS} ms Ruhe wird
+ * verglichen, weil die eigentlichen Handler (Zellen-Commit, Spinner, Auswahl) erst nach dem Filter laufen und beim
+ * Tippen nicht bei jedem Zeichen serialisiert werden soll.
  *
  * <p>
  * Der Filter hängt an den Fenstern, nicht an der Scene des Hauptfensters: Popups (Detailfenster der
@@ -57,6 +57,7 @@ public final class ChangeTrigger {
 		pause.setOnFinished(e -> {
 			checkAll(ChangeTracker.events());
 			checkAll(ChangeTracker.halls());
+			checkAll(ChangeTracker.settings());
 		});
 
 		Window.getWindows().forEach(ChangeTrigger::attach);

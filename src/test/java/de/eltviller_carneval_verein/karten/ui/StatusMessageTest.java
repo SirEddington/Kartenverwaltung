@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import java.util.List;
 
@@ -14,6 +15,17 @@ class StatusMessageTest {
 
 	private static final ValidationIssue ERROR = new ValidationIssue("TST-001", Severity.ERROR, "Fehler");
 	private static final ValidationIssue WARNING = new ValidationIssue("TST-002", Severity.WARNING, "Warnung");
+
+	@Test
+	void showIfFooterVisibleDoesNothingWithoutAFooter() {
+		StatusMessage status = StatusMessage.getInstance();
+		StatusMessage.Entry before = status.currentProperty().get();
+
+		// Ohne sichtbare Fußzeile weder Dialog (hier gäbe es keinen Toolkit) noch neue Meldung
+		status.showIfFooterVisible(Severity.INFO, "Spiegelordner wieder erreichbar, Änderungen übertragen");
+
+		assertSame(before, status.currentProperty().get());
+	}
 
 	@Test
 	void singleIssueShowsCodeAndMessage() {

@@ -17,20 +17,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
 
 /**
- * Erkennt ungespeicherte Änderungen an Events und Hallen durch <strong>Vergleich mit dem gespeicherten
- * Stand</strong>, statt die Setter des Modells zu instrumentieren: Beim Laden und nach jedem Speichern wird der
- * Zustand der Entität als JSON-Bytes (mit derselben Mapper-Konfiguration wie das Repository, siehe
+ * Erkennt ungespeicherte Änderungen an Events, Hallen und den Einstellungen durch <strong>Vergleich mit dem
+ * gespeicherten Stand</strong>, statt die Setter des Modells zu instrumentieren: Beim Laden und nach jedem Speichern
+ * wird der Zustand der Entität als JSON-Bytes (mit derselben Mapper-Konfiguration wie das Repository, siehe
  * {@link JsonMapperFactory}) samt SHA-256 festgehalten. "Geändert" heißt: der aktuelle Zustand weicht vom
  * gemerkten ab. Eine zurückgenommene Änderung ist damit wieder "sauber".
  *
  * <p>
- * Es gibt einen Tracker je Art von Entität: {@link #events()} und {@link #halls()}. Beide arbeiten gleich, die
- * Instanzen sind aber getrennt, damit ein Event und eine Halle mit gleicher ID nie verwechselt werden und jede
- * Art ihre eigene Anzeige-Eigenschaft für die Speichern-Buttons hat.
+ * Es gibt einen Tracker je Art von Entität: {@link #events()}, {@link #halls()} und {@link #settings()}. Alle
+ * arbeiten gleich, die Instanzen sind aber getrennt, damit ein Event und eine Halle mit gleicher ID nie
+ * verwechselt werden und jede Art ihre eigene Anzeige-Eigenschaft für die Speichern-Buttons hat.
  *
  * <p>
  * Je Entität gibt es zwei Zustände: die <em>Baseline</em> (zuletzt geladen oder gespeichert) und den
@@ -42,7 +43,7 @@ import javafx.beans.property.ReadOnlyBooleanWrapper;
  * Der Tracker beobachtet das Modell nicht selbst. Wann verglichen wird, entscheidet der Aufrufer (in der App ein
  * Event-Filter an der Scene, siehe {@code ChangeTrigger}). Nicht threadsicher: alle Aufrufe im JavaFX-Thread.
  *
- * @param <T> {@link Event} oder {@link Hall}
+ * @param <T> {@link Event}, {@link Hall} oder {@link AppSettings}
  */
 public final class ChangeTracker<T> {
 
@@ -97,6 +98,7 @@ public final class ChangeTracker<T> {
 
 	private static ChangeTracker<Event> eventTracker;
 	private static ChangeTracker<Hall> hallTracker;
+	private static ChangeTracker<AppSettings> settingsTracker;
 
 	private final ObjectMapper mapper;
 	private final Function<T, String> idOf;
@@ -121,9 +123,17 @@ public final class ChangeTracker<T> {
 		return hallTracker;
 	}
 
+	/** Der Tracker der App für die Einstellungen (es gibt genau ein Objekt, die ID ist fest). */
+	public static synchronized ChangeTracker<AppSettings> settings() {
+		if (settingsTracker == null) {
+			settingsTracker = new ChangeTracker<>(settings -> "settings");
+		}
+		return settingsTracker;
+	}
+
 	/**
-	 * Die App nutzt {@link #events()} und {@link #halls()}; eine eigene Instanz ist für Tests gedacht, ohne die
-	 * Singletons anzufassen.
+	 * Die App nutzt {@link #events()}, {@link #halls()} und {@link #settings()}; eine eigene Instanz ist für Tests
+	 * gedacht, ohne die Singletons anzufassen.
 	 *
 	 * @param idOf liefert die ID der Entität (Schlüssel des Verfolgens)
 	 */

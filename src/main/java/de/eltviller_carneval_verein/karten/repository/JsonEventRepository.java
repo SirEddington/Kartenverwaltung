@@ -2,8 +2,6 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -185,7 +183,7 @@ public class JsonEventRepository implements EventRepository {
 			// umbenennen, damit ein Absturz mitten im Schreiben nicht die Event-Datei zerstört.
 			File tempFile = File.createTempFile(event.getId(), ".tmp", storageDir);
 			objectMapper.writeValue(tempFile, event);
-			Files.move(tempFile.toPath(), eventFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+			AtomicFileReplace.replace(tempFile.toPath(), eventFile.toPath());
 		} catch (IOException e) {
 			throw new RuntimeException("Fehler beim Speichern der Datei: " + fileName, e);
 		}

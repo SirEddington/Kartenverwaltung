@@ -29,6 +29,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker.Snapshot;
 
 class ChangeTrackerTest {
@@ -474,5 +475,21 @@ class ChangeTrackerTest {
 		// Nach dem Reset im ersten Listener-Aufruf wird das zweite Event nicht mehr geprüft
 		assertEquals(1, calls.size());
 		assertFalse(tracker.anyDirty());
+	}
+
+	@Test
+	void settingsTrackerIsSharedAndFollowsTheAppSettings() {
+		try {
+			assertSame(ChangeTracker.settings(), ChangeTracker.settings());
+			AppSettings settings = new AppSettings();
+
+			ChangeTracker.settings().trackNew(settings);
+			assertTrue(ChangeTracker.settings().anyDirty());
+
+			ChangeTracker.settings().markSaved(settings);
+			assertFalse(ChangeTracker.settings().anyDirty());
+		} finally {
+			ChangeTracker.settings().reset();
+		}
 	}
 }

@@ -704,6 +704,31 @@
     -fx-background-color: -fx-ecv-blue;
 }
 
+/* ScrollPane der Einstellungen: ohne Standardhintergrund und Rahmen, damit das Wappen dahinter durchscheint */
+.settings-scroll,
+.settings-scroll > .viewport {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+    -fx-border-color: transparent;
+}
+
+/* Beschriftung und Erklärung einer Einstellung: größer als die Standardschrift, damit sie auf dem Bildschirm gut lesbar sind */
+.settings-label {
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+}
+
+.settings-hint {
+    -fx-font-size: 14px;
+    -fx-text-fill: #666666;
+}
+
+/* Hinweis bei leerer Einstellungsansicht ("Noch keine Einstellungen verfügbar", "Keine Treffer") */
+.settings-info {
+    -fx-font-size: 14px;
+    -fx-text-fill: #666666;
+}
+
 /* ------------------------------------------------------------------------------
  * 11. TOOLTIPS, MENÜS & DIALOGE
  * ------------------------------------------------------------------------------ */

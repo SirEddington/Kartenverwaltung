@@ -318,6 +318,23 @@ class LeaveGuardTest {
 	}
 
 	@Test
+	void scopeWithDescriptionListsItInsteadOfLabelAndName() {
+		Event event = event("Kampagne");
+		eventTracker.track(event);
+		change(event);
+		LeaveGuard.Scope<Event> scope = new LeaveGuard.Scope<>("Event", eventTracker, new StateRestorer<>(Event.class, eventTracker, eventCache::add), e -> true,
+				entity -> "Einstellungen");
+
+		assertFalse(LeaveGuard.confirmLeave(List.of(scope), dirty -> {
+			questions.add(dirty);
+			return LeaveGuard.Decision.CANCEL;
+		}));
+
+		assertEquals(List.of(List.of("Einstellungen")), questions);
+		assertTrue(LeaveGuard.message(List.of("Einstellungen")).contains("• Einstellungen"));
+	}
+
+	@Test
 	void messageListsWhatIsChanged() {
 		String message = LeaveGuard.message(List.of("Event \"Kampagne\"", "Halle \"Halle 1\""));
 

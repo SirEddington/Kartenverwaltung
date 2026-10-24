@@ -27,6 +27,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker.Snapshot;
 
 class StateRestorerTest {
@@ -219,5 +220,20 @@ class StateRestorerTest {
 			byte[] second = mapper.writeValueAsBytes(mapper.readValue(first, Event.class));
 			assertArrayEquals(first, second, "Rundlauf nicht stabil: " + file.getName());
 		}
+	}
+
+	@Test
+	void restoringSettingsReplacesTheObjectInTheCache() {
+		ChangeTracker<AppSettings> settingsTracker = new ChangeTracker<>(settings -> "settings");
+		List<AppSettings> replaced = new ArrayList<>();
+		StateRestorer<AppSettings> settingsRestorer = new StateRestorer<>(AppSettings.class, settingsTracker, replaced::add);
+		AppSettings old = new AppSettings();
+		settingsTracker.track(old);
+
+		AppSettings restored = settingsRestorer.restoreBaseline(old);
+
+		assertNotSame(old, restored);
+		assertEquals(1, replaced.size());
+		assertSame(restored, replaced.get(0));
 	}
 }

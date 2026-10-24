@@ -44,6 +44,10 @@ module Kartenverwaltung {
     // Eingabe in Tabellenzellen und Spinnern (Zellen, Leser, Rückmeldung)
     exports de.eltviller_carneval_verein.karten.ui.input;
 
+    // Einstellungsbildschirm (Abschnitte, Zeilen und Suche)
+    opens de.eltviller_carneval_verein.karten.ui.settings to javafx.fxml;
+    exports de.eltviller_carneval_verein.karten.ui.settings;
+
     // Repository-Paket exportieren
     exports de.eltviller_carneval_verein.karten.repository;
 
@@ -52,4 +56,11 @@ module Kartenverwaltung {
 
     // Plausibilitätsprüfungen (ohne JavaFX, von UI und Tests genutzt)
     exports de.eltviller_carneval_verein.karten.validation;
+
+    // Einstellungen (AppSettings für Jackson, SettingsStore für UI und Start)
+    opens de.eltviller_carneval_verein.karten.settings to com.fasterxml.jackson.databind;
+    exports de.eltviller_carneval_verein.karten.settings;
+
+    // Spiegelung der Datenordner in einen zweiten Ordner
+    exports de.eltviller_carneval_verein.karten.mirror;
 }

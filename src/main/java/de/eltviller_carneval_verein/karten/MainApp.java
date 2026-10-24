@@ -2,9 +2,12 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import de.eltviller_carneval_verein.karten.mirror.MirrorService;
+import de.eltviller_carneval_verein.karten.mirror.MirrorSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
@@ -13,17 +16,21 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
 import de.eltviller_carneval_verein.karten.ui.ContextMenuGuard;
 import de.eltviller_carneval_verein.karten.ui.EnterOnButtons;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LiveValidator;
+import de.eltviller_carneval_verein.karten.ui.MirrorDialogs;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Pos;
 import javafx.scene.Parent;
@@ -65,17 +72,37 @@ public class MainApp extends Application {
 		stage.setTitle("ECV Kartenverwaltung");
 		stage.getIcons().add(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/harlekin_logo.png")));
 
+		// Die Einstellungen zuerst: Alles Weitere kann sich nach ihnen richten. Jedes Speichern führt den gespeicherten Stand der Änderungserkennung nach.
+		SettingsStore settingsStore = SettingsStore.getInstance();
+		settingsStore.addListener(ChangeTracker.settings()::markSaved);
+
 		// Events einmalig beim Start laden, damit unlesbare/doppelte Dateien sofort
 		// sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
 		JsonEventRepository repository = JsonEventRepository.getInstance();
 		// Alte Sicherungen übernehmen, verwaiste .tmp entfernen und Backups aufräumen, bevor etwas geladen wird
 		repository.backups().runStartupMaintenance();
 		JsonHallRepository.getInstance().backups().runStartupMaintenance();
+
+		// Der Spiegelordner erst nach der Backup-Wartung: Der Abgleich im Hintergrund sieht dann den bereinigten Stand
+		MirrorService mirror = MirrorService.getInstance();
+		if (mirror.startup(settingsStore.current().getMirrorDir()) == MirrorService.StartupResult.UNREACHABLE
+				&& !MirrorDialogs.askUnreachableAtStart(settingsStore.current().getMirrorDir().trim())) {
+			// "Beenden": das Hauptfenster erscheint gar nicht erst
+			Platform.exit();
+			return;
+		}
+		mirror.setHandlers(MirrorDialogs::infoUnreachable,
+				() -> StatusMessage.getInstance().showIfFooterVisible(Severity.INFO, "Spiegelordner wieder erreichbar, Änderungen übertragen"),
+				text -> StatusMessage.getInstance().show(Severity.ERROR, text));
+
 		repository.loadEvents();
 
 		// Jedes Speichern und Löschen führt den gespeicherten Stand der Änderungserkennung nach, egal von wo aus
 		repository.addListener(trackerUpdater(ChangeTracker.events()));
 		JsonHallRepository.getInstance().addListener(trackerUpdater(ChangeTracker.halls()));
+		// Und überträgt es in den Spiegelordner (tut nichts, solange keiner eingestellt ist)
+		repository.addListener(mirrorUpdater(mirror, MirrorSync.EVENTS, Event::getId));
+		JsonHallRepository.getInstance().addListener(mirrorUpdater(mirror, MirrorSync.HALLS, Hall::getId));
 		ChangeTrigger.install();
 		LiveValidator.install();
 
@@ -89,6 +116,11 @@ public class MainApp extends Application {
 		List<String> loadWarnings = repository.getAndClearLoadWarnings();
 		if (!loadWarnings.isEmpty()) {
 			showAlert("Warnung beim Laden der Events", String.join("\n\n", loadWarnings), AlertType.WARNING);
+		}
+
+		List<String> settingsWarnings = settingsStore.getAndClearLoadWarnings();
+		if (!settingsWarnings.isEmpty()) {
+			showAlert("Warnung beim Laden der Einstellungen", String.join("\n\n", settingsWarnings), AlertType.WARNING);
 		}
 
 		// Startet direkt im Hauptmenü
@@ -110,6 +142,20 @@ public class MainApp extends Application {
 		};
 	}
 
+	private static <T> RepositoryListener<T> mirrorUpdater(MirrorService mirror, String kind, Function<T, String> idOf) {
+		return new RepositoryListener<>() {
+			@Override
+			public void saved(T entity) {
+				mirror.entitySaved(kind, idOf.apply(entity));
+			}
+
+			@Override
+			public void deleted(T entity) {
+				mirror.entityDeleted(kind, idOf.apply(entity));
+			}
+		};
+	}
+
 	public static void showMenuView() {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/MenuView.fxml");
 	}
@@ -124,6 +170,10 @@ public class MainApp extends Application {
 
 	public static void showManagementMenuView() {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/ManagementMenuView.fxml");
+	}
+
+	public static void showSettingsView() {
+		loadScene("/de/eltviller_carneval_verein/karten/ui/SettingsView.fxml");
 	}
 
 	public static void showEventOverviewView() {
