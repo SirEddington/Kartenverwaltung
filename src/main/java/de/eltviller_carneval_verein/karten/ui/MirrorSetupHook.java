@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 
 import de.eltviller_carneval_verein.karten.AppPaths;
@@ -67,7 +68,17 @@ final class MirrorSetupHook implements SettingsSaver.MirrorHook {
 
 	@Override
 	public void activate(AppSettings settings) {
-		MirrorService.getInstance().configure(settings.getMirrorDir());
+		// Ein unveränderter Ordner bleibt unberührt: configure würde Ausfallmeldungen und Warteschlange zurücksetzen
+		if (needsConfigure(settings.getMirrorDir(), MirrorService.getInstance().target())) {
+			MirrorService.getInstance().configure(settings.getMirrorDir());
+		}
+	}
+
+	/** Ob der Spiegelordner aus den Einstellungen vom aktiven abweicht (Leerzeichen am Rand zählen nicht, leer = aus). */
+	static boolean needsConfigure(String mirrorDir, String currentTarget) {
+		String wanted = mirrorDir == null || mirrorDir.isBlank() ? null : mirrorDir.trim();
+		String active = currentTarget == null || currentTarget.isBlank() ? null : currentTarget.trim();
+		return !Objects.equals(wanted, active);
 	}
 
 	// Der Wartedialog wirft Exception; der Vertrag von prepare kennt nur IOException

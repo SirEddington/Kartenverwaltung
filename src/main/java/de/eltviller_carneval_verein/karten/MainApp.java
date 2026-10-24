@@ -92,7 +92,7 @@ public class MainApp extends Application {
 			return;
 		}
 		mirror.setHandlers(MirrorDialogs::infoUnreachable,
-				() -> StatusMessage.getInstance().show(Severity.INFO, "Spiegelordner wieder erreichbar, Änderungen übertragen"),
+				() -> StatusMessage.getInstance().showIfFooterVisible(Severity.INFO, "Spiegelordner wieder erreichbar, Änderungen übertragen"),
 				text -> StatusMessage.getInstance().show(Severity.ERROR, text));
 
 		repository.loadEvents();
