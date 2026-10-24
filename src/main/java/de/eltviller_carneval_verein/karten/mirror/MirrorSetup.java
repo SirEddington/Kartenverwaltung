@@ -59,6 +59,7 @@ public final class MirrorSetup {
 
 	private static final DateTimeFormatter SAFETY_STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 	private static final String UNFINISHED_SUFFIX = ".unvollstaendig";
+	private static final String STAGING_SUFFIX = ".staging";
 	private static final List<String> DATA_DIRS = List.of(MirrorSync.EVENTS, MirrorSync.HALLS);
 
 	private MirrorSetup() {
@@ -123,12 +124,20 @@ public final class MirrorSetup {
 	 * Führt die Entscheidung aus. {@link Action#NOTHING} und {@link Action#ASK} tun nichts ({@code ASK} muss der
 	 * Aufrufer vorher mit {@link #resolve} in {@code PUSH_LOCAL} oder {@code ADOPT_TARGET} umwandeln).
 	 * <p>
-	 * Reihenfolge bei {@link Action#ADOPT_TARGET}: erst die Sicherung der lokalen Daten nach
-	 * {@code <local>/vor-Übernahme-<yyyy-MM-dd_HH-mm-ss>}, vollständig angelegt und nachgeprüft, erst danach wird
-	 * {@code local} durch {@code target} ersetzt. Scheitert die Sicherung, bricht die Methode mit einer
-	 * {@link IOException} ab, bevor lokal irgendetwas verändert wurde. Die Sicherung wird nie automatisch gelöscht;
-	 * sie liegt neben {@code events_data} und {@code halls_data} und zählt bei späteren Vergleichen nicht als
-	 * Datenbestand.
+	 * Reihenfolge bei {@link Action#ADOPT_TARGET}:
+	 * <ol>
+	 * <li>Sicherung der lokalen Daten nach {@code <local>/vor-Übernahme-<yyyy-MM-dd_HH-mm-ss>}, vollständig angelegt
+	 * und nachgeprüft.</li>
+	 * <li>Der Spiegelordner wird in einen lokalen Zwischenordner {@code <Sicherung>.staging} kopiert und
+	 * nachgeprüft; er muss Entitätsdateien enthalten. Ein Spiegelordner, der inzwischen weg oder leer ist (Stick
+	 * gezogen, Netzlaufwerk getrennt), wird sonst als "leer" gelesen und würde lokal alles löschen.</li>
+	 * <li>Erst jetzt wird lokal aus dem Zwischenordner ersetzt (lokal nach lokal, ohne Netzzugriff).</li>
+	 * <li>Der Zwischenordner wird entfernt.</li>
+	 * </ol>
+	 * Scheitert Schritt 1 oder 2, bleibt lokal unverändert. Scheitert Schritt 3, wird die Sicherung zurückkopiert.
+	 * In jedem Fall wirft die Methode eine {@link IOException}, deren Meldung den Sicherungsordner nennt (und ob die
+	 * Wiederherstellung gelang). Die Sicherung wird nie automatisch gelöscht; sie liegt neben {@code events_data}
+	 * und {@code halls_data} und zählt bei späteren Vergleichen nicht als Datenbestand.
 	 * <p>
 	 * Gesichert wird alles, was in {@code events_data} und {@code halls_data} liegt und beim Übernehmen verschwinden
 	 * würde, also auch Backups ohne eine einzige Entitätsdatei. Liegt lokal nichts, entsteht keine Sicherung.
@@ -136,17 +145,72 @@ public final class MirrorSetup {
 	 * @param now Zeitpunkt für den Namen der Sicherung
 	 */
 	public static void execute(Action action, Path local, Path target, LocalDateTime now) throws IOException {
+		execute(action, local, target, now, MirrorSync::copyAll);
+	}
+
+	/** Das Kopieren der Datenordner; ein Zugriffspunkt, über den Tests Fehler an bestimmten Stellen auslösen. */
+	@FunctionalInterface
+	interface Copier {
+		void copyAll(Path from, Path to) throws IOException;
+	}
+
+	/**
+	 * Wie {@link #execute(Action, Path, Path, LocalDateTime)}; {@code copier} führt das Kopieren in den Schritten 2
+	 * und 3 aus. Die Sicherung und ihre Wiederherstellung kopieren immer mit {@link MirrorSync#copyAll}.
+	 */
+	static void execute(Action action, Path local, Path target, LocalDateTime now, Copier copier) throws IOException {
 		switch (action) {
 		case PUSH_LOCAL -> MirrorSync.copyAll(local, target);
-		case ADOPT_TARGET -> {
-			if (hasAnyData(local)) {
-				backUpLocal(local, now);
-			}
-			MirrorSync.copyAll(target, local);
-		}
+		case ADOPT_TARGET -> adopt(local, target, now, copier);
 		case NOTHING, ASK -> {
 		}
 		}
+	}
+
+	private static void adopt(Path local, Path target, LocalDateTime now, Copier copier) throws IOException {
+		Path safety = hasAnyData(local) ? backUpLocal(local, now) : null;
+		String safetyInfo = safety == null ? "" : " Die bisherigen Daten liegen unter " + safety.toAbsolutePath() + ".";
+		Path staging = local.resolve(SAFETY_PREFIX + SAFETY_STAMP.format(now) + STAGING_SUFFIX);
+		try {
+			try {
+				deleteQuietly(staging);
+				copier.copyAll(target, staging);
+				if (!MirrorSync.compare(target, staging).isEmpty()) {
+					throw new IOException("Der Spiegelordner hat sich beim Kopieren verändert.");
+				}
+				if (!MirrorSync.hasEntityFiles(staging)) {
+					throw new IOException("Im Spiegelordner " + target + " liegen keine Events und Hallen mehr.");
+				}
+			} catch (IOException | RuntimeException e) {
+				throw new IOException("Die Daten des Spiegelordners konnten nicht übernommen werden; die lokalen Daten"
+						+ " sind unverändert." + safetyInfo + " (" + e.getMessage() + ")", e);
+			}
+
+			try {
+				copier.copyAll(staging, local);
+			} catch (IOException | RuntimeException e) {
+				throw new IOException(replaceFailedMessage(local, safety, e), e);
+			}
+		} finally {
+			deleteQuietly(staging);
+		}
+	}
+
+	// Schritt 3 ist gescheitert: Die Sicherung zurückkopieren und dem Nutzer sagen, wo die alten Daten liegen
+	private static String replaceFailedMessage(Path local, Path safety, Exception cause) {
+		String base = "Das Übernehmen der Daten des Spiegelordners ist fehlgeschlagen (" + cause.getMessage() + ").";
+		if (safety == null) {
+			return base + " Lokal waren vorher keine Daten vorhanden.";
+		}
+		try {
+			MirrorSync.copyAll(safety, local);
+		} catch (IOException | RuntimeException restoreError) {
+			cause.addSuppressed(restoreError);
+			return base + " Die bisherigen Daten liegen unter " + safety.toAbsolutePath()
+					+ " und konnten NICHT automatisch wiederhergestellt werden, bitte manuell von dort zurückkopieren.";
+		}
+		return base + " Die bisherigen Daten liegen unter " + safety.toAbsolutePath()
+				+ "; sie wurden automatisch wiederhergestellt.";
 	}
 
 	/** Übersetzt die Antwort des Nutzers in die auszuführende Aktion; {@link Decision#CANCEL} bricht ab. */
@@ -188,7 +252,7 @@ public final class MirrorSetup {
 	 * Stand vergleichen, dann umbenennen. Der endgültige Name steht damit nur für eine vollständige Sicherung. Bei
 	 * einem Fehler wird die unfertige Sicherung wieder entfernt.
 	 */
-	private static void backUpLocal(Path local, LocalDateTime now) throws IOException {
+	private static Path backUpLocal(Path local, LocalDateTime now) throws IOException {
 		Path safety = local.resolve(SAFETY_PREFIX + SAFETY_STAMP.format(now));
 		if (Files.exists(safety, LinkOption.NOFOLLOW_LINKS)) {
 			// Nie in eine vorhandene Sicherung schreiben: Der Abgleich würde ihren Inhalt löschen
@@ -202,6 +266,7 @@ public final class MirrorSetup {
 				throw new IOException("Die Sicherung " + unfinished + " ist unvollständig.");
 			}
 			Files.move(unfinished, safety, StandardCopyOption.ATOMIC_MOVE);
+			return safety;
 		} catch (IOException | RuntimeException e) {
 			deleteQuietly(unfinished);
 			throw e;

@@ -239,6 +239,95 @@ class MirrorSetupTest {
 	}
 
 	@Test
+	void adoptAbortsWithoutTouchingLocalWhenTheTargetHasNoDataAnymore() throws IOException {
+		write(local, "events_data/E1.json", "lokal-alt");
+		write(local, "events_data/backups/E1/b.json", "lokal-backup");
+		write(local, "halls_data/H1.json", "lokal-halle");
+		List<String> before = allFiles(local);
+		// Der Spiegelordner ist seit decide() verschwunden: nur noch leere Datenordner
+		Files.createDirectories(target.resolve("events_data"));
+
+		assertThrows(IOException.class, () -> MirrorSetup.execute(Action.ADOPT_TARGET, local, target, NOW));
+
+		assertEquals("lokal-alt", read(local, "events_data/E1.json"));
+		assertEquals("lokal-backup", read(local, "events_data/backups/E1/b.json"));
+		assertEquals("lokal-halle", read(local, "halls_data/H1.json"));
+		assertEquals(before, allFiles(local).stream().filter(f -> !f.startsWith(SAFETY)).toList());
+		assertNoStagingOrUnfinished();
+	}
+
+	@Test
+	void adoptKeepsLocalWhenTheCopyFromTheTargetFails() throws IOException {
+		write(local, "events_data/E1.json", "lokal-alt");
+		write(local, "halls_data/H1.json", "lokal-halle");
+		write(target, "events_data/E1.json", "ziel");
+
+		IOException e = assertThrows(IOException.class, () -> MirrorSetup.execute(Action.ADOPT_TARGET, local, target,
+				NOW, (from, to) -> {
+					throw new IOException("Netzlaufwerk getrennt");
+				}));
+
+		assertTrue(e.getMessage().contains(local.resolve(SAFETY).toAbsolutePath().toString()));
+		assertEquals("lokal-alt", read(local, "events_data/E1.json"));
+		assertEquals("lokal-halle", read(local, "halls_data/H1.json"));
+		assertEquals("lokal-alt", read(local.resolve(SAFETY), "events_data/E1.json"));
+		assertNoStagingOrUnfinished();
+	}
+
+	@Test
+	void adoptRestoresLocalAndNamesTheSafetyFolderWhenTheReplaceFails() throws IOException {
+		write(local, "events_data/E1.json", "lokal-alt");
+		write(local, "events_data/backups/E1/b.json", "lokal-backup");
+		write(local, "halls_data/H1.json", "lokal-halle");
+		write(target, "events_data/E1.json", "ziel");
+		write(target, "events_data/E9.json", "ziel-neu");
+		// Ersetzen lokal geht schief, nachdem die Events schon überschrieben und Hallen gelöscht wurden
+		MirrorSetup.Copier partial = (from, to) -> {
+			if (!from.getFileName().toString().endsWith(".staging")) {
+				MirrorSync.copyAll(from, to);
+				return;
+			}
+			write(to, "events_data/E1.json", "halb-neu");
+			write(to, "events_data/E9.json", "halb-neu");
+			Files.delete(to.resolve("halls_data/H1.json"));
+			throw new IOException("Platte voll");
+		};
+
+		IOException e = assertThrows(IOException.class,
+				() -> MirrorSetup.execute(Action.ADOPT_TARGET, local, target, NOW, partial));
+
+		assertEquals("lokal-alt", read(local, "events_data/E1.json"));
+		assertEquals("lokal-backup", read(local, "events_data/backups/E1/b.json"));
+		assertEquals("lokal-halle", read(local, "halls_data/H1.json"));
+		assertFalse(Files.exists(local.resolve("events_data/E9.json")));
+		assertTrue(e.getMessage().contains(local.resolve(SAFETY).toAbsolutePath().toString()));
+		assertTrue(e.getMessage().contains("wiederhergestellt"));
+		assertFalse(e.getMessage().contains("NICHT"));
+		assertEquals("Platte voll", e.getCause().getMessage());
+		assertNoStagingOrUnfinished();
+	}
+
+	@Test
+	void successLeavesNeitherStagingNorUnfinishedFoldersBehind() throws IOException {
+		write(local, "events_data/E1.json", "lokal-alt");
+		write(target, "events_data/E1.json", "ziel");
+
+		MirrorSetup.execute(Action.ADOPT_TARGET, local, target, NOW);
+
+		assertEquals("ziel", read(local, "events_data/E1.json"));
+		assertTrue(Files.isDirectory(local.resolve(SAFETY)));
+		assertNoStagingOrUnfinished();
+	}
+
+	private void assertNoStagingOrUnfinished() throws IOException {
+		try (Stream<Path> stream = Files.list(local)) {
+			List<String> leftovers = stream.map(p -> p.getFileName().toString())
+					.filter(n -> n.endsWith(".staging") || n.endsWith(".unvollstaendig")).toList();
+			assertEquals(List.of(), leftovers);
+		}
+	}
+
+	@Test
 	void nothingAndAskDoNothing() throws IOException {
 		write(local, "events_data/E1.json", "lokal");
 		write(target, "events_data/E1.json", "ziel");
