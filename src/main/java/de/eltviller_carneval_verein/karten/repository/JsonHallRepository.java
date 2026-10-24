@@ -2,8 +2,6 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -193,7 +191,7 @@ public class JsonHallRepository implements HallRepository {
 			// umbenennen, damit ein Absturz mitten im Schreiben nicht die Hall-Datei zerstört.
 			File tempFile = File.createTempFile(hall.getId(), ".tmp", storageDir);
 			objectMapper.writeValue(tempFile, hall);
-			Files.move(tempFile.toPath(), hallFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+			AtomicFileReplace.replace(tempFile.toPath(), hallFile.toPath());
 		} catch (IOException e) {
 			throw new RuntimeException("Fehler beim Speichern der Datei: " + fileName, e);
 		}

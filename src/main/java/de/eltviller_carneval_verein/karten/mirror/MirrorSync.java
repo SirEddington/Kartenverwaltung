@@ -362,14 +362,20 @@ public final class MirrorSync {
 	 * schon auf der temporären Datei gesetzt, das Ziel zeigt sie also vom ersten Augenblick an. Die temporäre
 	 * Datei verschwindet auch bei einem Fehler.
 	 * <p>
+	 * Die Quelle wird zuerst ganz in den Speicher gelesen und geschlossen, erst danach wird in das Ziel geschrieben
+	 * (die Dateien sind klein). Bliebe sie während des Schreibens offen, scheiterte unter Windows jedes Speichern der
+	 * Anwendung, das die lokale Datei in dieser Zeit ersetzen will; auf einem langsamen oder getrennten Laufwerk
+	 * kann das Sekunden dauern.
+	 * <p>
 	 * Liegt im Ziel an dieser Stelle ein Ordner, wird ein leerer ersetzt; ein nicht leerer führt zu einer
 	 * {@link IOException}, statt dass hier ein ganzer Ordner des Nutzers gelöscht wird.
 	 */
 	private static void copyFile(Path source, Path destination, FileTime mtime) throws IOException {
+		byte[] content = Files.readAllBytes(source);
 		Files.createDirectories(destination.getParent());
 		Path temp = Files.createTempFile(destination.getParent(), "mirror", TMP_SUFFIX);
 		try {
-			Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING);
+			Files.write(temp, content);
 			Files.setLastModifiedTime(temp, mtime);
 			if (Files.isDirectory(destination, LinkOption.NOFOLLOW_LINKS)) {
 				Files.delete(destination);
