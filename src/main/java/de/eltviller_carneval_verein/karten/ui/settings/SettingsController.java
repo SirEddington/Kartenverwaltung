@@ -96,13 +96,13 @@ public class SettingsController {
 			}
 			File chosen = chooser.showDialog(chooseButton.getScene().getWindow());
 			if (chosen != null) {
-				settings.setMirrorDir(chosen.getAbsolutePath());
+				applyMirrorDir(settings, chosen.getAbsolutePath());
 				pathField.setText(settings.getMirrorDir());
 				removeButton.setDisable(false);
 			}
 		});
 		removeButton.setOnAction(event -> {
-			settings.setMirrorDir(null);
+			applyMirrorDir(settings, null);
 			pathField.clear();
 			removeButton.setDisable(true);
 		});
@@ -146,6 +146,16 @@ public class SettingsController {
 			}
 		});
 		return box;
+	}
+
+	/**
+	 * Setzt den Spiegelordner und lässt die Änderung sofort erkennen. Der {@code ChangeTrigger} reicht dafür nicht:
+	 * Beim Wählen läuft seine Wartezeit ab, während der Ordnerdialog noch offen ist, und der Dialog erzeugt danach
+	 * keine Ereignisse mehr.
+	 */
+	static void applyMirrorDir(AppSettings settings, String mirrorDir) {
+		settings.setMirrorDir(mirrorDir);
+		ChangeTracker.settings().check(settings);
 	}
 
 	private static boolean isBlank(String text) {
