@@ -15,9 +15,13 @@ import de.eltviller_carneval_verein.karten.validation.ValidationResult;
 /**
  * Zentraler Weg zum Speichern der Einstellungen über den Speichern-Button und beim Verlassen des Einstellungs-Screens
  * (Gegenstück zum {@link HallSaver}): Das Ergebnis erscheint in der Fußzeile ("Gespeichert" bzw. "Nicht gespeichert:
- * ..."). Vor dem Schreiben läuft der {@link SettingsValidator}; wurde ein neuer Spiegelordner gewählt, richtet der
- * {@link MirrorHook} ihn vorher ein (Prüfen, Vergleichen, Daten übertragen), und erst nach dem erfolgreichen
- * Schreiben von {@code settings.json} schaltet er die Spiegelung um.
+ * ..."). Der Ablauf ist: prüfen, vorbereiten, speichern, aktivieren. Vor dem Schreiben läuft der
+ * {@link SettingsValidator} (SET-001); wurde ein neuer Spiegelordner gewählt, richtet der {@link MirrorHook} ihn
+ * vorher ein (Prüfen mit SET-002/SET-003, Vergleichen, Daten übertragen) und erst nach dem erfolgreichen Schreiben
+ * von {@code settings.json} schaltet er die Spiegelung um. Beanstandungen (SET-xxx) erscheinen als "Nicht
+ * gespeichert: SET-...", ein gescheitertes Übertragen als "Nicht gespeichert: SYS-003: ..."; in beiden Fällen
+ * bleibt {@code settings.json} unberührt. Bricht der Nutzer die Rückfrage beim Einrichten ab, wird nichts
+ * geändert und auch nichts gemeldet.
  */
 public final class SettingsSaver {
 

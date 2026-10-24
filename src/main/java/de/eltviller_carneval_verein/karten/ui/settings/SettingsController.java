@@ -29,9 +29,11 @@ import javafx.stage.DirectoryChooser;
  * Der Einstellungsbildschirm: eine durchsuchbare Liste von Abschnitten mit ihren Einstellungen.
  * <p>
  * Die Abschnitte entstehen in {@link #buildSections(AppSettings)}; Folgetickets hängen ihre Einstellungen dort
- * ein. Die Einstellungen werden über den
+ * ein. Der erste echte Abschnitt ist "Datenspeicherung" mit dem Spiegelordner und dem Zustand der Spiegelung
+ * ({@link MirrorService}). Die Einstellungen werden über den
  * {@link ChangeTracker#settings() Tracker} verfolgt, sodass Speichern-Knopf und Verlassen-Abfrage wie in den
- * anderen Ansichten arbeiten.
+ * anderen Ansichten arbeiten. Gespeichert wird über den {@link SettingsSaver}, der vorher prüft und einen neuen
+ * Spiegelordner einrichtet; die Auswahl hier gilt erst nach dem Speichern.
  */
 public class SettingsController {
 
@@ -62,7 +64,9 @@ public class SettingsController {
 	}
 
 	/**
-	 * Die Abschnitte dieses Bildschirms. Folgetickets ergänzen hier ihre Einstellungen.
+	 * Die Abschnitte dieses Bildschirms. Bisher gibt es "Datenspeicherung" mit den Zeilen "Spiegelordner"
+	 * (Pfadfeld, Wählen, Entfernen) und "Status der Spiegelung" (Zustand, "Jetzt abgleichen"). Folgetickets
+	 * ergänzen hier weitere Einstellungen.
 	 *
 	 * @param settings die bearbeiteten Einstellungen
 	 */
