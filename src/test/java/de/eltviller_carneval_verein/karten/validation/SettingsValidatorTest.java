@@ -61,7 +61,15 @@ class SettingsValidatorTest {
 
 	@Test
 	void dotDotAndTrailingSeparatorCountAsSamePath() {
-		assertNested(validate(defaultRoot() + File.separator + ".." + File.separator + "app" + File.separator));
+		// Erst nach dem Normalisieren der Standardordner; ohne normalize() wäre das kein Treffer
+		assertNested(validate(root + File.separator + "other" + File.separator + ".." + File.separator + "app"
+				+ File.separator));
+	}
+
+	@Test
+	void dotDotLeavingTheDefaultCountsAsUnrelated() {
+		// Ohne normalize() sähe der Pfad wie ein Unterordner von "app" aus
+		assertTrue(validate(defaultRoot() + File.separator + ".." + File.separator + "other").isEmpty());
 	}
 
 	@Test
