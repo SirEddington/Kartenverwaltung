@@ -103,6 +103,9 @@ public final class MirrorService {
 	private boolean unreachableNotified;
 	// Ob der Spiegelordner ausgefallen war und die Rückkehr noch nicht gemeldet ist
 	private boolean wasDown;
+	// Die zuletzt gemeldete Fehlermeldung dieser Störung: Dauert sie an, wiederholt der Timer sie nicht;
+	// zurückgesetzt, wenn der Zustand AKTUELL wird oder das Ziel wechselt
+	private String lastErrorMessage;
 
 	/**
 	 * Für Tests: lokaler Ordner, Thread der Oberfläche, Thread der Arbeit und Erreichbarkeitsprüfung frei wählbar.
@@ -293,6 +296,7 @@ public final class MirrorService {
 			targetPath = null;
 			unreachableNotified = false;
 			wasDown = false;
+			lastErrorMessage = null;
 			setState(MirrorState.AUS);
 		}
 	}
@@ -305,6 +309,7 @@ public final class MirrorService {
 		targetPath = path;
 		unreachableNotified = false;
 		wasDown = false;
+		lastErrorMessage = null;
 	}
 
 	/**
@@ -409,7 +414,11 @@ public final class MirrorService {
 				if (gen != generation) {
 					return;
 				}
-				setState(MirrorState.ABGLEICH);
+				// Aus FEHLER heraus bleibt der Zustand während eines Wiederholversuchs stehen (kein Flackern
+				// der Anzeige); auf Wunsch des Nutzers steht ABGLEICH schon seit dem Einreihen
+				if (current != MirrorState.FEHLER) {
+					setState(MirrorState.ABGLEICH);
+				}
 			}
 		}
 		try {
@@ -419,15 +428,13 @@ public final class MirrorService {
 			case DELETE -> MirrorSync.deleteEntity(localRoot, path, op.kind(), op.id());
 			}
 		} catch (MirrorAbortedException e) {
-			LOGGER.log(Level.WARNING, e.getMessage());
-			markError(gen, MirrorMessages.aborted(text));
+			markError(gen, MirrorMessages.aborted(text), null);
 			return;
 		} catch (IOException | RuntimeException e) {
 			if (!probe(path)) {
 				markUnreachable(gen, text);
 			} else {
-				LOGGER.log(Level.WARNING, "Abgleich mit dem Spiegelordner " + text + " fehlgeschlagen", e);
-				markError(gen, MirrorMessages.syncFailed(text, describe(e)));
+				markError(gen, MirrorMessages.syncFailed(text, describe(e)), e);
 			}
 			return;
 		}
@@ -457,6 +464,7 @@ public final class MirrorService {
 			if (op.op() == OpKind.RECONCILE) {
 				setLastSync(Instant.now());
 				setState(MirrorState.AKTUELL);
+				lastErrorMessage = null;
 				boolean back = wasDown;
 				wasDown = false;
 				unreachableNotified = false;
@@ -496,12 +504,20 @@ public final class MirrorService {
 		}
 	}
 
-	private void markError(long gen, String message) {
+	// Meldet und protokolliert einen Fehler nur, wenn er sich vom zuletzt gemeldeten unterscheidet: Eine
+	// andauernde Störung (zum Beispiel SYS-004) käme sonst mit jedem Wiederholversuch erneut in die Fußzeile
+	private void markError(long gen, String message, Exception cause) {
 		synchronized (lock) {
 			if (gen != generation) {
 				return;
 			}
 			setState(MirrorState.FEHLER);
+			if (message.equals(lastErrorMessage)) {
+				LOGGER.log(Level.FINE, "Andauernder Fehler der Spiegelung: {0}", message);
+				return;
+			}
+			lastErrorMessage = message;
+			LOGGER.log(Level.WARNING, message, cause);
 			notifyUi(() -> {
 				Consumer<String> handler = onError;
 				if (handler != null) {

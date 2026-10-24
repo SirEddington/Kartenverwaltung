@@ -234,11 +234,10 @@ class MirrorServiceTest {
 		assertEquals("zwei", read(target, "events_data/E2.json"));
 		assertEquals(MirrorState.FEHLER, service.state().get());
 
-		// Auch ein Einzelfehler wirft nicht in den Aufrufer
+		// Auch ein Einzelfehler wirft nicht in den Aufrufer; dieselbe Störung wird nicht erneut gemeldet
 		service.entitySaved("events_data", "E1");
 		assertEquals(MirrorState.FEHLER, service.state().get());
-		assertEquals(2, errors.size());
-		assertTrue(errors.get(1).startsWith("SYS-003:"), errors.get(1));
+		assertEquals(1, errors.size());
 
 		// Ist das Hindernis weg, heilt der nächste Wiederholversuch
 		Files.delete(target.resolve("events_data/E1.json/inhalt.txt"));
@@ -259,6 +258,66 @@ class MirrorServiceTest {
 		assertTrue(errors.get(0).startsWith("SYS-004:"), errors.get(0));
 		assertEquals("kostbar", read(target, "events_data/E9.json"));
 		assertEquals("auch", read(target, "halls_data/H9.json"));
+	}
+
+	@Test
+	void repeatedIdenticalErrorIsReportedOnlyOnce() throws IOException {
+		write(target, "events_data/E9.json", "kostbar");
+		service.startup(target.toString());
+		assertEquals(MirrorState.FEHLER, service.state().get());
+		assertEquals(1, errors.size());
+
+		List<MirrorState> changes = new ArrayList<>();
+		service.state().addListener((observable, oldState, newState) -> changes.add(newState));
+		service.retryTick();
+		service.retryTick();
+		service.retryTick();
+
+		assertEquals(1, errors.size());
+		assertEquals(MirrorState.FEHLER, service.state().get());
+		assertTrue(changes.isEmpty(), "Zustandswechsel während der Wiederholversuche: " + changes);
+		assertEquals("kostbar", read(target, "events_data/E9.json"));
+	}
+
+	@Test
+	void changedErrorMessageIsReportedAgain() throws IOException {
+		write(target, "events_data/E9.json", "kostbar");
+		service.startup(target.toString());
+		assertEquals(1, errors.size());
+		assertTrue(errors.get(0).startsWith("SYS-004:"), errors.get(0));
+
+		// Die Ursache wechselt: lokal liegt jetzt etwas, im Ziel aber steht ein Ordner im Weg
+		write(local, "events_data/E1.json", "eins");
+		write(target, "events_data/E1.json/inhalt.txt", "gehoert dem Nutzer");
+		service.retryTick();
+
+		assertEquals(MirrorState.FEHLER, service.state().get());
+		assertEquals(2, errors.size());
+		assertTrue(errors.get(1).startsWith("SYS-003:"), errors.get(1));
+
+		// Und der neue Fehler wird ebenfalls nur einmal gemeldet
+		service.retryTick();
+		assertEquals(2, errors.size());
+	}
+
+	@Test
+	void errorIsReportedAgainAfterRecovery() throws IOException {
+		write(target, "events_data/E9.json", "kostbar");
+		service.startup(target.toString());
+		assertEquals(1, errors.size());
+
+		// Die Ursache verschwindet: Der Wiederholversuch heilt
+		write(local, "events_data/E9.json", "kostbar");
+		service.retryTick();
+		assertEquals(MirrorState.AKTUELL, service.state().get());
+		assertEquals(1, errors.size());
+
+		// Dieselbe Ursache tritt erneut auf: eine neue Störung, also wieder eine Meldung
+		Files.delete(local.resolve("events_data/E9.json"));
+		service.syncNow();
+		assertEquals(MirrorState.FEHLER, service.state().get());
+		assertEquals(2, errors.size());
+		assertTrue(errors.get(1).startsWith("SYS-004:"), errors.get(1));
 	}
 
 	@Test
