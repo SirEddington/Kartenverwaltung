@@ -150,6 +150,16 @@ class SettingsStoreTest {
 	}
 
 	@Test
+	void mirrorDirSurvivesSaveAndReload(@TempDir File dir) {
+		SettingsStore store = new SettingsStore(dir);
+		store.current().setMirrorDir("E:\\ECV");
+
+		store.save();
+
+		assertEquals("E:\\ECV", new SettingsStore(dir).current().getMirrorDir());
+	}
+
+	@Test
 	void emptySettingsSerializeToAnEmptyObject() throws IOException {
 		String json = JsonMapperFactory.create().writeValueAsString(new AppSettings());
 

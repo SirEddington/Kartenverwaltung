@@ -28,6 +28,7 @@
  * <tr><td>Sitz</td><td>SEA</td><td>{@link SeatValidator} / {@link SeatIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Halle</td><td>HLL</td><td>{@link HallValidator} / {@link HallIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Hallenobjekt</td><td>HOB</td><td>{@link HallObjectValidator} / {@link HallObjectIssue}</td><td>vorhanden</td></tr>
+ * <tr><td>Einstellungen</td><td>SET</td><td>{@link SettingsValidator} / {@link SettingsIssue}</td><td>vorhanden</td></tr>
  * <tr><td>technisch (unerwartet)</td><td>SYS</td><td>GlobalErrorHandler.CODE</td><td>vorhanden</td></tr>
  * </table>
  */

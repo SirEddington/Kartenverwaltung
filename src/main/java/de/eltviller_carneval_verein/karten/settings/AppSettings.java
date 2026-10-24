@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.settings;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Die Einstellungen der Anwendung, wie sie in {@code settings.json} stehen. Jede Einstellung ist ein Feld mit
@@ -8,11 +9,26 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  * unbekannten Feldern lässt sich trotzdem lesen. Ein Folgeticket, das eine Einstellung ergänzt, braucht
  * deshalb keine Migration.
  * <p>
- * Zunächst gibt es noch keine Einstellungen, das Objekt wird als leeres JSON-Objekt gespeichert.
+ * Ein Objekt ohne gesetzte Einstellung wird als leeres JSON-Objekt gespeichert.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AppSettings {
 
+	private String mirrorDir;
+
 	public AppSettings() {
+	}
+
+	/**
+	 * Der Spiegelordner, in den die Daten zusätzlich geschrieben werden. {@code null} oder leer heißt: keine
+	 * Spiegelung. Leere Werte werden nicht gespeichert, damit ein unberührtes Objekt weiter als {@code {}} erscheint.
+	 */
+	@JsonInclude(JsonInclude.Include.NON_EMPTY)
+	public String getMirrorDir() {
+		return mirrorDir;
+	}
+
+	public void setMirrorDir(String mirrorDir) {
+		this.mirrorDir = mirrorDir;
 	}
 }
