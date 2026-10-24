@@ -14,6 +14,7 @@ import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -73,8 +74,10 @@ public final class MirrorSync {
 		}
 	}
 
-	// Ein Eintrag aus einem der beiden Datenordner: Größe und Änderungszeit sind bei Ordnern ohne Bedeutung
-	private record Entry(boolean directory, long size, long mtimeMillis) {
+	// Ein Eintrag aus einem der beiden Datenordner: Größe und Änderungszeit sind bei Ordnern und Verknüpfungen ohne
+	// Bedeutung. Eine Verknüpfung (symbolischer Link, unter Windows auch eine Junction) ist ein Blatt: Ihr Ziel
+	// gehört nicht zu den Daten, sie wird weder durchlaufen noch kopiert.
+	private record Entry(boolean directory, boolean link, long size, long mtimeMillis) {
 	}
 
 	private MirrorSync() {
@@ -97,13 +100,13 @@ public final class MirrorSync {
 		}
 
 		for (Map.Entry<String, Entry> e : localEntries.entrySet()) {
-			if (e.getValue().directory()) {
+			if (e.getValue().directory() || e.getValue().link()) {
 				continue;
 			}
 			Entry other = targetEntries.get(e.getKey());
 			if (other == null) {
 				missing.add(e.getKey());
-			} else if (other.directory() || differs(e.getValue(), other)) {
+			} else if (other.directory() || other.link() || differs(e.getValue(), other)) {
 				changed.add(e.getKey());
 			}
 		}
@@ -228,21 +231,33 @@ public final class MirrorSync {
 		Files.walkFileTree(start, new SimpleFileVisitor<Path>() {
 			@Override
 			public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-				if (!dir.equals(start)) {
-					entries.put(key(start, rel, dir), new Entry(true, 0, 0));
+				if (dir.equals(start)) {
+					return FileVisitResult.CONTINUE;
 				}
+				if (isLink(attrs)) {
+					// Eine Junction meldet Java als Ordner; hineinzulaufen führte aus dem Datenordner hinaus
+					entries.put(key(start, rel, dir), new Entry(false, true, 0, 0));
+					return FileVisitResult.SKIP_SUBTREE;
+				}
+				entries.put(key(start, rel, dir), new Entry(true, false, 0, 0));
 				return FileVisitResult.CONTINUE;
 			}
 
 			@Override
 			public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
 				if (!file.getFileName().toString().endsWith(TMP_SUFFIX)) {
-					entries.put(key(start, rel, file), new Entry(false, attrs.size(), attrs.lastModifiedTime().toMillis()));
+					entries.put(key(start, rel, file), isLink(attrs) ? new Entry(false, true, 0, 0)
+							: new Entry(false, false, attrs.size(), attrs.lastModifiedTime().toMillis()));
 				}
 				return FileVisitResult.CONTINUE;
 			}
 		});
 		return entries;
+	}
+
+	// Symbolische Links und alles andere, was weder gewöhnliche Datei noch gewöhnlicher Ordner ist (Windows-Junctions)
+	private static boolean isLink(BasicFileAttributes attrs) {
+		return attrs.isSymbolicLink() || attrs.isOther();
 	}
 
 	// Relativer Pfad ab dem Basisordner, immer mit "/"
@@ -290,23 +305,50 @@ public final class MirrorSync {
 		for (Map.Entry<String, Entry> e : sourceEntries.entrySet()) {
 			Path destination = to.resolve(e.getKey());
 			Entry source = e.getValue();
+			if (source.link()) {
+				// Verknüpfungen der Quelle werden nicht gespiegelt und nie durchlaufen
+				continue;
+			}
 			if (source.directory()) {
 				Files.createDirectories(destination);
 				continue;
 			}
 			Entry other = targetEntries.get(e.getKey());
-			if (other == null || other.directory() || differs(source, other)) {
+			if (other == null || other.directory() || other.link() || differs(source, other)) {
 				Path sourceFile = from.resolve(e.getKey());
 				copyFile(sourceFile, destination, Files.getLastModifiedTime(sourceFile));
 			}
 		}
 
 		// Überzählige zuletzt; rückwärts, damit Inhalte vor ihren Ordnern drankommen
+		Map<String, String> sourceKeysByLowerCase = new TreeMap<>();
+		for (String key : sourceEntries.keySet()) {
+			sourceKeysByLowerCase.putIfAbsent(key.toLowerCase(Locale.ROOT), key);
+		}
 		for (String key : reversed(targetEntries)) {
-			if (!sourceEntries.containsKey(key)) {
+			if (!sourceEntries.containsKey(key) && !isSameFileAsSourceKey(to, key, sourceKeysByLowerCase)) {
 				deleteTree(to.resolve(key));
 			}
 		}
+	}
+
+	/**
+	 * Ob der überzählige Eintrag {@code key} im Ziel in Wahrheit die Datei ist, die gerade für einen Eintrag der
+	 * Quelle mit anderer Groß- und Kleinschreibung kopiert wurde (zum Beispiel {@code AB.json} und {@code ab.json}
+	 * unter Windows): Dann zeigen beide Namen auf dieselbe Datei, und das Löschen träfe die frische Kopie.
+	 * Auf einem Dateisystem mit Groß-/Kleinschreibung sind es zwei Dateien, und der überzählige Eintrag wird
+	 * wie jeder andere gelöscht.
+	 */
+	private static boolean isSameFileAsSourceKey(Path to, String key, Map<String, String> sourceKeysByLowerCase)
+			throws IOException {
+		String sourceKey = sourceKeysByLowerCase.get(key.toLowerCase(Locale.ROOT));
+		if (sourceKey == null) {
+			return false;
+		}
+		Path extra = to.resolve(key);
+		Path copied = to.resolve(sourceKey);
+		return Files.exists(extra, LinkOption.NOFOLLOW_LINKS) && Files.exists(copied, LinkOption.NOFOLLOW_LINKS)
+				&& Files.isSameFile(extra, copied);
 	}
 
 	private static List<String> reversed(SortedMap<String, Entry> entries) {
@@ -344,6 +386,16 @@ public final class MirrorSync {
 			return;
 		}
 		Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+			@Override
+			public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+				if (isLink(attrs)) {
+					// Nur die Junction selbst entfernen, nie ihren Inhalt außerhalb der Datenordner
+					Files.delete(dir);
+					return FileVisitResult.SKIP_SUBTREE;
+				}
+				return FileVisitResult.CONTINUE;
+			}
+
 			@Override
 			public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
 				Files.delete(file);

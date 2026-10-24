@@ -4,10 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
@@ -28,6 +30,10 @@ class MirrorSyncTest {
 
 	@TempDir
 	Path target;
+
+	// Ein Ordner außerhalb von lokal und Ziel, auf den die Junction-Tests zeigen
+	@TempDir
+	Path outside;
 
 	private static Path write(Path root, String rel, String text, long mtimeMillis) throws IOException {
 		Path file = root.resolve(rel);
@@ -308,6 +314,70 @@ class MirrorSyncTest {
 
 		assertEquals(List.of("other.txt"), allFiles(target));
 		assertTrue(MirrorSync.compare(local, target).isEmpty());
+	}
+
+	// Legt unter Windows eine Junction an (braucht keine Administratorrechte), sonst wird der Test übersprungen
+	private static Path junction(Path link, Path destination) throws IOException, InterruptedException {
+		assumeTrue(System.getProperty("os.name").startsWith("Windows"));
+		Files.createDirectories(link.getParent());
+		Process process = new ProcessBuilder("cmd", "/c", "mklink", "/J", link.toString(), destination.toString())
+				.redirectErrorStream(true).start();
+		process.getInputStream().readAllBytes();
+		assertEquals(0, process.waitFor());
+		return link;
+	}
+
+	@Test
+	void reconcileDoesNotFollowJunctionsInTheTarget() throws Exception {
+		write(local, "events_data/E1.json", "eins", T0);
+		write(target, "events_data/E1.json", "eins", T0);
+		write(outside, "wichtig.txt", "außerhalb", T0);
+		Path link = junction(target.resolve("events_data/backups/J"), outside);
+		try {
+			// Die Junction selbst ist überzählig, ihr Inhalt gehört nicht zum Spiegelordner
+			assertEquals(List.of("events_data/backups/J"), MirrorSync.compare(local, target).extra());
+
+			MirrorSync.reconcile(local, target);
+
+			assertEquals("außerhalb", read(outside, "wichtig.txt"));
+			assertFalse(Files.exists(link, LinkOption.NOFOLLOW_LINKS));
+		} finally {
+			// Die Junction vor dem Aufräumen der TempDirs entfernen, damit dabei nie in outside gelaufen wird
+			Files.deleteIfExists(link);
+		}
+	}
+
+	@Test
+	void reconcileDoesNotCopyThroughAJunctionInTheLocalTree() throws Exception {
+		write(local, "events_data/E1.json", "eins", T0);
+		write(outside, "geheim.txt", "außerhalb", T0);
+		Path link = junction(local.resolve("events_data/backups/J"), outside);
+		try {
+			MirrorSync.reconcile(local, target);
+
+			assertEquals("eins", read(target, "events_data/E1.json"));
+			assertEquals(List.of("events_data/E1.json"), allFiles(target));
+			assertFalse(exists(target, "events_data/backups/J"));
+			assertTrue(MirrorSync.compare(local, target).isEmpty());
+		} finally {
+			Files.deleteIfExists(link);
+		}
+	}
+
+	@Test
+	void caseOnlyNameDifferenceDoesNotDeleteTheCopiedFile() throws IOException {
+		write(local, "case-probe.txt", "x", T0);
+		assumeTrue(Files.exists(local.resolve("CASE-PROBE.TXT")), "Dateisystem unterscheidet Gross- und Kleinschreibung");
+		Files.delete(local.resolve("case-probe.txt"));
+
+		write(local, "halls_data/AB.json", "lokal", T0);
+		write(target, "halls_data/ab.json", "alt und länger", T0);
+
+		MirrorSync.reconcile(local, target);
+
+		assertEquals(1, allFiles(target).size());
+		assertEquals("lokal", read(target, "halls_data/AB.json"));
+		assertTrue(MirrorSync.compare(local, target).changed().isEmpty());
 	}
 
 	@Test
