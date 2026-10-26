@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -748,10 +749,12 @@ class SyncServiceTest {
 		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(broken).status());
 		assertTrue(a.layer.calls().subList(callsBefore, a.layer.calls().size()).stream().noneMatch(c -> c.contains(shared)));
 		assertTrue(a.events.errors.isEmpty(), "ob es eine gute Kopie gibt, entscheidet erst der Takt");
+		a.events.changed.clear();
 
 		a.service.tick();
 
-		assertTrue(a.events.changedUnits().containsAll(Set.of(healable, broken)));
+		assertTrue(a.events.changedUnits().contains(healable));
+		assertFalse(a.events.changedUnits().contains(broken), "ohne gute Kopie hat sich nichts geändert");
 		UnitState healed = a.service.unitState(healable);
 		assertEquals(Status.OK, healed.status());
 		assertEquals(h.id(), healed.head().id());
@@ -765,6 +768,55 @@ class SyncServiceTest {
 		assertEquals(Status.LOCKED_DAMAGED, locked.status());
 		assertEquals(k.id(), locked.blockedAt());
 		assertEquals(List.of(StoreMessages.damaged(broken.relativePath())), a.events.errors);
+	}
+
+	@Test
+	void permanentlyDamagedUnitIsNotRetriedInALoop() throws IOException {
+		UnitKey broken = UnitKey.event("kaputt");
+		Node a = node("a");
+		a.service.startup(shared);
+		Version k = save(a, create(broken, "weg"));
+		a.service.tick();
+		Files.writeString(localFile(a, broken, k.id() + ".json"), "kaputt");
+		Files.writeString(sharedFile(broken, k.id() + ".json"), "auch kaputt");
+		List<Set<UnitKey>> changed = new ArrayList<>();
+		// eine Oberfläche, die bei jeder Änderungsmeldung den Stand neu holt
+		a.service.setListener(new SyncListener() {
+			@Override
+			public void unitsChanged(Set<UnitKey> units) {
+				changed.add(units);
+				for (UnitKey unit : units) {
+					try {
+						a.service.unitState(unit);
+					} catch (IOException e) {
+						throw new UncheckedIOException(e);
+					}
+				}
+			}
+		});
+		String sharedCopyRead = "read " + sharedFile(broken, k.id() + ".json");
+		a.service.unitState(broken);
+		a.service.tick();
+		long reads = a.layer.calls().stream().filter(sharedCopyRead::equals).count();
+		assertTrue(reads > 0, "der erste Heilversuch liest die Kopie im gemeinsamen Ordner");
+
+		for (int i = 0; i < 3; i++) {
+			a.service.unitState(broken);
+			clock.advance(Duration.ofSeconds(2));
+			a.service.tick();
+		}
+
+		assertEquals(reads, a.layer.calls().stream().filter(sharedCopyRead::equals).count());
+		assertTrue(changed.stream().noneMatch(units -> units.contains(broken)));
+
+		// ändert der Vollabgleich die Einheit, darf sie wieder geheilt werden
+		Version foreign = version(OTHER, 1_000_000L, 0, "fremd", null);
+		Files.write(sharedFile(broken, foreign.id() + ".json"), StoreCodec.write(foreign));
+		a.service.syncNow();
+		a.service.unitState(broken);
+		a.service.tick();
+
+		assertTrue(a.layer.calls().stream().filter(sharedCopyRead::equals).count() > reads);
 	}
 
 	@Test

@@ -171,6 +171,11 @@ public final class SyncService {
 	private final List<LocalScan.OwnClaim> ownClaims = new ArrayList<>();
 	/** Gesperrte Einheiten, die der nächste Takt aus der Kopie im gemeinsamen Ordner zu heilen versucht. */
 	private final Set<UnitKey> repairQueue = new LinkedHashSet<>();
+	/**
+	 * Gesperrte Einheiten, für die es bei der letzten Heilung keine gute Kopie gab; sie werden erst wieder vorgemerkt, wenn
+	 * Abholen oder Vollabgleich sie als geändert melden.
+	 */
+	private final Set<UnitKey> unrepairable = new HashSet<>();
 
 	/**
 	 * Für Tests: Ordner, Kennung, Dateischicht, Threads, Erreichbarkeitsprüfung und Uhr frei wählbar. Es wird kein
@@ -492,7 +497,8 @@ public final class SyncService {
 	 * Der gültige Stand einer Einheit aus dem lokalen Bestand; liest nie den gemeinsamen Ordner. Ist die Kette wegen einer
 	 * beschädigten Datei gesperrt, gilt: Im Einzelbetrieb gibt es keine zweite Kopie, SYS-008 kommt sofort. Im gemeinsamen
 	 * Betrieb versucht der nächste Takt die Heilung aus der Kopie im gemeinsamen Ordner (SYS-007 im Log) und meldet die
-	 * Einheit danach mit {@link SyncListener#unitsChanged}; bleibt sie gesperrt, kommt dann SYS-008. SYS-008 und SYS-009
+	 * Einheit mit {@link SyncListener#unitsChanged}, wenn sich dadurch etwas geändert hat; bleibt sie gesperrt, kommt
+	 * SYS-008, und ein neuer Versuch folgt erst, wenn Abholen oder Vollabgleich die Einheit verändern. SYS-008 und SYS-009
 	 * (neueres Format) kommen einmal je Einheit und Programmlauf über {@link SyncListener#error}.
 	 */
 	public UnitState unitState(UnitKey unit) throws IOException {
@@ -501,7 +507,7 @@ public final class SyncService {
 			boolean single;
 			synchronized (lock) {
 				single = link == null;
-				if (!single) {
+				if (!single && !unrepairable.contains(unit)) {
 					repairQueue.add(unit);
 				}
 			}
@@ -531,24 +537,59 @@ public final class SyncService {
 		}
 		String myId = machineId();
 		for (UnitKey unit : units) {
-			UnitState state = ChainResolver.resolve(local.readUnit(unit), myId);
-			if (state.status() == Status.LOCKED_DAMAGED) {
-				state = heal(unit, state, myId, current.shared);
+			UnitState before = ChainResolver.resolve(local.readUnit(unit), myId);
+			UnitState after = before;
+			boolean replaced = false;
+			if (before.status() == Status.LOCKED_DAMAGED) {
+				Healing healing = heal(unit, before, myId, current.shared);
+				after = healing.state();
+				replaced = healing.replaced();
 			}
+			boolean locked = after.status() == Status.LOCKED_DAMAGED;
 			synchronized (lock) {
 				repairQueue.remove(unit);
+				// ohne gute Kopie nicht bei jedem unitState erneut versuchen, erst wenn sich die Einheit wieder ändert
+				if (locked) {
+					unrepairable.add(unit);
+				} else {
+					unrepairable.remove(unit);
+				}
 			}
-			round.changed.add(unit);
-			if (state.status() == Status.LOCKED_DAMAGED) {
+			// nur melden, was sich wirklich geändert hat: sonst fragte die Oberfläche erneut, und so fort
+			if (replaced || after.status() != before.status() || !Objects.equals(headId(after), headId(before))) {
+				round.changed.add(unit);
+			}
+			if (locked) {
 				reportDamaged(unit);
 			}
 		}
 	}
 
+	private static VersionId headId(UnitState state) {
+		return state.head() == null ? null : state.head().id();
+	}
+
+	/** Eine gesperrte Einheit darf wieder geheilt werden: Abholen oder Vollabgleich haben sie verändert. */
+	private void forgetUnrepairable(Collection<UnitKey> changedUnits) {
+		synchronized (lock) {
+			unrepairable.removeAll(changedUnits);
+		}
+	}
+
+	/**
+	 * Ergebnis einer Heilung.
+	 *
+	 * @param state    der Stand danach
+	 * @param replaced ob dabei eine Datei (lokal oder im gemeinsamen Ordner) ersetzt oder angelegt wurde
+	 */
+	private record Healing(UnitState state, boolean replaced) {
+	}
+
 	/** Heilt Datei um Datei, solange eine lokale Kopie ersetzt wird; liefert den Stand danach. */
-	private UnitState heal(UnitKey unit, UnitState damaged, String myId, VersionStore shared) throws IOException {
+	private Healing heal(UnitKey unit, UnitState damaged, String myId, VersionStore shared) throws IOException {
 		DamageRepair repair = new DamageRepair(local, shared, files, clock);
 		UnitState state = damaged;
+		boolean replaced = false;
 		for (int i = 0; i < MAX_REPAIRS && state.status() == Status.LOCKED_DAMAGED; i++) {
 			UnitFiles unitFiles = local.readUnit(unit);
 			String slot = LocalScan.stopSlot(unitFiles);
@@ -565,12 +606,13 @@ public final class SyncService {
 			if (result.corruptCopy() != null) {
 				LOGGER.warning(StoreMessages.repaired(result.replaced().toString(), result.corruptCopy().getFileName().toString()));
 			}
+			replaced |= result.replaced() != null;
 			if (result.outcome() != DamageRepair.Outcome.REPAIRED_LOCAL) {
 				break;
 			}
 			state = ChainResolver.resolve(local.readUnit(unit), myId);
 		}
-		return state;
+		return new Healing(state, replaced);
 	}
 
 	/** Die IDs aller Events im lokalen Bestand, sortiert. */
@@ -765,6 +807,7 @@ public final class SyncService {
 		}
 		watchOwnClaims(watch);
 		round.changed.addAll(result.changed());
+		forgetUnrepairable(result.changed());
 		result.lost().forEach(this::reportLoss);
 		enqueuePending(current);
 		runJobs(current, round);
@@ -899,6 +942,7 @@ public final class SyncService {
 	private void poll(Link current, Round round) throws IOException {
 		FeedPoll poll = current.reader.poll();
 		round.changed.addAll(poll.changed());
+		forgetUnrepairable(poll.changed());
 		poll.pending().forEach(notifier::pending);
 		if (poll.fullSyncNeeded()) {
 			current.fullSyncWanted = true;
@@ -1022,6 +1066,7 @@ public final class SyncService {
 			queued.clear();
 			ownClaims.clear();
 			repairQueue.clear();
+			unrepairable.clear();
 			notifier.reset();
 		}
 		return created;
@@ -1034,6 +1079,7 @@ public final class SyncService {
 			queued.clear();
 			ownClaims.clear();
 			repairQueue.clear();
+			unrepairable.clear();
 			notifier.reset();
 			notifier.setState(SyncState.AUS);
 		}
