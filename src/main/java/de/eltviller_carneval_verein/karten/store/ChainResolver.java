@@ -88,7 +88,10 @@ public final class ChainResolver {
 		List<List<VersionId>> lost = new ArrayList<>();
 		Set<VersionId> assigned = new HashSet<>();
 		for (Stretch stretch : ownStretches(versions, visited, ownMachineId)) {
-			boolean isPending = status == Status.WAITING || buildsOnHead(stretch.base(), headId);
+			// Auf der beschädigten Version, an der die Kette endet, baut das Zurücksetzen auf (Heilung Stufe 2): Ihr Platz ist
+			// frei, die Strecke wartet aufs Beanspruchen.
+			boolean isPending = status == Status.WAITING || buildsOnHead(stretch.base(), headId)
+					|| (status == Status.LOCKED_DAMAGED && blockedAt != null && blockedAt.equals(stretch.base()));
 			// Gehört eine Version zu mehreren Spitzen, steht sie nur in der ersten Strecke.
 			List<Version> fresh = stretch.versions().stream().filter(v -> assigned.add(v.id())).toList();
 			if (fresh.isEmpty()) {

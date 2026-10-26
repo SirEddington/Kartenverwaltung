@@ -53,7 +53,9 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * <b>Takt</b> (alle 2 Sekunden, {@link #tick()}): Erreichbarkeit prüfen (nur nach einem Fehler), Aufträge fortsetzen,
  * alle 30 Sekunden neue Rechner suchen, die Änderungslisten der anderen lesen, alle 10 Minuten (und beim Start, nach
  * der Rückkehr aus {@link SyncState#OFFLINE}, auf Wunsch) einen Vollabgleich, die eigenen Ansprüche der letzten 15
- * Minuten im gemeinsamen Ordner nachlesen (späte Niederlage bei einem Sync-Client). Vor jedem Vollabgleich merkt er
+ * Minuten im gemeinsamen Ordner nachlesen (späte Niederlage bei einem Sync-Client; nach einem Neustart auch die aus den
+ * lokalen Anspruchsdateien, beim Verbinden mit Mitnehmen die dabei hochgeladenen), vorgemerkte beschädigte Einheiten aus
+ * der Kopie im gemeinsamen Ordner heilen. Vor jedem Vollabgleich merkt er
  * sich die höchsten Listennummern und setzt die Positionen danach darauf; was währenddessen entsteht, liest der nächste
  * Takt.
  * <p>
@@ -64,10 +66,10 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * <b>Threads:</b>
  * <ul>
  * <li>Jeder Zugriff auf den gemeinsamen Ordner läuft im {@code worker}, in der Anwendung ein einzelner Daemon-Thread,
- * der auch den Takt ausführt. Die Oberfläche wartet nie darauf, mit drei Ausnahmen: {@link #startup} prüft die
- * Erreichbarkeit (höchstens 5 Sekunden) und lädt ausstehende Versionen hoch, bevor das Hauptmenü erscheint;
- * {@link #needsConnectDecision} liest den gemeinsamen Ordner; {@link #unitState} heilt eine beschädigte Datei aus der
- * Kopie im gemeinsamen Ordner.</li>
+ * der auch den Takt ausführt; auch die Heilung beschädigter Dateien aus der Kopie dort läuft im Takt. Die Oberfläche
+ * wartet nie darauf, mit zwei Ausnahmen: {@link #startup} prüft die Erreichbarkeit (höchstens 5 Sekunden) und lädt
+ * ausstehende Versionen hoch, bevor das Hauptmenü erscheint; {@link #needsConnectDecision} liest den gemeinsamen
+ * Ordner.</li>
  * <li>{@link #append} und die Abfragen arbeiten nur auf dem lokalen Bestand und laufen auf dem Thread des Aufrufers.</li>
  * <li>Zustand ({@link #syncState()}, {@link #lastSync()}) und alle Rückrufe kommen über den {@code ui}-Executor an, in
  * der Anwendung {@code Platform::runLater}.</li>
@@ -102,10 +104,6 @@ public final class SyncService {
 	/** Eine Aktion mit Dateizugriff. */
 	private interface IoAction {
 		void run() throws IOException;
-	}
-
-	/** Ein eigener gewonnener Anspruch, der noch auf eine späte Niederlage geprüft wird. */
-	private record OwnClaim(UnitKey unit, String claimName, VersionId version, Instant at) {
 	}
 
 	/**
@@ -169,7 +167,10 @@ public final class SyncService {
 	private final Set<VersionId> queued = new HashSet<>();
 	/** Die in diesem Programmlauf als verloren gemeldeten Versionen. */
 	private final Set<VersionId> reportedLost = new HashSet<>();
-	private final List<OwnClaim> ownClaims = new ArrayList<>();
+	/** Eigene gewonnene Ansprüche, die noch auf eine späte Niederlage geprüft werden. */
+	private final List<LocalScan.OwnClaim> ownClaims = new ArrayList<>();
+	/** Gesperrte Einheiten, die der nächste Takt aus der Kopie im gemeinsamen Ordner zu heilen versucht. */
+	private final Set<UnitKey> repairQueue = new LinkedHashSet<>();
 
 	/**
 	 * Für Tests: Ordner, Kennung, Dateischicht, Threads, Erreichbarkeitsprüfung und Uhr frei wählbar. Es wird kein
@@ -262,7 +263,8 @@ public final class SyncService {
 
 	/**
 	 * Beim Start der Anwendung. Räumt zuerst eigene temporäre Dateien älter als einen Tag aus dem lokalen Bestand. Ohne
-	 * gemeinsamen Ordner gilt der Einzelbetrieb ({@link SyncState#AUS}). Sonst wird die Erreichbarkeit geprüft
+	 * gemeinsamen Ordner gilt der Einzelbetrieb ({@link SyncState#AUS}); ausstehende eigene Versionen (etwa nach einem
+	 * Absturz vor dem lokalen Anspruch) werden dann lokal beansprucht. Sonst wird die Erreichbarkeit geprüft
 	 * (höchstens 5 Sekunden): Ist der Ordner erreichbar, werden die ausstehenden Versionen früherer Läufe hier synchron
 	 * hochgeladen, der Vollabgleich folgt im Hintergrund. Ist er nicht erreichbar, ist der Zustand
 	 * {@link SyncState#OFFLINE} und SYS-005 steht im Log; {@link SyncListener#unreachable} kommt nicht, das Popup zeigt
@@ -280,6 +282,7 @@ public final class SyncService {
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			deactivate();
+			claimPendingLocally();
 			return true;
 		}
 		Link current = activate(dir, null);
@@ -350,11 +353,30 @@ public final class SyncService {
 	}
 
 	/**
-	 * Beendet den gemeinsamen Betrieb: Der lokale Bestand bleibt, wie er ist, und ist ab jetzt Schiedsrichter
-	 * ({@link SyncState#AUS}). Noch nicht hochgeladene Versionen bleiben vorläufig liegen.
+	 * Beendet den gemeinsamen Betrieb: Der lokale Bestand bleibt, wie er ist (nichts wird gelöscht oder umgeschrieben),
+	 * und ist ab jetzt Schiedsrichter ({@link SyncState#AUS}). Noch nicht hochgeladene eigene Versionen werden deshalb
+	 * jetzt lokal beansprucht; verlorene bleiben verloren.
 	 */
 	public void disconnect() {
 		deactivate();
+		claimPendingLocally();
+	}
+
+	/**
+	 * Einzelbetrieb: Ausstehende eigene Versionen (nach dem Trennen, nach einem Absturz zwischen Schreiben und lokalem
+	 * Anspruch) werden lokal beansprucht, in der Reihenfolge der Aufträge. Nur lokal, deshalb auf dem Thread des
+	 * Aufrufers.
+	 */
+	private void claimPendingLocally() {
+		try {
+			List<UploadJob.Item> items = new ArrayList<>();
+			for (UploadJob job : LocalScan.pendingJobs(local, machineId(), Set.of())) {
+				items.addAll(job.items());
+			}
+			claimLocally(items);
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Ausstehende Versionen ließen sich lokal nicht beanspruchen", e);
+		}
 	}
 
 	/** Gleicht sofort vollständig ab (im Hintergrund). Ohne Wirkung im Einzelbetrieb. */
@@ -467,16 +489,25 @@ public final class SyncService {
 	}
 
 	/**
-	 * Der gültige Stand einer Einheit aus dem lokalen Bestand. Ist die Kette beschädigt, wird zuerst geheilt (aus der
-	 * Kopie im gemeinsamen Ordner, sofern erreichbar; SYS-007 im Log). Bleibt sie gesperrt, kommt SYS-008 (beschädigt)
-	 * bzw. SYS-009 (neueres Format) einmal je Einheit und Programmlauf über {@link SyncListener#error}. Ohne erreichbaren
-	 * Ordner bleibt eine Sperre ohne SYS-008, denn die Kopie dort ist vielleicht gut.
+	 * Der gültige Stand einer Einheit aus dem lokalen Bestand; liest nie den gemeinsamen Ordner. Ist die Kette wegen einer
+	 * beschädigten Datei gesperrt, gilt: Im Einzelbetrieb gibt es keine zweite Kopie, SYS-008 kommt sofort. Im gemeinsamen
+	 * Betrieb versucht der nächste Takt die Heilung aus der Kopie im gemeinsamen Ordner (SYS-007 im Log) und meldet die
+	 * Einheit danach mit {@link SyncListener#unitsChanged}; bleibt sie gesperrt, kommt dann SYS-008. SYS-008 und SYS-009
+	 * (neueres Format) kommen einmal je Einheit und Programmlauf über {@link SyncListener#error}.
 	 */
 	public UnitState unitState(UnitKey unit) throws IOException {
-		String myId = machineId();
-		UnitState state = ChainResolver.resolve(local.readUnit(unit), myId);
+		UnitState state = ChainResolver.resolve(local.readUnit(unit), machineId());
 		if (state.status() == Status.LOCKED_DAMAGED) {
-			state = repair(unit, state, myId);
+			boolean single;
+			synchronized (lock) {
+				single = link == null;
+				if (!single) {
+					repairQueue.add(unit);
+				}
+			}
+			if (single) {
+				reportDamaged(unit);
+			}
 		}
 		if (state.status() == Status.LOCKED_FORMAT) {
 			notifier.errorOnce(StoreMessages.SYS_NEWER_FORMAT + " " + unit.relativePath(),
@@ -485,33 +516,51 @@ public final class SyncService {
 		return state;
 	}
 
-	private UnitState repair(UnitKey unit, UnitState damaged, String myId) throws IOException {
-		Link current;
+	private void reportDamaged(UnitKey unit) {
+		notifier.errorOnce(StoreMessages.SYS_DAMAGED + " " + unit.relativePath(), StoreMessages.damaged(unit.relativePath()));
+	}
+
+	/**
+	 * Im Takt: heilt die vorgemerkten gesperrten Einheiten aus der Kopie im gemeinsamen Ordner, meldet sie als geändert
+	 * und, wenn sie gesperrt bleiben, mit SYS-008. Scheitert der Zugriff, bleibt die Einheit vorgemerkt.
+	 */
+	private void repairQueued(Link current, Round round) throws IOException {
+		List<UnitKey> units;
 		synchronized (lock) {
-			current = link;
+			units = List.copyOf(repairQueue);
 		}
-		boolean sharedUsable = current != null && current.shared != null && notifier.state() != SyncState.OFFLINE;
-		boolean conclusive = current == null || sharedUsable;
-		DamageRepair repair = new DamageRepair(local, sharedUsable ? current.shared : null, files, clock);
+		String myId = machineId();
+		for (UnitKey unit : units) {
+			UnitState state = ChainResolver.resolve(local.readUnit(unit), myId);
+			if (state.status() == Status.LOCKED_DAMAGED) {
+				state = heal(unit, state, myId, current.shared);
+			}
+			synchronized (lock) {
+				repairQueue.remove(unit);
+			}
+			round.changed.add(unit);
+			if (state.status() == Status.LOCKED_DAMAGED) {
+				reportDamaged(unit);
+			}
+		}
+	}
+
+	/** Heilt Datei um Datei, solange eine lokale Kopie ersetzt wird; liefert den Stand danach. */
+	private UnitState heal(UnitKey unit, UnitState damaged, String myId, VersionStore shared) throws IOException {
+		DamageRepair repair = new DamageRepair(local, shared, files, clock);
 		UnitState state = damaged;
 		for (int i = 0; i < MAX_REPAIRS && state.status() == Status.LOCKED_DAMAGED; i++) {
 			UnitFiles unitFiles = local.readUnit(unit);
 			String slot = LocalScan.stopSlot(unitFiles);
 			DamageRepair.Result result;
-			try {
-				if (state.blockedAt() != null) {
-					ClaimFile claim = unitFiles.claims().get(slot);
-					if (claim == null || claim.claim() == null) {
-						break;
-					}
-					result = repair.repairVersion(unit, claim.claim());
-				} else {
-					result = repair.repairClaim(unit, slot);
+			if (state.blockedAt() != null) {
+				ClaimFile claim = unitFiles.claims().get(slot);
+				if (claim == null || claim.claim() == null) {
+					break;
 				}
-			} catch (IOException | RuntimeException e) {
-				LOGGER.log(Level.WARNING, "Die Heilung von " + unit.relativePath() + " ist gescheitert", e);
-				conclusive = false;
-				break;
+				result = repair.repairVersion(unit, claim.claim());
+			} else {
+				result = repair.repairClaim(unit, slot);
 			}
 			if (result.corruptCopy() != null) {
 				LOGGER.warning(StoreMessages.repaired(result.replaced().toString(), result.corruptCopy().getFileName().toString()));
@@ -520,9 +569,6 @@ public final class SyncService {
 				break;
 			}
 			state = ChainResolver.resolve(local.readUnit(unit), myId);
-		}
-		if (state.status() == Status.LOCKED_DAMAGED && conclusive) {
-			notifier.errorOnce(StoreMessages.SYS_DAMAGED + " " + unit.relativePath(), StoreMessages.damaged(unit.relativePath()));
 		}
 		return state;
 	}
@@ -556,7 +602,9 @@ public final class SyncService {
 	/**
 	 * Setzt eine wegen einer beschädigten Version gesperrte Einheit zurück (Heilung Stufe 2): neue Version mit dem Inhalt
 	 * des letzten lesbaren Kettenglieds (ohne eines: gelöscht), mit der beschädigten Version als erstem Vorgänger.
-	 * Beansprucht wird sie wie jede andere über {@link #append}. Verloren ist genau die eine beschädigte Änderung.
+	 * Beansprucht wird sie wie jede andere über {@link #append}. Verloren ist genau die eine beschädigte Änderung. Gibt es
+	 * schon ein noch nicht beanspruchtes eigenes Zurücksetzen (gleicher erster Vorgänger), wird es zurückgegeben und
+	 * kein zweites angelegt.
 	 *
 	 * @throws IllegalStateException wenn die Einheit nicht wegen einer beschädigten Version gesperrt ist
 	 */
@@ -565,6 +613,11 @@ public final class SyncService {
 		if (state.status() != Status.LOCKED_DAMAGED || state.blockedAt() == null) {
 			throw new IllegalStateException(unit.relativePath() + " ist nicht wegen einer beschädigten Version gesperrt ("
 					+ state.status() + ").");
+		}
+		for (Version pending : state.pending()) {
+			if (state.blockedAt().equals(pending.firstParent())) {
+				return pending;
+			}
 		}
 		Version last = state.head();
 		ObjectNode payload = last == null ? null : last.payload();
@@ -648,6 +701,7 @@ public final class SyncService {
 			});
 		}
 		round.run(() -> poll(current, round));
+		round.run(() -> repairQueued(current, round));
 		round.run(() -> checkLateDefeats(current, round, now));
 		reportChanges(round);
 		if (!isCurrent(current)) {
@@ -686,16 +740,30 @@ public final class SyncService {
 			}
 			uploadLocalClaims = !both || mode == ConnectMode.MERGE;
 		}
+		String myId = machineId();
+		Instant now = clock.instant();
+		// Beim Mitnehmen: die eigenen Ansprüche, die der Abgleich jetzt erst hochlädt, ab jetzt beobachten
+		List<LocalScan.OwnClaim> watch = new ArrayList<>();
+		if (uploadLocalClaims) {
+			for (LocalScan.OwnClaim own : LocalScan.ownClaims(local, myId)) {
+				if (current.shared.readClaimBytes(own.unit(), own.claimName()).isEmpty()) {
+					watch.add(own.at(now));
+				}
+			}
+		}
 		Map<String, Long> latest = current.reader.latestNumbers();
-		FullSyncResult result = FullSync.run(local, current.shared, uploadLocalClaims, machineId(), files, clock);
+		FullSyncResult result = FullSync.run(local, current.shared, uploadLocalClaims, myId, files, clock);
 		current.reader.jumpTo(latest);
 		current.connectMode = null;
 		current.fullSyncWanted = false;
-		current.lastFullSync = clock.instant();
+		current.lastFullSync = now;
 		if (current.allUnitsWanted) {
 			current.allUnitsWanted = false;
 			round.allUnits = true;
+			// nach einem Neustart: die eigenen Ansprüche der letzten 15 Minuten weiter auf eine späte Niederlage prüfen
+			watch.addAll(LocalScan.recentOwnClaims(local, myId, now, LATE_DEFEAT_WINDOW));
 		}
+		watchOwnClaims(watch);
 		round.changed.addAll(result.changed());
 		result.lost().forEach(this::reportLoss);
 		enqueuePending(current);
@@ -782,15 +850,26 @@ public final class SyncService {
 		}
 	}
 
+	/** Nimmt Ansprüche in die Beobachtung auf; ein Platz, der schon beobachtet wird, kommt nicht doppelt. */
+	private void watchOwnClaims(List<LocalScan.OwnClaim> claims) {
+		synchronized (lock) {
+			for (LocalScan.OwnClaim claim : claims) {
+				boolean known = ownClaims.stream()
+						.anyMatch(o -> o.unit().equals(claim.unit()) && o.claimName().equals(claim.claimName()));
+				if (!known) {
+					ownClaims.add(claim);
+				}
+			}
+		}
+	}
+
 	/** Merkt sich einen gewonnenen Anspruch (er liegt jetzt lokal und nennt die Version) für die späte Niederlage. */
 	private void recordOwnClaim(UploadJob.Item item, Instant now) {
 		Version version = item.version();
 		try {
 			Optional<byte[]> bytes = local.readClaimBytes(item.unit(), version.claimName());
 			if (bytes.isPresent() && StoreCodec.readClaim(bytes.get()).version().equals(version.id())) {
-				synchronized (lock) {
-					ownClaims.add(new OwnClaim(item.unit(), version.claimName(), version.id(), now));
-				}
+				watchOwnClaims(List.of(new LocalScan.OwnClaim(item.unit(), version.claimName(), version.id(), now)));
 			}
 		} catch (IOException e) {
 			LOGGER.log(Level.FINE, "Der eigene Anspruch auf " + version.id() + " ist lokal nicht lesbar", e);
@@ -833,12 +912,12 @@ public final class SyncService {
 	 * Gewinner-Version kommt nach lokal. Den Verlust meldet dann die Ableitung aus dem Zustand.
 	 */
 	private void checkLateDefeats(Link current, Round round, Instant now) throws IOException {
-		List<OwnClaim> recent;
+		List<LocalScan.OwnClaim> recent;
 		synchronized (lock) {
 			ownClaims.removeIf(own -> !now.isBefore(own.at().plus(LATE_DEFEAT_WINDOW)));
 			recent = List.copyOf(ownClaims);
 		}
-		for (OwnClaim own : recent) {
+		for (LocalScan.OwnClaim own : recent) {
 			Optional<byte[]> bytes = current.shared.readClaimBytes(own.unit(), own.claimName());
 			Claim theirs = bytes.isPresent() ? parseClaim(bytes.get()) : null;
 			if (theirs == null || theirs.version().equals(own.version())) {
@@ -852,7 +931,7 @@ public final class SyncService {
 		}
 	}
 
-	private void displace(Link current, OwnClaim own, byte[] sharedBytes, Claim theirs) throws IOException {
+	private void displace(Link current, LocalScan.OwnClaim own, byte[] sharedBytes, Claim theirs) throws IOException {
 		UnitKey unit = own.unit();
 		Path claimFile = local.resolve(unit.relativePath() + "/claims/" + own.claimName() + ".json");
 		Optional<byte[]> localBytes = local.readClaimBytes(unit, own.claimName());
@@ -942,6 +1021,7 @@ public final class SyncService {
 			jobs.clear();
 			queued.clear();
 			ownClaims.clear();
+			repairQueue.clear();
 			notifier.reset();
 		}
 		return created;
@@ -953,6 +1033,7 @@ public final class SyncService {
 			jobs.clear();
 			queued.clear();
 			ownClaims.clear();
+			repairQueue.clear();
 			notifier.reset();
 			notifier.setState(SyncState.AUS);
 		}

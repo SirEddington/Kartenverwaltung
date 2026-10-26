@@ -1,6 +1,8 @@
 package de.eltviller_carneval_verein.karten.store;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -20,7 +22,43 @@ final class LocalScan {
 
 	private static final String ROOT = "root";
 
+	/**
+	 * Ein eigener Anspruch, der auf eine späte Niederlage geprüft wird.
+	 *
+	 * @param at seit wann er beobachtet wird (Zeitpunkt des Anspruchs oder des Hochladens)
+	 */
+	record OwnClaim(UnitKey unit, String claimName, VersionId version, Instant at) {
+
+		OwnClaim at(Instant since) {
+			return new OwnClaim(unit, claimName, version, since);
+		}
+	}
+
 	private LocalScan() {
+	}
+
+	/** Alle lesbaren Anspruchsdateien des lokalen Bestands, die dieser Rechner geschrieben hat. */
+	static List<OwnClaim> ownClaims(VersionStore local, String ownMachineId) throws IOException {
+		List<OwnClaim> own = new ArrayList<>();
+		for (UnitKey unit : local.allUnits()) {
+			for (ClaimFile file : local.readUnit(unit).claims().values()) {
+				Claim claim = file.claim();
+				if (claim != null && ownMachineId.equals(claim.machine())) {
+					own.add(new OwnClaim(unit, file.name(), claim.version(), claim.at()));
+				}
+			}
+		}
+		return own;
+	}
+
+	/**
+	 * Die eigenen Anspruchsdateien, die jünger sind als {@code window}: nach einem Neustart weiter auf eine späte
+	 * Niederlage zu prüfen.
+	 */
+	static List<OwnClaim> recentOwnClaims(VersionStore local, String ownMachineId, Instant now, Duration window)
+			throws IOException {
+		Instant since = now.minus(window);
+		return ownClaims(local, ownMachineId).stream().filter(claim -> claim.at().isAfter(since)).toList();
 	}
 
 	/**

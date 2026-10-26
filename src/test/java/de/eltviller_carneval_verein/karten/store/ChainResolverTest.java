@@ -490,7 +490,39 @@ class ChainResolverTest {
 		UnitState state = unit.resolve();
 
 		assertEquals(Status.LOCKED_DAMAGED, state.status());
+		// mine(4) baut auf der beschädigten Version auf, an der die Kette endet: ihr Platz ist frei (wie beim Zurücksetzen)
+		assertEquals(List.of(mine(3), mine(4)), ids(state.pending()));
+		assertTrue(state.lost().isEmpty());
+	}
+
+	@Test
+	void resetOnTheDamagedEndIsPending() throws IOException {
+		// mine(3) ist das Zurücksetzen: Inhalt von theirs(1), erster Vorgänger die beschädigte theirs(2)
+		Unit unit = new Unit().version(theirs(1)).unreadableVersion(theirs(2)).version(mine(3), theirs(2))
+				.claim("root", theirs(1));
+		unit.claim(theirs(1).value(), theirs(2));
+
+		UnitState state = unit.resolve();
+
+		assertEquals(Status.LOCKED_DAMAGED, state.status());
+		assertEquals(theirs(2), state.blockedAt());
 		assertEquals(List.of(mine(3)), ids(state.pending()));
+		assertTrue(state.lost().isEmpty());
+		assertEquals(mine(3), state.current().id());
+	}
+
+	@Test
+	void ownVersionOnAnOlderLinkStaysLostWhileLocked() throws IOException {
+		Unit unit = new Unit().version(theirs(1)).version(theirs(2), theirs(1)).unreadableVersion(theirs(3))
+				.version(mine(4), theirs(1)).claim("root", theirs(1));
+		unit.claim(theirs(1).value(), theirs(2));
+		unit.claim(theirs(2).value(), theirs(3));
+
+		UnitState state = unit.resolve();
+
+		assertEquals(Status.LOCKED_DAMAGED, state.status());
+		assertEquals(theirs(3), state.blockedAt());
+		assertTrue(state.pending().isEmpty());
 		assertEquals(List.of(List.of(mine(4))), state.lost());
 	}
 

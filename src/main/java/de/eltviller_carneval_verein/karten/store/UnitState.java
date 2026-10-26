@@ -10,8 +10,9 @@ import java.util.Set;
  * @param status    ob die Kette vollständig lesbar ist oder warten oder gesperrt ist
  * @param chain     die gültige Kette, ältestes Glied zuerst; bei {@code WAITING} und den Sperren endet sie vor der
  *                  Stelle, an der es nicht weitergeht
- * @param pending   die eigenen, noch nicht beanspruchten Versionen auf dem Ende der Kette, in der Reihenfolge, in
- *                  der sie hochzuladen sind (Vorgänger vor Nachfolger)
+ * @param pending   die eigenen, noch nicht beanspruchten Versionen auf dem Ende der Kette (bei {@code LOCKED_DAMAGED}
+ *                  auch auf der beschädigten Version, an der sie endet: das Zurücksetzen), in der Reihenfolge, in der
+ *                  sie hochzuladen sind (Vorgänger vor Nachfolger)
  * @param lost      die eigenen Versionen, die nicht auf dem Ende der Kette aufbauen und deshalb verloren sind; eine
  *                  Liste je Strecke, älteste Version zuerst; gehört eine Version zu mehreren Strecken (eigene
  *                  Verzweigung), steht sie nur in der ersten, und eine spätere Liste kann mit einer Version

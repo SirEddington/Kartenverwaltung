@@ -18,8 +18,11 @@ import de.eltviller_carneval_verein.karten.store.UnitState.Status;
  * als verloren; der Gewinner ist die Version, die den Platz des ältesten Vorfahren außerhalb der Kette belegt (laut
  * dessen Anspruchsdatei, auch wenn es eine beschädigte, bei der Heilung übersprungene Version ist). Als beansprucht
  * gilt auch eine solche übersprungene Version: Ein Anspruch hinter ihr wird wie jeder andere beurteilt.
- * Lässt sich die Kette nicht sicher bestimmen oder sind die Vorfahren noch nicht beansprucht, wirft der Anspruch eine
- * {@link IOException}: Ein späterer Versuch entscheidet.
+ * <p>
+ * Ist der erste Vorgänger beansprucht, entscheidet allein die Anspruchsdatei, auch wenn die Kette an ihm gesperrt endet
+ * (beschädigte Version: so entsteht der Anspruch beim Zurücksetzen). Nur wenn er es nicht ist, wird der Rückweg zur Kette
+ * gebraucht; lässt sich die Kette dafür nicht sicher bestimmen (nicht {@code OK}) oder sind die Vorfahren noch nicht
+ * beansprucht, wirft der Anspruch eine {@link IOException}: Ein späterer Versuch entscheidet.
  */
 public final class SharedArbiter implements Arbiter {
 
@@ -69,10 +72,12 @@ public final class SharedArbiter implements Arbiter {
 	/**
 	 * Prüft anhand der gültigen Kette im gemeinsamen Ordner, dass der erste Vorgänger darin beansprucht ist.
 	 *
-	 * @return {@code null}, wenn der Vorgänger beansprucht ist (in der Kette oder als übersprungene beschädigte Version); sonst die Niederlage mit dem Anspruch, der den Platz
-	 *         seines ältesten Vorfahren außerhalb der Kette belegt
-	 * @throws IOException wenn die Kette nicht bestimmt werden kann (nicht {@code OK}), eine Versionsdatei auf dem Weg
-	 *                     zur Kette fehlt oder unlesbar ist oder die Vorfahren noch nicht beansprucht sind
+	 * @return {@code null}, wenn der Vorgänger beansprucht ist (in der Kette, als übersprungene beschädigte Version oder
+	 *         als Version, an der die Kette gesperrt endet; dann gilt das unabhängig vom Status); sonst die Niederlage mit
+	 *         dem Anspruch, der den Platz seines ältesten Vorfahren außerhalb der Kette belegt
+	 * @throws IOException wenn der Vorgänger nicht beansprucht ist und die Kette nicht bestimmt werden kann (nicht
+	 *                     {@code OK}), eine Versionsdatei auf dem Weg zur Kette fehlt oder unlesbar ist oder die Vorfahren
+	 *                     noch nicht beansprucht sind
 	 */
 	private ClaimOutcome checkParent(UnitKey unit, Version version, VersionId parent) throws IOException {
 		UnitFiles files = shared.readUnit(unit);

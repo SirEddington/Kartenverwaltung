@@ -618,6 +618,39 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void lateDefeatAfterARestartIsDetected() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version va = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		clock.advance(Duration.ofMinutes(5));
+
+		Node restarted = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		restarted.service.startup(shared);
+		Version foreign = overrideSharedClaim(BOOKING, "root");
+		restarted.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), foreign.id())), restarted.events.lost);
+		assertEquals(foreign.id(), restarted.service.unitState(BOOKING).head().id());
+	}
+
+	@Test
+	void lateDefeatOfClaimsUploadedByMergeIsDetected() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version va = save(a, create(BOOKING, "Anna"));
+		// der lokale Anspruch ist älter als 15 Minuten; beobachtet wird er, weil das Verbinden ihn jetzt hochlädt
+		clock.advance(Duration.ofMinutes(20));
+		a.service.connect(shared, ConnectMode.MERGE);
+		assertEquals(va.id(), sharedClaim(BOOKING, "root").version());
+
+		Version foreign = overrideSharedClaim(BOOKING, "root");
+		a.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), foreign.id())), a.events.lost);
+	}
+
+	@Test
 	void ownClaimsAreRecheckedOnlyForFifteenMinutes() throws IOException {
 		Node a = node("a");
 		a.service.startup(shared);
@@ -708,20 +741,42 @@ class SyncServiceTest {
 		Files.writeString(healableFile, "kaputt");
 		Files.writeString(localFile(a, broken, k.id() + ".json"), "kaputt");
 		Files.writeString(sharedFile(broken, k.id() + ".json"), "auch kaputt");
+		int callsBefore = a.layer.calls().size();
 
+		// der Aufrufer (Oberfläche) bekommt sofort den gesperrten Stand und wartet nie auf den gemeinsamen Ordner
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(healable).status());
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(broken).status());
+		assertTrue(a.layer.calls().subList(callsBefore, a.layer.calls().size()).stream().noneMatch(c -> c.contains(shared)));
+		assertTrue(a.events.errors.isEmpty(), "ob es eine gute Kopie gibt, entscheidet erst der Takt");
+
+		a.service.tick();
+
+		assertTrue(a.events.changedUnits().containsAll(Set.of(healable, broken)));
 		UnitState healed = a.service.unitState(healable);
-
 		assertEquals(Status.OK, healed.status());
 		assertEquals(h.id(), healed.head().id());
 		assertArrayEquals(good, Files.readAllBytes(healableFile));
 		assertTrue(names(healableFile.getParent()).stream().anyMatch(n -> n.startsWith(h.id() + ".json.corrupt-")));
 
 		UnitState locked = a.service.unitState(broken);
+		a.service.tick();
 		a.service.unitState(broken);
 
 		assertEquals(Status.LOCKED_DAMAGED, locked.status());
 		assertEquals(k.id(), locked.blockedAt());
 		assertEquals(List.of(StoreMessages.damaged(broken.relativePath())), a.events.errors);
+	}
+
+	@Test
+	void damageInSingleModeIsReportedAtOnce() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v = save(a, create(BOOKING, "Anna"));
+		Files.writeString(localFile(a, BOOKING, v.id() + ".json"), "kaputt");
+
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(BOOKING).status());
+
+		assertEquals(List.of(StoreMessages.damaged(BOOKING.relativePath())), a.events.errors);
 	}
 
 	@Test
@@ -764,6 +819,32 @@ class SyncServiceTest {
 		assertEquals(reset.id(), state.head().id());
 		assertFalse(state.provisional());
 		assertTrue(a.events.lost.isEmpty());
+	}
+
+	@Test
+	void resetSurvivesARestartBeforeTheUpload() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Version v2 = save(a, update(BOOKING, v1, "Anna B"));
+		a.service.tick();
+		Files.writeString(localFile(a, BOOKING, v2.id() + ".json"), "kaputt");
+		Files.writeString(sharedFile(BOOKING, v2.id() + ".json"), "auch kaputt");
+		Version reset = a.service.resetToLastReadable(BOOKING);
+		assertEquals(reset.id(), a.service.resetToLastReadable(BOOKING).id(), "kein zweites Zurücksetzen");
+		assertTrue(a.service.unitState(BOOKING).provisional());
+
+		// Neustart, bevor ein Takt das Zurücksetzen hochgeladen hat
+		Node restarted = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, task -> {
+		});
+		assertTrue(restarted.service.startup(shared));
+
+		assertEquals(reset.id(), sharedClaim(BOOKING, v2.id().value()).version());
+		UnitState state = restarted.service.unitState(BOOKING);
+		assertEquals(Status.OK, state.status());
+		assertEquals(reset.id(), state.head().id());
+		assertTrue(restarted.events.lost.isEmpty());
 	}
 
 	@Test
@@ -913,6 +994,37 @@ class SyncServiceTest {
 		a.service.tick();
 		assertFalse(Files.exists(sharedFile(BOOKING, v2.id() + ".json")));
 		assertEquals(SyncState.AUS, a.service.syncState().get());
+	}
+
+	@Test
+	void disconnectClaimsPendingVersionsLocally() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v = save(a, create(BOOKING, "Anna"));
+		assertTrue(a.service.unitState(BOOKING).provisional());
+
+		a.service.disconnect();
+
+		UnitState state = a.service.unitState(BOOKING);
+		assertEquals(v.id(), state.head().id());
+		assertFalse(state.provisional());
+		assertFalse(Files.exists(sharedFile(BOOKING, "claims/root.json")));
+	}
+
+	@Test
+	void singleModeStartupClaimsVersionsLeftByACrash() throws IOException {
+		Path appData = dir.resolve("a");
+		MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "a");
+		// Absturz zwischen dem Schreiben der Version und ihrem lokalen Anspruch
+		Version v = version(identity.id(), 1_000_000L, 0, "abgestuerzt", null);
+		writeLocal(appData, BOOKING, v);
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+
+		assertTrue(a.service.startup(""));
+
+		UnitState state = a.service.unitState(BOOKING);
+		assertEquals(v.id(), state.head().id());
+		assertFalse(state.provisional());
 	}
 
 	// --- Abfragen
