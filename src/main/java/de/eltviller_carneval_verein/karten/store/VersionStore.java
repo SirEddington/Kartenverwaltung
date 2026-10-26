@@ -242,6 +242,17 @@ public final class VersionStore {
 	}
 
 	/**
+	 * Die Namen der direkten Einträge eines Ordners unter {@link #dataRoot()}, sortiert und ohne temporäre Dateien; leer,
+	 * wenn der Ordner fehlt.
+	 *
+	 * @param rel Pfad relativ zum Datenordner, mit {@code /} getrennt
+	 * @throws IllegalArgumentException wenn der Pfad absolut ist oder den Datenordner verlässt
+	 */
+	public List<String> listRelative(String rel) throws IOException {
+		return files.listNames(resolve(rel));
+	}
+
+	/**
 	 * Der Pfad zu einer Datei unter {@link #dataRoot()}.
 	 *
 	 * @param rel Pfad relativ zum Datenordner, mit {@code /} getrennt
