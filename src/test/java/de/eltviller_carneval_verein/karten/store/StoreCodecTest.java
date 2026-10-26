@@ -73,6 +73,36 @@ class StoreCodecTest {
 	}
 
 	@Test
+	void nullOperatorAndMachineNameRoundTripAsNull() throws IOException {
+		Version noOperator = new Version(StoreCodec.FORMAT, V1, List.of(), "m", "Kasse 1", null, AT, "s", false,
+				payload("{}"));
+		assertEquals(noOperator, StoreCodec.readVersion(StoreCodec.write(noOperator)));
+
+		Version noMachineName = new Version(StoreCodec.FORMAT, V1, List.of(), "m", null, "Anna", AT, "s", false,
+				payload("{}"));
+		assertEquals(noMachineName, StoreCodec.readVersion(StoreCodec.write(noMachineName)));
+	}
+
+	@Test
+	void missingOperatorAndMachineNameReadAsNull() throws IOException {
+		String json = "{\"format\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
+				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":false,\"payload\":{}}";
+
+		Version read = StoreCodec.readVersion(bytes(json));
+
+		assertNull(read.operator());
+		assertNull(read.machineName());
+	}
+
+	@Test
+	void nonTextOperatorIsIOException() {
+		String json = "{\"format\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
+				+ "\"operator\":5,\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":false}";
+
+		assertThrows(IOException.class, () -> StoreCodec.readVersion(bytes(json)));
+	}
+
+	@Test
 	void firstParentAndClaimNameFollowFirstParent() throws IOException {
 		Version version = new Version(StoreCodec.FORMAT, V3, List.of(V2, V1), "m", "Kasse 1", "Anna", AT, "save-1",
 				false, payload("{}"));

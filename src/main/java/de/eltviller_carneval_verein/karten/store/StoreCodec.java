@@ -85,7 +85,9 @@ public final class StoreCodec {
 	}
 
 	/**
-	 * Liest eine Versionsdatei. Fehlt die Nutzlast oder ist sie {@code null}, ist sie ein leeres Objekt.
+	 * Liest eine Versionsdatei. Fehlt die Nutzlast oder ist sie {@code null}, ist sie ein leeres Objekt. Rechnername
+	 * und Bediener dürfen fehlen oder {@code null} sein (der Bediener ist nicht immer gesetzt) und sind dann
+	 * {@code null}.
 	 *
 	 * @throws UnknownFormatException wenn die Datei ein höheres Format hat
 	 * @throws IOException            wenn die Datei kein gültiges JSON ist oder Felder fehlen oder ungültig sind
@@ -103,7 +105,7 @@ public final class StoreCodec {
 				throw new IOException("Das Feld payload ist kein Objekt.");
 			}
 			return new Version(format, VersionId.of(text(node, "id")), parents, text(node, "machine"),
-					text(node, "machineName"), text(node, "operator"), instant(node, "at"), text(node, "saveId"),
+					optionalText(node, "machineName"), optionalText(node, "operator"), instant(node, "at"), text(node, "saveId"),
 					bool(node, "deleted"),
 					payload == null || payload.isNull() ? MAPPER.createObjectNode() : (ObjectNode) payload);
 		} catch (IllegalArgumentException e) {
@@ -186,6 +188,12 @@ public final class StoreCodec {
 
 	private static String text(JsonNode node, String field) throws IOException {
 		return asText(node.get(field), field);
+	}
+
+	/** Ein Textfeld, das fehlen oder {@code null} sein darf (Anzeigefelder wie Bediener); sonst muss es Text sein. */
+	private static String optionalText(JsonNode node, String field) throws IOException {
+		JsonNode value = node.get(field);
+		return value == null || value.isNull() ? null : asText(value, field);
 	}
 
 	private static String asText(JsonNode value, String field) throws IOException {
