@@ -1,0 +1,167 @@
+package de.eltviller_carneval_verein.karten.store;
+
+import java.io.IOException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * {@link FileLayer} auf Basis von {@code java.nio.file}.
+ * <p>
+ * "Nur wenn nicht vorhanden" beruht auf {@link Files#move} ohne Optionen, das ein vorhandenes Ziel nicht ersetzt. Nicht
+ * {@code ATOMIC_MOVE}: Unter Windows ersetzt das ein vorhandenes Ziel stillschweigend.
+ */
+public final class NioFileLayer implements FileLayer {
+
+	@Override
+	public boolean createNew(Path file, byte[] content) throws IOException {
+		Path dir = parentOf(file);
+		Files.createDirectories(dir);
+		Path temp = writeTemp(dir, content);
+		try {
+			Files.move(temp, file);
+			return true;
+		} catch (FileAlreadyExistsException e) {
+			deleteQuietly(temp, null);
+			return false;
+		} catch (IOException | RuntimeException e) {
+			deleteQuietly(temp, e);
+			throw e;
+		}
+	}
+
+	@Override
+	public Optional<byte[]> read(Path file) throws IOException {
+		try {
+			return Optional.of(Files.readAllBytes(file));
+		} catch (NoSuchFileException e) {
+			return Optional.empty();
+		}
+	}
+
+	@Override
+	public boolean exists(Path file) {
+		return Files.exists(file);
+	}
+
+	@Override
+	public List<String> listNames(Path dir) throws IOException {
+		List<String> names = new ArrayList<>();
+		try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
+			for (Path entry : stream) {
+				String name = entry.getFileName().toString();
+				if (!name.startsWith(TEMP_PREFIX)) {
+					names.add(name);
+				}
+			}
+		} catch (NoSuchFileException e) {
+			return Collections.emptyList();
+		}
+		Collections.sort(names);
+		return names;
+	}
+
+	@Override
+	public boolean isDirectory(Path path) {
+		return Files.isDirectory(path);
+	}
+
+	@Override
+	public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
+		Path dir = parentOf(file);
+		Path corrupt = dir.resolve(corruptName);
+		Path temp = writeTemp(dir, good);
+		try {
+			Files.move(file, corrupt);
+		} catch (IOException | RuntimeException e) {
+			deleteQuietly(temp, e);
+			throw e;
+		}
+		try {
+			Files.move(temp, file);
+		} catch (IOException | RuntimeException e) {
+			try {
+				Files.move(corrupt, file);
+			} catch (IOException | RuntimeException restoreFailure) {
+				e.addSuppressed(restoreFailure);
+			}
+			deleteQuietly(temp, e);
+			throw e;
+		}
+	}
+
+	@Override
+	public void rename(Path from, Path to) throws IOException {
+		Files.move(from, to);
+	}
+
+	@Override
+	public void deleteOwnTemps(Path dir, Duration olderThan) throws IOException {
+		Instant limit = Instant.now().minus(olderThan);
+		try {
+			Files.walkFileTree(dir, new SimpleFileVisitor<>() {
+				@Override
+				public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+					String name = file.getFileName().toString();
+					if (name.startsWith(TEMP_PREFIX) && name.endsWith(TEMP_SUFFIX)
+							&& attrs.lastModifiedTime().toInstant().isBefore(limit)) {
+						Files.deleteIfExists(file);
+					}
+					return FileVisitResult.CONTINUE;
+				}
+
+				@Override
+				public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+					if (exc instanceof NoSuchFileException) {
+						return FileVisitResult.CONTINUE;
+					}
+					throw exc;
+				}
+			});
+		} catch (NoSuchFileException e) {
+			// Ordner fehlt: nichts aufzuräumen
+		}
+	}
+
+	/** Der Ordner der Datei; bei einem Namen ohne Ordner der aktuelle Ordner. */
+	private static Path parentOf(Path file) {
+		Path parent = file.toAbsolutePath().getParent();
+		return parent != null ? parent : file.toAbsolutePath();
+	}
+
+	/** Schreibt den Inhalt in eine neue temporäre Datei im Ordner; bei einem Fehler bleibt keine zurück. */
+	private static Path writeTemp(Path dir, byte[] content) throws IOException {
+		Path temp = dir.resolve(TEMP_PREFIX + UUID.randomUUID() + TEMP_SUFFIX);
+		try {
+			Files.write(temp, content, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+		} catch (IOException | RuntimeException e) {
+			deleteQuietly(temp, e);
+			throw e;
+		}
+		return temp;
+	}
+
+	/** Löscht die eigene temporäre Datei, soweit möglich. Ein Fehler wird nur beim ursprünglichen Fehler vermerkt. */
+	private static void deleteQuietly(Path temp, Throwable original) {
+		try {
+			Files.deleteIfExists(temp);
+		} catch (IOException | RuntimeException e) {
+			if (original != null) {
+				original.addSuppressed(e);
+			}
+		}
+	}
+}
