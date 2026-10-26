@@ -1,0 +1,270 @@
+package de.eltviller_carneval_verein.karten.store;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+/**
+ * Szenarien mit einem nachgebauten Nextcloud-Ordner: Jeder Dienst nimmt seinen eigenen, lokal synchronisierten
+ * Client-Ordner als gemeinsamen Ordner, und {@link SimulatedCloud} spielt Sync-Client und Server dazwischen.
+ */
+class CloudScenarioTest {
+
+	private static final Instant START = Instant.parse("2026-10-26T10:00:00Z");
+	private static final UnitKey BOOKING = UnitKey.booking("e1", "p1", "A-1");
+	private static final ObjectMapper MAPPER = new ObjectMapper();
+
+	/** Eine Uhr, die der Test vorstellt; beide Rechner teilen sie. */
+	private static final class TestClock extends Clock {
+		private Instant now = START;
+
+		void advance(Duration duration) {
+			now = now.plus(duration);
+		}
+
+		@Override
+		public ZoneId getZone() {
+			return ZoneOffset.UTC;
+		}
+
+		@Override
+		public Clock withZone(ZoneId zone) {
+			return this;
+		}
+
+		@Override
+		public Instant instant() {
+			return now;
+		}
+	}
+
+	/** Zeichnet alle Rückmeldungen eines Dienstes auf. */
+	private static final class Recorder implements SyncListener {
+		final List<Set<UnitKey>> changed = new ArrayList<>();
+		final List<PendingSighting> pending = new ArrayList<>();
+		final List<LostVersion> lost = new ArrayList<>();
+		final List<String> errors = new ArrayList<>();
+
+		@Override
+		public void unitsChanged(Set<UnitKey> units) {
+			changed.add(units);
+		}
+
+		@Override
+		public void pending(UnitKey unit, VersionId version, String machineName) {
+			pending.add(new PendingSighting(unit, version, machineName));
+		}
+
+		@Override
+		public void lost(UnitKey unit, List<VersionId> mine, VersionId winner) {
+			lost.add(new LostVersion(unit, mine, winner));
+		}
+
+		@Override
+		public void error(String message) {
+			errors.add(message);
+		}
+
+		Set<UnitKey> changedUnits() {
+			Set<UnitKey> all = new HashSet<>();
+			changed.forEach(all::addAll);
+			return all;
+		}
+	}
+
+	/** Ein simulierter Rechner: eigener Datenordner, eigener Dienst, eigener Client-Ordner als gemeinsamer Ordner. */
+	private final class Machine {
+		final String name;
+		final Path clientFolder;
+		final Path appData;
+		final Recorder events = new Recorder();
+		final SyncService service;
+
+		Machine(String name) throws IOException {
+			this.name = name;
+			this.clientFolder = cloud.addClient(name);
+			this.appData = dir.resolve("appdata-" + name);
+			MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> name);
+			this.service = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run, p -> true,
+					clock);
+			service.setListener(events);
+			assertTrue(service.startup(clientFolder.toString()));
+		}
+
+		Version sell(UnitKey unit, String text) throws IOException {
+			List<Version> saved = service.append(UUID.randomUUID().toString(), List.of(
+					new Change(unit, List.of(), MAPPER.createObjectNode().put("name", text), false)));
+			assertEquals(1, saved.size());
+			return saved.get(0);
+		}
+
+		Path localData() {
+			return appData.resolve("data");
+		}
+	}
+
+	@TempDir
+	Path dir;
+
+	private TestClock clock;
+	private SimulatedCloud cloud;
+
+	@BeforeEach
+	void setUp() {
+		clock = new TestClock();
+		cloud = new SimulatedCloud(dir.resolve("server"));
+	}
+
+	private static List<String> names(Path folder) throws IOException {
+		try (Stream<Path> entries = Files.list(folder)) {
+			return entries.map(p -> p.getFileName().toString()).sorted().toList();
+		}
+	}
+
+	private static List<String> tree(Path folder) throws IOException {
+		try (Stream<Path> entries = Files.walk(folder)) {
+			return entries.filter(Files::isRegularFile).map(p -> folder.relativize(p).toString().replace('\\', '/')).sorted()
+					.toList();
+		}
+	}
+
+	// --- Szenarien
+
+	/**
+	 * Beide verkaufen denselben Platz, beide Ansprüche liegen zunächst nur im eigenen Client-Ordner. Der Server nimmt
+	 * den ersten; der Sync-Client des zweiten legt seinen Anspruch als Konfliktkopie beiseite und holt den fremden.
+	 */
+	@Test
+	void lateDefeatThroughCloud() throws IOException {
+		Machine a = new Machine("a");
+		Machine b = new Machine("b");
+		Version va = a.sell(BOOKING, "Anna");
+		Version vb = b.sell(BOOKING, "Bert");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		b.service.tick();
+		assertTrue(a.events.lost.isEmpty());
+		assertTrue(b.events.lost.isEmpty(), "bis hierher kennt B nur den eigenen Anspruch");
+
+		cloud.step("a");
+		cloud.step("b");
+
+		Path claimsB = b.clientFolder.resolve("data").resolve(BOOKING.relativePath()).resolve("claims");
+		assertEquals(List.of("root (conflicted copy b).json", "root.json"), names(claimsB));
+		Claim winner = StoreCodec.readClaim(Files.readAllBytes(claimsB.resolve("root.json")));
+		assertEquals(va.id(), winner.version());
+
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(vb.id()), va.id())), b.events.lost);
+		assertTrue(b.events.errors.isEmpty());
+		assertEquals(va.id(), b.service.unitState(BOOKING).head().id());
+
+		// der Vollabgleich übergeht die Konfliktkopie: kein Fehler, keine Kopie im lokalen Bestand, kein zweiter Verlust
+		b.service.syncNow();
+		b.service.tick();
+
+		assertTrue(b.events.errors.isEmpty());
+		assertEquals(1, b.events.lost.size());
+		assertTrue(tree(b.localData()).stream().noneMatch(p -> p.contains("conflicted")), "Konfliktkopie im lokalen Bestand");
+		assertTrue(Files.exists(claimsB.resolve("root (conflicted copy b).json")), "die Konfliktkopie bleibt liegen");
+
+		// A hat gewonnen und meldet auch nach dem nächsten Abgleich nichts
+		cloud.step("b");
+		cloud.step("a");
+		clock.advance(Duration.ofSeconds(30));
+		a.service.tick();
+		a.service.syncNow();
+		assertTrue(a.events.lost.isEmpty());
+		assertTrue(a.events.errors.isEmpty());
+		assertEquals(va.id(), a.service.unitState(BOOKING).head().id());
+	}
+
+	/** Die Liste von A kommt bei B an, bevor die Versionsdatei da ist: B wartet und meldet erst nach dem Eintreffen. */
+	@Test
+	void feedBeforeFilesWaits() throws IOException {
+		Machine a = new Machine("a");
+		Machine b = new Machine("b");
+		Version va = a.sell(BOOKING, "Anna");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		cloud.step("a");
+
+		cloud.stepFilesOnly("b", rel -> rel.startsWith("data/feeds/"));
+		clock.advance(Duration.ofSeconds(30));
+		b.service.tick();
+
+		assertTrue(Files.exists(b.clientFolder.resolve("data/feeds/" + va.machine())),
+				"die Liste ist angekommen");
+		assertFalse(b.events.changedUnits().contains(BOOKING));
+		assertTrue(b.events.pending.isEmpty());
+		assertTrue(b.events.errors.isEmpty());
+		assertFalse(Files.exists(b.localData().resolve(BOOKING.relativePath()).resolve(va.id() + ".json")));
+
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+		assertFalse(b.events.changedUnits().contains(BOOKING), "B wartet weiter, solange die Datei fehlt");
+
+		cloud.step("b");
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+
+		assertTrue(b.events.changedUnits().contains(BOOKING));
+		assertEquals(va.id(), b.service.unitState(BOOKING).head().id());
+		assertFalse(b.service.unitState(BOOKING).provisional());
+		assertTrue(b.events.errors.isEmpty());
+	}
+
+	/** Version und Liste sind da, der Anspruch noch nicht: B meldet "wartend" mit dem Namen von A, dann gilt die Version. */
+	@Test
+	void pendingSightingBeforeClaim() throws IOException {
+		Machine a = new Machine("a");
+		Machine b = new Machine("b");
+		Version va = a.sell(BOOKING, "Anna");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		cloud.step("a");
+
+		cloud.stepFilesOnly("b", rel -> !rel.contains("/claims/"));
+		clock.advance(Duration.ofSeconds(30));
+		b.service.tick();
+
+		assertEquals(List.of(new PendingSighting(BOOKING, va.id(), "a")), b.events.pending);
+		assertEquals("a", va.machineName());
+		// ohne Anspruch ist die Version noch nicht gültig (die Änderungsmeldung für die kopierte Datei ist erlaubt)
+		Version head = b.service.unitState(BOOKING).head();
+		assertTrue(head == null || !head.id().equals(va.id()));
+		assertTrue(b.events.errors.isEmpty());
+
+		cloud.step("b");
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+
+		assertTrue(b.events.changedUnits().contains(BOOKING));
+		assertEquals(va.id(), b.service.unitState(BOOKING).head().id());
+		assertEquals(1, b.events.pending.size(), "die Beobachtung wird nur einmal gemeldet");
+		assertTrue(b.events.lost.isEmpty());
+	}
+}
