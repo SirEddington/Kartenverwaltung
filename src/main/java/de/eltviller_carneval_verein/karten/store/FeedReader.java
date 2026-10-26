@@ -140,15 +140,18 @@ public final class FeedReader {
 	 * erscheint, noch übernommen wird; auch noch nicht gemeldete Ergebnisse bleiben und kommen mit dem nächsten
 	 * {@link #poll()}, denn der Vollabgleich meldet einen Anspruch nicht, den ein früherer Durchlauf schon lokal angelegt
 	 * hat.
+	 * <p>
+	 * Der {@link SyncService} springt nicht: Ein übersprungener Eintrag des Gewinners würde einen abweichenden lokalen
+	 * Anspruch nie aufdecken (siehe {@link FeedPoll#contested()}).
 	 */
 	public synchronized void jumpToLatest() throws IOException {
 		jumpTo(latestNumbers());
 	}
 
 	/**
-	 * Die höchste vorhandene Listennummer je fremdem Rechner im gemeinsamen Ordner (ohne den eigenen). Ein Vollabgleich
-	 * merkt sie sich, bevor er die Bäume durchläuft, und setzt sie danach mit {@link #jumpTo}: Listen, die währenddessen
-	 * entstehen, liest dann der nächste {@link #poll()}, statt sie zu überspringen.
+	 * Die höchste vorhandene Listennummer je fremdem Rechner im gemeinsamen Ordner (ohne den eigenen). Wer nach einem
+	 * Vollabgleich springen will, merkt sie sich vor dem Durchlauf und setzt sie danach mit {@link #jumpTo}: Listen, die
+	 * währenddessen entstehen, liest dann der nächste {@link #poll()}, statt sie zu überspringen.
 	 */
 	public synchronized Map<String, Long> latestNumbers() throws IOException {
 		Map<String, Long> latest = new TreeMap<>();

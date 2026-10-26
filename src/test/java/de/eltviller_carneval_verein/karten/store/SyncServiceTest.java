@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -805,6 +806,40 @@ class SyncServiceTest {
 		a.service.tick();
 
 		assertEquals(List.of(new LostVersion(u1, List.of(saved.get(0).id()), vb.id())), a.events.lost);
+		assertEquals(SyncState.FEHLER, a.service.syncState().get());
+	}
+
+	@Test
+	void failureOnOneContestedSlotKeepsTheOthers() throws IOException {
+		UnitKey u1 = UnitKey.event("e1");
+		UnitKey u2 = UnitKey.event("e2");
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(u1, "eins"));
+		Version v2 = save(a, create(u2, "zwei"));
+		a.service.tick();
+		clock.advance(Duration.ofMinutes(16));
+		a.service.tick();
+		// lange nach der Beobachtung: beide Plätze gehören im gemeinsamen Ordner einem anderen, seine Liste kommt an
+		Version f1 = overrideSharedClaim(u1, "root");
+		Version f2 = overrideSharedClaim(u2, "root");
+		Feed feed = new Feed(StoreCodec.FORMAT, OTHER, 1, START, List.of(new FeedEntry(u1.relativePath(), f1.id(), "root"),
+				new FeedEntry(u2.relativePath(), f2.id(), "root")));
+		Files.createDirectories(sharedRoot.resolve("data/feeds/" + OTHER));
+		Files.write(sharedRoot.resolve("data/feeds/" + OTHER + "/1.json"), StoreCodec.write(feed));
+		// der zweite Lesezugriff auf den Anspruch von e1 (der Vergleich nach dem Abholen) scheitert
+		AtomicInteger u1Reads = new AtomicInteger();
+		a.layer.failWhen(p -> p.startsWith(sharedRoot) && p.toString().replace('\\', '/').endsWith("events/e1/claims/root.json")
+				&& u1Reads.incrementAndGet() == 2, "read", new IOException("Störung"));
+		clock.advance(Duration.ofSeconds(30));
+
+		a.service.tick();
+
+		// e2 wird trotz der Störung bei e1 verglichen; e1 kommt neu in die Beobachtung, die ihn im selben Takt nachliest
+		assertEquals(2, a.events.lost.size());
+		assertEquals(Set.of(new LostVersion(u2, List.of(v2.id()), f2.id()), new LostVersion(u1, List.of(v1.id()), f1.id())),
+				Set.copyOf(a.events.lost));
+		assertEquals(3, u1Reads.get());
 		assertEquals(SyncState.FEHLER, a.service.syncState().get());
 	}
 

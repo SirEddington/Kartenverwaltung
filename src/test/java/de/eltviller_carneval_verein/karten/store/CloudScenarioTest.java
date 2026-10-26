@@ -310,6 +310,42 @@ class CloudScenarioTest {
 		assertEquals(vb.id(), a.service.unitState(BOOKING).head().id());
 	}
 
+	/**
+	 * A gewinnt nur in seinem Client-Ordner und wird beendet. Mehr als 15 Minuten später, während das Programm aus ist,
+	 * bringt der Client B's Anspruch und B's Liste. Beim Neustart darf der Vollabgleich die Liste nicht überspringen:
+	 * Erst ihr Eintrag deckt die Niederlage auf.
+	 */
+	@Test
+	void winnersFeedAlreadyThereAtRestartIsNotSkipped() throws IOException {
+		Machine a = new Machine("a");
+		Machine b = new Machine("b");
+		Version vb = b.sell(BOOKING, "Bert");
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+		cloud.step("b");
+		Version va = a.sell(BOOKING, "Anna");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		assertEquals(va.id(), a.service.unitState(BOOKING).head().id(), "A hält den Platz in seiner Kopie");
+
+		// A ist beendet; der Client bringt 20 Minuten später die Entscheidung des Servers und B's Liste
+		clock.advance(Duration.ofMinutes(20));
+		cloud.step("a");
+		Recorder events = new Recorder();
+		SyncService restarted = new SyncService(a.appData, MachineIdentity.loadOrCreate(a.appData, () -> "a"),
+				new NioFileLayer(), Runnable::run, Runnable::run, p -> true, clock);
+		restarted.setListener(events);
+		assertTrue(restarted.startup(a.clientFolder.toString()));
+		clock.advance(Duration.ofSeconds(2));
+		restarted.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), vb.id())), events.lost);
+		Path localClaims = a.localData().resolve(BOOKING.relativePath()).resolve("claims");
+		assertEquals(vb.id(), StoreCodec.readClaim(Files.readAllBytes(localClaims.resolve("root.json"))).version());
+		assertEquals(1, names(localClaims).stream().filter(n -> n.startsWith("root.json.verdraengt-")).count());
+		assertEquals(vb.id(), restarted.unitState(BOOKING).head().id());
+	}
+
 	/** Die Liste von A kommt bei B an, bevor die Versionsdatei da ist: B wartet und meldet erst nach dem Eintreffen. */
 	@Test
 	void feedBeforeFilesWaits() throws IOException {

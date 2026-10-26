@@ -59,9 +59,9 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * lokalen Anspruchsdateien, beim Verbinden mit Mitnehmen die dabei hochgeladenen; höchstens 150 je Takt), vorgemerkte
  * beschädigte Einheiten aus der Kopie im gemeinsamen Ordner heilen und beschädigte Kopien dort aus der guten lokalen.
  * Trifft ein fremder Listeneintrag einen Platz, dessen lokaler Anspruch abweicht, wird sofort verglichen: So fällt eine
- * späte Niederlage auch nach Ablauf der Beobachtung auf. Vor jedem Vollabgleich merkt er
- * sich die höchsten Listennummern und setzt die Positionen danach darauf; was währenddessen entsteht, liest der nächste
- * Takt.
+ * späte Niederlage auch nach Ablauf der Beobachtung auf. Deshalb überspringt auch der Vollabgleich keine Liste: Er
+ * lässt die Positionen stehen, und jede Liste wird gelesen (nach einem Verlust von {@code sync-state.json} oder für einen
+ * neuen Rechner einmal der ganze Rückstand, 200 Listen je Takt).
  * <p>
  * <b>Verluste</b> werden nicht nur aus Ereignissen gemeldet, sondern aus dem Zustand abgeleitet: Für jede neu
  * aufgelöste Einheit (beim ersten Vollabgleich alle) wird jede verlorene Strecke gemeldet, deren Versionen in diesem
@@ -792,8 +792,8 @@ public final class SyncService {
 	}
 
 	/**
-	 * Der Vollabgleich: beim Verbinden zuerst Beiseitelegen bzw. Mitnehmen, dann beide Bäume abgleichen, die Positionen
-	 * auf den Stand von vor dem Durchlauf setzen, die ausstehenden Versionen einreihen und hochladen.
+	 * Der Vollabgleich: beim Verbinden zuerst Beiseitelegen bzw. Mitnehmen, dann beide Bäume abgleichen, die ausstehenden
+	 * Versionen einreihen und hochladen. Die Positionen der Änderungslisten ändert er nicht.
 	 */
 	private void fullSync(Link current, Round round) throws IOException {
 		boolean uploadLocalClaims = false;
@@ -808,13 +808,14 @@ public final class SyncService {
 		}
 		String myId = machineId();
 		Instant now = clock.instant();
-		Map<String, Long> latest = current.reader.latestNumbers();
 		// Beim Mitnehmen: genau die Ansprüche, die der Abgleich hochlädt, ab jetzt beobachten (je Anspruch sofort, damit
 		// auch ein abgebrochener Abgleich nichts verliert)
 		FullSyncResult result = FullSync.run(local, current.shared, uploadLocalClaims, myId, files, clock,
 				uploaded -> watchOwnClaims(
 						List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))));
-		current.reader.jumpTo(latest);
+		// Die Positionen der Listen bleiben stehen: Der Abgleich vergleicht keine Ansprüche, die auf beiden Seiten liegen.
+		// Erst das Lesen des Eintrags des Gewinners deckt einen abweichenden lokalen Anspruch auf; schon kopierte Dateien
+		// kosten dabei nur einen Vergleich.
 		current.connectMode = null;
 		current.fullSyncWanted = false;
 		current.lastFullSync = now;
@@ -1021,14 +1022,39 @@ public final class SyncService {
 		if (poll.fullSyncNeeded()) {
 			current.fullSyncWanted = true;
 		}
-		for (FeedPoll.Contested slot : poll.contested()) {
-			settleContested(current, slot, round);
-		}
 		if (!poll.damaged().isEmpty()) {
 			// die kopierte Datei passt nicht zum Anspruch: heilen versuchen (sonst SYS-008)
 			synchronized (lock) {
 				repairQueue.addAll(poll.damaged());
 			}
+		}
+		// jeder Platz für sich: Eine Störung bei einem verliert die übrigen nicht; der gestörte wird weiter beobachtet
+		IOException failure = null;
+		for (FeedPoll.Contested slot : poll.contested()) {
+			try {
+				settleContested(current, slot, round);
+			} catch (IOException e) {
+				if (failure == null) {
+					failure = e;
+				}
+				rearmIfOwn(slot);
+			}
+		}
+		if (failure != null) {
+			throw failure;
+		}
+	}
+
+	/** Beobachtet den lokalen Anspruch des Platzes ab jetzt neu, wenn er der eigene ist ({@code checkLateDefeats} prüft weiter). */
+	private void rearmIfOwn(FeedPoll.Contested slot) {
+		try {
+			Optional<byte[]> bytes = local.readClaimBytes(slot.unit(), slot.claimName());
+			Claim mine = bytes.isPresent() ? parseClaim(bytes.get()) : null;
+			if (mine != null && machineId().equals(mine.machine())) {
+				rearm(new LocalScan.OwnClaim(slot.unit(), slot.claimName(), mine.version(), clock.instant()));
+			}
+		} catch (IOException e) {
+			LOGGER.log(Level.FINE, "Der lokale Anspruch " + slot + " ist nicht lesbar", e);
 		}
 	}
 
