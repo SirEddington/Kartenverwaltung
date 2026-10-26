@@ -78,15 +78,16 @@ public final class SharedArbiter implements Arbiter {
 		UnitFiles files = shared.readUnit(unit);
 		UnitState state = ChainResolver.resolve(files, version.machine());
 		String where = unit.relativePath();
-		if (state.status() != Status.OK) {
-			throw new IOException("Die gültige Kette von " + where + " ist im gemeinsamen Ordner nicht bestimmbar ("
-					+ state.status() + ").");
-		}
 		// Beansprucht ist auch eine beschädigte, übersprungene Version: Sie hat ihren Platz bekommen und steht nur nicht in
-		// der Kette (Heilung Stufe 2). Ein Anspruch dahinter wird wie jeder andere beurteilt.
+		// der Kette (Heilung Stufe 2). Ein Anspruch dahinter wird wie jeder andere beurteilt, auch wenn die Kette gerade an
+		// ihr endet (gesperrt): So entsteht der Anspruch hinter der beschädigten Version beim Zurücksetzen.
 		Set<VersionId> claimed = state.claimed();
 		if (claimed.contains(parent)) {
 			return null;
+		}
+		if (state.status() != Status.OK) {
+			throw new IOException("Die gültige Kette von " + where + " ist im gemeinsamen Ordner nicht bestimmbar ("
+					+ state.status() + ").");
 		}
 		// Entlang des ersten Vorgängers bis zu einer beanspruchten Version oder zur ersten Version zurückgehen
 		VersionId base = null;

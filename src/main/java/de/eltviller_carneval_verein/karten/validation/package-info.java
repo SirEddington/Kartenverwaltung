@@ -35,7 +35,7 @@
  * <tr><td>Halle</td><td>HLL</td><td>{@link HallValidator} / {@link HallIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Hallenobjekt</td><td>HOB</td><td>{@link HallObjectValidator} / {@link HallObjectIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Einstellungen</td><td>SET</td><td>{@link SettingsValidator} / {@link SettingsIssue}</td><td>vorhanden</td></tr>
- * <tr><td>technisch (unerwartet)</td><td>SYS</td><td>GlobalErrorHandler.CODE (SYS-001), mirror.MirrorMessages (SYS-002 bis SYS-004)</td><td>vorhanden</td></tr>
+ * <tr><td>technisch (unerwartet)</td><td>SYS</td><td>GlobalErrorHandler.CODE (SYS-001), mirror.MirrorMessages (SYS-002 bis SYS-004), store.StoreMessages (SYS-005 bis SYS-012)</td><td>vorhanden</td></tr>
  * </table>
  */
 package de.eltviller_carneval_verein.karten.validation;

@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -653,5 +654,31 @@ class FeedReaderTest {
 		assertEquals(Set.of(UNIT, UNIT2), poll.changed());
 		assertEquals(1L, reloaded().position(PEER_A));
 		assertEquals(1L, reloaded().position(PEER_B));
+	}
+
+	@Test
+	void latestNumbersAreTheHighestFeedsOfThePeers() throws IOException {
+		putFeed(PEER_A, 1);
+		putFeed(PEER_A, 3);
+		putFeed(PEER_B, 2);
+		putRaw("feeds/" + ME + "/9.json", "{}");
+
+		assertEquals(Map.of(PEER_A, 3L, PEER_B, 2L), reader.latestNumbers());
+	}
+
+	@Test
+	void jumpToKeepsFeedsWrittenAfterTheSnapshot() throws IOException {
+		putFeed(PEER_A, 1);
+		Map<String, Long> latest = reader.latestNumbers();
+		// zwischen Schnappschuss und Sprung (während des Vollabgleichs) schreibt der andere Rechner weiter
+		Version later = version(PEER_A, "Kasse 2", V2);
+		sell(PEER_A, 2, UNIT, later);
+
+		reader.jumpTo(latest);
+
+		assertEquals(1L, positions.position(PEER_A));
+		assertEquals(1L, reloaded().position(PEER_A));
+		assertEquals(Set.of(UNIT), reader.poll().changed());
+		assertTrue(local.readVersionBytes(UNIT, V2).isPresent());
 	}
 }

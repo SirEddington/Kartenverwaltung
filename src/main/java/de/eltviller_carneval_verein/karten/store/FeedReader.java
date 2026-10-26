@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
@@ -133,9 +134,31 @@ public final class FeedReader {
 	 * hat.
 	 */
 	public synchronized void jumpToLatest() throws IOException {
+		jumpTo(latestNumbers());
+	}
+
+	/**
+	 * Die höchste vorhandene Listennummer je fremdem Rechner im gemeinsamen Ordner (ohne den eigenen). Ein Vollabgleich
+	 * merkt sie sich, bevor er die Bäume durchläuft, und setzt sie danach mit {@link #jumpTo}: Listen, die währenddessen
+	 * entstehen, liest dann der nächste {@link #poll()}, statt sie zu überspringen.
+	 */
+	public synchronized Map<String, Long> latestNumbers() throws IOException {
+		Map<String, Long> latest = new TreeMap<>();
 		for (String id : peerDirectories()) {
-			positions.set(id, Feeds.highestFeedNumber(shared, id));
+			latest.put(id, Feeds.highestFeedNumber(shared, id));
 		}
+		return latest;
+	}
+
+	/**
+	 * Setzt die Positionen der genannten Rechner und speichert sie, nach einem Vollabgleich (siehe
+	 * {@link #jumpToLatest()}); andere Rechner behalten ihre Position. Wartende Listen und der Wunsch nach einem
+	 * Vollabgleich entfallen, Beobachtungen und noch nicht gemeldete Ergebnisse bleiben.
+	 *
+	 * @param numbers die Nummern aus {@link #latestNumbers()}, ermittelt vor dem Vollabgleich
+	 */
+	public synchronized void jumpTo(Map<String, Long> numbers) throws IOException {
+		numbers.forEach(positions::set);
 		positions.save();
 		positionsDirty = false;
 		waiting.clear();
