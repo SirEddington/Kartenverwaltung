@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -16,7 +15,9 @@ import de.eltviller_carneval_verein.karten.store.UnitState.Status;
  * <p>
  * Eine Version darf nur hinter einem Vorgänger beansprucht werden, der in der gültigen Kette der Einheit im gemeinsamen
  * Ordner liegt. Steht der Vorgänger außerhalb der Kette, bekommt die Version keine Anspruchsdatei, sondern gilt ebenfalls
- * als verloren; der Gewinner ist das Kettenglied, das den Platz des ältesten Vorfahren außerhalb der Kette belegt.
+ * als verloren; der Gewinner ist die Version, die den Platz des ältesten Vorfahren außerhalb der Kette belegt (laut
+ * dessen Anspruchsdatei, auch wenn es eine beschädigte, bei der Heilung übersprungene Version ist). Als beansprucht
+ * gilt auch eine solche übersprungene Version: Ein Anspruch hinter ihr wird wie jeder andere beurteilt.
  * Lässt sich die Kette nicht sicher bestimmen oder sind die Vorfahren noch nicht beansprucht, wirft der Anspruch eine
  * {@link IOException}: Ein späterer Versuch entscheidet.
  */
@@ -66,9 +67,9 @@ public final class SharedArbiter implements Arbiter {
 	}
 
 	/**
-	 * Prüft anhand der gültigen Kette im gemeinsamen Ordner, dass der erste Vorgänger darin liegt.
+	 * Prüft anhand der gültigen Kette im gemeinsamen Ordner, dass der erste Vorgänger darin beansprucht ist.
 	 *
-	 * @return {@code null}, wenn der Vorgänger in der Kette liegt; sonst die Niederlage mit dem Anspruch, der den Platz
+	 * @return {@code null}, wenn der Vorgänger beansprucht ist (in der Kette oder als übersprungene beschädigte Version); sonst die Niederlage mit dem Anspruch, der den Platz
 	 *         seines ältesten Vorfahren außerhalb der Kette belegt
 	 * @throws IOException wenn die Kette nicht bestimmt werden kann (nicht {@code OK}), eine Versionsdatei auf dem Weg
 	 *                     zur Kette fehlt oder unlesbar ist oder die Vorfahren noch nicht beansprucht sind
@@ -81,20 +82,18 @@ public final class SharedArbiter implements Arbiter {
 			throw new IOException("Die gültige Kette von " + where + " ist im gemeinsamen Ordner nicht bestimmbar ("
 					+ state.status() + ").");
 		}
-		List<Version> chain = state.chain();
-		Set<VersionId> chainIds = new HashSet<>();
-		for (Version member : chain) {
-			chainIds.add(member.id());
-		}
-		if (chainIds.contains(parent)) {
+		// Beansprucht ist auch eine beschädigte, übersprungene Version: Sie hat ihren Platz bekommen und steht nur nicht in
+		// der Kette (Heilung Stufe 2). Ein Anspruch dahinter wird wie jeder andere beurteilt.
+		Set<VersionId> claimed = state.claimed();
+		if (claimed.contains(parent)) {
 			return null;
 		}
-		// Entlang des ersten Vorgängers bis zum Kettenglied oder zur ersten Version zurückgehen
+		// Entlang des ersten Vorgängers bis zu einer beanspruchten Version oder zur ersten Version zurückgehen
 		VersionId base = null;
 		Set<VersionId> seen = new HashSet<>();
 		VersionId current = parent;
 		while (current != null) {
-			if (chainIds.contains(current)) {
+			if (claimed.contains(current)) {
 				base = current;
 				break;
 			}
@@ -104,20 +103,15 @@ public final class SharedArbiter implements Arbiter {
 			}
 			current = file.version().firstParent();
 		}
-		int baseIndex = -1;
-		for (int i = 0; i < chain.size(); i++) {
-			if (chain.get(i).id().equals(base)) {
-				baseIndex = i;
-			}
-		}
-		if (baseIndex + 1 >= chain.size()) {
-			throw new IOException("Die Vorfahren von " + version.id() + " (" + where + ") sind im gemeinsamen Ordner noch nicht beansprucht.");
-		}
-		VersionId winner = chain.get(baseIndex + 1).id();
+		// Der Gewinner steht in der Anspruchsdatei des Platzes hinter der Basis (auch wenn dort eine übersprungene
+		// beschädigte Version steht); fehlt sie, sind die Vorfahren noch nicht beansprucht.
 		String slot = base == null ? "root" : base.value();
 		ClaimFile slotFile = files.claims().get(slot);
-		if (slotFile == null || slotFile.claim() == null || !slotFile.claim().version().equals(winner)) {
-			throw new IOException("Die Anspruchsdatei " + where + "/claims/" + slot + ".json passt nicht zur gültigen Kette.");
+		if (slotFile == null) {
+			throw new IOException("Die Vorfahren von " + version.id() + " (" + where + ") sind im gemeinsamen Ordner noch nicht beansprucht.");
+		}
+		if (slotFile.claim() == null) {
+			throw new IOException("Die Anspruchsdatei " + where + "/claims/" + slot + ".json ist nicht lesbar.");
 		}
 		copyLoss(unit, slot, slotFile.bytes(), slotFile.claim());
 		return new ClaimOutcome(false, slotFile.claim());

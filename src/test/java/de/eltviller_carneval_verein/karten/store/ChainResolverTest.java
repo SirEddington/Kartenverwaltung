@@ -10,8 +10,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.junit.jupiter.api.Test;
@@ -346,6 +348,8 @@ class ChainResolverTest {
 		assertNull(state.blockedAt());
 		assertTrue(state.pending().isEmpty());
 		assertTrue(state.lost().isEmpty());
+		// Die übersprungene beschädigte Version steht nicht in der Kette, hat aber ihren Platz bekommen
+		assertEquals(Set.of(theirs(1), theirs(2), mine(3)), state.claimed());
 	}
 
 	@Test
@@ -505,10 +509,14 @@ class ChainResolverTest {
 	void constructorCopiesGivenLists() {
 		List<Version> chain = new ArrayList<>();
 		List<List<VersionId>> lost = new ArrayList<>();
-		UnitState state = new UnitState(UNIT, Status.OK, chain, List.of(), lost, null);
+		Set<VersionId> claimed = new HashSet<>();
+		UnitState state = new UnitState(UNIT, Status.OK, chain, List.of(), lost, null, claimed);
 
 		lost.add(List.of(mine(1)));
+		claimed.add(mine(1));
 
 		assertTrue(state.lost().isEmpty());
+		assertTrue(state.claimed().isEmpty());
+		assertThrows(UnsupportedOperationException.class, () -> state.claimed().add(mine(2)));
 	}
 }

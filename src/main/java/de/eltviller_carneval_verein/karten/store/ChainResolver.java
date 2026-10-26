@@ -100,7 +100,7 @@ public final class ChainResolver {
 				lost.add(fresh.stream().map(Version::id).toList());
 			}
 		}
-		return new UnitState(files.unit(), status, chain, pending, lost, blockedAt);
+		return new UnitState(files.unit(), status, chain, pending, lost, blockedAt, visited);
 	}
 
 	/**

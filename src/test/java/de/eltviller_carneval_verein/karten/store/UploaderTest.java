@@ -35,6 +35,8 @@ class UploaderTest {
 	private static final VersionId V1 = VersionId.create(1_000_000L, "aaaaaaaa", 0);
 	private static final VersionId V2 = VersionId.create(2_000_000L, "aaaaaaaa", 1);
 	private static final VersionId V3 = VersionId.create(3_000_000L, "aaaaaaaa", 2);
+	private static final VersionId V4 = VersionId.create(4_000_000L, "aaaaaaaa", 3);
+	private static final VersionId V5 = VersionId.create(5_000_000L, "aaaaaaaa", 4);
 	private static final VersionId FOREIGN = VersionId.create(1_500_000L, "bbbbbbbb", 0);
 
 	@TempDir
@@ -452,5 +454,78 @@ class UploaderTest {
 
 		assertTrue(lost.isEmpty());
 		assertTrue(local.readClaimBytes(UNIT, "root").isPresent());
+	}
+
+	/**
+	 * Im gemeinsamen Ordner: R (V1) hat root, hinter R steht der Anspruch auf D (V2), dessen Datei beschädigt ist. Hinter D
+	 * steht der Anspruch auf {@code successor}, den Gewinner nach der Heilung Stufe 2. Die Kette ist OK, D ist übersprungen.
+	 */
+	private void chainWithSkippedDamagedVersion(Version successor) throws IOException {
+		Version r = version(OTHER, V1);
+		byte[] rBytes = StoreCodec.write(r);
+		assertTrue(shared.writeVersion(UNIT, V1, rBytes));
+		assertTrue(shared.createClaim(UNIT, "root", claimBytes(r, rBytes, AT)));
+		Version d = version(OTHER, V2, V1);
+		byte[] goodD = StoreCodec.write(d);
+		assertTrue(shared.writeVersion(UNIT, V2, "{ beschaedigt".getBytes(StandardCharsets.UTF_8)));
+		assertTrue(shared.createClaim(UNIT, V1.value(), claimBytes(d, goodD, AT)));
+		foreignClaim(UNIT, successor);
+	}
+
+	@Test
+	void versionOnSkippedDamagedParentIsJudgedNormally() throws IOException {
+		Version z = version(OTHER, V3, V2);
+		chainWithSkippedDamagedVersion(z);
+		Version q = version(ME, V4, V2);
+
+		List<LostVersion> lost = sharedUploader().run(job(item(UNIT, q)));
+
+		// Der Platz hinter D ist vergeben: normale Niederlage gegen Z, kein Fehler
+		assertEquals(List.of(new LostVersion(UNIT, List.of(V4), V3)), lost);
+		assertEquals(V3, StoreCodec.readClaim(local.readClaimBytes(UNIT, V2.value()).orElseThrow()).version());
+		assertTrue(sharedHas("events/e1/" + V4 + ".json"));
+	}
+
+	@Test
+	void versionOnSkippedDamagedParentWinsWithItsOwnExistingClaim() throws IOException {
+		Version q = version(ME, V3, V2);
+		chainWithSkippedDamagedVersion(q);
+		SharedArbiter arbiter = new SharedArbiter(shared, local, CLOCK);
+
+		ClaimOutcome outcome = arbiter.claim(UNIT, q, StoreCodec.write(q));
+
+		assertTrue(outcome.won());
+		assertEquals(V3, outcome.claim().version());
+		assertTrue(local.readClaimBytes(UNIT, V2.value()).isPresent());
+	}
+
+	@Test
+	void lostStretchWhoseSlotIsHeldBySkippedDamagedVersionReportsItAsWinner() throws IOException {
+		chainWithSkippedDamagedVersion(version(OTHER, V3, V2));
+		// P und Q bauen auf R auf; hinter R steht aber D (übersprungen), nicht Z als nächstes Kettenglied
+		Version p = version(ME, V4, V1);
+		assertTrue(shared.writeVersion(UNIT, V4, StoreCodec.write(p)));
+		Version q = version(ME, V5, V4);
+
+		List<LostVersion> lost = sharedUploader().run(job(item(UNIT, q)));
+
+		assertEquals(List.of(new LostVersion(UNIT, List.of(V5), V2)), lost);
+		assertFalse(sharedHas("events/e1/claims/" + V4 + ".json"));
+		assertEquals(V2, StoreCodec.readClaim(local.readClaimBytes(UNIT, V1.value()).orElseThrow()).version());
+	}
+
+	@Test
+	void missingSlotClaimBehindBaseStillThrows() throws IOException {
+		Version r = version(ME, V1);
+		byte[] rBytes = StoreCodec.write(r);
+		assertTrue(shared.writeVersion(UNIT, V1, rBytes));
+		assertTrue(shared.createClaim(UNIT, "root", claimBytes(r, rBytes, AT)));
+		Version p = version(ME, V2, V1);
+		assertTrue(shared.writeVersion(UNIT, V2, StoreCodec.write(p)));
+		Version q = version(ME, V3, V2);
+		SharedArbiter arbiter = new SharedArbiter(shared, local, CLOCK);
+
+		// Hinter R ist noch nichts beansprucht: der Zustand ist uneindeutig
+		assertThrows(IOException.class, () -> arbiter.claim(UNIT, q, StoreCodec.write(q)));
 	}
 }

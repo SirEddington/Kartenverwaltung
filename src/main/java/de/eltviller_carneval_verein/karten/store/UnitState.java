@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.store;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Der gültige Stand einer Einheit, wie ihn {@link ChainResolver} aus den Dateien ermittelt.
@@ -18,9 +19,12 @@ import java.util.List;
  * @param blockedAt die Version, an der die Kette endet ({@code WAITING}: die fehlende, {@code LOCKED_FORMAT}: die
  *                  mit unbekanntem Format, {@code LOCKED_DAMAGED}: die beschädigte oder bei einem Kreis die
  *                  wiederholte); {@code null} bei {@code OK} und bei einer unlesbaren Anspruchsdatei
+ * @param claimed   jede Version, die eine Anspruchsdatei auf dem Weg der Kette nennt, auch die beschädigten und
+ *                  übersprungenen (sie haben ihren Platz bekommen, stehen aber nicht in {@code chain}); bei
+ *                  {@code WAITING} und den Sperren auch die Version, an der die Kette endet
  */
 public record UnitState(UnitKey unit, Status status, List<Version> chain, List<Version> pending,
-		List<List<VersionId>> lost, VersionId blockedAt) {
+		List<List<VersionId>> lost, VersionId blockedAt, Set<VersionId> claimed) {
 
 	/** Zustand der Kette einer Einheit. */
 	public enum Status {
@@ -39,6 +43,7 @@ public record UnitState(UnitKey unit, Status status, List<Version> chain, List<V
 		chain = List.copyOf(chain);
 		pending = List.copyOf(pending);
 		lost = lost.stream().map(List::copyOf).toList();
+		claimed = Set.copyOf(claimed);
 	}
 
 	/** Das letzte Glied der gültigen Kette, oder {@code null}, wenn die Kette leer ist. */
