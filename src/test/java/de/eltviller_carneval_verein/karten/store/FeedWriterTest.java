@@ -71,6 +71,48 @@ class FeedWriterTest {
 	}
 
 	@Test
+	void lostReplyAfterWritingIsNotMistakenForAForeignWriter() throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		VersionStore shared = new VersionStore(dir.resolve("shared"), layer);
+		FeedWriter writer = new FeedWriter(shared, ME, CLOCK);
+		List<FeedEntry> entries = List.of(new FeedEntry("events/e1", V1, "root"));
+		layer.failAfter("createNew", new IOException("Antwort verloren"));
+
+		assertThrows(IOException.class, () -> writer.append(entries));
+		// Die Datei liegt schon da; der Wiederholungsversuch erkennt sie als die eigene
+		assertEquals(1L, writer.append(entries));
+
+		assertEquals(2L, writer.append(entries));
+		assertEquals(entries, StoreCodec.readFeed(shared.readRelative("feeds/" + ME + "/1.json").orElseThrow()).entries());
+	}
+
+	@Test
+	void lostReplyFollowedByOtherContentIsADuplicate() throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		VersionStore shared = new VersionStore(dir.resolve("shared"), layer);
+		FeedWriter writer = new FeedWriter(shared, ME, CLOCK);
+		layer.failAfter("createNew", new IOException("Antwort verloren"));
+		assertThrows(IOException.class, () -> writer.append(List.of(new FeedEntry("events/e1", V1, "root"))));
+
+		// Andere Einträge unter derselben Nummer: das ist nicht die eigene Datei
+		assertThrows(DuplicateMachineException.class,
+				() -> writer.append(List.of(new FeedEntry("events/e1", V2, V1.value()))));
+	}
+
+	@Test
+	void failureBeforeWritingKeepsTheNumber() throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		VersionStore shared = new VersionStore(dir.resolve("shared"), layer);
+		FeedWriter writer = new FeedWriter(shared, ME, CLOCK);
+		List<FeedEntry> entries = List.of(new FeedEntry("events/e1", V1, "root"));
+		layer.failNext("createNew", new IOException("Störung"));
+
+		assertThrows(IOException.class, () -> writer.append(entries));
+
+		assertEquals(1L, writer.append(entries));
+	}
+
+	@Test
 	void foreignWriterWithSameIdIsDetected() throws IOException {
 		VersionStore shared = shared();
 		FeedWriter writer = new FeedWriter(shared, ME, CLOCK);

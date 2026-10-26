@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Schreibt die Änderungslisten eines Rechners in den gemeinsamen Ordner: {@code feeds/<Rechner-ID>/<Nr>.json},
@@ -18,6 +19,9 @@ public final class FeedWriter {
 	private final String machineId;
 	private final Clock clock;
 	private long next;
+	/** Nummer und Einträge des letzten Versuchs, der mit einer Störung endete; 0, wenn es keinen gibt. */
+	private long uncertainSeq;
+	private List<FeedEntry> uncertainEntries;
 
 	/**
 	 * @param shared    der gemeinsame Bestand
@@ -35,19 +39,59 @@ public final class FeedWriter {
 	 *
 	 * @return die Nummer der geschriebenen Liste
 	 * @throws DuplicateMachineException wenn die Nummer schon belegt ist
-	 * @throws IOException               bei einer Störung; die Nummer bleibt dann unverbraucht
+	 * @throws IOException               bei einer Störung; die Nummer bleibt dann unverbraucht. Wurde die Datei trotz der
+	 *                                   Störung schon angelegt (verlorene Antwort), erkennt der nächste Aufruf mit
+	 *                                   denselben Einträgen sie als die eigene und zählt weiter.
 	 */
 	public synchronized long append(List<FeedEntry> entries) throws IOException {
 		if (next == 0) {
 			next = highestExisting() + 1;
 		}
 		long seq = next;
-		Feed feed = new Feed(StoreCodec.FORMAT, machineId, seq, Instant.now(clock), List.copyOf(entries));
-		if (!shared.createRelative(folder() + "/" + seq + ".json", StoreCodec.write(feed))) {
-			throw new DuplicateMachineException(machineId, seq);
+		List<FeedEntry> copy = List.copyOf(entries);
+		Feed feed = new Feed(StoreCodec.FORMAT, machineId, seq, Instant.now(clock), copy);
+		String rel = folder() + "/" + seq + ".json";
+		boolean created;
+		try {
+			created = shared.createRelative(rel, StoreCodec.write(feed));
+		} catch (IOException e) {
+			// Ob die Datei angelegt wurde, ist unklar: Nummer und Einträge für den nächsten Versuch merken
+			uncertainSeq = seq;
+			uncertainEntries = copy;
+			throw e;
 		}
+		if (!created) {
+			boolean ownEarlierAttempt = uncertainSeq == seq && copy.equals(uncertainEntries);
+			// scheitert das Lesen, bleibt der unklare Versuch für den nächsten Aufruf gemerkt
+			if (!ownEarlierAttempt || !isOwnFile(rel, seq, copy)) {
+				uncertainSeq = 0;
+				uncertainEntries = null;
+				throw new DuplicateMachineException(machineId, seq);
+			}
+		}
+		uncertainSeq = 0;
+		uncertainEntries = null;
 		next = seq + 1;
 		return seq;
+	}
+
+	/**
+	 * Ob die vorhandene Datei von diesem Schreiber stammt: gleicher Rechner, gleiche Nummer, gleiche Einträge (der
+	 * Zeitpunkt zählt nicht). Eine unlesbare Datei ist nicht die eigene.
+	 *
+	 * @throws IOException wenn das Lesen selbst scheitert
+	 */
+	private boolean isOwnFile(String rel, long seq, List<FeedEntry> entries) throws IOException {
+		Optional<byte[]> bytes = shared.readRelative(rel);
+		if (bytes.isEmpty()) {
+			return false;
+		}
+		try {
+			Feed existing = StoreCodec.readFeed(bytes.get());
+			return existing.machine().equals(machineId) && existing.seq() == seq && existing.entries().equals(entries);
+		} catch (IOException e) {
+			return false;
+		}
 	}
 
 	private String folder() {

@@ -304,6 +304,95 @@ class UploaderTest {
 	}
 
 	@Test
+	void chainOfThreeLostVersionsInSeparateJobsIsReportedEachTime() throws IOException {
+		foreignClaim(UNIT, version(OTHER, FOREIGN));
+		Version a = version(ME, V1);
+		Version b = version(ME, V2, V1);
+		Version c = version(ME, V3, V2);
+
+		assertEquals(List.of(new LostVersion(UNIT, List.of(V1), FOREIGN)), sharedUploader().run(job(item(UNIT, a))));
+		assertEquals(List.of(new LostVersion(UNIT, List.of(V2), FOREIGN)), sharedUploader().run(job(item(UNIT, b))));
+		UploadJob jobC = job(item(UNIT, c));
+		List<LostVersion> lost = sharedUploader().run(jobC);
+
+		assertEquals(List.of(new LostVersion(UNIT, List.of(V3), FOREIGN)), lost);
+		assertTrue(jobC.isDone());
+		assertFalse(sharedHas("events/e1/claims/" + V1 + ".json"));
+		assertFalse(sharedHas("events/e1/claims/" + V2 + ".json"));
+	}
+
+	@Test
+	void versionBehindParentWhoseSlotWasTakenLaterIsLost() throws IOException {
+		// R ist beansprucht; P hatte den Platz hinter R, doch dort steht inzwischen die fremde Version X
+		Version r = version(ME, V1);
+		byte[] rBytes = StoreCodec.write(r);
+		assertTrue(shared.writeVersion(UNIT, V1, rBytes));
+		assertTrue(shared.createClaim(UNIT, "root", claimBytes(r, rBytes, AT)));
+		foreignClaim(UNIT, version(OTHER, FOREIGN, V1));
+		Version p = version(ME, V2, V1);
+		assertTrue(shared.writeVersion(UNIT, V2, StoreCodec.write(p)));
+		Version q = version(ME, V3, V2);
+
+		List<LostVersion> lost = sharedUploader().run(job(item(UNIT, q)));
+
+		assertEquals(List.of(new LostVersion(UNIT, List.of(V3), FOREIGN)), lost);
+		assertFalse(sharedHas("events/e1/claims/" + V2 + ".json"));
+		assertEquals(FOREIGN, StoreCodec.readClaim(local.readClaimBytes(UNIT, V1.value()).orElseThrow()).version());
+		assertTrue(local.readVersionBytes(UNIT, FOREIGN).isPresent());
+	}
+
+	@Test
+	void versionBehindMergeVersionInTheChainIsClaimed() throws IOException {
+		Version r = version(ME, V1);
+		byte[] rBytes = StoreCodec.write(r);
+		assertTrue(shared.writeVersion(UNIT, V1, rBytes));
+		assertTrue(shared.createClaim(UNIT, "root", claimBytes(r, rBytes, AT)));
+		// P führt X zusammen; sein Anspruch heißt nach dem ersten Vorgänger R
+		Version merge = version(ME, V2, V1, FOREIGN);
+		byte[] mergeBytes = StoreCodec.write(merge);
+		assertTrue(shared.writeVersion(UNIT, V2, mergeBytes));
+		assertTrue(shared.createClaim(UNIT, V1.value(), claimBytes(merge, mergeBytes, AT)));
+
+		List<LostVersion> lost = sharedUploader().run(job(item(UNIT, version(ME, V3, V2))));
+
+		assertTrue(lost.isEmpty());
+		assertEquals(V3, StoreCodec.readClaim(shared.readClaimBytes(UNIT, V2.value()).orElseThrow()).version());
+	}
+
+	@Test
+	void unreadableChainBlocksTheClaim() throws IOException {
+		Version r = version(ME, V1);
+		byte[] rBytes = StoreCodec.write(r);
+		assertTrue(shared.writeVersion(UNIT, V1, rBytes));
+		// root zeigt auf eine Version, die im gemeinsamen Ordner noch fehlt: WAITING
+		assertTrue(shared.createClaim(UNIT, "root", claimBytes(version(OTHER, FOREIGN), StoreCodec.write(version(OTHER, FOREIGN)), AT)));
+		SharedArbiter arbiter = new SharedArbiter(shared, local, CLOCK);
+		Version q = version(ME, V2, V1);
+
+		assertThrows(IOException.class, () -> arbiter.claim(UNIT, q, StoreCodec.write(q)));
+
+		assertFalse(sharedHas("events/e1/claims/" + V1 + ".json"));
+	}
+
+	@Test
+	void feedWrittenButReplyLostDoesNotRaiseDuplicateMachine() throws IOException {
+		boolean[] lose = { true };
+		sharedLayer.failAfterWhen(p -> lose[0] && p.toString().replace('\\', '/').contains("/feeds/"), "createNew",
+				new IOException("Antwort verloren"));
+		UploadJob job = job(item(UNIT, version(ME, V1)));
+		Uploader uploader = sharedUploader();
+
+		assertThrows(IOException.class, () -> uploader.run(job));
+		lose[0] = false;
+		List<LostVersion> lost = uploader.run(job);
+
+		assertTrue(lost.isEmpty());
+		assertTrue(job.isDone());
+		assertTrue(sharedHas("feeds/" + ME + "/1.json"));
+		assertFalse(sharedHas("feeds/" + ME + "/2.json"));
+	}
+
+	@Test
 	void versionOnWonParentIsClaimed() throws IOException {
 		Version first = version(ME, V1);
 		Version second = version(ME, V2, V1);
