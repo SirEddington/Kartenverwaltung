@@ -17,6 +17,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -157,6 +161,41 @@ class CloudScenarioTest {
 	 */
 	@Test
 	void lateDefeatThroughCloud() throws IOException {
+		// die Warnung des Dienstes wird aufgefangen: Sie belegt den Weg der späten Niederlage und hält die Ausgabe sauber
+		Logger logger = Logger.getLogger(SyncService.class.getName());
+		List<LogRecord> warnings = new ArrayList<>();
+		Handler capture = new Handler() {
+			@Override
+			public void publish(LogRecord record) {
+				if (record.getLevel().intValue() >= Level.WARNING.intValue()) {
+					warnings.add(record);
+				}
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		boolean parentHandlers = logger.getUseParentHandlers();
+		logger.addHandler(capture);
+		logger.setUseParentHandlers(false);
+		try {
+			runLateDefeatThroughCloud();
+		} finally {
+			logger.removeHandler(capture);
+			logger.setUseParentHandlers(parentHandlers);
+		}
+
+		assertEquals(1, warnings.size(), "genau eine Warnung: " + warnings.stream().map(LogRecord::getMessage).toList());
+		assertEquals(Level.WARNING, warnings.get(0).getLevel());
+		assertTrue(warnings.get(0).getMessage().contains("Späte Niederlage"), warnings.get(0).getMessage());
+	}
+
+	private void runLateDefeatThroughCloud() throws IOException {
 		Machine a = new Machine("a");
 		Machine b = new Machine("b");
 		Version va = a.sell(BOOKING, "Anna");
@@ -181,6 +220,12 @@ class CloudScenarioTest {
 		assertEquals(List.of(new LostVersion(BOOKING, List.of(vb.id()), va.id())), b.events.lost);
 		assertTrue(b.events.errors.isEmpty());
 		assertEquals(va.id(), b.service.unitState(BOOKING).head().id());
+
+		// die späte Niederlage selbst: B hat seinen verdrängten Anspruch neben den neuen gelegt
+		Path localClaims = b.localData().resolve(BOOKING.relativePath()).resolve("claims");
+		assertEquals(va.id(), StoreCodec.readClaim(Files.readAllBytes(localClaims.resolve("root.json"))).version());
+		assertEquals(1, names(localClaims).stream().filter(n -> n.startsWith("root.json.verdraengt-")).count(),
+				"verdrängter Anspruch neben dem neuen: " + names(localClaims));
 
 		// der Vollabgleich übergeht die Konfliktkopie: kein Fehler, keine Kopie im lokalen Bestand, kein zweiter Verlust
 		b.service.syncNow();
