@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * Der Vollabgleich zwischen dem lokalen Bestand und dem gemeinsamen Ordner: das Sicherheitsnetz für alles, was die
@@ -54,21 +55,34 @@ public final class FullSync {
 	 */
 	public static FullSyncResult run(VersionStore local, VersionStore shared, boolean uploadLocalClaims,
 			String ownMachineId, FileLayer files, Clock clock) throws IOException {
-		return new Run(local, shared, ownMachineId, files, clock).execute(uploadLocalClaims);
+		return run(local, shared, uploadLocalClaims, ownMachineId, files, clock, claim -> {
+		});
+	}
+
+	/**
+	 * Wie {@link #run(VersionStore, VersionStore, boolean, String, FileLayer, Clock)}; meldet zusätzlich jeden lokalen
+	 * Anspruch, sobald er im gemeinsamen Ordner angelegt ist, auch wenn der Abgleich danach abbricht.
+	 *
+	 * @param uploaded erfährt jeden hochgeladenen Anspruch sofort
+	 */
+	public static FullSyncResult run(VersionStore local, VersionStore shared, boolean uploadLocalClaims,
+			String ownMachineId, FileLayer files, Clock clock, Consumer<FullSyncResult.UploadedClaim> uploaded)
+			throws IOException {
+		return new Run(local, shared, ownMachineId, files, clock, uploaded).execute(uploadLocalClaims);
 	}
 
 	/**
 	 * Ob beide Seiten schon Einheiten haben, also mindestens eine Versionsdatei. Nur dann muss der Aufrufer fragen,
-	 * ob er mitnehmen oder beiseitelegen will; sonst wird ohne Rückfrage vereinigt.
+	 * ob er mitnehmen oder beiseitelegen will; sonst wird ohne Rückfrage vereinigt. Je Seite endet die Suche bei der
+	 * ersten Einheit mit einer Versionsdatei.
 	 */
 	public static boolean bothHaveUnits(VersionStore local, VersionStore shared) throws IOException {
 		return hasVersionFile(local) && hasVersionFile(shared);
 	}
 
 	private static boolean hasVersionFile(VersionStore store) throws IOException {
-		for (String path : store.allDataFiles()) {
-			Optional<DataPath> data = classify(path);
-			if (data.isPresent() && !data.get().claim()) {
+		for (UnitKey unit : store.allUnits()) {
+			if (store.hasVersions(unit)) {
 				return true;
 			}
 		}
@@ -164,13 +178,17 @@ public final class FullSync {
 		private final List<LostVersion> lost = new ArrayList<>();
 		/** Je Einheit die Versions-IDs der als verloren gemeldeten eigenen Versionen. */
 		private final Map<UnitKey, Set<String>> lostIds = new HashMap<>();
+		private final List<FullSyncResult.UploadedClaim> uploaded = new ArrayList<>();
+		private final Consumer<FullSyncResult.UploadedClaim> onUpload;
 
-		Run(VersionStore local, VersionStore shared, String ownMachineId, FileLayer files, Clock clock) {
+		Run(VersionStore local, VersionStore shared, String ownMachineId, FileLayer files, Clock clock,
+				Consumer<FullSyncResult.UploadedClaim> onUpload) {
 			this.local = local;
 			this.shared = shared;
 			this.ownMachineId = ownMachineId;
 			this.files = files;
 			this.clock = clock;
+			this.onUpload = onUpload;
 		}
 
 		FullSyncResult execute(boolean uploadLocalClaims) throws IOException {
@@ -207,7 +225,7 @@ public final class FullSync {
 					}
 				}
 			}
-			return new FullSyncResult(changed, lost);
+			return new FullSyncResult(changed, lost, uploaded);
 		}
 
 		private static Set<String> paths(List<DataPath> files) {
@@ -252,6 +270,9 @@ public final class FullSync {
 				return;
 			}
 			if (shared.createRelative(file.path(), localBytes.get())) {
+				FullSyncResult.UploadedClaim claim = new FullSyncResult.UploadedClaim(file.unit(), file.name(), mine.version());
+				uploaded.add(claim);
+				onUpload.accept(claim);
 				return;
 			}
 			// jemand war schneller

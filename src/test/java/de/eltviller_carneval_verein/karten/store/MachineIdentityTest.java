@@ -51,6 +51,41 @@ class MachineIdentityTest {
 	}
 
 	@Test
+	void readFailureKeepsTheIdentity() throws IOException {
+		MachineIdentity original = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
+		byte[] before = Files.readAllBytes(machineFile());
+
+		// Stat oder Lesen scheitern vorübergehend (z. B. Virenscanner): nie eine neue Kennung
+		assertThrows(java.nio.file.AccessDeniedException.class, () -> MachineIdentity.loadOrCreate(dir, () -> "KASSE-1",
+				CLOCK, file -> {
+					throw new java.nio.file.AccessDeniedException(file.toString());
+				}));
+
+		assertEquals(List.of("machine.json"), names());
+		assertEquals(new String(before, StandardCharsets.UTF_8),
+				new String(Files.readAllBytes(machineFile()), StandardCharsets.UTF_8));
+		assertEquals(original.id(), MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").id());
+	}
+
+	@Test
+	void fileCreatedMeanwhileIsReadNotReplaced() throws IOException {
+		MachineIdentity original = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
+		int[] calls = { 0 };
+
+		// der erste Lesezugriff meldet "fehlt", obwohl die Datei da ist (ein anderer Start legte sie gerade an)
+		MachineIdentity loaded = MachineIdentity.loadOrCreate(dir, () -> "KASSE-2", CLOCK, file -> {
+			if (calls[0]++ == 0) {
+				throw new java.nio.file.NoSuchFileException(file.toString());
+			}
+			return Files.readAllBytes(file);
+		});
+
+		assertEquals(original.id(), loaded.id());
+		assertEquals("KASSE-1", loaded.name());
+		assertEquals(List.of("machine.json"), names());
+	}
+
+	@Test
 	void idWorksForVersionIds() throws IOException {
 		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
 

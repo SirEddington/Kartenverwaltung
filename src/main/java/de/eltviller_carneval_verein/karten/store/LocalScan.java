@@ -28,10 +28,6 @@ final class LocalScan {
 	 * @param at seit wann er beobachtet wird (Zeitpunkt des Anspruchs oder des Hochladens)
 	 */
 	record OwnClaim(UnitKey unit, String claimName, VersionId version, Instant at) {
-
-		OwnClaim at(Instant since) {
-			return new OwnClaim(unit, claimName, version, since);
-		}
 	}
 
 	private LocalScan() {

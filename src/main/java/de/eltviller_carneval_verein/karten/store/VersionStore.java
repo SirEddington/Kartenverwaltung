@@ -127,6 +127,11 @@ public final class VersionStore {
 		}
 	}
 
+	/** Ob die Einheit mindestens eine Versionsdatei hat (nur ihr eigener Ordner wird aufgelistet, nichts gelesen). */
+	public boolean hasVersions(UnitKey unit) throws IOException {
+		return !versionIds(unitDir(unit)).isEmpty();
+	}
+
 	/** Die IDs aller Events (gültige Ordnernamen unter {@code events/}), sortiert. */
 	public List<String> eventIds() throws IOException {
 		return unitIds(EVENTS, true);

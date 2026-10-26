@@ -92,6 +92,14 @@ public final class UploadJob {
 		losses.set(index, new LostVersion(loss.unit(), List.copyOf(mine), loss.winner()));
 	}
 
+	/**
+	 * Die bisher gefundenen Niederlagen, ohne sie als gemeldet zu markieren: für einen Lauf, der nach einer Störung
+	 * abbricht (der Empfänger muss doppelte Meldungen selbst aussortieren).
+	 */
+	List<LostVersion> losses() {
+		return List.copyOf(losses);
+	}
+
 	/** Die Niederlagen des Auftrags, einmal; danach leer. */
 	List<LostVersion> takeLosses() {
 		if (reported) {

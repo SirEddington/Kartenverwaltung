@@ -247,6 +247,69 @@ class CloudScenarioTest {
 		assertEquals(va.id(), a.service.unitState(BOOKING).head().id());
 	}
 
+	/**
+	 * A ist lange ohne Verbindung zum Server (sein Client-Ordner ist lokal, also nie OFFLINE) und "gewinnt" den Platz nur
+	 * in seiner Kopie; B ist auf dem Server zuerst. Erst nach 16 Minuten, wenn A's Beobachtung längst abgelaufen ist,
+	 * übernimmt A's Client die Fassung des Servers, zusammen mit B's Liste. Der Eintrag des Gewinners löst die
+	 * Neuberechnung aus.
+	 */
+	@Test
+	void lateDefeatAfterTheWatchWindowIsFoundThroughTheWinnersFeed() throws IOException {
+		Machine a = new Machine("a");
+		Machine b = new Machine("b");
+		Version va = a.sell(BOOKING, "Anna");
+		Version vb = b.sell(BOOKING, "Bert");
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+		cloud.step("b");
+		a.service.tick();
+		clock.advance(Duration.ofMinutes(16));
+		a.service.tick();
+		assertTrue(a.events.lost.isEmpty());
+
+		cloud.step("a");
+		clock.advance(Duration.ofSeconds(30));
+		a.service.tick();
+		a.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), vb.id())), a.events.lost);
+		Path localClaims = a.localData().resolve(BOOKING.relativePath()).resolve("claims");
+		assertEquals(vb.id(), StoreCodec.readClaim(Files.readAllBytes(localClaims.resolve("root.json"))).version());
+		assertEquals(1, names(localClaims).stream().filter(n -> n.startsWith("root.json.verdraengt-")).count());
+		assertEquals(vb.id(), a.service.unitState(BOOKING).head().id());
+	}
+
+	/**
+	 * Wie oben, aber B's Liste kommt vor der Konfliktauflösung an: Der lokale Anspruch ist noch A's eigener, die Liste
+	 * nennt B's Version. A beobachtet den Platz deshalb neu und erkennt die Niederlage, sobald der Client sie übernimmt.
+	 */
+	@Test
+	void winnersFeedBeforeTheConflictRearmsTheWatch() throws IOException {
+		Machine a = new Machine("a");
+		Machine b = new Machine("b");
+		Version va = a.sell(BOOKING, "Anna");
+		Version vb = b.sell(BOOKING, "Bert");
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+		cloud.step("b");
+		a.service.tick();
+		clock.advance(Duration.ofMinutes(16));
+		a.service.tick();
+
+		cloud.stepFilesOnly("a", rel -> !rel.contains("/claims/"));
+		clock.advance(Duration.ofSeconds(30));
+		a.service.tick();
+		assertTrue(a.events.lost.isEmpty(), "der Client hat den Anspruch noch nicht übernommen");
+
+		cloud.step("a");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		a.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), vb.id())), a.events.lost);
+		assertEquals(vb.id(), a.service.unitState(BOOKING).head().id());
+	}
+
 	/** Die Liste von A kommt bei B an, bevor die Versionsdatei da ist: B wartet und meldet erst nach dem Eintreffen. */
 	@Test
 	void feedBeforeFilesWaits() throws IOException {

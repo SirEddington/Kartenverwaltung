@@ -27,6 +27,10 @@ import java.util.regex.Pattern;
  * angefordert und die Liste übersprungen. Fehlt eine Anspruchsdatei noch, kommt die Version auf eine Beobachtungsliste,
  * die bei jedem Durchlauf neu geprüft wird, bis der Anspruch erscheint oder fünf Minuten vergangen sind.
  * <p>
+ * Ein vorhandener lokaler Anspruch wird nie ersetzt. Weicht er ab (der gemeinsame nennt eine andere Version, oder er ist
+ * der eigene und der fremde Eintrag nennt eine andere Version), meldet der Durchlauf den Platz als umstritten; passt eine
+ * kopierte Versionsdatei nicht zum Prüfwert des gemeinsamen Anspruchs, die Einheit als beschädigt.
+ * <p>
  * Ergebnisse, die ein gescheiterter Durchlauf schon gesammelt hat, gehen nicht verloren: Der nächste erfolgreiche
  * {@link #poll()} liefert sie mit. Die Klasse ist für den einen Hintergrund-Thread gedacht, der den gemeinsamen Ordner
  * bedient; die Methoden sind trotzdem synchronisiert.
@@ -63,6 +67,8 @@ public final class FeedReader {
 	// Noch nicht gemeldete Ergebnisse; sie überstehen einen gescheiterten Durchlauf
 	private final Set<UnitKey> changed = new LinkedHashSet<>();
 	private final List<PendingSighting> pending = new ArrayList<>();
+	private final Set<FeedPoll.Contested> contested = new LinkedHashSet<>();
+	private final Set<UnitKey> damaged = new LinkedHashSet<>();
 	private boolean fullSyncNeeded;
 	private boolean positionsDirty;
 
@@ -104,9 +110,11 @@ public final class FeedReader {
 			positions.save();
 			positionsDirty = false;
 		}
-		FeedPoll result = new FeedPoll(changed, pending, fullSyncNeeded);
+		FeedPoll result = new FeedPoll(changed, pending, fullSyncNeeded, contested, damaged);
 		changed.clear();
 		pending.clear();
+		contested.clear();
+		damaged.clear();
 		fullSyncNeeded = false;
 		return result;
 	}
@@ -198,7 +206,7 @@ public final class FeedReader {
 			Watch watch = entry.getKey();
 			Optional<byte[]> claim = shared.readClaimBytes(watch.unit(), watch.claimName());
 			if (claim.isPresent()) {
-				copyClaim(watch.unit(), watch.claimName(), claim.get());
+				copyClaim(watch.unit(), watch.claimName(), watch.version(), claim.get());
 				iterator.remove();
 			} else if (expired(entry.getValue(), WATCH_LIMIT, now)) {
 				iterator.remove();
@@ -257,6 +265,8 @@ public final class FeedReader {
 	private boolean process(String peer, Feed feed, Instant now) throws IOException {
 		String key = peer + "/" + feed.seq();
 		List<FeedEntry> valid = new ArrayList<>();
+		// die in diesem Durchlauf kopierten Versionsdateien, für den Abgleich mit dem Prüfwert des Anspruchs
+		Map<VersionId, byte[]> copied = new HashMap<>();
 		boolean versionMissing = false;
 		for (FeedEntry entry : feed.entries()) {
 			Optional<UnitKey> unit = UnitKey.parse(entry.unit());
@@ -265,7 +275,7 @@ public final class FeedReader {
 				continue;
 			}
 			valid.add(entry);
-			VersionFetch fetch = fetchVersion(unit.get(), entry.version());
+			VersionFetch fetch = fetchVersion(unit.get(), entry.version(), copied);
 			if (fetch == VersionFetch.MISSING) {
 				versionMissing = true;
 			} else if (fetch == VersionFetch.COPIED) {
@@ -286,7 +296,7 @@ public final class FeedReader {
 		}
 		waiting.remove(key);
 		for (FeedEntry entry : valid) {
-			handleClaim(UnitKey.parse(entry.unit()).orElseThrow(), entry, now);
+			handleClaim(UnitKey.parse(entry.unit()).orElseThrow(), entry, copied.get(entry.version()), now);
 		}
 		return true;
 	}
@@ -305,8 +315,12 @@ public final class FeedReader {
 		MISSING
 	}
 
-	/** Stellt sicher, dass die Versionsdatei lokal liegt, und kopiert sie dazu, wenn sie fehlt. */
-	private VersionFetch fetchVersion(UnitKey unit, VersionId id) throws IOException {
+	/**
+	 * Stellt sicher, dass die Versionsdatei lokal liegt, und kopiert sie dazu, wenn sie fehlt.
+	 *
+	 * @param copied nimmt die Bytes einer jetzt kopierten Datei auf
+	 */
+	private VersionFetch fetchVersion(UnitKey unit, VersionId id, Map<VersionId, byte[]> copied) throws IOException {
 		if (local.readVersionBytes(unit, id).isPresent()) {
 			return VersionFetch.PRESENT;
 		}
@@ -314,16 +328,28 @@ public final class FeedReader {
 		if (bytes.isEmpty()) {
 			return VersionFetch.MISSING;
 		}
-		return local.writeVersion(unit, id, bytes.get()) ? VersionFetch.COPIED : VersionFetch.PRESENT;
+		if (!local.writeVersion(unit, id, bytes.get())) {
+			return VersionFetch.PRESENT;
+		}
+		copied.put(id, bytes.get());
+		return VersionFetch.COPIED;
 	}
 
-	/** Holt die Anspruchsdatei des Eintrags oder beobachtet sie, wenn sie noch fehlt. */
-	private void handleClaim(UnitKey unit, FeedEntry entry, Instant now) throws IOException {
+	/**
+	 * Holt die Anspruchsdatei des Eintrags oder beobachtet sie, wenn sie noch fehlt.
+	 *
+	 * @param copiedBytes die Bytes der Versionsdatei, wenn dieser Durchlauf sie kopiert hat; sonst {@code null}
+	 */
+	private void handleClaim(UnitKey unit, FeedEntry entry, byte[] copiedBytes, Instant now) throws IOException {
 		Optional<byte[]> claim = shared.readClaimBytes(unit, entry.claim());
 		if (claim.isPresent()) {
-			copyClaim(unit, entry.claim(), claim.get());
+			if (copiedBytes != null) {
+				checkCopied(unit, entry.version(), copiedBytes, claim.get());
+			}
+			copyClaim(unit, entry.claim(), entry.version(), claim.get());
 			return;
 		}
+		checkContested(unit, entry.claim(), entry.version(), null);
 		Watch watch = new Watch(unit, entry.version(), entry.claim());
 		if (!watched.containsKey(watch)) {
 			watched.put(watch, now);
@@ -331,10 +357,55 @@ public final class FeedReader {
 		}
 	}
 
-	/** Legt den Anspruch lokal an; war er neu, hat sich der gültige Stand der Einheit womöglich geändert. */
-	private void copyClaim(UnitKey unit, String claimName, byte[] bytes) throws IOException {
+	/**
+	 * Legt den Anspruch lokal an; war er neu, hat sich der gültige Stand der Einheit womöglich geändert. Lag lokal schon
+	 * einer, wird verglichen (siehe {@link #checkContested}).
+	 *
+	 * @param listed die Version, die der fremde Eintrag für diesen Platz nennt
+	 */
+	private void copyClaim(UnitKey unit, String claimName, VersionId listed, byte[] bytes) throws IOException {
 		if (local.createClaim(unit, claimName, bytes)) {
 			changed.add(unit);
+		} else {
+			checkContested(unit, claimName, listed, bytes);
+		}
+	}
+
+	/**
+	 * Meldet den Platz als umstritten, wenn der lokale Anspruch der eigene ist und eine andere Version nennt als der
+	 * fremde Eintrag (der Sync-Client hat die Niederlage vielleicht noch nicht übernommen), oder wenn der gemeinsame
+	 * Anspruch eine andere Version nennt als der lokale (späte Niederlage). Ein lokal überschriebener Anspruch fiele
+	 * sonst nie auf: Angelegt wird nur, was fehlt.
+	 *
+	 * @param sharedBytes der gemeinsame Anspruch; {@code null}, wenn er noch fehlt
+	 */
+	private void checkContested(UnitKey unit, String claimName, VersionId listed, byte[] sharedBytes) throws IOException {
+		Optional<byte[]> localBytes = local.readClaimBytes(unit, claimName);
+		Claim mine = localBytes.isPresent() ? parseClaim(localBytes.get()) : null;
+		if (mine == null) {
+			return;
+		}
+		Claim theirs = sharedBytes == null ? null : parseClaim(sharedBytes);
+		boolean ownOther = ownMachineId.equals(mine.machine()) && !mine.version().equals(listed);
+		boolean differs = theirs != null && !theirs.version().equals(mine.version());
+		if (ownOther || differs) {
+			contested.add(new FeedPoll.Contested(unit, claimName));
+		}
+	}
+
+	/** Passt die kopierte Versionsdatei nicht zum Prüfwert des gemeinsamen Anspruchs, ist die gemeinsame Kopie beschädigt. */
+	private void checkCopied(UnitKey unit, VersionId version, byte[] copiedBytes, byte[] sharedClaim) {
+		Claim claim = parseClaim(sharedClaim);
+		if (claim != null && claim.version().equals(version) && !StoreCodec.sha256(copiedBytes).equals(claim.sha256())) {
+			damaged.add(unit);
+		}
+	}
+
+	private static Claim parseClaim(byte[] bytes) {
+		try {
+			return StoreCodec.readClaim(bytes);
+		} catch (IOException e) {
+			return null;
 		}
 	}
 

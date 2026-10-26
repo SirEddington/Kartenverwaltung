@@ -656,6 +656,74 @@ class FeedReaderTest {
 		assertEquals(1L, reloaded().position(PEER_B));
 	}
 
+	/** Eine eigene Version mit lokalem Anspruch auf {@code root}, wie nach einem eigenen Gewinn. */
+	private Version ownRootClaim() throws IOException {
+		Version mine = version(ME, "Ich", VersionId.create(500_000L, ME, 0));
+		byte[] bytes = StoreCodec.write(mine);
+		local.writeVersion(UNIT, mine.id(), bytes);
+		local.createClaim(UNIT, "root", StoreCodec.write(new Claim(mine.id(), StoreCodec.sha256(bytes), ME, START)));
+		return mine;
+	}
+
+	@Test
+	void sharedClaimDifferingFromTheLocalOneIsContested() throws IOException {
+		positions.set(PEER_A, 0);
+		Version mine = ownRootClaim();
+		byte[] localClaim = local.readClaimBytes(UNIT, "root").orElseThrow();
+		// lange nach der eigenen Beobachtung: der Sync-Client hat den Anspruch von A übernommen, A's Liste kommt an
+		sell(PEER_A, 1, UNIT, version(PEER_A, "Kasse 2", V1));
+
+		FeedPoll poll = reader.poll();
+
+		assertEquals(Set.of(new FeedPoll.Contested(UNIT, "root")), poll.contested());
+		// der Leser ersetzt nichts: das entscheidet der Aufrufer
+		assertArrayEquals(localClaim, local.readClaimBytes(UNIT, "root").orElseThrow());
+		assertEquals(mine.id(), StoreCodec.readClaim(localClaim).version());
+	}
+
+	@Test
+	void ownClaimMeetingAForeignEntryIsContestedEvenBeforeTheClientResolves() throws IOException {
+		positions.set(PEER_A, 0);
+		ownRootClaim();
+		// Version und Liste von A sind da, der Anspruch im gemeinsamen Ordner noch nicht
+		Version theirs = version(PEER_A, "Kasse 2", V1);
+		putVersion(UNIT, theirs);
+		putFeed(PEER_A, 1, entry(UNIT, theirs));
+
+		FeedPoll poll = reader.poll();
+
+		assertEquals(Set.of(new FeedPoll.Contested(UNIT, "root")), poll.contested());
+		assertEquals(1, poll.pending().size());
+	}
+
+	@Test
+	void matchingClaimIsNotContested() throws IOException {
+		positions.set(PEER_A, 0);
+		Version theirs = version(PEER_A, "Kasse 2", V1);
+		byte[] bytes = putVersion(UNIT, theirs);
+		putFeed(PEER_A, 1, entry(UNIT, theirs));
+		byte[] claim = putClaim(UNIT, theirs, bytes);
+		local.createClaim(UNIT, "root", claim);
+
+		assertTrue(reader.poll().contested().isEmpty());
+	}
+
+	@Test
+	void copiedVersionNotMatchingTheClaimIsReportedDamaged() throws IOException {
+		positions.set(PEER_A, 0);
+		Version theirs = version(PEER_A, "Kasse 2", V1);
+		byte[] good = StoreCodec.write(theirs);
+		// die gemeinsame Kopie ist beschädigt, der Anspruch nennt den Prüfwert der guten
+		assertTrue(shared.writeVersion(UNIT, V1, "kaputt".getBytes(StandardCharsets.UTF_8)));
+		putFeed(PEER_A, 1, entry(UNIT, theirs));
+		assertTrue(shared.createClaim(UNIT, "root",
+				StoreCodec.write(new Claim(V1, StoreCodec.sha256(good), PEER_A, START))));
+
+		FeedPoll poll = reader.poll();
+
+		assertEquals(Set.of(UNIT), poll.damaged());
+	}
+
 	@Test
 	void latestNumbersAreTheHighestFeedsOfThePeers() throws IOException {
 		putFeed(PEER_A, 1);

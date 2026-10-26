@@ -651,6 +651,163 @@ class SyncServiceTest {
 		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), foreign.id())), a.events.lost);
 	}
 
+	/** Lesezugriffe dieses Rechners auf Anspruchsdateien {@code root.json} im gemeinsamen Ordner bisher. */
+	private long sharedRootClaimReads(Node node) {
+		String prefix = "read " + sharedRoot;
+		return node.layer.calls().stream().filter(c -> c.startsWith(prefix) && c.endsWith("root.json")).count();
+	}
+
+	@Test
+	void lateDefeatChecksStayWithinTheBudgetAndStillCoverTheBacklog() throws IOException {
+		Path appData = dir.resolve("a");
+		String me = MachineIdentity.loadOrCreate(appData, () -> "a").id();
+		VersionStore localStore = new VersionStore(appData.resolve("data"), new NioFileLayer());
+		int count = 200;
+		for (int i = 0; i < count; i++) {
+			UnitKey hall = UnitKey.hall("h" + i);
+			Version v = version(me, 1_000_000L, i, "s" + i, null);
+			byte[] bytes = StoreCodec.write(v);
+			localStore.writeVersion(hall, v.id(), bytes);
+			localStore.createClaim(hall, "root", StoreCodec.write(new Claim(v.id(), StoreCodec.sha256(bytes), me, START)));
+		}
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+
+		// der erste Vollabgleich nimmt alle 200 jungen eigenen Ansprüche in die Beobachtung, geprüft werden 150 je Takt
+		a.service.startup(shared);
+		long reads = sharedRootClaimReads(a);
+		assertEquals(SyncService.LATE_DEFEAT_BUDGET, reads);
+		a.service.tick();
+		assertEquals(SyncService.LATE_DEFEAT_BUDGET, sharedRootClaimReads(a) - reads);
+
+		// nach Ablauf der Fenster wird jeder noch einmal geprüft, auch hinter dem Rückstand
+		clock.advance(Duration.ofMinutes(16));
+		UnitKey late = UnitKey.hall("h7");
+		Files.createDirectories(sharedFile(late, "claims"));
+		Version foreign = overrideSharedClaim(late, "root");
+		reads = sharedRootClaimReads(a);
+		a.service.tick();
+		assertEquals(SyncService.LATE_DEFEAT_BUDGET, sharedRootClaimReads(a) - reads);
+		reads = sharedRootClaimReads(a);
+		a.service.tick();
+		assertEquals(count - SyncService.LATE_DEFEAT_BUDGET, sharedRootClaimReads(a) - reads);
+
+		VersionId mine = VersionId.create(1_000_000L, me, 7);
+		assertEquals(List.of(new LostVersion(late, List.of(mine), foreign.id())), a.events.lost);
+		reads = sharedRootClaimReads(a);
+		a.service.tick();
+		assertEquals(0, sharedRootClaimReads(a) - reads, "alle Fenster sind abgelaufen");
+	}
+
+	@Test
+	void mergeWatchesExactlyTheUploadedClaims() throws IOException {
+		UnitKey uploaded = UnitKey.event("neu");
+		UnitKey known = UnitKey.event("bekannt");
+		Node a = node("a");
+		a.service.startup("");
+		Version vu = save(a, create(uploaded, "neu"));
+		Version vk = save(a, create(known, "bekannt"));
+		// den Anspruch auf "bekannt" kennt der gemeinsame Ordner schon: er wird nicht hochgeladen
+		Files.createDirectories(sharedFile(known, "claims"));
+		Files.copy(localFile(a, known, vk.id() + ".json"), sharedFile(known, vk.id() + ".json"));
+		Files.copy(localFile(a, known, "claims/root.json"), sharedFile(known, "claims/root.json"));
+		// die lokalen Ansprüche sind älter als 15 Minuten
+		clock.advance(Duration.ofMinutes(20));
+
+		a.service.connect(shared, ConnectMode.MERGE);
+		Version foreign = overrideSharedClaim(uploaded, "root");
+		overrideSharedClaim(known, "root");
+		a.service.tick();
+
+		assertEquals(List.of(new LostVersion(uploaded, List.of(vu.id()), foreign.id())), a.events.lost);
+	}
+
+	@Test
+	void sharedCopyIsHealedFromAGoodLocalCopy() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Path sharedV1 = sharedFile(BOOKING, v1.id() + ".json");
+		byte[] good = Files.readAllBytes(sharedV1);
+		Files.writeString(sharedV1, "kaputt");
+
+		// der nächste Anspruch hinter v1 sieht die beschädigte gemeinsame Kopie
+		save(a, update(BOOKING, v1, "Anna B"));
+		a.service.tick();
+
+		assertArrayEquals(good, Files.readAllBytes(sharedV1));
+		assertTrue(names(sharedV1.getParent()).stream().anyMatch(n -> n.startsWith(v1.id() + ".json.corrupt-")));
+		assertTrue(a.events.errors.isEmpty());
+	}
+
+	@Test
+	void lockedUnitIsRetriedAfterTheNextFullSync() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Path localV1 = localFile(a, BOOKING, v1.id() + ".json");
+		Path sharedV1 = sharedFile(BOOKING, v1.id() + ".json");
+		byte[] good = Files.readAllBytes(localV1);
+		Files.writeString(localV1, "kaputt");
+		Files.writeString(sharedV1, "auch kaputt");
+		a.service.unitState(BOOKING);
+		a.service.tick();
+		assertEquals(List.of(StoreMessages.damaged(BOOKING.relativePath())), a.events.errors);
+
+		// ein Rechner mit guter Kopie heilt den gemeinsamen Ordner
+		Files.write(sharedV1, good);
+		a.service.unitState(BOOKING);
+		a.service.tick();
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(BOOKING).status(), "noch kein neuer Versuch");
+
+		a.service.syncNow();
+		a.service.unitState(BOOKING);
+		a.service.tick();
+
+		assertEquals(Status.OK, a.service.unitState(BOOKING).status());
+		assertArrayEquals(good, Files.readAllBytes(localV1));
+	}
+
+	@Test
+	void damagedCopyFromAFeedIsReportedWithoutAsking() throws IOException {
+		UnitKey second = UnitKey.event("zweite");
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(UnitKey.hall("h1"), "Halle"));
+		a.service.tick();
+		Node b = node("b");
+		b.service.startup(shared);
+		Version v = save(a, create(second, "neu"));
+		a.service.tick();
+		Files.writeString(sharedFile(second, v.id() + ".json"), "kaputt");
+
+		b.service.tick();
+
+		assertEquals(List.of(StoreMessages.damaged(second.relativePath())), b.events.errors);
+		assertEquals(Status.LOCKED_DAMAGED, b.service.unitState(second).status());
+	}
+
+	@Test
+	void lossFoundBeforeAFailureInTheSameJobIsReportedAtOnce() throws IOException {
+		UnitKey u1 = UnitKey.event("e1");
+		UnitKey u2 = UnitKey.event("e2");
+		Node a = node("a");
+		Node b = node("b");
+		a.service.startup(shared);
+		b.service.startup(shared);
+		Version vb = save(b, create(u1, "B"));
+		b.service.tick();
+		Path u2Claims = sharedFile(u2, "claims");
+		a.layer.failWhen(p -> p.startsWith(u2Claims), "createNew", new IOException("Störung"));
+
+		List<Version> saved = a.service.append("s1", List.of(create(u1, "A"), create(u2, "A2")));
+		a.service.tick();
+
+		assertEquals(List.of(new LostVersion(u1, List.of(saved.get(0).id()), vb.id())), a.events.lost);
+		assertEquals(SyncState.FEHLER, a.service.syncState().get());
+	}
+
 	@Test
 	void ownClaimsAreRecheckedOnlyForFifteenMinutes() throws IOException {
 		Node a = node("a");

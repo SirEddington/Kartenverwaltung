@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -13,6 +14,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -151,6 +153,50 @@ class FullSyncTest {
 		assertTrue(has(shared, "events/e1/" + V2 + ".json"));
 		assertTrue(result.changed().isEmpty());
 		assertTrue(result.lost().isEmpty());
+	}
+
+	@Test
+	void uploadedClaimsAreReportedAsTheyHappen() throws IOException {
+		Version mine = version(ME, V1);
+		put(local, E1, mine);
+		claim(local, E1, mine, AT);
+		Version hall = version(ME, V2);
+		put(local, HALL, hall);
+		claim(local, HALL, hall, AT);
+		// E2: der Anspruch liegt schon gleich im gemeinsamen Ordner, er wird nicht hochgeladen
+		Version known = version(ME, FOREIGN);
+		put(local, E2, known);
+		byte[] knownClaim = claim(local, E2, known, AT);
+		put(shared, E2, known);
+		shared.createClaim(E2, "root", knownClaim);
+		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
+
+		FullSyncResult result = FullSync.run(local, shared, true, ME, files, CLOCK, seen::add);
+
+		List<FullSyncResult.UploadedClaim> expected = List.of(new FullSyncResult.UploadedClaim(E1, "root", V1),
+				new FullSyncResult.UploadedClaim(HALL, "root", V2));
+		assertEquals(expected, result.uploaded());
+		assertEquals(expected, seen);
+		assertTrue(run(false).uploaded().isEmpty());
+	}
+
+	@Test
+	void uploadedClaimsBeforeAnAbortAreStillReported() throws IOException {
+		Version mine = version(ME, V1);
+		put(local, E1, mine);
+		claim(local, E1, mine, AT);
+		Version hall = version(ME, V2);
+		put(local, HALL, hall);
+		claim(local, HALL, hall, AT);
+		FaultyFileLayer faulty = new FaultyFileLayer(files);
+		faulty.failWhen(p -> p.toString().replace('\\', '/').contains("shared/data/halls/h1/claims"), "createNew",
+				new IOException("Störung"));
+		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
+		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
+
+		assertThrows(IOException.class, () -> FullSync.run(local, faultyShared, true, ME, files, CLOCK, seen::add));
+
+		assertEquals(List.of(new FullSyncResult.UploadedClaim(E1, "root", V1)), seen);
 	}
 
 	@Test

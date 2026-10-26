@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 
@@ -29,6 +30,7 @@ public final class SharedArbiter implements Arbiter {
 	private final VersionStore shared;
 	private final VersionStore local;
 	private final Clock clock;
+	private final BiConsumer<UnitKey, Claim> damagedInShared;
 
 	/**
 	 * @param shared der gemeinsame Bestand
@@ -36,9 +38,20 @@ public final class SharedArbiter implements Arbiter {
 	 * @param clock  die Uhr für den Zeitpunkt des Anspruchs
 	 */
 	public SharedArbiter(VersionStore shared, VersionStore local, Clock clock) {
+		this(shared, local, clock, (unit, claim) -> {
+		});
+	}
+
+	/**
+	 * @param damagedInShared erfährt es, wenn die Kette im gemeinsamen Ordner an einer beschädigten Versionsdatei endet:
+	 *                        mit der Einheit und dem Anspruch, der diese Version nennt (für die Heilung aus einer guten
+	 *                        lokalen Kopie)
+	 */
+	public SharedArbiter(VersionStore shared, VersionStore local, Clock clock, BiConsumer<UnitKey, Claim> damagedInShared) {
 		this.shared = shared;
 		this.local = local;
 		this.clock = clock;
+		this.damagedInShared = damagedInShared;
 	}
 
 	@Override
@@ -83,6 +96,12 @@ public final class SharedArbiter implements Arbiter {
 		UnitFiles files = shared.readUnit(unit);
 		UnitState state = ChainResolver.resolve(files, version.machine());
 		String where = unit.relativePath();
+		if (state.status() == Status.LOCKED_DAMAGED && state.blockedAt() != null) {
+			ClaimFile slot = files.claims().get(LocalScan.stopSlot(files));
+			if (slot != null && slot.claim() != null) {
+				damagedInShared.accept(unit, slot.claim());
+			}
+		}
 		// Beansprucht ist auch eine beschädigte, übersprungene Version: Sie hat ihren Platz bekommen und steht nur nicht in
 		// der Kette (Heilung Stufe 2). Ein Anspruch dahinter wird wie jeder andere beurteilt, auch wenn die Kette gerade an
 		// ihr endet (gesperrt): So entsteht der Anspruch hinter der beschädigten Version beim Zurücksetzen.

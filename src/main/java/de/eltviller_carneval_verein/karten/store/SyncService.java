@@ -11,7 +11,9 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -54,8 +56,10 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * alle 30 Sekunden neue Rechner suchen, die Änderungslisten der anderen lesen, alle 10 Minuten (und beim Start, nach
  * der Rückkehr aus {@link SyncState#OFFLINE}, auf Wunsch) einen Vollabgleich, die eigenen Ansprüche der letzten 15
  * Minuten im gemeinsamen Ordner nachlesen (späte Niederlage bei einem Sync-Client; nach einem Neustart auch die aus den
- * lokalen Anspruchsdateien, beim Verbinden mit Mitnehmen die dabei hochgeladenen), vorgemerkte beschädigte Einheiten aus
- * der Kopie im gemeinsamen Ordner heilen. Vor jedem Vollabgleich merkt er
+ * lokalen Anspruchsdateien, beim Verbinden mit Mitnehmen die dabei hochgeladenen; höchstens 150 je Takt), vorgemerkte
+ * beschädigte Einheiten aus der Kopie im gemeinsamen Ordner heilen und beschädigte Kopien dort aus der guten lokalen.
+ * Trifft ein fremder Listeneintrag einen Platz, dessen lokaler Anspruch abweicht, wird sofort verglichen: So fällt eine
+ * späte Niederlage auch nach Ablauf der Beobachtung auf. Vor jedem Vollabgleich merkt er
  * sich die höchsten Listennummern und setzt die Positionen danach darauf; was währenddessen entsteht, liest der nächste
  * Takt.
  * <p>
@@ -87,6 +91,8 @@ public final class SyncService {
 	static final Duration FULL_SYNC_INTERVAL = Duration.ofMinutes(10);
 	/** So lange werden eigene gewonnene Ansprüche auf eine späte Niederlage geprüft. */
 	static final Duration LATE_DEFEAT_WINDOW = Duration.ofMinutes(15);
+	/** So viele beobachtete Ansprüche liest ein Takt höchstens, die am längsten nicht geprüften zuerst. */
+	static final int LATE_DEFEAT_BUDGET = 150;
 	/** Eigene temporäre Dateien, die älter sind, räumt der Start weg. */
 	static final Duration TEMP_AGE = Duration.ofDays(1);
 
@@ -104,6 +110,19 @@ public final class SyncService {
 	/** Eine Aktion mit Dateizugriff. */
 	private interface IoAction {
 		void run() throws IOException;
+	}
+
+	/** Ein beobachteter eigener Anspruch: wann er zuletzt geprüft wurde und als wievielter er dazukam. */
+	private static final class Watched {
+		final LocalScan.OwnClaim claim;
+		final long order;
+		/** {@code null}, solange er nie geprüft wurde. */
+		Instant lastChecked;
+
+		Watched(LocalScan.OwnClaim claim, long order) {
+			this.claim = claim;
+			this.order = order;
+		}
 	}
 
 	/**
@@ -167,8 +186,11 @@ public final class SyncService {
 	private final Set<VersionId> queued = new HashSet<>();
 	/** Die in diesem Programmlauf als verloren gemeldeten Versionen. */
 	private final Set<VersionId> reportedLost = new HashSet<>();
-	/** Eigene gewonnene Ansprüche, die noch auf eine späte Niederlage geprüft werden. */
-	private final List<LocalScan.OwnClaim> ownClaims = new ArrayList<>();
+	/** Eigene gewonnene Ansprüche, die noch auf eine späte Niederlage geprüft werden; Schlüssel: Einheit und Platz. */
+	private final Map<String, Watched> ownClaims = new LinkedHashMap<>();
+	private long watchOrder;
+	/** Einheiten, deren Kette im gemeinsamen Ordner an einer beschädigten Version endet, mit dem Anspruch darauf. */
+	private final Map<UnitKey, Claim> sharedRepairs = new LinkedHashMap<>();
 	/** Gesperrte Einheiten, die der nächste Takt aus der Kopie im gemeinsamen Ordner zu heilen versucht. */
 	private final Set<UnitKey> repairQueue = new LinkedHashSet<>();
 	/**
@@ -215,12 +237,15 @@ public final class SyncService {
 			Path appData = AppPaths.appDataDir().toPath();
 			MachineIdentity identity;
 			try {
-				Optional<InstanceLock> acquired = InstanceLock.tryAcquire(appData);
-				if (acquired.isEmpty()) {
-					LOGGER.severe(StoreMessages.alreadyRunning());
-					throw new IllegalStateException(StoreMessages.alreadyRunning());
+				// nach einem gescheiterten Versuch (etwa beim Lesen der Kennung) hält dieser Prozess die Sperre schon
+				if (instanceLock == null) {
+					Optional<InstanceLock> acquired = InstanceLock.tryAcquire(appData);
+					if (acquired.isEmpty()) {
+						LOGGER.severe(StoreMessages.alreadyRunning());
+						throw new IllegalStateException(StoreMessages.alreadyRunning());
+					}
+					instanceLock = acquired.get();
 				}
-				instanceLock = acquired.get();
 				identity = MachineIdentity.loadOrCreate(appData, () -> System.getenv("COMPUTERNAME"));
 			} catch (IOException e) {
 				throw new UncheckedIOException(e);
@@ -603,9 +628,7 @@ public final class SyncService {
 			} else {
 				result = repair.repairClaim(unit, slot);
 			}
-			if (result.corruptCopy() != null) {
-				LOGGER.warning(StoreMessages.repaired(result.replaced().toString(), result.corruptCopy().getFileName().toString()));
-			}
+			logRepaired(result);
 			replaced |= result.replaced() != null;
 			if (result.outcome() != DamageRepair.Outcome.REPAIRED_LOCAL) {
 				break;
@@ -743,6 +766,7 @@ public final class SyncService {
 			});
 		}
 		round.run(() -> poll(current, round));
+		round.run(() -> repairShared(current, round));
 		round.run(() -> repairQueued(current, round));
 		round.run(() -> checkLateDefeats(current, round, now));
 		reportChanges(round);
@@ -784,17 +808,12 @@ public final class SyncService {
 		}
 		String myId = machineId();
 		Instant now = clock.instant();
-		// Beim Mitnehmen: die eigenen Ansprüche, die der Abgleich jetzt erst hochlädt, ab jetzt beobachten
-		List<LocalScan.OwnClaim> watch = new ArrayList<>();
-		if (uploadLocalClaims) {
-			for (LocalScan.OwnClaim own : LocalScan.ownClaims(local, myId)) {
-				if (current.shared.readClaimBytes(own.unit(), own.claimName()).isEmpty()) {
-					watch.add(own.at(now));
-				}
-			}
-		}
 		Map<String, Long> latest = current.reader.latestNumbers();
-		FullSyncResult result = FullSync.run(local, current.shared, uploadLocalClaims, myId, files, clock);
+		// Beim Mitnehmen: genau die Ansprüche, die der Abgleich hochlädt, ab jetzt beobachten (je Anspruch sofort, damit
+		// auch ein abgebrochener Abgleich nichts verliert)
+		FullSyncResult result = FullSync.run(local, current.shared, uploadLocalClaims, myId, files, clock,
+				uploaded -> watchOwnClaims(
+						List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))));
 		current.reader.jumpTo(latest);
 		current.connectMode = null;
 		current.fullSyncWanted = false;
@@ -803,11 +822,13 @@ public final class SyncService {
 			current.allUnitsWanted = false;
 			round.allUnits = true;
 			// nach einem Neustart: die eigenen Ansprüche der letzten 15 Minuten weiter auf eine späte Niederlage prüfen
-			watch.addAll(LocalScan.recentOwnClaims(local, myId, now, LATE_DEFEAT_WINDOW));
+			watchOwnClaims(LocalScan.recentOwnClaims(local, myId, now, LATE_DEFEAT_WINDOW));
 		}
-		watchOwnClaims(watch);
+		// gesperrte Einheiten dürfen wieder geheilt werden: Die gemeinsame Kopie kann inzwischen geheilt sein
+		synchronized (lock) {
+			unrepairable.clear();
+		}
 		round.changed.addAll(result.changed());
-		forgetUnrepairable(result.changed());
 		result.lost().forEach(this::reportLoss);
 		enqueuePending(current);
 		runJobs(current, round);
@@ -855,7 +876,7 @@ public final class SyncService {
 			UploadJob job = pending.get(i);
 			try {
 				List<LostVersion> losses = new Uploader(current.shared, current.writer,
-						new SharedArbiter(current.shared, local, clock)).run(job);
+						new SharedArbiter(current.shared, local, clock, this::damagedInShared)).run(job);
 				completed(job, losses, round);
 			} catch (ContentMismatchException e) {
 				// nichts überschreiben: den Auftrag verwerfen, die Versionen bleiben lokal ausstehend
@@ -871,8 +892,48 @@ public final class SyncService {
 				regenerate(current);
 				i--;
 			} catch (IOException e) {
+				// Niederlagen, die dieser Lauf schon fand, gleich melden (doppelte sortiert reportLoss aus)
+				job.losses().forEach(this::reportLoss);
 				round.survive(e);
 			}
+		}
+	}
+
+	/** Vom {@link SharedArbiter}: Die Kette im gemeinsamen Ordner endet an einer beschädigten Version. */
+	private void damagedInShared(UnitKey unit, Claim claim) {
+		synchronized (lock) {
+			sharedRepairs.put(unit, claim);
+		}
+	}
+
+	/**
+	 * Im Takt: heilt beschädigte Versionsdateien im gemeinsamen Ordner aus der guten lokalen Kopie (oder umgekehrt, wenn
+	 * die lokale die beschädigte ist); SYS-007 ins Log.
+	 */
+	private void repairShared(Link current, Round round) throws IOException {
+		Map<UnitKey, Claim> todo;
+		synchronized (lock) {
+			todo = new LinkedHashMap<>(sharedRepairs);
+		}
+		if (todo.isEmpty()) {
+			return;
+		}
+		DamageRepair repair = new DamageRepair(local, current.shared, files, clock);
+		for (Map.Entry<UnitKey, Claim> entry : todo.entrySet()) {
+			DamageRepair.Result result = repair.repairVersion(entry.getKey(), entry.getValue());
+			logRepaired(result);
+			synchronized (lock) {
+				sharedRepairs.remove(entry.getKey(), entry.getValue());
+			}
+			if (result.outcome() == DamageRepair.Outcome.REPAIRED_LOCAL) {
+				round.changed.add(entry.getKey());
+			}
+		}
+	}
+
+	private static void logRepaired(DamageRepair.Result result) {
+		if (result.corruptCopy() != null) {
+			LOGGER.warning(StoreMessages.repaired(result.replaced().toString(), result.corruptCopy().getFileName().toString()));
 		}
 	}
 
@@ -897,13 +958,26 @@ public final class SyncService {
 	private void watchOwnClaims(List<LocalScan.OwnClaim> claims) {
 		synchronized (lock) {
 			for (LocalScan.OwnClaim claim : claims) {
-				boolean known = ownClaims.stream()
-						.anyMatch(o -> o.unit().equals(claim.unit()) && o.claimName().equals(claim.claimName()));
-				if (!known) {
-					ownClaims.add(claim);
-				}
+				ownClaims.computeIfAbsent(slotKey(claim.unit(), claim.claimName()), key -> new Watched(claim, watchOrder++));
 			}
 		}
+	}
+
+	/** Beobachtet den Anspruch von jetzt an neu (Fenster ab {@code claim.at()}), auch wenn der Platz schon beobachtet wird. */
+	private void rearm(LocalScan.OwnClaim claim) {
+		synchronized (lock) {
+			ownClaims.put(slotKey(claim.unit(), claim.claimName()), new Watched(claim, watchOrder++));
+		}
+	}
+
+	private void unwatch(UnitKey unit, String claimName) {
+		synchronized (lock) {
+			ownClaims.remove(slotKey(unit, claimName));
+		}
+	}
+
+	private static String slotKey(UnitKey unit, String claimName) {
+		return unit.relativePath() + "/claims/" + claimName;
 	}
 
 	/** Merkt sich einen gewonnenen Anspruch (er liegt jetzt lokal und nennt die Version) für die späte Niederlage. */
@@ -947,50 +1021,96 @@ public final class SyncService {
 		if (poll.fullSyncNeeded()) {
 			current.fullSyncWanted = true;
 		}
+		for (FeedPoll.Contested slot : poll.contested()) {
+			settleContested(current, slot, round);
+		}
+		if (!poll.damaged().isEmpty()) {
+			// die kopierte Datei passt nicht zum Anspruch: heilen versuchen (sonst SYS-008)
+			synchronized (lock) {
+				repairQueue.addAll(poll.damaged());
+			}
+		}
 	}
 
 	/**
-	 * Liest die eigenen gewonnenen Ansprüche der letzten 15 Minuten im gemeinsamen Ordner neu. Zeigt einer auf eine
-	 * andere Version (ein Sync-Client hat die erste Fassung eines anderen Rechners übernommen), wird der lokale Anspruch
-	 * durch den gemeinsamen ersetzt und bleibt als {@code <Name>.json.verdraengt-<Zeitstempel>} daneben liegen; die
-	 * Gewinner-Version kommt nach lokal. Den Verlust meldet dann die Ableitung aus dem Zustand.
+	 * Ein fremder Listeneintrag trifft einen Platz, dessen lokaler Anspruch abweicht. Nennt der gemeinsame Anspruch eine
+	 * andere Version als der lokale, ist das eine späte Niederlage, auch lange nach Ablauf der Beobachtung: verdrängen.
+	 * Sonst ist der lokale Anspruch der eigene, und der Sync-Client hat die Entscheidung vielleicht noch nicht
+	 * übernommen: ab jetzt wieder beobachten.
 	 */
-	private void checkLateDefeats(Link current, Round round, Instant now) throws IOException {
-		List<LocalScan.OwnClaim> recent;
-		synchronized (lock) {
-			ownClaims.removeIf(own -> !now.isBefore(own.at().plus(LATE_DEFEAT_WINDOW)));
-			recent = List.copyOf(ownClaims);
+	private void settleContested(Link current, FeedPoll.Contested slot, Round round) throws IOException {
+		Optional<byte[]> localBytes = local.readClaimBytes(slot.unit(), slot.claimName());
+		Claim mine = localBytes.isPresent() ? parseClaim(localBytes.get()) : null;
+		if (mine == null) {
+			return;
 		}
-		for (LocalScan.OwnClaim own : recent) {
-			Optional<byte[]> bytes = current.shared.readClaimBytes(own.unit(), own.claimName());
-			Claim theirs = bytes.isPresent() ? parseClaim(bytes.get()) : null;
-			if (theirs == null || theirs.version().equals(own.version())) {
-				continue;
-			}
-			displace(current, own, bytes.get(), theirs);
-			synchronized (lock) {
-				ownClaims.remove(own);
-			}
-			round.changed.add(own.unit());
+		Optional<byte[]> sharedBytes = current.shared.readClaimBytes(slot.unit(), slot.claimName());
+		Claim theirs = sharedBytes.isPresent() ? parseClaim(sharedBytes.get()) : null;
+		if (theirs != null && !theirs.version().equals(mine.version())) {
+			displace(current, slot.unit(), slot.claimName(), sharedBytes.get(), theirs, mine.version());
+			unwatch(slot.unit(), slot.claimName());
+			round.changed.add(slot.unit());
+		} else if (machineId().equals(mine.machine())) {
+			rearm(new LocalScan.OwnClaim(slot.unit(), slot.claimName(), mine.version(), clock.instant()));
 		}
 	}
 
-	private void displace(Link current, LocalScan.OwnClaim own, byte[] sharedBytes, Claim theirs) throws IOException {
-		UnitKey unit = own.unit();
-		Path claimFile = local.resolve(unit.relativePath() + "/claims/" + own.claimName() + ".json");
-		Optional<byte[]> localBytes = local.readClaimBytes(unit, own.claimName());
-		Claim mine = localBytes.isPresent() ? parseClaim(localBytes.get()) : null;
+	/**
+	 * Liest beobachtete eigene Ansprüche im gemeinsamen Ordner neu, höchstens {@value #LATE_DEFEAT_BUDGET} je Takt, die am
+	 * längsten nicht geprüften zuerst. Zeigt einer auf eine andere Version (ein Sync-Client hat die erste Fassung eines
+	 * anderen Rechners übernommen), wird der lokale Anspruch durch den gemeinsamen ersetzt und bleibt als
+	 * {@code <Name>.json.verdraengt-<Zeitstempel>} daneben liegen; die Gewinner-Version kommt nach lokal. Den Verlust
+	 * meldet dann die Ableitung aus dem Zustand. Ein Anspruch verlässt die Beobachtung erst nach einer Prüfung zu oder
+	 * nach Ablauf seines 15-Minuten-Fensters; so wird auch einer hinter einem großen Rückstand noch geprüft.
+	 */
+	private void checkLateDefeats(Link current, Round round, Instant now) throws IOException {
+		List<Watched> due;
+		synchronized (lock) {
+			due = ownClaims.values().stream()
+					.sorted(Comparator.comparing((Watched w) -> w.lastChecked, Comparator.nullsFirst(Comparator.naturalOrder()))
+							.thenComparingLong(w -> w.order))
+					.limit(LATE_DEFEAT_BUDGET).toList();
+		}
+		for (Watched watched : due) {
+			LocalScan.OwnClaim own = watched.claim;
+			String key = slotKey(own.unit(), own.claimName());
+			Optional<byte[]> bytes = current.shared.readClaimBytes(own.unit(), own.claimName());
+			Claim theirs = bytes.isPresent() ? parseClaim(bytes.get()) : null;
+			if (theirs != null && !theirs.version().equals(own.version())) {
+				displace(current, own.unit(), own.claimName(), bytes.get(), theirs, own.version());
+				synchronized (lock) {
+					ownClaims.remove(key, watched);
+				}
+				round.changed.add(own.unit());
+				continue;
+			}
+			synchronized (lock) {
+				if (!now.isBefore(own.at().plus(LATE_DEFEAT_WINDOW))) {
+					ownClaims.remove(key, watched);
+				} else {
+					watched.lastChecked = now;
+				}
+			}
+		}
+	}
+
+	/** Ersetzt den lokalen Anspruch durch den gemeinsamen (der alte bleibt daneben) und holt die Gewinner-Version. */
+	private void displace(Link current, UnitKey unit, String claimName, byte[] sharedBytes, Claim theirs, VersionId mine)
+			throws IOException {
+		Path claimFile = local.resolve(unit.relativePath() + "/claims/" + claimName + ".json");
+		Optional<byte[]> localBytes = local.readClaimBytes(unit, claimName);
+		Claim present = localBytes.isPresent() ? parseClaim(localBytes.get()) : null;
 		if (localBytes.isEmpty()) {
-			local.createClaim(unit, own.claimName(), sharedBytes);
-		} else if (mine == null || !mine.version().equals(theirs.version())) {
+			local.createClaim(unit, claimName, sharedBytes);
+		} else if (present == null || !present.version().equals(theirs.version())) {
 			files.replaceDamaged(claimFile, sharedBytes, displacedName(claimFile));
 		}
 		Optional<byte[]> winner = current.shared.readVersionBytes(unit, theirs.version());
 		if (winner.isPresent()) {
 			local.writeVersion(unit, theirs.version(), winner.get());
 		}
-		LOGGER.warning("Späte Niederlage: Der Anspruch " + unit.relativePath() + "/claims/" + own.claimName()
-				+ ".json nennt im gemeinsamen Ordner " + theirs.version() + " statt " + own.version() + ".");
+		LOGGER.warning("Späte Niederlage: Der Anspruch " + unit.relativePath() + "/claims/" + claimName
+				+ ".json nennt im gemeinsamen Ordner " + theirs.version() + " statt " + mine + ".");
 	}
 
 	/** {@code <Dateiname>.verdraengt-<yyyy-MM-dd_HH-mm-ss>}, bei Namensgleichheit mit {@code -2}, {@code -3} … */
@@ -1065,6 +1185,7 @@ public final class SyncService {
 			jobs.clear();
 			queued.clear();
 			ownClaims.clear();
+			sharedRepairs.clear();
 			repairQueue.clear();
 			unrepairable.clear();
 			notifier.reset();
@@ -1078,6 +1199,7 @@ public final class SyncService {
 			jobs.clear();
 			queued.clear();
 			ownClaims.clear();
+			sharedRepairs.clear();
 			repairQueue.clear();
 			unrepairable.clear();
 			notifier.reset();

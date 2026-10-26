@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.store;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -81,32 +82,88 @@ public final class MachineIdentity {
 	 * @param appDataDir   Datenordner dieses Rechners (wird bei Bedarf angelegt)
 	 * @param computerName liefert den Computernamen als Vorbelegung des Anzeigenamens
 	 * @param clock        Uhr für den Zeitstempel im Namen einer beschädigten Kopie
-	 * @throws IOException wenn die Datei nicht gelesen oder die neue nicht geschrieben werden kann
+	 * @throws IOException wenn die Datei nicht gelesen oder die neue nicht geschrieben werden kann. Jeder Lesefehler außer
+	 *                     "Datei fehlt" wird weitergeworfen: Eine vorhandene Kennung wird nie wegen einer vorübergehenden
+	 *                     Störung ersetzt.
 	 */
 	public static MachineIdentity loadOrCreate(Path appDataDir, Supplier<String> computerName, Clock clock)
 			throws IOException {
+		return loadOrCreate(appDataDir, computerName, clock, Files::readAllBytes);
+	}
+
+	/** Liest eine Datei; {@link java.nio.file.NoSuchFileException} heißt "fehlt". Für Tests austauschbar. */
+	interface Reader {
+		byte[] read(Path file) throws IOException;
+	}
+
+	/**
+	 * Wie {@link #loadOrCreate(Path, Supplier, Clock)} mit austauschbarem Lesezugriff. Eine neue Datei wird ohne
+	 * Ersetzen angelegt; ist inzwischen eine da (ein anderer Start war schneller), wird sie gelesen.
+	 */
+	static MachineIdentity loadOrCreate(Path appDataDir, Supplier<String> computerName, Clock clock, Reader reader)
+			throws IOException {
 		Path file = appDataDir.resolve(FILE_NAME);
-		if (Files.exists(file)) {
-			byte[] bytes = Files.readAllBytes(file);
-			JsonNode node = parseObject(bytes);
-			String id = validId(node);
-			if (id != null) {
-				String name = validName(node);
-				if (name != null) {
-					return new MachineIdentity(file, id, name, null);
-				}
-				// Gültige ID, aber Name fehlt oder ist unbrauchbar: die ID bleibt (sonst wären die eigenen Versionen und der
-				// eigene Listenordner plötzlich fremd), nur der Name wird neu vorbelegt und die Datei neu geschrieben.
-				MachineIdentity repaired = new MachineIdentity(file, id, nameFrom(computerName), null);
-				repaired.write(id, repaired.name);
-				return repaired;
+		for (int attempt = 1;; attempt++) {
+			byte[] bytes;
+			try {
+				bytes = reader.read(file);
+			} catch (NoSuchFileException e) {
+				bytes = null;
 			}
-			moveAsideCorrupt(file, clock);
+			if (bytes != null) {
+				JsonNode node = parseObject(bytes);
+				String id = validId(node);
+				if (id != null) {
+					String name = validName(node);
+					if (name != null) {
+						return new MachineIdentity(file, id, name, null);
+					}
+					// Gültige ID, aber Name fehlt oder ist unbrauchbar: die ID bleibt (sonst wären die eigenen Versionen und
+					// der eigene Listenordner plötzlich fremd), nur der Name wird neu vorbelegt und die Datei neu geschrieben.
+					MachineIdentity repaired = new MachineIdentity(file, id, nameFrom(computerName), null);
+					repaired.write(id, repaired.name);
+					return repaired;
+				}
+				moveAsideCorrupt(file, clock);
+			}
+			String name = nameFrom(computerName);
+			MachineIdentity created = new MachineIdentity(file, newId(), name, null);
+			if (created.writeNew(name)) {
+				return created;
+			}
+			if (attempt >= 3) {
+				throw new IOException("Die Datei " + file + " lässt sich weder lesen noch anlegen.");
+			}
+			// inzwischen angelegt: noch einmal lesen
 		}
-		String name = nameFrom(computerName);
-		MachineIdentity created = new MachineIdentity(file, newId(), name, null);
-		created.write(created.id, name);
-		return created;
+	}
+
+	/**
+	 * Legt {@code machine.json} an, ohne eine vorhandene zu ersetzen.
+	 *
+	 * @return {@code false}, wenn es die Datei schon gibt
+	 */
+	private boolean writeNew(String name) throws IOException {
+		byte[] bytes = toBytes(id, name);
+		Path dir = file.toAbsolutePath().getParent();
+		Files.createDirectories(dir);
+		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
+		try {
+			Files.write(temp, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+			// ohne Optionen: ein vorhandenes Ziel wird nicht ersetzt
+			Files.move(temp, file);
+			return true;
+		} catch (FileAlreadyExistsException e) {
+			Files.deleteIfExists(temp);
+			return false;
+		} catch (IOException | RuntimeException e) {
+			try {
+				Files.deleteIfExists(temp);
+			} catch (IOException | RuntimeException suppressed) {
+				e.addSuppressed(suppressed);
+			}
+			throw e;
+		}
 	}
 
 	/** Der Computername als Anzeigename; "Rechner", wenn der Lieferant nichts oder nur Leerraum liefert. */
@@ -208,12 +265,16 @@ public final class MachineIdentity {
 		return new MachineIdentity(file, newId, name, operator);
 	}
 
-	/** Schreibt die Datei über eine temporäre Datei im selben Ordner und ersetzt die vorhandene atomar. */
-	private void write(String id, String name) throws IOException {
+	private static byte[] toBytes(String id, String name) throws IOException {
 		ObjectNode node = MAPPER.createObjectNode();
 		node.put("id", id);
 		node.put("name", name);
-		byte[] bytes = MAPPER.writeValueAsBytes(node);
+		return MAPPER.writeValueAsBytes(node);
+	}
+
+	/** Schreibt die Datei über eine temporäre Datei im selben Ordner und ersetzt die vorhandene atomar. */
+	private void write(String id, String name) throws IOException {
+		byte[] bytes = toBytes(id, name);
 		Path dir = file.toAbsolutePath().getParent();
 		Files.createDirectories(dir);
 		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
