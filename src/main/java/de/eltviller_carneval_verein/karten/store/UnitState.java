@@ -12,7 +12,9 @@ import java.util.List;
  * @param pending   die eigenen, noch nicht beanspruchten Versionen auf dem Ende der Kette, in der Reihenfolge, in
  *                  der sie hochzuladen sind (Vorgänger vor Nachfolger)
  * @param lost      die eigenen Versionen, die nicht auf dem Ende der Kette aufbauen und deshalb verloren sind; eine
- *                  Liste je Strecke, älteste Version zuerst
+ *                  Liste je Strecke, älteste Version zuerst; gehört eine Version zu mehreren Strecken (eigene
+ *                  Verzweigung), steht sie nur in der ersten, und eine spätere Liste kann mit einer Version
+ *                  beginnen, deren erster Vorgänger in einer früheren Liste steht
  * @param blockedAt die Version, an der die Kette endet ({@code WAITING}: die fehlende, {@code LOCKED_FORMAT}: die
  *                  mit unbekanntem Format, {@code LOCKED_DAMAGED}: die beschädigte oder bei einem Kreis die
  *                  wiederholte); {@code null} bei {@code OK} und bei einer unlesbaren Anspruchsdatei
@@ -44,7 +46,10 @@ public record UnitState(UnitKey unit, Status status, List<Version> chain, List<V
 		return chain.isEmpty() ? null : chain.get(chain.size() - 1);
 	}
 
-	/** Der aktuelle Stand für den eigenen Rechner: die letzte ausstehende Version, sonst {@link #head()}. */
+	/**
+	 * Der aktuelle Stand für den eigenen Rechner: die letzte ausstehende Version, sonst {@link #head()}. Gibt es
+	 * mehrere ausstehende Strecken, ist es das letzte Element der letzten Strecke.
+	 */
 	public Version current() {
 		return pending.isEmpty() ? head() : pending.get(pending.size() - 1);
 	}

@@ -200,13 +200,54 @@ class ChainResolverTest {
 
 	@Test
 	void mergedLoserIsNotReportedAgain() throws IOException {
-		UnitState state = new Unit().version(mine(1)).version(theirs(2)).version(mine(3), theirs(2), mine(1))
-				.claim("root", theirs(2)).claim(theirs(2).value(), mine(3)).resolve();
+		// v1 und v2 (auf v1) verlieren gegen w; m fuehrt nur v1 zusammen, v2 bleibt verloren.
+		UnitState state = new Unit().version(mine(1)).version(mine(2), mine(1)).version(theirs(3))
+				.version(mine(4), theirs(3), mine(1)).claim("root", theirs(3)).claim(theirs(3).value(), mine(4))
+				.resolve();
 
-		assertEquals(List.of(theirs(2), mine(3)), ids(state.chain()));
-		assertEquals(mine(3), state.head().id());
+		assertEquals(List.of(theirs(3), mine(4)), ids(state.chain()));
+		assertEquals(mine(4), state.head().id());
+		assertTrue(state.pending().isEmpty());
+		assertEquals(List.of(List.of(mine(2))), state.lost());
+	}
+
+	@Test
+	void mergeOfTheLastLoserLeavesNothingLost() throws IOException {
+		UnitState state = new Unit().version(mine(1)).version(mine(2), mine(1)).version(theirs(3))
+				.version(mine(4), theirs(3), mine(2)).claim("root", theirs(3)).claim(theirs(3).value(), mine(4))
+				.resolve();
+
+		assertEquals(mine(4), state.head().id());
 		assertTrue(state.pending().isEmpty());
 		assertTrue(state.lost().isEmpty());
+	}
+
+	@Test
+	void damagedClaimedOwnVersionIsNeitherPendingNorLost() throws IOException {
+		UnitState state = new Unit().version(theirs(1)).version(mine(2), theirs(1)).claim("root", theirs(1))
+				.claim(theirs(1).value(), mine(2), "0".repeat(64)).resolve();
+
+		assertEquals(Status.LOCKED_DAMAGED, state.status());
+		assertEquals(mine(2), state.blockedAt());
+		assertEquals(List.of(theirs(1)), ids(state.chain()));
+		assertTrue(state.pending().isEmpty());
+		assertTrue(state.lost().isEmpty());
+		assertEquals(theirs(1), state.current().id());
+		assertFalse(state.provisional());
+	}
+
+	@Test
+	void skippedClaimedOwnVersionIsNotLostWithItsDescendant() throws IOException {
+		// d (eigen, beschaedigt) hat seinen Anspruch bekommen und r folgt ihm; e baut unbeansprucht auf d.
+		UnitState state = new Unit().version(theirs(1)).version(mine(2), theirs(1)).version(theirs(3), mine(2))
+				.version(mine(4), mine(2)).claim("root", theirs(1)).claim(theirs(1).value(), mine(2), "0".repeat(64))
+				.claim(mine(2).value(), theirs(3)).resolve();
+
+		assertEquals(Status.OK, state.status());
+		assertEquals(List.of(theirs(1), theirs(3)), ids(state.chain()));
+		assertEquals(theirs(3), state.head().id());
+		assertTrue(state.pending().isEmpty());
+		assertEquals(List.of(List.of(mine(4))), state.lost());
 	}
 
 	@Test

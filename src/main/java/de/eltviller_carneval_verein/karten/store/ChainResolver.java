@@ -43,7 +43,6 @@ public final class ChainResolver {
 		Map<String, ClaimFile> claims = files.claims();
 
 		List<Version> chain = new ArrayList<>();
-		Set<VersionId> chainIds = new HashSet<>();
 		Set<VersionId> visited = new HashSet<>();
 		Status status = Status.OK;
 		VersionId blockedAt = null;
@@ -75,7 +74,6 @@ public final class ChainResolver {
 			boolean intact = file.version() != null && StoreCodec.sha256(file.bytes()).equals(claim.sha256());
 			if (intact) {
 				chain.add(file.version());
-				chainIds.add(target);
 			} else if (!claims.containsKey(target.value())) {
 				status = Status.LOCKED_DAMAGED;
 				blockedAt = target;
@@ -89,7 +87,7 @@ public final class ChainResolver {
 		List<Version> pending = new ArrayList<>();
 		List<List<VersionId>> lost = new ArrayList<>();
 		Set<VersionId> assigned = new HashSet<>();
-		for (Stretch stretch : ownStretches(versions, chainIds, ownMachineId)) {
+		for (Stretch stretch : ownStretches(versions, visited, ownMachineId)) {
 			boolean isPending = status == Status.WAITING || buildsOnHead(stretch.base(), headId);
 			// Gehört eine Version zu mehreren Spitzen, steht sie nur in der ersten Strecke.
 			List<Version> fresh = stretch.versions().stream().filter(v -> assigned.add(v.id())).toList();
@@ -106,30 +104,43 @@ public final class ChainResolver {
 	}
 
 	/**
-	 * Die Strecken eigener Versionen außerhalb der Kette: je Spitze (eigene lesbare Version, die weder in der Kette
-	 * liegt noch von einer lesbaren Version als Vorgänger genannt wird) die Versionen zurück entlang des ersten
-	 * Vorgängers, solange sie eigen und nicht in der Kette sind. Die Strecken sind nach der ID ihrer ältesten
-	 * Version geordnet.
+	 * Die Strecken eigener Versionen außerhalb der Kette: je Spitze (eigene lesbare Version, die weder beansprucht
+	 * noch zusammengeführt ist noch von einer lesbaren Version als Vorgänger genannt wird) die Versionen zurück
+	 * entlang des ersten Vorgängers, solange sie eigen, nicht beansprucht und nicht zusammengeführt sind. Die
+	 * Strecken sind nach der ID ihrer ältesten Version geordnet.
+	 * <p>
+	 * Beansprucht ist jede Version, die eine Anspruchsdatei der Kette nennt (auch eine beschädigte oder übersprungene);
+	 * sie hat ihren Platz bekommen und ist nie ausstehend oder verloren. Zusammengeführt ist eine Version, die eine
+	 * lesbare Version als weiteren (nicht ersten) Vorgänger nennt; ihr Inhalt steckt schon in dieser Version und sie wird
+	 * nicht noch einmal gemeldet. In beiden Fällen endet die Strecke dort, und diese Version ist ihre Basis.
+	 *
+	 * @param claimedIds die Versionen, die eine Anspruchsdatei der Kette nennt
 	 */
-	private static List<Stretch> ownStretches(Map<VersionId, VersionFile> versions, Set<VersionId> chainIds,
+	private static List<Stretch> ownStretches(Map<VersionId, VersionFile> versions, Set<VersionId> claimedIds,
 			String ownMachineId) {
 		Set<VersionId> named = new HashSet<>();
+		Set<VersionId> merged = new HashSet<>();
 		for (VersionFile file : versions.values()) {
 			if (file.version() != null) {
-				named.addAll(file.version().parents());
+				List<VersionId> parents = file.version().parents();
+				named.addAll(parents);
+				if (parents.size() > 1) {
+					merged.addAll(parents.subList(1, parents.size()));
+				}
 			}
 		}
 		List<Stretch> stretches = new ArrayList<>();
 		for (VersionFile file : versions.values()) {
 			Version tip = file.version();
-			if (tip == null || !isOwn(tip, ownMachineId) || chainIds.contains(tip.id()) || named.contains(tip.id())) {
+			if (tip == null || !isOwn(tip, ownMachineId) || claimedIds.contains(tip.id()) || merged.contains(tip.id())
+					|| named.contains(tip.id())) {
 				continue;
 			}
 			List<Version> stretch = new ArrayList<>();
 			Set<VersionId> seen = new HashSet<>();
 			Version current = tip;
-			while (current != null && isOwn(current, ownMachineId) && !chainIds.contains(current.id())
-					&& seen.add(current.id())) {
+			while (current != null && isOwn(current, ownMachineId) && !claimedIds.contains(current.id())
+					&& !merged.contains(current.id()) && seen.add(current.id())) {
 				stretch.add(0, current);
 				VersionId parent = current.firstParent();
 				VersionFile parentFile = parent == null ? null : versions.get(parent);
