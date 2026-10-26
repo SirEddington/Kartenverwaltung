@@ -96,21 +96,52 @@ class MachineIdentityTest {
 	}
 
 	@Test
-	void incompleteOrInvalidContentCountsAsBroken() throws IOException {
-		List<String> broken = List.of("", "[]", "{}", "{\"id\":\"abcdefghijklmnopqrstuvwxyz\"}", "{\"name\":\"X\"}",
-				"{\"id\":\"ABCDEFGHIJKLMNOPQRSTUVWXYZ\",\"name\":\"X\"}", "{\"id\":\"abc\",\"name\":\"X\"}",
-				"{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"name\":5}", "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"name\":\" \"}");
+	void missingOrInvalidIdCountsAsBroken() throws IOException {
+		List<String> broken = List.of("", "[]", "{}", "{\"name\":\"X\"}", "{\"id\":5,\"name\":\"X\"}",
+				"{\"id\":\"ABCDEFGHIJKLMNOPQRSTUVWXYZ\",\"name\":\"X\"}", "{\"id\":\"abc\",\"name\":\"X\"}");
 		for (String content : broken) {
 			Files.writeString(machineFile(), content, StandardCharsets.UTF_8);
 
 			MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "NEU", CLOCK);
 
 			assertEquals("NEU", machine.name(), content);
-			assertNotEquals("abcdefghijklmnopqrstuvwxyz", machine.id(), content);
+			assertTrue(machine.id().matches("[0-9a-z]{26}"), content);
+			assertEquals(List.of("machine.json", "machine.json.corrupt-2026-10-26_13-45-07"), names(), content);
+			assertEquals(content, Files.readString(dir.resolve("machine.json.corrupt-2026-10-26_13-45-07")), content);
 			Files.delete(machineFile());
-			Files.deleteIfExists(dir.resolve("machine.json.corrupt-2026-10-26_13-45-07"));
-			Files.deleteIfExists(dir.resolve("machine.json.corrupt-2026-10-26_13-45-07-2"));
+			Files.delete(dir.resolve("machine.json.corrupt-2026-10-26_13-45-07"));
 		}
+	}
+
+	@Test
+	void validIdWithBadNameKeepsIdAndRepairsName() throws IOException {
+		String id = "abcdefghijklmnopqrstuvwxyz";
+		List<String> badNames = List.of("{\"id\":\"" + id + "\"}", "{\"id\":\"" + id + "\",\"name\":5}",
+				"{\"id\":\"" + id + "\",\"name\":null}", "{\"id\":\"" + id + "\",\"name\":\" \"}",
+				"{\"id\":\"" + id + "\",\"name\":\"\"}");
+		for (String content : badNames) {
+			Files.writeString(machineFile(), content, StandardCharsets.UTF_8);
+
+			MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "NEU", CLOCK);
+
+			assertEquals(id, machine.id(), content);
+			assertEquals("NEU", machine.name(), content);
+			assertEquals(List.of("machine.json"), names(), content);
+			MachineIdentity reloaded = MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK);
+			assertEquals(id, reloaded.id(), content);
+			assertEquals("NEU", reloaded.name(), content);
+			Files.delete(machineFile());
+		}
+	}
+
+	@Test
+	void validIdWithBadNameFallsBackToRechnerWithoutComputerName() throws IOException {
+		Files.writeString(machineFile(), "{\"id\":\"abcdefghijklmnopqrstuvwxyz\"}", StandardCharsets.UTF_8);
+
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> null, CLOCK);
+
+		assertEquals("abcdefghijklmnopqrstuvwxyz", machine.id());
+		assertEquals("Rechner", machine.name());
 	}
 
 	@Test

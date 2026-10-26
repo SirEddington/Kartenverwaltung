@@ -71,8 +71,10 @@ public final class MachineIdentity {
 
 	/**
 	 * Lädt die Kennung aus {@code machine.json} im Datenordner oder legt sie an. Fehlt die Datei, entsteht eine neue ID,
-	 * der Name ist der Computername (oder "Rechner", wenn der Lieferant nichts oder nur Leerraum liefert). Ist die Datei
-	 * beschädigt (kein JSON, Felder fehlen, ID nicht aus 26 Zeichen {@code [0-9a-z]}), wird sie nach
+	 * der Name ist der Computername (oder "Rechner", wenn der Lieferant nichts oder nur Leerraum liefert). Hat die Datei
+	 * eine gültige ID, aber keinen brauchbaren Namen (fehlt, kein Text, leer), bleibt die ID; der Name wird wie bei einer
+	 * neuen Kennung vorbelegt und die Datei neu geschrieben, ohne Kopie. Ist die Datei sonst beschädigt (kein JSON-Objekt,
+	 * ID fehlt oder nicht aus 26 Zeichen {@code [0-9a-z]}), wird sie nach
 	 * {@code machine.json.corrupt-<yyyy-MM-dd_HH-mm-ss>} umbenannt (nie überschrieben, bei Namensgleichheit mit Zusatz
 	 * {@code -2}, {@code -3} …) und eine neue Kennung angelegt; gelöscht wird nichts.
 	 *
@@ -86,37 +88,53 @@ public final class MachineIdentity {
 		Path file = appDataDir.resolve(FILE_NAME);
 		if (Files.exists(file)) {
 			byte[] bytes = Files.readAllBytes(file);
-			MachineIdentity loaded = parse(file, bytes);
-			if (loaded != null) {
-				return loaded;
+			JsonNode node = parseObject(bytes);
+			String id = validId(node);
+			if (id != null) {
+				String name = validName(node);
+				if (name != null) {
+					return new MachineIdentity(file, id, name, null);
+				}
+				// Gültige ID, aber Name fehlt oder ist unbrauchbar: die ID bleibt (sonst wären die eigenen Versionen und der
+				// eigene Listenordner plötzlich fremd), nur der Name wird neu vorbelegt und die Datei neu geschrieben.
+				MachineIdentity repaired = new MachineIdentity(file, id, nameFrom(computerName), null);
+				repaired.write(id, repaired.name);
+				return repaired;
 			}
 			moveAsideCorrupt(file, clock);
 		}
-		String supplied = computerName.get();
-		String name = supplied == null || supplied.isBlank() ? DEFAULT_NAME : supplied.trim();
+		String name = nameFrom(computerName);
 		MachineIdentity created = new MachineIdentity(file, newId(), name, null);
 		created.write(created.id, name);
 		return created;
 	}
 
-	/** Die Kennung aus dem Inhalt der Datei oder {@code null}, wenn sie beschädigt ist. */
-	private static MachineIdentity parse(Path file, byte[] bytes) {
-		JsonNode node;
+	/** Der Computername als Anzeigename; "Rechner", wenn der Lieferant nichts oder nur Leerraum liefert. */
+	private static String nameFrom(Supplier<String> computerName) {
+		String supplied = computerName.get();
+		return supplied == null || supplied.isBlank() ? DEFAULT_NAME : supplied.trim();
+	}
+
+	/** Der Inhalt als JSON-Objekt oder {@code null}, wenn er kein JSON-Objekt ist. */
+	private static JsonNode parseObject(byte[] bytes) {
 		try {
-			node = MAPPER.readTree(bytes);
+			JsonNode node = MAPPER.readTree(bytes);
+			return node != null && node.isObject() ? node : null;
 		} catch (IOException e) {
 			return null;
 		}
-		if (node == null || !node.isObject()) {
-			return null;
-		}
-		JsonNode id = node.get("id");
+	}
+
+	/** Die ID aus dem Objekt oder {@code null}, wenn sie fehlt oder nicht aus 26 Zeichen {@code [0-9a-z]} besteht. */
+	private static String validId(JsonNode node) {
+		JsonNode id = node == null ? null : node.get("id");
+		return id != null && id.isTextual() && ID_PATTERN.matcher(id.asText()).matches() ? id.asText() : null;
+	}
+
+	/** Der Name aus dem Objekt oder {@code null}, wenn er fehlt, kein Text oder leer ist. */
+	private static String validName(JsonNode node) {
 		JsonNode name = node.get("name");
-		if (id == null || !id.isTextual() || !ID_PATTERN.matcher(id.asText()).matches() || name == null || !name.isTextual()
-				|| name.asText().isBlank()) {
-			return null;
-		}
-		return new MachineIdentity(file, id.asText(), name.asText(), null);
+		return name != null && name.isTextual() && !name.asText().isBlank() ? name.asText() : null;
 	}
 
 	/** Benennt die beschädigte Datei um, ohne eine vorhandene Kopie zu überschreiben. */
