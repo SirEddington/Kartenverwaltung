@@ -250,7 +250,7 @@ class FeedReaderTest {
 		FeedPoll poll = reader.poll();
 
 		assertEquals(List.of(new PendingSighting(UNIT, V1, "Kasse 2")), poll.pending());
-		assertTrue(poll.changed().isEmpty());
+		assertEquals(Set.of(UNIT), poll.changed(), "die neue Versionsdatei wird gemeldet, die Einheit bleibt ungültig");
 		assertFalse(poll.fullSyncNeeded());
 		assertTrue(local.readVersionBytes(UNIT, V1).isPresent(), "die Versionsdatei liegt schon lokal");
 		assertTrue(local.readClaimBytes(UNIT, "root").isEmpty());
@@ -352,6 +352,8 @@ class FeedReaderTest {
 		byte[] bytes = putVersion(UNIT, version);
 		putFeed(PEER_A, 1, entry(UNIT, version));
 		byte[] claimBytes = putClaim(UNIT, version, bytes);
+		// Version und Anspruch liegen schon lokal (etwa vom Vollabgleich): es gibt nichts zu melden
+		assertTrue(local.writeVersion(UNIT, V1, bytes));
 		assertTrue(local.createClaim(UNIT, "root", claimBytes));
 
 		FeedPoll poll = reader.poll();
@@ -553,25 +555,85 @@ class FeedReaderTest {
 	}
 
 	@Test
-	void jumpToLatestForgetsWatchesAndWaitingFeeds() throws IOException {
+	void jumpToLatestForgetsWaitingFeeds() throws IOException {
+		positions.set(PEER_A, 0);
+		Version missing = version(PEER_A, "Kasse 2", V1);
+		putFeed(PEER_A, 1, entry(UNIT, missing));
+		putFeed(PEER_A, 2);
+		reader.poll();
+		assertEquals(0L, positions.position(PEER_A));
+
+		reader.jumpToLatest();
+		clock.advance(Duration.ofMinutes(10));
+		FeedPoll poll = reader.poll();
+
+		assertTrue(poll.changed().isEmpty());
+		assertFalse(poll.fullSyncNeeded(), "die Wartezeit der übersprungenen Liste läuft nicht weiter");
+		assertEquals(2L, positions.position(PEER_A));
+	}
+
+	@Test
+	void watchSurvivesJumpToLatest() throws IOException {
 		positions.set(PEER_A, 0);
 		Version version = version(PEER_A, "Kasse 2", V1);
 		byte[] bytes = putVersion(UNIT, version);
 		putFeed(PEER_A, 1, entry(UNIT, version));
 		assertEquals(1, reader.poll().pending().size());
-		Version missing = version(PEER_A, "Kasse 2", V2, V1);
-		putFeed(PEER_A, 2, entry(UNIT, missing));
-		reader.poll();
-		assertEquals(1L, positions.position(PEER_A));
 
+		// Vollabgleich: der Anspruch fehlt noch, erscheint aber kurz danach
 		reader.jumpToLatest();
-		putClaim(UNIT, version, bytes);
-		clock.advance(Duration.ofMinutes(10));
+		clock.advance(Duration.ofMinutes(1));
+		byte[] claimBytes = putClaim(UNIT, version, bytes);
 		FeedPoll poll = reader.poll();
 
-		assertTrue(poll.changed().isEmpty());
-		assertFalse(poll.fullSyncNeeded());
-		assertEquals(2L, positions.position(PEER_A));
+		assertEquals(Set.of(UNIT), poll.changed());
+		assertArrayEquals(claimBytes, local.readClaimBytes(UNIT, "root").orElseThrow());
+	}
+
+	@Test
+	void versionCopiedAfterItsClaimReportsTheUnit() throws IOException {
+		positions.set(PEER_A, 0);
+		positions.set(PEER_B, 0);
+		Version mine = version(PEER_A, "Kasse 2", V1);
+		putVersion(UNIT, mine);
+		putFeed(PEER_A, 1, entry(UNIT, mine));
+		reader.poll();
+
+		// Der Anspruch des Gewinners erscheint vor seiner Versionsdatei und kommt über die Beobachtung lokal an
+		Version winner = version(PEER_B, "Kasse 3", FOREIGN);
+		byte[] winnerBytes = StoreCodec.write(winner);
+		putClaim(UNIT, winner, winnerBytes);
+		assertEquals(Set.of(UNIT), reader.poll().changed());
+		assertTrue(local.readVersionBytes(UNIT, FOREIGN).isEmpty());
+
+		// Dann kommt seine Liste mit der Versionsdatei: die Einheit ist erst jetzt gültig und muss gemeldet werden
+		assertTrue(shared.writeVersion(UNIT, FOREIGN, winnerBytes));
+		putFeed(PEER_B, 1, entry(UNIT, winner));
+		FeedPoll poll = reader.poll();
+
+		assertEquals(Set.of(UNIT), poll.changed());
+		assertTrue(local.readVersionBytes(UNIT, FOREIGN).isPresent());
+	}
+
+	@Test
+	void resultsOfAFailedPollSurviveJumpToLatest() throws IOException {
+		positions.set(PEER_A, 0);
+		positions.set(PEER_B, 0);
+		sell(PEER_A, 1, UNIT, version(PEER_A, "Kasse 2", V1));
+		sell(PEER_B, 1, UNIT2, version(PEER_B, "Kasse 3", FOREIGN));
+		AtomicBoolean broken = new AtomicBoolean(true);
+		sharedLayer.failWhen(p -> broken.get() && p.toString().contains(PEER_B) && p.toString().endsWith("1.json"), "read",
+				new IOException("Störung"));
+		assertThrows(IOException.class, () -> reader.poll());
+		assertTrue(local.readClaimBytes(UNIT, "root").isPresent(), "der Anspruch von A liegt schon lokal");
+
+		// Der Vollabgleich nach dem Wiederverbinden meldet UNIT nicht mehr, denn der Anspruch ist schon da
+		broken.set(false);
+		reader.jumpToLatest();
+		FeedPoll poll = reader.poll();
+
+		assertEquals(Set.of(UNIT), poll.changed());
+		assertEquals(1L, positions.position(PEER_B));
 	}
 
 	@Test

@@ -43,7 +43,6 @@ public final class FeedReader {
 
 	private static final Pattern MACHINE_ID = Pattern.compile("[0-9a-z]{26}");
 	private static final String FEEDS = "feeds";
-	private static final String JSON = ".json";
 
 	/** Eine beobachtete Anspruchsdatei. */
 	private record Watch(UnitKey unit, VersionId version, String claimName) {
@@ -127,19 +126,19 @@ public final class FeedReader {
 
 	/**
 	 * Setzt die Position jedes Rechners im gemeinsamen Ordner auf die höchste vorhandene Nummer und speichert sie, nach
-	 * einem Vollabgleich. Beobachtungen, wartende Listen und noch nicht gemeldete Ergebnisse entfallen, denn der
-	 * Vollabgleich hat den Bestand schon abgeglichen.
+	 * einem Vollabgleich. Wartende Listen und der Wunsch nach einem Vollabgleich entfallen, denn der Vollabgleich hat
+	 * den Bestand schon abgeglichen. Beobachtete Ansprüche bleiben, damit einer, der kurz nach dem Vollabgleich
+	 * erscheint, noch übernommen wird; auch noch nicht gemeldete Ergebnisse bleiben und kommen mit dem nächsten
+	 * {@link #poll()}, denn der Vollabgleich meldet einen Anspruch nicht, den ein früherer Durchlauf schon lokal angelegt
+	 * hat.
 	 */
 	public synchronized void jumpToLatest() throws IOException {
 		for (String id : peerDirectories()) {
-			positions.set(id, highestNumber(id));
+			positions.set(id, Feeds.highestFeedNumber(shared, id));
 		}
 		positions.save();
 		positionsDirty = false;
-		watched.clear();
 		waiting.clear();
-		changed.clear();
-		pending.clear();
 		fullSyncNeeded = false;
 	}
 
@@ -166,27 +165,6 @@ public final class FeedReader {
 			}
 		}
 		return ids;
-	}
-
-	/** Die höchste Nummer unter den Dateien {@code <Nr>.json} im Ordner des Rechners; 0, wenn es keine gibt. */
-	private long highestNumber(String machineId) throws IOException {
-		long highest = 0;
-		for (String name : shared.listRelative(FEEDS + "/" + machineId)) {
-			if (!name.endsWith(JSON)) {
-				continue;
-			}
-			String stem = name.substring(0, name.length() - JSON.length());
-			try {
-				long number = Long.parseLong(stem);
-				// nur die kanonische Schreibweise: "007" oder "+7" zählen nicht
-				if (number > 0 && stem.equals(Long.toString(number))) {
-					highest = Math.max(highest, number);
-				}
-			} catch (NumberFormatException e) {
-				// kein Listenname
-			}
-		}
-		return highest;
 	}
 
 	/** Prüft alle Beobachtungen: Anspruch erschienen (übernehmen) oder abgelaufen (stillschweigend entfernen). */
@@ -219,7 +197,7 @@ public final class FeedReader {
 		long position = positions.position(peer);
 		while (left > 0) {
 			long seq = position + 1;
-			Optional<byte[]> bytes = shared.readRelative(FEEDS + "/" + peer + "/" + seq + JSON);
+			Optional<byte[]> bytes = shared.readRelative(Feeds.feedPath(peer, seq));
 			if (bytes.isEmpty()) {
 				break;
 			}
@@ -264,8 +242,13 @@ public final class FeedReader {
 				continue;
 			}
 			valid.add(entry);
-			if (!fetchVersion(unit.get(), entry.version())) {
+			VersionFetch fetch = fetchVersion(unit.get(), entry.version());
+			if (fetch == VersionFetch.MISSING) {
 				versionMissing = true;
+			} else if (fetch == VersionFetch.COPIED) {
+				// Lag der Anspruch schon lokal (über eine Beobachtung), war die Einheit bis jetzt "wartend"; jetzt ist
+				// sie gültig, und niemand sonst meldet das
+				changed.add(unit.get());
 			}
 		}
 		if (versionMissing) {
@@ -289,17 +272,26 @@ public final class FeedReader {
 		return "root".equals(name) || VersionId.isValid(name);
 	}
 
-	/** Stellt sicher, dass die Versionsdatei lokal liegt; {@code false}, wenn sie auch im gemeinsamen Ordner fehlt. */
-	private boolean fetchVersion(UnitKey unit, VersionId id) throws IOException {
+	/** Was {@link #fetchVersion} mit einer Versionsdatei erreicht hat. */
+	private enum VersionFetch {
+		/** Die Datei lag schon lokal. */
+		PRESENT,
+		/** Die Datei wurde jetzt aus dem gemeinsamen Ordner kopiert. */
+		COPIED,
+		/** Die Datei fehlt lokal und im gemeinsamen Ordner. */
+		MISSING
+	}
+
+	/** Stellt sicher, dass die Versionsdatei lokal liegt, und kopiert sie dazu, wenn sie fehlt. */
+	private VersionFetch fetchVersion(UnitKey unit, VersionId id) throws IOException {
 		if (local.readVersionBytes(unit, id).isPresent()) {
-			return true;
+			return VersionFetch.PRESENT;
 		}
 		Optional<byte[]> bytes = shared.readVersionBytes(unit, id);
 		if (bytes.isEmpty()) {
-			return false;
+			return VersionFetch.MISSING;
 		}
-		local.writeVersion(unit, id, bytes.get());
-		return true;
+		return local.writeVersion(unit, id, bytes.get()) ? VersionFetch.COPIED : VersionFetch.PRESENT;
 	}
 
 	/** Holt die Anspruchsdatei des Eintrags oder beobachtet sie, wenn sie noch fehlt. */

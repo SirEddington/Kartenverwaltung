@@ -45,12 +45,12 @@ public final class FeedWriter {
 	 */
 	public synchronized long append(List<FeedEntry> entries) throws IOException {
 		if (next == 0) {
-			next = highestExisting() + 1;
+			next = Feeds.highestFeedNumber(shared, machineId) + 1;
 		}
 		long seq = next;
 		List<FeedEntry> copy = List.copyOf(entries);
 		Feed feed = new Feed(StoreCodec.FORMAT, machineId, seq, Instant.now(clock), copy);
-		String rel = folder() + "/" + seq + ".json";
+		String rel = Feeds.feedPath(machineId, seq);
 		boolean created;
 		try {
 			created = shared.createRelative(rel, StoreCodec.write(feed));
@@ -94,28 +94,4 @@ public final class FeedWriter {
 		}
 	}
 
-	private String folder() {
-		return "feeds/" + machineId;
-	}
-
-	/** Die höchste Nummer unter den Dateien {@code <Nr>.json} des Ordners; 0, wenn es keine gibt. Andere Namen zählen nicht. */
-	private long highestExisting() throws IOException {
-		long highest = 0;
-		for (String name : shared.listRelative(folder())) {
-			if (!name.endsWith(".json")) {
-				continue;
-			}
-			String stem = name.substring(0, name.length() - ".json".length());
-			try {
-				long number = Long.parseLong(stem);
-				// nur die kanonische Schreibweise: "007" oder "+7" zählen nicht
-				if (number > 0 && stem.equals(Long.toString(number))) {
-					highest = Math.max(highest, number);
-				}
-			} catch (NumberFormatException e) {
-				// kein Listenname
-			}
-		}
-		return highest;
-	}
 }
