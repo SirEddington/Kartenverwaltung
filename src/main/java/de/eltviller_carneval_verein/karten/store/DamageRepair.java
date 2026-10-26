@@ -21,9 +21,14 @@ public final class DamageRepair {
 
 	/** Ergebnis einer Heilung. */
 	public enum Outcome {
-		/** Es war nichts zu heilen: die Kopien sind gut oder gleich, oder es fehlt nur eine Kopie (das holt der Abgleich). */
+		/**
+		 * Es war nichts zu heilen: die Kopien sind gut, beide Anspruchsdateien lesbar (auch wenn sie verschiedene Versionen
+		 * nennen: das ist eine Niederlage, keine Beschädigung), eine Datei hat ein neueres Format, oder es fehlt nur die
+		 * gemeinsame Kopie bzw. die lokale Anspruchsdatei (das holt der Abgleich). Eine fehlende lokale Versionsdatei
+		 * neben einer guten gemeinsamen wird dagegen neu angelegt: {@link #REPAIRED_LOCAL}.
+		 */
 		NOT_DAMAGED,
-		/** Die lokale Kopie wurde durch die gemeinsame ersetzt oder neu angelegt. */
+		/** Die lokale Kopie wurde durch die gemeinsame ersetzt oder, wenn sie fehlte, neu angelegt. */
 		REPAIRED_LOCAL,
 		/** Die gemeinsame Kopie wurde durch die lokale ersetzt. */
 		REPAIRED_SHARED,
@@ -31,14 +36,31 @@ public final class DamageRepair {
 		NO_GOOD_COPY
 	}
 
+	/**
+	 * Was die Heilung getan hat, mit den Pfaden für die Meldung SYS-007.
+	 *
+	 * @param outcome     das Ergebnis
+	 * @param replaced    die Datei, die ersetzt oder (bei fehlender lokaler Versionsdatei) neu angelegt wurde; sonst
+	 *                    {@code null}
+	 * @param corruptCopy der Pfad, unter dem die beschädigte Datei daneben liegt; {@code null}, wenn nichts umbenannt wurde
+	 *                    (nichts zu heilen, keine gute Kopie, oder die Datei fehlte)
+	 */
+	public record Result(Outcome outcome, Path replaced, Path corruptCopy) {
+
+		private static Result none(Outcome outcome) {
+			return new Result(outcome, null, null);
+		}
+	}
+
 	private static final String JSON = ".json";
 	private static final DateTimeFormatter CORRUPT_STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
-	/** Zustand einer Kopie: nicht vorhanden, gut oder beschädigt; {@code bytes} nur, wenn vorhanden. */
+	/** Zustand einer Kopie: nicht vorhanden, gut, beschädigt oder mit neuerem Format (nicht beschädigt, nicht lesbar). */
 	private enum State {
 		MISSING, GOOD, DAMAGED, UNKNOWN_FORMAT
 	}
 
+	/** Eine Kopie mit ihrem Zustand; {@code bytes} ist {@code null}, wenn sie fehlt. */
 	private record Copy(State state, byte[] bytes) {
 	}
 
@@ -66,73 +88,69 @@ public final class DamageRepair {
 	 * gemeinsame ist kein Fall der Heilung (der Abgleich lädt sie hoch).
 	 *
 	 * @param claim die Anspruchsdatei, die die Version nennt und ihren Prüfwert enthält
-	 * @return was getan wurde; {@link Outcome#NO_GOOD_COPY}, wenn eine Kopie beschädigt ist und keine gute da ist
+	 * @return was getan wurde; {@link Outcome#NO_GOOD_COPY}, wenn eine Kopie beschädigt ist und keine gute da ist.
+	 *         {@link Result#replaced()} ist die ersetzte oder neu angelegte Datei, {@link Result#corruptCopy()} der Pfad
+	 *         der beschädigten Datei daneben (bei einer neu angelegten fehlt er)
 	 */
-	public Outcome repairVersion(UnitKey unit, Claim claim) throws IOException {
+	public Result repairVersion(UnitKey unit, Claim claim) throws IOException {
 		VersionId id = claim.version();
 		Copy localCopy = checkVersion(local.readVersionBytes(unit, id), claim.sha256());
 		if (shared == null) {
-			return localCopy.state() == State.DAMAGED ? Outcome.NO_GOOD_COPY : Outcome.NOT_DAMAGED;
+			return Result.none(localCopy.state() == State.DAMAGED ? Outcome.NO_GOOD_COPY : Outcome.NOT_DAMAGED);
 		}
 		Copy sharedCopy = checkVersion(shared.readVersionBytes(unit, id), claim.sha256());
 		if (localCopy.state() == State.GOOD && sharedCopy.state() == State.DAMAGED) {
-			files.replaceDamaged(shared.resolve(versionRel(unit, id)), localCopy.bytes(),
-					corruptName(shared.resolve(versionRel(unit, id))));
-			return Outcome.REPAIRED_SHARED;
+			return replace(shared.resolve(versionRel(unit, id)), localCopy.bytes(), Outcome.REPAIRED_SHARED);
 		}
 		if (sharedCopy.state() == State.GOOD && localCopy.state() == State.DAMAGED) {
-			Path file = local.resolve(versionRel(unit, id));
-			files.replaceDamaged(file, sharedCopy.bytes(), corruptName(file));
-			return Outcome.REPAIRED_LOCAL;
+			return replace(local.resolve(versionRel(unit, id)), sharedCopy.bytes(), Outcome.REPAIRED_LOCAL);
 		}
 		if (sharedCopy.state() == State.GOOD && localCopy.state() == State.MISSING) {
 			// Lokal fehlt die Datei nur: anlegen (war sie inzwischen da, ist nichts zu tun)
-			return local.writeVersion(unit, id, sharedCopy.bytes()) ? Outcome.REPAIRED_LOCAL : Outcome.NOT_DAMAGED;
+			return local.writeVersion(unit, id, sharedCopy.bytes())
+					? new Result(Outcome.REPAIRED_LOCAL, local.resolve(versionRel(unit, id)), null)
+					: Result.none(Outcome.NOT_DAMAGED);
 		}
 		boolean anyDamaged = localCopy.state() == State.DAMAGED || sharedCopy.state() == State.DAMAGED;
 		boolean anyGood = localCopy.state() == State.GOOD || sharedCopy.state() == State.GOOD;
-		return anyDamaged && !anyGood ? Outcome.NO_GOOD_COPY : Outcome.NOT_DAMAGED;
+		return Result.none(anyDamaged && !anyGood ? Outcome.NO_GOOD_COPY : Outcome.NOT_DAMAGED);
 	}
 
 	/**
-	 * Ersetzt eine unlesbare Anspruchsdatei durch die lesbare der anderen Seite. Sind beide lesbar, aber nennen
-	 * verschiedene Versionen, gilt der gemeinsame Ordner und die lokale wird ersetzt. Eine fehlende lokale Anspruchsdatei
-	 * ist kein Fall der Heilung (der Abgleich kopiert sie), ebenso eine Datei mit höherem Format (neueres Programm).
+	 * Ersetzt eine unlesbare Anspruchsdatei durch die lesbare der anderen Seite. Sind beide lesbar, ist nichts zu heilen,
+	 * auch wenn sie verschiedene Versionen nennen: Das ist eine Niederlage (Abgleich, Hochladen und späte Niederlage
+	 * entscheiden darüber), keine Beschädigung. Eine fehlende lokale Anspruchsdatei ist ebenfalls kein Fall der Heilung
+	 * (der Abgleich kopiert sie), ebenso eine Datei mit höherem Format (neueres Programm).
 	 *
 	 * @param claimName {@code root} oder die ID des Vorgängers
-	 * @return was getan wurde; {@link Outcome#NO_GOOD_COPY}, wenn keine Seite lesbar ist
+	 * @return was getan wurde; {@link Outcome#NO_GOOD_COPY}, wenn keine Seite lesbar ist. {@link Result#replaced()} ist
+	 *         die ersetzte Datei, {@link Result#corruptCopy()} der Pfad der unlesbaren Datei daneben
 	 */
-	public Outcome repairClaim(UnitKey unit, String claimName) throws IOException {
+	public Result repairClaim(UnitKey unit, String claimName) throws IOException {
 		Copy localCopy = checkClaim(local.readClaimBytes(unit, claimName));
 		if (shared == null) {
-			return localCopy.state() == State.DAMAGED ? Outcome.NO_GOOD_COPY : Outcome.NOT_DAMAGED;
+			return Result.none(localCopy.state() == State.DAMAGED ? Outcome.NO_GOOD_COPY : Outcome.NOT_DAMAGED);
 		}
 		Copy sharedCopy = checkClaim(shared.readClaimBytes(unit, claimName));
 		if (localCopy.state() == State.UNKNOWN_FORMAT || sharedCopy.state() == State.UNKNOWN_FORMAT) {
-			return Outcome.NOT_DAMAGED;
+			return Result.none(Outcome.NOT_DAMAGED);
 		}
 		if (localCopy.state() == State.GOOD && sharedCopy.state() == State.DAMAGED) {
-			Path file = shared.resolve(claimRel(unit, claimName));
-			files.replaceDamaged(file, localCopy.bytes(), corruptName(file));
-			return Outcome.REPAIRED_SHARED;
+			return replace(shared.resolve(claimRel(unit, claimName)), localCopy.bytes(), Outcome.REPAIRED_SHARED);
 		}
 		if (sharedCopy.state() == State.GOOD && localCopy.state() == State.DAMAGED) {
-			return replaceLocalClaim(unit, claimName, sharedCopy.bytes());
-		}
-		if (localCopy.state() == State.GOOD && sharedCopy.state() == State.GOOD) {
-			Claim localClaim = StoreCodec.readClaim(localCopy.bytes());
-			Claim sharedClaim = StoreCodec.readClaim(sharedCopy.bytes());
-			return localClaim.version().equals(sharedClaim.version()) ? Outcome.NOT_DAMAGED
-					: replaceLocalClaim(unit, claimName, sharedCopy.bytes());
+			return replace(local.resolve(claimRel(unit, claimName)), sharedCopy.bytes(), Outcome.REPAIRED_LOCAL);
 		}
 		boolean anyDamaged = localCopy.state() == State.DAMAGED || sharedCopy.state() == State.DAMAGED;
-		return anyDamaged ? Outcome.NO_GOOD_COPY : Outcome.NOT_DAMAGED;
+		boolean anyGood = localCopy.state() == State.GOOD || sharedCopy.state() == State.GOOD;
+		return Result.none(anyDamaged && !anyGood ? Outcome.NO_GOOD_COPY : Outcome.NOT_DAMAGED);
 	}
 
-	private Outcome replaceLocalClaim(UnitKey unit, String claimName, byte[] good) throws IOException {
-		Path file = local.resolve(claimRel(unit, claimName));
-		files.replaceDamaged(file, good, corruptName(file));
-		return Outcome.REPAIRED_LOCAL;
+	/** Ersetzt die beschädigte Datei durch die gute Fassung und behält sie unter einem neuen {@code .corrupt-}-Namen. */
+	private Result replace(Path file, byte[] good, Outcome outcome) throws IOException {
+		String corruptName = corruptName(file);
+		files.replaceDamaged(file, good, corruptName);
+		return new Result(outcome, file, file.resolveSibling(corruptName));
 	}
 
 	/** Gut ist eine vorhandene Versionsdatei, deren SHA-256 dem Prüfwert der Anspruchsdatei entspricht. */

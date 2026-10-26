@@ -20,6 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import de.eltviller_carneval_verein.karten.store.DamageRepair.Outcome;
+import de.eltviller_carneval_verein.karten.store.DamageRepair.Result;
 
 class DamageRepairTest {
 
@@ -81,9 +82,11 @@ class DamageRepairTest {
 		local.writeVersion(UNIT, V1, damaged());
 		shared.writeVersion(UNIT, V1, good);
 
-		Outcome outcome = repair().repairVersion(UNIT, claimFor(good));
+		Result result = repair().repairVersion(UNIT, claimFor(good));
 
-		assertEquals(Outcome.REPAIRED_LOCAL, outcome);
+		assertEquals(Outcome.REPAIRED_LOCAL, result.outcome());
+		assertEquals(versionPath(local), result.replaced());
+		assertEquals(versionPath(local).resolveSibling(V1 + ".json.corrupt-" + STAMP), result.corruptCopy());
 		assertArrayEquals(good, local.readVersionBytes(UNIT, V1).orElseThrow());
 		assertArrayEquals(good, shared.readVersionBytes(UNIT, V1).orElseThrow());
 	}
@@ -93,10 +96,12 @@ class DamageRepairTest {
 		byte[] good = good();
 		shared.writeVersion(UNIT, V1, good);
 
-		Outcome outcome = repair().repairVersion(UNIT, claimFor(good));
+		Result result = repair().repairVersion(UNIT, claimFor(good));
 
-		assertEquals(Outcome.REPAIRED_LOCAL, outcome);
+		// Nichts war beschädigt, also gibt es auch keine beschädigte Kopie daneben
+		assertEquals(new Result(Outcome.REPAIRED_LOCAL, versionPath(local), null), result);
 		assertArrayEquals(good, local.readVersionBytes(UNIT, V1).orElseThrow());
+		assertEquals(List.of(V1 + ".json"), namesNextTo(versionPath(local)));
 	}
 
 	@Test
@@ -105,9 +110,11 @@ class DamageRepairTest {
 		local.writeVersion(UNIT, V1, good);
 		shared.writeVersion(UNIT, V1, damaged());
 
-		Outcome outcome = repair().repairVersion(UNIT, claimFor(good));
+		Result result = repair().repairVersion(UNIT, claimFor(good));
 
-		assertEquals(Outcome.REPAIRED_SHARED, outcome);
+		assertEquals(Outcome.REPAIRED_SHARED, result.outcome());
+		assertEquals(versionPath(shared), result.replaced());
+		assertEquals(versionPath(shared).resolveSibling(V1 + ".json.corrupt-" + STAMP), result.corruptCopy());
 		assertArrayEquals(good, shared.readVersionBytes(UNIT, V1).orElseThrow());
 		assertArrayEquals(good, local.readVersionBytes(UNIT, V1).orElseThrow());
 	}
@@ -119,9 +126,9 @@ class DamageRepairTest {
 		local.writeVersion(UNIT, V1, bad);
 		shared.writeVersion(UNIT, V1, bad);
 
-		Outcome outcome = repair().repairVersion(UNIT, claimFor(good));
+		Result result = repair().repairVersion(UNIT, claimFor(good));
 
-		assertEquals(Outcome.NO_GOOD_COPY, outcome);
+		assertEquals(new Result(Outcome.NO_GOOD_COPY, null, null), result);
 		assertArrayEquals(bad, local.readVersionBytes(UNIT, V1).orElseThrow());
 		assertArrayEquals(bad, shared.readVersionBytes(UNIT, V1).orElseThrow());
 		assertEquals(List.of(V1 + ".json"), namesNextTo(versionPath(local)));
@@ -133,7 +140,7 @@ class DamageRepairTest {
 		byte[] good = good();
 		local.writeVersion(UNIT, V1, damaged());
 
-		assertEquals(Outcome.NO_GOOD_COPY, repair().repairVersion(UNIT, claimFor(good)));
+		assertEquals(Outcome.NO_GOOD_COPY, repair().repairVersion(UNIT, claimFor(good)).outcome());
 	}
 
 	@Test
@@ -142,16 +149,16 @@ class DamageRepairTest {
 		local.writeVersion(UNIT, V1, good);
 		shared.writeVersion(UNIT, V1, good);
 
-		Outcome outcome = repair().repairVersion(UNIT, claimFor(good));
+		Result result = repair().repairVersion(UNIT, claimFor(good));
 
-		assertEquals(Outcome.NOT_DAMAGED, outcome);
+		assertEquals(Outcome.NOT_DAMAGED, result.outcome());
 		assertEquals(List.of(V1 + ".json"), namesNextTo(versionPath(local)));
 		assertEquals(List.of(V1 + ".json"), namesNextTo(versionPath(shared)));
 	}
 
 	@Test
 	void bothMissingIsNotDamaged() throws IOException {
-		assertEquals(Outcome.NOT_DAMAGED, repair().repairVersion(UNIT, claimFor(good())));
+		assertEquals(Outcome.NOT_DAMAGED, repair().repairVersion(UNIT, claimFor(good())).outcome());
 	}
 
 	@Test
@@ -159,7 +166,7 @@ class DamageRepairTest {
 		byte[] good = good();
 		local.writeVersion(UNIT, V1, good);
 
-		assertEquals(Outcome.NOT_DAMAGED, repair().repairVersion(UNIT, claimFor(good)));
+		assertEquals(Outcome.NOT_DAMAGED, repair().repairVersion(UNIT, claimFor(good)).outcome());
 		assertFalse(shared.readVersionBytes(UNIT, V1).isPresent());
 	}
 
@@ -169,7 +176,7 @@ class DamageRepairTest {
 		local.writeVersion(UNIT, V1, damaged());
 		DamageRepair single = new DamageRepair(local, null, files, CLOCK);
 
-		assertEquals(Outcome.NO_GOOD_COPY, single.repairVersion(UNIT, claimFor(good)));
+		assertEquals(Outcome.NO_GOOD_COPY, single.repairVersion(UNIT, claimFor(good)).outcome());
 	}
 
 	@Test
@@ -178,7 +185,7 @@ class DamageRepairTest {
 		local.writeVersion(UNIT, V1, good);
 		DamageRepair single = new DamageRepair(local, null, files, CLOCK);
 
-		assertEquals(Outcome.NOT_DAMAGED, single.repairVersion(UNIT, claimFor(good)));
+		assertEquals(Outcome.NOT_DAMAGED, single.repairVersion(UNIT, claimFor(good)).outcome());
 	}
 
 	@Test
@@ -188,9 +195,11 @@ class DamageRepairTest {
 		local.writeVersion(UNIT, V1, bad);
 		shared.writeVersion(UNIT, V1, good);
 
-		repair().repairVersion(UNIT, claimFor(good));
+		Result result = repair().repairVersion(UNIT, claimFor(good));
 
 		String corrupt = V1 + ".json.corrupt-" + STAMP;
+		assertEquals(versionPath(local), result.replaced());
+		assertEquals(versionPath(local).resolveSibling(corrupt), result.corruptCopy());
 		assertEquals(List.of(V1 + ".json", corrupt), namesNextTo(versionPath(local)));
 		assertArrayEquals(bad, Files.readAllBytes(versionPath(local).resolveSibling(corrupt)));
 	}
@@ -206,11 +215,12 @@ class DamageRepairTest {
 		Files.writeString(first, "alt1", StandardCharsets.UTF_8);
 		Files.writeString(second, "alt2", StandardCharsets.UTF_8);
 
-		repair().repairVersion(UNIT, claimFor(good));
+		Result result = repair().repairVersion(UNIT, claimFor(good));
 
 		assertEquals("alt1", Files.readString(first));
 		assertEquals("alt2", Files.readString(second));
 		Path third = versionPath(local).resolveSibling(V1 + ".json.corrupt-" + STAMP + "-3");
+		assertEquals(third, result.corruptCopy());
 		assertArrayEquals(bad, Files.readAllBytes(third));
 		assertArrayEquals(good, local.readVersionBytes(UNIT, V1).orElseThrow());
 	}
@@ -222,9 +232,11 @@ class DamageRepairTest {
 		local.writeVersion(UNIT, V1, good);
 		shared.writeVersion(UNIT, V1, bad);
 
-		repair().repairVersion(UNIT, claimFor(good));
+		Result result = repair().repairVersion(UNIT, claimFor(good));
 
 		String corrupt = V1 + ".json.corrupt-" + STAMP;
+		assertEquals(versionPath(shared), result.replaced());
+		assertEquals(versionPath(shared).resolveSibling(corrupt), result.corruptCopy());
 		assertEquals(List.of(V1 + ".json", corrupt), namesNextTo(versionPath(shared)));
 		assertArrayEquals(bad, Files.readAllBytes(versionPath(shared).resolveSibling(corrupt)));
 	}
@@ -240,11 +252,13 @@ class DamageRepairTest {
 		local.createClaim(UNIT, "root", bad);
 		shared.createClaim(UNIT, "root", claim);
 
-		Outcome outcome = repair().repairClaim(UNIT, "root");
+		Result result = repair().repairClaim(UNIT, "root");
 
-		assertEquals(Outcome.REPAIRED_LOCAL, outcome);
+		assertEquals(Outcome.REPAIRED_LOCAL, result.outcome());
 		assertArrayEquals(claim, local.readClaimBytes(UNIT, "root").orElseThrow());
 		String corrupt = "root.json.corrupt-" + STAMP;
+		assertEquals(claimPath(local, "root"), result.replaced());
+		assertEquals(claimPath(local, "root").resolveSibling(corrupt), result.corruptCopy());
 		assertEquals(List.of("root.json", corrupt), namesNextTo(claimPath(local, "root")));
 		assertArrayEquals(bad, Files.readAllBytes(claimPath(local, "root").resolveSibling(corrupt)));
 	}
@@ -256,28 +270,31 @@ class DamageRepairTest {
 		local.createClaim(UNIT, V1.value(), claim);
 		shared.createClaim(UNIT, V1.value(), bad);
 
-		Outcome outcome = repair().repairClaim(UNIT, V1.value());
+		Result result = repair().repairClaim(UNIT, V1.value());
 
-		assertEquals(Outcome.REPAIRED_SHARED, outcome);
+		assertEquals(Outcome.REPAIRED_SHARED, result.outcome());
 		assertArrayEquals(claim, shared.readClaimBytes(UNIT, V1.value()).orElseThrow());
 		String corrupt = V1 + ".json.corrupt-" + STAMP;
-		assertArrayEquals(bad, Files.readAllBytes(claimPath(shared, V1.value()).resolveSibling(corrupt)));
+		assertEquals(claimPath(shared, V1.value()), result.replaced());
+		assertEquals(claimPath(shared, V1.value()).resolveSibling(corrupt), result.corruptCopy());
+		assertArrayEquals(bad, Files.readAllBytes(result.corruptCopy()));
 	}
 
 	@Test
-	void differingClaimsSharedWins() throws IOException {
+	void differingReadableClaimsAreALossNotDamage() throws IOException {
 		byte[] sharedClaim = claimBytes(V1);
 		byte[] localClaim = claimBytes(V2);
 		local.createClaim(UNIT, "root", localClaim);
 		shared.createClaim(UNIT, "root", sharedClaim);
 
-		Outcome outcome = repair().repairClaim(UNIT, "root");
+		Result result = repair().repairClaim(UNIT, "root");
 
-		assertEquals(Outcome.REPAIRED_LOCAL, outcome);
-		assertArrayEquals(sharedClaim, local.readClaimBytes(UNIT, "root").orElseThrow());
+		// Zwei lesbare Anspruchsdateien mit verschiedenem Ziel sind eine Niederlage: Abgleich und Hochladen entscheiden
+		assertEquals(new Result(Outcome.NOT_DAMAGED, null, null), result);
+		assertArrayEquals(localClaim, local.readClaimBytes(UNIT, "root").orElseThrow());
 		assertArrayEquals(sharedClaim, shared.readClaimBytes(UNIT, "root").orElseThrow());
-		Path corrupt = claimPath(local, "root").resolveSibling("root.json.corrupt-" + STAMP);
-		assertArrayEquals(localClaim, Files.readAllBytes(corrupt));
+		assertEquals(List.of("root.json"), namesNextTo(claimPath(local, "root")));
+		assertEquals(List.of("root.json"), namesNextTo(claimPath(shared, "root")));
 	}
 
 	@Test
@@ -286,7 +303,7 @@ class DamageRepairTest {
 		local.createClaim(UNIT, "root", claim);
 		shared.createClaim(UNIT, "root", claim);
 
-		assertEquals(Outcome.NOT_DAMAGED, repair().repairClaim(UNIT, "root"));
+		assertEquals(Outcome.NOT_DAMAGED, repair().repairClaim(UNIT, "root").outcome());
 		assertEquals(List.of("root.json"), namesNextTo(claimPath(local, "root")));
 	}
 
@@ -295,7 +312,7 @@ class DamageRepairTest {
 		local.createClaim(UNIT, "root", damaged());
 		shared.createClaim(UNIT, "root", "{ auch kaputt".getBytes(StandardCharsets.UTF_8));
 
-		assertEquals(Outcome.NO_GOOD_COPY, repair().repairClaim(UNIT, "root"));
+		assertEquals(Outcome.NO_GOOD_COPY, repair().repairClaim(UNIT, "root").outcome());
 		assertEquals(List.of("root.json"), namesNextTo(claimPath(local, "root")));
 		assertEquals(List.of("root.json"), namesNextTo(claimPath(shared, "root")));
 	}
@@ -304,7 +321,7 @@ class DamageRepairTest {
 	void missingLocalClaimIsNotARepairCase() throws IOException {
 		shared.createClaim(UNIT, "root", claimBytes(V1));
 
-		assertEquals(Outcome.NOT_DAMAGED, repair().repairClaim(UNIT, "root"));
+		assertEquals(Outcome.NOT_DAMAGED, repair().repairClaim(UNIT, "root").outcome());
 		assertFalse(local.readClaimBytes(UNIT, "root").isPresent());
 	}
 
@@ -314,7 +331,7 @@ class DamageRepairTest {
 		local.createClaim(UNIT, "root", newer);
 		shared.createClaim(UNIT, "root", claimBytes(V1));
 
-		assertEquals(Outcome.NOT_DAMAGED, repair().repairClaim(UNIT, "root"));
+		assertEquals(Outcome.NOT_DAMAGED, repair().repairClaim(UNIT, "root").outcome());
 		assertArrayEquals(newer, local.readClaimBytes(UNIT, "root").orElseThrow());
 	}
 }
