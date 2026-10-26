@@ -134,26 +134,24 @@ public final class FeedReader {
 	}
 
 	/**
-	 * Setzt die Position jedes Rechners im gemeinsamen Ordner auf die höchste vorhandene Nummer und speichert sie, nach
-	 * einem Vollabgleich. Wartende Listen und der Wunsch nach einem Vollabgleich entfallen, denn der Vollabgleich hat
-	 * den Bestand schon abgeglichen. Beobachtete Ansprüche bleiben, damit einer, der kurz nach dem Vollabgleich
-	 * erscheint, noch übernommen wird; auch noch nicht gemeldete Ergebnisse bleiben und kommen mit dem nächsten
-	 * {@link #poll()}, denn der Vollabgleich meldet einen Anspruch nicht, den ein früherer Durchlauf schon lokal angelegt
-	 * hat.
+	 * Setzt die Position jedes Rechners im gemeinsamen Ordner auf die höchste vorhandene Nummer und speichert sie.
+	 * Wartende Listen und der Wunsch nach einem Vollabgleich entfallen; Beobachtungen und noch nicht gemeldete Ergebnisse
+	 * bleiben.
 	 * <p>
-	 * Der {@link SyncService} springt nicht: Ein übersprungener Eintrag des Gewinners würde einen abweichenden lokalen
-	 * Anspruch nie aufdecken (siehe {@link FeedPoll#contested()}).
+	 * Kein Aufrufer im Programm, nur für Tests: Der {@link SyncService} darf nicht springen. Jeder übersprungene Eintrag
+	 * ist ein Eintrag, der einen abweichenden lokalen Anspruch nicht mehr als umstritten melden kann
+	 * ({@link FeedPoll#contested()}); der Vollabgleich vergleicht nur eigene Ansprüche, und erst nach bis zu zehn
+	 * Minuten. Erneutes Lesen schon verarbeiteter Listen kostet dagegen nur einen Vergleich je Eintrag.
 	 */
-	public synchronized void jumpToLatest() throws IOException {
+	synchronized void jumpToLatest() throws IOException {
 		jumpTo(latestNumbers());
 	}
 
 	/**
-	 * Die höchste vorhandene Listennummer je fremdem Rechner im gemeinsamen Ordner (ohne den eigenen). Wer nach einem
-	 * Vollabgleich springen will, merkt sie sich vor dem Durchlauf und setzt sie danach mit {@link #jumpTo}: Listen, die
-	 * währenddessen entstehen, liest dann der nächste {@link #poll()}, statt sie zu überspringen.
+	 * Die höchste vorhandene Listennummer je fremdem Rechner im gemeinsamen Ordner (ohne den eigenen). Kein Aufrufer im
+	 * Programm (siehe {@link #jumpToLatest()}).
 	 */
-	public synchronized Map<String, Long> latestNumbers() throws IOException {
+	synchronized Map<String, Long> latestNumbers() throws IOException {
 		Map<String, Long> latest = new TreeMap<>();
 		for (String id : peerDirectories()) {
 			latest.put(id, Feeds.highestFeedNumber(shared, id));
@@ -162,13 +160,13 @@ public final class FeedReader {
 	}
 
 	/**
-	 * Setzt die Positionen der genannten Rechner und speichert sie, nach einem Vollabgleich (siehe
-	 * {@link #jumpToLatest()}); andere Rechner behalten ihre Position. Wartende Listen und der Wunsch nach einem
-	 * Vollabgleich entfallen, Beobachtungen und noch nicht gemeldete Ergebnisse bleiben.
+	 * Setzt die Positionen der genannten Rechner und speichert sie; andere Rechner behalten ihre Position. Wartende Listen
+	 * und der Wunsch nach einem Vollabgleich entfallen, Beobachtungen und noch nicht gemeldete Ergebnisse bleiben. Kein
+	 * Aufrufer im Programm (siehe {@link #jumpToLatest()}).
 	 *
-	 * @param numbers die Nummern aus {@link #latestNumbers()}, ermittelt vor dem Vollabgleich
+	 * @param numbers die Nummern, etwa aus {@link #latestNumbers()}
 	 */
-	public synchronized void jumpTo(Map<String, Long> numbers) throws IOException {
+	synchronized void jumpTo(Map<String, Long> numbers) throws IOException {
 		numbers.forEach(positions::set);
 		positions.save();
 		positionsDirty = false;

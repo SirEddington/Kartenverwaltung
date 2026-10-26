@@ -12,8 +12,12 @@ import java.util.Set;
  *                 verloren haben
  * @param uploaded die lokalen Ansprüche, die dieser Abgleich im gemeinsamen Ordner angelegt hat (nur beim Hochladen
  *                 lokaler Ansprüche)
+ * @param contested die Plätze, an denen der lokale Anspruch der eigene ist und der gemeinsame eine andere Version nennt
+ *                  (späte Niederlage, die keine Änderungsliste aufgedeckt hat; nur ohne Hochladen lokaler Ansprüche,
+ *                  denn dabei entscheidet der Abgleich selbst). Ersetzt wird hier nichts; das tut der Aufrufer.
  */
-public record FullSyncResult(Set<UnitKey> changed, List<LostVersion> lost, List<UploadedClaim> uploaded) {
+public record FullSyncResult(Set<UnitKey> changed, List<LostVersion> lost, List<UploadedClaim> uploaded,
+		List<FeedPoll.Contested> contested) {
 
 	/**
 	 * Ein Anspruch, den der Abgleich im gemeinsamen Ordner angelegt hat.
@@ -29,5 +33,6 @@ public record FullSyncResult(Set<UnitKey> changed, List<LostVersion> lost, List<
 		changed = Set.copyOf(changed);
 		lost = List.copyOf(lost);
 		uploaded = List.copyOf(uploaded);
+		contested = List.copyOf(contested);
 	}
 }

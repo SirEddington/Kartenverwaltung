@@ -346,6 +346,87 @@ class CloudScenarioTest {
 		assertEquals(vb.id(), restarted.unitState(BOOKING).head().id());
 	}
 
+	/** Bis hierher gleich in den folgenden Szenarien: B ist auf dem Server zuerst, A gewinnt nur lokal, 16 Minuten vergehen. */
+	private Version[] aWinsOnlyLocallyAndWaits(Machine a, Machine b) throws IOException {
+		Version vb = b.sell(BOOKING, "Bert");
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+		cloud.step("b");
+		Version va = a.sell(BOOKING, "Anna");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		clock.advance(Duration.ofMinutes(16));
+		a.service.tick();
+		assertTrue(a.events.lost.isEmpty());
+		return new Version[] { va, vb };
+	}
+
+	private void assertDisplacedOnce(Machine a, Version va, Version vb) throws IOException {
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), vb.id())), a.events.lost);
+		Path localClaims = a.localData().resolve(BOOKING.relativePath()).resolve("claims");
+		assertEquals(vb.id(), StoreCodec.readClaim(Files.readAllBytes(localClaims.resolve("root.json"))).version());
+		assertEquals(1, names(localClaims).stream().filter(n -> n.startsWith("root.json.verdraengt-")).count());
+		assertEquals(vb.id(), a.service.unitState(BOOKING).head().id());
+	}
+
+	/**
+	 * B's Anspruch und Liste kommen an, B's Versionsdatei hängt mehr als 5 Minuten nach: A überspringt die Liste, ohne
+	 * ihre Ansprüche anzusehen. Der angeforderte Vollabgleich vergleicht die eigenen Ansprüche und deckt die Niederlage
+	 * auf.
+	 */
+	@Test
+	void winnersFeedSkippedAfterWaitingIsCaughtByTheFullSync() throws IOException {
+		Machine a = new Machine("a");
+		Machine b = new Machine("b");
+		Version[] versions = aWinsOnlyLocallyAndWaits(a, b);
+		Version va = versions[0];
+		Version vb = versions[1];
+
+		String vbFile = vb.id() + ".json";
+		cloud.stepFilesOnly("a", rel -> !rel.endsWith(vbFile));
+		clock.advance(Duration.ofSeconds(30));
+		a.service.tick();
+		clock.advance(Duration.ofMinutes(5));
+		a.service.tick();
+		assertTrue(a.events.lost.isEmpty(), "die Liste wurde übersprungen");
+
+		cloud.step("a");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		a.service.tick();
+
+		assertDisplacedOnce(a, va, vb);
+	}
+
+	/**
+	 * B's Liste kommt, solange A's Client noch A's Anspruch hat (neu beobachtet), B's Anspruch erst nach Ablauf auch dieser
+	 * Beobachtung: Keine Liste und keine Beobachtung deckt es auf, der nächste Vollabgleich schon.
+	 */
+	@Test
+	void winnersClaimAfterTheRearmedWindowIsCaughtByTheFullSync() throws IOException {
+		Machine a = new Machine("a");
+		Machine b = new Machine("b");
+		Version[] versions = aWinsOnlyLocallyAndWaits(a, b);
+		Version va = versions[0];
+		Version vb = versions[1];
+
+		cloud.stepFilesOnly("a", rel -> !rel.contains("/claims/"));
+		clock.advance(Duration.ofSeconds(30));
+		a.service.tick();
+		clock.advance(Duration.ofMinutes(16));
+		a.service.tick();
+		cloud.step("a");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		assertTrue(a.events.lost.isEmpty(), "bis zum nächsten Vollabgleich bleibt es unentdeckt");
+
+		clock.advance(Duration.ofMinutes(10));
+		a.service.tick();
+		a.service.tick();
+
+		assertDisplacedOnce(a, va, vb);
+	}
+
 	/** Die Liste von A kommt bei B an, bevor die Versionsdatei da ist: B wartet und meldet erst nach dem Eintreffen. */
 	@Test
 	void feedBeforeFilesWaits() throws IOException {

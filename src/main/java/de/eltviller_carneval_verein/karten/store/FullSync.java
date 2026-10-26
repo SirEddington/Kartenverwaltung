@@ -37,6 +37,10 @@ public final class FullSync {
 	 * <ol>
 	 * <li>Versionsdateien, die auf einer Seite fehlen, werden auf die andere kopiert.</li>
 	 * <li>Anspruchsdateien, die lokal fehlen, werden aus dem gemeinsamen Ordner kopiert.</li>
+	 * <li>Ohne {@code uploadLocalClaims}: Eigene lokale Ansprüche (Rechner = {@code ownMachineId}), die auch im gemeinsamen
+	 * Ordner liegen, werden verglichen; nennt der gemeinsame eine andere Version, steht der Platz in
+	 * {@link FullSyncResult#contested()} (nichts wird ersetzt). Das fängt späte Niederlagen, die keine Änderungsliste
+	 * aufgedeckt hat; Kosten: zwei Lesezugriffe je eigenem Anspruch auf beiden Seiten.</li>
 	 * <li>Nur mit {@code uploadLocalClaims}: Anspruchsdateien, die im gemeinsamen Ordner fehlen, werden dort angelegt.
 	 * Liegt dort schon ein Anspruch auf eine andere Version, gewinnt er: Der lokale wird unter
 	 * {@code <Name>.json.verdraengt-<yyyy-MM-dd_HH-mm-ss>} beiseitegelegt, durch den gemeinsamen ersetzt, und die
@@ -179,6 +183,7 @@ public final class FullSync {
 		/** Je Einheit die Versions-IDs der als verloren gemeldeten eigenen Versionen. */
 		private final Map<UnitKey, Set<String>> lostIds = new HashMap<>();
 		private final List<FullSyncResult.UploadedClaim> uploaded = new ArrayList<>();
+		private final List<FeedPoll.Contested> contested = new ArrayList<>();
 		private final Consumer<FullSyncResult.UploadedClaim> onUpload;
 
 		Run(VersionStore local, VersionStore shared, String ownMachineId, FileLayer files, Clock clock,
@@ -212,6 +217,14 @@ public final class FullSync {
 					copyClaimInward(file);
 				}
 			}
+			if (!uploadLocalClaims) {
+				// Sicherheitsnetz für die späte Niederlage: eigene Ansprüche, die auf beiden Seiten liegen, vergleichen
+				for (DataPath file : localFiles) {
+					if (file.claim() && sharedPaths.contains(file.path())) {
+						checkOwnClaim(file);
+					}
+				}
+			}
 			if (uploadLocalClaims) {
 				// zuerst die Ansprüche, die auf beiden Seiten liegen: Ihre Niederlagen bestimmen, was danach nicht mehr hochgeladen wird
 				for (DataPath file : localFiles) {
@@ -225,7 +238,7 @@ public final class FullSync {
 					}
 				}
 			}
-			return new FullSyncResult(changed, lost, uploaded);
+			return new FullSyncResult(changed, lost, uploaded, contested);
 		}
 
 		private static Set<String> paths(List<DataPath> files) {
@@ -246,6 +259,21 @@ public final class FullSync {
 			Optional<byte[]> bytes = shared.readRelative(file.path());
 			if (parseClaim(bytes) != null && local.createRelative(file.path(), bytes.get())) {
 				changed.add(file.unit());
+			}
+		}
+
+		/**
+		 * Ist der lokale Anspruch lesbar und der eigene und nennt der gemeinsame (lesbar) eine andere Version, ist der Platz
+		 * umstritten. Unlesbare Kopien bleiben der Heilung überlassen.
+		 */
+		private void checkOwnClaim(DataPath file) throws IOException {
+			Claim mine = parseClaim(local.readRelative(file.path()));
+			if (mine == null || !ownMachineId.equals(mine.machine())) {
+				return;
+			}
+			Claim theirs = parseClaim(shared.readRelative(file.path()));
+			if (theirs != null && !theirs.version().equals(mine.version())) {
+				contested.add(new FeedPoll.Contested(file.unit(), file.name()));
 			}
 		}
 

@@ -680,8 +680,14 @@ class SyncServiceTest {
 		a.service.tick();
 		assertEquals(SyncService.LATE_DEFEAT_BUDGET, sharedRootClaimReads(a) - reads);
 
+		// der 10-Minuten-Abgleich läuft vorher (er vergleicht eigene Ansprüche auf beiden Seiten selbst, hier gibt es keine)
+		clock.advance(Duration.ofMinutes(10));
+		reads = sharedRootClaimReads(a);
+		a.service.tick();
+		assertEquals(SyncService.LATE_DEFEAT_BUDGET, sharedRootClaimReads(a) - reads);
+
 		// nach Ablauf der Fenster wird jeder noch einmal geprüft, auch hinter dem Rückstand
-		clock.advance(Duration.ofMinutes(16));
+		clock.advance(Duration.ofMinutes(6));
 		UnitKey late = UnitKey.hall("h7");
 		Files.createDirectories(sharedFile(late, "claims"));
 		Version foreign = overrideSharedClaim(late, "root");

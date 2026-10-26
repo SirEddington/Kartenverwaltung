@@ -156,6 +156,37 @@ class FullSyncTest {
 	}
 
 	@Test
+	void ownClaimsOnBothSidesAreComparedWithoutUploading() throws IOException {
+		// E1: der eigene lokale Anspruch, im gemeinsamen Ordner hat ein anderer den Platz
+		Version mine = version(ME, V1);
+		put(local, E1, mine);
+		byte[] localClaim = claim(local, E1, mine, AT);
+		Version foreign = version(OTHER, FOREIGN);
+		put(shared, E1, foreign);
+		claim(shared, E1, foreign, AT);
+		// E2: der lokale Anspruch ist nicht der eigene; ihn klärt die Änderungsliste, nicht der Abgleich
+		Version theirs = version(OTHER, V2);
+		put(local, E2, theirs);
+		claim(local, E2, theirs, AT);
+		put(shared, E2, foreign);
+		claim(shared, E2, foreign, AT);
+		// HALL: gleicher Anspruch auf beiden Seiten
+		Version same = version(ME, V2);
+		put(local, HALL, same);
+		byte[] sameClaim = claim(local, HALL, same, AT);
+		put(shared, HALL, same);
+		shared.createClaim(HALL, "root", sameClaim);
+
+		FullSyncResult result = run(false);
+
+		assertEquals(List.of(new FeedPoll.Contested(E1, "root")), result.contested());
+		// ersetzt wird nichts: das entscheidet der Aufrufer
+		assertArrayEquals(localClaim, local.readClaimBytes(E1, "root").orElseThrow());
+		// beim Mitnehmen entscheidet der Abgleich selbst
+		assertTrue(run(true).contested().isEmpty());
+	}
+
+	@Test
 	void uploadedClaimsAreReportedAsTheyHappen() throws IOException {
 		Version mine = version(ME, V1);
 		put(local, E1, mine);

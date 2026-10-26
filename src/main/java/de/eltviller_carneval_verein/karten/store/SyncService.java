@@ -813,9 +813,9 @@ public final class SyncService {
 		FullSyncResult result = FullSync.run(local, current.shared, uploadLocalClaims, myId, files, clock,
 				uploaded -> watchOwnClaims(
 						List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))));
-		// Die Positionen der Listen bleiben stehen: Der Abgleich vergleicht keine Ansprüche, die auf beiden Seiten liegen.
-		// Erst das Lesen des Eintrags des Gewinners deckt einen abweichenden lokalen Anspruch auf; schon kopierte Dateien
-		// kosten dabei nur einen Vergleich.
+		// Die Positionen der Listen bleiben stehen: Das Lesen des Eintrags des Gewinners deckt einen abweichenden lokalen
+		// Anspruch sofort auf; schon kopierte Dateien kosten dabei nur einen Vergleich. Was keine Liste aufdeckt (Liste
+		// übersprungen, Anspruch kam erst nach Ablauf der Beobachtung), meldet der Abgleich selbst als umstritten.
 		current.connectMode = null;
 		current.fullSyncWanted = false;
 		current.lastFullSync = now;
@@ -831,6 +831,7 @@ public final class SyncService {
 		}
 		round.changed.addAll(result.changed());
 		result.lost().forEach(this::reportLoss);
+		settleAll(current, result.contested(), round);
 		enqueuePending(current);
 		runJobs(current, round);
 	}
@@ -996,8 +997,10 @@ public final class SyncService {
 
 	/**
 	 * Ein anderer Rechner verwendet dieselbe Kennung: neue Kennung, neuer Schreiber und Leser der Listen, neuer
-	 * Generator der Versions-IDs, SYS-011; die Positionen ermittelt der nächste Vollabgleich neu. Ausstehende Versionen
-	 * mit der alten Kennung gelten danach nicht mehr als eigene.
+	 * Generator der Versions-IDs, SYS-011, und ein Vollabgleich wird angefordert. Die Positionen werden nicht neu gesetzt:
+	 * Die alte Kennung ist ab jetzt ein fremder Rechner, die Suche nach neuen Rechnern findet ihren Ordner und liest
+	 * ihre Listen ab Nummer 1 nach (für schon vorhandene Dateien nur ein Vergleich). Ausstehende Versionen mit der alten
+	 * Kennung gelten danach nicht mehr als eigene.
 	 */
 	private void regenerate(Link current) throws IOException {
 		MachineIdentity old;
@@ -1028,15 +1031,24 @@ public final class SyncService {
 				repairQueue.addAll(poll.damaged());
 			}
 		}
-		// jeder Platz für sich: Eine Störung bei einem verliert die übrigen nicht; der gestörte wird weiter beobachtet
+		settleAll(current, poll.contested(), round);
+	}
+
+	/**
+	 * Klärt umstrittene Plätze, jeden für sich: Eine Störung bei einem verliert die übrigen nicht; der gestörte wird
+	 * weiter beobachtet und gilt als geändert (vielleicht wurde er schon verdrängt). Die erste Störung wird am Ende
+	 * geworfen.
+	 */
+	private void settleAll(Link current, Collection<FeedPoll.Contested> slots, Round round) throws IOException {
 		IOException failure = null;
-		for (FeedPoll.Contested slot : poll.contested()) {
+		for (FeedPoll.Contested slot : slots) {
 			try {
 				settleContested(current, slot, round);
 			} catch (IOException e) {
 				if (failure == null) {
 					failure = e;
 				}
+				round.changed.add(slot.unit());
 				rearmIfOwn(slot);
 			}
 		}
