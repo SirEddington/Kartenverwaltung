@@ -3,10 +3,12 @@ package de.eltviller_carneval_verein.karten.store;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -40,6 +42,11 @@ class NioFileLayerTest {
 		try (Stream<Path> stream = Files.list(folder)) {
 			return stream.map(p -> p.getFileName().toString()).sorted().toList();
 		}
+	}
+
+	/** Die temporären Dateien im Ordner (auch die, die {@code listNames} verbirgt). */
+	private static List<String> tempsIn(Path folder) throws IOException {
+		return namesIn(folder).stream().filter(n -> n.startsWith(FileLayer.TEMP_PREFIX)).toList();
 	}
 
 	@Test
@@ -133,6 +140,46 @@ class NioFileLayerTest {
 		assertArrayEquals(bytes("gut"), Files.readAllBytes(file));
 		assertArrayEquals(bytes("kaputt"), Files.readAllBytes(dir.resolve("v.json.corrupt-2026-10-26_12-00-00")));
 		assertEquals(List.of("v.json", "v.json.corrupt-2026-10-26_12-00-00"), namesIn(dir));
+	}
+
+	@Test
+	void replaceDamagedFailsWhenCorruptNameExists() throws IOException {
+		Path file = dir.resolve("v.json");
+		Path corrupt = dir.resolve("v.json.corrupt-2026-10-26_12-00-00");
+		Files.write(file, bytes("kaputt"));
+		Files.write(corrupt, bytes("aelter"));
+
+		assertThrows(FileAlreadyExistsException.class,
+				() -> layer.replaceDamaged(file, bytes("gut"), corrupt.getFileName().toString()));
+
+		assertArrayEquals(bytes("kaputt"), Files.readAllBytes(file));
+		assertArrayEquals(bytes("aelter"), Files.readAllBytes(corrupt));
+		assertEquals(List.of("v.json", "v.json.corrupt-2026-10-26_12-00-00"), namesIn(dir));
+		assertEquals(List.of(), tempsIn(dir));
+	}
+
+	@Test
+	void createNewCleansUpTempOnOtherFailures() throws IOException {
+		// Ein Dateiname über 255 Zeichen: Die temporäre Datei lässt sich schreiben, das Verschieben scheitert.
+		Path file = dir.resolve("a".repeat(300) + ".json");
+
+		assertThrows(IOException.class, () -> layer.createNew(file, bytes("x")));
+
+		assertEquals(List.of(), tempsIn(dir));
+		assertEquals(List.of(), namesIn(dir));
+	}
+
+	@Test
+	void renameDoesNotReplaceExistingTarget() throws IOException {
+		Path from = dir.resolve("a.json");
+		Path to = dir.resolve("b.json");
+		Files.write(from, bytes("a"));
+		Files.write(to, bytes("b"));
+
+		assertThrows(FileAlreadyExistsException.class, () -> layer.rename(from, to));
+
+		assertArrayEquals(bytes("a"), Files.readAllBytes(from));
+		assertArrayEquals(bytes("b"), Files.readAllBytes(to));
 	}
 
 	@Test

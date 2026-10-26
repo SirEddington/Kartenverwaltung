@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.store;
 
 import java.io.IOException;
+import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileVisitResult;
@@ -69,6 +70,9 @@ public final class NioFileLayer implements FileLayer {
 			}
 		} catch (NoSuchFileException e) {
 			return Collections.emptyList();
+		} catch (DirectoryIteratorException e) {
+			// Ein Ein-/Ausgabefehler beim Durchlaufen (etwa weggebrochene Netzfreigabe) bleibt eine IOException
+			throw e.getCause();
 		}
 		Collections.sort(names);
 		return names;
