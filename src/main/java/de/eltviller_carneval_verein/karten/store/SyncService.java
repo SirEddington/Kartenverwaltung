@@ -192,6 +192,11 @@ public final class SyncService {
 	private volatile boolean indexRefreshed;
 	/** Wann zuletzt versucht wurde, den Index zu schreiben; {@code null}, solange noch nie. */
 	private volatile Instant lastIndexFlush;
+	/**
+	 * Macht "lokal lesen, auflösen, in den Index eintragen" je Aufruf unteilbar. Hält nur kurze Dateizugriffe auf den
+	 * lokalen Bestand; wer sie hält, nimmt höchstens kurz {@code lock} (Rechner-ID) und den Monitor des Index.
+	 */
+	private final Object resolveLock = new Object();
 
 	/** Serialisiert die Arbeit am gemeinsamen Ordner: Takt, Hochladen beim Start. */
 	private final ReentrantLock workLock = new ReentrantLock();
@@ -334,9 +339,12 @@ public final class SyncService {
 	 * Wie {@link #startup(String)}, mit Fortschritt. Nach dem Aufräumen gleicht der Start den Start-Index mit dem lokalen
 	 * Bestand ab (ein Durchlauf über die Verzeichnisnamen; nur Einheiten mit geänderten Dateinamen werden neu aufgelöst).
 	 * Ausstehende eigene Versionen werden nur bei den Einheiten gesucht, die der Index dafür nennt; die Entscheidung trifft
-	 * wie überall {@link ChainResolver} auf den Dateien. Scheitert der Abgleich, sucht der Start in allen Einheiten.
+	 * wie überall {@link ChainResolver} auf den Dateien. Scheitert der Abgleich, baut der Start den Index neu auf: Er löst jede
+	 * Einheit des Bestands einzeln aus den Dateien auf. Lässt sich dabei eine nicht lesen (oder der Bestand nicht auflisten),
+	 * scheitert der Start, denn mit einem unvollständigen Bestand wäre ein belegter Platz frei.
 	 *
 	 * @param progress bekommt den Anteil der abgeglichenen Einheiten von 0.0 bis 1.0, zuletzt 1.0; darf {@code null} sein
+	 * @throws UncheckedIOException wenn der Bestand nicht vollständig gelesen werden kann; die Meldung nennt die Einheit
 	 */
 	public boolean startup(String sharedDir, DoubleConsumer progress) {
 		try {
@@ -344,8 +352,9 @@ public final class SyncService {
 		} catch (IOException | RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Alte temporäre Dateien im lokalen Bestand ließen sich nicht entfernen", e);
 		}
-		// null heißt: der Index war nicht zu gebrauchen, alle Einheiten untersuchen
-		Set<UnitKey> candidates = refreshIndex(progress);
+		Set<UnitKey> refreshed = refreshIndex(progress);
+		// war der Index nicht zu gebrauchen: jede Einheit einzeln aus den Dateien, oder der Start scheitert
+		Set<UnitKey> candidates = refreshed != null ? refreshed : rebuildIndex(progress);
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			deactivate();
@@ -790,12 +799,50 @@ public final class SyncService {
 	}
 
 	/**
+	 * Baut den Index neu auf, wenn der Abgleich scheiterte: ein neuer, leerer Index, jede Einheit des Bestands einzeln über
+	 * {@link #resolveLocal}. Der Index ist danach vollständig, sonst scheitert der Start.
+	 *
+	 * @return die Einheiten mit ausstehenden eigenen Versionen
+	 * @throws UncheckedIOException wenn die Einheiten nicht aufgelistet oder eine nicht gelesen werden kann; der Bestand wäre
+	 *                              unvollständig (eine fehlende Buchung hieße einen freien Platz)
+	 */
+	private Set<UnitKey> rebuildIndex(DoubleConsumer progress) {
+		synchronized (resolveLock) {
+			index = new UnitIndex(appDataDir.resolve(INDEX), files, machineId());
+		}
+		Set<UnitKey> pending = new LinkedHashSet<>();
+		List<UnitKey> units;
+		try {
+			units = local.allUnits();
+		} catch (IOException e) {
+			throw new UncheckedIOException("Die Einheiten des lokalen Bestands ließen sich nicht auflisten", e);
+		}
+		for (UnitKey unit : units) {
+			try {
+				if (!resolveLocal(unit).pending().isEmpty()) {
+					pending.add(unit);
+				}
+			} catch (IOException e) {
+				throw new UncheckedIOException("Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
+			}
+		}
+		indexRefreshed = true;
+		if (progress != null) {
+			progress.accept(1.0);
+		}
+		return pending;
+	}
+
+	/**
 	 * Verwirft den Index, weil der Datenordner ausgetauscht wird (Beiseitelegen). Der leere Index ist vollständig und
-	 * darf deshalb auch ohne Abgleich geschrieben werden: Er ersetzt die alten Dateien.
+	 * darf deshalb auch ohne Abgleich geschrieben werden: Er ersetzt die alten Dateien. Unter {@code resolveLock}: Ein Stand,
+	 * der noch aus dem alten Datenordner gelesen wurde, kommt nicht danach in den Index.
 	 */
 	private void clearIndex() {
-		index.clear();
-		indexRefreshed = true;
+		synchronized (resolveLock) {
+			index.clear();
+			indexRefreshed = true;
+		}
 	}
 
 	/** Die Dateien einer Einheit und ihr Stand daraus. */
@@ -812,13 +859,19 @@ public final class SyncService {
 
 	/** Wie {@link #resolveLocal}, mit den gelesenen Dateien. */
 	private Resolved resolveWithFiles(UnitKey unit) throws IOException {
-		UnitFiles unitFiles = local.readUnit(unit);
-		UnitState state = ChainResolver.resolve(unitFiles, machineId());
-		// ein Ordner ohne Dateien ist keine Einheit des Bestands: kein Eintrag (etwa bei einer Abfrage nach einer unbekannten)
-		if (!unitFiles.versions().isEmpty() || !unitFiles.claims().isEmpty()) {
-			index.update(unitFiles, state);
+		// Lesen, Auflösen und Eintragen am Stück: Wer nach dem eigenen Schreiben auflöst, trägt auch zuletzt ein. Sonst
+		// überschriebe der ältere Stand eines anderen Threads den neueren. Reihenfolge der Sperren: workLock, resolveLock,
+		// Monitor des Index; machineId() nimmt nur kurz lock, und unter lock wartet nie jemand auf resolveLock.
+		synchronized (resolveLock) {
+			UnitFiles unitFiles = local.readUnit(unit);
+			UnitState state = ChainResolver.resolve(unitFiles, machineId());
+			// ein Ordner ohne Dateien ist keine Einheit des Bestands: kein Eintrag (etwa bei einer Abfrage nach einer
+			// unbekannten)
+			if (!unitFiles.versions().isEmpty() || !unitFiles.claims().isEmpty()) {
+				index.update(unitFiles, state);
+			}
+			return new Resolved(unitFiles, state);
 		}
-		return new Resolved(unitFiles, state);
 	}
 
 	/** Trägt die Einheiten der geschriebenen Versionen in den Index ein; was sich nicht lesen lässt, kostet nur den Eintrag. */

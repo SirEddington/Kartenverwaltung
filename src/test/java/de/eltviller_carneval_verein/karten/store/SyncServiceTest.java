@@ -25,9 +25,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -1530,6 +1533,192 @@ class SyncServiceTest {
 		assertTrue(again.service.startup(shared));
 		assertEquals(Set.of(theirs), again.service.snapshots().keySet());
 		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), again.service.snapshots());
+	}
+
+	/**
+	 * Hält einen Thread an, nachdem er die Anspruchsdatei {@code root.json} einer Einheit gelesen hat: Er hat dann die
+	 * Versionen und den Anspruch gesehen, aber noch nicht in den Index eingetragen.
+	 */
+	private static final class GateLayer implements FileLayer {
+		private final FileLayer delegate = new NioFileLayer();
+		final CountDownLatch entered = new CountDownLatch(1);
+		final CountDownLatch release = new CountDownLatch(1);
+		private volatile Thread gated;
+		private volatile Path unitDir;
+
+		void arm(Thread thread, Path unit) {
+			this.unitDir = unit;
+			this.gated = thread;
+		}
+
+		@Override
+		public Optional<byte[]> read(Path file) throws IOException {
+			Optional<byte[]> result = delegate.read(file);
+			if (Thread.currentThread() == gated && file.startsWith(unitDir) && file.getFileName().toString().equals("root.json")) {
+				gated = null;
+				entered.countDown();
+				try {
+					release.await(10, TimeUnit.SECONDS);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					throw new IOException(e);
+				}
+			}
+			return result;
+		}
+
+		@Override
+		public boolean createNew(Path file, byte[] content) throws IOException {
+			return delegate.createNew(file, content);
+		}
+
+		@Override
+		public boolean exists(Path file) {
+			return delegate.exists(file);
+		}
+
+		@Override
+		public List<String> listNames(Path dir) throws IOException {
+			return delegate.listNames(dir);
+		}
+
+		@Override
+		public Map<String, List<String>> listTree(Path root) throws IOException {
+			return delegate.listTree(root);
+		}
+
+		@Override
+		public boolean isDirectory(Path path) {
+			return delegate.isDirectory(path);
+		}
+
+		@Override
+		public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
+			delegate.replaceDamaged(file, good, corruptName);
+		}
+
+		@Override
+		public void rename(Path from, Path to) throws IOException {
+			delegate.rename(from, to);
+		}
+
+		@Override
+		public void deleteOwnTemps(Path dir, Duration olderThan) throws IOException {
+			delegate.deleteOwnTemps(dir, olderThan);
+		}
+	}
+
+	@Test
+	void olderResolutionNeverOverwritesNewerIndexEntry() throws Exception {
+		Path appData = dir.resolve("a");
+		GateLayer gate = new GateLayer();
+		MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "a");
+		SyncService service = new SyncService(appData, identity, gate, Runnable::run, Runnable::run, p -> true, clock);
+		service.startup("");
+		Version v1 = service.append("s1", List.of(create(BOOKING, "Anna"))).get(0);
+		// der "Worker" löst die Einheit auf (Stand: v1) und bleibt stehen, bevor er den Stand einträgt
+		AtomicReference<Throwable> failure = new AtomicReference<>();
+		Thread worker = new Thread(() -> {
+			try {
+				service.unitState(BOOKING);
+			} catch (IOException | RuntimeException e) {
+				failure.set(e);
+			}
+		});
+		gate.arm(worker, appData.resolve("data").resolve(BOOKING.relativePath()));
+		worker.start();
+		assertTrue(gate.entered.await(10, TimeUnit.SECONDS));
+		// die Oberfläche speichert v2 und trägt sie ein; ohne Serialisierung wäre sie sofort fertig
+		AtomicReference<Version> saved = new AtomicReference<>();
+		Thread ui = new Thread(() -> {
+			try {
+				saved.set(service.append("s2", List.of(update(BOOKING, v1, "Anna B"))).get(0));
+			} catch (IOException | RuntimeException e) {
+				failure.set(e);
+			}
+		});
+		ui.start();
+		long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+		while (ui.isAlive() && ui.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+			Thread.sleep(5);
+		}
+		gate.release.countDown();
+		worker.join(10_000);
+		ui.join(10_000);
+
+		assertNull(failure.get());
+		assertEquals(saved.get().id(), service.snapshots().get(BOOKING).version());
+		assertEquals(payload("Anna B"), service.snapshots().get(BOOKING).payload());
+	}
+
+	/** Ein Absturz zwischen Schreiben und lokalem Anspruch: eine Halle ist fertig, eine Buchung hat eine Version ohne Anspruch. */
+	private VersionId crashWithPendingBooking(Path appData) throws IOException {
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.service.startup("");
+		save(a, create(HALL, "Halle"));
+		a.layer.failWhen(p -> p.startsWith(a.localData()) && p.getParent().endsWith("claims"), "createNew",
+				new IOException("Absturz"));
+		assertThrows(IOException.class, () -> a.service.append("s2", List.of(create(BOOKING, "Anna"))));
+		return a.service.history(BOOKING).get(0).id();
+	}
+
+	@Test
+	void startupFallsBackWhenRefreshFails() throws IOException {
+		Path appData = dir.resolve("a");
+		VersionId pending = crashWithPendingBooking(appData);
+		Node b = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.layer.failNext("listTree", new IOException("Störung"));
+		List<Double> progress = new ArrayList<>();
+
+		assertTrue(b.service.startup("", progress::add));
+
+		Map<UnitKey, UnitSnapshot> snapshots = b.service.snapshots();
+		assertEquals(pending, snapshots.get(BOOKING).version());
+		assertEquals(Status.OK, snapshots.get(BOOKING).status());
+		assertEquals(payload("Halle"), snapshots.get(HALL).payload());
+		assertEquals(pending, b.service.unitState(BOOKING).head().id());
+		assertEquals(1.0, progress.get(progress.size() - 1));
+	}
+
+	@Test
+	void startupFallsBackWhenAUnitReadFailsOnce() throws IOException {
+		Path appData = dir.resolve("a");
+		VersionId pending = crashWithPendingBooking(appData);
+		Node b = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		AtomicBoolean armed = new AtomicBoolean(true);
+		b.layer.failWhen(p -> p.startsWith(b.localData()) && armed.compareAndSet(true, false), "read",
+				new IOException("Störung"));
+
+		assertTrue(b.service.startup(""));
+
+		assertEquals(pending, b.service.snapshots().get(BOOKING).version());
+		assertEquals(payload("Halle"), b.service.snapshots().get(HALL).payload());
+		assertEquals(pending, b.service.unitState(BOOKING).head().id());
+	}
+
+	@Test
+	void startupThrowsWhenAUnitStaysUnreadable() throws IOException {
+		Path appData = dir.resolve("a");
+		crashWithPendingBooking(appData);
+		Node b = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		Path unreadable = b.localData().resolve(BOOKING.relativePath());
+		b.layer.failWhen(p -> p.startsWith(unreadable), "read", new IOException("Datei gesperrt"));
+
+		UncheckedIOException e = assertThrows(UncheckedIOException.class, () -> b.service.startup(""));
+
+		assertTrue(e.getMessage().contains(BOOKING.relativePath()), e.getMessage());
+		assertEquals("Datei gesperrt", e.getCause().getMessage());
+	}
+
+	@Test
+	void startupThrowsWhenUnitsCannotBeListed() throws IOException {
+		Path appData = dir.resolve("a");
+		crashWithPendingBooking(appData);
+		Node b = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.layer.failWhen(p -> true, "listTree", new IOException("Störung"));
+		b.layer.failWhen(p -> p.startsWith(b.localData()), "listNames", new IOException("Störung"));
+
+		assertThrows(UncheckedIOException.class, () -> b.service.startup(""));
 	}
 
 	@Test
