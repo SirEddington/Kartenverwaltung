@@ -366,6 +366,73 @@ class UnitIndexTest {
 	}
 
 	@Test
+	void sameNameClaimReplacementIsResolvedAgain() throws IOException {
+		// eigener Anspruch auf dem Platz hinter V1 nennt die eigene Version V2; die fremde V3 liegt schon lokal
+		write(EVENT, ME, mine(1), null, "e-1", true);
+		write(EVENT, ME, mine(2), mine(1), "e-2", true);
+		VersionId foreign = id(3, OTHER);
+		Version foreignVersion = new Version(1, foreign, List.of(mine(1)), OTHER, "Kasse", "Bea", AT, "save-" + foreign, false,
+				new ObjectMapper().createObjectNode().put("name", "e-fremd"));
+		byte[] foreignBytes = StoreCodec.write(foreignVersion);
+		assertTrue(local.writeVersion(EVENT, foreign, foreignBytes));
+		UnitIndex first = index();
+		UnitIndex.Refresh before = refresh(first, local);
+		first.flush();
+		assertEquals(mine(2), first.entries().get(EVENT).snapshot().version());
+		assertTrue(before.lostUnits().isEmpty());
+
+		// späte Niederlage: der Anspruch wird unter gleichem Namen durch den des Siegers ersetzt (wie displace)
+		byte[] winner = StoreCodec.write(new Claim(foreign, StoreCodec.sha256(foreignBytes), OTHER, AT));
+		new NioFileLayer().replaceDamaged(local.dataRoot().resolve("events/e1/claims/" + mine(1) + ".json"), winner,
+				mine(1) + ".json.verdraengt-20261027");
+
+		UnitIndex second = index();
+		UnitIndex.Refresh refresh = refresh(second, local);
+
+		assertEquals(1, refresh.resolved());
+		assertEquals(foreign, second.entries().get(EVENT).snapshot().version());
+		assertEquals(Set.of(EVENT), refresh.lostUnits());
+	}
+
+	@Test
+	void repairedVersionIsResolvedAgain() throws IOException {
+		write(EVENT, ME, mine(1), null, "e-1", true);
+		write(EVENT, ME, mine(2), mine(1), "e-2", true);
+		byte[] good = local.readVersionBytes(EVENT, mine(2)).orElseThrow();
+		Path file = local.dataRoot().resolve("events/e1/" + mine(2) + ".json");
+		Files.writeString(file, "kaputt");
+		UnitIndex first = index();
+		refresh(first, local);
+		first.flush();
+		assertEquals(UnitState.Status.LOCKED_DAMAGED, first.entries().get(EVENT).snapshot().status());
+
+		new NioFileLayer().replaceDamaged(file, good, mine(2) + ".json.corrupt-20261027");
+
+		UnitIndex second = index();
+		UnitIndex.Refresh refresh = refresh(second, local);
+
+		assertEquals(1, refresh.resolved());
+		assertEquals(UnitState.Status.OK, second.entries().get(EVENT).snapshot().status());
+		assertEquals(mine(2), second.entries().get(EVENT).snapshot().version());
+	}
+
+	@Test
+	void fingerprintFromListingCountsSideCopiesOfReplacedFilesOnly() {
+		String v = mine(1) + ".json";
+		Map<String, List<String>> plain = Map.of("events/e1", List.of(v), "events/e1/claims", List.of("root.json"));
+		String base = UnitIndex.fingerprintFromListing(plain, "events/e1");
+
+		assertNotEquals(base, UnitIndex.fingerprintFromListing(
+				Map.of("events/e1", List.of(v, v + ".corrupt-1"), "events/e1/claims", List.of("root.json")), "events/e1"));
+		assertNotEquals(base, UnitIndex.fingerprintFromListing(
+				Map.of("events/e1", List.of(v), "events/e1/claims", List.of("root.json", "root.json.verdraengt-1")),
+				"events/e1"));
+		assertEquals(base, UnitIndex.fingerprintFromListing(Map.of("events/e1", List.of(v, "Thumbs.db", "x.json.corrupt-1",
+				v + ".", "~karv-1.tmp", mine(1) + " (Konfliktkopie).json"), "events/e1/claims", List.of("root.json", "Thumbs.db",
+						"abc.json.bak")), "events/e1"));
+	}
+
+	@Test
 	void fingerprintFromListingOfMissingFolderIsFingerprintOfNothing() {
 		assertEquals(UnitIndex.fingerprint(List.of(), List.of()), UnitIndex.fingerprintFromListing(Map.of(), "events/e1"));
 	}

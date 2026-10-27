@@ -41,10 +41,16 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * Der Abdruck ist der SHA-256 über die sortierten Namen der Versions- und Anspruchsdateien einer Einheit
  * ({@link #fingerprint(Collection, Collection)}). Beim Start entsteht er aus dem Verzeichnisbaum
  * ({@link FileLayer#listTree}) mit denselben Namensregeln wie {@link VersionStore#readUnit}; für dieselbe Einheit ist er
- * gleich dem {@linkplain #fingerprint(UnitFiles) Abdruck der gelesenen Dateien}. Bekannte, hingenommene Lücke: Ein
- * Eintrag, der weder normale Datei noch Ordner ist, wird von {@code readUnit} gesehen, vom Verzeichnisbaum aber nicht;
- * das führt höchstens zu einer erneuten Auflösung, nie zu einem falschen Stand. Ebenso ändert eine Heilung, die den
- * Inhalt einer Datei unter gleichem Namen ersetzt, den Abdruck nicht.
+ * gleich dem {@linkplain #fingerprint(UnitFiles) Abdruck der gelesenen Dateien}.
+ * <p>
+ * Wird eine Datei unter gleichem Namen ersetzt (späte Niederlage, Heilung; siehe {@link FileLayer#replaceDamaged}), bleibt
+ * die alte als {@code <Name>.json.<Endung>} (z. B. {@code .corrupt-…}, {@code .verdraengt-…}) daneben liegen. Solche
+ * Nebenkopien einer Versions- oder Anspruchsdatei gehen deshalb als Zeilen {@code s:<Name>} in den Abdruck aus dem
+ * Verzeichnisbaum ein. Der gespeicherte Abdruck der gelesenen Dateien kennt sie nicht: Eine Einheit mit Nebenkopie
+ * stimmt nie mit ihrem Eintrag überein und wird bei jedem Start neu aufgelöst, und zwar sofort, sobald die erste
+ * Nebenkopie entsteht. Fremde Namen ({@code Thumbs.db}, {@code .tmp}, Konfliktkopien) zählen nicht. Bekannte,
+ * hingenommene Lücke: Ein Eintrag, der weder normale Datei noch Ordner ist, wird von {@code readUnit} gesehen, vom
+ * Verzeichnisbaum aber nicht; das führt höchstens zu einer erneuten Auflösung, nie zu einem falschen Stand.
  * <p>
  * Dateiformat: {@code <Index>/events/<Event-ID>.json} (alle Einheiten dieses Events) und {@code <Index>/halls.json}, je
  * {@code {"indexFormat":1,"machine":…,"units":[…]}}. Eine Datei mit anderem Format, von einem anderen Rechner oder
@@ -112,9 +118,16 @@ final class UnitIndex {
 	 * danach {@code c:<Name>} der Ansprüche, jede Zeile mit {@code \n} abgeschlossen.
 	 */
 	static String fingerprint(Collection<VersionId> versions, Collection<String> claimNames) {
+		return fingerprint(versions, claimNames, List.of());
+	}
+
+	/** Wie {@link #fingerprint(Collection, Collection)}, mit den Zeilen {@code s:<Name>} der Nebenkopien am Ende. */
+	private static String fingerprint(Collection<VersionId> versions, Collection<String> claimNames,
+			Collection<String> sideCopies) {
 		StringBuilder text = new StringBuilder();
 		versions.stream().map(VersionId::value).sorted().forEach(v -> text.append("v:").append(v).append('\n'));
 		claimNames.stream().sorted().forEach(c -> text.append("c:").append(c).append('\n'));
+		sideCopies.stream().sorted().forEach(s -> text.append("s:").append(s).append('\n'));
 		return StoreCodec.sha256(text.toString().getBytes(StandardCharsets.UTF_8));
 	}
 
@@ -125,21 +138,41 @@ final class UnitIndex {
 
 	/**
 	 * Der Abdruck einer Einheit aus einem Verzeichnisbaum ({@link FileLayer#listTree}), ohne eine Datei zu lesen. Es gelten
-	 * die Namensregeln von {@link VersionStore#versionIdOf} und {@link VersionStore#claimNameOf}.
+	 * die Namensregeln von {@link VersionStore#versionIdOf} und {@link VersionStore#claimNameOf}. Zusätzlich zählen die
+	 * Nebenkopien ersetzter Dateien ({@code <Name>.json.<Endung>} im Einheitenordner bzw. unter {@code claims/}), siehe
+	 * Klassenbeschreibung.
 	 *
 	 * @param tree     der Verzeichnisbaum des Datenordners
 	 * @param unitPath der Ordner der Einheit relativ zum Datenordner (siehe {@link UnitKey#relativePath()})
 	 */
 	static String fingerprintFromListing(Map<String, List<String>> tree, String unitPath) {
 		List<VersionId> versions = new ArrayList<>();
+		List<String> sideCopies = new ArrayList<>();
 		for (String name : tree.getOrDefault(unitPath, List.of())) {
 			VersionStore.versionIdOf(name).ifPresent(versions::add);
+			String base = sideCopyBase(name);
+			if (base != null && VersionStore.versionIdOf(base).isPresent()) {
+				sideCopies.add(name);
+			}
 		}
 		List<String> claimNames = new ArrayList<>();
 		for (String name : tree.getOrDefault(unitPath + "/" + CLAIMS, List.of())) {
 			VersionStore.claimNameOf(name).ifPresent(claimNames::add);
+			String base = sideCopyBase(name);
+			if (base != null && VersionStore.claimNameOf(base).isPresent()) {
+				sideCopies.add(CLAIMS + "/" + name);
+			}
 		}
-		return fingerprint(versions, claimNames);
+		return fingerprint(versions, claimNames, sideCopies);
+	}
+
+	/**
+	 * Bei einem Namen der Form {@code <Stamm>.json.<Endung>} (nicht leere Endung) der Teil bis einschließlich
+	 * {@code .json}, den die Namensregeln des Versionsspeichers beurteilen; sonst {@code null}.
+	 */
+	private static String sideCopyBase(String name) {
+		int dot = name.indexOf(JSON + ".");
+		return dot < 0 || name.length() == dot + JSON.length() + 1 ? null : name.substring(0, dot + JSON.length());
 	}
 
 	/**
