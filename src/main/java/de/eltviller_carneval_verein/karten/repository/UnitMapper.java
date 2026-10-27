@@ -72,8 +72,11 @@ final class UnitMapper {
 	record UnitPayload(UnitKey unit, ObjectNode payload) {
 	}
 
-	/** Das Ergebnis des Zusammensetzens: die lesbaren Objekte und die Warnungen für den Nutzer. */
-	record Assembly<T>(List<T> items, List<String> warnings) {
+	/**
+	 * Das Ergebnis des Zusammensetzens: die lesbaren Objekte, die Warnungen für den Nutzer und die Einheiten, die
+	 * tatsächlich in die Objekte eingegangen sind ({@code shown}: Kopf, Vorstellungen, Buchungen bzw. Hallen).
+	 */
+	record Assembly<T>(List<T> items, List<String> warnings, Set<UnitKey> shown) {
 	}
 
 	private UnitMapper() {
@@ -147,17 +150,22 @@ final class UnitMapper {
 	 * <ul>
 	 * <li>Neue Einheit (nicht im Bestand oder ohne Version): erste Version, ohne Vorgänger.</li>
 	 * <li>Geänderte oder wieder aufgetauchte (gelöschte) Einheit: neue Version auf der aktuellen Version.</li>
-	 * <li>Einheit nur im Bestand: Löschung, aber nur wenn ihre Eltern-Einheit (Vorstellung: der Kopf, Buchung: ihre
-	 * Vorstellung) in {@code units} steht. Sonst bleibt sie unberührt, denn gelöscht wird nur am Kopf. Ein Event-Kopf
-	 * oder eine Halle hat keine Eltern-Einheit und wird nie hier gelöscht, nur mit {@link #deletion}.</li>
+	 * <li>Einheit nur im Bestand: Löschung, aber nur wenn sie angezeigt wurde ({@code shown}), ihre Eltern-Einheit
+	 * (Vorstellung: der Kopf, Buchung: ihre Vorstellung) in {@code units} steht und sie eine Version hat und nicht
+	 * schon gelöscht ist. Sonst bleibt sie unberührt, denn gelöscht wird nur am Kopf. Ein Event-Kopf oder eine Halle
+	 * hat keine Eltern-Einheit und wird nie hier gelöscht, nur mit {@link #deletion}.</li>
 	 * </ul>
 	 * Die Daten von {@code baseline} und {@code units} bleiben unverändert.
 	 *
 	 * @param baseline alle bekannten Einheiten des Events bzw. der Halle, sichtbare wie unsichtbare
+	 * @param shown    die Einheiten des Modells, wie es zuletzt geladen oder gespeichert wurde (siehe
+	 *                 {@link Assembly#shown()}). Eine Einheit, die nicht angezeigt werden konnte (unlesbar, Inhalt
+	 *                 passt nicht zum Ordner), fehlt in {@code units}, ohne dass der Nutzer sie entfernt hat; sie
+	 *                 wird deshalb nie gelöscht.
 	 * @throws LockedUnitException wenn eine betroffene Einheit gesperrt ist oder noch auf eine Datei wartet; dann
 	 *                             wird nichts gespeichert
 	 */
-	static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, List<UnitPayload> units) {
+	static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, Set<UnitKey> shown, List<UnitPayload> units) {
 		Set<UnitKey> present = new HashSet<>();
 		for (UnitPayload part : units) {
 			present.add(part.unit());
@@ -176,8 +184,8 @@ final class UnitMapper {
 		List<UnitSnapshot> vanished = new ArrayList<>();
 		for (UnitSnapshot known : baseline.values()) {
 			UnitKey parent = parentOf(known.unit());
-			if (known.version() != null && !known.deleted() && !present.contains(known.unit()) && parent != null
-					&& present.contains(parent)) {
+			if (known.version() != null && !known.deleted() && shown.contains(known.unit())
+					&& !present.contains(known.unit()) && parent != null && present.contains(parent)) {
 				vanished.add(known);
 			}
 		}
@@ -252,6 +260,7 @@ final class UnitMapper {
 	 */
 	static Assembly<Event> assembleEvents(Collection<UnitSnapshot> snapshots) {
 		List<String> warnings = new ArrayList<>();
+		Set<UnitKey> shown = new HashSet<>();
 		int orphans = 0;
 
 		// Gruppiert wird über die Schlüssel der Einheiten: die ID einer Vorstellung gilt nur innerhalb ihres Events
@@ -264,6 +273,7 @@ final class UnitMapper {
 						e -> unit.eventId().equals(e.getId()) ? null : "Die ID im Inhalt (" + e.getId() + ") passt nicht zum Ordner");
 				if (event != null) {
 					events.put(unit, event);
+					shown.add(unit);
 				}
 			}
 		}
@@ -288,6 +298,7 @@ final class UnitMapper {
 							: "Die ID im Inhalt (" + p.getId() + ") passt nicht zum Ordner");
 			if (presentation != null) {
 				presentations.put(unit, presentation);
+				shown.add(unit);
 				presentationsOfEvent.computeIfAbsent(eventKey, k -> new ArrayList<>()).add(presentation);
 			}
 		}
@@ -309,6 +320,7 @@ final class UnitMapper {
 					b -> bookingMismatch(unit, b));
 			if (booking != null) {
 				bookingsOfPresentation.computeIfAbsent(presentationKey, k -> new ArrayList<>()).add(booking);
+				shown.add(unit);
 			}
 		}
 
@@ -326,13 +338,14 @@ final class UnitMapper {
 
 		List<Event> result = new ArrayList<>(events.values());
 		result.sort(EVENT_ORDER);
-		return new Assembly<>(result, warnings);
+		return new Assembly<>(result, warnings, shown);
 	}
 
 	/** Setzt die Hallen aus den Ständen der Einheiten zusammen, nach Name sortiert. */
 	static Assembly<Hall> assembleHalls(Collection<UnitSnapshot> snapshots) {
 		List<String> warnings = new ArrayList<>();
 		List<Hall> halls = new ArrayList<>();
+		Set<UnitKey> shown = new HashSet<>();
 		for (UnitSnapshot snapshot : snapshots) {
 			if (snapshot.unit().type() == UnitType.HALL) {
 				String hallId = snapshot.unit().hallId();
@@ -341,11 +354,12 @@ final class UnitMapper {
 						h -> hallId.equals(h.getId()) ? null : "Die ID im Inhalt (" + h.getId() + ") passt nicht zum Ordner");
 				if (hall != null) {
 					halls.add(hall);
+					shown.add(snapshot.unit());
 				}
 			}
 		}
 		halls.sort(HALL_ORDER);
-		return new Assembly<>(halls, warnings);
+		return new Assembly<>(halls, warnings, shown);
 	}
 
 	/**
