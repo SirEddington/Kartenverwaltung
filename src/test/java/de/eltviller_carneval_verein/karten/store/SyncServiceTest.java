@@ -1541,6 +1541,213 @@ class SyncServiceTest {
 		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), again.service.snapshots());
 	}
 
+	// --- Marke "sauber beendet"
+
+	private static Path cleanMarker(Node node) {
+		return node.appData.resolve("index/clean");
+	}
+
+	private static boolean walkedTree(Node node) {
+		return node.layer.calls().stream().anyMatch(c -> c.startsWith("listTree ") || c.startsWith("deleteOwnTemps "));
+	}
+
+	/** Ein Bestand mit vollständigem Index, sauber beendet: eine Buchung, eine Halle samt den Ordnern von Event und Vorstellung. */
+	private Node cleanlyClosedNode() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(BOOKING, "Anna"));
+		save(a, create(HALL, "Halle"));
+		a.service.flushIndex();
+		// der Abgleich nimmt auch die Ordner ohne eigene Dateien auf
+		Node full = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		full.service.startup("");
+		full.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+		return a;
+	}
+
+	@Test
+	void startupAfterCleanShutdownSkipsTreeWalks() throws IOException {
+		Node a = cleanlyClosedNode();
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(""));
+
+		assertFalse(walkedTree(b), b.layer.calls().toString());
+		assertTrue(b.service.isStarted());
+		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), b.service.snapshots());
+		assertEquals(payload("Anna"), b.service.snapshots().get(BOOKING).payload());
+		assertFalse(Files.exists(cleanMarker(a)));
+		// die Einheiten selbst wurden nicht gelesen, nur der Index
+		String data = b.localData().toString();
+		assertTrue(b.layer.calls().stream().noneMatch(c -> c.startsWith("read ") && c.contains(data)));
+	}
+
+	@Test
+	void startupAfterCleanShutdownReportsProgressUpToOne() throws IOException {
+		Node a = cleanlyClosedNode();
+		List<Double> progress = new ArrayList<>();
+
+		new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run).service.startup("", progress::add);
+
+		assertEquals(1.0, progress.get(progress.size() - 1));
+	}
+
+	@Test
+	void startupAfterCrashWalksAgain() throws IOException {
+		Node a = cleanlyClosedNode();
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.service.startup("");
+		assertFalse(walkedTree(b));
+		Version v1 = b.service.history(BOOKING).get(0);
+		Version v2 = save(b, update(BOOKING, v1, "Anna B"));
+		// kein closeIndex: Absturz
+
+		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		c.service.startup("");
+
+		assertTrue(c.layer.calls().stream().anyMatch(call -> call.startsWith("listTree ")), c.layer.calls().toString());
+		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), c.service.snapshots());
+		assertEquals(v2.id(), c.service.snapshots().get(BOOKING).version());
+	}
+
+	@Test
+	void markerIsGoneAfterAChangeSoACrashWalksAgain() throws IOException {
+		Node a = cleanlyClosedNode();
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.service.startup("");
+		b.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+
+		// nach dem Schließen ändert sich noch etwas (etwa ein später Takt): die Marke gilt nicht mehr
+		save(b, create(UnitKey.booking("e1", "p1", "A-2"), "Berta"));
+
+		assertFalse(Files.exists(cleanMarker(a)));
+		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		c.service.startup("");
+		assertTrue(c.layer.calls().stream().anyMatch(call -> call.startsWith("listTree ")));
+		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), c.service.snapshots());
+	}
+
+	@Test
+	void closeIndexWritesNoMarkerWhenFlushFails() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(BOOKING, "Anna"));
+		a.layer.failWhen(p -> p.startsWith(a.appData.resolve("index")), "createNew", new IOException("Platte voll"));
+
+		a.service.closeIndex();
+
+		assertFalse(Files.exists(cleanMarker(a)));
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.service.startup("");
+		assertTrue(b.layer.calls().stream().anyMatch(call -> call.startsWith("listTree ")));
+		assertEquals(payload("Anna"), b.service.snapshots().get(BOOKING).payload());
+	}
+
+	@Test
+	void closeIndexWritesNothingBeforeStartup() throws IOException {
+		Node a = node("a");
+
+		a.service.closeIndex();
+
+		assertFalse(Files.exists(a.appData.resolve("index")));
+	}
+
+	@Test
+	void closeIndexNeverThrowsWhenWritingTheMarkerFails() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(BOOKING, "Anna"));
+		// an der Stelle der Marke liegt ein nicht leerer Ordner
+		Files.createDirectories(a.appData.resolve("index/clean/x"));
+
+		a.service.closeIndex();
+
+		assertTrue(Files.isDirectory(a.appData.resolve("index/clean")));
+		assertTrue(Files.isRegularFile(a.appData.resolve("index/events/e1.json")));
+	}
+
+	@Test
+	void pendingFromCleanIndexIsClaimed() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(HALL, "Halle"));
+		// Absturz zwischen dem Schreiben der Version und ihrem lokalen Anspruch
+		a.layer.failWhen(p -> p.startsWith(a.localData()) && p.getParent().endsWith("claims"), "createNew",
+				new IOException("Absturz"));
+		assertThrows(IOException.class, () -> a.service.append("s2", List.of(create(BOOKING, "Anna"))));
+		VersionId pending = a.service.history(BOOKING).get(0).id();
+		a.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(""));
+
+		assertFalse(walkedTree(b), b.layer.calls().toString());
+		assertEquals(pending, b.service.unitState(BOOKING).head().id());
+		assertEquals(pending, b.service.snapshots().get(BOOKING).version());
+		assertEquals(Status.OK, b.service.snapshots().get(BOOKING).status());
+		assertTrue(Files.isRegularFile(localFile(b, BOOKING, "claims/root.json")));
+	}
+
+	@Test
+	void pendingFromCleanIndexIsUploadedInSharedMode() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		a.down.set(true);
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		a.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+		a.down.set(false);
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(shared));
+
+		assertFalse(walkedTree(b), b.layer.calls().toString());
+		assertEquals(v.id(), sharedClaim(BOOKING, "root").version());
+	}
+
+	@Test
+	void setAsideDeletesCleanMarker() throws IOException {
+		UnitKey mine = UnitKey.event("lokal");
+		UnitKey theirs = UnitKey.event("gemeinsam");
+		Node b = node("b");
+		b.service.startup(shared);
+		save(b, create(theirs, "B"));
+		b.service.tick();
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(mine, "A"));
+		a.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+
+		a.service.connect(shared, ConnectMode.SET_ASIDE);
+
+		assertFalse(Files.exists(cleanMarker(a)));
+		assertEquals(Set.of(theirs), a.service.snapshots().keySet());
+	}
+
+	@Test
+	void duplicateMachineIdDeletesCleanMarker() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		String oldId = a.identity.id();
+		Feed copy = new Feed(StoreCodec.FORMAT, oldId, 2, START, List.of());
+		Files.write(sharedRoot.resolve("data/feeds/" + oldId + "/2.json"), StoreCodec.write(copy));
+		save(a, update(BOOKING, v1, "Anna B"));
+		a.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+
+		a.service.tick();
+
+		assertEquals(1, a.events.duplicates.size());
+		assertFalse(Files.exists(cleanMarker(a)));
+	}
+
 	/**
 	 * Hält einen Thread an, nachdem er die Anspruchsdatei {@code root.json} einer Einheit gelesen hat: Er hat dann die
 	 * Versionen und den Anspruch gesehen, aber noch nicht in den Index eingetragen.

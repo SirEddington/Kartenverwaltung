@@ -599,6 +599,161 @@ class UnitIndexTest {
 		assertEquals(0, snapshot.payload().size());
 	}
 
+	// --- Marke "sauber beendet"
+
+	private Path cleanMarker() {
+		return indexDir.resolve("clean");
+	}
+
+	/** Ein geschriebener Index samt Marke, wie ihn das saubere Beenden hinterlässt. */
+	private void buildCleanIndex() throws IOException {
+		UnitIndex first = index();
+		refresh(first, local);
+		first.flush();
+		assertTrue(first.writeCleanMarker());
+	}
+
+	@Test
+	void cleanMarkerIsDeletedWhenRead() throws IOException {
+		buildThreeUnits();
+		write(PRESENTATION, ME, mine(3), mine(2), "presentation-3", false);
+		buildCleanIndex();
+		assertEquals(ME, Files.readString(cleanMarker(), StandardCharsets.UTF_8));
+
+		UnitIndex second = index();
+		assertTrue(second.loadIfClean());
+
+		assertFalse(Files.exists(cleanMarker()));
+		assertEquals(Set.of(EVENT, PRESENTATION, HALL), second.entries().keySet());
+		assertEquals("presentation-3", name(second.entries().get(PRESENTATION)));
+		UnitIndex.Refresh refresh = second.cleanRefresh();
+		assertEquals(0, refresh.resolved());
+		assertEquals(Set.of(PRESENTATION), refresh.pendingUnits());
+		assertTrue(refresh.lostUnits().isEmpty());
+		// die Marke gilt nur für diesen einen Start
+		assertFalse(index().loadIfClean());
+	}
+
+	@Test
+	void cleanLoadWalksNoTree() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+
+		assertTrue(new UnitIndex(indexDir, layer, ME).loadIfClean());
+
+		assertTrue(layer.calls().stream().noneMatch(c -> c.startsWith("listTree ")), layer.calls().toString());
+	}
+
+	@Test
+	void withoutMarkerNothingIsLoaded() throws IOException {
+		buildThreeUnits();
+		UnitIndex first = index();
+		refresh(first, local);
+		first.flush();
+
+		UnitIndex second = index();
+
+		assertFalse(second.loadIfClean());
+		assertTrue(second.entries().isEmpty());
+		assertEquals(0, refresh(second, local).resolved());
+	}
+
+	@Test
+	void cleanMarkerOfOtherMachineIsIgnored() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		Files.writeString(cleanMarker(), OTHER, StandardCharsets.UTF_8);
+
+		UnitIndex second = index();
+
+		assertFalse(second.loadIfClean());
+		assertFalse(Files.exists(cleanMarker()));
+		assertTrue(second.entries().isEmpty());
+		assertEquals(0, refresh(second, local).resolved());
+	}
+
+	@Test
+	void unreadableCleanMarkerIsIgnoredAndDeleted() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		Files.write(cleanMarker(), new byte[] { (byte) 0xC3, (byte) 0x28 });
+
+		assertFalse(index().loadIfClean());
+		assertFalse(Files.exists(cleanMarker()));
+	}
+
+	@Test
+	void cleanLoadFallsBackWhenAnIndexFileIsUnreadable() throws IOException {
+		saveTwice(EVENT, "event");
+		saveTwice(PRESENTATION, "presentation");
+		saveTwice(HALL, "hall");
+		buildCleanIndex();
+		Files.writeString(eventIndexFile("e1"), "{");
+
+		UnitIndex second = index();
+
+		assertFalse(second.loadIfClean());
+		assertFalse(Files.exists(cleanMarker()));
+		// auch der gut gelesene Teil (die Hallen) wird nicht übernommen
+		assertTrue(second.entries().isEmpty());
+		UnitIndex.Refresh refresh = refresh(second, local);
+		assertEquals(2, refresh.resolved());
+		assertEquals(Set.of(EVENT, PRESENTATION, HALL), second.entries().keySet());
+	}
+
+	@Test
+	void cleanLoadFallsBackWhenAnIndexFileIsOfOtherMachine() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":1,\"machine\":\"" + OTHER + "\",\"units\":[]}");
+
+		assertFalse(index().loadIfClean());
+	}
+
+	@Test
+	void cleanMarkerIsNotWrittenWithUnflushedChanges() throws IOException {
+		buildThreeUnits();
+		UnitIndex index = index();
+		refresh(index, local);
+
+		assertFalse(index.writeCleanMarker());
+		assertFalse(Files.exists(cleanMarker()));
+
+		index.flush();
+		assertTrue(index.writeCleanMarker());
+		assertTrue(Files.isRegularFile(cleanMarker()));
+	}
+
+	@Test
+	void changeAfterMarkerDeletesIt() throws IOException {
+		saveTwice(EVENT, "event");
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+		assertTrue(index.writeCleanMarker());
+		write(EVENT, ME, mine(3), mine(2), "event-3", false);
+		UnitFiles files = local.readUnit(EVENT);
+
+		index.update(files, ChainResolver.resolve(files, ME));
+
+		assertFalse(Files.exists(cleanMarker()));
+		assertFalse(index().loadIfClean());
+	}
+
+	@Test
+	void clearDeletesCleanMarker() throws IOException {
+		buildThreeUnits();
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+		assertTrue(index.writeCleanMarker());
+
+		index.clear();
+
+		assertFalse(Files.exists(cleanMarker()));
+	}
+
 	private static long createdFiles(FaultyFileLayer layer) {
 		return layer.calls().stream().filter(c -> c.startsWith("createNew ")).count();
 	}

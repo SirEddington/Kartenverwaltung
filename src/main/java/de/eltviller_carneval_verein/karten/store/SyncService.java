@@ -75,7 +75,9 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * geändert haben; nur die dabei gefundenen Kandidaten mit ausstehenden eigenen Versionen untersucht der Start auf dem
  * Thread des Aufrufers. Jede Stelle, die den Stand einer Einheit ermittelt, trägt ihn danach in den Index ein. Gespeichert
  * wird er von {@link #flushIndex()} und im Takt alle {@link #INDEX_FLUSH}, nicht vor dem Abgleich durch {@link #startup}.
- * Der Index ist nie Schiedsrichter: Jede Entscheidung über Vorgänger, Ansprüche und Verluste trifft {@link ChainResolver}
+ * Beim Beenden ruft die Anwendung {@link #closeIndex()}: Es schreibt den Index und legt die Marke "sauber beendet" an. Findet
+ * {@link #startup} sie vor, übernimmt es den Index ohne jeden Durchlauf über den Bestand (zweite Stufe); ohne Marke,
+ * also nach einem Absturz, bleibt es beim Abgleich über die Verzeichnisnamen. Der Index ist nie Schiedsrichter: Jede Entscheidung über Vorgänger, Ansprüche und Verluste trifft {@link ChainResolver}
  * auf den Dateien; die Abläufe im {@code worker} lesen weiterhin alle Einheiten.
  * <p>
  * <b>Threads:</b>
@@ -108,6 +110,8 @@ public final class SyncService {
 	static final Duration TEMP_AGE = Duration.ofDays(1);
 	/** So selten schreibt der Takt den Start-Index. */
 	static final Duration INDEX_FLUSH = Duration.ofSeconds(5);
+	/** So lange wartet {@link #closeIndex()} auf eine laufende Runde im Hintergrund. */
+	static final Duration CLOSE_WAIT = Duration.ofSeconds(3);
 
 	private static final int MAX_REPAIRS = 10;
 	private static final int MAX_ID_ATTEMPTS = 100;
@@ -327,7 +331,9 @@ public final class SyncService {
 	// --- Steuerung
 
 	/**
-	 * Beim Start der Anwendung. Räumt zuerst eigene temporäre Dateien älter als einen Tag aus dem lokalen Bestand. Ohne
+	 * Beim Start der Anwendung. Macht zuerst den Start-Index benutzbar, nach einem sauberen Beenden ohne Durchlauf über den
+	 * Bestand, sonst nach dem Aufräumen eigener temporärer Dateien älter als einen Tag (Einzelheiten siehe
+	 * {@link #startup(String, DoubleConsumer)}). Ohne
 	 * gemeinsamen Ordner gilt der Einzelbetrieb ({@link SyncState#AUS}); ausstehende eigene Versionen (etwa nach einem
 	 * Absturz vor dem lokalen Anspruch) werden dann lokal beansprucht. Sonst wird die Erreichbarkeit geprüft
 	 * (höchstens 5 Sekunden): Ist der Ordner erreichbar, werden die ausstehenden Versionen früherer Läufe hier synchron
@@ -344,7 +350,12 @@ public final class SyncService {
 	}
 
 	/**
-	 * Wie {@link #startup(String)}, mit Fortschritt. Nach dem Aufräumen gleicht der Start den Start-Index mit dem lokalen
+	 * Wie {@link #startup(String)}, mit Fortschritt. Zuerst prüft der Start die Marke "sauber beendet" (siehe
+	 * {@link #closeIndex()}) und löscht sie dabei sofort. Gilt sie und sind alle Index-Dateien lesbar, wird der Index
+	 * ohne Durchlauf über den Bestand übernommen: Weder die eigenen temporären Dateien werden aufgeräumt noch die
+	 * Verzeichnisnamen durchlaufen; die Kandidaten für ausstehende Versionen sind die Einträge des Index mit entsprechender
+	 * Kennzeichnung. Sonst (nach einem Absturz, ohne oder mit fremder Marke, bei unbrauchbarem Index) räumt der Start zuerst
+	 * eigene temporäre Dateien älter als einen Tag auf und gleicht den Start-Index mit dem lokalen
 	 * Bestand ab (ein Durchlauf über die Verzeichnisnamen; nur Einheiten mit geänderten Dateinamen werden neu aufgelöst).
 	 * Ausstehende eigene Versionen werden nur bei den Einheiten gesucht, die der Index dafür nennt; die Entscheidung trifft
 	 * wie überall {@link ChainResolver} auf den Dateien. Scheitert der Abgleich, baut der Start den Index neu auf: Er löst jede
@@ -355,14 +366,7 @@ public final class SyncService {
 	 * @throws UncheckedIOException wenn der Bestand nicht vollständig gelesen werden kann; die Meldung nennt die Einheit
 	 */
 	public boolean startup(String sharedDir, DoubleConsumer progress) {
-		try {
-			files.deleteOwnTemps(local.dataRoot(), TEMP_AGE);
-		} catch (IOException | RuntimeException e) {
-			LOGGER.log(Level.WARNING, "Alte temporäre Dateien im lokalen Bestand ließen sich nicht entfernen", e);
-		}
-		Set<UnitKey> refreshed = refreshIndex(progress);
-		// war der Index nicht zu gebrauchen: jede Einheit einzeln aus den Dateien, oder der Start scheitert
-		Set<UnitKey> candidates = refreshed != null ? refreshed : rebuildIndex(progress);
+		Set<UnitKey> candidates = openIndex(progress);
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			deactivate();
@@ -778,14 +782,61 @@ public final class SyncService {
 	 * Fehler kommt als {@code WARNING} ins Log, der Index kostet dann nur beim nächsten Start Zeit.
 	 */
 	public void flushIndex() {
-		if (!indexRefreshed) {
-			return;
+		if (indexRefreshed) {
+			writeIndex();
 		}
+	}
+
+	/**
+	 * Schreibt den Index und merkt sich den Zeitpunkt.
+	 *
+	 * @return ob das Schreiben ohne Fehler durchlief
+	 */
+	private boolean writeIndex() {
 		lastIndexFlush = clock.instant();
 		try {
 			index.flush();
+			return true;
 		} catch (IOException | RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Der Start-Index ließ sich nicht schreiben", e);
+			return false;
+		}
+	}
+
+	/**
+	 * Beim Beenden der Anwendung: wie {@link #flushIndex()}, und gelingt das Schreiben vollständig, bleibt nichts
+	 * ungeschrieben, so legt es die Marke "sauber beendet" an ({@code <Index>/clean}, Inhalt: die eigene Rechner-ID). Der
+	 * nächste {@link #startup} übernimmt den Index dann ohne Durchlauf über den Bestand. Ohne Marke (Fehler beim Schreiben,
+	 * Index nie abgeglichen) startet er wie nach einem Absturz.
+	 * <p>
+	 * Eine gerade laufende Runde im Hintergrund wartet es kurz ab ({@link #CLOSE_WAIT}); ist sie dann nicht fertig, gibt es
+	 * keine Marke, denn ihre Änderungen am Bestand fehlten im Index. Ändert sich der Index nach der Marke noch, löscht er
+	 * sie selbst wieder. Wirft nie; Fehler stehen als {@code WARNING} im Log.
+	 */
+	public void closeIndex() {
+		boolean idle = false;
+		try {
+			idle = workLock.tryLock(CLOSE_WAIT.toMillis(), TimeUnit.MILLISECONDS);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+		try {
+			if (!indexRefreshed) {
+				return;
+			}
+			boolean written = writeIndex();
+			if (!written || !idle) {
+				return;
+			}
+			if (!index.writeCleanMarker()) {
+				LOGGER.warning("Der Start-Index hat noch ungeschriebene Änderungen; die Marke 'sauber beendet' entfällt");
+			}
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht schreiben", e);
+		} finally {
+			if (idle) {
+				workLock.unlock();
+			}
 		}
 	}
 
@@ -795,6 +846,37 @@ public final class SyncService {
 		if (indexRefreshed && (last == null || !clock.instant().isBefore(last.plus(INDEX_FLUSH))) && index.hasChanges()) {
 			flushIndex();
 		}
+	}
+
+	/**
+	 * Macht den Index beim Start benutzbar. Zuerst gilt die Marke "sauber beendet" ({@link UnitIndex#loadIfClean}): Ist sie
+	 * da und der Index lesbar, wird er ohne Durchlauf über den Bestand übernommen; das Aufräumen und der Verzeichnisbaum entfallen, denn
+	 * temporäre Reste und Änderungen am Bestand ohne den Index gibt es nur nach einem Absturz, und dann fehlt die Marke.
+	 * Sonst räumt der Start eigene temporäre Dateien auf und gleicht den Index ab, im Notfall baut er ihn neu auf.
+	 *
+	 * @return die Einheiten mit ausstehenden eigenen Versionen
+	 */
+	private Set<UnitKey> openIndex(DoubleConsumer progress) {
+		try {
+			if (index.loadIfClean()) {
+				Set<UnitKey> pending = index.cleanRefresh().pendingUnits();
+				indexRefreshed = true;
+				if (progress != null) {
+					progress.accept(1.0);
+				}
+				return pending;
+			}
+		} catch (RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht auswerten; der Bestand wird durchsucht", e);
+		}
+		try {
+			files.deleteOwnTemps(local.dataRoot(), TEMP_AGE);
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Alte temporäre Dateien im lokalen Bestand ließen sich nicht entfernen", e);
+		}
+		Set<UnitKey> refreshed = refreshIndex(progress);
+		// war der Index nicht zu gebrauchen: jede Einheit einzeln aus den Dateien, oder der Start scheitert
+		return refreshed != null ? refreshed : rebuildIndex(progress);
 	}
 
 	/**
@@ -1239,6 +1321,7 @@ public final class SyncService {
 		}
 		// der Index gehört zu einer Kennung (die Stände hängen davon ab, was "eigen" ist): neu aufbauen, die alten Dateien
 		// gelten als fremd
+		index.deleteCleanMarker();
 		index = new UnitIndex(appDataDir.resolve(INDEX), files, renewed.id());
 		refreshIndex(null);
 		current.bind(renewed.id(), local, clock);

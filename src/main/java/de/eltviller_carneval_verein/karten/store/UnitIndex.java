@@ -56,6 +56,15 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * {@code {"indexFormat":1,"machine":…,"units":[…]}}. Eine Datei mit anderem Format, von einem anderen Rechner oder
  * unlesbar gilt als leer und wird beim nächsten {@link #flush} neu geschrieben.
  * <p>
+ * <b>Marke "sauber beendet":</b> Die Datei {@code <Index>/clean} (Inhalt: die Rechner-ID als Text, UTF-8) sagt, dass der
+ * Index beim letzten Beenden vollständig geschrieben war und seither nichts am Bestand geändert wurde. {@link #loadIfClean}
+ * übernimmt den Index dann ohne Durchlauf über den Verzeichnisbaum und löscht die Marke sofort, damit ein Absturz nicht auf
+ * einen veralteten Index trifft. Die Marke entsteht nur in {@link #writeCleanMarker} (und nur ohne ungeschriebene
+ * Änderungen); jede spätere Änderung des Index ({@link #update}, {@link #clear}) löscht sie wieder. Temporäre Reste und
+ * geänderte Dateien entstehen nur bei einem Absturz, dann fehlt die Marke und der nächste Start prüft wie gewohnt. Auch
+ * die Marke macht den Index nicht zum Schiedsrichter: Die Entscheidung über ausstehende Versionen bleibt bei
+ * {@link ChainResolver} auf den Dateien.
+ * <p>
  * Alle Methoden sind synchronisiert.
  */
 final class UnitIndex {
@@ -67,6 +76,7 @@ final class UnitIndex {
 	private static final String HALLS = "halls";
 	private static final String CLAIMS = "claims";
 	private static final String JSON = ".json";
+	private static final String CLEAN = "clean";
 
 	private static final ObjectMapper MAPPER = JsonMapperFactory.create().copy()
 			.disable(SerializationFeature.INDENT_OUTPUT);
@@ -101,6 +111,8 @@ final class UnitIndex {
 	private final Set<String> loaded = new HashSet<>();
 	/** Die Gruppen, deren Datei neu geschrieben werden muss. */
 	private final Set<String> dirty = new TreeSet<>();
+	/** Ob diese Instanz die Marke "sauber beendet" angelegt hat und sie noch gilt. */
+	private boolean markerWritten;
 
 	/**
 	 * @param indexDir  der Ordner des Index ({@code <AppData>/index})
@@ -224,9 +236,14 @@ final class UnitIndex {
 			report.accept(1.0);
 		}
 
+		return refreshOf(units.keySet(), resolved);
+	}
+
+	/** Die Einheiten mit ausstehenden und mit verlorenen Versionen unter den genannten, nach den Flags ihrer Einträge. */
+	private Refresh refreshOf(Collection<UnitKey> units, int resolved) {
 		Set<UnitKey> pending = new HashSet<>();
 		Set<UnitKey> lost = new HashSet<>();
-		for (UnitKey unit : units.keySet()) {
+		for (UnitKey unit : units) {
 			Entry entry = entries.get(unit);
 			if (entry.pending()) {
 				pending.add(unit);
@@ -239,14 +256,25 @@ final class UnitIndex {
 	}
 
 	/**
+	 * Das Ergebnis nach einem erfolgreichen {@link #loadIfClean}: die Einheiten mit ausstehenden und mit verlorenen
+	 * Versionen nach den Flags der geladenen Einträge; es wurde nichts neu aufgelöst ({@code resolved == 0}).
+	 */
+	synchronized Refresh cleanRefresh() {
+		return refreshOf(entries.keySet(), 0);
+	}
+
+	/**
 	 * Trägt den frisch ermittelten Stand einer Einheit ein und merkt ihre Datei zum Schreiben vor. Der Eintrag beruht auf den
-	 * Dateien, die {@code unitFiles} enthält.
+	 * Dateien, die {@code unitFiles} enthält. Eine angelegte Marke "sauber beendet" gilt damit nicht mehr.
 	 */
 	synchronized void update(UnitFiles unitFiles, UnitState state) {
 		UnitKey unit = state.unit();
 		entries.put(unit, new Entry(UnitSnapshot.of(state), fingerprint(unitFiles), !state.pending().isEmpty(),
 				!state.lost().isEmpty()));
 		dirty.add(groupOf(unit));
+		if (markerWritten) {
+			deleteCleanMarker();
+		}
 	}
 
 	/** Eine unveränderliche Kopie der Einträge. */
@@ -262,9 +290,11 @@ final class UnitIndex {
 	/**
 	 * Verwirft alle Einträge. Alle bekannten Gruppen (im Speicher und als Datei vorhanden) gelten als geändert; der nächste
 	 * {@link #flush} schreibt sie leer. Die alten Dateien werden nie wieder gelesen: nötig, wenn der Datenordner ausgetauscht
-	 * wird (Beiseitelegen), denn danach können gleiche Dateinamen anderen Inhalt haben.
+	 * wird (Beiseitelegen), denn danach können gleiche Dateinamen anderen Inhalt haben. Die Marke "sauber beendet" wird
+	 * gelöscht.
 	 */
 	synchronized void clear() {
+		deleteCleanMarker();
 		Set<String> groups = new TreeSet<>(loaded);
 		entries.keySet().forEach(unit -> groups.add(groupOf(unit)));
 		try {
@@ -299,6 +329,90 @@ final class UnitIndex {
 			}
 			dirty.remove(group);
 		}
+	}
+
+	private Path cleanMarker() {
+		return indexDir.resolve(CLEAN);
+	}
+
+	/**
+	 * Legt die Marke "sauber beendet" an (Inhalt: die Rechner-ID), aber nur, wenn es keine ungeschriebenen Änderungen gibt:
+	 * Sonst stünde die Marke für einen Index, der nicht dem Stand der Dateien auf der Platte entspricht. Bis zur nächsten
+	 * Änderung ({@link #update}, {@link #clear}) gilt sie.
+	 *
+	 * @return ob die Marke angelegt wurde ({@code false} bei ungeschriebenen Änderungen)
+	 * @throws IOException wenn sie sich nicht schreiben lässt; dann gibt es keine (vollständige) Marke, und eine unvollständige
+	 *                     gilt beim Lesen als fremd
+	 */
+	synchronized boolean writeCleanMarker() throws IOException {
+		if (!dirty.isEmpty()) {
+			return false;
+		}
+		Files.createDirectories(indexDir);
+		Files.writeString(cleanMarker(), machineId, StandardCharsets.UTF_8);
+		markerWritten = true;
+		return true;
+	}
+
+	/** Löscht die Marke "sauber beendet", falls es sie gibt. Scheitert das, steht nur eine Warnung im Log. */
+	synchronized void deleteCleanMarker() {
+		markerWritten = false;
+		try {
+			Files.deleteIfExists(cleanMarker());
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht löschen: " + cleanMarker(), e);
+		}
+	}
+
+	/**
+	 * Übernimmt den Index ohne Durchlauf über den Verzeichnisbaum, wenn er beim letzten Beenden sauber geschrieben wurde. Prüft
+	 * dazu die Marke und löscht sie sofort: Sie gilt nur für genau diesen Start. Eine fremde oder unlesbare Marke wird
+	 * ebenfalls gelöscht (scheitert das, steht nur eine Warnung im Log), gilt aber nicht. Lässt sich die eigene Marke nicht
+	 * löschen, gilt der Start als unsauber. Danach werden alle Index-Dateien gelesen; ist eine unlesbar, hat ein anderes Format
+	 * oder eine andere Rechner-ID, gilt der Start ebenfalls als unsauber, und nichts von dem Gelesenen wird übernommen.
+	 * <p>
+	 * Bei {@code true} sind alle Einträge geladen; {@link #cleanRefresh()} liefert die Einheiten mit ausstehenden und
+	 * verlorenen Versionen. Bei {@code false} ist der Index unverändert und {@link #refresh} der Weg wie bisher. Wirft nie.
+	 */
+	synchronized boolean loadIfClean() {
+		Path marker = cleanMarker();
+		markerWritten = false;
+		boolean own;
+		try {
+			if (!Files.exists(marker)) {
+				return false;
+			}
+			own = machineId.equals(Files.readString(marker, StandardCharsets.UTF_8));
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ist unlesbar: " + marker, e);
+			own = false;
+		}
+		try {
+			Files.deleteIfExists(marker);
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht löschen: " + marker, e);
+			return false;
+		}
+		if (!own) {
+			return false;
+		}
+		Map<String, List<Entry>> read = new LinkedHashMap<>();
+		try {
+			for (String group : storedGroups()) {
+				if (!loaded.contains(group)) {
+					Optional<byte[]> bytes = files.read(fileOf(group));
+					read.put(group, bytes.isPresent() ? parse(bytes.get(), group) : List.of());
+				}
+			}
+		} catch (IOException | RuntimeException e) {
+			LOGGER.warning("Der Start-Index ist trotz Marke unbrauchbar, der Bestand wird durchsucht: " + e);
+			return false;
+		}
+		read.forEach((group, list) -> {
+			loaded.add(group);
+			list.forEach(entry -> entries.putIfAbsent(entry.snapshot().unit(), entry));
+		});
+		return true;
 	}
 
 	private static void deleteQuietly(Path temp) {

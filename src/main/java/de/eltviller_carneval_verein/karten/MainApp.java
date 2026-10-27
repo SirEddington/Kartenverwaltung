@@ -174,10 +174,13 @@ public class MainApp extends Application {
 		showMenuView();
 	}
 
-	/** Beim Beenden den Index schreiben (Fehler dabei werden nur geloggt), falls der Start den Dienst überhaupt erzeugt hat. */
+	/**
+	 * Beim Beenden den Index schreiben und die Marke "sauber beendet" anlegen (Fehler dabei werden nur geloggt), falls der
+	 * Start den Dienst überhaupt erzeugt hat.
+	 */
 	@Override
 	public void stop() {
-		SyncService.instanceIfCreated().ifPresent(SyncService::flushIndex);
+		SyncService.instanceIfCreated().ifPresent(SyncService::closeIndex);
 	}
 
 	private static <T> RepositoryListener<T> trackerUpdater(ChangeTracker<T> tracker) {
