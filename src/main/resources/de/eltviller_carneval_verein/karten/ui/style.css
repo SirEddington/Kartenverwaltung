@@ -536,41 +536,47 @@
  }
 
 /* ------------------------------------------------------------------------------
- * 6b. LISTEN (ListView, z.B. Reihenliste im Hallen-Editor, Dialoge "Platz zuweisen"
- * und "Wiederherstellen")
+ * 6b. LISTEN UND BÄUME (ListView/TreeView, z.B. Reihenliste im Hallen-Editor,
+ * Dialoge "Platz zuweisen" und "Wiederherstellen")
  * Rahmen, Zeilenfarben und Zellenabstand wie bei den Tabellen (Abschnitt 6), Fokus
  * wie bei Textfeldern und ComboBox. Die Zellen-Regeln gelten nur innerhalb einer
  * .list-view: Die Anzeige-Zelle des geschlossenen ComboBox ist auch eine ".list-cell"
  * (immer :filled:selected) und bleibt unberührt. Die Listen der ComboBox-Popups
  * behalten ihren Look aus Abschnitt 5 (dort spezifischere Selektoren).
  * ------------------------------------------------------------------------------ */
- .list-view {
+ .list-view,
+ .tree-view {
      -fx-background-color: transparent;
      -fx-border-color: -fx-border-neutral;
      -fx-border-width: 1px;
      -fx-border-radius: 4px;
  }
 
- .list-view:focused {
+ .list-view:focused,
+ .tree-view:focused {
      /* Breite bewusst gleich wie im Normalzustand, sonst verschiebt sich beim Fokussieren das Layout */
      -fx-border-color: -fx-ecv-blue;
  }
 
  /* Zeilen & Hover/Selection */
- .list-view .list-cell {
+ .list-view .list-cell,
+ .tree-view .tree-cell {
      -fx-background-color: -fx-surface-white;
      -fx-padding: 6px 8px;
  }
 
- .list-view .list-cell:odd {
+ .list-view .list-cell:odd,
+ .tree-view .tree-cell:odd {
      -fx-background-color: #F0F4F8;
  }
 
- .list-view .list-cell:hover {
+ .list-view .list-cell:hover,
+ .tree-view .tree-cell:hover {
      -fx-background-color: #E2E8F0;
  }
 
- .list-view .list-cell:filled:selected {
+ .list-view .list-cell:filled:selected,
+ .tree-view .tree-cell:filled:selected {
      -fx-background-color: -fx-ecv-yellow;
      -fx-text-fill: -fx-ecv-blue;
  }
