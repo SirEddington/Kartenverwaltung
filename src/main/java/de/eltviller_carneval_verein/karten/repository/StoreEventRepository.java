@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.repository;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
@@ -151,20 +152,62 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
-	 * Das Event, wie es zum Speicherstand war, als neues Objekt; auch für ein gelöschtes Event. Gespeichert wird nichts
-	 * und der Cache bleibt unberührt: Wiederherstellen ist {@code saveEvent(eventAt(..))}.
+	 * Stellt das Event auf den Speicherstand zurück. Ablauf: Die Einheiten des Events werden frisch aus dem Versionsspeicher
+	 * gelesen und sind ab jetzt Vergleichsstand und angezeigter Stand (Änderungen von anderer Seite seit dem Laden gelten
+	 * damit als Stand, den es zurückzusetzen gilt, nicht als unbekannt); ein sichtbares Event ersetzt das im Cache. Dann
+	 * wird der Zielstand zusammengesetzt, mit {@code adjust} angepasst (liefert Hinweise für den Nutzer) und wie jedes
+	 * Event gespeichert: Die Unterschiede werden neue Versionen mit gemeinsamer neuer {@code saveId} auf dem aktuellen
+	 * Ende der Ketten. Das Ergebnis ersetzt das Event im Cache.
+	 * <p>
+	 * Scheitert das Speichern, bleibt im Cache der frisch gelesene Stand, passend zum Vergleichsstand.
 	 *
-	 * @throws LockedUnitException wenn eine Einheit des Events gesperrt ist oder noch auf eine Datei wartet, oder wenn
-	 *                             das Event zu diesem Speicherstand gelöscht war
+	 * @throws LockedUnitException wenn eine Einheit des Events gesperrt ist oder noch auf eine Datei wartet, wenn das Event
+	 *                             zu diesem Speicherstand gelöscht war oder der Zielstand unlesbare Teile enthält; es
+	 *                             wurde nichts gespeichert
+	 * @throws RuntimeException    wenn das Schreiben scheitert
 	 */
-	public Event eventAt(String eventId, SavePoint point) throws IOException {
+	public Restored<Event> restoreEvent(String eventId, SavePoint point, Function<Event, List<String>> adjust)
+			throws IOException {
+		ensureLoaded();
 		List<UnitState> states = statesOf(eventId);
 		RestorePlanner.requireRestorable(states);
-		List<Event> events = UnitMapper.assembleEvents(RestorePlanner.targetsAt(states, point.at()).values()).items();
-		if (events.isEmpty()) {
-			throw new LockedUnitException("Zu diesem Speicherstand war das Event gelöscht.");
+		refreshFromStore(eventId, states);
+		Event target = targetOf(states, point);
+		List<String> notes = adjust.apply(target);
+		saveEvent(target);
+		replaceCachedEvent(target);
+		return new Restored<>(target, notes);
+	}
+
+	/**
+	 * Das Event, wie es zum Speicherstand war, als neues Objekt; auch für ein gelöschtes Event. Gespeichert wird nichts
+	 * und der Cache bleibt unberührt (nur für Tests; das Wiederherstellen ist {@link #restoreEvent}).
+	 */
+	Event eventAt(String eventId, SavePoint point) throws IOException {
+		List<UnitState> states = statesOf(eventId);
+		RestorePlanner.requireRestorable(states);
+		return targetOf(states, point);
+	}
+
+	private Event targetOf(List<UnitState> states, SavePoint point) {
+		return RestorePlanner.single(UnitMapper.assembleEvents(RestorePlanner.targetsAt(states, point.at()).values()),
+				"Zu diesem Speicherstand war das Event gelöscht.");
+	}
+
+	/** Übernimmt den frisch gelesenen Stand des Events als Vergleichsstand und, wenn es sichtbar ist, in den Cache. */
+	private void refreshFromStore(String eventId, List<UnitState> states) {
+		List<UnitSnapshot> snapshots = states.stream().map(UnitSnapshot::of).toList();
+		Assembly<Event> current = UnitMapper.assembleEvents(snapshots);
+		baseline.resetOwner(eventId, snapshots, current.shown());
+		if (!current.items().isEmpty()) {
+			Event fresh = current.items().get(0);
+			int index = cachedEvents.indexOf(fresh);
+			if (index >= 0) {
+				cachedEvents.set(index, fresh);
+			} else {
+				cachedEvents.add(fresh);
+			}
 		}
-		return events.get(0);
 	}
 
 	private List<UnitState> statesOf(String eventId) throws IOException {

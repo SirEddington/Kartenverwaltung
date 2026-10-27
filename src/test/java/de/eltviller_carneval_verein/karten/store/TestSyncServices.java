@@ -30,7 +30,8 @@ public final class TestSyncServices {
 		return singleMode(appData, files, Clock.systemUTC());
 	}
 
-	private static SyncService singleMode(Path appData, FileLayer files, Clock clock) {
+	/** Wie {@link #singleMode(Path)}, mit Dateischicht und Uhr nach Wahl. */
+	public static SyncService singleMode(Path appData, FileLayer files, Clock clock) {
 		try {
 			MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "test");
 			return new SyncService(appData, identity, files, Runnable::run, Runnable::run, path -> true, clock);

@@ -66,6 +66,19 @@ final class UnitBaseline {
 		}
 	}
 
+	/**
+	 * Baut den Vergleichsstand eines einzelnen Events bzw. einer Halle neu auf, wie {@link #reset} für alle: aus den
+	 * Ständen, die gerade gelesen wurden. Die anderen bleiben unberührt.
+	 */
+	void resetOwner(String ownerId, Collection<UnitSnapshot> snapshots, Set<UnitKey> shownUnits) {
+		Map<UnitKey, UnitSnapshot> units = new HashMap<>();
+		for (UnitSnapshot snapshot : snapshots) {
+			units.put(snapshot.unit(), snapshot);
+		}
+		known.put(ownerId, units);
+		shown.put(ownerId, new HashSet<>(shownUnits));
+	}
+
 	/** Die Stände der Köpfe (Events bzw. Hallen) im Vergleichsstand, auch der gelöschten. */
 	List<UnitSnapshot> heads(UnitType headType) {
 		List<UnitSnapshot> heads = new ArrayList<>();

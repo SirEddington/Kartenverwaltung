@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.repository;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
@@ -160,20 +161,57 @@ public class StoreHallRepository implements HallRepository {
 	}
 
 	/**
-	 * Die Halle, wie sie zum Speicherstand war, als neues Objekt; auch für eine gelöschte Halle. Gespeichert wird nichts
-	 * und der Cache bleibt unberührt: Wiederherstellen ist {@code saveHall(hallAt(..))}.
+	 * Stellt die Halle auf den Speicherstand zurück, im selben Ablauf wie
+	 * {@link StoreEventRepository#restoreEvent}: frisch lesen (Vergleichsstand und Cache), Zielstand zusammensetzen, mit
+	 * {@code adjust} anpassen, speichern, im Cache ersetzen. Scheitert das Speichern, bleibt im Cache der frisch gelesene
+	 * Stand.
 	 *
-	 * @throws LockedUnitException wenn die Halle gesperrt ist oder noch auf eine Datei wartet, oder wenn sie zu diesem
-	 *                             Speicherstand gelöscht war
+	 * @throws LockedUnitException wenn die Halle gesperrt ist oder noch auf eine Datei wartet, wenn sie zu diesem
+	 *                             Speicherstand gelöscht war oder der Zielstand unlesbar ist; es wurde nichts gespeichert
+	 * @throws RuntimeException    wenn das Schreiben scheitert
 	 */
-	public Hall hallAt(String hallId, SavePoint point) throws IOException {
+	public Restored<Hall> restoreHall(String hallId, SavePoint point, Function<Hall, List<String>> adjust)
+			throws IOException {
+		ensureLoaded();
 		List<UnitState> states = List.of(sync.unitState(UnitKey.hall(hallId)));
 		RestorePlanner.requireRestorable(states);
-		List<Hall> halls = UnitMapper.assembleHalls(RestorePlanner.targetsAt(states, point.at()).values()).items();
-		if (halls.isEmpty()) {
-			throw new LockedUnitException("Zu diesem Speicherstand war die Halle gelöscht.");
+		refreshFromStore(hallId, states);
+		Hall target = targetOf(states, point);
+		List<String> notes = adjust.apply(target);
+		saveHall(target);
+		replaceCachedHall(target);
+		return new Restored<>(target, notes);
+	}
+
+	/**
+	 * Die Halle, wie sie zum Speicherstand war, als neues Objekt; auch für eine gelöschte Halle. Gespeichert wird nichts
+	 * und der Cache bleibt unberührt (nur für Tests; das Wiederherstellen ist {@link #restoreHall}).
+	 */
+	Hall hallAt(String hallId, SavePoint point) throws IOException {
+		List<UnitState> states = List.of(sync.unitState(UnitKey.hall(hallId)));
+		RestorePlanner.requireRestorable(states);
+		return targetOf(states, point);
+	}
+
+	private Hall targetOf(List<UnitState> states, SavePoint point) {
+		return RestorePlanner.single(UnitMapper.assembleHalls(RestorePlanner.targetsAt(states, point.at()).values()),
+				"Zu diesem Speicherstand war die Halle gelöscht.");
+	}
+
+	/** Übernimmt den frisch gelesenen Stand der Halle als Vergleichsstand und, wenn sie sichtbar ist, in den Cache. */
+	private void refreshFromStore(String hallId, List<UnitState> states) {
+		List<UnitSnapshot> snapshots = states.stream().map(UnitSnapshot::of).toList();
+		Assembly<Hall> current = UnitMapper.assembleHalls(snapshots);
+		baseline.resetOwner(hallId, snapshots, current.shown());
+		if (!current.items().isEmpty()) {
+			Hall fresh = current.items().get(0);
+			int index = cachedHalls.indexOf(fresh);
+			if (index >= 0) {
+				cachedHalls.set(index, fresh);
+			} else {
+				cachedHalls.add(fresh);
+			}
 		}
-		return halls.get(0);
 	}
 
 	/** Meldet einen Listener an, der nach jedem Speichern und Löschen einer Halle benachrichtigt wird. */

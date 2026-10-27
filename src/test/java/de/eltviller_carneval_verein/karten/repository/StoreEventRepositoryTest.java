@@ -714,7 +714,7 @@ class StoreEventRepositoryTest {
 		bookingOf(event, 0, "Müller").setLastName("Schulz");
 		repository.saveEvent(event);
 
-		repository.saveEvent(repository.eventAt(event.getId(), s1));
+		repository.restoreEvent(event.getId(), s1, e -> List.of());
 
 		Event restored = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
 		assertEquals(List.of("Müller"), bookingNames(restored));
@@ -755,14 +755,14 @@ class StoreEventRepositoryTest {
 		assertEquals(2, repository.savePoints(event.getId()).size());
 		clock.advance(10);
 
-		repository.saveEvent(repository.eventAt(event.getId(), s1));
+		repository.restoreEvent(event.getId(), s1, e -> List.of());
 
 		assertEquals(3, repository.savePoints(event.getId()).size());
 		assertEquals(List.of("Müller"), bookingNames(TestRepositories.storeEvents(started(appData)).loadEvents().get(0)));
 		clock.advance(10);
 
 		// Zurück zum Stand vor dem Wiederherstellen
-		repository.saveEvent(repository.eventAt(event.getId(), s2));
+		repository.restoreEvent(event.getId(), s2, e -> List.of());
 
 		assertEquals(4, repository.savePoints(event.getId()).size());
 		assertEquals(List.of("Müller", "Meier"),
@@ -783,7 +783,7 @@ class StoreEventRepositoryTest {
 		assertTrue(TestRepositories.storeEvents(started(appData)).loadEvents().get(0).getPresentations().isEmpty());
 		clock.advance(10);
 
-		repository.saveEvent(repository.eventAt(event.getId(), s1));
+		repository.restoreEvent(event.getId(), s1, e -> List.of());
 
 		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
 		assertEquals(1, again.getPresentations().size());
@@ -805,7 +805,7 @@ class StoreEventRepositoryTest {
 		assertTrue(fresh.loadEvents().isEmpty());
 		assertEquals(List.of(new KnownEntity(event.getId(), "Prunksitzung", true)), fresh.knownEvents());
 
-		fresh.saveEvent(fresh.eventAt(event.getId(), s1));
+		fresh.restoreEvent(event.getId(), s1, e -> List.of());
 
 		StoreEventRepository again = TestRepositories.storeEvents(started(appData));
 		assertEquals(List.of(new KnownEntity(event.getId(), "Prunksitzung", false)), again.knownEvents());
@@ -826,7 +826,7 @@ class StoreEventRepositoryTest {
 		repository.deleteEvent(event);
 
 		StoreEventRepository fresh = TestRepositories.storeEvents(started(appData));
-		fresh.saveEvent(fresh.eventAt(event.getId(), s1));
+		fresh.restoreEvent(event.getId(), s1, e -> List.of());
 
 		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
 		assertEquals(List.of("Müller"), bookingNames(again));
@@ -844,9 +844,107 @@ class StoreEventRepositoryTest {
 		long before = filesIn(appData);
 
 		LockedUnitException refused = assertThrows(LockedUnitException.class,
-				() -> repository.eventAt(event.getId(), deletion));
+				() -> repository.restoreEvent(event.getId(), deletion, e -> List.of()));
 
 		assertEquals("Zu diesem Speicherstand war das Event gelöscht.", refused.getMessage());
+		assertEquals(before, filesIn(appData));
+	}
+
+	@Test
+	void restoreAfterOutsideChangesResetsThemAndBuildsOnCurrentEnd(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
+		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		// Änderungen, die nach dem Laden dieses Repositorys von anderer Seite dazukommen
+		StoreEventRepository other = TestRepositories.storeEvents(sync);
+		Event outside = other.loadEvents().get(0);
+		bookingOf(outside, 0, "Müller").setLastName("Fremd1");
+		booking(outside.getPresentations().get(0), "seat-2", 2, "Fremd2");
+		other.saveEvent(outside);
+		clock.advance(10);
+		String presentationId = event.getPresentations().get(0).getId();
+		UnitKey seat1 = UnitKey.booking(event.getId(), presentationId, "seat-1");
+		UnitKey seat2 = UnitKey.booking(event.getId(), presentationId, "seat-2");
+
+		Restored<Event> restored = repository.restoreEvent(event.getId(), s1, e -> List.of("Hinweis"));
+
+		assertEquals(List.of("Hinweis"), restored.notes());
+		assertSame(restored.restored(), repository.loadEvents().get(0));
+		List<Version> chain1 = sync.unitState(seat1).chain();
+		List<Version> chain2 = sync.unitState(seat2).chain();
+		assertEquals(3, chain1.size());
+		assertEquals(2, chain2.size());
+		assertEquals(chain1.get(1).id(), chain1.get(2).firstParent());
+		assertEquals(chain2.get(0).id(), chain2.get(1).firstParent());
+		assertEquals("Müller", chain1.get(2).payload().get("lastName").asText());
+		assertTrue(chain2.get(1).deleted());
+		assertEquals(chain1.get(2).saveId(), chain2.get(1).saveId());
+		assertEquals(1, sync.unitState(UnitKey.event(event.getId())).chain().size());
+		assertEquals(1, sync.unitState(UnitKey.presentation(event.getId(), presentationId)).chain().size());
+		assertEquals(3, repository.savePoints(event.getId()).size());
+		assertEquals(List.of("Müller"), bookingNames(TestRepositories.storeEvents(started(appData)).loadEvents().get(0)));
+	}
+
+	@Test
+	void restoreKeepsCacheConsistentWhenSaveFails(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		SyncService sync = started(TestSyncServices.singleMode(appData, layer, clock));
+		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		StoreEventRepository other = TestRepositories.storeEvents(sync);
+		Event outside = other.loadEvents().get(0);
+		bookingOf(outside, 0, "Müller").setLastName("Fremd1");
+		other.saveEvent(outside);
+		clock.advance(10);
+		long before = filesIn(appData);
+		layer.failNext("createNew", new IOException("Platte voll"));
+
+		RuntimeException failure = assertThrows(RuntimeException.class,
+				() -> repository.restoreEvent(event.getId(), s1, e -> List.of()));
+
+		assertTrue(failure.getMessage().startsWith("Fehler beim Speichern von \"Prunksitzung\": "), failure.getMessage());
+		// im Cache steht der aktuelle Stand des Speichers, nicht der Zielstand und nicht der alte Stand
+		Event cached = repository.loadEvents().get(0);
+		assertNotSame(event, cached);
+		assertEquals(List.of("Fremd1"), bookingNames(cached));
+		assertEquals(before, filesIn(appData));
+		repository.saveEvent(cached);
+		assertEquals(before, filesIn(appData));
+	}
+
+	@Test
+	void restoreRefusesTargetWithUnreadableParts(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
+		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		// eine Buchung, deren Inhalt nicht zu ihrem Ordner passt (Sitz seat-1 im Ordner seat-5)
+		String presentationId = event.getPresentations().get(0).getId();
+		UnitKey seat1 = UnitKey.booking(event.getId(), presentationId, "seat-1");
+		UnitKey seat5 = UnitKey.booking(event.getId(), presentationId, "seat-5");
+		ObjectNode misplaced = sync.unitState(seat1).head().payload().deepCopy();
+		sync.append("fremd", List.of(new Change(seat5, List.of(), misplaced, false)));
+		clock.advance(10);
+		bookingOf(event, 0, "Müller").setLastName("Schulz");
+		repository.saveEvent(event);
+		long before = filesIn(appData);
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class,
+				() -> repository.restoreEvent(event.getId(), s1, e -> List.of()));
+
+		assertTrue(refused.getMessage()
+				.startsWith("Der Speicherstand enthält unlesbare Teile und wird nicht wiederhergestellt: "),
+				refused.getMessage());
 		assertEquals(before, filesIn(appData));
 	}
 
@@ -867,7 +965,7 @@ class StoreEventRepositoryTest {
 		StoreEventRepository restarted = TestRepositories.storeEvents(started(appData));
 
 		LockedUnitException refused = assertThrows(LockedUnitException.class,
-				() -> restarted.eventAt(event.getId(), s1));
+				() -> restarted.restoreEvent(event.getId(), s1, e -> List.of()));
 		assertTrue(refused.getMessage().contains(unit.relativePath()));
 	}
 

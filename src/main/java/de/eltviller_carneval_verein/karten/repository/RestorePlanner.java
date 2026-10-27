@@ -104,6 +104,24 @@ final class RestorePlanner {
 	}
 
 	/**
+	 * Das eine Event bzw. die eine Halle aus dem zusammengesetzten Zielstand. Enthält der Zielstand unlesbare Teile, wird
+	 * er nicht wiederhergestellt: Sonst würden diese Teile beim Speichern wie vom Nutzer entfernt behandelt.
+	 *
+	 * @param deletedText die Meldung, wenn zu diesem Speicherstand nichts da war (gelöscht)
+	 * @throws LockedUnitException wenn der Zielstand unlesbare Teile enthält oder das Gesuchte fehlt
+	 */
+	static <T> T single(UnitMapper.Assembly<T> target, String deletedText) {
+		if (!target.warnings().isEmpty()) {
+			throw new LockedUnitException("Der Speicherstand enthält unlesbare Teile und wird nicht wiederhergestellt: "
+					+ String.join(" ", target.warnings()));
+		}
+		if (target.items().isEmpty()) {
+			throw new LockedUnitException(deletedText);
+		}
+		return target.items().get(0);
+	}
+
+	/**
 	 * Die Events bzw. Hallen zu den Köpfen im Vergleichsstand des Repositorys, nach Name (ohne Rücksicht auf
 	 * Groß-/Kleinschreibung), dann nach ID. Der Name eines gelöschten Kopfes stammt aus der letzten nicht gelöschten
 	 * Version seiner Kette, sonst gilt die ID.

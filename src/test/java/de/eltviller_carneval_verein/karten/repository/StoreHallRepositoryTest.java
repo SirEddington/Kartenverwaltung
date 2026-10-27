@@ -292,18 +292,48 @@ class StoreHallRepositoryTest {
 		assertEquals(2, repository.savePoints(hall.getId()).size());
 		long before = filesIn(appData);
 
-		Hall earlier = repository.hallAt(hall.getId(), first);
-
-		assertEquals("Stadthalle", earlier.getName());
+		assertEquals("Stadthalle", repository.hallAt(hall.getId(), first).getName());
 		assertEquals(before, filesIn(appData));
 		assertSame(hall, repository.findById(hall.getId()));
 		clock.advance(10);
-		repository.saveHall(earlier);
+		Restored<Hall> restored = repository.restoreHall(hall.getId(), first, h -> List.of("Hinweis"));
+
+		assertEquals(List.of("Hinweis"), restored.notes());
+		assertSame(restored.restored(), repository.findById(hall.getId()));
 
 		StoreHallRepository fresh = TestRepositories.storeHalls(started(appData));
 		assertEquals("Stadthalle", fresh.loadHalls().get(0).getName());
 		assertEquals(3, repository.savePoints(hall.getId()).size());
 		assertEquals(List.of(new KnownEntity(hall.getId(), "Stadthalle", false)), fresh.knownHalls());
+	}
+
+	@Test
+	void restoreHallAfterOutsideChangesBuildsOnCurrentEnd(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = TestSyncServices.singleMode(appData, clock);
+		sync.startup(null, p -> {
+		});
+		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		Hall hall = named("Stadthalle");
+		repository.saveHall(hall);
+		SavePoint first = repository.savePoints(hall.getId()).get(0);
+		clock.advance(10);
+		// eine Änderung, die nach dem Laden dieses Repositorys von anderer Seite dazukommt
+		StoreHallRepository other = TestRepositories.storeHalls(sync);
+		Hall outside = other.loadHalls().get(0);
+		outside.setName("Fremd");
+		other.saveHall(outside);
+		clock.advance(10);
+
+		Restored<Hall> restored = repository.restoreHall(hall.getId(), first, h -> List.of());
+
+		List<Version> chain = sync.unitState(UnitKey.hall(hall.getId())).chain();
+		assertEquals(3, chain.size());
+		assertEquals(chain.get(1).id(), chain.get(2).firstParent());
+		assertEquals("Stadthalle", chain.get(2).payload().get("name").asText());
+		assertEquals(3, repository.savePoints(hall.getId()).size());
+		assertSame(restored.restored(), repository.findById(hall.getId()));
+		assertEquals("Stadthalle", TestRepositories.storeHalls(started(appData)).loadHalls().get(0).getName());
 	}
 
 	@Test
@@ -322,10 +352,10 @@ class StoreHallRepositoryTest {
 
 		assertEquals(List.of(new KnownEntity(hall.getId(), "Stadthalle", true)), repository.knownHalls());
 		LockedUnitException refused = assertThrows(LockedUnitException.class,
-				() -> repository.hallAt(hall.getId(), deletion));
+				() -> repository.restoreHall(hall.getId(), deletion, h -> List.of()));
 		assertEquals("Zu diesem Speicherstand war die Halle gelöscht.", refused.getMessage());
 		clock.advance(10);
-		repository.saveHall(repository.hallAt(hall.getId(), saved));
+		repository.restoreHall(hall.getId(), saved, h -> List.of());
 
 		StoreHallRepository fresh = TestRepositories.storeHalls(started(appData));
 		assertEquals("Stadthalle", fresh.loadHalls().get(0).getName());
