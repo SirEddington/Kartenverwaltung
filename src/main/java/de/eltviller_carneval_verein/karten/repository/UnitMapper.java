@@ -122,7 +122,7 @@ final class UnitMapper {
 				if (!booking.hasData()) {
 					continue;
 				}
-				UnitKey key = bookingKey(event, presentation, booking);
+				UnitKey key = bookingKey(event.getId(), presentation.getId(), booking);
 				if (taken.put(key, booking) != null) {
 					throw new IllegalStateException("Zwei Buchungen belegen denselben Platz (Vorstellung \""
 							+ presentation.getName() + "\", " + booking.getTableLabel() + ", Sitz "
@@ -139,22 +139,27 @@ final class UnitMapper {
 		return new UnitPayload(UnitKey.hall(hall.getId()), normalize(hall));
 	}
 
-	private static UnitKey bookingKey(Event event, Presentation presentation, Booking booking) {
+	/** Der Schlüssel einer Buchung: auf dem Sitz, wenn sie einen hat und nicht "ohne Platz" ist, sonst über ihre Kennung. */
+	private static UnitKey bookingKey(String eventId, String presentationId, Booking booking) {
 		if (booking.getSeatId() != null && !booking.isUnassigned()) {
-			return UnitKey.booking(event.getId(), presentation.getId(), booking.getSeatId());
+			return UnitKey.booking(eventId, presentationId, booking.getSeatId());
 		}
-		return UnitKey.unassignedBooking(event.getId(), presentation.getId(), booking.getId());
+		return UnitKey.unassignedBooking(eventId, presentationId, booking.getId());
 	}
 
-	/** Warum der Inhalt einer Buchung nicht zum Ordner {@code unit} passt, oder {@code null}, wenn er passt. */
+	/**
+	 * Warum der Inhalt einer Buchung nicht zur Einheit {@code unit} passt, oder {@code null}, wenn er passt. Die Regel
+	 * ist die Umkehrung von {@link #bookingKey}: Die Buchung gehört genau dorthin, wohin das Zerlegen sie schreibt.
+	 */
 	private static String bookingMismatch(UnitKey unit, Booking booking) {
-		String dir = unit.bookingDir();
-		if (dir.startsWith("_")) {
-			return booking.isUnassigned() && ("_" + booking.getId()).equals(dir) ? null
-					: "Die Kennung im Inhalt (" + booking.getId() + ") passt nicht zum Ordner";
+		try {
+			if (bookingKey(unit.eventId(), unit.presentationId(), booking).equals(unit)) {
+				return null;
+			}
+		} catch (IllegalArgumentException e) {
+			// Sitz oder Kennung im Inhalt ist als Ordnername unzulässig
 		}
-		return !booking.isUnassigned() && dir.equals(booking.getSeatId()) ? null
-				: "Der Sitz im Inhalt (" + booking.getSeatId() + ") passt nicht zum Ordner";
+		return "Sitz (" + booking.getSeatId() + ") und Kennung (" + booking.getId() + ") im Inhalt passen nicht zum Ordner";
 	}
 
 	/**

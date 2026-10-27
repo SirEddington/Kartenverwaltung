@@ -718,6 +718,20 @@ class UnitMapperTest {
 	}
 
 	@Test
+	void bookingWithoutSeatAndNotMarkedUnassignedSurvivesReload() {
+		Event event = new Event("11111111-1111-1111-1111-111111111111");
+		Presentation presentation = event.addPresentation("Freitag");
+		Booking withoutSeat = booking(presentation, null, "", 0, 0, "Meier");
+		assertFalse(withoutSeat.isUnassigned());
+
+		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots(UnitMapper.decompose(event)));
+
+		assertEquals(List.of(), assembly.warnings());
+		List<Booking> loaded = assembly.items().get(0).getPresentations().get(0).getBookings();
+		assertEquals(List.of(withoutSeat.getId()), loaded.stream().map(Booking::getId).toList());
+	}
+
+	@Test
 	void hallFolderWithOtherIdIsDropped() {
 		Hall hall = realisticHall();
 		UnitPayload part = UnitMapper.decompose(hall);
