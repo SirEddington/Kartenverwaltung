@@ -626,6 +626,148 @@ class UnitMapperTest {
 	}
 
 	@Test
+	void copiedEventFolderIsDropped() {
+		Event event = simpleEvent();
+		Presentation first = event.getPresentations().get(0);
+		List<UnitSnapshot> original = snapshots(UnitMapper.decompose(event));
+		String copyId = event.getId() + "-PCNAME";
+		List<UnitSnapshot> snapshots = new ArrayList<>(original);
+		// Kopie des Ordners (Hand-Kopie, Konfliktkopie): gleicher Inhalt mit derselben ID, samt Kindern
+		for (UnitSnapshot snapshot : original) {
+			UnitKey unit = snapshot.unit();
+			UnitKey copy = switch (unit.type()) {
+			case EVENT -> UnitKey.event(copyId);
+			case PRESENTATION -> UnitKey.presentation(copyId, unit.presentationId());
+			default -> unit.bookingDir().startsWith("_")
+					? UnitKey.unassignedBooking(copyId, unit.presentationId(), unit.bookingDir().substring(1))
+					: UnitKey.booking(copyId, unit.presentationId(), unit.bookingDir());
+			};
+			snapshots.add(new UnitSnapshot(copy, snapshot.version(), snapshot.status(), false, snapshot.payload()));
+		}
+
+		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
+
+		assertEquals(List.of(event.getId()), assembly.items().stream().map(Event::getId).toList());
+		assertEquals(2, assembly.items().get(0).getPresentations().size());
+		assertEquals(3, assembly.items().get(0).getBookings().size());
+		assertEquals(List.of("Das Event " + copyId + " konnte nicht gelesen werden und fehlt."), assembly.warnings());
+		assertEquals(first.getId(), assembly.items().get(0).getPresentations().get(0).getId());
+	}
+
+	@Test
+	void presentationFolderWithOtherIdIsDroppedWithItsBookings() {
+		Event event = simpleEvent();
+		Presentation first = event.getPresentations().get(0);
+		Presentation second = event.getPresentations().get(1);
+		List<UnitSnapshot> snapshots = snapshots(UnitMapper.decompose(event));
+		UnitSnapshot snapshot = find(snapshots, UnitKey.presentation(event.getId(), first.getId()));
+		// der Inhalt von "second" liegt im Ordner von "first"
+		UnitSnapshot other = find(snapshots, UnitKey.presentation(event.getId(), second.getId()));
+		snapshots = replace(snapshots, new UnitSnapshot(snapshot.unit(), VERSION, Status.OK, false, other.payload()));
+
+		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
+
+		assertEquals(List.of(second.getId()),
+				assembly.items().get(0).getPresentations().stream().map(Presentation::getId).toList());
+		assertEquals(1, assembly.items().get(0).getBookings().size());
+		assertEquals(List.of(
+				"Die Vorstellung " + first.getId() + " von \"Prunksitzung\" konnte nicht gelesen werden und fehlt."),
+				assembly.warnings());
+	}
+
+	@Test
+	void seatFolderWithOtherSeatIdIsDropped() {
+		Event event = simpleEvent();
+		Presentation first = event.getPresentations().get(0);
+		List<UnitSnapshot> snapshots = snapshots(UnitMapper.decompose(event));
+		UnitKey folder = UnitKey.booking(event.getId(), first.getId(), "seat-a1");
+		ObjectNode payload = find(snapshots, folder).payload().deepCopy();
+		payload.put("seatId", "seat-a3");
+		snapshots = replace(snapshots, new UnitSnapshot(folder, VERSION, Status.OK, false, payload));
+
+		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
+
+		assertEquals(List.of("Meier"),
+				assembly.items().get(0).getPresentations().get(0).getBookings().stream().map(Booking::getLastName).toList());
+		assertEquals(List.of("Eine Buchung von \"Freitag\" konnte nicht gelesen werden und fehlt."), assembly.warnings());
+	}
+
+	@Test
+	void unassignedFolderWithOtherIdIsDropped() {
+		Event event = realisticEvent();
+		Presentation second = event.getPresentations().get(1);
+		Booking lost = second.getBookings().get(0);
+		List<UnitSnapshot> snapshots = snapshots(UnitMapper.decompose(event));
+		UnitKey folder = UnitKey.unassignedBooking(event.getId(), second.getId(), lost.getId());
+		ObjectNode payload = find(snapshots, folder).payload().deepCopy();
+		payload.put("id", "x");
+		snapshots = replace(snapshots, new UnitSnapshot(folder, VERSION, Status.OK, false, payload));
+		// ein Ordner "_x" mit dem Inhalt einer Buchung auf einem Sitz
+		UnitKey seated = UnitKey.booking(event.getId(), event.getPresentations().get(0).getId(), "seat-1");
+		snapshots = new ArrayList<>(snapshots);
+		snapshots.add(new UnitSnapshot(UnitKey.unassignedBooking(event.getId(), second.getId(), "x"), VERSION, Status.OK,
+				false, find(snapshots, seated).payload()));
+
+		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
+
+		Event loaded = assembly.items().get(0);
+		assertEquals(0, loaded.getPresentations().get(1).getBookings().size());
+		assertEquals(2, loaded.getPresentations().get(0).getBookings().size());
+		assertEquals(2, assembly.warnings().size());
+		assertTrue(assembly.warnings().stream().allMatch(w -> w.equals("Eine Buchung von \"Samstag\" konnte nicht gelesen werden und fehlt.")));
+	}
+
+	@Test
+	void hallFolderWithOtherIdIsDropped() {
+		Hall hall = realisticHall();
+		UnitPayload part = UnitMapper.decompose(hall);
+		UnitKey copy = UnitKey.hall(hall.getId() + "-PCNAME");
+
+		Assembly<Hall> assembly = UnitMapper.assembleHalls(
+				List.of(snapshot(part), new UnitSnapshot(copy, VERSION, Status.OK, false, part.payload())));
+
+		assertEquals(List.of(hall.getId()), assembly.items().stream().map(Hall::getId).toList());
+		assertEquals(List.of("Die Halle " + hall.getId() + "-PCNAME konnte nicht gelesen werden und fehlt."),
+				assembly.warnings());
+	}
+
+	@Test
+	void duplicatePresentationIdIsRejected() {
+		Event event = new Event("11111111-1111-1111-1111-111111111111");
+		event.setName("Prunksitzung");
+		presentation(event, "same", "Freitag", null, null);
+		presentation(event, "same", "Samstag", null, null);
+
+		IllegalStateException e = assertThrows(IllegalStateException.class, () -> UnitMapper.decompose(event));
+
+		assertEquals("Zwei Vorstellungen haben dieselbe ID (pres-same) im Event \"Prunksitzung\". "
+				+ "Es wurde nichts gespeichert.", e.getMessage());
+	}
+
+	@Test
+	void presentationsWithTheSameIdInDifferentEventsKeepTheirOwnBookings() {
+		Event one = new Event("11111111-1111-1111-1111-111111111111");
+		one.setName("Eins");
+		Event two = new Event("11111111-1111-1111-1111-111111111112");
+		two.setName("Zwei");
+		booking(presentation(one, "same", "Freitag", null, null), "seat-1", "A", 1, 1, "Aus Eins");
+		booking(presentation(two, "same", "Freitag", null, null), "seat-1", "A", 1, 1, "Aus Zwei");
+		booking(two.getPresentations().get(0), "seat-2", "A", 1, 2, "Auch Zwei");
+		List<UnitSnapshot> snapshots = new ArrayList<>(snapshots(UnitMapper.decompose(one)));
+		snapshots.addAll(snapshots(UnitMapper.decompose(two)));
+
+		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
+
+		assertEquals(List.of(), assembly.warnings());
+		List<Event> loaded = assembly.items();
+		assertEquals(List.of("Eins", "Zwei"), loaded.stream().map(Event::getName).toList());
+		assertEquals(List.of("Aus Eins"),
+				loaded.get(0).getPresentations().get(0).getBookings().stream().map(Booking::getLastName).toList());
+		assertEquals(List.of("Aus Zwei", "Auch Zwei"),
+				loaded.get(1).getPresentations().get(0).getBookings().stream().map(Booking::getLastName).toList());
+	}
+
+	@Test
 	void hallRoundTrip() {
 		Hall zoo = new Hall("66666666-6666-6666-6666-666666666667");
 		zoo.setName("zoo");
