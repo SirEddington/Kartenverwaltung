@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -16,8 +17,11 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -198,6 +202,49 @@ class StoreHallRepositoryTest {
 		repository.deleteHall(hall);
 
 		assertEquals(List.of("saved Stadthalle", "saved Stadthalle", "deleted Stadthalle"), recorder.calls);
+	}
+
+	@Test
+	void loadBeforeStartupIsRefused(@TempDir Path appData) {
+		SyncService notStarted = TestSyncServices.singleMode(appData);
+		StoreHallRepository repository = TestRepositories.storeHalls(notStarted);
+
+		IllegalStateException load = assertThrows(IllegalStateException.class, repository::loadHalls);
+		assertThrows(IllegalStateException.class, () -> repository.findById("x"));
+		assertThrows(IllegalStateException.class, () -> repository.saveHall(named("Zu früh")));
+
+		assertEquals("Der Versionsspeicher wurde noch nicht gestartet.", load.getMessage());
+		notStarted.startup(null, p -> {
+		});
+		assertTrue(repository.loadHalls().isEmpty());
+	}
+
+	@Test
+	void deleteOfLockedHallIsRefused(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		Hall hall = named("Stadthalle");
+		TestRepositories.storeHalls(sync).saveHall(hall);
+		UnitKey unit = UnitKey.hall(hall.getId());
+		Version first = sync.unitState(unit).head();
+		ObjectNode changed = first.payload().deepCopy();
+		changed.put("description", "geändert");
+		Version second = sync.append("test", List.of(new Change(unit, List.of(first.id()), changed, false))).get(0);
+		// die zweite Version wird beschädigt: Die Kette endet vor ihr, die erste bleibt lesbar
+		Files.writeString(appData.resolve("data/halls/" + hall.getId() + "/" + second.id() + ".json"), "kaputt");
+
+		SyncService restarted = started(appData);
+		StoreHallRepository repository = TestRepositories.storeHalls(restarted);
+		Hall loaded = repository.loadHalls().get(0);
+		Recorder recorder = new Recorder();
+		repository.addListener(recorder);
+
+		long versionsBefore = restarted.history(unit).size();
+
+		assertThrows(LockedUnitException.class, () -> repository.deleteHall(loaded));
+
+		assertEquals(versionsBefore, restarted.history(unit).size());
+		assertTrue(repository.loadHalls().contains(loaded));
+		assertTrue(recorder.calls.isEmpty());
 	}
 
 	@Test

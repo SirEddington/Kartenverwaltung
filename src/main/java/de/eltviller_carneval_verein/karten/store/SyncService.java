@@ -757,6 +757,14 @@ public final class SyncService {
 	}
 
 	/**
+	 * Ob {@link #startup} den Index mit dem lokalen Bestand abgeglichen (oder neu aufgebaut) hat. Erst dann liefert
+	 * {@link #snapshots()} den ganzen Bestand.
+	 */
+	public boolean isStarted() {
+		return indexRefreshed;
+	}
+
+	/**
 	 * Schreibt den Start-Index, soweit er sich geändert hat. Vor dem Abgleich durch {@link #startup} schreibt es nichts: Ein
 	 * Index, der nur die bisher berührten Einheiten kennt, würde den vollständigen auf der Platte ersetzen. Wirft nie; ein
 	 * Fehler kommt als {@code WARNING} ins Log, der Index kostet dann nur beim nächsten Start Zeit.

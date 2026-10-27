@@ -102,6 +102,9 @@ public class StoreHallRepository implements HallRepository {
 	}
 
 	private List<Hall> readHallsFromStore() {
+		if (!sync.isStarted()) {
+			throw new IllegalStateException("Der Versionsspeicher wurde noch nicht gestartet.");
+		}
 		List<UnitSnapshot> snapshots = sync.snapshots().values().stream()
 				.filter(snapshot -> snapshot.unit().type() == UnitType.HALL).toList();
 		Assembly<Hall> assembly = UnitMapper.assembleHalls(snapshots);

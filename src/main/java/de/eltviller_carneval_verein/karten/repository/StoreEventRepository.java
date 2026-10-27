@@ -89,6 +89,9 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	private List<Event> readEventsFromStore() {
+		if (!sync.isStarted()) {
+			throw new IllegalStateException("Der Versionsspeicher wurde noch nicht gestartet.");
+		}
 		List<UnitSnapshot> snapshots = sync.snapshots().values().stream()
 				.filter(snapshot -> snapshot.unit().type() != UnitType.HALL).toList();
 		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);

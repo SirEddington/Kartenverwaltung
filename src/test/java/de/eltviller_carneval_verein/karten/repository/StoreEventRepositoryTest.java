@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -30,13 +32,17 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
+import de.eltviller_carneval_verein.karten.store.LocalArbiter;
 import de.eltviller_carneval_verein.karten.store.NioFileLayer;
+import de.eltviller_carneval_verein.karten.store.StoreCodec;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.Version;
+import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.store.VersionStore;
 
 class StoreEventRepositoryTest {
 
@@ -104,6 +110,50 @@ class StoreEventRepositoryTest {
 	private static Booking bookingOf(Event event, int presentation, String lastName) {
 		return event.getPresentations().get(presentation).getBookings().stream()
 				.filter(b -> lastName.equals(b.getLastName())).findFirst().orElseThrow();
+	}
+
+	/**
+	 * Schreibt und beansprucht eine Version eines anderen Rechners auf dem Vorgänger, wie sie das Abholen aus dem
+	 * gemeinsamen Ordner in den lokalen Bestand bringt.
+	 */
+	private static Version writeForeignVersion(Path appData, UnitKey unit, Version parent, String lastName)
+			throws IOException {
+		ObjectNode payload = parent.payload().deepCopy();
+		payload.put("lastName", lastName);
+		Version version = new Version(StoreCodec.FORMAT, VersionId.create(1_900_000_000_000L, "abcdefgh", 1),
+				List.of(parent.id()), "0123456789abcdefghijklmnop", "Fremd", null, Instant.now(), "fremd", false,
+				payload);
+		byte[] bytes = StoreCodec.write(version);
+		VersionStore store = new VersionStore(appData.resolve("data"), new NioFileLayer());
+		assertTrue(store.writeVersion(unit, version.id(), bytes));
+		new LocalArbiter(store, Clock.systemUTC()).claim(unit, version, bytes);
+		return version;
+	}
+
+	/** Ein Event mit einer Vorstellung und einer Buchung "Müller" auf seat-1. */
+	private static Event smallEvent() {
+		Event event = named("Prunksitzung");
+		booking(event.addPresentation("Freitag"), "seat-1", 1, "Müller");
+		return event;
+	}
+
+	/** Dasselbe Event wie ein neu angelegtes Objekt, ohne Buchungen: Vorstellung gleich, Buchung entfernt. */
+	private static Event withoutBookings(Event event) {
+		Event copy = new Event(event.getId());
+		copy.setName(event.getName());
+		List<Presentation> presentations = new ArrayList<>();
+		for (Presentation presentation : event.getPresentations()) {
+			Presentation emptied = new Presentation(presentation.getId());
+			emptied.setName(presentation.getName());
+			presentations.add(emptied);
+		}
+		copy.setPresentations(presentations);
+		return copy;
+	}
+
+	private static List<String> bookingNames(Event event) {
+		return event.getPresentations().stream().flatMap(p -> p.getBookings().stream()).map(Booking::getLastName)
+				.toList();
 	}
 
 	// <-- Bauteile
@@ -469,5 +519,168 @@ class StoreEventRepositoryTest {
 		assertTrue(sync.history(seat).stream().noneMatch(Version::deleted));
 		UnitKey changed = UnitKey.booking(event.getId(), event.getPresentations().get(0).getId(), "seat-1");
 		assertEquals(2, sync.history(changed).size());
+	}
+
+	@Test
+	void failedSaveDoesNotAdoptAForeignVersionAsBaseline(@TempDir Path appData) throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		SyncService sync = started(TestSyncServices.singleMode(appData, layer));
+		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		UnitKey seat = UnitKey.booking(event.getId(), event.getPresentations().get(0).getId(), "seat-1");
+		// nach dem Laden kommt von anderer Seite eine Änderung der Buchung, die der Nutzer nie gesehen hat
+		Version foreign = writeForeignVersion(appData, seat, sync.unitState(seat).head(), "Fremd");
+		bookingOf(event, 0, "Müller").setLastName("Mueller");
+		layer.failNext("createNew", new IOException("Platte voll"));
+
+		assertThrows(RuntimeException.class, () -> repository.saveEvent(event));
+		repository.saveEvent(event);
+
+		// Der Vergleichsstand blieb die Version, die der Nutzer sah: Die zweite Änderung baut darauf auf, verliert gegen
+		// die fremde und überschreibt sie nicht
+		UnitState state = sync.unitState(seat);
+		assertEquals(foreign.id(), state.head().id());
+		assertEquals("Fremd", state.head().payload().get("lastName").asText());
+		assertEquals(1, state.lost().size());
+	}
+
+	@Test
+	void failedSaveDoesNotMakeAForeignUnitDeletable(@TempDir Path appData) throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		SyncService sync = started(TestSyncServices.singleMode(appData, layer));
+		Event event = smallEvent();
+		TestRepositories.storeEvents(sync).saveEvent(event);
+		// eine unlesbare Buchung auf seat-2: Sie wird nicht angezeigt und nie vom Repository gelöscht
+		UnitKey seat = UnitKey.booking(event.getId(), event.getPresentations().get(0).getId(), "seat-2");
+		ObjectNode broken = JsonMapperFactory.create().createObjectNode();
+		broken.put("id", "andere-id");
+		sync.append("test", List.of(new Change(seat, List.of(), broken, false)));
+		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		Event loaded = repository.loadEvents().get(0);
+		// der Nutzer legt eine Buchung auf diesen Sitz, doch dazwischen kommt eine fremde Version auf die unlesbare
+		booking(loaded.getPresentations().get(0), "seat-2", 2, "Neu");
+		writeForeignVersion(appData, seat, sync.unitState(seat).head(), "Fremd");
+		layer.failNext("createNew", new IOException("Platte voll"));
+		assertThrows(RuntimeException.class, () -> repository.saveEvent(loaded));
+
+		loaded.getPresentations().get(0).getBookings().removeIf(b -> "Neu".equals(b.getLastName()));
+		repository.saveEvent(loaded);
+
+		assertEquals(2, sync.history(seat).size(), "die fremde Version wurde nicht gelöscht");
+		assertTrue(sync.history(seat).stream().noneMatch(Version::deleted));
+	}
+
+	@Test
+	void deleteOfLockedEventIsRefused(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		Event event = smallEvent();
+		TestRepositories.storeEvents(sync).saveEvent(event);
+		UnitKey head = UnitKey.event(event.getId());
+		Version first = sync.unitState(head).head();
+		ObjectNode changed = first.payload().deepCopy();
+		changed.put("description", "geändert");
+		Version second = sync.append("test", List.of(new Change(head, List.of(first.id()), changed, false))).get(0);
+		// die zweite Version wird beschädigt: Die Kette endet vor ihr, die erste bleibt lesbar
+		Files.writeString(appData.resolve("data/events/" + event.getId() + "/" + second.id() + ".json"), "kaputt");
+
+		SyncService restarted = started(appData);
+		StoreEventRepository repository = TestRepositories.storeEvents(restarted);
+		Event loaded = repository.loadEvents().get(0);
+		Recorder recorder = new Recorder();
+		repository.addListener(recorder);
+		long versionsBefore = restarted.history(head).size();
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> repository.deleteEvent(loaded));
+
+		assertTrue(refused.getMessage().contains("events/" + event.getId()), refused.getMessage());
+		assertEquals(versionsBefore, restarted.history(head).size());
+		assertTrue(repository.loadEvents().contains(loaded));
+		assertTrue(recorder.calls.isEmpty());
+	}
+
+	@Test
+	void revivingDeletedEventAfterRestartRemovesItsOldBookings(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		repository.deleteEvent(event);
+		sync.flushIndex();
+
+		StoreEventRepository restarted = TestRepositories.storeEvents(started(appData));
+		assertTrue(restarted.loadEvents().isEmpty());
+		restarted.saveEvent(withoutBookings(event));
+
+		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		assertEquals(1, again.getPresentations().size());
+		assertEquals(List.of(), bookingNames(again));
+	}
+
+	@Test
+	void revivingDeletedEventInTheSameSessionRemovesItsOldBookings(@TempDir Path appData) throws IOException {
+		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		repository.deleteEvent(event);
+
+		repository.saveEvent(withoutBookings(event));
+
+		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		assertEquals(1, again.getPresentations().size());
+		assertEquals(List.of(), bookingNames(again));
+	}
+
+	@Test
+	void revivingDeletedPresentationRemovesItsOldBookings(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		Event withoutPresentation = new Event(event.getId());
+		withoutPresentation.setName(event.getName());
+		repository.saveEvent(withoutPresentation);
+		sync.flushIndex();
+
+		StoreEventRepository restarted = TestRepositories.storeEvents(started(appData));
+		Event loaded = restarted.loadEvents().get(0);
+		assertTrue(loaded.getPresentations().isEmpty());
+		restarted.saveEvent(withoutBookings(event));
+
+		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		assertEquals(1, again.getPresentations().size());
+		assertEquals(List.of(), bookingNames(again));
+	}
+
+	@Test
+	void revivingDeletedPresentationInTheSameSessionRemovesItsOldBookings(@TempDir Path appData) throws IOException {
+		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		Event withoutPresentation = new Event(event.getId());
+		withoutPresentation.setName(event.getName());
+		repository.saveEvent(withoutPresentation);
+
+		repository.saveEvent(withoutBookings(event));
+
+		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		assertEquals(1, again.getPresentations().size());
+		assertEquals(List.of(), bookingNames(again));
+	}
+
+	@Test
+	void loadBeforeStartupIsRefused(@TempDir Path appData) {
+		SyncService notStarted = TestSyncServices.singleMode(appData);
+		StoreEventRepository repository = TestRepositories.storeEvents(notStarted);
+
+		IllegalStateException load = assertThrows(IllegalStateException.class, repository::loadEvents);
+		assertThrows(IllegalStateException.class, repository::reloadEvents);
+		assertThrows(IllegalStateException.class, () -> repository.saveEvent(named("Zu früh")));
+
+		assertEquals("Der Versionsspeicher wurde noch nicht gestartet.", load.getMessage());
+		assertFalse(notStarted.isStarted());
+		started(notStarted);
+		assertTrue(notStarted.isStarted());
+		assertTrue(repository.loadEvents().isEmpty());
 	}
 }

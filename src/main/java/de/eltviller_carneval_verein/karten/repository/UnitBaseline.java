@@ -17,6 +17,7 @@ import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
@@ -74,7 +75,7 @@ final class UnitBaseline {
 	 * @throws RuntimeException    wenn das Schreiben scheitert; der Vergleichsstand zeigt dann, was auf der Platte liegt
 	 */
 	void save(String ownerId, String name, List<UnitPayload> units) {
-		List<Change> changes = UnitMapper.changes(baselineOf(ownerId), shown.getOrDefault(ownerId, Set.of()), units);
+		List<Change> changes = UnitMapper.changes(baselineOf(ownerId), shownForSave(ownerId, units), units);
 		if (!changes.isEmpty()) {
 			append(ownerId, changes, "Fehler beim Speichern von \"" + name + "\": ");
 		}
@@ -86,15 +87,56 @@ final class UnitBaseline {
 	}
 
 	/**
+	 * Die Einheiten, die für diesen Speichervorgang als angezeigt gelten. Bringt das Objekt einen gelöschten Event-Kopf
+	 * oder eine gelöschte Vorstellung zurück, kamen die lesbaren Einheiten darunter dem Nutzer nie vor Augen (nach einem
+	 * Neustart, oder weil sie seit dem Löschen nicht mehr gespeichert wurden). Sie gehören jetzt zum Objekt: Fehlen sie
+	 * darin, hat der Nutzer sie entfernt und sie werden gelöscht, statt wieder aufzutauchen.
+	 */
+	private Set<UnitKey> shownForSave(String ownerId, List<UnitPayload> units) {
+		Map<UnitKey, UnitSnapshot> baseline = baselineOf(ownerId);
+		Set<UnitKey> result = shown.getOrDefault(ownerId, Set.of());
+		Set<UnitKey> readable = null;
+		for (UnitPayload part : units) {
+			UnitKey revived = part.unit();
+			UnitSnapshot known = baseline.get(revived);
+			boolean hasChildren = revived.type() == UnitType.EVENT || revived.type() == UnitType.PRESENTATION;
+			if (known == null || !known.deleted() || !hasChildren) {
+				continue;
+			}
+			if (readable == null) {
+				readable = UnitMapper.readableUnits(baseline.values());
+				result = new HashSet<>(result);
+			}
+			for (UnitKey unit : readable) {
+				if (isBelow(unit, revived)) {
+					result.add(unit);
+				}
+			}
+		}
+		return result;
+	}
+
+	/** Ob die Einheit unter dem Event-Kopf bzw. der Vorstellung liegt. */
+	private static boolean isBelow(UnitKey unit, UnitKey parent) {
+		if (parent.type() == UnitType.EVENT) {
+			return unit.type() != UnitType.EVENT && parent.eventId().equals(unit.eventId());
+		}
+		return unit.type() == UnitType.BOOKING && parent.eventId().equals(unit.eventId())
+				&& parent.presentationId().equals(unit.presentationId());
+	}
+
+	/**
 	 * Löscht die Einheit (Event-Kopf bzw. Halle). Ist sie nie gespeichert worden oder schon gelöscht, passiert nichts.
 	 *
-	 * @throws RuntimeException wenn das Schreiben scheitert
+	 * @throws LockedUnitException wenn die Einheit gesperrt ist oder auf eine Datei wartet; es wurde nichts geschrieben
+	 * @throws RuntimeException    wenn das Schreiben scheitert
 	 */
 	void delete(String ownerId, UnitKey unit, String name) {
 		UnitSnapshot snapshot = baselineOf(ownerId).get(unit);
 		if (snapshot == null || snapshot.version() == null || snapshot.deleted()) {
 			return;
 		}
+		UnitMapper.requireWritable(snapshot);
 		append(ownerId, List.of(UnitMapper.deletion(snapshot)), "Fehler beim Löschen von \"" + name + "\": ");
 	}
 
@@ -104,11 +146,12 @@ final class UnitBaseline {
 
 	private void append(String ownerId, List<Change> changes, String failureText) {
 		Map<UnitKey, UnitSnapshot> baseline = baselineOf(ownerId);
+		String saveId = UUID.randomUUID().toString();
 		List<Version> written;
 		try {
-			written = sync.append(UUID.randomUUID().toString(), changes);
+			written = sync.append(saveId, changes);
 		} catch (IOException e) {
-			refresh(ownerId, changes);
+			refresh(ownerId, changes, saveId);
 			throw new RuntimeException(failureText + StoreMessages.describe(e), e);
 		}
 		for (int i = 0; i < written.size(); i++) {
@@ -119,21 +162,28 @@ final class UnitBaseline {
 	}
 
 	/**
-	 * Nach einem gescheiterten Schreiben: Die Einheiten der Änderungen stehen so im Vergleichsstand, wie sie auf der
-	 * Platte liegen (ein Teil kann geschrieben sein). Eine dabei geschriebene Einheit gilt als angezeigt, denn sie steht im
-	 * Modell des Nutzers.
+	 * Nach einem gescheiterten Schreiben: Eine Einheit der Änderungen, von der ein Teil geschrieben wurde, steht so im
+	 * Vergleichsstand, wie sie auf der Platte liegt, und gilt als angezeigt (sie steht im Modell des Nutzers). Nur der eigene
+	 * Versuch zählt: Trägt der aktuelle Stand nicht die {@code saveId} des Versuchs und ist er nicht der bisherige, hat
+	 * ein anderer Rechner die Einheit inzwischen geändert (in den Versionsspeicher geholt). Diesen Stand hat der Nutzer
+	 * nie gesehen; der Vergleichsstand bleibt, wie er war, sonst würde der nächste Speichervorgang die fremde Änderung
+	 * überschreiben.
 	 */
-	private void refresh(String ownerId, List<Change> changes) {
+	private void refresh(String ownerId, List<Change> changes, String saveId) {
 		Map<UnitKey, UnitSnapshot> baseline = baselineOf(ownerId);
 		for (Change change : changes) {
 			UnitKey unit = change.unit();
 			try {
 				UnitSnapshot before = baseline.get(unit);
-				UnitSnapshot after = UnitSnapshot.of(sync.unitState(unit));
-				baseline.put(unit, after);
-				boolean written = after.version() != null && !after.deleted()
-						&& (before == null || !after.version().equals(before.version()));
-				if (written) {
+				UnitState state = sync.unitState(unit);
+				Version current = state.current();
+				boolean ours = current != null && saveId.equals(current.saveId());
+				boolean unchanged = current == null ? before == null || before.version() == null
+						: before != null && current.id().equals(before.version());
+				if (ours || unchanged) {
+					baseline.put(unit, UnitSnapshot.of(state));
+				}
+				if (ours && !current.deleted()) {
 					shown.computeIfAbsent(ownerId, k -> new HashSet<>()).add(unit);
 				}
 			} catch (IOException | RuntimeException e) {

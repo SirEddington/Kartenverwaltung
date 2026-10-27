@@ -217,8 +217,12 @@ final class UnitMapper {
 		};
 	}
 
-	/** Eine gesperrte oder noch wartende Einheit lässt sich nicht ändern. */
-	private static void requireWritable(UnitSnapshot known) {
+	/**
+	 * Eine gesperrte oder noch wartende Einheit lässt sich nicht ändern, auch nicht löschen.
+	 *
+	 * @throws LockedUnitException wenn die Einheit gesperrt ist oder noch auf eine Datei wartet
+	 */
+	static void requireWritable(UnitSnapshot known) {
 		String path = known.unit().relativePath();
 		switch (known.status()) {
 		case LOCKED_DAMAGED -> throw new LockedUnitException(StoreMessages.damaged(path));
@@ -270,7 +274,7 @@ final class UnitMapper {
 			if (unit.type() == UnitType.EVENT) {
 				Event event = read(snapshot, Event.class, warnings,
 						"Das Event " + unit.eventId() + " konnte nicht gelesen werden und fehlt.",
-						e -> unit.eventId().equals(e.getId()) ? null : "Die ID im Inhalt (" + e.getId() + ") passt nicht zum Ordner");
+						eventMismatch(unit));
 				if (event != null) {
 					events.put(unit, event);
 					shown.add(unit);
@@ -294,8 +298,7 @@ final class UnitMapper {
 			Presentation presentation = read(snapshot, Presentation.class, warnings,
 					"Die Vorstellung " + unit.presentationId() + " von \"" + event.getName()
 							+ "\" konnte nicht gelesen werden und fehlt.",
-					p -> unit.presentationId().equals(p.getId()) ? null
-							: "Die ID im Inhalt (" + p.getId() + ") passt nicht zum Ordner");
+					presentationMismatch(unit));
 			if (presentation != null) {
 				presentations.put(unit, presentation);
 				shown.add(unit);
@@ -351,7 +354,7 @@ final class UnitMapper {
 				String hallId = snapshot.unit().hallId();
 				Hall hall = read(snapshot, Hall.class, warnings,
 						"Die Halle " + hallId + " konnte nicht gelesen werden und fehlt.",
-						h -> hallId.equals(h.getId()) ? null : "Die ID im Inhalt (" + h.getId() + ") passt nicht zum Ordner");
+						hallMismatch(snapshot.unit()));
 				if (hall != null) {
 					halls.add(hall);
 					shown.add(snapshot.unit());
@@ -385,20 +388,8 @@ final class UnitMapper {
 			warnings.add(unreadable);
 			return null;
 		}
-		T value;
-		try {
-			// treeToValue verändert den Baum nicht; die Payloads gehören dem Index
-			value = MAPPER.treeToValue(snapshot.payload(), type);
-		} catch (JsonProcessingException | RuntimeException e) {
-			LOG.warning("Die Einheit " + snapshot.unit().relativePath() + " lässt sich nicht lesen: "
-					+ StoreMessages.describe(e).lines().findFirst().orElse(""));
-			warnings.add(unreadable);
-			return null;
-		}
-		String mismatch = mismatchOf.apply(value);
-		if (mismatch != null) {
-			// z. B. ein von Hand kopierter Ordner: Gespeichert würde dorthin, wohin die ID des Inhalts zeigt
-			LOG.warning("Die Einheit " + snapshot.unit().relativePath() + " wird übergangen: " + mismatch + ".");
+		T value = parse(snapshot, type, mismatchOf);
+		if (value == null) {
 			warnings.add(unreadable);
 			return null;
 		}
@@ -408,5 +399,68 @@ final class UnitMapper {
 			warnings.add(StoreMessages.newerFormat(snapshot.unit().relativePath()));
 		}
 		return value;
+	}
+
+	/**
+	 * Liest die Daten einer Version als {@code type}. Ergibt {@code null} (mit einem Eintrag im Log), wenn Jackson sie
+	 * nicht liest oder {@code mismatchOf} einen Text ergibt: Der Inhalt passt dann nicht zum Ordner der Einheit (z. B. ein
+	 * von Hand kopierter Ordner, gespeichert würde dorthin, wohin die ID des Inhalts zeigt). Die Regel für {@link #read}
+	 * und {@link #readableUnits}.
+	 */
+	private static <T> T parse(UnitSnapshot snapshot, Class<T> type, Function<T, String> mismatchOf) {
+		T value;
+		try {
+			// treeToValue verändert den Baum nicht; die Payloads gehören dem Index
+			value = MAPPER.treeToValue(snapshot.payload(), type);
+		} catch (JsonProcessingException | RuntimeException e) {
+			LOG.warning("Die Einheit " + snapshot.unit().relativePath() + " lässt sich nicht lesen: "
+					+ StoreMessages.describe(e).lines().findFirst().orElse(""));
+			return null;
+		}
+		String mismatch = mismatchOf.apply(value);
+		if (mismatch != null) {
+			LOG.warning("Die Einheit " + snapshot.unit().relativePath() + " wird übergangen: " + mismatch + ".");
+			return null;
+		}
+		return value;
+	}
+
+	/**
+	 * Alle Einheiten, die das Zusammensetzen lesen würde (Version vorhanden, nicht gelöscht, Daten als Objekt lesbar, ID
+	 * passt zum Ordner), ohne Rücksicht darauf, ob ihre Eltern-Einheit gelöscht oder unlesbar ist. Für das Wiederbeleben
+	 * eines gelöschten Events oder einer gelöschten Vorstellung: Was darunter noch lesbar liegt, war dem Nutzer nicht
+	 * angezeigt, gehört aber zum wieder sichtbaren Objekt.
+	 */
+	static Set<UnitKey> readableUnits(Collection<UnitSnapshot> snapshots) {
+		Set<UnitKey> readable = new HashSet<>();
+		for (UnitSnapshot snapshot : snapshots) {
+			if (snapshot.version() == null || snapshot.deleted() || snapshot.payload() == null) {
+				continue;
+			}
+			UnitKey unit = snapshot.unit();
+			boolean ok = switch (unit.type()) {
+			case EVENT -> parse(snapshot, Event.class, eventMismatch(unit)) != null;
+			case PRESENTATION -> parse(snapshot, Presentation.class, presentationMismatch(unit)) != null;
+			case BOOKING -> parse(snapshot, Booking.class, (Booking b) -> bookingMismatch(unit, b)) != null;
+			case HALL -> parse(snapshot, Hall.class, hallMismatch(unit)) != null;
+			};
+			if (ok) {
+				readable.add(unit);
+			}
+		}
+		return readable;
+	}
+
+	private static Function<Event, String> eventMismatch(UnitKey unit) {
+		return e -> unit.eventId().equals(e.getId()) ? null : "Die ID im Inhalt (" + e.getId() + ") passt nicht zum Ordner";
+	}
+
+	private static Function<Presentation, String> presentationMismatch(UnitKey unit) {
+		return p -> unit.presentationId().equals(p.getId()) ? null
+				: "Die ID im Inhalt (" + p.getId() + ") passt nicht zum Ordner";
+	}
+
+	private static Function<Hall, String> hallMismatch(UnitKey unit) {
+		return h -> unit.hallId().equals(h.getId()) ? null : "Die ID im Inhalt (" + h.getId() + ") passt nicht zum Ordner";
 	}
 }
