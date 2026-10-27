@@ -83,6 +83,9 @@
     -fx-font-size: 13px;
     -fx-padding: 7px 16px;
     -fx-background-radius: 4px;
+    /* modena zeichnet den Hintergrund 1 px unter den Knopf hinaus (0 0 -1 0); die Hover-Regeln mit eigenen Ebenen
+       nicht. Ohne diese Zeile verschwindet beim Hover unten ein Pixel. */
+    -fx-background-insets: 0;
     -fx-border-radius: 4px;
     -fx-cursor: hand;
     -fx-background-color: -fx-surface-white;
@@ -333,6 +336,13 @@
     -fx-border-color: -fx-ecv-blue;
     /* Breite bewusst gleich wie im Normalzustand, sonst verschiebt sich beim Fokussieren das Layout (Border zählt zur Kontrollgröße) */
     -fx-border-width: 1px;
+}
+
+/* Markierter Text wie die Auswahl in Tabellen und Listen: Gelb mit blauer Schrift statt des Standardblaus.
+   ".text-input" trifft alle Eingabefelder, auch die in ComboBox, Spinner und bearbeiteten Tabellenzellen. */
+.text-input {
+    -fx-highlight-fill: -fx-ecv-yellow;
+    -fx-highlight-text-fill: -fx-ecv-blue;
 }
 
 /* ------------------------------------------------------------------------------
