@@ -8,8 +8,8 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
@@ -39,8 +39,8 @@ import javafx.scene.control.cell.CheckBoxTreeTableCell;
  */
 public class EventOverviewController extends AbstractOverviewController {
 
-	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
+	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 
 	// TableView und Spalten
 	@FXML

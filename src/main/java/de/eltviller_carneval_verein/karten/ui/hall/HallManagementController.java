@@ -13,8 +13,8 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Shape;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
@@ -51,8 +51,8 @@ public class HallManagementController extends AbstractOverviewController {
 	record PlansGroup(Hall hall) {
 	}
 
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
-	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
+	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
 
 	// Anzahl der Vorstellungen je Halle (hallId) und je Bestuhlung (seatingPlanId), wird bei jedem Neuaufbau des Baums berechnet
 	private Map<String, Integer> usageCounts = new HashMap<>();

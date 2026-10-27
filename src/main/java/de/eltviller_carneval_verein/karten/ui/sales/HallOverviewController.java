@@ -12,7 +12,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
@@ -48,7 +48,7 @@ import javafx.stage.Window;
  */
 public class HallOverviewController implements ContentController, SalesStateAware {
 
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 	private Event selectedEvent;
 	private Presentation selectedPres;
 	private boolean editMode = false;

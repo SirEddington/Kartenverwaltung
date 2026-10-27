@@ -19,8 +19,8 @@ import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SaleDates;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
@@ -73,8 +73,8 @@ import javafx.util.StringConverter;
  */
 public class EventEditController {
 
-	private final JsonEventRepository repository = JsonEventRepository.getInstance();
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
+	private final StoreEventRepository repository = StoreEventRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 
 	private final ObservableList<Event> masterEventData = FXCollections.observableArrayList();
 	private FilteredList<Event> filteredEventData;
@@ -835,7 +835,7 @@ public class EventEditController {
 	private void reloadRestoredData() {
 		String eventId = currentEvent == null ? null : currentEvent.getId();
 		String presentationId = currentPres == null ? null : currentPres.getId();
-		Event event = JsonEventRepository.getInstance().loadEvents().stream().filter(candidate -> candidate.getId().equals(eventId)).findFirst().orElse(null);
+		Event event = StoreEventRepository.getInstance().loadEvents().stream().filter(candidate -> candidate.getId().equals(eventId)).findFirst().orElse(null);
 		Presentation presentation = event == null ? null
 				: event.getPresentations().stream().filter(candidate -> candidate.getId().equals(presentationId)).findFirst().orElse(null);
 		MainApp.showEventEditView(event, presentation, false);

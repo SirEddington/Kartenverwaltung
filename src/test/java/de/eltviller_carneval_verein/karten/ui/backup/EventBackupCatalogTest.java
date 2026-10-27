@@ -51,8 +51,8 @@ class EventBackupCatalogTest {
 		sync = TestSyncServices.singleMode(appData, clock);
 		sync.startup(null, p -> {
 		});
-		events = TestRepositories.storeEvents(sync);
-		halls = TestRepositories.storeHalls(sync);
+		events = TestRepositories.events(sync);
+		halls = TestRepositories.halls(sync);
 	}
 
 	private EventBackupCatalog catalog() {

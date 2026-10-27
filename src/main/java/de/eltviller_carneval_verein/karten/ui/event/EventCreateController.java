@@ -6,7 +6,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
@@ -43,7 +43,7 @@ public class EventCreateController {
 
 		// Optional: null = keine Halle (kann später je Vorstellung in den Event-Details zugeordnet werden)
 		cmbHall.getItems().add(null);
-		cmbHall.getItems().addAll(JsonHallRepository.getInstance().loadHalls());
+		cmbHall.getItems().addAll(StoreHallRepository.getInstance().loadHalls());
 		cmbHall.setConverter(new StringConverter<Hall>() {
 			@Override
 			public String toString(Hall hall) {

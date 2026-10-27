@@ -11,8 +11,8 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
@@ -287,7 +287,7 @@ public class HallEditController {
 			return;
 		}
 		SeatingPlan plan = shownPlan;
-		if (!ConfirmDialog.confirmDelete("Bestuhlung löschen", deletePlanMessage(plan, JsonEventRepository.getInstance().loadEvents()))) {
+		if (!ConfirmDialog.confirmDelete("Bestuhlung löschen", deletePlanMessage(plan, StoreEventRepository.getInstance().loadEvents()))) {
 			return;
 		}
 		// Solange die Bestuhlung noch da ist: "Ohne Platz" und Momentaufnahmen der betroffenen Events festhalten
@@ -346,7 +346,7 @@ public class HallEditController {
 	 * öffnet sich mit ihr neu, im Anzeigemodus.
 	 */
 	private void reloadRestoredData() {
-		Hall restored = hall == null ? null : JsonHallRepository.getInstance().findById(hall.getId());
+		Hall restored = hall == null ? null : StoreHallRepository.getInstance().findById(hall.getId());
 		if (restored == null) {
 			// Eine nie gespeicherte Halle ist mit dem Verwerfen verschwunden
 			MainApp.showHallManagementView();

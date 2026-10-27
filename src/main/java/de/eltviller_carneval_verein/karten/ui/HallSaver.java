@@ -2,7 +2,7 @@ package de.eltviller_carneval_verein.karten.ui;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.repository.HallRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.validation.HallValidator;
 import de.eltviller_carneval_verein.karten.validation.ValidationResult;
 
@@ -24,7 +24,7 @@ public final class HallSaver {
 	 * @return {@code true}, wenn gespeichert wurde
 	 */
 	public static boolean save(Hall hall) {
-		SaveResult result = trySave(hall, JsonHallRepository.getInstance());
+		SaveResult result = trySave(hall, StoreHallRepository.getInstance());
 		StatusMessage.getInstance().showSaveResult(result.saved(), result.validation());
 		return result.saved();
 	}
@@ -35,7 +35,7 @@ public final class HallSaver {
 	 * Fehler des Repositories werden nicht abgefangen.
 	 */
 	public static void saveStructureChange(Hall hall) {
-		saveStructureChange(hall, JsonHallRepository.getInstance());
+		saveStructureChange(hall, StoreHallRepository.getInstance());
 	}
 
 	/** Wie {@link #saveStructureChange(Hall)} (paketsichtbar für Tests). */

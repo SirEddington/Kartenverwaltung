@@ -2,9 +2,8 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 
-import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalTime;
 
@@ -14,11 +13,20 @@ import org.junit.jupiter.api.io.TempDir;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 
 class JsonMapperFactoryTest {
 
+	private static SyncService started(Path appData) {
+		SyncService sync = TestSyncServices.singleMode(appData);
+		sync.startup(null, p -> {
+		});
+		return sync;
+	}
+
 	@Test
-	void savedFileIsByteIdenticalToTheFactorysSerialization(@TempDir File storageDir) throws IOException {
+	void savedAndReloadedEventSerializesByteIdenticallyToTheOriginal(@TempDir Path appData) throws IOException {
 		Event event = new Event();
 		event.setName("Kampagne");
 		Presentation presentation = event.addPresentation("Prunksitzung");
@@ -31,10 +39,10 @@ class JsonMapperFactoryTest {
 		booking.setSeatNumber(1);
 		booking.setLastName("Müller");
 
-		new JsonEventRepository(storageDir).saveEvent(event);
+		new StoreEventRepository(started(appData)).saveEvent(event);
 
-		byte[] onDisk = Files.readAllBytes(new File(storageDir, event.getId() + ".json").toPath());
+		Event reloaded = new StoreEventRepository(started(appData)).loadEvents().get(0);
 		// Darauf beruht der ChangeTracker: "geändert" muss dem entsprechen, was gespeichert würde
-		assertArrayEquals(JsonMapperFactory.create().writeValueAsBytes(event), onDisk);
+		assertArrayEquals(JsonMapperFactory.create().writeValueAsBytes(event), JsonMapperFactory.create().writeValueAsBytes(reloaded));
 	}
 }

@@ -10,8 +10,8 @@ import de.eltviller_carneval_verein.karten.AppPaths;
 import de.eltviller_carneval_verein.karten.mirror.MirrorMessages;
 import de.eltviller_carneval_verein.karten.mirror.MirrorService;
 import de.eltviller_carneval_verein.karten.mirror.MirrorSetup;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.validation.ValidationResult;
@@ -59,8 +59,8 @@ final class MirrorSetupHook implements SettingsSaver.MirrorHook {
 
 		if (chosen == MirrorSetup.Action.ADOPT_TARGET) {
 			// Die lokalen Dateien wurden ersetzt: Zwischenspeicher der Repositories und gemerkte Stände verwerfen
-			JsonEventRepository.getInstance().reloadEvents();
-			JsonHallRepository.getInstance().reloadHalls();
+			StoreEventRepository.getInstance().reloadEvents();
+			StoreHallRepository.getInstance().reloadHalls();
 			ChangeTracker.events().reset();
 			ChangeTracker.halls().reset();
 		}

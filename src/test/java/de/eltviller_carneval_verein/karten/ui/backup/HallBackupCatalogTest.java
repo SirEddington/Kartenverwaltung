@@ -46,7 +46,7 @@ class HallBackupCatalogTest {
 		sync = TestSyncServices.singleMode(appData, clock);
 		sync.startup(null, p -> {
 		});
-		halls = TestRepositories.storeHalls(sync);
+		halls = TestRepositories.halls(sync);
 	}
 
 	private HallBackupCatalog catalog() {
@@ -103,7 +103,7 @@ class HallBackupCatalogTest {
 		assertTrue(result.notes().isEmpty());
 		assertEquals("Stadthalle", halls.findById(hall.getId()).getName());
 		assertSame(halls.findById(hall.getId()), halls.loadHalls().get(0));
-		assertEquals("Stadthalle", TestRepositories.storeHalls(sync).loadHalls().get(0).getName());
+		assertEquals("Stadthalle", TestRepositories.halls(sync).loadHalls().get(0).getName());
 	}
 
 	@Test

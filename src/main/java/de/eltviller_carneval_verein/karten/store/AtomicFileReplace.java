@@ -23,7 +23,7 @@ import java.nio.file.StandardCopyOption;
  * {@code AtomicMoveNotSupportedException} beschreiben dagegen einen festen Zustand, den Warten nicht ändert; sie
  * und alle anderen Ausnahmen gehen sofort an den Aufrufer.
  */
-public final class AtomicFileReplace {
+final class AtomicFileReplace {
 
 	/** So oft wird das Ersetzen höchstens versucht. */
 	static final int ATTEMPTS = 10;
@@ -47,7 +47,7 @@ public final class AtomicFileReplace {
 	}
 
 	/** Ersetzt {@code target} atomar durch {@code temp}; siehe Klassenbeschreibung. */
-	public static void replace(Path temp, Path target) throws IOException {
+	static void replace(Path temp, Path target) throws IOException {
 		replace(temp, target,
 				(source, destination) -> Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE,
 						StandardCopyOption.REPLACE_EXISTING),

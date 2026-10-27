@@ -6,8 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,22 +29,24 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.repository.TestRepositories;
+import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.event.BookingTreeAccess;
 import de.eltviller_carneval_verein.karten.util.BookingTotals;
 
 /**
- * Änderungen an der Bestuhlung von Anfang bis Ende, mit echter Speicherung in einem temporären Ordner: Tisch löschen
+ * Änderungen an der Bestuhlung von Anfang bis Ende, mit echter Speicherung im Versionsspeicher eines temporären Ordners: Tisch löschen
  * und Reihe neu nummerieren wie im Hallen-Editor, Halle speichern und laden, Abgleich nach dem Laden, Event speichern
  * und laden, schließlich die Bestuhlung löschen. Keine Buchung mit Daten geht verloren, kein Cent ändert sich.
  *
  * <p>
  * Ausgangslage: Reihe A mit den Tischen A1 bis A3 zu je 2 Sitzen, Standardpreis 25,00 €. Gebucht sind A1 Sitz 1 (Karte,
- * Standardpreis, "Schmidt"), A2 Sitz 1 (bar, Einzelpreis 30,00 €, "Müller") und A3 Sitz 2 (nur reserviert, "Weber"),
+ * Standardpreis, "Schmidt"), A2 Sitz 2 (bar, Einzelpreis 30,00 €, "Müller") und A3 Sitz 2 (nur reserviert, "Weber"),
  * die übrigen drei Sitze sind leer.
  */
 class PlanEditsEndToEndTest {
@@ -52,10 +55,10 @@ class PlanEditsEndToEndTest {
 	private static final int INDIVIDUAL_PRICE = 3000;
 
 	@TempDir
-	File storageDir;
+	Path appData;
 
 	/** Die Ids, über die der Test die gespeicherten Objekte wiederfindet. */
-	private record Fixture(String hallId, String planId, String eventId, String seatA1s1, String seatA2s1, String seatA3s2) {
+	private record Fixture(String hallId, String planId, String eventId, String seatA1s1, String seatA2s2, String seatA3s2) {
 	}
 
 	/** Was eine Buchung an Daten trägt; Momentaufnahme, Sitz-Id und "Ohne Platz" gehören nicht dazu. */
@@ -69,20 +72,28 @@ class PlanEditsEndToEndTest {
 
 	// --- Speicherung ---
 
-	private JsonEventRepository events() {
-		return TestRepositories.events(new File(storageDir, "events"));
+	/** Ein frisch gestarteter Dienst auf dem Datenordner des Tests: liest alles neu aus dem Speicher. */
+	private SyncService started() {
+		SyncService sync = TestSyncServices.singleMode(appData);
+		sync.startup(null, p -> {
+		});
+		return sync;
 	}
 
-	private JsonHallRepository halls() {
-		return TestRepositories.halls(new File(storageDir, "halls"));
+	private StoreEventRepository events() {
+		return TestRepositories.events(started());
 	}
 
-	/** Liest das Event frisch von der Festplatte (neues Repository, kein Cache). */
+	private StoreHallRepository halls() {
+		return TestRepositories.halls(started());
+	}
+
+	/** Liest das Event frisch aus dem Speicher (neues Repository, kein Cache). */
 	private Event loadEvent(String eventId) {
 		return events().loadEvents().stream().filter(e -> e.getId().equals(eventId)).findFirst().orElseThrow();
 	}
 
-	/** Liest die Halle frisch von der Festplatte (neues Repository, kein Cache). */
+	/** Liest die Halle frisch aus dem Speicher (neues Repository, kein Cache). */
 	private Hall loadHall(String hallId) {
 		Hall hall = halls().findById(hallId);
 		assertNotNull(hall, "Die Halle muss gespeichert sein");
@@ -114,7 +125,7 @@ class PlanEditsEndToEndTest {
 		card.setLastName("Schmidt");
 		card.setPaymentStatus(PaymentStatus.CARD);
 
-		Booking cash = booking(presentation, 2, 1);
+		Booking cash = booking(presentation, 2, 2);
 		cash.setLastName("Müller");
 		cash.setFirstName("Hans");
 		cash.setEMail("hans.mueller@example.de");
@@ -164,8 +175,12 @@ class PlanEditsEndToEndTest {
 		return tracker;
 	}
 
-	private static String json(Event event) throws JsonProcessingException {
-		return JsonMapperFactory.create().writeValueAsString(event);
+	/**
+	 * Die Buchungen mit Daten als JSON, nach Id sortiert (die Reihenfolge nach dem Laden ist nicht die des Speicherns). Leere Buchungen fehlen mit Absicht: Sie werden nie gespeichert, der Abgleich legt
+	 * sie bei jedem Laden mit neuer Id an.
+	 */
+	private static String dataJson(Event event) throws JsonProcessingException {
+		return JsonMapperFactory.create().writeValueAsString(presentation(event).getBookings().stream().filter(Booking::hasData).sorted(Comparator.comparing(Booking::getId)).toList());
 	}
 
 	/** Jeder Sitz der Bestuhlung trägt genau eine Buchung mit Platz, und es gibt keine Buchung mit Platz ohne Sitz. */
@@ -182,8 +197,11 @@ class PlanEditsEndToEndTest {
 	void Bestuhlung_aendern_speichern_laden_und_loeschen_verliert_keine_Buchung_und_keinen_Cent() throws JsonProcessingException {
 		Fixture f = saveFixture();
 
-		// a. Stand vorher (aus der Datei gelesen)
-		Presentation before = presentation(loadEvent(f.eventId()));
+		// a. Stand vorher (aus dem Speicher gelesen; leere Buchungen werden nie gespeichert, der Abgleich legt sie wieder an)
+		Event eventBefore = loadEvent(f.eventId());
+		assertEquals(3, presentation(eventBefore).getBookings().size(), "gespeichert sind nur die drei Buchungen mit Daten");
+		prepare(eventBefore, loadHall(f.hallId()));
+		Presentation before = presentation(eventBefore);
 		BookingTotals totalsBefore = BookingTotals.of(before.getBookings());
 		Set<Data> dataBefore = dataOf(before);
 		assertEquals(6, totalsBefore.total(), "6 Sitze, 6 Buchungen");
@@ -204,7 +222,7 @@ class PlanEditsEndToEndTest {
 		Hall changedHall = loadHall(f.hallId());
 		SeatingPlan changedPlan = changedHall.findSeatingPlan(f.planId());
 		assertEquals(List.of(1, 2), changedPlan.getTables().stream().map(Table::getTableNumber).sorted().toList(), "nach dem Neu-Nummerieren: A1, A2");
-		assertNull(changedPlan.findSeat(f.seatA2s1()), "der Sitz von Müller ist mit Tisch A2 weg");
+		assertNull(changedPlan.findSeat(f.seatA2s2()), "der Sitz von Müller ist mit Tisch A2 weg");
 		assertEquals(2, changedPlan.findSeat(f.seatA3s2()).getParent().getTableNumber(), "der frühere Tisch A3 heißt jetzt A2");
 
 		// c. Abgleich nach dem Laden gegen die geänderte Halle
@@ -214,15 +232,15 @@ class PlanEditsEndToEndTest {
 
 		assertFalse(p.isPlanMissing(), "die Bestuhlung gibt es noch");
 		assertFalse(tracker.isDirty(event), "der Abgleich ist keine Änderung des Nutzers");
-		assertEquals(5, p.getBookings().size(), "die leere Buchung von A2 Sitz 2 ist entfernt, sonst bleibt alles");
+		assertEquals(5, p.getBookings().size(), "vier Sitze der geänderten Bestuhlung plus Müller ohne Platz; die leeren Buchungen legt der Abgleich an");
 
 		Booking mueller = byLastName(p, "Müller");
 		assertTrue(mueller.isUnassigned(), "Müller ist ohne Platz");
 		assertEquals(INDIVIDUAL_PRICE, mueller.getPrice(), "Müllers Einzelpreis bleibt");
 		assertEquals(PaymentStatus.CASH, mueller.getPaymentStatus(), "Müller bleibt bar bezahlt");
-		assertEquals(f.seatA2s1(), mueller.getSeatId(), "die alte Sitz-Id bleibt als Teil der Momentaufnahme");
+		assertEquals(f.seatA2s2(), mueller.getSeatId(), "die alte Sitz-Id bleibt als Teil der Momentaufnahme");
 		assertEquals(2, mueller.getTableNumber(), "Momentaufnahme bisher Tisch A2");
-		assertEquals(1, mueller.getSeatNumber(), "Momentaufnahme bisher Sitz 1");
+		assertEquals(2, mueller.getSeatNumber(), "Momentaufnahme bisher Sitz 2");
 
 		Booking weber = byLastName(p, "Weber");
 		assertFalse(weber.isUnassigned(), "Weber behält den Platz");
@@ -249,22 +267,23 @@ class PlanEditsEndToEndTest {
 		assertEquals(5, totalsAfter.total(), "Anzahl gesamt: 4 Sitze und Müller");
 
 		// d. Event speichern, laden, nochmals abgleichen: nichts ändert sich mehr
-		String jsonAfterSync = json(event);
+		String jsonAfterSync = dataJson(event);
 		events().saveEvent(event);
 		Event reloaded = loadEvent(f.eventId());
 		Presentation reloadedPresentation = presentation(reloaded);
-		assertTrue(byLastName(reloadedPresentation, "Müller").isUnassigned(), "Ohne Platz steht in der Datei, schon vor dem Abgleich");
+		assertTrue(byLastName(reloadedPresentation, "Müller").isUnassigned(), "Ohne Platz steht im Speicher, schon vor dem Abgleich");
 
 		ChangeTracker<Event> reloadedTracker = prepare(reloaded, changedHall);
 		assertFalse(reloadedTracker.isDirty(reloaded), "der zweite Abgleich ist keine Änderung");
-		assertEquals(jsonAfterSync, json(reloaded), "der zweite Abgleich ändert nichts");
+		assertEquals(jsonAfterSync, dataJson(reloaded), "der zweite Abgleich ändert keine Buchung mit Daten");
+		assertEverySeatBookedOnce(reloadedPresentation, changedPlan);
 		assertEquals(totalsAfter, BookingTotals.of(reloadedPresentation.getBookings()), "dieselben Zahlen nach Speichern und Laden");
 
 		// e. Hallen-Editor löscht die Bestuhlung: erst einfrieren, dann entfernen und speichern
 		Hall editorHall = loadHall(f.hallId());
 		SeatingPlan doomed = editorHall.findSeatingPlan(f.planId());
 		Event stored = loadEvent(f.eventId());
-		JsonEventRepository eventRepository = events();
+		StoreEventRepository eventRepository = events();
 		List<Event> saved = PlanFreezer.freeze(List.of(stored), presentation -> doomed.getId().equals(presentation.getSeatingPlanId()),
 				id -> editorHall.getId().equals(id) ? editorHall : null, new ChangeTracker<>(Event::getId), eventRepository::saveEvent);
 		assertEquals(List.of(stored), saved, "das betroffene Event wird vor dem Löschen gespeichert");
@@ -272,24 +291,29 @@ class PlanEditsEndToEndTest {
 		halls().saveHall(editorHall);
 
 		Hall hallWithoutPlan = loadHall(f.hallId());
-		assertNull(hallWithoutPlan.findSeatingPlan(f.planId()), "die Bestuhlung ist auch in der Datei weg");
+		assertNull(hallWithoutPlan.findSeatingPlan(f.planId()), "die Bestuhlung ist auch im Speicher weg");
 		Event frozen = loadEvent(f.eventId());
 		Presentation frozenPresentation = presentation(frozen);
 		prepare(frozen, hallWithoutPlan);
 
 		assertTrue(frozenPresentation.isPlanMissing(), "die Vorstellung ist eingefroren");
 		assertEquals(f.planId(), frozenPresentation.getSeatingPlanId(), "die Vorstellung zeigt weiter auf die gelöschte Bestuhlung");
-		assertEquals(jsonAfterSync, json(frozen), "Einfrieren, Löschen und Laden ändern keine Buchung");
-		assertEquals(5, frozenPresentation.getBookings().size(), "alle Buchungen bleiben");
+		assertEquals(jsonAfterSync, dataJson(frozen), "Einfrieren, Löschen und Laden ändern keine Buchung mit Daten");
+		assertEquals(3, frozenPresentation.getBookings().size(), "alle Buchungen mit Daten bleiben; leere werden nie gespeichert und ohne Bestuhlung nicht neu angelegt");
 		Booking frozenMueller = byLastName(frozenPresentation, "Müller");
 		assertTrue(frozenMueller.isUnassigned(), "Müller bleibt ohne Platz");
 		assertEquals(dataBefore, dataOf(frozenPresentation), "keine Buchung mit Daten verloren oder verändert");
-		assertEquals(totalsAfter, BookingTotals.of(frozenPresentation.getBookings()), "dieselben Zahlen nach dem Löschen der Bestuhlung");
+		BookingTotals totalsFrozen = BookingTotals.of(frozenPresentation.getBookings());
+		assertEquals(totalsAfter.revenueCents(), totalsFrozen.revenueCents(), "Einnahmen nach dem Löschen der Bestuhlung unverändert");
+		assertEquals(totalsAfter.expectedCents(), totalsFrozen.expectedCents(), "erwartet nach dem Löschen der Bestuhlung unverändert");
+		assertEquals(totalsAfter.paid(), totalsFrozen.paid(), "Anzahl bezahlt nach dem Löschen der Bestuhlung unverändert");
+		assertEquals(totalsAfter.reserved(), totalsFrozen.reserved(), "Anzahl reserviert nach dem Löschen der Bestuhlung unverändert");
+		assertEquals(3, totalsFrozen.total(), "gesamt: nur die Buchungen mit Daten");
 
 		Map<String, List<Booking>> tables = BookingTreeAccess.tables(frozenPresentation);
 		assertEquals(List.of("Tisch A1", "Tisch A2"), new ArrayList<>(tables.keySet()), "die Tische mit Platz aus der Momentaufnahme");
-		assertEquals(2, tables.get("Tisch A1").size(), "Tisch A1 mit 2 Sitzen");
-		assertEquals(2, tables.get("Tisch A2").size(), "Tisch A2 (früher A3) mit 2 Sitzen");
+		assertEquals(List.of(byLastName(frozenPresentation, "Schmidt")), tables.get("Tisch A1"), "Tisch A1 mit Schmidt");
+		assertEquals(List.of(byLastName(frozenPresentation, "Weber")), tables.get("Tisch A2"), "Tisch A2 (früher A3) mit Weber");
 		assertTrue(tables.get("Tisch A2").contains(byLastName(frozenPresentation, "Weber")), "Weber an Tisch A2");
 		assertFalse(tables.values().stream().anyMatch(bookings -> bookings.contains(frozenMueller)), "Müller an keinem Tisch");
 		assertEquals(List.of(frozenMueller), BookingTreeAccess.unassigned(frozenPresentation), "Müller unter Ohne Platz");

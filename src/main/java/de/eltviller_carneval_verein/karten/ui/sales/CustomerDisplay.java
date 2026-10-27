@@ -9,7 +9,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
@@ -51,7 +51,7 @@ public final class CustomerDisplay {
 	private static final String LOGO = "/de/eltviller_carneval_verein/karten/ui/images/harlekin_logo.png";
 
 	private final SalesViewState state;
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 	// Der Vollbildmodus ist ein randloses Fenster in Bildschirmgröße und kein JavaFX-Vollbild: Ein Vollbildfenster wird
 	// minimiert, sobald das Hauptfenster den Fokus bekommt. Die Scene wandert beim Umschalten zwischen den Fenstern.
 	private final Stage windowStage = new Stage();

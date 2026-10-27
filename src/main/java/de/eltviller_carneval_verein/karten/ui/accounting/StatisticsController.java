@@ -26,7 +26,7 @@ import com.lowagie.text.pdf.PdfWriter;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.util.BookingTotals;
@@ -46,7 +46,7 @@ import javafx.scene.image.WritableImage;
  */
 public class StatisticsController implements ContentController, Exportable {
 
-	private final JsonEventRepository repository = JsonEventRepository.getInstance();
+	private final StoreEventRepository repository = StoreEventRepository.getInstance();
 
 	private List<EventStats> lastStats = List.of();
 

@@ -1,7 +1,7 @@
 package de.eltviller_carneval_verein.karten.repository;
 
 /**
- * Wird von einem Repository ({@link JsonEventRepository}, {@link JsonHallRepository}) nach jedem Speichern oder
+ * Wird von einem Repository ({@link StoreEventRepository}, {@link StoreHallRepository}) nach jedem Speichern oder
  * Löschen aufgerufen, egal von welcher Stelle aus gespeichert wurde. So kann der Änderungsmelder den gespeicherten
  * Stand nachführen, ohne dass jeder Speicherweg daran denken muss.
  *

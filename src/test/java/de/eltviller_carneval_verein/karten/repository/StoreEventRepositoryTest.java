@@ -187,12 +187,12 @@ class StoreEventRepositoryTest {
 
 	@Test
 	void savedEventLoadsInNewInstance(@TempDir Path appData) throws IOException {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Event event = eventWithBookings();
 		event.setDescription("Große Sitzung");
 		repository.saveEvent(event);
 
-		StoreEventRepository fresh = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository fresh = TestRepositories.events(started(appData));
 		List<Event> loaded = fresh.loadEvents();
 
 		assertEquals(1, loaded.size());
@@ -209,7 +209,7 @@ class StoreEventRepositoryTest {
 
 	@Test
 	void loadEventsReturnsSameReferences(@TempDir Path appData) {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Event event = named("Kampagne");
 		repository.saveEvent(event);
 
@@ -225,7 +225,7 @@ class StoreEventRepositoryTest {
 
 	@Test
 	void saveWithoutChangesWritesNothing(@TempDir Path appData) throws IOException {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Event event = eventWithBookings();
 		repository.saveEvent(event);
 		long before = filesIn(appData);
@@ -245,7 +245,7 @@ class StoreEventRepositoryTest {
 		TableRow row = plan.addRow();
 		row.setLabel("A");
 		plan.fillRow(row, 2, 3);
-		TestRepositories.storeHalls(sync).saveHall(hall);
+		TestRepositories.halls(sync).saveHall(hall);
 		Event event = named("Prunksitzung");
 		for (String name : List.of("Freitag", "Samstag")) {
 			Presentation presentation = event.addPresentation(name);
@@ -255,13 +255,13 @@ class StoreEventRepositoryTest {
 			presentation.getBookings().get(0).setLastName("Müller");
 			presentation.getBookings().get(4).setLastName("Meier");
 		}
-		TestRepositories.storeEvents(sync).saveEvent(event);
+		TestRepositories.events(sync).saveEvent(event);
 		sync.flushIndex();
 		long before = filesIn(appData);
 
 		SyncService restarted = started(appData);
-		StoreHallRepository halls = TestRepositories.storeHalls(restarted);
-		StoreEventRepository events = TestRepositories.storeEvents(restarted);
+		StoreHallRepository halls = TestRepositories.halls(restarted);
+		StoreEventRepository events = TestRepositories.events(restarted);
 		for (Event loaded : events.loadEvents()) {
 			for (Presentation presentation : loaded.getPresentations()) {
 				// wie beim Öffnen in der App: die leeren Buchungen kommen aus der Bestuhlung zurück
@@ -279,7 +279,7 @@ class StoreEventRepositoryTest {
 	@Test
 	void changingOneBookingWritesOneVersion(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = eventWithBookings();
 		repository.saveEvent(event);
 		Booking changed = bookingOf(event, 1, "Becker");
@@ -292,7 +292,7 @@ class StoreEventRepositoryTest {
 			int expected = unit.equals(changedUnit) ? 2 : 1;
 			assertEquals(expected, sync.history(unit).size(), unit.relativePath());
 		}
-		assertEquals("Beckmann", TestRepositories.storeEvents(started(appData)).loadEvents().get(0).getPresentations()
+		assertEquals("Beckmann", TestRepositories.events(started(appData)).loadEvents().get(0).getPresentations()
 				.get(1).getBookings().stream().filter(b -> "seat-3".equals(b.getSeatId())).findFirst().orElseThrow()
 				.getLastName());
 	}
@@ -301,9 +301,9 @@ class StoreEventRepositoryTest {
 	void removedBookingIsDeletedWhenItWasShown(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
 		Event event = eventWithBookings();
-		TestRepositories.storeEvents(sync).saveEvent(event);
+		TestRepositories.events(sync).saveEvent(event);
 
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event loaded = repository.loadEvents().get(0);
 		Booking removed = bookingOf(loaded, 0, "Meier");
 		loaded.getPresentations().get(0).getBookings().remove(removed);
@@ -313,7 +313,7 @@ class StoreEventRepositoryTest {
 		List<Version> history = sync.history(unit);
 		assertEquals(2, history.size());
 		assertTrue(history.stream().anyMatch(Version::deleted));
-		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(List.of("Müller"),
 				again.getPresentations().get(0).getBookings().stream().map(Booking::getLastName).toList());
 	}
@@ -322,17 +322,17 @@ class StoreEventRepositoryTest {
 	void foreignBookingSavedMeanwhileIsNotDeletedByMySave(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
 		Event event = eventWithBookings();
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		repository.saveEvent(event);
 
 		// eine Buchung, die nach dem Laden dieses Repositorys von anderer Seite dazukommt
-		Event other = TestRepositories.storeEvents(sync).loadEvents().get(0);
+		Event other = TestRepositories.events(sync).loadEvents().get(0);
 		booking(other.getPresentations().get(0), "seat-9", 9, "Fremd");
-		TestRepositories.storeEvents(sync).saveEvent(other);
+		TestRepositories.events(sync).saveEvent(other);
 		bookingOf(event, 0, "Müller").setLastName("Mueller");
 		repository.saveEvent(event);
 
-		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals("Fremd", bookingOf(again, 0, "Fremd").getLastName());
 		assertEquals("Mueller", bookingOf(again, 0, "Mueller").getLastName());
 	}
@@ -340,7 +340,7 @@ class StoreEventRepositoryTest {
 	@Test
 	void deleteEventWritesOnlyHeadDeletion(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = eventWithBookings();
 		repository.saveEvent(event);
 
@@ -357,14 +357,14 @@ class StoreEventRepositoryTest {
 
 	@Test
 	void deletedEventIsGoneAfterReload(@TempDir Path appData) {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Event deleted = eventWithBookings();
 		Event kept = named("Zweites");
 		repository.saveEvents(List.of(deleted, kept));
 
 		repository.deleteEvents(List.of(deleted));
 
-		StoreEventRepository fresh = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository fresh = TestRepositories.events(started(appData));
 		assertEquals(List.of(kept.getId()), fresh.loadEvents().stream().map(Event::getId).toList());
 		assertEquals(List.of(kept.getId()), fresh.reloadEvents().stream().map(Event::getId).toList());
 	}
@@ -372,7 +372,7 @@ class StoreEventRepositoryTest {
 	@Test
 	void deleteOfNeverSavedEventOnlyNotifies(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Recorder recorder = new Recorder();
 		repository.addListener(recorder);
 
@@ -387,7 +387,7 @@ class StoreEventRepositoryTest {
 	void failedAppendKeepsBaselineConsistent(@TempDir Path appData) throws IOException {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		SyncService sync = started(TestSyncServices.singleMode(appData, layer));
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = eventWithBookings();
 		repository.saveEvent(event);
 		bookingOf(event, 0, "Müller").setLastName("Mueller");
@@ -408,7 +408,7 @@ class StoreEventRepositoryTest {
 			assertTrue(state.lost().isEmpty(), unit.relativePath() + " hat eine verlorene Strecke");
 		}
 		sync.flushIndex();
-		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals("Mueller", bookingOf(again, 0, "Mueller").getLastName());
 		assertEquals("Maier", bookingOf(again, 0, "Maier").getLastName());
 	}
@@ -417,7 +417,7 @@ class StoreEventRepositoryTest {
 	void failedAppendBeforeWritingIsRetriedCompletely(@TempDir Path appData) throws IOException {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		SyncService sync = started(TestSyncServices.singleMode(appData, layer));
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = eventWithBookings();
 		repository.saveEvent(event);
 		bookingOf(event, 0, "Müller").setLastName("Mueller");
@@ -435,14 +435,14 @@ class StoreEventRepositoryTest {
 			assertTrue(state.lost().isEmpty(), unit.relativePath());
 			assertTrue(state.pending().isEmpty(), unit.relativePath());
 		}
-		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals("Mueller", bookingOf(again, 0, "Mueller").getLastName());
 		assertEquals("Maier", bookingOf(again, 0, "Maier").getLastName());
 	}
 
 	@Test
 	void duplicateSeatWritesNothing(@TempDir Path appData) throws IOException {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Event event = eventWithBookings();
 		repository.saveEvent(event);
 		long before = filesIn(appData);
@@ -458,7 +458,7 @@ class StoreEventRepositoryTest {
 
 	@Test
 	void listenerGetsSavedAndDeleted(@TempDir Path appData) {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Recorder recorder = new Recorder();
 		repository.addListener(recorder);
 		Event event = named("Kampagne");
@@ -472,7 +472,7 @@ class StoreEventRepositoryTest {
 
 	@Test
 	void invalidEventIsRejectedWithoutNotifying(@TempDir Path appData) {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Recorder recorder = new Recorder();
 		repository.addListener(recorder);
 
@@ -487,7 +487,7 @@ class StoreEventRepositoryTest {
 
 	@Test
 	void replaceCachedEventSwapsTheObjectWithoutWriting(@TempDir Path appData) throws IOException {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Event original = named("Vorher");
 		repository.saveEvent(original);
 		long before = filesIn(appData);
@@ -513,8 +513,8 @@ class StoreEventRepositoryTest {
 		payload.put("id", "andere-id");
 		payload.put("name", "Fremd");
 		sync.append("test", List.of(new Change(UnitKey.event("ordner-id"), List.of(), payload, false)));
-		TestRepositories.storeEvents(sync).saveEvent(named("Sichtbar"));
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		TestRepositories.events(sync).saveEvent(named("Sichtbar"));
+		StoreEventRepository repository = TestRepositories.events(sync);
 
 		List<Event> loaded = repository.loadEvents();
 
@@ -530,13 +530,13 @@ class StoreEventRepositoryTest {
 	void unreadableUnitIsNeverDeletedBySave(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
 		Event event = eventWithBookings();
-		TestRepositories.storeEvents(sync).saveEvent(event);
+		TestRepositories.events(sync).saveEvent(event);
 		UnitKey seat = UnitKey.booking(event.getId(), event.getPresentations().get(0).getId(), "seat-2");
 		ObjectNode broken = JsonMapperFactory.create().createObjectNode();
 		broken.put("id", "andere-id");
 		sync.append("test", List.of(new Change(seat, List.of(sync.unitState(seat).head().id()), broken, false)));
 
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event loaded = repository.loadEvents().get(0);
 		assertEquals(1, loaded.getPresentations().get(0).getBookings().size());
 		bookingOf(loaded, 0, "Müller").setLastName("Mueller");
@@ -552,7 +552,7 @@ class StoreEventRepositoryTest {
 	void failedSaveDoesNotAdoptAForeignVersionAsBaseline(@TempDir Path appData) throws IOException {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		SyncService sync = started(TestSyncServices.singleMode(appData, layer));
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		UnitKey seat = UnitKey.booking(event.getId(), event.getPresentations().get(0).getId(), "seat-1");
@@ -577,13 +577,13 @@ class StoreEventRepositoryTest {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		SyncService sync = started(TestSyncServices.singleMode(appData, layer));
 		Event event = smallEvent();
-		TestRepositories.storeEvents(sync).saveEvent(event);
+		TestRepositories.events(sync).saveEvent(event);
 		// eine unlesbare Buchung auf seat-2: Sie wird nicht angezeigt und nie vom Repository gelöscht
 		UnitKey seat = UnitKey.booking(event.getId(), event.getPresentations().get(0).getId(), "seat-2");
 		ObjectNode broken = JsonMapperFactory.create().createObjectNode();
 		broken.put("id", "andere-id");
 		sync.append("test", List.of(new Change(seat, List.of(), broken, false)));
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event loaded = repository.loadEvents().get(0);
 		// der Nutzer legt eine Buchung auf diesen Sitz, doch dazwischen kommt eine fremde Version auf die unlesbare
 		booking(loaded.getPresentations().get(0), "seat-2", 2, "Neu");
@@ -602,7 +602,7 @@ class StoreEventRepositoryTest {
 	void deleteOfLockedEventIsRefused(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
 		Event event = smallEvent();
-		TestRepositories.storeEvents(sync).saveEvent(event);
+		TestRepositories.events(sync).saveEvent(event);
 		UnitKey head = UnitKey.event(event.getId());
 		Version first = sync.unitState(head).head();
 		ObjectNode changed = first.payload().deepCopy();
@@ -612,7 +612,7 @@ class StoreEventRepositoryTest {
 		Files.writeString(appData.resolve("data/events/" + event.getId() + "/" + second.id() + ".json"), "kaputt");
 
 		SyncService restarted = started(appData);
-		StoreEventRepository repository = TestRepositories.storeEvents(restarted);
+		StoreEventRepository repository = TestRepositories.events(restarted);
 		Event loaded = repository.loadEvents().get(0);
 		Recorder recorder = new Recorder();
 		repository.addListener(recorder);
@@ -629,31 +629,31 @@ class StoreEventRepositoryTest {
 	@Test
 	void revivingDeletedEventAfterRestartRemovesItsOldBookings(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		repository.deleteEvent(event);
 		sync.flushIndex();
 
-		StoreEventRepository restarted = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository restarted = TestRepositories.events(started(appData));
 		assertTrue(restarted.loadEvents().isEmpty());
 		restarted.saveEvent(withoutBookings(event));
 
-		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(1, again.getPresentations().size());
 		assertEquals(List.of(), bookingNames(again));
 	}
 
 	@Test
 	void revivingDeletedEventInTheSameSessionRemovesItsOldBookings(@TempDir Path appData) throws IOException {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		repository.deleteEvent(event);
 
 		repository.saveEvent(withoutBookings(event));
 
-		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(1, again.getPresentations().size());
 		assertEquals(List.of(), bookingNames(again));
 	}
@@ -661,7 +661,7 @@ class StoreEventRepositoryTest {
 	@Test
 	void revivingDeletedPresentationRemovesItsOldBookings(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		Event withoutPresentation = new Event(event.getId());
@@ -669,19 +669,19 @@ class StoreEventRepositoryTest {
 		repository.saveEvent(withoutPresentation);
 		sync.flushIndex();
 
-		StoreEventRepository restarted = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository restarted = TestRepositories.events(started(appData));
 		Event loaded = restarted.loadEvents().get(0);
 		assertTrue(loaded.getPresentations().isEmpty());
 		restarted.saveEvent(withoutBookings(event));
 
-		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(1, again.getPresentations().size());
 		assertEquals(List.of(), bookingNames(again));
 	}
 
 	@Test
 	void revivingDeletedPresentationInTheSameSessionRemovesItsOldBookings(@TempDir Path appData) throws IOException {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		Event withoutPresentation = new Event(event.getId());
@@ -690,7 +690,7 @@ class StoreEventRepositoryTest {
 
 		repository.saveEvent(withoutBookings(event));
 
-		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(1, again.getPresentations().size());
 		assertEquals(List.of(), bookingNames(again));
 	}
@@ -704,7 +704,7 @@ class StoreEventRepositoryTest {
 	@Test
 	void restoreSetsBookingsBackAndDeletesLaterOnes(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
-		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		StoreEventRepository repository = TestRepositories.events(started(TestSyncServices.singleMode(appData, clock)));
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		SavePoint s1 = savePoint(repository, event.getId(), 0);
@@ -716,14 +716,14 @@ class StoreEventRepositoryTest {
 
 		repository.restoreEvent(event.getId(), s1, e -> List.of());
 
-		Event restored = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event restored = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(List.of("Müller"), bookingNames(restored));
 	}
 
 	@Test
 	void eventAtWritesNothingAndKeepsTheCache(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
-		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		StoreEventRepository repository = TestRepositories.events(started(TestSyncServices.singleMode(appData, clock)));
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		SavePoint s1 = savePoint(repository, event.getId(), 0);
@@ -744,7 +744,7 @@ class StoreEventRepositoryTest {
 	@Test
 	void restoreIsItselfASavePoint(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
-		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		StoreEventRepository repository = TestRepositories.events(started(TestSyncServices.singleMode(appData, clock)));
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		SavePoint s1 = savePoint(repository, event.getId(), 0);
@@ -758,7 +758,7 @@ class StoreEventRepositoryTest {
 		repository.restoreEvent(event.getId(), s1, e -> List.of());
 
 		assertEquals(3, repository.savePoints(event.getId()).size());
-		assertEquals(List.of("Müller"), bookingNames(TestRepositories.storeEvents(started(appData)).loadEvents().get(0)));
+		assertEquals(List.of("Müller"), bookingNames(TestRepositories.events(started(appData)).loadEvents().get(0)));
 		clock.advance(10);
 
 		// Zurück zum Stand vor dem Wiederherstellen
@@ -766,13 +766,13 @@ class StoreEventRepositoryTest {
 
 		assertEquals(4, repository.savePoints(event.getId()).size());
 		assertEquals(List.of("Müller", "Meier"),
-				bookingNames(TestRepositories.storeEvents(started(appData)).loadEvents().get(0)));
+				bookingNames(TestRepositories.events(started(appData)).loadEvents().get(0)));
 	}
 
 	@Test
 	void restoreBringsBackDeletedPresentationWithBookings(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
-		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		StoreEventRepository repository = TestRepositories.events(started(TestSyncServices.singleMode(appData, clock)));
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		SavePoint s1 = savePoint(repository, event.getId(), 0);
@@ -780,12 +780,12 @@ class StoreEventRepositoryTest {
 		Event withoutPresentation = new Event(event.getId());
 		withoutPresentation.setName(event.getName());
 		repository.saveEvent(withoutPresentation);
-		assertTrue(TestRepositories.storeEvents(started(appData)).loadEvents().get(0).getPresentations().isEmpty());
+		assertTrue(TestRepositories.events(started(appData)).loadEvents().get(0).getPresentations().isEmpty());
 		clock.advance(10);
 
 		repository.restoreEvent(event.getId(), s1, e -> List.of());
 
-		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(1, again.getPresentations().size());
 		assertEquals(List.of("Müller"), bookingNames(again));
 	}
@@ -793,7 +793,7 @@ class StoreEventRepositoryTest {
 	@Test
 	void restoreBringsBackDeletedEvent(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
-		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		StoreEventRepository repository = TestRepositories.events(started(TestSyncServices.singleMode(appData, clock)));
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		SavePoint s1 = savePoint(repository, event.getId(), 0);
@@ -801,13 +801,13 @@ class StoreEventRepositoryTest {
 		repository.deleteEvent(event);
 
 		assertEquals(List.of(new KnownEntity(event.getId(), "Prunksitzung", true)), repository.knownEvents());
-		StoreEventRepository fresh = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository fresh = TestRepositories.events(started(appData));
 		assertTrue(fresh.loadEvents().isEmpty());
 		assertEquals(List.of(new KnownEntity(event.getId(), "Prunksitzung", true)), fresh.knownEvents());
 
 		fresh.restoreEvent(event.getId(), s1, e -> List.of());
 
-		StoreEventRepository again = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository again = TestRepositories.events(started(appData));
 		assertEquals(List.of(new KnownEntity(event.getId(), "Prunksitzung", false)), again.knownEvents());
 		assertEquals(List.of("Müller"), bookingNames(again.loadEvents().get(0)));
 	}
@@ -815,7 +815,7 @@ class StoreEventRepositoryTest {
 	@Test
 	void restoreOfDeletedEventDeletesUnitsCreatedAfterT(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
-		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		StoreEventRepository repository = TestRepositories.events(started(TestSyncServices.singleMode(appData, clock)));
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		SavePoint s1 = savePoint(repository, event.getId(), 0);
@@ -825,10 +825,10 @@ class StoreEventRepositoryTest {
 		clock.advance(10);
 		repository.deleteEvent(event);
 
-		StoreEventRepository fresh = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository fresh = TestRepositories.events(started(appData));
 		fresh.restoreEvent(event.getId(), s1, e -> List.of());
 
-		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(List.of("Müller"), bookingNames(again));
 	}
 
@@ -836,12 +836,12 @@ class StoreEventRepositoryTest {
 	void restoreToDeletionPointIsRefused(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
 		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		clock.advance(10);
 		// das Event wird von anderer Seite gelöscht, nachdem dieses Repository es geladen hat
-		StoreEventRepository other = TestRepositories.storeEvents(sync);
+		StoreEventRepository other = TestRepositories.events(sync);
 		other.deleteEvent(other.loadEvents().get(0));
 		SavePoint deletion = savePoint(other, event.getId(), 0);
 		long before = filesIn(appData);
@@ -861,13 +861,13 @@ class StoreEventRepositoryTest {
 	void restoreAfterOutsideChangesResetsThemAndBuildsOnCurrentEnd(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
 		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		SavePoint s1 = savePoint(repository, event.getId(), 0);
 		clock.advance(10);
 		// Änderungen, die nach dem Laden dieses Repositorys von anderer Seite dazukommen
-		StoreEventRepository other = TestRepositories.storeEvents(sync);
+		StoreEventRepository other = TestRepositories.events(sync);
 		Event outside = other.loadEvents().get(0);
 		bookingOf(outside, 0, "Müller").setLastName("Fremd1");
 		booking(outside.getPresentations().get(0), "seat-2", 2, "Fremd2");
@@ -893,7 +893,7 @@ class StoreEventRepositoryTest {
 		assertEquals(1, sync.unitState(UnitKey.event(event.getId())).chain().size());
 		assertEquals(1, sync.unitState(UnitKey.presentation(event.getId(), presentationId)).chain().size());
 		assertEquals(3, repository.savePoints(event.getId()).size());
-		assertEquals(List.of("Müller"), bookingNames(TestRepositories.storeEvents(started(appData)).loadEvents().get(0)));
+		assertEquals(List.of("Müller"), bookingNames(TestRepositories.events(started(appData)).loadEvents().get(0)));
 	}
 
 	@Test
@@ -901,12 +901,12 @@ class StoreEventRepositoryTest {
 		SteppedClock clock = new SteppedClock();
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		SyncService sync = started(TestSyncServices.singleMode(appData, layer, clock));
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		SavePoint s1 = savePoint(repository, event.getId(), 0);
 		clock.advance(10);
-		StoreEventRepository other = TestRepositories.storeEvents(sync);
+		StoreEventRepository other = TestRepositories.events(sync);
 		Event outside = other.loadEvents().get(0);
 		bookingOf(outside, 0, "Müller").setLastName("Fremd1");
 		other.saveEvent(outside);
@@ -931,7 +931,7 @@ class StoreEventRepositoryTest {
 	void restoreRefusesTargetWithUnreadableParts(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
 		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		SavePoint s1 = savePoint(repository, event.getId(), 0);
@@ -946,7 +946,7 @@ class StoreEventRepositoryTest {
 		repository.saveEvent(event);
 		clock.advance(10);
 		// eine Änderung von anderer Seite nach dem Speichern dieses Repositorys
-		StoreEventRepository other = TestRepositories.storeEvents(sync);
+		StoreEventRepository other = TestRepositories.events(sync);
 		Event outside = other.loadEvents().get(0);
 		bookingOf(outside, 0, "Schulz").setLastName("Fremd1");
 		other.saveEvent(outside);
@@ -968,7 +968,7 @@ class StoreEventRepositoryTest {
 	@Test
 	void eventAtOfLockedUnitIsRefused(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
-		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		StoreEventRepository repository = TestRepositories.events(sync);
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		SavePoint s1 = savePoint(repository, event.getId(), 0);
@@ -979,7 +979,7 @@ class StoreEventRepositoryTest {
 		Version second = sync.append("test", List.of(new Change(unit, List.of(first.id()), changed, false))).get(0);
 		Files.writeString(appData.resolve("data/events/" + event.getId() + "/" + second.id() + ".json"), "kaputt");
 
-		StoreEventRepository restarted = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository restarted = TestRepositories.events(started(appData));
 
 		LockedUnitException refused = assertThrows(LockedUnitException.class,
 				() -> restarted.restoreEvent(event.getId(), s1, e -> List.of()));
@@ -988,7 +988,7 @@ class StoreEventRepositoryTest {
 
 	@Test
 	void knownEventsAreSortedByNameIgnoringCase(@TempDir Path appData) {
-		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		StoreEventRepository repository = TestRepositories.events(started(appData));
 		Event beta = named("beta");
 		Event alpha = named("Alpha");
 		Event gamma = named("Gamma");
@@ -1002,7 +1002,7 @@ class StoreEventRepositoryTest {
 	@Test
 	void loadBeforeStartupIsRefused(@TempDir Path appData) {
 		SyncService notStarted = TestSyncServices.singleMode(appData);
-		StoreEventRepository repository = TestRepositories.storeEvents(notStarted);
+		StoreEventRepository repository = TestRepositories.events(notStarted);
 
 		IllegalStateException load = assertThrows(IllegalStateException.class, repository::loadEvents);
 		assertThrows(IllegalStateException.class, repository::reloadEvents);

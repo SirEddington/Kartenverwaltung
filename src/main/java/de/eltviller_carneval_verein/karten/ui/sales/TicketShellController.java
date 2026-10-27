@@ -10,7 +10,7 @@ import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
@@ -43,7 +43,7 @@ public class TicketShellController {
 	private static final Logger LOG = Logger.getLogger(TicketShellController.class.getName());
 	private static final String ALL_PRESENTATIONS = "Alle Vorstellungen";
 
-	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
+	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
 	// Gemeinsamer Zustand mit dem Kundenfenster: Die Shell und ihre Inhalte schreiben ihn, das Kundenfenster liest ihn
 	private final SalesViewState state = new SalesViewState();
 

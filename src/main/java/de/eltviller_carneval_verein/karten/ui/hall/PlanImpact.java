@@ -13,7 +13,7 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
@@ -63,14 +63,14 @@ final class PlanImpact {
 	}
 
 	/**
-	 * {@link #of} über die Events aus dem {@link JsonEventRepository} (wie die Rückfrage beim Löschen einer
+	 * {@link #of} über die Events aus dem {@link StoreEventRepository} (wie die Rückfrage beim Löschen einer
 	 * Bestuhlung); geladen wird nur, wenn überhaupt Sitze betroffen sind.
 	 */
 	static PlanImpact inEvents(SeatingPlan plan, Collection<String> seatIds) {
 		if (plan == null || seatIds == null || seatIds.isEmpty()) {
 			return new PlanImpact(List.of());
 		}
-		return of(plan.getId(), seatIds, JsonEventRepository.getInstance().loadEvents());
+		return of(plan.getId(), seatIds, StoreEventRepository.getInstance().loadEvents());
 	}
 
 	/** Die Sitzkennungen aller Sitze der Tische ({@code null} ergibt keine). */

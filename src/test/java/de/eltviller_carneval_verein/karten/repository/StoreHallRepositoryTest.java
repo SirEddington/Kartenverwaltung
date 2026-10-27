@@ -68,7 +68,7 @@ class StoreHallRepositoryTest {
 
 	@Test
 	void savedHallLoadsInNewInstance(@TempDir Path appData) {
-		StoreHallRepository repository = TestRepositories.storeHalls(started(appData));
+		StoreHallRepository repository = TestRepositories.halls(started(appData));
 		Hall hall = named("Stadthalle");
 		hall.setDescription("Große Halle");
 		hall.setHallWidth(24.5);
@@ -76,7 +76,7 @@ class StoreHallRepositoryTest {
 		hall.addHallObject();
 		repository.saveHall(hall);
 
-		StoreHallRepository fresh = TestRepositories.storeHalls(started(appData));
+		StoreHallRepository fresh = TestRepositories.halls(started(appData));
 		List<Hall> loaded = fresh.loadHalls();
 
 		assertEquals(1, loaded.size());
@@ -93,7 +93,7 @@ class StoreHallRepositoryTest {
 
 	@Test
 	void findByIdUsesCache(@TempDir Path appData) {
-		StoreHallRepository repository = TestRepositories.storeHalls(started(appData));
+		StoreHallRepository repository = TestRepositories.halls(started(appData));
 		Hall hall = named("Stadthalle");
 		repository.saveHall(hall);
 
@@ -107,18 +107,18 @@ class StoreHallRepositoryTest {
 	@Test
 	void hallsAndEventsDoNotSeeEachOther(@TempDir Path appData) {
 		SyncService sync = started(appData);
-		TestRepositories.storeHalls(sync).saveHall(named("Stadthalle"));
+		TestRepositories.halls(sync).saveHall(named("Stadthalle"));
 		Event event = new Event();
 		event.setName("Prunksitzung");
-		TestRepositories.storeEvents(sync).saveEvent(event);
+		TestRepositories.events(sync).saveEvent(event);
 
-		assertEquals(1, TestRepositories.storeHalls(sync).loadHalls().size());
-		assertEquals(1, TestRepositories.storeEvents(sync).loadEvents().size());
+		assertEquals(1, TestRepositories.halls(sync).loadHalls().size());
+		assertEquals(1, TestRepositories.events(sync).loadEvents().size());
 	}
 
 	@Test
 	void saveWithoutChangesWritesNothing(@TempDir Path appData) throws IOException {
-		StoreHallRepository repository = TestRepositories.storeHalls(started(appData));
+		StoreHallRepository repository = TestRepositories.halls(started(appData));
 		Hall hall = named("Stadthalle");
 		hall.addSeatingPlan();
 		repository.saveHall(hall);
@@ -136,11 +136,11 @@ class StoreHallRepositoryTest {
 		Hall hall = named("Stadthalle");
 		hall.addSeatingPlan();
 		hall.addHallObject();
-		TestRepositories.storeHalls(sync).saveHall(hall);
+		TestRepositories.halls(sync).saveHall(hall);
 		sync.flushIndex();
 		long before = filesIn(appData);
 
-		StoreHallRepository fresh = TestRepositories.storeHalls(started(appData));
+		StoreHallRepository fresh = TestRepositories.halls(started(appData));
 		fresh.saveHalls(fresh.loadHalls());
 
 		assertEquals(before, filesIn(appData));
@@ -149,7 +149,7 @@ class StoreHallRepositoryTest {
 	@Test
 	void changedHallWritesOneNewVersion(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
-		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		StoreHallRepository repository = TestRepositories.halls(sync);
 		Hall hall = named("Stadthalle");
 		repository.saveHall(hall);
 
@@ -157,13 +157,13 @@ class StoreHallRepositoryTest {
 		repository.saveHall(hall);
 
 		assertEquals(2, sync.history(UnitKey.hall(hall.getId())).size());
-		assertEquals("Festhalle", TestRepositories.storeHalls(started(appData)).loadHalls().get(0).getName());
+		assertEquals("Festhalle", TestRepositories.halls(started(appData)).loadHalls().get(0).getName());
 	}
 
 	@Test
 	void deleteHallWritesOnlyDeletion(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
-		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		StoreHallRepository repository = TestRepositories.halls(sync);
 		Hall deleted = named("Stadthalle");
 		Hall kept = named("Festhalle");
 		repository.saveHalls(List.of(deleted, kept));
@@ -175,7 +175,7 @@ class StoreHallRepositoryTest {
 		assertEquals(1, history.stream().filter(Version::deleted).count());
 		assertEquals(1, sync.history(UnitKey.hall(kept.getId())).size());
 		assertEquals(List.of(kept.getId()), repository.loadHalls().stream().map(Hall::getId).toList());
-		StoreHallRepository fresh = TestRepositories.storeHalls(started(appData));
+		StoreHallRepository fresh = TestRepositories.halls(started(appData));
 		assertEquals(List.of(kept.getId()), fresh.loadHalls().stream().map(Hall::getId).toList());
 		assertNull(fresh.findById(deleted.getId()));
 	}
@@ -183,7 +183,7 @@ class StoreHallRepositoryTest {
 	@Test
 	void deleteOfNeverSavedHallOnlyNotifies(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
-		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		StoreHallRepository repository = TestRepositories.halls(sync);
 		Recorder recorder = new Recorder();
 		repository.addListener(recorder);
 
@@ -196,7 +196,7 @@ class StoreHallRepositoryTest {
 
 	@Test
 	void listenerGetsSavedAndDeleted(@TempDir Path appData) {
-		StoreHallRepository repository = TestRepositories.storeHalls(started(appData));
+		StoreHallRepository repository = TestRepositories.halls(started(appData));
 		Recorder recorder = new Recorder();
 		repository.addListener(recorder);
 		Hall hall = named("Stadthalle");
@@ -211,7 +211,7 @@ class StoreHallRepositoryTest {
 	@Test
 	void loadBeforeStartupIsRefused(@TempDir Path appData) {
 		SyncService notStarted = TestSyncServices.singleMode(appData);
-		StoreHallRepository repository = TestRepositories.storeHalls(notStarted);
+		StoreHallRepository repository = TestRepositories.halls(notStarted);
 
 		IllegalStateException load = assertThrows(IllegalStateException.class, repository::loadHalls);
 		assertThrows(IllegalStateException.class, () -> repository.findById("x"));
@@ -227,7 +227,7 @@ class StoreHallRepositoryTest {
 	void deleteOfLockedHallIsRefused(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
 		Hall hall = named("Stadthalle");
-		TestRepositories.storeHalls(sync).saveHall(hall);
+		TestRepositories.halls(sync).saveHall(hall);
 		UnitKey unit = UnitKey.hall(hall.getId());
 		Version first = sync.unitState(unit).head();
 		ObjectNode changed = first.payload().deepCopy();
@@ -237,7 +237,7 @@ class StoreHallRepositoryTest {
 		Files.writeString(appData.resolve("data/halls/" + hall.getId() + "/" + second.id() + ".json"), "kaputt");
 
 		SyncService restarted = started(appData);
-		StoreHallRepository repository = TestRepositories.storeHalls(restarted);
+		StoreHallRepository repository = TestRepositories.halls(restarted);
 		Hall loaded = repository.loadHalls().get(0);
 		Recorder recorder = new Recorder();
 		repository.addListener(recorder);
@@ -282,7 +282,7 @@ class StoreHallRepositoryTest {
 		SyncService sync = TestSyncServices.singleMode(appData, clock);
 		sync.startup(null, p -> {
 		});
-		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		StoreHallRepository repository = TestRepositories.halls(sync);
 		Hall hall = named("Stadthalle");
 		repository.saveHall(hall);
 		SavePoint first = repository.savePoints(hall.getId()).get(0);
@@ -301,7 +301,7 @@ class StoreHallRepositoryTest {
 		assertEquals(List.of("Hinweis"), restored.notes());
 		assertSame(restored.restored(), repository.findById(hall.getId()));
 
-		StoreHallRepository fresh = TestRepositories.storeHalls(started(appData));
+		StoreHallRepository fresh = TestRepositories.halls(started(appData));
 		assertEquals("Stadthalle", fresh.loadHalls().get(0).getName());
 		assertEquals(3, repository.savePoints(hall.getId()).size());
 		assertEquals(List.of(new KnownEntity(hall.getId(), "Stadthalle", false)), fresh.knownHalls());
@@ -313,13 +313,13 @@ class StoreHallRepositoryTest {
 		SyncService sync = TestSyncServices.singleMode(appData, clock);
 		sync.startup(null, p -> {
 		});
-		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		StoreHallRepository repository = TestRepositories.halls(sync);
 		Hall hall = named("Stadthalle");
 		repository.saveHall(hall);
 		SavePoint first = repository.savePoints(hall.getId()).get(0);
 		clock.advance(10);
 		// eine Änderung, die nach dem Laden dieses Repositorys von anderer Seite dazukommt
-		StoreHallRepository other = TestRepositories.storeHalls(sync);
+		StoreHallRepository other = TestRepositories.halls(sync);
 		Hall outside = other.loadHalls().get(0);
 		outside.setName("Fremd");
 		other.saveHall(outside);
@@ -333,7 +333,7 @@ class StoreHallRepositoryTest {
 		assertEquals("Stadthalle", chain.get(2).payload().get("name").asText());
 		assertEquals(3, repository.savePoints(hall.getId()).size());
 		assertSame(restored.restored(), repository.findById(hall.getId()));
-		assertEquals("Stadthalle", TestRepositories.storeHalls(started(appData)).loadHalls().get(0).getName());
+		assertEquals("Stadthalle", TestRepositories.halls(started(appData)).loadHalls().get(0).getName());
 	}
 
 	@Test
@@ -342,7 +342,7 @@ class StoreHallRepositoryTest {
 		SyncService sync = TestSyncServices.singleMode(appData, clock);
 		sync.startup(null, p -> {
 		});
-		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		StoreHallRepository repository = TestRepositories.halls(sync);
 		Hall hall = named("Stadthalle");
 		repository.saveHall(hall);
 		SavePoint saved = repository.savePoints(hall.getId()).get(0);
@@ -357,7 +357,7 @@ class StoreHallRepositoryTest {
 		clock.advance(10);
 		repository.restoreHall(hall.getId(), saved, h -> List.of());
 
-		StoreHallRepository fresh = TestRepositories.storeHalls(started(appData));
+		StoreHallRepository fresh = TestRepositories.halls(started(appData));
 		assertEquals("Stadthalle", fresh.loadHalls().get(0).getName());
 		assertEquals(List.of(new KnownEntity(hall.getId(), "Stadthalle", false)), fresh.knownHalls());
 	}
@@ -368,12 +368,12 @@ class StoreHallRepositoryTest {
 		SyncService sync = TestSyncServices.singleMode(appData, clock);
 		sync.startup(null, p -> {
 		});
-		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		StoreHallRepository repository = TestRepositories.halls(sync);
 		Hall hall = named("Stadthalle");
 		repository.saveHall(hall);
 		clock.advance(10);
 		// die Halle wird von anderer Seite gelöscht, nachdem dieses Repository sie geladen hat
-		StoreHallRepository other = TestRepositories.storeHalls(sync);
+		StoreHallRepository other = TestRepositories.halls(sync);
 		other.deleteHall(other.loadHalls().get(0));
 		SavePoint deletion = other.savePoints(hall.getId()).get(0);
 		long before = filesIn(appData);
@@ -391,7 +391,7 @@ class StoreHallRepositoryTest {
 
 	@Test
 	void replaceCachedHallSwapsTheObjectWithoutWriting(@TempDir Path appData) throws IOException {
-		StoreHallRepository repository = TestRepositories.storeHalls(started(appData));
+		StoreHallRepository repository = TestRepositories.halls(started(appData));
 		Hall original = named("Vorher");
 		repository.saveHall(original);
 		long before = filesIn(appData);

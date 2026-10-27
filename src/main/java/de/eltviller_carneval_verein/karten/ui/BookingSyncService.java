@@ -8,7 +8,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 
 /**
@@ -24,7 +24,7 @@ public final class BookingSyncService {
 
 	/** Wie {@link #prepare(Event, Function, ChangeTracker)} mit den Hallen der App und dem Event-Tracker der App. */
 	public static void prepare(Event event) {
-		prepare(event, JsonHallRepository.getInstance()::findById, ChangeTracker.events());
+		prepare(event, StoreHallRepository.getInstance()::findById, ChangeTracker.events());
 	}
 
 	/**

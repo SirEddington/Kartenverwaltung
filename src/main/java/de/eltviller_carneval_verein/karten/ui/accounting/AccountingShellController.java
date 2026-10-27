@@ -13,7 +13,7 @@ import java.util.prefs.Preferences;
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
@@ -70,7 +70,7 @@ public class AccountingShellController {
 	private static final String PREF_KEY_LAST_EXPORT_FORMAT = "lastExportFormat";
 	private static final DateTimeFormatter FILE_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
-	private final JsonEventRepository repository = JsonEventRepository.getInstance();
+	private final StoreEventRepository repository = StoreEventRepository.getInstance();
 	private final Preferences prefs = Preferences.userNodeForPackage(AccountingShellController.class);
 
 	@FXML
