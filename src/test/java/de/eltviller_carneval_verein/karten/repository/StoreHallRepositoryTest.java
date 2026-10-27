@@ -10,6 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -245,6 +249,87 @@ class StoreHallRepositoryTest {
 		assertEquals(versionsBefore, restarted.history(unit).size());
 		assertTrue(repository.loadHalls().contains(loaded));
 		assertTrue(recorder.calls.isEmpty());
+	}
+
+	/** Uhr, die der Test von Hand stellt: Jeder Speicherstand bekommt so seinen eigenen Zeitpunkt. */
+	private static final class SteppedClock extends Clock {
+		private Instant now = Instant.parse("2026-10-27T10:00:00Z");
+
+		/** Stellt die Uhr {@code minutes} Minuten vor. */
+		void advance(int minutes) {
+			now = now.plusSeconds(60L * minutes);
+		}
+
+		@Override
+		public ZoneId getZone() {
+			return ZoneOffset.UTC;
+		}
+
+		@Override
+		public Clock withZone(ZoneId zone) {
+			return this;
+		}
+
+		@Override
+		public Instant instant() {
+			return now;
+		}
+	}
+
+	@Test
+	void restoreHallToEarlierVersion(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = TestSyncServices.singleMode(appData, clock);
+		sync.startup(null, p -> {
+		});
+		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		Hall hall = named("Stadthalle");
+		repository.saveHall(hall);
+		SavePoint first = repository.savePoints(hall.getId()).get(0);
+		clock.advance(10);
+		hall.setName("Festhalle");
+		repository.saveHall(hall);
+		assertEquals(2, repository.savePoints(hall.getId()).size());
+		long before = filesIn(appData);
+
+		Hall earlier = repository.hallAt(hall.getId(), first);
+
+		assertEquals("Stadthalle", earlier.getName());
+		assertEquals(before, filesIn(appData));
+		assertSame(hall, repository.findById(hall.getId()));
+		clock.advance(10);
+		repository.saveHall(earlier);
+
+		StoreHallRepository fresh = TestRepositories.storeHalls(started(appData));
+		assertEquals("Stadthalle", fresh.loadHalls().get(0).getName());
+		assertEquals(3, repository.savePoints(hall.getId()).size());
+		assertEquals(List.of(new KnownEntity(hall.getId(), "Stadthalle", false)), fresh.knownHalls());
+	}
+
+	@Test
+	void restoreBringsBackDeletedHallButNotToItsDeletionPoint(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = TestSyncServices.singleMode(appData, clock);
+		sync.startup(null, p -> {
+		});
+		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		Hall hall = named("Stadthalle");
+		repository.saveHall(hall);
+		SavePoint saved = repository.savePoints(hall.getId()).get(0);
+		clock.advance(10);
+		repository.deleteHall(hall);
+		SavePoint deletion = repository.savePoints(hall.getId()).get(0);
+
+		assertEquals(List.of(new KnownEntity(hall.getId(), "Stadthalle", true)), repository.knownHalls());
+		LockedUnitException refused = assertThrows(LockedUnitException.class,
+				() -> repository.hallAt(hall.getId(), deletion));
+		assertEquals("Zu diesem Speicherstand war die Halle gelöscht.", refused.getMessage());
+		clock.advance(10);
+		repository.saveHall(repository.hallAt(hall.getId(), saved));
+
+		StoreHallRepository fresh = TestRepositories.storeHalls(started(appData));
+		assertEquals("Stadthalle", fresh.loadHalls().get(0).getName());
+		assertEquals(List.of(new KnownEntity(hall.getId(), "Stadthalle", false)), fresh.knownHalls());
 	}
 
 	@Test

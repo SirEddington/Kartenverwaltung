@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.repository;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -63,6 +64,19 @@ final class UnitBaseline {
 		for (UnitKey unit : shownUnits) {
 			shown.computeIfAbsent(ownerOf(unit), k -> new HashSet<>()).add(unit);
 		}
+	}
+
+	/** Die Stände der Köpfe (Events bzw. Hallen) im Vergleichsstand, auch der gelöschten. */
+	List<UnitSnapshot> heads(UnitType headType) {
+		List<UnitSnapshot> heads = new ArrayList<>();
+		for (Map<UnitKey, UnitSnapshot> units : known.values()) {
+			for (UnitSnapshot snapshot : units.values()) {
+				if (snapshot.unit().type() == headType) {
+					heads.add(snapshot);
+				}
+			}
+		}
+		return heads;
 	}
 
 	/**

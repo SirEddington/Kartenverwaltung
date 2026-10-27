@@ -13,6 +13,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -57,6 +59,31 @@ class StoreEventRepositoryTest {
 		@Override
 		public void deleted(Event event) {
 			calls.add("deleted " + event.getName());
+		}
+	}
+
+	/** Uhr, die der Test von Hand stellt: Jeder Speicherstand bekommt so seinen eigenen Zeitpunkt. */
+	private static final class SteppedClock extends Clock {
+		private Instant now = Instant.parse("2026-10-27T10:00:00Z");
+
+		/** Stellt die Uhr {@code minutes} Minuten vor. */
+		void advance(int minutes) {
+			now = now.plusSeconds(60L * minutes);
+		}
+
+		@Override
+		public ZoneId getZone() {
+			return ZoneOffset.UTC;
+		}
+
+		@Override
+		public Clock withZone(ZoneId zone) {
+			return this;
+		}
+
+		@Override
+		public Instant instant() {
+			return now;
 		}
 	}
 
@@ -666,6 +693,195 @@ class StoreEventRepositoryTest {
 		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
 		assertEquals(1, again.getPresentations().size());
 		assertEquals(List.of(), bookingNames(again));
+	}
+
+	/** Der Speicherstand mit der angegebenen Zahl: 0 ist der neueste. */
+	private static SavePoint savePoint(StoreEventRepository repository, String eventId, int newestFirst)
+			throws IOException {
+		return repository.savePoints(eventId).get(newestFirst);
+	}
+
+	@Test
+	void restoreSetsBookingsBackAndDeletesLaterOnes(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		Presentation friday = event.getPresentations().get(0);
+		booking(friday, "seat-2", 2, "Meier");
+		bookingOf(event, 0, "Müller").setLastName("Schulz");
+		repository.saveEvent(event);
+
+		repository.saveEvent(repository.eventAt(event.getId(), s1));
+
+		Event restored = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		assertEquals(List.of("Müller"), bookingNames(restored));
+	}
+
+	@Test
+	void eventAtWritesNothingAndKeepsTheCache(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		bookingOf(event, 0, "Müller").setLastName("Schulz");
+		repository.saveEvent(event);
+		long before = filesIn(appData);
+
+		Event earlier = repository.eventAt(event.getId(), s1);
+
+		assertNotSame(event, earlier);
+		assertEquals(List.of("Müller"), bookingNames(earlier));
+		assertEquals(before, filesIn(appData));
+		assertSame(event, repository.loadEvents().get(0));
+		assertEquals(List.of("Schulz"), bookingNames(event));
+	}
+
+	@Test
+	void restoreIsItselfASavePoint(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		booking(event.getPresentations().get(0), "seat-2", 2, "Meier");
+		repository.saveEvent(event);
+		SavePoint s2 = savePoint(repository, event.getId(), 0);
+		assertEquals(2, repository.savePoints(event.getId()).size());
+		clock.advance(10);
+
+		repository.saveEvent(repository.eventAt(event.getId(), s1));
+
+		assertEquals(3, repository.savePoints(event.getId()).size());
+		assertEquals(List.of("Müller"), bookingNames(TestRepositories.storeEvents(started(appData)).loadEvents().get(0)));
+		clock.advance(10);
+
+		// Zurück zum Stand vor dem Wiederherstellen
+		repository.saveEvent(repository.eventAt(event.getId(), s2));
+
+		assertEquals(4, repository.savePoints(event.getId()).size());
+		assertEquals(List.of("Müller", "Meier"),
+				bookingNames(TestRepositories.storeEvents(started(appData)).loadEvents().get(0)));
+	}
+
+	@Test
+	void restoreBringsBackDeletedPresentationWithBookings(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		Event withoutPresentation = new Event(event.getId());
+		withoutPresentation.setName(event.getName());
+		repository.saveEvent(withoutPresentation);
+		assertTrue(TestRepositories.storeEvents(started(appData)).loadEvents().get(0).getPresentations().isEmpty());
+		clock.advance(10);
+
+		repository.saveEvent(repository.eventAt(event.getId(), s1));
+
+		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		assertEquals(1, again.getPresentations().size());
+		assertEquals(List.of("Müller"), bookingNames(again));
+	}
+
+	@Test
+	void restoreBringsBackDeletedEvent(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		repository.deleteEvent(event);
+
+		assertEquals(List.of(new KnownEntity(event.getId(), "Prunksitzung", true)), repository.knownEvents());
+		StoreEventRepository fresh = TestRepositories.storeEvents(started(appData));
+		assertTrue(fresh.loadEvents().isEmpty());
+		assertEquals(List.of(new KnownEntity(event.getId(), "Prunksitzung", true)), fresh.knownEvents());
+
+		fresh.saveEvent(fresh.eventAt(event.getId(), s1));
+
+		StoreEventRepository again = TestRepositories.storeEvents(started(appData));
+		assertEquals(List.of(new KnownEntity(event.getId(), "Prunksitzung", false)), again.knownEvents());
+		assertEquals(List.of("Müller"), bookingNames(again.loadEvents().get(0)));
+	}
+
+	@Test
+	void restoreOfDeletedEventDeletesUnitsCreatedAfterT(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		booking(event.getPresentations().get(0), "seat-2", 2, "Meier");
+		repository.saveEvent(event);
+		clock.advance(10);
+		repository.deleteEvent(event);
+
+		StoreEventRepository fresh = TestRepositories.storeEvents(started(appData));
+		fresh.saveEvent(fresh.eventAt(event.getId(), s1));
+
+		Event again = TestRepositories.storeEvents(started(appData)).loadEvents().get(0);
+		assertEquals(List.of("Müller"), bookingNames(again));
+	}
+
+	@Test
+	void restoreToDeletionPointIsRefused(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		clock.advance(10);
+		repository.deleteEvent(event);
+		SavePoint deletion = savePoint(repository, event.getId(), 0);
+		long before = filesIn(appData);
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class,
+				() -> repository.eventAt(event.getId(), deletion));
+
+		assertEquals("Zu diesem Speicherstand war das Event gelöscht.", refused.getMessage());
+		assertEquals(before, filesIn(appData));
+	}
+
+	@Test
+	void eventAtOfLockedUnitIsRefused(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		StoreEventRepository repository = TestRepositories.storeEvents(sync);
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		UnitKey unit = UnitKey.event(event.getId());
+		Version first = sync.unitState(unit).head();
+		ObjectNode changed = first.payload().deepCopy();
+		changed.put("description", "geändert");
+		Version second = sync.append("test", List.of(new Change(unit, List.of(first.id()), changed, false))).get(0);
+		Files.writeString(appData.resolve("data/events/" + event.getId() + "/" + second.id() + ".json"), "kaputt");
+
+		StoreEventRepository restarted = TestRepositories.storeEvents(started(appData));
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class,
+				() -> restarted.eventAt(event.getId(), s1));
+		assertTrue(refused.getMessage().contains(unit.relativePath()));
+	}
+
+	@Test
+	void knownEventsAreSortedByNameIgnoringCase(@TempDir Path appData) {
+		StoreEventRepository repository = TestRepositories.storeEvents(started(appData));
+		Event beta = named("beta");
+		Event alpha = named("Alpha");
+		Event gamma = named("Gamma");
+		repository.saveEvents(List.of(beta, alpha, gamma));
+		repository.deleteEvent(gamma);
+
+		assertEquals(List.of(new KnownEntity(alpha.getId(), "Alpha", false), new KnownEntity(beta.getId(), "beta", false),
+				new KnownEntity(gamma.getId(), "Gamma", true)), repository.knownEvents());
 	}
 
 	@Test

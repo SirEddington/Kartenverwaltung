@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.repository;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -8,6 +9,7 @@ import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 
 /**
@@ -132,6 +134,45 @@ public class StoreEventRepository implements EventRepository {
 		}
 
 		listeners.notifySaved(event);
+	}
+
+	/**
+	 * Alle Events, die dieses Repository kennt, auch die gelöschten (zum Wiederherstellen), nach Name sortiert. Ein
+	 * gelöschtes Event trägt den Namen aus seiner letzten nicht gelöschten Version, sonst seine ID.
+	 */
+	public List<KnownEntity> knownEvents() {
+		ensureLoaded();
+		return RestorePlanner.knownEntities(sync, baseline.heads(UnitType.EVENT));
+	}
+
+	/** Die Speicherstände des Events (Kopf, Vorstellungen, Buchungen), neueste zuerst. */
+	public List<SavePoint> savePoints(String eventId) throws IOException {
+		return RestorePlanner.savePoints(statesOf(eventId));
+	}
+
+	/**
+	 * Das Event, wie es zum Speicherstand war, als neues Objekt; auch für ein gelöschtes Event. Gespeichert wird nichts
+	 * und der Cache bleibt unberührt: Wiederherstellen ist {@code saveEvent(eventAt(..))}.
+	 *
+	 * @throws LockedUnitException wenn eine Einheit des Events gesperrt ist oder noch auf eine Datei wartet, oder wenn
+	 *                             das Event zu diesem Speicherstand gelöscht war
+	 */
+	public Event eventAt(String eventId, SavePoint point) throws IOException {
+		List<UnitState> states = statesOf(eventId);
+		RestorePlanner.requireRestorable(states);
+		List<Event> events = UnitMapper.assembleEvents(RestorePlanner.targetsAt(states, point.at()).values()).items();
+		if (events.isEmpty()) {
+			throw new LockedUnitException("Zu diesem Speicherstand war das Event gelöscht.");
+		}
+		return events.get(0);
+	}
+
+	private List<UnitState> statesOf(String eventId) throws IOException {
+		List<UnitState> states = new ArrayList<>();
+		for (UnitKey unit : sync.eventUnits(eventId)) {
+			states.add(sync.unitState(unit));
+		}
+		return states;
 	}
 
 	/** Meldet einen Listener an, der nach jedem Speichern und Löschen eines Events benachrichtigt wird. */

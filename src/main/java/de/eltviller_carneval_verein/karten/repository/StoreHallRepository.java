@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.repository;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -8,6 +9,7 @@ import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 
 /**
@@ -141,6 +143,37 @@ public class StoreHallRepository implements HallRepository {
 		}
 
 		listeners.notifySaved(hall);
+	}
+
+	/**
+	 * Alle Hallen, die dieses Repository kennt, auch die gelöschten (zum Wiederherstellen), nach Name sortiert. Eine
+	 * gelöschte Halle trägt den Namen aus ihrer letzten nicht gelöschten Version, sonst ihre ID.
+	 */
+	public List<KnownEntity> knownHalls() {
+		ensureLoaded();
+		return RestorePlanner.knownEntities(sync, baseline.heads(UnitType.HALL));
+	}
+
+	/** Die Speicherstände der Halle, neueste zuerst. */
+	public List<SavePoint> savePoints(String hallId) throws IOException {
+		return RestorePlanner.savePoints(List.of(sync.unitState(UnitKey.hall(hallId))));
+	}
+
+	/**
+	 * Die Halle, wie sie zum Speicherstand war, als neues Objekt; auch für eine gelöschte Halle. Gespeichert wird nichts
+	 * und der Cache bleibt unberührt: Wiederherstellen ist {@code saveHall(hallAt(..))}.
+	 *
+	 * @throws LockedUnitException wenn die Halle gesperrt ist oder noch auf eine Datei wartet, oder wenn sie zu diesem
+	 *                             Speicherstand gelöscht war
+	 */
+	public Hall hallAt(String hallId, SavePoint point) throws IOException {
+		List<UnitState> states = List.of(sync.unitState(UnitKey.hall(hallId)));
+		RestorePlanner.requireRestorable(states);
+		List<Hall> halls = UnitMapper.assembleHalls(RestorePlanner.targetsAt(states, point.at()).values()).items();
+		if (halls.isEmpty()) {
+			throw new LockedUnitException("Zu diesem Speicherstand war die Halle gelöscht.");
+		}
+		return halls.get(0);
 	}
 
 	/** Meldet einen Listener an, der nach jedem Speichern und Löschen einer Halle benachrichtigt wird. */
