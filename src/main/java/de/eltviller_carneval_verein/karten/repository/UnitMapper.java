@@ -24,6 +24,7 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
@@ -137,6 +138,88 @@ final class UnitMapper {
 	/** Zerlegt die Halle: Sie ist eine einzige Einheit. */
 	static UnitPayload decompose(Hall hall) {
 		return new UnitPayload(UnitKey.hall(hall.getId()), normalize(hall));
+	}
+
+	/**
+	 * Die Änderungen, die aus dem Bestand {@code baseline} den Stand {@code units} machen. Das Ergebnis folgt zuerst
+	 * der Reihenfolge von {@code units} (Eltern vor Kindern), danach kommen die Löschungen nach Schlüssel
+	 * ({@code relativePath}).
+	 * <ul>
+	 * <li>Neue Einheit (nicht im Bestand oder ohne Version): erste Version, ohne Vorgänger.</li>
+	 * <li>Geänderte oder wieder aufgetauchte (gelöschte) Einheit: neue Version auf der aktuellen Version.</li>
+	 * <li>Einheit nur im Bestand: Löschung, aber nur wenn ihre Eltern-Einheit (Vorstellung: der Kopf, Buchung: ihre
+	 * Vorstellung) in {@code units} steht. Sonst bleibt sie unberührt, denn gelöscht wird nur am Kopf. Ein Event-Kopf
+	 * oder eine Halle hat keine Eltern-Einheit und wird nie hier gelöscht, nur mit {@link #deletion}.</li>
+	 * </ul>
+	 * Die Daten von {@code baseline} und {@code units} bleiben unverändert.
+	 *
+	 * @param baseline alle bekannten Einheiten des Events bzw. der Halle, sichtbare wie unsichtbare
+	 * @throws LockedUnitException wenn eine betroffene Einheit gesperrt ist oder noch auf eine Datei wartet; dann
+	 *                             wird nichts gespeichert
+	 */
+	static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, List<UnitPayload> units) {
+		Set<UnitKey> present = new HashSet<>();
+		for (UnitPayload part : units) {
+			present.add(part.unit());
+		}
+
+		List<Change> changes = new ArrayList<>();
+		for (UnitPayload part : units) {
+			UnitSnapshot known = baseline.get(part.unit());
+			if (known == null || known.version() == null) {
+				changes.add(new Change(part.unit(), List.of(), part.payload(), false));
+			} else if (known.deleted() || !part.payload().equals(known.payload())) {
+				changes.add(new Change(part.unit(), List.of(known.version()), part.payload(), false));
+			}
+		}
+
+		List<UnitSnapshot> vanished = new ArrayList<>();
+		for (UnitSnapshot known : baseline.values()) {
+			UnitKey parent = parentOf(known.unit());
+			if (known.version() != null && !known.deleted() && !present.contains(known.unit()) && parent != null
+					&& present.contains(parent)) {
+				vanished.add(known);
+			}
+		}
+		vanished.sort(Comparator.comparing(s -> s.unit().relativePath()));
+		for (UnitSnapshot known : vanished) {
+			changes.add(deletion(known));
+		}
+
+		for (Change change : changes) {
+			UnitSnapshot known = baseline.get(change.unit());
+			if (known != null) {
+				requireWritable(known);
+			}
+		}
+		return changes;
+	}
+
+	/** Die Löschung einer Einheit auf ihrer aktuellen Version (für das Löschen eines ganzen Events oder einer Halle). */
+	static Change deletion(UnitSnapshot baseline) {
+		return new Change(baseline.unit(), List.of(baseline.version()), null, true);
+	}
+
+	/** Die Eltern-Einheit nach dem Schlüssel; {@code null} für Event-Kopf und Halle. */
+	private static UnitKey parentOf(UnitKey unit) {
+		return switch (unit.type()) {
+		case PRESENTATION -> UnitKey.event(unit.eventId());
+		case BOOKING -> UnitKey.presentation(unit.eventId(), unit.presentationId());
+		case EVENT, HALL -> null;
+		};
+	}
+
+	/** Eine gesperrte oder noch wartende Einheit lässt sich nicht ändern. */
+	private static void requireWritable(UnitSnapshot known) {
+		String path = known.unit().relativePath();
+		switch (known.status()) {
+		case LOCKED_DAMAGED -> throw new LockedUnitException(StoreMessages.damaged(path));
+		case LOCKED_FORMAT -> throw new LockedUnitException(StoreMessages.newerFormat(path));
+		case WAITING -> throw new LockedUnitException(
+				path + " wartet noch auf eine Datei aus dem gemeinsamen Ordner. Es wurde nichts gespeichert.");
+		case OK -> {
+		}
+		}
 	}
 
 	/** Der Schlüssel einer Buchung: auf dem Sitz, wenn sie einen hat und nicht "ohne Platz" ist, sonst über ihre Kennung. */
