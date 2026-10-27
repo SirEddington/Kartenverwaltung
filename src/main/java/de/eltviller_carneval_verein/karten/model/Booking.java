@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.model;
 
 import java.time.LocalDate;
 import java.util.Comparator;
+import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -29,6 +30,12 @@ public class Booking {
 			.thenComparingInt(Booking::getTableNumber).thenComparingInt(Booking::getSeatNumber);
 
 	private Presentation parentPresentation; // gesetzt von Presentation.setBookings/addBooking, wird nicht gespeichert
+
+	/**
+	 * Die Kennung der Buchung. Sie benennt eine Buchung ohne Platz im Versionsspeicher ({@code bookings/_<id>}); bei
+	 * einer Buchung auf einem Sitz bestimmt der Sitz den Ort. Ältere Dateien ohne das Feld laden mit einer neuen Kennung.
+	 */
+	private String id = UUID.randomUUID().toString(); // get,set
 
 	private String seatId; // get,set
 
@@ -75,6 +82,15 @@ public class Booking {
 	@JsonIgnore
 	public void setParent(Presentation parentPresentation) {
 		this.parentPresentation = parentPresentation;
+	}
+
+	public String getId() {
+		return id;
+	}
+
+	/** Ein fehlender Wert ({@code "id": null} in einer Datei) ergibt eine neue Kennung. */
+	public void setId(String id) {
+		this.id = id != null ? id : UUID.randomUUID().toString();
 	}
 
 	public String getSeatId() {
@@ -293,6 +309,7 @@ public class Booking {
 	/** Kopie aller gespeicherten Felder (auch "Ohne Platz"); ohne Vorstellung als Elternteil. */
 	public Booking copy() {
 		Booking copy = new Booking();
+		copy.id = id;
 		copy.seatId = seatId;
 		copy.rowLabel = rowLabel;
 		copy.tableNumber = tableNumber;

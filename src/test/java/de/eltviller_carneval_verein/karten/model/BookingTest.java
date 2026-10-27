@@ -363,4 +363,23 @@ class BookingTest {
 		copy.setLastName("Meier");
 		assertEquals("Müller", booking.getLastName());
 	}
+
+	@Test
+	void copy_behaelt_die_Kennung() {
+		Booking booking = new Booking();
+		booking.setId("buchung-1");
+
+		assertEquals("buchung-1", booking.copy().getId());
+	}
+
+	@Test
+	void ohne_Kennung_in_der_Datei_bekommt_die_Buchung_eine_neue() throws IOException {
+		ObjectMapper mapper = JsonMapperFactory.create();
+
+		Booking withoutId = mapper.readValue("{\"lastName\":\"Müller\"}", Booking.class);
+		Booking nullId = mapper.readValue("{\"id\":null}", Booking.class);
+
+		assertTrue(withoutId.getId() != null && !withoutId.getId().isBlank());
+		assertTrue(nullId.getId() != null && !nullId.getId().isBlank());
+	}
 }
