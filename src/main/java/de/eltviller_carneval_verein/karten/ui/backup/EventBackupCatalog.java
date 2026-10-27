@@ -2,16 +2,12 @@ package de.eltviller_carneval_verein.karten.ui.backup;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Consumer;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.BackupStore;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
-import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 
 /**
  * Wiederherstellen für Events. Vorstellungen, deren Halle es nicht mehr gibt, verlieren die Zuordnung
@@ -23,28 +19,18 @@ public final class EventBackupCatalog extends AbstractBackupCatalog<Event> {
 	private final Predicate<String> hallExists;
 
 	/**
-	 * @param hallExists sagt, ob es die Halle mit dieser ID noch gibt
+	 * @param events das Event-Repository, aus dem wiederhergestellt wird
+	 * @param halls  das Hallen-Repository, an dem sich prüft, ob es die Halle einer Vorstellung noch gibt
 	 */
-	public EventBackupCatalog(BackupStore store, Supplier<List<Event>> currentEvents, Predicate<String> hallExists, Consumer<Event> save, Consumer<Event> replaceInCache) {
-		super(store, Event.class, "Event", currentEvents, save, replaceInCache);
-		this.hallExists = hallExists;
+	public EventBackupCatalog(StoreEventRepository events, StoreHallRepository halls) {
+		super("Event", () -> events.knownEvents().stream().map(AbstractBackupCatalog::entry).toList(), unchecked(events::savePoints), events::restoreEvent,
+				Event::getName);
+		this.hallExists = hallId -> halls.findById(hallId) != null;
 	}
 
-	/** Der Katalog der App: echte Repositories, Speichern über den {@link EventSaver}. */
+	/** Der Katalog der App: die echten Repositories. */
 	public static EventBackupCatalog create() {
-		JsonEventRepository events = JsonEventRepository.getInstance();
-		JsonHallRepository halls = JsonHallRepository.getInstance();
-		return new EventBackupCatalog(events.backups(), events::loadEvents, hallId -> halls.findById(hallId) != null, EventSaver::saveStructureChange, events::replaceCachedEvent);
-	}
-
-	@Override
-	String idOf(Event event) {
-		return event.getId();
-	}
-
-	@Override
-	String nameOf(Event event) {
-		return event.getName();
+		return new EventBackupCatalog(StoreEventRepository.getInstance(), StoreHallRepository.getInstance());
 	}
 
 	@Override
@@ -61,5 +47,10 @@ public final class EventBackupCatalog extends AbstractBackupCatalog<Event> {
 			}
 		}
 		return notes;
+	}
+
+	@Override
+	public String restoreWarning() {
+		return "Spätere Änderungen und Verkäufe, auch die anderer Rechner, werden mit zurückgesetzt.";
 	}
 }

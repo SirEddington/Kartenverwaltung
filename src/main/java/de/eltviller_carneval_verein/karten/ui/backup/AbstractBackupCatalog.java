@@ -1,63 +1,90 @@
 package de.eltviller_carneval_verein.karten.ui.backup;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import de.eltviller_carneval_verein.karten.repository.BackupStore;
-import de.eltviller_carneval_verein.karten.repository.BackupStore.Backup;
-import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.repository.KnownEntity;
+import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
+import de.eltviller_carneval_verein.karten.repository.Restored;
+import de.eltviller_carneval_verein.karten.repository.SavePoint;
 
 /**
- * Das Gemeinsame von {@link EventBackupCatalog} und {@link HallBackupCatalog}: Einträge aus den Backup-Ordnern
- * und dem aktuellen Bestand bilden, eine Sicherung lesen, speichern und erst danach den Cache austauschen.
+ * Das Gemeinsame von {@link EventBackupCatalog} und {@link HallBackupCatalog}: Einträge und Speicherstände aus dem
+ * Repository anzeigen und einen Speicherstand über das Repository wiederherstellen (das Repository frischt auf,
+ * passt an, speichert und tauscht den Cache in einem Ablauf).
  *
  * @param <T> {@code Event} oder {@code Hall}
  */
 abstract class AbstractBackupCatalog<T> implements BackupCatalog {
 
 	private static final Logger LOG = Logger.getLogger(AbstractBackupCatalog.class.getName());
-	/** Das Anzeigeformat eines Backup-Zeitpunkts, für Liste, Rückfrage und Bestätigung dasselbe. */
-	static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
-	/** Der Mapper ist nach der Konfiguration threadsicher; ein neuer je Dialog würde seine Deserializer-Caches verlieren. */
-	private static final ObjectMapper MAPPER = JsonMapperFactory.create();
+	/** Das Anzeigeformat eines Zeitpunkts in Rückfrage und Bestätigung. */
+	private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
 
-	private final BackupStore store;
-	private final Class<T> type;
-	private final String label;
-	private final Supplier<List<T>> currentEntities;
-	private final Consumer<T> save;
-	private final Consumer<T> replaceInCache;
-
-	/**
-	 * @param save           speichert die wiederhergestellte Entität (wirft bei Fehlern)
-	 * @param replaceInCache tauscht das Objekt im Repository-Cache aus; wird erst nach erfolgreichem Speichern aufgerufen
-	 */
-	AbstractBackupCatalog(BackupStore store, Class<T> type, String label, Supplier<List<T>> currentEntities, Consumer<T> save, Consumer<T> replaceInCache) {
-		this.store = store;
-		this.type = type;
-		this.label = label;
-		this.currentEntities = currentEntities;
-		this.save = save;
-		this.replaceInCache = replaceInCache;
+	/** Stellt einen Speicherstand über das Repository wieder her: {@code StoreEventRepository::restoreEvent} bzw. {@code StoreHallRepository::restoreHall}. */
+	@FunctionalInterface
+	interface Restorer<T> {
+		Restored<T> restore(String id, SavePoint point, Function<T, List<String>> adjust) throws IOException;
 	}
 
-	abstract String idOf(T entity);
+	/** Liest die Speicherstände einer Entität; wirft {@link IOException}, wenn der Versionsspeicher nicht lesbar ist. */
+	@FunctionalInterface
+	interface SavePointLoader {
+		List<SavePoint> load(String id) throws IOException;
+	}
 
-	abstract String nameOf(T entity);
+	private final String label;
+	private final Supplier<List<Entry>> entries;
+	private final Function<String, List<SavePoint>> savePoints;
+	private final Restorer<T> restorer;
+	private final Function<T, String> nameOf;
 
 	/**
-	 * Passt die gelesene Entität vor dem Speichern an (z. B. nicht mehr vorhandene Verweise entfernen).
+	 * @param entries    liefert die Einträge, alphabetisch nach Name (auch gelöschte)
+	 * @param savePoints liefert die Speicherstände einer Entität, neueste zuerst (wirft {@link UncheckedIOException})
+	 * @param restorer   stellt einen Speicherstand wieder her
+	 * @param nameOf     der Name einer Entität für die Bestätigung
+	 */
+	AbstractBackupCatalog(String label, Supplier<List<Entry>> entries, Function<String, List<SavePoint>> savePoints, Restorer<T> restorer,
+			Function<T, String> nameOf) {
+		this.label = label;
+		this.entries = entries;
+		this.savePoints = savePoints;
+		this.restorer = restorer;
+		this.nameOf = nameOf;
+	}
+
+	/** Macht aus einem Leser, der {@link IOException} wirft, eine Funktion, die sie als {@link UncheckedIOException} weitergibt. */
+	static Function<String, List<SavePoint>> unchecked(SavePointLoader loader) {
+		return id -> {
+			try {
+				return loader.load(id);
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
+		};
+	}
+
+	/** Der Anzeigeeintrag zu einer Entität, die das Repository kennt. */
+	static Entry entry(KnownEntity known) {
+		return new Entry(known.id(), known.name(), known.deleted());
+	}
+
+	/** Ein Zeitpunkt für die Anzeige in Rückfrage und Bestätigung. */
+	static String timeText(Instant at, ZoneId zone) {
+		return at.atZone(zone).format(TIME_FORMAT);
+	}
+
+	/**
+	 * Passt die wiederhergestellte Entität vor dem Speichern an (z. B. nicht mehr vorhandene Verweise entfernen).
 	 *
 	 * @return Hinweise für den Nutzer, leer wenn nichts geändert wurde
 	 */
@@ -72,65 +99,25 @@ abstract class AbstractBackupCatalog<T> implements BackupCatalog {
 
 	@Override
 	public List<Entry> entries() {
-		Map<String, T> currentById = new HashMap<>();
-		for (T entity : currentEntities.get()) {
-			currentById.put(idOf(entity), entity);
-		}
-		List<Entry> entries = new ArrayList<>();
-		for (String id : store.idsWithBackups()) {
-			T existing = currentById.get(id);
-			String name = existing != null ? nameOf(existing) : nameFromNewestCopy(id);
-			entries.add(new Entry(id, name == null || name.isBlank() ? id : name, existing == null));
-		}
-		entries.sort(Comparator.comparing(entry -> entry.name().toLowerCase()));
-		return entries;
-	}
-
-	private String nameFromNewestCopy(String id) {
-		List<Backup> backups = store.list(id);
-		if (backups.isEmpty()) {
-			return null;
-		}
-		try {
-			return nameOf(MAPPER.readValue(store.read(backups.get(0)), type));
-		} catch (IOException | RuntimeException e) {
-			LOG.log(Level.WARNING, "Name aus der Sicherung " + backups.get(0).file().getFileName() + " nicht lesbar", e);
-			return null;
-		}
+		return entries.get();
 	}
 
 	@Override
-	public List<Backup> versions(String id) {
-		return store.list(id);
+	public List<SavePoint> versions(String id) {
+		return savePoints.apply(id);
 	}
 
 	@Override
-	public RestoreResult restore(Entry entry, Backup backup) {
-		String fileName = backup.file().getFileName().toString();
-		T restored;
+	public RestoreResult restore(Entry entry, SavePoint point) {
 		try {
-			restored = MAPPER.readValue(store.read(backup), type);
+			Restored<T> restored = restorer.restore(entry.id(), point, this::adjustForRestore);
+			return RestoreResult.success(label + " \"" + nameOf.apply(restored.restored()) + "\" auf den Stand vom "
+					+ timeText(point.at(), ZoneId.systemDefault()) + " zurückgesetzt.", restored.notes());
+		} catch (LockedUnitException e) {
+			return RestoreResult.failure(e.getMessage());
 		} catch (IOException | RuntimeException e) {
-			LOG.log(Level.WARNING, "Sicherung nicht lesbar: " + backup.file(), e);
-			return RestoreResult.failure("Die Sicherung " + fileName + " konnte nicht gelesen werden: " + e.getMessage());
+			LOG.log(Level.WARNING, "Wiederherstellen von " + label + " " + entry.id() + " aus " + point.saveId() + " gescheitert", e);
+			return RestoreResult.failure("Der Speicherstand konnte nicht wiederhergestellt werden: " + e.getMessage());
 		}
-		if (restored == null || !entry.id().equals(idOf(restored))) {
-			return RestoreResult.failure("Die Sicherung " + fileName + " gehört nicht zu \"" + entry.name() + "\".");
-		}
-
-		// Das Wiederherstellen ersetzt den aktuellen Stand: Ist er nicht gesichert (und lässt sich nicht sichern), bleibt alles wie es ist
-		if (!store.ensureBackedUp(entry.id())) {
-			return RestoreResult.failure("Der aktuelle Stand von \"" + entry.name() + "\" konnte nicht gesichert werden, deshalb wurde nichts überschrieben.");
-		}
-
-		List<String> notes = adjustForRestore(restored);
-		try {
-			save.accept(restored);
-		} catch (RuntimeException e) {
-			LOG.log(Level.SEVERE, "Wiederherstellen aus " + backup.file() + " konnte nicht gespeichert werden", e);
-			return RestoreResult.failure("Die Sicherung " + fileName + " konnte nicht gespeichert werden: " + e.getMessage());
-		}
-		replaceInCache.accept(restored);
-		return RestoreResult.success(label + " \"" + nameOf(restored) + "\" auf den Stand vom " + backup.timestamp().format(TIME_FORMAT) + " zurückgesetzt.", notes);
 	}
 }

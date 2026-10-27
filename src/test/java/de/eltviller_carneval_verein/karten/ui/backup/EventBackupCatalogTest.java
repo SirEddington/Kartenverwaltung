@@ -3,60 +3,60 @@ package de.eltviller_carneval_verein.karten.ui.backup;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.time.Clock;
-import java.time.Instant;
-import java.time.LocalDateTime;
+import java.nio.file.Path;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.BackupStore;
-import de.eltviller_carneval_verein.karten.repository.BackupStore.Backup;
-import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.repository.SavePoint;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.repository.TestRepositories;
+import de.eltviller_carneval_verein.karten.store.Change;
+import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.TestSyncServices;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog.Entry;
 
 class EventBackupCatalogTest {
 
 	@TempDir
-	File dataDir;
+	Path appData;
 
-	private final ObjectMapper mapper = JsonMapperFactory.create();
-	private BackupStore store;
-	private final List<Event> current = new ArrayList<>();
-	private final List<Event> saved = new ArrayList<>();
-	private final List<Event> replaced = new ArrayList<>();
-	private final Set<String> existingHalls = Set.of("hallA");
-	private RuntimeException saveFailure;
+	private final SteppedClock clock = new SteppedClock();
+	private SyncService sync;
+	private StoreEventRepository events;
+	private StoreHallRepository halls;
 
 	@BeforeEach
 	void setUp() {
-		store = new BackupStore(dataDir);
+		start();
+	}
+
+	/** Startet den Dienst neu auf demselben Ordner, wie nach einem Neustart der App. */
+	private void start() {
+		sync = TestSyncServices.singleMode(appData, clock);
+		sync.startup(null, p -> {
+		});
+		events = TestRepositories.storeEvents(sync);
+		halls = TestRepositories.storeHalls(sync);
 	}
 
 	private EventBackupCatalog catalog() {
-		return new EventBackupCatalog(store, () -> current, existingHalls::contains, event -> {
-			if (saveFailure != null) {
-				throw saveFailure;
-			}
-			saved.add(event);
-		}, replaced::add);
+		return new EventBackupCatalog(events, halls);
 	}
 
 	private static Event event(String name) {
@@ -65,202 +65,159 @@ class EventBackupCatalogTest {
 		return event;
 	}
 
-	/** Schreibt die Datei des Events und sichert sie, wie es das Repository vor dem Überschreiben täte. */
-	private Backup makeBackup(Event event) throws IOException {
-		File file = new File(dataDir, event.getId() + ".json");
-		mapper.writeValue(file, event);
-		store.backupBeforeOverwrite(event.getId(), file);
-		return store.list(event.getId()).get(0);
-	}
-
-	private Backup putRawBackup(String id, String content) throws IOException {
-		File dir = new File(new File(dataDir, "backups"), id);
-		dir.mkdirs();
-		Files.writeString(new File(dir, "2026-01-01_00-00-00-000.json").toPath(), content, StandardCharsets.UTF_8);
-		return store.list(id).get(0);
+	private SavePoint newestSavePoint(Event event) throws IOException {
+		return events.savePoints(event.getId()).get(0);
 	}
 
 	@Test
-	void entries_listsExistingAndDeletedEvents_sortedByName() throws IOException {
-		Event existing = event("Alpha");
-		makeBackup(existing);
-		existing.setName("Alpha neu");
-		current.add(existing);
-		Event deleted = event("Beta");
-		makeBackup(deleted);
+	void entriesIncludeDeletedEvents() {
+		Event beta = event("beta");
+		Event alpha = event("Alpha");
+		Event gone = event("Gamma");
+		events.saveEvents(List.of(beta, alpha, gone));
+		events.deleteEvent(gone);
 
-		List<Entry> entries = catalog().entries();
-
-		assertEquals(List.of(new Entry(existing.getId(), "Alpha neu", false), new Entry(deleted.getId(), "Beta", true)), entries);
+		assertEquals(List.of(new Entry(alpha.getId(), "Alpha", false), new Entry(beta.getId(), "beta", false), new Entry(gone.getId(), "Gamma", true)),
+				catalog().entries());
+		assertEquals("Event", catalog().entityLabel());
 	}
 
 	@Test
-	void entries_unreadableNewestCopy_usesIdAsName() throws IOException {
-		putRawBackup("xyz", "kein json");
-
-		assertEquals(List.of(new Entry("xyz", "xyz", true)), catalog().entries());
-	}
-
-	@Test
-	void versions_areTheStoreCopiesNewestFirst() throws IOException {
+	void versionsAreTheSavePointsNewestFirst() throws IOException {
 		Event event = event("Alpha");
-		makeBackup(event);
+		events.saveEvent(event);
+		clock.advance(10);
 		event.setName("Alpha 2");
-		Backup newest = makeBackup(event);
+		events.saveEvent(event);
 
-		List<Backup> versions = catalog().versions(event.getId());
+		List<SavePoint> versions = catalog().versions(event.getId());
 
 		assertEquals(2, versions.size());
-		assertEquals(newest, versions.get(0));
+		assertEquals(events.savePoints(event.getId()), versions);
+		assertTrue(versions.get(0).at().isAfter(versions.get(1).at()));
 	}
 
 	@Test
-	void restore_existingEvent_savesAndReplacesCache() throws IOException {
+	void restoreResetsEventAndReportsNotes() throws IOException {
+		Hall hall = new Hall();
+		hall.setName("Stadthalle");
+		halls.saveHall(hall);
 		Event event = event("Alpha");
-		Backup backup = makeBackup(event);
-		current.add(event);
+		Presentation prunk = event.addPresentation("Prunksitzung");
+		Presentation damen = event.addPresentation("Damensitzung");
+		prunk.setHallId(hall.getId());
+		damen.setHallId(hall.getId());
+		events.saveEvent(event);
+		SavePoint withHall = newestSavePoint(event);
+		clock.advance(10);
+		halls.deleteHall(hall);
 		event.setName("Kaputt");
+		events.saveEvent(event);
+		clock.advance(10);
 
-		RestoreResult result = catalog().restore(new Entry(event.getId(), "Kaputt", false), backup);
+		RestoreResult result = catalog().restore(new Entry(event.getId(), "Kaputt", false), withHall);
 
-		assertTrue(result.success());
-		assertTrue(result.message().contains("Alpha"));
-		assertTrue(result.notes().isEmpty());
-		assertEquals(1, saved.size());
-		assertEquals(event.getId(), saved.get(0).getId());
-		assertEquals("Alpha", saved.get(0).getName());
-		assertEquals(1, replaced.size());
-		assertSame(saved.get(0), replaced.get(0));
-	}
-
-	@Test
-	void restore_deletedEvent_isSavedAgain() throws IOException {
-		Event event = event("Beta");
-		Backup backup = makeBackup(event);
-
-		RestoreResult result = catalog().restore(new Entry(event.getId(), "Beta", true), backup);
-
-		assertTrue(result.success());
-		assertEquals("Beta", saved.get(0).getName());
-		assertEquals(1, replaced.size());
-	}
-
-	@Test
-	void restore_removesMissingHall_withNote() throws IOException {
-		Event event = event("Alpha");
-		Presentation kept = event.addPresentation("Prunksitzung");
-		kept.setHallId("hallA");
-		Presentation orphaned = event.addPresentation("Damensitzung");
-		orphaned.setHallId("hallB");
-		Backup backup = makeBackup(event);
-
-		RestoreResult result = catalog().restore(new Entry(event.getId(), "Alpha", true), backup);
-
-		assertTrue(result.success());
-		Event restored = saved.get(0);
-		assertEquals("hallA", restored.getPresentations().get(0).getHallId());
+		assertTrue(result.success(), result.message());
+		assertTrue(result.message().startsWith("Event \"Alpha\" auf den Stand vom "), result.message());
+		assertTrue(result.message().endsWith(" zurückgesetzt."), result.message());
+		assertEquals(2, result.notes().size());
+		String notes = String.join("\n", result.notes());
+		assertTrue(notes.contains("Prunksitzung"), notes);
+		assertTrue(notes.contains("Damensitzung"), notes);
+		Event restored = events.loadEvents().get(0);
+		assertNull(restored.getPresentations().get(0).getHallId());
 		assertNull(restored.getPresentations().get(1).getHallId());
-		assertEquals(1, result.notes().size());
-		assertTrue(result.notes().get(0).contains("Damensitzung"));
+		assertEquals("Alpha", restored.getName());
 	}
 
 	@Test
-	void restore_eventWithoutPresentations_doesNotThrow() throws IOException {
+	void restoreKeepsAHallThatStillExists() throws IOException {
+		Hall hall = new Hall();
+		hall.setName("Stadthalle");
+		halls.saveHall(hall);
 		Event event = event("Alpha");
-		event.setPresentations(null);
-		Backup backup = makeBackup(event);
+		event.addPresentation("Prunksitzung").setHallId(hall.getId());
+		events.saveEvent(event);
+		SavePoint saved = newestSavePoint(event);
+		clock.advance(10);
+		event.setName("Neu");
+		events.saveEvent(event);
 
-		RestoreResult result = catalog().restore(new Entry(event.getId(), "Alpha", true), backup);
+		RestoreResult result = catalog().restore(new Entry(event.getId(), "Neu", false), saved);
 
-		assertTrue(result.success());
-		assertEquals(1, saved.size());
+		assertTrue(result.success(), result.message());
+		assertTrue(result.notes().isEmpty());
+		assertEquals(hall.getId(), events.loadEvents().get(0).getPresentations().get(0).getHallId());
 	}
 
 	@Test
-	void restore_corruptCopy_changesNothing() throws IOException {
-		Backup backup = putRawBackup("xyz", "das ist kein JSON");
+	void restoreBringsBackADeletedEvent() throws IOException {
+		Event event = event("Beta");
+		events.saveEvent(event);
+		SavePoint saved = newestSavePoint(event);
+		clock.advance(10);
+		events.deleteEvent(event);
+		clock.advance(10);
 
-		RestoreResult result = catalog().restore(new Entry("xyz", "xyz", true), backup);
+		RestoreResult result = catalog().restore(new Entry(event.getId(), "Beta", true), saved);
+
+		assertTrue(result.success(), result.message());
+		assertEquals(1, events.loadEvents().size());
+		assertEquals("Beta", events.loadEvents().get(0).getName());
+		assertEquals(List.of(new Entry(event.getId(), "Beta", false)), catalog().entries());
+	}
+
+	@Test
+	void restoreToTheDeletionPointFailsWithText() throws IOException {
+		Event event = event("Beta");
+		events.saveEvent(event);
+		clock.advance(10);
+		events.deleteEvent(event);
+		SavePoint deletion = events.savePoints(event.getId()).get(0);
+
+		RestoreResult result = catalog().restore(new Entry(event.getId(), "Beta", true), deletion);
 
 		assertFalse(result.success());
-		assertTrue(result.message().contains(backup.file().getFileName().toString()));
-		assertTrue(saved.isEmpty());
-		assertTrue(replaced.isEmpty());
+		assertEquals("Zu diesem Speicherstand war das Event gelöscht.", result.message());
+		assertTrue(result.notes().isEmpty());
 	}
 
 	@Test
-	void restore_emptyCopy_changesNothing() throws IOException {
-		Backup backup = putRawBackup("xyz", "");
+	void restoreOfLockedEventFailsWithText() throws IOException {
+		Event event = event("Alpha");
+		events.saveEvent(event);
+		SavePoint saved = newestSavePoint(event);
+		UnitKey unit = UnitKey.event(event.getId());
+		Version first = sync.unitState(unit).head();
+		ObjectNode changed = first.payload().deepCopy();
+		changed.put("description", "geändert");
+		Version second = sync.append("test", List.of(new Change(unit, List.of(first.id()), changed, false))).get(0);
+		Files.writeString(appData.resolve("data/events/" + event.getId() + "/" + second.id() + ".json"), "kaputt");
+		start();
 
-		RestoreResult result = catalog().restore(new Entry("xyz", "xyz", true), backup);
+		RestoreResult result = catalog().restore(new Entry(event.getId(), "Alpha", false), saved);
 
 		assertFalse(result.success());
-		assertTrue(saved.isEmpty());
-		assertTrue(replaced.isEmpty());
+		assertTrue(result.message().contains(unit.relativePath()), result.message());
+		assertFalse(result.message().startsWith("Der Speicherstand konnte nicht wiederhergestellt werden"));
 	}
 
 	@Test
-	void restore_copyOfAnotherEvent_isRejected() throws IOException {
-		Event event = event("Alpha");
-		Backup backup = makeBackup(event);
-
-		RestoreResult result = catalog().restore(new Entry("anderes-event", "x", true), backup);
-
-		assertFalse(result.success());
-		assertTrue(saved.isEmpty());
+	void restoreWarningNamesSalesAndOtherMachines() {
+		assertEquals("Spätere Änderungen und Verkäufe, auch die anderer Rechner, werden mit zurückgesetzt.", catalog().restoreWarning());
 	}
 
 	@Test
-	void restore_saveFails_doesNotReplaceCache() throws IOException {
+	void timeInMessageIsShownInTheSystemZone() throws IOException {
 		Event event = event("Alpha");
-		Backup backup = makeBackup(event);
-		saveFailure = new IllegalStateException("Datei gesperrt");
+		events.saveEvent(event);
+		SavePoint saved = newestSavePoint(event);
+		clock.advance(10);
+		event.setName("Neu");
+		events.saveEvent(event);
 
-		RestoreResult result = catalog().restore(new Entry(event.getId(), "Alpha", true), backup);
+		RestoreResult result = catalog().restore(new Entry(event.getId(), "Neu", false), saved);
 
-		assertFalse(result.success());
-		assertTrue(replaced.isEmpty());
-	}
-
-	@Test
-	void restore_currentStateCannotBeBackedUp_changesNothing() throws IOException {
-		// Feste Uhr: Der Name der nächsten Kopie ist bekannt, ein Hindernis dort lässt das Sichern scheitern
-		Clock fixed = Clock.fixed(Instant.parse("2026-10-14T12:00:00Z"), ZoneId.systemDefault());
-		store = new BackupStore(dataDir, fixed);
-		Event event = event("Alpha");
-		Backup backup = makeBackup(event);
-		event.setName("Neuer Stand");
-		mapper.writeValue(new File(dataDir, event.getId() + ".json"), event);
-		String nextCopy = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS").format(LocalDateTime.now(fixed)) + "-2.json.part";
-		File obstacle = new File(new File(new File(dataDir, "backups"), event.getId()), nextCopy);
-		assertTrue(new File(obstacle, "blockiert").mkdirs());
-
-		RestoreResult result = catalog().restore(new Entry(event.getId(), "Neuer Stand", false), backup);
-
-		assertFalse(result.success());
-		assertTrue(result.message().contains("nichts überschrieben"));
-		assertTrue(saved.isEmpty());
-		assertTrue(replaced.isEmpty());
-	}
-
-	@Test
-	void restore_matchingNewestCopy_createsNoDuplicate() throws IOException {
-		Event event = event("Alpha");
-		Backup backup = makeBackup(event);
-		File file = new File(dataDir, event.getId() + ".json");
-		// Wie das Repository: erst die Datei sichern, dann überschreiben
-		EventBackupCatalog catalog = new EventBackupCatalog(store, () -> current, existingHalls::contains, restored -> {
-			store.backupBeforeOverwrite(restored.getId(), file);
-			try {
-				mapper.writeValue(file, restored);
-			} catch (IOException e) {
-				throw new IllegalStateException(e);
-			}
-		}, replaced::add);
-
-		RestoreResult result = catalog.restore(new Entry(event.getId(), "Alpha", false), backup);
-
-		assertTrue(result.success());
-		assertEquals(1, store.list(event.getId()).size(), "Die Datei entsprach schon der neuesten Kopie");
+		assertTrue(result.message().contains(AbstractBackupCatalog.timeText(saved.at(), ZoneId.systemDefault())), result.message());
 	}
 }

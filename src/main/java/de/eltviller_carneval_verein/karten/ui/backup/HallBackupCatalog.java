@@ -1,34 +1,23 @@
 package de.eltviller_carneval_verein.karten.ui.backup;
 
-import java.util.List;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
-
 import de.eltviller_carneval_verein.karten.model.Hall;
-import de.eltviller_carneval_verein.karten.repository.BackupStore;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
-import de.eltviller_carneval_verein.karten.ui.HallSaver;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 
 /** Wiederherstellen für Hallen. */
 public final class HallBackupCatalog extends AbstractBackupCatalog<Hall> {
 
-	public HallBackupCatalog(BackupStore store, Supplier<List<Hall>> currentHalls, Consumer<Hall> save, Consumer<Hall> replaceInCache) {
-		super(store, Hall.class, "Halle", currentHalls, save, replaceInCache);
+	public HallBackupCatalog(StoreHallRepository halls) {
+		super("Halle", () -> halls.knownHalls().stream().map(AbstractBackupCatalog::entry).toList(), unchecked(halls::savePoints), halls::restoreHall,
+				Hall::getName);
 	}
 
-	/** Der Katalog der App: echtes Repository, Speichern über den {@link HallSaver}. */
+	/** Der Katalog der App: das echte Repository. */
 	public static HallBackupCatalog create() {
-		JsonHallRepository halls = JsonHallRepository.getInstance();
-		return new HallBackupCatalog(halls.backups(), halls::loadHalls, HallSaver::saveStructureChange, halls::replaceCachedHall);
+		return new HallBackupCatalog(StoreHallRepository.getInstance());
 	}
 
 	@Override
-	String idOf(Hall hall) {
-		return hall.getId();
-	}
-
-	@Override
-	String nameOf(Hall hall) {
-		return hall.getName();
+	public String restoreWarning() {
+		return "Spätere Änderungen, auch die anderer Rechner, werden mit zurückgesetzt.";
 	}
 }
