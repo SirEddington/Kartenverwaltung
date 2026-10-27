@@ -266,6 +266,14 @@ final class UnitMapper {
 		List<String> warnings = new ArrayList<>();
 		Set<UnitKey> shown = new HashSet<>();
 		int orphans = 0;
+		// Kinder einer gelöschten Einheit bleiben liegen (Löschen nur am Kopf) und sind gewollt unsichtbar; gemeldet
+		// werden nur Einheiten, deren Eltern-Einheit fehlt oder unlesbar ist
+		Set<UnitKey> hidden = new HashSet<>();
+		for (UnitSnapshot snapshot : snapshots) {
+			if (snapshot.version() != null && snapshot.deleted()) {
+				hidden.add(snapshot.unit());
+			}
+		}
 
 		// Gruppiert wird über die Schlüssel der Einheiten: die ID einer Vorstellung gilt nur innerhalb ihres Events
 		Map<UnitKey, Event> events = new LinkedHashMap<>();
@@ -292,7 +300,11 @@ final class UnitMapper {
 			UnitKey eventKey = UnitKey.event(unit.eventId());
 			Event event = events.get(eventKey);
 			if (event == null) {
-				orphans++;
+				if (hidden.contains(eventKey)) {
+					hidden.add(unit);
+				} else {
+					orphans++;
+				}
 				continue;
 			}
 			Presentation presentation = read(snapshot, Presentation.class, warnings,
@@ -315,7 +327,9 @@ final class UnitMapper {
 			UnitKey presentationKey = UnitKey.presentation(unit.eventId(), unit.presentationId());
 			Presentation presentation = presentations.get(presentationKey);
 			if (presentation == null) {
-				orphans++;
+				if (!hidden.contains(presentationKey)) {
+					orphans++;
+				}
 				continue;
 			}
 			Booking booking = read(snapshot, Booking.class, warnings,

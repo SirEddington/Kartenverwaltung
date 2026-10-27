@@ -18,6 +18,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
@@ -446,6 +449,66 @@ class UnitMapperTest {
 		assertEquals(1, loaded.getPresentations().size());
 		assertEquals("Samstag", loaded.getPresentations().get(0).getName());
 		assertEquals(1, loaded.getBookings().size());
+	}
+
+	@Test
+	void childrenOfDeletedPresentationAreNotReportedAsOrphans() {
+		Event event = simpleEvent();
+		List<UnitSnapshot> snapshots = snapshots(UnitMapper.decompose(event));
+		UnitKey key = UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId());
+		List<UnitSnapshot> withDeletion = replace(snapshots, withState(find(snapshots, key), Status.OK, true));
+
+		assertEquals(List.of(), orphanMessages(() -> UnitMapper.assembleEvents(withDeletion)));
+	}
+
+	@Test
+	void childrenOfDeletedEventAreNotReportedAsOrphans() {
+		Event event = simpleEvent();
+		List<UnitSnapshot> snapshots = snapshots(UnitMapper.decompose(event));
+		UnitKey key = UnitKey.event(event.getId());
+		List<UnitSnapshot> withDeletion = replace(snapshots, withState(find(snapshots, key), Status.OK, true));
+
+		assertEquals(List.of(), orphanMessages(() -> UnitMapper.assembleEvents(withDeletion)));
+	}
+
+	@Test
+	void bookingWithoutPresentationIsReportedAsOrphan() {
+		Event event = simpleEvent();
+		List<UnitSnapshot> snapshots = snapshots(UnitMapper.decompose(event));
+		UnitKey key = UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId());
+		List<UnitSnapshot> withoutPresentation = snapshots.stream().filter(s -> !s.unit().equals(key)).toList();
+
+		assertEquals(List.of("2 Einheiten ohne sichtbare Eltern-Einheit wurden übergangen."),
+				orphanMessages(() -> UnitMapper.assembleEvents(withoutPresentation)));
+	}
+
+	/** Die Log-Meldungen über übergangene Einheiten ohne Eltern-Einheit, die während {@code action} entstehen. */
+	private static List<String> orphanMessages(Runnable action) {
+		Logger logger = Logger.getLogger(UnitMapper.class.getName());
+		List<String> messages = new ArrayList<>();
+		Handler handler = new Handler() {
+			@Override
+			public void publish(LogRecord record) {
+				if (record.getMessage().contains("ohne sichtbare Eltern-Einheit")) {
+					messages.add(record.getMessage());
+				}
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		logger.addHandler(handler);
+		try {
+			action.run();
+		} finally {
+			logger.removeHandler(handler);
+		}
+		return messages;
 	}
 
 	@Test
