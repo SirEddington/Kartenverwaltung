@@ -286,6 +286,14 @@ public final class SyncService {
 		return instance;
 	}
 
+	/**
+	 * Die Instanz der Anwendung, falls {@link #getInstance()} sie schon erzeugt hat; legt selbst nie eine an. Für das
+	 * Beenden der Anwendung, das nichts starten darf, wenn der Start gar nicht bis zum Dienst gekommen ist.
+	 */
+	public static synchronized Optional<SyncService> instanceIfCreated() {
+		return Optional.ofNullable(instance);
+	}
+
 	private static Thread daemon(Runnable runnable) {
 		Thread thread = new Thread(runnable, "store-sync");
 		thread.setDaemon(true);

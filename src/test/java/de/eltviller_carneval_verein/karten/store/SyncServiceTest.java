@@ -341,6 +341,12 @@ class SyncServiceTest {
 	// --- Einzelbetrieb und Hochladen
 
 	@Test
+	void instanceIfCreatedIsEmptyBeforeGetInstance() {
+		// getInstance() wird hier nie aufgerufen (es würde Sperre und Kennung im echten AppData anlegen)
+		assertTrue(SyncService.instanceIfCreated().isEmpty());
+	}
+
+	@Test
 	void singleModeAppendIsImmediatelyValid() throws IOException {
 		Node a = node("a");
 		assertTrue(a.service.startup(""));

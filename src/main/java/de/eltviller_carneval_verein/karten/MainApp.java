@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -26,15 +27,20 @@ import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
 import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.concurrent.Task;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
@@ -71,14 +77,71 @@ public class MainApp extends Application {
 		SettingsStore settingsStore = SettingsStore.getInstance();
 		settingsStore.addListener(ChangeTracker.settings()::markSaved);
 
-		// Den Versionsspeicher starten (vorläufig ohne gemeinsamen Ordner) und Hallen und Events einmalig beim Start
-		// laden, damit unlesbare Einheiten sofort sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste
-		// lautlos zu fehlen. Die Hallen zuerst: Die Events beziehen sich auf sie.
-		SyncService.getInstance().startup(null);
+		// Der Versionsspeicher nimmt zuerst die Sperre gegen einen zweiten Start und liest die Kennung des Rechners;
+		// scheitert das, geht es ohne Fenster nicht weiter
+		SyncService sync;
+		try {
+			sync = SyncService.getInstance();
+		} catch (IllegalStateException e) {
+			showAlert("Kartenverwaltung läuft bereits", e.getMessage(), AlertType.ERROR);
+			Platform.exit();
+			return;
+		} catch (UncheckedIOException e) {
+			LOG.log(Level.SEVERE, "Rechner-Kennung nicht lesbar", e);
+			showAlert("Start nicht möglich", "Die Rechner-Kennung konnte nicht gelesen werden: " + e.getCause().getMessage(), AlertType.ERROR);
+			Platform.exit();
+			return;
+		}
+
+		// Das Fenster steht sofort da, mit Ladeansicht; Abgleich und Laden laufen im Hintergrund (vorläufig ohne
+		// gemeinsamen Ordner). Hallen zuerst: Die Events beziehen sich auf sie. Geladen wird einmalig beim Start, damit
+		// unlesbare Einheiten sofort sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
+		Task<Void> loading = new Task<>() {
+			@Override
+			protected Void call() {
+				sync.startup(null, fraction -> updateProgress(fraction, 1.0));
+				StoreHallRepository.getInstance().loadHalls();
+				StoreEventRepository.getInstance().loadEvents();
+				return null;
+			}
+		};
+		loading.setOnSucceeded(e -> onLoaded(settingsStore));
+		loading.setOnFailed(e -> {
+			Throwable failure = loading.getException();
+			LOG.log(Level.SEVERE, "Bestand konnte nicht geladen werden", failure);
+			showAlert("Start nicht möglich", "Der Bestand konnte nicht geladen werden: " + failureMessage(failure), AlertType.ERROR);
+			Platform.exit();
+		});
+
+		primaryStage.setScene(createScene(loadingView(loading)));
+		primaryStage.show();
+
+		Thread loader = new Thread(loading, "start-laden");
+		loader.setDaemon(true);
+		loader.start();
+	}
+
+	/** Die Ansicht, die der Start zeigt, bis der Bestand geladen ist. */
+	private static Parent loadingView(Task<Void> loading) {
+		Label label = new Label("Bestand wird geladen …");
+		ProgressBar bar = new ProgressBar();
+		bar.setPrefWidth(320);
+		bar.progressProperty().bind(loading.progressProperty());
+		VBox box = new VBox(16, label, bar);
+		box.setAlignment(Pos.CENTER);
+		return box;
+	}
+
+	/** Die Meldung eines gescheiterten Ladens; bei einem {@link UncheckedIOException} die der eigentlichen Ursache. */
+	private static String failureMessage(Throwable failure) {
+		Throwable shown = failure instanceof UncheckedIOException && failure.getCause() != null ? failure.getCause() : failure;
+		return shown.getMessage() != null ? shown.getMessage() : shown.getClass().getSimpleName();
+	}
+
+	/** Läuft auf dem FX-Thread, sobald der Bestand geladen ist: der Rest des Starts und dann das Hauptmenü. */
+	private static void onLoaded(SettingsStore settingsStore) {
 		StoreHallRepository halls = StoreHallRepository.getInstance();
-		halls.loadHalls();
 		StoreEventRepository repository = StoreEventRepository.getInstance();
-		repository.loadEvents();
 
 		// Jedes Speichern und Löschen führt den gespeicherten Stand der Änderungserkennung nach, egal von wo aus
 		repository.addListener(trackerUpdater(ChangeTracker.events()));
@@ -93,9 +156,14 @@ public class MainApp extends Application {
 			}
 		});
 
-		List<String> loadWarnings = repository.getAndClearLoadWarnings();
-		if (!loadWarnings.isEmpty()) {
-			showAlert("Warnung beim Laden der Events", String.join("\n\n", loadWarnings), AlertType.WARNING);
+		List<String> eventWarnings = repository.getAndClearLoadWarnings();
+		if (!eventWarnings.isEmpty()) {
+			showAlert("Warnung beim Laden der Events", String.join("\n\n", eventWarnings), AlertType.WARNING);
+		}
+
+		List<String> hallWarnings = halls.getAndClearLoadWarnings();
+		if (!hallWarnings.isEmpty()) {
+			showAlert("Warnung beim Laden der Hallen", String.join("\n\n", hallWarnings), AlertType.WARNING);
 		}
 
 		List<String> settingsWarnings = settingsStore.getAndClearLoadWarnings();
@@ -103,9 +171,13 @@ public class MainApp extends Application {
 			showAlert("Warnung beim Laden der Einstellungen", String.join("\n\n", settingsWarnings), AlertType.WARNING);
 		}
 
-		// Startet direkt im Hauptmenü
 		showMenuView();
-		primaryStage.show();
+	}
+
+	/** Beim Beenden den Index schreiben (Fehler dabei werden nur geloggt), falls der Start den Dienst überhaupt erzeugt hat. */
+	@Override
+	public void stop() {
+		SyncService.instanceIfCreated().ifPresent(SyncService::flushIndex);
 	}
 
 	private static <T> RepositoryListener<T> trackerUpdater(ChangeTracker<T> tracker) {
