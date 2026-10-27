@@ -23,4 +23,9 @@ public record UnitSnapshot(UnitKey unit, VersionId version, UnitState.Status sta
 		}
 		return new UnitSnapshot(state.unit(), current.id(), state.status(), current.deleted(), current.payload());
 	}
+
+	/** Der Stand einer gültigen Version der Einheit (Zustand {@code OK}). */
+	public static UnitSnapshot of(UnitKey unit, Version version) {
+		return new UnitSnapshot(unit, version.id(), UnitState.Status.OK, version.deleted(), version.payload());
+	}
 }

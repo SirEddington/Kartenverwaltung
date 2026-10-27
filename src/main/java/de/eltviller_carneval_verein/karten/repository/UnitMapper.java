@@ -44,7 +44,7 @@ final class UnitMapper {
 	private static final Logger LOG = Logger.getLogger(UnitMapper.class.getName());
 
 	/** Derselbe Mapper wie beim Speichern und im Versionsspeicher. */
-	private static final ObjectMapper MAPPER = JsonMapperFactory.create();
+	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 
 	private static final String PRESENTATIONS = "presentations";
 	private static final String BOOKINGS = "bookings";
@@ -183,10 +183,12 @@ final class UnitMapper {
 
 		List<UnitSnapshot> vanished = new ArrayList<>();
 		for (UnitSnapshot known : baseline.values()) {
-			UnitKey parent = parentOf(known.unit());
 			if (known.version() != null && !known.deleted() && shown.contains(known.unit())
-					&& !present.contains(known.unit()) && parent != null && present.contains(parent)) {
-				vanished.add(known);
+					&& !present.contains(known.unit())) {
+				UnitKey parent = parentOf(known.unit());
+				if (parent != null && present.contains(parent)) {
+					vanished.add(known);
+				}
 			}
 		}
 		vanished.sort(Comparator.comparing(s -> s.unit().relativePath()));
@@ -223,15 +225,28 @@ final class UnitMapper {
 	 * @throws LockedUnitException wenn die Einheit gesperrt ist oder noch auf eine Datei wartet
 	 */
 	static void requireWritable(UnitSnapshot known) {
-		String path = known.unit().relativePath();
-		switch (known.status()) {
-		case LOCKED_DAMAGED -> throw new LockedUnitException(StoreMessages.damaged(path));
-		case LOCKED_FORMAT -> throw new LockedUnitException(StoreMessages.newerFormat(path));
-		case WAITING -> throw new LockedUnitException(
-				path + " wartet noch auf eine Datei aus dem gemeinsamen Ordner. Es wurde nichts gespeichert.");
-		case OK -> {
+		requireWritable(known.unit(), known.status());
+	}
+
+	/** Wie {@link #requireWritable(UnitSnapshot)}, für eine Einheit, von der nur der Zustand der Kette zählt. */
+	static void requireWritable(UnitKey unit, Status status) {
+		String locked = lockMessage(unit, status);
+		if (locked != null) {
+			throw new LockedUnitException(locked);
 		}
+		if (status == Status.WAITING) {
+			throw new LockedUnitException(unit.relativePath()
+					+ " wartet noch auf eine Datei aus dem gemeinsamen Ordner. Es wurde nichts gespeichert.");
 		}
+	}
+
+	/** Der Text (SYS-008 bzw. SYS-009), wenn die Einheit gesperrt ist; sonst {@code null}. */
+	private static String lockMessage(UnitKey unit, Status status) {
+		return switch (status) {
+		case LOCKED_DAMAGED -> StoreMessages.damaged(unit.relativePath());
+		case LOCKED_FORMAT -> StoreMessages.newerFormat(unit.relativePath());
+		case WAITING, OK -> null;
+		};
 	}
 
 	/** Der Schlüssel einer Buchung: auf dem Sitz, wenn sie einen hat und nicht "ohne Platz" ist, sonst über ihre Kennung. */
@@ -282,7 +297,7 @@ final class UnitMapper {
 			if (unit.type() == UnitType.EVENT) {
 				Event event = read(snapshot, Event.class, warnings,
 						"Das Event " + unit.eventId() + " konnte nicht gelesen werden und fehlt.",
-						eventMismatch(unit));
+						idMismatch(unit.eventId(), Event::getId));
 				if (event != null) {
 					events.put(unit, event);
 					shown.add(unit);
@@ -310,7 +325,7 @@ final class UnitMapper {
 			Presentation presentation = read(snapshot, Presentation.class, warnings,
 					"Die Vorstellung " + unit.presentationId() + " von \"" + event.getName()
 							+ "\" konnte nicht gelesen werden und fehlt.",
-					presentationMismatch(unit));
+					idMismatch(unit.presentationId(), Presentation::getId));
 			if (presentation != null) {
 				presentations.put(unit, presentation);
 				shown.add(unit);
@@ -368,7 +383,7 @@ final class UnitMapper {
 				String hallId = snapshot.unit().hallId();
 				Hall hall = read(snapshot, Hall.class, warnings,
 						"Die Halle " + hallId + " konnte nicht gelesen werden und fehlt.",
-						hallMismatch(snapshot.unit()));
+						idMismatch(hallId, Hall::getId));
 				if (hall != null) {
 					halls.add(hall);
 					shown.add(snapshot.unit());
@@ -407,10 +422,9 @@ final class UnitMapper {
 			warnings.add(unreadable);
 			return null;
 		}
-		if (snapshot.status() == Status.LOCKED_DAMAGED) {
-			warnings.add(StoreMessages.damaged(snapshot.unit().relativePath()));
-		} else if (snapshot.status() == Status.LOCKED_FORMAT) {
-			warnings.add(StoreMessages.newerFormat(snapshot.unit().relativePath()));
+		String locked = lockMessage(snapshot.unit(), snapshot.status());
+		if (locked != null) {
+			warnings.add(locked);
 		}
 		return value;
 	}
@@ -453,10 +467,11 @@ final class UnitMapper {
 			}
 			UnitKey unit = snapshot.unit();
 			boolean ok = switch (unit.type()) {
-			case EVENT -> parse(snapshot, Event.class, eventMismatch(unit)) != null;
-			case PRESENTATION -> parse(snapshot, Presentation.class, presentationMismatch(unit)) != null;
+			case EVENT -> parse(snapshot, Event.class, idMismatch(unit.eventId(), Event::getId)) != null;
+			case PRESENTATION ->
+				parse(snapshot, Presentation.class, idMismatch(unit.presentationId(), Presentation::getId)) != null;
 			case BOOKING -> parse(snapshot, Booking.class, (Booking b) -> bookingMismatch(unit, b)) != null;
-			case HALL -> parse(snapshot, Hall.class, hallMismatch(unit)) != null;
+			case HALL -> parse(snapshot, Hall.class, idMismatch(unit.hallId(), Hall::getId)) != null;
 			};
 			if (ok) {
 				readable.add(unit);
@@ -465,16 +480,11 @@ final class UnitMapper {
 		return readable;
 	}
 
-	private static Function<Event, String> eventMismatch(UnitKey unit) {
-		return e -> unit.eventId().equals(e.getId()) ? null : "Die ID im Inhalt (" + e.getId() + ") passt nicht zum Ordner";
-	}
-
-	private static Function<Presentation, String> presentationMismatch(UnitKey unit) {
-		return p -> unit.presentationId().equals(p.getId()) ? null
-				: "Die ID im Inhalt (" + p.getId() + ") passt nicht zum Ordner";
-	}
-
-	private static Function<Hall, String> hallMismatch(UnitKey unit) {
-		return h -> unit.hallId().equals(h.getId()) ? null : "Die ID im Inhalt (" + h.getId() + ") passt nicht zum Ordner";
+	/** Prüft, dass die ID im Inhalt die des Ordners ist; sonst der Grund (siehe {@link #parse}). */
+	private static <T> Function<T, String> idMismatch(String expectedId, Function<T, String> idOf) {
+		return value -> {
+			String actual = idOf.apply(value);
+			return expectedId.equals(actual) ? null : "Die ID im Inhalt (" + actual + ") passt nicht zum Ordner";
+		};
 	}
 }

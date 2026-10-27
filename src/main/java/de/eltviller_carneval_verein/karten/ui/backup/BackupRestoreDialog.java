@@ -1,6 +1,5 @@
 package de.eltviller_carneval_verein.karten.ui.backup;
 
-import java.io.UncheckedIOException;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -215,8 +214,7 @@ public final class BackupRestoreDialog {
 	}
 
 	private static String messageOf(Throwable failure) {
-		Throwable shown = failure instanceof UncheckedIOException && failure.getCause() != null ? failure.getCause() : failure;
-		return shown.getMessage() != null ? shown.getMessage() : shown.toString();
+		return MainApp.failureMessage(failure, Throwable::toString);
 	}
 
 	/**

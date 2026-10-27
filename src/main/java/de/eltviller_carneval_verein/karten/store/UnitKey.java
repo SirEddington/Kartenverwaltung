@@ -112,6 +112,11 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 		return new UnitKey(UnitType.HALL, null, null, null, hallId);
 	}
 
+	/** Die ID der Halle bzw. des Events, zu dem die Einheit gehört. */
+	public String ownerId() {
+		return type == UnitType.HALL ? hallId : eventId;
+	}
+
 	/** Der Ordner der Einheit relativ zum Wurzelordner des Speichers, immer mit {@code /} getrennt. */
 	public String relativePath() {
 		return switch (type) {

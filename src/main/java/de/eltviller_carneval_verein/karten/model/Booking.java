@@ -34,8 +34,10 @@ public class Booking {
 	/**
 	 * Die Kennung der Buchung. Sie benennt eine Buchung ohne Platz im Versionsspeicher ({@code bookings/_<id>}); bei
 	 * einer Buchung auf einem Sitz bestimmt der Sitz den Ort. Ältere Dateien ohne das Feld laden mit einer neuen Kennung.
+	 * Die Kennung entsteht erst beim ersten Lesen ({@link #getId()}), damit das Laden vieler Buchungen mit gespeicherter
+	 * Kennung keine unnötigen erzeugt.
 	 */
-	private String id = UUID.randomUUID().toString(); // get,set
+	private String id; // get,set
 
 	private String seatId; // get,set
 
@@ -84,13 +86,17 @@ public class Booking {
 		this.parentPresentation = parentPresentation;
 	}
 
-	public String getId() {
+	/** Die Kennung; sie wird beim ersten Lesen erzeugt und bleibt dann dieselbe (auch zwischen Threads). */
+	public synchronized String getId() {
+		if (id == null) {
+			id = UUID.randomUUID().toString();
+		}
 		return id;
 	}
 
 	/** Ein fehlender Wert ({@code "id": null} in einer Datei) ergibt eine neue Kennung. */
-	public void setId(String id) {
-		this.id = id != null ? id : UUID.randomUUID().toString();
+	public synchronized void setId(String id) {
+		this.id = id;
 	}
 
 	public String getSeatId() {
@@ -309,7 +315,7 @@ public class Booking {
 	/** Kopie aller gespeicherten Felder (auch "Ohne Platz"); ohne Vorstellung als Elternteil. */
 	public Booking copy() {
 		Booking copy = new Booking();
-		copy.id = id;
+		copy.id = getId();
 		copy.seatId = seatId;
 		copy.rowLabel = rowLabel;
 		copy.tableNumber = tableNumber;

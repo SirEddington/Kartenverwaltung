@@ -59,22 +59,14 @@ final class LocalScan {
 	}
 
 	/**
-	 * Die ausstehenden eigenen Versionen aller Einheiten als Aufträge: je {@code saveId} ein Auftrag, die Aufträge nach
-	 * ihrer kleinsten Versions-ID geordnet. Innerhalb eines Auftrags bleibt je Einheit die Reihenfolge aus
+	 * Die ausstehenden eigenen Versionen der genannten Einheiten als Aufträge: je {@code saveId} ein Auftrag, die Aufträge
+	 * nach ihrer kleinsten Versions-ID geordnet. Innerhalb eines Auftrags bleibt je Einheit die Reihenfolge aus
 	 * {@link UnitState#pending()} (Vorgänger zuerst, nicht nach ID, weil Uhren springen können); die Einheiten stehen
-	 * nach ihrer kleinsten Versions-ID.
+	 * nach ihrer kleinsten Versions-ID. Jede Einheit wird aus den Dateien aufgelöst; eine Auswahl (etwa die Kandidaten aus
+	 * dem Start-Index) spart nur das Lesen der übrigen.
 	 *
-	 * @param skip Versionen, die schon in einem Auftrag stehen; sie kommen nicht noch einmal vor
-	 */
-	static List<UploadJob> pendingJobs(VersionStore local, String ownMachineId, Set<VersionId> skip) throws IOException {
-		return pendingJobs(local, ownMachineId, skip, local.allUnits());
-	}
-
-	/**
-	 * Wie {@link #pendingJobs(VersionStore, String, Set)}, aber nur für die genannten Einheiten (etwa die Kandidaten aus dem
-	 * Start-Index). Jede wird aus den Dateien aufgelöst; die Auswahl spart nur das Lesen der übrigen.
-	 *
-	 * @param units die Einheiten, die untersucht werden
+	 * @param skip  Versionen, die schon in einem Auftrag stehen; sie kommen nicht noch einmal vor
+	 * @param units die Einheiten, die untersucht werden (alle: {@link VersionStore#allUnits()})
 	 */
 	static List<UploadJob> pendingJobs(VersionStore local, String ownMachineId, Set<VersionId> skip,
 			Collection<UnitKey> units) throws IOException {

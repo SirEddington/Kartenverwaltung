@@ -25,7 +25,6 @@ import java.util.logging.Logger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -86,8 +85,7 @@ final class UnitIndex {
 	private static final String JSON = ".json";
 	private static final String CLEAN = "clean";
 
-	private static final ObjectMapper MAPPER = JsonMapperFactory.create().copy()
-			.disable(SerializationFeature.INDENT_OUTPUT);
+	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 
 	/**
 	 * Ein Eintrag des Index.
@@ -210,13 +208,11 @@ final class UnitIndex {
 	 * Dateien neu aufgelöst; Einträge ohne Ordner entfallen. Danach hat jede Einheit des Bestands einen Eintrag.
 	 *
 	 * @param local    der lokale Bestand
-	 * @param progress bekommt den Anteil der behandelten Einheiten von 0.0 bis 1.0, zuletzt 1.0; darf {@code null} sein
+	 * @param progress bekommt den Anteil der behandelten Einheiten von 0.0 bis 1.0, zuletzt 1.0
 	 * @return die Einheiten mit ausstehenden und mit verlorenen Versionen und die Zahl der neu aufgelösten Einheiten
 	 */
 	synchronized Refresh refresh(VersionStore local, DoubleConsumer progress) throws IOException {
 		deleteLeftoverTemps();
-		DoubleConsumer report = progress == null ? p -> {
-		} : progress;
 		Map<String, List<String>> tree = files.listTree(local.dataRoot());
 		Map<UnitKey, String> units = new LinkedHashMap<>();
 		for (String rel : new TreeSet<>(tree.keySet())) {
@@ -236,7 +232,7 @@ final class UnitIndex {
 		int resolved = 0;
 		int done = 0;
 		int lastPercent = 0;
-		report.accept(0.0);
+		progress.accept(0.0);
 		for (Map.Entry<UnitKey, String> unit : units.entrySet()) {
 			Entry entry = entries.get(unit.getKey());
 			if (entry == null || !entry.fingerprint().equals(fingerprintFromListing(tree, unit.getValue()))) {
@@ -248,11 +244,11 @@ final class UnitIndex {
 			int percent = (int) (done * 100L / units.size());
 			if (percent != lastPercent) {
 				lastPercent = percent;
-				report.accept(percent / 100.0);
+				progress.accept(percent / 100.0);
 			}
 		}
 		if (lastPercent != 100) {
-			report.accept(1.0);
+			progress.accept(1.0);
 		}
 
 		return refreshOf(units.keySet(), resolved);
@@ -298,6 +294,13 @@ final class UnitIndex {
 	/** Eine unveränderliche Kopie der Einträge. */
 	synchronized Map<UnitKey, Entry> entries() {
 		return Map.copyOf(entries);
+	}
+
+	/** Eine unveränderliche Kopie der Stände aller Einträge; kopiert nur einmal. */
+	synchronized Map<UnitKey, UnitSnapshot> snapshots() {
+		Map<UnitKey, UnitSnapshot> snapshots = new HashMap<>(entries.size() * 4 / 3 + 1);
+		entries.forEach((unit, entry) -> snapshots.put(unit, entry.snapshot()));
+		return Collections.unmodifiableMap(snapshots);
 	}
 
 	/**
@@ -580,14 +583,11 @@ final class UnitIndex {
 	}
 
 	private List<Entry> parse(byte[] bytes, String group) throws IOException {
-		JsonNode root = MAPPER.readTree(bytes);
-		if (root == null || !root.isObject()) {
-			throw new IOException("Die Datei enthält kein JSON-Objekt.");
-		}
+		JsonNode root = StoreCodec.readTree(bytes);
 		if (!root.path("indexFormat").isInt() || root.get("indexFormat").asInt() != INDEX_FORMAT) {
 			throw new IOException("Unbekanntes Format des Index: " + root.get("indexFormat"));
 		}
-		if (!machineId.equals(text(root, "machine"))) {
+		if (!machineId.equals(StoreCodec.text(root, "machine"))) {
 			throw new IOException("Der Index stammt von einem anderen Rechner: " + root.get("machine"));
 		}
 		JsonNode units = root.get("units");
@@ -596,7 +596,7 @@ final class UnitIndex {
 		}
 		List<Entry> result = new ArrayList<>();
 		for (JsonNode item : units) {
-			UnitKey unit = UnitKey.parse(text(item, "unit"))
+			UnitKey unit = UnitKey.parse(StoreCodec.text(item, "unit"))
 					.orElseThrow(() -> new IOException("Unbekannte Einheit: " + item.get("unit")));
 			if (!groupOf(unit).equals(group)) {
 				throw new IOException("Die Einheit gehört nicht in diese Datei: " + unit.relativePath());
@@ -607,11 +607,11 @@ final class UnitIndex {
 				throw new IOException("Das Feld payload ist kein Objekt.");
 			}
 			UnitSnapshot snapshot = new UnitSnapshot(unit,
-					version == null || version.isNull() ? null : VersionId.of(text(item, "version")),
-					UnitState.Status.valueOf(text(item, "status")), bool(item, "deleted"),
+					version == null || version.isNull() ? null : VersionId.of(StoreCodec.text(item, "version")),
+					UnitState.Status.valueOf(StoreCodec.text(item, "status")), StoreCodec.bool(item, "deleted"),
 					payload == null || payload.isNull() ? null : (ObjectNode) payload);
-			result.add(new Entry(snapshot, text(item, "fingerprint"), bool(item, "pending"), bool(item, "lost"),
-					chain(item.get("chain"))));
+			result.add(new Entry(snapshot, StoreCodec.text(item, "fingerprint"), StoreCodec.bool(item, "pending"),
+					StoreCodec.bool(item, "lost"), chain(item.get("chain"))));
 		}
 		return result;
 	}
@@ -623,9 +623,9 @@ final class UnitIndex {
 		List<ChainStep> chain = new ArrayList<>();
 		for (JsonNode step : node) {
 			try {
-				chain.add(new ChainStep(VersionId.of(text(step, "version")), text(step, "saveId"),
-						Instant.parse(text(step, "at")), optionalText(step, "machineName"), optionalText(step, "operator"),
-						bool(step, "deleted")));
+				chain.add(new ChainStep(VersionId.of(StoreCodec.text(step, "version")), StoreCodec.text(step, "saveId"),
+						Instant.parse(StoreCodec.text(step, "at")), StoreCodec.optionalText(step, "machineName"),
+						StoreCodec.optionalText(step, "operator"), StoreCodec.bool(step, "deleted")));
 			} catch (DateTimeParseException e) {
 				throw new IOException("Ungültiger Zeitpunkt in der Kette: " + step.get("at"), e);
 			}
@@ -663,27 +663,5 @@ final class UnitIndex {
 					}
 				});
 		return MAPPER.writeValueAsBytes(root);
-	}
-
-	private static String text(JsonNode node, String field) throws IOException {
-		JsonNode value = node.get(field);
-		if (value == null || !value.isTextual()) {
-			throw new IOException("Das Feld " + field + " fehlt oder ist kein Text.");
-		}
-		return value.asText();
-	}
-
-	/** Ein Textfeld, das fehlen oder {@code null} sein darf; dann {@code null}. */
-	private static String optionalText(JsonNode node, String field) throws IOException {
-		JsonNode value = node.get(field);
-		return value == null || value.isNull() ? null : text(node, field);
-	}
-
-	private static boolean bool(JsonNode node, String field) throws IOException {
-		JsonNode value = node.get(field);
-		if (value == null || !value.isBoolean()) {
-			throw new IOException("Das Feld " + field + " fehlt oder ist kein Wahrheitswert.");
-		}
-		return value.asBoolean();
 	}
 }

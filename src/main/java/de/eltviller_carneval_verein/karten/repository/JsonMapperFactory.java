@@ -22,4 +22,9 @@ public final class JsonMapperFactory {
 		mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 		return mapper;
 	}
+
+	/** Wie {@link #create()}, aber ohne Einrückung: für Dateien und Vergleiche, in denen nur der JSON-Baum zählt. */
+	public static ObjectMapper createCompact() {
+		return create().disable(SerializationFeature.INDENT_OUTPUT);
+	}
 }

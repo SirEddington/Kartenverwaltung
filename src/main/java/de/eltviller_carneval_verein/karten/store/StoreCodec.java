@@ -11,7 +11,6 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -31,8 +30,7 @@ public final class StoreCodec {
 	/** Das Dateiformat, das diese Programmversion schreibt und liest. */
 	public static final int FORMAT = 1;
 
-	private static final ObjectMapper MAPPER = JsonMapperFactory.create().copy()
-			.disable(SerializationFeature.INDENT_OUTPUT);
+	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 
 	private StoreCodec() {
 	}
@@ -166,7 +164,8 @@ public final class StoreCodec {
 		}
 	}
 
-	private static JsonNode readTree(byte[] bytes) throws IOException {
+	/** Liest die Bytes als JSON-Objekt; alles andere ist eine {@link IOException}. */
+	static JsonNode readTree(byte[] bytes) throws IOException {
 		JsonNode node = MAPPER.readTree(bytes);
 		if (node == null || !node.isObject()) {
 			throw new IOException("Die Datei enthält kein JSON-Objekt.");
@@ -186,12 +185,13 @@ public final class StoreCodec {
 		return format.asInt();
 	}
 
-	private static String text(JsonNode node, String field) throws IOException {
+	/** Ein Pflichtfeld, das Text sein muss. Die Feldleser sind paketsichtbar, weil auch {@link UnitIndex} sie benutzt. */
+	static String text(JsonNode node, String field) throws IOException {
 		return asText(node.get(field), field);
 	}
 
 	/** Ein Textfeld, das fehlen oder {@code null} sein darf (Anzeigefelder wie Bediener); sonst muss es Text sein. */
-	private static String optionalText(JsonNode node, String field) throws IOException {
+	static String optionalText(JsonNode node, String field) throws IOException {
 		JsonNode value = node.get(field);
 		return value == null || value.isNull() ? null : asText(value, field);
 	}
@@ -203,7 +203,8 @@ public final class StoreCodec {
 		return value.asText();
 	}
 
-	private static boolean bool(JsonNode node, String field) throws IOException {
+	/** Ein Pflichtfeld, das ein Wahrheitswert sein muss. */
+	static boolean bool(JsonNode node, String field) throws IOException {
 		JsonNode value = node.get(field);
 		if (value == null || !value.isBoolean()) {
 			throw new IOException("Das Feld " + field + " fehlt oder ist kein Wahrheitswert.");

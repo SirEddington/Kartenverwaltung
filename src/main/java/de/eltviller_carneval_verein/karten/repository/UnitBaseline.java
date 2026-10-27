@@ -21,7 +21,6 @@ import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
-import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
 
@@ -68,21 +67,16 @@ final class UnitBaseline {
 		counters.computeIfAbsent(ownerId, k -> new AtomicLong()).incrementAndGet();
 	}
 
-	/** Das Event bzw. die Halle, zu der die Einheit gehört. */
-	private static String ownerOf(UnitKey unit) {
-		return unit.type() == UnitType.HALL ? unit.hallId() : unit.eventId();
-	}
-
 	/** Baut den Vergleichsstand neu aus den Ständen auf, die gerade geladen wurden. */
 	void reset(Collection<UnitSnapshot> snapshots, Set<UnitKey> shownUnits) {
 		known.keySet().forEach(this::changed);
 		known.clear();
 		shown.clear();
 		for (UnitSnapshot snapshot : snapshots) {
-			known.computeIfAbsent(ownerOf(snapshot.unit()), k -> new HashMap<>()).put(snapshot.unit(), snapshot);
+			known.computeIfAbsent(snapshot.unit().ownerId(),k -> new HashMap<>()).put(snapshot.unit(), snapshot);
 		}
 		for (UnitKey unit : shownUnits) {
-			shown.computeIfAbsent(ownerOf(unit), k -> new HashSet<>()).add(unit);
+			shown.computeIfAbsent(unit.ownerId(),k -> new HashSet<>()).add(unit);
 		}
 		known.keySet().forEach(this::changed);
 	}
@@ -215,7 +209,7 @@ final class UnitBaseline {
 		for (int i = 0; i < written.size(); i++) {
 			UnitKey unit = changes.get(i).unit();
 			Version version = written.get(i);
-			baseline.put(unit, new UnitSnapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()));
+			baseline.put(unit, UnitSnapshot.of(unit, version));
 		}
 		changed(ownerId);
 	}

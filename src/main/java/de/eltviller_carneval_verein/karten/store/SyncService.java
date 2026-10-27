@@ -255,7 +255,12 @@ public final class SyncService {
 		this.notifier = new SyncNotifier(ui);
 		this.machine = machine;
 		this.ids = new VersionIdGenerator(machine.id(), clock);
-		this.index = new UnitIndex(appDataDir.resolve(INDEX), files, machine.id());
+		this.index = newIndex(machine.id());
+	}
+
+	/** Ein neuer, noch leerer Index im Index-Ordner dieser Installation, für die Kennung des Rechners. */
+	private UnitIndex newIndex(String machineId) {
+		return new UnitIndex(appDataDir.resolve(INDEX), files, machineId);
 	}
 
 	/**
@@ -370,7 +375,8 @@ public final class SyncService {
 	 */
 	public boolean startup(String sharedDir, DoubleConsumer progress) {
 		reopen();
-		Set<UnitKey> candidates = openIndex(progress);
+		Set<UnitKey> candidates = openIndex(progress != null ? progress : p -> {
+		});
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			deactivate();
@@ -466,7 +472,8 @@ public final class SyncService {
 	private void claimPendingLocally(Collection<UnitKey> candidates) {
 		try {
 			List<UploadJob.Item> items = new ArrayList<>();
-			for (UploadJob job : scanPending(machineId(), Set.of(), candidates)) {
+			for (UploadJob job : LocalScan.pendingJobs(local, machineId(), Set.of(),
+					candidates != null ? candidates : local.allUnits())) {
 				items.addAll(job.items());
 			}
 			claimLocally(items);
@@ -782,9 +789,7 @@ public final class SyncService {
 	 * @return eine unveränderliche Kopie
 	 */
 	public Map<UnitKey, UnitSnapshot> snapshots() {
-		Map<UnitKey, UnitSnapshot> snapshots = new LinkedHashMap<>();
-		index.entries().forEach((unit, entry) -> snapshots.put(unit, entry.snapshot()));
-		return Collections.unmodifiableMap(snapshots);
+		return index.snapshots();
 	}
 
 	/**
@@ -909,9 +914,7 @@ public final class SyncService {
 			if (index.loadIfClean()) {
 				Set<UnitKey> pending = index.cleanRefresh().pendingUnits();
 				indexRefreshed = true;
-				if (progress != null) {
-					progress.accept(1.0);
-				}
+				progress.accept(1.0);
 				return pending;
 			}
 		} catch (RuntimeException e) {
@@ -954,7 +957,7 @@ public final class SyncService {
 	 */
 	private Set<UnitKey> rebuildIndex(DoubleConsumer progress) {
 		synchronized (resolveLock) {
-			index = new UnitIndex(appDataDir.resolve(INDEX), files, machineId());
+			index = newIndex(machineId());
 		}
 		Set<UnitKey> pending = new LinkedHashSet<>();
 		List<UnitKey> units;
@@ -973,9 +976,7 @@ public final class SyncService {
 			}
 		}
 		indexRefreshed = true;
-		if (progress != null) {
-			progress.accept(1.0);
-		}
+		progress.accept(1.0);
 		return pending;
 	}
 
@@ -1183,13 +1184,6 @@ public final class SyncService {
 		runJobs(current, round);
 	}
 
-	/** Die ausstehenden eigenen Versionen als Aufträge, in den genannten Einheiten ({@code null}: in allen). */
-	private List<UploadJob> scanPending(String myId, Set<VersionId> skip, Collection<UnitKey> candidates)
-			throws IOException {
-		return candidates == null ? LocalScan.pendingJobs(local, myId, skip)
-				: LocalScan.pendingJobs(local, myId, skip, candidates);
-	}
-
 	/**
 	 * Reiht die ausstehenden Versionen ein, die noch in keinem Auftrag stehen, vor den übrigen Aufträgen.
 	 *
@@ -1202,7 +1196,8 @@ public final class SyncService {
 			skip = new HashSet<>(queued);
 			myId = machine.id();
 		}
-		List<UploadJob> found = scanPending(myId, skip, candidates);
+		List<UploadJob> found = LocalScan.pendingJobs(local, myId, skip,
+				candidates != null ? candidates : local.allUnits());
 		synchronized (lock) {
 			if (link != current) {
 				return;
@@ -1373,8 +1368,9 @@ public final class SyncService {
 		// der Index gehört zu einer Kennung (die Stände hängen davon ab, was "eigen" ist): neu aufbauen, die alten Dateien
 		// gelten als fremd
 		index.deleteCleanMarker();
-		index = new UnitIndex(appDataDir.resolve(INDEX), files, renewed.id());
-		refreshIndex(null);
+		index = newIndex(renewed.id());
+		refreshIndex(p -> {
+		});
 		current.bind(renewed.id(), local, clock);
 		current.fullSyncWanted = true;
 		notifier.duplicateMachine(StoreMessages.duplicateMachine());

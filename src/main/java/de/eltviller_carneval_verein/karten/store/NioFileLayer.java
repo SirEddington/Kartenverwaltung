@@ -83,7 +83,7 @@ public final class NioFileLayer implements FileLayer {
 	@Override
 	public Map<String, List<String>> listTree(Path root) throws IOException {
 		Map<String, List<String>> tree = new TreeMap<>();
-		Files.walkFileTree(root, new SimpleFileVisitor<>() {
+		Files.walkFileTree(root, new MissingTolerantVisitor() {
 			@Override
 			public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
 				tree.put(keyOf(root, dir), new ArrayList<>());
@@ -96,15 +96,6 @@ public final class NioFileLayer implements FileLayer {
 					tree.get(keyOf(root, file.getParent())).add(file.getFileName().toString());
 				}
 				return FileVisitResult.CONTINUE;
-			}
-
-			@Override
-			public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
-				// Fehlt der Ordner oder verschwindet eine Datei während des Durchlaufs, ist sie schlicht nicht da
-				if (exc instanceof NoSuchFileException) {
-					return FileVisitResult.CONTINUE;
-				}
-				throw exc;
 			}
 		});
 		tree.values().forEach(Collections::sort);
@@ -154,7 +145,7 @@ public final class NioFileLayer implements FileLayer {
 	public void deleteOwnTemps(Path dir, Duration olderThan) throws IOException {
 		Instant limit = Instant.now().minus(olderThan);
 		try {
-			Files.walkFileTree(dir, new SimpleFileVisitor<>() {
+			Files.walkFileTree(dir, new MissingTolerantVisitor() {
 				@Override
 				public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
 					String name = file.getFileName().toString();
@@ -164,17 +155,20 @@ public final class NioFileLayer implements FileLayer {
 					}
 					return FileVisitResult.CONTINUE;
 				}
-
-				@Override
-				public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
-					if (exc instanceof NoSuchFileException) {
-						return FileVisitResult.CONTINUE;
-					}
-					throw exc;
-				}
 			});
 		} catch (NoSuchFileException e) {
 			// Ordner fehlt: nichts aufzuräumen
+		}
+	}
+
+	/** Ein Durchlauf, der Ordner und Dateien, die fehlen oder währenddessen verschwinden, übergeht; jeden anderen Fehler wirft er. */
+	private abstract static class MissingTolerantVisitor extends SimpleFileVisitor<Path> {
+		@Override
+		public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+			if (exc instanceof NoSuchFileException) {
+				return FileVisitResult.CONTINUE;
+			}
+			throw exc;
 		}
 	}
 

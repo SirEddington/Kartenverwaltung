@@ -22,7 +22,6 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
-import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
 
 /**
@@ -88,8 +87,7 @@ final class RestorePlanner {
 			for (int i = chain.size() - 1; i >= 0; i--) {
 				Version version = chain.get(i);
 				if (!version.at().isAfter(t)) {
-					targets.put(state.unit(),
-							new UnitSnapshot(state.unit(), version.id(), Status.OK, version.deleted(), version.payload()));
+					targets.put(state.unit(), UnitSnapshot.of(state.unit(), version));
 					break;
 				}
 			}
@@ -105,7 +103,7 @@ final class RestorePlanner {
 	 */
 	static void requireRestorable(Collection<UnitState> states) {
 		for (UnitState state : states) {
-			UnitMapper.requireWritable(new UnitSnapshot(state.unit(), null, state.status(), false, null));
+			UnitMapper.requireWritable(state.unit(), state.status());
 		}
 	}
 
@@ -138,16 +136,12 @@ final class RestorePlanner {
 			if (head.version() == null && head.status() == Status.OK) {
 				continue;
 			}
-			String id = idOf(head.unit());
+			String id = head.unit().ownerId();
 			String name = head.deleted() ? lastLiveName(sync, head.unit()) : nameOf(head.payload());
 			result.add(new KnownEntity(id, name != null ? name : id, head.deleted()));
 		}
 		result.sort(BY_NAME);
 		return result;
-	}
-
-	private static String idOf(UnitKey unit) {
-		return unit.type() == UnitType.HALL ? unit.hallId() : unit.eventId();
 	}
 
 	private static String lastLiveName(SyncService sync, UnitKey unit) {

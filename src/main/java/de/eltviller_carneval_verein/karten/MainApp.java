@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -87,13 +88,11 @@ public class MainApp extends Application {
 		try {
 			sync = SyncService.getInstance();
 		} catch (IllegalStateException e) {
-			showAlert("Kartenverwaltung läuft bereits", e.getMessage(), AlertType.ERROR);
-			Platform.exit();
+			failStart("Kartenverwaltung läuft bereits", e.getMessage());
 			return;
 		} catch (UncheckedIOException e) {
 			LOG.log(Level.SEVERE, "Rechner-Kennung nicht lesbar", e);
-			showAlert("Start nicht möglich", "Die Rechner-Kennung konnte nicht gelesen werden: " + e.getCause().getMessage(), AlertType.ERROR);
-			Platform.exit();
+			failStart("Start nicht möglich", "Die Rechner-Kennung konnte nicht gelesen werden: " + e.getCause().getMessage());
 			return;
 		}
 
@@ -113,8 +112,7 @@ public class MainApp extends Application {
 		loading.setOnFailed(e -> {
 			Throwable failure = loading.getException();
 			LOG.log(Level.SEVERE, "Bestand konnte nicht geladen werden", failure);
-			showAlert("Start nicht möglich", "Der Bestand konnte nicht geladen werden: " + failureMessage(failure), AlertType.ERROR);
-			Platform.exit();
+			failStart("Start nicht möglich", "Der Bestand konnte nicht geladen werden: " + failureMessage(failure));
 		});
 
 		primaryStage.setScene(createScene(loadingView(loading)));
@@ -138,8 +136,17 @@ public class MainApp extends Application {
 
 	/** Die Meldung eines gescheiterten Ladens; bei einem {@link UncheckedIOException} die der eigentlichen Ursache. */
 	private static String failureMessage(Throwable failure) {
+		return failureMessage(failure, shown -> shown.getClass().getSimpleName());
+	}
+
+	/**
+	 * Die Meldung eines Fehlers für den Nutzer; bei einem {@link UncheckedIOException} die der eigentlichen Ursache.
+	 *
+	 * @param fallback der Text, wenn die Ursache keine Meldung hat
+	 */
+	public static String failureMessage(Throwable failure, Function<Throwable, String> fallback) {
 		Throwable shown = failure instanceof UncheckedIOException && failure.getCause() != null ? failure.getCause() : failure;
-		return shown.getMessage() != null ? shown.getMessage() : shown.getClass().getSimpleName();
+		return shown.getMessage() != null ? shown.getMessage() : fallback.apply(shown);
 	}
 
 	/** Läuft auf dem FX-Thread, sobald der Bestand geladen ist: der Rest des Starts und dann das Hauptmenü. */
@@ -148,9 +155,14 @@ public class MainApp extends Application {
 			finishStart(settingsStore);
 		} catch (RuntimeException e) {
 			LOG.log(Level.SEVERE, "Oberfläche konnte nicht geladen werden", e);
-			showAlert("Start nicht möglich", "Die Oberfläche konnte nicht geladen werden: " + failureMessage(e), AlertType.ERROR);
-			Platform.exit();
+			failStart("Start nicht möglich", "Die Oberfläche konnte nicht geladen werden: " + failureMessage(e));
 		}
+	}
+
+	/** Meldet, dass der Start scheitert, und beendet die Anwendung. */
+	private static void failStart(String title, String text) {
+		showAlert(title, text, AlertType.ERROR);
+		Platform.exit();
 	}
 
 	/**
