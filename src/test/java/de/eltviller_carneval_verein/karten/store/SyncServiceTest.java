@@ -1720,8 +1720,9 @@ class SyncServiceTest {
 		Node a = node("a");
 		a.service.startup("");
 		save(a, create(mine, "A"));
-		a.service.closeIndex();
-		assertTrue(Files.isRegularFile(cleanMarker(a)));
+		// die Marke liegt auf der Platte, ohne dass der Dienst sie angelegt hat: nur das Beiseitelegen kann sie löschen
+		Files.createDirectories(cleanMarker(a).getParent());
+		Files.writeString(cleanMarker(a), a.identity.id());
 
 		a.service.connect(shared, ConnectMode.SET_ASIDE);
 
@@ -1739,13 +1740,56 @@ class SyncServiceTest {
 		Feed copy = new Feed(StoreCodec.FORMAT, oldId, 2, START, List.of());
 		Files.write(sharedRoot.resolve("data/feeds/" + oldId + "/2.json"), StoreCodec.write(copy));
 		save(a, update(BOOKING, v1, "Anna B"));
-		a.service.closeIndex();
-		assertTrue(Files.isRegularFile(cleanMarker(a)));
+		// die Marke liegt auf der Platte, ohne dass der Dienst sie angelegt hat: nur die neue Kennung kann sie löschen
+		Files.writeString(cleanMarker(a), oldId);
 
 		a.service.tick();
 
 		assertEquals(1, a.events.duplicates.size());
 		assertFalse(Files.exists(cleanMarker(a)));
+	}
+
+	@Test
+	void tickAfterCloseIndexDoesNothing() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Node b = node("b");
+		b.service.startup(shared);
+		Version v = save(b, create(BOOKING, "Anna"));
+		b.service.tick();
+		a.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+		// lange genug später, dass der Takt neue Rechner sucht und ihre Listen liest
+		clock.advance(Duration.ofSeconds(31));
+
+		a.service.tick();
+
+		assertFalse(Files.exists(localFile(a, BOOKING, v.id() + ".json")), "nach closeIndex wird nichts mehr kopiert");
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+	}
+
+	@Test
+	void appendAfterCloseIndexRemovesMarkerBeforeWriting() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+		List<Boolean> markerAtWrite = new ArrayList<>();
+		a.layer.failWhen(p -> {
+			if (p.startsWith(a.localData())) {
+				markerAtWrite.add(Files.exists(cleanMarker(a)));
+			}
+			return false;
+		}, "createNew", new IOException("nie"));
+
+		save(a, update(BOOKING, v1, "Anna B"));
+
+		assertFalse(markerAtWrite.isEmpty());
+		assertEquals(Set.of(false), Set.copyOf(markerAtWrite), "die Marke muss vor dem ersten Schreiben im Bestand weg sein");
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.service.startup("");
+		assertTrue(b.layer.calls().stream().anyMatch(call -> call.startsWith("listTree ")));
 	}
 
 	/**

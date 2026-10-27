@@ -60,7 +60,9 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * Index beim letzten Beenden vollständig geschrieben war und seither nichts am Bestand geändert wurde. {@link #loadIfClean}
  * übernimmt den Index dann ohne Durchlauf über den Verzeichnisbaum und löscht die Marke sofort, damit ein Absturz nicht auf
  * einen veralteten Index trifft. Die Marke entsteht nur in {@link #writeCleanMarker} (und nur ohne ungeschriebene
- * Änderungen); jede spätere Änderung des Index ({@link #update}, {@link #clear}) löscht sie wieder. Temporäre Reste und
+ * Änderungen). Wer danach den Bestand ändern will, ruft vor der ersten geschriebenen Datei {@link #invalidateCleanMarker}
+ * auf (nicht erst beim Eintragen des Ergebnisses: bis dahin kann der Prozess enden); {@link #update} und {@link #clear}
+ * löschen sie zusätzlich. Scheitert das Löschen, wird die Marke geleert, und eine leere Marke gilt als unbrauchbar. Temporäre Reste und
  * geänderte Dateien entstehen nur bei einem Absturz, dann fehlt die Marke und der nächste Start prüft wie gewohnt. Auch
  * die Marke macht den Index nicht zum Schiedsrichter: Die Entscheidung über ausstehende Versionen bleibt bei
  * {@link ChainResolver} auf den Dateien.
@@ -113,6 +115,7 @@ final class UnitIndex {
 	private final Set<String> dirty = new TreeSet<>();
 	/** Ob diese Instanz die Marke "sauber beendet" angelegt hat und sie noch gilt. */
 	private boolean markerWritten;
+	private Deleter deleter = Files::deleteIfExists;
 
 	/**
 	 * @param indexDir  der Ordner des Index ({@code <AppData>/index})
@@ -272,9 +275,8 @@ final class UnitIndex {
 		entries.put(unit, new Entry(UnitSnapshot.of(state), fingerprint(unitFiles), !state.pending().isEmpty(),
 				!state.lost().isEmpty()));
 		dirty.add(groupOf(unit));
-		if (markerWritten) {
-			deleteCleanMarker();
-		}
+		// Absicherung: Wer den Bestand ändert, hat die Marke schon vorher mit invalidateCleanMarker entfernt
+		invalidateCleanMarker();
 	}
 
 	/** Eine unveränderliche Kopie der Einträge. */
@@ -354,14 +356,47 @@ final class UnitIndex {
 		return true;
 	}
 
-	/** Löscht die Marke "sauber beendet", falls es sie gibt. Scheitert das, steht nur eine Warnung im Log. */
+	/**
+	 * Löscht die Marke "sauber beendet", falls es sie gibt. Scheitert das, wird die Datei geleert: Eine leere Marke nennt keine
+	 * Rechner-ID und gilt beim Start als unbrauchbar. Gelingt auch das nicht, steht eine Warnung im Log, und eine von dieser
+	 * Instanz angelegte Marke gilt weiter als vorhanden, damit {@link #invalidateCleanMarker()} es beim nächsten Mal erneut
+	 * versucht.
+	 */
 	synchronized void deleteCleanMarker() {
-		markerWritten = false;
+		Path marker = cleanMarker();
 		try {
-			Files.deleteIfExists(cleanMarker());
+			deleter.delete(marker);
 		} catch (IOException | RuntimeException e) {
-			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht löschen: " + cleanMarker(), e);
+			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht löschen und wird geleert: " + marker, e);
+			try {
+				Files.write(marker, new byte[0]);
+			} catch (IOException | RuntimeException again) {
+				LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich auch nicht leeren: " + marker, again);
+				return;
+			}
 		}
+		markerWritten = false;
+	}
+
+	/**
+	 * Muss vor jeder Änderung am lokalen Bestand aufgerufen werden: Eine von dieser Instanz angelegte Marke wird gelöscht,
+	 * bevor die erste Datei geschrieben wird, damit ein Absturz oder Beenden mitten in der Änderung nie auf eine gültige Marke
+	 * über einem geänderten Bestand trifft. Ohne angelegte Marke kostet der Aufruf keinen Dateizugriff.
+	 */
+	synchronized void invalidateCleanMarker() {
+		if (markerWritten) {
+			deleteCleanMarker();
+		}
+	}
+
+	/** Löscht eine Datei, falls es sie gibt. */
+	interface Deleter {
+		void delete(Path file) throws IOException;
+	}
+
+	/** Für Tests: ersetzt das Löschen der Marke, um ein Scheitern nachzustellen. */
+	synchronized void useDeleter(Deleter deleter) {
+		this.deleter = deleter;
 	}
 
 	/**
@@ -388,7 +423,7 @@ final class UnitIndex {
 			own = false;
 		}
 		try {
-			Files.deleteIfExists(marker);
+			deleter.delete(marker);
 		} catch (IOException | RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht löschen: " + marker, e);
 			return false;

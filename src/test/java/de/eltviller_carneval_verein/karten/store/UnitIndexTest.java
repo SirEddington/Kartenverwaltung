@@ -726,7 +726,39 @@ class UnitIndexTest {
 	}
 
 	@Test
-	void changeAfterMarkerDeletesIt() throws IOException {
+	void changeAfterMarkerDeletesItBeforeTheStoreIsWritten() throws IOException {
+		saveTwice(EVENT, "event");
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+		assertTrue(index.writeCleanMarker());
+
+		// zuerst die Marke, dann der Bestand, dann der Index
+		index.invalidateCleanMarker();
+		assertFalse(Files.exists(cleanMarker()));
+		write(EVENT, ME, mine(3), mine(2), "event-3", false);
+		UnitFiles files = local.readUnit(EVENT);
+		index.update(files, ChainResolver.resolve(files, ME));
+
+		assertFalse(Files.exists(cleanMarker()));
+		assertFalse(index().loadIfClean());
+	}
+
+	@Test
+	void invalidateWithoutMarkerDoesNothing() throws IOException {
+		saveTwice(EVENT, "event");
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+
+		index.invalidateCleanMarker();
+
+		assertFalse(Files.exists(cleanMarker()));
+		assertFalse(index.hasChanges());
+	}
+
+	@Test
+	void updateAfterMarkerDeletesIt() throws IOException {
 		saveTwice(EVENT, "event");
 		UnitIndex index = index();
 		refresh(index, local);
@@ -739,6 +771,27 @@ class UnitIndexTest {
 
 		assertFalse(Files.exists(cleanMarker()));
 		assertFalse(index().loadIfClean());
+	}
+
+	@Test
+	void failedMarkerDeleteInvalidatesMarker() throws IOException {
+		saveTwice(EVENT, "event");
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+		assertTrue(index.writeCleanMarker());
+		index.useDeleter(file -> {
+			throw new IOException("Datei gesperrt");
+		});
+
+		index.invalidateCleanMarker();
+
+		// gelöscht ging nicht: die Datei ist leer und gilt beim Start als unbrauchbar
+		assertTrue(Files.isRegularFile(cleanMarker()));
+		assertEquals(0, Files.size(cleanMarker()));
+		UnitIndex next = index();
+		assertFalse(next.loadIfClean());
+		assertTrue(next.entries().isEmpty());
 	}
 
 	@Test

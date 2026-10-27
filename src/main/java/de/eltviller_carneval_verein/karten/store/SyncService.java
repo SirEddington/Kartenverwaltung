@@ -196,6 +196,8 @@ public final class SyncService {
 	private volatile boolean indexRefreshed;
 	/** Wann zuletzt versucht wurde, den Index zu schreiben; {@code null}, solange noch nie. */
 	private volatile Instant lastIndexFlush;
+	/** Ob {@link #closeIndex()} die Marke "sauber beendet" angelegt hat; gesetzt unter {@code workLock}, der Takt tut dann nichts. */
+	private volatile boolean closed;
 	/**
 	 * Macht "lokal lesen, auflösen, in den Index eintragen" je Aufruf unteilbar. Hält nur kurze Dateizugriffe auf den
 	 * lokalen Bestand; wer sie hält, nimmt höchstens kurz {@code lock} (Rechner-ID) und den Monitor des Index.
@@ -366,6 +368,7 @@ public final class SyncService {
 	 * @throws UncheckedIOException wenn der Bestand nicht vollständig gelesen werden kann; die Meldung nennt die Einheit
 	 */
 	public boolean startup(String sharedDir, DoubleConsumer progress) {
+		reopen();
 		Set<UnitKey> candidates = openIndex(progress);
 		String dir = clean(sharedDir);
 		if (dir == null) {
@@ -431,6 +434,7 @@ public final class SyncService {
 	 */
 	public void connect(String sharedDir, ConnectMode mode) {
 		Objects.requireNonNull(mode, "mode");
+		reopen();
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			disconnect();
@@ -446,6 +450,7 @@ public final class SyncService {
 	 * jetzt lokal beansprucht; verlorene bleiben verloren.
 	 */
 	public void disconnect() {
+		reopen();
 		deactivate();
 		claimPendingLocally(null);
 	}
@@ -466,6 +471,17 @@ public final class SyncService {
 			claimLocally(items);
 		} catch (IOException | RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Ausstehende Versionen ließen sich lokal nicht beanspruchen", e);
+		}
+	}
+
+	/**
+	 * Öffnet den Dienst nach {@link #closeIndex()} wieder: Die Marke "sauber beendet" wird gelöscht, bevor irgendetwas den
+	 * Bestand ändert, und der Takt arbeitet wieder. Ohne vorheriges Schließen ohne Wirkung.
+	 */
+	private void reopen() {
+		if (closed) {
+			index.deleteCleanMarker();
+			closed = false;
 		}
 	}
 
@@ -504,6 +520,8 @@ public final class SyncService {
 			generator = ids;
 			current = link;
 		}
+		// vor der ersten Datei: eine Marke "sauber beendet" gilt nur über einem unveränderten Bestand
+		index.invalidateCleanMarker();
 		List<UploadJob.Item> written = new ArrayList<>();
 		IOException failure = null;
 		for (Change change : changes) {
@@ -810,8 +828,12 @@ public final class SyncService {
 	 * Index nie abgeglichen) startet er wie nach einem Absturz.
 	 * <p>
 	 * Eine gerade laufende Runde im Hintergrund wartet es kurz ab ({@link #CLOSE_WAIT}); ist sie dann nicht fertig, gibt es
-	 * keine Marke, denn ihre Änderungen am Bestand fehlten im Index. Ändert sich der Index nach der Marke noch, löscht er
-	 * sie selbst wieder. Wirft nie; Fehler stehen als {@code WARNING} im Log.
+	 * keine Marke, denn ihre Änderungen am Bestand fehlten im Index.
+	 * <p>
+	 * Mit der Marke ist der Dienst geschlossen: Der Takt tut nichts mehr, denn eine Runde, die nach der Marke Dateien in den
+	 * Bestand schriebe, und ein Prozessende mitten darin ließen die Marke über einem geänderten Bestand stehen. Ein späteres
+	 * {@link #append} löscht die Marke vor dem Schreiben; {@link #startup}, {@link #connect} und {@link #disconnect} öffnen
+	 * den Dienst wieder (und löschen die Marke zuerst). Wirft nie; Fehler stehen als {@code WARNING} im Log.
 	 */
 	public void closeIndex() {
 		boolean idle = false;
@@ -828,7 +850,10 @@ public final class SyncService {
 			if (!written || !idle) {
 				return;
 			}
-			if (!index.writeCleanMarker()) {
+			if (index.writeCleanMarker()) {
+				// ab jetzt ändert niemand mehr den Bestand: kein Takt, bis startup, connect oder disconnect den Dienst wieder öffnen
+				closed = true;
+			} else {
 				LOGGER.warning("Der Start-Index hat noch ungeschriebene Änderungen; die Marke 'sauber beendet' entfällt");
 			}
 		} catch (IOException | RuntimeException e) {
@@ -996,6 +1021,9 @@ public final class SyncService {
 		flushIndexIfDue();
 		workLock.lock();
 		try {
+			if (closed) {
+				return;
+			}
 			Link current;
 			synchronized (lock) {
 				current = link;
