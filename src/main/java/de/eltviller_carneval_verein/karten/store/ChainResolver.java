@@ -116,6 +116,10 @@ public final class ChainResolver {
 	 * sie hat ihren Platz bekommen und ist nie ausstehend oder verloren. Zusammengeführt ist eine Version, die eine
 	 * lesbare Version als weiteren (nicht ersten) Vorgänger nennt; ihr Inhalt steckt schon in dieser Version und sie wird
 	 * nicht noch einmal gemeldet. In beiden Fällen endet die Strecke dort, und diese Version ist ihre Basis.
+	 * <p>
+	 * Als Vorgänger genannt (und damit keine Spitze) zählt eine Version nur, wenn die nennende Version eigen oder
+	 * beansprucht ist. Eine fremde, unbeanspruchte Version, die eine eigene nennt, nimmt dieser nicht die Spitze: Brach
+	 * ein Rechner zwischen Liste und Anspruch ab, würde die eigene Version sonst nie erneut beansprucht.
 	 *
 	 * @param claimedIds die Versionen, die eine Anspruchsdatei der Kette nennt
 	 */
@@ -126,7 +130,9 @@ public final class ChainResolver {
 		for (VersionFile file : versions.values()) {
 			if (file.version() != null) {
 				List<VersionId> parents = file.version().parents();
-				named.addAll(parents);
+				if (isOwn(file.version(), ownMachineId) || claimedIds.contains(file.version().id())) {
+					named.addAll(parents);
+				}
 				if (parents.size() > 1) {
 					merged.addAll(parents.subList(1, parents.size()));
 				}

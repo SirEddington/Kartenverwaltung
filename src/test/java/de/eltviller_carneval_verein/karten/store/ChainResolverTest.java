@@ -263,6 +263,30 @@ class ChainResolverTest {
 	}
 
 	@Test
+	void ownVersionNamedOnlyByUnclaimedForeignVersionStaysPending() throws IOException {
+		// w (fremd) ist beansprucht; v (eigen) baut auf w, f (fremd) baut auf v, aber nur v und f sind unbeansprucht.
+		// Der Absturz kam zwischen Liste und Anspruch: f nennt v, hat aber keinen Platz bekommen.
+		UnitState state = new Unit().version(theirs(1)).version(mine(2), theirs(1)).version(theirs(3), mine(2))
+				.claim("root", theirs(1)).resolve();
+
+		assertEquals(List.of(theirs(1)), ids(state.chain()));
+		assertEquals(theirs(1), state.head().id());
+		assertEquals(List.of(mine(2)), ids(state.pending()));
+		assertTrue(state.lost().isEmpty());
+	}
+
+	@Test
+	void ownVersionNamedByClaimedVersionIsNoTip() throws IOException {
+		UnitState state = new Unit().version(theirs(1)).version(mine(2), theirs(1)).version(theirs(3), mine(2))
+				.claim("root", theirs(1)).claim(theirs(1).value(), mine(2)).claim(mine(2).value(), theirs(3)).resolve();
+
+		assertEquals(Status.OK, state.status());
+		assertEquals(List.of(theirs(1), mine(2), theirs(3)), ids(state.chain()));
+		assertTrue(state.pending().isEmpty());
+		assertTrue(state.lost().isEmpty());
+	}
+
+	@Test
 	void deletedVersionIsNormalHead() throws IOException {
 		UnitState state = new Unit().version(mine(1)).deletedVersion(theirs(2), mine(1)).claim("root", mine(1))
 				.claim(mine(1).value(), theirs(2)).resolve();
