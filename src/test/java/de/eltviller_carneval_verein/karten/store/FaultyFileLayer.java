@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
 
@@ -17,7 +18,7 @@ import java.util.function.Predicate;
  * Fehler gemeldet: der Zustand nach einer verlorenen Antwort, bei der die Datei schon angelegt ist.
  * <p>
  * Die Operationen heißen wie die Methoden der Schnittstelle: {@code createNew}, {@code read}, {@code exists},
- * {@code listNames}, {@code isDirectory}, {@code replaceDamaged}, {@code rename}, {@code deleteOwnTemps}.
+ * {@code listNames}, {@code listTree}, {@code isDirectory}, {@code replaceDamaged}, {@code rename}, {@code deleteOwnTemps}.
  * Threadsicher.
  */
 public final class FaultyFileLayer implements FileLayer {
@@ -130,6 +131,14 @@ public final class FaultyFileLayer implements FileLayer {
 	public List<String> listNames(Path dir) throws IOException {
 		IOException late = enter("listNames", dir);
 		List<String> result = delegate.listNames(dir);
+		throwLate(late);
+		return result;
+	}
+
+	@Override
+	public Map<String, List<String>> listTree(Path root) throws IOException {
+		IOException late = enter("listTree", root);
+		Map<String, List<String>> result = delegate.listTree(root);
 		throwLate(late);
 		return result;
 	}

@@ -298,9 +298,10 @@ public final class VersionStore {
 	/** Die IDs der Versionsdateien im Einheitenordner, sortiert; fremde Namen und Ordner fehlen. */
 	private List<VersionId> versionIds(Path unitDir) throws IOException {
 		List<VersionId> ids = new ArrayList<>();
-		for (String stem : jsonStems(unitDir)) {
-			if (VersionId.isValid(stem)) {
-				ids.add(VersionId.of(stem));
+		for (String name : files.listNames(unitDir)) {
+			Optional<VersionId> id = versionIdOf(name);
+			if (id.isPresent() && !files.isDirectory(unitDir.resolve(name))) {
+				ids.add(id.get());
 			}
 		}
 		return ids;
@@ -308,23 +309,45 @@ public final class VersionStore {
 
 	/** Die Namen der Anspruchsdateien unter {@code claims/}, sortiert; fremde Namen und Ordner fehlen. */
 	private List<String> claimNames(Path unitDir) throws IOException {
+		Path claimsDir = unitDir.resolve(CLAIMS);
 		List<String> names = new ArrayList<>();
-		for (String stem : jsonStems(unitDir.resolve(CLAIMS))) {
-			if (ROOT.equals(stem) || VersionId.isValid(stem)) {
-				names.add(stem);
+		for (String name : files.listNames(claimsDir)) {
+			Optional<String> claimName = claimNameOf(name);
+			if (claimName.isPresent() && !files.isDirectory(claimsDir.resolve(name))) {
+				names.add(claimName.get());
 			}
 		}
 		return names;
 	}
 
-	/** Die Namen der Dateien ({@code *.json}, keine Ordner) im Ordner ohne die Endung. */
-	private List<String> jsonStems(Path folder) throws IOException {
-		List<String> stems = new ArrayList<>();
-		for (String name : files.listNames(folder)) {
-			if (name.endsWith(JSON) && !files.isDirectory(folder.resolve(name))) {
-				stems.add(name.substring(0, name.length() - JSON.length()));
-			}
+	/**
+	 * Die ID, wenn der Dateiname der einer Versionsdatei ist: {@code <VersionId>.json}, genau in dieser Schreibweise.
+	 * Dies ist die eine Regel, nach der Versionsdateien erkannt werden; ob der Name zu einer Datei oder einem Ordner
+	 * gehört, prüft sie nicht.
+	 *
+	 * @param fileName der Name der Datei (kein Pfad)
+	 * @return die ID; leer bei jedem anderen Namen ({@code Thumbs.db}, Konfliktkopien, Großschreibung, {@code .tmp})
+	 */
+	public static Optional<VersionId> versionIdOf(String fileName) {
+		return stemOf(fileName).filter(VersionId::isValid).map(VersionId::of);
+	}
+
+	/**
+	 * Der Name des Anspruchs, wenn der Dateiname der einer Anspruchsdatei unter {@code claims/} ist: {@code root.json}
+	 * oder {@code <VersionId>.json}. Der Name des Anspruchs ist {@code "root"} bzw. die ID als Text.
+	 *
+	 * @param fileName der Name der Datei (kein Pfad)
+	 * @return der Name des Anspruchs; leer bei jedem anderen Namen
+	 */
+	public static Optional<String> claimNameOf(String fileName) {
+		return stemOf(fileName).filter(stem -> ROOT.equals(stem) || VersionId.isValid(stem));
+	}
+
+	/** Der Dateiname ohne die Endung {@code .json}; leer, wenn er nicht auf {@code .json} endet. */
+	private static Optional<String> stemOf(String fileName) {
+		if (fileName == null || !fileName.endsWith(JSON)) {
+			return Optional.empty();
 		}
-		return stems;
+		return Optional.of(fileName.substring(0, fileName.length() - JSON.length()));
 	}
 }

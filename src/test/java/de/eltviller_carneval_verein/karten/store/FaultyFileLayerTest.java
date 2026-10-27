@@ -96,12 +96,14 @@ class FaultyFileLayerTest {
 		layer.exists(file);
 		layer.isDirectory(dir);
 		layer.listNames(dir);
+		layer.listTree(dir);
 
 		assertEquals(List.of(
 				"createNew " + file,
 				"read " + file,
 				"exists " + file,
 				"isDirectory " + dir,
-				"listNames " + dir), layer.calls());
+				"listNames " + dir,
+				"listTree " + dir), layer.calls());
 	}
 }

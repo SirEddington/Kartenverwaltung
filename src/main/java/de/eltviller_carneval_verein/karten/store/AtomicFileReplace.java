@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.repository;
+package de.eltviller_carneval_verein.karten.store;
 
 import java.io.IOException;
 import java.nio.file.AccessDeniedException;
@@ -23,7 +23,7 @@ import java.nio.file.StandardCopyOption;
  * {@code AtomicMoveNotSupportedException} beschreiben dagegen einen festen Zustand, den Warten nicht ändert; sie
  * und alle anderen Ausnahmen gehen sofort an den Aufrufer.
  */
-final class AtomicFileReplace {
+public final class AtomicFileReplace {
 
 	/** So oft wird das Ersetzen höchstens versucht. */
 	static final int ATTEMPTS = 10;
@@ -47,7 +47,7 @@ final class AtomicFileReplace {
 	}
 
 	/** Ersetzt {@code target} atomar durch {@code temp}; siehe Klassenbeschreibung. */
-	static void replace(Path temp, Path target) throws IOException {
+	public static void replace(Path temp, Path target) throws IOException {
 		replace(temp, target,
 				(source, destination) -> Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE,
 						StandardCopyOption.REPLACE_EXISTING),

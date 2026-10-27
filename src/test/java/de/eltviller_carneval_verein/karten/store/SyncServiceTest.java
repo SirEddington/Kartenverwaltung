@@ -21,6 +21,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -166,6 +167,11 @@ class SyncServiceTest {
 		@Override
 		public List<String> listNames(Path dir) throws IOException {
 			return delegate.listNames(dir);
+		}
+
+		@Override
+		public Map<String, List<String>> listTree(Path root) throws IOException {
+			return delegate.listTree(root);
 		}
 
 		@Override

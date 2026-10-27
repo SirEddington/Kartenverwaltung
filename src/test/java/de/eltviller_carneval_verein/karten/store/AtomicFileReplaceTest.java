@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.repository;
+package de.eltviller_carneval_verein.karten.store;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;

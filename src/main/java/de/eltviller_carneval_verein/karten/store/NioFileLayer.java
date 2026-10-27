@@ -16,7 +16,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.UUID;
 
 /**
@@ -76,6 +78,42 @@ public final class NioFileLayer implements FileLayer {
 		}
 		Collections.sort(names);
 		return names;
+	}
+
+	@Override
+	public Map<String, List<String>> listTree(Path root) throws IOException {
+		Map<String, List<String>> tree = new TreeMap<>();
+		Files.walkFileTree(root, new SimpleFileVisitor<>() {
+			@Override
+			public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+				tree.put(keyOf(root, dir), new ArrayList<>());
+				return FileVisitResult.CONTINUE;
+			}
+
+			@Override
+			public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+				if (attrs.isRegularFile()) {
+					tree.get(keyOf(root, file.getParent())).add(file.getFileName().toString());
+				}
+				return FileVisitResult.CONTINUE;
+			}
+
+			@Override
+			public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+				// Fehlt der Ordner oder verschwindet eine Datei während des Durchlaufs, ist sie schlicht nicht da
+				if (exc instanceof NoSuchFileException) {
+					return FileVisitResult.CONTINUE;
+				}
+				throw exc;
+			}
+		});
+		tree.values().forEach(Collections::sort);
+		return tree;
+	}
+
+	/** Der Pfad des Ordners relativ zur Wurzel, getrennt durch {@code /}; für die Wurzel selbst {@code ""}. */
+	private static String keyOf(Path root, Path dir) {
+		return root.relativize(dir).toString().replace(root.getFileSystem().getSeparator(), "/");
 	}
 
 	@Override

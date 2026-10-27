@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -42,6 +43,14 @@ public interface FileLayer {
 	 * Ist der Ordner nicht vorhanden, ist die Liste leer.
 	 */
 	List<String> listNames(Path dir) throws IOException;
+
+	/**
+	 * Der ganze Verzeichnisbaum unter {@code root} in einem Durchlauf: jeder Ordner, auch ein leerer und {@code root}
+	 * selbst (Schlüssel {@code ""}), mit den Namen der regulären Dateien darin, sortiert und ohne Unterordner. Die
+	 * Schlüssel sind die Pfade relativ zu {@code root}, getrennt durch {@code /}. Anders als {@link #listNames} blendet
+	 * der Durchlauf {@code ~karv-*} nicht aus. Fehlt {@code root}, ist die Map leer.
+	 */
+	Map<String, List<String>> listTree(Path root) throws IOException;
 
 	/** {@code true}, wenn der Pfad ein vorhandener Ordner ist. */
 	boolean isDirectory(Path path);

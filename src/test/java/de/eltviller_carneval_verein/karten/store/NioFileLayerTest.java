@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -128,6 +129,32 @@ class NioFileLayerTest {
 	@Test
 	void listNamesOfMissingFolderIsEmpty() throws IOException {
 		assertEquals(List.of(), layer.listNames(dir.resolve("gibt-es-nicht")));
+	}
+
+	@Test
+	void listTreeReturnsFileNamesPerDirectory() throws IOException {
+		Files.createDirectories(dir.resolve("a").resolve("b"));
+		Files.createDirectory(dir.resolve("c"));
+		Files.write(dir.resolve("a").resolve("x.json"), bytes("x"));
+		Files.write(dir.resolve("a").resolve("b").resolve("y.json"), bytes("y"));
+
+		Map<String, List<String>> tree = layer.listTree(dir);
+
+		assertEquals(Map.of("", List.of(), "a", List.of("x.json"), "a/b", List.of("y.json"), "c", List.of()), tree);
+	}
+
+	@Test
+	void listTreeSortsFileNamesAndLeavesOutFolders() throws IOException {
+		Files.createDirectory(dir.resolve("sub"));
+		Files.write(dir.resolve("b.json"), bytes("b"));
+		Files.write(dir.resolve("a.json"), bytes("a"));
+
+		assertEquals(Map.of("", List.of("a.json", "b.json"), "sub", List.of()), layer.listTree(dir));
+	}
+
+	@Test
+	void listTreeOfMissingRootIsEmpty() throws IOException {
+		assertEquals(Map.of(), layer.listTree(dir.resolve("gibt-es-nicht")));
 	}
 
 	@Test

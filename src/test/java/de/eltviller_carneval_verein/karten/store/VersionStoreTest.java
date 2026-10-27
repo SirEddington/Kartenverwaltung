@@ -59,6 +59,31 @@ class VersionStoreTest {
 	}
 
 	@Test
+	void versionIdOfAcceptsOnlyVersionFileNames() {
+		assertEquals(Optional.of(V1), VersionStore.versionIdOf(V1 + ".json"));
+		assertEquals(Optional.empty(), VersionStore.versionIdOf("Thumbs.db"));
+		assertEquals(Optional.empty(), VersionStore.versionIdOf(V1 + " (Konflikt).json"));
+		assertEquals(Optional.empty(), VersionStore.versionIdOf(V1.value().toUpperCase() + ".json"));
+		assertEquals(Optional.empty(), VersionStore.versionIdOf(V1 + ".tmp"));
+		assertEquals(Optional.empty(), VersionStore.versionIdOf(V1.value()));
+		assertEquals(Optional.empty(), VersionStore.versionIdOf(".json"));
+		assertEquals(Optional.empty(), VersionStore.versionIdOf("root.json"));
+	}
+
+	@Test
+	void claimNameOfAcceptsRootAndVersionIds() {
+		assertEquals(Optional.of("root"), VersionStore.claimNameOf("root.json"));
+		assertEquals(Optional.of(V2.value()), VersionStore.claimNameOf(V2 + ".json"));
+		assertEquals(Optional.empty(), VersionStore.claimNameOf("Root.json"));
+		assertEquals(Optional.empty(), VersionStore.claimNameOf("root"));
+		assertEquals(Optional.empty(), VersionStore.claimNameOf("root.tmp"));
+		assertEquals(Optional.empty(), VersionStore.claimNameOf("Thumbs.db"));
+		assertEquals(Optional.empty(), VersionStore.claimNameOf(V2 + " (Konflikt).json"));
+		assertEquals(Optional.empty(), VersionStore.claimNameOf(V2.value().toUpperCase() + ".json"));
+		assertEquals(Optional.empty(), VersionStore.claimNameOf(".json"));
+	}
+
+	@Test
 	void writeAndReadUnit() throws IOException {
 		VersionStore store = store();
 		UnitKey unit = UnitKey.event("e1");
