@@ -22,9 +22,18 @@ public final class TestSyncServices {
 
 	/** Wie {@link #singleMode(Path)}, mit einer Uhr nach Wahl. */
 	public static SyncService singleMode(Path appData, Clock clock) {
+		return singleMode(appData, new NioFileLayer(), clock);
+	}
+
+	/** Wie {@link #singleMode(Path)}, mit einer Dateischicht nach Wahl (etwa {@link FaultyFileLayer}). */
+	public static SyncService singleMode(Path appData, FileLayer files) {
+		return singleMode(appData, files, Clock.systemUTC());
+	}
+
+	private static SyncService singleMode(Path appData, FileLayer files, Clock clock) {
 		try {
 			MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "test");
-			return new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run, path -> true, clock);
+			return new SyncService(appData, identity, files, Runnable::run, Runnable::run, path -> true, clock);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
