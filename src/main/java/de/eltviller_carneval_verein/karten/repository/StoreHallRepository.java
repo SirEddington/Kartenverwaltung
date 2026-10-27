@@ -172,15 +172,48 @@ public class StoreHallRepository implements HallRepository {
 	 */
 	public Restored<Hall> restoreHall(String hallId, SavePoint point, Function<Hall, List<String>> adjust)
 			throws IOException {
-		ensureLoaded();
+		return commitRestore(prepareRestoreHall(hallId, point), adjust);
+	}
+
+	/**
+	 * Der erste Schritt des Wiederherstellens, geeignet für einen Hintergrund-Thread: liest die Halle frisch, prüft, dass sie
+	 * nicht gesperrt ist und nicht auf eine Datei wartet, und setzt den Zielstand zusammen. Berührt weder Cache noch
+	 * Vergleichsstand noch Listener und schreibt nichts. Den Änderungszähler des Vergleichsstands liest es zuerst, damit
+	 * {@link #commitRestore} jede Änderung seither bemerkt.
+	 *
+	 * @throws LockedUnitException wie {@link #restoreHall}; es wurde nichts verändert
+	 */
+	public RestorePlan<Hall> prepareRestoreHall(String hallId, SavePoint point) throws IOException {
+		long changes = baseline.changes(hallId);
 		List<UnitState> states = List.of(sync.unitState(UnitKey.hall(hallId)));
 		RestorePlanner.requireRestorable(states);
-		Hall target = targetOf(states, point);
+		return new RestorePlan<>(hallId, states, targetOf(states, point), changes);
+	}
+
+	/**
+	 * Der zweite Schritt, auf dem Oberflächen-Thread: Hat sich der Vergleichsstand der Halle seit der Vorbereitung geändert
+	 * (etwa durch Speichern), wird abgelehnt. Sonst wird der Zielstand mit {@code adjust} angepasst, die vorbereitete Halle
+	 * wird Vergleichsstand und angezeigter Stand und der Zielstand wird wie jede Halle gespeichert; Einzelheiten und
+	 * Fehlerverhalten wie bei {@link #restoreHall}.
+	 *
+	 * @throws LockedUnitException wenn sich die Halle seit der Vorbereitung geändert hat; es wurde nichts geschrieben
+	 */
+	public Restored<Hall> commitRestore(RestorePlan<Hall> plan, Function<Hall, List<String>> adjust) {
+		if (baseline.changes(plan.ownerId()) != plan.changes()) {
+			throw new LockedUnitException("Die Halle wurde inzwischen geändert. Bitte erneut wiederherstellen.");
+		}
+		ensureLoaded();
+		Hall target = plan.target();
 		List<String> notes = adjust.apply(target);
-		refreshFromStore(hallId, states);
+		refreshFromStore(plan.ownerId(), plan.states());
 		saveHall(target);
 		replaceCachedHall(target);
 		return new Restored<>(target, notes);
+	}
+
+	/** Der Änderungszähler des Vergleichsstands der Halle (nur für Tests). */
+	long baselineChanges(String hallId) {
+		return baseline.changes(hallId);
 	}
 
 	/**

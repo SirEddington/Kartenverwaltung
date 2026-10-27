@@ -35,8 +35,27 @@ public interface BackupCatalog {
 	 */
 	List<SavePoint> versions(String id);
 
-	/** Holt den Speicherstand zurück; wirft nie, Fehler stehen im Ergebnis. */
-	RestoreResult restore(Entry entry, SavePoint point);
+	/** Ein vorbereitetes Wiederherstellen (Ergebnis von {@link #prepare}), das {@link #commit} übernimmt. */
+	interface Prepared {
+	}
+
+	/**
+	 * Erster Schritt des Wiederherstellens: liest den Versionsspeicher und setzt den Zielstand zusammen, ändert aber nichts.
+	 * Darf dauern und gehört deshalb auf einen Hintergrund-Thread. Wirft nie; scheitert die Vorbereitung, steht der Fehler im
+	 * Ergebnis von {@link #commit}.
+	 */
+	Prepared prepare(Entry entry, SavePoint point);
+
+	/**
+	 * Zweiter Schritt: übernimmt den vorbereiteten Zielstand in Cache und Versionsspeicher. Gehört auf den
+	 * Oberflächen-Thread. Wirft nie, Fehler (auch die der Vorbereitung und ein inzwischen geänderter Stand) stehen im Ergebnis.
+	 */
+	RestoreResult commit(Prepared prepared);
+
+	/** Beide Schritte nacheinander auf dem aufrufenden Thread; wirft nie, Fehler stehen im Ergebnis. */
+	default RestoreResult restore(Entry entry, SavePoint point) {
+		return commit(prepare(entry, point));
+	}
 
 	/** Was das Zurücksetzen außer der gewählten Entität noch mitnimmt; Teil der Rückfrage. */
 	String restoreWarning();

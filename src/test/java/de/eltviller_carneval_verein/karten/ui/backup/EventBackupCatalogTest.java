@@ -151,6 +151,42 @@ class EventBackupCatalogTest {
 	}
 
 	@Test
+	void prepareChangesNothingAndCommitRestores() throws IOException {
+		Event event = event("Alpha");
+		events.saveEvent(event);
+		SavePoint saved = newestSavePoint(event);
+		clock.advance(10);
+		event.setName("Neu");
+		events.saveEvent(event);
+		Entry entry = new Entry(event.getId(), "Neu", false);
+
+		BackupCatalog.Prepared prepared = catalog().prepare(entry, saved);
+
+		assertEquals("Neu", events.loadEvents().get(0).getName());
+		assertEquals(1, events.loadEvents().size());
+		RestoreResult result = catalog().commit(prepared);
+		assertTrue(result.success(), result.message());
+		assertEquals("Alpha", events.loadEvents().get(0).getName());
+	}
+
+	@Test
+	void commitIsRefusedWhenTheEventChangedAfterPrepare() throws IOException {
+		Event event = event("Alpha");
+		events.saveEvent(event);
+		SavePoint saved = newestSavePoint(event);
+		clock.advance(10);
+		BackupCatalog.Prepared prepared = catalog().prepare(new Entry(event.getId(), "Alpha", false), saved);
+		event.setName("Neu");
+		events.saveEvent(event);
+
+		RestoreResult result = catalog().commit(prepared);
+
+		assertFalse(result.success());
+		assertEquals("Das Event wurde inzwischen geändert. Bitte erneut wiederherstellen.", result.message());
+		assertEquals("Neu", events.loadEvents().get(0).getName());
+	}
+
+	@Test
 	void restoreBringsBackADeletedEvent() throws IOException {
 		Event event = event("Beta");
 		events.saveEvent(event);

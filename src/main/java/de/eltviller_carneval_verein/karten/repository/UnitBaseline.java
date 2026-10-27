@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -45,8 +47,25 @@ final class UnitBaseline {
 	/** Die angezeigten Einheiten je Event bzw. Halle. */
 	private final Map<String, Set<UnitKey>> shown = new HashMap<>();
 
+	/**
+	 * Je Event bzw. Halle ein Zähler, der bei jeder Änderung des Vergleichsstands oder der angezeigten Einheiten hochgezählt
+	 * wird. Er ist von jedem Thread lesbar: Die Vorbereitung eines Wiederherstellens (im Hintergrund) merkt sich seinen Wert,
+	 * die Übernahme (auf dem Oberflächen-Thread) lehnt ab, wenn er sich seither geändert hat.
+	 */
+	private final Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
+
 	UnitBaseline(SyncService sync) {
 		this.sync = sync;
+	}
+
+	/** Der Zählerstand des Events bzw. der Halle; von jedem Thread aus lesbar. */
+	long changes(String ownerId) {
+		AtomicLong counter = counters.get(ownerId);
+		return counter == null ? 0 : counter.get();
+	}
+
+	private void changed(String ownerId) {
+		counters.computeIfAbsent(ownerId, k -> new AtomicLong()).incrementAndGet();
 	}
 
 	/** Das Event bzw. die Halle, zu der die Einheit gehört. */
@@ -56,6 +75,7 @@ final class UnitBaseline {
 
 	/** Baut den Vergleichsstand neu aus den Ständen auf, die gerade geladen wurden. */
 	void reset(Collection<UnitSnapshot> snapshots, Set<UnitKey> shownUnits) {
+		known.keySet().forEach(this::changed);
 		known.clear();
 		shown.clear();
 		for (UnitSnapshot snapshot : snapshots) {
@@ -64,6 +84,7 @@ final class UnitBaseline {
 		for (UnitKey unit : shownUnits) {
 			shown.computeIfAbsent(ownerOf(unit), k -> new HashSet<>()).add(unit);
 		}
+		known.keySet().forEach(this::changed);
 	}
 
 	/**
@@ -77,6 +98,7 @@ final class UnitBaseline {
 		}
 		known.put(ownerId, units);
 		shown.put(ownerId, new HashSet<>(shownUnits));
+		changed(ownerId);
 	}
 
 	/** Die Stände der Köpfe (Events bzw. Hallen) im Vergleichsstand, auch der gelöschten. */
@@ -102,15 +124,16 @@ final class UnitBaseline {
 	 * @throws RuntimeException    wenn das Schreiben scheitert; der Vergleichsstand zeigt dann, was auf der Platte liegt
 	 */
 	void save(String ownerId, String name, List<UnitPayload> units) {
-		List<Change> changes = UnitMapper.changes(baselineOf(ownerId), shownForSave(ownerId, units), units);
-		if (!changes.isEmpty()) {
-			append(ownerId, changes, "Fehler beim Speichern von \"" + name + "\": ");
+		List<Change> pending = UnitMapper.changes(baselineOf(ownerId), shownForSave(ownerId, units), units);
+		if (!pending.isEmpty()) {
+			append(ownerId, pending, "Fehler beim Speichern von \"" + name + "\": ");
 		}
 		Set<UnitKey> now = new HashSet<>();
 		for (UnitPayload part : units) {
 			now.add(part.unit());
 		}
 		shown.put(ownerId, now);
+		changed(ownerId);
 	}
 
 	/**
@@ -175,10 +198,13 @@ final class UnitBaseline {
 		Map<UnitKey, UnitSnapshot> baseline = baselineOf(ownerId);
 		String saveId = UUID.randomUUID().toString();
 		List<Version> written;
+		// vor und nach dem Schreiben: Wer dazwischen den Zähler liest, liest auch die Dateien, bevor sie geschrieben sind
+		changed(ownerId);
 		try {
 			written = sync.append(saveId, changes);
 		} catch (IOException e) {
 			refresh(ownerId, changes, saveId);
+			changed(ownerId);
 			throw new RuntimeException(failureText + StoreMessages.describe(e), e);
 		}
 		for (int i = 0; i < written.size(); i++) {
@@ -186,6 +212,7 @@ final class UnitBaseline {
 			Version version = written.get(i);
 			baseline.put(unit, new UnitSnapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()));
 		}
+		changed(ownerId);
 	}
 
 	/**

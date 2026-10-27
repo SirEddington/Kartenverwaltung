@@ -23,8 +23,8 @@ public final class EventBackupCatalog extends AbstractBackupCatalog<Event> {
 	 * @param halls  das Hallen-Repository, an dem sich prüft, ob es die Halle einer Vorstellung noch gibt
 	 */
 	public EventBackupCatalog(StoreEventRepository events, StoreHallRepository halls) {
-		super("Event", () -> events.knownEvents().stream().map(AbstractBackupCatalog::entry).toList(), unchecked(events::savePoints), events::restoreEvent,
-				Event::getName);
+		super("Event", () -> events.knownEvents().stream().map(AbstractBackupCatalog::entry).toList(), unchecked(events::savePoints), events::prepareRestoreEvent,
+				events::commitRestore, Event::getName);
 		this.hallExists = hallId -> halls.findById(hallId) != null;
 	}
 

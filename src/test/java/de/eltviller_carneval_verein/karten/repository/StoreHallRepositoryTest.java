@@ -390,6 +390,63 @@ class StoreHallRepositoryTest {
 	}
 
 	@Test
+	void prepareRestoreHallTouchesNothing(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = TestSyncServices.singleMode(appData, clock);
+		sync.startup(null, p -> {
+		});
+		StoreHallRepository repository = TestRepositories.halls(sync);
+		Hall hall = named("Stadthalle");
+		repository.saveHall(hall);
+		SavePoint first = repository.savePoints(hall.getId()).get(0);
+		clock.advance(10);
+		hall.setName("Festhalle");
+		repository.saveHall(hall);
+		Recorder recorder = new Recorder();
+		repository.addListener(recorder);
+		long files = filesIn(appData);
+		long changes = repository.baselineChanges(hall.getId());
+
+		RestorePlan<Hall> plan = repository.prepareRestoreHall(hall.getId(), first);
+
+		assertEquals("Stadthalle", plan.target().getName());
+		assertEquals(changes, plan.changes());
+		assertEquals(changes, repository.baselineChanges(hall.getId()));
+		assertEquals(files, filesIn(appData));
+		assertSame(hall, repository.findById(hall.getId()));
+		assertEquals("Festhalle", hall.getName());
+		assertEquals(List.of(), recorder.calls);
+	}
+
+	@Test
+	void commitRestoreRefusesWhenHallChangedSincePrepare(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = TestSyncServices.singleMode(appData, clock);
+		sync.startup(null, p -> {
+		});
+		StoreHallRepository repository = TestRepositories.halls(sync);
+		Hall hall = named("Stadthalle");
+		repository.saveHall(hall);
+		SavePoint first = repository.savePoints(hall.getId()).get(0);
+		clock.advance(10);
+		RestorePlan<Hall> plan = repository.prepareRestoreHall(hall.getId(), first);
+		hall.setName("Festhalle");
+		repository.saveHall(hall);
+		long files = filesIn(appData);
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class,
+				() -> repository.commitRestore(plan, h -> List.of()));
+
+		assertEquals("Die Halle wurde inzwischen geändert. Bitte erneut wiederherstellen.", refused.getMessage());
+		assertEquals(files, filesIn(appData));
+		assertSame(hall, repository.findById(hall.getId()));
+		assertEquals("Festhalle", hall.getName());
+		clock.advance(10);
+		Restored<Hall> restored = repository.commitRestore(repository.prepareRestoreHall(hall.getId(), first), h -> List.of());
+		assertEquals("Stadthalle", restored.restored().getName());
+	}
+
+	@Test
 	void replaceCachedHallSwapsTheObjectWithoutWriting(@TempDir Path appData) throws IOException {
 		StoreHallRepository repository = TestRepositories.halls(started(appData));
 		Hall original = named("Vorher");

@@ -7,8 +7,8 @@ import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 public final class HallBackupCatalog extends AbstractBackupCatalog<Hall> {
 
 	public HallBackupCatalog(StoreHallRepository halls) {
-		super("Halle", () -> halls.knownHalls().stream().map(AbstractBackupCatalog::entry).toList(), unchecked(halls::savePoints), halls::restoreHall,
-				Hall::getName);
+		super("Halle", () -> halls.knownHalls().stream().map(AbstractBackupCatalog::entry).toList(), unchecked(halls::savePoints), halls::prepareRestoreHall,
+				halls::commitRestore, Hall::getName);
 	}
 
 	/** Der Katalog der App: das echte Repository. */

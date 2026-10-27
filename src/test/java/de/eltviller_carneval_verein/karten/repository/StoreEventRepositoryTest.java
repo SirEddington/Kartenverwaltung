@@ -703,6 +703,81 @@ class StoreEventRepositoryTest {
 	}
 
 	@Test
+	void prepareRestoreTouchesNothing(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		StoreEventRepository repository = TestRepositories.events(started(TestSyncServices.singleMode(appData, clock)));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		bookingOf(event, 0, "Müller").setLastName("Schulz");
+		repository.saveEvent(event);
+		Recorder recorder = new Recorder();
+		repository.addListener(recorder);
+		long files = filesIn(appData);
+		long changes = repository.baselineChanges(event.getId());
+
+		RestorePlan<Event> plan = repository.prepareRestoreEvent(event.getId(), s1);
+
+		assertEquals(List.of("Müller"), bookingNames(plan.target()));
+		assertEquals(event.getId(), plan.ownerId());
+		assertEquals(changes, plan.changes());
+		assertEquals(changes, repository.baselineChanges(event.getId()));
+		assertEquals(files, filesIn(appData));
+		assertSame(event, repository.loadEvents().get(0));
+		assertEquals(List.of("Schulz"), bookingNames(event));
+		assertEquals(List.of(), recorder.calls);
+		// ohne Speichern danach gelingt das Wiederherstellen
+		repository.commitRestore(plan, e -> List.of());
+		assertEquals(List.of("Müller"), bookingNames(TestRepositories.events(started(appData)).loadEvents().get(0)));
+	}
+
+	@Test
+	void prepareRestoreRefusesLikeRestore(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		clock.advance(10);
+		StoreEventRepository other = TestRepositories.events(sync);
+		other.deleteEvent(other.loadEvents().get(0));
+		SavePoint deletion = savePoint(other, event.getId(), 0);
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class,
+				() -> repository.prepareRestoreEvent(event.getId(), deletion));
+
+		assertEquals("Zu diesem Speicherstand war das Event gelöscht.", refused.getMessage());
+	}
+
+	@Test
+	void commitRestoreRefusesWhenEventChangedSincePrepare(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		StoreEventRepository repository = TestRepositories.events(started(TestSyncServices.singleMode(appData, clock)));
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		RestorePlan<Event> plan = repository.prepareRestoreEvent(event.getId(), s1);
+		// ein normales Speichern dazwischen
+		bookingOf(event, 0, "Müller").setLastName("Schulz");
+		repository.saveEvent(event);
+		long files = filesIn(appData);
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class,
+				() -> repository.commitRestore(plan, e -> List.of("Hinweis")));
+
+		assertEquals("Das Event wurde inzwischen geändert. Bitte erneut wiederherstellen.", refused.getMessage());
+		assertEquals(files, filesIn(appData));
+		assertSame(event, repository.loadEvents().get(0));
+		assertEquals(List.of("Schulz"), bookingNames(event));
+		// neu vorbereitet geht es
+		clock.advance(10);
+		repository.commitRestore(repository.prepareRestoreEvent(event.getId(), s1), e -> List.of());
+		assertEquals(List.of("Müller"), bookingNames(TestRepositories.events(started(appData)).loadEvents().get(0)));
+	}
+
+	@Test
 	void savePointsFromIndexEqualFreshResolution(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
 		SyncService sync = started(TestSyncServices.singleMode(appData, clock));

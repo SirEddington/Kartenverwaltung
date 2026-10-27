@@ -275,15 +275,20 @@ public final class BackupRestoreDialog {
 				return;
 			}
 			setRestoring(true, restoring, entryList, savePoints, closeButton);
-			Task<RestoreResult> task = new Task<>() {
+			// Lesen und Zusammensetzen im Hintergrund, Übernehmen (Cache, Speichern, Listener) auf dem Oberflächen-Thread
+			Task<BackupCatalog.Prepared> task = new Task<>() {
 				@Override
-				protected RestoreResult call() {
-					return catalog.restore(entry, point);
+				protected BackupCatalog.Prepared call() {
+					return catalog.prepare(entry, point);
 				}
 			};
 			task.setOnSucceeded(finished -> {
-				setRestoring(false, restoring, entryList, savePoints, closeButton);
-				RestoreResult result = task.getValue();
+				RestoreResult result;
+				try {
+					result = catalog.commit(task.getValue());
+				} finally {
+					setRestoring(false, restoring, entryList, savePoints, closeButton);
+				}
 				if (result.success()) {
 					done[0] = result;
 					dialog.close();

@@ -172,15 +172,48 @@ public class StoreEventRepository implements EventRepository {
 	 */
 	public Restored<Event> restoreEvent(String eventId, SavePoint point, Function<Event, List<String>> adjust)
 			throws IOException {
-		ensureLoaded();
+		return commitRestore(prepareRestoreEvent(eventId, point), adjust);
+	}
+
+	/**
+	 * Der erste Schritt des Wiederherstellens, geeignet für einen Hintergrund-Thread: liest die Einheiten des Events frisch,
+	 * prüft, dass keine gesperrt ist und keine auf eine Datei wartet, und setzt den Zielstand zusammen. Berührt weder Cache
+	 * noch Vergleichsstand noch Listener und schreibt nichts. Den Änderungszähler des Vergleichsstands liest es zuerst, damit
+	 * {@link #commitRestore} jede Änderung seither bemerkt.
+	 *
+	 * @throws LockedUnitException wie {@link #restoreEvent}; es wurde nichts verändert
+	 */
+	public RestorePlan<Event> prepareRestoreEvent(String eventId, SavePoint point) throws IOException {
+		long changes = baseline.changes(eventId);
 		List<UnitState> states = statesOf(eventId);
 		RestorePlanner.requireRestorable(states);
-		Event target = targetOf(states, point);
+		return new RestorePlan<>(eventId, states, targetOf(states, point), changes);
+	}
+
+	/**
+	 * Der zweite Schritt, auf dem Oberflächen-Thread: Hat sich der Vergleichsstand des Events seit der Vorbereitung
+	 * geändert (etwa durch Speichern), wird abgelehnt. Sonst wird der Zielstand mit {@code adjust} angepasst, die
+	 * vorbereiteten Einheiten werden Vergleichsstand und angezeigter Stand und der Zielstand wird wie jedes Event
+	 * gespeichert; Einzelheiten und Fehlerverhalten wie bei {@link #restoreEvent}.
+	 *
+	 * @throws LockedUnitException wenn sich das Event seit der Vorbereitung geändert hat; es wurde nichts geschrieben
+	 */
+	public Restored<Event> commitRestore(RestorePlan<Event> plan, Function<Event, List<String>> adjust) {
+		if (baseline.changes(plan.ownerId()) != plan.changes()) {
+			throw new LockedUnitException("Das Event wurde inzwischen geändert. Bitte erneut wiederherstellen.");
+		}
+		ensureLoaded();
+		Event target = plan.target();
 		List<String> notes = adjust.apply(target);
-		refreshFromStore(eventId, states);
+		refreshFromStore(plan.ownerId(), plan.states());
 		saveEvent(target);
 		replaceCachedEvent(target);
 		return new Restored<>(target, notes);
+	}
+
+	/** Der Änderungszähler des Vergleichsstands des Events (nur für Tests). */
+	long baselineChanges(String eventId) {
+		return baseline.changes(eventId);
 	}
 
 	/**
