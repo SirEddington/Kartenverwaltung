@@ -146,9 +146,12 @@ public class StoreEventRepository implements EventRepository {
 		return RestorePlanner.knownEntities(sync, baseline.heads(UnitType.EVENT));
 	}
 
-	/** Die Speicherstände des Events (Kopf, Vorstellungen, Buchungen), neueste zuerst. */
+	/**
+	 * Die Speicherstände des Events (Kopf, Vorstellungen, Buchungen), neueste zuerst. Sie entstehen aus den Ketten im
+	 * Start-Index, ohne eine Versionsdatei zu lesen.
+	 */
 	public List<SavePoint> savePoints(String eventId) throws IOException {
-		return RestorePlanner.savePoints(statesOf(eventId));
+		return RestorePlanner.savePoints(sync.chains(sync.eventUnits(eventId)).values());
 	}
 
 	/**

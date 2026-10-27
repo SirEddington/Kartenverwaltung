@@ -16,6 +16,7 @@ import java.util.logging.Logger;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
@@ -41,33 +42,38 @@ final class RestorePlanner {
 	}
 
 	/**
-	 * Die Speicherstände aus den Versionen der gültigen Ketten, neueste zuerst (bei gleichem Zeitpunkt nach
-	 * {@code saveId}). Je {@code saveId} ein Speicherstand: Zeitpunkt, Rechner und Bediener der spätesten Version,
+	 * Die Speicherstände aus den Gliedern der gültigen Ketten, neueste zuerst (bei gleichem Zeitpunkt nach
+	 * {@code saveId}). Je {@code saveId} ein Speicherstand: Zeitpunkt, Rechner und Bediener des spätesten Glieds,
 	 * dazu die Zahl der Einheiten, die der Speichervorgang geschrieben hat.
+	 *
+	 * @param chains je Einheit ihre gültige Kette, ältestes Glied zuerst
 	 */
-	static List<SavePoint> savePoints(Collection<UnitState> states) {
-		Map<String, Version> latest = new LinkedHashMap<>();
-		Map<String, Set<UnitKey>> units = new HashMap<>();
-		for (UnitState state : states) {
-			for (Version version : state.chain()) {
-				latest.merge(version.saveId(), version, (a, b) -> isLater(b, a) ? b : a);
-				units.computeIfAbsent(version.saveId(), k -> new HashSet<>()).add(state.unit());
+	static List<SavePoint> savePoints(Collection<List<ChainStep>> chains) {
+		Map<String, ChainStep> latest = new LinkedHashMap<>();
+		Map<String, Integer> units = new HashMap<>();
+		for (List<ChainStep> chain : chains) {
+			Set<String> seen = new HashSet<>();
+			for (ChainStep step : chain) {
+				latest.merge(step.saveId(), step, (a, b) -> isLater(b, a) ? b : a);
+				if (seen.add(step.saveId())) {
+					units.merge(step.saveId(), 1, Integer::sum);
+				}
 			}
 		}
 		List<SavePoint> result = new ArrayList<>();
-		for (Map.Entry<String, Version> entry : latest.entrySet()) {
-			Version version = entry.getValue();
-			result.add(new SavePoint(entry.getKey(), version.at(), version.machineName(), version.operator(),
-					units.get(entry.getKey()).size()));
+		for (Map.Entry<String, ChainStep> entry : latest.entrySet()) {
+			ChainStep step = entry.getValue();
+			result.add(new SavePoint(entry.getKey(), step.at(), step.machineName(), step.operator(),
+					units.get(entry.getKey())));
 		}
 		result.sort(Comparator.comparing(SavePoint::at).reversed().thenComparing(SavePoint::saveId));
 		return result;
 	}
 
 	/** Ob {@code candidate} später ist als {@code current}; bei gleichem Zeitpunkt entscheidet die Versions-ID. */
-	private static boolean isLater(Version candidate, Version current) {
+	private static boolean isLater(ChainStep candidate, ChainStep current) {
 		int byTime = candidate.at().compareTo(current.at());
-		return byTime != 0 ? byTime > 0 : candidate.id().compareTo(current.id()) > 0;
+		return byTime != 0 ? byTime > 0 : candidate.version().compareTo(current.version()) > 0;
 	}
 
 	/**

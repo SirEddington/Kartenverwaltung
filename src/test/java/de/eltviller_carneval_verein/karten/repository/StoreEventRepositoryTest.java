@@ -32,6 +32,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
 import de.eltviller_carneval_verein.karten.store.LocalArbiter;
@@ -699,6 +700,50 @@ class StoreEventRepositoryTest {
 	private static SavePoint savePoint(StoreEventRepository repository, String eventId, int newestFirst)
 			throws IOException {
 		return repository.savePoints(eventId).get(newestFirst);
+	}
+
+	@Test
+	void savePointsFromIndexEqualFreshResolution(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = eventWithBookings();
+		repository.saveEvent(event);
+		clock.advance(5);
+		event.setDescription("Große Sitzung");
+		bookingOf(event, 0, "Müller").setLastName("Schulz");
+		repository.saveEvent(event);
+		clock.advance(5);
+		// eine Buchung wird gelöscht, eine kommt hinzu
+		event.getPresentations().get(0).getBookings().removeIf(b -> "Meier".equals(b.getLastName()));
+		booking(event.getPresentations().get(1), "seat-4", 4, "Neu");
+		repository.saveEvent(event);
+		clock.advance(5);
+		// von anderer Seite kommt eine Änderung, die dieses Repository nicht kennt; die nächste eigene Änderung verliert
+		UnitKey seat = UnitKey.booking(event.getId(), event.getPresentations().get(1).getId(), "seat-1");
+		writeForeignVersion(appData, seat, sync.unitState(seat).head(), "Fremd");
+		bookingOf(event, 1, "Schmitz").setLastName("Schmidt");
+		event.setName("Prunksitzung 2");
+		repository.saveEvent(event);
+
+		List<SavePoint> fromIndex = repository.savePoints(event.getId());
+
+		List<List<ChainStep>> fresh = new ArrayList<>();
+		boolean anyLost = false;
+		boolean anyDeleted = false;
+		for (UnitKey unit : sync.eventUnits(event.getId())) {
+			UnitState state = sync.unitState(unit);
+			anyLost |= !state.lost().isEmpty();
+			anyDeleted |= state.chain().stream().anyMatch(Version::deleted);
+			fresh.add(state.chain().stream().map(ChainStep::of).toList());
+		}
+		assertTrue(anyLost, "der Test braucht eine verlorene Version");
+		assertTrue(anyDeleted, "der Test braucht eine Löschung");
+		assertTrue(fromIndex.size() >= 4, fromIndex.toString());
+		assertEquals(RestorePlanner.savePoints(fresh), fromIndex);
+		// der Index bleibt auch nach einem Neustart gleich
+		sync.flushIndex();
+		assertEquals(fromIndex, TestRepositories.events(started(appData)).savePoints(event.getId()));
 	}
 
 	@Test

@@ -11,12 +11,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.StoreCodec;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -59,12 +61,18 @@ class RestorePlannerTest {
 		return state(unit, Status.OK, chain);
 	}
 
+	/** Die Speicherstände aus den Gliedern der Ketten, wie der Index sie liefert. */
+	private static List<SavePoint> savePoints(UnitState... states) {
+		return RestorePlanner.savePoints(
+				Stream.of(states).map(state -> state.chain().stream().map(ChainStep::of).toList()).toList());
+	}
+
 	@Test
 	void savePointsGroupBySaveIdNewestFirst() {
 		UnitState event = ok(EVENT, version(1, "s1", at(1), false), version(4, "s3", at(30), false));
 		UnitState booking = ok(BOOKING, version(2, "s1", at(2), false), version(3, "s2", at(10), false));
 
-		List<SavePoint> points = RestorePlanner.savePoints(List.of(event, booking));
+		List<SavePoint> points = savePoints(event, booking);
 
 		assertEquals(List.of("s3", "s2", "s1"), points.stream().map(SavePoint::saveId).toList());
 		assertEquals(at(30), points.get(0).at());
@@ -76,7 +84,7 @@ class RestorePlannerTest {
 		UnitState event = ok(EVENT, version(1, "s1", at(1), false, "Kasse 1", "Anna"));
 		UnitState booking = ok(BOOKING, version(2, "s1", at(5), false, "Kasse 2", "Bernd"));
 
-		SavePoint point = RestorePlanner.savePoints(List.of(event, booking)).get(0);
+		SavePoint point = savePoints(event, booking).get(0);
 
 		assertEquals(at(5), point.at());
 		assertEquals("Kasse 2", point.machineName());
@@ -88,7 +96,7 @@ class RestorePlannerTest {
 		UnitState event = ok(EVENT, version(1, "b", at(1), false));
 		UnitState booking = ok(BOOKING, version(2, "a", at(1), false));
 
-		List<SavePoint> points = RestorePlanner.savePoints(List.of(event, booking));
+		List<SavePoint> points = savePoints(event, booking);
 
 		assertEquals(List.of("a", "b"), points.stream().map(SavePoint::saveId).toList());
 	}
@@ -100,7 +108,7 @@ class RestorePlannerTest {
 		UnitState booking = ok(BOOKING, version(3, "s1", at(1), false), version(5, "s1", at(2), false));
 
 		Map<String, Integer> counts = new HashMap<>();
-		for (SavePoint point : RestorePlanner.savePoints(List.of(event, presentation, booking))) {
+		for (SavePoint point : savePoints(event, presentation, booking)) {
 			counts.put(point.saveId(), point.unitCount());
 		}
 
@@ -151,7 +159,7 @@ class RestorePlannerTest {
 				Set.of());
 
 		UnitSnapshot target = RestorePlanner.targetsAt(List.of(event), at(10)).get(EVENT);
-		List<SavePoint> points = RestorePlanner.savePoints(List.of(event));
+		List<SavePoint> points = savePoints(event);
 
 		assertEquals(valid.id(), target.version());
 		assertEquals(1, points.size());

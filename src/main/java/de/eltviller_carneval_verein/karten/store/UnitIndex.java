@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -53,8 +55,11 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * Verzeichnisbaum aber nicht; das führt höchstens zu einer erneuten Auflösung, nie zu einem falschen Stand.
  * <p>
  * Dateiformat: {@code <Index>/events/<Event-ID>.json} (alle Einheiten dieses Events) und {@code <Index>/halls.json}, je
- * {@code {"indexFormat":1,"machine":…,"units":[…]}}. Eine Datei mit anderem Format, von einem anderen Rechner oder
- * unlesbar gilt als leer und wird beim nächsten {@link #flush} neu geschrieben.
+ * {@code {"indexFormat":2,"machine":…,"units":[…]}}. Je Einheit steht neben dem Stand die gültige Kette ohne Inhalt:
+ * {@code "chain":[{"version","saveId","at","machineName","operator","deleted"}]}, ältestes Glied zuerst. Daraus entstehen die
+ * Speicherstände eines Events, ohne eine Datei zu lesen ({@link SyncService#chains}). Eine Datei mit anderem Format (auch dem
+ * ersten ohne Kette), von einem anderen Rechner oder unlesbar gilt als leer und wird beim nächsten {@link #flush} neu
+ * geschrieben.
  * <p>
  * <b>Marke "sauber beendet":</b> Die Datei {@code <Index>/clean} (Inhalt: die Rechner-ID als Text, UTF-8) sagt, dass der
  * Index beim letzten Beenden vollständig geschrieben war und seither nichts am Bestand geändert wurde. {@link #loadIfClean}
@@ -73,7 +78,7 @@ final class UnitIndex {
 
 	private static final Logger LOGGER = Logger.getLogger(UnitIndex.class.getName());
 
-	private static final int INDEX_FORMAT = 1;
+	private static final int INDEX_FORMAT = 2;
 	private static final String EVENTS = "events";
 	private static final String HALLS = "halls";
 	private static final String CLAIMS = "claims";
@@ -90,8 +95,15 @@ final class UnitIndex {
 	 * @param fingerprint der Abdruck der Dateinamen, auf denen der Stand beruht
 	 * @param pending     ob die Einheit eigene, noch nicht beanspruchte Versionen hat
 	 * @param lost        ob die Einheit eigene, verlorene Versionen hat
+	 * @param chain       die gültige Kette ({@link UnitState#chain()}), ältestes Glied zuerst, ohne Inhalt: daraus entstehen die
+	 *                    Speicherstände, ohne eine Datei zu lesen
 	 */
-	record Entry(UnitSnapshot snapshot, String fingerprint, boolean pending, boolean lost) {
+	record Entry(UnitSnapshot snapshot, String fingerprint, boolean pending, boolean lost, List<ChainStep> chain) {
+
+		/** Macht die Kette unveränderlich. */
+		Entry {
+			chain = List.copyOf(chain);
+		}
 	}
 
 	/**
@@ -273,7 +285,7 @@ final class UnitIndex {
 	synchronized void update(UnitFiles unitFiles, UnitState state) {
 		UnitKey unit = state.unit();
 		entries.put(unit, new Entry(UnitSnapshot.of(state), fingerprint(unitFiles), !state.pending().isEmpty(),
-				!state.lost().isEmpty()));
+				!state.lost().isEmpty(), state.chain().stream().map(ChainStep::of).toList()));
 		dirty.add(groupOf(unit));
 		// Absicherung: Wer den Bestand ändert, hat die Marke schon vorher mit invalidateCleanMarker entfernt
 		invalidateCleanMarker();
@@ -282,6 +294,21 @@ final class UnitIndex {
 	/** Eine unveränderliche Kopie der Einträge. */
 	synchronized Map<UnitKey, Entry> entries() {
 		return Map.copyOf(entries);
+	}
+
+	/**
+	 * Die Ketten der genannten Einheiten, soweit der Index sie kennt; Einheiten ohne Eintrag fehlen im Ergebnis. Greift nur auf
+	 * die genannten Einträge zu.
+	 */
+	synchronized Map<UnitKey, List<ChainStep>> chains(Collection<UnitKey> units) {
+		Map<UnitKey, List<ChainStep>> chains = new LinkedHashMap<>();
+		for (UnitKey unit : units) {
+			Entry entry = entries.get(unit);
+			if (entry != null) {
+				chains.put(unit, entry.chain());
+			}
+		}
+		return chains;
 	}
 
 	/** Ob es Änderungen gibt, die {@link #flush} noch schreiben müsste. */
@@ -535,9 +562,27 @@ final class UnitIndex {
 					version == null || version.isNull() ? null : VersionId.of(text(item, "version")),
 					UnitState.Status.valueOf(text(item, "status")), bool(item, "deleted"),
 					payload == null || payload.isNull() ? null : (ObjectNode) payload);
-			result.add(new Entry(snapshot, text(item, "fingerprint"), bool(item, "pending"), bool(item, "lost")));
+			result.add(new Entry(snapshot, text(item, "fingerprint"), bool(item, "pending"), bool(item, "lost"),
+					chain(item.get("chain"))));
 		}
 		return result;
+	}
+
+	private static List<ChainStep> chain(JsonNode node) throws IOException {
+		if (node == null || !node.isArray()) {
+			throw new IOException("Das Feld chain fehlt oder ist keine Liste.");
+		}
+		List<ChainStep> chain = new ArrayList<>();
+		for (JsonNode step : node) {
+			try {
+				chain.add(new ChainStep(VersionId.of(text(step, "version")), text(step, "saveId"),
+						Instant.parse(text(step, "at")), optionalText(step, "machineName"), optionalText(step, "operator"),
+						bool(step, "deleted")));
+			} catch (DateTimeParseException e) {
+				throw new IOException("Ungültiger Zeitpunkt in der Kette: " + step.get("at"), e);
+			}
+		}
+		return chain;
 	}
 
 	private byte[] serialize(String group) throws IOException {
@@ -558,6 +603,16 @@ final class UnitIndex {
 					item.put("pending", entry.pending());
 					item.put("lost", entry.lost());
 					item.set("payload", snapshot.payload() == null ? MAPPER.nullNode() : snapshot.payload());
+					ArrayNode chain = item.putArray("chain");
+					for (ChainStep step : entry.chain()) {
+						ObjectNode node = chain.addObject();
+						node.put("version", step.version().value());
+						node.put("saveId", step.saveId());
+						node.put("at", step.at().toString());
+						node.put("machineName", step.machineName());
+						node.put("operator", step.operator());
+						node.put("deleted", step.deleted());
+					}
 				});
 		return MAPPER.writeValueAsBytes(root);
 	}
@@ -568,6 +623,12 @@ final class UnitIndex {
 			throw new IOException("Das Feld " + field + " fehlt oder ist kein Text.");
 		}
 		return value.asText();
+	}
+
+	/** Ein Textfeld, das fehlen oder {@code null} sein darf; dann {@code null}. */
+	private static String optionalText(JsonNode node, String field) throws IOException {
+		JsonNode value = node.get(field);
+		return value == null || value.isNull() ? null : text(node, field);
 	}
 
 	private static boolean bool(JsonNode node, String field) throws IOException {

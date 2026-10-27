@@ -70,7 +70,8 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * Programmlauf noch nicht gemeldet wurden. So geht kein Verlust durch einen Absturz verloren, und keiner kommt doppelt.
  * <p>
  * <b>Start-Index:</b> Der Stand jeder Einheit steht zusätzlich in einem lokalen Index ({@link UnitIndex}, Ordner
- * {@code index/} im Datenordner), den {@link #snapshots()} ohne Dateizugriff liefert. {@link #startup} gleicht ihn in
+ * {@code index/} im Datenordner), den {@link #snapshots()} ohne Dateizugriff liefert, mit der gültigen Kette ohne Inhalt
+ * ({@link #chains}) für den Verlauf. {@link #startup} gleicht ihn in
  * einem Durchlauf über die Verzeichnisnamen mit dem Bestand ab und löst nur Einheiten neu auf, deren Dateinamen sich
  * geändert haben; nur die dabei gefundenen Kandidaten mit ausstehenden eigenen Versionen untersucht der Start auf dem
  * Thread des Aufrufers. Jede Stelle, die den Stand einer Einheit ermittelt, trägt ihn danach in den Index ein. Gespeichert
@@ -784,6 +785,28 @@ public final class SyncService {
 		Map<UnitKey, UnitSnapshot> snapshots = new LinkedHashMap<>();
 		index.entries().forEach((unit, entry) -> snapshots.put(unit, entry.snapshot()));
 		return Collections.unmodifiableMap(snapshots);
+	}
+
+	/**
+	 * Die gültigen Ketten der genannten Einheiten ohne Inhalt (Rechner, Bediener, Zeitpunkt, Speichervorgang), ältestes Glied
+	 * zuerst: der Verlauf eines Events, ohne eine Datei zu lesen. Sie stammen aus dem Start-Index; nur eine Einheit ohne
+	 * Eintrag wird aus den Dateien aufgelöst ({@link #resolveLocal}) und dabei in den Index übernommen. Eine Einheit ohne
+	 * Dateien hat eine leere Kette. Der Index ist hier nur Zwischenspeicher für die Anzeige; was wiederhergestellt wird, liest
+	 * {@link #unitState} frisch aus den Dateien.
+	 *
+	 * @return je genannter Einheit ihre Kette
+	 */
+	public Map<UnitKey, List<ChainStep>> chains(Collection<UnitKey> units) throws IOException {
+		Map<UnitKey, List<ChainStep>> known = index.chains(units);
+		Map<UnitKey, List<ChainStep>> chains = new LinkedHashMap<>();
+		for (UnitKey unit : units) {
+			List<ChainStep> chain = known.get(unit);
+			if (chain == null) {
+				chain = resolveLocal(unit).chain().stream().map(ChainStep::of).toList();
+			}
+			chains.put(unit, chain);
+		}
+		return Collections.unmodifiableMap(chains);
 	}
 
 	/**

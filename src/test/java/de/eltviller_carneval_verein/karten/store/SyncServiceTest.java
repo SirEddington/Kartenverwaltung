@@ -1441,6 +1441,68 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void chainsComeFromIndexWithoutReadingVersionFiles() throws IOException {
+		Path appData = dir.resolve("a");
+		SyncService first = TestSyncServices.singleMode(appData);
+		first.startup(null, p -> {
+		});
+		Version v1 = first.append("s1", List.of(create(BOOKING, "Anna"))).get(0);
+		Version v2 = first.append("s2", List.of(update(BOOKING, v1, "Anna B"))).get(0);
+		first.append("s3", List.of(create(HALL, "Halle")));
+		first.flushIndex();
+
+		Node b = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(""));
+		int callsBefore = b.layer.calls().size();
+
+		Map<UnitKey, List<ChainStep>> chains = b.service.chains(List.of(BOOKING, HALL));
+
+		assertEquals(Set.of(BOOKING, HALL), chains.keySet());
+		assertEquals(List.of(v1.id(), v2.id()), chains.get(BOOKING).stream().map(ChainStep::version).toList());
+		assertEquals(List.of("s1", "s2"), chains.get(BOOKING).stream().map(ChainStep::saveId).toList());
+		assertEquals(v2.at(), chains.get(BOOKING).get(1).at());
+		assertEquals(v2.machineName(), chains.get(BOOKING).get(1).machineName());
+		assertEquals(1, chains.get(HALL).size());
+		assertEquals(List.of(), b.layer.calls().subList(callsBefore, b.layer.calls().size()));
+	}
+
+	@Test
+	void chainsOfUnitWithoutEntryAreResolvedFromFiles() throws IOException {
+		Path appData = dir.resolve("a");
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.service.startup("");
+		Version known = save(a, create(BOOKING, "Anna"));
+		// eine Einheit, die der Index nicht kennt: Datei und Anspruch von außen abgelegt
+		UnitKey stranger = UnitKey.booking("e1", "p1", "Z-9");
+		Version foreign = version("zzzzzzzz", 1_900_000_000_000L, 1, "fremd", null);
+		VersionStore store = new VersionStore(a.localData(), new NioFileLayer());
+		byte[] bytes = StoreCodec.write(foreign);
+		assertTrue(store.writeVersion(stranger, foreign.id(), bytes));
+		new LocalArbiter(store, clock).claim(stranger, foreign, bytes);
+		assertFalse(a.service.snapshots().containsKey(stranger));
+
+		Map<UnitKey, List<ChainStep>> chains = a.service.chains(List.of(BOOKING, stranger, UnitKey.hall("leer")));
+
+		assertEquals(List.of(known.id()), chains.get(BOOKING).stream().map(ChainStep::version).toList());
+		assertEquals(List.of(foreign.id()), chains.get(stranger).stream().map(ChainStep::version).toList());
+		assertEquals(List.of(), chains.get(UnitKey.hall("leer")));
+		// die Auflösung ging in den Index
+		assertTrue(a.service.snapshots().containsKey(stranger));
+		assertFalse(a.service.snapshots().containsKey(UnitKey.hall("leer")));
+	}
+
+	@Test
+	void chainsFollowTheIndexAfterAppend() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		Version v2 = save(a, update(BOOKING, v1, "Anna B"));
+
+		assertEquals(List.of(v1.id(), v2.id()),
+				a.service.chains(List.of(BOOKING)).get(BOOKING).stream().map(ChainStep::version).toList());
+	}
+
+	@Test
 	void startupReportsProgressUpToOne() throws IOException {
 		Path appData = dir.resolve("a");
 		SyncService first = TestSyncServices.singleMode(appData);

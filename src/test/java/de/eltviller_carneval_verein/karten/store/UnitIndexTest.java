@@ -156,7 +156,7 @@ class UnitIndexTest {
 		assertTrue(Files.isRegularFile(eventIndexFile("e1")));
 		assertTrue(Files.isRegularFile(indexDir.resolve("halls.json")));
 		ObjectNode root = (ObjectNode) new ObjectMapper().readTree(Files.readAllBytes(eventIndexFile("e1")));
-		assertEquals(1, root.get("indexFormat").asInt());
+		assertEquals(2, root.get("indexFormat").asInt());
 		assertEquals(ME, root.get("machine").asText());
 		assertEquals(2, root.get("units").size());
 		assertEquals("events/e1", root.get("units").get(0).get("unit").asText());
@@ -200,11 +200,75 @@ class UnitIndexTest {
 		UnitIndex first = index();
 		refresh(first, local);
 		first.flush();
-		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":2,\"machine\":\"" + ME + "\",\"units\":[]}");
+		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":3,\"machine\":\"" + ME + "\",\"units\":[]}");
 
 		UnitIndex.Refresh refresh = refresh(index(), local);
 
 		assertEquals(1, refresh.resolved());
+	}
+
+	@Test
+	void formatOneIndexIsRebuilt() throws IOException {
+		buildThreeUnits();
+		UnitIndex first = index();
+		refresh(first, local);
+		first.flush();
+		// ein Index, wie ihn die Fassung ohne Kette schrieb
+		Path halls = indexDir.resolve("halls.json");
+		Files.writeString(halls, Files.readString(halls).replace("\"indexFormat\":2", "\"indexFormat\":1"));
+		Path event = eventIndexFile("e1");
+		Files.writeString(event, Files.readString(event).replace("\"indexFormat\":2", "\"indexFormat\":1"));
+
+		UnitIndex second = index();
+		UnitIndex.Refresh refresh = refresh(second, local);
+
+		assertEquals(3, refresh.resolved());
+		assertEquals(first.entries(), second.entries());
+		second.flush();
+		assertEquals(0, refresh(index(), local).resolved());
+	}
+
+	@Test
+	void chainIsStoredAndReloaded() throws IOException {
+		saveTwice(EVENT, "event");
+		// eine gelöschte Version ohne Bediener als drittes Glied
+		Version deleted = new Version(1, mine(3), List.of(mine(2)), ME, "Kasse 2", null, AT.plusSeconds(90), "save-del", true,
+				new ObjectMapper().createObjectNode());
+		byte[] bytes = StoreCodec.write(deleted);
+		assertTrue(local.writeVersion(EVENT, mine(3), bytes));
+		assertTrue(arbiter.claim(EVENT, deleted, bytes).won());
+		UnitIndex first = index();
+		refresh(first, local);
+
+		List<ChainStep> expected = List.of(new ChainStep(mine(1), "save-" + mine(1), AT, "Kasse", "Anna", false),
+				new ChainStep(mine(2), "save-" + mine(2), AT, "Kasse", "Anna", false),
+				new ChainStep(mine(3), "save-del", AT.plusSeconds(90), "Kasse 2", null, true));
+		assertEquals(expected, first.entries().get(EVENT).chain());
+		first.flush();
+
+		UnitIndex second = index();
+		assertEquals(0, refresh(second, local).resolved());
+		assertEquals(expected, second.entries().get(EVENT).chain());
+		assertEquals(first.entries(), second.entries());
+
+		// auch über die Marke "sauber beendet" kommt die Kette mit
+		assertTrue(second.writeCleanMarker());
+		UnitIndex third = index();
+		assertTrue(third.loadIfClean());
+		assertEquals(expected, third.entries().get(EVENT).chain());
+	}
+
+	@Test
+	void chainEndsBeforeTheBlockedVersion() throws IOException {
+		write(EVENT, ME, mine(1), null, "e-1", true);
+		write(EVENT, ME, mine(2), mine(1), "e-2", true);
+		Files.writeString(local.dataRoot().resolve("events/e1/" + mine(2) + ".json"), "kaputt");
+		UnitIndex index = index();
+
+		refresh(index, local);
+
+		assertEquals(UnitState.Status.LOCKED_DAMAGED, index.entries().get(EVENT).snapshot().status());
+		assertEquals(List.of(mine(1)), index.entries().get(EVENT).chain().stream().map(ChainStep::version).toList());
 	}
 
 	@Test
@@ -706,7 +770,7 @@ class UnitIndexTest {
 	void cleanLoadFallsBackWhenAnIndexFileIsOfOtherMachine() throws IOException {
 		buildThreeUnits();
 		buildCleanIndex();
-		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":1,\"machine\":\"" + OTHER + "\",\"units\":[]}");
+		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":2,\"machine\":\"" + OTHER + "\",\"units\":[]}");
 
 		assertFalse(index().loadIfClean());
 	}

@@ -155,9 +155,9 @@ public class StoreHallRepository implements HallRepository {
 		return RestorePlanner.knownEntities(sync, baseline.heads(UnitType.HALL));
 	}
 
-	/** Die Speicherstände der Halle, neueste zuerst. */
+	/** Die Speicherstände der Halle, neueste zuerst, aus der Kette im Start-Index. */
 	public List<SavePoint> savePoints(String hallId) throws IOException {
-		return RestorePlanner.savePoints(List.of(sync.unitState(UnitKey.hall(hallId))));
+		return RestorePlanner.savePoints(sync.chains(List.of(UnitKey.hall(hallId))).values());
 	}
 
 	/**

@@ -16,6 +16,8 @@ import de.eltviller_carneval_verein.karten.repository.SavePoint;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog.Entry;
 import javafx.beans.binding.Bindings;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.concurrent.Task;
 import javafx.event.ActionEvent;
 import javafx.geometry.Insets;
@@ -39,12 +41,14 @@ import javafx.util.Callback;
 /**
  * Der Dialog zum Wiederherstellen aus den Speicherständen: links die Events (bzw. Hallen), auch gelöschte, rechts
  * deren Speicherstände nach Tagen gruppiert, mit Uhrzeit, Rechner, Bediener und Zahl der Änderungen. Für Events und
- * Hallen derselbe, über einen {@link BackupCatalog}. Die Speicherstände werden im Hintergrund gelesen.
+ * Hallen derselbe, über einen {@link BackupCatalog}. Die Speicherstände werden im Hintergrund gelesen, und das
+ * Wiederherstellen läuft im Hintergrund; währenddessen ist der Dialog gesperrt.
  */
 public final class BackupRestoreDialog {
 
 	private static final DateTimeFormatter DAY_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 	private static final DateTimeFormatter CLOCK_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
+	static final String BUSY_TEXT = "Wird wiederhergestellt …";
 
 	private BackupRestoreDialog() {
 	}
@@ -100,6 +104,7 @@ public final class BackupRestoreDialog {
 
 		private final TreeView<Object> tree = new TreeView<>();
 		private final Label placeholder = new Label();
+		private final Label busyText = new Label(BUSY_TEXT);
 
 		SavePointPane(ZoneId zone) {
 			tree.setShowRoot(false);
@@ -120,7 +125,19 @@ public final class BackupRestoreDialog {
 			placeholder.setWrapText(true);
 			placeholder.setMaxWidth(300);
 			placeholder.setMouseTransparent(true);
-			getChildren().addAll(tree, placeholder);
+			busyText.setVisible(false);
+			busyText.setMouseTransparent(true);
+			getChildren().addAll(tree, placeholder, busyText);
+		}
+
+		/**
+		 * Zeigt, solange etwas wiederhergestellt wird, nur den Platzhalter {@value BackupRestoreDialog#BUSY_TEXT}. Die Liste
+		 * bleibt dabei unverändert (auch die Auswahl) und erscheint danach wieder.
+		 */
+		void setBusy(boolean busy) {
+			busyText.setVisible(busy);
+			tree.setVisible(!busy);
+			placeholder.setVisible(!busy && tree.getRoot() == null);
 		}
 
 		/** Zeigt statt der Liste den Text. */
@@ -236,9 +253,17 @@ public final class BackupRestoreDialog {
 		restoreButton.setDefaultButton(false);
 		restoreButton.getStyleClass().add("button-primary");
 		closeButton.getStyleClass().add("button-default");
-		// Nur ein Speicherstand lässt sich wiederherstellen, ein Tag nicht
-		restoreButton.disableProperty().bind(Bindings.createBooleanBinding(() -> savePoints.selectedSavePoint() == null,
-				savePoints.tree().getSelectionModel().selectedItemProperty()));
+		// Nur ein Speicherstand lässt sich wiederherstellen, ein Tag nicht; währenddessen auch nichts
+		BooleanProperty restoring = new SimpleBooleanProperty();
+		restoreButton.disableProperty().bind(Bindings.createBooleanBinding(
+				() -> restoring.get() || savePoints.selectedSavePoint() == null,
+				savePoints.tree().getSelectionModel().selectedItemProperty(), restoring));
+		// Auch das Fenster lässt sich währenddessen nicht schließen (Kreuz, Escape)
+		dialog.setOnCloseRequest(event -> {
+			if (restoring.get()) {
+				event.consume();
+			}
+		});
 
 		RestoreResult[] done = new RestoreResult[1];
 		// Der Dialog bleibt bei "Wiederherstellen" offen, bis es geklappt hat: Fehler zeigt er, ohne die Auswahl zu verlieren
@@ -249,13 +274,30 @@ public final class BackupRestoreDialog {
 			if (entry == null || point == null || !confirm(dialog, catalog, entry, point, zone)) {
 				return;
 			}
-			RestoreResult result = catalog.restore(entry, point);
-			if (result.success()) {
-				done[0] = result;
-				dialog.close();
-			} else {
-				MainApp.showAlert("Wiederherstellen fehlgeschlagen", result.message(), AlertType.ERROR);
-			}
+			setRestoring(true, restoring, entryList, savePoints, closeButton);
+			Task<RestoreResult> task = new Task<>() {
+				@Override
+				protected RestoreResult call() {
+					return catalog.restore(entry, point);
+				}
+			};
+			task.setOnSucceeded(finished -> {
+				setRestoring(false, restoring, entryList, savePoints, closeButton);
+				RestoreResult result = task.getValue();
+				if (result.success()) {
+					done[0] = result;
+					dialog.close();
+				} else {
+					MainApp.showAlert("Wiederherstellen fehlgeschlagen", result.message(), AlertType.ERROR);
+				}
+			});
+			task.setOnFailed(finished -> {
+				setRestoring(false, restoring, entryList, savePoints, closeButton);
+				MainApp.showAlert("Wiederherstellen fehlgeschlagen", messageOf(task.getException()), AlertType.ERROR);
+			});
+			Thread thread = new Thread(task, "restore");
+			thread.setDaemon(true);
+			thread.start();
 		});
 
 		dialog.showAndWait();
@@ -265,6 +307,16 @@ public final class BackupRestoreDialog {
 			MainApp.showAlert("Wiederhergestellt", result.message() + "\n\n" + String.join("\n", result.notes()), AlertType.INFORMATION);
 		}
 		return result != null;
+	}
+
+	/** Sperrt den Dialog, solange wiederhergestellt wird: beide Listen und beide Knöpfe, rechts der Platzhalter. */
+	private static void setRestoring(boolean restoring, BooleanProperty flag, ListView<Entry> entryList, SavePointPane pane,
+			Button closeButton) {
+		flag.set(restoring);
+		entryList.setDisable(restoring);
+		pane.setDisable(restoring);
+		closeButton.setDisable(restoring);
+		pane.setBusy(restoring);
 	}
 
 	/** Die Rückfrage mit dem Hinweis, was mit zurückgesetzt wird und dass der aktuelle Stand erhalten bleibt; Fokus auf "Abbrechen". */
