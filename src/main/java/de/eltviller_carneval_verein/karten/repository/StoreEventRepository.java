@@ -152,14 +152,15 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
-	 * Stellt das Event auf den Speicherstand zurück. Ablauf: Die Einheiten des Events werden frisch aus dem Versionsspeicher
-	 * gelesen und sind ab jetzt Vergleichsstand und angezeigter Stand (Änderungen von anderer Seite seit dem Laden gelten
-	 * damit als Stand, den es zurückzusetzen gilt, nicht als unbekannt); ein sichtbares Event ersetzt das im Cache. Dann
-	 * wird der Zielstand zusammengesetzt, mit {@code adjust} angepasst (liefert Hinweise für den Nutzer) und wie jedes
-	 * Event gespeichert: Die Unterschiede werden neue Versionen mit gemeinsamer neuer {@code saveId} auf dem aktuellen
+	 * Stellt das Event auf den Speicherstand zurück. Ablauf: Aus den frisch gelesenen Einheiten wird der Zielstand zusammengesetzt und mit
+	 * {@code adjust} angepasst (liefert Hinweise für den Nutzer); wird er abgelehnt, ist nichts geschehen. Dann werden die
+	 * frisch gelesenen Einheiten Vergleichsstand und angezeigter Stand (Änderungen von anderer Seite seit dem Laden gelten
+	 * damit als Stand, den es zurückzusetzen gilt, nicht als unbekannt) und ein sichtbares Event ersetzt das im Cache. Zuletzt
+	 * wird der Zielstand wie jedes Event gespeichert: Die Unterschiede werden neue Versionen mit gemeinsamer neuer {@code saveId} auf dem aktuellen
 	 * Ende der Ketten. Das Ergebnis ersetzt das Event im Cache.
 	 * <p>
-	 * Scheitert das Speichern, bleibt im Cache der frisch gelesene Stand, passend zum Vergleichsstand.
+	 * Scheitert das Speichern, bleibt im Cache der frisch gelesene Stand, passend zum Vergleichsstand. Wird das
+	 * Wiederherstellen abgelehnt, bleiben Cache und Vergleichsstand unberührt.
 	 *
 	 * @throws LockedUnitException wenn eine Einheit des Events gesperrt ist oder noch auf eine Datei wartet, wenn das Event
 	 *                             zu diesem Speicherstand gelöscht war oder der Zielstand unlesbare Teile enthält; es
@@ -171,9 +172,9 @@ public class StoreEventRepository implements EventRepository {
 		ensureLoaded();
 		List<UnitState> states = statesOf(eventId);
 		RestorePlanner.requireRestorable(states);
-		refreshFromStore(eventId, states);
 		Event target = targetOf(states, point);
 		List<String> notes = adjust.apply(target);
+		refreshFromStore(eventId, states);
 		saveEvent(target);
 		replaceCachedEvent(target);
 		return new Restored<>(target, notes);

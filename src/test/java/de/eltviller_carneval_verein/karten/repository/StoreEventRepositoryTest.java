@@ -835,18 +835,25 @@ class StoreEventRepositoryTest {
 	@Test
 	void restoreToDeletionPointIsRefused(@TempDir Path appData) throws IOException {
 		SteppedClock clock = new SteppedClock();
-		StoreEventRepository repository = TestRepositories.storeEvents(started(TestSyncServices.singleMode(appData, clock)));
+		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
+		StoreEventRepository repository = TestRepositories.storeEvents(sync);
 		Event event = smallEvent();
 		repository.saveEvent(event);
 		clock.advance(10);
-		repository.deleteEvent(event);
-		SavePoint deletion = savePoint(repository, event.getId(), 0);
+		// das Event wird von anderer Seite gelöscht, nachdem dieses Repository es geladen hat
+		StoreEventRepository other = TestRepositories.storeEvents(sync);
+		other.deleteEvent(other.loadEvents().get(0));
+		SavePoint deletion = savePoint(other, event.getId(), 0);
 		long before = filesIn(appData);
 
 		LockedUnitException refused = assertThrows(LockedUnitException.class,
 				() -> repository.restoreEvent(event.getId(), deletion, e -> List.of()));
 
 		assertEquals("Zu diesem Speicherstand war das Event gelöscht.", refused.getMessage());
+		assertEquals(before, filesIn(appData));
+		// Cache und Vergleichsstand sind unberührt: Das gehaltene Objekt ist noch dasselbe, und Speichern schreibt nichts
+		assertSame(event, repository.loadEvents().get(0));
+		repository.saveEvent(event);
 		assertEquals(before, filesIn(appData));
 	}
 
@@ -937,6 +944,12 @@ class StoreEventRepositoryTest {
 		clock.advance(10);
 		bookingOf(event, 0, "Müller").setLastName("Schulz");
 		repository.saveEvent(event);
+		clock.advance(10);
+		// eine Änderung von anderer Seite nach dem Speichern dieses Repositorys
+		StoreEventRepository other = TestRepositories.storeEvents(sync);
+		Event outside = other.loadEvents().get(0);
+		bookingOf(outside, 0, "Schulz").setLastName("Fremd1");
+		other.saveEvent(outside);
 		long before = filesIn(appData);
 
 		LockedUnitException refused = assertThrows(LockedUnitException.class,
@@ -945,6 +958,10 @@ class StoreEventRepositoryTest {
 		assertTrue(refused.getMessage()
 				.startsWith("Der Speicherstand enthält unlesbare Teile und wird nicht wiederhergestellt: "),
 				refused.getMessage());
+		assertEquals(before, filesIn(appData));
+		// Cache und Vergleichsstand sind unberührt: Das gehaltene Objekt ist noch dasselbe, und Speichern schreibt nichts
+		assertSame(event, repository.loadEvents().get(0));
+		repository.saveEvent(event);
 		assertEquals(before, filesIn(appData));
 	}
 

@@ -162,9 +162,9 @@ public class StoreHallRepository implements HallRepository {
 
 	/**
 	 * Stellt die Halle auf den Speicherstand zurück, im selben Ablauf wie
-	 * {@link StoreEventRepository#restoreEvent}: frisch lesen (Vergleichsstand und Cache), Zielstand zusammensetzen, mit
-	 * {@code adjust} anpassen, speichern, im Cache ersetzen. Scheitert das Speichern, bleibt im Cache der frisch gelesene
-	 * Stand.
+	 * {@link StoreEventRepository#restoreEvent}: Zielstand zusammensetzen, mit
+	 * {@code adjust} anpassen, frisch lesen (Vergleichsstand und Cache), speichern, im Cache ersetzen. Scheitert das Speichern, bleibt im Cache der frisch gelesene
+	 * Stand. Wird das Wiederherstellen abgelehnt, bleiben Cache und Vergleichsstand unberührt.
 	 *
 	 * @throws LockedUnitException wenn die Halle gesperrt ist oder noch auf eine Datei wartet, wenn sie zu diesem
 	 *                             Speicherstand gelöscht war oder der Zielstand unlesbar ist; es wurde nichts gespeichert
@@ -175,9 +175,9 @@ public class StoreHallRepository implements HallRepository {
 		ensureLoaded();
 		List<UnitState> states = List.of(sync.unitState(UnitKey.hall(hallId)));
 		RestorePlanner.requireRestorable(states);
-		refreshFromStore(hallId, states);
 		Hall target = targetOf(states, point);
 		List<String> notes = adjust.apply(target);
+		refreshFromStore(hallId, states);
 		saveHall(target);
 		replaceCachedHall(target);
 		return new Restored<>(target, notes);

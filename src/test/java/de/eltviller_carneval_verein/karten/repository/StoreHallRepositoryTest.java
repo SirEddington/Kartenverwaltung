@@ -363,6 +363,33 @@ class StoreHallRepositoryTest {
 	}
 
 	@Test
+	void refusedHallRestoreLeavesCacheAndBaselineUntouched(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = TestSyncServices.singleMode(appData, clock);
+		sync.startup(null, p -> {
+		});
+		StoreHallRepository repository = TestRepositories.storeHalls(sync);
+		Hall hall = named("Stadthalle");
+		repository.saveHall(hall);
+		clock.advance(10);
+		// die Halle wird von anderer Seite gelöscht, nachdem dieses Repository sie geladen hat
+		StoreHallRepository other = TestRepositories.storeHalls(sync);
+		other.deleteHall(other.loadHalls().get(0));
+		SavePoint deletion = other.savePoints(hall.getId()).get(0);
+		long before = filesIn(appData);
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class,
+				() -> repository.restoreHall(hall.getId(), deletion, h -> List.of()));
+
+		assertEquals("Zu diesem Speicherstand war die Halle gelöscht.", refused.getMessage());
+		assertEquals(before, filesIn(appData));
+		// Cache und Vergleichsstand sind unberührt: Das gehaltene Objekt ist noch dasselbe, und Speichern schreibt nichts
+		assertSame(hall, repository.findById(hall.getId()));
+		repository.saveHall(hall);
+		assertEquals(before, filesIn(appData));
+	}
+
+	@Test
 	void replaceCachedHallSwapsTheObjectWithoutWriting(@TempDir Path appData) throws IOException {
 		StoreHallRepository repository = TestRepositories.storeHalls(started(appData));
 		Hall original = named("Vorher");
