@@ -2000,6 +2000,20 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void rebuildReportsProgressPerUnit() throws IOException {
+		Path appData = dir.resolve("a");
+		crashWithPendingBooking(appData);
+		Node b = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.layer.failNext("listTree", new IOException("Störung"));
+		List<Double> progress = new ArrayList<>();
+
+		b.service.startup("", progress::add);
+
+		assertTrue(progress.stream().anyMatch(fraction -> fraction > 0 && fraction < 1), "Zwischenstand fehlt: " + progress);
+		assertEquals(1.0, progress.get(progress.size() - 1));
+	}
+
+	@Test
 	void startupFallsBackWhenAUnitReadFailsOnce() throws IOException {
 		Path appData = dir.resolve("a");
 		VersionId pending = crashWithPendingBooking(appData);

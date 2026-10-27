@@ -73,10 +73,10 @@ final class UnitBaseline {
 		known.clear();
 		shown.clear();
 		for (UnitSnapshot snapshot : snapshots) {
-			known.computeIfAbsent(snapshot.unit().ownerId(),k -> new HashMap<>()).put(snapshot.unit(), snapshot);
+			known.computeIfAbsent(snapshot.unit().ownerId(), k -> new HashMap<>()).put(snapshot.unit(), snapshot);
 		}
 		for (UnitKey unit : shownUnits) {
-			shown.computeIfAbsent(unit.ownerId(),k -> new HashSet<>()).add(unit);
+			shown.computeIfAbsent(unit.ownerId(), k -> new HashSet<>()).add(unit);
 		}
 		known.keySet().forEach(this::changed);
 	}

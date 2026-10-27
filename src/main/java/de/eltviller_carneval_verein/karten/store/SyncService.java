@@ -120,6 +120,9 @@ public final class SyncService {
 	private static final String INDEX = "index";
 	private static final String SYNC_STATE = "sync-state.json";
 	private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
+	/** Für Aufrufer ohne Fortschrittsanzeige. */
+	private static final DoubleConsumer NO_PROGRESS = fraction -> {
+	};
 
 	private static SyncService instance;
 	/** Die Sperre gegen einen zweiten Start; gehalten bis zum Programmende. */
@@ -353,8 +356,7 @@ public final class SyncService {
 	 * @return {@code false}, wenn der gemeinsame Ordner nicht erreichbar ist; sonst {@code true}
 	 */
 	public boolean startup(String sharedDir) {
-		return startup(sharedDir, p -> {
-		});
+		return startup(sharedDir, NO_PROGRESS);
 	}
 
 	/**
@@ -375,8 +377,7 @@ public final class SyncService {
 	 */
 	public boolean startup(String sharedDir, DoubleConsumer progress) {
 		reopen();
-		Set<UnitKey> candidates = openIndex(progress != null ? progress : p -> {
-		});
+		Set<UnitKey> candidates = openIndex(progress != null ? progress : NO_PROGRESS);
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			deactivate();
@@ -966,6 +967,10 @@ public final class SyncService {
 		} catch (IOException e) {
 			throw new UncheckedIOException("Die Einheiten des lokalen Bestands ließen sich nicht auflisten", e);
 		}
+		// Fortschritt wie beim Abgleich je volles Prozent: Der Neuaufbau liest jede Einheit und kann lange dauern
+		int done = 0;
+		int lastPercent = 0;
+		progress.accept(0.0);
 		for (UnitKey unit : units) {
 			try {
 				if (!resolveLocal(unit).pending().isEmpty()) {
@@ -974,9 +979,17 @@ public final class SyncService {
 			} catch (IOException e) {
 				throw new UncheckedIOException("Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
 			}
+			done++;
+			int percent = (int) (done * 100L / units.size());
+			if (percent != lastPercent) {
+				lastPercent = percent;
+				progress.accept(percent / 100.0);
+			}
 		}
 		indexRefreshed = true;
-		progress.accept(1.0);
+		if (lastPercent != 100) {
+			progress.accept(1.0);
+		}
 		return pending;
 	}
 
@@ -1369,8 +1382,7 @@ public final class SyncService {
 		// gelten als fremd
 		index.deleteCleanMarker();
 		index = newIndex(renewed.id());
-		refreshIndex(p -> {
-		});
+		refreshIndex(NO_PROGRESS);
 		current.bind(renewed.id(), local, clock);
 		current.fullSyncWanted = true;
 		notifier.duplicateMachine(StoreMessages.duplicateMachine());
