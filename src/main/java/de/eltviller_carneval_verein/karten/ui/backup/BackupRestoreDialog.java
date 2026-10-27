@@ -73,9 +73,13 @@ public final class BackupRestoreDialog {
 		return days;
 	}
 
-	/** {@code HH:mm:ss · <Rechnername> · <Bediener> · <n> Änderungen}; ohne Bediener entfällt dieser Teil. */
+	/**
+	 * {@code HH:mm:ss · <Rechnername> · <Bediener> · <n> Änderungen}; ohne Bediener entfällt dieser Teil, ohne Rechnername
+	 * steht {@code unbekannter Rechner}.
+	 */
 	static String savePointText(SavePoint point, ZoneId zone) {
-		StringBuilder text = new StringBuilder(point.at().atZone(zone).format(CLOCK_FORMAT)).append(" · ").append(point.machineName());
+		String machine = point.machineName() == null || point.machineName().isBlank() ? "unbekannter Rechner" : point.machineName();
+		StringBuilder text = new StringBuilder(point.at().atZone(zone).format(CLOCK_FORMAT)).append(" · ").append(machine);
 		if (point.operator() != null && !point.operator().isBlank()) {
 			text.append(" · ").append(point.operator());
 		}

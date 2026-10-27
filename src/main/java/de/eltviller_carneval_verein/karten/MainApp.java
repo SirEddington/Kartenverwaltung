@@ -15,7 +15,10 @@ import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
+import de.eltviller_carneval_verein.karten.store.SyncListener;
 import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.VersionId;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
 import de.eltviller_carneval_verein.karten.ui.ContextMenuGuard;
@@ -26,6 +29,7 @@ import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -140,6 +144,36 @@ public class MainApp extends Application {
 
 	/** Läuft auf dem FX-Thread, sobald der Bestand geladen ist: der Rest des Starts und dann das Hauptmenü. */
 	private static void onLoaded(SettingsStore settingsStore) {
+		try {
+			finishStart(settingsStore);
+		} catch (RuntimeException e) {
+			LOG.log(Level.SEVERE, "Oberfläche konnte nicht geladen werden", e);
+			showAlert("Start nicht möglich", "Die Oberfläche konnte nicht geladen werden: " + failureMessage(e), AlertType.ERROR);
+			Platform.exit();
+		}
+	}
+
+	/**
+	 * Die Rückmeldungen des Versionsspeichers kommen auf dem FX-Thread an. Gezeigt wird, was der Nutzer wissen muss und nicht
+	 * selbst sieht: ein Fehler des Dienstes und eine eigene Änderung, die gegen eine andere verloren hat.
+	 */
+	private static SyncListener syncListener() {
+		return new SyncListener() {
+			@Override
+			public void error(String message) {
+				StatusMessage.getInstance().show(Severity.ERROR, message);
+			}
+
+			@Override
+			public void lost(UnitKey unit, List<VersionId> mine, VersionId winner) {
+				StatusMessage.getInstance().show(Severity.ERROR, "Eine Änderung an " + unit.relativePath()
+						+ " wurde nicht übernommen, weil ein anderer Stand zuerst gespeichert war. Bitte die Daten prüfen.");
+			}
+		};
+	}
+
+	private static void finishStart(SettingsStore settingsStore) {
+		SyncService.getInstance().setListener(syncListener());
 		StoreHallRepository halls = StoreHallRepository.getInstance();
 		StoreEventRepository repository = StoreEventRepository.getInstance();
 

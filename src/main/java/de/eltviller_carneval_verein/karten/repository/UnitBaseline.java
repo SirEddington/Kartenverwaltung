@@ -206,6 +206,11 @@ final class UnitBaseline {
 			refresh(ownerId, changes, saveId);
 			changed(ownerId);
 			throw new RuntimeException(failureText + StoreMessages.describe(e), e);
+		} catch (RuntimeException e) {
+			// Auch eine ungeprüfte Ausnahme kann nach einer geschriebenen Datei auftreten: Vergleichsstand angleichen, dann unverändert weiter
+			refresh(ownerId, changes, saveId);
+			changed(ownerId);
+			throw e;
 		}
 		for (int i = 0; i < written.size(); i++) {
 			UnitKey unit = changes.get(i).unit();

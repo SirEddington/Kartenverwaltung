@@ -9,14 +9,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
@@ -35,6 +39,7 @@ import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
+import de.eltviller_carneval_verein.karten.store.FileLayer;
 import de.eltviller_carneval_verein.karten.store.LocalArbiter;
 import de.eltviller_carneval_verein.karten.store.NioFileLayer;
 import de.eltviller_carneval_verein.karten.store.StoreCodec;
@@ -401,6 +406,95 @@ class StoreEventRepositoryTest {
 
 		assertTrue(failure.getMessage().startsWith("Fehler beim Speichern von \"Prunksitzung\": "), failure.getMessage());
 		assertInstanceOf(IOException.class, failure.getCause());
+		repository.saveEvent(event);
+
+		for (UnitKey unit : sync.eventUnits(event.getId())) {
+			UnitState state = sync.unitState(unit);
+			assertEquals(Status.OK, state.status(), unit.relativePath());
+			assertTrue(state.lost().isEmpty(), unit.relativePath() + " hat eine verlorene Strecke");
+		}
+		sync.flushIndex();
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
+		assertEquals("Mueller", bookingOf(again, 0, "Mueller").getLastName());
+		assertEquals("Maier", bookingOf(again, 0, "Maier").getLastName());
+	}
+
+	/** Eine Dateischicht, deren Anlegen nach dem {@code failAt}-ten Aufruf mit einer ungeprüften Ausnahme meldet, die Datei steht dann schon. */
+	private static final class UncheckedFailingLayer implements FileLayer {
+		private final FileLayer delegate = new NioFileLayer();
+		private final AtomicInteger creations = new AtomicInteger();
+		private volatile int failAt = Integer.MAX_VALUE;
+
+		void failAtCreation(int n) {
+			creations.set(0);
+			failAt = n;
+		}
+
+		@Override
+		public boolean createNew(Path file, byte[] content) throws IOException {
+			boolean result = delegate.createNew(file, content);
+			if (creations.incrementAndGet() == failAt) {
+				throw new UncheckedIOException(new IOException("Platte voll"));
+			}
+			return result;
+		}
+
+		@Override
+		public Optional<byte[]> read(Path file) throws IOException {
+			return delegate.read(file);
+		}
+
+		@Override
+		public boolean exists(Path file) {
+			return delegate.exists(file);
+		}
+
+		@Override
+		public List<String> listNames(Path dir) throws IOException {
+			return delegate.listNames(dir);
+		}
+
+		@Override
+		public Map<String, List<String>> listTree(Path root) throws IOException {
+			return delegate.listTree(root);
+		}
+
+		@Override
+		public boolean isDirectory(Path path) {
+			return delegate.isDirectory(path);
+		}
+
+		@Override
+		public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
+			delegate.replaceDamaged(file, good, corruptName);
+		}
+
+		@Override
+		public void rename(Path from, Path to) throws IOException {
+			delegate.rename(from, to);
+		}
+
+		@Override
+		public void deleteOwnTemps(Path dir, Duration olderThan) throws IOException {
+			delegate.deleteOwnTemps(dir, olderThan);
+		}
+	}
+
+	@Test
+	void uncheckedFailureOfAppendKeepsBaselineConsistent(@TempDir Path appData) throws IOException {
+		UncheckedFailingLayer layer = new UncheckedFailingLayer();
+		SyncService sync = started(TestSyncServices.singleMode(appData, layer));
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = eventWithBookings();
+		repository.saveEvent(event);
+		bookingOf(event, 0, "Müller").setLastName("Mueller");
+		bookingOf(event, 0, "Meier").setLastName("Maier");
+		// die zweite Datei wird angelegt, aber der Aufrufer erfährt von einer ungeprüften Ausnahme
+		layer.failAtCreation(2);
+
+		UncheckedIOException failure = assertThrows(UncheckedIOException.class, () -> repository.saveEvent(event));
+
+		assertEquals("Platte voll", failure.getCause().getMessage());
 		repository.saveEvent(event);
 
 		for (UnitKey unit : sync.eventUnits(event.getId())) {

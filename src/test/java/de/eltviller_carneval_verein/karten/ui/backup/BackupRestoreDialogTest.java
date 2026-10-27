@@ -63,6 +63,18 @@ class BackupRestoreDialogTest {
 	}
 
 	@Test
+	void savePointTextNamesUnknownMachine() {
+		Instant at = Instant.parse("2026-10-26T12:30:12Z");
+
+		assertEquals("14:30:12 · unbekannter Rechner · Anna · 3 Änderungen",
+				BackupRestoreDialog.savePointText(new SavePoint("a", at, null, "Anna", 3), ZONE));
+		assertEquals("14:30:12 · unbekannter Rechner · Anna · 3 Änderungen",
+				BackupRestoreDialog.savePointText(new SavePoint("a", at, "", "Anna", 3), ZONE));
+		assertEquals("14:30:12 · unbekannter Rechner · 3 Änderungen",
+				BackupRestoreDialog.savePointText(new SavePoint("a", at, "  ", null, 3), ZONE));
+	}
+
+	@Test
 	void savePointTextUsesSingularForOneChange() {
 		assertEquals("14:30:12 · Kasse1 · Anna · 1 Änderung", BackupRestoreDialog.savePointText(point("a", "2026-10-26T12:30:12Z", "Anna", 1), ZONE));
 	}

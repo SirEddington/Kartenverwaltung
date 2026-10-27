@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.store;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -127,6 +128,8 @@ final class UnitIndex {
 	private final Set<String> dirty = new TreeSet<>();
 	/** Ob diese Instanz die Marke "sauber beendet" angelegt hat und sie noch gilt. */
 	private boolean markerWritten;
+	/** Ob die Reste abgebrochener Schreibvorgänge schon gelöscht wurden (einmal beim Öffnen). */
+	private boolean tempsDeleted;
 	private Deleter deleter = Files::deleteIfExists;
 
 	/**
@@ -211,6 +214,7 @@ final class UnitIndex {
 	 * @return die Einheiten mit ausstehenden und mit verlorenen Versionen und die Zahl der neu aufgelösten Einheiten
 	 */
 	synchronized Refresh refresh(VersionStore local, DoubleConsumer progress) throws IOException {
+		deleteLeftoverTemps();
 		DoubleConsumer report = progress == null ? p -> {
 		} : progress;
 		Map<String, List<String>> tree = files.listTree(local.dataRoot());
@@ -390,19 +394,32 @@ final class UnitIndex {
 	 * versucht.
 	 */
 	synchronized void deleteCleanMarker() {
-		Path marker = cleanMarker();
 		try {
-			deleter.delete(marker);
+			deleter.delete(cleanMarker());
 		} catch (IOException | RuntimeException e) {
-			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht löschen und wird geleert: " + marker, e);
-			try {
-				Files.write(marker, new byte[0]);
-			} catch (IOException | RuntimeException again) {
-				LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich auch nicht leeren: " + marker, again);
+			if (!emptyCleanMarker(e)) {
 				return;
 			}
 		}
 		markerWritten = false;
+	}
+
+	/**
+	 * Leert die Marke, nachdem das Löschen gescheitert ist: Eine leere Marke nennt keine Rechner-ID und gilt beim Start als
+	 * unbrauchbar.
+	 *
+	 * @return {@code false}, wenn auch das scheitert und die Marke deshalb noch gültig sein kann
+	 */
+	private boolean emptyCleanMarker(Exception deleteFailure) {
+		Path marker = cleanMarker();
+		LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht löschen und wird geleert: " + marker, deleteFailure);
+		try {
+			Files.write(marker, new byte[0]);
+		} catch (IOException | RuntimeException again) {
+			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich auch nicht leeren: " + marker, again);
+			return false;
+		}
+		return true;
 	}
 
 	/**
@@ -429,14 +446,16 @@ final class UnitIndex {
 	/**
 	 * Übernimmt den Index ohne Durchlauf über den Verzeichnisbaum, wenn er beim letzten Beenden sauber geschrieben wurde. Prüft
 	 * dazu die Marke und löscht sie sofort: Sie gilt nur für genau diesen Start. Eine fremde oder unlesbare Marke wird
-	 * ebenfalls gelöscht (scheitert das, steht nur eine Warnung im Log), gilt aber nicht. Lässt sich die eigene Marke nicht
-	 * löschen, gilt der Start als unsauber. Danach werden alle Index-Dateien gelesen; ist eine unlesbar, hat ein anderes Format
+	 * ebenfalls gelöscht (scheitert das, steht nur eine Warnung im Log), gilt aber nicht. Lässt sich die Marke nicht löschen,
+	 * wird sie geleert wie in {@link #deleteCleanMarker()}; gelingt auch das nicht, gilt der Start als unsauber, und jedes
+	 * spätere {@link #invalidateCleanMarker()} versucht es erneut. Danach werden alle Index-Dateien gelesen; ist eine unlesbar, hat ein anderes Format
 	 * oder eine andere Rechner-ID, gilt der Start ebenfalls als unsauber, und nichts von dem Gelesenen wird übernommen.
 	 * <p>
 	 * Bei {@code true} sind alle Einträge geladen; {@link #cleanRefresh()} liefert die Einheiten mit ausstehenden und
 	 * verlorenen Versionen. Bei {@code false} ist der Index unverändert und {@link #refresh} der Weg wie bisher. Wirft nie.
 	 */
 	synchronized boolean loadIfClean() {
+		deleteLeftoverTemps();
 		Path marker = cleanMarker();
 		markerWritten = false;
 		boolean own;
@@ -452,7 +471,10 @@ final class UnitIndex {
 		try {
 			deleter.delete(marker);
 		} catch (IOException | RuntimeException e) {
-			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht löschen: " + marker, e);
+			if (!emptyCleanMarker(e)) {
+				// Die Marke kann gültig geblieben sein: jede spätere Änderung am Bestand versucht es erneut
+				markerWritten = true;
+			}
 			return false;
 		}
 		if (!own) {
@@ -475,6 +497,32 @@ final class UnitIndex {
 			list.forEach(entry -> entries.putIfAbsent(entry.snapshot().unit(), entry));
 		});
 		return true;
+	}
+
+	/**
+	 * Löscht die temporären Dateien {@code ~karv-index-*.tmp}, die ein abgebrochenes {@link #flush} im Index-Ordner und in
+	 * {@code events/} zurückgelassen hat, gleich welchen Alters: Nur diese Klasse schreibt sie, und den Index nutzt nur ein
+	 * Prozess (die Instanzsperre). Geschieht beim ersten Öffnen des Index ({@link #loadIfClean} oder {@link #refresh}) einmal;
+	 * Fehler stehen nur im Log.
+	 */
+	private void deleteLeftoverTemps() {
+		if (tempsDeleted) {
+			return;
+		}
+		tempsDeleted = true;
+		for (Path dir : List.of(indexDir, indexDir.resolve(EVENTS))) {
+			if (!Files.isDirectory(dir)) {
+				continue;
+			}
+			try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir,
+					FileLayer.TEMP_PREFIX + "index-*" + FileLayer.TEMP_SUFFIX)) {
+				for (Path temp : stream) {
+					deleteQuietly(temp);
+				}
+			} catch (IOException | RuntimeException e) {
+				LOGGER.log(Level.WARNING, "Temporäre Reste im Index-Ordner ließen sich nicht entfernen: " + dir, e);
+			}
+		}
 	}
 
 	private static void deleteQuietly(Path temp) {

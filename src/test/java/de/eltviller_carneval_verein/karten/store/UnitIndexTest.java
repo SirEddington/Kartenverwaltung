@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -856,6 +857,82 @@ class UnitIndexTest {
 		UnitIndex next = index();
 		assertFalse(next.loadIfClean());
 		assertTrue(next.entries().isEmpty());
+	}
+
+	@Test
+	void failedMarkerDeleteInCleanLoadEmptiesMarker() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		UnitIndex second = index();
+		second.useDeleter(file -> {
+			throw new IOException("Datei gesperrt");
+		});
+
+		assertFalse(second.loadIfClean());
+
+		// gelöscht ging nicht: die Marke ist leer und gilt für keinen späteren Start
+		assertTrue(Files.isRegularFile(cleanMarker()));
+		assertEquals(0, Files.size(cleanMarker()));
+		UnitIndex next = index();
+		assertFalse(next.loadIfClean());
+		assertTrue(next.entries().isEmpty());
+	}
+
+	@Test
+	void markerThatCannotBeRemovedInCleanLoadIsRetriedByInvalidate() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		Path marker = cleanMarker();
+		assertTrue(marker.toFile().setWritable(false));
+		assumeFalse(Files.isWritable(marker), "Schreibschutz greift auf diesem System nicht");
+		try {
+			UnitIndex second = index();
+			second.useDeleter(file -> {
+				throw new IOException("Datei gesperrt");
+			});
+			assertFalse(second.loadIfClean());
+			// weder Löschen noch Leeren ging: die Marke steht noch, und mit ihr der Inhalt
+			assertEquals(ME, Files.readString(marker, StandardCharsets.UTF_8));
+
+			// jede spätere Änderung am Bestand versucht es erneut
+			assertTrue(marker.toFile().setWritable(true));
+			second.useDeleter(Files::deleteIfExists);
+			second.invalidateCleanMarker();
+
+			assertFalse(Files.exists(marker));
+		} finally {
+			marker.toFile().setWritable(true);
+		}
+	}
+
+	@Test
+	void refreshDeletesLeftoverTempFilesOfTheIndex() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		Path leftOver = indexDir.resolve("~karv-index-" + java.util.UUID.randomUUID() + ".tmp");
+		Path leftOverEvents = indexDir.resolve("events").resolve("~karv-index-" + java.util.UUID.randomUUID() + ".tmp");
+		Path foreign = indexDir.resolve("Thumbs.db");
+		Files.writeString(leftOver, "halb");
+		Files.writeString(leftOverEvents, "halb");
+		Files.writeString(foreign, "bleibt");
+
+		refresh(index(), local);
+
+		assertFalse(Files.exists(leftOver));
+		assertFalse(Files.exists(leftOverEvents));
+		assertTrue(Files.exists(foreign));
+	}
+
+	@Test
+	void cleanLoadDeletesLeftoverTempFilesOfTheIndex() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		Path leftOver = indexDir.resolve("events").resolve("~karv-index-" + java.util.UUID.randomUUID() + ".tmp");
+		Files.writeString(leftOver, "halb");
+
+		assertTrue(index().loadIfClean());
+
+		assertFalse(Files.exists(leftOver));
 	}
 
 	@Test
