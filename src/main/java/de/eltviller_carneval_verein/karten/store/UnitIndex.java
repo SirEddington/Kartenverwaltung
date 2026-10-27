@@ -254,6 +254,33 @@ final class UnitIndex {
 		return Map.copyOf(entries);
 	}
 
+	/** Ob es Änderungen gibt, die {@link #flush} noch schreiben müsste. */
+	synchronized boolean hasChanges() {
+		return !dirty.isEmpty();
+	}
+
+	/**
+	 * Verwirft alle Einträge. Alle bekannten Gruppen (im Speicher und als Datei vorhanden) gelten als geändert; der nächste
+	 * {@link #flush} schreibt sie leer. Die alten Dateien werden nie wieder gelesen: nötig, wenn der Datenordner ausgetauscht
+	 * wird (Beiseitelegen), denn danach können gleiche Dateinamen anderen Inhalt haben.
+	 */
+	synchronized void clear() {
+		Set<String> groups = new TreeSet<>(loaded);
+		entries.keySet().forEach(unit -> groups.add(groupOf(unit)));
+		try {
+			for (String group : storedGroups()) {
+				if (files.exists(fileOf(group))) {
+					groups.add(group);
+				}
+			}
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Der Index-Ordner " + indexDir + " ließ sich nicht auflisten", e);
+		}
+		entries.clear();
+		loaded.addAll(groups);
+		dirty.addAll(groups);
+	}
+
 	/**
 	 * Schreibt die geänderten Index-Dateien, jede über eine temporäre Datei im selben Ordner und
 	 * {@link AtomicFileReplace#replace}. Scheitert eine Datei, bleibt sie als geändert vorgemerkt und die Ausnahme geht

@@ -1298,4 +1298,256 @@ class SyncServiceTest {
 		assertEquals(List.of(UnitKey.event("e1"), UnitKey.presentation("e1", "p1"), BOOKING), a.service.eventUnits("e1"));
 		assertEquals(List.of(v1.id(), v2.id()), a.service.history(BOOKING).stream().map(Version::id).toList());
 	}
+
+	// --- Start-Index
+
+	private static final UnitKey HALL = UnitKey.hall("h1");
+
+	/** Der Stand der Einheiten, wie ihn {@link ChainResolver} aus den Dateien des Datenordners ermittelt. */
+	private static Map<UnitKey, UnitSnapshot> snapshotsFromFiles(Path appData, String machineId) throws IOException {
+		VersionStore store = new VersionStore(appData.resolve("data"), new NioFileLayer());
+		Map<UnitKey, UnitSnapshot> expected = new java.util.HashMap<>();
+		for (UnitKey unit : store.allUnits()) {
+			expected.put(unit, UnitSnapshot.of(ChainResolver.resolve(store.readUnit(unit), machineId)));
+		}
+		return expected;
+	}
+
+	@Test
+	void startupBuildsSnapshotsOfAllUnits() throws IOException {
+		Path appData = dir.resolve("a");
+		SyncService first = TestSyncServices.singleMode(appData);
+		first.startup(null, p -> {
+		});
+		Version v1 = first.append("s1", List.of(create(BOOKING, "Anna"))).get(0);
+		Version v2 = first.append("s2", List.of(update(BOOKING, v1, "Anna B"))).get(0);
+		Version vh = first.append("s3", List.of(create(HALL, "Halle"))).get(0);
+
+		SyncService second = TestSyncServices.singleMode(appData);
+		assertTrue(second.startup(null, p -> {
+		}));
+
+		Map<UnitKey, UnitSnapshot> snapshots = second.snapshots();
+		// dazu die Ordner von Event und Vorstellung, die ohne eigene Dateien keinen Stand haben
+		assertEquals(Set.of(UnitKey.event("e1"), UnitKey.presentation("e1", "p1"), BOOKING, HALL), snapshots.keySet());
+		assertNull(snapshots.get(UnitKey.event("e1")).version());
+		assertEquals(v2.id(), snapshots.get(BOOKING).version());
+		assertEquals(payload("Anna B"), snapshots.get(BOOKING).payload());
+		assertEquals(Status.OK, snapshots.get(BOOKING).status());
+		assertEquals(vh.id(), snapshots.get(HALL).version());
+		assertEquals(payload("Halle"), snapshots.get(HALL).payload());
+		assertThrows(UnsupportedOperationException.class, () -> snapshots.remove(HALL));
+	}
+
+	@Test
+	void startupClaimsPendingFromIndexCandidates() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(HALL, "Halle"));
+		// Absturz zwischen dem Schreiben der Version und ihrem lokalen Anspruch
+		a.layer.failWhen(p -> p.startsWith(a.localData()) && p.getParent().endsWith("claims"), "createNew",
+				new IOException("Absturz"));
+		assertThrows(IOException.class, () -> a.service.append("s2", List.of(create(BOOKING, "Anna"))));
+		VersionId pending = a.service.history(BOOKING).get(0).id();
+		a.service.flushIndex();
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(""));
+
+		assertEquals(pending, b.service.unitState(BOOKING).head().id());
+		assertEquals(pending, b.service.snapshots().get(BOOKING).version());
+		assertEquals(Status.OK, b.service.snapshots().get(BOOKING).status());
+		// die unveränderte Einheit wurde nicht angefasst: weder gelesen noch aufgelöst
+		String hallFolder = b.localData().resolve(HALL.relativePath()).toString();
+		assertTrue(b.layer.calls().stream().noneMatch(c -> c.startsWith("read ") && c.contains(hallFolder)));
+	}
+
+	@Test
+	void appendUpdatesSnapshots() throws IOException {
+		SyncService service = TestSyncServices.singleMode(dir.resolve("a"));
+		service.startup(null, p -> {
+		});
+
+		Version v1 = service.append("s1", List.of(create(BOOKING, "Anna"))).get(0);
+		assertEquals(v1.id(), service.snapshots().get(BOOKING).version());
+		assertEquals(payload("Anna"), service.snapshots().get(BOOKING).payload());
+
+		Version v2 = service.append("s2", List.of(update(BOOKING, v1, "Anna B"))).get(0);
+		assertEquals(v2.id(), service.snapshots().get(BOOKING).version());
+		assertEquals(payload("Anna B"), service.snapshots().get(BOOKING).payload());
+	}
+
+	@Test
+	void appendInSharedModeUpdatesSnapshotsWithPendingVersion() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+
+		Version v = save(a, create(BOOKING, "Anna"));
+
+		assertEquals(v.id(), a.service.snapshots().get(BOOKING).version());
+	}
+
+	@Test
+	void startupAfterLostFlushMatchesFiles() throws IOException {
+		Path appData = dir.resolve("a");
+		SyncService first = TestSyncServices.singleMode(appData);
+		first.startup(null, p -> {
+		});
+		Version v1 = first.append("s1", List.of(create(BOOKING, "Anna"))).get(0);
+		first.flushIndex();
+		// diese Änderung erreicht den Index auf der Platte nie
+		first.append("s2", List.of(update(BOOKING, v1, "Anna B")));
+		first.append("s3", List.of(create(HALL, "Halle")));
+
+		SyncService second = TestSyncServices.singleMode(appData);
+		second.startup(null, p -> {
+		});
+
+		MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "test");
+		assertEquals(snapshotsFromFiles(appData, identity.id()), second.snapshots());
+		assertEquals(payload("Anna B"), second.snapshots().get(BOOKING).payload());
+	}
+
+	@Test
+	void startupReadsUnitsOnlyOnceWithIndex() throws IOException {
+		Path appData = dir.resolve("a");
+		SyncService first = TestSyncServices.singleMode(appData);
+		first.startup(null, p -> {
+		});
+		for (int i = 0; i < 20; i++) {
+			first.append("s" + i, List.of(create(UnitKey.booking("e1", "p1", "A-" + i), "Gast " + i)));
+		}
+		first.flushIndex();
+
+		Node b = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(""));
+
+		String data = b.localData().toString();
+		assertTrue(b.layer.calls().stream().noneMatch(c -> c.startsWith("read ") && c.contains(data)));
+		assertTrue(b.layer.calls().stream().anyMatch(c -> c.startsWith("read ") && c.contains("index")));
+		for (int i = 0; i < 20; i++) {
+			assertEquals("Gast " + i,
+					b.service.snapshots().get(UnitKey.booking("e1", "p1", "A-" + i)).payload().get("name").asText());
+		}
+	}
+
+	@Test
+	void startupReportsProgressUpToOne() throws IOException {
+		Path appData = dir.resolve("a");
+		SyncService first = TestSyncServices.singleMode(appData);
+		first.startup(null);
+		first.append("s1", List.of(create(BOOKING, "Anna")));
+		List<Double> progress = new ArrayList<>();
+
+		TestSyncServices.singleMode(appData).startup(null, progress::add);
+
+		assertEquals(1.0, progress.get(progress.size() - 1));
+	}
+
+	@Test
+	void tickFlushesIndexAtMostEveryFiveSeconds() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		assertEquals(0, indexWrites(a));
+
+		a.service.tick();
+		assertEquals(1, indexWrites(a));
+
+		Version v2 = save(a, update(BOOKING, v1, "Anna B"));
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		assertEquals(1, indexWrites(a));
+
+		clock.advance(Duration.ofSeconds(3));
+		a.service.tick();
+		assertEquals(2, indexWrites(a));
+
+		// nichts geändert: nichts zu schreiben
+		clock.advance(Duration.ofSeconds(5));
+		a.service.tick();
+		assertEquals(2, indexWrites(a));
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.service.startup("");
+		assertEquals(v2.id(), b.service.snapshots().get(BOOKING).version());
+	}
+
+	private static long indexWrites(Node node) {
+		String index = node.appData.resolve("index").toString();
+		return node.layer.calls().stream().filter(c -> c.startsWith("createNew ") && c.contains(index)).count();
+	}
+
+	@Test
+	void flushIndexWritesNothingBeforeStartup() throws IOException {
+		Path appData = dir.resolve("a");
+		SyncService service = TestSyncServices.singleMode(appData);
+		service.append("s1", List.of(create(BOOKING, "Anna")));
+
+		service.flushIndex();
+
+		assertFalse(Files.exists(appData.resolve("index")));
+
+		service.startup(null);
+		service.flushIndex();
+
+		assertTrue(Files.exists(appData.resolve("index/events/e1.json")));
+	}
+
+	@Test
+	void flushIndexDoesNotThrowWhenWritingFails() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(BOOKING, "Anna"));
+		a.layer.failWhen(p -> p.startsWith(a.appData.resolve("index")), "createNew", new IOException("Platte voll"));
+
+		a.service.flushIndex();
+		a.service.tick();
+
+		assertFalse(Files.exists(a.appData.resolve("index/events/e1.json")));
+	}
+
+	@Test
+	void setAsideClearsIndex() throws IOException {
+		UnitKey mine = UnitKey.event("lokal");
+		UnitKey theirs = UnitKey.event("gemeinsam");
+		Node b = node("b");
+		b.service.startup(shared);
+		save(b, create(theirs, "B"));
+		b.service.tick();
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(mine, "A"));
+		a.service.flushIndex();
+		assertEquals(Set.of(mine), a.service.snapshots().keySet());
+
+		a.service.connect(shared, ConnectMode.SET_ASIDE);
+
+		assertEquals(Set.of(theirs), a.service.snapshots().keySet());
+		a.service.flushIndex();
+		assertEquals(0, MAPPER.readTree(Files.readAllBytes(a.appData.resolve("index/events/lokal.json"))).get("units").size());
+		Node again = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(again.service.startup(shared));
+		assertEquals(Set.of(theirs), again.service.snapshots().keySet());
+		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), again.service.snapshots());
+	}
+
+	@Test
+	void changedUnitsAreInTheIndexWhenReported() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(HALL, "Halle"));
+		a.service.tick();
+		Node b = node("b");
+		b.service.startup(shared);
+		b.events.changed.clear();
+		Version va = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+
+		b.service.tick();
+
+		assertEquals(Set.of(BOOKING), b.events.changedUnits());
+		assertEquals(va.id(), b.service.snapshots().get(BOOKING).version());
+		assertFalse(b.service.snapshots().get(BOOKING).deleted());
+	}
 }

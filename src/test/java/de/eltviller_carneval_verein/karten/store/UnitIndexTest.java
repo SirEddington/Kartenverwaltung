@@ -534,6 +534,35 @@ class UnitIndexTest {
 	}
 
 	@Test
+	void clearDropsEntriesAndRewritesGroups() throws IOException {
+		buildThreeUnits();
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+		assertFalse(index.hasChanges());
+
+		index.clear();
+
+		assertTrue(index.entries().isEmpty());
+		assertTrue(index.hasChanges());
+		index.flush();
+		assertFalse(index.hasChanges());
+		for (Path file : List.of(eventIndexFile("e1"), indexDir.resolve("halls.json"))) {
+			assertEquals(0, new ObjectMapper().readTree(Files.readAllBytes(file)).get("units").size(), file.toString());
+		}
+		// der alte Inhalt kommt nicht zurück: weder in dieser Instanz noch in einer neuen
+		UnitIndex.Refresh again = refresh(index, local);
+		assertEquals(3, again.resolved());
+		index.flush();
+		assertEquals(0, refresh(index(), local).resolved());
+		// auch eine Instanz, die den Index noch nie gelesen hat, leert die Dateien
+		UnitIndex fresh = index();
+		fresh.clear();
+		fresh.flush();
+		assertEquals(3, refresh(index(), local).resolved());
+	}
+
+	@Test
 	void entriesCopyIsUnmodifiable() throws IOException {
 		saveTwice(EVENT, "event");
 		UnitIndex index = index();

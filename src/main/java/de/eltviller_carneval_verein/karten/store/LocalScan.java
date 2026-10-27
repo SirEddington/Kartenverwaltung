@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -66,8 +67,19 @@ final class LocalScan {
 	 * @param skip Versionen, die schon in einem Auftrag stehen; sie kommen nicht noch einmal vor
 	 */
 	static List<UploadJob> pendingJobs(VersionStore local, String ownMachineId, Set<VersionId> skip) throws IOException {
+		return pendingJobs(local, ownMachineId, skip, local.allUnits());
+	}
+
+	/**
+	 * Wie {@link #pendingJobs(VersionStore, String, Set)}, aber nur für die genannten Einheiten (etwa die Kandidaten aus dem
+	 * Start-Index). Jede wird aus den Dateien aufgelöst; die Auswahl spart nur das Lesen der übrigen.
+	 *
+	 * @param units die Einheiten, die untersucht werden
+	 */
+	static List<UploadJob> pendingJobs(VersionStore local, String ownMachineId, Set<VersionId> skip,
+			Collection<UnitKey> units) throws IOException {
 		Map<String, Map<UnitKey, List<UploadJob.Item>>> groups = new LinkedHashMap<>();
-		for (UnitKey unit : local.allUnits()) {
+		for (UnitKey unit : units) {
 			UnitFiles files = local.readUnit(unit);
 			for (Version version : ChainResolver.resolve(files, ownMachineId).pending()) {
 				if (skip.contains(version.id())) {

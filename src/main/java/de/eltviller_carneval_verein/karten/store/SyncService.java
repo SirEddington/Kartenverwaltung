@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -27,6 +28,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.DoubleConsumer;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -67,6 +69,15 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * aufgelöste Einheit (beim ersten Vollabgleich alle) wird jede verlorene Strecke gemeldet, deren Versionen in diesem
  * Programmlauf noch nicht gemeldet wurden. So geht kein Verlust durch einen Absturz verloren, und keiner kommt doppelt.
  * <p>
+ * <b>Start-Index:</b> Der Stand jeder Einheit steht zusätzlich in einem lokalen Index ({@link UnitIndex}, Ordner
+ * {@code index/} im Datenordner), den {@link #snapshots()} ohne Dateizugriff liefert. {@link #startup} gleicht ihn in
+ * einem Durchlauf über die Verzeichnisnamen mit dem Bestand ab und löst nur Einheiten neu auf, deren Dateinamen sich
+ * geändert haben; nur die dabei gefundenen Kandidaten mit ausstehenden eigenen Versionen untersucht der Start auf dem
+ * Thread des Aufrufers. Jede Stelle, die den Stand einer Einheit ermittelt, trägt ihn danach in den Index ein. Gespeichert
+ * wird er von {@link #flushIndex()} und im Takt alle {@link #INDEX_FLUSH}, nicht vor dem Abgleich durch {@link #startup}.
+ * Der Index ist nie Schiedsrichter: Jede Entscheidung über Vorgänger, Ansprüche und Verluste trifft {@link ChainResolver}
+ * auf den Dateien; die Abläufe im {@code worker} lesen weiterhin alle Einheiten.
+ * <p>
  * <b>Threads:</b>
  * <ul>
  * <li>Jeder Zugriff auf den gemeinsamen Ordner läuft im {@code worker}, in der Anwendung ein einzelner Daemon-Thread,
@@ -95,10 +106,13 @@ public final class SyncService {
 	static final int LATE_DEFEAT_BUDGET = 150;
 	/** Eigene temporäre Dateien, die älter sind, räumt der Start weg. */
 	static final Duration TEMP_AGE = Duration.ofDays(1);
+	/** So selten schreibt der Takt den Start-Index. */
+	static final Duration INDEX_FLUSH = Duration.ofSeconds(5);
 
 	private static final int MAX_REPAIRS = 10;
 	private static final int MAX_ID_ATTEMPTS = 100;
 	private static final String DATA = "data";
+	private static final String INDEX = "index";
 	private static final String SYNC_STATE = "sync-state.json";
 	private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
@@ -172,6 +186,13 @@ public final class SyncService {
 	private final VersionStore local;
 	private final SyncNotifier notifier;
 
+	/** Der Start-Index; hat eine eigene Sperre, deshalb nie unter {@code lock} benutzen. Neu bei einer neuen Rechner-ID. */
+	private volatile UnitIndex index;
+	/** Ob {@link #startup} den Index mit dem Bestand abgeglichen hat; vorher schreibt {@link #flushIndex()} nichts. */
+	private volatile boolean indexRefreshed;
+	/** Wann zuletzt versucht wurde, den Index zu schreiben; {@code null}, solange noch nie. */
+	private volatile Instant lastIndexFlush;
+
 	/** Serialisiert die Arbeit am gemeinsamen Ordner: Takt, Hochladen beim Start. */
 	private final ReentrantLock workLock = new ReentrantLock();
 
@@ -222,6 +243,7 @@ public final class SyncService {
 		this.notifier = new SyncNotifier(ui);
 		this.machine = machine;
 		this.ids = new VersionIdGenerator(machine.id(), clock);
+		this.index = new UnitIndex(appDataDir.resolve(INDEX), files, machine.id());
 	}
 
 	/**
@@ -304,15 +326,30 @@ public final class SyncService {
 	 * @return {@code false}, wenn der gemeinsame Ordner nicht erreichbar ist; sonst {@code true}
 	 */
 	public boolean startup(String sharedDir) {
+		return startup(sharedDir, p -> {
+		});
+	}
+
+	/**
+	 * Wie {@link #startup(String)}, mit Fortschritt. Nach dem Aufräumen gleicht der Start den Start-Index mit dem lokalen
+	 * Bestand ab (ein Durchlauf über die Verzeichnisnamen; nur Einheiten mit geänderten Dateinamen werden neu aufgelöst).
+	 * Ausstehende eigene Versionen werden nur bei den Einheiten gesucht, die der Index dafür nennt; die Entscheidung trifft
+	 * wie überall {@link ChainResolver} auf den Dateien. Scheitert der Abgleich, sucht der Start in allen Einheiten.
+	 *
+	 * @param progress bekommt den Anteil der abgeglichenen Einheiten von 0.0 bis 1.0, zuletzt 1.0; darf {@code null} sein
+	 */
+	public boolean startup(String sharedDir, DoubleConsumer progress) {
 		try {
 			files.deleteOwnTemps(local.dataRoot(), TEMP_AGE);
 		} catch (IOException | RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Alte temporäre Dateien im lokalen Bestand ließen sich nicht entfernen", e);
 		}
+		// null heißt: der Index war nicht zu gebrauchen, alle Einheiten untersuchen
+		Set<UnitKey> candidates = refreshIndex(progress);
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			deactivate();
-			claimPendingLocally();
+			claimPendingLocally(candidates);
 			return true;
 		}
 		Link current = activate(dir, null);
@@ -324,7 +361,7 @@ public final class SyncService {
 		try {
 			Round round = new Round(current);
 			round.run(() -> {
-				enqueuePending(current);
+				enqueuePending(current, candidates);
 				runJobs(current, round);
 			});
 			reportChanges(round);
@@ -389,18 +426,20 @@ public final class SyncService {
 	 */
 	public void disconnect() {
 		deactivate();
-		claimPendingLocally();
+		claimPendingLocally(null);
 	}
 
 	/**
 	 * Einzelbetrieb: Ausstehende eigene Versionen (nach dem Trennen, nach einem Absturz zwischen Schreiben und lokalem
 	 * Anspruch) werden lokal beansprucht, in der Reihenfolge der Aufträge. Nur lokal, deshalb auf dem Thread des
 	 * Aufrufers.
+	 *
+	 * @param candidates die Einheiten, die untersucht werden; {@code null} heißt alle
 	 */
-	private void claimPendingLocally() {
+	private void claimPendingLocally(Collection<UnitKey> candidates) {
 		try {
 			List<UploadJob.Item> items = new ArrayList<>();
-			for (UploadJob job : LocalScan.pendingJobs(local, machineId(), Set.of())) {
+			for (UploadJob job : scanPending(machineId(), Set.of(), candidates)) {
 				items.addAll(job.items());
 			}
 			claimLocally(items);
@@ -456,11 +495,15 @@ public final class SyncService {
 		}
 		try {
 			if (current == null) {
+				// der Index folgt dort: claimLocally löst jede Einheit über resolveLocal auf (Verlustableitung)
 				claimLocally(written);
 			} else {
 				enqueue(current, saveId, written);
+				indexUnits(written);
 			}
 		} catch (IOException e) {
+			// auch nach einem Fehler spiegelt der Index, was auf der Platte liegt (etwa eine Version ohne Anspruch)
+			indexUnits(written);
 			if (failure == null) {
 				throw e;
 			}
@@ -527,7 +570,7 @@ public final class SyncService {
 	 * (neueres Format) kommen einmal je Einheit und Programmlauf über {@link SyncListener#error}.
 	 */
 	public UnitState unitState(UnitKey unit) throws IOException {
-		UnitState state = ChainResolver.resolve(local.readUnit(unit), machineId());
+		UnitState state = resolveLocal(unit);
 		if (state.status() == Status.LOCKED_DAMAGED) {
 			boolean single;
 			synchronized (lock) {
@@ -560,13 +603,12 @@ public final class SyncService {
 		synchronized (lock) {
 			units = List.copyOf(repairQueue);
 		}
-		String myId = machineId();
 		for (UnitKey unit : units) {
-			UnitState before = ChainResolver.resolve(local.readUnit(unit), myId);
+			UnitState before = resolveLocal(unit);
 			UnitState after = before;
 			boolean replaced = false;
 			if (before.status() == Status.LOCKED_DAMAGED) {
-				Healing healing = heal(unit, before, myId, current.shared);
+				Healing healing = heal(unit, before, current.shared);
 				after = healing.state();
 				replaced = healing.replaced();
 			}
@@ -611,7 +653,7 @@ public final class SyncService {
 	}
 
 	/** Heilt Datei um Datei, solange eine lokale Kopie ersetzt wird; liefert den Stand danach. */
-	private Healing heal(UnitKey unit, UnitState damaged, String myId, VersionStore shared) throws IOException {
+	private Healing heal(UnitKey unit, UnitState damaged, VersionStore shared) throws IOException {
 		DamageRepair repair = new DamageRepair(local, shared, files, clock);
 		UnitState state = damaged;
 		boolean replaced = false;
@@ -633,7 +675,7 @@ public final class SyncService {
 			if (result.outcome() != DamageRepair.Outcome.REPAIRED_LOCAL) {
 				break;
 			}
-			state = ChainResolver.resolve(local.readUnit(unit), myId);
+			state = resolveLocal(unit);
 		}
 		return new Healing(state, replaced);
 	}
@@ -691,15 +733,116 @@ public final class SyncService {
 		return append(UUID.randomUUID().toString(), List.of(change)).get(0);
 	}
 
+	// --- Start-Index
+
+	/**
+	 * Der Stand aller Einheiten des lokalen Bestands aus dem Start-Index, ohne Dateizugriff: nach {@link #startup} der
+	 * ganze Bestand, danach fortgeschrieben von {@link #append}, Abholen, Vollabgleich und Heilung.
+	 *
+	 * @return eine unveränderliche Kopie
+	 */
+	public Map<UnitKey, UnitSnapshot> snapshots() {
+		Map<UnitKey, UnitSnapshot> snapshots = new LinkedHashMap<>();
+		index.entries().forEach((unit, entry) -> snapshots.put(unit, entry.snapshot()));
+		return Collections.unmodifiableMap(snapshots);
+	}
+
+	/**
+	 * Schreibt den Start-Index, soweit er sich geändert hat. Vor dem Abgleich durch {@link #startup} schreibt es nichts: Ein
+	 * Index, der nur die bisher berührten Einheiten kennt, würde den vollständigen auf der Platte ersetzen. Wirft nie; ein
+	 * Fehler kommt als {@code WARNING} ins Log, der Index kostet dann nur beim nächsten Start Zeit.
+	 */
+	public void flushIndex() {
+		if (!indexRefreshed) {
+			return;
+		}
+		lastIndexFlush = clock.instant();
+		try {
+			index.flush();
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Der Start-Index ließ sich nicht schreiben", e);
+		}
+	}
+
+	/** Im Takt: schreibt den Index, wenn er sich geändert hat und das letzte Schreiben {@link #INDEX_FLUSH} her ist. */
+	private void flushIndexIfDue() {
+		Instant last = lastIndexFlush;
+		if (indexRefreshed && (last == null || !clock.instant().isBefore(last.plus(INDEX_FLUSH))) && index.hasChanges()) {
+			flushIndex();
+		}
+	}
+
+	/**
+	 * Gleicht den Index mit dem Bestand ab.
+	 *
+	 * @return die Einheiten mit ausstehenden eigenen Versionen; {@code null}, wenn der Abgleich scheiterte und der Index
+	 *         nicht zu gebrauchen ist
+	 */
+	private Set<UnitKey> refreshIndex(DoubleConsumer progress) {
+		try {
+			UnitIndex.Refresh refresh = index.refresh(local, progress);
+			indexRefreshed = true;
+			return refresh.pendingUnits();
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Der Start-Index ließ sich nicht abgleichen; alle Einheiten werden untersucht", e);
+			return null;
+		}
+	}
+
+	/**
+	 * Verwirft den Index, weil der Datenordner ausgetauscht wird (Beiseitelegen). Der leere Index ist vollständig und
+	 * darf deshalb auch ohne Abgleich geschrieben werden: Er ersetzt die alten Dateien.
+	 */
+	private void clearIndex() {
+		index.clear();
+		indexRefreshed = true;
+	}
+
+	/** Die Dateien einer Einheit und ihr Stand daraus. */
+	private record Resolved(UnitFiles files, UnitState state) {
+	}
+
+	/**
+	 * Der Stand einer Einheit aus den Dateien des lokalen Bestands ({@link ChainResolver}), eingetragen in den Index. Jede
+	 * Stelle, die einen Stand aus dem lokalen Bestand ermittelt, geht darüber. Nie unter {@code lock} aufrufen.
+	 */
+	private UnitState resolveLocal(UnitKey unit) throws IOException {
+		return resolveWithFiles(unit).state();
+	}
+
+	/** Wie {@link #resolveLocal}, mit den gelesenen Dateien. */
+	private Resolved resolveWithFiles(UnitKey unit) throws IOException {
+		UnitFiles unitFiles = local.readUnit(unit);
+		UnitState state = ChainResolver.resolve(unitFiles, machineId());
+		// ein Ordner ohne Dateien ist keine Einheit des Bestands: kein Eintrag (etwa bei einer Abfrage nach einer unbekannten)
+		if (!unitFiles.versions().isEmpty() || !unitFiles.claims().isEmpty()) {
+			index.update(unitFiles, state);
+		}
+		return new Resolved(unitFiles, state);
+	}
+
+	/** Trägt die Einheiten der geschriebenen Versionen in den Index ein; was sich nicht lesen lässt, kostet nur den Eintrag. */
+	private void indexUnits(List<UploadJob.Item> items) {
+		for (UnitKey unit : items.stream().map(UploadJob.Item::unit).distinct().toList()) {
+			try {
+				resolveLocal(unit);
+			} catch (IOException | RuntimeException e) {
+				LOGGER.log(Level.WARNING, "Der Stand von " + unit.relativePath() + " ließ sich nicht in den Index übernehmen", e);
+			}
+		}
+	}
+
 	// --- Takt
 
 	/**
 	 * Ein Takt (in der Anwendung alle 2 Sekunden im {@code worker}): Erreichbarkeit nur nach einem Fehler prüfen, bei
 	 * Bedarf Vollabgleich, Aufträge fortsetzen, alle 30 Sekunden neue Rechner, Listen lesen, eigene Ansprüche der letzten
-	 * 15 Minuten nachprüfen; dann Verluste und geänderte Einheiten melden und den Zustand setzen. Ohne Wirkung im
-	 * Einzelbetrieb.
+	 * 15 Minuten nachprüfen; dann Verluste und geänderte Einheiten melden und den Zustand setzen. Am Anfang, auch im
+	 * Einzelbetrieb, wird der Start-Index geschrieben, wenn er sich geändert hat und das letzte Schreiben
+	 * {@link #INDEX_FLUSH} her ist; sonst ohne Wirkung im Einzelbetrieb.
 	 */
 	void tick() {
+		flushIndexIfDue();
 		workLock.lock();
 		try {
 			Link current;
@@ -803,6 +946,8 @@ public final class SyncService {
 			if (both && mode == ConnectMode.SET_ASIDE) {
 				Path aside = FullSync.setAside(local.dataRoot(), files, clock);
 				LOGGER.info("Der lokale Bestand wurde beiseitegelegt: " + aside);
+				// der Datenordner wird neu gefüllt, und gleiche Dateinamen können anderen Inhalt haben
+				clearIndex();
 			}
 			uploadLocalClaims = !both || mode == ConnectMode.MERGE;
 		}
@@ -832,19 +977,30 @@ public final class SyncService {
 		round.changed.addAll(result.changed());
 		result.lost().forEach(this::reportLoss);
 		settleAll(current, result.contested(), round);
-		enqueuePending(current);
+		enqueuePending(current, null);
 		runJobs(current, round);
 	}
 
-	/** Reiht die ausstehenden Versionen ein, die noch in keinem Auftrag stehen, vor den übrigen Aufträgen. */
-	private void enqueuePending(Link current) throws IOException {
+	/** Die ausstehenden eigenen Versionen als Aufträge, in den genannten Einheiten ({@code null}: in allen). */
+	private List<UploadJob> scanPending(String myId, Set<VersionId> skip, Collection<UnitKey> candidates)
+			throws IOException {
+		return candidates == null ? LocalScan.pendingJobs(local, myId, skip)
+				: LocalScan.pendingJobs(local, myId, skip, candidates);
+	}
+
+	/**
+	 * Reiht die ausstehenden Versionen ein, die noch in keinem Auftrag stehen, vor den übrigen Aufträgen.
+	 *
+	 * @param candidates die Einheiten, die untersucht werden; {@code null} heißt alle
+	 */
+	private void enqueuePending(Link current, Collection<UnitKey> candidates) throws IOException {
 		Set<VersionId> skip;
 		String myId;
 		synchronized (lock) {
 			skip = new HashSet<>(queued);
 			myId = machine.id();
 		}
-		List<UploadJob> found = LocalScan.pendingJobs(local, myId, skip);
+		List<UploadJob> found = scanPending(myId, skip, candidates);
 		synchronized (lock) {
 			if (link != current) {
 				return;
@@ -1012,6 +1168,10 @@ public final class SyncService {
 			machine = renewed;
 			ids = new VersionIdGenerator(renewed.id(), clock);
 		}
+		// der Index gehört zu einer Kennung (die Stände hängen davon ab, was "eigen" ist): neu aufbauen, die alten Dateien
+		// gelten als fremd
+		index = new UnitIndex(appDataDir.resolve(INDEX), files, renewed.id());
+		refreshIndex(null);
 		current.bind(renewed.id(), local, clock);
 		current.fullSyncWanted = true;
 		notifier.duplicateMachine(StoreMessages.duplicateMachine());
@@ -1171,7 +1331,10 @@ public final class SyncService {
 
 	// --- Meldungen
 
-	/** Meldet Verluste (aus dem Zustand abgeleitet) und geänderte Einheiten eines Durchlaufs, auch nach einem Fehler. */
+	/**
+	 * Meldet Verluste (aus dem Zustand abgeleitet) und geänderte Einheiten eines Durchlaufs, auch nach einem Fehler. Die
+	 * Ableitung löst jede geänderte Einheit über {@link #resolveLocal} auf: So steht sie im Index, bevor sie gemeldet wird.
+	 */
 	private void reportChanges(Round round) {
 		Collection<UnitKey> units = round.changed;
 		if (round.allUnits) {
@@ -1187,11 +1350,10 @@ public final class SyncService {
 
 	/** Leitet für jede Einheit die verlorenen Strecken aus dem Zustand ab und meldet, was noch nicht gemeldet wurde. */
 	private void reportLosses(Collection<UnitKey> units) {
-		String myId = machineId();
 		for (UnitKey unit : units) {
 			try {
-				UnitFiles unitFiles = local.readUnit(unit);
-				LocalScan.losses(unitFiles, ChainResolver.resolve(unitFiles, myId)).forEach(this::reportLoss);
+				Resolved resolved = resolveWithFiles(unit);
+				LocalScan.losses(resolved.files(), resolved.state()).forEach(this::reportLoss);
 			} catch (IOException e) {
 				LOGGER.log(Level.WARNING, "Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
 			}
