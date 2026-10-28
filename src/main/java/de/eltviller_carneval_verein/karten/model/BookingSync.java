@@ -262,14 +262,14 @@ public final class BookingSync {
 		return null;
 	}
 
-	/** Schlüssel eines Sitzes aus Reihenbuchstabe, Tisch- und Sitznummer. */
-	private static String key(Seat seat) {
+	/** Schlüssel eines Sitzes aus Reihenbuchstabe, Tisch- und Sitznummer (Schritt 2 des Abgleichs). */
+	public static String key(Seat seat) {
 		Table table = seat.getParent();
 		return key(table.getRowLabel(), table.getTableNumber(), seat.getSeatNumber());
 	}
 
-	/** Schlüssel der Momentaufnahme einer Buchung. */
-	private static String key(Booking booking) {
+	/** Schlüssel der Momentaufnahme einer Buchung; trifft er den Schlüssel eines Sitzes, setzt Schritt 2 sie dorthin. */
+	public static String key(Booking booking) {
 		return key(booking.getRowLabel(), booking.getTableNumber(), booking.getSeatNumber());
 	}
 

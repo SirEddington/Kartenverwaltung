@@ -97,6 +97,17 @@ class ForeignBacklogTest {
 	}
 
 	@Test
+	void holdTakesAUnitOutOfTheDeferredOnes() {
+		backlog.defer(deferral(E1_P1));
+
+		backlog.hold(E1_P1, "x");
+
+		assertFalse(backlog.isDeferred(E1_P1));
+		assertTrue(backlog.isHeld(E1_P1));
+		assertTrue(backlog.deferrals().isEmpty(), "eine wartende Einheit gibt keinen Hinweis");
+	}
+
+	@Test
 	void recheckListsDeferredBeforeHeld() {
 		backlog.hold(E1_P1, "x");
 		backlog.defer(deferral(E2));

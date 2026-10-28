@@ -46,13 +46,9 @@ final class ForeignBacklog {
 		deferred.put(deferral.unit(), deferral);
 	}
 
-	/** Nimmt die Einheit aus den zurückgestellten, ohne sie sonst zu verändern. */
-	void undefer(UnitKey unit) {
-		deferred.remove(unit);
-	}
-
-	/** Lässt die Einheit still warten; geloggt wird beim ersten Mal. */
+	/** Lässt die Einheit still warten, ohne Hinweis (eine zurückgestellte wartet damit nur noch); geloggt wird beim ersten Mal. */
 	void hold(UnitKey unit, String reason) {
+		deferred.remove(unit);
 		if (held.add(unit)) {
 			LOG.info("Fremder Stand von " + unit.relativePath() + " wartet: " + reason + ".");
 		}
@@ -122,24 +118,15 @@ final class ForeignBacklog {
 		void failed(String ownerId, List<UnitSnapshot> ofOwner, RuntimeException e, List<String> warnings);
 	}
 
-	/** Wie {@link #run(Collection, Predicate, Set, SyncService, Step)} ohne weitere Einheiten. */
-	ForeignResult run(Collection<UnitKey> units, Predicate<UnitKey> accepts, SyncService sync, Step step) {
-		return run(units, accepts, new LinkedHashSet<>(), sync, step);
-	}
-
 	/**
 	 * Der gemeinsame Rahmen von {@code applyForeign}: Geprüft werden die gemeldeten Einheiten, die {@code accepts} annimmt,
-	 * die zurückgestellten, dann die Einheiten aus {@code between} und zuletzt die wartenden. Die Stände kommen frisch aus
-	 * dem Index; was er nicht mehr kennt, fällt aus der Warteliste und aus {@code between}. Je Besitzer ruft der Rahmen
-	 * {@link Step#apply}; ein Fehler dort hält die übrigen Besitzer nicht auf ({@link Step#failed}). Lassen sich die Ketten
-	 * nicht lesen, wird nichts eingearbeitet und der Nutzer gewarnt.
+	 * die zurückgestellten und die wartenden. Die Stände kommen frisch aus dem Index; was er nicht mehr kennt, fällt aus der
+	 * Warteliste. Je Besitzer ruft der Rahmen {@link Step#apply}; ein Fehler dort hält die übrigen Besitzer nicht auf
+	 * ({@link Step#failed}). Lassen sich die Ketten nicht lesen, wird nichts eingearbeitet und der Nutzer gewarnt.
 	 *
-	 * @param between Einheiten, die das Repository selbst führt und zwischen den zurückgestellten und den wartenden prüfen
-	 *                lässt; der Rahmen entfernt daraus, was der Index nicht mehr kennt
 	 * @return alle danach zurückgestellten Stände und die Warnungen für den Nutzer
 	 */
-	ForeignResult run(Collection<UnitKey> units, Predicate<UnitKey> accepts, Set<UnitKey> between, SyncService sync,
-			Step step) {
+	ForeignResult run(Collection<UnitKey> units, Predicate<UnitKey> accepts, SyncService sync, Step step) {
 		Set<UnitKey> wanted = new LinkedHashSet<>();
 		for (UnitKey unit : units) {
 			if (accepts.test(unit)) {
@@ -147,13 +134,11 @@ final class ForeignBacklog {
 			}
 		}
 		wanted.addAll(deferred.keySet());
-		wanted.addAll(between);
 		wanted.addAll(held);
 		List<String> warnings = new ArrayList<>();
 		if (!wanted.isEmpty()) {
 			Map<UnitKey, UnitSnapshot> current = sync.snapshots(wanted);
 			retainKnown(current.keySet());
-			between.retainAll(current.keySet());
 			Map<String, List<UnitSnapshot>> byOwner = new LinkedHashMap<>();
 			for (UnitKey unit : wanted) {
 				UnitSnapshot snapshot = current.get(unit);

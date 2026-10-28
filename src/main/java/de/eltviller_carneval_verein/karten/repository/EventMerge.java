@@ -19,10 +19,12 @@ import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 
 /**
@@ -34,6 +36,14 @@ import de.eltviller_carneval_verein.karten.store.UnitType;
  * Ob ein Stand eingearbeitet werden darf, hat vorher der Aufrufer entschieden ({@link ForeignDecision}). Ein gelöschter
  * oder unlesbarer Kopf und ein neues Event tauschen das Objekt im Cache aus; das ist Sache des Repositorys, hier gibt es
  * dafür nur {@link #assembleEvent}.
+ * <p>
+ * <b>Die eine Platzierungsregel</b> ({@link #placeable}, Spec KARV-86 U2): Eine Buchung kommt nur ins Modell, wenn ihre
+ * Vorstellung dort steht, Halle und Bestuhlung dieser Vorstellung im Modell denen ihres aktuellen Index-Stands
+ * entsprechen und die Buchung zur Bestuhlung passt ({@link #fitsPlan}, auch Schritt 2 des Abgleichs). Sonst wartet sie
+ * ({@link Sink#held}), bis es passt; nur wenn nichts auf einen Platz wartet (die Buchung ist gelöscht oder unlesbar, oder
+ * ihre Vorstellung ist es), geht sie in den Vergleichsstand ({@link #nothingToPlace}). Das Einarbeiten, die neue
+ * Vorstellung, {@link #assembleEvent}, {@link #assembleLoaded} und die Vorprüfung im Repository ({@link #waits})
+ * entscheiden alle mit dieser Regel.
  */
 final class EventMerge {
 
@@ -45,9 +55,9 @@ final class EventMerge {
 		}
 
 		/**
-		 * Die Buchung hat im Modell keinen Platz (ihr Sitz fehlt in der Bestuhlung der Vorstellung, oder die Vorstellung
-		 * fehlt im Modell): Modell und Vergleichsstand bleiben unberührt, sie wartet, bis Halle oder Vorstellung mit dem
-		 * Sitz da sind.
+		 * Die Buchung ist nicht platzierbar ({@link EventMerge#placeable}: ihre Vorstellung fehlt im Modell oder weicht von ihrem
+		 * Index-Stand ab, oder die Buchung passt nicht zur Bestuhlung): Modell und Vergleichsstand bleiben unberührt, sie
+		 * wartet, bis Halle oder Vorstellung mit dem Sitz da sind.
 		 */
 		default void held(UnitSnapshot snapshot) {
 		}
@@ -82,37 +92,41 @@ final class EventMerge {
 		private final List<UnitSnapshot> index;
 		private final Function<String, Hall> hallLookup;
 
-		/** Die Vorstellungen, die gelöscht oder unlesbar sind: Ihre Buchungen warten auf keinen Platz. */
-		private final Set<UnitKey> goneParents;
+		/**
+		 * Die aktuellen Stände der Vorstellungen, unter denen Buchungen eingearbeitet werden, wie sie der Index hat (auch
+		 * gelöschte und unlesbare): Daran misst {@link #placeable} das Modell.
+		 */
+		private final Map<UnitKey, UnitSnapshot> presentationStates;
 
 		/** Die Kennungen der Platzhalter je Vorstellung und Sitz ({@code <presentationId>/<seatId>}). */
 		private final Map<String, String> placeholderIds;
 
-		/** Ein Plan, in dem keine Vorstellung gelöscht oder unlesbar ist (siehe den Konstruktor mit {@code goneParents}). */
+		/** Ein Plan ohne Stände der Vorstellungen (siehe den Konstruktor mit {@code presentationStates}). */
 		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup) {
-			this(units, index, hallLookup, Set.of());
+			this(units, index, hallLookup, Map.of());
 		}
 
 		/**
-		 * @param units       die einzuarbeitenden Stände (eines Events); eingearbeitet wird in der Reihenfolge Kopf,
-		 *                    Vorstellungen, Buchungen
-		 * @param index       die Stände des ganzen Events aus dem Index, aus denen eine neue Vorstellung samt ihren
-		 *                    Buchungen entsteht; leer, wenn keine neu ist
-		 * @param hallLookup  die Halle zur ID, {@code null}, wenn es sie nicht gibt
-		 * @param goneParents die Vorstellungen, die gelöscht oder unlesbar sind: Eine Buchung darunter, deren Vorstellung
-		 *                    nicht im Modell steht, geht nur in den Vergleichsstand. Sonst wartet sie auf ihre Vorstellung.
+		 * @param units              die einzuarbeitenden Stände (eines Events); eingearbeitet wird in der Reihenfolge Kopf,
+		 *                           Vorstellungen, Buchungen
+		 * @param index              die Stände des ganzen Events aus dem Index, aus denen eine neue Vorstellung samt ihren
+		 *                           Buchungen entsteht; leer, wenn keine neu ist
+		 * @param hallLookup         die Halle zur ID, {@code null}, wenn es sie nicht gibt
+		 * @param presentationStates die aktuellen Index-Stände der Vorstellungen der Buchungen unter {@code units}; fehlt
+		 *                           einer, ist die Buchung nicht platzierbar, ist er gelöscht oder unlesbar, geht sie nur in
+		 *                           den Vergleichsstand, wenn die Vorstellung nicht (mehr) im Modell steht
 		 */
 		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup,
-				Set<UnitKey> goneParents) {
-			this(sorted(units), List.copyOf(index), hallLookup, Set.copyOf(goneParents), new HashMap<>());
+				Map<UnitKey, UnitSnapshot> presentationStates) {
+			this(sorted(units), List.copyOf(index), hallLookup, Map.copyOf(presentationStates), new HashMap<>());
 		}
 
 		private Plan(List<UnitSnapshot> units, List<UnitSnapshot> index, Function<String, Hall> hallLookup,
-				Set<UnitKey> goneParents, Map<String, String> placeholderIds) {
+				Map<UnitKey, UnitSnapshot> presentationStates, Map<String, String> placeholderIds) {
 			this.units = units;
 			this.index = index;
 			this.hallLookup = hallLookup;
-			this.goneParents = goneParents;
+			this.presentationStates = presentationStates;
 			this.placeholderIds = placeholderIds;
 		}
 
@@ -125,7 +139,7 @@ final class EventMerge {
 		Plan restrictedTo(Collection<UnitKey> keep) {
 			Set<UnitKey> kept = new HashSet<>(keep);
 			List<UnitSnapshot> remaining = units.stream().filter(s -> kept.contains(s.unit())).toList();
-			return new Plan(remaining, index, hallLookup, goneParents, placeholderIds);
+			return new Plan(remaining, index, hallLookup, presentationStates, placeholderIds);
 		}
 
 		/** Die neue Kennung des geleerten Platzhalters auf diesem Sitz, beim ersten Mal ausgewürfelt. */
@@ -181,14 +195,14 @@ final class EventMerge {
 	 * <li>Vorstellung geändert: Felder kopieren, bei anderer Halle oder Bestuhlung danach abgleichen. Neu oder
 	 * wiederbelebt: mit ihren sichtbaren Buchungen aus dem Index zusammensetzen, einsortieren wie beim Laden, abgleichen.
 	 * Gelöscht oder unlesbar: aus der Liste.</li>
-	 * <li>Buchung auf einem Sitz: Die Buchung, die dort steht (bei freiem Sitz der leere Platzhalter), bekommt alle
-	 * Felder, auch die Kennung. Steht dort keine, wird sie angehängt, wenn die Bestuhlung den Sitz kennt; sonst bleibt
+	 * <li>Buchung auf einem Sitz: Ist sie {@linkplain #placeable platzierbar}, bekommt die Buchung, die dort steht (bei
+	 * freiem Sitz der leere Platzhalter), alle Felder, auch die Kennung. Steht dort keine, wird sie angehängt. Sonst bleibt
 	 * alles unberührt und sie wartet ({@link Sink#held}). Gelöscht oder unlesbar: nur die Kundendaten leeren, der
 	 * Platzhalter bekommt eine neue Kennung.</li>
 	 * <li>Buchung ohne Platz: anhand der Kennung aktualisieren, sonst anhängen; gelöscht oder unlesbar: entfernen.</li>
 	 * <li>Buchung unter einer Vorstellung, die nicht im Modell steht: Ist die Vorstellung noch nicht da, wartet eine lesbare
 	 * Buchung ({@link Sink#held}) und wird mit ihr sichtbar. Gelöscht oder unlesbar, oder ist die Vorstellung gelöscht oder
-	 * unlesbar ({@link Plan}): nur in den Vergleichsstand.</li>
+	 * unlesbar (ihr Stand im {@link Plan}): nur in den Vergleichsstand ({@link #nothingToPlace}).</li>
 	 * </ul>
 	 * Scheitert das Einarbeiten einer Einheit, ist das Modell für diese Einheit wieder wie vorher (die Einheiten davor
 	 * bleiben eingearbeitet und gemeldet), dann geht die Ausnahme weiter.
@@ -266,18 +280,16 @@ final class EventMerge {
 		}
 
 		// Buchungen, die nicht zur Bestuhlung passen, setzte der Abgleich um; sie warten wie jede solche Buchung
-		List<UnitSnapshot> fitting = new ArrayList<>();
-		List<UnitSnapshot> waiting = new ArrayList<>();
+		List<UnitSnapshot> all = new ArrayList<>();
 		for (UnitSnapshot below : plan.index) {
 			if (below.unit().type() == UnitType.BOOKING && inSubtree(below.unit(), unit)) {
-				Booking booking = UnitMapper.readUnit(below, Booking.class);
-				if (booking != null && !fitsPlan(below.unit(), booking, state, plan.hallLookup)) {
-					waiting.add(below);
-				} else {
-					fitting.add(below);
-				}
+				all.add(below);
 			}
 		}
+		List<UnitSnapshot> waiting = placeBelow(snapshot, all, plan.hallLookup, false);
+		Set<UnitKey> waitingUnits = new HashSet<>();
+		waiting.forEach(s -> waitingUnits.add(s.unit()));
+		List<UnitSnapshot> fitting = all.stream().filter(s -> !waitingUnits.contains(s.unit())).toList();
 		Presentation added = UnitMapper.assemblePresentation(snapshot, fitting);
 		insertSorted(event, added);
 		resync(added, plan);
@@ -299,18 +311,21 @@ final class EventMerge {
 
 	private static void mergeBooking(Event event, UnitSnapshot snapshot, Plan plan, Sink sink) {
 		UnitKey unit = snapshot.unit();
-		Presentation presentation = presentation(event, unit.presentationId());
-		Booking state = UnitMapper.readUnit(snapshot, Booking.class);
-		if (presentation == null) {
-			if (state == null || plan.goneParents.contains(presentationKey(unit))) {
-				// gelöscht oder unlesbar, oder ihre Vorstellung ist es: Es gibt nichts, was auf einen Platz wartet
-				sink.adopted(snapshot, false);
-			} else {
-				// ihre Vorstellung ist noch nicht da: sichtbar wird sie mit ihr, bis dahin steht sie nicht im Vergleichsstand
-				sink.held(snapshot);
-			}
+		UnitSnapshot indexed = plan.presentationStates.get(presentationKey(unit));
+		if (nothingToPlace(event, snapshot, indexed)) {
+			// gelöscht oder unlesbar, oder ihre Vorstellung ist es: Es gibt nichts, was auf einen Platz wartet
+			sink.adopted(snapshot, false);
 			return;
 		}
+		if (!placeable(event, snapshot, indexed, plan.hallLookup)) {
+			// ihre Vorstellung ist noch nicht da oder weicht von ihrem Index-Stand ab, oder die Bestuhlung hat den Sitz noch
+			// nicht (der Abgleich setzte sie um, und das nächste Speichern überschriebe den fremden Stand): sichtbar wird sie
+			// mit ihnen, bis dahin steht sie nicht im Vergleichsstand
+			sink.held(snapshot);
+			return;
+		}
+		Presentation presentation = presentation(event, unit.presentationId());
+		Booking state = UnitMapper.readUnit(snapshot, Booking.class);
 		Booking current = bookingAt(presentation, unit);
 		if (state == null) {
 			if (current != null && isUnassigned(unit)) {
@@ -328,108 +343,208 @@ final class EventMerge {
 		}
 		if (current != null) {
 			current.copyFrom(state);
-		} else if (fitsPlan(unit, state, presentation, plan.hallLookup)) {
+		} else {
 			if (presentation.getBookings() == null) {
 				presentation.setBookings(new ArrayList<>());
 			}
 			state.setParent(presentation);
 			presentation.getBookings().add(state);
-		} else {
-			// der Abgleich setzte sie um ("ohne Platz" bzw. zurück auf ihren alten Sitz), und das nächste Speichern
-			// überschriebe den fremden Stand
-			sink.held(snapshot);
-			return;
 		}
 		sink.adopted(snapshot, true);
 		warnIfLocked(snapshot, sink);
 	}
 
 	/**
-	 * Ob eine fremde Buchung beim Einarbeiten einen Platz im Modell findet ({@link #apply} sie also nicht zurückhält):
-	 * gelöscht oder unlesbar, im Modell schon vorhanden (auf ihrem Sitz bzw. mit ihrer Kennung), passend zur Bestuhlung
-	 * ({@link #fitsPlan}), oder ihre Vorstellung steht nicht im Modell, kommt aber im selben Schritt. Eine lesbare Buchung
-	 * ohne Vorstellung im Modell hat dagegen keinen Platz. {@code presentationState} ist der Stand der Vorstellung,
-	 * wenn er im selben Schritt eingearbeitet wird (sonst {@code null}): Wechselt er die Bestuhlung, zählt die neue.
+	 * Die eine Regel, ob eine fremde Buchung ins Modell darf (siehe die Klasse): Ihre Vorstellung steht im Modell, Halle
+	 * und Bestuhlung der Vorstellung im Modell sind die ihres aktuellen Index-Stands, und die Buchung passt zur Bestuhlung
+	 * ({@link #fitsPlan}) oder steht im Modell schon auf ihrem Platz. Eine gelöschte oder unlesbare Buchung braucht keinen
+	 * Sitz, nur die Vorstellung im Stand des Index.
+	 * <p>
+	 * Das Modell hinkt dem Index hinterher, solange der Wechsel von Halle oder Bestuhlung der Vorstellung oder ihr Löschen
+	 * zurückgestellt ist oder eine Gabelung bleibt, auch wenn die Vorstellung noch nicht gemeldet wurde: Ihre Buchungen
+	 * gehören zum anderen Stand und warten mit ihr.
+	 *
+	 * @param presentationIndexState der aktuelle Stand der Vorstellung der Buchung im Index; fehlt er oder ist er gelöscht
+	 *                               oder unlesbar, ist die Buchung nicht platzierbar
 	 */
-	static boolean hasPlace(Event event, UnitSnapshot booking, UnitSnapshot presentationState,
+	static boolean placeable(Event event, UnitSnapshot booking, UnitSnapshot presentationIndexState,
 			Function<String, Hall> hallLookup) {
 		UnitKey unit = booking.unit();
 		Presentation presentation = presentation(event, unit.presentationId());
+		Presentation indexed = presentationIndexState == null ? null
+				: UnitMapper.readUnit(presentationIndexState, Presentation.class);
+		if (presentation == null || indexed == null || changesPlan(presentation, indexed)) {
+			return false;
+		}
 		Booking state = UnitMapper.readUnit(booking, Booking.class);
-		if (state == null) {
-			return true;
-		}
-		Presentation presentationNow = presentationState == null ? null
-				: UnitMapper.readUnit(presentationState, Presentation.class);
-		if (presentationState != null && presentationNow == null) {
-			// die Vorstellung verlässt das Modell: die Buchung geht nur in den Vergleichsstand
-			return true;
-		}
-		if (presentation == null) {
-			// kommt die Vorstellung im selben Schritt, kommt die Buchung mit ihr; sonst wartet sie auf die Vorstellung
-			return presentationState != null;
-		}
-		if (presentationNow != null && changesPlan(presentation, presentationNow)) {
-			return fitsPlan(unit, state, presentationNow, hallLookup);
-		}
-		return bookingAt(presentation, unit) != null || fitsPlan(unit, state, presentation, hallLookup);
+		return state == null || bookingAt(presentation, unit) != null || fitsPlan(unit, state, presentation, hallLookup);
 	}
 
 	/**
-	 * Ob die Buchung zur Bestuhlung der Vorstellung passt: auf einem Sitz, den die Bestuhlung kennt; ohne Platz, wenn sie
-	 * keinen Sitz nennt, den die Bestuhlung kennt (Schritt 1 des Abgleichs setzte sie sonst dorthin zurück). Eine
-	 * unpassende stammt aus einer anderen Bestuhlung als der im Modell; meist ist die Halle oder die Vorstellung nur noch
-	 * nicht da.
-	 * <p>
-	 * Nicht abgedeckt ist Schritt 2 des Abgleichs ({@link BookingSync}): Eine Buchung ohne Platz, deren Reihe, Tisch und
-	 * Sitznummer einen im Modell freien Sitz treffen, setzt er dorthin. Das kommt nur vor, wenn der Sitz bei dem Rechner,
-	 * der sie geschrieben hat, belegt war und im Modell (noch) frei ist; ob er frei ist, hängt an den übrigen Buchungen im
-	 * Modell, die hier nicht geprüft werden.
+	 * Ob für die Buchung nichts auf einen Platz wartet: Ihre Vorstellung steht nicht im Modell, und die Buchung ist gelöscht
+	 * oder unlesbar oder die Vorstellung ist es ({@link #gone}). Sie geht dann nur in den Vergleichsstand. Eine lesbare
+	 * Buchung unter einer Vorstellung, die nur noch nicht da ist, wartet dagegen auf sie.
+	 */
+	static boolean nothingToPlace(Event event, UnitSnapshot booking, UnitSnapshot presentationIndexState) {
+		return presentation(event, booking.unit().presentationId()) == null
+				&& (UnitMapper.readUnit(booking, Booking.class) == null || gone(presentationIndexState));
+	}
+
+	/** Ob die Buchung warten muss: Sie ist weder {@link #placeable} noch {@link #nothingToPlace}. */
+	static boolean waits(Event event, UnitSnapshot booking, UnitSnapshot presentationIndexState,
+			Function<String, Hall> hallLookup) {
+		return !nothingToPlace(event, booking, presentationIndexState)
+				&& !placeable(event, booking, presentationIndexState, hallLookup);
+	}
+
+	/**
+	 * Ob die Vorstellung gelöscht oder unlesbar ist: gelöscht, ohne lesbare Version, oder gesperrt, ohne dass es eine
+	 * Version gäbe. Fehlt sie im Index nur noch ({@code null}, oder ohne Datei), ist sie nicht weg, sondern wird kommen.
+	 */
+	static boolean gone(UnitSnapshot presentation) {
+		if (presentation == null) {
+			return false;
+		}
+		boolean lockedWithoutVersion = presentation.version() == null && (presentation.status() == UnitState.Status.LOCKED_DAMAGED
+				|| presentation.status() == UnitState.Status.LOCKED_FORMAT);
+		return lockedWithoutVersion || (presentation.version() != null && !UnitMapper.isReadable(presentation));
+	}
+
+	/**
+	 * Ob die Buchung zur Bestuhlung der Vorstellung passt: auf einem Sitz, den die Bestuhlung kennt; ohne Platz, wenn der
+	 * Abgleich ({@link BookingSync}) sie nicht umsetzte: Sie nennt keinen Sitz, den die Bestuhlung kennt (Schritt 1 setzte
+	 * sie sonst dorthin zurück), und Reihe, Tisch und Sitznummer treffen keinen Sitz, den keine andere Buchung der
+	 * Vorstellung trägt (Schritt 2). Eine unpassende stammt aus einer anderen Bestuhlung als der im Modell; meist ist die
+	 * Halle oder die Vorstellung nur noch nicht da.
 	 */
 	private static boolean fitsPlan(UnitKey unit, Booking state, Presentation presentation,
 			Function<String, Hall> hallLookup) {
 		SeatingPlan seating = planOf(presentation, hallLookup);
-		if (isUnassigned(unit)) {
-			return state.getSeatId() == null || seating == null || seating.findSeat(state.getSeatId()) == null;
+		if (!isUnassigned(unit)) {
+			return seating != null && seating.findSeat(unit.bookingDir()) != null;
 		}
-		return seating != null && seating.findSeat(unit.bookingDir()) != null;
+		if (seating == null) {
+			return true;
+		}
+		if (state.getSeatId() != null && seating.findSeat(state.getSeatId()) != null) {
+			return false;
+		}
+		return !hitsFreeSeat(state, presentation, seating);
+	}
+
+	/**
+	 * Ob Reihe, Tisch und Sitznummer der Buchung einen Sitz treffen, den keine andere Buchung der Vorstellung über ihre
+	 * Sitzkennung trägt (auch ein leerer Platzhalter trägt ihn): Dorthin setzt Schritt 2 des Abgleichs sie.
+	 */
+	private static boolean hitsFreeSeat(Booking state, Presentation presentation, SeatingPlan seating) {
+		Set<String> taken = new HashSet<>();
+		for (Booking other : presentation.getBookings() != null ? presentation.getBookings() : List.<Booking>of()) {
+			if (other.getSeatId() != null && !Objects.equals(other.getId(), state.getId())) {
+				taken.add(other.getSeatId());
+			}
+		}
+		String key = BookingSync.key(state);
+		for (Seat seat : seating.getSeats()) {
+			if (key.equals(BookingSync.key(seat)) && !taken.contains(seat.getId())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
 	 * Setzt die Events aus den Ständen zusammen ({@link UnitMapper#assembleEvents}) und gleicht ihre Vorstellungen mit der
-	 * Bestuhlung ab, wie beim Vorbereiten eines geladenen Events für die Anzeige. Lesbare Buchungen, die nicht zur
-	 * Bestuhlung ihrer Vorstellung passen ({@link #fitsPlan}), bleiben draußen und kommen in {@code waiting}: Der Abgleich
-	 * setzte sie sonst um, und das nächste Speichern überschriebe den fremden Stand. Sie sind dann nicht angezeigt.
+	 * Bestuhlung ab, wie beim Vorbereiten eines geladenen Events für die Anzeige. Lesbare Buchungen, die nicht
+	 * {@linkplain #placeable platzierbar} sind, bleiben draußen und kommen in {@code waiting}: Der Abgleich setzte sie
+	 * sonst um, und das nächste Speichern überschriebe den fremden Stand. Sie sind dann nicht angezeigt.
 	 */
 	static Assembly<Event> assembleEvent(Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup,
 			List<UnitSnapshot> waiting) {
-		Map<UnitKey, Presentation> presentations = new HashMap<>();
-		for (UnitSnapshot snapshot : snapshots) {
-			if (snapshot.unit().type() == UnitType.PRESENTATION) {
-				Presentation presentation = UnitMapper.readUnit(snapshot, Presentation.class);
-				if (presentation != null) {
-					presentations.put(snapshot.unit(), presentation);
-				}
-			}
-		}
-		List<UnitSnapshot> fitting = new ArrayList<>();
-		for (UnitSnapshot snapshot : snapshots) {
-			UnitKey unit = snapshot.unit();
-			Presentation presentation = unit.type() == UnitType.BOOKING ? presentations.get(presentationKey(unit)) : null;
-			Booking booking = presentation != null ? UnitMapper.readUnit(snapshot, Booking.class) : null;
-			if (booking != null && !fitsPlan(unit, booking, presentation, hallLookup)) {
-				waiting.add(snapshot);
-			} else {
-				fitting.add(snapshot);
-			}
-		}
-		Assembly<Event> assembly = UnitMapper.assembleEvents(fitting);
+		Assembly<Event> assembly = UnitMapper.assembleEvents(withoutWaiting(snapshots, hallLookup, false, waiting));
 		for (Event event : assembly.items()) {
 			for (Presentation presentation : event.getPresentations()) {
 				BookingSync.sync(presentation, planOf(presentation, hallLookup));
 			}
 		}
 		return assembly;
+	}
+
+	/**
+	 * Setzt die Events beim Laden zusammen, ohne Abgleich (der folgt beim Vorbereiten für die Anzeige). Wie bei
+	 * {@link #assembleEvent} bleiben die Buchungen draußen, die nicht {@linkplain #placeable platzierbar} sind, und kommen in
+	 * {@code waiting}; sonst erschiene eine wartende Buchung nach einem Neustart auf ihrer Sitzkennung. Kennt
+	 * {@code hallLookup} die Bestuhlung einer Vorstellung nicht (die App setzt die Hallen erst nach dem Laden, oder die Halle
+	 * fehlt), lässt sich nichts über die Sitze sagen: Die Buchungen bleiben dann in der Vorstellung, und der Abgleich
+	 * markiert sie später wie bisher.
+	 */
+	static Assembly<Event> assembleLoaded(Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup,
+			List<UnitSnapshot> waiting) {
+		return UnitMapper.assembleEvents(withoutWaiting(snapshots, hallLookup, true, waiting));
+	}
+
+	/**
+	 * Die Stände ohne die Buchungen unter lesbaren Vorstellungen, die nicht platzierbar sind (sie kommen in {@code waiting}).
+	 *
+	 * @param lenient ob die Buchungen unter einer Vorstellung bleiben, deren Bestuhlung {@code hallLookup} nicht kennt
+	 */
+	private static List<UnitSnapshot> withoutWaiting(Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup,
+			boolean lenient, List<UnitSnapshot> waiting) {
+		Map<UnitKey, UnitSnapshot> presentations = new HashMap<>();
+		Map<UnitKey, List<UnitSnapshot>> bookings = new HashMap<>();
+		for (UnitSnapshot snapshot : snapshots) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() == UnitType.PRESENTATION && UnitMapper.isReadable(snapshot)) {
+				presentations.put(unit, snapshot);
+			} else if (unit.type() == UnitType.BOOKING) {
+				bookings.computeIfAbsent(presentationKey(unit), k -> new ArrayList<>()).add(snapshot);
+			}
+		}
+		Set<UnitKey> waitingUnits = new HashSet<>();
+		for (Map.Entry<UnitKey, List<UnitSnapshot>> entry : bookings.entrySet()) {
+			UnitSnapshot presentation = presentations.get(entry.getKey());
+			if (presentation != null) {
+				for (UnitSnapshot booking : placeBelow(presentation, entry.getValue(), hallLookup, lenient)) {
+					waitingUnits.add(booking.unit());
+					waiting.add(booking);
+				}
+			}
+		}
+		return snapshots.stream().filter(snapshot -> !waitingUnits.contains(snapshot.unit())).toList();
+	}
+
+	/**
+	 * Prüft die Buchungen unter einer Vorstellung, die aus dem Index zusammengesetzt wird, mit {@link #placeable}: Das Modell
+	 * ist hier der Stand der Vorstellung, so dass es keinem Index hinterherhinkt. Die Buchungen kommen der Reihe nach in eine
+	 * Probe der Vorstellung, erst die auf einem Sitz, dann die ohne Platz, damit "frei" ({@link #fitsPlan}) die Sitze meint,
+	 * die der Abgleich nach den übrigen Buchungen noch frei hat.
+	 *
+	 * @param lenient ob alle Buchungen bleiben, wenn {@code hallLookup} die Bestuhlung der Vorstellung nicht kennt
+	 * @return die Buchungen, die warten
+	 */
+	private static List<UnitSnapshot> placeBelow(UnitSnapshot presentation, List<UnitSnapshot> bookings,
+			Function<String, Hall> hallLookup, boolean lenient) {
+		Presentation probe = UnitMapper.readUnit(presentation, Presentation.class);
+		probe.setBookings(new ArrayList<>());
+		Event event = new Event(presentation.unit().eventId());
+		event.setPresentations(new ArrayList<>(List.of(probe)));
+		boolean planKnown = planOf(probe, hallLookup) != null;
+		List<UnitSnapshot> ordered = new ArrayList<>(bookings);
+		ordered.sort(Comparator.comparing((UnitSnapshot booking) -> isUnassigned(booking.unit())));
+		List<UnitSnapshot> waiting = new ArrayList<>();
+		for (UnitSnapshot booking : ordered) {
+			if (lenient && !planKnown) {
+				continue;
+			}
+			if (placeable(event, booking, presentation, hallLookup)) {
+				Booking state = UnitMapper.readUnit(booking, Booking.class);
+				if (state != null) {
+					probe.getBookings().add(state);
+				}
+			} else {
+				waiting.add(booking);
+			}
+		}
+		return waiting;
 	}
 
 	/** Gleicht die Buchungen mit der Bestuhlung der Vorstellung ab ({@link BookingSync#sync}), mit festen Platzhalter-Kennungen. */

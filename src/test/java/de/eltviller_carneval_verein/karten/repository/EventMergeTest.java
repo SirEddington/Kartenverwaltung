@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.function.Function;
 
 import org.junit.jupiter.api.Test;
 
@@ -116,6 +116,21 @@ class EventMergeTest {
 		return new EventMerge.Plan(units, index, id -> null);
 	}
 
+	/** Die Stände der Vorstellungen des Modells, wie sie der Index hat, wenn er ihnen nichts voraus hat. */
+	private Map<UnitKey, UnitSnapshot> indexOf(Event model) {
+		Map<UnitKey, UnitSnapshot> states = new HashMap<>();
+		for (Presentation presentation : model.getPresentations()) {
+			UnitKey key = UnitKey.presentation(model.getId(), presentation.getId());
+			states.put(key, foreign(model, key));
+		}
+		return states;
+	}
+
+	/** Ein Plan, dessen Index die Vorstellungen des Modells unverändert hat. */
+	private EventMerge.Plan plan(Event model, List<UnitSnapshot> units, List<UnitSnapshot> index) {
+		return new EventMerge.Plan(units, index, id -> null, indexOf(model));
+	}
+
 	// <-- Bauteile
 
 	@Test
@@ -143,7 +158,7 @@ class EventMergeTest {
 		state.getPresentations().get(0).getBookings().get(1).setLastName("Fremd");
 		Recording sink = new Recording();
 
-		EventMerge.apply(event, plan(List.of(foreign(state, seat(event, "s2"))), List.of()), sink);
+		EventMerge.apply(event, plan(event, List.of(foreign(state, seat(event, "s2"))), List.of()), sink);
 
 		assertSame(placeholder, event.getPresentations().get(0).getBookings().get(1));
 		assertEquals("Fremd", placeholder.getLastName());
@@ -158,7 +173,7 @@ class EventMergeTest {
 		Event copy = copyOf(event);
 		Booking sold = event.getPresentations().get(0).getBookings().get(0);
 		String oldId = sold.getId();
-		EventMerge.Plan plan = plan(List.of(deleted(seat(event, "s1"))), List.of());
+		EventMerge.Plan plan = plan(event, List.of(deleted(seat(event, "s1"))), List.of());
 		Recording sink = new Recording();
 
 		EventMerge.apply(event, plan, sink);
@@ -183,17 +198,17 @@ class EventMergeTest {
 		unassigned.setLastName("Ohne");
 		UnitKey unit = UnitKey.unassignedBooking(event.getId(), friday.getId(), unassigned.getId());
 
-		EventMerge.apply(event, plan(List.of(foreign(state, unit)), List.of()), new Recording());
+		EventMerge.apply(event, plan(event, List.of(foreign(state, unit)), List.of()), new Recording());
 		Booking added = friday.getBookings().get(2);
 		unassigned.setLastName("Ohne Platz");
-		EventMerge.apply(event, plan(List.of(foreign(state, unit)), List.of()), new Recording());
+		EventMerge.apply(event, plan(event, List.of(foreign(state, unit)), List.of()), new Recording());
 
 		assertEquals(3, friday.getBookings().size());
 		assertSame(added, friday.getBookings().get(2));
 		assertEquals("Ohne Platz", added.getLastName());
 		assertSame(friday, added.getParent());
 
-		EventMerge.apply(event, plan(List.of(deleted(unit)), List.of()), new Recording());
+		EventMerge.apply(event, plan(event, List.of(deleted(unit)), List.of()), new Recording());
 
 		assertEquals(2, friday.getBookings().size());
 	}
@@ -206,7 +221,7 @@ class EventMergeTest {
 		booking(state.getPresentations().get(0), "s9", 9, "Fremd");
 		Recording sink = new Recording();
 
-		EventMerge.apply(event, plan(List.of(foreign(state, seat(event, "s9"))), List.of()), sink);
+		EventMerge.apply(event, plan(event, List.of(foreign(state, seat(event, "s9"))), List.of()), sink);
 
 		assertEquals(List.of(seat(event, "s9")), sink.held);
 		assertTrue(sink.adopted.isEmpty());
@@ -330,13 +345,33 @@ class EventMergeTest {
 				UnitMapper.payloads(state).get(seat(event, "s1")));
 		Recording sink = new Recording();
 		// die Vorstellung ist gelöscht oder unlesbar: Auf einen Platz wartet nichts
+		UnitKey presentation = UnitKey.presentation(event.getId(), "fehlt");
 		EventMerge.Plan plan = new EventMerge.Plan(List.of(snapshot), List.of(), id -> null,
-				Set.of(UnitKey.presentation(event.getId(), "fehlt")));
+				Map.of(presentation, deleted(presentation)));
 
 		EventMerge.apply(event, plan, sink);
 
 		assertEquals(Map.of(unit, false), sink.adopted);
 		assertEquals(List.of(), sink.held);
+	}
+
+	@Test
+	void bookingOfAPresentationDeletedInTheSameBatchIsOnlyAdopted() {
+		Event event = event();
+		Event state = copyOfUnchecked(event);
+		UnitKey presentation = UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId());
+		UnitKey unit = seat(event, "s1");
+		UnitSnapshot gone = deleted(presentation);
+		Recording sink = new Recording();
+		// die Vorstellung ist im Modell, verlässt es aber mit diesem Schub; ihre Buchung kommt im selben
+		EventMerge.Plan plan = new EventMerge.Plan(List.of(gone, foreign(state, unit)), List.of(), id -> null,
+				Map.of(presentation, gone));
+
+		EventMerge.apply(event, plan, sink);
+
+		assertTrue(event.getPresentations().isEmpty());
+		assertEquals(Map.of(presentation, false, unit, false), sink.adopted);
+		assertEquals(List.of(), sink.held, "nichts wartet auf einen Platz");
 	}
 
 	@Test
@@ -406,10 +441,94 @@ class EventMergeTest {
 		UnitKey unit = UnitKey.unassignedBooking(event.getId(), friday.getId(), unassigned.getId());
 		Recording sink = new Recording();
 
-		EventMerge.apply(event, new EventMerge.Plan(List.of(foreign(state, unit)), List.of(), id -> hall), sink);
+		EventMerge.apply(event,
+				new EventMerge.Plan(List.of(foreign(state, unit)), List.of(), id -> hall, indexOf(event)), sink);
 
 		assertEquals(List.of(unit), sink.held);
 		assertEquals(MAPPER.valueToTree(before), MAPPER.valueToTree(event));
+	}
+
+	@Test
+	void bookingIsNotPlaceableWhilePresentationModelLagsBehindIndex() {
+		Event event = event();
+		Hall hall = hallWithOneSeat();
+		Hall other = hallWithOneSeat();
+		Presentation friday = inHall(event.getPresentations().get(0), hall);
+		// der Index-Stand der Vorstellung steht schon in der anderen Halle, das Modell noch in der ersten
+		Event state = copyOfUnchecked(event);
+		inHall(state.getPresentations().get(0), other);
+		booking(state.getPresentations().get(0), seatOf(hall), 1, "Fremd");
+		UnitSnapshot presentation = foreign(state, UnitKey.presentation(event.getId(), friday.getId()));
+		UnitSnapshot booking = foreign(state, UnitKey.booking(event.getId(), friday.getId(), seatOf(hall)));
+
+		assertFalse(EventMerge.placeable(event, booking, presentation, lookup(hall, other)));
+	}
+
+	@Test
+	void bookingIsPlaceableWhenModelMatchesIndexAndSeatExists() {
+		Event event = event();
+		Hall hall = hallWithOneSeat();
+		Presentation friday = inHall(event.getPresentations().get(0), hall);
+		Event state = copyOfUnchecked(event);
+		booking(state.getPresentations().get(0), seatOf(hall), 1, "Fremd");
+		UnitSnapshot presentation = foreign(state, UnitKey.presentation(event.getId(), friday.getId()));
+		UnitSnapshot booking = foreign(state, UnitKey.booking(event.getId(), friday.getId(), seatOf(hall)));
+
+		assertTrue(EventMerge.placeable(event, booking, presentation, lookup(hall)));
+		assertFalse(EventMerge.placeable(event, booking, null, lookup(hall)), "ohne Index-Stand der Vorstellung nicht");
+		assertFalse(EventMerge.placeable(event, booking, deleted(presentation.unit()), lookup(hall)),
+				"mit gelöschter Vorstellung nicht");
+		assertFalse(EventMerge.placeable(event, booking, presentation, lookup()), "ohne die Halle nicht");
+	}
+
+	@Test
+	void unassignedBookingMatchingAFreeSeatByLabelIsNotPlaceable() {
+		Event event = event();
+		Hall hall = hallWithOneSeat();
+		Presentation friday = inHall(event.getPresentations().get(0), hall);
+		Event state = copyOfUnchecked(event);
+		// "ohne Platz" ohne Sitzkennung, aber Reihe A, Tisch 1, Sitz 1 sind die Beschriftung des Sitzes der Bestuhlung, den im
+		// Modell keine Buchung trägt: Der Abgleich setzte sie dorthin (Schritt 2), das nächste Speichern überschriebe den Stand
+		Booking matching = booking(state.getPresentations().get(0), null, 1, "Ohne");
+		matching.setUnassigned(true);
+		Booking elsewhere = booking(state.getPresentations().get(0), null, 7, "Anderswo");
+		elsewhere.setUnassigned(true);
+		UnitSnapshot presentation = foreign(state, UnitKey.presentation(event.getId(), friday.getId()));
+		UnitSnapshot matchingUnit = foreign(state,
+				UnitKey.unassignedBooking(event.getId(), friday.getId(), matching.getId()));
+		UnitSnapshot elsewhereUnit = foreign(state,
+				UnitKey.unassignedBooking(event.getId(), friday.getId(), elsewhere.getId()));
+
+		assertFalse(EventMerge.placeable(event, matchingUnit, presentation, lookup(hall)));
+		assertTrue(EventMerge.placeable(event, elsewhereUnit, presentation, lookup(hall)),
+				"trifft sie keinen Sitz, bleibt sie ohne Platz");
+	}
+
+	@Test
+	void unassignedBookingMatchingASeatThatAnotherBookingTakesIsPlaceable() {
+		Event event = event();
+		Hall hall = hallWithOneSeat();
+		Presentation friday = inHall(event.getPresentations().get(0), hall);
+		// der Sitz der Bestuhlung ist im Modell belegt: Der Abgleich setzte die Buchung nicht um
+		booking(friday, seatOf(hall), 1, "Müller");
+		Event state = copyOfUnchecked(event);
+		Booking matching = booking(state.getPresentations().get(0), null, 1, "Ohne");
+		matching.setUnassigned(true);
+		UnitSnapshot presentation = foreign(state, UnitKey.presentation(event.getId(), friday.getId()));
+		UnitSnapshot unit = foreign(state, UnitKey.unassignedBooking(event.getId(), friday.getId(), matching.getId()));
+
+		assertTrue(EventMerge.placeable(event, unit, presentation, lookup(hall)));
+	}
+
+	private static Function<String, Hall> lookup(Hall... halls) {
+		return id -> {
+			for (Hall hall : halls) {
+				if (hall.getId().equals(id)) {
+					return hall;
+				}
+			}
+			return null;
+		};
 	}
 
 	/** Eine Halle mit einer Bestuhlung aus einem Tisch mit einem Sitz. */

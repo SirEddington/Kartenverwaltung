@@ -60,21 +60,16 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Die fremden Stände, die noch nicht eingearbeitet sind; {@link #applyForeign} prüft sie bei jedem Aufruf erneut.
 	 * Zurückgestellt (mit Hinweis) sind die Stände von Einheiten, die der Nutzer ungespeichert geändert hat oder bearbeitet.
-	 * Still wartend sind vor allem Buchungen, bis ihr Platz im Modell da ist: Sie passen nicht zur Bestuhlung der Vorstellung
-	 * im Modell, ihre Vorstellung fehlt im Modell, oder der Hallen- bzw. Bestuhlungswechsel (oder das Löschen) ihrer
-	 * Vorstellung ist zurückgestellt oder eine Gabelung. Meist kommt nur die Halle oder Vorstellung später an; vom Abgleich
-	 * umgesetzt, überschriebe das nächste Speichern den fremden Stand. Eine wartende Einheit hat keinen Vergleichsstand,
-	 * bis sie eingearbeitet ist: Der Nutzer hat ihren Stand nie gesehen, und sein Verkauf auf demselben Platz tritt als
-	 * Gabelung gegen sie an. Außerdem die Einheiten eines Events, bei dem die Entscheidung scheiterte.
+	 * Still wartend sind vor allem Buchungen, bis ihr Platz im Modell da ist, also solange sie nicht
+	 * {@linkplain EventMerge#placeable platzierbar} sind: Sie passen nicht zur Bestuhlung der Vorstellung im Modell, ihre
+	 * Vorstellung fehlt im Modell, oder die Vorstellung im Modell weicht von ihrem Stand im Index ab (der Hallen- bzw.
+	 * Bestuhlungswechsel oder das Löschen ist zurückgestellt oder eine Gabelung). Meist kommt nur die Halle oder Vorstellung
+	 * später an; vom Abgleich umgesetzt, überschriebe das nächste Speichern den fremden Stand. Eine wartende Einheit hat
+	 * keinen Vergleichsstand, bis sie eingearbeitet ist: Der Nutzer hat ihren Stand nie gesehen, und sein Verkauf auf
+	 * demselben Platz tritt als Gabelung gegen sie an. Das gilt auch nach einem Neustart ({@link #readEventsFromStore}).
+	 * Außerdem die Einheiten eines Events, bei dem die Entscheidung scheiterte.
 	 */
 	private final ForeignBacklog backlog = new ForeignBacklog();
-
-	/**
-	 * Vorstellungen, deren fremder Stand eine Gabelung ist und Halle oder Bestuhlung wechselt bzw. sie löscht: Ihre
-	 * Buchungen warten. Sie werden bei jedem Aufruf mit geprüft, damit die Buchungen weiter warten, solange die Gabelung
-	 * besteht.
-	 */
-	private final Set<UnitKey> forkedParents = new LinkedHashSet<>();
 
 	/**
 	 * Inhalte im Modell, die nicht der Nutzer, sondern das Einarbeiten erzeugt hat: Wechselt eine fremde Vorstellung Halle
@@ -160,10 +155,13 @@ public class StoreEventRepository implements EventRepository {
 		}
 		List<UnitSnapshot> snapshots = sync.snapshots().values().stream()
 				.filter(snapshot -> snapshot.unit().type() != UnitType.HALL).toList();
-		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
+		// Buchungen, die nicht platzierbar sind, bleiben auch nach einem Neustart draußen und warten (wie bei applyForeign)
+		List<UnitSnapshot> waiting = new ArrayList<>();
+		Assembly<Event> assembly = EventMerge.assembleLoaded(snapshots, hallLookup, waiting);
 		baseline.reset(snapshots, assembly.shown());
 		derived.clear();
 		removedByOthers.clear();
+		waiting.forEach(snapshot -> holdUnplaced(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
 		addLoadWarnings(assembly.warnings());
 		return new ArrayList<>(assembly.items());
 	}
@@ -458,8 +456,7 @@ public class StoreEventRepository implements EventRepository {
 		if (cachedEvents == null) {
 			return new ForeignResult(List.of(), List.of());
 		}
-		// forkedParents vor den wartenden Buchungen: Ob sie weiter warten, hängt an der Gabelung ihrer Vorstellung
-		return backlog.run(units, unit -> unit.type() != UnitType.HALL, forkedParents, sync, new ForeignBacklog.Step() {
+		return backlog.run(units, unit -> unit.type() != UnitType.HALL, sync, new ForeignBacklog.Step() {
 			@Override
 			public String ownerOf(UnitKey unit) {
 				return unit.eventId();
@@ -607,12 +604,9 @@ public class StoreEventRepository implements EventRepository {
 		String eventId = snapshots.get(0).unit().eventId();
 		Event event = cachedEvent(eventId);
 		List<UnitSnapshot> successors = new ArrayList<>();
-		// Vorstellungen, deren Buchungen warten: Hallen- bzw. Bestuhlungswechsel oder Löschen zurückgestellt oder Gabelung
-		Set<UnitKey> heldPresentations = new HashSet<>();
 		for (UnitSnapshot current : snapshots) {
 			UnitKey unit = current.unit();
 			ForeignDecision decision = ForeignDecision.decideUnblocked(baseline.known(unit), current, chainOf(chains, unit));
-			forkedParents.remove(unit);
 			if (decision != ForeignDecision.APPLY) {
 				backlog.settle(unit);
 			}
@@ -621,10 +615,6 @@ public class StoreEventRepository implements EventRepository {
 			} else if (decision == ForeignDecision.FORK) {
 				LOG.info("Fremder Stand von " + unit.relativePath()
 						+ " nicht eingearbeitet: Die eigene Version ist unterlegen (Gabelung).");
-				if (event != null && unit.type() == UnitType.PRESENTATION && EventMerge.touchesSubtree(event, current)) {
-					heldPresentations.add(unit);
-					forkedParents.add(unit);
-				}
 			} else if (decision == ForeignDecision.APPLY) {
 				successors.add(current);
 			}
@@ -637,31 +627,23 @@ public class StoreEventRepository implements EventRepository {
 		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false, null) : localChanges(event);
 		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
 		successors.sort(EventMerge.MERGE_ORDER);
-		Map<UnitKey, UnitSnapshot> appliedPresentations = new HashMap<>();
-		Set<UnitKey> goneParents = goneParents(event, successors);
+		Map<UnitKey, UnitSnapshot> presentationStates = presentationStates(event, snapshots, successors);
+		Set<UnitKey> appliedPresentations = new HashSet<>();
 		List<UnitSnapshot> apply = new ArrayList<>();
 		for (UnitSnapshot current : successors) {
 			UnitKey unit = current.unit();
+			UnitKey parent = unit.type() == UnitType.BOOKING ? EventMerge.presentationKey(unit) : null;
 			if (isBlocked(event, current, changes)) {
 				defer(event, current, chainOf(chains, unit));
-				if (unit.type() == UnitType.PRESENTATION && EventMerge.touchesSubtree(event, current)) {
-					heldPresentations.add(unit);
-				}
-			} else if (unit.type() == UnitType.BOOKING
-					&& heldPresentations.contains(EventMerge.presentationKey(unit))) {
-				// gehört zur neuen Bestuhlung bzw. zur verschwindenden Vorstellung: erst mit ihr einarbeiten
-				backlog.undefer(unit);
-				holdUnplaced(unit, "ihre Vorstellung ist zurückgestellt");
-			} else if (unit.type() == UnitType.BOOKING && event != null
-					&& !goneParents.contains(EventMerge.presentationKey(unit)) && !EventMerge.hasPlace(event, current,
-							appliedPresentations.get(EventMerge.presentationKey(unit)), hallLookup)) {
-				backlog.undefer(unit);
-				holdUnplaced(unit, "sie hat im Modell keinen Platz");
+			} else if (parent != null && event != null && !appliedPresentations.contains(parent)
+					&& EventMerge.waits(event, current, presentationStates.get(parent), hallLookup)) {
+				// Wird die Vorstellung in diesem Schritt eingearbeitet, entscheidet das Einarbeiten mit ihrem neuen Stand
+				holdUnplaced(unit, "sie ist im Modell nicht platzierbar");
 			} else {
 				backlog.settle(unit);
 				apply.add(current);
 				if (unit.type() == UnitType.PRESENTATION) {
-					appliedPresentations.put(unit, current);
+					appliedPresentations.add(unit);
 				}
 			}
 		}
@@ -682,36 +664,37 @@ public class StoreEventRepository implements EventRepository {
 		} else if (head != null && !headReadable) {
 			removeEvent(event, head, apply, warnings);
 		} else {
-			mergeInto(event, apply, changes, chains, goneParents, warnings);
+			mergeInto(event, apply, changes, chains, presentationStates, warnings);
 		}
 	}
 
 	/**
-	 * Die Vorstellungen der Buchungen unter {@code successors}, die nicht im Modell stehen und im Index gelöscht oder unlesbar
-	 * sind. Ihre Buchungen warten auf keinen Platz: Sie gehen nur in den Vergleichsstand. Fehlt die Vorstellung nur noch (sie
-	 * ist im Index nicht da oder lesbar), wartet die Buchung auf sie.
+	 * Die aktuellen Stände der Vorstellungen der Buchungen unter {@code successors}, wie der Index sie hat (auch gelöschte
+	 * und unlesbare): Daran misst {@link EventMerge#placeable} das Modell. Die Vorstellungen, die in {@code current} stehen,
+	 * sind schon frisch; für die übrigen liest der Index.
 	 */
-	private Set<UnitKey> goneParents(Event event, List<UnitSnapshot> successors) {
+	private Map<UnitKey, UnitSnapshot> presentationStates(Event event, List<UnitSnapshot> current,
+			List<UnitSnapshot> successors) {
+		Map<UnitKey, UnitSnapshot> states = new HashMap<>();
+		if (event == null) {
+			return states;
+		}
+		for (UnitSnapshot snapshot : current) {
+			if (snapshot.unit().type() == UnitType.PRESENTATION) {
+				states.put(snapshot.unit(), snapshot);
+			}
+		}
 		Set<UnitKey> missing = new HashSet<>();
-		if (event != null) {
-			for (UnitSnapshot snapshot : successors) {
-				UnitKey unit = snapshot.unit();
-				if (unit.type() == UnitType.BOOKING && EventMerge.presentation(event, unit.presentationId()) == null) {
-					missing.add(EventMerge.presentationKey(unit));
-				}
+		for (UnitSnapshot snapshot : successors) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() == UnitType.BOOKING && !states.containsKey(EventMerge.presentationKey(unit))) {
+				missing.add(EventMerge.presentationKey(unit));
 			}
 		}
-		Set<UnitKey> gone = new HashSet<>();
 		if (!missing.isEmpty()) {
-			for (UnitSnapshot snapshot : sync.snapshots(missing).values()) {
-				boolean lockedWithoutVersion = snapshot.version() == null && (snapshot.status() == UnitState.Status.LOCKED_DAMAGED
-						|| snapshot.status() == UnitState.Status.LOCKED_FORMAT);
-				if (lockedWithoutVersion || (snapshot.version() != null && !UnitMapper.isReadable(snapshot))) {
-					gone.add(snapshot.unit());
-				}
-			}
+			states.putAll(sync.snapshots(missing));
 		}
-		return gone;
+		return states;
 	}
 
 	/**
@@ -725,10 +708,9 @@ public class StoreEventRepository implements EventRepository {
 		backlog.hold(unit, reason);
 	}
 
-	/** Alle Einheiten des Events sind erledigt: nichts davon ist zurückgestellt, wartet still oder hängt an einer Gabelung. */
+	/** Alle Einheiten des Events sind erledigt: nichts davon ist zurückgestellt oder wartet still. */
 	private void forgetWaiting(String eventId) {
 		backlog.forgetOwner(eventId);
-		forkedParents.removeIf(unit -> eventId.equals(unit.eventId()));
 	}
 
 	private static Set<UnitKey> unitsOf(Collection<UnitSnapshot> snapshots) {
@@ -854,12 +836,12 @@ public class StoreEventRepository implements EventRepository {
 	 * {@code changingByOthers} folgt immer {@code changedByOthers}.
 	 */
 	private void mergeInto(Event event, List<UnitSnapshot> apply, LocalChanges changes,
-			Map<UnitKey, List<ChainStep>> chains, Set<UnitKey> goneParents, List<String> warnings) {
+			Map<UnitKey, List<ChainStep>> chains, Map<UnitKey, UnitSnapshot> presentationStates, List<String> warnings) {
 		String eventId = event.getId();
 		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
 				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
 		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
-		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, goneParents);
+		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, presentationStates);
 		Set<UnitKey> adopted = new LinkedHashSet<>();
 		Set<UnitKey> waiting = new HashSet<>();
 		EventMerge.Sink sink = new EventMerge.Sink() {
