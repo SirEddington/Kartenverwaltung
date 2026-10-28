@@ -1119,6 +1119,117 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(2, sync.history(sale.booking()).size());
 	}
 
+	/** Ein neues Event "Kinderfasching" von B, dessen Vorstellung in einer Halle liegt, die A erst kennt, wenn {@code arrived} gesetzt ist. */
+	private record NewEventInUnknownHall(Event children, UnitKey booking, SeatingPlan plan) {
+	}
+
+	private NewEventInUnknownHall newEventWithSaleInAHallNotYetKnown(AtomicBoolean arrived) {
+		Hall other = secondHall(1, 2);
+		SeatingPlan otherPlan = other.getSeatingPlans().get(0);
+		Function<String, Hall> halls = lookup(other);
+		mine.setHallLookup(id -> other.getId().equals(id) && !arrived.get() ? null : halls.apply(id));
+		StoreEventRepository others = TestRepositories.events(sync);
+		others.loadEvents();
+		Event children = new Event();
+		children.setName("Kinderfasching");
+		Presentation sunday = children.addPresentation("Sonntag");
+		sunday.setHallId(other.getId());
+		sunday.setSeatingPlanId(otherPlan.getId());
+		BookingSync.sync(sunday, otherPlan);
+		sunday.getBookings().get(1).setLastName("Klein");
+		others.saveEvent(children);
+		return new NewEventInUnknownHall(children,
+				UnitKey.booking(children.getId(), sunday.getId(), otherPlan.getSeats().get(1).getId()), otherPlan);
+	}
+
+	private Event cachedEvent(String id) {
+		return mine.loadEvents().stream().filter(e -> e.getId().equals(id)).findFirst().orElseThrow();
+	}
+
+	@Test
+	void waitingBookingHasNoBaselineUntilPlaced() throws IOException {
+		AtomicBoolean arrived = new AtomicBoolean(false);
+		NewEventInUnknownHall sale = newEventWithSaleInAHallNotYetKnown(arrived);
+
+		// das neue Event kommt, die Halle seiner Vorstellung nicht: Die Buchung findet ihren Sitz nicht
+		mine.applyForeign(sync.eventUnits(sale.children().getId()));
+
+		Event added = cachedEvent(sale.children().getId());
+		assertTrue(added.getPresentations().get(0).getBookings().stream().noneMatch(Booking::hasData));
+		assertNull(mine.knownUnit(sale.booking()), "eine wartende Einheit gehört nicht in den Vergleichsstand");
+		assertNotNull(mine.knownUnit(UnitKey.event(added.getId())));
+		long before = files();
+		mine.saveEvent(added);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+
+		arrived.set(true);
+		mine.retryDeferred();
+
+		Booking placed = added.getPresentations().get(0).getBookings().stream()
+				.filter(b -> sale.booking().bookingDir().equals(b.getSeatId())).findFirst().orElseThrow();
+		assertEquals("Klein", placed.getLastName());
+		assertNotNull(mine.knownUnit(sale.booking()));
+		assertTrue(mine.locallyChangedUnits().isEmpty(), "angezeigt und unverändert: kein Anlass zur Rückstellung");
+		mine.saveEvent(added);
+		assertEquals(before, files());
+	}
+
+	@Test
+	void bookingBeforeItsPresentationIsNotInBaselineAndAppearsWithIt() throws IOException {
+		Other other = other();
+		Presentation saturday = other.event().addPresentation("Samstag");
+		saturday.setHallId(hall.getId());
+		saturday.setSeatingPlanId(plan.getId());
+		BookingSync.sync(saturday, plan);
+		seat(saturday, 2).setLastName("Schmitz");
+		other.save();
+		UnitKey booking = seatUnit(saturday, 2);
+		long before = files();
+
+		mine.applyForeign(List.of(booking));
+
+		assertNull(mine.knownUnit(booking), "die Buchung wartet auf ihre Vorstellung, ohne Vergleichsstand");
+		assertEquals(1, event.getPresentations().size());
+		assertTrue(mine.retryDeferred().deferred().isEmpty());
+		assertTrue(recorder.calls.isEmpty(), "das Warten ändert nichts, also meldet es nichts");
+
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), saturday.getId())));
+
+		Presentation added = event.getPresentations().get(1);
+		assertEquals("Schmitz", seat(added, 2).getLastName());
+		assertNotNull(mine.knownUnit(booking));
+		assertTrue(mine.locallyChangedUnits().isEmpty());
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+	}
+
+	@Test
+	void saleOnSeatOfWaitingForeignBookingForks() throws IOException {
+		AtomicBoolean arrived = new AtomicBoolean(false);
+		NewEventInUnknownHall sale = newEventWithSaleInAHallNotYetKnown(arrived);
+		mine.applyForeign(sync.eventUnits(sale.children().getId()));
+		Event added = cachedEvent(sale.children().getId());
+		// die Halle kommt an, eine Ansicht bereitet die Vorstellung vor: Der Sitz sieht frei aus, und der Nutzer verkauft ihn
+		arrived.set(true);
+		Presentation sunday = added.getPresentations().get(0);
+		BookingSync.sync(sunday, sale.plan());
+		Booking mySale = sunday.getBookings().stream().filter(b -> sale.booking().bookingDir().equals(b.getSeatId()))
+				.findFirst().orElseThrow();
+		assertFalse(mySale.hasData(), "der Sitz sieht frei aus");
+		mySale.setLastName("Eigen");
+
+		mine.saveEvent(added);
+
+		List<Version> history = sync.history(sale.booking());
+		assertEquals(2, history.size());
+		Version ours = history.stream().filter(v -> "Eigen".equals(v.payload().get("lastName").asText())).findFirst()
+				.orElseThrow();
+		assertEquals(List.of(), ours.parents(), "eine Gabelung, nicht der Nachfolger des fremden Verkaufs");
+		UnitState state = sync.unitState(sale.booking());
+		assertEquals("Klein", state.head().payload().get("lastName").asText(), "Bs Verkauf bleibt gültig");
+		assertEquals(1, state.lost().size());
+	}
+
 	@Test
 	void failedAssemblyOfANewEventIsRetried() throws IOException {
 		StoreEventRepository others = TestRepositories.events(sync);
@@ -1330,9 +1441,9 @@ class StoreEventRepositoryForeignTest {
 		UnitKey presentation = UnitKey.presentation(event.getId(), saturday.getId());
 		long before = files();
 
-		// die Buchung kommt vor ihrer Vorstellung: nur in den Vergleichsstand, nicht angezeigt
+		// die Buchung kommt vor ihrer Vorstellung: Sie wartet, ohne Vergleichsstand
 		mine.applyForeign(List.of(booking));
-		assertNotNull(mine.knownUnit(booking));
+		assertNull(mine.knownUnit(booking));
 		mine.applyForeign(List.of(presentation));
 		Presentation added = event.getPresentations().get(1);
 		assertTrue(added.getBookings().stream().noneMatch(Booking::hasData));

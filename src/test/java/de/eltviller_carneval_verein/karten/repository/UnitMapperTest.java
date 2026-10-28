@@ -998,6 +998,47 @@ class UnitMapperTest {
 		assertFalse(changes.get(0).deleted());
 	}
 
+	/** Die Buchung auf seat-a1 hat im Bestand eine unlesbare Version; der Nutzer hat auf dem Sitz verkauft. */
+	private static UnitKey unreadableSeatSoldByUser(Event event, Map<UnitKey, UnitSnapshot> baseline) {
+		UnitKey key = bookingKey(event, 0, "seat-a1");
+		put(baseline, garbled(baseline.get(key), "price"));
+		event.getPresentations().get(0).getBookings().get(0).setLastName("Neuer Käufer");
+		return key;
+	}
+
+	@Test
+	void changeOnUnreadableHiddenUnitUnderShownParentHasNoParent() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		UnitKey key = unreadableSeatSoldByUser(event, baseline);
+		Set<UnitKey> shown = shown(baseline);
+		shown.remove(key);
+
+		List<Change> changes = UnitMapper.changes(baseline, shown, UnitMapper.decompose(event));
+
+		// die unlesbare Version hat der Nutzer nie gesehen: Seine Version tritt gegen sie an, statt auf ihr aufzubauen
+		assertEquals(1, changes.size());
+		assertEquals(key, changes.get(0).unit());
+		assertEquals(List.of(), changes.get(0).parents());
+		assertFalse(changes.get(0).deleted());
+	}
+
+	@Test
+	void changeOnUnreadableUnitUnderHiddenParentBuildsOnIt() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		UnitKey key = unreadableSeatSoldByUser(event, baseline);
+		Set<UnitKey> shown = shown(baseline);
+		shown.remove(key);
+		// auch die Vorstellung wurde nicht angezeigt (etwa beim Wiederherstellen): Die Einheit fehlte nur mit ihr
+		shown.remove(UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId()));
+
+		List<Change> changes = UnitMapper.changes(baseline, shown, UnitMapper.decompose(event));
+
+		Change change = changes.stream().filter(c -> c.unit().equals(key)).findFirst().orElseThrow();
+		assertEquals(List.of(baseline.get(key).version()), change.parents());
+	}
+
 	private static UnitPayload partOf(List<UnitPayload> parts, UnitKey unit) {
 		return parts.stream().filter(p -> p.unit().equals(unit)).findFirst().orElseThrow();
 	}

@@ -305,7 +305,7 @@ class EventMergeTest {
 	}
 
 	@Test
-	void bookingOfAnInvisiblePresentationIsOnlyAdopted() {
+	void bookingOfAnInvisiblePresentationWaits() {
 		Event event = event();
 		UnitKey unit = UnitKey.booking(event.getId(), "fehlt", "s1");
 		Event state = copyOfUnchecked(event);
@@ -315,8 +315,22 @@ class EventMergeTest {
 
 		EventMerge.apply(event, plan(List.of(snapshot), List.of()), sink);
 
-		assertEquals(Map.of(unit, false), sink.adopted);
+		assertEquals(List.of(unit), sink.held, "sie wartet auf ihre Vorstellung, statt in den Vergleichsstand zu gehen");
+		assertEquals(Map.of(), sink.adopted);
 		assertEquals(1, event.getPresentations().size());
+	}
+
+	@Test
+	void deletedBookingOfAnInvisiblePresentationIsOnlyAdopted() {
+		Event event = event();
+		UnitKey unit = UnitKey.booking(event.getId(), "fehlt", "s1");
+		UnitSnapshot snapshot = new UnitSnapshot(unit, nextVersion(), Status.OK, true, null);
+		Recording sink = new Recording();
+
+		EventMerge.apply(event, plan(List.of(snapshot), List.of()), sink);
+
+		assertEquals(Map.of(unit, false), sink.adopted, "nichts wartet auf einen Platz");
+		assertEquals(List.of(), sink.held);
 	}
 
 	@Test

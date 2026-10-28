@@ -61,9 +61,11 @@ public class StoreEventRepository implements EventRepository {
 	 * Die fremden Stände, die noch nicht eingearbeitet sind; {@link #applyForeign} prüft sie bei jedem Aufruf erneut.
 	 * Zurückgestellt (mit Hinweis) sind die Stände von Einheiten, die der Nutzer ungespeichert geändert hat oder bearbeitet.
 	 * Still wartend sind vor allem Buchungen, bis ihr Platz im Modell da ist: Sie passen nicht zur Bestuhlung der Vorstellung
-	 * im Modell, oder der Hallen- bzw. Bestuhlungswechsel (oder das Löschen) ihrer Vorstellung ist zurückgestellt oder eine
-	 * Gabelung. Meist kommt nur die Halle oder Vorstellung später an; vom Abgleich umgesetzt, überschriebe das nächste
-	 * Speichern den fremden Stand. Außerdem die Einheiten eines Events, bei dem die Entscheidung scheiterte.
+	 * im Modell, ihre Vorstellung fehlt im Modell, oder der Hallen- bzw. Bestuhlungswechsel (oder das Löschen) ihrer
+	 * Vorstellung ist zurückgestellt oder eine Gabelung. Meist kommt nur die Halle oder Vorstellung später an; vom Abgleich
+	 * umgesetzt, überschriebe das nächste Speichern den fremden Stand. Eine wartende Einheit hat keinen Vergleichsstand,
+	 * bis sie eingearbeitet ist: Der Nutzer hat ihren Stand nie gesehen, und sein Verkauf auf demselben Platz tritt als
+	 * Gabelung gegen sie an. Außerdem die Einheiten eines Events, bei dem die Entscheidung scheiterte.
 	 */
 	private final ForeignBacklog backlog = new ForeignBacklog();
 
@@ -279,7 +281,7 @@ public class StoreEventRepository implements EventRepository {
 		ensureLoaded();
 		Event target = plan.target();
 		List<String> notes = adjust.apply(target);
-		refreshFromStore(plan.ownerId(), plan.states());
+		refreshFromStore(plan.ownerId(), plan.states(), UnitMapper.payloads(target).keySet());
 		write(target);
 		replaceCachedEvent(target);
 		return new Restored<>(target, notes);
@@ -305,11 +307,28 @@ public class StoreEventRepository implements EventRepository {
 				"Zu diesem Speicherstand war das Event gelöscht.");
 	}
 
-	/** Übernimmt den frisch gelesenen Stand des Events als Vergleichsstand und, wenn es sichtbar ist, in den Cache. */
-	private void refreshFromStore(String eventId, List<UnitState> states) {
+	/**
+	 * Übernimmt den frisch gelesenen Stand des Events als Vergleichsstand und, wenn es sichtbar ist, in den Cache. Lesbare
+	 * Einheiten, die weder angezeigt werden noch im Zielstand stehen (etwa eine Vorstellung, die ankam, während der Kopf
+	 * unlesbar war), kommen nicht in den Vergleichsstand: Sie gehören nicht zum Modell und warten auf ihren Platz, bis sie
+	 * wieder gemeldet werden. Das gilt nicht unter einem gelöschten Kopf oder einer gelöschten Vorstellung: Dort gehören
+	 * die lesbaren Einheiten mit dem Wiederbeleben zum Objekt und werden, fehlen sie darin, gelöscht (siehe
+	 * {@link UnitBaseline#save}).
+	 */
+	private void refreshFromStore(String eventId, List<UnitState> states, Set<UnitKey> targetUnits) {
 		List<UnitSnapshot> snapshots = states.stream().map(UnitSnapshot::of).toList();
 		Assembly<Event> current = UnitMapper.assembleEvents(snapshots);
-		baseline.resetOwner(eventId, snapshots, current.shown());
+		Map<UnitKey, UnitSnapshot> byUnit = new HashMap<>();
+		snapshots.forEach(snapshot -> byUnit.put(snapshot.unit(), snapshot));
+		Set<UnitKey> notPlaced = new HashSet<>();
+		for (UnitSnapshot snapshot : snapshots) {
+			UnitKey unit = snapshot.unit();
+			if (!current.shown().contains(unit) && !targetUnits.contains(unit) && UnitMapper.isReadable(snapshot)
+					&& !belowDeleted(unit, byUnit)) {
+				notPlaced.add(unit);
+			}
+		}
+		baseline.resetOwner(eventId, snapshots, current.shown(), notPlaced);
 		forgetDerived(eventId);
 		removedByOthers.remove(eventId);
 		if (!current.items().isEmpty()) {
@@ -321,6 +340,18 @@ public class StoreEventRepository implements EventRepository {
 				cachedEvents.add(fresh);
 			}
 		}
+	}
+
+	/** Ob der Kopf oder die Vorstellung der Einheit gelöscht ist. */
+	private static boolean belowDeleted(UnitKey unit, Map<UnitKey, UnitSnapshot> byUnit) {
+		List<UnitKey> parents = new ArrayList<>();
+		if (unit.type() != UnitType.EVENT) {
+			parents.add(UnitKey.event(unit.eventId()));
+		}
+		if (unit.type() == UnitType.BOOKING) {
+			parents.add(UnitKey.presentation(unit.eventId(), unit.presentationId()));
+		}
+		return parents.stream().map(byUnit::get).anyMatch(parent -> parent != null && parent.deleted());
 	}
 
 	private List<UnitState> statesOf(String eventId) throws IOException {
@@ -407,10 +438,10 @@ public class StoreEventRepository implements EventRepository {
 	 * gültigen Kette wird eingearbeitet, außer der Nutzer hat die Einheit ungespeichert geändert oder bearbeitet sie gerade
 	 * (bei Löschung von Kopf oder Vorstellung und beim Wechsel von Halle oder Bestuhlung zählt alles darunter); dann wird
 	 * er zurückgestellt, der Vergleichsstand bleibt. Eine Buchung, die im Modell keinen Platz hat (Sitz fehlt in der
-	 * Bestuhlung, Hallenwechsel ihrer Vorstellung zurückgestellt), wartet still ohne Hinweis und wird ebenfalls jedes Mal
-	 * erneut geprüft. Je Event werden Objekt im Cache und Vergleichsstand in einem Schritt
-	 * nachgeführt, danach erfahren es die Listener. Ist noch nichts geladen, passiert nichts: Das erste Laden liest
-	 * ohnehin den aktuellen Stand.
+	 * Bestuhlung, Vorstellung fehlt im Modell, Hallenwechsel ihrer Vorstellung zurückgestellt), wartet still ohne Hinweis,
+	 * ohne Vergleichsstand, und wird ebenfalls jedes Mal erneut geprüft. Je Event werden Objekt im Cache und
+	 * Vergleichsstand in einem Schritt nachgeführt, danach erfahren es die Listener. Ist noch nichts geladen, passiert
+	 * nichts: Das erste Laden liest ohnehin den aktuellen Stand.
 	 * <p>
 	 * Nur auf dem Oberflächen-Thread aufrufen: Modell und Vergleichsstand sind nicht synchronisiert.
 	 *
@@ -573,12 +604,7 @@ public class StoreEventRepository implements EventRepository {
 		Set<UnitKey> heldPresentations = new HashSet<>();
 		for (UnitSnapshot current : snapshots) {
 			UnitKey unit = current.unit();
-			UnitSnapshot known = baseline.known(unit);
-			ForeignDecision decision = ForeignDecision.decideUnblocked(known, current, chainOf(chains, unit));
-			if (decision == ForeignDecision.KNOWN && notYetPlaced(event, known)) {
-				// bekannt, aber nie ins Modell gekommen (etwa eine Buchung, die auf ihren Platz wartet): noch einzuarbeiten
-				decision = ForeignDecision.APPLY;
-			}
+			ForeignDecision decision = ForeignDecision.decideUnblocked(baseline.known(unit), current, chainOf(chains, unit));
 			forkedParents.remove(unit);
 			if (decision != ForeignDecision.APPLY) {
 				backlog.settle(unit);
@@ -651,27 +677,16 @@ public class StoreEventRepository implements EventRepository {
 		}
 	}
 
-	/**
-	 * Ob die Einheit im Vergleichsstand einen lesbaren Stand hat, der nie angezeigt wurde, obwohl ihre Eltern-Einheit im
-	 * Modell steht: etwa eine Buchung, die vor ihrer Vorstellung ankam und dann nicht zur Bestuhlung passte. Sie gilt
-	 * nicht als bekannt, sonst fiele sie still heraus und ihr Sitz sähe frei aus.
-	 */
-	private boolean notYetPlaced(Event event, UnitSnapshot known) {
-		if (event == null || known == null || baseline.isShown(known.unit()) || !UnitMapper.isReadable(known)) {
-			return false;
-		}
-		UnitKey unit = known.unit();
-		return switch (unit.type()) {
-		case BOOKING -> EventMerge.presentation(event, unit.presentationId()) != null;
-		case PRESENTATION -> true;
-		case EVENT, HALL -> false;
-		};
-	}
-
 	/** Alle Einheiten des Events sind erledigt: nichts davon ist zurückgestellt, wartet still oder hängt an einer Gabelung. */
 	private void forgetWaiting(String eventId) {
 		backlog.forgetOwner(eventId);
 		forkedParents.removeIf(unit -> eventId.equals(unit.eventId()));
+	}
+
+	private static Set<UnitKey> unitsOf(List<UnitSnapshot> snapshots) {
+		Set<UnitKey> units = new HashSet<>();
+		snapshots.forEach(snapshot -> units.add(snapshot.unit()));
+		return units;
 	}
 
 	private static List<ChainStep> chainOf(Map<UnitKey, List<ChainStep>> chains, UnitKey unit) {
@@ -735,7 +750,7 @@ public class StoreEventRepository implements EventRepository {
 			Map<UnitKey, UnitSnapshot> all = sync.eventSnapshots(eventId);
 			List<UnitSnapshot> waiting = new ArrayList<>();
 			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup, waiting);
-			baseline.resetOwner(eventId, all.values(), assembly.shown());
+			baseline.resetOwner(eventId, all.values(), assembly.shown(), unitsOf(waiting));
 			forgetDerived(eventId);
 			warnings.addAll(assembly.warnings());
 			waiting.forEach(snapshot -> backlog.hold(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
@@ -809,7 +824,7 @@ public class StoreEventRepository implements EventRepository {
 			@Override
 			public void held(UnitSnapshot snapshot) {
 				waiting.add(snapshot.unit());
-				backlog.hold(snapshot.unit(), "ihr Sitz fehlt in der Bestuhlung der Vorstellung");
+				backlog.hold(snapshot.unit(), "sie hat im Modell keinen Platz");
 			}
 
 			@Override
@@ -882,7 +897,7 @@ public class StoreEventRepository implements EventRepository {
 			}
 			Event fresh = assembly.items().get(0);
 			byte[] state = MAPPER.writeValueAsBytes(fresh);
-			baseline.resetOwner(eventId, all, assembly.shown());
+			baseline.resetOwner(eventId, all, assembly.shown(), unitsOf(waiting));
 			forgetDerived(eventId);
 			warnings.addAll(assembly.warnings());
 			replaceCachedEvent(fresh);

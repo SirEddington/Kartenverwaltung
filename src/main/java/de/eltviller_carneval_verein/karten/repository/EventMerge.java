@@ -45,8 +45,9 @@ final class EventMerge {
 		}
 
 		/**
-		 * Die Buchung hat im Modell keinen Platz (ihr Sitz fehlt in der Bestuhlung der Vorstellung): Modell und Stand
-		 * bleiben unberührt, sie wartet, bis Halle oder Vorstellung mit dem Sitz da sind.
+		 * Die Buchung hat im Modell keinen Platz (ihr Sitz fehlt in der Bestuhlung der Vorstellung, oder die Vorstellung
+		 * fehlt im Modell): Modell und Vergleichsstand bleiben unberührt, sie wartet, bis Halle oder Vorstellung mit dem
+		 * Sitz da sind.
 		 */
 		default void held(UnitSnapshot snapshot) {
 		}
@@ -173,8 +174,8 @@ final class EventMerge {
 	 * alles unberührt und sie wartet ({@link Sink#held}). Gelöscht oder unlesbar: nur die Kundendaten leeren, der
 	 * Platzhalter bekommt eine neue Kennung.</li>
 	 * <li>Buchung ohne Platz: anhand der Kennung aktualisieren, sonst anhängen; gelöscht oder unlesbar: entfernen.</li>
-	 * <li>Buchung unter einer Vorstellung, die nicht im Modell steht: nur übernehmen; sichtbar wird sie mit der
-	 * Vorstellung.</li>
+	 * <li>Buchung unter einer Vorstellung, die nicht im Modell steht: lesbar wartet sie ({@link Sink#held}) und wird mit
+	 * der Vorstellung sichtbar; gelöscht oder unlesbar geht sie nur in den Vergleichsstand.</li>
 	 * </ul>
 	 * Scheitert das Einarbeiten einer Einheit, ist das Modell für diese Einheit wieder wie vorher (die Einheiten davor
 	 * bleiben eingearbeitet und gemeldet), dann geht die Ausnahme weiter.
@@ -286,12 +287,18 @@ final class EventMerge {
 	private static void mergeBooking(Event event, UnitSnapshot snapshot, Plan plan, Sink sink) {
 		UnitKey unit = snapshot.unit();
 		Presentation presentation = presentation(event, unit.presentationId());
+		Booking state = UnitMapper.readUnit(snapshot, Booking.class);
 		if (presentation == null) {
-			sink.adopted(snapshot, false);
+			if (state == null) {
+				// gelöscht oder unlesbar: Es gibt nichts, was auf einen Platz wartet
+				sink.adopted(snapshot, false);
+			} else {
+				// sichtbar wird sie mit der Vorstellung; bis dahin gehört sie nicht in den Vergleichsstand
+				sink.held(snapshot);
+			}
 			return;
 		}
 		Booking current = bookingAt(presentation, unit);
-		Booking state = UnitMapper.readUnit(snapshot, Booking.class);
 		if (state == null) {
 			if (current != null && isUnassigned(unit)) {
 				presentation.getBookings().remove(current);
@@ -326,8 +333,9 @@ final class EventMerge {
 
 	/**
 	 * Ob eine fremde Buchung beim Einarbeiten einen Platz im Modell findet ({@link #apply} sie also nicht zurückhält):
-	 * gelöscht oder unlesbar, ohne Vorstellung im Modell, im Modell schon vorhanden (auf ihrem Sitz bzw. mit ihrer
-	 * Kennung), oder passend zur Bestuhlung ({@link #fitsPlan}). {@code presentationState} ist der Stand der Vorstellung,
+	 * gelöscht oder unlesbar, im Modell schon vorhanden (auf ihrem Sitz bzw. mit ihrer Kennung), passend zur Bestuhlung
+	 * ({@link #fitsPlan}), oder ihre Vorstellung steht nicht im Modell, kommt aber im selben Schritt. Eine lesbare Buchung
+	 * ohne Vorstellung im Modell hat dagegen keinen Platz. {@code presentationState} ist der Stand der Vorstellung,
 	 * wenn er im selben Schritt eingearbeitet wird (sonst {@code null}): Wechselt er die Bestuhlung, zählt die neue.
 	 */
 	static boolean hasPlace(Event event, UnitSnapshot booking, UnitSnapshot presentationState,
@@ -335,7 +343,7 @@ final class EventMerge {
 		UnitKey unit = booking.unit();
 		Presentation presentation = presentation(event, unit.presentationId());
 		Booking state = UnitMapper.readUnit(booking, Booking.class);
-		if (presentation == null || state == null) {
+		if (state == null) {
 			return true;
 		}
 		Presentation presentationNow = presentationState == null ? null
@@ -343,6 +351,10 @@ final class EventMerge {
 		if (presentationState != null && presentationNow == null) {
 			// die Vorstellung verlässt das Modell: die Buchung geht nur in den Vergleichsstand
 			return true;
+		}
+		if (presentation == null) {
+			// kommt die Vorstellung im selben Schritt, kommt die Buchung mit ihr; sonst wartet sie auf die Vorstellung
+			return presentationState != null;
 		}
 		if (presentationNow != null && changesPlan(presentation, presentationNow)) {
 			return fitsPlan(unit, state, presentationNow, hallLookup);

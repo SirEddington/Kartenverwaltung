@@ -165,12 +165,15 @@ final class UnitMapper {
 	 * ({@code relativePath}).
 	 * <ul>
 	 * <li>Neue Einheit (nicht im Bestand oder ohne Version): erste Version, ohne Vorgänger.</li>
-	 * <li>Einheit mit lesbarem Stand im Bestand, die nie angezeigt wurde, obwohl ihre Eltern-Einheit angezeigt wird (etwa
-	 * ein fremder Verkauf, der noch auf seinen Platz im Modell wartet), aber mit anderem Inhalt im Modell: ebenfalls erste
-	 * Version, ohne Vorgänger. Der Nutzer hat den Stand nie gesehen; seine Version tritt gegen ihn an (Gabelung) und
-	 * überschreibt ihn nicht still. Wird auch die Eltern-Einheit nicht angezeigt (unlesbar oder gelöscht, etwa beim
-	 * Wiederherstellen oder für ein gehaltenes Objekt nach einem fremden unlesbaren Kopf), fehlte die Einheit nur mit ihr
-	 * und bekommt wie jede geänderte eine neue Version auf der aktuellen.</li>
+	 * <li>Buchung mit unlesbarem, nicht gelöschtem Stand im Bestand, die nicht angezeigt wird, obwohl ihre Vorstellung
+	 * angezeigt wird (ein fremder Verkauf mit unlesbarem Inhalt auf einem Sitz, den der Nutzer jetzt verkauft): ebenfalls
+	 * erste Version, ohne Vorgänger. Der Nutzer hat den Stand nie gesehen; seine Version tritt gegen ihn an (Gabelung), statt
+	 * als Nachfolger auf der unlesbaren Version zu stehen und sie still zu überschreiben. Nur eine Buchung kann im Modell
+	 * stehen, während ihr Stand verborgen ist (der Sitz ist ein leerer Platzhalter); eine verborgene Vorstellung steht nicht
+	 * darin, ihre Änderung (etwa beim Wiederherstellen) ersetzt den unlesbaren Stand als Nachfolger. Wird auch die
+	 * Vorstellung nicht angezeigt (unlesbar oder gelöscht, etwa beim Wiederherstellen oder für ein gehaltenes Objekt nach
+	 * einem fremden unlesbaren Kopf), fehlte die Buchung nur mit ihr und bekommt wie jede geänderte eine neue Version auf der
+	 * aktuellen. Einheiten, die auf ihren Platz im Modell warten, sind nicht im Bestand und zählen als neue Einheit.</li>
 	 * <li>Geänderte oder wieder aufgetauchte (gelöschte) Einheit: neue Version auf der aktuellen Version.</li>
 	 * <li>Einheit nur im Bestand: Löschung, aber nur wenn sie angezeigt wurde ({@code shown}), ihre Eltern-Einheit
 	 * (Vorstellung: der Kopf, Buchung: ihre Vorstellung) in {@code units} steht und sie eine Version hat und nicht
@@ -200,8 +203,8 @@ final class UnitMapper {
 				changes.add(new Change(part.unit(), List.of(), part.payload(), false));
 			} else if (!known.deleted() && part.payload().equals(known.payload())) {
 				continue;
-			} else if (!known.deleted() && !shown.contains(part.unit()) && isReadable(known)
-					&& parentShown(part.unit(), shown)) {
+			} else if (part.unit().type() == UnitType.BOOKING && !known.deleted() && !shown.contains(part.unit())
+					&& !isReadable(known) && parentShown(part.unit(), shown)) {
 				changes.add(new Change(part.unit(), List.of(), part.payload(), false));
 			} else {
 				changes.add(new Change(part.unit(), List.of(known.version()), part.payload(), false));

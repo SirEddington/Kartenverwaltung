@@ -86,9 +86,20 @@ final class UnitBaseline {
 	 * Ständen, die gerade gelesen wurden. Die anderen bleiben unberührt.
 	 */
 	void resetOwner(String ownerId, Collection<UnitSnapshot> snapshots, Set<UnitKey> shownUnits) {
+		resetOwner(ownerId, snapshots, shownUnits, Set.of());
+	}
+
+	/**
+	 * Wie {@link #resetOwner(String, Collection, Set)}, aber die {@code excluded}en Einheiten kommen nicht in den
+	 * Vergleichsstand: Sie warten auf ihren Platz im Modell (siehe {@link ForeignBacklog}). Hätten sie einen, sähe der Nutzer
+	 * ihren Stand als gesehen an, und sein Speichern baute auf ihm auf, statt gegen ihn anzutreten.
+	 */
+	void resetOwner(String ownerId, Collection<UnitSnapshot> snapshots, Set<UnitKey> shownUnits, Set<UnitKey> excluded) {
 		Map<UnitKey, UnitSnapshot> units = new HashMap<>();
 		for (UnitSnapshot snapshot : snapshots) {
-			units.put(snapshot.unit(), snapshot);
+			if (!excluded.contains(snapshot.unit())) {
+				units.put(snapshot.unit(), snapshot);
+			}
 		}
 		known.put(ownerId, units);
 		shown.put(ownerId, new HashSet<>(shownUnits));
