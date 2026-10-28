@@ -2135,6 +2135,155 @@ class SyncServiceTest {
 		assertThrows(UnsupportedOperationException.class, () -> snapshots.clear());
 	}
 
+	// --- Index Format 3: seen beim Löschen, Listennummern, über Liste eingelesen, aufgegangene Versionen
+
+	private static final UnitKey PRESENTATION = UnitKey.presentation("e1", "p1");
+
+	/** Schreibt den Index des Rechners und liefert den Eintrag der Einheit aus seiner Datei. */
+	private static com.fasterxml.jackson.databind.JsonNode indexEntry(Node node, UnitKey unit) throws IOException {
+		node.service.flushIndex();
+		Path file = node.appData.resolve("index").resolve(unit.type() == UnitType.HALL ? "halls.json"
+				: "events/" + unit.eventId() + ".json");
+		for (com.fasterxml.jackson.databind.JsonNode item : MAPPER.readTree(Files.readAllBytes(file)).get("units")) {
+			if (item.get("unit").asText().equals(unit.relativePath())) {
+				return item;
+			}
+		}
+		throw new AssertionError("kein Eintrag für " + unit.relativePath());
+	}
+
+	private static Change delete(UnitKey unit, Version parent) {
+		return new Change(unit, List.of(parent.id()), null, true);
+	}
+
+	@Test
+	void deletionOfPresentationRecordsSeenPositions() throws IOException {
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		Node b = node("b");
+		b.service.startup(shared);
+		for (int seq = 1; seq <= 3; seq++) {
+			publish(sharedStore, seq, UnitKey.booking("e1", "p1", "A-" + seq),
+					version(OTHER, 1_000_000L * seq, seq, "fremd-" + seq, null));
+		}
+		clock.advance(Duration.ofSeconds(30));
+		b.service.tick();
+		Version presentation = save(b, create(PRESENTATION, "Sitzung"));
+
+		Version deletion = save(b, delete(PRESENTATION, presentation));
+
+		assertTrue(deletion.deleted());
+		assertEquals(Map.of(OTHER, 3L), deletion.seen());
+		assertEquals(Map.of(OTHER, 3L),
+				StoreCodec.readVersion(Files.readAllBytes(localFile(b, PRESENTATION, deletion.id() + ".json"))).seen());
+		assertEquals(Map.of(), presentation.seen());
+	}
+
+	@Test
+	void seenIsOnlyWrittenForDeletionsOfEventsAndPresentations() throws IOException {
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		Node b = node("b");
+		b.service.startup(shared);
+		publish(sharedStore, 1, BOOKING, version(OTHER, 1_000_000L, 1, "fremd", null));
+		clock.advance(Duration.ofSeconds(30));
+		b.service.tick();
+		UnitKey event = UnitKey.event("e1");
+		Version head = save(b, create(event, "Fasching"));
+		Version booking = save(b, create(UnitKey.booking("e1", "p1", "B-1"), "Bert"));
+
+		Version update = save(b, update(event, head, "Fasching 2"));
+		Version bookingDeletion = save(b, delete(UnitKey.booking("e1", "p1", "B-1"), booking));
+		Version eventDeletion = save(b, delete(event, update));
+
+		assertEquals(Map.of(), update.seen());
+		assertEquals(Map.of(), bookingDeletion.seen());
+		assertEquals(Map.of(OTHER, 1L), eventDeletion.seen());
+	}
+
+	@Test
+	void deletionInSingleModeHasNoSeen() throws IOException {
+		Node a = node("a");
+		assertTrue(a.service.startup(""));
+		Version presentation = save(a, create(PRESENTATION, "Sitzung"));
+
+		Version deletion = save(a, delete(PRESENTATION, presentation));
+
+		assertTrue(deletion.deleted());
+		assertEquals(Map.of(), deletion.seen());
+	}
+
+	@Test
+	void ownVersionGetsItsListNumberAfterUpload() throws IOException {
+		Node a = node("a");
+		assertTrue(a.service.startup(shared));
+		Version first = save(a, create(BOOKING, "Anna"));
+
+		assertEquals(0L, indexEntry(a, BOOKING).get("ownSeq").asLong(), "noch in keiner Liste");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+
+		assertEquals(1L, indexEntry(a, BOOKING).get("ownSeq").asLong());
+		save(a, update(BOOKING, first, "Anna 2"));
+		assertEquals(0L, indexEntry(a, BOOKING).get("ownSeq").asLong());
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+
+		assertEquals(2L, indexEntry(a, BOOKING).get("ownSeq").asLong());
+		assertEquals(List.of("1.json", "2.json"), names(sharedRoot.resolve("data/feeds/" + a.identity.id())));
+	}
+
+	@Test
+	void ownVersionInSingleModeIsInNoList() throws IOException {
+		Node a = node("a");
+		assertTrue(a.service.startup(""));
+
+		save(a, create(BOOKING, "Anna"));
+
+		assertEquals(0L, indexEntry(a, BOOKING).get("ownSeq").asLong());
+	}
+
+	@Test
+	void foreignVersionIsMarkedListedAfterItsListIsProcessed() throws IOException {
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		Node a = node("a");
+		a.service.startup(shared);
+		Version p1 = version(OTHER, 1_000_000L, 0, "fremd-1", null);
+		publish(sharedStore, 1, BOOKING, p1);
+		// die zweite Liste nennt eine Version, deren Datei noch fehlt: die Liste ist nicht vollständig verarbeitet
+		Version p2 = version(OTHER, 2_000_000L, 1, "fremd-2", p1.id());
+		Feed second = new Feed(StoreCodec.FORMAT, OTHER, 2, START,
+				List.of(new FeedEntry(BOOKING.relativePath(), p2.id(), p2.claimName())));
+		assertTrue(sharedStore.createRelative("feeds/" + OTHER + "/2.json", StoreCodec.write(second)));
+		clock.advance(Duration.ofSeconds(30));
+
+		a.service.tick();
+
+		com.fasterxml.jackson.databind.JsonNode listed = indexEntry(a, BOOKING).get("listed");
+		assertEquals(1, listed.size());
+		assertEquals(p1.id().value(), listed.get(0).asText());
+		assertEquals(p1.id(), a.service.unitState(BOOKING).head().id());
+	}
+
+	@Test
+	void absorbedVersionsAreAnsweredFromTheIndex() throws IOException {
+		Path appData = dir.resolve("a");
+		MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "a");
+		Version w = version(OTHER, 1_000_000L, 0, "fremd-w", null);
+		Version l = version(OTHER, 2_000_000L, 1, "fremd-l", w.id());
+		Version m = new Version(StoreCodec.FORMAT, VersionId.create(3_000_000L, identity.id(), 0), List.of(w.id(), l.id()),
+				identity.id(), "a", null, START, "eigen", false, payload("merge"));
+		writeLocal(appData, BOOKING, w);
+		writeLocal(appData, BOOKING, l);
+		writeLocal(appData, BOOKING, m);
+		VersionStore local = new VersionStore(appData.resolve("data"), new NioFileLayer());
+		assertTrue(new LocalArbiter(local, clock).claim(BOOKING, w, StoreCodec.write(w)).won());
+		Node a = node("a");
+		assertTrue(a.service.startup(""));
+
+		Map<UnitKey, Set<VersionId>> absorbed = a.service.absorbed(List.of(BOOKING, UnitKey.hall("h1")));
+
+		assertEquals(Map.of(BOOKING, Set.of(l.id())), absorbed);
+	}
+
 	@Test
 	void sharedModeServicesSeeEachOthersVersions() {
 		SyncService a = TestSyncServices.sharedMode(dir.resolve("a"), sharedRoot, "a", clock);

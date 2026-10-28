@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -535,7 +536,7 @@ public final class SyncService {
 		IOException failure = null;
 		for (Change change : changes) {
 			try {
-				written.add(writeLocal(saveId, change, me, generator));
+				written.add(writeLocal(saveId, change, me, generator, seenFor(current, change)));
 			} catch (IOException e) {
 				failure = e;
 				break;
@@ -546,8 +547,10 @@ public final class SyncService {
 				// der Index folgt dort: claimLocally löst jede Einheit über resolveLocal auf (Verlustableitung)
 				claimLocally(written);
 			} else {
-				enqueue(current, saveId, written);
+				// erst in den Index, dann in die Warteschlange: Sobald der Auftrag läuft, trägt der Index die Listennummer ein
 				indexUnits(written);
+				index.markOwnListed(feedEntries(written), 0);
+				enqueue(current, saveId, written);
 			}
 		} catch (IOException e) {
 			// auch nach einem Fehler spiegelt der Index, was auf der Platte liegt (etwa eine Version ohne Anspruch)
@@ -563,14 +566,34 @@ public final class SyncService {
 		return written.stream().map(UploadJob.Item::version).toList();
 	}
 
+	/**
+	 * {@code seen} einer Version: bei der Löschung eines Event-Kopfs oder einer Vorstellung im gemeinsamen Betrieb je
+	 * fremdem Rechner die Nummer der zuletzt gelesenen Liste ({@link SyncPositions}); sonst leer.
+	 */
+	private static Map<String, Long> seenFor(Link current, Change change) {
+		UnitType type = change.unit().type();
+		if (current == null || !change.deleted() || type != UnitType.EVENT && type != UnitType.PRESENTATION) {
+			return Map.of();
+		}
+		Map<String, Long> seen = new TreeMap<>();
+		for (String machineId : current.positions.machines()) {
+			seen.put(machineId, current.positions.position(machineId));
+		}
+		return seen;
+	}
+
+	private static List<FeedEntry> feedEntries(List<UploadJob.Item> items) {
+		return items.stream().map(UploadJob.Item::feedEntry).toList();
+	}
+
 	/** Schreibt die Versionsdatei; ist der Name (praktisch nie) schon vergeben, mit der nächsten ID. */
-	private UploadJob.Item writeLocal(String saveId, Change change, MachineIdentity me, VersionIdGenerator generator)
-			throws IOException {
+	private UploadJob.Item writeLocal(String saveId, Change change, MachineIdentity me, VersionIdGenerator generator,
+			Map<String, Long> seen) throws IOException {
 		ObjectNode payload = change.deleted() || change.payload() == null ? JsonNodeFactory.instance.objectNode()
 				: change.payload().deepCopy();
 		for (int attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
 			Version version = new Version(StoreCodec.FORMAT, generator.next(), change.parents(), me.id(), me.name(),
-					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), Map.of());
+					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), seen);
 			byte[] bytes = StoreCodec.write(version);
 			if (local.writeVersion(change.unit(), version.id(), bytes)) {
 				return new UploadJob.Item(change.unit(), version, bytes);
@@ -588,6 +611,8 @@ public final class SyncService {
 			units.add(item.unit());
 		}
 		reportLosses(units);
+		// ohne gemeinsamen Ordner gibt es keine Listen: Die Versionen stehen in keiner
+		index.markOwnListed(feedEntries(items), 0);
 	}
 
 	private void enqueue(Link current, String saveId, List<UploadJob.Item> items) {
@@ -833,6 +858,17 @@ public final class SyncService {
 			chains.put(unit, chain);
 		}
 		return Collections.unmodifiableMap(chains);
+	}
+
+	/**
+	 * Die aufgegangenen Versionen der genannten Einheiten aus dem Start-Index, ohne Dateizugriff: alle Versionen, die vom
+	 * aktuellen Stand (Ende der Kette, bei ausstehenden eigenen Versionen die letzte davon) über beliebige Vorgänger erreichbar
+	 * sind, transitiv, ohne die Kette selbst. Einheiten ohne Eintrag im Index fehlen im Ergebnis.
+	 *
+	 * @return eine unveränderliche Kopie
+	 */
+	public Map<UnitKey, Set<VersionId>> absorbed(Collection<UnitKey> units) {
+		return index.absorbed(units);
 	}
 
 	/**
@@ -1264,7 +1300,8 @@ public final class SyncService {
 			UploadJob job = pending.get(i);
 			try {
 				List<LostVersion> losses = new Uploader(current.shared, current.writer,
-						new SharedArbiter(current.shared, local, clock, this::damagedInShared)).run(job);
+						new SharedArbiter(current.shared, local, clock, this::damagedInShared),
+						(entries, seq) -> index.markOwnListed(entries, seq)).run(job);
 				completed(job, losses, round);
 			} catch (ContentMismatchException e) {
 				// nichts überschreiben: den Auftrag verwerfen, die Versionen bleiben lokal ausstehend
@@ -1410,6 +1447,7 @@ public final class SyncService {
 
 	private void poll(Link current, Round round) throws IOException {
 		FeedPoll poll = current.reader.poll();
+		index.markListed(poll.listed());
 		round.changed.addAll(poll.changed());
 		forgetUnrepairable(poll.changed());
 		poll.pending().forEach(notifier::pending);

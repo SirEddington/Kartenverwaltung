@@ -164,7 +164,7 @@ class UnitIndexTest {
 		assertTrue(Files.isRegularFile(eventIndexFile("e1")));
 		assertTrue(Files.isRegularFile(indexDir.resolve("halls.json")));
 		ObjectNode root = (ObjectNode) new ObjectMapper().readTree(Files.readAllBytes(eventIndexFile("e1")));
-		assertEquals(2, root.get("indexFormat").asInt());
+		assertEquals(3, root.get("indexFormat").asInt());
 		assertEquals(ME, root.get("machine").asText());
 		assertEquals(2, root.get("units").size());
 		assertEquals("events/e1", root.get("units").get(0).get("unit").asText());
@@ -208,7 +208,7 @@ class UnitIndexTest {
 		UnitIndex first = index();
 		refresh(first, local);
 		first.flush();
-		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":3,\"machine\":\"" + ME + "\",\"units\":[]}");
+		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":4,\"machine\":\"" + ME + "\",\"units\":[]}");
 
 		UnitIndex.Refresh refresh = refresh(index(), local);
 
@@ -223,9 +223,9 @@ class UnitIndexTest {
 		first.flush();
 		// ein Index, wie ihn die Fassung ohne Kette schrieb
 		Path halls = indexDir.resolve("halls.json");
-		Files.writeString(halls, Files.readString(halls).replace("\"indexFormat\":2", "\"indexFormat\":1"));
+		Files.writeString(halls, Files.readString(halls).replace("\"indexFormat\":3", "\"indexFormat\":1"));
 		Path event = eventIndexFile("e1");
-		Files.writeString(event, Files.readString(event).replace("\"indexFormat\":2", "\"indexFormat\":1"));
+		Files.writeString(event, Files.readString(event).replace("\"indexFormat\":3", "\"indexFormat\":1"));
 
 		UnitIndex second = index();
 		UnitIndex.Refresh refresh = refresh(second, local);
@@ -891,7 +891,7 @@ class UnitIndexTest {
 	void cleanLoadFallsBackWhenAnIndexFileIsOfOtherMachine() throws IOException {
 		buildThreeUnits();
 		buildCleanIndex();
-		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":2,\"machine\":\"" + OTHER + "\",\"units\":[]}");
+		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":3,\"machine\":\"" + OTHER + "\",\"units\":[]}");
 
 		assertFalse(index().loadIfClean());
 	}
@@ -1065,6 +1065,261 @@ class UnitIndexTest {
 
 		index.clear();
 
+		assertFalse(Files.exists(cleanMarker()));
+	}
+
+	// --- Format 3: aufgegangene Versionen, Vermerke, seen, Listennummern
+
+	private static VersionId foreign(int n) {
+		return id(n, OTHER);
+	}
+
+	/** Schreibt eine Version mit beliebig vielen Vorgängern, optional Vermerk, Löschmarke und seen, und, wenn verlangt, ihren Anspruch. */
+	private Version put(UnitKey unit, String machine, VersionId id, List<VersionId> parents, boolean claim,
+			ConflictNote note, boolean deleted, Map<String, Long> seen) throws IOException {
+		ObjectNode payload = deleted ? new ObjectMapper().createObjectNode()
+				: new ObjectMapper().createObjectNode().put("name", "n-" + id);
+		Version version = new Version(1, id, parents, machine, "Kasse", "Anna", AT, "save-" + id, deleted, payload, note, seen);
+		byte[] bytes = StoreCodec.write(version);
+		assertTrue(local.writeVersion(unit, id, bytes));
+		if (claim) {
+			assertTrue(arbiter.claim(unit, version, bytes).won());
+		}
+		return version;
+	}
+
+	private Version put(UnitKey unit, String machine, VersionId id, List<VersionId> parents, boolean claim) throws IOException {
+		return put(unit, machine, id, parents, claim, null, false, Map.of());
+	}
+
+	private static ConflictNote note(ConflictNote.Kind kind) {
+		return new ConflictNote(kind, ME, new ConflictNote.Party(OTHER, "Kasse 2", "Bert", foreign(9)), List.of(), null, null, null);
+	}
+
+	/** Löst die Einheit aus den Dateien auf und trägt sie ein, wie es der Dienst nach jeder Änderung tut. */
+	private UnitState resolveInto(UnitIndex index, UnitKey unit) throws IOException {
+		UnitFiles files = local.readUnit(unit);
+		UnitState state = ChainResolver.resolve(files, ME);
+		index.update(files, state);
+		return state;
+	}
+
+	private static FeedEntry feedEntry(UnitKey unit, VersionId version) {
+		return new FeedEntry(unit.relativePath(), version, "root");
+	}
+
+	@Test
+	void absorbedIncludesMergedVersionsTransitively() throws IOException {
+		VersionId w = foreign(1);
+		VersionId b = foreign(2);
+		VersionId l = foreign(3);
+		VersionId c = foreign(4);
+		VersionId m2 = foreign(5);
+		put(EVENT, OTHER, w, List.of(), true);
+		put(EVENT, OTHER, b, List.of(w), true);
+		put(EVENT, OTHER, l, List.of(w), false);
+		put(EVENT, OTHER, c, List.of(w, l), false);
+		put(EVENT, OTHER, m2, List.of(b, c), true);
+		UnitIndex index = index();
+
+		refresh(index, local);
+
+		assertEquals(List.of(w, b, m2), index.entries().get(EVENT).chain().stream().map(ChainStep::version).toList());
+		assertEquals(Map.of(EVENT, Set.of(c, l)), index.absorbed(List.of(EVENT, HALL)));
+		assertEquals(Set.of(c, l), index.entries().get(EVENT).absorbed());
+	}
+
+	@Test
+	void absorbedFollowsOwnPendingMerge() throws IOException {
+		VersionId w = foreign(1);
+		VersionId l = foreign(2);
+		put(EVENT, OTHER, w, List.of(), true);
+		put(EVENT, OTHER, l, List.of(w), false);
+		put(EVENT, ME, mine(3), List.of(w, l), false);
+		UnitIndex index = index();
+
+		refresh(index, local);
+
+		UnitIndex.Entry entry = index.entries().get(EVENT);
+		assertTrue(entry.pending());
+		assertEquals(mine(3), entry.snapshot().version());
+		assertEquals(Set.of(l), entry.absorbed());
+	}
+
+	@Test
+	void notesOfChainAbsorbedAndPendingAreKept() throws IOException {
+		VersionId w = foreign(1);
+		VersionId x = foreign(2);
+		VersionId l = foreign(3);
+		VersionId u = foreign(4);
+		ConflictNote chainNote = note(ConflictNote.Kind.FIELDS);
+		ConflictNote absorbedNote = note(ConflictNote.Kind.DOUBLE_SALE);
+		ConflictNote pendingNote = note(ConflictNote.Kind.DELETE_WINS);
+		put(EVENT, OTHER, w, List.of(), true);
+		put(EVENT, OTHER, x, List.of(w), true, chainNote, false, Map.of());
+		put(EVENT, OTHER, l, List.of(w), false, absorbedNote, false, Map.of());
+		// eine fremde, nicht aufgegangene Version mit Vermerk zählt nicht
+		put(EVENT, OTHER, u, List.of(w), false, note(ConflictNote.Kind.UNMERGED), false, Map.of());
+		put(EVENT, ME, mine(5), List.of(x, l), false, pendingNote, false, Map.of());
+		UnitIndex index = index();
+
+		refresh(index, local);
+
+		UnitIndex.Entry entry = index.entries().get(EVENT);
+		assertEquals(Set.of(x, l, mine(5)), entry.notes().stream().map(UnitIndex.NotedVersion::version).collect(java.util.stream.Collectors.toSet()));
+		UnitIndex.NotedVersion pending = entry.notes().stream().filter(n -> n.version().equals(mine(5))).findFirst().orElseThrow();
+		assertEquals(new UnitIndex.NotedVersion(mine(5), ME, "Kasse", "Anna", AT, "save-" + mine(5), List.of(x, l), pendingNote), pending);
+		assertEquals(List.of(entry), index.entriesWithNotesOrSeen());
+
+		// die Vermerke überstehen Schreiben und Lesen des Index
+		index.flush();
+		UnitIndex second = index();
+		assertEquals(0, refresh(second, local).resolved());
+		assertEquals(entry, second.entries().get(EVENT));
+	}
+
+	@Test
+	void entriesWithoutNotesOrSeenAreNotListed() throws IOException {
+		buildThreeUnits();
+		UnitIndex index = index();
+
+		refresh(index, local);
+
+		assertTrue(index.entriesWithNotesOrSeen().isEmpty());
+	}
+
+	@Test
+	void seenOfCurrentDeletionIsKeptForEventAndPresentationOnly() throws IOException {
+		UnitKey booking = UnitKey.booking("e1", "p1", "A-1");
+		Map<String, Long> seen = Map.of(OTHER, 3L);
+		put(PRESENTATION, ME, mine(1), List.of(), true);
+		put(PRESENTATION, ME, mine(2), List.of(mine(1)), true, null, true, seen);
+		put(EVENT, ME, mine(1), List.of(), true);
+		put(booking, ME, mine(1), List.of(), true);
+		put(booking, ME, mine(2), List.of(mine(1)), true, null, true, seen);
+		put(HALL, ME, mine(1), List.of(), true);
+		UnitIndex index = index();
+
+		refresh(index, local);
+
+		assertEquals(seen, index.entries().get(PRESENTATION).seen());
+		assertEquals(Map.of(), index.entries().get(booking).seen());
+		assertEquals(Map.of(), index.entries().get(EVENT).seen());
+		assertEquals(List.of(index.entries().get(PRESENTATION)), index.entriesWithNotesOrSeen());
+		index.flush();
+		UnitIndex second = index();
+		refresh(second, local);
+		assertEquals(seen, second.entries().get(PRESENTATION).seen());
+	}
+
+	@Test
+	void format2IndexIsRebuilt() throws IOException {
+		buildThreeUnits();
+		UnitIndex first = index();
+		refresh(first, local);
+		first.flush();
+		Path halls = indexDir.resolve("halls.json");
+		Files.writeString(halls, Files.readString(halls).replace("\"indexFormat\":3", "\"indexFormat\":2"));
+		Path event = eventIndexFile("e1");
+		Files.writeString(event, Files.readString(event).replace("\"indexFormat\":3", "\"indexFormat\":2"));
+
+		UnitIndex second = index();
+		UnitIndex.Refresh refresh = refresh(second, local);
+
+		assertEquals(3, refresh.resolved());
+		assertNull(second.entries().get(EVENT).ownSeq());
+		assertEquals(first.entries(), second.entries());
+	}
+
+	@Test
+	void ownSeqAndListedSurviveUpdate() throws IOException {
+		VersionId w = foreign(1);
+		put(EVENT, OTHER, w, List.of(), true);
+		put(EVENT, ME, mine(2), List.of(w), false);
+		UnitIndex index = index();
+		refresh(index, local);
+		assertNull(index.entries().get(EVENT).ownSeq());
+		assertFalse(index.isListed(EVENT, w));
+
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(2))), 7);
+		index.markListed(List.of(feedEntry(EVENT, w)));
+
+		assertEquals(7L, index.entries().get(EVENT).ownSeq());
+		assertEquals(Set.of(w), index.entries().get(EVENT).listed());
+		assertTrue(index.isListed(EVENT, w));
+		assertFalse(index.isListed(EVENT, mine(2)));
+		assertFalse(index.isListed(HALL, w));
+
+		// die Version wird beansprucht, die Einheit neu aufgelöst: beide Angaben bleiben
+		UnitFiles files = local.readUnit(EVENT);
+		Version own = files.versions().get(mine(2)).version();
+		assertTrue(arbiter.claim(EVENT, own, files.versions().get(mine(2)).bytes()).won());
+		resolveInto(index, EVENT);
+		assertEquals(7L, index.entries().get(EVENT).ownSeq());
+		assertEquals(Set.of(w), index.entries().get(EVENT).listed());
+
+		// eine "keine Liste" ersetzt keine Nummer
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(2))), 0);
+		assertEquals(7L, index.entries().get(EVENT).ownSeq());
+
+		// eine neue eigene Version: ihre Nummer ist unbekannt, die gelesenen fremden Versionen bleiben
+		put(EVENT, ME, mine(3), List.of(mine(2)), false);
+		resolveInto(index, EVENT);
+		assertNull(index.entries().get(EVENT).ownSeq());
+		assertEquals(Set.of(w), index.entries().get(EVENT).listed());
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(3))), 0);
+		assertEquals(0L, index.entries().get(EVENT).ownSeq());
+
+		// beides steht in der Datei des Index
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(3))), 9);
+		assertEquals(9L, index.entries().get(EVENT).ownSeq());
+		index.flush();
+		UnitIndex second = index();
+		refresh(second, local);
+		assertEquals(index.entries().get(EVENT), second.entries().get(EVENT));
+	}
+
+	@Test
+	void markOwnListedIgnoresVersionsThatAreNotCurrent() throws IOException {
+		saveTwice(EVENT, "event");
+		UnitIndex index = index();
+		refresh(index, local);
+
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(1)), feedEntry(UnitKey.event("fehlt"), mine(2))), 4);
+
+		assertNull(index.entries().get(EVENT).ownSeq());
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(2))), 5);
+		assertEquals(5L, index.entries().get(EVENT).ownSeq());
+	}
+
+	@Test
+	void markListedBeforeTheEntryExistsIsAppliedByTheFirstUpdate() throws IOException {
+		VersionId w = foreign(1);
+		VersionId unknown = foreign(2);
+		put(EVENT, OTHER, w, List.of(), true);
+		UnitIndex index = index();
+
+		index.markListed(List.of(feedEntry(EVENT, w), feedEntry(EVENT, unknown)));
+		assertTrue(index.isListed(EVENT, w));
+		resolveInto(index, EVENT);
+
+		assertEquals(Set.of(w), index.entries().get(EVENT).listed(), "nur Versionen der Einheit werden gehalten");
+		assertTrue(index.isListed(EVENT, w));
+		assertFalse(index.isListed(EVENT, unknown));
+	}
+
+	@Test
+	void markingChangesTheIndexAndInvalidatesTheCleanMarker() throws IOException {
+		VersionId w = foreign(1);
+		put(EVENT, OTHER, w, List.of(), true);
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+		assertTrue(index.writeCleanMarker());
+
+		index.markListed(List.of(feedEntry(EVENT, w)));
+
+		assertTrue(index.hasChanges());
 		assertFalse(Files.exists(cleanMarker()));
 	}
 

@@ -17,9 +17,12 @@ import java.util.Set;
  *                       Ablauf der Beobachtung). Der Aufrufer vergleicht und verdrängt.
  * @param damaged        Einheiten, deren Versionsdatei beim Kopieren nicht zum Prüfwert des gemeinsamen Anspruchs passte
  *                       (die gemeinsame Kopie ist beschädigt)
+ * @param listed         die Einträge der in diesem Durchlauf vollständig verarbeiteten Listen: alle Versionsdateien lagen
+ *                       lokal vor und die Ansprüche sind übernommen oder werden beobachtet (nicht die Einträge einer
+ *                       Liste, die nach der Wartezeit übersprungen wurde, und nicht ungültige Einträge)
  */
 public record FeedPoll(Set<UnitKey> changed, List<PendingSighting> pending, boolean fullSyncNeeded,
-		Set<Contested> contested, Set<UnitKey> damaged) {
+		Set<Contested> contested, Set<UnitKey> damaged, List<FeedEntry> listed) {
 
 	/**
 	 * Ein umstrittener Platz.
@@ -35,5 +38,6 @@ public record FeedPoll(Set<UnitKey> changed, List<PendingSighting> pending, bool
 		pending = List.copyOf(pending);
 		contested = Set.copyOf(contested);
 		damaged = Set.copyOf(damaged);
+		listed = List.copyOf(listed);
 	}
 }

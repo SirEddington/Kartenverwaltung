@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.ObjLongConsumer;
 
 /**
  * Lädt einen Stapel in den gemeinsamen Ordner, in dieser Reihenfolge: erst alle Versionsdateien, dann eine neue
@@ -16,6 +17,7 @@ public final class Uploader {
 	private final VersionStore shared;
 	private final FeedWriter feed;
 	private final Arbiter arbiter;
+	private final ObjLongConsumer<List<FeedEntry>> onListed;
 
 	/**
 	 * @param shared  der gemeinsame Bestand
@@ -23,9 +25,21 @@ public final class Uploader {
 	 * @param arbiter der Schiedsrichter über die Ansprüche
 	 */
 	public Uploader(VersionStore shared, FeedWriter feed, Arbiter arbiter) {
+		this(shared, feed, arbiter, (entries, seq) -> {
+		});
+	}
+
+	/**
+	 * @param shared   der gemeinsame Bestand
+	 * @param feed     der Schreiber der Änderungslisten dieses Rechners
+	 * @param arbiter  der Schiedsrichter über die Ansprüche
+	 * @param onListed wird nach jeder geschriebenen Liste mit ihren Einträgen und ihrer Nummer aufgerufen; darf nicht werfen
+	 */
+	public Uploader(VersionStore shared, FeedWriter feed, Arbiter arbiter, ObjLongConsumer<List<FeedEntry>> onListed) {
 		this.shared = shared;
 		this.feed = feed;
 		this.arbiter = arbiter;
+		this.onListed = onListed;
 	}
 
 	/**
@@ -48,10 +62,11 @@ public final class Uploader {
 		if (job.stage() == UploadJob.Stage.FEED) {
 			List<FeedEntry> entries = new ArrayList<>();
 			for (UploadJob.Item item : job.items()) {
-				entries.add(new FeedEntry(item.unit().relativePath(), item.version().id(), item.version().claimName()));
+				entries.add(item.feedEntry());
 			}
-			feed.append(entries);
+			long seq = feed.append(entries);
 			job.enter(UploadJob.Stage.CLAIMS);
+			onListed.accept(entries, seq);
 		}
 		if (job.stage() == UploadJob.Stage.CLAIMS) {
 			for (int i = job.nextClaim(); i < job.items().size(); i++) {

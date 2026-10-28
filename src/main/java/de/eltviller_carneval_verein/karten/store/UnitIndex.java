@@ -7,9 +7,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -17,11 +19,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.DoubleConsumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -55,11 +59,14 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * Verzeichnisbaum aber nicht; das führt höchstens zu einer erneuten Auflösung, nie zu einem falschen Stand.
  * <p>
  * Dateiformat: {@code <Index>/events/<Event-ID>.json} (alle Einheiten dieses Events) und {@code <Index>/halls.json}, je
- * {@code {"indexFormat":2,"machine":…,"units":[…]}}. Je Einheit steht neben dem Stand die gültige Kette ohne Inhalt:
+ * {@code {"indexFormat":3,"machine":…,"units":[…]}}. Je Einheit steht neben dem Stand die gültige Kette ohne Inhalt:
  * {@code "chain":[{"version","saveId","at","machineName","operator","deleted"}]}, ältestes Glied zuerst. Daraus entstehen die
- * Speicherstände eines Events, ohne eine Datei zu lesen ({@link SyncService#chains}). Eine Datei mit anderem Format (auch dem
- * ersten ohne Kette), von einem anderen Rechner oder unlesbar gilt als leer und wird beim nächsten {@link #flush} neu
- * geschrieben.
+ * Speicherstände eines Events, ohne eine Datei zu lesen ({@link SyncService#chains}). Dazu kommen seit Format 3 die
+ * aufgegangenen Versionen ({@code "absorbed"}), die Versionen mit Konfliktvermerk ({@code "notes"}), {@code "seen"} der
+ * aktuellen Löschversion, die Nummer der eigenen Änderungsliste der aktuellen Version ({@code "ownSeq"}, fehlt: unbekannt)
+ * und die über eine Änderungsliste eingelesenen fremden Versionen ({@code "listed"}), siehe {@link Entry}. Eine Datei mit
+ * anderem Format (auch dem ersten ohne Kette und dem zweiten ohne diese Angaben), von einem anderen Rechner oder unlesbar
+ * gilt als leer und wird beim nächsten {@link #flush} neu geschrieben.
  * <p>
  * <b>Marke "sauber beendet":</b> Die Datei {@code <Index>/clean} (Inhalt: die Rechner-ID als Text, UTF-8) sagt, dass der
  * Index beim letzten Beenden vollständig geschrieben war und seither nichts am Bestand geändert wurde. {@link #loadIfClean}
@@ -78,7 +85,7 @@ final class UnitIndex {
 
 	private static final Logger LOGGER = Logger.getLogger(UnitIndex.class.getName());
 
-	private static final int INDEX_FORMAT = 2;
+	private static final int INDEX_FORMAT = 3;
 	private static final String EVENTS = "events";
 	private static final String HALLS = "halls";
 	private static final String CLAIMS = "claims";
@@ -96,12 +103,62 @@ final class UnitIndex {
 	 * @param lost        ob die Einheit eigene, verlorene Versionen hat
 	 * @param chain       die gültige Kette ({@link UnitState#chain()}), ältestes Glied zuerst, ohne Inhalt: daraus entstehen die
 	 *                    Speicherstände, ohne eine Datei zu lesen
+	 * @param absorbed    die Versionen, die vom aktuellen Stand ({@link UnitState#current()}) über beliebige Vorgänger
+	 *                    erreichbar sind, transitiv, ohne die Kette: was in eine Zusammenführung (auch eine, die selbst
+	 *                    zusammengeführt wurde) eingegangen ist
+	 * @param notes       die Versionen mit Konfliktvermerk aus der Kette, aus {@code absorbed} und unter den eigenen
+	 *                    ausstehenden Versionen
+	 * @param seen        {@link Version#seen()} der aktuellen Version, wenn sie eine Löschung eines Event-Kopfs oder einer
+	 *                    Vorstellung ist; sonst leer
+	 * @param ownSeq      die Nummer der eigenen Änderungsliste, in der die aktuelle Version steht, wenn sie eigen ist: eine
+	 *                    Zahl ab 1; {@code 0}: in keiner Liste; {@code null}: unbekannt (oder die aktuelle Version ist nicht eigen)
+	 * @param listed      die fremden Versionen dieser Einheit, die über eine vollständig verarbeitete Änderungsliste kamen;
+	 *                    nur für die Kette und {@code absorbed} gehalten
 	 */
-	record Entry(UnitSnapshot snapshot, String fingerprint, boolean pending, boolean lost, List<ChainStep> chain) {
+	record Entry(UnitSnapshot snapshot, String fingerprint, boolean pending, boolean lost, List<ChainStep> chain,
+			Set<VersionId> absorbed, List<NotedVersion> notes, Map<String, Long> seen, Long ownSeq, Set<VersionId> listed) {
 
-		/** Macht die Kette unveränderlich. */
+		/** Macht die Sammlungen unveränderlich. */
 		Entry {
 			chain = List.copyOf(chain);
+			absorbed = Set.copyOf(absorbed);
+			notes = List.copyOf(notes);
+			seen = Map.copyOf(seen);
+			listed = Set.copyOf(listed);
+		}
+
+		private Entry withOwnSeq(Long number) {
+			return new Entry(snapshot, fingerprint, pending, lost, chain, absorbed, notes, seen, number, listed);
+		}
+
+		private Entry withListed(Set<VersionId> versions) {
+			return new Entry(snapshot, fingerprint, pending, lost, chain, absorbed, notes, seen, ownSeq, versions);
+		}
+	}
+
+	/**
+	 * Eine Version mit Konfliktvermerk, so weit der Dialog sie braucht: Herkunft und Vermerk, ohne Inhalt.
+	 *
+	 * @param version     die ID der Version
+	 * @param machine     die ID des Rechners, der sie geschrieben hat
+	 * @param machineName der Anzeigename dieses Rechners
+	 * @param operator    der Bediener (kann {@code null} sein)
+	 * @param at          der Zeitpunkt des Speicherns
+	 * @param saveId      die ID des Speichervorgangs
+	 * @param parents     die Vorgänger der Version
+	 * @param note        der Konfliktvermerk
+	 */
+	record NotedVersion(VersionId version, String machine, String machineName, String operator, Instant at, String saveId,
+			List<VersionId> parents, ConflictNote note) {
+
+		/** Macht die Vorgänger unveränderlich. */
+		NotedVersion {
+			parents = List.copyOf(parents);
+		}
+
+		static NotedVersion of(Version version) {
+			return new NotedVersion(version.id(), version.machine(), version.machineName(), version.operator(), version.at(),
+					version.saveId(), version.parents(), version.conflict());
 		}
 	}
 
@@ -120,6 +177,11 @@ final class UnitIndex {
 	private final String machineId;
 
 	private final Map<UnitKey, Entry> entries = new HashMap<>();
+	/**
+	 * Fremde Versionen, die über eine Änderungsliste kamen, bevor ihre Einheit einen Eintrag hat ({@link #markListed});
+	 * {@link #update} übernimmt sie in den Eintrag. Nur im Speicher.
+	 */
+	private final Map<UnitKey, Set<VersionId>> unlistedYet = new HashMap<>();
 	/** Die Gruppen ({@code events/<Event-ID>} bzw. {@code halls}), deren Datei schon gelesen wurde. */
 	private final Set<String> loaded = new HashSet<>();
 	/** Die Gruppen, deren Datei neu geschrieben werden muss. */
@@ -229,6 +291,7 @@ final class UnitIndex {
 		for (UnitKey gone : new ArrayList<>(entries.keySet())) {
 			if (!units.containsKey(gone)) {
 				entries.remove(gone);
+				unlistedYet.remove(gone);
 				markChanged(groupOf(gone));
 			}
 		}
@@ -288,11 +351,109 @@ final class UnitIndex {
 	 */
 	synchronized void update(UnitFiles unitFiles, UnitState state) {
 		UnitKey unit = state.unit();
+		Entry previous = entries.get(unit);
+		Version current = state.current();
+		Set<VersionId> chainIds = state.chain().stream().map(Version::id).collect(Collectors.toSet());
+		Set<VersionId> absorbed = absorbedOf(unitFiles, current, chainIds);
 		entries.put(unit, new Entry(UnitSnapshot.of(state), fingerprint(unitFiles), !state.pending().isEmpty(),
-				!state.lost().isEmpty(), state.chain().stream().map(ChainStep::of).toList()));
+				!state.lost().isEmpty(), state.chain().stream().map(ChainStep::of).toList(), absorbed,
+				notesOf(unitFiles, state, absorbed), seenOf(unit, current), ownSeqOf(previous, current),
+				listedOf(previous, unit, unitFiles, state, chainIds, absorbed)));
 		markChanged(groupOf(unit));
 		// Absicherung: Wer den Bestand ändert, hat die Marke schon vorher mit invalidateCleanMarker entfernt
 		invalidateCleanMarker();
+	}
+
+	/**
+	 * Die Versionen, die vom aktuellen Stand über beliebige Vorgänger erreichbar sind (transitiv), ohne die Kette und ohne
+	 * den aktuellen Stand selbst. Liest nur die Versionen, die {@code unitFiles} schon enthält; eine genannte, aber lokal
+	 * fehlende oder unlesbare Version zählt als erreicht, ihre Vorgänger sind unbekannt.
+	 */
+	private static Set<VersionId> absorbedOf(UnitFiles unitFiles, Version current, Set<VersionId> chainIds) {
+		Set<VersionId> reached = new HashSet<>();
+		if (current == null) {
+			return reached;
+		}
+		Deque<VersionId> open = new ArrayDeque<>(current.parents());
+		Set<VersionId> visited = new HashSet<>();
+		while (!open.isEmpty()) {
+			VersionId id = open.pop();
+			if (!visited.add(id)) {
+				continue;
+			}
+			if (!chainIds.contains(id) && !id.equals(current.id())) {
+				reached.add(id);
+			}
+			VersionFile file = unitFiles.versions().get(id);
+			if (file != null && file.version() != null) {
+				file.version().parents().forEach(open::push);
+			}
+		}
+		return reached;
+	}
+
+	/** Die Versionen mit Vermerk aus der Kette, den aufgegangenen und den eigenen ausstehenden, in dieser Reihenfolge. */
+	private static List<NotedVersion> notesOf(UnitFiles unitFiles, UnitState state, Set<VersionId> absorbed) {
+		Map<VersionId, NotedVersion> notes = new LinkedHashMap<>();
+		for (Version version : state.chain()) {
+			addNote(notes, version);
+		}
+		for (VersionId id : new TreeSet<>(absorbed)) {
+			VersionFile file = unitFiles.versions().get(id);
+			if (file != null) {
+				addNote(notes, file.version());
+			}
+		}
+		for (Version version : state.pending()) {
+			addNote(notes, version);
+		}
+		return List.copyOf(notes.values());
+	}
+
+	private static void addNote(Map<VersionId, NotedVersion> notes, Version version) {
+		if (version != null && version.conflict() != null) {
+			notes.putIfAbsent(version.id(), NotedVersion.of(version));
+		}
+	}
+
+	/** {@code seen} der aktuellen Version, wenn sie eine Löschung eines Event-Kopfs oder einer Vorstellung ist. */
+	private static Map<String, Long> seenOf(UnitKey unit, Version current) {
+		boolean parent = unit.type() == UnitType.EVENT || unit.type() == UnitType.PRESENTATION;
+		return current != null && current.deleted() && parent ? current.seen() : Map.of();
+	}
+
+	/** Die Listennummer des bisherigen Eintrags, wenn die aktuelle Version dieselbe und eine eigene ist; sonst unbekannt. */
+	private Long ownSeqOf(Entry previous, Version current) {
+		if (previous == null || current == null || !machineId.equals(current.machine())
+				|| !current.id().equals(previous.snapshot().version())) {
+			return null;
+		}
+		return previous.ownSeq();
+	}
+
+	/**
+	 * Die über eine Änderungsliste eingelesenen fremden Versionen: die des bisherigen Eintrags und die vorgemerkten, soweit
+	 * die Version zur Kette oder zu den aufgegangenen gehört. Eine fremde Version der Einheit, die noch keinen Anspruch in
+	 * der Kette hat (ihr Anspruch kommt erst), bleibt ebenfalls erhalten: Die Liste kam vor dem Anspruch.
+	 */
+	private Set<VersionId> listedOf(Entry previous, UnitKey unit, UnitFiles unitFiles, UnitState state,
+			Set<VersionId> chainIds, Set<VersionId> absorbed) {
+		Set<VersionId> candidates = new HashSet<>();
+		if (previous != null) {
+			candidates.addAll(previous.listed());
+		}
+		Set<VersionId> waiting = unlistedYet.remove(unit);
+		if (waiting != null) {
+			candidates.addAll(waiting);
+		}
+		candidates.removeIf(id -> !(chainIds.contains(id) || absorbed.contains(id) || isUnclaimedForeign(unitFiles, state, id)));
+		return candidates;
+	}
+
+	private boolean isUnclaimedForeign(UnitFiles unitFiles, UnitState state, VersionId id) {
+		VersionFile file = unitFiles.versions().get(id);
+		return file != null && file.version() != null && !machineId.equals(file.version().machine())
+				&& !state.claimed().contains(id);
 	}
 
 	/** Eine unveränderliche Kopie der Einträge. */
@@ -352,6 +513,96 @@ final class UnitIndex {
 		return chains;
 	}
 
+	/**
+	 * Die aufgegangenen Versionen ({@link Entry#absorbed()}) der genannten Einheiten, soweit der Index sie kennt; Einheiten
+	 * ohne Eintrag fehlen im Ergebnis. Greift nur auf die genannten Einträge zu.
+	 */
+	synchronized Map<UnitKey, Set<VersionId>> absorbed(Collection<UnitKey> units) {
+		Map<UnitKey, Set<VersionId>> absorbed = new LinkedHashMap<>();
+		for (UnitKey unit : units) {
+			Entry entry = entries.get(unit);
+			if (entry != null) {
+				absorbed.put(unit, entry.absorbed());
+			}
+		}
+		return Collections.unmodifiableMap(absorbed);
+	}
+
+	/** Die Einträge, die Vermerke ({@link Entry#notes()}) oder {@code seen} ({@link Entry#seen()}) haben. */
+	synchronized List<Entry> entriesWithNotesOrSeen() {
+		return entries.values().stream().filter(entry -> !entry.notes().isEmpty() || !entry.seen().isEmpty()).toList();
+	}
+
+	/**
+	 * Hält fest, in welcher eigenen Änderungsliste die aktuelle Version der Einheiten steht. Nur Einträge, deren aktuelle
+	 * Version die genannte ist, ändern sich; eine ältere Version derselben Einheit oder eine Einheit ohne Eintrag bleibt
+	 * ohne Wirkung. Die Nummer {@code 0} heißt "in keiner Liste" und ersetzt nie eine bekannte Nummer ab 1: Die Liste, in der
+	 * die Version steht, bleibt wahr.
+	 *
+	 * @param entries die Einträge der Liste (oder, bei {@code 0}, der Versionen, die ohne Liste vorliegen)
+	 * @param seq     die Nummer der Liste; {@code 0}: keine
+	 */
+	synchronized void markOwnListed(Collection<FeedEntry> entries, long seq) {
+		boolean changed = false;
+		for (FeedEntry feedEntry : entries) {
+			Optional<UnitKey> unit = UnitKey.parse(feedEntry.unit());
+			Entry entry = unit.map(this.entries::get).orElse(null);
+			if (entry == null || !feedEntry.version().equals(entry.snapshot().version())
+					|| Long.valueOf(seq).equals(entry.ownSeq())) {
+				continue;
+			}
+			if (seq == 0 && entry.ownSeq() != null && entry.ownSeq() > 0) {
+				continue;
+			}
+			this.entries.put(unit.get(), entry.withOwnSeq(seq));
+			markChanged(groupOf(unit.get()));
+			changed = true;
+		}
+		if (changed) {
+			invalidateCleanMarker();
+		}
+	}
+
+	/**
+	 * Hält fest, dass fremde Versionen über eine vollständig verarbeitete Änderungsliste eingelesen wurden. Für eine Einheit
+	 * ohne Eintrag (der Anspruch kommt vielleicht erst) merkt sich der Index die Version, bis die Einheit eingetragen wird;
+	 * {@link #update} behält davon, was zur Einheit gehört.
+	 *
+	 * @param entries die Einträge der verarbeiteten Listen
+	 */
+	synchronized void markListed(Collection<FeedEntry> entries) {
+		boolean changed = false;
+		for (FeedEntry feedEntry : entries) {
+			Optional<UnitKey> parsed = UnitKey.parse(feedEntry.unit());
+			if (parsed.isEmpty()) {
+				continue;
+			}
+			UnitKey unit = parsed.get();
+			Entry entry = this.entries.get(unit);
+			if (entry == null) {
+				unlistedYet.computeIfAbsent(unit, key -> new HashSet<>()).add(feedEntry.version());
+			} else if (!entry.listed().contains(feedEntry.version())) {
+				Set<VersionId> listed = new HashSet<>(entry.listed());
+				listed.add(feedEntry.version());
+				this.entries.put(unit, entry.withListed(listed));
+				markChanged(groupOf(unit));
+				changed = true;
+			}
+		}
+		if (changed) {
+			invalidateCleanMarker();
+		}
+	}
+
+	/** Ob die Version der Einheit über eine vollständig verarbeitete Änderungsliste eingelesen wurde. */
+	synchronized boolean isListed(UnitKey unit, VersionId version) {
+		Entry entry = entries.get(unit);
+		if (entry != null && entry.listed().contains(version)) {
+			return true;
+		}
+		return unlistedYet.getOrDefault(unit, Set.of()).contains(version);
+	}
+
 	/** Ob es Änderungen gibt, die {@link #flush} noch schreiben müsste. */
 	synchronized boolean hasChanges() {
 		return !dirty.isEmpty();
@@ -377,6 +628,7 @@ final class UnitIndex {
 			LOGGER.log(Level.WARNING, "Der Index-Ordner " + indexDir + " ließ sich nicht auflisten", e);
 		}
 		entries.clear();
+		unlistedYet.clear();
 		loaded.addAll(groups);
 		groups.forEach(this::markChanged);
 	}
@@ -706,9 +958,58 @@ final class UnitIndex {
 					UnitState.Status.valueOf(StoreCodec.text(item, "status")), StoreCodec.bool(item, "deleted"),
 					payload == null || payload.isNull() ? null : (ObjectNode) payload);
 			result.add(new Entry(snapshot, StoreCodec.text(item, "fingerprint"), StoreCodec.bool(item, "pending"),
-					StoreCodec.bool(item, "lost"), chain(item.get("chain"))));
+					StoreCodec.bool(item, "lost"), chain(item.get("chain")), new HashSet<>(versionIds(item.get("absorbed"), "absorbed")),
+					notes(item.get("notes")), StoreCodec.readSeen(item.get("seen")), ownSeq(item.get("ownSeq")),
+					new HashSet<>(versionIds(item.get("listed"), "listed"))));
 		}
 		return result;
+	}
+
+	private static List<VersionId> versionIds(JsonNode node, String field) throws IOException {
+		if (node == null || !node.isArray()) {
+			throw new IOException("Das Feld " + field + " fehlt oder ist keine Liste.");
+		}
+		List<VersionId> ids = new ArrayList<>();
+		for (JsonNode id : node) {
+			if (!id.isTextual()) {
+				throw new IOException("Das Feld " + field + " enthält keine Versions-ID: " + id);
+			}
+			ids.add(VersionId.of(id.asText()));
+		}
+		return ids;
+	}
+
+	private static List<NotedVersion> notes(JsonNode node) throws IOException {
+		if (node == null || !node.isArray()) {
+			throw new IOException("Das Feld notes fehlt oder ist keine Liste.");
+		}
+		List<NotedVersion> notes = new ArrayList<>();
+		for (JsonNode item : node) {
+			ConflictNote note = StoreCodec.readConflict(item.get("conflict"));
+			if (note == null) {
+				throw new IOException("Ein Eintrag in notes hat keinen Vermerk: " + item);
+			}
+			try {
+				notes.add(new NotedVersion(VersionId.of(StoreCodec.text(item, "version")), StoreCodec.text(item, "machine"),
+						StoreCodec.optionalText(item, "machineName"), StoreCodec.optionalText(item, "operator"),
+						Instant.parse(StoreCodec.text(item, "at")), StoreCodec.text(item, "saveId"),
+						versionIds(item.get("parents"), "parents"), note));
+			} catch (DateTimeParseException e) {
+				throw new IOException("Ungültiger Zeitpunkt in notes: " + item.get("at"), e);
+			}
+		}
+		return notes;
+	}
+
+	/** Die Listennummer der aktuellen Version: fehlt das Feld oder ist es {@code null}, ist sie unbekannt. */
+	private static Long ownSeq(JsonNode node) throws IOException {
+		if (node == null || node.isNull()) {
+			return null;
+		}
+		if (!node.isIntegralNumber() || !node.canConvertToLong() || node.asLong() < 0) {
+			throw new IOException("Das Feld ownSeq ist keine Listennummer: " + node);
+		}
+		return node.asLong();
 	}
 
 	private static List<ChainStep> chain(JsonNode node) throws IOException {
@@ -756,6 +1057,30 @@ final class UnitIndex {
 						node.put("operator", step.operator());
 						node.put("deleted", step.deleted());
 					}
+					ArrayNode absorbed = item.putArray("absorbed");
+					entry.absorbed().stream().map(VersionId::value).sorted().forEach(absorbed::add);
+					ArrayNode notes = item.putArray("notes");
+					for (NotedVersion noted : entry.notes()) {
+						ObjectNode node = notes.addObject();
+						node.put("version", noted.version().value());
+						node.put("machine", noted.machine());
+						node.put("machineName", noted.machineName());
+						node.put("operator", noted.operator());
+						node.put("at", noted.at().toString());
+						node.put("saveId", noted.saveId());
+						ArrayNode parents = node.putArray("parents");
+						noted.parents().forEach(parent -> parents.add(parent.value()));
+						StoreCodec.writeConflict(node.putObject("conflict"), noted.note());
+					}
+					if (!entry.seen().isEmpty()) {
+						ObjectNode seen = item.putObject("seen");
+						new TreeMap<>(entry.seen()).forEach(seen::put);
+					}
+					if (entry.ownSeq() != null) {
+						item.put("ownSeq", entry.ownSeq().longValue());
+					}
+					ArrayNode listed = item.putArray("listed");
+					entry.listed().stream().map(VersionId::value).sorted().forEach(listed::add);
 				});
 		return MAPPER.writeValueAsBytes(root);
 	}

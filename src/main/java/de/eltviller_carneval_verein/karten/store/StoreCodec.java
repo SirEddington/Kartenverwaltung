@@ -68,7 +68,8 @@ public final class StoreCodec {
 		return MAPPER.writeValueAsBytes(node);
 	}
 
-	private static void writeConflict(ObjectNode node, ConflictNote note) {
+	/** Schreibt den Vermerk in den Knoten; paketsichtbar, weil auch {@link UnitIndex} Vermerke ablegt. */
+	static void writeConflict(ObjectNode node, ConflictNote note) {
 		node.put("kind", note.kind().name());
 		node.put("affected", note.affected());
 		ConflictNote.Party other = note.other();
@@ -166,7 +167,7 @@ public final class StoreCodec {
 	 * unbekannter Art (aus einer neueren Programmversion) wird mit einer Warnung übergangen, sonstige Beschädigungen
 	 * darin sind eine {@link IOException}.
 	 */
-	private static ConflictNote readConflict(JsonNode node) throws IOException {
+	static ConflictNote readConflict(JsonNode node) throws IOException {
 		if (node == null || node.isNull()) {
 			return null;
 		}
@@ -218,7 +219,7 @@ public final class StoreCodec {
 	}
 
 	/** Die optionalen gelesenen Listen: Rechner-ID auf Nummer; fehlt das Feld, ist die Zuordnung leer. */
-	private static Map<String, Long> readSeen(JsonNode node) throws IOException {
+	static Map<String, Long> readSeen(JsonNode node) throws IOException {
 		Map<String, Long> seen = new LinkedHashMap<>();
 		if (node == null || node.isNull()) {
 			return seen;

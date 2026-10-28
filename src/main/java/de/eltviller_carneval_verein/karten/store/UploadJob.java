@@ -13,6 +13,11 @@ public final class UploadJob {
 
 	/** Eine Version des Stapels mit den Bytes ihrer Versionsdatei. */
 	public record Item(UnitKey unit, Version version, byte[] bytes) {
+
+		/** Der Eintrag dieser Version in einer Änderungsliste. */
+		public FeedEntry feedEntry() {
+			return new FeedEntry(unit.relativePath(), version.id(), version.claimName());
+		}
 	}
 
 	/** Die Stufe des Hochladens. */

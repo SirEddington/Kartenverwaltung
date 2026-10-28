@@ -69,6 +69,7 @@ public final class FeedReader {
 	private final List<PendingSighting> pending = new ArrayList<>();
 	private final Set<FeedPoll.Contested> contested = new LinkedHashSet<>();
 	private final Set<UnitKey> damaged = new LinkedHashSet<>();
+	private final Set<FeedEntry> listed = new LinkedHashSet<>();
 	private boolean fullSyncNeeded;
 	private boolean positionsDirty;
 
@@ -110,11 +111,12 @@ public final class FeedReader {
 			positions.save();
 			positionsDirty = false;
 		}
-		FeedPoll result = new FeedPoll(changed, pending, fullSyncNeeded, contested, damaged);
+		FeedPoll result = new FeedPoll(changed, pending, fullSyncNeeded, contested, damaged, List.copyOf(listed));
 		changed.clear();
 		pending.clear();
 		contested.clear();
 		damaged.clear();
+		listed.clear();
 		fullSyncNeeded = false;
 		return result;
 	}
@@ -299,6 +301,8 @@ public final class FeedReader {
 		for (FeedEntry entry : valid) {
 			handleClaim(UnitKey.parse(entry.unit()).orElseThrow(), entry, copied.get(entry.version()), now);
 		}
+		// alle Versionsdateien liegen lokal, die Ansprüche sind übernommen oder werden beobachtet: die Liste ist verarbeitet
+		listed.addAll(valid);
 		return true;
 	}
 
