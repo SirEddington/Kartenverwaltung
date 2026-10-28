@@ -2,10 +2,13 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
@@ -49,6 +52,12 @@ import javafx.stage.Stage;
 public class MainApp extends Application {
 
 	private static final Logger LOG = Logger.getLogger(MainApp.class.getName());
+
+	/**
+	 * Systemeigenschaft nur für den Handtest mit zwei Instanzen: der gemeinsame Ordner, mit dem verbunden gestartet wird
+	 * (leer oder nicht gesetzt: Einzelbetrieb). Entfällt mit KARV-87, das den Ordner als Einstellung einführt.
+	 */
+	static final String SHARED_DIR_PROPERTY = "karten.sharedDir";
 
 	private static Stage primaryStage;
 	// Mindestbreite des Hauptfensters: So schmal darf es werden, die Kopfzeilen der Bildschirme sind darauf abgestimmt
@@ -94,12 +103,14 @@ public class MainApp extends Application {
 		}
 
 		// Das Fenster steht sofort da, mit Ladeansicht; Abgleich und Laden laufen im Hintergrund (vorläufig ohne
-		// gemeinsamen Ordner). Hallen zuerst: Die Events beziehen sich auf sie. Geladen wird einmalig beim Start, damit
+		// gemeinsamen Ordner, außer im Handtest: karten.sharedDir). Hallen zuerst: Die Events beziehen sich auf sie. Geladen wird einmalig beim Start, damit
 		// unlesbare Einheiten sofort sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
 		Task<Void> loading = new Task<>() {
 			@Override
 			protected Void call() {
-				sync.startup(null, fraction -> updateProgress(fraction, 1.0));
+				String sharedDir = System.getProperty(SHARED_DIR_PROPERTY);
+				warnIfLocalDataExists(sharedDir);
+				sync.startup(sharedDir, fraction -> updateProgress(fraction, 1.0));
 				StoreHallRepository.getInstance().loadHalls();
 				StoreEventRepository.getInstance().loadEvents();
 				return null;
@@ -118,6 +129,25 @@ public class MainApp extends Application {
 		Thread loader = new Thread(loading, "start-laden");
 		loader.setDaemon(true);
 		loader.start();
+	}
+
+	/**
+	 * Warnt im Log, wenn der Handtest einen gemeinsamen Ordner vorgibt, der lokale Bestand aber nicht leer ist: Die
+	 * Ansprüche aus dem Einzelbetrieb würden dann nie in den gemeinsamen Ordner hochgeladen (Befund M4). Der Handtest
+	 * gehört auf frische Datenordner.
+	 */
+	private static void warnIfLocalDataExists(String sharedDir) {
+		if (sharedDir == null || sharedDir.isBlank()) {
+			return;
+		}
+		Path data = AppPaths.appDataDir().toPath().resolve("data");
+		try (Stream<Path> entries = Files.isDirectory(data) ? Files.list(data) : Stream.empty()) {
+			if (entries.findAny().isPresent()) {
+				LOG.warning("karten.sharedDir ist gesetzt, aber der lokale Bestand " + data + " ist nicht leer: Ansprüche aus dem Einzelbetrieb werden nie in den gemeinsamen Ordner hochgeladen (Befund M4). Den Handtest mit einem frischen Datenordner starten.");
+			}
+		} catch (IOException e) {
+			LOG.log(Level.FINE, "Lokaler Bestand nicht prüfbar", e);
+		}
 	}
 
 	/** Die Ansicht, die der Start zeigt, bis der Bestand geladen ist. */
