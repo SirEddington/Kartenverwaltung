@@ -41,41 +41,30 @@ final class EventMerge {
 	interface Sink {
 
 		/** Die Einheit hat diesen Stand; {@code shown}: sie ist ins Modell eingegangen (sonst wird sie nie gelöscht). */
-		void adopted(UnitSnapshot snapshot, boolean shown);
+		default void adopted(UnitSnapshot snapshot, boolean shown) {
+		}
 
 		/**
 		 * Die Buchung hat im Modell keinen Platz (ihr Sitz fehlt in der Bestuhlung der Vorstellung): Modell und Stand
 		 * bleiben unberührt, sie wartet, bis Halle oder Vorstellung mit dem Sitz da sind.
 		 */
-		void held(UnitSnapshot snapshot);
+		default void held(UnitSnapshot snapshot) {
+		}
 
 		/**
 		 * Die Vorstellung hat das Modell verlassen (oder fehlte schon und ist nun gelöscht bzw. unlesbar); was unter ihr
 		 * angezeigt war, ist es nicht mehr.
 		 */
-		void left(UnitKey presentation);
+		default void left(UnitKey presentation) {
+		}
 
 		/** Eine Warnung für den Nutzer (unlesbare oder gesperrte Einheit). */
-		void warning(String text);
+		default void warning(String text) {
+		}
 	}
 
 	/** Meldet nichts: für das Nachspielen auf einer Kopie. */
 	static final Sink NONE = new Sink() {
-		@Override
-		public void adopted(UnitSnapshot snapshot, boolean shown) {
-		}
-
-		@Override
-		public void held(UnitSnapshot snapshot) {
-		}
-
-		@Override
-		public void left(UnitKey presentation) {
-		}
-
-		@Override
-		public void warning(String text) {
-		}
 	};
 
 	/** Präfix des Ordnernamens einer Buchung ohne Platz (siehe {@link UnitKey}). */
@@ -443,13 +432,7 @@ final class EventMerge {
 		if (event.getPresentations() == null) {
 			event.setPresentations(new ArrayList<>());
 		}
-		List<Presentation> presentations = event.getPresentations();
-		int index = 0;
-		while (index < presentations.size()
-				&& UnitMapper.PRESENTATION_ORDER.compare(presentations.get(index), added) <= 0) {
-			index++;
-		}
-		presentations.add(index, added);
+		UnitMapper.insertSorted(event.getPresentations(), added, UnitMapper.PRESENTATION_ORDER);
 		added.setParent(event);
 	}
 

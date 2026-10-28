@@ -549,13 +549,16 @@ final class UnitMapper {
 
 	/** Ob das Zusammensetzen die Einheit lesen würde ({@link #readUnit} ergibt ein Objekt). */
 	static boolean isReadable(UnitSnapshot snapshot) {
-		Object value = switch (snapshot.unit().type()) {
-		case EVENT -> readUnit(snapshot, Event.class);
-		case PRESENTATION -> readUnit(snapshot, Presentation.class);
-		case BOOKING -> readUnit(snapshot, Booking.class);
-		case HALL -> readUnit(snapshot, Hall.class);
-		};
-		return value != null;
+		return readUnit(snapshot, modelClass(snapshot.unit().type())) != null;
+	}
+
+	/** Fügt {@code item} vor dem ersten Eintrag ein, der nach der Ordnung hinter ihm käme (wie beim Laden); die übrige Reihenfolge bleibt. */
+	static <T> void insertSorted(List<T> list, T item, Comparator<? super T> order) {
+		int index = 0;
+		while (index < list.size() && order.compare(list.get(index), item) <= 0) {
+			index++;
+		}
+		list.add(index, item);
 	}
 
 	/**

@@ -23,7 +23,6 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
-import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Das Repository der Hallen auf dem Versionsspeicher. Eine Halle ist eine einzige Einheit; geschrieben wird nur, wenn
@@ -169,8 +168,7 @@ public class StoreHallRepository implements HallRepository {
 		// Ein fremder Stand hat das Objekt im Cache ersetzt oder entfernt: Das alte zu speichern überschriebe ihn
 		Hall cached = cachedHall(hall.getId());
 		if ((cached != null && cached != hall) || (cached == null && removedByOthers.contains(hall.getId()))) {
-			throw new LockedUnitException("„" + EntityLabels.nameOrPlaceholder(hall.getName())
-					+ "“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.");
+			throw LockedUnitException.replacedMeanwhile(hall.getName());
 		}
 		write(hall);
 	}
@@ -417,32 +415,37 @@ public class StoreHallRepository implements HallRepository {
 		UnitKey unit = current.unit();
 		String hallId = unit.hallId();
 		UnitSnapshot known = baseline.known(unit);
-		ForeignDecision decision = ForeignDecision.decideUnblocked(known, current, chain);
-		if (decision != ForeignDecision.APPLY) {
-			deferred.remove(unit);
-			failedUnits.remove(unit);
-		}
-		if (decision == ForeignDecision.KNOWN) {
+		switch (ForeignDecision.decideUnblocked(known, current, chain)) {
+		case KNOWN -> {
+			settle(unit);
 			baseline.adoptStatus(hallId, current, warnings);
-			return;
 		}
-		if (decision == ForeignDecision.FORK) {
+		case FORK -> {
+			settle(unit);
 			LOG.info("Fremder Stand von " + unit.relativePath()
 					+ " nicht eingearbeitet: Die eigene Version ist unterlegen (Gabelung).");
-			return;
 		}
-		if (decision != ForeignDecision.APPLY) {
-			return;
+		case APPLY -> applyNewer(current, known, chain, warnings);
+		default -> settle(unit);
 		}
+	}
 
-		Hall old = cachedHall(hallId);
-		if (old != null && isBlocked(old, known)) {
-			String machineName = chain.isEmpty() ? null : chain.get(chain.size() - 1).machineName();
-			deferred.put(unit, new Deferral(unit, current.version(), machineName, old));
-			return;
-		}
+	/** Die Einheit ist erledigt: Sie ist weder zurückgestellt noch war ihr Einarbeiten gescheitert. */
+	private void settle(UnitKey unit) {
 		deferred.remove(unit);
 		failedUnits.remove(unit);
+	}
+
+	/** Arbeitet den Nachfolger des Vergleichsstands ein, außer die Halle ist verändert oder gesperrt: Dann wird er zurückgestellt. */
+	private void applyNewer(UnitSnapshot current, UnitSnapshot known, List<ChainStep> chain, List<String> warnings) {
+		UnitKey unit = current.unit();
+		String hallId = unit.hallId();
+		Hall old = cachedHall(hallId);
+		if (old != null && isBlocked(old, known)) {
+			deferred.put(unit, Deferral.of(unit, current.version(), chain, old));
+			return;
+		}
+		settle(unit);
 
 		Hall fresh = UnitMapper.readUnit(current, Hall.class);
 		if (fresh == null) {
@@ -467,7 +470,7 @@ public class StoreHallRepository implements HallRepository {
 			listeners.notifyChangingByOthers(old);
 			baseline.adopt(hallId, current, true);
 			cachedHalls.remove(old);
-			insertSorted(fresh);
+			UnitMapper.insertSorted(cachedHalls, fresh, UnitMapper.HALL_ORDER);
 			listeners.notifyChangedByOthers(fresh, new ForeignBatch<>(Set.of(unit), copy -> {
 				throw new UnsupportedOperationException(
 						"Eine eingearbeitete Halle ist nie lokal verändert: Es gibt nichts nachzuspielen.");
@@ -475,7 +478,7 @@ public class StoreHallRepository implements HallRepository {
 		} else {
 			baseline.adopt(hallId, current, true);
 			removedByOthers.remove(hallId);
-			insertSorted(fresh);
+			UnitMapper.insertSorted(cachedHalls, fresh, UnitMapper.HALL_ORDER);
 			listeners.notifyAddedByOthers(fresh);
 		}
 	}
@@ -507,15 +510,6 @@ public class StoreHallRepository implements HallRepository {
 			}
 		}
 		return null;
-	}
-
-	/** Nimmt die Halle nach Name sortiert in den Cache auf, wie beim Laden. */
-	private void insertSorted(Hall hall) {
-		int index = 0;
-		while (index < cachedHalls.size() && UnitMapper.HALL_ORDER.compare(cachedHalls.get(index), hall) <= 0) {
-			index++;
-		}
-		cachedHalls.add(index, hall);
 	}
 
 	private void failed(UnitKey unit, RuntimeException e, List<String> warnings) {

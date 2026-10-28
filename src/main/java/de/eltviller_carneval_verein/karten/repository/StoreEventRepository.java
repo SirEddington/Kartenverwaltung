@@ -30,7 +30,6 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
-import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Das Repository der Events auf dem Versionsspeicher. Beim Speichern wird das Event in Kopf, Vorstellungen und Buchungen
@@ -39,6 +38,9 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 public class StoreEventRepository implements EventRepository {
 
 	private static final Logger LOG = Logger.getLogger(StoreEventRepository.class.getName());
+
+	/** Zum Neuzusammensetzen eines Events: der Zustand wird serialisiert und für jede Kopie neu gelesen. */
+	private static final ObjectMapper MAPPER = JsonMapperFactory.create();
 
 	private static StoreEventRepository instance;
 
@@ -193,8 +195,7 @@ public class StoreEventRepository implements EventRepository {
 		// Ein fremder Stand hat das Objekt im Cache ersetzt oder gelöscht: Das alte zu speichern überschriebe ihn
 		Event cached = cachedEvent(event.getId());
 		if ((cached != null && cached != event) || (cached == null && removedByOthers.contains(event.getId()))) {
-			throw new LockedUnitException("„" + EntityLabels.nameOrPlaceholder(event.getName())
-					+ "“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.");
+			throw LockedUnitException.replacedMeanwhile(event.getName());
 		}
 		write(event);
 	}
@@ -606,8 +607,7 @@ public class StoreEventRepository implements EventRepository {
 			}
 			forkedParents.remove(unit);
 			if (decision != ForeignDecision.APPLY) {
-				deferred.remove(unit);
-				held.remove(unit);
+				settle(unit);
 			}
 			if (decision == ForeignDecision.KNOWN) {
 				baseline.adoptStatus(eventId, current, warnings);
@@ -650,8 +650,7 @@ public class StoreEventRepository implements EventRepository {
 				deferred.remove(unit);
 				hold(unit, "ihr Sitz fehlt in der Bestuhlung der Vorstellung");
 			} else {
-				deferred.remove(unit);
-				held.remove(unit);
+				settle(unit);
 				apply.add(current);
 				if (unit.type() == UnitType.PRESENTATION) {
 					appliedPresentations.put(unit, current);
@@ -694,6 +693,19 @@ public class StoreEventRepository implements EventRepository {
 		case PRESENTATION -> true;
 		case EVENT, HALL -> false;
 		};
+	}
+
+	/** Die Einheit ist erledigt: Sie ist weder zurückgestellt ({@link #deferred}) noch wartet sie still ({@link #held}). */
+	private void settle(UnitKey unit) {
+		deferred.remove(unit);
+		held.remove(unit);
+	}
+
+	/** Alle Einheiten des Events sind erledigt: nichts davon ist zurückgestellt, wartet still oder hängt an einer Gabelung. */
+	private void forgetWaiting(String eventId) {
+		deferred.keySet().removeIf(unit -> eventId.equals(unit.eventId()));
+		held.removeIf(unit -> eventId.equals(unit.eventId()));
+		forkedParents.removeIf(unit -> eventId.equals(unit.eventId()));
 	}
 
 	/** Lässt die Buchung still warten (siehe {@link #held}); geloggt wird beim ersten Mal. */
@@ -742,8 +754,7 @@ public class StoreEventRepository implements EventRepository {
 
 	/** Stellt den Stand zurück; der Hinweis nennt den Rechner aus dem letzten Glied der Kette. */
 	private void defer(Event event, UnitSnapshot current, List<ChainStep> chain) {
-		String machineName = chain.isEmpty() ? null : chain.get(chain.size() - 1).machineName();
-		deferred.put(current.unit(), new Deferral(current.unit(), current.version(), machineName,
+		deferred.put(current.unit(), Deferral.of(current.unit(), current.version(), chain,
 				EventMerge.nearestModelObject(event, current.unit())));
 	}
 
@@ -772,12 +783,7 @@ public class StoreEventRepository implements EventRepository {
 			removedByOthers.remove(eventId);
 			for (Event added : assembly.items()) {
 				// einsortieren wie beim Laden
-				int index = 0;
-				while (index < cachedEvents.size()
-						&& UnitMapper.EVENT_ORDER.compare(cachedEvents.get(index), added) <= 0) {
-					index++;
-				}
-				cachedEvents.add(index, added);
+				UnitMapper.insertSorted(cachedEvents, added, UnitMapper.EVENT_ORDER);
 				listeners.notifyAddedByOthers(added);
 			}
 		} catch (RuntimeException e) {
@@ -917,22 +923,19 @@ public class StoreEventRepository implements EventRepository {
 				return false;
 			}
 			Event fresh = assembly.items().get(0);
-			ObjectMapper mapper = JsonMapperFactory.create();
-			byte[] state = mapper.writeValueAsBytes(fresh);
+			byte[] state = MAPPER.writeValueAsBytes(fresh);
 			baseline.resetOwner(eventId, all, assembly.shown());
 			forgetDerived(eventId);
 			warnings.addAll(assembly.warnings());
 			replaceCachedEvent(fresh);
 			// das frische Event zeigt jeden Stand des Index, außer den Buchungen, die nicht zur Bestuhlung passen
-			deferred.keySet().removeIf(unit -> eventId.equals(unit.eventId()));
-			held.removeIf(unit -> eventId.equals(unit.eventId()));
-			forkedParents.removeIf(unit -> eventId.equals(unit.eventId()));
+			forgetWaiting(eventId);
 			waiting.forEach(snapshot -> hold(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
 			Set<UnitKey> units = new HashSet<>();
 			all.forEach(snapshot -> units.add(snapshot.unit()));
 			listeners.notifyChangedByOthers(fresh, new ForeignBatch<>(units, copy -> {
 				try {
-					Event rebuilt = mapper.readValue(state, Event.class);
+					Event rebuilt = MAPPER.readValue(state, Event.class);
 					copy.copyFrom(rebuilt);
 					copy.setPresentations(rebuilt.getPresentations());
 				} catch (IOException e) {
