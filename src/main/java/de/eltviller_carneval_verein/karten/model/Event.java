@@ -79,6 +79,16 @@ public class Event {
 		this.name = name;
 	}
 
+	/**
+	 * Übernimmt die gespeicherten Felder eines anderen Stands (Name, Beschreibung, archiviert). Nicht kopiert werden
+	 * die Kennung (unveränderlich) und die Vorstellungen: Die Liste samt ihren Objekten bleibt, wie sie ist.
+	 */
+	public void copyFrom(Event source) {
+		setName(source.getName());
+		setDescription(source.getDescription());
+		setArchived(source.isArchived());
+	}
+
 	public Presentation addPresentation() {
 		Presentation newPres = new Presentation();
 		newPres.setParent(this);

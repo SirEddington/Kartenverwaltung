@@ -336,6 +336,51 @@ public class Booking {
 		return copy;
 	}
 
+	/**
+	 * Übernimmt alle gespeicherten Felder eines anderen Stands, auch die Kennung, den Sitz und "Ohne Platz". Der
+	 * Elternverweis bleibt.
+	 */
+	public void copyFrom(Booking source) {
+		setId(source.getId());
+		setSeatId(source.getSeatId());
+		setRowLabel(source.getRowLabel());
+		setTableNumber(source.getTableNumber());
+		setSeatNumber(source.getSeatNumber());
+		setCategory(source.getCategory());
+		setWheelchairAccessible(source.isWheelchairAccessible());
+		setPrice(source.getPrice());
+		setPaymentStatus(source.getPaymentStatus());
+		setCollected(source.isCollected());
+		setReservationDate(source.getReservationDate());
+		setPaymentDate(source.getPaymentDate());
+		setCollectionDate(source.getCollectionDate());
+		setLastName(source.getLastName());
+		setFirstName(source.getFirstName());
+		setEMail(source.getEMail());
+		setComment(source.getComment());
+		setUnassigned(source.isUnassigned());
+	}
+
+	/**
+	 * Leert die Kundendaten (alles, was {@link #hasData()} prüft, dazu die Daten von Reservierung, Bezahlung und
+	 * Abholung, den Einzelpreis und "Ohne Platz"). Sitz und Momentaufnahme des Platzes bleiben. Die Buchung bekommt eine
+	 * neue Kennung, denn eine Buchung ohne Daten ist nicht mehr dieselbe Buchung.
+	 */
+	public void clearCustomerData() {
+		setLastName(null);
+		setFirstName(null);
+		setEMail(null);
+		setComment(null);
+		setPaymentStatus(PaymentStatus.NONE);
+		setCollected(false);
+		setReservationDate(null);
+		setPaymentDate(null);
+		setCollectionDate(null);
+		setPrice(null);
+		setUnassigned(false);
+		setId(null);
+	}
+
 	/** Reihenbuchstabe ohne Rand, {@code null} als leer. */
 	private String sortLabel() {
 		return rowLabel != null ? rowLabel.trim() : "";
