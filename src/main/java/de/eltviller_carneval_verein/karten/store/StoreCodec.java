@@ -7,7 +7,10 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -51,7 +54,49 @@ public final class StoreCodec {
 		node.put("saveId", version.saveId());
 		node.put("deleted", version.deleted());
 		node.set("payload", version.deleted() || version.payload() == null ? MAPPER.createObjectNode() : version.payload());
+		if (version.conflict() != null) {
+			writeConflict(node.putObject("conflict"), version.conflict());
+		}
+		if (!version.seen().isEmpty()) {
+			ObjectNode seen = node.putObject("seen");
+			new TreeMap<>(version.seen()).forEach(seen::put);
+		}
 		return MAPPER.writeValueAsBytes(node);
+	}
+
+	private static void writeConflict(ObjectNode node, ConflictNote note) {
+		node.put("kind", note.kind().name());
+		node.put("affected", note.affected());
+		ConflictNote.Party other = note.other();
+		if (other != null) {
+			ObjectNode party = node.putObject("other");
+			party.put("machine", other.machine());
+			if (other.machineName() != null) {
+				party.put("machineName", other.machineName());
+			}
+			if (other.operator() != null) {
+				party.put("operator", other.operator());
+			}
+			party.put("version", other.version().value());
+		}
+		if (!note.fields().isEmpty()) {
+			ArrayNode fields = node.putArray("fields");
+			for (ConflictNote.FieldConflict field : note.fields()) {
+				ObjectNode item = fields.addObject();
+				item.put("group", field.group());
+				item.set("mine", field.mine());
+				item.set("theirs", field.theirs());
+			}
+		}
+		if (note.moved() != null) {
+			node.put("moved", note.moved().relativePath());
+		}
+		if (note.place() != null) {
+			node.set("place", note.place());
+		}
+		if (note.dropped() != null) {
+			node.put("dropped", note.dropped().value());
+		}
 	}
 
 	/** Schreibt eine Anspruchsdatei. */
@@ -105,10 +150,80 @@ public final class StoreCodec {
 			return new Version(format, VersionId.of(text(node, "id")), parents, text(node, "machine"),
 					optionalText(node, "machineName"), optionalText(node, "operator"), instant(node, "at"), text(node, "saveId"),
 					bool(node, "deleted"),
-					payload == null || payload.isNull() ? MAPPER.createObjectNode() : (ObjectNode) payload);
+					payload == null || payload.isNull() ? MAPPER.createObjectNode() : (ObjectNode) payload,
+					readConflict(node.get("conflict")), readSeen(node.get("seen")));
 		} catch (IllegalArgumentException e) {
 			throw new IOException(e.getMessage(), e);
 		}
+	}
+
+	/** Der optionale Konfliktvermerk; fehlt das Feld oder ist es {@code null}, gibt es keinen. */
+	private static ConflictNote readConflict(JsonNode node) throws IOException {
+		if (node == null || node.isNull()) {
+			return null;
+		}
+		if (!node.isObject()) {
+			throw new IOException("Das Feld conflict ist kein Objekt.");
+		}
+		String kindText = text(node, "kind");
+		ConflictNote.Kind kind;
+		try {
+			kind = ConflictNote.Kind.valueOf(kindText);
+		} catch (IllegalArgumentException e) {
+			throw new IOException("Das Feld kind enthält keine bekannte Art: " + kindText, e);
+		}
+		List<ConflictNote.FieldConflict> fields = new ArrayList<>();
+		JsonNode fieldNodes = node.get("fields");
+		if (fieldNodes != null && !fieldNodes.isNull()) {
+			for (JsonNode item : array(node, "fields")) {
+				if (!item.isObject()) {
+					throw new IOException("Ein Eintrag in fields ist kein Objekt.");
+				}
+				fields.add(new ConflictNote.FieldConflict(text(item, "group"), requiredObject(item, "mine"),
+						requiredObject(item, "theirs")));
+			}
+		}
+		return new ConflictNote(kind, text(node, "affected"), readParty(node.get("other")), fields,
+				readMoved(node.get("moved")), optionalObject(node, "place"), optionalVersionId(node, "dropped"));
+	}
+
+	private static ConflictNote.Party readParty(JsonNode node) throws IOException {
+		if (node == null || node.isNull()) {
+			return null;
+		}
+		if (!node.isObject()) {
+			throw new IOException("Das Feld other ist kein Objekt.");
+		}
+		return new ConflictNote.Party(text(node, "machine"), optionalText(node, "machineName"),
+				optionalText(node, "operator"), VersionId.of(text(node, "version")));
+	}
+
+	private static UnitKey readMoved(JsonNode node) throws IOException {
+		if (node == null || node.isNull()) {
+			return null;
+		}
+		String path = asText(node, "moved");
+		return UnitKey.parse(path)
+				.orElseThrow(() -> new IOException("Das Feld moved enthält keinen Einheitenpfad: " + path));
+	}
+
+	/** Die optionalen gelesenen Listen: Rechner-ID auf Nummer; fehlt das Feld, ist die Zuordnung leer. */
+	private static Map<String, Long> readSeen(JsonNode node) throws IOException {
+		Map<String, Long> seen = new LinkedHashMap<>();
+		if (node == null || node.isNull()) {
+			return seen;
+		}
+		if (!node.isObject()) {
+			throw new IOException("Das Feld seen ist kein Objekt.");
+		}
+		for (Map.Entry<String, JsonNode> entry : node.properties()) {
+			JsonNode number = entry.getValue();
+			if (!number.isIntegralNumber() || !number.canConvertToLong()) {
+				throw new IOException("Das Feld seen enthält für " + entry.getKey() + " keine ganze Zahl.");
+			}
+			seen.put(entry.getKey(), number.asLong());
+		}
+		return seen;
 	}
 
 	/**
@@ -210,6 +325,27 @@ public final class StoreCodec {
 			throw new IOException("Das Feld " + field + " fehlt oder ist kein Wahrheitswert.");
 		}
 		return value.asBoolean();
+	}
+
+	/** Ein Pflichtfeld, das ein Objekt sein muss. */
+	private static ObjectNode requiredObject(JsonNode node, String field) throws IOException {
+		JsonNode value = node.get(field);
+		if (value == null || !value.isObject()) {
+			throw new IOException("Das Feld " + field + " fehlt oder ist kein Objekt.");
+		}
+		return (ObjectNode) value;
+	}
+
+	/** Ein Feld, das fehlen oder {@code null} sein darf; sonst muss es ein Objekt sein. */
+	private static ObjectNode optionalObject(JsonNode node, String field) throws IOException {
+		JsonNode value = node.get(field);
+		return value == null || value.isNull() ? null : requiredObject(node, field);
+	}
+
+	/** Ein Feld mit einer Versions-ID, das fehlen oder {@code null} sein darf. */
+	private static VersionId optionalVersionId(JsonNode node, String field) throws IOException {
+		String value = optionalText(node, field);
+		return value == null ? null : VersionId.of(value);
 	}
 
 	private static JsonNode array(JsonNode node, String field) throws IOException {

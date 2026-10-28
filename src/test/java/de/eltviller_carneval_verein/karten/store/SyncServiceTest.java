@@ -363,6 +363,20 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void appendedChangeCarriesItsConflictNoteIntoTheVersionFile() throws IOException {
+		Node a = node("a");
+		assertTrue(a.service.startup(""));
+		ConflictNote note = new ConflictNote(ConflictNote.Kind.DELETE_WINS, "Buchung 7", null, null, null, null, null);
+
+		Version v = save(a, new Change(BOOKING, List.of(), payload("Anna"), false, note));
+
+		assertEquals(note, v.conflict());
+		assertEquals(Map.of(), v.seen());
+		assertEquals(note, a.service.unitState(BOOKING).head().conflict());
+		assertEquals(note, StoreCodec.readVersion(Files.readAllBytes(localFile(a, BOOKING, v.id() + ".json"))).conflict());
+	}
+
+	@Test
 	void sharedModeUploadsAndValidates() throws IOException {
 		Node a = node("a");
 		assertTrue(a.service.startup(shared));

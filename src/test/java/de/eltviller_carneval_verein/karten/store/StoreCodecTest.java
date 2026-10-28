@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -144,6 +145,128 @@ class StoreCodecTest {
 
 		assertEquals(V1, read.id());
 		assertEquals(payload("{\"a\":1}"), read.payload());
+	}
+
+	private static Version versionWith(ConflictNote conflict, Map<String, Long> seen) throws IOException {
+		return new Version(StoreCodec.FORMAT, V3, List.of(V1, V2), "k4m9q2x8-1234", "Kasse 1", "Anna", AT, "save-1", false,
+				payload("{\"a\":1}"), conflict, seen);
+	}
+
+	private static ConflictNote fullNote() throws IOException {
+		return new ConflictNote(ConflictNote.Kind.FIELDS, "Buchung 17",
+				new ConflictNote.Party("p7r2t5w1-9999", "Kasse 2", "Berta", V2),
+				List.of(new ConflictNote.FieldConflict("Kunde", payload("{\"name\":\"A\"}"), payload("{\"name\":\"B\"}")),
+						new ConflictNote.FieldConflict("Bezahlung", payload("{\"paid\":true}"), payload("{\"paid\":false}"))),
+				UnitKey.booking("e1", "p1", "s7"), payload("{\"seat\":\"s8\",\"row\":3}"), V1);
+	}
+
+	@Test
+	void versionWithConflictNoteRoundTrips() throws IOException {
+		Version version = versionWith(fullNote(), Map.of());
+
+		byte[] written = StoreCodec.write(version);
+		String json = text(written);
+		assertTrue(json.contains("\"conflict\":{\"kind\":\"FIELDS\""), json);
+		assertTrue(json.contains("\"moved\":\"events/e1/presentations/p1/bookings/s7\""), json);
+
+		Version read = StoreCodec.readVersion(written);
+		assertEquals(version, read);
+		assertEquals(fullNote(), read.conflict());
+	}
+
+	@Test
+	void conflictNoteWithOnlyRequiredPartsRoundTrips() throws IOException {
+		ConflictNote note = new ConflictNote(ConflictNote.Kind.DOUBLE_SALE, "Sitz 7", null, null, null, null, null);
+		Version version = versionWith(note, Map.of());
+
+		String json = text(StoreCodec.write(version));
+		assertFalse(json.contains("\"other\""), json);
+		assertFalse(json.contains("\"fields\""), json);
+		assertFalse(json.contains("\"moved\""), json);
+		assertFalse(json.contains("\"place\""), json);
+		assertFalse(json.contains("\"dropped\""), json);
+
+		Version read = StoreCodec.readVersion(StoreCodec.write(version));
+		assertEquals(version, read);
+		assertEquals(List.of(), read.conflict().fields());
+	}
+
+	@Test
+	void conflictNoteWithoutNamesInPartyRoundTrips() throws IOException {
+		ConflictNote note = new ConflictNote(ConflictNote.Kind.DELETE_WINS, "Buchung 3",
+				new ConflictNote.Party("p7r2t5w1-9999", null, null, V2), List.of(), null, null, V2);
+		Version version = versionWith(note, Map.of());
+
+		assertEquals(version, StoreCodec.readVersion(StoreCodec.write(version)));
+	}
+
+	@Test
+	void everyConflictKindRoundTrips() throws IOException {
+		for (ConflictNote.Kind kind : ConflictNote.Kind.values()) {
+			Version version = versionWith(new ConflictNote(kind, "x", null, null, null, null, null), Map.of());
+
+			assertEquals(version, StoreCodec.readVersion(StoreCodec.write(version)));
+		}
+	}
+
+	@Test
+	void versionWithSeenRoundTrips() throws IOException {
+		Version version = versionWith(null, Map.of("k4m9q2x8-1234", 17L, "p7r2t5w1-9999", 3L));
+
+		String json = text(StoreCodec.write(version));
+		assertTrue(json.contains("\"seen\":{\"k4m9q2x8-1234\":17,\"p7r2t5w1-9999\":3}"), json);
+
+		Version read = StoreCodec.readVersion(StoreCodec.write(version));
+		assertEquals(version, read);
+		assertEquals(Map.of("k4m9q2x8-1234", 17L, "p7r2t5w1-9999", 3L), read.seen());
+	}
+
+	@Test
+	void versionWithoutNewFieldsWritesNeitherField() throws IOException {
+		Version version = new Version(StoreCodec.FORMAT, V3, List.of(V1), "m", "Kasse 1", "Anna", AT, "save-1", false,
+				payload("{\"a\":1}"));
+
+		String json = text(StoreCodec.write(version));
+		assertFalse(json.contains("conflict"), json);
+		assertFalse(json.contains("seen"), json);
+
+		Version read = StoreCodec.readVersion(StoreCodec.write(version));
+		assertNull(read.conflict());
+		assertEquals(Map.of(), read.seen());
+	}
+
+	@Test
+	void versionWithNullSeenHasEmptySeen() throws IOException {
+		assertEquals(Map.of(), versionWith(null, null).seen());
+	}
+
+	@Test
+	void unknownFieldsInVersionAreIgnored() throws IOException {
+		String json = "{\"format\":1,\"future\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
+				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":false,\"payload\":{},"
+				+ "\"conflict\":{\"kind\":\"UNMERGED\",\"affected\":\"x\",\"future\":[1]},\"seen\":{\"m\":1},\"later\":{}}";
+
+		Version read = StoreCodec.readVersion(bytes(json));
+
+		assertEquals(1, read.format());
+		assertEquals(ConflictNote.Kind.UNMERGED, read.conflict().kind());
+		assertEquals(Map.of("m", 1L), read.seen());
+	}
+
+	@Test
+	void malformedConflictOrSeenIsIOException() {
+		String head = "{\"format\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
+				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":false,\"payload\":{},";
+
+		String note = "\"conflict\":{\"kind\":\"FIELDS\",\"affected\":\"x\",";
+		for (String members : List.of("\"conflict\":5", "\"conflict\":{\"affected\":\"x\"}",
+				"\"conflict\":{\"kind\":\"UNBEKANNT\",\"affected\":\"x\"}", note + "\"fields\":{}}",
+				note + "\"fields\":[{\"group\":\"g\",\"mine\":{},\"theirs\":1}]}", note + "\"moved\":\"kein/pfad\"}",
+				note + "\"place\":[]}", note + "\"dropped\":\"kaputt\"}", note + "\"other\":{\"machine\":\"m\"}}",
+				"\"seen\":[1]", "\"seen\":{\"m\":\"viele\"}", "\"seen\":{\"m\":1.5}")) {
+			String json = head + members + "}";
+			assertThrows(IOException.class, () -> StoreCodec.readVersion(bytes(json)), json);
+		}
 	}
 
 	@Test

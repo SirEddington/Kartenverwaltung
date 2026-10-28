@@ -570,7 +570,7 @@ public final class SyncService {
 				: change.payload().deepCopy();
 		for (int attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
 			Version version = new Version(StoreCodec.FORMAT, generator.next(), change.parents(), me.id(), me.name(),
-					me.operator(), clock.instant(), saveId, change.deleted(), payload);
+					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), Map.of());
 			byte[] bytes = StoreCodec.write(version);
 			if (local.writeVersion(change.unit(), version.id(), bytes)) {
 				return new UploadJob.Item(change.unit(), version, bytes);

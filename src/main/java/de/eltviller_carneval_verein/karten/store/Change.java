@@ -13,12 +13,18 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  *                aufbaut
  * @param payload der neue Inhalt; bei einer Löschung ohne Bedeutung (darf {@code null} sein)
  * @param deleted ob die Einheit mit dieser Änderung gelöscht wird
+ * @param note    der Konfliktvermerk, der in die Version übernommen wird; {@code null} bei einer gewöhnlichen Änderung
  */
-public record Change(UnitKey unit, List<VersionId> parents, ObjectNode payload, boolean deleted) {
+public record Change(UnitKey unit, List<VersionId> parents, ObjectNode payload, boolean deleted, ConflictNote note) {
 
 	/** Prüft Einheit und Vorgänger und macht die Liste unveränderlich. */
 	public Change {
 		Objects.requireNonNull(unit, "unit");
 		parents = List.copyOf(parents);
+	}
+
+	/** Eine gewöhnliche Änderung ohne Konfliktvermerk. */
+	public Change(UnitKey unit, List<VersionId> parents, ObjectNode payload, boolean deleted) {
+		this(unit, parents, payload, deleted, null);
 	}
 }
