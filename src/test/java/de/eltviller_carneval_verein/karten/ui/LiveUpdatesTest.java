@@ -357,6 +357,27 @@ class LiveUpdatesTest {
 	}
 
 	@Test
+	void bookingRefreshedByAHallChangeThatTheOtherMachineSavedAlikeGivesNoHint() throws IOException {
+		otherChangesHall(h -> h.getSeatingPlans().get(0).getRows().get(0).setLabel("B"));
+		notifyUnits(UnitKey.hall(hall.getId()));
+		assertEquals("B", seat(friday, 0).getRowLabel(), "der Abgleich hat die Momentaufnahme erneuert");
+		// der andere Rechner öffnet das Event mit der geänderten Halle und speichert es: Die Momentaufnahme wird eine Version
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event loaded = repository.loadEvents().get(0);
+		BookingSyncService.prepare(loaded, TestRepositories.halls(sync)::findById, new ChangeTracker<>(Event::getId));
+		repository.saveEvent(loaded);
+		long before = files();
+
+		notifyUnits(seatUnit(0));
+
+		assertTrue(hints.isEmpty(), hints.toString());
+		assertEquals(Set.of(), events.locallyChangedUnits());
+		assertFalse(eventTracker.isDirty(event));
+		events.saveEvent(event);
+		assertEquals(before, files(), "nichts wird als eigene Version geschrieben");
+	}
+
+	@Test
 	void hallIsBlockedWhileItsPresentationsHaveUnsavedBookings() {
 		seat(friday, 2).setLastName("Eigen");
 		eventTracker.check(event);

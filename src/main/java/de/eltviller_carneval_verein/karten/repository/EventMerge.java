@@ -49,7 +49,10 @@ final class EventMerge {
 		 */
 		void held(UnitSnapshot snapshot);
 
-		/** Die Vorstellung hat das Modell verlassen; was unter ihr angezeigt war, ist es nicht mehr. */
+		/**
+		 * Die Vorstellung hat das Modell verlassen (oder fehlte schon und ist nun gelöscht bzw. unlesbar); was unter ihr
+		 * angezeigt war, ist es nicht mehr.
+		 */
 		void left(UnitKey presentation);
 
 		/** Eine Warnung für den Nutzer (unlesbare oder gesperrte Einheit). */
@@ -243,9 +246,8 @@ final class EventMerge {
 			if (!UnitMapper.isAbsent(snapshot)) {
 				sink.warning(UnitMapper.unreadablePresentation(unit.presentationId(), event.getName()));
 			}
-			if (existing != null) {
-				sink.left(unit);
-			}
+			// auch ohne Vorstellung im Modell (der Nutzer hatte sie schon entfernt): Was unter ihr angezeigt war, ist weg
+			sink.left(unit);
 			sink.adopted(snapshot, false);
 			return false;
 		}

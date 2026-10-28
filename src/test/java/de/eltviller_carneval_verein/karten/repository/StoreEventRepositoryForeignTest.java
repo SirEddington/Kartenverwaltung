@@ -539,6 +539,115 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(before, files());
 	}
 
+	/** Der andere Rechner setzt die Vorstellung in die Halle {@code other} (Bestuhlung umgestellt wie in der App) und speichert. */
+	private Other remoteSwitchesTo(Hall other) {
+		Other remote = other();
+		remote.friday().setHallId(other.getId());
+		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		remote.save();
+		return remote;
+	}
+
+	@Test
+	void hallSwitchWhoseBookingsArriveLaterIsNoUnsavedChange() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		remoteSwitchesTo(other);
+		long before = files();
+
+		// erst nur die Vorstellung: Der Abgleich setzt Müller auf den neuen Sitz, wie es der andere Rechner tat
+		ForeignResult first = mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+
+		assertTrue(first.deferred().isEmpty());
+		assertEquals(other.getSeatingPlans().get(0).getSeats().get(0).getId(), sold.getSeatId());
+		assertEquals(Set.of(), mine.locallyChangedUnits(), "was der Abgleich umsetzte, hat der Nutzer nicht geändert");
+
+		// dann die Buchungen: alter Sitz gelöscht, neuer Sitz angelegt, beides steht schon so im Modell
+		ForeignResult second = mine.applyForeign(allUnits());
+
+		assertTrue(second.deferred().isEmpty(), second.deferred().toString());
+		assertTrue(mine.retryDeferred().deferred().isEmpty());
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+		assertSame(sold, friday.getBookings().get(0));
+		assertEquals("Müller", sold.getLastName());
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird als eigene Version geschrieben");
+	}
+
+	@Test
+	void hallSwitchWithALaterForeignChangeOfTheMovedBookingShowsTheChange() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		Other remote = remoteSwitchesTo(other);
+		// zwischen den beiden Meldungen ändert der andere Rechner die umgesetzte Buchung
+		remote.friday().getBookings().get(0).setLastName("Meier");
+		remote.save();
+		long before = files();
+
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		assertEquals("Müller", sold.getLastName());
+		ForeignResult second = mine.applyForeign(allUnits());
+
+		assertTrue(second.deferred().isEmpty(), second.deferred().toString());
+		assertSame(sold, friday.getBookings().get(0));
+		assertEquals("Meier", sold.getLastName(), "die spätere fremde Änderung kommt an");
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+		mine.saveEvent(event);
+		assertEquals(before, files());
+	}
+
+	@Test
+	void movedBookingChangedByTheUserAfterTheHallSwitchIsDeferred() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		Other remote = remoteSwitchesTo(other);
+		remote.friday().getBookings().get(0).setLastName("Meier");
+		remote.save();
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+
+		// der Nutzer ändert die umgesetzte Buchung, bevor ihre Einheit eintrifft: Das ist seine Änderung
+		sold.setLastName("Eigen");
+		ForeignResult second = mine.applyForeign(allUnits());
+
+		assertEquals(1, second.deferred().size(), second.deferred().toString());
+		assertEquals("Eigen", sold.getLastName());
+	}
+
+	@Test
+	void bookingClearedOnBothSidesIsNoUnsavedChange() throws IOException {
+		seat(friday, 0).clearCustomerData();
+		Other other = other();
+		seat(other.friday(), 0).clearCustomerData();
+		other.save();
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(List.of(seatUnit(friday, 0)));
+
+		assertTrue(result.deferred().isEmpty(), result.deferred().toString());
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+		mine.saveEvent(event);
+		assertEquals(before, files());
+	}
+
+	@Test
+	void presentationDeletedOnBothSidesIsNoUnsavedChange() throws IOException {
+		event.deletePresentation(friday);
+		Other other = other();
+		other.event().deletePresentation(other.friday());
+		other.save();
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(allUnits());
+
+		assertTrue(result.deferred().isEmpty(), result.deferred().toString());
+		assertEquals(Set.of(), mine.locallyChangedUnits(), "auch die Buchungen darunter sind mit ihr weg");
+		mine.saveEvent(event);
+		assertEquals(before, files());
+	}
+
 	@Test
 	void seatChangeSplitOverTwoBatchesSavesNothingForeign() throws IOException {
 		Other other = other();

@@ -75,6 +75,14 @@ public class StoreEventRepository implements EventRepository {
 	 */
 	private final Set<UnitKey> forkedParents = new LinkedHashSet<>();
 
+	/**
+	 * Inhalte im Modell, die nicht der Nutzer, sondern das Einarbeiten erzeugt hat: Wechselt eine fremde Vorstellung Halle
+	 * oder Bestuhlung, setzt der Abgleich ihre Buchungen auf die neuen Sitze, bevor deren Einheiten eintreffen. Solange das
+	 * Modell genau diesen Inhalt hat, gilt die Einheit nicht als lokal verändert; der Wert {@code null} heißt, das Einarbeiten
+	 * hat sie aus dem Modell genommen. Ein Eintrag gilt, bis sich der Vergleichsstand der Einheit ändert.
+	 */
+	private final Map<UnitKey, ObjectNode> derived = new HashMap<>();
+
 	/** Ob für das Modellobjekt einer Einheit gerade eine Eingabe offen ist (siehe {@link #setEditingCheck}). */
 	private Predicate<Object> inEditing = model -> false;
 
@@ -145,6 +153,7 @@ public class StoreEventRepository implements EventRepository {
 				.filter(snapshot -> snapshot.unit().type() != UnitType.HALL).toList();
 		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
 		baseline.reset(snapshots, assembly.shown());
+		derived.clear();
 		addLoadWarnings(assembly.warnings());
 		return new ArrayList<>(assembly.items());
 	}
@@ -184,6 +193,7 @@ public class StoreEventRepository implements EventRepository {
 	/** Schreibt das Event, ohne zu prüfen, ob es das Objekt im Cache ist (das Wiederherstellen setzt den Cache selbst). */
 	private void write(Event event) {
 		baseline.save(event.getId(), event.getName(), UnitMapper.decompose(event));
+		forgetDerived(event.getId());
 
 		// Cache aktualisieren, falls das Event dort noch nicht enthalten ist
 		// (z.B. ein neu erstelltes Event)
@@ -293,6 +303,7 @@ public class StoreEventRepository implements EventRepository {
 		List<UnitSnapshot> snapshots = states.stream().map(UnitSnapshot::of).toList();
 		Assembly<Event> current = UnitMapper.assembleEvents(snapshots);
 		baseline.resetOwner(eventId, snapshots, current.shown());
+		forgetDerived(eventId);
 		if (!current.items().isEmpty()) {
 			Event fresh = current.items().get(0);
 			int index = cachedEvents.indexOf(fresh);
@@ -356,6 +367,7 @@ public class StoreEventRepository implements EventRepository {
 
 		ensureLoaded();
 		baseline.delete(event.getId(), UnitKey.event(event.getId()), event.getName());
+		forgetDerived(event.getId());
 
 		cachedEvents.remove(event);
 
@@ -454,7 +466,8 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Die Einheiten aller Events im Cache, die der Nutzer ungespeichert geändert hat: Inhalt im Modell anders als im
-	 * Vergleichsstand, oder nur auf einer Seite vorhanden (im Vergleichsstand zählt nur eine angezeigte). Lässt sich ein
+	 * Vergleichsstand, oder nur auf einer Seite vorhanden (im Vergleichsstand zählt nur eine angezeigte). Nicht dazu zählt,
+	 * was das Einarbeiten selbst im Modell umgesetzt hat (siehe {@link #derived}), solange es unverändert ist. Lässt sich ein
 	 * Event nicht zerlegen (zwei Buchungen auf einem Platz), zählen sein Kopf und alles Angezeigte.
 	 */
 	public Set<UnitKey> locallyChangedUnits() {
@@ -479,9 +492,9 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Die lokal veränderten Einheiten eines Events; {@code all}, wenn es sich nicht zerlegen lässt (dann gilt jede Einheit
-	 * als verändert).
+	 * als verändert). {@code model} sind die Inhalte der Einheiten im Modell ({@code null} bei {@code all}).
 	 */
-	private record LocalChanges(Set<UnitKey> units, boolean all) {
+	private record LocalChanges(Set<UnitKey> units, boolean all, Map<UnitKey, ObjectNode> model) {
 
 		boolean none() {
 			return !all && units.isEmpty();
@@ -493,22 +506,77 @@ public class StoreEventRepository implements EventRepository {
 		try {
 			model = UnitMapper.payloads(event);
 		} catch (IllegalStateException e) {
-			return new LocalChanges(Set.of(), true);
+			return new LocalChanges(Set.of(), true, null);
 		}
 		Set<UnitKey> changed = new HashSet<>();
 		for (Map.Entry<UnitKey, ObjectNode> entry : model.entrySet()) {
 			UnitKey unit = entry.getKey();
 			UnitSnapshot known = baseline.known(unit);
-			if (known == null || known.deleted() || !baseline.isShown(unit) || !entry.getValue().equals(known.payload())) {
+			boolean differs = known == null || known.deleted() || !baseline.isShown(unit)
+					|| !entry.getValue().equals(known.payload());
+			if (differs && !(derived.containsKey(unit) && entry.getValue().equals(derived.get(unit)))) {
 				changed.add(unit);
 			}
 		}
 		for (UnitKey unit : baseline.shownUnits(event.getId())) {
-			if (!model.containsKey(unit)) {
+			if (!model.containsKey(unit) && !(derived.containsKey(unit) && derived.get(unit) == null)) {
 				changed.add(unit);
 			}
 		}
-		return new LocalChanges(changed, false);
+		return new LocalChanges(changed, false, model);
+	}
+
+	/**
+	 * Ob das Modell schon den fremden Stand der Einheit hat: derselbe Inhalt, oder die Einheit fehlt im Modell und ist auch
+	 * fremd gelöscht bzw. ohne Version. Etwa nach einem Hallenwechsel, dessen Buchungen nach der Vorstellung eintreffen: Der
+	 * Abgleich hat sie schon so umgesetzt wie der andere Rechner. Dann gibt es nichts zurückzustellen; der Stand geht still
+	 * in den Vergleichsstand (das Einarbeiten ändert am Modell nichts).
+	 */
+	private static boolean converged(LocalChanges changes, UnitSnapshot current) {
+		if (changes.model() == null) {
+			return false;
+		}
+		ObjectNode mine = changes.model().get(current.unit());
+		if (mine == null) {
+			return UnitMapper.isAbsent(current);
+		}
+		return current.version() != null && !current.deleted() && mine.equals(current.payload());
+	}
+
+	/** Übernimmt den Stand in den Vergleichsstand; was das Einarbeiten an der Einheit umgesetzt hatte, gilt damit nicht mehr. */
+	private void adopt(String eventId, UnitSnapshot snapshot, boolean shown) {
+		baseline.adopt(eventId, snapshot, shown);
+		derived.remove(snapshot.unit());
+	}
+
+	private void forgetDerived(String eventId) {
+		derived.keySet().removeIf(unit -> eventId.equals(unit.eventId()));
+	}
+
+	/**
+	 * Merkt sich, was das Einarbeiten neben den übernommenen Einheiten im Modell geändert hat (der Abgleich nach einem
+	 * Hallen- bzw. Bestuhlungswechsel): Diese Inhalte stammen nicht vom Nutzer (siehe {@link #derived}). Unter einer
+	 * Vorstellung, deren Wechsel eingearbeitet wird, ist nichts lokal verändert oder in Bearbeitung, sonst wäre er
+	 * zurückgestellt.
+	 */
+	private void noteDerived(Event event, Map<UnitKey, ObjectNode> before, Set<UnitKey> adopted) {
+		Map<UnitKey, ObjectNode> after;
+		try {
+			after = UnitMapper.payloads(event);
+		} catch (IllegalStateException e) {
+			return;
+		}
+		for (Map.Entry<UnitKey, ObjectNode> entry : after.entrySet()) {
+			UnitKey unit = entry.getKey();
+			if (!adopted.contains(unit) && !entry.getValue().equals(before.get(unit))) {
+				derived.put(unit, entry.getValue());
+			}
+		}
+		for (UnitKey unit : before.keySet()) {
+			if (!after.containsKey(unit) && !adopted.contains(unit) && baseline.isShown(unit)) {
+				derived.put(unit, null);
+			}
+		}
 	}
 
 	/** Entscheidet und arbeitet ein für die gemeldeten Einheiten eines Events. */
@@ -549,7 +617,7 @@ public class StoreEventRepository implements EventRepository {
 		}
 
 		// "lokal verändert" kostet das Zerlegen des Events: erst prüfen, wenn ein Nachfolger da ist
-		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false) : localChanges(event);
+		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false, null) : localChanges(event);
 		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
 		successors.sort(EventMerge.MERGE_ORDER);
 		Map<UnitKey, UnitSnapshot> appliedPresentations = new HashMap<>();
@@ -591,7 +659,7 @@ public class StoreEventRepository implements EventRepository {
 		} else if (event == null) {
 			// ohne sichtbares Event übernimmt nur der Vergleichsstand; angezeigt wird nichts
 			for (UnitSnapshot snapshot : apply) {
-				baseline.adopt(eventId, snapshot, false);
+				adopt(eventId, snapshot, false);
 			}
 			warnIfUnreadable(head, warnings);
 		} else if (head != null && !headReadable) {
@@ -631,10 +699,11 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Ob der Nutzer die Einheit ungespeichert geändert hat oder gerade bearbeitet; verlässt Kopf oder Vorstellung das
-	 * Modell oder wechselt eine Vorstellung Halle oder Bestuhlung, zählt jede Einheit darunter.
+	 * Modell oder wechselt eine Vorstellung Halle oder Bestuhlung, zählt jede Einheit darunter. Hat das Modell den fremden
+	 * Stand schon ({@link #converged}), ist nichts blockiert.
 	 */
 	private boolean isBlocked(Event event, UnitSnapshot current, LocalChanges changes) {
-		if (event == null) {
+		if (event == null || converged(changes, current)) {
 			return false;
 		}
 		if (changes.all()) {
@@ -687,6 +756,7 @@ public class StoreEventRepository implements EventRepository {
 			List<UnitSnapshot> waiting = new ArrayList<>();
 			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup, waiting);
 			baseline.resetOwner(eventId, all.values(), assembly.shown());
+			forgetDerived(eventId);
 			warnings.addAll(assembly.warnings());
 			waiting.forEach(snapshot -> hold(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
 			for (Event added : assembly.items()) {
@@ -714,8 +784,9 @@ public class StoreEventRepository implements EventRepository {
 		cachedEvents.remove(event);
 		hideBelow(eventId, UnitKey.event(eventId));
 		for (UnitSnapshot snapshot : apply) {
-			baseline.adopt(eventId, snapshot, false);
+			adopt(eventId, snapshot, false);
 		}
+		forgetDerived(eventId);
 		warnIfUnreadable(head, warnings);
 		listeners.notifyRemovedByOthers(event);
 	}
@@ -725,7 +796,7 @@ public class StoreEventRepository implements EventRepository {
 		for (UnitKey unit : baseline.shownUnits(eventId)) {
 			UnitSnapshot known = baseline.known(unit);
 			if (known != null && !unit.equals(root) && EventMerge.inSubtree(unit, root)) {
-				baseline.adopt(eventId, known, false);
+				adopt(eventId, known, false);
 			}
 		}
 	}
@@ -754,7 +825,7 @@ public class StoreEventRepository implements EventRepository {
 		EventMerge.Sink sink = new EventMerge.Sink() {
 			@Override
 			public void adopted(UnitSnapshot snapshot, boolean shown) {
-				baseline.adopt(eventId, snapshot, shown);
+				adopt(eventId, snapshot, shown);
 				adopted.add(snapshot.unit());
 			}
 
@@ -788,6 +859,10 @@ public class StoreEventRepository implements EventRepository {
 				}
 			}
 			plan = plan.restrictedTo(adopted);
+		}
+		// nur eine Vorstellung kann über den Abgleich Buchungen mitändern
+		if (changes.model() != null && apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION)) {
+			noteDerived(event, changes.model(), adopted);
 		}
 		EventMerge.Plan applied = plan;
 		listeners.notifyChangedByOthers(event,
@@ -833,6 +908,7 @@ public class StoreEventRepository implements EventRepository {
 			ObjectMapper mapper = JsonMapperFactory.create();
 			byte[] state = mapper.writeValueAsBytes(fresh);
 			baseline.resetOwner(eventId, all, assembly.shown());
+			forgetDerived(eventId);
 			warnings.addAll(assembly.warnings());
 			replaceCachedEvent(fresh);
 			// das frische Event zeigt jeden Stand des Index, außer den Buchungen, die nicht zur Bestuhlung passen
