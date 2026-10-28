@@ -478,6 +478,93 @@ class ChangeTrackerTest {
 	}
 
 	@Test
+	void rebaseOfCleanEntityKeepsItClean() {
+		Event event = event("Kampagne");
+		tracker.track(event);
+		firstSeat(event).setPrice(1500);
+
+		// Der geänderte Stand ist ein fremder Stand: Er wird Baseline, ohne als Nutzeränderung zu gelten
+		tracker.rebase(event, tracker.snapshotOf(event));
+
+		assertFalse(tracker.isDirty(event));
+		assertFalse(tracker.anyDirty());
+		assertTrue(calls.isEmpty(), "Das Nachführen meldet keinen Listenern etwas");
+		assertFalse(tracker.check(event));
+		assertEquals(tracker.snapshotOf(event), tracker.baseline(event));
+		assertEquals(tracker.baseline(event), tracker.last(event));
+	}
+
+	@Test
+	void rebaseWithOlderBaselineKeepsItDirty() {
+		Event event = event("Kampagne");
+		tracker.track(event);
+		Snapshot foreignBaseline = foreignBaselineOf(event);
+		firstSeat(event).setPrice(1500); // Nutzeränderung
+		event.setName("Fremdname"); // übernommene fremde Änderung
+
+		tracker.rebase(event, foreignBaseline);
+
+		assertTrue(tracker.isDirty(event));
+		assertTrue(tracker.anyDirty());
+		assertEquals(List.of(event), tracker.dirtyEntities());
+		assertEquals(foreignBaseline, tracker.baseline(event));
+		assertEquals(tracker.snapshotOf(event), tracker.last(event));
+		assertTrue(calls.isEmpty(), "Das Nachführen meldet keinen Listenern etwas");
+	}
+
+	@Test
+	void rebaseThenRemovingUserChangeIsClean() {
+		Event event = event("Kampagne");
+		tracker.track(event);
+		Snapshot foreignBaseline = foreignBaselineOf(event);
+		firstSeat(event).setPrice(1500);
+		event.setName("Fremdname");
+		tracker.rebase(event, foreignBaseline);
+
+		firstSeat(event).setPrice(1000); // Nutzeränderung zurücknehmen
+
+		assertTrue(tracker.check(event));
+		assertFalse(tracker.isDirty(event));
+		assertFalse(tracker.anyDirty());
+	}
+
+	/** Der Stand von {@code event}, wie er mit der fremden Änderung (Vorstellung umbenannt) aussähe, aber ohne die Nutzeränderung. */
+	private Snapshot foreignBaselineOf(Event event) {
+		String oldName = event.getName();
+		event.setName("Fremdname");
+		Snapshot snapshot = tracker.snapshotOf(event);
+		event.setName(oldName);
+		return snapshot;
+	}
+
+	@Test
+	void rebaseOfUntrackedEntityThrows() {
+		Event event = event("Unbekannt");
+
+		assertThrows(IllegalArgumentException.class, () -> tracker.rebase(event, tracker.snapshotOf(event)));
+	}
+
+	@Test
+	void rebaseWithReplacementObjectTracksTheNewObject() {
+		ChangeTracker<Hall> halls = new ChangeTracker<>(Hall::getId);
+		Hall original = new Hall();
+		original.setName("Halle");
+		halls.track(original);
+		var property = halls.dirtyProperty(original);
+		Hall replacement = new Hall(original.getId());
+		replacement.setName("Fremd umbenannt");
+
+		halls.rebase(replacement, halls.snapshotOf(replacement));
+
+		assertSame(property, halls.dirtyProperty(replacement), "Die gebundene Eigenschaft muss dieselbe bleiben");
+		assertFalse(halls.isDirty(replacement));
+		replacement.setName("Eigene Änderung");
+		assertTrue(halls.check(replacement));
+		assertEquals(List.of(replacement), halls.dirtyEntities());
+		assertTrue(property.get());
+	}
+
+	@Test
 	void settingsTrackerIsSharedAndFollowsTheAppSettings() {
 		try {
 			assertSame(ChangeTracker.settings(), ChangeTracker.settings());

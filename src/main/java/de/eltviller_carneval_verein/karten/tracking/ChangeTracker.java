@@ -242,6 +242,32 @@ public final class ChangeTracker<T> {
 		}
 	}
 
+	/** Der aktuelle Zustand der Entität als {@link Snapshot}, ohne am Tracker etwas zu ändern. */
+	public Snapshot snapshotOf(T entity) {
+		return snapshot(entity);
+	}
+
+	/**
+	 * Ein Stand von einem anderen Rechner wurde in die verfolgte Entität eingearbeitet (oder ein Objekt gleicher ID ersetzt
+	 * sie, so bei einer Halle): {@code baseline} wird die neue Baseline, der aktuelle Zustand der Entität der letzte
+	 * bekannte. Sie gilt nur als geändert, wenn sie von {@code baseline} abweicht, also wenn der Nutzer etwas
+	 * Ungespeichertes behalten hat. Die dirty-Eigenschaft bleibt dieselbe. Anders als {@link #replaceEntity} ist das
+	 * keine Nutzeränderung: Die Listener erfahren nichts.
+	 *
+	 * @throws IllegalArgumentException wenn keine Entität mit dieser ID verfolgt wird
+	 */
+	public void rebase(T entity, Snapshot baseline) {
+		Entry<T> entry = entries.get(idOf.apply(entity));
+		if (entry == null) {
+			throw new IllegalArgumentException("Wird nicht verfolgt: " + entity);
+		}
+		entry.entity = entity;
+		entry.baseline = baseline;
+		entry.last = snapshot(entity);
+		entry.dirty.set(!entry.last.equals(baseline));
+		updateAnyDirty();
+	}
+
 	/**
 	 * Vergleicht die Entität mit ihrem letzten bekannten Zustand und meldet eine Abweichung den Listenern.
 	 * Nicht verfolgte Entitäten werden ignoriert.
