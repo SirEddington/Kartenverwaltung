@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -33,6 +34,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.store.LocalArbiter;
 import de.eltviller_carneval_verein.karten.store.NioFileLayer;
 import de.eltviller_carneval_verein.karten.store.StoreCodec;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -335,6 +337,75 @@ class StoreHallRepositoryForeignTest {
 		mine.saveHalls(mine.loadHalls());
 
 		assertEquals(before, files(), "der fremde Stand wird weder gelöscht noch neu geschrieben");
+	}
+
+	@Test
+	void staleHallObjectIsRefusedAfterForeignReplacement() throws IOException {
+		otherRenames("Bürgerhaus");
+		mine.applyForeign(List.of(unit()));
+		AtomicInteger saved = new AtomicInteger();
+		mine.addListener(new RepositoryListener<>() {
+			@Override
+			public void saved(Hall entity) {
+				saved.incrementAndGet();
+			}
+		});
+		long before = files();
+		VersionId known = mine.knownUnit(unit()).version();
+		hall.setName("Alt geändert");
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveHall(hall));
+
+		assertEquals("„Alt geändert“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.",
+				refused.getMessage());
+		assertThrows(LockedUnitException.class, () -> mine.saveHalls(List.of(hall)));
+		assertEquals(before, files(), "nichts geschrieben");
+		assertEquals(0, saved.get(), "nichts gemeldet");
+		assertEquals(known, mine.knownUnit(unit()).version());
+		assertEquals("Bürgerhaus", mine.findById(hall.getId()).getName());
+
+		Hall current = mine.findById(hall.getId());
+		current.setName("Neu");
+		mine.saveHall(current);
+		assertEquals(1, saved.get());
+		assertEquals("Neu", other().findById(hall.getId()).getName());
+	}
+
+	@Test
+	void lockedReadableForeignHallIsAppliedWithWarning() throws IOException {
+		foreignName("Fremd-Halle");
+		Version damaged = foreignName("Kaputt");
+		Files.writeString(appData.resolve("data/" + unit().relativePath() + "/" + damaged.id() + ".json"), "kaputt");
+		sync.unitState(unit());
+
+		ForeignResult result = mine.applyForeign(List.of(unit()));
+
+		assertEquals("Fremd-Halle", mine.findById(hall.getId()).getName());
+		assertEquals(List.of(StoreMessages.damaged(unit().relativePath())), result.warnings());
+		Hall replaced = mine.findById(hall.getId());
+		replaced.setName("Neu");
+		assertThrows(LockedUnitException.class, () -> mine.saveHall(replaced));
+	}
+
+	@Test
+	void knownHallThatBecomesLockedWarnsAndKeepsTheModel() throws IOException {
+		foreignName("Fremd-Halle");
+		mine.applyForeign(List.of(unit()));
+		Hall applied = mine.findById(hall.getId());
+		Version damaged = foreignName("Kaputt");
+		Files.writeString(appData.resolve("data/" + unit().relativePath() + "/" + damaged.id() + ".json"), "kaputt");
+		sync.unitState(unit());
+		recorder.calls.clear();
+
+		ForeignResult result = mine.applyForeign(List.of(unit()));
+
+		assertSame(applied, mine.findById(hall.getId()));
+		assertEquals("Fremd-Halle", applied.getName());
+		assertEquals(List.of(StoreMessages.damaged(unit().relativePath())), result.warnings());
+		assertTrue(recorder.calls.isEmpty());
+		applied.setName("Neu");
+		assertThrows(LockedUnitException.class, () -> mine.saveHall(applied), "der Zustand ist im Vergleichsstand");
+		assertTrue(mine.applyForeign(List.of(unit())).warnings().isEmpty(), "die Warnung kommt nur einmal");
 	}
 
 	@Test

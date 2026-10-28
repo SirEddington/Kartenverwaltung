@@ -30,6 +30,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Das Repository der Events auf dem Versionsspeicher. Beim Speichern wird das Event in Kopf, Vorstellungen und Buchungen
@@ -171,6 +172,17 @@ public class StoreEventRepository implements EventRepository {
 
 		// Ohne geladenen Vergleichsstand würde ein vorhandenes Event wie ein neues geschrieben
 		ensureLoaded();
+		// Ein fremder Stand hat das Objekt im Cache ersetzt: Das alte zu speichern überschriebe ihn
+		Event cached = cachedEvent(event.getId());
+		if (cached != null && cached != event) {
+			throw new LockedUnitException("„" + EntityLabels.nameOrPlaceholder(event.getName())
+					+ "“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.");
+		}
+		write(event);
+	}
+
+	/** Schreibt das Event, ohne zu prüfen, ob es das Objekt im Cache ist (das Wiederherstellen setzt den Cache selbst). */
+	private void write(Event event) {
 		baseline.save(event.getId(), event.getName(), UnitMapper.decompose(event));
 
 		// Cache aktualisieren, falls das Event dort noch nicht enthalten ist
@@ -251,7 +263,7 @@ public class StoreEventRepository implements EventRepository {
 		Event target = plan.target();
 		List<String> notes = adjust.apply(target);
 		refreshFromStore(plan.ownerId(), plan.states());
-		saveEvent(target);
+		write(target);
 		replaceCachedEvent(target);
 		return new Restored<>(target, notes);
 	}

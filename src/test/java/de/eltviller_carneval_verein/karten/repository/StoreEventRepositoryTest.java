@@ -332,9 +332,10 @@ class StoreEventRepositoryTest {
 		repository.saveEvent(event);
 
 		// eine Buchung, die nach dem Laden dieses Repositorys von anderer Seite dazukommt
-		Event other = TestRepositories.events(sync).loadEvents().get(0);
+		StoreEventRepository otherRepository = TestRepositories.events(sync);
+		Event other = otherRepository.loadEvents().get(0);
 		booking(other.getPresentations().get(0), "seat-9", 9, "Fremd");
-		TestRepositories.events(sync).saveEvent(other);
+		otherRepository.saveEvent(other);
 		bookingOf(event, 0, "Müller").setLastName("Mueller");
 		repository.saveEvent(event);
 
@@ -761,13 +762,16 @@ class StoreEventRepositoryTest {
 		repository.saveEvent(event);
 		Event withoutPresentation = new Event(event.getId());
 		withoutPresentation.setName(event.getName());
+		repository.replaceCachedEvent(withoutPresentation);
 		repository.saveEvent(withoutPresentation);
 		sync.flushIndex();
 
 		StoreEventRepository restarted = TestRepositories.events(started(appData));
 		Event loaded = restarted.loadEvents().get(0);
 		assertTrue(loaded.getPresentations().isEmpty());
-		restarted.saveEvent(withoutBookings(event));
+		Event revived = withoutBookings(event);
+		restarted.replaceCachedEvent(revived);
+		restarted.saveEvent(revived);
 
 		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(1, again.getPresentations().size());
@@ -781,9 +785,12 @@ class StoreEventRepositoryTest {
 		repository.saveEvent(event);
 		Event withoutPresentation = new Event(event.getId());
 		withoutPresentation.setName(event.getName());
+		repository.replaceCachedEvent(withoutPresentation);
 		repository.saveEvent(withoutPresentation);
 
-		repository.saveEvent(withoutBookings(event));
+		Event revived = withoutBookings(event);
+		repository.replaceCachedEvent(revived);
+		repository.saveEvent(revived);
 
 		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(1, again.getPresentations().size());
@@ -993,6 +1000,7 @@ class StoreEventRepositoryTest {
 		clock.advance(10);
 		Event withoutPresentation = new Event(event.getId());
 		withoutPresentation.setName(event.getName());
+		repository.replaceCachedEvent(withoutPresentation);
 		repository.saveEvent(withoutPresentation);
 		assertTrue(TestRepositories.events(started(appData)).loadEvents().get(0).getPresentations().isEmpty());
 		clock.advance(10);

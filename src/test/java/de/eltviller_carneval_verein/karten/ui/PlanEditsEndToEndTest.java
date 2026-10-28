@@ -213,11 +213,12 @@ class PlanEditsEndToEndTest {
 		assertEquals(3, dataBefore.size(), "drei Buchungen mit Daten");
 
 		// b. Hallen-Editor: Tisch A2 löschen, Reihe A neu nummerieren (A3 wird A2), speichern, neu laden
-		Hall editedHall = loadHall(f.hallId());
+		StoreHallRepository editorHalls = halls();
+		Hall editedHall = editorHalls.findById(f.hallId());
 		SeatingPlan editedPlan = editedHall.findSeatingPlan(f.planId());
 		assertTrue(editedPlan.deleteTable(table(editedPlan, 2)), "Tisch A2 gelöscht");
 		editedPlan.renumber(editedPlan.getRows().get(0));
-		halls().saveHall(editedHall);
+		editorHalls.saveHall(editedHall);
 
 		Hall changedHall = loadHall(f.hallId());
 		SeatingPlan changedPlan = changedHall.findSeatingPlan(f.planId());
@@ -226,7 +227,8 @@ class PlanEditsEndToEndTest {
 		assertEquals(2, changedPlan.findSeat(f.seatA3s2()).getParent().getTableNumber(), "der frühere Tisch A3 heißt jetzt A2");
 
 		// c. Abgleich nach dem Laden gegen die geänderte Halle
-		Event event = loadEvent(f.eventId());
+		StoreEventRepository syncedEvents = events();
+		Event event = syncedEvents.loadEvents().stream().filter(e -> e.getId().equals(f.eventId())).findFirst().orElseThrow();
 		Presentation p = presentation(event);
 		ChangeTracker<Event> tracker = prepare(event, changedHall);
 
@@ -268,7 +270,7 @@ class PlanEditsEndToEndTest {
 
 		// d. Event speichern, laden, nochmals abgleichen: nichts ändert sich mehr
 		String jsonAfterSync = dataJson(event);
-		events().saveEvent(event);
+		syncedEvents.saveEvent(event);
 		Event reloaded = loadEvent(f.eventId());
 		Presentation reloadedPresentation = presentation(reloaded);
 		assertTrue(byLastName(reloadedPresentation, "Müller").isUnassigned(), "Ohne Platz steht im Speicher, schon vor dem Abgleich");
@@ -280,15 +282,16 @@ class PlanEditsEndToEndTest {
 		assertEquals(totalsAfter, BookingTotals.of(reloadedPresentation.getBookings()), "dieselben Zahlen nach Speichern und Laden");
 
 		// e. Hallen-Editor löscht die Bestuhlung: erst einfrieren, dann entfernen und speichern
-		Hall editorHall = loadHall(f.hallId());
+		StoreHallRepository doomedHalls = halls();
+		Hall editorHall = doomedHalls.findById(f.hallId());
 		SeatingPlan doomed = editorHall.findSeatingPlan(f.planId());
-		Event stored = loadEvent(f.eventId());
 		StoreEventRepository eventRepository = events();
+		Event stored = eventRepository.loadEvents().stream().filter(e -> e.getId().equals(f.eventId())).findFirst().orElseThrow();
 		List<Event> saved = PlanFreezer.freeze(List.of(stored), presentation -> doomed.getId().equals(presentation.getSeatingPlanId()),
 				id -> editorHall.getId().equals(id) ? editorHall : null, new ChangeTracker<>(Event::getId), eventRepository::saveEvent);
 		assertEquals(List.of(stored), saved, "das betroffene Event wird vor dem Löschen gespeichert");
 		assertTrue(editorHall.getSeatingPlans().remove(doomed), "Bestuhlung entfernt");
-		halls().saveHall(editorHall);
+		doomedHalls.saveHall(editorHall);
 
 		Hall hallWithoutPlan = loadHall(f.hallId());
 		assertNull(hallWithoutPlan.findSeatingPlan(f.planId()), "die Bestuhlung ist auch im Speicher weg");

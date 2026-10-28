@@ -22,6 +22,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Das Repository der Hallen auf dem Versionsspeicher. Eine Halle ist eine einzige Einheit; geschrieben wird nur, wenn
@@ -156,6 +157,17 @@ public class StoreHallRepository implements HallRepository {
 
 		// Ohne geladenen Vergleichsstand würde eine vorhandene Halle wie eine neue geschrieben
 		ensureLoaded();
+		// Ein fremder Stand hat das Objekt im Cache ersetzt: Das alte zu speichern überschriebe ihn
+		Hall cached = cachedHall(hall.getId());
+		if (cached != null && cached != hall) {
+			throw new LockedUnitException("„" + EntityLabels.nameOrPlaceholder(hall.getName())
+					+ "“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.");
+		}
+		write(hall);
+	}
+
+	/** Schreibt die Halle, ohne zu prüfen, ob sie das Objekt im Cache ist (das Wiederherstellen setzt den Cache selbst). */
+	private void write(Hall hall) {
 		baseline.save(hall.getId(), hall.getName(), List.of(UnitMapper.decompose(hall)));
 
 		// Cache aktualisieren, falls die Halle dort noch nicht enthalten ist
@@ -227,7 +239,7 @@ public class StoreHallRepository implements HallRepository {
 		Hall target = plan.target();
 		List<String> notes = adjust.apply(target);
 		refreshFromStore(plan.ownerId(), plan.states());
-		saveHall(target);
+		write(target);
 		replaceCachedHall(target);
 		return new Restored<>(target, notes);
 	}
@@ -415,7 +427,6 @@ public class StoreHallRepository implements HallRepository {
 
 		Hall old = cachedHall(hallId);
 		if (old != null && isBlocked(old, known)) {
-			failedUnits.remove(unit);
 			String machineName = chain.isEmpty() ? null : chain.get(chain.size() - 1).machineName();
 			deferred.put(unit, new Deferral(unit, current.version(), machineName, old));
 			return;
@@ -424,9 +435,9 @@ public class StoreHallRepository implements HallRepository {
 		failedUnits.remove(unit);
 
 		Hall fresh = UnitMapper.readUnit(current, Hall.class);
-		baseline.adopt(hallId, current, fresh != null);
 		if (fresh == null) {
 			// gelöscht oder unlesbar: wie beim Laden unsichtbar
+			baseline.adopt(hallId, current, false);
 			if (!UnitMapper.isAbsent(current)) {
 				warnings.add(UnitMapper.unreadableHall(hallId));
 			}
@@ -434,8 +445,16 @@ public class StoreHallRepository implements HallRepository {
 				cachedHalls.remove(old);
 				listeners.notifyRemovedByOthers(old);
 			}
-		} else if (old != null) {
+			return;
+		}
+		// eine gesperrte Halle mit lesbarer Version wird wie beim Laden geladen, mit Warnung
+		String locked = UnitMapper.lockMessage(unit, current.status());
+		if (locked != null) {
+			warnings.add(locked);
+		}
+		if (old != null) {
 			listeners.notifyChangingByOthers(old);
+			baseline.adopt(hallId, current, true);
 			cachedHalls.remove(old);
 			insertSorted(fresh);
 			listeners.notifyChangedByOthers(fresh, new ForeignBatch<>(Set.of(unit), copy -> {
@@ -443,6 +462,7 @@ public class StoreHallRepository implements HallRepository {
 						"Eine eingearbeitete Halle ist nie lokal verändert: Es gibt nichts nachzuspielen.");
 			}));
 		} else {
+			baseline.adopt(hallId, current, true);
 			insertSorted(fresh);
 			listeners.notifyAddedByOthers(fresh);
 		}

@@ -606,6 +606,41 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(before, files());
 	}
 
+	@Test
+	void staleEventObjectIsRefusedAfterARebuild() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(failingAt(2, lookup(other)));
+		Other remote = other();
+		remote.friday().setHallId(other.getId());
+		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		remote.save();
+		mine.applyForeign(allUnits());
+		Event rebuilt = mine.loadEvents().get(0);
+		assertNotSame(event, rebuilt);
+		AtomicInteger saved = new AtomicInteger();
+		mine.addListener(new RepositoryListener<>() {
+			@Override
+			public void saved(Event entity) {
+				saved.incrementAndGet();
+			}
+		});
+		long before = files();
+		event.setName("Alt geändert");
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
+
+		assertEquals("„Alt geändert“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.",
+				refused.getMessage());
+		assertThrows(LockedUnitException.class, () -> mine.saveEvents(List.of(event)));
+		assertEquals(before, files(), "nichts geschrieben");
+		assertEquals(0, saved.get(), "nichts gemeldet");
+		assertEquals(List.of(rebuilt), mine.loadEvents());
+
+		rebuilt.setName("Neu");
+		mine.saveEvent(rebuilt);
+		assertEquals(1, saved.get());
+	}
+
 	// <-- Einarbeiten
 
 	// Regeln -->
