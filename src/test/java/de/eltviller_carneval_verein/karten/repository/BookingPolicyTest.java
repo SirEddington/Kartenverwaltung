@@ -366,6 +366,73 @@ class BookingPolicyTest {
 	}
 
 	@Test
+	void myMoveFollowedByAnEditOfTheNewSaleStillTransfersTheirEdit() {
+		// Meine: x nach s2 verschoben und y auf s1 verkauft (save-a), danach y geändert (save-b); Deren ändert x auf s1
+		Version base = version(THIRD, booking("x", "s1"));
+		Version myCopy = version(OWN, "save-a", booking("x", "s2", b -> b.setSeatNumber(2)));
+		Version mine = version(OWN, "save-b", booking("y", "s1", b -> b.setComment("geändert")));
+		Version theirs = version(OTHER, booking("x", "s1", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, siblings(Map.entry(S2, myCopy)), theirs));
+
+		assertEquals(mine.payload(), resolution.payload());
+		assertNull(resolution.note());
+		ObjectNode merged = booking("x", "s2", b -> {
+			b.setSeatNumber(2);
+			b.setPaymentStatus(PaymentStatus.CARD);
+		});
+		assertEquals(List.of(new Change(S2, List.of(myCopy.id()), merged, false)), resolution.extra());
+	}
+
+	/**
+	 * Meine verschiebt m von s3 nach s1 (save-a); ein anderer Rechner ändert m auf s3 und verkauft t auf s1. Meine verliert
+	 * auf beiden Einheiten. Gleich in welcher Reihenfolge sie aufgelöst werden: m lebt danach in einer Einheit.
+	 */
+	@Test
+	void lostMoveOntoADoubleSoldSeatKeepsTheBookingInEitherOrder() {
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		Version s3Base = version(THIRD, booking("m", "s3", b -> b.setSeatNumber(3)));
+		Version myS3Deletion = deletion(OWN, "save-a");
+		Version myS1 = version(OWN, "save-a", booking("m", "s1"));
+		Version theirS3 = version(OTHER, booking("m", "s3", b -> {
+			b.setSeatNumber(3);
+			b.setComment("Rollstuhl");
+		}));
+		Version theirS1 = version(OTHER, booking("t", "s1"));
+
+		// s1 zuerst: s3 trägt m noch (die eigene Löschung dort ist offen), trotzdem entsteht _m
+		Resolution s1First = POLICY.resolve(input(S1, null, myS1, theirS1, siblings(Map.entry(S3, theirS3)), theirS1));
+		assertEquals(Kind.DOUBLE_SALE, s1First.note().kind());
+		Change created = s1First.extra().get(0);
+		assertEquals(unassigned, created.unit());
+		assertTrue(created.parents().isEmpty());
+		Version written = version(OWN, "resolver-1", created.payload());
+		Version s1Merge = version(OWN, "resolver-1", theirS1.payload());
+
+		// danach s3: Die Änderung von Deren geht an _m, wo m jetzt lebt
+		Resolution s3Then = POLICY.resolve(input(S3, s3Base, myS3Deletion, theirS3,
+				siblings(Map.entry(S1, s1Merge), Map.entry(unassigned, written)), theirS3));
+		assertTrue(s3Then.deleted());
+		assertEquals(1, s3Then.extra().size());
+		Change transferred = s3Then.extra().get(0);
+		assertEquals(unassigned, transferred.unit());
+		assertFalse(transferred.deleted());
+		assertEquals(List.of(written.id()), transferred.parents());
+		assertEquals("Rollstuhl", transferred.payload().get("comment").asText());
+		assertTrue(transferred.payload().get("unassigned").asBoolean());
+
+		// s3 zuerst: m lebt nirgends sonst, die eigene Löschung gewinnt; danach s1: m weicht nach _m aus
+		Resolution s3First = POLICY.resolve(input(S3, s3Base, myS3Deletion, theirS3, siblings(Map.entry(S1, theirS1)),
+				theirS3));
+		assertTrue(s3First.deleted());
+		assertTrue(s3First.extra().isEmpty());
+		Version s3Merge = deletion(OWN, "resolver-2");
+		Resolution s1Then = POLICY.resolve(input(S1, null, myS1, theirS1, siblings(Map.entry(S3, s3Merge)), theirS1));
+		assertEquals(List.of(unassigned), s1Then.extra().stream().map(Change::unit).toList());
+		assertFalse(s1Then.extra().get(0).deleted());
+	}
+
+	@Test
 	void bothReplacedWithDifferentBookingsIsADoubleSale() {
 		// keine Seite trägt mehr x: zwei neue Verkäufe auf demselben Sitz
 		Version base = version(THIRD, booking("x", "s1"));

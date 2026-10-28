@@ -257,8 +257,10 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * <ul>
 	 * <li>"Deren" gelöscht, "Meine" geändert, und die Buchung lebt in einer Geschwister-Einheit: betroffen ist bei strittigen
 	 * Gruppen dieser Rechner.</li>
-	 * <li>"Meine" gelöscht, "Deren" dieselbe Buchung geändert, und die Buchung lebt in einer Kopie aus dem eigenen
-	 * Speichervorgang: betroffen ist bei strittigen Gruppen der Rechner von "Deren".</li>
+	 * <li>"Meine" gelöscht, "Deren" dieselbe Buchung geändert, und die Buchung lebt in einer Geschwister-Einheit: betroffen
+	 * ist bei strittigen Gruppen der Rechner von "Deren". Der Speichervorgang der Kopie zählt nicht: Trägt "Deren" die
+	 * Buchung hier, lebt sie anderswo nur durch dieses Rechners Verschieben, auch wenn die Kopie erst eine Auflösung schrieb
+	 * (Doppelverkauf am Ziel, die Buchung lebt unter {@code _<ID>}).</li>
 	 * </ul>
 	 *
 	 * @return die Auflösung, oder {@code null}, wenn keine solche Kopie die Buchung trägt
@@ -282,7 +284,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (!isSameBooking(input, theirs)) {
 			return null;
 		}
-		UnitSnapshot copy = movedCopy(input, bookingId, mine.saveId());
+		UnitSnapshot copy = livingCopy(input, bookingId);
 		if (copy == null) {
 			return null;
 		}
@@ -382,15 +384,17 @@ public final class BookingPolicy implements ConflictPolicy {
 
 	/**
 	 * "Meine" hat die Buchung der Basis auf dem Sitz durch eine andere ersetzt, "Deren" hat sie geändert. Der Sitz behält
-	 * "Meine". Lebt die Buchung in einer Kopie aus dem eigenen Speichervorgang (verschoben), geht die Änderung von "Deren"
-	 * dorthin ({@link #transfer}, betroffen bei strittigen Gruppen ist der Rechner von "Deren"). Sonst hat dieser Rechner sie
+	 * "Meine". Lebt die Buchung in einer Geschwister-Einheit, geht die Änderung von "Deren" dorthin ({@link #transfer},
+	 * betroffen bei strittigen Gruppen ist der Rechner von "Deren"). Trägt "Deren" die Buchung auf dem Sitz, kann sie
+	 * anderswo nur leben, weil dieser Rechner sie verschoben hat; der Speichervorgang zählt nicht, denn "Meine" kann eine
+	 * spätere Änderung der neuen Buchung sein. Sonst hat dieser Rechner sie
 	 * storniert, und die Stornierung gilt: Vermerk DELETE_WINS an den Rechner von "Deren", wenn er sie gegenüber der Basis
 	 * geändert hatte.
 	 */
 	private static Resolution replacedByMine(ConflictInput input, String bookingId) {
 		Version mine = input.mine();
 		Version theirs = input.theirs();
-		UnitSnapshot copy = movedCopy(input, bookingId, mine.saveId());
+		UnitSnapshot copy = livingCopy(input, bookingId);
 		if (copy != null) {
 			return transfer(input, mine.payload(), false, copy, theirs.payload(), theirs.machine(),
 					PolicyRules.party(mine), theirs.id());
@@ -409,10 +413,13 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * <p>
 	 * Der Schlüssel {@code _<ID>} ist fest, damit eine Wiederholung nach einem Absturz dieselbe Einheit trifft. Ist sie
 	 * schon gelöscht (die Buchung stand früher ohne Platz und wurde von dort zugewiesen), baut die neue Version auf der
-	 * Löschung auf; eine Erstversion übersprünge die Auflösung, weil die Einheit schon Versionen hat. Lebt die Buchung
-	 * schon in einer Geschwister-Einheit (auch {@code _<ID>}), entsteht keine zweite: Der Vermerk nennt diese Einheit als
-	 * {@code moved}, der eigene Inhalt steht nur noch in "Meine". Ist die Einheit selbst schon {@code _<ID>}, kann die
-	 * Buchung nicht weiter ausweichen: "Deren" bleibt, Vermerk UNMERGED.
+	 * Löschung auf; eine Erstversion übersprünge die Auflösung, weil die Einheit schon Versionen hat. Lebt {@code _<ID>}
+	 * schon, entsteht keine zweite Fassung darauf (der eigene Inhalt steht nur noch in "Meine"). Eine andere Einheit, die
+	 * die Buchung noch trägt, zählt nicht: Sie lebt dort womöglich nur, weil die eigene Löschung dort verloren hat und noch
+	 * nicht aufgelöst ist (verschoben, während ein anderer Rechner sie dort änderte). Deren Auflösung überträgt die Änderung
+	 * dann auf {@code _<ID>} ({@link #movedAgainstEdit}); ohne {@code _<ID>} löschte sie die Buchung dort, und sie lebte
+	 * nirgends mehr. Ist die Einheit selbst schon {@code _<ID>}, kann die Buchung nicht weiter ausweichen: "Deren" bleibt,
+	 * Vermerk UNMERGED.
 	 */
 	private static Resolution doubleSale(ConflictInput input, String mineId) {
 		Version mine = input.mine();
@@ -423,9 +430,9 @@ public final class BookingPolicy implements ConflictPolicy {
 			return PolicyRules.unmerged(input);
 		}
 		List<Change> extra;
-		UnitSnapshot living = livingCopy(input, mineId);
-		if (living != null) {
-			moved = living.unit();
+		Sibling existing = input.siblings().get(moved);
+		UnitSnapshot current = existing == null ? null : existing.snapshot();
+		if (current != null && current.version() != null && !current.deleted()) {
 			extra = List.of();
 		} else {
 			ObjectNode withoutPlace = mine.payload().deepCopy();
@@ -434,9 +441,8 @@ public final class BookingPolicy implements ConflictPolicy {
 			withoutPlace.put(ROW_LABEL, "");
 			withoutPlace.put(TABLE_NUMBER, 0);
 			withoutPlace.put(SEAT_NUMBER, 0);
-			Sibling existing = input.siblings().get(moved);
-			List<VersionId> parents = existing != null && existing.snapshot().version() != null
-					&& existing.snapshot().deleted() ? List.of(existing.snapshot().version()) : List.of();
+			List<VersionId> parents = current != null && current.version() != null ? List.of(current.version())
+					: List.of();
 			extra = List.of(new Change(moved, parents, withoutPlace, false));
 		}
 

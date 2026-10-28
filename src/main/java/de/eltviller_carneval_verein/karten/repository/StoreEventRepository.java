@@ -24,6 +24,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
+import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -554,8 +555,9 @@ public class StoreEventRepository implements EventRepository {
 			UnitSnapshot known = baseline.known(unit);
 			boolean differs = known == null || known.deleted() || !baseline.isShown(unit)
 					|| !entry.getValue().equals(known.payload());
-			if (differs && unit.type() == UnitType.BOOKING && entry.getValue().hasNonNull("id")) {
-				moved.computeIfAbsent(entry.getValue().get("id").asText(), id -> new ArrayList<>()).add(unit);
+			if (differs && unit.type() == UnitType.BOOKING && entry.getValue().hasNonNull(ConflictInput.BOOKING_ID)) {
+				moved.computeIfAbsent(entry.getValue().get(ConflictInput.BOOKING_ID).asText(), id -> new ArrayList<>())
+						.add(unit);
 			}
 			if (differs && !(derived.containsKey(unit) && entry.getValue().equals(derived.get(unit)))) {
 				changed.add(unit);
@@ -589,7 +591,8 @@ public class StoreEventRepository implements EventRepository {
 			if (!UnitMapper.isAbsent(current)) {
 				return false;
 			}
-			String movedId = known == null || known.payload() == null ? null : known.payload().path("id").asText(null);
+			String movedId = known == null || known.payload() == null ? null : known.payload().path(ConflictInput.BOOKING_ID)
+					.asText(null);
 			return movedId == null || changes.movedCarriers(movedId, current.unit()).isEmpty();
 		}
 		return current.version() != null && !current.deleted() && mine.equals(current.payload());
