@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
@@ -123,10 +124,10 @@ class BookingPolicyTest {
 		return new ConflictInput(unit, base, mine, theirs, List.of(chain), OWN, siblings);
 	}
 
-	/** Eine Geschwister-Einheit, deren gültige Kette mit {@code version} endet. */
+	/** Eine Geschwister-Einheit, deren gültige Kette mit {@code version} endet und die nur diese Version hat. */
 	private static Sibling sibling(UnitKey unit, Version version) {
 		return new Sibling(new UnitSnapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()),
-				ChainStep.of(version));
+				ChainStep.of(version), Set.of(version.saveId()));
 	}
 
 	@SafeVarargs
@@ -407,6 +408,36 @@ class BookingPolicyTest {
 	}
 
 	@Test
+	void newSaleOnASeatTheirsCancelledWins() {
+		// Deren storniert x; Meine verkauft auf dem Sitz eine andere Buchung y: Die Stornierung trifft y nicht
+		Version base = version(THIRD, booking("x", "s1"));
+		Version theirDeletion = deletion(OTHER);
+		Version mine = version(OWN, booking("y", "s1", b -> b.setLastName("Neu")));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirDeletion, theirDeletion));
+
+		assertFalse(resolution.deleted());
+		assertEquals(mine.payload(), resolution.payload());
+		assertNull(resolution.note());
+		assertTrue(resolution.extra().isEmpty());
+	}
+
+	@Test
+	void newSaleWithoutBaseAgainstACancelledSaleWins() {
+		// zwei Erstverkäufe auf einem freien Sitz; Deren hat seinen Verkauf t inzwischen storniert
+		Version sold = version(OTHER, booking("t", "s1"));
+		Version theirDeletion = deletion(OTHER);
+		Version mine = version(OWN, booking("m", "s1"));
+
+		Resolution resolution = POLICY.resolve(input(S1, null, mine, theirDeletion, sold, theirDeletion));
+
+		assertFalse(resolution.deleted());
+		assertEquals(mine.payload(), resolution.payload());
+		assertNull(resolution.note());
+		assertTrue(resolution.extra().isEmpty());
+	}
+
+	@Test
 	void cancellationAgainstAnotherBookingKeepsIt() {
 		// Meine storniert x; auf dem Sitz steht inzwischen die Buchung y: Die Stornierung trifft y nicht
 		Version base = version(THIRD, booking("x", "s1"));
@@ -515,6 +546,62 @@ class BookingPolicyTest {
 		assertEquals(2, place.theirs().get("seatNumber").asInt());
 		// nur die Gruppe "Platz", keine Kundendaten
 		assertFalse(place.mine().has("lastName"));
+	}
+
+	@Test
+	void bothMovedToTheSameSeatKeepsTheBookingWithoutNote() {
+		// beide Rechner verschieben x von s1 nach s2: Sie sind sich einig, s2 gabelt für sich (gleiche Buchung)
+		Version base = version(THIRD, booking("x", "s1"));
+		Version myDeletion = deletion(OWN, "save-mine");
+		Version theirDeletion = deletion(OTHER, "save-theirs");
+		Version theirCopy = version(OTHER, "save-theirs", booking("x", "s2", b -> b.setSeatNumber(2)));
+		// die eigene Version auf s2 hat verloren, liegt aber im Ordner von s2
+		Sibling s2 = new Sibling(new UnitSnapshot(S2, theirCopy.id(), Status.OK, false, theirCopy.payload()),
+				ChainStep.of(theirCopy), Set.of("save-theirs", "save-mine"));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, Map.of(S2, s2), theirDeletion));
+
+		assertTrue(resolution.deleted());
+		assertNull(resolution.note());
+		assertTrue(resolution.extra().isEmpty());
+	}
+
+	@Test
+	void moveEditedAgainLaterIsStillRecognized() {
+		// die verschobene Kopie auf s2 wurde nach dem Verschieben in einem späteren Speichervorgang geändert
+		Version base = version(THIRD, booking("x", "s1"));
+		Version myDeletion = deletion(OWN, "save-move");
+		Version edited = version(OWN, "save-later", booking("x", "s2", b -> {
+			b.setSeatNumber(2);
+			b.setComment("später geändert");
+		}));
+		Version theirDeletion = deletion(OTHER, "save-cancel");
+		Sibling s2 = new Sibling(new UnitSnapshot(S2, edited.id(), Status.OK, false, edited.payload()),
+				ChainStep.of(edited), Set.of("save-move", "save-later"));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, Map.of(S2, s2), theirDeletion));
+
+		assertEquals(List.of(deletionOf(S2, edited)), resolution.extra());
+		assertEquals(Kind.DELETE_WINS, resolution.note().kind());
+		assertEquals(OWN, resolution.note().affected());
+		assertEquals(edited.id(), resolution.note().dropped());
+	}
+
+	@Test
+	void pendingOwnMovedCopyIsRecognized() {
+		// die eigene Kopie auf s2 ist noch nicht beansprucht: Sie steht in keiner Kette, aber im Ordner
+		Version base = version(THIRD, booking("x", "s1"));
+		Version myDeletion = deletion(OWN, "save-move");
+		Version pending = version(OWN, "save-move", booking("x", "s2", b -> b.setSeatNumber(2)));
+		Version theirDeletion = deletion(OTHER, "save-cancel");
+		Sibling s2 = new Sibling(new UnitSnapshot(S2, pending.id(), Status.OK, false, pending.payload()), null,
+				Set.of("save-move"));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, Map.of(S2, s2), theirDeletion));
+
+		assertEquals(List.of(deletionOf(S2, pending)), resolution.extra());
+		assertEquals(Kind.DELETE_WINS, resolution.note().kind());
+		assertEquals(OWN, resolution.note().affected());
 	}
 
 	@Test

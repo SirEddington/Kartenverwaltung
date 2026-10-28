@@ -22,6 +22,9 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 
 /**
@@ -68,6 +71,12 @@ final class ConflictResolver {
 	static final Duration LIST_WAIT = Duration.ofMinutes(5);
 	/** So viele Zusammenführungen schreibt ein Durchlauf höchstens je Einheit; die Einheit kommt dann im nächsten wieder. */
 	private static final int MAX_MERGES_PER_UNIT = 20;
+	/**
+	 * Das Feld der Buchungs-ID im Inhalt einer Buchung, wie das Repository es schreibt (dieselbe ID benennt eine Buchung
+	 * ohne Platz, {@link UnitKey#unassignedBooking}). Nur für die Auswahl der Geschwister, deren Speichervorgänge die
+	 * Strategie bekommt.
+	 */
+	private static final String BOOKING_ID = "id";
 
 	/** Was die Auflösung vom Dienst braucht. */
 	interface Host {
@@ -84,7 +93,10 @@ final class ConflictResolver {
 		/** Die ID dieses Rechners. */
 		String machineId();
 
-		/** Die anderen Buchungs-Einheiten derselben Vorstellung aus dem Start-Index (Inhalte nicht kopiert). */
+		/**
+		 * Die anderen Buchungs-Einheiten derselben Vorstellung aus dem Start-Index (Inhalte nicht kopiert, ohne
+		 * Speichervorgänge; die ergänzt die Auflösung).
+		 */
 		Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking);
 
 		/** Schreibt die Änderungen wie {@link SyncService#append}. */
@@ -392,16 +404,19 @@ final class ConflictResolver {
 	 * (das würde als leerer Inhalt geschrieben), steht es im Log (SEVERE) und einmal je Einheit und Lauf in der Fußzeile.
 	 *
 	 * @return die Entscheidung; {@code null}, wenn die Strategie scheiterte
+	 * @throws IOException wenn sich der Ordner einer Geschwister-Einheit nicht lesen lässt (die Einheit bleibt eingereiht)
 	 */
-	private Resolution decide(UnitKey unit, Stretch stretch) {
+	private Resolution decide(UnitKey unit, Stretch stretch) throws IOException {
 		ConflictPolicy policy = policies.get(unit.type());
 		if (policy == null) {
 			return unmerged(stretch.mine(), stretch.theirs());
 		}
+		Map<UnitKey, ConflictInput.Sibling> siblings = unit.type() == UnitType.BOOKING ? siblings(unit, stretch.base())
+				: Map.of();
 		try {
 			ConflictInput input = new ConflictInput(unit, copy(stretch.base()), copy(stretch.mine()),
 					copy(stretch.theirs()), stretch.chainSinceBase().stream().map(ConflictResolver::copy).toList(),
-					host.machineId(), unit.type() == UnitType.BOOKING ? copySiblings(host.siblings(unit)) : Map.of());
+					host.machineId(), siblings);
 			Resolution resolution = Objects.requireNonNull(policy.resolve(input), "Die Strategie lieferte kein Ergebnis.");
 			if (!resolution.deleted() && resolution.payload() == null) {
 				throw new IllegalStateException("Die Strategie lieferte keinen Inhalt.");
@@ -496,14 +511,43 @@ final class ConflictResolver {
 				note.place() == null ? null : note.place().deepCopy(), note.dropped());
 	}
 
-	private static Map<UnitKey, ConflictInput.Sibling> copySiblings(Map<UnitKey, ConflictInput.Sibling> siblings) {
+	/**
+	 * Die anderen Buchungs-Einheiten derselben Vorstellung als Kopien. Trägt eine davon die Buchung der Basis (gleiche
+	 * Buchungs-ID, nicht gelöscht), bekommt sie die Speichervorgänge aller lesbaren Versionen in ihrem Ordner: Daran erkennt
+	 * die Strategie ein Verschieben, auch wenn die Kopie seitdem geändert wurde oder noch aussteht. Nur für diese (meist
+	 * keine oder eine) werden Dateien gelesen.
+	 */
+	private Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey unit, Version base) throws IOException {
+		String bookingId = base == null || base.deleted() ? null : bookingIdOf(base.payload());
 		Map<UnitKey, ConflictInput.Sibling> copies = new LinkedHashMap<>();
-		siblings.forEach((key, sibling) -> {
+		for (Map.Entry<UnitKey, ConflictInput.Sibling> entry : host.siblings(unit).entrySet()) {
+			ConflictInput.Sibling sibling = entry.getValue();
 			UnitSnapshot s = sibling.snapshot();
 			UnitSnapshot copy = new UnitSnapshot(s.unit(), s.version(), s.status(), s.deleted(),
 					s.payload() == null ? null : s.payload().deepCopy());
-			copies.put(key, new ConflictInput.Sibling(copy, sibling.head()));
-		});
+			boolean carriesBooking = bookingId != null && s.version() != null && !s.deleted()
+					&& bookingId.equals(bookingIdOf(s.payload()));
+			Set<String> saveIds = carriesBooking ? saveIdsOf(entry.getKey()) : Set.of();
+			copies.put(entry.getKey(), new ConflictInput.Sibling(copy, sibling.head(), saveIds));
+		}
 		return copies;
+	}
+
+	/** Die Buchungs-ID im Inhalt einer Buchung (das Feld {@value #BOOKING_ID}); {@code null}, wenn sie fehlt. */
+	private static String bookingIdOf(ObjectNode payload) {
+		JsonNode id = payload == null ? null : payload.get(BOOKING_ID);
+		return id != null && id.isTextual() ? id.asText() : null;
+	}
+
+	/** Die Speichervorgänge aller lesbaren Versionen im Ordner der Einheit. */
+	private Set<String> saveIdsOf(UnitKey unit) throws IOException {
+		Set<String> saveIds = new HashSet<>();
+		for (VersionFile file : host.resolve(unit).files().versions().values()) {
+			Version version = file.version();
+			if (version != null && version.saveId() != null) {
+				saveIds.add(version.saveId());
+			}
+		}
+		return saveIds;
 	}
 }

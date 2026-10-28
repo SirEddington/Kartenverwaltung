@@ -289,6 +289,32 @@ class ConflictResolverTest {
 	}
 
 	@Test
+	void siblingsWithTheBookingOfTheBaseCarryAllTheirSaveIds() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		RecordingPolicy policy = new RecordingPolicy();
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		ObjectNode booking = MAPPER.createObjectNode().put("id", "X").put("name", "Anna");
+		// die Buchung X lebt auch auf A-2: dorthin verschoben in einem Speichervorgang, später in einem anderen geändert
+		Version moved = service.append("save-move",
+				List.of(new Change(OTHER_SEAT, List.of(), booking.deepCopy().put("name", "Anna auf A-2"), false))).get(0);
+		service.append("save-later",
+				List.of(new Change(OTHER_SEAT, List.of(moved.id()), booking.deepCopy().put("name", "Anna, Rollstuhl"), false)));
+		UnitKey otherBooking = UnitKey.booking("e1", "p1", "A-3");
+		service.append("save-other",
+				List.of(new Change(otherBooking, List.of(), MAPPER.createObjectNode().put("id", "Y"), false)));
+		Version base = own(service, BOOKING, List.of(), booking);
+		foreign(service, appData, BOOKING, List.of(base.id()), name("Bert"), false, Map.of());
+		own(service, BOOKING, List.of(base.id()), name("Carla"));
+
+		service.tick();
+
+		ConflictInput input = policy.inputs.get(0);
+		assertEquals(Set.of("save-move", "save-later"), input.siblings().get(OTHER_SEAT).saveIds());
+		assertEquals(Set.of(), input.siblings().get(otherBooking).saveIds(), "eine andere Buchung: kein Dateizugriff");
+	}
+
+	@Test
 	void twoRootVersionsHaveNullBase() throws IOException {
 		Path appData = dir.resolve("app");
 		SyncService service = single(appData);
