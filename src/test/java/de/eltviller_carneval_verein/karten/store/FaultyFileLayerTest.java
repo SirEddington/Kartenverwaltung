@@ -11,6 +11,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,6 +39,32 @@ class FaultyFileLayerTest {
 
 		assertTrue(layer.createNew(file, new byte[] { 2 }));
 		assertArrayEquals(new byte[] { 2 }, layer.read(file).orElseThrow());
+	}
+
+	@Test
+	void blockNextHoldsTheNextCallUntilReleased() throws Exception {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		Path file = dir.resolve("a.json");
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		layer.blockNext("createNew", entered, release);
+		ExecutorService executor = Executors.newSingleThreadExecutor();
+		try {
+			Future<Boolean> writing = executor.submit(() -> layer.createNew(file, new byte[] { 1 }));
+
+			assertTrue(entered.await(10, TimeUnit.SECONDS));
+			assertFalse(layer.exists(file), "der Aufruf ist angehalten");
+			assertTrue(layer.calls().stream().noneMatch(c -> c.startsWith("createNew")));
+			release.countDown();
+
+			assertTrue(writing.get(10, TimeUnit.SECONDS));
+			assertArrayEquals(new byte[] { 1 }, layer.read(file).orElseThrow());
+			// nur der nächste Aufruf wird angehalten
+			assertTrue(layer.createNew(dir.resolve("b.json"), new byte[] { 2 }));
+		} finally {
+			release.countDown();
+			executor.shutdownNow();
+		}
 	}
 
 	@Test

@@ -19,6 +19,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -563,6 +570,119 @@ class UnitIndexTest {
 
 		index.flush();
 		assertTrue(Files.isRegularFile(eventIndexFile("e1")));
+	}
+
+	/** Ein Index auf einer Dateischicht, deren nächstes Schreiben angehalten wird, und der Thread, der {@code flush} aufruft. */
+	private final class SlowWrite implements AutoCloseable {
+		final UnitIndex index;
+		final CountDownLatch release = new CountDownLatch(1);
+		final ExecutorService executor = Executors.newCachedThreadPool();
+		Future<?> flushing;
+
+		SlowWrite() throws Exception {
+			FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+			index = new UnitIndex(indexDir, layer, ME);
+			refresh(index, local);
+			CountDownLatch entered = new CountDownLatch(1);
+			layer.blockNext("createNew", entered, release);
+			flushing = executor.submit(() -> {
+				index.flush();
+				return null;
+			});
+			assertTrue(entered.await(10, TimeUnit.SECONDS), "flush hat nicht zu schreiben begonnen");
+		}
+
+		/** Führt {@code call} auf einem anderen Thread aus und liefert das Ergebnis; wartet er auf das Schreiben, scheitert der Test. */
+		<T> T meanwhile(Callable<T> call) throws Exception {
+			try {
+				return executor.submit(call).get(2, TimeUnit.SECONDS);
+			} catch (TimeoutException e) {
+				throw new AssertionError("der Aufruf wartet auf das Schreiben des Index", e);
+			}
+		}
+
+		void finish() throws Exception {
+			release.countDown();
+			flushing.get(10, TimeUnit.SECONDS);
+		}
+
+		@Override
+		public void close() {
+			release.countDown();
+			executor.shutdownNow();
+		}
+	}
+
+	@Test
+	void snapshotsDoNotWaitForIndexWrite() throws Exception {
+		saveTwice(EVENT, "event");
+		try (SlowWrite write = new SlowWrite()) {
+			Map<UnitKey, UnitSnapshot> snapshots = write.meanwhile(() -> write.index.snapshots(List.of(EVENT)));
+
+			assertEquals("event-2", snapshots.get(EVENT).payload().get("name").asText());
+			assertEquals(Set.of(EVENT), write.meanwhile(() -> write.index.chains(List.of(EVENT))).keySet());
+			assertEquals(Set.of(EVENT), write.meanwhile(() -> write.index.eventSnapshots("e1")).keySet());
+			assertFalse(Files.exists(eventIndexFile("e1")), "es wurde noch nichts geschrieben");
+
+			write.finish();
+			assertTrue(Files.isRegularFile(eventIndexFile("e1")));
+			assertFalse(write.index.hasChanges());
+		}
+	}
+
+	@Test
+	void updateDuringIndexWriteStaysMarkedAsChanged() throws Exception {
+		saveTwice(EVENT, "event");
+		try (SlowWrite write = new SlowWrite()) {
+			write.meanwhile(() -> addThirdVersion(write));
+
+			write.finish();
+
+			assertTrue(write.index.hasChanges(), "der Stand während des Schreibens steht noch nicht in der Datei");
+			write.index.flush();
+			assertFalse(write.index.hasChanges());
+			UnitIndex reopened = index();
+			assertEquals(0, refresh(reopened, local).resolved());
+			assertEquals("event-3", name(reopened.entries().get(EVENT)));
+		}
+	}
+
+	@Test
+	void cleanMarkerIsNotWrittenWhileTheIndexIsBeingWritten() throws Exception {
+		saveTwice(EVENT, "event");
+		try (SlowWrite write = new SlowWrite()) {
+			assertFalse(write.meanwhile(write.index::writeCleanMarker));
+
+			write.finish();
+
+			assertTrue(write.index.writeCleanMarker());
+		}
+	}
+
+	@Test
+	void secondFlushWaitsForTheRunningOne() throws Exception {
+		saveTwice(EVENT, "event");
+		try (SlowWrite write = new SlowWrite()) {
+			Future<?> second = write.executor.submit(() -> {
+				write.index.flush();
+				return null;
+			});
+			assertThrows(TimeoutException.class, () -> second.get(300, TimeUnit.MILLISECONDS));
+
+			write.finish();
+			second.get(10, TimeUnit.SECONDS);
+
+			assertFalse(write.index.hasChanges());
+			assertTrue(Files.isRegularFile(eventIndexFile("e1")));
+		}
+	}
+
+	/** Schreibt eine dritte Version der Einheit {@link #EVENT} (namens {@code event-3}) und trägt sie in den Index der Probe ein. */
+	private Void addThirdVersion(SlowWrite write) throws IOException {
+		write(EVENT, ME, mine(3), mine(2), "event-3", true);
+		UnitFiles files = local.readUnit(EVENT);
+		write.index.update(files, ChainResolver.resolve(files, ME));
+		return null;
 	}
 
 	@Test

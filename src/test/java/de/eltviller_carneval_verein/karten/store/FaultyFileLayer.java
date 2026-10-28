@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 /**
@@ -26,9 +28,16 @@ public final class FaultyFileLayer implements FileLayer {
 	private record Failure(Predicate<Path> path, String operation, IOException exception, boolean once, boolean after) {
 	}
 
+	private record Block(String operation, CountDownLatch entered, CountDownLatch release) {
+	}
+
+	/** Wie lange ein mit {@link #blockNext} angehaltener Aufruf höchstens wartet. */
+	private static final Duration BLOCK_LIMIT = Duration.ofSeconds(30);
+
 	private final FileLayer delegate;
 	private final List<String> calls = new ArrayList<>();
 	private final List<Failure> failures = new ArrayList<>();
+	private final List<Block> blocks = new ArrayList<>();
 
 	public FaultyFileLayer(FileLayer delegate) {
 		this.delegate = delegate;
@@ -63,10 +72,46 @@ public final class FaultyFileLayer implements FileLayer {
 	}
 
 	/**
+	 * Hält den nächsten Aufruf der Operation (mit beliebigem Pfad) an, bevor er aufgezeichnet und ausgeführt wird: Ein
+	 * langsames Schreiben. {@code entered} wird heruntergezählt, sobald der Aufruf angehalten ist; er läuft weiter, wenn
+	 * {@code release} heruntergezählt wird (spätestens nach {@link #BLOCK_LIMIT}, dann mit {@link IOException}).
+	 */
+	public synchronized void blockNext(String operation, CountDownLatch entered, CountDownLatch release) {
+		blocks.add(new Block(operation, entered, release));
+	}
+
+	/** Wartet, falls der Aufruf angehalten werden soll, und zeichnet ihn dann auf (siehe {@link #record}). */
+	private IOException enter(String operation, Path path) throws IOException {
+		Block block = takeBlock(operation);
+		if (block != null) {
+			block.entered().countDown();
+			try {
+				if (!block.release().await(BLOCK_LIMIT.toSeconds(), TimeUnit.SECONDS)) {
+					throw new IOException("Der angehaltene Aufruf wurde nicht freigegeben: " + operation);
+				}
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				throw new IOException("Der angehaltene Aufruf wurde unterbrochen: " + operation, e);
+			}
+		}
+		return record(operation, path);
+	}
+
+	private synchronized Block takeBlock(String operation) {
+		for (Block block : blocks) {
+			if (block.operation().equals(operation)) {
+				blocks.remove(block);
+				return block;
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * Zeichnet den Aufruf auf. Ein eingestellter Fehler "vor dem Aufruf" wird ausgelöst; ein Fehler "nach dem Aufruf" wird
 	 * zurückgegeben, damit der Aufrufer ihn nach der Ausführung wirft.
 	 */
-	private synchronized IOException enter(String operation, Path path) throws IOException {
+	private synchronized IOException record(String operation, Path path) throws IOException {
 		calls.add(operation + " " + path);
 		for (Failure failure : failures) {
 			if (failure.operation().equals(operation) && failure.path().test(path)) {

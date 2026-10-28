@@ -72,7 +72,7 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * die Marke macht den Index nicht zum Schiedsrichter: Die Entscheidung über ausstehende Versionen bleibt bei
  * {@link ChainResolver} auf den Dateien.
  * <p>
- * Alle Methoden sind synchronisiert.
+ * Alle Methoden sind synchronisiert, bis auf das Schreiben der Dateien in {@link #flush}.
  */
 final class UnitIndex {
 
@@ -124,6 +124,10 @@ final class UnitIndex {
 	private final Set<String> loaded = new HashSet<>();
 	/** Die Gruppen, deren Datei neu geschrieben werden muss. */
 	private final Set<String> dirty = new TreeSet<>();
+	/** Wie oft sich eine Gruppe seit dem Start geändert hat ({@link #markChanged}); so erkennt {@link #flush} ein Update während des Schreibens. */
+	private final Map<String, Long> revisions = new HashMap<>();
+	/** Lässt höchstens einen {@link #flush} zugleich schreiben; wird vor der Sperre des Index genommen, nie umgekehrt. */
+	private final Object flushLock = new Object();
 	/** Ob diese Instanz die Marke "sauber beendet" angelegt hat und sie noch gilt. */
 	private boolean markerWritten;
 	/** Ob die Reste abgebrochener Schreibvorgänge schon gelöscht wurden (einmal beim Öffnen). */
@@ -225,7 +229,7 @@ final class UnitIndex {
 		for (UnitKey gone : new ArrayList<>(entries.keySet())) {
 			if (!units.containsKey(gone)) {
 				entries.remove(gone);
-				dirty.add(groupOf(gone));
+				markChanged(groupOf(gone));
 			}
 		}
 
@@ -286,7 +290,7 @@ final class UnitIndex {
 		UnitKey unit = state.unit();
 		entries.put(unit, new Entry(UnitSnapshot.of(state), fingerprint(unitFiles), !state.pending().isEmpty(),
 				!state.lost().isEmpty(), state.chain().stream().map(ChainStep::of).toList()));
-		dirty.add(groupOf(unit));
+		markChanged(groupOf(unit));
 		// Absicherung: Wer den Bestand ändert, hat die Marke schon vorher mit invalidateCleanMarker entfernt
 		invalidateCleanMarker();
 	}
@@ -374,27 +378,88 @@ final class UnitIndex {
 		}
 		entries.clear();
 		loaded.addAll(groups);
-		dirty.addAll(groups);
+		groups.forEach(this::markChanged);
 	}
 
 	/**
 	 * Schreibt die geänderten Index-Dateien, jede über eine temporäre Datei im selben Ordner und
 	 * {@link AtomicFileReplace#replace}. Scheitert eine Datei, bleibt sie als geändert vorgemerkt und die Ausnahme geht
 	 * weiter; die noch nicht geschriebenen bleiben ebenfalls vorgemerkt.
+	 * <p>
+	 * Die Sperre des Index hält nur das Sammeln der Einträge einer Gruppe auf, nicht das Serialisieren und Schreiben (bis
+	 * 24 MB): Leser wie {@link #snapshots(Collection)} warten so nicht auf die Platte. Eine Gruppe, die sich während des Schreibens ändert,
+	 * bleibt vorgemerkt und kommt beim nächsten Aufruf in die Datei. Mehrere Aufrufe schreiben nacheinander.
 	 */
-	synchronized void flush() throws IOException {
-		for (String group : new ArrayList<>(dirty)) {
-			Path file = fileOf(group);
-			Path temp = file.resolveSibling(FileLayer.TEMP_PREFIX + "index-" + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
-			try {
-				files.createNew(temp, serialize(group));
-				AtomicFileReplace.replace(temp, file);
-			} catch (IOException | RuntimeException e) {
-				deleteQuietly(temp);
-				throw e;
+	void flush() throws IOException {
+		// ein Schreiben nach dem anderen: Ein zweiter Aufruf wartet, bis der erste fertig ist (und die Gruppen geschrieben hat)
+		synchronized (flushLock) {
+			for (String group : changedGroups()) {
+				Prepared prepared = prepare(group);
+				if (prepared != null) {
+					write(prepared);
+				}
 			}
-			dirty.remove(group);
 		}
+	}
+
+	/** Die Gruppen, die geschrieben werden müssen, als Kopie. */
+	private synchronized List<String> changedGroups() {
+		return new ArrayList<>(dirty);
+	}
+
+	/**
+	 * Bereitet die Gruppe unter der Sperre des Index auf: Nur das Sammeln ihrer Einträge hält die Leser auf. Die Einträge sind
+	 * unveränderlich (ein {@link #update} ersetzt sie, ändert sie nie), das Serialisieren und Schreiben geschieht danach ohne
+	 * die Sperre ({@link #write}).
+	 *
+	 * @return die Einträge mit dem Stand, auf dem sie beruhen; {@code null}, wenn die Gruppe inzwischen nicht mehr geändert ist
+	 */
+	private synchronized Prepared prepare(String group) {
+		if (!dirty.contains(group)) {
+			return null;
+		}
+		List<Entry> inGroup = entries.values().stream().filter(entry -> groupOf(entry.snapshot().unit()).equals(group))
+				.toList();
+		return new Prepared(group, revisionOf(group), inGroup);
+	}
+
+	/**
+	 * Serialisiert die Gruppe und schreibt ihre Datei über eine temporäre Datei, ohne die Sperre des Index. Die Gruppe gilt
+	 * erst danach als geschrieben, und nur, wenn sich inzwischen nichts an ihr geändert hat: Ein {@link #update} während des
+	 * Schreibens lässt sie vorgemerkt, damit der nächste {@link #flush} den neuen Stand schreibt.
+	 */
+	private void write(Prepared prepared) throws IOException {
+		Path file = fileOf(prepared.group());
+		byte[] bytes = serialize(prepared.entries());
+		Path temp = file.resolveSibling(FileLayer.TEMP_PREFIX + "index-" + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
+		try {
+			files.createNew(temp, bytes);
+			AtomicFileReplace.replace(temp, file);
+		} catch (IOException | RuntimeException e) {
+			deleteQuietly(temp);
+			throw e;
+		}
+		markWritten(prepared);
+	}
+
+	private synchronized void markWritten(Prepared prepared) {
+		if (revisionOf(prepared.group()) == prepared.revision()) {
+			dirty.remove(prepared.group());
+		}
+	}
+
+	/** Merkt eine Gruppe zum Schreiben vor. */
+	private void markChanged(String group) {
+		dirty.add(group);
+		revisions.merge(group, 1L, Long::sum);
+	}
+
+	private long revisionOf(String group) {
+		return revisions.getOrDefault(group, 0L);
+	}
+
+	/** Die Einträge einer Gruppe und der Stand ({@link #revisionOf}), auf dem sie beruhen. */
+	private record Prepared(String group, long revision, List<Entry> entries) {
 	}
 
 	private Path cleanMarker() {
@@ -608,7 +673,7 @@ final class UnitIndex {
 		} catch (IOException | RuntimeException e) {
 			// Erwarteter Fall (anderer Rechner, anderes Format, beschädigt): eine Zeile genügt, kein Stapel
 			LOGGER.warning("Der Start-Index " + file + " ist unbrauchbar und wird neu aufgebaut: " + e);
-			dirty.add(group);
+			markChanged(group);
 		}
 	}
 
@@ -663,12 +728,12 @@ final class UnitIndex {
 		return chain;
 	}
 
-	private byte[] serialize(String group) throws IOException {
+	private byte[] serialize(List<Entry> groupEntries) throws IOException {
 		ObjectNode root = MAPPER.createObjectNode();
 		root.put("indexFormat", INDEX_FORMAT);
 		root.put("machine", machineId);
 		ArrayNode units = root.putArray("units");
-		entries.values().stream().filter(entry -> groupOf(entry.snapshot().unit()).equals(group))
+		groupEntries.stream()
 				.sorted((a, b) -> a.snapshot().unit().relativePath().compareTo(b.snapshot().unit().relativePath()))
 				.forEach(entry -> {
 					UnitSnapshot snapshot = entry.snapshot();
