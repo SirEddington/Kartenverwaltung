@@ -9,6 +9,9 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
@@ -87,6 +90,29 @@ public final class CustomerDisplay {
 	private final SetChangeListener<Booking> selectionChanged = change -> redraw.request();
 	// Ein Verkauf im Hauptfenster ändert Buchungen: Die Änderungserkennung meldet es kurz nach der Bedienung
 	private final ChangeTracker.Listener<Event> dataChanged = (changed, before, after) -> onDataChanged(changed);
+	// Fremde Änderungen führt der Tracker still nach (rebase meldet nichts): Das Fenster erfährt sie vom Repository
+	private final RepositoryListener<Event> foreignEventChanges = new RepositoryListener<>() {
+		@Override
+		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
+			onDataChanged(event);
+		}
+	};
+	private final RepositoryListener<Hall> foreignHallChanges = new RepositoryListener<>() {
+		@Override
+		public void changedByOthers(Hall hall, ForeignBatch<Hall> batch) {
+			onHallChanged(hall);
+		}
+
+		@Override
+		public void addedByOthers(Hall hall) {
+			onHallChanged(hall);
+		}
+
+		@Override
+		public void removedByOthers(Hall hall) {
+			onHallChanged(hall);
+		}
+	};
 
 	private final HallPlanPane.Decorator decorator = new HallPlanPane.Decorator() {
 		@Override
@@ -339,6 +365,8 @@ public final class CustomerDisplay {
 		state.summaryPlacementProperty().addListener(placementInvalidated);
 		state.selectedBookings().addListener(selectionChanged);
 		ChangeTracker.events().addListener(dataChanged);
+		StoreEventRepository.getInstance().addListener(foreignEventChanges);
+		hallRepository.addListener(foreignHallChanges);
 	}
 
 	private void detach() {
@@ -353,11 +381,21 @@ public final class CustomerDisplay {
 		state.summaryPlacementProperty().removeListener(placementInvalidated);
 		state.selectedBookings().removeListener(selectionChanged);
 		ChangeTracker.events().removeListener(dataChanged);
+		StoreEventRepository.getInstance().removeListener(foreignEventChanges);
+		hallRepository.removeListener(foreignHallChanges);
 	}
 
 	/** Nur Änderungen am gezeigten Event zeichnen neu; die Änderungserkennung meldet alle verfolgten Events. */
 	private void onDataChanged(Event changed) {
 		if (changed.equals(state.eventProperty().get())) {
+			redraw.request();
+		}
+	}
+
+	/** Ersetzt oder ändert ein anderer Rechner die Halle der gezeigten Vorstellung, zeichnet das Fenster neu (die Halle wird über die ID gesucht). */
+	private void onHallChanged(Hall hall) {
+		Presentation presentation = state.presentationProperty().get();
+		if (presentation != null && hall.getId().equals(presentation.getHallId())) {
 			redraw.request();
 		}
 	}

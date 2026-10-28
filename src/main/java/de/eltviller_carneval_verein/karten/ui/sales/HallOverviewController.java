@@ -12,9 +12,13 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
 import javafx.beans.value.ChangeListener;
@@ -72,6 +76,35 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	// Einpassen auf die Halle erfolgt nur, wenn sich die Halle ändert (Zoom bleibt beim Vorstellungswechsel)
 	private String fittedHallId = null;
 
+	// Fremde Änderungen am gezeigten Event oder an der Halle der gezeigten Vorstellung: Der Plan wird neu gezeichnet
+	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
+	private final RepositoryListener<Event> foreignEventChanges = new RepositoryListener<>() {
+		@Override
+		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
+			// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
+			if (event == selectedEvent) {
+				dropGoneBookingsFromSelection();
+				renderHall();
+			}
+		}
+	};
+	private final RepositoryListener<Hall> foreignHallChanges = new RepositoryListener<>() {
+		@Override
+		public void changedByOthers(Hall hall, ForeignBatch<Hall> batch) {
+			renderIfShown(hall);
+		}
+
+		@Override
+		public void addedByOthers(Hall hall) {
+			renderIfShown(hall);
+		}
+
+		@Override
+		public void removedByOthers(Hall hall) {
+			renderIfShown(hall);
+		}
+	};
+
 	@FXML
 	private HallPlanPane viewportPane;
 
@@ -100,6 +133,29 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		rubberBand.setStroke(HallPlanPane.SELECTION_COLOR);
 		viewportPane.getChildren().add(rubberBand);
 		updateHint();
+
+		// Fremde Änderungen nur, solange der Plan zu sehen ist (danach hielten die Repositories diese Ansicht am Leben)
+		LiveViews.whileShown(viewportPane, () -> {
+			eventRepository.addListener(foreignEventChanges);
+			hallRepository.addListener(foreignHallChanges);
+		}, () -> {
+			eventRepository.removeListener(foreignEventChanges);
+			hallRepository.removeListener(foreignHallChanges);
+		});
+	}
+
+	/** Zeichnet neu, wenn es die Halle der gezeigten Vorstellung ist (eine ersetzte Halle hat dieselbe ID, {@link #hallOf} sucht nach ihr). */
+	private void renderIfShown(Hall hall) {
+		if (selectedPres != null && hall.getId().equals(selectedPres.getHallId())) {
+			renderHall();
+		}
+	}
+
+	/** Buchungen, die ein anderer Rechner aus der Vorstellung genommen hat, bleiben nicht ausgewählt. */
+	private void dropGoneBookingsFromSelection() {
+		if (selectedPres != null && selectedPres.getBookings() != null) {
+			selectedBookings.removeIf(booking -> !selectedPres.getBookings().contains(booking));
+		}
 	}
 
 	// Verschoben wird der Plan von der HallPlanPane mit der rechten Maustaste (ein Klick ohne Ziehen öffnet das

@@ -10,6 +10,8 @@ import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
@@ -17,11 +19,13 @@ import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelsMenu;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -74,6 +78,25 @@ public class TicketShellController {
 
 	// Wird gerade die Vorstellungsliste neu gefüllt, soll die Auswahl nicht an den Inhalt gemeldet werden
 	private boolean updatingPresentations = false;
+	// Dasselbe für die Event-Liste, wenn sie nach fremden Änderungen nachgeführt wird (syncWithRepository)
+	private boolean updatingEvents = false;
+	// Fremde Änderungen an Events: Die Liste und die Auswahl folgen dem Cache
+	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
+		@Override
+		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
+			syncWithRepository();
+		}
+
+		@Override
+		public void addedByOthers(Event event) {
+			syncWithRepository();
+		}
+
+		@Override
+		public void removedByOthers(Event event) {
+			syncWithRepository();
+		}
+	};
 	private String searchText = "";
 	// Auswahl der verlassenen Ansicht, bis die neue sie zurückbekommt (restorePendingSelection)
 	private List<Booking> pendingSelection = List.of();
@@ -113,6 +136,9 @@ public class TicketShellController {
 			}
 		});
 
+		// Fremde Änderungen an Events nur, solange die Shell zu sehen ist (danach hielte das Repository sie am Leben)
+		LiveViews.whileShown(contentArea, () -> eventRepository.addListener(foreignChanges), () -> eventRepository.removeListener(foreignChanges));
+
 		// "Alle Vorstellungen" ist als echter (null-)Eintrag Teil der Liste, wie in der Abrechnung: So lässt sich die
 		// Auswahl einer Vorstellung wieder aufheben.
 		presComboBox.setConverter(new StringConverter<Presentation>() {
@@ -132,27 +158,8 @@ public class TicketShellController {
 
 		// Event- & Vorstellungs-Listener einrichten
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
-			state.eventProperty().set(selectedEvent);
-			state.presentationProperty().set(null);
-			if (selectedEvent != null) {
-				// Buchungen mit den Bestuhlungen abgleichen, bevor das Event angezeigt wird (gilt nicht als Änderung)
-				BookingSyncService.prepare(selectedEvent);
-			}
-			// Das Neufüllen der Liste meldet der Inhalt nicht einzeln: setEvent unten setzt ihn auf "Alle Vorstellungen"
-			updatingPresentations = true;
-			try {
-				List<Presentation> presentationItems = new ArrayList<>();
-				presentationItems.add(null); // "Alle Vorstellungen"
-				if (selectedEvent != null) {
-					presentationItems.addAll(selectedEvent.getPresentations());
-				}
-				presComboBox.getItems().setAll(presentationItems);
-				presComboBox.getSelectionModel().selectFirst();
-			} finally {
-				updatingPresentations = false;
-			}
-			if (activeContentController != null) {
-				activeContentController.setEvent(selectedEvent);
+			if (!updatingEvents) {
+				applyEventSelection(selectedEvent);
 			}
 		});
 
@@ -190,6 +197,99 @@ public class TicketShellController {
 		// Hat das einzige Event nur eine Vorstellung, ist sie gleich gewählt (Eintrag 0 ist "Alle Vorstellungen")
 		if (presComboBox.getItems().size() == 2) {
 			presComboBox.getSelectionModel().select(1);
+		}
+	}
+
+	/** Das gewählte Event gilt für die Shell und den Inhalt; die Vorstellung steht danach auf "Alle Vorstellungen". */
+	private void applyEventSelection(Event selectedEvent) {
+		state.eventProperty().set(selectedEvent);
+		state.presentationProperty().set(null);
+		if (selectedEvent != null) {
+			// Buchungen mit den Bestuhlungen abgleichen, bevor das Event angezeigt wird (gilt nicht als Änderung)
+			BookingSyncService.prepare(selectedEvent);
+		}
+		// Das Neufüllen der Liste meldet der Inhalt nicht einzeln: setEvent unten setzt ihn auf "Alle Vorstellungen"
+		updatingPresentations = true;
+		try {
+			List<Presentation> presentationItems = new ArrayList<>();
+			presentationItems.add(null); // "Alle Vorstellungen"
+			if (selectedEvent != null) {
+				presentationItems.addAll(selectedEvent.getPresentations());
+			}
+			presComboBox.getItems().setAll(presentationItems);
+			presComboBox.getSelectionModel().selectFirst();
+		} finally {
+			updatingPresentations = false;
+		}
+		if (activeContentController != null) {
+			activeContentController.setEvent(selectedEvent);
+		}
+	}
+
+	/**
+	 * Führt Event- und Vorstellungsliste nach Änderungen anderer Rechner nach (neues, gelöschtes, archiviertes oder
+	 * umbenanntes Event, geänderte Vorstellungen). Die Auswahl bleibt über die ID: Ist das gewählte Event noch dasselbe
+	 * Objekt, wird nichts neu belegt; ist es ein neues Objekt (neu zusammengesetzt), wird die Auswahl damit neu belegt wie nach
+	 * "Nicht speichern"; ist es weg, ist die Auswahl leer und die Fußzeile sagt warum.
+	 */
+	private void syncWithRepository() {
+		Event shown = state.eventProperty().get();
+		Presentation shownPresentation = state.presentationProperty().get();
+		List<Event> all = eventRepository.loadEvents();
+		List<Event> events = all.stream().filter(event -> !event.isArchived()).toList();
+		Event current = shown == null ? null : events.stream().filter(event -> event.equals(shown)).findFirst().orElse(null);
+
+		// Die Auswahl wird unten gezielt nachgeführt; erst abmelden und neu wählen lässt die Box den (ggf. neuen) Namen zeigen
+		updatingEvents = true;
+		try {
+			eventComboBox.getItems().setAll(events);
+			eventComboBox.getSelectionModel().clearSelection();
+			if (current != null) {
+				eventComboBox.getSelectionModel().select(current);
+			}
+		} finally {
+			updatingEvents = false;
+		}
+
+		if (shown == null) {
+			return;
+		}
+		if (current == null) {
+			boolean archived = all.stream().anyMatch(event -> event.equals(shown));
+			applyEventSelection(null);
+			StatusMessage.getInstance().show(Severity.WARNING,
+					"„" + EntityLabels.nameOrPlaceholder(shown.getName()) + "“ wurde auf einem anderen Rechner " + (archived ? "archiviert." : "gelöscht."));
+		} else if (current != shown) {
+			applyEventSelection(current);
+			String presentationId = shownPresentation == null ? null : shownPresentation.getId();
+			presComboBox.getItems().stream().filter(presentation -> presentation != null && presentation.getId().equals(presentationId)).findFirst()
+					.ifPresent(presentation -> presComboBox.getSelectionModel().select(presentation));
+		} else {
+			syncPresentations(current, shownPresentation);
+		}
+	}
+
+	/** Das gewählte Event ist dasselbe Objekt: Vorstellungen können dazugekommen, weg oder umbenannt sein. */
+	private void syncPresentations(Event event, Presentation shown) {
+		List<Presentation> items = new ArrayList<>();
+		items.add(null); // "Alle Vorstellungen"
+		items.addAll(event.getPresentations());
+		Presentation kept = shown == null ? null
+				: items.stream().filter(presentation -> presentation != null && presentation.equals(shown)).findFirst().orElse(null);
+		updatingPresentations = true;
+		try {
+			presComboBox.getItems().setAll(items);
+			presComboBox.getSelectionModel().clearSelection();
+			presComboBox.getSelectionModel().select(items.indexOf(kept));
+		} finally {
+			updatingPresentations = false;
+		}
+		// Weg oder ein neues Objekt mit derselben ID: der Inhalt zeigt sonst eine Vorstellung, die nicht mehr im Event steht
+		if (kept != shown) {
+			state.presentationProperty().set(kept);
+			if (activeContentController != null) {
+				activeContentController.setPresentation(kept);
+			}
 		}
 	}
 

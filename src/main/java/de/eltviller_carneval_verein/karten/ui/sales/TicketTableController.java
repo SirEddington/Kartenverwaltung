@@ -15,10 +15,15 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SaleDates;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
@@ -78,6 +83,19 @@ public class TicketTableController implements ContentController, SalesStateAware
 	private FilteredList<BookingDTO> filteredData;
 	private ContextMenu selectionMenu;
 	private SeatDetailPopup activeDialog;
+
+	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
+	// Eine fremde Änderung kam, während eine Zelle im Bearbeiten war; die Tabelle zeichnet nach deren Ende neu
+	private boolean foreignChangePending = false;
+	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
+		@Override
+		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
+			// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
+			if (event == selectedEvent) {
+				refreshAfterForeignChange();
+			}
+		}
+	};
 
 	// TableView und Spalten
 	@FXML
@@ -198,6 +216,19 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 		seatTable.getSelectionModel().getSelectedItems().addListener((ListChangeListener<BookingDTO>) change -> updateUnassignedBar());
 		updateUnassignedBar();
+
+		// Eine Zelle im Bearbeiten hält ihre Buchung für fremde Änderungen zurück; endet sie, kommt Verpasstes nach
+		EditingUnits.getInstance().watch(seatTable, BookingDTO::getBooking);
+		seatTable.editingCellProperty().addListener((obs, before, cell) -> {
+			if (cell == null && foreignChangePending) {
+				Platform.runLater(this::refreshAfterForeignChange);
+			}
+		});
+		// Fremde Änderungen nur, solange die Tabelle zu sehen ist; eine mit der Ansicht verschwundene Zelle gibt ihre Buchung frei
+		LiveViews.whileShown(seatTable, () -> eventRepository.addListener(foreignChanges), () -> {
+			eventRepository.removeListener(foreignChanges);
+			EditingUnits.getInstance().end(seatTable);
+		});
 	}
 
 	private void sellSelection() {
@@ -421,17 +452,21 @@ public class TicketTableController implements ContentController, SalesStateAware
 	}
 
 	private void loadBookings() {
-		List<Presentation> presentations = new ArrayList<>();
 		masterData.clear(); // Vorherige Daten leeren
+		masterData.setAll(buildRows());
+		updateUnassignedBar();
+		relayoutTable();
+	}
 
+	/** Die Zeilen der gewählten Vorstellung bzw. aller Vorstellungen des gewählten Events. */
+	private List<BookingDTO> buildRows() {
+		List<Presentation> presentations = new ArrayList<>();
 		if (selectedPres != null) {
 			presentations.add(selectedPres);
 		} else if (selectedEvent != null && selectedEvent.getPresentations() != null) {
 			presentations.addAll(selectedEvent.getPresentations());
 		} else {
-			updateUnassignedBar();
-			relayoutTable();
-			return;
+			return List.of();
 		}
 
 		// Je Vorstellung: erst die Buchungen ohne Platz, dann nach Platz (A2 vor A10, Tische ohne Reihe vor A)
@@ -442,9 +477,46 @@ public class TicketTableController implements ContentController, SalesStateAware
 						.forEach(booking -> rows.add(new BookingDTO(presentation.getParent(), presentation, booking)));
 			}
 		}
+		return rows;
+	}
+
+	/**
+	 * Fremde Änderungen am gezeigten Event: Sind es dieselben Buchungen in derselben Reihenfolge, genügt ein Neuzeichnen der
+	 * Zellen; sonst wird die Liste neu gesetzt und die bisherige Auswahl wiederhergestellt. Nie, solange eine Zelle im Bearbeiten
+	 * ist (das Neuzeichnen risse sie weg): Dann kommt es nach dem Ende der Bearbeitung nach, und die zurückgestellten Einheiten
+	 * der bearbeiteten Buchung folgen über das erneute Einarbeiten.
+	 */
+	private void refreshAfterForeignChange() {
+		if (seatTable.getEditingCell() != null) {
+			foreignChangePending = true;
+			return;
+		}
+		foreignChangePending = false;
+		List<BookingDTO> rows = buildRows();
+		if (sameBookings(masterData, rows)) {
+			seatTable.refresh();
+			updateUnassignedBar();
+			return;
+		}
+		List<Booking> selection = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
+		masterData.clear();
 		masterData.setAll(rows);
 		updateUnassignedBar();
 		relayoutTable();
+		restoreSelection(selection);
+	}
+
+	/** Ob beide Listen dieselben Buchungen (dieselben Objekte) in derselben Reihenfolge enthalten. */
+	static boolean sameBookings(List<BookingDTO> shown, List<BookingDTO> expected) {
+		if (shown.size() != expected.size()) {
+			return false;
+		}
+		for (int index = 0; index < shown.size(); index++) {
+			if (shown.get(index).getBooking() != expected.get(index).getBooking()) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**

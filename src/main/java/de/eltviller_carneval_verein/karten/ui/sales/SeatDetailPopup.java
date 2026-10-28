@@ -8,6 +8,7 @@ import java.util.function.BooleanSupplier;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
+import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.input.DateTimeInput;
 import de.eltviller_carneval_verein.karten.ui.input.InputFeedback;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
@@ -33,6 +34,7 @@ import javafx.scene.shape.SVGPath;
 import javafx.scene.shape.StrokeLineCap;
 import javafx.stage.Popup;
 import javafx.stage.Window;
+import javafx.stage.WindowEvent;
 import javafx.util.StringConverter;
 
 /**
@@ -73,7 +75,17 @@ public final class SeatDetailPopup {
 		return popup;
 	}
 
+	/**
+	 * Zeigt den Dialog. Mit Eingabemöglichkeit zählen seine Buchungen als in Bearbeitung ({@link EditingUnits}), bis der
+	 * Dialog schließt (Anwenden, Abbrechen, Esc, Fenster zu): Ein fremder Stand dafür wird zurückgestellt, statt die
+	 * Eingaben zu überschreiben. Ohne Bearbeitungsmodus gibt es nichts einzugeben.
+	 */
 	public void show(Window owner, double screenX, double screenY) {
+		if (editMode) {
+			EditingUnits.getInstance().begin(this, edit.bookings());
+			// Ein Handler statt setOnHidden: Die Saalansicht setzt den Handler beim Schließen auf null
+			popup.addEventHandler(WindowEvent.WINDOW_HIDDEN, event -> EditingUnits.getInstance().end(this));
+		}
 		popup.show(owner, screenX, screenY);
 		// Ein Popup bekommt die Stylesheets der Haupt-Szene nicht mit: Buttons, Felder usw. sähen sonst anders aus
 		popup.getScene().getStylesheets().add(HallOverviewController.APP_STYLESHEET);
