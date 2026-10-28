@@ -13,6 +13,7 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Shape;
+import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
@@ -21,9 +22,11 @@ import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.HallBackupCatalog;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.fxml.FXML;
@@ -326,7 +329,12 @@ public class HallManagementController extends AbstractOverviewController {
 			if (!confirmDelete("Halle löschen", "Soll die Halle \"" + hall.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
 				return;
 			}
-			hallRepository.deleteHall(hall);
+			try {
+				hallRepository.deleteHall(hall);
+			} catch (LockedUnitException e) {
+				// Die Liste zeigt eine Halle, die ein anderer Rechner inzwischen ersetzt oder gelöscht hat
+				StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
+			}
 		} else {
 			return;
 		}

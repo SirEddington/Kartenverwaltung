@@ -8,6 +8,7 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
@@ -15,6 +16,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.EventBackupCatalog;
@@ -22,6 +24,7 @@ import de.eltviller_carneval_verein.karten.ui.event.BookingTree.TableGroup;
 import de.eltviller_carneval_verein.karten.ui.event.BookingTree.UnassignedGroup;
 import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
@@ -329,7 +332,12 @@ public class EventOverviewController extends AbstractOverviewController {
 
 		if (data instanceof Event) {
 			if (confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
-				eventRepository.deleteEvent(event);
+				try {
+					eventRepository.deleteEvent(event);
+				} catch (LockedUnitException e) {
+					// Die Liste zeigt ein Event, das ein anderer Rechner inzwischen ersetzt oder gelöscht hat
+					StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
+				}
 			} else {
 				return;
 			}

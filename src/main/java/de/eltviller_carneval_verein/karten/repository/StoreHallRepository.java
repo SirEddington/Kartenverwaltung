@@ -164,11 +164,16 @@ public class StoreHallRepository implements HallRepository {
 		// Ohne geladenen Vergleichsstand würde eine vorhandene Halle wie eine neue geschrieben
 		ensureLoaded();
 		// Ein fremder Stand hat das Objekt im Cache ersetzt oder entfernt: Das alte zu speichern überschriebe ihn
+		requireCurrent(hall);
+		write(hall);
+	}
+
+	/** Lehnt eine Halle ab, die nicht die im Cache ist, aber deren Platz einnimmt, oder die ein fremder Stand gelöscht hat. */
+	private void requireCurrent(Hall hall) {
 		Hall cached = cachedHall(hall.getId());
 		if ((cached != null && cached != hall) || (cached == null && removedByOthers.contains(hall.getId()))) {
 			throw LockedUnitException.replacedMeanwhile(hall.getName());
 		}
-		write(hall);
 	}
 
 	/** Schreibt die Halle, ohne zu prüfen, ob sie das Objekt im Cache ist (das Wiederherstellen setzt den Cache selbst). */
@@ -318,7 +323,12 @@ public class StoreHallRepository implements HallRepository {
 		}
 	}
 
-	/** Löscht die Halle (eine Löschung auf ihrer einzigen Einheit). Eine nie gespeicherte Halle verlässt nur den Cache. */
+	/**
+	 * Löscht die Halle (eine Löschung auf ihrer einzigen Einheit). Eine nie gespeicherte Halle verlässt nur den Cache.
+	 *
+	 * @throws LockedUnitException wenn ein fremder Stand die Halle ersetzt oder gelöscht hat (die Ansicht ist veraltet, wie beim
+	 *                             Speichern); es wurde nichts geschrieben
+	 */
 	@Override
 	public void deleteHall(Hall hall) {
 		if (hall == null) {
@@ -326,6 +336,8 @@ public class StoreHallRepository implements HallRepository {
 		}
 
 		ensureLoaded();
+		// Ein fremder Stand hat das Objekt im Cache ersetzt oder entfernt: Das alte zu löschen träfe den fremden Stand
+		requireCurrent(hall);
 		baseline.delete(hall.getId(), UnitKey.hall(hall.getId()), hall.getName());
 
 		cachedHalls.remove(hall);

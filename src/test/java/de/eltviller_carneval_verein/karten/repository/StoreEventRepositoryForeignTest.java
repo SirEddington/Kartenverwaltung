@@ -794,6 +794,45 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	@Test
+	void deletingStaleEventObjectIsRejected() throws IOException {
+		Other other = other();
+		other.repository().deleteEvent(other.event());
+		mine.applyForeign(List.of(head()));
+		long before = files();
+		AtomicInteger deleted = new AtomicInteger();
+		mine.addListener(new RepositoryListener<>() {
+			@Override
+			public void deleted(Event entity) {
+				deleted.incrementAndGet();
+			}
+		});
+
+		LockedUnitException removed = assertThrows(LockedUnitException.class, () -> mine.deleteEvent(event));
+
+		assertEquals("„Prunksitzung“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.",
+				removed.getMessage());
+		assertEquals(before, files(), "nichts geschrieben");
+		// der andere Rechner holt das Event zurück: Die Ansicht hält das Objekt von vorher
+		other.repository().saveEvent(other.event());
+		mine.applyForeign(List.of(head()));
+		Event revived = mine.loadEvents().get(0);
+		assertNotSame(event, revived);
+		long afterRevive = files();
+
+		assertThrows(LockedUnitException.class, () -> mine.deleteEvent(event));
+		assertThrows(LockedUnitException.class, () -> mine.deleteEvents(List.of(event)));
+
+		assertEquals(afterRevive, files(), "nichts geschrieben");
+		assertEquals(0, deleted.get(), "nichts gemeldet");
+		assertEquals(List.of(revived), mine.loadEvents());
+		assertFalse(sync.unitState(head()).head().deleted());
+
+		mine.deleteEvent(revived);
+		assertTrue(mine.loadEvents().isEmpty());
+		assertEquals(1, deleted.get());
+	}
+
+	@Test
 	void eventDeletedLocallyCanBeSavedAgain() throws IOException {
 		mine.deleteEvent(event);
 
@@ -1201,6 +1240,43 @@ class StoreEventRepositoryForeignTest {
 		assertEquals("Müller", sold.getLastName());
 		mine.saveEvent(event);
 		assertEquals(before, files());
+	}
+
+	@Test
+	void moveAgainstForeignCancellationIsDeferredNotConverged() throws IOException {
+		Booking sold = seat(friday, 0);
+		UnitKey oldSeat = seatUnit(friday, 0);
+		// B verschiebt Müller auf Sitz 1 (ungespeichert): Sitz 0 fehlt im Modell, Sitz 1 trägt dieselbe Buchung
+		assertTrue(BookingSync.assign(friday, plan, sold, planSeat(1)));
+		// A storniert Müller auf Sitz 0
+		Other remote = other();
+		seat(remote.friday(), 0).clearCustomerData();
+		remote.save();
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(List.of(oldSeat));
+
+		assertEquals(List.of(oldSeat), result.deferred().stream().map(Deferral::unit).toList(),
+				"die Stornierung wird nicht still übernommen");
+		assertEquals("Müller", sold.getLastName());
+		assertEquals(planSeat(1).getId(), sold.getSeatId());
+		assertFalse(mine.knownUnit(oldSeat).deleted(), "der Vergleichsstand kennt die Löschung noch nicht");
+		assertEquals(before, files());
+	}
+
+	@Test
+	void cancellationOfABookingNotMovedInTheModelIsStillAdoptedSilently() throws IOException {
+		UnitKey oldSeat = seatUnit(friday, 0);
+		// B hat Müller auf Sitz 0 gelöscht (ungespeichert), A storniert ihn ebenfalls
+		seat(friday, 0).clearCustomerData();
+		Other remote = other();
+		seat(remote.friday(), 0).clearCustomerData();
+		remote.save();
+
+		ForeignResult result = mine.applyForeign(List.of(oldSeat));
+
+		assertTrue(result.deferred().isEmpty(), result.deferred().toString());
+		assertEquals(Set.of(), mine.locallyChangedUnits());
 	}
 
 	@Disabled("H2 hingenommen (kein Verlust), siehe Spec: nach U1/U2 bleibt die Buchungs-ID im kurzen Fenster doppelt im Modell;"

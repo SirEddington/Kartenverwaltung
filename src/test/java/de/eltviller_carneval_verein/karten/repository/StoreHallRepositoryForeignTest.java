@@ -417,6 +417,46 @@ class StoreHallRepositoryForeignTest {
 	}
 
 	@Test
+	void deletingStaleHallObjectIsRejected() throws IOException {
+		StoreHallRepository other = other();
+		Hall theirs = other.findById(hall.getId());
+		other.deleteHall(theirs);
+		mine.applyForeign(List.of(unit()));
+		long before = files();
+		AtomicInteger deleted = new AtomicInteger();
+		mine.addListener(new RepositoryListener<>() {
+			@Override
+			public void deleted(Hall entity) {
+				deleted.incrementAndGet();
+			}
+		});
+
+		LockedUnitException removed = assertThrows(LockedUnitException.class, () -> mine.deleteHall(hall));
+
+		assertEquals("„Stadthalle“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.",
+				removed.getMessage());
+		assertEquals(before, files(), "nichts geschrieben");
+		// der andere Rechner holt die Halle zurück: Die Ansicht hält das Objekt von vorher
+		other.saveHall(theirs);
+		mine.applyForeign(List.of(unit()));
+		Hall revived = mine.findById(hall.getId());
+		assertNotSame(hall, revived);
+		long afterRevive = files();
+
+		assertThrows(LockedUnitException.class, () -> mine.deleteHall(hall));
+		assertThrows(LockedUnitException.class, () -> mine.deleteHalls(List.of(hall)));
+
+		assertEquals(afterRevive, files(), "nichts geschrieben");
+		assertEquals(0, deleted.get(), "nichts gemeldet");
+		assertSame(revived, mine.findById(hall.getId()));
+		assertFalse(sync.unitState(unit()).head().deleted());
+
+		mine.deleteHall(revived);
+		assertNull(mine.findById(hall.getId()));
+		assertEquals(1, deleted.get());
+	}
+
+	@Test
 	void hallDeletedLocallyCanBeSavedAgain() throws IOException {
 		mine.deleteHall(hall);
 

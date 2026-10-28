@@ -191,11 +191,16 @@ public class StoreEventRepository implements EventRepository {
 		// Ohne geladenen Vergleichsstand würde ein vorhandenes Event wie ein neues geschrieben
 		ensureLoaded();
 		// Ein fremder Stand hat das Objekt im Cache ersetzt oder gelöscht: Das alte zu speichern überschriebe ihn
+		requireCurrent(event);
+		write(event);
+	}
+
+	/** Lehnt ein Event ab, das nicht das im Cache ist, aber dessen Platz einnimmt, oder das ein fremder Stand gelöscht hat. */
+	private void requireCurrent(Event event) {
 		Event cached = cachedEvent(event.getId());
 		if ((cached != null && cached != event) || (cached == null && removedByOthers.contains(event.getId()))) {
 			throw LockedUnitException.replacedMeanwhile(event.getName());
 		}
-		write(event);
 	}
 
 	/** Schreibt das Event, ohne zu prüfen, ob es das Objekt im Cache ist (das Wiederherstellen setzt den Cache selbst). */
@@ -403,6 +408,9 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Löscht das Event: Nur sein Kopf bekommt eine Löschung, Vorstellungen und Buchungen bleiben liegen und sind
 	 * unsichtbar. Ein nie gespeichertes Event verlässt nur den Cache.
+	 *
+	 * @throws LockedUnitException wenn ein fremder Stand das Event ersetzt oder gelöscht hat (die Ansicht ist veraltet, wie beim
+	 *                             Speichern); es wurde nichts geschrieben
 	 */
 	@Override
 	public void deleteEvent(Event event) {
@@ -411,6 +419,8 @@ public class StoreEventRepository implements EventRepository {
 		}
 
 		ensureLoaded();
+		// Ein fremder Stand hat das Objekt im Cache ersetzt oder gelöscht: Das alte zu löschen träfe den fremden Stand
+		requireCurrent(event);
 		baseline.delete(event.getId(), UnitKey.event(event.getId()), event.getName());
 		forgetDerived(event.getId());
 
@@ -520,6 +530,12 @@ public class StoreEventRepository implements EventRepository {
 		boolean none() {
 			return !all && units.isEmpty();
 		}
+
+		/** Ob eine andere Buchungs-Einheit als {@code except} im Modell die Buchung mit dieser Kennung trägt. */
+		boolean carriesElsewhere(String bookingId, UnitKey except) {
+			return model.entrySet().stream().anyMatch(entry -> entry.getKey().type() == UnitType.BOOKING
+					&& !entry.getKey().equals(except) && bookingId.equals(entry.getValue().path("id").asText(null)));
+		}
 	}
 
 	private LocalChanges localChanges(Event event) {
@@ -552,14 +568,22 @@ public class StoreEventRepository implements EventRepository {
 	 * fremd gelöscht bzw. ohne Version. Etwa nach einem Hallenwechsel, dessen Buchungen nach der Vorstellung eintreffen: Der
 	 * Abgleich hat sie schon so umgesetzt wie der andere Rechner. Dann gibt es nichts zurückzustellen; der Stand geht still
 	 * in den Vergleichsstand (das Einarbeiten ändert am Modell nichts).
+	 * <p>
+	 * Eine fremde Löschung, die eine Buchung träfe, die im Modell auf einer anderen Einheit steht (der Nutzer hat sie
+	 * ungespeichert verschoben), ist keine Übereinstimmung: Die Buchung trägt dort ihre Kennung aus {@code known}, dem
+	 * Vergleichsstand der Einheit.
 	 */
-	private static boolean converged(LocalChanges changes, UnitSnapshot current) {
+	private static boolean converged(LocalChanges changes, UnitSnapshot known, UnitSnapshot current) {
 		if (changes.model() == null) {
 			return false;
 		}
 		ObjectNode mine = changes.model().get(current.unit());
 		if (mine == null) {
-			return UnitMapper.isAbsent(current);
+			if (!UnitMapper.isAbsent(current)) {
+				return false;
+			}
+			String movedId = known == null || known.payload() == null ? null : known.payload().path("id").asText(null);
+			return movedId == null || !changes.carriesElsewhere(movedId, current.unit());
 		}
 		return current.version() != null && !current.deleted() && mine.equals(current.payload());
 	}
@@ -815,7 +839,7 @@ public class StoreEventRepository implements EventRepository {
 	 * Stand schon ({@link #converged}), ist nichts blockiert.
 	 */
 	private boolean isBlocked(Event event, UnitSnapshot current, LocalChanges changes) {
-		if (event == null || converged(changes, current)) {
+		if (event == null || converged(changes, baseline.known(current.unit()), current)) {
 			return false;
 		}
 		if (changes.all()) {
