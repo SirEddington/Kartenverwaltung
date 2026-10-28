@@ -4,8 +4,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,11 +46,11 @@ public class StoreHallRepository implements HallRepository {
 
 	private final RepositoryListeners<Hall> listeners = new RepositoryListeners<>();
 
-	/** Die zurückgestellten fremden Stände; {@link #applyForeign} prüft sie bei jedem Aufruf erneut. */
-	private final Map<UnitKey, Deferral> deferred = new LinkedHashMap<>();
-
-	/** Einheiten, bei denen das Einarbeiten scheiterte; sie kommen bei jedem Aufruf von {@link #applyForeign} wieder dran. */
-	private final Set<UnitKey> failedUnits = new LinkedHashSet<>();
+	/**
+	 * Die fremden Stände, die noch nicht eingearbeitet sind; {@link #applyForeign} prüft sie bei jedem Aufruf erneut. Still
+	 * wartend sind die Einheiten, bei denen das Einarbeiten scheiterte.
+	 */
+	private final ForeignBacklog backlog = new ForeignBacklog();
 
 	/**
 	 * Die IDs der Hallen, die ein fremder Stand (gelöscht oder unlesbar) aus dem Cache genommen hat. Hält eine Ansicht eine
@@ -363,41 +361,26 @@ public class StoreHallRepository implements HallRepository {
 		if (cachedHalls == null) {
 			return new ForeignResult(List.of(), List.of());
 		}
-		Set<UnitKey> wanted = new LinkedHashSet<>();
-		for (UnitKey unit : units) {
-			if (unit.type() == UnitType.HALL) {
-				wanted.add(unit);
+		return backlog.run(units, unit -> unit.type() == UnitType.HALL, sync, new ForeignBacklog.Step() {
+			@Override
+			public String ownerOf(UnitKey unit) {
+				return unit.hallId();
 			}
-		}
-		wanted.addAll(deferred.keySet());
-		wanted.addAll(failedUnits);
-		List<String> warnings = new ArrayList<>();
-		if (!wanted.isEmpty()) {
-			Map<UnitKey, UnitSnapshot> current = sync.snapshots(wanted);
-			// was der Index nicht mehr kennt, lässt sich nicht einarbeiten
-			deferred.keySet().retainAll(current.keySet());
-			failedUnits.retainAll(current.keySet());
-			try {
-				Map<UnitKey, List<ChainStep>> chains = sync.chains(current.keySet());
-				for (UnitKey unit : wanted) {
-					UnitSnapshot snapshot = current.get(unit);
-					if (snapshot == null) {
-						continue;
-					}
-					// ein Fehler bei einer Halle hält die übrigen nicht auf; sie kommt beim nächsten Mal wieder
-					try {
-						applyForeign(snapshot, chains.getOrDefault(unit, List.of()), warnings);
-					} catch (RuntimeException e) {
-						failed(unit, e, warnings);
-						failedUnits.add(unit);
-					}
-				}
-			} catch (IOException e) {
-				LOG.log(Level.WARNING, "Die Ketten fremd geänderter Hallen ließen sich nicht lesen", e);
-				warnings.add("Änderungen von einem anderen Rechner ließen sich nicht einarbeiten: " + StoreMessages.describe(e));
+
+			@Override
+			public void apply(List<UnitSnapshot> ofHall, Map<UnitKey, List<ChainStep>> chains, List<String> warnings) {
+				// je Halle eine Einheit
+				UnitSnapshot snapshot = ofHall.get(0);
+				applyForeign(snapshot, chains.getOrDefault(snapshot.unit(), List.of()), warnings);
 			}
-		}
-		return new ForeignResult(new ArrayList<>(deferred.values()), warnings);
+
+			@Override
+			public void failed(String hallId, List<UnitSnapshot> ofHall, RuntimeException e, List<String> warnings) {
+				UnitKey unit = ofHall.get(0).unit();
+				StoreHallRepository.this.failed(unit, e, warnings);
+				backlog.hold(unit, "das Einarbeiten ist gescheitert");
+			}
+		});
 	}
 
 	/** Versucht die zurückgestellten Stände erneut, etwa nach dem Speichern oder wenn eine Bearbeitung endet. */
@@ -417,23 +400,17 @@ public class StoreHallRepository implements HallRepository {
 		UnitSnapshot known = baseline.known(unit);
 		switch (ForeignDecision.decideUnblocked(known, current, chain)) {
 		case KNOWN -> {
-			settle(unit);
+			backlog.settle(unit);
 			baseline.adoptStatus(hallId, current, warnings);
 		}
 		case FORK -> {
-			settle(unit);
+			backlog.settle(unit);
 			LOG.info("Fremder Stand von " + unit.relativePath()
 					+ " nicht eingearbeitet: Die eigene Version ist unterlegen (Gabelung).");
 		}
 		case APPLY -> applyNewer(current, known, chain, warnings);
-		default -> settle(unit);
+		default -> backlog.settle(unit);
 		}
-	}
-
-	/** Die Einheit ist erledigt: Sie ist weder zurückgestellt noch war ihr Einarbeiten gescheitert. */
-	private void settle(UnitKey unit) {
-		deferred.remove(unit);
-		failedUnits.remove(unit);
 	}
 
 	/** Arbeitet den Nachfolger des Vergleichsstands ein, außer die Halle ist verändert oder gesperrt: Dann wird er zurückgestellt. */
@@ -442,10 +419,10 @@ public class StoreHallRepository implements HallRepository {
 		String hallId = unit.hallId();
 		Hall old = cachedHall(hallId);
 		if (old != null && isBlocked(old, known)) {
-			deferred.put(unit, Deferral.of(unit, current.version(), chain, old));
+			backlog.defer(Deferral.of(unit, current.version(), chain, old));
 			return;
 		}
-		settle(unit);
+		backlog.settle(unit);
 
 		Hall fresh = UnitMapper.readUnit(current, Hall.class);
 		if (fresh == null) {
