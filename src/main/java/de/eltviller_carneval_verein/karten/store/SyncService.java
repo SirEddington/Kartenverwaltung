@@ -100,11 +100,11 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * </ul>
  * <b>Sperrfolge</b> (wer mehrere hält, nimmt sie nur in dieser Reihenfolge): {@code workLock} (Takt, Hochladen beim
  * Start) → Sperre der Auflösung ({@link ConflictResolver#resolvePending}) → {@code resolveLock} (lesen, auflösen,
- * eintragen) → {@code lock} (Felder des Dienstes; darunter kein Dateizugriff, nur kurz der Monitor des
- * {@link SyncNotifier}) → Monitor des Index. {@code flushLock} des Index wird vor dessen Monitor genommen, nie darunter.
- * {@link #append} nimmt nur {@code resolveLock}, {@code lock} und den Index, jeweils kurz und nacheinander; niemand hält
- * {@code lock}, während {@link #append} läuft. Deshalb darf {@link #append} von der Oberfläche und aus dem {@code worker}
- * zugleich kommen.
+ * eintragen) → Monitor des Index bzw. {@code lock}. {@code lock} (Felder des Dienstes) und der Monitor des Index werden
+ * nie ineinander genommen: Unter {@code lock} gibt es keinen Dateizugriff und keinen Index, nur kurz den Monitor des
+ * {@link SyncNotifier}. {@code flushLock} des Index wird vor dessen Monitor genommen, nie darunter. {@link #append} nimmt
+ * nur {@code resolveLock}, {@code lock} und den Index, jeweils kurz und nacheinander; niemand hält {@code lock}, während
+ * {@link #append} läuft. Deshalb darf {@link #append} von der Oberfläche und aus dem {@code worker} zugleich kommen.
  */
 public final class SyncService {
 
@@ -502,11 +502,12 @@ public final class SyncService {
 	}
 
 	/**
-	 * Beim Start, bevor {@link #startup} zurückkehrt: löst die eingereihten Verluste und die Einheiten, die der Index als
-	 * verloren kennt (etwa aus einem früheren Lauf), vollständig auf. So lädt die Anwendung schon den aufgelösten Stand.
+	 * Beim Start, bevor {@link #startup} zurückkehrt: meldet die Verluste der Einheiten, die der Index als verloren kennt
+	 * (etwa aus einem früheren Lauf; das reiht sie ein), und löst alle eingereihten vollständig auf. So lädt die Anwendung
+	 * schon den aufgelösten Stand.
 	 */
 	private void resolveAtStartup(Collection<UnitKey> lostUnits) {
-		resolver.enqueue(lostUnits);
+		reportLosses(lostUnits);
 		resolver.resolvePending(Integer.MAX_VALUE);
 	}
 
@@ -1841,6 +1842,17 @@ public final class SyncService {
 		@Override
 		public List<Version> append(String saveId, List<Change> changes) throws IOException {
 			return SyncService.this.append(saveId, changes);
+		}
+
+		/** SYS-006 mit dem gemeinsamen Ordner; im Einzelbetrieb mit dem lokalen Bestand, in den geschrieben wird. */
+		@Override
+		public String failureText(Exception failure) {
+			Link current;
+			synchronized (lock) {
+				current = link;
+			}
+			return current != null ? SyncService.failureText(current, failure)
+					: StoreMessages.syncFailed(local.dataRoot().toString(), StoreMessages.describe(failure));
 		}
 	}
 

@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.store;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -41,13 +42,20 @@ import de.eltviller_carneval_verein.karten.store.UnitState.Status;
  * <li>Fehlt die Basis lokal oder ist sie noch in keinem Glied der Kette aufgegangen (die Zusammenführung, die sie enthält,
  * ist noch nicht beansprucht), wartet die Strecke, bis sich die Einheit ändert: Dann meldet der Dienst den Verlust
  * erneut. Steht die Basis in einer anderen verlorenen Strecke, kommt die Strecke nach deren Auflösung dran.</li>
- * <li>Eine gesperrte oder wartende Kette (etwa {@code LOCKED_FORMAT}) wird übersprungen.</li>
+ * <li>Eine gesperrte oder wartende Kette wird übersprungen: {@code LOCKED_FORMAT} bis zum neueren Programm,
+ * {@code LOCKED_DAMAGED} bis die Heilung oder {@link SyncService#resetToLastReadable} eine neue Version schreibt (dann
+ * meldet der Dienst den Verlust erneut), {@code WAITING} bis die fehlende Version da ist.</li>
  * </ul>
  * Geschrieben wird über {@link SyncService#append} mit einer neuen {@code saveId} je Strecke: zuerst die weiteren
- * Änderungen der {@link Resolution} (ohne die, deren Einheit schon diesen Inhalt bzw. die Löschung hat), dann die
- * Zusammenführung. Bricht das Programm dazwischen ab, wiederholt der nächste Versuch die Auflösung, ohne die weitere
- * Einheit doppelt anzulegen. Wirft die Strategie, wird nichts geschrieben (Log SEVERE, Fußzeile einmal je Einheit und
- * Lauf), und die Einheit wird nicht erneut eingereiht.
+ * Änderungen der {@link Resolution}, dann die Zusammenführung. Eine weitere neue Einheit (ohne Vorgänger) entfällt, sobald
+ * die Einheit irgendeine Version hat, eine weitere Löschung, wenn die Einheit schon gelöscht ist: Bricht das Programm
+ * zwischen beiden ab, wiederholt der nächste Versuch die Auflösung, ohne eine zweite Erstversion anzulegen, die gegen die
+ * erste gabelte (auch wenn die Strategie den Inhalt beim zweiten Mal etwas anders liefert).
+ * <p>
+ * Fehler: Wirft die Strategie oder liefert sie ohne Löschung keinen Inhalt, wird nichts geschrieben (Log SEVERE, Fußzeile
+ * einmal je Einheit und Lauf), und die Einheit wird nicht erneut eingereiht. Scheitert das Lesen oder Schreiben, bleibt
+ * die Einheit eingereiht und wird im nächsten Takt erneut versucht; Log WARNING einmal je Einheit und Störung, SYS-006 in
+ * der Fußzeile einmal je Störung (sie endet, wenn jede gestörte Einheit wieder durchläuft).
  * <p>
  * Threads: {@link #enqueue} von jedem Thread; {@link #resolvePending} serialisiert sich selbst und läuft im Takt bzw.
  * beim Start. Die Auflösung fasst nie Modell, Vergleichsstand oder Tracker an.
@@ -81,6 +89,9 @@ final class ConflictResolver {
 
 		/** Schreibt die Änderungen wie {@link SyncService#append}. */
 		List<Version> append(String saveId, List<Change> changes) throws IOException;
+
+		/** Der Text von SYS-006 für einen Fehler beim Lesen oder Schreiben, wie der Dienst ihn sonst meldet. */
+		String failureText(Exception failure);
 	}
 
 	/** Was mit einer verlorenen Strecke in diesem Durchlauf geschieht. */
@@ -115,6 +126,11 @@ final class ConflictResolver {
 	private final Map<UnitKey, Instant> waitingSince = new HashMap<>();
 	/** Die Einheiten, deren Strategie in diesem Programmlauf schon in der Fußzeile gemeldet wurde. */
 	private final Set<UnitKey> reportedFailures = new HashSet<>();
+	/**
+	 * Die Einheiten, deren Lesen oder Schreiben in der laufenden Störung scheiterte; eine Einheit fällt heraus, sobald sie
+	 * wieder durchläuft. Ist die Menge leer, ist keine Störung im Gang.
+	 */
+	private final Set<UnitKey> disrupted = new HashSet<>();
 
 	ConflictResolver(Host host, SyncNotifier notifier, Clock clock) {
 		this.host = host;
@@ -183,8 +199,9 @@ final class ConflictResolver {
 
 	/**
 	 * Löst die verlorenen Strecken einer Einheit auf und meldet danach die geschriebenen Einheiten und, wenn ein Vermerk
-	 * dabei war, die geänderten Konflikte. Ein Fehler beim Lesen oder Schreiben steht im Log (WARNING); die Einheit kommt
-	 * wieder, wenn der Dienst den Verlust erneut meldet (Änderung der Einheit, nächster Start).
+	 * dabei war, die geänderten Konflikte. Scheitert Lesen oder Schreiben, bleibt die Einheit eingereiht (siehe
+	 * {@link #disrupted}); ein unerwarteter Fehler steht im Log (WARNING), und die Einheit kommt erst wieder, wenn der Dienst
+	 * den Verlust erneut meldet.
 	 *
 	 * @return ob die Einheit wieder eingereiht wird
 	 */
@@ -193,7 +210,11 @@ final class ConflictResolver {
 		boolean again = false;
 		try {
 			again = mergeStretches(unit, written);
-		} catch (IOException | RuntimeException e) {
+			disrupted.remove(unit);
+		} catch (IOException | UncheckedIOException e) {
+			again = true;
+			reportDisruption(unit, e);
+		} catch (RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Der Konflikt an " + unit.relativePath() + " ließ sich nicht zusammenführen", e);
 		} finally {
 			if (!again) {
@@ -206,6 +227,23 @@ final class ConflictResolver {
 			}
 		}
 		return again;
+	}
+
+	/**
+	 * Ein Fehler beim Lesen oder Schreiben: Log WARNING einmal je Einheit und Störung, SYS-006 in der Fußzeile einmal je
+	 * Störung. Die Störung beginnt mit der ersten gestörten Einheit und endet, wenn jede wieder durchläuft.
+	 */
+	private void reportDisruption(UnitKey unit, Exception failure) {
+		boolean beginning = disrupted.isEmpty();
+		if (!disrupted.add(unit)) {
+			LOGGER.log(Level.FINE, "Der Konflikt an " + unit.relativePath() + " ließ sich weiter nicht zusammenführen", failure);
+			return;
+		}
+		LOGGER.log(Level.WARNING, "Der Konflikt an " + unit.relativePath()
+				+ " ließ sich nicht zusammenführen; der nächste Takt versucht es erneut", failure);
+		if (beginning) {
+			notifier.error(host.failureText(failure));
+		}
 	}
 
 	/**
@@ -350,8 +388,8 @@ final class ConflictResolver {
 	}
 
 	/**
-	 * Fragt die Strategie (ohne Strategie: "Deren bleibt"). Wirft sie, steht es im Log (SEVERE) und einmal je Einheit und
-	 * Lauf in der Fußzeile.
+	 * Fragt die Strategie (ohne Strategie: "Deren bleibt"). Wirft sie, liefert sie nichts oder ohne Löschung keinen Inhalt
+	 * (das würde als leerer Inhalt geschrieben), steht es im Log (SEVERE) und einmal je Einheit und Lauf in der Fußzeile.
 	 *
 	 * @return die Entscheidung; {@code null}, wenn die Strategie scheiterte
 	 */
@@ -364,7 +402,11 @@ final class ConflictResolver {
 			ConflictInput input = new ConflictInput(unit, copy(stretch.base()), copy(stretch.mine()),
 					copy(stretch.theirs()), stretch.chainSinceBase().stream().map(ConflictResolver::copy).toList(),
 					host.machineId(), unit.type() == UnitType.BOOKING ? copySiblings(host.siblings(unit)) : Map.of());
-			return Objects.requireNonNull(policy.resolve(input), "Die Strategie lieferte kein Ergebnis.");
+			Resolution resolution = Objects.requireNonNull(policy.resolve(input), "Die Strategie lieferte kein Ergebnis.");
+			if (!resolution.deleted() && resolution.payload() == null) {
+				throw new IllegalStateException("Die Strategie lieferte keinen Inhalt.");
+			}
+			return resolution;
 		} catch (RuntimeException e) {
 			String message = "Ein Konflikt an " + unit.relativePath() + " ließ sich nicht auflösen: "
 					+ StoreMessages.describe(e);
@@ -400,11 +442,19 @@ final class ConflictResolver {
 		return changes;
 	}
 
-	/** Ob die Einheit schon den Inhalt der weiteren Änderung hat bzw. schon gelöscht ist (oder keinen Stand hat). */
+	/**
+	 * Ob die weitere Änderung schon geschrieben ist: eine neue Einheit (ohne Vorgänger), sobald die Einheit irgendeine
+	 * Version hat (ein Inhaltsvergleich hinge an der JSON-Darstellung, und eine zweite Erstversion gabelte ohnehin); eine
+	 * Löschung, wenn die Einheit schon gelöscht ist oder keinen Stand hat; jede andere Änderung, wenn der aktuelle Stand
+	 * denselben Inhalt hat.
+	 */
 	private boolean alreadyThere(Change extra) throws IOException {
 		Version current = host.resolve(extra.unit()).state().current();
 		if (extra.deleted()) {
 			return current == null || current.deleted();
+		}
+		if (extra.parents().isEmpty()) {
+			return current != null;
 		}
 		return current != null && !current.deleted() && Objects.equals(current.payload(), extra.payload());
 	}

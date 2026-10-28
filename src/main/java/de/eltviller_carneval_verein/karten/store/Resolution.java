@@ -11,8 +11,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * @param payload der Inhalt der Zusammenführung; bei einer Löschung ohne Bedeutung
  * @param deleted ob die Zusammenführung die Einheit löscht
  * @param extra   weitere Änderungen, die vor der Zusammenführung geschrieben werden: neue Einheiten ({@code parents}
- *                leer) und Löschungen ({@code parents}: der aktuelle Stand). Hat die Einheit schon diesen Inhalt bzw.
- *                ist sie schon gelöscht, entfällt der Eintrag (Wiederholung nach einem Absturz)
+ *                leer) und Löschungen ({@code parents}: der aktuelle Stand). Hat eine neue Einheit schon irgendeine
+ *                Version bzw. ist die zu löschende schon gelöscht, entfällt der Eintrag (Wiederholung nach einem Absturz)
  * @param note    der Konfliktvermerk der Zusammenführung; {@code null}: keiner
  */
 public record Resolution(ObjectNode payload, boolean deleted, List<Change> extra, ConflictNote note) {

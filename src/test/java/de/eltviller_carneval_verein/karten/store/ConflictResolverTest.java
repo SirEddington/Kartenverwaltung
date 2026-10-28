@@ -21,6 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -54,6 +55,7 @@ class ConflictResolverTest {
 		final List<ConflictInput> inputs = new ArrayList<>();
 		List<Change> extra = List.of();
 		boolean delete;
+		boolean withoutPayload;
 		RuntimeException failure;
 
 		@Override
@@ -64,7 +66,7 @@ class ConflictResolverTest {
 			}
 			ObjectNode payload = MAPPER.createObjectNode();
 			payload.set("seen", input.mine().payload().deepCopy());
-			return new Resolution(payload, delete, extra, null);
+			return new Resolution(withoutPayload ? null : payload, delete, extra, null);
 		}
 	}
 
@@ -72,7 +74,13 @@ class ConflictResolverTest {
 	private static final class Recorder implements SyncListener {
 		final List<Set<UnitKey>> changed = new ArrayList<>();
 		final List<String> errors = new ArrayList<>();
+		final List<LostVersion> lost = new ArrayList<>();
 		int conflicts;
+
+		@Override
+		public void lost(UnitKey unit, List<VersionId> mine, VersionId winner) {
+			lost.add(new LostVersion(unit, mine, winner));
+		}
 
 		@Override
 		public void unitsChanged(Set<UnitKey> units) {
@@ -397,9 +405,11 @@ class ConflictResolverTest {
 		service.tick();
 		assertEquals(1, versionFiles(appData, MOVED));
 
+		// die Wiederholung liefert die neue Einheit mit anderem Inhalt (etwa anders getippte Zahlen): Sie gilt trotzdem als
+		// geschrieben, sobald die Einheit eine Version hat; eine zweite Erstversion gabelte gegen die erste
 		SyncService restarted = TestSyncServices.singleMode(appData, clock);
 		RecordingPolicy again = new RecordingPolicy();
-		again.extra = policy.extra;
+		again.extra = List.of(new Change(MOVED, List.of(), name("Carla ohne Platz, neu berechnet"), false));
 		restarted.setConflictPolicy(UnitType.BOOKING, again);
 		restarted.startup(null);
 
@@ -409,6 +419,68 @@ class ConflictResolverTest {
 		UnitState state = restarted.unitState(BOOKING);
 		assertTrue(state.lost().isEmpty());
 		assertEquals(List.of(loss.theirs().id(), loss.mine().id()), state.head().parents());
+	}
+
+	@Test
+	void failedMergeWriteIsRetriedInTheNextTick() throws IOException {
+		Path appData = dir.resolve("app");
+		FaultyFileLayer files = new FaultyFileLayer(new NioFileLayer());
+		SyncService service = single(appData, files);
+		Recorder events = new Recorder();
+		service.setListener(events);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(new Change(MOVED, List.of(), name("Carla ohne Platz"), false));
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		Loss loss = loss(service, appData, BOOKING);
+		AtomicBoolean full = new AtomicBoolean(true);
+		files.failWhen(p -> full.get() && p.getParent() != null && p.getParent().endsWith(Path.of("p1", "bookings", "A-1")),
+				"createNew", new IOException("Datenträger voll"));
+
+		service.tick();
+		service.tick();
+
+		assertEquals(2, policy.inputs.size(), "im nächsten Takt erneut versucht");
+		assertEquals(List.of(List.of(loss.mine().id())), service.unitState(BOOKING).lost());
+		assertEquals(1, events.errors.size(), "SYS-006 einmal je Störung: " + events.errors);
+		assertTrue(events.errors.get(0).startsWith(StoreMessages.SYS_SYNC_FAILED + ": "), events.errors.get(0));
+		assertTrue(events.errors.get(0).contains("Datenträger voll"), events.errors.get(0));
+		assertEquals(1, logsAtLeast(Level.WARNING).stream().filter(r -> r.getMessage().contains(BOOKING.relativePath())).count(),
+				"WARNING einmal je Einheit und Störung");
+
+		full.set(false);
+		service.tick();
+
+		UnitState state = service.unitState(BOOKING);
+		assertTrue(state.lost().isEmpty());
+		assertEquals(List.of(loss.theirs().id(), loss.mine().id()), state.head().parents());
+		assertEquals(1, versionFiles(appData, MOVED), "die Buchung ohne Platz gibt es genau einmal");
+
+		// eine neue Störung nach dem Erfolg wird wieder gemeldet
+		own(service, BOOKING, List.of(loss.mine().id()), name("Carla 2"));
+		full.set(true);
+		service.tick();
+		assertEquals(2, events.errors.size());
+	}
+
+	@Test
+	void resolutionWithoutPayloadIsTreatedLikeAFailingPolicy() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Recorder events = new Recorder();
+		service.setListener(events);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.withoutPayload = true;
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		Loss loss = loss(service, appData, BOOKING);
+		ForeignVersions counter = new ForeignVersions(service, appData);
+		long before = counter.files();
+
+		service.tick();
+
+		assertEquals(before, counter.files(), "kein leerer Inhalt als Zusammenführung");
+		assertEquals(List.of(List.of(loss.mine().id())), service.unitState(BOOKING).lost());
+		assertEquals(1, events.errors.size());
+		assertTrue(events.errors.get(0).startsWith("Ein Konflikt an " + BOOKING.relativePath()), events.errors.get(0));
 	}
 
 	@Test
@@ -602,11 +674,15 @@ class ConflictResolverTest {
 		first.closeIndex();
 
 		SyncService restarted = TestSyncServices.singleMode(appData, clock);
+		Recorder events = new Recorder();
+		restarted.setListener(events);
 		restarted.startup(null);
 
 		UnitState state = restarted.unitState(BOOKING);
 		assertTrue(state.lost().isEmpty());
 		assertEquals(List.of(loss.theirs().id(), loss.mine().id()), state.head().parents());
+		// der Verlust, den nur der Index kannte, wird wie jeder andere gemeldet
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(loss.mine().id()), loss.theirs().id())), events.lost);
 	}
 
 	@Test

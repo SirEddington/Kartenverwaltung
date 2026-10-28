@@ -920,9 +920,12 @@ class StoreEventRepositoryTest {
 		// der Index bleibt auch nach einem Neustart gleich; der Start führt die verlorene Version zusammen (KARV-86), das ist
 		// genau ein Speicherstand mehr, der jüngste
 		sync.flushIndex();
-		List<SavePoint> afterRestart = TestRepositories.events(started(appData)).savePoints(event.getId());
+		SyncService restarted = started(appData);
+		List<SavePoint> afterRestart = TestRepositories.events(restarted).savePoints(event.getId());
+		Version merge = restarted.unitState(seat).head();
+		assertEquals(2, merge.parents().size(), "der Start hat die verlorene Version zusammengeführt");
+		assertEquals(merge.saveId(), afterRestart.get(0).saveId());
 		assertEquals(fromIndex, afterRestart.subList(1, afterRestart.size()));
-		assertEquals(1, afterRestart.get(0).unitCount());
 	}
 
 	@Test
