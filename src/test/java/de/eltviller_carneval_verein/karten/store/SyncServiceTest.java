@@ -594,13 +594,14 @@ class SyncServiceTest {
 	void lossDetectedBeforeACrashIsReportedAfterRestart() throws IOException {
 		Node a = node("a");
 		a.service.startup(shared);
-		Version va = save(a, create(BOOKING, "Anna"));
-		a.service.tick();
-		// B erkennt den Verlust, stürzt aber ab, bevor die Meldung die Oberfläche erreicht
+		// B startet vor A's Hochladen: So hat B A's Liste noch nicht gelesen, und die Auflösung wartet darauf (KARV-86)
 		Path appDataB = dir.resolve("b");
 		Node crashed = new Node(appDataB, "b", new NioFileLayer(), task -> {
 		}, Runnable::run);
 		crashed.service.startup(shared);
+		Version va = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		// B erkennt den Verlust, stürzt aber ab, bevor die Meldung die Oberfläche erreicht
 		Version vb = save(crashed, create(BOOKING, "Bert"));
 		crashed.service.tick();
 		assertTrue(Files.exists(localFile(crashed, BOOKING, "claims/root.json")), "der Verlust ist lokal angekommen");

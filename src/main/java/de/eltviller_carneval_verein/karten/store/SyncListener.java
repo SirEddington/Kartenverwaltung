@@ -9,8 +9,18 @@ import java.util.Set;
  */
 public interface SyncListener {
 
-	/** Der gültige Stand dieser Einheiten hat sich geändert (fremde Änderungen, eigene Uploads, Verluste). */
+	/**
+	 * Der gültige Stand dieser Einheiten hat sich geändert (fremde Änderungen, eigene Uploads, Verluste, vom Dienst
+	 * geschriebene Zusammenführungen).
+	 */
 	default void unitsChanged(Set<UnitKey> units) {
+	}
+
+	/**
+	 * Die Menge der offenen Konflikte kann sich geändert haben, etwa nachdem der Dienst eine Zusammenführung mit
+	 * Konfliktvermerk geschrieben hat.
+	 */
+	default void conflictsChanged() {
 	}
 
 	/**

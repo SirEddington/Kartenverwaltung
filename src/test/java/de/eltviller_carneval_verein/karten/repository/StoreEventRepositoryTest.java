@@ -917,9 +917,12 @@ class StoreEventRepositoryTest {
 		assertTrue(anyDeleted, "der Test braucht eine Löschung");
 		assertTrue(fromIndex.size() >= 4, fromIndex.toString());
 		assertEquals(RestorePlanner.savePoints(fresh), fromIndex);
-		// der Index bleibt auch nach einem Neustart gleich
+		// der Index bleibt auch nach einem Neustart gleich; der Start führt die verlorene Version zusammen (KARV-86), das ist
+		// genau ein Speicherstand mehr, der jüngste
 		sync.flushIndex();
-		assertEquals(fromIndex, TestRepositories.events(started(appData)).savePoints(event.getId()));
+		List<SavePoint> afterRestart = TestRepositories.events(started(appData)).savePoints(event.getId());
+		assertEquals(fromIndex, afterRestart.subList(1, afterRestart.size()));
+		assertEquals(1, afterRestart.get(0).unitCount());
 	}
 
 	@Test

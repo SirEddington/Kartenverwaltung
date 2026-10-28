@@ -136,6 +136,15 @@ final class SyncNotifier {
 		deliver(l -> l.error(message));
 	}
 
+	/** Meldet einen Fehler für die Fußzeile ohne Log und ohne Zustand; ob er einmal oder öfter kommt, regelt der Aufrufer. */
+	void error(String message) {
+		deliver(l -> l.error(message));
+	}
+
+	void conflictsChanged() {
+		deliver(SyncListener::conflictsChanged);
+	}
+
 	void unitsChanged(Set<UnitKey> units) {
 		if (!units.isEmpty()) {
 			Set<UnitKey> copy = Set.copyOf(units);

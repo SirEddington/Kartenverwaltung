@@ -69,6 +69,10 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * <b>Verluste</b> werden nicht nur aus Ereignissen gemeldet, sondern aus dem Zustand abgeleitet: Für jede neu
  * aufgelöste Einheit (beim ersten Vollabgleich alle) wird jede verlorene Strecke gemeldet, deren Versionen in diesem
  * Programmlauf noch nicht gemeldet wurden. So geht kein Verlust durch einen Absturz verloren, und keiner kommt doppelt.
+ * Jede gemeldete Einheit (auch eine schon gemeldete) kommt außerdem in die Warteschlange des {@link ConflictResolver}, der
+ * die Strecke mit der {@link ConflictPolicy} ihrer Art zu einer Zusammenführung auflöst: im Takt nach dem Hochladen
+ * (höchstens {@value #RESOLVE_BUDGET} Einheiten), beim Start, bevor {@link #startup} zurückkehrt (dann auch die
+ * Einheiten, die der Index als verloren kennt).
  * <p>
  * <b>Start-Index:</b> Der Stand jeder Einheit steht zusätzlich in einem lokalen Index ({@link UnitIndex}, Ordner
  * {@code <AppData>/index}, neben {@code data/}), den {@link #snapshots()} ohne Dateizugriff liefert, mit der gültigen Kette ohne Inhalt
@@ -89,10 +93,18 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * wartet nie darauf, mit zwei Ausnahmen: {@link #startup} prüft die Erreichbarkeit (höchstens 5 Sekunden) und lädt
  * ausstehende Versionen hoch, bevor das Hauptmenü erscheint; {@link #needsConnectDecision} liest den gemeinsamen
  * Ordner.</li>
- * <li>{@link #append} und die Abfragen arbeiten nur auf dem lokalen Bestand und laufen auf dem Thread des Aufrufers.</li>
+ * <li>{@link #append} und die Abfragen arbeiten nur auf dem lokalen Bestand und laufen auf dem Thread des Aufrufers;
+ * {@link #append} ruft auch die Auflösung im {@code worker} auf, gleichzeitig mit der Oberfläche.</li>
  * <li>Zustand ({@link #syncState()}, {@link #lastSync()}) und alle Rückrufe kommen über den {@code ui}-Executor an, in
  * der Anwendung {@code Platform::runLater}.</li>
  * </ul>
+ * <b>Sperrfolge</b> (wer mehrere hält, nimmt sie nur in dieser Reihenfolge): {@code workLock} (Takt, Hochladen beim
+ * Start) → Sperre der Auflösung ({@link ConflictResolver#resolvePending}) → {@code resolveLock} (lesen, auflösen,
+ * eintragen) → {@code lock} (Felder des Dienstes; darunter kein Dateizugriff, nur kurz der Monitor des
+ * {@link SyncNotifier}) → Monitor des Index. {@code flushLock} des Index wird vor dessen Monitor genommen, nie darunter.
+ * {@link #append} nimmt nur {@code resolveLock}, {@code lock} und den Index, jeweils kurz und nacheinander; niemand hält
+ * {@code lock}, während {@link #append} läuft. Deshalb darf {@link #append} von der Oberfläche und aus dem {@code worker}
+ * zugleich kommen.
  */
 public final class SyncService {
 
@@ -114,6 +126,8 @@ public final class SyncService {
 	static final Duration INDEX_FLUSH = Duration.ofSeconds(5);
 	/** So lange wartet {@link #closeIndex()} auf eine laufende Runde im Hintergrund. */
 	static final Duration CLOSE_WAIT = Duration.ofSeconds(3);
+	/** So viele eingereihte Einheiten löst ein Takt höchstens auf; der Rest kommt im nächsten. */
+	static final int RESOLVE_BUDGET = 200;
 
 	private static final int MAX_REPAIRS = 10;
 	private static final int MAX_ID_ATTEMPTS = 100;
@@ -194,6 +208,8 @@ public final class SyncService {
 	private final Clock clock;
 	private final VersionStore local;
 	private final SyncNotifier notifier;
+	/** Löst die gemeldeten Verluste zu Zusammenführungen auf; eingereiht wird in {@link #reportLoss}. */
+	private final ConflictResolver resolver;
 
 	/** Der Start-Index; hat eine eigene Sperre, deshalb nie unter {@code lock} benutzen. Neu bei einer neuen Rechner-ID. */
 	private volatile UnitIndex index;
@@ -260,6 +276,7 @@ public final class SyncService {
 		this.machine = machine;
 		this.ids = new VersionIdGenerator(machine.id(), clock);
 		this.index = newIndex(machine.id());
+		this.resolver = new ConflictResolver(new ResolverHost(), notifier, clock);
 	}
 
 	/** Ein neuer, noch leerer Index im Index-Ordner dieser Installation, für die Kennung des Rechners. */
@@ -323,6 +340,20 @@ public final class SyncService {
 		notifier.setListener(listener);
 	}
 
+	/**
+	 * Setzt die Fachregel, mit der verlorene Strecken dieser Einheitenart zusammengeführt werden; vor {@link #startup}
+	 * setzen, damit schon die Auflösung beim Start sie benutzt. {@code null} entfernt sie: Dann bleibt "Deren", und der
+	 * Vermerk {@link ConflictNote.Kind#UNMERGED} sagt diesem Rechner, dass sein Inhalt weicht.
+	 */
+	public void setConflictPolicy(UnitType type, ConflictPolicy policy) {
+		resolver.setPolicy(type, policy);
+	}
+
+	/** Für Tests: die Auflösung der Verluste. */
+	ConflictResolver resolver() {
+		return resolver;
+	}
+
 	/** Der Zustand des Austauschs; Änderungen kommen über den {@code ui}-Executor an. */
 	public ReadOnlyObjectProperty<SyncState> syncState() {
 		return notifier.stateProperty();
@@ -352,6 +383,8 @@ public final class SyncService {
 	 * hochgeladen, der Vollabgleich folgt im Hintergrund. Ist er nicht erreichbar, ist der Zustand
 	 * {@link SyncState#OFFLINE} und SYS-005 steht im Log; {@link SyncListener#unreachable} kommt nicht, das Popup zeigt
 	 * der Aufrufer. Der Ausfall gilt damit als gemeldet; gelingt ein späterer Takt, kommt {@link SyncListener#reconnected}.
+	 * Zuletzt (in jedem Betrieb, auch ohne Verbindung) löst der Start die verlorenen Strecken auf, die er gefunden hat oder
+	 * die der Index als verloren kennt ({@link ConflictResolver}), damit die Anwendung schon den aufgelösten Stand lädt.
 	 *
 	 * @param sharedDir der gemeinsame Ordner aus den Einstellungen; leer oder {@code null} heißt Einzelbetrieb
 	 * @return {@code false}, wenn der gemeinsame Ordner nicht erreichbar ist; sonst {@code true}
@@ -378,26 +411,30 @@ public final class SyncService {
 	 */
 	public boolean startup(String sharedDir, DoubleConsumer progress) {
 		reopen();
-		Set<UnitKey> candidates = openIndex(progress != null ? progress : NO_PROGRESS);
+		UnitIndex.Refresh opened = openIndex(progress != null ? progress : NO_PROGRESS);
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			deactivate();
-			claimPendingLocally(candidates);
+			claimPendingLocally(opened.pendingUnits());
+			resolveAtStartup(opened.lostUnits());
 			return true;
 		}
 		Link current = activate(dir, null);
 		if (current.path == null || !probe(current.path)) {
 			notifier.unreachable(dir, false);
+			// ohne Verbindung wird lokal aufgelöst und später hochgeladen
+			resolveAtStartup(opened.lostUnits());
 			return false;
 		}
 		workLock.lock();
 		try {
 			Round round = new Round(current);
 			round.run(() -> {
-				enqueuePending(current, candidates);
+				enqueuePending(current, opened.pendingUnits());
 				runJobs(current, round);
 			});
 			reportChanges(round);
+			resolveAtStartup(opened.lostUnits());
 			if (isCurrent(current)) {
 				if (round.unreachable) {
 					notifier.unreachable(dir, false);
@@ -462,6 +499,15 @@ public final class SyncService {
 		reopen();
 		deactivate();
 		claimPendingLocally(null);
+	}
+
+	/**
+	 * Beim Start, bevor {@link #startup} zurückkehrt: löst die eingereihten Verluste und die Einheiten, die der Index als
+	 * verloren kennt (etwa aus einem früheren Lauf), vollständig auf. So lädt die Anwendung schon den aufgelösten Stand.
+	 */
+	private void resolveAtStartup(Collection<UnitKey> lostUnits) {
+		resolver.enqueue(lostUnits);
+		resolver.resolvePending(Integer.MAX_VALUE);
 	}
 
 	/**
@@ -973,15 +1019,15 @@ public final class SyncService {
 	 * temporäre Reste und Änderungen am Bestand ohne den Index gibt es nur nach einem Absturz, und dann fehlt die Marke.
 	 * Sonst räumt der Start eigene temporäre Dateien auf und gleicht den Index ab, im Notfall baut er ihn neu auf.
 	 *
-	 * @return die Einheiten mit ausstehenden eigenen Versionen
+	 * @return die Einheiten mit ausstehenden und mit verlorenen eigenen Versionen
 	 */
-	private Set<UnitKey> openIndex(DoubleConsumer progress) {
+	private UnitIndex.Refresh openIndex(DoubleConsumer progress) {
 		try {
 			if (index.loadIfClean()) {
-				Set<UnitKey> pending = index.cleanRefresh().pendingUnits();
+				UnitIndex.Refresh refresh = index.cleanRefresh();
 				indexRefreshed = true;
 				progress.accept(1.0);
-				return pending;
+				return refresh;
 			}
 		} catch (RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht auswerten; der Bestand wird durchsucht", e);
@@ -991,7 +1037,7 @@ public final class SyncService {
 		} catch (IOException | RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Alte temporäre Dateien im lokalen Bestand ließen sich nicht entfernen", e);
 		}
-		Set<UnitKey> refreshed = refreshIndex(progress);
+		UnitIndex.Refresh refreshed = refreshIndex(progress);
 		// war der Index nicht zu gebrauchen: jede Einheit einzeln aus den Dateien, oder der Start scheitert
 		return refreshed != null ? refreshed : rebuildIndex(progress);
 	}
@@ -999,14 +1045,14 @@ public final class SyncService {
 	/**
 	 * Gleicht den Index mit dem Bestand ab.
 	 *
-	 * @return die Einheiten mit ausstehenden eigenen Versionen; {@code null}, wenn der Abgleich scheiterte und der Index
-	 *         nicht zu gebrauchen ist
+	 * @return die Einheiten mit ausstehenden und mit verlorenen eigenen Versionen; {@code null}, wenn der Abgleich
+	 *         scheiterte und der Index nicht zu gebrauchen ist
 	 */
-	private Set<UnitKey> refreshIndex(DoubleConsumer progress) {
+	private UnitIndex.Refresh refreshIndex(DoubleConsumer progress) {
 		try {
 			UnitIndex.Refresh refresh = index.refresh(local, progress);
 			indexRefreshed = true;
-			return refresh.pendingUnits();
+			return refresh;
 		} catch (IOException | RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Der Start-Index ließ sich nicht abgleichen; alle Einheiten werden untersucht", e);
 			return null;
@@ -1017,15 +1063,16 @@ public final class SyncService {
 	 * Baut den Index neu auf, wenn der Abgleich scheiterte: ein neuer, leerer Index, jede Einheit des Bestands einzeln über
 	 * {@link #resolveLocal}. Der Index ist danach vollständig, sonst scheitert der Start.
 	 *
-	 * @return die Einheiten mit ausstehenden eigenen Versionen
+	 * @return die Einheiten mit ausstehenden und mit verlorenen eigenen Versionen
 	 * @throws UncheckedIOException wenn die Einheiten nicht aufgelistet oder eine nicht gelesen werden kann; der Bestand wäre
 	 *                              unvollständig (eine fehlende Buchung hieße einen freien Platz)
 	 */
-	private Set<UnitKey> rebuildIndex(DoubleConsumer progress) {
+	private UnitIndex.Refresh rebuildIndex(DoubleConsumer progress) {
 		synchronized (resolveLock) {
 			index = newIndex(machineId());
 		}
 		Set<UnitKey> pending = new LinkedHashSet<>();
+		Set<UnitKey> lost = new LinkedHashSet<>();
 		List<UnitKey> units;
 		try {
 			units = local.allUnits();
@@ -1038,8 +1085,12 @@ public final class SyncService {
 		progress.accept(0.0);
 		for (UnitKey unit : units) {
 			try {
-				if (!resolveLocal(unit).pending().isEmpty()) {
+				UnitState state = resolveLocal(unit);
+				if (!state.pending().isEmpty()) {
 					pending.add(unit);
+				}
+				if (!state.lost().isEmpty()) {
+					lost.add(unit);
 				}
 			} catch (IOException e) {
 				throw new UncheckedIOException("Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
@@ -1055,7 +1106,7 @@ public final class SyncService {
 		if (lastPercent != 100) {
 			progress.accept(1.0);
 		}
-		return pending;
+		return new UnitIndex.Refresh(Collections.unmodifiableSet(pending), Collections.unmodifiableSet(lost), units.size());
 	}
 
 	/**
@@ -1071,7 +1122,7 @@ public final class SyncService {
 	}
 
 	/** Die Dateien einer Einheit und ihr Stand daraus. */
-	private record Resolved(UnitFiles files, UnitState state) {
+	record Resolved(UnitFiles files, UnitState state) {
 	}
 
 	/**
@@ -1117,7 +1168,8 @@ public final class SyncService {
 	 * Bedarf Vollabgleich, Aufträge fortsetzen, alle 30 Sekunden neue Rechner, Listen lesen, eigene Ansprüche der letzten
 	 * 15 Minuten nachprüfen; dann Verluste und geänderte Einheiten melden und den Zustand setzen. Am Anfang, auch im
 	 * Einzelbetrieb, wird der Start-Index geschrieben, wenn er sich geändert hat und das letzte Schreiben
-	 * {@link #INDEX_FLUSH} her ist; sonst ohne Wirkung im Einzelbetrieb.
+	 * {@link #INDEX_FLUSH} her ist. Nach dem Hochladen löst der Takt höchstens {@value #RESOLVE_BUDGET} eingereihte
+	 * Verluste auf; im Einzelbetrieb und ohne Verbindung ebenso, nur lokal (hochgeladen wird später).
 	 */
 	void tick() {
 		flushIndexIfDue();
@@ -1130,8 +1182,8 @@ public final class SyncService {
 			synchronized (lock) {
 				current = link;
 			}
-			if (current != null) {
-				runTick(current);
+			if (current == null || !runTick(current)) {
+				resolver.resolvePending(RESOLVE_BUDGET);
 			}
 		} finally {
 			workLock.unlock();
@@ -1154,10 +1206,15 @@ public final class SyncService {
 		}
 	}
 
-	private void runTick(Link current) {
+	/**
+	 * Der Takt im gemeinsamen Betrieb.
+	 *
+	 * @return ob die Auflösung der Verluste lief (nach dem Hochladen); {@code false}, wenn der Ordner nicht erreichbar war
+	 */
+	private boolean runTick(Link current) {
 		if (current.path == null) {
 			notifier.unreachable(current.text, true);
-			return;
+			return false;
 		}
 		SyncState state = notifier.state();
 		boolean returning = state == SyncState.OFFLINE;
@@ -1166,7 +1223,7 @@ public final class SyncService {
 				if (isCurrent(current)) {
 					notifier.unreachable(current.text, true);
 				}
-				return;
+				return false;
 			}
 			current.probeFirst = false;
 		}
@@ -1183,6 +1240,9 @@ public final class SyncService {
 			round.run(() -> fullSync(current, round));
 		}
 		round.run(() -> runJobs(current, round));
+		// nach dem Hochladen, auch wenn der Ordner dabei wegfiel (die Auflösung ist lokal): Die Zusammenführungen gehen mit
+		// dem nächsten Takt hinaus
+		resolver.resolvePending(RESOLVE_BUDGET);
 		if (current.lastDiscovery == null || !now.isBefore(current.lastDiscovery.plus(DISCOVERY_INTERVAL))) {
 			round.run(() -> {
 				current.reader.discoverMachines();
@@ -1195,7 +1255,7 @@ public final class SyncService {
 		round.run(() -> checkLateDefeats(current, round, now));
 		reportChanges(round);
 		if (!isCurrent(current)) {
-			return;
+			return true;
 		}
 		if (round.unreachable) {
 			notifier.unreachable(current.text, true);
@@ -1204,6 +1264,7 @@ public final class SyncService {
 		} else {
 			notifier.succeeded(clock.instant(), hasJobs());
 		}
+		return true;
 	}
 
 	private static boolean fullSyncDue(Link current, Instant now) {
@@ -1638,8 +1699,13 @@ public final class SyncService {
 		}
 	}
 
-	/** Meldet die Versionen der Niederlage, die in diesem Programmlauf noch nicht gemeldet wurden. */
+	/**
+	 * Reiht die Einheit zur Auflösung ein, auch wenn die Niederlage schon gemeldet war (nach einem Fehler beim Schreiben der
+	 * Zusammenführung, nach einem Fehler der Strategie), und meldet die Versionen, die in diesem Programmlauf noch nicht
+	 * gemeldet wurden.
+	 */
 	private void reportLoss(LostVersion loss) {
+		resolver.enqueue(loss.unit());
 		List<VersionId> fresh;
 		synchronized (lock) {
 			fresh = loss.mine().stream().filter(reportedLost::add).toList();
@@ -1727,6 +1793,54 @@ public final class SyncService {
 		} catch (InvalidPathException e) {
 			LOGGER.log(Level.WARNING, "Ungültiger Pfad des gemeinsamen Ordners: " + dir, e);
 			return null;
+		}
+	}
+
+	/** Was der {@link ConflictResolver} vom Dienst braucht: lokaler Bestand, Index und {@link #append}. */
+	private final class ResolverHost implements ConflictResolver.Host {
+
+		@Override
+		public Resolved resolve(UnitKey unit) throws IOException {
+			return resolveWithFiles(unit);
+		}
+
+		@Override
+		public boolean shared() {
+			synchronized (lock) {
+				return link != null;
+			}
+		}
+
+		@Override
+		public boolean isListed(UnitKey unit, VersionId version) {
+			return index.isListed(unit, version);
+		}
+
+		@Override
+		public String machineId() {
+			return SyncService.this.machineId();
+		}
+
+		@Override
+		public Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking) {
+			Map<UnitKey, UnitSnapshot> event = index.eventSnapshots(booking.eventId());
+			List<UnitKey> keys = event.keySet().stream()
+					.filter(unit -> unit.type() == UnitType.BOOKING && unit.presentationId().equals(booking.presentationId())
+							&& !unit.equals(booking))
+					.sorted(Comparator.comparing(UnitKey::relativePath)).toList();
+			Map<UnitKey, List<ChainStep>> chains = index.chains(keys);
+			Map<UnitKey, ConflictInput.Sibling> siblings = new LinkedHashMap<>();
+			for (UnitKey unit : keys) {
+				List<ChainStep> chain = chains.getOrDefault(unit, List.of());
+				ChainStep head = chain.isEmpty() ? null : chain.get(chain.size() - 1);
+				siblings.put(unit, new ConflictInput.Sibling(event.get(unit), head));
+			}
+			return siblings;
+		}
+
+		@Override
+		public List<Version> append(String saveId, List<Change> changes) throws IOException {
+			return SyncService.this.append(saveId, changes);
 		}
 	}
 

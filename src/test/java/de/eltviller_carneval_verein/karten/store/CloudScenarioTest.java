@@ -248,6 +248,51 @@ class CloudScenarioTest {
 	}
 
 	/**
+	 * Wie oben, weiter bis zum Ende: B meldet den Verlust, liest A's Liste, führt zusammen ([A, B]) und lädt die
+	 * Zusammenführung hoch; danach haben beide Rechner denselben Stand, und keine Gabelung bleibt.
+	 */
+	@Test
+	void lateDefeatIsMergedAndBothMachinesEndOnTheSameState() throws IOException {
+		Machine a = new Machine("a");
+		Machine b = new Machine("b");
+		Version va = a.sell(BOOKING, "Anna");
+		Version vb = b.sell(BOOKING, "Bert");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		b.service.tick();
+		cloud.step("a");
+		cloud.step("b");
+
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(vb.id()), va.id())), b.events.lost);
+		// B findet A's Liste, führt im nächsten Takt zusammen und lädt im übernächsten hoch
+		clock.advance(Duration.ofSeconds(30));
+		b.service.tick();
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+		clock.advance(Duration.ofSeconds(2));
+		b.service.tick();
+		Version merge = b.service.unitState(BOOKING).head();
+		assertEquals(List.of(va.id(), vb.id()), merge.parents());
+		assertEquals(ConflictNote.Kind.UNMERGED, merge.conflict().kind());
+
+		cloud.step("b");
+		cloud.step("a");
+		clock.advance(Duration.ofSeconds(30));
+		a.service.tick();
+
+		assertEquals(merge.id(), a.service.unitState(BOOKING).head().id());
+		assertTrue(a.events.changedUnits().contains(BOOKING));
+		assertTrue(a.service.unitState(BOOKING).lost().isEmpty());
+		assertTrue(b.service.unitState(BOOKING).lost().isEmpty());
+		assertTrue(a.events.lost.isEmpty());
+		assertEquals(1, b.events.lost.size(), "der Verlust wird einmal gemeldet");
+		assertTrue(a.events.errors.isEmpty());
+		assertTrue(b.events.errors.isEmpty());
+	}
+
+	/**
 	 * A ist lange ohne Verbindung zum Server (sein Client-Ordner ist lokal, also nie OFFLINE) und "gewinnt" den Platz nur
 	 * in seiner Kopie; B ist auf dem Server zuerst. Erst nach 16 Minuten, wenn A's Beobachtung längst abgelaufen ist,
 	 * übernimmt A's Client die Fassung des Servers, zusammen mit B's Liste. Der Eintrag des Gewinners löst die
