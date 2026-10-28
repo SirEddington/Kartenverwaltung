@@ -360,10 +360,15 @@ final class EventMerge {
 	}
 
 	/**
-	 * Ob die Buchung so zur Bestuhlung der Vorstellung passt, dass der Abgleich sie nicht umsetzt: auf einem Sitz, den die
-	 * Bestuhlung kennt; ohne Platz, wenn sie keinen Sitz nennt, den die Bestuhlung kennt (der Abgleich setzte sie sonst
-	 * dorthin zurück). Eine unpassende stammt aus einer anderen Bestuhlung als der im Modell; meist ist die Halle oder die
-	 * Vorstellung nur noch nicht da.
+	 * Ob die Buchung zur Bestuhlung der Vorstellung passt: auf einem Sitz, den die Bestuhlung kennt; ohne Platz, wenn sie
+	 * keinen Sitz nennt, den die Bestuhlung kennt (Schritt 1 des Abgleichs setzte sie sonst dorthin zurück). Eine
+	 * unpassende stammt aus einer anderen Bestuhlung als der im Modell; meist ist die Halle oder die Vorstellung nur noch
+	 * nicht da.
+	 * <p>
+	 * Nicht abgedeckt ist Schritt 2 des Abgleichs ({@link BookingSync}): Eine Buchung ohne Platz, deren Reihe, Tisch und
+	 * Sitznummer einen im Modell freien Sitz treffen, setzt er dorthin. Das kommt nur vor, wenn der Sitz bei dem Rechner,
+	 * der sie geschrieben hat, belegt war und im Modell (noch) frei ist; ob er frei ist, hängt an den übrigen Buchungen im
+	 * Modell, die hier nicht geprüft werden.
 	 */
 	private static boolean fitsPlan(UnitKey unit, Booking state, Presentation presentation,
 			Function<String, Hall> hallLookup) {
@@ -376,10 +381,33 @@ final class EventMerge {
 
 	/**
 	 * Setzt die Events aus den Ständen zusammen ({@link UnitMapper#assembleEvents}) und gleicht ihre Vorstellungen mit der
-	 * Bestuhlung ab, wie beim Vorbereiten eines geladenen Events für die Anzeige.
+	 * Bestuhlung ab, wie beim Vorbereiten eines geladenen Events für die Anzeige. Lesbare Buchungen, die nicht zur
+	 * Bestuhlung ihrer Vorstellung passen ({@link #fitsPlan}), bleiben draußen und kommen in {@code waiting}: Der Abgleich
+	 * setzte sie sonst um, und das nächste Speichern überschriebe den fremden Stand. Sie sind dann nicht angezeigt.
 	 */
-	static Assembly<Event> assembleEvent(Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup) {
-		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
+	static Assembly<Event> assembleEvent(Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup,
+			List<UnitSnapshot> waiting) {
+		Map<UnitKey, Presentation> presentations = new HashMap<>();
+		for (UnitSnapshot snapshot : snapshots) {
+			if (snapshot.unit().type() == UnitType.PRESENTATION) {
+				Presentation presentation = UnitMapper.readUnit(snapshot, Presentation.class);
+				if (presentation != null) {
+					presentations.put(snapshot.unit(), presentation);
+				}
+			}
+		}
+		List<UnitSnapshot> fitting = new ArrayList<>();
+		for (UnitSnapshot snapshot : snapshots) {
+			UnitKey unit = snapshot.unit();
+			Presentation presentation = unit.type() == UnitType.BOOKING ? presentations.get(presentationKey(unit)) : null;
+			Booking booking = presentation != null ? UnitMapper.readUnit(snapshot, Booking.class) : null;
+			if (booking != null && !fitsPlan(unit, booking, presentation, hallLookup)) {
+				waiting.add(snapshot);
+			} else {
+				fitting.add(snapshot);
+			}
+		}
+		Assembly<Event> assembly = UnitMapper.assembleEvents(fitting);
 		for (Event event : assembly.items()) {
 			for (Presentation presentation : event.getPresentations()) {
 				BookingSync.sync(presentation, planOf(presentation, hallLookup));

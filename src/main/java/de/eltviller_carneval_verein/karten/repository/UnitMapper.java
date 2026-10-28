@@ -164,6 +164,9 @@ final class UnitMapper {
 	 * ({@code relativePath}).
 	 * <ul>
 	 * <li>Neue Einheit (nicht im Bestand oder ohne Version): erste Version, ohne Vorgänger.</li>
+	 * <li>Einheit mit lesbarem Stand im Bestand, die nie angezeigt wurde (etwa ein fremder Verkauf, der noch auf seinen
+	 * Platz im Modell wartet), aber mit anderem Inhalt im Modell: ebenfalls erste Version, ohne Vorgänger. Der Nutzer hat
+	 * den Stand nie gesehen; seine Version tritt gegen ihn an (Gabelung) und überschreibt ihn nicht still.</li>
 	 * <li>Geänderte oder wieder aufgetauchte (gelöschte) Einheit: neue Version auf der aktuellen Version.</li>
 	 * <li>Einheit nur im Bestand: Löschung, aber nur wenn sie angezeigt wurde ({@code shown}), ihre Eltern-Einheit
 	 * (Vorstellung: der Kopf, Buchung: ihre Vorstellung) in {@code units} steht und sie eine Version hat und nicht
@@ -191,7 +194,11 @@ final class UnitMapper {
 			UnitSnapshot known = baseline.get(part.unit());
 			if (known == null || known.version() == null) {
 				changes.add(new Change(part.unit(), List.of(), part.payload(), false));
-			} else if (known.deleted() || !part.payload().equals(known.payload())) {
+			} else if (!known.deleted() && part.payload().equals(known.payload())) {
+				continue;
+			} else if (!known.deleted() && !shown.contains(part.unit()) && isReadable(known)) {
+				changes.add(new Change(part.unit(), List.of(), part.payload(), false));
+			} else {
 				changes.add(new Change(part.unit(), List.of(known.version()), part.payload(), false));
 			}
 		}
@@ -518,18 +525,22 @@ final class UnitMapper {
 	static Set<UnitKey> readableUnits(Collection<UnitSnapshot> snapshots) {
 		Set<UnitKey> readable = new HashSet<>();
 		for (UnitSnapshot snapshot : snapshots) {
-			UnitKey unit = snapshot.unit();
-			Object value = switch (unit.type()) {
-			case EVENT -> readUnit(snapshot, Event.class);
-			case PRESENTATION -> readUnit(snapshot, Presentation.class);
-			case BOOKING -> readUnit(snapshot, Booking.class);
-			case HALL -> readUnit(snapshot, Hall.class);
-			};
-			if (value != null) {
-				readable.add(unit);
+			if (isReadable(snapshot)) {
+				readable.add(snapshot.unit());
 			}
 		}
 		return readable;
+	}
+
+	/** Ob das Zusammensetzen die Einheit lesen würde ({@link #readUnit} ergibt ein Objekt). */
+	static boolean isReadable(UnitSnapshot snapshot) {
+		Object value = switch (snapshot.unit().type()) {
+		case EVENT -> readUnit(snapshot, Event.class);
+		case PRESENTATION -> readUnit(snapshot, Presentation.class);
+		case BOOKING -> readUnit(snapshot, Booking.class);
+		case HALL -> readUnit(snapshot, Hall.class);
+		};
+		return value != null;
 	}
 
 	/**

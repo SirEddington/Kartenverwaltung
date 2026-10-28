@@ -510,6 +510,10 @@ public class StoreEventRepository implements EventRepository {
 			UnitKey unit = current.unit();
 			UnitSnapshot known = baseline.known(unit);
 			ForeignDecision decision = decide(known, current, chainOf(chains, unit));
+			if (decision == ForeignDecision.KNOWN && notYetPlaced(event, known)) {
+				// bekannt, aber nie ins Modell gekommen (etwa eine Buchung, die auf ihren Platz wartet): noch einzuarbeiten
+				decision = ForeignDecision.APPLY;
+			}
 			forkedParents.remove(unit);
 			if (decision != ForeignDecision.APPLY) {
 				deferred.remove(unit);
@@ -571,7 +575,7 @@ public class StoreEventRepository implements EventRepository {
 		UnitSnapshot head = apply.stream().filter(s -> s.unit().type() == UnitType.EVENT).findFirst().orElse(null);
 		boolean headReadable = head != null && UnitMapper.readUnit(head, Event.class) != null;
 		if (event == null && headReadable) {
-			addEvent(eventId, warnings);
+			addEvent(eventId, apply, warnings);
 		} else if (event == null) {
 			// ohne sichtbares Event übernimmt nur der Vergleichsstand; angezeigt wird nichts
 			for (UnitSnapshot snapshot : apply) {
@@ -583,6 +587,23 @@ public class StoreEventRepository implements EventRepository {
 		} else {
 			mergeInto(event, apply, changes, chains, warnings);
 		}
+	}
+
+	/**
+	 * Ob die Einheit im Vergleichsstand einen lesbaren Stand hat, der nie angezeigt wurde, obwohl ihre Eltern-Einheit im
+	 * Modell steht: etwa eine Buchung, die vor ihrer Vorstellung ankam und dann nicht zur Bestuhlung passte. Sie gilt
+	 * nicht als bekannt, sonst fiele sie still heraus und ihr Sitz sähe frei aus.
+	 */
+	private boolean notYetPlaced(Event event, UnitSnapshot known) {
+		if (event == null || known == null || baseline.isShown(known.unit()) || !UnitMapper.isReadable(known)) {
+			return false;
+		}
+		UnitKey unit = known.unit();
+		return switch (unit.type()) {
+		case BOOKING -> EventMerge.presentation(event, unit.presentationId()) != null;
+		case PRESENTATION -> true;
+		case EVENT, HALL -> false;
+		};
 	}
 
 	/**
@@ -675,13 +696,18 @@ public class StoreEventRepository implements EventRepository {
 		return null;
 	}
 
-	/** Ein neues oder wiederbelebtes Event: aus dem Index zusammensetzen, Vergleichsstand wie beim Laden, in den Cache. */
-	private void addEvent(String eventId, List<String> warnings) {
+	/**
+	 * Ein neues oder wiederbelebtes Event: aus dem Index zusammensetzen, Vergleichsstand wie beim Laden, in den Cache.
+	 * Buchungen, die nicht zur Bestuhlung passen, warten (siehe {@link EventMerge#assembleEvent}).
+	 */
+	private void addEvent(String eventId, List<UnitSnapshot> apply, List<String> warnings) {
 		try {
 			Map<UnitKey, UnitSnapshot> all = sync.eventSnapshots(eventId);
-			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup);
+			List<UnitSnapshot> waiting = new ArrayList<>();
+			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup, waiting);
 			baseline.resetOwner(eventId, all.values(), assembly.shown());
 			warnings.addAll(assembly.warnings());
+			waiting.forEach(snapshot -> hold(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
 			for (Event added : assembly.items()) {
 				// einsortieren wie beim Laden
 				int index = 0;
@@ -693,8 +719,11 @@ public class StoreEventRepository implements EventRepository {
 				listeners.notifyAddedByOthers(added);
 			}
 		} catch (RuntimeException e) {
-			// es hat sich nichts geändert; die nächste Meldung zu diesem Event versucht es erneut
+			// es hat sich nichts geändert; die Einheiten warten und kommen beim nächsten Aufruf wieder
 			failed(eventId, e, warnings);
+			for (UnitSnapshot snapshot : apply) {
+				hold(snapshot.unit(), "das Zusammensetzen des Events ist gescheitert");
+			}
 		}
 	}
 
@@ -814,7 +843,8 @@ public class StoreEventRepository implements EventRepository {
 		String eventId = event.getId();
 		try {
 			Collection<UnitSnapshot> all = sync.eventSnapshots(eventId).values();
-			Assembly<Event> assembly = EventMerge.assembleEvent(all, hallLookup);
+			List<UnitSnapshot> waiting = new ArrayList<>();
+			Assembly<Event> assembly = EventMerge.assembleEvent(all, hallLookup, waiting);
 			if (assembly.items().isEmpty()) {
 				return false;
 			}
@@ -824,10 +854,11 @@ public class StoreEventRepository implements EventRepository {
 			baseline.resetOwner(eventId, all, assembly.shown());
 			warnings.addAll(assembly.warnings());
 			replaceCachedEvent(fresh);
-			// das frische Event zeigt jeden Stand des Index; nichts davon wartet mehr
+			// das frische Event zeigt jeden Stand des Index, außer den Buchungen, die nicht zur Bestuhlung passen
 			deferred.keySet().removeIf(unit -> eventId.equals(unit.eventId()));
 			held.removeIf(unit -> eventId.equals(unit.eventId()));
 			forkedParents.removeIf(unit -> eventId.equals(unit.eventId()));
+			waiting.forEach(snapshot -> hold(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
 			Set<UnitKey> units = new HashSet<>();
 			all.forEach(snapshot -> units.add(snapshot.unit()));
 			listeners.notifyChangedByOthers(fresh, new ForeignBatch<>(units, copy -> {

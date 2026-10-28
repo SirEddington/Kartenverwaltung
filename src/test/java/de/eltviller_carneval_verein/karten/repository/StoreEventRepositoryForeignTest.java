@@ -49,6 +49,7 @@ import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
 import de.eltviller_carneval_verein.karten.store.VersionStore;
@@ -869,6 +870,105 @@ class StoreEventRepositoryForeignTest {
 		assertSame(added, added.getBookings().get(0).getParent());
 		mine.saveEvent(event);
 		assertEquals(before, files());
+	}
+
+	/** B legt die Vorstellung "Samstag" in einer zweiten Halle an und verkauft dort Sitz 2 an "Schmitz". */
+	private record SplitSale(Presentation saturday, UnitKey booking, UnitKey presentation, SeatingPlan plan) {
+	}
+
+	/** Wie {@link SplitSale}; A kennt die zweite Halle erst, wenn {@code arrived} gesetzt ist. */
+	private SplitSale saleInAPresentationOfAHallNotYetKnown(AtomicBoolean arrived) {
+		Hall other = secondHall(1, 2);
+		SeatingPlan otherPlan = other.getSeatingPlans().get(0);
+		Function<String, Hall> halls = lookup(other);
+		mine.setHallLookup(id -> other.getId().equals(id) && !arrived.get() ? null : halls.apply(id));
+		Other remote = other();
+		Presentation saturday = remote.event().addPresentation("Samstag");
+		saturday.setHallId(other.getId());
+		saturday.setSeatingPlanId(otherPlan.getId());
+		BookingSync.sync(saturday, otherPlan);
+		saturday.getBookings().get(1).setLastName("Schmitz");
+		remote.save();
+		return new SplitSale(saturday,
+				UnitKey.booking(event.getId(), saturday.getId(), otherPlan.getSeats().get(1).getId()),
+				UnitKey.presentation(event.getId(), saturday.getId()), otherPlan);
+	}
+
+	@Test
+	void bookingBeforeItsPresentationWaitsUntilTheHallArrives() throws IOException {
+		AtomicBoolean arrived = new AtomicBoolean(false);
+		SplitSale sale = saleInAPresentationOfAHallNotYetKnown(arrived);
+		long before = files();
+
+		// die Buchung kommt vor ihrer Vorstellung, die Vorstellung vor ihrer Halle
+		mine.applyForeign(List.of(sale.booking()));
+		assertEquals(1, event.getPresentations().size());
+		mine.applyForeign(List.of(sale.presentation()));
+		Presentation added = event.getPresentations().get(1);
+		assertTrue(added.getBookings().isEmpty());
+		mine.retryDeferred();
+		assertTrue(added.getBookings().isEmpty(), "sie wartet weiter, statt als bekannt herauszufallen");
+		mine.saveEvent(event);
+		assertEquals(before, files());
+
+		arrived.set(true);
+		mine.retryDeferred();
+
+		assertEquals(List.of("Schmitz"), added.getBookings().stream().map(Booking::getLastName).toList());
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+	}
+
+	@Test
+	void saleOnASeatWhoseForeignBookingWaitsForksInsteadOfOverwritingIt() throws IOException {
+		AtomicBoolean arrived = new AtomicBoolean(false);
+		SplitSale sale = saleInAPresentationOfAHallNotYetKnown(arrived);
+		mine.applyForeign(List.of(sale.booking()));
+		mine.applyForeign(List.of(sale.presentation()));
+		Presentation added = event.getPresentations().get(1);
+		// die Halle kommt an und eine Ansicht bereitet die Vorstellung vor, bevor die Buchung erneut geprüft wird
+		arrived.set(true);
+		BookingSync.sync(added, sale.plan());
+		Booking mySale = added.getBookings().stream()
+				.filter(b -> sale.booking().bookingDir().equals(b.getSeatId())).findFirst().orElseThrow();
+		assertFalse(mySale.hasData(), "der Sitz sieht frei aus");
+		mySale.setLastName("Eigen");
+
+		ForeignResult result = mine.applyForeign(List.of());
+		assertEquals(List.of(sale.booking()), result.deferred().stream().map(Deferral::unit).toList(),
+				"der fremde Verkauf auf demselben Platz wird gemeldet");
+		mine.saveEvent(event);
+
+		UnitState state = sync.unitState(sale.booking());
+		assertEquals("Schmitz", state.head().payload().get("lastName").asText(), "Bs Verkauf bleibt gültig");
+		assertEquals(1, state.lost().size(), "As Verkauf tritt als Gabelung an, statt still darüber zu schreiben");
+		assertEquals(2, sync.history(sale.booking()).size());
+	}
+
+	@Test
+	void failedAssemblyOfANewEventIsRetried() throws IOException {
+		StoreEventRepository others = TestRepositories.events(sync);
+		others.loadEvents();
+		Event children = new Event();
+		children.setName("Kinderfasching");
+		Presentation sunday = children.addPresentation("Sonntag");
+		sunday.setHallId(hall.getId());
+		sunday.setSeatingPlanId(plan.getId());
+		BookingSync.sync(sunday, plan);
+		seat(sunday, 0).setLastName("Klein");
+		others.saveEvent(children);
+		// beim neuen Event fragt erst das Zusammensetzen nach der Halle
+		mine.setHallLookup(failingAt(1, lookup()));
+
+		ForeignResult failed = mine.applyForeign(List.of(UnitKey.event(children.getId())));
+		assertEquals(1, failed.warnings().size(), failed.warnings().toString());
+		assertEquals(1, mine.loadEvents().size());
+
+		mine.retryDeferred();
+
+		Event added = mine.loadEvents().stream().filter(e -> e.getId().equals(children.getId())).findFirst()
+				.orElseThrow();
+		assertEquals("Klein", seat(added.getPresentations().get(0), 0).getLastName());
 	}
 
 	@Test
