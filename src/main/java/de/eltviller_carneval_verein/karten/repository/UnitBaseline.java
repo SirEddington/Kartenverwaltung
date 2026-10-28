@@ -111,6 +111,27 @@ final class UnitBaseline {
 		changed(ownerId);
 	}
 
+	/**
+	 * Ein bekannter Stand, dessen Kette gesperrt oder wieder lesbar geworden ist: Wie beim Laden geht der Zustand in den
+	 * Vergleichsstand (Speichern lehnt eine gesperrte Einheit dann ab), das Modell bleibt. {@code WAITING} wird nicht
+	 * übernommen: Die nächste Meldung kommt, wenn die Datei da ist, und wird sie dann eine Gabelung, sperrte ein
+	 * übernommenes {@code WAITING} die Einheit bis zum Neustart.
+	 *
+	 * @param current der aktuelle Stand der Einheit, dessen Version schon bekannt ist
+	 * @param warnings erhält die Sperrmeldung, wenn die Einheit gesperrt ist
+	 */
+	void adoptStatus(String ownerId, UnitSnapshot current, List<String> warnings) {
+		UnitSnapshot before = known(current.unit());
+		if (current.status() == UnitState.Status.WAITING || (before != null && before.status() == current.status())) {
+			return;
+		}
+		adopt(ownerId, current, isShown(current.unit()));
+		String locked = UnitMapper.lockMessage(current.unit(), current.status());
+		if (locked != null) {
+			warnings.add(locked);
+		}
+	}
+
 	/** Der Stand der Einheit im Vergleichsstand, oder {@code null}, wenn sie nicht bekannt ist. */
 	UnitSnapshot known(UnitKey unit) {
 		Map<UnitKey, UnitSnapshot> units = known.get(unit.ownerId());

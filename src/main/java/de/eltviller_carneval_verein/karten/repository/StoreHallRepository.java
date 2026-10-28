@@ -2,11 +2,21 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
+import de.eltviller_carneval_verein.karten.store.ChainStep;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
@@ -18,6 +28,8 @@ import de.eltviller_carneval_verein.karten.store.UnitType;
  * sie sich gegenüber dem geladenen Stand geändert hat (siehe {@link UnitBaseline}).
  */
 public class StoreHallRepository implements HallRepository {
+
+	private static final Logger LOG = Logger.getLogger(StoreHallRepository.class.getName());
 
 	private static StoreHallRepository instance;
 
@@ -34,6 +46,15 @@ public class StoreHallRepository implements HallRepository {
 	private final List<String> loadWarnings = new ArrayList<>();
 
 	private final RepositoryListeners<Hall> listeners = new RepositoryListeners<>();
+
+	/** Die zurückgestellten fremden Stände; {@link #applyForeign} prüft sie bei jedem Aufruf erneut. */
+	private final Map<UnitKey, Deferral> deferred = new LinkedHashMap<>();
+
+	/** Einheiten, bei denen das Einarbeiten scheiterte; sie kommen bei jedem Aufruf von {@link #applyForeign} wieder dran. */
+	private final Set<UnitKey> failedUnits = new LinkedHashSet<>();
+
+	/** Ob eine Halle gerade in Bearbeitung ist oder davon abhängt (siehe {@link #setBlockedCheck}). */
+	private Predicate<Hall> blockedCheck = hall -> false;
 
 	/**
 	 * Liefert die einzige Instanz des Repositorys. Alle Controller sollen sich
@@ -252,6 +273,11 @@ public class StoreHallRepository implements HallRepository {
 		listeners.add(listener);
 	}
 
+	/** Meldet einen Listener ab (etwa wenn eine Ansicht verlassen wird). */
+	public void removeListener(RepositoryListener<Hall> listener) {
+		listeners.remove(listener);
+	}
+
 	/**
 	 * Ersetzt die Halle mit derselben ID im Cache durch ein anderes Objekt, z. B. nach dem Wiederherstellen eines
 	 * früheren Zustands. Der Versionsspeicher bleibt unberührt, und es wird kein Listener benachrichtigt. Ist die Halle
@@ -288,5 +314,186 @@ public class StoreHallRepository implements HallRepository {
 
 		listeners.notifyDeleted(hall);
 	}
+
+	// Fremde Stände -->
+
+	/**
+	 * Wer entscheidet, ob eine Halle gerade nicht ersetzt werden darf, obwohl sie nicht ungespeichert verändert ist (in der
+	 * App: der Hallen-Editor ist in Bearbeitung, oder Buchungen in Vorstellungen dieser Halle sind ungespeichert). Ein
+	 * fremder Stand dafür wird zurückgestellt. Gilt zusätzlich zum eigenen "lokal verändert" der Halle. Vorgabe: nie.
+	 */
+	public void setBlockedCheck(Predicate<Hall> blocked) {
+		this.blockedCheck = blocked;
+	}
+
+	/**
+	 * Arbeitet die Stände ein, die andere Rechner für diese Einheiten geschrieben haben (Spec KARV-85, "Entscheidung je
+	 * Einheit", "Einarbeiten" und "Fehlerfälle"). Nur Hallen zählen; die zurückgestellten Einheiten früherer Aufrufe werden
+	 * jedes Mal mit geprüft. Je Einheit gilt {@link ForeignDecision}: Ein Nachfolger des Vergleichsstands in der gültigen
+	 * Kette wird eingearbeitet, außer die Halle ist ungespeichert verändert oder gesperrt durch {@link #setBlockedCheck};
+	 * dann wird er zurückgestellt, der Vergleichsstand bleibt. Eine eingearbeitete Halle ersetzt das Objekt im Cache (sie
+	 * ist nie lokal verändert, sonst wäre sie zurückgestellt); neue und gelöschte Hallen kommen in den Cache bzw. verlassen
+	 * ihn. Ist noch nichts geladen, passiert nichts: Das erste Laden liest ohnehin den aktuellen Stand.
+	 * <p>
+	 * Nur auf dem Oberflächen-Thread aufrufen: Modell und Vergleichsstand sind nicht synchronisiert.
+	 *
+	 * @return alle danach zurückgestellten Stände und die Warnungen für den Nutzer
+	 */
+	public ForeignResult applyForeign(Collection<UnitKey> units) {
+		if (cachedHalls == null) {
+			return new ForeignResult(List.of(), List.of());
+		}
+		Set<UnitKey> wanted = new LinkedHashSet<>();
+		for (UnitKey unit : units) {
+			if (unit.type() == UnitType.HALL) {
+				wanted.add(unit);
+			}
+		}
+		wanted.addAll(deferred.keySet());
+		wanted.addAll(failedUnits);
+		List<String> warnings = new ArrayList<>();
+		if (!wanted.isEmpty()) {
+			Map<UnitKey, UnitSnapshot> current = sync.snapshots(wanted);
+			// was der Index nicht mehr kennt, lässt sich nicht einarbeiten
+			deferred.keySet().retainAll(current.keySet());
+			failedUnits.retainAll(current.keySet());
+			try {
+				Map<UnitKey, List<ChainStep>> chains = sync.chains(current.keySet());
+				for (UnitKey unit : wanted) {
+					UnitSnapshot snapshot = current.get(unit);
+					if (snapshot == null) {
+						continue;
+					}
+					// ein Fehler bei einer Halle hält die übrigen nicht auf; sie kommt beim nächsten Mal wieder
+					try {
+						applyForeign(snapshot, chains.getOrDefault(unit, List.of()), warnings);
+					} catch (RuntimeException e) {
+						failed(unit, e, warnings);
+						failedUnits.add(unit);
+					}
+				}
+			} catch (IOException e) {
+				LOG.log(Level.WARNING, "Die Ketten fremd geänderter Hallen ließen sich nicht lesen", e);
+				warnings.add("Änderungen von einem anderen Rechner ließen sich nicht einarbeiten: " + StoreMessages.describe(e));
+			}
+		}
+		return new ForeignResult(new ArrayList<>(deferred.values()), warnings);
+	}
+
+	/** Versucht die zurückgestellten Stände erneut, etwa nach dem Speichern oder wenn eine Bearbeitung endet. */
+	public ForeignResult retryDeferred() {
+		return applyForeign(List.of());
+	}
+
+	/** Der Stand der Einheit im Vergleichsstand (nur für Tests). */
+	UnitSnapshot knownUnit(UnitKey unit) {
+		return baseline.known(unit);
+	}
+
+	/** Entscheidet und arbeitet ein für eine Halle. */
+	private void applyForeign(UnitSnapshot current, List<ChainStep> chain, List<String> warnings) {
+		UnitKey unit = current.unit();
+		String hallId = unit.hallId();
+		UnitSnapshot known = baseline.known(unit);
+		ForeignDecision decision = ForeignDecision.decideUnblocked(known, current, chain);
+		if (decision != ForeignDecision.APPLY) {
+			deferred.remove(unit);
+			failedUnits.remove(unit);
+		}
+		if (decision == ForeignDecision.KNOWN) {
+			baseline.adoptStatus(hallId, current, warnings);
+			return;
+		}
+		if (decision == ForeignDecision.FORK) {
+			LOG.info("Fremder Stand von " + unit.relativePath()
+					+ " nicht eingearbeitet: Die eigene Version ist unterlegen (Gabelung).");
+			return;
+		}
+		if (decision != ForeignDecision.APPLY) {
+			return;
+		}
+
+		Hall old = cachedHall(hallId);
+		if (old != null && isBlocked(old, known)) {
+			failedUnits.remove(unit);
+			String machineName = chain.isEmpty() ? null : chain.get(chain.size() - 1).machineName();
+			deferred.put(unit, new Deferral(unit, current.version(), machineName, old));
+			return;
+		}
+		deferred.remove(unit);
+		failedUnits.remove(unit);
+
+		Hall fresh = UnitMapper.readUnit(current, Hall.class);
+		baseline.adopt(hallId, current, fresh != null);
+		if (fresh == null) {
+			// gelöscht oder unlesbar: wie beim Laden unsichtbar
+			if (!UnitMapper.isAbsent(current)) {
+				warnings.add(UnitMapper.unreadableHall(hallId));
+			}
+			if (old != null) {
+				cachedHalls.remove(old);
+				listeners.notifyRemovedByOthers(old);
+			}
+		} else if (old != null) {
+			listeners.notifyChangingByOthers(old);
+			cachedHalls.remove(old);
+			insertSorted(fresh);
+			listeners.notifyChangedByOthers(fresh, new ForeignBatch<>(Set.of(unit), copy -> {
+				throw new UnsupportedOperationException(
+						"Eine eingearbeitete Halle ist nie lokal verändert: Es gibt nichts nachzuspielen.");
+			}));
+		} else {
+			insertSorted(fresh);
+			listeners.notifyAddedByOthers(fresh);
+		}
+	}
+
+	/**
+	 * Ob die Halle nicht ersetzt werden darf: Sie ist ungespeichert verändert (ihr Inhalt weicht vom Vergleichsstand ab, oder
+	 * es gibt ihn nur auf einer Seite) oder {@link #setBlockedCheck} sagt es.
+	 */
+	private boolean isBlocked(Hall hall, UnitSnapshot known) {
+		return locallyChanged(hall, known) || blockedCheck.test(hall);
+	}
+
+	private boolean locallyChanged(Hall hall, UnitSnapshot known) {
+		if (known == null || known.deleted() || !baseline.isShown(UnitKey.hall(hall.getId()))) {
+			return true;
+		}
+		try {
+			return !UnitMapper.decompose(hall).payload().equals(known.payload());
+		} catch (IllegalStateException e) {
+			// ohne verlässlichen Vergleich gilt die Halle als verändert
+			return true;
+		}
+	}
+
+	private Hall cachedHall(String hallId) {
+		for (Hall hall : cachedHalls) {
+			if (hallId.equals(hall.getId())) {
+				return hall;
+			}
+		}
+		return null;
+	}
+
+	/** Nimmt die Halle nach Name sortiert in den Cache auf, wie beim Laden. */
+	private void insertSorted(Hall hall) {
+		int index = 0;
+		while (index < cachedHalls.size() && UnitMapper.HALL_ORDER.compare(cachedHalls.get(index), hall) <= 0) {
+			index++;
+		}
+		cachedHalls.add(index, hall);
+	}
+
+	private void failed(UnitKey unit, RuntimeException e, List<String> warnings) {
+		Hall hall = cachedHall(unit.hallId());
+		String name = hall != null && hall.getName() != null ? hall.getName() : unit.hallId();
+		LOG.log(Level.SEVERE, "Fremde Änderungen an der Halle \"" + name + "\" ließen sich nicht einarbeiten", e);
+		warnings.add("Die Änderungen eines anderen Rechners an der Halle \"" + name + "\" ließen sich nicht einarbeiten: "
+				+ StoreMessages.describe(e));
+	}
+
+	// <-- Fremde Stände
 
 }

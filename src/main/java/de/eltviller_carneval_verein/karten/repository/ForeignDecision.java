@@ -50,4 +50,18 @@ enum ForeignDecision {
 		}
 		return blocked ? DEFER : APPLY;
 	}
+
+	/**
+	 * Die Entscheidung ohne "blockiert" (das fragt das Repository erst danach, wenn ein Nachfolger da ist). Ist die Einheit
+	 * gesperrt, ohne dass ein Glied lesbar ist, gibt es keine Kette, an der sich ein Nachfolger zeigt: Sie wird wie beim
+	 * Laden behandelt und verlässt das Modell.
+	 */
+	static ForeignDecision decideUnblocked(UnitSnapshot baseline, UnitSnapshot current, List<ChainStep> chain) {
+		boolean locked = current.status() == UnitState.Status.LOCKED_DAMAGED
+				|| current.status() == UnitState.Status.LOCKED_FORMAT;
+		if (current.version() == null && locked && baseline != null && baseline.version() != null) {
+			return APPLY;
+		}
+		return decide(baseline, current, chain, false);
+	}
 }

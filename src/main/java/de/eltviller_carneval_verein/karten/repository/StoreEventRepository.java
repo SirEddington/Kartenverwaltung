@@ -509,7 +509,7 @@ public class StoreEventRepository implements EventRepository {
 		for (UnitSnapshot current : snapshots) {
 			UnitKey unit = current.unit();
 			UnitSnapshot known = baseline.known(unit);
-			ForeignDecision decision = decide(known, current, chainOf(chains, unit));
+			ForeignDecision decision = ForeignDecision.decideUnblocked(known, current, chainOf(chains, unit));
 			if (decision == ForeignDecision.KNOWN && notYetPlaced(event, known)) {
 				// bekannt, aber nie ins Modell gekommen (etwa eine Buchung, die auf ihren Platz wartet): noch einzuarbeiten
 				decision = ForeignDecision.APPLY;
@@ -520,7 +520,7 @@ public class StoreEventRepository implements EventRepository {
 				held.remove(unit);
 			}
 			if (decision == ForeignDecision.KNOWN) {
-				adoptStatus(eventId, known, current, warnings);
+				baseline.adoptStatus(eventId, current, warnings);
 			} else if (decision == ForeignDecision.FORK) {
 				LOG.info("Fremder Stand von " + unit.relativePath()
 						+ " nicht eingearbeitet: Die eigene Version ist unterlegen (Gabelung).");
@@ -606,20 +606,6 @@ public class StoreEventRepository implements EventRepository {
 		};
 	}
 
-	/**
-	 * Die Entscheidung ohne "blockiert" (das fragt der Aufrufer erst danach). Ist die Einheit gesperrt, ohne dass ein Glied
-	 * lesbar ist, gibt es keine Kette, an der sich ein Nachfolger zeigt: Sie wird wie beim Laden behandelt und verlässt das
-	 * Modell.
-	 */
-	private static ForeignDecision decide(UnitSnapshot known, UnitSnapshot current, List<ChainStep> chain) {
-		boolean locked = current.status() == UnitState.Status.LOCKED_DAMAGED
-				|| current.status() == UnitState.Status.LOCKED_FORMAT;
-		if (current.version() == null && locked && known != null && known.version() != null) {
-			return ForeignDecision.APPLY;
-		}
-		return ForeignDecision.decide(known, current, chain, false);
-	}
-
 	/** Lässt die Buchung still warten (siehe {@link #held}); geloggt wird beim ersten Mal. */
 	private void hold(UnitKey unit, String reason) {
 		if (held.add(unit)) {
@@ -629,23 +615,6 @@ public class StoreEventRepository implements EventRepository {
 
 	private static List<ChainStep> chainOf(Map<UnitKey, List<ChainStep>> chains, UnitKey unit) {
 		return chains.getOrDefault(unit, List.of());
-	}
-
-	/**
-	 * Ein bekannter Stand, dessen Kette gesperrt oder wieder lesbar geworden ist: Wie beim Laden geht der Zustand in den
-	 * Vergleichsstand (Speichern lehnt eine gesperrte Einheit dann ab), das Modell bleibt. {@code WAITING} wird nicht
-	 * übernommen: Die nächste Meldung kommt, wenn die Datei da ist, und wird sie dann eine Gabelung, sperrte ein
-	 * übernommenes {@code WAITING} die Einheit bis zum Neustart.
-	 */
-	private void adoptStatus(String eventId, UnitSnapshot known, UnitSnapshot current, List<String> warnings) {
-		if (current.status() == UnitState.Status.WAITING || (known != null && known.status() == current.status())) {
-			return;
-		}
-		baseline.adopt(eventId, current, baseline.isShown(current.unit()));
-		String locked = UnitMapper.lockMessage(current.unit(), current.status());
-		if (locked != null) {
-			warnings.add(locked);
-		}
 	}
 
 	/**

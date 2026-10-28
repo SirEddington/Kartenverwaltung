@@ -65,7 +65,8 @@ final class UnitMapper {
 			.comparing(Event::getName, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER))
 			.thenComparing(Event::getId, Comparator.nullsLast(Comparator.<String>naturalOrder()));
 
-	private static final Comparator<Hall> HALL_ORDER = Comparator
+	/** Hallen: Name ohne Groß-/Kleinschreibung ({@code null} zuletzt), ID. */
+	static final Comparator<Hall> HALL_ORDER = Comparator
 			.comparing(Hall::getName, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER))
 			.thenComparing(Hall::getId, Comparator.nullsLast(Comparator.<String>naturalOrder()));
 
@@ -446,6 +447,11 @@ final class UnitMapper {
 		return "Eine Buchung von \"" + presentationName + "\" konnte nicht gelesen werden und fehlt.";
 	}
 
+	/** Die Warnung für eine Halle, die sich nicht lesen lässt. */
+	static String unreadableHall(String hallId) {
+		return "Die Halle " + hallId + " konnte nicht gelesen werden und fehlt.";
+	}
+
 	/** Setzt die Hallen aus den Ständen der Einheiten zusammen, nach Name sortiert. */
 	static Assembly<Hall> assembleHalls(Collection<UnitSnapshot> snapshots) {
 		List<String> warnings = new ArrayList<>();
@@ -454,8 +460,7 @@ final class UnitMapper {
 		for (UnitSnapshot snapshot : snapshots) {
 			if (snapshot.unit().type() == UnitType.HALL) {
 				String hallId = snapshot.unit().hallId();
-				Hall hall = read(snapshot, Hall.class, warnings,
-						"Die Halle " + hallId + " konnte nicht gelesen werden und fehlt.",
+				Hall hall = read(snapshot, Hall.class, warnings, unreadableHall(hallId),
 						idMismatch(hallId, Hall::getId));
 				if (hall != null) {
 					halls.add(hall);
