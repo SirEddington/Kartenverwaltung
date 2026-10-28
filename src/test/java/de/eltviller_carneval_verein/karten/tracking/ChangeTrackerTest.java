@@ -528,15 +528,6 @@ class ChangeTrackerTest {
 		assertFalse(tracker.anyDirty());
 	}
 
-	/** Der Stand von {@code event}, wie er mit der fremden Änderung (Vorstellung umbenannt) aussähe, aber ohne die Nutzeränderung. */
-	private Snapshot foreignBaselineOf(Event event) {
-		String oldName = event.getName();
-		event.setName("Fremdname");
-		Snapshot snapshot = tracker.snapshotOf(event);
-		event.setName(oldName);
-		return snapshot;
-	}
-
 	@Test
 	void rebaseOfUntrackedEntityThrows() {
 		Event event = event("Unbekannt");
@@ -560,8 +551,18 @@ class ChangeTrackerTest {
 		assertFalse(halls.isDirty(replacement));
 		replacement.setName("Eigene Änderung");
 		assertTrue(halls.check(replacement));
-		assertEquals(List.of(replacement), halls.dirtyEntities());
+		assertEquals(1, halls.dirtyEntities().size());
+		assertSame(replacement, halls.dirtyEntities().get(0), "Hall.equals vergleicht nur die ID, es muss dasselbe Objekt sein");
 		assertTrue(property.get());
+	}
+
+	/** Der Stand von {@code event}, wie er mit der fremden Änderung (Event umbenannt) aussähe, aber ohne die Nutzeränderung. */
+	private Snapshot foreignBaselineOf(Event event) {
+		String oldName = event.getName();
+		event.setName("Fremdname");
+		Snapshot snapshot = tracker.snapshotOf(event);
+		event.setName(oldName);
+		return snapshot;
 	}
 
 	@Test
