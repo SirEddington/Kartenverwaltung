@@ -18,8 +18,9 @@ import java.util.Set;
  * <li><b>Elternlöschung:</b> Die aktuelle Version eines Event-Kopfs oder einer Vorstellung ist eine <em>fremde</em>
  * Löschung {@code D}. Darunter zählt jede eigene Einheit (Buchung, bei einem Event-Kopf auch Vorstellung), deren aktueller
  * Stand eine eigene, nicht gelöschte Version ist und deren Listennummer {@code 0} ist (in keiner Liste) oder größer als
- * {@code D.seen[eigene ID]} (fehlt der Eintrag: 0): Der Löschende kannte sie nicht. Eine eigene Löschung ist nie ein
- * Konflikt.</li>
+ * {@code D.seen[eigene ID]} (fehlt der Eintrag: 0): Der Löschende kannte sie nicht. Eine eigene Löschung ist kein
+ * Konflikt, außer sie ist die Zusammenführung, in der eine fremde Löschung gegen eine eigene Änderung gewann
+ * (Vermerk DELETE_WINS mit fremder Gegenseite): Sie gilt als die fremde Löschung.</li>
  * <li><b>Unbekannte Listennummer</b> ({@code ownSeq == null} bei einer eigenen Version): zählt weder als Konflikt noch als
  * bekannt; {@link Derivation#undecided()} sagt dem Aufrufer, dass er erst die eigenen Listen lesen muss.</li>
  * </ul>
@@ -42,12 +43,16 @@ final class ConflictLedger {
 	private static final class Deletion {
 		final UnitKey parent;
 		final ChainStep step;
+		final String machineName;
+		final String operator;
 		final long seenOfMe;
 		final List<UnitKey> affected = new ArrayList<>();
 
-		Deletion(UnitKey parent, ChainStep step, long seenOfMe) {
+		Deletion(UnitKey parent, ChainStep step, String machineName, String operator, long seenOfMe) {
 			this.parent = parent;
 			this.step = step;
+			this.machineName = machineName;
+			this.operator = operator;
 			this.seenOfMe = seenOfMe;
 		}
 	}
@@ -58,15 +63,16 @@ final class ConflictLedger {
 	/**
 	 * @param entries      die Einträge des Index
 	 * @param ownId        die Rechner-ID dieses Rechners
-	 * @param acknowledged die bestätigten Versionen (Vermerke und Löschversionen); sie zählen nicht mehr
+	 * @param acknowledged die bestätigten Konflikte (Version und Art); sie zählen nicht mehr
 	 */
-	static Derivation derive(Collection<UnitIndex.Entry> entries, String ownId, Set<VersionId> acknowledged) {
+	static Derivation derive(Collection<UnitIndex.Entry> entries, String ownId, Set<ConflictKey> acknowledged) {
 		List<OpenConflict> conflicts = new ArrayList<>();
 		Map<UnitKey, Deletion> deletions = new HashMap<>();
 		for (UnitIndex.Entry entry : entries) {
 			UnitKey unit = entry.snapshot().unit();
 			for (UnitIndex.NotedVersion noted : entry.notes()) {
-				if (ownId.equals(noted.note().affected()) && !acknowledged.contains(noted.version())) {
+				if (ownId.equals(noted.note().affected())
+						&& !acknowledged.contains(new ConflictKey(noted.version(), ConflictKey.Kind.NOTE))) {
 					conflicts.add(new OpenConflict(noted.version(), unit, noted.at(), noted.saveId(), noted.note(), null));
 				}
 			}
@@ -81,20 +87,25 @@ final class ConflictLedger {
 				deletion.affected.sort(Comparator.comparing(UnitKey::relativePath));
 				ChainStep step = deletion.step;
 				conflicts.add(new OpenConflict(step.version(), deletion.parent, step.at(), step.saveId(), null,
-						new OpenConflict.ParentDeletion(deletion.parent, step.machineName(), step.operator(), deletion.affected)));
+						new OpenConflict.ParentDeletion(deletion.parent, deletion.machineName, deletion.operator, deletion.affected)));
 			}
 		}
 		conflicts.sort(Comparator.comparing(OpenConflict::at).thenComparing(OpenConflict::id));
 		return new Derivation(List.copyOf(conflicts), undecided);
 	}
 
-	/** Die fremde Löschung, die der Eintrag als aktuellen Stand hat; {@code null}, wenn er keine hat oder sie bestätigt ist. */
-	private static Deletion foreignParentDeletion(UnitIndex.Entry entry, String ownId, Set<VersionId> acknowledged) {
+	/**
+	 * Die fremde Löschung, die der Eintrag als aktuellen Stand hat; {@code null}, wenn er keine hat oder sie bestätigt ist.
+	 * Als fremd gilt auch eine eigene Zusammenführung, die als Löschung entstand, weil die fremde Löschung gegen eine eigene
+	 * Änderung gewann (Vermerk DELETE_WINS, dessen Gegenseite ein anderer Rechner ist): Sie trägt {@code seen} der fremden
+	 * Löschung, Rechner und Bediener nennt der Vermerk.
+	 */
+	private static Deletion foreignParentDeletion(UnitIndex.Entry entry, String ownId, Set<ConflictKey> acknowledged) {
 		UnitSnapshot snapshot = entry.snapshot();
 		UnitType type = snapshot.unit().type();
 		VersionId version = snapshot.version();
 		if (!snapshot.deleted() || version == null || type != UnitType.EVENT && type != UnitType.PRESENTATION
-				|| version.isFrom(ownId) || acknowledged.contains(version)) {
+				|| acknowledged.contains(new ConflictKey(version, ConflictKey.Kind.PARENT_DELETION))) {
 			return null;
 		}
 		List<ChainStep> chain = entry.chain();
@@ -102,7 +113,27 @@ final class ConflictLedger {
 		if (step == null || !step.version().equals(version)) {
 			return null;
 		}
-		return new Deletion(snapshot.unit(), step, entry.seen().getOrDefault(ownId, 0L));
+		String machineName = step.machineName();
+		String operator = step.operator();
+		if (version.isFrom(ownId)) {
+			ConflictNote.Party other = deleterOfOwnMerge(entry, version);
+			if (other == null || ownId.equals(other.machine())) {
+				return null;
+			}
+			machineName = other.machineName();
+			operator = other.operator();
+		}
+		return new Deletion(snapshot.unit(), step, machineName, operator, entry.seen().getOrDefault(ownId, 0L));
+	}
+
+	/** Die Gegenseite des Vermerks DELETE_WINS an der Version; {@code null}, wenn sie keinen hat. */
+	private static ConflictNote.Party deleterOfOwnMerge(UnitIndex.Entry entry, VersionId version) {
+		for (UnitIndex.NotedVersion noted : entry.notes()) {
+			if (noted.version().equals(version) && noted.note().kind() == ConflictNote.Kind.DELETE_WINS) {
+				return noted.note().other();
+			}
+		}
+		return null;
 	}
 
 	/**

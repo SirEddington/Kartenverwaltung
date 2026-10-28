@@ -15,11 +15,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -134,10 +136,15 @@ class ConflictLedgerTest {
 	/** Schreibt eine Version eines anderen Rechners in den lokalen Bestand, beansprucht sie lokal und bringt sie in den Index. */
 	private Version foreign(SyncService service, Path appData, UnitKey unit, List<VersionId> parents, ObjectNode payload,
 			boolean deleted, Map<String, Long> seen) throws IOException {
+		return foreign(service, appData, unit, parents, payload, deleted, seen, null);
+	}
+
+	private Version foreign(SyncService service, Path appData, UnitKey unit, List<VersionId> parents, ObjectNode payload,
+			boolean deleted, Map<String, Long> seen, ConflictNote note) throws IOException {
 		foreignCount++;
 		Version version = new Version(StoreCodec.FORMAT, VersionId.create(1_900_000_000_000L + foreignCount, FOREIGN, foreignCount),
 				parents, FOREIGN, "Kasse 2", "Bert", Instant.parse("2026-10-28T09:00:00Z").plusSeconds(foreignCount),
-				"fremd-" + foreignCount, deleted, deleted ? MAPPER.createObjectNode() : payload, null, seen);
+				"fremd-" + foreignCount, deleted, deleted ? MAPPER.createObjectNode() : payload, note, seen);
 		byte[] bytes = StoreCodec.write(version);
 		VersionStore store = new VersionStore(appData.resolve("data"), new NioFileLayer());
 		assertTrue(store.writeVersion(unit, version.id(), bytes));
@@ -176,15 +183,33 @@ class ConflictLedgerTest {
 
 	/** Version, Liste und Anspruch des Rechners A im gemeinsamen Ordner, wie sein Uploader sie schreibt. */
 	private void publish(Path shared, UnitKey unit, Version version) throws IOException {
+		publishListOnly(shared, unit, version);
+		publishClaim(shared, unit, version);
+	}
+
+	/** Version und Liste ohne den Anspruch: A ist mitten im Hochladen. */
+	private void publishListOnly(Path shared, UnitKey unit, Version version) throws IOException {
 		VersionStore store = new VersionStore(shared.resolve("data"), new NioFileLayer());
-		byte[] bytes = StoreCodec.write(version);
-		assertTrue(store.writeVersion(unit, version.id(), bytes));
+		assertTrue(store.writeVersion(unit, version.id(), StoreCodec.write(version)));
 		publishedCount++;
 		Feed feed = new Feed(StoreCodec.FORMAT, A_ID, publishedCount, Instant.parse("2026-10-28T09:00:00Z"),
 				List.of(new FeedEntry(unit.relativePath(), version.id(), version.claimName())));
 		assertTrue(store.createRelative("feeds/" + A_ID + "/" + publishedCount + ".json", StoreCodec.write(feed)));
+	}
+
+	/** Der Anspruch zu einer schon abgelegten Version. */
+	private void publishClaim(Path shared, UnitKey unit, Version version) throws IOException {
+		VersionStore store = new VersionStore(shared.resolve("data"), new NioFileLayer());
+		byte[] bytes = store.readVersionBytes(unit, version.id()).orElseThrow();
 		Claim claim = new Claim(version.id(), StoreCodec.sha256(bytes), A_ID, Instant.parse("2026-10-28T09:00:00Z"));
 		assertTrue(store.createClaim(unit, version.claimName(), StoreCodec.write(claim)));
+	}
+
+	/** Version und Anspruch ohne Liste: Nur der Vollabgleich findet sie. */
+	private void publishWithoutList(Path shared, UnitKey unit, Version version) throws IOException {
+		VersionStore store = new VersionStore(shared.resolve("data"), new NioFileLayer());
+		assertTrue(store.writeVersion(unit, version.id(), StoreCodec.write(version)));
+		publishClaim(shared, unit, version);
 	}
 
 	/** A legt die Vorstellung an und löscht sie dann; {@code seen} nennt, was A von B gelesen hatte. */
@@ -234,12 +259,14 @@ class ConflictLedgerTest {
 		assertEquals(note, conflict.note());
 		assertNull(conflict.deletion());
 
-		service.acknowledge(List.of(second.id()));
+		assertEquals(new ConflictKey(second.id(), ConflictKey.Kind.NOTE), conflict.key());
+		service.acknowledge(List.of(conflict.key()));
 
 		assertEquals(List.of(), service.openConflicts());
 		assertEquals(1, recorder.conflicts, "das Bestätigen meldet die geänderte Menge");
 		String file = Files.readString(appData.resolve("conflicts-ack.json"), StandardCharsets.UTF_8);
-		assertEquals(List.of(second.id().value()), List.of(MAPPER.readTree(file).get("acknowledged").get(0).asText()));
+		assertEquals(List.of("note:" + second.id().value()),
+				List.of(MAPPER.readTree(file).get("acknowledged").get(0).asText()));
 		SyncService restarted = single(appData);
 		assertEquals(List.of(), restarted.openConflicts(), "nach einem Neustart bleibt es bestätigt");
 	}
@@ -388,7 +415,8 @@ class ConflictLedgerTest {
 		Version deletion = foreign(service, appData, SHOW, List.of(show.id()), null, true, Map.of());
 		assertEquals(1, service.openConflicts().size());
 
-		service.acknowledge(List.of(deletion.id()));
+		assertEquals(new ConflictKey(deletion.id(), ConflictKey.Kind.PARENT_DELETION), service.openConflicts().get(0).key());
+		service.acknowledge(List.of(service.openConflicts().get(0).key()));
 
 		assertEquals(List.of(), service.openConflicts());
 		assertEquals(List.of(), single(appData).openConflicts(), "auch nach einem Neustart");
@@ -496,7 +524,7 @@ class ConflictLedgerTest {
 		SyncService service = single(appData);
 		Version first = own(service, SALE, List.of(), name("Anna"));
 		Version second = own(service, SALE, List.of(first.id()), name("Carla"), false, noteFor(idOf(appData)));
-		service.acknowledge(List.of(second.id()));
+		service.acknowledge(List.of(new ConflictKey(second.id(), ConflictKey.Kind.NOTE)));
 		assertEquals(List.of(), service.openConflicts());
 		Files.writeString(appData.resolve("conflicts-ack.json"), "{\"acknowledged\": [", StandardCharsets.UTF_8);
 
@@ -529,9 +557,263 @@ class ConflictLedgerTest {
 		layer.failWhen(p -> p.startsWith(appData) && p.toString().contains("conflicts-ack"), "createNew",
 				new AccessDeniedException("schreibgeschützt"));
 
-		assertThrows(IOException.class, () -> service.acknowledge(List.of(second.id())));
+		assertThrows(IOException.class, () -> service.acknowledge(List.of(new ConflictKey(second.id(), ConflictKey.Kind.NOTE))));
 
 		assertEquals(List.of(second.id()), service.openConflicts().stream().map(OpenConflict::id).toList());
+	}
+
+	// --- Meldung conflictsChanged
+
+	@Test
+	void conflictIsReportedWhenTheClaimArrivesAfterItsList() throws IOException {
+		Path appData = dir.resolve("b");
+		Path shared = Files.createDirectories(dir.resolve("gemeinsam"));
+		SyncService b = sharedNode(appData, shared);
+		Recorder recorder = new Recorder();
+		b.setListener(recorder);
+		Version created = aVersion(0, List.of(), false, Map.of(), null);
+		publish(shared, SALE, created);
+		Version merge = aVersion(1, List.of(created.id()), false, Map.of(), noteFor(idOf(appData)));
+		publishListOnly(shared, SALE, merge);
+		tickAfterDiscoveryInterval(b);
+		assertEquals(List.of(), b.openConflicts(), "ohne Anspruch gilt die Version noch nicht");
+		int before = recorder.conflicts;
+
+		// der Anspruch kommt erst in einem späteren Durchlauf; die Version steht dann in keiner neu gelesenen Liste
+		publishClaim(shared, SALE, merge);
+		clock.advance(Duration.ofSeconds(2));
+		TestSyncServices.tick(b);
+
+		assertEquals(List.of(merge.id()), b.openConflicts().stream().map(OpenConflict::id).toList());
+		assertTrue(recorder.conflicts > before);
+	}
+
+	@Test
+	void conflictIsReportedWhenAVersionArrivesOnlyThroughTheFullSync() throws IOException {
+		Path appData = dir.resolve("b");
+		Path shared = Files.createDirectories(dir.resolve("gemeinsam"));
+		SyncService b = sharedNode(appData, shared);
+		Recorder recorder = new Recorder();
+		b.setListener(recorder);
+		Version created = aVersion(0, List.of(), false, Map.of(), null);
+		publish(shared, SALE, created);
+		tickAfterDiscoveryInterval(b);
+		assertEquals(List.of(), b.openConflicts());
+		int before = recorder.conflicts;
+
+		Version merge = aVersion(1, List.of(created.id()), false, Map.of(), noteFor(idOf(appData)));
+		publishWithoutList(shared, SALE, merge);
+		b.syncNow();
+
+		assertEquals(List.of(merge.id()), b.openConflicts().stream().map(OpenConflict::id).toList());
+		assertTrue(recorder.conflicts > before);
+	}
+
+	@Test
+	void conflictIsReportedWhenItDisappearsBecauseTheParentWasRevived() throws IOException {
+		Path appData = dir.resolve("b");
+		Path shared = Files.createDirectories(dir.resolve("gemeinsam"));
+		SyncService b = sharedNode(appData, shared);
+		saveAndUpload(b, SALE);
+		Version deletion = aDeletesShow(shared, idOf(appData), 0L);
+		tickAfterDiscoveryInterval(b);
+		assertEquals(1, b.openConflicts().size());
+		Recorder recorder = new Recorder();
+		b.setListener(recorder);
+
+		publish(shared, SHOW, aVersion(2, List.of(deletion.id()), false, Map.of(), null));
+		tickAfterDiscoveryInterval(b);
+
+		assertEquals(List.of(), b.openConflicts());
+		assertTrue(recorder.conflicts > 0);
+	}
+
+	// --- Löschen gewinnt auf der verlierenden Seite, Bestätigen je Art
+
+	/**
+	 * A löscht die Vorstellung, B ändert sie: Die Löschung gewinnt, und B schreibt die Zusammenführung als Löschung mit dem
+	 * Vermerk DELETE_WINS und den gelesenen Listen der Löschung. Darunter liegt ein Verkauf von B, den A nicht kannte.
+	 */
+	private Version deleteWinsMergeOnLosingMachine(SyncService service, Path appData) throws IOException {
+		String me = idOf(appData);
+		Version show = foreign(service, appData, SHOW, List.of(), name("Sitzung"), false, Map.of());
+		own(service, SALE, List.of(), name("Anna"));
+		Version deletion = foreign(service, appData, SHOW, List.of(show.id()), null, true, Map.of());
+		Version edit = own(service, SHOW, List.of(show.id()), name("Sitzung 2"));
+		assertEquals(List.of(List.of(edit.id())), service.unitState(SHOW).lost());
+		ConflictNote note = new ConflictNote(ConflictNote.Kind.DELETE_WINS, me,
+				new ConflictNote.Party(FOREIGN, "Kasse 2", "Bert", deletion.id()), List.of(), null, null, null);
+		return service.append(UUID.randomUUID().toString(),
+				List.of(new Change(SHOW, List.of(deletion.id(), edit.id()), null, true, note, deletion.seen()))).get(0);
+	}
+
+	@Test
+	void deleteWinsMergeOnTheLosingMachineCountsAsForeignParentDeletion() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Version merge = deleteWinsMergeOnLosingMachine(service, appData);
+		assertTrue(service.unitState(SHOW).head().deleted());
+		assertEquals(merge.id(), service.unitState(SHOW).head().id(), "die eigene Zusammenführung ist der aktuelle Stand");
+
+		List<OpenConflict> deletions = service.openConflicts().stream().filter(c -> c.deletion() != null).toList();
+
+		assertEquals(1, deletions.size());
+		assertEquals(merge.id(), deletions.get(0).id());
+		assertEquals(merge.at(), deletions.get(0).at());
+		assertEquals(new OpenConflict.ParentDeletion(SHOW, "Kasse 2", "Bert", List.of(SALE)), deletions.get(0).deletion());
+	}
+
+	@Test
+	void ownDeleteWinsMergeWhereTheOwnSideDeletedIsNoParentDeletion() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Version show = own(service, SHOW, List.of(), name("Sitzung"));
+		own(service, SALE, List.of(), name("Anna"));
+		Version deletion = own(service, SHOW, List.of(show.id()), null, true, null);
+		Version edit = foreign(service, appData, SHOW, List.of(show.id()), name("Sitzung 2"), false, Map.of());
+		ConflictNote note = new ConflictNote(ConflictNote.Kind.DELETE_WINS, FOREIGN,
+				new ConflictNote.Party(idOf(appData), "test", null, deletion.id()), List.of(), null, null, null);
+
+		service.append(UUID.randomUUID().toString(),
+				List.of(new Change(SHOW, List.of(deletion.id(), edit.id()), null, true, note, Map.of())));
+
+		assertEquals(List.of(), service.openConflicts(), "der Löschende ist dieser Rechner, die Änderung verlor auf dem anderen");
+	}
+
+	@Test
+	void noteAndParentDeletionOnTheSameVersionAreTwoRowsAcknowledgedSeparately() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Version merge = deleteWinsMergeOnLosingMachine(service, appData);
+
+		List<OpenConflict> open = service.openConflicts();
+		assertEquals(2, open.size());
+		assertEquals(List.of(merge.id(), merge.id()), open.stream().map(OpenConflict::id).toList());
+		OpenConflict note = open.stream().filter(c -> c.note() != null).findFirst().orElseThrow();
+		OpenConflict deletion = open.stream().filter(c -> c.deletion() != null).findFirst().orElseThrow();
+		assertEquals(new ConflictKey(merge.id(), ConflictKey.Kind.NOTE), note.key());
+		assertEquals(new ConflictKey(merge.id(), ConflictKey.Kind.PARENT_DELETION), deletion.key());
+
+		service.acknowledge(List.of(note.key()));
+		assertEquals(List.of(deletion.key()), service.openConflicts().stream().map(OpenConflict::key).toList());
+		assertEquals(Set.of("note:" + merge.id().value()),
+				Set.of(MAPPER.readTree(Files.readString(appData.resolve("conflicts-ack.json"))).get("acknowledged").get(0).asText()));
+
+		service.acknowledge(List.of(deletion.key()));
+		assertEquals(List.of(), service.openConflicts());
+		String file = Files.readString(appData.resolve("conflicts-ack.json"), StandardCharsets.UTF_8);
+		assertEquals(Set.of("note:" + merge.id().value(), "deletion:" + merge.id().value()),
+				Set.of(MAPPER.readTree(file).get("acknowledged").get(0).asText(),
+						MAPPER.readTree(file).get("acknowledged").get(1).asText()));
+	}
+
+	// --- Eigene Listen nach Verbindungsverlust
+
+	@Test
+	void offlineStartThenReconnectDecidesUnknownListNumbersWithoutChanges() throws IOException {
+		Path appData = dir.resolve("b");
+		Path shared = Files.createDirectories(dir.resolve("gemeinsam"));
+		SyncService first = sharedNode(appData, shared);
+		saveAndUpload(first, SALE);
+		aDeletesShow(shared, idOf(appData), 0L);
+		tickAfterDiscoveryInterval(first);
+		assertEquals(1, first.openConflicts().size());
+		deleteTree(appData.resolve("index"));
+		AtomicBoolean reachable = new AtomicBoolean(false);
+		MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "Kasse B");
+		SyncService b = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run,
+				path -> reachable.get(), clock);
+		Recorder recorder = new Recorder();
+		b.setListener(recorder);
+
+		assertFalse(b.startup(shared.toString()), "der gemeinsame Ordner ist nicht erreichbar");
+		assertEquals(List.of(), b.openConflicts(), "die Listennummer des Verkaufs ist unbekannt");
+		reachable.set(true);
+		clock.advance(Duration.ofSeconds(2));
+		TestSyncServices.tick(b);
+
+		assertEquals(1, b.openConflicts().size());
+		assertTrue(recorder.conflicts > 0);
+	}
+
+	@Test
+	void failedReadOfOwnListsIsRetriedByTheNextTickWithoutChanges() throws IOException {
+		Path appData = dir.resolve("b");
+		Path shared = Files.createDirectories(dir.resolve("gemeinsam"));
+		SyncService first = sharedNode(appData, shared);
+		saveAndUpload(first, SALE);
+		deleteTree(appData.resolve("index"));
+		MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "Kasse B");
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		AtomicBoolean broken = new AtomicBoolean(true);
+		layer.failWhen(p -> broken.get() && p.toString().replace('\\', '/').endsWith("feeds/" + identity.id()), "listNames",
+				new IOException("Netzlaufwerk getrennt"));
+		SyncService b = new SyncService(appData, identity, layer, Runnable::run, Runnable::run, path -> true, clock);
+		b.startup(shared.toString());
+		aDeletesShow(shared, identity.id(), 0L);
+		tickAfterDiscoveryInterval(b);
+		assertEquals(List.of(), b.openConflicts(), "die Listennummer ist noch unbekannt");
+
+		broken.set(false);
+		clock.advance(Duration.ofSeconds(2));
+		TestSyncServices.tick(b);
+
+		assertEquals(1, b.openConflicts().size());
+	}
+
+	// --- Die Bestätigungsdatei
+
+	@Test
+	void unreadableAckFileIsNotTakenForEmptyAndNotOverwritten() throws IOException {
+		Path appData = dir.resolve("app");
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		AtomicBoolean unreadable = new AtomicBoolean();
+		layer.failWhen(p -> unreadable.get() && p.getFileName().toString().equals("conflicts-ack.json"), "read",
+				new IOException("Sharing violation"));
+		SyncService first = TestSyncServices.singleMode(appData, layer, clock);
+		first.startup(null);
+		String me = idOf(appData);
+		Version a = own(first, SALE, List.of(), name("Anna"));
+		Version noteA = own(first, SALE, List.of(a.id()), name("Carla"), false, noteFor(me));
+		Version b = own(first, OTHER_SALE, List.of(), name("Dora"));
+		Version noteB = own(first, OTHER_SALE, List.of(b.id()), name("Emil"), false, noteFor(me));
+		first.acknowledge(List.of(new ConflictKey(noteA.id(), ConflictKey.Kind.NOTE)));
+		unreadable.set(true);
+		SyncService restarted = TestSyncServices.singleMode(appData, layer, clock);
+		restarted.startup(null);
+
+		assertEquals(2, restarted.openConflicts().size(), "unlesbar: lieber alles offen");
+		assertThrows(IOException.class, () -> restarted.acknowledge(List.of(new ConflictKey(noteB.id(), ConflictKey.Kind.NOTE))));
+
+		unreadable.set(false);
+		assertEquals(List.of(noteB.id()), restarted.openConflicts().stream().map(OpenConflict::id).toList(),
+				"die gültige Datei blieb unberührt, die erste Bestätigung gilt weiter");
+	}
+
+	@Test
+	void ackFileIsReadAtStartup() throws IOException {
+		Path appData = dir.resolve("app");
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		SyncService service = TestSyncServices.singleMode(appData, layer, clock);
+
+		service.startup(null);
+
+		assertTrue(layer.calls().stream().anyMatch(call -> call.startsWith("read ") && call.endsWith("conflicts-ack.json")),
+				"vor der ersten Abfrage der Konflikte gelesen: " + layer.calls());
+	}
+
+	@Test
+	void acknowledgeRejectsNullElementsAndChangesNothing() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Version first = own(service, SALE, List.of(), name("Anna"));
+		Version second = own(service, SALE, List.of(first.id()), name("Carla"), false, noteFor(idOf(appData)));
+		ConflictKey key = new ConflictKey(second.id(), ConflictKey.Kind.NOTE);
+
+		assertThrows(NullPointerException.class, () -> service.acknowledge(Arrays.asList(key, null)));
+
+		assertEquals(1, service.openConflicts().size());
+		assertFalse(Files.exists(appData.resolve("conflicts-ack.json")));
 	}
 
 	// --- Ableitung auf Einträgen

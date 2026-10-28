@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -23,7 +24,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -242,9 +242,15 @@ public final class SyncService {
 	/** Schützt {@link #acknowledged}; die letzte Sperre der Folge (unter ihr nur die kleine Datei, keine weitere Sperre). */
 	private final Object ackLock = new Object();
 	/** Die bestätigten Konflikte ({@code conflicts-ack.json}); {@code null}, solange die Datei nicht gelesen wurde. */
-	private Set<VersionId> acknowledged;
-	/** Ob eine Elternlöschung auf die eigenen Listen wartet, die der Takt liest; gelesen und gesetzt unter {@code workLock}. */
-	private boolean ownListsWanted;
+	private Set<ConflictKey> acknowledged;
+	/** Die zuletzt gemeldeten offenen Konflikte (siehe {@link #reportConflictChanges}); unter {@code ackLock}. */
+	private Set<ConflictKey> reportedConflicts = new HashSet<>();
+	/**
+	 * Ob offene Elternlöschungen auf die eigenen Listen warten könnten: gesetzt, wenn eine Verbindung aktiviert oder der Index
+	 * neu aufgebaut wird (die Listennummern sind dann unbekannt), auch bei einem Start ohne Verbindung; der Takt prüft es und
+	 * liest die Listen nur, wenn eine Entscheidung fehlt.
+	 */
+	private volatile boolean ownListsWanted;
 
 	/** Serialisiert die Arbeit am gemeinsamen Ordner: Takt, Hochladen beim Start. */
 	private final ReentrantLock workLock = new ReentrantLock();
@@ -432,6 +438,7 @@ public final class SyncService {
 	 */
 	public boolean startup(String sharedDir, DoubleConsumer progress) {
 		reopen();
+		loadAcknowledgedAtStart();
 		UnitIndex.Refresh opened = openIndex(progress != null ? progress : NO_PROGRESS);
 		String dir = clean(sharedDir);
 		if (dir == null) {
@@ -450,12 +457,13 @@ public final class SyncService {
 		workLock.lock();
 		try {
 			Round round = new Round(current);
+			round.startup = true;
 			round.run(() -> {
 				enqueuePending(current, opened.pendingUnits());
 				runJobs(current, round);
 			});
 			reportChanges(round);
-			round.run(() -> decideUnknownListNumbers(round, true));
+			round.run(() -> decideUnknownListNumbers(round));
 			resolveAtStartup(opened.lostUnits());
 			if (isCurrent(current)) {
 				if (round.unreachable) {
@@ -965,74 +973,124 @@ public final class SyncService {
 	}
 
 	/**
-	 * Bestätigt Konflikte (die ID der Version mit dem Vermerk bzw. der Löschversion, siehe {@link OpenConflict#id()}): Sie
-	 * erscheinen nicht mehr in {@link #openConflicts()}, auch nicht nach einem Neustart. Schreibt
-	 * {@code <AppData>/conflicts-ack.json} atomar und meldet dann {@link SyncListener#conflictsChanged}. Scheitert das
-	 * Schreiben, gilt nichts als bestätigt.
+	 * Bestätigt Konflikte (Schlüssel aus {@link OpenConflict#key()}: Version und Art): Sie erscheinen nicht mehr in
+	 * {@link #openConflicts()}, auch nicht nach einem Neustart. Ein Vermerk und eine Elternlöschung derselben Version werden
+	 * einzeln bestätigt. Schreibt {@code <AppData>/conflicts-ack.json} atomar und meldet dann
+	 * {@link SyncListener#conflictsChanged}. Scheitert das Schreiben, gilt nichts als bestätigt; ist die vorhandene Datei
+	 * nicht lesbar (etwa von einem anderen Programm gesperrt), wird sie auch nicht überschrieben.
 	 *
-	 * @throws IOException wenn die Datei nicht geschrieben werden kann
+	 * @throws NullPointerException wenn ein Element {@code null} ist
+	 * @throws IOException          wenn die Datei nicht gelesen oder nicht geschrieben werden kann
 	 */
-	public void acknowledge(Collection<VersionId> ids) throws IOException {
+	public void acknowledge(Collection<ConflictKey> keys) throws IOException {
+		Objects.requireNonNull(keys, "keys");
+		for (ConflictKey key : keys) {
+			Objects.requireNonNull(key, "Ein zu bestätigender Konflikt darf nicht null sein");
+		}
 		synchronized (ackLock) {
-			Set<VersionId> known = loadedAcknowledged();
-			Set<VersionId> next = new TreeSet<>(known);
-			if (!next.addAll(ids)) {
+			Set<ConflictKey> next = new HashSet<>(loadedAcknowledged());
+			if (!next.addAll(keys)) {
 				return;
 			}
 			writeAcknowledged(next);
 			acknowledged = next;
+			// was bestätigt ist, ist nicht mehr offen: Der nächste Vergleich meldet es nicht noch einmal
+			reportedConflicts.removeAll(keys);
 		}
 		notifier.conflictsChanged();
 	}
 
 	private ConflictLedger.Derivation deriveConflicts() {
 		String me = machineId();
-		Set<VersionId> done;
+		Set<ConflictKey> done;
 		synchronized (ackLock) {
-			done = Set.copyOf(loadedAcknowledged());
+			try {
+				done = Set.copyOf(loadedAcknowledged());
+			} catch (IOException e) {
+				// nicht als "nichts bestätigt" merken: Der nächste Aufruf liest die Datei erneut
+				LOGGER.log(Level.WARNING, "Die bestätigten Konflikte (" + CONFLICTS_ACK
+						+ ") ließen sich nicht lesen; alle Konflikte gelten vorerst als offen", e);
+				done = Set.of();
+			}
 		}
-		return index.read(entries -> ConflictLedger.derive(entries, me, done));
+		Set<ConflictKey> acknowledgedNow = done;
+		return index.read(entries -> ConflictLedger.derive(entries, me, acknowledgedNow));
 	}
 
-	/** Die bestätigten Konflikte; liest die Datei beim ersten Aufruf. Nur unter {@code ackLock}. */
-	private Set<VersionId> loadedAcknowledged() {
+	/**
+	 * Merkt sich die offenen Konflikte als zuletzt gemeldet.
+	 *
+	 * @return ob sie sich gegenüber den vorher gemeldeten geändert haben (neue, weggefallene, andere Art)
+	 */
+	private boolean replaceReportedConflicts(ConflictLedger.Derivation derivation) {
+		Set<ConflictKey> now = new HashSet<>();
+		derivation.conflicts().forEach(conflict -> now.add(conflict.key()));
+		synchronized (ackLock) {
+			boolean changed = !now.equals(reportedConflicts);
+			reportedConflicts = now;
+			return changed;
+		}
+	}
+
+	/**
+	 * Die bestätigten Konflikte; liest die Datei beim ersten Aufruf. Nur unter {@code ackLock}.
+	 *
+	 * @throws IOException wenn die Datei nicht gelesen werden kann (nicht: wenn sie defekt ist); dann bleibt sie ungelesen
+	 */
+	private Set<ConflictKey> loadedAcknowledged() throws IOException {
 		if (acknowledged == null) {
 			acknowledged = readAcknowledged();
 		}
 		return acknowledged;
 	}
 
-	/** Fehlt die Datei oder ist sie defekt, gilt nichts als bestätigt (lieber einmal zu viel als verschluckt). */
-	private Set<VersionId> readAcknowledged() {
-		Set<VersionId> ids = new TreeSet<>();
+	/**
+	 * Fehlt die Datei oder ist sie defekt (kein JSON, falsche Form, ungültiger Eintrag), gilt nichts als bestätigt (lieber
+	 * einmal zu viel als verschluckt), bei einer defekten mit WARNING.
+	 *
+	 * @throws IOException wenn das Lesen selbst scheitert: Die Datei kann gültig sein
+	 */
+	private Set<ConflictKey> readAcknowledged() throws IOException {
+		Set<ConflictKey> keys = new HashSet<>();
+		Optional<byte[]> bytes = files.read(appDataDir.resolve(CONFLICTS_ACK));
+		if (bytes.isEmpty()) {
+			return keys;
+		}
 		try {
-			Optional<byte[]> bytes = files.read(appDataDir.resolve(CONFLICTS_ACK));
-			if (bytes.isEmpty()) {
-				return ids;
-			}
 			JsonNode list = MAPPER.readTree(bytes.get()).get(ACKNOWLEDGED);
 			if (list == null || !list.isArray()) {
 				throw new IOException("Das Feld '" + ACKNOWLEDGED + "' fehlt oder ist keine Liste");
 			}
 			for (JsonNode item : list) {
-				if (!item.isTextual() || !VersionId.isValid(item.asText())) {
+				if (!item.isTextual()) {
 					throw new IOException("Ungültiger Eintrag in '" + ACKNOWLEDGED + "': " + item);
 				}
-				ids.add(VersionId.of(item.asText()));
+				keys.add(ConflictKey.parse(item.asText()));
 			}
-			return ids;
+			return keys;
 		} catch (IOException | RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Die bestätigten Konflikte (" + CONFLICTS_ACK
-					+ ") ließen sich nicht lesen; alle Konflikte gelten als offen", e);
-			return new TreeSet<>();
+					+ ") sind defekt; alle Konflikte gelten als offen", e);
+			return new HashSet<>();
+		}
+	}
+
+	/** Liest die Bestätigungen beim Start, damit die erste Abfrage (womöglich auf dem FX-Thread) keine Datei liest. */
+	private void loadAcknowledgedAtStart() {
+		synchronized (ackLock) {
+			try {
+				loadedAcknowledged();
+			} catch (IOException e) {
+				LOGGER.log(Level.WARNING, "Die bestätigten Konflikte (" + CONFLICTS_ACK + ") ließen sich nicht lesen", e);
+			}
 		}
 	}
 
 	/** Schreibt die Datei über eine temporäre Datei, die die vorhandene atomar ersetzt. */
-	private void writeAcknowledged(Set<VersionId> ids) throws IOException {
+	private void writeAcknowledged(Set<ConflictKey> keys) throws IOException {
 		ObjectNode root = MAPPER.createObjectNode();
 		ArrayNode list = root.putArray(ACKNOWLEDGED);
-		ids.forEach(id -> list.add(id.value()));
+		keys.stream().map(ConflictKey::asText).sorted().forEach(list::add);
 		byte[] bytes = MAPPER.writeValueAsBytes(root);
 		Path file = appDataDir.resolve(CONFLICTS_ACK);
 		Path temp = file.resolveSibling(FileLayer.TEMP_PREFIX + "conflicts-ack-" + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
@@ -1377,7 +1435,7 @@ public final class SyncService {
 		round.run(() -> repairQueued(current, round));
 		round.run(() -> checkLateDefeats(current, round, now));
 		reportChanges(round);
-		round.run(() -> decideUnknownListNumbers(round, false));
+		round.run(() -> decideUnknownListNumbers(round));
 		if (!isCurrent(current)) {
 			return true;
 		}
@@ -1634,6 +1692,8 @@ public final class SyncService {
 		index.deleteCleanMarker();
 		index = newIndex(renewed.id());
 		refreshIndex(NO_PROGRESS);
+		// der neue Index kennt keine Listennummern
+		ownListsWanted = true;
 		current.bind(renewed.id(), local, clock);
 		current.fullSyncWanted = true;
 		notifier.duplicateMachine(StoreMessages.duplicateMachine());
@@ -1810,9 +1870,14 @@ public final class SyncService {
 		}
 		reportLosses(units);
 		notifier.unitsChanged(round.changed);
-		// erst jetzt stehen die gelisteten Versionen im Index: eine fremde mit Vermerk oder eine Löschung kann einen Konflikt öffnen
-		if (!round.listed.isEmpty() && index.carriesNoteOrParentDeletion(round.listed)) {
-			notifier.conflictsChanged();
+		// Hat der Durchlauf etwas geändert (oder ist es der Start), stehen die Einheiten jetzt im Index: Die offenen Konflikte
+		// werden neu abgeleitet und mit den zuletzt gemeldeten verglichen. Das fängt jeden Weg ab (Liste, später eintreffender
+		// Anspruch, Vollabgleich, Aufgehen in eine Zusammenführung, Wegfall), nicht nur die Ankunft aus einer Liste.
+		if (round.startup || round.allUnits || !round.changed.isEmpty() || !round.listed.isEmpty()) {
+			round.derivation = deriveConflicts();
+			if (replaceReportedConflicts(round.derivation)) {
+				notifier.conflictsChanged();
+			}
 		}
 	}
 
@@ -1820,19 +1885,26 @@ public final class SyncService {
 	 * Entscheidet die Elternlöschungen, die an einer unbekannten Listennummer einer eigenen Version hängen ({@link
 	 * ConflictLedger.Derivation#undecided()}; nach einem Neuaufbau des Index oder einem unsauberen Ende kennt er die Nummern
 	 * nicht): Liest die eigenen Listen ({@code feeds/<eigene ID>/}), trägt die Nummern ein und meldet
-	 * {@link SyncListener#conflictsChanged}. Läuft nur, wenn sich im Durchlauf etwas geändert hat, bei {@code force} (Start)
-	 * oder wenn ein früherer Versuch scheiterte; sonst kostet der Takt nichts.
+	 * {@link SyncListener#conflictsChanged}. Nutzt die Ableitung, die {@link #reportChanges} in diesem Durchlauf gemacht hat;
+	 * gab es keine, wird nur dann abgeleitet, wenn noch eine Entscheidung aussteht ({@link #ownListsWanted}: nach dem
+	 * Aktivieren der Verbindung, auch nach einem Start ohne Verbindung, und nach einem gescheiterten Versuch). Sonst kostet der
+	 * Takt nichts.
 	 */
-	private void decideUnknownListNumbers(Round round, boolean force) throws IOException {
-		if (!force && !ownListsWanted && round.changed.isEmpty() && round.listed.isEmpty()) {
+	private void decideUnknownListNumbers(Round round) throws IOException {
+		ConflictLedger.Derivation derivation = round.derivation;
+		if (derivation == null && ownListsWanted) {
+			derivation = deriveConflicts();
+		}
+		if (derivation == null) {
 			return;
 		}
-		ownListsWanted = deriveConflicts().undecided();
+		ownListsWanted = derivation.undecided();
 		if (!ownListsWanted) {
 			return;
 		}
 		readOwnLists(round.link);
 		ownListsWanted = false;
+		replaceReportedConflicts(deriveConflicts());
 		notifier.conflictsChanged();
 	}
 
@@ -1845,6 +1917,13 @@ public final class SyncService {
 	private void readOwnLists(Link current) throws IOException {
 		String me = machineId();
 		Map<UnitKey, UnitSnapshot> snapshots = index.snapshots();
+		// die Stände, gegen die die Listen gelesen werden: nur für sie darf "in keiner Liste" gelten
+		Map<UnitKey, VersionId> examined = new HashMap<>();
+		snapshots.forEach((unit, snapshot) -> {
+			if (snapshot.version() != null && snapshot.version().isFrom(me)) {
+				examined.put(unit, snapshot.version());
+			}
+		});
 		for (long seq : Feeds.feedNumbers(current.shared, me)) {
 			Optional<byte[]> bytes = current.shared.readRelative(Feeds.feedPath(me, seq));
 			if (bytes.isEmpty()) {
@@ -1869,7 +1948,7 @@ public final class SyncService {
 			}).toList();
 			index.markOwnListed(currentOnes, seq);
 		}
-		index.markUnknownOwnAsUnlisted();
+		index.markUnknownOwnAsUnlisted(examined);
 	}
 
 	/** Leitet für jede Einheit die verlorenen Strecken aus dem Zustand ab und meldet, was noch nicht gemeldet wurde. */
@@ -1919,6 +1998,8 @@ public final class SyncService {
 			unrepairable.clear();
 			notifier.reset();
 		}
+		// die Listennummern eigener Versionen sind womöglich unbekannt (neuer Index, unsauberes Ende): der Takt prüft es
+		ownListsWanted = true;
 		return created;
 	}
 
@@ -2050,6 +2131,10 @@ public final class SyncService {
 		final Set<UnitKey> changed = new LinkedHashSet<>();
 		/** Die fremden Versionen, deren Liste in diesem Durchlauf vollständig verarbeitet wurde. */
 		final List<FeedEntry> listed = new ArrayList<>();
+		/** Ob es der Durchlauf beim Start ist: Die offenen Konflikte werden dann auch ohne Änderung abgeleitet. */
+		boolean startup;
+		/** Die Ableitung der offenen Konflikte nach diesem Durchlauf ({@link #reportChanges}); {@code null}, wenn es keine gab. */
+		ConflictLedger.Derivation derivation;
 		/** Der erste Vollabgleich gelang: Verluste aller Einheiten ableiten. */
 		boolean allUnits;
 		boolean unreachable;

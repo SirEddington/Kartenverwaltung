@@ -1301,7 +1301,10 @@ class UnitIndexTest {
 		refresh(index, local);
 		index.markOwnListed(List.of(feedEntry(PRESENTATION, mine(2))), 4);
 
-		index.markUnknownOwnAsUnlisted();
+		// geprüft wurden die Stände zu einem früheren Zeitpunkt: für den Event-Kopf war es noch die Vorversion
+		index.markUnknownOwnAsUnlisted(Map.of(EVENT, mine(1), PRESENTATION, mine(2), HALL, foreign(1)));
+		assertNull(index.entries().get(EVENT).ownSeq(), "die geprüfte Version ist nicht mehr die aktuelle: keine falsche 0");
+		index.markUnknownOwnAsUnlisted(Map.of(EVENT, mine(2), PRESENTATION, mine(2), HALL, foreign(1)));
 
 		assertEquals(0L, index.entries().get(EVENT).ownSeq());
 		assertEquals(4L, index.entries().get(PRESENTATION).ownSeq(), "eine bekannte Nummer bleibt");

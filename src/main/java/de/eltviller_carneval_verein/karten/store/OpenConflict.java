@@ -9,8 +9,8 @@ import java.util.Objects;
  * Konfliktvermerk, der diesen Rechner betrifft, oder eine Elternlöschung über eigenen, dem Löschenden unbekannten
  * Verkäufen. Genau eins von {@code note} und {@code deletion} ist gesetzt.
  *
- * @param id       die Version, die den Konflikt trägt: die Version mit dem Vermerk bzw. die Löschversion; unter dieser ID
- *                 wird der Konflikt bestätigt ({@link SyncService#acknowledge})
+ * @param id       die Version, die den Konflikt trägt: die Version mit dem Vermerk bzw. die Löschversion; mit der Art
+ *                 ({@link #key()}) wird der Konflikt bestätigt ({@link SyncService#acknowledge})
  * @param unit     die Einheit dieser Version
  * @param at       der Zeitpunkt des Speicherns dieser Version
  * @param saveId   der Speichervorgang dieser Version (mehrere Konflikte desselben Vorgangs gehören im Dialog zusammen)
@@ -36,6 +36,11 @@ public record OpenConflict(VersionId id, UnitKey unit, Instant at, String saveId
 			Objects.requireNonNull(parent, "parent");
 			affected = List.copyOf(affected);
 		}
+	}
+
+	/** Der Schlüssel, unter dem der Konflikt bestätigt wird ({@link SyncService#acknowledge}): Version und Art. */
+	public ConflictKey key() {
+		return new ConflictKey(id, note != null ? ConflictKey.Kind.NOTE : ConflictKey.Kind.PARENT_DELETION);
 	}
 
 	/** Prüft, dass genau eins von Vermerk und Elternlöschung gesetzt ist. */
