@@ -1,9 +1,14 @@
 package de.eltviller_carneval_verein.karten.ui;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.MainApp;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupRestoreDialog;
 import javafx.fxml.FXML;
@@ -34,6 +39,34 @@ public abstract class AbstractOverviewController {
 		treeTableView.setRowFactory(ttv -> createRow());
 		reload();
 		searchField.textProperty().addListener((obs, oldVal, newVal) -> applyFilter());
+		// Fremde Änderungen nur, solange die Übersicht zu sehen ist (danach hielten die Repositories sie am Leben)
+		LiveViews.whileShown(treeTableView, () -> watchForeignChanges(true), () -> watchForeignChanges(false));
+	}
+
+	/**
+	 * Meldet die Übersicht bei den Repositories an ({@code true}) bzw. wieder ab ({@code false}), deren Änderungen sie zeigt.
+	 * Die Listener rufen {@link #reloadOnForeignChange()} auf.
+	 */
+	protected abstract void watchForeignChanges(boolean watch);
+
+	/** Ein Listener, der bei jeder Änderung eines anderen Rechners (geändert, neu, gelöscht) die Übersicht nachführt. */
+	protected final <T> RepositoryListener<T> foreignChangeReloader() {
+		return new RepositoryListener<>() {
+			@Override
+			public void changedByOthers(T entity, ForeignBatch<T> batch) {
+				reloadKeepingSelection();
+			}
+
+			@Override
+			public void addedByOthers(T entity) {
+				reloadKeepingSelection();
+			}
+
+			@Override
+			public void removedByOthers(T entity) {
+				reloadKeepingSelection();
+			}
+		};
 	}
 
 	/** Konfiguriert die Spalten der Baum-Tabelle. */
@@ -63,6 +96,34 @@ public abstract class AbstractOverviewController {
 		fullRoot = buildTree();
 		restoreExpanded(fullRoot, expanded);
 		applyFilter();
+	}
+
+	/**
+	 * Wie {@link #reload()}, die Auswahl bleibt: Die neuen Knoten gleichen den bisherigen über {@code equals} (Events,
+	 * Vorstellungen und Hallen über die ID, auch wenn ein anderer Rechner das Objekt ersetzt hat). Gibt es den gewählten
+	 * Knoten nicht mehr, ist sein nächster vorhandener Vorfahre gewählt.
+	 */
+	protected void reloadKeepingSelection() {
+		List<Object> path = new ArrayList<>();
+		for (TreeItem<Object> item = selectedItem(); item != null && item.getParent() != null; item = item.getParent()) {
+			path.add(0, item.getValue());
+		}
+		reload();
+		TreeItem<Object> found = treeTableView.getRoot();
+		if (found == null) {
+			return;
+		}
+		for (Object value : path) {
+			TreeItem<Object> next = found.getChildren().stream().filter(child -> Objects.equals(child.getValue(), value)).findFirst().orElse(null);
+			if (next == null) {
+				break;
+			}
+			found.setExpanded(true);
+			found = next;
+		}
+		if (found != treeTableView.getRoot()) {
+			treeTableView.getSelectionModel().select(found);
+		}
 	}
 
 	private void collectExpanded(TreeItem<Object> item, Set<Object> expanded) {

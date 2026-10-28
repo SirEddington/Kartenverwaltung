@@ -21,9 +21,14 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
@@ -43,6 +48,20 @@ public class CashReconciliationController implements ContentController, Exportab
 	// Verhindert, dass das programmatische Setzen von Spinner/Kommentarfeld (beim
 	// Laden einer Vorstellung) fälschlich als Nutzereingabe interpretiert wird.
 	private boolean updatingFromModel = false;
+
+	// true, solange die Ansicht in einem gezeigten Fenster steht (nur dann ist die Vorstellung bei EditingUnits gemeldet)
+	private boolean shown = false;
+	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
+	// Fremde Änderungen am gezeigten Event: Die Zahlen werden neu berechnet. Ein neu zusammengesetztes Event (anderes
+	// Objekt) bindet die Shell mit setEvent neu
+	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
+		@Override
+		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
+			if (event == selectedEvent) {
+				refresh();
+			}
+		}
+	};
 
 	// Zuletzt in refresh() berechnete Rohwerte (Cent/Anzahl), damit der Export
 	// dieselben Zahlen nutzt wie die Anzeige, ohne formatierte Label-Strings
@@ -104,6 +123,30 @@ public class CashReconciliationController implements ContentController, Exportab
 		});
 
 		applyEditMode();
+
+		// Fremde Änderungen nur, solange die Kasse zu sehen ist; im Bearbeitungsmodus ist die Vorstellung dann in Bearbeitung
+		LiveViews.whileShown(actualCashSpinner, () -> {
+			eventRepository.addListener(foreignChanges);
+			shown = true;
+			reportEditing();
+		}, () -> {
+			eventRepository.removeListener(foreignChanges);
+			shown = false;
+			reportEditing();
+		});
+	}
+
+	/**
+	 * Im Bearbeitungsmodus (und nur in einem gezeigten Fenster) ist die gewählte Vorstellung in Bearbeitung: Ein fremder Stand
+	 * für sie wird zurückgestellt und kommt, sobald der Bearbeitungsmodus, die Vorstellung oder die Ansicht verlassen ist. Die
+	 * Meldung endet auf jedem Weg hinaus, sonst bliebe die Vorstellung für fremde Stände gesperrt.
+	 */
+	private void reportEditing() {
+		if (shown && editMode && selectedPres != null) {
+			EditingUnits.getInstance().begin(this, List.of(selectedPres));
+		} else {
+			EditingUnits.getInstance().end(this);
+		}
 	}
 
 	/**
@@ -170,7 +213,11 @@ public class CashReconciliationController implements ContentController, Exportab
 
 		updatingFromModel = true;
 		actualCashSpinner.getValueFactory().setValue(istCents / 100.0);
-		txtDifferenceComment.setText(selectedPres != null && selectedPres.getCashDifferenceComment() != null ? selectedPres.getCashDifferenceComment() : "");
+		String comment = selectedPres != null && selectedPres.getCashDifferenceComment() != null ? selectedPres.getCashDifferenceComment() : "";
+		// Nur bei anderem Text: Eine fremde Änderung an einer Buchung darf nicht den Cursor in einem getippten Kommentar verrücken
+		if (!comment.equals(txtDifferenceComment.getText())) {
+			txtDifferenceComment.setText(comment);
+		}
 		updatingFromModel = false;
 
 		updateEditableControlsState();
@@ -332,6 +379,7 @@ public class CashReconciliationController implements ContentController, Exportab
 		this.selectedEvent = event;
 		this.selectedPres = null;
 		refresh();
+		reportEditing();
 	}
 
 	@Override
@@ -341,6 +389,7 @@ public class CashReconciliationController implements ContentController, Exportab
 			this.selectedEvent = presentation.getParent();
 		}
 		refresh();
+		reportEditing();
 	}
 
 	@Override
@@ -363,5 +412,6 @@ public class CashReconciliationController implements ContentController, Exportab
 	public void setEditMode(boolean enabled) {
 		editMode = enabled;
 		applyEditMode();
+		reportEditing();
 	}
 }

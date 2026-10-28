@@ -13,6 +13,7 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Shape;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
@@ -58,6 +59,10 @@ public class HallManagementController extends AbstractOverviewController {
 	private Map<String, Integer> usageCounts = new HashMap<>();
 	private Map<String, Integer> planUsageCounts = new HashMap<>();
 
+	// Fremde Änderungen an Hallen und, wegen der Nutzungszahlen, an Events: Der Baum wird neu aufgebaut
+	private final RepositoryListener<Hall> foreignHallChanges = foreignChangeReloader();
+	private final RepositoryListener<Event> foreignEventChanges = foreignChangeReloader();
+
 	@FXML
 	private TreeTableColumn<Object, String> colName;
 	@FXML
@@ -78,6 +83,17 @@ public class HallManagementController extends AbstractOverviewController {
 	private TreeTableColumn<Object, String> colUsage;
 	@FXML
 	private TreeTableColumn<Object, String> colShape;
+
+	@Override
+	protected void watchForeignChanges(boolean watch) {
+		if (watch) {
+			hallRepository.addListener(foreignHallChanges);
+			eventRepository.addListener(foreignEventChanges);
+		} else {
+			hallRepository.removeListener(foreignHallChanges);
+			eventRepository.removeListener(foreignEventChanges);
+		}
+	}
 
 	@Override
 	protected void setupColumns() {

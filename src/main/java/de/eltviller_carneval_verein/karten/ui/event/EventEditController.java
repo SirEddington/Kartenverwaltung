@@ -19,17 +19,22 @@ import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SaleDates;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
@@ -38,6 +43,7 @@ import de.eltviller_carneval_verein.karten.ui.event.PresentationTables.Item;
 import de.eltviller_carneval_verein.karten.ui.input.TableInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
@@ -182,6 +188,30 @@ public class EventEditController {
 	// true, solange die Detailfelder aus einer Vorstellung befüllt werden: Dabei wird nichts ins Modell geschrieben
 	private boolean loadingDetails = false;
 
+	// Eine fremde Änderung kam, während eine Eingabe offen war; die Ansicht führt sich nach deren Ende nach
+	private boolean foreignChangePending = false;
+	// Fremde Änderungen an Events: Die Tabellen führen sich nach; ist das gezeigte Event gelöscht, geht es zurück zur Übersicht
+	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
+		@Override
+		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
+			showForeignChanges();
+		}
+
+		@Override
+		public void addedByOthers(Event event) {
+			showForeignChanges();
+		}
+
+		@Override
+		public void removedByOthers(Event event) {
+			if (event.equals(currentEvent)) {
+				leaveDeletedEvent(event);
+			} else {
+				showForeignChanges();
+			}
+		}
+	};
+
 	public void initData(Event event, Presentation presentation, boolean editable) {
 
 		if (event != null) {
@@ -210,6 +240,99 @@ public class EventEditController {
 		setupContextMenu();
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
 		SaveShortcut.install(btnSave);
+		setupForeignChanges();
+	}
+
+	/**
+	 * Fremde Änderungen: Eine Zelle im Bearbeiten hält ihr Objekt für fremde Stände zurück ({@link EditingUnits#watch}); endet
+	 * die offene Eingabe, kommt Verpasstes nach. Angemeldet ist die Ansicht nur, solange sie zu sehen ist; eine mit ihr
+	 * verschwundene Zelle gibt dabei ihr Objekt frei.
+	 */
+	private void setupForeignChanges() {
+		EditingUnits editing = EditingUnits.getInstance();
+		editing.watch(eventTable, event -> event);
+		editing.watch(presTable, presentation -> presentation);
+		editing.watch(seatTable, booking -> booking);
+		for (TableView<?> table : List.of(eventTable, presTable, seatTable)) {
+			table.editingCellProperty().addListener((obs, before, cell) -> {
+				if (cell == null) {
+					showPendingForeignChanges();
+				}
+			});
+		}
+		spnPresPrice.getEditor().focusedProperty().addListener((obs, wasFocused, focused) -> {
+			if (!focused) {
+				showPendingForeignChanges();
+			}
+		});
+		LiveViews.whileShown(eventPerfHBox, () -> repository.addListener(foreignChanges), () -> {
+			repository.removeListener(foreignChanges);
+			editing.end(eventTable);
+			editing.end(presTable);
+			editing.end(seatTable);
+		});
+	}
+
+	/** Ob eine Eingabe offen ist, die ein Neuzeichnen der Tabellen und Felder wegrisse. */
+	private boolean inputOpen() {
+		return eventTable.getEditingCell() != null || presTable.getEditingCell() != null || seatTable.getEditingCell() != null
+				|| spnPresPrice.getEditor().isFocused();
+	}
+
+	/** Holt eine zurückgestellte Auffrischung nach, nachdem die laufende Bestätigung der Eingabe zu Ende ist. */
+	private void showPendingForeignChanges() {
+		if (foreignChangePending) {
+			Platform.runLater(this::showForeignChanges);
+		}
+	}
+
+	/**
+	 * Führt Event-Tabelle, Vorstellungstabelle, Tische, Sitze und die Felder der gezeigten Vorstellung nach Änderungen
+	 * anderer Rechner nach. Event und Vorstellung bleiben über die ID gewählt, auch wenn ein anderer Rechner das Objekt
+	 * ersetzt hat (ein veraltetes Objekt bliebe sonst gewählt, und sein Speichern würde abgelehnt); der Bearbeitungsmodus
+	 * bleibt. Nie während einer offenen Eingabe (das Neuzeichnen risse sie weg): Dann kommt es nach deren Ende nach.
+	 */
+	private void showForeignChanges() {
+		if (inputOpen()) {
+			foreignChangePending = true;
+			return;
+		}
+		foreignChangePending = false;
+		String eventId = currentEvent == null ? null : currentEvent.getId();
+		String presentationId = currentPres == null ? null : currentPres.getId();
+		Item shownTable = tableTable.getSelectionModel().getSelectedItem();
+		String tableLabel = shownTable == null ? null : shownTable.label();
+		List<Booking> selectedSeats = new ArrayList<>(seatTable.getSelectionModel().getSelectedItems());
+
+		loadEvents();
+		// Erst abwählen: Ein gleiches (ID), aber veraltetes Objekt bliebe sonst die Auswahl der Tabelle
+		eventTable.getSelectionModel().clearSelection();
+		Event event = masterEventData.stream().filter(candidate -> candidate.getId().equals(eventId)).findFirst().orElse(null);
+		if (event == null) {
+			refreshPresentationTable(null, null);
+			return;
+		}
+		eventTable.getSelectionModel().select(event);
+		Presentation presentation = event.getPresentations().stream().filter(candidate -> candidate.getId().equals(presentationId)).findFirst().orElse(null);
+		refreshPresentationTable(event, presentation);
+
+		masterTableData.stream().filter(item -> item.label().equals(tableLabel)).findFirst().ifPresent(item -> tableTable.getSelectionModel().select(item));
+		selectedSeats.stream().filter(masterSeatData::contains).forEach(booking -> seatTable.getSelectionModel().select(booking));
+	}
+
+	/**
+	 * Das gezeigte Event hat ein anderer Rechner gelöscht: zurück zur Übersicht (ohne Rückfrage zu diesem Event, der Tracker
+	 * hat es schon vergessen), die Fußzeile sagt warum. Bleibt die Ansicht stehen (Abbruch der Rückfrage zu anderen
+	 * ungespeicherten Events), verschwindet das Event aus den Tabellen.
+	 */
+	private void leaveDeletedEvent(Event removed) {
+		MainApp.showEventOverviewView();
+		if (btnSave.getScene() != null && btnSave.getScene().getWindow() != null) {
+			showForeignChanges();
+		}
+		// Die Übersicht hat keine Fußzeile, die Meldung öffnet dort einen Dialog: erst nach dem Ende der Benachrichtigung der Listener
+		String text = "„" + EntityLabels.nameOrPlaceholder(removed.getName()) + "“ wurde auf einem anderen Rechner gelöscht.";
+		Platform.runLater(() -> StatusMessage.getInstance().show(Severity.WARNING, text));
 	}
 
 	private void setupCollums() {

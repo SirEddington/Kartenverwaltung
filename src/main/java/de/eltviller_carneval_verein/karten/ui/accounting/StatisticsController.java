@@ -26,9 +26,12 @@ import com.lowagie.text.pdf.PdfWriter;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
@@ -49,6 +52,26 @@ public class StatisticsController implements ContentController, Exportable {
 	private final StoreEventRepository repository = StoreEventRepository.getInstance();
 
 	private List<EventStats> lastStats = List.of();
+	// Ob die zuletzt gebauten Diagramme archivierte Events enthalten (für die Auffrischung nach fremden Änderungen)
+	private boolean includeArchived = false;
+
+	// Die Statistik rechnet über alle Events: Jede Änderung eines anderen Rechners kann die Zahlen verschieben
+	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
+		@Override
+		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
+			refresh(includeArchived);
+		}
+
+		@Override
+		public void addedByOthers(Event event) {
+			refresh(includeArchived);
+		}
+
+		@Override
+		public void removedByOthers(Event event) {
+			refresh(includeArchived);
+		}
+	};
 
 	@FXML
 	private LineChart<String, Number> trendChart;
@@ -58,6 +81,8 @@ public class StatisticsController implements ContentController, Exportable {
 	@FXML
 	public void initialize() {
 		refresh(false);
+		// Fremde Änderungen nur, solange die Statistik zu sehen ist (danach hielte das Repository sie am Leben)
+		LiveViews.whileShown(trendChart, () -> repository.addListener(foreignChanges), () -> repository.removeListener(foreignChanges));
 	}
 
 	/**
@@ -66,7 +91,8 @@ public class StatisticsController implements ContentController, Exportable {
 	 * wird oder sich der Archiv-Filter ändert.
 	 */
 	public void refresh(boolean includeArchived) {
-		lastStats = repository.loadEvents().stream()
+		this.includeArchived = includeArchived;
+		lastStats =repository.loadEvents().stream()
 				.filter(event -> includeArchived || !event.isArchived())
 				.map(this::computeStats)
 				.sorted(Comparator.comparing(EventStats::sortDate))
