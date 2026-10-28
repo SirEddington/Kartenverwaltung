@@ -261,10 +261,11 @@ public final class ChangeTracker<T> {
 		if (entry == null) {
 			throw new IllegalArgumentException("Wird nicht verfolgt: " + entity);
 		}
+		Snapshot current = snapshot(entity);
 		entry.entity = entity;
 		entry.baseline = baseline;
-		entry.last = snapshot(entity);
-		entry.dirty.set(!entry.last.equals(baseline));
+		entry.last = current;
+		entry.dirty.set(!current.equals(baseline));
 		updateAnyDirty();
 	}
 
