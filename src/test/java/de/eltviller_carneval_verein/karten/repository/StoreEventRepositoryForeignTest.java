@@ -750,6 +750,35 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(1, saved.get());
 	}
 
+	@Test
+	void eventDeletedElsewhereIsRefusedFromAStaleView() throws IOException {
+		Other other = other();
+		other.repository().deleteEvent(other.event());
+		mine.applyForeign(List.of(head()));
+		assertFalse(mine.loadEvents().contains(event));
+		long before = files();
+		// eine Ansicht hält das Event noch
+		event.setName("Alt geändert");
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
+
+		assertEquals("„Alt geändert“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.",
+				refused.getMessage());
+		assertEquals(before, files(), "die fremde Löschung wird nicht überschrieben");
+		assertTrue(sync.unitState(head()).head().deleted());
+		assertTrue(mine.loadEvents().isEmpty());
+	}
+
+	@Test
+	void eventDeletedLocallyCanBeSavedAgain() throws IOException {
+		mine.deleteEvent(event);
+
+		mine.saveEvent(event);
+
+		assertFalse(sync.unitState(head()).head().deleted(), "der Nutzer holt sein Event zurück");
+		assertTrue(mine.loadEvents().contains(event));
+	}
+
 	// <-- Einarbeiten
 
 	// Regeln -->

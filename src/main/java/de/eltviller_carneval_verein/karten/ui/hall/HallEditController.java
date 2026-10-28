@@ -174,14 +174,42 @@ public class HallEditController {
 		MainApp.showHallEditViewWithChanges(current, null, plan, false);
 	}
 
-	/** Die gezeigte Halle hat ein anderer Rechner gelöscht: zurück zur Hallenverwaltung, die einen Dialog mit dem Grund zeigt. */
+	/**
+	 * Die gezeigte Halle hat ein anderer Rechner gelöscht: zurück zur Hallenverwaltung, die einen Dialog mit dem Grund zeigt.
+	 * Bleibt die Ansicht stehen (Abbruch der Rückfrage zu anderen ungespeicherten Änderungen), zeigt sie die Halle nicht mehr.
+	 */
 	private void leaveDeletedHall(Hall removed) {
-		if (!viewShown()) {
+		if (!viewShown() || hall == null || !hall.getId().equals(removed.getId())) {
 			return;
 		}
 		MainApp.showHallManagementView();
+		if (viewShown()) {
+			showNoHall();
+		}
 		// Die Hallenverwaltung hat keine Fußzeile: Die Meldung öffnet dort einen Dialog
 		StatusMessage.getInstance().show(Severity.WARNING, "„" + EntityLabels.nameOrPlaceholder(removed.getName()) + "“ wurde auf einem anderen Rechner gelöscht.");
+	}
+
+	/**
+	 * Die gezeigte Halle gibt es nicht mehr, die Ansicht bleibt aber stehen: Sie zeigt keine Halle und lässt sich nicht mehr
+	 * bearbeiten (Speichern lehnte das alte Objekt ohnehin ab). Weiter geht es mit "Zurück".
+	 */
+	private void showNoHall() {
+		setEditable(false);
+		hall = null;
+		reportEditing();
+		btnToggleEdit.setDisable(true);
+		updating = true;
+		try {
+			txtName.setText("");
+			txtDescription.setText("");
+			cmbSeatingPlan.getItems().clear();
+			cmbSeatingPlan.setValue(null);
+		} finally {
+			updating = false;
+		}
+		showPlan(null);
+		hallPlanController.setHall(null);
 	}
 
 	/**

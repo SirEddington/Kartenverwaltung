@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.repository;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -53,6 +54,13 @@ public class StoreHallRepository implements HallRepository {
 
 	/** Einheiten, bei denen das Einarbeiten scheiterte; sie kommen bei jedem Aufruf von {@link #applyForeign} wieder dran. */
 	private final Set<UnitKey> failedUnits = new LinkedHashSet<>();
+
+	/**
+	 * Die IDs der Hallen, die ein fremder Stand (gelöscht oder unlesbar) aus dem Cache genommen hat. Hält eine Ansicht eine
+	 * solche Halle noch, lehnt {@link #saveHall} sie ab: Sie schriebe ihren alten Stand über den fremden. Kommt die Halle
+	 * wieder in den Cache, gilt das nicht mehr.
+	 */
+	private final Set<String> removedByOthers = new HashSet<>();
 
 	/** Ob eine Halle gerade in Bearbeitung ist oder davon abhängt (siehe {@link #setBlockedCheck}). */
 	private Predicate<Hall> blockedCheck = hall -> false;
@@ -134,6 +142,7 @@ public class StoreHallRepository implements HallRepository {
 				.filter(snapshot -> snapshot.unit().type() == UnitType.HALL).toList();
 		Assembly<Hall> assembly = UnitMapper.assembleHalls(snapshots);
 		baseline.reset(snapshots, assembly.shown());
+		removedByOthers.clear();
 		addLoadWarnings(assembly.warnings());
 		return new ArrayList<>(assembly.items());
 	}
@@ -157,9 +166,9 @@ public class StoreHallRepository implements HallRepository {
 
 		// Ohne geladenen Vergleichsstand würde eine vorhandene Halle wie eine neue geschrieben
 		ensureLoaded();
-		// Ein fremder Stand hat das Objekt im Cache ersetzt: Das alte zu speichern überschriebe ihn
+		// Ein fremder Stand hat das Objekt im Cache ersetzt oder entfernt: Das alte zu speichern überschriebe ihn
 		Hall cached = cachedHall(hall.getId());
-		if (cached != null && cached != hall) {
+		if ((cached != null && cached != hall) || (cached == null && removedByOthers.contains(hall.getId()))) {
 			throw new LockedUnitException("„" + EntityLabels.nameOrPlaceholder(hall.getName())
 					+ "“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.");
 		}
@@ -269,6 +278,7 @@ public class StoreHallRepository implements HallRepository {
 		List<UnitSnapshot> snapshots = states.stream().map(UnitSnapshot::of).toList();
 		Assembly<Hall> current = UnitMapper.assembleHalls(snapshots);
 		baseline.resetOwner(hallId, snapshots, current.shown());
+		removedByOthers.remove(hallId);
 		if (!current.items().isEmpty()) {
 			Hall fresh = current.items().get(0);
 			int index = cachedHalls.indexOf(fresh);
@@ -443,6 +453,7 @@ public class StoreHallRepository implements HallRepository {
 			}
 			if (old != null) {
 				cachedHalls.remove(old);
+				removedByOthers.add(hallId);
 				listeners.notifyRemovedByOthers(old);
 			}
 			return;
@@ -463,6 +474,7 @@ public class StoreHallRepository implements HallRepository {
 			}));
 		} else {
 			baseline.adopt(hallId, current, true);
+			removedByOthers.remove(hallId);
 			insertSorted(fresh);
 			listeners.notifyAddedByOthers(fresh);
 		}

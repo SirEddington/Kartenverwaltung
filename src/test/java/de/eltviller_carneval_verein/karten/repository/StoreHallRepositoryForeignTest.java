@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.repository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -429,6 +430,61 @@ class StoreHallRepositoryForeignTest {
 		assertTrue(result.warnings().get(0).contains(hall.getId()), result.warnings().get(0));
 		assertEquals(List.of("removed Stadthalle"), recorder.calls);
 		assertSame(hall, recorder.entities.get(0));
+	}
+
+	@Test
+	void hallDeletedElsewhereIsRefusedFromAStaleView() throws IOException {
+		StoreHallRepository other = other();
+		other.deleteHall(other.findById(hall.getId()));
+		mine.applyForeign(List.of(unit()));
+		assertNull(mine.findById(hall.getId()));
+		long before = files();
+		// der Hallen-Editor zeigt die Halle noch (Rückfrage beim Verlassen abgebrochen)
+		hall.setName("Alt geändert");
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveHall(hall));
+
+		assertEquals("„Alt geändert“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.",
+				refused.getMessage());
+		assertEquals(before, files(), "die fremde Löschung wird nicht überschrieben");
+		assertNull(mine.findById(hall.getId()));
+	}
+
+	@Test
+	void hallUnreadableElsewhereIsRefusedFromAStaleView() throws IOException {
+		foreignVersion(unit(), payload -> payload.put("id", "anderes"));
+		mine.applyForeign(List.of(unit()));
+		long before = files();
+
+		assertThrows(LockedUnitException.class, () -> mine.saveHall(hall));
+
+		assertEquals(before, files());
+	}
+
+	@Test
+	void hallDeletedLocallyCanBeSavedAgain() throws IOException {
+		mine.deleteHall(hall);
+
+		mine.saveHall(hall);
+
+		assertFalse(sync.unitState(unit()).head().deleted());
+		assertSame(hall, mine.findById(hall.getId()));
+	}
+
+	@Test
+	void hallRevivedElsewhereIsSavableAgain() throws IOException {
+		StoreHallRepository other = other();
+		Hall theirs = other.findById(hall.getId());
+		other.deleteHall(theirs);
+		mine.applyForeign(List.of(unit()));
+		other.saveHall(theirs);
+		mine.applyForeign(List.of(unit()));
+		Hall revived = mine.findById(hall.getId());
+
+		revived.setName("Neu");
+		mine.saveHall(revived);
+
+		assertEquals("Neu", sync.unitState(unit()).head().payload().get("name").asText());
 	}
 
 	@Test
