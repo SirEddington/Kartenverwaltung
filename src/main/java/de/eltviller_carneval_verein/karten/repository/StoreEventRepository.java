@@ -2,11 +2,25 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
+import de.eltviller_carneval_verein.karten.store.ChainStep;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
@@ -18,6 +32,8 @@ import de.eltviller_carneval_verein.karten.store.UnitType;
  * zerlegt und nur geschrieben, was sich gegenüber dem geladenen Stand geändert hat (siehe {@link UnitBaseline}).
  */
 public class StoreEventRepository implements EventRepository {
+
+	private static final Logger LOG = Logger.getLogger(StoreEventRepository.class.getName());
 
 	private static StoreEventRepository instance;
 
@@ -34,6 +50,15 @@ public class StoreEventRepository implements EventRepository {
 	private final List<String> loadWarnings = new ArrayList<>();
 
 	private final RepositoryListeners<Event> listeners = new RepositoryListeners<>();
+
+	/** Die zurückgestellten fremden Stände; {@link #applyForeign} prüft sie bei jedem Aufruf erneut. */
+	private final Map<UnitKey, Deferral> deferred = new LinkedHashMap<>();
+
+	/** Ob für das Modellobjekt einer Einheit gerade eine Eingabe offen ist (siehe {@link #setEditingCheck}). */
+	private Predicate<Object> inEditing = model -> false;
+
+	/** Die Halle zur ID für den Abgleich der Buchungen fremder Stände (siehe {@link #setHallLookup}). */
+	private Function<String, Hall> hallLookup = hallId -> null;
 
 	/**
 	 * Liefert die einzige Instanz des Repositorys. Alle Controller sollen sich
@@ -260,6 +285,11 @@ public class StoreEventRepository implements EventRepository {
 		listeners.add(listener);
 	}
 
+	/** Meldet einen Listener ab (etwa wenn eine Ansicht verlassen wird). */
+	public void removeListener(RepositoryListener<Event> listener) {
+		listeners.remove(listener);
+	}
+
 	/**
 	 * Ersetzt das Event mit derselben ID im Cache durch ein anderes Objekt, z. B. nach dem Wiederherstellen eines
 	 * früheren Zustands. Der Versionsspeicher bleibt unberührt, und es wird kein Listener benachrichtigt. Ist das Event
@@ -300,4 +330,410 @@ public class StoreEventRepository implements EventRepository {
 		listeners.notifyDeleted(event);
 	}
 
+	// Fremde Stände -->
+
+	/**
+	 * Wer entscheidet, ob für ein Modellobjekt (Event, Presentation oder Booking) gerade eine Eingabe offen ist, die noch
+	 * nicht im Modell steht. Ein fremder Stand dafür wird zurückgestellt. Vorgabe: nie.
+	 */
+	public void setEditingCheck(Predicate<Object> inEditing) {
+		this.inEditing = inEditing;
+	}
+
+	/**
+	 * Woher die Bestuhlung kommt, mit der die Buchungen fremd geänderter oder neuer Vorstellungen abgeglichen werden (in der
+	 * App die Hallen des Hallen-Repositorys). Vorgabe: keine Halle, wie eine nicht gefundene.
+	 */
+	public void setHallLookup(Function<String, Hall> hallLookup) {
+		this.hallLookup = hallLookup;
+	}
+
+	/**
+	 * Arbeitet die Stände ein, die andere Rechner für diese Einheiten geschrieben haben (Spec KARV-85, "Entscheidung je
+	 * Einheit", "Einarbeiten" und "Fehlerfälle"). Hallen werden übergangen; die zurückgestellten Einheiten früherer Aufrufe
+	 * werden jedes Mal mit geprüft. Je Einheit gilt {@link ForeignDecision}: Ein Nachfolger des Vergleichsstands in der
+	 * gültigen Kette wird eingearbeitet, außer der Nutzer hat die Einheit ungespeichert geändert oder bearbeitet sie gerade
+	 * (bei Löschung von Kopf oder Vorstellung und beim Wechsel von Halle oder Bestuhlung zählt alles darunter); dann wird
+	 * er zurückgestellt, der Vergleichsstand bleibt. Je Event werden Objekt im Cache und Vergleichsstand in einem Schritt
+	 * nachgeführt, danach erfahren es die Listener. Ist noch nichts geladen, passiert nichts: Das erste Laden liest
+	 * ohnehin den aktuellen Stand.
+	 * <p>
+	 * Nur auf dem Oberflächen-Thread aufrufen: Modell und Vergleichsstand sind nicht synchronisiert.
+	 *
+	 * @return alle danach zurückgestellten Stände und die Warnungen für den Nutzer
+	 */
+	public ForeignResult applyForeign(Collection<UnitKey> units) {
+		if (cachedEvents == null) {
+			return new ForeignResult(List.of(), List.of());
+		}
+		Set<UnitKey> wanted = new LinkedHashSet<>();
+		for (UnitKey unit : units) {
+			if (unit.type() != UnitType.HALL) {
+				wanted.add(unit);
+			}
+		}
+		wanted.addAll(deferred.keySet());
+		List<String> warnings = new ArrayList<>();
+		if (!wanted.isEmpty()) {
+			Map<UnitKey, UnitSnapshot> current = sync.snapshots(wanted);
+			// was der Index nicht mehr kennt, lässt sich nicht einarbeiten
+			deferred.keySet().retainAll(current.keySet());
+			Map<String, List<UnitSnapshot>> byEvent = new LinkedHashMap<>();
+			for (UnitKey unit : wanted) {
+				UnitSnapshot snapshot = current.get(unit);
+				if (snapshot != null) {
+					byEvent.computeIfAbsent(unit.eventId(), k -> new ArrayList<>()).add(snapshot);
+				}
+			}
+			try {
+				Map<UnitKey, List<ChainStep>> chains = sync.chains(current.keySet());
+				for (List<UnitSnapshot> ofEvent : byEvent.values()) {
+					applyForeign(ofEvent, chains, warnings);
+				}
+			} catch (IOException e) {
+				LOG.log(Level.WARNING, "Die Ketten fremd geänderter Einheiten ließen sich nicht lesen", e);
+				warnings.add("Änderungen von einem anderen Rechner ließen sich nicht einarbeiten: " + StoreMessages.describe(e));
+			}
+		}
+		return new ForeignResult(new ArrayList<>(deferred.values()), warnings);
+	}
+
+	/** Versucht die zurückgestellten Stände erneut, etwa nach dem Speichern oder wenn eine Bearbeitung endet. */
+	public ForeignResult retryDeferred() {
+		return applyForeign(List.of());
+	}
+
+	/**
+	 * Die Einheiten aller Events im Cache, die der Nutzer ungespeichert geändert hat: Inhalt im Modell anders als im
+	 * Vergleichsstand, oder nur auf einer Seite vorhanden (im Vergleichsstand zählt nur eine angezeigte). Lässt sich ein
+	 * Event nicht zerlegen (zwei Buchungen auf einem Platz), zählen sein Kopf und alles Angezeigte.
+	 */
+	public Set<UnitKey> locallyChangedUnits() {
+		Set<UnitKey> changed = new HashSet<>();
+		if (cachedEvents != null) {
+			for (Event event : cachedEvents) {
+				LocalChanges changes = localChanges(event);
+				changed.addAll(changes.units());
+				if (changes.all()) {
+					changed.add(UnitKey.event(event.getId()));
+					changed.addAll(baseline.shownUnits(event.getId()));
+				}
+			}
+		}
+		return changed;
+	}
+
+	/** Der Stand der Einheit im Vergleichsstand (nur für Tests). */
+	UnitSnapshot knownUnit(UnitKey unit) {
+		return baseline.known(unit);
+	}
+
+	/**
+	 * Die lokal veränderten Einheiten eines Events; {@code all}, wenn es sich nicht zerlegen lässt (dann gilt jede Einheit
+	 * als verändert).
+	 */
+	private record LocalChanges(Set<UnitKey> units, boolean all) {
+
+		boolean none() {
+			return !all && units.isEmpty();
+		}
+	}
+
+	private LocalChanges localChanges(Event event) {
+		Map<UnitKey, ObjectNode> model;
+		try {
+			model = UnitMapper.payloads(event);
+		} catch (IllegalStateException e) {
+			return new LocalChanges(Set.of(), true);
+		}
+		Set<UnitKey> changed = new HashSet<>();
+		for (Map.Entry<UnitKey, ObjectNode> entry : model.entrySet()) {
+			UnitKey unit = entry.getKey();
+			UnitSnapshot known = baseline.known(unit);
+			if (known == null || known.deleted() || !baseline.isShown(unit) || !entry.getValue().equals(known.payload())) {
+				changed.add(unit);
+			}
+		}
+		for (UnitKey unit : baseline.shownUnits(event.getId())) {
+			if (!model.containsKey(unit)) {
+				changed.add(unit);
+			}
+		}
+		return new LocalChanges(changed, false);
+	}
+
+	/** Entscheidet und arbeitet ein für die gemeldeten Einheiten eines Events. */
+	private void applyForeign(List<UnitSnapshot> snapshots, Map<UnitKey, List<ChainStep>> chains, List<String> warnings) {
+		String eventId = snapshots.get(0).unit().eventId();
+		Event event = cachedEvent(eventId);
+		List<UnitSnapshot> successors = new ArrayList<>();
+		for (UnitSnapshot current : snapshots) {
+			UnitKey unit = current.unit();
+			UnitSnapshot known = baseline.known(unit);
+			ForeignDecision decision = decide(known, current, chainOf(chains, unit));
+			if (decision != ForeignDecision.APPLY) {
+				deferred.remove(unit);
+			}
+			if (decision == ForeignDecision.KNOWN) {
+				adoptStatus(eventId, known, current, warnings);
+			} else if (decision == ForeignDecision.FORK) {
+				LOG.info("Fremder Stand von " + unit.relativePath()
+						+ " nicht eingearbeitet: Die eigene Version ist unterlegen (Gabelung).");
+			} else if (decision == ForeignDecision.APPLY) {
+				successors.add(current);
+			}
+		}
+		if (successors.isEmpty()) {
+			return;
+		}
+
+		// "lokal verändert" kostet das Zerlegen des Events: erst prüfen, wenn ein Nachfolger da ist
+		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false) : localChanges(event);
+		List<UnitSnapshot> apply = new ArrayList<>();
+		for (UnitSnapshot current : successors) {
+			if (isBlocked(event, current, changes)) {
+				defer(event, current, chainOf(chains, current.unit()));
+			} else {
+				deferred.remove(current.unit());
+				apply.add(current);
+			}
+		}
+		if (apply.isEmpty()) {
+			return;
+		}
+
+		UnitSnapshot head = apply.stream().filter(s -> s.unit().type() == UnitType.EVENT).findFirst().orElse(null);
+		boolean headReadable = head != null && UnitMapper.readUnit(head, Event.class) != null;
+		if (event == null && headReadable) {
+			addEvent(eventId, warnings);
+		} else if (event == null) {
+			// ohne sichtbares Event übernimmt nur der Vergleichsstand; angezeigt wird nichts
+			for (UnitSnapshot snapshot : apply) {
+				baseline.adopt(eventId, snapshot, false);
+			}
+			warnIfUnreadable(head, warnings);
+		} else if (head != null && !headReadable) {
+			removeEvent(event, head, apply, warnings);
+		} else {
+			mergeInto(event, apply, changes, chains, warnings);
+		}
+	}
+
+	/**
+	 * Die Entscheidung ohne "blockiert" (das fragt der Aufrufer erst danach). Hat die Einheit keine lesbare Version mehr
+	 * (gesperrt ohne lesbares Glied), gibt es keine Kette, an der sich ein Nachfolger zeigt: Sie wird wie beim Laden
+	 * behandelt und verlässt das Modell.
+	 */
+	private static ForeignDecision decide(UnitSnapshot known, UnitSnapshot current, List<ChainStep> chain) {
+		if (current.version() == null && current.status() != UnitState.Status.WAITING && known != null
+				&& known.version() != null) {
+			return ForeignDecision.APPLY;
+		}
+		return ForeignDecision.decide(known, current, chain, false);
+	}
+
+	private static List<ChainStep> chainOf(Map<UnitKey, List<ChainStep>> chains, UnitKey unit) {
+		return chains.getOrDefault(unit, List.of());
+	}
+
+	/**
+	 * Ein bekannter Stand, dessen Kette gesperrt oder wieder lesbar geworden ist: Wie beim Laden geht der Zustand in den
+	 * Vergleichsstand (Speichern lehnt eine gesperrte Einheit dann ab), das Modell bleibt. {@code WAITING} wird nicht
+	 * übernommen: Die nächste Meldung kommt, wenn die Datei da ist, und wird sie dann eine Gabelung, sperrte ein
+	 * übernommenes {@code WAITING} die Einheit bis zum Neustart.
+	 */
+	private void adoptStatus(String eventId, UnitSnapshot known, UnitSnapshot current, List<String> warnings) {
+		if (current.status() == UnitState.Status.WAITING || (known != null && known.status() == current.status())) {
+			return;
+		}
+		baseline.adopt(eventId, current, baseline.isShown(current.unit()));
+		String locked = UnitMapper.lockMessage(current.unit(), current.status());
+		if (locked != null) {
+			warnings.add(locked);
+		}
+	}
+
+	/**
+	 * Ob der Nutzer die Einheit ungespeichert geändert hat oder gerade bearbeitet; verlässt Kopf oder Vorstellung das
+	 * Modell oder wechselt eine Vorstellung Halle oder Bestuhlung, zählt jede Einheit darunter.
+	 */
+	private boolean isBlocked(Event event, UnitSnapshot current, LocalChanges changes) {
+		if (event == null) {
+			return false;
+		}
+		if (changes.all()) {
+			return true;
+		}
+		UnitKey unit = current.unit();
+		Object model = EventMerge.modelObject(event, unit);
+		if (changes.units().contains(unit) || (model != null && inEditing.test(model))) {
+			return true;
+		}
+		if (!EventMerge.touchesSubtree(event, current)) {
+			return false;
+		}
+		for (UnitKey changed : changes.units()) {
+			if (EventMerge.inSubtree(changed, unit)) {
+				return true;
+			}
+		}
+		for (Object below : EventMerge.subtree(event, unit)) {
+			if (inEditing.test(below)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Stellt den Stand zurück; der Hinweis nennt den Rechner aus dem letzten Glied der Kette. */
+	private void defer(Event event, UnitSnapshot current, List<ChainStep> chain) {
+		String machineName = chain.isEmpty() ? null : chain.get(chain.size() - 1).machineName();
+		deferred.put(current.unit(), new Deferral(current.unit(), current.version(), machineName,
+				EventMerge.nearestModelObject(event, current.unit())));
+	}
+
+	private Event cachedEvent(String eventId) {
+		for (Event event : cachedEvents) {
+			if (event.getId().equals(eventId)) {
+				return event;
+			}
+		}
+		return null;
+	}
+
+	/** Ein neues oder wiederbelebtes Event: aus dem Index zusammensetzen, Vergleichsstand wie beim Laden, in den Cache. */
+	private void addEvent(String eventId, List<String> warnings) {
+		try {
+			Map<UnitKey, UnitSnapshot> all = sync.eventSnapshots(eventId);
+			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup);
+			baseline.resetOwner(eventId, all.values(), assembly.shown());
+			warnings.addAll(assembly.warnings());
+			for (Event added : assembly.items()) {
+				cachedEvents.add(added);
+				listeners.notifyAddedByOthers(added);
+			}
+		} catch (RuntimeException e) {
+			// es hat sich nichts geändert; die nächste Meldung zu diesem Event versucht es erneut
+			failed(eventId, e, warnings);
+		}
+	}
+
+	/** Kopf gelöscht oder unlesbar: Das Event verlässt samt Kindern den Cache, wie beim Laden unter einem solchen Kopf. */
+	private void removeEvent(Event event, UnitSnapshot head, List<UnitSnapshot> apply, List<String> warnings) {
+		String eventId = event.getId();
+		cachedEvents.remove(event);
+		hideBelow(eventId, UnitKey.event(eventId));
+		for (UnitSnapshot snapshot : apply) {
+			baseline.adopt(eventId, snapshot, false);
+		}
+		warnIfUnreadable(head, warnings);
+		listeners.notifyRemovedByOthers(event);
+	}
+
+	/** Was unter Kopf bzw. Vorstellung angezeigt war, ist es nicht mehr: Es hat mit ihnen das Modell verlassen. */
+	private void hideBelow(String eventId, UnitKey root) {
+		for (UnitKey unit : baseline.shownUnits(eventId)) {
+			UnitSnapshot known = baseline.known(unit);
+			if (known != null && !unit.equals(root) && EventMerge.inSubtree(unit, root)) {
+				baseline.adopt(eventId, known, false);
+			}
+		}
+	}
+
+	private static void warnIfUnreadable(UnitSnapshot head, List<String> warnings) {
+		if (head != null && !UnitMapper.isAbsent(head) && UnitMapper.readUnit(head, Event.class) == null) {
+			warnings.add(UnitMapper.unreadableEvent(head.unit().eventId()));
+		}
+	}
+
+	/**
+	 * Arbeitet die Stände in das Event im Cache ein; jede Einheit geht gleich danach in den Vergleichsstand. Scheitert das,
+	 * wird ein nicht lokal verändertes Event aus dem Index neu zusammengesetzt; sonst bleibt, was schon eingearbeitet ist,
+	 * und der Rest wird zurückgestellt.
+	 */
+	private void mergeInto(Event event, List<UnitSnapshot> apply, LocalChanges changes,
+			Map<UnitKey, List<ChainStep>> chains, List<String> warnings) {
+		String eventId = event.getId();
+		listeners.notifyChangingByOthers(event);
+		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
+				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
+		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
+		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup);
+		Set<UnitKey> adopted = new LinkedHashSet<>();
+		EventMerge.Sink sink = new EventMerge.Sink() {
+			@Override
+			public void adopted(UnitSnapshot snapshot, boolean shown) {
+				baseline.adopt(eventId, snapshot, shown);
+				adopted.add(snapshot.unit());
+			}
+
+			@Override
+			public void left(UnitKey presentation) {
+				hideBelow(eventId, presentation);
+			}
+
+			@Override
+			public void warning(String text) {
+				warnings.add(text);
+			}
+		};
+		try {
+			EventMerge.apply(event, plan, sink);
+		} catch (RuntimeException e) {
+			failed(event.getName(), e, warnings);
+			if (changes.none() && rebuild(event, warnings)) {
+				return;
+			}
+			for (UnitSnapshot snapshot : apply) {
+				if (!adopted.contains(snapshot.unit())) {
+					defer(event, snapshot, chainOf(chains, snapshot.unit()));
+				}
+			}
+			plan = plan.restrictedTo(adopted);
+			if (adopted.isEmpty()) {
+				return;
+			}
+		}
+		EventMerge.Plan applied = plan;
+		listeners.notifyChangedByOthers(event,
+				new ForeignBatch<>(adopted, copy -> EventMerge.apply(copy, applied, EventMerge.NONE)));
+	}
+
+	/**
+	 * Nach gescheitertem Einarbeiten: setzt das Event aus dem Index neu zusammen, Vergleichsstand wie beim Laden, und
+	 * ersetzt es im Cache.
+	 *
+	 * @return ob das gelang; sonst ist nichts verändert
+	 */
+	private boolean rebuild(Event event, List<String> warnings) {
+		String eventId = event.getId();
+		Function<String, Hall> lookup = hallLookup;
+		try {
+			Collection<UnitSnapshot> all = sync.eventSnapshots(eventId).values();
+			Assembly<Event> assembly = EventMerge.assembleEvent(all, lookup);
+			if (assembly.items().isEmpty()) {
+				return false;
+			}
+			Event fresh = assembly.items().get(0);
+			baseline.resetOwner(eventId, all, assembly.shown());
+			warnings.addAll(assembly.warnings());
+			replaceCachedEvent(fresh);
+			Set<UnitKey> units = new HashSet<>();
+			all.forEach(snapshot -> units.add(snapshot.unit()));
+			listeners.notifyChangedByOthers(fresh,
+					new ForeignBatch<>(units, copy -> EventMerge.replaceContent(copy, all, lookup)));
+			return true;
+		} catch (RuntimeException e) {
+			LOG.log(Level.SEVERE, "Das Event " + eventId + " ließ sich nicht aus dem Index neu zusammensetzen", e);
+			return false;
+		}
+	}
+
+	private static void failed(String name, RuntimeException e, List<String> warnings) {
+		LOG.log(Level.SEVERE, "Fremde Änderungen an \"" + name + "\" ließen sich nicht einarbeiten", e);
+		warnings.add("Die Änderungen eines anderen Rechners an \"" + name + "\" ließen sich nicht einarbeiten: "
+				+ StoreMessages.describe(e));
+	}
+
+	// <-- Fremde Stände
 }

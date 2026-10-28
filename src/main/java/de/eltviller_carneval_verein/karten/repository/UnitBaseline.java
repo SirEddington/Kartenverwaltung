@@ -95,6 +95,39 @@ final class UnitBaseline {
 		changed(ownerId);
 	}
 
+	/**
+	 * Übernimmt den Stand einer einzelnen Einheit in den Vergleichsstand, etwa einen fremden Stand, der ins Modell
+	 * eingearbeitet wurde. {@code shownNow} sagt, ob die Einheit jetzt angezeigt wird (ins Modell eingegangen ist); eine
+	 * nicht angezeigte wird nie gelöscht.
+	 */
+	void adopt(String ownerId, UnitSnapshot snapshot, boolean shownNow) {
+		baselineOf(ownerId).put(snapshot.unit(), snapshot);
+		Set<UnitKey> units = shown.computeIfAbsent(ownerId, k -> new HashSet<>());
+		if (shownNow) {
+			units.add(snapshot.unit());
+		} else {
+			units.remove(snapshot.unit());
+		}
+		changed(ownerId);
+	}
+
+	/** Der Stand der Einheit im Vergleichsstand, oder {@code null}, wenn sie nicht bekannt ist. */
+	UnitSnapshot known(UnitKey unit) {
+		Map<UnitKey, UnitSnapshot> units = known.get(unit.ownerId());
+		return units == null ? null : units.get(unit);
+	}
+
+	/** Ob die Einheit angezeigt wird (siehe {@link UnitMapper.Assembly#shown()}). */
+	boolean isShown(UnitKey unit) {
+		Set<UnitKey> units = shown.get(unit.ownerId());
+		return units != null && units.contains(unit);
+	}
+
+	/** Die angezeigten Einheiten des Events bzw. der Halle, als Kopie. */
+	Set<UnitKey> shownUnits(String ownerId) {
+		return Set.copyOf(shown.getOrDefault(ownerId, Set.of()));
+	}
+
 	/** Die Stände der Köpfe (Events bzw. Hallen) im Vergleichsstand, auch der gelöschten. */
 	List<UnitSnapshot> heads(UnitType headType) {
 		List<UnitSnapshot> heads = new ArrayList<>();

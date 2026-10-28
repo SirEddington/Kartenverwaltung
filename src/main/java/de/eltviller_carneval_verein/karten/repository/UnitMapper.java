@@ -50,7 +50,7 @@ final class UnitMapper {
 	private static final String BOOKINGS = "bookings";
 
 	/** Vorstellungen: Datum, Uhrzeit (je {@code null} zuletzt), Name ohne Groß-/Kleinschreibung ({@code null} zuletzt), ID. */
-	private static final Comparator<Presentation> PRESENTATION_ORDER = Comparator
+	static final Comparator<Presentation> PRESENTATION_ORDER = Comparator
 			.comparing(Presentation::getDate, Comparator.nullsLast(Comparator.<LocalDate>naturalOrder()))
 			.thenComparing(Presentation::getTime, Comparator.nullsLast(Comparator.<LocalTime>naturalOrder()))
 			.thenComparing(Presentation::getName, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER))
@@ -136,6 +136,20 @@ final class UnitMapper {
 			}
 		}
 		return parts;
+	}
+
+	/**
+	 * Die Inhalte der Einheiten des Events je Schlüssel, wie {@link #decompose(Event)} sie bildet (Kopf, Vorstellungen,
+	 * Buchungen mit Daten): der Inhalt der Einheit im Modell, für den Vergleich "lokal verändert".
+	 *
+	 * @throws IllegalStateException wie {@link #decompose(Event)}
+	 */
+	static Map<UnitKey, ObjectNode> payloads(Event event) {
+		Map<UnitKey, ObjectNode> payloads = new LinkedHashMap<>();
+		for (UnitPayload part : decompose(event)) {
+			payloads.put(part.unit(), part.payload());
+		}
+		return payloads;
 	}
 
 	/** Zerlegt die Halle: Sie ist eine einzige Einheit. */
@@ -241,7 +255,7 @@ final class UnitMapper {
 	}
 
 	/** Der Text (SYS-008 bzw. SYS-009), wenn die Einheit gesperrt ist; sonst {@code null}. */
-	private static String lockMessage(UnitKey unit, Status status) {
+	static String lockMessage(UnitKey unit, Status status) {
 		return switch (status) {
 		case LOCKED_DAMAGED -> StoreMessages.damaged(unit.relativePath());
 		case LOCKED_FORMAT -> StoreMessages.newerFormat(unit.relativePath());
@@ -295,8 +309,7 @@ final class UnitMapper {
 		for (UnitSnapshot snapshot : snapshots) {
 			UnitKey unit = snapshot.unit();
 			if (unit.type() == UnitType.EVENT) {
-				Event event = read(snapshot, Event.class, warnings,
-						"Das Event " + unit.eventId() + " konnte nicht gelesen werden und fehlt.",
+				Event event = read(snapshot, Event.class, warnings, unreadableEvent(unit.eventId()),
 						idMismatch(unit.eventId(), Event::getId));
 				if (event != null) {
 					events.put(unit, event);
@@ -323,8 +336,7 @@ final class UnitMapper {
 				continue;
 			}
 			Presentation presentation = read(snapshot, Presentation.class, warnings,
-					"Die Vorstellung " + unit.presentationId() + " von \"" + event.getName()
-							+ "\" konnte nicht gelesen werden und fehlt.",
+					unreadablePresentation(unit.presentationId(), event.getName()),
 					idMismatch(unit.presentationId(), Presentation::getId));
 			if (presentation != null) {
 				presentations.put(unit, presentation);
@@ -347,8 +359,7 @@ final class UnitMapper {
 				}
 				continue;
 			}
-			Booking booking = read(snapshot, Booking.class, warnings,
-					"Eine Buchung von \"" + presentation.getName() + "\" konnte nicht gelesen werden und fehlt.",
+			Booking booking = read(snapshot, Booking.class, warnings, unreadableBooking(presentation.getName()),
 					b -> bookingMismatch(unit, b));
 			if (booking != null) {
 				bookingsOfPresentation.computeIfAbsent(presentationKey, k -> new ArrayList<>()).add(booking);
@@ -371,6 +382,50 @@ final class UnitMapper {
 		List<Event> result = new ArrayList<>(events.values());
 		result.sort(EVENT_ORDER);
 		return new Assembly<>(result, warnings, shown);
+	}
+
+	/**
+	 * Setzt eine Vorstellung mit ihren sichtbaren Buchungen zusammen, nach den Regeln von {@link #assembleEvents}: Aus
+	 * {@code bookings} zählen nur die Buchungen dieser Vorstellung, die sich lesen lassen, in der Reihenfolge der Plätze.
+	 * Die Payloads bleiben unverändert.
+	 *
+	 * @return die Vorstellung ohne Elternverweis, oder {@code null}, wenn sie gelöscht oder unlesbar ist
+	 */
+	static Presentation assemblePresentation(UnitSnapshot presentation, Collection<UnitSnapshot> bookings) {
+		Presentation result = readUnit(presentation, Presentation.class);
+		if (result == null) {
+			return null;
+		}
+		UnitKey key = presentation.unit();
+		List<Booking> visible = new ArrayList<>();
+		for (UnitSnapshot snapshot : bookings) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() == UnitType.BOOKING && unit.eventId().equals(key.eventId())
+					&& unit.presentationId().equals(key.presentationId())) {
+				Booking booking = readUnit(snapshot, Booking.class);
+				if (booking != null) {
+					visible.add(booking);
+				}
+			}
+		}
+		visible.sort(BOOKING_ORDER);
+		result.setBookings(visible);
+		return result;
+	}
+
+	/** Die Warnung für ein Event, das sich nicht lesen lässt. */
+	static String unreadableEvent(String eventId) {
+		return "Das Event " + eventId + " konnte nicht gelesen werden und fehlt.";
+	}
+
+	/** Die Warnung für eine Vorstellung, die sich nicht lesen lässt. */
+	static String unreadablePresentation(String presentationId, String eventName) {
+		return "Die Vorstellung " + presentationId + " von \"" + eventName + "\" konnte nicht gelesen werden und fehlt.";
+	}
+
+	/** Die Warnung für eine Buchung, die sich nicht lesen lässt. */
+	static String unreadableBooking(String presentationName) {
+		return "Eine Buchung von \"" + presentationName + "\" konnte nicht gelesen werden und fehlt.";
 	}
 
 	/** Setzt die Hallen aus den Ständen der Einheiten zusammen, nach Name sortiert. */
@@ -462,22 +517,63 @@ final class UnitMapper {
 	static Set<UnitKey> readableUnits(Collection<UnitSnapshot> snapshots) {
 		Set<UnitKey> readable = new HashSet<>();
 		for (UnitSnapshot snapshot : snapshots) {
-			if (snapshot.version() == null || snapshot.deleted() || snapshot.payload() == null) {
-				continue;
-			}
 			UnitKey unit = snapshot.unit();
-			boolean ok = switch (unit.type()) {
-			case EVENT -> parse(snapshot, Event.class, idMismatch(unit.eventId(), Event::getId)) != null;
-			case PRESENTATION ->
-				parse(snapshot, Presentation.class, idMismatch(unit.presentationId(), Presentation::getId)) != null;
-			case BOOKING -> parse(snapshot, Booking.class, (Booking b) -> bookingMismatch(unit, b)) != null;
-			case HALL -> parse(snapshot, Hall.class, idMismatch(unit.hallId(), Hall::getId)) != null;
+			Object value = switch (unit.type()) {
+			case EVENT -> readUnit(snapshot, Event.class);
+			case PRESENTATION -> readUnit(snapshot, Presentation.class);
+			case BOOKING -> readUnit(snapshot, Booking.class);
+			case HALL -> readUnit(snapshot, Hall.class);
 			};
-			if (ok) {
+			if (value != null) {
 				readable.add(unit);
 			}
 		}
 		return readable;
+	}
+
+	/**
+	 * Liest eine einzelne Einheit nach den Regeln des Zusammensetzens ({@link #read}, ID-Prüfung eingeschlossen), aber
+	 * ohne Warnung. Der Payload bleibt unverändert.
+	 *
+	 * @param type die Modellklasse zur Art der Einheit (Event, Presentation, Booking oder Hall)
+	 * @return ein neues Objekt, oder {@code null}, wenn die Einheit gelöscht ist, keine Version hat oder sich nicht lesen
+	 *         lässt
+	 * @throws IllegalArgumentException wenn {@code type} nicht zur Art der Einheit passt
+	 */
+	static <T> T readUnit(UnitSnapshot snapshot, Class<T> type) {
+		UnitKey unit = snapshot.unit();
+		Function<?, String> mismatchOf = switch (unit.type()) {
+		case EVENT -> idMismatch(unit.eventId(), Event::getId);
+		case PRESENTATION -> idMismatch(unit.presentationId(), Presentation::getId);
+		case BOOKING -> (Booking b) -> bookingMismatch(unit, b);
+		case HALL -> idMismatch(unit.hallId(), Hall::getId);
+		};
+		if (type != modelClass(unit.type())) {
+			throw new IllegalArgumentException(type.getSimpleName() + " passt nicht zu " + unit.relativePath());
+		}
+		if (snapshot.version() == null || snapshot.deleted() || snapshot.payload() == null) {
+			return null;
+		}
+		@SuppressWarnings("unchecked")
+		Function<T, String> typed = (Function<T, String>) mismatchOf;
+		return parse(snapshot, type, typed);
+	}
+
+	private static Class<?> modelClass(UnitType type) {
+		return switch (type) {
+		case EVENT -> Event.class;
+		case PRESENTATION -> Presentation.class;
+		case BOOKING -> Booking.class;
+		case HALL -> Hall.class;
+		};
+	}
+
+	/**
+	 * Ob die Einheit gewollt fehlt: gelöscht, oder ein Ordner ohne eigene Version mit Status {@code OK} (die Einheit gibt es
+	 * nicht). Dann gibt es, anders als bei einer unlesbaren Einheit, keine Warnung (siehe {@link #read}).
+	 */
+	static boolean isAbsent(UnitSnapshot snapshot) {
+		return snapshot.version() == null ? snapshot.status() == Status.OK : snapshot.deleted();
 	}
 
 	/** Prüft, dass die ID im Inhalt die des Ordners ist; sonst der Grund (siehe {@link #parse}). */
