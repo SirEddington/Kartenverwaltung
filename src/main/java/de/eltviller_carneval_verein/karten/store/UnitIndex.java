@@ -182,6 +182,11 @@ final class UnitIndex {
 	 * {@link #update} übernimmt sie in den Eintrag. Nur im Speicher.
 	 */
 	private final Map<UnitKey, Set<VersionId>> unlistedYet = new HashMap<>();
+	/**
+	 * Listennummern eigener Versionen, die der Index noch nicht als aktuelle Version einer Einheit kennt
+	 * ({@link #markOwnListed}); {@link #update} übernimmt sie und verwirft, was zum Stand gehört. Nur im Speicher.
+	 */
+	private final Map<UnitKey, Map<VersionId, Long>> ownListedYet = new HashMap<>();
 	/** Die Gruppen ({@code events/<Event-ID>} bzw. {@code halls}), deren Datei schon gelesen wurde. */
 	private final Set<String> loaded = new HashSet<>();
 	/** Die Gruppen, deren Datei neu geschrieben werden muss. */
@@ -292,6 +297,7 @@ final class UnitIndex {
 			if (!units.containsKey(gone)) {
 				entries.remove(gone);
 				unlistedYet.remove(gone);
+				ownListedYet.remove(gone);
 				markChanged(groupOf(gone));
 			}
 		}
@@ -357,7 +363,7 @@ final class UnitIndex {
 		Set<VersionId> absorbed = absorbedOf(unitFiles, current, chainIds);
 		entries.put(unit, new Entry(UnitSnapshot.of(state), fingerprint(unitFiles), !state.pending().isEmpty(),
 				!state.lost().isEmpty(), state.chain().stream().map(ChainStep::of).toList(), absorbed,
-				notesOf(unitFiles, state, absorbed), seenOf(unit, current), ownSeqOf(previous, current),
+				notesOf(unitFiles, state, absorbed), seenOf(unit, current), ownSeqOf(previous, unit, current, chainIds, absorbed),
 				listedOf(previous, unit, unitFiles, state, chainIds, absorbed)));
 		markChanged(groupOf(unit));
 		// Absicherung: Wer den Bestand ändert, hat die Marke schon vorher mit invalidateCleanMarker entfernt
@@ -368,6 +374,11 @@ final class UnitIndex {
 	 * Die Versionen, die vom aktuellen Stand über beliebige Vorgänger erreichbar sind (transitiv), ohne die Kette und ohne
 	 * den aktuellen Stand selbst. Liest nur die Versionen, die {@code unitFiles} schon enthält; eine genannte, aber lokal
 	 * fehlende oder unlesbare Version zählt als erreicht, ihre Vorgänger sind unbekannt.
+	 * <p>
+	 * Absichtlich weiter gefasst als die Regel "zusammengeführt" in {@link ChainResolver} (nur eine eigene oder beanspruchte
+	 * nennende Version zählt): Hier zählt jede erreichte Nennung. Für {@code ForeignDecision} genügt das, weil sie nur fragt,
+	 * ob ein früher gesehener Vergleichsstand im neuen Stand enthalten ist; ob er dort erledigt ist, entscheidet weiter
+	 * {@link ChainResolver}.
 	 */
 	private static Set<VersionId> absorbedOf(UnitFiles unitFiles, Version current, Set<VersionId> chainIds) {
 		Set<VersionId> reached = new HashSet<>();
@@ -422,13 +433,29 @@ final class UnitIndex {
 		return current != null && current.deleted() && parent ? current.seen() : Map.of();
 	}
 
-	/** Die Listennummer des bisherigen Eintrags, wenn die aktuelle Version dieselbe und eine eigene ist; sonst unbekannt. */
-	private Long ownSeqOf(Entry previous, Version current) {
-		if (previous == null || current == null || !machineId.equals(current.machine())
-				|| !current.id().equals(previous.snapshot().version())) {
-			return null;
+	/**
+	 * Die Listennummer der aktuellen Version, wenn sie eigen ist: die des bisherigen Eintrags, wenn er dieselbe Version
+	 * hatte, verbunden mit einer vorgemerkten ({@link #markOwnListed}); sonst unbekannt. Die vorgemerkten Nummern von
+	 * Versionen, die nun zum Stand gehören, entfallen.
+	 */
+	private Long ownSeqOf(Entry previous, UnitKey unit, Version current, Set<VersionId> chainIds, Set<VersionId> absorbed) {
+		Map<VersionId, Long> remembered = ownListedYet.get(unit);
+		Long number = null;
+		if (current != null && machineId.equals(current.machine())) {
+			if (previous != null && current.id().equals(previous.snapshot().version())) {
+				number = previous.ownSeq();
+			}
+			if (remembered != null && remembered.containsKey(current.id())) {
+				number = combine(number, remembered.get(current.id()));
+			}
 		}
-		return previous.ownSeq();
+		if (remembered != null) {
+			remembered.keySet().removeIf(id -> current != null && id.equals(current.id()) || chainIds.contains(id) || absorbed.contains(id));
+			if (remembered.isEmpty()) {
+				ownListedYet.remove(unit);
+			}
+		}
+		return number;
 	}
 
 	/**
@@ -535,9 +562,10 @@ final class UnitIndex {
 
 	/**
 	 * Hält fest, in welcher eigenen Änderungsliste die aktuelle Version der Einheiten steht. Nur Einträge, deren aktuelle
-	 * Version die genannte ist, ändern sich; eine ältere Version derselben Einheit oder eine Einheit ohne Eintrag bleibt
-	 * ohne Wirkung. Die Nummer {@code 0} heißt "in keiner Liste" und ersetzt nie eine bekannte Nummer ab 1: Die Liste, in der
-	 * die Version steht, bleibt wahr.
+	 * Version die genannte ist, ändern sich sofort; für eine andere Version oder eine Einheit ohne Eintrag merkt sich der
+	 * Index die Nummer, und der nächste {@link #update}, der die Version als aktuelle findet, übernimmt sie. Die Nummer
+	 * {@code 0} heißt "in keiner Liste" und ersetzt nie eine bekannte Nummer ab 1; von mehreren Nummern ab 1 gilt die
+	 * kleinste (siehe {@link #combine}).
 	 *
 	 * @param entries die Einträge der Liste (oder, bei {@code 0}, der Versionen, die ohne Liste vorliegen)
 	 * @param seq     die Nummer der Liste; {@code 0}: keine
@@ -545,22 +573,42 @@ final class UnitIndex {
 	synchronized void markOwnListed(Collection<FeedEntry> entries, long seq) {
 		boolean changed = false;
 		for (FeedEntry feedEntry : entries) {
-			Optional<UnitKey> unit = UnitKey.parse(feedEntry.unit());
-			Entry entry = unit.map(this.entries::get).orElse(null);
-			if (entry == null || !feedEntry.version().equals(entry.snapshot().version())
-					|| Long.valueOf(seq).equals(entry.ownSeq())) {
+			Optional<UnitKey> parsed = UnitKey.parse(feedEntry.unit());
+			if (parsed.isEmpty()) {
 				continue;
 			}
-			if (seq == 0 && entry.ownSeq() != null && entry.ownSeq() > 0) {
+			UnitKey unit = parsed.get();
+			Entry entry = this.entries.get(unit);
+			if (entry == null || !feedEntry.version().equals(entry.snapshot().version())) {
+				// der Index kennt diese Version noch nicht (oder nicht als aktuelle): der nächste update übernimmt die Nummer
+				ownListedYet.computeIfAbsent(unit, key -> new HashMap<>()).merge(feedEntry.version(), seq, UnitIndex::combine);
 				continue;
 			}
-			this.entries.put(unit.get(), entry.withOwnSeq(seq));
-			markChanged(groupOf(unit.get()));
-			changed = true;
+			Long number = combine(entry.ownSeq(), seq);
+			if (!number.equals(entry.ownSeq())) {
+				this.entries.put(unit, entry.withOwnSeq(number));
+				markChanged(groupOf(unit));
+				changed = true;
+			}
 		}
 		if (changed) {
 			invalidateCleanMarker();
 		}
+	}
+
+	/**
+	 * Verbindet eine bekannte Listennummer mit einer neuen: Von mehreren Nummern ab 1 gilt die kleinste (die Version steht
+	 * schon in der ersten Liste; eine spätere ist eine Wiederholung nach einem Absturz), eine Nummer ab 1 ersetzt
+	 * "keine Liste" ({@code 0}) und "unbekannt" ({@code null}), und {@code 0} ersetzt nur "unbekannt".
+	 */
+	private static Long combine(Long known, long seq) {
+		if (known == null) {
+			return seq;
+		}
+		if (seq == 0) {
+			return known;
+		}
+		return known == 0 ? seq : Math.min(known, seq);
 	}
 
 	/**
@@ -629,6 +677,7 @@ final class UnitIndex {
 		}
 		entries.clear();
 		unlistedYet.clear();
+		ownListedYet.clear();
 		loaded.addAll(groups);
 		groups.forEach(this::markChanged);
 	}
@@ -918,8 +967,17 @@ final class UnitIndex {
 		try {
 			Optional<byte[]> bytes = files.read(file);
 			if (bytes.isPresent()) {
+				boolean zeroReset = false;
 				for (Entry entry : parse(bytes.get(), group)) {
+					// "in keiner Liste" wurde vielleicht vor einem Absturz geschrieben, nachdem die Liste entstanden war: unbekannt
+					if (entry.ownSeq() != null && entry.ownSeq() == 0) {
+						entry = entry.withOwnSeq(null);
+						zeroReset = true;
+					}
 					entries.putIfAbsent(entry.snapshot().unit(), entry);
+				}
+				if (zeroReset) {
+					markChanged(group);
 				}
 			}
 		} catch (IOException | RuntimeException e) {

@@ -546,6 +546,9 @@ public final class SyncService {
 			if (current == null) {
 				// der Index folgt dort: claimLocally löst jede Einheit über resolveLocal auf (Verlustableitung)
 				claimLocally(written);
+				// ohne gemeinsamen Ordner gibt es keine Listen: Die frisch geschriebenen Versionen stehen in keiner. Nur hier ist
+				// das sicher; was claimPendingLocally findet, kann schon in einer Liste stehen (unbekannt)
+				index.markOwnListed(feedEntries(written), 0);
 			} else {
 				// erst in den Index, dann in die Warteschlange: Sobald der Auftrag läuft, trägt der Index die Listennummer ein
 				indexUnits(written);
@@ -567,12 +570,20 @@ public final class SyncService {
 	}
 
 	/**
-	 * {@code seen} einer Version: bei der Löschung eines Event-Kopfs oder einer Vorstellung im gemeinsamen Betrieb je
-	 * fremdem Rechner die Nummer der zuletzt gelesenen Liste ({@link SyncPositions}); sonst leer.
+	 * {@code seen} einer Version: bei der Löschung eines Event-Kopfs oder einer Vorstellung die ausdrücklich genannten
+	 * ({@link Change#seen()}), sonst im gemeinsamen Betrieb je fremdem Rechner die Nummer der zuletzt gelesenen Liste
+	 * ({@link SyncPositions}); sonst leer. Eine Position rückt auch über Listen vor, die nach der Wartezeit übersprungen
+	 * wurden (Entscheidung der Spezifikation, siehe "{@code seen} ist eine Annäherung").
 	 */
 	private static Map<String, Long> seenFor(Link current, Change change) {
 		UnitType type = change.unit().type();
-		if (current == null || !change.deleted() || type != UnitType.EVENT && type != UnitType.PRESENTATION) {
+		if (!change.deleted() || type != UnitType.EVENT && type != UnitType.PRESENTATION) {
+			return Map.of();
+		}
+		if (change.seen() != null) {
+			return change.seen();
+		}
+		if (current == null) {
 			return Map.of();
 		}
 		Map<String, Long> seen = new TreeMap<>();
@@ -611,8 +622,6 @@ public final class SyncService {
 			units.add(item.unit());
 		}
 		reportLosses(units);
-		// ohne gemeinsamen Ordner gibt es keine Listen: Die Versionen stehen in keiner
-		index.markOwnListed(feedEntries(items), 0);
 	}
 
 	private void enqueue(Link current, String saveId, List<UploadJob.Item> items) {

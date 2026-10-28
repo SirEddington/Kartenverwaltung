@@ -1323,6 +1323,99 @@ class UnitIndexTest {
 		assertFalse(Files.exists(cleanMarker()));
 	}
 
+	// --- R13: Listennummern über einen Absturz und bei Wiederholung
+
+	@Test
+	void persistedZeroIsUnknownAfterNonCleanStartButSurvivesCleanStart() throws IOException {
+		put(EVENT, ME, mine(1), List.of(), false);
+		UnitIndex first = index();
+		refresh(first, local);
+		first.markOwnListed(List.of(feedEntry(EVENT, mine(1))), 0);
+		assertEquals(0L, first.entries().get(EVENT).ownSeq());
+		first.flush();
+		// die Liste wurde geschrieben und der Anspruch angelegt, danach brach der Prozess ab: kein Flush, keine Marke
+		UnitFiles files = local.readUnit(EVENT);
+		assertTrue(arbiter.claim(EVENT, files.versions().get(mine(1)).version(), files.versions().get(mine(1)).bytes()).won());
+
+		UnitIndex restarted = index();
+		refresh(restarted, local);
+
+		assertNull(restarted.entries().get(EVENT).ownSeq(), "0 ist nach einem unsauberen Start nicht mehr gesichert");
+		restarted.flush();
+		assertTrue(restarted.writeCleanMarker());
+		UnitIndex clean = index();
+		assertTrue(clean.loadIfClean());
+		assertNull(clean.entries().get(EVENT).ownSeq(), "die Datei wurde ohne die 0 neu geschrieben");
+	}
+
+	@Test
+	void persistedNumberSurvivesNonCleanStartAndCleanStartKeepsZero() throws IOException {
+		put(EVENT, ME, mine(1), List.of(), false);
+		put(HALL, ME, mine(1), List.of(), false);
+		UnitIndex first = index();
+		refresh(first, local);
+		first.markOwnListed(List.of(feedEntry(EVENT, mine(1))), 4);
+		first.markOwnListed(List.of(feedEntry(HALL, mine(1))), 0);
+		first.flush();
+		assertTrue(first.writeCleanMarker());
+
+		UnitIndex clean = index();
+		assertTrue(clean.loadIfClean());
+		assertEquals(0L, clean.entries().get(HALL).ownSeq());
+		assertEquals(4L, clean.entries().get(EVENT).ownSeq());
+
+		UnitIndex dirty = index();
+		refresh(dirty, local);
+		assertEquals(4L, dirty.entries().get(EVENT).ownSeq());
+		assertNull(dirty.entries().get(HALL).ownSeq());
+	}
+
+	@Test
+	void markOwnListedKeepsTheSmallestKnownNumber() throws IOException {
+		put(EVENT, ME, mine(1), List.of(), false);
+		UnitIndex index = index();
+		refresh(index, local);
+
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(1))), 3);
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(1))), 4);
+		assertEquals(3L, index.entries().get(EVENT).ownSeq());
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(1))), 2);
+		assertEquals(2L, index.entries().get(EVENT).ownSeq());
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(1))), 0);
+		assertEquals(2L, index.entries().get(EVENT).ownSeq());
+	}
+
+	@Test
+	void markOwnListedBeforeTheEntryExistsSurvivesTheLaterUpdate() throws IOException {
+		put(EVENT, ME, mine(1), List.of(), false);
+		UnitIndex index = index();
+
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(1))), 5);
+		assertNull(index.entries().get(EVENT));
+		resolveInto(index, EVENT);
+		assertEquals(5L, index.entries().get(EVENT).ownSeq());
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(1))), 0);
+		assertEquals(5L, index.entries().get(EVENT).ownSeq());
+	}
+
+	@Test
+	void markOwnListedForANewerVersionSurvivesTheLaterUpdate() throws IOException {
+		put(EVENT, ME, mine(1), List.of(), false);
+		UnitIndex index = index();
+		refresh(index, local);
+		// die Liste ist hochgeladen, bevor der Index die neue Version kennt
+		put(EVENT, ME, mine(2), List.of(mine(1)), false);
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(1)), feedEntry(EVENT, mine(2))), 6);
+		assertEquals(6L, index.entries().get(EVENT).ownSeq(), "die alte aktuelle Version steht in der Liste");
+
+		resolveInto(index, EVENT);
+
+		assertEquals(6L, index.entries().get(EVENT).ownSeq(), "die neue Version ebenfalls: vorgemerkt und übernommen");
+		assertEquals(mine(2), index.entries().get(EVENT).snapshot().version());
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(2))), 0);
+		assertEquals(6L, index.entries().get(EVENT).ownSeq());
+	}
+
 	private static long createdFiles(FaultyFileLayer layer) {
 		return layer.calls().stream().filter(c -> c.startsWith("createNew ")).count();
 	}

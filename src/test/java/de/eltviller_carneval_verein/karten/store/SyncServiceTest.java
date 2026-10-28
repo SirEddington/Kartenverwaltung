@@ -2285,6 +2285,44 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void zeroListNumberWrittenBeforeTheUploadIsNotTrustedAfterACrash() throws IOException {
+		Node a = node("a");
+		assertTrue(a.service.startup(shared));
+		save(a, create(BOOKING, "Anna"));
+		// der Index mit "in keiner Liste" kommt auf die Platte, dann wird hochgeladen (Liste 1, lokaler Anspruch) ...
+		assertEquals(0L, indexEntry(a, BOOKING).get("ownSeq").asLong());
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		assertEquals(List.of("1.json"), names(sharedRoot.resolve("data/feeds/" + a.identity.id())));
+
+		// ... und der Prozess endet, ohne den Index noch einmal zu schreiben: unsauberer Start
+		Node restarted = node("a");
+		assertTrue(restarted.service.startup(shared));
+
+		com.fasterxml.jackson.databind.JsonNode own = indexEntry(restarted, BOOKING).get("ownSeq");
+		assertTrue(own == null || own.isNull() || own.asLong() != 0, "nicht 'in keiner Liste': " + own);
+	}
+
+	@Test
+	void explicitSeenOfAChangeIsWrittenVerbatimForDeletionsOfEventsAndPresentations() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		Version presentation = save(b, create(PRESENTATION, "Sitzung"));
+		Version booking = save(b, create(BOOKING, "Anna"));
+		Map<String, Long> explicit = Map.of(OTHER, 42L);
+
+		Version update = save(b, new Change(PRESENTATION, List.of(presentation.id()), payload("Sitzung 2"), false, null, explicit));
+		Version bookingDeletion = save(b, new Change(BOOKING, List.of(booking.id()), null, true, null, explicit));
+		Version deletion = save(b, new Change(PRESENTATION, List.of(update.id()), null, true, null, explicit));
+
+		assertEquals(Map.of(), update.seen());
+		assertEquals(Map.of(), bookingDeletion.seen());
+		assertEquals(explicit, deletion.seen());
+		assertEquals(explicit,
+				StoreCodec.readVersion(Files.readAllBytes(localFile(b, PRESENTATION, deletion.id() + ".json"))).seen());
+	}
+
+	@Test
 	void sharedModeServicesSeeEachOthersVersions() {
 		SyncService a = TestSyncServices.sharedMode(dir.resolve("a"), sharedRoot, "a", clock);
 		SyncService b = TestSyncServices.sharedMode(dir.resolve("b"), sharedRoot, "b", clock);
