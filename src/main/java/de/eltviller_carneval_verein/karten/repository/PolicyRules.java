@@ -57,13 +57,22 @@ final class PolicyRules {
 		if (isReadable(input, mine) && isReadable(input, theirs)) {
 			return null;
 		}
+		return unmerged(input);
+	}
+
+	/** "Deren" bleibt mit seinem gespeicherten Inhalt; der Vermerk UNMERGED sagt diesem Rechner, dass "Meine" weicht. */
+	static Resolution unmerged(ConflictInput input) {
+		Version theirs = input.theirs();
 		ConflictNote note = new ConflictNote(ConflictNote.Kind.UNMERGED, input.ownMachineId(), party(theirs), List.of(), null,
-				null, mine.id());
+				null, input.mine().id());
 		return new Resolution(theirs.payload(), theirs.deleted(), List.of(), note);
 	}
 
-	/** Ob die Version lesbar ist; eine Löschung hat keinen Inhalt zu lesen. */
-	private static boolean isReadable(ConflictInput input, Version version) {
+	/**
+	 * Ob die Version lesbar ist ({@link UnitMapper#isReadable} auf ihrem Inhalt in dieser Einheit); eine Löschung hat keinen
+	 * Inhalt zu lesen. Eine nicht gelöschte Version ohne Inhalt (gesperrt) ist nicht lesbar.
+	 */
+	static boolean isReadable(ConflictInput input, Version version) {
 		return version.deleted()
 				|| UnitMapper.isReadable(new UnitSnapshot(input.unit(), version.id(), Status.OK, false, version.payload()));
 	}

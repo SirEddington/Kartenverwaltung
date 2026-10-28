@@ -172,7 +172,7 @@ final class FieldMerge {
 	}
 
 	/** Die Felder der Gruppe, die der Stand enthält, als Kopie. */
-	private static ObjectNode slice(ObjectNode node, List<String> fields) {
+	static ObjectNode slice(ObjectNode node, List<String> fields) {
 		ObjectNode slice = JsonNodeFactory.instance.objectNode();
 		for (String field : fields) {
 			if (node.has(field)) {
