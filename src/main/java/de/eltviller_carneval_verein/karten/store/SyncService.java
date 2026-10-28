@@ -794,6 +794,26 @@ public final class SyncService {
 	}
 
 	/**
+	 * Die Stände der genannten Einheiten aus dem Start-Index, ohne Dateizugriff und ohne den ganzen Bestand zu kopieren.
+	 * Einheiten ohne Eintrag im Index fehlen im Ergebnis (sie werden nicht aus den Dateien aufgelöst).
+	 *
+	 * @return eine unveränderliche Kopie der Stände dieser Einheiten
+	 */
+	public Map<UnitKey, UnitSnapshot> snapshots(Collection<UnitKey> units) {
+		return index.snapshots(units);
+	}
+
+	/**
+	 * Die Stände aller Einheiten eines Events (Kopf, Vorstellungen, Buchungen) aus dem Start-Index, ohne Dateizugriff und ohne
+	 * den ganzen Bestand zu kopieren.
+	 *
+	 * @return eine unveränderliche Kopie; leer, wenn der Index zu diesem Event nichts kennt
+	 */
+	public Map<UnitKey, UnitSnapshot> eventSnapshots(String eventId) {
+		return index.eventSnapshots(eventId);
+	}
+
+	/**
 	 * Die gültigen Ketten der genannten Einheiten ohne Inhalt (Rechner, Bediener, Zeitpunkt, Speichervorgang), ältestes Glied
 	 * zuerst: der Verlauf eines Events, ohne eine Datei zu lesen. Sie stammen aus dem Start-Index; nur eine Einheit ohne
 	 * Eintrag wird aus den Dateien aufgelöst ({@link #resolveLocal}) und dabei in den Index übernommen. Eine Einheit ohne

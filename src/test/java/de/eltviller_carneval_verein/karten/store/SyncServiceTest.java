@@ -2072,4 +2072,73 @@ class SyncServiceTest {
 		assertEquals(va.id(), b.service.snapshots().get(BOOKING).version());
 		assertFalse(b.service.snapshots().get(BOOKING).deleted());
 	}
+
+	@Test
+	void snapshotsOfUnitsReturnsOnlyRequestedUnits() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		UnitKey other = UnitKey.booking("e1", "p1", "A-2");
+		Version v = save(a, create(BOOKING, "Anna"));
+		save(a, create(other, "Bert"));
+
+		Map<UnitKey, UnitSnapshot> snapshots = a.service.snapshots(List.of(BOOKING));
+
+		assertEquals(Set.of(BOOKING), snapshots.keySet());
+		assertEquals(v.id(), snapshots.get(BOOKING).version());
+		assertEquals(payload("Anna"), snapshots.get(BOOKING).payload());
+		assertThrows(UnsupportedOperationException.class, () -> snapshots.clear());
+	}
+
+	@Test
+	void snapshotsOfUnknownUnitIsAbsent() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(BOOKING, "Anna"));
+
+		Map<UnitKey, UnitSnapshot> snapshots = a.service.snapshots(List.of(UnitKey.booking("e1", "p1", "Z-9")));
+
+		assertTrue(snapshots.isEmpty());
+	}
+
+	@Test
+	void eventSnapshotsReturnsAllUnitsOfTheEvent() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		UnitKey head = UnitKey.event("e1");
+		UnitKey presentation = UnitKey.presentation("e1", "p1");
+		UnitKey second = UnitKey.booking("e1", "p1", "A-2");
+		save(a, create(head, "Fasching"));
+		save(a, create(presentation, "Sitzung"));
+		save(a, create(BOOKING, "Anna"));
+		save(a, create(second, "Bert"));
+		save(a, create(UnitKey.booking("e2", "p1", "A-1"), "Clara"));
+		save(a, create(UnitKey.hall("h1"), "Halle"));
+
+		Map<UnitKey, UnitSnapshot> snapshots = a.service.eventSnapshots("e1");
+
+		assertEquals(Set.of(head, presentation, BOOKING, second), snapshots.keySet());
+		assertTrue(a.service.eventSnapshots("e3").isEmpty());
+		assertThrows(UnsupportedOperationException.class, () -> snapshots.clear());
+	}
+
+	@Test
+	void sharedModeServicesSeeEachOthersVersions() {
+		SyncService a = TestSyncServices.sharedMode(dir.resolve("a"), sharedRoot, "a", clock);
+		SyncService b = TestSyncServices.sharedMode(dir.resolve("b"), sharedRoot, "b", clock);
+		Version v;
+		try {
+			v = a.append(UUID.randomUUID().toString(), List.of(create(BOOKING, "Anna"))).get(0);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+		TestSyncServices.tick(a);
+		// B entdeckt neue Rechner im gemeinsamen Ordner höchstens alle 30 Sekunden
+		clock.advance(Duration.ofSeconds(30));
+		TestSyncServices.tick(b);
+
+		UnitSnapshot seen = b.snapshots(List.of(BOOKING)).get(BOOKING);
+
+		assertEquals(v.id(), seen.version());
+		assertEquals(Status.OK, seen.status());
+	}
 }

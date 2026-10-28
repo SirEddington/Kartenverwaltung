@@ -39,4 +39,27 @@ public final class TestSyncServices {
 			throw new UncheckedIOException(e);
 		}
 	}
+
+	/**
+	 * Ein gestarteter Dienst im gemeinsamen Betrieb: Oberfläche und Hintergrund laufen auf dem Thread des Aufrufers, der
+	 * gemeinsame Ordner gilt immer als erreichbar, der Rechner heißt {@code machineName}. Mehrere solche Dienste mit
+	 * demselben {@code sharedDir} (und je eigenem {@code appData}) verhalten sich wie mehrere Rechner; der Takt wird mit
+	 * {@link #tick(SyncService)} von Hand ausgelöst.
+	 */
+	public static SyncService sharedMode(Path appData, Path sharedDir, String machineName, Clock clock) {
+		try {
+			MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> machineName);
+			SyncService service = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run,
+					path -> true, clock);
+			service.startup(sharedDir.toString());
+			return service;
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+	}
+
+	/** Löst einen Takt des Dienstes aus: lädt hoch, holt Fremdes ab und meldet die Änderungen. */
+	public static void tick(SyncService service) {
+		service.tick();
+	}
 }

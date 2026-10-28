@@ -304,6 +304,36 @@ final class UnitIndex {
 	}
 
 	/**
+	 * Die Stände der genannten Einheiten, soweit der Index sie kennt; Einheiten ohne Eintrag fehlen im Ergebnis. Greift nur auf
+	 * die genannten Einträge zu und kopiert nicht den ganzen Bestand.
+	 */
+	synchronized Map<UnitKey, UnitSnapshot> snapshots(Collection<UnitKey> units) {
+		Map<UnitKey, UnitSnapshot> snapshots = new HashMap<>();
+		for (UnitKey unit : units) {
+			Entry entry = entries.get(unit);
+			if (entry != null) {
+				snapshots.put(unit, entry.snapshot());
+			}
+		}
+		return Collections.unmodifiableMap(snapshots);
+	}
+
+	/**
+	 * Die Stände aller Einheiten eines Events (Kopf, Vorstellungen, Buchungen). Die Hallen gehören zu keinem Event. Kopiert nur
+	 * die Stände dieses Events, nicht den ganzen Bestand.
+	 */
+	synchronized Map<UnitKey, UnitSnapshot> eventSnapshots(String eventId) {
+		Map<UnitKey, UnitSnapshot> snapshots = new HashMap<>();
+		for (Map.Entry<UnitKey, Entry> entry : entries.entrySet()) {
+			UnitKey unit = entry.getKey();
+			if (unit.type() != UnitType.HALL && eventId.equals(unit.eventId())) {
+				snapshots.put(entry.getKey(), entry.getValue().snapshot());
+			}
+		}
+		return Collections.unmodifiableMap(snapshots);
+	}
+
+	/**
 	 * Die Ketten der genannten Einheiten, soweit der Index sie kennt; Einheiten ohne Eintrag fehlen im Ergebnis. Greift nur auf
 	 * die genannten Einträge zu.
 	 */
