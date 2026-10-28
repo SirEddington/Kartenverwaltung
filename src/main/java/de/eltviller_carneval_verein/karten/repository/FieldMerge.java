@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -75,49 +76,67 @@ final class FieldMerge {
 	}
 
 	/**
-	 * Die älteste Version der Kette, die {@code has} erfüllt: die, die einen Inhalt eingebracht hat. Für den Vermerk
-	 * ("Gegenseite"): Ist "Deren" selbst die Zusammenführung eines dritten Rechners, ist es dessen ursprüngliche Version.
+	 * Die Version, die einen Inhalt eingebracht hat: der Anfang der jüngsten ununterbrochenen Reihe von Versionen, die
+	 * {@code has} erfüllen. Wurde ein Wert gesetzt, überschrieben und wieder gesetzt (V, W, V), zählt das zweite V, nicht
+	 * das erste. Für den Vermerk ("Gegenseite"): Ist "Deren" selbst die Zusammenführung eines dritten Rechners, ist es
+	 * dessen ursprüngliche Version.
 	 *
 	 * @param chainSinceBase die Glieder der Kette seit der Basis, ältestes zuerst
 	 * @return die Version, oder {@code null}, wenn keine passt
 	 */
 	static Version introducedBy(List<Version> chainSinceBase, Predicate<Version> has) {
-		for (Version version : chainSinceBase) {
-			if (has.test(version)) {
-				return version;
+		for (int end = chainSinceBase.size() - 1; end >= 0; end--) {
+			if (has.test(chainSinceBase.get(end))) {
+				int start = end;
+				while (start > 0 && has.test(chainSinceBase.get(start - 1))) {
+					start--;
+				}
+				return chainSinceBase.get(start);
 			}
 		}
 		return null;
 	}
 
 	/**
-	 * Die älteste Version der Kette, die in einer der strittigen Gruppen den Wert von "Deren" gesetzt hat: Sie hat die
-	 * Gruppe so, wie der Konflikt sie für "Deren" festhält (nicht gelöscht).
+	 * Die Version für die Gegenseite eines Vermerks FIELDS. Ein Vermerk nennt nur eine Gegenseite: Je strittiger Gruppe
+	 * zählt der Anfang der jüngsten Reihe von Versionen, die den Wert von "Deren" tragen ({@link #introducedBy}); bei
+	 * mehreren strittigen Gruppen gilt davon die jüngste, also die Version, die zuletzt einen gewinnenden Wert gesetzt hat.
 	 *
 	 * @return die Version, oder {@code null}, wenn keine passt
 	 */
 	static Version introducedByConflict(List<Version> chainSinceBase, Map<String, List<String>> groups,
 			List<FieldConflict> conflicts) {
-		return introducedBy(chainSinceBase, version -> {
-			if (version.deleted() || version.payload() == null) {
-				return false;
+		Version latest = null;
+		int latestIndex = -1;
+		for (FieldConflict conflict : conflicts) {
+			List<String> fields = fieldsOf(groups, conflict);
+			Version start = introducedBy(chainSinceBase,
+					version -> !version.deleted() && same(version.payload(), conflict.theirs(), fields));
+			int index = start == null ? -1 : chainSinceBase.indexOf(start);
+			if (index > latestIndex) {
+				latest = start;
+				latestIndex = index;
 			}
-			for (FieldConflict conflict : conflicts) {
-				List<String> fields = new ArrayList<>(groups.getOrDefault(conflict.group(), List.of(conflict.group())));
-				conflict.theirs().fieldNames().forEachRemaining(name -> {
-					if (!fields.contains(name)) {
-						fields.add(name);
-					}
-				});
-				if (same(version.payload(), conflict.theirs(), fields)) {
-					return true;
-				}
-			}
-			return false;
-		});
+		}
+		return latest;
 	}
 
-	/** Die Gruppen und dazu eine eigene Gruppe je Feld in einem der Stände, das keine Gruppe kennt. */
+	/** Die Felder der strittigen Gruppe: die der Gruppe, bei einem unbekannten Feld die Felder im Konflikt. */
+	private static List<String> fieldsOf(Map<String, List<String>> groups, FieldConflict conflict) {
+		List<String> fields = groups.get(conflict.group());
+		if (fields != null) {
+			return fields;
+		}
+		Set<String> names = new LinkedHashSet<>();
+		conflict.mine().fieldNames().forEachRemaining(names::add);
+		conflict.theirs().fieldNames().forEachRemaining(names::add);
+		return List.copyOf(names);
+	}
+
+	/**
+	 * Die Gruppen und dazu eine eigene Gruppe je Feld in einem der Stände, das keine Gruppe kennt. Sie heißt wie das Feld;
+	 * trägt schon eine Gruppe diesen Namen, hängt ein Stern an, denn das Feld gehört nicht zu dieser Gruppe.
+	 */
 	private static Map<String, List<String>> withUnknownFields(Map<String, List<String>> groups, ObjectNode... nodes) {
 		Map<String, List<String>> all = new LinkedHashMap<>(groups);
 		Set<String> known = new HashSet<>();
@@ -126,12 +145,11 @@ final class FieldMerge {
 			for (Iterator<String> names = node.fieldNames(); names.hasNext();) {
 				String name = names.next();
 				if (known.add(name)) {
-					// trägt eine Gruppe schon diesen Namen, gehört das Feld dazu (nie eine Gruppe ersetzen)
-					all.merge(name, List.of(name), (old, added) -> {
-						List<String> extended = new ArrayList<>(old);
-						extended.addAll(added);
-						return extended;
-					});
+					String key = name;
+					while (all.containsKey(key)) {
+						key += "*";
+					}
+					all.put(key, List.of(name));
 				}
 			}
 		}

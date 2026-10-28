@@ -3,20 +3,26 @@ package de.eltviller_carneval_verein.karten.repository;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Party;
 import de.eltviller_carneval_verein.karten.store.Resolution;
+import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.Version;
 
 /**
- * Die Regeln, die für alle Einheitenarten gelten, und die Bausteine der Strategien: "Gleich" und "Löschen gewinnt" (die
- * Buchung stellt davor ihre eigene Regel für zwei Löschungen). Jede Regel liefert die {@link Resolution}, wenn sie
- * greift, sonst {@code null}. Zustandslos.
+ * Die Regeln für Event-Kopf, Vorstellung und Halle und Bausteine für die Buchung. Jede Regel liefert die
+ * {@link Resolution}, wenn sie greift, sonst {@code null}. Zustandslos.
+ * <p>
+ * Für alle Einheitenarten gilt {@link #equal} ("Gleich", die Buchung stellt davor ihre Regel für zwei Löschungen).
+ * {@link #unreadable} ist die Regel für Kopf, Vorstellung und Halle: Bei der Buchung heißt "Deren" unlesbar
+ * Doppelverkauf (K1), nicht UNMERGED. {@link #deleteWins} gilt für Einheiten, deren Gegenüber an der Identität erkannt
+ * wird (siehe dort).
  */
 final class PolicyRules {
 
@@ -24,36 +30,42 @@ final class PolicyRules {
 	}
 
 	/**
-	 * Die Regeln in ihrer Reihenfolge: unlesbarer Inhalt, "Gleich", "Löschen gewinnt".
+	 * Die Regeln für Kopf, Vorstellung und Halle in ihrer Reihenfolge: "Gleich", unlesbarer Inhalt, "Löschen gewinnt".
 	 *
-	 * @return die Auflösung, oder {@code null}, wenn keine Regel greift (beide Seiten haben Inhalt und verschiedenen)
+	 * @return die Auflösung, oder {@code null}, wenn keine Regel greift (beide Seiten haben lesbaren, verschiedenen Inhalt)
 	 */
 	static Resolution common(ConflictInput input) {
-		Resolution resolution = unreadable(input);
+		Resolution resolution = equal(input);
 		if (resolution == null) {
-			resolution = equal(input);
+			resolution = unreadable(input);
 		}
 		if (resolution == null) {
-			resolution = deleteWins(input);
+			resolution = deleteWins(input, theirs -> true);
 		}
 		return resolution;
 	}
 
 	/**
-	 * Unlesbarer Inhalt (kein Payload bei einer nicht gelöschten Version): "Deren" bleibt, der Vermerk UNMERGED sagt es
-	 * diesem Rechner. Ohne Inhalt von "Deren" (eine Auflösung ohne Inhalt würde der Dienst verwerfen) bleibt dessen
-	 * Datei, wie sie ist: ein leeres Objekt.
+	 * Unlesbarer Inhalt: Eine nicht gelöschte Version lässt sich nicht als Objekt der Einheitenart lesen oder ihre ID
+	 * passt nicht zum Ordner der Einheit ({@link UnitMapper#isReadable}). Mit einer solchen Seite gibt es keinen
+	 * Feldvergleich: "Deren" bleibt mit seinem gespeicherten Inhalt, der Vermerk UNMERGED sagt es diesem Rechner (betroffen
+	 * ist er auch dann, wenn "Deren" unlesbar ist: Sein Inhalt weicht).
 	 */
 	static Resolution unreadable(ConflictInput input) {
 		Version mine = input.mine();
 		Version theirs = input.theirs();
-		if ((mine.deleted() || mine.payload() != null) && (theirs.deleted() || theirs.payload() != null)) {
+		if (isReadable(input, mine) && isReadable(input, theirs)) {
 			return null;
 		}
 		ConflictNote note = new ConflictNote(ConflictNote.Kind.UNMERGED, input.ownMachineId(), party(theirs), List.of(), null,
 				null, mine.id());
-		ObjectNode payload = theirs.payload() != null ? theirs.payload() : JsonNodeFactory.instance.objectNode();
-		return new Resolution(payload, theirs.deleted(), List.of(), note);
+		return new Resolution(theirs.payload(), theirs.deleted(), List.of(), note);
+	}
+
+	/** Ob die Version lesbar ist; eine Löschung hat keinen Inhalt zu lesen. */
+	private static boolean isReadable(ConflictInput input, Version version) {
+		return version.deleted()
+				|| UnitMapper.isReadable(new UnitSnapshot(input.unit(), version.id(), Status.OK, false, version.payload()));
 	}
 
 	/** "Gleich": Ist "Meine" gleich "Deren" oder gleich der Basis, gilt "Deren", ohne Vermerk. */
@@ -69,12 +81,17 @@ final class PolicyRules {
 	 * <ul>
 	 * <li>"Deren" ist gelöscht, "Meine" eine Änderung: "Deren" gilt; betroffen ist dieser Rechner, die Gegenseite die
 	 * Löschung in der Kette.</li>
-	 * <li>"Meine" ist gelöscht, "Deren" eine Änderung gegen die Basis: Die Löschung gilt; betroffen ist der Rechner von
-	 * "Deren", die Gegenseite die eigene Löschung. Hat "Deren" nichts gegen die Basis geändert, entfällt der
-	 * Vermerk.</li>
+	 * <li>"Meine" ist gelöscht, "Deren" eine Änderung gegen die Basis <em>derselben Sache</em>: Die Löschung gilt;
+	 * betroffen ist der Rechner von "Deren", die Gegenseite die eigene Löschung. Hat "Deren" nichts gegen die Basis
+	 * geändert, entfällt der Vermerk. Ist "Deren" nicht dieselbe Sache ({@code sameIdentity} falsch), greift die Regel
+	 * nicht ({@code null}): Die Löschung dürfte sonst einen Inhalt löschen, den ihr Rechner nie kannte.</li>
 	 * </ul>
+	 *
+	 * @param sameIdentity ob "Deren" dieselbe Sache ist wie die Basis; Kopf, Vorstellung und Halle haben nur eine und
+	 *                     übergeben immer wahr, die Buchung prüft ihre Buchungs-ID (ein anderer Verkauf auf demselben Sitz
+	 *                     ist ein Doppelverkauf, keine Löschung)
 	 */
-	static Resolution deleteWins(ConflictInput input) {
+	static Resolution deleteWins(ConflictInput input, Predicate<Version> sameIdentity) {
 		Version mine = input.mine();
 		Version theirs = input.theirs();
 		if (theirs.deleted() && !mine.deleted()) {
@@ -83,7 +100,7 @@ final class PolicyRules {
 					party(deletion != null ? deletion : theirs), List.of(), null, null, mine.id());
 			return new Resolution(theirs.payload(), true, List.of(), note);
 		}
-		if (mine.deleted() && !theirs.deleted()) {
+		if (mine.deleted() && !theirs.deleted() && sameIdentity.test(theirs)) {
 			ConflictNote note = sameContent(theirs, input.base()) ? null
 					: new ConflictNote(ConflictNote.Kind.DELETE_WINS, theirs.machine(), party(mine), List.of(), null, null,
 							theirs.id());

@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.repository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -171,12 +172,58 @@ class FieldMergeTest {
 	}
 
 	@Test
-	void introducedByIsTheOldestMatchingVersion() {
+	void introducedByIsTheFirstVersionOfAnUnbrokenRun() {
 		Version first = version(1, "{\"v\":1}");
 		Version second = version(2, "{\"v\":2}");
 		Version third = version(3, "{\"v\":2}");
 
 		assertSame(second, FieldMerge.introducedBy(List.of(first, second, third), v -> v.payload().path("v").asInt() == 2));
+	}
+
+	@Test
+	void introducedByStartsTheLastUnbrokenRun() {
+		// V -> W -> V: Der Wert wurde zuletzt von der dritten Version wieder gesetzt, nicht von der ersten
+		Version first = version(1, "{\"v\":1}");
+		Version second = version(2, "{\"v\":2}");
+		Version third = version(3, "{\"v\":1}");
+		Version fourth = version(4, "{\"v\":1}");
+
+		assertSame(third, FieldMerge.introducedBy(List.of(first, second, third, fourth), v -> v.payload().path("v").asInt() == 1));
+		assertSame(third, FieldMerge.introducedBy(List.of(first, second, third), v -> v.payload().path("v").asInt() == 1));
+	}
+
+	@Test
+	void introducedByConflictNamesTheStartOfTheMostRecentRun() {
+		FieldMerge.Result result = merge("{\"lastName\":\"Base\",\"comment\":\"b\"}",
+				"{\"lastName\":\"Mine\",\"comment\":\"M\"}", "{\"lastName\":\"Theirs\",\"comment\":\"T\"}");
+		assertEquals(2, result.conflicts().size());
+		// "customer" gilt seit der ersten Version, "comment" erst seit der zweiten: Die jüngere Serie zählt
+		Version first = version(1, "{\"lastName\":\"Theirs\",\"comment\":\"b\"}");
+		Version second = version(2, "{\"lastName\":\"Theirs\",\"comment\":\"T\"}");
+
+		assertSame(second, FieldMerge.introducedByConflict(List.of(first, second), FieldGroups.booking(), result.conflicts()));
+	}
+
+	@Test
+	void unknownFieldNamedLikeAGroupDoesNotJoinTheGroup() {
+		// "payment" ist der Name einer Gruppe (paymentStatus, paymentDate), aber hier ein unbekanntes Feld
+		FieldMerge.Result both = merge("{\"paymentStatus\":\"NONE\",\"payment\":\"a\"}",
+				"{\"paymentStatus\":\"CASH\",\"payment\":\"a\"}", "{\"paymentStatus\":\"NONE\",\"payment\":\"b\"}");
+		assertEquals(json("{\"paymentStatus\":\"CASH\",\"payment\":\"b\"}"), both.merged());
+		assertTrue(both.conflicts().isEmpty());
+
+		FieldMerge.Result disputed = merge("{\"paymentStatus\":\"NONE\",\"payment\":\"a\"}",
+				"{\"paymentStatus\":\"CASH\",\"payment\":\"c\"}", "{\"paymentStatus\":\"NONE\",\"payment\":\"b\"}");
+		assertEquals(json("{\"paymentStatus\":\"CASH\",\"payment\":\"b\"}"), disputed.merged());
+		assertEquals(1, disputed.conflicts().size());
+		assertEquals(json("{\"payment\":\"c\"}"), disputed.conflicts().get(0).mine());
+		assertEquals(json("{\"payment\":\"b\"}"), disputed.conflicts().get(0).theirs());
+		assertFalse(FieldGroups.booking().containsKey(disputed.conflicts().get(0).group()));
+
+		// die Herkunft des strittigen unbekannten Felds wird gefunden
+		Version first = version(1, "{\"paymentStatus\":\"NONE\",\"payment\":\"b\"}");
+		Version second = version(2, "{\"paymentStatus\":\"CASH\",\"payment\":\"b\"}");
+		assertSame(first, FieldMerge.introducedByConflict(List.of(first, second), FieldGroups.booking(), disputed.conflicts()));
 	}
 
 	@Test

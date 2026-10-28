@@ -61,9 +61,9 @@ class HeadPresentationHallPolicyTest {
 				"Kasse " + machine, "Bediener " + machine, Instant.EPOCH, "save-" + counter, true, json("{}"));
 	}
 
-	private static Version unreadable(String machine) {
-		return new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter++), List.of(), machine,
-				"Kasse " + machine, "Bediener " + machine, Instant.EPOCH, "save-" + counter, false, null);
+	/** Eine Vorstellung, die sich nicht lesen lässt: Das Datum ist kein Datum. */
+	private static Version unreadablePresentation(String machine) {
+		return version(machine, presentation("date", "\"kaputt\"").toString());
 	}
 
 	private static ConflictInput input(UnitKey unit, Version base, Version mine, Version theirs, Version... chain) {
@@ -243,16 +243,16 @@ class HeadPresentationHallPolicyTest {
 	}
 
 	@Test
-	void unreadableTheirsIsUnmerged() {
+	void unreadableTheirsIsUnmergedAndTheirsStays() {
 		Version base = version(THIRD, PRESENTATION_BASE);
 		Version mine = version(OWN, presentation("name", "\"Samstag\"").toString());
-		Version theirs = unreadable(OTHER);
+		Version theirs = unreadablePresentation(OTHER);
 
 		Resolution resolution = PRESENTATION_POLICY.resolve(input(PRESENTATION, base, mine, theirs, theirs));
 
-		// "Deren" bleibt; ohne lesbaren Inhalt als leeres Objekt (der Dienst verwürfe eine Auflösung ohne Inhalt)
+		// kein Feldvergleich mit einer unlesbaren Seite: Der gespeicherte Inhalt von "Deren" bleibt, wie er ist
 		assertFalse(resolution.deleted());
-		assertEquals(json("{}"), resolution.payload());
+		assertEquals(theirs.payload(), resolution.payload());
 		ConflictNote note = resolution.note();
 		assertEquals(Kind.UNMERGED, note.kind());
 		assertEquals(OWN, note.affected());
@@ -263,7 +263,8 @@ class HeadPresentationHallPolicyTest {
 	@Test
 	void unreadableMineIsUnmergedAndTheirsStays() {
 		Version base = version(THIRD, PRESENTATION_BASE);
-		Version mine = unreadable(OWN);
+		// Meine ist unlesbar; Deren hat eine andere Gruppe geändert, die ein Feldvergleich übernehmen würde
+		Version mine = unreadablePresentation(OWN);
 		Version theirs = version(OTHER, presentation("name", "\"Samstag\"").toString());
 
 		Resolution resolution = PRESENTATION_POLICY.resolve(input(PRESENTATION, base, mine, theirs, theirs));
@@ -271,7 +272,64 @@ class HeadPresentationHallPolicyTest {
 		assertEquals(theirs.payload(), resolution.payload());
 		assertEquals(Kind.UNMERGED, resolution.note().kind());
 		assertEquals(OWN, resolution.note().affected());
+		assertEquals(party(theirs), resolution.note().other());
 		assertEquals(mine.id(), resolution.note().dropped());
+	}
+
+	@Test
+	void contentOfAnotherUnitIsUnreadable() {
+		// die ID im Inhalt passt nicht zum Ordner der Einheit
+		Version base = version(THIRD, "{\"id\":\"event-1\",\"name\":\"Session\"}");
+		Version wrongId = version(OTHER, "{\"id\":\"event-9\",\"name\":\"Session\"}");
+		Version mine = version(OWN, "{\"id\":\"event-1\",\"name\":\"Neu\"}");
+
+		Resolution theirsWrong = HEAD_POLICY.resolve(input(HEAD, base, mine, wrongId, wrongId));
+		assertEquals(wrongId.payload(), theirsWrong.payload());
+		assertEquals(Kind.UNMERGED, theirsWrong.note().kind());
+
+		Version theirs = version(OTHER, "{\"id\":\"event-1\",\"name\":\"Session\",\"archived\":true}");
+		Version mineWrong = version(OWN, "{\"id\":\"event-9\",\"name\":\"Session\"}");
+		Resolution mineIsWrong = HEAD_POLICY.resolve(input(HEAD, base, mineWrong, theirs, theirs));
+		assertEquals(theirs.payload(), mineIsWrong.payload());
+		assertEquals(Kind.UNMERGED, mineIsWrong.note().kind());
+
+		Version hallBase = version(THIRD, "{\"id\":\"hall-1\",\"name\":\"Alt\"}");
+		Version hallWrong = version(OTHER, "{\"id\":\"hall-9\",\"name\":\"Fremd\"}");
+		Version hallMine = version(OWN, "{\"id\":\"hall-1\",\"name\":\"Neu\"}");
+		Resolution hall = HALL_POLICY.resolve(input(HALL, hallBase, hallMine, hallWrong, hallWrong));
+		assertEquals(hallWrong.payload(), hall.payload());
+		assertEquals(Kind.UNMERGED, hall.note().kind());
+		assertEquals(OWN, hall.note().affected());
+	}
+
+	@Test
+	void equalContentIsDecidedBeforeReadability() {
+		Version base = version(THIRD, PRESENTATION_BASE);
+		Version mine = unreadablePresentation(OWN);
+		Version theirs = unreadablePresentation(OTHER);
+
+		Resolution resolution = PRESENTATION_POLICY.resolve(input(PRESENTATION, base, mine, theirs, theirs));
+
+		assertEquals(theirs.payload(), resolution.payload());
+		assertNull(resolution.note());
+	}
+
+	@Test
+	void deleteWinsOnlyAppliesToTheSameIdentityWhenAskedTo() {
+		Version base = version(THIRD, PRESENTATION_BASE);
+		Version myDeletion = deletion(OWN);
+		Version theirs = version(OTHER, presentation("name", "\"Samstag\"").toString());
+		ConflictInput input = input(PRESENTATION, base, myDeletion, theirs, theirs);
+
+		// Deren ist eine andere Sache als die Basis (bei Buchungen: neue Buchung auf demselben Sitz): nichts wird gelöscht
+		assertNull(PolicyRules.deleteWins(input, version -> false));
+		assertTrue(PolicyRules.deleteWins(input, version -> true).deleted());
+
+		// Deren gelöscht gilt unabhängig davon
+		Version theirDeletion = deletion(OTHER);
+		Version mine = version(OWN, presentation("name", "\"Samstag\"").toString());
+		assertTrue(PolicyRules.deleteWins(input(PRESENTATION, base, mine, theirDeletion, theirDeletion), version -> false)
+				.deleted());
 	}
 
 	@Test
