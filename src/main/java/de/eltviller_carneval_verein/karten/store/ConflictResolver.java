@@ -71,12 +71,6 @@ final class ConflictResolver {
 	static final Duration LIST_WAIT = Duration.ofMinutes(5);
 	/** So viele Zusammenführungen schreibt ein Durchlauf höchstens je Einheit; die Einheit kommt dann im nächsten wieder. */
 	private static final int MAX_MERGES_PER_UNIT = 20;
-	/**
-	 * Das Feld der Buchungs-ID im Inhalt einer Buchung, wie das Repository es schreibt (dieselbe ID benennt eine Buchung
-	 * ohne Platz, {@link UnitKey#unassignedBooking}). Nur für die Auswahl der Geschwister, deren Speichervorgänge die
-	 * Strategie bekommt.
-	 */
-	private static final String BOOKING_ID = "id";
 
 	/** Was die Auflösung vom Dienst braucht. */
 	interface Host {
@@ -533,9 +527,9 @@ final class ConflictResolver {
 		return copies;
 	}
 
-	/** Die Buchungs-ID im Inhalt einer Buchung (das Feld {@value #BOOKING_ID}); {@code null}, wenn sie fehlt. */
+	/** Die Buchungs-ID im Inhalt einer Buchung ({@link ConflictInput#BOOKING_ID}); {@code null}, wenn sie fehlt. */
 	private static String bookingIdOf(ObjectNode payload) {
-		JsonNode id = payload == null ? null : payload.get(BOOKING_ID);
+		JsonNode id = payload == null ? null : payload.get(ConflictInput.BOOKING_ID);
 		return id != null && id.isTextual() ? id.asText() : null;
 	}
 

@@ -246,17 +246,159 @@ class BookingPolicyTest {
 	}
 
 	@Test
-	void anotherBookingWithoutDeletionInTheChainIsADoubleSale() {
-		// Meine hat die ID der Basis, aber Deren hat ohne Storno überschrieben: Doppelverkauf, nicht Löschen gewinnt
+	void cancelAndResellInOneSaveAgainstEditKeepsTheCancellation() {
+		// Ergebnis A: Deren storniert x und verkauft y in einem Speichervorgang (s1: x → y, keine Löschversion);
+		// Meine ändert x. x lebt nirgends mehr: Die Stornierung gilt, x wird nicht als _x wiederbelebt
 		Version base = version(THIRD, booking("x", "s1"));
 		Version theirs = version(OTHER, booking("y", "s1"));
 		Version mine = version(OWN, booking("x", "s1", b -> b.setComment("Rollstuhl")));
 
 		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, theirs));
 
+		assertFalse(resolution.deleted());
+		assertEquals(theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty());
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.DELETE_WINS, note.kind());
+		assertEquals(OWN, note.affected());
+		assertEquals(party(theirs), note.other());
+		assertEquals(mine.id(), note.dropped());
+	}
+
+	@Test
+	void moveAndSellInOneSaveTransfersMyEditToTheMovedCopy() {
+		// Ergebnis B: Deren verschiebt x nach s2 und verkauft y auf s1 in einem Speichervorgang; Meine ändert x auf s1.
+		// x bekommt die eigene Änderung auf s2, kein zweites x unter _x
+		Version base = version(THIRD, booking("x", "s1"));
+		Version theirs = version(OTHER, "save-theirs", booking("y", "s1"));
+		Version theirCopy = version(OTHER, "save-theirs", booking("x", "s2", b -> {
+			b.setSeatNumber(2);
+			b.setComment("Rollstuhl");
+		}));
+		Version mine = version(OWN, booking("x", "s1", b -> b.setPaymentStatus(PaymentStatus.CASH)));
+
+		Resolution resolution = POLICY.resolve(
+				input(S1, base, mine, theirs, siblings(Map.entry(S2, theirCopy)), theirs));
+
+		assertFalse(resolution.deleted());
+		assertEquals(theirs.payload(), resolution.payload());
+		assertNull(resolution.note());
+		ObjectNode merged = booking("x", "s2", b -> {
+			b.setSeatNumber(2);
+			b.setComment("Rollstuhl");
+			b.setPaymentStatus(PaymentStatus.CASH);
+		});
+		assertEquals(List.of(new Change(S2, List.of(theirCopy.id()), merged, false)), resolution.extra());
+	}
+
+	@Test
+	void transferredEditWithConflictingGroupReportsIt() {
+		Version base = version(THIRD, booking("x", "s1"));
+		Version theirs = version(OTHER, "save-theirs", booking("y", "s1"));
+		Version theirCopy = version(OTHER, "save-theirs", booking("x", "s2", b -> {
+			b.setSeatNumber(2);
+			b.setLastName("Schulz");
+		}));
+		Version mine = version(OWN, booking("x", "s1", b -> {
+			b.setLastName("Meier");
+			b.setComment("Abholung Freitag");
+		}));
+
+		Resolution resolution = POLICY.resolve(
+				input(S1, base, mine, theirs, siblings(Map.entry(S2, theirCopy)), theirs));
+
+		assertEquals(theirs.payload(), resolution.payload());
+		// der Platz bleibt der der Kopie, der Kunde der Kopie gilt, der Kommentar kommt dazu
+		ObjectNode merged = booking("x", "s2", b -> {
+			b.setSeatNumber(2);
+			b.setLastName("Schulz");
+			b.setComment("Abholung Freitag");
+		});
+		assertEquals(List.of(new Change(S2, List.of(theirCopy.id()), merged, false)), resolution.extra());
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.FIELDS, note.kind());
+		assertEquals(OWN, note.affected());
+		assertEquals(mine.id(), note.dropped());
+		assertEquals(S2, note.moved());
+		assertEquals(1, note.fields().size());
+		assertEquals("customer", note.fields().get(0).group());
+		assertEquals("Meier", note.fields().get(0).mine().get("lastName").asText());
+		assertEquals("Schulz", note.fields().get(0).theirs().get("lastName").asText());
+	}
+
+	@Test
+	void myReplacementKeepsTheSeatAndCancelsTheirEditedBooking() {
+		// Spiegel zu Ergebnis A: Meine ersetzt x durch y (storniert x), Deren ändert x: y bleibt auf dem Sitz
+		Version base = version(THIRD, booking("x", "s1"));
+		Version mine = version(OWN, booking("y", "s1", b -> b.setLastName("Neu")));
+		Version theirs = version(OTHER, booking("x", "s1", b -> b.setComment("Rollstuhl")));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, theirs));
+
+		assertFalse(resolution.deleted());
+		assertEquals(mine.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty());
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.DELETE_WINS, note.kind());
+		assertEquals(OTHER, note.affected());
+		assertEquals(party(mine), note.other());
+		assertEquals(theirs.id(), note.dropped());
+	}
+
+	@Test
+	void myMoveAndSaleTransfersTheirEditToMyCopy() {
+		// Spiegel zu Ergebnis B: Meine verschiebt x nach s2 und verkauft y auf s1; Deren ändert x auf s1
+		Version base = version(THIRD, booking("x", "s1"));
+		Version mine = version(OWN, "save-move", booking("y", "s1"));
+		Version myCopy = version(OWN, "save-move", booking("x", "s2", b -> b.setSeatNumber(2)));
+		Version theirs = version(OTHER, booking("x", "s1", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, siblings(Map.entry(S2, myCopy)), theirs));
+
+		assertFalse(resolution.deleted());
+		assertEquals(mine.payload(), resolution.payload());
+		assertNull(resolution.note());
+		ObjectNode merged = booking("x", "s2", b -> {
+			b.setSeatNumber(2);
+			b.setPaymentStatus(PaymentStatus.CARD);
+		});
+		assertEquals(List.of(new Change(S2, List.of(myCopy.id()), merged, false)), resolution.extra());
+	}
+
+	@Test
+	void bothReplacedWithDifferentBookingsIsADoubleSale() {
+		// keine Seite trägt mehr x: zwei neue Verkäufe auf demselben Sitz
+		Version base = version(THIRD, booking("x", "s1"));
+		Version mine = version(OWN, booking("m", "s1"));
+		Version theirs = version(OTHER, booking("t", "s1"));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, theirs));
+
 		assertEquals(theirs.payload(), resolution.payload());
 		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
-		assertEquals(UnitKey.unassignedBooking(EVENT, PRESENTATION, "x"), resolution.extra().get(0).unit());
+		assertEquals(UnitKey.unassignedBooking(EVENT, PRESENTATION, "m"), resolution.extra().get(0).unit());
+	}
+
+	@Test
+	void doubleSaleWithAnAliveUnassignedCopyCreatesNoSecondUnit() {
+		// die Buchung m lebt schon ohne Platz: keine zweite lebende Einheit mit derselben Buchungs-ID
+		UnitKey moved = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		Version alive = version(OTHER, booking("m", null, b -> {
+			b.setRowLabel("");
+			b.setTableNumber(0);
+			b.setSeatNumber(0);
+			b.setUnassigned(true);
+		}));
+		Version mine = version(OWN, booking("m", "s1"));
+		Version theirs = version(OTHER, booking("t", "s1"));
+
+		Resolution resolution = POLICY.resolve(input(S1, null, mine, theirs, siblings(Map.entry(moved, alive)), theirs));
+
+		assertEquals(theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty());
+		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
+		assertEquals(moved, resolution.note().moved());
+		assertEquals(mine.id(), resolution.note().dropped());
 	}
 
 	@Test
@@ -435,6 +577,79 @@ class BookingPolicyTest {
 		assertEquals(mine.payload(), resolution.payload());
 		assertNull(resolution.note());
 		assertTrue(resolution.extra().isEmpty());
+	}
+
+	@Test
+	void unreadableNewSaleOnACancelledSeatIsUnmerged() {
+		Version base = version(THIRD, booking("x", "s1"));
+		Version theirDeletion = deletion(OTHER);
+		ObjectNode broken = booking("y", "s1");
+		broken.put("seatNumber", "keine Zahl");
+		Version mine = version(OWN, broken);
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirDeletion, theirDeletion));
+
+		assertTrue(resolution.deleted());
+		assertTrue(resolution.extra().isEmpty());
+		assertEquals(Kind.UNMERGED, resolution.note().kind());
+		assertEquals(OWN, resolution.note().affected());
+		assertEquals(mine.id(), resolution.note().dropped());
+	}
+
+	@Test
+	void theirMoveAgainstMyEditTransfersTheEdit() {
+		// Deren verschiebt x von s1 nach s2 (Löschung auf s1), Meine ändert x auf s1: Die Änderung geht nach s2
+		Version base = version(THIRD, booking("x", "s1"));
+		Version theirDeletion = deletion(OTHER, "save-move");
+		Version theirCopy = version(OTHER, "save-move", booking("x", "s2", b -> b.setSeatNumber(2)));
+		Version mine = version(OWN, booking("x", "s1", b -> b.setComment("Abholung Freitag")));
+
+		Resolution resolution = POLICY.resolve(
+				input(S1, base, mine, theirDeletion, siblings(Map.entry(S2, theirCopy)), theirDeletion));
+
+		assertTrue(resolution.deleted());
+		assertNull(resolution.note());
+		ObjectNode merged = booking("x", "s2", b -> {
+			b.setSeatNumber(2);
+			b.setComment("Abholung Freitag");
+		});
+		assertEquals(List.of(new Change(S2, List.of(theirCopy.id()), merged, false)), resolution.extra());
+	}
+
+	@Test
+	void myMoveAgainstTheirEditTransfersTheirEditAndReportsConflicts() {
+		// Meine verschiebt x nach s2 und ändert dort später den Kommentar; Deren ändert den Kommentar auf s1 anders
+		Version base = version(THIRD, booking("x", "s1"));
+		Version myDeletion = deletion(OWN, "save-move");
+		Version myCopy = version(OWN, "save-later", booking("x", "s2", b -> {
+			b.setSeatNumber(2);
+			b.setComment("meiner");
+		}));
+		Version theirs = version(OTHER, booking("x", "s1", b -> {
+			b.setComment("deren");
+			b.setPaymentStatus(PaymentStatus.TRANSFER);
+		}));
+		Sibling s2 = new Sibling(new UnitSnapshot(S2, myCopy.id(), Status.OK, false, myCopy.payload()),
+				ChainStep.of(myCopy), Set.of("save-move", "save-later"));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirs, Map.of(S2, s2), theirs));
+
+		assertTrue(resolution.deleted());
+		ObjectNode merged = booking("x", "s2", b -> {
+			b.setSeatNumber(2);
+			b.setComment("meiner");
+			b.setPaymentStatus(PaymentStatus.TRANSFER);
+		});
+		assertEquals(List.of(new Change(S2, List.of(myCopy.id()), merged, false)), resolution.extra());
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.FIELDS, note.kind());
+		assertEquals(OTHER, note.affected());
+		assertEquals(party(myDeletion), note.other());
+		assertEquals(theirs.id(), note.dropped());
+		assertEquals(S2, note.moved());
+		assertEquals("comment", note.fields().get(0).group());
+		assertEquals("deren", note.fields().get(0).mine().get("comment").asText());
+		assertEquals("meiner", note.fields().get(0).theirs().get("comment").asText());
 	}
 
 	@Test

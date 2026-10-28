@@ -26,6 +26,13 @@ public record ConflictInput(UnitKey unit, Version base, Version mine, Version th
 		String ownMachineId, Map<UnitKey, Sibling> siblings) {
 
 	/**
+	 * Das Feld der Buchungs-ID im Inhalt einer Buchung, wie das Repository es schreibt; dieselbe ID benennt eine Buchung
+	 * ohne Platz ({@link UnitKey#unassignedBooking}). Die einzige Stelle, an der der Speicher in den Inhalt einer Buchung
+	 * schaut: für die Auswahl der Geschwister, die ihre Speichervorgänge mitbekommen.
+	 */
+	public static final String BOOKING_ID = "id";
+
+	/**
 	 * Eine andere Buchungs-Einheit derselben Vorstellung.
 	 *
 	 * @param snapshot ihr aktueller Stand (der Inhalt als Kopie)

@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -12,6 +13,7 @@ import de.eltviller_carneval_verein.karten.store.ConflictInput.Sibling;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.FieldConflict;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Kind;
+import de.eltviller_carneval_verein.karten.store.ConflictNote.Party;
 import de.eltviller_carneval_verein.karten.store.ConflictPolicy;
 import de.eltviller_carneval_verein.karten.store.Resolution;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -24,18 +26,20 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
  * <ol start="0">
  * <li>Beide gelöscht (Verschieben gegen Storno): siehe {@link #bothDeleted}.</li>
  * <li>Gleich ({@link PolicyRules#equal}).</li>
- * <li>Löschen gewinnt ({@link PolicyRules#deleteWins}) nur für dieselbe Buchung (Buchungs-ID der Basis) auf beiden
- * Seiten; sonst gilt die andere Buchung, siehe {@link #saleOnCancelledSeat} und {@link #cancelledAnotherBooking}.</li>
- * <li>Anderer Inhalt auf dem Sitz: Storno und Neuverkauf oder Doppelverkauf, siehe {@link #otherBooking}.</li>
+ * <li>Löschung gegen Änderung: Trägt "Meine" nicht die Buchung der Basis, gilt sie ({@link #saleOnCancelledSeat}). War
+ * die Löschung ein Verschieben, geht die Änderung an die verschobene Kopie ({@link #movedAgainstEdit}). Sonst gewinnt die
+ * Löschung ({@link PolicyRules#deleteWins}), aber nur gegen dieselbe Buchung ({@link #cancelledAnotherBooking}).</li>
+ * <li>Verschiedene Buchungen auf dem Sitz: entschieden danach, wer die Buchung der Basis trägt, siehe
+ * {@link #otherBooking}.</li>
  * <li>Gleiche Buchung: Dreiwegevergleich je Feldgruppe ({@link FieldGroups#booking()}).</li>
  * </ol>
- * Ein unlesbares oder gesperrtes "Deren" führt nicht zu UNMERGED, sondern zum Doppelverkauf (K1): Die eigene Buchung
- * weicht "ohne Platz" aus, statt zu verschwinden. Zustandslos; läuft auf dem Hintergrund-Thread des Versionsspeichers und
- * kennt weder Modell noch Repository, alle Eingaben sind Kopien.
+ * Eine Buchungs-ID lebt danach nie in zwei Einheiten zugleich. Ein unlesbares oder gesperrtes "Deren" führt nicht zu
+ * UNMERGED, sondern zum Doppelverkauf (K1): Die eigene Buchung weicht "ohne Platz" aus, statt zu verschwinden; außer auf
+ * einer Einheit {@code _<ID>}, dort kann sie nicht ausweichen, und es bleibt bei UNMERGED. Zustandslos; läuft auf dem
+ * Hintergrund-Thread des Versionsspeichers und kennt weder Modell noch Repository, alle Eingaben sind Kopien.
  */
 public final class BookingPolicy implements ConflictPolicy {
 
-	private static final String ID = "id";
 	private static final String SEAT_ID = "seatId";
 	private static final String ROW_LABEL = "rowLabel";
 	private static final String TABLE_NUMBER = "tableNumber";
@@ -43,7 +47,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	private static final String UNASSIGNED = "unassigned";
 	/** Der Platz im Vermerk eines Doppelverkaufs, für die Anzeige im Dialog. */
 	private static final List<String> PLACE = List.of(SEAT_ID, ROW_LABEL, TABLE_NUMBER, SEAT_NUMBER);
-	/** Die Feldgruppe "Platz" für den Vermerk, wenn beide Seiten verschoben haben. */
+	/** Die Feldgruppe "Platz". */
 	private static final String PLACE_GROUP = "place";
 
 	@Override
@@ -54,6 +58,9 @@ public final class BookingPolicy implements ConflictPolicy {
 		}
 		if (resolution == null) {
 			resolution = saleOnCancelledSeat(input);
+		}
+		if (resolution == null) {
+			resolution = movedAgainstEdit(input);
 		}
 		if (resolution == null) {
 			resolution = PolicyRules.deleteWins(input, theirs -> isSameBooking(input, theirs));
@@ -72,9 +79,7 @@ public final class BookingPolicy implements ConflictPolicy {
 
 	/**
 	 * Regel 0, beide gelöscht: Entscheidend ist, wo die Buchungs-ID der Basis danach noch lebt. Eine Seite hat verschoben,
-	 * wenn eine Geschwister-Einheit diese Buchung (nicht gelöscht) trägt und in ihrem Ordner eine Version aus dem
-	 * Speichervorgang der Löschung dieser Seite liegt ({@link Sibling#saveIds()}, Ruling R22): auch wenn die Kopie seitdem
-	 * geändert wurde, noch aussteht oder ihre Version dort verloren hat. Sonst hat sie storniert.
+	 * wenn sie im selben Speichervorgang eine {@link #movedCopy Kopie} angelegt hat. Sonst hat sie storniert.
 	 * <ul>
 	 * <li>Verschoben gegen storniert: Storno gewinnt, die verschobene Einheit bekommt eine Löschung; betroffen ist der
 	 * Rechner, der verschoben hat (Vermerk DELETE_WINS, {@code dropped} ist die Version der verschobenen Einheit). Das
@@ -86,8 +91,6 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * <li>Beide storniert, oder nicht zu entscheiden (keine Geschwister-Einheit trägt die Buchung): Löschung ohne Vermerk,
 	 * keine weitere Löschung. Eine verkaufte Buchung wird nie auf Verdacht gelöscht.</li>
 	 * </ul>
-	 * Trägt eine Geschwister-Einheit inzwischen eine andere Buchung, gilt sie nicht als verschoben und wird nicht
-	 * angefasst.
 	 *
 	 * @return die Auflösung, oder {@code null}, wenn nicht beide Seiten gelöscht sind
 	 */
@@ -102,9 +105,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (bookingId == null) {
 			return cancelled;
 		}
-		// Ist "Deren" die Zusammenführung eines dritten Rechners, gehört die Verschiebung zur ursprünglichen Löschung
-		Version deletion = FieldMerge.introducedBy(input.chainSinceBase(), Version::deleted);
-		Version theirDeletion = deletion != null ? deletion : theirs;
+		Version theirDeletion = deletionIn(input);
 		UnitSnapshot myCopy = movedCopy(input, bookingId, mine.saveId());
 		UnitSnapshot theirCopy = movedCopy(input, bookingId, theirDeletion.saveId());
 
@@ -133,9 +134,29 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/**
-	 * Die Geschwister-Einheit, in die ein Speichervorgang die Buchung verschoben hat: nicht gelöscht, mit der Buchungs-ID,
-	 * und in ihrem Ordner liegt eine Version aus diesem Speichervorgang. Bei mehreren (sollte nicht vorkommen) die erste
-	 * nach Ordner, damit eine Wiederholung nach einem Absturz dasselbe entscheidet.
+	 * Die Löschung in der Kette seit der Basis, die "Deren" eingebracht hat: Ist "Deren" die Zusammenführung eines dritten
+	 * Rechners, gehört ein Verschieben zur ursprünglichen Löschung. Ohne Löschung in der Kette "Deren" selbst.
+	 */
+	private static Version deletionIn(ConflictInput input) {
+		Version deletion = FieldMerge.introducedBy(input.chainSinceBase(), Version::deleted);
+		return deletion != null ? deletion : input.theirs();
+	}
+
+	/**
+	 * Die Kopie, die ein Speichervorgang angelegt hat, als er die Buchung verschob: eine {@link #livingCopies lebende
+	 * Kopie}, in deren Ordner eine Version aus diesem Speichervorgang liegt ({@link Sibling#saveIds()}, Ruling R22), auch
+	 * wenn sie seitdem geändert wurde, noch aussteht oder dort verloren hat.
+	 * <p>
+	 * Nicht erkannt wird ein Verschieben, dessen Kopie keine Version aus dem Speichervorgang der Löschung trägt; die Seite
+	 * gilt dann als storniert:
+	 * <ul>
+	 * <li>"Meine" ist selbst eine Zusammenführung des Auflösers (er schreibt mit einem eigenen Speichervorgang je Strecke):
+	 * Ein Verschieben, das sie übernommen hat, gehört zu einem anderen Speichervorgang.</li>
+	 * <li>Die Kopie wurde danach weiter verschoben (s1 → s2 → s3): Im Ordner von s3 liegt der Speichervorgang der Löschung
+	 * von s1 nicht.</li>
+	 * <li>Selten, drei Rechner: Das eigene Verschieben nach s2 verlor dort gegen einen Verkauf. Die Buchung lebt erst nach
+	 * der Auflösung von s2 unter {@code _<ID>}, geschrieben in deren Speichervorgang.</li>
+	 * </ul>
 	 *
 	 * @return ihr Stand, oder {@code null}, wenn es keine gibt
 	 */
@@ -143,18 +164,67 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (saveId == null) {
 			return null;
 		}
-		return input.siblings().values().stream()
-				.filter(sibling -> sibling.saveIds().contains(saveId))
-				.map(Sibling::snapshot)
-				.filter(snapshot -> snapshot.version() != null && !snapshot.deleted()
-						&& bookingId.equals(text(snapshot.payload(), ID)))
-				.min(Comparator.comparing(snapshot -> snapshot.unit().relativePath()))
+		return first(livingCopies(input, bookingId).filter(sibling -> sibling.saveIds().contains(saveId)));
+	}
+
+	/** Irgendeine {@link #livingCopies lebende Kopie} der Buchung, oder {@code null}. */
+	private static UnitSnapshot livingCopy(ConflictInput input, String bookingId) {
+		return first(livingCopies(input, bookingId));
+	}
+
+	/** Die Geschwister-Einheiten, die die Buchung tragen (nicht gelöscht, gleiche Buchungs-ID). */
+	private static Stream<Sibling> livingCopies(ConflictInput input, String bookingId) {
+		return input.siblings().values().stream().filter(sibling -> {
+			UnitSnapshot snapshot = sibling.snapshot();
+			return snapshot.version() != null && !snapshot.deleted() && bookingId.equals(text(snapshot.payload()));
+		});
+	}
+
+	/** Bei mehreren (sollte nicht vorkommen) die erste nach Ordner, damit eine Wiederholung dasselbe entscheidet. */
+	private static UnitSnapshot first(Stream<Sibling> siblings) {
+		return siblings.map(Sibling::snapshot).min(Comparator.comparing(snapshot -> snapshot.unit().relativePath()))
 				.orElse(null);
 	}
 
 	/** Die Löschung einer Geschwister-Einheit auf ihrem aktuellen Stand. */
 	private static Change deletionOf(UnitSnapshot sibling) {
 		return new Change(sibling.unit(), List.of(sibling.version()), null, true);
+	}
+
+	/**
+	 * Überträgt eine Änderung der Buchung auf ihre Kopie in einer anderen Einheit, statt sie zu verwerfen oder die Buchung
+	 * ein zweites Mal anzulegen: Dreiwegevergleich gegen die Basis mit {@code change} auf der einen und der Kopie auf der
+	 * anderen Seite; die Gruppe "Platz" bleibt die der Kopie, bei strittigen Gruppen gilt die Kopie. Ergibt das einen
+	 * anderen Inhalt, bekommt die Kopie eine neue Version auf ihrem aktuellen Stand. Strittige Gruppen kommen in einen
+	 * Vermerk FIELDS mit {@code moved} = Einheit der Kopie (dort lebt die Buchung, nicht auf dem Sitz des Vermerks).
+	 *
+	 * @param payload  die Fassung der Einheit selbst
+	 * @param deleted  ob die Einheit selbst gelöscht wird
+	 * @param copy     die Kopie
+	 * @param change   der Inhalt, dessen Änderung übertragen wird
+	 * @param affected der Rechner, dessen Änderung bei strittigen Gruppen weicht
+	 * @param other    die Gegenseite des Vermerks
+	 * @param dropped  die Version mit der weichenden Änderung
+	 */
+	private static Resolution transfer(ConflictInput input, ObjectNode payload, boolean deleted, UnitSnapshot copy,
+			ObjectNode change, String affected, Party other, VersionId dropped) {
+		ObjectNode side = change.deepCopy();
+		for (String field : FieldGroups.booking().get(PLACE_GROUP)) {
+			JsonNode value = copy.payload().get(field);
+			if (value == null) {
+				side.remove(field);
+			} else {
+				side.set(field, value.deepCopy());
+			}
+		}
+		Version base = input.base();
+		FieldMerge.Result result = FieldMerge.merge(base == null || base.deleted() ? null : base.payload(), side,
+				copy.payload(), FieldGroups.booking());
+		List<Change> extra = result.merged().equals(copy.payload()) ? List.of()
+				: List.of(new Change(copy.unit(), List.of(copy.version()), result.merged(), false));
+		ConflictNote note = result.conflicts().isEmpty() ? null
+				: new ConflictNote(Kind.FIELDS, affected, other, result.conflicts(), copy.unit(), null, dropped);
+		return new Resolution(payload, deleted, extra, note);
 	}
 
 	/**
@@ -178,6 +248,46 @@ public final class BookingPolicy implements ConflictPolicy {
 			return PolicyRules.unmerged(input);
 		}
 		return new Resolution(mine.payload(), false, List.of(), null);
+	}
+
+	/**
+	 * Regel 2 mit Verschieben (Ruling R25): Die Löschung der Buchung der Basis war ein Verschieben, die andere Seite hat
+	 * die Buchung hier geändert. Die Änderung geht an die verschobene Kopie ({@link #transfer}), die Einheit selbst bleibt
+	 * gelöscht.
+	 * <ul>
+	 * <li>"Deren" gelöscht, "Meine" geändert, und die Buchung lebt in einer Geschwister-Einheit: betroffen ist bei strittigen
+	 * Gruppen dieser Rechner.</li>
+	 * <li>"Meine" gelöscht, "Deren" dieselbe Buchung geändert, und die Buchung lebt in einer Kopie aus dem eigenen
+	 * Speichervorgang: betroffen ist bei strittigen Gruppen der Rechner von "Deren".</li>
+	 * </ul>
+	 *
+	 * @return die Auflösung, oder {@code null}, wenn keine solche Kopie die Buchung trägt
+	 */
+	private static Resolution movedAgainstEdit(ConflictInput input) {
+		Version mine = input.mine();
+		Version theirs = input.theirs();
+		String bookingId = idOf(input.base());
+		if (bookingId == null || mine.deleted() == theirs.deleted()) {
+			return null;
+		}
+		if (theirs.deleted()) {
+			// "Meine" trägt die Buchung der Basis, sonst hätte saleOnCancelledSeat entschieden
+			UnitSnapshot copy = livingCopy(input, bookingId);
+			if (copy == null || !PolicyRules.isReadable(input, mine)) {
+				return null;
+			}
+			return transfer(input, theirs.payload(), true, copy, mine.payload(), input.ownMachineId(),
+					PolicyRules.party(deletionIn(input)), mine.id());
+		}
+		if (!isSameBooking(input, theirs)) {
+			return null;
+		}
+		UnitSnapshot copy = movedCopy(input, bookingId, mine.saveId());
+		if (copy == null) {
+			return null;
+		}
+		return transfer(input, null, true, copy, theirs.payload(), theirs.machine(), PolicyRules.party(mine),
+				theirs.id());
 	}
 
 	/**
@@ -207,13 +317,18 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/**
-	 * Regel 3, beide Seiten mit Inhalt:
+	 * Regel 3, beide Seiten mit Inhalt, entschieden danach, wer die Buchung der Basis trägt (Ruling R25). Gespeichert wird
+	 * je Event; "x stornieren und y verkaufen" oder "x verschieben und y verkaufen" in einem Speichervorgang schreibt den
+	 * Sitz ohne Löschversion von x auf y.
 	 * <ul>
-	 * <li>Verschiedene Buchungs-IDs, "Meine" hat die der Basis, und die Kette seit der Basis enthält eine Löschung (storniert,
-	 * danach neu verkauft): Löschen gewinnt, "Deren" gilt (Vermerk DELETE_WINS an diesen Rechner).</li>
-	 * <li>Sonst verschiedene IDs, oder "Deren" unlesbar oder gesperrt (K1): {@link #doubleSale Doppelverkauf}.</li>
+	 * <li>Ist "Meine" unlesbar, lässt sich nichts verschieben oder übertragen: "Deren" bleibt, Vermerk UNMERGED.</li>
+	 * <li>"Deren" unlesbar oder gesperrt (K1): {@link #doubleSale Doppelverkauf}.</li>
+	 * <li>Gleiche Buchungs-ID: {@code null}, Regel 4.</li>
+	 * <li>"Meine" trägt die Buchung der Basis, "Deren" hat sie ersetzt: {@link #replacedByTheirs}.</li>
+	 * <li>"Deren" trägt die Buchung der Basis, "Meine" hat sie ersetzt: {@link #replacedByMine}.</li>
+	 * <li>Keine Seite trägt sie (keine Basis, oder beide haben sie durch verschiedene neue Buchungen ersetzt):
+	 * Doppelverkauf.</li>
 	 * </ul>
-	 * Ist "Meine" unlesbar, lässt sich die Buchung nicht verschieben: "Deren" bleibt, Vermerk UNMERGED.
 	 *
 	 * @return die Auflösung, oder {@code null} bei derselben Buchung auf beiden Seiten (Regel 4)
 	 */
@@ -224,18 +339,66 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (mineId == null || !PolicyRules.isReadable(input, mine)) {
 			return PolicyRules.unmerged(input);
 		}
-		boolean theirsReadable = PolicyRules.isReadable(input, theirs);
-		if (theirsReadable && mineId.equals(idOf(theirs))) {
+		if (!PolicyRules.isReadable(input, theirs)) {
+			return doubleSale(input, mineId);
+		}
+		String theirsId = idOf(theirs);
+		if (mineId.equals(theirsId)) {
 			return null;
 		}
-		if (theirsReadable && mineId.equals(idOf(input.base()))
-				&& input.chainSinceBase().stream().anyMatch(Version::deleted)) {
-			Version deletion = FieldMerge.introducedBy(input.chainSinceBase(), Version::deleted);
-			ConflictNote note = new ConflictNote(Kind.DELETE_WINS, input.ownMachineId(), PolicyRules.party(deletion),
-					List.of(), null, null, mine.id());
-			return new Resolution(theirs.payload(), false, List.of(), note);
+		String bookingId = idOf(input.base());
+		if (mineId.equals(bookingId)) {
+			return replacedByTheirs(input, bookingId, theirsId);
+		}
+		if (bookingId != null && bookingId.equals(theirsId)) {
+			return replacedByMine(input, bookingId);
 		}
 		return doubleSale(input, mineId);
+	}
+
+	/**
+	 * "Deren" hat die Buchung der Basis auf dem Sitz durch eine andere ersetzt, "Meine" hat sie geändert. Der Sitz behält
+	 * "Deren". Lebt die Buchung in einer Geschwister-Einheit ("Deren" hat sie verschoben), geht die eigene Änderung dorthin
+	 * ({@link #transfer}, betroffen bei strittigen Gruppen ist dieser Rechner). Sonst hat "Deren" sie storniert, und die
+	 * Stornierung gilt: Vermerk DELETE_WINS an diesen Rechner.
+	 */
+	private static Resolution replacedByTheirs(ConflictInput input, String bookingId, String theirsId) {
+		Version theirs = input.theirs();
+		Version replacement = theirsId == null ? null
+				: FieldMerge.introducedBy(input.chainSinceBase(), version -> theirsId.equals(idOf(version)));
+		if (replacement == null) {
+			replacement = theirs;
+		}
+		UnitSnapshot copy = livingCopy(input, bookingId);
+		if (copy != null) {
+			return transfer(input, theirs.payload(), false, copy, input.mine().payload(), input.ownMachineId(),
+					PolicyRules.party(replacement), input.mine().id());
+		}
+		Version deletion = FieldMerge.introducedBy(input.chainSinceBase(), Version::deleted);
+		ConflictNote note = new ConflictNote(Kind.DELETE_WINS, input.ownMachineId(),
+				PolicyRules.party(deletion != null ? deletion : replacement), List.of(), null, null, input.mine().id());
+		return new Resolution(theirs.payload(), false, List.of(), note);
+	}
+
+	/**
+	 * "Meine" hat die Buchung der Basis auf dem Sitz durch eine andere ersetzt, "Deren" hat sie geändert. Der Sitz behält
+	 * "Meine". Lebt die Buchung in einer Kopie aus dem eigenen Speichervorgang (verschoben), geht die Änderung von "Deren"
+	 * dorthin ({@link #transfer}, betroffen bei strittigen Gruppen ist der Rechner von "Deren"). Sonst hat dieser Rechner sie
+	 * storniert, und die Stornierung gilt: Vermerk DELETE_WINS an den Rechner von "Deren", wenn er sie gegenüber der Basis
+	 * geändert hatte.
+	 */
+	private static Resolution replacedByMine(ConflictInput input, String bookingId) {
+		Version mine = input.mine();
+		Version theirs = input.theirs();
+		UnitSnapshot copy = movedCopy(input, bookingId, mine.saveId());
+		if (copy != null) {
+			return transfer(input, mine.payload(), false, copy, theirs.payload(), theirs.machine(),
+					PolicyRules.party(mine), theirs.id());
+		}
+		ConflictNote note = PolicyRules.sameContent(theirs, input.base()) ? null
+				: new ConflictNote(Kind.DELETE_WINS, theirs.machine(), PolicyRules.party(mine), List.of(), null, null,
+						theirs.id());
+		return new Resolution(mine.payload(), false, List.of(), note);
 	}
 
 	/**
@@ -246,8 +409,10 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * <p>
 	 * Der Schlüssel {@code _<ID>} ist fest, damit eine Wiederholung nach einem Absturz dieselbe Einheit trifft. Ist sie
 	 * schon gelöscht (die Buchung stand früher ohne Platz und wurde von dort zugewiesen), baut die neue Version auf der
-	 * Löschung auf; eine Erstversion übersprünge die Auflösung, weil die Einheit schon Versionen hat. Ist die Einheit selbst
-	 * schon {@code _<ID>}, kann die Buchung nicht weiter ausweichen: "Deren" bleibt, Vermerk UNMERGED.
+	 * Löschung auf; eine Erstversion übersprünge die Auflösung, weil die Einheit schon Versionen hat. Lebt die Buchung
+	 * schon in einer Geschwister-Einheit (auch {@code _<ID>}), entsteht keine zweite: Der Vermerk nennt diese Einheit als
+	 * {@code moved}, der eigene Inhalt steht nur noch in "Meine". Ist die Einheit selbst schon {@code _<ID>}, kann die
+	 * Buchung nicht weiter ausweichen: "Deren" bleibt, Vermerk UNMERGED.
 	 */
 	private static Resolution doubleSale(ConflictInput input, String mineId) {
 		Version mine = input.mine();
@@ -257,16 +422,23 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (moved.equals(unit)) {
 			return PolicyRules.unmerged(input);
 		}
-		ObjectNode withoutPlace = mine.payload().deepCopy();
-		withoutPlace.put(UNASSIGNED, true);
-		withoutPlace.putNull(SEAT_ID);
-		withoutPlace.put(ROW_LABEL, "");
-		withoutPlace.put(TABLE_NUMBER, 0);
-		withoutPlace.put(SEAT_NUMBER, 0);
-		Sibling existing = input.siblings().get(moved);
-		List<VersionId> parents = existing != null && existing.snapshot().version() != null
-				&& existing.snapshot().deleted() ? List.of(existing.snapshot().version()) : List.of();
-		Change extra = new Change(moved, parents, withoutPlace, false);
+		List<Change> extra;
+		UnitSnapshot living = livingCopy(input, mineId);
+		if (living != null) {
+			moved = living.unit();
+			extra = List.of();
+		} else {
+			ObjectNode withoutPlace = mine.payload().deepCopy();
+			withoutPlace.put(UNASSIGNED, true);
+			withoutPlace.putNull(SEAT_ID);
+			withoutPlace.put(ROW_LABEL, "");
+			withoutPlace.put(TABLE_NUMBER, 0);
+			withoutPlace.put(SEAT_NUMBER, 0);
+			Sibling existing = input.siblings().get(moved);
+			List<VersionId> parents = existing != null && existing.snapshot().version() != null
+					&& existing.snapshot().deleted() ? List.of(existing.snapshot().version()) : List.of();
+			extra = List.of(new Change(moved, parents, withoutPlace, false));
+		}
 
 		String theirsId = idOf(theirs);
 		Version introducer = theirsId == null ? null
@@ -274,16 +446,17 @@ public final class BookingPolicy implements ConflictPolicy {
 		ConflictNote note = new ConflictNote(Kind.DOUBLE_SALE, input.ownMachineId(),
 				PolicyRules.party(introducer != null ? introducer : theirs), List.of(), moved,
 				FieldMerge.slice(mine.payload(), PLACE), mine.id());
-		return new Resolution(theirs.payload(), false, List.of(extra), note);
+		return new Resolution(theirs.payload(), false, extra, note);
 	}
 
 	/** Die Buchungs-ID einer Version mit Inhalt; {@code null} ohne Version, bei einer Löschung oder ohne ID. */
 	private static String idOf(Version version) {
-		return version == null || version.deleted() ? null : text(version.payload(), ID);
+		return version == null || version.deleted() ? null : text(version.payload());
 	}
 
-	private static String text(ObjectNode payload, String field) {
-		JsonNode value = payload == null ? null : payload.get(field);
+	/** Die Buchungs-ID im Inhalt ({@link ConflictInput#BOOKING_ID}); {@code null}, wenn sie fehlt. */
+	private static String text(ObjectNode payload) {
+		JsonNode value = payload == null ? null : payload.get(ConflictInput.BOOKING_ID);
 		return value != null && value.isTextual() ? value.asText() : null;
 	}
 }
