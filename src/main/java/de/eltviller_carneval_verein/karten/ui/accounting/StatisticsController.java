@@ -26,12 +26,12 @@ import com.lowagie.text.pdf.PdfWriter;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
@@ -56,22 +56,7 @@ public class StatisticsController implements ContentController, Exportable {
 	private boolean includeArchived = false;
 
 	// Die Statistik rechnet über alle Events: Jede Änderung eines anderen Rechners kann die Zahlen verschieben
-	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
-		@Override
-		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
-			refresh(includeArchived);
-		}
-
-		@Override
-		public void addedByOthers(Event event) {
-			refresh(includeArchived);
-		}
-
-		@Override
-		public void removedByOthers(Event event) {
-			refresh(includeArchived);
-		}
-	};
+	private final RepositoryListener<Event> foreignChanges = RepositoryListener.onForeignChange(() -> refresh(includeArchived));
 
 	@FXML
 	private LineChart<String, Number> trendChart;
@@ -82,7 +67,7 @@ public class StatisticsController implements ContentController, Exportable {
 	public void initialize() {
 		refresh(false);
 		// Fremde Änderungen nur, solange die Statistik zu sehen ist (danach hielte das Repository sie am Leben)
-		LiveViews.whileShown(trendChart, () -> repository.addListener(foreignChanges), () -> repository.removeListener(foreignChanges));
+		LiveViews.whileShown(trendChart, Registration.of(repository::addListener, repository::removeListener, foreignChanges));
 	}
 
 	/**

@@ -97,22 +97,7 @@ public final class CustomerDisplay {
 			onDataChanged(event);
 		}
 	};
-	private final RepositoryListener<Hall> foreignHallChanges = new RepositoryListener<>() {
-		@Override
-		public void changedByOthers(Hall hall, ForeignBatch<Hall> batch) {
-			onHallChanged(hall);
-		}
-
-		@Override
-		public void addedByOthers(Hall hall) {
-			onHallChanged(hall);
-		}
-
-		@Override
-		public void removedByOthers(Hall hall) {
-			onHallChanged(hall);
-		}
-	};
+	private final RepositoryListener<Hall> foreignHallChanges = RepositoryListener.onForeignChange(this::onHallChanged);
 
 	private final HallPlanPane.Decorator decorator = new HallPlanPane.Decorator() {
 		@Override

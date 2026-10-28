@@ -33,6 +33,7 @@ import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
@@ -213,22 +214,7 @@ public class EventEditController {
 		}
 	};
 	// Fremde Änderungen an Hallen: Die Auswahl der Hallen und Bestuhlungen führt sich nach (ein ersetztes Objekt hat dieselbe ID)
-	private final RepositoryListener<Hall> foreignHallChanges = new RepositoryListener<>() {
-		@Override
-		public void changedByOthers(Hall hall, ForeignBatch<Hall> batch) {
-			showForeignChanges();
-		}
-
-		@Override
-		public void addedByOthers(Hall hall) {
-			showForeignChanges();
-		}
-
-		@Override
-		public void removedByOthers(Hall hall) {
-			showForeignChanges();
-		}
-	};
+	private final RepositoryListener<Hall> foreignHallChanges = RepositoryListener.onForeignChange(this::showForeignChanges);
 	// Eine Rückfrage (Hallen-/Bestuhlungswechsel, Löschen) ist offen: Während sie wartet, führt sich die Ansicht nicht nach
 	private boolean dialogOpen = false;
 	// Besitzer der Meldung bei EditingUnits für das Objekt, auf das sich die offene Rückfrage bezieht
@@ -293,18 +279,14 @@ public class EventEditController {
 				showPendingForeignChanges();
 			}
 		});
-		LiveViews.whileShown(eventPerfHBox, () -> {
-			repository.addListener(foreignChanges);
-			hallRepository.addListener(foreignHallChanges);
-		}, () -> {
-			repository.removeListener(foreignChanges);
-			hallRepository.removeListener(foreignHallChanges);
-			editing.end(eventTable);
-			editing.end(presTable);
-			editing.end(seatTable);
-			editing.end(spnPresPrice);
-			editing.end(dialogOwner);
-		});
+		LiveViews.whileShown(eventPerfHBox, Registration.of(repository::addListener, repository::removeListener, foreignChanges),
+				Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges), Registration.onDetach(() -> {
+					editing.end(eventTable);
+					editing.end(presTable);
+					editing.end(seatTable);
+					editing.end(spnPresPrice);
+					editing.end(dialogOwner);
+				}));
 	}
 
 	/** Ob eine Eingabe oder Rückfrage offen ist, die ein Neuzeichnen der Tabellen und Felder wegrisse. */
@@ -343,11 +325,6 @@ public class EventEditController {
 		} finally {
 			loadingDetails = false;
 		}
-	}
-
-	/** Ob die Ansicht noch in einem gezeigten Fenster steht. */
-	private boolean viewShown() {
-		return btnSave.getScene() != null && btnSave.getScene().getWindow() != null;
 	}
 
 	/** Holt eine zurückgestellte Auffrischung nach, nachdem die laufende Bestätigung der Eingabe zu Ende ist. */
@@ -399,7 +376,7 @@ public class EventEditController {
 	 */
 	private void leaveDeletedEvent(Event removed) {
 		// Inzwischen ist die Ansicht verlassen oder ein anderes Event gewählt (das gelöschte verschwindet dann aus den Tabellen)
-		if (!viewShown()) {
+		if (!LiveViews.isShown(btnSave)) {
 			return;
 		}
 		if (currentEvent != null && !removed.equals(currentEvent)) {
@@ -407,7 +384,7 @@ public class EventEditController {
 			return;
 		}
 		MainApp.showEventOverviewView();
-		if (viewShown()) {
+		if (LiveViews.isShown(btnSave)) {
 			showForeignChanges();
 		}
 		// Die Übersicht hat keine Fußzeile: Die Meldung öffnet dort einen Dialog
@@ -1102,7 +1079,7 @@ public class EventEditController {
 		setEditable(false);
 		MainApp.showEventOverviewView();
 		// Hat der Nutzer im Dialog "Abbrechen" gewählt, bleibt dieser Screen stehen: Bearbeitungsmodus zurückgeben
-		if (btnSave.getScene() != null && btnSave.getScene().getWindow() != null) {
+		if (LiveViews.isShown(btnSave)) {
 			setEditable(wasEditable);
 		}
 	}

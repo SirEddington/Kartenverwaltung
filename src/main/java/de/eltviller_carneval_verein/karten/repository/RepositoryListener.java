@@ -1,5 +1,7 @@
 package de.eltviller_carneval_verein.karten.repository;
 
+import java.util.function.Consumer;
+
 /**
  * Wird von einem Repository ({@link StoreEventRepository}, {@link StoreHallRepository}) nach jedem Speichern oder
  * Löschen aufgerufen, egal von welcher Stelle aus gespeichert wurde. So kann der Änderungsmelder den gespeicherten
@@ -38,5 +40,30 @@ public interface RepositoryListener<T> {
 
 	/** Ein anderer Rechner hat die Entität gelöscht (oder sie ist unlesbar geworden); sie hat den Cache verlassen. */
 	default void removedByOthers(T entity) {
+	}
+
+	/** Ein Listener, der bei jedem fremden Rückruf ({@code changedByOthers}, {@code addedByOthers}, {@code removedByOthers}) {@code action} mit der Entität aufruft. */
+	static <T> RepositoryListener<T> onForeignChange(Consumer<? super T> action) {
+		return new RepositoryListener<>() {
+			@Override
+			public void changedByOthers(T entity, ForeignBatch<T> batch) {
+				action.accept(entity);
+			}
+
+			@Override
+			public void addedByOthers(T entity) {
+				action.accept(entity);
+			}
+
+			@Override
+			public void removedByOthers(T entity) {
+				action.accept(entity);
+			}
+		};
+	}
+
+	/** Wie {@link #onForeignChange(Consumer)}, für eine Aktion, die die Entität nicht braucht. */
+	static <T> RepositoryListener<T> onForeignChange(Runnable action) {
+		return onForeignChange(entity -> action.run());
 	}
 }

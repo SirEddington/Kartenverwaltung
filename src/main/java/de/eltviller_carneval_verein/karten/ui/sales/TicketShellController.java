@@ -10,7 +10,6 @@ import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
@@ -21,6 +20,7 @@ import de.eltviller_carneval_verein.karten.ui.EventSelectionSync;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
@@ -81,22 +81,7 @@ public class TicketShellController {
 	// Führt die Boxen nach Änderungen anderer Rechner nach; entsteht in initialize, wenn die Boxen da sind
 	private EventSelectionSync selectionSync;
 	// Fremde Änderungen an Events: Die Liste und die Auswahl folgen dem Cache
-	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
-		@Override
-		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
-			selectionSync.sync();
-		}
-
-		@Override
-		public void addedByOthers(Event event) {
-			selectionSync.sync();
-		}
-
-		@Override
-		public void removedByOthers(Event event) {
-			selectionSync.sync();
-		}
-	};
+	private final RepositoryListener<Event> foreignChanges = RepositoryListener.onForeignChange(() -> selectionSync.sync());
 	private String searchText = "";
 	// Auswahl der verlassenen Ansicht, bis die neue sie zurückbekommt (restorePendingSelection)
 	private List<Booking> pendingSelection = List.of();
@@ -145,7 +130,7 @@ public class TicketShellController {
 				});
 
 		// Fremde Änderungen an Events nur, solange die Shell zu sehen ist (danach hielte das Repository sie am Leben)
-		LiveViews.whileShown(contentArea, () -> eventRepository.addListener(foreignChanges), () -> eventRepository.removeListener(foreignChanges));
+		LiveViews.whileShown(contentArea, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges));
 
 		// "Alle Vorstellungen" ist als echter (null-)Eintrag Teil der Liste, wie in der Abrechnung: So lässt sich die
 		// Auswahl einer Vorstellung wieder aufheben.

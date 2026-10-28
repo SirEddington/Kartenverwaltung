@@ -7,8 +7,8 @@ import java.util.Objects;
 import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.MainApp;
-import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupRestoreDialog;
 import javafx.fxml.FXML;
@@ -40,33 +40,18 @@ public abstract class AbstractOverviewController {
 		reload();
 		searchField.textProperty().addListener((obs, oldVal, newVal) -> applyFilter());
 		// Fremde Änderungen nur, solange die Übersicht zu sehen ist (danach hielten die Repositories sie am Leben)
-		LiveViews.whileShown(treeTableView, () -> watchForeignChanges(true), () -> watchForeignChanges(false));
+		LiveViews.whileShown(treeTableView, foreignChangeRegistrations().toArray(new Registration[0]));
 	}
 
 	/**
-	 * Meldet die Übersicht bei den Repositories an ({@code true}) bzw. wieder ab ({@code false}), deren Änderungen sie zeigt.
-	 * Die Listener rufen {@link #reloadOnForeignChange()} auf.
+	 * Die Anmeldungen bei den Repositories, deren Änderungen die Übersicht zeigt: Sie gelten, solange die Übersicht zu sehen
+	 * ist. Die Listener entstehen mit {@link #foreignChangeReloader()}.
 	 */
-	protected abstract void watchForeignChanges(boolean watch);
+	protected abstract List<Registration> foreignChangeRegistrations();
 
 	/** Ein Listener, der bei jeder Änderung eines anderen Rechners (geändert, neu, gelöscht) die Übersicht nachführt. */
 	protected final <T> RepositoryListener<T> foreignChangeReloader() {
-		return new RepositoryListener<>() {
-			@Override
-			public void changedByOthers(T entity, ForeignBatch<T> batch) {
-				reloadKeepingSelection();
-			}
-
-			@Override
-			public void addedByOthers(T entity) {
-				reloadKeepingSelection();
-			}
-
-			@Override
-			public void removedByOthers(T entity) {
-				reloadKeepingSelection();
-			}
-		};
+		return RepositoryListener.onForeignChange(this::reloadKeepingSelection);
 	}
 
 	/** Konfiguriert die Spalten der Baum-Tabelle. */

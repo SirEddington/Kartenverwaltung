@@ -13,6 +13,7 @@ import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
@@ -64,14 +65,9 @@ public class EventOverviewController extends AbstractOverviewController {
 	private TreeTableColumn<Object, Boolean> colArchive;
 
 	@Override
-	protected void watchForeignChanges(boolean watch) {
-		if (watch) {
-			eventRepository.addListener(foreignEventChanges);
-			hallRepository.addListener(foreignHallChanges);
-		} else {
-			eventRepository.removeListener(foreignEventChanges);
-			hallRepository.removeListener(foreignHallChanges);
-		}
+	protected List<Registration> foreignChangeRegistrations() {
+		return List.of(Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignEventChanges),
+				Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges));
 	}
 
 	@Override

@@ -24,6 +24,7 @@ import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
@@ -227,10 +228,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 			}
 		});
 		// Fremde Änderungen nur, solange die Tabelle zu sehen ist; eine mit der Ansicht verschwundene Zelle gibt ihre Buchung frei
-		LiveViews.whileShown(seatTable, () -> eventRepository.addListener(foreignChanges), () -> {
-			eventRepository.removeListener(foreignChanges);
-			EditingUnits.getInstance().end(seatTable);
-		});
+		LiveViews.whileShown(seatTable, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges),
+				Registration.onDetach(() -> EditingUnits.getInstance().end(seatTable)));
 	}
 
 	private void sellSelection() {

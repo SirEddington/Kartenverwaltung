@@ -19,6 +19,7 @@ import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
 import javafx.beans.value.ChangeListener;
@@ -88,22 +89,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			}
 		}
 	};
-	private final RepositoryListener<Hall> foreignHallChanges = new RepositoryListener<>() {
-		@Override
-		public void changedByOthers(Hall hall, ForeignBatch<Hall> batch) {
-			renderIfShown(hall);
-		}
-
-		@Override
-		public void addedByOthers(Hall hall) {
-			renderIfShown(hall);
-		}
-
-		@Override
-		public void removedByOthers(Hall hall) {
-			renderIfShown(hall);
-		}
-	};
+	private final RepositoryListener<Hall> foreignHallChanges = RepositoryListener.onForeignChange(this::renderIfShown);
 
 	@FXML
 	private HallPlanPane viewportPane;
@@ -135,13 +121,8 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		updateHint();
 
 		// Fremde Änderungen nur, solange der Plan zu sehen ist (danach hielten die Repositories diese Ansicht am Leben)
-		LiveViews.whileShown(viewportPane, () -> {
-			eventRepository.addListener(foreignEventChanges);
-			hallRepository.addListener(foreignHallChanges);
-		}, () -> {
-			eventRepository.removeListener(foreignEventChanges);
-			hallRepository.removeListener(foreignHallChanges);
-		});
+		LiveViews.whileShown(viewportPane, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignEventChanges),
+				Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges));
 	}
 
 	/** Zeichnet neu, wenn es die Halle der gezeigten Vorstellung ist (eine ersetzte Halle hat dieselbe ID, {@link #hallOf} sucht nach ihr). */

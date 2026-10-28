@@ -63,6 +63,18 @@ public final class EditingUnits {
 		}
 	}
 
+	/**
+	 * Meldet {@code model} als in Bearbeitung, solange {@code active} gilt und es da ist ({@link #begin}); sonst endet die
+	 * Bearbeitung des Besitzers ({@link #end}).
+	 */
+	public void report(Object owner, boolean active, Object model) {
+		if (active && model != null) {
+			begin(owner, List.of(model));
+		} else {
+			end(owner);
+		}
+	}
+
 	/** Der Besitzer ist fertig (bestätigt, abgebrochen oder geschlossen). Hatte er nichts gemeldet, passiert nichts. */
 	public void end(Object owner) {
 		if (byOwner.remove(owner) != null) {

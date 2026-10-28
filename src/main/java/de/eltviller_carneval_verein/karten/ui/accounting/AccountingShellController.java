@@ -13,7 +13,6 @@ import java.util.prefs.Preferences;
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
@@ -24,6 +23,7 @@ import de.eltviller_carneval_verein.karten.ui.EventSelectionSync;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
@@ -107,22 +107,7 @@ public class AccountingShellController {
 	// Führt die Boxen nach Änderungen anderer Rechner nach; entsteht in initialize, wenn die Boxen da sind
 	private EventSelectionSync selectionSync;
 	// Fremde Änderungen an Events: Die Listen und die Auswahl folgen dem Cache
-	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
-		@Override
-		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
-			selectionSync.sync();
-		}
-
-		@Override
-		public void addedByOthers(Event event) {
-			selectionSync.sync();
-		}
-
-		@Override
-		public void removedByOthers(Event event) {
-			selectionSync.sync();
-		}
-	};
+	private final RepositoryListener<Event> foreignChanges = RepositoryListener.onForeignChange(() -> selectionSync.sync());
 
 	@FXML
 	public void initialize() {
@@ -191,7 +176,7 @@ public class AccountingShellController {
 		setupExportButton();
 
 		// Fremde Änderungen an Events nur, solange die Abrechnung zu sehen ist (danach hielte das Repository sie am Leben)
-		LiveViews.whileShown(contentArea, () -> repository.addListener(foreignChanges), () -> repository.removeListener(foreignChanges));
+		LiveViews.whileShown(contentArea, Registration.of(repository::addListener, repository::removeListener, foreignChanges));
 
 		// Muss NACH den obigen Listenern laufen: setzt bei genau einem Event
 		// automatisch dessen Auswahl, was den eventComboBox-Listener auslöst -

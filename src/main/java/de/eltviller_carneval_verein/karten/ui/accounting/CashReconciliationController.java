@@ -29,6 +29,7 @@ import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
@@ -125,15 +126,13 @@ public class CashReconciliationController implements ContentController, Exportab
 		applyEditMode();
 
 		// Fremde Änderungen nur, solange die Kasse zu sehen ist; im Bearbeitungsmodus ist die Vorstellung dann in Bearbeitung
-		LiveViews.whileShown(actualCashSpinner, () -> {
-			eventRepository.addListener(foreignChanges);
+		LiveViews.whileShown(actualCashSpinner, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges), new Registration(() -> {
 			shown = true;
 			reportEditing();
 		}, () -> {
-			eventRepository.removeListener(foreignChanges);
 			shown = false;
 			reportEditing();
-		});
+		}));
 	}
 
 	/**
@@ -142,11 +141,7 @@ public class CashReconciliationController implements ContentController, Exportab
 	 * Meldung endet auf jedem Weg hinaus, sonst bliebe die Vorstellung für fremde Stände gesperrt.
 	 */
 	private void reportEditing() {
-		if (shown && editMode && selectedPres != null) {
-			EditingUnits.getInstance().begin(this, List.of(selectedPres));
-		} else {
-			EditingUnits.getInstance().end(this);
-		}
+		EditingUnits.getInstance().report(this, shown && editMode, selectedPres);
 	}
 
 	/**

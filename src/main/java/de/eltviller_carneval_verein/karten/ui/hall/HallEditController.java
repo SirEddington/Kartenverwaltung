@@ -23,6 +23,7 @@ import de.eltviller_carneval_verein.karten.ui.HallSaver;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.PlanFreezer;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
@@ -144,20 +145,13 @@ public class HallEditController {
 		setupSeatingPlanSelection();
 
 		// Fremde Änderungen nur, solange die Ansicht zu sehen ist; im Bearbeitungsmodus ist die Halle dann in Bearbeitung
-		LiveViews.whileShown(btnSave, () -> {
-			hallRepository.addListener(foreignChanges);
+		LiveViews.whileShown(btnSave, Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignChanges), new Registration(() -> {
 			shown = true;
 			reportEditing();
 		}, () -> {
-			hallRepository.removeListener(foreignChanges);
 			shown = false;
 			reportEditing();
-		});
-	}
-
-	/** Ob die Ansicht noch in einem gezeigten Fenster steht. */
-	private boolean viewShown() {
-		return btnSave.getScene() != null && btnSave.getScene().getWindow() != null;
+		}));
 	}
 
 	/**
@@ -167,7 +161,7 @@ public class HallEditController {
 	 */
 	private void reloadReplacedHall() {
 		Hall current = hallRepository.findById(hall.getId());
-		if (!viewShown() || editMode || current == null || current == hall) {
+		if (!LiveViews.isShown(btnSave) || editMode || current == null || current == hall) {
 			return;
 		}
 		SeatingPlan plan = shownPlan != null && hallPlanController.isSeatingTabActive() ? current.findSeatingPlan(shownPlan.getId()) : null;
@@ -179,11 +173,11 @@ public class HallEditController {
 	 * Bleibt die Ansicht stehen (Abbruch der Rückfrage zu anderen ungespeicherten Änderungen), zeigt sie die Halle nicht mehr.
 	 */
 	private void leaveDeletedHall(Hall removed) {
-		if (!viewShown() || hall == null || !hall.getId().equals(removed.getId())) {
+		if (!LiveViews.isShown(btnSave) || hall == null || !hall.getId().equals(removed.getId())) {
 			return;
 		}
 		MainApp.showHallManagementView();
-		if (viewShown()) {
+		if (LiveViews.isShown(btnSave)) {
 			showNoHall();
 		}
 		// Die Hallenverwaltung hat keine Fußzeile: Die Meldung öffnet dort einen Dialog
@@ -218,11 +212,7 @@ public class HallEditController {
 	 * Ansicht wirklich zu sehen ist, und endet auf jedem Weg hinaus, sonst bliebe die Halle für fremde Stände gesperrt.
 	 */
 	private void reportEditing() {
-		if (shown && editMode && hall != null) {
-			EditingUnits.getInstance().begin(this, List.of(hall));
-		} else {
-			EditingUnits.getInstance().end(this);
-		}
+		EditingUnits.getInstance().report(this, shown && editMode, hall);
 	}
 
 	/** Auswahl der Bestuhlung: Die Auswahl selbst ist keine Änderung an der Halle, Neu/Kopieren/Löschen/Name schon. */
@@ -489,7 +479,7 @@ public class HallEditController {
 		MainApp.showHallManagementView();
 		// Hat der Nutzer im Dialog "Abbrechen" gewählt, bleibt dieser Screen stehen: Bearbeitungsmodus zurückgeben,
 		// sonst wäre der Speichern-Button gesperrt, obwohl ungespeicherte Änderungen da sind
-		if (btnSave.getScene() != null && btnSave.getScene().getWindow() != null) {
+		if (LiveViews.isShown(btnSave)) {
 			setEditable(wasEditable);
 		}
 	}

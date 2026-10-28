@@ -1,5 +1,8 @@
 package de.eltviller_carneval_verein.karten.ui;
 
+import java.util.function.Consumer;
+
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import javafx.beans.InvalidationListener;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -22,6 +25,46 @@ public final class LiveViews {
 	 */
 	public static void whileShown(Node anchor, Runnable register, Runnable unregister) {
 		new Watch(anchor, register, unregister).update();
+	}
+
+	/**
+	 * Wie {@link #whileShown(Node, Runnable, Runnable)}: Die Registrierungen werden der Reihe nach an- und abgemeldet.
+	 */
+	public static void whileShown(Node anchor, Registration... registrations) {
+		whileShown(anchor, () -> {
+			for (Registration registration : registrations) {
+				registration.attach().run();
+			}
+		}, () -> {
+			for (Registration registration : registrations) {
+				registration.detach().run();
+			}
+		});
+	}
+
+	/** Ob die Ansicht von {@code anchor} in einem Fenster steht (Szene und Fenster sind da). */
+	public static boolean isShown(Node anchor) {
+		return anchor.getScene() != null && anchor.getScene().getWindow() != null;
+	}
+
+	/**
+	 * Ein Paar aus An- und Abmelden, das {@link #whileShown(Node, Registration...)} solange gilt, wie die Ansicht zu sehen ist.
+	 *
+	 * @param attach das Anmelden
+	 * @param detach das Abmelden (das Gegenstück zu {@code attach})
+	 */
+	public record Registration(Runnable attach, Runnable detach) {
+
+		/** Meldet {@code listener} über {@code add} an und über {@code remove} wieder ab (z. B. {@code repository::addListener}). */
+		public static <T> Registration of(Consumer<RepositoryListener<T>> add, Consumer<RepositoryListener<T>> remove, RepositoryListener<T> listener) {
+			return new Registration(() -> add.accept(listener), () -> remove.accept(listener));
+		}
+
+		/** Eine Registrierung, die beim Anmelden nichts tut und nur beim Abmelden {@code detach} ausführt. */
+		public static Registration onDetach(Runnable detach) {
+			return new Registration(() -> {
+			}, detach);
+		}
 	}
 
 	/** Beobachtet die Kette Knoten, Szene, Fenster, gezeigt; hängt sich um, wenn ein Glied wechselt. */
