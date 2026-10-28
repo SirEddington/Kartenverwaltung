@@ -20,6 +20,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SaleDates;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
@@ -939,7 +940,13 @@ public class EventEditController {
 			// Nie gespeichert: Es gibt nichts zu löschen, es verschwindet nur wieder aus der Tabelle
 			ChangeTracker.events().untrack(event);
 		} else {
-			repository.deleteEvent(event);
+			try {
+				repository.deleteEvent(event);
+			} catch (LockedUnitException e) {
+				// Die Tabelle zeigt ein Event, das ein anderer Rechner inzwischen ersetzt oder gelöscht hat
+				StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
+				return;
+			}
 		}
 
 		if (event.equals(currentEvent)) {

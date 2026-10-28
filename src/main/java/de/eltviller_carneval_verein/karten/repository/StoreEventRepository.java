@@ -523,18 +523,20 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Die lokal veränderten Einheiten eines Events; {@code all}, wenn es sich nicht zerlegen lässt (dann gilt jede Einheit
-	 * als verändert). {@code model} sind die Inhalte der Einheiten im Modell ({@code null} bei {@code all}).
+	 * als verändert). {@code model} sind die Inhalte der Einheiten im Modell ({@code null} bei {@code all}). {@code moved}
+	 * sind die Buchungs-Einheiten im Modell, deren Inhalt vom Vergleichsstand abweicht oder die keinen haben (auch die vom
+	 * Abgleich abgeleiteten), je Buchungs-Kennung: Dort steht eine Buchung, die gegenüber dem gespeicherten Stand versetzt ist.
 	 */
-	private record LocalChanges(Set<UnitKey> units, boolean all, Map<UnitKey, ObjectNode> model) {
+	private record LocalChanges(Set<UnitKey> units, boolean all, Map<UnitKey, ObjectNode> model,
+			Map<String, List<UnitKey>> moved) {
 
 		boolean none() {
 			return !all && units.isEmpty();
 		}
 
-		/** Ob eine andere Buchungs-Einheit als {@code except} im Modell die Buchung mit dieser Kennung trägt. */
-		boolean carriesElsewhere(String bookingId, UnitKey except) {
-			return model.entrySet().stream().anyMatch(entry -> entry.getKey().type() == UnitType.BOOKING
-					&& !entry.getKey().equals(except) && bookingId.equals(entry.getValue().path("id").asText(null)));
+		/** Die versetzten Einheiten, die die Buchung mit dieser Kennung tragen, ohne {@code except}. */
+		List<UnitKey> movedCarriers(String bookingId, UnitKey except) {
+			return moved.getOrDefault(bookingId, List.of()).stream().filter(unit -> !unit.equals(except)).toList();
 		}
 	}
 
@@ -543,14 +545,18 @@ public class StoreEventRepository implements EventRepository {
 		try {
 			model = UnitMapper.payloads(event);
 		} catch (IllegalStateException e) {
-			return new LocalChanges(Set.of(), true, null);
+			return new LocalChanges(Set.of(), true, null, Map.of());
 		}
 		Set<UnitKey> changed = new HashSet<>();
+		Map<String, List<UnitKey>> moved = new HashMap<>();
 		for (Map.Entry<UnitKey, ObjectNode> entry : model.entrySet()) {
 			UnitKey unit = entry.getKey();
 			UnitSnapshot known = baseline.known(unit);
 			boolean differs = known == null || known.deleted() || !baseline.isShown(unit)
 					|| !entry.getValue().equals(known.payload());
+			if (differs && unit.type() == UnitType.BOOKING && entry.getValue().hasNonNull("id")) {
+				moved.computeIfAbsent(entry.getValue().get("id").asText(), id -> new ArrayList<>()).add(unit);
+			}
 			if (differs && !(derived.containsKey(unit) && entry.getValue().equals(derived.get(unit)))) {
 				changed.add(unit);
 			}
@@ -560,7 +566,7 @@ public class StoreEventRepository implements EventRepository {
 				changed.add(unit);
 			}
 		}
-		return new LocalChanges(changed, false, model);
+		return new LocalChanges(changed, false, model, moved);
 	}
 
 	/**
@@ -569,9 +575,10 @@ public class StoreEventRepository implements EventRepository {
 	 * Abgleich hat sie schon so umgesetzt wie der andere Rechner. Dann gibt es nichts zurückzustellen; der Stand geht still
 	 * in den Vergleichsstand (das Einarbeiten ändert am Modell nichts).
 	 * <p>
-	 * Eine fremde Löschung, die eine Buchung träfe, die im Modell auf einer anderen Einheit steht (der Nutzer hat sie
-	 * ungespeichert verschoben), ist keine Übereinstimmung: Die Buchung trägt dort ihre Kennung aus {@code known}, dem
-	 * Vergleichsstand der Einheit.
+	 * Eine fremde Löschung, die eine Buchung träfe, die im Modell versetzt auf einer anderen Einheit steht (etwa vom Nutzer
+	 * ungespeichert verschoben, siehe {@link LocalChanges#moved}), ist keine Übereinstimmung: Die Buchung trägt dort ihre
+	 * Kennung aus {@code known}, dem Vergleichsstand der Einheit. Steht sie dort schon so im Vergleichsstand, ist sie nicht
+	 * versetzt: Das Modell hat dann genau den fremden Stand.
 	 */
 	private static boolean converged(LocalChanges changes, UnitSnapshot known, UnitSnapshot current) {
 		if (changes.model() == null) {
@@ -583,7 +590,7 @@ public class StoreEventRepository implements EventRepository {
 				return false;
 			}
 			String movedId = known == null || known.payload() == null ? null : known.payload().path("id").asText(null);
-			return movedId == null || !changes.carriesElsewhere(movedId, current.unit());
+			return movedId == null || changes.movedCarriers(movedId, current.unit()).isEmpty();
 		}
 		return current.version() != null && !current.deleted() && mine.equals(current.payload());
 	}
@@ -664,19 +671,19 @@ public class StoreEventRepository implements EventRepository {
 		}
 
 		// "lokal verändert" kostet das Zerlegen des Events: erst prüfen, wenn ein Nachfolger da ist
-		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false, null) : localChanges(event);
+		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false, null, Map.of()) : localChanges(event);
 		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
 		successors.sort(EventMerge.MERGE_ORDER);
 		Map<UnitKey, UnitSnapshot> presentationStates = presentationStates(event, snapshots, successors);
 		Map<UnitKey, String> lastIds = event == null ? Map.of() : lastIds(event, successors);
-		// Eine Stornierung, die eine vom Nutzer berührte Buchung träfe (versetzt vom Abgleich), wartet wie jede Änderung daran
-		Set<String> touchedIds = lastIds.isEmpty() || changes.all() ? Set.of() : touchedBookingIds(event, changes);
 		Set<UnitKey> appliedPresentations = new HashSet<>();
 		List<UnitSnapshot> apply = new ArrayList<>();
 		for (UnitSnapshot current : successors) {
 			UnitKey unit = current.unit();
 			UnitKey parent = unit.type() == UnitType.BOOKING ? EventMerge.presentationKey(unit) : null;
-			if (isBlocked(event, current, changes) || (lastIds.containsKey(unit) && touchedIds.contains(lastIds.get(unit)))) {
+			// Eine Stornierung, die eine vom Nutzer berührte versetzte Buchung träfe, wartet wie jede Änderung daran
+			if (isBlocked(event, current, changes)
+					|| (lastIds.containsKey(unit) && movedBookingTouched(event, changes, lastIds.get(unit), unit))) {
 				defer(event, current, chainOf(chains, unit));
 			} else if (parent != null && event != null && !appliedPresentations.contains(parent)
 					&& EventMerge.waits(event, current, presentationStates.get(parent), hallLookup)) {
@@ -787,24 +794,20 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
-	 * Die Kennungen der Buchungen im Modell, die der Nutzer ungespeichert geändert hat oder gerade bearbeitet. Eine
-	 * Stornierung, die eine solche Buchung träfe (sie wurde von einem Wechsel der Bestuhlung versetzt), wird zurückgestellt,
-	 * statt die Eingabe zu leeren oder zu übergehen. Setzt voraus, dass sich das Event zerlegen ließ.
+	 * Ob die Buchung mit dieser Kennung im Modell versetzt auf einer anderen Einheit als {@code unit} steht (siehe
+	 * {@link LocalChanges#moved}) und der Nutzer sie dort ungespeichert geändert hat oder gerade bearbeitet. Eine
+	 * Stornierung, die eine solche Buchung träfe (sie wurde etwa von einem Wechsel der Bestuhlung versetzt), wird
+	 * zurückgestellt, statt die Eingabe zu leeren oder zu übergehen. Eine nur vom Abgleich versetzte Buchung, an der der
+	 * Nutzer nichts getan hat, wird von der Stornierung getroffen.
 	 */
-	private Set<String> touchedBookingIds(Event event, LocalChanges changes) {
-		Set<String> ids = new HashSet<>();
-		for (UnitKey unit : changes.units()) {
-			ObjectNode payload = changes.model().get(unit);
-			if (unit.type() == UnitType.BOOKING && payload != null && payload.hasNonNull("id")) {
-				ids.add(payload.get("id").asText());
+	private boolean movedBookingTouched(Event event, LocalChanges changes, String bookingId, UnitKey unit) {
+		for (UnitKey carrier : changes.movedCarriers(bookingId, unit)) {
+			Object model = EventMerge.modelObject(event, carrier);
+			if (changes.units().contains(carrier) || (model != null && inEditing.test(model))) {
+				return true;
 			}
 		}
-		for (Object model : EventMerge.subtree(event, UnitKey.event(event.getId()))) {
-			if (model instanceof Booking booking && inEditing.test(booking)) {
-				ids.add(booking.getId());
-			}
-		}
-		return ids;
+		return false;
 	}
 
 	/**

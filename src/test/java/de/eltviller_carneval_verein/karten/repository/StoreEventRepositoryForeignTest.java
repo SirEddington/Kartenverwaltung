@@ -1265,6 +1265,60 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	@Test
+	void cancellationOfABookingEditedOnItsSeatThenDerivedAwayIsDeferred() throws IOException {
+		Booking sold = seat(friday, 0);
+		UnitKey oldSeat = seatUnit(friday, 0);
+		// der Nutzer ändert Müller auf Sitz 0 (ungespeichert) ...
+		sold.setFirstName("Hans");
+		// ... dann setzt ein Abgleich die Buchung vom Sitz (etwa weil ein fremder Hallenstand den Sitz streicht): ohne Platz
+		mine.deriving(event, () -> sold.setUnassigned(true));
+		assertEquals(Set.of(oldSeat), mine.locallyChangedUnits(), "die eigene Änderung steht noch auf dem alten Sitz");
+		// A storniert Müller auf Sitz 0
+		Other remote = other();
+		seat(remote.friday(), 0).clearCustomerData();
+		remote.save();
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(List.of(oldSeat));
+
+		assertEquals(List.of(oldSeat), result.deferred().stream().map(Deferral::unit).toList(),
+				"die Stornierung trifft die Eingabe nicht still");
+		assertEquals("Hans", sold.getFirstName());
+		assertEquals("Müller", sold.getLastName());
+		assertTrue(friday.getBookings().contains(sold));
+		assertEquals(before, files());
+	}
+
+	@Test
+	void deletionOfTheOldSeatOfAMoveWhoseNewSeatIsAlreadyKnownIsAdoptedSilently() throws IOException {
+		Booking sold = seat(friday, 0);
+		UnitKey oldSeat = seatUnit(friday, 0);
+		UnitKey newSeat = seatUnit(friday, 1);
+		// A verschiebt Müller auf Sitz 1 und speichert
+		Other remote = other();
+		assertTrue(BookingSync.assign(remote.friday(), plan, seat(remote.friday(), 0), planSeat(1)));
+		remote.save();
+		// B bekommt zuerst Sitz 1: Müller steht kurz doppelt im Modell (Sitz 0 und Sitz 1)
+		mine.applyForeign(List.of(newSeat));
+		assertEquals(2, friday.getBookings().stream().filter(b -> sold.getId().equals(b.getId())).count(),
+				"das kurze Fenster, in dem die Buchung doppelt im Modell steht");
+		// der Nutzer räumt die Dublette auf Sitz 0 ab
+		sold.clearCustomerData();
+		assertEquals(Set.of(oldSeat), mine.locallyChangedUnits());
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(List.of(oldSeat));
+
+		assertTrue(result.deferred().isEmpty(), "das Modell hat genau den fremden Stand: " + result.deferred());
+		assertTrue(mine.retryDeferred().deferred().isEmpty());
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+		assertNotNull(mine.knownUnit(oldSeat));
+		assertTrue(mine.knownUnit(oldSeat).deleted());
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird als eigene Version geschrieben");
+	}
+
+	@Test
 	void cancellationOfABookingNotMovedInTheModelIsStillAdoptedSilently() throws IOException {
 		UnitKey oldSeat = seatUnit(friday, 0);
 		// B hat Müller auf Sitz 0 gelöscht (ungespeichert), A storniert ihn ebenfalls
