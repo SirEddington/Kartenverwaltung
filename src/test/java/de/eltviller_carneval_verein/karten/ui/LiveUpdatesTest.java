@@ -8,16 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Clock;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
-import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,15 +33,11 @@ import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.repository.TestRepositories;
-import de.eltviller_carneval_verein.karten.store.LocalArbiter;
-import de.eltviller_carneval_verein.karten.store.NioFileLayer;
-import de.eltviller_carneval_verein.karten.store.StoreCodec;
+import de.eltviller_carneval_verein.karten.store.ForeignVersions;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.Version;
-import de.eltviller_carneval_verein.karten.store.VersionId;
-import de.eltviller_carneval_verein.karten.store.VersionStore;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.tracking.StateRestorer;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
@@ -88,7 +80,7 @@ class LiveUpdatesTest {
 	private SeatingPlan plan;
 	private Event event;
 	private Presentation friday;
-	private int foreignVersions;
+	private ForeignVersions foreign;
 
 	/**
 	 * Eine Halle mit 2 Tischen zu je 3 Sitzen und ein Event "Prunksitzung" mit der Vorstellung "Freitag" in dieser Halle,
@@ -97,6 +89,7 @@ class LiveUpdatesTest {
 	@BeforeEach
 	void setUp() {
 		sync = TestSyncServices.singleMode(appData);
+		foreign = new ForeignVersions(sync, appData);
 		sync.startup(null, p -> {
 		});
 		Hall created = new Hall();
@@ -123,8 +116,8 @@ class LiveUpdatesTest {
 		events.loadEvents();
 		hallTracker = new ChangeTracker<>(Hall::getId);
 		eventTracker = new ChangeTracker<>(Event::getId);
-		events.addListener(trackerUpdater(eventTracker));
-		halls.addListener(trackerUpdater(hallTracker));
+		events.addListener(eventTracker.repositoryUpdater());
+		halls.addListener(hallTracker.repositoryUpdater());
 		editing = new EditingUnits();
 		live = new LiveUpdates(halls, events, hallTracker, eventTracker, editing, command -> later.execute(command), hints::add);
 		eventRestorer = new StateRestorer<>(Event.class, eventTracker, events::replaceCachedEvent);
@@ -140,21 +133,6 @@ class LiveUpdatesTest {
 	}
 
 	// Bauteile -->
-
-	/** Wie in der App: Jedes Speichern und Löschen führt den Tracker nach. */
-	private static <T> RepositoryListener<T> trackerUpdater(ChangeTracker<T> tracker) {
-		return new RepositoryListener<>() {
-			@Override
-			public void saved(T entity) {
-				tracker.markSaved(entity);
-			}
-
-			@Override
-			public void deleted(T entity) {
-				tracker.untrack(entity);
-			}
-		};
-	}
 
 	/** Die Buchung auf dem n-ten Sitz der Bestuhlung. */
 	private Booking seat(Presentation presentation, int n) {
@@ -194,9 +172,7 @@ class LiveUpdatesTest {
 
 	/** Die Anzahl aller Dateien (Versionen und Ansprüche) im lokalen Bestand. */
 	private long files() throws IOException {
-		try (Stream<Path> walk = Files.walk(appData.resolve("data"))) {
-			return walk.filter(Files::isRegularFile).count();
-		}
+		return foreign.files();
 	}
 
 	/** Der gespeicherte Stand des Events, wie ihn der Tracker für "Nicht speichern" hält. */
@@ -216,18 +192,7 @@ class LiveUpdatesTest {
 	 * Abholen aus dem gemeinsamen Ordner tut.
 	 */
 	private void foreignVersion(UnitKey unit, String machineName, Consumer<ObjectNode> changes) throws IOException {
-		Version parent = sync.unitState(unit).head();
-		ObjectNode payload = parent.payload().deepCopy();
-		changes.accept(payload);
-		foreignVersions++;
-		Version version = new Version(StoreCodec.FORMAT,
-				VersionId.create(1_900_000_000_000L + foreignVersions, "abcdefgh", foreignVersions), List.of(parent.id()),
-				"0123456789abcdefghijklmnop", machineName, null, Instant.now(), "fremd-" + foreignVersions, false, payload);
-		byte[] bytes = StoreCodec.write(version);
-		VersionStore store = new VersionStore(appData.resolve("data"), new NioFileLayer());
-		assertTrue(store.writeVersion(unit, version.id(), bytes));
-		new LocalArbiter(store, Clock.systemUTC()).claim(unit, version, bytes);
-		sync.unitState(unit);
+		foreign.write(unit, machineName, changes);
 	}
 
 	private static String deferralHint(String entry, String machine) {

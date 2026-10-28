@@ -13,18 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
-import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,18 +37,16 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.Change;
-import de.eltviller_carneval_verein.karten.store.LocalArbiter;
-import de.eltviller_carneval_verein.karten.store.NioFileLayer;
-import de.eltviller_carneval_verein.karten.store.StoreCodec;
+import de.eltviller_carneval_verein.karten.store.ForeignVersions;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.TestClock;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
-import de.eltviller_carneval_verein.karten.store.VersionStore;
 
 /**
  * Fremde Stände im Event-Repository. "Der andere Rechner" ist meist ein zweites Repository auf demselben Dienst: Es
@@ -92,30 +85,6 @@ class StoreEventRepositoryForeignTest {
 		}
 	}
 
-	/** Uhr, die der Test von Hand stellt. */
-	private static final class TestClock extends Clock {
-		private Instant now = Instant.parse("2026-10-28T10:00:00Z");
-
-		void advance(Duration duration) {
-			now = now.plus(duration);
-		}
-
-		@Override
-		public ZoneId getZone() {
-			return ZoneOffset.UTC;
-		}
-
-		@Override
-		public Clock withZone(ZoneId zone) {
-			return this;
-		}
-
-		@Override
-		public Instant instant() {
-			return now;
-		}
-	}
-
 	/** Das Event, wie es der andere Rechner geladen und für die Anzeige vorbereitet hat. */
 	private record Other(StoreEventRepository repository, Event event) {
 		void save() {
@@ -137,7 +106,7 @@ class StoreEventRepositoryForeignTest {
 	private Event event;
 	private Presentation friday;
 	private final Recorder recorder = new Recorder();
-	private int foreignVersions;
+	private ForeignVersions foreign;
 
 	/**
 	 * Eine Halle mit 2 Tischen zu je 3 Sitzen; ein Event "Prunksitzung" mit der Vorstellung "Freitag" in dieser Halle,
@@ -146,6 +115,7 @@ class StoreEventRepositoryForeignTest {
 	@BeforeEach
 	void setUp() {
 		sync = TestSyncServices.singleMode(appData);
+		foreign = new ForeignVersions(sync, appData);
 		sync.startup(null, p -> {
 		});
 		hall = new Hall();
@@ -206,9 +176,7 @@ class StoreEventRepositoryForeignTest {
 
 	/** Die Anzahl aller Dateien (Versionen und Ansprüche) im lokalen Bestand. */
 	private long files() throws IOException {
-		try (Stream<Path> walk = Files.walk(appData.resolve("data"))) {
-			return walk.filter(Files::isRegularFile).count();
-		}
+		return foreign.files();
 	}
 
 	/** Die Anzahl aller Versionen aller Einheiten des Events. */
@@ -260,20 +228,7 @@ class StoreEventRepositoryForeignTest {
 	 * aus dem gemeinsamen Ordner tut.
 	 */
 	private Version foreignVersion(UnitKey unit, String lastName) throws IOException {
-		Version parent = sync.unitState(unit).head();
-		ObjectNode payload = parent.payload().deepCopy();
-		payload.put("lastName", lastName);
-		foreignVersions++;
-		Version version = new Version(StoreCodec.FORMAT,
-				VersionId.create(1_900_000_000_000L + foreignVersions, "abcdefgh", foreignVersions),
-				List.of(parent.id()), "0123456789abcdefghijklmnop", "Fremd", null, Instant.now(),
-				"fremd-" + foreignVersions, false, payload);
-		byte[] bytes = StoreCodec.write(version);
-		VersionStore store = new VersionStore(appData.resolve("data"), new NioFileLayer());
-		assertTrue(store.writeVersion(unit, version.id(), bytes));
-		new LocalArbiter(store, Clock.systemUTC()).claim(unit, version, bytes);
-		sync.unitState(unit);
-		return version;
+		return foreign.write(unit, "Fremd", payload -> payload.put("lastName", lastName));
 	}
 
 	// <-- Bauteile
