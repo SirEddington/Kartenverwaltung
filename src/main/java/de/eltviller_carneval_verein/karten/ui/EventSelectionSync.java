@@ -20,22 +20,97 @@ import javafx.scene.control.ComboBox;
  * speichern"; ist es weg, ist die Auswahl leer und die Fußzeile sagt warum.
  *
  * <p>
+ * Eine Liste wird nur neu gesetzt, wenn sie sich wirklich unterscheidet (andere Objekte oder ein anderer angezeigter Name),
+ * und die Auswahl nur, wenn sie nicht schon stimmt: Fremde Änderungen kommen alle paar Sekunden, eine offene Liste soll
+ * dabei weder flackern noch zugehen.
+ *
+ * <p>
  * Während die Listen nachgeführt werden, melden {@link #updatingEvents()} und {@link #updatingPresentations()}
  * {@code true}: Die Auswahl-Listener der Shell dürfen dann nichts an den Inhalt weitergeben. Nur im JavaFX-Thread.
  */
 public final class EventSelectionSync {
 
+	/**
+	 * Was der Abgleich von einer Auswahlbox braucht; in der App eine {@link ComboBox} ({@link #of}). Paketsichtbar, damit
+	 * Tests ohne Oberfläche auskommen.
+	 */
+	interface Box<T> {
+
+		/** Die Einträge der Liste. */
+		List<T> items();
+
+		/** Ersetzt die Einträge; wie bei der ComboBox ist danach nichts gewählt. */
+		void setItems(List<T> items);
+
+		/** Die gewählte Zeile, {@code -1} ohne Auswahl. */
+		int selectedIndex();
+
+		/** Leert die Auswahl und wählt die Zeile ({@code -1}: keine). */
+		void select(int index);
+
+		/** Der Text, den die Box für den Eintrag zeigt. */
+		String label(T item);
+
+		/** Leert den Wert der Box: Eine ComboBox behält ihn sonst auch ohne Eintrag in der Liste. */
+		void clearValue();
+	}
+
+	/** Die ComboBox als {@link Box}. */
+	static <T> Box<T> of(ComboBox<T> box) {
+		return new Box<>() {
+			@Override
+			public List<T> items() {
+				return box.getItems();
+			}
+
+			@Override
+			public void setItems(List<T> items) {
+				box.getItems().setAll(items);
+			}
+
+			@Override
+			public int selectedIndex() {
+				return box.getSelectionModel().getSelectedIndex();
+			}
+
+			@Override
+			public void select(int index) {
+				box.getSelectionModel().clearSelection();
+				if (index >= 0) {
+					box.getSelectionModel().select(index);
+				}
+			}
+
+			@Override
+			public String label(T item) {
+				return box.getConverter().toString(item);
+			}
+
+			@Override
+			public void clearValue() {
+				box.setValue(null);
+			}
+		};
+	}
+
+	/** Was eine Box nach dem letzten Setzen durch diese Klasse zeigt: die Einträge und ihre Texte von damals. */
+	private record Shown<T>(List<T> items, List<String> labels) {
+	}
+
 	private final StoreEventRepository repository;
-	private final ComboBox<Event> eventBox;
-	private final ComboBox<Presentation> presentationBox;
+	private final Box<Event> eventBox;
+	private final Box<Presentation> presentationBox;
 	private final Predicate<Event> listed;
 	private final Supplier<Event> shownEvent;
 	private final Supplier<Presentation> shownPresentation;
 	private final Consumer<Event> applyEventSelection;
 	private final Consumer<Presentation> applyPresentation;
+	private final Consumer<String> warning;
 
 	private boolean updatingEvents = false;
 	private boolean updatingPresentations = false;
+	private Shown<Event> shownEvents;
+	private Shown<Presentation> shownPresentations;
 
 	/**
 	 * @param listed              welche Events die Box zeigt (z. B. ohne archivierte)
@@ -47,6 +122,14 @@ public final class EventSelectionSync {
 	 */
 	public EventSelectionSync(StoreEventRepository repository, ComboBox<Event> eventBox, ComboBox<Presentation> presentationBox, Predicate<Event> listed,
 			Supplier<Event> shownEvent, Supplier<Presentation> shownPresentation, Consumer<Event> applyEventSelection, Consumer<Presentation> applyPresentation) {
+		this(repository, of(eventBox), of(presentationBox), listed, shownEvent, shownPresentation, applyEventSelection, applyPresentation,
+				text -> StatusMessage.getInstance().show(Severity.WARNING, text));
+	}
+
+	/** Wie oben, mit beliebigen Boxen und einem eigenen Weg für den Hinweis in der Fußzeile (für Tests). */
+	EventSelectionSync(StoreEventRepository repository, Box<Event> eventBox, Box<Presentation> presentationBox, Predicate<Event> listed,
+			Supplier<Event> shownEvent, Supplier<Presentation> shownPresentation, Consumer<Event> applyEventSelection, Consumer<Presentation> applyPresentation,
+			Consumer<String> warning) {
 		this.repository = repository;
 		this.eventBox = eventBox;
 		this.presentationBox = presentationBox;
@@ -55,6 +138,7 @@ public final class EventSelectionSync {
 		this.shownPresentation = shownPresentation;
 		this.applyEventSelection = applyEventSelection;
 		this.applyPresentation = applyPresentation;
+		this.warning = warning;
 	}
 
 	/** {@code true}, solange die Event-Box nachgeführt wird. */
@@ -75,14 +159,10 @@ public final class EventSelectionSync {
 		List<Event> events = all.stream().filter(listed).toList();
 		Event current = shown == null ? null : events.stream().filter(event -> event.equals(shown)).findFirst().orElse(null);
 
-		// Die Auswahl wird unten gezielt nachgeführt; erst abmelden und neu wählen lässt die Box den (ggf. neuen) Namen zeigen
 		updatingEvents = true;
 		try {
-			eventBox.getItems().setAll(events);
-			eventBox.getSelectionModel().clearSelection();
-			if (current != null) {
-				eventBox.getSelectionModel().select(current);
-			}
+			// Neu gesetzt und neu gewählt zeigt die Box auch einen geänderten Namen
+			shownEvents = show(eventBox, events, current, shownEvents);
 		} finally {
 			updatingEvents = false;
 		}
@@ -94,16 +174,61 @@ public final class EventSelectionSync {
 			boolean archived = all.stream().anyMatch(event -> event.equals(shown));
 			applyEventSelection.accept(null);
 			clearValues();
-			StatusMessage.getInstance().show(Severity.WARNING,
-					"„" + EntityLabels.nameOrPlaceholder(shown.getName()) + "“ wurde auf einem anderen Rechner " + (archived ? "archiviert." : "gelöscht."));
+			warning.accept("„" + EntityLabels.nameOrPlaceholder(shown.getName()) + "“ wurde auf einem anderen Rechner " + (archived ? "archiviert." : "gelöscht."));
 		} else if (current != shown) {
 			applyEventSelection.accept(current);
 			String presentationId = shownPres == null ? null : shownPres.getId();
-			presentationBox.getItems().stream().filter(presentation -> presentation != null && presentation.getId().equals(presentationId)).findFirst()
-					.ifPresent(presentation -> presentationBox.getSelectionModel().select(presentation));
+			List<Presentation> presentations = presentationBox.items();
+			for (int index = 0; index < presentations.size(); index++) {
+				Presentation presentation = presentations.get(index);
+				if (presentation != null && presentation.getId().equals(presentationId)) {
+					presentationBox.select(index);
+					break;
+				}
+			}
 		} else {
 			syncPresentations(current, shownPres);
 		}
+	}
+
+	/**
+	 * Setzt die Einträge nur, wenn sie sich von dem unterscheiden, was die Box zeigt, und wählt {@code selected}, wenn es nicht
+	 * schon gewählt ist.
+	 *
+	 * @return was die Box danach zeigt
+	 */
+	private static <T> Shown<T> show(Box<T> box, List<T> items, T selected, Shown<T> before) {
+		List<String> labels = items.stream().map(box::label).toList();
+		int index = indexOf(items, selected);
+		if (before == null || !sameObjects(box.items(), items) || !sameObjects(before.items(), items) || !before.labels().equals(labels)) {
+			box.setItems(items);
+			box.select(index);
+		} else if (box.selectedIndex() != index) {
+			box.select(index);
+		}
+		return new Shown<>(new ArrayList<>(items), labels);
+	}
+
+	/** Die Stelle des Objekts in der Liste (nach Identität), {@code -1}, wenn es fehlt. */
+	private static <T> int indexOf(List<T> items, T item) {
+		for (int index = 0; index < items.size(); index++) {
+			if (items.get(index) == item) {
+				return index;
+			}
+		}
+		return -1;
+	}
+
+	private static <T> boolean sameObjects(List<T> a, List<T> b) {
+		if (a.size() != b.size()) {
+			return false;
+		}
+		for (int index = 0; index < a.size(); index++) {
+			if (a.get(index) != b.get(index)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/** Eine ComboBox behält ihren Wert auch ohne Eintrag in der Liste und zeigte sonst weiter das gelöschte Event. */
@@ -111,8 +236,10 @@ public final class EventSelectionSync {
 		updatingEvents = true;
 		updatingPresentations = true;
 		try {
-			eventBox.setValue(null);
-			presentationBox.setValue(null);
+			eventBox.clearValue();
+			presentationBox.clearValue();
+			shownEvents = null;
+			shownPresentations = null;
 		} finally {
 			updatingEvents = false;
 			updatingPresentations = false;
@@ -127,9 +254,7 @@ public final class EventSelectionSync {
 		Presentation kept = shown == null ? null : items.stream().filter(presentation -> presentation != null && presentation.equals(shown)).findFirst().orElse(null);
 		updatingPresentations = true;
 		try {
-			presentationBox.getItems().setAll(items);
-			presentationBox.getSelectionModel().clearSelection();
-			presentationBox.getSelectionModel().select(items.indexOf(kept));
+			shownPresentations = show(presentationBox, items, kept, shownPresentations);
 		} finally {
 			updatingPresentations = false;
 		}

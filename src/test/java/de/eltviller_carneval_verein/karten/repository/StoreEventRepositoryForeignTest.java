@@ -881,6 +881,51 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	@Test
+	void archivingIsDeferredWhileABookingBelowIsChanged() {
+		seat(friday, 1).setLastName("Eigen");
+		Other other = other();
+		other.event().setArchived(true);
+		other.save();
+
+		ForeignResult result = mine.applyForeign(List.of(head()));
+
+		assertEquals(List.of(head()), result.deferred().stream().map(Deferral::unit).toList());
+		assertFalse(event.isArchived(), "die Verkaufsansichten zeigen das Event weiter, der Verkauf bleibt speicherbar");
+		assertTrue(recorder.calls.isEmpty());
+
+		mine.saveEvent(event);
+		mine.retryDeferred();
+
+		assertTrue(event.isArchived(), "nach dem Speichern greift das Archivieren");
+	}
+
+	@Test
+	void archivingIsDeferredWhileABookingIsInEditing() {
+		Booking placeholder = seat(friday, 1);
+		mine.setEditingCheck(o -> o == placeholder);
+		Other other = other();
+		other.event().setArchived(true);
+		other.save();
+
+		ForeignResult result = mine.applyForeign(List.of(head()));
+
+		assertEquals(List.of(head()), result.deferred().stream().map(Deferral::unit).toList());
+		assertFalse(event.isArchived());
+	}
+
+	@Test
+	void archivingACleanEventIsApplied() {
+		Other other = other();
+		other.event().setArchived(true);
+		other.save();
+
+		ForeignResult result = mine.applyForeign(List.of(head()));
+
+		assertTrue(result.deferred().isEmpty());
+		assertTrue(event.isArchived());
+	}
+
+	@Test
 	void hallSwitchIsDeferredWithItsBookingsWhileABookingBelowIsChanged() throws IOException {
 		Booking mySale = seat(friday, 2);
 		mySale.setLastName("Eigen");

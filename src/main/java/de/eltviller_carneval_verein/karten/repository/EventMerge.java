@@ -603,12 +603,16 @@ final class EventMerge {
 
 	/**
 	 * Ob der fremde Stand den ganzen Teilbaum darunter betrifft: Kopf oder Vorstellung verlassen das Modell (gelöscht oder
-	 * unlesbar), oder eine Vorstellung wechselt Halle oder Bestuhlung.
+	 * unlesbar), das Event wird archiviert (es verschwindet aus den Verkaufsansichten, ein offener Verkauf ginge mit ihm),
+	 * oder eine Vorstellung wechselt Halle oder Bestuhlung.
 	 */
 	static boolean touchesSubtree(Event event, UnitSnapshot snapshot) {
 		UnitKey unit = snapshot.unit();
 		return switch (unit.type()) {
-		case EVENT -> UnitMapper.readUnit(snapshot, Event.class) == null;
+		case EVENT -> {
+			Event state = UnitMapper.readUnit(snapshot, Event.class);
+			yield state == null || (state.isArchived() && !event.isArchived());
+		}
 		case PRESENTATION -> {
 			Presentation existing = presentation(event, unit.presentationId());
 			Presentation state = UnitMapper.readUnit(snapshot, Presentation.class);
