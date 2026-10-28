@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -164,6 +165,19 @@ public final class LiveUpdates {
 				text -> StatusMessage.getInstance().show(Severity.WARNING, text));
 		live.watch(StateRestorer.events(), StateRestorer.halls());
 		sync.setListener(live.listener());
+		// Meldungen, die nach dem Lesen des Bestands beim Start, aber vor dieser Stelle ankamen, liefen ins Leere
+		if (sync.sharedDir() != null) {
+			live.catchUp(sync.snapshots().keySet());
+		}
+	}
+
+	/**
+	 * Holt nach, was vor dem Einhängen geschah: Arbeitet die Stände der Einheiten ein, als wären sie gemeldet worden (ein
+	 * schon bekannter Stand ändert nichts). Läuft über {@code later}, nach den Meldungen, die schon unterwegs sind.
+	 */
+	public void catchUp(Collection<UnitKey> units) {
+		Set<UnitKey> all = Set.copyOf(units);
+		later.execute(() -> apply(() -> halls.applyForeign(all), () -> events.applyForeign(all)));
 	}
 
 	// Einarbeiten -->

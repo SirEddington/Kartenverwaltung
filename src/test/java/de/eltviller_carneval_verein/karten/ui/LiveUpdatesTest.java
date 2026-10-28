@@ -223,6 +223,38 @@ class LiveUpdatesTest {
 	}
 
 	@Test
+	void catchUpAppliesAForeignSaleWhoseNotificationWasMissed() throws IOException {
+		// der Verkauf liegt im Index, seine Meldung kam vor dem Einhängen an und lief ins Leere
+		Other other = other();
+		seat(other.friday(), 1).setLastName("Fremd");
+		other.save();
+		long before = files();
+
+		live.catchUp(sync.snapshots().keySet());
+
+		assertEquals("Fremd", seat(friday, 1).getLastName());
+		assertFalse(eventTracker.isDirty(event));
+		events.saveEvent(event);
+		assertEquals(before, files(), "der nachgeholte Verkauf wird weder gelöscht noch neu geschrieben");
+		assertTrue(hints.isEmpty());
+	}
+
+	@Test
+	void catchUpWithoutForeignChangesChangesNothing() throws IOException {
+		long before = files();
+		String muellerId = seat(friday, 0).getId();
+
+		live.catchUp(sync.snapshots().keySet());
+
+		assertEquals("Müller", seat(friday, 0).getLastName());
+		assertEquals(muellerId, seat(friday, 0).getId());
+		assertFalse(eventTracker.isDirty(event));
+		events.saveEvent(event);
+		assertEquals(before, files());
+		assertTrue(hints.isEmpty());
+	}
+
+	@Test
 	void foreignSaleKeepsUserChangesDirtyAndDiscardKeepsTheSale() throws IOException {
 		seat(friday, 0).setLastName("Eigen");
 		eventTracker.check(event);
