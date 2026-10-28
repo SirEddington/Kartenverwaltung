@@ -253,7 +253,7 @@ public final class LiveUpdates {
 				continue;
 			}
 			try {
-				BookingSyncService.prepare(event, halls::findById, eventTracker);
+				BookingSyncService.prepare(event, halls::findById, eventTracker, events);
 			} catch (RuntimeException e) {
 				LOG.log(Level.SEVERE, "Buchungen ließen sich nicht mit der neuen Halle abgleichen: " + event, e);
 			}

@@ -578,9 +578,10 @@ public class StoreEventRepository implements EventRepository {
 	 * Merkt sich, was das Einarbeiten neben den übernommenen Einheiten im Modell geändert hat (der Abgleich nach einem
 	 * Hallen- bzw. Bestuhlungswechsel): Diese Inhalte stammen nicht vom Nutzer (siehe {@link #derived}). Unter einer
 	 * Vorstellung, deren Wechsel eingearbeitet wird, ist nichts lokal verändert oder in Bearbeitung, sonst wäre er
-	 * zurückgestellt.
+	 * zurückgestellt. {@code skip} sind Einheiten, die nicht gemerkt werden: die eben übernommenen, bei {@link #deriving} die
+	 * schon vorher lokal veränderten.
 	 */
-	private void noteDerived(Event event, Map<UnitKey, ObjectNode> before, Set<UnitKey> adopted) {
+	private void noteDerived(Event event, Map<UnitKey, ObjectNode> before, Set<UnitKey> skip) {
 		Map<UnitKey, ObjectNode> after;
 		try {
 			after = UnitMapper.payloads(event);
@@ -589,14 +590,28 @@ public class StoreEventRepository implements EventRepository {
 		}
 		for (Map.Entry<UnitKey, ObjectNode> entry : after.entrySet()) {
 			UnitKey unit = entry.getKey();
-			if (!adopted.contains(unit) && !entry.getValue().equals(before.get(unit))) {
+			if (!skip.contains(unit) && !entry.getValue().equals(before.get(unit))) {
 				derived.put(unit, entry.getValue());
 			}
 		}
 		for (UnitKey unit : before.keySet()) {
-			if (!after.containsKey(unit) && !adopted.contains(unit) && baseline.isShown(unit)) {
+			if (!after.containsKey(unit) && !skip.contains(unit) && baseline.isShown(unit)) {
 				derived.put(unit, null);
 			}
+		}
+	}
+
+	/**
+	 * Lässt {@code reconcile} das Event mit der Bestuhlung abgleichen (etwa {@code BookingSync.sync} nach einem fremden
+	 * Hallenwechsel) und merkt, was der Abgleich im Modell geändert hat: Das stammt nicht vom Nutzer (siehe {@link #derived}).
+	 * Eine Einheit, die der Nutzer schon vorher ungespeichert geändert hatte, bleibt lokal verändert, auch wenn der Abgleich
+	 * noch darauf aufsetzt. Lässt sich das Event nicht zerlegen, wird nichts gemerkt.
+	 */
+	public void deriving(Event event, Runnable reconcile) {
+		LocalChanges before = localChanges(event);
+		reconcile.run();
+		if (before.model() != null) {
+			noteDerived(event, before.model(), before.units());
 		}
 	}
 

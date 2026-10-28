@@ -391,6 +391,47 @@ class LiveUpdatesTest {
 	}
 
 	@Test
+	void foreignHallChangeDoesNotDeferLaterForeignBookingsOfThatHall() throws IOException {
+		otherChangesHall(h -> h.getSeatingPlans().get(0).getRows().get(0).setLabel("B"));
+
+		notifyUnits(UnitKey.hall(hall.getId()));
+
+		assertEquals("B", seat(friday, 0).getRowLabel(), "der Abgleich hat die Buchungen auf die neue Bestuhlung umgesetzt");
+		assertEquals(Set.of(), events.locallyChangedUnits(), "was der Abgleich umsetzte, hat der Nutzer nicht geändert");
+		// der andere Rechner öffnet das Event mit der geänderten Halle, verkauft auf dem ersten Sitz und speichert
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event loaded = repository.loadEvents().get(0);
+		BookingSyncService.prepare(loaded, TestRepositories.halls(sync)::findById, new ChangeTracker<>(Event::getId));
+		seat(loaded.getPresentations().get(0), 0).setLastName("Fremd");
+		repository.saveEvent(loaded);
+		long before = files();
+
+		notifyUnits(seatUnit(0));
+
+		assertEquals("Fremd", seat(friday, 0).getLastName(), "der fremde Verkauf ist eingearbeitet");
+		assertTrue(hints.isEmpty(), hints.toString());
+		assertEquals(Set.of(), events.locallyChangedUnits());
+		assertFalse(eventTracker.isDirty(event));
+		events.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird als eigene Version geschrieben");
+	}
+
+	@Test
+	void reconcileOnTopOfAnUnsavedBookingKeepsItALocalChange() {
+		seat(friday, 0).setLastName("Eigen");
+		otherChangesHall(h -> h.getSeatingPlans().get(0).getRows().get(0).setLabel("B"));
+		Hall changed = TestRepositories.halls(sync).findById(hall.getId());
+
+		BookingSyncService.prepare(event, id -> changed, eventTracker, events);
+
+		assertEquals("B", seat(friday, 0).getRowLabel());
+		assertEquals("B", seat(friday, 1).getRowLabel());
+		assertEquals(Set.of(seatUnit(0)), events.locallyChangedUnits(),
+				"die Eingabe des Nutzers bleibt eine Änderung, nur der Abgleich allein gilt nicht als solche");
+		assertTrue(eventTracker.isDirty(event));
+	}
+
+	@Test
 	void hallIsBlockedWhileItsPresentationsHaveUnsavedBookings() {
 		seat(friday, 2).setLastName("Eigen");
 		eventTracker.check(event);

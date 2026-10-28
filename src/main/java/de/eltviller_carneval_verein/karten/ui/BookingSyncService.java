@@ -8,6 +8,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 
@@ -22,16 +23,24 @@ public final class BookingSyncService {
 	private BookingSyncService() {
 	}
 
-	/** Wie {@link #prepare(Event, Function, ChangeTracker)} mit den Hallen der App und dem Event-Tracker der App. */
+	/** Wie {@link #prepare(Event, Function, ChangeTracker, StoreEventRepository)} mit den Hallen, dem Event-Tracker und dem Event-Repository der App. */
 	public static void prepare(Event event) {
-		prepare(event, StoreHallRepository.getInstance()::findById, ChangeTracker.events());
+		prepare(event, StoreHallRepository.getInstance()::findById, ChangeTracker.events(), StoreEventRepository.getInstance());
+	}
+
+	/** Wie {@link #prepare(Event, Function, ChangeTracker, StoreEventRepository)} ohne Event-Repository. */
+	public static void prepare(Event event, Function<String, Hall> hallLookup, ChangeTracker<Event> tracker) {
+		prepare(event, hallLookup, tracker, null);
 	}
 
 	/**
 	 * @param hallLookup liefert die Halle zur Id oder {@code null}, wenn es sie nicht (mehr) gibt
 	 * @param tracker    der Tracker, in dem das Event verfolgt wird
+	 * @param repository das Event-Repository, dem der Abgleich als vom Einarbeiten abgeleitet gilt, nicht als Änderung des
+	 *                   Nutzers ({@link StoreEventRepository#deriving}); {@code null} ohne dieses Merken
 	 */
-	public static void prepare(Event event, Function<String, Hall> hallLookup, ChangeTracker<Event> tracker) {
+	public static void prepare(Event event, Function<String, Hall> hallLookup, ChangeTracker<Event> tracker,
+			StoreEventRepository repository) {
 		// Eine noch nicht verglichene Änderung zählt mit: erst vergleichen, dann den Abgleich laufen lassen.
 		boolean wasDirty = false;
 		if (tracker.baseline(event) != null) {
@@ -39,14 +48,21 @@ public final class BookingSyncService {
 			wasDirty = tracker.isDirty(event);
 		}
 
-		// Fehlende Listen (etwa "presentations": null in einer Datei) werden übersprungen
-		for (Presentation presentation : event.getPresentations() != null ? event.getPresentations() : List.<Presentation>of()) {
-			if (presentation.getBookings() == null) {
-				continue;
+		Runnable reconcile = () -> {
+			// Fehlende Listen (etwa "presentations": null in einer Datei) werden übersprungen
+			for (Presentation presentation : event.getPresentations() != null ? event.getPresentations() : List.<Presentation>of()) {
+				if (presentation.getBookings() == null) {
+					continue;
+				}
+				Hall hall = presentation.getHallId() != null ? hallLookup.apply(presentation.getHallId()) : null;
+				SeatingPlan plan = hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
+				BookingSync.sync(presentation, plan);
 			}
-			Hall hall = presentation.getHallId() != null ? hallLookup.apply(presentation.getHallId()) : null;
-			SeatingPlan plan = hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
-			BookingSync.sync(presentation, plan);
+		};
+		if (repository != null) {
+			repository.deriving(event, reconcile);
+		} else {
+			reconcile.run();
 		}
 
 		if (!wasDirty) {
