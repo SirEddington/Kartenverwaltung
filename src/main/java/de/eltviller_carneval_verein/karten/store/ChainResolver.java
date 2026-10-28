@@ -108,18 +108,20 @@ public final class ChainResolver {
 
 	/**
 	 * Die Strecken eigener Versionen außerhalb der Kette: je Spitze (eigene lesbare Version, die weder beansprucht
-	 * noch zusammengeführt ist noch von einer lesbaren Version als Vorgänger genannt wird) die Versionen zurück
+	 * noch zusammengeführt ist noch von einer eigenen oder beanspruchten Version als Vorgänger genannt wird) die Versionen zurück
 	 * entlang des ersten Vorgängers, solange sie eigen, nicht beansprucht und nicht zusammengeführt sind. Die
 	 * Strecken sind nach der ID ihrer ältesten Version geordnet.
 	 * <p>
 	 * Beansprucht ist jede Version, die eine Anspruchsdatei der Kette nennt (auch eine beschädigte oder übersprungene);
 	 * sie hat ihren Platz bekommen und ist nie ausstehend oder verloren. Zusammengeführt ist eine Version, die eine
-	 * lesbare Version als weiteren (nicht ersten) Vorgänger nennt; ihr Inhalt steckt schon in dieser Version und sie wird
-	 * nicht noch einmal gemeldet. In beiden Fällen endet die Strecke dort, und diese Version ist ihre Basis.
+	 * eigene oder beanspruchte Version als weiteren (nicht ersten) Vorgänger nennt; ihr Inhalt steckt schon in dieser
+	 * Version und sie wird nicht noch einmal gemeldet. In beiden Fällen endet die Strecke dort, und diese Version ist
+	 * ihre Basis.
 	 * <p>
-	 * Als Vorgänger genannt (und damit keine Spitze) zählt eine Version nur, wenn die nennende Version eigen oder
-	 * beansprucht ist. Eine fremde, unbeanspruchte Version, die eine eigene nennt, nimmt dieser nicht die Spitze: Brach
-	 * ein Rechner zwischen Liste und Anspruch ab, würde die eigene Version sonst nie erneut beansprucht.
+	 * Als Vorgänger genannt (und damit keine Spitze) und als zusammengeführt zählt eine Version nur, wenn die nennende
+	 * Version eigen oder beansprucht ist. Eine fremde, unbeanspruchte Version, die eine eigene nennt, nimmt dieser weder
+	 * die Spitze noch erledigt sie sie: Brach ein Rechner zwischen Liste und Anspruch ab, würde die eigene Version sonst
+	 * nie erneut beansprucht; und eine eigene Zusammenführung, die noch aussteht, erledigt ihre Vorgänger schon.
 	 *
 	 * @param claimedIds die Versionen, die eine Anspruchsdatei der Kette nennt
 	 */
@@ -132,9 +134,9 @@ public final class ChainResolver {
 				List<VersionId> parents = file.version().parents();
 				if (isOwn(file.version(), ownMachineId) || claimedIds.contains(file.version().id())) {
 					named.addAll(parents);
-				}
-				if (parents.size() > 1) {
-					merged.addAll(parents.subList(1, parents.size()));
+					if (parents.size() > 1) {
+						merged.addAll(parents.subList(1, parents.size()));
+					}
 				}
 			}
 		}

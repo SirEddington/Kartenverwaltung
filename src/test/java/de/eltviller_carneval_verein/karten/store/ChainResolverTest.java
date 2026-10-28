@@ -287,6 +287,60 @@ class ChainResolverTest {
 	}
 
 	@Test
+	void versionNamedByClaimedVersionIsNotATip() throws IOException {
+		// Die beanspruchte f nennt die unbeanspruchte eigene v als ersten Vorgänger: v ist keine Spitze, auch nicht verloren.
+		UnitState state = new Unit().version(theirs(1)).version(mine(2), theirs(1)).version(theirs(3), mine(2))
+				.claim("root", theirs(1)).claim(theirs(1).value(), theirs(3)).resolve();
+
+		assertEquals(Status.OK, state.status());
+		assertEquals(List.of(theirs(1), theirs(3)), ids(state.chain()));
+		assertTrue(state.pending().isEmpty());
+		assertTrue(state.lost().isEmpty());
+	}
+
+	@Test
+	void foreignUnclaimedMergeDoesNotHideOwnLostVersion() throws IOException {
+		// f (fremd, unbeansprucht) nennt die verlorene eigene v als weiteren Vorgänger: Das erledigt v nicht.
+		UnitState state = new Unit().version(theirs(1)).version(mine(2)).version(theirs(3), theirs(1), mine(2))
+				.claim("root", theirs(1)).resolve();
+
+		assertEquals(List.of(theirs(1)), ids(state.chain()));
+		assertTrue(state.pending().isEmpty());
+		assertEquals(List.of(List.of(mine(2))), state.lost());
+	}
+
+	@Test
+	void ownMergeMakesLostStretchMerged() throws IOException {
+		// Die eigene Zusammenführung [w, v] ist ausstehend (noch nicht hochgeladen); v ist weder ausstehend noch verloren.
+		UnitState state = new Unit().version(theirs(1)).version(mine(2)).version(mine(3), theirs(1), mine(2))
+				.claim("root", theirs(1)).resolve();
+
+		assertEquals(List.of(mine(3)), ids(state.pending()));
+		assertTrue(state.lost().isEmpty());
+	}
+
+	@Test
+	void claimedForeignMergeMakesOwnVersionMerged() throws IOException {
+		UnitState state = new Unit().version(theirs(1)).version(mine(2)).version(theirs(3), theirs(1), mine(2))
+				.claim("root", theirs(1)).claim(theirs(1).value(), theirs(3)).resolve();
+
+		assertEquals(List.of(theirs(1), theirs(3)), ids(state.chain()));
+		assertTrue(state.pending().isEmpty());
+		assertTrue(state.lost().isEmpty());
+	}
+
+	@Test
+	void stretchBuildingOnMergedOwnVersionIsLost() throws IOException {
+		// v (eigen) ist in m (Kette w -> m) zusammengeführt; die eigene Version auf v baut auf einem erledigten Stand.
+		UnitState state = new Unit().version(theirs(1)).version(mine(2)).version(theirs(3), theirs(1), mine(2))
+				.version(mine(4), mine(2)).claim("root", theirs(1)).claim(theirs(1).value(), theirs(3)).resolve();
+
+		assertEquals(List.of(theirs(1), theirs(3)), ids(state.chain()));
+		assertTrue(state.pending().isEmpty());
+		assertEquals(List.of(List.of(mine(4))), state.lost());
+	}
+
+	@Test
 	void deletedVersionIsNormalHead() throws IOException {
 		UnitState state = new Unit().version(mine(1)).deletedVersion(theirs(2), mine(1)).claim("root", mine(1))
 				.claim(mine(1).value(), theirs(2)).resolve();
