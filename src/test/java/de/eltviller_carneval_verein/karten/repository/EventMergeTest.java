@@ -112,8 +112,9 @@ class EventMergeTest {
 		return UnitKey.booking(event.getId(), event.getPresentations().get(0).getId(), seatId);
 	}
 
+	/** Ein Plan für Stände ohne Buchungen unter einer Vorstellung des Modells: Er kennt keine Index-Stände von Vorstellungen. */
 	private static EventMerge.Plan plan(List<UnitSnapshot> units, List<UnitSnapshot> index) {
-		return new EventMerge.Plan(units, index, id -> null);
+		return new EventMerge.Plan(units, index, id -> null, Map.of());
 	}
 
 	/** Die Stände der Vorstellungen des Modells, wie sie der Index hat, wenn er ihnen nichts voraus hat. */
@@ -242,7 +243,7 @@ class EventMergeTest {
 		EventMerge.Plan plan = new EventMerge.Plan(List.of(foreign(state, head), foreign(state, presentation)),
 				List.of(), id -> {
 					throw new IllegalStateException("Halle nicht lesbar");
-				});
+				}, Map.of());
 		Recording sink = new Recording();
 
 		assertThrows(IllegalStateException.class, () -> EventMerge.apply(event, plan, sink));
@@ -269,7 +270,7 @@ class EventMergeTest {
 		state.getPresentations().get(0).setSeatingPlanId(seating.getId());
 		UnitKey presentation = UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId());
 		EventMerge.Plan plan = plan(List.of(foreign(state, presentation)), List.of());
-		EventMerge.Plan withHall = new EventMerge.Plan(plan.units(), List.of(), id -> hall);
+		EventMerge.Plan withHall = new EventMerge.Plan(plan.units(), List.of(), id -> hall, Map.of());
 
 		EventMerge.apply(event, withHall, new Recording());
 		EventMerge.apply(copy, withHall, EventMerge.NONE);
@@ -296,7 +297,7 @@ class EventMergeTest {
 
 		// die Buchung steht schon im Index (sie kam vor ihrer Vorstellung), gemeldet ist nur die Vorstellung
 		EventMerge.apply(event,
-				new EventMerge.Plan(List.of(foreign(state, presentationUnit)), List.of(bookingState), id -> hall), sink);
+				new EventMerge.Plan(List.of(foreign(state, presentationUnit)), List.of(bookingState), id -> hall, Map.of()), sink);
 
 		assertEquals(List.of("Freitag", "Samstag", "Sonntag"),
 				event.getPresentations().stream().map(Presentation::getName).toList());
@@ -400,7 +401,7 @@ class EventMergeTest {
 
 		// gemeldet in umgekehrter Reihenfolge: die Buchung kommt mit ihrer Vorstellung aus dem Index
 		EventMerge.apply(event, new EventMerge.Plan(List.of(bookingState, foreign(state, presentationUnit)),
-				List.of(bookingState), id -> hall), new Recording());
+				List.of(bookingState), id -> hall, Map.of()), new Recording());
 
 		assertEquals(List.of("Schmitz"),
 				event.getPresentations().get(1).getBookings().stream().map(Booking::getLastName).toList());
@@ -419,7 +420,7 @@ class EventMergeTest {
 		Recording sink = new Recording();
 
 		EventMerge.apply(event,
-				new EventMerge.Plan(List.of(foreign(state, presentationUnit)), List.of(bookingState), id -> hall), sink);
+				new EventMerge.Plan(List.of(foreign(state, presentationUnit)), List.of(bookingState), id -> hall, Map.of()), sink);
 
 		Presentation added = event.getPresentations().get(1);
 		assertEquals(1, added.getBookings().size(), "nur der leere Platzhalter der Bestuhlung");

@@ -101,9 +101,20 @@ final class EventMerge {
 		/** Die Kennungen der Platzhalter je Vorstellung und Sitz ({@code <presentationId>/<seatId>}). */
 		private final Map<String, String> placeholderIds;
 
-		/** Ein Plan ohne Stände der Vorstellungen (siehe den Konstruktor mit {@code presentationStates}). */
-		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup) {
-			this(units, index, hallLookup, Map.of());
+		/**
+		 * Die Kennung der Buchung, die auf dem Sitz der gelöschten oder unlesbaren Sitz-Einheit stand (aus ihrem zuletzt
+		 * bekannten Stand), solange keine andere Einheit des Vergleichsstands sie trägt: Hat der Abgleich die Buchung auf einen
+		 * anderen Sitz gesetzt, finden Löschung und Stornierung sie darüber.
+		 */
+		private final Map<UnitKey, String> lastIds;
+
+		/**
+		 * Ein Plan ohne bekannte Kennungen der Buchungen hinter gelöschten Sitz-Einheiten (siehe den Konstruktor mit
+		 * {@code lastIds}).
+		 */
+		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup,
+				Map<UnitKey, UnitSnapshot> presentationStates) {
+			this(units, index, hallLookup, presentationStates, Map.of());
 		}
 
 		/**
@@ -115,18 +126,22 @@ final class EventMerge {
 		 * @param presentationStates die aktuellen Index-Stände der Vorstellungen der Buchungen unter {@code units}; fehlt
 		 *                           einer, ist die Buchung nicht platzierbar, ist er gelöscht oder unlesbar, geht sie nur in
 		 *                           den Vergleichsstand, wenn die Vorstellung nicht (mehr) im Modell steht
+		 * @param lastIds            siehe {@link #lastIds}
 		 */
 		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup,
-				Map<UnitKey, UnitSnapshot> presentationStates) {
-			this(sorted(units), List.copyOf(index), hallLookup, Map.copyOf(presentationStates), new HashMap<>());
+				Map<UnitKey, UnitSnapshot> presentationStates, Map<UnitKey, String> lastIds) {
+			this(sorted(units), List.copyOf(index), hallLookup, Map.copyOf(presentationStates), Map.copyOf(lastIds),
+					new HashMap<>());
 		}
 
 		private Plan(List<UnitSnapshot> units, List<UnitSnapshot> index, Function<String, Hall> hallLookup,
-				Map<UnitKey, UnitSnapshot> presentationStates, Map<String, String> placeholderIds) {
+				Map<UnitKey, UnitSnapshot> presentationStates, Map<UnitKey, String> lastIds,
+				Map<String, String> placeholderIds) {
 			this.units = units;
 			this.index = index;
 			this.hallLookup = hallLookup;
 			this.presentationStates = presentationStates;
+			this.lastIds = lastIds;
 			this.placeholderIds = placeholderIds;
 		}
 
@@ -139,7 +154,7 @@ final class EventMerge {
 		Plan restrictedTo(Collection<UnitKey> keep) {
 			Set<UnitKey> kept = new HashSet<>(keep);
 			List<UnitSnapshot> remaining = units.stream().filter(s -> kept.contains(s.unit())).toList();
-			return new Plan(remaining, index, hallLookup, presentationStates, placeholderIds);
+			return new Plan(remaining, index, hallLookup, presentationStates, lastIds, placeholderIds);
 		}
 
 		/** Die neue Kennung des geleerten Platzhalters auf diesem Sitz, beim ersten Mal ausgewürfelt. */
@@ -166,10 +181,30 @@ final class EventMerge {
 			}
 		}
 
+		/**
+		 * Kopf, Vorstellungen, Buchungen; unter den Buchungen zuerst die gelöschten und unlesbaren: Sie räumen ihren Platz,
+		 * bevor eine lesbare ihn belegt (eine Buchung, die der Abgleich auf einen anderen Sitz gesetzt hat, gehört dem Sitz,
+		 * dessen Einheit sie trägt).
+		 */
 		private static List<UnitSnapshot> sorted(List<UnitSnapshot> units) {
 			List<UnitSnapshot> sorted = new ArrayList<>(units);
 			sorted.sort(MERGE_ORDER);
-			return List.copyOf(sorted);
+			List<UnitSnapshot> cancelled = new ArrayList<>();
+			List<UnitSnapshot> others = new ArrayList<>();
+			for (UnitSnapshot snapshot : sorted) {
+				(snapshot.unit().type() == UnitType.BOOKING && !UnitMapper.isReadable(snapshot) ? cancelled : others)
+						.add(snapshot);
+			}
+			List<UnitSnapshot> result = new ArrayList<>();
+			for (UnitSnapshot snapshot : others) {
+				if (snapshot.unit().type() == UnitType.BOOKING && !cancelled.isEmpty()) {
+					result.addAll(cancelled);
+					cancelled.clear();
+				}
+				result.add(snapshot);
+			}
+			result.addAll(cancelled);
+			return List.copyOf(result);
 		}
 	}
 
@@ -270,6 +305,15 @@ final class EventMerge {
 		}
 		if (existing != null) {
 			boolean replanned = changesPlan(existing, state);
+			if (replanned) {
+				// Stornierungen auf den alten Sitzen zuerst: Nach dem Abgleich fände sie ihre Buchung dort nicht mehr
+				for (UnitSnapshot below : plan.units) {
+					if (below.unit().type() == UnitType.BOOKING && inSubtree(below.unit(), unit)
+							&& UnitMapper.readUnit(below, Booking.class) == null) {
+						cancel(existing, below.unit(), plan);
+					}
+				}
+			}
 			existing.copyFrom(state);
 			if (replanned) {
 				resync(existing, plan);
@@ -328,13 +372,7 @@ final class EventMerge {
 		Booking state = UnitMapper.readUnit(snapshot, Booking.class);
 		Booking current = bookingAt(presentation, unit);
 		if (state == null) {
-			if (current != null && isUnassigned(unit)) {
-				presentation.getBookings().remove(current);
-			} else if (current != null && current.hasData()) {
-				// die Momentaufnahme des Sitzes bleibt; ein späterer Verkauf trägt nicht die Kennung des alten Käufers
-				current.clearCustomerData();
-				current.setId(plan.clearedId(presentation.getId(), unit.bookingDir()));
-			}
+			cancel(presentation, unit, plan);
 			if (!UnitMapper.isAbsent(snapshot)) {
 				sink.warning(UnitMapper.unreadableBooking(presentation.getName()));
 			}
@@ -352,6 +390,45 @@ final class EventMerge {
 		}
 		sink.adopted(snapshot, true);
 		warnIfLocked(snapshot, sink);
+	}
+
+	/**
+	 * Nimmt die Buchung der gelöschten oder unlesbaren Einheit aus dem Modell: Eine Buchung ohne Platz wird entfernt, auf
+	 * einem Sitz werden nur die Kundendaten geleert (die Momentaufnahme des Sitzes bleibt; ein späterer Verkauf trägt nicht
+	 * die Kennung des alten Käufers). Steht auf dem Sitz nichts mehr, weil der Abgleich die Buchung nach einem Wechsel von
+	 * Halle oder Bestuhlung versetzt hat, gilt dasselbe für die Buchung mit der Kennung aus dem letzten bekannten Stand
+	 * ({@link Plan#lastIds}): Sonst schriebe das nächste Speichern die Stornierung als neuen Verkauf über.
+	 */
+	private static void cancel(Presentation presentation, UnitKey unit, Plan plan) {
+		Booking current = bookingAt(presentation, unit);
+		if (current != null && isUnassigned(unit)) {
+			presentation.getBookings().remove(current);
+			return;
+		}
+		if (current == null && !isUnassigned(unit)) {
+			current = movedBooking(presentation, plan.lastIds.get(unit));
+			if (current != null && (current.isUnassigned() || current.getSeatId() == null)) {
+				presentation.getBookings().remove(current);
+				return;
+			}
+		}
+		if (current != null && current.hasData()) {
+			current.clearCustomerData();
+			current.setId(plan.clearedId(presentation.getId(), current.getSeatId()));
+		}
+	}
+
+	/** Die Buchung mit Daten und dieser Kennung in der Vorstellung, sonst {@code null}. */
+	private static Booking movedBooking(Presentation presentation, String bookingId) {
+		if (bookingId == null || presentation.getBookings() == null) {
+			return null;
+		}
+		for (Booking booking : presentation.getBookings()) {
+			if (bookingId.equals(booking.getId()) && booking.hasData()) {
+				return booking;
+			}
+		}
+		return null;
 	}
 
 	/**

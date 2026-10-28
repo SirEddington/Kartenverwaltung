@@ -19,8 +19,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
@@ -698,6 +700,70 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
+	 * Zu den gelöschten oder unlesbaren Buchungen unter {@code apply} die Kennung der Buchung aus ihrem zuletzt bekannten
+	 * Stand (siehe {@link EventMerge.Plan}), außer eine andere angezeigte Einheit des Events trägt diese Kennung schon: Dann
+	 * ist die Buchung dorthin gezogen, und die Löschung betrifft sie nicht mehr. Ebenso, wenn der Nutzer die Buchung im Modell
+	 * ungespeichert geändert hat oder bearbeitet: Seine Eingabe bleibt.
+	 */
+	private Map<UnitKey, String> lastIds(Event event, List<UnitSnapshot> apply, LocalChanges changes) {
+		Map<UnitKey, String> ids = new HashMap<>();
+		if (changes.all()) {
+			return ids;
+		}
+		for (UnitSnapshot snapshot : apply) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() != UnitType.BOOKING || UnitMapper.isReadable(snapshot)) {
+				continue;
+			}
+			UnitSnapshot known = baseline.known(unit);
+			Booking last = known == null ? null : UnitMapper.readUnit(known, Booking.class);
+			if (last != null && last.getId() != null && !carriedElsewhere(event.getId(), unit, last.getId())
+					&& !touchedByUser(event, unit, last.getId(), changes)) {
+				ids.put(unit, last.getId());
+			}
+		}
+		return ids;
+	}
+
+	/** Ob die Buchung mit dieser Kennung in der Vorstellung im Modell ungespeichert geändert ist oder bearbeitet wird. */
+	private boolean touchedByUser(Event event, UnitKey unit, String bookingId, LocalChanges changes) {
+		Presentation presentation = EventMerge.presentation(event, unit.presentationId());
+		if (presentation == null || presentation.getBookings() == null) {
+			return false;
+		}
+		for (Booking booking : presentation.getBookings()) {
+			if (bookingId.equals(booking.getId())) {
+				if (inEditing.test(booking)) {
+					return true;
+				}
+				for (Map.Entry<UnitKey, ObjectNode> entry : changes.model().entrySet()) {
+					if (changes.units().contains(entry.getKey()) && entry.getKey().type() == UnitType.BOOKING
+							&& entry.getKey().presentationId().equals(unit.presentationId())
+							&& entry.getValue().path("id").asText().equals(bookingId)) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	/** Ob eine andere angezeigte Buchungs-Einheit der Vorstellung im Vergleichsstand diese Kennung trägt. */
+	private boolean carriedElsewhere(String eventId, UnitKey unit, String bookingId) {
+		for (UnitKey shown : baseline.shownUnits(eventId)) {
+			if (shown.type() == UnitType.BOOKING && !shown.equals(unit)
+					&& shown.presentationId().equals(unit.presentationId())) {
+				UnitSnapshot known = baseline.known(shown);
+				Booking booking = known == null ? null : UnitMapper.readUnit(known, Booking.class);
+				if (booking != null && bookingId.equals(booking.getId())) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Lässt die Buchung warten, bis ihr Platz im Modell da ist. Einen früheren Stand, den der Nutzer nicht im Modell hat
 	 * (etwa weil ihre Vorstellung das Modell verließ), nimmt sie aus dem Vergleichsstand: Sonst gälte er als gesehen, die
 	 * Buchung fiele aus der Warteliste, sobald der Index wieder den bekannten Stand zeigt, und ein Verkauf auf ihrem Sitz
@@ -841,7 +907,8 @@ public class StoreEventRepository implements EventRepository {
 		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
 				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
 		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
-		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, presentationStates);
+		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, presentationStates,
+				lastIds(event, apply, changes));
 		Set<UnitKey> adopted = new LinkedHashSet<>();
 		Set<UnitKey> waiting = new HashSet<>();
 		EventMerge.Sink sink = new EventMerge.Sink() {

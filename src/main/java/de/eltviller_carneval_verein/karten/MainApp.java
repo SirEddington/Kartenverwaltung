@@ -111,6 +111,8 @@ public class MainApp extends Application {
 				warnIfLocalDataExists(sharedDir);
 				sync.startup(sharedDir, fraction -> updateProgress(fraction, 1.0));
 				StoreHallRepository.getInstance().loadHalls();
+				// schon vor dem Laden der Events: Beim Laden bleiben Buchungen, die nicht zur Bestuhlung ihrer Vorstellung passen, draußen
+				StoreEventRepository.getInstance().setHallLookup(StoreHallRepository.getInstance()::findById);
 				StoreEventRepository.getInstance().loadEvents();
 				return null;
 			}

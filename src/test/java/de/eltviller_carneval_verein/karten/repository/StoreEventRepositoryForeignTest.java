@@ -1056,6 +1056,86 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(written.id(), mine.knownUnit(unit).version());
 	}
 
+	/** B storniert Müller (Sitz 0) und stellt danach die Vorstellung auf die zweite Halle um. */
+	private UnitKey remoteCancelsThenSwitches(Hall other) {
+		Other remote = other();
+		seat(remote.friday(), 0).clearCustomerData();
+		remote.save();
+		remote.friday().setHallId(other.getId());
+		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		remote.save();
+		return UnitKey.presentation(event.getId(), friday.getId());
+	}
+
+	private void assertCancelledMullerIsGoneAndNothingIsWritten(long before) throws IOException {
+		assertTrue(friday.getBookings().stream().noneMatch(Booking::hasData),
+				"die Stornierung gilt: " + friday.getBookings().stream().filter(Booking::hasData)
+						.map(b -> b.getLastName() + "@" + b.getSeatId()).toList());
+		mine.saveEvent(event);
+		assertEquals(before, files(), "die Stornierung wird nicht durch einen neuen Verkauf überschrieben");
+	}
+
+	@Test
+	void cancellationReportedBeforeThePlanSwitchOfItsPresentationStaysCancelled() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		UnitKey presentation = remoteCancelsThenSwitches(other);
+		long before = files();
+
+		mine.applyForeign(List.of(seatUnit(friday, 0)));
+		assertEquals("Müller", seat(friday, 0).getLastName(), "die Löschung wartet mit der Vorstellung");
+		mine.applyForeign(List.of(presentation));
+
+		assertCancelledMullerIsGoneAndNothingIsWritten(before);
+	}
+
+	@Test
+	void cancellationInTheSameBatchAsThePlanSwitchOfItsPresentationStaysCancelled() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		remoteCancelsThenSwitches(other);
+		long before = files();
+
+		mine.applyForeign(allUnits());
+
+		assertCancelledMullerIsGoneAndNothingIsWritten(before);
+	}
+
+	@Test
+	void cancellationReportedAfterThePlanSwitchOfItsPresentationStaysCancelled() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		UnitKey presentation = remoteCancelsThenSwitches(other);
+		long before = files();
+
+		// erst die Vorstellung: Der Abgleich setzt Müller auf einen Sitz der neuen Bestuhlung; dann die Löschung seines alten
+		mine.applyForeign(List.of(presentation));
+		mine.applyForeign(List.of(seatUnit(friday, 0)));
+
+		assertCancelledMullerIsGoneAndNothingIsWritten(before);
+	}
+
+	@Test
+	void cancellationReportedAfterTheMovedBookingArrivedDoesNotClearTheMovedBooking() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		remoteSwitchesTo(other);
+		long before = files();
+		UnitKey oldSeat = seatUnit(friday, 0);
+		UnitKey newSeat = UnitKey.booking(event.getId(), friday.getId(), other.getSeatingPlans().get(0).getSeats().get(0).getId());
+
+		// Müllers neue Einheit kommt vor der Löschung der alten: Dann gehört die Buchung dem neuen Sitz
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		mine.applyForeign(List.of(newSeat));
+		mine.applyForeign(List.of(oldSeat));
+
+		assertSame(sold, friday.getBookings().get(0));
+		assertEquals("Müller", sold.getLastName());
+		mine.saveEvent(event);
+		assertEquals(before, files());
+	}
+
 	@Disabled("H2 hingenommen (kein Verlust), siehe Spec: nach U1/U2 bleibt die Buchungs-ID im kurzen Fenster doppelt im Modell;"
 			+ " sie ohne neue Sonderregel auszuschließen, gelingt nicht")
 	@Test
