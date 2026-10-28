@@ -92,7 +92,7 @@ public class StatisticsController implements ContentController, Exportable {
 	 */
 	public void refresh(boolean includeArchived) {
 		this.includeArchived = includeArchived;
-		lastStats =repository.loadEvents().stream()
+		lastStats = repository.loadEvents().stream()
 				.filter(event -> includeArchived || !event.isArchived())
 				.map(this::computeStats)
 				.sorted(Comparator.comparing(EventStats::sortDate))

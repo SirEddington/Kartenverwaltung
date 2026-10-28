@@ -703,7 +703,8 @@ public class HallPlanController {
 		renderHall();
 	}
 
-	private boolean isSeatingTabActive() {
+	/** Ob der Reiter "Bestuhlung" gerade offen ist. */
+	boolean isSeatingTabActive() {
 		return sideTabs.getSelectionModel().getSelectedItem() == seatingTab;
 	}
 

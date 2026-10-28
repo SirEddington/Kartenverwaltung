@@ -205,12 +205,34 @@ public class EventEditController {
 		@Override
 		public void removedByOthers(Event event) {
 			if (event.equals(currentEvent)) {
-				leaveDeletedEvent(event);
+				// Der Wechsel kann eine Rückfrage öffnen (ungespeicherte andere Events): nicht mitten in der Benachrichtigung
+				Platform.runLater(() -> leaveDeletedEvent(event));
 			} else {
 				showForeignChanges();
 			}
 		}
 	};
+	// Fremde Änderungen an Hallen: Die Auswahl der Hallen und Bestuhlungen führt sich nach (ein ersetztes Objekt hat dieselbe ID)
+	private final RepositoryListener<Hall> foreignHallChanges = new RepositoryListener<>() {
+		@Override
+		public void changedByOthers(Hall hall, ForeignBatch<Hall> batch) {
+			showForeignChanges();
+		}
+
+		@Override
+		public void addedByOthers(Hall hall) {
+			showForeignChanges();
+		}
+
+		@Override
+		public void removedByOthers(Hall hall) {
+			showForeignChanges();
+		}
+	};
+	// Eine Rückfrage (Hallen-/Bestuhlungswechsel, Löschen) ist offen: Während sie wartet, führt sich die Ansicht nicht nach
+	private boolean dialogOpen = false;
+	// Besitzer der Meldung bei EditingUnits für das Objekt, auf das sich die offene Rückfrage bezieht
+	private final Object dialogOwner = new Object();
 
 	public void initData(Event event, Presentation presentation, boolean editable) {
 
@@ -260,23 +282,72 @@ public class EventEditController {
 				}
 			});
 		}
+		// Der getippte Standardpreis steht erst nach dem Bestätigen im Modell: Solange das Feld den Fokus hat, ist die Vorstellung in Bearbeitung
 		spnPresPrice.getEditor().focusedProperty().addListener((obs, wasFocused, focused) -> {
-			if (!focused) {
+			if (focused) {
+				if (currentPres != null) {
+					editing.begin(spnPresPrice, List.of(currentPres));
+				}
+			} else {
+				editing.end(spnPresPrice);
 				showPendingForeignChanges();
 			}
 		});
-		LiveViews.whileShown(eventPerfHBox, () -> repository.addListener(foreignChanges), () -> {
+		LiveViews.whileShown(eventPerfHBox, () -> {
+			repository.addListener(foreignChanges);
+			hallRepository.addListener(foreignHallChanges);
+		}, () -> {
 			repository.removeListener(foreignChanges);
+			hallRepository.removeListener(foreignHallChanges);
 			editing.end(eventTable);
 			editing.end(presTable);
 			editing.end(seatTable);
+			editing.end(spnPresPrice);
+			editing.end(dialogOwner);
 		});
 	}
 
-	/** Ob eine Eingabe offen ist, die ein Neuzeichnen der Tabellen und Felder wegrisse. */
+	/** Ob eine Eingabe oder Rückfrage offen ist, die ein Neuzeichnen der Tabellen und Felder wegrisse. */
 	private boolean inputOpen() {
-		return eventTable.getEditingCell() != null || presTable.getEditingCell() != null || seatTable.getEditingCell() != null
+		return dialogOpen || eventTable.getEditingCell() != null || presTable.getEditingCell() != null || seatTable.getEditingCell() != null
 				|| spnPresPrice.getEditor().isFocused();
+	}
+
+	/**
+	 * Zeigt eine Rückfrage, während der {@code model} (das Objekt, das sie ändern oder löschen wird) für fremde Stände als in
+	 * Bearbeitung gilt und die Ansicht sich nicht nachführt; was währenddessen ankam, kommt danach nach.
+	 *
+	 * @return die Antwort der Rückfrage
+	 */
+	private boolean confirmEditing(Object model, BooleanSupplier dialog) {
+		EditingUnits editing = EditingUnits.getInstance();
+		dialogOpen = true;
+		editing.begin(dialogOwner, List.of(model));
+		try {
+			return dialog.getAsBoolean();
+		} finally {
+			dialogOpen = false;
+			editing.end(dialogOwner);
+			showPendingForeignChanges();
+		}
+	}
+
+	/** Füllt die Auswahl der Hallen neu aus dem Repository (ein ersetztes Objekt hat dieselbe ID, eine gelöschte Halle ist nicht mehr wählbar). */
+	private void refreshHallChoices() {
+		List<Hall> choices = new ArrayList<>();
+		choices.add(null);
+		choices.addAll(hallRepository.loadHalls());
+		loadingDetails = true;
+		try {
+			cmbPresHall.getItems().setAll(choices);
+		} finally {
+			loadingDetails = false;
+		}
+	}
+
+	/** Ob die Ansicht noch in einem gezeigten Fenster steht. */
+	private boolean viewShown() {
+		return btnSave.getScene() != null && btnSave.getScene().getWindow() != null;
 	}
 
 	/** Holt eine zurückgestellte Auffrischung nach, nachdem die laufende Bestätigung der Eingabe zu Ende ist. */
@@ -305,6 +376,7 @@ public class EventEditController {
 		List<Booking> selectedSeats = new ArrayList<>(seatTable.getSelectionModel().getSelectedItems());
 
 		loadEvents();
+		refreshHallChoices();
 		// Erst abwählen: Ein gleiches (ID), aber veraltetes Objekt bliebe sonst die Auswahl der Tabelle
 		eventTable.getSelectionModel().clearSelection();
 		Event event = masterEventData.stream().filter(candidate -> candidate.getId().equals(eventId)).findFirst().orElse(null);
@@ -326,13 +398,20 @@ public class EventEditController {
 	 * ungespeicherten Events), verschwindet das Event aus den Tabellen.
 	 */
 	private void leaveDeletedEvent(Event removed) {
+		// Inzwischen ist die Ansicht verlassen oder ein anderes Event gewählt (das gelöschte verschwindet dann aus den Tabellen)
+		if (!viewShown()) {
+			return;
+		}
+		if (currentEvent != null && !removed.equals(currentEvent)) {
+			showForeignChanges();
+			return;
+		}
 		MainApp.showEventOverviewView();
-		if (btnSave.getScene() != null && btnSave.getScene().getWindow() != null) {
+		if (viewShown()) {
 			showForeignChanges();
 		}
-		// Die Übersicht hat keine Fußzeile, die Meldung öffnet dort einen Dialog: erst nach dem Ende der Benachrichtigung der Listener
-		String text = "„" + EntityLabels.nameOrPlaceholder(removed.getName()) + "“ wurde auf einem anderen Rechner gelöscht.";
-		Platform.runLater(() -> StatusMessage.getInstance().show(Severity.WARNING, text));
+		// Die Übersicht hat keine Fußzeile: Die Meldung öffnet dort einen Dialog
+		StatusMessage.getInstance().show(Severity.WARNING, "„" + EntityLabels.nameOrPlaceholder(removed.getName()) + "“ wurde auf einem anderen Rechner gelöscht.");
 	}
 
 	private void setupCollums() {
@@ -673,25 +752,36 @@ public class EventEditController {
 			return;
 		}
 		String message = hallChangeMessage(presentation);
-		if (message != null && !ConfirmDialog.confirm("Halle wechseln", message, "Wechseln", "button-primary", null)) {
-			loadingDetails = true;
-			try {
-				cmbPresHall.setValue(hallRepository.findById(presentation.getHallId()));
-			} finally {
-				loadingDetails = false;
-			}
+		if (message != null && !confirmEditing(presentation, () -> ConfirmDialog.confirm("Halle wechseln", message, "Wechseln", "button-primary", null))) {
+			resetHallChoice(presentation);
 			return;
 		}
 		changeHall(presentation, newHall);
+	}
+
+	/** Die Auswahl der Halle kehrt zur Halle des Modells zurück. */
+	private void resetHallChoice(Presentation presentation) {
+		loadingDetails = true;
+		try {
+			cmbPresHall.setValue(hallRepository.findById(presentation.getHallId()));
+		} finally {
+			loadingDetails = false;
+		}
 	}
 
 	/**
 	 * Hallenwechsel: Die Bestuhlung wird zurückgesetzt. Der Abgleich ohne Bestuhlung ({@link BookingSync#sync}) entfernt
 	 * die leeren Buchungen, Buchungen mit Daten bleiben ohne Platz, bis eine Bestuhlung der neuen Halle gewählt ist.
 	 */
-	private void changeHall(Presentation presentation, Hall newHall) {
-		String newHallId = newHall != null ? newHall.getId() : null;
+	private void changeHall(Presentation presentation, Hall chosen) {
+		String newHallId = chosen != null ? chosen.getId() : null;
 		if (Objects.equals(newHallId, presentation.getHallId())) {
+			return;
+		}
+		// Die Halle des Repositorys, nicht die der Auswahl: Eine fremd ersetzte Halle ist ein neues Objekt mit derselben ID
+		Hall newHall = chosen == null ? null : hallRepository.findById(newHallId);
+		if (chosen != null && newHall == null) {
+			resetHallChoice(presentation); // die Halle ist inzwischen gelöscht
 			return;
 		}
 		presentation.setHallId(newHallId);
@@ -711,11 +801,14 @@ public class EventEditController {
 	 * Bestuhlungswechsel mit Rückfrage; bei "Abbrechen" kehrt die Auswahl zur Bestuhlung des Modells zurück (nicht zum
 	 * vorigen Wert der Auswahl, der nach schnellen Mehrfachwechseln schon ein nie bestätigter sein kann).
 	 */
-	private void changePlan(Presentation presentation, SeatingPlan newPlan) {
-		if (presentation != currentPres || cmbPresPlan.getValue() != newPlan) {
+	private void changePlan(Presentation presentation, SeatingPlan chosen) {
+		if (presentation != currentPres || cmbPresPlan.getValue() != chosen) {
 			return; // die Auswahl hat sich inzwischen wieder geändert
 		}
-		if (!PlanSwitchDialog.confirm(presentation, newPlan)) {
+		// Die Bestuhlung der Halle im Repository, nicht die der Auswahl: Eine fremd ersetzte Halle ist ein neues Objekt
+		Hall hall = hallRepository.findById(presentation.getHallId());
+		SeatingPlan newPlan = hall == null ? null : hall.findSeatingPlan(chosen.getId());
+		if (newPlan == null || !confirmEditing(presentation, () -> PlanSwitchDialog.confirm(presentation, newPlan))) {
 			loadingDetails = true;
 			try {
 				cmbPresPlan.setValue(modelPlan(presentation, hallRepository.findById(presentation.getHallId())));
@@ -861,7 +954,7 @@ public class EventEditController {
 
 	private void handleDeleteEvent(Event event) {
 		boolean neverSaved = ChangeTracker.events().isNew(event);
-		if (!neverSaved && !ConfirmDialog.confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
+		if (!neverSaved && !confirmEditing(event, () -> ConfirmDialog.confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?"))) {
 			return;
 		}
 
@@ -898,7 +991,7 @@ public class EventEditController {
 	}
 
 	private void handleDeletePres(Presentation presentation) {
-		if (!ConfirmDialog.confirmDelete("Vorstellung löschen", "Soll die Vorstellung \"" + presentation.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
+		if (!confirmEditing(presentation, () -> ConfirmDialog.confirmDelete("Vorstellung löschen", "Soll die Vorstellung \"" + presentation.getName() + "\" wirklich unwiderruflich gelöscht werden?"))) {
 			return;
 		}
 

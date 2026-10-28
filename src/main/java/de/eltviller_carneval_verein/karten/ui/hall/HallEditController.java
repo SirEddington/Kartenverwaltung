@@ -66,20 +66,18 @@ public class HallEditController {
 		@Override
 		public void changedByOthers(Hall changed, ForeignBatch<Hall> batch) {
 			if (!editMode && hall != null && hall.getId().equals(changed.getId())) {
-				// Die ersetzte Halle ist ein neues Objekt mit derselben ID; ein Speichern der alten würde abgelehnt. Ohne Rückfrage:
-				// Im Anzeigemodus gibt es hier nichts Ungespeichertes
-				MainApp.showHallEditViewWithChanges(changed, null, null, false);
+				// Nicht mitten in der Benachrichtigung der Listener: Das Laden der neuen Ansicht meldet diese ab
+				Platform.runLater(HallEditController.this::reloadReplacedHall);
 			}
 		}
 
+		// Keine Prüfung des Bearbeitungsmodus nötig: Im Bearbeitungsmodus ist die Halle in Bearbeitung, und das Repository stellt
+		// auch das Löschen zurück (wie jeden fremden Stand); es kommt erst, wenn der Modus oder die Ansicht verlassen ist
 		@Override
 		public void removedByOthers(Hall removed) {
 			if (hall != null && hall.getId().equals(removed.getId())) {
-				MainApp.showHallManagementView();
-				// Die Hallenverwaltung hat keine Fußzeile, die Meldung öffnet dort einen Dialog: erst nach dem Ende der
-				// Benachrichtigung der Listener
-				String text = "„" + EntityLabels.nameOrPlaceholder(removed.getName()) + "“ wurde auf einem anderen Rechner gelöscht.";
-				Platform.runLater(() -> StatusMessage.getInstance().show(Severity.WARNING, text));
+				// Der Wechsel kann eine Rückfrage öffnen (andere ungespeicherte Hallen): nicht mitten in der Benachrichtigung
+				Platform.runLater(() -> leaveDeletedHall(removed));
 			}
 		}
 	};
@@ -155,6 +153,35 @@ public class HallEditController {
 			shown = false;
 			reportEditing();
 		});
+	}
+
+	/** Ob die Ansicht noch in einem gezeigten Fenster steht. */
+	private boolean viewShown() {
+		return btnSave.getScene() != null && btnSave.getScene().getWindow() != null;
+	}
+
+	/**
+	 * Ein anderer Rechner hat die Halle ersetzt (neues Objekt mit derselben ID; ein Speichern der alten würde abgelehnt): Die
+	 * Ansicht öffnet sich mit der Halle des Repositorys neu, ohne Rückfrage (im Anzeigemodus gibt es hier nichts Ungespeichertes)
+	 * und mit der gewählten Bestuhlung, wenn der Reiter "Bestuhlung" offen ist (sie zu übergeben öffnet ihn).
+	 */
+	private void reloadReplacedHall() {
+		Hall current = hallRepository.findById(hall.getId());
+		if (!viewShown() || editMode || current == null || current == hall) {
+			return;
+		}
+		SeatingPlan plan = shownPlan != null && hallPlanController.isSeatingTabActive() ? current.findSeatingPlan(shownPlan.getId()) : null;
+		MainApp.showHallEditViewWithChanges(current, null, plan, false);
+	}
+
+	/** Die gezeigte Halle hat ein anderer Rechner gelöscht: zurück zur Hallenverwaltung, die einen Dialog mit dem Grund zeigt. */
+	private void leaveDeletedHall(Hall removed) {
+		if (!viewShown()) {
+			return;
+		}
+		MainApp.showHallManagementView();
+		// Die Hallenverwaltung hat keine Fußzeile: Die Meldung öffnet dort einen Dialog
+		StatusMessage.getInstance().show(Severity.WARNING, "„" + EntityLabels.nameOrPlaceholder(removed.getName()) + "“ wurde auf einem anderen Rechner gelöscht.");
 	}
 
 	/**
