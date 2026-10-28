@@ -268,16 +268,19 @@ class EventMergeTest {
 		Presentation sunday = event.addPresentation("Sonntag");
 		sunday.setDate(LocalDate.of(2027, 2, 14));
 		Event state = copyOfUnchecked(event);
-		Presentation saturday = state.addPresentation("Samstag");
+		Hall hall = hallWithOneSeat();
+		Presentation saturday = inHall(state.addPresentation("Samstag"), hall);
 		saturday.setDate(LocalDate.of(2027, 2, 13));
-		booking(saturday, "s1", 1, "Schmitz");
+		String seatId = seatOf(hall);
+		booking(saturday, seatId, 1, "Schmitz");
 		UnitKey presentationUnit = UnitKey.presentation(event.getId(), saturday.getId());
-		UnitKey bookingUnit = UnitKey.booking(event.getId(), saturday.getId(), "s1");
+		UnitKey bookingUnit = UnitKey.booking(event.getId(), saturday.getId(), seatId);
 		UnitSnapshot bookingState = foreign(state, bookingUnit);
 		Recording sink = new Recording();
 
 		// die Buchung steht schon im Index (sie kam vor ihrer Vorstellung), gemeldet ist nur die Vorstellung
-		EventMerge.apply(event, plan(List.of(foreign(state, presentationUnit)), List.of(bookingState)), sink);
+		EventMerge.apply(event,
+				new EventMerge.Plan(List.of(foreign(state, presentationUnit)), List.of(bookingState), id -> hall), sink);
 
 		assertEquals(List.of("Freitag", "Samstag", "Sonntag"),
 				event.getPresentations().stream().map(Presentation::getName).toList());
@@ -320,18 +323,80 @@ class EventMergeTest {
 	void unitsAreMergedHeadFirstThenPresentationsThenBookings() {
 		Event event = event();
 		Event state = copyOfUnchecked(event);
-		Presentation saturday = state.addPresentation("Samstag");
-		booking(saturday, "s1", 1, "Schmitz");
+		Hall hall = hallWithOneSeat();
+		Presentation saturday = inHall(state.addPresentation("Samstag"), hall);
+		booking(saturday, seatOf(hall), 1, "Schmitz");
 		UnitKey presentationUnit = UnitKey.presentation(event.getId(), saturday.getId());
-		UnitKey bookingUnit = UnitKey.booking(event.getId(), saturday.getId(), "s1");
+		UnitKey bookingUnit = UnitKey.booking(event.getId(), saturday.getId(), seatOf(hall));
 		UnitSnapshot bookingState = foreign(state, bookingUnit);
 
 		// gemeldet in umgekehrter Reihenfolge: die Buchung kommt mit ihrer Vorstellung aus dem Index
-		EventMerge.apply(event, plan(List.of(bookingState, foreign(state, presentationUnit)), List.of(bookingState)),
-				new Recording());
+		EventMerge.apply(event, new EventMerge.Plan(List.of(bookingState, foreign(state, presentationUnit)),
+				List.of(bookingState), id -> hall), new Recording());
 
 		assertEquals(List.of("Schmitz"),
 				event.getPresentations().get(1).getBookings().stream().map(Booking::getLastName).toList());
+	}
+
+	@Test
+	void newPresentationLeavesOutBookingsOnSeatsItsPlanDoesNotKnow() {
+		Event event = event();
+		Event state = copyOfUnchecked(event);
+		Hall hall = hallWithOneSeat();
+		Presentation saturday = inHall(state.addPresentation("Samstag"), hall);
+		booking(saturday, "anderer-sitz", 2, "Schmitz");
+		UnitKey presentationUnit = UnitKey.presentation(event.getId(), saturday.getId());
+		UnitKey bookingUnit = UnitKey.booking(event.getId(), saturday.getId(), "anderer-sitz");
+		UnitSnapshot bookingState = foreign(state, bookingUnit);
+		Recording sink = new Recording();
+
+		EventMerge.apply(event,
+				new EventMerge.Plan(List.of(foreign(state, presentationUnit)), List.of(bookingState), id -> hall), sink);
+
+		Presentation added = event.getPresentations().get(1);
+		assertEquals(1, added.getBookings().size(), "nur der leere Platzhalter der Bestuhlung");
+		assertFalse(added.getBookings().get(0).hasData());
+		assertEquals(List.of(bookingUnit), sink.held);
+		assertEquals(Map.of(presentationUnit, true), sink.adopted);
+	}
+
+	@Test
+	void unassignedBookingWhoseSeatIsInThePlanIsHeld() throws IOException {
+		Event event = event();
+		Hall hall = hallWithOneSeat();
+		Presentation friday = inHall(event.getPresentations().get(0), hall);
+		Event before = copyOf(event);
+		Event state = copyOfUnchecked(event);
+		// "ohne Platz" in einer anderen Bestuhlung, sein alter Sitz ist aber einer der Bestuhlung im Modell
+		Booking unassigned = booking(state.getPresentations().get(0), seatOf(hall), 1, "Ohne");
+		unassigned.setUnassigned(true);
+		UnitKey unit = UnitKey.unassignedBooking(event.getId(), friday.getId(), unassigned.getId());
+		Recording sink = new Recording();
+
+		EventMerge.apply(event, new EventMerge.Plan(List.of(foreign(state, unit)), List.of(), id -> hall), sink);
+
+		assertEquals(List.of(unit), sink.held);
+		assertEquals(MAPPER.valueToTree(before), MAPPER.valueToTree(event));
+	}
+
+	/** Eine Halle mit einer Bestuhlung aus einem Tisch mit einem Sitz. */
+	private static Hall hallWithOneSeat() {
+		Hall hall = new Hall();
+		SeatingPlan seating = hall.addSeatingPlan();
+		TableRow row = seating.addRow();
+		row.setLabel("A");
+		seating.fillRow(row, 1, 1);
+		return hall;
+	}
+
+	private static String seatOf(Hall hall) {
+		return hall.getSeatingPlans().get(0).getSeats().get(0).getId();
+	}
+
+	private static Presentation inHall(Presentation presentation, Hall hall) {
+		presentation.setHallId(hall.getId());
+		presentation.setSeatingPlanId(hall.getSeatingPlans().get(0).getId());
+		return presentation;
 	}
 
 	private static Event copyOfUnchecked(Event event) {

@@ -59,12 +59,20 @@ public class StoreEventRepository implements EventRepository {
 	private final Map<UnitKey, Deferral> deferred = new LinkedHashMap<>();
 
 	/**
-	 * Fremde Buchungen, die still warten, bis ihr Platz im Modell da ist: ihr Sitz fehlt in der Bestuhlung der Vorstellung,
-	 * oder der Hallen- bzw. Bestuhlungswechsel (oder das Löschen) ihrer Vorstellung ist zurückgestellt. Meist kommt nur die
-	 * Halle oder Vorstellung später an; "ohne Platz" gemacht, löschte das nächste Speichern die Sitz-Einheit. Ohne Hinweis
-	 * für den Nutzer, bei jedem Aufruf von {@link #applyForeign} erneut geprüft.
+	 * Fremde Stände, die still warten. Vor allem Buchungen, bis ihr Platz im Modell da ist: Sie passen nicht zur
+	 * Bestuhlung der Vorstellung im Modell, oder der Hallen- bzw. Bestuhlungswechsel (oder das Löschen) ihrer Vorstellung
+	 * ist zurückgestellt oder eine Gabelung. Meist kommt nur die Halle oder Vorstellung später an; vom Abgleich umgesetzt,
+	 * überschriebe das nächste Speichern den fremden Stand. Außerdem die Einheiten eines Events, bei dem die Entscheidung
+	 * scheiterte. Ohne Hinweis für den Nutzer, bei jedem Aufruf von {@link #applyForeign} erneut geprüft.
 	 */
 	private final Set<UnitKey> held = new LinkedHashSet<>();
+
+	/**
+	 * Vorstellungen, deren fremder Stand eine Gabelung ist und Halle oder Bestuhlung wechselt bzw. sie löscht: Ihre
+	 * Buchungen warten. Sie werden bei jedem Aufruf mit geprüft, damit die Buchungen weiter warten, solange die Gabelung
+	 * besteht.
+	 */
+	private final Set<UnitKey> forkedParents = new LinkedHashSet<>();
 
 	/** Ob für das Modellobjekt einer Einheit gerade eine Eingabe offen ist (siehe {@link #setEditingCheck}). */
 	private Predicate<Object> inEditing = model -> false;
@@ -387,6 +395,8 @@ public class StoreEventRepository implements EventRepository {
 			}
 		}
 		wanted.addAll(deferred.keySet());
+		// vor den wartenden Buchungen: Ob sie weiter warten, hängt an der Gabelung ihrer Vorstellung
+		wanted.addAll(forkedParents);
 		wanted.addAll(held);
 		List<String> warnings = new ArrayList<>();
 		if (!wanted.isEmpty()) {
@@ -394,6 +404,7 @@ public class StoreEventRepository implements EventRepository {
 			// was der Index nicht mehr kennt, lässt sich nicht einarbeiten
 			deferred.keySet().retainAll(current.keySet());
 			held.retainAll(current.keySet());
+			forkedParents.retainAll(current.keySet());
 			Map<String, List<UnitSnapshot>> byEvent = new LinkedHashMap<>();
 			for (UnitKey unit : wanted) {
 				UnitSnapshot snapshot = current.get(unit);
@@ -404,11 +415,16 @@ public class StoreEventRepository implements EventRepository {
 			try {
 				Map<UnitKey, List<ChainStep>> chains = sync.chains(current.keySet());
 				for (List<UnitSnapshot> ofEvent : byEvent.values()) {
-					// ein Fehler bei einem Event hält die übrigen nicht auf
+					// ein Fehler bei einem Event hält die übrigen nicht auf; seine Einheiten kommen beim nächsten Mal wieder
 					try {
 						applyForeign(ofEvent, chains, warnings);
 					} catch (RuntimeException e) {
 						failed(ofEvent.get(0).unit().eventId(), e, warnings);
+						for (UnitSnapshot snapshot : ofEvent) {
+							if (!deferred.containsKey(snapshot.unit())) {
+								hold(snapshot.unit(), "die Entscheidung ist gescheitert");
+							}
+						}
 					}
 				}
 			} catch (IOException e) {
@@ -488,10 +504,13 @@ public class StoreEventRepository implements EventRepository {
 		String eventId = snapshots.get(0).unit().eventId();
 		Event event = cachedEvent(eventId);
 		List<UnitSnapshot> successors = new ArrayList<>();
+		// Vorstellungen, deren Buchungen warten: Hallen- bzw. Bestuhlungswechsel oder Löschen zurückgestellt oder Gabelung
+		Set<UnitKey> heldPresentations = new HashSet<>();
 		for (UnitSnapshot current : snapshots) {
 			UnitKey unit = current.unit();
 			UnitSnapshot known = baseline.known(unit);
 			ForeignDecision decision = decide(known, current, chainOf(chains, unit));
+			forkedParents.remove(unit);
 			if (decision != ForeignDecision.APPLY) {
 				deferred.remove(unit);
 				held.remove(unit);
@@ -501,6 +520,10 @@ public class StoreEventRepository implements EventRepository {
 			} else if (decision == ForeignDecision.FORK) {
 				LOG.info("Fremder Stand von " + unit.relativePath()
 						+ " nicht eingearbeitet: Die eigene Version ist unterlegen (Gabelung).");
+				if (event != null && unit.type() == UnitType.PRESENTATION && EventMerge.touchesSubtree(event, current)) {
+					heldPresentations.add(unit);
+					forkedParents.add(unit);
+				}
 			} else if (decision == ForeignDecision.APPLY) {
 				successors.add(current);
 			}
@@ -513,7 +536,6 @@ public class StoreEventRepository implements EventRepository {
 		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false) : localChanges(event);
 		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
 		successors.sort(EventMerge.MERGE_ORDER);
-		Set<UnitKey> heldPresentations = new HashSet<>();
 		Map<UnitKey, UnitSnapshot> appliedPresentations = new HashMap<>();
 		List<UnitSnapshot> apply = new ArrayList<>();
 		for (UnitSnapshot current : successors) {
@@ -773,7 +795,13 @@ public class StoreEventRepository implements EventRepository {
 				|| held.stream().anyMatch(unit -> eventId.equals(unit.eventId()))) {
 			return false;
 		}
-		return EventMerge.subtree(event, UnitKey.event(eventId)).stream().noneMatch(inEditing);
+		try {
+			return EventMerge.subtree(event, UnitKey.event(eventId)).stream().noneMatch(inEditing);
+		} catch (RuntimeException e) {
+			// ohne verlässliche Auskunft gilt das Event als in Bearbeitung; changedByOthers folgt trotzdem
+			LOG.log(Level.SEVERE, "Ob \"" + event.getName() + "\" gerade bearbeitet wird, ließ sich nicht prüfen", e);
+			return false;
+		}
 	}
 
 	/**
@@ -799,6 +827,7 @@ public class StoreEventRepository implements EventRepository {
 			// das frische Event zeigt jeden Stand des Index; nichts davon wartet mehr
 			deferred.keySet().removeIf(unit -> eventId.equals(unit.eventId()));
 			held.removeIf(unit -> eventId.equals(unit.eventId()));
+			forkedParents.removeIf(unit -> eventId.equals(unit.eventId()));
 			Set<UnitKey> units = new HashSet<>();
 			all.forEach(snapshot -> units.add(snapshot.unit()));
 			listeners.notifyChangedByOthers(fresh, new ForeignBatch<>(units, copy -> {

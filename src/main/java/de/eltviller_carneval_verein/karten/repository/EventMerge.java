@@ -260,23 +260,35 @@ final class EventMerge {
 			return false;
 		}
 
-		Presentation added = UnitMapper.assemblePresentation(snapshot, plan.index);
+		// Buchungen, die nicht zur Bestuhlung passen, setzte der Abgleich um; sie warten wie jede solche Buchung
+		List<UnitSnapshot> fitting = new ArrayList<>();
+		List<UnitSnapshot> waiting = new ArrayList<>();
+		for (UnitSnapshot below : plan.index) {
+			if (below.unit().type() == UnitType.BOOKING && inSubtree(below.unit(), unit)) {
+				Booking booking = UnitMapper.readUnit(below, Booking.class);
+				if (booking != null && !fitsPlan(below.unit(), booking, state, plan.hallLookup)) {
+					waiting.add(below);
+				} else {
+					fitting.add(below);
+				}
+			}
+		}
+		Presentation added = UnitMapper.assemblePresentation(snapshot, fitting);
 		insertSorted(event, added);
 		resync(added, plan);
 		sink.adopted(snapshot, true);
 		warnIfLocked(snapshot, sink);
-		for (UnitSnapshot below : plan.index) {
-			if (below.unit().type() == UnitType.BOOKING && inSubtree(below.unit(), unit)) {
-				boolean readable = UnitMapper.readUnit(below, Booking.class) != null;
-				if (!readable && !UnitMapper.isAbsent(below)) {
-					sink.warning(UnitMapper.unreadableBooking(added.getName()));
-				}
-				sink.adopted(below, readable);
-				if (readable) {
-					warnIfLocked(below, sink);
-				}
+		for (UnitSnapshot below : fitting) {
+			boolean readable = UnitMapper.readUnit(below, Booking.class) != null;
+			if (!readable && !UnitMapper.isAbsent(below)) {
+				sink.warning(UnitMapper.unreadableBooking(added.getName()));
+			}
+			sink.adopted(below, readable);
+			if (readable) {
+				warnIfLocked(below, sink);
 			}
 		}
+		waiting.forEach(sink::held);
 		return true;
 	}
 
@@ -305,14 +317,15 @@ final class EventMerge {
 		}
 		if (current != null) {
 			current.copyFrom(state);
-		} else if (isUnassigned(unit) || hasSeat(presentation, unit.bookingDir(), plan.hallLookup)) {
+		} else if (fitsPlan(unit, state, presentation, plan.hallLookup)) {
 			if (presentation.getBookings() == null) {
 				presentation.setBookings(new ArrayList<>());
 			}
 			state.setParent(presentation);
 			presentation.getBookings().add(state);
 		} else {
-			// "ohne Platz" gemacht, löschte das nächste Speichern die Sitz-Einheit und gäbe den Platz frei
+			// der Abgleich setzte sie um ("ohne Platz" bzw. zurück auf ihren alten Sitz), und das nächste Speichern
+			// überschriebe den fremden Stand
 			sink.held(snapshot);
 			return;
 		}
@@ -322,27 +335,43 @@ final class EventMerge {
 
 	/**
 	 * Ob eine fremde Buchung beim Einarbeiten einen Platz im Modell findet ({@link #apply} sie also nicht zurückhält):
-	 * gelöscht oder unlesbar, ohne Platz, ohne Vorstellung im Modell, auf einem Sitz, auf dem im Modell schon eine Buchung
-	 * steht, oder auf einem Sitz der Bestuhlung. {@code presentationState} ist der Stand der Vorstellung, wenn er im selben
-	 * Schritt eingearbeitet wird (sonst {@code null}): Wechselt er die Bestuhlung, zählt die neue.
+	 * gelöscht oder unlesbar, ohne Vorstellung im Modell, im Modell schon vorhanden (auf ihrem Sitz bzw. mit ihrer
+	 * Kennung), oder passend zur Bestuhlung ({@link #fitsPlan}). {@code presentationState} ist der Stand der Vorstellung,
+	 * wenn er im selben Schritt eingearbeitet wird (sonst {@code null}): Wechselt er die Bestuhlung, zählt die neue.
 	 */
 	static boolean hasPlace(Event event, UnitSnapshot booking, UnitSnapshot presentationState,
 			Function<String, Hall> hallLookup) {
 		UnitKey unit = booking.unit();
 		Presentation presentation = presentation(event, unit.presentationId());
-		if (isUnassigned(unit) || presentation == null || UnitMapper.readUnit(booking, Booking.class) == null) {
+		Booking state = UnitMapper.readUnit(booking, Booking.class);
+		if (presentation == null || state == null) {
 			return true;
 		}
-		Presentation state = presentationState == null ? null
+		Presentation presentationNow = presentationState == null ? null
 				: UnitMapper.readUnit(presentationState, Presentation.class);
-		if (presentationState != null && state == null) {
+		if (presentationState != null && presentationNow == null) {
 			// die Vorstellung verlässt das Modell: die Buchung geht nur in den Vergleichsstand
 			return true;
 		}
-		if (state != null && changesPlan(presentation, state)) {
-			return hasSeat(state, unit.bookingDir(), hallLookup);
+		if (presentationNow != null && changesPlan(presentation, presentationNow)) {
+			return fitsPlan(unit, state, presentationNow, hallLookup);
 		}
-		return bookingAt(presentation, unit) != null || hasSeat(presentation, unit.bookingDir(), hallLookup);
+		return bookingAt(presentation, unit) != null || fitsPlan(unit, state, presentation, hallLookup);
+	}
+
+	/**
+	 * Ob die Buchung so zur Bestuhlung der Vorstellung passt, dass der Abgleich sie nicht umsetzt: auf einem Sitz, den die
+	 * Bestuhlung kennt; ohne Platz, wenn sie keinen Sitz nennt, den die Bestuhlung kennt (der Abgleich setzte sie sonst
+	 * dorthin zurück). Eine unpassende stammt aus einer anderen Bestuhlung als der im Modell; meist ist die Halle oder die
+	 * Vorstellung nur noch nicht da.
+	 */
+	private static boolean fitsPlan(UnitKey unit, Booking state, Presentation presentation,
+			Function<String, Hall> hallLookup) {
+		SeatingPlan seating = planOf(presentation, hallLookup);
+		if (isUnassigned(unit)) {
+			return state.getSeatId() == null || seating == null || seating.findSeat(state.getSeatId()) == null;
+		}
+		return seating != null && seating.findSeat(unit.bookingDir()) != null;
 	}
 
 	/**
@@ -372,11 +401,6 @@ final class EventMerge {
 	private static SeatingPlan planOf(Presentation presentation, Function<String, Hall> hallLookup) {
 		Hall hall = presentation.getHallId() != null ? hallLookup.apply(presentation.getHallId()) : null;
 		return hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
-	}
-
-	private static boolean hasSeat(Presentation presentation, String seatId, Function<String, Hall> hallLookup) {
-		SeatingPlan plan = planOf(presentation, hallLookup);
-		return plan != null && plan.findSeat(seatId) != null;
 	}
 
 	private static boolean changesPlan(Presentation existing, Presentation state) {

@@ -765,6 +765,161 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	@Test
+	void unassignedForeignBookingWaitsWhileItsOldSeatIsInMyPlan() throws IOException {
+		Booking sold = seat(friday, 0);
+		Other other = other();
+		// ohne Bestuhlung wird Müller "ohne Platz" unter _<id> und behält die Kennung seines alten Sitzes
+		other.friday().setSeatingPlanId(null);
+		BookingSync.sync(other.friday(), null);
+		other.save();
+		Booking remote = other.friday().getBookings().get(0);
+		UnitKey unassigned = UnitKey.unassignedBooking(event.getId(), friday.getId(), remote.getId());
+		long before = files();
+
+		// die Vorstellung ohne Bestuhlung ist noch nicht gemeldet: Der Abgleich setzte Müller auf seinen alten Sitz
+		ForeignResult result = mine.applyForeign(List.of(seatUnit(friday, 0), unassigned));
+
+		assertTrue(result.deferred().isEmpty(), "still, ohne Hinweis");
+		assertSame(sold, seat(friday, 0));
+		assertFalse(sold.hasData(), "die Sitz-Einheit ist gelöscht");
+		assertTrue(friday.getBookings().stream().noneMatch(Booking::hasData));
+		assertNull(mine.knownUnit(unassigned));
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+
+		assertNull(friday.getSeatingPlanId());
+		assertEquals(List.of("Müller"), friday.getBookings().stream().map(Booking::getLastName).toList());
+		assertTrue(friday.getBookings().get(0).isUnassigned());
+		assertEquals(remote.getId(), friday.getBookings().get(0).getId());
+		mine.saveEvent(event);
+		assertEquals(before, files());
+	}
+
+	@Test
+	void bookingsWaitWhileTheirPresentationIsAForkThatSwitchesThePlan() throws IOException {
+		Booking sold = seat(friday, 0);
+		Other other = other();
+		other.friday().setSeatingPlanId(null);
+		BookingSync.sync(other.friday(), null);
+		other.save();
+		// A ändert die Vorstellung selbst und speichert, ohne Bs Stand zu kennen: seine Version unterliegt
+		friday.setName("Freitagabend");
+		mine.saveEvent(event);
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+		assertEquals(1, sync.unitState(presentation).lost().size());
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(allUnits());
+
+		assertTrue(result.deferred().isEmpty(), "eine Gabelung bekommt keinen Hinweis, ihre Buchungen warten still");
+		assertSame(sold, seat(friday, 0));
+		assertEquals("Müller", sold.getLastName());
+		assertEquals(plan.getId(), friday.getSeatingPlanId());
+		assertEquals(6, friday.getBookings().size());
+		mine.retryDeferred();
+		assertEquals("Müller", sold.getLastName(), "sie warten, solange die Gabelung besteht");
+		assertTrue(friday.getBookings().stream().noneMatch(Booking::isUnassigned));
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+
+		// passt der Stand wieder (hier: neu geladen, bis KARV-86 Gabelungen auflöst), ist die Buchung da
+		Event reloaded = mine.reloadEvents().get(0);
+		mine.applyForeign(allUnits());
+		Presentation reloadedFriday = reloaded.getPresentations().get(0);
+		assertEquals(List.of("Müller"), reloadedFriday.getBookings().stream().map(Booking::getLastName).toList());
+		assertTrue(reloadedFriday.getBookings().get(0).isUnassigned());
+		mine.saveEvent(reloaded);
+		assertEquals(before, files());
+	}
+
+	@Test
+	void newPresentationLeavesOutBookingsOnSeatsOfAHallNotYetKnown() throws IOException {
+		Hall other = secondHall(1, 2);
+		SeatingPlan otherPlan = other.getSeatingPlans().get(0);
+		AtomicBoolean arrived = new AtomicBoolean(false);
+		Function<String, Hall> halls = lookup(other);
+		mine.setHallLookup(id -> other.getId().equals(id) && !arrived.get() ? null : halls.apply(id));
+		Other remote = other();
+		Presentation saturday = remote.event().addPresentation("Samstag");
+		saturday.setHallId(other.getId());
+		saturday.setSeatingPlanId(otherPlan.getId());
+		BookingSync.sync(saturday, otherPlan);
+		saturday.getBookings().get(1).setLastName("Schmitz");
+		remote.save();
+		UnitKey booking = UnitKey.booking(event.getId(), saturday.getId(), otherPlan.getSeats().get(1).getId());
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(allUnits());
+
+		assertTrue(result.deferred().isEmpty());
+		assertEquals(List.of("Freitag", "Samstag"),
+				event.getPresentations().stream().map(Presentation::getName).toList());
+		Presentation added = event.getPresentations().get(1);
+		assertTrue(added.getBookings().isEmpty(), "ohne bekannte Halle bleibt die Buchung draußen");
+		assertNull(mine.knownUnit(booking));
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+
+		arrived.set(true);
+		mine.retryDeferred();
+
+		assertEquals(List.of("Schmitz"), added.getBookings().stream().map(Booking::getLastName).toList());
+		assertSame(added, added.getBookings().get(0).getParent());
+		mine.saveEvent(event);
+		assertEquals(before, files());
+	}
+
+	@Test
+	void unitsOfAnEventWhoseDecisionFailedAreRetried() {
+		AtomicBoolean broken = new AtomicBoolean(true);
+		mine.setEditingCheck(o -> {
+			if (broken.get()) {
+				throw new IllegalStateException("Registratur kaputt");
+			}
+			return false;
+		});
+		Other other = other();
+		seat(other.friday(), 0).setLastName("Fremd");
+		other.save();
+
+		ForeignResult failed = mine.applyForeign(List.of(seatUnit(friday, 0)));
+		assertEquals(1, failed.warnings().size(), failed.warnings().toString());
+		assertEquals("Müller", seat(friday, 0).getLastName());
+
+		broken.set(false);
+		ForeignResult retried = mine.retryDeferred();
+
+		assertTrue(retried.warnings().isEmpty());
+		assertEquals("Fremd", seat(friday, 0).getLastName());
+	}
+
+	@Test
+	void failingEditingCheckDuringRecoveryStillPairsTheNotifications() {
+		Hall other = secondHall(1, 2);
+		// gemeldet ist nur die Vorstellung: Die 1. Abfrage ist ihr Abgleich
+		mine.setHallLookup(failingAt(1, lookup(other)));
+		mine.setEditingCheck(o -> {
+			if (o == event) {
+				throw new IllegalStateException("Registratur kaputt");
+			}
+			return false;
+		});
+		Other remote = other();
+		remote.friday().setHallId(other.getId());
+		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		remote.save();
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+
+		ForeignResult result = mine.applyForeign(List.of(presentation));
+
+		assertEquals(List.of("changing Prunksitzung", "changed Prunksitzung"), recorder.calls);
+		assertSame(event, mine.loadEvents().get(0));
+		assertEquals(List.of(presentation), result.deferred().stream().map(Deferral::unit).toList());
+	}
+
+	@Test
 	void deferredUnitIsAppliedOnRetryAfterEditingEnds() throws IOException {
 		Booking sold = seat(friday, 0);
 		AtomicBoolean editing = new AtomicBoolean(true);
