@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.store;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -22,6 +23,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -34,10 +36,14 @@ import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.AppPaths;
+import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
@@ -85,6 +91,12 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * {@link #startup} sie vor, übernimmt es den Index ohne jeden Durchlauf über den Bestand (zweite Stufe); ohne Marke,
  * also nach einem Absturz, bleibt es beim Abgleich über die Verzeichnisnamen. Der Index ist nie Schiedsrichter: Jede Entscheidung über Vorgänger, Ansprüche und Verluste trifft {@link ChainResolver}
  * auf den Dateien; die Abläufe im {@code worker} lesen weiterhin alle Einheiten.
+ * <p>
+ * <b>Offene Konflikte:</b> {@link #openConflicts()} leitet sie aus dem Index ab ({@link ConflictLedger}), bestätigt werden sie
+ * mit {@link #acknowledge} ({@code <AppData>/conflicts-ack.json}). Eine Elternlöschung hängt an der Nummer der eigenen
+ * Änderungsliste, in der der Verkauf steht; kennt der Index sie nicht (nach einem Neuaufbau), liest der Start bzw. der Takt
+ * einmal die eigenen Listen im gemeinsamen Ordner und meldet dann {@link SyncListener#conflictsChanged}. Dieses Signal kommt
+ * außerdem, wenn eine Liste mit einer fremden Version mit Vermerk oder einer Löschung eingelesen wurde.
  * <p>
  * <b>Threads:</b>
  * <ul>
@@ -134,6 +146,9 @@ public final class SyncService {
 	private static final String DATA = "data";
 	private static final String INDEX = "index";
 	private static final String SYNC_STATE = "sync-state.json";
+	private static final String CONFLICTS_ACK = "conflicts-ack.json";
+	private static final String ACKNOWLEDGED = "acknowledged";
+	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 	private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 	/** Für Aufrufer ohne Fortschrittsanzeige. */
 	private static final DoubleConsumer NO_PROGRESS = fraction -> {
@@ -224,6 +239,12 @@ public final class SyncService {
 	 * lokalen Bestand; wer sie hält, nimmt höchstens kurz {@code lock} (Rechner-ID) und den Monitor des Index.
 	 */
 	private final Object resolveLock = new Object();
+	/** Schützt {@link #acknowledged}; die letzte Sperre der Folge (unter ihr nur die kleine Datei, keine weitere Sperre). */
+	private final Object ackLock = new Object();
+	/** Die bestätigten Konflikte ({@code conflicts-ack.json}); {@code null}, solange die Datei nicht gelesen wurde. */
+	private Set<VersionId> acknowledged;
+	/** Ob eine Elternlöschung auf die eigenen Listen wartet, die der Takt liest; gelesen und gesetzt unter {@code workLock}. */
+	private boolean ownListsWanted;
 
 	/** Serialisiert die Arbeit am gemeinsamen Ordner: Takt, Hochladen beim Start. */
 	private final ReentrantLock workLock = new ReentrantLock();
@@ -434,6 +455,7 @@ public final class SyncService {
 				runJobs(current, round);
 			});
 			reportChanges(round);
+			round.run(() -> decideUnknownListNumbers(round, true));
 			resolveAtStartup(opened.lostUnits());
 			if (isCurrent(current)) {
 				if (round.unreachable) {
@@ -927,6 +949,106 @@ public final class SyncService {
 		return index.absorbed(units);
 	}
 
+	// --- Offene Konflikte
+
+	/**
+	 * Die offenen Konflikte dieses Rechners aus dem Start-Index ({@link ConflictLedger}), ohne Zugriff auf den Bestand:
+	 * Konfliktvermerke, die diesen Rechner betreffen, und fremde Löschungen eines Event-Kopfs oder einer Vorstellung über
+	 * eigenen Verkäufen, die der Löschende nicht kannte, jeweils solange sie nicht bestätigt sind. Eine Elternlöschung, für
+	 * die noch eine Listennummer fehlt, erscheint erst, wenn der Takt die eigenen Listen gelesen hat
+	 * ({@link SyncListener#conflictsChanged}). Die erste Abfrage liest einmal die kleine Datei {@code conflicts-ack.json}.
+	 *
+	 * @return unveränderlich, nach Zeitpunkt, dann ID sortiert
+	 */
+	public List<OpenConflict> openConflicts() {
+		return deriveConflicts().conflicts();
+	}
+
+	/**
+	 * Bestätigt Konflikte (die ID der Version mit dem Vermerk bzw. der Löschversion, siehe {@link OpenConflict#id()}): Sie
+	 * erscheinen nicht mehr in {@link #openConflicts()}, auch nicht nach einem Neustart. Schreibt
+	 * {@code <AppData>/conflicts-ack.json} atomar und meldet dann {@link SyncListener#conflictsChanged}. Scheitert das
+	 * Schreiben, gilt nichts als bestätigt.
+	 *
+	 * @throws IOException wenn die Datei nicht geschrieben werden kann
+	 */
+	public void acknowledge(Collection<VersionId> ids) throws IOException {
+		synchronized (ackLock) {
+			Set<VersionId> known = loadedAcknowledged();
+			Set<VersionId> next = new TreeSet<>(known);
+			if (!next.addAll(ids)) {
+				return;
+			}
+			writeAcknowledged(next);
+			acknowledged = next;
+		}
+		notifier.conflictsChanged();
+	}
+
+	private ConflictLedger.Derivation deriveConflicts() {
+		String me = machineId();
+		Set<VersionId> done;
+		synchronized (ackLock) {
+			done = Set.copyOf(loadedAcknowledged());
+		}
+		return index.read(entries -> ConflictLedger.derive(entries, me, done));
+	}
+
+	/** Die bestätigten Konflikte; liest die Datei beim ersten Aufruf. Nur unter {@code ackLock}. */
+	private Set<VersionId> loadedAcknowledged() {
+		if (acknowledged == null) {
+			acknowledged = readAcknowledged();
+		}
+		return acknowledged;
+	}
+
+	/** Fehlt die Datei oder ist sie defekt, gilt nichts als bestätigt (lieber einmal zu viel als verschluckt). */
+	private Set<VersionId> readAcknowledged() {
+		Set<VersionId> ids = new TreeSet<>();
+		try {
+			Optional<byte[]> bytes = files.read(appDataDir.resolve(CONFLICTS_ACK));
+			if (bytes.isEmpty()) {
+				return ids;
+			}
+			JsonNode list = MAPPER.readTree(bytes.get()).get(ACKNOWLEDGED);
+			if (list == null || !list.isArray()) {
+				throw new IOException("Das Feld '" + ACKNOWLEDGED + "' fehlt oder ist keine Liste");
+			}
+			for (JsonNode item : list) {
+				if (!item.isTextual() || !VersionId.isValid(item.asText())) {
+					throw new IOException("Ungültiger Eintrag in '" + ACKNOWLEDGED + "': " + item);
+				}
+				ids.add(VersionId.of(item.asText()));
+			}
+			return ids;
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Die bestätigten Konflikte (" + CONFLICTS_ACK
+					+ ") ließen sich nicht lesen; alle Konflikte gelten als offen", e);
+			return new TreeSet<>();
+		}
+	}
+
+	/** Schreibt die Datei über eine temporäre Datei, die die vorhandene atomar ersetzt. */
+	private void writeAcknowledged(Set<VersionId> ids) throws IOException {
+		ObjectNode root = MAPPER.createObjectNode();
+		ArrayNode list = root.putArray(ACKNOWLEDGED);
+		ids.forEach(id -> list.add(id.value()));
+		byte[] bytes = MAPPER.writeValueAsBytes(root);
+		Path file = appDataDir.resolve(CONFLICTS_ACK);
+		Path temp = file.resolveSibling(FileLayer.TEMP_PREFIX + "conflicts-ack-" + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
+		try {
+			files.createNew(temp, bytes);
+			AtomicFileReplace.replace(temp, file);
+		} catch (IOException | RuntimeException e) {
+			try {
+				Files.deleteIfExists(temp);
+			} catch (IOException | RuntimeException suppressed) {
+				e.addSuppressed(suppressed);
+			}
+			throw e;
+		}
+	}
+
 	/**
 	 * Ob {@link #startup} den Index mit dem lokalen Bestand abgeglichen (oder neu aufgebaut) hat. Erst dann liefert
 	 * {@link #snapshots()} den ganzen Bestand.
@@ -1255,6 +1377,7 @@ public final class SyncService {
 		round.run(() -> repairQueued(current, round));
 		round.run(() -> checkLateDefeats(current, round, now));
 		reportChanges(round);
+		round.run(() -> decideUnknownListNumbers(round, false));
 		if (!isCurrent(current)) {
 			return true;
 		}
@@ -1519,6 +1642,7 @@ public final class SyncService {
 	private void poll(Link current, Round round) throws IOException {
 		FeedPoll poll = current.reader.poll();
 		index.markListed(poll.listed());
+		round.listed.addAll(poll.listed());
 		round.changed.addAll(poll.changed());
 		forgetUnrepairable(poll.changed());
 		poll.pending().forEach(notifier::pending);
@@ -1686,6 +1810,66 @@ public final class SyncService {
 		}
 		reportLosses(units);
 		notifier.unitsChanged(round.changed);
+		// erst jetzt stehen die gelisteten Versionen im Index: eine fremde mit Vermerk oder eine Löschung kann einen Konflikt öffnen
+		if (!round.listed.isEmpty() && index.carriesNoteOrParentDeletion(round.listed)) {
+			notifier.conflictsChanged();
+		}
+	}
+
+	/**
+	 * Entscheidet die Elternlöschungen, die an einer unbekannten Listennummer einer eigenen Version hängen ({@link
+	 * ConflictLedger.Derivation#undecided()}; nach einem Neuaufbau des Index oder einem unsauberen Ende kennt er die Nummern
+	 * nicht): Liest die eigenen Listen ({@code feeds/<eigene ID>/}), trägt die Nummern ein und meldet
+	 * {@link SyncListener#conflictsChanged}. Läuft nur, wenn sich im Durchlauf etwas geändert hat, bei {@code force} (Start)
+	 * oder wenn ein früherer Versuch scheiterte; sonst kostet der Takt nichts.
+	 */
+	private void decideUnknownListNumbers(Round round, boolean force) throws IOException {
+		if (!force && !ownListsWanted && round.changed.isEmpty() && round.listed.isEmpty()) {
+			return;
+		}
+		ownListsWanted = deriveConflicts().undecided();
+		if (!ownListsWanted) {
+			return;
+		}
+		readOwnLists(round.link);
+		ownListsWanted = false;
+		notifier.conflictsChanged();
+	}
+
+	/**
+	 * Liest alle eigenen Listen im gemeinsamen Ordner und trägt ihre Nummern für die aktuellen Versionen ein. Was danach noch
+	 * unbekannt ist, steht in keiner Liste ({@link UnitIndex#markUnknownOwnAsUnlisted}), sonst ginge ein Verkauf, der offline
+	 * entstand und nie in einer Liste stand, nie als dem Löschenden unbekannt ein. Eine unlesbare Liste wird übersprungen
+	 * (WARNING): ihre Versionen gelten dann als in keiner Liste, lieber einmal zu viel als verschluckt.
+	 */
+	private void readOwnLists(Link current) throws IOException {
+		String me = machineId();
+		Map<UnitKey, UnitSnapshot> snapshots = index.snapshots();
+		for (long seq : Feeds.feedNumbers(current.shared, me)) {
+			Optional<byte[]> bytes = current.shared.readRelative(Feeds.feedPath(me, seq));
+			if (bytes.isEmpty()) {
+				continue;
+			}
+			Feed feed;
+			try {
+				feed = StoreCodec.readFeed(bytes.get());
+			} catch (IOException e) {
+				LOGGER.log(Level.WARNING, "Die eigene Liste " + Feeds.feedPath(me, seq) + " ist unlesbar", e);
+				continue;
+			}
+			if (!feed.machine().equals(me) || feed.seq() != seq) {
+				LOGGER.warning("Die eigene Liste " + Feeds.feedPath(me, seq) + " gehört nicht zu ihrem Pfad");
+				continue;
+			}
+			// nur die aktuellen Versionen: für ältere merkte sich der Index die Nummer ohne Nutzen
+			List<FeedEntry> currentOnes = feed.entries().stream().filter(entry -> {
+				Optional<UnitKey> unit = UnitKey.parse(entry.unit());
+				UnitSnapshot snapshot = unit.isEmpty() ? null : snapshots.get(unit.get());
+				return snapshot != null && entry.version().equals(snapshot.version());
+			}).toList();
+			index.markOwnListed(currentOnes, seq);
+		}
+		index.markUnknownOwnAsUnlisted();
 	}
 
 	/** Leitet für jede Einheit die verlorenen Strecken aus dem Zustand ab und meldet, was noch nicht gemeldet wurde. */
@@ -1864,6 +2048,8 @@ public final class SyncService {
 	private final class Round {
 		final Link link;
 		final Set<UnitKey> changed = new LinkedHashSet<>();
+		/** Die fremden Versionen, deren Liste in diesem Durchlauf vollständig verarbeitet wurde. */
+		final List<FeedEntry> listed = new ArrayList<>();
 		/** Der erste Vollabgleich gelang: Verluste aller Einheiten ableiten. */
 		boolean allUnits;
 		boolean unreachable;

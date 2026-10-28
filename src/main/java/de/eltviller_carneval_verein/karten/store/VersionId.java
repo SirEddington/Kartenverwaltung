@@ -93,6 +93,19 @@ public record VersionId(String value) implements Comparable<VersionId> {
 		return Long.parseLong(value.substring(0, MILLIS_DIGITS), RADIX);
 	}
 
+	/**
+	 * Ob die ID das Kürzel dieses Rechners trägt, also von ihm erzeugt wurde. Das Kürzel sind nur die ersten 8 Zeichen der
+	 * Rechner-ID: Zwei verschiedene Rechner mit gleichem Kürzel (bei zufälligen 26-stelligen IDs praktisch ausgeschlossen)
+	 * sind hier nicht zu unterscheiden. Für Stellen, die nur die ID einer Version kennen und keine Datei lesen wollen.
+	 */
+	public boolean isFrom(String machineId) {
+		if (machineId == null || machineId.length() < MACHINE_DIGITS) {
+			return false;
+		}
+		int start = MILLIS_DIGITS + 1;
+		return value.regionMatches(start, machineId.toLowerCase(Locale.ROOT), 0, MACHINE_DIGITS);
+	}
+
 	@Override
 	public int compareTo(VersionId other) {
 		return value.compareTo(other.value);

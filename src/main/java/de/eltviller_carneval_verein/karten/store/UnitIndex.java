@@ -23,6 +23,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.DoubleConsumer;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -558,6 +559,59 @@ final class UnitIndex {
 	/** Die Einträge, die Vermerke ({@link Entry#notes()}) oder {@code seen} ({@link Entry#seen()}) haben. */
 	synchronized List<Entry> entriesWithNotesOrSeen() {
 		return entries.values().stream().filter(entry -> !entry.notes().isEmpty() || !entry.seen().isEmpty()).toList();
+	}
+
+	/**
+	 * Lässt den Leser über alle Einträge laufen, ohne sie zu kopieren (die Einträge sind unveränderlich). Der Leser läuft unter
+	 * der Sperre des Index: Er rechnet nur und ruft nichts zurück.
+	 */
+	synchronized <T> T read(Function<Collection<Entry>, T> reader) {
+		return reader.apply(entries.values());
+	}
+
+	/**
+	 * Ob eine der Versionen einen Konfliktvermerk trägt oder die aktuelle Löschung eines Event-Kopfs oder einer Vorstellung ist
+	 * (also einen Konflikt auslösen kann). Versionen, die der Index nicht kennt, zählen nicht.
+	 *
+	 * @param versions die Einträge der Listen
+	 */
+	synchronized boolean carriesNoteOrParentDeletion(Collection<FeedEntry> versions) {
+		for (FeedEntry feedEntry : versions) {
+			Optional<UnitKey> parsed = UnitKey.parse(feedEntry.unit());
+			Entry entry = parsed.isEmpty() ? null : entries.get(parsed.get());
+			if (entry == null) {
+				continue;
+			}
+			UnitType type = entry.snapshot().unit().type();
+			boolean deletion = entry.snapshot().deleted() && feedEntry.version().equals(entry.snapshot().version())
+					&& (type == UnitType.EVENT || type == UnitType.PRESENTATION);
+			if (deletion || entry.notes().stream().anyMatch(noted -> noted.version().equals(feedEntry.version()))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Setzt bei jedem Eintrag, dessen aktuelle Version eigen ist und dessen Listennummer unbekannt ist, "in keiner Liste"
+	 * ({@code 0}), wie {@link #markOwnListed} mit {@code 0}. Gilt, nachdem alle eigenen Listen gelesen und ihre Nummern
+	 * eingetragen sind: Was dann noch unbekannt ist, steht in keiner. Wie überall erkennt der Index eigene Versionen am
+	 * Kürzel ihrer ID ({@link VersionId#isFrom}).
+	 */
+	synchronized void markUnknownOwnAsUnlisted() {
+		boolean changed = false;
+		for (Map.Entry<UnitKey, Entry> item : entries.entrySet()) {
+			Entry entry = item.getValue();
+			VersionId current = entry.snapshot().version();
+			if (entry.ownSeq() == null && current != null && current.isFrom(machineId)) {
+				item.setValue(entry.withOwnSeq(0L));
+				markChanged(groupOf(item.getKey()));
+				changed = true;
+			}
+		}
+		if (changed) {
+			invalidateCleanMarker();
+		}
 	}
 
 	/**

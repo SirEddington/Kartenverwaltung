@@ -80,6 +80,17 @@ class VersionIdTest {
 	}
 
 	@Test
+	void isFromComparesTheMachineAbbreviation() {
+		VersionId id = VersionId.create(1_790_000_000_000L, "K4M9Q2X8ABCDEFGHIJKLMNOPQR", 3);
+
+		assertTrue(id.isFrom("k4m9q2x8abcdefghijklmnopqr"));
+		assertTrue(id.isFrom("K4M9Q2X8XXXX"), "nur die ersten 8 Zeichen zählen");
+		assertFalse(id.isFrom("k4m9q2x9abcdefghijklmnopqr"));
+		assertFalse(id.isFrom("k4m9q2x"), "zu kurz für ein Kürzel");
+		assertFalse(id.isFrom(null));
+	}
+
+	@Test
 	void generatorFollowsClock() {
 		VersionIdGenerator first = new VersionIdGenerator("k4m9q2x8", Clock.fixed(Instant.ofEpochMilli(5), ZoneOffset.UTC));
 		VersionIdGenerator second = new VersionIdGenerator("k4m9q2x8", Clock.fixed(Instant.ofEpochMilli(6), ZoneOffset.UTC));

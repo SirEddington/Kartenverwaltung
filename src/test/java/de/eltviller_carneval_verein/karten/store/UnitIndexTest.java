@@ -1293,6 +1293,24 @@ class UnitIndexTest {
 	}
 
 	@Test
+	void markUnknownOwnAsUnlistedOnlyTouchesOwnCurrentVersionsWithoutNumber() throws IOException {
+		saveTwice(EVENT, "event");
+		saveTwice(PRESENTATION, "presentation");
+		put(HALL, OTHER, foreign(1), List.of(), true);
+		UnitIndex index = index();
+		refresh(index, local);
+		index.markOwnListed(List.of(feedEntry(PRESENTATION, mine(2))), 4);
+
+		index.markUnknownOwnAsUnlisted();
+
+		assertEquals(0L, index.entries().get(EVENT).ownSeq());
+		assertEquals(4L, index.entries().get(PRESENTATION).ownSeq(), "eine bekannte Nummer bleibt");
+		assertNull(index.entries().get(HALL).ownSeq(), "ein fremder Stand hat keine eigene Nummer");
+		index.markOwnListed(List.of(feedEntry(EVENT, mine(2))), 6);
+		assertEquals(6L, index.entries().get(EVENT).ownSeq(), "eine Nummer ab 1 ersetzt 'in keiner Liste'");
+	}
+
+	@Test
 	void markListedBeforeTheEntryExistsIsAppliedByTheFirstUpdate() throws IOException {
 		VersionId w = foreign(1);
 		VersionId unknown = foreign(2);
