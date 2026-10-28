@@ -366,7 +366,7 @@ class SyncServiceTest {
 	void appendedChangeCarriesItsConflictNoteIntoTheVersionFile() throws IOException {
 		Node a = node("a");
 		assertTrue(a.service.startup(""));
-		ConflictNote note = new ConflictNote(ConflictNote.Kind.DELETE_WINS, "Buchung 7", null, null, null, null, null);
+		ConflictNote note = new ConflictNote(ConflictNote.Kind.DELETE_WINS, a.identity.id(), null, null, null, null, null);
 
 		Version v = save(a, new Change(BOOKING, List.of(), payload("Anna"), false, note));
 

@@ -11,6 +11,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,6 +34,8 @@ public final class StoreCodec {
 
 	/** Das Dateiformat, das diese Programmversion schreibt und liest. */
 	public static final int FORMAT = 1;
+
+	private static final Logger LOGGER = Logger.getLogger(StoreCodec.class.getName());
 
 	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 
@@ -157,7 +161,11 @@ public final class StoreCodec {
 		}
 	}
 
-	/** Der optionale Konfliktvermerk; fehlt das Feld oder ist es {@code null}, gibt es keinen. */
+	/**
+	 * Der optionale Konfliktvermerk; fehlt das Feld oder ist es {@code null}, gibt es keinen. Ein Vermerk mit
+	 * unbekannter Art (aus einer neueren Programmversion) wird mit einer Warnung übergangen, sonstige Beschädigungen
+	 * darin sind eine {@link IOException}.
+	 */
 	private static ConflictNote readConflict(JsonNode node) throws IOException {
 		if (node == null || node.isNull()) {
 			return null;
@@ -170,7 +178,9 @@ public final class StoreCodec {
 		try {
 			kind = ConflictNote.Kind.valueOf(kindText);
 		} catch (IllegalArgumentException e) {
-			throw new IOException("Das Feld kind enthält keine bekannte Art: " + kindText, e);
+			// eine Art aus einer neueren Programmversion: Die Version bleibt lesbar, nur der Vermerk entfällt
+			LOGGER.log(Level.WARNING, "Der Konfliktvermerk mit der unbekannten Art " + kindText + " wird übergangen.");
+			return null;
 		}
 		List<ConflictNote.FieldConflict> fields = new ArrayList<>();
 		JsonNode fieldNodes = node.get("fields");

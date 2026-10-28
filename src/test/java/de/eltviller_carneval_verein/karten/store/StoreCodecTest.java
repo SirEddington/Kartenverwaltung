@@ -153,7 +153,7 @@ class StoreCodecTest {
 	}
 
 	private static ConflictNote fullNote() throws IOException {
-		return new ConflictNote(ConflictNote.Kind.FIELDS, "Buchung 17",
+		return new ConflictNote(ConflictNote.Kind.FIELDS, "k4m9q2x8-1234",
 				new ConflictNote.Party("p7r2t5w1-9999", "Kasse 2", "Berta", V2),
 				List.of(new ConflictNote.FieldConflict("Kunde", payload("{\"name\":\"A\"}"), payload("{\"name\":\"B\"}")),
 						new ConflictNote.FieldConflict("Bezahlung", payload("{\"paid\":true}"), payload("{\"paid\":false}"))),
@@ -176,7 +176,7 @@ class StoreCodecTest {
 
 	@Test
 	void conflictNoteWithOnlyRequiredPartsRoundTrips() throws IOException {
-		ConflictNote note = new ConflictNote(ConflictNote.Kind.DOUBLE_SALE, "Sitz 7", null, null, null, null, null);
+		ConflictNote note = new ConflictNote(ConflictNote.Kind.DOUBLE_SALE, "k4m9q2x8-1234", null, null, null, null, null);
 		Version version = versionWith(note, Map.of());
 
 		String json = text(StoreCodec.write(version));
@@ -193,7 +193,7 @@ class StoreCodecTest {
 
 	@Test
 	void conflictNoteWithoutNamesInPartyRoundTrips() throws IOException {
-		ConflictNote note = new ConflictNote(ConflictNote.Kind.DELETE_WINS, "Buchung 3",
+		ConflictNote note = new ConflictNote(ConflictNote.Kind.DELETE_WINS, "k4m9q2x8-1234",
 				new ConflictNote.Party("p7r2t5w1-9999", null, null, V2), List.of(), null, null, V2);
 		Version version = versionWith(note, Map.of());
 
@@ -203,7 +203,7 @@ class StoreCodecTest {
 	@Test
 	void everyConflictKindRoundTrips() throws IOException {
 		for (ConflictNote.Kind kind : ConflictNote.Kind.values()) {
-			Version version = versionWith(new ConflictNote(kind, "x", null, null, null, null, null), Map.of());
+			Version version = versionWith(new ConflictNote(kind, "k4m9q2x8-1234", null, null, null, null, null), Map.of());
 
 			assertEquals(version, StoreCodec.readVersion(StoreCodec.write(version)));
 		}
@@ -244,7 +244,7 @@ class StoreCodecTest {
 	void unknownFieldsInVersionAreIgnored() throws IOException {
 		String json = "{\"format\":1,\"future\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
 				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":false,\"payload\":{},"
-				+ "\"conflict\":{\"kind\":\"UNMERGED\",\"affected\":\"x\",\"future\":[1]},\"seen\":{\"m\":1},\"later\":{}}";
+				+ "\"conflict\":{\"kind\":\"UNMERGED\",\"affected\":\"k4m9q2x8-1234\",\"future\":[1]},\"seen\":{\"m\":1},\"later\":{}}";
 
 		Version read = StoreCodec.readVersion(bytes(json));
 
@@ -254,13 +254,36 @@ class StoreCodecTest {
 	}
 
 	@Test
+	void unknownConflictKindDropsTheNoteButKeepsTheVersionReadable() throws IOException {
+		String json = "{\"format\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
+				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":false,\"payload\":{\"a\":1},"
+				+ "\"conflict\":{\"kind\":\"NEUE_ART\",\"affected\":\"k4m9q2x8-1234\",\"neu\":[1]},\"seen\":{\"m\":4}}";
+
+		Version read = StoreCodec.readVersion(bytes(json));
+
+		assertNull(read.conflict());
+		assertEquals(payload("{\"a\":1}"), read.payload());
+		assertEquals(Map.of("m", 4L), read.seen());
+	}
+
+	@Test
+	void versionWithoutNewFieldsHasExactlyTheKnownBytes() throws IOException {
+		Version version = new Version(StoreCodec.FORMAT, V3, List.of(V1), "m", "Kasse 1", "Anna", AT, "save-1", false,
+				payload("{\"a\":1}"));
+
+		assertEquals("{\"format\":1,\"id\":\"00000000003-p7r2t5w1-0000\",\"parents\":[\"00000000001-k4m9q2x8-0001\"],"
+				+ "\"machine\":\"m\",\"machineName\":\"Kasse 1\",\"operator\":\"Anna\",\"at\":\"2026-10-26T19:04:11.512Z\","
+				+ "\"saveId\":\"save-1\",\"deleted\":false,\"payload\":{\"a\":1}}", text(StoreCodec.write(version)));
+	}
+
+	@Test
 	void malformedConflictOrSeenIsIOException() {
 		String head = "{\"format\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
 				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":false,\"payload\":{},";
 
 		String note = "\"conflict\":{\"kind\":\"FIELDS\",\"affected\":\"x\",";
 		for (String members : List.of("\"conflict\":5", "\"conflict\":{\"affected\":\"x\"}",
-				"\"conflict\":{\"kind\":\"UNBEKANNT\",\"affected\":\"x\"}", note + "\"fields\":{}}",
+				"\"conflict\":{\"kind\":5,\"affected\":\"x\"}", note + "\"fields\":{}}",
 				note + "\"fields\":[{\"group\":\"g\",\"mine\":{},\"theirs\":1}]}", note + "\"moved\":\"kein/pfad\"}",
 				note + "\"place\":[]}", note + "\"dropped\":\"kaputt\"}", note + "\"other\":{\"machine\":\"m\"}}",
 				"\"seen\":[1]", "\"seen\":{\"m\":\"viele\"}", "\"seen\":{\"m\":1.5}")) {

@@ -10,7 +10,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * der Dialog mit den offenen Konflikten es später anzeigen kann.
  *
  * @param kind     Art des Konflikts
- * @param affected Anzeigetext der betroffenen Sache, etwa die Buchung oder der Sitz
+ * @param affected ID des betroffenen Rechners (danach filtert der Dialog)
  * @param other    die Gegenseite, deren Stand mit dem eigenen zusammentraf; darf {@code null} sein
  * @param fields   die widersprüchlichen Feldgruppen; leer, wenn die Art keine hat (nie {@code null})
  * @param moved    die Einheit, auf die eine versetzte Buchung ausgewichen ist; darf {@code null} sein
