@@ -89,6 +89,7 @@ public final class LiveUpdates {
 	// Hallen, die seit dem letzten Abgleich der Events neu oder ersetzt sind
 	private final Set<String> changedHallIds = new LinkedHashSet<>();
 	private final Set<Announced> announced = new HashSet<>();
+	private final EventListener eventListener = new EventListener();
 	private boolean retryScheduled;
 
 	/**
@@ -107,13 +108,22 @@ public final class LiveUpdates {
 		this.later = later;
 		this.hint = hint;
 
-		// Eine Halle ist gesperrt, solange sie bearbeitet wird oder Buchungen in ihren Vorstellungen ungespeichert sind
-		halls.setBlockedCheck(hall -> editing.isEditing(hall) || hasUnsavedBookings(hall));
+		// Eine Halle ist gesperrt, solange sie bearbeitet wird oder Buchungen in ihren Vorstellungen ungespeichert sind oder
+		// bearbeitet werden (der Abgleich mit der neuen Bestuhlung nähme sonst einen Platzhalter weg, in den gerade getippt wird)
+		halls.setBlockedCheck(hall -> editing.isEditing(hall) || hasUnsavedBookings(hall) || isEditingIn(hall, editing));
 		events.setEditingCheck(editing::isEditing);
 		events.setHallLookup(halls::findById);
 		halls.addListener(new HallListener());
-		events.addListener(new EventListener());
+		events.addListener(eventListener);
 		editing.addEndListener(this::scheduleRetry);
+	}
+
+	/**
+	 * Der Listener am Event-Repository (paketsichtbar für Tests: Ein Schub, dessen Nachspielen scheitert, entsteht nur im
+	 * Test, siehe {@code TestRepositories.failingBatch}).
+	 */
+	RepositoryListener<Event> eventListener() {
+		return eventListener;
 	}
 
 	/**
@@ -175,8 +185,10 @@ public final class LiveUpdates {
 	}
 
 	/**
-	 * Hallen, dann Abgleich der Events mit neuen Hallen, dann Events; zuletzt die Hinweise. Ein Fehler in einem Schritt hält
-	 * die anderen nicht auf.
+	 * Hallen, dann Abgleich der Events mit neuen Hallen, dann Events; zuletzt die Hinweise: erst die Warnungen, dann die
+	 * zurückgestellten Stände. Die Fußzeile zeigt nur den letzten; der Hinweis "deine Änderung ist noch nicht gespeichert"
+	 * kommt nur einmal je Version und darf nicht von einer Warnung desselben Schubs verdeckt werden. Ein Fehler in einem
+	 * Schritt hält die anderen nicht auf.
 	 */
 	private void apply(Supplier<ForeignResult> hallStep, Supplier<ForeignResult> eventStep) {
 		List<Deferral> deferrals = new ArrayList<>();
@@ -185,12 +197,12 @@ public final class LiveUpdates {
 		prepareEventsOfChangedHalls();
 		collect(eventStep, deferrals, warnings);
 		// erst jetzt: Ein Hinweis kann einen Dialog öffnen, in dem weitere Meldungen ankommen
+		warnings.forEach(this::show);
 		for (Deferral deferral : deferrals) {
 			if (announced.add(new Announced(deferral.unit(), deferral.version()))) {
 				show(deferralText(deferral));
 			}
 		}
-		warnings.forEach(this::show);
 	}
 
 	private void collect(Supplier<ForeignResult> step, List<Deferral> deferrals, List<String> warnings) {
@@ -257,6 +269,25 @@ public final class LiveUpdates {
 			}
 		}
 		return changed.stream().anyMatch(unit -> unit.type() == UnitType.BOOKING && presentationIds.contains(unit.presentationId()));
+	}
+
+	/** {@code true}, wenn eine Vorstellung in dieser Halle oder eine ihrer Buchungen gerade bearbeitet wird. */
+	private boolean isEditingIn(Hall hall, EditingUnits editing) {
+		for (Event event : events.loadEvents()) {
+			for (Presentation presentation : presentationsOf(event)) {
+				if (!hall.getId().equals(presentation.getHallId())) {
+					continue;
+				}
+				if (editing.isEditing(presentation)) {
+					return true;
+				}
+				List<Booking> bookings = presentation.getBookings() != null ? presentation.getBookings() : List.of();
+				if (bookings.stream().anyMatch(editing::isEditing)) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	// <-- Einarbeiten

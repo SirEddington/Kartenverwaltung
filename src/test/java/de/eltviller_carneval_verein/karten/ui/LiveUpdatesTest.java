@@ -310,6 +310,22 @@ class LiveUpdatesTest {
 	}
 
 	@Test
+	void failedReplayKeepsTheEventDirtyWithItsOldBaselineAndWarns() {
+		seat(friday, 0).setLastName("Eigen");
+		eventTracker.check(event);
+		ChangeTracker.Snapshot before = eventTracker.baseline(event);
+		RepositoryListener<Event> listener = live.eventListener();
+
+		listener.changingByOthers(event);
+		listener.changedByOthers(event, TestRepositories.failingBatch(Set.of(seatUnit(1))));
+
+		assertTrue(eventTracker.isDirty(event), "nichts geht still verloren");
+		assertEquals(before, eventTracker.baseline(event), "der gespeicherte Stand bleibt der alte");
+		assertEquals(List.of("Änderungen von einem anderen Rechner an „Prunksitzung“ konnten nicht nachgeführt werden. "
+				+ "Bitte speichern statt verwerfen."), hints);
+	}
+
+	@Test
 	void foreignDeletionUntracksTheEvent() {
 		Other other = other();
 		other.repository().deleteEvent(other.event());
@@ -416,6 +432,43 @@ class LiveUpdatesTest {
 	}
 
 	@Test
+	void hallIsDeferredWhileABookingOfItsPresentationsIsInEditing() {
+		// ein Popup ist auf dem leeren Platzhalter eines Sitzes offen, den der andere Rechner entfernt
+		Booking placeholder = seat(friday, 5);
+		Object popup = new Object();
+		editing.begin(popup, List.of(placeholder));
+		otherChangesHall(h -> {
+			SeatingPlan changed = h.getSeatingPlans().get(0);
+			changed.getTables().get(1).getSeats().remove(2);
+		});
+
+		notifyUnits(UnitKey.hall(hall.getId()));
+
+		assertSame(hall, halls.findById(hall.getId()), "die Eingabe schriebe sonst in einen entfernten Platzhalter");
+		assertTrue(friday.getBookings().contains(placeholder));
+		assertEquals(List.of(deferralHint("Stadthalle", "Rechner test")), hints);
+
+		editing.end(popup);
+
+		assertNotSame(hall, halls.findById(hall.getId()));
+		assertEquals(5, friday.getBookings().size());
+		assertFalse(friday.getBookings().contains(placeholder));
+	}
+
+	@Test
+	void hallIsDeferredWhileAPresentationInItIsInEditing() {
+		Object dialog = new Object();
+		editing.begin(dialog, List.of(friday));
+		otherChangesHall(h -> h.setName("Bürgerhaus"));
+
+		notifyUnits(UnitKey.hall(hall.getId()));
+
+		assertSame(hall, halls.findById(hall.getId()));
+		editing.end(dialog);
+		assertEquals("Bürgerhaus", halls.findById(hall.getId()).getName());
+	}
+
+	@Test
 	void discardOfAHallRetriesItsDeferredUnit() {
 		hall.setName("Eigen");
 		hallTracker.check(hall);
@@ -457,6 +510,27 @@ class LiveUpdatesTest {
 
 		assertEquals(List.of(deferralHint(label, "Rechner Fremd"), deferralHint(label, "Rechner Fremd")), hints,
 				"eine neue Version bekommt einen neuen Hinweis");
+	}
+
+	@Test
+	void deferralHintComesAfterTheWarningsOfTheSameBatch() throws IOException {
+		Hall second = new Hall();
+		second.setName("Bürgerhaus");
+		TestRepositories.halls(sync).saveHall(second);
+		UnitKey secondUnit = UnitKey.hall(second.getId());
+		notifyUnits(secondUnit);
+		Booking mine = seat(friday, 0);
+		mine.setLastName("Eigen");
+		eventTracker.check(event);
+		foreignVersion(secondUnit, "Fremd", payload -> payload.put("id", "anderes"));
+		foreignVersion(seatUnit(0), "Fremd", payload -> payload.put("lastName", "Erste"));
+
+		notifyUnits(secondUnit, seatUnit(0));
+
+		assertEquals(2, hints.size(), hints.toString());
+		assertTrue(hints.get(0).contains(second.getId()), "die Warnung zur unlesbaren Halle");
+		assertEquals(deferralHint(EntityLabels.booking(mine), "Rechner Fremd"), hints.get(1),
+				"die Fußzeile zeigt nur den letzten Hinweis: der zum Zurückstellen bleibt stehen");
 	}
 
 	@Test

@@ -1,6 +1,9 @@
 package de.eltviller_carneval_verein.karten.repository;
 
+import java.util.Set;
+
 import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 
 /**
  * Testzugang zu den Repositories auf einem eigenen Versionsspeicher für Tests außerhalb dieses Pakets (die
@@ -19,5 +22,12 @@ public final class TestRepositories {
 	/** Ein Hallen-Repository auf dem Versionsspeicher; der Dienst muss gestartet sein. */
 	public static StoreHallRepository halls(SyncService sync) {
 		return new StoreHallRepository(sync);
+	}
+
+	/** Ein Schub fremder Stände, dessen Nachspielen auf einer Kopie scheitert (für den Notweg des Änderungsmelders). */
+	public static <T> ForeignBatch<T> failingBatch(Set<UnitKey> units) {
+		return new ForeignBatch<>(units, copy -> {
+			throw new IllegalStateException("Nachspielen gescheitert (Test)");
+		});
 	}
 }
