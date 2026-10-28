@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,6 +21,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -206,6 +209,50 @@ class StoreEventRepositoryForeignTest {
 		}
 	}
 
+	/** Die Anzahl aller Versionen aller Einheiten des Events. */
+	private long versions() throws IOException {
+		long count = 0;
+		for (UnitKey unit : allUnits()) {
+			count += sync.history(unit).size();
+		}
+		return count;
+	}
+
+	/** Eine zweite Halle "Bürgerhaus" mit einer Reihe A aus {@code tables} Tischen zu je {@code seats} Sitzen, gespeichert. */
+	private Hall secondHall(int tables, int seats) {
+		Hall other = new Hall();
+		other.setName("Bürgerhaus");
+		SeatingPlan otherPlan = other.addSeatingPlan();
+		TableRow row = otherPlan.addRow();
+		row.setLabel("A");
+		otherPlan.fillRow(row, tables, seats);
+		TestRepositories.halls(sync).saveHall(other);
+		return other;
+	}
+
+	/** Wie {@code halls}, nur die {@code failAt}-te Abfrage (ab 1 gezählt) wirft. */
+	private static Function<String, Hall> failingAt(int failAt, Function<String, Hall> halls) {
+		AtomicInteger calls = new AtomicInteger();
+		return id -> {
+			if (calls.incrementAndGet() == failAt) {
+				throw new IllegalStateException("Halle nicht lesbar");
+			}
+			return halls.apply(id);
+		};
+	}
+
+	/** Die Hallen des Tests nach ID. */
+	private Function<String, Hall> lookup(Hall... halls) {
+		return id -> {
+			for (Hall candidate : halls) {
+				if (candidate.getId().equals(id)) {
+					return candidate;
+				}
+			}
+			return hall.getId().equals(id) ? hall : null;
+		};
+	}
+
 	/**
 	 * Schreibt eine Version des Rechners "Fremd" auf das Ende der Kette und bringt sie in den Index, wie es das Abholen
 	 * aus dem gemeinsamen Ordner tut.
@@ -322,23 +369,48 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	@Test
-	void foreignBookingOnUnknownSeatBecomesUnassigned() {
-		Other other = other();
-		Booking elsewhere = other.friday().addBooking();
-		elsewhere.setSeatId("anderer-sitz");
-		elsewhere.setRowLabel("Z");
-		elsewhere.setTableNumber(9);
-		elsewhere.setSeatNumber(9);
-		elsewhere.setLastName("Fremd");
-		other.save();
-
-		mine.applyForeign(List.of(UnitKey.booking(event.getId(), friday.getId(), "anderer-sitz")));
-
-		Booking added = friday.getBookings().stream().filter(b -> "Fremd".equals(b.getLastName())).findFirst()
+	void foreignBookingOnUnknownSeatWaitsUntilItsSeatArrives() throws IOException {
+		Hall other = new Hall();
+		other.setName("Bürgerhaus");
+		SeatingPlan otherPlan = other.addSeatingPlan();
+		TableRow row = otherPlan.addRow();
+		row.setLabel("A");
+		otherPlan.fillRow(row, 1, 2);
+		TestRepositories.halls(sync).saveHall(other);
+		mine.setHallLookup(id -> hall.getId().equals(id) ? hall : other.getId().equals(id) ? other : null);
+		Other remote = other();
+		remote.friday().setHallId(other.getId());
+		BookingSync.switchPlan(remote.friday(), otherPlan);
+		String newSeat = otherPlan.getSeats().get(1).getId();
+		Booking sold = remote.friday().getBookings().stream().filter(b -> newSeat.equals(b.getSeatId())).findFirst()
 				.orElseThrow();
-		assertTrue(added.isUnassigned());
-		assertEquals(7, friday.getBookings().size());
-		assertEquals("Müller", seat(friday, 0).getLastName());
+		sold.setLastName("Fremd");
+		remote.save();
+		UnitKey unit = UnitKey.booking(event.getId(), friday.getId(), newSeat);
+		long before = files();
+
+		// die Vorstellung mit der neuen Bestuhlung ist noch nicht gemeldet: Der Sitz fehlt in As Bestuhlung
+		ForeignResult result = mine.applyForeign(List.of(unit));
+
+		assertTrue(result.deferred().isEmpty(), "still, ohne Hinweis");
+		assertNull(mine.knownUnit(unit), "der Vergleichsstand bleibt unberührt");
+		assertEquals(6, friday.getBookings().size());
+		assertTrue(friday.getBookings().stream().noneMatch(b -> "Fremd".equals(b.getLastName())));
+		assertTrue(recorder.calls.isEmpty());
+		assertTrue(mine.retryDeferred().deferred().isEmpty());
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+
+		mine.applyForeign(allUnits());
+
+		assertEquals(otherPlan.getId(), friday.getSeatingPlanId());
+		Booking placeholder = friday.getBookings().stream().filter(b -> newSeat.equals(b.getSeatId())).findFirst()
+				.orElseThrow();
+		assertEquals("Fremd", placeholder.getLastName());
+		assertEquals(sold.getId(), placeholder.getId());
+		assertEquals(2, friday.getBookings().size());
+		mine.saveEvent(event);
+		assertEquals(before, files());
 	}
 
 	@Test
@@ -398,6 +470,8 @@ class StoreEventRepositoryForeignTest {
 		mine.applyForeign(sync.eventUnits(children.getId()));
 
 		assertEquals(List.of("added Kinderfasching"), recorder.calls);
+		assertEquals(List.of("Kinderfasching", "Prunksitzung"),
+				mine.loadEvents().stream().map(Event::getName).toList(), "einsortiert wie beim Laden");
 		Event added = mine.loadEvents().stream().filter(e -> e.getId().equals(children.getId())).findFirst()
 				.orElseThrow();
 		assertSame(added, recorder.entities.get(0));
@@ -507,20 +581,10 @@ class StoreEventRepositoryForeignTest {
 
 	@Test
 	void failureWhileMergingRebuildsACleanEventFromTheIndex() throws IOException {
-		Hall other = new Hall();
-		other.setName("Bürgerhaus");
-		SeatingPlan otherPlan = other.addSeatingPlan();
-		TableRow row = otherPlan.addRow();
-		row.setLabel("A");
-		otherPlan.fillRow(row, 1, 2);
-		TestRepositories.halls(sync).saveHall(other);
-		AtomicBoolean fail = new AtomicBoolean(true);
-		mine.setHallLookup(id -> {
-			if (fail.getAndSet(false)) {
-				throw new IllegalStateException("Halle nicht lesbar");
-			}
-			return other.getId().equals(id) ? other : hall;
-		});
+		Hall other = secondHall(1, 2);
+		SeatingPlan otherPlan = other.getSeatingPlans().get(0);
+		// 1. Abfrage: Platz der neuen Sitz-Einheit (Entscheidung), 2.: Abgleich der Vorstellung
+		mine.setHallLookup(failingAt(2, lookup(other)));
 		Other remote = other();
 		remote.friday().setHallId(other.getId());
 		BookingSync.switchPlan(remote.friday(), otherPlan);
@@ -671,21 +735,33 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	@Test
-	void hallSwitchIsDeferredWhileABookingBelowIsChanged() {
+	void hallSwitchIsDeferredWithItsBookingsWhileABookingBelowIsChanged() throws IOException {
 		Booking mySale = seat(friday, 2);
 		mySale.setLastName("Eigen");
+		Booking sold = seat(friday, 0);
 		Other other = other();
+		// ohne Bestuhlung wird Müller "ohne Platz": seine Sitz-Einheit wird gelöscht, eine Einheit _<id> entsteht
 		other.friday().setSeatingPlanId(null);
 		BookingSync.sync(other.friday(), null);
 		other.save();
 		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
 
-		ForeignResult result = mine.applyForeign(List.of(presentation));
+		ForeignResult result = mine.applyForeign(allUnits());
 
 		assertEquals(List.of(presentation), result.deferred().stream().map(Deferral::unit).toList());
 		assertEquals(plan.getId(), friday.getSeatingPlanId());
+		assertSame(sold, seat(friday, 0));
+		assertEquals("Müller", sold.getLastName());
+		assertEquals(6, friday.getBookings().size());
 		assertSame(mySale, seat(friday, 2));
 		assertEquals("Eigen", mySale.getLastName());
+		assertEquals(Set.of(seatUnit(friday, 2)), mine.locallyChangedUnits());
+
+		long versionsBefore = versions();
+		mine.saveEvent(event);
+
+		assertEquals(versionsBefore + 1, versions(), "nur der eigene Verkauf wird geschrieben");
+		assertEquals(1, sync.history(seatUnit(friday, 2)).size());
 	}
 
 	@Test
@@ -789,6 +865,129 @@ class StoreEventRepositoryForeignTest {
 				seatUnit(friday, 1)), batch.units());
 		assertEquals(mapper.valueToTree(event), mapper.valueToTree(copy));
 		assertNotSame(seat(friday, 0), seat(copy.getPresentations().get(0), 0));
+	}
+
+	@Test
+	void batchReplayOnCopyMatchesAfterHallSwitchAndNewPresentation() throws IOException {
+		Hall big = secondHall(3, 3);
+		SeatingPlan bigPlan = big.getSeatingPlans().get(0);
+		mine.setHallLookup(lookup(big));
+		ObjectMapper mapper = JsonMapperFactory.create();
+		Event copy = mapper.readValue(mapper.writeValueAsBytes(event), Event.class);
+		Other other = other();
+		other.friday().setHallId(big.getId());
+		BookingSync.switchPlan(other.friday(), bigPlan);
+		Presentation saturday = other.event().addPresentation("Samstag");
+		saturday.setHallId(big.getId());
+		saturday.setSeatingPlanId(bigPlan.getId());
+		BookingSync.sync(saturday, bigPlan);
+		saturday.getBookings().get(4).setLastName("Schmitz");
+		other.save();
+		long before = files();
+
+		mine.applyForeign(allUnits());
+		recorder.batches.get(0).replayOn(copy);
+
+		assertEquals(9, friday.getBookings().size());
+		assertEquals(9, event.getPresentations().get(1).getBookings().size());
+		assertEquals(mapper.valueToTree(event), mapper.valueToTree(copy),
+				"auch die vom Abgleich neu angelegten Platzhalter tragen dieselben Kennungen");
+		mine.saveEvent(event);
+		assertEquals(before, files());
+	}
+
+	@Test
+	void failureWhileMergingAnUnsavedEventLeavesNoForeignStateInTheModel() throws IOException {
+		Presentation saturday = event.addPresentation("Samstag");
+		saturday.setHallId(hall.getId());
+		saturday.setSeatingPlanId(plan.getId());
+		BookingSync.sync(saturday, plan);
+		mine.saveEvent(event);
+		seat(saturday, 1).setLastName("Eigen");
+		Hall other = secondHall(1, 2);
+		// 1. Abfrage: Platz der neuen Sitz-Einheit (Entscheidung), 2.: Abgleich der Vorstellung
+		mine.setHallLookup(failingAt(2, lookup(other)));
+		Booking sold = seat(friday, 0);
+		Other remote = other();
+		remote.event().setDescription("Große Sitzung");
+		remote.friday().setHallId(other.getId());
+		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		remote.save();
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+
+		ForeignResult result = mine.applyForeign(allUnits());
+
+		assertEquals(1, result.warnings().size(), result.warnings().toString());
+		assertSame(event, mine.loadEvents().get(0), "ein ungespeichertes Event wird nicht ausgetauscht");
+		assertEquals("Große Sitzung", event.getDescription(), "der Kopf davor bleibt eingearbeitet");
+		assertEquals(hall.getId(), friday.getHallId());
+		assertEquals(plan.getId(), friday.getSeatingPlanId());
+		assertEquals(6, friday.getBookings().size());
+		assertSame(sold, seat(friday, 0));
+		assertEquals(Set.of(seatUnit(saturday, 1)), mine.locallyChangedUnits(),
+				"kein halb eingearbeiteter fremder Stand gilt als eigene Änderung");
+		assertTrue(result.deferred().stream().anyMatch(d -> d.unit().equals(presentation)));
+		assertEquals(List.of("changing Prunksitzung", "changed Prunksitzung"), recorder.calls);
+		assertEquals(Set.of(head()), recorder.batches.get(0).units());
+
+		mine.saveEvent(event);
+		assertEquals(2, sync.history(presentation).size(), "die Vorstellung schreibt A nicht");
+
+		assertTrue(mine.retryDeferred().deferred().isEmpty());
+		assertEquals(other.getId(), friday.getHallId());
+		assertSame(sold, friday.getBookings().get(0));
+		assertEquals(other.getSeatingPlans().get(0).getSeats().get(0).getId(), sold.getSeatId());
+		assertEquals("Müller", sold.getLastName());
+	}
+
+	@Test
+	void failureWhileMergingDoesNotRebuildAnEventInEditing() {
+		Hall other = secondHall(1, 2);
+		// gemeldet ist nur die Vorstellung: Die 1. Abfrage ist ihr Abgleich
+		mine.setHallLookup(failingAt(1, lookup(other)));
+		mine.setEditingCheck(o -> o == event);
+		Other remote = other();
+		remote.friday().setHallId(other.getId());
+		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		remote.save();
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+
+		ForeignResult result = mine.applyForeign(List.of(presentation));
+
+		assertSame(event, mine.loadEvents().get(0), "die offene Eingabe schreibt weiter ins Objekt im Cache");
+		assertEquals(hall.getId(), friday.getHallId());
+		assertEquals(List.of(presentation), result.deferred().stream().map(Deferral::unit).toList());
+	}
+
+	@Test
+	void failureInOneEventDoesNotStopTheOthers() throws IOException {
+		StoreEventRepository others = TestRepositories.events(sync);
+		others.loadEvents();
+		Event children = new Event();
+		children.setName("Kinderfasching");
+		children.addPresentation("Sonntag");
+		others.saveEvent(children);
+		mine.applyForeign(sync.eventUnits(children.getId()));
+		Event mineChildren = mine.loadEvents().get(0);
+		mine.setEditingCheck(o -> {
+			if (o == event) {
+				throw new IllegalStateException("Registratur kaputt");
+			}
+			return false;
+		});
+		Other other = other();
+		other.event().setDescription("Große Sitzung");
+		other.save();
+		children.setDescription("Fasching für Kinder");
+		others.saveEvent(children);
+		recorder.calls.clear();
+
+		ForeignResult result = mine.applyForeign(List.of(head(), UnitKey.event(children.getId())));
+
+		assertEquals(1, result.warnings().size(), result.warnings().toString());
+		assertEquals(null, event.getDescription());
+		assertEquals("Fasching für Kinder", mineChildren.getDescription());
+		assertEquals(List.of("changing Kinderfasching", "changed Kinderfasching"), recorder.calls);
 	}
 
 	@Test

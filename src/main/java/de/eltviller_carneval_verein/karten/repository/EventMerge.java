@@ -2,9 +2,11 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -41,6 +43,12 @@ final class EventMerge {
 		/** Die Einheit hat diesen Stand; {@code shown}: sie ist ins Modell eingegangen (sonst wird sie nie gelöscht). */
 		void adopted(UnitSnapshot snapshot, boolean shown);
 
+		/**
+		 * Die Buchung hat im Modell keinen Platz (ihr Sitz fehlt in der Bestuhlung der Vorstellung): Modell und Stand
+		 * bleiben unberührt, sie wartet, bis Halle oder Vorstellung mit dem Sitz da sind.
+		 */
+		void held(UnitSnapshot snapshot);
+
 		/** Die Vorstellung hat das Modell verlassen; was unter ihr angezeigt war, ist es nicht mehr. */
 		void left(UnitKey presentation);
 
@@ -52,6 +60,10 @@ final class EventMerge {
 	static final Sink NONE = new Sink() {
 		@Override
 		public void adopted(UnitSnapshot snapshot, boolean shown) {
+		}
+
+		@Override
+		public void held(UnitSnapshot snapshot) {
 		}
 
 		@Override
@@ -67,15 +79,18 @@ final class EventMerge {
 	private static final String UNASSIGNED_PREFIX = "_";
 
 	/**
-	 * Was in ein Event eingearbeitet wird. Ein Plan wirkt auf das Event im Cache und auf jede Kopie gleich: Auch die neue
-	 * Kennung eines geleerten Platzhalters entsteht nur einmal und gilt dann für beide.
+	 * Was in ein Event eingearbeitet wird. Ein Plan wirkt auf das Event im Cache und auf jede Kopie gleich: Auch die
+	 * Kennungen leerer Platzhalter (geleert oder vom Abgleich neu angelegt) entstehen nur beim ersten Einarbeiten und
+	 * gelten dann für jede Kopie, sonst wiche die Kopie für den Änderungsmelder ab.
 	 */
 	static final class Plan {
 
 		private final List<UnitSnapshot> units;
 		private final List<UnitSnapshot> index;
 		private final Function<String, Hall> hallLookup;
-		private final Map<UnitKey, String> placeholderIds;
+
+		/** Die Kennungen der Platzhalter je Vorstellung und Sitz ({@code <presentationId>/<seatId>}). */
+		private final Map<String, String> placeholderIds;
 
 		/**
 		 * @param units      die einzuarbeitenden Stände (eines Events); eingearbeitet wird in der Reihenfolge Kopf,
@@ -89,7 +104,7 @@ final class EventMerge {
 		}
 
 		private Plan(List<UnitSnapshot> units, List<UnitSnapshot> index, Function<String, Hall> hallLookup,
-				Map<UnitKey, String> placeholderIds) {
+				Map<String, String> placeholderIds) {
 			this.units = units;
 			this.index = index;
 			this.hallLookup = hallLookup;
@@ -101,31 +116,54 @@ final class EventMerge {
 			return units;
 		}
 
-		/** Derselbe Plan, beschränkt auf die genannten Einheiten (mit denselben neuen Kennungen). */
+		/** Derselbe Plan, beschränkt auf die genannten Einheiten (mit denselben Kennungen der Platzhalter). */
 		Plan restrictedTo(Collection<UnitKey> keep) {
 			Set<UnitKey> kept = new HashSet<>(keep);
 			List<UnitSnapshot> remaining = units.stream().filter(s -> kept.contains(s.unit())).toList();
 			return new Plan(remaining, index, hallLookup, placeholderIds);
 		}
 
-		private String placeholderId(UnitKey unit) {
-			return placeholderIds.computeIfAbsent(unit, k -> UUID.randomUUID().toString());
+		/** Die neue Kennung des geleerten Platzhalters auf diesem Sitz, beim ersten Mal ausgewürfelt. */
+		private String clearedId(String presentationId, String seatId) {
+			return placeholderIds.computeIfAbsent(presentationId + "/" + seatId, k -> UUID.randomUUID().toString());
+		}
+
+		/**
+		 * Gibt den Platzhaltern, die der Abgleich eben neu angelegt hat, dieselben Kennungen wie beim ersten Einarbeiten;
+		 * beim ersten Einarbeiten merkt er sich ihre Kennungen.
+		 */
+		private void fixCreatedIds(Presentation presentation, Set<Booking> before) {
+			for (Booking booking : presentation.getBookings() != null ? presentation.getBookings() : List.<Booking>of()) {
+				if (before.contains(booking) || booking.hasData() || booking.getSeatId() == null) {
+					continue;
+				}
+				String key = presentation.getId() + "/" + booking.getSeatId();
+				String known = placeholderIds.get(key);
+				if (known != null) {
+					booking.setId(known);
+				} else {
+					placeholderIds.put(key, booking.getId());
+				}
+			}
 		}
 
 		private static List<UnitSnapshot> sorted(List<UnitSnapshot> units) {
 			List<UnitSnapshot> sorted = new ArrayList<>(units);
-			sorted.sort(Comparator.comparingInt(s -> rank(s.unit().type())));
+			sorted.sort(MERGE_ORDER);
 			return List.copyOf(sorted);
 		}
+	}
 
-		private static int rank(UnitType type) {
-			return switch (type) {
-			case EVENT -> 0;
-			case PRESENTATION -> 1;
-			case BOOKING -> 2;
-			case HALL -> throw new IllegalArgumentException("Eine Halle gehört zu keinem Event.");
-			};
-		}
+	/** Die Reihenfolge des Einarbeitens: Kopf, Vorstellungen, Buchungen (wie beim Zerlegen). */
+	static final Comparator<UnitSnapshot> MERGE_ORDER = Comparator.comparingInt(s -> rank(s.unit().type()));
+
+	private static int rank(UnitType type) {
+		return switch (type) {
+		case EVENT -> 0;
+		case PRESENTATION -> 1;
+		case BOOKING -> 2;
+		case HALL -> throw new IllegalArgumentException("Eine Halle gehört zu keinem Event.");
+		};
 	}
 
 	private EventMerge() {
@@ -139,12 +177,15 @@ final class EventMerge {
 	 * wiederbelebt: mit ihren sichtbaren Buchungen aus dem Index zusammensetzen, einsortieren wie beim Laden, abgleichen.
 	 * Gelöscht oder unlesbar: aus der Liste.</li>
 	 * <li>Buchung auf einem Sitz: Die Buchung, die dort steht (bei freiem Sitz der leere Platzhalter), bekommt alle
-	 * Felder, auch die Kennung; gibt es den Sitz in der Bestuhlung nicht, wird sie angehängt und abgeglichen (wird "ohne
-	 * Platz"). Gelöscht oder unlesbar: nur die Kundendaten leeren, der Platzhalter bekommt eine neue Kennung.</li>
+	 * Felder, auch die Kennung. Steht dort keine, wird sie angehängt, wenn die Bestuhlung den Sitz kennt; sonst bleibt
+	 * alles unberührt und sie wartet ({@link Sink#held}). Gelöscht oder unlesbar: nur die Kundendaten leeren, der
+	 * Platzhalter bekommt eine neue Kennung.</li>
 	 * <li>Buchung ohne Platz: anhand der Kennung aktualisieren, sonst anhängen; gelöscht oder unlesbar: entfernen.</li>
 	 * <li>Buchung unter einer Vorstellung, die nicht im Modell steht: nur übernehmen; sichtbar wird sie mit der
 	 * Vorstellung.</li>
 	 * </ul>
+	 * Scheitert das Einarbeiten einer Einheit, ist das Modell für diese Einheit wieder wie vorher (die Einheiten davor
+	 * bleiben eingearbeitet und gemeldet), dann geht die Ausnahme weiter.
 	 *
 	 * @throws IllegalArgumentException wenn ein Stand zu einem anderen Event gehört oder der Kopf nicht lesbar ist
 	 */
@@ -155,23 +196,30 @@ final class EventMerge {
 			if (!event.getId().equals(unit.eventId())) {
 				throw new IllegalArgumentException(unit.relativePath() + " gehört nicht zum Event " + event.getId());
 			}
-			switch (unit.type()) {
-			case EVENT -> mergeHead(event, snapshot, sink);
-			case PRESENTATION -> {
-				if (mergePresentation(event, snapshot, plan, sink)) {
-					assembled.add(unit);
-				}
-			}
 			// eine Buchung unter einer gerade zusammengesetzten Vorstellung kam schon mit ihr aus dem Index
-			case BOOKING -> {
-				if (!assembled.contains(presentationKey(unit))) {
-					mergeBooking(event, snapshot, plan, sink);
-				}
+			if (unit.type() == UnitType.BOOKING && assembled.contains(presentationKey(unit))) {
+				continue;
 			}
-			case HALL -> throw new IllegalArgumentException("Eine Halle gehört zu keinem Event.");
+			Undo undo = new Undo(event, unit);
+			try {
+				switch (unit.type()) {
+				case EVENT -> mergeHead(event, snapshot, sink);
+				case PRESENTATION -> {
+					if (mergePresentation(event, snapshot, plan, sink)) {
+						assembled.add(unit);
+					}
+				}
+				case BOOKING -> mergeBooking(event, snapshot, plan, sink);
+				case HALL -> throw new IllegalArgumentException("Eine Halle gehört zu keinem Event.");
+				}
+			} catch (RuntimeException e) {
+				undo.restore();
+				throw e;
 			}
 		}
 	}
+
+	// Jede Einarbeitung ändert zuerst das Modell und meldet erst danach (nichts Gemeldetes wird zurückgesetzt)
 
 	private static void mergeHead(Event event, UnitSnapshot snapshot, Sink sink) {
 		Event state = UnitMapper.readUnit(snapshot, Event.class);
@@ -189,11 +237,13 @@ final class EventMerge {
 		Presentation existing = presentation(event, unit.presentationId());
 		Presentation state = UnitMapper.readUnit(snapshot, Presentation.class);
 		if (state == null) {
+			if (existing != null) {
+				event.getPresentations().remove(existing);
+			}
 			if (!UnitMapper.isAbsent(snapshot)) {
 				sink.warning(UnitMapper.unreadablePresentation(unit.presentationId(), event.getName()));
 			}
 			if (existing != null) {
-				event.getPresentations().remove(existing);
 				sink.left(unit);
 			}
 			sink.adopted(snapshot, false);
@@ -203,7 +253,7 @@ final class EventMerge {
 			boolean replanned = changesPlan(existing, state);
 			existing.copyFrom(state);
 			if (replanned) {
-				resync(existing, plan.hallLookup);
+				resync(existing, plan);
 			}
 			sink.adopted(snapshot, true);
 			warnIfLocked(snapshot, sink);
@@ -212,7 +262,7 @@ final class EventMerge {
 
 		Presentation added = UnitMapper.assemblePresentation(snapshot, plan.index);
 		insertSorted(event, added);
-		resync(added, plan.hallLookup);
+		resync(added, plan);
 		sink.adopted(snapshot, true);
 		warnIfLocked(snapshot, sink);
 		for (UnitSnapshot below : plan.index) {
@@ -240,34 +290,59 @@ final class EventMerge {
 		Booking current = bookingAt(presentation, unit);
 		Booking state = UnitMapper.readUnit(snapshot, Booking.class);
 		if (state == null) {
-			if (!UnitMapper.isAbsent(snapshot)) {
-				sink.warning(UnitMapper.unreadableBooking(presentation.getName()));
-			}
 			if (current != null && isUnassigned(unit)) {
 				presentation.getBookings().remove(current);
 			} else if (current != null && current.hasData()) {
 				// die Momentaufnahme des Sitzes bleibt; ein späterer Verkauf trägt nicht die Kennung des alten Käufers
 				current.clearCustomerData();
-				current.setId(plan.placeholderId(unit));
+				current.setId(plan.clearedId(presentation.getId(), unit.bookingDir()));
+			}
+			if (!UnitMapper.isAbsent(snapshot)) {
+				sink.warning(UnitMapper.unreadableBooking(presentation.getName()));
 			}
 			sink.adopted(snapshot, false);
 			return;
 		}
 		if (current != null) {
 			current.copyFrom(state);
-		} else {
+		} else if (isUnassigned(unit) || hasSeat(presentation, unit.bookingDir(), plan.hallLookup)) {
 			if (presentation.getBookings() == null) {
 				presentation.setBookings(new ArrayList<>());
 			}
 			state.setParent(presentation);
 			presentation.getBookings().add(state);
-			if (!isUnassigned(unit) && !hasSeat(presentation, unit.bookingDir(), plan.hallLookup)) {
-				// den Sitz gibt es in der Bestuhlung nicht: der Abgleich wie beim Laden macht sie "ohne Platz"
-				resync(presentation, plan.hallLookup);
-			}
+		} else {
+			// "ohne Platz" gemacht, löschte das nächste Speichern die Sitz-Einheit und gäbe den Platz frei
+			sink.held(snapshot);
+			return;
 		}
 		sink.adopted(snapshot, true);
 		warnIfLocked(snapshot, sink);
+	}
+
+	/**
+	 * Ob eine fremde Buchung beim Einarbeiten einen Platz im Modell findet ({@link #apply} sie also nicht zurückhält):
+	 * gelöscht oder unlesbar, ohne Platz, ohne Vorstellung im Modell, auf einem Sitz, auf dem im Modell schon eine Buchung
+	 * steht, oder auf einem Sitz der Bestuhlung. {@code presentationState} ist der Stand der Vorstellung, wenn er im selben
+	 * Schritt eingearbeitet wird (sonst {@code null}): Wechselt er die Bestuhlung, zählt die neue.
+	 */
+	static boolean hasPlace(Event event, UnitSnapshot booking, UnitSnapshot presentationState,
+			Function<String, Hall> hallLookup) {
+		UnitKey unit = booking.unit();
+		Presentation presentation = presentation(event, unit.presentationId());
+		if (isUnassigned(unit) || presentation == null || UnitMapper.readUnit(booking, Booking.class) == null) {
+			return true;
+		}
+		Presentation state = presentationState == null ? null
+				: UnitMapper.readUnit(presentationState, Presentation.class);
+		if (presentationState != null && state == null) {
+			// die Vorstellung verlässt das Modell: die Buchung geht nur in den Vergleichsstand
+			return true;
+		}
+		if (state != null && changesPlan(presentation, state)) {
+			return hasSeat(state, unit.bookingDir(), hallLookup);
+		}
+		return bookingAt(presentation, unit) != null || hasSeat(presentation, unit.bookingDir(), hallLookup);
 	}
 
 	/**
@@ -278,28 +353,20 @@ final class EventMerge {
 		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
 		for (Event event : assembly.items()) {
 			for (Presentation presentation : event.getPresentations()) {
-				resync(presentation, hallLookup);
+				BookingSync.sync(presentation, planOf(presentation, hallLookup));
 			}
 		}
 		return assembly;
 	}
 
-	/**
-	 * Macht {@code target} zu dem Event, das {@link #assembleEvent} aus den Ständen zusammensetzt (Felder und
-	 * Vorstellungen); für das Nachspielen, wenn ein Event aus dem Index neu zusammengesetzt wurde.
-	 */
-	static void replaceContent(Event target, Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup) {
-		for (Event fresh : assembleEvent(snapshots, hallLookup).items()) {
-			if (fresh.getId().equals(target.getId())) {
-				target.copyFrom(fresh);
-				target.setPresentations(fresh.getPresentations());
-			}
+	/** Gleicht die Buchungen mit der Bestuhlung der Vorstellung ab ({@link BookingSync#sync}), mit festen Platzhalter-Kennungen. */
+	private static void resync(Presentation presentation, Plan plan) {
+		Set<Booking> before = Collections.newSetFromMap(new IdentityHashMap<>());
+		if (presentation.getBookings() != null) {
+			before.addAll(presentation.getBookings());
 		}
-	}
-
-	/** Gleicht die Buchungen mit der Bestuhlung der Vorstellung ab ({@link BookingSync#sync}). */
-	private static void resync(Presentation presentation, Function<String, Hall> hallLookup) {
-		BookingSync.sync(presentation, planOf(presentation, hallLookup));
+		BookingSync.sync(presentation, planOf(presentation, plan.hallLookup));
+		plan.fixCreatedIds(presentation, before);
 	}
 
 	private static SeatingPlan planOf(Presentation presentation, Function<String, Hall> hallLookup) {
@@ -336,6 +403,74 @@ final class EventMerge {
 		String locked = UnitMapper.lockMessage(snapshot.unit(), snapshot.status());
 		if (locked != null) {
 			sink.warning(locked);
+		}
+	}
+
+	/**
+	 * Was das Einarbeiten einer Einheit am Modell ändern kann: Kopf, Liste der Vorstellungen und die betroffene Vorstellung
+	 * samt Buchungsliste und den Feldern der Buchungen, die es ändern kann (bei einer Vorstellung alle, die der Abgleich
+	 * anfasst, bei einer Buchung die auf ihrem Platz). Scheitert es mittendrin, stellt {@link #restore} das wieder her:
+	 * Ein halb übernommener fremder Stand gälte sonst als Änderung des Nutzers, und das nächste Speichern schriebe ihn.
+	 */
+	private static final class Undo {
+
+		private final Event event;
+		private final Event head;
+		private final List<Presentation> presentations;
+		private final Presentation presentation;
+		private final Presentation fields;
+		private final boolean planMissing;
+		private final List<Booking> bookingList;
+		private final List<Booking> bookings;
+		private final Map<Booking, Booking> states = new IdentityHashMap<>();
+
+		Undo(Event event, UnitKey unit) {
+			this.event = event;
+			head = new Event(event.getId());
+			head.copyFrom(event);
+			presentations = event.getPresentations() == null ? null : new ArrayList<>(event.getPresentations());
+			presentation = unit.type() == UnitType.EVENT ? null : presentation(event, unit.presentationId());
+			if (presentation == null) {
+				fields = null;
+				planMissing = false;
+				bookingList = null;
+				bookings = null;
+				return;
+			}
+			fields = new Presentation(presentation.getId());
+			fields.copyFrom(presentation);
+			planMissing = presentation.isPlanMissing();
+			bookingList = presentation.getBookings();
+			bookings = bookingList == null ? null : new ArrayList<>(bookingList);
+			if (bookings != null && unit.type() == UnitType.PRESENTATION) {
+				bookings.forEach(booking -> states.put(booking, booking.copy()));
+			} else if (bookings != null) {
+				Booking target = bookingAt(presentation, unit);
+				if (target != null) {
+					states.put(target, target.copy());
+				}
+			}
+		}
+
+		void restore() {
+			event.copyFrom(head);
+			if (presentations != null && event.getPresentations() != null) {
+				event.getPresentations().clear();
+				event.getPresentations().addAll(presentations);
+			} else {
+				event.setPresentations(presentations == null ? null : new ArrayList<>(presentations));
+			}
+			if (presentation == null) {
+				return;
+			}
+			presentation.copyFrom(fields);
+			presentation.setPlanMissing(planMissing);
+			if (bookingList != null) {
+				bookingList.clear();
+				bookingList.addAll(bookings);
+			}
+			presentation.setBookings(bookingList);
+			states.forEach(Booking::copyFrom);
 		}
 	}
 
@@ -477,7 +612,8 @@ final class EventMerge {
 		return unit.bookingDir().startsWith(UNASSIGNED_PREFIX);
 	}
 
-	private static UnitKey presentationKey(UnitKey booking) {
+	/** Die Vorstellung, zu der die Buchung gehört. */
+	static UnitKey presentationKey(UnitKey booking) {
 		return UnitKey.presentation(booking.eventId(), booking.presentationId());
 	}
 

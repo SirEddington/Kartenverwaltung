@@ -60,7 +60,8 @@ final class UnitMapper {
 	private static final Comparator<Booking> BOOKING_ORDER = Booking.PLACE_ORDER
 			.thenComparing(Booking::getId, Comparator.nullsLast(Comparator.<String>naturalOrder()));
 
-	private static final Comparator<Event> EVENT_ORDER = Comparator
+	/** Events: Name ohne Groß-/Kleinschreibung ({@code null} zuletzt), ID. */
+	static final Comparator<Event> EVENT_ORDER = Comparator
 			.comparing(Event::getName, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER))
 			.thenComparing(Event::getId, Comparator.nullsLast(Comparator.<String>naturalOrder()));
 

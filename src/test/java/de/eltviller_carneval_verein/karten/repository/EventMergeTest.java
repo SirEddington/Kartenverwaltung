@@ -3,7 +3,9 @@ package de.eltviller_carneval_verein.karten.repository;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -20,7 +22,10 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
@@ -33,12 +38,18 @@ class EventMergeTest {
 	/** Merkt sich, was das Einarbeiten meldet. */
 	private static final class Recording implements EventMerge.Sink {
 		final Map<UnitKey, Boolean> adopted = new HashMap<>();
+		final List<UnitKey> held = new ArrayList<>();
 		final List<UnitKey> left = new ArrayList<>();
 		final List<String> warnings = new ArrayList<>();
 
 		@Override
 		public void adopted(UnitSnapshot snapshot, boolean shown) {
 			adopted.put(snapshot.unit(), shown);
+		}
+
+		@Override
+		public void held(UnitSnapshot snapshot) {
+			held.add(snapshot.unit());
 		}
 
 		@Override
@@ -187,18 +198,68 @@ class EventMergeTest {
 	}
 
 	@Test
-	void bookingOnUnknownSeatIsAppendedAndBecomesUnassigned() {
+	void bookingOnUnknownSeatIsHeldAndLeavesTheModelAlone() throws IOException {
 		Event event = event();
-		Presentation friday = event.getPresentations().get(0);
+		Event before = copyOf(event);
 		Event state = copyOfUnchecked(event);
 		booking(state.getPresentations().get(0), "s9", 9, "Fremd");
+		Recording sink = new Recording();
 
-		EventMerge.apply(event, plan(List.of(foreign(state, seat(event, "s9"))), List.of()), new Recording());
+		EventMerge.apply(event, plan(List.of(foreign(state, seat(event, "s9"))), List.of()), sink);
 
-		Booking added = friday.getBookings().stream().filter(b -> "Fremd".equals(b.getLastName())).findFirst()
-				.orElseThrow();
-		assertTrue(added.isUnassigned(), "ohne Bestuhlung läuft der Abgleich wie beim Laden");
-		assertSame(friday, added.getParent());
+		assertEquals(List.of(seat(event, "s9")), sink.held);
+		assertTrue(sink.adopted.isEmpty());
+		assertEquals(MAPPER.valueToTree(before), MAPPER.valueToTree(event));
+	}
+
+	@Test
+	void failingUnitLeavesItsPartOfTheModelAsBefore() {
+		Event event = event();
+		Presentation friday = event.getPresentations().get(0);
+		List<Booking> bookings = new ArrayList<>(friday.getBookings());
+		Event state = copyOfUnchecked(event);
+		state.setDescription("Große Sitzung");
+		state.getPresentations().get(0).setHallId("andere-halle");
+		state.getPresentations().get(0).setSeatingPlanId("andere-bestuhlung");
+		UnitKey head = UnitKey.event(event.getId());
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+		EventMerge.Plan plan = new EventMerge.Plan(List.of(foreign(state, head), foreign(state, presentation)),
+				List.of(), id -> {
+					throw new IllegalStateException("Halle nicht lesbar");
+				});
+		Recording sink = new Recording();
+
+		assertThrows(IllegalStateException.class, () -> EventMerge.apply(event, plan, sink));
+
+		assertEquals("Große Sitzung", event.getDescription(), "die Einheit davor bleibt eingearbeitet");
+		assertNull(friday.getHallId());
+		assertNull(friday.getSeatingPlanId());
+		assertEquals(bookings, friday.getBookings());
+		assertEquals("Müller", bookings.get(0).getLastName());
+		assertEquals(Map.of(head, true), sink.adopted);
+	}
+
+	@Test
+	void placeholdersCreatedByTheSyncGetTheSameIdsOnTheCopy() throws IOException {
+		Hall hall = new Hall();
+		SeatingPlan seating = hall.addSeatingPlan();
+		TableRow row = seating.addRow();
+		row.setLabel("A");
+		seating.fillRow(row, 2, 3);
+		Event event = event();
+		Event copy = copyOf(event);
+		Event state = copyOfUnchecked(event);
+		state.getPresentations().get(0).setHallId(hall.getId());
+		state.getPresentations().get(0).setSeatingPlanId(seating.getId());
+		UnitKey presentation = UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId());
+		EventMerge.Plan plan = plan(List.of(foreign(state, presentation)), List.of());
+		EventMerge.Plan withHall = new EventMerge.Plan(plan.units(), List.of(), id -> hall);
+
+		EventMerge.apply(event, withHall, new Recording());
+		EventMerge.apply(copy, withHall, EventMerge.NONE);
+
+		assertEquals(6, event.getPresentations().get(0).getBookings().size());
+		assertEquals(MAPPER.valueToTree(event), MAPPER.valueToTree(copy));
 	}
 
 	@Test

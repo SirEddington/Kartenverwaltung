@@ -1,8 +1,10 @@
 package de.eltviller_carneval_verein.karten.repository;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -14,6 +16,8 @@ import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Event;
@@ -53,6 +57,14 @@ public class StoreEventRepository implements EventRepository {
 
 	/** Die zurückgestellten fremden Stände; {@link #applyForeign} prüft sie bei jedem Aufruf erneut. */
 	private final Map<UnitKey, Deferral> deferred = new LinkedHashMap<>();
+
+	/**
+	 * Fremde Buchungen, die still warten, bis ihr Platz im Modell da ist: ihr Sitz fehlt in der Bestuhlung der Vorstellung,
+	 * oder der Hallen- bzw. Bestuhlungswechsel (oder das Löschen) ihrer Vorstellung ist zurückgestellt. Meist kommt nur die
+	 * Halle oder Vorstellung später an; "ohne Platz" gemacht, löschte das nächste Speichern die Sitz-Einheit. Ohne Hinweis
+	 * für den Nutzer, bei jedem Aufruf von {@link #applyForeign} erneut geprüft.
+	 */
+	private final Set<UnitKey> held = new LinkedHashSet<>();
 
 	/** Ob für das Modellobjekt einer Einheit gerade eine Eingabe offen ist (siehe {@link #setEditingCheck}). */
 	private Predicate<Object> inEditing = model -> false;
@@ -354,7 +366,9 @@ public class StoreEventRepository implements EventRepository {
 	 * werden jedes Mal mit geprüft. Je Einheit gilt {@link ForeignDecision}: Ein Nachfolger des Vergleichsstands in der
 	 * gültigen Kette wird eingearbeitet, außer der Nutzer hat die Einheit ungespeichert geändert oder bearbeitet sie gerade
 	 * (bei Löschung von Kopf oder Vorstellung und beim Wechsel von Halle oder Bestuhlung zählt alles darunter); dann wird
-	 * er zurückgestellt, der Vergleichsstand bleibt. Je Event werden Objekt im Cache und Vergleichsstand in einem Schritt
+	 * er zurückgestellt, der Vergleichsstand bleibt. Eine Buchung, die im Modell keinen Platz hat (Sitz fehlt in der
+	 * Bestuhlung, Hallenwechsel ihrer Vorstellung zurückgestellt), wartet still ohne Hinweis und wird ebenfalls jedes Mal
+	 * erneut geprüft. Je Event werden Objekt im Cache und Vergleichsstand in einem Schritt
 	 * nachgeführt, danach erfahren es die Listener. Ist noch nichts geladen, passiert nichts: Das erste Laden liest
 	 * ohnehin den aktuellen Stand.
 	 * <p>
@@ -373,11 +387,13 @@ public class StoreEventRepository implements EventRepository {
 			}
 		}
 		wanted.addAll(deferred.keySet());
+		wanted.addAll(held);
 		List<String> warnings = new ArrayList<>();
 		if (!wanted.isEmpty()) {
 			Map<UnitKey, UnitSnapshot> current = sync.snapshots(wanted);
 			// was der Index nicht mehr kennt, lässt sich nicht einarbeiten
 			deferred.keySet().retainAll(current.keySet());
+			held.retainAll(current.keySet());
 			Map<String, List<UnitSnapshot>> byEvent = new LinkedHashMap<>();
 			for (UnitKey unit : wanted) {
 				UnitSnapshot snapshot = current.get(unit);
@@ -388,7 +404,12 @@ public class StoreEventRepository implements EventRepository {
 			try {
 				Map<UnitKey, List<ChainStep>> chains = sync.chains(current.keySet());
 				for (List<UnitSnapshot> ofEvent : byEvent.values()) {
-					applyForeign(ofEvent, chains, warnings);
+					// ein Fehler bei einem Event hält die übrigen nicht auf
+					try {
+						applyForeign(ofEvent, chains, warnings);
+					} catch (RuntimeException e) {
+						failed(ofEvent.get(0).unit().eventId(), e, warnings);
+					}
 				}
 			} catch (IOException e) {
 				LOG.log(Level.WARNING, "Die Ketten fremd geänderter Einheiten ließen sich nicht lesen", e);
@@ -473,6 +494,7 @@ public class StoreEventRepository implements EventRepository {
 			ForeignDecision decision = decide(known, current, chainOf(chains, unit));
 			if (decision != ForeignDecision.APPLY) {
 				deferred.remove(unit);
+				held.remove(unit);
 			}
 			if (decision == ForeignDecision.KNOWN) {
 				adoptStatus(eventId, known, current, warnings);
@@ -489,13 +511,35 @@ public class StoreEventRepository implements EventRepository {
 
 		// "lokal verändert" kostet das Zerlegen des Events: erst prüfen, wenn ein Nachfolger da ist
 		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false) : localChanges(event);
+		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
+		successors.sort(EventMerge.MERGE_ORDER);
+		Set<UnitKey> heldPresentations = new HashSet<>();
+		Map<UnitKey, UnitSnapshot> appliedPresentations = new HashMap<>();
 		List<UnitSnapshot> apply = new ArrayList<>();
 		for (UnitSnapshot current : successors) {
+			UnitKey unit = current.unit();
 			if (isBlocked(event, current, changes)) {
-				defer(event, current, chainOf(chains, current.unit()));
+				held.remove(unit);
+				defer(event, current, chainOf(chains, unit));
+				if (unit.type() == UnitType.PRESENTATION && EventMerge.touchesSubtree(event, current)) {
+					heldPresentations.add(unit);
+				}
+			} else if (unit.type() == UnitType.BOOKING
+					&& heldPresentations.contains(EventMerge.presentationKey(unit))) {
+				// gehört zur neuen Bestuhlung bzw. zur verschwindenden Vorstellung: erst mit ihr einarbeiten
+				deferred.remove(unit);
+				hold(unit, "ihre Vorstellung ist zurückgestellt");
+			} else if (unit.type() == UnitType.BOOKING && event != null && !EventMerge.hasPlace(event, current,
+					appliedPresentations.get(EventMerge.presentationKey(unit)), hallLookup)) {
+				deferred.remove(unit);
+				hold(unit, "ihr Sitz fehlt in der Bestuhlung der Vorstellung");
 			} else {
-				deferred.remove(current.unit());
+				deferred.remove(unit);
+				held.remove(unit);
 				apply.add(current);
+				if (unit.type() == UnitType.PRESENTATION) {
+					appliedPresentations.put(unit, current);
+				}
 			}
 		}
 		if (apply.isEmpty()) {
@@ -520,16 +564,24 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
-	 * Die Entscheidung ohne "blockiert" (das fragt der Aufrufer erst danach). Hat die Einheit keine lesbare Version mehr
-	 * (gesperrt ohne lesbares Glied), gibt es keine Kette, an der sich ein Nachfolger zeigt: Sie wird wie beim Laden
-	 * behandelt und verlässt das Modell.
+	 * Die Entscheidung ohne "blockiert" (das fragt der Aufrufer erst danach). Ist die Einheit gesperrt, ohne dass ein Glied
+	 * lesbar ist, gibt es keine Kette, an der sich ein Nachfolger zeigt: Sie wird wie beim Laden behandelt und verlässt das
+	 * Modell.
 	 */
 	private static ForeignDecision decide(UnitSnapshot known, UnitSnapshot current, List<ChainStep> chain) {
-		if (current.version() == null && current.status() != UnitState.Status.WAITING && known != null
-				&& known.version() != null) {
+		boolean locked = current.status() == UnitState.Status.LOCKED_DAMAGED
+				|| current.status() == UnitState.Status.LOCKED_FORMAT;
+		if (current.version() == null && locked && known != null && known.version() != null) {
 			return ForeignDecision.APPLY;
 		}
 		return ForeignDecision.decide(known, current, chain, false);
+	}
+
+	/** Lässt die Buchung still warten (siehe {@link #held}); geloggt wird beim ersten Mal. */
+	private void hold(UnitKey unit, String reason) {
+		if (held.add(unit)) {
+			LOG.info("Fremder Stand von " + unit.relativePath() + " wartet: " + reason + ".");
+		}
 	}
 
 	private static List<ChainStep> chainOf(Map<UnitKey, List<ChainStep>> chains, UnitKey unit) {
@@ -609,7 +661,13 @@ public class StoreEventRepository implements EventRepository {
 			baseline.resetOwner(eventId, all.values(), assembly.shown());
 			warnings.addAll(assembly.warnings());
 			for (Event added : assembly.items()) {
-				cachedEvents.add(added);
+				// einsortieren wie beim Laden
+				int index = 0;
+				while (index < cachedEvents.size()
+						&& UnitMapper.EVENT_ORDER.compare(cachedEvents.get(index), added) <= 0) {
+					index++;
+				}
+				cachedEvents.add(index, added);
 				listeners.notifyAddedByOthers(added);
 			}
 		} catch (RuntimeException e) {
@@ -647,24 +705,31 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
-	 * Arbeitet die Stände in das Event im Cache ein; jede Einheit geht gleich danach in den Vergleichsstand. Scheitert das,
-	 * wird ein nicht lokal verändertes Event aus dem Index neu zusammengesetzt; sonst bleibt, was schon eingearbeitet ist,
-	 * und der Rest wird zurückgestellt.
+	 * Arbeitet die Stände in das Event im Cache ein; jede Einheit geht gleich danach in den Vergleichsstand. Scheitert eine
+	 * Einheit, ist sie im Modell wieder wie vorher ({@link EventMerge#apply}); ein sauberes Event wird dann aus dem Index
+	 * neu zusammengesetzt, sonst bleibt, was schon eingearbeitet ist, und der Rest wird zurückgestellt. Auf
+	 * {@code changingByOthers} folgt immer {@code changedByOthers}.
 	 */
 	private void mergeInto(Event event, List<UnitSnapshot> apply, LocalChanges changes,
 			Map<UnitKey, List<ChainStep>> chains, List<String> warnings) {
 		String eventId = event.getId();
-		listeners.notifyChangingByOthers(event);
 		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
 				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
 		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
 		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup);
 		Set<UnitKey> adopted = new LinkedHashSet<>();
+		Set<UnitKey> waiting = new HashSet<>();
 		EventMerge.Sink sink = new EventMerge.Sink() {
 			@Override
 			public void adopted(UnitSnapshot snapshot, boolean shown) {
 				baseline.adopt(eventId, snapshot, shown);
 				adopted.add(snapshot.unit());
+			}
+
+			@Override
+			public void held(UnitSnapshot snapshot) {
+				waiting.add(snapshot.unit());
+				hold(snapshot.unit(), "ihr Sitz fehlt in der Bestuhlung der Vorstellung");
 			}
 
 			@Override
@@ -677,22 +742,20 @@ public class StoreEventRepository implements EventRepository {
 				warnings.add(text);
 			}
 		};
+		listeners.notifyChangingByOthers(event);
 		try {
 			EventMerge.apply(event, plan, sink);
 		} catch (RuntimeException e) {
 			failed(event.getName(), e, warnings);
-			if (changes.none() && rebuild(event, warnings)) {
+			if (mayRebuild(event, changes) && rebuild(event, warnings)) {
 				return;
 			}
 			for (UnitSnapshot snapshot : apply) {
-				if (!adopted.contains(snapshot.unit())) {
+				if (!adopted.contains(snapshot.unit()) && !waiting.contains(snapshot.unit())) {
 					defer(event, snapshot, chainOf(chains, snapshot.unit()));
 				}
 			}
 			plan = plan.restrictedTo(adopted);
-			if (adopted.isEmpty()) {
-				return;
-			}
 		}
 		EventMerge.Plan applied = plan;
 		listeners.notifyChangedByOthers(event,
@@ -700,30 +763,55 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
+	 * Ob das Event nach gescheitertem Einarbeiten aus dem Index neu zusammengesetzt werden darf: nur wenn es sauber ist,
+	 * also nichts lokal verändert, nichts davon zurückgestellt oder wartend und kein Objekt darin in Bearbeitung (eine
+	 * offene Eingabe schriebe sonst in ein abgehängtes Objekt).
+	 */
+	private boolean mayRebuild(Event event, LocalChanges changes) {
+		String eventId = event.getId();
+		if (!changes.none() || deferred.keySet().stream().anyMatch(unit -> eventId.equals(unit.eventId()))
+				|| held.stream().anyMatch(unit -> eventId.equals(unit.eventId()))) {
+			return false;
+		}
+		return EventMerge.subtree(event, UnitKey.event(eventId)).stream().noneMatch(inEditing);
+	}
+
+	/**
 	 * Nach gescheitertem Einarbeiten: setzt das Event aus dem Index neu zusammen, Vergleichsstand wie beim Laden, und
-	 * ersetzt es im Cache.
+	 * ersetzt es im Cache. Die Kopie für den Änderungsmelder bekommt genau diesen Stand.
 	 *
 	 * @return ob das gelang; sonst ist nichts verändert
 	 */
 	private boolean rebuild(Event event, List<String> warnings) {
 		String eventId = event.getId();
-		Function<String, Hall> lookup = hallLookup;
 		try {
 			Collection<UnitSnapshot> all = sync.eventSnapshots(eventId).values();
-			Assembly<Event> assembly = EventMerge.assembleEvent(all, lookup);
+			Assembly<Event> assembly = EventMerge.assembleEvent(all, hallLookup);
 			if (assembly.items().isEmpty()) {
 				return false;
 			}
 			Event fresh = assembly.items().get(0);
+			ObjectMapper mapper = JsonMapperFactory.create();
+			byte[] state = mapper.writeValueAsBytes(fresh);
 			baseline.resetOwner(eventId, all, assembly.shown());
 			warnings.addAll(assembly.warnings());
 			replaceCachedEvent(fresh);
+			// das frische Event zeigt jeden Stand des Index; nichts davon wartet mehr
+			deferred.keySet().removeIf(unit -> eventId.equals(unit.eventId()));
+			held.removeIf(unit -> eventId.equals(unit.eventId()));
 			Set<UnitKey> units = new HashSet<>();
 			all.forEach(snapshot -> units.add(snapshot.unit()));
-			listeners.notifyChangedByOthers(fresh,
-					new ForeignBatch<>(units, copy -> EventMerge.replaceContent(copy, all, lookup)));
+			listeners.notifyChangedByOthers(fresh, new ForeignBatch<>(units, copy -> {
+				try {
+					Event rebuilt = mapper.readValue(state, Event.class);
+					copy.copyFrom(rebuilt);
+					copy.setPresentations(rebuilt.getPresentations());
+				} catch (IOException e) {
+					throw new UncheckedIOException(e);
+				}
+			}));
 			return true;
-		} catch (RuntimeException e) {
+		} catch (JsonProcessingException | RuntimeException e) {
 			LOG.log(Level.SEVERE, "Das Event " + eventId + " ließ sich nicht aus dem Index neu zusammensetzen", e);
 			return false;
 		}

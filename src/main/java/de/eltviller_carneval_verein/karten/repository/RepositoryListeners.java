@@ -27,30 +27,30 @@ final class RepositoryListeners<T> {
 	}
 
 	void notifySaved(T entity) {
-		notifyAll(listener -> listener.saved(entity), "beim Speichern", entity);
+		notifyEach(listener -> listener.saved(entity), "beim Speichern", entity);
 	}
 
 	void notifyDeleted(T entity) {
-		notifyAll(listener -> listener.deleted(entity), "beim Löschen", entity);
+		notifyEach(listener -> listener.deleted(entity), "beim Löschen", entity);
 	}
 
 	void notifyChangingByOthers(T entity) {
-		notifyAll(listener -> listener.changingByOthers(entity), "vor dem Einarbeiten fremder Stände", entity);
+		notifyEach(listener -> listener.changingByOthers(entity), "vor dem Einarbeiten fremder Stände", entity);
 	}
 
 	void notifyChangedByOthers(T entity, ForeignBatch<T> batch) {
-		notifyAll(listener -> listener.changedByOthers(entity, batch), "nach dem Einarbeiten fremder Stände", entity);
+		notifyEach(listener -> listener.changedByOthers(entity, batch), "nach dem Einarbeiten fremder Stände", entity);
 	}
 
 	void notifyAddedByOthers(T entity) {
-		notifyAll(listener -> listener.addedByOthers(entity), "bei einem fremd angelegten Eintrag", entity);
+		notifyEach(listener -> listener.addedByOthers(entity), "bei einem fremd angelegten Eintrag", entity);
 	}
 
 	void notifyRemovedByOthers(T entity) {
-		notifyAll(listener -> listener.removedByOthers(entity), "bei einem fremd gelöschten Eintrag", entity);
+		notifyEach(listener -> listener.removedByOthers(entity), "bei einem fremd gelöschten Eintrag", entity);
 	}
 
-	private void notifyAll(Consumer<RepositoryListener<T>> call, String when, T entity) {
+	private void notifyEach(Consumer<RepositoryListener<T>> call, String when, T entity) {
 		for (RepositoryListener<T> listener : new ArrayList<>(listeners)) {
 			try {
 				call.accept(listener);
