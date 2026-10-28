@@ -569,8 +569,75 @@ class StoreEventRepositoryForeignTest {
 		sold.setLastName("Eigen");
 		ForeignResult second = mine.applyForeign(allUnits());
 
-		assertEquals(1, second.deferred().size(), second.deferred().toString());
+		assertEquals(2, second.deferred().size(), "die Buchung und die Löschung ihres alten Sitzes: " + second.deferred());
 		assertEquals("Eigen", sold.getLastName());
+	}
+
+	@Test
+	void cancellationIsDeferredWhileTheMovedBookingIsChangedByTheUser() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		UnitKey presentation = remoteCancelsThenSwitches(other);
+		UnitKey oldSeat = seatUnit(friday, 0);
+		mine.applyForeign(List.of(presentation));
+		Booking moved = friday.getBookings().stream().filter(Booking::hasData).findFirst().orElseThrow();
+		moved.setFirstName("Hans");
+
+		ForeignResult result = mine.applyForeign(List.of(oldSeat));
+
+		assertEquals(List.of(oldSeat), result.deferred().stream().map(Deferral::unit).toList(),
+				"die Stornierung wird nicht stillschweigend übernommen");
+		assertEquals("Hans", moved.getFirstName());
+		assertEquals("Müller", moved.getLastName());
+		assertNotNull(mine.knownUnit(oldSeat));
+		assertFalse(mine.knownUnit(oldSeat).deleted(), "der Vergleichsstand kennt die Löschung noch nicht");
+	}
+
+	@Test
+	void cancellationIsAppliedAfterTheEditingOfTheMovedBookingEnds() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		UnitKey presentation = remoteCancelsThenSwitches(other);
+		UnitKey oldSeat = seatUnit(friday, 0);
+		long before = files();
+		mine.applyForeign(List.of(presentation));
+		Booking moved = friday.getBookings().stream().filter(Booking::hasData).findFirst().orElseThrow();
+		AtomicBoolean editing = new AtomicBoolean(true);
+		mine.setEditingCheck(o -> editing.get() && o == moved);
+
+		ForeignResult result = mine.applyForeign(List.of(oldSeat));
+		assertEquals(List.of(oldSeat), result.deferred().stream().map(Deferral::unit).toList());
+		assertEquals("Müller", moved.getLastName());
+
+		editing.set(false);
+		ForeignResult retried = mine.retryDeferred();
+
+		assertTrue(retried.deferred().isEmpty());
+		assertCancelledMullerIsGoneAndNothingIsWritten(before);
+	}
+
+	@Test
+	void manyCancellationsOfASwitchedPresentationAreAllApplied() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		for (int n = 0; n < 6; n++) {
+			seat(friday, n).setLastName("Gast" + n);
+		}
+		mine.saveEvent(event);
+		Other remote = other();
+		for (int n = 0; n < 6; n++) {
+			seat(remote.friday(), n).clearCustomerData();
+		}
+		remote.save();
+		remote.friday().setHallId(other.getId());
+		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		remote.save();
+		long before = files();
+
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		mine.applyForeign(allUnits());
+
+		assertCancelledMullerIsGoneAndNothingIsWritten(before);
 	}
 
 	@Test

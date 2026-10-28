@@ -22,7 +22,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
-import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
@@ -630,12 +629,15 @@ public class StoreEventRepository implements EventRepository {
 		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
 		successors.sort(EventMerge.MERGE_ORDER);
 		Map<UnitKey, UnitSnapshot> presentationStates = presentationStates(event, snapshots, successors);
+		Map<UnitKey, String> lastIds = event == null ? Map.of() : lastIds(event, successors);
+		// Eine Stornierung, die eine vom Nutzer berührte Buchung träfe (versetzt vom Abgleich), wartet wie jede Änderung daran
+		Set<String> touchedIds = lastIds.isEmpty() || changes.all() ? Set.of() : touchedBookingIds(event, changes);
 		Set<UnitKey> appliedPresentations = new HashSet<>();
 		List<UnitSnapshot> apply = new ArrayList<>();
 		for (UnitSnapshot current : successors) {
 			UnitKey unit = current.unit();
 			UnitKey parent = unit.type() == UnitType.BOOKING ? EventMerge.presentationKey(unit) : null;
-			if (isBlocked(event, current, changes)) {
+			if (isBlocked(event, current, changes) || (lastIds.containsKey(unit) && touchedIds.contains(lastIds.get(unit)))) {
 				defer(event, current, chainOf(chains, unit));
 			} else if (parent != null && event != null && !appliedPresentations.contains(parent)
 					&& EventMerge.waits(event, current, presentationStates.get(parent), hallLookup)) {
@@ -666,7 +668,7 @@ public class StoreEventRepository implements EventRepository {
 		} else if (head != null && !headReadable) {
 			removeEvent(event, head, apply, warnings);
 		} else {
-			mergeInto(event, apply, changes, chains, presentationStates, warnings);
+			mergeInto(event, apply, changes, chains, presentationStates, lastIds, warnings);
 		}
 	}
 
@@ -702,65 +704,68 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Zu den gelöschten oder unlesbaren Buchungen unter {@code apply} die Kennung der Buchung aus ihrem zuletzt bekannten
 	 * Stand (siehe {@link EventMerge.Plan}), außer eine andere angezeigte Einheit des Events trägt diese Kennung schon: Dann
-	 * ist die Buchung dorthin gezogen, und die Löschung betrifft sie nicht mehr. Ebenso, wenn der Nutzer die Buchung im Modell
-	 * ungespeichert geändert hat oder bearbeitet: Seine Eingabe bleibt.
+	 * ist die Buchung dorthin gezogen, und die Löschung betrifft sie nicht mehr. Die Kennungen werden einmal je Aufruf
+	 * gesammelt.
 	 */
-	private Map<UnitKey, String> lastIds(Event event, List<UnitSnapshot> apply, LocalChanges changes) {
+	private Map<UnitKey, String> lastIds(Event event, List<UnitSnapshot> successors) {
 		Map<UnitKey, String> ids = new HashMap<>();
-		if (changes.all()) {
-			return ids;
-		}
-		for (UnitSnapshot snapshot : apply) {
+		Map<String, List<UnitKey>> carriers = null;
+		for (UnitSnapshot snapshot : successors) {
 			UnitKey unit = snapshot.unit();
 			if (unit.type() != UnitType.BOOKING || UnitMapper.isReadable(snapshot)) {
 				continue;
 			}
 			UnitSnapshot known = baseline.known(unit);
 			Booking last = known == null ? null : UnitMapper.readUnit(known, Booking.class);
-			if (last != null && last.getId() != null && !carriedElsewhere(event.getId(), unit, last.getId())
-					&& !touchedByUser(event, unit, last.getId(), changes)) {
+			if (last == null || last.getId() == null) {
+				continue;
+			}
+			if (carriers == null) {
+				carriers = shownBookingIds(event.getId());
+			}
+			boolean carriedElsewhere = carriers.getOrDefault(last.getId(), List.of()).stream()
+					.anyMatch(other -> !other.equals(unit) && other.presentationId().equals(unit.presentationId()));
+			if (!carriedElsewhere) {
 				ids.put(unit, last.getId());
 			}
 		}
 		return ids;
 	}
 
-	/** Ob die Buchung mit dieser Kennung in der Vorstellung im Modell ungespeichert geändert ist oder bearbeitet wird. */
-	private boolean touchedByUser(Event event, UnitKey unit, String bookingId, LocalChanges changes) {
-		Presentation presentation = EventMerge.presentation(event, unit.presentationId());
-		if (presentation == null || presentation.getBookings() == null) {
-			return false;
-		}
-		for (Booking booking : presentation.getBookings()) {
-			if (bookingId.equals(booking.getId())) {
-				if (inEditing.test(booking)) {
-					return true;
-				}
-				for (Map.Entry<UnitKey, ObjectNode> entry : changes.model().entrySet()) {
-					if (changes.units().contains(entry.getKey()) && entry.getKey().type() == UnitType.BOOKING
-							&& entry.getKey().presentationId().equals(unit.presentationId())
-							&& entry.getValue().path("id").asText().equals(bookingId)) {
-						return true;
-					}
-				}
-			}
-		}
-		return false;
-	}
-
-	/** Ob eine andere angezeigte Buchungs-Einheit der Vorstellung im Vergleichsstand diese Kennung trägt. */
-	private boolean carriedElsewhere(String eventId, UnitKey unit, String bookingId) {
+	/** Die Kennungen der angezeigten Buchungs-Einheiten des Events im Vergleichsstand, je Kennung die Einheiten, die sie tragen. */
+	private Map<String, List<UnitKey>> shownBookingIds(String eventId) {
+		Map<String, List<UnitKey>> carriers = new HashMap<>();
 		for (UnitKey shown : baseline.shownUnits(eventId)) {
-			if (shown.type() == UnitType.BOOKING && !shown.equals(unit)
-					&& shown.presentationId().equals(unit.presentationId())) {
+			if (shown.type() == UnitType.BOOKING) {
 				UnitSnapshot known = baseline.known(shown);
 				Booking booking = known == null ? null : UnitMapper.readUnit(known, Booking.class);
-				if (booking != null && bookingId.equals(booking.getId())) {
-					return true;
+				if (booking != null && booking.getId() != null) {
+					carriers.computeIfAbsent(booking.getId(), k -> new ArrayList<>()).add(shown);
 				}
 			}
 		}
-		return false;
+		return carriers;
+	}
+
+	/**
+	 * Die Kennungen der Buchungen im Modell, die der Nutzer ungespeichert geändert hat oder gerade bearbeitet. Eine
+	 * Stornierung, die eine solche Buchung träfe (sie wurde von einem Wechsel der Bestuhlung versetzt), wird zurückgestellt,
+	 * statt die Eingabe zu leeren oder zu übergehen. Setzt voraus, dass sich das Event zerlegen ließ.
+	 */
+	private Set<String> touchedBookingIds(Event event, LocalChanges changes) {
+		Set<String> ids = new HashSet<>();
+		for (UnitKey unit : changes.units()) {
+			ObjectNode payload = changes.model().get(unit);
+			if (unit.type() == UnitType.BOOKING && payload != null && payload.hasNonNull("id")) {
+				ids.add(payload.get("id").asText());
+			}
+		}
+		for (Object model : EventMerge.subtree(event, UnitKey.event(event.getId()))) {
+			if (model instanceof Booking booking && inEditing.test(booking)) {
+				ids.add(booking.getId());
+			}
+		}
+		return ids;
 	}
 
 	/**
@@ -902,13 +907,13 @@ public class StoreEventRepository implements EventRepository {
 	 * {@code changingByOthers} folgt immer {@code changedByOthers}.
 	 */
 	private void mergeInto(Event event, List<UnitSnapshot> apply, LocalChanges changes,
-			Map<UnitKey, List<ChainStep>> chains, Map<UnitKey, UnitSnapshot> presentationStates, List<String> warnings) {
+			Map<UnitKey, List<ChainStep>> chains, Map<UnitKey, UnitSnapshot> presentationStates,
+			Map<UnitKey, String> lastIds, List<String> warnings) {
 		String eventId = event.getId();
 		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
 				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
 		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
-		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, presentationStates,
-				lastIds(event, apply, changes));
+		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, presentationStates, lastIds);
 		Set<UnitKey> adopted = new LinkedHashSet<>();
 		Set<UnitKey> waiting = new HashSet<>();
 		EventMerge.Sink sink = new EventMerge.Sink() {
