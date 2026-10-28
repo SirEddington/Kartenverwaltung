@@ -1179,6 +1179,55 @@ class StoreEventRepositoryTest {
 		assertEquals(before, filesIn(appData));
 	}
 
+	/**
+	 * Müller (Speicherstand s1), dann Schulz; danach bekommt {@code broken} (Kopf oder Vorstellung) von anderer Seite eine
+	 * unlesbare, nicht gesperrte Nachfolgeversion (die ID passt nicht zum Ordner). Ein frisch geladenes Repository stellt
+	 * s1 wieder her: Die Buchung darunter wird zum gültigen Nachfolger, nicht zu einer unterlegenen Gabelung.
+	 */
+	private static void restoreUnderUnreadableParent(Path appData, boolean breakHead) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		bookingOf(event, 0, "Müller").setLastName("Schulz");
+		repository.saveEvent(event);
+		clock.advance(10);
+		String presentationId = event.getPresentations().get(0).getId();
+		UnitKey broken = breakHead ? UnitKey.event(event.getId()) : UnitKey.presentation(event.getId(), presentationId);
+		Version parent = sync.unitState(broken).head();
+		ObjectNode payload = parent.payload().deepCopy();
+		payload.put("id", "andere-id");
+		sync.append("fremd", List.of(new Change(broken, List.of(parent.id()), payload, false)));
+		clock.advance(10);
+		StoreEventRepository fresh = TestRepositories.events(sync);
+		fresh.loadEvents();
+
+		Restored<Event> restored = fresh.restoreEvent(event.getId(), s1, e -> List.of());
+
+		assertEquals(List.of("Müller"), bookingNames(restored.restored()));
+		UnitState seat1 = sync.unitState(UnitKey.booking(event.getId(), presentationId, "seat-1"));
+		assertEquals("Müller", seat1.head().payload().get("lastName").asText());
+		assertTrue(seat1.lost().isEmpty(), "die Buchung wird Nachfolger, keine unterlegene Gabelung");
+		assertEquals(3, seat1.chain().size());
+		UnitState parentState = sync.unitState(broken);
+		assertTrue(parentState.lost().isEmpty());
+		assertEquals(3, parentState.chain().size(), "auf die unlesbare Version folgt der Zielstand");
+		assertEquals(List.of("Müller"), bookingNames(TestRepositories.events(started(appData)).loadEvents().get(0)));
+	}
+
+	@Test
+	void restoreUnderUnreadablePresentationWritesItsBookingsAsSuccessors(@TempDir Path appData) throws IOException {
+		restoreUnderUnreadableParent(appData, false);
+	}
+
+	@Test
+	void restoreUnderUnreadableHeadWritesItsChildrenAsSuccessors(@TempDir Path appData) throws IOException {
+		restoreUnderUnreadableParent(appData, true);
+	}
+
 	@Test
 	void eventAtOfLockedUnitIsRefused(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);

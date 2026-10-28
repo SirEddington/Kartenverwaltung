@@ -164,9 +164,12 @@ final class UnitMapper {
 	 * ({@code relativePath}).
 	 * <ul>
 	 * <li>Neue Einheit (nicht im Bestand oder ohne Version): erste Version, ohne Vorgänger.</li>
-	 * <li>Einheit mit lesbarem Stand im Bestand, die nie angezeigt wurde (etwa ein fremder Verkauf, der noch auf seinen
-	 * Platz im Modell wartet), aber mit anderem Inhalt im Modell: ebenfalls erste Version, ohne Vorgänger. Der Nutzer hat
-	 * den Stand nie gesehen; seine Version tritt gegen ihn an (Gabelung) und überschreibt ihn nicht still.</li>
+	 * <li>Einheit mit lesbarem Stand im Bestand, die nie angezeigt wurde, obwohl ihre Eltern-Einheit angezeigt wird (etwa
+	 * ein fremder Verkauf, der noch auf seinen Platz im Modell wartet), aber mit anderem Inhalt im Modell: ebenfalls erste
+	 * Version, ohne Vorgänger. Der Nutzer hat den Stand nie gesehen; seine Version tritt gegen ihn an (Gabelung) und
+	 * überschreibt ihn nicht still. Wird auch die Eltern-Einheit nicht angezeigt (unlesbar oder gelöscht, etwa beim
+	 * Wiederherstellen oder für ein gehaltenes Objekt nach einem fremden unlesbaren Kopf), fehlte die Einheit nur mit ihr
+	 * und bekommt wie jede geänderte eine neue Version auf der aktuellen.</li>
 	 * <li>Geänderte oder wieder aufgetauchte (gelöschte) Einheit: neue Version auf der aktuellen Version.</li>
 	 * <li>Einheit nur im Bestand: Löschung, aber nur wenn sie angezeigt wurde ({@code shown}), ihre Eltern-Einheit
 	 * (Vorstellung: der Kopf, Buchung: ihre Vorstellung) in {@code units} steht und sie eine Version hat und nicht
@@ -196,7 +199,8 @@ final class UnitMapper {
 				changes.add(new Change(part.unit(), List.of(), part.payload(), false));
 			} else if (!known.deleted() && part.payload().equals(known.payload())) {
 				continue;
-			} else if (!known.deleted() && !shown.contains(part.unit()) && isReadable(known)) {
+			} else if (!known.deleted() && !shown.contains(part.unit()) && isReadable(known)
+					&& parentShown(part.unit(), shown)) {
 				changes.add(new Change(part.unit(), List.of(), part.payload(), false));
 			} else {
 				changes.add(new Change(part.unit(), List.of(known.version()), part.payload(), false));
@@ -230,6 +234,12 @@ final class UnitMapper {
 	/** Die Löschung einer Einheit auf ihrer aktuellen Version (für das Löschen eines ganzen Events oder einer Halle). */
 	static Change deletion(UnitSnapshot baseline) {
 		return new Change(baseline.unit(), List.of(baseline.version()), null, true);
+	}
+
+	/** Ob die Eltern-Einheit angezeigt wird; ein Event-Kopf oder eine Halle hat keine. */
+	private static boolean parentShown(UnitKey unit, Set<UnitKey> shown) {
+		UnitKey parent = parentOf(unit);
+		return parent != null && shown.contains(parent);
 	}
 
 	/** Die Eltern-Einheit nach dem Schlüssel; {@code null} für Event-Kopf und Halle. */

@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.repository;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -1078,6 +1079,107 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(List.of(StoreMessages.damaged(unit.relativePath())), result.warnings());
 		sold.setLastName("Neu");
 		assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
+	}
+
+	/** Hängt an den Kopf eine unlesbare, nicht gesperrte Version von anderer Seite (die ID passt nicht zum Ordner). */
+	private void unreadableForeignHead() throws IOException {
+		Version parent = sync.unitState(head()).head();
+		ObjectNode broken = parent.payload().deepCopy();
+		broken.put("id", "andere-id");
+		sync.append("fremd", List.of(new Change(head(), List.of(parent.id()), broken, false)));
+	}
+
+	@Test
+	void savingAHeldEventAfterAForeignUnreadableHeadWritesItsChangesAsSuccessors() throws IOException {
+		unreadableForeignHead();
+		mine.applyForeign(List.of(head()));
+		assertEquals(List.of("removed Prunksitzung"), recorder.calls);
+		// eine Ansicht hält das Event noch und speichert Änderungen darunter, die der Nutzer gesehen hat
+		friday.setName("Freitagabend");
+		seat(friday, 0).setLastName("Neu");
+
+		mine.saveEvent(event);
+
+		UnitState booking = sync.unitState(seatUnit(friday, 0));
+		assertEquals("Neu", booking.head().payload().get("lastName").asText());
+		assertTrue(booking.lost().isEmpty(), "Nachfolger, keine unterlegene Gabelung");
+		UnitState presentation = sync.unitState(UnitKey.presentation(event.getId(), friday.getId()));
+		assertEquals("Freitagabend", presentation.head().payload().get("name").asText());
+		assertTrue(presentation.lost().isEmpty());
+	}
+
+	@Test
+	void presentationThatArrivedWhileItsEventWasHiddenIsPlacedLater() throws IOException {
+		Other other = other();
+		Presentation saturday = other.event().addPresentation("Samstag");
+		saturday.setHallId(hall.getId());
+		saturday.setSeatingPlanId(plan.getId());
+		BookingSync.sync(saturday, plan);
+		seat(saturday, 2).setLastName("Schmitz");
+		other.save();
+		unreadableForeignHead();
+		UnitKey presentation = UnitKey.presentation(event.getId(), saturday.getId());
+
+		// der unlesbare Kopf nimmt das Event aus dem Cache; die neue Vorstellung kommt nur in den Vergleichsstand
+		mine.applyForeign(allUnits());
+		assertFalse(mine.loadEvents().contains(event));
+		assertNotNull(mine.knownUnit(presentation));
+		// eine Ansicht hält das Event noch und speichert es: Es ist wieder da, die Vorstellung kam nie hinein
+		mine.saveEvent(event);
+		assertTrue(mine.loadEvents().contains(event));
+		assertEquals(1, event.getPresentations().size());
+		long before = files();
+
+		mine.applyForeign(List.of(presentation));
+
+		assertEquals(List.of("Freitag", "Samstag"),
+				event.getPresentations().stream().map(Presentation::getName).toList());
+		assertEquals("Schmitz", seat(event.getPresentations().get(1), 2).getLastName());
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+	}
+
+	@Test
+	void unassignedBookingBeforeItsPresentationWaitsWhileItsOldSeatIsInThePlan() throws IOException {
+		Other remote = other();
+		Presentation saturday = remote.event().addPresentation("Samstag");
+		saturday.setHallId(hall.getId());
+		saturday.setSeatingPlanId(plan.getId());
+		// ohne Platz, aber mit der Kennung eines Sitzes der Bestuhlung: Der Abgleich setzte sie auf diesen Sitz
+		Booking unassigned = saturday.addBooking();
+		unassigned.setUnassigned(true);
+		unassigned.setSeatId(planSeat(1).getId());
+		unassigned.setLastName("Schmitz");
+		remote.save();
+		UnitKey booking = UnitKey.unassignedBooking(event.getId(), saturday.getId(), unassigned.getId());
+		UnitKey presentation = UnitKey.presentation(event.getId(), saturday.getId());
+		long before = files();
+
+		// die Buchung kommt vor ihrer Vorstellung: nur in den Vergleichsstand, nicht angezeigt
+		mine.applyForeign(List.of(booking));
+		assertNotNull(mine.knownUnit(booking));
+		mine.applyForeign(List.of(presentation));
+		Presentation added = event.getPresentations().get(1);
+		assertTrue(added.getBookings().stream().noneMatch(Booking::hasData));
+		mine.retryDeferred();
+		assertTrue(added.getBookings().stream().noneMatch(Booking::hasData),
+				"sie wartet weiter, statt als bekannt herauszufallen");
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+
+		// B nimmt der Vorstellung die Bestuhlung: Jetzt passt die Buchung
+		saturday.setSeatingPlanId(null);
+		BookingSync.sync(saturday, null);
+		remote.save();
+		long afterSwitch = files();
+		mine.applyForeign(List.of(presentation));
+
+		assertNull(added.getSeatingPlanId());
+		assertEquals(List.of("Schmitz"), added.getBookings().stream().map(Booking::getLastName).toList());
+		assertTrue(added.getBookings().get(0).isUnassigned());
+		assertEquals(unassigned.getId(), added.getBookings().get(0).getId());
+		mine.saveEvent(event);
+		assertEquals(afterSwitch, files());
 	}
 
 	@Test
