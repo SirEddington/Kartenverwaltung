@@ -123,6 +123,18 @@ final class UnitBaseline {
 	}
 
 	/**
+	 * Nimmt die Einheit aus dem Vergleichsstand: Sie wartet auf ihren Platz im Modell, und ein früherer Stand, den der Nutzer
+	 * nie neben dem neuen gesehen hat, darf nicht als bekannt gelten (siehe {@link #resetOwner(String, Collection, Set, Set)}).
+	 * Eine angezeigte Einheit ist davon ausgenommen: Sie steht mit diesem Stand im Modell.
+	 */
+	void forget(UnitKey unit) {
+		Map<UnitKey, UnitSnapshot> units = known.get(unit.ownerId());
+		if (units != null && !isShown(unit) && units.remove(unit) != null) {
+			changed(unit.ownerId());
+		}
+	}
+
+	/**
 	 * Ein bekannter Stand, dessen Kette gesperrt oder wieder lesbar geworden ist: Wie beim Laden geht der Zustand in den
 	 * Vergleichsstand (Speichern lehnt eine gesperrte Einheit dann ab), das Modell bleibt. {@code WAITING} wird nicht
 	 * übernommen: Die nächste Meldung kommt, wenn die Datei da ist, und wird sie dann eine Gabelung, sperrte ein

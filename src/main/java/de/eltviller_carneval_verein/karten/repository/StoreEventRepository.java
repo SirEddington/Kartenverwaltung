@@ -310,25 +310,32 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Übernimmt den frisch gelesenen Stand des Events als Vergleichsstand und, wenn es sichtbar ist, in den Cache. Lesbare
 	 * Einheiten, die weder angezeigt werden noch im Zielstand stehen (etwa eine Vorstellung, die ankam, während der Kopf
-	 * unlesbar war), kommen nicht in den Vergleichsstand: Sie gehören nicht zum Modell und warten auf ihren Platz, bis sie
-	 * wieder gemeldet werden. Das gilt nicht unter einem gelöschten Kopf oder einer gelöschten Vorstellung: Dort gehören
-	 * die lesbaren Einheiten mit dem Wiederbeleben zum Objekt und werden, fehlen sie darin, gelöscht (siehe
-	 * {@link UnitBaseline#save}).
+	 * unlesbar war), kommen nicht in den Vergleichsstand: Sie gehören nicht zum Modell und warten in der Warteliste auf ihren
+	 * Platz. Das gilt nicht unter einem gelöschten Kopf oder einer gelöschten Vorstellung: Dort gehören die lesbaren
+	 * Einheiten mit dem Wiederbeleben zum Objekt und werden, fehlen sie darin, gelöscht (siehe {@link UnitBaseline#save}).
+	 * Eine unlesbare, nicht gelöschte Einheit des Zielstands gilt als angezeigt: Der Zielstand ersetzt sie, als Nachfolger
+	 * ihres unlesbaren Stands (sie wird nicht gelöscht).
 	 */
 	private void refreshFromStore(String eventId, List<UnitState> states, Set<UnitKey> targetUnits) {
 		List<UnitSnapshot> snapshots = states.stream().map(UnitSnapshot::of).toList();
 		Assembly<Event> current = UnitMapper.assembleEvents(snapshots);
 		Map<UnitKey, UnitSnapshot> byUnit = new HashMap<>();
 		snapshots.forEach(snapshot -> byUnit.put(snapshot.unit(), snapshot));
+		Set<UnitKey> shownNow = new HashSet<>(current.shown());
 		Set<UnitKey> notPlaced = new HashSet<>();
 		for (UnitSnapshot snapshot : snapshots) {
 			UnitKey unit = snapshot.unit();
-			if (!current.shown().contains(unit) && !targetUnits.contains(unit) && UnitMapper.isReadable(snapshot)
-					&& !belowDeleted(unit, byUnit)) {
+			boolean readable = UnitMapper.isReadable(snapshot);
+			if (targetUnits.contains(unit)) {
+				if (!readable && snapshot.version() != null && !snapshot.deleted()) {
+					shownNow.add(unit);
+				}
+			} else if (readable && !shownNow.contains(unit) && !belowDeleted(unit, byUnit)) {
 				notPlaced.add(unit);
 			}
 		}
-		baseline.resetOwner(eventId, snapshots, current.shown(), notPlaced);
+		baseline.resetOwner(eventId, snapshots, shownNow, notPlaced);
+		notPlaced.forEach(unit -> backlog.hold(unit, "sie gehört nicht zum wiederhergestellten Stand und hat noch keinen Platz"));
 		forgetDerived(eventId);
 		removedByOthers.remove(eventId);
 		if (!current.items().isEmpty()) {
@@ -631,6 +638,7 @@ public class StoreEventRepository implements EventRepository {
 		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
 		successors.sort(EventMerge.MERGE_ORDER);
 		Map<UnitKey, UnitSnapshot> appliedPresentations = new HashMap<>();
+		Set<UnitKey> goneParents = goneParents(event, successors);
 		List<UnitSnapshot> apply = new ArrayList<>();
 		for (UnitSnapshot current : successors) {
 			UnitKey unit = current.unit();
@@ -643,11 +651,12 @@ public class StoreEventRepository implements EventRepository {
 					&& heldPresentations.contains(EventMerge.presentationKey(unit))) {
 				// gehört zur neuen Bestuhlung bzw. zur verschwindenden Vorstellung: erst mit ihr einarbeiten
 				backlog.undefer(unit);
-				backlog.hold(unit, "ihre Vorstellung ist zurückgestellt");
-			} else if (unit.type() == UnitType.BOOKING && event != null && !EventMerge.hasPlace(event, current,
-					appliedPresentations.get(EventMerge.presentationKey(unit)), hallLookup)) {
+				holdUnplaced(unit, "ihre Vorstellung ist zurückgestellt");
+			} else if (unit.type() == UnitType.BOOKING && event != null
+					&& !goneParents.contains(EventMerge.presentationKey(unit)) && !EventMerge.hasPlace(event, current,
+							appliedPresentations.get(EventMerge.presentationKey(unit)), hallLookup)) {
 				backlog.undefer(unit);
-				backlog.hold(unit, "ihr Sitz fehlt in der Bestuhlung der Vorstellung");
+				holdUnplaced(unit, "sie hat im Modell keinen Platz");
 			} else {
 				backlog.settle(unit);
 				apply.add(current);
@@ -673,8 +682,47 @@ public class StoreEventRepository implements EventRepository {
 		} else if (head != null && !headReadable) {
 			removeEvent(event, head, apply, warnings);
 		} else {
-			mergeInto(event, apply, changes, chains, warnings);
+			mergeInto(event, apply, changes, chains, goneParents, warnings);
 		}
+	}
+
+	/**
+	 * Die Vorstellungen der Buchungen unter {@code successors}, die nicht im Modell stehen und im Index gelöscht oder unlesbar
+	 * sind. Ihre Buchungen warten auf keinen Platz: Sie gehen nur in den Vergleichsstand. Fehlt die Vorstellung nur noch (sie
+	 * ist im Index nicht da oder lesbar), wartet die Buchung auf sie.
+	 */
+	private Set<UnitKey> goneParents(Event event, List<UnitSnapshot> successors) {
+		Set<UnitKey> missing = new HashSet<>();
+		if (event != null) {
+			for (UnitSnapshot snapshot : successors) {
+				UnitKey unit = snapshot.unit();
+				if (unit.type() == UnitType.BOOKING && EventMerge.presentation(event, unit.presentationId()) == null) {
+					missing.add(EventMerge.presentationKey(unit));
+				}
+			}
+		}
+		Set<UnitKey> gone = new HashSet<>();
+		if (!missing.isEmpty()) {
+			for (UnitSnapshot snapshot : sync.snapshots(missing).values()) {
+				boolean lockedWithoutVersion = snapshot.version() == null && (snapshot.status() == UnitState.Status.LOCKED_DAMAGED
+						|| snapshot.status() == UnitState.Status.LOCKED_FORMAT);
+				if (lockedWithoutVersion || (snapshot.version() != null && !UnitMapper.isReadable(snapshot))) {
+					gone.add(snapshot.unit());
+				}
+			}
+		}
+		return gone;
+	}
+
+	/**
+	 * Lässt die Buchung warten, bis ihr Platz im Modell da ist. Einen früheren Stand, den der Nutzer nicht im Modell hat
+	 * (etwa weil ihre Vorstellung das Modell verließ), nimmt sie aus dem Vergleichsstand: Sonst gälte er als gesehen, die
+	 * Buchung fiele aus der Warteliste, sobald der Index wieder den bekannten Stand zeigt, und ein Verkauf auf ihrem Sitz
+	 * baute auf dem fremden auf.
+	 */
+	private void holdUnplaced(UnitKey unit, String reason) {
+		baseline.forget(unit);
+		backlog.hold(unit, reason);
 	}
 
 	/** Alle Einheiten des Events sind erledigt: nichts davon ist zurückgestellt, wartet still oder hängt an einer Gabelung. */
@@ -683,7 +731,7 @@ public class StoreEventRepository implements EventRepository {
 		forkedParents.removeIf(unit -> eventId.equals(unit.eventId()));
 	}
 
-	private static Set<UnitKey> unitsOf(List<UnitSnapshot> snapshots) {
+	private static Set<UnitKey> unitsOf(Collection<UnitSnapshot> snapshots) {
 		Set<UnitKey> units = new HashSet<>();
 		snapshots.forEach(snapshot -> units.add(snapshot.unit()));
 		return units;
@@ -806,12 +854,12 @@ public class StoreEventRepository implements EventRepository {
 	 * {@code changingByOthers} folgt immer {@code changedByOthers}.
 	 */
 	private void mergeInto(Event event, List<UnitSnapshot> apply, LocalChanges changes,
-			Map<UnitKey, List<ChainStep>> chains, List<String> warnings) {
+			Map<UnitKey, List<ChainStep>> chains, Set<UnitKey> goneParents, List<String> warnings) {
 		String eventId = event.getId();
 		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
 				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
 		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
-		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup);
+		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, goneParents);
 		Set<UnitKey> adopted = new LinkedHashSet<>();
 		Set<UnitKey> waiting = new HashSet<>();
 		EventMerge.Sink sink = new EventMerge.Sink() {
@@ -824,7 +872,7 @@ public class StoreEventRepository implements EventRepository {
 			@Override
 			public void held(UnitSnapshot snapshot) {
 				waiting.add(snapshot.unit());
-				backlog.hold(snapshot.unit(), "sie hat im Modell keinen Platz");
+				holdUnplaced(snapshot.unit(), "sie hat im Modell keinen Platz");
 			}
 
 			@Override
@@ -904,9 +952,7 @@ public class StoreEventRepository implements EventRepository {
 			// das frische Event zeigt jeden Stand des Index, außer den Buchungen, die nicht zur Bestuhlung passen
 			forgetWaiting(eventId);
 			waiting.forEach(snapshot -> backlog.hold(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
-			Set<UnitKey> units = new HashSet<>();
-			all.forEach(snapshot -> units.add(snapshot.unit()));
-			listeners.notifyChangedByOthers(fresh, new ForeignBatch<>(units, copy -> {
+			listeners.notifyChangedByOthers(fresh, new ForeignBatch<>(unitsOf(all), copy -> {
 				try {
 					Event rebuilt = MAPPER.readValue(state, Event.class);
 					copy.copyFrom(rebuilt);

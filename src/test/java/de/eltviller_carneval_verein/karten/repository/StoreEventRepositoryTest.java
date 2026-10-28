@@ -1237,6 +1237,37 @@ class StoreEventRepositoryTest {
 	}
 
 	@Test
+	void restoreOverAnUnreadableBookingWritesASuccessor(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = smallEvent();
+		repository.saveEvent(event);
+		SavePoint s1 = savePoint(repository, event.getId(), 0);
+		clock.advance(10);
+		bookingOf(event, 0, "Müller").setLastName("Schulz");
+		repository.saveEvent(event);
+		clock.advance(10);
+		UnitKey seat = UnitKey.booking(event.getId(), event.getPresentations().get(0).getId(), "seat-1");
+		Version parent = sync.unitState(seat).head();
+		// der Inhalt sagt, die Buchung gehöre auf einen anderen Sitz: nicht anzeigbar, aber nicht gesperrt
+		ObjectNode payload = parent.payload().deepCopy();
+		payload.put("seatId", "seat-9");
+		sync.append("fremd", List.of(new Change(seat, List.of(parent.id()), payload, false)));
+		clock.advance(10);
+		StoreEventRepository fresh = TestRepositories.events(sync);
+		fresh.loadEvents();
+
+		Restored<Event> restored = fresh.restoreEvent(event.getId(), s1, e -> List.of());
+
+		assertEquals(List.of("Müller"), bookingNames(restored.restored()));
+		UnitState state = sync.unitState(seat);
+		assertEquals("Müller", state.head().payload().get("lastName").asText());
+		assertTrue(state.lost().isEmpty(), "das Wiederherstellen ersetzt die unlesbare Version als Nachfolger");
+		assertEquals(4, state.chain().size());
+	}
+
+	@Test
 	void eventAtOfLockedUnitIsRefused(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
 		StoreEventRepository repository = TestRepositories.events(sync);

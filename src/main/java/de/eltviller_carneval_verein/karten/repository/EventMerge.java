@@ -82,25 +82,37 @@ final class EventMerge {
 		private final List<UnitSnapshot> index;
 		private final Function<String, Hall> hallLookup;
 
+		/** Die Vorstellungen, die gelöscht oder unlesbar sind: Ihre Buchungen warten auf keinen Platz. */
+		private final Set<UnitKey> goneParents;
+
 		/** Die Kennungen der Platzhalter je Vorstellung und Sitz ({@code <presentationId>/<seatId>}). */
 		private final Map<String, String> placeholderIds;
 
-		/**
-		 * @param units      die einzuarbeitenden Stände (eines Events); eingearbeitet wird in der Reihenfolge Kopf,
-		 *                   Vorstellungen, Buchungen
-		 * @param index      die Stände des ganzen Events aus dem Index, aus denen eine neue Vorstellung samt ihren
-		 *                   Buchungen entsteht; leer, wenn keine neu ist
-		 * @param hallLookup die Halle zur ID, {@code null}, wenn es sie nicht gibt
-		 */
+		/** Ein Plan, in dem keine Vorstellung gelöscht oder unlesbar ist (siehe den Konstruktor mit {@code goneParents}). */
 		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup) {
-			this(sorted(units), List.copyOf(index), hallLookup, new HashMap<>());
+			this(units, index, hallLookup, Set.of());
+		}
+
+		/**
+		 * @param units       die einzuarbeitenden Stände (eines Events); eingearbeitet wird in der Reihenfolge Kopf,
+		 *                    Vorstellungen, Buchungen
+		 * @param index       die Stände des ganzen Events aus dem Index, aus denen eine neue Vorstellung samt ihren
+		 *                    Buchungen entsteht; leer, wenn keine neu ist
+		 * @param hallLookup  die Halle zur ID, {@code null}, wenn es sie nicht gibt
+		 * @param goneParents die Vorstellungen, die gelöscht oder unlesbar sind: Eine Buchung darunter, deren Vorstellung
+		 *                    nicht im Modell steht, geht nur in den Vergleichsstand. Sonst wartet sie auf ihre Vorstellung.
+		 */
+		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup,
+				Set<UnitKey> goneParents) {
+			this(sorted(units), List.copyOf(index), hallLookup, Set.copyOf(goneParents), new HashMap<>());
 		}
 
 		private Plan(List<UnitSnapshot> units, List<UnitSnapshot> index, Function<String, Hall> hallLookup,
-				Map<String, String> placeholderIds) {
+				Set<UnitKey> goneParents, Map<String, String> placeholderIds) {
 			this.units = units;
 			this.index = index;
 			this.hallLookup = hallLookup;
+			this.goneParents = goneParents;
 			this.placeholderIds = placeholderIds;
 		}
 
@@ -113,7 +125,7 @@ final class EventMerge {
 		Plan restrictedTo(Collection<UnitKey> keep) {
 			Set<UnitKey> kept = new HashSet<>(keep);
 			List<UnitSnapshot> remaining = units.stream().filter(s -> kept.contains(s.unit())).toList();
-			return new Plan(remaining, index, hallLookup, placeholderIds);
+			return new Plan(remaining, index, hallLookup, goneParents, placeholderIds);
 		}
 
 		/** Die neue Kennung des geleerten Platzhalters auf diesem Sitz, beim ersten Mal ausgewürfelt. */
@@ -174,8 +186,9 @@ final class EventMerge {
 	 * alles unberührt und sie wartet ({@link Sink#held}). Gelöscht oder unlesbar: nur die Kundendaten leeren, der
 	 * Platzhalter bekommt eine neue Kennung.</li>
 	 * <li>Buchung ohne Platz: anhand der Kennung aktualisieren, sonst anhängen; gelöscht oder unlesbar: entfernen.</li>
-	 * <li>Buchung unter einer Vorstellung, die nicht im Modell steht: lesbar wartet sie ({@link Sink#held}) und wird mit
-	 * der Vorstellung sichtbar; gelöscht oder unlesbar geht sie nur in den Vergleichsstand.</li>
+	 * <li>Buchung unter einer Vorstellung, die nicht im Modell steht: Ist die Vorstellung noch nicht da, wartet eine lesbare
+	 * Buchung ({@link Sink#held}) und wird mit ihr sichtbar. Gelöscht oder unlesbar, oder ist die Vorstellung gelöscht oder
+	 * unlesbar ({@link Plan}): nur in den Vergleichsstand.</li>
 	 * </ul>
 	 * Scheitert das Einarbeiten einer Einheit, ist das Modell für diese Einheit wieder wie vorher (die Einheiten davor
 	 * bleiben eingearbeitet und gemeldet), dann geht die Ausnahme weiter.
@@ -289,11 +302,11 @@ final class EventMerge {
 		Presentation presentation = presentation(event, unit.presentationId());
 		Booking state = UnitMapper.readUnit(snapshot, Booking.class);
 		if (presentation == null) {
-			if (state == null) {
-				// gelöscht oder unlesbar: Es gibt nichts, was auf einen Platz wartet
+			if (state == null || plan.goneParents.contains(presentationKey(unit))) {
+				// gelöscht oder unlesbar, oder ihre Vorstellung ist es: Es gibt nichts, was auf einen Platz wartet
 				sink.adopted(snapshot, false);
 			} else {
-				// sichtbar wird sie mit der Vorstellung; bis dahin gehört sie nicht in den Vergleichsstand
+				// ihre Vorstellung ist noch nicht da: sichtbar wird sie mit ihr, bis dahin steht sie nicht im Vergleichsstand
 				sink.held(snapshot);
 			}
 			return;

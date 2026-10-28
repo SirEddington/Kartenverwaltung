@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -318,6 +319,24 @@ class EventMergeTest {
 		assertEquals(List.of(unit), sink.held, "sie wartet auf ihre Vorstellung, statt in den Vergleichsstand zu gehen");
 		assertEquals(Map.of(), sink.adopted);
 		assertEquals(1, event.getPresentations().size());
+	}
+
+	@Test
+	void bookingOfAGoneInvisiblePresentationIsOnlyAdopted() {
+		Event event = event();
+		UnitKey unit = UnitKey.booking(event.getId(), "fehlt", "s1");
+		Event state = copyOfUnchecked(event);
+		UnitSnapshot snapshot = new UnitSnapshot(unit, nextVersion(), Status.OK, false,
+				UnitMapper.payloads(state).get(seat(event, "s1")));
+		Recording sink = new Recording();
+		// die Vorstellung ist gelöscht oder unlesbar: Auf einen Platz wartet nichts
+		EventMerge.Plan plan = new EventMerge.Plan(List.of(snapshot), List.of(), id -> null,
+				Set.of(UnitKey.presentation(event.getId(), "fehlt")));
+
+		EventMerge.apply(event, plan, sink);
+
+		assertEquals(Map.of(unit, false), sink.adopted);
+		assertEquals(List.of(), sink.held);
 	}
 
 	@Test

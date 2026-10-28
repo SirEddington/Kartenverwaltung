@@ -1426,6 +1426,113 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	@Test
+	void presentationLeftOutByARestoreIsPlacedByTheBacklogWithoutANotification() throws IOException {
+		Other other = other();
+		Presentation saturday = other.event().addPresentation("Samstag");
+		saturday.setHallId(hall.getId());
+		saturday.setSeatingPlanId(plan.getId());
+		BookingSync.sync(saturday, plan);
+		seat(saturday, 2).setLastName("Schmitz");
+		other.save();
+		unreadableForeignHead();
+		mine.applyForeign(allUnits());
+		List<SavePoint> points = mine.savePoints(event.getId());
+		Event restored = mine.restoreEvent(event.getId(), points.get(points.size() - 1), e -> List.of()).restored();
+		assertEquals(1, restored.getPresentations().size());
+		long before = files();
+
+		// kein Hinweis auf die Vorstellung: Sie wartet in der Warteliste, bis sie ins Modell passt
+		mine.retryDeferred();
+
+		assertEquals(List.of("Freitag", "Samstag"),
+				restored.getPresentations().stream().map(Presentation::getName).toList());
+		assertEquals("Schmitz", seat(restored.getPresentations().get(1), 2).getLastName());
+		mine.saveEvent(restored);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+	}
+
+	@Test
+	void hiddenBookingOfARevivedPresentationKeepsWaitingAndIsNotOverwritten() throws IOException {
+		Hall second = secondHall(1, 2);
+		mine.setHallLookup(lookup(second));
+		Other remote = other();
+		Presentation theirs = remote.friday();
+		// B löscht Freitag: Müllers Buchung verlässt mit ihm das Modell, bleibt aber im Vergleichsstand
+		remote.event().getPresentations().remove(theirs);
+		remote.save();
+		mine.applyForeign(allUnits());
+		assertTrue(event.getPresentations().isEmpty());
+		// B belebt Freitag im Bürgerhaus wieder: Müllers Sitz fehlt dort, seine Buchung wartet
+		theirs.setHallId(second.getId());
+		theirs.setSeatingPlanId(second.getSeatingPlans().get(0).getId());
+		remote.event().getPresentations().add(theirs);
+		remote.save();
+		mine.applyForeign(allUnits());
+		assertEquals(1, event.getPresentations().size());
+		assertNull(mine.knownUnit(seatUnit(friday, 0)), "wartend: ohne Vergleichsstand");
+		// B setzt Freitag zurück in die Stadthalle
+		theirs.setHallId(hall.getId());
+		theirs.setSeatingPlanId(plan.getId());
+		remote.save();
+		long before = files();
+
+		mine.applyForeign(allUnits());
+		mine.retryDeferred();
+
+		Presentation back = event.getPresentations().get(0);
+		assertEquals("Müller", seat(back, 0).getLastName(), "Müller kommt mit der Stadthalle zurück");
+		mine.saveEvent(event);
+		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
+	}
+
+	@Test
+	void saleOnSeatOfHiddenBookingAfterTheHallReturnsDoesNotBuildOnTheForeignSale() throws IOException {
+		Hall second = secondHall(1, 2);
+		mine.setHallLookup(lookup(second));
+		Other remote = other();
+		Presentation theirs = remote.friday();
+		remote.event().getPresentations().remove(theirs);
+		remote.save();
+		mine.applyForeign(allUnits());
+		theirs.setHallId(second.getId());
+		theirs.setSeatingPlanId(second.getSeatingPlans().get(0).getId());
+		remote.event().getPresentations().add(theirs);
+		remote.save();
+		mine.applyForeign(allUnits());
+		UnitKey seatZero = seatUnit(friday, 0);
+
+		// Die Buchung wartet ohne Vergleichsstand; ein Verkauf auf ihrem Sitz tritt gegen sie an
+		assertNull(mine.knownUnit(seatZero));
+		Presentation shown = event.getPresentations().get(0);
+		shown.setHallId(hall.getId());
+		shown.setSeatingPlanId(plan.getId());
+		BookingSync.switchPlan(shown, plan);
+		seat(shown, 0).setLastName("Eigen");
+		mine.saveEvent(event);
+
+		Version ours = sync.history(seatZero).stream()
+				.filter(v -> "Eigen".equals(v.payload().get("lastName").asText())).findFirst().orElseThrow();
+		assertEquals(List.of(), ours.parents(), "eine Gabelung, nicht der Nachfolger des fremden Verkaufs");
+		assertEquals("Müller", sync.unitState(seatZero).head().payload().get("lastName").asText());
+	}
+
+	@Test
+	void foreignWriteToBookingOfADeletedPresentationIsOnlyAdopted() throws IOException {
+		Other remote = other();
+		remote.event().getPresentations().remove(remote.friday());
+		remote.save();
+		mine.applyForeign(allUnits());
+		assertTrue(event.getPresentations().isEmpty());
+		UnitKey unit = seatUnit(friday, 0);
+
+		Version written = foreignVersion(unit, "Fremd");
+		mine.applyForeign(List.of(unit));
+
+		assertEquals(written.id(), mine.knownUnit(unit).version(), "nichts wartet auf einen Platz: nur der Vergleichsstand");
+		assertTrue(mine.retryDeferred().deferred().isEmpty());
+	}
+
+	@Test
 	void unassignedBookingBeforeItsPresentationWaitsWhileItsOldSeatIsInThePlan() throws IOException {
 		Other remote = other();
 		Presentation saturday = remote.event().addPresentation("Samstag");
