@@ -1308,22 +1308,22 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	@Test
-	void savingAHeldEventAfterAForeignUnreadableHeadWritesItsChangesAsSuccessors() throws IOException {
+	void savingAHeldEventAfterAForeignUnreadableHeadIsRefused() throws IOException {
 		unreadableForeignHead();
 		mine.applyForeign(List.of(head()));
 		assertEquals(List.of("removed Prunksitzung"), recorder.calls);
-		// eine Ansicht hält das Event noch und speichert Änderungen darunter, die der Nutzer gesehen hat
+		long before = files();
+		// eine Ansicht hält das Event noch und will Änderungen darunter speichern
 		friday.setName("Freitagabend");
 		seat(friday, 0).setLastName("Neu");
 
-		mine.saveEvent(event);
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
 
-		UnitState booking = sync.unitState(seatUnit(friday, 0));
-		assertEquals("Neu", booking.head().payload().get("lastName").asText());
-		assertTrue(booking.lost().isEmpty(), "Nachfolger, keine unterlegene Gabelung");
-		UnitState presentation = sync.unitState(UnitKey.presentation(event.getId(), friday.getId()));
-		assertEquals("Freitagabend", presentation.head().payload().get("name").asText());
-		assertTrue(presentation.lost().isEmpty());
+		assertEquals("„Prunksitzung“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.",
+				refused.getMessage());
+		assertEquals(before, files(), "nichts geschrieben: der alte Stand überschriebe neuere fremde Stände");
+		assertEquals("Müller", sync.unitState(seatUnit(friday, 0)).head().payload().get("lastName").asText());
+		assertTrue(mine.loadEvents().isEmpty());
 	}
 
 	@Test
@@ -1342,18 +1342,20 @@ class StoreEventRepositoryForeignTest {
 		mine.applyForeign(allUnits());
 		assertFalse(mine.loadEvents().contains(event));
 		assertNotNull(mine.knownUnit(presentation));
-		// eine Ansicht hält das Event noch und speichert es: Es ist wieder da, die Vorstellung kam nie hinein
-		mine.saveEvent(event);
-		assertTrue(mine.loadEvents().contains(event));
-		assertEquals(1, event.getPresentations().size());
+		// das Wiederherstellen des ersten Stands bringt das Event zurück (eine Ansicht, die das alte Objekt hält, wird
+		// abgelehnt); die Vorstellung kam nie hinein
+		List<SavePoint> points = mine.savePoints(event.getId());
+		Event restored = mine.restoreEvent(event.getId(), points.get(points.size() - 1), e -> List.of()).restored();
+		assertTrue(mine.loadEvents().contains(restored));
+		assertEquals(1, restored.getPresentations().size());
 		long before = files();
 
 		mine.applyForeign(List.of(presentation));
 
 		assertEquals(List.of("Freitag", "Samstag"),
-				event.getPresentations().stream().map(Presentation::getName).toList());
-		assertEquals("Schmitz", seat(event.getPresentations().get(1), 2).getLastName());
-		mine.saveEvent(event);
+				restored.getPresentations().stream().map(Presentation::getName).toList());
+		assertEquals("Schmitz", seat(restored.getPresentations().get(1), 2).getLastName());
+		mine.saveEvent(restored);
 		assertEquals(before, files(), "nichts Fremdes wird geschrieben oder gelöscht");
 	}
 

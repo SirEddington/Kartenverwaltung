@@ -84,11 +84,12 @@ public class StoreEventRepository implements EventRepository {
 	private final Map<UnitKey, ObjectNode> derived = new HashMap<>();
 
 	/**
-	 * Die IDs der Events, die ein fremd gelöschter Kopf aus dem Cache genommen hat. Hält eine Ansicht ein solches Event
-	 * noch, lehnt {@link #saveEvent} es ab: Es schriebe seinen alten Stand über die fremde Löschung. Kommt das Event wieder
-	 * in den Cache, gilt das nicht mehr.
+	 * Die IDs der Events, die ein fremder gelöschter oder unlesbarer Kopf aus dem Cache genommen hat. Hält eine Ansicht ein
+	 * solches Event noch, lehnt {@link #saveEvent} es ab: Es schriebe seinen alten Stand über die fremden Stände (entfernt
+	 * wird ein Event nur, wenn es sauber und nicht in Bearbeitung ist, und die Ansicht verlässt es). Kommt das Event wieder in
+	 * den Cache, gilt das nicht mehr; das Wiederherstellen schreibt über {@link #write} und ist davon nicht betroffen.
 	 */
-	private final Set<String> deletedByOthers = new HashSet<>();
+	private final Set<String> removedByOthers = new HashSet<>();
 
 	/** Ob für das Modellobjekt einer Einheit gerade eine Eingabe offen ist (siehe {@link #setEditingCheck}). */
 	private Predicate<Object> inEditing = model -> false;
@@ -161,7 +162,7 @@ public class StoreEventRepository implements EventRepository {
 		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
 		baseline.reset(snapshots, assembly.shown());
 		derived.clear();
-		deletedByOthers.clear();
+		removedByOthers.clear();
 		addLoadWarnings(assembly.warnings());
 		return new ArrayList<>(assembly.items());
 	}
@@ -191,7 +192,7 @@ public class StoreEventRepository implements EventRepository {
 		ensureLoaded();
 		// Ein fremder Stand hat das Objekt im Cache ersetzt oder gelöscht: Das alte zu speichern überschriebe ihn
 		Event cached = cachedEvent(event.getId());
-		if ((cached != null && cached != event) || (cached == null && deletedByOthers.contains(event.getId()))) {
+		if ((cached != null && cached != event) || (cached == null && removedByOthers.contains(event.getId()))) {
 			throw new LockedUnitException("„" + EntityLabels.nameOrPlaceholder(event.getName())
 					+ "“ wurde inzwischen auf einem anderen Rechner geändert. Bitte die Ansicht neu öffnen.");
 		}
@@ -312,7 +313,7 @@ public class StoreEventRepository implements EventRepository {
 		Assembly<Event> current = UnitMapper.assembleEvents(snapshots);
 		baseline.resetOwner(eventId, snapshots, current.shown());
 		forgetDerived(eventId);
-		deletedByOthers.remove(eventId);
+		removedByOthers.remove(eventId);
 		if (!current.items().isEmpty()) {
 			Event fresh = current.items().get(0);
 			int index = cachedEvents.indexOf(fresh);
@@ -768,7 +769,7 @@ public class StoreEventRepository implements EventRepository {
 			forgetDerived(eventId);
 			warnings.addAll(assembly.warnings());
 			waiting.forEach(snapshot -> hold(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
-			deletedByOthers.remove(eventId);
+			removedByOthers.remove(eventId);
 			for (Event added : assembly.items()) {
 				// einsortieren wie beim Laden
 				int index = 0;
@@ -797,10 +798,7 @@ public class StoreEventRepository implements EventRepository {
 			adopt(eventId, snapshot, false);
 		}
 		forgetDerived(eventId);
-		// nur gelöscht: Unter einem unlesbaren Kopf schreibt eine Ansicht, die das Event hält, ihre Änderungen als Nachfolger
-		if (head.deleted()) {
-			deletedByOthers.add(eventId);
-		}
+		removedByOthers.add(eventId);
 		warnIfUnreadable(head, warnings);
 		listeners.notifyRemovedByOthers(event);
 	}
