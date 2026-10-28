@@ -86,7 +86,13 @@ public final class SeatDetailPopup {
 			// Ein Handler statt setOnHidden: Die Saalansicht setzt den Handler beim Schließen auf null
 			popup.addEventHandler(WindowEvent.WINDOW_HIDDEN, event -> EditingUnits.getInstance().end(this));
 		}
-		popup.show(owner, screenX, screenY);
+		try {
+			popup.show(owner, screenX, screenY);
+		} catch (RuntimeException e) {
+			// Nie gezeigt, also nie geschlossen: Die Buchungen blieben sonst bis zum Neustart "in Bearbeitung"
+			EditingUnits.getInstance().end(this);
+			throw e;
+		}
 		// Ein Popup bekommt die Stylesheets der Haupt-Szene nicht mit: Buttons, Felder usw. sähen sonst anders aus
 		popup.getScene().getStylesheets().add(HallOverviewController.APP_STYLESHEET);
 	}

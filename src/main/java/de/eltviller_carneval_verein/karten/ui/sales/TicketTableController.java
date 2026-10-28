@@ -81,6 +81,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 	// Enthält NUR die Buchungen des aktuell gewählten Events
 	private final ObservableList<BookingDTO> masterData = FXCollections.observableArrayList();
 	private FilteredList<BookingDTO> filteredData;
+	// Der Suchtext, nach dem filteredData gerade filtert (die Shell gibt ihn mit filter vor)
+	private String searchQuery = "";
 	private ContextMenu selectionMenu;
 	private SeatDetailPopup activeDialog;
 
@@ -494,6 +496,12 @@ public class TicketTableController implements ContentController, SalesStateAware
 		foreignChangePending = false;
 		List<BookingDTO> rows = buildRows();
 		if (sameBookings(masterData, rows)) {
+			// Dieselben Buchungen mit fremden Daten: Die Suche prüft sie neu (ein fremder Name kann jetzt passen oder nicht mehr)
+			if (!searchQuery.isBlank()) {
+				List<Booking> selection = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
+				filter(searchQuery);
+				restoreSelection(selection);
+			}
 			seatTable.refresh();
 			updateUnassignedBar();
 			return;
@@ -605,8 +613,11 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	@Override
 	public void filter(String query) {
-		// Vorname, Nachname und Kommentar zusammen, jedes Suchwort muss vorkommen (BookingSearch)
-		filteredData.setPredicate(dto -> BookingSearch.matches(dto.getBooking(), query));
+		searchQuery = query == null ? "" : query;
+		// Vorname, Nachname und Kommentar zusammen, jedes Suchwort muss vorkommen (BookingSearch); ein neues Prädikat prüft
+		// alle Zeilen neu
+		String current = searchQuery;
+		filteredData.setPredicate(dto -> BookingSearch.matches(dto.getBooking(), current));
 	}
 
 	@Override
