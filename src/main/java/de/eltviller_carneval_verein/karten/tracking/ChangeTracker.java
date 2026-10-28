@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
@@ -267,6 +268,43 @@ public final class ChangeTracker<T> {
 		entry.last = current;
 		entry.dirty.set(!current.equals(baseline));
 		updateAnyDirty();
+	}
+
+	/**
+	 * Wie {@link #rebase} mit dem aktuellen Zustand der Entität als neuer Baseline: Sie ist danach sauber. Der Zustand wird
+	 * nur einmal serialisiert.
+	 *
+	 * @throws IllegalArgumentException wenn keine Entität mit dieser ID verfolgt wird
+	 */
+	public void rebaseToCurrent(T entity) {
+		Snapshot current = snapshot(entity);
+		Entry<T> entry = entries.get(idOf.apply(entity));
+		if (entry == null) {
+			throw new IllegalArgumentException("Wird nicht verfolgt: " + entity);
+		}
+		entry.entity = entity;
+		entry.baseline = current;
+		entry.last = current;
+		entry.dirty.set(false);
+		updateAnyDirty();
+	}
+
+	/**
+	 * Ein Listener für das Repository der Entitäten: Jedes Speichern führt den gespeicherten Stand nach
+	 * ({@link #markSaved}), jedes Löschen beendet die Verfolgung ({@link #untrack}), egal von wo aus gespeichert wurde.
+	 */
+	public RepositoryListener<T> repositoryUpdater() {
+		return new RepositoryListener<>() {
+			@Override
+			public void saved(T entity) {
+				markSaved(entity);
+			}
+
+			@Override
+			public void deleted(T entity) {
+				untrack(entity);
+			}
+		};
 	}
 
 	/**

@@ -494,10 +494,10 @@ public class TicketTableController implements ContentController, SalesStateAware
 		}
 		foreignChangePending = false;
 		List<BookingDTO> rows = buildRows();
+		List<Booking> selection = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
 		if (sameBookings(masterData, rows)) {
 			// Dieselben Buchungen mit fremden Daten: Die Suche prüft sie neu (ein fremder Name kann jetzt passen oder nicht mehr)
 			if (!searchQuery.isBlank()) {
-				List<Booking> selection = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
 				filter(searchQuery);
 				restoreSelection(selection);
 			}
@@ -505,7 +505,6 @@ public class TicketTableController implements ContentController, SalesStateAware
 			updateUnassignedBar();
 			return;
 		}
-		List<Booking> selection = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
 		masterData.clear();
 		masterData.setAll(rows);
 		updateUnassignedBar();

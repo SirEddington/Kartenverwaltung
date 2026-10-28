@@ -74,6 +74,19 @@ public class Event {
 	}
 	// <-- Getter und Setter
 
+	/** Die Vorstellung mit dieser ID; {@code null} bei unbekannter oder fehlender ID. */
+	public Presentation findPresentation(String id) {
+		if (presentations == null) {
+			return null;
+		}
+		for (Presentation presentation : presentations) {
+			if (presentation.getId().equals(id)) {
+				return presentation;
+			}
+		}
+		return null;
+	}
+
 	/** Nimmt jeden Wert an; ein leerer Name wird vom {@code EventValidator} gemeldet (EVT-002). */
 	public void setName(String name) {
 		this.name = name;

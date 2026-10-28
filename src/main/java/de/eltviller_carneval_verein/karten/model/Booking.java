@@ -315,24 +315,7 @@ public class Booking {
 	/** Kopie aller gespeicherten Felder (auch "Ohne Platz"); ohne Vorstellung als Elternteil. */
 	public Booking copy() {
 		Booking copy = new Booking();
-		copy.id = getId();
-		copy.seatId = seatId;
-		copy.rowLabel = rowLabel;
-		copy.tableNumber = tableNumber;
-		copy.seatNumber = seatNumber;
-		copy.category = category;
-		copy.wheelchairAccessible = wheelchairAccessible;
-		copy.price = price;
-		copy.setPaymentStatus(getPaymentStatus());
-		copy.collected = collected;
-		copy.reservationDate = reservationDate;
-		copy.paymentDate = paymentDate;
-		copy.collectionDate = collectionDate;
-		copy.lastName = lastName;
-		copy.firstName = firstName;
-		copy.eMail = eMail;
-		copy.comment = comment;
-		copy.unassigned = unassigned;
+		copy.copyFrom(this);
 		return copy;
 	}
 

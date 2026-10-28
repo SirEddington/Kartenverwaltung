@@ -362,7 +362,7 @@ public class EventEditController {
 			return;
 		}
 		eventTable.getSelectionModel().select(event);
-		Presentation presentation = event.getPresentations().stream().filter(candidate -> candidate.getId().equals(presentationId)).findFirst().orElse(null);
+		Presentation presentation = event.findPresentation(presentationId);
 		refreshPresentationTable(event, presentation);
 
 		masterTableData.stream().filter(item -> item.label().equals(tableLabel)).findFirst().ifPresent(item -> tableTable.getSelectionModel().select(item));
@@ -1029,8 +1029,7 @@ public class EventEditController {
 		String eventId = currentEvent == null ? null : currentEvent.getId();
 		String presentationId = currentPres == null ? null : currentPres.getId();
 		Event event = StoreEventRepository.getInstance().loadEvents().stream().filter(candidate -> candidate.getId().equals(eventId)).findFirst().orElse(null);
-		Presentation presentation = event == null ? null
-				: event.getPresentations().stream().filter(candidate -> candidate.getId().equals(presentationId)).findFirst().orElse(null);
+		Presentation presentation = event == null ? null : event.findPresentation(presentationId);
 		MainApp.showEventEditView(event, presentation, false);
 	}
 

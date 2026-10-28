@@ -515,15 +515,7 @@ final class EventMerge {
 
 	/** Die Vorstellung mit dieser ID im Event, sonst {@code null}. */
 	static Presentation presentation(Event event, String presentationId) {
-		if (event.getPresentations() == null) {
-			return null;
-		}
-		for (Presentation presentation : event.getPresentations()) {
-			if (presentation.getId().equals(presentationId)) {
-				return presentation;
-			}
-		}
-		return null;
+		return event.findPresentation(presentationId);
 	}
 
 	/**

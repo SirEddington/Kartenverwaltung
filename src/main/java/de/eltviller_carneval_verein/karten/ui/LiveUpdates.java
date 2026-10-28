@@ -110,7 +110,7 @@ public final class LiveUpdates {
 
 		// Eine Halle ist gesperrt, solange sie bearbeitet wird oder Buchungen in ihren Vorstellungen ungespeichert sind oder
 		// bearbeitet werden (der Abgleich mit der neuen Bestuhlung nähme sonst einen Platzhalter weg, in den gerade getippt wird)
-		halls.setBlockedCheck(hall -> editing.isEditing(hall) || hasUnsavedBookings(hall) || isEditingIn(hall, editing));
+		halls.setBlockedCheck(hall -> editing.isEditing(hall) || isEditingIn(hall, editing) || hasUnsavedBookings(hall));
 		events.setEditingCheck(editing::isEditing);
 		events.setHallLookup(halls::findById);
 		halls.addListener(new HallListener());
@@ -261,33 +261,35 @@ public final class LiveUpdates {
 			return false;
 		}
 		Set<String> presentationIds = new HashSet<>();
-		for (Event event : events.loadEvents()) {
-			for (Presentation presentation : presentationsOf(event)) {
-				if (hall.getId().equals(presentation.getHallId())) {
-					presentationIds.add(presentation.getId());
-				}
-			}
-		}
+		presentationsIn(hall).forEach(presentation -> presentationIds.add(presentation.getId()));
 		return changed.stream().anyMatch(unit -> unit.type() == UnitType.BOOKING && presentationIds.contains(unit.presentationId()));
 	}
 
 	/** {@code true}, wenn eine Vorstellung in dieser Halle oder eine ihrer Buchungen gerade bearbeitet wird. */
 	private boolean isEditingIn(Hall hall, EditingUnits editing) {
-		for (Event event : events.loadEvents()) {
-			for (Presentation presentation : presentationsOf(event)) {
-				if (!hall.getId().equals(presentation.getHallId())) {
-					continue;
-				}
-				if (editing.isEditing(presentation)) {
-					return true;
-				}
-				List<Booking> bookings = presentation.getBookings() != null ? presentation.getBookings() : List.of();
-				if (bookings.stream().anyMatch(editing::isEditing)) {
-					return true;
-				}
+		for (Presentation presentation : presentationsIn(hall)) {
+			if (editing.isEditing(presentation)) {
+				return true;
+			}
+			List<Booking> bookings = presentation.getBookings() != null ? presentation.getBookings() : List.of();
+			if (bookings.stream().anyMatch(editing::isEditing)) {
+				return true;
 			}
 		}
 		return false;
+	}
+
+	/** Alle Vorstellungen aller Events, die in dieser Halle stattfinden. */
+	private List<Presentation> presentationsIn(Hall hall) {
+		List<Presentation> result = new ArrayList<>();
+		for (Event event : events.loadEvents()) {
+			for (Presentation presentation : presentationsOf(event)) {
+				if (hall.getId().equals(presentation.getHallId())) {
+					result.add(presentation);
+				}
+			}
+		}
+		return result;
 	}
 
 	// <-- Einarbeiten
@@ -331,7 +333,7 @@ public final class LiveUpdates {
 		public void changedByOthers(Hall hall, ForeignBatch<Hall> batch) {
 			changedHallIds.add(hall.getId());
 			if (hallTracker.baseline(hall) != null && !hallTracker.isNew(hall)) {
-				hallTracker.rebase(hall, hallTracker.snapshotOf(hall));
+				hallTracker.rebaseToCurrent(hall);
 			}
 		}
 
@@ -380,7 +382,7 @@ public final class LiveUpdates {
 			return;
 		}
 		if (!eventTracker.isDirty(event)) {
-			eventTracker.rebase(event, eventTracker.snapshotOf(event));
+			eventTracker.rebaseToCurrent(event);
 			return;
 		}
 		try {

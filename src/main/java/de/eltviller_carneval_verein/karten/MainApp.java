@@ -15,7 +15,6 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
@@ -197,8 +196,8 @@ public class MainApp extends Application {
 		StoreEventRepository repository = StoreEventRepository.getInstance();
 
 		// Jedes Speichern und Löschen führt den gespeicherten Stand der Änderungserkennung nach, egal von wo aus
-		repository.addListener(trackerUpdater(ChangeTracker.events()));
-		halls.addListener(trackerUpdater(ChangeTracker.halls()));
+		repository.addListener(ChangeTracker.events().repositoryUpdater());
+		halls.addListener(ChangeTracker.halls().repositoryUpdater());
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
 		LiveUpdates.install(SyncService.getInstance());
 		ChangeTrigger.install();
@@ -236,20 +235,6 @@ public class MainApp extends Application {
 	@Override
 	public void stop() {
 		SyncService.instanceIfCreated().ifPresent(SyncService::closeIndex);
-	}
-
-	private static <T> RepositoryListener<T> trackerUpdater(ChangeTracker<T> tracker) {
-		return new RepositoryListener<>() {
-			@Override
-			public void saved(T entity) {
-				tracker.markSaved(entity);
-			}
-
-			@Override
-			public void deleted(T entity) {
-				tracker.untrack(entity);
-			}
-		};
 	}
 
 	public static void showMenuView() {
