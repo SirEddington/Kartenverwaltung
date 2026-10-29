@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -49,8 +50,10 @@ public final class ConflictList {
 	 * @param label der Name der Gruppe für die Anzeige
 	 * @param mine  der eigene Wert als Text ("dein Wert")
 	 * @param valid der gültige Wert, der des Gewinners, als Text
+	 * @param adopted ob das Modell diesen eigenen Wert schon hat ("übernommen"): Dann gibt es für die Gruppe keine Aktion
+	 *                mehr. Wird bei jedem {@link ConflictList#rows()} aus dem Modell abgeleitet, nichts davon ist gespeichert.
 	 */
-	public record FieldRow(String group, String label, String mine, String valid) {
+	public record FieldRow(String group, String label, String mine, String valid, boolean adopted) {
 	}
 
 	/**
@@ -60,7 +63,8 @@ public final class ConflictList {
 	 * @param kindText    die Art als Text
 	 * @param entry       der Eintrag (Event, Vorstellung, Platz bzw. Kunde; bei einer Halle ihr Name)
 	 * @param counterpart die Gegenseite: Rechner und Bediener, soweit bekannt
-	 * @param at          der Zeitpunkt, an dem die Version gespeichert wurde, die den Konflikt trägt
+	 * @param at          der Zeitpunkt der Gegenseite (ihre Version); ohne bekannte Version der Zeitpunkt der Version, die den
+	 *                    Konflikt trägt
 	 * @param fields      die strittigen Feldgruppen (nur bei {@link ConflictNote.Kind#FIELDS})
 	 * @param action      die Aktion der Zeile
 	 * @param group       bei einem Doppelverkauf der Speichervorgang, dessen Zeilen zusammengehören; sonst {@code null}
@@ -81,6 +85,7 @@ public final class ConflictList {
 
 	private final Supplier<List<OpenConflict>> source;
 	private final Function<UnitKey, String> labelOf;
+	private final BiPredicate<OpenConflict, String> adopted;
 
 	/** Die Konflikte, die der Nutzer im Dialog gesehen hat. */
 	private final Set<ConflictKey> seen = new HashSet<>();
@@ -92,8 +97,18 @@ public final class ConflictList {
 	 * @param labelOf der Anzeigename einer Einheit: Event, Vorstellung, Platz bzw. Kunde; bei einer Halle der Hallenname
 	 */
 	public ConflictList(Supplier<List<OpenConflict>> source, Function<UnitKey, String> labelOf) {
+		this(source, labelOf, (conflict, group) -> false);
+	}
+
+	/**
+	 * @param adopted sagt zu einem Konflikt und dem Namen einer seiner Feldgruppen, ob das Modell den eigenen Wert schon hat
+	 *                (in der App {@code ConflictActions::isAdopted}); {@link FieldRow#adopted()}
+	 */
+	public ConflictList(Supplier<List<OpenConflict>> source, Function<UnitKey, String> labelOf,
+			BiPredicate<OpenConflict, String> adopted) {
 		this.source = source;
 		this.labelOf = labelOf;
+		this.adopted = adopted;
 	}
 
 	/**
@@ -146,9 +161,11 @@ public final class ConflictList {
 		}
 		ConflictNote.Party other = note.other();
 		String counterpart = other == null ? UNKNOWN_MACHINE : counterpart(other.machineName(), other.operator());
-		List<FieldRow> fields = note.fields().stream().map(ConflictList::fieldRow).toList();
+		Instant at = other == null ? conflict.at() : Instant.ofEpochMilli(other.version().epochMillis());
+		List<FieldRow> fields = note.fields().stream()
+				.map(field -> fieldRow(field, adopted.test(conflict, field.group()))).toList();
 		String group = note.kind() == ConflictNote.Kind.DOUBLE_SALE ? conflict.saveId() : null;
-		return new Row(conflict, kindText(note.kind()), entry, counterpart, conflict.at(), fields,
+		return new Row(conflict, kindText(note.kind()), entry, counterpart, at, fields,
 				actionOf(note.kind(), conflict.unit()), group);
 	}
 
@@ -185,9 +202,9 @@ public final class ConflictList {
 		return text == null || text.isBlank();
 	}
 
-	private static FieldRow fieldRow(FieldConflict conflict) {
+	private static FieldRow fieldRow(FieldConflict conflict, boolean adopted) {
 		return new FieldRow(conflict.group(), groupLabel(conflict.group()), valueText(conflict.mine()),
-				valueText(conflict.theirs()));
+				valueText(conflict.theirs()), adopted);
 	}
 
 	private static String groupLabel(String group) {

@@ -71,7 +71,40 @@ class ConflictListTest {
 		assertEquals(Action.ASSIGN_PLACE, rows.get(0).action());
 		assertEquals("Doppelverkauf", rows.get(0).kindText());
 		assertEquals("Label " + seat("s1").relativePath(), rows.get(0).entry());
-		assertEquals(rows.get(0).conflict().at(), rows.get(0).at());
+		assertEquals(Instant.ofEpochMilli(2), rows.get(0).at(), "der Zeitpunkt der Gegenseite (ihre Version)");
+	}
+
+	@Test
+	void rowWithoutKnownCounterpartVersionUsesTheTimeOfTheConflict() {
+		OpenConflict withoutOther = conflict(seat("s1"), "a", note(Kind.DOUBLE_SALE, null));
+		source.add(withoutOther);
+		UnitKey show = UnitKey.presentation("ev", "pr");
+		source.add(new OpenConflict(nextId(), show, AT.plusSeconds(99), "del", null,
+				new ParentDeletion(show, "Kasse 3", null, List.of(seat("s1")))));
+
+		List<Row> rows = list.rows();
+
+		assertEquals(withoutOther.at(), rows.get(0).at());
+		assertEquals(AT.plusSeconds(99), rows.get(1).at());
+	}
+
+	@Test
+	void fieldRowsShowWhichGroupsAreAlreadyAdopted() {
+		ConflictNote note = new ConflictNote(Kind.FIELDS, "me", party("Kasse 1", null),
+				List.of(new FieldConflict("customer", JsonNodeFactory.instance.objectNode().put("lastName", "Meier"),
+						JsonNodeFactory.instance.objectNode().put("lastName", "Maier")),
+						new FieldConflict("comment", JsonNodeFactory.instance.objectNode().put("comment", "x"),
+								JsonNodeFactory.instance.objectNode().put("comment", "y"))),
+				null, null, nextId());
+		source.add(conflict(seat("s1"), "a", note));
+		ConflictList withState = new ConflictList(() -> List.copyOf(source), unit -> "Label",
+				(conflict, group) -> group.equals("comment"));
+
+		List<ConflictList.FieldRow> fields = withState.rows().get(0).fields();
+
+		assertEquals(List.of(false, true), fields.stream().map(ConflictList.FieldRow::adopted).toList());
+		assertEquals(List.of(false, false), list.rows().get(0).fields().stream().map(ConflictList.FieldRow::adopted).toList(),
+				"ohne Auskunft über das Modell ist nichts übernommen");
 	}
 
 	@Test

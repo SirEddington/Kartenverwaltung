@@ -3,11 +3,15 @@ package de.eltviller_carneval_verein.karten.ui;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
@@ -17,6 +21,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.FieldConflict;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
@@ -128,7 +133,7 @@ public final class ConflictActions {
 		}
 		boolean subject = switch (row.action()) {
 		case ASSIGN_PLACE -> bookingToAssign(row) != null;
-		case TAKE_MY_VALUE -> valueTarget(row) != null;
+		case TAKE_MY_VALUE -> valueTarget(row) != null && !allAdopted(row.conflict());
 		case TAKE_MY_HALL -> hallToReplace(row) != null;
 		case RESTORE_BOOKING -> restoreOf(row) != null;
 		case NONE -> false;
@@ -155,23 +160,33 @@ public final class ConflictActions {
 	/**
 	 * Übernimmt den eigenen Wert einer Feldgruppe: Das Modell bekommt die Felder der Gruppe aus dem Vermerk
 	 * ({@link FieldConflict#mine()}), dann wird das Event gespeichert. Die Änderung gilt für die Einheit, auf die der Vermerk
-	 * sie übertragen hat ({@link ConflictNote#moved()}), sonst für die der Zeile.
+	 * sie übertragen hat ({@link ConflictNote#moved()}), sonst für die der Zeile. Hat der Vermerk nur eine Gruppe, ist die
+	 * Zeile danach bestätigt; bei mehreren erst, wenn jede Gruppe übernommen ist ({@link #isAdopted}), sonst bleibt sie offen.
 	 *
 	 * @throws IllegalStateException wenn die Aktion gesperrt ist, die Gruppe nicht zur Zeile gehört oder Ändern, Speichern
-	 *                               oder Bestätigen scheitert; das Modell ist dann wieder wie vorher, nichts bestätigt
+	 *                               oder Bestätigen scheitert; nichts ist bestätigt. Das Modell ist wieder wie vorher, außer
+	 *                               der Wert wurde schon geschrieben: Dann bleibt es, und der Text beginnt mit "Gespeichert,
+	 *                               aber nicht bestätigt".
 	 */
 	public void takeMyValue(Row row, String group) {
 		require(row, Action.TAKE_MY_VALUE);
 		FieldConflict conflict = row.conflict().note().fields().stream().filter(field -> field.group().equals(group))
 				.findFirst().orElseThrow(() -> new IllegalStateException(
 						"Die Gruppe \"" + group + "\" gehört nicht zu diesem Konflikt."));
+		if (isAdopted(row.conflict(), group)) {
+			throw new IllegalStateException("Dieser Wert ist schon übernommen.");
+		}
 		UnitKey unit = valueUnit(row);
 		Event event = events.findEvent(unit.eventId());
 		ObjectNode before = events.payloadOf(unit);
+		VersionId versionBefore = versionOf(unit);
 		try {
 			events.applyGroup(unit, group, conflict.mine());
 			save(event);
 		} catch (RuntimeException e) {
+			if (writtenDespite(unit, versionBefore)) {
+				throw writtenButNotAcknowledged(e);
+			}
 			try {
 				events.applyFields(unit, before);
 			} catch (RuntimeException undoFailed) {
@@ -179,7 +194,59 @@ public final class ConflictActions {
 			}
 			throw failure(e);
 		}
-		acknowledge(row);
+		// mehrere Gruppen: Die Zeile bleibt offen, bis jede übernommen ist (oder der Nutzer sie mit "Erledigt" schließt)
+		if (row.conflict().note().fields().size() == 1 || allAdopted(row.conflict())) {
+			acknowledge(row);
+		}
+	}
+
+	/**
+	 * Ob das Modell den eigenen Wert der Feldgruppe schon hat ("übernommen"): Jedes Feld des eigenen Werts aus dem Vermerk
+	 * steht so im Modell der Einheit, auf der die Aktion wirkt. Abgeleitet aus dem Modell, nichts davon ist gespeichert.
+	 * Nur für Feldkonflikte von Event, Vorstellung und Buchung; sonst und bei einer Gruppe ohne Felder {@code false}.
+	 */
+	public boolean isAdopted(OpenConflict conflict, String group) {
+		ConflictNote note = conflict.note();
+		if (note == null || note.kind() != ConflictNote.Kind.FIELDS || conflict.unit().type() == UnitType.HALL) {
+			return false;
+		}
+		FieldConflict field = note.fields().stream().filter(candidate -> candidate.group().equals(group)).findFirst()
+				.orElse(null);
+		if (field == null || field.mine().isEmpty()) {
+			return false;
+		}
+		ObjectNode payload;
+		try {
+			payload = events.payloadOf(note.moved() != null ? note.moved() : conflict.unit());
+		} catch (IllegalStateException e) {
+			return false;
+		}
+		if (payload == null) {
+			return false;
+		}
+		Iterator<Map.Entry<String, JsonNode>> values = field.mine().fields();
+		while (values.hasNext()) {
+			Map.Entry<String, JsonNode> entry = values.next();
+			if (!sameValue(payload.get(entry.getKey()), entry.getValue())) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** Gleiche Werte; ein fehlendes Feld gilt als {@code null}, Zahlen zählen nach ihrem Wert. */
+	private static boolean sameValue(JsonNode now, JsonNode wanted) {
+		JsonNode left = now == null ? NullNode.getInstance() : now;
+		if (left.equals(wanted)) {
+			return true;
+		}
+		return left.isNumber() && wanted.isNumber() && left.decimalValue().compareTo(wanted.decimalValue()) == 0;
+	}
+
+	/** Ob jede Gruppe des Vermerks schon übernommen ist. */
+	private boolean allAdopted(OpenConflict conflict) {
+		return !conflict.note().fields().isEmpty()
+				&& conflict.note().fields().stream().allMatch(field -> isAdopted(conflict, field.group()));
 	}
 
 	/**
@@ -192,12 +259,19 @@ public final class ConflictActions {
 		require(row, Action.TAKE_MY_HALL);
 		Hall current = hallToReplace(row);
 		Hall mine = halls.readHall(dropped(row.conflict()).payload());
+		UnitKey unit = row.conflict().unit();
+		VersionId versionBefore = versionOf(unit);
 		halls.replaceCachedHall(mine);
 		try {
 			if (!hallSaver.test(mine)) {
 				throw new IllegalStateException("Die Halle wurde nicht gespeichert.");
 			}
 		} catch (RuntimeException e) {
+			// geschrieben, dann gescheitert: Die Halle im Cache ist die geschriebene; die alte zurückzusetzen ließe das nächste
+			// Speichern die fremde Fassung über die eigene schreiben
+			if (changed(unit, versionBefore)) {
+				throw writtenButNotAcknowledged(e);
+			}
 			halls.replaceCachedHall(current);
 			throw failure(e);
 		}
@@ -219,6 +293,9 @@ public final class ConflictActions {
 		Booking placeholder = restore.placeholder();
 		Booking before = placeholder == null ? null : placeholder.copy();
 		Booking added = null;
+		UnitKey unit = placeholder != null ? row.conflict().unit()
+				: UnitKey.unassignedBooking(restore.event().getId(), restore.presentation().getId(), content.getId());
+		VersionId versionBefore = versionOf(unit);
 		try {
 			if (placeholder != null) {
 				// der Sitz bleibt, wie das Modell ihn kennt; nur die Buchung kommt zurück
@@ -241,6 +318,9 @@ public final class ConflictActions {
 			}
 			save(restore.event());
 		} catch (RuntimeException e) {
+			if (writtenDespite(unit, versionBefore)) {
+				throw writtenButNotAcknowledged(e);
+			}
 			if (placeholder != null) {
 				placeholder.copyFrom(before);
 			}
@@ -384,7 +464,42 @@ public final class ConflictActions {
 	}
 
 	private static String bookingId(ObjectNode payload) {
-		return payload == null ? null : payload.path("id").asText(null);
+		return payload == null ? null : payload.path(ConflictInput.BOOKING_ID).asText(null);
+	}
+
+	/** Die aktuelle Version der Einheit nach der Kette im lokalen Bestand; {@code null} ohne Version oder wenn sie sich nicht lesen lässt. */
+	private VersionId versionOf(UnitKey unit) {
+		try {
+			Version current = sync.unitState(unit).current();
+			return current == null ? null : current.id();
+		} catch (IOException e) {
+			return null;
+		}
+	}
+
+	/** Ob die Einheit seit {@code before} eine andere aktuelle Version hat; lässt sie sich nicht lesen, gilt sie als geändert. */
+	private boolean changed(UnitKey unit, VersionId before) {
+		try {
+			Version current = sync.unitState(unit).current();
+			return !Objects.equals(current == null ? null : current.id(), before);
+		} catch (IOException e) {
+			return true;
+		}
+	}
+
+	/**
+	 * Ob nach einem gescheiterten Speichern des Events der Stand der Einheit doch geschrieben ist: Sie hat eine andere
+	 * Version als vorher und gilt im Vergleichsstand nicht mehr als lokal verändert (das Repository gleicht den Vergleichsstand
+	 * nach einem Fehler an die Platte an). Dann darf das Modell nicht zurückgesetzt werden, sonst schriebe das nächste Speichern
+	 * den fremden Wert über den gewählten.
+	 */
+	private boolean writtenDespite(UnitKey unit, VersionId before) {
+		return changed(unit, before) && !events.locallyChangedUnits().contains(unit);
+	}
+
+	/** Die Aktion ist geschrieben, aber danach gescheitert: Das Modell bleibt, die Zeile bleibt unbestätigt offen. */
+	private static IllegalStateException writtenButNotAcknowledged(RuntimeException cause) {
+		return new IllegalStateException("Gespeichert, aber nicht bestätigt: " + failure(cause).getMessage(), cause);
 	}
 
 	// <-- Gegenstand der Aktionen

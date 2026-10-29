@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -26,6 +28,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
@@ -40,6 +45,8 @@ import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.repository.TestRepositories;
+import de.eltviller_carneval_verein.karten.store.Change;
+import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
 import de.eltviller_carneval_verein.karten.store.NioFileLayer;
 import de.eltviller_carneval_verein.karten.store.SyncListener;
 import de.eltviller_carneval_verein.karten.store.SyncService;
@@ -69,12 +76,14 @@ class ConflictActionsTest {
 		final ChangeTracker<Event> eventTracker = new ChangeTracker<>(Event::getId);
 		final ChangeTracker<Hall> hallTracker = new ChangeTracker<>(Hall::getId);
 		final EditingUnits editing = new EditingUnits();
+		/** Die Dateischicht des Rechners; Tests lassen sie gezielt scheitern. */
+		final FaultyFileLayer files = new FaultyFileLayer(new NioFileLayer());
 		Hall hall;
 		Event event;
 
 		Machine(String name, Path shared) {
 			this.name = name;
-			sync = TestSyncServices.unstarted(dir.resolve("app-" + name), name, new NioFileLayer(), p -> true, clock);
+			sync = TestSyncServices.unstarted(dir.resolve("app-" + name), name, files, p -> true, clock);
 			sync.setListener(this);
 			ConflictPolicies.install(sync);
 			sync.startup(shared.toString());
@@ -138,7 +147,7 @@ class ConflictActionsTest {
 		}
 
 		ConflictList list() {
-			return new ConflictList(sync::openConflicts, unit -> unit.relativePath());
+			return new ConflictList(sync::openConflicts, unit -> unit.relativePath(), actions()::isAdopted);
 		}
 
 		Row onlyRow() {
@@ -528,4 +537,236 @@ class ConflictActionsTest {
 		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
 		assertThrows(IllegalStateException.class, () -> b.actions().takeMyValue(row, "comment"));
 	}
+
+	// Mehrere Gruppen (R28) -->
+
+	@Test
+	void rowWithTwoGroupsStaysOpenUntilEveryGroupIsAdopted() {
+		a.seat(0).setLastName("Meier-A");
+		a.seat(0).setComment("von A");
+		a.saveEvent();
+		b.seat(0).setLastName("Meier-B");
+		b.seat(0).setComment("von B");
+		b.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(2, row.fields().size());
+		assertEquals(List.of(false, false), row.fields().stream().map(ConflictList.FieldRow::adopted).toList());
+		ConflictActions actions = b.actions();
+
+		actions.takeMyValue(row, "comment");
+
+		assertEquals(1, b.sync.openConflicts().size(), "die Zeile bleibt offen");
+		assertEquals("von B", b.seat(0).getComment());
+		assertEquals("Meier-A", b.seat(0).getLastName(), "die andere Gruppe bleibt, wie sie ist");
+		Row after = b.onlyRow();
+		assertEquals(List.of("customer", "comment"), after.fields().stream().map(ConflictList.FieldRow::group).toList());
+		assertEquals(List.of(false, true), after.fields().stream().map(ConflictList.FieldRow::adopted).toList());
+		assertTrue(actions.availability(after).enabled());
+		assertThrows(IllegalStateException.class, () -> actions.takeMyValue(after, "comment"),
+				"eine übernommene Gruppe bietet keine Aktion mehr");
+
+		actions.takeMyValue(after, "customer");
+
+		assertEquals("Meier-B", b.seat(0).getLastName());
+		assertEquals(List.of(), b.sync.openConflicts(), "mit der letzten Gruppe ist die Zeile bestätigt");
+	}
+
+	@Test
+	void rowWithOneGroupIsAcknowledgedByTheAction() {
+		Row row = commentConflict();
+		assertEquals(1, row.fields().size());
+
+		b.actions().takeMyValue(row, "comment");
+
+		assertEquals(List.of(), b.sync.openConflicts());
+	}
+
+	// <-- Mehrere Gruppen
+
+	// Zurücksetzen nach einer gescheiterten Aktion (I2) -->
+
+	@Test
+	void valueThatWasAlreadyWrittenIsKeptWhenOnlyTheAnswerIsLost() throws IOException {
+		Row row = commentConflict();
+		UnitKey unit = b.seatUnit(0);
+		b.files.failAfterWhen(p -> p.toString().replace('\\', '/').contains(unit.relativePath()), "createNew",
+				new IOException("Antwort verloren"));
+
+		IllegalStateException failure = assertThrows(IllegalStateException.class,
+				() -> b.actions().takeMyValue(row, "comment"));
+
+		assertTrue(failure.getMessage().contains("nicht bestätigt"), failure.getMessage());
+		assertEquals("von B", b.sync.unitState(unit).current().payload().get("comment").asText(), "es ist geschrieben");
+		assertEquals("von B", b.seat(0).getComment(), "das Modell behält den geschriebenen Wert");
+		assertEquals(Set.of(), b.repository.locallyChangedUnits(), "das nächste Speichern schreibt den Wert nicht zurück");
+		assertEquals(1, b.sync.openConflicts().size(), "nicht bestätigt");
+	}
+
+	@Test
+	void hallThatWasAlreadyWrittenIsKeptWhenOnlyTheAnswerIsLost() throws IOException {
+		Row row = hallConflict();
+		String hallId = a.hall.getId();
+		b.files.failAfterWhen(p -> p.toString().replace('\\', '/').contains(UnitKey.hall(hallId).relativePath()),
+				"createNew", new IOException("Antwort verloren"));
+
+		IllegalStateException failure = assertThrows(IllegalStateException.class, () -> b.actions().takeMyHall(row));
+
+		assertTrue(failure.getMessage().contains("nicht bestätigt"), failure.getMessage());
+		assertEquals("Halle B", b.halls.findById(hallId).getName());
+		assertEquals("Halle B", b.sync.unitState(UnitKey.hall(hallId)).current().payload().get("name").asText());
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	@Test
+	void failedRestoreOnTheFreeSeatResetsThePlaceholder() {
+		Row row = freeSeatRestore();
+		Booking placeholder = b.seat(0);
+		String id = placeholder.getId();
+
+		assertThrows(IllegalStateException.class, () -> b.actions(saved -> false, hall -> true).restoreBooking(row));
+
+		assertSame(placeholder, b.seat(0));
+		assertFalse(placeholder.hasData(), "der Sitz ist wieder frei");
+		assertEquals(id, placeholder.getId());
+		assertEquals(Set.of(), b.repository.locallyChangedUnits());
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	@Test
+	void failedRestoreWithoutPlaceRemovesTheAddedBooking() {
+		String bookingId = b.seat(0).getId();
+		a.seat(0).clearCustomerData();
+		a.seat(0).setLastName("Neu");
+		a.saveEvent();
+		b.seat(0).setComment("von B");
+		b.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		int before = b.friday().getBookings().size();
+
+		assertThrows(IllegalStateException.class, () -> b.actions(saved -> false, hall -> true).restoreBooking(row));
+
+		assertEquals(before, b.friday().getBookings().size());
+		assertTrue(b.friday().getBookings().stream().noneMatch(booking -> bookingId.equals(booking.getId())));
+		assertEquals(Set.of(), b.repository.locallyChangedUnits());
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	@Test
+	void failedTakeMyHallPutsTheOldHallBack() {
+		Row row = hallConflict();
+		String hallId = a.hall.getId();
+		Hall current = b.halls.findById(hallId);
+
+		assertThrows(IllegalStateException.class, () -> b.actions(saved -> true, hall -> false).takeMyHall(row));
+
+		assertSame(current, b.halls.findById(hallId));
+		assertEquals("Halle A", current.getName());
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	/** "a" und "b" benennen die Halle verschieden; "a" gewinnt, "b" hat einen Hallenkonflikt. */
+	private Row hallConflict() {
+		String hallId = a.hall.getId();
+		a.hall.setName("Halle A");
+		a.halls.saveHall(a.hall);
+		Hall mine = b.halls.findById(hallId);
+		mine.setName("Halle B");
+		b.halls.saveHall(mine);
+		settle();
+		return b.onlyRow();
+	}
+
+	/** "a" storniert den ersten Sitz, "b" ändert dort den Kommentar; der Sitz ist danach frei. */
+	private Row freeSeatRestore() {
+		a.seat(0).clearCustomerData();
+		a.saveEvent();
+		b.seat(0).setComment("von B");
+		b.saveEvent();
+		settle();
+		return b.onlyRow();
+	}
+
+	// <-- Zurücksetzen
+
+	// Buchung noch am Leben (I3) -->
+
+	/** Setzt den Inhalt als Buchung "ohne Platz" (wie beim Doppelverkauf). */
+	private static ObjectNode withoutPlace(ObjectNode payload) {
+		ObjectNode copy = payload.deepCopy();
+		copy.put("unassigned", true);
+		copy.putNull("seatId");
+		copy.put("rowLabel", "");
+		copy.put("tableNumber", 0);
+		copy.put("seatNumber", 0);
+		return copy;
+	}
+
+	@Test
+	void restoreIsNotOfferedWhileTheBookingIsInAnOpenLostStretch() throws IOException {
+		String bookingId = b.seat(0).getId();
+		UnitKey other = b.seatUnit(3);
+		a.seat(0).clearCustomerData();
+		a.seat(3).setLastName("Zed");
+		a.saveEvent();
+		a.tick();
+		b.seat(0).setComment("von B");
+		b.saveEvent();
+		// eine ältere eigene Version derselben Buchung auf einem anderen Sitz, den "a" zuerst verkauft hat: Sie verliert dort
+		ObjectNode payload = b.repository.payloadOf(b.seatUnit(0)).deepCopy();
+		Booking seat = b.seat(3);
+		payload.put("seatId", seat.getSeatId());
+		payload.put("rowLabel", seat.getRowLabel());
+		payload.put("tableNumber", seat.getTableNumber());
+		payload.put("seatNumber", seat.getSeatNumber());
+		b.sync.append("lost-copy", List.of(new Change(other, List.of(), payload, false)));
+		// die Auflösung kann die Buchung "ohne Platz" nicht schreiben: Die verlorene Strecke bleibt offen
+		AtomicBoolean broken = new AtomicBoolean(true);
+		b.files.failWhen(p -> broken.get() && p.toString().contains("_" + bookingId), "createNew",
+				new IOException("Platte voll"));
+		settle();
+		warnings.clear();
+		Row row = b.list().rows().stream().filter(candidate -> candidate.action() == Action.RESTORE_BOOKING).findFirst()
+				.orElseThrow();
+		assertEquals(Set.of(other), b.sync.lostUnits(List.of(other)), "die Strecke ist offen");
+		assertFalse(b.repository.bookingLives(b.event.getId(), b.friday().getId(), bookingId),
+				"weder Modell noch aktueller Stand kennen die Buchung");
+
+		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+
+		broken.set(false);
+		settle();
+		assertEquals(Set.of(), b.sync.lostUnits(List.of(other)), "aufgelöst");
+		assertTrue(b.repository.bookingLives(b.event.getId(), b.friday().getId(), bookingId), "jetzt lebt sie ohne Platz");
+		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+	}
+
+	@Test
+	void restoreIsNotOfferedWhenOnlyTheStoreKnowsTheBooking() throws IOException {
+		Row row = freeSeatRestore();
+		assertTrue(b.actions().availability(row).enabled());
+		String bookingId = droppedBookingId(b, row);
+		UnitKey without = UnitKey.unassignedBooking(b.event.getId(), b.friday().getId(), bookingId);
+		ObjectNode payload = withoutPlace(b.sync.version(row.conflict().unit(), row.conflict().note().dropped()).payload());
+		b.sync.append("store-only", List.of(new Change(without, List.of(), payload, false)));
+		assertTrue(b.friday().getBookings().stream().noneMatch(booking -> booking.hasData() && bookingId.equals(booking.getId())),
+				"das Modell kennt sie nicht");
+
+		assertTrue(b.repository.bookingLives(b.event.getId(), b.friday().getId(), bookingId));
+		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+	}
+
+	@Test
+	void anUnreadableBookingUnitCountsAsPossiblyAlive() throws IOException {
+		Row row = freeSeatRestore();
+		UnitKey broken = b.seatUnit(4);
+		ObjectNode garbage = JsonNodeFactory.instance.objectNode().put("tableNumber", "keine Zahl");
+		b.sync.append("unreadable", List.of(new Change(broken, List.of(), garbage, false)));
+
+		assertTrue(b.repository.bookingLives(b.event.getId(), b.friday().getId(), droppedBookingId(b, row)));
+		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+	}
+
+	// <-- Buchung noch am Leben
 }

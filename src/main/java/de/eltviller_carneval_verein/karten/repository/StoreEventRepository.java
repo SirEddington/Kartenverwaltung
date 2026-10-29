@@ -436,7 +436,8 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Setzt die genannten Felder der Einheit im Modell und lässt alle anderen, wie sie sind. Ändert nur das Modell; es wird
 	 * nichts gespeichert und kein Listener benachrichtigt. Wechselt eine Vorstellung dabei Halle oder Bestuhlung, gleicht
-	 * {@link BookingSync} ihre Buchungen ab wie im Vorstellungs-Editor.
+	 * {@link BookingSync} ihre Buchungen ab wie im Vorstellungs-Editor. Nur im JavaFX-Thread aufrufen (das Modell ist nicht
+	 * synchronisiert); der Aufrufer speichert danach oder setzt das Modell zurück.
 	 *
 	 * @param fields die Felder mit JSON-Feldnamen, wie {@link UnitMapper#normalize} sie schreibt
 	 * @throws IllegalStateException wenn die Einheit im Modell fehlt oder das Ergebnis sich nicht lesen lässt; das Modell ist
@@ -476,7 +477,7 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Wie {@link #applyFields}, für eine ganze Feldgruppe ({@link FieldGroups}): Felder der Gruppe, die {@code values} nicht
 	 * nennt, werden geleert, damit die Gruppe genau den Stand von {@code values} hat. Ein unbekannter Gruppenname gilt als
-	 * Name eines einzelnen Feldes.
+	 * Name eines einzelnen Feldes. Nur im JavaFX-Thread aufrufen; der Aufrufer speichert danach oder setzt das Modell zurück.
 	 *
 	 * @param values die Gruppe als JSON-Ausschnitt, wie ihn der Konfliktvermerk trägt
 	 */
@@ -508,7 +509,8 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Ob die Buchung mit dieser Kennung unter der Vorstellung lebt: als Buchung mit Daten im Modell oder als nicht gelöschte
-	 * Buchungs-Einheit der Vorstellung im Index (auf einem Sitz oder {@code _<ID>}).
+	 * Buchungs-Einheit der Vorstellung im Index (auf einem Sitz oder {@code _<ID>}). Eine nicht gelöschte Einheit der
+	 * Vorstellung, deren Inhalt sich nicht lesen lässt, zählt als möglicherweise lebende Buchung.
 	 */
 	public boolean bookingLives(String eventId, String presentationId, String bookingId) {
 		Event event = findEvent(eventId);
@@ -522,9 +524,13 @@ public class StoreEventRepository implements EventRepository {
 		}
 		for (UnitSnapshot snapshot : sync.eventSnapshots(eventId).values()) {
 			UnitKey unit = snapshot.unit();
-			if (unit.type() == UnitType.BOOKING && presentationId.equals(unit.presentationId()) && snapshot.version() != null
-					&& !snapshot.deleted() && snapshot.payload() != null
-					&& bookingId.equals(snapshot.payload().path(ConflictInput.BOOKING_ID).asText(null))) {
+			if (unit.type() != UnitType.BOOKING || !presentationId.equals(unit.presentationId()) || snapshot.version() == null
+					|| snapshot.deleted()) {
+				continue;
+			}
+			// eine nicht gelöschte Einheit, deren Inhalt sich nicht lesen lässt, kann die Buchung tragen: sie gilt als lebend
+			if (bookingId.equals(snapshot.payload() == null ? null
+					: snapshot.payload().path(ConflictInput.BOOKING_ID).asText(null)) || !UnitMapper.isReadable(snapshot)) {
 				return true;
 			}
 		}
