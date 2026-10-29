@@ -621,6 +621,59 @@ class ConflictScenarioTest {
 		assertModelShowsDoubleSale(b, 1, "Anna", bertId, "Bert");
 	}
 
+	/**
+	 * Absicherung Aufgabe 14: Während B's Zusammenführung zurückgestellt ist, zeigt B's Modell Bert zweimal (auf dem Sitz mit
+	 * der Eingabe und "ohne Platz"). A storniert Bert "ohne Platz". Nach dem Einarbeiten und B's Speichern lebt keine falsche
+	 * Kopie von Bert, B's Eingabe geht nicht still verloren (Vermerk an B), und nichts bleibt gegabelt.
+	 */
+	@Test
+	void foreignCancellationDuringDeferralLeavesNoFalseCopy() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		a.sell(1, "Anna");
+		Booking bert = b.sell(1, "Bert");
+		String bertId = bert.getId();
+		bert.setComment("Notiz");
+		a.tick();
+		b.tick();
+		untilQuiet(a, b);
+		UnitKey seat = seatUnit(a, 1);
+		UnitKey moved = unassignedUnit(b, bertId);
+		assertEquals(1, b.repository.retryDeferred().deferred().size(), "B's Zusammenführung ist zurückgestellt");
+		assertEquals(2, b.friday().getBookings().stream().filter(booking -> bertId.equals(booking.getId())).count());
+
+		Booking aBert = a.friday().getBookings().stream().filter(booking -> bertId.equals(booking.getId())).findFirst()
+				.orElseThrow();
+		a.friday().getBookings().remove(aBert);
+		a.repository.saveEvent(a.event);
+		untilQuiet(a, b);
+		// die Stornierung trifft bei B die Kopie "ohne Platz"; die Eingabe auf dem Sitz bleibt, weiter zurückgestellt
+		List<Booking> bBerts = b.friday().getBookings().stream().filter(booking -> bertId.equals(booking.getId())).toList();
+		assertEquals(1, bBerts.size(), bBerts.toString());
+		assertFalse(bBerts.get(0).isUnassigned());
+		assertEquals("Notiz", bBerts.get(0).getComment(), "die ungespeicherte Eingabe bleibt");
+		assertEquals(1, b.repository.retryDeferred().deferred().size());
+		b.repository.saveEvent(b.event);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertTrue(a.eventState().get(moved).deleted(), "A's Stornierung gilt");
+		assertEquals("Anna", lastName(a.eventState().get(seat)));
+		assertEquals(Set.of(), carriers(a, bertId), "keine falsche Kopie von Bert");
+		assertTrue(b.open().stream().anyMatch(conflict -> conflict.note() != null
+				&& conflict.note().kind() == ConflictNote.Kind.DELETE_WINS && conflict.unit().equals(seat)),
+				"B's Eingabe weicht mit Vermerk: " + b.open());
+		for (Machine machine : m) {
+			assertEquals(0, machine.friday().getBookings().stream().filter(booking -> bertId.equals(booking.getId())).count(),
+					machine.name);
+			assertEquals("Anna", machine.seat(1).getLastName(), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+		}
+	}
+
 	/** Die lebenden Einheiten des Events, deren Buchung diese Kennung trägt. */
 	private static Set<UnitKey> carriers(Machine machine, String bookingId) {
 		Set<UnitKey> carriers = new HashSet<>();
