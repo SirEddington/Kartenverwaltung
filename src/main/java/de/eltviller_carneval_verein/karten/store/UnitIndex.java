@@ -24,6 +24,7 @@ import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.DoubleConsumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -570,6 +571,55 @@ final class UnitIndex {
 			}
 		}
 		return Collections.unmodifiableMap(absorbed);
+	}
+
+	/**
+	 * Die Einheiten, deren Eintrag eigene, noch nicht beanspruchte Versionen anzeigt ({@link Entry#pending()}). Nur Kandidaten:
+	 * Ob eine Version ausstehend ist, entscheidet {@link ChainResolver} auf den Dateien.
+	 */
+	synchronized Set<UnitKey> pendingUnits() {
+		Set<UnitKey> units = new LinkedHashSet<>();
+		entries.forEach((unit, entry) -> {
+			if (entry.pending()) {
+				units.add(unit);
+			}
+		});
+		return Collections.unmodifiableSet(units);
+	}
+
+	/**
+	 * Die Einheiten, deren Eintrag eigene, verlorene Versionen anzeigt ({@link Entry#lost()}). Nur Kandidaten: Ob eine Version
+	 * verloren ist, entscheidet {@link ChainResolver} auf den Dateien.
+	 */
+	synchronized Set<UnitKey> lostUnits() {
+		Set<UnitKey> units = new LinkedHashSet<>();
+		entries.forEach((unit, entry) -> {
+			if (entry.lost()) {
+				units.add(unit);
+			}
+		});
+		return Collections.unmodifiableSet(units);
+	}
+
+	/**
+	 * Die Einheiten, deren Kopfversion ({@link UnitSnapshot#version()}) {@code own} erfüllt und deren Zeitstempel in der
+	 * Versions-ID ({@link VersionId#epochMillis()}) nach {@code since} liegt: die Kandidaten für eigene junge Ansprüche. Einheiten
+	 * ohne Kopfversion zählen nie. Nur Kandidaten; welche Ansprüche es gibt und wie alt sie sind, liest der Aufrufer aus den
+	 * Dateien.
+	 *
+	 * @param own   ob die Version von diesem Rechner stammt
+	 * @param since die Grenze; die ID muss jünger sein
+	 */
+	synchronized Set<UnitKey> recentOwnHeads(Predicate<VersionId> own, Instant since) {
+		long limit = since.toEpochMilli();
+		Set<UnitKey> units = new LinkedHashSet<>();
+		entries.forEach((unit, entry) -> {
+			VersionId head = entry.snapshot().version();
+			if (head != null && own.test(head) && head.epochMillis() > limit) {
+				units.add(unit);
+			}
+		});
+		return Collections.unmodifiableSet(units);
 	}
 
 	/** Der Eintrag der Einheit (unveränderlich), oder {@code null}, wenn der Index sie nicht kennt. */

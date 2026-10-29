@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -337,6 +338,62 @@ class UnitIndexTest {
 		refresh(third, local);
 		assertEquals(Set.of(EVENT), third.entries().keySet());
 		assertTrue(third.entries().keySet().stream().noneMatch(EVENT2::equals));
+	}
+
+	@Test
+	void pendingAndLostUnitsFollowTheFlags() throws IOException {
+		// PRESENTATION: ausstehend; EVENT: verloren; HALL: unauffällig
+		write(PRESENTATION, ME, mine(1), null, "p-1", true);
+		write(PRESENTATION, ME, mine(2), mine(1), "p-2", false);
+		write(EVENT, ME, mine(1), null, "e-1", true);
+		write(EVENT, OTHER, id(2, OTHER), mine(1), "e-other", true);
+		write(EVENT, ME, mine(3), mine(1), "e-3", false);
+		saveTwice(HALL, "hall");
+		UnitIndex index = index();
+		assertEquals(Set.of(), index.pendingUnits());
+		assertEquals(Set.of(), index.lostUnits());
+
+		refresh(index, local);
+
+		assertEquals(Set.of(PRESENTATION), index.pendingUnits());
+		assertEquals(Set.of(EVENT), index.lostUnits());
+
+		// die Mengen folgen den Flags, wenn eine Einheit neu eingetragen wird: PRESENTATION ist nicht mehr ausstehend
+		assertTrue(arbiter.claim(PRESENTATION, local.readUnit(PRESENTATION).versions().get(mine(2)).version(),
+				local.readUnit(PRESENTATION).versions().get(mine(2)).bytes()).won());
+		resolveInto(index, PRESENTATION);
+		assertEquals(Set.of(), index.pendingUnits());
+		assertEquals(Set.of(EVENT), index.lostUnits());
+
+		// und sie kommen auch aus dem gespeicherten Index
+		index.flush();
+		UnitIndex reopened = index();
+		refresh(reopened, local);
+		assertEquals(Set.of(), reopened.pendingUnits());
+		assertEquals(Set.of(EVENT), reopened.lostUnits());
+	}
+
+	@Test
+	void recentOwnHeadsSelectsOwnYoungHeads() throws IOException {
+		long now = AT.toEpochMilli();
+		VersionId young = VersionId.create(now - 60_000L, ME, 0);
+		VersionId old = VersionId.create(now - 3_600_000L, ME, 0);
+		VersionId foreignYoung = VersionId.create(now - 60_000L, OTHER, 0);
+		write(EVENT, ME, young, null, "e-young", true);
+		write(PRESENTATION, ME, old, null, "p-old", true);
+		write(HALL, OTHER, foreignYoung, null, "h-foreign", true);
+		UnitIndex index = index();
+		refresh(index, local);
+
+		Instant since = AT.minus(Duration.ofMinutes(15));
+
+		assertEquals(Set.of(EVENT), index.recentOwnHeads(version -> version.isFrom(ME), since));
+		// eine ältere Grenze nimmt auch die ältere eigene Kopfversion, die fremde nie
+		assertEquals(Set.of(EVENT, PRESENTATION),
+				index.recentOwnHeads(version -> version.isFrom(ME), AT.minus(Duration.ofHours(2))));
+		// die Grenze selbst gilt nicht als "danach"
+		assertEquals(Set.of(), index.recentOwnHeads(version -> version.isFrom(ME), Instant.ofEpochMilli(now - 60_000L)));
+		assertEquals(Set.of(), index().recentOwnHeads(version -> true, Instant.EPOCH));
 	}
 
 	@Test

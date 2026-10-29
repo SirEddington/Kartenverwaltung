@@ -131,6 +131,11 @@ public final class SyncService {
 	static final Duration FULL_SYNC_INTERVAL = Duration.ofMinutes(10);
 	/** So lange werden eigene gewonnene Ansprüche auf eine späte Niederlage geprüft. */
 	static final Duration LATE_DEFEAT_WINDOW = Duration.ofMinutes(15);
+	/**
+	 * Zugabe für die Uhr, wenn der Index die Einheiten mit jungen eigenen Köpfen nennt: Die Versions-ID trägt die Zeit des
+	 * Schreibens, der Anspruch kommt später, und die Uhr eines Rechners geht nicht ganz gleich.
+	 */
+	private static final Duration CLOCK_SLACK = Duration.ofMinutes(15);
 	/** So viele beobachtete Ansprüche liest ein Takt höchstens, die am längsten nicht geprüften zuerst. */
 	static final int LATE_DEFEAT_BUDGET = 150;
 	/** Eigene temporäre Dateien, die älter sind, räumt der Start weg. */
@@ -529,7 +534,7 @@ public final class SyncService {
 	public void disconnect() {
 		reopen();
 		deactivate();
-		claimPendingLocally(null);
+		claimPendingLocally(index.pendingUnits());
 	}
 
 	/**
@@ -547,13 +552,13 @@ public final class SyncService {
 	 * Anspruch) werden lokal beansprucht, in der Reihenfolge der Aufträge. Nur lokal, deshalb auf dem Thread des
 	 * Aufrufers.
 	 *
-	 * @param candidates die Einheiten, die untersucht werden; {@code null} heißt alle
+	 * @param candidates die Einheiten, die untersucht werden (die Kandidaten aus dem Index); ob eine Version ausstehend ist,
+	 *                   entscheidet {@link ChainResolver} auf den Dateien
 	 */
 	private void claimPendingLocally(Collection<UnitKey> candidates) {
 		try {
 			List<UploadJob.Item> items = new ArrayList<>();
-			for (UploadJob job : LocalScan.pendingJobs(local, machineId(), Set.of(),
-					candidates != null ? candidates : local.allUnits())) {
+			for (UploadJob job : LocalScan.pendingJobs(local, machineId(), Set.of(), candidates)) {
 				items.addAll(job.items());
 			}
 			claimLocally(items);
@@ -1582,8 +1587,11 @@ public final class SyncService {
 		if (current.allUnitsWanted) {
 			current.allUnitsWanted = false;
 			round.allUnits = true;
-			// nach einem Neustart: die eigenen Ansprüche der letzten 15 Minuten weiter auf eine späte Niederlage prüfen
-			watchOwnClaims(LocalScan.recentOwnClaims(local, myId, now, LATE_DEFEAT_WINDOW));
+			// nach einem Neustart: die eigenen Ansprüche der letzten 15 Minuten weiter auf eine späte Niederlage prüfen; gelesen
+			// werden nur die Einheiten, deren Kopf der Index als jung und eigen kennt (der Anspruch entscheidet dann selbst)
+			Set<UnitKey> recent = index.recentOwnHeads(id -> id.isFrom(myId),
+					now.minus(LATE_DEFEAT_WINDOW).minus(CLOCK_SLACK));
+			watchOwnClaims(LocalScan.recentOwnClaims(local, myId, now, LATE_DEFEAT_WINDOW, recent));
 		}
 		// gesperrte Einheiten dürfen wieder geheilt werden: Die gemeinsame Kopie kann inzwischen geheilt sein
 		synchronized (lock) {
@@ -1595,14 +1603,16 @@ public final class SyncService {
 		indexUnitKeys(result.changed());
 		result.lost().forEach(this::reportLoss);
 		settleAll(current, result.contested(), round);
-		enqueuePending(current, null);
+		// Kandidaten für ausstehende Versionen nennt der Index; was der Abgleich kopiert hat, steht schon darin
+		enqueuePending(current, index.pendingUnits());
 		runJobs(current, round);
 	}
 
 	/**
 	 * Reiht die ausstehenden Versionen ein, die noch in keinem Auftrag stehen, vor den übrigen Aufträgen.
 	 *
-	 * @param candidates die Einheiten, die untersucht werden; {@code null} heißt alle
+	 * @param candidates die Einheiten, die untersucht werden (die Kandidaten aus dem Index); ob eine Version ausstehend ist,
+	 *                   entscheidet {@link ChainResolver} auf den Dateien
 	 */
 	private void enqueuePending(Link current, Collection<UnitKey> candidates) throws IOException {
 		Set<VersionId> skip;
@@ -1611,8 +1621,7 @@ public final class SyncService {
 			skip = new HashSet<>(queued);
 			myId = machine.id();
 		}
-		List<UploadJob> found = LocalScan.pendingJobs(local, myId, skip,
-				candidates != null ? candidates : local.allUnits());
+		List<UploadJob> found = LocalScan.pendingJobs(local, myId, skip, candidates);
 		synchronized (lock) {
 			if (link != current) {
 				return;
@@ -1956,11 +1965,11 @@ public final class SyncService {
 	private void reportChanges(Round round) {
 		Collection<UnitKey> units = round.changed;
 		if (round.allUnits) {
-			try {
-				units = local.allUnits();
-			} catch (IOException e) {
-				LOGGER.log(Level.WARNING, "Die Einheiten des lokalen Bestands ließen sich nicht auflisten", e);
-			}
+			// nach dem ersten Vollabgleich: die geänderten Einheiten und die, die der Index als verloren kennt (Kandidaten;
+			// die Verluste leitet reportLosses aus den Dateien ab)
+			Set<UnitKey> candidates = new LinkedHashSet<>(round.changed);
+			candidates.addAll(index.lostUnits());
+			units = candidates;
 		}
 		reportLosses(units);
 		notifier.unitsChanged(round.changed);

@@ -36,8 +36,14 @@ final class LocalScan {
 
 	/** Alle lesbaren Anspruchsdateien des lokalen Bestands, die dieser Rechner geschrieben hat. */
 	static List<OwnClaim> ownClaims(VersionStore local, String ownMachineId) throws IOException {
+		return ownClaims(local, ownMachineId, local.allUnits());
+	}
+
+	/** Die lesbaren Anspruchsdateien der genannten Einheiten, die dieser Rechner geschrieben hat. */
+	private static List<OwnClaim> ownClaims(VersionStore local, String ownMachineId, Collection<UnitKey> units)
+			throws IOException {
 		List<OwnClaim> own = new ArrayList<>();
-		for (UnitKey unit : local.allUnits()) {
+		for (UnitKey unit : units) {
 			for (ClaimFile file : local.readUnit(unit).claims().values()) {
 				Claim claim = file.claim();
 				if (claim != null && ownMachineId.equals(claim.machine())) {
@@ -56,6 +62,19 @@ final class LocalScan {
 			throws IOException {
 		Instant since = now.minus(window);
 		return ownClaims(local, ownMachineId).stream().filter(claim -> claim.at().isAfter(since)).toList();
+	}
+
+	/**
+	 * Wie {@link #recentOwnClaims(VersionStore, String, Instant, Duration)}, aber nur über die Ansprüche der genannten
+	 * Einheiten (etwa die Kandidaten aus dem Start-Index): Die übrigen werden nicht gelesen. Ob ein Anspruch jung ist,
+	 * entscheidet weiter {@link OwnClaim#at()}.
+	 *
+	 * @param units die Einheiten, deren Ansprüche gelesen werden
+	 */
+	static List<OwnClaim> recentOwnClaims(VersionStore local, String ownMachineId, Instant now, Duration window,
+			Collection<UnitKey> units) throws IOException {
+		Instant since = now.minus(window);
+		return ownClaims(local, ownMachineId, units).stream().filter(claim -> claim.at().isAfter(since)).toList();
 	}
 
 	/**

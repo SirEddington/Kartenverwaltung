@@ -759,6 +759,126 @@ class SyncServiceTest {
 		assertEquals(foreign.id(), restarted.service.unitState(BOOKING).head().id());
 	}
 
+	/** Fremde Hallen mit je einer Version und ihrem Anspruch, gleich im lokalen und im gemeinsamen Bestand (nichts zu kopieren). */
+	private void seedForeignHalls(Path appData, int count) throws IOException {
+		VersionStore localStore = new VersionStore(appData.resolve("data"), new NioFileLayer());
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		for (int i = 0; i < count; i++) {
+			UnitKey hall = UnitKey.hall("f" + i);
+			Version v = version(OTHER, START.toEpochMilli() - 3_600_000L, i, "f" + i, null);
+			byte[] bytes = StoreCodec.write(v);
+			byte[] claim = StoreCodec.write(new Claim(v.id(), StoreCodec.sha256(bytes), OTHER, START));
+			for (VersionStore store : List.of(localStore, sharedStore)) {
+				assertTrue(store.writeVersion(hall, v.id(), bytes));
+				assertTrue(store.createClaim(hall, "root", claim));
+			}
+		}
+	}
+
+	/** Baut den Start-Index des Rechners und schreibt ihn, damit der nächste Start keine Einheit lesen muss. */
+	private static void writeStartIndex(Path appData, String machineId) throws IOException {
+		UnitIndex index = new UnitIndex(appData.resolve("index"), new NioFileLayer(), machineId);
+		index.refresh(new VersionStore(appData.resolve("data"), new NioFileLayer()), p -> {
+		});
+		index.flush();
+	}
+
+	/**
+	 * Die Lesezugriffe dieses Rechners auf Versionsdateien des lokalen Bestands, die nicht zu den genannten Einheiten
+	 * gehören: Wer eine Einheit auflöst ({@code readUnit}), liest ihre Versionsdateien. Anspruchsdateien zählen nicht, denn der
+	 * Vollabgleich vergleicht eigene Ansprüche auf beiden Seiten selbst.
+	 */
+	private static List<String> localReadsBesides(Node node, UnitKey... allowed) {
+		String data = "read " + node.localData();
+		return node.layer.calls().stream().filter(c -> c.startsWith(data)).map(c -> c.replace('\\', '/'))
+				.filter(c -> !c.contains("/claims/"))
+				.filter(c -> java.util.Arrays.stream(allowed).noneMatch(unit -> c.contains(unit.relativePath()))).toList();
+	}
+
+	@Test
+	void fullSyncAfterRestartDoesNotReadTheWholeStore() throws IOException {
+		Path appData = dir.resolve("a");
+		String me = MachineIdentity.loadOrCreate(appData, () -> "a").id();
+		seedForeignHalls(appData, 200);
+		Version own = version(me, START.toEpochMilli(), 0, "s1", null);
+		writeLocal(appData, BOOKING, own);
+		writeStartIndex(appData, me);
+
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.service.startup(shared);
+		a.service.tick();
+
+		assertEquals(own.id(), sharedClaim(BOOKING, "root").version(), "die ausstehende Version ist hochgeladen");
+		assertEquals(List.of(), localReadsBesides(a, BOOKING));
+		assertTrue(a.events.errors.isEmpty());
+	}
+
+	@Test
+	void lossesAfterTheFirstRunAreDerivedFromIndexedLostUnits() throws IOException {
+		Path appData = dir.resolve("a");
+		String me = MachineIdentity.loadOrCreate(appData, () -> "a").id();
+		seedForeignHalls(appData, 200);
+		// der Platz hinter der Wurzel gehört dem Fremden (auf beiden Seiten); die eigene, nie beanspruchte Version ist verloren
+		Version winner = version(OTHER, START.toEpochMilli() - 1000, 0, "fremd", null);
+		byte[] winnerBytes = StoreCodec.write(winner);
+		byte[] winnerClaim = StoreCodec.write(new Claim(winner.id(), StoreCodec.sha256(winnerBytes), OTHER, START));
+		for (VersionStore store : List.of(new VersionStore(dir.resolve("a/data"), new NioFileLayer()),
+				new VersionStore(sharedRoot.resolve("data"), new NioFileLayer()))) {
+			assertTrue(store.writeVersion(BOOKING, winner.id(), winnerBytes));
+			assertTrue(store.createClaim(BOOKING, "root", winnerClaim));
+		}
+		Version lost = version(me, START.toEpochMilli(), 0, "s1", null);
+		writeLocal(appData, BOOKING, lost);
+		writeStartIndex(appData, me);
+
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.service.startup(shared);
+		a.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(lost.id()), winner.id())), a.events.lost);
+		assertEquals(List.of(), localReadsBesides(a, BOOKING));
+	}
+
+	@Test
+	void lateDefeatAfterARestartIsStillDetected() throws IOException {
+		Path appData = dir.resolve("a");
+		seedForeignHalls(appData, 200);
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.service.startup(shared);
+		Version va = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		a.service.flushIndex();
+		clock.advance(Duration.ofMinutes(5));
+
+		Node restarted = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		restarted.service.startup(shared);
+		Version foreign = overrideSharedClaim(BOOKING, "root");
+		restarted.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), foreign.id())), restarted.events.lost);
+		assertEquals(foreign.id(), restarted.service.unitState(BOOKING).head().id());
+		assertEquals(List.of(), localReadsBesides(restarted, BOOKING));
+	}
+
+	@Test
+	void disconnectClaimsPendingVersionsWithoutReadingTheWholeStore() throws IOException {
+		Path appData = dir.resolve("a");
+		String me = MachineIdentity.loadOrCreate(appData, () -> "a").id();
+		seedForeignHalls(appData, 200);
+		Version own = version(me, START.toEpochMilli(), 0, "s1", null);
+		writeLocal(appData, BOOKING, own);
+		writeStartIndex(appData, me);
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.down.set(true);
+		a.service.startup(shared);
+		assertFalse(Files.exists(localFile(a, BOOKING, "claims/root.json")), "nicht erreichbar: noch nicht beansprucht");
+
+		a.service.disconnect();
+
+		assertEquals(own.id(), StoreCodec.readClaim(Files.readAllBytes(localFile(a, BOOKING, "claims/root.json"))).version());
+		assertEquals(List.of(), localReadsBesides(a, BOOKING));
+	}
+
 	@Test
 	void lateDefeatOfClaimsUploadedByMergeIsDetected() throws IOException {
 		Node a = node("a");
@@ -789,7 +909,8 @@ class SyncServiceTest {
 		int count = 200;
 		for (int i = 0; i < count; i++) {
 			UnitKey hall = UnitKey.hall("h" + i);
-			Version v = version(me, 1_000_000L, i, "s" + i, null);
+			// die ID trägt die Zeit des Schreibens: nur Einheiten mit jungem eigenem Kopf liest der Neustart auf Ansprüche
+			Version v = version(me, START.toEpochMilli(), i, "s" + i, null);
 			byte[] bytes = StoreCodec.write(v);
 			localStore.writeVersion(hall, v.id(), bytes);
 			localStore.createClaim(hall, "root", StoreCodec.write(new Claim(v.id(), StoreCodec.sha256(bytes), me, START)));
@@ -822,7 +943,7 @@ class SyncServiceTest {
 		a.service.tick();
 		assertEquals(count - SyncService.LATE_DEFEAT_BUDGET, sharedRootClaimReads(a) - reads);
 
-		VersionId mine = VersionId.create(1_000_000L, me, 7);
+		VersionId mine = VersionId.create(START.toEpochMilli(), me, 7);
 		assertEquals(List.of(new LostVersion(late, List.of(mine), foreign.id())), a.events.lost);
 		reads = sharedRootClaimReads(a);
 		a.service.tick();
