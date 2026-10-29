@@ -1836,6 +1836,94 @@ class SyncServiceTest {
 		assertTrue(values.get(0) >= 0.0);
 	}
 
+	@Test
+	void failedBeginAfterSetAsideDoesNotSetASaleAside() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		save(b, create(UnitKey.event("gemeinsam"), "B"));
+		b.service.tick();
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(UnitKey.event("lokal"), "A"));
+		// gleich nach dem Beiseitelegen fällt der gemeinsame Ordner weg: Das Bestimmen der Abschnitte scheitert
+		AtomicBoolean dropped = new AtomicBoolean();
+		a.layer.onEach("rename", () -> {
+			if (dropped.compareAndSet(false, true)) {
+				a.down.set(true);
+			}
+		});
+
+		a.service.connect(shared, ConnectMode.SET_ASIDE);
+		assertTrue(dropped.get());
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertNull(a.service.fullSyncProgress().get(), "kein Lauf begonnen");
+		// ein Verkauf vor der Rückkehr legt data/ neu an
+		Version sale = save(a, create(BOOKING, "Anna"));
+		a.down.set(false);
+		a.service.tick();
+
+		List<String> aside = names(a.appData).stream().filter(n -> n.startsWith("data-beiseite-")).toList();
+		assertEquals(1, aside.size(), "nur einmal beiseitegelegt");
+		assertTrue(Files.isDirectory(a.appData.resolve(aside.get(0)).resolve("events/lokal")));
+		assertEquals(sale.id(), a.service.unitState(BOOKING).head().id());
+		assertEquals(sale.id(), sharedClaim(BOOKING, "root").version());
+		assertFalse(Files.exists(sharedRoot.resolve("data/events/lokal")), "der beiseitegelegte Bestand wird nicht mitgenommen");
+	}
+
+	@Test
+	void saleDuringARunIsUploadedWithinFiveSeconds() throws IOException {
+		// je Block 50 × 38 ms = 1,9 s: Ein Stück des Laufs braucht zwei Blöcke, also 3,8 s
+		Path appData = dir.resolve("a");
+		seedForeignHalls(appData, 300);
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.service.startup(shared);
+		slowReads(a, Duration.ofMillis(38));
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		a.service.tick();
+		assertNotNull(a.service.fullSyncProgress().get());
+		// der ungünstigste Zeitpunkt: gleich nach dem Hochladen des Takts
+		Instant saved = clock.instant();
+		save(a, create(BOOKING, "Anna"));
+		Path claim = sharedFile(BOOKING, "claims/root.json");
+		AtomicReference<Instant> uploaded = new AtomicReference<>();
+		a.layer.onEach("read", () -> {
+			if (uploaded.get() == null && Files.exists(claim)) {
+				uploaded.set(clock.instant());
+			}
+		});
+
+		for (int i = 0; i < 5 && uploaded.get() == null; i++) {
+			clock.advance(SyncService.TICK);
+			a.service.tick();
+			if (uploaded.get() == null && Files.exists(claim)) {
+				uploaded.set(clock.instant());
+			}
+		}
+
+		assertNotNull(uploaded.get());
+		Duration took = Duration.between(saved, uploaded.get());
+		assertTrue(took.compareTo(Duration.ofSeconds(5)) <= 0, "hochgeladen nach " + took);
+		assertNotNull(a.service.fullSyncProgress().get(), "der Lauf läuft noch");
+	}
+
+	@Test
+	void ownPendingVersionCopiedInByTheRunIsUploadedAtItsEnd() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(UnitKey.event("lokal"), "A"));
+		// ein früheres Hochladen brach zwischen Versionsdatei und Anspruch ab: Die eigene Version liegt nur im gemeinsamen Ordner
+		Version own = version(a.service.machineId(), START.toEpochMilli() - 60_000L, 0, "abgebrochen", null);
+		assertTrue(new VersionStore(sharedRoot.resolve("data"), new NioFileLayer()).writeVersion(BOOKING, own.id(),
+				StoreCodec.write(own)));
+
+		// connect führt den Takt sofort aus; ohne Kosten erledigt er den ganzen Lauf
+		a.service.connect(shared, ConnectMode.SET_ASIDE);
+
+		assertNull(a.service.fullSyncProgress().get(), "der Lauf ist zu Ende");
+		assertEquals(own.id(), sharedClaim(BOOKING, "root").version(), "im Takt, in dem der Lauf endet");
+		assertFalse(a.service.unitState(BOOKING).provisional());
+	}
+
 	// --- Der gemeinsame Ordner verschwindet (KARV-101)
 
 	/** Ein Rechner, dessen Erreichbarkeit wie in der Anwendung am Ordner selbst hängt. */

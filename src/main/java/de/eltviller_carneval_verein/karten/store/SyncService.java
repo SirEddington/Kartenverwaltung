@@ -220,6 +220,11 @@ public final class SyncService {
 		volatile boolean wantedDuringRun;
 		/** Ob der laufende Vollabgleich alle lokalen Ansprüche hochlädt (Mitnehmen); entschieden bei seinem Beginn. */
 		volatile boolean uploadLocalClaims;
+		/**
+		 * Ob diese Verbindung den lokalen Bestand schon beiseitegelegt hat. Ein wiederholter Beginn (nach einem Fehler danach)
+		 * entscheidet dann nicht neu: Sonst legte er einen inzwischen gespeicherten Verkauf ein zweites Mal beiseite.
+		 */
+		volatile boolean setAsideDone;
 		/** Der erste Vollabgleich steht noch aus: danach werden die Verluste aller Einheiten abgeleitet. */
 		volatile boolean allUnitsWanted = true;
 		volatile Instant lastFullSync;
@@ -1570,7 +1575,17 @@ public final class SyncService {
 			round.run(() -> beginRun(current));
 		}
 		if (current.run != null) {
+			// Verkäufe zuerst: Ein Stück des Laufs dauert bis zu FULL_SYNC_SLICE_BUDGET und einen Block, und ein Verkauf soll
+			// nach höchstens 5 Sekunden oben sein
+			if (hasJobs()) {
+				round.run(() -> runJobs(current, round));
+			}
 			round.run(() -> runSlice(current, round, now));
+			if (current.run == null) {
+				// der Lauf ist zu Ende: Eigene ausstehende Versionen, die er hereinkopiert hat (etwa nach dem Beiseitelegen aus
+				// einem abgebrochenen Hochladen), nennt jetzt der Index; einmal je Lauf, damit ein Speichervorgang ein Auftrag bleibt
+				round.run(() -> enqueuePending(current, withUnindexed(index.pendingUnits())));
+			}
 		}
 		round.run(() -> runJobs(current, round));
 		// nach dem Hochladen, auch wenn der Ordner dabei wegfiel (die Auflösung ist lokal): Die Zusammenführungen gehen mit
@@ -1636,10 +1651,16 @@ public final class SyncService {
 		try {
 			boolean uploadLocalClaims = false;
 			ConnectMode mode = current.connectMode;
-			if (mode != null) {
+			if (mode != null && current.setAsideDone) {
+				// ein früherer Beginn hat schon beiseitegelegt und ist danach gescheitert: Es bleibt bei der Entscheidung von
+				// damals (nichts mitnehmen). Neu entschieden lägen inzwischen gespeicherte Verkäufe im lokalen Bestand, und er
+				// würde ein zweites Mal beiseitegelegt.
+				uploadLocalClaims = false;
+			} else if (mode != null) {
 				boolean both = FullSync.bothHaveUnits(local, current.shared);
 				if (both && mode == ConnectMode.SET_ASIDE) {
 					Path aside = FullSync.setAside(local.dataRoot(), files, clock);
+					current.setAsideDone = true;
 					LOGGER.info("Der lokale Bestand wurde beiseitegelegt: " + aside);
 					// der Datenordner wird neu gefüllt, und gleiche Dateinamen können anderen Inhalt haben
 					clearIndex();
@@ -1651,8 +1672,8 @@ public final class SyncService {
 			synchronized (lock) {
 				unrepairable.clear();
 			}
-			// Kandidaten für ausstehende Versionen nennt der Index. Einmal je Lauf, nicht je Abschnitt: Ein Speichervorgang
-			// über mehrere Einheiten bleibt so ein Auftrag (eine Änderungsliste)
+			// Kandidaten für ausstehende Versionen nennt der Index. Am Beginn und am Ende des Laufs, nicht je Abschnitt: Ein
+			// Speichervorgang über mehrere Einheiten bleibt so ein Auftrag (eine Änderungsliste)
 			enqueuePending(current, withUnindexed(index.pendingUnits()));
 			if (current.allUnitsWanted) {
 				// nach einem Neustart: die eigenen Ansprüche der letzten 15 Minuten weiter auf eine späte Niederlage prüfen;
