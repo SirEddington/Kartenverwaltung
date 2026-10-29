@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -56,6 +57,8 @@ class ConflictResolverTest {
 		List<Change> extra = List.of();
 		boolean delete;
 		boolean withoutPayload;
+		/** Ob die Zusammenführung einen Vermerk bekommt. */
+		boolean noted;
 		RuntimeException failure;
 
 		@Override
@@ -66,7 +69,14 @@ class ConflictResolverTest {
 			}
 			ObjectNode payload = MAPPER.createObjectNode();
 			payload.set("seen", input.mine().payload().deepCopy());
-			return new Resolution(withoutPayload ? null : payload, delete, extra, null);
+			ConflictNote note = null;
+			if (noted) {
+				Version theirs = input.theirs();
+				note = new ConflictNote(ConflictNote.Kind.UNMERGED, "test",
+						new ConflictNote.Party(theirs.machine(), theirs.machineName(), theirs.operator(), theirs.id()),
+						List.of(), null, null, input.mine().id());
+			}
+			return new Resolution(withoutPayload ? null : payload, delete, extra, note);
 		}
 	}
 
@@ -75,6 +85,8 @@ class ConflictResolverTest {
 		final List<Set<UnitKey>> changed = new ArrayList<>();
 		final List<String> errors = new ArrayList<>();
 		final List<LostVersion> lost = new ArrayList<>();
+		/** Die Reihenfolge der Meldungen: {@code "units"} und {@code "conflicts"}. */
+		final List<String> sequence = new ArrayList<>();
 		int conflicts;
 
 		@Override
@@ -85,6 +97,7 @@ class ConflictResolverTest {
 		@Override
 		public void unitsChanged(Set<UnitKey> units) {
 			changed.add(units);
+			sequence.add("units");
 		}
 
 		@Override
@@ -95,6 +108,7 @@ class ConflictResolverTest {
 		@Override
 		public void conflictsChanged() {
 			conflicts++;
+			sequence.add("conflicts");
 		}
 
 		Set<UnitKey> changedUnits() {
@@ -690,6 +704,100 @@ class ConflictResolverTest {
 
 		assertTrue(events.changedUnits().contains(BOOKING));
 		assertEquals(1, events.conflicts);
+	}
+
+	@Test
+	void resolvingSeveralUnitsInOnePassReportsThemInOneUnitsChanged() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Recorder events = new Recorder();
+		service.setListener(events);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(new Change(MOVED, List.of(), name("Carla ohne Platz"), false));
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		loss(service, appData, BOOKING);
+		loss(service, appData, OTHER_SEAT);
+		events.changed.clear();
+		events.sequence.clear();
+
+		service.resolver().resolvePending(Integer.MAX_VALUE);
+
+		assertEquals(2, policy.inputs.size());
+		assertEquals(List.of(Set.of(BOOKING, OTHER_SEAT, MOVED)), events.changed);
+	}
+
+	@Test
+	void resolvingSeveralNotedMergesInOnePassReportsConflictsChangedOnce() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Recorder events = new Recorder();
+		service.setListener(events);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.noted = true;
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		loss(service, appData, BOOKING);
+		loss(service, appData, OTHER_SEAT);
+		events.changed.clear();
+		events.sequence.clear();
+		events.conflicts = 0;
+
+		service.resolver().resolvePending(Integer.MAX_VALUE);
+
+		assertEquals(2, policy.inputs.size());
+		assertNotNull(service.unitState(BOOKING).head().conflict());
+		assertNotNull(service.unitState(OTHER_SEAT).head().conflict());
+		assertEquals(1, events.conflicts);
+		assertEquals(List.of("units", "conflicts"), events.sequence);
+	}
+
+	@Test
+	void aPassWithoutNoteReportsNoConflictsChanged() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Recorder events = new Recorder();
+		service.setListener(events);
+		service.setConflictPolicy(UnitType.BOOKING, new RecordingPolicy());
+		loss(service, appData, BOOKING);
+		loss(service, appData, OTHER_SEAT);
+		events.changed.clear();
+		events.sequence.clear();
+		events.conflicts = 0;
+
+		service.resolver().resolvePending(Integer.MAX_VALUE);
+
+		assertEquals(1, events.changed.size());
+		assertEquals(0, events.conflicts);
+	}
+
+	@Test
+	void aPassWithOneFailedAndOneSuccessfulUnitReportsBothInOneUnitsChanged() throws IOException {
+		Path appData = dir.resolve("app");
+		FaultyFileLayer files = new FaultyFileLayer(new NioFileLayer());
+		SyncService service = single(appData, files);
+		Recorder events = new Recorder();
+		service.setListener(events);
+		service.setConflictPolicy(UnitType.BOOKING, new RecordingPolicy());
+		Loss failing = loss(service, appData, BOOKING);
+		loss(service, appData, OTHER_SEAT);
+		AtomicBoolean full = new AtomicBoolean(true);
+		files.failWhen(p -> full.get() && p.getParent() != null && p.getParent().endsWith(Path.of("p1", "bookings", "A-1")),
+				"createNew", new IOException("Datenträger voll"));
+		events.changed.clear();
+		events.sequence.clear();
+
+		service.resolver().resolvePending(Integer.MAX_VALUE);
+
+		assertEquals(List.of(Set.of(BOOKING, OTHER_SEAT)), events.changed, "die gescheiterte gilt als versucht");
+		assertEquals(List.of(List.of(failing.mine().id())), service.unitState(BOOKING).lost());
+		assertTrue(service.unitState(OTHER_SEAT).lost().isEmpty());
+
+		// die gescheiterte Einheit blieb eingereiht und kommt im nächsten Durchlauf allein dran
+		full.set(false);
+		events.changed.clear();
+		service.resolver().resolvePending(Integer.MAX_VALUE);
+
+		assertEquals(List.of(Set.of(BOOKING)), events.changed);
+		assertTrue(service.unitState(BOOKING).lost().isEmpty());
 	}
 
 	@Test

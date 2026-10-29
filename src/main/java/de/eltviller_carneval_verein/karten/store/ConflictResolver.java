@@ -60,6 +60,9 @@ import de.eltviller_carneval_verein.karten.store.UnitState.Status;
  * die Einheit eingereiht und wird im nächsten Takt erneut versucht; Log WARNING einmal je Einheit und Störung, SYS-006 in
  * der Fußzeile einmal je Störung (sie endet, wenn jede gestörte Einheit wieder durchläuft).
  * <p>
+ * Rückmeldung: Die geschriebenen Einheiten und geänderten Konflikte meldet ein Durchlauf gesammelt am Ende, nicht je
+ * Einheit (siehe {@link #resolvePending}).
+ * <p>
  * Threads: {@link #enqueue} von jedem Thread; {@link #resolvePending} serialisiert sich selbst und läuft im Takt bzw.
  * beim Start. Die Auflösung fasst nie Modell, Vergleichsstand oder Tracker an.
  */
@@ -171,9 +174,15 @@ final class ConflictResolver {
 	/**
 	 * Löst höchstens {@code budget} eingereihte Einheiten auf, die zuerst eingereihten zuerst; der Rest bleibt in der
 	 * Schlange. Eine Einheit, die auf Änderungslisten wartet, kommt wieder ans Ende.
+	 * <p>
+	 * Gemeldet wird einmal je Durchlauf, am Ende (auch bei einem unerwarteten Fehler): die geschriebenen Einheiten in einem
+	 * {@link SyncNotifier#unitsChanged} und, wenn eine geschriebene Version einen Vermerk trägt, danach ein
+	 * {@link SyncNotifier#conflictsChanged}. Jeder Rückruf lädt auf dem FX-Thread die Ansichten neu, je Einheit gemeldet
+	 * kostete das bei vielen Zusammenführungen einen ganzen Takt.
 	 */
 	void resolvePending(int budget) {
 		running.lock();
+		Written written = new Written();
 		try {
 			List<UnitKey> units = new ArrayList<>();
 			synchronized (queue) {
@@ -185,17 +194,24 @@ final class ConflictResolver {
 			}
 			List<UnitKey> again = new ArrayList<>();
 			for (UnitKey unit : units) {
-				if (resolveUnit(unit)) {
+				if (resolveUnit(unit, written)) {
 					again.add(unit);
 				}
 			}
 			enqueue(again);
 		} finally {
-			running.unlock();
+			try {
+				notifier.unitsChanged(written.units);
+				if (written.noted) {
+					notifier.conflictsChanged();
+				}
+			} finally {
+				running.unlock();
+			}
 		}
 	}
 
-	/** Was die Auflösung einer Einheit geschrieben hat, für die Rückmeldung. */
+	/** Was die Auflösung eines Durchlaufs geschrieben hat, für die Rückmeldung. */
 	private static final class Written {
 		/** Die Einheiten der geschriebenen (oder bei einem Fehler: versuchten) Änderungen. */
 		final Set<UnitKey> units = new LinkedHashSet<>();
@@ -204,15 +220,14 @@ final class ConflictResolver {
 	}
 
 	/**
-	 * Löst die verlorenen Strecken einer Einheit auf und meldet danach die geschriebenen Einheiten und, wenn ein Vermerk
-	 * dabei war, die geänderten Konflikte. Scheitert Lesen oder Schreiben, bleibt die Einheit eingereiht (siehe
-	 * {@link #disrupted}); ein unerwarteter Fehler steht im Log (WARNING), und die Einheit kommt erst wieder, wenn der Dienst
-	 * den Verlust erneut meldet.
+	 * Löst die verlorenen Strecken einer Einheit auf und trägt die geschriebenen Einheiten und einen etwaigen Vermerk in
+	 * {@code written} ein; gemeldet wird erst am Ende des Durchlaufs. Scheitert Lesen oder Schreiben, bleibt die Einheit
+	 * eingereiht (siehe {@link #disrupted}); ein unerwarteter Fehler steht im Log (WARNING), und die Einheit kommt erst wieder,
+	 * wenn der Dienst den Verlust erneut meldet.
 	 *
 	 * @return ob die Einheit wieder eingereiht wird
 	 */
-	private boolean resolveUnit(UnitKey unit) {
-		Written written = new Written();
+	private boolean resolveUnit(UnitKey unit, Written written) {
 		boolean again = false;
 		try {
 			again = mergeStretches(unit, written);
@@ -226,10 +241,6 @@ final class ConflictResolver {
 			if (!again) {
 				// die Einheit verlässt die Schlange: Ein späteres Warten beginnt von vorn
 				waitingSince.remove(unit);
-			}
-			notifier.unitsChanged(written.units);
-			if (written.noted) {
-				notifier.conflictsChanged();
 			}
 		}
 		return again;
