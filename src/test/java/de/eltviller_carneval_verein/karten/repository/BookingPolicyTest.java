@@ -620,6 +620,30 @@ class BookingPolicyTest {
 		assertForeignMoveKeptOnSeat(s1Then, theirS1);
 	}
 
+	@Test
+	void foreignCopyThatMovedOnStillGivesTheLoserANote() {
+		// wie R31b, aber A hat m danach von s4 nach s5 weitergesetzt (save-c): Die Kopie trägt save-b nicht mehr
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		UnitKey s5 = seat("s5");
+		Version base = version(THIRD, "save-0", withoutPlace("m", b -> {
+		}));
+		Version myDeletion = deletion(OWN, "save-a");
+		Version myS1 = version(OWN, "save-a", booking("m", "s1", b -> b.setComment("Fenster")));
+		Version theirDeletion = deletion(OTHER, "save-b");
+		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
+		Version theirS5 = version(OTHER, "save-c", booking("m", "s5", b -> b.setSeatNumber(5)));
+
+		Resolution resolution = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
+				Map.of(S1, strandedTarget(S1, theirS1, myS1), s5, sibling(s5, theirS5)), theirDeletion));
+
+		assertTrue(resolution.deleted());
+		assertTrue(resolution.extra().isEmpty(), "s5 wird nicht gelöscht");
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.FIELDS, note.kind(), "B's gescheitertes Zuweisen bleibt nicht still");
+		assertEquals("s5", note.fields().get(0).theirs().get("seatId").asText());
+		assertEquals(myS1.id(), note.dropped());
+	}
+
 	private static void assertForeignMoveKeptOnSeat(Resolution resolution, Version theirS1) {
 		assertFalse(resolution.deleted());
 		assertEquals(theirS1.payload(), resolution.payload());

@@ -134,13 +134,16 @@ public final class BookingPolicy implements ConflictPolicy {
 					List.of(), null, null, myCopy.version());
 			return new Resolution(theirs.payload(), true, List.of(deletionOf(myCopy)), note);
 		}
-		Version myLostCopy = theirCopy == null || !isOwnUnassigned(input.unit(), bookingId) ? null
+		// R31b: Mein Zuweisen aus "ohne Platz" ist am Ziel gescheitert, Deren hat verschoben; Deren gilt, nichts löschen.
+		// Ist die fremde Kopie seither weitergewandert (sie trägt den Speichervorgang der Löschung nicht mehr), gilt sie
+		// ebenso: Der Vermerk muss bleiben, sonst ginge das Zuweisen still unter.
+		UnitSnapshot foreignCopy = theirCopy != null ? theirCopy : livingCopy(input, bookingId);
+		Version myLostCopy = foreignCopy == null || !isOwnUnassigned(input.unit(), bookingId) ? null
 				: strandedTarget(input, bookingId, mine.saveId());
 		if (myLostCopy != null) {
-			// R31b: Mein Zuweisen aus "ohne Platz" ist am Ziel gescheitert, Deren hat verschoben; Deren gilt, nichts löschen
 			List<String> place = FieldGroups.booking().get(PLACE_GROUP);
 			FieldConflict conflict = new FieldConflict(PLACE_GROUP, FieldMerge.slice(myLostCopy.payload(), place),
-					FieldMerge.slice(theirCopy.payload(), place));
+					FieldMerge.slice(foreignCopy.payload(), place));
 			ConflictNote note = new ConflictNote(Kind.FIELDS, input.ownMachineId(), PolicyRules.party(theirDeletion),
 					List.of(conflict), null, null, myLostCopy.id());
 			return new Resolution(theirs.payload(), true, List.of(), note);
