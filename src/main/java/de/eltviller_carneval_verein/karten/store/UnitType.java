@@ -16,5 +16,10 @@ public enum UnitType {
 	BOOKING,
 
 	/** Eine Halle samt Sitzplan. */
-	HALL
+	HALL;
+
+	/** Ob Einheiten dieser Art Einheiten unter sich haben: ein Event (Vorstellungen) und eine Vorstellung (Buchungen). */
+	public boolean hasChildren() {
+		return this == EVENT || this == PRESENTATION;
+	}
 }

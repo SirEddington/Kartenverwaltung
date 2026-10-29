@@ -1,6 +1,8 @@
 package de.eltviller_carneval_verein.karten.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -29,6 +31,34 @@ class UnitKeyTest {
 		assertEquals(UnitType.BOOKING, UnitKey.unassignedBooking("e1", "p1", "b1").type());
 		assertEquals(UnitType.HALL, UnitKey.hall("h1").type());
 		assertEquals("_b1", UnitKey.unassignedBooking("e1", "p1", "b1").bookingDir());
+	}
+
+	@Test
+	void hierarchyHelpersFollowTheFolderLayout() {
+		UnitKey event = UnitKey.event("e1");
+		UnitKey presentation = UnitKey.presentation("e1", "p1");
+		UnitKey seat = UnitKey.booking("e1", "p1", "s1");
+		UnitKey unassigned = UnitKey.unassignedBooking("e1", "p1", "b1");
+		UnitKey hall = UnitKey.hall("h1");
+
+		assertNull(event.parent());
+		assertEquals(event, presentation.parent());
+		assertEquals(presentation, seat.parent());
+		assertNull(hall.parent());
+		assertEquals(List.of(presentation, event), unassigned.ancestors());
+		assertEquals(List.of(event), presentation.ancestors());
+		assertEquals(List.of(), hall.ancestors());
+
+		assertTrue(unassigned.isUnassigned());
+		assertEquals("b1", unassigned.unassignedBookingId());
+		assertFalse(seat.isUnassigned());
+		assertNull(seat.unassignedBookingId());
+		assertFalse(event.isUnassigned());
+
+		assertTrue(UnitType.EVENT.hasChildren());
+		assertTrue(UnitType.PRESENTATION.hasChildren());
+		assertFalse(UnitType.BOOKING.hasChildren());
+		assertFalse(UnitType.HALL.hasChildren());
 	}
 
 	@Test

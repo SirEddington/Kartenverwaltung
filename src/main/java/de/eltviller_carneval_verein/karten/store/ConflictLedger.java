@@ -102,9 +102,8 @@ final class ConflictLedger {
 	 */
 	private static Deletion foreignParentDeletion(UnitIndex.Entry entry, String ownId, Set<ConflictKey> acknowledged) {
 		UnitSnapshot snapshot = entry.snapshot();
-		UnitType type = snapshot.unit().type();
 		VersionId version = snapshot.version();
-		if (!snapshot.deleted() || version == null || type != UnitType.EVENT && type != UnitType.PRESENTATION
+		if (!snapshot.deleted() || version == null || !snapshot.unit().type().hasChildren()
 				|| acknowledged.contains(new ConflictKey(version, ConflictKey.Kind.PARENT_DELETION))) {
 			return null;
 		}
@@ -150,7 +149,7 @@ final class ConflictLedger {
 			if (snapshot.deleted() || version == null || !version.isFrom(ownId)) {
 				continue;
 			}
-			for (UnitKey parent : parentsOf(unit)) {
+			for (UnitKey parent : unit.ancestors()) {
 				Deletion deletion = deletions.get(parent);
 				if (deletion == null) {
 					continue;
@@ -164,14 +163,5 @@ final class ConflictLedger {
 			}
 		}
 		return undecided;
-	}
-
-	/** Die Einheiten, deren Löschung diese Einheit trifft: bei einer Buchung Vorstellung und Event, bei einer Vorstellung das Event. */
-	private static List<UnitKey> parentsOf(UnitKey unit) {
-		return switch (unit.type()) {
-		case BOOKING -> List.of(UnitKey.presentation(unit.eventId(), unit.presentationId()), UnitKey.event(unit.eventId()));
-		case PRESENTATION -> List.of(UnitKey.event(unit.eventId()));
-		default -> List.of();
-		};
 	}
 }

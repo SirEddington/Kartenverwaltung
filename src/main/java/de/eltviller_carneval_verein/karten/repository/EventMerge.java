@@ -78,9 +78,6 @@ final class EventMerge {
 	static final Sink NONE = new Sink() {
 	};
 
-	/** Präfix des Ordnernamens einer Buchung ohne Platz (siehe {@link UnitKey}). */
-	private static final String UNASSIGNED_PREFIX = "_";
-
 	/**
 	 * Was in ein Event eingearbeitet wird. Ein Plan wirkt auf das Event im Cache und auf jede Kopie gleich: Auch die
 	 * Kennungen leerer Platzhalter (geleert oder vom Abgleich neu angelegt) entstehen nur beim ersten Einarbeiten und
@@ -252,7 +249,7 @@ final class EventMerge {
 				throw new IllegalArgumentException(unit.relativePath() + " gehört nicht zum Event " + event.getId());
 			}
 			// eine Buchung unter einer gerade zusammengesetzten Vorstellung kam schon mit ihr aus dem Index
-			if (unit.type() == UnitType.BOOKING && assembled.contains(presentationKey(unit))) {
+			if (unit.type() == UnitType.BOOKING && assembled.contains(unit.parent())) {
 				continue;
 			}
 			Undo undo = new Undo(event, unit);
@@ -355,7 +352,7 @@ final class EventMerge {
 
 	private static void mergeBooking(Event event, UnitSnapshot snapshot, Plan plan, Sink sink) {
 		UnitKey unit = snapshot.unit();
-		UnitSnapshot indexed = plan.presentationStates.get(presentationKey(unit));
+		UnitSnapshot indexed = plan.presentationStates.get(unit.parent());
 		if (nothingToPlace(event, snapshot, indexed)) {
 			// gelöscht oder unlesbar, oder ihre Vorstellung ist es: Es gibt nichts, was auf einen Platz wartet
 			sink.adopted(snapshot, false);
@@ -401,11 +398,11 @@ final class EventMerge {
 	 */
 	private static void cancel(Presentation presentation, UnitKey unit, Plan plan) {
 		Booking current = bookingAt(presentation, unit);
-		if (current != null && isUnassigned(unit)) {
+		if (current != null && unit.isUnassigned()) {
 			presentation.getBookings().remove(current);
 			return;
 		}
-		if (current == null && !isUnassigned(unit)) {
+		if (current == null && !unit.isUnassigned()) {
 			current = movedBooking(presentation, plan.lastIds.get(unit));
 			if (current != null && (current.isUnassigned() || current.getSeatId() == null)) {
 				presentation.getBookings().remove(current);
@@ -497,7 +494,7 @@ final class EventMerge {
 	private static boolean fitsPlan(UnitKey unit, Booking state, Presentation presentation,
 			Function<String, Hall> hallLookup) {
 		SeatingPlan seating = planOf(presentation, hallLookup);
-		if (!isUnassigned(unit)) {
+		if (!unit.isUnassigned()) {
 			return seating != null && seating.findSeat(unit.bookingDir()) != null;
 		}
 		if (seating == null) {
@@ -573,7 +570,7 @@ final class EventMerge {
 			if (unit.type() == UnitType.PRESENTATION && UnitMapper.isReadable(snapshot)) {
 				presentations.put(unit, snapshot);
 			} else if (unit.type() == UnitType.BOOKING) {
-				bookings.computeIfAbsent(presentationKey(unit), k -> new ArrayList<>()).add(snapshot);
+				bookings.computeIfAbsent(unit.parent(), k -> new ArrayList<>()).add(snapshot);
 			}
 		}
 		Set<UnitKey> waitingUnits = new HashSet<>();
@@ -606,7 +603,7 @@ final class EventMerge {
 		event.setPresentations(new ArrayList<>(List.of(probe)));
 		boolean planKnown = planOf(probe, hallLookup) != null;
 		List<UnitSnapshot> ordered = new ArrayList<>(bookings);
-		ordered.sort(Comparator.comparing((UnitSnapshot booking) -> isUnassigned(booking.unit())));
+		ordered.sort(Comparator.comparing((UnitSnapshot booking) -> booking.unit().isUnassigned()));
 		List<UnitSnapshot> waiting = new ArrayList<>();
 		for (UnitSnapshot booking : ordered) {
 			if (lenient && !planKnown) {
@@ -745,8 +742,8 @@ final class EventMerge {
 			return null;
 		}
 		String dir = unit.bookingDir();
-		if (isUnassigned(unit)) {
-			String id = dir.substring(UNASSIGNED_PREFIX.length());
+		if (unit.isUnassigned()) {
+			String id = unit.unassignedBookingId();
 			for (Booking booking : presentation.getBookings()) {
 				if ((booking.getSeatId() == null || booking.isUnassigned()) && id.equals(booking.getId())) {
 					return booking;
@@ -856,15 +853,6 @@ final class EventMerge {
 		if (presentation.getBookings() != null) {
 			objects.addAll(presentation.getBookings());
 		}
-	}
-
-	private static boolean isUnassigned(UnitKey unit) {
-		return unit.bookingDir().startsWith(UNASSIGNED_PREFIX);
-	}
-
-	/** Die Vorstellung, zu der die Buchung gehört. */
-	static UnitKey presentationKey(UnitKey booking) {
-		return UnitKey.presentation(booking.eventId(), booking.presentationId());
 	}
 
 	// <-- Wege durch das Modell

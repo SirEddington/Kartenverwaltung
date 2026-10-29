@@ -507,8 +507,7 @@ final class ConflictResolver {
 	 * bleibt. Sonst {@code null} (die Positionen dieses Rechners).
 	 */
 	private static Map<String, Long> seenOf(UnitKey unit, Resolution resolution, Version mine, Version theirs) {
-		boolean parent = unit.type() == UnitType.EVENT || unit.type() == UnitType.PRESENTATION;
-		if (!resolution.deleted() || !parent) {
+		if (!resolution.deleted() || !unit.type().hasChildren()) {
 			return null;
 		}
 		if (theirs.deleted()) {

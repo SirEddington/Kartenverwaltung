@@ -1,5 +1,7 @@
 package de.eltviller_carneval_verein.karten.store;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -115,6 +117,37 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 	/** Die ID der Halle bzw. des Events, zu dem die Einheit gehört. */
 	public String ownerId() {
 		return type == UnitType.HALL ? hallId : eventId;
+	}
+
+	/** Ob die Einheit eine Buchung ohne Sitz ist (Ordner {@code _<bookingId>}). */
+	public boolean isUnassigned() {
+		return type == UnitType.BOOKING && bookingDir.startsWith(UNASSIGNED_PREFIX);
+	}
+
+	/** Die Buchungs-ID einer Buchung ohne Sitz (der Ordnername ohne {@code _}); sonst {@code null}. */
+	public String unassignedBookingId() {
+		return isUnassigned() ? bookingDir.substring(UNASSIGNED_PREFIX.length()) : null;
+	}
+
+	/** Die Eltern-Einheit: bei einer Buchung ihre Vorstellung, bei einer Vorstellung das Event; sonst {@code null}. */
+	public UnitKey parent() {
+		return switch (type) {
+		case PRESENTATION -> event(eventId);
+		case BOOKING -> presentation(eventId, presentationId);
+		case EVENT, HALL -> null;
+		};
+	}
+
+	/**
+	 * Die Einheiten über dieser, die nächste zuerst: bei einer Buchung Vorstellung und Event, bei einer Vorstellung das
+	 * Event; sonst keine.
+	 */
+	public List<UnitKey> ancestors() {
+		List<UnitKey> ancestors = new ArrayList<>();
+		for (UnitKey ancestor = parent(); ancestor != null; ancestor = ancestor.parent()) {
+			ancestors.add(ancestor);
+		}
+		return ancestors;
 	}
 
 	/** Der Ordner der Einheit relativ zum Wurzelordner des Speichers, immer mit {@code /} getrennt. */

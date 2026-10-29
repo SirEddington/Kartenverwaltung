@@ -220,8 +220,7 @@ final class UnitBaseline {
 		for (UnitPayload part : units) {
 			UnitKey revived = part.unit();
 			UnitSnapshot known = baseline.get(revived);
-			boolean hasChildren = revived.type() == UnitType.EVENT || revived.type() == UnitType.PRESENTATION;
-			if (known == null || !known.deleted() || !hasChildren) {
+			if (known == null || !known.deleted() || !revived.type().hasChildren()) {
 				continue;
 			}
 			if (readable == null) {

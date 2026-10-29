@@ -653,8 +653,7 @@ public final class SyncService {
 	 * wurden (Entscheidung der Spezifikation, siehe "{@code seen} ist eine Annäherung").
 	 */
 	private static Map<String, Long> seenFor(Link current, Change change) {
-		UnitType type = change.unit().type();
-		if (!change.deleted() || type != UnitType.EVENT && type != UnitType.PRESENTATION) {
+		if (!change.deleted() || !change.unit().type().hasChildren()) {
 			return Map.of();
 		}
 		if (change.seen() != null) {

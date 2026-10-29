@@ -431,8 +431,7 @@ final class UnitIndex {
 
 	/** {@code seen} der aktuellen Version, wenn sie eine Löschung eines Event-Kopfs oder einer Vorstellung ist. */
 	private static Map<String, Long> seenOf(UnitKey unit, Version current) {
-		boolean parent = unit.type() == UnitType.EVENT || unit.type() == UnitType.PRESENTATION;
-		return current != null && current.deleted() && parent ? current.seen() : Map.of();
+		return current != null && current.deleted() && unit.type().hasChildren() ? current.seen() : Map.of();
 	}
 
 	/**

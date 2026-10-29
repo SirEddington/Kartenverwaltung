@@ -22,8 +22,6 @@ public final class ConflictLabels {
 	private static final String SEPARATOR = " › ";
 	private static final String UNKNOWN_PLACE = "(Platz unbekannt)";
 	private static final String UNKNOWN_CUSTOMER = "(Kunde unbekannt)";
-	/** Der Ordnername einer Buchung ohne Platz beginnt mit diesem Zeichen (siehe {@link UnitKey}). */
-	private static final String UNASSIGNED_PREFIX = "_";
 
 	private ConflictLabels() {
 	}
@@ -62,8 +60,7 @@ public final class ConflictLabels {
 			if (unit.type() == UnitType.PRESENTATION) {
 				return path;
 			}
-			boolean withoutSeat = unit.bookingDir().startsWith(UNASSIGNED_PREFIX);
-			return path + SEPARATOR + bookingPart(modelObject.apply(unit), withoutSeat);
+			return path + SEPARATOR + bookingPart(modelObject.apply(unit), unit.isUnassigned());
 		};
 	}
 

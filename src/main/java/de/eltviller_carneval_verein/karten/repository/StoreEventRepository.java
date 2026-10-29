@@ -362,14 +362,7 @@ public class StoreEventRepository implements EventRepository {
 
 	/** Ob der Kopf oder die Vorstellung der Einheit gelöscht ist. */
 	private static boolean belowDeleted(UnitKey unit, Map<UnitKey, UnitSnapshot> byUnit) {
-		List<UnitKey> parents = new ArrayList<>();
-		if (unit.type() != UnitType.EVENT) {
-			parents.add(UnitKey.event(unit.eventId()));
-		}
-		if (unit.type() == UnitType.BOOKING) {
-			parents.add(UnitKey.presentation(unit.eventId(), unit.presentationId()));
-		}
-		return parents.stream().map(byUnit::get).anyMatch(parent -> parent != null && parent.deleted());
+		return unit.ancestors().stream().map(byUnit::get).anyMatch(parent -> parent != null && parent.deleted());
 	}
 
 	private List<UnitState> statesOf(String eventId) throws IOException {
@@ -830,7 +823,7 @@ public class StoreEventRepository implements EventRepository {
 		List<UnitSnapshot> apply = new ArrayList<>();
 		for (UnitSnapshot current : successors) {
 			UnitKey unit = current.unit();
-			UnitKey parent = unit.type() == UnitType.BOOKING ? EventMerge.presentationKey(unit) : null;
+			UnitKey parent = unit.type() == UnitType.BOOKING ? unit.parent() : null;
 			// Eine Stornierung, die eine vom Nutzer berührte versetzte Buchung träfe, wartet wie jede Änderung daran
 			if (isBlocked(event, current, changes)
 					|| (lastIds.containsKey(unit) && movedBookingTouched(event, changes, lastIds.get(unit), unit))) {
@@ -887,8 +880,8 @@ public class StoreEventRepository implements EventRepository {
 		Set<UnitKey> missing = new HashSet<>();
 		for (UnitSnapshot snapshot : successors) {
 			UnitKey unit = snapshot.unit();
-			if (unit.type() == UnitType.BOOKING && !states.containsKey(EventMerge.presentationKey(unit))) {
-				missing.add(EventMerge.presentationKey(unit));
+			if (unit.type() == UnitType.BOOKING && !states.containsKey(unit.parent())) {
+				missing.add(unit.parent());
 			}
 		}
 		if (!missing.isEmpty()) {

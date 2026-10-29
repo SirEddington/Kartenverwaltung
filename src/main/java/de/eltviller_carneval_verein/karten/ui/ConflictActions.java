@@ -78,8 +78,6 @@ public final class ConflictActions {
 	/** Eine Zeile ohne Aktion bietet nichts an und braucht keinen Grund. */
 	private static final Availability NO_ACTION = new Availability(false, "");
 
-	/** Der Ordnername einer Buchung ohne Platz beginnt mit diesem Zeichen (siehe {@link UnitKey}). */
-	private static final String UNASSIGNED_PREFIX = "_";
 	/** Die Feldgruppe einer Vorstellung mit Halle und Bestuhlung ({@code FieldGroups}). */
 	private static final String HALL_GROUP = "hall";
 
@@ -532,7 +530,7 @@ public final class ConflictActions {
 			return null;
 		}
 		Booking placeholder = null;
-		if (!unit.bookingDir().startsWith(UNASSIGNED_PREFIX) && events.modelObject(unit) instanceof Booking seat
+		if (!unit.isUnassigned() && events.modelObject(unit) instanceof Booking seat
 				&& !seat.hasData() && !storedAt(unit)) {
 			placeholder = seat;
 		}

@@ -218,7 +218,7 @@ final class UnitMapper {
 		for (UnitSnapshot known : baseline.values()) {
 			if (known.isLive() && shown.contains(known.unit())
 					&& !present.contains(known.unit())) {
-				UnitKey parent = parentOf(known.unit());
+				UnitKey parent = known.unit().parent();
 				if (parent != null && present.contains(parent)) {
 					vanished.add(known);
 				}
@@ -254,7 +254,7 @@ final class UnitMapper {
 	 * wiederbelebt wird, weil die Einheit unter ihr noch zu räumen ist (siehe {@link #changes}).
 	 */
 	private static boolean revivesParent(Map<UnitKey, UnitSnapshot> baseline, UnitKey unit) {
-		for (UnitKey ancestor = parentOf(unit); ancestor != null; ancestor = parentOf(ancestor)) {
+		for (UnitKey ancestor : unit.ancestors()) {
 			UnitSnapshot known = baseline.get(ancestor);
 			if (known != null && known.deleted()) {
 				return true;
@@ -265,17 +265,8 @@ final class UnitMapper {
 
 	/** Ob die Eltern-Einheit angezeigt wird; ein Event-Kopf oder eine Halle hat keine. */
 	private static boolean parentShown(UnitKey unit, Set<UnitKey> shown) {
-		UnitKey parent = parentOf(unit);
+		UnitKey parent = unit.parent();
 		return parent != null && shown.contains(parent);
-	}
-
-	/** Die Eltern-Einheit nach dem Schlüssel; {@code null} für Event-Kopf und Halle. */
-	private static UnitKey parentOf(UnitKey unit) {
-		return switch (unit.type()) {
-		case PRESENTATION -> UnitKey.event(unit.eventId());
-		case BOOKING -> UnitKey.presentation(unit.eventId(), unit.presentationId());
-		case EVENT, HALL -> null;
-		};
 	}
 
 	/**
