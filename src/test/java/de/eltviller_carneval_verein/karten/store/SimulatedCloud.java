@@ -33,7 +33,7 @@ import java.util.stream.Stream;
  * endet (Ausschlussregel {@code ~*.tmp}), und Konfliktkopien werden nie hochgeladen. Löschungen werden nicht
  * übertragen. Der Sync-Client darf in den Client-Ordnern schreiben, wie er will; er ist kein Produktivcode.
  */
-final class SimulatedCloud {
+public final class SimulatedCloud {
 
 	private static final String TEMP_PREFIX = "~karv-";
 	private static final String TEMP_SUFFIX = ".tmp";
@@ -47,7 +47,7 @@ final class SimulatedCloud {
 	/**
 	 * @param server der Server-Ordner; die Client-Ordner entstehen als Geschwister davon
 	 */
-	SimulatedCloud(Path server) {
+	public SimulatedCloud(Path server) {
 		this.server = server;
 		try {
 			Files.createDirectories(server);
@@ -61,7 +61,7 @@ final class SimulatedCloud {
 	 *
 	 * @return der lokal synchronisierte Ordner, den der Dienst dieses Rechners als gemeinsamen Ordner nimmt
 	 */
-	Path addClient(String name) {
+	public Path addClient(String name) {
 		Path folder = server.resolveSibling("client-" + name);
 		try {
 			Files.createDirectories(folder);
@@ -74,7 +74,7 @@ final class SimulatedCloud {
 	}
 
 	/** Ein vollständiger Sync-Durchlauf dieses Rechners. */
-	void step(String client) {
+	public void step(String client) {
 		sync(client, rel -> true);
 	}
 
@@ -82,7 +82,7 @@ final class SimulatedCloud {
 	 * Ein Sync-Durchlauf, der nur Dateien überträgt, deren Pfad (relativ zum Client-Ordner, mit {@code /}) passt: So
 	 * kommt eine Liste vor ihrer Versionsdatei an, oder Version und Liste vor dem Anspruch.
 	 */
-	void stepFilesOnly(String client, Predicate<String> rel) {
+	public void stepFilesOnly(String client, Predicate<String> rel) {
 		sync(client, rel);
 	}
 

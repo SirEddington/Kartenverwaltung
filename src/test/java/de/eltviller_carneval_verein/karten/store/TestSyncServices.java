@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.function.Predicate;
 
 /**
  * Test-Hilfe: ein {@link SyncService} für den Einzelbetrieb, ohne Threads und ohne Takt. Oberfläche und Hintergrund
@@ -53,6 +54,22 @@ public final class TestSyncServices {
 					path -> true, clock);
 			service.startup(sharedDir.toString());
 			return service;
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+	}
+
+	/**
+	 * Ein noch nicht gestarteter Dienst für den gemeinsamen Betrieb, mit Dateischicht und Erreichbarkeitsprüfung nach Wahl
+	 * (etwa {@link FaultyFileLayer} und ein Schalter, der den gemeinsamen Ordner wegnimmt). Oberfläche und Hintergrund
+	 * laufen auf dem Thread des Aufrufers, der Rechner heißt {@code machineName}. Wer Strategien braucht, setzt sie und
+	 * ruft dann {@link SyncService#startup(String)} mit dem gemeinsamen Ordner auf.
+	 */
+	public static SyncService unstarted(Path appData, String machineName, FileLayer files, Predicate<Path> reachable,
+			Clock clock) {
+		try {
+			MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> machineName);
+			return new SyncService(appData, identity, files, Runnable::run, Runnable::run, reachable, clock);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
