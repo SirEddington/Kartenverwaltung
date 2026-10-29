@@ -15,8 +15,8 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
  * @param machineName der Anzeigename des Rechners, der ihn geschrieben hat (letztes Glied der Kette); {@code null},
  *                    wenn er nicht bekannt ist
  * @param model       das Objekt im Modell, das der Hinweis nennt (Event, Presentation, Booking oder Hall)
- * @param silent      ob der Hinweis entfällt: Der Stand ist eine eigene Zusammenführung, der Hinweis nennte den eigenen
- *                    Rechner als "anderen Rechner"; den Konflikt zeigt der Dialog
+ * @param silent      ob der Hinweis entfällt: Der Stand ist eine eigene Zusammenführung mit einem Vermerk für diesen
+ *                    Rechner, der Hinweis nennte den eigenen Rechner als "anderen Rechner"; den Konflikt zeigt der Dialog
  */
 public record Deferral(UnitKey unit, VersionId version, String machineName, Object model, boolean silent) {
 
@@ -30,7 +30,7 @@ public record Deferral(UnitKey unit, VersionId version, String machineName, Obje
 		return new Deferral(unit, version, machineOf(chain), model, false);
 	}
 
-	/** Wie {@link #of}, aber ohne Hinweis: Der Stand ist eine eigene Zusammenführung. */
+	/** Wie {@link #of}, aber ohne Hinweis: Der Stand ist eine eigene Zusammenführung mit Vermerk für diesen Rechner. */
 	static Deferral silent(UnitKey unit, VersionId version, List<ChainStep> chain, Object model) {
 		return new Deferral(unit, version, machineOf(chain), model, true);
 	}

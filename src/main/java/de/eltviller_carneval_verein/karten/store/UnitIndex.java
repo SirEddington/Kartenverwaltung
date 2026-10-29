@@ -556,6 +556,11 @@ final class UnitIndex {
 		return Collections.unmodifiableMap(absorbed);
 	}
 
+	/** Der Eintrag der Einheit (unveränderlich), oder {@code null}, wenn der Index sie nicht kennt. */
+	synchronized Entry entry(UnitKey unit) {
+		return entries.get(unit);
+	}
+
 	/** Die Einträge, die Vermerke ({@link Entry#notes()}) oder {@code seen} ({@link Entry#seen()}) haben. */
 	synchronized List<Entry> entriesWithNotesOrSeen() {
 		return entries.values().stream().filter(entry -> !entry.notes().isEmpty() || !entry.seen().isEmpty()).toList();

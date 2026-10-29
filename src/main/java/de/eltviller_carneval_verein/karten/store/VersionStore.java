@@ -104,6 +104,16 @@ public final class VersionStore {
 		return new UnitFiles(unit, Collections.unmodifiableMap(versions), Collections.unmodifiableMap(claims));
 	}
 
+	/**
+	 * Liest eine einzelne Version der Einheit.
+	 *
+	 * @return die Version; leer, wenn die Datei fehlt oder nicht lesbar ist (beschädigt, höheres Format, falsche ID)
+	 * @throws IOException wenn das Lesen der Datei selbst scheitert
+	 */
+	public Optional<Version> readVersion(UnitKey unit, VersionId id) throws IOException {
+		return files.read(versionFile(unit, id)).map(bytes -> parseVersion(id, bytes).version());
+	}
+
 	private static VersionFile parseVersion(VersionId id, byte[] bytes) {
 		try {
 			Version version = StoreCodec.readVersion(bytes);

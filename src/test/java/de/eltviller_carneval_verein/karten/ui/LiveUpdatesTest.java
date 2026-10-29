@@ -37,6 +37,7 @@ import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.repository.TestRepositories;
+import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ForeignVersions;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
@@ -576,22 +577,55 @@ class LiveUpdatesTest {
 				"die Fußzeile zeigt nur den letzten Hinweis: der zum Zurückstellen bleibt stehen");
 	}
 
+	/** Eine eigene Zusammenführung (eigene Rechner-ID, zwei Vorgänger) auf einem fremden Stand der Buchung. */
+	private void ownMerge(ConflictNote note) throws IOException {
+		VersionId sold = sync.unitState(seatUnit(0)).head().id();
+		foreignVersion(seatUnit(0), "Fremd", payload -> payload.put("lastName", "Fremd"));
+		foreign.writeMerge(seatUnit(0), sync.machineId(), "test", List.of(sold), note,
+				payload -> payload.put("comment", "M"));
+	}
+
 	@Test
 	void deferredOwnMergeShowsNoHint() throws IOException {
 		Booking mine = seat(friday, 0);
 		mine.setLastName("Eigen");
 		eventTracker.check(event);
-		VersionId sold = sync.unitState(seatUnit(0)).head().id();
-		foreignVersion(seatUnit(0), "Fremd", payload -> payload.put("lastName", "Fremd"));
-		hints.clear();
-		// eine eigene Zusammenführung (eigene Rechner-ID, zwei Vorgänger) auf dem fremden Stand
-		foreign.writeMerge(seatUnit(0), sync.machineId(), "test", List.of(sold), payload -> payload.put("comment", "M"));
+		ownMerge(new ConflictNote(ConflictNote.Kind.FIELDS, sync.machineId(), null, List.of(), null, null, null));
 
 		notifyUnits(seatUnit(0));
 
 		assertEquals(List.of(), hints, "den Konflikt zeigt der Dialog, nicht die Fußzeile");
 		assertEquals("Eigen", mine.getLastName(), "zurückgestellt");
 		assertEquals(1, events.retryDeferred().deferred().size(), "die Einheit bleibt zurückgestellt");
+	}
+
+	/**
+	 * Ruling R27: Eine eigene Zusammenführung ohne Vermerk für diesen Rechner (hier: ein Vermerk, der einen anderen
+	 * Rechner betrifft) bringt nur fremde Änderungen; sie bekommt den gewohnten Hinweis.
+	 */
+	@Test
+	void ownMergeWithoutNoteShowsTheNormalHint() throws IOException {
+		Booking mine = seat(friday, 0);
+		mine.setLastName("Eigen");
+		eventTracker.check(event);
+		ownMerge(new ConflictNote(ConflictNote.Kind.FIELDS, "anderer-rechner", null, List.of(), null, null, null));
+
+		notifyUnits(seatUnit(0));
+
+		assertEquals(List.of(deferralHint(EntityLabels.booking(mine), "Rechner test")), hints);
+		assertEquals("Eigen", mine.getLastName(), "zurückgestellt");
+	}
+
+	@Test
+	void ownMergeWithoutAnyNoteShowsTheNormalHint() throws IOException {
+		Booking mine = seat(friday, 0);
+		mine.setLastName("Eigen");
+		eventTracker.check(event);
+		ownMerge(null);
+
+		notifyUnits(seatUnit(0));
+
+		assertEquals(List.of(deferralHint(EntityLabels.booking(mine), "Rechner test")), hints);
 	}
 
 	@Test

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,11 +21,16 @@ import org.junit.jupiter.api.io.TempDir;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
+import de.eltviller_carneval_verein.karten.store.ConflictNote;
+import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
+import de.eltviller_carneval_verein.karten.store.ForeignVersions;
+import de.eltviller_carneval_verein.karten.store.NioFileLayer;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
 
 class ForeignBacklogTest {
@@ -162,6 +168,53 @@ class ForeignBacklogTest {
 
 		assertEquals(Set.of(E1, E2), backlog.recheck());
 		assertFalse(backlog.isHeld(E1_P1));
+	}
+
+	/** Der Stand einer Halle: eine eigene Zusammenführung, die eine fremde Version mit Vermerk für diesen Rechner aufnimmt. */
+	private record MergedHall(SyncService sync, FaultyFileLayer layer, UnitKey unit, Version merge) {
+		UnitSnapshot current() {
+			return sync.snapshots(List.of(unit)).get(unit);
+		}
+	}
+
+	private MergedHall mergedHall() throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		SyncService sync = TestSyncServices.singleMode(appData, layer);
+		sync.startup(null, p -> {
+		});
+		Hall hall = new Hall();
+		hall.setName("A");
+		TestRepositories.halls(sync).saveHall(hall);
+		UnitKey unit = UnitKey.hall(hall.getId());
+		ForeignVersions foreign = new ForeignVersions(sync, appData);
+		ConflictNote forMe = new ConflictNote(ConflictNote.Kind.FIELDS, sync.machineId(), null, List.of(), null, null, null);
+		Version absorbed = foreign.writeUnclaimed(unit, forMe, payload -> payload.put("name", "B"));
+		Version merge = foreign.writeMerge(unit, sync.machineId(), "test", List.of(absorbed.id()), null,
+				payload -> payload.put("name", "M"));
+		assertEquals(Set.of(absorbed.id()), sync.absorbed(List.of(unit)).get(unit));
+		assertEquals(merge.id(), sync.snapshots(List.of(unit)).get(unit).version());
+		return new MergedHall(sync, layer, unit, merge);
+	}
+
+	@Test
+	void ownMergeAbsorbingANoteForThisMachineIsDeferredSilently() throws IOException {
+		MergedHall hall = mergedHall();
+
+		backlog.defer(hall.current(), List.of(), "Halle", hall.sync());
+
+		assertTrue(backlog.deferrals().get(0).silent());
+	}
+
+	@Test
+	void ownMergeThatCannotBeReadKeepsTheHintAndWarns() throws IOException {
+		MergedHall hall = mergedHall();
+		hall.layer().failWhen(p -> p.endsWith(hall.merge().id() + ".json"), "read", new IOException("gesperrt"));
+
+		backlog.defer(hall.current(), List.of(), "Halle", hall.sync());
+
+		assertFalse(backlog.deferrals().get(0).silent(), "ohne Auskunft bleibt der Hinweis");
+		assertTrue(logged.stream().anyMatch(message -> message.contains(hall.unit().relativePath())
+				&& message.contains("eigene Zusammenführung")), logged.toString());
 	}
 
 	@Test

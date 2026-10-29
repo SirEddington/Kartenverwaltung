@@ -1756,6 +1756,32 @@ class StoreEventRepositoryForeignTest {
 		assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
 	}
 
+	/**
+	 * Die einzige Version der Buchung wird beschädigt, während der Nutzer sie ändert: Der gesperrte Stand ohne lesbares
+	 * Glied (ohne Version) wird zurückgestellt und bei jedem weiteren Aufruf ohne Fehler erneut geprüft.
+	 */
+	@Test
+	void deferredLockedUnitWithoutReadableVersionIsRecheckedWithoutFailure() throws IOException {
+		Booking sold = seat(friday, 0);
+		UnitKey unit = seatUnit(friday, 0);
+		Version only = sync.unitState(unit).head();
+		Files.writeString(appData.resolve("data/" + unit.relativePath() + "/" + only.id() + ".json"), "kaputt");
+		assertNull(sync.unitState(unit).current(), "kein lesbares Glied");
+		sold.setLastName("Eigen");
+
+		ForeignResult first = mine.applyForeign(List.of(unit));
+		ForeignResult second = mine.retryDeferred();
+		ForeignResult third = mine.retryDeferred();
+
+		assertEquals(1, first.deferred().size(), first.deferred().toString());
+		assertNull(first.deferred().get(0).version());
+		assertEquals(first.deferred(), second.deferred());
+		assertEquals(first.deferred(), third.deferred());
+		assertEquals(List.of(), second.warnings());
+		assertEquals(List.of(), third.warnings());
+		assertEquals("Eigen", sold.getLastName());
+	}
+
 	/** Hängt an den Kopf eine unlesbare, nicht gesperrte Version von anderer Seite (die ID passt nicht zum Ordner). */
 	private void unreadableForeignHead() throws IOException {
 		Version parent = sync.unitState(head()).head();

@@ -866,18 +866,50 @@ public final class SyncService {
 	}
 
 	/**
-	 * Eine lesbare Version der Einheit aus dem lokalen Bestand (siehe {@link #history}), etwa um ihre Vorgänger und ihren
-	 * Rechner zu prüfen.
+	 * Eine lesbare Version der Einheit aus dem lokalen Bestand (wie in {@link #history}), etwa um ihre Vorgänger und ihren
+	 * Rechner zu prüfen. Liest nur diese eine Datei.
 	 *
 	 * @return die Version; {@code null}, wenn es sie lokal nicht lesbar gibt
 	 */
 	public Version version(UnitKey unit, VersionId id) throws IOException {
-		for (Version version : history(unit)) {
-			if (version.id().equals(id)) {
-				return version;
+		return local.readVersion(unit, id).orElse(null);
+	}
+
+	/**
+	 * Ob der Stand {@code version} der Einheit eine eigene Zusammenführung ist, die einen Konflikt dieses Rechners
+	 * auflöst: von diesem Rechner, mit mehr als einem Vorgänger, und sie selbst oder eine in ihr aufgegangene Version trägt
+	 * einen Vermerk, der diesen Rechner betrifft ({@link ConflictNote#affected()}). Diesen Konflikt zeigt der Dialog. Die
+	 * Vermerke stammen aus dem Start-Index; kennt er keinen passenden, wird keine Datei gelesen. Sonst liest es höchstens
+	 * diese eine Version (wenn sie selbst keinen Vermerk trägt, kennt der Index Rechner und Vorgänger nicht).
+	 *
+	 * @param version ein Stand der Einheit; {@code null} ist nie eine Zusammenführung
+	 */
+	public boolean isOwnNotedMerge(UnitKey unit, VersionId version) throws IOException {
+		UnitIndex.Entry entry = index.entry(unit);
+		if (version == null || entry == null) {
+			return false;
+		}
+		String own = machineId();
+		UnitIndex.NotedVersion self = null;
+		boolean noted = false;
+		for (UnitIndex.NotedVersion candidate : entry.notes()) {
+			boolean itself = candidate.version().equals(version);
+			if (itself) {
+				self = candidate;
+			}
+			if ((itself || entry.absorbed().contains(candidate.version()))
+					&& own.equals(candidate.note().affected())) {
+				noted = true;
 			}
 		}
-		return null;
+		if (!noted) {
+			return false;
+		}
+		if (self != null) {
+			return own.equals(self.machine()) && self.parents().size() > 1;
+		}
+		Version merge = version(unit, version);
+		return merge != null && own.equals(merge.machine()) && merge.parents().size() > 1;
 	}
 
 	/**

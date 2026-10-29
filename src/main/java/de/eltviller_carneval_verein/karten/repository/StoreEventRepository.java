@@ -78,7 +78,8 @@ public class StoreEventRepository implements EventRepository {
 	 * Inhalte im Modell, die nicht der Nutzer, sondern das Einarbeiten erzeugt hat: Wechselt eine fremde Vorstellung Halle
 	 * oder Bestuhlung, setzt der Abgleich ihre Buchungen auf die neuen Sitze, bevor deren Einheiten eintreffen. Solange das
 	 * Modell genau diesen Inhalt hat, gilt die Einheit nicht als lokal verändert; der Wert {@code null} heißt, das Einarbeiten
-	 * hat sie aus dem Modell genommen. Ein Eintrag gilt, bis sich der Vergleichsstand der Einheit ändert.
+	 * hat sie aus dem Modell genommen. Ein Eintrag gilt, bis sich der Inhalt des Vergleichsstands der Einheit ändert; eine
+	 * neue Version mit gleichem Inhalt ({@link ForeignDecision#SAME}) lässt ihn stehen.
 	 */
 	private final Map<UnitKey, ObjectNode> derived = new HashMap<>();
 
@@ -457,7 +458,7 @@ public class StoreEventRepository implements EventRepository {
 	 * Vergleichsstand, ohne Modell, Listener und Hinweis. Ein anderer Nachfolger wird eingearbeitet, außer der Nutzer hat
 	 * die Einheit ungespeichert geändert oder bearbeitet sie gerade (bei Löschung von Kopf oder Vorstellung und beim Wechsel
 	 * von Halle oder Bestuhlung zählt alles darunter); dann wird er zurückgestellt (still, wenn er eine eigene
-	 * Zusammenführung ist), der Vergleichsstand bleibt. Eine Buchung, die im Modell keinen Platz hat (Sitz fehlt in der
+	 * Zusammenführung mit Vermerk für diesen Rechner ist), der Vergleichsstand bleibt. Eine Buchung, die im Modell keinen Platz hat (Sitz fehlt in der
 	 * Bestuhlung, Vorstellung fehlt im Modell, Hallenwechsel ihrer Vorstellung zurückgestellt), wartet still ohne Hinweis,
 	 * ohne Vergleichsstand, und wird ebenfalls jedes Mal erneut geprüft. Je Event werden Objekt im Cache und
 	 * Vergleichsstand in einem Schritt nachgeführt, danach erfahren es die Listener. Ist noch nichts geladen, passiert
@@ -884,7 +885,8 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Stellt den Stand zurück; der Hinweis nennt den Rechner aus dem letzten Glied der Kette, bei einer eigenen
-	 * Zusammenführung entfällt er (siehe {@link ForeignBacklog#defer(UnitSnapshot, List, Object, SyncService)}).
+	 * Zusammenführung mit Vermerk für diesen Rechner entfällt er (siehe
+	 * {@link ForeignBacklog#defer(UnitSnapshot, List, Object, SyncService)}).
 	 */
 	private void defer(Event event, UnitSnapshot current, List<ChainStep> chain) {
 		backlog.defer(current, chain, EventMerge.nearestModelObject(event, current.unit()), sync);

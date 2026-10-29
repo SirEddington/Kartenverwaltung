@@ -71,13 +71,12 @@ class ConflictScenarioTest {
 
 	/**
 	 * Zeichnet die Rückmeldungen eines Dienstes auf, die die Szenarien prüfen, und lässt die Repositories des Rechners jede
-	 * Meldung einarbeiten wie die App ({@code LiveUpdates}): erst die Hallen, dann die Events. Die zurückgestellten Stände
-	 * des letzten Einarbeitens stehen in {@link #deferred}.
+	 * Meldung einarbeiten wie die App ({@code LiveUpdates}): erst die Hallen, dann die Events. Die Warnungen des
+	 * Einarbeitens stehen in {@link #warnings}; zurückgestellte Stände fragen die Szenarien beim Repository ab.
 	 */
 	private static final class Recorder implements SyncListener {
 		final List<String> errors = new ArrayList<>();
 		final List<String> warnings = new ArrayList<>();
-		List<Deferral> deferred = List.of();
 		/** Die Repositories, sobald es sie gibt; vor dem Start kommt nichts an, was sie einarbeiten könnten. */
 		StoreHallRepository halls;
 		StoreEventRepository events;
@@ -88,9 +87,7 @@ class ConflictScenarioTest {
 				return;
 			}
 			warnings.addAll(halls.applyForeign(units).warnings());
-			ForeignResult result = events.applyForeign(units);
-			warnings.addAll(result.warnings());
-			deferred = result.deferred();
+			warnings.addAll(events.applyForeign(units).warnings());
 		}
 
 		@Override
@@ -573,7 +570,35 @@ class ConflictScenarioTest {
 		assertTrue(deferred.get(0).silent(), "eine eigene Zusammenführung bekommt keinen Hinweis");
 		assertEquals("Bert", bert.getLastName(), "die Eingabe bleibt");
 		assertEquals("Notiz", bert.getComment());
-		assertDoubleSale(b, unassignedUnit(b, bert.getId()), seat);
+		String bertId = bert.getId();
+		UnitKey moved = unassignedUnit(b, bertId);
+		OpenConflict sale = assertDoubleSale(b, moved, seat);
+		// solange zurückgestellt, zeigt B's Modell Bert zweimal: auf dem Sitz (mit der Eingabe) und "ohne Platz"
+		assertEquals(2, b.friday().getBookings().stream().filter(booking -> bertId.equals(booking.getId())).count());
+
+		// B speichert seine Eingabe auf der alten Version; sie tritt gegen die Zusammenführung an
+		b.repository.saveEvent(b.event);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("Anna", lastName(a.eventState().get(seat)));
+		assertEquals(Set.of(moved), carriers(a, bertId), "Bert lebt in genau einer Einheit");
+		assertEquals("Notiz", a.eventState().get(moved).payload().get("comment").asText(), "die Eingabe ist gespeichert");
+		assertEquals(List.of(sale.key()), b.open().stream().map(OpenConflict::key).toList(), b.open().toString());
+		assertTrue(a.open().isEmpty(), a.open().toString());
+		assertModelShowsDoubleSale(b, 1, "Anna", bertId, "Bert");
+	}
+
+	/** Die lebenden Einheiten des Events, deren Buchung diese Kennung trägt. */
+	private static Set<UnitKey> carriers(Machine machine, String bookingId) {
+		Set<UnitKey> carriers = new HashSet<>();
+		machine.eventState().forEach((unit, snapshot) -> {
+			if (!snapshot.deleted() && snapshot.payload() != null && snapshot.payload().has("id")
+					&& bookingId.equals(snapshot.payload().get("id").asText())) {
+				carriers.add(unit);
+			}
+		});
+		return carriers;
 	}
 
 	/**
@@ -931,14 +956,7 @@ class ConflictScenarioTest {
 		assertTrue(a.eventState().get(oldSeat).deleted());
 		assertEquals("Müller", lastName(a.eventState().get(newSeat)));
 		assertEquals(muellerId, a.eventState().get(newSeat).payload().get("id").asText());
-		Set<UnitKey> carriers = new HashSet<>();
-		a.eventState().forEach((unit, snapshot) -> {
-			if (!snapshot.deleted() && snapshot.payload() != null && snapshot.payload().has("id")
-					&& muellerId.equals(snapshot.payload().get("id").asText())) {
-				carriers.add(unit);
-			}
-		});
-		assertEquals(Set.of(newSeat), carriers, "Müller lebt nur auf dem neuen Sitz");
+		assertEquals(Set.of(newSeat), carriers(a, muellerId), "Müller lebt nur auf dem neuen Sitz");
 		for (Machine machine : m) {
 			assertTrue(machine.open().isEmpty(), machine.name + ": " + machine.open());
 			for (UnitKey unit : machine.eventState().keySet()) {

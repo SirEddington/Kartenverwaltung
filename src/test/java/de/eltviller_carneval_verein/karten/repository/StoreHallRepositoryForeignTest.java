@@ -343,6 +343,27 @@ class StoreHallRepositoryForeignTest {
 		assertThrows(LockedUnitException.class, () -> mine.saveHall(replaced));
 	}
 
+	/** Wie im Event-Repository: Ein gesperrter Stand ohne lesbares Glied wird zurückgestellt und ohne Fehler erneut geprüft. */
+	@Test
+	void deferredLockedHallWithoutReadableVersionIsRecheckedWithoutFailure() throws IOException {
+		Version only = sync.unitState(unit()).head();
+		Files.writeString(appData.resolve("data/" + unit().relativePath() + "/" + only.id() + ".json"), "kaputt");
+		assertNull(sync.unitState(unit()).current(), "kein lesbares Glied");
+		mine.setBlockedCheck(h -> true);
+
+		ForeignResult first = mine.applyForeign(List.of(unit()));
+		ForeignResult second = mine.retryDeferred();
+		ForeignResult third = mine.retryDeferred();
+
+		assertEquals(1, first.deferred().size(), first.deferred().toString());
+		assertNull(first.deferred().get(0).version());
+		assertEquals(first.deferred(), second.deferred());
+		assertEquals(first.deferred(), third.deferred());
+		assertEquals(List.of(), second.warnings());
+		assertEquals(List.of(), third.warnings());
+		assertSame(hall, mine.findById(hall.getId()));
+	}
+
 	@Test
 	void knownHallThatBecomesLockedWarnsAndKeepsTheModel() throws IOException {
 		foreignName("Fremd-Halle");

@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.logging.Level;
@@ -17,7 +18,6 @@ import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
-import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
 
 /**
@@ -50,28 +50,26 @@ final class ForeignBacklog {
 
 	/**
 	 * Stellt den aktuellen Stand der Einheit zurück; der Hinweis nennt den Rechner aus dem letzten Glied der Kette. Ist der
-	 * Stand eine eigene Zusammenführung (eigene Rechner-ID, mehr als ein Vorgänger), entfällt der Hinweis: Er nennte den
-	 * eigenen Rechner als "anderen Rechner", den Konflikt zeigt der Dialog. Nachgesehen wird das einmal je Version (die
-	 * Einheit wird bei jedem Aufruf von {@code applyForeign} erneut zurückgestellt); lässt sich die Version nicht lesen,
-	 * bleibt der Hinweis.
+	 * Stand eine eigene Zusammenführung, die einen Konflikt dieses Rechners vermerkt ({@link SyncService#isOwnNotedMerge}),
+	 * entfällt der Hinweis: Er nennte den eigenen Rechner als "anderen Rechner", den Konflikt zeigt der Dialog. Eine eigene
+	 * Zusammenführung ohne solchen Vermerk bringt nur fremde Änderungen und bekommt den Hinweis (Ruling R27). Nachgesehen
+	 * wird das einmal je Version (die Einheit wird bei jedem Aufruf von {@code applyForeign} erneut zurückgestellt); lässt
+	 * sich die Version nicht lesen, bleibt der Hinweis.
 	 *
-	 * @param model das Objekt im Modell, das der Hinweis nennt
+	 * @param current der Stand; ohne Version (gesperrt, kein lesbares Glied) nie still
+	 * @param model   das Objekt im Modell, das der Hinweis nennt
 	 */
 	void defer(UnitSnapshot current, List<ChainStep> chain, Object model, SyncService sync) {
 		Deferral before = deferred.get(current.unit());
-		boolean silent = before != null && before.version().equals(current.version()) ? before.silent()
-				: isOwnMerge(current, sync);
+		boolean silent = before != null && Objects.equals(before.version(), current.version()) ? before.silent()
+				: isOwnNotedMerge(current, sync);
 		defer(silent ? Deferral.silent(current.unit(), current.version(), chain, model)
 				: Deferral.of(current.unit(), current.version(), chain, model));
 	}
 
-	private static boolean isOwnMerge(UnitSnapshot current, SyncService sync) {
-		if (current.version() == null) {
-			return false;
-		}
+	private static boolean isOwnNotedMerge(UnitSnapshot current, SyncService sync) {
 		try {
-			Version version = sync.version(current.unit(), current.version());
-			return version != null && version.parents().size() > 1 && sync.machineId().equals(version.machine());
+			return sync.isOwnNotedMerge(current.unit(), current.version());
 		} catch (IOException e) {
 			LOG.log(Level.WARNING, "Ob der Stand von " + current.unit().relativePath()
 					+ " eine eigene Zusammenführung ist, ließ sich nicht lesen", e);

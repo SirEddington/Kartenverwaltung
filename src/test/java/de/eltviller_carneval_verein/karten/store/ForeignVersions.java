@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -19,6 +20,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * es das Abholen aus dem gemeinsamen Ordner tut. Jede Hilfe zählt ihre Versionen selbst hoch; je Test eine.
  */
 public final class ForeignVersions {
+
+	/** Die Rechner-ID von "Fremd". */
+	private static final String FOREIGN = "0123456789abcdefghijklmnop";
 
 	private final SyncService sync;
 	private final Path appData;
@@ -39,7 +43,7 @@ public final class ForeignVersions {
 	 * @param changes ändert die Daten der Vorgängerversion
 	 */
 	public Version write(UnitKey unit, String machineName, Consumer<ObjectNode> changes) throws IOException {
-		return write(unit, "0123456789abcdefghijklmnop", machineName, List.of(), changes);
+		return write(unit, FOREIGN, machineName, List.of(), null, true, changes);
 	}
 
 	/**
@@ -47,15 +51,27 @@ public final class ForeignVersions {
 	 * Vorgänger sind {@code absorbed}.
 	 *
 	 * @param machine die Rechner-ID des Schreibenden (etwa die eigene, für eine eigene Zusammenführung)
+	 * @param note    der Konfliktvermerk der Zusammenführung; {@code null} für keinen
 	 * @param changes ändert die Daten der Vorgängerversion
 	 */
-	public Version writeMerge(UnitKey unit, String machine, String machineName, List<VersionId> absorbed,
+	public Version writeMerge(UnitKey unit, String machine, String machineName, List<VersionId> absorbed, ConflictNote note,
 			Consumer<ObjectNode> changes) throws IOException {
-		return write(unit, machine, machineName, absorbed, changes);
+		return write(unit, machine, machineName, absorbed, note, true, changes);
 	}
 
-	private Version write(UnitKey unit, String machine, String machineName, List<VersionId> absorbed,
-			Consumer<ObjectNode> changes) throws IOException {
+	/**
+	 * Schreibt eine Version des Rechners "Fremd" auf das letzte Glied, ohne sie zu beanspruchen: Sie steht nicht in der
+	 * Kette, eine spätere Zusammenführung kann sie aufnehmen.
+	 *
+	 * @param note    ihr Konfliktvermerk; {@code null} für keinen
+	 * @param changes ändert die Daten der Vorgängerversion
+	 */
+	public Version writeUnclaimed(UnitKey unit, ConflictNote note, Consumer<ObjectNode> changes) throws IOException {
+		return write(unit, FOREIGN, "Fremd", List.of(), note, false, changes);
+	}
+
+	private Version write(UnitKey unit, String machine, String machineName, List<VersionId> absorbed, ConflictNote note,
+			boolean claim, Consumer<ObjectNode> changes) throws IOException {
 		Version parent = sync.unitState(unit).head();
 		ObjectNode payload = parent.payload().deepCopy();
 		changes.accept(payload);
@@ -64,11 +80,14 @@ public final class ForeignVersions {
 		parents.add(parent.id());
 		parents.addAll(absorbed);
 		Version version = new Version(StoreCodec.FORMAT, VersionId.create(1_900_000_000_000L + count, "abcdefgh", count),
-				List.copyOf(parents), machine, machineName, null, Instant.now(), "fremd-" + count, false, payload);
+				List.copyOf(parents), machine, machineName, null, Instant.now(), "fremd-" + count, false, payload, note,
+				Map.of());
 		byte[] bytes = StoreCodec.write(version);
 		VersionStore store = new VersionStore(appData.resolve("data"), new NioFileLayer());
 		assertTrue(store.writeVersion(unit, version.id(), bytes));
-		new LocalArbiter(store, Clock.systemUTC()).claim(unit, version, bytes);
+		if (claim) {
+			new LocalArbiter(store, Clock.systemUTC()).claim(unit, version, bytes);
+		}
 		sync.unitState(unit);
 		return version;
 	}

@@ -363,10 +363,10 @@ public class StoreHallRepository implements HallRepository {
 	 * jedes Mal mit geprüft. Je Einheit gilt {@link ForeignDecision}: Ein Nachfolger des Vergleichsstands (der steht in der
 	 * gültigen Kette oder ist in einer Zusammenführung aufgegangen) mit demselben Inhalt geht nur in den Vergleichsstand.
 	 * Ein anderer Nachfolger wird eingearbeitet, außer die Halle ist ungespeichert verändert oder gesperrt durch
-	 * {@link #setBlockedCheck}; dann wird er zurückgestellt (still, wenn er eine eigene Zusammenführung ist), der
-	 * Vergleichsstand bleibt. Eine eingearbeitete Halle ersetzt das Objekt im Cache (sie
-	 * ist nie lokal verändert, sonst wäre sie zurückgestellt); neue und gelöschte Hallen kommen in den Cache bzw. verlassen
-	 * ihn. Ist noch nichts geladen, passiert nichts: Das erste Laden liest ohnehin den aktuellen Stand.
+	 * {@link #setBlockedCheck}; dann wird er zurückgestellt (still, wenn er eine eigene Zusammenführung mit Vermerk für
+	 * diesen Rechner ist), der Vergleichsstand bleibt. Eine eingearbeitete Halle ersetzt das Objekt im Cache (sie ist nie
+	 * lokal verändert, sonst wäre sie zurückgestellt); neue und gelöschte Hallen kommen in den Cache bzw. verlassen ihn.
+	 * Ist noch nichts geladen, passiert nichts: Das erste Laden liest ohnehin den aktuellen Stand.
 	 * <p>
 	 * Nur auf dem Oberflächen-Thread aufrufen: Modell und Vergleichsstand sind nicht synchronisiert.
 	 *
