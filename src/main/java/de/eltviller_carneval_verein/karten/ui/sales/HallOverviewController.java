@@ -22,6 +22,7 @@ import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
+import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
 import javafx.fxml.FXML;
@@ -80,16 +81,20 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	// Fremde Änderungen am gezeigten Event oder an der Halle der gezeigten Vorstellung: Der Plan wird neu gezeichnet
 	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
 	private final RepositoryListener<Event> foreignEventChanges = new RepositoryListener<>() {
+		// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
+		private final RepositoryListener<Event> refreshing = LiveViews.coalescing(Platform::runLater,
+				units -> LiveViews.touches(units, selectedEvent, selectedPres), () -> {
+					dropGoneBookingsFromSelection();
+					renderHall();
+				});
+
 		@Override
 		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
-			// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
-			if (event == selectedEvent) {
-				dropGoneBookingsFromSelection();
-				renderHall();
-			}
+			refreshing.changedByOthers(event, batch);
 		}
 	};
-	private final RepositoryListener<Hall> foreignHallChanges = RepositoryListener.onForeignChange(this::renderIfShown);
+	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.coalescing(Platform::runLater,
+			units -> LiveViews.touchesHall(units, selectedPres == null ? null : selectedPres.getHallId()), this::renderIfShown);
 
 	@FXML
 	private HallPlanPane viewportPane;
@@ -125,9 +130,9 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 				Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges));
 	}
 
-	/** Zeichnet neu, wenn es die Halle der gezeigten Vorstellung ist (eine ersetzte Halle hat dieselbe ID, {@link #hallOf} sucht nach ihr). */
-	private void renderIfShown(Hall hall) {
-		if (selectedPres != null && hall.getId().equals(selectedPres.getHallId())) {
+	/** Zeichnet die Halle der gezeigten Vorstellung neu (eine ersetzte Halle hat dieselbe ID, {@link #hallOf} sucht nach ihr). */
+	private void renderIfShown() {
+		if (selectedPres != null) {
 			renderHall();
 		}
 	}

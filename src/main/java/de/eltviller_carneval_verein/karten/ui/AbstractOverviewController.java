@@ -5,12 +5,15 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupRestoreDialog;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.TextField;
@@ -49,9 +52,12 @@ public abstract class AbstractOverviewController {
 	 */
 	protected abstract List<Registration> foreignChangeRegistrations();
 
-	/** Ein Listener, der bei jeder Änderung eines anderen Rechners (geändert, neu, gelöscht) die Übersicht nachführt. */
-	protected final <T> RepositoryListener<T> foreignChangeReloader() {
-		return RepositoryListener.onForeignChange(this::reloadKeepingSelection);
+	/**
+	 * Ein Listener, der bei Änderungen eines anderen Rechners (geändert, neu, gelöscht) die Übersicht nachführt, höchstens
+	 * einmal je Takt und bei geänderten Einheiten nur, wenn eine davon von Belang ist.
+	 */
+	protected final <T> RepositoryListener<T> foreignChangeReloader(Predicate<Set<UnitKey>> relevant) {
+		return LiveViews.coalescing(Platform::runLater, relevant, this::reloadKeepingSelection);
 	}
 
 	/** Konfiguriert die Spalten der Baum-Tabelle. */

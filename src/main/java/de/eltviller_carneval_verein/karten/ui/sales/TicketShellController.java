@@ -26,6 +26,7 @@ import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelsMenu;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -81,7 +82,7 @@ public class TicketShellController {
 	// Führt die Boxen nach Änderungen anderer Rechner nach; entsteht in initialize, wenn die Boxen da sind
 	private EventSelectionSync selectionSync;
 	// Fremde Änderungen an Events: Die Liste und die Auswahl folgen dem Cache
-	private final RepositoryListener<Event> foreignChanges = RepositoryListener.onForeignChange(() -> selectionSync.sync());
+	private final RepositoryListener<Event> foreignChanges = LiveViews.coalescing(Platform::runLater, LiveViews.ALL_UNITS, () -> selectionSync.sync());
 	private String searchText = "";
 	// Auswahl der verlassenen Ansicht, bis die neue sie zurückbekommt (restorePendingSelection)
 	private List<Booking> pendingSelection = List.of();

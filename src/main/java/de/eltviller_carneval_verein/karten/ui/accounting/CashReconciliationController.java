@@ -34,6 +34,7 @@ import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
@@ -56,11 +57,12 @@ public class CashReconciliationController implements ContentController, Exportab
 	// Fremde Änderungen am gezeigten Event: Die Zahlen werden neu berechnet. Ein neu zusammengesetztes Event (anderes
 	// Objekt) bindet die Shell mit setEvent neu
 	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
+		private final RepositoryListener<Event> refreshing = LiveViews.coalescing(Platform::runLater,
+				units -> LiveViews.touches(units, selectedEvent, selectedPres), CashReconciliationController.this::refresh);
+
 		@Override
 		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
-			if (event == selectedEvent) {
-				refresh();
-			}
+			refreshing.changedByOthers(event, batch);
 		}
 	};
 

@@ -91,12 +91,13 @@ public class TicketTableController implements ContentController, SalesStateAware
 	// Eine fremde Änderung kam, während eine Zelle im Bearbeiten war; die Tabelle zeichnet nach deren Ende neu
 	private boolean foreignChangePending = false;
 	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
+		// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
+		private final RepositoryListener<Event> refreshing = LiveViews.coalescing(Platform::runLater,
+				units -> LiveViews.touches(units, selectedEvent, selectedPres), TicketTableController.this::refreshAfterForeignChange);
+
 		@Override
 		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
-			// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
-			if (event == selectedEvent) {
-				refreshAfterForeignChange();
-			}
+			refreshing.changedByOthers(event, batch);
 		}
 	};
 

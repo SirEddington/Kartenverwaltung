@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.List;
+import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Booking;
@@ -13,7 +14,10 @@ import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.ui.CoalescedAction;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.application.Platform;
@@ -78,12 +82,7 @@ public final class CustomerDisplay {
 	private boolean attached = false;
 
 	// Eine Auswahl von hundert Sitzen meldet hundert Änderungen: Der Plan wird trotzdem nur einmal neu gezeichnet
-	private final CoalescedAction redraw = new CoalescedAction(Platform::runLater, () -> {
-		if (attached) {
-			refresh();
-			applyView();
-		}
-	});
+	private final CoalescedAction redraw = new CoalescedAction(Platform::runLater, this::redrawIfAttached);
 	private final ChangeListener<Object> contentChanged = (obs, oldValue, newValue) -> redraw.request();
 	private final ChangeListener<Rectangle2D> viewChanged = (obs, oldValue, newValue) -> applyView();
 	private final InvalidationListener placementInvalidated = observable -> placeSummary();
@@ -92,12 +91,16 @@ public final class CustomerDisplay {
 	private final ChangeTracker.Listener<Event> dataChanged = (changed, before, after) -> onDataChanged(changed);
 	// Fremde Änderungen führt der Tracker still nach (rebase meldet nichts): Das Fenster erfährt sie vom Repository
 	private final RepositoryListener<Event> foreignEventChanges = new RepositoryListener<>() {
+		private final RepositoryListener<Event> redrawing = LiveViews.coalescing(Platform::runLater, CustomerDisplay.this::touchesShownPresentation,
+				CustomerDisplay.this::redrawIfAttached);
+
 		@Override
 		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
-			onDataChanged(event);
+			redrawing.changedByOthers(event, batch);
 		}
 	};
-	private final RepositoryListener<Hall> foreignHallChanges = RepositoryListener.onForeignChange(this::onHallChanged);
+	// Ersetzt oder ändert ein anderer Rechner die Halle der gezeigten Vorstellung, zeichnet das Fenster neu (die Halle wird über die ID gesucht)
+	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.coalescing(Platform::runLater, this::touchesShownHall, this::redrawIfAttached);
 
 	private final HallPlanPane.Decorator decorator = new HallPlanPane.Decorator() {
 		@Override
@@ -377,11 +380,22 @@ public final class CustomerDisplay {
 		}
 	}
 
-	/** Ersetzt oder ändert ein anderer Rechner die Halle der gezeigten Vorstellung, zeichnet das Fenster neu (die Halle wird über die ID gesucht). */
-	private void onHallChanged(Hall hall) {
+	/** Ob unter den fremd geänderten Einheiten eine zum gezeigten Event und zur gezeigten Vorstellung gehört. */
+	private boolean touchesShownPresentation(Set<UnitKey> units) {
+		return LiveViews.touches(units, state.eventProperty().get(), state.presentationProperty().get());
+	}
+
+	/** Ob unter den fremd geänderten Einheiten die Halle der gezeigten Vorstellung ist (sie wird über die ID gesucht). */
+	private boolean touchesShownHall(Set<UnitKey> units) {
 		Presentation presentation = state.presentationProperty().get();
-		if (presentation != null && hall.getId().equals(presentation.getHallId())) {
-			redraw.request();
+		return presentation != null && LiveViews.touchesHall(units, presentation.getHallId());
+	}
+
+	/** Zeichnet Titel und Plan neu, solange das Fenster angemeldet ist. */
+	private void redrawIfAttached() {
+		if (attached) {
+			refresh();
+			applyView();
 		}
 	}
 

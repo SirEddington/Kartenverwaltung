@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.ui.sales;
+package de.eltviller_carneval_verein.karten.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

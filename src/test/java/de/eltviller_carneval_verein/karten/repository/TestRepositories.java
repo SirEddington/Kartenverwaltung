@@ -24,6 +24,12 @@ public final class TestRepositories {
 		return new StoreHallRepository(sync);
 	}
 
+	/** Ein Schub fremder Stände, dessen Nachspielen nichts tut (für Ansichten, die nur die Einheiten lesen). */
+	public static <T> ForeignBatch<T> batchOf(Set<UnitKey> units) {
+		return new ForeignBatch<>(units, copy -> {
+		});
+	}
+
 	/** Ein Schub fremder Stände, dessen Nachspielen auf einer Kopie scheitert (für den Notweg des Änderungsmelders). */
 	public static <T> ForeignBatch<T> failingBatch(Set<UnitKey> units) {
 		return new ForeignBatch<>(units, copy -> {

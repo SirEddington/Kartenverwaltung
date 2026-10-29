@@ -12,10 +12,12 @@ import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
@@ -47,9 +49,9 @@ public class EventOverviewController extends AbstractOverviewController {
 	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
 	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 
-	// Fremde Änderungen an Events und, wegen der Hallenspalte, an Hallen: Der Baum wird neu aufgebaut
-	private final RepositoryListener<Event> foreignEventChanges = foreignChangeReloader();
-	private final RepositoryListener<Hall> foreignHallChanges = foreignChangeReloader();
+	// Fremde Änderungen an Events (der Baum zeigt auch Buchungen und Summen) und, wegen der Hallenspalte, an Hallen: Der Baum wird neu aufgebaut
+	private final RepositoryListener<Event> foreignEventChanges = foreignChangeReloader(LiveViews.ALL_UNITS);
+	private final RepositoryListener<Hall> foreignHallChanges = foreignChangeReloader(LiveViews.ofTypes(UnitType.HALL));
 
 	// TableView und Spalten
 	@FXML

@@ -64,12 +64,17 @@ public class HallEditController {
 	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 	// Fremde Änderungen an der gezeigten Halle (nur im Anzeigemodus: im Bearbeitungsmodus hält EditingUnits sie zurück)
 	private final RepositoryListener<Hall> foreignChanges = new RepositoryListener<>() {
+		// Nicht mitten in der Benachrichtigung der Listener, sondern im nächsten Takt: Das Laden der neuen Ansicht meldet diese ab
+		private final RepositoryListener<Hall> reloading = LiveViews.coalescing(Platform::runLater,
+				units -> !editMode && hall != null && LiveViews.touchesHall(units, hall.getId()), () -> {
+					if (!editMode && hall != null) {
+						reloadReplacedHall();
+					}
+				});
+
 		@Override
 		public void changedByOthers(Hall changed, ForeignBatch<Hall> batch) {
-			if (!editMode && hall != null && hall.getId().equals(changed.getId())) {
-				// Nicht mitten in der Benachrichtigung der Listener: Das Laden der neuen Ansicht meldet diese ab
-				Platform.runLater(HallEditController.this::reloadReplacedHall);
-			}
+			reloading.changedByOthers(changed, batch);
 		}
 
 		// Keine Prüfung des Bearbeitungsmodus nötig: Im Bearbeitungsmodus ist die Halle in Bearbeitung, und das Repository stellt
