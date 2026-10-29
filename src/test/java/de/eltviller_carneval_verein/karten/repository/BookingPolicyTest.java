@@ -1041,7 +1041,7 @@ class BookingPolicyTest {
 	}
 
 	/** Dieselben Invarianten für die Zellen, die ohne einen neuen Mechanismus im Speicher nicht zu halten sind. */
-	@Disabled("Ruling offen (Bericht Runde 4): Löst A _m auf, bevor B's Auflösung von s1 bei ihm ist, hält A B's "
+	@Disabled("Ruling R36, Lösung in KARV-93: Löst A _m auf, bevor B's Auflösung von s1 bei ihm ist, hält A B's "
 			+ "gewonnene Löschung für ein Storno und löscht seine Kopie auf s4 (Regel 0, verschoben gegen storniert), weil "
 			+ "die Strategie B's verlorenes Ziel auf s1 nicht sieht; dazu müsste der Speicher fremde verlorene Versionen "
 			+ "anderer Einheiten liefern, die der Index heute nicht kennt")
