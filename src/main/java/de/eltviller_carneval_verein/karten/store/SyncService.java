@@ -2176,6 +2176,11 @@ public final class SyncService {
 		}
 
 		@Override
+		public Set<UnitKey> withOwnVersionsBesideChain(Collection<UnitKey> units) {
+			return index.withOwnBesideChain(units, machineId());
+		}
+
+		@Override
 		public List<Version> append(String saveId, List<Change> changes) throws IOException {
 			return SyncService.this.append(saveId, changes);
 		}

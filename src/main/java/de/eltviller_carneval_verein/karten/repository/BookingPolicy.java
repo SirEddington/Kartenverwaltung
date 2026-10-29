@@ -27,8 +27,10 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
  * <li>Beide gelöscht (Verschieben gegen Storno): siehe {@link #bothDeleted}.</li>
  * <li>Gleich ({@link PolicyRules#equal}).</li>
  * <li>Löschung gegen Änderung: Trägt "Meine" nicht die Buchung der Basis, gilt sie ({@link #saleOnCancelledSeat}). War
- * die Löschung ein Verschieben, geht die Änderung an die verschobene Kopie ({@link #movedAgainstEdit}). Sonst gewinnt die
- * Löschung ({@link PolicyRules#deleteWins}), aber nur gegen dieselbe Buchung ({@link #cancelledAnotherBooking}).</li>
+ * die Löschung ein Verschieben, geht die Änderung an die verschobene Kopie ({@link #movedAgainstEdit}). War die eigene
+ * Löschung von {@code _<ID>} ein Umzug, dessen Ziel verloren hat, bleibt die Buchung dort ({@link #strandedMove}). Sonst
+ * gewinnt die Löschung ({@link PolicyRules#deleteWins}), aber nur gegen dieselbe Buchung
+ * ({@link #cancelledAnotherBooking}).</li>
  * <li>Verschiedene Buchungen auf dem Sitz: entschieden danach, wer die Buchung der Basis trägt, siehe
  * {@link #otherBooking}.</li>
  * <li>Gleiche Buchung: Dreiwegevergleich je Feldgruppe ({@link FieldGroups#booking()}).</li>
@@ -61,6 +63,9 @@ public final class BookingPolicy implements ConflictPolicy {
 		}
 		if (resolution == null) {
 			resolution = movedAgainstEdit(input);
+		}
+		if (resolution == null) {
+			resolution = strandedMove(input);
 		}
 		if (resolution == null) {
 			resolution = PolicyRules.deleteWins(input, theirs -> isSameBooking(input, theirs));
@@ -293,6 +298,76 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/**
+	 * Regel 2, gescheiterter Umzug aus "ohne Platz" (Ruling R31): Die Einheit ist {@code _<ID>} der Buchung der Basis,
+	 * "Meine" hat sie gelöscht, "Deren" ist dieselbe Buchung mit Inhalt, und keine Geschwister-Einheit trägt sie (sonst
+	 * {@link #movedAgainstEdit}). Liegt in einer Geschwister-Einheit eine Version aus dem Speichervorgang der Löschung mit
+	 * dieser Buchung, die dort nicht gilt ({@link Sibling#lostMove()}), war die Löschung kein Storno, sondern die Quelle eines
+	 * Umzugs, dessen Ziel verloren hat (dort steht ein anderer Verkauf; den Doppelverkauf meldet der Vermerk dort). Die
+	 * Buchung bleibt hier mit "Deren"; die Felder, die "Meine" beim Umzug geändert hat (die Version am Ziel ohne die Gruppe
+	 * "Platz"), kommen per Dreiwegevergleich gegen die Basis dazu. Strittige Gruppen: "Deren" gilt, Vermerk FIELDS an diesen
+	 * Rechner.
+	 * <p>
+	 * So entscheiden beide Reihenfolgen gleich: Wird das Ziel zuerst aufgelöst, lebt die Buchung hier noch, und
+	 * {@link #doubleSale} legt keine zweite Fassung an; wird diese Einheit zuerst aufgelöst, lebt sie danach hier. Nur für
+	 * {@code _<ID>}: Von einem Sitz aus legt der Doppelverkauf am Ziel {@code _<ID>} an, und {@link #movedAgainstEdit}
+	 * überträgt dorthin.
+	 *
+	 * @return die Auflösung, oder {@code null}, wenn es kein solcher Umzug war
+	 */
+	private static Resolution strandedMove(ConflictInput input) {
+		Version mine = input.mine();
+		Version theirs = input.theirs();
+		String bookingId = idOf(input.base());
+		UnitKey unit = input.unit();
+		if (bookingId == null || !mine.deleted() || theirs.deleted() || !isSameBooking(input, theirs)
+				|| !unit.equals(UnitKey.unassignedBooking(unit.eventId(), unit.presentationId(), bookingId))) {
+			return null;
+		}
+		Version target = strandedTarget(input, bookingId, mine.saveId());
+		if (target == null) {
+			return null;
+		}
+		ObjectNode basePayload = input.base().payload();
+		ObjectNode side = target.payload().deepCopy();
+		for (String field : FieldGroups.booking().get(PLACE_GROUP)) {
+			JsonNode value = basePayload.get(field);
+			if (value == null) {
+				side.remove(field);
+			} else {
+				side.set(field, value.deepCopy());
+			}
+		}
+		FieldMerge.Result result = FieldMerge.merge(basePayload, side, theirs.payload(), FieldGroups.booking());
+		if (result.conflicts().isEmpty()) {
+			return new Resolution(result.merged(), false, List.of(), null);
+		}
+		Version introducer = FieldMerge.introducedByConflict(input.chainSinceBase(), FieldGroups.booking(),
+				result.conflicts());
+		ConflictNote note = new ConflictNote(Kind.FIELDS, input.ownMachineId(),
+				PolicyRules.party(introducer != null ? introducer : theirs), result.conflicts(), null, null, mine.id());
+		return new Resolution(result.merged(), false, List.of(), note);
+	}
+
+	/**
+	 * Das {@link Sibling#lostMove() verlorene Ziel} eines Umzugs der Buchung aus dem Speichervorgang {@code saveId} in
+	 * einer Geschwister-Einheit, die die Buchung nicht trägt; bei mehreren das erste nach Ordner.
+	 *
+	 * @return die Version am Ziel, oder {@code null}, wenn es keine gibt
+	 */
+	private static Version strandedTarget(ConflictInput input, String bookingId, String saveId) {
+		if (saveId == null) {
+			return null;
+		}
+		return input.siblings().values().stream()
+				.filter(sibling -> sibling.lostMove() != null && !sibling.lostMove().deleted()
+						&& saveId.equals(sibling.lostMove().saveId()) && bookingId.equals(idOf(sibling.lostMove()))
+						&& !(sibling.snapshot().version() != null && !sibling.snapshot().deleted()
+								&& bookingId.equals(text(sibling.snapshot().payload()))))
+				.min(Comparator.comparing(sibling -> sibling.snapshot().unit().relativePath())).map(Sibling::lostMove)
+				.orElse(null);
+	}
+
+	/**
 	 * Ob "Deren" dieselbe Buchung ist wie die Basis (gleiche Buchungs-ID); nur dann darf eine eigene Stornierung sie
 	 * löschen. Ein unlesbares "Deren" ist es nicht.
 	 */
@@ -418,8 +493,10 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * die Buchung noch trägt, zählt nicht: Sie lebt dort womöglich nur, weil die eigene Löschung dort verloren hat und noch
 	 * nicht aufgelöst ist (verschoben, während ein anderer Rechner sie dort änderte). Deren Auflösung überträgt die Änderung
 	 * dann auf {@code _<ID>} ({@link #movedAgainstEdit}); ohne {@code _<ID>} löschte sie die Buchung dort, und sie lebte
-	 * nirgends mehr. Ist die Einheit selbst schon {@code _<ID>}, kann die Buchung nicht weiter ausweichen: "Deren" bleibt,
-	 * Vermerk UNMERGED.
+	 * nirgends mehr. Lebt {@code _<ID>} nur, weil die eigene Löschung dort verloren hat (die Buchung kam von dort hierher,
+	 * Zuweisen aus "ohne Platz"), bleibt sie dort trotzdem: Die Auflösung von {@code _<ID>} erkennt den gescheiterten Umzug
+	 * und löscht nicht ({@link #strandedMove}, Ruling R31); die Felder, die "Meine" dabei geändert hat, überträgt sie. Ist
+	 * die Einheit selbst schon {@code _<ID>}, kann die Buchung nicht weiter ausweichen: "Deren" bleibt, Vermerk UNMERGED.
 	 */
 	private static Resolution doubleSale(ConflictInput input, String mineId) {
 		Version mine = input.mine();

@@ -41,13 +41,23 @@ public record ConflictInput(UnitKey unit, Version base, Version mine, Version th
 	 *                 ausstehende und verlorene); gefüllt nur, wenn ihr Stand die Buchung der Basis trägt (gleiche
 	 *                 Buchungs-ID, nicht gelöscht), sonst leer. Daran erkennt die Strategie, ob ein Speichervorgang die
 	 *                 Buchung hierher verschoben hat, auch wenn die Kopie seitdem geändert wurde oder noch aussteht
+	 * @param lostMove das Ziel eines Umzugs, der hier nicht gilt (Ruling R31): die jüngste lesbare Version in ihrem Ordner
+	 *                 aus dem Speichervorgang von "Meine", die die Buchung der Basis trägt, während ihr Stand sie nicht
+	 *                 trägt (die Version hat verloren oder ist in einer Zusammenführung aufgegangen). Gefüllt nur, wenn
+	 *                 "Meine" eine Löschung ist, und nur für Einheiten, die laut Index eigene Versionen außerhalb ihrer Kette
+	 *                 haben; sonst {@code null}. Eine Kopie, die die Strategie verändern darf
 	 */
-	public record Sibling(UnitSnapshot snapshot, ChainStep head, Set<String> saveIds) {
+	public record Sibling(UnitSnapshot snapshot, ChainStep head, Set<String> saveIds, Version lostMove) {
 
 		/** Prüft den Stand und macht die Speichervorgänge unveränderlich. */
 		public Sibling {
 			Objects.requireNonNull(snapshot, "snapshot");
 			saveIds = saveIds == null ? Set.of() : Set.copyOf(saveIds);
+		}
+
+		/** Eine Geschwister-Einheit ohne verlorenes Umzugsziel. */
+		public Sibling(UnitSnapshot snapshot, ChainStep head, Set<String> saveIds) {
+			this(snapshot, head, saveIds, null);
 		}
 	}
 

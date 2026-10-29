@@ -329,6 +329,39 @@ class ConflictResolverTest {
 	}
 
 	@Test
+	void siblingWithTheLostTargetOfMyMoveCarriesIt() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		RecordingPolicy policy = new RecordingPolicy();
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		ObjectNode booking = MAPPER.createObjectNode().put("id", "X").put("name", "Anna");
+		Version base = own(service, BOOKING, List.of(), booking);
+		foreign(service, appData, BOOKING, List.of(base.id()), booking.deepCopy().put("name", "Anna bezahlt"), false,
+				Map.of());
+		// auf A-2 verkauft ein anderer Rechner zuerst T; danach zieht dieser Rechner X in einem Speichervorgang dorthin um
+		foreign(service, appData, OTHER_SEAT, List.of(), MAPPER.createObjectNode().put("id", "T"), false, Map.of());
+		List<Version> move = service.append("save-move", List.of(new Change(BOOKING, List.of(base.id()), null, true),
+				new Change(OTHER_SEAT, List.of(), booking.deepCopy().put("name", "Anna am Fenster"), false)));
+		UnitKey otherBooking = UnitKey.booking("e1", "p1", "A-3");
+		service.append("save-move", List.of(new Change(otherBooking, List.of(), MAPPER.createObjectNode().put("id", "Y"),
+				false)));
+		assertEquals(1, service.unitState(BOOKING).lost().size());
+		assertEquals(1, service.unitState(OTHER_SEAT).lost().size());
+
+		service.tick();
+
+		ConflictInput input = policy.inputs.stream().filter(i -> i.unit().equals(BOOKING)).findFirst().orElseThrow();
+		ConflictInput.Sibling target = input.siblings().get(OTHER_SEAT);
+		assertEquals(move.get(1).id(), target.lostMove().id(), "das verlorene Ziel des Umzugs");
+		assertEquals("Anna am Fenster", target.lostMove().payload().get("name").asText());
+		assertNull(input.siblings().get(otherBooking).lostMove(),
+				"eine Einheit ohne eigene Versionen neben ihrer Kette: kein Dateizugriff, kein Ziel");
+		// ohne Löschung als "Meine" kein Ziel
+		ConflictInput seatInput = policy.inputs.stream().filter(i -> i.unit().equals(OTHER_SEAT)).findFirst().orElseThrow();
+		assertNull(seatInput.siblings().get(BOOKING).lostMove());
+	}
+
+	@Test
 	void twoRootVersionsHaveNullBase() throws IOException {
 		Path appData = dir.resolve("app");
 		SyncService service = single(appData);

@@ -15,6 +15,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -539,6 +540,23 @@ final class UnitIndex {
 			}
 		}
 		return chains;
+	}
+
+	/**
+	 * Die genannten Einheiten mit eigenen Versionen außerhalb ihrer Kette: verlorene ({@link Entry#lost()}), ausstehende
+	 * ({@link Entry#pending()}) oder aufgegangene von diesem Rechner ({@link Entry#absorbed()}). Einheiten ohne Eintrag
+	 * fehlen. Greift nur auf die genannten Einträge zu.
+	 */
+	synchronized Set<UnitKey> withOwnBesideChain(Collection<UnitKey> units, String machineId) {
+		Set<UnitKey> result = new LinkedHashSet<>();
+		for (UnitKey unit : units) {
+			Entry entry = entries.get(unit);
+			if (entry != null && (entry.lost() || entry.pending()
+					|| entry.absorbed().stream().anyMatch(version -> version.isFrom(machineId)))) {
+				result.add(unit);
+			}
+		}
+		return result;
 	}
 
 	/**

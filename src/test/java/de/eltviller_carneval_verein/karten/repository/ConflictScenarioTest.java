@@ -37,6 +37,7 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.TableRow;
@@ -1005,6 +1006,53 @@ class ConflictScenarioTest {
 		assertEquals("Notiz", a.eventState().get(newSeat).payload().get("comment").asText(), "B's Änderung ist übertragen");
 		assertTrue(b.open().isEmpty(), "keine Stornierung, die niemand gemacht hat: " + b.open());
 		assertTrue(a.open().isEmpty(), a.open().toString());
+	}
+
+	/**
+	 * I1, Platz zuweisen gegen Änderung plus Verkauf (Ruling R31): Mia steht "ohne Platz". B weist ihr Sitz 1 zu und ändert
+	 * dabei den Kommentar (ein Speichervorgang: Löschung von {@code _Mia}, Mia auf Sitz 1); A setzt Mia gleichzeitig auf
+	 * "bezahlt" und verkauft Sitz 1 an Tom, A lädt zuerst hoch. B verliert auf beiden Einheiten. Danach lebt Mia genau
+	 * einmal, "ohne Platz", mit A's und B's Änderung; Sitz 1 trägt Tom; B hat den Doppelverkauf offen, A keinen Konflikt.
+	 */
+	@Test
+	void assigningAPlaceAgainstEditPlusSaleKeepsTheBookingWithoutPlace() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Booking mia = a.friday().addBooking();
+		mia.setLastName("Mia");
+		mia.setUnassigned(true);
+		a.repository.saveEvent(a.event);
+		String miaId = mia.getId();
+		UnitKey miaUnit = unassignedUnit(a, miaId);
+		untilQuiet(a, b);
+		Booking bMia = b.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId())).findFirst()
+				.orElseThrow();
+
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), bMia, b.plan().getSeats().get(1)));
+		bMia.setComment("Fenster");
+		b.repository.saveEvent(b.event);
+		mia.setPaymentStatus(PaymentStatus.CARD);
+		a.seat(1).setLastName("Tom");
+		a.repository.saveEvent(a.event);
+		a.tick();
+		b.tick();
+
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		UnitKey seat = seatUnit(a, 1);
+		assertEquals("Tom", lastName(a.eventState().get(seat)));
+		assertEquals(Set.of(miaUnit), carriers(a, miaId), "Mia lebt genau einmal");
+		UnitSnapshot kept = a.eventState().get(miaUnit);
+		assertWithoutPlace(kept, "Mia");
+		assertEquals("CARD", kept.payload().get("paymentStatus").asText(), "A's Änderung");
+		assertEquals("Fenster", kept.payload().get("comment").asText(), "B's Änderung beim Zuweisen");
+		assertDoubleSale(b, miaUnit, seat);
+		assertTrue(a.open().isEmpty(), "keine Stornierung, die niemand gemacht hat: " + a.open());
+		assertModelShowsDoubleSale(a, 1, "Tom", miaId, "Mia");
+		assertModelShowsDoubleSale(b, 1, "Tom", miaId, "Mia");
 	}
 
 	/**

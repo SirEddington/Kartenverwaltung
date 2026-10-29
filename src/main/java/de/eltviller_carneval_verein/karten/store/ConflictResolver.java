@@ -96,6 +96,13 @@ final class ConflictResolver {
 		 */
 		Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking);
 
+		/**
+		 * Die Einheiten unter {@code units}, die laut Start-Index eigene Versionen außerhalb ihrer gültigen Kette haben:
+		 * verlorene, ausstehende oder in eine Zusammenführung aufgegangene. Nur in ihrem Ordner kann das Ziel eines
+		 * eigenen Umzugs liegen, der dort nicht gilt.
+		 */
+		Set<UnitKey> withOwnVersionsBesideChain(Collection<UnitKey> units);
+
 		/** Schreibt die Änderungen wie {@link SyncService#append}. */
 		List<Version> append(String saveId, List<Change> changes) throws IOException;
 
@@ -416,7 +423,8 @@ final class ConflictResolver {
 		if (policy == null) {
 			return unmerged(stretch.mine(), stretch.theirs());
 		}
-		Map<UnitKey, ConflictInput.Sibling> siblings = unit.type() == UnitType.BOOKING ? siblings(unit, stretch.base())
+		Map<UnitKey, ConflictInput.Sibling> siblings = unit.type() == UnitType.BOOKING
+				? siblings(unit, stretch.base(), stretch.mine())
 				: Map.of();
 		try {
 			ConflictInput input = new ConflictInput(unit, copy(stretch.base()), copy(stretch.mine()),
@@ -525,13 +533,19 @@ final class ConflictResolver {
 	/**
 	 * Die anderen Buchungs-Einheiten derselben Vorstellung als Kopien. Trägt eine davon die Buchung der Basis (gleiche
 	 * Buchungs-ID, nicht gelöscht), bekommt sie die Speichervorgänge aller lesbaren Versionen in ihrem Ordner: Daran erkennt
-	 * die Strategie ein Verschieben, auch wenn die Kopie seitdem geändert wurde oder noch aussteht. Nur für diese (meist
-	 * keine oder eine) werden Dateien gelesen.
+	 * die Strategie ein Verschieben, auch wenn die Kopie seitdem geändert wurde oder noch aussteht. Ist "Meine" eine
+	 * Löschung, bekommt eine Einheit, die die Buchung nicht trägt, das verlorene Ziel eines Umzugs aus dem Speichervorgang
+	 * von "Meine" ({@link ConflictInput.Sibling#lostMove()}). Dateien werden nur für die Träger (meist keiner oder einer)
+	 * und für Einheiten mit eigenen Versionen außerhalb ihrer Kette gelesen (laut Index; meist keine).
 	 */
-	private Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey unit, Version base) throws IOException {
+	private Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey unit, Version base, Version mine) throws IOException {
 		String bookingId = base == null || base.deleted() ? null : bookingIdOf(base.payload());
+		Map<UnitKey, ConflictInput.Sibling> fromIndex = host.siblings(unit);
+		Set<UnitKey> withOwnBeside = bookingId != null && mine.deleted() && mine.saveId() != null
+				? host.withOwnVersionsBesideChain(fromIndex.keySet())
+				: Set.of();
 		Map<UnitKey, ConflictInput.Sibling> copies = new LinkedHashMap<>();
-		for (Map.Entry<UnitKey, ConflictInput.Sibling> entry : host.siblings(unit).entrySet()) {
+		for (Map.Entry<UnitKey, ConflictInput.Sibling> entry : fromIndex.entrySet()) {
 			ConflictInput.Sibling sibling = entry.getValue();
 			UnitSnapshot s = sibling.snapshot();
 			UnitSnapshot copy = new UnitSnapshot(s.unit(), s.version(), s.status(), s.deleted(),
@@ -539,9 +553,29 @@ final class ConflictResolver {
 			boolean carriesBooking = bookingId != null && s.version() != null && !s.deleted()
 					&& bookingId.equals(bookingIdOf(s.payload()));
 			Set<String> saveIds = carriesBooking ? saveIdsOf(entry.getKey()) : Set.of();
-			copies.put(entry.getKey(), new ConflictInput.Sibling(copy, sibling.head(), saveIds));
+			Version lostMove = !carriesBooking && withOwnBeside.contains(entry.getKey())
+					? lostMoveIn(entry.getKey(), bookingId, mine.saveId())
+					: null;
+			copies.put(entry.getKey(), new ConflictInput.Sibling(copy, sibling.head(), saveIds, lostMove));
 		}
 		return copies;
+	}
+
+	/**
+	 * Die jüngste lesbare Version im Ordner der Einheit aus dem Speichervorgang {@code saveId}, die die Buchung trägt (nicht
+	 * gelöscht, gleiche Buchungs-ID), als Kopie; {@code null}, wenn es keine gibt.
+	 */
+	private Version lostMoveIn(UnitKey unit, String bookingId, String saveId) throws IOException {
+		Version found = null;
+		for (VersionFile file : host.resolve(unit).files().versions().values()) {
+			Version version = file.version();
+			if (version != null && !version.deleted() && saveId.equals(version.saveId())
+					&& bookingId.equals(bookingIdOf(version.payload()))
+					&& (found == null || version.id().compareTo(found.id()) > 0)) {
+				found = version;
+			}
+		}
+		return copy(found);
 	}
 
 	/** Die Buchungs-ID im Inhalt einer Buchung ({@link ConflictInput#BOOKING_ID}); {@code null}, wenn sie fehlt. */

@@ -432,6 +432,114 @@ class BookingPolicyTest {
 		assertFalse(s1Then.extra().get(0).deleted());
 	}
 
+	/** Die Buchung m "ohne Platz", wie das Repository sie auf {@code _m} schreibt, danach die Änderungen aus {@code edit}. */
+	private static ObjectNode withoutPlace(String id, Consumer<Booking> edit) {
+		return booking(id, null, b -> {
+			b.setRowLabel("");
+			b.setTableNumber(0);
+			b.setSeatNumber(0);
+			b.setUnassigned(true);
+			edit.accept(b);
+		});
+	}
+
+	/** Eine Geschwister-Einheit mit ihrem Stand und dem verlorenen Ziel eines eigenen Umzugs in ihrem Ordner. */
+	private static Sibling strandedTarget(UnitKey unit, Version current, Version lostMove) {
+		return new Sibling(new UnitSnapshot(unit, current.id(), Status.OK, current.deleted(), current.payload()),
+				ChainStep.of(current), Set.of(), lostMove);
+	}
+
+	/**
+	 * R31: Meine weist m von {@code _m} dem Sitz s1 zu und ändert dabei die E-Mail (save-a: Löschung von {@code _m}, m auf
+	 * s1); ein anderer Rechner ändert m auf {@code _m} (bezahlt) und verkauft t auf s1. Meine verliert auf beiden Einheiten.
+	 * In beiden Reihenfolgen lebt m danach genau einmal, auf {@code _m}, mit der Änderung von Deren und der von Meine; kein
+	 * DELETE_WINS, s1 trägt t mit dem Doppelverkauf an Meine.
+	 */
+	@Test
+	void lostAssignmentFromUnassignedKeepsTheBookingOnItsUnitInEitherOrder() {
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		Version base = version(THIRD, withoutPlace("m", b -> {
+		}));
+		Version myDeletion = deletion(OWN, "save-a");
+		Version myS1 = version(OWN, "save-a", booking("m", "s1", b -> b.setEMail("neu@example.org")));
+		Version theirM = version(OTHER, "save-b", withoutPlace("m", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
+		ObjectNode expected = withoutPlace("m", b -> {
+			b.setPaymentStatus(PaymentStatus.CARD);
+			b.setEMail("neu@example.org");
+		});
+
+		// s1 zuerst: _m lebt (Deren), also keine Zusatz-Einheit; danach _m: Deren bleibt, die E-Mail kommt dazu
+		Resolution s1First = POLICY.resolve(input(S1, null, myS1, theirS1, siblings(Map.entry(unassigned, theirM)), theirS1));
+		assertEquals(theirS1.payload(), s1First.payload());
+		assertEquals(Kind.DOUBLE_SALE, s1First.note().kind());
+		assertEquals(unassigned, s1First.note().moved());
+		assertTrue(s1First.extra().isEmpty());
+		Version s1Merge = version(OWN, "resolver-1", theirS1.payload());
+		Resolution mThen = POLICY.resolve(input(unassigned, base, myDeletion, theirM,
+				Map.of(S1, strandedTarget(S1, s1Merge, myS1)), theirM));
+		assertFalse(mThen.deleted(), "kein Storno: der Umzug ist gescheitert");
+		assertEquals(expected, mThen.payload());
+		assertNull(mThen.note(), "verschiedene Gruppen: still");
+		assertTrue(mThen.extra().isEmpty());
+
+		// _m zuerst: dasselbe Ergebnis; danach s1: _m lebt, also keine Zusatz-Einheit
+		Resolution mFirst = POLICY.resolve(input(unassigned, base, myDeletion, theirM,
+				Map.of(S1, strandedTarget(S1, theirS1, myS1)), theirM));
+		assertFalse(mFirst.deleted());
+		assertEquals(expected, mFirst.payload());
+		assertNull(mFirst.note());
+		Version mMerge = version(OWN, "resolver-2", mFirst.payload());
+		Resolution s1Then = POLICY.resolve(input(S1, null, myS1, theirS1, siblings(Map.entry(unassigned, mMerge)), theirS1));
+		assertEquals(theirS1.payload(), s1Then.payload());
+		assertEquals(Kind.DOUBLE_SALE, s1Then.note().kind());
+		assertEquals(unassigned, s1Then.note().moved());
+		assertTrue(s1Then.extra().isEmpty());
+	}
+
+	@Test
+	void lostAssignmentFromUnassignedNotesTheGroupBothSidesChanged() {
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		Version base = version(THIRD, withoutPlace("m", b -> {
+		}));
+		Version myDeletion = deletion(OWN, "save-a");
+		Version myS1 = version(OWN, "save-a", booking("m", "s1", b -> b.setComment("Fenster")));
+		Version theirM = version(OTHER, "save-b", withoutPlace("m", b -> b.setComment("Gang")));
+		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
+
+		Resolution resolution = POLICY.resolve(input(unassigned, base, myDeletion, theirM,
+				Map.of(S1, strandedTarget(S1, theirS1, myS1)), theirM));
+
+		assertFalse(resolution.deleted());
+		assertEquals(theirM.payload(), resolution.payload(), "bei derselben Gruppe gilt Deren");
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.FIELDS, note.kind());
+		assertEquals(OWN, note.affected());
+		assertEquals(party(theirM), note.other());
+		assertEquals(List.of("comment"), note.fields().stream().map(ConflictNote.FieldConflict::group).toList());
+		assertEquals("Fenster", note.fields().get(0).mine().get("comment").asText());
+		assertEquals("Gang", note.fields().get(0).theirs().get("comment").asText());
+		assertNull(note.moved(), "die Änderung blieb auf der Einheit des Vermerks");
+		assertEquals(myDeletion.id(), note.dropped());
+	}
+
+	@Test
+	void cancellationOfUnassignedBookingStillWinsWithoutStrandedMove() {
+		// ohne verlorenes Umzugsziel bleibt es eine Stornierung von _m: Löschung gewinnt
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		Version base = version(THIRD, withoutPlace("m", b -> {
+		}));
+		Version myDeletion = deletion(OWN, "save-a");
+		Version theirM = version(OTHER, "save-b", withoutPlace("m", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
+
+		Resolution resolution = POLICY.resolve(input(unassigned, base, myDeletion, theirM,
+				siblings(Map.entry(S1, theirS1)), theirM));
+
+		assertTrue(resolution.deleted());
+		assertEquals(Kind.DELETE_WINS, resolution.note().kind());
+	}
+
 	@Test
 	void bothReplacedWithDifferentBookingsIsADoubleSale() {
 		// keine Seite trägt mehr x: zwei neue Verkäufe auf demselben Sitz
