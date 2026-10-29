@@ -507,7 +507,8 @@ class ConflictScenarioTest {
 		assertEquals(2, open.size(), open.toString());
 		assertEquals(Set.of(seatUnit(b, 1), seatUnit(b, 2)), Set.of(open.get(0).unit(), open.get(1).unit()));
 		assertNotEquals(open.get(0).saveId(), open.get(1).saveId(), "jede Zusammenführung hat ihren Speichervorgang");
-		List<ConflictList.Row> rows = new ConflictList(b::open, unit -> unit.relativePath()).rows();
+		List<ConflictList.Row> rows = new ConflictList(b::open, unit -> unit.relativePath(), (conflict, group) -> false,
+				hallId -> null).rows();
 		assertEquals(List.of(bertSave, bertSave), rows.stream().map(ConflictList.Row::group).toList());
 	}
 

@@ -1169,7 +1169,7 @@ class UnitIndexTest {
 		assertEquals(Set.of(x, l, mine(5)), entry.notes().stream().map(UnitIndex.NotedVersion::version).collect(java.util.stream.Collectors.toSet()));
 		UnitIndex.NotedVersion pending = entry.notes().stream().filter(n -> n.version().equals(mine(5))).findFirst().orElseThrow();
 		assertEquals(new UnitIndex.NotedVersion(mine(5), ME, "Kasse", "Anna", AT, "save-" + mine(5), List.of(x, l), pendingNote), pending);
-		assertEquals(List.of(entry), index.entriesWithNotesOrSeen());
+		assertEquals(List.of(entry), withNotesOrSeen(index));
 
 		// die Vermerke überstehen Schreiben und Lesen des Index
 		index.flush();
@@ -1185,7 +1185,13 @@ class UnitIndexTest {
 
 		refresh(index, local);
 
-		assertTrue(index.entriesWithNotesOrSeen().isEmpty());
+		assertTrue(withNotesOrSeen(index).isEmpty());
+	}
+
+	/** Die Einträge des Index, die Vermerke oder {@code seen} haben. */
+	private static List<UnitIndex.Entry> withNotesOrSeen(UnitIndex index) {
+		return index.entries().values().stream().filter(entry -> !entry.notes().isEmpty() || !entry.seen().isEmpty())
+				.toList();
 	}
 
 	@Test
@@ -1205,7 +1211,7 @@ class UnitIndexTest {
 		assertEquals(seen, index.entries().get(PRESENTATION).seen());
 		assertEquals(Map.of(), index.entries().get(booking).seen());
 		assertEquals(Map.of(), index.entries().get(EVENT).seen());
-		assertEquals(List.of(index.entries().get(PRESENTATION)), index.entriesWithNotesOrSeen());
+		assertEquals(List.of(index.entries().get(PRESENTATION)), withNotesOrSeen(index));
 		index.flush();
 		UnitIndex second = index();
 		refresh(second, local);

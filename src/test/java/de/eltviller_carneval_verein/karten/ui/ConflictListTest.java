@@ -33,7 +33,8 @@ class ConflictListTest {
 	private static final Instant AT = Instant.parse("2026-10-28T10:00:00Z");
 
 	private final List<OpenConflict> source = new ArrayList<>();
-	private final ConflictList list = new ConflictList(() -> List.copyOf(source), unit -> "Label " + unit.relativePath());
+	private final ConflictList list = new ConflictList(() -> List.copyOf(source), unit -> "Label " + unit.relativePath(),
+			(conflict, group) -> false, hallId -> null);
 	private int counter;
 
 	private VersionId nextId() {
@@ -118,7 +119,7 @@ class ConflictListTest {
 				null, null, nextId());
 		source.add(conflict(seat("s1"), "a", note));
 		ConflictList withState = new ConflictList(() -> List.copyOf(source), unit -> "Label",
-				(conflict, group) -> group.equals("comment"));
+				(conflict, group) -> group.equals("comment"), hallId -> null);
 
 		List<ConflictList.FieldRow> fields = withState.rows().get(0).fields();
 

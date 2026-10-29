@@ -100,23 +100,10 @@ public final class ConflictList {
 	private Set<ConflictKey> delivered = Set.of();
 
 	/**
-	 * @param source liefert die offenen Konflikte, neu bei jedem Aufruf (in der App {@code SyncService::openConflicts})
-	 * @param labelOf der Anzeigename einer Einheit: Event, Vorstellung, Platz bzw. Kunde; bei einer Halle der Hallenname
-	 */
-	public ConflictList(Supplier<List<OpenConflict>> source, Function<UnitKey, String> labelOf) {
-		this(source, labelOf, (conflict, group) -> false);
-	}
-
-	/**
-	 * @param adopted sagt zu einem Konflikt und dem Namen einer seiner Feldgruppen, ob das Modell den eigenen Wert schon hat
-	 *                (in der App {@code ConflictActions::isAdopted}); {@link FieldRow#adopted()}
-	 */
-	public ConflictList(Supplier<List<OpenConflict>> source, Function<UnitKey, String> labelOf,
-			BiPredicate<OpenConflict, String> adopted) {
-		this(source, labelOf, adopted, hallId -> null);
-	}
-
-	/**
+	 * @param source   liefert die offenen Konflikte, neu bei jedem Aufruf (in der App {@code SyncService::openConflicts})
+	 * @param labelOf  der Anzeigename einer Einheit: Event, Vorstellung, Platz bzw. Kunde; bei einer Halle der Hallenname
+	 * @param adopted  sagt zu einem Konflikt und dem Namen einer seiner Feldgruppen, ob das Modell den eigenen Wert schon hat
+	 *                 (in der App {@code ConflictActions::isAdopted}); {@link FieldRow#adopted()}
 	 * @param findHall die Halle zur Kennung oder {@code null} (in der App {@code StoreHallRepository::findById}): Halle und
 	 *                 Bestuhlung einer Feldgruppe erscheinen mit ihren Namen statt mit ihren Kennungen
 	 */

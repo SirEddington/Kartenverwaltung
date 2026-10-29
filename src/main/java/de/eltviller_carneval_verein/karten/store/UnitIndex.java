@@ -577,11 +577,6 @@ final class UnitIndex {
 		return entries.get(unit);
 	}
 
-	/** Die Einträge, die Vermerke ({@link Entry#notes()}) oder {@code seen} ({@link Entry#seen()}) haben. */
-	synchronized List<Entry> entriesWithNotesOrSeen() {
-		return entries.values().stream().filter(entry -> !entry.notes().isEmpty() || !entry.seen().isEmpty()).toList();
-	}
-
 	/**
 	 * Lässt den Leser über alle Einträge laufen, ohne sie zu kopieren (die Einträge sind unveränderlich). Der Leser läuft unter
 	 * der Sperre des Index: Er rechnet nur und ruft nichts zurück.

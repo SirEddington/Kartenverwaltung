@@ -148,7 +148,7 @@ class ConflictActionsTest {
 		}
 
 		ConflictList list() {
-			return new ConflictList(sync::openConflicts, unit -> unit.relativePath(), actions()::isAdopted);
+			return new ConflictList(sync::openConflicts, unit -> unit.relativePath(), actions()::isAdopted, hallId -> null);
 		}
 
 		Row onlyRow() {
