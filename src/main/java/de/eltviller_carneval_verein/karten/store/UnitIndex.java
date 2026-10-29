@@ -602,20 +602,22 @@ final class UnitIndex {
 	}
 
 	/**
-	 * Die Einheiten, deren Kopfversion ({@link UnitSnapshot#version()}) {@code own} erfüllt und deren Zeitstempel in der
-	 * Versions-ID ({@link VersionId#epochMillis()}) nach {@code since} liegt: die Kandidaten für eigene junge Ansprüche. Einheiten
-	 * ohne Kopfversion zählen nie. Nur Kandidaten; welche Ansprüche es gibt und wie alt sie sind, liest der Aufrufer aus den
-	 * Dateien.
+	 * Die Einheiten, deren gültige Kette ({@link Entry#chain()}) mindestens ein Glied hat, das {@code own} erfüllt und dessen
+	 * Zeitstempel in der Versions-ID ({@link VersionId#epochMillis()}) nach {@code since} liegt (die Kopfversion zählt auch,
+	 * falls sie nicht in der Kette steht): die Kandidaten für eigene junge Ansprüche, auch wenn inzwischen eine fremde Version
+	 * darauf aufbaut. Nur Kandidaten; welche Ansprüche es gibt und wie alt sie sind, liest der Aufrufer aus den Dateien. Nicht
+	 * erfasst: eine Version, die lange nach dem Schreiben beansprucht wurde (alte ID, junger Anspruch).
 	 *
 	 * @param own   ob die Version von diesem Rechner stammt
 	 * @param since die Grenze; die ID muss jünger sein
 	 */
-	synchronized Set<UnitKey> recentOwnHeads(Predicate<VersionId> own, Instant since) {
+	synchronized Set<UnitKey> recentOwnChainUnits(Predicate<VersionId> own, Instant since) {
 		long limit = since.toEpochMilli();
+		Predicate<VersionId> young = version -> own.test(version) && version.epochMillis() > limit;
 		Set<UnitKey> units = new LinkedHashSet<>();
 		entries.forEach((unit, entry) -> {
 			VersionId head = entry.snapshot().version();
-			if (head != null && own.test(head) && head.epochMillis() > limit) {
+			if (head != null && young.test(head) || entry.chain().stream().anyMatch(step -> young.test(step.version()))) {
 				units.add(unit);
 			}
 		});

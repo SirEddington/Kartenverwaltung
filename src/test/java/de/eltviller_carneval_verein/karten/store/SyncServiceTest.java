@@ -861,6 +861,86 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void lateDefeatOfAnOwnLinkBelowAForeignHeadIsDetectedAfterARestart() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version va = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		// ein anderer Rechner baut auf der eigenen Version auf: Der Kopf der Einheit ist danach fremd
+		Node b = node("b");
+		b.service.startup(shared);
+		b.service.tick();
+		Version vb = save(b, update(BOOKING, va, "Bert"));
+		b.service.tick();
+		// A entdeckt neue Rechner alle 30 Sekunden
+		clock.advance(SyncService.DISCOVERY_INTERVAL);
+		a.service.tick();
+		assertEquals(vb.id(), a.service.unitState(BOOKING).head().id());
+		a.service.flushIndex();
+		clock.advance(Duration.ofMinutes(5));
+
+		Node restarted = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		restarted.service.startup(shared);
+		restarted.service.tick();
+		assertTrue(restarted.events.lost.isEmpty());
+
+		// die Niederlage kommt nach dem ersten Vollabgleich, vor dem nächsten (10 Minuten): nur die Beobachtung findet sie
+		clock.advance(Duration.ofMinutes(1));
+		Version foreign = overrideSharedClaim(BOOKING, "root");
+		restarted.service.tick();
+		restarted.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), foreign.id())), restarted.events.lost);
+	}
+
+	/** Der Zustand nach einem Absturz im Wartebetrieb: Die Version liegt lokal, der Index kennt die Einheit nicht. */
+	private Node nodeWithUnindexedPendingVersion() throws IOException {
+		AtomicBoolean failReads = new AtomicBoolean();
+		Path appData = dir.resolve("a");
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.layer.failWhen(p -> failReads.get() && p.startsWith(a.localData()), "read", new IOException("Datei gesperrt"));
+		a.down.set(true);
+		a.service.startup(shared);
+		failReads.set(true);
+		try {
+			// der Index scheitert beim Auflösen der neuen Einheit; die Version ist trotzdem geschrieben und eingereiht
+			save(a, create(BOOKING, "Anna"));
+		} finally {
+			failReads.set(false);
+		}
+		assertNull(a.service.snapshots().get(BOOKING), "der Index kennt die Einheit nicht");
+		return a;
+	}
+
+	@Test
+	void unitWhoseIndexUpdateFailedIsStillFoundByTheNextFullSync() throws IOException {
+		Node a = nodeWithUnindexedPendingVersion();
+		// der Auftrag im Speicher geht verloren (Verbindung neu aufgebaut); nur der Index könnte die Version noch nennen
+		a.down.set(false);
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.tick();
+
+		assertTrue(Files.exists(sharedFile(BOOKING, "claims/root.json")), "die ausstehende Version ist hochgeladen");
+		assertEquals(a.service.unitState(BOOKING).head().id(), sharedClaim(BOOKING, "root").version());
+	}
+
+	@Test
+	void cleanMarkerIsWrittenOnlyOnceEveryUnitIsIndexed() throws IOException {
+		Node a = nodeWithUnindexedPendingVersion();
+		Path marker = a.appData.resolve("index").resolve("clean");
+
+		a.service.closeIndex();
+		assertFalse(Files.exists(marker), "der Index kennt nicht alle Einheiten");
+
+		// eine spätere gelungene Auflösung der Einheit (hier der Abgleich mit dem Hochladen) stellt den Index richtig
+		a.down.set(false);
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.tick();
+		a.service.closeIndex();
+		assertTrue(Files.exists(marker));
+	}
+
+	@Test
 	void disconnectClaimsPendingVersionsWithoutReadingTheWholeStore() throws IOException {
 		Path appData = dir.resolve("a");
 		String me = MachineIdentity.loadOrCreate(appData, () -> "a").id();

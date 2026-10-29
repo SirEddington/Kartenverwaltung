@@ -374,7 +374,7 @@ class UnitIndexTest {
 	}
 
 	@Test
-	void recentOwnHeadsSelectsOwnYoungHeads() throws IOException {
+	void recentOwnChainUnitsSelectsUnitsWithAnOwnYoungLink() throws IOException {
 		long now = AT.toEpochMilli();
 		VersionId young = VersionId.create(now - 60_000L, ME, 0);
 		VersionId old = VersionId.create(now - 3_600_000L, ME, 0);
@@ -382,18 +382,25 @@ class UnitIndexTest {
 		write(EVENT, ME, young, null, "e-young", true);
 		write(PRESENTATION, ME, old, null, "p-old", true);
 		write(HALL, OTHER, foreignYoung, null, "h-foreign", true);
+		// EVENT2: ein junges eigenes Glied, darauf baut ein fremder Kopf auf
+		write(EVENT2, ME, VersionId.create(now - 120_000L, ME, 0), null, "e2-own", true);
+		write(EVENT2, OTHER, VersionId.create(now - 30_000L, OTHER, 0), VersionId.create(now - 120_000L, ME, 0), "e2-foreign",
+				true);
 		UnitIndex index = index();
 		refresh(index, local);
+		assertTrue(index.entries().get(EVENT2).snapshot().version().isFrom(OTHER), "der Kopf ist fremd");
 
 		Instant since = AT.minus(Duration.ofMinutes(15));
 
-		assertEquals(Set.of(EVENT), index.recentOwnHeads(version -> version.isFrom(ME), since));
-		// eine ältere Grenze nimmt auch die ältere eigene Kopfversion, die fremde nie
-		assertEquals(Set.of(EVENT, PRESENTATION),
-				index.recentOwnHeads(version -> version.isFrom(ME), AT.minus(Duration.ofHours(2))));
+		assertEquals(Set.of(EVENT, EVENT2), index.recentOwnChainUnits(version -> version.isFrom(ME), since));
+		// eine ältere Grenze nimmt auch das ältere eigene Glied, das fremde nie
+		assertEquals(Set.of(EVENT, EVENT2, PRESENTATION),
+				index.recentOwnChainUnits(version -> version.isFrom(ME), AT.minus(Duration.ofHours(2))));
+		// das ältere eigene Glied von EVENT2 liegt vor dieser Grenze
+		assertEquals(Set.of(EVENT), index.recentOwnChainUnits(version -> version.isFrom(ME), Instant.ofEpochMilli(now - 90_000L)));
 		// die Grenze selbst gilt nicht als "danach"
-		assertEquals(Set.of(), index.recentOwnHeads(version -> version.isFrom(ME), Instant.ofEpochMilli(now - 60_000L)));
-		assertEquals(Set.of(), index().recentOwnHeads(version -> true, Instant.EPOCH));
+		assertEquals(Set.of(), index.recentOwnChainUnits(version -> version.isFrom(ME), Instant.ofEpochMilli(now - 60_000L)));
+		assertEquals(Set.of(), index().recentOwnChainUnits(version -> true, Instant.EPOCH));
 	}
 
 	@Test

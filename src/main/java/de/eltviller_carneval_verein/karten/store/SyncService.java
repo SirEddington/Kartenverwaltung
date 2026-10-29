@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -245,6 +246,13 @@ public final class SyncService {
 	 * lokalen Bestand; wer sie hält, nimmt höchstens kurz {@code lock} (Rechner-ID) und den Monitor des Index.
 	 */
 	private final Object resolveLock = new Object();
+	/**
+	 * Einheiten, deren Eintrag im Index fehlt oder veraltet ist, weil das Auflösen scheiterte (etwa ein gesperrtes Lesen nach dem
+	 * Schreiben). Sie sind Kandidaten für Ausstehendes und Verlorenes, auch wenn der Index sie nicht nennt, und verhindern die
+	 * Marke "sauber beendet". Geschrieben unter {@code resolveLock}; eine nebenläufige Menge ohne eigene Sperre, damit sie in
+	 * keine Sperrfolge gerät.
+	 */
+	private final Set<UnitKey> unindexed = ConcurrentHashMap.newKeySet();
 	/** Schützt {@link #acknowledged}; die letzte Sperre der Folge (unter ihr nur die kleine Datei, keine weitere Sperre). */
 	private final Object ackLock = new Object();
 	/** Die bestätigten Konflikte ({@code conflicts-ack.json}); {@code null}, solange die Datei nicht gelesen wurde. */
@@ -449,7 +457,7 @@ public final class SyncService {
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			deactivate();
-			claimPendingLocally(opened.pendingUnits());
+			claimPendingLocally(withUnindexed(opened.pendingUnits()));
 			resolveAtStartup(opened.lostUnits());
 			return true;
 		}
@@ -465,7 +473,7 @@ public final class SyncService {
 			Round round = new Round(current);
 			round.startup = true;
 			round.run(() -> {
-				enqueuePending(current, opened.pendingUnits());
+				enqueuePending(current, withUnindexed(opened.pendingUnits()));
 				runJobs(current, round);
 			});
 			reportChanges(round);
@@ -534,7 +542,7 @@ public final class SyncService {
 	public void disconnect() {
 		reopen();
 		deactivate();
-		claimPendingLocally(index.pendingUnits());
+		claimPendingLocally(withUnindexed(index.pendingUnits()));
 	}
 
 	/**
@@ -1234,7 +1242,8 @@ public final class SyncService {
 	 * Index nie abgeglichen) startet er wie nach einem Absturz.
 	 * <p>
 	 * Eine gerade laufende Runde im Hintergrund wartet es kurz ab ({@link #CLOSE_WAIT}); ist sie dann nicht fertig, gibt es
-	 * keine Marke, denn ihre Änderungen am Bestand fehlten im Index.
+	 * keine Marke, denn ihre Änderungen am Bestand fehlten im Index. Dasselbe gilt, solange das Auflösen einer Einheit
+	 * gescheitert ist und der Index sie nicht kennt (WARNING im Log): Der nächste Start durchsucht den Bestand.
 	 * <p>
 	 * Mit der Marke ist der Dienst geschlossen: Der Takt tut nichts mehr, denn eine Runde, die nach der Marke Dateien in den
 	 * Bestand schriebe, und ein Prozessende mitten darin ließen die Marke über einem geänderten Bestand stehen. Ein späteres
@@ -1254,6 +1263,11 @@ public final class SyncService {
 			}
 			boolean written = writeIndex();
 			if (!written || !idle) {
+				return;
+			}
+			if (!unindexed.isEmpty()) {
+				// der Index kennt nicht alle Einheiten: Der nächste Start muss den Bestand durchsuchen
+				LOGGER.warning("Der Start-Index kennt nicht alle Einheiten; die Marke 'sauber beendet' entfällt");
 				return;
 			}
 			if (index.writeCleanMarker()) {
@@ -1336,6 +1350,7 @@ public final class SyncService {
 	private UnitIndex.Refresh rebuildIndex(DoubleConsumer progress) {
 		synchronized (resolveLock) {
 			index = newIndex(machineId());
+			unindexed.clear();
 		}
 		Set<UnitKey> pending = new LinkedHashSet<>();
 		Set<UnitKey> lost = new LinkedHashSet<>();
@@ -1383,6 +1398,7 @@ public final class SyncService {
 	private void clearIndex() {
 		synchronized (resolveLock) {
 			index.clear();
+			unindexed.clear();
 			indexRefreshed = true;
 		}
 	}
@@ -1405,14 +1421,21 @@ public final class SyncService {
 		// überschriebe der ältere Stand eines anderen Threads den neueren. Reihenfolge der Sperren: workLock, resolveLock,
 		// Monitor des Index; machineId() nimmt nur kurz lock, und unter lock wartet nie jemand auf resolveLock.
 		synchronized (resolveLock) {
-			UnitFiles unitFiles = local.readUnit(unit);
-			UnitState state = ChainResolver.resolve(unitFiles, machineId());
-			// ein Ordner ohne Dateien ist keine Einheit des Bestands: kein Eintrag (etwa bei einer Abfrage nach einer
-			// unbekannten)
-			if (!unitFiles.versions().isEmpty() || !unitFiles.claims().isEmpty()) {
-				index.update(unitFiles, state);
+			try {
+				UnitFiles unitFiles = local.readUnit(unit);
+				UnitState state = ChainResolver.resolve(unitFiles, machineId());
+				// ein Ordner ohne Dateien ist keine Einheit des Bestands: kein Eintrag (etwa bei einer Abfrage nach einer
+				// unbekannten)
+				if (!unitFiles.versions().isEmpty() || !unitFiles.claims().isEmpty()) {
+					index.update(unitFiles, state);
+				}
+				unindexed.remove(unit);
+				return new Resolved(unitFiles, state);
+			} catch (IOException | RuntimeException e) {
+				// der Index kennt den Stand dieser Einheit nicht (mehr): Sie bleibt Kandidat, bis eine Auflösung gelingt
+				unindexed.add(unit);
+				throw e;
 			}
-			return new Resolved(unitFiles, state);
 		}
 	}
 
@@ -1588,8 +1611,11 @@ public final class SyncService {
 			current.allUnitsWanted = false;
 			round.allUnits = true;
 			// nach einem Neustart: die eigenen Ansprüche der letzten 15 Minuten weiter auf eine späte Niederlage prüfen; gelesen
-			// werden nur die Einheiten, deren Kopf der Index als jung und eigen kennt (der Anspruch entscheidet dann selbst)
-			Set<UnitKey> recent = index.recentOwnHeads(id -> id.isFrom(myId),
+			// werden nur die Einheiten, in deren gültiger Kette der Index ein junges eigenes Glied kennt (der Anspruch
+			// entscheidet dann selbst). Eine Version, die lange nach dem Schreiben hochgeladen wurde (alte ID, junger Anspruch),
+			// wird nach einem Neustart nicht beobachtet; den Vergleich der eigenen Ansprüche beider Seiten (checkOwnClaim) im
+			// nächsten Vollabgleich fängt sie.
+			Set<UnitKey> recent = index.recentOwnChainUnits(id -> id.isFrom(myId),
 					now.minus(LATE_DEFEAT_WINDOW).minus(CLOCK_SLACK));
 			watchOwnClaims(LocalScan.recentOwnClaims(local, myId, now, LATE_DEFEAT_WINDOW, recent));
 		}
@@ -1604,8 +1630,15 @@ public final class SyncService {
 		result.lost().forEach(this::reportLoss);
 		settleAll(current, result.contested(), round);
 		// Kandidaten für ausstehende Versionen nennt der Index; was der Abgleich kopiert hat, steht schon darin
-		enqueuePending(current, index.pendingUnits());
+		enqueuePending(current, withUnindexed(index.pendingUnits()));
 		runJobs(current, round);
+	}
+
+	/** Die Kandidaten des Index und die Einheiten, die der Index wegen eines Fehlers beim Auflösen nicht kennt. */
+	private Set<UnitKey> withUnindexed(Collection<UnitKey> indexed) {
+		Set<UnitKey> units = new LinkedHashSet<>(indexed);
+		units.addAll(unindexed);
+		return units;
 	}
 
 	/**
@@ -1968,7 +2001,7 @@ public final class SyncService {
 			// nach dem ersten Vollabgleich: die geänderten Einheiten und die, die der Index als verloren kennt (Kandidaten;
 			// die Verluste leitet reportLosses aus den Dateien ab)
 			Set<UnitKey> candidates = new LinkedHashSet<>(round.changed);
-			candidates.addAll(index.lostUnits());
+			candidates.addAll(withUnindexed(index.lostUnits()));
 			units = candidates;
 		}
 		reportLosses(units);
