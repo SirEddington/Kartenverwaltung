@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -300,6 +301,87 @@ class NioFileLayerTest {
 		assertTrue(layer.createNew(anchor.resolve("a.json"), bytes("x"), anchor, null));
 
 		assertEquals(List.of("a.json"), namesIn(anchor));
+	}
+
+	/**
+	 * Eine Dateischicht, deren Ordner sich wie auf mancher Netzfreigabe verhalten: Das Anlegen eines Ordners, den es schon
+	 * gibt, scheitert mit {@link AccessDeniedException} (der Benutzer darf im Elternordner nichts anlegen), und jeder
+	 * Versuch wird aufgezeichnet. Ein lokales Dateisystem meldet hier {@link FileAlreadyExistsException} und zeigt den
+	 * Unterschied nicht.
+	 */
+	private static NioFileLayer shareLikeLayer(List<Path> attempts) {
+		return new NioFileLayer(level -> {
+			attempts.add(level);
+			if (Files.exists(level)) {
+				throw new AccessDeniedException(level.toString());
+			}
+			Files.createDirectory(level);
+		});
+	}
+
+	@Test
+	void createNewDoesNotTouchExistingLevels() throws IOException {
+		Path anchor = Files.createDirectory(dir.resolve("gemeinsam"));
+		Path events = Files.createDirectories(anchor.resolve("data").resolve("events"));
+		Path file = Files.createDirectory(events.resolve("e1")).resolve("x.json");
+		List<Path> attempts = new ArrayList<>();
+
+		assertTrue(shareLikeLayer(attempts).createNew(file, bytes("x"), anchor, null));
+
+		assertEquals(List.of(), attempts);
+		assertArrayEquals(bytes("x"), Files.readAllBytes(file));
+	}
+
+	@Test
+	void createNewCreatesOnlyTheMissingLevels() throws IOException {
+		Path anchor = Files.createDirectory(dir.resolve("gemeinsam"));
+		Path data = Files.createDirectory(anchor.resolve("data"));
+		Path file = data.resolve("events").resolve("e1").resolve("x.json");
+		List<Path> attempts = new ArrayList<>();
+
+		assertTrue(shareLikeLayer(attempts).createNew(file, bytes("x"), anchor, null));
+
+		assertEquals(List.of(data.resolve("events"), data.resolve("events").resolve("e1")), attempts);
+		assertArrayEquals(bytes("x"), Files.readAllBytes(file));
+	}
+
+	@Test
+	void createNewReportsAMissingLevelThatCannotBeCreated() throws IOException {
+		Path anchor = Files.createDirectory(dir.resolve("gemeinsam"));
+		Path file = anchor.resolve("data").resolve("a.json");
+		NioFileLayer denying = new NioFileLayer(level -> {
+			throw new AccessDeniedException(level.toString());
+		});
+
+		assertThrows(AccessDeniedException.class, () -> denying.createNew(file, bytes("x"), anchor, null));
+
+		assertEquals(List.of(), namesIn(anchor));
+	}
+
+	@Test
+	void createNewAcceptsALevelThatAnotherMachineCreatedMeanwhile() throws IOException {
+		Path anchor = Files.createDirectory(dir.resolve("gemeinsam"));
+		Path file = anchor.resolve("data").resolve("a.json");
+		NioFileLayer racing = new NioFileLayer(level -> {
+			Files.createDirectory(level);
+			throw new AccessDeniedException(level.toString());
+		});
+
+		assertTrue(racing.createNew(file, bytes("x"), anchor, null));
+
+		assertArrayEquals(bytes("x"), Files.readAllBytes(file));
+	}
+
+	@Test
+	void createNewNeverAttemptsToCreateTheAnchor() throws IOException {
+		Path anchor = dir.resolve("gemeinsam");
+		Path file = anchor.resolve("data").resolve("events").resolve("a.json");
+		List<Path> attempts = new ArrayList<>();
+
+		assertThrows(NoSuchFileException.class, () -> shareLikeLayer(attempts).createNew(file, bytes("x"), anchor, null));
+
+		assertEquals(List.of(anchor.resolve("data")), attempts);
+		assertFalse(Files.exists(anchor));
 	}
 
 	@Test

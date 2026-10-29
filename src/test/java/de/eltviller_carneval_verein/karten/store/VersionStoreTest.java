@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -314,6 +315,36 @@ class VersionStoreTest {
 		Files.createDirectory(anchor);
 		assertTrue(store.writeVersion(unit, V1, version));
 		assertTrue(Files.isDirectory(anchor.resolve("data").resolve("events").resolve("e1")));
+	}
+
+	@Test
+	void storeHandsAnchorAndCurrentTagToTheFileLayer() throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		Path anchor = Files.createDirectory(dir.resolve("gemeinsam"));
+		AtomicReference<String> tag = new AtomicReference<>("abc");
+		VersionStore store = new VersionStore(anchor.resolve("data"), layer, anchor, tag::get);
+		UnitKey unit = UnitKey.event("e1");
+		byte[] version = versionBytes(V1);
+
+		store.writeVersion(unit, V1, version);
+		tag.set("xyz");
+		store.createClaim(unit, "root", claimBytes(V1, version));
+		store.createRelative("feeds/m1/feed.json", bytes("{}"));
+
+		assertEquals(List.of(new FaultyFileLayer.Creation(store.resolve("events/e1/" + V1 + ".json"), anchor, "abc"),
+				new FaultyFileLayer.Creation(store.resolve("events/e1/claims/root.json"), anchor, "xyz"),
+				new FaultyFileLayer.Creation(store.resolve("feeds/m1/feed.json"), anchor, "xyz")), layer.creations());
+	}
+
+	@Test
+	void storeWithoutAnchorHandsNoAnchorAndNoTagToTheFileLayer() throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		VersionStore store = new VersionStore(dir.resolve("data"), layer);
+
+		store.writeVersion(UnitKey.event("e1"), V1, versionBytes(V1));
+
+		assertEquals(List.of(new FaultyFileLayer.Creation(store.resolve("events/e1/" + V1 + ".json"), null, null)),
+				layer.creations());
 	}
 
 	@Test

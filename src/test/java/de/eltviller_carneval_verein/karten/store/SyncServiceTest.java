@@ -408,6 +408,30 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void sharedWritesCarryTheSharedFolderAsAnchorAndTheMachineIdAsTag() throws IOException {
+		Node a = node("a");
+		assertTrue(a.service.startup(shared));
+		save(a, create(BOOKING, "Anna"));
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+
+		List<FaultyFileLayer.Creation> inShared = a.layer.creations().stream().filter(c -> c.file().startsWith(sharedRoot)).toList();
+		List<FaultyFileLayer.Creation> local = a.layer.creations().stream().filter(c -> c.file().startsWith(a.appData)).toList();
+
+		assertFalse(inShared.isEmpty());
+		assertFalse(local.isEmpty());
+		for (FaultyFileLayer.Creation creation : inShared) {
+			assertEquals(sharedRoot.toAbsolutePath().normalize(), creation.anchor().toAbsolutePath().normalize(), creation.file().toString());
+			assertEquals(a.service.machineId(), creation.tempTag(), creation.file().toString());
+		}
+		for (FaultyFileLayer.Creation creation : local) {
+			assertNull(creation.anchor(), creation.file().toString());
+			assertNull(creation.tempTag(), creation.file().toString());
+		}
+		assertEquals(inShared.size() + local.size(), a.layer.creations().size());
+	}
+
+	@Test
 	void twoMachinesFirstUploadWins() throws IOException {
 		Node a = node("a");
 		Node b = node("b");

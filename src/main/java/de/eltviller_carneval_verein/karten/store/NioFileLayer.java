@@ -30,6 +30,23 @@ import java.util.UUID;
  */
 public final class NioFileLayer implements FileLayer {
 
+	/** Legt einen einzelnen Ordner an, dessen Elternordner vorhanden sein muss; die Naht für Tests. */
+	@FunctionalInterface
+	interface DirectoryCreator {
+		void create(Path dir) throws IOException;
+	}
+
+	private final DirectoryCreator directories;
+
+	public NioFileLayer() {
+		this(Files::createDirectory);
+	}
+
+	/** Nur für Tests: Ordner einer Netzfreigabe nachstellen, die sich anders verhält als das lokale Dateisystem. */
+	NioFileLayer(DirectoryCreator directories) {
+		this.directories = directories;
+	}
+
 	@Override
 	public boolean createNew(Path file, byte[] content, Path anchor, String tempTag) throws IOException {
 		Path dir;
@@ -214,19 +231,23 @@ public final class NioFileLayer implements FileLayer {
 	}
 
 	/**
-	 * Legt die fehlenden Ordner zwischen {@code anchor} und dem Ordner der Datei einzeln an, nie den Anker selbst. Fehlt
-	 * der Anker oder eine Ebene darüber, scheitert {@link Files#createDirectory} mit {@link NoSuchFileException}, ohne
-	 * etwas anzulegen. Eine Ebene, die schon vorhanden ist (auch eine, die ein anderer Rechner gerade anlegt), ist kein
-	 * Fehler.
+	 * Legt die fehlenden Ordner zwischen {@code anchor} und dem Ordner der Datei einzeln an, nie den Anker selbst. Ist der
+	 * Ordner der Datei schon da, geschieht nichts weiter. Vorhandene Ebenen werden übersprungen, nicht noch einmal
+	 * angelegt (auf Netzfreigaben scheitert das ohne das Recht, dort Ordner anzulegen). Fehlt der Anker oder eine Ebene
+	 * darüber, scheitert das Anlegen mit {@link NoSuchFileException}, ohne etwas anzulegen. Scheitert das Anlegen sonst,
+	 * aber die Ebene ist danach da (ein anderer Rechner war schneller), ist das kein Fehler.
 	 *
 	 * @return der Ordner der Datei
 	 * @throws IllegalArgumentException wenn die Datei nicht unter dem Anker liegt
 	 */
-	private static Path createLevelsBelow(Path anchor, Path file) throws IOException {
+	private Path createLevelsBelow(Path anchor, Path file) throws IOException {
 		Path root = anchor.toAbsolutePath().normalize();
 		Path dir = parentOf(file).normalize();
 		if (!dir.startsWith(root)) {
 			throw new IllegalArgumentException("Die Datei liegt nicht unter dem Anker: " + file + " (Anker " + anchor + ")");
+		}
+		if (Files.isDirectory(dir)) {
+			return dir; // alle Ebenen sind da (und damit der Anker); es gibt nichts anzulegen und keine Zugriffe darüber hinaus
 		}
 		Path level = root;
 		for (Path part : root.relativize(dir)) {
@@ -234,12 +255,18 @@ public final class NioFileLayer implements FileLayer {
 				break; // die Datei liegt unmittelbar im Anker
 			}
 			level = level.resolve(part);
+			if (Files.isDirectory(level)) {
+				continue; // Ein vorhandener Ordner wird nie erneut angelegt: Auf Netzfreigaben scheitert das ohne Recht dazu
+			}
 			try {
-				Files.createDirectory(level);
-			} catch (FileAlreadyExistsException e) {
+				directories.create(level);
+			} catch (NoSuchFileException e) {
+				throw e; // der Anker oder eine Ebene darüber fehlt
+			} catch (IOException e) {
 				if (!Files.isDirectory(level)) {
 					throw e;
 				}
+				// ein anderer Rechner hat die Ebene gerade angelegt
 			}
 		}
 		return dir;

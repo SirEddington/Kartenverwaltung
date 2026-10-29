@@ -30,6 +30,10 @@ public final class FaultyFileLayer implements FileLayer {
 	private record Failure(Predicate<Path> path, String operation, IOException exception, boolean once, boolean after) {
 	}
 
+	/** Ein Aufruf von {@code createNew}: die Datei sowie Anker und Kennung, mit denen er kam. */
+	public record Creation(Path file, Path anchor, String tempTag) {
+	}
+
 	private record Block(String operation, CountDownLatch entered, CountDownLatch release) {
 	}
 
@@ -40,6 +44,7 @@ public final class FaultyFileLayer implements FileLayer {
 	private final List<String> calls = new ArrayList<>();
 	private final List<Failure> failures = new ArrayList<>();
 	private final List<Block> blocks = new ArrayList<>();
+	private final List<Creation> creations = new ArrayList<>();
 
 	public FaultyFileLayer(FileLayer delegate) {
 		this.delegate = delegate;
@@ -66,6 +71,11 @@ public final class FaultyFileLayer implements FileLayer {
 	/** Wie {@link #failAfter}, für jeden Aufruf der Operation mit einem passenden Pfad. */
 	public synchronized void failAfterWhen(Predicate<Path> path, String operation, IOException e) {
 		failures.add(new Failure(path, operation, e, false, true));
+	}
+
+	/** Alle bisherigen Aufrufe von {@code createNew} mit den Werten für Anker und Kennung, auch die gescheiterten. */
+	public synchronized List<Creation> creations() {
+		return List.copyOf(creations);
 	}
 
 	/** Alle bisherigen Aufrufe als {@code "<Operation> <Pfad>"} in der Reihenfolge, auch die gescheiterten. */
@@ -152,6 +162,9 @@ public final class FaultyFileLayer implements FileLayer {
 
 	@Override
 	public boolean createNew(Path file, byte[] content, Path anchor, String tempTag) throws IOException {
+		synchronized (this) {
+			creations.add(new Creation(file, anchor, tempTag));
+		}
 		IOException late = enter("createNew", file);
 		boolean result = delegate.createNew(file, content, anchor, tempTag);
 		throwLate(late);
