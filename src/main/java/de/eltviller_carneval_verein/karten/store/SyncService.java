@@ -1395,7 +1395,12 @@ public final class SyncService {
 
 	/** Trägt die Einheiten der geschriebenen Versionen in den Index ein; was sich nicht lesen lässt, kostet nur den Eintrag. */
 	private void indexUnits(List<UploadJob.Item> items) {
-		for (UnitKey unit : items.stream().map(UploadJob.Item::unit).distinct().toList()) {
+		indexUnitKeys(items.stream().map(UploadJob.Item::unit).distinct().toList());
+	}
+
+	/** Trägt die Einheiten in den Index ein, ohne etwas zu melden; was sich nicht lesen lässt, kostet nur den Eintrag. */
+	private void indexUnitKeys(Collection<UnitKey> units) {
+		for (UnitKey unit : units) {
 			try {
 				resolveLocal(unit);
 			} catch (IOException | RuntimeException e) {
@@ -1561,6 +1566,9 @@ public final class SyncService {
 			unrepairable.clear();
 		}
 		round.changed.addAll(result.changed());
+		// Die Auflösung im selben Takt liest die Geschwister einer Buchung aus dem Index: Was der Abgleich kopiert hat, steht
+		// schon vorher darin, nicht erst nach dem Melden am Ende des Takts (sonst sähe ein fremdes Umsetzen wie ein Storno aus)
+		indexUnitKeys(result.changed());
 		result.lost().forEach(this::reportLoss);
 		settleAll(current, result.contested(), round);
 		enqueuePending(current, null);

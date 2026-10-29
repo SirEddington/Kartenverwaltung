@@ -945,6 +945,68 @@ class ConflictScenarioTest {
 		assertTrue(a.open().isEmpty(), a.open().toString());
 	}
 
+	/** Setzt die Buchung des Sitzes {@code from} auf den freien Sitz {@code to} um und speichert (ein Speichervorgang). */
+	private static Booking move(Machine machine, int from, int to) {
+		Booking booking = machine.seat(from);
+		assertTrue(BookingSync.assign(machine.friday(), machine.plan(), booking, machine.plan().getSeats().get(to)));
+		BookingSync.sync(machine.friday(), machine.plan());
+		machine.repository.saveEvent(machine.event);
+		return booking;
+	}
+
+	/** Die neueste Änderungsliste des Rechners im gemeinsamen Ordner. */
+	private static Path newestFeed(Machine machine) throws IOException {
+		Path folder = machine.sharedDir.resolve("data").resolve("feeds").resolve(machine.sync.machineId());
+		try (var feeds = Files.list(folder)) {
+			return feeds.max((x, y) -> Long.compare(feedNumber(x), feedNumber(y))).orElseThrow();
+		}
+	}
+
+	private static long feedNumber(Path feed) {
+		String name = feed.getFileName().toString();
+		return Long.parseLong(name.substring(0, name.length() - ".json".length()));
+	}
+
+	/**
+	 * M4: A setzt Müller um, seine Liste kommt bei B nicht an. B ändert Müller auf dem alten Sitz und verliert gegen A's
+	 * Löschung; die Strecke wartet auf die Liste. Nach den 5 Minuten bringt erst ein Vollabgleich A's neuen Sitz, im selben
+	 * Takt läuft die Auflösung: Sie sieht den neuen Geschwisterstand und überträgt B's Änderung auf die umgesetzte Buchung,
+	 * statt sie als Stornierung zu behandeln (DELETE_WINS).
+	 */
+	@Test
+	void fullSyncBringsForeignMoveBeforeTheLossIsResolved() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		UnitKey oldSeat = seatUnit(a, 0);
+		UnitKey newSeat = seatUnit(a, 2);
+		String muellerId = move(a, 0, 2).getId();
+		a.tick();
+		Path feed = newestFeed(a);
+		Path hidden = Files.move(feed, dir.resolve("versteckt.json"));
+		b.seat(0).setComment("Notiz");
+		b.repository.saveEvent(b.event);
+		clock.advance(Duration.ofSeconds(2));
+		b.tick();
+		assertEquals(1, b.sync.unitState(oldSeat).lost().size(), "B's Änderung hat gegen A's Löschung verloren");
+		assertNull(b.sync.unitState(newSeat).current(), "A's neuer Sitz ist bei B noch nicht angekommen");
+
+		// die Wartezeit auf Listen (5 Minuten) ist um, der regelmäßige Vollabgleich (10 Minuten) noch nicht fällig
+		clock.advance(Duration.ofMinutes(5).plusSeconds(1));
+		b.sync.syncNow();
+
+		assertTrue(warnings.removeIf(record -> record.getMessage().contains("5 Minuten")), "die Strecke wartete aus");
+		Files.move(hidden, feed);
+		untilQuiet(a, b);
+		assertConverged(a, b);
+		assertTrue(a.eventState().get(oldSeat).deleted());
+		assertEquals(Set.of(newSeat), carriers(a, muellerId), "Müller lebt nur auf dem neuen Sitz");
+		assertEquals("Notiz", a.eventState().get(newSeat).payload().get("comment").asText(), "B's Änderung ist übertragen");
+		assertTrue(b.open().isEmpty(), "keine Stornierung, die niemand gemacht hat: " + b.open());
+		assertTrue(a.open().isEmpty(), a.open().toString());
+	}
+
 	/**
 	 * H3: Nach einer Hallenänderung (Reihe A neu angelegt, die Sitze haben neue IDs) setzen beide Rechner Müller gleich um
 	 * und speichern. Alter Sitz (zwei Löschungen), neuer Sitz (zwei Erstversionen derselben Buchung) und keine Einheit
