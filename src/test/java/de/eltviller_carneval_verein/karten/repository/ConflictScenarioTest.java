@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -68,9 +69,29 @@ class ConflictScenarioTest {
 	/** Der Abstand zwischen zwei Runden: länger als das Intervall, in dem ein Dienst neue Rechner sucht. */
 	private static final Duration ROUND = Duration.ofSeconds(31);
 
-	/** Zeichnet die Rückmeldungen eines Dienstes auf, die die Szenarien prüfen. */
+	/**
+	 * Zeichnet die Rückmeldungen eines Dienstes auf, die die Szenarien prüfen, und lässt die Repositories des Rechners jede
+	 * Meldung einarbeiten wie die App ({@code LiveUpdates}): erst die Hallen, dann die Events. Die zurückgestellten Stände
+	 * des letzten Einarbeitens stehen in {@link #deferred}.
+	 */
 	private static final class Recorder implements SyncListener {
 		final List<String> errors = new ArrayList<>();
+		final List<String> warnings = new ArrayList<>();
+		List<Deferral> deferred = List.of();
+		/** Die Repositories, sobald es sie gibt; vor dem Start kommt nichts an, was sie einarbeiten könnten. */
+		StoreHallRepository halls;
+		StoreEventRepository events;
+
+		@Override
+		public void unitsChanged(Set<UnitKey> units) {
+			if (halls == null) {
+				return;
+			}
+			warnings.addAll(halls.applyForeign(units).warnings());
+			ForeignResult result = events.applyForeign(units);
+			warnings.addAll(result.warnings());
+			deferred = result.deferred();
+		}
 
 		@Override
 		public void error(String message) {
@@ -85,6 +106,7 @@ class ConflictScenarioTest {
 	 */
 	private final class Machine {
 		final String name;
+		final Path sharedDir;
 		final AtomicBoolean down = new AtomicBoolean();
 		final Recorder events = new Recorder();
 		final SyncService sync;
@@ -94,7 +116,14 @@ class ConflictScenarioTest {
 		Event event;
 
 		Machine(String name, Path sharedDir) {
+			this(name, sharedDir, true);
+		}
+
+		/** Mit {@code reachable == false} startet der Rechner ohne den gemeinsamen Ordner ({@link #down}). */
+		Machine(String name, Path sharedDir, boolean reachable) {
 			this.name = name;
+			this.sharedDir = sharedDir;
+			down.set(!reachable);
 			FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 			for (String operation : List.of("createNew", "read", "listNames")) {
 				layer.failWhen(p -> down.get() && p.startsWith(sharedDir), operation,
@@ -103,11 +132,24 @@ class ConflictScenarioTest {
 			sync = TestSyncServices.unstarted(dir.resolve("app-" + name), name, layer, p -> !down.get(), clock);
 			sync.setListener(events);
 			ConflictPolicies.install(sync);
-			assertTrue(sync.startup(sharedDir.toString()));
+			assertEquals(reachable, sync.startup(sharedDir.toString()));
 			halls = TestRepositories.halls(sync);
 			repository = TestRepositories.events(sync);
 			repository.setHallLookup(id -> hall != null && hall.getId().equals(id) ? hall : null);
+			events.halls = halls;
+			events.events = repository;
 			started.add(this);
+		}
+
+		/**
+		 * Beendet den Rechner sauber und startet ihn mit demselben Datenordner neu, während der gemeinsame Ordner nicht
+		 * erreichbar ist; der neue Rechner hat Halle und Event geladen.
+		 */
+		Machine restartOffline() {
+			sync.closeIndex();
+			Machine restarted = new Machine(name, sharedDir, false);
+			restarted.load();
+			return restarted;
 		}
 
 		/** Lädt Halle und Event aus dem Speicher und bereitet das Event vor wie die App (leere Platzhalter). */
@@ -185,30 +227,36 @@ class ConflictScenarioTest {
 		public void close() {
 		}
 	};
-	private final Logger logger = Logger.getLogger(SyncService.class.getName());
-	private boolean parentHandlers;
+	/** Der Dienst und die Repositories, die einarbeiten; je Logger, ob er an die übergeordneten weitergab. */
+	private final Map<Logger, Boolean> loggers = new LinkedHashMap<>();
 
 	@BeforeEach
 	void captureWarnings() {
-		parentHandlers = logger.getUseParentHandlers();
-		logger.addHandler(capture);
-		logger.setUseParentHandlers(false);
+		for (Class<?> type : List.of(SyncService.class, StoreEventRepository.class, StoreHallRepository.class)) {
+			Logger logger = Logger.getLogger(type.getName());
+			loggers.put(logger, logger.getUseParentHandlers());
+			logger.addHandler(capture);
+			logger.setUseParentHandlers(false);
+		}
 	}
 
 	/**
-	 * Keine Strategie scheiterte (SEVERE), keine Strecke wurde erst nach 5 Minuten mit dem Vorhandenen aufgelöst, und kein
-	 * Rechner meldete einen Fehler.
+	 * Keine Strategie und kein Einarbeiten scheiterte (SEVERE), keine Strecke wurde erst nach 5 Minuten mit dem Vorhandenen
+	 * aufgelöst, und kein Rechner meldete einen Fehler.
 	 */
 	@AfterEach
 	void noFailuresAndNoGivingUp() {
-		logger.removeHandler(capture);
-		logger.setUseParentHandlers(parentHandlers);
+		loggers.forEach((logger, parentHandlers) -> {
+			logger.removeHandler(capture);
+			logger.setUseParentHandlers(parentHandlers);
+		});
 		for (LogRecord record : warnings) {
 			assertTrue(record.getLevel().intValue() < Level.SEVERE.intValue(), "SEVERE: " + record.getMessage());
 			assertFalse(record.getMessage().contains("5 Minuten"), record.getMessage());
 		}
 		for (Machine machine : started) {
 			assertTrue(machine.events.errors.isEmpty(), machine.name + ": " + machine.events.errors);
+			assertTrue(machine.events.warnings.isEmpty(), machine.name + ": " + machine.events.warnings);
 		}
 	}
 
@@ -335,8 +383,12 @@ class ConflictScenarioTest {
 				machine.plan().getSeats().get(n).getId());
 	}
 
-	private static UnitKey unassignedUnit(Machine machine, Booking booking) {
-		return UnitKey.unassignedBooking(machine.event.getId(), machine.friday().getId(), booking.getId());
+	/**
+	 * Die Einheit "ohne Platz" der Buchung mit dieser Kennung. Die Kennung beim Verkauf festhalten: Arbeitet das Repository
+	 * des Verlierers die Zusammenführung ein, trägt sein Buchungsobjekt auf dem Sitz danach die des Gewinners.
+	 */
+	private static UnitKey unassignedUnit(Machine machine, String bookingId) {
+		return UnitKey.unassignedBooking(machine.event.getId(), machine.friday().getId(), bookingId);
 	}
 
 	private static String lastName(UnitSnapshot snapshot) {
@@ -381,6 +433,26 @@ class ConflictScenarioTest {
 		return machine.sync.history(unit).stream().filter(version -> version.conflict() != null).count();
 	}
 
+	/**
+	 * Das Modell des Rechners zeigt den Doppelverkauf auf dem n-ten Sitz: dort die Buchung des Gewinners, die des Verlierers
+	 * genau einmal "ohne Platz". Der Vergleichsstand des Sitzes ist sein aktueller Stand, nichts gilt als ungespeichert und
+	 * nichts ist zurückgestellt.
+	 */
+	private static void assertModelShowsDoubleSale(Machine machine, int n, String winner, String loserId, String loser)
+			throws IOException {
+		assertEquals(winner, machine.seat(n).getLastName(), machine.name);
+		List<Booking> withoutPlace = machine.friday().getBookings().stream().filter(Booking::isUnassigned).toList();
+		assertEquals(1, withoutPlace.size(), machine.name + ": " + withoutPlace);
+		assertEquals(loserId, withoutPlace.get(0).getId(), machine.name);
+		assertEquals(loser, withoutPlace.get(0).getLastName(), machine.name);
+		assertNull(withoutPlace.get(0).getSeatId(), machine.name);
+		UnitKey seat = seatUnit(machine, n);
+		assertEquals(machine.sync.unitState(seat).current().id(), machine.repository.knownUnit(seat).version(),
+				machine.name);
+		assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+		assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+	}
+
 	// <-- Bauteile
 
 	/** A und B verkaufen denselben Platz, B lädt später hoch: Der Sitz bleibt A's, B's Buchung steht "ohne Platz". */
@@ -391,7 +463,7 @@ class ConflictScenarioTest {
 		Machine b = m[1];
 		setUp(a, b);
 		a.sell(1, "Anna");
-		Booking bert = b.sell(1, "Bert");
+		String bertId = b.sell(1, "Bert").getId();
 		a.tick();
 		b.tick();
 
@@ -400,11 +472,196 @@ class ConflictScenarioTest {
 		assertConverged(a, b);
 		UnitKey seat = seatUnit(a, 1);
 		assertEquals("Anna", lastName(a.eventState().get(seat)));
-		UnitKey moved = unassignedUnit(b, bert);
+		UnitKey moved = unassignedUnit(b, bertId);
 		assertEquals(Set.of(moved), unassigned(a).keySet());
 		assertWithoutPlace(unassigned(a).get(moved), "Bert");
 		assertDoubleSale(b, moved, seat);
 		assertTrue(a.open().isEmpty(), "der Gewinner hat keinen Konflikt: " + a.open());
+		// beide Repositories haben die Zusammenführung eingearbeitet
+		assertModelShowsDoubleSale(a, 1, "Anna", bertId, "Bert");
+		assertModelShowsDoubleSale(b, 1, "Anna", bertId, "Bert");
+	}
+
+	/**
+	 * Der Verlierer arbeitet seine eigene Zusammenführung ein, sobald sie geschrieben ist, noch bevor der Gewinner sie hat:
+	 * Auf dem Sitz steht A's Buchung, B's Buchung "ohne Platz", und nichts gilt als ungespeichert.
+	 */
+	@Test
+	void loserIncorporatesOwnMergeAndShowsBookingWithoutPlace() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		a.sell(1, "Anna");
+		String bertId = b.sell(1, "Bert").getId();
+		a.tick();
+		b.tick();
+		UnitKey seat = seatUnit(a, 1);
+
+		for (int round = 0; round < MAX_ROUNDS && notes(b, seat) == 0; round++) {
+			clock.advance(ROUND);
+			b.tick();
+		}
+
+		assertEquals(1, notes(b, seat), "B hat zusammengeführt");
+		assertEquals(0, notes(a, seat), "A hat die Zusammenführung noch nicht");
+		assertModelShowsDoubleSale(b, 1, "Anna", bertId, "Bert");
+	}
+
+	/**
+	 * Review Focus 2: Der Gewinner ändert den Kommentar seiner Buchung, ohne zu speichern. Die Zusammenführung des Verlierers
+	 * hat auf dem Sitz denselben Inhalt wie sein Stand: Sie geht still in den Vergleichsstand, ohne Zurückstellen und ohne
+	 * das Modell anzufassen, und sein nächstes Speichern baut auf ihr auf, statt erneut zu gabeln.
+	 */
+	@Test
+	void winnerWithUnsavedEditAdoptsTheLosersMergeSilently() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Booking anna = a.sell(1, "Anna");
+		b.sell(1, "Bert");
+		anna.setComment("Notiz");
+		a.tick();
+		b.tick();
+
+		untilQuiet(a, b);
+
+		UnitKey seat = seatUnit(a, 1);
+		VersionId merge = a.sync.unitState(seat).head().id();
+		assertEquals(1, notes(a, seat), "B's Zusammenführung ist beim Gewinner");
+		assertNotNull(a.sync.unitState(seat).head().conflict(), "das letzte Glied ist die Zusammenführung");
+		assertEquals(merge, a.repository.knownUnit(seat).version(), "der Vergleichsstand hat die Zusammenführung");
+		assertEquals(List.of(), a.repository.retryDeferred().deferred(), "nichts zurückgestellt, kein Hinweis");
+		assertEquals("Anna", anna.getLastName());
+		assertEquals("Notiz", anna.getComment(), "die Eingabe bleibt");
+		assertEquals(Set.of(seat), a.repository.locallyChangedUnits(), "ungespeichert ist nur der Kommentar");
+
+		a.repository.saveEvent(a.event);
+
+		Version saved = a.sync.unitState(seat).current();
+		assertEquals(List.of(merge), saved.parents(), "auf der Zusammenführung, nicht auf der alten Version");
+		assertEquals("Notiz", saved.payload().get("comment").asText());
+		untilQuiet(a, b);
+		assertConverged(a, b);
+		assertTrue(a.open().isEmpty(), a.open().toString());
+	}
+
+	/**
+	 * Der Verlierer ändert seine Buchung, ohne zu speichern, als seine Zusammenführung eintrifft: Sie wird zurückgestellt,
+	 * aber still; den Konflikt zeigt der Dialog, nicht die Fußzeile ("auf Rechner b geändert" wäre falsch).
+	 */
+	@Test
+	void deferredOwnMergeShowsNoHint() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		a.sell(1, "Anna");
+		Booking bert = b.sell(1, "Bert");
+		bert.setComment("Notiz");
+		a.tick();
+		b.tick();
+
+		untilQuiet(a, b);
+
+		UnitKey seat = seatUnit(a, 1);
+		List<Deferral> deferred = b.repository.retryDeferred().deferred();
+		assertEquals(1, deferred.size(), deferred.toString());
+		assertEquals(seat, deferred.get(0).unit());
+		assertEquals(b.sync.unitState(seat).current().id(), deferred.get(0).version());
+		assertTrue(deferred.get(0).silent(), "eine eigene Zusammenführung bekommt keinen Hinweis");
+		assertEquals("Bert", bert.getLastName(), "die Eingabe bleibt");
+		assertEquals("Notiz", bert.getComment());
+		assertDoubleSale(b, unassignedUnit(b, bert.getId()), seat);
+	}
+
+	/**
+	 * B kennt die Niederlage schon (sie steht in seinem Index), wird beendet und startet neu, während der gemeinsame Ordner
+	 * fehlt: Der Start löst lokal auf, binnen der 5 Minuten ist genau ein Doppelverkauf offen und das Modell zeigt ihn. Nach
+	 * der Rückkehr bleibt es ein Vermerk und ein offener Konflikt, und alle Rechner laufen zusammen.
+	 */
+	@Test
+	void offlineStartWithKnownLossResolvesAndShowsOneConflict() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		a.sell(1, "Anna");
+		String bertId = b.sell(1, "Bert").getId();
+		a.tick();
+		clock.advance(ROUND);
+		b.tick();
+		UnitKey seat = seatUnit(a, 1);
+		assertEquals(1, b.sync.unitState(seat).lost().size(), "B hat verloren und wartet noch auf A's Liste");
+		assertTrue(b.open().isEmpty());
+
+		Machine restarted = b.restartOffline();
+
+		UnitKey moved = unassignedUnit(restarted, bertId);
+		OpenConflict conflict = assertDoubleSale(restarted, moved, seat);
+		assertModelShowsDoubleSale(restarted, 1, "Anna", bertId, "Bert");
+		clock.advance(ROUND);
+		restarted.tick();
+		assertEquals(SyncState.OFFLINE, restarted.sync.syncState().get());
+		assertEquals(List.of(conflict), restarted.open(), "ohne Verbindung bleibt es ein Konflikt");
+
+		restarted.down.set(false);
+		untilQuiet(a, restarted);
+
+		assertConverged(a, restarted);
+		assertEquals(List.of(conflict.key()), restarted.open().stream().map(OpenConflict::key).toList());
+		assertEquals(1, notes(restarted, seat));
+		assertEquals(1, notes(a, seat));
+		assertTrue(a.open().isEmpty(), a.open().toString());
+		assertModelShowsDoubleSale(a, 1, "Anna", bertId, "Bert");
+		assertModelShowsDoubleSale(restarted, 1, "Anna", bertId, "Bert");
+	}
+
+	/**
+	 * Beide ändern dasselbe Feld des Event-Kopfs und dieselbe Feldgruppe der Vorstellung verschieden: Je Einheit entsteht ein
+	 * FIELDS-Vermerk aus ihrer eigenen Strategie. Die Gruppe "schedule" (Datum und Uhrzeit) kennt nur
+	 * {@link PresentationPolicy}; fehlte eine Strategie, gäbe es nur "Deren" mit einem UNMERGED-Vermerk.
+	 */
+	@Test
+	void headAndPresentationFieldConflictsUseTheirPolicies() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		a.event.setDescription("Annas Beschreibung");
+		a.friday().setTime(LocalTime.of(19, 11));
+		a.repository.saveEvent(a.event);
+		b.event.setDescription("Berts Beschreibung");
+		b.friday().setTime(LocalTime.of(20, 11));
+		b.repository.saveEvent(b.event);
+		a.tick();
+		b.tick();
+
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		UnitKey head = UnitKey.event(a.event.getId());
+		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
+		Map<UnitKey, ConflictNote> notes = new HashMap<>();
+		b.open().forEach(conflict -> notes.put(conflict.unit(), conflict.note()));
+		assertEquals(Set.of(head, presentation), notes.keySet(), b.open().toString());
+		ConflictNote headNote = notes.get(head);
+		assertEquals(ConflictNote.Kind.FIELDS, headNote.kind());
+		assertEquals(List.of("description"), headNote.fields().stream().map(ConflictNote.FieldConflict::group).toList());
+		assertEquals("Berts Beschreibung", headNote.fields().get(0).mine().get("description").asText());
+		assertEquals("Annas Beschreibung", headNote.fields().get(0).theirs().get("description").asText());
+		ConflictNote presentationNote = notes.get(presentation);
+		assertEquals(ConflictNote.Kind.FIELDS, presentationNote.kind());
+		assertEquals(List.of("schedule"),
+				presentationNote.fields().stream().map(ConflictNote.FieldConflict::group).toList());
+		assertTrue(a.open().isEmpty(), a.open().toString());
+		// beide Modelle zeigen die Werte des Gewinners
+		for (Machine machine : m) {
+			assertEquals("Annas Beschreibung", machine.event.getDescription(), machine.name);
+			assertEquals(LocalTime.of(19, 11), machine.friday().getTime(), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+		}
 	}
 
 	/**
@@ -419,8 +676,8 @@ class ConflictScenarioTest {
 		Machine c = m[2];
 		setUp(a, b, c);
 		a.sell(1, "Anna");
-		Booking bert = b.sell(1, "Bert");
-		Booking carla = c.sell(1, "Carla");
+		String bertId = b.sell(1, "Bert").getId();
+		String carlaId = c.sell(1, "Carla").getId();
 		a.tick();
 		b.tick();
 		c.tick();
@@ -430,8 +687,8 @@ class ConflictScenarioTest {
 		assertConverged(a, b, c);
 		UnitKey seat = seatUnit(a, 1);
 		assertEquals("Anna", lastName(a.eventState().get(seat)));
-		UnitKey bertMoved = unassignedUnit(b, bert);
-		UnitKey carlaMoved = unassignedUnit(c, carla);
+		UnitKey bertMoved = unassignedUnit(b, bertId);
+		UnitKey carlaMoved = unassignedUnit(c, carlaId);
 		Map<UnitKey, UnitSnapshot> withoutPlace = unassigned(a);
 		assertEquals(Set.of(bertMoved, carlaMoved), withoutPlace.keySet());
 		assertWithoutPlace(withoutPlace.get(bertMoved), "Bert");
@@ -463,7 +720,7 @@ class ConflictScenarioTest {
 		Machine b = m[1];
 		setUp(a, b);
 		a.sell(1, "Anna");
-		Booking bert = b.sell(1, "Bert");
+		String bertId = b.sell(1, "Bert").getId();
 		a.tick();
 		clock.advance(ROUND);
 		b.tick();
@@ -479,7 +736,7 @@ class ConflictScenarioTest {
 		UnitState offline = b.sync.unitState(seat);
 		assertTrue(offline.lost().isEmpty(), "lokal aufgelöst");
 		assertEquals(1, offline.pending().size(), "die Zusammenführung steht aus");
-		UnitKey moved = unassignedUnit(b, bert);
+		UnitKey moved = unassignedUnit(b, bertId);
 		assertTrue(b.sync.unitState(moved).provisional());
 		OpenConflict conflict = assertDoubleSale(b, moved, seat);
 		assertEquals(offline.pending().get(0).id(), conflict.id());
@@ -612,7 +869,7 @@ class ConflictScenarioTest {
 		Machine b = m[1];
 		setUp(a, b);
 		a.sell(1, "Anna");
-		Booking bert = b.sell(1, "Bert");
+		String bertId = b.sell(1, "Bert").getId();
 		clock.advance(Duration.ofSeconds(2));
 		TestSyncServices.tick(a.sync);
 		TestSyncServices.tick(b.sync);
@@ -625,7 +882,7 @@ class ConflictScenarioTest {
 				"der Weg über die späte Niederlage");
 		assertConverged(a, b);
 		assertEquals("Anna", lastName(a.eventState().get(seat)));
-		UnitKey moved = unassignedUnit(b, bert);
+		UnitKey moved = unassignedUnit(b, bertId);
 		assertEquals(Set.of(moved), unassigned(a).keySet());
 		assertWithoutPlace(unassigned(a).get(moved), "Bert");
 		assertDoubleSale(b, moved, seat);

@@ -1323,6 +1323,21 @@ class SyncServiceTest {
 		assertEquals(List.of(v1.id(), v2.id()), a.service.history(BOOKING).stream().map(Version::id).toList());
 	}
 
+	@Test
+	void versionAndMachineIdComeFromTheLocalStore() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		Version v2 = save(a, update(BOOKING, v1, "Anna B"));
+
+		Version found = a.service.version(BOOKING, v2.id());
+		assertEquals(v2.id(), found.id());
+		assertEquals(List.of(v1.id()), found.parents());
+		assertEquals(payload("Anna B"), found.payload());
+		assertNull(a.service.version(BOOKING, VersionId.create(1L, "zzzzzzzz", 0)), "lokal nicht vorhanden");
+		assertEquals(v1.machine(), a.service.machineId());
+	}
+
 	// --- Start-Index
 
 	private static final UnitKey HALL = UnitKey.hall("h1");

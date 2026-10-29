@@ -866,6 +866,21 @@ public final class SyncService {
 	}
 
 	/**
+	 * Eine lesbare Version der Einheit aus dem lokalen Bestand (siehe {@link #history}), etwa um ihre Vorgänger und ihren
+	 * Rechner zu prüfen.
+	 *
+	 * @return die Version; {@code null}, wenn es sie lokal nicht lesbar gibt
+	 */
+	public Version version(UnitKey unit, VersionId id) throws IOException {
+		for (Version version : history(unit)) {
+			if (version.id().equals(id)) {
+				return version;
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * Setzt eine wegen einer beschädigten Version gesperrte Einheit zurück (Heilung Stufe 2): neue Version mit dem Inhalt
 	 * des letzten lesbaren Kettenglieds (ohne eines: gelöscht), mit der beschädigten Version als erstem Vorgänger.
 	 * Beansprucht wird sie wie jede andere über {@link #append}. Verloren ist genau die eine beschädigte Änderung. Gibt es
@@ -2029,7 +2044,8 @@ public final class SyncService {
 		}
 	}
 
-	private String machineId() {
+	/** Die ID dieses Rechners ({@link MachineIdentity}); sie steht in jeder eigenen Version. */
+	public String machineId() {
 		synchronized (lock) {
 			return machine.id();
 		}

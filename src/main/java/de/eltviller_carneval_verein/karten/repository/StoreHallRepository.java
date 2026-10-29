@@ -21,6 +21,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.store.VersionId;
 
 /**
  * Das Repository der Hallen auf dem Versionsspeicher. Eine Halle ist eine einzige Einheit; geschrieben wird nur, wenn
@@ -359,9 +360,11 @@ public class StoreHallRepository implements HallRepository {
 	/**
 	 * Arbeitet die Stände ein, die andere Rechner für diese Einheiten geschrieben haben (Spec KARV-85, "Entscheidung je
 	 * Einheit", "Einarbeiten" und "Fehlerfälle"). Nur Hallen zählen; die zurückgestellten Einheiten früherer Aufrufe werden
-	 * jedes Mal mit geprüft. Je Einheit gilt {@link ForeignDecision}: Ein Nachfolger des Vergleichsstands in der gültigen
-	 * Kette wird eingearbeitet, außer die Halle ist ungespeichert verändert oder gesperrt durch {@link #setBlockedCheck};
-	 * dann wird er zurückgestellt, der Vergleichsstand bleibt. Eine eingearbeitete Halle ersetzt das Objekt im Cache (sie
+	 * jedes Mal mit geprüft. Je Einheit gilt {@link ForeignDecision}: Ein Nachfolger des Vergleichsstands (der steht in der
+	 * gültigen Kette oder ist in einer Zusammenführung aufgegangen) mit demselben Inhalt geht nur in den Vergleichsstand.
+	 * Ein anderer Nachfolger wird eingearbeitet, außer die Halle ist ungespeichert verändert oder gesperrt durch
+	 * {@link #setBlockedCheck}; dann wird er zurückgestellt (still, wenn er eine eigene Zusammenführung ist), der
+	 * Vergleichsstand bleibt. Eine eingearbeitete Halle ersetzt das Objekt im Cache (sie
 	 * ist nie lokal verändert, sonst wäre sie zurückgestellt); neue und gelöschte Hallen kommen in den Cache bzw. verlassen
 	 * ihn. Ist noch nichts geladen, passiert nichts: Das erste Laden liest ohnehin den aktuellen Stand.
 	 * <p>
@@ -380,10 +383,12 @@ public class StoreHallRepository implements HallRepository {
 			}
 
 			@Override
-			public void apply(List<UnitSnapshot> ofHall, Map<UnitKey, List<ChainStep>> chains, List<String> warnings) {
+			public void apply(List<UnitSnapshot> ofHall, Map<UnitKey, List<ChainStep>> chains,
+					Map<UnitKey, Set<VersionId>> absorbed, List<String> warnings) {
 				// je Halle eine Einheit
 				UnitSnapshot snapshot = ofHall.get(0);
-				applyForeign(snapshot, chains.getOrDefault(snapshot.unit(), List.of()), warnings);
+				applyForeign(snapshot, chains.getOrDefault(snapshot.unit(), List.of()),
+						absorbed.getOrDefault(snapshot.unit(), Set.of()), warnings);
 			}
 
 			@Override
@@ -406,11 +411,12 @@ public class StoreHallRepository implements HallRepository {
 	}
 
 	/** Entscheidet und arbeitet ein für eine Halle. */
-	private void applyForeign(UnitSnapshot current, List<ChainStep> chain, List<String> warnings) {
+	private void applyForeign(UnitSnapshot current, List<ChainStep> chain, Set<VersionId> absorbed,
+			List<String> warnings) {
 		UnitKey unit = current.unit();
 		String hallId = unit.hallId();
 		UnitSnapshot known = baseline.known(unit);
-		switch (ForeignDecision.decideUnblocked(known, current, chain)) {
+		switch (ForeignDecision.decideUnblocked(known, current, chain, absorbed)) {
 		case KNOWN -> {
 			backlog.settle(unit);
 			baseline.adoptStatus(hallId, current, warnings);
@@ -419,6 +425,11 @@ public class StoreHallRepository implements HallRepository {
 			backlog.settle(unit);
 			LOG.info("Fremder Stand von " + unit.relativePath()
 					+ " nicht eingearbeitet: Die eigene Version ist unterlegen (Gabelung).");
+		}
+		case SAME -> {
+			// die Halle hat diesen Inhalt schon: nur die Version übernehmen, ohne Cache, Listener und Hinweis
+			backlog.settle(unit);
+			baseline.adopt(hallId, current, baseline.isShown(unit));
 		}
 		case APPLY -> applyNewer(current, known, chain, warnings);
 		default -> backlog.settle(unit);
@@ -431,7 +442,7 @@ public class StoreHallRepository implements HallRepository {
 		String hallId = unit.hallId();
 		Hall old = cachedHall(hallId);
 		if (old != null && isBlocked(old, known)) {
-			backlog.defer(Deferral.of(unit, current.version(), chain, old));
+			backlog.defer(current, chain, old, sync);
 			return;
 		}
 		backlog.settle(unit);

@@ -189,7 +189,7 @@ class ForeignBacklogTest {
 
 					@Override
 					public void apply(List<UnitSnapshot> ofOwner, Map<UnitKey, List<ChainStep>> chains,
-							List<String> warnings) {
+							Map<UnitKey, Set<VersionId>> absorbed, List<String> warnings) {
 						calls.add("apply " + ofOwner.get(0).unit().hallId());
 						if (ofOwner.get(0).unit().equals(unitA)) {
 							throw new IllegalStateException("kaputt");

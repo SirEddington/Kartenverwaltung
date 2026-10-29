@@ -17,13 +17,15 @@ import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.Version;
+import de.eltviller_carneval_verein.karten.store.VersionId;
 
 /**
  * Die Warteliste eines Repositorys für fremde Stände, die noch nicht eingearbeitet sind, und der gemeinsame Rahmen von
  * {@code applyForeign} (Spec KARV-85). Eine Einheit ist
  * <ul>
  * <li><em>zurückgestellt</em> ({@link #defer}): Der Nutzer hat sie ungespeichert geändert oder bearbeitet sie gerade. Daraus
- * entsteht der Hinweis in der Fußzeile ({@link #deferrals});</li>
+ * entsteht der Hinweis in der Fußzeile ({@link #deferrals}), außer bei einer eigenen Zusammenführung;</li>
  * <li><em>wartend</em> ({@link #hold}): Sie wartet still, ohne Hinweis, etwa eine Buchung, bis ihr Platz im Modell da ist,
  * oder eine Einheit, bei der das Einarbeiten scheiterte.</li>
  * </ul>
@@ -40,10 +42,41 @@ final class ForeignBacklog {
 	/** Die still wartenden Einheiten in Einfügereihenfolge. */
 	private final Set<UnitKey> held = new LinkedHashSet<>();
 
-	/** Stellt den Stand zurück, mit Hinweis. Die Einheit wartet damit nicht mehr still. */
+	/** Stellt den Stand zurück, mit Hinweis, wenn er nicht still ist. Die Einheit wartet damit nicht mehr still. */
 	void defer(Deferral deferral) {
 		held.remove(deferral.unit());
 		deferred.put(deferral.unit(), deferral);
+	}
+
+	/**
+	 * Stellt den aktuellen Stand der Einheit zurück; der Hinweis nennt den Rechner aus dem letzten Glied der Kette. Ist der
+	 * Stand eine eigene Zusammenführung (eigene Rechner-ID, mehr als ein Vorgänger), entfällt der Hinweis: Er nennte den
+	 * eigenen Rechner als "anderen Rechner", den Konflikt zeigt der Dialog. Nachgesehen wird das einmal je Version (die
+	 * Einheit wird bei jedem Aufruf von {@code applyForeign} erneut zurückgestellt); lässt sich die Version nicht lesen,
+	 * bleibt der Hinweis.
+	 *
+	 * @param model das Objekt im Modell, das der Hinweis nennt
+	 */
+	void defer(UnitSnapshot current, List<ChainStep> chain, Object model, SyncService sync) {
+		Deferral before = deferred.get(current.unit());
+		boolean silent = before != null && before.version().equals(current.version()) ? before.silent()
+				: isOwnMerge(current, sync);
+		defer(silent ? Deferral.silent(current.unit(), current.version(), chain, model)
+				: Deferral.of(current.unit(), current.version(), chain, model));
+	}
+
+	private static boolean isOwnMerge(UnitSnapshot current, SyncService sync) {
+		if (current.version() == null) {
+			return false;
+		}
+		try {
+			Version version = sync.version(current.unit(), current.version());
+			return version != null && version.parents().size() > 1 && sync.machineId().equals(version.machine());
+		} catch (IOException e) {
+			LOG.log(Level.WARNING, "Ob der Stand von " + current.unit().relativePath()
+					+ " eine eigene Zusammenführung ist, ließ sich nicht lesen", e);
+			return false;
+		}
 	}
 
 	/** Lässt die Einheit still warten, ohne Hinweis (eine zurückgestellte wartet damit nur noch); geloggt wird beim ersten Mal. */
@@ -108,8 +141,14 @@ final class ForeignBacklog {
 		/** Der Besitzer der Einheit: die ID ihres Events bzw. ihrer Halle. */
 		String ownerOf(UnitKey unit);
 
-		/** Entscheidet und arbeitet die Stände eines Besitzers ein. */
-		void apply(List<UnitSnapshot> ofOwner, Map<UnitKey, List<ChainStep>> chains, List<String> warnings);
+		/**
+		 * Entscheidet und arbeitet die Stände eines Besitzers ein.
+		 *
+		 * @param chains   je Einheit ihre gültige Kette
+		 * @param absorbed je Einheit die Versionen, die im aktuellen Stand aufgegangen sind (fehlt eine, keine)
+		 */
+		void apply(List<UnitSnapshot> ofOwner, Map<UnitKey, List<ChainStep>> chains,
+				Map<UnitKey, Set<VersionId>> absorbed, List<String> warnings);
 
 		/**
 		 * Das Einarbeiten für den Besitzer ist mit einer Ausnahme gescheitert: meldet es dem Nutzer und merkt sich die
@@ -148,10 +187,11 @@ final class ForeignBacklog {
 			}
 			try {
 				Map<UnitKey, List<ChainStep>> chains = sync.chains(current.keySet());
+				Map<UnitKey, Set<VersionId>> absorbed = sync.absorbed(current.keySet());
 				for (List<UnitSnapshot> ofOwner : byOwner.values()) {
 					// ein Fehler bei einem Besitzer hält die übrigen nicht auf; seine Einheiten kommen beim nächsten Mal wieder
 					try {
-						step.apply(ofOwner, chains, warnings);
+						step.apply(ofOwner, chains, absorbed, warnings);
 					} catch (RuntimeException e) {
 						step.failed(step.ownerOf(ofOwner.get(0).unit()), ofOwner, e, warnings);
 					}

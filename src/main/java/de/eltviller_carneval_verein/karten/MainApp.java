@@ -15,6 +15,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
@@ -100,6 +101,8 @@ public class MainApp extends Application {
 			failStart("Start nicht möglich", "Die Rechner-Kennung konnte nicht gelesen werden: " + e.getCause().getMessage());
 			return;
 		}
+		// Die Fachregeln für Konflikte vor dem Start: Schon der Start löst verlorene Änderungen mit ihnen auf
+		ConflictPolicies.install(sync);
 
 		// Das Fenster steht sofort da, mit Ladeansicht; Abgleich und Laden laufen im Hintergrund (vorläufig ohne
 		// gemeinsamen Ordner, außer im Handtest: karten.sharedDir). Hallen zuerst: Die Events beziehen sich auf sie. Geladen wird einmalig beim Start, damit

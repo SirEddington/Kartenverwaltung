@@ -129,8 +129,9 @@ public final class LiveUpdates {
 
 	/**
 	 * Die Rückmeldungen des Versionsspeichers kommen auf dem FX-Thread an. Gezeigt wird, was der Nutzer wissen muss und nicht
-	 * selbst sieht: ein Fehler des Dienstes und eine eigene Änderung, die gegen eine andere verloren hat; dazu arbeitet
-	 * {@code unitsChanged} fremde Stände ein.
+	 * selbst sieht: ein Fehler des Dienstes; dazu arbeitet {@code unitsChanged} fremde Stände ein. Eine eigene Änderung,
+	 * die gegen eine andere verloren hat, steht nur im Log: Der Speicher führt sie zusammen, und der Konflikt erscheint im
+	 * Dialog.
 	 */
 	public SyncListener listener() {
 		return new SyncListener() {
@@ -146,8 +147,8 @@ public final class LiveUpdates {
 
 			@Override
 			public void lost(UnitKey unit, List<VersionId> mine, VersionId winner) {
-				StatusMessage.getInstance().show(Severity.ERROR, "Eine Änderung an " + unit.relativePath()
-						+ " wurde nicht übernommen, weil ein anderer Stand zuerst gespeichert war. Bitte die Daten prüfen.");
+				LOG.info("Eigene Versionen " + mine + " von " + unit.relativePath() + " unterlegen gegen " + winner
+						+ "; sie werden zusammengeführt.");
 			}
 		};
 	}
@@ -213,7 +214,8 @@ public final class LiveUpdates {
 		// erst jetzt: Ein Hinweis kann einen Dialog öffnen, in dem weitere Meldungen ankommen
 		warnings.forEach(this::show);
 		for (Deferral deferral : deferrals) {
-			if (announced.add(new Announced(deferral.unit(), deferral.version()))) {
+			// eine eigene Zusammenführung: Der Hinweis nennte den eigenen Rechner, den Konflikt zeigt der Dialog
+			if (!deferral.silent() && announced.add(new Announced(deferral.unit(), deferral.version()))) {
 				show(deferralText(deferral));
 			}
 		}

@@ -14,6 +14,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +42,7 @@ import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.Version;
+import de.eltviller_carneval_verein.karten.store.VersionId;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.tracking.StateRestorer;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
@@ -569,6 +574,62 @@ class LiveUpdatesTest {
 		assertTrue(hints.get(0).contains(second.getId()), "die Warnung zur unlesbaren Halle");
 		assertEquals(deferralHint(EntityLabels.booking(mine), "Rechner Fremd"), hints.get(1),
 				"die Fußzeile zeigt nur den letzten Hinweis: der zum Zurückstellen bleibt stehen");
+	}
+
+	@Test
+	void deferredOwnMergeShowsNoHint() throws IOException {
+		Booking mine = seat(friday, 0);
+		mine.setLastName("Eigen");
+		eventTracker.check(event);
+		VersionId sold = sync.unitState(seatUnit(0)).head().id();
+		foreignVersion(seatUnit(0), "Fremd", payload -> payload.put("lastName", "Fremd"));
+		hints.clear();
+		// eine eigene Zusammenführung (eigene Rechner-ID, zwei Vorgänger) auf dem fremden Stand
+		foreign.writeMerge(seatUnit(0), sync.machineId(), "test", List.of(sold), payload -> payload.put("comment", "M"));
+
+		notifyUnits(seatUnit(0));
+
+		assertEquals(List.of(), hints, "den Konflikt zeigt der Dialog, nicht die Fußzeile");
+		assertEquals("Eigen", mine.getLastName(), "zurückgestellt");
+		assertEquals(1, events.retryDeferred().deferred().size(), "die Einheit bleibt zurückgestellt");
+	}
+
+	@Test
+	void lostShowsNoFooterMessage() {
+		Logger logger = Logger.getLogger(LiveUpdates.class.getName());
+		List<LogRecord> records = new ArrayList<>();
+		Handler capture = new Handler() {
+			@Override
+			public void publish(LogRecord record) {
+				records.add(record);
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		logger.addHandler(capture);
+		StatusMessage.Entry before = StatusMessage.getInstance().currentProperty().get();
+		VersionId lost = VersionId.create(1_000L, "aaaaaaaa", 0);
+		VersionId winner = VersionId.create(1_000L, "bbbbbbbb", 0);
+		try {
+			// ohne Fußzeile öffnete eine Meldung einen Dialog; hier gibt es keinen Toolkit
+			live.listener().lost(seatUnit(0), List.of(lost), winner);
+		} finally {
+			logger.removeHandler(capture);
+		}
+
+		assertSame(before, StatusMessage.getInstance().currentProperty().get());
+		assertEquals(1, records.size(), records.toString());
+		LogRecord record = records.get(0);
+		assertEquals(Level.INFO, record.getLevel());
+		assertTrue(record.getMessage().contains(seatUnit(0).relativePath()), record.getMessage());
+		assertTrue(record.getMessage().contains(lost.value()), record.getMessage());
+		assertTrue(record.getMessage().contains(winner.value()), record.getMessage());
 	}
 
 	@Test

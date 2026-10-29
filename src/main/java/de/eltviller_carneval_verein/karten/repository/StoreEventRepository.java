@@ -31,6 +31,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.store.VersionId;
 
 /**
  * Das Repository der Events auf dem Versionsspeicher. Beim Speichern wird das Event in Kopf, Vorstellungen und Buchungen
@@ -451,10 +452,12 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Arbeitet die Stände ein, die andere Rechner für diese Einheiten geschrieben haben (Spec KARV-85, "Entscheidung je
 	 * Einheit", "Einarbeiten" und "Fehlerfälle"). Hallen werden übergangen; die zurückgestellten Einheiten früherer Aufrufe
-	 * werden jedes Mal mit geprüft. Je Einheit gilt {@link ForeignDecision}: Ein Nachfolger des Vergleichsstands in der
-	 * gültigen Kette wird eingearbeitet, außer der Nutzer hat die Einheit ungespeichert geändert oder bearbeitet sie gerade
-	 * (bei Löschung von Kopf oder Vorstellung und beim Wechsel von Halle oder Bestuhlung zählt alles darunter); dann wird
-	 * er zurückgestellt, der Vergleichsstand bleibt. Eine Buchung, die im Modell keinen Platz hat (Sitz fehlt in der
+	 * werden jedes Mal mit geprüft. Je Einheit gilt {@link ForeignDecision}: Ein Nachfolger des Vergleichsstands (der steht
+	 * in der gültigen Kette oder ist in einer Zusammenführung aufgegangen) mit demselben Inhalt geht nur in den
+	 * Vergleichsstand, ohne Modell, Listener und Hinweis. Ein anderer Nachfolger wird eingearbeitet, außer der Nutzer hat
+	 * die Einheit ungespeichert geändert oder bearbeitet sie gerade (bei Löschung von Kopf oder Vorstellung und beim Wechsel
+	 * von Halle oder Bestuhlung zählt alles darunter); dann wird er zurückgestellt (still, wenn er eine eigene
+	 * Zusammenführung ist), der Vergleichsstand bleibt. Eine Buchung, die im Modell keinen Platz hat (Sitz fehlt in der
 	 * Bestuhlung, Vorstellung fehlt im Modell, Hallenwechsel ihrer Vorstellung zurückgestellt), wartet still ohne Hinweis,
 	 * ohne Vergleichsstand, und wird ebenfalls jedes Mal erneut geprüft. Je Event werden Objekt im Cache und
 	 * Vergleichsstand in einem Schritt nachgeführt, danach erfahren es die Listener. Ist noch nichts geladen, passiert
@@ -475,8 +478,9 @@ public class StoreEventRepository implements EventRepository {
 			}
 
 			@Override
-			public void apply(List<UnitSnapshot> ofEvent, Map<UnitKey, List<ChainStep>> chains, List<String> warnings) {
-				applyForeign(ofEvent, chains, warnings);
+			public void apply(List<UnitSnapshot> ofEvent, Map<UnitKey, List<ChainStep>> chains,
+					Map<UnitKey, Set<VersionId>> absorbed, List<String> warnings) {
+				applyForeign(ofEvent, chains, absorbed, warnings);
 			}
 
 			@Override
@@ -650,13 +654,15 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/** Entscheidet und arbeitet ein für die gemeldeten Einheiten eines Events. */
-	private void applyForeign(List<UnitSnapshot> snapshots, Map<UnitKey, List<ChainStep>> chains, List<String> warnings) {
+	private void applyForeign(List<UnitSnapshot> snapshots, Map<UnitKey, List<ChainStep>> chains,
+			Map<UnitKey, Set<VersionId>> absorbed, List<String> warnings) {
 		String eventId = snapshots.get(0).unit().eventId();
 		Event event = cachedEvent(eventId);
 		List<UnitSnapshot> successors = new ArrayList<>();
 		for (UnitSnapshot current : snapshots) {
 			UnitKey unit = current.unit();
-			ForeignDecision decision = ForeignDecision.decideUnblocked(baseline.known(unit), current, chainOf(chains, unit));
+			ForeignDecision decision = ForeignDecision.decideUnblocked(baseline.known(unit), current, chainOf(chains, unit),
+					absorbed.getOrDefault(unit, Set.of()));
 			if (decision != ForeignDecision.APPLY) {
 				backlog.settle(unit);
 			}
@@ -665,6 +671,10 @@ public class StoreEventRepository implements EventRepository {
 			} else if (decision == ForeignDecision.FORK) {
 				LOG.info("Fremder Stand von " + unit.relativePath()
 						+ " nicht eingearbeitet: Die eigene Version ist unterlegen (Gabelung).");
+			} else if (decision == ForeignDecision.SAME) {
+				// das Modell hat diesen Inhalt schon (oder die ungespeicherte Eingabe baut darauf auf): nur die Version
+				// übernehmen, damit das nächste Speichern auf ihr aufsetzt; was das Einarbeiten umgesetzt hat, gilt weiter
+				baseline.adopt(eventId, current, baseline.isShown(unit));
 			} else if (decision == ForeignDecision.APPLY) {
 				successors.add(current);
 			}
@@ -872,10 +882,12 @@ public class StoreEventRepository implements EventRepository {
 		return false;
 	}
 
-	/** Stellt den Stand zurück; der Hinweis nennt den Rechner aus dem letzten Glied der Kette. */
+	/**
+	 * Stellt den Stand zurück; der Hinweis nennt den Rechner aus dem letzten Glied der Kette, bei einer eigenen
+	 * Zusammenführung entfällt er (siehe {@link ForeignBacklog#defer(UnitSnapshot, List, Object, SyncService)}).
+	 */
 	private void defer(Event event, UnitSnapshot current, List<ChainStep> chain) {
-		backlog.defer(Deferral.of(current.unit(), current.version(), chain,
-				EventMerge.nearestModelObject(event, current.unit())));
+		backlog.defer(current, chain, EventMerge.nearestModelObject(event, current.unit()), sync);
 	}
 
 	private Event cachedEvent(String eventId) {
