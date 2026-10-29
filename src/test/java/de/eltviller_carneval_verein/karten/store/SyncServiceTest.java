@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -1482,6 +1483,357 @@ class SyncServiceTest {
 		a.service.syncNow();
 
 		assertTrue(Files.exists(localFile(a, hall, foreign.id() + ".json")));
+	}
+
+	// --- Vollabgleich in Abschnitten über mehrere Takte
+
+	/** So viel Zeit kostet ein Lesezugriff auf der Test-Uhr, wenn ein Test den Lauf über mehrere Takte verteilt. */
+	private static final Duration READ_COST = Duration.ofMillis(20);
+
+	/** Ab jetzt stellt jeder Lesezugriff des Rechners die Test-Uhr um {@code cost} vor. */
+	private void slowReads(Node node, Duration cost) {
+		node.layer.onEach("read", () -> clock.advance(cost));
+	}
+
+	/**
+	 * Ein gestarteter Rechner mit {@code count} fremden Hallen auf beiden Seiten (sechs Abschnitte bei 300), dessen
+	 * Lesezugriffe danach je {@link #READ_COST} kosten: Ein Abschnitt liest je Halle den lokalen Anspruch, also 50 × 20 ms.
+	 * Den ersten Lauf hat der Takt aus {@code startup} schon erledigt (der Worker des Tests führt ihn sofort aus); der
+	 * nächste Takt beginnt einen neuen, denn die 10 Minuten sind um.
+	 */
+	private Node slowNodeWithHalls(int count) throws IOException {
+		Path appData = dir.resolve("a");
+		seedForeignHalls(appData, count);
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.service.startup(shared);
+		assertNull(a.service.fullSyncProgress().get());
+		slowReads(a, READ_COST);
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		return a;
+	}
+
+	/** Takte, bis der Rechner keinen Vollabgleich mehr laufen hat; liefert die Zahl der Takte. */
+	private static int tickUntilRunEnds(Node node) {
+		int ticks = 0;
+		do {
+			node.service.tick();
+			ticks++;
+			assertTrue(ticks < 100, "der Lauf endet nicht");
+		} while (node.service.fullSyncProgress().get() != null);
+		return ticks;
+	}
+
+	/** Eine fremde Einheit mit Version und Anspruch im genannten Bestand, ohne Liste. */
+	private static Version seedForeign(VersionStore store, UnitKey unit, int counter) throws IOException {
+		Version v = version(OTHER, START.toEpochMilli() - 3_600_000L, counter, "f" + counter, null);
+		byte[] bytes = StoreCodec.write(v);
+		assertTrue(store.writeVersion(unit, v.id(), bytes));
+		assertTrue(store.createClaim(unit, "root", StoreCodec.write(new Claim(v.id(), StoreCodec.sha256(bytes), OTHER, START))));
+		return v;
+	}
+
+	@Test
+	void fullSyncSpreadsOverSeveralTicksWithinTheBudget() throws IOException {
+		Node a = slowNodeWithHalls(300);
+		Duration block = READ_COST.multipliedBy(FullSyncRun.HALL_BUNDLE);
+
+		int ticks = 0;
+		do {
+			Instant before = clock.instant();
+			a.service.tick();
+			ticks++;
+			Duration took = Duration.between(before, clock.instant());
+			assertTrue(took.compareTo(SyncService.FULL_SYNC_SLICE_BUDGET.plus(block)) <= 0, "Takt " + ticks + " dauerte " + took);
+			assertTrue(ticks < 100, "der Lauf endet nicht");
+		} while (a.service.fullSyncProgress().get() != null);
+
+		assertEquals(3, ticks, "sechs Abschnitte zu je 1 s, zwei je Takt");
+		assertTrue(a.events.errors.isEmpty());
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+	}
+
+	@Test
+	void saleIsUploadedBetweenSlicesOfARun() throws IOException {
+		Node a = slowNodeWithHalls(300);
+		a.service.tick();
+		assertNotNull(a.service.fullSyncProgress().get(), "der Lauf ist nach einem Takt nicht fertig");
+
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+
+		assertEquals(v.id(), sharedClaim(BOOKING, "root").version());
+		assertFalse(a.service.unitState(BOOKING).provisional());
+		Double progress = a.service.fullSyncProgress().get();
+		assertNotNull(progress, "der Lauf läuft noch");
+		assertTrue(progress < 1.0);
+	}
+
+	@Test
+	void runResumesAtThePointerAfterBeingOffline() throws IOException {
+		Node a = slowNodeWithHalls(300);
+		a.service.tick();
+		double before = a.service.fullSyncProgress().get();
+
+		a.down.set(true);
+		a.service.tick();
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertEquals(before, a.service.fullSyncProgress().get(), "der Lauf bleibt am Zeiger stehen");
+		a.down.set(false);
+		int calls = a.layer.calls().size();
+		a.service.tick();
+
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+		assertTrue(a.service.fullSyncProgress().get() > before, "der Lauf geht am Zeiger weiter");
+		// die erste Halle (Abschnitt 1, vor dem Ausfall erledigt) wird nicht noch einmal gelesen
+		assertTrue(a.layer.calls().subList(calls, a.layer.calls().size()).stream()
+				.noneMatch(c -> c.replace('\\', '/').contains("/halls/f0/")));
+	}
+
+	@Test
+	void newConnectionDiscardsTheRun() throws IOException {
+		Node a = slowNodeWithHalls(300);
+		a.service.tick();
+		double before = a.service.fullSyncProgress().get();
+		int calls = a.layer.calls().size();
+
+		// connect plant einen Takt ein, den der Worker des Tests sofort ausführt
+		a.service.connect(shared, ConnectMode.MERGE);
+
+		assertTrue(a.service.fullSyncProgress().get() < before, "ein neuer Lauf");
+		assertTrue(a.layer.calls().subList(calls, a.layer.calls().size()).stream()
+				.anyMatch(c -> c.startsWith("read ") && c.replace('\\', '/').contains("/halls/f0/")), "der neue Lauf beginnt vorn");
+	}
+
+	@Test
+	void mergeAcrossSeveralTicksClearsConnectModeOnlyAtTheEnd() throws IOException {
+		Path appData = dir.resolve("a");
+		VersionStore localStore = new VersionStore(appData.resolve("data"), new NioFileLayer());
+		List<UnitKey> halls = new ArrayList<>();
+		for (int i = 0; i < 300; i++) {
+			halls.add(UnitKey.hall("f" + i));
+			seedForeign(localStore, halls.get(i), i);
+		}
+		// der gemeinsame Ordner hat schon Einheiten: Es gilt der Modus
+		seedForeign(new VersionStore(sharedRoot.resolve("data"), new NioFileLayer()), UnitKey.event("gemeinsam"), 999);
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.service.startup("");
+		slowReads(a, READ_COST);
+
+		a.service.connect(shared, ConnectMode.MERGE);
+		assertNotNull(a.service.fullSyncProgress().get(), "der Lauf braucht mehrere Takte");
+		// "f99" ist die letzte Halle nach Namen
+		assertFalse(Files.exists(sharedFile(UnitKey.hall("f99"), "claims/root.json")));
+		tickUntilRunEnds(a);
+
+		// fremde lokale Ansprüche lädt nur das Mitnehmen hoch: Es galt bis zum letzten Abschnitt
+		for (UnitKey hall : halls) {
+			assertTrue(Files.exists(sharedFile(hall, "claims/root.json")), hall.relativePath());
+		}
+		// danach ist der Modus vergessen: kein neuer Lauf
+		a.service.tick();
+		assertNull(a.service.fullSyncProgress().get());
+		assertTrue(a.events.errors.isEmpty());
+	}
+
+	@Test
+	void setAsideAcrossSeveralTicksKeepsTheSetAsideFolder() throws IOException {
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		for (int i = 0; i < 300; i++) {
+			seedForeign(sharedStore, UnitKey.hall("f" + i), i);
+		}
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(UnitKey.event("lokal"), "A"));
+		slowReads(a, READ_COST);
+
+		a.service.connect(shared, ConnectMode.SET_ASIDE);
+		assertNotNull(a.service.fullSyncProgress().get(), "der Lauf braucht mehrere Takte");
+		// ein Verkauf mitten im Lauf liegt im neuen Bestand: Er wird nicht noch einmal beiseitegelegt
+		Version sale = save(a, create(BOOKING, "Anna"));
+		tickUntilRunEnds(a);
+
+		List<String> aside = names(a.appData).stream().filter(n -> n.startsWith("data-beiseite-")).toList();
+		assertEquals(1, aside.size());
+		assertTrue(Files.isDirectory(a.appData.resolve(aside.get(0)).resolve("events/lokal")));
+		assertFalse(Files.exists(sharedRoot.resolve("data/events/lokal")));
+		assertEquals(sale.id(), a.service.unitState(BOOKING).head().id());
+		assertEquals(sale.id(), sharedClaim(BOOKING, "root").version());
+		assertEquals(300, a.service.hallIds().size());
+		a.service.tick();
+		assertNull(a.service.fullSyncProgress().get(), "der Modus ist nach dem Lauf vergessen");
+	}
+
+	@Test
+	void wishDuringARunStartsANewRunRightAfter() throws IOException {
+		Node a = slowNodeWithHalls(300);
+		a.service.tick();
+		double first = a.service.fullSyncProgress().get();
+
+		// syncNow plant einen Takt ein, den der Worker des Tests sofort ausführt: Er setzt den Lauf fort
+		a.service.syncNow();
+		assertTrue(a.service.fullSyncProgress().get() > first, "ein laufender Lauf wird nicht neu begonnen");
+		tickUntilRunEnds(a);
+
+		a.service.tick();
+		assertNotNull(a.service.fullSyncProgress().get(), "direkt nach dem Ende beginnt ein neuer Lauf");
+		tickUntilRunEnds(a);
+		a.service.tick();
+		assertNull(a.service.fullSyncProgress().get(), "ein Wunsch, ein Lauf");
+	}
+
+	@Test
+	void lateDefeatInALaterSectionIsFound() throws IOException {
+		Path appData = dir.resolve("a");
+		seedForeignHalls(appData, 300);
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.service.startup(shared);
+		Version va = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		assertEquals(va.id(), sharedClaim(BOOKING, "root").version());
+		// die Beobachtung des Anspruchs läuft ab; der nächste Lauf ist erst in 10 Minuten
+		clock.advance(Duration.ofMinutes(20));
+		a.service.tick();
+		Version foreign = overrideSharedClaim(BOOKING, "root");
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		slowReads(a, READ_COST);
+
+		a.service.tick();
+		assertTrue(a.events.lost.isEmpty(), "die Buchung kommt in einem späteren Abschnitt");
+		tickUntilRunEnds(a);
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), foreign.id())), a.events.lost);
+		assertEquals(foreign.id(), a.service.unitState(BOOKING).head().id());
+	}
+
+	@Test
+	void emptiedSharedFolderIsRefilledByEachMachinesOwnRun() throws IOException {
+		UnitKey seatA = UnitKey.booking("e1", "p1", "A-1");
+		UnitKey seatB = UnitKey.booking("e1", "p2", "B-1");
+		UnitKey seatC = UnitKey.booking("e2", "p1", "C-1");
+		UnitKey contested = UnitKey.booking("e1", "p1", "A-9");
+		Node a = node("a");
+		Node b = node("b");
+		Node c = node("c");
+		List<Node> all = List.of(a, b, c);
+		for (Node node : all) {
+			node.service.startup(shared);
+		}
+		Version va = save(a, create(seatA, "Anna"));
+		Version vb = save(b, create(seatB, "Bert"));
+		Version vc = save(c, create(seatC, "Clara"));
+		for (Node node : all) {
+			node.service.tick();
+		}
+		// die Suche nach neuen Rechnern (alle 30 Sekunden): Danach hat jeder die Verkäufe der anderen
+		clock.advance(SyncService.DISCOVERY_INTERVAL);
+		for (Node node : all) {
+			node.service.tick();
+		}
+		assertEquals(va.id(), c.service.unitState(seatA).head().id());
+		// A verkauft noch einen Platz; bevor die anderen ihn abholen, wird der gemeinsame Ordner geleert
+		Version a9 = save(a, create(contested, "Anton"));
+		a.service.tick();
+		deleteTree(sharedRoot.resolve("data"));
+		// B kennt den Verkauf von A nicht und vergibt den Platz neu
+		Version b9 = save(b, create(contested, "Berta"));
+		b.service.tick();
+		assertEquals(b9.id(), sharedClaim(contested, "root").version());
+
+		// der nächste Lauf jedes Rechners, in Abschnitten über mehrere Takte
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		for (Node node : all) {
+			slowReads(node, Duration.ofSeconds(1));
+		}
+		int rounds = 0;
+		boolean running;
+		do {
+			running = false;
+			for (Node node : all) {
+				node.service.tick();
+				running |= node.service.fullSyncProgress().get() != null;
+			}
+			rounds++;
+			assertTrue(rounds < 50, "die Läufe enden nicht");
+		} while (running);
+
+		assertTrue(rounds > 1, "die Läufe verteilen sich über mehrere Takte");
+		// kein Verkauf verschwindet: jeder Rechner hat seine Versionen und Ansprüche wieder hochgeladen
+		assertEquals(va.id(), sharedClaim(seatA, "root").version());
+		assertEquals(vb.id(), sharedClaim(seatB, "root").version());
+		assertEquals(vc.id(), sharedClaim(seatC, "root").version());
+		for (Map.Entry<UnitKey, Version> sold : Map.of(seatA, va, seatB, vb, seatC, vc, contested, b9).entrySet()) {
+			assertTrue(Files.exists(sharedFile(sold.getKey(), sold.getValue().id() + ".json")), sold.getKey().relativePath());
+		}
+		assertTrue(Files.exists(sharedFile(contested, a9.id() + ".json")), "auch die verlorene Version bleibt erhalten");
+		// der inzwischen neu vergebene Platz ist ein Konflikt, kein stiller Verlust
+		assertEquals(b9.id(), sharedClaim(contested, "root").version());
+		assertEquals(List.of(new LostVersion(contested, List.of(a9.id()), b9.id())), a.events.lost);
+		// ohne Fachregel löst A den Verlust zu "Deren" auf
+		assertEquals(payload("Berta"), a.service.unitState(contested).head().payload());
+		assertTrue(b.events.lost.isEmpty());
+		assertTrue(c.events.lost.isEmpty());
+	}
+
+	@Test
+	void bookingAddedBehindThePointerIsFetchedByTheFeedNotLost() throws IOException {
+		Path appData = dir.resolve("a");
+		VersionStore localStore = new VersionStore(appData.resolve("data"), new NioFileLayer());
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		// eine Vorstellung mit zwei Blöcken
+		for (int i = 0; i < FullSyncRun.BOOKING_BLOCK + 100; i++) {
+			UnitKey booking = UnitKey.booking("e1", "p1", String.format("S-%04d", i));
+			seedForeign(localStore, booking, i);
+			seedForeign(sharedStore, booking, i);
+		}
+		// der fremde Rechner hat schon eine Liste: A findet ihn im ersten Takt
+		publish(sharedStore, 1, UnitKey.hall("h1"), version(OTHER, START.toEpochMilli() - 2000, 9000, "liste-1", null));
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		a.service.startup(shared);
+		// der erste Lauf lief im Takt aus startup; der nächste beginnt nach 10 Minuten
+		slowReads(a, READ_COST);
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		a.service.tick();
+		assertNotNull(a.service.fullSyncProgress().get(), "der zweite Block der Vorstellung steht noch aus");
+
+		// zwischen den Blöcken: vor dem Zeiger eine Buchung mit Liste und eine ohne, hinter dem Zeiger eine mit Liste
+		UnitKey behind = UnitKey.booking("e1", "p1", "A-1");
+		UnitKey unlisted = UnitKey.booking("e1", "p1", "A-2");
+		UnitKey ahead = UnitKey.booking("e1", "p1", "T-1");
+		Version vBehind = version(OTHER, START.toEpochMilli(), 9001, "liste-2", null);
+		Version vAhead = version(OTHER, START.toEpochMilli(), 9002, "liste-3", null);
+		publish(sharedStore, 2, behind, vBehind);
+		publish(sharedStore, 3, ahead, vAhead);
+		Version vUnlisted = seedForeign(sharedStore, unlisted, 9003);
+		tickUntilRunEnds(a);
+
+		assertEquals(vBehind.id(), a.service.unitState(behind).head().id(), "die Liste holt die Buchung vor dem Zeiger");
+		assertEquals(vAhead.id(), a.service.unitState(ahead).head().id());
+		assertTrue(a.events.lost.isEmpty());
+		assertFalse(Files.exists(localFile(a, unlisted, vUnlisted.id() + ".json")), "ohne Liste: erst der nächste Lauf");
+
+		a.service.syncNow();
+		tickUntilRunEnds(a);
+		assertEquals(vUnlisted.id(), a.service.unitState(unlisted).head().id());
+		assertTrue(a.events.lost.isEmpty());
+	}
+
+	@Test
+	void progressRisesToOneAndBecomesNull() throws IOException {
+		Node a = slowNodeWithHalls(300);
+		List<Double> seen = new ArrayList<>();
+		a.service.fullSyncProgress().addListener((property, before, after) -> seen.add(after));
+		assertNull(a.service.fullSyncProgress().get());
+
+		tickUntilRunEnds(a);
+
+		assertNull(seen.get(seen.size() - 1));
+		assertEquals(1.0, seen.get(seen.size() - 2));
+		List<Double> values = seen.subList(0, seen.size() - 1);
+		assertTrue(values.size() > 2, "Zwischenstände: " + seen);
+		for (int i = 1; i < values.size(); i++) {
+			assertTrue(values.get(i) >= values.get(i - 1), "steigt: " + seen);
+		}
+		assertTrue(values.get(0) >= 0.0);
 	}
 
 	// --- Der gemeinsame Ordner verschwindet (KARV-101)

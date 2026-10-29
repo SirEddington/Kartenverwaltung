@@ -63,16 +63,20 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * liegen und wird mit {@link SyncListener#lost} gemeldet.
  * <p>
  * <b>Takt</b> (alle 2 Sekunden, {@link #tick()}): Erreichbarkeit prüfen (nach einem Fehler; sonst zuerst, ob der
- * gemeinsame Ordner noch da ist: fehlt er, ist der Zustand offline, und nichts legt ihn an), Aufträge fortsetzen,
- * alle 30 Sekunden neue Rechner suchen, die Änderungslisten der anderen lesen, alle 10 Minuten (und beim Start, nach
- * der Rückkehr aus {@link SyncState#OFFLINE}, auf Wunsch) einen Vollabgleich, die eigenen Ansprüche der letzten 15
- * Minuten im gemeinsamen Ordner nachlesen (späte Niederlage bei einem Sync-Client; nach einem Neustart auch die aus den
- * lokalen Anspruchsdateien, beim Verbinden mit Mitnehmen die dabei hochgeladenen; höchstens 150 je Takt), vorgemerkte
- * beschädigte Einheiten aus der Kopie im gemeinsamen Ordner heilen und beschädigte Kopien dort aus der guten lokalen.
- * Trifft ein fremder Listeneintrag einen Platz, dessen lokaler Anspruch abweicht, wird sofort verglichen: So fällt eine
- * späte Niederlage auch nach Ablauf der Beobachtung auf. Deshalb überspringt auch der Vollabgleich keine Liste: Er
- * lässt die Positionen stehen, und jede Liste wird gelesen (nach einem Verlust von {@code sync-state.json} oder für einen
- * neuen Rechner einmal der ganze Rückstand, 200 Listen je Takt).
+ * gemeinsame Ordner noch da ist: fehlt er, ist der Zustand offline, und nichts legt ihn an), ein Stück des
+ * Vollabgleichs, Aufträge fortsetzen, alle 30 Sekunden neue Rechner suchen, die Änderungslisten der anderen lesen, die
+ * eigenen Ansprüche der letzten 15 Minuten im gemeinsamen Ordner nachlesen (späte Niederlage bei einem Sync-Client; nach
+ * einem Neustart auch die aus den lokalen Anspruchsdateien, beim Verbinden mit Mitnehmen die dabei hochgeladenen;
+ * höchstens 150 je Takt), vorgemerkte beschädigte Einheiten aus der Kopie im gemeinsamen Ordner heilen und beschädigte
+ * Kopien dort aus der guten lokalen. Der <b>Vollabgleich</b> beginnt alle 10 Minuten (gezählt ab dem Ende des vorigen),
+ * beim Start, nach der Rückkehr aus {@link SyncState#OFFLINE} und auf Wunsch; er läuft in Abschnitten ({@link FullSyncRun})
+ * über mehrere Takte, je Takt etwa {@link #FULL_SYNC_SLICE_BUDGET} (mindestens ein Block), danach kommen die übrigen
+ * Schritte. Sein Zeiger hängt an der Verbindung: Nach einem Ausfall setzt er dort fort, eine neue Verbindung verwirft
+ * ihn. Ein Wunsch während eines Laufs beginnt ihn nicht neu, sondern direkt nach seinem Ende einen neuen; den
+ * Fortschritt zeigt {@link #fullSyncProgress()}. Trifft ein fremder Listeneintrag einen Platz, dessen lokaler Anspruch
+ * abweicht, wird sofort verglichen: So fällt eine späte Niederlage auch nach Ablauf der Beobachtung auf. Deshalb
+ * überspringt auch der Vollabgleich keine Liste: Er lässt die Positionen stehen, und jede Liste wird gelesen (nach einem
+ * Verlust von {@code sync-state.json} oder für einen neuen Rechner einmal der ganze Rückstand, 200 Listen je Takt).
  * <p>
  * <b>Verluste</b> werden nicht nur aus Ereignissen gemeldet, sondern aus dem Zustand abgeleitet: Für jede neu
  * aufgelöste Einheit (beim ersten Vollabgleich alle) wird jede verlorene Strecke gemeldet, deren Versionen in diesem
@@ -128,8 +132,13 @@ public final class SyncService {
 	static final Duration TICK = Duration.ofSeconds(2);
 	/** So oft wird nach neuen Rechnern gesucht. */
 	static final Duration DISCOVERY_INTERVAL = Duration.ofSeconds(30);
-	/** So oft läuft ein Vollabgleich. */
+	/** So oft läuft ein Vollabgleich (gezählt ab dem Ende des vorigen). */
 	static final Duration FULL_SYNC_INTERVAL = Duration.ofMinutes(10);
+	/**
+	 * So lange arbeitet ein Takt etwa an den Abschnitten des Vollabgleichs (mindestens ein Block); danach kommen die übrigen
+	 * Schritte des Takts, und der nächste Takt setzt den Lauf fort.
+	 */
+	static final Duration FULL_SYNC_SLICE_BUDGET = Duration.ofSeconds(2);
 	/** So lange werden eigene gewonnene Ansprüche auf eine späte Niederlage geprüft. */
 	static final Duration LATE_DEFEAT_WINDOW = Duration.ofMinutes(15);
 	/**
@@ -197,11 +206,20 @@ public final class SyncService {
 		final SyncPositions positions;
 		volatile FeedReader reader;
 		volatile FeedWriter writer;
-		/** Beim Verbinden: die Entscheidung des Aufrufers, bis der erste Vollabgleich gelungen ist. */
+		/** Beim Verbinden: die Entscheidung des Aufrufers, bis der erste Vollabgleich zu Ende ist. */
 		volatile ConnectMode connectMode;
 		/** Vor der ersten Arbeit die Erreichbarkeit prüfen (nach dem Verbinden). */
 		volatile boolean probeFirst;
 		volatile boolean fullSyncWanted = true;
+		/**
+		 * Der laufende Vollabgleich mit seinem Zeiger; {@code null} ohne Lauf. Gehört zu dieser Verbindung: Eine neue verwirft
+		 * ihn. Benutzt nur unter der Arbeitssperre; andere Threads fragen nur, ob es ihn gibt.
+		 */
+		volatile FullSyncRun run;
+		/** Ein Vollabgleich wurde gewünscht, während einer lief: Nach dessen Ende beginnt sofort ein neuer. */
+		volatile boolean wantedDuringRun;
+		/** Ob der laufende Vollabgleich alle lokalen Ansprüche hochlädt (Mitnehmen); entschieden bei seinem Beginn. */
+		volatile boolean uploadLocalClaims;
 		/** Der erste Vollabgleich steht noch aus: danach werden die Verluste aller Einheiten abgeleitet. */
 		volatile boolean allUnitsWanted = true;
 		volatile Instant lastFullSync;
@@ -405,6 +423,14 @@ public final class SyncService {
 		return notifier.lastSyncProperty();
 	}
 
+	/**
+	 * Der Fortschritt des laufenden Vollabgleichs: der Anteil erledigter Abschnitte von 0.0 bis 1.0, {@code null} ohne
+	 * laufenden Lauf (auch im Einzelbetrieb). Änderungen kommen über den {@code ui}-Executor an.
+	 */
+	public ReadOnlyObjectProperty<Double> fullSyncProgress() {
+		return notifier.fullSyncProgressProperty();
+	}
+
 	/** Der gemeinsame Ordner, wie er eingestellt wurde (ohne Leerzeichen am Rand); {@code null} im Einzelbetrieb. */
 	public String sharedDir() {
 		synchronized (lock) {
@@ -586,7 +612,10 @@ public final class SyncService {
 		}
 	}
 
-	/** Gleicht sofort vollständig ab (im Hintergrund). Ohne Wirkung im Einzelbetrieb. */
+	/**
+	 * Fordert sofort einen Vollabgleich an (im Hintergrund, in Abschnitten über mehrere Takte). Läuft gerade einer, wird er
+	 * nicht neu begonnen; direkt nach seinem Ende beginnt ein neuer. Ohne Wirkung im Einzelbetrieb.
+	 */
 	public void syncNow() {
 		Link current;
 		synchronized (lock) {
@@ -595,7 +624,7 @@ public final class SyncService {
 		if (current == null) {
 			return;
 		}
-		current.fullSyncWanted = true;
+		wishFullSync(current);
 		schedule();
 	}
 
@@ -1459,8 +1488,9 @@ public final class SyncService {
 
 	/**
 	 * Ein Takt (in der Anwendung alle 2 Sekunden im {@code worker}): Erreichbarkeit nur nach einem Fehler prüfen, bei
-	 * Bedarf Vollabgleich, Aufträge fortsetzen, alle 30 Sekunden neue Rechner, Listen lesen, eigene Ansprüche der letzten
-	 * 15 Minuten nachprüfen; dann Verluste und geänderte Einheiten melden und den Zustand setzen. Am Anfang, auch im
+	 * Bedarf einen Vollabgleich beginnen und ein Stück davon abarbeiten, Aufträge fortsetzen, alle 30 Sekunden neue
+	 * Rechner, Listen lesen, eigene Ansprüche der letzten 15 Minuten nachprüfen; dann Verluste und geänderte Einheiten
+	 * melden und den Zustand setzen. Am Anfang, auch im
 	 * Einzelbetrieb, wird der Start-Index geschrieben, wenn er sich geändert hat und das letzte Schreiben
 	 * {@link #INDEX_FLUSH} her ist. Nach dem Hochladen löst der Takt höchstens {@value #RESOLVE_BUDGET} eingereihte
 	 * Verluste auf; im Einzelbetrieb und ohne Verbindung ebenso, nur lokal (hochgeladen wird später).
@@ -1528,16 +1558,19 @@ public final class SyncService {
 			return false;
 		}
 		if (returning) {
-			// nach der Rückkehr zuerst der Vollabgleich mit allen ausstehenden Versionen
-			current.fullSyncWanted = true;
+			// nach der Rückkehr ein Vollabgleich; ein laufender setzt am Zeiger fort, und danach beginnt ein neuer
+			wishFullSync(current);
 			if (hasJobs() && isCurrent(current)) {
 				notifier.setState(SyncState.AUSSTEHEND);
 			}
 		}
 		Instant now = clock.instant();
 		Round round = new Round(current);
-		if (fullSyncDue(current, now)) {
-			round.run(() -> fullSync(current, round));
+		if (current.run == null && fullSyncDue(current, now)) {
+			round.run(() -> beginRun(current));
+		}
+		if (current.run != null) {
+			round.run(() -> runSlice(current, round, now));
 		}
 		round.run(() -> runJobs(current, round));
 		// nach dem Hochladen, auch wenn der Ordner dabei wegfiel (die Auflösung ist lokal): Die Zusammenführungen gehen mit
@@ -1568,9 +1601,22 @@ public final class SyncService {
 		return true;
 	}
 
+	/** Ob ein neuer Vollabgleich beginnen soll (gefragt nur, solange keiner läuft). */
 	private static boolean fullSyncDue(Link current, Instant now) {
-		return current.fullSyncWanted || current.connectMode != null || current.lastFullSync == null
-				|| !now.isBefore(current.lastFullSync.plus(FULL_SYNC_INTERVAL));
+		return current.fullSyncWanted || current.wantedDuringRun || current.connectMode != null
+				|| current.lastFullSync == null || !now.isBefore(current.lastFullSync.plus(FULL_SYNC_INTERVAL));
+	}
+
+	/**
+	 * Wünscht einen Vollabgleich (sofort abgleichen, Liste verlangt es, Rückkehr aus {@link SyncState#OFFLINE}, neue
+	 * Kennung): Läuft einer, wird er nicht neu begonnen, sondern nach seinem Ende beginnt ein neuer.
+	 */
+	private static void wishFullSync(Link current) {
+		if (current.run != null) {
+			current.wantedDuringRun = true;
+		} else {
+			current.fullSyncWanted = true;
+		}
 	}
 
 	private static String failureText(Link current, Exception failure) {
@@ -1578,60 +1624,131 @@ public final class SyncService {
 	}
 
 	/**
-	 * Der Vollabgleich: beim Verbinden zuerst Beiseitelegen bzw. Mitnehmen, dann beide Bäume abgleichen, die ausstehenden
-	 * Versionen einreihen und hochladen. Die Positionen der Änderungslisten ändert er nicht.
+	 * Beginn eines Vollabgleichs, in einem Takt: beim Verbinden zuerst Beiseitelegen (der einzige Schritt, der den ganzen
+	 * lokalen Bestand ändert, vor allen Abschnitten) bzw. die Entscheidung über das Mitnehmen, die für alle Abschnitte des
+	 * Laufs gilt; dann die ausstehenden Versionen einreihen, nach einem Neustart die jungen eigenen Ansprüche beobachten
+	 * und die Abschnitte bestimmen ({@link FullSyncRun#begin}). Ein Wunsch nach einem Vollabgleich gilt ab hier dem
+	 * nächsten Lauf; scheitert der Beginn, bleibt er offen. Die Positionen der Änderungslisten ändert der Vollabgleich nicht.
 	 */
-	private void fullSync(Link current, Round round) throws IOException {
-		boolean uploadLocalClaims = false;
-		ConnectMode mode = current.connectMode;
-		if (mode != null) {
-			boolean both = FullSync.bothHaveUnits(local, current.shared);
-			if (both && mode == ConnectMode.SET_ASIDE) {
-				Path aside = FullSync.setAside(local.dataRoot(), files, clock);
-				LOGGER.info("Der lokale Bestand wurde beiseitegelegt: " + aside);
-				// der Datenordner wird neu gefüllt, und gleiche Dateinamen können anderen Inhalt haben
-				clearIndex();
+	private void beginRun(Link current) throws IOException {
+		current.fullSyncWanted = false;
+		current.wantedDuringRun = false;
+		try {
+			boolean uploadLocalClaims = false;
+			ConnectMode mode = current.connectMode;
+			if (mode != null) {
+				boolean both = FullSync.bothHaveUnits(local, current.shared);
+				if (both && mode == ConnectMode.SET_ASIDE) {
+					Path aside = FullSync.setAside(local.dataRoot(), files, clock);
+					LOGGER.info("Der lokale Bestand wurde beiseitegelegt: " + aside);
+					// der Datenordner wird neu gefüllt, und gleiche Dateinamen können anderen Inhalt haben
+					clearIndex();
+				}
+				uploadLocalClaims = !both || mode == ConnectMode.MERGE;
 			}
-			uploadLocalClaims = !both || mode == ConnectMode.MERGE;
+			current.uploadLocalClaims = uploadLocalClaims;
+			// gesperrte Einheiten dürfen wieder geheilt werden: Die gemeinsame Kopie kann inzwischen geheilt sein
+			synchronized (lock) {
+				unrepairable.clear();
+			}
+			// Kandidaten für ausstehende Versionen nennt der Index. Einmal je Lauf, nicht je Abschnitt: Ein Speichervorgang
+			// über mehrere Einheiten bleibt so ein Auftrag (eine Änderungsliste)
+			enqueuePending(current, withUnindexed(index.pendingUnits()));
+			if (current.allUnitsWanted) {
+				// nach einem Neustart: die eigenen Ansprüche der letzten 15 Minuten weiter auf eine späte Niederlage prüfen;
+				// gelesen werden nur die Einheiten, in deren gültiger Kette der Index ein junges eigenes Glied kennt (der
+				// Anspruch entscheidet dann selbst). Eine Version, die lange nach dem Schreiben hochgeladen wurde (alte ID,
+				// junger Anspruch), wird nach einem Neustart nicht beobachtet; den Vergleich der eigenen Ansprüche beider Seiten
+				// (checkOwnClaim) im nächsten Vollabgleich fängt sie.
+				String myId = machineId();
+				Instant now = clock.instant();
+				Set<UnitKey> recent = index.recentOwnChainUnits(id -> id.isFrom(myId),
+						now.minus(LATE_DEFEAT_WINDOW).minus(CLOCK_SLACK));
+				watchOwnClaims(LocalScan.recentOwnClaims(local, myId, now, LATE_DEFEAT_WINDOW, recent));
+			}
+			FullSyncRun run = new FullSyncRun(local, current.shared);
+			run.begin();
+			current.run = run;
+			publishProgress(current, run.progress());
+		} catch (IOException | RuntimeException e) {
+			current.fullSyncWanted = true;
+			throw e;
 		}
-		String myId = machineId();
+	}
+
+	/**
+	 * Ein Stück des laufenden Vollabgleichs: Abschnitte und Blöcke, bis {@link #FULL_SYNC_SLICE_BUDGET} seit Beginn des
+	 * Takts verbraucht ist, mindestens aber ein Block. Scheitert ein Block (etwa weil der Ordner wegfällt), bleibt der
+	 * Zeiger davor stehen, und der nächste erreichbare Takt wiederholt ihn; jeder Schritt darin ist wiederholbar. Nach dem
+	 * letzten Abschnitt endet der Lauf.
+	 *
+	 * @param sliceStart der Beginn des Takts
+	 */
+	private void runSlice(Link current, Round round, Instant sliceStart) throws IOException {
+		FullSyncRun run = current.run;
+		Instant end = sliceStart.plus(FULL_SYNC_SLICE_BUDGET);
+		boolean finished;
+		try {
+			finished = run.step(() -> !clock.instant().isBefore(end), units -> syncSection(current, round, units));
+		} finally {
+			publishProgress(current, run.progress());
+		}
+		if (finished) {
+			endRun(current, round);
+		}
+	}
+
+	/**
+	 * Ein Block des Vollabgleichs: gleicht die Einheiten ab ({@link FullSync#syncUnits}, mit der Entscheidung über das
+	 * Mitnehmen vom Beginn des Laufs), trägt die geänderten in den Index ein, meldet die gefundenen Verluste und klärt
+	 * umstrittene Plätze.
+	 */
+	private void syncSection(Link current, Round round, List<UnitKey> units) throws IOException {
 		Instant now = clock.instant();
-		// Beim Mitnehmen: genau die Ansprüche, die der Abgleich hochlädt, ab jetzt beobachten (je Anspruch sofort, damit
-		// auch ein abgebrochener Abgleich nichts verliert)
-		FullSyncResult result = FullSync.run(local, current.shared, uploadLocalClaims, myId, files, clock,
-				uploaded -> watchOwnClaims(
+		// Hochgeladene Ansprüche (beim Mitnehmen alle, sonst die eigenen, die im gemeinsamen Ordner fehlten) ab jetzt
+		// beobachten, je Anspruch sofort, damit auch ein abgebrochener Abgleich nichts verliert
+		FullSyncResult result = FullSync.syncUnits(local, current.shared, units, current.uploadLocalClaims, machineId(),
+				files, clock, uploaded -> watchOwnClaims(
 						List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))));
 		// Die Positionen der Listen bleiben stehen: Das Lesen des Eintrags des Gewinners deckt einen abweichenden lokalen
 		// Anspruch sofort auf; schon kopierte Dateien kosten dabei nur einen Vergleich. Was keine Liste aufdeckt (Liste
 		// übersprungen, Anspruch kam erst nach Ablauf der Beobachtung), meldet der Abgleich selbst als umstritten.
-		current.connectMode = null;
-		current.fullSyncWanted = false;
-		current.lastFullSync = now;
-		if (current.allUnitsWanted) {
-			current.allUnitsWanted = false;
-			round.allUnits = true;
-			// nach einem Neustart: die eigenen Ansprüche der letzten 15 Minuten weiter auf eine späte Niederlage prüfen; gelesen
-			// werden nur die Einheiten, in deren gültiger Kette der Index ein junges eigenes Glied kennt (der Anspruch
-			// entscheidet dann selbst). Eine Version, die lange nach dem Schreiben hochgeladen wurde (alte ID, junger Anspruch),
-			// wird nach einem Neustart nicht beobachtet; den Vergleich der eigenen Ansprüche beider Seiten (checkOwnClaim) im
-			// nächsten Vollabgleich fängt sie.
-			Set<UnitKey> recent = index.recentOwnChainUnits(id -> id.isFrom(myId),
-					now.minus(LATE_DEFEAT_WINDOW).minus(CLOCK_SLACK));
-			watchOwnClaims(LocalScan.recentOwnClaims(local, myId, now, LATE_DEFEAT_WINDOW, recent));
-		}
-		// gesperrte Einheiten dürfen wieder geheilt werden: Die gemeinsame Kopie kann inzwischen geheilt sein
-		synchronized (lock) {
-			unrepairable.clear();
-		}
 		round.changed.addAll(result.changed());
 		// Die Auflösung im selben Takt liest die Geschwister einer Buchung aus dem Index: Was der Abgleich kopiert hat, steht
 		// schon vorher darin, nicht erst nach dem Melden am Ende des Takts (sonst sähe ein fremdes Umsetzen wie ein Storno aus)
 		indexUnitKeys(result.changed());
 		result.lost().forEach(this::reportLoss);
 		settleAll(current, result.contested(), round);
-		// Kandidaten für ausstehende Versionen nennt der Index; was der Abgleich kopiert hat, steht schon darin
-		enqueuePending(current, withUnindexed(index.pendingUnits()));
-		runJobs(current, round);
+	}
+
+	/**
+	 * Ende des Vollabgleichs nach dem letzten Abschnitt: Die Entscheidung des Verbindens ist erledigt, der Abstand bis zum
+	 * nächsten Lauf zählt ab jetzt, und ein Wunsch während des Laufs lässt sofort den nächsten beginnen. Nach dem ersten Lauf
+	 * leitet der Takt die Verluste der Einheiten ab, die der Index als verloren kennt, und die offenen Konflikte neu.
+	 */
+	private void endRun(Link current, Round round) {
+		current.connectMode = null;
+		current.uploadLocalClaims = false;
+		current.run = null;
+		current.lastFullSync = clock.instant();
+		if (current.wantedDuringRun) {
+			current.wantedDuringRun = false;
+			current.fullSyncWanted = true;
+		}
+		if (current.allUnitsWanted) {
+			current.allUnitsWanted = false;
+			round.allUnits = true;
+		}
+		publishProgress(current, null);
+	}
+
+	/** Meldet den Fortschritt des Vollabgleichs, solange die Verbindung noch die aktuelle ist. */
+	private void publishProgress(Link current, Double progress) {
+		synchronized (lock) {
+			if (link == current) {
+				notifier.setFullSyncProgress(progress);
+			}
+		}
 	}
 
 	/** Die Kandidaten des Index und die Einheiten, die der Index wegen eines Fehlers beim Auflösen nicht kennt. */
@@ -1831,7 +1948,7 @@ public final class SyncService {
 		// der neue Index kennt keine Listennummern
 		ownListsWanted = true;
 		current.bind(renewed.id(), local, clock);
-		current.fullSyncWanted = true;
+		wishFullSync(current);
 		notifier.duplicateMachine(StoreMessages.duplicateMachine());
 	}
 
@@ -1843,7 +1960,7 @@ public final class SyncService {
 		forgetUnrepairable(poll.changed());
 		poll.pending().forEach(notifier::pending);
 		if (poll.fullSyncNeeded()) {
-			current.fullSyncWanted = true;
+			wishFullSync(current);
 		}
 		if (!poll.damaged().isEmpty()) {
 			// die kopierte Datei passt nicht zum Anspruch: heilen versuchen (sonst SYS-008)
@@ -2133,6 +2250,8 @@ public final class SyncService {
 			repairQueue.clear();
 			unrepairable.clear();
 			notifier.reset();
+			// ein Vollabgleich der vorigen Verbindung ist verworfen (er hing an ihrem Link)
+			notifier.setFullSyncProgress(null);
 		}
 		// die Listennummern eigener Versionen sind womöglich unbekannt (neuer Index, unsauberes Ende): der Takt prüft es
 		ownListsWanted = true;
@@ -2150,6 +2269,7 @@ public final class SyncService {
 			unrepairable.clear();
 			notifier.reset();
 			notifier.setState(SyncState.AUS);
+			notifier.setFullSyncProgress(null);
 		}
 	}
 
@@ -2277,7 +2397,7 @@ public final class SyncService {
 		boolean startup;
 		/** Die Ableitung der offenen Konflikte nach diesem Durchlauf ({@link #reportChanges}); {@code null}, wenn es keine gab. */
 		ConflictLedger.Derivation derivation;
-		/** Der erste Vollabgleich gelang: Verluste aller Einheiten ableiten. */
+		/** Der erste Vollabgleich ist in diesem Takt zu Ende gegangen: Verluste aller Einheiten ableiten. */
 		boolean allUnits;
 		boolean unreachable;
 		Exception failure;

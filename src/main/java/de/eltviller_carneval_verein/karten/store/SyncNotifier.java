@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.store;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
@@ -31,10 +32,13 @@ final class SyncNotifier {
 	private final Executor ui;
 	private final ReadOnlyObjectWrapper<SyncState> stateProperty = new ReadOnlyObjectWrapper<>(SyncState.AUS);
 	private final ReadOnlyObjectWrapper<Instant> lastSyncProperty = new ReadOnlyObjectWrapper<>();
+	private final ReadOnlyObjectWrapper<Double> fullSyncProgressProperty = new ReadOnlyObjectWrapper<>();
 	private volatile SyncListener listener = new SyncListener() {
 	};
 
 	private SyncState current = SyncState.AUS;
+	/** Der zuletzt gesetzte Fortschritt des Vollabgleichs; {@code null} ohne Lauf. */
+	private Double fullSyncProgress;
 	/** Ob für den laufenden Ausfall schon gemeldet wurde; zurückgesetzt beim nächsten Erfolg. */
 	private boolean unreachableNotified;
 	/** Ob der Ordner ausgefallen war und die Rückkehr noch nicht gemeldet ist. */
@@ -54,6 +58,22 @@ final class SyncNotifier {
 
 	ReadOnlyObjectProperty<Instant> lastSyncProperty() {
 		return lastSyncProperty.getReadOnlyProperty();
+	}
+
+	ReadOnlyObjectProperty<Double> fullSyncProgressProperty() {
+		return fullSyncProgressProperty.getReadOnlyProperty();
+	}
+
+	/**
+	 * Setzt den Fortschritt des Vollabgleichs (Anteil von 0.0 bis 1.0, {@code null} ohne Lauf); die Eigenschaft folgt über
+	 * den {@code ui}-Executor, nur bei einer Änderung.
+	 */
+	synchronized void setFullSyncProgress(Double progress) {
+		if (Objects.equals(fullSyncProgress, progress)) {
+			return;
+		}
+		fullSyncProgress = progress;
+		notifyUi(() -> fullSyncProgressProperty.set(progress));
 	}
 
 	void setListener(SyncListener listener) {
