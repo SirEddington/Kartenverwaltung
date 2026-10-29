@@ -44,6 +44,14 @@ public record OpenConflict(VersionId id, UnitKey unit, Instant at, String saveId
 		return new ConflictKey(id, note != null ? ConflictKey.Kind.NOTE : ConflictKey.Kind.PARENT_DELETION);
 	}
 
+	/**
+	 * Die Einheit, auf der der Vermerk wirkt: die, auf die er die Buchung übertragen hat ({@link ConflictNote#moved()}),
+	 * sonst {@link #unit()}.
+	 */
+	public UnitKey target() {
+		return note != null && note.moved() != null ? note.moved() : unit;
+	}
+
 	/** Prüft, dass genau eins von Vermerk und Elternlöschung gesetzt ist. */
 	public OpenConflict {
 		Objects.requireNonNull(id, "id");

@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -42,6 +44,7 @@ import de.eltviller_carneval_verein.karten.ui.ConflictList.Row;
 import de.eltviller_carneval_verein.karten.ui.event.PlanSwitchDialog;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanImpact;
 import de.eltviller_carneval_verein.karten.ui.sales.AssignPlaceDialog;
+import de.eltviller_carneval_verein.karten.ui.sales.SalesPlan;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
@@ -167,11 +170,11 @@ public final class ConflictActions {
 
 	/**
 	 * Die Bestuhlung der Vorstellung in ihrer Halle (für {@link #assignPlace}); {@code null} ohne Halle, ohne Bestuhlung und
-	 * bei einer eingefrorenen Vorstellung (wie {@code SalesPlan.of}).
+	 * bei einer eingefrorenen Vorstellung ({@link SalesPlan#of}).
 	 */
 	public SeatingPlan planOf(Presentation presentation) {
 		Hall hall = presentation.getHallId() == null ? null : halls.findById(presentation.getHallId());
-		return hall == null || presentation.isPlanMissing() ? null : hall.findSeatingPlan(presentation.getSeatingPlanId());
+		return SalesPlan.of(presentation, hall);
 	}
 
 	/**
@@ -203,18 +206,12 @@ public final class ConflictActions {
 			throw new IllegalStateException(
 					"Platz zuweisen nicht möglich: " + AssignPlaceDialog.label(seat) + " ist bereits belegt.");
 		}
-		try {
-			save(event);
-		} catch (RuntimeException e) {
-			if (writtenDespite(seatUnit, versionBefore)) {
-				throw writtenButNotAcknowledged(e);
-			}
+		saveOrUndo(seatUnit, versionBefore, this::writtenDespite, () -> save(event), e -> {
 			// die Buchung wieder ohne Platz, und der leere Platzhalter, den die Zuweisung entfernt hat, wieder an seiner Stelle
 			booking.copyFrom(before);
 			presentation.getBookings().clear();
 			presentation.getBookings().addAll(bookingsBefore);
-			throw failure(e);
-		}
+		});
 		acknowledge(row);
 	}
 
@@ -225,11 +222,7 @@ public final class ConflictActions {
 	 * @throws IllegalStateException wenn sich der Konflikt nicht bestätigen lässt; er bleibt dann offen
 	 */
 	public void dismiss(Row row) {
-		try {
-			sync.acknowledge(Set.of(row.conflict().key()));
-		} catch (IOException e) {
-			throw new IllegalStateException("Der Konflikt ließ sich nicht bestätigen: " + StoreMessages.describe(e), e);
-		}
+		acknowledge(row, "Der Konflikt ließ sich nicht bestätigen: ");
 	}
 
 	/**
@@ -248,7 +241,7 @@ public final class ConflictActions {
 		if (row.action() != Action.TAKE_MY_VALUE || !HALL_GROUP.equals(group) || row.conflict().note() == null) {
 			return null;
 		}
-		UnitKey unit = valueUnit(row);
+		UnitKey unit = row.conflict().target();
 		FieldConflict field = row.conflict().note().fields().stream().filter(candidate -> candidate.group().equals(group))
 				.findFirst().orElse(null);
 		if (unit.type() != UnitType.PRESENTATION || field == null || !(events.modelObject(unit) instanceof Presentation presentation)) {
@@ -313,24 +306,20 @@ public final class ConflictActions {
 		if (isAdopted(row.conflict(), group)) {
 			throw new IllegalStateException("Dieser Wert ist schon übernommen.");
 		}
-		UnitKey unit = valueUnit(row);
+		UnitKey unit = row.conflict().target();
 		Event event = events.findEvent(unit.eventId());
 		ObjectNode before = events.payloadOf(unit);
 		VersionId versionBefore = versionOf(unit);
-		try {
+		saveOrUndo(unit, versionBefore, this::writtenDespite, () -> {
 			events.applyGroup(unit, group, conflict.mine());
 			save(event);
-		} catch (RuntimeException e) {
-			if (writtenDespite(unit, versionBefore)) {
-				throw writtenButNotAcknowledged(e);
-			}
+		}, e -> {
 			try {
 				events.applyFields(unit, before);
 			} catch (RuntimeException undoFailed) {
 				e.addSuppressed(undoFailed);
 			}
-			throw failure(e);
-		}
+		});
 		// mehrere Gruppen: Die Zeile bleibt offen, bis jede übernommen ist (oder der Nutzer sie mit "Erledigt" schließt)
 		if (row.conflict().note().fields().size() == 1 || allAdopted(row.conflict())) {
 			acknowledge(row);
@@ -354,7 +343,7 @@ public final class ConflictActions {
 		}
 		ObjectNode payload;
 		try {
-			payload = events.payloadOf(note.moved() != null ? note.moved() : conflict.unit());
+			payload = events.payloadOf(conflict.target());
 		} catch (IllegalStateException e) {
 			return false;
 		}
@@ -399,19 +388,13 @@ public final class ConflictActions {
 		UnitKey unit = row.conflict().unit();
 		VersionId versionBefore = versionOf(unit);
 		halls.replaceCachedHall(mine);
-		try {
+		// geschrieben, dann gescheitert: Die Halle im Cache ist die geschriebene; die alte zurückzusetzen ließe das nächste
+		// Speichern die fremde Fassung über die eigene schreiben (daher genügt hier eine andere Version)
+		saveOrUndo(unit, versionBefore, this::changed, () -> {
 			if (!hallSaver.test(mine)) {
 				throw new IllegalStateException("Die Halle wurde nicht gespeichert.");
 			}
-		} catch (RuntimeException e) {
-			// geschrieben, dann gescheitert: Die Halle im Cache ist die geschriebene; die alte zurückzusetzen ließe das nächste
-			// Speichern die fremde Fassung über die eigene schreiben
-			if (changed(unit, versionBefore)) {
-				throw writtenButNotAcknowledged(e);
-			}
-			halls.replaceCachedHall(current);
-			throw failure(e);
-		}
+		}, e -> halls.replaceCachedHall(current));
 		acknowledge(row);
 	}
 
@@ -429,11 +412,12 @@ public final class ConflictActions {
 		Booking content = restore.content();
 		Booking placeholder = restore.placeholder();
 		Booking before = placeholder == null ? null : placeholder.copy();
-		Booking added = null;
+		// die angelegte Buchung "ohne Platz", damit das Zurücksetzen sie wieder entfernt
+		Booking[] added = new Booking[1];
 		UnitKey unit = placeholder != null ? row.conflict().unit()
 				: UnitKey.unassignedBooking(restore.event().getId(), restore.presentation().getId(), content.getId());
 		VersionId versionBefore = versionOf(unit);
-		try {
+		saveOrUndo(unit, versionBefore, this::writtenDespite, () -> {
 			if (placeholder != null) {
 				// der Sitz bleibt, wie das Modell ihn kennt; nur die Buchung kommt zurück
 				placeholder.copyFrom(content);
@@ -445,37 +429,27 @@ public final class ConflictActions {
 				placeholder.setWheelchairAccessible(before.isWheelchairAccessible());
 				placeholder.setUnassigned(false);
 			} else {
-				added = restore.presentation().addBooking();
-				added.copyFrom(content);
-				added.setUnassigned(true);
-				added.setSeatId(null);
-				added.setRowLabel("");
-				added.setTableNumber(0);
-				added.setSeatNumber(0);
+				added[0] = restore.presentation().addBooking();
+				added[0].copyFrom(content);
+				added[0].setUnassigned(true);
+				added[0].setSeatId(null);
+				added[0].setRowLabel("");
+				added[0].setTableNumber(0);
+				added[0].setSeatNumber(0);
 			}
 			save(restore.event());
-		} catch (RuntimeException e) {
-			if (writtenDespite(unit, versionBefore)) {
-				throw writtenButNotAcknowledged(e);
-			}
+		}, e -> {
 			if (placeholder != null) {
 				placeholder.copyFrom(before);
 			}
-			if (added != null) {
-				restore.presentation().getBookings().remove(added);
+			if (added[0] != null) {
+				restore.presentation().getBookings().remove(added[0]);
 			}
-			throw failure(e);
-		}
+		});
 		acknowledge(row);
 	}
 
 	// Gegenstand der Aktionen -->
-
-	/** Die Einheit, auf der die eigenen Felder gelten: die, auf die der Vermerk sie übertragen hat, sonst die der Zeile. */
-	private static UnitKey valueUnit(Row row) {
-		ConflictNote note = row.conflict().note();
-		return note.moved() != null ? note.moved() : row.conflict().unit();
-	}
 
 	/**
 	 * Das Objekt im Modell, das die eigenen Felder bekommt; {@code null}, wenn es sie nicht mehr gibt. Eine Buchung zählt nur,
@@ -486,7 +460,7 @@ public final class ConflictActions {
 		if (row.conflict().note() == null) {
 			return null;
 		}
-		Object model = events.modelObject(valueUnit(row));
+		Object model = events.modelObject(row.conflict().target());
 		if (model instanceof Booking booking) {
 			Version version = dropped(row.conflict());
 			return booking.hasData() && version != null && !version.deleted()
@@ -631,6 +605,29 @@ public final class ConflictActions {
 		return changed(unit, before) && !events.locallyChangedUnits().contains(unit);
 	}
 
+	/**
+	 * Das Gerüst jeder Aktion: {@code change} ändert das Modell und speichert. Scheitert das, ist der Stand der Einheit laut
+	 * {@code written} aber doch geschrieben, bleibt das Modell, und der Text beginnt mit "Gespeichert, aber nicht
+	 * bestätigt". Sonst setzt {@code undo} das Modell zurück (es bekommt den Fehler, etwa um einen Fehler beim Zurücksetzen
+	 * anzuhängen), und der Grund kommt als {@link IllegalStateException}. Bestätigt wird hier nichts.
+	 *
+	 * @param versionBefore die aktuelle Version der Einheit vor der Aktion ({@link #versionOf})
+	 * @param written       ob die Einheit seitdem als geschrieben gilt: beim Event {@link #writtenDespite}, bei der Halle
+	 *                      {@link #changed}
+	 */
+	private static void saveOrUndo(UnitKey unit, VersionId versionBefore, BiPredicate<UnitKey, VersionId> written,
+			Runnable change, Consumer<RuntimeException> undo) {
+		try {
+			change.run();
+		} catch (RuntimeException e) {
+			if (written.test(unit, versionBefore)) {
+				throw writtenButNotAcknowledged(e);
+			}
+			undo.accept(e);
+			throw failure(e);
+		}
+	}
+
 	/** Die Aktion ist geschrieben, aber danach gescheitert: Das Modell bleibt, die Zeile bleibt unbestätigt offen. */
 	private static IllegalStateException writtenButNotAcknowledged(RuntimeException cause) {
 		return new IllegalStateException("Gespeichert, aber nicht bestätigt: " + failure(cause).getMessage(), cause);
@@ -678,11 +675,15 @@ public final class ConflictActions {
 	}
 
 	private void acknowledge(Row row) {
+		acknowledge(row, "Gespeichert, aber der Konflikt ließ sich nicht bestätigen: ");
+	}
+
+	/** Bestätigt den Konflikt der Zeile; scheitert das, steht der Grund hinter {@code prefix}. */
+	private void acknowledge(Row row, String prefix) {
 		try {
 			sync.acknowledge(Set.of(row.conflict().key()));
 		} catch (IOException e) {
-			throw new IllegalStateException("Gespeichert, aber der Konflikt ließ sich nicht bestätigen: "
-					+ StoreMessages.describe(e), e);
+			throw new IllegalStateException(prefix + StoreMessages.describe(e), e);
 		}
 	}
 
