@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -55,6 +56,7 @@ import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.ui.ConflictList;
 
 /**
  * Konflikte Ende zu Ende über zwei oder drei Rechner: Jeder Rechner hat einen eigenen Dienst mit den Strategien aus
@@ -477,6 +479,35 @@ class ConflictScenarioTest {
 		// beide Repositories haben die Zusammenführung eingearbeitet
 		assertModelShowsDoubleSale(a, 1, "Anna", bertId, "Bert");
 		assertModelShowsDoubleSale(b, 1, "Anna", bertId, "Bert");
+	}
+
+	/**
+	 * B verkauft zwei Plätze in einem Speichervorgang, A hat beide schon verkauft: Jede Zusammenführung hat ihren eigenen
+	 * Speichervorgang, die Vermerke nennen aber B's verlorenen, und der Dialog zeigt beide Zeilen in einer Gruppe.
+	 */
+	@Test
+	void doubleSalesOfOneSaveFormOneGroupInTheDialog() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		a.seat(1).setLastName("Anna");
+		a.sell(2, "Anna");
+		b.seat(1).setLastName("Bert");
+		b.sell(2, "Bert");
+		String bertSave = b.sync.unitState(seatUnit(b, 1)).current().saveId();
+		a.tick();
+		b.tick();
+
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		List<OpenConflict> open = b.open();
+		assertEquals(2, open.size(), open.toString());
+		assertEquals(Set.of(seatUnit(b, 1), seatUnit(b, 2)), Set.of(open.get(0).unit(), open.get(1).unit()));
+		assertNotEquals(open.get(0).saveId(), open.get(1).saveId(), "jede Zusammenführung hat ihren Speichervorgang");
+		List<ConflictList.Row> rows = new ConflictList(b::open, unit -> unit.relativePath()).rows();
+		assertEquals(List.of(bertSave, bertSave), rows.stream().map(ConflictList.Row::group).toList());
 	}
 
 	/**

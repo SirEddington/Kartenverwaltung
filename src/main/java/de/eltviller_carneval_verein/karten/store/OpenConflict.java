@@ -13,7 +13,8 @@ import java.util.Objects;
  *                 ({@link #key()}) wird der Konflikt bestätigt ({@link SyncService#acknowledge})
  * @param unit     die Einheit dieser Version
  * @param at       der Zeitpunkt des Speicherns dieser Version
- * @param saveId   der Speichervorgang dieser Version (mehrere Konflikte desselben Vorgangs gehören im Dialog zusammen)
+ * @param saveId   der Speichervorgang dieser Version; im Dialog gehören Konflikte desselben verlorenen Speichervorgangs
+ *                 zusammen ({@link ConflictNote#lostSave()}), dieser gilt nur bei Vermerken ohne ihn
  * @param note     der Konfliktvermerk; {@code null} bei einer Elternlöschung
  * @param deletion die Elternlöschung; {@code null} bei einem Vermerk
  */

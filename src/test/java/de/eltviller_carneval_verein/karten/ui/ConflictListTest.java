@@ -56,12 +56,18 @@ class ConflictListTest {
 		return new ConflictNote(kind, "me", other, List.of(), null, null, null);
 	}
 
+	/** Ein Vermerk, wie die Auflösung ihn schreibt: mit dem Speichervorgang der weichenden eigenen Version. */
+	private static ConflictNote note(Kind kind, Party other, String lostSave) {
+		return new ConflictNote(kind, "me", other, List.of(), null, null, null, lostSave);
+	}
+
 	@Test
-	void doubleSalesOfOneSaveAreGrouped() {
-		source.add(conflict(seat("s1"), "save-1", note(Kind.DOUBLE_SALE, party("Kasse 1", "Anna"))));
-		source.add(conflict(seat("s7"), "other-save", note(Kind.FIELDS, party("Kasse 1", "Anna"))));
-		source.add(conflict(seat("s2"), "save-1", note(Kind.DOUBLE_SALE, party("Kasse 1", "Anna"))));
-		source.add(conflict(seat("s3"), "save-1", note(Kind.DOUBLE_SALE, party("Kasse 1", "Anna"))));
+	void doubleSalesOfOneLostSaveAreGrouped() {
+		// jede Zusammenführung hat ihren eigenen Speichervorgang; gemeinsam ist der der weichenden Version
+		source.add(conflict(seat("s1"), "merge-1", note(Kind.DOUBLE_SALE, party("Kasse 1", "Anna"), "save-1")));
+		source.add(conflict(seat("s7"), "merge-2", note(Kind.FIELDS, party("Kasse 1", "Anna"), "save-1")));
+		source.add(conflict(seat("s2"), "merge-3", note(Kind.DOUBLE_SALE, party("Kasse 1", "Anna"), "save-1")));
+		source.add(conflict(seat("s3"), "merge-4", note(Kind.DOUBLE_SALE, party("Kasse 1", "Anna"), "save-1")));
 
 		List<Row> rows = list.rows();
 
@@ -74,6 +80,18 @@ class ConflictListTest {
 		assertEquals("Doppelverkauf", rows.get(0).kindText());
 		assertEquals("Label " + seat("s1").relativePath(), rows.get(0).entry());
 		assertEquals(Instant.ofEpochMilli(2), rows.get(0).at(), "der Zeitpunkt der Gegenseite (ihre Version)");
+	}
+
+	@Test
+	void noteWithoutLostSaveIsGroupedBySaveOfTheConflict() {
+		source.add(conflict(seat("s1"), "alt", note(Kind.DOUBLE_SALE, party("Kasse 1", null))));
+		source.add(conflict(seat("s2"), "neu", note(Kind.DOUBLE_SALE, party("Kasse 1", null), "save-9")));
+		source.add(conflict(seat("s3"), "alt", note(Kind.DOUBLE_SALE, party("Kasse 1", null))));
+
+		List<Row> rows = list.rows();
+
+		assertEquals(List.of("s1", "s3", "s2"), rows.stream().map(row -> row.conflict().unit().bookingDir()).toList());
+		assertEquals(List.of("alt", "alt", "save-9"), rows.stream().map(Row::group).toList());
 	}
 
 	@Test

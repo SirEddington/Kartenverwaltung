@@ -17,9 +17,24 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * @param place    der Platz, an den die Buchung versetzt wurde; darf {@code null} sein
  * @param dropped  die Version, deren Inhalt weicht: bei Zusammenführungen meist der zweite Vorgänger, bei
  *                 {@link Kind#DELETE_WINS} gegen die Gegenseite der erste; darf {@code null} sein
+ * @param lostSave der Speichervorgang der weichenden eigenen Version ("Meine", die neueste Version der verlorenen
+ *                 Strecke): Konflikte desselben verlorenen Speichervorgangs gehören im Dialog zusammen. Die Auflösung
+ *                 setzt ihn bei jedem Vermerk, den sie schreibt; darf {@code null} sein (ältere Vermerke), dann gilt der
+ *                 Speichervorgang der Version, die den Vermerk trägt
  */
 public record ConflictNote(Kind kind, String affected, Party other, List<FieldConflict> fields, UnitKey moved,
-		ObjectNode place, VersionId dropped) {
+		ObjectNode place, VersionId dropped, String lostSave) {
+
+	/** Ein Vermerk ohne {@code lostSave}; den setzt die Auflösung beim Schreiben ({@link #withLostSave}). */
+	public ConflictNote(Kind kind, String affected, Party other, List<FieldConflict> fields, UnitKey moved,
+			ObjectNode place, VersionId dropped) {
+		this(kind, affected, other, fields, moved, place, dropped, null);
+	}
+
+	/** Derselbe Vermerk mit dem Speichervorgang der weichenden eigenen Version. */
+	public ConflictNote withLostSave(String lostSave) {
+		return new ConflictNote(kind, affected, other, fields, moved, place, dropped, lostSave);
+	}
 
 	/** Die Art des Konflikts. */
 	public enum Kind {

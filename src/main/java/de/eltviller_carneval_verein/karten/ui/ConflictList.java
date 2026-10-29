@@ -71,7 +71,9 @@ public final class ConflictList {
 	 *                    Konflikt trägt
 	 * @param fields      die strittigen Feldgruppen (nur bei {@link ConflictNote.Kind#FIELDS})
 	 * @param action      die Aktion der Zeile
-	 * @param group       bei einem Doppelverkauf der Speichervorgang, dessen Zeilen zusammengehören; sonst {@code null}
+	 * @param group       bei einem Doppelverkauf der verlorene Speichervorgang, dessen Zeilen zusammengehören
+	 *                    ({@link ConflictNote#lostSave()}, bei älteren Vermerken der Speichervorgang der Version mit dem
+	 *                    Vermerk); sonst {@code null}
 	 */
 	public record Row(OpenConflict conflict, String kindText, String entry, String counterpart, Instant at,
 			List<FieldRow> fields, Action action, String group) {
@@ -199,7 +201,8 @@ public final class ConflictList {
 		Instant at = other == null ? conflict.at() : Instant.ofEpochMilli(other.version().epochMillis());
 		List<FieldRow> fields = note.fields().stream()
 				.map(field -> fieldRow(field, adopted.test(conflict, field.group()))).toList();
-		String group = note.kind() == ConflictNote.Kind.DOUBLE_SALE ? conflict.saveId() : null;
+		String group = note.kind() != ConflictNote.Kind.DOUBLE_SALE ? null
+				: note.lostSave() != null ? note.lostSave() : conflict.saveId();
 		return new Row(conflict, kindText(note.kind()), entry, counterpart, at, fields,
 				actionOf(note.kind(), conflict.unit()), group);
 	}

@@ -102,6 +102,9 @@ public final class StoreCodec {
 		if (note.dropped() != null) {
 			node.put("dropped", note.dropped().value());
 		}
+		if (note.lostSave() != null) {
+			node.put("lostSave", note.lostSave());
+		}
 	}
 
 	/** Schreibt eine Anspruchsdatei. */
@@ -195,7 +198,23 @@ public final class StoreCodec {
 			}
 		}
 		return new ConflictNote(kind, text(node, "affected"), readParty(node.get("other")), fields,
-				readMoved(node.get("moved")), optionalObject(node, "place"), optionalVersionId(node, "dropped"));
+				readMoved(node.get("moved")), optionalObject(node, "place"), optionalVersionId(node, "dropped"),
+				readLostSave(node.get("lostSave")));
+	}
+
+	/**
+	 * Der optionale Speichervorgang der weichenden Version. Er dient nur der Gruppierung im Dialog: Fehlt er oder ist er
+	 * kein Text, ist er {@code null} (der Dialog nimmt dann den Speichervorgang der Version), nie eine Beschädigung.
+	 */
+	private static String readLostSave(JsonNode node) {
+		if (node == null || node.isNull()) {
+			return null;
+		}
+		if (!node.isTextual()) {
+			LOGGER.log(Level.WARNING, "Das Feld lostSave im Konfliktvermerk ist kein Text und wird übergangen.");
+			return null;
+		}
+		return node.asText();
 	}
 
 	private static ConflictNote.Party readParty(JsonNode node) throws IOException {

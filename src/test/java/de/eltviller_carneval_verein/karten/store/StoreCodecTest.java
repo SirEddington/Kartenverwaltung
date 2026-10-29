@@ -185,10 +185,38 @@ class StoreCodecTest {
 		assertFalse(json.contains("\"moved\""), json);
 		assertFalse(json.contains("\"place\""), json);
 		assertFalse(json.contains("\"dropped\""), json);
+		assertFalse(json.contains("\"lostSave\""), json);
 
 		Version read = StoreCodec.readVersion(StoreCodec.write(version));
 		assertEquals(version, read);
 		assertEquals(List.of(), read.conflict().fields());
+		assertNull(read.conflict().lostSave());
+	}
+
+	@Test
+	void lostSaveOfTheNoteRoundTrips() throws IOException {
+		ConflictNote note = new ConflictNote(ConflictNote.Kind.DOUBLE_SALE, "k4m9q2x8-1234", null, null, null, null, V1,
+				"save-0");
+		Version version = versionWith(note, Map.of());
+
+		String json = text(StoreCodec.write(version));
+		assertTrue(json.contains("\"dropped\":\"" + V1.value() + "\",\"lostSave\":\"save-0\"}"), json);
+
+		Version read = StoreCodec.readVersion(StoreCodec.write(version));
+		assertEquals(version, read);
+		assertEquals("save-0", read.conflict().lostSave());
+	}
+
+	@Test
+	void lostSaveThatIsNoTextIsDroppedButKeepsTheNote() throws IOException {
+		String json = "{\"format\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
+				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":false,\"payload\":{},"
+				+ "\"conflict\":{\"kind\":\"DOUBLE_SALE\",\"affected\":\"k4m9q2x8-1234\",\"lostSave\":{\"neu\":1}}}";
+
+		Version read = StoreCodec.readVersion(bytes(json));
+
+		assertEquals(ConflictNote.Kind.DOUBLE_SALE, read.conflict().kind());
+		assertNull(read.conflict().lostSave());
 	}
 
 	@Test

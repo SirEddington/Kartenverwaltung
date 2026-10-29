@@ -448,17 +448,23 @@ final class ConflictResolver {
 
 	/**
 	 * Die zu schreibenden Änderungen: zuerst die weiteren, die noch nicht da sind (eine Wiederholung nach einem Absturz legt
-	 * eine weitere Einheit nicht doppelt an), dann die Zusammenführung {@code [Deren, Meine]}.
+	 * eine weitere Einheit nicht doppelt an), dann die Zusammenführung {@code [Deren, Meine]}. Jeder Vermerk bekommt den
+	 * Speichervorgang von "Meine" ({@link ConflictNote#lostSave()}): Die Zusammenführungen bekommen je Strecke einen neuen,
+	 * die Konflikte eines verlorenen Speichervorgangs gehören im Dialog aber zusammen.
 	 */
 	private List<Change> changes(UnitKey unit, Stretch stretch, Resolution resolution) throws IOException {
+		String lostSave = stretch.mine().saveId();
 		List<Change> changes = new ArrayList<>();
 		for (Change extra : resolution.extra()) {
 			if (!alreadyThere(extra)) {
-				changes.add(extra);
+				changes.add(extra.note() == null ? extra
+						: new Change(extra.unit(), extra.parents(), extra.payload(), extra.deleted(),
+								extra.note().withLostSave(lostSave), extra.seen()));
 			}
 		}
+		ConflictNote note = resolution.note() == null ? null : resolution.note().withLostSave(lostSave);
 		changes.add(new Change(unit, List.of(stretch.theirs().id(), stretch.mine().id()), resolution.payload(),
-				resolution.deleted(), resolution.note(), seenOf(unit, resolution, stretch.mine(), stretch.theirs())));
+				resolution.deleted(), note, seenOf(unit, resolution, stretch.mine(), stretch.theirs())));
 		return changes;
 	}
 
@@ -513,7 +519,7 @@ final class ConflictResolver {
 		List<ConflictNote.FieldConflict> fields = note.fields().stream()
 				.map(f -> new ConflictNote.FieldConflict(f.group(), f.mine().deepCopy(), f.theirs().deepCopy())).toList();
 		return new ConflictNote(note.kind(), note.affected(), note.other(), fields, note.moved(),
-				note.place() == null ? null : note.place().deepCopy(), note.dropped());
+				note.place() == null ? null : note.place().deepCopy(), note.dropped(), note.lostSave());
 	}
 
 	/**
