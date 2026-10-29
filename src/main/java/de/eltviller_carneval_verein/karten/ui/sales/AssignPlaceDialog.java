@@ -93,7 +93,7 @@ public final class AssignPlaceDialog {
 	 * Sitznummer. Frei ist ein Sitz, wenn keine Buchung der Vorstellung auf ihn zeigt, die Daten trägt
 	 * ({@link Booking#hasData()}); ein bloßer Einzelpreis belegt ihn nicht.
 	 */
-	static List<Seat> freeSeats(Presentation presentation, SeatingPlan plan) {
+	public static List<Seat> freeSeats(Presentation presentation, SeatingPlan plan) {
 		if (plan == null) {
 			return List.of();
 		}
@@ -111,7 +111,7 @@ public final class AssignPlaceDialog {
 	}
 
 	/** "Tisch A3, Sitz 2" bzw. "Tisch 3, Sitz 2" ohne Reihenbuchstaben. */
-	static String label(Seat seat) {
+	public static String label(Seat seat) {
 		return seat.getParent().getDisplayName() + ", Sitz " + seat.getSeatNumber();
 	}
 }

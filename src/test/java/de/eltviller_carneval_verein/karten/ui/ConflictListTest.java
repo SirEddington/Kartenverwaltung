@@ -190,4 +190,25 @@ class ConflictListTest {
 		assertEquals("Maier, Anna", rows.get(0).fields().get(0).valid());
 		assertEquals("Halle B", rows.get(1).fields().get(0).mine());
 	}
+
+	@Test
+	void indicatorTextCountsTheOpenConflicts() {
+		assertEquals("1 Konflikt offen", ConflictList.indicatorText(1));
+		assertEquals("2 Konflikte offen", ConflictList.indicatorText(2));
+		assertEquals("12 Konflikte offen", ConflictList.indicatorText(12));
+	}
+
+	@Test
+	void placeTextNamesTheFormerPlaceOfTheNote() {
+		ObjectNode place = JsonNodeFactory.instance.objectNode().put("rowLabel", "A").put("tableNumber", 3).put("seatNumber", 2);
+		ConflictNote withPlace = new ConflictNote(Kind.DOUBLE_SALE, "me", null, List.of(), null, place, null);
+		ObjectNode noRow = JsonNodeFactory.instance.objectNode().put("rowLabel", "").put("tableNumber", 7).put("seatNumber", 1);
+
+		assertEquals("Tisch A3, Sitz 2", ConflictList.placeText(withPlace));
+		assertEquals("Tisch 7, Sitz 1",
+				ConflictList.placeText(new ConflictNote(Kind.DOUBLE_SALE, "me", null, List.of(), null, noRow, null)));
+		assertNull(ConflictList.placeText(note(Kind.DOUBLE_SALE, null)), "ohne Platz im Vermerk");
+		assertNull(ConflictList.placeText(new ConflictNote(Kind.DOUBLE_SALE, "me", null, List.of(), null,
+				JsonNodeFactory.instance.objectNode().put("rowLabel", "A"), null)), "ohne Tischnummer ist es kein Platz");
+	}
 }

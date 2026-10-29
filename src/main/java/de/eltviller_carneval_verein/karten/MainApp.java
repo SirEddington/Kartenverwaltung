@@ -22,8 +22,16 @@ import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
+import de.eltviller_carneval_verein.karten.ui.ConflictActions;
+import de.eltviller_carneval_verein.karten.ui.ConflictDialog;
+import de.eltviller_carneval_verein.karten.ui.ConflictIndicator;
+import de.eltviller_carneval_verein.karten.ui.ConflictLabels;
+import de.eltviller_carneval_verein.karten.ui.ConflictList;
 import de.eltviller_carneval_verein.karten.ui.ContextMenuGuard;
+import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EnterOnButtons;
+import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.HallSaver;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LiveUpdates;
 import de.eltviller_carneval_verein.karten.ui.LiveValidator;
@@ -35,6 +43,7 @@ import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.fxml.FXMLLoader;
+import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
@@ -44,6 +53,8 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
@@ -60,6 +71,11 @@ public class MainApp extends Application {
 	static final String SHARED_DIR_PROPERTY = "karten.sharedDir";
 
 	private static Stage primaryStage;
+	// Der Sammel-Dialog für Konflikte (gesetzt, sobald der Bestand geladen ist) und der Hinweis in der Fußzeile des aktuellen Fensterinhalts
+	private static SyncService conflictSync;
+	private static ConflictList conflictList;
+	private static ConflictActions conflictActions;
+	private static ConflictIndicator conflictIndicator;
 	// Mindestbreite des Hauptfensters: So schmal darf es werden, die Kopfzeilen der Bildschirme sind darauf abgestimmt
 	private static final double MIN_WIDTH = 1250.0;
 	private static double width = 1300.0;
@@ -203,8 +219,15 @@ public class MainApp extends Application {
 		// Jedes Speichern und Löschen führt den gespeicherten Stand der Änderungserkennung nach, egal von wo aus
 		repository.addListener(ChangeTracker.events().repositoryUpdater());
 		halls.addListener(ChangeTracker.halls().repositoryUpdater());
+		// Der Sammel-Dialog für Konflikte: Fußzeile und Dialog hängen an denselben Konflikten des Versionsspeichers
+		SyncService sync = SyncService.getInstance();
+		ConflictActions conflictActions = new ConflictActions(repository, halls, ChangeTracker.events(), ChangeTracker.halls(),
+				EditingUnits.getInstance(), sync, EventSaver::save, HallSaver::save);
+		MainApp.conflictActions = conflictActions;
+		conflictList = new ConflictList(sync::openConflicts, ConflictLabels.of(repository, halls), conflictActions::isAdopted);
+		conflictSync = sync;
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
-		LiveUpdates.install(SyncService.getInstance());
+		LiveUpdates.install(sync, MainApp::conflictsChanged);
 		ChangeTrigger.install();
 		LiveValidator.install();
 
@@ -231,6 +254,37 @@ public class MainApp extends Application {
 		}
 
 		showMenuView();
+		// Konflikte, die schon beim Start aufgelöst wurden (der Versionsspeicher meldete sie, bevor jemand zuhörte)
+		conflictsChanged();
+	}
+
+	/**
+	 * Die offenen Konflikte können sich geändert haben (FX-Thread): Die Fußzeile zeigt die Zahl neu; kam ein Konflikt dazu, den
+	 * der Nutzer noch nie gesehen hat, öffnet sich der Sammel-Dialog, sonst wird ein offener nur aufgefrischt.
+	 */
+	private static void conflictsChanged() {
+		if (conflictIndicator != null) {
+			conflictIndicator.refresh();
+		}
+		if (conflictList != null && conflictList.hasUnseen()) {
+			openConflictDialog();
+		} else {
+			ConflictDialog.refreshIfOpen();
+		}
+	}
+
+	/** Zeigt den Sammel-Dialog (oder holt ihn nach vorn): per Klick auf die Fußzeile und bei neuen Konflikten. */
+	private static void openConflictDialog() {
+		if (conflictList == null) {
+			return;
+		}
+		ConflictDialog.show(primaryStage, conflictList, conflictActions);
+		conflictList.markSeen();
+	}
+
+	/** Die Zahl der offenen Konflikte für die Fußzeile; vor dem Start des Versionsspeichers keine. */
+	private static int openConflictCount() {
+		return conflictSync == null ? 0 : conflictSync.openConflicts().size();
 	}
 
 	/**
@@ -410,7 +464,18 @@ public class MainApp extends Application {
 		background.setOpacity(0.12);
 		background.setMouseTransparent(true);
 
-		StackPane wrapper = new StackPane(background, content);
+		// unter dem Inhalt die Zeile mit dem Hinweis auf offene Konflikte; ohne Konflikte nimmt sie keinen Platz
+		ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount, MainApp::openConflictDialog);
+		conflictIndicator = indicator;
+		HBox indicatorBar = new HBox(indicator);
+		indicatorBar.setAlignment(Pos.CENTER_LEFT);
+		indicatorBar.setPadding(new Insets(0, 20, 8, 20));
+		indicatorBar.visibleProperty().bind(indicator.visibleProperty());
+		indicatorBar.managedProperty().bind(indicator.managedProperty());
+		VBox.setVgrow(content, Priority.ALWAYS);
+		VBox screen = new VBox(content, indicatorBar);
+
+		StackPane wrapper = new StackPane(background, screen);
 		background.fitHeightProperty().bind(wrapper.heightProperty().multiply(0.85));
 		StackPane.setAlignment(background, Pos.CENTER);
 		return wrapper;

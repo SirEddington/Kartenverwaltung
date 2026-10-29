@@ -147,6 +147,26 @@ public final class ConflictList {
 		seen.addAll(delivered);
 	}
 
+	/** Der Hinweis der Fußzeile: {@code 1 Konflikt offen} bzw. {@code <N> Konflikte offen}. */
+	public static String indicatorText(int count) {
+		return count == 1 ? "1 Konflikt offen" : count + " Konflikte offen";
+	}
+
+	/**
+	 * Der Platz, den der Vermerk festhält (bei einem Doppelverkauf der bisherige der Buchung), wie ihn die App nennt:
+	 * {@code Tisch A3, Sitz 2} bzw. ohne Reihenbuchstaben {@code Tisch 3, Sitz 2}.
+	 *
+	 * @return der Text; {@code null}, wenn der Vermerk keinen Platz mit Tischnummer hat
+	 */
+	public static String placeText(ConflictNote note) {
+		ObjectNode place = note == null ? null : note.place();
+		if (place == null || place.path("tableNumber").asInt(0) <= 0) {
+			return null;
+		}
+		return "Tisch " + place.path("rowLabel").asText("") + place.path("tableNumber").asInt() + ", Sitz "
+				+ place.path("seatNumber").asInt();
+	}
+
 	private Row row(OpenConflict conflict) {
 		ConflictNote note = conflict.note();
 		String entry = labelOf.apply(conflict.unit());

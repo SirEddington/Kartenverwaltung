@@ -57,6 +57,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions.Availability;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Action;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Row;
+import de.eltviller_carneval_verein.karten.ui.sales.AssignPlaceDialog;
 
 /**
  * Die Aktionen des Sammel-Dialogs auf echten Konflikten: Zwei Rechner mit eigenem Dienst und den Strategien der App tauschen
@@ -769,4 +770,148 @@ class ConflictActionsTest {
 	}
 
 	// <-- Buchung noch am Leben
+
+	// Platz zuweisen und Hinweise vor dem Übernehmen (Aufgabe 16) -->
+
+	@Test
+	void assignPlaceGivesTheBookingTheSeatAndAcknowledges() throws IOException {
+		Row sale = doubleSale();
+		Seat free = b.plan().getSeats().get(5);
+
+		b.actions().assignPlace(sale, free);
+
+		Booking bert = b.seat(5);
+		assertEquals("Bert", bert.getLastName());
+		assertFalse(bert.isUnassigned());
+		assertEquals(1, b.friday().getBookings().stream().filter(booking -> free.getId().equals(booking.getSeatId())).count());
+		assertEquals("Bert", b.sync.unitState(b.seatUnit(5)).current().payload().get("lastName").asText());
+		assertEquals(List.of(), b.sync.openConflicts());
+	}
+
+	@Test
+	void assignPlaceToATakenSeatSaysSoAndChangesNothing() {
+		Row sale = doubleSale();
+		Seat taken = b.plan().getSeats().get(0);
+		List<Booking> before = new ArrayList<>(b.friday().getBookings());
+
+		IllegalStateException failure = assertThrows(IllegalStateException.class, () -> b.actions().assignPlace(sale, taken));
+
+		assertEquals("Platz zuweisen nicht möglich: " + AssignPlaceDialog.label(taken) + " ist bereits belegt.",
+				failure.getMessage());
+		assertEquals(before, b.friday().getBookings());
+		assertTrue(b.actions().bookingToAssign(sale).isUnassigned());
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	@Test
+	void failedAssignPutsTheBookingBackWithoutPlace() {
+		Row sale = doubleSale();
+		Booking bert = b.actions().bookingToAssign(sale);
+		Booking snapshot = bert.copy();
+		List<Booking> before = new ArrayList<>(b.friday().getBookings());
+
+		assertThrows(IllegalStateException.class,
+				() -> b.actions(saved -> false, hall -> true).assignPlace(sale, b.plan().getSeats().get(5)));
+
+		assertEquals(before, b.friday().getBookings(), "auch der leere Platzhalter des Sitzes ist wieder da");
+		assertTrue(bert.isUnassigned());
+		assertEquals(snapshot.getSeatId(), bert.getSeatId());
+		assertEquals(snapshot.getPlaceLabel(), bert.getPlaceLabel());
+		assertEquals(Set.of(), b.repository.locallyChangedUnits());
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	@Test
+	void assignPlaceIsRefusedWhileTheEventIsDirty() {
+		Row sale = doubleSale();
+		b.eventTracker.track(b.event);
+		b.seat(3).setLastName("Neu");
+		b.eventTracker.check(b.event);
+
+		assertThrows(IllegalStateException.class, () -> b.actions().assignPlace(sale, b.plan().getSeats().get(5)));
+		assertTrue(b.actions().bookingToAssign(sale).isUnassigned());
+	}
+
+	@Test
+	void dismissAcknowledgesWithoutChangingTheModel() {
+		Row row = commentConflict();
+
+		b.actions().dismiss(row);
+
+		assertEquals(List.of(), b.sync.openConflicts());
+		assertEquals("von A", b.seat(0).getComment(), "ohne Aktion bleibt der gültige Wert");
+		assertEquals(Set.of(), b.repository.locallyChangedUnits());
+	}
+
+	@Test
+	void dismissFailureKeepsTheConflictAndSaysSo() {
+		Row row = commentConflict();
+		b.files.failWhen(p -> p.toString().contains("conflicts-ack"), "createNew", new IOException("Platte voll"));
+
+		IllegalStateException failure = assertThrows(IllegalStateException.class, () -> b.actions().dismiss(row));
+
+		assertTrue(failure.getMessage().contains("nicht bestätigen"), failure.getMessage());
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	@Test
+	void valueWithoutConsequencesForBookingsHasNoNotice() {
+		Row row = commentConflict();
+
+		assertNull(b.actions().bookingImpact(row, "comment"));
+	}
+
+	@Test
+	void takeMyHallNamesTheBookingsThatLoseTheirSeat() {
+		String hallId = a.hall.getId();
+		a.hall.setName("Halle A");
+		a.halls.saveHall(a.hall);
+		Hall mine = b.halls.findById(hallId);
+		SeatingPlan plan = mine.getSeatingPlans().get(0);
+		plan.deleteTable(plan.getTables().get(0));
+		b.halls.saveHall(mine);
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(Action.TAKE_MY_HALL, row.action());
+
+		String note = b.actions().bookingImpact(row, null);
+
+		assertNotNull(note);
+		assertTrue(note.contains("1 Buchung mit Daten in Vorstellung Freitag (Event Prunksitzung)"), note);
+	}
+
+	@Test
+	void takeMyHallWithoutLostSeatsHasNoNotice() {
+		assertNull(b.actions().bookingImpact(hallConflict(), null));
+	}
+
+	@Test
+	void takeMyValueOfAnotherSeatingPlanNamesTheEffectOnTheBookings() {
+		Hall shared = a.hall;
+		SeatingPlan second = shared.addSeatingPlan();
+		TableRow secondRow = second.addRow();
+		secondRow.setLabel("B");
+		second.fillRow(secondRow, 1, 1);
+		SeatingPlan third = shared.addSeatingPlan();
+		TableRow thirdRow = third.addRow();
+		thirdRow.setLabel("C");
+		third.fillRow(thirdRow, 1, 1);
+		a.halls.saveHall(shared);
+		settle();
+		a.friday().setSeatingPlanId(second.getId());
+		a.saveEvent();
+		b.friday().setSeatingPlanId(third.getId());
+		b.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(Action.TAKE_MY_VALUE, row.action());
+		assertEquals(List.of("hall"), row.fields().stream().map(ConflictList.FieldRow::group).toList());
+
+		String note = b.actions().bookingImpact(row, "hall");
+
+		assertNotNull(note);
+		assertTrue(note.contains("1 ohne Platz"), note);
+	}
+
+	// <-- Platz zuweisen und Hinweise
 }

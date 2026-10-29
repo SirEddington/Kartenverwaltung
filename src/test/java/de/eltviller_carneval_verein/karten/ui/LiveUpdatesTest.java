@@ -667,6 +667,35 @@ class LiveUpdatesTest {
 	}
 
 	@Test
+	void conflictsChangedIsPassedOnToTheDialogHook() {
+		List<String> calls = new ArrayList<>();
+		live.listener().conflictsChanged();
+		live.setOnConflictsChanged(() -> calls.add("geändert"));
+
+		live.listener().conflictsChanged();
+		live.listener().conflictsChanged();
+
+		assertEquals(List.of("geändert", "geändert"), calls);
+	}
+
+	@Test
+	void failingDialogHookDoesNotBreakTheListener() {
+		live.setOnConflictsChanged(() -> {
+			throw new IllegalStateException("Dialog kaputt");
+		});
+		Logger logger = Logger.getLogger(LiveUpdates.class.getName());
+		Level level = logger.getLevel();
+		logger.setLevel(Level.OFF);
+		try {
+			live.listener().conflictsChanged();
+		} finally {
+			logger.setLevel(level);
+		}
+
+		assertEquals(List.of(), hints, "kein Hinweis, nur das Log");
+	}
+
+	@Test
 	void deferralWithoutKnownMachineNameSaysAnotherMachine() throws IOException {
 		Booking mine = seat(friday, 0);
 		mine.setLastName("Eigen");

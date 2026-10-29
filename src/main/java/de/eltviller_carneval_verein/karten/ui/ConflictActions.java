@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -15,9 +16,12 @@ import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
@@ -35,6 +39,10 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Action;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Row;
+import de.eltviller_carneval_verein.karten.ui.event.PlanSwitchDialog;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanImpact;
+import de.eltviller_carneval_verein.karten.ui.sales.AssignPlaceDialog;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Die Aktionen der Zeilen des Sammel-Dialogs ohne JavaFX: ob eine Aktion gerade möglich ist ({@link #availability}) und
@@ -72,6 +80,8 @@ public final class ConflictActions {
 
 	/** Der Ordnername einer Buchung ohne Platz beginnt mit diesem Zeichen (siehe {@link UnitKey}). */
 	private static final String UNASSIGNED_PREFIX = "_";
+	/** Die Feldgruppe einer Vorstellung mit Halle und Bestuhlung ({@code FieldGroups}). */
+	private static final String HALL_GROUP = "hall";
 
 	private record VersionRef(UnitKey unit, VersionId id) {
 	}
@@ -155,6 +165,135 @@ public final class ConflictActions {
 		}
 		Object model = events.modelObject(note.moved());
 		return model instanceof Booking booking && booking.isUnassigned() && booking.hasData() ? booking : null;
+	}
+
+	/**
+	 * Die Bestuhlung der Vorstellung in ihrer Halle (für {@link #assignPlace}); {@code null} ohne Halle, ohne Bestuhlung und
+	 * bei einer eingefrorenen Vorstellung (wie {@code SalesPlan.of}).
+	 */
+	public SeatingPlan planOf(Presentation presentation) {
+		Hall hall = presentation.getHallId() == null ? null : halls.findById(presentation.getHallId());
+		return hall == null || presentation.isPlanMissing() ? null : hall.findSeatingPlan(presentation.getSeatingPlanId());
+	}
+
+	/**
+	 * Weist die Buchung "ohne Platz" eines Doppelverkaufs dem gewählten freien Sitz zu ({@link BookingSync#assign}), speichert
+	 * das Event und bestätigt die Zeile.
+	 *
+	 * @param seat ein Sitz der Bestuhlung aus {@link #planOf}
+	 * @throws IllegalStateException wenn die Aktion gesperrt ist, der Sitz inzwischen belegt ist ({@code "Platz zuweisen nicht
+	 *                               möglich: <Platz> ist bereits belegt."}) oder Speichern oder Bestätigen scheitert; nichts ist
+	 *                               bestätigt. Das Modell ist wieder wie vorher, außer die Zuweisung wurde schon geschrieben:
+	 *                               Dann bleibt es, und der Text beginnt mit "Gespeichert, aber nicht bestätigt".
+	 */
+	public void assignPlace(Row row, Seat seat) {
+		require(row, Action.ASSIGN_PLACE);
+		Booking booking = bookingToAssign(row);
+		UnitKey moved = row.conflict().note().moved();
+		Event event = events.findEvent(moved.eventId());
+		Presentation presentation = event.findPresentation(moved.presentationId());
+		SeatingPlan plan = planOf(presentation);
+		if (plan == null) {
+			throw new IllegalStateException(
+					"Platz zuweisen nicht möglich: " + EntityLabels.presentation(presentation) + " hat keine Bestuhlung.");
+		}
+		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
+		Booking before = booking.copy();
+		UnitKey seatUnit = UnitKey.booking(event.getId(), presentation.getId(), seat.getId());
+		VersionId versionBefore = versionOf(seatUnit);
+		if (!BookingSync.assign(presentation, plan, booking, seat)) {
+			throw new IllegalStateException(
+					"Platz zuweisen nicht möglich: " + AssignPlaceDialog.label(seat) + " ist bereits belegt.");
+		}
+		try {
+			save(event);
+		} catch (RuntimeException e) {
+			if (writtenDespite(seatUnit, versionBefore)) {
+				throw writtenButNotAcknowledged(e);
+			}
+			// die Buchung wieder ohne Platz, und der leere Platzhalter, den die Zuweisung entfernt hat, wieder an seiner Stelle
+			booking.copyFrom(before);
+			presentation.getBookings().clear();
+			presentation.getBookings().addAll(bookingsBefore);
+			throw failure(e);
+		}
+		acknowledge(row);
+	}
+
+	/**
+	 * Bestätigt die Zeile ohne Aktion ("Erledigt"): Sie verschwindet und kommt nach einem Neustart nicht wieder. Das Modell
+	 * bleibt unberührt.
+	 *
+	 * @throws IllegalStateException wenn sich der Konflikt nicht bestätigen lässt; er bleibt dann offen
+	 */
+	public void dismiss(Row row) {
+		try {
+			sync.acknowledge(Set.of(row.conflict().key()));
+		} catch (IOException e) {
+			throw new IllegalStateException("Der Konflikt ließ sich nicht bestätigen: " + StoreMessages.describe(e), e);
+		}
+	}
+
+	/**
+	 * Was die Aktion der Zeile für Buchungen bedeutet, als Text für die Rückfrage, die der Nutzer bestätigen muss, bevor er sie
+	 * wählt (dieselben Hinweise wie die Editoren): bei einer anderen Halle oder Bestuhlung einer Vorstellung ({@code group}
+	 * {@code "hall"}) die Folgen für ihre Buchungen ({@link PlanSwitchDialog#impactMessage}), bei der eigenen Fassung einer
+	 * Halle die Buchungen auf Sitzen, die die Fassung nicht mehr hat ({@link PlanImpact}).
+	 *
+	 * @param group die Feldgruppe bei {@link Action#TAKE_MY_VALUE}; sonst unbeachtet
+	 * @return der Text; {@code null}, wenn die Aktion keine Buchung betrifft
+	 */
+	public String bookingImpact(Row row, String group) {
+		if (row.action() == Action.TAKE_MY_HALL) {
+			return hallImpact(row);
+		}
+		if (row.action() != Action.TAKE_MY_VALUE || !HALL_GROUP.equals(group) || row.conflict().note() == null) {
+			return null;
+		}
+		UnitKey unit = valueUnit(row);
+		FieldConflict field = row.conflict().note().fields().stream().filter(candidate -> candidate.group().equals(group))
+				.findFirst().orElse(null);
+		if (unit.type() != UnitType.PRESENTATION || field == null || !(events.modelObject(unit) instanceof Presentation presentation)) {
+			return null;
+		}
+		String hallId = text(field.mine(), "hallId", presentation.getHallId());
+		String planId = text(field.mine(), "seatingPlanId", presentation.getSeatingPlanId());
+		Hall hall = hallId == null ? null : halls.findById(hallId);
+		return PlanSwitchDialog.impactMessage(presentation, hall == null ? null : hall.findSeatingPlan(planId));
+	}
+
+	/** Der Text des Felds; ohne das Feld {@code fallback}, bei {@code null} im Feld {@code null}. */
+	private static String text(ObjectNode values, String field, String fallback) {
+		JsonNode value = values.get(field);
+		if (value == null) {
+			return fallback;
+		}
+		return value.isNull() ? null : value.asText();
+	}
+
+	/** Die Buchungen auf Sitzen, die die eigene Fassung der Halle nicht mehr hat, samt Hinweis; {@code null} ohne solche. */
+	private String hallImpact(Row row) {
+		Hall current = hallToReplace(row);
+		Version version = dropped(row.conflict());
+		Hall mine = current == null || version == null ? null : halls.readHall(version.payload());
+		if (mine == null || current.getSeatingPlans() == null) {
+			return null;
+		}
+		List<Event> loaded = events.loadEvents();
+		List<PlanImpact> impacts = new ArrayList<>();
+		for (SeatingPlan plan : current.getSeatingPlans()) {
+			SeatingPlan kept = mine.findSeatingPlan(plan.getId());
+			Set<String> keptIds = new HashSet<>();
+			if (kept != null) {
+				kept.getSeats().forEach(seat -> keptIds.add(seat.getId()));
+			}
+			Set<String> removed = new HashSet<>();
+			plan.getSeats().forEach(seat -> removed.add(seat.getId()));
+			removed.removeAll(keptIds);
+			impacts.add(PlanImpact.of(plan.getId(), removed, loaded));
+		}
+		PlanImpact all = PlanImpact.combine(impacts);
+		return all.isEmpty() ? null : "Die Halle wird durch deine Fassung ersetzt." + all.deleteNote();
 	}
 
 	/**

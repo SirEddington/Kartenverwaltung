@@ -83,13 +83,31 @@ public final class PlanSwitchDialog {
 				+ r.removedEmpty() + " leere entfernt";
 	}
 
-	private static boolean ask(Presentation p, SeatingPlan newPlan, Report shown) {
+	/**
+	 * Die Folgen des Wechsels als Text für eine Rückfrage, ohne die Vorstellung zu verändern: für Aufrufer, die den Wechsel
+	 * selbst ausführen (der Sammel-Dialog übernimmt die Werte über das Repository).
+	 *
+	 * @return der Text; {@code null}, wenn es nichts zu nennen gibt (kein Wechsel, keine Bestuhlung oder keine betroffene Buchung)
+	 */
+	public static String impactMessage(Presentation p, SeatingPlan newPlan) {
+		if (newPlan == null || Objects.equals(newPlan.getId(), p.getSeatingPlanId())) {
+			return null;
+		}
+		Report shown = dialogReport(p, BookingSync.preview(p, newPlan));
+		return needsConfirmation(shown) ? message(p, newPlan, shown) : null;
+	}
+
+	private static String message(Presentation p, SeatingPlan newPlan, Report shown) {
 		StringBuilder message = new StringBuilder();
 		message.append(EntityLabels.presentation(p)).append(" bekommt die Bestuhlung \"")
 				.append(EntityLabels.nameOrPlaceholder(newPlan.getName())).append("\":\n\n").append(summary(shown)).append('.');
 		if (shown.unassigned() > 0) {
 			message.append("\n\nBuchungen ohne Platz bleiben erhalten und können später einem Sitz zugewiesen werden.");
 		}
-		return ConfirmDialog.confirm("Bestuhlung wechseln", message.toString(), "Wechseln", "button-primary", null);
+		return message.toString();
+	}
+
+	private static boolean ask(Presentation p, SeatingPlan newPlan, Report shown) {
+		return ConfirmDialog.confirm("Bestuhlung wechseln", message(p, newPlan, shown), "Wechseln", "button-primary", null);
 	}
 }

@@ -23,7 +23,7 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
  * sie über die Sitzkennung ihren Tischen). Gezählt werden die Buchungen der Vorstellungen, die die Bestuhlung nutzen,
  * deren {@link Booking#getSeatId() Sitzkennung} unter den betroffenen Sitzen ist.
  */
-final class PlanImpact {
+public final class PlanImpact {
 
 	/** Eine Vorstellung mit betroffenen Buchungen; die Namen sind schon für die Anzeige aufbereitet. */
 	record Entry(String eventName, String presentationName, int bookings) {
@@ -40,7 +40,7 @@ final class PlanImpact {
 	 * Alle Argumente dürfen {@code null} sein (dann ist nichts betroffen), ebenso die Sitzkennung einer Buchung (sie
 	 * zählt dann nicht; {@code Set.of} lehnt {@code contains(null)} ab).
 	 */
-	static PlanImpact of(String planId, Collection<String> seatIds, List<Event> events) {
+	public static PlanImpact of(String planId, Collection<String> seatIds, List<Event> events) {
 		List<Entry> entries = new ArrayList<>();
 		if (planId == null || seatIds == null || seatIds.isEmpty() || events == null) {
 			return new PlanImpact(entries);
@@ -104,11 +104,18 @@ final class PlanImpact {
 		return ids;
 	}
 
+	/** Fasst die Auswirkungen mehrerer Bestuhlungen zusammen (jede Vorstellung nutzt nur eine, die Einträge überschneiden sich nicht). */
+	public static PlanImpact combine(Collection<PlanImpact> impacts) {
+		List<Entry> entries = new ArrayList<>();
+		impacts.forEach(impact -> entries.addAll(impact.entries));
+		return new PlanImpact(entries);
+	}
+
 	List<Entry> entries() {
 		return entries;
 	}
 
-	boolean isEmpty() {
+	public boolean isEmpty() {
 		return entries.isEmpty();
 	}
 
@@ -120,7 +127,7 @@ final class PlanImpact {
 	 * Der Zusatz für die Rückfrage vor dem Löschen (beginnt mit einer Leerzeile), ohne betroffene Buchungen leer. Eine
 	 * Vorstellung steht im Satz, mehrere je in einer Zeile.
 	 */
-	String deleteNote() {
+	public String deleteNote() {
 		if (isEmpty()) {
 			return "";
 		}

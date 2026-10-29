@@ -92,6 +92,9 @@ public final class LiveUpdates {
 	private final Set<Announced> announced = new HashSet<>();
 	private final EventListener eventListener = new EventListener();
 	private boolean retryScheduled;
+	/** Wird gerufen, wenn sich die offenen Konflikte geändert haben können (FX-Thread): Hinweis in der Fußzeile, Sammel-Dialog. */
+	private Runnable onConflictsChanged = () -> {
+	};
 
 	/**
 	 * Verbindet die Repositories mit den Trackern und der Registratur der Bearbeitungen.
@@ -128,16 +131,33 @@ public final class LiveUpdates {
 	}
 
 	/**
+	 * Was bei {@code conflictsChanged} des Versionsspeichers geschieht (FX-Thread): in der App die Fußzeile auffrischen und
+	 * den Sammel-Dialog öffnen, wenn ein neuer Konflikt dazukam.
+	 */
+	public void setOnConflictsChanged(Runnable onConflictsChanged) {
+		this.onConflictsChanged = onConflictsChanged;
+	}
+
+	/**
 	 * Die Rückmeldungen des Versionsspeichers kommen auf dem FX-Thread an. Gezeigt wird, was der Nutzer wissen muss und nicht
 	 * selbst sieht: ein Fehler des Dienstes; dazu arbeitet {@code unitsChanged} fremde Stände ein. Eine eigene Änderung,
 	 * die gegen eine andere verloren hat, steht nur im Log: Der Speicher führt sie zusammen, und der Konflikt erscheint im
-	 * Dialog.
+	 * Dialog ({@code conflictsChanged}).
 	 */
 	public SyncListener listener() {
 		return new SyncListener() {
 			@Override
 			public void unitsChanged(Set<UnitKey> units) {
 				apply(() -> halls.applyForeign(units), () -> events.applyForeign(units));
+			}
+
+			@Override
+			public void conflictsChanged() {
+				try {
+					onConflictsChanged.run();
+				} catch (RuntimeException e) {
+					LOG.log(Level.SEVERE, "Die Konflikte ließen sich nicht anzeigen", e);
+				}
 			}
 
 			@Override
@@ -159,11 +179,16 @@ public final class LiveUpdates {
 		hallRestorer.addListener((replaced, restored) -> scheduleRetry());
 	}
 
-	/** Wie die Anwendung sie braucht: die Repositories und Tracker der App, Wiederholen und Hinweise auf dem FX-Thread. */
-	public static void install(SyncService sync) {
+	/**
+	 * Wie die Anwendung sie braucht: die Repositories und Tracker der App, Wiederholen und Hinweise auf dem FX-Thread.
+	 *
+	 * @param onConflictsChanged was bei geänderten Konflikten geschieht ({@link #setOnConflictsChanged})
+	 */
+	public static void install(SyncService sync, Runnable onConflictsChanged) {
 		LiveUpdates live = new LiveUpdates(StoreHallRepository.getInstance(), StoreEventRepository.getInstance(),
 				ChangeTracker.halls(), ChangeTracker.events(), EditingUnits.getInstance(), Platform::runLater,
 				text -> StatusMessage.getInstance().show(Severity.WARNING, text));
+		live.setOnConflictsChanged(onConflictsChanged);
 		live.watch(StateRestorer.events(), StateRestorer.halls());
 		sync.setListener(live.listener());
 		// Meldungen, die nach dem Lesen des Bestands beim Start, aber vor dieser Stelle ankamen, liefen ins Leere

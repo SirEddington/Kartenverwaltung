@@ -984,3 +984,20 @@
     -fx-background-insets: 0, 0 1 1 1;
     -fx-padding: 10px;
 }
+
+/* ------------------------------------------------------------------------------
+ * KONFLIKTE: Hinweis in der Fußzeile und Sammel-Dialog (ConflictIndicator, ConflictDialog)
+ * ------------------------------------------------------------------------------ */
+.conflict-indicator {
+    -fx-text-fill: -fx-status-warning-text;
+    -fx-font-weight: bold;
+    -fx-underline: true;
+}
+
+.conflict-error {
+    -fx-text-fill: -fx-status-error-text;
+}
+
+.conflict-adopted {
+    -fx-text-fill: -fx-status-success-text;
+}
