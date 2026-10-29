@@ -209,13 +209,21 @@ public final class StoreCodec {
 				optionalText(node, "operator"), VersionId.of(text(node, "version")));
 	}
 
+	/**
+	 * Die optionale Einheit, auf die eine Buchung gewichen ist. Ein Pfad, den diese Programmversion nicht kennt (aus
+	 * einer neueren Programmversion), wird wie eine unbekannte Art mit einer Warnung übergangen: Der Vermerk bleibt,
+	 * nur ohne {@code moved}. Ein Wert, der kein Text ist, bleibt eine {@link IOException}.
+	 */
 	private static UnitKey readMoved(JsonNode node) throws IOException {
 		if (node == null || node.isNull()) {
 			return null;
 		}
 		String path = asText(node, "moved");
-		return UnitKey.parse(path)
-				.orElseThrow(() -> new IOException("Das Feld moved enthält keinen Einheitenpfad: " + path));
+		UnitKey moved = UnitKey.parse(path).orElse(null);
+		if (moved == null) {
+			LOGGER.log(Level.WARNING, "Der Einheitenpfad " + path + " im Feld moved ist unbekannt und wird übergangen.");
+		}
+		return moved;
 	}
 
 	/** Die optionalen gelesenen Listen: Rechner-ID auf Nummer; fehlt das Feld, ist die Zuordnung leer. */

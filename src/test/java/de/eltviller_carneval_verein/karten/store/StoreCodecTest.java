@@ -267,6 +267,21 @@ class StoreCodecTest {
 	}
 
 	@Test
+	void unknownMovedPathDropsOnlyMovedButKeepsTheNote() throws IOException {
+		String json = "{\"format\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
+				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":false,\"payload\":{\"a\":1},"
+				+ "\"conflict\":{\"kind\":\"DOUBLE_SALE\",\"affected\":\"k4m9q2x8-1234\",\"moved\":\"zukunft/neue/art\","
+				+ "\"dropped\":\"" + V2.value() + "\"}}";
+
+		Version read = StoreCodec.readVersion(bytes(json));
+
+		assertEquals(ConflictNote.Kind.DOUBLE_SALE, read.conflict().kind());
+		assertNull(read.conflict().moved());
+		assertEquals(V2, read.conflict().dropped());
+		assertEquals(payload("{\"a\":1}"), read.payload());
+	}
+
+	@Test
 	void versionWithoutNewFieldsHasExactlyTheKnownBytes() throws IOException {
 		Version version = new Version(StoreCodec.FORMAT, V3, List.of(V1), "m", "Kasse 1", "Anna", AT, "save-1", false,
 				payload("{\"a\":1}"));
@@ -284,7 +299,7 @@ class StoreCodecTest {
 		String note = "\"conflict\":{\"kind\":\"FIELDS\",\"affected\":\"x\",";
 		for (String members : List.of("\"conflict\":5", "\"conflict\":{\"affected\":\"x\"}",
 				"\"conflict\":{\"kind\":5,\"affected\":\"x\"}", note + "\"fields\":{}}",
-				note + "\"fields\":[{\"group\":\"g\",\"mine\":{},\"theirs\":1}]}", note + "\"moved\":\"kein/pfad\"}",
+				note + "\"fields\":[{\"group\":\"g\",\"mine\":{},\"theirs\":1}]}", note + "\"moved\":5}",
 				note + "\"place\":[]}", note + "\"dropped\":\"kaputt\"}", note + "\"other\":{\"machine\":\"m\"}}",
 				"\"seen\":[1]", "\"seen\":{\"m\":\"viele\"}", "\"seen\":{\"m\":1.5}")) {
 			String json = head + members + "}";
