@@ -151,8 +151,8 @@ public final class CustomerDisplay {
 		planPane.contentPane().widthProperty().addListener(refit);
 		planPane.contentPane().heightProperty().addListener(refit);
 
-		// Hintergrund, Wappen und Stylesheet wie in allen Ansichten der App
-		scene = MainApp.createScene(contentLayout);
+		// Hintergrund, Wappen und Stylesheet wie in allen Ansichten der App, aber ohne den Hinweis auf offene Konflikte
+		scene = MainApp.createSceneWithoutConflictHint(contentLayout);
 		// Automatisch steht die Kartenübersicht im Hochformat unter dem Plan, sonst rechts; die Wahl im Menü "Anzeige" geht vor
 		scene.widthProperty().addListener(placementInvalidated);
 		scene.heightProperty().addListener(placementInvalidated);

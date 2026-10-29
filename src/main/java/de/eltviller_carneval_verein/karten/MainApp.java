@@ -439,10 +439,25 @@ public class MainApp extends Application {
 	}
 
 	/**
-	 * Die einzige Stelle, an der die Scenes der App entstehen: Hintergrund und Stylesheet.
+	 * Die Scene einer Ansicht des Hauptfensters: Hintergrund, Stylesheet und darunter der Hinweis auf offene Konflikte,
+	 * den {@link #conflictsChanged()} auffrischt.
 	 */
 	public static Scene createScene(Parent content) {
-		Scene scene = new Scene(wrapWithBackground(content), width, height);
+		return createScene(content, true);
+	}
+
+	/**
+	 * Die Scene eines weiteren Fensters (Kundenfenster): Hintergrund und Stylesheet wie im Hauptfenster, aber ohne den
+	 * Hinweis auf offene Konflikte. Der Hinweis gehört nur ins Hauptfenster; Kunden sollen ihn nicht sehen, und der
+	 * Hinweis des Hauptfensters bleibt der, den die App auffrischt.
+	 */
+	public static Scene createSceneWithoutConflictHint(Parent content) {
+		return createScene(content, false);
+	}
+
+	/** Die einzige Stelle, an der die Scenes der App entstehen. */
+	private static Scene createScene(Parent content, boolean conflictHint) {
+		Scene scene = new Scene(wrapWithBackground(content, conflictHint), width, height);
 		scene.getStylesheets().add(stylesheetUrl());
 		EnterOnButtons.install(scene);
 		return scene;
@@ -456,24 +471,28 @@ public class MainApp extends Application {
 	 * Legt das ECV-Wappen groß und dezent transparent hinter den eigentlichen
 	 * Bildschirminhalt, damit es auf jedem Screen einheitlich im Hintergrund
 	 * erscheint, statt es in jeder FXML einzeln nachzubauen. Skaliert mit der
-	 * tatsächlichen Fenstergröße mit.
+	 * tatsächlichen Fenstergröße mit. Mit {@code conflictHint} steht unter dem Inhalt der Hinweis auf offene Konflikte,
+	 * und er wird der Hinweis, den die App auffrischt.
 	 */
-	private static Parent wrapWithBackground(Parent content) {
+	private static Parent wrapWithBackground(Parent content, boolean conflictHint) {
 		ImageView background = new ImageView(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/wappen.png")));
 		background.setPreserveRatio(true);
 		background.setOpacity(0.12);
 		background.setMouseTransparent(true);
 
-		// unter dem Inhalt die Zeile mit dem Hinweis auf offene Konflikte; ohne Konflikte nimmt sie keinen Platz
-		ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount, MainApp::openConflictDialog);
-		conflictIndicator = indicator;
-		HBox indicatorBar = new HBox(indicator);
-		indicatorBar.setAlignment(Pos.CENTER_LEFT);
-		indicatorBar.setPadding(new Insets(0, 20, 8, 20));
-		indicatorBar.visibleProperty().bind(indicator.visibleProperty());
-		indicatorBar.managedProperty().bind(indicator.managedProperty());
 		VBox.setVgrow(content, Priority.ALWAYS);
-		VBox screen = new VBox(content, indicatorBar);
+		VBox screen = new VBox(content);
+		if (conflictHint) {
+			// unter dem Inhalt die Zeile mit dem Hinweis auf offene Konflikte; ohne Konflikte nimmt sie keinen Platz
+			ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount, MainApp::openConflictDialog);
+			conflictIndicator = indicator;
+			HBox indicatorBar = new HBox(indicator);
+			indicatorBar.setAlignment(Pos.CENTER_LEFT);
+			indicatorBar.setPadding(new Insets(0, 20, 8, 20));
+			indicatorBar.visibleProperty().bind(indicator.visibleProperty());
+			indicatorBar.managedProperty().bind(indicator.managedProperty());
+			screen.getChildren().add(indicatorBar);
+		}
 
 		StackPane wrapper = new StackPane(background, screen);
 		background.fitHeightProperty().bind(wrapper.heightProperty().multiply(0.85));
