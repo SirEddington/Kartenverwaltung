@@ -224,7 +224,8 @@ public class MainApp extends Application {
 		ConflictActions conflictActions = new ConflictActions(repository, halls, ChangeTracker.events(), ChangeTracker.halls(),
 				EditingUnits.getInstance(), sync, EventSaver::save, HallSaver::save);
 		MainApp.conflictActions = conflictActions;
-		conflictList = new ConflictList(sync::openConflicts, ConflictLabels.of(repository, halls), conflictActions::isAdopted);
+		conflictList = new ConflictList(sync::openConflicts, ConflictLabels.of(repository, halls), conflictActions::isAdopted,
+				halls::findById);
 		conflictSync = sync;
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
 		LiveUpdates.install(sync, MainApp::conflictsChanged);

@@ -13,12 +13,16 @@ import java.util.function.Supplier;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.store.ConflictKey;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.FieldConflict;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Das Modell des Sammel-Dialogs ohne JavaFX: macht aus den offenen Konflikten des Rechners ({@code SyncService.openConflicts})
@@ -86,6 +90,7 @@ public final class ConflictList {
 	private final Supplier<List<OpenConflict>> source;
 	private final Function<UnitKey, String> labelOf;
 	private final BiPredicate<OpenConflict, String> adopted;
+	private final Function<String, Hall> findHall;
 
 	/** Die Konflikte, die der Nutzer im Dialog gesehen hat. */
 	private final Set<ConflictKey> seen = new HashSet<>();
@@ -106,9 +111,19 @@ public final class ConflictList {
 	 */
 	public ConflictList(Supplier<List<OpenConflict>> source, Function<UnitKey, String> labelOf,
 			BiPredicate<OpenConflict, String> adopted) {
+		this(source, labelOf, adopted, hallId -> null);
+	}
+
+	/**
+	 * @param findHall die Halle zur Kennung oder {@code null} (in der App {@code StoreHallRepository::findById}): Halle und
+	 *                 Bestuhlung einer Feldgruppe erscheinen mit ihren Namen statt mit ihren Kennungen
+	 */
+	public ConflictList(Supplier<List<OpenConflict>> source, Function<UnitKey, String> labelOf,
+			BiPredicate<OpenConflict, String> adopted, Function<String, Hall> findHall) {
 		this.source = source;
 		this.labelOf = labelOf;
 		this.adopted = adopted;
+		this.findHall = findHall;
 	}
 
 	/**
@@ -222,7 +237,7 @@ public final class ConflictList {
 		return text == null || text.isBlank();
 	}
 
-	private static FieldRow fieldRow(FieldConflict conflict, boolean adopted) {
+	private FieldRow fieldRow(FieldConflict conflict, boolean adopted) {
 		return new FieldRow(conflict.group(), groupLabel(conflict.group()), valueText(conflict.mine()),
 				valueText(conflict.theirs()), adopted);
 	}
@@ -231,16 +246,44 @@ public final class ConflictList {
 		return GROUP_LABELS.getOrDefault(group, group);
 	}
 
-	/** Die Werte einer Gruppe als Text: die gesetzten Werte, durch Komma getrennt; ohne Werte {@code (leer)}. */
-	private static String valueText(ObjectNode values) {
+	/**
+	 * Die Werte einer Gruppe als Text: die gesetzten Werte, durch Komma getrennt; ohne Werte {@code (leer)}. Halle und
+	 * Bestuhlung stehen mit ihren Namen da (unbekannt wie in den Tabellen als Strich), der Zahlstatus mit seinem Text aus
+	 * den Ansichten; die Sitz-ID fehlt, weil Reihe, Tisch und Sitz daneben stehen.
+	 */
+	private String valueText(ObjectNode values) {
 		List<String> parts = new ArrayList<>();
 		values.fields().forEachRemaining(field -> {
 			JsonNode value = field.getValue();
-			String text = value.isBoolean() ? (value.asBoolean() ? "ja" : "nein") : value.asText();
-			if (!value.isNull() && !text.isBlank()) {
+			if (value.isNull() || field.getKey().equals("seatId")) {
+				return;
+			}
+			String text = switch (field.getKey()) {
+			case "hallId" -> EntityLabels.hallDisplayName(findHall.apply(value.asText()));
+			case "seatingPlanId" -> planName(values.path("hallId").asText(null), value.asText());
+			case "paymentStatus" -> paymentText(value.asText());
+			default -> value.isBoolean() ? (value.asBoolean() ? "ja" : "nein") : value.asText();
+			};
+			if (!text.isBlank()) {
 				parts.add(text);
 			}
 		});
 		return parts.isEmpty() ? "(leer)" : String.join(", ", parts);
+	}
+
+	/** Der Name der Bestuhlung in ihrer Halle; ein Strich, wenn es Halle oder Bestuhlung nicht (mehr) gibt. */
+	private String planName(String hallId, String planId) {
+		Hall hall = hallId == null ? null : findHall.apply(hallId);
+		SeatingPlan plan = hall == null ? null : hall.findSeatingPlan(planId);
+		return plan == null ? EntityLabels.hallDisplayName(null) : EntityLabels.nameOrPlaceholder(plan.getName());
+	}
+
+	/** Der Zahlstatus wie in den Ansichten ("Offen", "Bar", …); ein unbekannter Wert bleibt, wie er ist. */
+	private static String paymentText(String name) {
+		try {
+			return PaymentStatus.valueOf(name).getDisplayName();
+		} catch (IllegalArgumentException e) {
+			return name;
+		}
 	}
 }

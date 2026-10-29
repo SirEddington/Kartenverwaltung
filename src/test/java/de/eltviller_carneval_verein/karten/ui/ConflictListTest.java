@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.FieldConflict;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Kind;
@@ -189,6 +191,38 @@ class ConflictListTest {
 		assertEquals("Meier, Anna", rows.get(0).fields().get(0).mine());
 		assertEquals("Maier, Anna", rows.get(0).fields().get(0).valid());
 		assertEquals("Halle B", rows.get(1).fields().get(0).mine());
+	}
+
+	@Test
+	void valuesShowNamesInsteadOfIdsAndEnumTexts() {
+		Hall festhalle = new Hall("h1");
+		festhalle.setName("Festhalle");
+		SeatingPlan prunk = festhalle.addSeatingPlan();
+		prunk.setName("Prunksitzung");
+		ConflictList named = new ConflictList(() -> List.copyOf(source), unit -> "Label", (conflict, group) -> false,
+				hallId -> hallId.equals("h1") ? festhalle : null);
+		ObjectNode myHall = JsonNodeFactory.instance.objectNode().put("hallId", "h1").put("seatingPlanId", prunk.getId());
+		ObjectNode theirHall = JsonNodeFactory.instance.objectNode().put("hallId", "weg").put("seatingPlanId", "auch-weg");
+		ObjectNode myPlace = JsonNodeFactory.instance.objectNode().put("seatId", "f00-ba5").put("rowLabel", "A")
+				.put("tableNumber", 3).put("seatNumber", 2);
+		ObjectNode theirPlace = JsonNodeFactory.instance.objectNode().put("seatId", "f00-ba7").put("rowLabel", "A")
+				.put("tableNumber", 3).put("seatNumber", 4);
+		ObjectNode myPayment = JsonNodeFactory.instance.objectNode().put("paymentStatus", "TRANSFER");
+		ObjectNode theirPayment = JsonNodeFactory.instance.objectNode().put("paymentStatus", "NEU_IN_SPAETERER_APP");
+		source.add(conflict(UnitKey.presentation("ev", "pr"), "a", new ConflictNote(Kind.FIELDS, "me", null,
+				List.of(new FieldConflict("hall", myHall, theirHall)), null, null, nextId())));
+		source.add(conflict(seat("s1"), "b", new ConflictNote(Kind.FIELDS, "me", null,
+				List.of(new FieldConflict("place", myPlace, theirPlace), new FieldConflict("payment", myPayment, theirPayment)),
+				null, null, nextId())));
+
+		List<Row> rows = named.rows();
+
+		assertEquals("Festhalle, Prunksitzung", rows.get(0).fields().get(0).mine());
+		assertEquals("–, –", rows.get(0).fields().get(0).valid(), "unbekannte Halle und Bestuhlung wie in den Tabellen");
+		assertEquals("A, 3, 2", rows.get(1).fields().get(0).mine(), "die Sitz-ID steht nicht da");
+		assertEquals("A, 3, 4", rows.get(1).fields().get(0).valid());
+		assertEquals("Überweisung", rows.get(1).fields().get(1).mine());
+		assertEquals("NEU_IN_SPAETERER_APP", rows.get(1).fields().get(1).valid(), "ein unbekannter Wert bleibt, wie er ist");
 	}
 
 	@Test
