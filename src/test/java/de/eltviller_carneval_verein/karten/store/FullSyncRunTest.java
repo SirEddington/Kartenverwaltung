@@ -127,8 +127,10 @@ class FullSyncRunTest {
 
 	@Test
 	void largePresentationIsSplitIntoBlocksWithThePointer() throws IOException {
-		seats(local, 1, 1000);
-		seats(shared, 1001, 1200);
+		int block = FullSyncRun.BOOKING_BLOCK;
+		int tail = block / 2;
+		seats(local, 1, 2 * block);
+		seats(shared, 2 * block + 1, 2 * block + tail);
 		Recorder work = new Recorder();
 		UnitKey p1 = presentation("e1", "p1");
 		run.begin();
@@ -137,53 +139,54 @@ class FullSyncRunTest {
 		assertFalse(run.inProgress(p1));
 		assertFalse(run.step(ALWAYS, work));
 		assertEquals(2, work.calls.size());
-		assertEquals(1 + FullSyncRun.BOOKING_BLOCK, work.calls.get(1).size());
+		assertEquals(1 + block, work.calls.get(1).size());
 		assertEquals(p1, work.calls.get(1).get(0));
 		assertEquals(booking("e1", "p1", seat(1)), work.calls.get(1).get(1));
-		assertEquals(booking("e1", "p1", seat(500)), work.calls.get(1).get(500));
+		assertEquals(booking("e1", "p1", seat(block)), work.calls.get(1).get(block));
 		assertTrue(run.inProgress(p1));
 		assertTrue(run.inProgress(booking("e1", "p1", seat(7))));
 		assertFalse(run.inProgress(booking("e1", "p2", seat(7))));
 		assertFalse(run.inProgress(UnitKey.event("e1")));
 
 		assertFalse(run.step(ALWAYS, work));
-		assertEquals(FullSyncRun.BOOKING_BLOCK, work.calls.get(2).size());
-		assertEquals(booking("e1", "p1", seat(501)), work.calls.get(2).get(0));
-		assertEquals(booking("e1", "p1", seat(1000)), work.calls.get(2).get(499));
+		assertEquals(block, work.calls.get(2).size());
+		assertEquals(booking("e1", "p1", seat(block + 1)), work.calls.get(2).get(0));
+		assertEquals(booking("e1", "p1", seat(2 * block)), work.calls.get(2).get(block - 1));
 		assertTrue(run.inProgress(p1));
 
 		assertTrue(run.step(ALWAYS, work));
-		assertEquals(200, work.calls.get(3).size());
-		assertEquals(booking("e1", "p1", seat(1001)), work.calls.get(3).get(0));
-		assertEquals(booking("e1", "p1", seat(1200)), work.calls.get(3).get(199));
+		assertEquals(tail, work.calls.get(3).size());
+		assertEquals(booking("e1", "p1", seat(2 * block + 1)), work.calls.get(3).get(0));
+		assertEquals(booking("e1", "p1", seat(2 * block + tail)), work.calls.get(3).get(tail - 1));
 		assertFalse(run.inProgress(p1));
 		assertTrue(run.finished());
 	}
 
 	@Test
 	void bookingAddedAfterThePointerIsInTheNextBlock() throws IOException {
-		seats(local, 1, 600);
+		int block = FullSyncRun.BOOKING_BLOCK;
+		seats(local, 1, block + 20);
 		Recorder work = new Recorder();
 		run.begin();
 		run.step(ALWAYS, work); // Kopf
-		run.step(ALWAYS, work); // Vorstellung + s0001..s0500
-		assertEquals(seat(500), work.calls.get(1).get(500).bookingDir());
+		run.step(ALWAYS, work); // Vorstellung + die ersten Buchungen eines Blocks
+		assertEquals(seat(block), work.calls.get(1).get(block).bookingDir());
 
-		seats(shared, 601, 601); // erst nach dem ersten Block entstanden
+		seats(shared, block + 21, block + 21); // erst nach dem ersten Block entstanden
 		folder(local, "events/e1/presentations/p1/bookings/s0000"); // vor dem Zeiger: wartet auf den nächsten Lauf
 
 		assertTrue(run.step(ALWAYS, work));
 		List<UnitKey> last = work.calls.get(2);
-		assertEquals(101, last.size());
-		assertEquals(booking("e1", "p1", seat(501)), last.get(0));
-		assertEquals(booking("e1", "p1", seat(601)), last.get(100));
+		assertEquals(21, last.size());
+		assertEquals(booking("e1", "p1", seat(block + 1)), last.get(0));
+		assertEquals(booking("e1", "p1", seat(block + 21)), last.get(20));
 		assertFalse(last.contains(booking("e1", "p1", "s0000")));
 	}
 
 	@Test
 	void stepStopsWhenTimeIsUpButDoesAtLeastOneBlock() throws IOException {
 		folder(local, "halls/h1");
-		seats(local, 1, 600);
+		seats(local, 1, FullSyncRun.BOOKING_BLOCK + 20);
 		Recorder work = new Recorder();
 		run.begin();
 
@@ -196,14 +199,15 @@ class FullSyncRunTest {
 			assertEquals(before + 1, work.calls.size(), "je Aufruf genau ein Block");
 			assertTrue(steps < 10);
 		}
-		// Halle, Kopf, Vorstellung + 500, 100
+		// Halle, Kopf, Vorstellung + ein Block, der Rest
 		assertEquals(4, steps);
 		assertEquals(4, work.calls.size());
 	}
 
 	@Test
 	void failedBlockIsRepeated() throws IOException {
-		seats(local, 1, 600);
+		int block = FullSyncRun.BOOKING_BLOCK;
+		seats(local, 1, block + 20);
 		Recorder work = new Recorder();
 		run.begin();
 		run.step(ALWAYS, work); // Kopf
@@ -214,7 +218,7 @@ class FullSyncRunTest {
 
 		run.step(ALWAYS, work);
 		assertEquals(2, work.calls.size());
-		assertEquals(1 + FullSyncRun.BOOKING_BLOCK, work.calls.get(1).size());
+		assertEquals(1 + block, work.calls.get(1).size());
 		assertTrue(run.inProgress(presentation("e1", "p1")));
 
 		work.failOnce = new IOException("Platte weg");
@@ -222,8 +226,8 @@ class FullSyncRunTest {
 		assertTrue(run.inProgress(presentation("e1", "p1")));
 		assertTrue(run.step(NEVER, work));
 		assertEquals(3, work.calls.size());
-		assertEquals(booking("e1", "p1", seat(501)), work.calls.get(2).get(0));
-		assertEquals(100, work.calls.get(2).size());
+		assertEquals(booking("e1", "p1", seat(block + 1)), work.calls.get(2).get(0));
+		assertEquals(20, work.calls.get(2).size());
 	}
 
 	@Test

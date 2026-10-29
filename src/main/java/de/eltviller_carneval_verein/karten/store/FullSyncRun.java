@@ -23,8 +23,13 @@ final class FullSyncRun {
 
 	/** Wie viele Hallen ein Abschnitt zusammenfasst. */
 	static final int HALL_BUNDLE = 50;
-	/** Wie viele Buchungen ein Block höchstens enthält (Startwert, nach der Messung festzulegen). */
-	static final int BOOKING_BLOCK = 500;
+	/**
+	 * Wie viele Buchungen ein Block höchstens enthält. Ein Takt arbeitet Blöcke ab, bis das Budget um ist, und beendet den
+	 * Block, der danach noch läuft: Die Haltezeit der Arbeitssperre ist also etwa das Budget plus ein Block. Gemessen
+	 * (Bestand 15.000 Buchungen, lokale Platte) dauern 50 Buchungen etwa 0,3 s, mit Hochladen bis etwa 0,6 s; bei 100 stieg
+	 * ein Takt auf 2,55 s, bei 500 auf 3,3 s.
+	 */
+	static final int BOOKING_BLOCK = 50;
 
 	/** Die Arbeit an einem Block: gleicht die Einheiten ab. */
 	interface Work {
