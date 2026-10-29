@@ -14,7 +14,6 @@ import de.eltviller_carneval_verein.karten.store.ConflictInput.Sibling;
 import de.eltviller_carneval_verein.karten.store.ConflictInput.Standing;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.FieldConflict;
-import de.eltviller_carneval_verein.karten.store.ConflictNote.Kind;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Party;
 import de.eltviller_carneval_verein.karten.store.ConflictPolicy;
 import de.eltviller_carneval_verein.karten.store.Resolution;
@@ -127,13 +126,12 @@ public final class BookingPolicy implements ConflictPolicy {
 			List<String> place = FieldGroups.booking().get(PLACE_GROUP);
 			FieldConflict conflict = new FieldConflict(PLACE_GROUP, FieldMerge.slice(myCopy.payload(), place),
 					FieldMerge.slice(theirCopy.payload(), place));
-			ConflictNote note = new ConflictNote(Kind.FIELDS, input.ownMachineId(), PolicyRules.party(theirDeletion),
-					List.of(conflict), null, null, myCopy.version());
+			ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), Party.of(theirDeletion), List.of(conflict), null,
+					myCopy.version());
 			return new Resolution(theirs.payload(), true, List.of(deletionOf(myCopy)), note);
 		}
 		if (myCopy != null) {
-			ConflictNote note = new ConflictNote(Kind.DELETE_WINS, input.ownMachineId(), PolicyRules.party(theirDeletion),
-					List.of(), null, null, myCopy.version());
+			ConflictNote note = ConflictNote.deleteWins(input.ownMachineId(), Party.of(theirDeletion), myCopy.version());
 			return new Resolution(theirs.payload(), true, List.of(deletionOf(myCopy)), note);
 		}
 		// R31b: Mein Zuweisen aus "ohne Platz" ist am Ziel gescheitert, Deren hat verschoben; Deren gilt, nichts löschen.
@@ -146,13 +144,12 @@ public final class BookingPolicy implements ConflictPolicy {
 			List<String> place = FieldGroups.booking().get(PLACE_GROUP);
 			FieldConflict conflict = new FieldConflict(PLACE_GROUP, FieldMerge.slice(myLostCopy.payload(), place),
 					FieldMerge.slice(foreignCopy.payload(), place));
-			ConflictNote note = new ConflictNote(Kind.FIELDS, input.ownMachineId(), PolicyRules.party(theirDeletion),
-					List.of(conflict), null, null, myLostCopy.id());
+			ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), Party.of(theirDeletion), List.of(conflict), null,
+					myLostCopy.id());
 			return new Resolution(theirs.payload(), true, List.of(), note);
 		}
 		if (theirCopy != null) {
-			ConflictNote note = new ConflictNote(Kind.DELETE_WINS, theirDeletion.machine(), PolicyRules.party(mine),
-					List.of(), null, null, theirCopy.version());
+			ConflictNote note = ConflictNote.deleteWins(theirDeletion.machine(), Party.of(mine), theirCopy.version());
 			return new Resolution(theirs.payload(), true, List.of(deletionOf(theirCopy)), note);
 		}
 		return cancelled;
@@ -163,8 +160,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * Rechners, gehört ein Verschieben zur ursprünglichen Löschung. Ohne Löschung in der Kette "Deren" selbst.
 	 */
 	private static Version deletionIn(ConflictInput input) {
-		Version deletion = FieldMerge.introducedBy(input.chainSinceBase(), Version::deleted);
-		return deletion != null ? deletion : input.theirs();
+		return PolicyRules.introducerOr(input.chainSinceBase(), Version::deleted, input.theirs());
 	}
 
 	/**
@@ -245,7 +241,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		List<Change> extra = result.merged().equals(copy.payload()) ? List.of()
 				: List.of(new Change(copy.unit(), List.of(copy.version()), result.merged(), false));
 		ConflictNote note = result.conflicts().isEmpty() ? null
-				: new ConflictNote(Kind.FIELDS, affected, other, result.conflicts(), copy.unit(), null, dropped);
+				: ConflictNote.ofFields(affected, other, result.conflicts(), copy.unit(), dropped);
 		return new Resolution(payload, deleted, extra, note);
 	}
 
@@ -301,7 +297,7 @@ public final class BookingPolicy implements ConflictPolicy {
 				return null;
 			}
 			return transfer(input, theirs.payload(), true, copy, mine.payload(), input.ownMachineId(),
-					PolicyRules.party(deletionIn(input)), mine.id());
+					Party.of(deletionIn(input)), mine.id());
 		}
 		if (!isSameBooking(input, theirs)) {
 			return null;
@@ -310,8 +306,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (copy == null) {
 			return null;
 		}
-		return transfer(input, null, true, copy, theirs.payload(), theirs.machine(), PolicyRules.party(mine),
-				theirs.id());
+		return transfer(input, null, true, copy, theirs.payload(), theirs.machine(), Party.of(mine), theirs.id());
 	}
 
 	/**
@@ -359,10 +354,10 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (result.conflicts().isEmpty()) {
 			return new Resolution(result.merged(), false, List.of(), null);
 		}
-		Version introducer = FieldMerge.introducedByConflict(input.chainSinceBase(), FieldGroups.booking(),
-				result.conflicts());
-		ConflictNote note = new ConflictNote(Kind.FIELDS, input.ownMachineId(),
-				PolicyRules.party(introducer != null ? introducer : theirs), result.conflicts(), null, null, mine.id());
+		Version introducer = PolicyRules.introducerOr(input.chainSinceBase(), FieldGroups.booking(), result.conflicts(),
+				theirs);
+		ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), Party.of(introducer), result.conflicts(), null,
+				mine.id());
 		return new Resolution(result.merged(), false, List.of(), note);
 	}
 
@@ -463,20 +458,24 @@ public final class BookingPolicy implements ConflictPolicy {
 	 */
 	private static Resolution replacedByTheirs(ConflictInput input, String bookingId, String theirsId) {
 		Version theirs = input.theirs();
-		Version replacement = theirsId == null ? null
-				: FieldMerge.introducedBy(input.chainSinceBase(), version -> theirsId.equals(idOf(version)));
-		if (replacement == null) {
-			replacement = theirs;
-		}
+		Version replacement = introducerOf(input, theirsId, theirs);
 		UnitSnapshot copy = livingCopy(input, bookingId);
 		if (copy != null) {
 			return transfer(input, theirs.payload(), false, copy, input.mine().payload(), input.ownMachineId(),
-					PolicyRules.party(replacement), input.mine().id());
+					Party.of(replacement), input.mine().id());
 		}
-		Version deletion = FieldMerge.introducedBy(input.chainSinceBase(), Version::deleted);
-		ConflictNote note = new ConflictNote(Kind.DELETE_WINS, input.ownMachineId(),
-				PolicyRules.party(deletion != null ? deletion : replacement), List.of(), null, null, input.mine().id());
+		Version deletion = PolicyRules.introducerOr(input.chainSinceBase(), Version::deleted, replacement);
+		ConflictNote note = ConflictNote.deleteWins(input.ownMachineId(), Party.of(deletion), input.mine().id());
 		return new Resolution(theirs.payload(), false, List.of(), note);
+	}
+
+	/**
+	 * Die Version, die die Buchung mit dieser ID in die Kette seit der Basis eingebracht hat
+	 * ({@link PolicyRules#introducerOr}); ohne ID oder ohne solche Version {@code fallback}.
+	 */
+	private static Version introducerOf(ConflictInput input, String bookingId, Version fallback) {
+		return bookingId == null ? fallback
+				: PolicyRules.introducerOr(input.chainSinceBase(), version -> bookingId.equals(idOf(version)), fallback);
 	}
 
 	/**
@@ -493,12 +492,11 @@ public final class BookingPolicy implements ConflictPolicy {
 		Version theirs = input.theirs();
 		UnitSnapshot copy = livingCopy(input, bookingId);
 		if (copy != null) {
-			return transfer(input, mine.payload(), false, copy, theirs.payload(), theirs.machine(),
-					PolicyRules.party(mine), theirs.id());
+			return transfer(input, mine.payload(), false, copy, theirs.payload(), theirs.machine(), Party.of(mine),
+					theirs.id());
 		}
 		ConflictNote note = PolicyRules.sameContent(theirs, input.base()) ? null
-				: new ConflictNote(Kind.DELETE_WINS, theirs.machine(), PolicyRules.party(mine), List.of(), null, null,
-						theirs.id());
+				: ConflictNote.deleteWins(theirs.machine(), Party.of(mine), theirs.id());
 		return new Resolution(mine.payload(), false, List.of(), note);
 	}
 
@@ -542,10 +540,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (moved.equals(unit)) {
 			return PolicyRules.unmerged(input);
 		}
-		String theirsId = idOf(theirs);
-		Version introducer = theirsId == null ? null
-				: FieldMerge.introducedBy(input.chainSinceBase(), version -> theirsId.equals(idOf(version)));
-		Party other = PolicyRules.party(introducer != null ? introducer : theirs);
+		Party other = Party.of(introducerOf(input, idOf(theirs), theirs));
 		List<Change> extra;
 		Sibling existing = input.siblings().get(moved);
 		UnitSnapshot current = existing == null ? null : existing.snapshot();
@@ -555,8 +550,7 @@ public final class BookingPolicy implements ConflictPolicy {
 			UnitSnapshot copy = livingCopy(input, mineId);
 			if (copy == null) {
 				// R31a: Storno gewinnt
-				ConflictNote note = new ConflictNote(Kind.DELETE_WINS, input.ownMachineId(), other, List.of(), null, null,
-						mine.id());
+				ConflictNote note = ConflictNote.deleteWins(input.ownMachineId(), other, mine.id());
 				return new Resolution(theirs.payload(), false, List.of(), note);
 			}
 			if (!ownDeletionHolds(input, existing)) {
@@ -566,8 +560,8 @@ public final class BookingPolicy implements ConflictPolicy {
 			List<String> place = FieldGroups.booking().get(PLACE_GROUP);
 			FieldConflict conflict = new FieldConflict(PLACE_GROUP, FieldMerge.slice(mine.payload(), place),
 					FieldMerge.slice(copy.payload(), place));
-			ConflictNote note = new ConflictNote(Kind.FIELDS, input.ownMachineId(), other, List.of(conflict), copy.unit(),
-					null, mine.id());
+			ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), other, List.of(conflict), copy.unit(),
+					mine.id());
 			List<Change> revived = movedThereAndUnresolved(input, existing, copy)
 					? List.of(withoutPlace(mine, moved, current))
 					: List.of();
@@ -576,7 +570,7 @@ public final class BookingPolicy implements ConflictPolicy {
 			extra = List.of(withoutPlace(mine, moved, current));
 		}
 
-		ConflictNote note = new ConflictNote(Kind.DOUBLE_SALE, input.ownMachineId(), other, List.of(), moved,
+		ConflictNote note = ConflictNote.doubleSale(input.ownMachineId(), other, moved,
 				FieldMerge.slice(mine.payload(), PLACE), mine.id());
 		return new Resolution(theirs.payload(), false, extra, note);
 	}

@@ -33,11 +33,10 @@ public final class HallPolicy implements ConflictPolicy {
 		}
 		Version mine = input.mine();
 		Version theirs = input.theirs();
-		Version introducer = FieldMerge.introducedBy(input.chainSinceBase(),
-				version -> !version.deleted() && theirs.payload().equals(version.payload()));
-		ConflictNote note = new ConflictNote(ConflictNote.Kind.FIELDS, input.ownMachineId(),
-				PolicyRules.party(introducer != null ? introducer : theirs),
-				List.of(new FieldConflict(GROUP, nameOf(mine.payload()), nameOf(theirs.payload()))), null, null, mine.id());
+		Version introducer = PolicyRules.introducerOr(input.chainSinceBase(),
+				version -> !version.deleted() && theirs.payload().equals(version.payload()), theirs);
+		ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), ConflictNote.Party.of(introducer),
+				List.of(new FieldConflict(GROUP, nameOf(mine.payload()), nameOf(theirs.payload()))), null, mine.id());
 		return new Resolution(theirs.payload(), false, List.of(), note);
 	}
 

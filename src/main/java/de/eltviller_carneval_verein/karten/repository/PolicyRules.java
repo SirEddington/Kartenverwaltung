@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
+import de.eltviller_carneval_verein.karten.store.ConflictNote.FieldConflict;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Party;
 import de.eltviller_carneval_verein.karten.store.Resolution;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
@@ -63,8 +64,7 @@ final class PolicyRules {
 	/** "Deren" bleibt mit seinem gespeicherten Inhalt; der Vermerk UNMERGED sagt diesem Rechner, dass "Meine" weicht. */
 	static Resolution unmerged(ConflictInput input) {
 		Version theirs = input.theirs();
-		ConflictNote note = new ConflictNote(ConflictNote.Kind.UNMERGED, input.ownMachineId(), party(theirs), List.of(), null,
-				null, input.mine().id());
+		ConflictNote note = ConflictNote.unmerged(input.ownMachineId(), Party.of(theirs), input.mine().id());
 		return new Resolution(theirs.payload(), theirs.deleted(), List.of(), note);
 	}
 
@@ -104,15 +104,13 @@ final class PolicyRules {
 		Version mine = input.mine();
 		Version theirs = input.theirs();
 		if (theirs.deleted() && !mine.deleted()) {
-			Version deletion = FieldMerge.introducedBy(input.chainSinceBase(), Version::deleted);
-			ConflictNote note = new ConflictNote(ConflictNote.Kind.DELETE_WINS, input.ownMachineId(),
-					party(deletion != null ? deletion : theirs), List.of(), null, null, mine.id());
+			Version deletion = introducerOr(input.chainSinceBase(), Version::deleted, theirs);
+			ConflictNote note = ConflictNote.deleteWins(input.ownMachineId(), Party.of(deletion), mine.id());
 			return new Resolution(theirs.payload(), true, List.of(), note);
 		}
 		if (mine.deleted() && !theirs.deleted() && sameIdentity.test(theirs)) {
 			ConflictNote note = sameContent(theirs, input.base()) ? null
-					: new ConflictNote(ConflictNote.Kind.DELETE_WINS, theirs.machine(), party(mine), List.of(), null, null,
-							theirs.id());
+					: ConflictNote.deleteWins(theirs.machine(), Party.of(mine), theirs.id());
 			return new Resolution(null, true, List.of(), note);
 		}
 		return null;
@@ -126,9 +124,23 @@ final class PolicyRules {
 		return a.deleted() || Objects.equals(a.payload(), b.payload());
 	}
 
-	/** Die Gegenseite des Vermerks nach den Angaben der Version. */
-	static Party party(Version version) {
-		return new Party(version.machine(), version.machineName(), version.operator(), version.id());
+	/**
+	 * Die Version, die in der Kette seit der Basis den Inhalt eingebracht hat, den {@code has} erkennt
+	 * ({@link FieldMerge#introducedBy}); gibt es keine, {@code fallback}.
+	 */
+	static Version introducerOr(List<Version> chainSinceBase, Predicate<Version> has, Version fallback) {
+		Version introducer = FieldMerge.introducedBy(chainSinceBase, has);
+		return introducer != null ? introducer : fallback;
+	}
+
+	/**
+	 * Die Version, die zuletzt einen gewinnenden Wert der strittigen Gruppen eingebracht hat
+	 * ({@link FieldMerge#introducedByConflict}); gibt es keine, {@code fallback}.
+	 */
+	static Version introducerOr(List<Version> chainSinceBase, Map<String, List<String>> groups,
+			List<FieldConflict> conflicts, Version fallback) {
+		Version introducer = FieldMerge.introducedByConflict(chainSinceBase, groups, conflicts);
+		return introducer != null ? introducer : fallback;
 	}
 
 	/**
@@ -147,9 +159,9 @@ final class PolicyRules {
 		if (result.conflicts().isEmpty()) {
 			return new Resolution(result.merged(), false, List.of(), null);
 		}
-		Version introducer = FieldMerge.introducedByConflict(input.chainSinceBase(), groups, result.conflicts());
-		ConflictNote note = new ConflictNote(ConflictNote.Kind.FIELDS, input.ownMachineId(),
-				party(introducer != null ? introducer : input.theirs()), result.conflicts(), null, null, input.mine().id());
+		Version introducer = introducerOr(input.chainSinceBase(), groups, result.conflicts(), input.theirs());
+		ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), Party.of(introducer), result.conflicts(), null,
+				input.mine().id());
 		return new Resolution(result.merged(), false, List.of(), note);
 	}
 }

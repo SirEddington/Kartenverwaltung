@@ -31,6 +31,28 @@ public record ConflictNote(Kind kind, String affected, Party other, List<FieldCo
 		this(kind, affected, other, fields, moved, place, dropped, null);
 	}
 
+	/** Ein Vermerk {@link Kind#FIELDS} mit den strittigen Gruppen; {@code moved} darf {@code null} sein. */
+	public static ConflictNote ofFields(String affected, Party other, List<FieldConflict> fields, UnitKey moved,
+			VersionId dropped) {
+		return new ConflictNote(Kind.FIELDS, affected, other, fields, moved, null, dropped);
+	}
+
+	/** Ein Vermerk {@link Kind#DELETE_WINS}. */
+	public static ConflictNote deleteWins(String affected, Party other, VersionId dropped) {
+		return new ConflictNote(Kind.DELETE_WINS, affected, other, List.of(), null, null, dropped);
+	}
+
+	/** Ein Vermerk {@link Kind#UNMERGED}. */
+	public static ConflictNote unmerged(String affected, Party other, VersionId dropped) {
+		return new ConflictNote(Kind.UNMERGED, affected, other, List.of(), null, null, dropped);
+	}
+
+	/** Ein Vermerk {@link Kind#DOUBLE_SALE}: die Buchung ist auf {@code moved} ausgewichen, {@code place} war ihr Platz. */
+	public static ConflictNote doubleSale(String affected, Party other, UnitKey moved, ObjectNode place,
+			VersionId dropped) {
+		return new ConflictNote(Kind.DOUBLE_SALE, affected, other, List.of(), moved, place, dropped);
+	}
+
 	/** Derselbe Vermerk mit dem Speichervorgang der weichenden eigenen Version. */
 	public ConflictNote withLostSave(String lostSave) {
 		return new ConflictNote(kind, affected, other, fields, moved, place, dropped, lostSave);
@@ -62,6 +84,11 @@ public record ConflictNote(Kind kind, String affected, Party other, List<FieldCo
 		public Party {
 			Objects.requireNonNull(machine, "machine");
 			Objects.requireNonNull(version, "version");
+		}
+
+		/** Die Gegenseite nach den Angaben der Version. */
+		public static Party of(Version version) {
+			return new Party(version.machine(), version.machineName(), version.operator(), version.id());
 		}
 	}
 

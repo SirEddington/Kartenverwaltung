@@ -456,9 +456,7 @@ final class ConflictResolver {
 
 	/** Ohne Strategie: Deren bleibt, der Vermerk sagt diesem Rechner, dass sein Inhalt weicht. */
 	private Resolution unmerged(Version mine, Version theirs) {
-		ConflictNote note = new ConflictNote(ConflictNote.Kind.UNMERGED, host.machineId(),
-				new ConflictNote.Party(theirs.machine(), theirs.machineName(), theirs.operator(), theirs.id()), List.of(),
-				null, null, mine.id());
+		ConflictNote note = ConflictNote.unmerged(host.machineId(), ConflictNote.Party.of(theirs), mine.id());
 		return new Resolution(theirs.payload(), theirs.deleted(), List.of(), note);
 	}
 
