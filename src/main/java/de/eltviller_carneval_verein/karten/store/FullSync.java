@@ -129,7 +129,8 @@ public final class FullSync {
 		return units;
 	}
 
-	private static List<UnitKey> childrenOfBoth(VersionStore local, VersionStore shared, UnitKey parent, String folder)
+	/** Die Unterordner-Einheiten von {@code <parent>/<folder>}, die es auf mindestens einer Seite gibt, nach Namen sortiert. */
+	static List<UnitKey> childrenOfBoth(VersionStore local, VersionStore shared, UnitKey parent, String folder)
 			throws IOException {
 		List<UnitKey> children = new ArrayList<>();
 		for (String name : union(local.childNames(parent, folder), shared.childNames(parent, folder))) {
@@ -138,10 +139,11 @@ public final class FullSync {
 		return children;
 	}
 
-	private static Set<String> union(List<String> first, List<String> second) {
+	/** Die Namen beider Listen ohne Doppelte, sortiert. */
+	static List<String> union(List<String> first, List<String> second) {
 		Set<String> names = new TreeSet<>(first);
 		names.addAll(second);
-		return names;
+		return new ArrayList<>(names);
 	}
 
 	/**

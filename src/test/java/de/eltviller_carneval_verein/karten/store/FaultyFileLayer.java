@@ -39,6 +39,9 @@ public final class FaultyFileLayer implements FileLayer {
 	private record Block(String operation, CountDownLatch entered, CountDownLatch release) {
 	}
 
+	private record Hook(String operation, Runnable action) {
+	}
+
 	/** Wie lange ein mit {@link #blockNext} angehaltener Aufruf höchstens wartet. */
 	private static final Duration BLOCK_LIMIT = Duration.ofSeconds(30);
 
@@ -46,6 +49,7 @@ public final class FaultyFileLayer implements FileLayer {
 	private final List<String> calls = new ArrayList<>();
 	private final List<Failure> failures = new ArrayList<>();
 	private final List<Block> blocks = new ArrayList<>();
+	private final List<Hook> hooks = new ArrayList<>();
 	private final List<Creation> creations = new ArrayList<>();
 
 	public FaultyFileLayer(FileLayer delegate) {
@@ -107,8 +111,31 @@ public final class FaultyFileLayer implements FileLayer {
 		blocks.add(new Block(operation, entered, release));
 	}
 
+	/**
+	 * Führt die Aktion vor jedem Aufruf der Operation aus (mit beliebigem Pfad), bevor der Aufruf aufgezeichnet wird.
+	 * Damit stellt ein Test etwa eine Uhr vor, während ein Abgleich läuft.
+	 */
+	public synchronized void onEach(String operation, Runnable action) {
+		hooks.add(new Hook(operation, action));
+	}
+
+	private void runHooks(String operation) {
+		List<Hook> matching = new ArrayList<>();
+		synchronized (this) {
+			for (Hook hook : hooks) {
+				if (hook.operation().equals(operation)) {
+					matching.add(hook);
+				}
+			}
+		}
+		for (Hook hook : matching) {
+			hook.action().run();
+		}
+	}
+
 	/** Wartet, falls der Aufruf angehalten werden soll, und zeichnet ihn dann auf (siehe {@link #record}). */
 	private IOException enter(String operation, Path path) throws IOException {
+		runHooks(operation);
 		Block block = takeBlock(operation);
 		if (block != null) {
 			block.entered().countDown();

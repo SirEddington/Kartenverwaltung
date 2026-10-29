@@ -42,6 +42,19 @@ class FaultyFileLayerTest {
 	}
 
 	@Test
+	void onEachRunsBeforeEveryCallOfThatOperation() throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		List<String> seen = new java.util.ArrayList<>();
+		layer.onEach("exists", () -> seen.add("vorher " + layer.calls().size()));
+
+		layer.exists(dir);
+		layer.listNames(dir);
+		layer.exists(dir);
+
+		assertEquals(List.of("vorher 0", "vorher 2"), seen);
+	}
+
+	@Test
 	void blockNextHoldsTheNextCallUntilReleased() throws Exception {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		Path file = dir.resolve("a.json");
