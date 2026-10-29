@@ -22,9 +22,6 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 
 /**
@@ -557,8 +554,8 @@ final class ConflictResolver {
 	 */
 	private Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey unit, Version base, Version mine,
 			Set<String> mineSaveIds) throws IOException {
-		String bookingId = base == null || base.deleted() ? null : bookingIdOf(base.payload());
-		String mineId = mine.deleted() ? null : bookingIdOf(mine.payload());
+		String bookingId = base == null || base.deleted() ? null : ConflictInput.bookingIdOf(base.payload());
+		String mineId = mine.deleted() ? null : ConflictInput.bookingIdOf(mine.payload());
 		UnitKey ownUnassigned = mineId == null ? null
 				: UnitKey.unassignedBooking(unit.eventId(), unit.presentationId(), mineId);
 		Map<UnitKey, ConflictInput.Sibling> fromIndex = host.siblings(unit);
@@ -571,10 +568,8 @@ final class ConflictResolver {
 			UnitSnapshot s = sibling.snapshot();
 			UnitSnapshot copy = new UnitSnapshot(s.unit(), s.version(), s.status(), s.deleted(),
 					s.payload() == null ? null : s.payload().deepCopy());
-			boolean carriesBooking = bookingId != null && s.version() != null && !s.deleted()
-					&& bookingId.equals(bookingIdOf(s.payload()));
-			boolean carriesMine = mineId != null && s.version() != null && !s.deleted()
-					&& mineId.equals(bookingIdOf(s.payload()));
+			boolean carriesBooking = bookingId != null && s.carriesBooking(bookingId);
+			boolean carriesMine = mineId != null && s.carriesBooking(mineId);
 			boolean isOwnUnassigned = entry.getKey().equals(ownUnassigned);
 			SyncService.Resolved files = carriesBooking || carriesMine || isOwnUnassigned ? host.resolve(entry.getKey())
 					: null;
@@ -600,7 +595,7 @@ final class ConflictResolver {
 		for (VersionFile file : resolved.files().versions().values()) {
 			Version version = file.version();
 			if (version != null && !version.deleted() && version.saveId() != null && saveIds.contains(version.saveId())
-					&& !chain.contains(version.id()) && bookingId.equals(bookingIdOf(version.payload()))
+					&& !chain.contains(version.id()) && bookingId.equals(ConflictInput.bookingIdOf(version.payload()))
 					&& (found == null || version.id().compareTo(found.id()) > 0)) {
 				found = version;
 			}
@@ -659,12 +654,6 @@ final class ConflictResolver {
 		Set<VersionId> ids = new HashSet<>();
 		versions.forEach(version -> ids.add(version.id()));
 		return ids;
-	}
-
-	/** Die Buchungs-ID im Inhalt einer Buchung ({@link ConflictInput#BOOKING_ID}); {@code null}, wenn sie fehlt. */
-	private static String bookingIdOf(ObjectNode payload) {
-		JsonNode id = payload == null ? null : payload.get(ConflictInput.BOOKING_ID);
-		return id != null && id.isTextual() ? id.asText() : null;
 	}
 
 	/** Die Speichervorgänge aller lesbaren Versionen im Ordner der Einheit. */

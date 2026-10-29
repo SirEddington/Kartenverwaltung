@@ -254,7 +254,7 @@ final class UnitBaseline {
 	 */
 	void delete(String ownerId, UnitKey unit, String name) {
 		UnitSnapshot snapshot = baselineOf(ownerId).get(unit);
-		if (snapshot == null || snapshot.version() == null || snapshot.deleted()) {
+		if (snapshot == null || !snapshot.isLive()) {
 			return;
 		}
 		UnitMapper.requireWritable(snapshot);

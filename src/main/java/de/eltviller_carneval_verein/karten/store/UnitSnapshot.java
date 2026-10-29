@@ -31,4 +31,14 @@ public record UnitSnapshot(UnitKey unit, VersionId version, UnitState.Status sta
 	public static UnitSnapshot of(UnitKey unit, Version version) {
 		return new UnitSnapshot(unit, version.id(), UnitState.Status.OK, version.deleted(), version.payload());
 	}
+
+	/** Ob die Einheit lebt: Sie hat eine aktuelle Version, und die ist keine Löschung. */
+	public boolean isLive() {
+		return version != null && !deleted;
+	}
+
+	/** Ob die Einheit lebt und die Buchung mit dieser ID trägt ({@link ConflictInput#bookingIdOf}). */
+	public boolean carriesBooking(String bookingId) {
+		return isLive() && bookingId.equals(ConflictInput.bookingIdOf(payload));
+	}
 }

@@ -199,10 +199,7 @@ public final class BookingPolicy implements ConflictPolicy {
 
 	/** Die Geschwister-Einheiten, die die Buchung tragen (nicht gelöscht, gleiche Buchungs-ID). */
 	private static Stream<Sibling> livingCopies(ConflictInput input, String bookingId) {
-		return input.siblings().values().stream().filter(sibling -> {
-			UnitSnapshot snapshot = sibling.snapshot();
-			return snapshot.version() != null && !snapshot.deleted() && bookingId.equals(text(snapshot.payload()));
-		});
+		return input.siblings().values().stream().filter(sibling -> sibling.snapshot().carriesBooking(bookingId));
 	}
 
 	/** Bei mehreren (sollte nicht vorkommen) die erste nach Ordner, damit eine Wiederholung dasselbe entscheidet. */
@@ -387,8 +384,7 @@ public final class BookingPolicy implements ConflictPolicy {
 				.filter(sibling -> sibling.lostMove() != null && !sibling.lostMove().deleted()
 						&& sibling.lostMove().saveId() != null && saveIds.contains(sibling.lostMove().saveId())
 						&& bookingId.equals(idOf(sibling.lostMove()))
-						&& !(sibling.snapshot().version() != null && !sibling.snapshot().deleted()
-								&& bookingId.equals(text(sibling.snapshot().payload()))))
+						&& !sibling.snapshot().carriesBooking(bookingId))
 				.min(Comparator.comparing(sibling -> sibling.snapshot().unit().relativePath())).map(Sibling::lostMove)
 				.orElse(null);
 	}
@@ -553,7 +549,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		List<Change> extra;
 		Sibling existing = input.siblings().get(moved);
 		UnitSnapshot current = existing == null ? null : existing.snapshot();
-		if (current != null && current.version() != null && !current.deleted()) {
+		if (current != null && current.isLive()) {
 			extra = List.of();
 		} else if (assignedFrom(input, existing) && deletedThereByOthers(input, existing)) {
 			UnitSnapshot copy = livingCopy(input, mineId);
@@ -650,12 +646,6 @@ public final class BookingPolicy implements ConflictPolicy {
 
 	/** Die Buchungs-ID einer Version mit Inhalt; {@code null} ohne Version, bei einer Löschung oder ohne ID. */
 	private static String idOf(Version version) {
-		return version == null || version.deleted() ? null : text(version.payload());
-	}
-
-	/** Die Buchungs-ID im Inhalt ({@link ConflictInput#BOOKING_ID}); {@code null}, wenn sie fehlt. */
-	private static String text(ObjectNode payload) {
-		JsonNode value = payload == null ? null : payload.get(ConflictInput.BOOKING_ID);
-		return value != null && value.isTextual() ? value.asText() : null;
+		return version == null || version.deleted() ? null : ConflictInput.bookingIdOf(version.payload());
 	}
 }

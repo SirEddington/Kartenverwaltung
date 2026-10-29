@@ -338,7 +338,7 @@ public class StoreEventRepository implements EventRepository {
 			UnitKey unit = snapshot.unit();
 			boolean readable = UnitMapper.isReadable(snapshot);
 			if (targetUnits.contains(unit)) {
-				if (!readable && snapshot.version() != null && !snapshot.deleted()) {
+				if (!readable && snapshot.isLive()) {
 					shownNow.add(unit);
 				}
 			} else if (readable && !shownNow.contains(unit) && !belowDeleted(unit, byUnit)) {
@@ -524,13 +524,11 @@ public class StoreEventRepository implements EventRepository {
 		}
 		for (UnitSnapshot snapshot : sync.eventSnapshots(eventId).values()) {
 			UnitKey unit = snapshot.unit();
-			if (unit.type() != UnitType.BOOKING || !presentationId.equals(unit.presentationId()) || snapshot.version() == null
-					|| snapshot.deleted()) {
+			if (unit.type() != UnitType.BOOKING || !presentationId.equals(unit.presentationId()) || !snapshot.isLive()) {
 				continue;
 			}
 			// eine nicht gelöschte Einheit, deren Inhalt sich nicht lesen lässt, kann die Buchung tragen: sie gilt als lebend
-			if (bookingId.equals(snapshot.payload() == null ? null
-					: snapshot.payload().path(ConflictInput.BOOKING_ID).asText(null)) || !UnitMapper.isReadable(snapshot)) {
+			if (bookingId.equals(ConflictInput.bookingIdOf(snapshot.payload())) || !UnitMapper.isReadable(snapshot)) {
 				return true;
 			}
 		}
@@ -703,9 +701,10 @@ public class StoreEventRepository implements EventRepository {
 			UnitSnapshot known = baseline.known(unit);
 			boolean differs = known == null || known.deleted() || !baseline.isShown(unit)
 					|| !entry.getValue().equals(known.payload());
-			if (differs && unit.type() == UnitType.BOOKING && entry.getValue().hasNonNull(ConflictInput.BOOKING_ID)) {
-				moved.computeIfAbsent(entry.getValue().get(ConflictInput.BOOKING_ID).asText(), id -> new ArrayList<>())
-						.add(unit);
+			String bookingId = differs && unit.type() == UnitType.BOOKING ? ConflictInput.bookingIdOf(entry.getValue())
+					: null;
+			if (bookingId != null) {
+				moved.computeIfAbsent(bookingId, id -> new ArrayList<>()).add(unit);
 			}
 			if (differs && !(derived.containsKey(unit) && entry.getValue().equals(derived.get(unit)))) {
 				changed.add(unit);
@@ -739,11 +738,10 @@ public class StoreEventRepository implements EventRepository {
 			if (!UnitMapper.isAbsent(current)) {
 				return false;
 			}
-			String movedId = known == null || known.payload() == null ? null : known.payload().path(ConflictInput.BOOKING_ID)
-					.asText(null);
+			String movedId = known == null ? null : ConflictInput.bookingIdOf(known.payload());
 			return movedId == null || changes.movedCarriers(movedId, current.unit()).isEmpty();
 		}
-		return current.version() != null && !current.deleted() && mine.equals(current.payload());
+		return current.isLive() && mine.equals(current.payload());
 	}
 
 	/** Übernimmt den Stand in den Vergleichsstand; was das Einarbeiten an der Einheit umgesetzt hatte, gilt damit nicht mehr. */

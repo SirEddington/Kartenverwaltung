@@ -5,6 +5,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 /**
  * Was eine {@link ConflictPolicy} über eine verlorene Strecke erfährt. Alle Inhalte sind Kopien; die Strategie darf sie
  * verändern.
@@ -34,6 +37,15 @@ public record ConflictInput(UnitKey unit, Version base, Version mine, Version th
 	 * schaut: für die Auswahl der Geschwister, die ihre Speichervorgänge mitbekommen.
 	 */
 	public static final String BOOKING_ID = "id";
+
+	/**
+	 * Die Buchungs-ID im Inhalt einer Buchung ({@link #BOOKING_ID}); {@code null} ohne Inhalt, ohne ID oder wenn sie kein
+	 * Text ist.
+	 */
+	public static String bookingIdOf(ObjectNode payload) {
+		JsonNode id = payload == null ? null : payload.get(BOOKING_ID);
+		return id != null && id.isTextual() ? id.asText() : null;
+	}
 
 	/**
 	 * Eine andere Buchungs-Einheit derselben Vorstellung.

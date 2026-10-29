@@ -492,7 +492,7 @@ public final class ConflictActions {
 		if (model instanceof Booking booking) {
 			Version version = dropped(row.conflict());
 			return booking.hasData() && version != null && !version.deleted()
-					&& booking.getId().equals(bookingId(version.payload())) ? booking : null;
+					&& booking.getId().equals(ConflictInput.bookingIdOf(version.payload())) ? booking : null;
 		}
 		return model;
 	}
@@ -542,7 +542,7 @@ public final class ConflictActions {
 	/** Ob der Index auf der Einheit einen lebenden Stand hat (der Sitz ist dann vergeben, auch wenn das Modell ihn noch nicht kennt). */
 	private boolean storedAt(UnitKey unit) {
 		UnitSnapshot stored = sync.snapshots(List.of(unit)).get(unit);
-		return stored != null && stored.version() != null && !stored.deleted();
+		return stored != null && stored.isLive();
 	}
 
 	/**
@@ -561,7 +561,8 @@ public final class ConflictActions {
 				for (List<VersionId> stretch : sync.unitState(lostUnit).lost()) {
 					for (VersionId id : stretch) {
 						Version version = sync.version(lostUnit, id);
-						if (version != null && !version.deleted() && bookingId.equals(bookingId(version.payload()))) {
+						if (version != null && !version.deleted()
+								&& bookingId.equals(ConflictInput.bookingIdOf(version.payload()))) {
 							return true;
 						}
 					}
@@ -600,10 +601,6 @@ public final class ConflictActions {
 			}
 		}
 		return null;
-	}
-
-	private static String bookingId(ObjectNode payload) {
-		return payload == null ? null : payload.path(ConflictInput.BOOKING_ID).asText(null);
 	}
 
 	/** Die aktuelle Version der Einheit nach der Kette im lokalen Bestand; {@code null} ohne Version oder wenn sie sich nicht lesen lässt. */

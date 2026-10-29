@@ -216,7 +216,7 @@ final class UnitMapper {
 
 		List<UnitSnapshot> vanished = new ArrayList<>();
 		for (UnitSnapshot known : baseline.values()) {
-			if (known.version() != null && !known.deleted() && shown.contains(known.unit())
+			if (known.isLive() && shown.contains(known.unit())
 					&& !present.contains(known.unit())) {
 				UnitKey parent = parentOf(known.unit());
 				if (parent != null && present.contains(parent)) {
@@ -607,7 +607,7 @@ final class UnitMapper {
 		if (type != modelClass(unit.type())) {
 			throw new IllegalArgumentException(type.getSimpleName() + " passt nicht zu " + unit.relativePath());
 		}
-		if (snapshot.version() == null || snapshot.deleted() || snapshot.payload() == null) {
+		if (!snapshot.isLive() || snapshot.payload() == null) {
 			return null;
 		}
 		@SuppressWarnings("unchecked")
