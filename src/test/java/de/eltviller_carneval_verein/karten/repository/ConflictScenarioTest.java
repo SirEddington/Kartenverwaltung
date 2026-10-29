@@ -1115,6 +1115,31 @@ class ConflictScenarioTest {
 	 */
 	@Test
 	void cancellationWinsAgainstAssigningAPlace() throws IOException {
+		cancellationAgainstAssigningAPlace(1);
+	}
+
+	/**
+	 * N2 (R35): wie {@link #cancellationWinsAgainstAssigningAPlace}, aber B ändert Mia auf Sitz 1 in einem zweiten
+	 * Speichervorgang, bevor es hochlädt. Die Stornierung gilt trotzdem und kehrt nicht still zurück.
+	 */
+	@Test
+	void cancellationWinsAgainstAssigningAPlaceSavedTwice() throws IOException {
+		cancellationAgainstAssigningAPlace(2);
+	}
+
+	/** Mia steht "ohne Platz"; B weist ihr Sitz 1 zu (bei zwei Speichervorgängen danach noch ein Kommentar). */
+	private static void assignOnB(Machine b, String miaId, int ownSaves) {
+		Booking bMia = b.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId())).findFirst()
+				.orElseThrow();
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), bMia, b.plan().getSeats().get(1)));
+		b.repository.saveEvent(b.event);
+		if (ownSaves == 2) {
+			bMia.setComment("Fenster");
+			b.repository.saveEvent(b.event);
+		}
+	}
+
+	private void cancellationAgainstAssigningAPlace(int ownSaves) throws IOException {
 		Machine[] m = machines("a", "b");
 		Machine a = m[0];
 		Machine b = m[1];
@@ -1126,11 +1151,8 @@ class ConflictScenarioTest {
 		String miaId = mia.getId();
 		UnitKey miaUnit = unassignedUnit(a, miaId);
 		untilQuiet(a, b);
-		Booking bMia = b.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId())).findFirst()
-				.orElseThrow();
 
-		assertTrue(BookingSync.assign(b.friday(), b.plan(), bMia, b.plan().getSeats().get(1)));
-		b.repository.saveEvent(b.event);
+		assignOnB(b, miaId, ownSaves);
 		a.friday().getBookings().remove(mia);
 		a.seat(1).setLastName("Tom");
 		a.repository.saveEvent(a.event);
@@ -1167,6 +1189,19 @@ class ConflictScenarioTest {
 	 */
 	@Test
 	void foreignMoveWinsAgainstAssigningAPlace() throws IOException {
+		foreignMoveAgainstAssigningAPlace(1);
+	}
+
+	/**
+	 * N2 (R35): wie {@link #foreignMoveWinsAgainstAssigningAPlace}, aber B ändert Mia auf Sitz 1 in einem zweiten
+	 * Speichervorgang, bevor es hochlädt. A's Umzug gilt trotzdem, und Mia lebt nicht zweimal.
+	 */
+	@Test
+	void foreignMoveWinsAgainstAssigningAPlaceSavedTwice() throws IOException {
+		foreignMoveAgainstAssigningAPlace(2);
+	}
+
+	private void foreignMoveAgainstAssigningAPlace(int ownSaves) throws IOException {
 		Machine[] m = machines("a", "b");
 		Machine a = m[0];
 		Machine b = m[1];
@@ -1178,11 +1213,8 @@ class ConflictScenarioTest {
 		String miaId = mia.getId();
 		UnitKey miaUnit = unassignedUnit(a, miaId);
 		untilQuiet(a, b);
-		Booking bMia = b.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId())).findFirst()
-				.orElseThrow();
 
-		assertTrue(BookingSync.assign(b.friday(), b.plan(), bMia, b.plan().getSeats().get(1)));
-		b.repository.saveEvent(b.event);
+		assignOnB(b, miaId, ownSaves);
 		assertTrue(BookingSync.assign(a.friday(), a.plan(), mia, a.plan().getSeats().get(4)));
 		a.seat(1).setLastName("Tom");
 		a.repository.saveEvent(a.event);
@@ -1214,6 +1246,73 @@ class ConflictScenarioTest {
 			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
 			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
 		}
+	}
+
+	/**
+	 * N1, getrennte Gewinner (R35): Mia steht "ohne Platz". A verkauft Sitz 1 an Tom und lädt hoch; seine Liste kommt bei B
+	 * vorerst nicht an. B weist Mia Sitz 1 zu (mit Kommentar) und lädt hoch: B gewinnt {@code _Mia} und verliert Sitz 1,
+	 * die Strecke wartet auf A's Liste. Inzwischen setzt A Mia auf "bezahlt", verliert auf {@code _Mia} gegen B's Löschung
+	 * und löst auf (DELETE_WINS an A). Erst danach löst B Sitz 1 auf: Die gewinnende Löschung von {@code _Mia} ist B's
+	 * eigene, auch wenn A's Zusammenführung sie bestätigt; niemand hat storniert, also lebt Mia genau einmal "ohne Platz".
+	 */
+	@Test
+	void assigningAPlaceWithSplitWinnersKeepsTheBookingOnce() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Booking mia = a.friday().addBooking();
+		mia.setLastName("Mia");
+		mia.setUnassigned(true);
+		a.repository.saveEvent(a.event);
+		String miaId = mia.getId();
+		UnitKey miaUnit = unassignedUnit(a, miaId);
+		UnitKey seat = seatUnit(a, 1);
+		untilQuiet(a, b);
+
+		a.seat(1).setLastName("Tom");
+		a.repository.saveEvent(a.event);
+		a.tick();
+		Path feed = newestFeed(a);
+		Path hidden = Files.move(feed, dir.resolve("versteckt.json"));
+		Booking bMia = b.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId())).findFirst()
+				.orElseThrow();
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), bMia, b.plan().getSeats().get(1)));
+		bMia.setComment("Fenster");
+		b.repository.saveEvent(b.event);
+		clock.advance(Duration.ofSeconds(2));
+		b.tick();
+		assertEquals(1, b.sync.unitState(seat).lost().size(), "B hat Sitz 1 verloren, die Strecke wartet auf A's Liste");
+		assertTrue(b.sync.unitState(miaUnit).current().deleted(), "B's Löschung von _Mia gilt");
+
+		mia.setPaymentStatus(PaymentStatus.CARD);
+		a.repository.saveEvent(a.event);
+		for (int round = 0; round < 3; round++) {
+			clock.advance(ROUND);
+			a.tick();
+		}
+		assertTrue(a.sync.unitState(miaUnit).lost().isEmpty(), "A hat _Mia aufgelöst");
+		assertTrue(a.sync.unitState(miaUnit).current().deleted(), "A's Änderung weicht B's Löschung");
+
+		// die Wartezeit auf Listen ist um: B löst Sitz 1 mit dem auf, was der Vollabgleich bringt (A's Zusammenführung)
+		clock.advance(Duration.ofMinutes(5).plusSeconds(1));
+		b.sync.syncNow();
+		assertTrue(warnings.removeIf(record -> record.getMessage().contains("5 Minuten")), "die Strecke wartete aus");
+		Files.move(hidden, feed);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("Tom", lastName(a.eventState().get(seat)));
+		assertEquals(Set.of(miaUnit), carriers(a, miaId), "Mia lebt genau einmal, niemand hat storniert");
+		UnitSnapshot kept = a.eventState().get(miaUnit);
+		assertWithoutPlace(kept, "Mia");
+		assertEquals("Fenster", kept.payload().get("comment").asText(), "B's Änderung beim Zuweisen");
+		assertDoubleSale(b, miaUnit, seat);
+		List<OpenConflict> open = a.open();
+		assertEquals(1, open.size(), "A's Änderung weicht mit Vermerk: " + open);
+		assertEquals(ConflictNote.Kind.DELETE_WINS, open.get(0).note().kind());
+		assertModelShowsDoubleSale(a, 1, "Tom", miaId, "Mia");
+		assertModelShowsDoubleSale(b, 1, "Tom", miaId, "Mia");
 	}
 
 	/**

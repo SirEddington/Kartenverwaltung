@@ -361,6 +361,78 @@ class ConflictResolverTest {
 		assertNull(seatInput.siblings().get(BOOKING).lostMove());
 	}
 
+	/**
+	 * R35: Die Eingabe trägt die Speichervorgänge der ganzen verlorenen Strecke, und die Einheit {@code _<ID>} der Buchung
+	 * von "Meine" ihre Löschungen mit ihrem Stand: ohne Zusammenführungen und ohne die, die schon vor der Strecke dort
+	 * lagen.
+	 */
+	@Test
+	void stretchCarriesAllItsSavesAndMyUnassignedUnitItsDeletions() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		RecordingPolicy policy = new RecordingPolicy();
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		ObjectNode booking = MAPPER.createObjectNode().put("id", "X").put("name", "Anna");
+		// X stand schon früher ohne Platz, wurde von dort gelöscht und wieder angelegt: eine ältere Löschung
+		Version first = service.append("save-first", List.of(new Change(MOVED, List.of(), booking.deepCopy(), false)))
+				.get(0);
+		Version earlier = service.append("save-earlier", List.of(new Change(MOVED, List.of(first.id()), null, true)))
+				.get(0);
+		Version base = service.append("save-0",
+				List.of(new Change(MOVED, List.of(earlier.id()), booking.deepCopy(), false))).get(0);
+		// auf A-1 verkauft ein anderer Rechner zuerst T; dieser Rechner weist X dorthin zu und ändert X danach dort noch
+		foreign(service, appData, BOOKING, List.of(), MAPPER.createObjectNode().put("id", "T"), false, Map.of());
+		List<Version> assign = service.append("save-a", List.of(new Change(MOVED, List.of(base.id()), null, true),
+				new Change(BOOKING, List.of(), booking.deepCopy().put("name", "Anna am Fenster"), false)));
+		service.append("save-c", List.of(new Change(BOOKING, List.of(assign.get(1).id()),
+				booking.deepCopy().put("name", "Anna, Rollstuhl"), false)));
+		// ein anderer Rechner hat X ohne Platz ebenfalls gelöscht und dort verloren, und X nach A-2 gesetzt
+		Version theirDeletion = foreign(service, appData, MOVED, List.of(base.id()), null, true, Map.of());
+		Version theirCopy = foreign(service, appData, OTHER_SEAT, List.of(), booking.deepCopy(), false, Map.of());
+		assertEquals(1, service.unitState(BOOKING).lost().size());
+		assertEquals(assign.get(0).id(), service.unitState(MOVED).head().id(), "die eigene Löschung gilt");
+
+		service.tick();
+
+		ConflictInput input = policy.inputs.stream().filter(i -> i.unit().equals(BOOKING)).findFirst().orElseThrow();
+		assertEquals(Set.of("save-a", "save-c"), input.mineSaveIds());
+		assertEquals(Set.of(theirCopy.saveId()), input.siblings().get(OTHER_SEAT).saveIds(),
+				"trägt die Buchung von Meine (die Strecke hat keine Basis)");
+		assertEquals(Set.of(new ConflictInput.Deletion("save-a", ConflictInput.Standing.CHAIN),
+				new ConflictInput.Deletion(theirDeletion.saveId(), ConflictInput.Standing.BESIDE)),
+				Set.copyOf(input.siblings().get(MOVED).deletions()), "ohne die ältere Löschung");
+	}
+
+	/**
+	 * N3: Das verlorene Ziel eines Umzugs ist nie eine Version der gültigen Kette dieser Einheit, auch wenn sie aus dem
+	 * Speichervorgang der Löschung stammt und die Einheit eigene Versionen außerhalb der Kette hat.
+	 */
+	@Test
+	void lostMoveIsNeverAVersionOfTheValidChain() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		RecordingPolicy policy = new RecordingPolicy();
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		ObjectNode booking = MAPPER.createObjectNode().put("id", "X").put("name", "Anna");
+		Version base = own(service, MOVED, List.of(), booking);
+		foreign(service, appData, MOVED, List.of(base.id()), booking.deepCopy().put("name", "Anna bezahlt"), false,
+				Map.of());
+		// dieser Rechner zieht X nach A-2 um; dort gilt das Ziel, ein anderer Rechner setzt danach Y darauf
+		List<Version> move = service.append("save-move", List.of(new Change(MOVED, List.of(base.id()), null, true),
+				new Change(OTHER_SEAT, List.of(), booking.deepCopy().put("name", "Anna am Fenster"), false)));
+		foreign(service, appData, OTHER_SEAT, List.of(move.get(1).id()), MAPPER.createObjectNode().put("id", "Y"), false,
+				Map.of());
+		// eine eigene spätere Änderung auf A-2 verliert: A-2 hat eigene Versionen außerhalb der Kette
+		own(service, OTHER_SEAT, List.of(move.get(1).id()), booking.deepCopy().put("name", "Anna, Rollstuhl"));
+		assertEquals(1, service.unitState(MOVED).lost().size());
+		assertEquals(1, service.unitState(OTHER_SEAT).lost().size());
+
+		service.tick();
+
+		ConflictInput input = policy.inputs.stream().filter(i -> i.unit().equals(MOVED)).findFirst().orElseThrow();
+		assertNull(input.siblings().get(OTHER_SEAT).lostMove(), "das Ziel gilt dort, es ist kein verlorenes");
+	}
+
 	@Test
 	void twoRootVersionsHaveNullBase() throws IOException {
 		Path appData = dir.resolve("app");

@@ -9,13 +9,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -32,7 +40,9 @@ import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
+import de.eltviller_carneval_verein.karten.store.ConflictInput.Deletion;
 import de.eltviller_carneval_verein.karten.store.ConflictInput.Sibling;
+import de.eltviller_carneval_verein.karten.store.ConflictInput.Standing;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Kind;
 import de.eltviller_carneval_verein.karten.store.ConflictPolicy;
@@ -523,10 +533,13 @@ class BookingPolicyTest {
 		assertEquals(myDeletion.id(), note.dropped());
 	}
 
-	/** Die Einheit {@code _m} mit ihrem Stand als Kette bis {@code current} und den Speichervorgängen in ihrem Ordner. */
-	private static Sibling unassignedWith(UnitKey unit, Version current, String... saveIds) {
+	/**
+	 * Die Einheit {@code _m} mit ihrem Stand als Kette bis {@code current}, den Löschungen in ihrem Ordner (wie der Resolver
+	 * sie liefert) und den Speichervorgängen darin.
+	 */
+	private static Sibling unassignedWith(UnitKey unit, Version current, List<Deletion> deletions, String... saveIds) {
 		return new Sibling(new UnitSnapshot(unit, current.id(), Status.OK, current.deleted(), current.payload()),
-				ChainStep.of(current), Set.of(saveIds));
+				ChainStep.of(current), Set.of(saveIds), null, deletions);
 	}
 
 	/**
@@ -546,7 +559,8 @@ class BookingPolicyTest {
 
 		// s1 zuerst: _m ist fremd gelöscht, die eigene Löschung dort (save-a) ist verloren
 		Resolution s1First = POLICY.resolve(input(S1, null, myS1, theirS1,
-				Map.of(unassigned, unassignedWith(unassigned, theirDeletion, "save-0", "save-a", "save-b")), theirS1));
+				Map.of(unassigned, unassignedWith(unassigned, theirDeletion, ownLost(), "save-0", "save-a", "save-b")),
+				theirS1));
 		assertCancellationWins(s1First, theirS1, myS1);
 		Version s1Merge = version(OWN, "resolver-1", theirS1.payload());
 		Resolution mThen = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
@@ -563,9 +577,20 @@ class BookingPolicyTest {
 		assertTrue(mFirst.extra().isEmpty());
 		Version mMerge = deletion(OWN, "resolver-2");
 		Resolution s1Then = POLICY.resolve(input(S1, null, myS1, theirS1,
-				Map.of(unassigned, unassignedWith(unassigned, mMerge, "save-0", "save-a", "save-b", "resolver-2")),
+				Map.of(unassigned,
+						unassignedWith(unassigned, mMerge, ownAbsorbed(), "save-0", "save-a", "save-b", "resolver-2")),
 				theirS1));
 		assertCancellationWins(s1Then, theirS1, myS1);
+	}
+
+	/** Die Löschungen auf {@code _m}, solange die eigene (save-a) gegen die fremde (save-b) verloren hat. */
+	private static List<Deletion> ownLost() {
+		return List.of(new Deletion("save-b", Standing.CHAIN), new Deletion("save-a", Standing.BESIDE));
+	}
+
+	/** Die Löschungen auf {@code _m}, nachdem die eigene Auflösung die verlorene eigene Löschung zusammengeführt hat. */
+	private static List<Deletion> ownAbsorbed() {
+		return List.of(new Deletion("save-b", Standing.CHAIN), new Deletion("save-a", Standing.ABSORBED));
 	}
 
 	private static void assertCancellationWins(Resolution resolution, Version theirS1, Version myS1) {
@@ -599,7 +624,7 @@ class BookingPolicyTest {
 
 		// s1 zuerst: m lebt auf s4, also keine Zusatz-Einheit und hier kein Vermerk (den bekommt _m)
 		Resolution s1First = POLICY.resolve(input(S1, null, myS1, theirS1,
-				Map.of(unassigned, unassignedWith(unassigned, theirDeletion, "save-0", "save-a", "save-b"), s4,
+				Map.of(unassigned, unassignedWith(unassigned, theirDeletion, ownLost(), "save-0", "save-a", "save-b"), s4,
 						sibling(s4, theirS4)),
 				theirS1));
 		assertForeignMoveKeptOnSeat(s1First, theirS1);
@@ -614,7 +639,8 @@ class BookingPolicyTest {
 		assertForeignMoveWinsOnUnassigned(mFirst, theirDeletion, myS1);
 		Version mMerge = deletion(OWN, "resolver-2");
 		Resolution s1Then = POLICY.resolve(input(S1, null, myS1, theirS1,
-				Map.of(unassigned, unassignedWith(unassigned, mMerge, "save-0", "save-a", "save-b", "resolver-2"), s4,
+				Map.of(unassigned,
+						unassignedWith(unassigned, mMerge, ownAbsorbed(), "save-0", "save-a", "save-b", "resolver-2"), s4,
 						sibling(s4, theirS4)),
 				theirS1));
 		assertForeignMoveKeptOnSeat(s1Then, theirS1);
@@ -673,7 +699,9 @@ class BookingPolicyTest {
 		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
 
 		Resolution resolution = POLICY.resolve(input(S1, null, myS1, theirS1,
-				Map.of(unassigned, unassignedWith(unassigned, earlierDeletion, "save-0", "save-early")), theirS1));
+				Map.of(unassigned, unassignedWith(unassigned, earlierDeletion,
+						List.of(new Deletion("save-early", Standing.CHAIN)), "save-0", "save-early")),
+				theirS1));
 
 		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
 		assertEquals(List.of(unassigned), resolution.extra().stream().map(Change::unit).toList());
@@ -695,6 +723,386 @@ class BookingPolicyTest {
 
 		assertTrue(resolution.deleted());
 		assertEquals(Kind.DELETE_WINS, resolution.note().kind());
+	}
+
+	// R35: Zuweisen aus "ohne Platz" gegen eine gleichzeitige Änderung, als Matrix -->
+
+	/** Was A mit m macht, während es s1 an t verkauft. */
+	enum ForeignAction {
+		/** m auf {@code _m} ändern (bezahlt). */
+		EDIT,
+		/** m stornieren ({@code _m} löschen). */
+		CANCEL,
+		/** m von {@code _m} nach s4 setzen. */
+		MOVE_TO_S4,
+		/** m nach s4 setzen und in einem zweiten Speichervorgang weiter nach s5. */
+		MOVE_TO_S4_THEN_S5
+	}
+
+	/** Wer welche Einheit gewinnt, und wer in welcher Reihenfolge auflöst. */
+	enum Course {
+		/** A gewinnt beide Einheiten; B löst erst s1, dann {@code _m} auf. */
+		A_WINS_BOTH_SEAT_FIRST(false),
+		/** A gewinnt beide Einheiten; B löst erst {@code _m}, dann s1 auf. */
+		A_WINS_BOTH_UNASSIGNED_FIRST(false),
+		/** B gewinnt {@code _m}, A gewinnt s1; B löst s1 auf, bevor A {@code _m} auflöst (und A sieht B's Ergebnis). */
+		SPLIT_SEAT_BEFORE_FOREIGN_MERGE(true),
+		/** B gewinnt {@code _m}, A gewinnt s1; A löst {@code _m} auf, danach B s1 (und B sieht A's Zusammenführung). */
+		SPLIT_SEAT_AFTER_FOREIGN_MERGE(true);
+
+		final boolean split;
+
+		Course(boolean split) {
+			this.split = split;
+		}
+	}
+
+	/**
+	 * Ein Versionsspeicher im Kleinen: je Einheit alle Versionen ihres Ordners und die gültige Kette, je Einheit und
+	 * Rechner die verlorene Strecke. {@link #resolve} bildet die Eingabe wie {@code ConflictResolver} (Basis, Meine, Deren,
+	 * Kette seit der Basis, Speichervorgänge der Strecke, Geschwister mit Speichervorgängen, verlorenem Umzugsziel und
+	 * Löschungen) und schreibt die Auflösung (weitere Änderungen, dann die Zusammenführung) in die Ketten. Gabelungen
+	 * zwischen Auflösungen gibt es hier nicht: Wer auflöst, sieht alles, was vorher aufgelöst wurde.
+	 */
+	private static final class World {
+		private final Map<UnitKey, List<Version>> chains = new LinkedHashMap<>();
+		private final Map<UnitKey, List<Version>> folders = new LinkedHashMap<>();
+		private final Map<UnitKey, Map<String, List<Version>>> lost = new LinkedHashMap<>();
+		/** Die geschriebenen Vermerke. */
+		final List<ConflictNote> notes = new ArrayList<>();
+		private int merges;
+
+		void claim(UnitKey unit, Version version) {
+			List<Version> chain = chains.computeIfAbsent(unit, key -> new ArrayList<>());
+			assertEquals(chain.isEmpty() ? null : chain.get(chain.size() - 1).id(), version.firstParent(),
+					"keine Gabelung an " + unit.relativePath());
+			chain.add(version);
+			folders.computeIfAbsent(unit, key -> new ArrayList<>()).add(version);
+		}
+
+		void lose(UnitKey unit, Version version) {
+			folders.computeIfAbsent(unit, key -> new ArrayList<>()).add(version);
+			lost.computeIfAbsent(unit, key -> new LinkedHashMap<>())
+					.computeIfAbsent(version.machine(), key -> new ArrayList<>()).add(version);
+		}
+
+		Version head(UnitKey unit) {
+			List<Version> chain = chains.getOrDefault(unit, List.of());
+			return chain.isEmpty() ? null : chain.get(chain.size() - 1);
+		}
+
+		/** Die Einheiten, deren Stand die Buchung trägt. */
+		List<UnitKey> carriers(String bookingId) {
+			return chains.keySet().stream().filter(unit -> bookingId.equals(idOf(head(unit)))).toList();
+		}
+
+		/** Ob kein Rechner mehr eine verlorene Strecke hat. */
+		boolean settled() {
+			return lost.values().stream().allMatch(Map::isEmpty);
+		}
+
+		/** Die Vermerke, die einen Rechner betreffen. */
+		List<ConflictNote> notesFor(String machine) {
+			return notes.stream().filter(note -> machine.equals(note.affected())).toList();
+		}
+
+		/** Löst die verlorene Strecke des Rechners an der Einheit auf, wie der Resolver auf diesem Rechner. */
+		void resolve(UnitKey unit, String machine) {
+			List<Version> stretch = lost.get(unit).remove(machine);
+			Version mine = stretch.get(stretch.size() - 1);
+			VersionId baseId = stretch.get(0).firstParent();
+			List<Version> chain = chains.get(unit);
+			int at = -1;
+			for (int i = 0; baseId != null && i < chain.size(); i++) {
+				if (chain.get(i).id().equals(baseId)) {
+					at = i;
+				}
+			}
+			Version base = at < 0 ? null : chain.get(at);
+			Version theirs = head(unit);
+			Set<String> saveIds = stretch.stream().map(Version::saveId).collect(Collectors.toSet());
+			ConflictInput input = new ConflictInput(unit, copy(base), copy(mine), copy(theirs),
+					chain.subList(at + 1, chain.size()).stream().map(BookingPolicyTest::copy).toList(), machine,
+					siblings(unit, base, mine, saveIds), saveIds);
+			Resolution resolution = POLICY.resolve(input);
+			String saveId = "merge-" + ++merges;
+			for (Change extra : resolution.extra()) {
+				Version current = head(extra.unit());
+				boolean there = extra.deleted() ? current == null || current.deleted()
+						: extra.parents().isEmpty() && current != null;
+				if (!there) {
+					write(extra.unit(), extra.parents(), machine, saveId, extra.deleted(), extra.payload(), extra.note());
+				}
+			}
+			write(unit, List.of(theirs.id(), mine.id()), machine, saveId, resolution.deleted(), resolution.payload(),
+					resolution.note());
+		}
+
+		private void write(UnitKey unit, List<VersionId> parents, String machine, String saveId, boolean deleted,
+				ObjectNode payload, ConflictNote note) {
+			claim(unit, new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter++), parents, machine,
+					"Kasse " + machine, "Bediener " + machine, Instant.EPOCH, saveId, deleted, deleted ? null : payload,
+					note, Map.of()));
+			if (note != null) {
+				notes.add(note);
+			}
+		}
+
+		/** Die Geschwister wie {@code ConflictResolver.siblings}. */
+		private Map<UnitKey, Sibling> siblings(UnitKey unit, Version base, Version mine, Set<String> saveIds) {
+			String bookingId = idOf(base);
+			String mineId = idOf(mine);
+			UnitKey ownUnassigned = mineId == null ? null : UnitKey.unassignedBooking(EVENT, PRESENTATION, mineId);
+			Map<UnitKey, Sibling> siblings = new LinkedHashMap<>();
+			for (UnitKey other : chains.keySet()) {
+				Version head = head(other);
+				if (other.equals(unit)) {
+					continue;
+				}
+				boolean carries = bookingId != null && bookingId.equals(idOf(head));
+				boolean carriesMine = mineId != null && mineId.equals(idOf(head));
+				Set<String> folderSaves = carries || carriesMine || other.equals(ownUnassigned)
+						? folders.get(other).stream().map(Version::saveId).collect(Collectors.toSet())
+						: Set.of();
+				Version lostMove = carries || bookingId == null || !mine.deleted() ? null
+						: youngest(other, version -> !chains.get(other).contains(version)
+								&& saveIds.contains(version.saveId()) && bookingId.equals(idOf(version)));
+				List<Deletion> deletions = other.equals(ownUnassigned) ? deletions(other, saveIds) : List.of();
+				siblings.put(other, new Sibling(new UnitSnapshot(other, head.id(), Status.OK, head.deleted(),
+						head.deleted() ? null : head.payload().deepCopy()), ChainStep.of(head), folderSaves, copy(lostMove),
+						deletions));
+			}
+			return siblings;
+		}
+
+		private Version youngest(UnitKey unit, Predicate<Version> filter) {
+			return folders.get(unit).stream().filter(filter).reduce((first, second) -> second).orElse(null);
+		}
+
+		private List<Deletion> deletions(UnitKey unit, Set<String> saveIds) {
+			Set<VersionId> earlier = new HashSet<>();
+			folders.get(unit).stream().filter(version -> saveIds.contains(version.saveId()))
+					.forEach(version -> earlier.addAll(ancestors(unit, version)));
+			Set<VersionId> absorbed = ancestors(unit, head(unit));
+			List<Deletion> deletions = new ArrayList<>();
+			for (Version version : folders.get(unit)) {
+				if (version.deleted() && version.parents().size() < 2 && !earlier.contains(version.id())) {
+					Standing standing = chains.get(unit).contains(version) ? Standing.CHAIN
+							: absorbed.contains(version.id()) ? Standing.ABSORBED : Standing.BESIDE;
+					deletions.add(new Deletion(version.saveId(), standing));
+				}
+			}
+			return deletions;
+		}
+
+		/** Die Vorgänger der Version im Ordner, über alle Vorgänger, ohne sie selbst. */
+		private Set<VersionId> ancestors(UnitKey unit, Version version) {
+			Set<VersionId> found = new HashSet<>();
+			List<VersionId> open = new ArrayList<>(version.parents());
+			while (!open.isEmpty()) {
+				VersionId id = open.remove(open.size() - 1);
+				if (found.add(id)) {
+					folders.get(unit).stream().filter(candidate -> candidate.id().equals(id)).findFirst()
+							.ifPresent(parent -> open.addAll(parent.parents()));
+				}
+			}
+			return found;
+		}
+	}
+
+	/** Eine Kopie der Version, wie der Resolver sie der Strategie gibt. */
+	private static Version copy(Version version) {
+		return version == null ? null
+				: new Version(version.format(), version.id(), version.parents(), version.machine(), version.machineName(),
+						version.operator(), version.at(), version.saveId(), version.deleted(),
+						version.payload() == null ? null : version.payload().deepCopy(), version.conflict(), version.seen());
+	}
+
+	/** Die Buchungs-ID einer Version mit Inhalt; {@code null} ohne Version oder bei einer Löschung. */
+	private static String idOf(Version version) {
+		return version == null || version.deleted() ? null : version.payload().path("id").asText(null);
+	}
+
+	/** Eine Version auf einem Vorgänger; ohne Inhalt eine Löschung. */
+	private static Version child(String machine, String saveId, Version parent, ObjectNode payload) {
+		return new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter++), List.of(parent.id()),
+				machine, "Kasse " + machine, "Bediener " + machine, Instant.EPOCH, saveId, payload == null, payload);
+	}
+
+	/**
+	 * Der Fall aus R35: m steht "ohne Platz" ({@code _m}). B (dieser Rechner, OWN) weist m dem Sitz s1 zu und ändert dabei die
+	 * E-Mail (save-a: Löschung von {@code _m}, m auf s1), bei zwei Speichervorgängen danach noch den Kommentar an m auf s1
+	 * (save-c). A (OTHER) verkauft s1 an t und ändert, storniert oder verschiebt m im selben Speichervorgang (save-b);
+	 * weitergeschoben nach s5 wird in save-d. A gewinnt s1, {@code _m} gewinnt je nach Verlauf A oder B; danach lösen die
+	 * Verlierer in der Reihenfolge des Verlaufs auf.
+	 */
+	private static World assignmentAgainst(ForeignAction action, int ownSaves, Course course) {
+		World world = new World();
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		UnitKey s4 = seat("s4");
+		Version base = version(THIRD, "save-0", withoutPlace("m", b -> {
+		}));
+		world.claim(unassigned, base);
+		Version myDeletion = child(OWN, "save-a", base, null);
+		List<Version> mySeat = new ArrayList<>(
+				List.of(version(OWN, "save-a", booking("m", "s1", b -> b.setEMail("neu@example.org")))));
+		if (ownSaves == 2) {
+			mySeat.add(child(OWN, "save-c", mySeat.get(0), booking("m", "s1", b -> {
+				b.setEMail("neu@example.org");
+				b.setComment("Fenster");
+			})));
+		}
+		Version theirSeat = version(OTHER, "save-b", booking("t", "s1", b -> b.setLastName("Tom")));
+		Version theirM = action == ForeignAction.EDIT
+				? child(OTHER, "save-b", base, withoutPlace("m", b -> b.setPaymentStatus(PaymentStatus.CARD)))
+				: child(OTHER, "save-b", base, null);
+		world.claim(S1, theirSeat);
+		mySeat.forEach(version -> world.lose(S1, version));
+		if (action == ForeignAction.MOVE_TO_S4 || action == ForeignAction.MOVE_TO_S4_THEN_S5) {
+			Version theirS4 = version(OTHER, "save-b", booking("m", "s4", b -> b.setSeatNumber(4)));
+			world.claim(s4, theirS4);
+			if (action == ForeignAction.MOVE_TO_S4_THEN_S5) {
+				world.claim(s4, child(OTHER, "save-d", theirS4, null));
+				world.claim(seat("s5"), version(OTHER, "save-d", booking("m", "s5", b -> b.setSeatNumber(5))));
+			}
+		}
+		if (course.split) {
+			world.claim(unassigned, myDeletion);
+			world.lose(unassigned, theirM);
+		} else {
+			world.claim(unassigned, theirM);
+			world.lose(unassigned, myDeletion);
+		}
+		switch (course) {
+		case A_WINS_BOTH_SEAT_FIRST -> {
+			world.resolve(S1, OWN);
+			world.resolve(unassigned, OWN);
+		}
+		case A_WINS_BOTH_UNASSIGNED_FIRST -> {
+			world.resolve(unassigned, OWN);
+			world.resolve(S1, OWN);
+		}
+		case SPLIT_SEAT_BEFORE_FOREIGN_MERGE -> {
+			world.resolve(S1, OWN);
+			world.resolve(unassigned, OTHER);
+		}
+		case SPLIT_SEAT_AFTER_FOREIGN_MERGE -> {
+			world.resolve(unassigned, OTHER);
+			world.resolve(S1, OWN);
+		}
+		}
+		assertTrue(world.settled());
+		return world;
+	}
+
+	/**
+	 * Die Zellen, die die Matrix nicht halten kann: A verschiebt m nach s4, die Gewinner sind getrennt, und A löst
+	 * {@code _m} auf, bevor B's Auflösung von s1 bei ihm ist.
+	 */
+	private static boolean heldOpen(ForeignAction action, Course course) {
+		return action == ForeignAction.MOVE_TO_S4 && course == Course.SPLIT_SEAT_AFTER_FOREIGN_MERGE;
+	}
+
+	static Stream<Arguments> assignmentCells() {
+		return cells(cell -> !heldOpen(cell.action(), cell.course()));
+	}
+
+	static Stream<Arguments> heldOpenCells() {
+		return cells(cell -> heldOpen(cell.action(), cell.course()));
+	}
+
+	private record Cell(ForeignAction action, int ownSaves, Course course) {
+	}
+
+	private static Stream<Arguments> cells(Predicate<Cell> filter) {
+		List<Arguments> cells = new ArrayList<>();
+		for (ForeignAction action : ForeignAction.values()) {
+			for (int ownSaves = 1; ownSaves <= 2; ownSaves++) {
+				for (Course course : Course.values()) {
+					if (filter.test(new Cell(action, ownSaves, course))) {
+						cells.add(Arguments.of(action, ownSaves, course));
+					}
+				}
+			}
+		}
+		return cells.stream();
+	}
+
+	/**
+	 * R35: In jeder Variante und jeder Reihenfolge lebt m höchstens einmal, und nirgends genau dann, wenn A storniert hat;
+	 * A's Umzug gilt, eine Änderung von A weicht nie still; B weicht mit genau einem Vermerk (Änderung: Doppelverkauf,
+	 * Storno: DELETE_WINS, Umzug: FIELDS "Platz"), A hat nur dann einen, wenn seine Änderung weicht; s1 trägt t.
+	 */
+	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
+	@MethodSource("assignmentCells")
+	void assignmentFromUnassignedAgainstConcurrentChangeKeepsInvariants(ForeignAction action, int ownSaves,
+			Course course) {
+		assertInvariants(assignmentAgainst(action, ownSaves, course), action);
+	}
+
+	/** Dieselben Invarianten für die Zellen, die ohne einen neuen Mechanismus im Speicher nicht zu halten sind. */
+	@Disabled("Ruling offen (Bericht Runde 4): Löst A _m auf, bevor B's Auflösung von s1 bei ihm ist, hält A B's "
+			+ "gewonnene Löschung für ein Storno und löscht seine Kopie auf s4 (Regel 0, verschoben gegen storniert), weil "
+			+ "die Strategie B's verlorenes Ziel auf s1 nicht sieht; dazu müsste der Speicher fremde verlorene Versionen "
+			+ "anderer Einheiten liefern, die der Index heute nicht kennt")
+	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
+	@MethodSource("heldOpenCells")
+	void foreignMoveAgainstAssignmentWithSplitWinnersKeepsInvariants(ForeignAction action, int ownSaves,
+			Course course) {
+		assertInvariants(assignmentAgainst(action, ownSaves, course), action);
+	}
+
+	/**
+	 * Was in den offenen Zellen gilt: nie zwei lebende Einheiten, B hat genau einen Vermerk, und lebt m nirgends, hat A
+	 * einen Vermerk DELETE_WINS auf seine Kopie (zum Wiederherstellen). Nichts geht still verloren.
+	 */
+	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
+	@MethodSource("heldOpenCells")
+	void foreignMoveAgainstAssignmentWithSplitWinnersLosesNothingSilently(ForeignAction action, int ownSaves,
+			Course course) {
+		World world = assignmentAgainst(action, ownSaves, course);
+		List<UnitKey> carriers = world.carriers("m");
+		assertTrue(carriers.size() <= 1, "m lebt höchstens einmal: " + carriers);
+		assertEquals(1, world.notesFor(OWN).size(), "B: " + world.notesFor(OWN));
+		if (carriers.isEmpty()) {
+			List<ConflictNote> theirs = world.notesFor(OTHER);
+			assertEquals(1, theirs.size(), "A: " + theirs);
+			assertEquals(Kind.DELETE_WINS, theirs.get(0).kind());
+		}
+		assertEquals("t", idOf(world.head(S1)));
+	}
+
+	private static void assertInvariants(World world, ForeignAction action) {
+		List<UnitKey> carriers = world.carriers("m");
+		assertTrue(carriers.size() <= 1, "1: m lebt höchstens einmal: " + carriers);
+		assertEquals(action == ForeignAction.CANCEL ? 0 : 1, carriers.size(),
+				"2: m lebt genau dann nirgends, wenn A storniert hat: " + carriers);
+		boolean theirChangeYields = false;
+		switch (action) {
+		case MOVE_TO_S4 -> assertEquals(List.of(seat("s4")), carriers, "3: A's Umzug gilt");
+		case MOVE_TO_S4_THEN_S5 -> assertEquals(List.of(seat("s5")), carriers, "3: A's Umzug gilt");
+		case EDIT -> theirChangeYields = !"CARD".equals(world.head(carriers.get(0)).payload().path("paymentStatus").asText());
+		case CANCEL -> {
+		}
+		}
+		List<ConflictNote> mine = world.notesFor(OWN);
+		assertEquals(1, mine.size(), "4: B weicht mit genau einem Vermerk: " + mine);
+		Kind expected = switch (action) {
+		case EDIT -> Kind.DOUBLE_SALE;
+		case CANCEL -> Kind.DELETE_WINS;
+		case MOVE_TO_S4, MOVE_TO_S4_THEN_S5 -> Kind.FIELDS;
+		};
+		assertEquals(expected, mine.get(0).kind(), "4: Art von B's Vermerk");
+		if (expected == Kind.FIELDS) {
+			assertEquals(List.of("place"), mine.get(0).fields().stream().map(ConflictNote.FieldConflict::group).toList());
+		}
+		List<ConflictNote> theirs = world.notesFor(OTHER);
+		assertEquals(theirChangeYields ? 1 : 0, theirs.size(),
+				"3/4: A hat genau dann einen Vermerk, wenn seine Änderung weicht: " + theirs);
+		if (theirChangeYields) {
+			assertEquals(Kind.DELETE_WINS, theirs.get(0).kind());
+		}
+		assertEquals("t", idOf(world.head(S1)), "5: s1 trägt t");
 	}
 
 	@Test

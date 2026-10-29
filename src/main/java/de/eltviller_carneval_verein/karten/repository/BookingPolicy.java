@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -10,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.ConflictInput.Sibling;
+import de.eltviller_carneval_verein.karten.store.ConflictInput.Standing;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.FieldConflict;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Kind;
@@ -139,7 +141,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		// ebenso: Der Vermerk muss bleiben, sonst ginge das Zuweisen still unter.
 		UnitSnapshot foreignCopy = theirCopy != null ? theirCopy : livingCopy(input, bookingId);
 		Version myLostCopy = foreignCopy == null || !isOwnUnassigned(input.unit(), bookingId) ? null
-				: strandedTarget(input, bookingId, mine.saveId());
+				: strandedTarget(input, bookingId);
 		if (myLostCopy != null) {
 			List<String> place = FieldGroups.booking().get(PLACE_GROUP);
 			FieldConflict conflict = new FieldConflict(PLACE_GROUP, FieldMerge.slice(myLostCopy.payload(), place),
@@ -318,9 +320,10 @@ public final class BookingPolicy implements ConflictPolicy {
 	/**
 	 * Regel 2, gescheiterter Umzug aus "ohne Platz" (Ruling R31): Die Einheit ist {@code _<ID>} der Buchung der Basis,
 	 * "Meine" hat sie gelöscht, "Deren" ist dieselbe Buchung mit Inhalt, und keine Geschwister-Einheit trägt sie (sonst
-	 * {@link #movedAgainstEdit}). Liegt in einer Geschwister-Einheit eine Version aus dem Speichervorgang der Löschung mit
-	 * dieser Buchung, die dort nicht gilt ({@link Sibling#lostMove()}), war die Löschung kein Storno, sondern die Quelle eines
-	 * Umzugs, dessen Ziel verloren hat (dort steht ein anderer Verkauf; den Doppelverkauf meldet der Vermerk dort). Die
+	 * {@link #movedAgainstEdit}). Liegt in einer Geschwister-Einheit eine Version aus einem Speichervorgang der Strecke (dem
+	 * der Löschung) mit dieser Buchung, die dort nicht gilt ({@link Sibling#lostMove()}), war die Löschung kein Storno,
+	 * sondern die Quelle eines Umzugs, dessen Ziel verloren hat (dort steht ein anderer Verkauf; den Doppelverkauf meldet
+	 * der Vermerk dort). Die
 	 * Buchung bleibt hier mit "Deren"; die Felder, die "Meine" beim Umzug geändert hat (die Version am Ziel ohne die Gruppe
 	 * "Platz"), kommen per Dreiwegevergleich gegen die Basis dazu. Strittige Gruppen: "Deren" gilt, Vermerk FIELDS an diesen
 	 * Rechner.
@@ -341,7 +344,7 @@ public final class BookingPolicy implements ConflictPolicy {
 				|| !isOwnUnassigned(unit, bookingId)) {
 			return null;
 		}
-		Version target = strandedTarget(input, bookingId, mine.saveId());
+		Version target = strandedTarget(input, bookingId);
 		if (target == null) {
 			return null;
 		}
@@ -372,18 +375,18 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/**
-	 * Das {@link Sibling#lostMove() verlorene Ziel} eines Umzugs der Buchung aus dem Speichervorgang {@code saveId} in
-	 * einer Geschwister-Einheit, die die Buchung nicht trägt; bei mehreren das erste nach Ordner.
+	 * Das {@link Sibling#lostMove() verlorene Ziel} eines Umzugs der Buchung aus einem Speichervorgang der verlorenen
+	 * Strecke ({@link ConflictInput#mineSaveIds()}, derselbe Schlüssel wie in {@link #doubleSale}) in einer
+	 * Geschwister-Einheit, die die Buchung nicht trägt; bei mehreren das erste nach Ordner.
 	 *
 	 * @return die Version am Ziel, oder {@code null}, wenn es keine gibt
 	 */
-	private static Version strandedTarget(ConflictInput input, String bookingId, String saveId) {
-		if (saveId == null) {
-			return null;
-		}
+	private static Version strandedTarget(ConflictInput input, String bookingId) {
+		Set<String> saveIds = input.mineSaveIds();
 		return input.siblings().values().stream()
 				.filter(sibling -> sibling.lostMove() != null && !sibling.lostMove().deleted()
-						&& saveId.equals(sibling.lostMove().saveId()) && bookingId.equals(idOf(sibling.lostMove()))
+						&& sibling.lostMove().saveId() != null && saveIds.contains(sibling.lostMove().saveId())
+						&& bookingId.equals(idOf(sibling.lostMove()))
 						&& !(sibling.snapshot().version() != null && !sibling.snapshot().deleted()
 								&& bookingId.equals(text(sibling.snapshot().payload()))))
 				.min(Comparator.comparing(sibling -> sibling.snapshot().unit().relativePath())).map(Sibling::lostMove)
@@ -518,13 +521,22 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * dann auf {@code _<ID>} ({@link #movedAgainstEdit}); ohne {@code _<ID>} löschte sie die Buchung dort, und sie lebte
 	 * nirgends mehr. Lebt {@code _<ID>} nur, weil die eigene Löschung dort verloren hat (die Buchung kam von dort hierher,
 	 * Zuweisen aus "ohne Platz"), bleibt sie dort trotzdem: Die Auflösung von {@code _<ID>} erkennt den gescheiterten Umzug
-	 * und löscht nicht ({@link #strandedMove}, Ruling R31); die Felder, die "Meine" dabei geändert hat, überträgt sie. Hat
-	 * ein anderer Rechner {@code _<ID>} dagegen gelöscht, während "Meine" die Buchung von dort hierher zuwies
-	 * ({@link #foreignDeletedSource}), gibt es keine Wiederbelebung, und der Sitz behält "Deren": Lebt die Buchung anderswo
-	 * (er hat sie verschoben, Ruling R31b), gilt sein Umzug, und den Vermerk FIELDS "place" schreibt die Auflösung von
-	 * {@code _<ID>} ({@link #bothDeleted}); sonst hat er storniert (Ruling R31a), und dieser Rechner bekommt hier statt des
-	 * Doppelverkaufs den Vermerk DELETE_WINS ({@code dropped} = "Meine", zum Wiederherstellen). Ist
-	 * die Einheit selbst schon {@code _<ID>}, kann die Buchung nicht weiter ausweichen: "Deren" bleibt, Vermerk UNMERGED.
+	 * und löscht nicht ({@link #strandedMove}, Ruling R31); die Felder, die "Meine" dabei geändert hat, überträgt sie.
+	 * <p>
+	 * Hat "Meine" die Buchung von {@code _<ID>} hierher zugewiesen ({@link #assignedFrom}) und hat ein anderer Rechner sie
+	 * dort ebenfalls gelöscht ({@link #deletedThereByOthers}), gibt es keine Wiederbelebung (R21 gilt nur, wenn die Löschung
+	 * dort allein dieses Rechners Zuweisen war, Ruling R35), und der Sitz behält "Deren":
+	 * <ul>
+	 * <li>Lebt die Buchung nirgends, hat er storniert (Ruling R31a): Dieser Rechner bekommt hier statt des Doppelverkaufs den
+	 * Vermerk DELETE_WINS ({@code dropped} = "Meine", zum Wiederherstellen).</li>
+	 * <li>Lebt sie anderswo, hat er sie verschoben, und sein Umzug gilt (Ruling R31b). Den Vermerk FIELDS "place" schreibt
+	 * die Auflösung von {@code _<ID>} ({@link #bothDeleted}), wenn die eigene Löschung dort verloren hat; hat sie dort
+	 * gewonnen, gibt es auf diesem Rechner keine Auflösung von {@code _<ID>}, und der Vermerk steht hier, mit
+	 * {@code moved} = Einheit der Kopie (dort lebt die Buchung, nicht auf dem Sitz des Vermerks). Hat der andere Rechner
+	 * seine Löschung dann noch nicht aufgelöst und stammt die Kopie aus ihr, lebt {@code _<ID>} bis dahin wieder
+	 * ({@link #movedThereAndUnresolved}): Seine Auflösung überträgt dann auf die Kopie, statt sie zu löschen.</li>
+	 * </ul>
+	 * Ist die Einheit selbst schon {@code _<ID>}, kann die Buchung nicht weiter ausweichen: "Deren" bleibt, Vermerk UNMERGED.
 	 */
 	private static Resolution doubleSale(ConflictInput input, String mineId) {
 		Version mine = input.mine();
@@ -543,24 +555,29 @@ public final class BookingPolicy implements ConflictPolicy {
 		UnitSnapshot current = existing == null ? null : existing.snapshot();
 		if (current != null && current.version() != null && !current.deleted()) {
 			extra = List.of();
-		} else if (foreignDeletedSource(input, existing)) {
-			if (livingCopies(input, mineId).findAny().isPresent()) {
-				// R31b: ein fremder Umzug gilt; den Vermerk bekommt die Auflösung von _<ID> (bothDeleted)
+		} else if (assignedFrom(input, existing) && deletedThereByOthers(input, existing)) {
+			UnitSnapshot copy = livingCopy(input, mineId);
+			if (copy == null) {
+				// R31a: Storno gewinnt
+				ConflictNote note = new ConflictNote(Kind.DELETE_WINS, input.ownMachineId(), other, List.of(), null, null,
+						mine.id());
+				return new Resolution(theirs.payload(), false, List.of(), note);
+			}
+			if (!ownDeletionHolds(input, existing)) {
+				// R31b: Den Vermerk bekommt die eigene Auflösung von _<ID> (bothDeleted)
 				return new Resolution(theirs.payload(), false, List.of(), null);
 			}
-			ConflictNote note = new ConflictNote(Kind.DELETE_WINS, input.ownMachineId(), other, List.of(), null, null,
-					mine.id());
-			return new Resolution(theirs.payload(), false, List.of(), note);
-		} else {
-			ObjectNode withoutPlace = mine.payload().deepCopy();
-			withoutPlace.put(UNASSIGNED, true);
-			withoutPlace.putNull(SEAT_ID);
-			withoutPlace.put(ROW_LABEL, "");
-			withoutPlace.put(TABLE_NUMBER, 0);
-			withoutPlace.put(SEAT_NUMBER, 0);
-			List<VersionId> parents = current != null && current.version() != null ? List.of(current.version())
+			List<String> place = FieldGroups.booking().get(PLACE_GROUP);
+			FieldConflict conflict = new FieldConflict(PLACE_GROUP, FieldMerge.slice(mine.payload(), place),
+					FieldMerge.slice(copy.payload(), place));
+			ConflictNote note = new ConflictNote(Kind.FIELDS, input.ownMachineId(), other, List.of(conflict), copy.unit(),
+					null, mine.id());
+			List<Change> revived = movedThereAndUnresolved(input, existing, copy)
+					? List.of(withoutPlace(mine, moved, current))
 					: List.of();
-			extra = List.of(new Change(moved, parents, withoutPlace, false));
+			return new Resolution(theirs.payload(), false, revived, note);
+		} else {
+			extra = List.of(withoutPlace(mine, moved, current));
 		}
 
 		ConflictNote note = new ConflictNote(Kind.DOUBLE_SALE, input.ownMachineId(), other, List.of(), moved,
@@ -569,19 +586,66 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/**
-	 * Ob {@code _<ID>} fremd gelöscht ist, während "Meine" die Buchung von dort hierher zuwies (Rulings R31a, R31b): "Meine"
-	 * kam im selben Speichervorgang von {@code _<ID>} (eine Version aus dem Speichervorgang von "Meine" liegt dort,
-	 * {@link Sibling#saveIds()}), {@code _<ID>} ist gelöscht, und die Löschung stammt nicht aus diesem Speichervorgang (die
-	 * eigene hat dort verloren). Dann wird {@code _<ID>} nicht wiederbelebt (R21 gilt nur für die eigene, unangefochtene
-	 * Löschung): Lebt die Buchung anderswo, hat der andere Rechner sie verschoben, und sein Umzug gilt; sonst hat er
-	 * storniert, und das Storno gilt.
+	 * "Meine" als Einheit {@code _<ID>} "ohne Platz": mit allen Kundendaten, {@code unassigned}, Sitz-ID, Reihe, Tisch und
+	 * Sitz geleert wie bei einer neuen Buchung; als Nachfolger ihres aktuellen Stands, wenn sie schon einen hat.
 	 */
-	private static boolean foreignDeletedSource(ConflictInput input, Sibling source) {
-		String saveId = input.mine().saveId();
-		if (saveId == null || source == null || source.head() == null || !source.snapshot().deleted()) {
+	private static Change withoutPlace(Version mine, UnitKey moved, UnitSnapshot current) {
+		ObjectNode withoutPlace = mine.payload().deepCopy();
+		withoutPlace.put(UNASSIGNED, true);
+		withoutPlace.putNull(SEAT_ID);
+		withoutPlace.put(ROW_LABEL, "");
+		withoutPlace.put(TABLE_NUMBER, 0);
+		withoutPlace.put(SEAT_NUMBER, 0);
+		List<VersionId> parents = current != null && current.version() != null ? List.of(current.version()) : List.of();
+		return new Change(moved, parents, withoutPlace, false);
+	}
+
+	/**
+	 * Ob die fremde Löschung von {@code _<ID>} noch daneben liegt (ihr Rechner hat sie noch nicht aufgelöst) und die lebende
+	 * Kopie aus ihrem Speichervorgang stammt: Dann sieht seine Auflösung von {@code _<ID>} die gewonnene eigene Löschung als
+	 * Storno, denn das verlorene Ziel hier kennt sie nicht, und löschte nach Regel 0 seine Kopie
+	 * ({@link #bothDeleted}, verschoben gegen storniert). Lebt {@code _<ID>} wieder, überträgt sie stattdessen auf die
+	 * Kopie und löscht {@code _<ID>} ({@link #movedAgainstEdit}); sein Umzug gilt (Ruling R35).
+	 */
+	private static boolean movedThereAndUnresolved(ConflictInput input, Sibling source, UnitSnapshot copy) {
+		Sibling carrier = input.siblings().get(copy.unit());
+		return carrier != null && source.deletions().stream()
+				.anyMatch(deletion -> deletion.standing() == Standing.BESIDE && deletion.saveId() != null
+						&& !input.mineSaveIds().contains(deletion.saveId())
+						&& carrier.saveIds().contains(deletion.saveId()));
+	}
+
+	/**
+	 * Ob "Meine" die Buchung von {@code _<ID>} hierher zugewiesen hat: {@code _<ID>} ist gelöscht, und in ihrem Ordner liegt
+	 * eine Version aus einem Speichervorgang der verlorenen Strecke ({@link Sibling#saveIds()} gegen
+	 * {@link ConflictInput#mineSaveIds()}; irgendeiner, denn nach dem Zuweisen kann dieser Rechner die Buchung hier weiter
+	 * geändert haben, Ruling R35).
+	 */
+	private static boolean assignedFrom(ConflictInput input, Sibling source) {
+		if (source == null || source.snapshot().version() == null || !source.snapshot().deleted()) {
 			return false;
 		}
-		return source.saveIds().contains(saveId) && !saveId.equals(source.head().saveId());
+		return source.saveIds().stream().anyMatch(input.mineSaveIds()::contains);
+	}
+
+	/**
+	 * Ob ein anderer Speichervorgang als die der verlorenen Strecke die Buchung auf {@code _<ID>} gelöscht hat
+	 * ({@link Sibling#deletions()}), gleich ob diese Löschung dort gilt, aufgegangen ist oder noch daneben liegt: Dann hat ein
+	 * anderer Rechner storniert oder verschoben, und die Löschung dort war nicht allein dieses Rechners Zuweisen. Eine
+	 * Zusammenführung, die die eigene Löschung bestätigt, zählt nicht (sie steht nicht unter den Löschungen).
+	 */
+	private static boolean deletedThereByOthers(ConflictInput input, Sibling source) {
+		return source.deletions().stream()
+				.anyMatch(deletion -> deletion.saveId() == null || !input.mineSaveIds().contains(deletion.saveId()));
+	}
+
+	/**
+	 * Ob die eigene Löschung von {@code _<ID>} (aus einem Speichervorgang der Strecke) dort in der gültigen Kette steht,
+	 * also gewonnen hat: Dann hat dieser Rechner dort keine verlorene Strecke, deren Auflösung ihm einen Vermerk schriebe.
+	 */
+	private static boolean ownDeletionHolds(ConflictInput input, Sibling source) {
+		return source.deletions().stream().anyMatch(deletion -> deletion.standing() == Standing.CHAIN
+				&& deletion.saveId() != null && input.mineSaveIds().contains(deletion.saveId()));
 	}
 
 	/** Die Buchungs-ID einer Version mit Inhalt; {@code null} ohne Version, bei einer Löschung oder ohne ID. */
