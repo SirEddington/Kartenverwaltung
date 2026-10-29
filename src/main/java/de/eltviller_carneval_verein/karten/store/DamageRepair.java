@@ -13,7 +13,8 @@ import java.util.Optional;
  * sich jede Kopie prüfen, und eine beschädigte wird durch eine gute ersetzt. Jeder Rechner mit guter Kopie heilt so den
  * gemeinsamen Ordner, alle anderen heilen sich beim nächsten Lesen daraus.
  * <p>
- * Ersetzt wird über {@link FileLayer#replaceDamaged}: Die beschädigte Datei bleibt als {@code <Name>.corrupt-<Zeitstempel>}
+ * Ersetzt wird über {@link VersionStore#replaceDamaged} (und damit {@link FileLayer#replaceDamaged}; im gemeinsamen Ordner
+ * trägt die temporäre Datei die Kennung des Rechners): Die beschädigte Datei bleibt als {@code <Name>.corrupt-<Zeitstempel>}
  * daneben liegen und wird nie überschrieben oder gelöscht. Ohne gemeinsamen Ordner (Einzelbetrieb) gibt es keine zweite
  * Kopie; eine beschädigte lokale bleibt dann ohne Ersatz.
  */
@@ -100,10 +101,10 @@ public final class DamageRepair {
 		}
 		Copy sharedCopy = checkVersion(shared.readVersionBytes(unit, id), claim.sha256());
 		if (localCopy.state() == State.GOOD && sharedCopy.state() == State.DAMAGED) {
-			return replace(shared.resolve(versionRel(unit, id)), localCopy.bytes(), Outcome.REPAIRED_SHARED);
+			return replace(shared, shared.resolve(versionRel(unit, id)), localCopy.bytes(), Outcome.REPAIRED_SHARED);
 		}
 		if (sharedCopy.state() == State.GOOD && localCopy.state() == State.DAMAGED) {
-			return replace(local.resolve(versionRel(unit, id)), sharedCopy.bytes(), Outcome.REPAIRED_LOCAL);
+			return replace(local, local.resolve(versionRel(unit, id)), sharedCopy.bytes(), Outcome.REPAIRED_LOCAL);
 		}
 		if (sharedCopy.state() == State.GOOD && localCopy.state() == State.MISSING) {
 			// Lokal fehlt die Datei nur: anlegen (war sie inzwischen da, ist nichts zu tun)
@@ -136,20 +137,23 @@ public final class DamageRepair {
 			return Result.none(Outcome.NOT_DAMAGED);
 		}
 		if (localCopy.state() == State.GOOD && sharedCopy.state() == State.DAMAGED) {
-			return replace(shared.resolve(claimRel(unit, claimName)), localCopy.bytes(), Outcome.REPAIRED_SHARED);
+			return replace(shared, shared.resolve(claimRel(unit, claimName)), localCopy.bytes(), Outcome.REPAIRED_SHARED);
 		}
 		if (sharedCopy.state() == State.GOOD && localCopy.state() == State.DAMAGED) {
-			return replace(local.resolve(claimRel(unit, claimName)), sharedCopy.bytes(), Outcome.REPAIRED_LOCAL);
+			return replace(local, local.resolve(claimRel(unit, claimName)), sharedCopy.bytes(), Outcome.REPAIRED_LOCAL);
 		}
 		boolean anyDamaged = localCopy.state() == State.DAMAGED || sharedCopy.state() == State.DAMAGED;
 		boolean anyGood = localCopy.state() == State.GOOD || sharedCopy.state() == State.GOOD;
 		return Result.none(anyDamaged && !anyGood ? Outcome.NO_GOOD_COPY : Outcome.NOT_DAMAGED);
 	}
 
-	/** Ersetzt die beschädigte Datei durch die gute Fassung und behält sie unter einem neuen {@code .corrupt-}-Namen. */
-	private Result replace(Path file, byte[] good, Outcome outcome) throws IOException {
+	/**
+	 * Ersetzt die beschädigte Datei des Bestands durch die gute Fassung und behält sie unter einem neuen
+	 * {@code .corrupt-}-Namen. Der Bestand schreibt die temporäre Datei: im gemeinsamen Ordner mit der Kennung des Rechners.
+	 */
+	private Result replace(VersionStore store, Path file, byte[] good, Outcome outcome) throws IOException {
 		String corruptName = corruptName(file);
-		files.replaceDamaged(file, good, corruptName);
+		store.replaceDamaged(file, good, corruptName);
 		return new Result(outcome, file, file.resolveSibling(corruptName));
 	}
 

@@ -23,7 +23,7 @@ import java.util.function.Predicate;
  * Die Operationen heißen wie die Methoden der Schnittstelle: {@code createNew}, {@code read}, {@code exists},
  * {@code listNames}, {@code listNamesWithTemps}, {@code listTree}, {@code isDirectory}, {@code replaceDamaged},
  * {@code rename}, {@code deleteOwnTemps}, {@code deleteOldTemps}. Beide Fassungen von {@code createNew} heißen
- * {@code createNew}. Threadsicher.
+ * {@code createNew}, beide von {@code replaceDamaged} {@code replaceDamaged}. Threadsicher.
  */
 public final class FaultyFileLayer implements FileLayer {
 
@@ -34,6 +34,10 @@ public final class FaultyFileLayer implements FileLayer {
 
 	/** Ein Aufruf von {@code createNew}: die Datei sowie Anker und Kennung, mit denen er kam. */
 	public record Creation(Path file, Path anchor, String tempTag) {
+	}
+
+	/** Ein Aufruf von {@code replaceDamaged}: die ersetzte Datei und die Kennung, mit der er kam. */
+	public record Replacement(Path file, String tempTag) {
 	}
 
 	private record Block(String operation, CountDownLatch entered, CountDownLatch release) {
@@ -51,6 +55,7 @@ public final class FaultyFileLayer implements FileLayer {
 	private final List<Block> blocks = new ArrayList<>();
 	private final List<Hook> hooks = new ArrayList<>();
 	private final List<Creation> creations = new ArrayList<>();
+	private final List<Replacement> replacements = new ArrayList<>();
 
 	public FaultyFileLayer(FileLayer delegate) {
 		this.delegate = delegate;
@@ -95,6 +100,11 @@ public final class FaultyFileLayer implements FileLayer {
 	/** Alle bisherigen Aufrufe von {@code createNew} mit den Werten für Anker und Kennung, auch die gescheiterten. */
 	public synchronized List<Creation> creations() {
 		return List.copyOf(creations);
+	}
+
+	/** Alle bisherigen Aufrufe von {@code replaceDamaged} mit dem Wert für die Kennung, auch die gescheiterten. */
+	public synchronized List<Replacement> replacements() {
+		return List.copyOf(replacements);
 	}
 
 	/** Alle bisherigen Aufrufe als {@code "<Operation> <Pfad>"} in der Reihenfolge, auch die gescheiterten. */
@@ -265,9 +275,12 @@ public final class FaultyFileLayer implements FileLayer {
 	}
 
 	@Override
-	public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
+	public void replaceDamaged(Path file, byte[] good, String corruptName, String tempTag) throws IOException {
+		synchronized (this) {
+			replacements.add(new Replacement(file, tempTag));
+		}
 		IOException late = enter("replaceDamaged", file);
-		delegate.replaceDamaged(file, good, corruptName);
+		delegate.replaceDamaged(file, good, corruptName, tempTag);
 		throwLate(late);
 	}
 

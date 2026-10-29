@@ -1740,6 +1740,37 @@ public final class SyncService {
 		indexUnitKeys(result.changed());
 		result.lost().forEach(this::reportLoss);
 		settleAll(current, result.contested(), round);
+		deleteOwnOldTemps(current, units);
+	}
+
+	/**
+	 * Räumt je Einheit des Blocks im gemeinsamen Ordner die eigenen alten temporären Dateien auf: Name mit der eigenen
+	 * Kennung ({@code ~karv-<Kennung>-<UUID>.tmp}), seit mehr als {@link #TEMP_AGE} nicht geändert, im Ordner der Einheit
+	 * oder in ihrem {@code claims/}. Fremde und kennungslose temporäre Dateien bleiben unberührt: Sie gehören einem anderen
+	 * Rechner oder sind nicht zuzuordnen. Ein Fehler hier (etwa weil der Ordner wegfällt oder das Löschen nicht erlaubt
+	 * ist) lässt den Block nicht scheitern: Das Aufräumen ist nur Pflege, und scheitert der Zugriff wirklich, meldet ihn
+	 * der nächste Schritt des Abgleichs. Beim ersten Fehler bleibt der Rest des Blocks liegen, beim nächsten Lauf kommt er
+	 * wieder dran.
+	 */
+	private void deleteOwnOldTemps(Link current, List<UnitKey> units) {
+		String me = machineId();
+		try {
+			for (UnitKey unit : units) {
+				Map<String, List<String>> byFolder = new LinkedHashMap<>();
+				for (String rel : current.shared.unitTempFiles(unit)) {
+					int slash = rel.lastIndexOf('/');
+					String name = rel.substring(slash + 1);
+					if (me.equals(FileLayer.tempTagOf(name))) {
+						byFolder.computeIfAbsent(rel.substring(0, slash), folder -> new ArrayList<>()).add(name);
+					}
+				}
+				for (Map.Entry<String, List<String>> folder : byFolder.entrySet()) {
+					files.deleteOldTemps(current.shared.resolve(folder.getKey()), folder.getValue(), TEMP_AGE);
+				}
+			}
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.FINE, "Alte temporäre Dateien im gemeinsamen Ordner ließen sich nicht entfernen", e);
+		}
 	}
 
 	/**

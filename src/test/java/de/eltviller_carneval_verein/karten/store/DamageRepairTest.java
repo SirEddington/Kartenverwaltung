@@ -280,6 +280,54 @@ class DamageRepairTest {
 		assertArrayEquals(bad, Files.readAllBytes(result.corruptCopy()));
 	}
 
+	/** Der gemeinsame Bestand schreibt wie im Betrieb mit Anker und Kennung; beide Bestände gehen über dieselbe Schicht. */
+	private DamageRepair repairRecordedBy(FaultyFileLayer layer) {
+		VersionStore recordedLocal = new VersionStore(local.dataRoot(), layer);
+		VersionStore recordedShared = new VersionStore(shared.dataRoot(), layer, dir.resolve("shared"), () -> ME);
+		return new DamageRepair(recordedLocal, recordedShared, layer, CLOCK);
+	}
+
+	@Test
+	void sharedReplacementCarriesTheMachineIdAsTempTag() throws IOException {
+		byte[] good = good();
+		local.writeVersion(UNIT, V1, good);
+		shared.writeVersion(UNIT, V1, damaged());
+		FaultyFileLayer layer = new FaultyFileLayer(files);
+
+		Result result = repairRecordedBy(layer).repairVersion(UNIT, claimFor(good));
+
+		assertEquals(Outcome.REPAIRED_SHARED, result.outcome());
+		assertEquals(List.of(new FaultyFileLayer.Replacement(versionPath(shared), ME)), layer.replacements());
+		assertEquals(List.of(), files.listNamesWithTemps(versionPath(shared).getParent()).stream()
+				.filter(n -> n.startsWith(FileLayer.TEMP_PREFIX)).toList());
+	}
+
+	@Test
+	void sharedClaimReplacementCarriesTheMachineIdAsTempTag() throws IOException {
+		byte[] claim = claimBytes(V1);
+		local.createClaim(UNIT, V1.value(), claim);
+		shared.createClaim(UNIT, V1.value(), damaged());
+		FaultyFileLayer layer = new FaultyFileLayer(files);
+
+		Result result = repairRecordedBy(layer).repairClaim(UNIT, V1.value());
+
+		assertEquals(Outcome.REPAIRED_SHARED, result.outcome());
+		assertEquals(List.of(new FaultyFileLayer.Replacement(claimPath(shared, V1.value()), ME)), layer.replacements());
+	}
+
+	@Test
+	void localReplacementStaysWithoutTempTag() throws IOException {
+		byte[] good = good();
+		local.writeVersion(UNIT, V1, damaged());
+		shared.writeVersion(UNIT, V1, good);
+		FaultyFileLayer layer = new FaultyFileLayer(files);
+
+		Result result = repairRecordedBy(layer).repairVersion(UNIT, claimFor(good));
+
+		assertEquals(Outcome.REPAIRED_LOCAL, result.outcome());
+		assertEquals(List.of(new FaultyFileLayer.Replacement(versionPath(local), null)), layer.replacements());
+	}
+
 	@Test
 	void differingReadableClaimsAreALossNotDamage() throws IOException {
 		byte[] sharedClaim = claimBytes(V1);

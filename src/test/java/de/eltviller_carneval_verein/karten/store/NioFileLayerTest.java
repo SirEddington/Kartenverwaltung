@@ -463,6 +463,57 @@ class NioFileLayerTest {
 		assertEquals(List.of("a.json"), namesIn(anchor));
 	}
 
+	/** Die Namen der temporären Dateien, die beim Ausführen der Aktion im Ordner entstehen (über einen Überwacher). */
+	private List<String> tempsCreatedWhile(Path folder, IoAction action) throws Exception {
+		List<String> created = new ArrayList<>();
+		try (WatchService watch = folder.getFileSystem().newWatchService()) {
+			folder.register(watch, StandardWatchEventKinds.ENTRY_CREATE);
+			action.run();
+
+			WatchKey key;
+			while ((key = watch.poll(500, TimeUnit.MILLISECONDS)) != null) {
+				for (WatchEvent<?> event : key.pollEvents()) {
+					created.add(event.context().toString());
+				}
+				key.reset();
+			}
+		}
+		return created.stream().filter(n -> n.startsWith(FileLayer.TEMP_PREFIX)).toList();
+	}
+
+	/** Eine Aktion mit Dateizugriff. */
+	private interface IoAction {
+		void run() throws IOException;
+	}
+
+	@Test
+	void replaceDamagedTempFileCarriesTheTag() throws Exception {
+		Path file = dir.resolve("v.json");
+		Files.write(file, bytes("kaputt"));
+
+		// Der Inhalt ist groß genug, dass das Schreiben der temporären Datei einen Moment dauert
+		List<String> temps = tempsCreatedWhile(dir,
+				() -> layer.replaceDamaged(file, new byte[4 * 1024 * 1024], "v.json.corrupt-2026-10-26_12-00-00", "abc"));
+
+		assertEquals(1, temps.size(), temps.toString());
+		assertEquals("abc", FileLayer.tempTagOf(temps.get(0)));
+		assertEquals(4 * 1024 * 1024, Files.size(file));
+		assertEquals(List.of("v.json", "v.json.corrupt-2026-10-26_12-00-00"), namesIn(dir));
+	}
+
+	@Test
+	void replaceDamagedWithoutTagWritesAnUntaggedTempFile() throws Exception {
+		Path file = dir.resolve("v.json");
+		Files.write(file, bytes("kaputt"));
+
+		List<String> temps = tempsCreatedWhile(dir,
+				() -> layer.replaceDamaged(file, new byte[4 * 1024 * 1024], "v.json.corrupt-2026-10-26_12-00-00"));
+
+		assertEquals(1, temps.size(), temps.toString());
+		assertNull(FileLayer.tempTagOf(temps.get(0)));
+		assertTrue(temps.get(0).matches("~karv-[0-9a-f-]{36}\\.tmp"), temps.get(0));
+	}
+
 	@Test
 	void tempTagOfReadsTheTagBetweenPrefixAndUuid() {
 		String uuid = "123e4567-e89b-12d3-a456-426614174000";

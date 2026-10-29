@@ -473,8 +473,8 @@ class StoreEventRepositoryTest {
 		}
 
 		@Override
-		public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
-			delegate.replaceDamaged(file, good, corruptName);
+		public void replaceDamaged(Path file, byte[] good, String corruptName, String tempTag) throws IOException {
+			delegate.replaceDamaged(file, good, corruptName, tempTag);
 		}
 
 		@Override

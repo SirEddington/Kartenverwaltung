@@ -85,8 +85,16 @@ public interface FileLayer {
 	 * zurückbenannt; keine der beiden wird gelöscht.
 	 *
 	 * @param corruptName Dateiname (kein Pfad) im Ordner der Datei, unter dem die beschädigte Fassung bleibt
+	 * @param tempTag     die Kennung im Namen der temporären Datei ({@code ~karv-<Kennung>-<UUID>.tmp}); {@code null} für
+	 *                    eine Datei ohne Kennung ({@code ~karv-<UUID>.tmp}). Im gemeinsamen Ordner trägt sie die Kennung
+	 *                    des schreibenden Rechners, damit ein Rest dort seinem Urheber zuzuordnen ist.
 	 */
-	void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException;
+	void replaceDamaged(Path file, byte[] good, String corruptName, String tempTag) throws IOException;
+
+	/** Wie {@link #replaceDamaged(Path, byte[], String, String)} ohne Kennung (für lokale Dateien). */
+	default void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
+		replaceDamaged(file, good, corruptName, null);
+	}
 
 	/** Benennt die Datei um. Ein vorhandenes Ziel wird nicht ersetzt. */
 	void rename(Path from, Path to) throws IOException;

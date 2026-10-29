@@ -145,10 +145,10 @@ public final class NioFileLayer implements FileLayer {
 	}
 
 	@Override
-	public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
+	public void replaceDamaged(Path file, byte[] good, String corruptName, String tempTag) throws IOException {
 		Path dir = parentOf(file);
 		Path corrupt = dir.resolve(corruptName);
-		Path temp = writeTemp(dir, good, null);
+		Path temp = writeTemp(dir, good, tempTag);
 		try {
 			Files.move(file, corrupt);
 		} catch (IOException | RuntimeException e) {

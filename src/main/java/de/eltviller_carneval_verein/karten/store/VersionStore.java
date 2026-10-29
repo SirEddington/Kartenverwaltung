@@ -77,6 +77,18 @@ public final class VersionStore {
 	}
 
 	/**
+	 * Ersetzt eine beschädigte Datei dieses Bestands durch eine gute Fassung und behält die beschädigte (siehe
+	 * {@link FileLayer#replaceDamaged(Path, byte[], String, String)}). Die temporäre Datei trägt wie beim Anlegen die
+	 * Kennung dieses Bestands, im gemeinsamen Ordner also die des schreibenden Rechners.
+	 *
+	 * @param file        die Datei in diesem Bestand
+	 * @param corruptName Dateiname (kein Pfad) im Ordner der Datei, unter dem die beschädigte Fassung bleibt
+	 */
+	public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
+		files.replaceDamaged(file, good, corruptName, tempTag == null ? null : tempTag.get());
+	}
+
+	/**
 	 * Legt die Versionsdatei an, wenn es sie noch nicht gibt.
 	 *
 	 * @return {@code true}, wenn sie angelegt wurde; {@code false}, wenn die Version schon da war (unverändert)

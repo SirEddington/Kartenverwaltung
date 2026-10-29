@@ -15,6 +15,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -197,8 +198,8 @@ class SyncServiceTest {
 		}
 
 		@Override
-		public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
-			delegate.replaceDamaged(file, good, corruptName);
+		public void replaceDamaged(Path file, byte[] good, String corruptName, String tempTag) throws IOException {
+			delegate.replaceDamaged(file, good, corruptName, tempTag);
 		}
 
 		@Override
@@ -1483,6 +1484,76 @@ class SyncServiceTest {
 		a.service.syncNow();
 
 		assertTrue(Files.exists(localFile(a, hall, foreign.id() + ".json")));
+	}
+
+	// --- Eigene alte temporäre Dateien im gemeinsamen Ordner
+
+	/** Eine temporäre Datei {@code ~karv-<Kennung>-<UUID>.tmp} (ohne Kennung bei {@code null}), um {@code age} gealtert. */
+	private static Path tempFile(Path folder, String tag, Duration age) throws IOException {
+		Files.createDirectories(folder);
+		Path temp = folder.resolve(FileLayer.TEMP_PREFIX + (tag == null ? "" : tag + "-") + UUID.randomUUID()
+				+ FileLayer.TEMP_SUFFIX);
+		Files.write(temp, new byte[] { 1 });
+		Files.setLastModifiedTime(temp, FileTime.from(Instant.now().minus(age)));
+		return temp;
+	}
+
+	/** Ein gestarteter Rechner und eine fremde Halle im gemeinsamen Ordner, die der nächste Vollabgleich holt. */
+	private Node nodeWithForeignHallInSharedFolder(UnitKey hall) throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version foreign = version(OTHER, 1_000_000L, 0, "fremd", null);
+		Files.createDirectories(sharedFile(hall, "x").getParent());
+		Files.write(sharedFile(hall, foreign.id() + ".json"), StoreCodec.write(foreign));
+		return a;
+	}
+
+	@Test
+	void sectionDeletesOnlyOwnOldTempsInTheSharedFolder() throws IOException {
+		UnitKey hall = UnitKey.hall("h1");
+		Node a = nodeWithForeignHallInSharedFolder(hall);
+		String me = a.service.machineId();
+		Path unitDir = sharedFile(hall, "x").getParent();
+		Path claimsDir = unitDir.resolve("claims");
+		Duration old = SyncService.TEMP_AGE.plusHours(1);
+		Duration young = SyncService.TEMP_AGE.minusHours(1);
+		Path ownOld = tempFile(unitDir, me, old);
+		Path ownOldInClaims = tempFile(claimsDir, me, old);
+		Path ownYoung = tempFile(unitDir, me, young);
+		Path foreignOld = tempFile(unitDir, OTHER, old);
+		Path foreignOldInClaims = tempFile(claimsDir, OTHER, old);
+		Path untaggedOld = tempFile(unitDir, null, old);
+		Path untaggedOldInClaims = tempFile(claimsDir, null, old);
+
+		a.service.syncNow();
+
+		assertFalse(Files.exists(ownOld));
+		assertFalse(Files.exists(ownOldInClaims));
+		assertTrue(Files.exists(ownYoung));
+		assertTrue(Files.exists(foreignOld));
+		assertTrue(Files.exists(foreignOldInClaims));
+		assertTrue(Files.exists(untaggedOld));
+		assertTrue(Files.exists(untaggedOldInClaims));
+		// der Abschnitt ist trotzdem gelaufen
+		assertEquals(0, a.events.errors.size());
+		assertTrue(a.events.changedUnits().contains(hall));
+	}
+
+	@Test
+	void failingTempCleanupInTheSharedFolderDoesNotFailTheSection() throws IOException {
+		UnitKey hall = UnitKey.hall("h1");
+		Node a = nodeWithForeignHallInSharedFolder(hall);
+		Path unitDir = sharedFile(hall, "x").getParent();
+		Path ownOld = tempFile(unitDir, a.service.machineId(), SyncService.TEMP_AGE.plusHours(1));
+		a.layer.failWhen(p -> p.startsWith(sharedRoot), "deleteOldTemps", new IOException("Netzlaufwerk getrennt"));
+
+		a.service.syncNow();
+
+		assertTrue(a.layer.calls().stream().anyMatch(c -> c.startsWith("deleteOldTemps " + unitDir)));
+		assertTrue(Files.exists(ownOld));
+		assertTrue(Files.exists(localFile(a, hall, VersionId.create(1_000_000L, OTHER, 0) + ".json")));
+		assertEquals(0, a.events.errors.size());
+		assertEquals(0, a.events.unreachable.size());
 	}
 
 	// --- Vollabgleich in Abschnitten über mehrere Takte
@@ -2784,8 +2855,8 @@ class SyncServiceTest {
 		}
 
 		@Override
-		public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
-			delegate.replaceDamaged(file, good, corruptName);
+		public void replaceDamaged(Path file, byte[] good, String corruptName, String tempTag) throws IOException {
+			delegate.replaceDamaged(file, good, corruptName, tempTag);
 		}
 
 		@Override
