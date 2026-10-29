@@ -22,7 +22,6 @@ import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
-import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
 import javafx.fxml.FXML;
@@ -82,7 +81,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
 	private final RepositoryListener<Event> foreignEventChanges = new RepositoryListener<>() {
 		// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
-		private final RepositoryListener<Event> refreshing = LiveViews.coalescing(Platform::runLater,
+		private final RepositoryListener<Event> refreshing = LiveViews.onFxThread(
 				units -> LiveViews.touches(units, selectedEvent, selectedPres), () -> {
 					dropGoneBookingsFromSelection();
 					renderHall();
@@ -93,7 +92,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			refreshing.changedByOthers(event, batch);
 		}
 	};
-	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.coalescing(Platform::runLater,
+	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(
 			units -> LiveViews.touchesHall(units, selectedPres == null ? null : selectedPres.getHallId()), this::renderIfShown);
 
 	@FXML

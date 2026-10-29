@@ -34,7 +34,6 @@ import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
-import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.SnapshotParameters;
 import javafx.scene.chart.BarChart;
@@ -57,7 +56,7 @@ public class StatisticsController implements ContentController, Exportable {
 	private boolean includeArchived = false;
 
 	// Die Statistik rechnet über alle Events: Jede Änderung eines anderen Rechners kann die Zahlen verschieben
-	private final RepositoryListener<Event> foreignChanges = LiveViews.coalescing(Platform::runLater, LiveViews.ALL_UNITS, () -> refresh(includeArchived));
+	private final RepositoryListener<Event> foreignChanges = LiveViews.onFxThread(LiveViews.ALL_UNITS, () -> refresh(includeArchived));
 
 	@FXML
 	private LineChart<String, Number> trendChart;

@@ -88,6 +88,12 @@ public final class EntityLabels {
 		return prefix + booking.getPlaceLabel();
 	}
 
+	/** Der Kunde einer Buchung: Vor- und Nachname, getrimmt; leer, wenn beide fehlen oder leer sind. */
+	public static String customer(Booking booking) {
+		return ((booking.getFirstName() == null ? "" : booking.getFirstName().trim()) + " "
+				+ (booking.getLastName() == null ? "" : booking.getLastName().trim())).trim();
+	}
+
 	/**
 	 * Der Platz einer Buchung für Anzeigen: "Tisch A3, Sitz 2", bei einer Buchung ohne Platz "Ohne Platz (bisher
 	 * Tisch A3, Sitz 2)", damit sie nie mit der Buchung des echten Platzes verwechselt wird.

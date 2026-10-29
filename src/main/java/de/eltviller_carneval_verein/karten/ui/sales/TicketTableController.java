@@ -92,7 +92,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 	private boolean foreignChangePending = false;
 	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
 		// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
-		private final RepositoryListener<Event> refreshing = LiveViews.coalescing(Platform::runLater,
+		private final RepositoryListener<Event> refreshing = LiveViews.onFxThread(
 				units -> LiveViews.touches(units, selectedEvent, selectedPres), TicketTableController.this::refreshAfterForeignChange);
 
 		@Override

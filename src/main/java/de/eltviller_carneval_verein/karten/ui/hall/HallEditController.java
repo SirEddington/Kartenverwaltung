@@ -65,7 +65,7 @@ public class HallEditController {
 	// Fremde Änderungen an der gezeigten Halle (nur im Anzeigemodus: im Bearbeitungsmodus hält EditingUnits sie zurück)
 	private final RepositoryListener<Hall> foreignChanges = new RepositoryListener<>() {
 		// Nicht mitten in der Benachrichtigung der Listener, sondern im nächsten Takt: Das Laden der neuen Ansicht meldet diese ab
-		private final RepositoryListener<Hall> reloading = LiveViews.coalescing(Platform::runLater,
+		private final RepositoryListener<Hall> reloading = LiveViews.onFxThread(
 				units -> !editMode && hall != null && LiveViews.touchesHall(units, hall.getId()), () -> {
 					if (!editMode && hall != null) {
 						reloadReplacedHall();

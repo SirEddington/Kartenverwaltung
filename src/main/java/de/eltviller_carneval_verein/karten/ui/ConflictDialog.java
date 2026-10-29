@@ -1,7 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui;
 
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -23,6 +22,7 @@ import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions.Availability;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.FieldRow;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Row;
+import de.eltviller_carneval_verein.karten.ui.backup.AbstractBackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.sales.AssignPlaceDialog;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.property.ReadOnlyObjectWrapper;
@@ -53,8 +53,6 @@ import javafx.stage.Window;
 public final class ConflictDialog {
 
 	private static final Logger LOG = Logger.getLogger(ConflictDialog.class.getName());
-	/** Das Format des Zeitpunkts wie im Wiederherstellen-Dialog. */
-	private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
 	/** Was von der Breite einer Spalte für den Rand der Zelle abgeht. */
 	private static final double CELL_PADDING = 24;
 	private static final String TAKE_VALUE = "Meinen Wert übernehmen";
@@ -99,7 +97,7 @@ public final class ConflictDialog {
 		table.getColumns().add(column("Eintrag", 190, (row, col) -> wrapped(row.entry(), col)));
 		table.getColumns().add(column("Gegenseite", 120, (row, col) -> wrapped(row.counterpart(), col)));
 		table.getColumns().add(column("Zeitpunkt", 115, (row, col) -> wrapped(
-				TIME_FORMAT.format(row.at().atZone(ZoneId.systemDefault())), col)));
+				AbstractBackupCatalog.timeText(row.at(), ZoneId.systemDefault()), col)));
 		table.getColumns().add(column("Werte", 290, this::valuesCell));
 		table.getColumns().add(column("Aktion", 225, this::actionCell));
 		table.getColumns().add(column("Erledigt", 95, (row, col) -> doneButton(row)));
@@ -195,8 +193,7 @@ public final class ConflictDialog {
 			Booking booking = actions.bookingToAssign(row);
 			String place = ConflictList.placeText(note);
 			if (booking != null) {
-				String name = ((booking.getFirstName() == null ? "" : booking.getFirstName().trim()) + " "
-						+ (booking.getLastName() == null ? "" : booking.getLastName().trim())).trim();
+				String name = EntityLabels.customer(booking);
 				lines.add("Deine Buchung" + (name.isEmpty() ? "" : " (" + name + ")") + " steht jetzt ohne Platz.");
 			} else {
 				lines.add("Deine Buchung steht nicht mehr ohne Platz im Event.");
@@ -368,6 +365,12 @@ public final class ConflictDialog {
 		refresh();
 	}
 
+	/** Die Aktion ist nicht möglich: Der Grund steht in der Zeile, die offen bleibt. Danach wird aufgefrischt. */
+	private void fail(Row row, String reason) {
+		errors.put(row.conflict().key(), reason);
+		refresh();
+	}
+
 	private void takeMyValue(Row row, FieldRow field) {
 		String impact = actions.bookingImpact(row, field.group());
 		if (impact != null && !ConfirmDialog.confirm("Bestuhlung wechseln", impact, "Wechseln", "button-primary", stage)) {
@@ -398,16 +401,11 @@ public final class ConflictDialog {
 		}
 		SeatingPlan plan = actions.planOf(presentation);
 		if (plan == null) {
-			run(row, () -> {
-				throw new IllegalStateException(
-						"Platz zuweisen nicht möglich: " + EntityLabels.presentation(presentation) + " hat keine Bestuhlung.");
-			});
+			fail(row, ConflictActions.noPlanText(presentation));
 			return;
 		}
 		if (AssignPlaceDialog.freeSeats(presentation, plan).isEmpty()) {
-			run(row, () -> {
-				throw new IllegalStateException("Platz zuweisen nicht möglich: In der Bestuhlung ist kein Sitz frei.");
-			});
+			fail(row, "Platz zuweisen nicht möglich: In der Bestuhlung ist kein Sitz frei.");
 			return;
 		}
 		Optional<Seat> seat = AssignPlaceDialog.choose(presentation, plan, stage);

@@ -61,11 +61,19 @@ public final class StoreCodec {
 		if (version.conflict() != null) {
 			writeConflict(node.putObject("conflict"), version.conflict());
 		}
-		if (!version.seen().isEmpty()) {
-			ObjectNode seen = node.putObject("seen");
-			new TreeMap<>(version.seen()).forEach(seen::put);
-		}
+		writeSeen(node, version.seen());
 		return MAPPER.writeValueAsBytes(node);
+	}
+
+	/**
+	 * Schreibt die gelesenen Listen als Feld {@code seen} nach Rechner-ID sortiert, nur wenn es welche gibt; paketsichtbar,
+	 * weil auch {@link UnitIndex} sie ablegt.
+	 */
+	static void writeSeen(ObjectNode node, Map<String, Long> seen) {
+		if (!seen.isEmpty()) {
+			ObjectNode field = node.putObject("seen");
+			new TreeMap<>(seen).forEach(field::put);
+		}
 	}
 
 	/** Schreibt den Vermerk in den Knoten; paketsichtbar, weil auch {@link UnitIndex} Vermerke ablegt. */

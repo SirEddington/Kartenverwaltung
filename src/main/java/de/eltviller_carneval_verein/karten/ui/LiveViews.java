@@ -11,6 +11,7 @@ import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -84,6 +85,11 @@ public final class LiveViews {
 				tick.request();
 			}
 		};
+	}
+
+	/** Wie {@link #coalescing}, mit dem Lauf auf dem FX-Thread ({@code Platform::runLater}), wie in der App. */
+	public static <T> RepositoryListener<T> onFxThread(Predicate<Set<UnitKey>> relevant, Runnable refresh) {
+		return coalescing(Platform::runLater, relevant, refresh);
 	}
 
 	/** Von Belang sind Einheiten einer der Arten (z. B. die Übersichten: nur Event und Vorstellung, keine Buchungen). */

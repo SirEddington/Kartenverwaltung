@@ -28,7 +28,6 @@ import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
-import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -108,7 +107,7 @@ public class AccountingShellController {
 	// Führt die Boxen nach Änderungen anderer Rechner nach; entsteht in initialize, wenn die Boxen da sind
 	private EventSelectionSync selectionSync;
 	// Fremde Änderungen an Events: Die Listen und die Auswahl folgen dem Cache
-	private final RepositoryListener<Event> foreignChanges = LiveViews.coalescing(Platform::runLater, LiveViews.ALL_UNITS, () -> selectionSync.sync());
+	private final RepositoryListener<Event> foreignChanges = LiveViews.onFxThread(LiveViews.ALL_UNITS, () -> selectionSync.sync());
 
 	@FXML
 	public void initialize() {

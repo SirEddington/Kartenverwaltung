@@ -177,6 +177,11 @@ public final class ConflictActions {
 		return SalesPlan.of(presentation, hall);
 	}
 
+	/** Der Grund, wenn die Vorstellung keine Bestuhlung hat, der eine Buchung zugewiesen werden könnte. */
+	static String noPlanText(Presentation presentation) {
+		return "Platz zuweisen nicht möglich: " + EntityLabels.presentation(presentation) + " hat keine Bestuhlung.";
+	}
+
 	/**
 	 * Weist die Buchung "ohne Platz" eines Doppelverkaufs dem gewählten freien Sitz zu ({@link BookingSync#assign}), speichert
 	 * das Event und bestätigt die Zeile.
@@ -195,8 +200,7 @@ public final class ConflictActions {
 		Presentation presentation = event.findPresentation(moved.presentationId());
 		SeatingPlan plan = planOf(presentation);
 		if (plan == null) {
-			throw new IllegalStateException(
-					"Platz zuweisen nicht möglich: " + EntityLabels.presentation(presentation) + " hat keine Bestuhlung.");
+			throw new IllegalStateException(noPlanText(presentation));
 		}
 		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
 		Booking before = booking.copy();

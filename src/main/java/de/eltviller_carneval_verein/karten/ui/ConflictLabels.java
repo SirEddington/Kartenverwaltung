@@ -72,8 +72,7 @@ public final class ConflictLabels {
 		if (!withoutSeat) {
 			return EntityLabels.place(booking);
 		}
-		String name = ((booking.getFirstName() == null ? "" : booking.getFirstName().trim()) + " "
-				+ (booking.getLastName() == null ? "" : booking.getLastName().trim())).trim();
+		String name = EntityLabels.customer(booking);
 		return name.isEmpty() ? UNKNOWN_CUSTOMER : name;
 	}
 }

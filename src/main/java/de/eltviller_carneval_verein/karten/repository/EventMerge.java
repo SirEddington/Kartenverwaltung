@@ -631,7 +631,8 @@ final class EventMerge {
 		plan.fixCreatedIds(presentation, before);
 	}
 
-	private static SeatingPlan planOf(Presentation presentation, Function<String, Hall> hallLookup) {
+	/** Die Bestuhlung der Vorstellung in ihrer Halle nach {@code hallLookup}; {@code null} ohne Halle oder Bestuhlung. */
+	static SeatingPlan planOf(Presentation presentation, Function<String, Hall> hallLookup) {
 		Hall hall = presentation.getHallId() != null ? hallLookup.apply(presentation.getHallId()) : null;
 		return hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
 	}

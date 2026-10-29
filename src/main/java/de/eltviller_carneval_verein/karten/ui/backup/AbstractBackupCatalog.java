@@ -25,7 +25,7 @@ import de.eltviller_carneval_verein.karten.repository.SavePoint;
  *
  * @param <T> {@code Event} oder {@code Hall}
  */
-abstract class AbstractBackupCatalog<T> implements BackupCatalog {
+public abstract class AbstractBackupCatalog<T> implements BackupCatalog {
 
 	private static final Logger LOG = Logger.getLogger(AbstractBackupCatalog.class.getName());
 	/** Das Anzeigeformat eines Zeitpunkts in Rückfrage und Bestätigung. */
@@ -94,8 +94,8 @@ abstract class AbstractBackupCatalog<T> implements BackupCatalog {
 		return new Entry(known.id(), known.name(), known.deleted());
 	}
 
-	/** Ein Zeitpunkt für die Anzeige in Rückfrage und Bestätigung. */
-	static String timeText(Instant at, ZoneId zone) {
+	/** Ein Zeitpunkt für die Anzeige in Rückfrage und Bestätigung (auch im Konflikt-Dialog). */
+	public static String timeText(Instant at, ZoneId zone) {
 		return at.atZone(zone).format(TIME_FORMAT);
 	}
 

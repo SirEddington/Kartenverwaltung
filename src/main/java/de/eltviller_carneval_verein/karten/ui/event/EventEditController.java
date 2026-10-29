@@ -195,7 +195,7 @@ public class EventEditController {
 	// Fremde Änderungen an Events: Die Tabellen führen sich nach; ist das gezeigte Event gelöscht, geht es zurück zur Übersicht
 	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
 		// Die Tabellen zeigen Events, Vorstellungen, Tische und Sitze: Jede Einheit ist von Belang
-		private final RepositoryListener<Event> refreshing = LiveViews.coalescing(Platform::runLater, LiveViews.ALL_UNITS,
+		private final RepositoryListener<Event> refreshing = LiveViews.onFxThread(LiveViews.ALL_UNITS,
 				EventEditController.this::showForeignChanges);
 
 		@Override
@@ -219,7 +219,7 @@ public class EventEditController {
 		}
 	};
 	// Fremde Änderungen an Hallen: Die Auswahl der Hallen und Bestuhlungen führt sich nach (ein ersetztes Objekt hat dieselbe ID)
-	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.coalescing(Platform::runLater, LiveViews.ALL_UNITS, this::showForeignChanges);
+	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(LiveViews.ALL_UNITS, this::showForeignChanges);
 	// Eine Rückfrage (Hallen-/Bestuhlungswechsel, Löschen) ist offen: Während sie wartet, führt sich die Ansicht nicht nach
 	private boolean dialogOpen = false;
 	// Besitzer der Meldung bei EditingUnits für das Objekt, auf das sich die offene Rückfrage bezieht

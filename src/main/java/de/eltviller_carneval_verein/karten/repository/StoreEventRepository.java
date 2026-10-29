@@ -25,7 +25,6 @@ import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
@@ -456,7 +455,7 @@ public class StoreEventRepository implements EventRepository {
 				presentation.copyFrom(MAPPER.treeToValue(merged, Presentation.class));
 				if (!Objects.equals(hallId, presentation.getHallId())
 						|| !Objects.equals(planId, presentation.getSeatingPlanId())) {
-					BookingSync.sync(presentation, planOf(presentation));
+					BookingSync.sync(presentation, EventMerge.planOf(presentation, hallLookup));
 				}
 			}
 			case HALL -> throw new IllegalStateException("Eine Halle ist keine Einheit eines Events.");
@@ -526,11 +525,6 @@ public class StoreEventRepository implements EventRepository {
 			}
 		}
 		return false;
-	}
-
-	private SeatingPlan planOf(Presentation presentation) {
-		Hall hall = presentation.getHallId() != null ? hallLookup.apply(presentation.getHallId()) : null;
-		return hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
 	}
 
 	// <-- Hilfen für den Konflikt-Dialog

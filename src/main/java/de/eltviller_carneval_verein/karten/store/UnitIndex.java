@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.DoubleConsumer;
@@ -1188,10 +1187,7 @@ final class UnitIndex {
 						noted.parents().forEach(parent -> parents.add(parent.value()));
 						StoreCodec.writeConflict(node.putObject("conflict"), noted.note());
 					}
-					if (!entry.seen().isEmpty()) {
-						ObjectNode seen = item.putObject("seen");
-						new TreeMap<>(entry.seen()).forEach(seen::put);
-					}
+					StoreCodec.writeSeen(item, entry.seen());
 					if (entry.ownSeq() != null) {
 						item.put("ownSeq", entry.ownSeq().longValue());
 					}

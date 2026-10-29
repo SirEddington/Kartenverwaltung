@@ -91,7 +91,7 @@ public final class CustomerDisplay {
 	private final ChangeTracker.Listener<Event> dataChanged = (changed, before, after) -> onDataChanged(changed);
 	// Fremde Änderungen führt der Tracker still nach (rebase meldet nichts): Das Fenster erfährt sie vom Repository
 	private final RepositoryListener<Event> foreignEventChanges = new RepositoryListener<>() {
-		private final RepositoryListener<Event> redrawing = LiveViews.coalescing(Platform::runLater, CustomerDisplay.this::touchesShownPresentation,
+		private final RepositoryListener<Event> redrawing = LiveViews.onFxThread(CustomerDisplay.this::touchesShownPresentation,
 				CustomerDisplay.this::redrawIfAttached);
 
 		@Override
@@ -100,7 +100,7 @@ public final class CustomerDisplay {
 		}
 	};
 	// Ersetzt oder ändert ein anderer Rechner die Halle der gezeigten Vorstellung, zeichnet das Fenster neu (die Halle wird über die ID gesucht)
-	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.coalescing(Platform::runLater, this::touchesShownHall, this::redrawIfAttached);
+	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(this::touchesShownHall, this::redrawIfAttached);
 
 	private final HallPlanPane.Decorator decorator = new HallPlanPane.Decorator() {
 		@Override

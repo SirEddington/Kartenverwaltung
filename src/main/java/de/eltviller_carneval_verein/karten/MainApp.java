@@ -274,13 +274,15 @@ public class MainApp extends Application {
 		}
 	}
 
-	/** Zeigt den Sammel-Dialog (oder holt ihn nach vorn): per Klick auf die Fußzeile und bei neuen Konflikten. */
+	/**
+	 * Zeigt den Sammel-Dialog (oder holt ihn nach vorn): per Klick auf die Fußzeile und bei neuen Konflikten. Was er zeigt,
+	 * gilt danach als gesehen (das merkt der Dialog selbst).
+	 */
 	private static void openConflictDialog() {
 		if (conflictList == null) {
 			return;
 		}
 		ConflictDialog.show(primaryStage, conflictList, conflictActions);
-		conflictList.markSeen();
 	}
 
 	/** Die Zahl der offenen Konflikte für die Fußzeile; vor dem Start des Versionsspeichers keine. */
