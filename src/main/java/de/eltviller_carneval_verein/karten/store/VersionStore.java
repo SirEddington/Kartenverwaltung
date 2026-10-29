@@ -309,6 +309,41 @@ public final class VersionStore {
 	}
 
 	/**
+	 * Was {@link #scanUnit} in einem Durchgang findet.
+	 *
+	 * @param dataFiles die Pfade wie von {@link #unitDataFiles}
+	 * @param tempFiles die Pfade wie von {@link #unitTempFiles}
+	 */
+	public record UnitScan(List<String> dataFiles, List<String> tempFiles) {
+	}
+
+	/**
+	 * Die Versions- und Anspruchsdateien und die temporären Dateien genau dieser Einheit mit einem Listenzugriff je Ordner
+	 * (Einheitenordner und {@code claims/}), nicht mit je einem für {@link #unitDataFiles} und {@link #unitTempFiles}: auf
+	 * einer Netzfreigabe kostet jeder Zugriff. Die Ergebnisse sind dieselben wie bei den beiden Methoden.
+	 */
+	public UnitScan scanUnit(UnitKey unit) throws IOException {
+		Path unitDir = unitDir(unit);
+		Path claimsDir = unitDir.resolve(CLAIMS);
+		String prefix = unit.relativePath() + "/";
+		List<String> unitNames = files.listNamesWithTemps(unitDir);
+		List<String> claimNamesWithTemps = files.listNamesWithTemps(claimsDir);
+
+		List<String> data = new ArrayList<>();
+		for (VersionId id : versionIdsOf(unitDir, unitNames)) {
+			data.add(prefix + id + JSON);
+		}
+		for (String name : claimNamesOf(claimsDir, claimNamesWithTemps)) {
+			data.add(prefix + CLAIMS + "/" + name + JSON);
+		}
+		Collections.sort(data);
+		List<String> temps = new ArrayList<>();
+		addTempNames(temps, unitNames, prefix);
+		addTempNames(temps, claimNamesWithTemps, prefix + CLAIMS + "/");
+		return new UnitScan(data, temps);
+	}
+
+	/**
 	 * Die Pfade der temporären Dateien dieser Schicht ({@code ~karv-*.tmp}, eigene wie fremde) im Ordner der Einheit und
 	 * in ihrem {@code claims/}, relativ zu {@link #dataRoot()} und mit {@code /} getrennt: zuerst die des Einheitenordners,
 	 * dann die unter {@code claims/}, je nach Namen sortiert. Unterordner der Einheit zählen nicht.
@@ -317,13 +352,13 @@ public final class VersionStore {
 		Path unitDir = unitDir(unit);
 		String prefix = unit.relativePath() + "/";
 		List<String> paths = new ArrayList<>();
-		addTempNames(paths, unitDir, prefix);
-		addTempNames(paths, unitDir.resolve(CLAIMS), prefix + CLAIMS + "/");
+		addTempNames(paths, files.listNamesWithTemps(unitDir), prefix);
+		addTempNames(paths, files.listNamesWithTemps(unitDir.resolve(CLAIMS)), prefix + CLAIMS + "/");
 		return paths;
 	}
 
-	private void addTempNames(List<String> paths, Path dir, String prefix) throws IOException {
-		for (String name : files.listNamesWithTemps(dir)) {
+	private static void addTempNames(List<String> paths, List<String> names, String prefix) {
+		for (String name : names) {
 			if (name.startsWith(FileLayer.TEMP_PREFIX) && name.endsWith(FileLayer.TEMP_SUFFIX)) {
 				paths.add(prefix + name);
 			}
@@ -402,8 +437,13 @@ public final class VersionStore {
 
 	/** Die IDs der Versionsdateien im Einheitenordner, sortiert; fremde Namen und Ordner fehlen. */
 	private List<VersionId> versionIds(Path unitDir) throws IOException {
+		return versionIdsOf(unitDir, files.listNames(unitDir));
+	}
+
+	/** Wie {@link #versionIds}, aus den schon gelisteten Namen im Einheitenordner (temporäre Namen sind keine Versions-IDs). */
+	private List<VersionId> versionIdsOf(Path unitDir, List<String> names) {
 		List<VersionId> ids = new ArrayList<>();
-		for (String name : files.listNames(unitDir)) {
+		for (String name : names) {
 			Optional<VersionId> id = versionIdOf(name);
 			if (id.isPresent() && !files.isDirectory(unitDir.resolve(name))) {
 				ids.add(id.get());
@@ -415,8 +455,13 @@ public final class VersionStore {
 	/** Die Namen der Anspruchsdateien unter {@code claims/}, sortiert; fremde Namen und Ordner fehlen. */
 	private List<String> claimNames(Path unitDir) throws IOException {
 		Path claimsDir = unitDir.resolve(CLAIMS);
+		return claimNamesOf(claimsDir, files.listNames(claimsDir));
+	}
+
+	/** Wie {@link #claimNames}, aus den schon gelisteten Namen in {@code claims/}. */
+	private List<String> claimNamesOf(Path claimsDir, List<String> listed) {
 		List<String> names = new ArrayList<>();
-		for (String name : files.listNames(claimsDir)) {
+		for (String name : listed) {
 			Optional<String> claimName = claimNameOf(name);
 			if (claimName.isPresent() && !files.isDirectory(claimsDir.resolve(name))) {
 				names.add(claimName.get());

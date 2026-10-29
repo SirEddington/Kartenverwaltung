@@ -236,7 +236,7 @@ class SyncServiceTest {
 			this.appData = appData;
 			this.identity = MachineIdentity.loadOrCreate(appData, () -> name);
 			this.layer = new FaultyFileLayer(files);
-			for (String operation : List.of("createNew", "read", "listNames")) {
+			for (String operation : List.of("createNew", "read", "listNames", "listNamesWithTemps")) {
 				layer.failWhen(p -> down.get() && p.startsWith(sharedRoot), operation, new IOException("Netzlaufwerk getrennt"));
 			}
 			this.service = new SyncService(appData, identity, layer, ui, worker,
@@ -1554,6 +1554,45 @@ class SyncServiceTest {
 		assertTrue(Files.exists(localFile(a, hall, VersionId.create(1_000_000L, OTHER, 0) + ".json")));
 		assertEquals(0, a.events.errors.size());
 		assertEquals(0, a.events.unreachable.size());
+	}
+
+	@Test
+	void failingTempCleanupInOneFolderDoesNotSkipTheOthers() throws IOException {
+		UnitKey hall = UnitKey.hall("h1");
+		Node a = nodeWithForeignHallInSharedFolder(hall);
+		Path unitDir = sharedFile(hall, "x").getParent();
+		Path claimsDir = unitDir.resolve("claims");
+		Duration old = SyncService.TEMP_AGE.plusHours(1);
+		Path stuck = tempFile(unitDir, a.service.machineId(), old);
+		Path other = tempFile(claimsDir, a.service.machineId(), old);
+		a.layer.failWhen(p -> p.equals(unitDir), "deleteOldTemps", new IOException("gesperrt"));
+
+		a.service.syncNow();
+
+		assertTrue(Files.exists(stuck));
+		assertFalse(Files.exists(other));
+		assertEquals(0, a.events.errors.size());
+	}
+
+	@Test
+	void sectionListsEachSharedUnitFolderOnlyOnceAlsoForTheCleanup() throws IOException {
+		UnitKey hall = UnitKey.hall("h1");
+		Node a = nodeWithForeignHallInSharedFolder(hall);
+		Path unitDir = sharedFile(hall, "x").getParent();
+		Path claimsDir = unitDir.resolve("claims");
+		Path ownOld = tempFile(unitDir, a.service.machineId(), SyncService.TEMP_AGE.plusHours(1));
+		int before = a.layer.calls().size();
+
+		a.service.syncNow();
+
+		List<String> calls = a.layer.calls().subList(before, a.layer.calls().size());
+		List<String> listings = calls.stream().filter(c -> c.startsWith("listNames")
+				&& (c.endsWith(" " + unitDir) || c.endsWith(" " + claimsDir))).toList();
+		// ein Listenzugriff je Ordner der Einheit, der Dateien und temporäre Reste zugleich liefert
+		assertEquals(List.of("listNamesWithTemps " + unitDir, "listNamesWithTemps " + claimsDir), listings);
+		// für das Alter wird nur die eigene Datei abgefragt
+		assertEquals(List.of("deleteOldTemps " + unitDir), calls.stream().filter(c -> c.startsWith("deleteOldTemps")).toList());
+		assertFalse(Files.exists(ownOld));
 	}
 
 	// --- Vollabgleich in Abschnitten über mehrere Takte

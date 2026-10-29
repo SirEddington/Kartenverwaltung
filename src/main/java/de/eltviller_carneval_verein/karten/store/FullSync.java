@@ -242,6 +242,8 @@ public final class FullSync {
 		private final Set<UnitKey> lostChecked = new HashSet<>();
 		private final List<FullSyncResult.UploadedClaim> uploaded = new ArrayList<>();
 		private final List<FeedPoll.Contested> contested = new ArrayList<>();
+		/** Die temporären Dateien, die das Auflisten der Einheiten im gemeinsamen Ordner mitgeliefert hat. */
+		private final List<String> sharedTemps = new ArrayList<>();
 		private final Consumer<FullSyncResult.UploadedClaim> onUpload;
 
 		Run(VersionStore local, VersionStore shared, String ownMachineId, FileLayer files, Clock clock,
@@ -257,7 +259,10 @@ public final class FullSync {
 		/** Gleicht eine Einheit ab (siehe {@link FullSync#syncUnits}). */
 		void syncUnit(UnitKey unit, boolean uploadLocalClaims) throws IOException {
 			List<DataPath> localFiles = dataPaths(unit, local.unitDataFiles(unit));
-			List<DataPath> sharedFiles = dataPaths(unit, shared.unitDataFiles(unit));
+			// Im gemeinsamen Ordner ein Listenzugriff je Ordner für Dateien und temporäre Reste zugleich
+			VersionStore.UnitScan sharedScan = shared.scanUnit(unit);
+			sharedTemps.addAll(sharedScan.tempFiles());
+			List<DataPath> sharedFiles = dataPaths(unit, sharedScan.dataFiles());
 			Set<String> localPaths = paths(localFiles);
 			Set<String> sharedPaths = paths(sharedFiles);
 
@@ -311,7 +316,7 @@ public final class FullSync {
 		}
 
 		FullSyncResult result() {
-			return new FullSyncResult(changed, lost, uploaded, contested);
+			return new FullSyncResult(changed, lost, uploaded, contested, sharedTemps);
 		}
 
 		private static Set<String> paths(List<DataPath> files) {

@@ -15,9 +15,12 @@ import java.util.Set;
  * @param contested die Plätze, an denen der lokale Anspruch der eigene ist und der gemeinsame eine andere Version nennt
  *                  (späte Niederlage, die keine Änderungsliste aufgedeckt hat; nur ohne Hochladen lokaler Ansprüche,
  *                  denn dabei entscheidet der Abgleich selbst). Ersetzt wird hier nichts; das tut der Aufrufer.
+ * @param sharedTemps die temporären Dateien ({@code ~karv-*.tmp}, eigene wie fremde), die der Abgleich beim Auflisten der
+ *                    Ordner der Einheiten im gemeinsamen Ordner mitgesehen hat, als Pfade relativ zu dessen Datenordner.
+ *                    Der Aufrufer räumt davon auf, was ihm gehört; dafür ist kein weiterer Listenzugriff nötig.
  */
 public record FullSyncResult(Set<UnitKey> changed, List<LostVersion> lost, List<UploadedClaim> uploaded,
-		List<FeedPoll.Contested> contested) {
+		List<FeedPoll.Contested> contested, List<String> sharedTemps) {
 
 	/**
 	 * Ein Anspruch, den der Abgleich im gemeinsamen Ordner angelegt hat.
@@ -34,5 +37,6 @@ public record FullSyncResult(Set<UnitKey> changed, List<LostVersion> lost, List<
 		lost = List.copyOf(lost);
 		uploaded = List.copyOf(uploaded);
 		contested = List.copyOf(contested);
+		sharedTemps = List.copyOf(sharedTemps);
 	}
 }

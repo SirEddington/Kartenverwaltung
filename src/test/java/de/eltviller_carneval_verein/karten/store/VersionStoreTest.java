@@ -301,6 +301,38 @@ class VersionStoreTest {
 	}
 
 	@Test
+	void scanUnitYieldsDataAndTempFilesWithOneListingPerFolder() throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		VersionStore store = new VersionStore(dir.resolve("data"), layer);
+		UnitKey event = UnitKey.event("e1");
+		store.writeVersion(event, V2, versionBytes(V2, V1));
+		store.writeVersion(event, V1, versionBytes(V1));
+		store.createClaim(event, "root", claimBytes(V1, versionBytes(V1)));
+		store.writeVersion(UnitKey.presentation("e1", "p1"), V3, versionBytes(V3));
+		Path unitDir = store.dataRoot().resolve("events/e1");
+		String tagged = "~karv-maschine-1-0f8fad5b-d9cb-469f-a165-70867728950e.tmp";
+		put(unitDir.resolve(tagged), "x");
+		put(unitDir.resolve("claims/~karv-2.tmp"), "x");
+		put(unitDir.resolve("Thumbs.db"), "x");
+		put(unitDir.resolve("presentations/p1/~karv-5.tmp"), "x");
+		List<String> data = store.unitDataFiles(event);
+		List<String> temps = store.unitTempFiles(event);
+		int before = layer.calls().size();
+
+		VersionStore.UnitScan scan = store.scanUnit(event);
+
+		assertEquals(data, scan.dataFiles());
+		assertEquals(temps, scan.tempFiles());
+		assertEquals(List.of("events/e1/" + V1 + ".json", "events/e1/" + V2 + ".json", "events/e1/claims/root.json"),
+				scan.dataFiles());
+		assertEquals(List.of("events/e1/" + tagged, "events/e1/claims/~karv-2.tmp"), scan.tempFiles());
+		List<String> listings = layer.calls().subList(before, layer.calls().size()).stream()
+				.filter(c -> c.startsWith("listNames")).toList();
+		assertEquals(List.of("listNamesWithTemps " + unitDir, "listNamesWithTemps " + unitDir.resolve("claims")), listings);
+		assertEquals(new VersionStore.UnitScan(List.of(), List.of()), store.scanUnit(UnitKey.hall("h1")));
+	}
+
+	@Test
 	void unitTempFilesListsTempsOfUnitAndClaims() throws IOException {
 		VersionStore store = store();
 		UnitKey event = UnitKey.event("e1");
