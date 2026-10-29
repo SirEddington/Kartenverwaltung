@@ -876,6 +876,21 @@ public final class SyncService {
 	}
 
 	/**
+	 * Die Einheiten unter {@code units}, die laut Start-Index eine eigene verlorene Strecke haben (noch nicht zusammengeführt).
+	 * Liest keine Datei; der Index spiegelt nur, den Stand der Strecke liefert {@link #unitState}.
+	 */
+	public Set<UnitKey> lostUnits(Collection<UnitKey> units) {
+		Set<UnitKey> lost = new LinkedHashSet<>();
+		for (UnitKey unit : units) {
+			UnitIndex.Entry entry = index.entry(unit);
+			if (entry != null && entry.lost()) {
+				lost.add(unit);
+			}
+		}
+		return Collections.unmodifiableSet(lost);
+	}
+
+	/**
 	 * Ob der Stand {@code version} der Einheit eine eigene Zusammenführung ist, die einen Konflikt dieses Rechners
 	 * auflöst: von diesem Rechner, mit mehr als einem Vorgänger, und sie selbst oder eine in ihr aufgegangene Version trägt
 	 * einen Vermerk, der diesen Rechner betrifft ({@link ConflictNote#affected()}). Diesen Konflikt zeigt der Dialog. Die

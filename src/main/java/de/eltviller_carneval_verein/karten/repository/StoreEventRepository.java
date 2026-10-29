@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -20,8 +21,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
@@ -400,6 +404,139 @@ public class StoreEventRepository implements EventRepository {
 			cachedEvents.set(index, replacement);
 		}
 	}
+
+	// Hilfen für den Konflikt-Dialog -->
+
+	/** Das Event mit dieser ID im Cache; {@code null}, wenn es keines gibt (nie gespeichert, gelöscht oder fremd entfernt). */
+	public Event findEvent(String eventId) {
+		ensureLoaded();
+		return cachedEvent(eventId);
+	}
+
+	/**
+	 * Das Objekt im Modell zur Einheit (Event, Presentation oder Booking), sonst {@code null}. Bei einer Buchung auf einem
+	 * Sitz ist es auch der leere Platzhalter, wenn der Sitz frei ist (siehe {@link Booking#hasData()}).
+	 */
+	public Object modelObject(UnitKey unit) {
+		Event event = unit.type() == UnitType.HALL ? null : findEvent(unit.eventId());
+		return event == null ? null : EventMerge.modelObject(event, unit);
+	}
+
+	/**
+	 * Der Inhalt, den das Modell für die Einheit hätte, wenn es jetzt gespeichert würde; {@code null}, wenn es sie im Modell
+	 * nicht gibt oder sie leer ist (eine Buchung ohne Daten wird nie geschrieben).
+	 *
+	 * @throws IllegalStateException wenn sich das Event nicht zerlegen lässt (zwei Buchungen auf einem Platz)
+	 */
+	public ObjectNode payloadOf(UnitKey unit) {
+		Event event = unit.type() == UnitType.HALL ? null : findEvent(unit.eventId());
+		return event == null ? null : UnitMapper.payloads(event).get(unit);
+	}
+
+	/**
+	 * Setzt die genannten Felder der Einheit im Modell und lässt alle anderen, wie sie sind. Ändert nur das Modell; es wird
+	 * nichts gespeichert und kein Listener benachrichtigt. Wechselt eine Vorstellung dabei Halle oder Bestuhlung, gleicht
+	 * {@link BookingSync} ihre Buchungen ab wie im Vorstellungs-Editor.
+	 *
+	 * @param fields die Felder mit JSON-Feldnamen, wie {@link UnitMapper#normalize} sie schreibt
+	 * @throws IllegalStateException wenn die Einheit im Modell fehlt oder das Ergebnis sich nicht lesen lässt; das Modell ist
+	 *                               dann unverändert
+	 */
+	public void applyFields(UnitKey unit, ObjectNode fields) {
+		Object model = modelObject(unit);
+		if (model == null || unit.type() == UnitType.HALL) {
+			throw new IllegalStateException("Die Einheit " + unit.relativePath() + " ist im Modell nicht vorhanden.");
+		}
+		ObjectNode merged = UnitMapper.normalize(model);
+		merged.remove("presentations");
+		merged.remove("bookings");
+		fields.fields().forEachRemaining(field -> merged.set(field.getKey(), field.getValue().deepCopy()));
+		try {
+			switch (unit.type()) {
+			case BOOKING -> ((Booking) model).copyFrom(MAPPER.treeToValue(merged, Booking.class));
+			case EVENT -> ((Event) model).copyFrom(MAPPER.treeToValue(merged, Event.class));
+			case PRESENTATION -> {
+				Presentation presentation = (Presentation) model;
+				String hallId = presentation.getHallId();
+				String planId = presentation.getSeatingPlanId();
+				presentation.copyFrom(MAPPER.treeToValue(merged, Presentation.class));
+				if (!Objects.equals(hallId, presentation.getHallId())
+						|| !Objects.equals(planId, presentation.getSeatingPlanId())) {
+					BookingSync.sync(presentation, planOf(presentation));
+				}
+			}
+			case HALL -> throw new IllegalStateException("Eine Halle ist keine Einheit eines Events.");
+			}
+		} catch (JsonProcessingException e) {
+			throw new IllegalStateException("Der Inhalt von " + unit.relativePath() + " lässt sich nicht lesen: "
+					+ StoreMessages.describe(e), e);
+		}
+	}
+
+	/**
+	 * Wie {@link #applyFields}, für eine ganze Feldgruppe ({@link FieldGroups}): Felder der Gruppe, die {@code values} nicht
+	 * nennt, werden geleert, damit die Gruppe genau den Stand von {@code values} hat. Ein unbekannter Gruppenname gilt als
+	 * Name eines einzelnen Feldes.
+	 *
+	 * @param values die Gruppe als JSON-Ausschnitt, wie ihn der Konfliktvermerk trägt
+	 */
+	public void applyGroup(UnitKey unit, String group, ObjectNode values) {
+		Map<String, List<String>> groups = switch (unit.type()) {
+		case BOOKING -> FieldGroups.booking();
+		case PRESENTATION -> FieldGroups.presentation();
+		case EVENT -> FieldGroups.eventHead();
+		case HALL -> throw new IllegalArgumentException("Eine Halle hat keine Feldgruppen im Event.");
+		};
+		ObjectNode fields = values.deepCopy();
+		for (String field : groups.getOrDefault(group, List.of(group))) {
+			if (!fields.has(field)) {
+				fields.putNull(field);
+			}
+		}
+		applyFields(unit, fields);
+	}
+
+	/** Liest den Inhalt einer Buchungs-Version als neues Objekt; {@code null}, wenn er sich nicht lesen lässt. */
+	public Booking readBooking(ObjectNode payload) {
+		try {
+			return MAPPER.treeToValue(payload, Booking.class);
+		} catch (JsonProcessingException | RuntimeException e) {
+			LOG.warning("Der Inhalt einer Buchung lässt sich nicht lesen: " + StoreMessages.describe(e).lines().findFirst().orElse(""));
+			return null;
+		}
+	}
+
+	/**
+	 * Ob die Buchung mit dieser Kennung unter der Vorstellung lebt: als Buchung mit Daten im Modell oder als nicht gelöschte
+	 * Buchungs-Einheit der Vorstellung im Index (auf einem Sitz oder {@code _<ID>}).
+	 */
+	public boolean bookingLives(String eventId, String presentationId, String bookingId) {
+		Event event = findEvent(eventId);
+		Presentation presentation = event == null ? null : event.findPresentation(presentationId);
+		if (presentation != null && presentation.getBookings() != null) {
+			for (Booking booking : presentation.getBookings()) {
+				if (booking.hasData() && bookingId.equals(booking.getId())) {
+					return true;
+				}
+			}
+		}
+		for (UnitSnapshot snapshot : sync.eventSnapshots(eventId).values()) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() == UnitType.BOOKING && presentationId.equals(unit.presentationId()) && snapshot.version() != null
+					&& !snapshot.deleted() && snapshot.payload() != null
+					&& bookingId.equals(snapshot.payload().path(ConflictInput.BOOKING_ID).asText(null))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private SeatingPlan planOf(Presentation presentation) {
+		Hall hall = presentation.getHallId() != null ? hallLookup.apply(presentation.getHallId()) : null;
+		return hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
+	}
+
+	// <-- Hilfen für den Konflikt-Dialog
 
 	@Override
 	public void deleteEvents(List<Event> events) {

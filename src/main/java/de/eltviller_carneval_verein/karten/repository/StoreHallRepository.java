@@ -12,6 +12,10 @@ import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
@@ -30,6 +34,9 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
 public class StoreHallRepository implements HallRepository {
 
 	private static final Logger LOG = Logger.getLogger(StoreHallRepository.class.getName());
+
+	/** Zum Lesen einer früheren Fassung einer Halle ({@link #readHall}). */
+	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 
 	private static StoreHallRepository instance;
 
@@ -314,6 +321,21 @@ public class StoreHallRepository implements HallRepository {
 		int index = cachedHalls.indexOf(replacement);
 		if (index >= 0) {
 			cachedHalls.set(index, replacement);
+		}
+	}
+
+	/**
+	 * Liest den Inhalt einer Hallen-Version als neues Objekt (für den Konflikt-Dialog: eine frühere Fassung der Halle wieder
+	 * schreiben). Cache und Versionsspeicher bleiben unberührt.
+	 *
+	 * @return die Halle; {@code null}, wenn der Inhalt sich nicht lesen lässt
+	 */
+	public Hall readHall(ObjectNode payload) {
+		try {
+			return MAPPER.treeToValue(payload, Hall.class);
+		} catch (JsonProcessingException | RuntimeException e) {
+			LOG.warning("Der Inhalt einer Halle lässt sich nicht lesen: " + StoreMessages.describe(e).lines().findFirst().orElse(""));
+			return null;
 		}
 	}
 
