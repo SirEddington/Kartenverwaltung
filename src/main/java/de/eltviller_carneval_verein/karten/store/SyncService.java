@@ -596,7 +596,9 @@ public final class SyncService {
 	 * @param saveId die ID des Speichervorgangs; alle Versionen tragen sie
 	 * @return die neuen Versionen in der Reihenfolge der Änderungen
 	 * @throws IOException wenn eine Datei nicht geschrieben werden kann; die schon geschriebenen Versionen desselben
-	 *                     Aufrufs bleiben liegen und werden wie die übrigen beansprucht bzw. hochgeladen
+	 *                     Aufrufs bleiben liegen und werden wie die übrigen beansprucht bzw. hochgeladen. Dasselbe gilt,
+	 *                     wenn das Schreiben eine unerwartete {@link RuntimeException} wirft: Sie wird nach dem
+	 *                     Beanspruchen bzw. Einreihen weitergeworfen, Folgefehler hängen als unterdrückte Ausnahmen an.
 	 */
 	public List<Version> append(String saveId, List<Change> changes) throws IOException {
 		Objects.requireNonNull(saveId, "saveId");
@@ -611,12 +613,19 @@ public final class SyncService {
 		// vor der ersten Datei: eine Marke "sauber beendet" gilt nur über einem unveränderten Bestand
 		index.invalidateCleanMarker();
 		List<UploadJob.Item> written = new ArrayList<>();
+		// der Fehler, der das Schreiben beendet hat: geprüft oder unerwartet (nie beide)
 		IOException failure = null;
+		RuntimeException unexpected = null;
 		for (Change change : changes) {
 			try {
 				written.add(writeLocal(saveId, change, me, generator, seenFor(current, change)));
 			} catch (IOException e) {
 				failure = e;
+				break;
+			} catch (RuntimeException e) {
+				// die schon geschriebenen Versionen müssen trotzdem in den Index und in die Warteschlange: Spätere Schritte
+				// nehmen die Kandidaten für Ausstehendes aus dem Index
+				unexpected = e;
 				break;
 			}
 		}
@@ -633,16 +642,25 @@ public final class SyncService {
 				index.markOwnListed(feedEntries(written), 0);
 				enqueue(current, saveId, written);
 			}
-		} catch (IOException e) {
+		} catch (IOException | RuntimeException e) {
 			// auch nach einem Fehler spiegelt der Index, was auf der Platte liegt (etwa eine Version ohne Anspruch)
-			indexUnits(written);
-			if (failure == null) {
+			Throwable first = failure != null ? failure : unexpected;
+			if (first == null) {
+				indexUnits(written);
 				throw e;
 			}
-			failure.addSuppressed(e);
+			try {
+				indexUnits(written);
+			} catch (RuntimeException indexFailure) {
+				first.addSuppressed(indexFailure);
+			}
+			first.addSuppressed(e);
 		}
 		if (failure != null) {
 			throw failure;
+		}
+		if (unexpected != null) {
+			throw unexpected;
 		}
 		return written.stream().map(UploadJob.Item::version).toList();
 	}

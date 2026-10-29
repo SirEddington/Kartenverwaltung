@@ -27,7 +27,9 @@ import java.util.function.Predicate;
  */
 public final class FaultyFileLayer implements FileLayer {
 
-	private record Failure(Predicate<Path> path, String operation, IOException exception, boolean once, boolean after) {
+	/** {@code exception} ist die geprüfte, {@code unchecked} die ungeprüfte Ausnahme; genau eine von beiden ist gesetzt. */
+	private record Failure(Predicate<Path> path, String operation, IOException exception, RuntimeException unchecked,
+			boolean once, boolean after) {
 	}
 
 	/** Ein Aufruf von {@code createNew}: die Datei sowie Anker und Kennung, mit denen er kam. */
@@ -52,12 +54,25 @@ public final class FaultyFileLayer implements FileLayer {
 
 	/** Lässt den nächsten Aufruf der Operation (mit beliebigem Pfad) mit dieser Ausnahme scheitern. */
 	public synchronized void failNext(String operation, IOException e) {
-		failures.add(new Failure(p -> true, operation, e, true, false));
+		failures.add(new Failure(p -> true, operation, e, null, true, false));
+	}
+
+	/**
+	 * Wie {@link #failNext}, mit einer ungeprüften Ausnahme: Der Aufruf wirft sie unverändert, ohne etwas auszuführen
+	 * (ein Fehler, den die Schicht nicht als {@link IOException} meldet).
+	 */
+	public synchronized void failNextUnchecked(String operation, RuntimeException e) {
+		failures.add(new Failure(p -> true, operation, null, e, true, false));
+	}
+
+	/** Wie {@link #failNextUnchecked(String, RuntimeException)}, aber nur für den nächsten Aufruf mit einem passenden Pfad. */
+	public synchronized void failNextUnchecked(Predicate<Path> path, String operation, RuntimeException e) {
+		failures.add(new Failure(path, operation, null, e, true, false));
 	}
 
 	/** Lässt jeden Aufruf der Operation mit einem passenden Pfad mit dieser Ausnahme scheitern. */
 	public synchronized void failWhen(Predicate<Path> path, String operation, IOException e) {
-		failures.add(new Failure(path, operation, e, false, false));
+		failures.add(new Failure(path, operation, e, null, false, false));
 	}
 
 	/**
@@ -65,12 +80,12 @@ public final class FaultyFileLayer implements FileLayer {
 	 * ist eingetreten, der Aufrufer erfährt es nicht.
 	 */
 	public synchronized void failAfter(String operation, IOException e) {
-		failures.add(new Failure(p -> true, operation, e, true, true));
+		failures.add(new Failure(p -> true, operation, e, null, true, true));
 	}
 
 	/** Wie {@link #failAfter}, für jeden Aufruf der Operation mit einem passenden Pfad. */
 	public synchronized void failAfterWhen(Predicate<Path> path, String operation, IOException e) {
-		failures.add(new Failure(path, operation, e, false, true));
+		failures.add(new Failure(path, operation, e, null, false, true));
 	}
 
 	/** Alle bisherigen Aufrufe von {@code createNew} mit den Werten für Anker und Kennung, auch die gescheiterten. */
@@ -129,6 +144,9 @@ public final class FaultyFileLayer implements FileLayer {
 			if (failure.operation().equals(operation) && failure.path().test(path)) {
 				if (failure.once()) {
 					failures.remove(failure);
+				}
+				if (failure.unchecked() != null) {
+					throw failure.unchecked();
 				}
 				if (failure.after()) {
 					return failure.exception();

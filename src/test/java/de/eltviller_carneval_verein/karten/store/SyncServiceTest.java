@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -629,6 +630,55 @@ class SyncServiceTest {
 
 		assertTrue(Files.exists(sharedFile(u1, "claims/root.json")));
 		assertFalse(a.service.unitState(u1).provisional());
+	}
+
+	@Test
+	void runtimeFailureInAppendStillClaimsWrittenVersionsInSingleMode() throws IOException {
+		UnitKey u1 = UnitKey.event("e1");
+		UnitKey u2 = UnitKey.event("e2");
+		Path appData = dir.resolve("a");
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		SyncService service = TestSyncServices.singleMode(appData, layer);
+		assertTrue(service.startup(""));
+		Path u2Local = appData.resolve("data").resolve(u2.relativePath());
+		UncheckedIOException failure = new UncheckedIOException(new IOException("Platte voll"));
+		layer.failNextUnchecked(p -> p.startsWith(u2Local), "createNew", failure);
+
+		UncheckedIOException thrown = assertThrows(UncheckedIOException.class,
+				() -> service.append("s1", List.of(create(u1, "eins"), create(u2, "zwei"))));
+
+		assertSame(failure, thrown);
+		assertTrue(Files.exists(appData.resolve("data").resolve(u1.relativePath()).resolve("claims/root.json")),
+				"die geschriebene Version ist beansprucht");
+		assertFalse(Files.exists(appData.resolve("data").resolve(u2.relativePath())));
+		UnitState state = service.unitState(u1);
+		assertEquals("eins", state.head().payload().get("name").asText());
+		assertFalse(state.provisional());
+	}
+
+	@Test
+	void runtimeFailureInAppendStillQueuesWrittenVersionsInSharedMode() throws IOException {
+		UnitKey u1 = UnitKey.event("e1");
+		UnitKey u2 = UnitKey.event("e2");
+		Node a = node("a");
+		a.service.startup(shared);
+		Path u2Local = a.localData().resolve(u2.relativePath());
+		RuntimeException failure = new IllegalStateException("unerwartet");
+		a.layer.failNextUnchecked(p -> p.startsWith(u2Local), "createNew", failure);
+
+		RuntimeException thrown = assertThrows(RuntimeException.class,
+				() -> a.service.append("s1", List.of(create(u1, "eins"), create(u2, "zwei"))));
+
+		assertSame(failure, thrown);
+		UnitState pending = a.service.unitState(u1);
+		assertEquals("eins", pending.current().payload().get("name").asText());
+		assertTrue(pending.provisional(), "die Version ist eingereiht, aber noch nicht oben");
+
+		a.service.tick();
+
+		assertTrue(Files.exists(sharedFile(u1, "claims/root.json")));
+		assertFalse(a.service.unitState(u1).provisional());
+		assertFalse(Files.exists(sharedFile(u2, "claims/root.json")));
 	}
 
 	// --- Verluste
