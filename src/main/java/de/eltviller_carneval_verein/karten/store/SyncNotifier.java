@@ -14,7 +14,7 @@ import javafx.beans.property.ReadOnlyObjectWrapper;
 
 /**
  * Zustand und Rückmeldungen des {@link SyncService}: hält den Zustand, entscheidet, welche Meldung wirklich hinaus
- * geht, und reicht alles über den {@code ui}-Executor weiter (Muster {@code MirrorService}).
+ * geht, und reicht alles über den {@code ui}-Executor weiter.
  * <ul>
  * <li>Intern gilt immer der sofort gesetzte Zustand; die Eigenschaften folgen über den {@code ui}-Executor in der
  * Reihenfolge der Änderungen.</li>

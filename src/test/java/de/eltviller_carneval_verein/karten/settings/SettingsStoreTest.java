@@ -150,15 +150,17 @@ class SettingsStoreTest {
 	}
 
 	@Test
-	void mirrorDirSurvivesSaveAndReload(@TempDir File dir) {
-		SettingsStore store = new SettingsStore(dir);
-		store.current().setMirrorDir("E:\\ECV");
+	void mirrorDirFromAnOlderVersionIsIgnored(@TempDir File dir) throws IOException {
+		write(dir, "{\"mirrorDir\":\"E:\\\\ECV\"}");
 
+		SettingsStore store = new SettingsStore(dir);
 		store.save();
 
-		assertEquals("E:\\ECV", new SettingsStore(dir).current().getMirrorDir());
+		assertTrue(store.getAndClearLoadWarnings().isEmpty());
+		assertEquals(0, JsonMapperFactory.create().readTree(new File(dir, "settings.json")).size());
 	}
 
+	/** Hält fest, dass die Annotation an {@link AppSettings} die leere Bean für Jackson schreibbar macht (bis KARV-87 Felder ergänzt). */
 	@Test
 	void emptySettingsSerializeToAnEmptyObject() throws IOException {
 		String json = JsonMapperFactory.create().writeValueAsString(new AppSettings());

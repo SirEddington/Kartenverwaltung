@@ -13,9 +13,6 @@ import java.util.function.Predicate;
  * Prüft mit Zeitlimit, ob der gemeinsame Ordner erreichbar ist. Ein hängendes Netzlaufwerk blockiert Dateizugriffe oft
  * eine halbe Minute; die Prüfung läuft deshalb auf einem eigenen Daemon-Thread, und wer fragt, wartet höchstens bis zum
  * Zeitlimit. Läuft es ab, gilt der Ordner als nicht erreichbar. Ohne JavaFX.
- * <p>
- * Die Logik entspricht {@code mirror.MirrorReachability}; sie steht hier noch einmal, weil die Spiegelung vor v1.0
- * entfällt.
  */
 public final class Reachability {
 

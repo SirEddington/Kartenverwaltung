@@ -11,10 +11,10 @@ import java.nio.file.StandardCopyOption;
  * Ersetzt eine Datei atomar durch eine fertig geschriebene temporäre Datei ({@code ATOMIC_MOVE},
  * {@code REPLACE_EXISTING}) und wiederholt das kurz, wenn die Zieldatei gerade von jemand anderem geöffnet ist.
  * <p>
- * Windows verweigert das Ersetzen, solange ein anderer Zugriff auf die Zieldatei offen ist: die Spiegelung, die
- * sie gerade liest, ein Virenscanner, die Indizierung oder ein Synchronisationsprogramm. Solche Zugriffe dauern
- * meist nur Millisekunden; deshalb wird bis zu {@link #ATTEMPTS}-mal im Abstand von {@link #PAUSE_MILLIS} ms
- * versucht und erst danach die letzte Ausnahme unverändert weitergeworfen.
+ * Windows verweigert das Ersetzen, solange ein anderer Zugriff auf die Zieldatei offen ist: ein Virenscanner, die
+ * Indizierung oder ein Synchronisationsprogramm. Solche Zugriffe dauern meist nur Millisekunden; deshalb wird bis zu
+ * {@link #ATTEMPTS}-mal im Abstand von {@link #PAUSE_MILLIS} ms versucht und erst danach die letzte Ausnahme
+ * unverändert weitergeworfen.
  * <p>
  * Wiederholt wird nur, was nach einem solchen Zugriff aussieht: eine {@link AccessDeniedException} und eine
  * {@link FileSystemException} genau dieser Klasse (als eine von beiden meldet Java unter Windows eine

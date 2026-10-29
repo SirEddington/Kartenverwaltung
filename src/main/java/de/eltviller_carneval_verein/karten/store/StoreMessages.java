@@ -5,7 +5,8 @@ import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
 /**
  * Codes und Texte der technischen Meldungen des Versionsspeichers ({@code SYS-005} bis {@code SYS-012}). Die Texte sind
  * Vorlagen mit den Platzhaltern {@code &1} und {@code &2}; fertig formatiert lauten sie {@code "<Code>: <Text>"}.
- * Nummern werden nie wiederverwendet ({@code SYS-002} bis {@code SYS-004} gehören zur Spiegelung).
+ * Nummern werden nie wiederverwendet; {@code SYS-002} bis {@code SYS-004} bleiben unbesetzt (siehe das Package
+ * {@code validation}).
  */
 public final class StoreMessages {
 
