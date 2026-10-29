@@ -495,7 +495,10 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * dann auf {@code _<ID>} ({@link #movedAgainstEdit}); ohne {@code _<ID>} löschte sie die Buchung dort, und sie lebte
 	 * nirgends mehr. Lebt {@code _<ID>} nur, weil die eigene Löschung dort verloren hat (die Buchung kam von dort hierher,
 	 * Zuweisen aus "ohne Platz"), bleibt sie dort trotzdem: Die Auflösung von {@code _<ID>} erkennt den gescheiterten Umzug
-	 * und löscht nicht ({@link #strandedMove}, Ruling R31); die Felder, die "Meine" dabei geändert hat, überträgt sie. Ist
+	 * und löscht nicht ({@link #strandedMove}, Ruling R31); die Felder, die "Meine" dabei geändert hat, überträgt sie. Hat
+	 * ein anderer Rechner {@code _<ID>} dagegen storniert, während "Meine" die Buchung von dort hierher zuwies, gewinnt das
+	 * Storno ({@link #cancelledSource}, Ruling R31a): keine Wiederbelebung, der Sitz behält "Deren", und statt des
+	 * Doppelverkaufs bekommt dieser Rechner den Vermerk DELETE_WINS ({@code dropped} = "Meine", zum Wiederherstellen). Ist
 	 * die Einheit selbst schon {@code _<ID>}, kann die Buchung nicht weiter ausweichen: "Deren" bleibt, Vermerk UNMERGED.
 	 */
 	private static Resolution doubleSale(ConflictInput input, String mineId) {
@@ -506,11 +509,19 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (moved.equals(unit)) {
 			return PolicyRules.unmerged(input);
 		}
+		String theirsId = idOf(theirs);
+		Version introducer = theirsId == null ? null
+				: FieldMerge.introducedBy(input.chainSinceBase(), version -> theirsId.equals(idOf(version)));
+		Party other = PolicyRules.party(introducer != null ? introducer : theirs);
 		List<Change> extra;
 		Sibling existing = input.siblings().get(moved);
 		UnitSnapshot current = existing == null ? null : existing.snapshot();
 		if (current != null && current.version() != null && !current.deleted()) {
 			extra = List.of();
+		} else if (cancelledSource(input, mineId, existing)) {
+			ConflictNote note = new ConflictNote(Kind.DELETE_WINS, input.ownMachineId(), other, List.of(), null, null,
+					mine.id());
+			return new Resolution(theirs.payload(), false, List.of(), note);
 		} else {
 			ObjectNode withoutPlace = mine.payload().deepCopy();
 			withoutPlace.put(UNASSIGNED, true);
@@ -523,13 +534,25 @@ public final class BookingPolicy implements ConflictPolicy {
 			extra = List.of(new Change(moved, parents, withoutPlace, false));
 		}
 
-		String theirsId = idOf(theirs);
-		Version introducer = theirsId == null ? null
-				: FieldMerge.introducedBy(input.chainSinceBase(), version -> theirsId.equals(idOf(version)));
-		ConflictNote note = new ConflictNote(Kind.DOUBLE_SALE, input.ownMachineId(),
-				PolicyRules.party(introducer != null ? introducer : theirs), List.of(), moved,
+		ConflictNote note = new ConflictNote(Kind.DOUBLE_SALE, input.ownMachineId(), other, List.of(), moved,
 				FieldMerge.slice(mine.payload(), PLACE), mine.id());
 		return new Resolution(theirs.payload(), false, extra, note);
+	}
+
+	/**
+	 * Ruling R31a, Storno gewinnt gegen ein gescheitertes Zuweisen aus "ohne Platz": "Meine" kam im selben Speichervorgang
+	 * von {@code _<ID>} hierher (eine Version aus dem Speichervorgang von "Meine" liegt dort, {@link Sibling#saveIds()}),
+	 * {@code _<ID>} ist aber gelöscht, und die Löschung stammt nicht aus diesem Speichervorgang (die eigene hat dort
+	 * verloren, ein anderer Rechner hat storniert), und keine Geschwister-Einheit trägt die Buchung (sonst wäre es ein
+	 * Verschieben gewesen). Dann wird {@code _<ID>} nicht wiederbelebt.
+	 */
+	private static boolean cancelledSource(ConflictInput input, String mineId, Sibling source) {
+		String saveId = input.mine().saveId();
+		if (saveId == null || source == null || source.head() == null || !source.snapshot().deleted()) {
+			return false;
+		}
+		return source.saveIds().contains(saveId) && !saveId.equals(source.head().saveId())
+				&& livingCopies(input, mineId).findAny().isEmpty();
 	}
 
 	/** Die Buchungs-ID einer Version mit Inhalt; {@code null} ohne Version, bei einer Löschung oder ohne ID. */

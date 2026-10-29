@@ -523,6 +523,79 @@ class BookingPolicyTest {
 		assertEquals(myDeletion.id(), note.dropped());
 	}
 
+	/** Die Einheit {@code _m} mit ihrem Stand als Kette bis {@code current} und den Speichervorgängen in ihrem Ordner. */
+	private static Sibling unassignedWith(UnitKey unit, Version current, String... saveIds) {
+		return new Sibling(new UnitSnapshot(unit, current.id(), Status.OK, current.deleted(), current.payload()),
+				ChainStep.of(current), Set.of(saveIds));
+	}
+
+	/**
+	 * R31a: Meine weist m von {@code _m} dem Sitz s1 zu (save-a); ein anderer Rechner storniert m (löscht {@code _m}) und
+	 * verkauft t auf s1 (save-b). Storno gewinnt in beiden Reihenfolgen: m lebt nirgends, {@code _m} wird nicht
+	 * wiederbelebt, s1 trägt t; Meine bekommt genau einen Vermerk DELETE_WINS (auf s1), keinen Doppelverkauf.
+	 */
+	@Test
+	void cancellationWinsAgainstALostAssignmentFromUnassignedInEitherOrder() {
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		Version base = version(THIRD, "save-0", withoutPlace("m", b -> {
+		}));
+		Version myDeletion = deletion(OWN, "save-a");
+		Version myS1 = version(OWN, "save-a", booking("m", "s1", b -> b.setComment("Fenster")));
+		Version theirDeletion = deletion(OTHER, "save-b");
+		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
+
+		// s1 zuerst: _m ist fremd gelöscht, die eigene Löschung dort (save-a) ist verloren
+		Resolution s1First = POLICY.resolve(input(S1, null, myS1, theirS1,
+				Map.of(unassigned, unassignedWith(unassigned, theirDeletion, "save-0", "save-a", "save-b")), theirS1));
+		assertCancellationWins(s1First, theirS1, myS1);
+		Version s1Merge = version(OWN, "resolver-1", theirS1.payload());
+		Resolution mThen = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
+				Map.of(S1, strandedTarget(S1, s1Merge, myS1)), theirDeletion));
+		assertTrue(mThen.deleted());
+		assertNull(mThen.note(), "ein Vermerk für m genügt");
+		assertTrue(mThen.extra().isEmpty());
+
+		// _m zuerst: die Löschung bleibt ohne Vermerk; danach s1 wie oben
+		Resolution mFirst = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
+				Map.of(S1, strandedTarget(S1, theirS1, myS1)), theirDeletion));
+		assertTrue(mFirst.deleted());
+		assertNull(mFirst.note());
+		assertTrue(mFirst.extra().isEmpty());
+		Version mMerge = deletion(OWN, "resolver-2");
+		Resolution s1Then = POLICY.resolve(input(S1, null, myS1, theirS1,
+				Map.of(unassigned, unassignedWith(unassigned, mMerge, "save-0", "save-a", "save-b", "resolver-2")),
+				theirS1));
+		assertCancellationWins(s1Then, theirS1, myS1);
+	}
+
+	private static void assertCancellationWins(Resolution resolution, Version theirS1, Version myS1) {
+		assertFalse(resolution.deleted());
+		assertEquals(theirS1.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), "_m wird nicht wiederbelebt");
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.DELETE_WINS, note.kind());
+		assertEquals(OWN, note.affected());
+		assertEquals(party(theirS1), note.other());
+		assertEquals(myS1.id(), note.dropped(), "die eigene Buchung, zum Wiederherstellen");
+		assertNull(note.moved());
+	}
+
+	@Test
+	void ownEarlierAssignmentFromUnassignedStillRevivesOnADoubleSale() {
+		// R21: _m wurde früher in einem anderen Speichervorgang gelöscht (zugewiesen); kein Storno, _m baut auf der Löschung auf
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		Version earlierDeletion = deletion(OWN, "save-early");
+		Version myS1 = version(OWN, "save-a", booking("m", "s1"));
+		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
+
+		Resolution resolution = POLICY.resolve(input(S1, null, myS1, theirS1,
+				Map.of(unassigned, unassignedWith(unassigned, earlierDeletion, "save-0", "save-early")), theirS1));
+
+		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
+		assertEquals(List.of(unassigned), resolution.extra().stream().map(Change::unit).toList());
+		assertEquals(List.of(earlierDeletion.id()), resolution.extra().get(0).parents());
+	}
+
 	@Test
 	void cancellationOfUnassignedBookingStillWinsWithoutStrandedMove() {
 		// ohne verlorenes Umzugsziel bleibt es eine Stornierung von _m: Löschung gewinnt

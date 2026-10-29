@@ -533,13 +533,18 @@ final class ConflictResolver {
 	/**
 	 * Die anderen Buchungs-Einheiten derselben Vorstellung als Kopien. Trägt eine davon die Buchung der Basis (gleiche
 	 * Buchungs-ID, nicht gelöscht), bekommt sie die Speichervorgänge aller lesbaren Versionen in ihrem Ordner: Daran erkennt
-	 * die Strategie ein Verschieben, auch wenn die Kopie seitdem geändert wurde oder noch aussteht. Ist "Meine" eine
+	 * die Strategie ein Verschieben, auch wenn die Kopie seitdem geändert wurde oder noch aussteht. Dasselbe bekommt die
+	 * Einheit {@code _<ID>} der Buchung von "Meine", auch gelöscht: Daran erkennt die Strategie, dass "Meine" von dort
+	 * hierher zugewiesen wurde (Ruling R31a). Ist "Meine" eine
 	 * Löschung, bekommt eine Einheit, die die Buchung nicht trägt, das verlorene Ziel eines Umzugs aus dem Speichervorgang
 	 * von "Meine" ({@link ConflictInput.Sibling#lostMove()}). Dateien werden nur für die Träger (meist keiner oder einer)
 	 * und für Einheiten mit eigenen Versionen außerhalb ihrer Kette gelesen (laut Index; meist keine).
 	 */
 	private Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey unit, Version base, Version mine) throws IOException {
 		String bookingId = base == null || base.deleted() ? null : bookingIdOf(base.payload());
+		String mineId = mine.deleted() ? null : bookingIdOf(mine.payload());
+		UnitKey ownUnassigned = mineId == null ? null
+				: UnitKey.unassignedBooking(unit.eventId(), unit.presentationId(), mineId);
 		Map<UnitKey, ConflictInput.Sibling> fromIndex = host.siblings(unit);
 		Set<UnitKey> withOwnBeside = bookingId != null && mine.deleted() && mine.saveId() != null
 				? host.withOwnVersionsBesideChain(fromIndex.keySet())
@@ -552,7 +557,8 @@ final class ConflictResolver {
 					s.payload() == null ? null : s.payload().deepCopy());
 			boolean carriesBooking = bookingId != null && s.version() != null && !s.deleted()
 					&& bookingId.equals(bookingIdOf(s.payload()));
-			Set<String> saveIds = carriesBooking ? saveIdsOf(entry.getKey()) : Set.of();
+			Set<String> saveIds = carriesBooking || entry.getKey().equals(ownUnassigned) ? saveIdsOf(entry.getKey())
+					: Set.of();
 			Version lostMove = !carriesBooking && withOwnBeside.contains(entry.getKey())
 					? lostMoveIn(entry.getKey(), bookingId, mine.saveId())
 					: null;

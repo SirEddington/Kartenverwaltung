@@ -39,8 +39,10 @@ public record ConflictInput(UnitKey unit, Version base, Version mine, Version th
 	 * @param head     das letzte Glied ihrer gültigen Kette; {@code null}, wenn sie keine hat
 	 * @param saveIds  die Speichervorgänge aller lesbaren Versionen in ihrem Ordner (Kette, aufgegangene, eigene
 	 *                 ausstehende und verlorene); gefüllt nur, wenn ihr Stand die Buchung der Basis trägt (gleiche
-	 *                 Buchungs-ID, nicht gelöscht), sonst leer. Daran erkennt die Strategie, ob ein Speichervorgang die
-	 *                 Buchung hierher verschoben hat, auch wenn die Kopie seitdem geändert wurde oder noch aussteht
+	 *                 Buchungs-ID, nicht gelöscht), und für die Einheit {@code _<ID>} der Buchung von "Meine" (auch
+	 *                 gelöscht), sonst leer. Daran erkennt die Strategie, ob ein Speichervorgang die Buchung hierher
+	 *                 verschoben hat, auch wenn die Kopie seitdem geändert wurde oder noch aussteht, und ob "Meine" aus
+	 *                 "ohne Platz" zugewiesen wurde
 	 * @param lostMove das Ziel eines Umzugs, der hier nicht gilt (Ruling R31): die jüngste lesbare Version in ihrem Ordner
 	 *                 aus dem Speichervorgang von "Meine", die die Buchung der Basis trägt, während ihr Stand sie nicht
 	 *                 trägt (die Version hat verloren oder ist in einer Zusammenführung aufgegangen). Gefüllt nur, wenn
