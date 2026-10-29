@@ -236,11 +236,6 @@ class ForeignBacklogTest {
 		ForeignResult result = backlog.run(List.of(unitA, unitB, E1), unit -> unit.type() == UnitType.HALL, sync,
 				new ForeignBacklog.Step() {
 					@Override
-					public String ownerOf(UnitKey unit) {
-						return unit.hallId();
-					}
-
-					@Override
 					public void apply(List<UnitSnapshot> ofOwner, Map<UnitKey, List<ChainStep>> chains,
 							Map<UnitKey, Set<VersionId>> absorbed, List<String> warnings) {
 						calls.add("apply " + ofOwner.get(0).unit().hallId());

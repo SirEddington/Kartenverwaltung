@@ -400,11 +400,6 @@ public class StoreHallRepository implements HallRepository {
 		}
 		return backlog.run(units, unit -> unit.type() == UnitType.HALL, sync, new ForeignBacklog.Step() {
 			@Override
-			public String ownerOf(UnitKey unit) {
-				return unit.hallId();
-			}
-
-			@Override
 			public void apply(List<UnitSnapshot> ofHall, Map<UnitKey, List<ChainStep>> chains,
 					Map<UnitKey, Set<VersionId>> absorbed, List<String> warnings) {
 				// je Halle eine Einheit

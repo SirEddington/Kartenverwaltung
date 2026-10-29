@@ -615,11 +615,6 @@ public class StoreEventRepository implements EventRepository {
 		}
 		return backlog.run(units, unit -> unit.type() != UnitType.HALL, sync, new ForeignBacklog.Step() {
 			@Override
-			public String ownerOf(UnitKey unit) {
-				return unit.eventId();
-			}
-
-			@Override
 			public void apply(List<UnitSnapshot> ofEvent, Map<UnitKey, List<ChainStep>> chains,
 					Map<UnitKey, Set<VersionId>> absorbed, List<String> warnings) {
 				applyForeign(ofEvent, chains, absorbed, warnings);

@@ -130,14 +130,13 @@ final class ForeignBacklog {
 	}
 
 	private static boolean ownedBy(String ownerId, UnitKey unit) {
-		return ownerId.equals(unit.eventId()) || ownerId.equals(unit.hallId());
+		return ownerId.equals(unit.ownerId());
 	}
 
-	/** Was ein Repository im Rahmen {@link #run} für einen Besitzer (Event bzw. Halle) tut. */
+	/**
+	 * Was ein Repository im Rahmen {@link #run} für einen Besitzer (Event bzw. Halle, {@link UnitKey#ownerId()}) tut.
+	 */
 	interface Step {
-
-		/** Der Besitzer der Einheit: die ID ihres Events bzw. ihrer Halle. */
-		String ownerOf(UnitKey unit);
 
 		/**
 		 * Entscheidet und arbeitet die Stände eines Besitzers ein.
@@ -180,7 +179,7 @@ final class ForeignBacklog {
 			for (UnitKey unit : wanted) {
 				UnitSnapshot snapshot = current.get(unit);
 				if (snapshot != null) {
-					byOwner.computeIfAbsent(step.ownerOf(unit), k -> new ArrayList<>()).add(snapshot);
+					byOwner.computeIfAbsent(unit.ownerId(), k -> new ArrayList<>()).add(snapshot);
 				}
 			}
 			try {
@@ -191,7 +190,7 @@ final class ForeignBacklog {
 					try {
 						step.apply(ofOwner, chains, absorbed, warnings);
 					} catch (RuntimeException e) {
-						step.failed(step.ownerOf(ofOwner.get(0).unit()), ofOwner, e, warnings);
+						step.failed(ofOwner.get(0).unit().ownerId(), ofOwner, e, warnings);
 					}
 				}
 			} catch (IOException e) {
