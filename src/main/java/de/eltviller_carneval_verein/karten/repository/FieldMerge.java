@@ -61,13 +61,7 @@ final class FieldMerge {
 				continue; // beide gleich, oder nur "Deren" hat geändert: "Deren" gilt, und die Kopie hat sie schon
 			}
 			if (same(theirs, before, fields)) {
-				for (String field : fields) {
-					if (mine.has(field)) {
-						merged.set(field, mine.get(field).deepCopy());
-					} else {
-						merged.remove(field);
-					}
-				}
+				copyFields(merged, mine, fields);
 			} else {
 				conflicts.add(new FieldConflict(group.getKey(), slice(mine, fields), slice(theirs, fields)));
 			}
@@ -169,6 +163,21 @@ final class FieldMerge {
 	private static JsonNode valueOf(ObjectNode node, String field) {
 		JsonNode value = node.get(field);
 		return value == null || value.isNull() ? null : value;
+	}
+
+	/**
+	 * Übernimmt die Felder aus {@code from} als Kopie nach {@code to}; ein Feld, das {@code from} fehlt, entfällt in
+	 * {@code to}.
+	 */
+	static void copyFields(ObjectNode to, ObjectNode from, List<String> fields) {
+		for (String field : fields) {
+			JsonNode value = from.get(field);
+			if (value == null) {
+				to.remove(field);
+			} else {
+				to.set(field, value.deepCopy());
+			}
+		}
 	}
 
 	/** Die Felder der Gruppe, die der Stand enthält, als Kopie. */

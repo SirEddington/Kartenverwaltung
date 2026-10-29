@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.store.Change;
@@ -123,11 +122,8 @@ public final class BookingPolicy implements ConflictPolicy {
 			if (myCopy.unit().equals(theirCopy.unit())) {
 				return cancelled;
 			}
-			List<String> place = FieldGroups.booking().get(PLACE_GROUP);
-			FieldConflict conflict = new FieldConflict(PLACE_GROUP, FieldMerge.slice(myCopy.payload(), place),
-					FieldMerge.slice(theirCopy.payload(), place));
-			ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), Party.of(theirDeletion), List.of(conflict), null,
-					myCopy.version());
+			ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), Party.of(theirDeletion),
+					List.of(placeConflict(myCopy.payload(), theirCopy.payload())), null, myCopy.version());
 			return new Resolution(theirs.payload(), true, List.of(deletionOf(myCopy)), note);
 		}
 		if (myCopy != null) {
@@ -141,11 +137,8 @@ public final class BookingPolicy implements ConflictPolicy {
 		Version myLostCopy = foreignCopy == null || !isOwnUnassigned(input.unit(), bookingId) ? null
 				: strandedTarget(input, bookingId);
 		if (myLostCopy != null) {
-			List<String> place = FieldGroups.booking().get(PLACE_GROUP);
-			FieldConflict conflict = new FieldConflict(PLACE_GROUP, FieldMerge.slice(myLostCopy.payload(), place),
-					FieldMerge.slice(foreignCopy.payload(), place));
-			ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), Party.of(theirDeletion), List.of(conflict), null,
-					myLostCopy.id());
+			ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), Party.of(theirDeletion),
+					List.of(placeConflict(myLostCopy.payload(), foreignCopy.payload())), null, myLostCopy.id());
 			return new Resolution(theirs.payload(), true, List.of(), note);
 		}
 		if (theirCopy != null) {
@@ -204,6 +197,12 @@ public final class BookingPolicy implements ConflictPolicy {
 				.orElse(null);
 	}
 
+	/** Der Konflikt der Gruppe "Platz" zwischen zwei Fassungen der Buchung (je die Felder der Gruppe als Kopie). */
+	private static FieldConflict placeConflict(ObjectNode mine, ObjectNode theirs) {
+		List<String> place = FieldGroups.booking().get(PLACE_GROUP);
+		return new FieldConflict(PLACE_GROUP, FieldMerge.slice(mine, place), FieldMerge.slice(theirs, place));
+	}
+
 	/** Die Löschung einer Geschwister-Einheit auf ihrem aktuellen Stand. */
 	private static Change deletionOf(UnitSnapshot sibling) {
 		return new Change(sibling.unit(), List.of(sibling.version()), null, true);
@@ -227,14 +226,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	private static Resolution transfer(ConflictInput input, ObjectNode payload, boolean deleted, UnitSnapshot copy,
 			ObjectNode change, String affected, Party other, VersionId dropped) {
 		ObjectNode side = change.deepCopy();
-		for (String field : FieldGroups.booking().get(PLACE_GROUP)) {
-			JsonNode value = copy.payload().get(field);
-			if (value == null) {
-				side.remove(field);
-			} else {
-				side.set(field, value.deepCopy());
-			}
-		}
+		FieldMerge.copyFields(side, copy.payload(), FieldGroups.booking().get(PLACE_GROUP));
 		Version base = input.base();
 		FieldMerge.Result result = FieldMerge.merge(base == null || base.deleted() ? null : base.payload(), side,
 				copy.payload(), FieldGroups.booking());
@@ -342,14 +334,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		}
 		ObjectNode basePayload = input.base().payload();
 		ObjectNode side = target.payload().deepCopy();
-		for (String field : FieldGroups.booking().get(PLACE_GROUP)) {
-			JsonNode value = basePayload.get(field);
-			if (value == null) {
-				side.remove(field);
-			} else {
-				side.set(field, value.deepCopy());
-			}
-		}
+		FieldMerge.copyFields(side, basePayload, FieldGroups.booking().get(PLACE_GROUP));
 		FieldMerge.Result result = FieldMerge.merge(basePayload, side, theirs.payload(), FieldGroups.booking());
 		if (result.conflicts().isEmpty()) {
 			return new Resolution(result.merged(), false, List.of(), null);
@@ -557,11 +542,8 @@ public final class BookingPolicy implements ConflictPolicy {
 				// R31b: Den Vermerk bekommt die eigene Auflösung von _<ID> (bothDeleted)
 				return new Resolution(theirs.payload(), false, List.of(), null);
 			}
-			List<String> place = FieldGroups.booking().get(PLACE_GROUP);
-			FieldConflict conflict = new FieldConflict(PLACE_GROUP, FieldMerge.slice(mine.payload(), place),
-					FieldMerge.slice(copy.payload(), place));
-			ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), other, List.of(conflict), copy.unit(),
-					mine.id());
+			ConflictNote note = ConflictNote.ofFields(input.ownMachineId(), other,
+					List.of(placeConflict(mine.payload(), copy.payload())), copy.unit(), mine.id());
 			List<Change> revived = movedThereAndUnresolved(input, existing, copy)
 					? List.of(withoutPlace(mine, moved, current))
 					: List.of();
