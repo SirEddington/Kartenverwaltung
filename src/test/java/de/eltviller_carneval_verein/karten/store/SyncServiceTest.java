@@ -803,11 +803,12 @@ class SyncServiceTest {
 		a.service.tick();
 		assertEquals(SyncService.LATE_DEFEAT_BUDGET, sharedRootClaimReads(a) - reads);
 
-		// der 10-Minuten-Abgleich läuft vorher (er vergleicht eigene Ansprüche auf beiden Seiten selbst, hier gibt es keine)
+		// der 10-Minuten-Abgleich läuft vorher und vergleicht die eigenen Ansprüche auf beiden Seiten selbst: alle 200, denn
+		// der erste Abgleich hat sie hochgeladen (M4); das Budget der späten Niederlagen bleibt davon unberührt
 		clock.advance(Duration.ofMinutes(10));
 		reads = sharedRootClaimReads(a);
 		a.service.tick();
-		assertEquals(SyncService.LATE_DEFEAT_BUDGET, sharedRootClaimReads(a) - reads);
+		assertEquals(count + SyncService.LATE_DEFEAT_BUDGET, sharedRootClaimReads(a) - reads);
 
 		// nach Ablauf der Fenster wird jeder noch einmal geprüft, auch hinter dem Rückstand
 		clock.advance(Duration.ofMinutes(6));

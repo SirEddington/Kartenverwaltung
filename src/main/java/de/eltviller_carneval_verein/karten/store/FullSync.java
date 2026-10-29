@@ -6,6 +6,8 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -13,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Consumer;
 
 /**
@@ -20,7 +23,8 @@ import java.util.function.Consumer;
  * Änderungslisten verpasst haben. Er kopiert nur fehlende Dateien und verändert oder löscht nie etwas; die einzige
  * Ausnahme ist ein lokaler Anspruch, der beim Hochladen gegen einen anderen im gemeinsamen Ordner verliert (er bleibt
  * unter neuem Namen liegen). Vorhandene Dateien werden nicht verglichen. Was nicht wie eine Versions- oder
- * Anspruchsdatei heißt, wird übergangen ({@link VersionStore#allDataFiles()}).
+ * Anspruchsdatei heißt, wird übergangen ({@link VersionStore#unitDataFiles}). Er arbeitet Einheit für Einheit
+ * ({@link #syncUnits}).
  */
 public final class FullSync {
 
@@ -41,19 +45,27 @@ public final class FullSync {
 	 * Ordner liegen, werden verglichen; nennt der gemeinsame eine andere Version, steht der Platz in
 	 * {@link FullSyncResult#contested()} (nichts wird ersetzt). Das fängt späte Niederlagen, die keine Änderungsliste
 	 * aufgedeckt hat; Kosten: zwei Lesezugriffe je eigenem Anspruch auf beiden Seiten.</li>
-	 * <li>Nur mit {@code uploadLocalClaims}: Anspruchsdateien, die im gemeinsamen Ordner fehlen, werden dort angelegt.
-	 * Liegt dort schon ein Anspruch auf eine andere Version, gewinnt er: Der lokale wird unter
+	 * <li>Mit {@code uploadLocalClaims}: Anspruchsdateien, die auf beiden Seiten liegen und verschiedene Versionen nennen,
+	 * werden geklärt wie beim Hochladen (der gemeinsame gewinnt, siehe unten).</li>
+	 * <li>Anspruchsdateien, die im gemeinsamen Ordner fehlen, werden dort angelegt, {@code root} zuerst: mit
+	 * {@code uploadLocalClaims} alle, ohne nur die eigenen (der gemeinsame Ordner wurde geleert oder zurückgespielt, oder
+	 * der Anspruch entstand ohne Verbindung) und nur, wenn der Platz der Einheit nicht gerade umstritten ist. Nicht
+	 * hochgeladen wird ein Anspruch, der auf einer verlorenen Version aufbaut oder eine nennt (ohne
+	 * {@code uploadLocalClaims} auch eine, die der lokale Stand schon als verloren zeigt). Liegt im gemeinsamen Ordner
+	 * inzwischen ein Anspruch auf eine andere Version, gewinnt er: Der lokale wird unter
 	 * {@code <Name>.json.verdraengt-<yyyy-MM-dd_HH-mm-ss>} beiseitegelegt, durch den gemeinsamen ersetzt, und die
 	 * eigenen Versionen darauf werden als verloren gemeldet. Ein Anspruch auf dieselbe Version mit anderen Bytes
 	 * (etwa anderer Zeitpunkt) ist kein Widerspruch.</li>
 	 * </ol>
+	 * Die Schritte laufen je Einheit, die Einheiten beider Bestände nacheinander in der Reihenfolge von
+	 * {@link VersionStore#allUnits()}.
 	 * Unlesbare Anspruchsdateien auf beiden Seiten werden übergangen (die Heilung ist Sache eines späteren Schritts).
 	 *
 	 * @param local             der lokale Bestand
 	 * @param shared            der gemeinsame Bestand
-	 * @param uploadLocalClaims ob lokale Anspruchsdateien auch in den gemeinsamen Ordner gelegt werden (Verbinden mit
-	 *                          Mitnehmen); sonst fließen Ansprüche nur nach innen
-	 * @param ownMachineId      die ID des eigenen Rechners (für die Ermittlung der verlorenen Versionen)
+	 * @param uploadLocalClaims ob alle lokalen Anspruchsdateien in den gemeinsamen Ordner gelegt werden (Verbinden mit
+	 *                          Mitnehmen); sonst fließen nach außen nur eigene Ansprüche, die dort fehlen
+	 * @param ownMachineId      die ID des eigenen Rechners (für eigene Ansprüche und die verlorenen Versionen)
 	 * @param files             die Dateischicht, über die ein verdrängter lokaler Anspruch ersetzt wird
 	 * @param clock             die Uhr für den Zeitstempel im Namen verdrängter Ansprüche
 	 */
@@ -72,7 +84,64 @@ public final class FullSync {
 	public static FullSyncResult run(VersionStore local, VersionStore shared, boolean uploadLocalClaims,
 			String ownMachineId, FileLayer files, Clock clock, Consumer<FullSyncResult.UploadedClaim> uploaded)
 			throws IOException {
-		return new Run(local, shared, ownMachineId, files, clock, uploaded).execute(uploadLocalClaims);
+		return syncUnits(local, shared, unitsOfBoth(local, shared), uploadLocalClaims, ownMachineId, files, clock,
+				uploaded);
+	}
+
+	/**
+	 * Gleicht die genannten Einheiten ab, eine nach der anderen in der gegebenen Reihenfolge, je Einheit in den Schritten
+	 * von {@link #run(VersionStore, VersionStore, boolean, String, FileLayer, Clock)}. Betrachtet werden nur die Dateien
+	 * im Ordner der Einheit und in ihrem {@code claims/} ({@link VersionStore#unitDataFiles}), nicht die ihrer
+	 * Unterordner. Eine Einheit, die dieser Aufruf als umstritten meldet, lädt keinen eigenen Anspruch hoch: Die Klärung
+	 * ist Sache des Aufrufers, und der nächste Lauf lädt hoch, was danach noch gilt.
+	 *
+	 * @param units    die Einheiten; ob es sie auf einer Seite gibt, ist gleich
+	 * @param uploaded erfährt jeden hochgeladenen Anspruch sofort, auch wenn der Abgleich danach abbricht
+	 */
+	public static FullSyncResult syncUnits(VersionStore local, VersionStore shared, Collection<UnitKey> units,
+			boolean uploadLocalClaims, String ownMachineId, FileLayer files, Clock clock,
+			Consumer<FullSyncResult.UploadedClaim> uploaded) throws IOException {
+		Run run = new Run(local, shared, ownMachineId, files, clock, uploaded);
+		for (UnitKey unit : units) {
+			run.syncUnit(unit, uploadLocalClaims);
+		}
+		return run.result();
+	}
+
+	/**
+	 * Die Einheiten, die es in mindestens einem der beiden Bestände gibt, in der Reihenfolge von
+	 * {@link VersionStore#allUnits()}: jedes Event, gefolgt von seinen Auftritten mit deren Buchungen, dann die Hallen;
+	 * auf jeder Ebene nach Ordnernamen sortiert.
+	 */
+	private static List<UnitKey> unitsOfBoth(VersionStore local, VersionStore shared) throws IOException {
+		List<UnitKey> units = new ArrayList<>();
+		for (String eventId : union(local.eventIds(), shared.eventIds())) {
+			UnitKey event = UnitKey.event(eventId);
+			units.add(event);
+			for (UnitKey presentation : childrenOfBoth(local, shared, event, VersionStore.PRESENTATIONS)) {
+				units.add(presentation);
+				units.addAll(childrenOfBoth(local, shared, presentation, VersionStore.BOOKINGS));
+			}
+		}
+		for (String hallId : union(local.hallIds(), shared.hallIds())) {
+			units.add(UnitKey.hall(hallId));
+		}
+		return units;
+	}
+
+	private static List<UnitKey> childrenOfBoth(VersionStore local, VersionStore shared, UnitKey parent, String folder)
+			throws IOException {
+		List<UnitKey> children = new ArrayList<>();
+		for (String name : union(local.childNames(parent, folder), shared.childNames(parent, folder))) {
+			children.add(VersionStore.childUnit(parent, folder, name).orElseThrow());
+		}
+		return children;
+	}
+
+	private static Set<String> union(List<String> first, List<String> second) {
+		Set<String> names = new TreeSet<>(first);
+		names.addAll(second);
+		return names;
 	}
 
 	/**
@@ -125,34 +194,16 @@ public final class FullSync {
 	}
 
 	/**
-	 * Erkennt Art und Einheit einer Datei aus {@link VersionStore#allDataFiles()}. Die Versionsdatei wird zuerst
-	 * geprüft: Eine Einheit darf {@code claims} heißen (etwa eine Buchung auf dem Sitz {@code claims}), und ihr Ordner
-	 * ist dann nicht der Anspruchsordner einer Einheit, weil dessen Elternpfad keine Einheit ist.
+	 * Die Dateien aus {@link VersionStore#unitDataFiles} der Einheit mit ihrer Art: Was unter {@code claims/} der Einheit
+	 * liegt, ist eine Anspruchsdatei, alles andere eine Versionsdatei. Eine Einheit darf {@code claims} heißen (etwa eine
+	 * Buchung auf dem Sitz {@code claims}); weil nur die Dateien dieser einen Einheit kommen, ist das eindeutig.
 	 */
-	private static Optional<DataPath> classify(String path) {
-		int slash = path.lastIndexOf('/');
-		if (slash < 0 || !path.endsWith(JSON)) {
-			return Optional.empty();
-		}
-		String parent = path.substring(0, slash);
-		String name = path.substring(slash + 1, path.length() - JSON.length());
-		Optional<UnitKey> unit = UnitKey.parse(parent);
-		if (unit.isPresent() && VersionId.isValid(name)) {
-			return Optional.of(new DataPath(path, unit.get(), name, false));
-		}
-		if (parent.endsWith(CLAIMS) && (ROOT.equals(name) || VersionId.isValid(name))) {
-			unit = UnitKey.parse(parent.substring(0, parent.length() - CLAIMS.length()));
-			if (unit.isPresent()) {
-				return Optional.of(new DataPath(path, unit.get(), name, true));
-			}
-		}
-		return Optional.empty();
-	}
-
-	private static List<DataPath> classifyAll(List<String> paths) {
+	private static List<DataPath> dataPaths(UnitKey unit, List<String> paths) {
+		String claimsPrefix = unit.relativePath() + CLAIMS + "/";
 		List<DataPath> result = new ArrayList<>();
 		for (String path : paths) {
-			classify(path).ifPresent(result::add);
+			String name = path.substring(path.lastIndexOf('/') + 1, path.length() - JSON.length());
+			result.add(new DataPath(path, unit, name, path.startsWith(claimsPrefix)));
 		}
 		return result;
 	}
@@ -180,8 +231,13 @@ public final class FullSync {
 
 		private final Set<UnitKey> changed = new LinkedHashSet<>();
 		private final List<LostVersion> lost = new ArrayList<>();
-		/** Je Einheit die Versions-IDs der als verloren gemeldeten eigenen Versionen. */
+		/**
+		 * Je Einheit die Versions-IDs der eigenen Versionen, die dieser Lauf als verloren gemeldet hat oder (ohne Mitnehmen)
+		 * der lokale Stand schon als verloren zeigt.
+		 */
 		private final Map<UnitKey, Set<String>> lostIds = new HashMap<>();
+		/** Die Einheiten, deren lokal schon verlorene Versionen in {@link #lostIds} stehen. */
+		private final Set<UnitKey> lostChecked = new HashSet<>();
 		private final List<FullSyncResult.UploadedClaim> uploaded = new ArrayList<>();
 		private final List<FeedPoll.Contested> contested = new ArrayList<>();
 		private final Consumer<FullSyncResult.UploadedClaim> onUpload;
@@ -196,15 +252,16 @@ public final class FullSync {
 			this.onUpload = onUpload;
 		}
 
-		FullSyncResult execute(boolean uploadLocalClaims) throws IOException {
-			List<DataPath> localFiles = classifyAll(local.allDataFiles());
-			List<DataPath> sharedFiles = classifyAll(shared.allDataFiles());
+		/** Gleicht eine Einheit ab (siehe {@link FullSync#syncUnits}). */
+		void syncUnit(UnitKey unit, boolean uploadLocalClaims) throws IOException {
+			List<DataPath> localFiles = dataPaths(unit, local.unitDataFiles(unit));
+			List<DataPath> sharedFiles = dataPaths(unit, shared.unitDataFiles(unit));
 			Set<String> localPaths = paths(localFiles);
 			Set<String> sharedPaths = paths(sharedFiles);
 
 			for (DataPath file : sharedFiles) {
 				if (!file.claim() && !localPaths.contains(file.path()) && copy(shared, local, file.path())) {
-					changed.add(file.unit());
+					changed.add(unit);
 				}
 			}
 			for (DataPath file : localFiles) {
@@ -217,27 +274,41 @@ public final class FullSync {
 					copyClaimInward(file);
 				}
 			}
+			List<DataPath> onBothSides = new ArrayList<>();
+			List<DataPath> missingInShared = new ArrayList<>();
+			for (DataPath file : localFiles) {
+				if (file.claim()) {
+					(sharedPaths.contains(file.path()) ? onBothSides : missingInShared).add(file);
+				}
+			}
+			// root zuerst: Verliert er beim Hochladen, steht seine Strecke fest, bevor die Ansprüche dahinter an der Reihe sind
+			missingInShared.sort(Comparator.comparing(file -> !ROOT.equals(file.name())));
 			if (!uploadLocalClaims) {
 				// Sicherheitsnetz für die späte Niederlage: eigene Ansprüche, die auf beiden Seiten liegen, vergleichen
-				for (DataPath file : localFiles) {
-					if (file.claim() && sharedPaths.contains(file.path())) {
-						checkOwnClaim(file);
-					}
+				int contestedBefore = contested.size();
+				for (DataPath file : onBothSides) {
+					checkOwnClaim(file);
 				}
-			}
-			if (uploadLocalClaims) {
+				if (contested.size() > contestedBefore) {
+					// umstritten: Die Klärung macht der Aufrufer, der nächste Lauf lädt hoch, was danach noch gilt
+					return;
+				}
+				// fehlen eigene Ansprüche im gemeinsamen Ordner (geleert, zurückgespielt, Einzelbetrieb), wieder anlegen
+				for (DataPath file : missingInShared) {
+					uploadClaim(file, true);
+				}
+			} else {
 				// zuerst die Ansprüche, die auf beiden Seiten liegen: Ihre Niederlagen bestimmen, was danach nicht mehr hochgeladen wird
-				for (DataPath file : localFiles) {
-					if (file.claim() && sharedPaths.contains(file.path())) {
-						compareBoth(file);
-					}
+				for (DataPath file : onBothSides) {
+					compareBoth(file);
 				}
-				for (DataPath file : localFiles) {
-					if (file.claim() && !sharedPaths.contains(file.path())) {
-						uploadClaim(file);
-					}
+				for (DataPath file : missingInShared) {
+					uploadClaim(file, false);
 				}
 			}
+		}
+
+		FullSyncResult result() {
 			return new FullSyncResult(changed, lost, uploaded, contested);
 		}
 
@@ -286,11 +357,21 @@ public final class FullSync {
 			}
 		}
 
-		private void uploadClaim(DataPath file) throws IOException {
+		/**
+		 * Legt den lokalen Anspruch im gemeinsamen Ordner an, außer er baut auf einer verlorenen Version auf. Liegt dort
+		 * inzwischen ein Anspruch auf eine andere Version, gewinnt dieser ({@link #settle}).
+		 *
+		 * @param ownOnly nur einen eigenen Anspruch (Rechner = eigene ID) hochladen; dann zählen als verloren auch die
+		 *                Strecken, die der lokale Stand schon als verloren zeigt
+		 */
+		private void uploadClaim(DataPath file, boolean ownOnly) throws IOException {
 			Optional<byte[]> localBytes = local.readRelative(file.path());
 			Claim mine = parseClaim(localBytes);
-			if (mine == null) {
+			if (mine == null || ownOnly && !ownMachineId.equals(mine.machine())) {
 				return;
+			}
+			if (ownOnly) {
+				noteLocallyLost(file.unit());
 			}
 			Set<String> lostHere = lostIds.getOrDefault(file.unit(), Set.of());
 			if (lostHere.contains(file.name()) || lostHere.contains(mine.version().value())) {
@@ -308,6 +389,25 @@ public final class FullSync {
 			Claim theirs = parseClaim(sharedBytes);
 			if (theirs != null && !mine.version().equals(theirs.version())) {
 				settle(file, mine, sharedBytes.get(), theirs);
+			}
+		}
+
+		/**
+		 * Trägt einmal je Einheit die eigenen Versionen in {@link #lostIds} ein, die der lokale Stand schon als verloren
+		 * zeigt: Ohne Mitnehmen kann eine frühere Niederlage lokal schon geklärt sein (der Anspruch ersetzt), ohne dass
+		 * dieser Lauf sie findet; die Ansprüche dahinter hätten in der gültigen Kette keinen Platz. Gemeldet werden diese
+		 * Versionen hier nicht, sie sind schon bekannt.
+		 */
+		private void noteLocallyLost(UnitKey unit) throws IOException {
+			if (!lostChecked.add(unit)) {
+				return;
+			}
+			UnitState state = ChainResolver.resolve(local.readUnit(unit), ownMachineId);
+			for (List<VersionId> stretch : state.lost()) {
+				Set<String> ids = lostIds.computeIfAbsent(unit, u -> new HashSet<>());
+				for (VersionId id : stretch) {
+					ids.add(id.value());
+				}
 			}
 		}
 

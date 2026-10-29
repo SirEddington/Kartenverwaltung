@@ -27,8 +27,10 @@ public final class VersionStore {
 	private static final String ROOT = "root";
 	private static final String EVENTS = "events";
 	private static final String HALLS = "halls";
-	private static final String PRESENTATIONS = "presentations";
-	private static final String BOOKINGS = "bookings";
+	/** Der Ordner der Auftritte unter einem Event (siehe {@link #childNames}). */
+	static final String PRESENTATIONS = "presentations";
+	/** Der Ordner der Buchungen unter einem Auftritt (siehe {@link #childNames}). */
+	static final String BOOKINGS = "bookings";
 
 	private final Path dataRoot;
 	private final FileLayer files;
@@ -220,14 +222,33 @@ public final class VersionStore {
 	}
 
 	private List<UnitKey> childUnits(UnitKey parent, String folder) throws IOException {
-		Path childDir = unitDir(parent).resolve(folder);
 		List<UnitKey> children = new ArrayList<>();
-		for (String name : files.listNames(childDir)) {
-			if (files.isDirectory(childDir.resolve(name))) {
-				UnitKey.parse(parent.relativePath() + "/" + folder + "/" + name).ifPresent(children::add);
-			}
+		for (String name : childNames(parent, folder)) {
+			children.add(childUnit(parent, folder, name).orElseThrow());
 		}
 		return children;
+	}
+
+	/**
+	 * Die Namen der Unterordner von {@code <parent>/<folder>}, die eine Einheit bezeichnen (gültiger Name), sortiert;
+	 * leer, wenn der Ordner fehlt.
+	 *
+	 * @param folder {@code presentations} unter einem Event oder {@code bookings} unter einem Auftritt
+	 */
+	public List<String> childNames(UnitKey parent, String folder) throws IOException {
+		Path childDir = unitDir(parent).resolve(folder);
+		List<String> names = new ArrayList<>();
+		for (String name : files.listNames(childDir)) {
+			if (files.isDirectory(childDir.resolve(name)) && childUnit(parent, folder, name).isPresent()) {
+				names.add(name);
+			}
+		}
+		return names;
+	}
+
+	/** Die Einheit im Unterordner {@code <parent>/<folder>/<name>}; leer, wenn der Pfad keine Einheit bezeichnet. */
+	static Optional<UnitKey> childUnit(UnitKey parent, String folder, String name) {
+		return UnitKey.parse(parent.relativePath() + "/" + folder + "/" + name);
 	}
 
 	/** Alle Einheiten des Bestands: die aller Events, dann alle Hallen. */
@@ -250,17 +271,51 @@ public final class VersionStore {
 	public List<String> allDataFiles() throws IOException {
 		List<String> paths = new ArrayList<>();
 		for (UnitKey unit : allUnits()) {
-			Path unitDir = unitDir(unit);
-			String prefix = unit.relativePath() + "/";
-			for (VersionId id : versionIds(unitDir)) {
-				paths.add(prefix + id + JSON);
-			}
-			for (String name : claimNames(unitDir)) {
-				paths.add(prefix + CLAIMS + "/" + name + JSON);
-			}
+			paths.addAll(unitDataFiles(unit));
 		}
 		Collections.sort(paths);
 		return paths;
+	}
+
+	/**
+	 * Die Pfade der Versions- und Anspruchsdateien genau dieser Einheit (ohne die ihrer Unterordner, etwa der Auftritte
+	 * eines Events), relativ zu {@link #dataRoot()} und mit {@code /} getrennt, sortiert. Es gelten die Namensregeln von
+	 * {@link #allDataFiles()}; fehlt der Ordner, ist die Liste leer.
+	 */
+	public List<String> unitDataFiles(UnitKey unit) throws IOException {
+		Path unitDir = unitDir(unit);
+		String prefix = unit.relativePath() + "/";
+		List<String> paths = new ArrayList<>();
+		for (VersionId id : versionIds(unitDir)) {
+			paths.add(prefix + id + JSON);
+		}
+		for (String name : claimNames(unitDir)) {
+			paths.add(prefix + CLAIMS + "/" + name + JSON);
+		}
+		Collections.sort(paths);
+		return paths;
+	}
+
+	/**
+	 * Die Pfade der temporären Dateien dieser Schicht ({@code ~karv-*.tmp}, eigene wie fremde) im Ordner der Einheit und
+	 * in ihrem {@code claims/}, relativ zu {@link #dataRoot()} und mit {@code /} getrennt: zuerst die des Einheitenordners,
+	 * dann die unter {@code claims/}, je nach Namen sortiert. Unterordner der Einheit zählen nicht.
+	 */
+	public List<String> unitTempFiles(UnitKey unit) throws IOException {
+		Path unitDir = unitDir(unit);
+		String prefix = unit.relativePath() + "/";
+		List<String> paths = new ArrayList<>();
+		addTempNames(paths, unitDir, prefix);
+		addTempNames(paths, unitDir.resolve(CLAIMS), prefix + CLAIMS + "/");
+		return paths;
+	}
+
+	private void addTempNames(List<String> paths, Path dir, String prefix) throws IOException {
+		for (String name : files.listNamesWithTemps(dir)) {
+			if (name.startsWith(FileLayer.TEMP_PREFIX) && name.endsWith(FileLayer.TEMP_SUFFIX)) {
+				paths.add(prefix + name);
+			}
+		}
 	}
 
 	/**

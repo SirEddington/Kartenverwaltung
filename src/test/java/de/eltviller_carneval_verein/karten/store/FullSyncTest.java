@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,7 +18,10 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -122,7 +127,8 @@ class FullSyncTest {
 		Version foreign = version(OTHER, FOREIGN);
 		put(shared, E2, foreign);
 		byte[] sharedClaim = claim(shared, E2, foreign, AT);
-		Version mine = version(ME, V1);
+		// ein fremder lokaler Anspruch; eigene, die im gemeinsamen Ordner fehlen, lädt der Abgleich hoch (M4)
+		Version mine = version(OTHER, V1);
 		put(local, E1, mine);
 		claim(local, E1, mine, AT);
 
@@ -432,6 +438,234 @@ class FullSyncTest {
 		assertEquals(Set.of("events/e1/" + V1 + ".json"), sharedAdded);
 		assertEquals(Set.of(E2), result.changed());
 		assertTrue(result.lost().isEmpty());
+	}
+
+	@Test
+	void ownClaimMissingInSharedIsUploadedWithoutMerge() throws IOException {
+		// der gemeinsame Ordner wurde geleert: nur lokal liegen die eigenen Versionen und Ansprüche
+		Version mine = version(ME, V1);
+		put(local, E1, mine);
+		byte[] rootClaim = claim(local, E1, mine, AT);
+		Version second = version(ME, V2, V1);
+		put(local, E1, second);
+		byte[] secondClaim = claim(local, E1, second, AT);
+		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
+
+		FullSyncResult result = FullSync.run(local, shared, false, ME, files, CLOCK, seen::add);
+
+		assertArrayEquals(rootClaim, shared.readClaimBytes(E1, "root").orElseThrow());
+		assertArrayEquals(secondClaim, shared.readClaimBytes(E1, V1.value()).orElseThrow());
+		assertTrue(has(shared, "events/e1/" + V1 + ".json"));
+		assertTrue(has(shared, "events/e1/" + V2 + ".json"));
+		List<FullSyncResult.UploadedClaim> expected = List.of(new FullSyncResult.UploadedClaim(E1, "root", V1),
+				new FullSyncResult.UploadedClaim(E1, V1.value(), V2));
+		assertEquals(expected, result.uploaded());
+		assertEquals(expected, seen);
+		assertTrue(result.lost().isEmpty());
+		assertTrue(result.contested().isEmpty());
+		assertTrue(result.changed().isEmpty());
+		UnitState state = ChainResolver.resolve(shared.readUnit(E1), OTHER);
+		assertEquals(List.of(mine, second), state.chain());
+	}
+
+	@Test
+	void ownClaimMissingAfterRollbackIsUploaded() throws IOException {
+		Version mine = version(ME, V1);
+		put(local, E1, mine);
+		byte[] rootClaim = claim(local, E1, mine, AT);
+		Version second = version(ME, V2, V1);
+		put(local, E1, second);
+		byte[] secondClaim = claim(local, E1, second, AT);
+		// der gemeinsame Ordner ist auf einen älteren Stand zurückgespielt: nur die erste Version und ihr Anspruch
+		put(shared, E1, mine);
+		shared.createClaim(E1, "root", rootClaim);
+
+		FullSyncResult result = run(false);
+
+		assertEquals(List.of(new FullSyncResult.UploadedClaim(E1, V1.value(), V2)), result.uploaded());
+		assertArrayEquals(secondClaim, shared.readClaimBytes(E1, V1.value()).orElseThrow());
+		assertTrue(has(shared, "events/e1/" + V2 + ".json"));
+		assertTrue(result.lost().isEmpty());
+		assertTrue(result.contested().isEmpty());
+	}
+
+	@Test
+	void foreignLocalClaimIsNotUploadedWithoutMerge() throws IOException {
+		Version foreign = version(OTHER, FOREIGN);
+		put(local, E1, foreign);
+		byte[] foreignClaim = claim(local, E1, foreign, AT);
+
+		FullSyncResult result = run(false);
+
+		assertTrue(result.uploaded().isEmpty());
+		assertTrue(shared.readClaimBytes(E1, "root").isEmpty());
+		// die Version kommt trotzdem hoch
+		assertTrue(has(shared, "events/e1/" + FOREIGN + ".json"));
+		// nur das Mitnehmen lädt fremde lokale Ansprüche hoch
+		assertEquals(List.of(new FullSyncResult.UploadedClaim(E1, "root", FOREIGN)), run(true).uploaded());
+		assertArrayEquals(foreignClaim, shared.readClaimBytes(E1, "root").orElseThrow());
+	}
+
+	@Test
+	void ownClaimLosesToAnotherClaimThatArrivedMeanwhile() throws IOException {
+		Version mine = version(ME, V1);
+		put(local, E1, mine);
+		byte[] oldLocalClaim = claim(local, E1, mine, AT);
+		Version second = version(ME, V2, V1);
+		put(local, E1, second);
+		claim(local, E1, second, AT);
+		Version foreign = version(OTHER, FOREIGN);
+		byte[][] arrived = new byte[2][];
+		// ein anderer Rechner legt seinen Anspruch an, nachdem der Abgleich die Einheit aufgelistet hat
+		FileLayer racing = racing(files, shared.resolve("events/e1/claims/root.json"), () -> {
+			arrived[0] = put(shared, E1, foreign);
+			arrived[1] = claim(shared, E1, foreign, AT);
+		});
+		VersionStore racingShared = new VersionStore(shared.dataRoot(), racing);
+
+		FullSyncResult result = FullSync.run(local, racingShared, false, ME, files, CLOCK);
+
+		assertEquals(List.of(new LostVersion(E1, List.of(V1, V2), FOREIGN)), result.lost());
+		assertEquals(Set.of(E1), result.changed());
+		assertTrue(result.uploaded().isEmpty());
+		assertTrue(result.contested().isEmpty());
+		// der gemeinsame Anspruch gilt jetzt auch lokal, der eigene liegt beiseite
+		assertArrayEquals(arrived[1], shared.readClaimBytes(E1, "root").orElseThrow());
+		assertArrayEquals(arrived[1], local.readClaimBytes(E1, "root").orElseThrow());
+		assertArrayEquals(arrived[0], local.readVersionBytes(E1, FOREIGN).orElseThrow());
+		Path aside = local.dataRoot().resolve("events/e1/claims/root.json.verdraengt-2026-10-26_10-00-00");
+		assertArrayEquals(oldLocalClaim, Files.readAllBytes(aside));
+		// der Anspruch hinter der verlorenen Version geht nicht in die Kette des Gewinners
+		assertTrue(shared.readClaimBytes(E1, V1.value()).isEmpty());
+	}
+
+	@Test
+	void ownClaimOnALostStretchIsNotUploaded() throws IOException {
+		// V1 hat den Platz an FOREIGN verloren (der lokale Anspruch ist schon ersetzt); V2 baut auf V1 auf
+		Version foreign = version(OTHER, FOREIGN);
+		put(shared, E1, foreign);
+		byte[] foreignClaim = claim(shared, E1, foreign, AT);
+		put(local, E1, foreign);
+		local.createClaim(E1, "root", foreignClaim);
+		put(local, E1, version(ME, V1));
+		Version second = version(ME, V2, V1);
+		put(local, E1, second);
+		claim(local, E1, second, AT);
+
+		FullSyncResult result = run(false);
+
+		assertTrue(shared.readClaimBytes(E1, V1.value()).isEmpty());
+		assertTrue(result.uploaded().isEmpty());
+		assertTrue(result.contested().isEmpty());
+		assertTrue(result.lost().isEmpty());
+		assertTrue(has(shared, "events/e1/" + V2 + ".json"));
+	}
+
+	@Test
+	void contestedUnitUploadsNoOwnClaim() throws IOException {
+		Version mine = version(ME, V1);
+		put(local, E1, mine);
+		claim(local, E1, mine, AT);
+		Version second = version(ME, V2, V1);
+		put(local, E1, second);
+		claim(local, E1, second, AT);
+		Version foreign = version(OTHER, FOREIGN);
+		put(shared, E1, foreign);
+		claim(shared, E1, foreign, AT);
+
+		FullSyncResult result = run(false);
+
+		assertEquals(List.of(new FeedPoll.Contested(E1, "root")), result.contested());
+		assertTrue(result.uploaded().isEmpty());
+		assertTrue(shared.readClaimBytes(E1, V1.value()).isEmpty());
+	}
+
+	@Test
+	void syncUnitsOfAllUnitsEqualsRun() throws IOException {
+		UnitKey p1 = UnitKey.presentation("e1", "p1");
+		UnitKey p2 = UnitKey.presentation("e1", "p2");
+		UnitKey booking = UnitKey.unassignedBooking("e1", "p2", "b1");
+		// eigener Anspruch nur lokal (wird hochgeladen), eigene Version ohne Anspruch nur lokal
+		Version mine = version(ME, V1);
+		put(local, E1, mine);
+		claim(local, E1, mine, AT);
+		put(local, p1, version(ME, V2));
+		// fremder Anspruch nur im gemeinsamen Ordner (kommt herein), Einheiten nur dort
+		Version foreign = version(OTHER, FOREIGN);
+		put(shared, E2, foreign);
+		claim(shared, E2, foreign, AT);
+		put(shared, booking, foreign);
+		claim(shared, booking, foreign, AT);
+		// umstrittener Platz in der Halle
+		Version hall = version(ME, V2);
+		put(local, HALL, hall);
+		claim(local, HALL, hall, AT);
+		put(shared, HALL, foreign);
+		claim(shared, HALL, foreign, AT);
+		Path copy = dir.resolve("kopie");
+		copyTree(dir.resolve("local"), copy.resolve("local"));
+		copyTree(dir.resolve("shared"), copy.resolve("shared"));
+		VersionStore localCopy = new VersionStore(copy.resolve("local").resolve("data"), files);
+		VersionStore sharedCopy = new VersionStore(copy.resolve("shared").resolve("data"), files);
+		List<UnitKey> units = List.of(E1, p1, p2, booking, E2, HALL);
+		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
+
+		FullSyncResult expected = run(false);
+		FullSyncResult actual = FullSync.syncUnits(localCopy, sharedCopy, units, false, ME, files, CLOCK, seen::add);
+
+		assertEquals(expected, actual);
+		assertEquals(actual.uploaded(), seen);
+		assertEquals(List.of(new FullSyncResult.UploadedClaim(E1, "root", V1)), actual.uploaded());
+		assertEquals(List.of(new FeedPoll.Contested(HALL, "root")), actual.contested());
+		assertEquals(Set.of(E2, booking, HALL), actual.changed());
+		assertEquals(contents(local.dataRoot()), contents(localCopy.dataRoot()));
+		assertEquals(contents(shared.dataRoot()), contents(sharedCopy.dataRoot()));
+	}
+
+	/** Eine Aktion mit Dateizugriff. */
+	private interface IoAction {
+		void run() throws IOException;
+	}
+
+	/**
+	 * Eine Dateischicht, die unmittelbar vor dem ersten Anlegen von {@code target} {@code before} ausführt: Ein anderer
+	 * Rechner war zwischen Auflisten und Anlegen schneller.
+	 */
+	private static FileLayer racing(FileLayer delegate, Path target, IoAction before) {
+		AtomicBoolean done = new AtomicBoolean();
+		return (FileLayer) Proxy.newProxyInstance(FileLayer.class.getClassLoader(), new Class<?>[] { FileLayer.class },
+				(proxy, method, args) -> {
+					if (method.getName().equals("createNew") && target.equals(args[0]) && done.compareAndSet(false, true)) {
+						before.run();
+					}
+					try {
+						return method.invoke(delegate, args);
+					} catch (InvocationTargetException e) {
+						throw e.getCause();
+					}
+				});
+	}
+
+	private static void copyTree(Path from, Path to) throws IOException {
+		try (Stream<Path> walk = Files.walk(from)) {
+			for (Path source : walk.toList()) {
+				Path target = to.resolve(from.relativize(source).toString());
+				if (Files.isDirectory(source)) {
+					Files.createDirectories(target);
+				} else {
+					Files.copy(source, target);
+				}
+			}
+		}
+	}
+
+	/** Alle Dateien unter {@code root} mit ihrem Inhalt. */
+	private static Map<String, String> contents(Path root) throws IOException {
+		Map<String, String> result = new TreeMap<>();
+		for (String rel : tree(root)) {
+			result.put(rel, new String(Files.readAllBytes(root.resolve(rel)), StandardCharsets.UTF_8));
+		}
+		return result;
 	}
 
 	private static Set<String> diff(Set<String> after, Set<String> before) {

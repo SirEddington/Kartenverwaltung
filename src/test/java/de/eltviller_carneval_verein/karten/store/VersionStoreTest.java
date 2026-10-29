@@ -274,6 +274,55 @@ class VersionStoreTest {
 	}
 
 	@Test
+	void unitDataFilesListsOnlyThatUnit() throws IOException {
+		VersionStore store = store();
+		UnitKey event = UnitKey.event("e1");
+		UnitKey presentation = UnitKey.presentation("e1", "p1");
+		byte[] first = versionBytes(V1);
+		store.writeVersion(event, V2, versionBytes(V2, V1));
+		store.writeVersion(event, V1, first);
+		store.createClaim(event, V1.value(), claimBytes(V2, versionBytes(V2, V1)));
+		store.createClaim(event, "root", claimBytes(V1, first));
+		store.writeVersion(presentation, V3, versionBytes(V3));
+		store.createClaim(presentation, "root", claimBytes(V3, versionBytes(V3)));
+		store.writeVersion(UnitKey.booking("e1", "p1", "s1"), V1, first);
+		put(store.dataRoot().resolve("events/e1/Thumbs.db"), "x");
+		put(store.dataRoot().resolve("events/e1/claims/~karv-1.tmp"), "x");
+		Files.createDirectories(store.dataRoot().resolve("events/e1/presentations/ungültig!"));
+
+		assertEquals(List.of("events/e1/" + V1 + ".json", "events/e1/" + V2 + ".json",
+				"events/e1/claims/" + V1 + ".json", "events/e1/claims/root.json"), store.unitDataFiles(event));
+		assertEquals(List.of("events/e1/presentations/p1/" + V3 + ".json", "events/e1/presentations/p1/claims/root.json"),
+				store.unitDataFiles(presentation));
+		assertEquals(List.of(), store.unitDataFiles(UnitKey.hall("h1")));
+		assertEquals(List.of("p1"), store.childNames(event, "presentations"));
+		assertEquals(List.of("s1"), store.childNames(presentation, "bookings"));
+		assertEquals(List.of(), store.childNames(UnitKey.event("e2"), "presentations"));
+	}
+
+	@Test
+	void unitTempFilesListsTempsOfUnitAndClaims() throws IOException {
+		VersionStore store = store();
+		UnitKey event = UnitKey.event("e1");
+		store.writeVersion(event, V1, versionBytes(V1));
+		Path unitDir = store.dataRoot().resolve("events/e1");
+		String tagged = "~karv-maschine-1-0f8fad5b-d9cb-469f-a165-70867728950e.tmp";
+		put(unitDir.resolve(tagged), "x");
+		put(unitDir.resolve("~karv-1.tmp"), "x");
+		put(unitDir.resolve("claims/~karv-2.tmp"), "x");
+		// keine temporären Dateien dieser Schicht, oder die einer anderen Einheit
+		put(unitDir.resolve("~karv-3.json"), "x");
+		put(unitDir.resolve("karv-4.tmp"), "x");
+		put(unitDir.resolve("presentations/p1/~karv-5.tmp"), "x");
+
+		assertEquals(List.of("events/e1/~karv-1.tmp", "events/e1/" + tagged, "events/e1/claims/~karv-2.tmp"),
+				store.unitTempFiles(event));
+		assertEquals(List.of("events/e1/presentations/p1/~karv-5.tmp"),
+				store.unitTempFiles(UnitKey.presentation("e1", "p1")));
+		assertEquals(List.of(), store.unitTempFiles(UnitKey.hall("h1")));
+	}
+
+	@Test
 	void relativeAccessReadsAndCreatesBelowRoot() throws IOException {
 		VersionStore store = store();
 
