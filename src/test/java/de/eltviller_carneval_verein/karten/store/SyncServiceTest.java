@@ -20,6 +20,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -223,13 +224,20 @@ class SyncServiceTest {
 		final SyncService service;
 
 		Node(Path appData, String name, FileLayer files, Executor ui, Executor worker) throws IOException {
+			this(appData, name, files, ui, worker, null);
+		}
+
+		/** Mit eigener Prüfung der Erreichbarkeit statt des Schalters {@link #down}, etwa {@code Files::isDirectory}. */
+		Node(Path appData, String name, FileLayer files, Executor ui, Executor worker, Predicate<Path> reachable)
+				throws IOException {
 			this.appData = appData;
 			this.identity = MachineIdentity.loadOrCreate(appData, () -> name);
 			this.layer = new FaultyFileLayer(files);
 			for (String operation : List.of("createNew", "read", "listNames")) {
 				layer.failWhen(p -> down.get() && p.startsWith(sharedRoot), operation, new IOException("Netzlaufwerk getrennt"));
 			}
-			this.service = new SyncService(appData, identity, layer, ui, worker, p -> !down.get(), clock);
+			this.service = new SyncService(appData, identity, layer, ui, worker,
+					reachable != null ? reachable : p -> !down.get(), clock);
 			service.setListener(events);
 			service.syncState().addListener((property, before, after) -> states.add(after));
 		}
@@ -1222,6 +1230,103 @@ class SyncServiceTest {
 		a.service.syncNow();
 
 		assertTrue(Files.exists(localFile(a, hall, foreign.id() + ".json")));
+	}
+
+	// --- Der gemeinsame Ordner verschwindet (KARV-101)
+
+	/** Ein Rechner, dessen Erreichbarkeit wie in der Anwendung am Ordner selbst hängt. */
+	private Node folderNode(String name) throws IOException {
+		return new Node(dir.resolve(name), name, new NioFileLayer(), Runnable::run, Runnable::run, Files::isDirectory);
+	}
+
+	private static void deleteTree(Path folder) throws IOException {
+		try (Stream<Path> entries = Files.walk(folder)) {
+			for (Path entry : entries.sorted(Comparator.reverseOrder()).toList()) {
+				Files.delete(entry);
+			}
+		}
+	}
+
+	@Test
+	void vanishedSharedFolderIsNotRecreatedOnUpload() throws IOException {
+		Node a = folderNode("a");
+		assertTrue(a.service.startup(shared));
+		deleteTree(sharedRoot);
+
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+
+		assertFalse(Files.exists(sharedRoot), "der gemeinsame Ordner wird nie angelegt");
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertEquals(List.of(shared), a.events.unreachable);
+	}
+
+	@Test
+	void vanishedSharedFolderIsNotRecreatedByFullSync() throws IOException {
+		Node a = folderNode("a");
+		assertTrue(a.service.startup(shared));
+		deleteTree(sharedRoot);
+
+		a.service.syncNow();
+		a.service.tick();
+
+		assertFalse(Files.exists(sharedRoot), "der gemeinsame Ordner wird nie angelegt");
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertEquals(List.of(shared), a.events.unreachable);
+	}
+
+	@Test
+	void vanishedSharedFolderIsDetectedWithoutOwnChanges() throws IOException {
+		Node a = folderNode("a");
+		assertTrue(a.service.startup(shared));
+		a.service.tick();
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+		deleteTree(sharedRoot);
+
+		a.service.tick();
+
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertEquals(List.of(shared), a.events.unreachable);
+		assertFalse(Files.exists(sharedRoot));
+	}
+
+	@Test
+	void restoredSharedFolderUploadsLikeAReturn() throws IOException {
+		Node a = folderNode("a");
+		assertTrue(a.service.startup(shared));
+		deleteTree(sharedRoot);
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertTrue(a.service.unitState(BOOKING).provisional());
+
+		Files.createDirectories(sharedRoot);
+		a.service.tick();
+
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+		assertEquals(1, a.events.reconnected);
+		assertEquals(List.of(shared), a.events.unreachable);
+		assertFalse(a.service.unitState(BOOKING).provisional());
+		assertEquals(v.id(), sharedClaim(BOOKING, "root").version());
+		assertTrue(Files.exists(sharedFile(BOOKING, v.id() + ".json")));
+	}
+
+	@Test
+	void missingDataBelowAnExistingFolderIsCreated() throws IOException {
+		Node a = folderNode("a");
+		assertTrue(a.service.startup(shared));
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		assertTrue(Files.isDirectory(sharedRoot.resolve("data")));
+		deleteTree(sharedRoot.resolve("data"));
+
+		Version v = save(a, create(UnitKey.booking("e1", "p1", "A-2"), "Berta"));
+		a.service.tick();
+
+		assertTrue(Files.isDirectory(sharedRoot.resolve("data")), "nur der Anker bleibt unangetastet, data/ wird angelegt");
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+		assertEquals(v.id(), sharedClaim(UnitKey.booking("e1", "p1", "A-2"), "root").version());
+		assertTrue(a.events.unreachable.isEmpty());
 	}
 
 	// --- Verbinden und Trennen

@@ -61,7 +61,8 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * vorherigen Listeneintrag kann so nicht entstehen. Wer den Anspruch nicht bekommt, hat verloren; die Version bleibt
  * liegen und wird mit {@link SyncListener#lost} gemeldet.
  * <p>
- * <b>Takt</b> (alle 2 Sekunden, {@link #tick()}): Erreichbarkeit prüfen (nur nach einem Fehler), Aufträge fortsetzen,
+ * <b>Takt</b> (alle 2 Sekunden, {@link #tick()}): Erreichbarkeit prüfen (nach einem Fehler; sonst zuerst, ob der
+ * gemeinsame Ordner noch da ist: fehlt er, ist der Zustand offline, und nichts legt ihn an), Aufträge fortsetzen,
  * alle 30 Sekunden neue Rechner suchen, die Änderungslisten der anderen lesen, alle 10 Minuten (und beim Start, nach
  * der Rückkehr aus {@link SyncState#OFFLINE}, auf Wunsch) einen Vollabgleich, die eigenen Ansprüche der letzten 15
  * Minuten im gemeinsamen Ordner nachlesen (späte Niederlage bei einem Sync-Client; nach einem Neustart auch die aus den
@@ -1473,6 +1474,12 @@ public final class SyncService {
 				return false;
 			}
 			current.probeFirst = false;
+		} else if (!files.isDirectory(current.path) && !probe(current.path)) {
+			// ein Takt ohne eigene Änderung liest nur, und ein fehlender Ordner sähe dabei leer aus: Er gälte als aktuell
+			if (isCurrent(current)) {
+				notifier.unreachable(current.text, true);
+			}
+			return false;
 		}
 		if (returning) {
 			// nach der Rückkehr zuerst der Vollabgleich mit allen ausstehenden Versionen
