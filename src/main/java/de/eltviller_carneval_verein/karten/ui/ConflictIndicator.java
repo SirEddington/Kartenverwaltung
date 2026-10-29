@@ -18,7 +18,8 @@ public final class ConflictIndicator extends Hyperlink {
 	private final IntSupplier openCount;
 
 	/**
-	 * @param openCount liefert die Zahl der offenen Konflikte (in der App {@code SyncService.openConflicts().size()})
+	 * @param openCount liefert die Zahl der offenen Konflikte (in der App die nach der letzten Rückmeldung des
+	 *                  Versionsspeichers, damit eine neue Fußzeile nicht neu ableitet)
 	 * @param open      öffnet den Sammel-Dialog
 	 */
 	public ConflictIndicator(IntSupplier openCount, Runnable open) {

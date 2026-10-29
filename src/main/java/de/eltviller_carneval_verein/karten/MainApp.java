@@ -19,6 +19,7 @@ import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
+import de.eltviller_carneval_verein.karten.store.OpenConflict;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
@@ -76,6 +77,8 @@ public class MainApp extends Application {
 	private static ConflictList conflictList;
 	private static ConflictActions conflictActions;
 	private static ConflictIndicator conflictIndicator;
+	// Die Zahl der offenen Konflikte nach der letzten Rückmeldung; jede neue Fußzeile übernimmt sie
+	private static int lastOpenCount;
 	// Mindestbreite des Hauptfensters: So schmal darf es werden, die Kopfzeilen der Bildschirme sind darauf abgestimmt
 	private static final double MIN_WIDTH = 1250.0;
 	private static double width = 1300.0;
@@ -264,19 +267,31 @@ public class MainApp extends Application {
 	 * der Nutzer noch nie gesehen hat, öffnet sich der Sammel-Dialog, sonst wird ein offener nur aufgefrischt.
 	 */
 	private static void conflictsChanged() {
+		// einmal je Rückmeldung abgeleitet, für Fußzeile, "neu?" und Dialog
+		List<OpenConflict> open;
+		try {
+			open = conflictSync == null ? List.of() : conflictSync.openConflicts();
+		} catch (RuntimeException e) {
+			lastOpenCount = 0;
+			if (conflictIndicator != null) {
+				conflictIndicator.refresh();
+			}
+			throw e;
+		}
+		lastOpenCount = open.size();
 		if (conflictIndicator != null) {
 			conflictIndicator.refresh();
 		}
-		if (conflictList != null && conflictList.hasUnseen()) {
-			openConflictDialog();
+		if (conflictList != null && conflictList.hasUnseen(open)) {
+			ConflictDialog.show(primaryStage, conflictList, conflictActions, open);
 		} else {
-			ConflictDialog.refreshIfOpen();
+			ConflictDialog.refreshIfOpen(open);
 		}
 	}
 
 	/**
-	 * Zeigt den Sammel-Dialog (oder holt ihn nach vorn): per Klick auf die Fußzeile und bei neuen Konflikten. Was er zeigt,
-	 * gilt danach als gesehen (das merkt der Dialog selbst).
+	 * Zeigt den Sammel-Dialog (oder holt ihn nach vorn) per Klick auf die Fußzeile. Was er zeigt, gilt danach als gesehen
+	 * (das merkt der Dialog selbst).
 	 */
 	private static void openConflictDialog() {
 		if (conflictList == null) {
@@ -285,9 +300,12 @@ public class MainApp extends Application {
 		ConflictDialog.show(primaryStage, conflictList, conflictActions);
 	}
 
-	/** Die Zahl der offenen Konflikte für die Fußzeile; vor dem Start des Versionsspeichers keine. */
+	/**
+	 * Die Zahl der offenen Konflikte für die Fußzeile nach der letzten Rückmeldung ({@link #conflictsChanged}); vor der
+	 * ersten keine. Eine neue Fußzeile (bei jedem Wechsel der Ansicht) leitet so nicht neu ab.
+	 */
 	private static int openConflictCount() {
-		return conflictSync == null ? 0 : conflictSync.openConflicts().size();
+		return lastOpenCount;
 	}
 
 	/**

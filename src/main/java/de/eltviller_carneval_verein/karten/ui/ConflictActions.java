@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -104,6 +105,31 @@ public final class ConflictActions {
 	private final Map<VersionRef, Version> dropped = new HashMap<>();
 
 	/**
+	 * Was ein Auffrischen des Dialogs für viele Zeilen braucht, einmal je Auffrischen ermittelt ({@link #duringRefresh});
+	 * außerhalb eines Auffrischens {@code null}, dann wird jedes Mal neu ermittelt.
+	 */
+	private RefreshCache refreshCache;
+
+	/**
+	 * Der Zwischenspeicher eines Auffrischens. Das Modell ändert sich währenddessen nicht (alles auf dem JavaFX-Thread, keine
+	 * Eingabe dazwischen).
+	 */
+	private static final class RefreshCache {
+		/** Je Event, ob es ungespeicherte Änderungen hat oder darin etwas bearbeitet wird ({@link #inUse}). */
+		final Map<Event, Boolean> inUse = new IdentityHashMap<>();
+		/** Je Event-ID die Inhalte im Modell ({@link StoreEventRepository#payloadsOf}). */
+		final Map<String, Payloads> payloads = new HashMap<>();
+		/** Je Event-ID seine Stände im Index ({@link SyncService#eventSnapshots}). */
+		final Map<String, Map<UnitKey, UnitSnapshot>> eventSnapshots = new HashMap<>();
+		/** Die weichenden Versionen, die sich in diesem Auffrischen nicht lesen ließen ({@link #dropped(OpenConflict)}). */
+		final Set<VersionRef> missing = new HashSet<>();
+	}
+
+	/** Die Inhalte eines Events im Modell; {@code failure}, wenn es sich nicht zerlegen lässt. */
+	private record Payloads(Map<UnitKey, ObjectNode> byUnit, IllegalStateException failure) {
+	}
+
+	/**
 	 * @param saveEvent speichert das Event wie die Speichern-Schaltfläche und meldet, ob es gespeichert wurde (in der App
 	 *                  {@code EventSaver::save}); darf auch eine Ausnahme werfen
 	 * @param saveHall  wie {@code saveEvent} für die Halle ({@code HallSaver::save})
@@ -119,6 +145,25 @@ public final class ConflictActions {
 		this.sync = sync;
 		this.eventSaver = saveEvent;
 		this.hallSaver = saveHall;
+	}
+
+	/**
+	 * Lässt {@code refresh} (das Auffrischen des Dialogs: Zeilen samt {@link #isAdopted}, {@link #availability},
+	 * {@link #bookingToAssign}) mit einem Zwischenspeicher laufen: Je Event werden die Inhalte im Modell, die Stände im
+	 * Index und ob es in Gebrauch ist nur einmal ermittelt, eine weichende Version, die sich nicht lesen lässt, nur einmal
+	 * versucht. Danach gilt der Zwischenspeicher nicht mehr. Nur für Abfragen; keine Aktion darf darin laufen.
+	 */
+	public void duringRefresh(Runnable refresh) {
+		if (refreshCache != null) {
+			refresh.run();
+			return;
+		}
+		refreshCache = new RefreshCache();
+		try {
+			refresh.run();
+		} finally {
+			refreshCache = null;
+		}
 	}
 
 	/**
@@ -138,7 +183,7 @@ public final class ConflictActions {
 			}
 		} else {
 			Event event = events.findEvent(unit.eventId());
-			if (event != null && inUse(event)) {
+			if (event != null && inUseCached(event)) {
 				return IS_BLOCKED;
 			}
 		}
@@ -347,7 +392,7 @@ public final class ConflictActions {
 		}
 		ObjectNode payload;
 		try {
-			payload = events.payloadOf(conflict.target());
+			payload = payloadOf(conflict.target());
 		} catch (IllegalStateException e) {
 			return false;
 		}
@@ -503,7 +548,7 @@ public final class ConflictActions {
 			return null;
 		}
 		String bookingId = content.getId();
-		if (events.bookingLives(event.getId(), presentation.getId(), bookingId)
+		if (events.bookingLives(event.getId(), presentation.getId(), bookingId, () -> eventSnapshots(event.getId()))
 				|| inOpenLostStretch(unit, bookingId)) {
 			return null;
 		}
@@ -527,7 +572,7 @@ public final class ConflictActions {
 	 */
 	private boolean inOpenLostStretch(UnitKey unit, String bookingId) {
 		List<UnitKey> siblings = new ArrayList<>();
-		for (UnitKey other : sync.eventSnapshots(unit.eventId()).keySet()) {
+		for (UnitKey other : eventSnapshots(unit.eventId()).keySet()) {
 			if (other.type() == UnitType.BOOKING && unit.presentationId().equals(other.presentationId())) {
 				siblings.add(other);
 			}
@@ -566,6 +611,9 @@ public final class ConflictActions {
 			if (known != null) {
 				return known;
 			}
+			if (refreshCache != null && refreshCache.missing.contains(ref)) {
+				continue;
+			}
 			try {
 				Version read = sync.version(unit, note.dropped());
 				if (read != null) {
@@ -573,10 +621,47 @@ public final class ConflictActions {
 					return read;
 				}
 			} catch (IOException e) {
-				// nicht lesbar heißt hier: kein Gegenstand; der nächste Aufruf versucht es erneut
+				// nicht lesbar heißt hier: kein Gegenstand; der nächste Aufruf (beim Auffrischen: das nächste) versucht es erneut
+			}
+			if (refreshCache != null) {
+				refreshCache.missing.add(ref);
 			}
 		}
 		return null;
+	}
+
+	/** {@link StoreEventRepository#payloadOf}; während eines Auffrischens einmal je Event gebildet. */
+	private ObjectNode payloadOf(UnitKey unit) {
+		if (refreshCache == null || unit.type() == UnitType.HALL) {
+			return events.payloadOf(unit);
+		}
+		Payloads payloads = refreshCache.payloads.computeIfAbsent(unit.eventId(), eventId -> {
+			try {
+				return new Payloads(events.payloadsOf(eventId), null);
+			} catch (IllegalStateException e) {
+				return new Payloads(null, e);
+			}
+		});
+		if (payloads.failure() != null) {
+			throw payloads.failure();
+		}
+		return payloads.byUnit() == null ? null : payloads.byUnit().get(unit);
+	}
+
+	/** {@link SyncService#eventSnapshots}; während eines Auffrischens einmal je Event gelesen. */
+	private Map<UnitKey, UnitSnapshot> eventSnapshots(String eventId) {
+		if (refreshCache == null) {
+			return sync.eventSnapshots(eventId);
+		}
+		return refreshCache.eventSnapshots.computeIfAbsent(eventId, sync::eventSnapshots);
+	}
+
+	/** {@link #inUse}; während eines Auffrischens einmal je Event geprüft. */
+	private boolean inUseCached(Event event) {
+		if (refreshCache == null) {
+			return inUse(event);
+		}
+		return refreshCache.inUse.computeIfAbsent(event, this::inUse);
 	}
 
 	/** Die aktuelle Version der Einheit nach der Kette im lokalen Bestand; {@code null} ohne Version oder wenn sie sich nicht lesen lässt. */

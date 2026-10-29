@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -120,16 +121,30 @@ public final class ConflictList {
 	 * hintereinander, wo der erste von ihnen stand. Merkt, welche Konflikte damit geliefert sind ({@link #markSeen()}).
 	 */
 	public List<Row> rows() {
-		List<Row> all = source.get().stream().map(this::row).toList();
-		List<Row> ordered = new ArrayList<>();
-		Set<String> placed = new HashSet<>();
-		for (Row row : all) {
+		return rows(source.get());
+	}
+
+	/** Wie {@link #rows()}, für die schon abgeleiteten offenen Konflikte (in der App einmal je Rückmeldung). */
+	public List<Row> rows(List<OpenConflict> open) {
+		// je Zeile ohne Gruppe ein Platz, je Gruppe einer, wo ihre erste Zeile stand
+		List<List<Row>> slots = new ArrayList<>();
+		Map<String, List<Row>> groups = new HashMap<>();
+		for (OpenConflict conflict : open) {
+			Row row = row(conflict);
 			if (row.group() == null) {
-				ordered.add(row);
-			} else if (placed.add(row.group())) {
-				all.stream().filter(member -> row.group().equals(member.group())).forEach(ordered::add);
+				slots.add(List.of(row));
+				continue;
 			}
+			List<Row> members = groups.get(row.group());
+			if (members == null) {
+				members = new ArrayList<>();
+				groups.put(row.group(), members);
+				slots.add(members);
+			}
+			members.add(row);
 		}
+		List<Row> ordered = new ArrayList<>();
+		slots.forEach(ordered::addAll);
 		Set<ConflictKey> keys = new HashSet<>();
 		ordered.forEach(row -> keys.add(row.conflict().key()));
 		delivered = keys;
@@ -138,7 +153,12 @@ public final class ConflictList {
 
 	/** Ob es einen offenen Konflikt gibt, den der Nutzer noch nie gesehen hat ({@link #markSeen()}). */
 	public boolean hasUnseen() {
-		for (OpenConflict conflict : source.get()) {
+		return hasUnseen(source.get());
+	}
+
+	/** Wie {@link #hasUnseen()}, für die schon abgeleiteten offenen Konflikte. */
+	public boolean hasUnseen(List<OpenConflict> open) {
+		for (OpenConflict conflict : open) {
 			if (!seen.contains(conflict.key())) {
 				return true;
 			}

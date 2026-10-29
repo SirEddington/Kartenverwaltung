@@ -13,6 +13,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -421,8 +422,19 @@ public class StoreEventRepository implements EventRepository {
 	 * @throws IllegalStateException wenn sich das Event nicht zerlegen lässt (zwei Buchungen auf einem Platz)
 	 */
 	public ObjectNode payloadOf(UnitKey unit) {
-		Event event = unit.type() == UnitType.HALL ? null : findEvent(unit.eventId());
-		return event == null ? null : UnitMapper.payloads(event).get(unit);
+		Map<UnitKey, ObjectNode> payloads = unit.type() == UnitType.HALL ? null : payloadsOf(unit.eventId());
+		return payloads == null ? null : payloads.get(unit);
+	}
+
+	/**
+	 * Die Inhalte aller Einheiten des Events, wie {@link #payloadOf} sie einzeln liefert (zum Merken, wenn viele Einheiten
+	 * eines Events gefragt sind); {@code null}, wenn das Event nicht im Cache ist.
+	 *
+	 * @throws IllegalStateException wenn sich das Event nicht zerlegen lässt (zwei Buchungen auf einem Platz)
+	 */
+	public Map<UnitKey, ObjectNode> payloadsOf(String eventId) {
+		Event event = findEvent(eventId);
+		return event == null ? null : UnitMapper.payloads(event);
 	}
 
 	/**
@@ -505,6 +517,15 @@ public class StoreEventRepository implements EventRepository {
 	 * Vorstellung, deren Inhalt sich nicht lesen lässt, zählt als möglicherweise lebende Buchung.
 	 */
 	public boolean bookingLives(String eventId, String presentationId, String bookingId) {
+		return bookingLives(eventId, presentationId, bookingId, () -> sync.eventSnapshots(eventId));
+	}
+
+	/**
+	 * Wie {@link #bookingLives(String, String, String)}; die Stände des Events im Index ({@link SyncService#eventSnapshots})
+	 * kommen von {@code eventSnapshots}, nur wenn das Modell die Buchung nicht schon trägt.
+	 */
+	public boolean bookingLives(String eventId, String presentationId, String bookingId,
+			Supplier<Map<UnitKey, UnitSnapshot>> eventSnapshots) {
 		Event event = findEvent(eventId);
 		Presentation presentation = event == null ? null : event.findPresentation(presentationId);
 		if (presentation != null && presentation.getBookings() != null) {
@@ -514,7 +535,7 @@ public class StoreEventRepository implements EventRepository {
 				}
 			}
 		}
-		for (UnitSnapshot snapshot : sync.eventSnapshots(eventId).values()) {
+		for (UnitSnapshot snapshot : eventSnapshots.get().values()) {
 			UnitKey unit = snapshot.unit();
 			if (unit.type() != UnitType.BOOKING || !presentationId.equals(unit.presentationId()) || !snapshot.isLive()) {
 				continue;

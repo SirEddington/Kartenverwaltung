@@ -18,6 +18,7 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.store.ConflictKey;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
+import de.eltviller_carneval_verein.karten.store.OpenConflict;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions.Availability;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.FieldRow;
@@ -129,42 +130,68 @@ public final class ConflictDialog {
 	 */
 	@SuppressWarnings("exports")
 	public static void show(Window owner, ConflictList list, ConflictActions actions) {
+		show(owner, list, actions, null);
+	}
+
+	/**
+	 * Wie {@link #show(Window, ConflictList, ConflictActions)}, mit den schon abgeleiteten offenen Konflikten.
+	 *
+	 * @param conflicts die offenen Konflikte; {@code null}: die Liste leitet sie selbst ab
+	 */
+	@SuppressWarnings("exports")
+	public static void show(Window owner, ConflictList list, ConflictActions actions, List<OpenConflict> conflicts) {
 		if (open != null && open.stage.isShowing()) {
-			open.refresh();
+			open.refresh(conflicts);
 			open.stage.toFront();
 			return;
 		}
 		open = new ConflictDialog(owner, list, actions);
-		open.refresh();
+		open.refresh(conflicts);
 		open.stage.show();
 	}
 
-	/** Frischt den Dialog auf, wenn er offen ist; sonst nichts. */
-	public static void refreshIfOpen() {
+	/**
+	 * Frischt den Dialog mit den schon abgeleiteten offenen Konflikten auf, wenn er offen ist; sonst nichts.
+	 *
+	 * @param conflicts die offenen Konflikte; {@code null}: die Liste leitet sie selbst ab
+	 */
+	public static void refreshIfOpen(List<OpenConflict> conflicts) {
 		if (open != null && open.stage.isShowing()) {
-			open.refresh();
+			open.refresh(conflicts);
 		}
 	}
 
 	// Auffrischen -->
 
 	private void refresh() {
-		List<Row> rows = list.rows();
-		availability.clear();
-		details.clear();
-		groupSizes.clear();
-		Set<ConflictKey> keys = new HashSet<>();
-		for (Row row : rows) {
-			ConflictKey key = row.conflict().key();
-			keys.add(key);
-			availability.put(key, availabilityOf(row));
-			details.put(key, detailsOf(row));
-			if (row.group() != null) {
-				groupSizes.merge(row.group(), 1, Integer::sum);
+		refresh(null);
+	}
+
+	/**
+	 * Holt die Zeilen und ermittelt je Zeile Verfügbarkeit und Zusatzzeilen, mit dem Zwischenspeicher der Aktionen
+	 * ({@link ConflictActions#duringRefresh}).
+	 *
+	 * @param conflicts die offenen Konflikte; {@code null}: die Liste leitet sie selbst ab
+	 */
+	private void refresh(List<OpenConflict> conflicts) {
+		actions.duringRefresh(() -> {
+			List<Row> rows = conflicts == null ? list.rows() : list.rows(conflicts);
+			availability.clear();
+			details.clear();
+			groupSizes.clear();
+			Set<ConflictKey> keys = new HashSet<>();
+			for (Row row : rows) {
+				ConflictKey key = row.conflict().key();
+				keys.add(key);
+				availability.put(key, availabilityOf(row));
+				details.put(key, detailsOf(row));
+				if (row.group() != null) {
+					groupSizes.merge(row.group(), 1, Integer::sum);
+				}
 			}
-		}
-		errors.keySet().retainAll(keys);
-		table.getItems().setAll(rows);
+			errors.keySet().retainAll(keys);
+			table.getItems().setAll(rows);
+		});
 		// die Tabelle zeigt jetzt alles, was die Liste geliefert hat
 		list.markSeen();
 	}

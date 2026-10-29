@@ -574,6 +574,33 @@ class ConflictActionsTest {
 	}
 
 	@Test
+	void refreshCacheGivesTheSameAnswersAndEndsWithTheRefresh() {
+		a.seat(0).setLastName("Meier-A");
+		a.seat(0).setComment("von A");
+		a.saveEvent();
+		b.seat(0).setLastName("Meier-B");
+		b.seat(0).setComment("von B");
+		b.saveEvent();
+		settle();
+		ConflictActions actions = b.actions();
+		Row row = b.onlyRow();
+		assertFalse(actions.isAdopted(row.conflict(), "comment"));
+		Availability plain = actions.availability(row);
+		List<Object> cached = new ArrayList<>();
+
+		actions.duringRefresh(() -> {
+			cached.add(actions.isAdopted(row.conflict(), "customer"));
+			cached.add(actions.isAdopted(row.conflict(), "comment"));
+			cached.add(actions.availability(row));
+			cached.add(actions.availability(row));
+		});
+
+		assertEquals(List.of(false, false, plain, plain), cached);
+		b.seat(0).setComment("von B");
+		assertTrue(actions.isAdopted(row.conflict(), "comment"), "nach dem Auffrischen gilt der Zwischenspeicher nicht mehr");
+	}
+
+	@Test
 	void rowWithOneGroupIsAcknowledgedByTheAction() {
 		Row row = commentConflict();
 		assertEquals(1, row.fields().size());
