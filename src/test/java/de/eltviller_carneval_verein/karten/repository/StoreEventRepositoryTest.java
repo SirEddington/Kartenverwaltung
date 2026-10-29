@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -433,8 +434,8 @@ class StoreEventRepositoryTest {
 		}
 
 		@Override
-		public boolean createNew(Path file, byte[] content) throws IOException {
-			boolean result = delegate.createNew(file, content);
+		public boolean createNew(Path file, byte[] content, Path anchor, String tempTag) throws IOException {
+			boolean result = delegate.createNew(file, content, anchor, tempTag);
 			if (creations.incrementAndGet() == failAt) {
 				throw new UncheckedIOException(new IOException("Platte voll"));
 			}
@@ -454,6 +455,11 @@ class StoreEventRepositoryTest {
 		@Override
 		public List<String> listNames(Path dir) throws IOException {
 			return delegate.listNames(dir);
+		}
+
+		@Override
+		public List<String> listNamesWithTemps(Path dir) throws IOException {
+			return delegate.listNamesWithTemps(dir);
 		}
 
 		@Override
@@ -479,6 +485,11 @@ class StoreEventRepositoryTest {
 		@Override
 		public void deleteOwnTemps(Path dir, Duration olderThan) throws IOException {
 			delegate.deleteOwnTemps(dir, olderThan);
+		}
+
+		@Override
+		public void deleteOldTemps(Path dir, Collection<String> names, Duration olderThan) throws IOException {
+			delegate.deleteOldTemps(dir, names, olderThan);
 		}
 	}
 

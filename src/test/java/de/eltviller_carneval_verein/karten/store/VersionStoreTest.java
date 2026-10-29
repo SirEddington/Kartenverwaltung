@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -295,6 +296,32 @@ class VersionStoreTest {
 			assertThrows(IllegalArgumentException.class, () -> store.createRelative(bad, bytes("x")), bad);
 		}
 		assertThrows(IllegalArgumentException.class, () -> store.resolve(null));
+	}
+
+	@Test
+	void sharedStoreWithAnchorDoesNotCreateAMissingFolder() throws IOException {
+		Path anchor = dir.resolve("gemeinsam");
+		VersionStore store = new VersionStore(anchor.resolve("data"), new NioFileLayer(), anchor, () -> "abc");
+		UnitKey unit = UnitKey.event("e1");
+		byte[] version = versionBytes(V1);
+
+		assertEquals(anchor, store.anchor());
+		assertThrows(NoSuchFileException.class, () -> store.writeVersion(unit, V1, version));
+		assertThrows(NoSuchFileException.class, () -> store.createClaim(unit, "root", claimBytes(V1, version)));
+		assertThrows(NoSuchFileException.class, () -> store.createRelative("feeds/m1/feed.json", bytes("{}")));
+
+		assertFalse(Files.exists(anchor));
+		Files.createDirectory(anchor);
+		assertTrue(store.writeVersion(unit, V1, version));
+		assertTrue(Files.isDirectory(anchor.resolve("data").resolve("events").resolve("e1")));
+	}
+
+	@Test
+	void storeWithoutAnchorCreatesMissingFolders() throws IOException {
+		VersionStore store = store();
+
+		assertNull(store.anchor());
+		assertTrue(store.writeVersion(UnitKey.event("e1"), V1, versionBytes(V1)));
 	}
 
 	@Test

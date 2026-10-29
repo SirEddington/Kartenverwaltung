@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -147,14 +148,24 @@ class SyncServiceTest {
 		}
 
 		@Override
-		public boolean createNew(Path file, byte[] content) throws IOException {
+		public boolean createNew(Path file, byte[] content, Path anchor, String tempTag) throws IOException {
 			if (trigger != null && trigger.test(file)) {
 				IoAction pending = action;
 				trigger = null;
 				action = null;
 				pending.run();
 			}
-			return delegate.createNew(file, content);
+			return delegate.createNew(file, content, anchor, tempTag);
+		}
+
+		@Override
+		public List<String> listNamesWithTemps(Path dir) throws IOException {
+			return delegate.listNamesWithTemps(dir);
+		}
+
+		@Override
+		public void deleteOldTemps(Path dir, Collection<String> names, Duration olderThan) throws IOException {
+			delegate.deleteOldTemps(dir, names, olderThan);
 		}
 
 		@Override
@@ -1917,8 +1928,18 @@ class SyncServiceTest {
 		}
 
 		@Override
-		public boolean createNew(Path file, byte[] content) throws IOException {
-			return delegate.createNew(file, content);
+		public boolean createNew(Path file, byte[] content, Path anchor, String tempTag) throws IOException {
+			return delegate.createNew(file, content, anchor, tempTag);
+		}
+
+		@Override
+		public List<String> listNamesWithTemps(Path dir) throws IOException {
+			return delegate.listNamesWithTemps(dir);
+		}
+
+		@Override
+		public void deleteOldTemps(Path dir, Collection<String> names, Duration olderThan) throws IOException {
+			delegate.deleteOldTemps(dir, names, olderThan);
 		}
 
 		@Override

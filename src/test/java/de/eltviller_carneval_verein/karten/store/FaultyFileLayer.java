@@ -5,6 +5,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,8 +21,9 @@ import java.util.function.Predicate;
  * Fehler gemeldet: der Zustand nach einer verlorenen Antwort, bei der die Datei schon angelegt ist.
  * <p>
  * Die Operationen heißen wie die Methoden der Schnittstelle: {@code createNew}, {@code read}, {@code exists},
- * {@code listNames}, {@code listTree}, {@code isDirectory}, {@code replaceDamaged}, {@code rename}, {@code deleteOwnTemps}.
- * Threadsicher.
+ * {@code listNames}, {@code listNamesWithTemps}, {@code listTree}, {@code isDirectory}, {@code replaceDamaged},
+ * {@code rename}, {@code deleteOwnTemps}, {@code deleteOldTemps}. Beide Fassungen von {@code createNew} heißen
+ * {@code createNew}. Threadsicher.
  */
 public final class FaultyFileLayer implements FileLayer {
 
@@ -149,9 +151,9 @@ public final class FaultyFileLayer implements FileLayer {
 	}
 
 	@Override
-	public boolean createNew(Path file, byte[] content) throws IOException {
+	public boolean createNew(Path file, byte[] content, Path anchor, String tempTag) throws IOException {
 		IOException late = enter("createNew", file);
-		boolean result = delegate.createNew(file, content);
+		boolean result = delegate.createNew(file, content, anchor, tempTag);
 		throwLate(late);
 		return result;
 	}
@@ -176,6 +178,14 @@ public final class FaultyFileLayer implements FileLayer {
 	public List<String> listNames(Path dir) throws IOException {
 		IOException late = enter("listNames", dir);
 		List<String> result = delegate.listNames(dir);
+		throwLate(late);
+		return result;
+	}
+
+	@Override
+	public List<String> listNamesWithTemps(Path dir) throws IOException {
+		IOException late = enter("listNamesWithTemps", dir);
+		List<String> result = delegate.listNamesWithTemps(dir);
 		throwLate(late);
 		return result;
 	}
@@ -214,6 +224,13 @@ public final class FaultyFileLayer implements FileLayer {
 	public void deleteOwnTemps(Path dir, Duration olderThan) throws IOException {
 		IOException late = enter("deleteOwnTemps", dir);
 		delegate.deleteOwnTemps(dir, olderThan);
+		throwLate(late);
+	}
+
+	@Override
+	public void deleteOldTemps(Path dir, Collection<String> names, Duration olderThan) throws IOException {
+		IOException late = enter("deleteOldTemps", dir);
+		delegate.deleteOldTemps(dir, names, olderThan);
 		throwLate(late);
 	}
 }

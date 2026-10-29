@@ -2052,7 +2052,7 @@ public final class SyncService {
 
 	private Link activate(String dir, ConnectMode mode) {
 		Path path = toPath(dir);
-		VersionStore shared = path == null ? null : new VersionStore(path.resolve(DATA), files);
+		VersionStore shared = path == null ? null : new VersionStore(path.resolve(DATA), files, path, this::machineId);
 		Link created = new Link(dir, path, shared, new SyncPositions(appDataDir.resolve(SYNC_STATE), dir));
 		created.connectMode = mode;
 		created.probeFirst = mode != null;

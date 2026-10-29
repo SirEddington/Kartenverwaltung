@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.store;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -12,8 +13,9 @@ import java.util.Optional;
  * den gemeinsamen Ordner im Netz. Die Schicht ist eine Schnittstelle, damit Tests Fehler und Abstürze zwischen
  * einzelnen Schritten nachstellen können.
  * <p>
- * Temporäre Dateien heißen {@code ~karv-<UUID>.tmp}. Alles, was mit {@code ~karv-} beginnt, ist für {@link #listNames}
- * unsichtbar. Die Schicht löscht nie Daten, sondern nur eigene temporäre Dateien.
+ * Temporäre Dateien heißen {@code ~karv-<UUID>.tmp}, mit Kennung des schreibenden Rechners {@code ~karv-<Kennung>-<UUID>.tmp}
+ * (siehe {@link #tempTagOf}). Alles, was mit {@code ~karv-} beginnt, ist für {@link #listNames} unsichtbar. Die Schicht
+ * löscht nie Daten, sondern nur eigene temporäre Dateien.
  */
 public interface FileLayer {
 
@@ -23,14 +25,32 @@ public interface FileLayer {
 	/** Endung aller temporären Dateien dieser Schicht. */
 	String TEMP_SUFFIX = ".tmp";
 
+	/** Die Länge einer UUID als Text ({@code 8-4-4-4-12}). */
+	int UUID_LENGTH = 36;
+
 	/**
-	 * Legt die Datei nur an, wenn sie noch nicht vorhanden ist (die Grundlage der Anspruchsdateien). Fehlende
-	 * Elternordner werden angelegt. Der Inhalt erscheint vollständig oder gar nicht, nie halb geschrieben.
+	 * Legt die Datei nur an, wenn sie noch nicht vorhanden ist (die Grundlage der Anspruchsdateien). Der Inhalt erscheint
+	 * vollständig oder gar nicht, nie halb geschrieben.
+	 * <p>
+	 * Ohne {@code anchor} werden fehlende Elternordner mit {@link java.nio.file.Files#createDirectories} angelegt. Mit
+	 * {@code anchor} (dem gemeinsamen Ordner selbst) darf die Datei nur darunter liegen; fehlende Ordner zwischen Anker und
+	 * Datei werden einzeln angelegt, der Anker nie: Ist er verschwunden, scheitert der Aufruf mit
+	 * {@link java.nio.file.NoSuchFileException}, und es wird nichts angelegt. Beide Pfade werden absolut und normalisiert
+	 * verglichen.
 	 *
+	 * @param anchor  der Ordner, unter dem angelegt wird und der selbst nie angelegt wird; {@code null} für keinen Anker
+	 * @param tempTag die Kennung im Namen der temporären Datei ({@code ~karv-<Kennung>-<UUID>.tmp}); {@code null} für eine
+	 *                Datei ohne Kennung ({@code ~karv-<UUID>.tmp})
 	 * @return {@code true}, wenn diese Schicht die Datei angelegt hat; {@code false}, wenn sie schon vorhanden war (der
 	 *         vorhandene Inhalt bleibt unverändert)
+	 * @throws IllegalArgumentException wenn {@code anchor} gesetzt ist und die Datei nicht darunter liegt
 	 */
-	boolean createNew(Path file, byte[] content) throws IOException;
+	boolean createNew(Path file, byte[] content, Path anchor, String tempTag) throws IOException;
+
+	/** Wie {@link #createNew(Path, byte[], Path, String)} ohne Anker und ohne Kennung: Fehlende Elternordner werden angelegt. */
+	default boolean createNew(Path file, byte[] content) throws IOException {
+		return createNew(file, content, null, null);
+	}
 
 	/** Der Inhalt der Datei; leer, wenn die Datei fehlt. Andere Fehler werden als {@link IOException} gemeldet. */
 	Optional<byte[]> read(Path file) throws IOException;
@@ -43,6 +63,9 @@ public interface FileLayer {
 	 * Ist der Ordner nicht vorhanden, ist die Liste leer.
 	 */
 	List<String> listNames(Path dir) throws IOException;
+
+	/** Wie {@link #listNames}, aber mit den {@code ~karv-*}-Einträgen: die Namen der temporären Dateien eingeschlossen. */
+	List<String> listNamesWithTemps(Path dir) throws IOException;
 
 	/**
 	 * Der ganze Verzeichnisbaum unter {@code root} in einem Durchlauf: jeder Ordner, auch ein leerer und {@code root}
@@ -73,4 +96,48 @@ public interface FileLayer {
 	 * {@code olderThan} nicht geändert wurden. Andere Dateien bleiben unberührt. Ein fehlender Ordner ist kein Fehler.
 	 */
 	void deleteOwnTemps(Path dir, Duration olderThan) throws IOException;
+
+	/**
+	 * Löscht aus dem Ordner nur die genannten Dateien, und nur wenn es eigene temporäre Dateien sind (Name beginnt mit
+	 * {@code ~karv-} und endet auf {@code .tmp}) und sie seit mehr als {@code olderThan} nicht geändert wurden. Alle
+	 * anderen Namen (auch solche mit Pfadtrennern) bleiben unberührt. Eine fehlende Datei oder ein fehlender Ordner ist
+	 * kein Fehler.
+	 *
+	 * @param names Dateinamen (keine Pfade) im Ordner
+	 */
+	void deleteOldTemps(Path dir, Collection<String> names, Duration olderThan) throws IOException;
+
+	/**
+	 * Die Kennung aus dem Namen einer temporären Datei {@code ~karv-<Kennung>-<UUID>.tmp}. Eine UUID hat 36 Zeichen; die
+	 * Kennung ist der Teil zwischen {@code ~karv-} und {@code -<UUID>.tmp} und darf selbst {@code -} enthalten.
+	 *
+	 * @return die Kennung; {@code null} für {@code ~karv-<UUID>.tmp} (ohne Kennung) und für fremde Namen
+	 */
+	static String tempTagOf(String fileName) {
+		if (fileName == null || !fileName.startsWith(TEMP_PREFIX) || !fileName.endsWith(TEMP_SUFFIX)) {
+			return null;
+		}
+		int end = fileName.length() - TEMP_SUFFIX.length();
+		int uuidStart = end - UUID_LENGTH;
+		int tagEnd = uuidStart - 1;
+		if (tagEnd <= TEMP_PREFIX.length() || fileName.charAt(tagEnd) != '-' || !isUuid(fileName, uuidStart, end)) {
+			return null;
+		}
+		return fileName.substring(TEMP_PREFIX.length(), tagEnd);
+	}
+
+	/** Ob {@code text[from, to)} wie eine UUID aussieht: {@code 8-4-4-4-12} kleingeschriebene Hexadezimalziffern. */
+	private static boolean isUuid(String text, int from, int to) {
+		if (to - from != UUID_LENGTH) {
+			return false;
+		}
+		for (int i = 0; i < UUID_LENGTH; i++) {
+			char c = text.charAt(from + i);
+			boolean dash = i == 8 || i == 13 || i == 18 || i == 23;
+			if (dash ? c != '-' : !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f')) {
+				return false;
+			}
+		}
+		return true;
+	}
 }

@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.function.Supplier;
 
 /**
  * Ein Bestand von Versions- und Anspruchsdateien: der lokale unter {@code <AppData>/data} oder der gemeinsame unter
@@ -31,19 +32,46 @@ public final class VersionStore {
 
 	private final Path dataRoot;
 	private final FileLayer files;
+	private final Path anchor;
+	private final Supplier<String> tempTag;
 
 	/**
+	 * Ein Bestand ohne Anker: Beim Schreiben werden fehlende Ordner angelegt, die temporären Dateien tragen keine Kennung.
+	 *
 	 * @param dataRoot der Ordner {@code data} dieses Bestands
 	 * @param files    die Dateischicht, über die gelesen und geschrieben wird
 	 */
 	public VersionStore(Path dataRoot, FileLayer files) {
+		this(dataRoot, files, null, null);
+	}
+
+	/**
+	 * @param dataRoot der Ordner {@code data} dieses Bestands
+	 * @param files    die Dateischicht, über die gelesen und geschrieben wird
+	 * @param anchor   der Ordner, in dem {@code data} liegt (beim gemeinsamen Bestand der gemeinsame Ordner selbst); er wird
+	 *                 beim Schreiben nie angelegt, nur {@code data} und tiefer. {@code null}: kein Anker
+	 * @param tempTag  liefert die Kennung für die Namen der temporären Dateien beim Schreiben (siehe
+	 *                 {@link FileLayer#createNew(Path, byte[], Path, String)}); {@code null}: keine Kennung
+	 */
+	public VersionStore(Path dataRoot, FileLayer files, Path anchor, Supplier<String> tempTag) {
 		this.dataRoot = dataRoot;
 		this.files = files;
+		this.anchor = anchor;
+		this.tempTag = tempTag;
 	}
 
 	/** Der Ordner {@code data} dieses Bestands. */
 	public Path dataRoot() {
 		return dataRoot;
+	}
+
+	/** Der Anker, unter dem dieser Bestand schreibt (nie angelegt); {@code null}, wenn er keinen hat. */
+	public Path anchor() {
+		return anchor;
+	}
+
+	private boolean create(Path file, byte[] bytes) throws IOException {
+		return files.createNew(file, bytes, anchor, tempTag == null ? null : tempTag.get());
 	}
 
 	/**
@@ -52,7 +80,7 @@ public final class VersionStore {
 	 * @return {@code true}, wenn sie angelegt wurde; {@code false}, wenn die Version schon da war (unverändert)
 	 */
 	public boolean writeVersion(UnitKey unit, VersionId id, byte[] bytes) throws IOException {
-		return files.createNew(versionFile(unit, id), bytes);
+		return create(versionFile(unit, id), bytes);
 	}
 
 	/** Die Bytes der Versionsdatei; leer, wenn es sie nicht gibt. */
@@ -68,7 +96,7 @@ public final class VersionStore {
 	 * @throws IllegalArgumentException wenn der Name weder {@code root} noch eine Versions-ID ist
 	 */
 	public boolean createClaim(UnitKey unit, String claimName, byte[] bytes) throws IOException {
-		return files.createNew(claimFile(unit, claimName), bytes);
+		return create(claimFile(unit, claimName), bytes);
 	}
 
 	/**
@@ -253,7 +281,7 @@ public final class VersionStore {
 	 * @throws IllegalArgumentException wenn der Pfad absolut ist oder den Datenordner verlässt
 	 */
 	public boolean createRelative(String rel, byte[] bytes) throws IOException {
-		return files.createNew(resolve(rel), bytes);
+		return create(resolve(rel), bytes);
 	}
 
 	/**

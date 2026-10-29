@@ -14,6 +14,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -30,10 +31,15 @@ import java.util.UUID;
 public final class NioFileLayer implements FileLayer {
 
 	@Override
-	public boolean createNew(Path file, byte[] content) throws IOException {
-		Path dir = parentOf(file);
-		Files.createDirectories(dir);
-		Path temp = writeTemp(dir, content);
+	public boolean createNew(Path file, byte[] content, Path anchor, String tempTag) throws IOException {
+		Path dir;
+		if (anchor == null) {
+			dir = parentOf(file);
+			Files.createDirectories(dir);
+		} else {
+			dir = createLevelsBelow(anchor, file);
+		}
+		Path temp = writeTemp(dir, content, tempTag);
 		try {
 			Files.move(temp, file);
 			return true;
@@ -62,11 +68,20 @@ public final class NioFileLayer implements FileLayer {
 
 	@Override
 	public List<String> listNames(Path dir) throws IOException {
+		return list(dir, false);
+	}
+
+	@Override
+	public List<String> listNamesWithTemps(Path dir) throws IOException {
+		return list(dir, true);
+	}
+
+	private static List<String> list(Path dir, boolean withTemps) throws IOException {
 		List<String> names = new ArrayList<>();
 		try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
 			for (Path entry : stream) {
 				String name = entry.getFileName().toString();
-				if (!name.startsWith(TEMP_PREFIX)) {
+				if (withTemps || !name.startsWith(TEMP_PREFIX)) {
 					names.add(name);
 				}
 			}
@@ -116,7 +131,7 @@ public final class NioFileLayer implements FileLayer {
 	public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
 		Path dir = parentOf(file);
 		Path corrupt = dir.resolve(corruptName);
-		Path temp = writeTemp(dir, good);
+		Path temp = writeTemp(dir, good, null);
 		try {
 			Files.move(file, corrupt);
 		} catch (IOException | RuntimeException e) {
@@ -161,6 +176,26 @@ public final class NioFileLayer implements FileLayer {
 		}
 	}
 
+	@Override
+	public void deleteOldTemps(Path dir, Collection<String> names, Duration olderThan) throws IOException {
+		Instant limit = Instant.now().minus(olderThan);
+		for (String name : names) {
+			if (!name.startsWith(TEMP_PREFIX) || !name.endsWith(TEMP_SUFFIX) || name.indexOf('/') >= 0
+					|| name.indexOf('\\') >= 0) {
+				continue;
+			}
+			Path file = dir.resolve(name);
+			try {
+				BasicFileAttributes attrs = Files.readAttributes(file, BasicFileAttributes.class);
+				if (attrs.isRegularFile() && attrs.lastModifiedTime().toInstant().isBefore(limit)) {
+					Files.deleteIfExists(file);
+				}
+			} catch (NoSuchFileException e) {
+				// die Datei ist schon weg (oder der Ordner fehlt): nichts zu löschen
+			}
+		}
+	}
+
 	/** Ein Durchlauf, der Ordner und Dateien, die fehlen oder währenddessen verschwinden, übergeht; jeden anderen Fehler wirft er. */
 	private abstract static class MissingTolerantVisitor extends SimpleFileVisitor<Path> {
 		@Override
@@ -178,9 +213,42 @@ public final class NioFileLayer implements FileLayer {
 		return parent != null ? parent : file.toAbsolutePath();
 	}
 
+	/**
+	 * Legt die fehlenden Ordner zwischen {@code anchor} und dem Ordner der Datei einzeln an, nie den Anker selbst. Fehlt
+	 * der Anker oder eine Ebene darüber, scheitert {@link Files#createDirectory} mit {@link NoSuchFileException}, ohne
+	 * etwas anzulegen. Eine Ebene, die schon vorhanden ist (auch eine, die ein anderer Rechner gerade anlegt), ist kein
+	 * Fehler.
+	 *
+	 * @return der Ordner der Datei
+	 * @throws IllegalArgumentException wenn die Datei nicht unter dem Anker liegt
+	 */
+	private static Path createLevelsBelow(Path anchor, Path file) throws IOException {
+		Path root = anchor.toAbsolutePath().normalize();
+		Path dir = parentOf(file).normalize();
+		if (!dir.startsWith(root)) {
+			throw new IllegalArgumentException("Die Datei liegt nicht unter dem Anker: " + file + " (Anker " + anchor + ")");
+		}
+		Path level = root;
+		for (Path part : root.relativize(dir)) {
+			if (part.toString().isEmpty()) {
+				break; // die Datei liegt unmittelbar im Anker
+			}
+			level = level.resolve(part);
+			try {
+				Files.createDirectory(level);
+			} catch (FileAlreadyExistsException e) {
+				if (!Files.isDirectory(level)) {
+					throw e;
+				}
+			}
+		}
+		return dir;
+	}
+
 	/** Schreibt den Inhalt in eine neue temporäre Datei im Ordner; bei einem Fehler bleibt keine zurück. */
-	private static Path writeTemp(Path dir, byte[] content) throws IOException {
-		Path temp = dir.resolve(TEMP_PREFIX + UUID.randomUUID() + TEMP_SUFFIX);
+	private static Path writeTemp(Path dir, byte[] content, String tempTag) throws IOException {
+		String tag = tempTag == null || tempTag.isEmpty() ? "" : tempTag + "-";
+		Path temp = dir.resolve(TEMP_PREFIX + tag + UUID.randomUUID() + TEMP_SUFFIX);
 		try {
 			Files.write(temp, content, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
 		} catch (IOException | RuntimeException e) {
