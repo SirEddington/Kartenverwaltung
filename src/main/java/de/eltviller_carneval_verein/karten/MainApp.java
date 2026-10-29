@@ -37,6 +37,7 @@ import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LiveUpdates;
 import de.eltviller_carneval_verein.karten.ui.LiveValidator;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
+import de.eltviller_carneval_verein.karten.ui.StatusLabel;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
@@ -46,6 +47,7 @@ import javafx.concurrent.Task;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
@@ -55,6 +57,7 @@ import javafx.scene.control.ProgressBar;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
@@ -227,7 +230,7 @@ public class MainApp extends Application {
 		ConflictActions conflictActions = new ConflictActions(repository, halls, ChangeTracker.events(), ChangeTracker.halls(),
 				EditingUnits.getInstance(), sync, EventSaver::save, HallSaver::save);
 		MainApp.conflictActions = conflictActions;
-		conflictList = new ConflictList(sync::openConflicts, ConflictLabels.of(repository, halls), conflictActions::isAdopted,
+		conflictList = new ConflictList(sync::openConflicts, ConflictLabels.of(repository, halls, sync), conflictActions::isAdopted,
 				halls::findById);
 		conflictSync = sync;
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
@@ -492,8 +495,9 @@ public class MainApp extends Application {
 	 * Legt das ECV-Wappen groß und dezent transparent hinter den eigentlichen
 	 * Bildschirminhalt, damit es auf jedem Screen einheitlich im Hintergrund
 	 * erscheint, statt es in jeder FXML einzeln nachzubauen. Skaliert mit der
-	 * tatsächlichen Fenstergröße mit. Mit {@code conflictHint} steht unter dem Inhalt der Hinweis auf offene Konflikte,
-	 * und er wird der Hinweis, den die App auffrischt.
+	 * tatsächlichen Fenstergröße mit. Mit {@code conflictHint} steht der Hinweis auf offene Konflikte in der Fußzeile vor
+	 * den Meldungen ({@link StatusLabel}; bei "Anzeige" also zwischen beiden), in einer Ansicht ohne Fußzeile unter dem
+	 * Inhalt; er wird der Hinweis, den die App auffrischt.
 	 */
 	private static Parent wrapWithBackground(Parent content, boolean conflictHint) {
 		ImageView background = new ImageView(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/wappen.png")));
@@ -504,21 +508,42 @@ public class MainApp extends Application {
 		VBox.setVgrow(content, Priority.ALWAYS);
 		VBox screen = new VBox(content);
 		if (conflictHint) {
-			// unter dem Inhalt die Zeile mit dem Hinweis auf offene Konflikte; ohne Konflikte nimmt sie keinen Platz
+			// ohne Konflikte nimmt der Hinweis keinen Platz, weder in der Fußzeile noch als eigene Zeile
 			ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount, MainApp::openConflictDialog);
 			conflictIndicator = indicator;
-			HBox indicatorBar = new HBox(indicator);
-			indicatorBar.setAlignment(Pos.CENTER_LEFT);
-			indicatorBar.setPadding(new Insets(0, 20, 8, 20));
-			indicatorBar.visibleProperty().bind(indicator.visibleProperty());
-			indicatorBar.managedProperty().bind(indicator.managedProperty());
-			screen.getChildren().add(indicatorBar);
+			StatusLabel messages = findStatusLabel(content);
+			if (messages != null && messages.getParent() instanceof Pane footer) {
+				footer.getChildren().add(footer.getChildren().indexOf(messages), indicator);
+			} else {
+				HBox indicatorBar = new HBox(indicator);
+				indicatorBar.setAlignment(Pos.CENTER_LEFT);
+				indicatorBar.setPadding(new Insets(0, 20, 8, 20));
+				indicatorBar.visibleProperty().bind(indicator.visibleProperty());
+				indicatorBar.managedProperty().bind(indicator.managedProperty());
+				screen.getChildren().add(indicatorBar);
+			}
 		}
 
 		StackPane wrapper = new StackPane(background, screen);
 		background.fitHeightProperty().bind(wrapper.heightProperty().multiply(0.85));
 		StackPane.setAlignment(background, Pos.CENTER);
 		return wrapper;
+	}
+
+	/** Die Meldungen der Fußzeile im Inhalt; {@code null}, wenn die Ansicht keine Fußzeile mit Meldungen hat. */
+	private static StatusLabel findStatusLabel(Parent parent) {
+		for (Node child : parent.getChildrenUnmodifiable()) {
+			if (child instanceof StatusLabel label) {
+				return label;
+			}
+			if (child instanceof Parent nested) {
+				StatusLabel found = findStatusLabel(nested);
+				if (found != null) {
+					return found;
+				}
+			}
+		}
+		return null;
 	}
 
 	/**

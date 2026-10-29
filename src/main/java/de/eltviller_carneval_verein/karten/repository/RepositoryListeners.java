@@ -2,9 +2,12 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 
 /**
  * Die Listener eines Repositorys. Eine Ausnahme in einem Listener wird nur geloggt: Die Datei ist zu diesem
@@ -40,6 +43,10 @@ final class RepositoryListeners<T> {
 
 	void notifyChangedByOthers(T entity, ForeignBatch<T> batch) {
 		notifyEach(listener -> listener.changedByOthers(entity, batch), "nach dem Einarbeiten fremder Stände", entity);
+	}
+
+	void notifyChangedElsewhere(T entity, Set<UnitKey> units) {
+		notifyEach(listener -> listener.changedElsewhere(entity, units), "nach einer Änderung außerhalb der Ansichten", entity);
 	}
 
 	void notifyAddedByOthers(T entity) {

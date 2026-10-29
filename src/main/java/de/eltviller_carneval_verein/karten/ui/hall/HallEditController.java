@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.hall;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import de.eltviller_carneval_verein.karten.MainApp;
@@ -15,6 +16,7 @@ import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
@@ -75,6 +77,12 @@ public class HallEditController {
 		@Override
 		public void changedByOthers(Hall changed, ForeignBatch<Hall> batch) {
 			reloading.changedByOthers(changed, batch);
+		}
+
+		// "Meine Fassung übernehmen" ersetzt die Halle im Cache durch ein anderes Objekt
+		@Override
+		public void changedElsewhere(Hall changed, Set<UnitKey> units) {
+			reloading.changedElsewhere(changed, units);
 		}
 
 		// Keine Prüfung des Bearbeitungsmodus nötig: Im Bearbeitungsmodus ist die Halle in Bearbeitung, und das Repository stellt

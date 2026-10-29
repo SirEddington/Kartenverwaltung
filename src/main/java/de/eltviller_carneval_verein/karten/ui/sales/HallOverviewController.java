@@ -16,6 +16,7 @@ import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
@@ -90,6 +91,11 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		@Override
 		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
 			refreshing.changedByOthers(event, batch);
+		}
+
+		@Override
+		public void changedElsewhere(Event event, Set<UnitKey> units) {
+			refreshing.changedElsewhere(event, units);
 		}
 	};
 	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(

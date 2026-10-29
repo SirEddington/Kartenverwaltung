@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiPredicate;
@@ -171,6 +172,12 @@ public final class ConflictList {
 		seen.addAll(delivered);
 	}
 
+	/** Die Erklärung einer Elternlöschung: wie viele eigene Einträge darunter standen, die der Löschende nicht kannte. */
+	public static String deletionText(int count) {
+		String entries = count == 1 ? "stand 1 Eintrag von dir, den" : "standen " + count + " Einträge von dir, die";
+		return "Darunter " + entries + " der andere Rechner nicht kannte. Der Stand lässt sich aus dem Verlauf wiederherstellen.";
+	}
+
 	/** Der Hinweis der Fußzeile: {@code 1 Konflikt offen} bzw. {@code <N> Konflikte offen}. */
 	public static String indicatorText(int count) {
 		return count == 1 ? "1 Konflikt offen" : count + " Konflikte offen";
@@ -259,7 +266,8 @@ public final class ConflictList {
 	/**
 	 * Die Werte einer Gruppe als Text: die gesetzten Werte, durch Komma getrennt; ohne Werte {@code (leer)}. Halle und
 	 * Bestuhlung stehen mit ihren Namen da (unbekannt wie in den Tabellen als Strich), der Zahlstatus mit seinem Text aus
-	 * den Ansichten; die Sitz-ID fehlt, weil Reihe, Tisch und Sitz daneben stehen.
+	 * den Ansichten, Preis und Kassenbetrag als Betrag ({@code 35,00 €}); die Sitz-ID fehlt, weil Reihe, Tisch und Sitz
+	 * daneben stehen.
 	 */
 	private String valueText(ObjectNode values) {
 		List<String> parts = new ArrayList<>();
@@ -272,6 +280,9 @@ public final class ConflictList {
 			case "hallId" -> EntityLabels.hallDisplayName(findHall.apply(value.asText()));
 			case "seatingPlanId" -> planName(values.path("hallId").asText(null), value.asText());
 			case "paymentStatus" -> paymentText(value.asText());
+			// wie in den Tabellen (GermanDecimalStringConverter), mit Währung
+			case "price", "actualCashAmount" ->
+				value.isNumber() ? String.format(Locale.GERMANY, "%.2f €", value.asDouble()) : value.asText();
 			default -> value.isBoolean() ? (value.asBoolean() ? "ja" : "nein") : value.asText();
 			};
 			if (!text.isBlank()) {

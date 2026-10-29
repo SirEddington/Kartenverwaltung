@@ -98,6 +98,11 @@ public final class CustomerDisplay {
 		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
 			redrawing.changedByOthers(event, batch);
 		}
+
+		@Override
+		public void changedElsewhere(Event event, Set<UnitKey> units) {
+			redrawing.changedElsewhere(event, units);
+		}
 	};
 	// Ersetzt oder ändert ein anderer Rechner die Halle der gezeigten Vorstellung, zeichnet das Fenster neu (die Halle wird über die ID gesucht)
 	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(this::touchesShownHall, this::redrawIfAttached);

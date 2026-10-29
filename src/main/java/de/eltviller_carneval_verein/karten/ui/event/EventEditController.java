@@ -5,6 +5,7 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -24,6 +25,7 @@ import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
@@ -201,6 +203,11 @@ public class EventEditController {
 		@Override
 		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
 			refreshing.changedByOthers(event, batch);
+		}
+
+		@Override
+		public void changedElsewhere(Event event, Set<UnitKey> units) {
+			refreshing.changedElsewhere(event, units);
 		}
 
 		@Override

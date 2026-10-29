@@ -81,6 +81,21 @@ class LiveViewsTest {
 	}
 
 	@Test
+	void changeElsewhereRefreshesLikeForeignChanges() {
+		RepositoryListener<Event> listener = listener(LiveViews.ofTypes(UnitType.BOOKING));
+		Event event = new Event();
+
+		listener.changedElsewhere(event, Set.of(HALL));
+		tick();
+		assertEquals(0, refreshes, "no relevant unit");
+
+		listener.changedElsewhere(event, Set.of(BOOKING));
+		listener.changedByOthers(event, batch(BOOKING));
+		tick();
+		assertEquals(1, refreshes, "one refresh per tick");
+	}
+
+	@Test
 	void addedAndRemovedAlwaysRefresh() {
 		RepositoryListener<Event> listener = listener(units -> false);
 		Event event = new Event();

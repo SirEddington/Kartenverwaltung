@@ -1,5 +1,9 @@
 package de.eltviller_carneval_verein.karten.repository;
 
+import java.util.Set;
+
+import de.eltviller_carneval_verein.karten.store.UnitKey;
+
 /**
  * Wird von einem Repository ({@link StoreEventRepository}, {@link StoreHallRepository}) nach jedem Speichern oder
  * Löschen aufgerufen, egal von welcher Stelle aus gespeichert wurde. So kann der Änderungsmelder den gespeicherten
@@ -30,6 +34,15 @@ public interface RepositoryListener<T> {
 	 * {@code batch} nennt die Einheiten und spielt sie auf einer Kopie nach.
 	 */
 	default void changedByOthers(T entity, ForeignBatch<T> batch) {
+	}
+
+	/**
+	 * Eine Stelle außerhalb der Ansichten (der Sammel-Dialog für Konflikte) hat die Entität geändert und gespeichert;
+	 * {@link #saved} kam schon. Die Ansichten frischen sich auf wie nach fremden Ständen, sonst zeigten sie den alten Stand.
+	 *
+	 * @param units die geänderten Einheiten
+	 */
+	default void changedElsewhere(T entity, Set<UnitKey> units) {
 	}
 
 	/** Ein anderer Rechner hat die Entität angelegt oder wiederbelebt; sie steht jetzt im Cache. */

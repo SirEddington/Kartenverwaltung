@@ -59,7 +59,8 @@ public final class LiveViews {
 	 * Ein Listener, der fremde Änderungen sammelt und die Ansicht einmal je Takt auffrischt: Alle Rückrufe bis zum nächsten
 	 * Lauf von {@code later} (in der App {@code Platform::runLater}) ergeben höchstens ein {@code refresh}, und nur wenn
 	 * mindestens einer von Belang ist. Bei {@code changedByOthers} entscheiden die gemeldeten Einheiten
-	 * ({@link ForeignBatch#units()}), ein fremd angelegter oder gelöschter Eintrag ist immer von Belang. Alles auf dem FX-Thread.
+	 * ({@link ForeignBatch#units()}), ebenso bei {@code changedElsewhere} (eine Aktion des Sammel-Dialogs); ein fremd
+	 * angelegter oder gelöschter Eintrag ist immer von Belang. Alles auf dem FX-Thread.
 	 *
 	 * @param later    plant einen Lauf für später ein
 	 * @param relevant ob unter den gemeldeten Einheiten eine für die Ansicht von Belang ist
@@ -71,6 +72,13 @@ public final class LiveViews {
 			@Override
 			public void changedByOthers(T entity, ForeignBatch<T> batch) {
 				if (relevant.test(batch.units())) {
+					tick.request();
+				}
+			}
+
+			@Override
+			public void changedElsewhere(T entity, Set<UnitKey> units) {
+				if (relevant.test(units)) {
 					tick.request();
 				}
 			}

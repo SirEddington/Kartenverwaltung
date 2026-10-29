@@ -50,8 +50,9 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Die Aktionen der Zeilen des Sammel-Dialogs ohne JavaFX: ob eine Aktion gerade möglich ist ({@link #availability}) und
- * was sie tut. Jede Aktion ändert das Modell des Verlierers, speichert sofort und bestätigt dann die Zeile
- * ({@link SyncService#acknowledge}); scheitert sie, wird das Modell zurückgesetzt, nichts bestätigt, und der Grund steht in
+ * was sie tut. Jede Aktion ändert das Modell des Verlierers, speichert sofort, sagt den Ansichten, welche Einheiten sich
+ * geändert haben ({@code announceChange} der Repositories), und bestätigt dann die Zeile ({@link SyncService#acknowledge});
+ * scheitert sie, wird das Modell zurückgesetzt, nichts bestätigt, und der Grund steht in
  * der {@link IllegalStateException} für die Zeile.
  * <p>
  * Eine Aktion arbeitet immer auf dem eingearbeiteten Stand: Hat das Event bzw. die Halle ungespeicherte Änderungen oder wird
@@ -261,6 +262,7 @@ public final class ConflictActions {
 			presentation.getBookings().clear();
 			presentation.getBookings().addAll(bookingsBefore);
 		});
+		events.announceChange(event, Set.of(seatUnit, moved));
 		acknowledge(row);
 	}
 
@@ -309,6 +311,51 @@ public final class ConflictActions {
 			return fallback;
 		}
 		return value.isNull() ? null : value.asText();
+	}
+
+	/**
+	 * Die beiden Fassungen eines Hallenkonflikts zum Vergleich: je Fassung der Name und die Bestuhlungen mit der Zahl ihrer
+	 * Tische und Sitze. Stimmen die Bestuhlungen darin überein, sagt eine dritte Zeile, dass sich die Fassungen anders
+	 * unterscheiden.
+	 *
+	 * @return die Zeilen; leer bei einer anderen Aktion oder wenn eine der Fassungen fehlt
+	 */
+	public List<String> hallVersions(Row row) {
+		if (row.action() != Action.TAKE_MY_HALL) {
+			return List.of();
+		}
+		Hall current = halls.findById(row.conflict().unit().hallId());
+		Version version = dropped(row.conflict());
+		if (current == null || version == null) {
+			return List.of();
+		}
+		Hall mine = halls.readHall(version.payload());
+		List<String> lines = new ArrayList<>();
+		lines.add("Deine Fassung: " + hallText(mine));
+		lines.add("Gültig: " + hallText(current));
+		if (plansText(mine).equals(plansText(current))) {
+			lines.add("Gleich viele Tische und Sitze; die Fassungen unterscheiden sich in Namen, Anordnung oder Maßen.");
+		}
+		return lines;
+	}
+
+	/** {@code „Name“; Bestuhlung: 2 Tische, 12 Sitze; …}. */
+	private static String hallText(Hall hall) {
+		return "„" + EntityLabels.nameOrPlaceholder(hall.getName()) + "“; " + plansText(hall);
+	}
+
+	private static String plansText(Hall hall) {
+		if (hall.getSeatingPlans() == null || hall.getSeatingPlans().isEmpty()) {
+			return "keine Bestuhlung";
+		}
+		List<String> plans = new ArrayList<>();
+		for (SeatingPlan plan : hall.getSeatingPlans()) {
+			int tables = plan.getTables().size();
+			int seats = plan.getSeats().size();
+			plans.add(EntityLabels.nameOrPlaceholder(plan.getName()) + ": " + tables + (tables == 1 ? " Tisch, " : " Tische, ")
+					+ seats + (seats == 1 ? " Sitz" : " Sitze"));
+		}
+		return String.join("; ", plans);
 	}
 
 	/** Die Buchungen auf Sitzen, die die eigene Fassung der Halle nicht mehr hat, samt Hinweis; {@code null} ohne solche. */
@@ -369,6 +416,7 @@ public final class ConflictActions {
 				e.addSuppressed(undoFailed);
 			}
 		});
+		events.announceChange(event, Set.of(unit));
 		// mehrere Gruppen: Die Zeile bleibt offen, bis jede übernommen ist (oder der Nutzer sie mit "Erledigt" schließt)
 		if (row.conflict().note().fields().size() == 1 || allAdopted(row.conflict())) {
 			acknowledge(row);
@@ -444,6 +492,7 @@ public final class ConflictActions {
 				throw new IllegalStateException("Die Halle wurde nicht gespeichert.");
 			}
 		}, e -> halls.replaceCachedHall(current));
+		halls.announceChange(mine, Set.of(unit));
 		acknowledge(row);
 	}
 
@@ -495,6 +544,7 @@ public final class ConflictActions {
 				restore.presentation().getBookings().remove(added[0]);
 			}
 		});
+		events.announceChange(restore.event(), Set.of(unit));
 		acknowledge(row);
 	}
 

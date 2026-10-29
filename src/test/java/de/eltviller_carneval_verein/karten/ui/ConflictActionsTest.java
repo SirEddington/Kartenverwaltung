@@ -42,6 +42,7 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
 import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.repository.TestRepositories;
@@ -905,6 +906,88 @@ class ConflictActionsTest {
 
 		assertNotNull(note);
 		assertTrue(note.contains("1 Buchung mit Daten in Vorstellung Freitag (Event Prunksitzung)"), note);
+	}
+
+	/** Merkt sich, welche Einheiten ein Repository als "anderswo geändert" meldet. */
+	private static final class Announced<T> implements RepositoryListener<T> {
+		final List<Set<UnitKey>> calls = new ArrayList<>();
+
+		@Override
+		public void changedElsewhere(T entity, Set<UnitKey> units) {
+			calls.add(units);
+		}
+	}
+
+	@Test
+	void actionsTellTheViewsWhatChanged() throws IOException {
+		Announced<Event> eventViews = new Announced<>();
+		b.repository.addListener(eventViews);
+
+		Row sale = doubleSale();
+		Seat free = b.plan().getSeats().get(2);
+		b.actions().assignPlace(sale, free);
+
+		assertEquals(1, eventViews.calls.size());
+		assertTrue(eventViews.calls.get(0).contains(UnitKey.booking(b.event.getId(), b.friday().getId(), free.getId())),
+				"der zugewiesene Sitz: " + eventViews.calls);
+		assertTrue(eventViews.calls.get(0).contains(sale.conflict().note().moved()), "die Buchung ohne Platz");
+
+		Row comment = commentConflict();
+		b.actions().takeMyValue(comment, "comment");
+
+		assertEquals(Set.of(b.seatUnit(0)), eventViews.calls.get(1));
+	}
+
+	@Test
+	void failedActionTellsTheViewsNothing() {
+		Announced<Event> eventViews = new Announced<>();
+		b.repository.addListener(eventViews);
+		Row row = commentConflict();
+
+		assertThrows(IllegalStateException.class, () -> b.actions(saved -> false, hall -> true).takeMyValue(row, "comment"));
+
+		assertEquals(List.of(), eventViews.calls);
+	}
+
+	@Test
+	void takeMyHallTellsTheHallViews() {
+		Announced<Hall> hallViews = new Announced<>();
+		b.halls.addListener(hallViews);
+		Row row = hallConflict();
+
+		b.actions().takeMyHall(row);
+
+		assertEquals(List.of(Set.of(UnitKey.hall(a.hall.getId()))), hallViews.calls);
+	}
+
+	@Test
+	void hallVersionsDescribeBothSeatingPlans() {
+		String hallId = a.hall.getId();
+		a.hall.setName("Halle A");
+		a.halls.saveHall(a.hall);
+		Hall mine = b.halls.findById(hallId);
+		SeatingPlan plan = mine.getSeatingPlans().get(0);
+		plan.setName("Voll");
+		plan.deleteTable(plan.getTables().get(0));
+		b.halls.saveHall(mine);
+		settle();
+		Row row = b.onlyRow();
+
+		List<String> lines = b.actions().hallVersions(row);
+
+		assertEquals(List.of("Deine Fassung: „Stadthalle“; Voll: 1 Tisch, 3 Sitze",
+				"Gültig: „Halle A“; Bestuhlung 1: 2 Tische, 6 Sitze"), lines);
+	}
+
+	@Test
+	void hallVersionsWithTheSameCountsSayThatTheLayoutDiffers() {
+		Row row = hallConflict();
+
+		List<String> lines = b.actions().hallVersions(row);
+
+		assertEquals(3, lines.size(), lines.toString());
+		assertEquals("Gleich viele Tische und Sitze; die Fassungen unterscheiden sich in Namen, Anordnung oder Maßen.",
+				lines.get(2));
 	}
 
 	@Test

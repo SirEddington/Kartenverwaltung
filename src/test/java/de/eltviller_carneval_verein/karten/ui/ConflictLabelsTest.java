@@ -3,9 +3,16 @@ package de.eltviller_carneval_verein.karten.ui;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.time.Instant;
+import java.util.List;
 import java.util.function.Function;
 
 import org.junit.jupiter.api.Test;
+
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
@@ -16,6 +23,8 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.store.Version;
+import de.eltviller_carneval_verein.karten.store.VersionId;
 
 /** Die Anzeigenamen der Einheiten im Sammel-Dialog. */
 class ConflictLabelsTest {
@@ -86,6 +95,42 @@ class ConflictLabelsTest {
 		assertNull(labels().apply(UnitKey.event("gone")));
 		assertNull(labels().apply(UnitKey.presentation("gone", "p1")));
 		assertNull(labels().apply(UnitKey.hall("gone")));
+	}
+
+	@Test
+	void deletedEventAndPresentationAreNamedByTheirLastVersion() {
+		Function<UnitKey, String> former = unit -> switch (unit.type()) {
+		case EVENT -> "Kappensitzung";
+		case PRESENTATION -> "Vorstellung 4";
+		default -> null;
+		};
+		Function<UnitKey, String> labels = ConflictLabels.of(id -> event.getId().equals(id) ? event : null, unit -> null,
+				id -> null, former);
+
+		assertEquals("Prunksitzung › Vorstellung 4", labels.apply(UnitKey.presentation(event.getId(), "gone")));
+		assertEquals("Prunksitzung › Freitag", labels.apply(UnitKey.presentation(event.getId(), friday.getId())),
+				"was das Modell kennt, geht vor");
+		assertEquals("Kappensitzung", labels.apply(UnitKey.event("gone")));
+		assertEquals("Kappensitzung › Vorstellung 4", labels.apply(UnitKey.presentation("gone", "p1")));
+	}
+
+	@Test
+	void formerNameIsTheNameOfTheNewestLiveVersion() {
+		UnitKey unit = UnitKey.presentation("ev", "pr");
+		List<Version> history = List.of(version(1, false, "Vorstellung 3"), version(2, false, "Vorstellung 4"),
+				version(3, true, null));
+
+		assertEquals("Vorstellung 4", ConflictLabels.formerName(key -> history).apply(unit));
+		assertNull(ConflictLabels.formerName(key -> List.of(version(1, true, null))).apply(unit), "nie mit Namen gespeichert");
+		assertNull(ConflictLabels.formerName(key -> {
+			throw new UncheckedIOException(new IOException("weg"));
+		}).apply(unit), "unlesbar heißt: kein Name");
+	}
+
+	private static Version version(int n, boolean deleted, String name) {
+		ObjectNode payload = deleted ? null : JsonNodeFactory.instance.objectNode().put("name", name);
+		return new Version(1, VersionId.of(String.format("%011d-abcdefgh-0001", n)), List.of(), "m", "Kasse", null,
+				Instant.ofEpochMilli(n), "save-" + n, deleted, payload);
 	}
 
 	@Test

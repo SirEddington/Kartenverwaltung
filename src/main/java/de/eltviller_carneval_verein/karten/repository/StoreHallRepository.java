@@ -310,6 +310,14 @@ public class StoreHallRepository implements HallRepository {
 	}
 
 	/**
+	 * Sagt den Listenern, dass eine Stelle außerhalb der Ansichten die Halle geändert und gespeichert hat
+	 * ({@link RepositoryListener#changedElsewhere}).
+	 */
+	public void announceChange(Hall hall, Set<UnitKey> units) {
+		listeners.notifyChangedElsewhere(hall, Set.copyOf(units));
+	}
+
+	/**
 	 * Ersetzt die Halle mit derselben ID im Cache durch ein anderes Objekt, z. B. nach dem Wiederherstellen eines
 	 * früheren Zustands. Der Versionsspeicher bleibt unberührt, und es wird kein Listener benachrichtigt. Ist die Halle
 	 * nicht im Cache (noch nie gespeichert), passiert nichts.

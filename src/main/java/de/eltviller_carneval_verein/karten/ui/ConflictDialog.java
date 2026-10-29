@@ -56,6 +56,10 @@ public final class ConflictDialog {
 	private static final Logger LOG = Logger.getLogger(ConflictDialog.class.getName());
 	/** Was von der Breite einer Spalte für den Rand der Zelle abgeht. */
 	private static final double CELL_PADDING = 24;
+	/** Alle Spalten nebeneinander (zusammen 1145) samt Rand und Rollbalken; das Hauptfenster ist mindestens 1250 breit. */
+	private static final double MIN_WIDTH = 1200;
+	/** Einleitung, Kopfzeile und etwa zwei Zeilen. */
+	private static final double MIN_HEIGHT = 320;
 	private static final String TAKE_VALUE = "Meinen Wert übernehmen";
 	private static final String TAKE_HALL = "Meine Fassung übernehmen";
 
@@ -94,6 +98,8 @@ public final class ConflictDialog {
 		intro.setWrapText(true);
 		table.setPlaceholder(new Label("Keine offenen Konflikte"));
 		table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+		// Zeilen sind nicht auswählbar: Es gibt nichts zu wählen, und die Auswahlfarbe verdeckte die Schaltflächen
+		table.setSelectionModel(null);
 		table.getColumns().add(column("Art", 110, (row, col) -> wrapped(kindText(row), col)));
 		table.getColumns().add(column("Eintrag", 190, (row, col) -> wrapped(row.entry(), col)));
 		table.getColumns().add(column("Gegenseite", 120, (row, col) -> wrapped(row.counterpart(), col)));
@@ -109,6 +115,8 @@ public final class ConflictDialog {
 		Scene scene = new Scene(root, 1230, 520);
 		scene.getStylesheets().add(ConflictDialog.class.getResource("style.css").toExternalForm());
 		stage.setScene(scene);
+		stage.setMinWidth(MIN_WIDTH);
+		stage.setMinHeight(MIN_HEIGHT);
 		// Was der Nutzer in den Editoren tat, während der Dialog offen war, ändert, was möglich ist
 		stage.focusedProperty().addListener((observable, was, now) -> {
 			if (now) {
@@ -191,6 +199,8 @@ public final class ConflictDialog {
 			}
 			errors.keySet().retainAll(keys);
 			table.getItems().setAll(rows);
+			// Gleiche Zeilen (Records) zeichnen die Zellen nicht neu; Verfügbarkeit, Zusatzzeilen und Fehler können sich geändert haben
+			table.refresh();
 		});
 		// die Tabelle zeigt jetzt alles, was die Liste geliefert hat
 		list.markSeen();
@@ -210,9 +220,7 @@ public final class ConflictDialog {
 		List<String> lines = new ArrayList<>();
 		ConflictNote note = row.conflict().note();
 		if (note == null) {
-			int count = row.conflict().deletion().affected().size();
-			lines.add("Darunter standen " + count + (count == 1 ? " Eintrag" : " Einträge")
-					+ " von dir, die der andere Rechner nicht kannte. Der Stand lässt sich aus dem Verlauf wiederherstellen.");
+			lines.add(ConflictList.deletionText(row.conflict().deletion().affected().size()));
 			return lines;
 		}
 		switch (note.kind()) {
@@ -237,7 +245,15 @@ public final class ConflictDialog {
 		}
 		case UNMERGED -> lines.add("Die Änderungen ließen sich nicht zusammenführen; der Stand der anderen Seite gilt.");
 		case FIELDS -> {
-			// die Gruppen stehen in den Feldzeilen
+			// die Gruppen stehen in den Feldzeilen; eine Halle zeigt statt ihres Namens beide Fassungen
+			if (row.action() == ConflictList.Action.TAKE_MY_HALL) {
+				try {
+					lines.addAll(actions.hallVersions(row));
+				} catch (RuntimeException e) {
+					// dann steht nur die Feldzeile mit den Namen da
+					LOG.log(Level.WARNING, "Die Fassungen einer Halle ließen sich nicht beschreiben", e);
+				}
+			}
 		}
 		}
 		return lines;
@@ -294,11 +310,14 @@ public final class ConflictDialog {
 	private Node valuesCell(Row row, TableColumn<Row, Row> column) {
 		VBox box = new VBox(4);
 		ConflictKey key = row.conflict().key();
-		for (FieldRow field : row.fields()) {
+		List<String> lines = details.getOrDefault(key, List.of());
+		// bei einer Halle nennen die Zusatzzeilen beide Fassungen; die Feldzeile hätte nur die Namen
+		List<FieldRow> fields = row.action() == ConflictList.Action.TAKE_MY_HALL && !lines.isEmpty() ? List.of() : row.fields();
+		for (FieldRow field : fields) {
 			String text = field.label() + ": dein Wert: " + field.mine() + " / gültig: " + field.valid();
 			box.getChildren().add(wrapped(text, column));
 		}
-		for (String line : details.getOrDefault(key, List.of())) {
+		for (String line : lines) {
 			box.getChildren().add(wrapped(line, column));
 		}
 		String error = errors.get(key);

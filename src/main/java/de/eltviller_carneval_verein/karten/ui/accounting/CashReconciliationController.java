@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Set;
 
 import com.lowagie.text.Document;
 import com.lowagie.text.Font;
@@ -25,6 +26,7 @@ import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.util.BookingTotals;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
@@ -62,6 +64,11 @@ public class CashReconciliationController implements ContentController, Exportab
 		@Override
 		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
 			refreshing.changedByOthers(event, batch);
+		}
+
+		@Override
+		public void changedElsewhere(Event event, Set<UnitKey> units) {
+			refreshing.changedElsewhere(event, units);
 		}
 	};
 

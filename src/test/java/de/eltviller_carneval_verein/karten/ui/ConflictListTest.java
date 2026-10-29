@@ -245,6 +245,34 @@ class ConflictListTest {
 	}
 
 	@Test
+	void amountsShowAsEuro() {
+		source.add(conflict(seat("s1"), "a", new ConflictNote(Kind.FIELDS, "me", null,
+				List.of(new FieldConflict("price", JsonNodeFactory.instance.objectNode().put("price", 35),
+						JsonNodeFactory.instance.objectNode().put("price", 40.5))),
+				null, null, nextId())));
+		source.add(conflict(UnitKey.presentation("ev", "pr"), "b", new ConflictNote(Kind.FIELDS, "me", null,
+				List.of(new FieldConflict("cash",
+						JsonNodeFactory.instance.objectNode().put("actualCashAmount", 1234.5).put("cashDifferenceComment", "Wechselgeld"),
+						JsonNodeFactory.instance.objectNode().putNull("actualCashAmount").put("cashDifferenceComment", ""))),
+				null, null, nextId())));
+
+		List<Row> rows = list.rows();
+
+		assertEquals("35,00 €", rows.get(0).fields().get(0).mine());
+		assertEquals("40,50 €", rows.get(0).fields().get(0).valid());
+		assertEquals("1234,50 €, Wechselgeld", rows.get(1).fields().get(0).mine());
+		assertEquals("(leer)", rows.get(1).fields().get(0).valid());
+	}
+
+	@Test
+	void deletionTextAgreesWithTheCount() {
+		assertEquals("Darunter stand 1 Eintrag von dir, den der andere Rechner nicht kannte. Der Stand lässt sich aus dem "
+				+ "Verlauf wiederherstellen.", ConflictList.deletionText(1));
+		assertEquals("Darunter standen 3 Einträge von dir, die der andere Rechner nicht kannte. Der Stand lässt sich aus dem "
+				+ "Verlauf wiederherstellen.", ConflictList.deletionText(3));
+	}
+
+	@Test
 	void indicatorTextCountsTheOpenConflicts() {
 		assertEquals("1 Konflikt offen", ConflictList.indicatorText(1));
 		assertEquals("2 Konflikte offen", ConflictList.indicatorText(2));

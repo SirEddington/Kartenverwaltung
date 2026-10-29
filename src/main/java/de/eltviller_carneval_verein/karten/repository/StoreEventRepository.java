@@ -384,6 +384,14 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
+	 * Sagt den Listenern, dass eine Stelle außerhalb der Ansichten das Event geändert und gespeichert hat
+	 * ({@link RepositoryListener#changedElsewhere}).
+	 */
+	public void announceChange(Event event, Set<UnitKey> units) {
+		listeners.notifyChangedElsewhere(event, Set.copyOf(units));
+	}
+
+	/**
 	 * Ersetzt das Event mit derselben ID im Cache durch ein anderes Objekt, z. B. nach dem Wiederherstellen eines
 	 * früheren Zustands. Der Versionsspeicher bleibt unberührt, und es wird kein Listener benachrichtigt. Ist das Event
 	 * nicht im Cache (noch nie gespeichert), passiert nichts.
