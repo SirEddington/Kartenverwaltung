@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
@@ -795,6 +796,56 @@ class StoreEventRepositoryTest {
 		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
 		assertEquals(1, again.getPresentations().size());
 		assertEquals(List.of(), bookingNames(again));
+	}
+
+	@Test
+	void failedRevivalAfterChildCleanupIsCompletedOnRetry(@TempDir Path appData) throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		SyncService sync = started(TestSyncServices.singleMode(appData, layer));
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = eventWithBookings();
+		repository.saveEvent(event);
+		repository.deleteEvent(event);
+		UnitKey head = UnitKey.event(event.getId());
+		List<UnitKey> oldChildren = sync.eventUnits(event.getId()).stream().filter(unit -> !unit.equals(head)).toList();
+		String headFolder = "/" + head.relativePath() + "/";
+		AtomicBoolean down = new AtomicBoolean(true);
+		layer.failWhen(path -> down.get() && path.toString().replace('\\', '/').contains(headFolder)
+				&& !path.toString().replace('\\', '/').contains("/presentations/"), "createNew",
+				new IOException("Platte voll"));
+		// lebt wieder auf mit nur einer Vorstellung, ohne Buchungen: die zweite Vorstellung und zwei Buchungen fallen weg
+		Event revived = withoutBookings(event);
+		revived.setPresentations(new ArrayList<>(revived.getPresentations().subList(0, 1)));
+		repository.replaceCachedEvent(revived);
+
+		assertThrows(RuntimeException.class, () -> repository.saveEvent(revived));
+
+		assertTrue(sync.unitState(head).current().deleted(), "der Kopf ist nach dem Fehler noch gelöscht");
+		int cleaned = 0;
+		for (UnitKey unit : oldChildren) {
+			cleaned += deletions(sync, unit);
+		}
+		assertTrue(cleaned > 0, "die alten Kinder sind vor dem Kopf geräumt worden");
+
+		down.set(false);
+		repository.saveEvent(revived);
+
+		assertFalse(sync.unitState(head).current().deleted(), "der Kopf lebt wieder");
+		int deleted = 0;
+		for (UnitKey unit : oldChildren) {
+			assertTrue(deletions(sync, unit) <= 1, unit.relativePath() + " wurde mehrfach gelöscht");
+			deleted += deletions(sync, unit);
+		}
+		assertEquals(cleaned, deleted, "der Wiederholversuch löscht nichts mehr");
+		sync.flushIndex();
+		Event again = TestRepositories.events(started(appData)).loadEvents().get(0);
+		assertEquals(1, again.getPresentations().size());
+		assertEquals(List.of(), bookingNames(again));
+	}
+
+	/** Wie oft die gültige Kette der Einheit eine Löschung enthält. */
+	private static int deletions(SyncService sync, UnitKey unit) throws IOException {
+		return (int) sync.unitState(unit).chain().stream().filter(Version::deleted).count();
 	}
 
 	/** Der Speicherstand mit der angegebenen Zahl: 0 ist der neueste. */

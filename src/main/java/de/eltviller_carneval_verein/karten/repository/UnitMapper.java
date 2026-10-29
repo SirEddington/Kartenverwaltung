@@ -162,7 +162,7 @@ final class UnitMapper {
 	/**
 	 * Die Änderungen, die aus dem Bestand {@code baseline} den Stand {@code units} machen. Das Ergebnis folgt zuerst
 	 * der Reihenfolge von {@code units} (Eltern vor Kindern), danach kommen die Löschungen nach Schlüssel
-	 * ({@code relativePath}).
+	 * ({@code relativePath}); die Löschungen unter einer wiederbelebten Eltern-Einheit stehen davor (siehe unten).
 	 * <ul>
 	 * <li>Neue Einheit (nicht im Bestand oder ohne Version): erste Version, ohne Vorgänger.</li>
 	 * <li>Einheit mit unlesbarem, nicht gelöschtem Stand im Bestand, die nicht angezeigt wird, obwohl ihre Eltern-Einheit
@@ -177,6 +177,11 @@ final class UnitMapper {
 	 * (Vorstellung: der Kopf, Buchung: ihre Vorstellung) in {@code units} steht und sie eine Version hat und nicht
 	 * schon gelöscht ist. Sonst bleibt sie unberührt, denn gelöscht wird nur am Kopf. Ein Event-Kopf oder eine Halle
 	 * hat keine Eltern-Einheit und wird nie hier gelöscht, nur mit {@link #deletion}.</li>
+	 * <li>Reihenfolge beim Wiederbeleben: Ist eine übergeordnete Einheit (Kopf, Vorstellung) der gelöschten Einheit im
+	 * Bestand gelöscht und wird jetzt wiederbelebt, stehen diese Löschungen (die alten Kinder) <b>vor</b> allen anderen
+	 * Änderungen, also vor der neuen Version des Kopfs. Scheitert das Speichern danach, sieht der Wiederholversuch den Kopf
+	 * noch gelöscht und räumt erneut, ohne Schon-Gelöschtes zu wiederholen; lebte der Kopf zuerst, wären die alten Kinder
+	 * nach einem Fehler sofort wieder sichtbar.</li>
 	 * </ul>
 	 * Die Daten von {@code baseline} und {@code units} bleiben unverändert.
 	 *
@@ -220,9 +225,15 @@ final class UnitMapper {
 			}
 		}
 		vanished.sort(Comparator.comparing(s -> s.unit().relativePath()));
+		List<Change> cleanup = new ArrayList<>();
 		for (UnitSnapshot known : vanished) {
-			changes.add(deletion(known));
+			if (revivesParent(baseline, known.unit())) {
+				cleanup.add(deletion(known));
+			} else {
+				changes.add(deletion(known));
+			}
 		}
+		changes.addAll(0, cleanup);
 
 		for (Change change : changes) {
 			UnitSnapshot known = baseline.get(change.unit());
@@ -236,6 +247,20 @@ final class UnitMapper {
 	/** Die Löschung einer Einheit auf ihrer aktuellen Version (für das Löschen eines ganzen Events oder einer Halle). */
 	static Change deletion(UnitSnapshot baseline) {
 		return new Change(baseline.unit(), List.of(baseline.version()), null, true);
+	}
+
+	/**
+	 * Ob eine übergeordnete Einheit (Eltern-Einheit, deren Eltern-Einheit …) im Bestand gelöscht ist und mit diesem Speichern
+	 * wiederbelebt wird, weil die Einheit unter ihr noch zu räumen ist (siehe {@link #changes}).
+	 */
+	private static boolean revivesParent(Map<UnitKey, UnitSnapshot> baseline, UnitKey unit) {
+		for (UnitKey ancestor = parentOf(unit); ancestor != null; ancestor = parentOf(ancestor)) {
+			UnitSnapshot known = baseline.get(ancestor);
+			if (known != null && known.deleted()) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Ob die Eltern-Einheit angezeigt wird; ein Event-Kopf oder eine Halle hat keine. */
