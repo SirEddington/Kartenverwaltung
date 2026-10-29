@@ -2392,6 +2392,20 @@ public final class SyncService {
 			return SyncService.this.append(saveId, changes);
 		}
 
+		/** Ob der laufende Vollabgleich die Vorstellung der Einheit erst zum Teil abgeglichen hat ({@link FullSyncRun#inProgress}). */
+		@Override
+		public boolean deferred(UnitKey unit) {
+			Link current;
+			synchronized (lock) {
+				current = link;
+			}
+			if (current == null) {
+				return false;
+			}
+			FullSyncRun run = current.run;
+			return run != null && run.inProgress(unit);
+		}
+
 		/** SYS-006 mit dem gemeinsamen Ordner; im Einzelbetrieb mit dem lokalen Bestand, in den geschrieben wird. */
 		@Override
 		public String failureText(Exception failure) {

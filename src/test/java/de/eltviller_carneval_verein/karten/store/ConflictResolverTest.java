@@ -14,6 +14,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -228,6 +229,79 @@ class ConflictResolverTest {
 		synchronized (logs) {
 			return logs.stream().filter(r -> r.getLevel().intValue() >= level.intValue()).toList();
 		}
+	}
+
+	// --- Zurückstellen
+
+	/**
+	 * Eine Einheit, die der Dienst zurückstellt (halb abgeglichene Vorstellung), bleibt eingereiht, ohne dass die Auflösung
+	 * sie liest; sobald sie nicht mehr zurückgestellt ist, kommt sie dran.
+	 */
+	@Test
+	void deferredUnitStaysQueuedWithoutBeingRead() {
+		AtomicBoolean deferred = new AtomicBoolean(true);
+		List<UnitKey> read = new ArrayList<>();
+		ConflictResolver.Host host = new ConflictResolver.Host() {
+			@Override
+			public SyncService.Resolved resolve(UnitKey unit) {
+				read.add(unit);
+				// "wartend": Die Auflösung gibt die Einheit ab, ohne weiter zu lesen
+				return new SyncService.Resolved(null,
+						new UnitState(unit, UnitState.Status.WAITING, List.of(), List.of(), List.of(), null, Set.of()));
+			}
+
+			@Override
+			public boolean shared() {
+				return true;
+			}
+
+			@Override
+			public boolean isListed(UnitKey unit, VersionId version) {
+				return true;
+			}
+
+			@Override
+			public String machineId() {
+				return "me";
+			}
+
+			@Override
+			public Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking) {
+				return Map.of();
+			}
+
+			@Override
+			public Set<UnitKey> withOwnVersionsBesideChain(Collection<UnitKey> units) {
+				return Set.of();
+			}
+
+			@Override
+			public List<Version> append(String saveId, List<Change> changes) {
+				throw new AssertionError("nichts zu schreiben");
+			}
+
+			@Override
+			public String failureText(Exception failure) {
+				return failure.toString();
+			}
+
+			@Override
+			public boolean deferred(UnitKey unit) {
+				return deferred.get();
+			}
+		};
+		ConflictResolver resolver = new ConflictResolver(host, new SyncNotifier(Runnable::run), clock);
+		resolver.enqueue(BOOKING);
+
+		resolver.resolvePending(10);
+		resolver.resolvePending(10);
+
+		assertEquals(List.of(), read, "eine zurückgestellte Einheit wird nicht gelesen");
+
+		deferred.set(false);
+		resolver.resolvePending(10);
+
+		assertEquals(List.of(BOOKING), read, "sie blieb eingereiht und kommt jetzt dran");
 	}
 
 	// --- Zusammenführen

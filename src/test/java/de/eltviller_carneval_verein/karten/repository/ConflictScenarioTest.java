@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -27,6 +28,7 @@ import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -108,6 +110,8 @@ class ConflictScenarioTest {
 		final String name;
 		final Path sharedDir;
 		final AtomicBoolean down = new AtomicBoolean();
+		/** Die Dateischicht des Rechners, damit ein Szenario Haken setzen kann (etwa eine Uhr, die mit jedem Lesen weiterläuft). */
+		final FaultyFileLayer layer;
 		final Recorder events = new Recorder();
 		final SyncService sync;
 		final StoreHallRepository halls;
@@ -124,7 +128,7 @@ class ConflictScenarioTest {
 			this.name = name;
 			this.sharedDir = sharedDir;
 			down.set(!reachable);
-			FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+			layer = new FaultyFileLayer(new NioFileLayer());
 			for (String operation : List.of("createNew", "read", "listNames")) {
 				layer.failWhen(p -> down.get() && p.startsWith(sharedDir), operation,
 						new IOException("Netzlaufwerk getrennt"));
@@ -279,12 +283,17 @@ class ConflictScenarioTest {
 	 * Vorstellung "Freitag" an, "Müller" auf dem ersten Sitz; die anderen holen beides ab und laden es.
 	 */
 	private void setUp(Machine first, Machine... others) {
+		setUp(2, first, others);
+	}
+
+	/** Wie {@link #setUp(Machine, Machine...)}, mit {@code tables} Tischen zu je 3 Sitzen in der Reihe A. */
+	private void setUp(int tables, Machine first, Machine... others) {
 		Hall hall = new Hall();
 		hall.setName("Stadthalle");
 		SeatingPlan plan = hall.addSeatingPlan();
 		TableRow row = plan.addRow();
 		row.setLabel("A");
-		plan.fillRow(row, 2, 3);
+		plan.fillRow(row, tables, 3);
 		first.halls.saveHall(hall);
 		first.hall = hall;
 		Event event = new Event();
@@ -1057,6 +1066,78 @@ class ConflictScenarioTest {
 		assertConverged(a, b);
 		assertTrue(a.eventState().get(oldSeat).deleted());
 		assertEquals(Set.of(newSeat), carriers(a, muellerId), "Müller lebt nur auf dem neuen Sitz");
+		assertEquals("Notiz", a.eventState().get(newSeat).payload().get("comment").asText(), "B's Änderung ist übertragen");
+		assertTrue(b.open().isEmpty(), "keine Stornierung, die niemand gemacht hat: " + b.open());
+		assertTrue(a.open().isEmpty(), a.open().toString());
+	}
+
+	/**
+	 * Wie M4, aber die Vorstellung hat so viele Buchungen, dass der Vollabgleich sie in zwei Blöcken über zwei Takte abgleicht:
+	 * A setzt eine Buchung vom Ordner mit dem kleinsten Namen (1. Block) auf den mit dem größten (2. Block) um. Nach dem
+	 * 1. Block kennt B die Löschung der Quelle, aber noch nicht das Ziel; die Wartezeit auf die Liste ist um. Die Auflösung
+	 * von B's verlorener Änderung darf nicht in diesem Takt laufen, sonst sähe das Umsetzen wie eine Stornierung aus
+	 * (DELETE_WINS); sie kommt im Takt nach dem letzten Block dran und überträgt B's Änderung auf das Ziel.
+	 */
+	@Test
+	void foreignMoveAcrossTwoBlocksIsNotResolvedAsCancellation() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		// 180 Tische zu 3 Sitzen: mit einem freien Sitz mehr, als ein Block (500) Buchungen fasst
+		int seats = 540;
+		setUp(seats / 3, a, b);
+		List<Integer> byFolder = IntStream.range(0, seats).boxed()
+				.sorted(Comparator.comparing(n -> a.plan().getSeats().get(n).getId())).toList();
+		int from = byFolder.get(0);
+		// das Ziel ist der letzte Ordner (nie Müllers Sitz 0, den setUp schon verkauft hat): Es liegt sicher im 2. Block
+		int to = byFolder.get(byFolder.size() - 1) != 0 ? byFolder.get(byFolder.size() - 1) : byFolder.get(seats - 2);
+		for (int n = 1; n < seats; n++) {
+			if (n != to) {
+				a.seat(n).setLastName("Gast " + n);
+			}
+		}
+		a.repository.saveEvent(a.event);
+		untilQuiet(a, b);
+		UnitKey oldSeat = seatUnit(a, from);
+		UnitKey newSeat = seatUnit(a, to);
+		assertNull(b.sync.unitState(newSeat).current(), "das Ziel ist noch frei");
+
+		String movedId = move(a, from, to).getId();
+		a.tick();
+		Path feed = newestFeed(a);
+		Path hidden = Files.move(feed, dir.resolve("versteckt.json"));
+		b.seat(from).setComment("Notiz");
+		b.repository.saveEvent(b.event);
+		clock.advance(Duration.ofSeconds(2));
+		b.tick();
+		assertEquals(1, b.sync.unitState(oldSeat).lost().size(), "B's Änderung hat gegen A's Löschung verloren");
+		assertNull(b.sync.unitState(newSeat).current(), "A's neuer Sitz ist bei B noch nicht angekommen");
+
+		// die Wartezeit auf Listen (5 Minuten) ist um; jedes Lesen kostet B Zeit, damit ein Takt nach einem Block endet
+		clock.advance(Duration.ofMinutes(5).plusSeconds(1));
+		AtomicBoolean slow = new AtomicBoolean(true);
+		b.layer.onEach("read", () -> {
+			if (slow.get()) {
+				clock.advance(Duration.ofMillis(20));
+			}
+		});
+		b.sync.syncNow();
+		assertNotNull(b.sync.fullSyncProgress().get(), "der 2. Block der Vorstellung steht noch aus");
+		assertNull(b.sync.unitState(newSeat).current(), "das Ziel liegt im 2. Block");
+		assertEquals(1, b.sync.unitState(oldSeat).lost().size(), "die Auflösung wartet auf den Rest der Vorstellung");
+		int ticks = 1;
+		while (b.sync.fullSyncProgress().get() != null) {
+			TestSyncServices.tick(b.sync);
+			assertTrue(++ticks < 20, "der Lauf endet nicht");
+		}
+		slow.set(false);
+
+		assertTrue(warnings.removeIf(record -> record.getMessage().contains("5 Minuten")), "die Strecke wartete aus");
+		Files.move(hidden, feed);
+		untilQuiet(a, b);
+		assertConverged(a, b);
+		assertTrue(a.eventState().get(oldSeat).deleted());
+		assertEquals(Set.of(newSeat), carriers(a, movedId), "die Buchung lebt nur auf dem neuen Sitz");
 		assertEquals("Notiz", a.eventState().get(newSeat).payload().get("comment").asText(), "B's Änderung ist übertragen");
 		assertTrue(b.open().isEmpty(), "keine Stornierung, die niemand gemacht hat: " + b.open());
 		assertTrue(a.open().isEmpty(), a.open().toString());

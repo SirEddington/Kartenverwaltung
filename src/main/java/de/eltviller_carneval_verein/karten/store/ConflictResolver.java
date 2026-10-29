@@ -57,6 +57,9 @@ import de.eltviller_carneval_verein.karten.store.UnitState.Status;
  * die Einheit eingereiht und wird im nächsten Takt erneut versucht; Log WARNING einmal je Einheit und Störung, SYS-006 in
  * der Fußzeile einmal je Störung (sie endet, wenn jede gestörte Einheit wieder durchläuft).
  * <p>
+ * Zurückstellen: Eine Einheit einer Vorstellung, die der Vollabgleich erst zum Teil abgeglichen hat ({@link Host#deferred}),
+ * wird nicht gelesen und bleibt eingereiht; sie kommt im Takt nach dem letzten Block dran.
+ * <p>
  * Rückmeldung: Die geschriebenen Einheiten und geänderten Konflikte meldet ein Durchlauf gesammelt am Ende, nicht je
  * Einheit (siehe {@link #resolvePending}).
  * <p>
@@ -105,6 +108,13 @@ final class ConflictResolver {
 
 		/** Der Text von SYS-006 für einen Fehler beim Lesen oder Schreiben, wie der Dienst ihn sonst meldet. */
 		String failureText(Exception failure);
+
+		/**
+		 * Ob die Einheit zu einer Vorstellung gehört, die der Vollabgleich nur zum Teil abgeglichen hat. Der Index kennt dann
+		 * nur einen Teil ihrer Buchungen: Ein fremdes Umsetzen, dessen Quelle im einen und dessen Ziel im anderen Block liegt,
+		 * sähe wie eine Stornierung aus. Die Einheit bleibt eingereiht und kommt nach dem letzten Block dran.
+		 */
+		boolean deferred(UnitKey unit);
 	}
 
 	/** Was mit einer verlorenen Strecke in diesem Durchlauf geschieht. */
@@ -236,6 +246,10 @@ final class ConflictResolver {
 	 * @return ob die Einheit wieder eingereiht wird
 	 */
 	private boolean resolveUnit(UnitKey unit, Written written) {
+		if (host.deferred(unit)) {
+			// halb abgeglichene Vorstellung: nichts lesen, die Einheit bleibt eingereiht (und ihre Wartezeit läuft weiter)
+			return true;
+		}
 		boolean again = false;
 		try {
 			again = mergeStretches(unit, written);
