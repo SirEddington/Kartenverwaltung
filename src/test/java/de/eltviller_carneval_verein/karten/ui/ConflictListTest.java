@@ -245,14 +245,14 @@ class ConflictListTest {
 	}
 
 	@Test
-	void amountsShowAsEuro() {
+	void amountsInCentShowAsEuro() {
 		source.add(conflict(seat("s1"), "a", new ConflictNote(Kind.FIELDS, "me", null,
-				List.of(new FieldConflict("price", JsonNodeFactory.instance.objectNode().put("price", 35),
-						JsonNodeFactory.instance.objectNode().put("price", 40.5))),
+				List.of(new FieldConflict("price", JsonNodeFactory.instance.objectNode().put("price", 3500),
+						JsonNodeFactory.instance.objectNode().put("price", 4050))),
 				null, null, nextId())));
 		source.add(conflict(UnitKey.presentation("ev", "pr"), "b", new ConflictNote(Kind.FIELDS, "me", null,
 				List.of(new FieldConflict("cash",
-						JsonNodeFactory.instance.objectNode().put("actualCashAmount", 1234.5).put("cashDifferenceComment", "Wechselgeld"),
+						JsonNodeFactory.instance.objectNode().put("actualCashAmount", 123450).put("cashDifferenceComment", "Wechselgeld"),
 						JsonNodeFactory.instance.objectNode().putNull("actualCashAmount").put("cashDifferenceComment", ""))),
 				null, null, nextId())));
 

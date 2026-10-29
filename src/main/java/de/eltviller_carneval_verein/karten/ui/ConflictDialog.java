@@ -56,8 +56,8 @@ public final class ConflictDialog {
 	private static final Logger LOG = Logger.getLogger(ConflictDialog.class.getName());
 	/** Was von der Breite einer Spalte für den Rand der Zelle abgeht. */
 	private static final double CELL_PADDING = 24;
-	/** Alle Spalten nebeneinander (zusammen 1145) samt Rand und Rollbalken; das Hauptfenster ist mindestens 1250 breit. */
-	private static final double MIN_WIDTH = 1200;
+	/** Alle Spalten in ihrer Mindestbreite (zusammen 855) samt Rand, Rollbalken und Fensterrahmen. */
+	private static final double MIN_WIDTH = 920;
 	/** Einleitung, Kopfzeile und etwa zwei Zeilen. */
 	private static final double MIN_HEIGHT = 320;
 	private static final String TAKE_VALUE = "Meinen Wert übernehmen";
@@ -97,17 +97,19 @@ public final class ConflictDialog {
 				+ "anderen Seite. Übernimm deinen Wert oder bestätige mit „Erledigt“.");
 		intro.setWrapText(true);
 		table.setPlaceholder(new Label("Keine offenen Konflikte"));
-		table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+		// Die Spalten füllen die Breite und werden mit dem Fenster gleichmäßig schmaler, bis zu ihrer Mindestbreite (die
+		// Schaltflächen von "Aktion" und "Erledigt" bleiben ganz)
+		table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS);
 		// Zeilen sind nicht auswählbar: Es gibt nichts zu wählen, und die Auswahlfarbe verdeckte die Schaltflächen
 		table.setSelectionModel(null);
-		table.getColumns().add(column("Art", 110, (row, col) -> wrapped(kindText(row), col)));
-		table.getColumns().add(column("Eintrag", 190, (row, col) -> wrapped(row.entry(), col)));
-		table.getColumns().add(column("Gegenseite", 120, (row, col) -> wrapped(row.counterpart(), col)));
-		table.getColumns().add(column("Zeitpunkt", 115, (row, col) -> wrapped(
+		table.getColumns().add(column("Art", 110, 80, (row, col) -> wrapped(kindText(row), col)));
+		table.getColumns().add(column("Eintrag", 190, 120, (row, col) -> wrapped(row.entry(), col)));
+		table.getColumns().add(column("Gegenseite", 120, 90, (row, col) -> wrapped(row.counterpart(), col)));
+		table.getColumns().add(column("Zeitpunkt", 115, 90, (row, col) -> wrapped(
 				AbstractBackupCatalog.timeText(row.at(), ZoneId.systemDefault()), col)));
-		table.getColumns().add(column("Werte", 290, this::valuesCell));
-		table.getColumns().add(column("Aktion", 225, this::actionCell));
-		table.getColumns().add(column("Erledigt", 95, (row, col) -> doneButton(row)));
+		table.getColumns().add(column("Werte", 290, 180, this::valuesCell));
+		table.getColumns().add(column("Aktion", 225, 200, this::actionCell));
+		table.getColumns().add(column("Erledigt", 95, 95, (row, col) -> doneButton(row)));
 
 		VBox root = new VBox(10, intro, table);
 		root.setPadding(new Insets(12));
@@ -269,9 +271,11 @@ public final class ConflictDialog {
 		return size != null && size > 1 ? row.kindText() + " (" + size + " Plätze eines Verkaufs)" : row.kindText();
 	}
 
-	private TableColumn<Row, Row> column(String title, double width, BiFunction<Row, TableColumn<Row, Row>, Node> content) {
+	private TableColumn<Row, Row> column(String title, double width, double minWidth,
+			BiFunction<Row, TableColumn<Row, Row>, Node> content) {
 		TableColumn<Row, Row> column = new TableColumn<>(title);
 		column.setPrefWidth(width);
+		column.setMinWidth(minWidth);
 		column.setSortable(false);
 		column.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(cell.getValue()));
 		column.setCellFactory(col -> new TableCell<>() {
