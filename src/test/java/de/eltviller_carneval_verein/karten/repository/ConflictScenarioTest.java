@@ -1161,6 +1161,62 @@ class ConflictScenarioTest {
 	}
 
 	/**
+	 * R31b, Platz zuweisen gegen fremden Umzug plus Verkauf: Mia steht "ohne Platz". B weist ihr Sitz 1 zu; A setzt sie
+	 * gleichzeitig auf Sitz 4 und verkauft Sitz 1 an Tom, A lädt zuerst hoch. A's Umzug gilt: Mia lebt genau einmal, auf
+	 * Sitz 4; Sitz 1 trägt Tom. B hat genau einen offenen Konflikt (FIELDS "place"), A keinen.
+	 */
+	@Test
+	void foreignMoveWinsAgainstAssigningAPlace() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Booking mia = a.friday().addBooking();
+		mia.setLastName("Mia");
+		mia.setUnassigned(true);
+		a.repository.saveEvent(a.event);
+		String miaId = mia.getId();
+		UnitKey miaUnit = unassignedUnit(a, miaId);
+		untilQuiet(a, b);
+		Booking bMia = b.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId())).findFirst()
+				.orElseThrow();
+
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), bMia, b.plan().getSeats().get(1)));
+		b.repository.saveEvent(b.event);
+		assertTrue(BookingSync.assign(a.friday(), a.plan(), mia, a.plan().getSeats().get(4)));
+		a.seat(1).setLastName("Tom");
+		a.repository.saveEvent(a.event);
+		a.tick();
+		b.tick();
+
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		UnitKey seat = seatUnit(a, 1);
+		UnitKey seat4 = seatUnit(a, 4);
+		assertEquals("Tom", lastName(a.eventState().get(seat)));
+		assertTrue(a.eventState().get(miaUnit).deleted(), "_Mia bleibt gelöscht");
+		assertEquals(Set.of(seat4), carriers(a, miaId), "Mia lebt genau einmal, auf A's Sitz");
+		assertEquals("Mia", lastName(a.eventState().get(seat4)));
+		List<OpenConflict> open = b.open();
+		assertEquals(1, open.size(), open.toString());
+		ConflictNote note = open.get(0).note();
+		assertEquals(ConflictNote.Kind.FIELDS, note.kind());
+		assertEquals(List.of("place"), note.fields().stream().map(ConflictNote.FieldConflict::group).toList());
+		assertTrue(a.open().isEmpty(), a.open().toString());
+		for (Machine machine : m) {
+			List<Booking> mias = machine.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId()))
+					.toList();
+			assertEquals(1, mias.size(), machine.name + ": " + mias);
+			assertFalse(mias.get(0).isUnassigned(), machine.name);
+			assertEquals("Mia", machine.seat(4).getLastName(), machine.name);
+			assertEquals("Tom", machine.seat(1).getLastName(), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+		}
+	}
+
+	/**
 	 * H3: Nach einer Hallenänderung (Reihe A neu angelegt, die Sitze haben neue IDs) setzen beide Rechner Müller gleich um
 	 * und speichern. Alter Sitz (zwei Löschungen), neuer Sitz (zwei Erstversionen derselben Buchung) und keine Einheit
 	 * bekommt einen Vermerk.

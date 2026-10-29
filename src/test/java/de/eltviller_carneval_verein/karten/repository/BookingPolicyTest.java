@@ -580,6 +580,66 @@ class BookingPolicyTest {
 		assertNull(note.moved());
 	}
 
+	/**
+	 * R31b: Meine weist m von {@code _m} dem Sitz s1 zu (save-a); ein anderer Rechner setzt m von {@code _m} auf s4 und
+	 * verkauft t auf s1 (save-b). Die fremde Verschiebung gilt in beiden Reihenfolgen: m bleibt auf s4 (nie gelöscht),
+	 * {@code _m} bleibt gelöscht, s1 trägt t; Meine bekommt genau einen Vermerk FIELDS "place" (auf {@code _m}).
+	 */
+	@Test
+	void foreignMoveWinsAgainstALostAssignmentFromUnassignedInEitherOrder() {
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		UnitKey s4 = seat("s4");
+		Version base = version(THIRD, "save-0", withoutPlace("m", b -> {
+		}));
+		Version myDeletion = deletion(OWN, "save-a");
+		Version myS1 = version(OWN, "save-a", booking("m", "s1"));
+		Version theirDeletion = deletion(OTHER, "save-b");
+		Version theirS4 = version(OTHER, "save-b", booking("m", "s4", b -> b.setSeatNumber(4)));
+		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
+
+		// s1 zuerst: m lebt auf s4, also keine Zusatz-Einheit und hier kein Vermerk (den bekommt _m)
+		Resolution s1First = POLICY.resolve(input(S1, null, myS1, theirS1,
+				Map.of(unassigned, unassignedWith(unassigned, theirDeletion, "save-0", "save-a", "save-b"), s4,
+						sibling(s4, theirS4)),
+				theirS1));
+		assertForeignMoveKeptOnSeat(s1First, theirS1);
+		Version s1Merge = version(OWN, "resolver-1", theirS1.payload());
+		Resolution mThen = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
+				Map.of(S1, strandedTarget(S1, s1Merge, myS1), s4, sibling(s4, theirS4)), theirDeletion));
+		assertForeignMoveWinsOnUnassigned(mThen, theirDeletion, myS1);
+
+		// _m zuerst: dasselbe
+		Resolution mFirst = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
+				Map.of(S1, strandedTarget(S1, theirS1, myS1), s4, sibling(s4, theirS4)), theirDeletion));
+		assertForeignMoveWinsOnUnassigned(mFirst, theirDeletion, myS1);
+		Version mMerge = deletion(OWN, "resolver-2");
+		Resolution s1Then = POLICY.resolve(input(S1, null, myS1, theirS1,
+				Map.of(unassigned, unassignedWith(unassigned, mMerge, "save-0", "save-a", "save-b", "resolver-2"), s4,
+						sibling(s4, theirS4)),
+				theirS1));
+		assertForeignMoveKeptOnSeat(s1Then, theirS1);
+	}
+
+	private static void assertForeignMoveKeptOnSeat(Resolution resolution, Version theirS1) {
+		assertFalse(resolution.deleted());
+		assertEquals(theirS1.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), "_m wird nicht wiederbelebt");
+		assertNull(resolution.note(), "der Vermerk steht auf _m");
+	}
+
+	private static void assertForeignMoveWinsOnUnassigned(Resolution resolution, Version theirDeletion, Version myS1) {
+		assertTrue(resolution.deleted());
+		assertTrue(resolution.extra().isEmpty(), "s4 wird nie gelöscht");
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.FIELDS, note.kind());
+		assertEquals(OWN, note.affected());
+		assertEquals(party(theirDeletion), note.other());
+		assertEquals(List.of("place"), note.fields().stream().map(ConflictNote.FieldConflict::group).toList());
+		assertEquals("s1", note.fields().get(0).mine().get("seatId").asText());
+		assertEquals("s4", note.fields().get(0).theirs().get("seatId").asText());
+		assertEquals(myS1.id(), note.dropped());
+	}
+
 	@Test
 	void ownEarlierAssignmentFromUnassignedStillRevivesOnADoubleSale() {
 		// R21: _m wurde früher in einem anderen Speichervorgang gelöscht (zugewiesen); kein Storno, _m baut auf der Löschung auf

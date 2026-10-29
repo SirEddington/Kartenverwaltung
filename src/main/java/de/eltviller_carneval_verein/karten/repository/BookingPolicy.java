@@ -93,6 +93,10 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * gelöscht; Vermerk FIELDS mit der Gruppe "Platz" (beide Plätze aus den verschobenen Einheiten, {@code dropped} ist die
 	 * eigene).</li>
 	 * <li>Beide an denselben Sitz verschoben: Sie sind sich einig; Löschung ohne Vermerk, sonst nichts.</li>
+	 * <li>Auf {@code _<ID>}: "Deren" hat verschoben, das eigene Zuweisen ist am Ziel gescheitert (dort steht ein anderer
+	 * Verkauf, {@link Sibling#lostMove()}): Die Verschiebung von "Deren" gilt, nichts wird gelöscht; Vermerk FIELDS mit der
+	 * Gruppe "Platz" (eigenes Ziel gegen ihre Kopie, {@code dropped} ist die eigene Version am Ziel), Ruling R31b. Der
+	 * Doppelverkauf am Ziel legt dann keine Zusatz-Einheit an ({@link #doubleSale}).</li>
 	 * <li>Beide storniert, oder nicht zu entscheiden (keine Geschwister-Einheit trägt die Buchung): Löschung ohne Vermerk,
 	 * keine weitere Löschung. Eine verkaufte Buchung wird nie auf Verdacht gelöscht.</li>
 	 * </ul>
@@ -129,6 +133,17 @@ public final class BookingPolicy implements ConflictPolicy {
 			ConflictNote note = new ConflictNote(Kind.DELETE_WINS, input.ownMachineId(), PolicyRules.party(theirDeletion),
 					List.of(), null, null, myCopy.version());
 			return new Resolution(theirs.payload(), true, List.of(deletionOf(myCopy)), note);
+		}
+		Version myLostCopy = theirCopy == null || !isOwnUnassigned(input.unit(), bookingId) ? null
+				: strandedTarget(input, bookingId, mine.saveId());
+		if (myLostCopy != null) {
+			// R31b: Mein Zuweisen aus "ohne Platz" ist am Ziel gescheitert, Deren hat verschoben; Deren gilt, nichts löschen
+			List<String> place = FieldGroups.booking().get(PLACE_GROUP);
+			FieldConflict conflict = new FieldConflict(PLACE_GROUP, FieldMerge.slice(myLostCopy.payload(), place),
+					FieldMerge.slice(theirCopy.payload(), place));
+			ConflictNote note = new ConflictNote(Kind.FIELDS, input.ownMachineId(), PolicyRules.party(theirDeletion),
+					List.of(conflict), null, null, myLostCopy.id());
+			return new Resolution(theirs.payload(), true, List.of(), note);
 		}
 		if (theirCopy != null) {
 			ConflictNote note = new ConflictNote(Kind.DELETE_WINS, theirDeletion.machine(), PolicyRules.party(mine),
@@ -320,7 +335,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		String bookingId = idOf(input.base());
 		UnitKey unit = input.unit();
 		if (bookingId == null || !mine.deleted() || theirs.deleted() || !isSameBooking(input, theirs)
-				|| !unit.equals(UnitKey.unassignedBooking(unit.eventId(), unit.presentationId(), bookingId))) {
+				|| !isOwnUnassigned(unit, bookingId)) {
 			return null;
 		}
 		Version target = strandedTarget(input, bookingId, mine.saveId());
@@ -346,6 +361,11 @@ public final class BookingPolicy implements ConflictPolicy {
 		ConflictNote note = new ConflictNote(Kind.FIELDS, input.ownMachineId(),
 				PolicyRules.party(introducer != null ? introducer : theirs), result.conflicts(), null, null, mine.id());
 		return new Resolution(result.merged(), false, List.of(), note);
+	}
+
+	/** Ob die Einheit {@code _<ID>} dieser Buchung ist (die Buchung "ohne Platz"). */
+	private static boolean isOwnUnassigned(UnitKey unit, String bookingId) {
+		return unit.equals(UnitKey.unassignedBooking(unit.eventId(), unit.presentationId(), bookingId));
 	}
 
 	/**
@@ -496,9 +516,11 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * nirgends mehr. Lebt {@code _<ID>} nur, weil die eigene Löschung dort verloren hat (die Buchung kam von dort hierher,
 	 * Zuweisen aus "ohne Platz"), bleibt sie dort trotzdem: Die Auflösung von {@code _<ID>} erkennt den gescheiterten Umzug
 	 * und löscht nicht ({@link #strandedMove}, Ruling R31); die Felder, die "Meine" dabei geändert hat, überträgt sie. Hat
-	 * ein anderer Rechner {@code _<ID>} dagegen storniert, während "Meine" die Buchung von dort hierher zuwies, gewinnt das
-	 * Storno ({@link #cancelledSource}, Ruling R31a): keine Wiederbelebung, der Sitz behält "Deren", und statt des
-	 * Doppelverkaufs bekommt dieser Rechner den Vermerk DELETE_WINS ({@code dropped} = "Meine", zum Wiederherstellen). Ist
+	 * ein anderer Rechner {@code _<ID>} dagegen gelöscht, während "Meine" die Buchung von dort hierher zuwies
+	 * ({@link #foreignDeletedSource}), gibt es keine Wiederbelebung, und der Sitz behält "Deren": Lebt die Buchung anderswo
+	 * (er hat sie verschoben, Ruling R31b), gilt sein Umzug, und den Vermerk FIELDS "place" schreibt die Auflösung von
+	 * {@code _<ID>} ({@link #bothDeleted}); sonst hat er storniert (Ruling R31a), und dieser Rechner bekommt hier statt des
+	 * Doppelverkaufs den Vermerk DELETE_WINS ({@code dropped} = "Meine", zum Wiederherstellen). Ist
 	 * die Einheit selbst schon {@code _<ID>}, kann die Buchung nicht weiter ausweichen: "Deren" bleibt, Vermerk UNMERGED.
 	 */
 	private static Resolution doubleSale(ConflictInput input, String mineId) {
@@ -518,7 +540,11 @@ public final class BookingPolicy implements ConflictPolicy {
 		UnitSnapshot current = existing == null ? null : existing.snapshot();
 		if (current != null && current.version() != null && !current.deleted()) {
 			extra = List.of();
-		} else if (cancelledSource(input, mineId, existing)) {
+		} else if (foreignDeletedSource(input, existing)) {
+			if (livingCopies(input, mineId).findAny().isPresent()) {
+				// R31b: ein fremder Umzug gilt; den Vermerk bekommt die Auflösung von _<ID> (bothDeleted)
+				return new Resolution(theirs.payload(), false, List.of(), null);
+			}
 			ConflictNote note = new ConflictNote(Kind.DELETE_WINS, input.ownMachineId(), other, List.of(), null, null,
 					mine.id());
 			return new Resolution(theirs.payload(), false, List.of(), note);
@@ -540,19 +566,19 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/**
-	 * Ruling R31a, Storno gewinnt gegen ein gescheitertes Zuweisen aus "ohne Platz": "Meine" kam im selben Speichervorgang
-	 * von {@code _<ID>} hierher (eine Version aus dem Speichervorgang von "Meine" liegt dort, {@link Sibling#saveIds()}),
-	 * {@code _<ID>} ist aber gelöscht, und die Löschung stammt nicht aus diesem Speichervorgang (die eigene hat dort
-	 * verloren, ein anderer Rechner hat storniert), und keine Geschwister-Einheit trägt die Buchung (sonst wäre es ein
-	 * Verschieben gewesen). Dann wird {@code _<ID>} nicht wiederbelebt.
+	 * Ob {@code _<ID>} fremd gelöscht ist, während "Meine" die Buchung von dort hierher zuwies (Rulings R31a, R31b): "Meine"
+	 * kam im selben Speichervorgang von {@code _<ID>} (eine Version aus dem Speichervorgang von "Meine" liegt dort,
+	 * {@link Sibling#saveIds()}), {@code _<ID>} ist gelöscht, und die Löschung stammt nicht aus diesem Speichervorgang (die
+	 * eigene hat dort verloren). Dann wird {@code _<ID>} nicht wiederbelebt (R21 gilt nur für die eigene, unangefochtene
+	 * Löschung): Lebt die Buchung anderswo, hat der andere Rechner sie verschoben, und sein Umzug gilt; sonst hat er
+	 * storniert, und das Storno gilt.
 	 */
-	private static boolean cancelledSource(ConflictInput input, String mineId, Sibling source) {
+	private static boolean foreignDeletedSource(ConflictInput input, Sibling source) {
 		String saveId = input.mine().saveId();
 		if (saveId == null || source == null || source.head() == null || !source.snapshot().deleted()) {
 			return false;
 		}
-		return source.saveIds().contains(saveId) && !saveId.equals(source.head().saveId())
-				&& livingCopies(input, mineId).findAny().isEmpty();
+		return source.saveIds().contains(saveId) && !saveId.equals(source.head().saveId());
 	}
 
 	/** Die Buchungs-ID einer Version mit Inhalt; {@code null} ohne Version, bei einer Löschung oder ohne ID. */
