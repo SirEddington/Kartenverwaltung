@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -138,12 +139,17 @@ class ConnectFlowStoreTest {
 
 	/** Fremde Hallen mit Version und Anspruch im gemeinsamen Ordner, ohne Listen (sechs Abschnitte bei 300). */
 	private void seedSharedHalls(int count) throws IOException {
-		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		seedHalls(sharedRoot, "f", count);
+	}
+
+	/** Fremde Hallen {@code <prefix>0}, {@code <prefix>1}, ... in einem gemeinsamen Ordner (wie {@link #seedSharedHalls}). */
+	private void seedHalls(Path root, String prefix, int count) throws IOException {
+		VersionStore sharedStore = new VersionStore(root.resolve("data"), new NioFileLayer());
 		long millis = clock.instant().toEpochMilli() - 3_600_000L;
 		for (int i = 0; i < count; i++) {
-			UnitKey hall = UnitKey.hall("f" + i);
+			UnitKey hall = UnitKey.hall(prefix + i);
 			Version v = new Version(StoreCodec.FORMAT, VersionId.create(millis, OTHER, i), List.of(), OTHER, "Kasse", null,
-					clock.instant(), "f" + i, false, MAPPER.createObjectNode().put("name", "Halle " + i));
+					clock.instant(), prefix + i, false, MAPPER.createObjectNode().put("name", "Halle " + i));
 			byte[] bytes = StoreCodec.write(v);
 			assertTrue(sharedStore.writeVersion(hall, v.id(), bytes));
 			assertTrue(sharedStore.createClaim(hall, "root",
@@ -1375,5 +1381,361 @@ class ConnectFlowStoreTest {
 		assertEquals(sale.id(), sharedClaim(BOOKING).version());
 		assertTrue(Files.isDirectory(sharedUnit(LOCAL_EVENT)));
 		assertEquals(List.of(), asideFolders(a));
+	}
+
+	// --- Starttabelle (Abschnitt E): Einstellungen x Marke "verbunden" -> Aufruf beim Start, über Neustarts
+
+	/** Der Weg, den der Start (KARV-87) bei "Einstellungen leer, Marke Ordner X" geht. */
+	private static void startWithoutFolderAndDisconnect(Node node) {
+		assertTrue(node.service.startup(null));
+		node.service.disconnect();
+	}
+
+	/**
+	 * Ein Rechner, dessen erster Lauf nach dem Beiseitelegen mitten im Lauf abbricht (Absturz, kein {@code closeIndex}):
+	 * Die eigene Einheit {@link #LOCAL_EVENT} liegt beiseite, die Marke ist unvollständig, ein Teil der 300 fremden Hallen
+	 * ist abgeholt, und ein Verkauf aus dem Lauf ist noch nicht hochgeladen.
+	 *
+	 * @param node  der abgestürzte Rechner; sein Dienst bleibt unbenutzt liegen
+	 * @param sale  der noch nicht hochgeladene Verkauf
+	 * @param aside der Ordner des beiseitegelegten Bestands
+	 */
+	private record AbortedRun(Node node, Version sale, String aside) {
+	}
+
+	private AbortedRun firstRunAbortedAfterSetAside() throws IOException {
+		seedSharedHalls(300);
+		Node a = nodeWithEarlierUnit("a");
+		a.slowReads();
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.SET_ASIDE);
+		assertTrue(a.service.tick());
+		List<String> aside = asideFolders(a);
+		assertEquals(1, aside.size());
+		assertNotNull(a.service.fullSyncProgress().get(), "mitten im Lauf");
+		assertFalse(result.isDone());
+		assertFalse(a.marker().orElseThrow().complete());
+		Version sale = save(a, BOOKING, "Anna");
+		assertTrue(a.service.unitState(BOOKING).provisional(), "noch nicht hochgeladen");
+		assertFalse(Files.exists(sharedUnit(BOOKING)));
+		return new AbortedRun(a, sale, aside.get(0));
+	}
+
+	/** Der Verkauf liegt im gemeinsamen Ordner und ist dort der Anspruch der Einheit. */
+	private void assertUploaded(Version sale, UnitKey unit) throws IOException {
+		assertEquals(sale.id(), sharedClaim(unit).version());
+		assertTrue(Files.exists(sharedUnit(unit).resolve(sale.id() + ".json")), "die Version liegt im gemeinsamen Ordner");
+	}
+
+	/** Zeile 1: Einstellungen leer, Marke leer: {@code startup(null)}, Einzelbetrieb. */
+	@Test
+	void emptySettingsAndEmptyMarkerIsSingleMode() throws IOException {
+		Node a = new Node("a");
+		assertEquals(Optional.empty(), a.marker());
+		assertEquals(Optional.empty(), a.service.connectedDir());
+		assertTrue(a.service.connectionComplete().get());
+
+		assertTrue(a.service.startup(null));
+
+		assertEquals(SyncState.AUS, a.service.syncState().get());
+		assertEquals(Optional.empty(), a.marker());
+		assertFalse(Files.exists(a.appData.resolve(ConnectionMarker.FILE_NAME)), "keine Marke angelegt");
+		assertNull(a.service.sharedDir());
+		assertTrue(a.service.connectionComplete().get());
+		assertEquals(List.of(), a.asked, "ohne Rückfrage");
+		assertEquals(List.of(), a.queued, "kein Takt eingeplant");
+		// Speichern gilt lokal und endgültig, nichts erreicht den gemeinsamen Ordner
+		Version sale = save(a, BOOKING, "Anna");
+		assertFalse(a.service.unitState(BOOKING).provisional());
+		assertEquals(sale.id(), a.service.unitState(BOOKING).head().id());
+		assertTrue(Files.exists(a.localData().resolve(BOOKING.relativePath()).resolve("claims/root.json")));
+		assertEquals(List.of(), a.layer.calls().stream().filter(c -> c.contains(sharedRoot.toString())).toList());
+		assertEquals(List.of(""), tree(sharedRoot), "der gemeinsame Ordner bleibt leer");
+
+		// derselbe Weg nach einem Neustart
+		a.service.closeIndex();
+		Node restarted = new Node(a.appData, "a", null);
+		assertTrue(restarted.service.startup(null));
+		assertEquals(SyncState.AUS, restarted.service.syncState().get());
+		assertEquals(Optional.empty(), restarted.marker());
+		assertEquals(sale.id(), restarted.service.unitState(BOOKING).head().id());
+	}
+
+	/**
+	 * Zeile 2: Einstellungen leer, Marke Ordner X: {@code startup(null)}, dann trennt der Start ausdrücklich: Die Marke ist
+	 * weg, das Ausstehende wird lokal beansprucht. Der Absturz liegt mitten im ersten Lauf, der Verkauf aus dem Lauf ist
+	 * noch nicht hochgeladen.
+	 */
+	@Test
+	void emptySettingsWithMarkerDisconnectsAndClaimsPendingLocally() throws IOException {
+		AbortedRun aborted = firstRunAbortedAfterSetAside();
+		Node a = new Node(aborted.node().appData, "a", null);
+		assertFalse(Files.exists(a.localData().resolve(BOOKING.relativePath()).resolve("claims/root.json")));
+
+		assertTrue(a.service.startup(null));
+
+		// startup(null) lässt die Marke stehen; das Ausstehende ist schon lokal beansprucht
+		ConnectionMarker.State kept = a.marker().orElseThrow();
+		assertEquals(shared, kept.dir());
+		assertFalse(kept.complete());
+		assertEquals(Optional.of(shared), a.service.connectedDir());
+		assertFalse(a.service.connectionComplete().get(), "unvollständige Marke");
+		assertEquals(SyncState.AUS, a.service.syncState().get());
+		assertEquals(aborted.sale().id(), a.service.unitState(BOOKING).head().id());
+		assertFalse(a.service.unitState(BOOKING).provisional());
+
+		a.service.disconnect();
+
+		assertEquals(Optional.empty(), a.marker());
+		assertFalse(Files.exists(a.appData.resolve(ConnectionMarker.FILE_NAME)));
+		assertEquals(Optional.empty(), a.service.connectedDir());
+		assertTrue(a.service.connectionComplete().get());
+		assertEquals(SyncState.AUS, a.service.syncState().get());
+		assertEquals(List.of(), a.asked, "ohne Rückfrage");
+		assertEquals(aborted.sale().id(), a.service.unitState(BOOKING).head().id());
+		assertEquals(List.of(), pending(a, BOOKING));
+		assertTrue(Files.exists(a.localData().resolve(BOOKING.relativePath()).resolve("claims/root.json")), "lokal beansprucht");
+		assertFalse(Files.exists(sharedUnit(BOOKING)), "nichts im gemeinsamen Ordner");
+		// nichts verloren: der beiseitegelegte Bestand ist unberührt, und die Einstellung ist ein Einzelbetrieb
+		assertEquals(List.of(aborted.aside()), asideFolders(a));
+		assertTrue(Files.isDirectory(a.appData.resolve(aborted.aside()).resolve(LOCAL_EVENT.relativePath())));
+
+		// auch der Weg des Starts als Ganzes (startup(null) + disconnect) auf einer Marke, die vollständig war
+		Node connected = new Node("b");
+		assertTrue(connected.service.startup(null));
+		save(connected, LOCAL_EVENT, "A");
+		connected.service.connect(shared, ConnectMode.MERGE);
+		connected.runScheduled();
+		assertTrue(connected.marker().orElseThrow().complete());
+		connected.down.set(true);
+		Version offlineSale = save(connected, BOOKING, "Anna");
+		assertTrue(connected.service.unitState(BOOKING).provisional(), "vorläufig, nicht lokal beansprucht");
+		Node restarted = new Node(connected.appData, "b", null);
+		startWithoutFolderAndDisconnect(restarted);
+		assertEquals(Optional.empty(), restarted.marker());
+		assertTrue(restarted.service.connectionComplete().get());
+		assertEquals(offlineSale.id(), restarted.service.unitState(BOOKING).head().id());
+		assertFalse(restarted.service.unitState(BOOKING).provisional());
+		assertTrue(Files.exists(restarted.localData().resolve(BOOKING.relativePath()).resolve("claims/root.json")));
+		assertFalse(Files.exists(sharedUnit(BOOKING)));
+		assertEquals(List.of(), restarted.asked);
+	}
+
+	/**
+	 * Zeile 3: Einstellungen X, Marke X vollständig: {@code startup(X)} wie heute. Kein zweiter erster Lauf (keine Frage, keine
+	 * neue Marke, kein Beiseitelegen, kein eiliger Takt); der Vollabgleich folgt im Hintergrund mit Pausen.
+	 */
+	@Test
+	void completeMarkerStartsNormally() throws IOException {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.runScheduled();
+		ConnectionMarker.State complete = a.marker().orElseThrow();
+		assertTrue(complete.complete());
+		assertTrue(Files.isDirectory(sharedUnit(LOCAL_EVENT)), "hochgeladen");
+		Node b = new Node("b");
+		assertTrue(b.service.startup(null));
+		b.service.connect(shared, ConnectMode.MERGE);
+		b.runScheduled();
+		// ein Verkauf des anderen Rechners, den a erst im Vollabgleich nach dem Neustart sieht
+		Version theirs = save(b, BOOKING, "Berta");
+		b.service.tick();
+		assertUploaded(theirs, BOOKING);
+		a.service.closeIndex();
+
+		Node restarted = new Node(a.appData, "a", null);
+		assertEquals(Optional.of(shared), restarted.service.connectedDir());
+		assertTrue(restarted.service.connectionComplete().get());
+		assertTrue(restarted.service.startup(shared));
+
+		assertEquals(SyncState.AKTUELL, restarted.service.syncState().get());
+		assertEquals(shared, restarted.service.sharedDir());
+		assertEquals(complete, restarted.marker().orElseThrow(), "die Marke bleibt unverändert");
+		assertTrue(restarted.service.connectionComplete().get());
+		assertEquals(List.of(), restarted.asked, "ohne Rückfrage");
+		assertEquals(List.of(), asideFolders(restarted));
+		assertEquals(List.of("lokal"), restarted.service.eventIds(), "der lokale Bestand bleibt, wie er ist");
+		assertNull(restarted.service.fullSyncProgress().get());
+		// der Vollabgleich folgt mit Pausen (kein eiliger Lauf), sein Ende ändert die Marke nicht
+		assertNotEquals(theirs.id(), restarted.service.unitState(BOOKING).head() == null ? null : restarted.service.unitState(BOOKING).head().id(),
+				"der fremde Verkauf ist vor dem Vollabgleich nicht da");
+		assertFalse(tickUntilRunEnds(restarted).contains(true));
+		assertEquals(theirs.id(), restarted.service.unitState(BOOKING).head().id(), "der Vollabgleich holt den fremden Verkauf");
+		assertEquals(complete, restarted.marker().orElseThrow());
+		assertEquals(List.of(), restarted.asked);
+		assertEquals(List.of(), asideFolders(restarted));
+	}
+
+	/**
+	 * Zeile 4: Einstellungen X, Marke X unvollständig: {@code startup(null)}, dann {@code connect(X, MERGE)} ohne Rückfrage.
+	 * Der Absturz liegt mitten im Lauf nach dem Beiseitelegen; ein zweites Beiseitelegen und eine Frage wären der Fehler.
+	 */
+	@Test
+	void abortedFirstRunAfterSetAsideResumesWithMergeWithoutAsking() throws IOException {
+		AbortedRun aborted = firstRunAbortedAfterSetAside();
+
+		Node a = restart(aborted.node(), "a");
+		ConnectionMarker.State before = a.marker().orElseThrow();
+		assertEquals(shared, before.dir());
+		assertFalse(before.complete());
+		assertFalse(a.service.connectionComplete().get());
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
+		a.runScheduled();
+
+		assertEquals(outcome(Kind.AKTUELL), result.getNow(null));
+		assertEquals(List.of(), a.asked, "ohne Rückfrage");
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+		assertEquals(List.of(aborted.aside()), asideFolders(a), "genau ein data-beiseite-Ordner");
+		// nichts verloren: der erste Bestand liegt beiseite, der Verkauf aus dem Lauf ist hochgeladen
+		assertTrue(Files.isDirectory(a.appData.resolve(aborted.aside()).resolve(LOCAL_EVENT.relativePath())));
+		assertFalse(Files.exists(sharedUnit(LOCAL_EVENT)), "der beiseitegelegte Bestand wird nicht mitgenommen");
+		assertUploaded(aborted.sale(), BOOKING);
+		assertEquals(aborted.sale().id(), a.service.unitState(BOOKING).head().id());
+		assertFalse(a.service.unitState(BOOKING).provisional());
+		assertEquals(300, a.service.hallIds().size());
+		ConnectionMarker.State after = a.marker().orElseThrow();
+		assertEquals(shared, after.dir());
+		assertTrue(after.complete());
+		assertTrue(a.service.connectionComplete().get());
+		assertFalse(a.service.tick(), "kein weiterer eiliger Lauf");
+	}
+
+	/**
+	 * Review Focus 2: Nach dem Absturz im ersten Lauf ist der Ordner beim Neustart nicht erreichbar. Das Verbinden mit
+	 * {@code MERGE} meldet OFFLINE, ohne zu fragen und ohne die unvollständige Marke zu ändern; nach der Rückkehr setzt der
+	 * Lauf fort, nimmt alles mit, und sein Ende meldet {@code connectionComplete()}.
+	 */
+	@Test
+	void restartAfterAbortedFirstRunWhileOfflineMergesOnReturn() throws IOException {
+		AbortedRun aborted = firstRunAbortedAfterSetAside();
+		Node a = restart(aborted.node(), "a");
+		ConnectionMarker.State before = a.marker().orElseThrow();
+		a.down.set(true);
+
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
+		a.runScheduled();
+
+		assertEquals(new ConnectOutcome(Kind.OFFLINE, false, null, StoreMessages.unreachable(shared)), result.getNow(null));
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertEquals(List.of(), a.asked, "ohne Rückfrage");
+		assertEquals(before, a.marker().orElseThrow(), "die unvollständige Marke bleibt");
+		assertFalse(a.service.connectionComplete().get());
+		assertEquals(List.of(aborted.aside()), asideFolders(a));
+		// ein weiterer Verkauf in der Zeit ohne Verbindung bleibt vorläufig
+		UnitKey second = UnitKey.booking("e1", "p1", "A-2");
+		Version offlineSale = save(a, second, "Carla");
+		assertTrue(a.service.unitState(second).provisional());
+		assertFalse(a.service.tick());
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertFalse(Files.exists(sharedUnit(second)));
+
+		// zurück: Der Lauf setzt fort und nimmt alles mit; ein zweites Ergebnis gibt es nicht
+		a.down.set(false);
+		tickUntilRunEnds(a);
+
+		assertEquals(Kind.OFFLINE, result.getNow(null).kind());
+		assertEquals(List.of(), a.asked, "auch nach der Rückkehr ohne Rückfrage");
+		assertTrue(a.service.connectionComplete().get());
+		ConnectionMarker.State after = a.marker().orElseThrow();
+		assertEquals(shared, after.dir());
+		assertTrue(after.complete());
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+		assertEquals(List.of(aborted.aside()), asideFolders(a), "kein zweites Beiseitelegen");
+		assertTrue(Files.isDirectory(a.appData.resolve(aborted.aside()).resolve(LOCAL_EVENT.relativePath())));
+		assertFalse(Files.exists(sharedUnit(LOCAL_EVENT)));
+		assertUploaded(aborted.sale(), BOOKING);
+		assertUploaded(offlineSale, second);
+		assertEquals(300, a.service.hallIds().size());
+	}
+
+	/**
+	 * Fehlerfall "Abbruch zwischen Beiseitelegen und Marke": Der lokale Bestand ist leer, die Marke fehlt. Der nächste Start
+	 * ({@code startup(null)}, {@code connect(X, ASK)}, Zeile 5) vereinigt ohne Rückfrage, weil eine Seite leer ist.
+	 */
+	@Test
+	void abortBetweenSetAsideAndMarkerMergesBecauseOneSideIsEmpty() throws IOException {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		AtomicBoolean broken = new AtomicBoolean(true);
+		breakMarker(a, broken);
+		List<String> sharedBefore = tree(sharedRoot);
+		a.service.connect(shared, ConnectMode.SET_ASIDE);
+		assertFalse(a.service.tick());
+		// Stand des Abbruchs: beiseitegelegt, lokal leer, keine Marke, nichts im gemeinsamen Ordner geändert
+		List<String> aside = asideFolders(a);
+		assertEquals(1, aside.size());
+		assertEquals(Optional.empty(), a.marker());
+		assertEquals(List.of(), a.service.eventIds());
+		assertEquals(sharedBefore, tree(sharedRoot));
+
+		Node restarted = restart(a, "a");
+		assertEquals(Optional.empty(), restarted.marker());
+		assertEquals(Optional.empty(), restarted.service.connectedDir());
+		assertTrue(restarted.service.connectionComplete().get());
+		CompletableFuture<ConnectOutcome> result = restarted.service.connect(shared, ConnectMode.ASK);
+		restarted.runScheduled();
+
+		assertEquals(outcome(Kind.AKTUELL), result.getNow(null));
+		assertEquals(List.of(), restarted.asked, "ohne Rückfrage: eine Seite ist leer");
+		assertEquals(SyncState.AKTUELL, restarted.service.syncState().get());
+		assertEquals(List.of("f0", "f1", "f2"), restarted.service.hallIds());
+		assertEquals(List.of(aside.get(0)), asideFolders(restarted), "nicht noch einmal beiseitegelegt");
+		assertTrue(Files.isDirectory(restarted.appData.resolve(aside.get(0)).resolve(LOCAL_EVENT.relativePath())), "nichts verloren");
+		assertFalse(Files.exists(sharedUnit(LOCAL_EVENT)));
+		ConnectionMarker.State marker = restarted.marker().orElseThrow();
+		assertEquals(shared, marker.dir());
+		assertTrue(marker.complete());
+	}
+
+	/**
+	 * Zeile 5: Einstellungen X, Marke Y (ein anderer Ordner): {@code startup(null)}, dann {@code connect(X, ASK)}. Beide
+	 * Seiten haben Einheiten, also fragt der Abgleich; die Marke von Y bleibt bis zur Entscheidung stehen.
+	 */
+	@Test
+	void otherFolderInTheMarkerConnectsWithAsk() throws IOException {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.runScheduled();
+		ConnectionMarker.State markerOfY = a.marker().orElseThrow();
+		assertTrue(markerOfY.complete());
+		assertTrue(Files.isDirectory(sharedUnit(LOCAL_EVENT)));
+		a.service.closeIndex();
+		Path otherRoot = Files.createDirectories(dir.resolve("gemeinsam-x"));
+		seedHalls(otherRoot, "g", 3);
+		String otherDir = otherRoot.toString();
+		List<String> sharedY = tree(sharedRoot);
+		List<String> sharedX = tree(otherRoot);
+
+		Node restarted = restart(a, "a");
+		assertEquals(Optional.of(shared), restarted.service.connectedDir());
+		CompletableFuture<ConnectOutcome> result = restarted.service.connect(otherDir, ConnectMode.ASK);
+		restarted.runScheduled();
+
+		assertEquals(decisionNeeded(true), result.getNow(null));
+		assertEquals(List.of(new Question(otherDir, true)), restarted.asked);
+		assertEquals(SyncState.ENTSCHEIDUNG, restarted.service.syncState().get());
+		assertEquals(markerOfY, restarted.marker().orElseThrow(), "bis zur Entscheidung bleibt die Marke von Y");
+		assertFalse(restarted.service.connectionComplete().get());
+		assertEquals(sharedY, tree(sharedRoot));
+		assertEquals(sharedX, tree(otherRoot), "in der Pause geht nichts hinaus");
+		assertEquals(List.of("f0", "f1", "f2"), restarted.service.hallIds(), "nichts abgeholt");
+
+		// Beiseitelegen ist erlaubt (dieser Programmlauf hat nichts gespeichert); danach gilt die Marke von X
+		CompletableFuture<ConnectOutcome> decided = restarted.service.decideConnect(ConnectMode.SET_ASIDE);
+		restarted.runScheduled();
+
+		List<String> aside = asideFolders(restarted);
+		assertEquals(1, aside.size());
+		Path asideRoot = restarted.appData.resolve(aside.get(0));
+		assertEquals(new ConnectOutcome(Kind.AKTUELL, false, asideRoot, null), decided.getNow(null));
+		assertTrue(Files.isDirectory(asideRoot.resolve(LOCAL_EVENT.relativePath())), "nichts verloren");
+		assertEquals(List.of("g0", "g1", "g2"), restarted.service.hallIds());
+		assertEquals(List.of(), restarted.service.eventIds());
+		assertEquals(sharedY, tree(sharedRoot), "Y bleibt unberührt");
+		ConnectionMarker.State markerOfX = restarted.marker().orElseThrow();
+		assertEquals(otherDir, markerOfX.dir());
+		assertTrue(markerOfX.complete());
+		assertTrue(restarted.service.connectionComplete().get());
 	}
 }
