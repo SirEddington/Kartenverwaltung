@@ -70,7 +70,7 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * höchstens 150 je Takt), vorgemerkte beschädigte Einheiten aus der Kopie im gemeinsamen Ordner heilen und beschädigte
  * Kopien dort aus der guten lokalen. Der <b>Vollabgleich</b> beginnt alle 10 Minuten (gezählt ab dem Ende des vorigen),
  * beim Start, nach der Rückkehr aus {@link SyncState#OFFLINE} und auf Wunsch; er läuft in Abschnitten ({@link FullSyncRun})
- * über mehrere Takte, je Takt etwa {@link #FULL_SYNC_SLICE_BUDGET} (mindestens ein Block), danach kommen die übrigen
+ * über mehrere Takte, je Takt höchstens {@link #FULL_SYNC_SLICE_BUDGET} (mindestens ein Block), danach kommen die übrigen
  * Schritte. Sein Zeiger hängt an der Verbindung: Nach einem Ausfall setzt er dort fort, eine neue Verbindung verwirft
  * ihn. Ein Wunsch während eines Laufs beginnt ihn nicht neu, sondern direkt nach seinem Ende einen neuen; den
  * Fortschritt zeigt {@link #fullSyncProgress()}. Trifft ein fremder Listeneintrag einen Platz, dessen lokaler Anspruch
@@ -135,8 +135,10 @@ public final class SyncService {
 	/** So oft läuft ein Vollabgleich (gezählt ab dem Ende des vorigen). */
 	static final Duration FULL_SYNC_INTERVAL = Duration.ofMinutes(10);
 	/**
-	 * So lange arbeitet ein Takt etwa an den Abschnitten des Vollabgleichs (mindestens ein Block); danach kommen die übrigen
-	 * Schritte des Takts, und der nächste Takt setzt den Lauf fort.
+	 * So lange hält ein Takt höchstens die Arbeitssperre für die Abschnitte des Vollabgleichs, gerechnet ab Beginn des Takts:
+	 * Ein weiterer Block beginnt nur, wenn er nach der Dauer des vorigen noch ins Budget passt. Der erste Block eines Takts
+	 * läuft immer; ist ein einzelner Block länger als das Budget, dauert der Takt so lange. Danach kommen die übrigen Schritte
+	 * des Takts, und der nächste Takt setzt den Lauf fort.
 	 */
 	static final Duration FULL_SYNC_SLICE_BUDGET = Duration.ofSeconds(2);
 	/** So lange werden eigene gewonnene Ansprüche auf eine späte Niederlage geprüft. */
@@ -1687,7 +1689,7 @@ public final class SyncService {
 						now.minus(LATE_DEFEAT_WINDOW).minus(CLOCK_SLACK));
 				watchOwnClaims(LocalScan.recentOwnClaims(local, myId, now, LATE_DEFEAT_WINDOW, recent));
 			}
-			FullSyncRun run = new FullSyncRun(local, current.shared);
+			FullSyncRun run = new FullSyncRun(local, current.shared, clock);
 			run.begin();
 			current.run = run;
 			publishProgress(current, run.progress());
@@ -1698,8 +1700,9 @@ public final class SyncService {
 	}
 
 	/**
-	 * Ein Stück des laufenden Vollabgleichs: Abschnitte und Blöcke, bis {@link #FULL_SYNC_SLICE_BUDGET} seit Beginn des
-	 * Takts verbraucht ist, mindestens aber ein Block. Scheitert ein Block (etwa weil der Ordner wegfällt), bleibt der
+	 * Ein Stück des laufenden Vollabgleichs: Abschnitte und Blöcke, solange der nächste nach der Dauer des vorigen noch vor
+	 * Ablauf von {@link #FULL_SYNC_SLICE_BUDGET} seit Beginn des Takts fertig würde ({@link FullSyncRun#step}), mindestens aber
+	 * ein Block. Scheitert ein Block (etwa weil der Ordner wegfällt), bleibt der
 	 * Zeiger davor stehen, und der nächste erreichbare Takt wiederholt ihn; jeder Schritt darin ist wiederholbar. Nach dem
 	 * letzten Abschnitt endet der Lauf.
 	 *
@@ -1710,7 +1713,7 @@ public final class SyncService {
 		Instant end = sliceStart.plus(FULL_SYNC_SLICE_BUDGET);
 		boolean finished;
 		try {
-			finished = run.step(() -> !clock.instant().isBefore(end), units -> syncSection(current, round, units));
+			finished = run.step(end, units -> syncSection(current, round, units));
 		} finally {
 			publishProgress(current, run.progress());
 		}

@@ -1,9 +1,11 @@
 package de.eltviller_carneval_verein.karten.store;
 
 import java.io.IOException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BooleanSupplier;
 
 /**
  * Der Plan eines Vollabgleichs in Stücken: Er teilt die Einheiten beider Bestände in Abschnitte und Blöcke und merkt
@@ -24,10 +26,11 @@ final class FullSyncRun {
 	/** Wie viele Hallen ein Abschnitt zusammenfasst. */
 	static final int HALL_BUNDLE = 50;
 	/**
-	 * Wie viele Buchungen ein Block höchstens enthält. Ein Takt arbeitet Blöcke ab, bis das Budget um ist, und beendet den
-	 * Block, der danach noch läuft: Die Haltezeit der Arbeitssperre ist also etwa das Budget plus ein Block. Gemessen
-	 * (Bestand 15.000 Buchungen, lokale Platte) dauern 50 Buchungen etwa 0,3 s, mit Hochladen bis etwa 0,6 s; bei 100 stieg
-	 * ein Takt auf 2,55 s, bei 500 auf 3,3 s.
+	 * Wie viele Buchungen ein Block höchstens enthält. Ein Takt beginnt einen weiteren Block nur, wenn der Block, gemessen
+	 * an dem davor, noch ins Budget passt ({@link #step}); die Haltezeit der Arbeitssperre ist also höchstens das Budget,
+	 * außer ein einzelner Block ist länger (dann ist der erste Block der Takt). Gemessen (Bestand 15.000 Buchungen, lokale
+	 * Platte, vor dieser Regel) dauern 50 Buchungen etwa 0,3 s, mit Hochladen bis etwa 0,6 s; bei 100 stieg ein Takt auf
+	 * 2,55 s, bei 500 auf 3,3 s.
 	 */
 	static final int BOOKING_BLOCK = 50;
 
@@ -42,6 +45,7 @@ final class FullSyncRun {
 
 	private final VersionStore local;
 	private final VersionStore shared;
+	private final Clock clock;
 
 	private List<Section> sections;
 	private int index;
@@ -50,9 +54,10 @@ final class FullSyncRun {
 	/** Der Ordnername der zuletzt bearbeiteten Buchung des aktuellen Abschnitts; leer vor dem ersten Block. */
 	private String pointer = "";
 
-	FullSyncRun(VersionStore local, VersionStore shared) {
+	FullSyncRun(VersionStore local, VersionStore shared, Clock clock) {
 		this.local = local;
 		this.shared = shared;
+		this.clock = clock;
 	}
 
 	/** Stellt die Abschnitte aus den Beständen beider Seiten zusammen und beginnt von vorn. */
@@ -80,20 +85,25 @@ final class FullSyncRun {
 	}
 
 	/**
-	 * Arbeitet Abschnitte und Blöcke ab, bis der Lauf fertig ist oder die Zeit um ist. {@code timeUp} wird vor jedem
-	 * Abschnitt und vor jedem Block gefragt, aber erst, nachdem dieser Aufruf mindestens einen Block erledigt hat: So
-	 * kommt der Lauf auch bei knappem Budget voran. Wirft {@code work}, bleiben Abschnitt und Zeiger stehen, und der
-	 * nächste Aufruf wiederholt den Block.
+	 * Arbeitet Abschnitte und Blöcke ab, bis der Lauf fertig ist oder die Frist keinen weiteren Block mehr zulässt. Der
+	 * erste Block dieses Aufrufs läuft immer: So kommt der Lauf auch auf einer langsamen Freigabe voran, auf der ein einzelner
+	 * Block länger dauert als das Budget. Ein weiterer Abschnitt oder Block beginnt nur, wenn er voraussichtlich bis zur Frist
+	 * fertig wird, nämlich wenn die Uhr jetzt plus die Dauer des zuletzt erledigten Blocks (mit Auflisten der Buchungen)
+	 * nicht nach {@code deadline} liegt. Ein Aufruf hält die Arbeitssperre des Aufrufers also höchstens bis zur Frist, es sei
+	 * denn, ein einzelner Block ist länger oder ein Block wird langsamer als der davor. Wirft {@code work}, bleiben Abschnitt
+	 * und Zeiger stehen, und der nächste Aufruf wiederholt den Block.
 	 *
+	 * @param deadline die Zeit, bis zu der der Aufruf fertig sein soll (nach der Uhr des Aufrufers)
 	 * @return ob der Lauf fertig ist
 	 */
-	boolean step(BooleanSupplier timeUp, Work work) throws IOException {
+	boolean step(Instant deadline, Work work) throws IOException {
 		if (sections == null) {
 			throw new IllegalStateException("Der Lauf wurde nicht begonnen.");
 		}
-		boolean didWork = false;
+		Duration last = null;
 		while (index < sections.size()) {
-			if (didWork && timeUp.getAsBoolean()) {
+			Instant begin = clock.instant();
+			if (last != null && begin.plus(last).isAfter(deadline)) {
 				return false;
 			}
 			Section section = sections.get(index);
@@ -103,7 +113,7 @@ final class FullSyncRun {
 			} else {
 				stepPresentation(section.presentation(), work);
 			}
-			didWork = true;
+			last = Duration.between(begin, clock.instant());
 		}
 		return true;
 	}

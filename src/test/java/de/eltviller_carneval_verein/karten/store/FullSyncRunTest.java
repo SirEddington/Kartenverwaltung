@@ -8,9 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BooleanSupplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,21 +19,28 @@ import org.junit.jupiter.api.io.TempDir;
 
 class FullSyncRunTest {
 
-	private static final BooleanSupplier NEVER = () -> false;
-	private static final BooleanSupplier ALWAYS = () -> true;
+	/** Eine Frist, die nie erreicht wird. */
+	private static final Instant NEVER = Instant.MAX;
+	/** Eine Frist, die immer schon vorbei ist: Ein Aufruf von {@code step} erledigt genau einen Block. */
+	private static final Instant ALWAYS = Instant.MIN;
 
 	@TempDir
 	Path dir;
 
+	private final TestClock clock = new TestClock();
 	private VersionStore local;
 	private VersionStore shared;
 	private FullSyncRun run;
 
-	/** Zeichnet die Listen auf, mit denen {@code sync} aufgerufen wird; wirft auf Wunsch einmal. */
-	private static final class Recorder implements FullSyncRun.Work {
+	/**
+	 * Zeichnet die Listen auf, mit denen {@code sync} aufgerufen wird; wirft auf Wunsch einmal und stellt auf Wunsch die
+	 * Uhr je Aufruf vor (die Dauer eines Blocks).
+	 */
+	private final class Recorder implements FullSyncRun.Work {
 
 		final List<List<UnitKey>> calls = new ArrayList<>();
 		IOException failOnce;
+		Duration cost = Duration.ZERO;
 
 		@Override
 		public void sync(List<UnitKey> units) throws IOException {
@@ -42,6 +50,7 @@ class FullSyncRunTest {
 				throw e;
 			}
 			calls.add(List.copyOf(units));
+			clock.advance(cost);
 		}
 	}
 
@@ -50,7 +59,7 @@ class FullSyncRunTest {
 		FileLayer files = new NioFileLayer();
 		local = new VersionStore(dir.resolve("local").resolve("data"), files);
 		shared = new VersionStore(dir.resolve("shared").resolve("data"), files);
-		run = new FullSyncRun(local, shared);
+		run = new FullSyncRun(local, shared, clock);
 	}
 
 	private static void folder(VersionStore store, String relativePath) throws IOException {
@@ -135,7 +144,7 @@ class FullSyncRunTest {
 		UnitKey p1 = presentation("e1", "p1");
 		run.begin();
 
-		assertFalse(run.step(() -> true, work)); // Kopf des Events
+		assertFalse(run.step(ALWAYS, work)); // Kopf des Events
 		assertFalse(run.inProgress(p1));
 		assertFalse(run.step(ALWAYS, work));
 		assertEquals(2, work.calls.size());
@@ -202,6 +211,74 @@ class FullSyncRunTest {
 		// Halle, Kopf, Vorstellung + ein Block, der Rest
 		assertEquals(4, steps);
 		assertEquals(4, work.calls.size());
+	}
+
+	/** Fünf Events: Abschnitte mit je einer Einheit, deren Dauer der Test über {@link Recorder#cost} vorgibt. */
+	private void fiveEventHeads() throws IOException {
+		for (int n = 1; n <= 5; n++) {
+			folder(local, "events/e" + n);
+		}
+	}
+
+	@Test
+	void furtherBlockStartsOnlyIfItFitsTheBudget() throws IOException {
+		fiveEventHeads();
+		Recorder work = new Recorder();
+		work.cost = Duration.ofMillis(800);
+		Instant deadline = clock.instant().plusSeconds(2);
+		run.begin();
+
+		assertFalse(run.step(deadline, work));
+
+		// 0,8 s, dann 1,6 s; ein dritter Block endete bei 2,4 s und passt nicht mehr
+		assertEquals(2, work.calls.size());
+		assertEquals(Duration.ofMillis(1600), Duration.between(deadline.minusSeconds(2), clock.instant()));
+	}
+
+	@Test
+	void blockEndingExactlyAtTheDeadlineStillFits() throws IOException {
+		fiveEventHeads();
+		Recorder work = new Recorder();
+		work.cost = Duration.ofSeconds(1);
+		run.begin();
+
+		assertFalse(run.step(clock.instant().plusSeconds(2), work));
+
+		assertEquals(2, work.calls.size());
+	}
+
+	@Test
+	void blockLongerThanTheBudgetRunsAloneAndTheRunAdvances() throws IOException {
+		fiveEventHeads();
+		Recorder work = new Recorder();
+		work.cost = Duration.ofSeconds(3);
+		run.begin();
+
+		int steps = 0;
+		boolean done = false;
+		while (!done) {
+			int before = work.calls.size();
+			done = run.step(clock.instant().plusSeconds(2), work);
+			steps++;
+			assertEquals(before + 1, work.calls.size(), "je Aufruf genau ein Block");
+			assertTrue(steps < 10);
+		}
+		assertEquals(5, steps);
+	}
+
+	@Test
+	void blocksOfALargePresentationFollowTheSameRule() throws IOException {
+		int block = FullSyncRun.BOOKING_BLOCK;
+		seats(local, 1, 3 * block);
+		Recorder work = new Recorder();
+		work.cost = Duration.ofMillis(900);
+		run.begin();
+		run.step(ALWAYS, work); // Kopf
+
+		// Vorstellung + erster Block (0,9 s); der zweite endete bei 1,8 s und passt; der dritte nicht
+		assertFalse(run.step(clock.instant().plusSeconds(2), work));
+		assertEquals(3, work.calls.size());
+		assertTrue(run.inProgress(presentation("e1", "p1")));
 	}
 
 	@Test

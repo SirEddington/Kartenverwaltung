@@ -1612,12 +1612,17 @@ class SyncServiceTest {
 	 * nächste Takt beginnt einen neuen, denn die 10 Minuten sind um.
 	 */
 	private Node slowNodeWithHalls(int count) throws IOException {
+		return slowNodeWithHalls(count, READ_COST);
+	}
+
+	/** Wie {@link #slowNodeWithHalls(int)}, aber mit {@code cost} je Lesezugriff: Ein Abschnitt dauert 50 × {@code cost}. */
+	private Node slowNodeWithHalls(int count, Duration cost) throws IOException {
 		Path appData = dir.resolve("a");
 		seedForeignHalls(appData, count);
 		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		a.service.startup(shared);
 		assertNull(a.service.fullSyncProgress().get());
-		slowReads(a, READ_COST);
+		slowReads(a, cost);
 		clock.advance(SyncService.FULL_SYNC_INTERVAL);
 		return a;
 	}
@@ -1660,6 +1665,43 @@ class SyncServiceTest {
 		assertEquals(3, ticks, "sechs Abschnitte zu je 1 s, zwei je Takt");
 		assertTrue(a.events.errors.isEmpty());
 		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+	}
+
+	@Test
+	void sliceStartsNoBlockThatWouldEndAfterTheBudget() throws IOException {
+		Node a = slowNodeWithHalls(300, Duration.ofMillis(16)); // ein Abschnitt dauert 0,8 s
+		Duration block = Duration.ofMillis(800);
+
+		Instant before = clock.instant();
+		a.service.tick();
+		Duration took = Duration.between(before, clock.instant());
+
+		// zwei Blöcke (bis 1,6 s); ein dritter endete bei 2,4 s, also nach dem Budget von 2 s
+		assertEquals(2.0 / 6, a.service.fullSyncProgress().get(), 1e-9);
+		assertTrue(took.compareTo(SyncService.FULL_SYNC_SLICE_BUDGET) <= 0, "Takt dauerte " + took);
+		assertTrue(took.compareTo(block.multipliedBy(2)) >= 0, "Takt dauerte " + took);
+		assertEquals(2, tickUntilRunEnds(a), "zwei weitere Takte für die übrigen vier Abschnitte");
+	}
+
+	@Test
+	void blockLongerThanTheBudgetStillRunsAndTheRunAdvances() throws IOException {
+		Node a = slowNodeWithHalls(300, Duration.ofMillis(60)); // ein Abschnitt dauert 3 s
+		Duration block = Duration.ofSeconds(3);
+
+		double progress = 0;
+		for (int tick = 1; tick <= 5; tick++) {
+			Instant before = clock.instant();
+			a.service.tick();
+			Duration took = Duration.between(before, clock.instant());
+			Double now = a.service.fullSyncProgress().get();
+			assertNotNull(now, "Takt " + tick + ": der Lauf ist noch nicht fertig");
+			assertEquals(tick / 6.0, now, 1e-9, "ein Block je Takt");
+			assertTrue(now > progress);
+			progress = now;
+			assertTrue(took.compareTo(block) >= 0 && took.compareTo(block.plusMillis(500)) < 0, "Takt dauerte " + took);
+		}
+		a.service.tick();
+		assertNull(a.service.fullSyncProgress().get(), "der sechste Block beendet den Lauf");
 	}
 
 	@Test
