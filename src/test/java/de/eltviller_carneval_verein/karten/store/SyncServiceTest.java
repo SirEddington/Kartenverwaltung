@@ -921,6 +921,37 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void abortedBlockStillIndexesTheUnknownUnitsItReached() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		a.service.closeIndex();
+		copyPastTheApp(OTHER, COPIED, a.localData(), sharedRoot.resolve("data"));
+		UnitKey k1 = UnitKey.hall("k1");
+		UnitKey k2 = UnitKey.hall("k2");
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		// das Auflisten von k2 im gemeinsamen Ordner scheitert: Der Block der Hallen bricht dort ab
+		AtomicBoolean broken = new AtomicBoolean(true);
+		Path k2Shared = sharedFile(k2, "x").getParent();
+		b.layer.failWhen(p -> broken.get() && p.equals(k2Shared), "listNamesWithTemps", new IOException("Störung"));
+		assertTrue(b.service.startup(shared));
+
+		assertNotNull(b.service.fullSyncProgress().get(), "der Lauf steht vor dem gescheiterten Block");
+		assertIndexed(b, List.of(k1, k2));
+		assertTrue(b.events.changedUnits().containsAll(List.of(k1, k2)), b.events.changed.toString());
+		assertFalse(b.service.snapshots().containsKey(UnitKey.event("e2")), "nach dem Abbruch kam kein Block mehr dran");
+
+		broken.set(false);
+		b.service.tick();
+
+		assertNull(b.service.fullSyncProgress().get());
+		assertIndexed(b, COPIED);
+		assertTrue(b.events.changedUnits().containsAll(COPIED), b.events.changed.toString());
+	}
+
+	@Test
 	void fullSyncIndexesUnknownUnitsThatAreOnlyLocal() throws IOException {
 		Node a = node("a");
 		a.service.startup(shared);
@@ -2055,6 +2086,44 @@ class SyncServiceTest {
 		assertEquals(3, ticks, "sechs Abschnitte zu je 1 s, zwei je Takt");
 		assertTrue(a.events.errors.isEmpty());
 		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+	}
+
+	@Test
+	void unknownUnitsSpreadOverSeveralTicksAndTheReportStaysInTheBudget() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		// an der App vorbei in beide Bestände kopiert: 300 Hallen, die der Index nicht kennt
+		List<UnitKey> halls = new ArrayList<>();
+		for (int n = 0; n < 300; n++) {
+			halls.add(UnitKey.hall(String.format("k%03d", n)));
+		}
+		copyPastTheApp(OTHER, halls, a.localData(), sharedRoot.resolve("data"));
+		// je Halle liest der Abschnitt den lokalen Anspruch, das Eintragen und das Melden je Version und Anspruch: Ein
+		// Abschnitt dauert 50 × 3 × 4 ms = 0,6 s, das Melden danach 50 × 2 × 4 ms = 0,4 s
+		slowReads(a, Duration.ofMillis(4));
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		a.events.changed.clear();
+
+		int ticks = 0;
+		do {
+			Instant before = clock.instant();
+			a.service.tick();
+			ticks++;
+			Duration took = Duration.between(before, clock.instant());
+			// samt Melden am Ende des Takts im Budget, bis auf die übrige Arbeit des Takts (einzelne Lesezugriffe); ohne die
+			// Nacharbeit: drei Abschnitte und ihr Melden, 3 s
+			Duration otherWork = Duration.ofMillis(100);
+			assertTrue(took.compareTo(SyncService.FULL_SYNC_SLICE_BUDGET.plus(otherWork)) <= 0,
+					"Takt " + ticks + " dauerte " + took);
+			assertTrue(ticks < 100, "der Lauf endet nicht");
+		} while (a.service.fullSyncProgress().get() != null);
+
+		assertEquals(4, ticks, "sechs Abschnitte der Hallen, zwei je Takt; dann Kopf und Vorstellung von e1");
+		assertIndexed(a, halls);
+		assertTrue(a.events.changedUnits().containsAll(halls));
+		assertTrue(a.events.errors.isEmpty(), a.events.errors.toString());
 	}
 
 	@Test

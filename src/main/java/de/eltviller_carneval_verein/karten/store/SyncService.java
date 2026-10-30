@@ -2460,8 +2460,8 @@ public final class SyncService {
 
 	/**
 	 * Ein Stück des laufenden Vollabgleichs: Abschnitte und Blöcke, solange der nächste nach der Dauer des vorigen noch vor
-	 * Ablauf von {@link #FULL_SYNC_SLICE_BUDGET} seit Beginn des Takts fertig würde ({@link FullSyncRun#step}), mindestens aber
-	 * ein Block. Scheitert ein Block (etwa weil der Ordner wegfällt), bleibt der
+	 * Ablauf von {@link #FULL_SYNC_SLICE_BUDGET} seit Beginn des Takts fertig würde, samt der Nacharbeit der Blöcke beim
+	 * Melden ({@link FullSyncRun#step}, {@link #syncSection}), mindestens aber ein Block. Scheitert ein Block (etwa weil der Ordner wegfällt), bleibt der
 	 * Zeiger davor stehen, und der nächste erreichbare Takt wiederholt ihn; jeder Schritt darin ist wiederholbar. Nach dem
 	 * letzten Abschnitt endet der Lauf.
 	 *
@@ -2525,9 +2525,13 @@ public final class SyncService {
 	 * <p>
 	 * Geändert ist auch jede lokale Einheit des Blocks, die der Index nicht kennt ({@link UnitIndex#entry}, eine Abfrage im
 	 * Speicher): Kam sie an der App vorbei in den lokalen Bestand, während der Index als sauber beendet galt (etwa eine
-	 * zurückgespielte Sicherung), nimmt der Block sie wie eine kopierte auf und meldet sie der Oberfläche. Das Auflösen
-	 * zählt zur Dauer des Blocks, an der {@link FullSyncRun#step} den nächsten misst; nach einem großen Hineinkopieren
-	 * macht ein Takt also weniger Blöcke, das Budget gilt weiter.
+	 * zurückgespielte Sicherung), nimmt der Block sie wie eine kopierte auf und meldet sie der Oberfläche.
+	 * <p>
+	 * Jede geänderte Einheit wird zweimal aufgelöst: hier beim Eintragen in den Index (zählt zur Dauer des Blocks) und am
+	 * Ende des Takts beim Melden ({@link #reportChanges}, Verluste aus den Dateien), noch unter {@code workLock}. Die Dauer
+	 * des Eintragens gibt der Block deshalb als Nacharbeit zurück; {@link FullSyncRun#step} rechnet sie gegen das Budget.
+	 * Nach einem großen Hineinkopieren macht ein Takt also weniger Blöcke, und die Arbeitssperre samt Melden bleibt im
+	 * Budget (außer der erste Block allein ist länger).
 	 * <p>
 	 * Scheitert der Block mittendrin, werden die geänderten Einheiten und die Verluste bis dahin ({@link FullSync.Aborted})
 	 * trotzdem eingetragen und gemeldet, bevor der Fehler weitergeht: Ein ausgeglichener Anspruch ist danach auf beiden
@@ -2535,8 +2539,10 @@ public final class SyncService {
 	 * findet, was noch nicht erledigt ist (und {@link #reportLoss} je Version nur einmal meldet). Umstrittene Plätze und
 	 * temporäre Dateien bleiben der Wiederholung überlassen, sie finden sich dabei wieder. Die Vorstellung des Blocks gilt
 	 * bis zur gelungenen Wiederholung als in Arbeit ({@link FullSyncRun#inProgress}), die Auflösung ihrer Verluste wartet.
+	 *
+	 * @return die Dauer des Eintragens in den Index, als Schätzung für das zweite Auflösen am Ende des Takts
 	 */
-	private void syncSection(Link current, Round round, List<UnitKey> units) throws IOException {
+	private Duration syncSection(Link current, Round round, List<UnitKey> units) throws IOException {
 		Instant now = clock.instant();
 		FullSyncResult result;
 		try {
@@ -2557,9 +2563,13 @@ public final class SyncService {
 			}
 			throw (IOException) cause;
 		}
+		Instant takeOver = clock.instant();
 		takeOverSection(round, result);
+		// steht für das zweite Auflösen derselben Einheiten in reportChanges am Ende des Takts (gleiche Arbeit, unter workLock)
+		Duration deferred = Duration.between(takeOver, clock.instant());
 		settleAll(current, result.contested(), round);
 		deleteOwnOldTemps(current, result.sharedTemps());
+		return deferred;
 	}
 
 	/** Übernimmt aus dem (Teil-)Ergebnis eines Blocks die geänderten Einheiten in Index und Takt und meldet die Verluste. */

@@ -153,6 +153,21 @@ class FullSyncTest {
 	}
 
 	@Test
+	void unknownLocalUnitIsInThePartialResultWhenItsSharedScanFails() throws IOException {
+		put(local, E1, version(ME, V1));
+		FaultyFileLayer faulty = new FaultyFileLayer(files);
+		faulty.failWhen(p -> p.toString().replace('\\', '/').endsWith("shared/data/events/e1"), "listNamesWithTemps",
+				new IOException("Störung"));
+		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
+
+		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
+				() -> FullSync.syncUnits(local, faultyShared, List.of(E1), false, OWN, files, CLOCK, unit -> false, claim -> {
+				}));
+
+		assertEquals(Set.of(E1), aborted.partial().changed());
+	}
+
+	@Test
 	void claimsFlowOnlyInward() throws IOException {
 		Version foreign = version(OTHER, FOREIGN);
 		put(shared, E2, foreign);
