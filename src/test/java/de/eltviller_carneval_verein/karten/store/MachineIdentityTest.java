@@ -219,6 +219,100 @@ class MachineIdentityTest {
 	}
 
 	@Test
+	void regenerateRemembersTheOldIdWithTheMoment() throws IOException {
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
+		String oldId = machine.id();
+
+		MachineIdentity fresh = machine.regenerate(CLOCK);
+
+		assertEquals(List.of(new Ownership.Previous(oldId, CLOCK.instant())), fresh.ownership().previous());
+		assertEquals(fresh.id(), fresh.ownership().currentId());
+		assertTrue(fresh.ownership().isOwnId(VersionId.create(CLOCK.millis(), oldId, 0)));
+		assertFalse(fresh.ownership().isOwnId(VersionId.create(CLOCK.millis() + 1, oldId, 0)));
+		// die alte Instanz bleibt unverändert
+		assertEquals(List.of(), machine.ownership().previous());
+		var previous = new com.fasterxml.jackson.databind.ObjectMapper().readTree(Files.readAllBytes(machineFile()))
+				.get("previous");
+		assertEquals(1, previous.size());
+		assertEquals(oldId, previous.get(0).get("id").asText());
+		assertEquals("2026-10-26T13:45:07Z", previous.get(0).get("until").asText());
+	}
+
+	@Test
+	void regenerateTwiceKeepsBothOldIds() throws IOException {
+		MachineIdentity first = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
+		MachineIdentity second = first.regenerate(CLOCK);
+		Clock later = Clock.fixed(CLOCK.instant().plusSeconds(60), ZoneOffset.UTC);
+
+		MachineIdentity third = second.regenerate(later);
+
+		assertEquals(List.of(new Ownership.Previous(first.id(), CLOCK.instant()),
+				new Ownership.Previous(second.id(), later.instant())), third.ownership().previous());
+	}
+
+	@Test
+	void regenerateWithoutClockUsesTheSystemClock() throws IOException {
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
+		Instant before = Instant.now();
+
+		MachineIdentity fresh = machine.regenerate();
+
+		Instant until = fresh.ownership().previous().get(0).until();
+		assertFalse(until.isBefore(before.minusMillis(1)));
+		assertFalse(until.isAfter(Instant.now().plusMillis(1)));
+	}
+
+	@Test
+	void renameKeepsPreviousIds() throws IOException {
+		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(CLOCK);
+		List<Ownership.Previous> previous = fresh.ownership().previous();
+
+		fresh.rename("Eingang Nord");
+
+		assertEquals(previous, fresh.ownership().previous());
+		assertEquals(previous, MachineIdentity.loadOrCreate(dir, () -> "egal").ownership().previous());
+	}
+
+	@Test
+	void fileWithoutPreviousHasNone() throws IOException {
+		Files.writeString(machineFile(), "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"name\":\"KASSE-1\",\"unbekannt\":5}",
+				StandardCharsets.UTF_8);
+
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK);
+
+		assertEquals(List.of(), machine.ownership().previous());
+		assertEquals("abcdefghijklmnopqrstuvwxyz", machine.ownership().currentId());
+		assertEquals(List.of("machine.json"), names());
+	}
+
+	@Test
+	void previousSurvivesReload() throws IOException {
+		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(CLOCK);
+
+		MachineIdentity reloaded = MachineIdentity.loadOrCreate(dir, () -> "egal");
+
+		assertEquals(fresh.id(), reloaded.id());
+		assertEquals(fresh.ownership(), reloaded.ownership());
+		assertEquals(1, reloaded.ownership().previous().size());
+	}
+
+	@Test
+	void previousWithBadEntriesIsIgnoredAndTheIdentityKept() throws IOException {
+		String id = "abcdefghijklmnopqrstuvwxyz";
+		String good = "{\"id\":\"zyxwvutsrqponmlkjihgfedcba\",\"until\":\"2026-10-26T13:45:07Z\"}";
+		Files.writeString(machineFile(), "{\"id\":\"" + id + "\",\"name\":\"KASSE-1\",\"previous\":[" + good
+				+ ",5,{\"id\":\"zu-kurz\",\"until\":\"2026-10-26T13:45:07Z\"},{\"id\":\"zyxwvutsrqponmlkjihgfedcba\","
+				+ "\"until\":\"kein Zeitpunkt\"},{\"id\":\"zyxwvutsrqponmlkjihgfedcba\"}]}", StandardCharsets.UTF_8);
+
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK);
+
+		assertEquals(id, machine.id());
+		assertEquals(List.of(new Ownership.Previous("zyxwvutsrqponmlkjihgfedcba", CLOCK.instant())),
+				machine.ownership().previous());
+		assertEquals(List.of("machine.json"), names());
+	}
+
+	@Test
 	void renameTrimsAndPersists() throws IOException {
 		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
 		String id = machine.id();

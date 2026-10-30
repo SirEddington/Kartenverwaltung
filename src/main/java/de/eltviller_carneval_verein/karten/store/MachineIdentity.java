@@ -9,14 +9,20 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.SecureRandom;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
@@ -28,6 +34,9 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * ersten 8 Zeichen bilden das Rechner-Kürzel der {@link VersionId}. ID und Name stehen in {@code machine.json} direkt im
  * Datenordner dieses Rechners, nie im gemeinsamen Ordner. Die Datei gehört diesem Rechner allein und darf deshalb
  * überschrieben werden (anders als Datendateien).
+ * <p>
+ * Nach einer Neuvergabe der ID merkt sich {@code machine.json} die früheren IDs mit dem Zeitpunkt der Neuvergabe
+ * ({@code "previous"}, fehlt in älteren Dateien); {@link #ownership()} entscheidet damit, welche Versionen als eigen gelten.
  * <p>
  * Der Bediener wird nur im Speicher gehalten. ID, Name und Bediener sind {@code volatile}, weil ein Hintergrund-Thread
  * sie später liest.
@@ -50,12 +59,14 @@ public final class MachineIdentity {
 
 	private final Path file;
 	private final String id;
+	private final List<Ownership.Previous> previous;
 	private volatile String name;
 	private volatile String operator;
 
-	private MachineIdentity(Path file, String id, String name, String operator) {
+	private MachineIdentity(Path file, String id, List<Ownership.Previous> previous, String name, String operator) {
 		this.file = file;
 		this.id = id;
+		this.previous = List.copyOf(previous);
 		this.name = name;
 		this.operator = operator;
 	}
@@ -115,19 +126,20 @@ public final class MachineIdentity {
 				String id = validId(node);
 				if (id != null) {
 					String name = validName(node);
+					List<Ownership.Previous> previous = validPrevious(node);
 					if (name != null) {
-						return new MachineIdentity(file, id, name, null);
+						return new MachineIdentity(file, id, previous, name, null);
 					}
 					// Gültige ID, aber Name fehlt oder ist unbrauchbar: die ID bleibt (sonst wären die eigenen Versionen und
 					// der eigene Listenordner plötzlich fremd), nur der Name wird neu vorbelegt und die Datei neu geschrieben.
-					MachineIdentity repaired = new MachineIdentity(file, id, nameFrom(computerName), null);
-					repaired.write(id, repaired.name);
+					MachineIdentity repaired = new MachineIdentity(file, id, previous, nameFrom(computerName), null);
+					repaired.write(id, repaired.name, previous);
 					return repaired;
 				}
 				moveAsideCorrupt(file, clock);
 			}
 			String name = nameFrom(computerName);
-			MachineIdentity created = new MachineIdentity(file, newId(), name, null);
+			MachineIdentity created = new MachineIdentity(file, newId(), List.of(), name, null);
 			if (created.writeNew(name)) {
 				return created;
 			}
@@ -144,7 +156,7 @@ public final class MachineIdentity {
 	 * @return {@code false}, wenn es die Datei schon gibt
 	 */
 	private boolean writeNew(String name) throws IOException {
-		byte[] bytes = toBytes(id, name);
+		byte[] bytes = toBytes(id, name, previous);
 		Path dir = file.toAbsolutePath().getParent();
 		Files.createDirectories(dir);
 		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
@@ -192,6 +204,33 @@ public final class MachineIdentity {
 	private static String validName(JsonNode node) {
 		JsonNode name = node.get("name");
 		return name != null && name.isTextual() && !name.asText().isBlank() ? name.asText() : null;
+	}
+
+	/**
+	 * Die früheren IDs aus dem Objekt. Fehlt das Feld, ist die Liste leer. Ein Eintrag ohne gültige ID (26 Zeichen
+	 * {@code [0-9a-z]}) oder ohne lesbaren Zeitpunkt wird übersprungen: Die aktuelle ID ist wichtiger als ein schadhafter
+	 * Eintrag, deshalb gilt die Datei dadurch nicht als beschädigt.
+	 */
+	private static List<Ownership.Previous> validPrevious(JsonNode node) {
+		JsonNode array = node.get("previous");
+		if (array == null || !array.isArray()) {
+			return List.of();
+		}
+		List<Ownership.Previous> result = new ArrayList<>();
+		for (JsonNode entry : array) {
+			JsonNode entryId = entry.get("id");
+			JsonNode until = entry.get("until");
+			if (entryId == null || !entryId.isTextual() || !ID_PATTERN.matcher(entryId.asText()).matches()
+					|| until == null || !until.isTextual()) {
+				continue;
+			}
+			try {
+				result.add(new Ownership.Previous(entryId.asText(), Instant.parse(until.asText())));
+			} catch (DateTimeParseException e) {
+				// unlesbarer Zeitpunkt: Eintrag überspringen
+			}
+		}
+		return result;
 	}
 
 	/** Benennt die beschädigte Datei um, ohne eine vorhandene Kopie zu überschreiben. */
@@ -248,33 +287,61 @@ public final class MachineIdentity {
 			throw new IllegalArgumentException("Der Name des Rechners darf nicht leer sein.");
 		}
 		String trimmed = name.trim();
-		write(id, trimmed);
+		write(id, trimmed, previous);
 		this.name = trimmed;
 	}
 
 	/**
-	 * Vergibt eine neue ID (gleicher Name, gleicher Bediener) und schreibt {@code machine.json} neu. Nötig, wenn ein
-	 * Datenordner auf einen zweiten Rechner kopiert wurde und beide dieselbe ID tragen. Diese Instanz behält ihre ID; wer
-	 * die neue braucht, nimmt die zurückgegebene.
-	 *
-	 * @throws IOException wenn die Datei nicht geschrieben werden kann
+	 * Was dieser Rechner als "eigen" ansieht: die aktuelle ID und die früheren (siehe {@link Ownership}).
 	 */
-	public synchronized MachineIdentity regenerate() throws IOException {
-		String newId = newId();
-		write(newId, name);
-		return new MachineIdentity(file, newId, name, operator);
+	public Ownership ownership() {
+		return new Ownership(id, previous);
 	}
 
-	private static byte[] toBytes(String id, String name) throws IOException {
+	/**
+	 * Vergibt eine neue ID mit der Systemuhr.
+	 *
+	 * @see #regenerate(Clock)
+	 */
+	public MachineIdentity regenerate() throws IOException {
+		return regenerate(Clock.systemUTC());
+	}
+
+	/**
+	 * Vergibt eine neue ID (gleicher Name, gleicher Bediener) und schreibt {@code machine.json} neu. Nötig, wenn ein
+	 * Datenordner auf einen zweiten Rechner kopiert wurde und beide dieselbe ID tragen. Die alte ID bleibt mit dem
+	 * Zeitpunkt der Uhr (auf die Millisekunde abgeschnitten) als frühere ID erhalten: Versionen bis dahin gelten weiter als
+	 * eigen (siehe {@link Ownership}). Diese Instanz behält ihre ID; wer die neue braucht, nimmt die zurückgegebene.
+	 *
+	 * @param clock Uhr für den Zeitpunkt der Neuvergabe
+	 * @throws IOException wenn die Datei nicht geschrieben werden kann
+	 */
+	public synchronized MachineIdentity regenerate(Clock clock) throws IOException {
+		String newId = newId();
+		List<Ownership.Previous> all = new ArrayList<>(previous);
+		all.add(new Ownership.Previous(id, clock.instant().truncatedTo(ChronoUnit.MILLIS)));
+		write(newId, name, all);
+		return new MachineIdentity(file, newId, all, name, operator);
+	}
+
+	private static byte[] toBytes(String id, String name, List<Ownership.Previous> previous) throws IOException {
 		ObjectNode node = MAPPER.createObjectNode();
 		node.put("id", id);
 		node.put("name", name);
+		if (!previous.isEmpty()) {
+			ArrayNode array = node.putArray("previous");
+			for (Ownership.Previous old : previous) {
+				ObjectNode entry = array.addObject();
+				entry.put("id", old.id());
+				entry.put("until", old.until().toString());
+			}
+		}
 		return MAPPER.writeValueAsBytes(node);
 	}
 
 	/** Schreibt die Datei über eine temporäre Datei im selben Ordner und ersetzt die vorhandene atomar. */
-	private void write(String id, String name) throws IOException {
-		byte[] bytes = toBytes(id, name);
+	private void write(String id, String name, List<Ownership.Previous> previous) throws IOException {
+		byte[] bytes = toBytes(id, name, previous);
 		Path dir = file.toAbsolutePath().getParent();
 		Files.createDirectories(dir);
 		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
