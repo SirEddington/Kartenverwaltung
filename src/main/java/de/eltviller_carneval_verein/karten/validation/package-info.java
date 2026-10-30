@@ -10,6 +10,10 @@
  * bis {@code SYS-004} und {@code SET-001} bis {@code SET-003} gehörten zur Spiegelung (KARV-73), die mit KARV-89
  * entfallen ist; sie werden nicht wieder vergeben.
  *
+ * <p>Die Texte von {@code SYS-005}, {@code SYS-006} und {@code SYS-008} bis {@code SYS-013} wurden mit KARV-87 neu gefasst:
+ * Sie sagen dem Bediener in Du-Form, was passiert ist und was er tun kann (oder dass er nichts tun muss). Die Codes
+ * bleiben, der Text von {@code SYS-007} ist unverändert.
+ *
  * <p>Meldungstexte stehen als Vorlage im Issue-Enum und enthalten Platzhalter {@code &1} bis {@code &9}
  * (wie in SAP, siehe {@link MessageTemplate}). {@code &1} ist in der Regel die Beschreibung der
  * betroffenen Entität ({@link EntityLabels}); weitere Parameter sind Werte aus der Prüfung.

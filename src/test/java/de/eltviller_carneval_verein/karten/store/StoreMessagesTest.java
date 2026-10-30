@@ -22,26 +22,64 @@ class StoreMessagesTest {
 	}
 
 	@Test
-	void textsMatchSpec() {
-		assertEquals("SYS-005: Der gemeinsame Ordner \\\\server\\karten ist nicht erreichbar. Du kannst weiterarbeiten; "
-				+ "neue Verkäufe und Änderungen sind vorläufig, bis sie hochgeladen sind.",
+	void unreachableTextSaysChangesAreUploadedLater() {
+		assertEquals("SYS-005: Der gemeinsame Ordner \\\\server\\karten ist nicht erreichbar. Du kannst weiterarbeiten: "
+				+ "Neue Verkäufe und Änderungen sind vorläufig und werden hochgeladen, sobald der Ordner wieder erreichbar ist.",
 				StoreMessages.unreachable("\\\\server\\karten"));
-		assertEquals("SYS-006: Der Abgleich mit dem gemeinsamen Ordner E:\\ECV ist fehlgeschlagen: Platte voll",
+	}
+
+	@Test
+	void syncFailedTextPutsTheCauseInParenthesesAndPromisesRetries() {
+		assertEquals("SYS-006: Der Abgleich mit dem gemeinsamen Ordner E:\\ECV ist gescheitert (Platte voll). Neue Verkäufe "
+				+ "bleiben vorläufig; die Kartenverwaltung versucht es weiter.",
 				StoreMessages.syncFailed("E:\\ECV", "Platte voll"));
+	}
+
+	@Test
+	void repairedTextIsUnchanged() {
 		assertEquals("SYS-007: Die beschädigte Datei E:\\ECV\\data\\halls\\h1\\v.json wurde durch eine geprüfte Kopie "
 				+ "ersetzt; die beschädigte liegt als v.json.corrupt-2026-10-26_19-04-11 daneben.",
 				StoreMessages.repaired("E:\\ECV\\data\\halls\\h1\\v.json", "v.json.corrupt-2026-10-26_19-04-11"));
-		assertEquals("SYS-008: halls/h1 ist beschädigt, und es gibt keine unbeschädigte Kopie. Änderungen daran sind "
-				+ "gesperrt, bis sie auf den letzten lesbaren Stand zurückgesetzt wird.", StoreMessages.damaged("halls/h1"));
-		assertEquals("SYS-009: halls/h1 wurde mit einer neueren Version der Kartenverwaltung gespeichert. Bitte "
-				+ "aktualisiere die Kartenverwaltung auf diesem Rechner.", StoreMessages.newerFormat("halls/h1"));
-		assertEquals("SYS-010: Die Kartenverwaltung läuft auf diesem Rechner bereits.", StoreMessages.alreadyRunning());
-		assertEquals("SYS-011: Ein anderer Rechner verwendet dieselbe Rechner-Kennung (wahrscheinlich eine kopierte "
-				+ "Installation). Dieser Rechner hat eine neue Kennung erhalten.", StoreMessages.duplicateMachine());
-		assertEquals("SYS-012: Im gemeinsamen Ordner liegt events/e1/v.json mit anderem Inhalt als lokal. Es wurde "
-				+ "nichts überschrieben.", StoreMessages.contentMismatch("events/e1/v.json"));
-		assertEquals("SYS-013: halls/h1 ließ sich wiederholt nicht mit dem gemeinsamen Ordner abgleichen und wurde "
-				+ "übersprungen: AccessDeniedException: E:\\ECV\\data\\halls\\h1. Der nächste Abgleich versucht es erneut.",
+	}
+
+	@Test
+	void damagedTextPointsToTheLockedEntriesInTheFooter() {
+		assertEquals("SYS-008: halls/h1 ist beschädigt, und es gibt keine heile Kopie. Der Eintrag ist gesperrt; über "
+				+ "„gesperrte Einträge“ in der Fußzeile kannst du ihn auf den letzten lesbaren Stand zurücksetzen.",
+				StoreMessages.damaged("halls/h1"));
+	}
+
+	@Test
+	void newerFormatTextSaysTheEntryIsLockedHere() {
+		assertEquals("SYS-009: halls/h1 wurde mit einer neueren Version der Kartenverwaltung gespeichert und ist hier "
+				+ "gesperrt. Aktualisiere die Kartenverwaltung auf diesem Rechner.", StoreMessages.newerFormat("halls/h1"));
+	}
+
+	@Test
+	void alreadyRunningTextTellsToSwitchToTheOpenWindow() {
+		assertEquals("SYS-010: Die Kartenverwaltung ist auf diesem Rechner schon geöffnet. Wechsle zum offenen Fenster.",
+				StoreMessages.alreadyRunning());
+	}
+
+	@Test
+	void duplicateMachineTextSaysNothingHasToBeDone() {
+		assertEquals("SYS-011: Ein anderer Rechner verwendet dieselbe Rechner-Kennung, wahrscheinlich weil die Installation "
+				+ "kopiert wurde. Dieser Rechner hat deshalb eine neue Kennung bekommen. Du musst nichts tun.",
+				StoreMessages.duplicateMachine());
+	}
+
+	@Test
+	void contentMismatchTextAsksToPassTheHintOn() {
+		assertEquals("SYS-012: Im gemeinsamen Ordner liegt events/e1/v.json mit anderem Inhalt als auf diesem Rechner. Es "
+				+ "wurde nichts überschrieben. Gib den Hinweis bitte an die Betreuung der Kartenverwaltung weiter.",
+				StoreMessages.contentMismatch("events/e1/v.json"));
+	}
+
+	@Test
+	void skippedTextNamesMissingForeignChanges() {
+		assertEquals("SYS-013: halls/h1 ließ sich wiederholt nicht mit dem gemeinsamen Ordner abgleichen "
+				+ "(AccessDeniedException: E:\\ECV\\data\\halls\\h1) und wurde übersprungen. Änderungen anderer Rechner "
+				+ "daran fehlen hier, bis ein späterer Abgleich gelingt; die Kartenverwaltung versucht es weiter.",
 				StoreMessages.skipped("halls/h1", "AccessDeniedException: E:\\ECV\\data\\halls\\h1"));
 	}
 

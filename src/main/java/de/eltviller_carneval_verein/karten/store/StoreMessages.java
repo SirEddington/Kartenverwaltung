@@ -38,29 +38,35 @@ public final class StoreMessages {
 	public static final String SYS_SKIPPED = "SYS-013";
 
 	private static final String UNREACHABLE_TEXT = "Der gemeinsame Ordner &1 ist nicht erreichbar. Du kannst "
-			+ "weiterarbeiten; neue Verkäufe und Änderungen sind vorläufig, bis sie hochgeladen sind.";
+			+ "weiterarbeiten: Neue Verkäufe und Änderungen sind vorläufig und werden hochgeladen, sobald der Ordner "
+			+ "wieder erreichbar ist.";
 
-	private static final String SYNC_FAILED_TEXT = "Der Abgleich mit dem gemeinsamen Ordner &1 ist fehlgeschlagen: &2";
+	private static final String SYNC_FAILED_TEXT = "Der Abgleich mit dem gemeinsamen Ordner &1 ist gescheitert (&2). "
+			+ "Neue Verkäufe bleiben vorläufig; die Kartenverwaltung versucht es weiter.";
 
 	private static final String REPAIRED_TEXT = "Die beschädigte Datei &1 wurde durch eine geprüfte Kopie ersetzt; die "
 			+ "beschädigte liegt als &2 daneben.";
 
-	private static final String DAMAGED_TEXT = "&1 ist beschädigt, und es gibt keine unbeschädigte Kopie. Änderungen "
-			+ "daran sind gesperrt, bis sie auf den letzten lesbaren Stand zurückgesetzt wird.";
+	private static final String DAMAGED_TEXT = "&1 ist beschädigt, und es gibt keine heile Kopie. Der Eintrag ist "
+			+ "gesperrt; über „gesperrte Einträge“ in der Fußzeile kannst du ihn auf den letzten lesbaren Stand "
+			+ "zurücksetzen.";
 
-	private static final String NEWER_FORMAT_TEXT = "&1 wurde mit einer neueren Version der Kartenverwaltung gespeichert. "
-			+ "Bitte aktualisiere die Kartenverwaltung auf diesem Rechner.";
+	private static final String NEWER_FORMAT_TEXT = "&1 wurde mit einer neueren Version der Kartenverwaltung gespeichert "
+			+ "und ist hier gesperrt. Aktualisiere die Kartenverwaltung auf diesem Rechner.";
 
-	private static final String ALREADY_RUNNING_TEXT = "Die Kartenverwaltung läuft auf diesem Rechner bereits.";
+	private static final String ALREADY_RUNNING_TEXT = "Die Kartenverwaltung ist auf diesem Rechner schon geöffnet. "
+			+ "Wechsle zum offenen Fenster.";
 
-	private static final String DUPLICATE_MACHINE_TEXT = "Ein anderer Rechner verwendet dieselbe Rechner-Kennung "
-			+ "(wahrscheinlich eine kopierte Installation). Dieser Rechner hat eine neue Kennung erhalten.";
+	private static final String DUPLICATE_MACHINE_TEXT = "Ein anderer Rechner verwendet dieselbe Rechner-Kennung, "
+			+ "wahrscheinlich weil die Installation kopiert wurde. Dieser Rechner hat deshalb eine neue Kennung "
+			+ "bekommen. Du musst nichts tun.";
 
-	private static final String CONTENT_MISMATCH_TEXT = "Im gemeinsamen Ordner liegt &1 mit anderem Inhalt als lokal. Es "
-			+ "wurde nichts überschrieben.";
+	private static final String CONTENT_MISMATCH_TEXT = "Im gemeinsamen Ordner liegt &1 mit anderem Inhalt als auf diesem "
+			+ "Rechner. Es wurde nichts überschrieben. Gib den Hinweis bitte an die Betreuung der Kartenverwaltung weiter.";
 
-	private static final String SKIPPED_TEXT = "&1 ließ sich wiederholt nicht mit dem gemeinsamen Ordner abgleichen und wurde "
-			+ "übersprungen: &2. Der nächste Abgleich versucht es erneut.";
+	private static final String SKIPPED_TEXT = "&1 ließ sich wiederholt nicht mit dem gemeinsamen Ordner abgleichen (&2) und "
+			+ "wurde übersprungen. Änderungen anderer Rechner daran fehlen hier, bis ein späterer Abgleich gelingt; die "
+			+ "Kartenverwaltung versucht es weiter.";
 
 	private StoreMessages() {
 	}
