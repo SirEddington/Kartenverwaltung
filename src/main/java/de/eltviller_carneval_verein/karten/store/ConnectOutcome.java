@@ -5,9 +5,9 @@ import java.util.Objects;
 
 /**
  * Wie ein {@link SyncService#connect} (oder ein {@link SyncService#decideConnect}) ausging. Es kommt genau einmal je
- * Aufruf, beim ersten Ausgang: am Ende des ersten
- * Vollabgleichs der Verbindung oder vorher, wenn der Ordner nicht erreichbar ist, ein Abschnitt scheitert oder die
- * Verbindung getrennt bzw. gewechselt wird. Läuft der erste Vollabgleich danach weiter, meldet sein Ende
+ * Aufruf, beim ersten Ausgang: am Ende des ersten Vollabgleichs der Verbindung oder vorher, wenn der Ordner nicht
+ * erreichbar ist, ein Abschnitt scheitert oder die Verbindung getrennt bzw. gewechselt wird. Läuft der erste
+ * Vollabgleich danach weiter, meldet sein Ende
  * {@link SyncService#connectionComplete()}; ein zweites Ergebnis gibt es nicht.
  *
  * @param kind            der Ausgang

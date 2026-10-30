@@ -381,6 +381,12 @@ public final class SyncService {
 	 * Sperre des Dienstes vorfinden. Nur unter {@code workLock} benutzt.
 	 */
 	private final List<Runnable> outcomesDue = new ArrayList<>();
+	/**
+	 * Der Thread des Takts wurde unterbrochen, während das Beiseitelegen auf laufende Speichervorgänge wartete
+	 * ({@link #setAsideLocal}); {@link #tick()} stellt die Unterbrechung nach der Freigabe der Arbeitssperre wieder her. Nur
+	 * unter {@code workLock} benutzt.
+	 */
+	private boolean interruptAfterTick;
 
 	// Alles Folgende wird unter lock gelesen und geschrieben; Dateizugriffe geschehen nie darunter.
 	private final Object lock = new Object();
@@ -406,8 +412,9 @@ public final class SyncService {
 	 */
 	private final Set<UnitKey> unrepairable = new HashSet<>();
 	/**
-	 * Wie viele {@link #append} gerade Versionsdateien in den lokalen Bestand schreiben; das Beiseitelegen wartet, bis es
-	 * keine mehr sind ({@link #setAsideLocal}). Auf das Ende wird an {@code lock} gewartet.
+	 * Wie viele {@link #append} gerade im lokalen Bestand arbeiten: von der ersten Versionsdatei bis zum Einreihen bzw. zum
+	 * lokalen Beanspruchen (ohne {@link #settleAfterConnectionChange}, das {@code workLock} nimmt). Das Beiseitelegen
+	 * wartet, bis es keine mehr sind ({@link #setAsideLocal}); gewartet wird an {@code lock}.
 	 */
 	private int localWrites;
 	/**
@@ -740,7 +747,9 @@ public final class SyncService {
 	 * @throws IllegalArgumentException wenn {@code mode} weder {@link ConnectMode#MERGE} noch {@link ConnectMode#SET_ASIDE}
 	 *                                  ist
 	 * @throws IllegalStateException    wenn die aktuelle Verbindung nicht auf eine Entscheidung wartet (Zustand
-	 *                                  {@link SyncState#ENTSCHEIDUNG}), etwa im Einzelbetrieb oder nach einer Entscheidung
+	 *                                  {@link SyncState#ENTSCHEIDUNG}), etwa im Einzelbetrieb oder nach einer Entscheidung,
+	 *                                  oder der Ordner wurde in der Pause unerreichbar ({@link SyncState#OFFLINE}); die
+	 *                                  Frage kommt nach der Rückkehr erneut
 	 */
 	public CompletableFuture<ConnectOutcome> decideConnect(ConnectMode mode) {
 		Objects.requireNonNull(mode, "mode");
@@ -935,6 +944,8 @@ public final class SyncService {
 		// der Fehler, der das Schreiben beendet hat: geprüft oder unerwartet (nie beide)
 		IOException failure = null;
 		RuntimeException unexpected = null;
+		// gezählt bis zum Einreihen (bzw. lokalen Beanspruchen): Ein Beiseitelegen trifft nie Dateien ohne ihren Auftrag
+		boolean counted = true;
 		try {
 			// vor der ersten Datei: eine Marke "sauber beendet" gilt nur über einem unveränderten Bestand
 			index.invalidateCleanMarker();
@@ -951,37 +962,42 @@ public final class SyncService {
 					break;
 				}
 			}
-		} finally {
-			endLocalWrites();
-		}
-		try {
-			if (current == null) {
-				// der Index folgt dort: claimLocally löst jede Einheit über resolveLocal auf (Verlustableitung)
-				claimLocally(written);
-				// ohne gemeinsamen Ordner gibt es keine Listen: Die frisch geschriebenen Versionen stehen in keiner. Nur hier ist
-				// das sicher; was claimPendingLocally findet, kann schon in einer Liste stehen (unbekannt)
-				index.markOwnListed(feedEntries(written), 0);
-			} else {
-				// erst in den Index, dann in die Warteschlange: Sobald der Auftrag läuft, trägt der Index die Listennummer ein
-				indexUnits(written);
-				index.markOwnListed(feedEntries(written), 0);
-				if (!enqueue(current, saveId, written)) {
-					settleAfterConnectionChange(saveId, written);
-				}
-			}
-		} catch (IOException | RuntimeException e) {
-			// auch nach einem Fehler spiegelt der Index, was auf der Platte liegt (etwa eine Version ohne Anspruch)
-			Throwable first = failure != null ? failure : unexpected;
-			if (first == null) {
-				indexUnits(written);
-				throw e;
-			}
 			try {
-				indexUnits(written);
-			} catch (RuntimeException indexFailure) {
-				first.addSuppressed(indexFailure);
+				if (current == null) {
+					// der Index folgt dort: claimLocally löst jede Einheit über resolveLocal auf (Verlustableitung)
+					claimLocally(written);
+					// ohne gemeinsamen Ordner gibt es keine Listen: Die frisch geschriebenen Versionen stehen in keiner. Nur hier
+					// ist das sicher; was claimPendingLocally findet, kann schon in einer Liste stehen (unbekannt)
+					index.markOwnListed(feedEntries(written), 0);
+				} else {
+					// erst in den Index, dann in die Warteschlange: Sobald der Auftrag läuft, trägt der Index die Listennummer ein
+					indexUnits(written);
+					index.markOwnListed(feedEntries(written), 0);
+					if (!enqueue(current, saveId, written)) {
+						// nicht mehr gezählt: Das nimmt workLock, und ein wartendes Beiseitelegen hält sie
+						counted = false;
+						endLocalWrites();
+						settleAfterConnectionChange(saveId, written);
+					}
+				}
+			} catch (IOException | RuntimeException e) {
+				// auch nach einem Fehler spiegelt der Index, was auf der Platte liegt (etwa eine Version ohne Anspruch)
+				Throwable first = failure != null ? failure : unexpected;
+				if (first == null) {
+					indexUnits(written);
+					throw e;
+				}
+				try {
+					indexUnits(written);
+				} catch (RuntimeException indexFailure) {
+					first.addSuppressed(indexFailure);
+				}
+				first.addSuppressed(e);
 			}
-			first.addSuppressed(e);
+		} finally {
+			if (counted) {
+				endLocalWrites();
+			}
 		}
 		if (failure != null) {
 			throw failure;
@@ -997,8 +1013,8 @@ public final class SyncService {
 	 * gerade beiseitegelegt, wartet es, bis der neue Datenordner bereit ist; dann setzt es für einen Speichervorgang der
 	 * Anwendung nach dem Start den Merker der Schutzregel (vor der ersten Datei: Auch ein Speichervorgang, der gerade
 	 * schreibt, verhindert das Beiseitelegen; scheitert er, bleibt der Merker, die sichere Richtung) und zählt sich zu den
-	 * laufenden Schreibvorgängen. Wer {@code workLock} hält, findet hier nie ein laufendes Beiseitelegen vor (es läuft
-	 * selbst unter {@code workLock}); gewartet wird nur ohne gehaltene Sperre.
+	 * laufenden Schreibvorgängen ({@link #localWrites}, bis zum Einreihen). Wer {@code workLock} hält, findet hier nie ein
+	 * laufendes Beiseitelegen vor (es läuft selbst unter {@code workLock}); gewartet wird nur ohne gehaltene Sperre.
 	 *
 	 * @param counts ob es ein Speichervorgang der Anwendung mit mindestens einer Änderung ist
 	 * @return die Verbindung, mit der geschrieben wird
@@ -1028,7 +1044,7 @@ public final class SyncService {
 		}
 	}
 
-	/** Ende der lokalen Schreibvorgänge eines {@link #append}; ein wartendes Beiseitelegen prüft danach erneut. */
+	/** Ende der lokalen Arbeit eines {@link #append} (nach dem Einreihen); ein wartendes Beiseitelegen prüft danach erneut. */
 	private void endLocalWrites() {
 		synchronized (lock) {
 			localWrites--;
@@ -1903,7 +1919,12 @@ public final class SyncService {
 			}
 			return current.firstRun && current.hurry && isCurrent(current);
 		} finally {
+			boolean interrupt = interruptAfterTick;
+			interruptAfterTick = false;
 			unlockWork();
+			if (interrupt) {
+				Thread.currentThread().interrupt();
+			}
 		}
 	}
 
@@ -1911,14 +1932,15 @@ public final class SyncService {
 	 * Ein Takt im {@code worker}, im ersten Lauf einer Verbindung mehrere ohne Pause ({@link #tick()} liefert dann
 	 * {@code true}). Die Arbeitssperre ist zwischen zwei Takten frei; weil sie fair ist, kommen ein wartendes
 	 * {@link #connect}, {@link #disconnect} oder {@link #closeIndex()} dazwischen dran. Liefert {@link #tick()}
-	 * {@code false} (Lauf zu Ende, Ordner weg, Störung, getrennt, geschlossen), endet die Schleife.
+	 * {@code false} (Lauf zu Ende, Ordner weg, Störung, getrennt, geschlossen) oder ist der Thread danach unterbrochen, endet
+	 * die Schleife; der nächste eingeplante Takt setzt fort.
 	 */
 	private void tickSafely() {
 		try {
-			boolean again = true;
-			while (again) {
+			boolean again;
+			do {
 				again = tick();
-			}
+			} while (again && !Thread.currentThread().isInterrupted());
 		} catch (RuntimeException e) {
 			LOGGER.log(Level.SEVERE, "Unerwarteter Fehler im Takt des Versionsspeichers", e);
 		}
@@ -1988,6 +2010,19 @@ public final class SyncService {
 			round.run(() -> beginRun(current));
 			if (current.deciding) {
 				// die Schutzregel verbot das Beiseitelegen: Pause wie oben
+				return false;
+			}
+			if (current.decision != null && current.decision.setAside()) {
+				// das Beiseitelegen scheiterte (etwa am Umbenennen) und steht noch aus: Der Bestand, der beiseitegelegt wird,
+				// lädt nichts hoch, holt nichts ab und heilt nichts; der nächste Takt versucht es erneut
+				if (!isCurrent(current)) {
+					return false;
+				}
+				if (round.unreachable) {
+					reportUnreachable(current);
+				} else if (round.failure != null) {
+					reportFailure(current, round.failure);
+				}
 				return false;
 			}
 		}
@@ -2151,10 +2186,10 @@ public final class SyncService {
 	 * (einmal je Verbindung, {@link Link#decision}; das Mitnehmen gilt für alle Abschnitte des Laufs) und das Beiseitelegen
 	 * (der einzige Schritt, der den ganzen lokalen Bestand ändert, vor allen Abschnitten; {@link #setAsideLocal}). Verbietet
 	 * die Schutzregel das Beiseitelegen, beginnt kein Lauf: Der Abgleich pausiert mit der Frage ({@link #enterDecision}). Im
-	 * ersten Lauf einer Verbindung danach die Marke "verbunden" als unvollständig. Dann die ausstehenden Versionen einreihen, nach einem Neustart die
-	 * jungen eigenen Ansprüche beobachten und die Abschnitte bestimmen ({@link FullSyncRun#begin}). Ein Wunsch nach einem
-	 * Vollabgleich gilt ab hier dem nächsten Lauf; scheitert der Beginn, bleibt er offen. Die Positionen der Änderungslisten
-	 * ändert der Vollabgleich nicht.
+	 * ersten Lauf einer Verbindung danach die Marke "verbunden" als unvollständig. Dann die ausstehenden Versionen
+	 * einreihen, nach einem Neustart die jungen eigenen Ansprüche beobachten und die Abschnitte bestimmen
+	 * ({@link FullSyncRun#begin}). Ein Wunsch nach einem Vollabgleich gilt ab hier dem nächsten Lauf; scheitert der Beginn,
+	 * bleibt er offen. Die Positionen der Änderungslisten ändert der Vollabgleich nicht.
 	 */
 	private void beginRun(Link current) throws IOException {
 		current.fullSyncWanted = false;
@@ -2222,8 +2257,11 @@ public final class SyncService {
 	/**
 	 * Legt den lokalen Bestand beiseite, wenn die Schutzregel es erlaubt; unter {@code workLock}. Prüfung und Umbenennen
 	 * bilden einen Schritt, mit dem sich kein lokales Schreiben eines {@link #append} überschneidet: Unter {@code lock} wird
-	 * der Merker geprüft und {@link #settingAside} gesetzt, dann gewartet, bis kein {@link #append} mehr schreibt (das
-	 * betrifft nur Schreibvorgänge, die nicht zählen; einer, der zählt, hat den Merker schon gesetzt). Ein {@link #append},
+	 * der Merker geprüft und {@link #settingAside} gesetzt, dann gewartet, bis kein {@link #append} mehr im lokalen Bestand
+	 * arbeitet ({@link #localWrites}: Dateien, Index, Einreihen; das betrifft nur Speichervorgänge, die nicht zählen; einer,
+	 * der zählt, hat den Merker schon gesetzt). Der gezählte Teil nimmt nur {@code resolveLock}, den Monitor des Index und
+	 * kurz {@code lock}, nie {@code workLock}; wer sie hält, wartet nie auf {@code workLock}, die hier allein gehalten wird.
+	 * Deshalb endet das Warten immer. Ein {@link #append},
 	 * das danach beginnen will, wartet, bis der neue Datenordner bereit ist (umbenannt, Index geleert), und schreibt dann
 	 * dorthin. Die Aufträge des alten Bestands (etwa Zusammenführungen der Auflösung während der Pause) gehen mit ihm
 	 * beiseite und nicht hinaus. Scheitert das Umbenennen, bleibt die Entscheidung, und der nächste Beginn prüft erneut.
@@ -2245,10 +2283,11 @@ public final class SyncService {
 				}
 			}
 		}
+		if (interrupted) {
+			// erst nach dem Takt wiederherstellen: Mit gesetztem Merker scheiterte sonst jeder unterbrechbare Dateizugriff darin
+			interruptAfterTick = true;
+		}
 		try {
-			if (interrupted) {
-				Thread.currentThread().interrupt();
-			}
 			Path aside = FullSync.setAside(local.dataRoot(), files, clock);
 			// ab hier ist beiseitegelegt: nie ein zweites Mal, auch wenn danach etwas scheitert
 			current.decision = new ConnectDecision(false, decision.uploadLocalClaims());

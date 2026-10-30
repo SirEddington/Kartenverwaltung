@@ -941,6 +941,65 @@ class ConnectFlowStoreTest {
 		assertFalse(Files.exists(sharedUnit(second)), "die Zusammenführung aus der Pause geht mit dem Bestand beiseite");
 	}
 
+	/**
+	 * Ein Rechner wie {@link #nodeWithEarlierUnit}, dazu eine verlorene Strecke an der Halle aus dem früheren Programmlauf.
+	 * Ihre Zusammenführung scheitert beim Start: Sie kommt erst in einem Takt dran (in der Pause nach Ablauf von
+	 * {@link ConflictResolver#LIST_WAIT}).
+	 */
+	private Node nodeWithUnresolvedLoss(UnitKey hall) throws IOException {
+		Node earlier = new Node("a");
+		assertTrue(earlier.service.startup(""));
+		save(earlier, LOCAL_EVENT, "A");
+		Version base = save(earlier, hall, "Anna");
+		foreignOnTop(earlier, hall, base, 0);
+		earlier.service.append(UUID.randomUUID().toString(),
+				List.of(new Change(hall, List.of(base.id()), MAPPER.createObjectNode().put("name", "Carla"), false)));
+		assertEquals(1, earlier.service.unitState(hall).lost().size());
+		Node a = new Node(earlier.appData, "a", null);
+		a.service.setConflictPolicy(UnitType.HALL,
+				input -> new Resolution(input.mine().payload().deepCopy(), false, List.of(), null));
+		AtomicBoolean blocked = new AtomicBoolean(true);
+		a.layer.failWhen(p -> blocked.get() && p.startsWith(a.localData().resolve(hall.relativePath())), "createNew",
+				new IOException("gesperrt"));
+		assertTrue(a.service.startup(""));
+		blocked.set(false);
+		return a;
+	}
+
+	@Test
+	void failedSetAsideRenameUploadsNothingOfTheOldStore() throws IOException {
+		UnitKey hall = UnitKey.hall("h2");
+		seedSharedHalls(3);
+		Node a = nodeWithUnresolvedLoss(hall);
+		a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+		assertEquals(List.of(new Question(shared, true)), a.asked);
+		// in der Pause löst der Takt lokal auf: Die Zusammenführung wartet als Auftrag
+		clock.advance(ConflictResolver.LIST_WAIT);
+		assertFalse(a.service.tick());
+		assertMerged(a, hall);
+		a.layer.failNext("rename", new AccessDeniedException("data gesperrt"));
+
+		CompletableFuture<ConnectOutcome> decided = a.service.decideConnect(ConnectMode.SET_ASIDE);
+		a.runScheduled();
+
+		assertEquals(Kind.FEHLER, decided.getNow(null).kind());
+		assertEquals(SyncState.FEHLER, a.service.syncState().get());
+		assertEquals(List.of(), asideFolders(a));
+		assertFalse(Files.exists(sharedUnit(hall)), "der Bestand, der beiseitegelegt wird, lädt nichts hoch");
+		assertEquals(List.of(), a.service.hallIds().stream().filter(id -> id.startsWith("f")).toList(), "nichts abgeholt");
+
+		// der nächste Beginn legt beiseite: Die Zusammenführung bleibt beim alten Bestand
+		tickUntilRunEnds(a);
+
+		List<String> aside = asideFolders(a);
+		assertEquals(1, aside.size());
+		assertTrue(Files.isDirectory(a.appData.resolve(aside.get(0)).resolve(hall.relativePath())));
+		assertFalse(Files.exists(sharedUnit(hall)));
+		assertEquals(List.of("f0", "f1", "f2"), a.service.hallIds(), "die Zusammenführung kommt nicht zurück");
+		assertTrue(a.marker().orElseThrow().complete());
+	}
+
 	@Test
 	void askWhileUnreachableIsOfflineAndKeepsSavesPending() throws IOException {
 		seedSharedHalls(3);
@@ -1126,6 +1185,94 @@ class ConnectFlowStoreTest {
 		assertEquals(Kind.AKTUELL, merged.getNow(null).kind());
 		assertEquals(sale.get().id(), sharedClaim(BOOKING).version());
 		assertEquals(List.of(), asideFolders(a));
+	}
+
+	@Test
+	void uncountedSaveFinishesQueuingBeforeTheSetAside() throws Exception {
+		setAsideWaitingForAnUncountedSave(false);
+	}
+
+	@Test
+	void interruptWhileTheSetAsideWaitsIsRestoredAfterTheTick() throws Exception {
+		setAsideWaitingForAnUncountedSave(true);
+	}
+
+	/**
+	 * Ein Speichervorgang, der nicht zählt (vor dem Ende von {@code startup}), hält beim Eintragen in den Index an; das
+	 * Beiseitelegen wartet auf ihn. Mit {@code interrupt} wird der Thread des Takts dabei unterbrochen: Der Takt läuft trotzdem
+	 * ohne Störung zu Ende, und die Unterbrechung steht danach wieder.
+	 */
+	private void setAsideWaitingForAnUncountedSave(boolean interrupt) throws Exception {
+		seedSharedHalls(3);
+		Node earlier = new Node("a");
+		assertTrue(earlier.service.startup(""));
+		save(earlier, LOCAL_EVENT, "A");
+		// ohne Ende von startup zählt ein Speichervorgang nicht für die Schutzregel; er darf beiseitegelegt werden, aber nur
+		// ganz: Datei und Auftrag
+		Node a = new Node(earlier.appData, "a", null);
+		a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+		assertEquals(List.of(new Question(shared, true)), a.asked);
+		// der Speichervorgang hält nach dem Schreiben an, beim Eintragen in den Index (vor dem Einreihen)
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		a.layer.blockNext("read", entered, release);
+		AtomicReference<Throwable> failure = new AtomicReference<>();
+		Thread saver = new Thread(() -> {
+			try {
+				save(a, BOOKING, "Anna");
+			} catch (Throwable e) {
+				failure.set(e);
+			}
+		});
+		AtomicBoolean interruptedAfter = new AtomicBoolean();
+		Thread worker = new Thread(() -> {
+			a.runScheduled();
+			interruptedAfter.set(Thread.currentThread().isInterrupted());
+		});
+		// kein Dateizugriff des Takts läuft mit gesetzter Unterbrechung (ein unterbrechbarer Kanal scheiterte sonst)
+		AtomicReference<String> interruptedIo = new AtomicReference<>();
+		for (String operation : List.of("read", "createNew", "listNames", "rename")) {
+			a.layer.onEach(operation, () -> {
+				if (Thread.currentThread() == worker && worker.isInterrupted()) {
+					interruptedIo.compareAndSet(null, operation);
+				}
+			});
+		}
+		CompletableFuture<ConnectOutcome> decided;
+		try {
+			saver.start();
+			assertTrue(entered.await(10, TimeUnit.SECONDS));
+			decided = a.service.decideConnect(ConnectMode.SET_ASIDE);
+			worker.start();
+			// das Beiseitelegen wartet an der Bedingung auf das Ende des Speichervorgangs; ohne Ausschluss liefe es weiter und
+			// bliebe am Index hängen, den der Speichervorgang gerade hält
+			long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+			Thread.State state = worker.getState();
+			while (System.nanoTime() < deadline && (state == Thread.State.NEW || state == Thread.State.RUNNABLE)) {
+				Thread.onSpinWait();
+				state = worker.getState();
+			}
+			assertEquals(Thread.State.WAITING, state, "das Beiseitelegen wartet auf den Speichervorgang");
+			if (interrupt) {
+				worker.interrupt();
+			}
+		} finally {
+			release.countDown();
+			saver.join(10_000);
+			worker.join(10_000);
+		}
+		assertNull(failure.get());
+		assertFalse(worker.isAlive());
+		assertEquals(Kind.AKTUELL, decided.getNow(null).kind(), "der Takt lief ohne Störung zu Ende");
+		assertEquals(interrupt, interruptedAfter.get(), "die Unterbrechung steht nach dem Takt wieder");
+		assertNull(interruptedIo.get(), "Dateizugriff mit gesetzter Unterbrechung");
+		a.service.tick();
+
+		List<String> aside = asideFolders(a);
+		assertEquals(1, aside.size());
+		assertTrue(Files.isDirectory(a.appData.resolve(aside.get(0)).resolve(BOOKING.relativePath())), "mit dem Bestand beiseite");
+		assertFalse(Files.exists(sharedUnit(BOOKING)), "sein Auftrag ging mit beiseite");
 	}
 
 	@Test
