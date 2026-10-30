@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -45,8 +46,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.AppPaths;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.store.ConnectOutcome.Kind;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import javafx.application.Platform;
+import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyObjectProperty;
 
 /**
@@ -73,7 +76,10 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * über mehrere Takte, je Takt höchstens {@link #FULL_SYNC_SLICE_BUDGET} (mindestens ein Block), danach kommen die übrigen
  * Schritte. Sein Zeiger hängt an der Verbindung: Nach einem Ausfall setzt er dort fort, eine neue Verbindung verwirft
  * ihn. Ein Wunsch während eines Laufs beginnt ihn nicht neu, sondern direkt nach seinem Ende einen neuen; den
- * Fortschritt zeigt {@link #fullSyncProgress()}. Trifft ein fremder Listeneintrag einen Platz, dessen lokaler Anspruch
+ * Fortschritt zeigt {@link #fullSyncProgress()}. Im ersten Lauf einer Verbindung ({@link #connect}) folgen die Takte ohne
+ * Pause aufeinander, solange der Ordner erreichbar ist und nichts scheitert (die Arbeitssperre wird dazwischen frei); sein
+ * Ende liefert das Ergebnis von {@link #connect} und vervollständigt die Marke "verbunden" ({@link #connectionComplete()}).
+ * Trifft ein fremder Listeneintrag einen Platz, dessen lokaler Anspruch
  * abweicht, wird sofort verglichen: So fällt eine späte Niederlage auch nach Ablauf der Beobachtung auf. Deshalb
  * überspringt auch der Vollabgleich keine Liste: Er lässt die Positionen stehen, und jede Liste wird gelesen (nach einem
  * Verlust von {@code sync-state.json} oder für einen neuen Rechner einmal der ganze Rückstand, 200 Listen je Takt).
@@ -201,6 +207,16 @@ public final class SyncService {
 	}
 
 	/**
+	 * Die Entscheidung am Beginn des ersten Laufs einer Verbindung, einmal je Verbindung gefasst ({@link Link#decision}).
+	 *
+	 * @param setAside          ob der lokale Bestand noch beiseitezulegen ist; nach dem Beiseitelegen {@code false}, damit
+	 *                          nie ein zweites Mal beiseitegelegt wird
+	 * @param uploadLocalClaims ob der erste Lauf alle lokalen Ansprüche hochlädt (Mitnehmen; auch, wenn eine Seite leer ist)
+	 */
+	private record ConnectDecision(boolean setAside, boolean uploadLocalClaims) {
+	}
+
+	/**
 	 * Die Verbindung zu einem gemeinsamen Ordner. Wird der Ordner gewechselt oder getrennt, entsteht eine neue (oder
 	 * keine); was für eine alte Verbindung noch läuft, zählt nicht mehr. Leser und Schreiber benutzt nur der Thread, der
 	 * die Arbeitssperre hält.
@@ -228,14 +244,34 @@ public final class SyncService {
 		/** Ob der laufende Vollabgleich alle lokalen Ansprüche hochlädt (Mitnehmen); entschieden bei seinem Beginn. */
 		volatile boolean uploadLocalClaims;
 		/**
-		 * Ob diese Verbindung den lokalen Bestand schon beiseitegelegt hat. Ein wiederholter Beginn (nach einem Fehler danach)
-		 * entscheidet dann nicht neu: Sonst legte er einen inzwischen gespeicherten Verkauf ein zweites Mal beiseite.
+		 * Die Entscheidung des Verbindens ({@link ConnectDecision}), gefasst beim ersten Beginn eines Laufs, sobald beide Seiten
+		 * gelesen sind; {@code null} bis dahin. Ein wiederholter Beginn (nach einem Fehler danach) entscheidet nie neu, sondern
+		 * setzt mit ihr fort: Neu entschieden sähe er einen inzwischen gespeicherten Verkauf als lokale Einheit und legte ihn
+		 * beiseite, ob zuvor schon beiseitegelegt wurde oder nicht. Benutzt nur unter der Arbeitssperre.
 		 */
-		volatile boolean setAsideDone;
+		volatile ConnectDecision decision;
 		/** Der erste Vollabgleich steht noch aus: danach werden die Verluste aller Einheiten abgeleitet. */
 		volatile boolean allUnitsWanted = true;
 		volatile Instant lastFullSync;
 		volatile Instant lastDiscovery;
+		/**
+		 * Das Ergebnis von {@link SyncService#connect} bis zum ersten Ausgang; danach (und ohne {@code connect}) {@code null}.
+		 * Festgelegt wird es nur unter der Arbeitssperre ({@link SyncService#settle}).
+		 */
+		volatile CompletableFuture<ConnectOutcome> outcome;
+		/**
+		 * Der erste Vollabgleich dieser Verbindung läuft (ab {@link SyncService#connect} bis zu seinem Ende): Er schreibt die
+		 * Marke "verbunden", und seine Takte folgen ohne Pause aufeinander. Nicht bei einer Verbindung aus
+		 * {@link SyncService#startup}.
+		 */
+		volatile boolean firstRun;
+		/** Wohin diese Verbindung den lokalen Bestand beiseitegelegt hat; {@code null}, solange nicht. */
+		volatile Path setAsidePath;
+		/**
+		 * Ob der letzte Takt den Ordner erreichte und ohne Störung durchlief: Nur dann folgt im ersten Lauf der nächste Takt
+		 * sofort. Eigenes Feld, unabhängig davon, ob der Takt die Auflösung schon erledigt hat.
+		 */
+		volatile boolean hurry;
 
 		Link(String text, Path path, VersionStore shared, SyncPositions positions) {
 			this.text = text;
@@ -309,6 +345,12 @@ public final class SyncService {
 	 * {@code disconnect} oder {@code closeIndex} zwischen zwei Takten drankommt und nicht hinter jedem neuen Takt wartet.
 	 */
 	private final ReentrantLock workLock = new ReentrantLock(true);
+	/**
+	 * Ergebnisse von {@link #connect}, die unter {@code workLock} feststehen und erst nach deren Freigabe geliefert werden
+	 * ({@link #unlockWork}): Abhängige Stufen ohne eigenen Executor laufen auf dem liefernden Thread und sollen dabei keine
+	 * Sperre des Dienstes vorfinden. Nur unter {@code workLock} benutzt.
+	 */
+	private final List<Runnable> outcomesDue = new ArrayList<>();
 
 	// Alles Folgende wird unter lock gelesen und geschrieben; Dateizugriffe geschehen nie darunter.
 	private final Object lock = new Object();
@@ -354,7 +396,9 @@ public final class SyncService {
 		this.reachable = reachable;
 		this.clock = clock;
 		this.local = new VersionStore(appDataDir.resolve(DATA), files);
-		this.notifier = new SyncNotifier(ui);
+		// eine unvollständige Marke "verbunden": Der erste Lauf einer Verbindung kam nicht zu Ende (auch über einen Neustart)
+		this.notifier = new SyncNotifier(ui,
+				ConnectionMarker.read(appDataDir).map(ConnectionMarker.State::complete).orElse(true));
 		this.machine = machine;
 		this.ids = new VersionIdGenerator(machine.id(), clock);
 		this.index = newIndex(machine.ownership());
@@ -452,6 +496,25 @@ public final class SyncService {
 	 */
 	public ReadOnlyObjectProperty<Double> fullSyncProgress() {
 		return notifier.fullSyncProgressProperty();
+	}
+
+	/**
+	 * Ob der erste Vollabgleich der Verbindung zu Ende kam: {@code false} von {@link #connect} bis zum Ende dieses Laufs,
+	 * auch über einen Neustart hinweg, solange die Marke "verbunden" unvollständig ist (Startwert aus der Marke);
+	 * {@code true} im Einzelbetrieb, nach {@link #disconnect} und sobald die Marke vollständig ist. Änderungen kommen über
+	 * den {@code ui}-Executor an.
+	 */
+	public ReadOnlyBooleanProperty connectionComplete() {
+		return notifier.connectionCompleteProperty();
+	}
+
+	/**
+	 * Der gemeinsame Ordner aus der Marke "verbunden" ({@code <AppData>/connection.json}): mit welchem Ordner zuletzt
+	 * verbunden wurde, ob der erste Lauf zu Ende kam oder nicht; leer ohne (lesbare) Marke. Liest die kleine lokale Datei,
+	 * unabhängig davon, ob der Dienst gestartet ist.
+	 */
+	public Optional<String> connectedDir() {
+		return ConnectionMarker.read(appDataDir).map(ConnectionMarker.State::dir);
 	}
 
 	/** Der gemeinsame Ordner, wie er eingestellt wurde (ohne Leerzeichen am Rand); {@code null} im Einzelbetrieb. */
@@ -582,31 +645,51 @@ public final class SyncService {
 	 * verloren); {@link ConnectMode#SET_ASIDE} benennt den lokalen Bestand in {@code data-beiseite-<Zeitstempel>} um (nie
 	 * gelöscht) und gleicht in einen leeren Bestand ab. Leer oder {@code null} trennt.
 	 * <p>
+	 * Der erste Vollabgleich der Verbindung schreibt an seinem Beginn die Marke "verbunden" als unvollständig, an seinem Ende
+	 * als vollständig; bis dahin ist {@link #connectionComplete()} {@code false}, und seine Takte folgen ohne Pause
+	 * aufeinander (die Arbeitssperre wird dazwischen frei).
+	 * <p>
 	 * Wartet auf das Ende des laufenden Takts; nicht auf dem FX-Thread aufrufen. So überlappt kein Hochladen der alten
 	 * Verbindung mit dem Wechsel.
+	 *
+	 * @return das Ergebnis, genau einmal: {@link Kind#AKTUELL} bzw. {@link Kind#AUSSTEHEND} am Ende des ersten Laufs,
+	 *         vorher {@link Kind#OFFLINE} (Ordner nicht erreichbar), {@link Kind#FEHLER} (ein Abschnitt scheitert) oder
+	 *         {@link Kind#ABGEBROCHEN} (getrennt oder neu verbunden); jeweils mit dem Pfad des beiseitegelegten Bestands,
+	 *         falls schon beiseitegelegt. Bei leerem Pfad sofort {@link Kind#ABGEBROCHEN}. Geliefert wird ohne gehaltene
+	 *         Sperre des Dienstes; abhängige Stufen ohne eigenen Executor laufen auf dem liefernden Thread (im Takt dem
+	 *         {@code worker}, sonst dem Aufrufer von {@code connect} bzw. {@link #disconnect}).
 	 */
-	public void connect(String sharedDir, ConnectMode mode) {
+	public CompletableFuture<ConnectOutcome> connect(String sharedDir, ConnectMode mode) {
 		Objects.requireNonNull(mode, "mode");
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			disconnect();
-			return;
+			return CompletableFuture.completedFuture(new ConnectOutcome(Kind.ABGEBROCHEN, false, null, null));
 		}
+		CompletableFuture<ConnectOutcome> outcome = new CompletableFuture<>();
 		workLock.lock();
 		try {
 			reopen();
-			activate(dir, mode);
+			abortPendingOutcome();
+			Link created = activate(dir, mode);
+			// noch hält niemand sonst die Arbeitssperre: Kein Takt sieht die Verbindung ohne diese Felder
+			created.outcome = outcome;
+			created.firstRun = true;
+			notifier.setConnectionComplete(false);
 		} finally {
-			workLock.unlock();
+			unlockWork();
 		}
 		// ohne Sperre: Der Takt nimmt sie selbst
 		schedule();
+		return outcome;
 	}
 
 	/**
 	 * Beendet den gemeinsamen Betrieb: Der lokale Bestand bleibt, wie er ist (nichts wird gelöscht oder umgeschrieben),
 	 * und ist ab jetzt Schiedsrichter ({@link SyncState#AUS}). Noch nicht hochgeladene eigene Versionen werden deshalb
-	 * jetzt lokal beansprucht; verlorene bleiben verloren.
+	 * jetzt lokal beansprucht; verlorene bleiben verloren. Die Marke "verbunden" wird gelöscht,
+	 * {@link #connectionComplete()} ist danach {@code true}, und ein noch offenes Ergebnis eines {@link #connect} endet mit
+	 * {@link Kind#ABGEBROCHEN} (geliefert, bevor {@code disconnect} zurückkehrt).
 	 * <p>
 	 * Wartet auf das Ende des laufenden Takts; nicht auf dem FX-Thread aufrufen. Erst danach steht fest, was hochgeladen
 	 * ist und was nicht, und der lokale Anspruch widerspricht keinem gemeinsamen.
@@ -615,10 +698,57 @@ public final class SyncService {
 		workLock.lock();
 		try {
 			reopen();
+			abortPendingOutcome();
 			deactivate();
 			claimPendingLocally(withUnindexed(index.pendingUnits()));
+			try {
+				ConnectionMarker.delete(appDataDir);
+			} catch (IOException | RuntimeException e) {
+				LOGGER.log(Level.WARNING, "Die Marke 'verbunden' ließ sich nicht löschen", e);
+			}
+			notifier.setConnectionComplete(true);
 		} finally {
-			workLock.unlock();
+			unlockWork();
+		}
+	}
+
+	/** Ein noch offenes Ergebnis der aktuellen Verbindung endet mit {@link Kind#ABGEBROCHEN}; unter {@code workLock}. */
+	private void abortPendingOutcome() {
+		Link previous;
+		synchronized (lock) {
+			previous = link;
+		}
+		if (previous != null) {
+			settle(previous, new ConnectOutcome(Kind.ABGEBROCHEN, false, previous.setAsidePath, null));
+		}
+	}
+
+	/**
+	 * Legt den Ausgang des Verbindens fest, wenn er noch offen ist (unter {@code workLock}; der erste Ausgang gilt, jeder
+	 * weitere ist ohne Wirkung). Geliefert wird er erst nach der Freigabe der Sperre ({@link #unlockWork}).
+	 */
+	private void settle(Link current, ConnectOutcome outcome) {
+		CompletableFuture<ConnectOutcome> future = current.outcome;
+		if (future == null) {
+			return;
+		}
+		current.outcome = null;
+		outcomesDue.add(() -> future.complete(outcome));
+	}
+
+	/**
+	 * Gibt {@code workLock} frei. Wer sie dabei ganz abgibt, liefert danach die Ergebnisse, die unter ihr feststanden
+	 * ({@link #settle}): ohne gehaltene Sperre, damit abhängige Stufen auf diesem Thread jede Sperre der Folge nehmen dürfen.
+	 */
+	private void unlockWork() {
+		List<Runnable> due = List.of();
+		if (workLock.getHoldCount() == 1 && !outcomesDue.isEmpty()) {
+			due = List.copyOf(outcomesDue);
+			outcomesDue.clear();
+		}
+		workLock.unlock();
+		for (Runnable delivery : due) {
+			delivery.run();
 		}
 	}
 
@@ -1588,30 +1718,49 @@ public final class SyncService {
 	 * melden und den Zustand setzen. Am Anfang, auch im
 	 * Einzelbetrieb, wird der Start-Index geschrieben, wenn er sich geändert hat und das letzte Schreiben
 	 * {@link #INDEX_FLUSH} her ist. Nach dem Hochladen löst der Takt höchstens {@value #RESOLVE_BUDGET} eingereihte
-	 * Verluste auf; im Einzelbetrieb und ohne Verbindung ebenso, nur lokal (hochgeladen wird später).
+	 * Verluste auf; im Einzelbetrieb und ohne Verbindung ebenso, nur lokal (hochgeladen wird später). Ein Ergebnis von
+	 * {@link #connect}, das in diesem Takt feststeht, wird nach der Freigabe der Arbeitssperre geliefert.
+	 *
+	 * @return ob der nächste Takt sofort folgen soll: Der erste Lauf einer Verbindung läuft noch, und dieser Takt erreichte
+	 *         den Ordner ohne Störung. Sonst (auch nach einer Störung, damit ein dauerhaft scheiternder Block den
+	 *         {@code worker} nicht ohne Pause beschäftigt) gilt der Abstand {@link #TICK}.
 	 */
-	void tick() {
+	boolean tick() {
 		flushIndexIfDue();
 		workLock.lock();
 		try {
 			if (closed) {
-				return;
+				return false;
 			}
 			Link current;
 			synchronized (lock) {
 				current = link;
 			}
-			if (current == null || !runTick(current)) {
+			if (current == null) {
+				resolver.resolvePending(RESOLVE_BUDGET);
+				return false;
+			}
+			if (!runTick(current)) {
 				resolver.resolvePending(RESOLVE_BUDGET);
 			}
+			return current.firstRun && current.hurry && isCurrent(current);
 		} finally {
-			workLock.unlock();
+			unlockWork();
 		}
 	}
 
+	/**
+	 * Ein Takt im {@code worker}, im ersten Lauf einer Verbindung mehrere ohne Pause ({@link #tick()} liefert dann
+	 * {@code true}). Die Arbeitssperre ist zwischen zwei Takten frei; weil sie fair ist, kommen ein wartendes
+	 * {@link #connect}, {@link #disconnect} oder {@link #closeIndex()} dazwischen dran. Liefert {@link #tick()}
+	 * {@code false} (Lauf zu Ende, Ordner weg, Störung, getrennt, geschlossen), endet die Schleife.
+	 */
 	private void tickSafely() {
 		try {
-			tick();
+			boolean again = true;
+			while (again) {
+				again = tick();
+			}
 		} catch (RuntimeException e) {
 			LOGGER.log(Level.SEVERE, "Unerwarteter Fehler im Takt des Versionsspeichers", e);
 		}
@@ -1626,13 +1775,17 @@ public final class SyncService {
 	}
 
 	/**
-	 * Der Takt im gemeinsamen Betrieb.
+	 * Der Takt im gemeinsamen Betrieb. Im ersten Lauf einer Verbindung legt er dessen Ergebnis fest: am Ende des Laufs
+	 * {@link Kind#AKTUELL} bzw. {@link Kind#AUSSTEHEND} (je nachdem, ob danach noch Aufträge warten), vorher
+	 * {@link Kind#OFFLINE}, wenn der Ordner nicht erreichbar ist, und {@link Kind#FEHLER} nach einer Störung; jeweils nur,
+	 * solange das Ergebnis offen ist. Setzt {@link Link#hurry}.
 	 *
 	 * @return ob die Auflösung der Verluste lief (nach dem Hochladen); {@code false}, wenn der Ordner nicht erreichbar war
 	 */
 	private boolean runTick(Link current) {
+		current.hurry = false;
 		if (current.path == null) {
-			notifier.unreachable(current.text, true);
+			reportUnreachable(current);
 			return false;
 		}
 		SyncState state = notifier.state();
@@ -1640,7 +1793,7 @@ public final class SyncService {
 		if (returning || state == SyncState.FEHLER || current.probeFirst) {
 			if (!probe(current.path)) {
 				if (isCurrent(current)) {
-					notifier.unreachable(current.text, true);
+					reportUnreachable(current);
 				}
 				return false;
 			}
@@ -1648,7 +1801,7 @@ public final class SyncService {
 		} else if (!files.isDirectory(current.path) && !probe(current.path)) {
 			// ein Takt ohne eigene Änderung liest nur, und ein fehlender Ordner sähe dabei leer aus: Er gälte als aktuell
 			if (isCurrent(current)) {
-				notifier.unreachable(current.text, true);
+				reportUnreachable(current);
 			}
 			return false;
 		}
@@ -1696,14 +1849,34 @@ public final class SyncService {
 		if (!isCurrent(current)) {
 			return true;
 		}
+		if (round.firstRunEnded) {
+			// das Ende des ersten Laufs ist sein Ergebnis, auch wenn danach im selben Takt etwas scheiterte
+			settle(current, new ConnectOutcome(hasJobs() ? Kind.AUSSTEHEND : Kind.AKTUELL, false, current.setAsidePath, null));
+		}
 		if (round.unreachable) {
-			notifier.unreachable(current.text, true);
+			reportUnreachable(current);
 		} else if (round.failure != null) {
-			notifier.failed(failureText(current, round.failure), round.failure);
+			String text = failureText(current, round.failure);
+			notifier.failed(text, round.failure);
+			if (current.firstRun) {
+				settle(current, new ConnectOutcome(Kind.FEHLER, false, current.setAsidePath, text));
+			}
 		} else {
 			notifier.succeeded(clock.instant(), hasJobs());
+			current.hurry = true;
 		}
 		return true;
+	}
+
+	/**
+	 * Der Ordner ist nicht erreichbar: Zustand {@link SyncState#OFFLINE} (SYS-005 einmal je Ausfall). Im ersten Lauf einer
+	 * Verbindung ist das ihr Ergebnis, falls noch keins feststeht.
+	 */
+	private void reportUnreachable(Link current) {
+		notifier.unreachable(current.text, true);
+		if (current.firstRun) {
+			settle(current, new ConnectOutcome(Kind.OFFLINE, false, current.setAsidePath, StoreMessages.unreachable(current.text)));
+		}
 	}
 
 	/** Ob ein neuer Vollabgleich beginnen soll (gefragt nur, solange keiner läuft). */
@@ -1729,35 +1902,45 @@ public final class SyncService {
 	}
 
 	/**
-	 * Beginn eines Vollabgleichs, in einem Takt: beim Verbinden zuerst Beiseitelegen (der einzige Schritt, der den ganzen
-	 * lokalen Bestand ändert, vor allen Abschnitten) bzw. die Entscheidung über das Mitnehmen, die für alle Abschnitte des
-	 * Laufs gilt; dann die ausstehenden Versionen einreihen, nach einem Neustart die jungen eigenen Ansprüche beobachten
-	 * und die Abschnitte bestimmen ({@link FullSyncRun#begin}). Ein Wunsch nach einem Vollabgleich gilt ab hier dem
-	 * nächsten Lauf; scheitert der Beginn, bleibt er offen. Die Positionen der Änderungslisten ändert der Vollabgleich nicht.
+	 * Beginn eines Vollabgleichs, in einem Takt: beim Verbinden zuerst die Entscheidung über Beiseitelegen und Mitnehmen
+	 * (einmal je Verbindung, {@link Link#decision}; das Mitnehmen gilt für alle Abschnitte des Laufs) und das Beiseitelegen
+	 * (der einzige Schritt, der den ganzen lokalen Bestand ändert, vor allen Abschnitten); im ersten Lauf einer Verbindung
+	 * danach die Marke "verbunden" als unvollständig. Dann die ausstehenden Versionen einreihen, nach einem Neustart die
+	 * jungen eigenen Ansprüche beobachten und die Abschnitte bestimmen ({@link FullSyncRun#begin}). Ein Wunsch nach einem
+	 * Vollabgleich gilt ab hier dem nächsten Lauf; scheitert der Beginn, bleibt er offen. Die Positionen der Änderungslisten
+	 * ändert der Vollabgleich nicht.
 	 */
 	private void beginRun(Link current) throws IOException {
 		current.fullSyncWanted = false;
 		current.wantedDuringRun = false;
 		try {
-			boolean uploadLocalClaims = false;
 			ConnectMode mode = current.connectMode;
-			if (mode != null && current.setAsideDone) {
-				// ein früherer Beginn hat schon beiseitegelegt und ist danach gescheitert: Es bleibt bei der Entscheidung von
-				// damals (nichts mitnehmen). Neu entschieden lägen inzwischen gespeicherte Verkäufe im lokalen Bestand, und er
-				// würde ein zweites Mal beiseitegelegt.
-				uploadLocalClaims = false;
-			} else if (mode != null) {
-				boolean both = FullSync.bothHaveUnits(local, current.shared);
-				if (both && mode == ConnectMode.SET_ASIDE) {
+			if (mode != null) {
+				if (current.decision == null) {
+					// einmal je Verbindung, beim ersten Treffen: Ein wiederholter Beginn (etwa nach einem Ausfall danach) setzt mit
+					// dieser Entscheidung fort. Neu entschieden lägen inzwischen gespeicherte Verkäufe im lokalen Bestand, und er
+					// würde ihretwegen (erneut) beiseitegelegt.
+					boolean both = FullSync.bothHaveUnits(local, current.shared);
+					current.decision = new ConnectDecision(both && mode == ConnectMode.SET_ASIDE, !both || mode == ConnectMode.MERGE);
+				}
+				ConnectDecision decision = current.decision;
+				if (decision.setAside()) {
 					Path aside = FullSync.setAside(local.dataRoot(), files, clock);
-					current.setAsideDone = true;
+					// ab hier ist beiseitegelegt: nie ein zweites Mal, auch wenn danach etwas scheitert
+					current.decision = new ConnectDecision(false, decision.uploadLocalClaims());
+					current.setAsidePath = aside;
 					LOGGER.info("Der lokale Bestand wurde beiseitegelegt: " + aside);
 					// der Datenordner wird neu gefüllt, und gleiche Dateinamen können anderen Inhalt haben
 					clearIndex();
 				}
-				uploadLocalClaims = !both || mode == ConnectMode.MERGE;
 			}
-			current.uploadLocalClaims = uploadLocalClaims;
+			current.uploadLocalClaims = mode != null && current.decision.uploadLocalClaims();
+			if (current.firstRun) {
+				// nach der Entscheidung und dem Beiseitelegen, vor allen Abschnitten: Bricht der Lauf ab, setzt der nächste Start
+				// mit Mitnehmen fort; fehlt die Marke (Abbruch davor), fragt er neu
+				ConnectionMarker.write(appDataDir, files, new ConnectionMarker.State(current.text, clock.instant(), false));
+				notifier.setConnectionComplete(false);
+			}
 			// gesperrte Einheiten dürfen wieder geheilt werden: Die gemeinsame Kopie kann inzwischen geheilt sein
 			synchronized (lock) {
 				unrepairable.clear();
@@ -1807,6 +1990,10 @@ public final class SyncService {
 			publishProgress(current, run.progress());
 		}
 		if (finished) {
+			if (current.firstRun) {
+				// scheitert das Schreiben, bleibt der Lauf fertig stehen, und der nächste Takt beendet ihn erneut
+				ConnectionMarker.write(appDataDir, files, new ConnectionMarker.State(current.text, clock.instant(), true));
+			}
 			endRun(current, round);
 		}
 	}
@@ -1872,7 +2059,9 @@ public final class SyncService {
 	/**
 	 * Ende des Vollabgleichs nach dem letzten Abschnitt: Die Entscheidung des Verbindens ist erledigt, der Abstand bis zum
 	 * nächsten Lauf zählt ab jetzt, und ein Wunsch während des Laufs lässt sofort den nächsten beginnen. Nach dem ersten Lauf
-	 * leitet der Takt die Verluste der Einheiten ab, die der Index als verloren kennt, und die offenen Konflikte neu.
+	 * leitet der Takt die Verluste der Einheiten ab, die der Index als verloren kennt, und die offenen Konflikte neu. Nach
+	 * dem ersten Lauf einer Verbindung (die Marke "verbunden" ist dann schon vollständig) meldet es
+	 * {@link #connectionComplete()}, und der Takt liefert das Ergebnis von {@link #connect}.
 	 */
 	private void endRun(Link current, Round round) {
 		current.connectMode = null;
@@ -1886,6 +2075,11 @@ public final class SyncService {
 		if (current.allUnitsWanted) {
 			current.allUnitsWanted = false;
 			round.allUnits = true;
+		}
+		if (current.firstRun) {
+			current.firstRun = false;
+			round.firstRunEnded = true;
+			notifier.setConnectionComplete(true);
 		}
 		publishProgress(current, null);
 	}
@@ -2634,6 +2828,8 @@ public final class SyncService {
 		ConflictLedger.Derivation derivation;
 		/** Der erste Vollabgleich ist in diesem Takt zu Ende gegangen: Verluste aller Einheiten ableiten. */
 		boolean allUnits;
+		/** Der erste Vollabgleich einer Verbindung ist in diesem Takt zu Ende gegangen: Er liefert das Ergebnis von connect. */
+		boolean firstRunEnded;
 		boolean unreachable;
 		Exception failure;
 

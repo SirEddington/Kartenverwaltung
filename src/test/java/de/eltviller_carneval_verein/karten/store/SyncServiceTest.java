@@ -2033,10 +2033,12 @@ class SyncServiceTest {
 		double before = a.service.fullSyncProgress().get();
 		int calls = a.layer.calls().size();
 
-		// connect plant einen Takt ein, den der Worker des Tests sofort ausführt
-		a.service.connect(shared, ConnectMode.MERGE);
+		// connect plant einen Takt ein, den der Worker des Tests sofort ausführt; im ersten Lauf der neuen Verbindung folgen
+		// die Takte ohne Pause bis zu seinem Ende
+		assertEquals(ConnectOutcome.Kind.AKTUELL, a.service.connect(shared, ConnectMode.MERGE).join().kind());
 
-		assertTrue(a.service.fullSyncProgress().get() < before, "ein neuer Lauf");
+		assertTrue(before < 1.0);
+		assertNull(a.service.fullSyncProgress().get(), "der neue Lauf ist zu Ende");
 		assertTrue(a.layer.calls().subList(calls, a.layer.calls().size()).stream()
 				.anyMatch(c -> c.startsWith("read ") && c.replace('\\', '/').contains("/halls/f0/")), "der neue Lauf beginnt vorn");
 	}
@@ -2052,11 +2054,14 @@ class SyncServiceTest {
 		}
 		// der gemeinsame Ordner hat schon Einheiten: Es gilt der Modus
 		seedForeign(new VersionStore(sharedRoot.resolve("data"), new NioFileLayer()), UnitKey.event("gemeinsam"), 999);
-		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		// die Takte, die connect einplant, verwirft der Worker: Der Test löst sie selbst aus (der erste Lauf liefe sonst am Stück)
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, task -> {
+		});
 		a.service.startup("");
 		slowReads(a, READ_COST);
 
 		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.tick();
 		assertNotNull(a.service.fullSyncProgress().get(), "der Lauf braucht mehrere Takte");
 		// "f99" ist die letzte Halle nach Namen
 		assertFalse(Files.exists(sharedFile(UnitKey.hall("f99"), "claims/root.json")));
@@ -2078,12 +2083,15 @@ class SyncServiceTest {
 		for (int i = 0; i < 300; i++) {
 			seedForeign(sharedStore, UnitKey.hall("f" + i), i);
 		}
-		Node a = node("a");
+		// die Takte, die connect einplant, verwirft der Worker: Der Test löst sie selbst aus (der erste Lauf liefe sonst am Stück)
+		Node a = new Node(dir.resolve("a"), "a", new NioFileLayer(), Runnable::run, task -> {
+		});
 		a.service.startup("");
 		save(a, create(UnitKey.event("lokal"), "A"));
 		slowReads(a, READ_COST);
 
 		a.service.connect(shared, ConnectMode.SET_ASIDE);
+		a.service.tick();
 		assertNotNull(a.service.fullSyncProgress().get(), "der Lauf braucht mehrere Takte");
 		// ein Verkauf mitten im Lauf liegt im neuen Bestand: Er wird nicht noch einmal beiseitegelegt
 		Version sale = save(a, create(BOOKING, "Anna"));

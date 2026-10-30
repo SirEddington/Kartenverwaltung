@@ -10,6 +10,8 @@ import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 
@@ -33,12 +35,15 @@ final class SyncNotifier {
 	private final ReadOnlyObjectWrapper<SyncState> stateProperty = new ReadOnlyObjectWrapper<>(SyncState.AUS);
 	private final ReadOnlyObjectWrapper<Instant> lastSyncProperty = new ReadOnlyObjectWrapper<>();
 	private final ReadOnlyObjectWrapper<Double> fullSyncProgressProperty = new ReadOnlyObjectWrapper<>();
+	private final ReadOnlyBooleanWrapper connectionCompleteProperty;
 	private volatile SyncListener listener = new SyncListener() {
 	};
 
 	private SyncState current = SyncState.AUS;
 	/** Der zuletzt gesetzte Fortschritt des Vollabgleichs; {@code null} ohne Lauf. */
 	private Double fullSyncProgress;
+	/** Der zuletzt gesetzte Stand von {@link #connectionCompleteProperty()}. */
+	private boolean connectionComplete;
 	/** Ob für den laufenden Ausfall schon gemeldet wurde; zurückgesetzt beim nächsten Erfolg. */
 	private boolean unreachableNotified;
 	/** Ob der Ordner ausgefallen war und die Rückkehr noch nicht gemeldet ist. */
@@ -48,8 +53,19 @@ final class SyncNotifier {
 	/** Schlüssel der Meldungen, die in diesem Programmlauf schon einmal kamen. */
 	private final Set<String> reportedOnce = new HashSet<>();
 
+	/** Ohne Marke "verbunden": Die erste Verbindung gilt als vollständig. */
 	SyncNotifier(Executor ui) {
+		this(ui, true);
+	}
+
+	/**
+	 * @param connectionComplete der Startwert von {@link #connectionCompleteProperty()} (aus der Marke "verbunden"); er gilt
+	 *                           sofort, ohne den {@code ui}-Executor
+	 */
+	SyncNotifier(Executor ui, boolean connectionComplete) {
 		this.ui = ui;
+		this.connectionComplete = connectionComplete;
+		this.connectionCompleteProperty = new ReadOnlyBooleanWrapper(connectionComplete);
 	}
 
 	ReadOnlyObjectProperty<SyncState> stateProperty() {
@@ -74,6 +90,22 @@ final class SyncNotifier {
 		}
 		fullSyncProgress = progress;
 		notifyUi(() -> fullSyncProgressProperty.set(progress));
+	}
+
+	ReadOnlyBooleanProperty connectionCompleteProperty() {
+		return connectionCompleteProperty.getReadOnlyProperty();
+	}
+
+	/**
+	 * Setzt, ob der erste Vollabgleich der Verbindung zu Ende kam ({@code true} auch im Einzelbetrieb); die Eigenschaft
+	 * folgt über den {@code ui}-Executor, nur bei einer Änderung.
+	 */
+	synchronized void setConnectionComplete(boolean complete) {
+		if (connectionComplete == complete) {
+			return;
+		}
+		connectionComplete = complete;
+		notifyUi(() -> connectionCompleteProperty.set(complete));
 	}
 
 	void setListener(SyncListener listener) {
