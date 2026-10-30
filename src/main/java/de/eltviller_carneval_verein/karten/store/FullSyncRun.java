@@ -50,14 +50,15 @@ final class FullSyncRun {
 
 	private List<Section> sections;
 	private int index;
-	/** Ob vom aktuellen Abschnitt "Vorstellung" schon ein Block erledigt ist (dann gilt der Zeiger). */
-	private boolean started;
 	/**
 	 * Ob der letzte Block des aktuellen Abschnitts "Vorstellung" scheiterte: Er kann schon einen Teil abgeglichen (und
 	 * gemeldet) haben, der Rest folgt erst mit der Wiederholung.
 	 */
 	private boolean failed;
-	/** Der Ordnername der zuletzt bearbeiteten Buchung des aktuellen Abschnitts; leer vor dem ersten Block. */
+	/**
+	 * Der Ordnername der zuletzt bearbeiteten Buchung des aktuellen Abschnitts; leer vor dem ersten Block. Ein Buchungsordner
+	 * heißt nie leer: Nicht leer heißt also, dass vom aktuellen Abschnitt "Vorstellung" schon ein Block erledigt ist.
+	 */
 	private String pointer = "";
 
 	FullSyncRun(VersionStore local, VersionStore shared, Clock clock) {
@@ -86,7 +87,6 @@ final class FullSyncRun {
 		}
 		sections = planned;
 		index = 0;
-		started = false;
 		failed = false;
 		pointer = "";
 	}
@@ -129,7 +129,7 @@ final class FullSyncRun {
 	/** Ein Block der Vorstellung; ist es der letzte, ist der Abschnitt danach erledigt. */
 	private void stepPresentation(UnitKey presentation, Work work) throws IOException {
 		List<UnitKey> units = new ArrayList<>();
-		if (!started) {
+		if (pointer.isEmpty()) {
 			units.add(presentation);
 		}
 		int bookings = 0;
@@ -152,11 +152,9 @@ final class FullSyncRun {
 			failed = false;
 		}
 		if (more) {
-			started = true;
 			pointer = last;
 		} else {
 			index++;
-			started = false;
 			pointer = "";
 		}
 	}
@@ -175,7 +173,7 @@ final class FullSyncRun {
 	 * gescheiterter Block kann schon einen Teil abgeglichen und gemeldet haben.
 	 */
 	boolean inProgress(UnitKey unit) {
-		if (!started && !failed || sections == null || index >= sections.size()) {
+		if (pointer.isEmpty() && !failed || sections == null || index >= sections.size()) {
 			return false;
 		}
 		UnitKey presentation = sections.get(index).presentation();

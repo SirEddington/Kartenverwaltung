@@ -2722,7 +2722,8 @@ public final class SyncService {
 
 	/**
 	 * Lädt die Aufträge der Reihe nach hoch. Scheitert einer bei erreichbarem Ordner, kommen die übrigen trotzdem dran
-	 * (ein späterer Takt setzt ihn fort); ist der Ordner weg, endet der Durchlauf.
+	 * (ein späterer Takt setzt ihn fort, nicht ein zweiter Aufruf im selben Takt: {@link Round#failedJobs}); ist der Ordner
+	 * weg, endet der Durchlauf.
 	 */
 	private void runJobs(Link current, Round round) throws IOException {
 		List<UploadJob> pending;
@@ -2735,6 +2736,10 @@ public final class SyncService {
 				return;
 			}
 			UploadJob job = pending.get(i);
+			if (round.failedJobs.contains(job)) {
+				// schon in diesem Takt gescheitert: erst der nächste versucht es erneut
+				continue;
+			}
 			// vor dem Hochladen: Es schreibt die lokalen Ansprüche
 			job.items().forEach(item -> round.unsettle(item.unit()));
 			try {
@@ -2749,6 +2754,7 @@ public final class SyncService {
 				remove(job);
 			} catch (DuplicateMachineException e) {
 				if (regenerated) {
+					round.failedJobs.add(job);
 					claimedBeforeAbort(job, round);
 					round.survive(e);
 					continue;
@@ -2757,6 +2763,7 @@ public final class SyncService {
 				regenerate(current);
 				i--;
 			} catch (IOException e) {
+				round.failedJobs.add(job);
 				// Niederlagen, die dieser Lauf schon fand, gleich melden (doppelte sortiert reportLoss aus)
 				job.losses().forEach(this::reportLoss);
 				claimedBeforeAbort(job, round);
@@ -3467,6 +3474,8 @@ public final class SyncService {
 	private final class Round {
 		final Link link;
 		final Set<UnitKey> changed = new LinkedHashSet<>();
+		/** Die Aufträge, die in diesem Durchlauf scheiterten ({@link #runJobs} läuft im Takt bis zu zweimal). */
+		final Set<UploadJob> failedJobs = new HashSet<>();
 		/** Die fremden Versionen, deren Liste in diesem Durchlauf vollständig verarbeitet wurde. */
 		final List<FeedEntry> listed = new ArrayList<>();
 		/** Ob es der Durchlauf beim Start ist: Die offenen Konflikte werden dann auch ohne Änderung abgeleitet. */

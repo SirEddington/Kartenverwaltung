@@ -214,11 +214,11 @@ public final class FullSync {
 		private final List<LostVersion> lost = new ArrayList<>();
 		/**
 		 * Je Einheit die Versions-IDs der eigenen Versionen, die dieser Lauf als verloren gemeldet hat oder (ohne Mitnehmen)
-		 * der lokale Stand schon als verloren zeigt.
+		 * der lokale Stand schon als verloren zeigt. Ohne Mitnehmen kommt jede Einheit zuerst über {@link #noteLocallyLost}
+		 * hinein (auch mit leerer Menge), bevor ein Verlust dazukommt: Ein Eintrag heißt dann, dass ihr lokaler Stand geprüft
+		 * ist.
 		 */
 		private final Map<UnitKey, Set<String>> lostIds = new HashMap<>();
-		/** Die Einheiten, deren lokal schon verlorene Versionen in {@link #lostIds} stehen. */
-		private final Set<UnitKey> lostChecked = new HashSet<>();
 		private final List<FullSyncResult.UploadedClaim> uploaded = new ArrayList<>();
 		private final List<FeedPoll.Contested> contested = new ArrayList<>();
 		/** Die temporären Dateien, die das Auflisten der Einheiten im gemeinsamen Ordner mitgeliefert hat. */
@@ -391,16 +391,17 @@ public final class FullSync {
 		 * Versionen hier nicht, sie sind schon bekannt.
 		 */
 		private void noteLocallyLost(UnitKey unit) throws IOException {
-			if (!lostChecked.add(unit)) {
+			if (lostIds.containsKey(unit)) {
 				return;
 			}
 			UnitState state = ChainResolver.resolve(local.readUnit(unit), own);
+			Set<String> ids = new HashSet<>();
 			for (List<VersionId> stretch : state.lost()) {
-				Set<String> ids = lostIds.computeIfAbsent(unit, u -> new HashSet<>());
 				for (VersionId id : stretch) {
 					ids.add(id.value());
 				}
 			}
+			lostIds.put(unit, ids);
 		}
 
 		/**

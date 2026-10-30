@@ -2,14 +2,12 @@ package de.eltviller_carneval_verein.karten.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -75,14 +73,12 @@ class OwnershipTest {
 	}
 
 	@Test
-	void idsListsCurrentAndPreviousIds() {
-		assertEquals(Set.of(CURRENT, OLD), ownership.ids());
-	}
+	void previousIdIsOwnTempTagWithoutTimeLimit() {
+		Ownership twoPrevious = new Ownership(CURRENT,
+				List.of(new Ownership.Previous(OLD, UNTIL), new Ownership.Previous(FOREIGN, UNTIL.minusSeconds(60))));
 
-	@Test
-	void idsAreComputedOnceAndUnmodifiable() {
-		assertSame(ownership.ids(), ownership.ids(), "einmal berechnet, nicht je Aufruf");
-		assertThrows(UnsupportedOperationException.class, () -> ownership.ids().add(FOREIGN));
+		assertTrue(twoPrevious.isOwnTempTag(FOREIGN), "auch die zweite frühere ID");
+		assertFalse(twoPrevious.isOwnTempTag("andere"));
 		assertEquals(ownership, new Ownership(CURRENT, List.of(new Ownership.Previous(OLD, UNTIL))));
 	}
 

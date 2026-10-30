@@ -2400,6 +2400,29 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void jobThatFailedInATickIsNotRetriedInTheSameTick() throws IOException {
+		Node a = slowNodeWithHalls(300);
+		a.service.tick();
+		assertNotNull(a.service.fullSyncProgress().get(), "der Lauf ist nach einem Takt nicht fertig");
+		Version v = save(a, create(BOOKING, "Anna"));
+		Path bookingDir = sharedFile(BOOKING, "x").getParent();
+		AtomicBoolean broken = new AtomicBoolean(true);
+		a.layer.failWhen(p -> broken.get() && p.startsWith(bookingDir), "createNew", new IOException("Störung"));
+		int before = a.layer.calls().size();
+
+		// Hochladen vor dem Stück des Laufs (scheitert) und danach (übersprungen)
+		a.service.tick();
+
+		long attempts = a.layer.calls().subList(before, a.layer.calls().size()).stream()
+				.filter(c -> c.startsWith("createNew ") && c.contains(bookingDir.toString())).count();
+		assertEquals(1, attempts, "ein Versuch je Takt");
+		assertEquals(SyncState.FEHLER, a.service.syncState().get());
+		broken.set(false);
+		a.service.tick();
+		assertEquals(v.id(), sharedClaim(BOOKING, "root").version(), "der nächste Takt lädt hoch");
+	}
+
+	@Test
 	void runResumesAtThePointerAfterBeingOffline() throws IOException {
 		Node a = slowNodeWithHalls(300);
 		a.service.tick();

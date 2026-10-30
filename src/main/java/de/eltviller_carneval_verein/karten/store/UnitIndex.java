@@ -176,11 +176,10 @@ final class UnitIndex {
 	private final Path indexDir;
 	private final FileLayer files;
 	/**
-	 * Die aktuelle ID dieses Rechners: Sie steht in den Index-Dateien und in der Marke "sauber beendet". Unter dem Monitor
-	 * des Index; ändert sich nur mit {@link #adoptOwnership}.
+	 * Was als eigen gilt (aktuelle und frühere IDs); danach werden die Stände aufgelöst. Die aktuelle ID steht in den
+	 * Index-Dateien und in der Marke "sauber beendet" ({@link #machineId()}). Unter dem Monitor des Index; ändert sich nur
+	 * mit {@link #adoptOwnership}.
 	 */
-	private String machineId;
-	/** Was als eigen gilt (aktuelle und frühere IDs); danach werden die Stände aufgelöst. Wie {@link #machineId}. */
 	private Ownership own;
 
 	private final Map<UnitKey, Entry> entries = new HashMap<>();
@@ -227,8 +226,12 @@ final class UnitIndex {
 	UnitIndex(Path indexDir, FileLayer files, Ownership own) {
 		this.indexDir = indexDir;
 		this.files = files;
-		this.machineId = own.currentId();
 		this.own = own;
+	}
+
+	/** Die aktuelle ID dieses Rechners; unter dem Monitor des Index. */
+	private String machineId() {
+		return own.currentId();
 	}
 
 	/**
@@ -826,7 +829,7 @@ final class UnitIndex {
 	 */
 	synchronized void adoptOwnership(Ownership renewed) {
 		own = renewed;
-		machineId = renewed.currentId();
+		String machineId = renewed.currentId();
 		for (Map.Entry<UnitKey, Entry> item : entries.entrySet()) {
 			Entry entry = item.getValue();
 			VersionId version = entry.snapshot().version();
@@ -883,7 +886,7 @@ final class UnitIndex {
 		}
 		List<Entry> inGroup = entries.values().stream().filter(entry -> groupOf(entry.snapshot().unit()).equals(group))
 				.toList();
-		return new Prepared(group, revisionOf(group), machineId, inGroup);
+		return new Prepared(group, revisionOf(group), machineId(), inGroup);
 	}
 
 	/**
@@ -944,7 +947,7 @@ final class UnitIndex {
 		// vorher: Ein Schreiben, das nach dem Inhalt scheitert, hinterlässt sonst eine gültige Marke, von der niemand weiß
 		markerWritten = true;
 		Files.createDirectories(indexDir);
-		Files.writeString(cleanMarker(), machineId, StandardCharsets.UTF_8);
+		Files.writeString(cleanMarker(), machineId(), StandardCharsets.UTF_8);
 		return true;
 	}
 
@@ -1042,7 +1045,7 @@ final class UnitIndex {
 			if (!Files.exists(marker)) {
 				return false;
 			}
-			ownMarker = machineId.equals(Files.readString(marker, StandardCharsets.UTF_8));
+			ownMarker = machineId().equals(Files.readString(marker, StandardCharsets.UTF_8));
 		} catch (IOException | RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ist unlesbar: " + marker, e);
 			ownMarker = false;
@@ -1172,7 +1175,7 @@ final class UnitIndex {
 		if (!root.path("indexFormat").isInt() || root.get("indexFormat").asInt() != INDEX_FORMAT) {
 			throw new IOException("Unbekanntes Format des Index: " + root.get("indexFormat"));
 		}
-		if (!machineId.equals(StoreCodec.text(root, "machine"))) {
+		if (!machineId().equals(StoreCodec.text(root, "machine"))) {
 			throw new IOException("Der Index stammt von einem anderen Rechner: " + root.get("machine"));
 		}
 		JsonNode units = root.get("units");

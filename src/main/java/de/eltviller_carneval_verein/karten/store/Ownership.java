@@ -1,10 +1,8 @@
 package de.eltviller_carneval_verein.karten.store;
 
 import java.time.Instant;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * Was dieser Rechner als "eigen" ansieht: seine aktuelle ID und die früheren, die er vor einer Neuvergabe trug.
@@ -15,9 +13,8 @@ import java.util.Set;
  *
  * @param currentId die aktuelle Rechner-ID
  * @param previous  die früheren IDs mit dem Zeitpunkt, bis zu dem sie galten (nie {@code null}, unveränderlich)
- * @param ids       die aktuelle und alle früheren IDs, einmal berechnet (unveränderlich); siehe {@link #ids()}
  */
-public record Ownership(String currentId, List<Previous> previous, Set<String> ids) {
+public record Ownership(String currentId, List<Previous> previous) {
 
 	/**
 	 * Eine frühere Rechner-ID.
@@ -36,34 +33,13 @@ public record Ownership(String currentId, List<Previous> previous, Set<String> i
 	}
 
 	/**
-	 * Macht aus einer fehlenden Liste der früheren IDs eine leere, kopiert die Liste und berechnet die Menge aller IDs
-	 * einmal ({@link #ids()}).
+	 * Macht aus einer fehlenden Liste der früheren IDs eine leere und kopiert die Liste.
 	 *
-	 * @param ids {@code null} oder schon dieselbe Menge, die sich aus den beiden anderen ergibt (etwa aus einer Kopie)
-	 * @throws NullPointerException     wenn die aktuelle ID fehlt
-	 * @throws IllegalArgumentException wenn {@code ids} nicht zu den beiden anderen passt
+	 * @throws NullPointerException wenn die aktuelle ID fehlt
 	 */
 	public Ownership {
 		Objects.requireNonNull(currentId, "currentId");
 		previous = previous == null ? List.of() : List.copyOf(previous);
-		Set<String> all = new LinkedHashSet<>();
-		all.add(currentId);
-		for (Previous old : previous) {
-			all.add(old.id());
-		}
-		if (ids != null && !ids.equals(all)) {
-			throw new IllegalArgumentException("Die IDs " + ids + " passen nicht zu " + all);
-		}
-		ids = Set.copyOf(all);
-	}
-
-	/**
-	 * Was eigen ist: die aktuelle ID und die früheren mit ihrer Grenze.
-	 *
-	 * @throws NullPointerException wenn die aktuelle ID fehlt
-	 */
-	public Ownership(String currentId, List<Previous> previous) {
-		this(currentId, previous, null);
 	}
 
 	/**
@@ -120,17 +96,22 @@ public record Ownership(String currentId, List<Previous> previous, Set<String> i
 	}
 
 	/**
-	 * Ob die Kennung einer Zwischendatei (die Rechner-ID im Namen) die aktuelle oder eine frühere ID ist; eine Abfrage der
-	 * einmal berechneten Menge {@link #ids()}, deshalb auch je Datei billig.
+	 * Ob die Kennung einer Zwischendatei (die Rechner-ID im Namen) die aktuelle oder eine frühere ID ist. Ohne Zeitgrenze:
+	 * Der Name trägt keinen Zeitpunkt. Die Liste der früheren IDs hat höchstens wenige Einträge, deshalb auch je Datei billig.
 	 */
 	public boolean isOwnTempTag(String tag) {
-		return tag != null && ids.contains(tag);
-	}
-
-	/** Die aktuelle und alle früheren IDs; im Konstruktor einmal berechnet, unveränderlich. */
-	@Override
-	public Set<String> ids() {
-		return ids;
+		if (tag == null) {
+			return false;
+		}
+		if (tag.equals(currentId)) {
+			return true;
+		}
+		for (Previous old : previous) {
+			if (tag.equals(old.id())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static boolean withinLimit(VersionId version, Previous old) {
