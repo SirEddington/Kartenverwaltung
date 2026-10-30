@@ -690,7 +690,7 @@ class UnitIndexTest {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		UnitIndex index = new UnitIndex(indexDir, layer, OWN);
 		refresh(index, local);
-		layer.failNext("createNew", new IOException("Platte voll"));
+		layer.failNext("replace", new IOException("Platte voll"));
 
 		assertThrows(IOException.class, index::flush);
 		assertFalse(Files.exists(eventIndexFile("e1")));
@@ -711,7 +711,7 @@ class UnitIndexTest {
 			index = new UnitIndex(indexDir, layer, OWN);
 			refresh(index, local);
 			CountDownLatch entered = new CountDownLatch(1);
-			layer.blockNext("createNew", entered, release);
+			layer.blockNext("replace", entered, release);
 			flushing = executor.submit(() -> {
 				index.flush();
 				return null;
@@ -1775,6 +1775,6 @@ class UnitIndexTest {
 	}
 
 	private static long createdFiles(FaultyFileLayer layer) {
-		return layer.calls().stream().filter(c -> c.startsWith("createNew ")).count();
+		return layer.calls().stream().filter(c -> c.startsWith("replace ")).count();
 	}
 }

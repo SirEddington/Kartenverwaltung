@@ -132,7 +132,7 @@ final class ConflictLedger {
 		String operator = step.operator();
 		if (own.isOwnId(version)) {
 			ConflictNote.Party other = deleterOfOwnMerge(entry, version);
-			if (other == null || own.isOwn(other.machine(), other.version())) {
+			if (other == null || own.isOwn(other)) {
 				return null;
 			}
 			machineName = other.machineName();

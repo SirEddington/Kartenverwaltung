@@ -48,7 +48,7 @@ final class LocalScan {
 		for (UnitKey unit : units) {
 			for (ClaimFile file : local.readUnit(unit).claims().values()) {
 				Claim claim = file.claim();
-				if (claim != null && own.isOwn(claim.machine(), claim.version())) {
+				if (claim != null && own.isOwn(claim)) {
 					claims.add(new OwnClaim(unit, file.name(), claim.version(), claim.at()));
 				}
 			}

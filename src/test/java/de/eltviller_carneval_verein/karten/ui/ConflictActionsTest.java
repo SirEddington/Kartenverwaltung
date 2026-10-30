@@ -874,7 +874,7 @@ class ConflictActionsTest {
 	@Test
 	void dismissFailureKeepsTheConflictAndSaysSo() {
 		Row row = commentConflict();
-		b.files.failWhen(p -> p.toString().contains("conflicts-ack"), "createNew", new IOException("Platte voll"));
+		b.files.failWhen(p -> p.toString().contains("conflicts-ack"), "replace", new IOException("Platte voll"));
 
 		IllegalStateException failure = assertThrows(IllegalStateException.class, () -> b.actions().dismiss(row));
 

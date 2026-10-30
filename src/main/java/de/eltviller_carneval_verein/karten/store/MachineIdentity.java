@@ -5,7 +5,6 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -377,29 +376,18 @@ public final class MachineIdentity {
 	}
 
 	/**
-	 * Schreibt die Datei über eine temporäre Datei im selben Ordner und ersetzt die vorhandene atomar. Enthielt die Datei
+	 * Schreibt die Datei über eine temporäre Datei im selben Ordner und ersetzt die vorhandene atomar
+	 * ({@link AtomicFileReplace#write}, mit Wiederholung, solange ein anderer Zugriff sie offen hält). Enthielt die Datei
 	 * beim Laden schadhafte Einträge in {@code previous}, wird vor dem ersten Schreiben eine Kopie angelegt (siehe
 	 * {@link #asideCorrupt}, mit der Uhr dieser Instanz); schlägt das fehl, bleibt die Datei unverändert.
 	 */
 	private void write(String id, String name, List<Ownership.Previous> previous) throws IOException {
 		byte[] bytes = toBytes(id, name, previous);
-		Path dir = file.toAbsolutePath().getParent();
-		Files.createDirectories(dir);
+		Files.createDirectories(file.toAbsolutePath().getParent());
 		if (keepOriginal) {
 			asideCorrupt(file, clock, true);
 		}
-		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
-		try {
-			Files.write(temp, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-			Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-			keepOriginal = false;
-		} catch (IOException | RuntimeException e) {
-			try {
-				Files.deleteIfExists(temp);
-			} catch (IOException | RuntimeException suppressed) {
-				e.addSuppressed(suppressed);
-			}
-			throw e;
-		}
+		AtomicFileReplace.write(file, bytes, null);
+		keepOriginal = false;
 	}
 }

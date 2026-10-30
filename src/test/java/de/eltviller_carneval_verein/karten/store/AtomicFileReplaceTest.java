@@ -40,6 +40,33 @@ class AtomicFileReplaceTest {
 	}
 
 	@Test
+	void writeCreatesTheFolderAndReplacesTheFileWithoutLeftovers() throws IOException {
+		Path target = dir.resolve("unter").resolve("E1.json");
+
+		AtomicFileReplace.write(target, "alt".getBytes(StandardCharsets.UTF_8), "marke");
+		AtomicFileReplace.write(target, "neu".getBytes(StandardCharsets.UTF_8), null);
+
+		assertArrayEquals("neu".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(target));
+		try (var entries = Files.list(target.getParent())) {
+			assertEquals(List.of(target), entries.toList());
+		}
+	}
+
+	@Test
+	void failedWriteKeepsTheFileAndRemovesItsTempFile() throws IOException {
+		// ein Ordner mit Inhalt an der Stelle der Datei: Das Ersetzen scheitert dauerhaft
+		Path target = Files.createDirectories(dir.resolve("E1.json"));
+		Files.writeString(target.resolve("drin"), "x", StandardCharsets.UTF_8);
+
+		assertThrows(IOException.class, () -> AtomicFileReplace.write(target, "neu".getBytes(StandardCharsets.UTF_8), "marke"));
+
+		assertEquals(List.of(target), listFiles());
+		try (var entries = Files.list(target)) {
+			assertEquals(List.of(target.resolve("drin")), entries.toList());
+		}
+	}
+
+	@Test
 	void retriesAMoveThatFailsTwiceWithAccessDenied() throws IOException {
 		Path temp = dir.resolve("E1.tmp");
 		Path target = dir.resolve("E1.json");

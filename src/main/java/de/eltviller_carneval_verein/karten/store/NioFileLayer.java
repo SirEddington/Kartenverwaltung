@@ -74,6 +74,11 @@ public final class NioFileLayer implements FileLayer {
 	}
 
 	@Override
+	public void replace(Path file, byte[] content, String tempTag) throws IOException {
+		AtomicFileReplace.write(file, content, tempTag);
+	}
+
+	@Override
 	public Optional<byte[]> read(Path file) throws IOException {
 		try {
 			return Optional.of(Files.readAllBytes(file));
@@ -213,8 +218,7 @@ public final class NioFileLayer implements FileLayer {
 				@Override
 				public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
 					String name = file.getFileName().toString();
-					if (name.startsWith(TEMP_PREFIX) && name.endsWith(TEMP_SUFFIX)
-							&& attrs.lastModifiedTime().toInstant().isBefore(limit)) {
+					if (FileLayer.isTempName(name) && attrs.lastModifiedTime().toInstant().isBefore(limit)) {
 						Files.deleteIfExists(file);
 					}
 					return FileVisitResult.CONTINUE;
@@ -229,8 +233,7 @@ public final class NioFileLayer implements FileLayer {
 	public void deleteOldTemps(Path dir, Collection<String> names, Duration olderThan) throws IOException {
 		Instant limit = Instant.now().minus(olderThan);
 		for (String name : names) {
-			if (!name.startsWith(TEMP_PREFIX) || !name.endsWith(TEMP_SUFFIX) || name.indexOf('/') >= 0
-					|| name.indexOf('\\') >= 0) {
+			if (!FileLayer.isTempName(name) || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0) {
 				continue;
 			}
 			Path file = dir.resolve(name);

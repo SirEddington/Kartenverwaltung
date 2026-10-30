@@ -559,7 +559,7 @@ class ConflictLedgerTest {
 		service.startup(null);
 		Version first = own(service, SALE, List.of(), name("Anna"));
 		Version second = own(service, SALE, List.of(first.id()), name("Carla"), false, noteFor(idOf(appData)));
-		layer.failWhen(p -> p.startsWith(appData) && p.toString().contains("conflicts-ack"), "createNew",
+		layer.failWhen(p -> p.startsWith(appData) && p.toString().contains("conflicts-ack"), "replace",
 				new AccessDeniedException("schreibgeschützt"));
 
 		assertThrows(IOException.class, () -> service.acknowledge(List.of(new ConflictKey(second.id(), ConflictKey.Kind.NOTE))));

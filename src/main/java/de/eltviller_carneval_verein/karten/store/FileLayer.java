@@ -8,6 +8,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Predicate;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Die einzige Stelle, über die der Versionsspeicher auf Platten zugreift, sowohl auf den lokalen Speicher als auch auf
@@ -52,6 +55,16 @@ public interface FileLayer {
 	default boolean createNew(Path file, byte[] content) throws IOException {
 		return createNew(file, content, null, null);
 	}
+
+	/**
+	 * Ersetzt die Datei atomar durch den Inhalt oder legt sie an ({@link AtomicFileReplace#write}): über genau eine temporäre
+	 * Datei im selben Ordner, mit kurzer Wiederholung, solange ein anderer Zugriff die Zieldatei offen hält. Fehlende
+	 * Elternordner werden angelegt. Scheitert es, bleibt die vorhandene Datei unverändert und keine temporäre zurück. Nur
+	 * für Dateien, die diesem Rechner allein gehören (Marken, Index, Bestätigungen), nie für Versions- oder Anspruchsdateien.
+	 *
+	 * @param tempTag die Kennung im Namen der temporären Datei ({@code ~karv-<Kennung>-<UUID>.tmp}); {@code null} für keine
+	 */
+	void replace(Path file, byte[] content, String tempTag) throws IOException;
 
 	/** Der Inhalt der Datei; leer, wenn die Datei fehlt. Andere Fehler werden als {@link IOException} gemeldet. */
 	Optional<byte[]> read(Path file) throws IOException;
@@ -137,13 +150,49 @@ public interface FileLayer {
 	void deleteOldTemps(Path dir, Collection<String> names, Duration olderThan) throws IOException;
 
 	/**
+	 * Räumt Ordner für Ordner alte temporäre Dateien auf, deren Namen der Aufrufer ohnehin gelistet hat (kein weiterer
+	 * Listenzugriff): je Ordner ein Aufruf von {@link #deleteOldTemps(Path, Collection, Duration)} mit den temporären Namen
+	 * ({@link #isTempName}), deren Kennung ({@link #tempTagOf}) {@code tagWanted} annimmt; ein Ordner ohne solche Namen kostet
+	 * keinen Zugriff. Ein Fehler (etwa weil der Ordner wegfällt oder das Löschen nicht erlaubt ist) betrifft nur seinen
+	 * Ordner und steht nur im Log ({@code FINE}): Das Aufräumen ist Pflege und lässt den Aufrufer nicht scheitern; der
+	 * Ordner kommt beim nächsten Mal wieder dran.
+	 *
+	 * @param root          der Ordner, unter dem die Ordner liegen
+	 * @param namesByFolder je Ordner (relativ zu {@code root}, mit {@code /} getrennt; {@code ""} für {@code root}) die Namen
+	 *                      darin
+	 * @param tagWanted     bekommt die Kennung jeder temporären Datei ({@code null} für eine ohne Kennung)
+	 * @param where         wo die Ordner liegen, für das Log (etwa {@code "im lokalen Bestand"})
+	 */
+	default void deleteOldTemps(Path root, Map<String, ? extends Collection<String>> namesByFolder,
+			Predicate<String> tagWanted, Duration olderThan, String where) {
+		for (Map.Entry<String, ? extends Collection<String>> folder : namesByFolder.entrySet()) {
+			List<String> temps = folder.getValue().stream().filter(name -> isTempName(name) && tagWanted.test(tempTagOf(name)))
+					.toList();
+			if (temps.isEmpty()) {
+				continue;
+			}
+			try {
+				deleteOldTemps(root.resolve(folder.getKey()), temps, olderThan);
+			} catch (IOException | RuntimeException e) {
+				Logger.getLogger(SyncService.class.getName()).log(Level.FINE,
+						"Alte temporäre Dateien in " + folder.getKey() + " " + where + " ließen sich nicht entfernen", e);
+			}
+		}
+	}
+
+	/** Ob der Name der einer temporären Datei dieser Schicht ist: {@code ~karv-*.tmp}, mit oder ohne Kennung. */
+	static boolean isTempName(String fileName) {
+		return fileName != null && fileName.startsWith(TEMP_PREFIX) && fileName.endsWith(TEMP_SUFFIX);
+	}
+
+	/**
 	 * Die Kennung aus dem Namen einer temporären Datei {@code ~karv-<Kennung>-<UUID>.tmp}. Eine UUID hat 36 Zeichen; die
 	 * Kennung ist der Teil zwischen {@code ~karv-} und {@code -<UUID>.tmp} und darf selbst {@code -} enthalten.
 	 *
 	 * @return die Kennung; {@code null} für {@code ~karv-<UUID>.tmp} (ohne Kennung) und für fremde Namen
 	 */
 	static String tempTagOf(String fileName) {
-		if (fileName == null || !fileName.startsWith(TEMP_PREFIX) || !fileName.endsWith(TEMP_SUFFIX)) {
+		if (!isTempName(fileName)) {
 			return null;
 		}
 		int end = fileName.length() - TEMP_SUFFIX.length();

@@ -92,6 +92,16 @@ public record Ownership(String currentId, List<Previous> previous, Set<String> i
 		return isOwn(version.machine(), version.id());
 	}
 
+	/** Ob der Anspruch ein eigener ist: Rechner des Anspruchs und beanspruchte Version wie {@link #isOwn(String, VersionId)}. */
+	public boolean isOwn(Claim claim) {
+		return isOwn(claim.machine(), claim.version());
+	}
+
+	/** Ob die Beteiligte eines Konfliktvermerks dieser Rechner ist; wie {@link #isOwn(String, VersionId)}. */
+	public boolean isOwn(ConflictNote.Party party) {
+		return isOwn(party.machine(), party.version());
+	}
+
 	/**
 	 * Wie {@link #isOwn(String, VersionId)}, nur über das Rechner-Kürzel in der Versions-ID (siehe
 	 * {@link VersionId#isFrom(String)}), mit derselben Zeitgrenze. Für Stellen, die nur die ID einer Version kennen und

@@ -331,7 +331,7 @@ public final class FullSync {
 		 */
 		private void checkOwnClaim(DataPath file) throws IOException {
 			Claim mine = parseClaim(local.readRelative(file.path()));
-			if (mine == null || !own.isOwn(mine.machine(), mine.version())) {
+			if (mine == null || !own.isOwn(mine)) {
 				return;
 			}
 			Claim theirs = parseClaim(shared.readRelative(file.path()));
@@ -359,7 +359,7 @@ public final class FullSync {
 		private void uploadClaim(DataPath file, boolean ownOnly) throws IOException {
 			Optional<byte[]> localBytes = local.readRelative(file.path());
 			Claim mine = parseClaim(localBytes);
-			if (mine == null || ownOnly && !own.isOwn(mine.machine(), mine.version())) {
+			if (mine == null || ownOnly && !own.isOwn(mine)) {
 				return;
 			}
 			if (ownOnly) {

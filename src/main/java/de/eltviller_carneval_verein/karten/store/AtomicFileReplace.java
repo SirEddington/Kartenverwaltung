@@ -6,6 +6,8 @@ import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.util.UUID;
 
 /**
  * Ersetzt eine Datei atomar durch eine fertig geschriebene temporäre Datei ({@code ATOMIC_MOVE},
@@ -22,6 +24,9 @@ import java.nio.file.StandardCopyOption;
  * {@code FileAlreadyExistsException}, {@code DirectoryNotEmptyException}, {@code NotDirectoryException} oder
  * {@code AtomicMoveNotSupportedException} beschreiben dagegen einen festen Zustand, den Warten nicht ändert; sie
  * und alle anderen Ausnahmen gehen sofort an den Aufrufer.
+ * <p>
+ * {@link #write} ist der ganze Weg (temporäre Datei schreiben, ersetzen, aufräumen) für die Dateien, die diesem Rechner
+ * allein gehören: die Marke "verbunden", die bestätigten Konflikte, die Dateien des Start-Index und {@code machine.json}.
  */
 final class AtomicFileReplace {
 
@@ -44,6 +49,32 @@ final class AtomicFileReplace {
 	}
 
 	private AtomicFileReplace() {
+	}
+
+	/**
+	 * Schreibt den Inhalt in eine neue temporäre Datei im Ordner von {@code file} ({@code ~karv-<tempTag>-<UUID>.tmp},
+	 * ohne Kennung {@code ~karv-<UUID>.tmp}) und ersetzt {@code file} atomar durch sie ({@link #replace(Path, Path)}).
+	 * Fehlende Elternordner werden angelegt. Scheitert ein Schritt, bleibt die vorhandene Datei unverändert, und die
+	 * temporäre wird entfernt (gelingt das nicht, hängt der Fehler als unterdrückte Ausnahme am ursprünglichen).
+	 *
+	 * @param tempTag die Kennung im Namen der temporären Datei; {@code null} oder leer für keine
+	 */
+	static void write(Path file, byte[] bytes, String tempTag) throws IOException {
+		Path dir = file.toAbsolutePath().getParent();
+		Files.createDirectories(dir);
+		String tag = tempTag == null || tempTag.isEmpty() ? "" : tempTag + "-";
+		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + tag + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
+		try {
+			Files.write(temp, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+			replace(temp, file);
+		} catch (IOException | RuntimeException e) {
+			try {
+				Files.deleteIfExists(temp);
+			} catch (IOException | RuntimeException suppressed) {
+				e.addSuppressed(suppressed);
+			}
+			throw e;
+		}
 	}
 
 	/** Ersetzt {@code target} atomar durch {@code temp}; siehe Klassenbeschreibung. */

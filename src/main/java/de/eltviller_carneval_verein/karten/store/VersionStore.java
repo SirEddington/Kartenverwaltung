@@ -73,7 +73,12 @@ public final class VersionStore {
 	}
 
 	private boolean create(Path file, byte[] bytes) throws IOException {
-		return files.createNew(file, bytes, anchor, tempTag == null ? null : tempTag.get());
+		return files.createNew(file, bytes, anchor, currentTag());
+	}
+
+	/** Die Kennung für die temporären Dateien beim Schreiben, so wie sie jetzt gilt; {@code null}: keine. */
+	private String currentTag() {
+		return tempTag == null ? null : tempTag.get();
 	}
 
 	/**
@@ -85,7 +90,7 @@ public final class VersionStore {
 	 * @param corruptName Dateiname (kein Pfad) im Ordner der Datei, unter dem die beschädigte Fassung bleibt
 	 */
 	public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
-		files.replaceDamaged(file, good, corruptName, tempTag == null ? null : tempTag.get());
+		files.replaceDamaged(file, good, corruptName, currentTag());
 	}
 
 	/**
@@ -283,12 +288,16 @@ public final class VersionStore {
 	 */
 	public List<String> unitDataFiles(UnitKey unit) throws IOException {
 		Path unitDir = unitDir(unit);
-		String prefix = unit.relativePath() + "/";
+		return dataPaths(unit.relativePath() + "/", versionIds(unitDir), claimNames(unitDir));
+	}
+
+	/** Die Pfade der Versions- und Anspruchsdateien einer Einheit aus ihren Namen, sortiert. */
+	private static List<String> dataPaths(String prefix, List<VersionId> versionIds, List<String> claimNames) {
 		List<String> paths = new ArrayList<>();
-		for (VersionId id : versionIds(unitDir)) {
+		for (VersionId id : versionIds) {
 			paths.add(prefix + id + JSON);
 		}
-		for (String name : claimNames(unitDir)) {
+		for (String name : claimNames) {
 			paths.add(prefix + CLAIMS + "/" + name + JSON);
 		}
 		Collections.sort(paths);
@@ -318,14 +327,7 @@ public final class VersionStore {
 		List<FileLayer.DirEntry> unitEntries = files.listEntriesWithTemps(unitDir);
 		List<FileLayer.DirEntry> claimEntries = files.listEntriesWithTemps(claimsDir);
 
-		List<String> data = new ArrayList<>();
-		for (VersionId id : versionIdsOf(unitEntries)) {
-			data.add(prefix + id + JSON);
-		}
-		for (String name : claimNamesOf(claimEntries)) {
-			data.add(prefix + CLAIMS + "/" + name + JSON);
-		}
-		Collections.sort(data);
+		List<String> data = dataPaths(prefix, versionIdsOf(unitEntries), claimNamesOf(claimEntries));
 		List<String> temps = new ArrayList<>();
 		addTempNames(temps, unitEntries.stream().map(FileLayer.DirEntry::name).toList(), prefix);
 		addTempNames(temps, claimEntries.stream().map(FileLayer.DirEntry::name).toList(), prefix + CLAIMS + "/");
@@ -334,7 +336,7 @@ public final class VersionStore {
 
 	private static void addTempNames(List<String> paths, List<String> names, String prefix) {
 		for (String name : names) {
-			if (name.startsWith(FileLayer.TEMP_PREFIX) && name.endsWith(FileLayer.TEMP_SUFFIX)) {
+			if (FileLayer.isTempName(name)) {
 				paths.add(prefix + name);
 			}
 		}

@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayDeque;
@@ -22,7 +21,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.UUID;
 import java.util.function.DoubleConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -312,7 +310,7 @@ final class UnitIndex {
 	synchronized Refresh refresh(VersionStore local, DoubleConsumer progress) throws IOException {
 		deleteLeftoverTemps();
 		Map<String, List<String>> tree = files.listTree(local.dataRoot());
-		deleteOldLocalTemps(local, tree, SyncService.TEMP_AGE);
+		deleteOldLocalTemps(local, tree);
 		Map<UnitKey, String> units = new LinkedHashMap<>();
 		for (String rel : new TreeSet<>(tree.keySet())) {
 			UnitKey.parse(rel).ifPresent(unit -> units.put(unit, rel));
@@ -362,44 +360,27 @@ final class UnitIndex {
 	 * das Löschen nicht erlaubt ist) betrifft nur seinen Ordner und steht nur im Log: Das Aufräumen ist Pflege und lässt
 	 * den Abgleich nicht scheitern; der Ordner kommt beim nächsten Start wieder dran.
 	 */
-	private void deleteOldLocalTemps(VersionStore local, Map<String, List<String>> tree, Duration tempAge) {
+	private void deleteOldLocalTemps(VersionStore local, Map<String, List<String>> tree) {
 		// die Kennung einmal, nicht je Datei (wie SyncService#deleteOwnOldTemps)
 		Ownership mine = own;
-		for (Map.Entry<String, List<String>> folder : tree.entrySet()) {
-			List<String> temps = new ArrayList<>();
-			for (String name : folder.getValue()) {
-				if (name.startsWith(FileLayer.TEMP_PREFIX) && name.endsWith(FileLayer.TEMP_SUFFIX)) {
-					String tag = FileLayer.tempTagOf(name);
-					if (tag == null || mine.isOwnTempTag(tag)) {
-						temps.add(name);
-					}
-				}
-			}
-			if (temps.isEmpty()) {
-				continue;
-			}
-			try {
-				files.deleteOldTemps(local.dataRoot().resolve(folder.getKey()), temps, tempAge);
-			} catch (IOException | RuntimeException e) {
-				LOGGER.log(Level.FINE, "Alte temporäre Dateien in " + folder.getKey() + " im lokalen Bestand ließen sich nicht entfernen", e);
-			}
-		}
+		files.deleteOldTemps(local.dataRoot(), tree, tag -> tag == null || mine.isOwnTempTag(tag), SyncService.TEMP_AGE,
+				"im lokalen Bestand");
 	}
 
 	/** Die Einheiten mit ausstehenden und mit verlorenen Versionen unter den genannten, nach den Flags ihrer Einträge. */
 	private Refresh refreshOf(Collection<UnitKey> units, int resolved) {
-		Set<UnitKey> pending = new HashSet<>();
-		Set<UnitKey> lost = new HashSet<>();
+		return new Refresh(unitsWhere(units, Entry::pending), unitsWhere(units, Entry::lost), resolved);
+	}
+
+	/** Die Einheiten unter {@code units}, deren Eintrag {@code test} erfüllt, in deren Reihenfolge; unveränderlich. */
+	private Set<UnitKey> unitsWhere(Collection<UnitKey> units, Predicate<Entry> test) {
+		Set<UnitKey> found = new LinkedHashSet<>();
 		for (UnitKey unit : units) {
-			Entry entry = entries.get(unit);
-			if (entry.pending()) {
-				pending.add(unit);
-			}
-			if (entry.lost()) {
-				lost.add(unit);
+			if (test.test(entries.get(unit))) {
+				found.add(unit);
 			}
 		}
-		return new Refresh(Collections.unmodifiableSet(pending), Collections.unmodifiableSet(lost), resolved);
+		return Collections.unmodifiableSet(found);
 	}
 
 	/**
@@ -634,13 +615,7 @@ final class UnitIndex {
 	 * Ob eine Version ausstehend ist, entscheidet {@link ChainResolver} auf den Dateien.
 	 */
 	synchronized Set<UnitKey> pendingUnits() {
-		Set<UnitKey> units = new LinkedHashSet<>();
-		entries.forEach((unit, entry) -> {
-			if (entry.pending()) {
-				units.add(unit);
-			}
-		});
-		return Collections.unmodifiableSet(units);
+		return unitsWhere(entries.keySet(), Entry::pending);
 	}
 
 	/**
@@ -648,13 +623,7 @@ final class UnitIndex {
 	 * verloren ist, entscheidet {@link ChainResolver} auf den Dateien.
 	 */
 	synchronized Set<UnitKey> lostUnits() {
-		Set<UnitKey> units = new LinkedHashSet<>();
-		entries.forEach((unit, entry) -> {
-			if (entry.lost()) {
-				units.add(unit);
-			}
-		});
-		return Collections.unmodifiableSet(units);
+		return unitsWhere(entries.keySet(), Entry::lost);
 	}
 
 	/**
@@ -670,14 +639,10 @@ final class UnitIndex {
 	synchronized Set<UnitKey> recentOwnChainUnits(Predicate<VersionId> own, Instant since) {
 		long limit = since.toEpochMilli();
 		Predicate<VersionId> young = version -> own.test(version) && version.epochMillis() > limit;
-		Set<UnitKey> units = new LinkedHashSet<>();
-		entries.forEach((unit, entry) -> {
+		return unitsWhere(entries.keySet(), entry -> {
 			VersionId head = entry.snapshot().version();
-			if (head != null && young.test(head) || entry.chain().stream().anyMatch(step -> young.test(step.version()))) {
-				units.add(unit);
-			}
+			return head != null && young.test(head) || entry.chain().stream().anyMatch(step -> young.test(step.version()));
 		});
-		return Collections.unmodifiableSet(units);
 	}
 
 	/** Der Eintrag der Einheit (unveränderlich), oder {@code null}, wenn der Index sie nicht kennt. */
@@ -880,8 +845,8 @@ final class UnitIndex {
 	}
 
 	/**
-	 * Schreibt die geänderten Index-Dateien, jede über eine temporäre Datei im selben Ordner und
-	 * {@link AtomicFileReplace#replace}. Scheitert eine Datei, bleibt sie als geändert vorgemerkt und die Ausnahme geht
+	 * Schreibt die geänderten Index-Dateien, jede über eine temporäre Datei im selben Ordner ({@link FileLayer#replace}).
+	 * Scheitert eine Datei, bleibt sie als geändert vorgemerkt und die Ausnahme geht
 	 * weiter; die noch nicht geschriebenen bleiben ebenfalls vorgemerkt.
 	 * <p>
 	 * Die Sperre des Index hält nur das Sammeln der Einträge einer Gruppe auf, nicht das Serialisieren und Schreiben (bis
@@ -928,15 +893,8 @@ final class UnitIndex {
 	 */
 	private void write(Prepared prepared) throws IOException {
 		Path file = fileOf(prepared.group());
-		byte[] bytes = serialize(prepared.machineId(), prepared.entries());
-		Path temp = file.resolveSibling(FileLayer.TEMP_PREFIX + "index-" + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
-		try {
-			files.createNew(temp, bytes);
-			AtomicFileReplace.replace(temp, file);
-		} catch (IOException | RuntimeException e) {
-			deleteQuietly(temp);
-			throw e;
-		}
+		// die temporäre Datei heißt ~karv-index-*.tmp: Bleibt sie nach einem Absturz liegen, räumt deleteLeftoverTemps sie weg
+		files.replace(file, serialize(prepared.machineId(), prepared.entries()), "index");
 		markWritten(prepared);
 	}
 

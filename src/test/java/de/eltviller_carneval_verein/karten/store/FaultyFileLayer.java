@@ -20,7 +20,7 @@ import java.util.function.Predicate;
  * {@link #failWhen}). Mit {@link #failAfter} und {@link #failAfterWhen} wird der Aufruf erst ausgeführt und danach der
  * Fehler gemeldet: der Zustand nach einer verlorenen Antwort, bei der die Datei schon angelegt ist.
  * <p>
- * Die Operationen heißen wie die Methoden der Schnittstelle: {@code createNew}, {@code read}, {@code exists},
+ * Die Operationen heißen wie die Methoden der Schnittstelle: {@code createNew}, {@code replace}, {@code read}, {@code exists},
  * {@code listNames}, {@code listTree}, {@code isDirectory}, {@code replaceDamaged}, {@code rename},
  * {@code deleteOwnTemps}, {@code deleteOldTemps}. Beide Fassungen von {@code createNew} heißen {@code createNew}, beide
  * von {@code replaceDamaged} {@code replaceDamaged}. {@code listEntries} zählt als {@code listNames} (ein Test, der dort
@@ -226,6 +226,13 @@ public final class FaultyFileLayer implements FileLayer {
 		boolean result = delegate.createNew(file, content, anchor, tempTag);
 		throwLate(late);
 		return result;
+	}
+
+	@Override
+	public void replace(Path file, byte[] content, String tempTag) throws IOException {
+		IOException late = enter("replace", file);
+		delegate.replace(file, content, tempTag);
+		throwLate(late);
 	}
 
 	@Override

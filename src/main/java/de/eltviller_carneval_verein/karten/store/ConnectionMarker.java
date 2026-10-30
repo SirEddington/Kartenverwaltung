@@ -7,7 +7,6 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -24,7 +23,7 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * vollständig; {@link SyncService#disconnect} löscht sie. Der Start der Anwendung wählt danach seinen Weg (KARV-87).
  * <p>
  * Inhalt: {@code {"dir": "<Ordner>", "at": "<ISO-Zeitpunkt>", "complete": true|false}}. Geschrieben wird über eine
- * temporäre Datei, die die vorhandene atomar ersetzt ({@link AtomicFileReplace}).
+ * temporäre Datei, die die vorhandene atomar ersetzt ({@link FileLayer#replace}).
  */
 final class ConnectionMarker {
 
@@ -84,20 +83,7 @@ final class ConnectionMarker {
 		root.put(DIR, state.dir());
 		root.put(AT, state.at().toString());
 		root.put(COMPLETE, state.complete());
-		byte[] bytes = MAPPER.writeValueAsBytes(root);
-		Path file = appDataDir.resolve(FILE_NAME);
-		Path temp = file.resolveSibling(FileLayer.TEMP_PREFIX + "connection-" + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
-		try {
-			files.createNew(temp, bytes);
-			AtomicFileReplace.replace(temp, file);
-		} catch (IOException | RuntimeException e) {
-			try {
-				Files.deleteIfExists(temp);
-			} catch (IOException | RuntimeException suppressed) {
-				e.addSuppressed(suppressed);
-			}
-			throw e;
-		}
+		files.replace(appDataDir.resolve(FILE_NAME), MAPPER.writeValueAsBytes(root), "connection");
 	}
 
 	/** Löscht die Marke; ohne Marke ohne Wirkung. */

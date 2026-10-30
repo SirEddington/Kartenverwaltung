@@ -443,6 +443,11 @@ class StoreEventRepositoryTest {
 		}
 
 		@Override
+		public void replace(Path file, byte[] content, String tempTag) throws IOException {
+			delegate.replace(file, content, tempTag);
+		}
+
+		@Override
 		public Optional<byte[]> read(Path file) throws IOException {
 			return delegate.read(file);
 		}

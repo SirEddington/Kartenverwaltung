@@ -174,6 +174,11 @@ class SyncServiceTest {
 		}
 
 		@Override
+		public void replace(Path file, byte[] content, String tempTag) throws IOException {
+			delegate.replace(file, content, tempTag);
+		}
+
+		@Override
 		public List<DirEntry> listEntriesWithTemps(Path dir) throws IOException {
 			return delegate.listEntriesWithTemps(dir);
 		}
@@ -3306,7 +3311,7 @@ class SyncServiceTest {
 
 	private static long indexWrites(Node node) {
 		String index = node.appData.resolve("index").toString();
-		return node.layer.calls().stream().filter(c -> c.startsWith("createNew ") && c.contains(index)).count();
+		return node.layer.calls().stream().filter(c -> c.startsWith("replace ") && c.contains(index)).count();
 	}
 
 	@Test
@@ -3330,7 +3335,7 @@ class SyncServiceTest {
 		Node a = node("a");
 		a.service.startup("");
 		save(a, create(BOOKING, "Anna"));
-		a.layer.failWhen(p -> p.startsWith(a.appData.resolve("index")), "createNew", new IOException("Platte voll"));
+		a.layer.failWhen(p -> p.startsWith(a.appData.resolve("index")), "replace", new IOException("Platte voll"));
 
 		a.service.flushIndex();
 		a.service.tick();
@@ -3512,7 +3517,7 @@ class SyncServiceTest {
 		Node a = node("a");
 		a.service.startup("");
 		save(a, create(BOOKING, "Anna"));
-		a.layer.failWhen(p -> p.startsWith(a.appData.resolve("index")), "createNew", new IOException("Platte voll"));
+		a.layer.failWhen(p -> p.startsWith(a.appData.resolve("index")), "replace", new IOException("Platte voll"));
 
 		a.service.closeIndex();
 
@@ -3862,6 +3867,11 @@ class SyncServiceTest {
 		@Override
 		public boolean createNew(Path file, byte[] content, Path anchor, String tempTag) throws IOException {
 			return delegate.createNew(file, content, anchor, tempTag);
+		}
+
+		@Override
+		public void replace(Path file, byte[] content, String tempTag) throws IOException {
+			delegate.replace(file, content, tempTag);
 		}
 
 		@Override

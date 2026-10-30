@@ -528,10 +528,10 @@ class ConnectFlowStoreTest {
 
 	// --- Ruling 17: die Marke "verbunden" lässt sich nicht schreiben
 
-	/** Ab jetzt scheitert (solange {@code broken} gilt) das Anlegen der temporären Datei der Marke "verbunden". */
+	/** Ab jetzt scheitert (solange {@code broken} gilt) das Schreiben der Marke "verbunden". */
 	private static void breakMarker(Node node, AtomicBoolean broken) {
-		node.layer.failWhen(p -> broken.get() && p.getFileName().toString().startsWith(FileLayer.TEMP_PREFIX + "connection-"),
-				"createNew", new AccessDeniedException("connection.json gesperrt"));
+		node.layer.failWhen(p -> broken.get() && p.getFileName().toString().equals("connection.json"), "replace",
+				new AccessDeniedException("connection.json gesperrt"));
 	}
 
 	private String markerWriteFailed(Node node) {

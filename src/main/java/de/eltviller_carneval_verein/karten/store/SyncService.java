@@ -2,7 +2,6 @@ package de.eltviller_carneval_verein.karten.store;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -33,6 +32,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
 import java.util.function.Predicate;
 import java.util.logging.Level;
@@ -626,9 +626,8 @@ public final class SyncService {
 
 	/** Der gemeinsame Ordner, wie er eingestellt wurde (ohne Leerzeichen am Rand); {@code null} im Einzelbetrieb. */
 	public String sharedDir() {
-		synchronized (lock) {
-			return link == null ? null : link.text;
-		}
+		Link current = currentLink();
+		return current == null ? null : current.text;
 	}
 
 	// --- Steuerung
@@ -832,10 +831,7 @@ public final class SyncService {
 		CompletableFuture<ConnectOutcome> outcome = new CompletableFuture<>();
 		workLock.lock();
 		try {
-			Link current;
-			synchronized (lock) {
-				current = link;
-			}
+			Link current = currentLink();
 			if (current == null || !current.deciding) {
 				throw new IllegalStateException("Keine Verbindung wartet auf eine Entscheidung (Zustand " + notifier.state() + ")");
 			}
@@ -889,10 +885,7 @@ public final class SyncService {
 
 	/** Ein noch offenes Ergebnis der aktuellen Verbindung endet mit {@link Kind#ABGEBROCHEN}; unter {@code workLock}. */
 	private void abortPendingOutcome() {
-		Link previous;
-		synchronized (lock) {
-			previous = link;
-		}
+		Link previous = currentLink();
 		if (previous != null) {
 			settle(previous, new ConnectOutcome(Kind.ABGEBROCHEN, false, previous.setAsidePath, null));
 		}
@@ -976,10 +969,7 @@ public final class SyncService {
 	 * nicht neu begonnen; direkt nach seinem Ende beginnt ein neuer. Ohne Wirkung im Einzelbetrieb.
 	 */
 	public void syncNow() {
-		Link current;
-		synchronized (lock) {
-			current = link;
-		}
+		Link current = currentLink();
 		if (current == null) {
 			return;
 		}
@@ -1103,29 +1093,40 @@ public final class SyncService {
 	 * @return die Verbindung, mit der geschrieben wird
 	 */
 	private Link beginLocalWrites(boolean counts) {
-		boolean interrupted = false;
-		try {
-			synchronized (lock) {
-				while (settingAside) {
-					try {
-						lock.wait();
-					} catch (InterruptedException e) {
-						// ein Speichervorgang bricht nicht ab: Das Beiseitelegen dauert nur eine Umbenennung
-						interrupted = true;
-					}
-				}
-				if (counts && startupDone) {
-					wroteSinceStartup = true;
-				}
-				localWrites++;
-				localWritesBegun++;
-				return link;
+		Link current;
+		boolean interrupted;
+		synchronized (lock) {
+			// ein Speichervorgang bricht nicht ab: Das Beiseitelegen dauert nur eine Umbenennung
+			interrupted = awaitUninterruptibly(() -> !settingAside);
+			if (counts && startupDone) {
+				wroteSinceStartup = true;
 			}
-		} finally {
-			if (interrupted) {
-				Thread.currentThread().interrupt();
+			localWrites++;
+			localWritesBegun++;
+			current = link;
+		}
+		if (interrupted) {
+			Thread.currentThread().interrupt();
+		}
+		return current;
+	}
+
+	/**
+	 * Wartet an {@code lock}, bis {@code done} gilt; nur unter {@code lock} aufrufen. Eine Unterbrechung beendet das Warten
+	 * nicht, sie wird nur gemerkt: Der Aufrufer stellt sie wieder her, wenn es passt.
+	 *
+	 * @return ob der Thread während des Wartens unterbrochen wurde
+	 */
+	private boolean awaitUninterruptibly(BooleanSupplier done) {
+		boolean interrupted = false;
+		while (!done.getAsBoolean()) {
+			try {
+				lock.wait();
+			} catch (InterruptedException e) {
+				interrupted = true;
 			}
 		}
+		return interrupted;
 	}
 
 	/** Ende der lokalen Arbeit eines {@link #append} (nach dem Einreihen); ein wartendes Beiseitelegen prüft danach erneut. */
@@ -1247,10 +1248,7 @@ public final class SyncService {
 			// die Verbindung wechselt nur unter workLock (auch beim Start): Die Schleife läuft höchstens einmal und dient nur
 			// noch der Vorsicht
 			while (true) {
-				Link now;
-				synchronized (lock) {
-					now = link;
-				}
+				Link now = currentLink();
 				if (now == null) {
 					claimLocally(items);
 					return;
@@ -1711,20 +1709,7 @@ public final class SyncService {
 		ObjectNode root = MAPPER.createObjectNode();
 		ArrayNode list = root.putArray(ACKNOWLEDGED);
 		keys.stream().map(ConflictKey::asText).sorted().forEach(list::add);
-		byte[] bytes = MAPPER.writeValueAsBytes(root);
-		Path file = appDataDir.resolve(CONFLICTS_ACK);
-		Path temp = file.resolveSibling(FileLayer.TEMP_PREFIX + "conflicts-ack-" + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
-		try {
-			files.createNew(temp, bytes);
-			AtomicFileReplace.replace(temp, file);
-		} catch (IOException | RuntimeException e) {
-			try {
-				Files.deleteIfExists(temp);
-			} catch (IOException | RuntimeException suppressed) {
-				e.addSuppressed(suppressed);
-			}
-			throw e;
-		}
+		files.replace(appDataDir.resolve(CONFLICTS_ACK), MAPPER.writeValueAsBytes(root), "conflicts-ack");
 	}
 
 	/**
@@ -2052,10 +2037,7 @@ public final class SyncService {
 			if (closed) {
 				return false;
 			}
-			Link current;
-			synchronized (lock) {
-				current = link;
-			}
+			Link current = currentLink();
 			if (current == null) {
 				// auch die Auflösung schreibt in den Bestand: nicht, solange eine gültige Marke "sauber beendet" stehen kann
 				if (index.invalidateCleanMarker()) {
@@ -2187,13 +2169,8 @@ public final class SyncService {
 				// das Beiseitelegen steht noch aus (das Umbenennen oder schon das Entscheiden scheiterte): Der Bestand, der
 				// beiseitegelegt werden kann, lädt nichts hoch, holt nichts ab und heilt nichts; der nächste Takt versucht es
 				// erneut (nach dem Abstand TICK, denn der Takt gilt als gestört)
-				if (!isCurrent(current)) {
-					return false;
-				}
-				if (round.unreachable) {
-					reportUnreachable(current);
-				} else if (round.failure != null) {
-					reportFailure(current, round.failure);
+				if (isCurrent(current)) {
+					reportRound(current, round);
 				}
 				return false;
 			}
@@ -2232,15 +2209,29 @@ public final class SyncService {
 		}
 		// das Ende des ersten Laufs ist sein Ergebnis, auch wenn danach im selben Takt etwas scheiterte
 		settleFirstRunEnd(current);
-		if (round.unreachable) {
-			reportUnreachable(current);
-		} else if (round.failure != null) {
-			reportFailure(current, round.failure);
-		} else {
+		if (!reportRound(current, round)) {
 			notifier.succeeded(clock.instant(), hasJobs());
 			current.hurry = true;
 		}
 		return true;
+	}
+
+	/**
+	 * Meldet die Störung eines Durchlaufs: Ordner nicht erreichbar ({@link #reportUnreachable}) oder eine andere
+	 * ({@link #reportFailure}, die erste).
+	 *
+	 * @return ob es eine Störung gab
+	 */
+	private boolean reportRound(Link current, Round round) {
+		if (round.unreachable) {
+			reportUnreachable(current);
+			return true;
+		}
+		if (round.failure != null) {
+			reportFailure(current, round.failure);
+			return true;
+		}
+		return false;
 	}
 
 	/**
@@ -2265,15 +2256,7 @@ public final class SyncService {
 		Round check = new Round(current);
 		boolean[] both = new boolean[1];
 		check.run(() -> both[0] = FullSync.bothHaveUnits(local, current.shared));
-		if (!isCurrent(current)) {
-			return false;
-		}
-		if (check.unreachable) {
-			reportUnreachable(current);
-			return false;
-		}
-		if (check.failure != null) {
-			reportFailure(current, check.failure);
+		if (!isCurrent(current) || reportRound(current, check)) {
 			return false;
 		}
 		if (both[0]) {
@@ -2457,19 +2440,13 @@ public final class SyncService {
 	 * @return {@code false}, wenn die Schutzregel es verbietet (nichts ist geschehen); sonst {@code true}
 	 */
 	private boolean setAsideLocal(Link current, ConnectDecision decision) throws IOException {
-		boolean interrupted = false;
+		boolean interrupted;
 		synchronized (lock) {
 			if (wroteSinceStartup) {
 				return false;
 			}
 			settingAside = true;
-			while (localWrites > 0) {
-				try {
-					lock.wait();
-				} catch (InterruptedException e) {
-					interrupted = true;
-				}
-			}
+			interrupted = awaitUninterruptibly(() -> localWrites <= 0);
 		}
 		if (interrupted) {
 			// erst nach dem Takt wiederherstellen: Mit gesetztem Merker scheiterte sonst jeder unterbrechbare Dateizugriff darin
@@ -2627,23 +2604,13 @@ public final class SyncService {
 	 * @param sharedTemps Pfade relativ zum Datenordner des gemeinsamen Ordners
 	 */
 	private void deleteOwnOldTemps(Link current, List<String> sharedTemps) {
-		// die Kennung einmal je Block, nicht je Datei (ownership() nimmt lock)
-		Ownership own = ownership();
 		Map<String, List<String>> byFolder = new LinkedHashMap<>();
 		for (String rel : sharedTemps) {
 			int slash = rel.lastIndexOf('/');
-			String name = rel.substring(slash + 1);
-			if (own.isOwnTempTag(FileLayer.tempTagOf(name))) {
-				byFolder.computeIfAbsent(rel.substring(0, slash), folder -> new ArrayList<>()).add(name);
-			}
+			byFolder.computeIfAbsent(rel.substring(0, slash), folder -> new ArrayList<>()).add(rel.substring(slash + 1));
 		}
-		for (Map.Entry<String, List<String>> folder : byFolder.entrySet()) {
-			try {
-				files.deleteOldTemps(current.shared.resolve(folder.getKey()), folder.getValue(), TEMP_AGE);
-			} catch (IOException | RuntimeException e) {
-				LOGGER.log(Level.FINE, "Alte temporäre Dateien in " + folder.getKey() + " im gemeinsamen Ordner ließen sich nicht entfernen", e);
-			}
-		}
+		// die Kennung einmal je Block, nicht je Datei (ownership() nimmt lock)
+		files.deleteOldTemps(current.shared.dataRoot(), byFolder, ownership()::isOwnTempTag, TEMP_AGE, "im gemeinsamen Ordner");
 	}
 
 	/**
@@ -3026,7 +2993,7 @@ public final class SyncService {
 		try {
 			Optional<byte[]> bytes = local.readClaimBytes(slot.unit(), slot.claimName());
 			Claim mine = bytes.isPresent() ? parseClaim(bytes.get()) : null;
-			if (mine != null && ownership().isOwn(mine.machine(), mine.version())) {
+			if (mine != null && ownership().isOwn(mine)) {
 				rearm(new LocalScan.OwnClaim(slot.unit(), slot.claimName(), mine.version(), clock.instant()));
 			}
 		} catch (IOException e) {
@@ -3053,7 +3020,7 @@ public final class SyncService {
 			displace(current, slot.unit(), slot.claimName(), sharedBytes.get(), theirs, mine.version());
 			unwatch(slot.unit(), slot.claimName());
 			round.touch(slot.unit());
-		} else if (ownership().isOwn(mine.machine(), mine.version())) {
+		} else if (ownership().isOwn(mine)) {
 			rearm(new LocalScan.OwnClaim(slot.unit(), slot.claimName(), mine.version(), clock.instant()));
 		}
 	}
@@ -3352,10 +3319,15 @@ public final class SyncService {
 		}
 	}
 
-	private boolean isCurrent(Link current) {
+	/** Die aktuelle Verbindung; {@code null} im Einzelbetrieb. Nimmt nur kurz {@code lock}. */
+	private Link currentLink() {
 		synchronized (lock) {
-			return link == current;
+			return link;
 		}
+	}
+
+	private boolean isCurrent(Link current) {
+		return currentLink() == current;
 	}
 
 	private boolean hasJobs() {
@@ -3421,9 +3393,7 @@ public final class SyncService {
 
 		@Override
 		public boolean shared() {
-			synchronized (lock) {
-				return link != null;
-			}
+			return currentLink() != null;
 		}
 
 		@Override
@@ -3472,10 +3442,7 @@ public final class SyncService {
 		/** Ob der laufende Vollabgleich die Vorstellung der Einheit erst zum Teil abgeglichen hat ({@link FullSyncRun#inProgress}). */
 		@Override
 		public boolean deferred(UnitKey unit) {
-			Link current;
-			synchronized (lock) {
-				current = link;
-			}
+			Link current = currentLink();
 			if (current == null) {
 				return false;
 			}
@@ -3486,10 +3453,7 @@ public final class SyncService {
 		/** SYS-006 mit dem gemeinsamen Ordner; im Einzelbetrieb mit dem lokalen Bestand, in den geschrieben wird. */
 		@Override
 		public String failureText(Exception failure) {
-			Link current;
-			synchronized (lock) {
-				current = link;
-			}
+			Link current = currentLink();
 			return current != null ? SyncService.failureText(current, failure)
 					: StoreMessages.syncFailed(local.dataRoot().toString(), StoreMessages.describe(failure));
 		}

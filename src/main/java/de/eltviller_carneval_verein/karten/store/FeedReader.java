@@ -400,7 +400,7 @@ public final class FeedReader {
 			return;
 		}
 		Claim theirs = sharedBytes == null ? null : parseClaim(sharedBytes);
-		boolean ownOther = own.isOwn(mine.machine(), mine.version()) && !mine.version().equals(listed);
+		boolean ownOther = own.isOwn(mine) && !mine.version().equals(listed);
 		boolean differs = theirs != null && !theirs.version().equals(mine.version());
 		if (ownOther || differs) {
 			contested.add(new FeedPoll.Contested(unit, claimName));
