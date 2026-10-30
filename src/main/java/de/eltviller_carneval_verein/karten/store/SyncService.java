@@ -661,13 +661,14 @@ public final class SyncService {
 	 * die Verbindung wechselt nur unter {@code workLock} und bleibt deshalb bis zum Ende dieselbe.
 	 */
 	private Started startLocked(String sharedDir, DoubleConsumer progress) {
+		// ein offenes Ergebnis eines connect (etwa nach closeIndex) endet, mit oder ohne Ordner: Der Start ersetzt die Verbindung
+		abortPendingOutcome();
 		reopen();
 		loadAcknowledgedAtStart();
 		UnitIndex.Refresh opened = openIndex(progress);
 		String dir = clean(sharedDir);
 		if (dir == null) {
-			// die Marke "verbunden" bleibt (KARV-87 trennt ausdrücklich mit disconnect); ein offenes Ergebnis endet
-			abortPendingOutcome();
+			// die Marke "verbunden" bleibt (KARV-87 trennt ausdrücklich mit disconnect)
 			deactivate();
 			claimPendingLocally(withUnindexed(opened.pendingUnits()));
 			resolveAtStartup(opened.lostUnits());
@@ -734,7 +735,7 @@ public final class SyncService {
 	 *         {@link Kind#ABGEBROCHEN} (getrennt oder neu verbunden); jeweils mit dem Pfad des beiseitegelegten Bestands,
 	 *         falls schon beiseitegelegt. Bei leerem Pfad sofort {@link Kind#ABGEBROCHEN}. Nach {@link #closeIndex()} (der
 	 *         Takt ruht dann) liefert ein noch offenes Ergebnis erst ein späteres {@code connect}, {@link #disconnect} oder
-	 *         {@code startup} ohne Ordner, jeweils mit {@link Kind#ABGEBROCHEN}. Geliefert wird ohne gehaltene
+	 *         {@link #startup}, jeweils mit {@link Kind#ABGEBROCHEN}. Geliefert wird ohne gehaltene
 	 *         Sperre des Dienstes; abhängige Stufen ohne eigenen Executor laufen auf dem liefernden Thread (im Takt dem
 	 *         {@code worker}, sonst dem Aufrufer von {@code connect} bzw. {@link #disconnect}).
 	 */
@@ -903,7 +904,7 @@ public final class SyncService {
 	private void claimPendingLocally(Collection<UnitKey> candidates) {
 		try {
 			List<UploadJob.Item> items = new ArrayList<>();
-			for (UploadJob job : LocalScan.pendingJobs(local, ownership(), Set.of(), candidates)) {
+			for (UploadJob job : LocalScan.pendingJobs(local, ownership(), Set.of(), candidates, this::keepCandidate)) {
 				items.addAll(job.items());
 			}
 			claimLocally(items);
@@ -2595,6 +2596,16 @@ public final class SyncService {
 		}
 	}
 
+	/**
+	 * Eine Einheit, die sich bei der Suche nach Ausstehendem nicht lesen ließ, bleibt Kandidat ({@link #unindexed}), bis
+	 * eine Auflösung gelingt; bis dahin gibt es auch keine Marke "sauber beendet".
+	 */
+	private void keepCandidate(UnitKey unit) {
+		synchronized (resolveLock) {
+			unindexed.add(unit);
+		}
+	}
+
 	/** Die Kandidaten des Index und die Einheiten, die der Index wegen eines Fehlers beim Auflösen nicht kennt. */
 	private Set<UnitKey> withUnindexed(Collection<UnitKey> indexed) {
 		Set<UnitKey> units = new LinkedHashSet<>(indexed);
@@ -2615,7 +2626,7 @@ public final class SyncService {
 			skip = new HashSet<>(queued);
 			own = machine.ownership();
 		}
-		List<UploadJob> found = LocalScan.pendingJobs(local, own, skip, candidates);
+		List<UploadJob> found = LocalScan.pendingJobs(local, own, skip, candidates, this::keepCandidate);
 		synchronized (lock) {
 			if (link != current) {
 				return;
@@ -3103,13 +3114,17 @@ public final class SyncService {
 		index.markUnknownOwnAsUnlisted(examined);
 	}
 
-	/** Leitet für jede Einheit die verlorenen Strecken aus dem Zustand ab und meldet, was noch nicht gemeldet wurde. */
+	/**
+	 * Leitet für jede Einheit die verlorenen Strecken aus dem Zustand ab und meldet, was noch nicht gemeldet wurde. Ein
+	 * Fehler bei einer Einheit (auch ein ungeprüfter) kostet nur ihre Meldung; sie bleibt Kandidat ({@link #unindexed}),
+	 * und der Rest des Takts läuft weiter.
+	 */
 	private void reportLosses(Collection<UnitKey> units) {
 		for (UnitKey unit : units) {
 			try {
 				Resolved resolved = resolveWithFiles(unit);
 				LocalScan.losses(resolved.files(), resolved.state()).forEach(this::reportLoss);
-			} catch (IOException e) {
+			} catch (IOException | RuntimeException e) {
 				LOGGER.log(Level.WARNING, "Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
 			}
 		}

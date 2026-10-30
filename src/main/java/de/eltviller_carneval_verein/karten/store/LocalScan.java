@@ -11,6 +11,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 
@@ -21,6 +24,7 @@ import de.eltviller_carneval_verein.karten.store.UnitState.Status;
  */
 final class LocalScan {
 
+	private static final Logger LOGGER = Logger.getLogger(LocalScan.class.getName());
 	private static final String ROOT = "root";
 
 	/**
@@ -87,22 +91,35 @@ final class LocalScan {
 	 * nach ihrer kleinsten Versions-ID. Jede Einheit wird aus den Dateien aufgelöst; eine Auswahl (etwa die Kandidaten aus
 	 * dem Start-Index) spart nur das Lesen der übrigen.
 	 *
-	 * @param own   was eigen ist (auch Versionen einer früheren ID bis zu ihrer Neuvergabe: sie werden weiter hochgeladen)
-	 * @param skip  Versionen, die schon in einem Auftrag stehen; sie kommen nicht noch einmal vor
-	 * @param units die Einheiten, die untersucht werden (alle: {@link VersionStore#allUnits()})
+	 * Eine Einheit, die sich nicht lesen oder auflösen lässt, hält die übrigen nicht auf: Sie wird übergangen (WARNING im
+	 * Log) und an {@code unreadable} gemeldet, damit der Aufrufer sie als Kandidaten behält.
+	 *
+	 * @param own        was eigen ist (auch Versionen einer früheren ID bis zu ihrer Neuvergabe: sie werden weiter
+	 *                   hochgeladen)
+	 * @param skip       Versionen, die schon in einem Auftrag stehen; sie kommen nicht noch einmal vor
+	 * @param units      die Einheiten, die untersucht werden (alle: {@link VersionStore#allUnits()})
+	 * @param unreadable erfährt jede Einheit, die übergangen wurde
 	 */
 	static List<UploadJob> pendingJobs(VersionStore local, Ownership own, Set<VersionId> skip,
-			Collection<UnitKey> units) throws IOException {
+			Collection<UnitKey> units, Consumer<UnitKey> unreadable) {
 		Map<String, Map<UnitKey, List<UploadJob.Item>>> groups = new LinkedHashMap<>();
 		for (UnitKey unit : units) {
-			UnitFiles files = local.readUnit(unit);
-			for (Version version : ChainResolver.resolve(files, own).pending()) {
-				if (skip.contains(version.id())) {
-					continue;
+			List<UploadJob.Item> found = new ArrayList<>();
+			try {
+				UnitFiles files = local.readUnit(unit);
+				for (Version version : ChainResolver.resolve(files, own).pending()) {
+					if (!skip.contains(version.id())) {
+						found.add(new UploadJob.Item(unit, version, files.versions().get(version.id()).bytes()));
+					}
 				}
-				byte[] bytes = files.versions().get(version.id()).bytes();
-				groups.computeIfAbsent(version.saveId(), id -> new LinkedHashMap<>())
-						.computeIfAbsent(unit, u -> new ArrayList<>()).add(new UploadJob.Item(unit, version, bytes));
+			} catch (IOException | RuntimeException e) {
+				LOGGER.log(Level.WARNING, "Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
+				unreadable.accept(unit);
+				continue;
+			}
+			for (UploadJob.Item item : found) {
+				groups.computeIfAbsent(item.version().saveId(), id -> new LinkedHashMap<>())
+						.computeIfAbsent(unit, u -> new ArrayList<>()).add(item);
 			}
 		}
 		List<UploadJob> jobs = new ArrayList<>();

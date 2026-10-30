@@ -492,6 +492,21 @@ class ConnectFlowStoreTest {
 		assertNull(a.service.sharedDir());
 	}
 
+	@Test
+	void startupWithAFolderAbortsAPendingOutcomeAfterCloseIndex() throws IOException {
+		Node a = new Node("a");
+		a.service.startup("");
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
+		// der Takt ruht nach closeIndex: Das Ergebnis bleibt offen, bis der nächste Start es abschließt
+		a.service.closeIndex();
+		assertFalse(result.isDone());
+
+		assertTrue(a.service.startup(shared));
+
+		assertEquals(outcome(Kind.ABGEBROCHEN), result.getNow(null));
+		assertEquals(shared, a.service.sharedDir());
+	}
+
 	// --- Ruling 17: die Marke "verbunden" lässt sich nicht schreiben
 
 	/** Ab jetzt scheitert (solange {@code broken} gilt) das Anlegen der temporären Datei der Marke "verbunden". */
@@ -1737,6 +1752,79 @@ class ConnectFlowStoreTest {
 		assertEquals(otherDir, markerOfX.dir());
 		assertTrue(markerOfX.complete());
 		assertTrue(restarted.service.connectionComplete().get());
+	}
+
+	// --- eine unlesbare Einheit hält die Suche nach Ausstehendem nicht auf
+
+	/** Ab jetzt scheitert jedes Lesen einer Datei der Einheit im lokalen Bestand des Rechners. */
+	private static void breakLocalUnit(Node node, UnitKey unit) {
+		Path folder = node.localData().resolve(unit.relativePath());
+		node.layer.failWhen(p -> p.startsWith(folder), "read", new AccessDeniedException(folder.toString()));
+	}
+
+	@Test
+	void unreadableUnitDoesNotStopClaimingTheOthersLocally() throws IOException {
+		Node a = new Node("a");
+		assertTrue(a.service.startup(shared));
+		a.down.set(true);
+		save(a, LOCAL_EVENT, "A");
+		Version sale = save(a, BOOKING, "Anna");
+		assertTrue(a.service.unitState(BOOKING).provisional());
+		breakLocalUnit(a, LOCAL_EVENT);
+
+		a.service.disconnect();
+
+		assertTrue(Files.exists(a.localData().resolve(BOOKING.relativePath()).resolve("claims/root.json")), "lokal beansprucht");
+		assertEquals(sale.id(), a.service.unitState(BOOKING).head().id());
+		assertFalse(a.service.unitState(BOOKING).provisional());
+	}
+
+	@Test
+	void unreadableUnitDoesNotStopUploadingTheOthersAtStartup() throws IOException {
+		Node a = new Node("a");
+		assertTrue(a.service.startup(shared));
+		a.down.set(true);
+		save(a, LOCAL_EVENT, "A");
+		Version sale = save(a, BOOKING, "Anna");
+		// Absturz nach dem Schreiben des Index, ohne Marke "sauber beendet": Der Start liest nur die Kandidaten
+		a.service.flushIndex();
+		Node restarted = new Node(a.appData, "a", null);
+		breakLocalUnit(restarted, LOCAL_EVENT);
+
+		assertTrue(restarted.service.startup(shared));
+
+		assertEquals(sale.id(), sharedClaim(BOOKING).version());
+		assertFalse(Files.exists(sharedUnit(LOCAL_EVENT).resolve("claims/root.json")));
+	}
+
+	/** Ob der aktuelle Thread gerade in einer Methode dieses Namens steckt. */
+	private static boolean calledFrom(String method) {
+		return StackWalker.getInstance().walk(frames -> frames.anyMatch(frame -> frame.getMethodName().equals(method)));
+	}
+
+	@Test
+	void runtimeErrorWhileReportingOneUnitDoesNotStopTheTick() throws IOException {
+		seedSharedHalls(2);
+		Node a = new Node("a");
+		List<UnitKey> changed = Collections.synchronizedList(new ArrayList<>());
+		a.service.setListener(new SyncListener() {
+			@Override
+			public void unitsChanged(java.util.Set<UnitKey> units) {
+				changed.addAll(units);
+			}
+		});
+		// das Auflösen von f0 beim Ableiten der Verluste am Ende des Takts wirft einmal ungeprüft
+		Path broken = a.localData().resolve(UnitKey.hall("f0").relativePath());
+		a.layer.failNextUnchecked(p -> p.startsWith(broken) && calledFrom("reportLosses"), "read",
+				new IllegalStateException("kaputt"));
+		assertTrue(a.service.startup(shared));
+
+		tickUntilRunEnds(a);
+
+		assertTrue(changed.containsAll(List.of(UnitKey.hall("f0"), UnitKey.hall("f1"))), "gemeldet: " + changed);
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+		assertEquals(List.of("f0", "f1"), a.service.hallIds());
+		assertTrue(a.layer.calls().stream().anyMatch(call -> call.startsWith("read " + broken)), "der Fehler trat auf");
 	}
 
 	/**
