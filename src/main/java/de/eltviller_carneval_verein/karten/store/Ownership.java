@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.store;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -25,10 +26,21 @@ public record Ownership(String currentId, List<Previous> previous) {
 	 *              sind eigen
 	 */
 	public record Previous(String id, Instant until) {
+
+		/** @throws NullPointerException wenn ID oder Zeitpunkt fehlen */
+		public Previous {
+			Objects.requireNonNull(id, "id");
+			Objects.requireNonNull(until, "until");
+		}
 	}
 
-	/** Macht aus einer fehlenden Liste der früheren IDs eine leere und kopiert die Liste. */
+	/**
+	 * Macht aus einer fehlenden Liste der früheren IDs eine leere und kopiert die Liste.
+	 *
+	 * @throws NullPointerException wenn die aktuelle ID fehlt
+	 */
 	public Ownership {
+		Objects.requireNonNull(currentId, "currentId");
 		previous = previous == null ? List.of() : List.copyOf(previous);
 	}
 

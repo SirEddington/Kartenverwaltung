@@ -312,6 +312,109 @@ class MachineIdentityTest {
 		assertEquals(List.of("machine.json"), names());
 	}
 
+	private static final String LOSSY_ID = "abcdefghijklmnopqrstuvwxyz";
+	private static final String LOSSY_COPY = "machine.json.corrupt-2026-10-26_13-45-07";
+
+	/** Eine Datei, deren "previous" einen brauchbaren und einen schadhaften Eintrag enthält. */
+	private String writeLossyFile() throws IOException {
+		String content = "{\"id\":\"" + LOSSY_ID + "\",\"name\":\"KASSE-1\",\"previous\":["
+				+ "{\"id\":\"zyxwvutsrqponmlkjihgfedcba\",\"until\":\"2026-10-26T13:45:07Z\"},{\"id\":\"kaputt\"}]}";
+		Files.writeString(machineFile(), content, StandardCharsets.UTF_8);
+		return content;
+	}
+
+	@Test
+	void skippedPreviousEntryKeepsACopyBeforeRename() throws IOException {
+		String content = writeLossyFile();
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK);
+		// Laden allein ändert nichts: noch keine Kopie nötig
+		assertEquals(List.of("machine.json"), names());
+
+		machine.rename("Eingang Nord");
+
+		assertEquals(List.of("machine.json", LOSSY_COPY), names());
+		assertEquals(content, Files.readString(dir.resolve(LOSSY_COPY)));
+		assertEquals(1, MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK).ownership().previous().size());
+		// nur einmal: ein weiteres Schreiben legt keine zweite Kopie an
+		machine.rename("Eingang Süd");
+		assertEquals(List.of("machine.json", LOSSY_COPY), names());
+	}
+
+	@Test
+	void skippedPreviousEntryKeepsACopyBeforeRegenerate() throws IOException {
+		String content = writeLossyFile();
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK);
+		Clock later = Clock.fixed(CLOCK.instant().plusSeconds(3600), ZoneOffset.UTC);
+
+		MachineIdentity fresh = machine.regenerate(later);
+
+		assertEquals(List.of("machine.json", "machine.json.corrupt-2026-10-26_14-45-07"), names());
+		assertEquals(content, Files.readString(dir.resolve("machine.json.corrupt-2026-10-26_14-45-07")));
+		assertEquals(2, fresh.ownership().previous().size());
+	}
+
+	@Test
+	void previousThatIsNotAnArrayKeepsACopyBeforeRewrite() throws IOException {
+		String content = "{\"id\":\"" + LOSSY_ID + "\",\"name\":\"KASSE-1\",\"previous\":{\"id\":\"x\"}}";
+		Files.writeString(machineFile(), content, StandardCharsets.UTF_8);
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK);
+		assertEquals(List.of(), machine.ownership().previous());
+
+		machine.rename("Eingang Nord");
+
+		assertEquals(List.of("machine.json", LOSSY_COPY), names());
+		assertEquals(content, Files.readString(dir.resolve(LOSSY_COPY)));
+	}
+
+	@Test
+	void skippedEntryCopyIsAlsoMadeWhenTheNameIsRepaired() throws IOException {
+		String content = "{\"id\":\"" + LOSSY_ID + "\",\"previous\":[5]}";
+		Files.writeString(machineFile(), content, StandardCharsets.UTF_8);
+
+		MachineIdentity.loadOrCreate(dir, () -> "NEU", CLOCK);
+
+		assertEquals(List.of("machine.json", LOSSY_COPY), names());
+		assertEquals(content, Files.readString(dir.resolve(LOSSY_COPY)));
+	}
+
+	@Test
+	void cleanPreviousLeavesNoCopy() throws IOException {
+		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(CLOCK);
+
+		fresh.rename("Eingang Nord");
+		MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK).rename("Noch einer");
+
+		assertEquals(List.of("machine.json"), names());
+	}
+
+	@Test
+	void untilBeyondTheMillisecondRangeIsSkippedAndKept() throws IOException {
+		String content = "{\"id\":\"" + LOSSY_ID + "\",\"name\":\"KASSE-1\",\"previous\":["
+				+ "{\"id\":\"zyxwvutsrqponmlkjihgfedcba\",\"until\":\"+1000000000-12-31T23:59:59Z\"}]}";
+		Files.writeString(machineFile(), content, StandardCharsets.UTF_8);
+
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK);
+
+		assertEquals(List.of(), machine.ownership().previous());
+		// kein ArithmeticException beim Prüfen
+		assertFalse(machine.ownership().isOwnId(VersionId.create(1_000L, "zyxwvutsrqponmlkjihgfedcba", 0)));
+		machine.rename("Eingang Nord");
+		assertEquals(content, Files.readString(dir.resolve(LOSSY_COPY)));
+	}
+
+	@Test
+	void regenerateTruncatesToMilliseconds() throws IOException {
+		Clock subMilli = Clock.fixed(Instant.parse("2026-10-26T13:45:07.123456789Z"), ZoneOffset.UTC);
+
+		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(subMilli);
+
+		assertEquals(Instant.parse("2026-10-26T13:45:07.123Z"), fresh.ownership().previous().get(0).until());
+		var previous = new com.fasterxml.jackson.databind.ObjectMapper().readTree(Files.readAllBytes(machineFile()))
+				.get("previous");
+		assertEquals("2026-10-26T13:45:07.123Z", previous.get(0).get("until").asText());
+		assertEquals(fresh.ownership(), MachineIdentity.loadOrCreate(dir, () -> "egal").ownership());
+	}
+
 	@Test
 	void renameTrimsAndPersists() throws IOException {
 		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");

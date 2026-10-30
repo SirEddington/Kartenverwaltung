@@ -60,15 +60,26 @@ public final class MachineIdentity {
 	private final Path file;
 	private final String id;
 	private final List<Ownership.Previous> previous;
+	private final Clock clock;
 	private volatile String name;
 	private volatile String operator;
 
-	private MachineIdentity(Path file, String id, List<Ownership.Previous> previous, String name, String operator) {
+	/**
+	 * Ob die Datei beim Laden schadhafte Einträge in {@code previous} enthielt, die das nächste Schreiben verlieren würde:
+	 * Dann wird vor diesem Schreiben eine Kopie der Datei angelegt. Zugriff nur in {@code synchronized}-Methoden oder vor
+	 * der Veröffentlichung der Instanz.
+	 */
+	private boolean keepOriginal;
+
+	private MachineIdentity(Path file, String id, List<Ownership.Previous> previous, String name, String operator,
+			Clock clock, boolean keepOriginal) {
 		this.file = file;
 		this.id = id;
 		this.previous = List.copyOf(previous);
 		this.name = name;
 		this.operator = operator;
+		this.clock = clock;
+		this.keepOriginal = keepOriginal;
 	}
 
 	/**
@@ -88,7 +99,9 @@ public final class MachineIdentity {
 	 * neuen Kennung vorbelegt und die Datei neu geschrieben, ohne Kopie. Ist die Datei sonst beschädigt (kein JSON-Objekt,
 	 * ID fehlt oder nicht aus 26 Zeichen {@code [0-9a-z]}), wird sie nach
 	 * {@code machine.json.corrupt-<yyyy-MM-dd_HH-mm-ss>} umbenannt (nie überschrieben, bei Namensgleichheit mit Zusatz
-	 * {@code -2}, {@code -3} …) und eine neue Kennung angelegt; gelöscht wird nichts.
+	 * {@code -2}, {@code -3} …) und eine neue Kennung angelegt; gelöscht wird nichts. Enthält {@code previous} schadhafte
+	 * Einträge (oder ist kein Array), bleibt die ID, die brauchbaren Einträge gelten weiter, und vor dem ersten Neuschreiben
+	 * der Datei entsteht eine Kopie unter demselben Namensschema.
 	 *
 	 * @param appDataDir   Datenordner dieses Rechners (wird bei Bedarf angelegt)
 	 * @param computerName liefert den Computernamen als Vorbelegung des Anzeigenamens
@@ -126,20 +139,21 @@ public final class MachineIdentity {
 				String id = validId(node);
 				if (id != null) {
 					String name = validName(node);
-					List<Ownership.Previous> previous = validPrevious(node);
+					PreviousRead read = readPrevious(node);
 					if (name != null) {
-						return new MachineIdentity(file, id, previous, name, null);
+						return new MachineIdentity(file, id, read.entries(), name, null, clock, read.lossy());
 					}
 					// Gültige ID, aber Name fehlt oder ist unbrauchbar: die ID bleibt (sonst wären die eigenen Versionen und
 					// der eigene Listenordner plötzlich fremd), nur der Name wird neu vorbelegt und die Datei neu geschrieben.
-					MachineIdentity repaired = new MachineIdentity(file, id, previous, nameFrom(computerName), null);
-					repaired.write(id, repaired.name, previous);
+					MachineIdentity repaired = new MachineIdentity(file, id, read.entries(), nameFrom(computerName), null,
+							clock, read.lossy());
+					repaired.write(id, repaired.name, read.entries(), clock);
 					return repaired;
 				}
-				moveAsideCorrupt(file, clock);
+				asideCorrupt(file, clock, false);
 			}
 			String name = nameFrom(computerName);
-			MachineIdentity created = new MachineIdentity(file, newId(), List.of(), name, null);
+			MachineIdentity created = new MachineIdentity(file, newId(), List.of(), name, null, clock, false);
 			if (created.writeNew(name)) {
 				return created;
 			}
@@ -207,38 +221,68 @@ public final class MachineIdentity {
 	}
 
 	/**
-	 * Die früheren IDs aus dem Objekt. Fehlt das Feld, ist die Liste leer. Ein Eintrag ohne gültige ID (26 Zeichen
-	 * {@code [0-9a-z]}) oder ohne lesbaren Zeitpunkt wird übersprungen: Die aktuelle ID ist wichtiger als ein schadhafter
-	 * Eintrag, deshalb gilt die Datei dadurch nicht als beschädigt.
+	 * Das Ergebnis des Lesens von {@code previous}.
+	 *
+	 * @param entries die brauchbaren Einträge
+	 * @param lossy   ob etwas fehlt, was ein Neuschreiben verlöre: übersprungene Einträge, oder {@code previous} ist kein
+	 *                Array
 	 */
-	private static List<Ownership.Previous> validPrevious(JsonNode node) {
+	private record PreviousRead(List<Ownership.Previous> entries, boolean lossy) {
+	}
+
+	/**
+	 * Die früheren IDs aus dem Objekt. Fehlt das Feld, ist die Liste leer. Ein Eintrag ohne gültige ID (26 Zeichen
+	 * {@code [0-9a-z]}) oder ohne lesbaren Zeitpunkt (nicht lesbar, oder nicht in Millisekunden darstellbar) wird
+	 * übersprungen: Die aktuelle ID ist wichtiger als ein schadhafter Eintrag, deshalb gilt die Datei dadurch nicht als
+	 * beschädigt. Damit nichts still verloren geht, meldet das Ergebnis, ob Einträge übersprungen wurden oder
+	 * {@code previous} kein Array ist; dann sichert das nächste Schreiben zuvor eine Kopie der Datei.
+	 */
+	private static PreviousRead readPrevious(JsonNode node) {
 		JsonNode array = node.get("previous");
-		if (array == null || !array.isArray()) {
-			return List.of();
+		if (array == null) {
+			return new PreviousRead(List.of(), false);
+		}
+		if (!array.isArray()) {
+			return new PreviousRead(List.of(), true);
 		}
 		List<Ownership.Previous> result = new ArrayList<>();
+		boolean lossy = false;
 		for (JsonNode entry : array) {
 			JsonNode entryId = entry.get("id");
 			JsonNode until = entry.get("until");
 			if (entryId == null || !entryId.isTextual() || !ID_PATTERN.matcher(entryId.asText()).matches()
 					|| until == null || !until.isTextual()) {
+				lossy = true;
 				continue;
 			}
 			try {
-				result.add(new Ownership.Previous(entryId.asText(), Instant.parse(until.asText())));
-			} catch (DateTimeParseException e) {
-				// unlesbarer Zeitpunkt: Eintrag überspringen
+				Instant parsed = Instant.parse(until.asText());
+				// Ownership vergleicht in Millisekunden: Ein Zeitpunkt, der dort überläuft, wäre später ein Fehler im Betrieb
+				parsed.toEpochMilli();
+				result.add(new Ownership.Previous(entryId.asText(), parsed));
+			} catch (DateTimeParseException | ArithmeticException e) {
+				lossy = true;
 			}
 		}
-		return result;
+		return new PreviousRead(result, lossy);
 	}
 
-	/** Benennt die beschädigte Datei um, ohne eine vorhandene Kopie zu überschreiben. */
-	private static void moveAsideCorrupt(Path file, Clock clock) throws IOException {
+	/**
+	 * Legt die Datei unter dem Namen {@code machine.json.corrupt-<yyyy-MM-dd_HH-mm-ss>} (bei Namensgleichheit mit Zusatz
+	 * {@code -2}, {@code -3} …) beiseite, ohne eine vorhandene Datei zu überschreiben.
+	 *
+	 * @param copy {@code true}: kopieren, die Datei bleibt; {@code false}: umbenennen
+	 */
+	private static void asideCorrupt(Path file, Clock clock, boolean copy) throws IOException {
 		String base = FILE_NAME + ".corrupt-" + LocalDateTime.now(clock).format(CORRUPT_STAMP);
 		for (int attempt = 1;; attempt++) {
+			Path target = file.resolveSibling(attempt == 1 ? base : base + "-" + attempt);
 			try {
-				Files.move(file, file.resolveSibling(attempt == 1 ? base : base + "-" + attempt));
+				if (copy) {
+					Files.copy(file, target);
+				} else {
+					Files.move(file, target);
+				}
 				return;
 			} catch (FileAlreadyExistsException e) {
 				// Kopie mit diesem Namen gibt es schon: nächsten Namen versuchen
@@ -287,7 +331,7 @@ public final class MachineIdentity {
 			throw new IllegalArgumentException("Der Name des Rechners darf nicht leer sein.");
 		}
 		String trimmed = name.trim();
-		write(id, trimmed, previous);
+		write(id, trimmed, previous, clock);
 		this.name = trimmed;
 	}
 
@@ -320,8 +364,8 @@ public final class MachineIdentity {
 		String newId = newId();
 		List<Ownership.Previous> all = new ArrayList<>(previous);
 		all.add(new Ownership.Previous(id, clock.instant().truncatedTo(ChronoUnit.MILLIS)));
-		write(newId, name, all);
-		return new MachineIdentity(file, newId, all, name, operator);
+		write(newId, name, all, clock);
+		return new MachineIdentity(file, newId, all, name, operator, this.clock, false);
 	}
 
 	private static byte[] toBytes(String id, String name, List<Ownership.Previous> previous) throws IOException {
@@ -339,15 +383,25 @@ public final class MachineIdentity {
 		return MAPPER.writeValueAsBytes(node);
 	}
 
-	/** Schreibt die Datei über eine temporäre Datei im selben Ordner und ersetzt die vorhandene atomar. */
-	private void write(String id, String name, List<Ownership.Previous> previous) throws IOException {
+	/**
+	 * Schreibt die Datei über eine temporäre Datei im selben Ordner und ersetzt die vorhandene atomar. Enthielt die Datei
+	 * beim Laden schadhafte Einträge in {@code previous}, wird vor dem ersten Schreiben eine Kopie angelegt (siehe
+	 * {@link #asideCorrupt}); schlägt das fehl, bleibt die Datei unverändert.
+	 *
+	 * @param stamp Uhr für den Zeitstempel im Namen dieser Kopie
+	 */
+	private void write(String id, String name, List<Ownership.Previous> previous, Clock stamp) throws IOException {
 		byte[] bytes = toBytes(id, name, previous);
 		Path dir = file.toAbsolutePath().getParent();
 		Files.createDirectories(dir);
+		if (keepOriginal) {
+			asideCorrupt(file, stamp, true);
+		}
 		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
 		try {
 			Files.write(temp, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
 			Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+			keepOriginal = false;
 		} catch (IOException | RuntimeException e) {
 			try {
 				Files.deleteIfExists(temp);

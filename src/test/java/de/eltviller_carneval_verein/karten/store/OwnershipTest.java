@@ -79,6 +79,13 @@ class OwnershipTest {
 	}
 
 	@Test
+	void nullPartsAreRejected() {
+		assertThrows(NullPointerException.class, () -> new Ownership(null, List.of()));
+		assertThrows(NullPointerException.class, () -> new Ownership.Previous(null, UNTIL));
+		assertThrows(NullPointerException.class, () -> new Ownership.Previous(OLD, null));
+	}
+
+	@Test
 	void listIsCopiedDefensively() {
 		List<Ownership.Previous> source = new ArrayList<>(List.of(new Ownership.Previous(OLD, UNTIL)));
 		Ownership copy = new Ownership(CURRENT, source);
