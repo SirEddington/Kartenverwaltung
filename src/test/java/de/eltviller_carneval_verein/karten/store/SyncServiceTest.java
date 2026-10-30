@@ -3016,6 +3016,39 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void closeIndexWritesNoMarkerWhileASaveIsWriting() throws Exception {
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(HALL, "Halle"));
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		a.layer.blockNext("createNew", entered, release);
+		AtomicReference<Throwable> failure = new AtomicReference<>();
+		Thread saver = new Thread(() -> {
+			try {
+				save(a, create(BOOKING, "Anna"));
+			} catch (Throwable e) {
+				failure.set(e);
+			}
+		});
+		saver.start();
+		try {
+			assertTrue(entered.await(10, TimeUnit.SECONDS), "der Speichervorgang schreibt");
+
+			a.service.closeIndex();
+
+			// die Marke stünde sonst über einer Version, die der Index noch nicht kennt
+			assertFalse(Files.exists(cleanMarker(a)));
+		} finally {
+			release.countDown();
+			saver.join(10_000);
+		}
+		assertNull(failure.get());
+		a.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)), "ohne laufenden Speichervorgang wie gewohnt");
+	}
+
+	@Test
 	void startupAfterCleanShutdownSkipsTreeWalks() throws IOException {
 		Node a = cleanlyClosedNode();
 
@@ -4125,5 +4158,29 @@ class SyncServiceTest {
 
 		assertEquals(v.id(), seen.version());
 		assertEquals(Status.OK, seen.status());
+	}
+
+	@Test
+	void relativePathToTheSharedFolderWorks() throws IOException {
+		// ein relativer Pfad vom Arbeitsordner aus, mit "." darin
+		Files.createDirectories(Path.of("target"));
+		Path base = Files.createTempDirectory(Path.of("target"), "relativ-");
+		try {
+			assertFalse(base.isAbsolute());
+			Path relativeShared = Files.createDirectory(base.resolve("gemeinsam"));
+			SyncService a = TestSyncServices.sharedMode(dir.resolve("a"), base.resolve(".").resolve("gemeinsam"), "a", clock);
+			Version v = a.append(UUID.randomUUID().toString(), List.of(create(BOOKING, "Anna"))).get(0);
+			TestSyncServices.tick(a);
+
+			Path claim = relativeShared.resolve("data").resolve(BOOKING.relativePath()).resolve("claims/root.json");
+			assertEquals(v.id(), StoreCodec.readClaim(Files.readAllBytes(claim)).version());
+			assertEquals(SyncState.AKTUELL, a.syncState().get());
+		} finally {
+			try (Stream<Path> entries = Files.walk(base)) {
+				for (Path entry : entries.sorted(Comparator.reverseOrder()).toList()) {
+					Files.delete(entry);
+				}
+			}
+		}
 	}
 }

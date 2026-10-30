@@ -283,7 +283,9 @@ public final class NioFileLayer implements FileLayer {
 	 */
 	private Path createLevelsBelow(Path anchor, Path file) throws IOException {
 		Path root = anchor.toAbsolutePath().normalize();
-		Path dir = parentOf(file).normalize();
+		// beide Seiten absolut und normalisiert: Ein relativer Pfad zum gemeinsamen Ordner (oder einer mit "." und "..") liegt
+		// sonst scheinbar nicht unter dem Anker
+		Path dir = parentOf(file.toAbsolutePath().normalize());
 		if (!dir.startsWith(root)) {
 			throw new IllegalArgumentException("Die Datei liegt nicht unter dem Anker: " + file + " (Anker " + anchor + ")");
 		}

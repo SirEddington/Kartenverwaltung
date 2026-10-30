@@ -23,6 +23,7 @@ import java.nio.file.attribute.FileTime;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -330,6 +331,37 @@ class NioFileLayerTest {
 		assertFalse(layer.createNew(file, bytes("y"), anchor, null));
 
 		assertArrayEquals(bytes("x"), Files.readAllBytes(file));
+	}
+
+	@Test
+	void createNewAcceptsARelativeAnchorAndFile() throws IOException {
+		// ein relativer Pfad zum gemeinsamen Ordner (vom Arbeitsordner aus), mit "." und ".." darin
+		Files.createDirectories(Path.of("target"));
+		Path base = Files.createTempDirectory(Path.of("target"), "relativ-");
+		try {
+			assertFalse(base.isAbsolute());
+			Path anchor = Files.createDirectory(base.resolve("gemeinsam"));
+			Path file = base.resolve(".").resolve("gemeinsam").resolve("data").resolve("x").resolve("..").resolve("events")
+					.resolve("e1").resolve("a.json");
+			Path dotted = base.resolve("..").resolve(base.getFileName()).resolve("gemeinsam");
+
+			assertTrue(layer.createNew(file, bytes("x"), anchor, null));
+			assertTrue(layer.createNew(anchor.resolve("data").resolve("b.json"), bytes("y"), dotted, null));
+			assertTrue(layer.createNew(anchor.toAbsolutePath().resolve("c.json"), bytes("z"), anchor, null));
+			assertTrue(layer.createNew(anchor.resolve("data").resolve("d.json"), bytes("w"), anchor.toAbsolutePath(), null));
+
+			assertArrayEquals(bytes("x"), Files.readAllBytes(anchor.resolve("data/events/e1/a.json")));
+			assertArrayEquals(bytes("y"), Files.readAllBytes(anchor.resolve("data/b.json")));
+			assertArrayEquals(bytes("z"), Files.readAllBytes(anchor.resolve("c.json")));
+			assertArrayEquals(bytes("w"), Files.readAllBytes(anchor.resolve("data/d.json")));
+			assertFalse(Files.exists(anchor.resolve("data/x")), "kein Ordner für den Umweg über ..");
+		} finally {
+			try (Stream<Path> entries = Files.walk(base)) {
+				for (Path entry : entries.sorted(Comparator.reverseOrder()).toList()) {
+					Files.delete(entry);
+				}
+			}
+		}
 	}
 
 	@Test

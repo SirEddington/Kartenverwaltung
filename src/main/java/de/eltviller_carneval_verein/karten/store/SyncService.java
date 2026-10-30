@@ -88,9 +88,11 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * {@link #disconnect} löscht sie; {@link #connectedDir()} und {@link #connectionComplete()} lesen sie, und der nächste
  * Start wählt seinen Weg nach ihr (die Oberfläche setzt einen unvollständigen ersten Lauf ohne Rückfrage fort). Im Modus
  * {@link ConnectMode#ASK} prüft der Beginn des ersten Laufs an den Dateien, ob beide Seiten Einheiten haben; dann
- * pausiert der Abgleich ({@link SyncState#ENTSCHEIDUNG}, noch ohne Marke), bis {@link #decideConnect} entscheidet, und jeder
- * Takt prüft nur die Erreichbarkeit. Die <b>Schutzregel</b> verbietet jedes Beiseitelegen, sobald dieser Programmlauf nach
- * dem Start eigene Versionen geschrieben hat (siehe {@link #connect}).
+ * pausiert der Abgleich ({@link SyncState#ENTSCHEIDUNG}, noch ohne Marke), bis {@link #decideConnect} entscheidet; jeder
+ * Takt prüft dann die Erreichbarkeit, löst lokal auf wie ohne Verbindung und schreibt den Index, wenn er fällig ist, lädt
+ * aber nichts hoch und holt nichts ab. Die <b>Schutzregel</b> verbietet jedes Beiseitelegen, sobald dieser Programmlauf
+ * nach dem Start eigene Versionen geschrieben hat (siehe {@link #connect}). Vertrag: {@link #startup} vor {@link #connect}
+ * aufrufen; erst ab dem Ende von {@link #startup} zählen eigene Versionen für die Schutzregel, ohne Start greift sie nie.
  * <p>
  * Kein Takt schreibt über einer gültigen Marke "sauber beendet": Jeder macht sie vor der Arbeit am gemeinsamen Ordner und
  * vor der Auflösung ungültig ({@link UnitIndex#invalidateCleanMarker}); gelingt das nicht, prüft er nur die Erreichbarkeit.
@@ -101,7 +103,8 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * Verlust von {@code sync-state.json} oder für einen neuen Rechner einmal der ganze Rückstand, 200 Listen je Takt).
  * <p>
  * <b>Verluste</b> werden nicht nur aus Ereignissen gemeldet, sondern aus dem Zustand abgeleitet: Für jede neu
- * aufgelöste Einheit (beim ersten Vollabgleich alle) wird jede verlorene Strecke gemeldet, deren Versionen in diesem
+ * aufgelöste Einheit (am Ende des ersten Vollabgleichs nach dem Start oder Verbinden außerdem jede, die der Index als
+ * verloren kennt) wird jede verlorene Strecke gemeldet, deren Versionen in diesem
  * Programmlauf noch nicht gemeldet wurden. So geht kein Verlust durch einen Absturz verloren, und keiner kommt doppelt.
  * Jede gemeldete Einheit (auch eine schon gemeldete) kommt außerdem in die Warteschlange des {@link ConflictResolver}, der
  * die Strecke mit der {@link ConflictPolicy} ihrer Art zu einer Zusammenführung auflöst: im Takt nach dem Hochladen
@@ -119,7 +122,9 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * Wechsel weiter als eigen ({@link Ownership}). Beim Beenden ruft die Anwendung {@link #closeIndex()}: Es schreibt den Index und legt die Marke "sauber beendet" an. Findet
  * {@link #startup} sie vor, übernimmt es den Index ohne jeden Durchlauf über den Bestand (zweite Stufe); ohne Marke,
  * also nach einem Absturz, bleibt es beim Abgleich über die Verzeichnisnamen. Der Index ist nie Schiedsrichter: Jede Entscheidung über Vorgänger, Ansprüche und Verluste trifft {@link ChainResolver}
- * auf den Dateien; die Abläufe im {@code worker} lesen weiterhin alle Einheiten.
+ * auf den Dateien. Er nennt nur, welche Einheiten gelesen werden: Die Abläufe im {@code worker} lesen die Kandidaten des
+ * Index (ausstehende, verlorene, junge eigene Glieder) und die Einheiten, die nicht im Index stehen, dazu, was der
+ * Vollabgleich gerade abgleicht und was sich geändert hat; nicht mehr in jedem Takt alle Einheiten.
  * <p>
  * <b>Offene Konflikte:</b> {@link #openConflicts()} leitet sie aus dem Index ab ({@link ConflictLedger}), bestätigt werden sie
  * mit {@link #acknowledge} ({@code <AppData>/conflicts-ack.json}). Eine Elternlöschung hängt an der Nummer der eigenen
@@ -138,7 +143,8 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * dem Wechsel überlappt; sie dürfen nie auf dem FX-Thread laufen. Die Sperre ist fair: Sie kommen zwischen zwei Takten
  * dran, auch im ersten Lauf ohne Pause.</li>
  * <li>{@link #append} und die Abfragen arbeiten nur auf dem lokalen Bestand und laufen auf dem Thread des Aufrufers;
- * {@link #append} ruft auch die Auflösung im {@code worker} auf, gleichzeitig mit der Oberfläche.</li>
+ * auch die Auflösung im {@code worker} ({@link ConflictResolver}) ruft {@link #append} auf, um ihre Zusammenführungen
+ * zu schreiben, gleichzeitig mit der Oberfläche.</li>
  * <li>Zustand ({@link #syncState()}, {@link #lastSync()}) und alle Rückrufe kommen über den {@code ui}-Executor an, in
  * der Anwendung {@code Platform::runLater}.</li>
  * </ul>
@@ -158,6 +164,9 @@ import javafx.beans.property.ReadOnlyObjectProperty;
 public final class SyncService {
 
 	private static final Logger LOGGER = Logger.getLogger(SyncService.class.getName());
+	/** Der Logtext, wenn {@link #closeIndex()} die Marke "sauber beendet" wegen eines laufenden {@link #append} auslässt. */
+	private static final String SAVE_IN_PROGRESS =
+			"Ein Speichervorgang schreibt gerade in den lokalen Bestand; die Marke 'sauber beendet' entfällt";
 
 	/** Abstand der Takte. */
 	static final Duration TICK = Duration.ofSeconds(2);
@@ -432,6 +441,11 @@ public final class SyncService {
 	 * wartet, bis es keine mehr sind ({@link #setAsideLocal}); gewartet wird an {@code lock}.
 	 */
 	private int localWrites;
+	/**
+	 * Wie viele {@link #append} je mit dem lokalen Schreiben begonnen haben (nur steigend, unter {@code lock}): Daran erkennt
+	 * {@link #closeIndex()}, ob eines während des Schreibens der Marke "sauber beendet" begann.
+	 */
+	private long localWritesBegun;
 	/**
 	 * Der lokale Bestand wird gerade beiseitegelegt (von der Prüfung der Schutzregel bis der neue Datenordner bereit ist);
 	 * ein {@link #append}, das beginnen will, wartet an {@code lock}.
@@ -720,6 +734,8 @@ public final class SyncService {
 	 * unmittelbar vor jedem Versuch des Beiseitelegens; verbietet sie es dort, pausiert der Abgleich wie bei
 	 * {@link ConnectMode#ASK}, mit {@code setAsideAllowed = false}. Was {@link #startup} und die Auflösung schreiben, zählt
 	 * nicht. Ein Speichervorgang, der während des Beiseitelegens beginnt, wartet, bis der neue Datenordner bereit ist.
+	 * Vertrag: {@link #startup} vor {@code connect} aufrufen. Erst ab dem Ende von {@link #startup} zählen eigene Versionen
+	 * für die Schutzregel; ohne Start greift sie nie.
 	 * <p>
 	 * Der erste Vollabgleich der Verbindung schreibt an seinem Beginn (nach der Entscheidung und dem Beiseitelegen) die Marke
 	 * "verbunden" als unvollständig, an seinem Ende als vollständig; bis dahin ist {@link #connectionComplete()}
@@ -769,7 +785,8 @@ public final class SyncService {
 	 * Verbindung setzt mit {@link ConnectMode#MERGE} (Mitnehmen) oder {@link ConnectMode#SET_ASIDE} (Beiseitelegen) fort,
 	 * im Hintergrund wie nach {@link #connect}. Verbietet die Schutzregel das Beiseitelegen inzwischen (zwischen Frage und
 	 * Antwort wurde gespeichert, oder ein Speichervorgang schreibt gerade), ändert sich nichts: Die Pause bleibt, die Frage
-	 * kommt erneut mit {@code setAsideAllowed = false}, und das Ergebnis ist sofort {@link Kind#ENTSCHEIDUNG}.
+	 * kommt erneut mit {@code setAsideAllowed = false}, und das Ergebnis ist sofort {@link Kind#ENTSCHEIDUNG}. Vertrag wie bei
+	 * {@link #connect}: {@link #startup} vorher aufrufen, sonst greift die Schutzregel nie.
 	 * <p>
 	 * Nimmt die Arbeitssperre und wartet deshalb auf das Ende des laufenden Takts; nicht auf dem FX-Thread aufrufen.
 	 *
@@ -1074,6 +1091,7 @@ public final class SyncService {
 					wroteSinceStartup = true;
 				}
 				localWrites++;
+				localWritesBegun++;
 				return link;
 			}
 		} finally {
@@ -1719,7 +1737,10 @@ public final class SyncService {
 	 * <p>
 	 * Eine gerade laufende Runde im Hintergrund wartet es kurz ab ({@link #CLOSE_WAIT}); ist sie dann nicht fertig, gibt es
 	 * keine Marke, denn ihre Änderungen am Bestand fehlten im Index. Dasselbe gilt, solange das Auflösen einer Einheit
-	 * gescheitert ist und der Index sie nicht kennt (WARNING im Log): Der nächste Start durchsucht den Bestand.
+	 * gescheitert ist und der Index sie nicht kennt (WARNING im Log): Der nächste Start durchsucht den Bestand. Ebenso,
+	 * solange ein {@link #append} im lokalen Bestand schreibt ({@link #localWrites}) oder eines während des Schreibens der
+	 * Marke beginnt (dann wird sie gleich wieder ungültig gemacht): Seine Dateien stünden sonst unter einer Marke, deren
+	 * Index sie nicht kennt.
 	 * <p>
 	 * Mit der Marke ist der Dienst geschlossen: Der Takt tut nichts mehr, denn eine Runde, die nach der Marke Dateien in den
 	 * Bestand schriebe, und ein Prozessende mitten darin ließen die Marke über einem geänderten Bestand stehen. Ein späteres
@@ -1747,7 +1768,30 @@ public final class SyncService {
 				LOGGER.warning("Der Start-Index kennt nicht alle Einheiten; die Marke 'sauber beendet' entfällt");
 				return;
 			}
+			// ein append schreibt ohne workLock: Zwischen seinen Dateien und dem Eintrag in den Index stünde die Marke über einer
+			// Version, die der Index nicht kennt. Gezählt wird unter lock, geschrieben ohne
+			long writesBegun;
+			boolean writing;
+			synchronized (lock) {
+				writing = localWrites > 0;
+				writesBegun = localWritesBegun;
+			}
+			if (writing) {
+				LOGGER.warning(SAVE_IN_PROGRESS);
+				return;
+			}
 			if (index.writeCleanMarker()) {
+				boolean overlapped;
+				synchronized (lock) {
+					overlapped = localWritesBegun != writesBegun;
+				}
+				if (overlapped) {
+					// ein append begann zwischen Zählen und Schreiben: Hat es die Marke ungültig gemacht, bevor sie dastand, gälte sie
+					// über seinen Dateien
+					index.invalidateCleanMarker();
+					LOGGER.warning(SAVE_IN_PROGRESS);
+					return;
+				}
 				// ab jetzt ändert niemand mehr den Bestand: kein Takt, bis startup, connect oder disconnect den Dienst wieder öffnen
 				closed = true;
 			} else {

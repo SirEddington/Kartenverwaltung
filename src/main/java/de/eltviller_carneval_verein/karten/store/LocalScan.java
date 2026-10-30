@@ -39,14 +39,9 @@ final class LocalScan {
 	}
 
 	/**
-	 * Alle lesbaren Anspruchsdateien des lokalen Bestands, die dieser Rechner geschrieben hat (Rechner des Anspruchs und
+	 * Die lesbaren Anspruchsdateien der genannten Einheiten, die dieser Rechner geschrieben hat (Rechner des Anspruchs und
 	 * beanspruchte Version eigen nach {@code own}, auch unter einer früheren ID).
 	 */
-	static List<OwnClaim> ownClaims(VersionStore local, Ownership own) throws IOException {
-		return ownClaims(local, own, local.allUnits());
-	}
-
-	/** Die lesbaren Anspruchsdateien der genannten Einheiten, die dieser Rechner geschrieben hat. */
 	private static List<OwnClaim> ownClaims(VersionStore local, Ownership own, Collection<UnitKey> units)
 			throws IOException {
 		List<OwnClaim> claims = new ArrayList<>();
@@ -62,19 +57,9 @@ final class LocalScan {
 	}
 
 	/**
-	 * Die eigenen Anspruchsdateien, die jünger sind als {@code window}: nach einem Neustart weiter auf eine späte
-	 * Niederlage zu prüfen.
-	 */
-	static List<OwnClaim> recentOwnClaims(VersionStore local, Ownership own, Instant now, Duration window)
-			throws IOException {
-		Instant since = now.minus(window);
-		return ownClaims(local, own).stream().filter(claim -> claim.at().isAfter(since)).toList();
-	}
-
-	/**
-	 * Wie {@link #recentOwnClaims(VersionStore, Ownership, Instant, Duration)}, aber nur über die Ansprüche der genannten
-	 * Einheiten (etwa die Kandidaten aus dem Start-Index): Die übrigen werden nicht gelesen. Ob ein Anspruch jung ist,
-	 * entscheidet weiter {@link OwnClaim#at()}.
+	 * Die eigenen Anspruchsdateien der genannten Einheiten (etwa die Kandidaten aus dem Start-Index), die jünger sind als
+	 * {@code window}: nach einem Neustart weiter auf eine späte Niederlage zu prüfen. Die übrigen Einheiten werden nicht
+	 * gelesen; ob ein Anspruch jung ist, entscheidet {@link OwnClaim#at()}.
 	 *
 	 * @param units die Einheiten, deren Ansprüche gelesen werden
 	 */

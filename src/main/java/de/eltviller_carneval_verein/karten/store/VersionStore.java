@@ -313,15 +313,17 @@ public final class VersionStore {
 	 * Was {@link #scanUnit} in einem Durchgang findet.
 	 *
 	 * @param dataFiles die Pfade wie von {@link #unitDataFiles}
-	 * @param tempFiles die Pfade wie von {@link #unitTempFiles}
+	 * @param tempFiles die Pfade der temporären Dateien dieser Schicht ({@code ~karv-*.tmp}, eigene wie fremde) im Ordner der
+	 *                  Einheit und in ihrem {@code claims/}, relativ zu {@link #dataRoot()} und mit {@code /} getrennt:
+	 *                  zuerst die des Einheitenordners, dann die unter {@code claims/}. Unterordner der Einheit zählen nicht.
 	 */
 	public record UnitScan(List<String> dataFiles, List<String> tempFiles) {
 	}
 
 	/**
 	 * Die Versions- und Anspruchsdateien und die temporären Dateien genau dieser Einheit mit einem Listenzugriff je Ordner
-	 * (Einheitenordner und {@code claims/}), nicht mit je einem für {@link #unitDataFiles} und {@link #unitTempFiles}: auf
-	 * einer Netzfreigabe kostet jeder Zugriff. Die Ergebnisse sind dieselben wie bei den beiden Methoden.
+	 * (Einheitenordner und {@code claims/}): auf einer Netzfreigabe kostet jeder Zugriff. Die Versions- und
+	 * Anspruchsdateien sind dieselben wie bei {@link #unitDataFiles}.
 	 */
 	public UnitScan scanUnit(UnitKey unit) throws IOException {
 		Path unitDir = unitDir(unit);
@@ -342,20 +344,6 @@ public final class VersionStore {
 		addTempNames(temps, unitEntries.stream().map(FileLayer.DirEntry::name).toList(), prefix);
 		addTempNames(temps, claimEntries.stream().map(FileLayer.DirEntry::name).toList(), prefix + CLAIMS + "/");
 		return new UnitScan(data, temps);
-	}
-
-	/**
-	 * Die Pfade der temporären Dateien dieser Schicht ({@code ~karv-*.tmp}, eigene wie fremde) im Ordner der Einheit und
-	 * in ihrem {@code claims/}, relativ zu {@link #dataRoot()} und mit {@code /} getrennt: zuerst die des Einheitenordners,
-	 * dann die unter {@code claims/}, je nach Namen sortiert. Unterordner der Einheit zählen nicht.
-	 */
-	public List<String> unitTempFiles(UnitKey unit) throws IOException {
-		Path unitDir = unitDir(unit);
-		String prefix = unit.relativePath() + "/";
-		List<String> paths = new ArrayList<>();
-		addTempNames(paths, files.listNamesWithTemps(unitDir), prefix);
-		addTempNames(paths, files.listNamesWithTemps(unitDir.resolve(CLAIMS)), prefix + CLAIMS + "/");
-		return paths;
 	}
 
 	private static void addTempNames(List<String> paths, List<String> names, String prefix) {

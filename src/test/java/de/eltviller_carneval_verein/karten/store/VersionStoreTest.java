@@ -345,13 +345,11 @@ class VersionStoreTest {
 		put(unitDir.resolve("Thumbs.db"), "x");
 		put(unitDir.resolve("presentations/p1/~karv-5.tmp"), "x");
 		List<String> data = store.unitDataFiles(event);
-		List<String> temps = store.unitTempFiles(event);
 		int before = layer.calls().size();
 
 		VersionStore.UnitScan scan = store.scanUnit(event);
 
 		assertEquals(data, scan.dataFiles());
-		assertEquals(temps, scan.tempFiles());
 		assertEquals(List.of("events/e1/" + V1 + ".json", "events/e1/" + V2 + ".json", "events/e1/claims/root.json"),
 				scan.dataFiles());
 		assertEquals(List.of("events/e1/" + tagged, "events/e1/claims/~karv-2.tmp"), scan.tempFiles());
@@ -362,7 +360,7 @@ class VersionStoreTest {
 	}
 
 	@Test
-	void unitTempFilesListsTempsOfUnitAndClaims() throws IOException {
+	void scanUnitListsTempsOfUnitAndClaims() throws IOException {
 		VersionStore store = store();
 		UnitKey event = UnitKey.event("e1");
 		store.writeVersion(event, V1, versionBytes(V1));
@@ -377,10 +375,10 @@ class VersionStoreTest {
 		put(unitDir.resolve("presentations/p1/~karv-5.tmp"), "x");
 
 		assertEquals(List.of("events/e1/~karv-1.tmp", "events/e1/" + tagged, "events/e1/claims/~karv-2.tmp"),
-				store.unitTempFiles(event));
+				store.scanUnit(event).tempFiles());
 		assertEquals(List.of("events/e1/presentations/p1/~karv-5.tmp"),
-				store.unitTempFiles(UnitKey.presentation("e1", "p1")));
-		assertEquals(List.of(), store.unitTempFiles(UnitKey.hall("h1")));
+				store.scanUnit(UnitKey.presentation("e1", "p1")).tempFiles());
+		assertEquals(List.of(), store.scanUnit(UnitKey.hall("h1")).tempFiles());
 	}
 
 	@Test
