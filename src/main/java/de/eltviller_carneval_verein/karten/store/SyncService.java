@@ -67,10 +67,10 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * <p>
  * <b>Takt</b> (alle 2 Sekunden, {@link #tick()}): Erreichbarkeit prüfen (nach einem Fehler; sonst zuerst, ob der
  * gemeinsame Ordner noch da ist: fehlt er, ist der Zustand offline, und nichts legt ihn an), ein Stück des
- * Vollabgleichs, Aufträge fortsetzen, alle 30 Sekunden neue Rechner suchen, die Änderungslisten der anderen lesen, die
- * eigenen Ansprüche der letzten 15 Minuten im gemeinsamen Ordner nachlesen (späte Niederlage bei einem Sync-Client; nach
- * einem Neustart auch die aus den lokalen Anspruchsdateien, beim Verbinden mit Mitnehmen die dabei hochgeladenen;
- * höchstens 150 je Takt), vorgemerkte beschädigte Einheiten aus der Kopie im gemeinsamen Ordner heilen und beschädigte
+ * Vollabgleichs, Aufträge fortsetzen, neue Rechner suchen (eine Auflistung von {@code feeds/}), die Änderungslisten
+ * der anderen lesen, die eigenen Ansprüche der letzten 15 Minuten im gemeinsamen Ordner nachlesen (späte Niederlage
+ * bei einem Sync-Client; nach einem Neustart auch die aus den lokalen Anspruchsdateien, beim Verbinden mit Mitnehmen
+ * die dabei hochgeladenen; höchstens 150 je Takt), vorgemerkte beschädigte Einheiten aus der Kopie im gemeinsamen Ordner heilen und beschädigte
  * Kopien dort aus der guten lokalen. Der <b>Vollabgleich</b> beginnt alle 10 Minuten (gezählt ab dem Ende des vorigen),
  * beim Start, nach der Rückkehr aus {@link SyncState#OFFLINE} und auf Wunsch; er läuft in Abschnitten ({@link FullSyncRun})
  * über mehrere Takte, je Takt höchstens {@link #FULL_SYNC_SLICE_BUDGET}, danach kommen die übrigen Schritte. Ein Abschnitt
@@ -175,8 +175,6 @@ public final class SyncService {
 
 	/** Abstand der Takte. */
 	static final Duration TICK = Duration.ofSeconds(2);
-	/** So oft wird nach neuen Rechnern gesucht. */
-	static final Duration DISCOVERY_INTERVAL = Duration.ofSeconds(30);
 	/** So oft läuft ein Vollabgleich (gezählt ab dem Ende des vorigen). */
 	static final Duration FULL_SYNC_INTERVAL = Duration.ofMinutes(10);
 	/**
@@ -309,7 +307,6 @@ public final class SyncService {
 		/** Der erste Vollabgleich steht noch aus: danach werden die Verluste aller Einheiten abgeleitet. */
 		volatile boolean allUnitsWanted = true;
 		volatile Instant lastFullSync;
-		volatile Instant lastDiscovery;
 		/**
 		 * Das Ergebnis von {@link SyncService#connect} bis zum ersten Ausgang; danach (und ohne {@code connect}) {@code null}.
 		 * Festgelegt wird es nur unter der Arbeitssperre ({@link SyncService#settle}).
@@ -2214,12 +2211,7 @@ public final class SyncService {
 		// nach dem Hochladen, auch wenn der Ordner dabei wegfiel (die Auflösung ist lokal): Die Zusammenführungen gehen mit
 		// dem nächsten Takt hinaus
 		resolver.resolvePending(RESOLVE_BUDGET);
-		if (current.lastDiscovery == null || !now.isBefore(current.lastDiscovery.plus(DISCOVERY_INTERVAL))) {
-			round.run(() -> {
-				current.reader.discoverMachines();
-				current.lastDiscovery = now;
-			});
-		}
+		round.run(current.reader::discoverMachines);
 		round.run(() -> poll(current, round));
 		round.run(() -> repairShared(current, round));
 		round.run(() -> repairQueued(current, round));

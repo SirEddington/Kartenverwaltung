@@ -526,7 +526,7 @@ class SyncServiceTest {
 	}
 
 	@Test
-	void newMachineIsFoundWithinThirtySeconds() throws IOException {
+	void machineThatConnectsLaterFindsTheOthersInItsFirstTick() throws IOException {
 		Node a = node("a");
 		Node b = node("b");
 		a.service.startup(shared);
@@ -534,9 +534,6 @@ class SyncServiceTest {
 		Version va = save(a, create(BOOKING, "Anna"));
 		a.service.tick();
 
-		b.service.tick();
-		assertFalse(b.events.changedUnits().contains(BOOKING), "A ist B noch unbekannt");
-		clock.advance(Duration.ofSeconds(30));
 		b.service.tick();
 
 		assertTrue(b.events.changedUnits().contains(BOOKING));
@@ -1022,8 +1019,8 @@ class SyncServiceTest {
 		b.service.tick();
 		Version vb = save(b, update(BOOKING, va, "Bert"));
 		b.service.tick();
-		// A entdeckt neue Rechner alle 30 Sekunden
-		clock.advance(SyncService.DISCOVERY_INTERVAL);
+		// A entdeckt neue Rechner in jedem Takt
+		clock.advance(SyncService.TICK);
 		a.service.tick();
 		assertEquals(vb.id(), a.service.unitState(BOOKING).head().id());
 		a.service.flushIndex();
@@ -1041,6 +1038,26 @@ class SyncServiceTest {
 		restarted.service.tick();
 
 		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), foreign.id())), restarted.events.lost);
+	}
+
+	@Test
+	void newMachineIsPickedUpOnTheNextTick() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Node b = node("b");
+		b.service.startup(shared);
+		a.service.tick();
+		b.service.tick();
+		// C verbindet neu mit demselben Ordner und verkauft; A und B kennen seinen Strom noch nicht
+		Node c = node("c");
+		c.service.startup(shared);
+		Version vc = save(c, create(BOOKING, "Clara"));
+		c.service.tick();
+
+		clock.advance(SyncService.TICK);
+		a.service.tick();
+
+		assertEquals(vc.id(), a.service.unitState(BOOKING).head().id());
 	}
 
 	/** Der Zustand nach einem Absturz im Wartebetrieb: Die Version liegt lokal, der Index kennt die Einheit nicht. */
@@ -2599,8 +2616,8 @@ class SyncServiceTest {
 		for (Node node : all) {
 			node.service.tick();
 		}
-		// die Suche nach neuen Rechnern (alle 30 Sekunden): Danach hat jeder die Verkäufe der anderen
-		clock.advance(SyncService.DISCOVERY_INTERVAL);
+		// die Suche nach neuen Rechnern (in jedem Takt): Danach hat jeder die Verkäufe der anderen
+		clock.advance(SyncService.TICK);
 		for (Node node : all) {
 			node.service.tick();
 		}

@@ -244,7 +244,8 @@ class CloudScenarioTest {
 		a.service.syncNow();
 		assertTrue(a.events.lost.isEmpty());
 		assertTrue(a.events.errors.isEmpty());
-		assertEquals(va.id(), a.service.unitState(BOOKING).head().id());
+		// B findet A's Liste im Takt nach dem Verlust und führt zusammen: Der Kopf ist B's Zusammenführung über A's Version
+		assertEquals(List.of(va.id(), vb.id()), a.service.unitState(BOOKING).head().parents());
 	}
 
 	/**

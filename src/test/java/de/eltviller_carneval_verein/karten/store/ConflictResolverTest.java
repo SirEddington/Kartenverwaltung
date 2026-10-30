@@ -774,7 +774,7 @@ class ConflictResolverTest {
 		SimulatedCloud cloud = new SimulatedCloud(dir.resolve("server"));
 		SyncService a = TestSyncServices.sharedMode(dir.resolve("app-a"), cloud.addClient("a"), "a", clock);
 		SyncService b = TestSyncServices.sharedMode(dir.resolve("app-b"), cloud.addClient("b"), "b", clock);
-		Version[] versions = lateDefeatOfB(cloud, a, b, true);
+		Version[] versions = lateDefeatOfB(cloud, a, b, false);
 		Version va = versions[0];
 		Version vb = versions[1];
 
@@ -783,8 +783,9 @@ class ConflictResolverTest {
 		assertTrue(waiting.pending().isEmpty(), "nichts geschrieben");
 		assertEquals(2, b.history(BOOKING).size());
 
-		// B findet A's Liste und liest sie (nach dem Hochladen, also nach dem Versuch in diesem Takt)
-		clock.advance(Duration.ofSeconds(30));
+		// A's Liste kommt an; B findet sie und liest sie (nach dem Hochladen, also nach dem Versuch in diesem Takt)
+		cloud.step("b");
+		clock.advance(Duration.ofSeconds(2));
 		b.tick();
 		assertTrue(b.unitState(BOOKING).pending().isEmpty());
 		clock.advance(Duration.ofSeconds(2));
@@ -940,20 +941,21 @@ class ConflictResolverTest {
 		clock.advance(Duration.ofSeconds(2));
 
 		// erste Runde: B und C verlieren beim Hochladen gegen W, lesen A's Liste und führen im nächsten Takt jeder für sich
-		// zusammen; B lädt zuerst hoch
+		// zusammen; C führt zusammen, bevor B seine Zusammenführung hochlädt (B's Liste wird in jedem Takt gefunden, also
+		// kann C sie nicht früher kennen)
 		b.tick();
 		b.tick();
 		Version mb = last(b.unitState(BOOKING).pending());
 		assertEquals(List.of(w.id(), lb.id()), mb.parents());
-		b.tick();
-		assertEquals(mb.id(), b.unitState(BOOKING).head().id());
 		c.tick();
 		c.tick();
 		Version mc = last(c.unitState(BOOKING).pending());
 		assertEquals(List.of(w.id(), lc.id()), mc.parents());
+		b.tick();
+		assertEquals(mb.id(), b.unitState(BOOKING).head().id());
 
-		// zweite Runde: Die Zusammenführung von C verliert gegen die von B; C findet B's Liste erst danach
-		clock.advance(Duration.ofSeconds(30));
+		// zweite Runde: Die Zusammenführung von C verliert gegen die von B
+		clock.advance(Duration.ofSeconds(2));
 		c.tick();
 		assertEquals(List.of(List.of(mc.id())), c.unitState(BOOKING).lost());
 		c.tick();
