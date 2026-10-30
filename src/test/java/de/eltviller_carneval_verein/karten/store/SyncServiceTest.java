@@ -2832,6 +2832,52 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void chainsOfAnUnknownDamagedUnitReportSys008InSingleMode() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		// eine Einheit, die der Index nicht kennt: Anspruch von außen abgelegt, die Versionsdatei danach beschädigt
+		UnitKey stranger = UnitKey.booking("e1", "p1", "Z-9");
+		Version foreign = version("zzzzzzzz", 1_900_000_000_000L, 1, "fremd", null);
+		VersionStore store = new VersionStore(a.localData(), new NioFileLayer());
+		byte[] bytes = StoreCodec.write(foreign);
+		assertTrue(store.writeVersion(stranger, foreign.id(), bytes));
+		new LocalArbiter(store, clock).claim(stranger, foreign, bytes);
+		Files.writeString(localFile(a, stranger, foreign.id() + ".json"), "kaputt");
+		assertFalse(a.service.snapshots().containsKey(stranger));
+
+		a.service.chains(List.of(stranger));
+		a.service.chains(List.of(stranger));
+
+		assertEquals(List.of(StoreMessages.damaged(stranger.relativePath())), a.events.errors, "SYS-008 einmal je Einheit");
+	}
+
+	@Test
+	void chainsOfAnUnknownDamagedUnitQueueARepairInSharedMode() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		UnitKey stranger = UnitKey.booking("e1", "p1", "Z-9");
+		Version foreign = version("zzzzzzzz", 1_900_000_000_000L, 1, "fremd", null);
+		VersionStore store = new VersionStore(a.localData(), new NioFileLayer());
+		byte[] bytes = StoreCodec.write(foreign);
+		assertTrue(store.writeVersion(stranger, foreign.id(), bytes));
+		new LocalArbiter(store, clock).claim(stranger, foreign, bytes);
+		// die gute Kopie liegt im gemeinsamen Ordner, die lokale Datei ist beschädigt
+		Files.createDirectories(sharedFile(stranger, "x").getParent());
+		Files.write(sharedFile(stranger, foreign.id() + ".json"), bytes);
+		Path localFile = localFile(a, stranger, foreign.id() + ".json");
+		Files.writeString(localFile, "kaputt");
+		assertFalse(a.service.snapshots().containsKey(stranger));
+
+		a.service.chains(List.of(stranger));
+		assertTrue(a.events.errors.isEmpty(), "ob es eine gute Kopie gibt, entscheidet erst der Takt");
+		a.service.tick();
+
+		assertTrue(a.events.changedUnits().contains(stranger));
+		assertArrayEquals(bytes, Files.readAllBytes(localFile));
+		assertEquals(Status.OK, a.service.unitState(stranger).status());
+	}
+
+	@Test
 	void chainsFollowTheIndexAfterAppend() throws IOException {
 		Node a = node("a");
 		a.service.startup("");

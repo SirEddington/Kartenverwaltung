@@ -1209,6 +1209,16 @@ public final class SyncService {
 	 */
 	public UnitState unitState(UnitKey unit) throws IOException {
 		UnitState state = resolveLocal(unit);
+		reportLocked(unit, state);
+		return state;
+	}
+
+	/**
+	 * Behandelt eine gesperrte Einheit: beschädigt im gemeinsamen Betrieb zur Heilung vormerken (der nächste Takt versucht
+	 * sie), im Einzelbetrieb sofort SYS-008; neueres Format SYS-009. Nimmt nur kurz {@code lock}, sonst keine Sperre; ein
+	 * Stand ohne Sperre bleibt unberührt.
+	 */
+	private void reportLocked(UnitKey unit, UnitState state) {
 		if (state.status() == Status.LOCKED_DAMAGED) {
 			boolean single;
 			synchronized (lock) {
@@ -1225,7 +1235,6 @@ public final class SyncService {
 			notifier.errorOnce(StoreMessages.SYS_NEWER_FORMAT + " " + unit.relativePath(),
 					StoreMessages.newerFormat(unit.relativePath()));
 		}
-		return state;
 	}
 
 	private void reportDamaged(UnitKey unit) {
@@ -1469,7 +1478,8 @@ public final class SyncService {
 	 * Die gültigen Ketten der genannten Einheiten ohne Inhalt (Rechner, Bediener, Zeitpunkt, Speichervorgang), ältestes Glied
 	 * zuerst: der Verlauf eines Events, ohne eine Datei zu lesen. Sie stammen aus dem Start-Index; nur eine Einheit ohne
 	 * Eintrag wird aus den Dateien aufgelöst ({@link #resolveLocal}) und dabei in den Index übernommen. Eine Einheit ohne
-	 * Dateien hat eine leere Kette. Der Index ist hier nur Zwischenspeicher für die Anzeige; was wiederhergestellt wird, liest
+	 * Dateien hat eine leere Kette. Ist eine solche Einheit gesperrt, behandelt es sie wie {@link #unitState} (Heilung
+	 * vormerken, SYS-008, SYS-009). Der Index ist hier nur Zwischenspeicher für die Anzeige; was wiederhergestellt wird, liest
 	 * {@link #unitState} frisch aus den Dateien.
 	 *
 	 * @return je genannter Einheit ihre Kette
@@ -1480,7 +1490,10 @@ public final class SyncService {
 		for (UnitKey unit : units) {
 			List<ChainStep> chain = known.get(unit);
 			if (chain == null) {
-				chain = resolveLocal(unit).chain().stream().map(ChainStep::of).toList();
+				UnitState state = resolveLocal(unit);
+				// wie unitState: eine beschädigte oder neuere unbekannte Einheit melden, nicht still als leere Kette zeigen
+				reportLocked(unit, state);
+				chain = state.chain().stream().map(ChainStep::of).toList();
 			}
 			chains.put(unit, chain);
 		}
