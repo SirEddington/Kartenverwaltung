@@ -2068,6 +2068,64 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void damagedUnitKnownAtStartupIsResettableInSingleMode() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v = save(a, create(BOOKING, "Anna"));
+		Files.writeString(localFile(a, BOOKING, v.id() + ".json"), "kaputt");
+
+		Node restarted = restartSingle(a);
+
+		assertEquals(Status.LOCKED_DAMAGED, restarted.service.snapshots().get(BOOKING).status());
+		assertEquals(Set.of(BOOKING), restarted.service.resettableUnits(), "ohne dass jemand die Einheit abfragte");
+		assertEquals(List.of(), restarted.events.locked, "die Vorbelegung meldet nichts");
+	}
+
+	@Test
+	void disconnectPrefillsResettableFromIndex() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Files.writeString(localFile(a, BOOKING, v.id() + ".json"), "kaputt");
+		// der Index übernimmt den beschädigten Stand, ohne dass der Takt schon geheilt hätte
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(BOOKING).status());
+		assertEquals(Status.LOCKED_DAMAGED, a.service.snapshots().get(BOOKING).status());
+		assertEquals(Set.of(), a.service.resettableUnits());
+
+		a.service.disconnect();
+
+		assertEquals(Set.of(BOOKING), a.service.resettableUnits());
+		assertEquals(List.of(), a.events.locked, "die Vorbelegung meldet nichts");
+	}
+
+	@Test
+	void pendingResetIsNotQueuedForRepairOrResettable() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Files.writeString(localFile(a, BOOKING, v.id() + ".json"), "kaputt");
+		Files.writeString(sharedFile(BOOKING, v.id() + ".json"), "auch kaputt");
+		// die Einheit ist vorgemerkt, der Takt hat noch nicht versucht, sie zu heilen
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(BOOKING).status());
+		// das Zurücksetzen wird geschrieben, sein Anspruch aber nicht hochgeladen
+		a.layer.failWhen(p -> p.startsWith(sharedRoot), "createNew", new IOException("gesperrt"));
+		String sharedCopyRead = "read " + sharedFile(BOOKING, v.id() + ".json");
+		long readsBefore = a.layer.calls().stream().filter(sharedCopyRead::equals).count();
+		a.service.resetToLastReadable(BOOKING);
+
+		a.service.tick();
+
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(BOOKING).status(), "der Anspruch fehlt noch");
+		assertEquals(Set.of(), a.service.resettableUnits());
+		a.service.tick();
+		assertEquals(Set.of(), a.service.resettableUnits());
+		assertEquals(List.of(), a.events.locked, "kein SYS-008 für ein Zurücksetzen, das schon geschrieben ist");
+		assertEquals(readsBefore, a.layer.calls().stream().filter(sharedCopyRead::equals).count(), "kein Heilversuch");
+	}
+
+	@Test
 	void newerFormatIsReportedAsLockedButNotResettable() throws IOException {
 		Node a = node("a");
 		a.service.startup("");

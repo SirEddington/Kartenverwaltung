@@ -480,9 +480,10 @@ public final class SyncService {
 	 */
 	private final Set<UnitKey> unrepairable = new HashSet<>();
 	/**
-	 * Im Einzelbetrieb die Einheiten, für die SYS-008 gemeldet wurde und deren letzter gesehener Stand noch beschädigt ist
-	 * (es gibt keine zweite Kopie, nur das Zurücksetzen hilft). Unter {@code lock}; eine neue oder getrennte Verbindung
-	 * leert sie.
+	 * Im Einzelbetrieb die beschädigten Einheiten (es gibt keine zweite Kopie, nur das Zurücksetzen hilft): die, die der
+	 * Start-Index nach Start und Trennen als beschädigt kennt ({@link #prefillDamagedSingle}), und die, für die SYS-008
+	 * gemeldet wurde und deren letzter gesehener Stand noch beschädigt ist. Unter {@code lock}; eine neue oder getrennte
+	 * Verbindung leert sie.
 	 */
 	private final Set<UnitKey> damagedSingle = new HashSet<>();
 	/**
@@ -663,8 +664,8 @@ public final class SyncService {
 
 	/**
 	 * Die gesperrten Einheiten, die sich auf den letzten lesbaren Stand zurücksetzen lassen ({@link #resetToLastReadable}):
-	 * im gemeinsamen Betrieb die beschädigten, für die der Takt keine gute Kopie fand; im Einzelbetrieb die beschädigten,
-	 * für die SYS-008 gemeldet wurde. Eine Einheit mit neuerem Format ist nie dabei: Sie braucht ein neueres Programm. Eine
+	 * im gemeinsamen Betrieb die beschädigten, für die der Takt keine gute Kopie fand; im Einzelbetrieb alle beschädigten
+	 * (nach Start und Trennen laut Start-Index, danach die abgefragten). Eine Einheit mit neuerem Format ist nie dabei: Sie braucht ein neueres Programm. Eine
 	 * Einheit fällt heraus, sobald ein späterer Stand nicht mehr beschädigt ist oder das Zurücksetzen gelang; eine neue oder
 	 * getrennte Verbindung leert die Menge des Einzelbetriebs. Ohne Datei-Ein-/Ausgabe, nimmt nur kurz {@code lock}; auf jedem
 	 * Thread aufrufbar.
@@ -774,6 +775,7 @@ public final class SyncService {
 			deactivate();
 			claimPendingLocally(withUnindexed(opened.pendingUnits()));
 			resolveAtStartup(opened.lostUnits());
+			prefillDamagedSingle();
 			return Started.SINGLE;
 		}
 		Link current = activate(dir, null);
@@ -934,6 +936,7 @@ public final class SyncService {
 			abortPendingOutcome();
 			deactivate();
 			claimPendingLocally(withUnindexed(index.pendingUnits()));
+			prefillDamagedSingle();
 			try {
 				ConnectionMarker.delete(appDataDir);
 				connection = null;
@@ -1342,20 +1345,15 @@ public final class SyncService {
 
 	/**
 	 * Behandelt eine gesperrte Einheit: beschädigt im gemeinsamen Betrieb zur Heilung vormerken (der nächste Takt versucht
-	 * sie), im Einzelbetrieb sofort SYS-008 und als zurücksetzbar merken; neueres Format SYS-009. Eine beschädigte Einheit, deren
-	 * Zurücksetzen schon geschrieben ist und auf seinen Anspruch wartet, bleibt unvermerkt, ebenso fällt eine Einheit aus den
-	 * zurücksetzbaren, deren Stand nicht mehr beschädigt ist. Nimmt nur kurz {@code lock}, sonst keine Sperre.
+	 * sie), im Einzelbetrieb sofort SYS-008 und als zurücksetzbar merken; neueres Format SYS-009. Eine Einheit fällt aus den
+	 * zurücksetzbaren, sobald ihr Stand nicht mehr beschädigt ist. Nimmt nur kurz {@code lock}, sonst keine Sperre.
 	 */
 	private void reportLocked(UnitKey unit, UnitState state) {
 		if (state.status() == Status.LOCKED_DAMAGED) {
-			boolean resetWritten = pendingReset(state) != null;
 			boolean single;
 			synchronized (lock) {
 				single = link == null;
-				if (resetWritten) {
-					damagedSingle.remove(unit);
-					unrepairable.remove(unit);
-				} else if (single) {
+				if (single) {
 					damagedSingle.add(unit);
 				} else if (!unrepairable.contains(unit)) {
 					repairQueue.add(unit);
@@ -1384,6 +1382,45 @@ public final class SyncService {
 		}
 	}
 
+	/**
+	 * Ob das Zurücksetzen der beschädigten Einheit schon geschrieben ist und auf seinen Anspruch wartet. Dann ist nichts mehr
+	 * zu heilen oder anzubieten: Die Einheit verlässt die Heilungswarteschlange, {@code unrepairable} und {@code damagedSingle}.
+	 * Nur {@link #repairQueued} fragt es: Dort allein wird die Warteschlange abgearbeitet, und {@code unrepairable} wächst nur
+	 * von dort. Ein {@link #unitState} dazwischen merkt die Einheit höchstens vor, der Takt lässt sie dann fallen. Nimmt nur
+	 * kurz {@code lock}.
+	 */
+	private boolean resetWritten(UnitKey unit, UnitState state) {
+		if (pendingReset(state) == null) {
+			return false;
+		}
+		synchronized (lock) {
+			repairQueue.remove(unit);
+			unrepairable.remove(unit);
+			damagedSingle.remove(unit);
+		}
+		return true;
+	}
+
+	/**
+	 * Im Einzelbetrieb nach Start und Trennen: Die beschädigten Einheiten laut Start-Index gelten als zurücksetzbar, auch wenn
+	 * noch niemand sie abgefragt hat (die Ladewarnung nennt sie schon). Ohne Datei-Ein-/Ausgabe, ohne Rückruf; der Index wird
+	 * vor {@code lock} gelesen. Unter {@code workLock}, nach dem lokalen Beanspruchen: Dort wird ein ausstehendes Zurücksetzen
+	 * schon gültig.
+	 */
+	private void prefillDamagedSingle() {
+		Set<UnitKey> damaged = new HashSet<>();
+		index.snapshots().forEach((unit, snapshot) -> {
+			if (snapshot.status() == Status.LOCKED_DAMAGED) {
+				damaged.add(unit);
+			}
+		});
+		synchronized (lock) {
+			if (link == null) {
+				damagedSingle.addAll(damaged);
+			}
+		}
+	}
+
 	/** Das noch nicht beanspruchte eigene Zurücksetzen der beschädigten Version, an der die Kette endet; sonst {@code null}. */
 	private static Version pendingReset(UnitState state) {
 		for (Version pending : state.pending()) {
@@ -1405,6 +1442,9 @@ public final class SyncService {
 		}
 		for (UnitKey unit : units) {
 			UnitState before = resolveLocal(unit);
+			if (before.status() == Status.LOCKED_DAMAGED && resetWritten(unit, before)) {
+				continue;
+			}
 			UnitState after = before;
 			boolean replaced = false;
 			if (before.status() == Status.LOCKED_DAMAGED) {
