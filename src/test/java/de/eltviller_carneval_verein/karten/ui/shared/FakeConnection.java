@@ -93,6 +93,16 @@ public final class FakeConnection implements ConnectionControl {
 		open.forEach(future -> future.complete(value));
 	}
 
+	/** Schließt alle offenen Futures von {@link #connect} und {@link #decideConnect} mit diesem Fehler ab. */
+	public void fail(Throwable error) {
+		List<CompletableFuture<ConnectOutcome>> open;
+		synchronized (pending) {
+			open = new ArrayList<>(pending);
+			pending.clear();
+		}
+		open.forEach(future -> future.completeExceptionally(error));
+	}
+
 	/** Die Aufrufe in der Reihenfolge: {@code "startup:<Ordner>"}, {@code "connect:<Ordner>:<Modus>"}, {@code "decide:<Modus>"}, {@code "disconnect"}, {@code "syncNow"}. */
 	public List<String> calls() {
 		synchronized (calls) {
