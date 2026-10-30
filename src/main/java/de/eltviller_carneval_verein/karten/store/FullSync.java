@@ -37,6 +37,31 @@ public final class FullSync {
 	}
 
 	/**
+	 * Ein Abgleich, der mittendrin abbrach. Was er bis dahin erledigt hat, steht schon auf der Platte und kommt als
+	 * Teilergebnis mit: Ein ausgeglichener Anspruch ist danach auf beiden Seiten gleich, die Wiederholung fände ihn nicht
+	 * mehr, und ohne das Teilergebnis gingen Verlust und Indexeintrag verloren. Die Ursache ({@link #getCause()}) ist der
+	 * ursprüngliche Fehler, eine {@link IOException} oder eine {@link RuntimeException}.
+	 */
+	public static final class Aborted extends IOException {
+		private static final long serialVersionUID = 1L;
+
+		private final transient FullSyncResult partial;
+
+		Aborted(FullSyncResult partial, Exception cause) {
+			super(cause.getMessage(), cause);
+			this.partial = partial;
+		}
+
+		/**
+		 * Was der Abgleich bis zum Fehler erledigt hat: {@link FullSyncResult#changed()} und {@link FullSyncResult#lost()}
+		 * vollständig, die übrigen Sammlungen so weit, wie er kam.
+		 */
+		public FullSyncResult partial() {
+			return partial;
+		}
+	}
+
+	/**
 	 * Gleicht die beiden Bestände ab.
 	 * <ol>
 	 * <li>Versionsdateien, die auf einer Seite fehlen, werden auf die andere kopiert.</li>
@@ -97,13 +122,19 @@ public final class FullSync {
 	 *
 	 * @param units    die Einheiten; ob es sie auf einer Seite gibt, ist gleich
 	 * @param uploaded erfährt jeden hochgeladenen Anspruch sofort, auch wenn der Abgleich danach abbricht
+	 * @throws Aborted wenn ein Schritt scheitert ({@link IOException} oder {@link RuntimeException}); trägt das Teilergebnis
+	 *                 bis dahin, damit der Aufrufer meldet und einträgt, was schon geschehen ist
 	 */
 	public static FullSyncResult syncUnits(VersionStore local, VersionStore shared, Collection<UnitKey> units,
 			boolean uploadLocalClaims, Ownership own, FileLayer files, Clock clock,
-			Consumer<FullSyncResult.UploadedClaim> uploaded) throws IOException {
+			Consumer<FullSyncResult.UploadedClaim> uploaded) throws Aborted {
 		Run run = new Run(local, shared, own, files, clock, uploaded);
-		for (UnitKey unit : units) {
-			run.syncUnit(unit, uploadLocalClaims);
+		try {
+			for (UnitKey unit : units) {
+				run.syncUnit(unit, uploadLocalClaims);
+			}
+		} catch (IOException | RuntimeException e) {
+			throw new Aborted(run.result(), e);
 		}
 		return run.result();
 	}
@@ -421,21 +452,31 @@ public final class FullSync {
 		/**
 		 * Der gemeinsame Anspruch gewinnt: Der lokale wird beiseitegelegt und durch ihn ersetzt, die Version des
 		 * Gewinners kommt (falls nötig) nach lokal, und die eigenen Versionen auf dem verdrängten Anspruch werden als
-		 * verloren gemeldet.
+		 * verloren gemeldet. Sobald der lokale Anspruch ersetzt ist, sind Einheit und Verlust vermerkt, auch wenn ein Schritt
+		 * danach scheitert: Die Wiederholung fände beide Ansprüche gleich und meldete nichts mehr. Scheitert das Bestimmen der
+		 * Strecke, steht im Verlust nur die verdrängte Version; den Rest leitet der Aufrufer aus den Dateien ab.
 		 */
 		private void settle(DataPath file, Claim mine, byte[] sharedBytes, Claim theirs) throws IOException {
 			String fileName = file.path().substring(file.path().lastIndexOf('/') + 1);
 			String stamp = LocalDateTime.now(clock).format(STAMP);
 			files.replaceDamaged(local.resolve(file.path()), sharedBytes, fileName + ".verdraengt-" + stamp);
-			copy(shared, local, file.unit().relativePath() + "/" + theirs.version() + JSON);
 			changed.add(file.unit());
+			List<VersionId> stretch = List.of(mine.version());
+			try {
+				copy(shared, local, file.unit().relativePath() + "/" + theirs.version() + JSON);
+				stretch = stretchOf(file.unit(), mine.version());
+			} finally {
+				noteLost(file.unit(), stretch, theirs.version());
+			}
+		}
 
-			List<VersionId> stretch = stretchOf(file.unit(), mine.version());
-			LostVersion entry = new LostVersion(file.unit(), stretch, theirs.version());
+		/** Vermerkt die verlorene Strecke (ohne Doppelte) und ihre IDs für die Ansprüche, die danach an der Reihe sind. */
+		private void noteLost(UnitKey unit, List<VersionId> stretch, VersionId winner) {
+			LostVersion entry = new LostVersion(unit, stretch, winner);
 			if (!lost.contains(entry)) {
 				lost.add(entry);
 			}
-			Set<String> ids = lostIds.computeIfAbsent(file.unit(), u -> new HashSet<>());
+			Set<String> ids = lostIds.computeIfAbsent(unit, u -> new HashSet<>());
 			for (VersionId id : stretch) {
 				ids.add(id.value());
 			}

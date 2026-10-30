@@ -1738,4 +1738,72 @@ class ConnectFlowStoreTest {
 		assertTrue(markerOfX.complete());
 		assertTrue(restarted.service.connectionComplete().get());
 	}
+
+	/**
+	 * Ein Block wirft, nachdem er einen Anspruch schon ausgeglichen hat: Verbinden mit Mitnehmen, zwei Hallen in einem Bündel,
+	 * der lokale Anspruch auf h1 verliert gegen einen fremden, und das Hochladen des Anspruchs auf h2 scheitert einmal. Der
+	 * Verlust von h1 wird trotzdem gemeldet und der Index zeigt den Gewinner, auch nach einem sauberen Neustart (die Wiederholung
+	 * des Blocks findet beide Ansprüche gleich und meldet nichts mehr). Die Verkäufe sind älter als das Fenster der späten
+	 * Niederlage, damit nur der Abgleich sie aufdecken kann.
+	 */
+	@Test
+	void lossSettledInABlockThatThrowsIsStillReported() throws Exception {
+		NioFileLayer nio = new NioFileLayer();
+		FaultyFileLayer layer = new FaultyFileLayer(nio);
+		SyncService a = TestSyncServices.unstarted(dir.resolve("a"), "kasse-a", layer, p -> true, clock);
+		List<UnitKey> lost = Collections.synchronizedList(new ArrayList<>());
+		a.setListener(new SyncListener() {
+			@Override
+			public void lost(UnitKey unit, List<VersionId> mine, VersionId winner) {
+				lost.add(unit);
+			}
+		});
+		assertTrue(a.startup(""));
+		UnitKey h1 = UnitKey.hall("h1");
+		UnitKey h2 = UnitKey.hall("h2");
+		Version mine1 = a.append("s1", List.of(new Change(h1, List.of(), MAPPER.createObjectNode().put("n", "a1"), false)))
+				.get(0);
+		Version mine2 = a.append("s2", List.of(new Change(h2, List.of(), MAPPER.createObjectNode().put("n", "a2"), false)))
+				.get(0);
+		clock.advance(Duration.ofHours(2));
+		// ein anderer Rechner hat h1 im gemeinsamen Ordner schon verkauft
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), nio);
+		VersionId foreignId = VersionId.create(clock.millis() - 60_000, "bbbbbbbb", 0);
+		Version foreign = new Version(1, foreignId, List.of(), OTHER, "Kasse B", "Bea", clock.instant(), "sb", false,
+				MAPPER.createObjectNode().put("n", "b1"));
+		byte[] foreignBytes = StoreCodec.write(foreign);
+		sharedStore.writeVersion(h1, foreignId, foreignBytes);
+		sharedStore.createClaim(h1, "root",
+				StoreCodec.write(new Claim(foreignId, StoreCodec.sha256(foreignBytes), OTHER, clock.instant())));
+		// das Hochladen des Anspruchs auf h2 scheitert einmal, nachdem h1 im selben Bündel ausgeglichen ist
+		layer.failNextUnchecked(p -> p.toString().replace('\\', '/').contains("gemeinsam/data/halls/h2/claims"),
+				"createNew", new IllegalStateException("Netz weg"));
+
+		CompletableFuture<ConnectOutcome> outcome = a.connect(shared, ConnectMode.MERGE);
+		for (int i = 0; i < 10 && !outcome.isDone(); i++) {
+			a.tick();
+		}
+		for (int i = 0; i < 5; i++) {
+			a.tick();
+		}
+
+		assertTrue(outcome.isDone());
+		assertTrue(a.connectionComplete().get(), "erster Lauf beendet");
+		assertEquals(List.of(h1), lost, "der Verlust von h1 wird genau einmal gemeldet");
+		assertNotEquals(mine1.id(), a.snapshots().get(h1).version(), "der Index zeigt nicht mehr den eigenen Verkauf");
+		assertEquals(foreign.payload(), a.unitState(h1).head().payload());
+		assertEquals(mine2.id(), StoreCodec.readClaim(sharedStore.readClaimBytes(h2, "root").orElseThrow()).version(),
+				"der gescheiterte Anspruch wird beim nächsten Versuch hochgeladen");
+
+		// nach einem sauberen Neustart bleibt es dabei
+		a.closeIndex();
+		SyncService again = TestSyncServices.unstarted(dir.resolve("a"), "kasse-a", nio, p -> true, clock);
+		again.startup(shared);
+		for (int i = 0; i < 5; i++) {
+			clock.advance(Duration.ofSeconds(3));
+			again.tick();
+		}
+		assertNotEquals(mine1.id(), again.snapshots().get(h1).version());
+		assertEquals(foreign.payload(), again.unitState(h1).head().payload());
+	}
 }

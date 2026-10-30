@@ -51,6 +51,11 @@ final class FullSyncRun {
 	private int index;
 	/** Ob vom aktuellen Abschnitt "Vorstellung" schon ein Block erledigt ist (dann gilt der Zeiger). */
 	private boolean started;
+	/**
+	 * Ob der letzte Block des aktuellen Abschnitts "Vorstellung" scheiterte: Er kann schon einen Teil abgeglichen (und
+	 * gemeldet) haben, der Rest folgt erst mit der Wiederholung.
+	 */
+	private boolean failed;
 	/** Der Ordnername der zuletzt bearbeiteten Buchung des aktuellen Abschnitts; leer vor dem ersten Block. */
 	private String pointer = "";
 
@@ -81,6 +86,7 @@ final class FullSyncRun {
 		sections = planned;
 		index = 0;
 		started = false;
+		failed = false;
 		pointer = "";
 	}
 
@@ -91,7 +97,8 @@ final class FullSyncRun {
 	 * fertig wird, nämlich wenn die Uhr jetzt plus die Dauer des zuletzt erledigten Blocks (mit Auflisten der Buchungen)
 	 * nicht nach {@code deadline} liegt. Ein Aufruf hält die Arbeitssperre des Aufrufers also höchstens bis zur Frist, es sei
 	 * denn, ein einzelner Block ist länger oder ein Block wird langsamer als der davor. Wirft {@code work}, bleiben Abschnitt
-	 * und Zeiger stehen, und der nächste Aufruf wiederholt den Block.
+	 * und Zeiger stehen, und der nächste Aufruf wiederholt den Block; die Vorstellung eines gescheiterten Blocks gilt bis
+	 * dahin als in Arbeit ({@link #inProgress}).
 	 *
 	 * @param deadline die Zeit, bis zu der der Aufruf fertig sein soll (nach der Uhr des Aufrufers)
 	 * @return ob der Lauf fertig ist
@@ -139,7 +146,9 @@ final class FullSyncRun {
 			}
 		}
 		if (!units.isEmpty()) {
+			failed = true;
 			work.sync(units);
+			failed = false;
 		}
 		if (more) {
 			started = true;
@@ -161,10 +170,11 @@ final class FullSyncRun {
 
 	/**
 	 * Ob die Einheit zu der Vorstellung gehört (die Vorstellung selbst oder eine Buchung darunter), von der schon Blöcke
-	 * erledigt sind, die letzten aber noch nicht.
+	 * erledigt sind, die letzten aber noch nicht, oder deren letzter Block scheiterte (bis ein Block gelingt): Ein
+	 * gescheiterter Block kann schon einen Teil abgeglichen und gemeldet haben.
 	 */
 	boolean inProgress(UnitKey unit) {
-		if (!started || sections == null || index >= sections.size()) {
+		if (!started && !failed || sections == null || index >= sections.size()) {
 			return false;
 		}
 		UnitKey presentation = sections.get(index).presentation();

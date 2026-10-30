@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -238,6 +239,81 @@ class FullSyncTest {
 		assertThrows(IOException.class, () -> FullSync.run(local, faultyShared, true, OWN, files, CLOCK, seen::add));
 
 		assertEquals(List.of(new FullSyncResult.UploadedClaim(E1, "root", V1)), seen);
+	}
+
+	@Test
+	void abortAfterASettleCarriesThePartialResult() throws IOException {
+		// E1: der lokale Anspruch verliert gegen den gemeinsamen; danach scheitert das Hochladen des Anspruchs auf HALL
+		Version mine = version(ME, V1);
+		put(local, E1, mine);
+		claim(local, E1, mine, AT);
+		Version foreign = version(OTHER, FOREIGN);
+		put(shared, E1, foreign);
+		claim(shared, E1, foreign, AT);
+		Version hall = version(ME, V2);
+		put(local, HALL, hall);
+		claim(local, HALL, hall, AT);
+		FaultyFileLayer faulty = new FaultyFileLayer(files);
+		IllegalStateException cause = new IllegalStateException("Netz weg");
+		faulty.failNextUnchecked(p -> p.toString().replace('\\', '/').contains("shared/data/halls/h1/claims"), "createNew",
+				cause);
+		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
+		List<UnitKey> units = List.of(E1, HALL);
+
+		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
+				() -> FullSync.syncUnits(local, faultyShared, units, true, OWN, files, CLOCK, claim -> {
+				}));
+
+		assertSame(cause, aborted.getCause());
+		assertEquals(List.of(new LostVersion(E1, List.of(V1), FOREIGN)), aborted.partial().lost());
+		assertEquals(Set.of(E1), aborted.partial().changed());
+		// die Wiederholung findet auf E1 beide Ansprüche gleich: nichts mehr zu melden, nur HALL wird nachgeholt
+		FullSyncResult again = FullSync.syncUnits(local, shared, units, true, OWN, files, CLOCK, claim -> {
+		});
+		assertTrue(again.lost().isEmpty());
+		assertTrue(again.changed().isEmpty());
+		assertEquals(List.of(new FullSyncResult.UploadedClaim(HALL, "root", V2)), again.uploaded());
+	}
+
+	@Test
+	void abortRightAfterReplacingTheLocalClaimStillCarriesTheLoss() throws IOException {
+		Version mine = version(ME, V1);
+		put(local, E1, mine);
+		claim(local, E1, mine, AT);
+		Version foreign = version(OTHER, FOREIGN);
+		put(shared, E1, foreign);
+		claim(shared, E1, foreign, AT);
+		// sobald der lokale Anspruch ersetzt ist, scheitert das nächste lokale Lesen (das Bestimmen der verlorenen Strecke)
+		FaultyFileLayer faulty = new FaultyFileLayer(files);
+		faulty.onEach("replaceDamaged", () -> faulty.failNextUnchecked("read", new IllegalStateException("Platte weg")));
+		VersionStore faultyLocal = new VersionStore(local.dataRoot(), faulty);
+
+		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
+				() -> FullSync.syncUnits(faultyLocal, shared, List.of(E1), true, OWN, faulty, CLOCK, claim -> {
+				}));
+
+		assertEquals(List.of(new LostVersion(E1, List.of(V1), FOREIGN)), aborted.partial().lost());
+		assertEquals(Set.of(E1), aborted.partial().changed());
+		assertEquals(FOREIGN, StoreCodec.readClaim(local.readClaimBytes(E1, "root").orElseThrow()).version());
+	}
+
+	@Test
+	void abortWithAnIOExceptionCarriesItAsTheCause() throws IOException {
+		Version hall = version(ME, V2);
+		put(local, HALL, hall);
+		claim(local, HALL, hall, AT);
+		FaultyFileLayer faulty = new FaultyFileLayer(files);
+		IOException cause = new IOException("Störung");
+		faulty.failWhen(p -> p.toString().replace('\\', '/').contains("shared/data/halls/h1/claims"), "createNew", cause);
+		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
+
+		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
+				() -> FullSync.syncUnits(local, faultyShared, List.of(HALL), true, OWN, files, CLOCK, claim -> {
+				}));
+
+		assertSame(cause, aborted.getCause());
+		assertTrue(aborted.partial().lost().isEmpty());
+		assertTrue(aborted.partial().changed().isEmpty());
 	}
 
 	@Test

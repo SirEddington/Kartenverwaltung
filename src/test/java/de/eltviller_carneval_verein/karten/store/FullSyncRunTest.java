@@ -291,7 +291,8 @@ class FullSyncRunTest {
 		work.failOnce = new IOException("Platte weg");
 
 		assertThrows(IOException.class, () -> run.step(NEVER, work));
-		assertFalse(run.inProgress(presentation("e1", "p1")));
+		// der gescheiterte Block kann schon einen Teil abgeglichen haben
+		assertTrue(run.inProgress(presentation("e1", "p1")));
 
 		run.step(ALWAYS, work);
 		assertEquals(2, work.calls.size());
@@ -305,6 +306,36 @@ class FullSyncRunTest {
 		assertEquals(3, work.calls.size());
 		assertEquals(booking("e1", "p1", seat(block + 1)), work.calls.get(2).get(0));
 		assertEquals(20, work.calls.get(2).size());
+	}
+
+	@Test
+	void failedBlockKeepsItsPresentationInProgressUntilABlockSucceeds() throws IOException {
+		seats(local, 1, 3);
+		folder(local, "events/e1/presentations/p2");
+		Recorder work = new Recorder();
+		run.begin();
+		run.step(ALWAYS, work); // Kopf
+		work.failOnce = new IOException("Platte weg");
+
+		// der einzige Block der Vorstellung scheitert: Ein Teil kann schon abgeglichen und gemeldet sein, der Rest noch nicht
+		assertThrows(IOException.class, () -> run.step(ALWAYS, work));
+		assertTrue(run.inProgress(presentation("e1", "p1")));
+		assertTrue(run.inProgress(booking("e1", "p1", seat(2))));
+		assertFalse(run.inProgress(presentation("e1", "p2")));
+		assertFalse(run.inProgress(UnitKey.event("e1")));
+
+		run.step(ALWAYS, work);
+		assertEquals(List.of(presentation("e1", "p1"), booking("e1", "p1", seat(1)), booking("e1", "p1", seat(2)),
+				booking("e1", "p1", seat(3))), work.calls.get(1));
+		assertFalse(run.inProgress(presentation("e1", "p1")));
+		assertFalse(run.inProgress(presentation("e1", "p2")), "der nächste Abschnitt hat noch keinen Block begonnen");
+
+		// ein neuer Lauf beginnt ohne Altlast
+		work.failOnce = new IOException("Platte weg");
+		assertThrows(IOException.class, () -> run.step(ALWAYS, work));
+		assertTrue(run.inProgress(presentation("e1", "p2")));
+		run.begin();
+		assertFalse(run.inProgress(presentation("e1", "p2")));
 	}
 
 	@Test

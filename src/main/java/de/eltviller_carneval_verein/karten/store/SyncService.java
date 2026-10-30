@@ -2477,14 +2477,42 @@ public final class SyncService {
 	 * Ein Block des Vollabgleichs: gleicht die Einheiten ab ({@link FullSync#syncUnits}, mit der Entscheidung über das
 	 * Mitnehmen vom Beginn des Laufs), trägt die geänderten in den Index ein, meldet die gefundenen Verluste und klärt
 	 * umstrittene Plätze.
+	 * <p>
+	 * Scheitert der Block mittendrin, werden die geänderten Einheiten und die Verluste bis dahin ({@link FullSync.Aborted})
+	 * trotzdem eingetragen und gemeldet, bevor der Fehler weitergeht: Ein ausgeglichener Anspruch ist danach auf beiden
+	 * Seiten gleich, und die Wiederholung des Blocks fände ihn nicht mehr; doppelt meldet sie nichts, weil sie nur noch
+	 * findet, was noch nicht erledigt ist (und {@link #reportLoss} je Version nur einmal meldet). Umstrittene Plätze und
+	 * temporäre Dateien bleiben der Wiederholung überlassen, sie finden sich dabei wieder. Die Vorstellung des Blocks gilt
+	 * bis zur gelungenen Wiederholung als in Arbeit ({@link FullSyncRun#inProgress}), die Auflösung ihrer Verluste wartet.
 	 */
 	private void syncSection(Link current, Round round, List<UnitKey> units) throws IOException {
 		Instant now = clock.instant();
-		// Hochgeladene Ansprüche (beim Mitnehmen alle, sonst die eigenen, die im gemeinsamen Ordner fehlten) ab jetzt
-		// beobachten, je Anspruch sofort, damit auch ein abgebrochener Abgleich nichts verliert
-		FullSyncResult result = FullSync.syncUnits(local, current.shared, units, current.uploadLocalClaims, ownership(),
-				files, clock, uploaded -> watchOwnClaims(
-						List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))));
+		FullSyncResult result;
+		try {
+			// Hochgeladene Ansprüche (beim Mitnehmen alle, sonst die eigenen, die im gemeinsamen Ordner fehlten) ab jetzt
+			// beobachten, je Anspruch sofort, damit auch ein abgebrochener Abgleich nichts verliert
+			result = FullSync.syncUnits(local, current.shared, units, current.uploadLocalClaims, ownership(), files, clock,
+					uploaded -> watchOwnClaims(
+							List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))));
+		} catch (FullSync.Aborted e) {
+			Throwable cause = e.getCause();
+			try {
+				takeOverSection(round, e.partial());
+			} catch (RuntimeException inner) {
+				cause.addSuppressed(inner);
+			}
+			if (cause instanceof RuntimeException unchecked) {
+				throw unchecked;
+			}
+			throw (IOException) cause;
+		}
+		takeOverSection(round, result);
+		settleAll(current, result.contested(), round);
+		deleteOwnOldTemps(current, result.sharedTemps());
+	}
+
+	/** Übernimmt aus dem (Teil-)Ergebnis eines Blocks die geänderten Einheiten in Index und Takt und meldet die Verluste. */
+	private void takeOverSection(Round round, FullSyncResult result) {
 		// Die Positionen der Listen bleiben stehen: Das Lesen des Eintrags des Gewinners deckt einen abweichenden lokalen
 		// Anspruch sofort auf; schon kopierte Dateien kosten dabei nur einen Vergleich. Was keine Liste aufdeckt (Liste
 		// übersprungen, Anspruch kam erst nach Ablauf der Beobachtung), meldet der Abgleich selbst als umstritten.
@@ -2493,8 +2521,6 @@ public final class SyncService {
 		// schon vorher darin, nicht erst nach dem Melden am Ende des Takts (sonst sähe ein fremdes Umsetzen wie ein Storno aus)
 		indexUnitKeys(result.changed());
 		result.lost().forEach(this::reportLoss);
-		settleAll(current, result.contested(), round);
-		deleteOwnOldTemps(current, result.sharedTemps());
 	}
 
 	/**
