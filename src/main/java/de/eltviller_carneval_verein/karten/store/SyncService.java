@@ -498,16 +498,27 @@ public final class SyncService {
 		UnitIndex.Refresh opened = openIndex(progress != null ? progress : NO_PROGRESS);
 		String dir = clean(sharedDir);
 		if (dir == null) {
-			deactivate();
-			claimPendingLocally(withUnindexed(opened.pendingUnits()));
-			resolveAtStartup(opened.lostUnits());
+			// unter der Arbeitssperre: Die Auflösung (Sperre der Auflösung) und ein append daraus folgen der Sperrfolge
+			workLock.lock();
+			try {
+				deactivate();
+				claimPendingLocally(withUnindexed(opened.pendingUnits()));
+				resolveAtStartup(opened.lostUnits());
+			} finally {
+				workLock.unlock();
+			}
 			return true;
 		}
 		Link current = activate(dir, null);
 		if (current.path == null || !probe(current.path)) {
 			notifier.unreachable(dir, false);
 			// ohne Verbindung wird lokal aufgelöst und später hochgeladen
-			resolveAtStartup(opened.lostUnits());
+			workLock.lock();
+			try {
+				resolveAtStartup(opened.lostUnits());
+			} finally {
+				workLock.unlock();
+			}
 			return false;
 		}
 		workLock.lock();
@@ -716,7 +727,7 @@ public final class SyncService {
 				indexUnits(written);
 				index.markOwnListed(feedEntries(written), 0);
 				if (!enqueue(current, saveId, written)) {
-					claimIfDisconnected(written);
+					settleAfterConnectionChange(saveId, written);
 				}
 			}
 		} catch (IOException | RuntimeException e) {
@@ -822,21 +833,30 @@ public final class SyncService {
 	}
 
 	/**
-	 * {@link #append} fand beim Einreihen eine andere Verbindung vor als beim Beginn: Ist inzwischen getrennt, beansprucht
+	 * {@link #append} fand beim Einreihen eine andere Verbindung vor als beim Beginn. Ist inzwischen getrennt, beansprucht
 	 * der lokale Bestand die Versionen jetzt, sonst würde sie nie jemand beanspruchen. Hat eine neue Verbindung begonnen,
-	 * bleiben sie ausstehend, und der Index nennt sie ihrem ersten Vollabgleich. Unter {@code workLock}, damit das nicht mit
-	 * einem Wechsel der Verbindung überlappt; der Aufrufer hält keine andere Sperre (im {@code worker} gehört sie ihm schon).
-	 * Wartet deshalb in diesem seltenen Fall auf das Ende des laufenden Takts.
+	 * kommt der Stapel als Auftrag in deren Warteschlange und geht mit dem nächsten Takt hinaus: Ihr erster Vollabgleich hat
+	 * die Version womöglich schon verpasst (der Index kannte sie beim Beginn noch nicht), und bis zum nächsten vergingen
+	 * Minuten. Ein Auftrag, den der Vollabgleich ebenfalls findet, wird nicht doppelt eingereiht ({@code queued}). Unter
+	 * {@code workLock}, damit das nicht mit einem Wechsel der Verbindung überlappt; der Aufrufer hält keine andere Sperre (im
+	 * {@code worker} gehört sie ihm schon). Wartet deshalb in diesem seltenen Fall auf das Ende des laufenden Takts.
 	 */
-	private void claimIfDisconnected(List<UploadJob.Item> items) throws IOException {
+	private void settleAfterConnectionChange(String saveId, List<UploadJob.Item> items) throws IOException {
 		workLock.lock();
 		try {
-			synchronized (lock) {
-				if (link != null) {
+			while (true) {
+				Link now;
+				synchronized (lock) {
+					now = link;
+				}
+				if (now == null) {
+					claimLocally(items);
+					return;
+				}
+				if (enqueue(now, saveId, items)) {
 					return;
 				}
 			}
-			claimLocally(items);
 		} finally {
 			workLock.unlock();
 		}

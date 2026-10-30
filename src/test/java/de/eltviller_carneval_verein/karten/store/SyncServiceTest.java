@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.reflect.Field;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -2996,14 +2998,21 @@ class SyncServiceTest {
 
 	// --- Verbinden und Trennen warten auf den laufenden Takt (M1)
 
-	/** Wartet, bis der Thread an einer Sperre steht; scheitert, wenn er vorher fertig ist (er hat dann nicht gewartet). */
-	private static void assertParkedOnALock(Thread thread) throws InterruptedException {
+	/**
+	 * Wartet, bis der Thread in der Warteschlange der Arbeitssperre des Dienstes steht; scheitert, wenn er vorher fertig ist
+	 * (er hat dann nicht gewartet) oder an etwas anderem wartet.
+	 */
+	private static void assertWaitingForTheWorkLock(SyncService service, Thread thread) throws Exception {
+		Field field = SyncService.class.getDeclaredField("workLock");
+		field.setAccessible(true);
+		ReentrantLock workLock = (ReentrantLock) field.get(service);
 		long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-		while (thread.isAlive() && thread.getState() != Thread.State.WAITING && System.nanoTime() < deadline) {
+		while (thread.isAlive() && !workLock.hasQueuedThread(thread) && System.nanoTime() < deadline) {
 			Thread.sleep(5);
 		}
 		assertTrue(thread.isAlive(), "der Aufruf kehrte zurück, obwohl der Takt noch lief");
-		assertEquals(Thread.State.WAITING, thread.getState());
+		assertTrue(workLock.hasQueuedThread(thread), "der Aufruf wartet nicht auf die Arbeitssperre");
+		assertTrue(workLock.isFair());
 	}
 
 	@Test
@@ -3042,7 +3051,7 @@ class SyncServiceTest {
 			}
 		});
 		disconnect.start();
-		assertParkedOnALock(disconnect);
+		assertWaitingForTheWorkLock(a.service, disconnect);
 		release.countDown();
 		tick.join(10_000);
 		disconnect.join(10_000);
@@ -3121,6 +3130,45 @@ class SyncServiceTest {
 		for (Runnable tick : List.copyOf(queued)) {
 			tick.run();
 		}
+		assertEquals(saved.get().id(), sharedClaim(BOOKING, "root").version());
+		assertFalse(a.service.unitState(BOOKING).provisional());
+	}
+
+	@Test
+	void appendRejectedAfterTheFirstRunBeganIsUploadedByTheNextTick() throws Exception {
+		List<Runnable> queued = new ArrayList<>();
+		Node a = new Node(dir.resolve("a"), "a", new NioFileLayer(), Runnable::run, queued::add);
+		a.service.startup(shared);
+		// append hat die alte Verbindung gelesen und steht im lokalen Schreiben
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		a.layer.blockNext("createNew", entered, release);
+		AtomicReference<Version> saved = new AtomicReference<>();
+		AtomicReference<Throwable> failure = new AtomicReference<>();
+		Thread ui = new Thread(() -> {
+			try {
+				saved.set(a.service.append("s1", List.of(create(BOOKING, "Anna"))).get(0));
+			} catch (IOException | RuntimeException e) {
+				failure.set(e);
+			}
+		});
+		ui.start();
+		assertTrue(entered.await(10, TimeUnit.SECONDS));
+		queued.clear();
+		a.service.connect(shared, ConnectMode.MERGE);
+		// der erste Takt der neuen Verbindung beginnt und beendet den Vollabgleich, solange append noch schreibt: Der Index
+		// kennt die Version noch nicht
+		for (Runnable tick : List.copyOf(queued)) {
+			tick.run();
+		}
+		assertFalse(Files.exists(sharedFile(BOOKING, "claims/root.json")));
+		release.countDown();
+		ui.join(10_000);
+		assertNull(failure.get());
+
+		// der nächste gewöhnliche Takt lädt hoch, nicht erst ein späterer Vollabgleich
+		a.service.tick();
+
 		assertEquals(saved.get().id(), sharedClaim(BOOKING, "root").version());
 		assertFalse(a.service.unitState(BOOKING).provisional());
 	}
