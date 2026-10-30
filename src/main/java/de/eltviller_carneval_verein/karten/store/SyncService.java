@@ -73,16 +73,28 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * höchstens 150 je Takt), vorgemerkte beschädigte Einheiten aus der Kopie im gemeinsamen Ordner heilen und beschädigte
  * Kopien dort aus der guten lokalen. Der <b>Vollabgleich</b> beginnt alle 10 Minuten (gezählt ab dem Ende des vorigen),
  * beim Start, nach der Rückkehr aus {@link SyncState#OFFLINE} und auf Wunsch; er läuft in Abschnitten ({@link FullSyncRun})
- * über mehrere Takte, je Takt höchstens {@link #FULL_SYNC_SLICE_BUDGET} (mindestens ein Block), danach kommen die übrigen
- * Schritte. Sein Zeiger hängt an der Verbindung: Nach einem Ausfall setzt er dort fort, eine neue Verbindung verwirft
+ * über mehrere Takte, je Takt höchstens {@link #FULL_SYNC_SLICE_BUDGET}, danach kommen die übrigen Schritte. Ein Abschnitt
+ * ist ein Bündel Hallen, ein Event-Kopf, eine Vorstellung oder ein Block von höchstens {@code FullSyncRun.BOOKING_BLOCK}
+ * Buchungsordnern; ein weiterer beginnt nur, wenn er nach der Dauer des vorigen noch ins Budget passt, der erste läuft
+ * immer. Sein Zeiger hängt an der Verbindung: Nach einem Ausfall setzt er dort fort, eine neue Verbindung verwirft
  * ihn. Ein Wunsch während eines Laufs beginnt ihn nicht neu, sondern direkt nach seinem Ende einen neuen; den
  * Fortschritt zeigt {@link #fullSyncProgress()}. Im ersten Lauf einer Verbindung ({@link #connect}) folgen die Takte ohne
- * Pause aufeinander, solange der Ordner erreichbar ist und nichts scheitert (die Arbeitssperre wird dazwischen frei); sein
- * Ende liefert das Ergebnis von {@link #connect} und vervollständigt die Marke "verbunden" ({@link #connectionComplete()}).
- * Im Modus {@link ConnectMode#ASK} prüft der Beginn des ersten Laufs an den Dateien, ob beide Seiten Einheiten haben; dann
- * pausiert der Abgleich ({@link SyncState#ENTSCHEIDUNG}), bis {@link #decideConnect} entscheidet, und jeder Takt prüft nur
- * die Erreichbarkeit. Die <b>Schutzregel</b> verbietet jedes Beiseitelegen, sobald dieser Programmlauf nach dem Start eigene
- * Versionen geschrieben hat (siehe {@link #connect}).
+ * Pause aufeinander ({@link #tick()} liefert {@code true}, {@code tickSafely} wiederholt sofort), solange der Ordner
+ * erreichbar ist und nichts scheitert; die Arbeitssperre wird dazwischen frei. Sein Ende liefert das Ergebnis von
+ * {@link #connect} und vervollständigt die Marke "verbunden" ({@link #connectionComplete()}).
+ * <p>
+ * <b>Marke "verbunden"</b> ({@code <AppData>/connection.json}, nur lokal): Ordner, Zeitpunkt und ob der erste Lauf zu Ende
+ * war. Der erste Lauf schreibt sie an seinem Beginn als unvollständig und an seinem Ende als vollständig,
+ * {@link #disconnect} löscht sie; {@link #connectedDir()} und {@link #connectionComplete()} lesen sie, und der nächste
+ * Start wählt seinen Weg nach ihr (die Oberfläche setzt einen unvollständigen ersten Lauf ohne Rückfrage fort). Im Modus
+ * {@link ConnectMode#ASK} prüft der Beginn des ersten Laufs an den Dateien, ob beide Seiten Einheiten haben; dann
+ * pausiert der Abgleich ({@link SyncState#ENTSCHEIDUNG}, noch ohne Marke), bis {@link #decideConnect} entscheidet, und jeder
+ * Takt prüft nur die Erreichbarkeit. Die <b>Schutzregel</b> verbietet jedes Beiseitelegen, sobald dieser Programmlauf nach
+ * dem Start eigene Versionen geschrieben hat (siehe {@link #connect}).
+ * <p>
+ * Kein Takt schreibt über einer gültigen Marke "sauber beendet": Jeder macht sie vor der Arbeit am gemeinsamen Ordner und
+ * vor der Auflösung ungültig ({@link UnitIndex#invalidateCleanMarker}); gelingt das nicht, prüft er nur die Erreichbarkeit.
+ * <p>
  * Trifft ein fremder Listeneintrag einen Platz, dessen lokaler Anspruch
  * abweicht, wird sofort verglichen: So fällt eine späte Niederlage auch nach Ablauf der Beobachtung auf. Deshalb
  * überspringt auch der Vollabgleich keine Liste: Er lässt die Positionen stehen, und jede Liste wird gelesen (nach einem
@@ -103,7 +115,8 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * geändert haben; nur die dabei gefundenen Kandidaten mit ausstehenden eigenen Versionen untersucht der Start auf dem
  * Thread des Aufrufers. Jede Stelle, die den Stand einer Einheit ermittelt, trägt ihn danach in den Index ein. Gespeichert
  * wird er von {@link #flushIndex()} und im Takt alle {@link #INDEX_FLUSH}, nicht vor dem Abgleich durch {@link #startup}.
- * Beim Beenden ruft die Anwendung {@link #closeIndex()}: Es schreibt den Index und legt die Marke "sauber beendet" an. Findet
+ * Bei einer neuen Rechner-ID (SYS-011) wird er nicht neu aufgebaut: Er übernimmt sie, und die früheren IDs zählen bis zum
+ * Wechsel weiter als eigen ({@link Ownership}). Beim Beenden ruft die Anwendung {@link #closeIndex()}: Es schreibt den Index und legt die Marke "sauber beendet" an. Findet
  * {@link #startup} sie vor, übernimmt es den Index ohne jeden Durchlauf über den Bestand (zweite Stufe); ohne Marke,
  * also nach einem Absturz, bleibt es beim Abgleich über die Verzeichnisnamen. Der Index ist nie Schiedsrichter: Jede Entscheidung über Vorgänger, Ansprüche und Verluste trifft {@link ChainResolver}
  * auf den Dateien; die Abläufe im {@code worker} lesen weiterhin alle Einheiten.
@@ -120,9 +133,10 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * der auch den Takt ausführt; auch die Heilung beschädigter Dateien aus der Kopie dort läuft im Takt. Die Oberfläche
  * wartet nie darauf, mit einer Ausnahme: {@link #startup} prüft die Erreichbarkeit (höchstens 5 Sekunden) und lädt
  * ausstehende Versionen hoch, bevor das Hauptmenü erscheint.</li>
- * <li>{@link #connect}, {@link #decideConnect} und {@link #disconnect} nehmen die Arbeitssperre ({@code workLock}) und
- * warten deshalb auf das Ende des laufenden Takts, damit kein Hochladen der alten Verbindung mit dem Wechsel überlappt;
- * sie dürfen nie auf dem FX-Thread laufen. Die Sperre ist fair: Sie kommen zwischen zwei Takten dran.</li>
+ * <li>{@link #startup}, {@link #connect}, {@link #decideConnect} und {@link #disconnect} nehmen die Arbeitssperre
+ * ({@code workLock}) und warten deshalb auf das Ende des laufenden Takts, damit kein Hochladen der alten Verbindung mit
+ * dem Wechsel überlappt; sie dürfen nie auf dem FX-Thread laufen. Die Sperre ist fair: Sie kommen zwischen zwei Takten
+ * dran, auch im ersten Lauf ohne Pause.</li>
  * <li>{@link #append} und die Abfragen arbeiten nur auf dem lokalen Bestand und laufen auf dem Thread des Aufrufers;
  * {@link #append} ruft auch die Auflösung im {@code worker} auf, gleichzeitig mit der Oberfläche.</li>
  * <li>Zustand ({@link #syncState()}, {@link #lastSync()}) und alle Rückrufe kommen über den {@code ui}-Executor an, in
@@ -1708,8 +1722,9 @@ public final class SyncService {
 	 * <p>
 	 * Mit der Marke ist der Dienst geschlossen: Der Takt tut nichts mehr, denn eine Runde, die nach der Marke Dateien in den
 	 * Bestand schriebe, und ein Prozessende mitten darin ließen die Marke über einem geänderten Bestand stehen. Ein späteres
-	 * {@link #append} löscht die Marke vor dem Schreiben; {@link #startup}, {@link #connect} und {@link #disconnect} öffnen
-	 * den Dienst wieder (und löschen die Marke zuerst). Wirft nie; Fehler stehen als {@code WARNING} im Log.
+	 * {@link #append} löscht die Marke vor dem Schreiben, wird aber in diesem Programmlauf nicht mehr hochgeladen, sondern
+	 * beim nächsten Start; {@link #startup}, {@link #connect} und {@link #disconnect} öffnen den Dienst wieder (und löschen
+	 * die Marke zuerst). Wirft nie; Fehler stehen als {@code WARNING} im Log.
 	 */
 	public void closeIndex() {
 		boolean idle = false;
