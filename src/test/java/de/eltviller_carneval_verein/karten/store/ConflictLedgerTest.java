@@ -44,6 +44,11 @@ class ConflictLedgerTest {
 
 	private static final String A_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaa";
 	private static final String FOREIGN = "0123456789abcdefghijklmnop";
+	/** Die frühere ID dieses Rechners (vor SYS-011); sie galt bis {@link #UNTIL}. */
+	private static final String PREVIOUS_ID = "pppppppppppppppppppppppppp";
+	private static final Instant UNTIL = Instant.ofEpochMilli(1_900_000_010_000L);
+	/** Dieser Rechner: aktuelle ID {@link #A_ID}, frühere {@link #PREVIOUS_ID}. */
+	private static final Ownership OWN = new Ownership(A_ID, List.of(new Ownership.Previous(PREVIOUS_ID, UNTIL)));
 	private static final UnitKey EVENT = UnitKey.event("e1");
 	private static final UnitKey SHOW = UnitKey.presentation("e1", "p1");
 	private static final UnitKey SALE = UnitKey.booking("e1", "p1", "A-1");
@@ -834,7 +839,7 @@ class ConflictLedgerTest {
 		List<UnitIndex.Entry> entries = List.of(entry(SHOW, theirs, true, Map.of(), null, List.of()),
 				entry(SALE, mine, false, Map.of(), null, List.of()));
 
-		ConflictLedger.Derivation derivation = ConflictLedger.derive(entries, A_ID, Set.of());
+		ConflictLedger.Derivation derivation = ConflictLedger.derive(entries, OWN, Set.of());
 
 		assertEquals(List.of(), derivation.conflicts());
 		assertTrue(derivation.undecided());
@@ -847,7 +852,7 @@ class ConflictLedgerTest {
 		List<UnitIndex.Entry> entries = List.of(entry(SHOW, theirs, true, Map.of(), null, List.of()),
 				entry(SALE, foreignSale, false, Map.of(), null, List.of()));
 
-		ConflictLedger.Derivation derivation = ConflictLedger.derive(entries, A_ID, Set.of());
+		ConflictLedger.Derivation derivation = ConflictLedger.derive(entries, OWN, Set.of());
 
 		assertEquals(List.of(), derivation.conflicts());
 		assertFalse(derivation.undecided(), "ein fremder Stand braucht keine eigene Listennummer");
@@ -863,11 +868,72 @@ class ConflictLedgerTest {
 				entry(UnitKey.booking("e2", "p9", "B-1"), VersionId.create(1_900_000_005_000L, A_ID, 5), false, Map.of(), 0L,
 						List.of()));
 
-		List<OpenConflict> conflicts = ConflictLedger.derive(entries, A_ID, Set.of()).conflicts();
+		List<OpenConflict> conflicts = ConflictLedger.derive(entries, OWN, Set.of()).conflicts();
 
 		assertEquals(1, conflicts.size());
 		assertEquals(List.of(SHOW, OTHER_SALE), conflicts.get(0).deletion().affected(),
 				"nur Listennummer 0 oder größer als seen (3); sortiert nach Pfad");
+	}
+
+	@Test
+	void parentDeletionCountsSalesOfAPreviousIdAsOwn() {
+		VersionId deletion = VersionId.create(1_900_000_020_000L, FOREIGN, 1);
+		UnitKey known = UnitKey.booking("e1", "p1", "A-3");
+		UnitKey copied = UnitKey.booking("e1", "p1", "A-4");
+		List<UnitIndex.Entry> entries = List.of(entry(SHOW, deletion, true, Map.of(A_ID, 3L), null, List.of()),
+				// vor der Neuvergabe und in keiner Liste: dem Löschenden unbekannt
+				entry(SALE, VersionId.create(1_900_000_003_000L, PREVIOUS_ID, 1), false, Map.of(), 0L, List.of()),
+				// genau auf der Grenze, Listennummer hinter seen
+				entry(OTHER_SALE, VersionId.create(1_900_000_010_000L, PREVIOUS_ID, 2), false, Map.of(), 4L, List.of()),
+				// vor der Neuvergabe, dem Löschenden bekannt
+				entry(known, VersionId.create(1_900_000_004_000L, PREVIOUS_ID, 3), false, Map.of(), 2L, List.of()),
+				// nach der Grenze: der andere Rechner, der die alte ID weiter trägt; fremd, braucht keine Listennummer
+				entry(copied, VersionId.create(1_900_000_010_001L, PREVIOUS_ID, 4), false, Map.of(), null, List.of()));
+
+		ConflictLedger.Derivation derivation = ConflictLedger.derive(entries, OWN, Set.of());
+
+		assertEquals(1, derivation.conflicts().size());
+		assertEquals(List.of(SALE, OTHER_SALE), derivation.conflicts().get(0).deletion().affected());
+		assertFalse(derivation.undecided(), "die Version nach der Grenze ist fremd");
+	}
+
+	@Test
+	void deletionOfAPreviousIdIsOwnOnlyUntilTheChange() {
+		VersionId sale = VersionId.create(1_900_000_002_000L, A_ID, 1);
+		UnitIndex.Entry saleEntry = entry(SALE, sale, false, Map.of(), 0L, List.of());
+		VersionId ownDeletion = VersionId.create(1_900_000_005_000L, PREVIOUS_ID, 1);
+		VersionId copyDeletion = VersionId.create(1_900_000_011_000L, PREVIOUS_ID, 2);
+
+		List<OpenConflict> own = ConflictLedger
+				.derive(List.of(entry(SHOW, ownDeletion, true, Map.of(), null, List.of()), saleEntry), OWN, Set.of())
+				.conflicts();
+		List<OpenConflict> copy = ConflictLedger
+				.derive(List.of(entry(SHOW, copyDeletion, true, Map.of(), null, List.of()), saleEntry), OWN, Set.of())
+				.conflicts();
+
+		assertEquals(List.of(), own, "die eigene Löschung vor der Neuvergabe ist kein Konflikt");
+		assertEquals(1, copy.size());
+		assertEquals(List.of(SALE), copy.get(0).deletion().affected());
+	}
+
+	@Test
+	void noteForAPreviousIdCountsUntilTheChange() {
+		VersionId before = VersionId.create(1_900_000_001_000L, A_ID, 1);
+		VersionId after = VersionId.create(1_900_000_011_000L, A_ID, 2);
+		VersionId foreignMerge = VersionId.create(1_900_000_012_000L, FOREIGN, 3);
+		VersionId droppedBefore = VersionId.create(1_900_000_009_000L, PREVIOUS_ID, 4);
+		Instant at = Instant.parse("2026-10-28T09:00:00Z");
+		// ein fremder Rechner vermerkt nach der Neuvergabe, dass eine Änderung von vor ihr weicht: sie war eigen
+		ConflictNote droppedNote = new ConflictNote(ConflictNote.Kind.FIELDS, PREVIOUS_ID, null, List.of(), null, null,
+				droppedBefore);
+		List<UnitIndex.Entry> entries = List.of(
+				entry(SALE, after, false, Map.of(), 0L,
+						List.of(noted(before, at, noteFor(PREVIOUS_ID)), noted(after, at, noteFor(PREVIOUS_ID)))),
+				entry(OTHER_SALE, foreignMerge, false, Map.of(), null, List.of(noted(foreignMerge, at, droppedNote))));
+
+		List<OpenConflict> conflicts = ConflictLedger.derive(entries, OWN, Set.of()).conflicts();
+
+		assertEquals(List.of(before, foreignMerge), conflicts.stream().map(OpenConflict::id).toList());
 	}
 
 	@Test
@@ -883,7 +949,7 @@ class ConflictLedgerTest {
 				entry(SALE, late, false, Map.of(), 0L, List.of(noted(late, t2, note), noted(sameTimeHigh, t2, note))),
 				entry(OTHER_SALE, early, false, Map.of(), 0L, List.of(noted(early, t1, note), noted(sameTimeLow, t2, note))));
 
-		List<OpenConflict> conflicts = ConflictLedger.derive(entries, A_ID, Set.of()).conflicts();
+		List<OpenConflict> conflicts = ConflictLedger.derive(entries, OWN, Set.of()).conflicts();
 
 		assertEquals(List.of(early, late, sameTimeLow, sameTimeHigh), conflicts.stream().map(OpenConflict::id).toList());
 	}

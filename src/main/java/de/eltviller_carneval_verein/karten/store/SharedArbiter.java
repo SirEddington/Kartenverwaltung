@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -94,7 +95,8 @@ public final class SharedArbiter implements Arbiter {
 	 */
 	private ClaimOutcome checkParent(UnitKey unit, Version version, VersionId parent) throws IOException {
 		UnitFiles files = shared.readUnit(unit);
-		UnitState state = ChainResolver.resolve(files, version.machine());
+		// gebraucht werden nur Kette, Beanspruchtes und Status; die hängen nicht davon ab, was eigen ist
+		UnitState state = ChainResolver.resolve(files, new Ownership(version.machine(), List.of()));
 		String where = unit.relativePath();
 		if (state.status() == Status.LOCKED_DAMAGED && state.blockedAt() != null) {
 			ClaimFile slot = files.claims().get(LocalScan.stopSlot(files));

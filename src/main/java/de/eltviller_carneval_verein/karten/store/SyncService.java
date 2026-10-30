@@ -244,11 +244,14 @@ public final class SyncService {
 			this.positions = positions;
 		}
 
-		/** Leser und Schreiber der Änderungslisten für diese Rechner-Kennung. */
-		void bind(String machineId, VersionStore local, Clock clock) {
+		/**
+		 * Leser und Schreiber der Änderungslisten für diese Rechner-Kennung: Der Schreiber schreibt unter der aktuellen ID,
+		 * der Leser weiß auch die früheren.
+		 */
+		void bind(Ownership own, VersionStore local, Clock clock) {
 			if (shared != null) {
-				reader = new FeedReader(shared, local, machineId, positions, clock);
-				writer = new FeedWriter(shared, machineId, clock);
+				reader = new FeedReader(shared, local, own, positions, clock);
+				writer = new FeedWriter(shared, own.currentId(), clock);
 			}
 		}
 	}
@@ -350,13 +353,13 @@ public final class SyncService {
 		this.notifier = new SyncNotifier(ui);
 		this.machine = machine;
 		this.ids = new VersionIdGenerator(machine.id(), clock);
-		this.index = newIndex(machine.id());
+		this.index = newIndex(machine.ownership());
 		this.resolver = new ConflictResolver(new ResolverHost(), notifier, clock);
 	}
 
 	/** Ein neuer, noch leerer Index im Index-Ordner dieser Installation, für die Kennung des Rechners. */
-	private UnitIndex newIndex(String machineId) {
-		return new UnitIndex(appDataDir.resolve(INDEX), files, machineId);
+	private UnitIndex newIndex(Ownership own) {
+		return new UnitIndex(appDataDir.resolve(INDEX), files, own);
 	}
 
 	/**
@@ -636,7 +639,7 @@ public final class SyncService {
 	private void claimPendingLocally(Collection<UnitKey> candidates) {
 		try {
 			List<UploadJob.Item> items = new ArrayList<>();
-			for (UploadJob job : LocalScan.pendingJobs(local, machineId(), Set.of(), candidates)) {
+			for (UploadJob job : LocalScan.pendingJobs(local, ownership(), Set.of(), candidates)) {
 				items.addAll(job.items());
 			}
 			claimLocally(items);
@@ -1034,8 +1037,9 @@ public final class SyncService {
 
 	/**
 	 * Ob der Stand {@code version} der Einheit eine eigene Zusammenführung ist, die einen Konflikt dieses Rechners
-	 * auflöst: von diesem Rechner, mit mehr als einem Vorgänger, und sie selbst oder eine in ihr aufgegangene Version trägt
-	 * einen Vermerk, der diesen Rechner betrifft ({@link ConflictNote#affected()}). Diesen Konflikt zeigt der Dialog. Die
+	 * auflöst: von diesem Rechner (auch unter einer früheren ID vor ihrer Neuvergabe, siehe {@link Ownership}), mit mehr als
+	 * einem Vorgänger, und sie selbst oder eine in ihr aufgegangene Version trägt einen Vermerk, der diesen Rechner betrifft
+	 * ({@link ConflictNote#affected()}, {@link ConflictLedger#affectsMe}). Diesen Konflikt zeigt der Dialog. Die
 	 * Vermerke stammen aus dem Start-Index; kennt er keinen passenden, wird keine Datei gelesen. Sonst liest es höchstens
 	 * diese eine Version (wenn sie selbst keinen Vermerk trägt, kennt der Index Rechner und Vorgänger nicht).
 	 *
@@ -1046,7 +1050,7 @@ public final class SyncService {
 		if (version == null || entry == null) {
 			return false;
 		}
-		String own = machineId();
+		Ownership own = ownership();
 		UnitIndex.NotedVersion self = null;
 		boolean noted = false;
 		for (UnitIndex.NotedVersion candidate : entry.notes()) {
@@ -1054,8 +1058,7 @@ public final class SyncService {
 			if (itself) {
 				self = candidate;
 			}
-			if ((itself || entry.absorbed().contains(candidate.version()))
-					&& own.equals(candidate.note().affected())) {
+			if ((itself || entry.absorbed().contains(candidate.version())) && ConflictLedger.affectsMe(own, candidate)) {
 				noted = true;
 			}
 		}
@@ -1063,10 +1066,10 @@ public final class SyncService {
 			return false;
 		}
 		if (self != null) {
-			return own.equals(self.machine()) && self.parents().size() > 1;
+			return own.isOwn(self.machine(), self.version()) && self.parents().size() > 1;
 		}
 		Version merge = version(unit, version);
-		return merge != null && own.equals(merge.machine()) && merge.parents().size() > 1;
+		return merge != null && own.isOwn(merge) && merge.parents().size() > 1;
 	}
 
 	/**
@@ -1205,7 +1208,7 @@ public final class SyncService {
 	}
 
 	private ConflictLedger.Derivation deriveConflicts() {
-		String me = machineId();
+		Ownership me = ownership();
 		Set<ConflictKey> done;
 		synchronized (ackLock) {
 			try {
@@ -1460,7 +1463,7 @@ public final class SyncService {
 	 */
 	private UnitIndex.Refresh rebuildIndex(DoubleConsumer progress) {
 		synchronized (resolveLock) {
-			index = newIndex(machineId());
+			index = newIndex(ownership());
 			unindexed.clear();
 		}
 		Set<UnitKey> pending = new LinkedHashSet<>();
@@ -1530,11 +1533,11 @@ public final class SyncService {
 	private Resolved resolveWithFiles(UnitKey unit) throws IOException {
 		// Lesen, Auflösen und Eintragen am Stück: Wer nach dem eigenen Schreiben auflöst, trägt auch zuletzt ein. Sonst
 		// überschriebe der ältere Stand eines anderen Threads den neueren. Reihenfolge der Sperren: workLock, resolveLock,
-		// Monitor des Index; machineId() nimmt nur kurz lock, und unter lock wartet nie jemand auf resolveLock.
+		// Monitor des Index; ownership() nimmt nur kurz lock, und unter lock wartet nie jemand auf resolveLock.
 		synchronized (resolveLock) {
 			try {
 				UnitFiles unitFiles = local.readUnit(unit);
-				UnitState state = ChainResolver.resolve(unitFiles, machineId());
+				UnitState state = ChainResolver.resolve(unitFiles, ownership());
 				// ein Ordner ohne Dateien ist keine Einheit des Bestands: kein Eintrag (etwa bei einer Abfrage nach einer
 				// unbekannten)
 				if (!unitFiles.versions().isEmpty() || !unitFiles.claims().isEmpty()) {
@@ -1757,12 +1760,13 @@ public final class SyncService {
 				// gelesen werden nur die Einheiten, in deren gültiger Kette der Index ein junges eigenes Glied kennt (der
 				// Anspruch entscheidet dann selbst). Eine Version, die lange nach dem Schreiben hochgeladen wurde (alte ID,
 				// junger Anspruch), wird nach einem Neustart nicht beobachtet; den Vergleich der eigenen Ansprüche beider Seiten
-				// (checkOwnClaim) im nächsten Vollabgleich fängt sie.
-				String myId = machineId();
+				// (checkOwnClaim) im nächsten Vollabgleich fängt sie. Eigen sind auch die Ansprüche einer früheren ID von vor
+				// ihrer Neuvergabe.
+				Ownership own = ownership();
 				Instant now = clock.instant();
-				Set<UnitKey> recent = index.recentOwnChainUnits(id -> id.isFrom(myId),
+				Set<UnitKey> recent = index.recentOwnChainUnits(own::isOwnId,
 						now.minus(LATE_DEFEAT_WINDOW).minus(CLOCK_SLACK));
-				watchOwnClaims(LocalScan.recentOwnClaims(local, myId, now, LATE_DEFEAT_WINDOW, recent));
+				watchOwnClaims(LocalScan.recentOwnClaims(local, own, now, LATE_DEFEAT_WINDOW, recent));
 			}
 			FullSyncRun run = new FullSyncRun(local, current.shared, clock);
 			run.begin();
@@ -1806,7 +1810,7 @@ public final class SyncService {
 		Instant now = clock.instant();
 		// Hochgeladene Ansprüche (beim Mitnehmen alle, sonst die eigenen, die im gemeinsamen Ordner fehlten) ab jetzt
 		// beobachten, je Anspruch sofort, damit auch ein abgebrochener Abgleich nichts verliert
-		FullSyncResult result = FullSync.syncUnits(local, current.shared, units, current.uploadLocalClaims, machineId(),
+		FullSyncResult result = FullSync.syncUnits(local, current.shared, units, current.uploadLocalClaims, ownership(),
 				files, clock, uploaded -> watchOwnClaims(
 						List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))));
 		// Die Positionen der Listen bleiben stehen: Das Lesen des Eintrags des Gewinners deckt einen abweichenden lokalen
@@ -1823,8 +1827,9 @@ public final class SyncService {
 
 	/**
 	 * Räumt im gemeinsamen Ordner die eigenen alten temporären Dateien auf, die der Abgleich dieses Blocks beim Auflisten
-	 * der Einheiten ohnehin gesehen hat ({@link FullSyncResult#sharedTemps}; kein weiterer Listenzugriff): Name mit der
-	 * eigenen Kennung ({@code ~karv-<Kennung>-<UUID>.tmp}), seit mehr als {@link #TEMP_AGE} nicht geändert. Nur für diese
+	 * der Einheiten ohnehin gesehen hat ({@link FullSyncResult#sharedTemps}; kein weiterer Listenzugriff): Name mit einer
+	 * eigenen Kennung ({@code ~karv-<Kennung>-<UUID>.tmp}; die aktuelle oder eine frühere, {@link Ownership#isOwnTempTag}),
+	 * seit mehr als {@link #TEMP_AGE} nicht geändert. Neue temporäre Dateien tragen nur die aktuelle. Nur für diese
 	 * Dateien wird das Alter abgefragt. Fremde und kennungslose temporäre Dateien bleiben unberührt: Sie gehören einem
 	 * anderen Rechner oder sind nicht zuzuordnen. Ein Fehler hier (etwa weil der Ordner wegfällt oder das Löschen nicht
 	 * erlaubt ist) lässt den Block nicht scheitern: Das Aufräumen ist nur Pflege, und scheitert der Zugriff wirklich, meldet
@@ -1834,12 +1839,14 @@ public final class SyncService {
 	 * @param sharedTemps Pfade relativ zum Datenordner des gemeinsamen Ordners
 	 */
 	private void deleteOwnOldTemps(Link current, List<String> sharedTemps) {
-		String me = machineId();
+		// die eigenen Kennungen einmal je Block, nicht je Datei (wie Ownership#isOwnTempTag)
+		Set<String> ownTags = ownership().ids();
 		Map<String, List<String>> byFolder = new LinkedHashMap<>();
 		for (String rel : sharedTemps) {
 			int slash = rel.lastIndexOf('/');
 			String name = rel.substring(slash + 1);
-			if (me.equals(FileLayer.tempTagOf(name))) {
+			String tag = FileLayer.tempTagOf(name);
+			if (tag != null && ownTags.contains(tag)) {
 				byFolder.computeIfAbsent(rel.substring(0, slash), folder -> new ArrayList<>()).add(name);
 			}
 		}
@@ -1897,12 +1904,12 @@ public final class SyncService {
 	 */
 	private void enqueuePending(Link current, Collection<UnitKey> candidates) throws IOException {
 		Set<VersionId> skip;
-		String myId;
+		Ownership own;
 		synchronized (lock) {
 			skip = new HashSet<>(queued);
-			myId = machine.id();
+			own = machine.ownership();
 		}
-		List<UploadJob> found = LocalScan.pendingJobs(local, myId, skip, candidates);
+		List<UploadJob> found = LocalScan.pendingJobs(local, own, skip, candidates);
 		synchronized (lock) {
 			if (link != current) {
 				return;
@@ -2057,16 +2064,18 @@ public final class SyncService {
 	/**
 	 * Ein anderer Rechner verwendet dieselbe Kennung: neue Kennung, neuer Schreiber und Leser der Listen, neuer
 	 * Generator der Versions-IDs, SYS-011, und ein Vollabgleich wird angefordert. Die Positionen werden nicht neu gesetzt:
-	 * Die alte Kennung ist ab jetzt ein fremder Rechner, die Suche nach neuen Rechnern findet ihren Ordner und liest
-	 * ihre Listen ab Nummer 1 nach (für schon vorhandene Dateien nur ein Vergleich). Ausstehende Versionen mit der alten
-	 * Kennung gelten danach nicht mehr als eigene.
+	 * Die alte Kennung ist ab jetzt ein fremder Rechner (der, der sie weiter trägt), die Suche nach neuen Rechnern findet
+	 * ihren Ordner und liest ihre Listen ab Nummer 1 nach (für schon vorhandene Dateien nur ein Vergleich). Versionen, die
+	 * dieser Rechner bis zur Neuvergabe mit der alten Kennung schrieb, bleiben eigene ({@link Ownership}): Ausstehende werden
+	 * weiter hochgeladen, verlorene gemeldet und aufgelöst. Den Zeitpunkt der Neuvergabe nimmt die Uhr des Dienstes, dieselbe,
+	 * aus der die Versions-IDs ihre Zeit haben.
 	 */
 	private void regenerate(Link current) throws IOException {
 		MachineIdentity old;
 		synchronized (lock) {
 			old = machine;
 		}
-		MachineIdentity renewed = old.regenerate();
+		MachineIdentity renewed = old.regenerate(clock);
 		synchronized (lock) {
 			machine = renewed;
 			ids = new VersionIdGenerator(renewed.id(), clock);
@@ -2074,11 +2083,11 @@ public final class SyncService {
 		// der Index gehört zu einer Kennung (die Stände hängen davon ab, was "eigen" ist): neu aufbauen, die alten Dateien
 		// gelten als fremd
 		index.deleteCleanMarker();
-		index = newIndex(renewed.id());
+		index = newIndex(renewed.ownership());
 		refreshIndex(NO_PROGRESS);
 		// der neue Index kennt keine Listennummern
 		ownListsWanted = true;
-		current.bind(renewed.id(), local, clock);
+		current.bind(renewed.ownership(), local, clock);
 		wishFullSync(current);
 		notifier.duplicateMachine(StoreMessages.duplicateMachine());
 	}
@@ -2130,7 +2139,7 @@ public final class SyncService {
 		try {
 			Optional<byte[]> bytes = local.readClaimBytes(slot.unit(), slot.claimName());
 			Claim mine = bytes.isPresent() ? parseClaim(bytes.get()) : null;
-			if (mine != null && machineId().equals(mine.machine())) {
+			if (mine != null && ownership().isOwn(mine.machine(), mine.version())) {
 				rearm(new LocalScan.OwnClaim(slot.unit(), slot.claimName(), mine.version(), clock.instant()));
 			}
 		} catch (IOException e) {
@@ -2156,7 +2165,7 @@ public final class SyncService {
 			displace(current, slot.unit(), slot.claimName(), sharedBytes.get(), theirs, mine.version());
 			unwatch(slot.unit(), slot.claimName());
 			round.changed.add(slot.unit());
-		} else if (machineId().equals(mine.machine())) {
+		} else if (ownership().isOwn(mine.machine(), mine.version())) {
 			rearm(new LocalScan.OwnClaim(slot.unit(), slot.claimName(), mine.version(), clock.instant()));
 		}
 	}
@@ -2296,15 +2305,18 @@ public final class SyncService {
 	 * Liest alle eigenen Listen im gemeinsamen Ordner und trägt ihre Nummern für die aktuellen Versionen ein. Was danach noch
 	 * unbekannt ist, steht in keiner Liste ({@link UnitIndex#markUnknownOwnAsUnlisted}), sonst ginge ein Verkauf, der offline
 	 * entstand und nie in einer Liste stand, nie als dem Löschenden unbekannt ein. Eine unlesbare Liste wird übersprungen
-	 * (WARNING): ihre Versionen gelten dann als in keiner Liste, lieber einmal zu viel als verschluckt.
+	 * (WARNING): ihre Versionen gelten dann als in keiner Liste, lieber einmal zu viel als verschluckt. Gelesen werden nur
+	 * die Listen der aktuellen ID (die Nummern gelten für sie, {@link ConflictLedger}); eine eigene Version einer früheren
+	 * ID, die nicht nach der Neuvergabe noch einmal gelistet wurde, gilt deshalb ebenfalls als in keiner Liste.
 	 */
 	private void readOwnLists(Link current) throws IOException {
 		String me = machineId();
+		Ownership own = ownership();
 		Map<UnitKey, UnitSnapshot> snapshots = index.snapshots();
 		// die Stände, gegen die die Listen gelesen werden: nur für sie darf "in keiner Liste" gelten
 		Map<UnitKey, VersionId> examined = new HashMap<>();
 		snapshots.forEach((unit, snapshot) -> {
-			if (snapshot.version() != null && snapshot.version().isFrom(me)) {
+			if (snapshot.version() != null && own.isOwnId(snapshot.version())) {
 				examined.put(unit, snapshot.version());
 			}
 		});
@@ -2372,7 +2384,7 @@ public final class SyncService {
 		created.connectMode = mode;
 		created.probeFirst = mode != null;
 		synchronized (lock) {
-			created.bind(machine.id(), local, clock);
+			created.bind(machine.ownership(), local, clock);
 			link = created;
 			jobs.clear();
 			queued.clear();
@@ -2416,10 +2428,23 @@ public final class SyncService {
 		}
 	}
 
-	/** Die ID dieses Rechners ({@link MachineIdentity}); sie steht in jeder eigenen Version. */
+	/**
+	 * Die aktuelle ID dieses Rechners ({@link MachineIdentity}); sie steht in jeder neuen eigenen Version. Ob eine Version
+	 * eigen ist, entscheidet {@link #ownership()}, nicht der Vergleich mit dieser ID.
+	 */
 	public String machineId() {
 		synchronized (lock) {
 			return machine.id();
+		}
+	}
+
+	/**
+	 * Was dieser Rechner als eigen ansieht: die aktuelle ID und die früheren bis zu ihrer Neuvergabe (SYS-011, siehe
+	 * {@link Ownership}). Nimmt nur kurz {@code lock}; darf deshalb unter jeder anderen Sperre der Folge aufgerufen werden.
+	 */
+	Ownership ownership() {
+		synchronized (lock) {
+			return machine.ownership();
 		}
 	}
 
@@ -2476,6 +2501,11 @@ public final class SyncService {
 		}
 
 		@Override
+		public Ownership ownership() {
+			return SyncService.this.ownership();
+		}
+
+		@Override
 		public Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking) {
 			Map<UnitKey, UnitSnapshot> event = index.eventSnapshots(booking.eventId());
 			List<UnitKey> keys = event.keySet().stream()
@@ -2494,7 +2524,7 @@ public final class SyncService {
 
 		@Override
 		public Set<UnitKey> withOwnVersionsBesideChain(Collection<UnitKey> units) {
-			return index.withOwnBesideChain(units, machineId());
+			return index.withOwnBesideChain(units);
 		}
 
 		@Override

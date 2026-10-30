@@ -41,6 +41,7 @@ class UnitIndexTest {
 	private static final Clock CLOCK = Clock.fixed(AT, ZoneOffset.UTC);
 	private static final String ME = "maschine-1";
 	private static final String OTHER = "fremder2";
+	private static final Ownership OWN = new Ownership(ME, List.of());
 
 	private static final UnitKey EVENT = UnitKey.event("e1");
 	private static final UnitKey PRESENTATION = UnitKey.presentation("e1", "p1");
@@ -62,7 +63,7 @@ class UnitIndexTest {
 	}
 
 	private UnitIndex index() {
-		return new UnitIndex(indexDir, new NioFileLayer(), ME);
+		return new UnitIndex(indexDir, new NioFileLayer(), OWN);
 	}
 
 	private static VersionId id(int n, String machine) {
@@ -191,7 +192,7 @@ class UnitIndexTest {
 	@Test
 	void indexOfOtherMachineIsIgnored() throws IOException {
 		buildThreeUnits();
-		UnitIndex foreign = new UnitIndex(indexDir, new NioFileLayer(), "x");
+		UnitIndex foreign = new UnitIndex(indexDir, new NioFileLayer(), new Ownership("x", List.of()));
 		refresh(foreign, local);
 		foreign.flush();
 
@@ -606,7 +607,7 @@ class UnitIndexTest {
 		saveTwice(EVENT2, "event2");
 		saveTwice(HALL, "hall");
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
-		UnitIndex index = new UnitIndex(indexDir, layer, ME);
+		UnitIndex index = new UnitIndex(indexDir, layer, OWN);
 		refresh(index, local);
 		index.flush();
 		assertEquals(3, createdFiles(layer));
@@ -625,7 +626,7 @@ class UnitIndexTest {
 	void failedFlushKeepsFileMarkedChanged() throws IOException {
 		saveTwice(EVENT, "event");
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
-		UnitIndex index = new UnitIndex(indexDir, layer, ME);
+		UnitIndex index = new UnitIndex(indexDir, layer, OWN);
 		refresh(index, local);
 		layer.failNext("createNew", new IOException("Platte voll"));
 
@@ -645,7 +646,7 @@ class UnitIndexTest {
 
 		SlowWrite() throws Exception {
 			FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
-			index = new UnitIndex(indexDir, layer, ME);
+			index = new UnitIndex(indexDir, layer, OWN);
 			refresh(index, local);
 			CountDownLatch entered = new CountDownLatch(1);
 			layer.blockNext("createNew", entered, release);
@@ -745,7 +746,7 @@ class UnitIndexTest {
 	private Void addThirdVersion(SlowWrite write) throws IOException {
 		write(EVENT, ME, mine(3), mine(2), "event-3", true);
 		UnitFiles files = local.readUnit(EVENT);
-		write.index.update(files, ChainResolver.resolve(files, ME));
+		write.index.update(files, ChainResolver.resolve(files, OWN));
 		return null;
 	}
 
@@ -769,7 +770,7 @@ class UnitIndexTest {
 		index.flush();
 		write(EVENT, ME, mine(3), mine(2), "event-3", false);
 		UnitFiles files = local.readUnit(EVENT);
-		UnitState state = ChainResolver.resolve(files, ME);
+		UnitState state = ChainResolver.resolve(files, OWN);
 
 		index.update(files, state);
 
@@ -824,7 +825,7 @@ class UnitIndexTest {
 	void snapshotOfStateWithoutCurrentVersionHasNoVersionAndPayload() throws IOException {
 		UnitFiles files = local.readUnit(EVENT);
 
-		UnitSnapshot snapshot = UnitSnapshot.of(ChainResolver.resolve(files, ME));
+		UnitSnapshot snapshot = UnitSnapshot.of(ChainResolver.resolve(files, OWN));
 
 		assertEquals(EVENT, snapshot.unit());
 		assertNull(snapshot.version());
@@ -841,7 +842,7 @@ class UnitIndexTest {
 		local.writeVersion(EVENT, mine(1), bytes);
 		arbiter.claim(EVENT, deleted, bytes);
 
-		UnitSnapshot snapshot = UnitSnapshot.of(ChainResolver.resolve(local.readUnit(EVENT), ME));
+		UnitSnapshot snapshot = UnitSnapshot.of(ChainResolver.resolve(local.readUnit(EVENT), OWN));
 
 		assertTrue(snapshot.deleted());
 		assertEquals(mine(1), snapshot.version());
@@ -889,7 +890,7 @@ class UnitIndexTest {
 		buildCleanIndex();
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 
-		assertTrue(new UnitIndex(indexDir, layer, ME).loadIfClean());
+		assertTrue(new UnitIndex(indexDir, layer, OWN).loadIfClean());
 
 		assertTrue(layer.calls().stream().noneMatch(c -> c.startsWith("listTree ")), layer.calls().toString());
 	}
@@ -987,7 +988,7 @@ class UnitIndexTest {
 		assertFalse(Files.exists(cleanMarker()));
 		write(EVENT, ME, mine(3), mine(2), "event-3", false);
 		UnitFiles files = local.readUnit(EVENT);
-		index.update(files, ChainResolver.resolve(files, ME));
+		index.update(files, ChainResolver.resolve(files, OWN));
 
 		assertFalse(Files.exists(cleanMarker()));
 		assertFalse(index().loadIfClean());
@@ -1016,7 +1017,7 @@ class UnitIndexTest {
 		write(EVENT, ME, mine(3), mine(2), "event-3", false);
 		UnitFiles files = local.readUnit(EVENT);
 
-		index.update(files, ChainResolver.resolve(files, ME));
+		index.update(files, ChainResolver.resolve(files, OWN));
 
 		assertFalse(Files.exists(cleanMarker()));
 		assertFalse(index().loadIfClean());
@@ -1163,7 +1164,7 @@ class UnitIndexTest {
 	/** Löst die Einheit aus den Dateien auf und trägt sie ein, wie es der Dienst nach jeder Änderung tut. */
 	private UnitState resolveInto(UnitIndex index, UnitKey unit) throws IOException {
 		UnitFiles files = local.readUnit(unit);
-		UnitState state = ChainResolver.resolve(files, ME);
+		UnitState state = ChainResolver.resolve(files, OWN);
 		index.update(files, state);
 		return state;
 	}
@@ -1381,6 +1382,30 @@ class UnitIndexTest {
 		assertNull(index.entries().get(HALL).ownSeq(), "ein fremder Stand hat keine eigene Nummer");
 		index.markOwnListed(List.of(feedEntry(EVENT, mine(2))), 6);
 		assertEquals(6L, index.entries().get(EVENT).ownSeq(), "eine Nummer ab 1 ersetzt 'in keiner Liste'");
+	}
+
+	@Test
+	void versionsOfAPreviousIdCountAsOwnUntilTheChange() throws IOException {
+		String previous = "vorherig1";
+		Ownership own = new Ownership(ME, List.of(new Ownership.Previous(previous, Instant.ofEpochMilli(2_000_000L))));
+		// vor der Neuvergabe: eine ausstehende und eine beanspruchte Version der früheren ID
+		write(EVENT, previous, id(1, previous), null, "vorher", false);
+		write(PRESENTATION, previous, id(2, previous), null, "grenze", true);
+		// danach: die Kopie, die die alte ID weiter trägt (fremd)
+		write(HALL, previous, id(3, previous), null, "kopie", true);
+		UnitIndex index = new UnitIndex(indexDir, new NioFileLayer(), own);
+
+		UnitIndex.Refresh refresh = refresh(index, local);
+
+		assertEquals(Set.of(EVENT), refresh.pendingUnits());
+		assertEquals(Set.of(EVENT), index.withOwnBesideChain(List.of(EVENT, PRESENTATION, HALL)));
+		index.markOwnListed(List.of(feedEntry(PRESENTATION, id(2, previous))), 3);
+		UnitFiles files = local.readUnit(PRESENTATION);
+		index.update(files, ChainResolver.resolve(files, own));
+		assertEquals(3L, index.entries().get(PRESENTATION).ownSeq(), "die Nummer einer eigenen Version bleibt beim Auflösen");
+		index.markUnknownOwnAsUnlisted(Map.of(EVENT, id(1, previous), HALL, id(3, previous)));
+		assertEquals(0L, index.entries().get(EVENT).ownSeq());
+		assertNull(index.entries().get(HALL).ownSeq(), "die Version der Kopie ist fremd");
 	}
 
 	@Test

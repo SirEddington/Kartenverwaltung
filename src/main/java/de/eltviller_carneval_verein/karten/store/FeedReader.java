@@ -55,7 +55,7 @@ public final class FeedReader {
 
 	private final VersionStore shared;
 	private final VersionStore local;
-	private final String ownMachineId;
+	private final Ownership own;
 	private final SyncPositions positions;
 	private final Clock clock;
 
@@ -76,15 +76,17 @@ public final class FeedReader {
 	/**
 	 * @param shared       der gemeinsame Bestand
 	 * @param local        der lokale Bestand
-	 * @param ownMachineId die Kennung dieses Rechners; seine eigene Liste wird nie gelesen
-	 * @param positions    die zuletzt gelesenen Nummern
-	 * @param clock        die Uhr für die Fristen
+	 * @param own       was dieser Rechner als eigen ansieht. Die Liste der aktuellen ID wird nie gelesen. Die Listen einer
+	 *                  früheren ID schon: Nach einer Neuvergabe (SYS-011) schreibt dort der andere Rechner weiter, der
+	 *                  die alte ID trägt. Eigene Versionen darin (bis zur Neuvergabe) melden keine fremde Speicherung
+	 *                  ({@link FeedPoll#pending()}), und ein Anspruch einer früheren ID zählt beim Vergleich als eigener
+	 * @param positions die zuletzt gelesenen Nummern
+	 * @param clock     die Uhr für die Fristen
 	 */
-	public FeedReader(VersionStore shared, VersionStore local, String ownMachineId, SyncPositions positions,
-			Clock clock) {
+	public FeedReader(VersionStore shared, VersionStore local, Ownership own, SyncPositions positions, Clock clock) {
 		this.shared = shared;
 		this.local = local;
-		this.ownMachineId = ownMachineId;
+		this.own = own;
 		this.positions = positions;
 		this.clock = clock;
 	}
@@ -187,8 +189,12 @@ public final class FeedReader {
 		return peers;
 	}
 
+	/**
+	 * Ob die Listen dieser Kennung gelesen werden: jede gültige ID außer der aktuellen eigenen. Eine frühere eigene ID
+	 * zählt als fremder Rechner, denn ihre späteren Listen schreibt der Rechner, der sie weiter trägt.
+	 */
 	private boolean isPeerId(String id) {
-		return MACHINE_ID.matcher(id).matches() && !id.equals(ownMachineId);
+		return MACHINE_ID.matcher(id).matches() && !id.equals(own.currentId());
 	}
 
 	private List<String> peerDirectories() throws IOException {
@@ -358,7 +364,10 @@ public final class FeedReader {
 		Watch watch = new Watch(unit, entry.version(), entry.claim());
 		if (!watched.containsKey(watch)) {
 			watched.put(watch, now);
-			pending.add(new PendingSighting(unit, entry.version(), machineName(unit, entry.version())));
+			// eine eigene Version aus der Liste einer früheren ID ist keine fremde Speicherung: Sie lädt dieser Rechner hoch
+			if (!own.isOwnId(entry.version())) {
+				pending.add(new PendingSighting(unit, entry.version(), machineName(unit, entry.version())));
+			}
 		}
 	}
 
@@ -391,7 +400,7 @@ public final class FeedReader {
 			return;
 		}
 		Claim theirs = sharedBytes == null ? null : parseClaim(sharedBytes);
-		boolean ownOther = ownMachineId.equals(mine.machine()) && !mine.version().equals(listed);
+		boolean ownOther = own.isOwn(mine.machine(), mine.version()) && !mine.version().equals(listed);
 		boolean differs = theirs != null && !theirs.version().equals(mine.version());
 		if (ownOther || differs) {
 			contested.add(new FeedPoll.Contested(unit, claimName));

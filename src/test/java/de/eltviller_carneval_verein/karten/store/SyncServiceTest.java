@@ -781,7 +781,7 @@ class SyncServiceTest {
 
 	/** Baut den Start-Index des Rechners und schreibt ihn, damit der nächste Start keine Einheit lesen muss. */
 	private static void writeStartIndex(Path appData, String machineId) throws IOException {
-		UnitIndex index = new UnitIndex(appData.resolve("index"), new NioFileLayer(), machineId);
+		UnitIndex index = new UnitIndex(appData.resolve("index"), new NioFileLayer(), new Ownership(machineId, List.of()));
 		index.refresh(new VersionStore(appData.resolve("data"), new NioFileLayer()), p -> {
 		});
 		index.flush();
@@ -1219,6 +1219,149 @@ class SyncServiceTest {
 		a.service.tick();
 		assertEquals(v3.id(), a.service.unitState(BOOKING).head().id());
 		assertEquals(1, a.events.duplicates.size());
+	}
+
+	// --- Frühere Kennung nach SYS-011
+
+	/** Eine zweite Buchung derselben Vorstellung: Ihre Speicherung löst SYS-011 aus, ohne {@link #BOOKING} zu berühren. */
+	private static final UnitKey SECOND = UnitKey.booking("e1", "p1", "A-2");
+
+	/**
+	 * Löst SYS-011 aus: Eine kopierte Installation hat mit der Kennung des Rechners schon die Liste 2 geschrieben; das
+	 * Hochladen der nächsten Speicherung (auf {@link #SECOND}) stößt darauf, und der Rechner bekommt eine neue Kennung. Der
+	 * Rechner hat vorher genau eine Liste hochgeladen; die Uhr steht dabei.
+	 *
+	 * @return die Speicherung, die noch mit der alten Kennung entstand
+	 */
+	private Version triggerSys011(Node node) throws IOException {
+		String oldId = node.service.machineId();
+		Feed copy = new Feed(StoreCodec.FORMAT, oldId, 2, START, List.of());
+		Files.write(sharedRoot.resolve("data/feeds/" + oldId + "/2.json"), StoreCodec.write(copy));
+		Version saved = save(node, create(SECOND, "Berta"));
+		node.service.tick();
+		assertEquals(List.of(StoreMessages.duplicateMachine()), node.events.duplicates);
+		assertNotEquals(oldId, node.service.machineId());
+		assertEquals(oldId, saved.machine());
+		return saved;
+	}
+
+	/** Lässt das Schreiben von Listen im gemeinsamen Ordner scheitern, außer unter der Kennung {@code allowed}. */
+	private void breakListsExceptFor(Node node, String allowed, AtomicBoolean broken) {
+		Path feeds = sharedRoot.resolve("data/feeds");
+		node.layer.failWhen(p -> broken.get() && p.startsWith(feeds) && !p.startsWith(feeds.resolve(allowed)), "createNew",
+				new IOException("Liste nicht schreibbar"));
+	}
+
+	@Test
+	void pendingVersionOfThePreviousIdIsUploadedAfterSys011() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		// nach der Neuvergabe scheitert die Liste der neuen Kennung: Die Speicherung der alten bleibt ausstehend
+		AtomicBoolean broken = new AtomicBoolean(true);
+		breakListsExceptFor(a, a.service.machineId(), broken);
+		Version v2 = triggerSys011(a);
+		String newId = a.service.machineId();
+		assertTrue(a.service.unitState(SECOND).provisional());
+		assertTrue(a.service.ownership().isOwn(v2));
+
+		// neu verbinden verwirft die Aufträge: Was aussteht, findet der Vollabgleich im Bestand
+		broken.set(false);
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.tick();
+
+		assertEquals(v2.id(), sharedClaim(SECOND, "root").version());
+		assertEquals(List.of(v2.id()), feedVersions(newId, 1));
+		assertFalse(a.service.unitState(SECOND).provisional());
+	}
+
+	@Test
+	void lateDefeatOfAVersionFromBeforeSys011IsReported() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		triggerSys011(a);
+
+		Version foreign = overrideSharedClaim(BOOKING, "root");
+		a.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(v1.id()), foreign.id())), a.events.lost);
+		assertEquals(foreign.id(), a.service.unitState(BOOKING).head().id());
+	}
+
+	@Test
+	void ownershipSurvivesARestartAfterSys011() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		String oldId = a.service.machineId();
+		breakListsExceptFor(a, oldId, new AtomicBoolean(true));
+		Version v2 = triggerSys011(a);
+		Ownership own = a.service.ownership();
+
+		// Neustart mit der neuen Kennung; die Speicherung der alten wartet noch aufs Hochladen
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertEquals(own, b.service.ownership());
+		assertEquals(List.of(new Ownership.Previous(oldId, START)), own.previous());
+		b.service.startup(shared);
+
+		assertEquals(v2.id(), sharedClaim(SECOND, "root").version());
+		assertEquals(List.of(v2.id()), feedVersions(b.service.machineId(), 1));
+
+		// auch nach dem Neustart wird der eigene Anspruch von vor der Neuvergabe auf eine späte Niederlage geprüft
+		Version foreign = overrideSharedClaim(BOOKING, "root");
+		b.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(v1.id()), foreign.id())), b.events.lost);
+	}
+
+	@Test
+	void versionOfThePreviousIdAfterUntilIsForeign() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		String oldId = a.service.machineId();
+		triggerSys011(a);
+		// die kopierte Installation trägt die alte Kennung weiter und speichert nach der Neuvergabe auf v1, noch ohne Anspruch
+		clock.advance(Duration.ofMinutes(1));
+		Version copy = version(oldId, clock.millis(), 0, "kopie", v1.id());
+		listOnly(new VersionStore(sharedRoot.resolve("data"), new NioFileLayer()), 3, BOOKING, copy);
+		assertFalse(a.service.ownership().isOwn(copy));
+
+		a.service.syncNow();
+		a.service.tick();
+
+		assertTrue(Files.exists(localFile(a, BOOKING, copy.id() + ".json")), "die Version der Kopie ist angekommen");
+		UnitState state = a.service.unitState(BOOKING);
+		assertEquals(List.of(), state.pending());
+		assertEquals(v1.id(), state.current().id());
+		assertFalse(Files.exists(sharedFile(BOOKING, "claims/" + v1.id() + ".json")), "nicht für die Kopie beansprucht");
+		// die Listen der alten Kennung liest der Rechner wie die eines fremden: Die Speicherung der Kopie ist unterwegs
+		assertTrue(a.events.pending.stream().anyMatch(sighting -> sighting.version().equals(copy.id())), a.events.pending.toString());
+	}
+
+	@Test
+	void sectionDeletesOldTempsOfAPreviousIdToo() throws IOException {
+		UnitKey hall = UnitKey.hall("h1");
+		MachineIdentity before = MachineIdentity.loadOrCreate(dir.resolve("a"), () -> "a");
+		before.regenerate(clock);
+		Node a = nodeWithForeignHallInSharedFolder(hall);
+		assertNotEquals(before.id(), a.service.machineId());
+		Path unitDir = sharedFile(hall, "x").getParent();
+		Duration old = SyncService.TEMP_AGE.plusHours(1);
+		Path previousOld = tempFile(unitDir, before.id(), old);
+		Path currentOld = tempFile(unitDir, a.service.machineId(), old);
+		Path foreignOld = tempFile(unitDir, OTHER, old);
+
+		a.service.syncNow();
+
+		assertFalse(Files.exists(previousOld));
+		assertFalse(Files.exists(currentOld));
+		assertTrue(Files.exists(foreignOld));
 	}
 
 	@Test
@@ -2333,7 +2476,7 @@ class SyncServiceTest {
 		VersionStore store = new VersionStore(appData.resolve("data"), new NioFileLayer());
 		Map<UnitKey, UnitSnapshot> expected = new java.util.HashMap<>();
 		for (UnitKey unit : store.allUnits()) {
-			expected.put(unit, UnitSnapshot.of(ChainResolver.resolve(store.readUnit(unit), machineId)));
+			expected.put(unit, UnitSnapshot.of(ChainResolver.resolve(store.readUnit(unit), new Ownership(machineId, List.of()))));
 		}
 		return expected;
 	}

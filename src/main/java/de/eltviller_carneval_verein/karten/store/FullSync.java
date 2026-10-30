@@ -41,7 +41,8 @@ public final class FullSync {
 	 * <ol>
 	 * <li>Versionsdateien, die auf einer Seite fehlen, werden auf die andere kopiert.</li>
 	 * <li>Anspruchsdateien, die lokal fehlen, werden aus dem gemeinsamen Ordner kopiert.</li>
-	 * <li>Ohne {@code uploadLocalClaims}: Eigene lokale Ansprüche (Rechner = {@code ownMachineId}), die auch im gemeinsamen
+	 * <li>Ohne {@code uploadLocalClaims}: Eigene lokale Ansprüche (nach {@code own}, auch die einer früheren ID von vor ihrer
+	 * Neuvergabe), die auch im gemeinsamen
 	 * Ordner liegen, werden verglichen; nennt der gemeinsame eine andere Version, steht der Platz in
 	 * {@link FullSyncResult#contested()} (nichts wird ersetzt). Das fängt späte Niederlagen, die keine Änderungsliste
 	 * aufgedeckt hat; Kosten: zwei Lesezugriffe je eigenem Anspruch auf beiden Seiten.</li>
@@ -65,32 +66,31 @@ public final class FullSync {
 	 * @param shared            der gemeinsame Bestand
 	 * @param uploadLocalClaims ob alle lokalen Anspruchsdateien in den gemeinsamen Ordner gelegt werden (Verbinden mit
 	 *                          Mitnehmen); sonst fließen nach außen nur eigene Ansprüche, die dort fehlen
-	 * @param ownMachineId      die ID des eigenen Rechners (für eigene Ansprüche und die verlorenen Versionen)
+	 * @param own               was dieser Rechner als eigen ansieht (für eigene Ansprüche und die verlorenen Versionen)
 	 * @param files             die Dateischicht, über die ein verdrängter lokaler Anspruch ersetzt wird
 	 * @param clock             die Uhr für den Zeitstempel im Namen verdrängter Ansprüche
 	 */
 	public static FullSyncResult run(VersionStore local, VersionStore shared, boolean uploadLocalClaims,
-			String ownMachineId, FileLayer files, Clock clock) throws IOException {
-		return run(local, shared, uploadLocalClaims, ownMachineId, files, clock, claim -> {
+			Ownership own, FileLayer files, Clock clock) throws IOException {
+		return run(local, shared, uploadLocalClaims, own, files, clock, claim -> {
 		});
 	}
 
 	/**
-	 * Wie {@link #run(VersionStore, VersionStore, boolean, String, FileLayer, Clock)}; meldet zusätzlich jeden lokalen
+	 * Wie {@link #run(VersionStore, VersionStore, boolean, Ownership, FileLayer, Clock)}; meldet zusätzlich jeden lokalen
 	 * Anspruch, sobald er im gemeinsamen Ordner angelegt ist, auch wenn der Abgleich danach abbricht.
 	 *
 	 * @param uploaded erfährt jeden hochgeladenen Anspruch sofort
 	 */
 	public static FullSyncResult run(VersionStore local, VersionStore shared, boolean uploadLocalClaims,
-			String ownMachineId, FileLayer files, Clock clock, Consumer<FullSyncResult.UploadedClaim> uploaded)
+			Ownership own, FileLayer files, Clock clock, Consumer<FullSyncResult.UploadedClaim> uploaded)
 			throws IOException {
-		return syncUnits(local, shared, unitsOfBoth(local, shared), uploadLocalClaims, ownMachineId, files, clock,
-				uploaded);
+		return syncUnits(local, shared, unitsOfBoth(local, shared), uploadLocalClaims, own, files, clock, uploaded);
 	}
 
 	/**
 	 * Gleicht die genannten Einheiten ab, eine nach der anderen in der gegebenen Reihenfolge, je Einheit in den Schritten
-	 * von {@link #run(VersionStore, VersionStore, boolean, String, FileLayer, Clock)}. Betrachtet werden nur die Dateien
+	 * von {@link #run(VersionStore, VersionStore, boolean, Ownership, FileLayer, Clock)}. Betrachtet werden nur die Dateien
 	 * im Ordner der Einheit und in ihrem {@code claims/} ({@link VersionStore#unitDataFiles}), nicht die ihrer
 	 * Unterordner. Eine Einheit, die dieser Aufruf als umstritten meldet, lädt keinen eigenen Anspruch hoch: Die Klärung
 	 * ist Sache des Aufrufers, und der nächste Lauf lädt hoch, was danach noch gilt.
@@ -99,9 +99,9 @@ public final class FullSync {
 	 * @param uploaded erfährt jeden hochgeladenen Anspruch sofort, auch wenn der Abgleich danach abbricht
 	 */
 	public static FullSyncResult syncUnits(VersionStore local, VersionStore shared, Collection<UnitKey> units,
-			boolean uploadLocalClaims, String ownMachineId, FileLayer files, Clock clock,
+			boolean uploadLocalClaims, Ownership own, FileLayer files, Clock clock,
 			Consumer<FullSyncResult.UploadedClaim> uploaded) throws IOException {
-		Run run = new Run(local, shared, ownMachineId, files, clock, uploaded);
+		Run run = new Run(local, shared, own, files, clock, uploaded);
 		for (UnitKey unit : units) {
 			run.syncUnit(unit, uploadLocalClaims);
 		}
@@ -227,7 +227,7 @@ public final class FullSync {
 
 		private final VersionStore local;
 		private final VersionStore shared;
-		private final String ownMachineId;
+		private final Ownership own;
 		private final FileLayer files;
 		private final Clock clock;
 
@@ -246,11 +246,11 @@ public final class FullSync {
 		private final List<String> sharedTemps = new ArrayList<>();
 		private final Consumer<FullSyncResult.UploadedClaim> onUpload;
 
-		Run(VersionStore local, VersionStore shared, String ownMachineId, FileLayer files, Clock clock,
+		Run(VersionStore local, VersionStore shared, Ownership own, FileLayer files, Clock clock,
 				Consumer<FullSyncResult.UploadedClaim> onUpload) {
 			this.local = local;
 			this.shared = shared;
-			this.ownMachineId = ownMachineId;
+			this.own = own;
 			this.files = files;
 			this.clock = clock;
 			this.onUpload = onUpload;
@@ -346,7 +346,7 @@ public final class FullSync {
 		 */
 		private void checkOwnClaim(DataPath file) throws IOException {
 			Claim mine = parseClaim(local.readRelative(file.path()));
-			if (mine == null || !ownMachineId.equals(mine.machine())) {
+			if (mine == null || !own.isOwn(mine.machine(), mine.version())) {
 				return;
 			}
 			Claim theirs = parseClaim(shared.readRelative(file.path()));
@@ -368,13 +368,13 @@ public final class FullSync {
 		 * Legt den lokalen Anspruch im gemeinsamen Ordner an, außer er baut auf einer verlorenen Version auf. Liegt dort
 		 * inzwischen ein Anspruch auf eine andere Version, gewinnt dieser ({@link #settle}).
 		 *
-		 * @param ownOnly nur einen eigenen Anspruch (Rechner = eigene ID) hochladen; dann zählen als verloren auch die
-		 *                Strecken, die der lokale Stand schon als verloren zeigt
+		 * @param ownOnly nur einen eigenen Anspruch (nach {@link Ownership#isOwn(String, VersionId)}) hochladen; dann zählen
+		 *                als verloren auch die Strecken, die der lokale Stand schon als verloren zeigt
 		 */
 		private void uploadClaim(DataPath file, boolean ownOnly) throws IOException {
 			Optional<byte[]> localBytes = local.readRelative(file.path());
 			Claim mine = parseClaim(localBytes);
-			if (mine == null || ownOnly && !ownMachineId.equals(mine.machine())) {
+			if (mine == null || ownOnly && !own.isOwn(mine.machine(), mine.version())) {
 				return;
 			}
 			if (ownOnly) {
@@ -409,7 +409,7 @@ public final class FullSync {
 			if (!lostChecked.add(unit)) {
 				return;
 			}
-			UnitState state = ChainResolver.resolve(local.readUnit(unit), ownMachineId);
+			UnitState state = ChainResolver.resolve(local.readUnit(unit), own);
 			for (List<VersionId> stretch : state.lost()) {
 				Set<String> ids = lostIds.computeIfAbsent(unit, u -> new HashSet<>());
 				for (VersionId id : stretch) {
@@ -443,7 +443,7 @@ public final class FullSync {
 
 		/** Die Strecke eigener verlorener Versionen, in der die Version steht; sonst nur sie selbst. */
 		private List<VersionId> stretchOf(UnitKey unit, VersionId version) throws IOException {
-			UnitState state = ChainResolver.resolve(local.readUnit(unit), ownMachineId);
+			UnitState state = ChainResolver.resolve(local.readUnit(unit), own);
 			for (List<VersionId> stretch : state.lost()) {
 				if (stretch.contains(version)) {
 					return stretch;

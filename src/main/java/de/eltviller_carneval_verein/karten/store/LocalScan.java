@@ -34,47 +34,50 @@ final class LocalScan {
 	private LocalScan() {
 	}
 
-	/** Alle lesbaren Anspruchsdateien des lokalen Bestands, die dieser Rechner geschrieben hat. */
-	static List<OwnClaim> ownClaims(VersionStore local, String ownMachineId) throws IOException {
-		return ownClaims(local, ownMachineId, local.allUnits());
+	/**
+	 * Alle lesbaren Anspruchsdateien des lokalen Bestands, die dieser Rechner geschrieben hat (Rechner des Anspruchs und
+	 * beanspruchte Version eigen nach {@code own}, auch unter einer früheren ID).
+	 */
+	static List<OwnClaim> ownClaims(VersionStore local, Ownership own) throws IOException {
+		return ownClaims(local, own, local.allUnits());
 	}
 
 	/** Die lesbaren Anspruchsdateien der genannten Einheiten, die dieser Rechner geschrieben hat. */
-	private static List<OwnClaim> ownClaims(VersionStore local, String ownMachineId, Collection<UnitKey> units)
+	private static List<OwnClaim> ownClaims(VersionStore local, Ownership own, Collection<UnitKey> units)
 			throws IOException {
-		List<OwnClaim> own = new ArrayList<>();
+		List<OwnClaim> claims = new ArrayList<>();
 		for (UnitKey unit : units) {
 			for (ClaimFile file : local.readUnit(unit).claims().values()) {
 				Claim claim = file.claim();
-				if (claim != null && ownMachineId.equals(claim.machine())) {
-					own.add(new OwnClaim(unit, file.name(), claim.version(), claim.at()));
+				if (claim != null && own.isOwn(claim.machine(), claim.version())) {
+					claims.add(new OwnClaim(unit, file.name(), claim.version(), claim.at()));
 				}
 			}
 		}
-		return own;
+		return claims;
 	}
 
 	/**
 	 * Die eigenen Anspruchsdateien, die jünger sind als {@code window}: nach einem Neustart weiter auf eine späte
 	 * Niederlage zu prüfen.
 	 */
-	static List<OwnClaim> recentOwnClaims(VersionStore local, String ownMachineId, Instant now, Duration window)
+	static List<OwnClaim> recentOwnClaims(VersionStore local, Ownership own, Instant now, Duration window)
 			throws IOException {
 		Instant since = now.minus(window);
-		return ownClaims(local, ownMachineId).stream().filter(claim -> claim.at().isAfter(since)).toList();
+		return ownClaims(local, own).stream().filter(claim -> claim.at().isAfter(since)).toList();
 	}
 
 	/**
-	 * Wie {@link #recentOwnClaims(VersionStore, String, Instant, Duration)}, aber nur über die Ansprüche der genannten
+	 * Wie {@link #recentOwnClaims(VersionStore, Ownership, Instant, Duration)}, aber nur über die Ansprüche der genannten
 	 * Einheiten (etwa die Kandidaten aus dem Start-Index): Die übrigen werden nicht gelesen. Ob ein Anspruch jung ist,
 	 * entscheidet weiter {@link OwnClaim#at()}.
 	 *
 	 * @param units die Einheiten, deren Ansprüche gelesen werden
 	 */
-	static List<OwnClaim> recentOwnClaims(VersionStore local, String ownMachineId, Instant now, Duration window,
+	static List<OwnClaim> recentOwnClaims(VersionStore local, Ownership own, Instant now, Duration window,
 			Collection<UnitKey> units) throws IOException {
 		Instant since = now.minus(window);
-		return ownClaims(local, ownMachineId, units).stream().filter(claim -> claim.at().isAfter(since)).toList();
+		return ownClaims(local, own, units).stream().filter(claim -> claim.at().isAfter(since)).toList();
 	}
 
 	/**
@@ -84,15 +87,16 @@ final class LocalScan {
 	 * nach ihrer kleinsten Versions-ID. Jede Einheit wird aus den Dateien aufgelöst; eine Auswahl (etwa die Kandidaten aus
 	 * dem Start-Index) spart nur das Lesen der übrigen.
 	 *
+	 * @param own   was eigen ist (auch Versionen einer früheren ID bis zu ihrer Neuvergabe: sie werden weiter hochgeladen)
 	 * @param skip  Versionen, die schon in einem Auftrag stehen; sie kommen nicht noch einmal vor
 	 * @param units die Einheiten, die untersucht werden (alle: {@link VersionStore#allUnits()})
 	 */
-	static List<UploadJob> pendingJobs(VersionStore local, String ownMachineId, Set<VersionId> skip,
+	static List<UploadJob> pendingJobs(VersionStore local, Ownership own, Set<VersionId> skip,
 			Collection<UnitKey> units) throws IOException {
 		Map<String, Map<UnitKey, List<UploadJob.Item>>> groups = new LinkedHashMap<>();
 		for (UnitKey unit : units) {
 			UnitFiles files = local.readUnit(unit);
-			for (Version version : ChainResolver.resolve(files, ownMachineId).pending()) {
+			for (Version version : ChainResolver.resolve(files, own).pending()) {
 				if (skip.contains(version.id())) {
 					continue;
 				}

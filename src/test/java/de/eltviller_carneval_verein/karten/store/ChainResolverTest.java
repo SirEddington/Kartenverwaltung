@@ -29,6 +29,11 @@ class ChainResolverTest {
 
 	private static final String ME = "aaaaaaaa";
 	private static final String OTHER = "bbbbbbbb";
+	/** Die frühere ID dieses Rechners (vor SYS-011); sie galt bis {@link #UNTIL}. */
+	private static final String PREVIOUS = "cccccccc";
+	/** Zeitpunkt der Neuvergabe: Versionen der früheren ID bis hier (Nummer 5) sind eigen. */
+	private static final Instant UNTIL = Instant.ofEpochMilli(5000L);
+	private static final Ownership OWN = new Ownership(ME, List.of(new Ownership.Previous(PREVIOUS, UNTIL)));
 
 	/** Versions-IDs: je größer die Zahl, desto später die ID; der Rechner ist nur Teil des Namens. */
 	private static VersionId id(int n, String machine) {
@@ -41,6 +46,10 @@ class ChainResolverTest {
 
 	private static VersionId theirs(int n) {
 		return id(n, OTHER);
+	}
+
+	private static VersionId previous(int n) {
+		return id(n, PREVIOUS);
 	}
 
 	/** Baut die Dateien einer Einheit im Speicher auf. */
@@ -95,7 +104,7 @@ class ChainResolverTest {
 		}
 
 		UnitState resolve() {
-			return ChainResolver.resolve(new UnitFiles(UNIT, versions, claims), ME);
+			return ChainResolver.resolve(new UnitFiles(UNIT, versions, claims), OWN);
 		}
 	}
 
@@ -358,6 +367,41 @@ class ChainResolverTest {
 		assertEquals(List.of(theirs(1)), ids(state.chain()));
 		assertTrue(state.pending().isEmpty());
 		assertTrue(state.lost().isEmpty());
+	}
+
+	// --- frühere eigene ID (nach SYS-011)
+
+	@Test
+	void pendingVersionOfAPreviousIdIsOwnPending() throws IOException {
+		// previous(2) entstand vor der Neuvergabe, mine(6) danach auf ihr: eine Strecke über den Wechsel der ID
+		UnitState state = new Unit().version(theirs(1)).version(previous(2), theirs(1)).version(mine(6), previous(2))
+				.claim("root", theirs(1)).resolve();
+
+		assertEquals(List.of(previous(2), mine(6)), ids(state.pending()));
+		assertTrue(state.lost().isEmpty());
+		assertEquals(mine(6), state.current().id());
+		assertTrue(state.provisional());
+	}
+
+	@Test
+	void lostStretchOfAPreviousIdIsReportedAsOwnLoss() throws IOException {
+		UnitState state = new Unit().version(theirs(1)).version(previous(2)).version(previous(5), previous(2))
+				.version(mine(6), previous(5)).claim("root", theirs(1)).resolve();
+
+		assertTrue(state.pending().isEmpty());
+		assertEquals(List.of(List.of(previous(2), previous(5), mine(6))), state.lost(),
+				"die Grenze zählt mit (previous(5) liegt genau auf ihr)");
+	}
+
+	@Test
+	void versionOfAPreviousIdAfterUntilIsForeign() throws IOException {
+		// previous(6) schrieb der andere Rechner, der die alte ID nach der Neuvergabe weiter trägt
+		UnitState state = new Unit().version(theirs(1)).version(previous(6), theirs(1)).version(previous(7))
+				.claim("root", theirs(1)).resolve();
+
+		assertTrue(state.pending().isEmpty());
+		assertTrue(state.lost().isEmpty());
+		assertEquals(theirs(1), state.current().id());
 	}
 
 	@Test

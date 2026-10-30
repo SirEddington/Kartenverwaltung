@@ -176,7 +176,10 @@ final class UnitIndex {
 
 	private final Path indexDir;
 	private final FileLayer files;
+	/** Die aktuelle ID dieses Rechners: Sie steht in den Index-Dateien und in der Marke "sauber beendet". */
 	private final String machineId;
+	/** Was als eigen gilt (aktuelle und frühere IDs); danach werden die Stände aufgelöst. */
+	private final Ownership own;
 
 	private final Map<UnitKey, Entry> entries = new HashMap<>();
 	/**
@@ -204,14 +207,17 @@ final class UnitIndex {
 	private Deleter deleter = Files::deleteIfExists;
 
 	/**
-	 * @param indexDir  der Ordner des Index ({@code <AppData>/index})
-	 * @param files     die Dateischicht, über die der Index gelesen und geschrieben wird
-	 * @param machineId die ID dieses Rechners; Index-Dateien anderer Rechner werden nicht übernommen
+	 * @param indexDir der Ordner des Index ({@code <AppData>/index})
+	 * @param files    die Dateischicht, über die der Index gelesen und geschrieben wird
+	 * @param own      was dieser Rechner als eigen ansieht. Seine aktuelle ID kommt in die Index-Dateien; Index-Dateien
+	 *                 mit einer anderen ID (auch einer früheren eigenen) werden nicht übernommen, denn ihre Stände hingen
+	 *                 von einem anderen "eigen" ab
 	 */
-	UnitIndex(Path indexDir, FileLayer files, String machineId) {
+	UnitIndex(Path indexDir, FileLayer files, Ownership own) {
 		this.indexDir = indexDir;
 		this.files = files;
-		this.machineId = machineId;
+		this.machineId = own.currentId();
+		this.own = own;
 	}
 
 	/**
@@ -312,7 +318,7 @@ final class UnitIndex {
 			Entry entry = entries.get(unit.getKey());
 			if (entry == null || !entry.fingerprint().equals(fingerprintFromListing(tree, unit.getValue()))) {
 				UnitFiles unitFiles = local.readUnit(unit.getKey());
-				update(unitFiles, ChainResolver.resolve(unitFiles, machineId));
+				update(unitFiles, ChainResolver.resolve(unitFiles, own));
 				resolved++;
 			}
 			done++;
@@ -442,7 +448,7 @@ final class UnitIndex {
 	private Long ownSeqOf(Entry previous, UnitKey unit, Version current, Set<VersionId> chainIds, Set<VersionId> absorbed) {
 		Map<VersionId, Long> remembered = ownListedYet.get(unit);
 		Long number = null;
-		if (current != null && machineId.equals(current.machine())) {
+		if (current != null && own.isOwn(current)) {
 			if (previous != null && current.id().equals(previous.snapshot().version())) {
 				number = previous.ownSeq();
 			}
@@ -480,8 +486,7 @@ final class UnitIndex {
 
 	private boolean isUnclaimedForeign(UnitFiles unitFiles, UnitState state, VersionId id) {
 		VersionFile file = unitFiles.versions().get(id);
-		return file != null && file.version() != null && !machineId.equals(file.version().machine())
-				&& !state.claimed().contains(id);
+		return file != null && file.version() != null && !own.isOwn(file.version()) && !state.claimed().contains(id);
 	}
 
 	/** Eine unveränderliche Kopie der Einträge. */
@@ -544,14 +549,14 @@ final class UnitIndex {
 	/**
 	 * Die genannten Einheiten mit eigenen Versionen außerhalb ihrer Kette: verlorene ({@link Entry#lost()}), ausstehende
 	 * ({@link Entry#pending()}) oder aufgegangene von diesem Rechner ({@link Entry#absorbed()}). Einheiten ohne Eintrag
-	 * fehlen. Greift nur auf die genannten Einträge zu.
+	 * fehlen. Greift nur auf die genannten Einträge zu. Eigen ist eine aufgegangene Version nach dem Kürzel ihrer ID
+	 * ({@link Ownership#isOwnId}, auch unter einer früheren ID).
 	 */
-	synchronized Set<UnitKey> withOwnBesideChain(Collection<UnitKey> units, String machineId) {
+	synchronized Set<UnitKey> withOwnBesideChain(Collection<UnitKey> units) {
 		Set<UnitKey> result = new LinkedHashSet<>();
 		for (UnitKey unit : units) {
 			Entry entry = entries.get(unit);
-			if (entry != null && (entry.lost() || entry.pending()
-					|| entry.absorbed().stream().anyMatch(version -> version.isFrom(machineId)))) {
+			if (entry != null && (entry.lost() || entry.pending() || entry.absorbed().stream().anyMatch(own::isOwnId))) {
 				result.add(unit);
 			}
 		}
@@ -643,7 +648,9 @@ final class UnitIndex {
 	 * eingetragen sind: Was dann noch unbekannt ist, steht in keiner. Nur wo der Eintrag noch genau die geprüfte Version als
 	 * aktuelle hat: Eine Version, die erst nach der Prüfung entstand oder die Einheit ablöste, wurde nicht gegen die Listen
 	 * gelesen, und eine falsche {@code 0} liesse sie als dem Löschenden unbekannt erscheinen. Wie überall erkennt der Index
-	 * eigene Versionen am Kürzel ihrer ID ({@link VersionId#isFrom}).
+	 * eigene Versionen am Kürzel ihrer ID ({@link Ownership#isOwnId}); auch eine Version einer früheren ID von vor der
+	 * Neuvergabe bekommt die {@code 0}, denn gelesen werden nur die Listen der aktuellen ID: lieber ein Konflikt zu viel als
+	 * ein verschluckter.
 	 *
 	 * @param examined die Einheiten mit der aktuellen Version, die beim Lesen der Listen galt
 	 */
@@ -653,7 +660,7 @@ final class UnitIndex {
 			Entry entry = entries.get(item.getKey());
 			VersionId version = item.getValue();
 			if (entry != null && version != null && version.equals(entry.snapshot().version()) && entry.ownSeq() == null
-					&& version.isFrom(machineId)) {
+					&& own.isOwnId(version)) {
 				entries.put(item.getKey(), entry.withOwnSeq(0L));
 				markChanged(groupOf(item.getKey()));
 				changed = true;
@@ -961,15 +968,15 @@ final class UnitIndex {
 		deleteLeftoverTemps();
 		Path marker = cleanMarker();
 		markerWritten = false;
-		boolean own;
+		boolean ownMarker;
 		try {
 			if (!Files.exists(marker)) {
 				return false;
 			}
-			own = machineId.equals(Files.readString(marker, StandardCharsets.UTF_8));
+			ownMarker = machineId.equals(Files.readString(marker, StandardCharsets.UTF_8));
 		} catch (IOException | RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ist unlesbar: " + marker, e);
-			own = false;
+			ownMarker = false;
 		}
 		try {
 			deleter.delete(marker);
@@ -980,7 +987,7 @@ final class UnitIndex {
 			}
 			return false;
 		}
-		if (!own) {
+		if (!ownMarker) {
 			return false;
 		}
 		Map<String, List<Entry>> read = new LinkedHashMap<>();

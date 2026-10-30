@@ -38,6 +38,10 @@ class FullSyncTest {
 	private static final Clock CLOCK = Clock.fixed(AT, ZoneOffset.UTC);
 	private static final String ME = "maschine-1";
 	private static final String OTHER = "maschine-2";
+	/** Die frühere ID dieses Rechners; sie galt bis zwischen {@link #V1} und {@link #V2}. */
+	private static final String PREVIOUS = "maschine-0";
+	private static final Ownership OWN = new Ownership(ME,
+			List.of(new Ownership.Previous(PREVIOUS, Instant.ofEpochMilli(1_500_000L))));
 
 	private static final UnitKey E1 = UnitKey.event("e1");
 	private static final UnitKey E2 = UnitKey.event("e2");
@@ -82,7 +86,7 @@ class FullSyncTest {
 	}
 
 	private FullSyncResult run(boolean upload) throws IOException {
-		return FullSync.run(local, shared, upload, ME, files, CLOCK);
+		return FullSync.run(local, shared, upload, OWN, files, CLOCK);
 	}
 
 	private static boolean has(VersionStore store, String rel) throws IOException {
@@ -208,7 +212,7 @@ class FullSyncTest {
 		shared.createClaim(E2, "root", knownClaim);
 		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
 
-		FullSyncResult result = FullSync.run(local, shared, true, ME, files, CLOCK, seen::add);
+		FullSyncResult result = FullSync.run(local, shared, true, OWN, files, CLOCK, seen::add);
 
 		List<FullSyncResult.UploadedClaim> expected = List.of(new FullSyncResult.UploadedClaim(E1, "root", V1),
 				new FullSyncResult.UploadedClaim(HALL, "root", V2));
@@ -231,7 +235,7 @@ class FullSyncTest {
 		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
 		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
 
-		assertThrows(IOException.class, () -> FullSync.run(local, faultyShared, true, ME, files, CLOCK, seen::add));
+		assertThrows(IOException.class, () -> FullSync.run(local, faultyShared, true, OWN, files, CLOCK, seen::add));
 
 		assertEquals(List.of(new FullSyncResult.UploadedClaim(E1, "root", V1)), seen);
 	}
@@ -265,7 +269,7 @@ class FullSyncTest {
 		assertArrayEquals(mineBytes, shared.readVersionBytes(E1, V1).orElseThrow());
 		assertTrue(shared.readClaimBytes(E1, V1.value()).isEmpty());
 		assertEquals(UnitState.Status.OK,
-				ChainResolver.resolve(shared.readUnit(E1), ME).status());
+				ChainResolver.resolve(shared.readUnit(E1), OWN).status());
 	}
 
 	@Test
@@ -388,6 +392,38 @@ class FullSyncTest {
 	}
 
 	@Test
+	void ownClaimsOfAPreviousIdAreUploadedOnlyUntilTheChange() throws IOException {
+		// V1 entstand vor der Neuvergabe (eigen), V2 danach unter derselben alten ID (die Kopie: fremd)
+		Version before = version(PREVIOUS, V1);
+		put(local, E1, before);
+		claim(local, E1, before, AT);
+		Version after = version(PREVIOUS, V2);
+		put(local, E2, after);
+		claim(local, E2, after, AT);
+
+		FullSyncResult result = run(false);
+
+		assertTrue(shared.readClaimBytes(E1, "root").isPresent());
+		assertTrue(shared.readClaimBytes(E2, "root").isEmpty());
+		assertEquals(List.of(new FullSyncResult.UploadedClaim(E1, "root", V1)), result.uploaded());
+	}
+
+	@Test
+	void ownClaimOfAPreviousIdIsComparedForALateDefeat() throws IOException {
+		Version mine = version(PREVIOUS, V1);
+		byte[] mineBytes = put(local, E1, mine);
+		claim(local, E1, mine, AT);
+		shared.writeVersion(E1, V1, mineBytes);
+		Version foreign = version(OTHER, FOREIGN);
+		put(shared, E1, foreign);
+		claim(shared, E1, foreign, AT);
+
+		FullSyncResult result = run(false);
+
+		assertEquals(List.of(new FeedPoll.Contested(E1, "root")), result.contested());
+	}
+
+	@Test
 	void setAsideWithoutDataFolderDoesNothing() throws IOException {
 		assertNull(FullSync.setAside(local.dataRoot(), files, CLOCK));
 		assertFalse(Files.exists(dir.resolve("local")));
@@ -451,7 +487,7 @@ class FullSyncTest {
 		byte[] secondClaim = claim(local, E1, second, AT);
 		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
 
-		FullSyncResult result = FullSync.run(local, shared, false, ME, files, CLOCK, seen::add);
+		FullSyncResult result = FullSync.run(local, shared, false, OWN, files, CLOCK, seen::add);
 
 		assertArrayEquals(rootClaim, shared.readClaimBytes(E1, "root").orElseThrow());
 		assertArrayEquals(secondClaim, shared.readClaimBytes(E1, V1.value()).orElseThrow());
@@ -464,7 +500,7 @@ class FullSyncTest {
 		assertTrue(result.lost().isEmpty());
 		assertTrue(result.contested().isEmpty());
 		assertTrue(result.changed().isEmpty());
-		UnitState state = ChainResolver.resolve(shared.readUnit(E1), OTHER);
+		UnitState state = ChainResolver.resolve(shared.readUnit(E1), new Ownership(OTHER, List.of()));
 		assertEquals(List.of(mine, second), state.chain());
 	}
 
@@ -523,7 +559,7 @@ class FullSyncTest {
 		});
 		VersionStore racingShared = new VersionStore(shared.dataRoot(), racing);
 
-		FullSyncResult result = FullSync.run(local, racingShared, false, ME, files, CLOCK);
+		FullSyncResult result = FullSync.run(local, racingShared, false, OWN, files, CLOCK);
 
 		assertEquals(List.of(new LostVersion(E1, List.of(V1, V2), FOREIGN)), result.lost());
 		assertEquals(Set.of(E1), result.changed());
@@ -611,7 +647,7 @@ class FullSyncTest {
 		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
 
 		FullSyncResult expected = run(false);
-		FullSyncResult actual = FullSync.syncUnits(localCopy, sharedCopy, units, false, ME, files, CLOCK, seen::add);
+		FullSyncResult actual = FullSync.syncUnits(localCopy, sharedCopy, units, false, OWN, files, CLOCK, seen::add);
 
 		assertEquals(expected, actual);
 		assertEquals(actual.uploaded(), seen);

@@ -266,6 +266,11 @@ class ConflictResolverTest {
 			}
 
 			@Override
+			public Ownership ownership() {
+				return new Ownership("me", List.of());
+			}
+
+			@Override
 			public Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking) {
 				return Map.of();
 			}

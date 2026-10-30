@@ -24,8 +24,12 @@ import java.util.Set;
  * <li><b>Unbekannte Listennummer</b> ({@code ownSeq == null} bei einer eigenen Version): zählt weder als Konflikt noch als
  * bekannt; {@link Derivation#undecided()} sagt dem Aufrufer, dass er erst die eigenen Listen lesen muss.</li>
  * </ul>
- * Ob eine Version eigen ist, folgt aus dem Kürzel in ihrer ID ({@link VersionId#isFrom}); der Eintrag nennt den Rechner der
- * aktuellen Version nicht.
+ * Ob eine Version eigen ist, folgt aus dem Kürzel in ihrer ID ({@link Ownership#isOwnId}: aktuelle ID, oder eine frühere bis
+ * zu ihrer Neuvergabe); der Eintrag nennt den Rechner der aktuellen Version nicht. Ein Vermerk betrifft diesen Rechner, wenn
+ * {@link ConflictNote#affected()} eine eigene ID ist und die weichende Version ({@link ConflictNote#dropped()}, ohne sie die
+ * Version mit dem Vermerk) bei einer früheren ID vor deren Neuvergabe entstand ({@link #affectsMe}). Die Listennummern
+ * ({@link UnitIndex.Entry#ownSeq()}) stammen immer aus den Listen der aktuellen ID (der Index wird bei einer Neuvergabe neu
+ * aufgebaut) und werden deshalb mit {@code D.seen[aktuelle ID]} verglichen.
  */
 final class ConflictLedger {
 
@@ -62,26 +66,26 @@ final class ConflictLedger {
 
 	/**
 	 * @param entries      die Einträge des Index
-	 * @param ownId        die Rechner-ID dieses Rechners
+	 * @param own          was dieser Rechner als eigen ansieht
 	 * @param acknowledged die bestätigten Konflikte (Version und Art); sie zählen nicht mehr
 	 */
-	static Derivation derive(Collection<UnitIndex.Entry> entries, String ownId, Set<ConflictKey> acknowledged) {
+	static Derivation derive(Collection<UnitIndex.Entry> entries, Ownership own, Set<ConflictKey> acknowledged) {
 		List<OpenConflict> conflicts = new ArrayList<>();
 		Map<UnitKey, Deletion> deletions = new HashMap<>();
 		for (UnitIndex.Entry entry : entries) {
 			UnitKey unit = entry.snapshot().unit();
 			for (UnitIndex.NotedVersion noted : entry.notes()) {
-				if (ownId.equals(noted.note().affected())
+				if (affectsMe(own, noted)
 						&& !acknowledged.contains(new ConflictKey(noted.version(), ConflictKey.Kind.NOTE))) {
 					conflicts.add(new OpenConflict(noted.version(), unit, noted.at(), noted.saveId(), noted.note(), null));
 				}
 			}
-			Deletion deletion = foreignParentDeletion(entry, ownId, acknowledged);
+			Deletion deletion = foreignParentDeletion(entry, own, acknowledged);
 			if (deletion != null) {
 				deletions.put(unit, deletion);
 			}
 		}
-		boolean undecided = !deletions.isEmpty() && collectAffected(entries, ownId, deletions);
+		boolean undecided = !deletions.isEmpty() && collectAffected(entries, own, deletions);
 		for (Deletion deletion : deletions.values()) {
 			if (!deletion.affected.isEmpty()) {
 				deletion.affected.sort(Comparator.comparing(UnitKey::relativePath));
@@ -95,12 +99,23 @@ final class ConflictLedger {
 	}
 
 	/**
+	 * Ob der Vermerk diesen Rechner betrifft: {@link ConflictNote#affected()} ist eine eigene ID, gemessen an der Zeit der
+	 * weichenden Version ({@link ConflictNote#dropped()}; ohne sie an der Version, die den Vermerk trägt). So zählt auch ein
+	 * Vermerk, den ein anderer Rechner nach der Neuvergabe über eine Änderung von vor ihr schrieb, und keiner über die
+	 * Änderung des Rechners, der die alte ID weiter trägt.
+	 */
+	static boolean affectsMe(Ownership own, UnitIndex.NotedVersion noted) {
+		ConflictNote note = noted.note();
+		return own.isOwn(note.affected(), note.dropped() != null ? note.dropped() : noted.version());
+	}
+
+	/**
 	 * Die fremde Löschung, die der Eintrag als aktuellen Stand hat; {@code null}, wenn er keine hat oder sie bestätigt ist.
 	 * Als fremd gilt auch eine eigene Zusammenführung, die als Löschung entstand, weil die fremde Löschung gegen eine eigene
 	 * Änderung gewann (Vermerk DELETE_WINS, dessen Gegenseite ein anderer Rechner ist): Sie trägt {@code seen} der fremden
 	 * Löschung, Rechner und Bediener nennt der Vermerk.
 	 */
-	private static Deletion foreignParentDeletion(UnitIndex.Entry entry, String ownId, Set<ConflictKey> acknowledged) {
+	private static Deletion foreignParentDeletion(UnitIndex.Entry entry, Ownership own, Set<ConflictKey> acknowledged) {
 		UnitSnapshot snapshot = entry.snapshot();
 		VersionId version = snapshot.version();
 		if (!snapshot.deleted() || version == null || !snapshot.unit().type().hasChildren()
@@ -114,15 +129,16 @@ final class ConflictLedger {
 		}
 		String machineName = step.machineName();
 		String operator = step.operator();
-		if (version.isFrom(ownId)) {
+		if (own.isOwnId(version)) {
 			ConflictNote.Party other = deleterOfOwnMerge(entry, version);
-			if (other == null || ownId.equals(other.machine())) {
+			if (other == null || own.isOwn(other.machine(), other.version())) {
 				return null;
 			}
 			machineName = other.machineName();
 			operator = other.operator();
 		}
-		return new Deletion(snapshot.unit(), step, machineName, operator, entry.seen().getOrDefault(ownId, 0L));
+		return new Deletion(snapshot.unit(), step, machineName, operator,
+				entry.seen().getOrDefault(own.currentId(), 0L));
 	}
 
 	/** Die Gegenseite des Vermerks DELETE_WINS an der Version; {@code null}, wenn sie keinen hat. */
@@ -140,13 +156,13 @@ final class ConflictLedger {
 	 *
 	 * @return ob eine eigene Einheit unter einer Löschung eine unbekannte Listennummer hat
 	 */
-	private static boolean collectAffected(Collection<UnitIndex.Entry> entries, String ownId, Map<UnitKey, Deletion> deletions) {
+	private static boolean collectAffected(Collection<UnitIndex.Entry> entries, Ownership own, Map<UnitKey, Deletion> deletions) {
 		boolean undecided = false;
 		for (UnitIndex.Entry entry : entries) {
 			UnitSnapshot snapshot = entry.snapshot();
 			UnitKey unit = snapshot.unit();
 			VersionId version = snapshot.version();
-			if (snapshot.deleted() || version == null || !version.isFrom(ownId)) {
+			if (snapshot.deleted() || version == null || !own.isOwnId(version)) {
 				continue;
 			}
 			for (UnitKey parent : unit.ancestors()) {

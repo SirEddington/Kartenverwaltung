@@ -87,8 +87,11 @@ final class ConflictResolver {
 		/** Ob die fremde Version über die Änderungsliste ihres Rechners eingelesen wurde. */
 		boolean isListed(UnitKey unit, VersionId version);
 
-		/** Die ID dieses Rechners. */
+		/** Die aktuelle ID dieses Rechners; sie steht in den Vermerken der Zusammenführungen, die er schreibt. */
 		String machineId();
+
+		/** Was dieser Rechner als eigen ansieht: die aktuelle ID und die früheren bis zu ihrer Neuvergabe. */
+		Ownership ownership();
 
 		/**
 		 * Die anderen Buchungs-Einheiten derselben Vorstellung aus dem Start-Index (Inhalte nicht kopiert, ohne
@@ -412,14 +415,15 @@ final class ConflictResolver {
 
 	/**
 	 * Ob die Strecke noch wartet: im gemeinsamen Betrieb, solange eine fremde Version der Kette seit der Basis nicht über
-	 * ihre Änderungsliste eingelesen ist, höchstens {@link #LIST_WAIT} seit dem ersten Versuch.
+	 * ihre Änderungsliste eingelesen ist, höchstens {@link #LIST_WAIT} seit dem ersten Versuch. Eigen (und damit nie
+	 * wartend) ist auch eine Version einer früheren ID von vor ihrer Neuvergabe.
 	 */
 	private boolean mustWait(UnitKey unit, List<Version> since) {
 		if (!host.shared()) {
 			return false;
 		}
-		String me = host.machineId();
-		boolean unlisted = since.stream().anyMatch(v -> !me.equals(v.machine()) && !host.isListed(unit, v.id()));
+		Ownership own = host.ownership();
+		boolean unlisted = since.stream().anyMatch(v -> !own.isOwn(v) && !host.isListed(unit, v.id()));
 		if (!unlisted) {
 			return false;
 		}

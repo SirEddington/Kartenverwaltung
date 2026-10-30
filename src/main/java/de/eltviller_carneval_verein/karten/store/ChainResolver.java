@@ -34,11 +34,12 @@ public final class ChainResolver {
 	/**
 	 * Ermittelt den gültigen Stand einer Einheit.
 	 *
-	 * @param files        die Versions- und Anspruchsdateien der Einheit
-	 * @param ownMachineId die ID des eigenen Rechners; eigene Versionen sind die mit dieser {@code machine}
+	 * @param files die Versions- und Anspruchsdateien der Einheit
+	 * @param own   was dieser Rechner als eigen ansieht: Versionen der aktuellen ID und die früherer IDs bis zu deren
+	 *              Neuvergabe ({@link Ownership#isOwn(Version)})
 	 * @return der Zustand mit Kette, ausstehenden und verlorenen Versionen
 	 */
-	public static UnitState resolve(UnitFiles files, String ownMachineId) {
+	public static UnitState resolve(UnitFiles files, Ownership own) {
 		Map<VersionId, VersionFile> versions = files.versions();
 		Map<String, ClaimFile> claims = files.claims();
 
@@ -87,7 +88,7 @@ public final class ChainResolver {
 		List<Version> pending = new ArrayList<>();
 		List<List<VersionId>> lost = new ArrayList<>();
 		Set<VersionId> assigned = new HashSet<>();
-		for (Stretch stretch : ownStretches(versions, visited, ownMachineId)) {
+		for (Stretch stretch : ownStretches(versions, visited, own)) {
 			// Auf der beschädigten Version, an der die Kette endet, baut das Zurücksetzen auf (Heilung Stufe 2): Ihr Platz ist
 			// frei, die Strecke wartet aufs Beanspruchen.
 			boolean isPending = status == Status.WAITING || buildsOnHead(stretch.base(), headId)
@@ -123,16 +124,19 @@ public final class ChainResolver {
 	 * die Spitze noch erledigt sie sie: Brach ein Rechner zwischen Liste und Anspruch ab, würde die eigene Version sonst
 	 * nie erneut beansprucht; und eine eigene Zusammenführung, die noch aussteht, erledigt ihre Vorgänger schon.
 	 *
+	 * Eine Strecke darf über eine Neuvergabe der Rechner-ID hinweg laufen: Eigen ist jede Version, die {@code own} so
+	 * nennt.
+	 *
 	 * @param claimedIds die Versionen, die eine Anspruchsdatei der Kette nennt
 	 */
 	private static List<Stretch> ownStretches(Map<VersionId, VersionFile> versions, Set<VersionId> claimedIds,
-			String ownMachineId) {
+			Ownership own) {
 		Set<VersionId> named = new HashSet<>();
 		Set<VersionId> merged = new HashSet<>();
 		for (VersionFile file : versions.values()) {
 			if (file.version() != null) {
 				List<VersionId> parents = file.version().parents();
-				if (isOwn(file.version(), ownMachineId) || claimedIds.contains(file.version().id())) {
+				if (own.isOwn(file.version()) || claimedIds.contains(file.version().id())) {
 					named.addAll(parents);
 					if (parents.size() > 1) {
 						merged.addAll(parents.subList(1, parents.size()));
@@ -143,14 +147,14 @@ public final class ChainResolver {
 		List<Stretch> stretches = new ArrayList<>();
 		for (VersionFile file : versions.values()) {
 			Version tip = file.version();
-			if (tip == null || !isOwn(tip, ownMachineId) || claimedIds.contains(tip.id()) || merged.contains(tip.id())
+			if (tip == null || !own.isOwn(tip) || claimedIds.contains(tip.id()) || merged.contains(tip.id())
 					|| named.contains(tip.id())) {
 				continue;
 			}
 			List<Version> stretch = new ArrayList<>();
 			Set<VersionId> seen = new HashSet<>();
 			Version current = tip;
-			while (current != null && isOwn(current, ownMachineId) && !claimedIds.contains(current.id())
+			while (current != null && own.isOwn(current) && !claimedIds.contains(current.id())
 					&& !merged.contains(current.id()) && seen.add(current.id())) {
 				stretch.add(0, current);
 				VersionId parent = current.firstParent();
@@ -171,9 +175,5 @@ public final class ChainResolver {
 	 */
 	private static boolean buildsOnHead(VersionId base, VersionId headId) {
 		return base == null ? headId == null : base.equals(headId);
-	}
-
-	private static boolean isOwn(Version version, String ownMachineId) {
-		return ownMachineId.equals(version.machine());
 	}
 }

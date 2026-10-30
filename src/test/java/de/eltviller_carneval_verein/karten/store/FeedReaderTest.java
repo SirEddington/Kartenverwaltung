@@ -81,7 +81,16 @@ class FeedReaderTest {
 		shared = new VersionStore(dir.resolve("shared"), sharedLayer);
 		local = new VersionStore(dir.resolve("local"), new NioFileLayer());
 		positions = new SyncPositions(dir.resolve("sync-state.json"), SHARED_KEY);
-		reader = new FeedReader(shared, local, ME, positions, clock);
+		reader = new FeedReader(shared, local, new Ownership(ME, List.of()), positions, clock);
+	}
+
+	/** Die frühere ID dieses Rechners (vor SYS-011); sie galt bis 1 500 000 ms, also für {@link #V1}, nicht für {@link #V2}. */
+	private static final String PREVIOUS = "pppppppppppppppppppppppppp";
+
+	/** Ein Leser für diesen Rechner mit der früheren ID {@link #PREVIOUS}. */
+	private FeedReader readerWithPreviousId() {
+		Ownership own = new Ownership(ME, List.of(new Ownership.Previous(PREVIOUS, Instant.ofEpochMilli(1_500_000L))));
+		return new FeedReader(shared, local, own, positions, clock);
 	}
 
 	private static Version version(String machine, String machineName, VersionId id, VersionId... parents) {
@@ -663,6 +672,43 @@ class FeedReaderTest {
 		local.writeVersion(UNIT, mine.id(), bytes);
 		local.createClaim(UNIT, "root", StoreCodec.write(new Claim(mine.id(), StoreCodec.sha256(bytes), ME, START)));
 		return mine;
+	}
+
+	@Test
+	void listOfAPreviousIdIsReadButOwnVersionsInItAreNoSightings() throws IOException {
+		reader = readerWithPreviousId();
+		positions.set(PREVIOUS, 0);
+		// eigene Version von vor der Neuvergabe: Liste geschrieben, Anspruch noch nicht (Abbruch dazwischen)
+		Version own = version(PREVIOUS, "Kasse 1", VersionId.create(1_000_000L, PREVIOUS, 0));
+		local.writeVersion(UNIT, own.id(), putVersion(UNIT, own));
+		putFeed(PREVIOUS, 1, entry(UNIT, own));
+		// die Kopie, die die alte ID weiter trägt, speichert danach, ebenfalls noch ohne Anspruch
+		Version copy = version(PREVIOUS, "Kasse 1", VersionId.create(2_000_000L, PREVIOUS, 0));
+		putVersion(UNIT2, copy);
+		putFeed(PREVIOUS, 2, entry(UNIT2, copy));
+
+		FeedPoll poll = reader.poll();
+
+		assertEquals(2L, positions.position(PREVIOUS), "die Listen der früheren ID werden gelesen");
+		assertEquals(List.of(new PendingSighting(UNIT2, copy.id(), "Kasse 1")), poll.pending());
+		assertTrue(poll.contested().isEmpty());
+	}
+
+	@Test
+	void ownClaimOfAPreviousIdMeetingAForeignEntryIsContested() throws IOException {
+		reader = readerWithPreviousId();
+		positions.set(PEER_A, 0);
+		Version mine = version(PREVIOUS, "Ich", VersionId.create(500_000L, PREVIOUS, 0));
+		byte[] bytes = StoreCodec.write(mine);
+		local.writeVersion(UNIT, mine.id(), bytes);
+		local.createClaim(UNIT, "root", StoreCodec.write(new Claim(mine.id(), StoreCodec.sha256(bytes), PREVIOUS, START)));
+		Version theirs = version(PEER_A, "Kasse 2", V1);
+		putVersion(UNIT, theirs);
+		putFeed(PEER_A, 1, entry(UNIT, theirs));
+
+		FeedPoll poll = reader.poll();
+
+		assertEquals(Set.of(new FeedPoll.Contested(UNIT, "root")), poll.contested());
 	}
 
 	@Test
