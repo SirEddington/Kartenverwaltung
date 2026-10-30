@@ -3032,6 +3032,8 @@ public final class SyncService {
 			synchronized (lock) {
 				// seit freeze liegt keine ID nach until: die späteste vergebene braucht keine Korrektur der Grenze
 				retiring.retire();
+				// ein setOperator seit dem Erzeugen von renewed ging nur an old: hier nachziehen
+				renewed.setOperator(old.operator());
 				machine = renewed;
 				ids = fresh;
 			}
@@ -3451,6 +3453,54 @@ public final class SyncService {
 	public String machineId() {
 		synchronized (lock) {
 			return machine.id();
+		}
+	}
+
+	/** Der Anzeigename dieses Rechners ({@link MachineIdentity#name}); er steht in jeder neuen eigenen Version. */
+	public String machineName() {
+		synchronized (lock) {
+			return machine.name();
+		}
+	}
+
+	/**
+	 * Ändert den Anzeigenamen dieses Rechners und schreibt {@code machine.json}. Die Oberfläche hält keine eigene
+	 * {@link MachineIdentity}: Eine Neuvergabe der Kennung (SYS-011) tauscht sie aus. Nimmt {@code workLock} (wie
+	 * {@link #connect}) und ist damit gegen die Neuvergabe im Takt abgeschlossen; nicht auf dem FX-Thread aufrufen. Die
+	 * Datei wird nicht unter {@code lock} geschrieben.
+	 *
+	 * @param name der neue Name; Leerraum wird abgeschnitten
+	 * @throws IllegalArgumentException wenn der Name leer ist
+	 * @throws IOException              wenn die Datei nicht geschrieben werden kann; der alte Name bleibt
+	 */
+	public void renameMachine(String name) throws IOException {
+		workLock.lock();
+		try {
+			MachineIdentity current;
+			synchronized (lock) {
+				current = machine;
+			}
+			current.rename(name);
+		} finally {
+			unlockWork();
+		}
+	}
+
+	/** Der Bediener dieser Sitzung oder {@code null}, solange keiner gesetzt ist; er steht in jeder neuen eigenen Version. */
+	public String operator() {
+		synchronized (lock) {
+			return machine.operator();
+		}
+	}
+
+	/**
+	 * Setzt den Bediener dieser Sitzung (nur im Speicher, siehe {@link MachineIdentity#setOperator}). Leerraum wird
+	 * abgeschnitten, Leeres und {@code null} heißen "kein Bediener". Eine Neuvergabe der Kennung übernimmt ihn
+	 * ({@link #regenerate}).
+	 */
+	public void setOperator(String name) {
+		synchronized (lock) {
+			machine.setOperator(name);
 		}
 	}
 

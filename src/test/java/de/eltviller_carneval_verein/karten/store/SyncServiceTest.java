@@ -1463,6 +1463,64 @@ class SyncServiceTest {
 		assertEquals(1, a.events.duplicates.size());
 	}
 
+	// --- Rechnername und Bediener
+
+	@Test
+	void renamedMachineNameIsInNewVersionsAndSurvivesRestart() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+
+		a.service.renameMachine(" Kasse 2 ");
+
+		assertEquals("Kasse 2", a.service.machineName());
+		assertEquals("Kasse 2", save(a, create(BOOKING, "Anna")).machineName());
+		Node restarted = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertEquals("Kasse 2", restarted.service.machineName());
+	}
+
+	@Test
+	void renameWithBlankNameIsRejectedAndKeepsOldName() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+
+		assertThrows(IllegalArgumentException.class, () -> a.service.renameMachine("  "));
+
+		assertEquals("a", a.service.machineName());
+		assertEquals("a", save(a, create(BOOKING, "Anna")).machineName());
+	}
+
+	@Test
+	void operatorIsInNewVersions() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		assertNull(a.service.operator());
+
+		a.service.setOperator("Anna");
+
+		assertEquals("Anna", a.service.operator());
+		assertEquals("Anna", save(a, create(BOOKING, "Anna")).operator());
+	}
+
+	@Test
+	void nameAndOperatorSurviveDuplicateMachineRegeneration() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		a.service.renameMachine("Kasse 2");
+		a.service.setOperator("Anna");
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		String oldId = a.service.machineId();
+
+		triggerSys011(a);
+
+		assertNotEquals(oldId, a.service.machineId());
+		assertEquals("Kasse 2", a.service.machineName());
+		assertEquals("Anna", a.service.operator());
+		Version after = save(a, create(UnitKey.booking("e1", "p1", "A-3"), "Berta"));
+		assertEquals("Kasse 2", after.machineName());
+		assertEquals("Anna", after.operator());
+	}
+
 	// --- Frühere Kennung nach SYS-011
 
 	/** Eine zweite Buchung derselben Vorstellung: Ihre Speicherung löst SYS-011 aus, ohne {@link #BOOKING} zu berühren. */
