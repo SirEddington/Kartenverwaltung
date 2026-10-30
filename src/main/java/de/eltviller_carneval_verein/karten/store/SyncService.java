@@ -268,6 +268,11 @@ public final class SyncService {
 		/** Wohin diese Verbindung den lokalen Bestand beiseitegelegt hat; {@code null}, solange nicht. */
 		volatile Path setAsidePath;
 		/**
+		 * Der erste Lauf ist zu Ende, sein Ergebnis aber noch nicht festgelegt. Gesetzt in {@code endRun}; der Takt legt es
+		 * fest, auch wenn danach in ihm etwas Unerwartetes wirft ({@link SyncService#settleFirstRunEnd}). Unter der Arbeitssperre.
+		 */
+		volatile boolean endOutcomeDue;
+		/**
 		 * Ob der letzte Takt den Ordner erreichte und ohne Störung durchlief: Nur dann folgt im ersten Lauf der nächste Takt
 		 * sofort. Eigenes Feld, unabhängig davon, ob der Takt die Auflösung schon erledigt hat.
 		 */
@@ -571,11 +576,13 @@ public final class SyncService {
 			// unter der Arbeitssperre: Die Auflösung (Sperre der Auflösung) und ein append daraus folgen der Sperrfolge
 			workLock.lock();
 			try {
+				// die Marke "verbunden" bleibt (KARV-87 trennt ausdrücklich mit disconnect); ein offenes Ergebnis endet
+				abortPendingOutcome();
 				deactivate();
 				claimPendingLocally(withUnindexed(opened.pendingUnits()));
 				resolveAtStartup(opened.lostUnits());
 			} finally {
-				workLock.unlock();
+				unlockWork();
 			}
 			return true;
 		}
@@ -655,7 +662,9 @@ public final class SyncService {
 	 * @return das Ergebnis, genau einmal: {@link Kind#AKTUELL} bzw. {@link Kind#AUSSTEHEND} am Ende des ersten Laufs,
 	 *         vorher {@link Kind#OFFLINE} (Ordner nicht erreichbar), {@link Kind#FEHLER} (ein Abschnitt scheitert) oder
 	 *         {@link Kind#ABGEBROCHEN} (getrennt oder neu verbunden); jeweils mit dem Pfad des beiseitegelegten Bestands,
-	 *         falls schon beiseitegelegt. Bei leerem Pfad sofort {@link Kind#ABGEBROCHEN}. Geliefert wird ohne gehaltene
+	 *         falls schon beiseitegelegt. Bei leerem Pfad sofort {@link Kind#ABGEBROCHEN}. Nach {@link #closeIndex()} (der
+	 *         Takt ruht dann) liefert ein noch offenes Ergebnis erst ein späteres {@code connect}, {@link #disconnect} oder
+	 *         {@code startup} ohne Ordner, jeweils mit {@link Kind#ABGEBROCHEN}. Geliefert wird ohne gehaltene
 	 *         Sperre des Dienstes; abhängige Stufen ohne eigenen Executor laufen auf dem liefernden Thread (im Takt dem
 	 *         {@code worker}, sonst dem Aufrufer von {@code connect} bzw. {@link #disconnect}).
 	 */
@@ -1740,8 +1749,14 @@ public final class SyncService {
 				resolver.resolvePending(RESOLVE_BUDGET);
 				return false;
 			}
-			if (!runTick(current)) {
-				resolver.resolvePending(RESOLVE_BUDGET);
+			try {
+				if (!runTick(current)) {
+					resolver.resolvePending(RESOLVE_BUDGET);
+				}
+			} finally {
+				// das Ende des ersten Laufs liefert sein Ergebnis, auch wenn danach im Takt etwas Unerwartetes warf (etwa in der
+				// Ableitung der Verluste, die keine Absicherung des Durchlaufs umgibt)
+				settleFirstRunEnd(current);
 			}
 			return current.firstRun && current.hurry && isCurrent(current);
 		} finally {
@@ -1849,10 +1864,8 @@ public final class SyncService {
 		if (!isCurrent(current)) {
 			return true;
 		}
-		if (round.firstRunEnded) {
-			// das Ende des ersten Laufs ist sein Ergebnis, auch wenn danach im selben Takt etwas scheiterte
-			settle(current, new ConnectOutcome(hasJobs() ? Kind.AUSSTEHEND : Kind.AKTUELL, false, current.setAsidePath, null));
-		}
+		// das Ende des ersten Laufs ist sein Ergebnis, auch wenn danach im selben Takt etwas scheiterte
+		settleFirstRunEnd(current);
 		if (round.unreachable) {
 			reportUnreachable(current);
 		} else if (round.failure != null) {
@@ -1866,6 +1879,18 @@ public final class SyncService {
 			current.hurry = true;
 		}
 		return true;
+	}
+
+	/**
+	 * Legt nach dem Ende des ersten Laufs ({@link Link#endOutcomeDue}) dessen Ergebnis fest: {@link Kind#AUSSTEHEND}, wenn
+	 * noch Aufträge warten, sonst {@link Kind#AKTUELL}. Einmal; danach ohne Wirkung. Unter {@code workLock}.
+	 */
+	private void settleFirstRunEnd(Link current) {
+		if (!current.endOutcomeDue) {
+			return;
+		}
+		current.endOutcomeDue = false;
+		settle(current, new ConnectOutcome(hasJobs() ? Kind.AUSSTEHEND : Kind.AKTUELL, false, current.setAsidePath, null));
 	}
 
 	/**
@@ -1897,7 +1922,11 @@ public final class SyncService {
 		}
 	}
 
+	/** SYS-006 mit dem gemeinsamen Ordner; bei einem Fehler an einer lokalen Datei des Dienstes dessen eigener Text. */
 	private static String failureText(Link current, Exception failure) {
+		if (failure instanceof LocalFileException) {
+			return failure.getMessage();
+		}
 		return StoreMessages.syncFailed(current.text, StoreMessages.describe(failure));
 	}
 
@@ -1937,8 +1966,13 @@ public final class SyncService {
 			current.uploadLocalClaims = mode != null && current.decision.uploadLocalClaims();
 			if (current.firstRun) {
 				// nach der Entscheidung und dem Beiseitelegen, vor allen Abschnitten: Bricht der Lauf ab, setzt der nächste Start
-				// mit Mitnehmen fort; fehlt die Marke (Abbruch davor), fragt er neu
-				ConnectionMarker.write(appDataDir, files, new ConnectionMarker.State(current.text, clock.instant(), false));
+				// mit Mitnehmen fort; fehlt die Marke (Abbruch davor), fragt er neu. Ohne Marke beginnt kein Lauf: Der Takt scheitert
+				// mit einem Text über die lokale Datei, und der nächste versucht es erneut
+				try {
+					writeConnectionMarker(current, false);
+				} catch (IOException | RuntimeException e) {
+					throw new LocalFileException(markerWriteFailed(), e);
+				}
 				notifier.setConnectionComplete(false);
 			}
 			// gesperrte Einheiten dürfen wieder geheilt werden: Die gemeinsame Kopie kann inzwischen geheilt sein
@@ -1991,10 +2025,37 @@ public final class SyncService {
 		}
 		if (finished) {
 			if (current.firstRun) {
-				// scheitert das Schreiben, bleibt der Lauf fertig stehen, und der nächste Takt beendet ihn erneut
-				ConnectionMarker.write(appDataDir, files, new ConnectionMarker.State(current.text, clock.instant(), true));
+				try {
+					writeConnectionMarker(current, true);
+				} catch (IOException | RuntimeException e) {
+					// der Lauf endet trotzdem: Die Marke bleibt unvollständig, und der nächste Start nimmt ohne Rückfrage mit (die
+					// sichere Richtung)
+					LOGGER.log(Level.WARNING, markerWriteFailed(), e);
+				}
 			}
 			endRun(current, round);
+		}
+	}
+
+	/** Schreibt die Marke "verbunden" für die Verbindung, mit dem jetzigen Zeitpunkt. */
+	private void writeConnectionMarker(Link current, boolean complete) throws IOException {
+		ConnectionMarker.write(appDataDir, files, new ConnectionMarker.State(current.text, clock.instant(), complete));
+	}
+
+	/** Der Text, wenn die Marke "verbunden" sich nicht schreiben lässt; nennt die lokale Datei. */
+	private String markerWriteFailed() {
+		return "Die Marke 'verbunden' ließ sich nicht schreiben: " + appDataDir.resolve(ConnectionMarker.FILE_NAME);
+	}
+
+	/**
+	 * Ein Takt scheiterte an einer lokalen Datei des Dienstes (der Marke "verbunden"), nicht am gemeinsamen Ordner: Der Text
+	 * ist fertig und nennt die Datei; {@link #failureText} gibt ihn unverändert weiter statt SYS-006.
+	 */
+	private static final class LocalFileException extends IOException {
+		private static final long serialVersionUID = 1L;
+
+		LocalFileException(String message, Throwable cause) {
+			super(message, cause);
 		}
 	}
 
@@ -2078,7 +2139,7 @@ public final class SyncService {
 		}
 		if (current.firstRun) {
 			current.firstRun = false;
-			round.firstRunEnded = true;
+			current.endOutcomeDue = true;
 			notifier.setConnectionComplete(true);
 		}
 		publishProgress(current, null);
@@ -2828,8 +2889,6 @@ public final class SyncService {
 		ConflictLedger.Derivation derivation;
 		/** Der erste Vollabgleich ist in diesem Takt zu Ende gegangen: Verluste aller Einheiten ableiten. */
 		boolean allUnits;
-		/** Der erste Vollabgleich einer Verbindung ist in diesem Takt zu Ende gegangen: Er liefert das Ergebnis von connect. */
-		boolean firstRunEnded;
 		boolean unreachable;
 		Exception failure;
 

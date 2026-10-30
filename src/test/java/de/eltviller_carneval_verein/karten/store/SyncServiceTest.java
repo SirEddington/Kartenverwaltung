@@ -2028,17 +2028,26 @@ class SyncServiceTest {
 
 	@Test
 	void newConnectionDiscardsTheRun() throws IOException {
-		Node a = slowNodeWithHalls(300);
+		Path appData = dir.resolve("a");
+		seedForeignHalls(appData, 300);
+		// die Takte, die startup und connect einplanen, verwirft der Worker: Der Test löst sie selbst aus (der erste Lauf der
+		// neuen Verbindung liefe sonst am Stück)
+		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, task -> {
+		});
+		a.service.startup(shared);
+		// der erste Lauf nach dem Start, ohne Kosten in einem Takt
+		a.service.tick();
+		assertNull(a.service.fullSyncProgress().get());
+		slowReads(a, READ_COST);
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
 		a.service.tick();
 		double before = a.service.fullSyncProgress().get();
 		int calls = a.layer.calls().size();
 
-		// connect plant einen Takt ein, den der Worker des Tests sofort ausführt; im ersten Lauf der neuen Verbindung folgen
-		// die Takte ohne Pause bis zu seinem Ende
-		assertEquals(ConnectOutcome.Kind.AKTUELL, a.service.connect(shared, ConnectMode.MERGE).join().kind());
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.tick();
 
-		assertTrue(before < 1.0);
-		assertNull(a.service.fullSyncProgress().get(), "der neue Lauf ist zu Ende");
+		assertTrue(a.service.fullSyncProgress().get() < before, "ein neuer Lauf");
 		assertTrue(a.layer.calls().subList(calls, a.layer.calls().size()).stream()
 				.anyMatch(c -> c.startsWith("read ") && c.replace('\\', '/').contains("/halls/f0/")), "der neue Lauf beginnt vorn");
 	}

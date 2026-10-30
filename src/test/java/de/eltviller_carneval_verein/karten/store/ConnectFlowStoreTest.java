@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -24,6 +25,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -146,6 +151,21 @@ class ConnectFlowStoreTest {
 		}
 	}
 
+	/** Kopiert den Ordner mit allem darunter; liefert das Ziel. */
+	private static Path copyTree(Path from, Path to) throws IOException {
+		try (Stream<Path> entries = Files.walk(from)) {
+			for (Path entry : entries.toList()) {
+				Path target = to.resolve(from.relativize(entry).toString());
+				if (Files.isDirectory(entry)) {
+					Files.createDirectories(target);
+				} else {
+					Files.copy(entry, target);
+				}
+			}
+		}
+		return to;
+	}
+
 	/** Takte, bis kein Vollabgleich mehr läuft; liefert, was {@code tick()} jeweils meldete. */
 	private static List<Boolean> tickUntilRunEnds(Node node) {
 		List<Boolean> results = new ArrayList<>();
@@ -258,15 +278,16 @@ class ConnectFlowStoreTest {
 		a.service.connect(shared, ConnectMode.MERGE);
 		a.service.tick();
 
-		// Neustart mitten im ersten Lauf: Die Marke ist unvollständig
-		Node restarted = new Node(a.appData, "a", null);
+		// Neustart mitten im ersten Lauf, auf einer Kopie des Datenordners (der erste Dienst läuft weiter): Die Marke ist
+		// unvollständig
+		Path copy = copyTree(a.appData, dir.resolve("kopie"));
+		Node restarted = new Node(copy, "a", null);
 		assertFalse(restarted.service.connectionComplete().get());
 		assertEquals(Optional.of(shared), restarted.service.connectedDir(), "auch ohne Start");
 		// der Start ohne Ordner lässt die Marke stehen (KARV-87 trennt dafür ausdrücklich)
-		Node single = new Node(a.appData, "a", null);
-		assertTrue(single.service.startup(""));
-		assertFalse(single.service.connectionComplete().get());
-		assertFalse(a.marker().orElseThrow().complete());
+		assertTrue(restarted.service.startup(""));
+		assertFalse(restarted.service.connectionComplete().get());
+		assertFalse(restarted.marker().orElseThrow().complete());
 
 		tickUntilRunEnds(a);
 		assertTrue(a.service.connectionComplete().get());
@@ -372,6 +393,142 @@ class ConnectFlowStoreTest {
 		assertEquals(outcome(Kind.AKTUELL), second.getNow(null));
 		assertEquals(outcome(Kind.ABGEBROCHEN), first.getNow(null));
 		assertTrue(a.service.connectionComplete().get());
+	}
+
+	@Test
+	void outcomeArrivesEvenIfTheTickThatEndsTheFirstRunThrowsAfterwards() throws IOException {
+		seedSharedHalls(3);
+		Node a = new Node("a");
+		a.service.startup("");
+		// gleich nach dem Ende des Laufs wirft der nächste Lesezugriff unerwartet: in der Ableitung der Verluste am Ende des
+		// Takts, die keine Absicherung des Durchlaufs umgibt
+		AtomicBoolean armed = new AtomicBoolean();
+		AtomicBoolean thrown = new AtomicBoolean();
+		a.service.fullSyncProgress().addListener((property, before, after) -> {
+			if (before != null && after == null) {
+				armed.set(true);
+			}
+		});
+		a.layer.onEach("read", () -> {
+			if (armed.compareAndSet(true, false)) {
+				thrown.set(true);
+				throw new IllegalStateException("unerwarteter Fehler nach dem Ende des Laufs");
+			}
+		});
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
+
+		a.runScheduled();
+
+		assertTrue(thrown.get(), "der Fehler kam nach dem Ende des Laufs");
+		assertNull(a.service.fullSyncProgress().get());
+		assertTrue(a.service.connectionComplete().get());
+		assertEquals(outcome(Kind.AKTUELL), result.getNow(null), "das Ende des ersten Laufs liefert sein Ergebnis trotzdem");
+	}
+
+	@Test
+	void startupWithoutFolderAbortsAPendingOutcome() throws IOException {
+		Node a = new Node("a");
+		a.service.startup("");
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
+
+		assertTrue(a.service.startup(""));
+
+		assertEquals(outcome(Kind.ABGEBROCHEN), result.getNow(null));
+		assertNull(a.service.sharedDir());
+	}
+
+	// --- Ruling 17: die Marke "verbunden" lässt sich nicht schreiben
+
+	/** Ab jetzt scheitert (solange {@code broken} gilt) das Anlegen der temporären Datei der Marke "verbunden". */
+	private static void breakMarker(Node node, AtomicBoolean broken) {
+		node.layer.failWhen(p -> broken.get() && p.getFileName().toString().startsWith(FileLayer.TEMP_PREFIX + "connection-"),
+				"createNew", new AccessDeniedException("connection.json gesperrt"));
+	}
+
+	private String markerWriteFailed(Node node) {
+		return "Die Marke 'verbunden' ließ sich nicht schreiben: " + node.appData.resolve("connection.json");
+	}
+
+	@Test
+	void markerWriteFailingAtTheBeginningFailsTheTickWithALocalText() throws IOException {
+		seedSharedHalls(3);
+		Node a = new Node("a");
+		a.service.startup("");
+		AtomicBoolean broken = new AtomicBoolean(true);
+		breakMarker(a, broken);
+		List<String> errors = new ArrayList<>();
+		a.service.setListener(new SyncListener() {
+			@Override
+			public void error(String message) {
+				errors.add(message);
+			}
+		});
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
+
+		assertFalse(a.service.tick());
+
+		assertEquals(new ConnectOutcome(Kind.FEHLER, false, null, markerWriteFailed(a)), result.getNow(null));
+		assertEquals(List.of(markerWriteFailed(a)), errors, "der Text nennt die lokale Datei, nicht den gemeinsamen Ordner");
+		assertEquals(SyncState.FEHLER, a.service.syncState().get());
+		assertNull(a.service.fullSyncProgress().get(), "kein Lauf ohne Marke");
+		assertEquals(Optional.empty(), a.marker());
+		assertFalse(a.service.connectionComplete().get());
+
+		// der nächste Takt versucht es erneut
+		broken.set(false);
+		tickUntilRunEnds(a);
+		assertTrue(a.marker().orElseThrow().complete());
+		assertTrue(a.service.connectionComplete().get());
+		assertEquals(Kind.FEHLER, result.getNow(null).kind());
+	}
+
+	@Test
+	void markerWriteFailingAtTheEndStillEndsTheFirstRun() throws Exception {
+		Node a = slowNodeBesideHalls();
+		AtomicBoolean broken = new AtomicBoolean();
+		breakMarker(a, broken);
+		List<LogRecord> logs = new ArrayList<>();
+		Handler capture = new Handler() {
+			@Override
+			public void publish(LogRecord record) {
+				synchronized (logs) {
+					logs.add(record);
+				}
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		Logger logger = Logger.getLogger(SyncService.class.getName());
+		logger.addHandler(capture);
+		try {
+			CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
+			assertTrue(a.service.tick());
+			assertFalse(a.marker().orElseThrow().complete());
+			broken.set(true);
+
+			tickUntilRunEnds(a);
+
+			assertEquals(outcome(Kind.AKTUELL), result.getNow(null), "das Ende kommt trotzdem");
+			assertTrue(a.service.connectionComplete().get());
+			assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+			assertFalse(a.marker().orElseThrow().complete(), "die Marke bleibt unvollständig: der nächste Start nimmt mit");
+			// der Modus ist erledigt: kein weiterer Lauf
+			assertFalse(a.service.tick());
+			assertNull(a.service.fullSyncProgress().get());
+			synchronized (logs) {
+				assertTrue(logs.stream().anyMatch(r -> r.getLevel() == Level.WARNING && markerWriteFailed(a).equals(r.getMessage())),
+						"WARNING mit dem Pfad der Marke");
+			}
+			assertFalse(new Node(a.appData, "a", null).service.connectionComplete().get(), "nach einem Neustart");
+		} finally {
+			logger.removeHandler(capture);
+		}
 	}
 
 	// --- Ruling 10: die Entscheidung am Beginn des ersten Laufs gilt je Verbindung einmal
