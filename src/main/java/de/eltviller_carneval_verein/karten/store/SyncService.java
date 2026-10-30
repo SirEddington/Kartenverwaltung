@@ -266,7 +266,10 @@ public final class SyncService {
 	/** Löst die gemeldeten Verluste zu Zusammenführungen auf; eingereiht wird in {@link #reportLoss}. */
 	private final ConflictResolver resolver;
 
-	/** Der Start-Index; hat eine eigene Sperre, deshalb nie unter {@code lock} benutzen. Neu bei einer neuen Rechner-ID. */
+	/**
+	 * Der Start-Index; hat eine eigene Sperre, deshalb nie unter {@code lock} benutzen. Bei einer neuen Rechner-ID bleibt er
+	 * und übernimmt sie ({@link UnitIndex#adoptOwnership}); neu nur beim Notfall-Neuaufbau des Starts.
+	 */
 	private volatile UnitIndex index;
 	/** Ob {@link #startup} den Index mit dem Bestand abgeglichen hat; vorher schreibt {@link #flushIndex()} nichts. */
 	private volatile boolean indexRefreshed;
@@ -293,8 +296,9 @@ public final class SyncService {
 	/** Die zuletzt gemeldeten offenen Konflikte (siehe {@link #reportConflictChanges}); unter {@code ackLock}. */
 	private Set<ConflictKey> reportedConflicts = new HashSet<>();
 	/**
-	 * Ob offene Elternlöschungen auf die eigenen Listen warten könnten: gesetzt, wenn eine Verbindung aktiviert oder der Index
-	 * neu aufgebaut wird (die Listennummern sind dann unbekannt), auch bei einem Start ohne Verbindung; der Takt prüft es und
+	 * Ob offene Elternlöschungen auf die eigenen Listen warten könnten: gesetzt, wenn eine Verbindung aktiviert, der Index
+	 * neu aufgebaut oder die Rechner-ID neu vergeben wird (die Listennummern sind dann unbekannt), auch bei einem Start ohne
+	 * Verbindung; der Takt prüft es und
 	 * liest die Listen nur, wenn eine Entscheidung fehlt.
 	 */
 	private volatile boolean ownListsWanted;
@@ -1959,6 +1963,7 @@ public final class SyncService {
 				remove(job);
 			} catch (DuplicateMachineException e) {
 				if (regenerated) {
+					claimedBeforeAbort(job, round);
 					round.survive(e);
 					continue;
 				}
@@ -1968,8 +1973,23 @@ public final class SyncService {
 			} catch (IOException e) {
 				// Niederlagen, die dieser Lauf schon fand, gleich melden (doppelte sortiert reportLoss aus)
 				job.losses().forEach(this::reportLoss);
+				claimedBeforeAbort(job, round);
 				round.survive(e);
 			}
+		}
+	}
+
+	/**
+	 * Ein Auftrag brach in der Stufe {@code CLAIMS} ab: Die Einheiten der schon beanspruchten Versionen ({@code 0 …
+	 * nextClaim()-1}) gelten als geändert. Ihr Anspruch ist entschieden (gewonnen oder verloren) und liegt lokal; ohne die
+	 * Meldung erführe die Oberfläche davon erst, wenn der Auftrag fertig ist.
+	 */
+	private static void claimedBeforeAbort(UploadJob job, Round round) {
+		if (job.stage() != UploadJob.Stage.CLAIMS) {
+			return;
+		}
+		for (int i = 0; i < job.nextClaim(); i++) {
+			round.changed.add(job.items().get(i).unit());
 		}
 	}
 
@@ -2082,6 +2102,11 @@ public final class SyncService {
 	 * alten still. Weil jede Version ihre ID und ihre Kennung zusammen unter {@code lock} holt ({@link #writeLocal}),
 	 * bekommt ein Speichervorgang, der vor dem Austausch begann, danach IDs der neuen Kennung. Scheitert das Schreiben, läuft
 	 * der alte Generator weiter, als wäre nichts gewesen.
+	 * <p>
+	 * Der Index wird nicht neu aufgebaut ({@link UnitIndex#adoptOwnership}): Versionen der alten Kennung bleiben bis zum
+	 * Wechsel eigen, die Stände gelten weiter. Ihre Listennummern gelten als unbekannt, denn sie stammen aus den Listen der
+	 * alten Kennung; der Takt liest danach die eigenen Listen ({@link #ownListsWanted}). Ob der Start den Index abgeglichen
+	 * hat ({@link #isStarted()}), bleibt unberührt.
 	 */
 	private void regenerate(Link current) throws IOException {
 		MachineIdentity old;
@@ -2101,18 +2126,19 @@ public final class SyncService {
 			}
 			throw e;
 		}
-		synchronized (lock) {
-			// seit freeze liegt keine ID nach until: die späteste vergebene braucht keine Korrektur der Grenze
-			retiring.retire();
-			machine = renewed;
-			ids = new VersionIdGenerator(renewed.id(), clock);
-		}
-		// der Index gehört zu einer Kennung (die Stände hängen davon ab, was "eigen" ist): neu aufbauen, die alten Dateien
-		// gelten als fremd
 		index.deleteCleanMarker();
-		index = newIndex(renewed.ownership());
-		refreshIndex(NO_PROGRESS);
-		// der neue Index kennt keine Listennummern
+		// unter resolveLock: Kein Auflösen liegt zwischen dem Austausch und der Übernahme in den Index, jedes danach löst mit
+		// der neuen Ownership auf
+		synchronized (resolveLock) {
+			synchronized (lock) {
+				// seit freeze liegt keine ID nach until: die späteste vergebene braucht keine Korrektur der Grenze
+				retiring.retire();
+				machine = renewed;
+				ids = new VersionIdGenerator(renewed.id(), clock);
+			}
+			// kein Neuaufbau: Eigen bleiben dieselben Versionen; die Listennummern der alten ID werden unbekannt
+			index.adoptOwnership(renewed.ownership());
+		}
 		ownListsWanted = true;
 		current.bind(renewed.ownership(), local, clock);
 		wishFullSync(current);
@@ -2303,8 +2329,8 @@ public final class SyncService {
 
 	/**
 	 * Entscheidet die Elternlöschungen, die an einer unbekannten Listennummer einer eigenen Version hängen ({@link
-	 * ConflictLedger.Derivation#undecided()}; nach einem Neuaufbau des Index oder einem unsauberen Ende kennt er die Nummern
-	 * nicht): Liest die eigenen Listen ({@code feeds/<eigene ID>/}), trägt die Nummern ein und meldet
+	 * ConflictLedger.Derivation#undecided()}; nach einem Neuaufbau des Index, einem unsauberen Ende oder einer Neuvergabe der
+	 * Rechner-ID kennt er die Nummern nicht): Liest die eigenen Listen ({@code feeds/<eigene ID>/}), trägt die Nummern ein und meldet
 	 * {@link SyncListener#conflictsChanged}. Nutzt die Ableitung, die {@link #reportChanges} in diesem Durchlauf gemacht hat;
 	 * gab es keine, wird nur dann abgeleitet, wenn noch eine Entscheidung aussteht ({@link #ownListsWanted}: nach dem
 	 * Aktivieren der Verbindung, auch nach einem Start ohne Verbindung, und nach einem gescheiterten Versuch). Sonst kostet der
@@ -2334,7 +2360,8 @@ public final class SyncService {
 	 * entstand und nie in einer Liste stand, nie als dem Löschenden unbekannt ein. Eine unlesbare Liste wird übersprungen
 	 * (WARNING): ihre Versionen gelten dann als in keiner Liste, lieber einmal zu viel als verschluckt. Gelesen werden nur
 	 * die Listen der aktuellen ID (die Nummern gelten für sie, {@link ConflictLedger}); eine eigene Version einer früheren
-	 * ID, die nicht nach der Neuvergabe noch einmal gelistet wurde, gilt deshalb ebenfalls als in keiner Liste.
+	 * ID, die nicht nach der Neuvergabe noch einmal gelistet wurde, gilt deshalb ebenfalls als in keiner Liste. Ihre Nummer
+	 * aus den Listen der früheren ID hat der Index bei der Neuvergabe vergessen ({@link UnitIndex#adoptOwnership}).
 	 */
 	private void readOwnLists(Link current) throws IOException {
 		String me = machineId();

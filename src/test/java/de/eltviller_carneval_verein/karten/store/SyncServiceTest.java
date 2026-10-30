@@ -1347,6 +1347,69 @@ class SyncServiceTest {
 		assertTrue(a.events.pending.stream().anyMatch(sighting -> sighting.version().equals(copy.id())), a.events.pending.toString());
 	}
 
+	/** Der Start-Index des Dienstes (privates Feld). */
+	private static Object indexOf(SyncService service) throws ReflectiveOperationException {
+		Field field = SyncService.class.getDeclaredField("index");
+		field.setAccessible(true);
+		return field.get(service);
+	}
+
+	@Test
+	void duplicateMachineDoesNotRebuildTheIndex() throws Exception {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Object index = indexOf(a.service);
+		int callsBefore = a.layer.calls().size();
+
+		triggerSys011(a);
+
+		List<String> calls = a.layer.calls().subList(callsBefore, a.layer.calls().size());
+		assertTrue(calls.stream().noneMatch(c -> c.startsWith("listTree ")), calls.toString());
+		assertSame(index, indexOf(a.service), "derselbe Index, kein neuer");
+		assertTrue(a.service.isStarted());
+		Map<UnitKey, UnitSnapshot> snapshots = a.service.snapshots();
+		assertTrue(snapshots.containsKey(BOOKING) && snapshots.containsKey(SECOND), snapshots.keySet().toString());
+		// das nächste Schreiben trägt die neue Kennung in die Datei
+		a.service.flushIndex();
+		var root = MAPPER.readTree(Files.readAllBytes(a.appData.resolve("index/events/e1.json")));
+		assertEquals(a.service.machineId(), root.get("machine").asText());
+		Node restarted = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		restarted.service.startup("");
+		// der Abgleich beim Start nimmt zusätzlich die Ordner von Event und Vorstellung auf
+		assertTrue(restarted.service.snapshots().entrySet().containsAll(snapshots.entrySet()),
+				restarted.service.snapshots().toString());
+	}
+
+	/**
+	 * Der Auftrag scheitert beim zweiten Anspruch (er entsteht, die Antwort geht verloren): Der erste ist gewonnen, und seine
+	 * Einheit wird schon in diesem Takt als geändert gemeldet, nicht erst, wenn der Auftrag fertig ist.
+	 */
+	@Test
+	void claimsWonBeforeAnAbortAreReportedAsChanged() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		a.service.tick();
+		Path secondClaim = Path.of(SECOND.relativePath(), "claims", "root.json");
+		AtomicBoolean armed = new AtomicBoolean(true);
+		a.layer.failAfterWhen(p -> p.startsWith(sharedRoot) && p.endsWith(secondClaim) && armed.getAndSet(false), "createNew",
+				new IOException("Antwort verloren"));
+		List<Version> saved = a.service.append("stapel", List.of(create(BOOKING, "Anna"), create(SECOND, "Berta")));
+		a.events.changed.clear();
+
+		a.service.tick();
+
+		assertFalse(armed.get(), "der zweite Anspruch wurde versucht");
+		assertEquals(saved.get(0).id(), sharedClaim(BOOKING, "root").version());
+		assertTrue(a.events.changedUnits().contains(BOOKING), a.events.changed.toString());
+		assertFalse(a.service.unitState(BOOKING).provisional());
+		// der nächste Takt setzt beim zweiten Anspruch fort
+		a.service.tick();
+		assertTrue(a.events.changedUnits().contains(SECOND));
+		assertFalse(a.service.unitState(SECOND).provisional());
+	}
+
 	/**
 	 * Ein Speichervorgang läuft über SYS-011 hinweg: Er beginnt vor der Neuvergabe und hält beim Schreiben seiner ersten
 	 * Version an; die Neuvergabe läuft durch, die Uhr geht weiter, erst dann entsteht seine zweite Version. Beide gelten als

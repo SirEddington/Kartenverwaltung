@@ -1532,6 +1532,72 @@ class UnitIndexTest {
 		assertEquals(6L, index.entries().get(EVENT).ownSeq());
 	}
 
+	// --- Neue Rechner-ID ohne Neuaufbau (SYS-011)
+
+	/** Die neue ID nach SYS-011; die bisherige ({@link #ME}) gilt bis 5 000 000 ms, also für {@code mine(1…5)}. */
+	private static final String RENEWED = "nachher1x";
+	private static final Ownership RENEWED_OWN = new Ownership(RENEWED,
+			List.of(new Ownership.Previous(ME, Instant.ofEpochMilli(5_000_000L))));
+
+	@Test
+	void adoptOwnershipRewritesAllGroupsWithTheNewId() throws IOException {
+		buildThreeUnits();
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+		assertFalse(index.hasChanges());
+		Map<UnitKey, UnitIndex.Entry> before = index.entries();
+
+		index.adoptOwnership(RENEWED_OWN);
+
+		assertTrue(index.hasChanges());
+		assertEquals(before, index.entries(), "die Einträge bleiben");
+		index.flush();
+		ObjectMapper mapper = new ObjectMapper();
+		assertEquals(RENEWED, mapper.readTree(Files.readAllBytes(eventIndexFile("e1"))).get("machine").asText());
+		assertEquals(RENEWED, mapper.readTree(Files.readAllBytes(indexDir.resolve("halls.json"))).get("machine").asText());
+		assertTrue(index.writeCleanMarker());
+		assertEquals(RENEWED, Files.readString(cleanMarker(), StandardCharsets.UTF_8));
+		// ein Start mit der neuen ID übernimmt die Dateien, ohne eine Einheit neu aufzulösen
+		UnitIndex restarted = new UnitIndex(indexDir, new NioFileLayer(), RENEWED_OWN);
+		assertTrue(restarted.loadIfClean());
+		assertEquals(before, restarted.entries());
+		assertEquals(0, refresh(new UnitIndex(indexDir, new NioFileLayer(), RENEWED_OWN), local).resolved());
+	}
+
+	@Test
+	void adoptOwnershipForgetsListNumbersOfThePreviousId() throws IOException {
+		UnitKey booking = UnitKey.booking("e1", "p1", "A-1");
+		put(PRESENTATION, OTHER, foreign(1), List.of(), true);
+		// die fremde Löschung kannte die Listen der neuen ID bis Nummer 5
+		put(PRESENTATION, OTHER, foreign(6), List.of(foreign(1)), true, null, true, Map.of(RENEWED, 5L));
+		put(booking, ME, mine(2), List.of(), true);
+		UnitIndex index = index();
+		refresh(index, local);
+		// die Nummer 3 stammt aus den Listen der bisherigen ID
+		index.markOwnListed(List.of(feedEntry(booking, mine(2))), 3);
+		// ebenso eine vorgemerkte Nummer einer Version, die der Index noch nicht als aktuelle kennt
+		index.markOwnListed(List.of(feedEntry(HALL, mine(4))), 7);
+		assertEquals(3L, index.entries().get(booking).ownSeq());
+
+		index.adoptOwnership(RENEWED_OWN);
+
+		assertNull(index.entries().get(booking).ownSeq(), "eine Nummer der früheren ID gilt nicht für die neue");
+		ConflictLedger.Derivation undecided = ConflictLedger.derive(index.entries().values(), RENEWED_OWN, Set.of());
+		assertTrue(undecided.undecided());
+		assertTrue(undecided.conflicts().isEmpty());
+		// wie readOwnLists: Die Listen der neuen ID nennen die Version nicht, also kannte der Löschende sie nicht
+		index.markUnknownOwnAsUnlisted(Map.of(booking, mine(2)));
+		ConflictLedger.Derivation decided = ConflictLedger.derive(index.entries().values(), RENEWED_OWN, Set.of());
+		assertFalse(decided.undecided());
+		assertEquals(1, decided.conflicts().size());
+		assertEquals(List.of(booking), decided.conflicts().get(0).deletion().affected());
+		put(HALL, ME, mine(4), List.of(), false);
+		UnitFiles files = local.readUnit(HALL);
+		index.update(files, ChainResolver.resolve(files, RENEWED_OWN));
+		assertNull(index.entries().get(HALL).ownSeq(), "die vorgemerkte Nummer der früheren ID ist verworfen");
+	}
+
 	private static long createdFiles(FaultyFileLayer layer) {
 		return layer.calls().stream().filter(c -> c.startsWith("createNew ")).count();
 	}

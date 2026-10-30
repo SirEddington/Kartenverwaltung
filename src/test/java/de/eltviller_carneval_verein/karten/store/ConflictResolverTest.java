@@ -796,6 +796,99 @@ class ConflictResolverTest {
 		assertTrue(logsAtLeast(Level.WARNING).stream().noneMatch(r -> r.getMessage().contains("5 Minuten")));
 	}
 
+	/**
+	 * Eine Version der früheren ID dieses Rechners (vor SYS-011) in der Kette ist eigen: Auf ihre Änderungsliste wird nicht
+	 * gewartet, auch wenn sie nie als gelesen gilt. Fiele die Prüfung auf "nur die aktuelle ID" zurück, wartete die
+	 * Auflösung hier fünf Minuten.
+	 */
+	@Test
+	void ownVersionOfAPreviousIdDoesNotWait() throws IOException {
+		String previous = "frueher1aaaaaaaaaaaaaaaaaa";
+		String current = "jetzt123aaaaaaaaaaaaaaaaaa";
+		long untilMillis = 1_800_000_010_000L;
+		Ownership own = new Ownership(current, List.of(new Ownership.Previous(previous, Instant.ofEpochMilli(untilMillis))));
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		Version base = new Version(StoreCodec.FORMAT, VersionId.create(untilMillis - 3000, previous, 0), List.of(), previous,
+				"Kasse", null, clock.instant(), "s1", false, name("Anna"));
+		// der Gewinner: noch unter der früheren ID, vor ihrer Grenze; seine Liste ist nie gelesen
+		Version winner = new Version(StoreCodec.FORMAT, VersionId.create(untilMillis - 2000, previous, 1), List.of(base.id()),
+				previous, "Kasse", null, clock.instant(), "s2", false, name("Bert"));
+		Version mine = new Version(StoreCodec.FORMAT, VersionId.create(untilMillis + 5000, current, 0), List.of(base.id()),
+				current, "Kasse", null, clock.instant(), "s3", false, name("Carla"));
+		for (Version version : List.of(base, winner, mine)) {
+			byte[] bytes = StoreCodec.write(version);
+			assertTrue(store.writeVersion(BOOKING, version.id(), bytes));
+			if (version != mine) {
+				assertTrue(arbiter.claim(BOOKING, version, bytes).won());
+			}
+		}
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver.Host host = new ConflictResolver.Host() {
+			@Override
+			public SyncService.Resolved resolve(UnitKey unit) throws IOException {
+				UnitFiles files = store.readUnit(unit);
+				return new SyncService.Resolved(files, ChainResolver.resolve(files, own));
+			}
+
+			@Override
+			public boolean shared() {
+				return true;
+			}
+
+			@Override
+			public boolean isListed(UnitKey unit, VersionId version) {
+				return false;
+			}
+
+			@Override
+			public String machineId() {
+				return current;
+			}
+
+			@Override
+			public Ownership ownership() {
+				return own;
+			}
+
+			@Override
+			public Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking) {
+				return Map.of();
+			}
+
+			@Override
+			public Set<UnitKey> withOwnVersionsBesideChain(Collection<UnitKey> units) {
+				return Set.of();
+			}
+
+			@Override
+			public List<Version> append(String saveId, List<Change> changes) {
+				appended.add(changes);
+				return List.of();
+			}
+
+			@Override
+			public String failureText(Exception failure) {
+				return failure.toString();
+			}
+
+			@Override
+			public boolean deferred(UnitKey unit) {
+				return false;
+			}
+		};
+		assertEquals(List.of(List.of(mine.id())), host.resolve(BOOKING).state().lost());
+		ConflictResolver resolver = new ConflictResolver(host, new SyncNotifier(Runnable::run), clock);
+		RecordingPolicy policy = new RecordingPolicy();
+		resolver.setPolicy(UnitType.BOOKING, policy);
+		resolver.enqueue(BOOKING);
+
+		resolver.resolvePending(10);
+
+		assertEquals(1, appended.size(), "zusammengeführt, ohne zu warten");
+		assertEquals(List.of(winner.id(), mine.id()), appended.get(0).get(0).parents());
+	}
+
 	@Test
 	void resolutionGivesUpWaitingAfterFiveMinutes() throws IOException {
 		SimulatedCloud cloud = new SimulatedCloud(dir.resolve("server"));

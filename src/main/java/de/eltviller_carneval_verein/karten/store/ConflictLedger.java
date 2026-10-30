@@ -28,8 +28,9 @@ import java.util.Set;
  * zu ihrer Neuvergabe); der Eintrag nennt den Rechner der aktuellen Version nicht. Ein Vermerk betrifft diesen Rechner, wenn
  * {@link ConflictNote#affected()} eine eigene ID ist und die weichende Version ({@link ConflictNote#dropped()}, ohne sie die
  * Version mit dem Vermerk) bei einer früheren ID vor deren Neuvergabe entstand ({@link #affectsMe}). Die Listennummern
- * ({@link UnitIndex.Entry#ownSeq()}) stammen immer aus den Listen der aktuellen ID (der Index wird bei einer Neuvergabe neu
- * aufgebaut) und werden deshalb mit {@code D.seen[aktuelle ID]} verglichen.
+ * ({@link UnitIndex.Entry#ownSeq()}) stammen immer aus den Listen der aktuellen ID (bei einer Neuvergabe vergisst der Index
+ * die Nummern aus den Listen der früheren, {@link UnitIndex#adoptOwnership}) und werden deshalb mit
+ * {@code D.seen[aktuelle ID]} verglichen.
  */
 final class ConflictLedger {
 

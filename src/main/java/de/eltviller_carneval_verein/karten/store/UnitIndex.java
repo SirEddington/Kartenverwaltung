@@ -176,10 +176,13 @@ final class UnitIndex {
 
 	private final Path indexDir;
 	private final FileLayer files;
-	/** Die aktuelle ID dieses Rechners: Sie steht in den Index-Dateien und in der Marke "sauber beendet". */
-	private final String machineId;
-	/** Was als eigen gilt (aktuelle und frühere IDs); danach werden die Stände aufgelöst. */
-	private final Ownership own;
+	/**
+	 * Die aktuelle ID dieses Rechners: Sie steht in den Index-Dateien und in der Marke "sauber beendet". Unter dem Monitor
+	 * des Index; ändert sich nur mit {@link #adoptOwnership}.
+	 */
+	private String machineId;
+	/** Was als eigen gilt (aktuelle und frühere IDs); danach werden die Stände aufgelöst. Wie {@link #machineId}. */
+	private Ownership own;
 
 	private final Map<UnitKey, Entry> entries = new HashMap<>();
 	/**
@@ -211,7 +214,8 @@ final class UnitIndex {
 	 * @param files    die Dateischicht, über die der Index gelesen und geschrieben wird
 	 * @param own      was dieser Rechner als eigen ansieht. Seine aktuelle ID kommt in die Index-Dateien; Index-Dateien
 	 *                 mit einer anderen ID (auch einer früheren eigenen) werden nicht übernommen, denn ihre Stände hingen
-	 *                 von einem anderen "eigen" ab
+	 *                 von einem anderen "eigen" ab. Bei einer Neuvergabe zur Laufzeit übernimmt der Index die neue
+	 *                 Ownership ohne Neuaufbau ({@link #adoptOwnership})
 	 */
 	UnitIndex(Path indexDir, FileLayer files, Ownership own) {
 		this.indexDir = indexDir;
@@ -794,6 +798,41 @@ final class UnitIndex {
 	}
 
 	/**
+	 * Übernimmt nach einer Neuvergabe der Rechner-ID (SYS-011) die neue Ownership, ohne den Index neu aufzubauen. Die Stände
+	 * bleiben, denn eigen sind weiter dieselben Versionen im Bestand: die der früheren ID bis zu ihrer Grenze, und die
+	 * Grenze deckt jede Version, die dieser Rechner mit ihr schrieb ({@link SyncService}, Neuvergabe). Alle geladenen Gruppen
+	 * gelten als geändert: Das nächste {@link #flush} schreibt sie mit der neuen ID, sonst gälten die Dateien beim nächsten
+	 * Start als fremd. Eine Marke "sauber beendet" gilt nicht mehr.
+	 * <p>
+	 * Die Listennummern ({@link Entry#ownSeq()}) gelten nur für die Listen der aktuellen ID; {@link ConflictLedger} vergleicht
+	 * sie mit {@code seen} der aktuellen ID. Stammt die aktuelle Version eines Eintrags nicht von der neuen ID, wird ihre
+	 * Nummer deshalb unbekannt, ebenso jede vorgemerkte Nummer einer solchen Version: Eine Nummer aus den Listen der früheren
+	 * ID, gegen {@code seen} der neuen verglichen, verpasste einen Konflikt. {@link #markOwnListed} und
+	 * {@link #markUnknownOwnAsUnlisted} entscheiden die Nummern danach wie nach einem Neuaufbau.
+	 *
+	 * @param renewed die Ownership mit der neuen ID als aktueller
+	 */
+	synchronized void adoptOwnership(Ownership renewed) {
+		own = renewed;
+		machineId = renewed.currentId();
+		for (Map.Entry<UnitKey, Entry> item : entries.entrySet()) {
+			Entry entry = item.getValue();
+			VersionId version = entry.snapshot().version();
+			if (entry.ownSeq() != null && (version == null || !version.isFrom(machineId))) {
+				item.setValue(entry.withOwnSeq(null));
+			}
+		}
+		for (Map<VersionId, Long> numbers : ownListedYet.values()) {
+			numbers.keySet().removeIf(version -> !version.isFrom(machineId));
+		}
+		ownListedYet.values().removeIf(Map::isEmpty);
+		Set<String> groups = new TreeSet<>(loaded);
+		entries.keySet().forEach(unit -> groups.add(groupOf(unit)));
+		groups.forEach(this::markChanged);
+		invalidateCleanMarker();
+	}
+
+	/**
 	 * Schreibt die geänderten Index-Dateien, jede über eine temporäre Datei im selben Ordner und
 	 * {@link AtomicFileReplace#replace}. Scheitert eine Datei, bleibt sie als geändert vorgemerkt und die Ausnahme geht
 	 * weiter; die noch nicht geschriebenen bleiben ebenfalls vorgemerkt.
@@ -832,7 +871,7 @@ final class UnitIndex {
 		}
 		List<Entry> inGroup = entries.values().stream().filter(entry -> groupOf(entry.snapshot().unit()).equals(group))
 				.toList();
-		return new Prepared(group, revisionOf(group), inGroup);
+		return new Prepared(group, revisionOf(group), machineId, inGroup);
 	}
 
 	/**
@@ -842,7 +881,7 @@ final class UnitIndex {
 	 */
 	private void write(Prepared prepared) throws IOException {
 		Path file = fileOf(prepared.group());
-		byte[] bytes = serialize(prepared.entries());
+		byte[] bytes = serialize(prepared.machineId(), prepared.entries());
 		Path temp = file.resolveSibling(FileLayer.TEMP_PREFIX + "index-" + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
 		try {
 			files.createNew(temp, bytes);
@@ -870,8 +909,12 @@ final class UnitIndex {
 		return revisions.getOrDefault(group, 0L);
 	}
 
-	/** Die Einträge einer Gruppe und der Stand ({@link #revisionOf}), auf dem sie beruhen. */
-	private record Prepared(String group, long revision, List<Entry> entries) {
+	/**
+	 * Die Einträge einer Gruppe, der Stand ({@link #revisionOf}), auf dem sie beruhen, und die Rechner-ID, mit der sie
+	 * geschrieben werden (gelesen unter dem Monitor; {@link #adoptOwnership} während des Schreibens lässt die Gruppe
+	 * vorgemerkt).
+	 */
+	private record Prepared(String group, long revision, String machineId, List<Entry> entries) {
 	}
 
 	private Path cleanMarker() {
@@ -1198,10 +1241,10 @@ final class UnitIndex {
 		return chain;
 	}
 
-	private byte[] serialize(List<Entry> groupEntries) throws IOException {
+	private static byte[] serialize(String machine, List<Entry> groupEntries) throws IOException {
 		ObjectNode root = MAPPER.createObjectNode();
 		root.put("indexFormat", INDEX_FORMAT);
-		root.put("machine", machineId);
+		root.put("machine", machine);
 		ArrayNode units = root.putArray("units");
 		groupEntries.stream()
 				.sorted((a, b) -> a.snapshot().unit().relativePath().compareTo(b.snapshot().unit().relativePath()))
