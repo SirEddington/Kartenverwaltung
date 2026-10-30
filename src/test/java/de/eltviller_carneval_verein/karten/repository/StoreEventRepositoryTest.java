@@ -458,8 +458,8 @@ class StoreEventRepositoryTest {
 		}
 
 		@Override
-		public List<String> listNamesWithTemps(Path dir) throws IOException {
-			return delegate.listNamesWithTemps(dir);
+		public List<DirEntry> listEntriesWithTemps(Path dir) throws IOException {
+			return delegate.listEntriesWithTemps(dir);
 		}
 
 		@Override

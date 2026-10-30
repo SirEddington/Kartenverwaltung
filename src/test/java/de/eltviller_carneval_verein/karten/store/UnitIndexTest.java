@@ -135,9 +135,8 @@ class UnitIndexTest {
 		saveTwice(EVENT, "event");
 		Path unitDir = local.dataRoot().resolve(EVENT.relativePath());
 		Path claimsDir = unitDir.resolve("claims");
-		Duration tempAge = Duration.ofDays(1);
-		Duration old = tempAge.plusHours(1);
-		Duration young = tempAge.minusHours(1);
+		Duration old = SyncService.TEMP_AGE.plusHours(1);
+		Duration young = SyncService.TEMP_AGE.minusHours(1);
 		Path untaggedOld = tempFile(unitDir, null, old);
 		Path untaggedOldInClaims = tempFile(claimsDir, null, old);
 		Path ownOld = tempFile(unitDir, ME, old);
@@ -149,8 +148,7 @@ class UnitIndexTest {
 		Path foreignName = Files.write(unitDir.resolve("Thumbs.db"), new byte[] { 1 });
 		Files.setLastModifiedTime(foreignName, FileTime.from(Instant.now().minus(old)));
 
-		UnitIndex.Refresh refresh = index().refresh(local, p -> {
-		}, tempAge);
+		UnitIndex.Refresh refresh = refresh(index(), local);
 
 		assertFalse(Files.exists(untaggedOld));
 		assertFalse(Files.exists(untaggedOldInClaims));
@@ -165,7 +163,7 @@ class UnitIndexTest {
 	}
 
 	@Test
-	void refreshWithoutAgeUsesTheStandardTempAge() throws IOException {
+	void refreshUsesTheStandardTempAgeOfOneDay() throws IOException {
 		saveTwice(EVENT, "event");
 		Path unitDir = local.dataRoot().resolve(EVENT.relativePath());
 		Path untaggedYoung = tempFile(unitDir, null, Duration.ofHours(23));

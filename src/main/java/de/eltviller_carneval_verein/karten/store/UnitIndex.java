@@ -297,32 +297,22 @@ final class UnitIndex {
 
 	/**
 	 * Gleicht den Index mit dem Bestand ab: Einheiten, deren Abdruck zum Eintrag passt, bleiben, alle anderen werden aus den
-	 * Dateien neu aufgelöst; Einträge ohne Ordner entfallen. Danach hat jede Einheit des Bestands einen Eintrag. Alte
-	 * temporäre Dateien räumt derselbe Durchlauf auf, älter als {@link SyncService#TEMP_AGE}
-	 * ({@link #refresh(VersionStore, DoubleConsumer, Duration)}).
+	 * Dateien neu aufgelöst; Einträge ohne Ordner entfallen. Danach hat jede Einheit des Bestands einen Eintrag.
+	 * <p>
+	 * Alte temporäre Dateien räumt derselbe Durchlauf auf: Der Verzeichnisbaum, den der Abgleich ohnehin auflistet, zeigt
+	 * auch die temporären Reste ({@link FileLayer#listTree} blendet {@code ~karv-*} nicht aus). Daraus löscht er die eigenen
+	 * und kennungslosen (lokal tragen temporäre Dateien keine Kennung) {@code ~karv-*.tmp}, die seit mehr als
+	 * {@link SyncService#TEMP_AGE} nicht geändert wurden. Das Alter wird nur für diese Namen abgefragt; ein Fehler betrifft
+	 * nur seinen Ordner und lässt den Abgleich nicht scheitern. Die Namen einer fremden Kennung bleiben unberührt.
 	 *
 	 * @param local    der lokale Bestand
 	 * @param progress bekommt den Anteil der behandelten Einheiten von 0.0 bis 1.0, zuletzt 1.0
 	 * @return die Einheiten mit ausstehenden und mit verlorenen Versionen und die Zahl der neu aufgelösten Einheiten
 	 */
 	synchronized Refresh refresh(VersionStore local, DoubleConsumer progress) throws IOException {
-		return refresh(local, progress, SyncService.TEMP_AGE);
-	}
-
-	/**
-	 * Wie {@link #refresh(VersionStore, DoubleConsumer)}, mit dem Alter, ab dem der Durchlauf alte temporäre Dateien löscht.
-	 * Der Verzeichnisbaum, den der Abgleich ohnehin auflistet, zeigt auch die temporären Reste ({@link FileLayer#listTree}
-	 * blendet {@code ~karv-*} nicht aus): Daraus löscht der Durchlauf die eigenen und kennungslosen (lokal tragen
-	 * temporäre Dateien keine Kennung) {@code ~karv-*.tmp}, die seit mehr als {@code tempAge} nicht geändert wurden. Das
-	 * Alter wird nur für diese Namen abgefragt; ein Fehler betrifft nur seinen Ordner und lässt den Abgleich nicht scheitern.
-	 * Die Namen einer fremden Kennung bleiben unberührt.
-	 *
-	 * @param tempAge das Alter, ab dem eine temporäre Datei als Rest eines Absturzes gilt
-	 */
-	synchronized Refresh refresh(VersionStore local, DoubleConsumer progress, Duration tempAge) throws IOException {
 		deleteLeftoverTemps();
 		Map<String, List<String>> tree = files.listTree(local.dataRoot());
-		deleteOldLocalTemps(local, tree, tempAge);
+		deleteOldLocalTemps(local, tree, SyncService.TEMP_AGE);
 		Map<UnitKey, String> units = new LinkedHashMap<>();
 		for (String rel : new TreeSet<>(tree.keySet())) {
 			UnitKey.parse(rel).ifPresent(unit -> units.put(unit, rel));

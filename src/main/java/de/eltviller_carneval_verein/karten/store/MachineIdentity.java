@@ -147,7 +147,7 @@ public final class MachineIdentity {
 					// der eigene Listenordner plötzlich fremd), nur der Name wird neu vorbelegt und die Datei neu geschrieben.
 					MachineIdentity repaired = new MachineIdentity(file, id, read.entries(), nameFrom(computerName), null,
 							clock, read.lossy());
-					repaired.write(id, repaired.name, read.entries(), clock);
+					repaired.write(id, repaired.name, read.entries());
 					return repaired;
 				}
 				asideCorrupt(file, clock, false);
@@ -331,7 +331,7 @@ public final class MachineIdentity {
 			throw new IllegalArgumentException("Der Name des Rechners darf nicht leer sein.");
 		}
 		String trimmed = name.trim();
-		write(id, trimmed, previous, clock);
+		write(id, trimmed, previous);
 		this.name = trimmed;
 	}
 
@@ -343,45 +343,22 @@ public final class MachineIdentity {
 	}
 
 	/**
-	 * Vergibt eine neue ID mit der Systemuhr.
-	 *
-	 * @see #regenerate(Clock)
-	 */
-	public MachineIdentity regenerate() throws IOException {
-		return regenerate(Clock.systemUTC());
-	}
-
-	/**
 	 * Vergibt eine neue ID (gleicher Name, gleicher Bediener) und schreibt {@code machine.json} neu. Nötig, wenn ein
-	 * Datenordner auf einen zweiten Rechner kopiert wurde und beide dieselbe ID tragen. Die alte ID bleibt mit dem
-	 * Zeitpunkt der Uhr (auf die Millisekunde abgeschnitten) als frühere ID erhalten: Versionen bis dahin gelten weiter als
-	 * eigen (siehe {@link Ownership}). Diese Instanz behält ihre ID; wer die neue braucht, nimmt die zurückgegebene.
-	 *
-	 * @param clock Uhr für den Zeitpunkt der Neuvergabe
-	 * @throws IOException wenn die Datei nicht geschrieben werden kann
-	 */
-	public MachineIdentity regenerate(Clock clock) throws IOException {
-		return regenerate(clock.instant(), clock);
-	}
-
-	/**
-	 * Wie {@link #regenerate(Clock)}, mit ausdrücklich genannter Grenze der alten ID: Versionen der alten ID bis
-	 * einschließlich {@code until} (auf die Millisekunde abgeschnitten) bleiben eigen. Der Aufrufer wählt sie so, dass sie
-	 * jede Version deckt, die er mit der alten ID erzeugt hat oder noch erzeugt (siehe {@link VersionIdGenerator#freeze()}).
+	 * Datenordner auf einen zweiten Rechner kopiert wurde und beide dieselbe ID tragen. Die alte ID bleibt mit der Grenze
+	 * {@code until} (auf die Millisekunde abgeschnitten) als frühere ID erhalten: Versionen der alten ID bis einschließlich
+	 * dahin gelten weiter als eigen (siehe {@link Ownership}). Der Aufrufer wählt die Grenze so, dass sie jede Version deckt,
+	 * die er mit der alten ID erzeugt hat oder noch erzeugt (siehe {@link VersionIdGenerator#freeze()}). Diese Instanz
+	 * behält ihre ID; wer die neue braucht, nimmt die zurückgegebene.
 	 *
 	 * @param until die Grenze der alten ID
 	 * @throws IOException wenn die Datei nicht geschrieben werden kann
 	 */
-	public MachineIdentity regenerate(Instant until) throws IOException {
-		return regenerate(until, clock);
-	}
-
-	private synchronized MachineIdentity regenerate(Instant until, Clock stamp) throws IOException {
+	public synchronized MachineIdentity regenerate(Instant until) throws IOException {
 		String newId = newId();
 		List<Ownership.Previous> all = new ArrayList<>(previous);
 		all.add(new Ownership.Previous(id, until.truncatedTo(ChronoUnit.MILLIS)));
-		write(newId, name, all, stamp);
-		return new MachineIdentity(file, newId, all, name, operator, this.clock, false);
+		write(newId, name, all);
+		return new MachineIdentity(file, newId, all, name, operator, clock, false);
 	}
 
 	private static byte[] toBytes(String id, String name, List<Ownership.Previous> previous) throws IOException {
@@ -402,16 +379,14 @@ public final class MachineIdentity {
 	/**
 	 * Schreibt die Datei über eine temporäre Datei im selben Ordner und ersetzt die vorhandene atomar. Enthielt die Datei
 	 * beim Laden schadhafte Einträge in {@code previous}, wird vor dem ersten Schreiben eine Kopie angelegt (siehe
-	 * {@link #asideCorrupt}); schlägt das fehl, bleibt die Datei unverändert.
-	 *
-	 * @param stamp Uhr für den Zeitstempel im Namen dieser Kopie
+	 * {@link #asideCorrupt}, mit der Uhr dieser Instanz); schlägt das fehl, bleibt die Datei unverändert.
 	 */
-	private void write(String id, String name, List<Ownership.Previous> previous, Clock stamp) throws IOException {
+	private void write(String id, String name, List<Ownership.Previous> previous) throws IOException {
 		byte[] bytes = toBytes(id, name, previous);
 		Path dir = file.toAbsolutePath().getParent();
 		Files.createDirectories(dir);
 		if (keepOriginal) {
-			asideCorrupt(file, stamp, true);
+			asideCorrupt(file, clock, true);
 		}
 		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
 		try {

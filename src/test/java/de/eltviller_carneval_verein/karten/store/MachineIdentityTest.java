@@ -206,7 +206,7 @@ class MachineIdentityTest {
 		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
 		machine.setOperator("Anna");
 
-		MachineIdentity fresh = machine.regenerate();
+		MachineIdentity fresh = machine.regenerate(CLOCK.instant());
 
 		assertNotEquals(machine.id(), fresh.id());
 		assertTrue(fresh.id().matches("[0-9a-z]{26}"));
@@ -223,7 +223,7 @@ class MachineIdentityTest {
 		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
 		String oldId = machine.id();
 
-		MachineIdentity fresh = machine.regenerate(CLOCK);
+		MachineIdentity fresh = machine.regenerate(CLOCK.instant());
 
 		assertEquals(List.of(new Ownership.Previous(oldId, CLOCK.instant())), fresh.ownership().previous());
 		assertEquals(fresh.id(), fresh.ownership().currentId());
@@ -241,10 +241,10 @@ class MachineIdentityTest {
 	@Test
 	void regenerateTwiceKeepsBothOldIds() throws IOException {
 		MachineIdentity first = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
-		MachineIdentity second = first.regenerate(CLOCK);
+		MachineIdentity second = first.regenerate(CLOCK.instant());
 		Clock later = Clock.fixed(CLOCK.instant().plusSeconds(60), ZoneOffset.UTC);
 
-		MachineIdentity third = second.regenerate(later);
+		MachineIdentity third = second.regenerate(later.instant());
 
 		assertEquals(List.of(new Ownership.Previous(first.id(), CLOCK.instant()),
 				new Ownership.Previous(second.id(), later.instant())), third.ownership().previous());
@@ -263,20 +263,8 @@ class MachineIdentityTest {
 	}
 
 	@Test
-	void regenerateWithoutClockUsesTheSystemClock() throws IOException {
-		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
-		Instant before = Instant.now();
-
-		MachineIdentity fresh = machine.regenerate();
-
-		Instant until = fresh.ownership().previous().get(0).until();
-		assertFalse(until.isBefore(before.minusMillis(1)));
-		assertFalse(until.isAfter(Instant.now().plusMillis(1)));
-	}
-
-	@Test
 	void renameKeepsPreviousIds() throws IOException {
-		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(CLOCK);
+		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(CLOCK.instant());
 		List<Ownership.Previous> previous = fresh.ownership().previous();
 
 		fresh.rename("Eingang Nord");
@@ -299,7 +287,7 @@ class MachineIdentityTest {
 
 	@Test
 	void previousSurvivesReload() throws IOException {
-		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(CLOCK);
+		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(CLOCK.instant());
 
 		MachineIdentity reloaded = MachineIdentity.loadOrCreate(dir, () -> "egal");
 
@@ -355,10 +343,11 @@ class MachineIdentityTest {
 	@Test
 	void skippedPreviousEntryKeepsACopyBeforeRegenerate() throws IOException {
 		String content = writeLossyFile();
-		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK);
+		// der Zeitstempel der Kopie kommt von der Uhr der Kennung
 		Clock later = Clock.fixed(CLOCK.instant().plusSeconds(3600), ZoneOffset.UTC);
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "egal", later);
 
-		MachineIdentity fresh = machine.regenerate(later);
+		MachineIdentity fresh = machine.regenerate(later.instant());
 
 		assertEquals(List.of("machine.json", "machine.json.corrupt-2026-10-26_14-45-07"), names());
 		assertEquals(content, Files.readString(dir.resolve("machine.json.corrupt-2026-10-26_14-45-07")));
@@ -391,7 +380,7 @@ class MachineIdentityTest {
 
 	@Test
 	void cleanPreviousLeavesNoCopy() throws IOException {
-		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(CLOCK);
+		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(CLOCK.instant());
 
 		fresh.rename("Eingang Nord");
 		MachineIdentity.loadOrCreate(dir, () -> "egal", CLOCK).rename("Noch einer");
@@ -418,7 +407,7 @@ class MachineIdentityTest {
 	void regenerateTruncatesToMilliseconds() throws IOException {
 		Clock subMilli = Clock.fixed(Instant.parse("2026-10-26T13:45:07.123456789Z"), ZoneOffset.UTC);
 
-		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(subMilli);
+		MachineIdentity fresh = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1").regenerate(subMilli.instant());
 
 		assertEquals(Instant.parse("2026-10-26T13:45:07.123Z"), fresh.ownership().previous().get(0).until());
 		var previous = new com.fasterxml.jackson.databind.ObjectMapper().readTree(Files.readAllBytes(machineFile()))

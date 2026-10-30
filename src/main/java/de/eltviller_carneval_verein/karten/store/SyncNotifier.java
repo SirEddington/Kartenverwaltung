@@ -53,11 +53,6 @@ final class SyncNotifier {
 	/** Schlüssel der Meldungen, die in diesem Programmlauf schon einmal kamen. */
 	private final Set<String> reportedOnce = new HashSet<>();
 
-	/** Ohne Marke "verbunden": Die erste Verbindung gilt als vollständig. */
-	SyncNotifier(Executor ui) {
-		this(ui, true);
-	}
-
 	/**
 	 * @param connectionComplete der Startwert von {@link #connectionCompleteProperty()} (aus der Marke "verbunden"); er gilt
 	 *                           sofort, ohne den {@code ui}-Executor

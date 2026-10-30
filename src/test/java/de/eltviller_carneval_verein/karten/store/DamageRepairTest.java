@@ -298,8 +298,8 @@ class DamageRepairTest {
 
 		assertEquals(Outcome.REPAIRED_SHARED, result.outcome());
 		assertEquals(List.of(new FaultyFileLayer.Replacement(versionPath(shared), ME)), layer.replacements());
-		assertEquals(List.of(), files.listNamesWithTemps(versionPath(shared).getParent()).stream()
-				.filter(n -> n.startsWith(FileLayer.TEMP_PREFIX)).toList());
+		assertEquals(List.of(), files.listEntriesWithTemps(versionPath(shared).getParent()).stream()
+				.map(FileLayer.DirEntry::name).filter(n -> n.startsWith(FileLayer.TEMP_PREFIX)).toList());
 	}
 
 	@Test

@@ -600,7 +600,7 @@ class NioFileLayerTest {
 	}
 
 	@Test
-	void listNamesWithTempsShowsTempsListNamesHidesThem() throws IOException {
+	void listEntriesWithTempsShowsTempsListNamesHidesThem() throws IOException {
 		Files.write(dir.resolve("b.json"), bytes("b"));
 		Files.write(dir.resolve("~karv-abc-123e4567-e89b-12d3-a456-426614174000.tmp"), bytes("t"));
 		Files.write(dir.resolve("~karv-x.tmp"), bytes("t"));
@@ -608,8 +608,8 @@ class NioFileLayerTest {
 
 		assertEquals(List.of("b.json", "sub"), layer.listNames(dir));
 		assertEquals(List.of("b.json", "sub", "~karv-abc-123e4567-e89b-12d3-a456-426614174000.tmp", "~karv-x.tmp"),
-				layer.listNamesWithTemps(dir));
-		assertEquals(List.of(), layer.listNamesWithTemps(dir.resolve("gibt-es-nicht")));
+				layer.listEntriesWithTemps(dir).stream().map(FileLayer.DirEntry::name).toList());
+		assertEquals(List.of(), layer.listEntriesWithTemps(dir.resolve("gibt-es-nicht")));
 	}
 
 	@Test

@@ -67,8 +67,8 @@ public final class VersionStore {
 		return dataRoot;
 	}
 
-	/** Der Anker, unter dem dieser Bestand schreibt (nie angelegt); {@code null}, wenn er keinen hat. */
-	public Path anchor() {
+	/** Für Tests: der Anker, unter dem dieser Bestand schreibt (nie angelegt); {@code null}, wenn er keinen hat. */
+	Path anchor() {
 		return anchor;
 	}
 
@@ -277,23 +277,9 @@ public final class VersionStore {
 	}
 
 	/**
-	 * Die Pfade aller Versions- und Anspruchsdateien aller Einheiten, relativ zu {@link #dataRoot()} und mit {@code /}
-	 * getrennt, sortiert. Es sind genau die Dateien, die {@link #readUnit} übernimmt; Listendateien unter
-	 * {@code feeds/} gehören nicht dazu.
-	 */
-	public List<String> allDataFiles() throws IOException {
-		List<String> paths = new ArrayList<>();
-		for (UnitKey unit : allUnits()) {
-			paths.addAll(unitDataFiles(unit));
-		}
-		Collections.sort(paths);
-		return paths;
-	}
-
-	/**
 	 * Die Pfade der Versions- und Anspruchsdateien genau dieser Einheit (ohne die ihrer Unterordner, etwa der Auftritte
-	 * eines Events), relativ zu {@link #dataRoot()} und mit {@code /} getrennt, sortiert. Es gelten die Namensregeln von
-	 * {@link #allDataFiles()}; fehlt der Ordner, ist die Liste leer.
+	 * eines Events), relativ zu {@link #dataRoot()} und mit {@code /} getrennt, sortiert. Es sind genau die Dateien, die
+	 * {@link #readUnit} übernimmt; fehlt der Ordner, ist die Liste leer.
 	 */
 	public List<String> unitDataFiles(UnitKey unit) throws IOException {
 		Path unitDir = unitDir(unit);

@@ -95,7 +95,40 @@ class FullSyncTest {
 	}
 
 	private FullSyncResult run(boolean upload) throws IOException {
-		return FullSync.run(local, shared, upload, OWN, files, CLOCK);
+		return syncAll(local, shared, upload, claim -> {
+		});
+	}
+
+	/**
+	 * Gleicht alle Einheiten beider Bestände ab ({@link FullSync#syncUnits}, jede Einheit gilt als bekannt), in der
+	 * Reihenfolge von {@link #unitsOfBoth}. Tests, die mehrere Einheiten prüfen, hängen an dieser Reihenfolge (Events vor
+	 * Hallen).
+	 */
+	private FullSyncResult syncAll(VersionStore local, VersionStore shared, boolean upload,
+			Consumer<FullSyncResult.UploadedClaim> uploaded) throws IOException {
+		return FullSync.syncUnits(local, shared, unitsOfBoth(local, shared), upload, OWN, files, CLOCK, KNOWN, uploaded,
+				NO_ABORT);
+	}
+
+	/**
+	 * Die Einheiten, die es in mindestens einem der beiden Bestände gibt, in der Reihenfolge von
+	 * {@link VersionStore#allUnits()}: jedes Event, gefolgt von seinen Auftritten mit deren Buchungen, dann die Hallen;
+	 * auf jeder Ebene nach Ordnernamen sortiert.
+	 */
+	private static List<UnitKey> unitsOfBoth(VersionStore local, VersionStore shared) throws IOException {
+		List<UnitKey> units = new ArrayList<>();
+		for (String eventId : FullSync.union(local.eventIds(), shared.eventIds())) {
+			UnitKey event = UnitKey.event(eventId);
+			units.add(event);
+			for (UnitKey presentation : FullSync.childrenOfBoth(local, shared, event, VersionStore.PRESENTATIONS)) {
+				units.add(presentation);
+				units.addAll(FullSync.childrenOfBoth(local, shared, presentation, VersionStore.BOOKINGS));
+			}
+		}
+		for (String hallId : FullSync.union(local.hallIds(), shared.hallIds())) {
+			units.add(UnitKey.hall(hallId));
+		}
+		return units;
 	}
 
 	private static boolean has(VersionStore store, String rel) throws IOException {
@@ -117,7 +150,7 @@ class FullSyncTest {
 		assertTrue(has(shared, "halls/h1/" + V2 + ".json"));
 		assertEquals(Set.of(E2), result.changed());
 		assertTrue(result.lost().isEmpty());
-		assertEquals(local.allDataFiles(), shared.allDataFiles());
+		assertEquals(VersionStoreTest.allDataFiles(local), VersionStoreTest.allDataFiles(shared));
 	}
 
 	@Test
@@ -259,7 +292,7 @@ class FullSyncTest {
 		shared.createClaim(E2, "root", knownClaim);
 		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
 
-		FullSyncResult result = FullSync.run(local, shared, true, OWN, files, CLOCK, seen::add);
+		FullSyncResult result = syncAll(local, shared, true, seen::add);
 
 		List<FullSyncResult.UploadedClaim> expected = List.of(new FullSyncResult.UploadedClaim(E1, "root", V1),
 				new FullSyncResult.UploadedClaim(HALL, "root", V2));
@@ -282,7 +315,7 @@ class FullSyncTest {
 		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
 		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
 
-		assertThrows(IOException.class, () -> FullSync.run(local, faultyShared, true, OWN, files, CLOCK, seen::add));
+		assertThrows(IOException.class, () -> syncAll(local, faultyShared, true, seen::add));
 
 		assertEquals(List.of(new FullSyncResult.UploadedClaim(E1, "root", V1)), seen);
 	}
@@ -527,14 +560,14 @@ class FullSyncTest {
 	void setAsideRenamesAndNeverDeletes() throws IOException {
 		byte[] bytes = put(local, E1, version(ME, V1));
 		claim(local, E1, version(ME, V1), AT);
-		List<String> before = local.allDataFiles();
+		List<String> before = VersionStoreTest.allDataFiles(local);
 
 		Path aside = FullSync.setAside(local.dataRoot(), files, CLOCK);
 
 		assertEquals(local.dataRoot().resolveSibling("data-beiseite-2026-10-26_10-00-00"), aside);
 		assertFalse(Files.exists(local.dataRoot()));
 		VersionStore moved = new VersionStore(aside, files);
-		assertEquals(before, moved.allDataFiles());
+		assertEquals(before, VersionStoreTest.allDataFiles(moved));
 		assertArrayEquals(bytes, moved.readVersionBytes(E1, V1).orElseThrow());
 
 		// ein zweites Mal in derselben Sekunde bekommt einen Zusatz
@@ -596,7 +629,7 @@ class FullSyncTest {
 		FullSyncResult result = run(false);
 
 		assertEquals(Set.of(E2), result.changed());
-		assertEquals(List.of("events/e2/" + FOREIGN + ".json"), local.allDataFiles());
+		assertEquals(List.of("events/e2/" + FOREIGN + ".json"), VersionStoreTest.allDataFiles(local));
 	}
 
 	@Test
@@ -644,7 +677,7 @@ class FullSyncTest {
 		byte[] secondClaim = claim(local, E1, second, AT);
 		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
 
-		FullSyncResult result = FullSync.run(local, shared, false, OWN, files, CLOCK, seen::add);
+		FullSyncResult result = syncAll(local, shared, false, seen::add);
 
 		assertArrayEquals(rootClaim, shared.readClaimBytes(E1, "root").orElseThrow());
 		assertArrayEquals(secondClaim, shared.readClaimBytes(E1, V1.value()).orElseThrow());
@@ -716,7 +749,8 @@ class FullSyncTest {
 		});
 		VersionStore racingShared = new VersionStore(shared.dataRoot(), racing);
 
-		FullSyncResult result = FullSync.run(local, racingShared, false, OWN, files, CLOCK);
+		FullSyncResult result = syncAll(local, racingShared, false, claim -> {
+		});
 
 		assertEquals(List.of(new LostVersion(E1, List.of(V1, V2), FOREIGN)), result.lost());
 		assertEquals(Set.of(E1), result.changed());

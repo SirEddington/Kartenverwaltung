@@ -295,7 +295,7 @@ class ConflictResolverTest {
 				return deferred.get();
 			}
 		};
-		ConflictResolver resolver = new ConflictResolver(host, new SyncNotifier(Runnable::run), clock);
+		ConflictResolver resolver = new ConflictResolver(host, new SyncNotifier(Runnable::run, true), clock);
 		resolver.enqueue(BOOKING);
 
 		resolver.resolvePending(10);
@@ -878,7 +878,7 @@ class ConflictResolverTest {
 			}
 		};
 		assertEquals(List.of(List.of(mine.id())), host.resolve(BOOKING).state().lost());
-		ConflictResolver resolver = new ConflictResolver(host, new SyncNotifier(Runnable::run), clock);
+		ConflictResolver resolver = new ConflictResolver(host, new SyncNotifier(Runnable::run, true), clock);
 		RecordingPolicy policy = new RecordingPolicy();
 		resolver.setPolicy(UnitType.BOOKING, policy);
 		resolver.enqueue(BOOKING);

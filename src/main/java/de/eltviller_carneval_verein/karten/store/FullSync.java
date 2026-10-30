@@ -38,7 +38,8 @@ public final class FullSync {
 	}
 
 	/**
-	 * Gleicht die beiden Bestände ab.
+	 * Gleicht die genannten Einheiten ab, eine nach der anderen in der gegebenen Reihenfolge, je Einheit in diesen
+	 * Schritten:
 	 * <ol>
 	 * <li>Versionsdateien, die auf einer Seite fehlen, werden auf die andere kopiert.</li>
 	 * <li>Anspruchsdateien, die lokal fehlen, werden aus dem gemeinsamen Ordner kopiert.</li>
@@ -59,59 +60,33 @@ public final class FullSync {
 	 * eigenen Versionen darauf werden als verloren gemeldet. Ein Anspruch auf dieselbe Version mit anderen Bytes
 	 * (etwa anderer Zeitpunkt) ist kein Widerspruch.</li>
 	 * </ol>
-	 * Die Schritte laufen je Einheit, die Einheiten beider Bestände nacheinander in der Reihenfolge von
-	 * {@link VersionStore#allUnits()}.
 	 * Unlesbare Anspruchsdateien auf beiden Seiten werden übergangen (die Heilung ist Sache eines späteren Schritts).
-	 *
-	 * @param local             der lokale Bestand
-	 * @param shared            der gemeinsame Bestand
-	 * @param uploadLocalClaims ob alle lokalen Anspruchsdateien in den gemeinsamen Ordner gelegt werden (Verbinden mit
-	 *                          Mitnehmen); sonst fließen nach außen nur eigene Ansprüche, die dort fehlen
-	 * @param own               was dieser Rechner als eigen ansieht (für eigene Ansprüche und die verlorenen Versionen)
-	 * @param files             die Dateischicht, über die ein verdrängter lokaler Anspruch ersetzt wird
-	 * @param clock             die Uhr für den Zeitstempel im Namen verdrängter Ansprüche
-	 */
-	public static FullSyncResult run(VersionStore local, VersionStore shared, boolean uploadLocalClaims,
-			Ownership own, FileLayer files, Clock clock) throws IOException {
-		return run(local, shared, uploadLocalClaims, own, files, clock, claim -> {
-		});
-	}
-
-	/**
-	 * Wie {@link #run(VersionStore, VersionStore, boolean, Ownership, FileLayer, Clock)}; meldet zusätzlich jeden lokalen
-	 * Anspruch, sobald er im gemeinsamen Ordner angelegt ist, auch wenn der Abgleich danach abbricht.
-	 *
-	 * @param uploaded erfährt jeden hochgeladenen Anspruch sofort
-	 */
-	public static FullSyncResult run(VersionStore local, VersionStore shared, boolean uploadLocalClaims,
-			Ownership own, FileLayer files, Clock clock, Consumer<FullSyncResult.UploadedClaim> uploaded)
-			throws IOException {
-		return syncUnits(local, shared, unitsOfBoth(local, shared), uploadLocalClaims, own, files, clock, unit -> true,
-				uploaded, partial -> {
-				});
-	}
-
-	/**
-	 * Gleicht die genannten Einheiten ab, eine nach der anderen in der gegebenen Reihenfolge, je Einheit in den Schritten
-	 * von {@link #run(VersionStore, VersionStore, boolean, Ownership, FileLayer, Clock)}. Betrachtet werden nur die Dateien
-	 * im Ordner der Einheit und in ihrem {@code claims/} ({@link VersionStore#unitDataFiles}), nicht die ihrer
-	 * Unterordner. Eine Einheit, die dieser Aufruf als umstritten meldet, lädt keinen eigenen Anspruch hoch: Die Klärung
-	 * ist Sache des Aufrufers, und der nächste Lauf lädt hoch, was danach noch gilt.
+	 * Betrachtet werden nur die Dateien im Ordner der Einheit und in ihrem {@code claims/}
+	 * ({@link VersionStore#unitDataFiles}), nicht die ihrer Unterordner. Eine Einheit, die dieser Aufruf als umstritten
+	 * meldet, lädt keinen eigenen Anspruch hoch: Die Klärung ist Sache des Aufrufers, und der nächste Lauf lädt hoch, was
+	 * danach noch gilt.
 	 * <p>
 	 * Eine Einheit mit Dateien im lokalen Bestand, die {@code known} nicht kennt, steht ebenfalls in
 	 * {@link FullSyncResult#changed()}, auch wenn nichts zu kopieren war: So nimmt der Aufrufer Einheiten auf, die an ihm
 	 * vorbei in den lokalen Bestand kamen (etwa eine zurückgespielte Sicherung). Gefragt wird nach dem Auflisten, das
 	 * ohnehin geschieht; die Frage selbst kostet keinen Dateizugriff.
 	 *
-	 * @param units    die Einheiten; ob es sie auf einer Seite gibt, ist gleich
-	 * @param known    ob der Aufrufer die Einheit schon kennt (eine Abfrage im Speicher, ohne Dateizugriff)
-	 * @param uploaded erfährt jeden hochgeladenen Anspruch sofort, auch wenn der Abgleich danach abbricht
-	 * @param onAbort  bekommt, wenn ein Schritt scheitert, das Teilergebnis bis dahin, bevor der Fehler weitergeht: Was
-	 *                 der Abgleich erledigt hat, steht schon auf der Platte (ein ausgeglichener Anspruch ist danach auf beiden
-	 *                 Seiten gleich, die Wiederholung fände ihn nicht mehr), und ohne das Teilergebnis gingen Verlust und
-	 *                 Indexeintrag verloren. {@link FullSyncResult#changed()} und {@link FullSyncResult#lost()} sind
-	 *                 vollständig, die übrigen Sammlungen so weit, wie er kam. Wirft der Rückruf selbst, hängt sein Fehler
-	 *                 als unterdrückte Ausnahme am ursprünglichen
+	 * @param local             der lokale Bestand
+	 * @param shared            der gemeinsame Bestand
+	 * @param units             die Einheiten; ob es sie auf einer Seite gibt, ist gleich
+	 * @param uploadLocalClaims ob alle lokalen Anspruchsdateien in den gemeinsamen Ordner gelegt werden (Verbinden mit
+	 *                          Mitnehmen); sonst fließen nach außen nur eigene Ansprüche, die dort fehlen
+	 * @param own               was dieser Rechner als eigen ansieht (für eigene Ansprüche und die verlorenen Versionen)
+	 * @param files             die Dateischicht, über die ein verdrängter lokaler Anspruch ersetzt wird
+	 * @param clock             die Uhr für den Zeitstempel im Namen verdrängter Ansprüche
+	 * @param known             ob der Aufrufer die Einheit schon kennt (eine Abfrage im Speicher, ohne Dateizugriff)
+	 * @param uploaded          erfährt jeden hochgeladenen Anspruch sofort, auch wenn der Abgleich danach abbricht
+	 * @param onAbort           bekommt, wenn ein Schritt scheitert, das Teilergebnis bis dahin, bevor der Fehler weitergeht:
+	 *                          Was der Abgleich erledigt hat, steht schon auf der Platte (ein ausgeglichener Anspruch ist
+	 *                          danach auf beiden Seiten gleich, die Wiederholung fände ihn nicht mehr), und ohne das
+	 *                          Teilergebnis gingen Verlust und Indexeintrag verloren. {@link FullSyncResult#changed()} und
+	 *                          {@link FullSyncResult#lost()} sind vollständig, die übrigen Sammlungen so weit, wie er kam.
+	 *                          Wirft der Rückruf selbst, hängt sein Fehler als unterdrückte Ausnahme am ursprünglichen
 	 * @throws IOException wenn ein Schritt scheitert; ebenso unverändert eine {@link RuntimeException} aus einem Schritt
 	 */
 	public static FullSyncResult syncUnits(VersionStore local, VersionStore shared, Collection<UnitKey> units,
@@ -131,27 +106,6 @@ public final class FullSync {
 			throw e;
 		}
 		return run.result();
-	}
-
-	/**
-	 * Die Einheiten, die es in mindestens einem der beiden Bestände gibt, in der Reihenfolge von
-	 * {@link VersionStore#allUnits()}: jedes Event, gefolgt von seinen Auftritten mit deren Buchungen, dann die Hallen;
-	 * auf jeder Ebene nach Ordnernamen sortiert.
-	 */
-	private static List<UnitKey> unitsOfBoth(VersionStore local, VersionStore shared) throws IOException {
-		List<UnitKey> units = new ArrayList<>();
-		for (String eventId : union(local.eventIds(), shared.eventIds())) {
-			UnitKey event = UnitKey.event(eventId);
-			units.add(event);
-			for (UnitKey presentation : childrenOfBoth(local, shared, event, VersionStore.PRESENTATIONS)) {
-				units.add(presentation);
-				units.addAll(childrenOfBoth(local, shared, presentation, VersionStore.BOOKINGS));
-			}
-		}
-		for (String hallId : union(local.hallIds(), shared.hallIds())) {
-			units.add(UnitKey.hall(hallId));
-		}
-		return units;
 	}
 
 	/** Die Unterordner-Einheiten von {@code <parent>/<folder>}, die es auf mindestens einer Seite gibt, nach Namen sortiert. */

@@ -14,6 +14,8 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -58,6 +60,21 @@ class VersionStoreTest {
 	private static void put(Path file, String content) throws IOException {
 		Files.createDirectories(file.getParent());
 		Files.write(file, bytes(content));
+	}
+
+	/**
+	 * Test-Hilfe (auch für {@link FullSyncTest}): die Pfade aller Versions- und Anspruchsdateien aller Einheiten des
+	 * Bestands ({@link VersionStore#allUnits}, je Einheit {@link VersionStore#unitDataFiles}), relativ zum Datenordner und
+	 * mit {@code /} getrennt, sortiert. Es sind genau die Dateien, die {@link VersionStore#readUnit} übernimmt;
+	 * Listendateien unter {@code feeds/} gehören nicht dazu.
+	 */
+	static List<String> allDataFiles(VersionStore store) throws IOException {
+		List<String> paths = new ArrayList<>();
+		for (UnitKey unit : store.allUnits()) {
+			paths.addAll(store.unitDataFiles(unit));
+		}
+		Collections.sort(paths);
+		return paths;
 	}
 
 	@Test
@@ -207,7 +224,7 @@ class VersionStoreTest {
 
 		assertEquals(List.of(V1), List.copyOf(files.versions().keySet()));
 		assertEquals(List.of("root"), List.copyOf(files.claims().keySet()));
-		assertEquals(List.of("events/e1/" + V1 + ".json", "events/e1/claims/root.json"), store.allDataFiles());
+		assertEquals(List.of("events/e1/" + V1 + ".json", "events/e1/claims/root.json"), allDataFiles(store));
 	}
 
 	@Test
@@ -270,7 +287,7 @@ class VersionStoreTest {
 
 		assertEquals(List.of("events/e1/" + V1 + ".json", "events/e1/claims/root.json",
 				"events/e1/presentations/p1/bookings/s1/" + V2 + ".json", "halls/h1/" + V3 + ".json"),
-				store.allDataFiles());
+				allDataFiles(store));
 	}
 
 	@Test
@@ -489,7 +506,7 @@ class VersionStoreTest {
 		assertEquals(List.of(event, UnitKey.presentation("e1", "p1"), booking), store.eventUnits("e1"));
 		assertEquals(List.of(event, UnitKey.presentation("e1", "p1"), booking), store.allUnits());
 		assertEquals(List.of("events/e1/" + V1 + ".json", "events/e1/" + V2 + ".json", "events/e1/claims/root.json",
-				"events/e1/presentations/p1/bookings/_b1/" + V1 + ".json"), store.allDataFiles());
+				"events/e1/presentations/p1/bookings/_b1/" + V1 + ".json"), allDataFiles(store));
 		assertArrayEquals(bytes("{}"), store.readRelative("feeds/m1/feed.json").orElseThrow());
 	}
 }

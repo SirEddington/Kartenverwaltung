@@ -89,20 +89,11 @@ public final class NioFileLayer implements FileLayer {
 
 	@Override
 	public List<String> listNames(Path dir) throws IOException {
-		return list(dir, false);
-	}
-
-	@Override
-	public List<String> listNamesWithTemps(Path dir) throws IOException {
-		return list(dir, true);
-	}
-
-	private static List<String> list(Path dir, boolean withTemps) throws IOException {
 		List<String> names = new ArrayList<>();
 		try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
 			for (Path entry : stream) {
 				String name = entry.getFileName().toString();
-				if (withTemps || !name.startsWith(TEMP_PREFIX)) {
+				if (!name.startsWith(TEMP_PREFIX)) {
 					names.add(name);
 				}
 			}

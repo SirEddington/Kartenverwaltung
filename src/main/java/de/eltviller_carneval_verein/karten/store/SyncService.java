@@ -1858,7 +1858,7 @@ public final class SyncService {
 	 * da und der Index lesbar, wird er ohne Durchlauf über den Bestand übernommen; das Aufräumen und der Verzeichnisbaum entfallen, denn
 	 * temporäre Reste und Änderungen am Bestand ohne den Index gibt es nur nach einem Absturz, und dann fehlt die Marke.
 	 * Sonst gleicht der Start den Index ab und räumt dabei im selben Durchlauf über den Bestand die alten temporären
-	 * Dateien auf ({@link UnitIndex#refresh(VersionStore, DoubleConsumer, Duration)}); im Notfall baut er den
+	 * Dateien auf ({@link UnitIndex#refresh}); im Notfall baut er den
 	 * Index neu auf.
 	 *
 	 * @return die Einheiten mit ausstehenden und mit verlorenen eigenen Versionen

@@ -174,8 +174,8 @@ class SyncServiceTest {
 		}
 
 		@Override
-		public List<String> listNamesWithTemps(Path dir) throws IOException {
-			return delegate.listNamesWithTemps(dir);
+		public List<DirEntry> listEntriesWithTemps(Path dir) throws IOException {
+			return delegate.listEntriesWithTemps(dir);
 		}
 
 		@Override
@@ -1705,7 +1705,7 @@ class SyncServiceTest {
 	void sectionDeletesOldTempsOfAPreviousIdToo() throws IOException {
 		UnitKey hall = UnitKey.hall("h1");
 		MachineIdentity before = MachineIdentity.loadOrCreate(dir.resolve("a"), () -> "a");
-		before.regenerate(clock);
+		before.regenerate(clock.instant());
 		Node a = nodeWithForeignHallInSharedFolder(hall);
 		assertNotEquals(before.id(), a.service.machineId());
 		Path unitDir = sharedFile(hall, "x").getParent();
@@ -3865,8 +3865,8 @@ class SyncServiceTest {
 		}
 
 		@Override
-		public List<String> listNamesWithTemps(Path dir) throws IOException {
-			return delegate.listNamesWithTemps(dir);
+		public List<DirEntry> listEntriesWithTemps(Path dir) throws IOException {
+			return delegate.listEntriesWithTemps(dir);
 		}
 
 		@Override

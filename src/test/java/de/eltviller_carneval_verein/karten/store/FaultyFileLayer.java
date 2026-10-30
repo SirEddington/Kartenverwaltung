@@ -21,11 +21,11 @@ import java.util.function.Predicate;
  * Fehler gemeldet: der Zustand nach einer verlorenen Antwort, bei der die Datei schon angelegt ist.
  * <p>
  * Die Operationen heißen wie die Methoden der Schnittstelle: {@code createNew}, {@code read}, {@code exists},
- * {@code listNames}, {@code listNamesWithTemps}, {@code listTree}, {@code isDirectory}, {@code replaceDamaged},
- * {@code rename}, {@code deleteOwnTemps}, {@code deleteOldTemps}. Beide Fassungen von {@code createNew} heißen
- * {@code createNew}, beide von {@code replaceDamaged} {@code replaceDamaged}. {@code listEntries} und
- * {@code listEntriesWithTemps} zählen als {@code listNames} bzw. {@code listNamesWithTemps}: Ein Test, der dort einen Fehler
- * einstellt oder die Aufrufe zählt, erfasst beide Wege. Threadsicher.
+ * {@code listNames}, {@code listTree}, {@code isDirectory}, {@code replaceDamaged}, {@code rename},
+ * {@code deleteOwnTemps}, {@code deleteOldTemps}. Beide Fassungen von {@code createNew} heißen {@code createNew}, beide
+ * von {@code replaceDamaged} {@code replaceDamaged}. {@code listEntries} zählt als {@code listNames} (ein Test, der dort
+ * einen Fehler einstellt oder die Aufrufe zählt, erfasst beide Wege), {@code listEntriesWithTemps} heißt
+ * {@code listNamesWithTemps}. Threadsicher.
  */
 public final class FaultyFileLayer implements FileLayer {
 
@@ -252,14 +252,6 @@ public final class FaultyFileLayer implements FileLayer {
 		return result;
 	}
 
-	@Override
-	public List<String> listNamesWithTemps(Path dir) throws IOException {
-		IOException late = enter("listNamesWithTemps", dir);
-		List<String> result = delegate.listNamesWithTemps(dir);
-		throwLate(late);
-		return result;
-	}
-
 	/** Zählt als Aufruf von {@code listNames} (dieselben Fehler und Haken); {@code isDirectory} wird dabei nicht aufgerufen. */
 	@Override
 	public List<DirEntry> listEntries(Path dir) throws IOException {
@@ -269,7 +261,7 @@ public final class FaultyFileLayer implements FileLayer {
 		return result;
 	}
 
-	/** Zählt als Aufruf von {@code listNamesWithTemps}; {@code isDirectory} wird dabei nicht aufgerufen. */
+	/** Heißt {@code listNamesWithTemps}; {@code isDirectory} wird dabei nicht aufgerufen. */
 	@Override
 	public List<DirEntry> listEntriesWithTemps(Path dir) throws IOException {
 		IOException late = enter("listNamesWithTemps", dir);
