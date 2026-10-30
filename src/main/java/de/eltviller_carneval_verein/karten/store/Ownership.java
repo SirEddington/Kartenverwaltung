@@ -15,8 +15,9 @@ import java.util.Set;
  *
  * @param currentId die aktuelle Rechner-ID
  * @param previous  die früheren IDs mit dem Zeitpunkt, bis zu dem sie galten (nie {@code null}, unveränderlich)
+ * @param ids       die aktuelle und alle früheren IDs, einmal berechnet (unveränderlich); siehe {@link #ids()}
  */
-public record Ownership(String currentId, List<Previous> previous) {
+public record Ownership(String currentId, List<Previous> previous, Set<String> ids) {
 
 	/**
 	 * Eine frühere Rechner-ID.
@@ -35,13 +36,34 @@ public record Ownership(String currentId, List<Previous> previous) {
 	}
 
 	/**
-	 * Macht aus einer fehlenden Liste der früheren IDs eine leere und kopiert die Liste.
+	 * Macht aus einer fehlenden Liste der früheren IDs eine leere, kopiert die Liste und berechnet die Menge aller IDs
+	 * einmal ({@link #ids()}).
 	 *
-	 * @throws NullPointerException wenn die aktuelle ID fehlt
+	 * @param ids {@code null} oder schon dieselbe Menge, die sich aus den beiden anderen ergibt (etwa aus einer Kopie)
+	 * @throws NullPointerException     wenn die aktuelle ID fehlt
+	 * @throws IllegalArgumentException wenn {@code ids} nicht zu den beiden anderen passt
 	 */
 	public Ownership {
 		Objects.requireNonNull(currentId, "currentId");
 		previous = previous == null ? List.of() : List.copyOf(previous);
+		Set<String> all = new LinkedHashSet<>();
+		all.add(currentId);
+		for (Previous old : previous) {
+			all.add(old.id());
+		}
+		if (ids != null && !ids.equals(all)) {
+			throw new IllegalArgumentException("Die IDs " + ids + " passen nicht zu " + all);
+		}
+		ids = Set.copyOf(all);
+	}
+
+	/**
+	 * Was eigen ist: die aktuelle ID und die früheren mit ihrer Grenze.
+	 *
+	 * @throws NullPointerException wenn die aktuelle ID fehlt
+	 */
+	public Ownership(String currentId, List<Previous> previous) {
+		this(currentId, previous, null);
 	}
 
 	/**
@@ -87,19 +109,18 @@ public record Ownership(String currentId, List<Previous> previous) {
 		return false;
 	}
 
-	/** Ob die Kennung einer Zwischendatei (die Rechner-ID im Namen) die aktuelle oder eine frühere ID ist. */
+	/**
+	 * Ob die Kennung einer Zwischendatei (die Rechner-ID im Namen) die aktuelle oder eine frühere ID ist; eine Abfrage der
+	 * einmal berechneten Menge {@link #ids()}, deshalb auch je Datei billig.
+	 */
 	public boolean isOwnTempTag(String tag) {
-		return tag != null && ids().contains(tag);
+		return tag != null && ids.contains(tag);
 	}
 
-	/** Die aktuelle und alle früheren IDs. */
+	/** Die aktuelle und alle früheren IDs; im Konstruktor einmal berechnet, unveränderlich. */
+	@Override
 	public Set<String> ids() {
-		Set<String> ids = new LinkedHashSet<>();
-		ids.add(currentId);
-		for (Previous old : previous) {
-			ids.add(old.id());
-		}
-		return Set.copyOf(ids);
+		return ids;
 	}
 
 	private static boolean withinLimit(VersionId version, Previous old) {

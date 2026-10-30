@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -76,6 +77,13 @@ class OwnershipTest {
 	@Test
 	void idsListsCurrentAndPreviousIds() {
 		assertEquals(Set.of(CURRENT, OLD), ownership.ids());
+	}
+
+	@Test
+	void idsAreComputedOnceAndUnmodifiable() {
+		assertSame(ownership.ids(), ownership.ids(), "einmal berechnet, nicht je Aufruf");
+		assertThrows(UnsupportedOperationException.class, () -> ownership.ids().add(FOREIGN));
+		assertEquals(ownership, new Ownership(CURRENT, List.of(new Ownership.Previous(OLD, UNTIL))));
 	}
 
 	@Test

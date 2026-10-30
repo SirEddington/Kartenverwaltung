@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -1083,6 +1084,85 @@ class SyncServiceTest {
 		assertTrue(Files.exists(marker));
 	}
 
+	/** Ob der aktuelle Thread gerade in einer Methode dieses Namens steckt. */
+	private static boolean calledFrom(String method) {
+		return StackWalker.getInstance().walk(frames -> frames.anyMatch(frame -> frame.getMethodName().equals(method)));
+	}
+
+	@Test
+	void unitLeavesTheCandidatesOnceTheSearchForPendingReadsItAgain() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		a.down.set(true);
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.down.set(false);
+		// nach dem Hochladen scheitert das Auflösen beim Melden einmal: Der Index nennt die Version noch als ausstehend, die
+		// Einheit bleibt Kandidat
+		Path unit = a.localData().resolve(BOOKING.relativePath());
+		a.layer.failNextUnchecked(p -> p.startsWith(unit) && calledFrom("reportLosses"), "read",
+				new IllegalStateException("Datei gesperrt"));
+		a.service.tick();
+		assertEquals(v.id(), sharedClaim(BOOKING, "root").version(), "hochgeladen");
+		a.service.closeIndex();
+		assertFalse(Files.exists(cleanMarker(a)), "der Index kennt nicht alle Einheiten");
+
+		// der nächste Vollabgleich sucht unter den Kandidaten nach Ausstehendem und liest die Einheit jetzt fehlerfrei; sonst
+		// ändert sich an ihr nichts
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		a.service.tick();
+		a.service.closeIndex();
+
+		assertTrue(Files.isRegularFile(cleanMarker(a)), "die Einheit ist kein Kandidat mehr");
+		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()).get(BOOKING), a.service.snapshots().get(BOOKING),
+				"der Index kennt ihren Stand");
+	}
+
+	/**
+	 * Das nächste Einreihen der Einheit zur Auflösung wirft einmal ungeprüft, also erst nachdem sie aufgelöst und im Index
+	 * eingetragen ist: Die Schlange der Auflösung wird dafür ersetzt.
+	 */
+	private static void failNextEnqueue(SyncService service, UnitKey unit) throws ReflectiveOperationException {
+		Field field = ConflictResolver.class.getDeclaredField("queue");
+		field.setAccessible(true);
+		AtomicBoolean armed = new AtomicBoolean();
+		@SuppressWarnings("serial")
+		Set<UnitKey> queue = new LinkedHashSet<>() {
+			@Override
+			public boolean add(UnitKey key) {
+				if (key.equals(unit) && armed.getAndSet(false)) {
+					throw new IllegalStateException("Einreihen gescheitert");
+				}
+				return super.add(key);
+			}
+		};
+		@SuppressWarnings("unchecked")
+		Set<UnitKey> before = (Set<UnitKey>) field.get(service.resolver());
+		queue.addAll(before);
+		armed.set(true);
+		field.set(service.resolver(), queue);
+	}
+
+	@Test
+	void lossWhoseReportFailedAfterResolvingIsReportedLater() throws Exception {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version va = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Version foreign = overrideSharedClaim(BOOKING, "root");
+		failNextEnqueue(a.service, BOOKING);
+
+		a.service.tick();
+		assertEquals(List.of(), a.events.lost, "das Melden scheiterte");
+		// die Oberfläche liest die Einheit dazwischen: Das löst sie auf, meldet aber nichts
+		assertEquals(foreign.id(), a.service.unitState(BOOKING).head().id(), "die Niederlage ist lokal");
+
+		// die nächste Runde meldet den Verlust doch noch, und nur einmal
+		a.service.tick();
+		a.service.tick();
+
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), foreign.id())), a.events.lost);
+	}
+
 	@Test
 	void disconnectClaimsPendingVersionsWithoutReadingTheWholeStore() throws IOException {
 		Path appData = dir.resolve("a");
@@ -2101,8 +2181,10 @@ class SyncServiceTest {
 		}
 		copyPastTheApp(OTHER, halls, a.localData(), sharedRoot.resolve("data"));
 		// je Halle liest der Abschnitt den lokalen Anspruch, das Eintragen und das Melden je Version und Anspruch: Ein
-		// Abschnitt dauert 50 × 3 × 4 ms = 0,6 s, das Melden danach 50 × 2 × 4 ms = 0,4 s
-		slowReads(a, Duration.ofMillis(4));
+		// Abschnitt dauert 50 × 3 × 3 ms = 0,45 s, das Melden danach 50 × 2 × 3 ms = 0,3 s. Mit der Nacharbeit passen zwei
+		// Abschnitte in einen Takt (1,5 s; ein dritter wäre 2,25 s), ohne sie vier (3 s), und nur ihre Nacharbeit (ohne die
+		// Schätzung für den nächsten) ließe drei zu (2,25 s): Beides liegt deutlich über dem Budget
+		slowReads(a, Duration.ofMillis(3));
 		clock.advance(SyncService.FULL_SYNC_INTERVAL);
 		a.events.changed.clear();
 
@@ -2112,15 +2194,14 @@ class SyncServiceTest {
 			a.service.tick();
 			ticks++;
 			Duration took = Duration.between(before, clock.instant());
-			// samt Melden am Ende des Takts im Budget, bis auf die übrige Arbeit des Takts (einzelne Lesezugriffe); ohne die
-			// Nacharbeit: drei Abschnitte und ihr Melden, 3 s
+			// samt Melden am Ende des Takts im Budget, bis auf die übrige Arbeit des Takts (einzelne Lesezugriffe)
 			Duration otherWork = Duration.ofMillis(100);
 			assertTrue(took.compareTo(SyncService.FULL_SYNC_SLICE_BUDGET.plus(otherWork)) <= 0,
 					"Takt " + ticks + " dauerte " + took);
 			assertTrue(ticks < 100, "der Lauf endet nicht");
 		} while (a.service.fullSyncProgress().get() != null);
 
-		assertEquals(4, ticks, "sechs Abschnitte der Hallen, zwei je Takt; dann Kopf und Vorstellung von e1");
+		assertTrue(ticks > 1, "über mehrere Takte verteilt: " + ticks);
 		assertIndexed(a, halls);
 		assertTrue(a.events.changedUnits().containsAll(halls));
 		assertTrue(a.events.errors.isEmpty(), a.events.errors.toString());

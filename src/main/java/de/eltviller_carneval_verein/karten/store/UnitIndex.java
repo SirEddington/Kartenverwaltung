@@ -373,14 +373,14 @@ final class UnitIndex {
 	 * den Abgleich nicht scheitern; der Ordner kommt beim nächsten Start wieder dran.
 	 */
 	private void deleteOldLocalTemps(VersionStore local, Map<String, List<String>> tree, Duration tempAge) {
-		// die eigenen Kennungen einmal, nicht je Datei (wie SyncService#deleteOwnOldTemps)
-		Set<String> ownTags = own.ids();
+		// die Kennung einmal, nicht je Datei (wie SyncService#deleteOwnOldTemps)
+		Ownership mine = own;
 		for (Map.Entry<String, List<String>> folder : tree.entrySet()) {
 			List<String> temps = new ArrayList<>();
 			for (String name : folder.getValue()) {
 				if (name.startsWith(FileLayer.TEMP_PREFIX) && name.endsWith(FileLayer.TEMP_SUFFIX)) {
 					String tag = FileLayer.tempTagOf(name);
-					if (tag == null || ownTags.contains(tag)) {
+					if (tag == null || mine.isOwnTempTag(tag)) {
 						temps.add(name);
 					}
 				}

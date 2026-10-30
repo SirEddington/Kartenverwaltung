@@ -329,6 +329,25 @@ class ConnectFlowStoreTest {
 	}
 
 	@Test
+	void connectedDirFollowsWritesAndDeletesWithoutReadingTheMarker() throws IOException {
+		Node a = new Node("a");
+		assertTrue(a.service.startup(""));
+		Path file = a.appData.resolve(ConnectionMarker.FILE_NAME);
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.tick();
+		assertTrue(a.marker().orElseThrow().complete());
+
+		// die Datei verschwindet am Dienst vorbei: connectedDir kennt die Marke, ohne sie zu lesen
+		Files.delete(file);
+		assertEquals(Optional.of(shared), a.service.connectedDir());
+
+		a.service.disconnect();
+		// eine Marke, die nicht der Dienst geschrieben hat, sieht er ebenso wenig
+		ConnectionMarker.write(a.appData, new NioFileLayer(), new ConnectionMarker.State("anderswo", clock.instant(), true));
+		assertEquals(Optional.empty(), a.service.connectedDir());
+	}
+
+	@Test
 	void connectionCompleteFollowsMarker() throws IOException {
 		assertTrue(new Node("leer").service.connectionComplete().get(), "ohne Marke");
 		Node a = slowNodeBesideHalls();

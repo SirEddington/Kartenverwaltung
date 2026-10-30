@@ -85,7 +85,8 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * <p>
  * <b>Marke "verbunden"</b> ({@code <AppData>/connection.json}, nur lokal): Ordner, Zeitpunkt und ob der erste Lauf zu Ende
  * war. Der erste Lauf schreibt sie an seinem Beginn als unvollständig und an seinem Ende als vollständig,
- * {@link #disconnect} löscht sie; {@link #connectedDir()} und {@link #connectionComplete()} lesen sie, und der nächste
+ * {@link #disconnect} löscht sie; {@link #connectedDir()} und {@link #connectionComplete()} geben sie wieder (gelesen
+ * beim Erzeugen des Dienstes, danach im Speicher nachgeführt), und der nächste
  * Start wählt seinen Weg nach ihr (die Oberfläche setzt einen unvollständigen ersten Lauf ohne Rückfrage fort). Im Modus
  * {@link ConnectMode#ASK} prüft der Beginn des ersten Laufs an den Dateien, ob beide Seiten Einheiten haben; dann
  * pausiert der Abgleich ({@link SyncState#ENTSCHEIDUNG}, noch ohne Marke), bis {@link #decideConnect} entscheidet; jeder
@@ -346,6 +347,14 @@ public final class SyncService {
 	private final SyncNotifier notifier;
 	/** Löst die gemeldeten Verluste zu Zusammenführungen auf; eingereiht wird in {@link #reportLoss}. */
 	private final ConflictResolver resolver;
+	/**
+	 * Die Marke "verbunden", wie sie in {@code connection.json} steht; {@code null} ohne (lesbare) Marke. Gelesen im
+	 * Konstruktor, danach bei jedem gelungenen Schreiben ({@link #writeConnectionMarker}) und Löschen ({@link #disconnect})
+	 * nachgeführt; ein gescheitertes ändert die Datei nicht (atomares Ersetzen) und deshalb auch dieses Feld nicht. Nur dieser
+	 * Dienst schreibt die Datei (ein Programm je Rechner, {@link InstanceLock}); {@link #connectedDir()} liest deshalb
+	 * ohne Dateizugriff.
+	 */
+	private volatile ConnectionMarker.State connection;
 
 	/**
 	 * Der Start-Index; hat eine eigene Sperre, deshalb nie unter {@code lock} benutzen. Bei einer neuen Rechner-ID bleibt er
@@ -370,6 +379,12 @@ public final class SyncService {
 	 * keine Sperrfolge gerät.
 	 */
 	private final Set<UnitKey> unindexed = ConcurrentHashMap.newKeySet();
+	/**
+	 * Einheiten, die {@link #reportLosses} aufgelöst hat, deren Verluste es danach aber nicht ableiten oder melden konnte (ein
+	 * ungeprüfter Fehler nach dem Auflösen). Jede Runde ({@link #reportChanges}) versucht es erneut, bis es gelingt; ein
+	 * Auflösen ohne Melden (etwa {@link #unitState}) nimmt sie nicht heraus. Eine nebenläufige Menge ohne eigene Sperre.
+	 */
+	private final Set<UnitKey> unreported = ConcurrentHashMap.newKeySet();
 	/** Schützt {@link #acknowledged}; die letzte Sperre der Folge (unter ihr nur die kleine Datei, keine weitere Sperre). */
 	private final Object ackLock = new Object();
 	/** Die bestätigten Konflikte ({@code conflicts-ack.json}); {@code null}, solange die Datei nicht gelesen wurde. */
@@ -472,9 +487,9 @@ public final class SyncService {
 		this.reachable = reachable;
 		this.clock = clock;
 		this.local = new VersionStore(appDataDir.resolve(DATA), files);
+		this.connection = ConnectionMarker.read(appDataDir).orElse(null);
 		// eine unvollständige Marke "verbunden": Der erste Lauf einer Verbindung kam nicht zu Ende (auch über einen Neustart)
-		this.notifier = new SyncNotifier(ui,
-				ConnectionMarker.read(appDataDir).map(ConnectionMarker.State::complete).orElse(true));
+		this.notifier = new SyncNotifier(ui, connection == null || connection.complete());
 		this.machine = machine;
 		this.ids = new VersionIdGenerator(machine.id(), clock);
 		this.index = newIndex(machine.ownership());
@@ -591,11 +606,12 @@ public final class SyncService {
 
 	/**
 	 * Der gemeinsame Ordner aus der Marke "verbunden" ({@code <AppData>/connection.json}): mit welchem Ordner zuletzt
-	 * verbunden wurde, ob der erste Lauf zu Ende kam oder nicht; leer ohne (lesbare) Marke. Liest die kleine lokale Datei,
-	 * unabhängig davon, ob der Dienst gestartet ist.
+	 * verbunden wurde, ob der erste Lauf zu Ende kam oder nicht; leer ohne (lesbare) Marke. Ohne Dateizugriff: Der Dienst
+	 * liest die Marke beim Erzeugen und führt sie bei jedem Schreiben und Löschen nach ({@link #connection}), unabhängig
+	 * davon, ob er gestartet ist.
 	 */
 	public Optional<String> connectedDir() {
-		return ConnectionMarker.read(appDataDir).map(ConnectionMarker.State::dir);
+		return Optional.ofNullable(connection).map(ConnectionMarker.State::dir);
 	}
 
 	/** Der gemeinsame Ordner, wie er eingestellt wurde (ohne Leerzeichen am Rand); {@code null} im Einzelbetrieb. */
@@ -851,6 +867,7 @@ public final class SyncService {
 			claimPendingLocally(withUnindexed(index.pendingUnits()));
 			try {
 				ConnectionMarker.delete(appDataDir);
+				connection = null;
 			} catch (IOException | RuntimeException e) {
 				LOGGER.log(Level.WARNING, "Die Marke 'verbunden' ließ sich nicht löschen", e);
 			}
@@ -921,7 +938,7 @@ public final class SyncService {
 	private void claimPendingLocally(Collection<UnitKey> candidates) {
 		try {
 			List<UploadJob.Item> items = new ArrayList<>();
-			for (UploadJob job : LocalScan.pendingJobs(local, ownership(), Set.of(), candidates, this::keepCandidate)) {
+			for (UploadJob job : pendingJobs(ownership(), Set.of(), candidates)) {
 				items.addAll(job.items());
 			}
 			claimLocally(items);
@@ -1788,8 +1805,14 @@ public final class SyncService {
 				if (overlapped) {
 					// ein append begann zwischen Zählen und Schreiben: Hat es die Marke ungültig gemacht, bevor sie dastand, gälte sie
 					// über seinen Dateien
-					index.invalidateCleanMarker();
-					LOGGER.warning(SAVE_IN_PROGRESS);
+					if (index.invalidateCleanMarker()) {
+						LOGGER.warning(SAVE_IN_PROGRESS);
+					} else {
+						// weder gelöscht noch geleert (die Warnungen des Index stehen schon im Log): Sie kann über den Dateien des
+						// Speichervorgangs gelten. Der Dienst bleibt offen, und jede weitere Änderung versucht es erneut (KARV-104)
+						LOGGER.warning("Ein Speichervorgang begann während des Schreibens der Marke 'sauber beendet', und sie ließ "
+								+ "sich weder löschen noch leeren; sie kann noch gelten: " + index.cleanMarker());
+					}
 					return;
 				}
 				// ab jetzt ändert niemand mehr den Bestand: kein Takt, bis startup, connect oder disconnect den Dienst wieder öffnen
@@ -2490,9 +2513,14 @@ public final class SyncService {
 		}
 	}
 
-	/** Schreibt die Marke "verbunden" für die Verbindung, mit dem jetzigen Zeitpunkt. */
+	/**
+	 * Schreibt die Marke "verbunden" für die Verbindung, mit dem jetzigen Zeitpunkt, und führt {@link #connection} nach. Am
+	 * Beginn wie am Ende des ersten Laufs (auch dort, wo ein Scheitern nur im Log steht) geht jedes Schreiben hierüber.
+	 */
 	private void writeConnectionMarker(Link current, boolean complete) throws IOException {
-		ConnectionMarker.write(appDataDir, files, new ConnectionMarker.State(current.text, clock.instant(), complete));
+		ConnectionMarker.State state = new ConnectionMarker.State(current.text, clock.instant(), complete);
+		ConnectionMarker.write(appDataDir, files, state);
+		connection = state;
 	}
 
 	/** Der Text, wenn die Marke "verbunden" sich nicht schreiben lässt; nennt die lokale Datei. */
@@ -2598,14 +2626,13 @@ public final class SyncService {
 	 * @param sharedTemps Pfade relativ zum Datenordner des gemeinsamen Ordners
 	 */
 	private void deleteOwnOldTemps(Link current, List<String> sharedTemps) {
-		// die eigenen Kennungen einmal je Block, nicht je Datei (wie Ownership#isOwnTempTag)
-		Set<String> ownTags = ownership().ids();
+		// die Kennung einmal je Block, nicht je Datei (ownership() nimmt lock)
+		Ownership own = ownership();
 		Map<String, List<String>> byFolder = new LinkedHashMap<>();
 		for (String rel : sharedTemps) {
 			int slash = rel.lastIndexOf('/');
 			String name = rel.substring(slash + 1);
-			String tag = FileLayer.tempTagOf(name);
-			if (tag != null && ownTags.contains(tag)) {
+			if (own.isOwnTempTag(FileLayer.tempTagOf(name))) {
 				byFolder.computeIfAbsent(rel.substring(0, slash), folder -> new ArrayList<>()).add(name);
 			}
 		}
@@ -2666,6 +2693,28 @@ public final class SyncService {
 		}
 	}
 
+	/**
+	 * Die ausstehenden Versionen der Kandidaten ({@link LocalScan#pendingJobs}). Was sich dabei nicht lesen lässt, bleibt
+	 * Kandidat ({@link #keepCandidate}). Ein Kandidat aus {@link #unindexed}, der sich jetzt lesen ließ, wird danach über
+	 * {@link #resolveLocal} neu aufgelöst: So kennt der Index seinen Stand wieder, und er verlässt {@link #unindexed}, auch
+	 * wenn sonst nichts an ihm geschieht (nichts ausstehend). Ohne das bliebe er bis zum Programmende Kandidat, und
+	 * {@link #closeIndex()} schriebe nie die Marke "sauber beendet". Nur herauszunehmen genügte nicht: Scheiterte zuvor das
+	 * Auflösen, ist sein Eintrag im Index veraltet. Nie unter {@code lock} aufrufen.
+	 *
+	 * @param candidates die Einheiten, die untersucht werden
+	 */
+	private List<UploadJob> pendingJobs(Ownership own, Set<VersionId> skip, Collection<UnitKey> candidates) {
+		Set<UnitKey> unreadable = new HashSet<>();
+		List<UploadJob> found = LocalScan.pendingJobs(local, own, skip, candidates, unit -> {
+			unreadable.add(unit);
+			keepCandidate(unit);
+		});
+		List<UnitKey> readAgain = candidates.stream().filter(unit -> !unreadable.contains(unit) && unindexed.contains(unit))
+				.toList();
+		indexUnitKeys(readAgain);
+		return found;
+	}
+
 	/** Die Kandidaten des Index und die Einheiten, die der Index wegen eines Fehlers beim Auflösen nicht kennt. */
 	private Set<UnitKey> withUnindexed(Collection<UnitKey> indexed) {
 		Set<UnitKey> units = new LinkedHashSet<>(indexed);
@@ -2686,7 +2735,7 @@ public final class SyncService {
 			skip = new HashSet<>(queued);
 			own = machine.ownership();
 		}
-		List<UploadJob> found = LocalScan.pendingJobs(local, own, skip, candidates, this::keepCandidate);
+		List<UploadJob> found = pendingJobs(own, skip, candidates);
 		synchronized (lock) {
 			if (link != current) {
 				return;
@@ -3077,14 +3126,18 @@ public final class SyncService {
 	/**
 	 * Meldet Verluste (aus dem Zustand abgeleitet) und geänderte Einheiten eines Durchlaufs, auch nach einem Fehler. Die
 	 * Ableitung löst jede geänderte Einheit über {@link #resolveLocal} auf: So steht sie im Index, bevor sie gemeldet wird.
+	 * Dazu kommen die Einheiten, deren Meldung zuvor scheiterte ({@link #unreported}).
 	 */
 	private void reportChanges(Round round) {
 		Collection<UnitKey> units = round.changed;
-		if (round.allUnits) {
+		if (round.allUnits || !unreported.isEmpty()) {
 			// nach dem ersten Vollabgleich: die geänderten Einheiten und die, die der Index als verloren kennt (Kandidaten;
-			// die Verluste leitet reportLosses aus den Dateien ab)
+			// die Verluste leitet reportLosses aus den Dateien ab); in jeder Runde die mit gescheiterter Meldung
 			Set<UnitKey> candidates = new LinkedHashSet<>(round.changed);
-			candidates.addAll(withUnindexed(index.lostUnits()));
+			if (round.allUnits) {
+				candidates.addAll(withUnindexed(index.lostUnits()));
+			}
+			candidates.addAll(unreported);
 			units = candidates;
 		}
 		reportLosses(units);
@@ -3176,16 +3229,26 @@ public final class SyncService {
 
 	/**
 	 * Leitet für jede Einheit die verlorenen Strecken aus dem Zustand ab und meldet, was noch nicht gemeldet wurde. Ein
-	 * Fehler bei einer Einheit (auch ein ungeprüfter) kostet nur ihre Meldung; sie bleibt Kandidat ({@link #unindexed}),
-	 * und der Rest des Takts läuft weiter.
+	 * Fehler bei einer Einheit (auch ein ungeprüfter) kostet nur ihre Meldung, und der Rest des Takts läuft weiter. Scheitert
+	 * das Auflösen, bleibt sie Kandidat ({@link #unindexed}); scheitert erst das Ableiten oder Melden danach, holt die
+	 * nächste Runde die Meldung nach ({@link #unreported}).
 	 */
 	private void reportLosses(Collection<UnitKey> units) {
 		for (UnitKey unit : units) {
+			Resolved resolved;
 			try {
-				Resolved resolved = resolveWithFiles(unit);
-				LocalScan.losses(resolved.files(), resolved.state()).forEach(this::reportLoss);
+				resolved = resolveWithFiles(unit);
 			} catch (IOException | RuntimeException e) {
 				LOGGER.log(Level.WARNING, "Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
+				continue;
+			}
+			try {
+				LocalScan.losses(resolved.files(), resolved.state()).forEach(this::reportLoss);
+				unreported.remove(unit);
+			} catch (RuntimeException e) {
+				// der Index kennt den Stand, nur die Meldung fehlt (und das Einreihen zur Auflösung): nächste Runde erneut
+				unreported.add(unit);
+				LOGGER.log(Level.WARNING, "Die Verluste von " + unit.relativePath() + " ließen sich nicht melden", e);
 			}
 		}
 	}
