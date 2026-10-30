@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -31,6 +32,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -51,6 +53,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.store.ConnectOutcome.Kind;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 
 class SyncServiceTest {
@@ -3192,6 +3195,119 @@ class SyncServiceTest {
 		assertTrue(b.layer.calls().stream().anyMatch(call -> call.startsWith("listTree ")));
 	}
 
+	/** Die Marke "sauber beendet" lässt sich weder löschen noch leeren: Der Index löscht nicht, die Datei ist schreibgeschützt. */
+	private static void lockCleanMarker(Node node) {
+		node.service.index().useDeleter(file -> {
+			throw new IOException("Datei gesperrt");
+		});
+		assertTrue(cleanMarker(node).toFile().setWritable(false));
+		assumeFalse(Files.isWritable(cleanMarker(node)), "Schreibschutz greift auf diesem System nicht");
+	}
+
+	/** Hebt {@link #lockCleanMarker} auf. */
+	private static void unlockCleanMarker(Node node) {
+		cleanMarker(node).toFile().setWritable(true);
+		node.service.index().useDeleter(Files::deleteIfExists);
+	}
+
+	@Test
+	void tickWritesNothingWhileTheCleanMarkerCannotBeInvalidated() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		Node earlier = node("a");
+		earlier.service.startup(shared);
+		earlier.service.tick();
+		earlier.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(earlier)));
+		Version v = save(b, create(BOOKING, "Anna"));
+		b.service.tick();
+		// Neustart: Die Marke lässt sich beim Start weder löschen noch leeren und kann gültig bleiben
+		Node a = new Node(earlier.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		lockCleanMarker(a);
+		try {
+			assertTrue(a.service.startup(shared));
+			// lange genug später, dass der Takt neue Rechner sucht und ihre Listen liest
+			clock.advance(Duration.ofSeconds(31));
+
+			a.service.tick();
+
+			assertFalse(Files.exists(localFile(a, BOOKING, v.id() + ".json")), "über einer gültigen Marke wird nichts abgeholt");
+			assertEquals(a.identity.id(), Files.readString(cleanMarker(a)));
+			assertEquals(SyncState.FEHLER, a.service.syncState().get());
+
+			// der nächste Takt versucht es erneut und holt ab, sobald die Marke weg ist
+			unlockCleanMarker(a);
+			a.service.tick();
+
+			assertTrue(Files.isRegularFile(localFile(a, BOOKING, v.id() + ".json")));
+			assertFalse(Files.exists(cleanMarker(a)));
+			assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+		} finally {
+			unlockCleanMarker(a);
+		}
+	}
+
+	@Test
+	void connectOutcomeIsFehlerWhileTheCleanMarkerCannotBeInvalidated() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		Version v = save(b, create(BOOKING, "Anna"));
+		b.service.tick();
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(HALL, "Halle"));
+		a.service.closeIndex();
+		lockCleanMarker(a);
+		try {
+			// connect öffnet den Dienst wieder, kann die Marke aber nicht entfernen; der Takt läuft gleich hier
+			CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
+
+			assertEquals(Kind.FEHLER, result.getNow(null).kind(), "das Ergebnis kommt, auch wenn die Marke bleibt");
+			assertFalse(Files.exists(localFile(a, BOOKING, v.id() + ".json")));
+			assertFalse(Files.exists(sharedFile(HALL, "")), "nichts hochgeladen");
+			assertEquals(a.identity.id(), Files.readString(cleanMarker(a)));
+			assertFalse(a.service.connectionComplete().get());
+
+			// der Lauf versucht es weiter, wie nach jeder Störung
+			unlockCleanMarker(a);
+			a.service.tick();
+
+			assertTrue(Files.isRegularFile(localFile(a, BOOKING, v.id() + ".json")));
+			assertTrue(Files.isDirectory(sharedFile(HALL, "")), "mitgenommen");
+			assertTrue(a.service.connectionComplete().get());
+			assertEquals(Kind.FEHLER, result.getNow(null).kind(), "ein Ergebnis, genau einmal");
+		} finally {
+			unlockCleanMarker(a);
+		}
+	}
+
+	@Test
+	void singleModeTickResolvesNothingWhileTheCleanMarkerCannotBeInvalidated() throws IOException {
+		Node earlier = node("a");
+		earlier.service.startup("");
+		save(earlier, create(BOOKING, "Anna"));
+		earlier.service.closeIndex();
+		Node a = new Node(earlier.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		lockCleanMarker(a);
+		try {
+			assertTrue(a.service.startup(""));
+			a.service.resolver().enqueue(BOOKING);
+			String unit = localFile(a, BOOKING, "").toString();
+			int before = a.layer.calls().size();
+
+			a.service.tick();
+
+			assertTrue(a.layer.calls().subList(before, a.layer.calls().size()).stream().noneMatch(c -> c.contains(unit)),
+					"die Auflösung wartet, bis die Marke weg ist");
+			unlockCleanMarker(a);
+			a.service.tick();
+			assertTrue(a.layer.calls().subList(before, a.layer.calls().size()).stream().anyMatch(c -> c.contains(unit)));
+			assertFalse(Files.exists(cleanMarker(a)));
+		} finally {
+			unlockCleanMarker(a);
+		}
+	}
+
 	/**
 	 * Hält einen Thread an, nachdem er die Anspruchsdatei {@code root.json} einer Einheit gelesen hat: Er hat dann die
 	 * Versionen und den Anspruch gesehen, aber noch nicht in den Index eingetragen.
@@ -3493,6 +3609,51 @@ class SyncServiceTest {
 
 		assertEquals(saved.get().id(), sharedClaim(BOOKING, "root").version());
 		assertFalse(a.service.unitState(BOOKING).provisional());
+	}
+
+	@Test
+	void startupTakesTheWorkLock() throws Exception {
+		Node a = node("a");
+		a.service.startup(shared);
+		a.service.tick();
+		Version mine = save(a, create(BOOKING, "A"));
+		// der Takt schreibt den Index vor der Arbeitssperre; hier ist das schon geschehen, die Uhr steht still
+		a.service.flushIndex();
+		// der Takt von a steht mitten im Hochladen
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		a.layer.blockNext("createNew", entered, release);
+		AtomicReference<Throwable> failure = new AtomicReference<>();
+		Thread tick = new Thread(() -> {
+			try {
+				a.service.tick();
+			} catch (RuntimeException e) {
+				failure.set(e);
+			}
+		});
+		tick.start();
+		assertTrue(entered.await(10, TimeUnit.SECONDS));
+		// der angehaltene Aufruf ist noch nicht aufgezeichnet: Jeder neue Eintrag stammt vom Start
+		int before = a.layer.calls().size();
+
+		AtomicBoolean started = new AtomicBoolean();
+		Thread startup = new Thread(() -> {
+			try {
+				started.set(a.service.startup(shared));
+			} catch (RuntimeException e) {
+				failure.set(e);
+			}
+		});
+		startup.start();
+		assertWaitingForTheWorkLock(a.service, startup);
+		assertEquals(before, a.layer.calls().size(), "der Start arbeitet nicht neben dem Takt: " + a.layer.calls());
+		release.countDown();
+		tick.join(10_000);
+		startup.join(10_000);
+
+		assertNull(failure.get());
+		assertTrue(started.get());
+		assertEquals(mine.id(), sharedClaim(BOOKING, "root").version());
 	}
 
 	/** Ein Absturz zwischen Schreiben und lokalem Anspruch: eine Halle ist fertig, eine Buchung hat eine Version ohne Anspruch. */

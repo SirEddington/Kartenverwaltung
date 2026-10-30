@@ -978,12 +978,17 @@ final class UnitIndex {
 	/**
 	 * Muss vor jeder Änderung am lokalen Bestand aufgerufen werden: Eine von dieser Instanz angelegte Marke wird gelöscht,
 	 * bevor die erste Datei geschrieben wird, damit ein Absturz oder Beenden mitten in der Änderung nie auf eine gültige Marke
-	 * über einem geänderten Bestand trifft. Ohne angelegte Marke kostet der Aufruf keinen Dateizugriff.
+	 * über einem geänderten Bestand trifft. Ohne angelegte Marke kostet der Aufruf keinen Dateizugriff. Scheitern Löschen
+	 * und Leeren, versucht es jeder weitere Aufruf erneut.
+	 *
+	 * @return {@code true}, wenn danach sicher keine gültige Marke dieser Instanz steht (keine angelegt, gelöscht oder
+	 *         geleert); {@code false}, wenn weder Löschen noch Leeren gelang (die Warnungen stehen im Log)
 	 */
-	synchronized void invalidateCleanMarker() {
+	synchronized boolean invalidateCleanMarker() {
 		if (markerWritten) {
 			deleteCleanMarker();
 		}
+		return !markerWritten;
 	}
 
 	/** Löscht eine Datei, falls es sie gibt. */

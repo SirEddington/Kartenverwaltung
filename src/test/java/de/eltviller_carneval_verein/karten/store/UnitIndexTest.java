@@ -1091,6 +1091,37 @@ class UnitIndexTest {
 	}
 
 	@Test
+	void invalidateReportsWhetherTheMarkerIsSafelyGone() throws IOException {
+		saveTwice(EVENT, "event");
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+		// ohne angelegte Marke steht keine gültige
+		assertTrue(index.invalidateCleanMarker());
+		assertTrue(index.writeCleanMarker());
+		Path marker = cleanMarker();
+		index.useDeleter(file -> {
+			throw new IOException("Datei gesperrt");
+		});
+		assertTrue(marker.toFile().setWritable(false));
+		assumeFalse(Files.isWritable(marker), "Schreibschutz greift auf diesem System nicht");
+		try {
+			// weder Löschen noch Leeren: Die Marke kann gültig sein
+			assertFalse(index.invalidateCleanMarker());
+			assertEquals(ME, Files.readString(marker, StandardCharsets.UTF_8));
+			assertFalse(index.invalidateCleanMarker(), "jeder Aufruf versucht es erneut und meldet es erneut");
+
+			// Leeren geht wieder: Die leere Marke gilt nicht
+			assertTrue(marker.toFile().setWritable(true));
+			assertTrue(index.invalidateCleanMarker());
+			assertEquals(0, Files.size(marker));
+			assertFalse(index().loadIfClean());
+		} finally {
+			marker.toFile().setWritable(true);
+		}
+	}
+
+	@Test
 	void refreshDeletesLeftoverTempFilesOfTheIndex() throws IOException {
 		buildThreeUnits();
 		buildCleanIndex();

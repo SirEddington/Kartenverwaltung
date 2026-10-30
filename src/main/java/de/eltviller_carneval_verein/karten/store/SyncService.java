@@ -183,6 +183,11 @@ public final class SyncService {
 	private static final String SYNC_STATE = "sync-state.json";
 	private static final String CONFLICTS_ACK = "conflicts-ack.json";
 	private static final String ACKNOWLEDGED = "acknowledged";
+	/**
+	 * Die Ursache der Störung, solange ein Takt die Marke "sauber beendet" nicht ungültig machen kann (in SYS-006; die
+	 * Einzelheiten mit dem Pfad stehen schon im Log des Index).
+	 */
+	private static final String CLEAN_MARKER_STUCK = "Die Marke 'sauber beendet' ließ sich weder löschen noch leeren";
 	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 	private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 	/** Für Aufrufer ohne Fortschrittsanzeige. */
@@ -370,8 +375,9 @@ public final class SyncService {
 	private volatile boolean wroteSinceStartup;
 
 	/**
-	 * Serialisiert die Arbeit am gemeinsamen Ordner und jeden Wechsel der Verbindung: Takt, Hochladen beim Start,
-	 * {@link #connect}, {@link #disconnect}, {@link #closeIndex()}. Fair, damit ein wartendes {@code connect},
+	 * Serialisiert die Arbeit am gemeinsamen Ordner und jeden Wechsel der Verbindung: Takt, {@link #startup} (ganz, samt
+	 * Index und Hochladen), {@link #connect}, {@link #decideConnect}, {@link #disconnect}, {@link #closeIndex()}. Die
+	 * Verbindung ({@code link}) ändert sich nur unter ihr. Fair, damit ein wartendes {@code connect},
 	 * {@code disconnect} oder {@code closeIndex} zwischen zwei Takten drankommt und nicht hinter jedem neuen Takt wartet.
 	 */
 	private final ReentrantLock workLock = new ReentrantLock(true);
@@ -527,6 +533,11 @@ public final class SyncService {
 		return resolver;
 	}
 
+	/** Für Tests: der Start-Index (etwa um das Löschen der Marke "sauber beendet" scheitern zu lassen). */
+	UnitIndex index() {
+		return index;
+	}
+
 	/** Der Zustand des Austauschs; Änderungen kommen über den {@code ui}-Executor an. */
 	public ReadOnlyObjectProperty<SyncState> syncState() {
 		return notifier.stateProperty();
@@ -605,73 +616,82 @@ public final class SyncService {
 	 * wie überall {@link ChainResolver} auf den Dateien. Scheitert der Abgleich, baut der Start den Index neu auf: Er löst jede
 	 * Einheit des Bestands einzeln aus den Dateien auf. Lässt sich dabei eine nicht lesen (oder der Bestand nicht auflisten),
 	 * scheitert der Start, denn mit einem unvollständigen Bestand wäre ein belegter Platz frei.
+	 * <p>
+	 * Der ganze Start läuft unter der Arbeitssperre; er wartet deshalb auf das Ende eines laufenden Takts, und kein Takt
+	 * läuft neben ihm. Nicht auf dem FX-Thread aufrufen.
 	 *
 	 * @param progress bekommt den Anteil der abgeglichenen Einheiten von 0.0 bis 1.0, zuletzt 1.0; darf {@code null} sein
 	 * @throws UncheckedIOException wenn der Bestand nicht vollständig gelesen werden kann; die Meldung nennt die Einheit
 	 */
 	public boolean startup(String sharedDir, DoubleConsumer progress) {
+		Started started;
+		// ein einziger Abschnitt unter der Arbeitssperre, vor jeder inneren Sperre: Kein Takt, kein closeIndex und kein
+		// Wechsel der Verbindung überschneidet sich mit dem Öffnen, dem Index, der Verbindung oder dem Hochladen beim Start
+		workLock.lock();
 		try {
-			reopen();
-			loadAcknowledgedAtStart();
-			UnitIndex.Refresh opened = openIndex(progress != null ? progress : NO_PROGRESS);
-			String dir = clean(sharedDir);
-			if (dir == null) {
-				// unter der Arbeitssperre: Die Auflösung (Sperre der Auflösung) und ein append daraus folgen der Sperrfolge
-				workLock.lock();
-				try {
-					// die Marke "verbunden" bleibt (KARV-87 trennt ausdrücklich mit disconnect); ein offenes Ergebnis endet
-					abortPendingOutcome();
-					deactivate();
-					claimPendingLocally(withUnindexed(opened.pendingUnits()));
-					resolveAtStartup(opened.lostUnits());
-				} finally {
-					unlockWork();
-				}
-				return true;
-			}
-			Link current = activate(dir, null);
-			if (current.path == null || !probe(current.path)) {
-				notifier.unreachable(dir, false);
-				// ohne Verbindung wird lokal aufgelöst und später hochgeladen
-				workLock.lock();
-				try {
-					resolveAtStartup(opened.lostUnits());
-				} finally {
-					workLock.unlock();
-				}
-				return false;
-			}
-			workLock.lock();
-			try {
-				Round round = new Round(current);
-				round.startup = true;
-				round.run(() -> {
-					enqueuePending(current, withUnindexed(opened.pendingUnits()));
-					runJobs(current, round);
-				});
-				reportChanges(round);
-				round.run(() -> decideUnknownListNumbers(round));
-				resolveAtStartup(opened.lostUnits());
-				if (isCurrent(current)) {
-					if (round.unreachable) {
-						notifier.unreachable(dir, false);
-						return false;
-					}
-					if (round.failure != null) {
-						notifier.failed(failureText(current, round.failure), round.failure);
-					} else {
-						notifier.setState(hasJobs() ? SyncState.AUSSTEHEND : SyncState.AKTUELL);
-					}
-				}
-			} finally {
-				workLock.unlock();
-			}
-			schedule();
-			return true;
+			started = startLocked(sharedDir, progress != null ? progress : NO_PROGRESS);
 		} finally {
 			// ab hier zählen eigene Versionen für die Schutzregel; was der Start selbst schrieb (Auflösung), zählt nicht
 			startupDone = true;
+			unlockWork();
 		}
+		if (started == Started.CONNECTED) {
+			// ohne Sperre: Der Takt nimmt sie selbst
+			schedule();
+		}
+		return started != Started.UNREACHABLE;
+	}
+
+	/** Wie {@link #startup} ausging: im Einzelbetrieb, ohne erreichbaren Ordner oder verbunden (der Takt folgt sofort). */
+	private enum Started {
+		SINGLE, UNREACHABLE, CONNECTED
+	}
+
+	/**
+	 * Der Start unter {@code workLock}. Die Auflösung (Sperre der Auflösung) und ein append daraus folgen der Sperrfolge;
+	 * die Verbindung wechselt nur unter {@code workLock} und bleibt deshalb bis zum Ende dieselbe.
+	 */
+	private Started startLocked(String sharedDir, DoubleConsumer progress) {
+		reopen();
+		loadAcknowledgedAtStart();
+		UnitIndex.Refresh opened = openIndex(progress);
+		String dir = clean(sharedDir);
+		if (dir == null) {
+			// die Marke "verbunden" bleibt (KARV-87 trennt ausdrücklich mit disconnect); ein offenes Ergebnis endet
+			abortPendingOutcome();
+			deactivate();
+			claimPendingLocally(withUnindexed(opened.pendingUnits()));
+			resolveAtStartup(opened.lostUnits());
+			return Started.SINGLE;
+		}
+		Link current = activate(dir, null);
+		if (current.path == null || !probe(current.path)) {
+			notifier.unreachable(dir, false);
+			// ohne Verbindung wird lokal aufgelöst und später hochgeladen
+			resolveAtStartup(opened.lostUnits());
+			return Started.UNREACHABLE;
+		}
+		Round round = new Round(current);
+		round.startup = true;
+		round.run(() -> {
+			enqueuePending(current, withUnindexed(opened.pendingUnits()));
+			runJobs(current, round);
+		});
+		reportChanges(round);
+		round.run(() -> decideUnknownListNumbers(round));
+		resolveAtStartup(opened.lostUnits());
+		if (isCurrent(current)) {
+			if (round.unreachable) {
+				notifier.unreachable(dir, false);
+				return Started.UNREACHABLE;
+			}
+			if (round.failure != null) {
+				notifier.failed(failureText(current, round.failure), round.failure);
+			} else {
+				notifier.setState(hasJobs() ? SyncState.AUSSTEHEND : SyncState.AKTUELL);
+			}
+		}
+		return Started.CONNECTED;
 	}
 
 	/**
@@ -885,7 +905,10 @@ public final class SyncService {
 
 	/**
 	 * Öffnet den Dienst nach {@link #closeIndex()} wieder: Die Marke "sauber beendet" wird gelöscht, bevor irgendetwas den
-	 * Bestand ändert, und der Takt arbeitet wieder. Ohne vorheriges Schließen ohne Wirkung.
+	 * Bestand ändert, und der Takt arbeitet wieder. Scheitern Löschen und Leeren, schreibt trotzdem kein Takt über ihr: Jeder
+	 * versucht es zuerst erneut ({@link UnitIndex#invalidateCleanMarker}). Ohne vorheriges Schließen ohne Wirkung. Nur unter
+	 * {@code workLock} ({@link #startup}, {@link #connect}, {@link #decideConnect}, {@link #disconnect}), damit es sich nicht
+	 * mit einem Takt oder mit {@link #closeIndex()} überschneidet.
 	 */
 	private void reopen() {
 		if (closed) {
@@ -1161,6 +1184,8 @@ public final class SyncService {
 	private void settleAfterConnectionChange(String saveId, List<UploadJob.Item> items) throws IOException {
 		workLock.lock();
 		try {
+			// die Verbindung wechselt nur unter workLock (auch beim Start): Die Schleife läuft höchstens einmal und dient nur
+			// noch der Vorsicht
 			while (true) {
 				Link now;
 				synchronized (lock) {
@@ -1894,6 +1919,10 @@ public final class SyncService {
 	 * {@link #INDEX_FLUSH} her ist. Nach dem Hochladen löst der Takt höchstens {@value #RESOLVE_BUDGET} eingereihte
 	 * Verluste auf; im Einzelbetrieb und ohne Verbindung ebenso, nur lokal (hochgeladen wird später). Ein Ergebnis von
 	 * {@link #connect}, das in diesem Takt feststeht, wird nach der Freigabe der Arbeitssperre geliefert.
+	 * <p>
+	 * Kein Takt schreibt, solange eine gültige Marke "sauber beendet" dieser Instanz stehen kann: Vor jeder Arbeit am
+	 * gemeinsamen Ordner und vor der Auflösung macht er sie ungültig ({@link UnitIndex#invalidateCleanMarker}); gelingt
+	 * das nicht, prüft er nur die Erreichbarkeit (siehe {@code runTick}), und der nächste versucht es erneut.
 	 *
 	 * @return ob der nächste Takt sofort folgen soll: Der erste Lauf einer Verbindung läuft noch, und dieser Takt erreichte
 	 *         den Ordner ohne Störung. Sonst (auch nach einer Störung, damit ein dauerhaft scheiternder Block den
@@ -1911,7 +1940,10 @@ public final class SyncService {
 				current = link;
 			}
 			if (current == null) {
-				resolver.resolvePending(RESOLVE_BUDGET);
+				// auch die Auflösung schreibt in den Bestand: nicht, solange eine gültige Marke "sauber beendet" stehen kann
+				if (index.invalidateCleanMarker()) {
+					resolver.resolvePending(RESOLVE_BUDGET);
+				}
 				return false;
 			}
 			try {
@@ -1968,15 +2000,23 @@ public final class SyncService {
 	 * {@link ConnectMode#ASK} prüft er nach der Erreichbarkeit, ob beide Seiten Einheiten haben ({@link #askBeforeTheRun}).
 	 * In der Pause ({@link Link#deciding}) endet er nach der Prüfung der Erreichbarkeit: kein Lauf, kein Hochladen, kein
 	 * Abholen. Setzt {@link Link#hurry}.
+	 * <p>
+	 * Zuerst, vor jeder Arbeit am gemeinsamen Ordner und vor der Auflösung, macht er die Marke "sauber beendet" ungültig
+	 * ({@link UnitIndex#invalidateCleanMarker}). Gelingt das nicht, schreibt dieser Takt nichts: Er prüft nur die
+	 * Erreichbarkeit und meldet sonst eine Störung (im ersten Lauf auch als Ergebnis von {@link #connect}, damit es nicht
+	 * ausbleibt); der nächste Takt versucht es erneut, nach dem Abstand {@link #TICK}.
 	 *
-	 * @return ob die Auflösung der Verluste lief (nach dem Hochladen); {@code false}, wenn der Ordner nicht erreichbar war
-	 *         oder der Abgleich pausiert (dann löst {@link #tick()} lokal auf, wie ohne Verbindung)
+	 * @return ob die Auflösung der Verluste lief (nach dem Hochladen) oder ausbleiben muss, weil die Marke stehen blieb;
+	 *         {@code false}, wenn der Ordner nicht erreichbar war oder der Abgleich pausiert (dann löst {@link #tick()}
+	 *         lokal auf, wie ohne Verbindung)
 	 */
 	private boolean runTick(Link current) {
 		current.hurry = false;
+		// eine gültige Marke darf über keinem Bestand stehen, den Abholen, Vollabgleich oder Auflösung verändert haben
+		boolean markerGone = index.invalidateCleanMarker();
 		if (current.path == null) {
 			reportUnreachable(current);
-			return false;
+			return !markerGone;
 		}
 		SyncState state = notifier.state();
 		boolean returning = state == SyncState.OFFLINE;
@@ -1985,7 +2025,7 @@ public final class SyncService {
 				if (isCurrent(current)) {
 					reportUnreachable(current);
 				}
-				return false;
+				return !markerGone;
 			}
 			current.probeFirst = false;
 		} else if (!files.isDirectory(current.path) && !probe(current.path)) {
@@ -1993,7 +2033,7 @@ public final class SyncService {
 			if (isCurrent(current)) {
 				reportUnreachable(current);
 			}
-			return false;
+			return !markerGone;
 		}
 		if (returning) {
 			// nach der Rückkehr ein Vollabgleich; ein laufender setzt am Zeiger fort, und danach beginnt ein neuer
@@ -2001,6 +2041,14 @@ public final class SyncService {
 			if (hasJobs() && isCurrent(current)) {
 				notifier.setState(SyncState.AUSSTEHEND);
 			}
+		}
+		if (!markerGone) {
+			// nur die Erreichbarkeit war dran; in der Pause vor der Entscheidung schreibt der Takt ohnehin nichts, und ihr
+			// Ergebnis steht schon fest
+			if (!current.deciding && isCurrent(current)) {
+				reportFailure(current, new IOException(CLEAN_MARKER_STUCK));
+			}
+			return true;
 		}
 		if (current.connectMode == ConnectMode.ASK && !current.deciding && !askBeforeTheRun(current)) {
 			return false;
@@ -2149,14 +2197,19 @@ public final class SyncService {
 
 	/**
 	 * Legt nach dem Ende des ersten Laufs ({@link Link#endOutcomeDue}) dessen Ergebnis fest: {@link Kind#AUSSTEHEND}, wenn
-	 * noch Aufträge warten, sonst {@link Kind#AKTUELL}. Einmal; danach ohne Wirkung. Unter {@code workLock}.
+	 * noch Aufträge warten, sonst {@link Kind#AKTUELL}; {@link Kind#ABGEBROCHEN}, wenn die Verbindung nicht mehr die aktuelle
+	 * ist (wie bei {@link #connect} "getrennt oder neu verbunden"). Einmal; danach ohne Wirkung. Unter {@code workLock}.
 	 */
 	private void settleFirstRunEnd(Link current) {
 		if (!current.endOutcomeDue) {
 			return;
 		}
 		current.endOutcomeDue = false;
-		settle(current, new ConnectOutcome(hasJobs() ? Kind.AUSSTEHEND : Kind.AKTUELL, false, current.setAsidePath, null));
+		// ist die Verbindung nicht mehr die aktuelle, wurde getrennt oder neu verbunden: dann ABGEBROCHEN (hat das schon
+		// abortPendingOutcome festgelegt, ist dieses ohne Wirkung). Nur noch zur Vorsicht, denn die Verbindung wechselt nur
+		// unter workLock, die der Takt hält
+		Kind kind = !isCurrent(current) ? Kind.ABGEBROCHEN : hasJobs() ? Kind.AUSSTEHEND : Kind.AKTUELL;
+		settle(current, new ConnectOutcome(kind, false, current.setAsidePath, null));
 	}
 
 	/**
@@ -2444,8 +2497,9 @@ public final class SyncService {
 	 * Ende des Vollabgleichs nach dem letzten Abschnitt: Die Entscheidung des Verbindens ist erledigt, der Abstand bis zum
 	 * nächsten Lauf zählt ab jetzt, und ein Wunsch während des Laufs lässt sofort den nächsten beginnen. Nach dem ersten Lauf
 	 * leitet der Takt die Verluste der Einheiten ab, die der Index als verloren kennt, und die offenen Konflikte neu. Nach
-	 * dem ersten Lauf einer Verbindung (die Marke "verbunden" ist dann schon vollständig) meldet es
-	 * {@link #connectionComplete()}, und der Takt liefert das Ergebnis von {@link #connect}.
+	 * dem ersten Lauf einer Verbindung meldet es {@link #connectionComplete()}, und der Takt liefert das Ergebnis von
+	 * {@link #connect}. Die Marke "verbunden" wurde dann als vollständig geschrieben, oder das Schreiben scheiterte und steht
+	 * nur im Log: Sie bleibt unvollständig, und der nächste Start nimmt ohne Rückfrage mit ({@code runSlice}).
 	 */
 	private void endRun(Link current, Round round) {
 		current.connectMode = null;
