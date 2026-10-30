@@ -34,17 +34,16 @@ class FullSyncRunTest {
 
 	/**
 	 * Zeichnet die Listen auf, mit denen {@code sync} aufgerufen wird; wirft auf Wunsch einmal und stellt auf Wunsch die
-	 * Uhr je Aufruf vor (die Dauer eines Blocks) und meldet je Aufruf {@code deferred} als Nacharbeit nach dem Stück.
+	 * Uhr je Aufruf vor (die Dauer eines Blocks).
 	 */
 	private final class Recorder implements FullSyncRun.Work {
 
 		final List<List<UnitKey>> calls = new ArrayList<>();
 		IOException failOnce;
 		Duration cost = Duration.ZERO;
-		Duration deferred = Duration.ZERO;
 
 		@Override
-		public Duration sync(List<UnitKey> units) throws IOException {
+		public void sync(List<UnitKey> units) throws IOException {
 			if (failOnce != null) {
 				IOException e = failOnce;
 				failOnce = null;
@@ -52,7 +51,6 @@ class FullSyncRunTest {
 			}
 			calls.add(List.copyOf(units));
 			clock.advance(cost);
-			return deferred;
 		}
 	}
 
@@ -247,44 +245,6 @@ class FullSyncRunTest {
 		assertFalse(run.step(clock.instant().plusSeconds(2), work));
 
 		assertEquals(2, work.calls.size());
-	}
-
-	@Test
-	void deferredWorkOfTheBlocksCountsAgainstTheBudget() throws IOException {
-		fiveEventHeads();
-		Recorder work = new Recorder();
-		work.cost = Duration.ofMillis(400);
-		work.deferred = Duration.ofMillis(400);
-		Instant deadline = clock.instant().plusSeconds(2);
-		run.begin();
-
-		assertFalse(run.step(deadline, work));
-
-		// ohne Nacharbeit passten alle fünf Blöcke (bis 2,0 s); mit ihr brächte ein dritter Block die Sperre auf 1,2 s
-		// Arbeit und 1,2 s Nacharbeit
-		assertEquals(2, work.calls.size());
-		Duration held = Duration.between(deadline.minusSeconds(2), clock.instant()).plus(work.deferred.multipliedBy(2));
-		assertEquals(Duration.ofMillis(1600), held);
-	}
-
-	@Test
-	void firstBlockRunsEvenIfItsDeferredWorkAloneExceedsTheBudget() throws IOException {
-		fiveEventHeads();
-		Recorder work = new Recorder();
-		work.cost = Duration.ofMillis(100);
-		work.deferred = Duration.ofSeconds(3);
-		run.begin();
-
-		int steps = 0;
-		boolean done = false;
-		while (!done) {
-			int before = work.calls.size();
-			done = run.step(clock.instant().plusSeconds(2), work);
-			steps++;
-			assertEquals(before + 1, work.calls.size(), "je Aufruf genau ein Block");
-			assertTrue(steps < 10);
-		}
-		assertEquals(5, steps);
 	}
 
 	@Test

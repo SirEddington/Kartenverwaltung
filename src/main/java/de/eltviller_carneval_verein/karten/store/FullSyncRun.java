@@ -36,13 +36,8 @@ final class FullSyncRun {
 
 	/** Die Arbeit an einem Block: gleicht die Einheiten ab. */
 	interface Work {
-		/**
-		 * Gleicht die Einheiten ab.
-		 *
-		 * @return die Arbeit, die der Block erst nach {@link #step} verursacht (noch im selben Takt, unter derselben Sperre),
-		 *         geschätzt als Dauer; {@link Duration#ZERO}, wenn keine
-		 */
-		Duration sync(List<UnitKey> units) throws IOException;
+		/** Gleicht die Einheiten ab. */
+		void sync(List<UnitKey> units) throws IOException;
 	}
 
 	/** Ein Abschnitt: {@code presentation} ist nur bei einem Abschnitt "Vorstellung" gesetzt, sonst stehen die Einheiten in {@code units}. */
@@ -101,10 +96,8 @@ final class FullSyncRun {
 	 * erste Block dieses Aufrufs läuft immer: So kommt der Lauf auch auf einer langsamen Freigabe voran, auf der ein einzelner
 	 * Block länger dauert als das Budget. Ein weiterer Abschnitt oder Block beginnt nur, wenn er voraussichtlich bis zur Frist
 	 * fertig wird, nämlich wenn die Uhr jetzt plus die Dauer des zuletzt erledigten Blocks (mit Auflisten der Buchungen)
-	 * nicht nach {@code deadline} liegt. Die Nacharbeit, die die Blöcke dieses Aufrufs gemeldet haben ({@link Work#sync}),
-	 * zählt dazu, ebenso die des letzten Blocks noch einmal als Schätzung für den nächsten: Sie fällt nach diesem Aufruf
-	 * unter derselben Sperre an. Ein Aufruf hält die Arbeitssperre des Aufrufers samt Nacharbeit also höchstens bis zur Frist,
-	 * es sei denn, ein einzelner Block ist länger oder ein Block wird langsamer als der davor. Wirft {@code work}, bleiben
+	 * nicht nach {@code deadline} liegt. Ein Aufruf hält die Arbeitssperre des Aufrufers also höchstens bis zur Frist, es sei
+	 * denn, ein einzelner Block ist länger oder ein Block wird langsamer als der davor. Wirft {@code work}, bleiben
 	 * Abschnitt und Zeiger stehen, und der nächste Aufruf wiederholt den Block; die Vorstellung eines gescheiterten Blocks
 	 * gilt bis dahin als in Arbeit ({@link #inProgress}).
 	 *
@@ -116,32 +109,25 @@ final class FullSyncRun {
 			throw new IllegalStateException("Der Lauf wurde nicht begonnen.");
 		}
 		Duration last = null;
-		Duration lastDeferred = Duration.ZERO;
-		Duration debt = Duration.ZERO;
 		while (index < sections.size()) {
 			Instant begin = clock.instant();
-			if (last != null && begin.plus(last).plus(lastDeferred).plus(debt).isAfter(deadline)) {
+			if (last != null && begin.plus(last).isAfter(deadline)) {
 				return false;
 			}
 			Section section = sections.get(index);
 			if (section.presentation() == null) {
-				lastDeferred = work.sync(section.units());
+				work.sync(section.units());
 				index++;
 			} else {
-				lastDeferred = stepPresentation(section.presentation(), work);
+				stepPresentation(section.presentation(), work);
 			}
-			debt = debt.plus(lastDeferred);
 			last = Duration.between(begin, clock.instant());
 		}
 		return true;
 	}
 
-	/**
-	 * Ein Block der Vorstellung; ist es der letzte, ist der Abschnitt danach erledigt.
-	 *
-	 * @return die Nacharbeit des Blocks ({@link Work#sync})
-	 */
-	private Duration stepPresentation(UnitKey presentation, Work work) throws IOException {
+	/** Ein Block der Vorstellung; ist es der letzte, ist der Abschnitt danach erledigt. */
+	private void stepPresentation(UnitKey presentation, Work work) throws IOException {
 		List<UnitKey> units = new ArrayList<>();
 		if (!started) {
 			units.add(presentation);
@@ -160,10 +146,9 @@ final class FullSyncRun {
 				bookings++;
 			}
 		}
-		Duration deferred = Duration.ZERO;
 		if (!units.isEmpty()) {
 			failed = true;
-			deferred = work.sync(units);
+			work.sync(units);
 			failed = false;
 		}
 		if (more) {
@@ -174,7 +159,6 @@ final class FullSyncRun {
 			started = false;
 			pointer = "";
 		}
-		return deferred;
 	}
 
 	/** Der Anteil der erledigten Abschnitte; {@code 1.0}, wenn der Lauf fertig ist. */

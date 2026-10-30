@@ -27,6 +27,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -2180,10 +2181,9 @@ class SyncServiceTest {
 			halls.add(UnitKey.hall(String.format("k%03d", n)));
 		}
 		copyPastTheApp(OTHER, halls, a.localData(), sharedRoot.resolve("data"));
-		// je Halle liest der Abschnitt den lokalen Anspruch, das Eintragen und das Melden je Version und Anspruch: Ein
-		// Abschnitt dauert 50 × 3 × 3 ms = 0,45 s, das Melden danach 50 × 2 × 3 ms = 0,3 s. Mit der Nacharbeit passen zwei
-		// Abschnitte in einen Takt (1,5 s; ein dritter wäre 2,25 s), ohne sie vier (3 s), und nur ihre Nacharbeit (ohne die
-		// Schätzung für den nächsten) ließe drei zu (2,25 s): Beides liegt deutlich über dem Budget
+		// je Halle liest der Abschnitt den lokalen Anspruch und löst sie einmal auf (Version und Anspruch): Ein Abschnitt
+		// dauert 50 × 3 × 3 ms = 0,45 s, und das Melden am Ende des Takts löst die Hallen nicht noch einmal auf. Vier
+		// Abschnitte passen in einen Takt (1,8 s); löste das Melden sie erneut auf (50 × 2 × 3 ms je Abschnitt), wären es 3 s
 		slowReads(a, Duration.ofMillis(3));
 		clock.advance(SyncService.FULL_SYNC_INTERVAL);
 		a.events.changed.clear();
@@ -2205,6 +2205,140 @@ class SyncServiceTest {
 		assertIndexed(a, halls);
 		assertTrue(a.events.changedUnits().containsAll(halls));
 		assertTrue(a.events.errors.isEmpty(), a.events.errors.toString());
+	}
+
+	/**
+	 * Je Einheit, wie oft der Rechner in {@code calls} eine ihrer Versionsdateien im lokalen Bestand gelesen hat; wer eine
+	 * Einheit auflöst, liest jede davon einmal. Anspruchsdateien zählen nicht (der Abgleich liest sie auch selbst).
+	 */
+	private static Map<UnitKey, Integer> localVersionReads(Node node, Collection<UnitKey> units, List<String> calls) {
+		String data = "read " + node.localData() + java.io.File.separator;
+		Map<String, UnitKey> byFolder = new HashMap<>();
+		units.forEach(unit -> byFolder.put(unit.relativePath(), unit));
+		Map<UnitKey, Integer> reads = new HashMap<>();
+		for (String call : calls) {
+			if (call.startsWith(data)) {
+				String rel = call.substring(data.length()).replace('\\', '/');
+				UnitKey unit = byFolder.get(rel.substring(0, Math.max(0, rel.lastIndexOf('/'))));
+				if (unit != null) {
+					reads.merge(unit, 1, Integer::sum);
+				}
+			}
+		}
+		return reads;
+	}
+
+	@Test
+	void changedUnitIsReadOncePerTick() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		// an der App vorbei in beide Bestände kopiert: Jeder Block nimmt seine Hallen auf (geändert), kopiert aber nichts
+		List<UnitKey> halls = new ArrayList<>();
+		for (int n = 0; n < 150; n++) {
+			halls.add(UnitKey.hall(String.format("k%03d", n)));
+		}
+		copyPastTheApp(OTHER, halls, a.localData(), sharedRoot.resolve("data"));
+		// ein Abschnitt dauert 50 × 3 × 10 ms = 1,5 s: ein Abschnitt je Takt
+		slowReads(a, Duration.ofMillis(10));
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+
+		Map<UnitKey, Integer> total = new HashMap<>();
+		int ticks = 0;
+		do {
+			int before = a.layer.calls().size();
+			a.service.tick();
+			ticks++;
+			Map<UnitKey, Integer> inTick = localVersionReads(a, halls, a.layer.calls().subList(before, a.layer.calls().size()));
+			String tick = "Takt " + ticks + ": ";
+			inTick.forEach((unit, reads) -> assertEquals(1, reads, tick + unit.relativePath()));
+			inTick.forEach((unit, reads) -> total.merge(unit, reads, Integer::sum));
+			assertTrue(ticks < 100, "der Lauf endet nicht");
+		} while (a.service.fullSyncProgress().get() != null);
+
+		assertTrue(ticks > 1, "über mehrere Takte verteilt: " + ticks);
+		assertEquals(halls.size(), total.size(), "jede Halle wurde gelesen");
+		assertIndexed(a, halls);
+		assertTrue(a.events.changedUnits().containsAll(halls));
+		assertTrue(a.events.errors.isEmpty(), a.events.errors.toString());
+	}
+
+	/** 50 fremde Hallen nur im gemeinsamen Ordner: ein voller erster Abschnitt, der vor jeder Halle "x…" an der Reihe ist. */
+	private void seedFiftyForeignHallsInShared() throws IOException {
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		for (int n = 0; n < FullSyncRun.HALL_BUNDLE; n++) {
+			seedForeign(sharedStore, UnitKey.hall(String.format("a%03d", n)), n);
+		}
+	}
+
+	@Test
+	void unitChangedByAJobAfterItsBlockIsResolvedAgainAtTheEndOfTheTick() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		UnitKey hall = UnitKey.hall("x");
+		seedFiftyForeignHallsInShared();
+		Version theirs = seedForeign(new VersionStore(sharedRoot.resolve("data"), new NioFileLayer()), hall, 100);
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		// während des ersten Abschnitts (nach dem Hochladen vor dem Lauf) ein Verkauf auf der Halle des zweiten: Ihr Block
+		// holt die fremde Version und löst die Halle auf, erst das Hochladen nach dem Lauf beansprucht den Verkauf
+		AtomicBoolean armed = new AtomicBoolean(true);
+		AtomicReference<Version> sale = new AtomicReference<>();
+		a.layer.onEach("listNamesWithTemps", () -> {
+			if (armed.compareAndSet(true, false)) {
+				try {
+					sale.set(save(a, update(hall, theirs, "Bert")));
+				} catch (IOException e) {
+					throw new UncheckedIOException(e);
+				}
+			}
+		});
+
+		a.service.tick();
+
+		assertNull(a.service.fullSyncProgress().get(), "ein Takt, ein Lauf");
+		assertEquals(sale.get().id(), sharedClaim(hall, theirs.id().value()).version(), "im selben Takt hochgeladen");
+		UnitIndex.Entry entry = a.service.index().entry(hall);
+		assertFalse(entry.pending(), "der Index kennt den Anspruch");
+		assertEquals(List.of(theirs.id(), sale.get().id()), entry.chain().stream().map(ChainStep::version).toList());
+		assertIndexed(a, List.of(hall));
+		assertTrue(a.events.changedUnits().contains(hall));
+		assertTrue(a.events.errors.isEmpty(), a.events.errors.toString());
+	}
+
+	@Test
+	void unitChangedByThePollAfterItsBlockIsResolvedAgainAtTheEndOfTheTick() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		UnitKey hall = UnitKey.hall("x");
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		seedFiftyForeignHallsInShared();
+		Version first = seedForeign(sharedStore, hall, 100);
+		Version second = version(OTHER, START.toEpochMilli() - 1000, 101, "fremd-2", first.id());
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		// sobald der Block der Halle ihre Dateien hereinkopiert hat, legt der fremde Rechner eine neue Version mit Liste ab:
+		// Das Abholen am Ende des Takts holt sie, nicht mehr der Block
+		Path hallClaim = localFile(a, hall, "claims/root.json");
+		AtomicBoolean armed = new AtomicBoolean(true);
+		a.layer.onEach("listNames", () -> {
+			if (Files.exists(hallClaim) && armed.compareAndSet(true, false)) {
+				try {
+					publish(sharedStore, 1, hall, second);
+				} catch (IOException e) {
+					throw new UncheckedIOException(e);
+				}
+			}
+		});
+
+		a.service.tick();
+
+		assertFalse(armed.get(), "die neue Version kam während des Takts");
+		assertNull(a.service.fullSyncProgress().get(), "ein Takt, ein Lauf");
+		// zuerst der Index (unitState trüge den Stand selbst ein)
+		assertEquals(second.id(), a.service.snapshots().get(hall).version(), "im Index nach dem Abholen im selben Takt");
+		assertIndexed(a, List.of(hall));
+		assertEquals(second.id(), a.service.unitState(hall).head().id());
+		assertTrue(a.events.changedUnits().contains(hall));
 	}
 
 	@Test

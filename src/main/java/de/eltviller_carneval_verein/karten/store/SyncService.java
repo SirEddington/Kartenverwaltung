@@ -385,6 +385,16 @@ public final class SyncService {
 	 * Auflösen ohne Melden (etwa {@link #unitState}) nimmt sie nicht heraus. Eine nebenläufige Menge ohne eigene Sperre.
 	 */
 	private final Set<UnitKey> unreported = ConcurrentHashMap.newKeySet();
+	/**
+	 * Die Einheiten, die der laufende Durchlauf ({@link Round}) schon aufgelöst, eingetragen und gemeldet hat: die geänderten
+	 * Einheiten der Blöcke des Vollabgleichs ({@link #takeOverSection}). Das Melden am Ende ({@link #reportChanges}) löst sie
+	 * nicht noch einmal auf. Gefüllt und gelesen nur auf dem Thread des Durchlaufs unter {@code workLock}; jeder Durchlauf
+	 * beginnt leer. Wer eine Einheit danach ändert, nimmt sie heraus: der Takt vor dem Schreiben ({@link Round#unsettle},
+	 * {@link Round#touch}), {@link #writeLocal} nach dem Schreiben, auch auf dem Thread der Oberfläche. Deshalb eine
+	 * nebenläufige Menge ohne eigene Sperre: Sie gerät in keine Sperrfolge, und weil der Block eine Einheit vor dem Auflösen
+	 * einträgt, nimmt ein Schreiben, das sein Auflösen nicht mehr sieht, sie danach sicher wieder heraus.
+	 */
+	private final Set<UnitKey> settled = ConcurrentHashMap.newKeySet();
 	/** Schützt {@link #acknowledged}; die letzte Sperre der Folge (unter ihr nur die kleine Datei, keine weitere Sperre). */
 	private final Object ackLock = new Object();
 	/** Die bestätigten Konflikte ({@code conflicts-ack.json}); {@code null}, solange die Datei nicht gelesen wurde. */
@@ -923,7 +933,7 @@ public final class SyncService {
 	 * schon den aufgelösten Stand.
 	 */
 	private void resolveAtStartup(Collection<UnitKey> lostUnits) {
-		reportLosses(lostUnits);
+		reportLosses(lostUnits, List.of());
 		resolver.resolvePending(Integer.MAX_VALUE);
 	}
 
@@ -1174,8 +1184,13 @@ public final class SyncService {
 			Version version = new Version(StoreCodec.FORMAT, id, change.parents(), me.id(), me.name(),
 					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), seen);
 			byte[] bytes = StoreCodec.write(version);
-			if (local.writeVersion(change.unit(), version.id(), bytes)) {
-				return new UploadJob.Item(change.unit(), version, bytes);
+			try {
+				if (local.writeVersion(change.unit(), version.id(), bytes)) {
+					return new UploadJob.Item(change.unit(), version, bytes);
+				}
+			} finally {
+				// zur Vorsicht: Ein laufender Takt löst die Einheit am Ende erneut auf
+				settled.remove(change.unit());
 			}
 		}
 		throw new IOException("Für " + change.unit().relativePath() + " ließ sich keine freie Versions-ID finden.");
@@ -1189,7 +1204,7 @@ public final class SyncService {
 			arbiter.claim(item.unit(), item.version(), item.bytes());
 			units.add(item.unit());
 		}
-		reportLosses(units);
+		reportLosses(units, List.of());
 	}
 
 	/**
@@ -1305,6 +1320,7 @@ public final class SyncService {
 			UnitState after = before;
 			boolean replaced = false;
 			if (before.status() == Status.LOCKED_DAMAGED) {
+				round.unsettle(unit);
 				Healing healing = heal(unit, before, current.shared);
 				after = healing.state();
 				replaced = healing.replaced();
@@ -1321,7 +1337,7 @@ public final class SyncService {
 			}
 			// nur melden, was sich wirklich geändert hat: sonst fragte die Oberfläche erneut, und so fort
 			if (replaced || after.status() != before.status() || !Objects.equals(headId(after), headId(before))) {
-				round.changed.add(unit);
+				round.touch(unit);
 			}
 			if (locked) {
 				reportDamaged(unit);
@@ -1952,6 +1968,7 @@ public final class SyncService {
 		synchronized (resolveLock) {
 			index.clear();
 			unindexed.clear();
+			settled.clear();
 			indexRefreshed = true;
 		}
 	}
@@ -2483,8 +2500,8 @@ public final class SyncService {
 
 	/**
 	 * Ein Stück des laufenden Vollabgleichs: Abschnitte und Blöcke, solange der nächste nach der Dauer des vorigen noch vor
-	 * Ablauf von {@link #FULL_SYNC_SLICE_BUDGET} seit Beginn des Takts fertig würde, samt der Nacharbeit der Blöcke beim
-	 * Melden ({@link FullSyncRun#step}, {@link #syncSection}), mindestens aber ein Block. Scheitert ein Block (etwa weil der Ordner wegfällt), bleibt der
+	 * Ablauf von {@link #FULL_SYNC_SLICE_BUDGET} seit Beginn des Takts fertig würde ({@link FullSyncRun#step}), mindestens
+	 * aber ein Block. Scheitert ein Block (etwa weil der Ordner wegfällt), bleibt der
 	 * Zeiger davor stehen, und der nächste erreichbare Takt wiederholt ihn; jeder Schritt darin ist wiederholbar. Nach dem
 	 * letzten Abschnitt endet der Lauf.
 	 *
@@ -2548,18 +2565,16 @@ public final class SyncService {
 
 	/**
 	 * Ein Block des Vollabgleichs: gleicht die Einheiten ab ({@link FullSync#syncUnits}, mit der Entscheidung über das
-	 * Mitnehmen vom Beginn des Laufs), trägt die geänderten in den Index ein, meldet die gefundenen Verluste und klärt
+	 * Mitnehmen vom Beginn des Laufs), löst die geänderten auf, trägt sie in den Index ein, meldet die Verluste und klärt
 	 * umstrittene Plätze.
 	 * <p>
 	 * Geändert ist auch jede lokale Einheit des Blocks, die der Index nicht kennt ({@link UnitIndex#entry}, eine Abfrage im
 	 * Speicher): Kam sie an der App vorbei in den lokalen Bestand, während der Index als sauber beendet galt (etwa eine
 	 * zurückgespielte Sicherung), nimmt der Block sie wie eine kopierte auf und meldet sie der Oberfläche.
 	 * <p>
-	 * Jede geänderte Einheit wird zweimal aufgelöst: hier beim Eintragen in den Index (zählt zur Dauer des Blocks) und am
-	 * Ende des Takts beim Melden ({@link #reportChanges}, Verluste aus den Dateien), noch unter {@code workLock}. Die Dauer
-	 * des Eintragens gibt der Block deshalb als Nacharbeit zurück; {@link FullSyncRun#step} rechnet sie gegen das Budget.
-	 * Nach einem großen Hineinkopieren macht ein Takt also weniger Blöcke, und die Arbeitssperre samt Melden bleibt im
-	 * Budget (außer der erste Block allein ist länger).
+	 * Jede geänderte Einheit wird je Takt einmal aufgelöst, hier im Block (zählt zu seiner Dauer und damit zum Budget):
+	 * Das Melden am Ende des Takts ({@link #reportChanges}) übergeht sie ({@link #settled}), außer ein späterer Schritt des
+	 * Takts hat sie wieder geändert.
 	 * <p>
 	 * Scheitert der Block mittendrin, werden die geänderten Einheiten und die Verluste bis dahin ({@link FullSync.Aborted})
 	 * trotzdem eingetragen und gemeldet, bevor der Fehler weitergeht: Ein ausgeglichener Anspruch ist danach auf beiden
@@ -2567,10 +2582,8 @@ public final class SyncService {
 	 * findet, was noch nicht erledigt ist (und {@link #reportLoss} je Version nur einmal meldet). Umstrittene Plätze und
 	 * temporäre Dateien bleiben der Wiederholung überlassen, sie finden sich dabei wieder. Die Vorstellung des Blocks gilt
 	 * bis zur gelungenen Wiederholung als in Arbeit ({@link FullSyncRun#inProgress}), die Auflösung ihrer Verluste wartet.
-	 *
-	 * @return die Dauer des Eintragens in den Index, als Schätzung für das zweite Auflösen am Ende des Takts
 	 */
-	private Duration syncSection(Link current, Round round, List<UnitKey> units) throws IOException {
+	private void syncSection(Link current, Round round, List<UnitKey> units) throws IOException {
 		Instant now = clock.instant();
 		FullSyncResult result;
 		try {
@@ -2591,25 +2604,26 @@ public final class SyncService {
 			}
 			throw (IOException) cause;
 		}
-		Instant takeOver = clock.instant();
 		takeOverSection(round, result);
-		// steht für das zweite Auflösen derselben Einheiten in reportChanges am Ende des Takts (gleiche Arbeit, unter workLock)
-		Duration deferred = Duration.between(takeOver, clock.instant());
 		settleAll(current, result.contested(), round);
 		deleteOwnOldTemps(current, result.sharedTemps());
-		return deferred;
 	}
 
-	/** Übernimmt aus dem (Teil-)Ergebnis eines Blocks die geänderten Einheiten in Index und Takt und meldet die Verluste. */
+	/**
+	 * Übernimmt aus dem (Teil-)Ergebnis eines Blocks die geänderten Einheiten in Index und Takt und meldet die Verluste:
+	 * zuerst die, die der Abgleich gefunden hat, dann die aus den Dateien abgeleiteten ({@link #reportLosses}). Die Einheiten
+	 * gelten danach in diesem Takt als erledigt ({@link #settled}).
+	 */
 	private void takeOverSection(Round round, FullSyncResult result) {
 		// Die Positionen der Listen bleiben stehen: Das Lesen des Eintrags des Gewinners deckt einen abweichenden lokalen
 		// Anspruch sofort auf; schon kopierte Dateien kosten dabei nur einen Vergleich. Was keine Liste aufdeckt (Liste
 		// übersprungen, Anspruch kam erst nach Ablauf der Beobachtung), meldet der Abgleich selbst als umstritten.
 		round.changed.addAll(result.changed());
+		// vor dem Auflösen: Ein Schreiben, das das Auflösen nicht mehr sieht, nimmt die Einheit danach wieder heraus
+		settled.addAll(result.changed());
 		// Die Auflösung im selben Takt liest die Geschwister einer Buchung aus dem Index: Was der Abgleich kopiert hat, steht
 		// schon vorher darin, nicht erst nach dem Melden am Ende des Takts (sonst sähe ein fremdes Umsetzen wie ein Storno aus)
-		indexUnitKeys(result.changed());
-		result.lost().forEach(this::reportLoss);
+		reportLosses(result.changed(), result.lost());
 	}
 
 	/**
@@ -2767,6 +2781,8 @@ public final class SyncService {
 				return;
 			}
 			UploadJob job = pending.get(i);
+			// vor dem Hochladen: Es schreibt die lokalen Ansprüche
+			job.items().forEach(item -> round.unsettle(item.unit()));
 			try {
 				List<LostVersion> losses = new Uploader(current.shared, current.writer,
 						new SharedArbiter(current.shared, local, clock, this::damagedInShared),
@@ -2805,7 +2821,7 @@ public final class SyncService {
 			return;
 		}
 		for (int i = 0; i < job.nextClaim(); i++) {
-			round.changed.add(job.items().get(i).unit());
+			round.touch(job.items().get(i).unit());
 		}
 	}
 
@@ -2830,13 +2846,14 @@ public final class SyncService {
 		}
 		DamageRepair repair = new DamageRepair(local, current.shared, files, clock);
 		for (Map.Entry<UnitKey, Claim> entry : todo.entrySet()) {
+			round.unsettle(entry.getKey());
 			DamageRepair.Result result = repair.repairVersion(entry.getKey(), entry.getValue());
 			logRepaired(result);
 			synchronized (lock) {
 				sharedRepairs.remove(entry.getKey(), entry.getValue());
 			}
 			if (result.outcome() == DamageRepair.Outcome.REPAIRED_LOCAL) {
-				round.changed.add(entry.getKey());
+				round.touch(entry.getKey());
 			}
 		}
 	}
@@ -2852,7 +2869,7 @@ public final class SyncService {
 		losses.forEach(this::reportLoss);
 		Instant now = clock.instant();
 		for (UploadJob.Item item : job.items()) {
-			round.changed.add(item.unit());
+			round.touch(item.unit());
 			recordOwnClaim(item, now);
 		}
 	}
@@ -2968,10 +2985,18 @@ public final class SyncService {
 	}
 
 	private void poll(Link current, Round round) throws IOException {
-		FeedPoll poll = current.reader.poll();
+		FeedPoll poll;
+		try {
+			poll = current.reader.poll();
+		} catch (IOException | RuntimeException e) {
+			// welche Einheiten das Abholen bis zum Fehler lokal geändert hat, steht erst im nächsten Ergebnis: Alles, was der
+			// Takt schon erledigt hat, löst das Melden am Ende erneut auf
+			settled.clear();
+			throw e;
+		}
 		index.markListed(poll.listed());
 		round.listed.addAll(poll.listed());
-		round.changed.addAll(poll.changed());
+		poll.changed().forEach(round::touch);
 		forgetUnrepairable(poll.changed());
 		poll.pending().forEach(notifier::pending);
 		if (poll.fullSyncNeeded()) {
@@ -3000,7 +3025,7 @@ public final class SyncService {
 				if (failure == null) {
 					failure = e;
 				}
-				round.changed.add(slot.unit());
+				round.touch(slot.unit());
 				rearmIfOwn(slot);
 			}
 		}
@@ -3037,9 +3062,10 @@ public final class SyncService {
 		Optional<byte[]> sharedBytes = current.shared.readClaimBytes(slot.unit(), slot.claimName());
 		Claim theirs = sharedBytes.isPresent() ? parseClaim(sharedBytes.get()) : null;
 		if (theirs != null && !theirs.version().equals(mine.version())) {
+			round.unsettle(slot.unit());
 			displace(current, slot.unit(), slot.claimName(), sharedBytes.get(), theirs, mine.version());
 			unwatch(slot.unit(), slot.claimName());
-			round.changed.add(slot.unit());
+			round.touch(slot.unit());
 		} else if (ownership().isOwn(mine.machine(), mine.version())) {
 			rearm(new LocalScan.OwnClaim(slot.unit(), slot.claimName(), mine.version(), clock.instant()));
 		}
@@ -3067,11 +3093,12 @@ public final class SyncService {
 			Optional<byte[]> bytes = current.shared.readClaimBytes(own.unit(), own.claimName());
 			Claim theirs = bytes.isPresent() ? parseClaim(bytes.get()) : null;
 			if (theirs != null && !theirs.version().equals(own.version())) {
+				round.unsettle(own.unit());
 				displace(current, own.unit(), own.claimName(), bytes.get(), theirs, own.version());
 				synchronized (lock) {
 					ownClaims.remove(key, watched);
 				}
-				round.changed.add(own.unit());
+				round.touch(own.unit());
 				continue;
 			}
 			synchronized (lock) {
@@ -3126,21 +3153,20 @@ public final class SyncService {
 	/**
 	 * Meldet Verluste (aus dem Zustand abgeleitet) und geänderte Einheiten eines Durchlaufs, auch nach einem Fehler. Die
 	 * Ableitung löst jede geänderte Einheit über {@link #resolveLocal} auf: So steht sie im Index, bevor sie gemeldet wird.
-	 * Dazu kommen die Einheiten, deren Meldung zuvor scheiterte ({@link #unreported}).
+	 * Ausgenommen sind die, die der Durchlauf schon so aufgelöst hat ({@link #settled}). Dazu kommen die Einheiten, deren
+	 * Meldung zuvor scheiterte ({@link #unreported}).
 	 */
 	private void reportChanges(Round round) {
-		Collection<UnitKey> units = round.changed;
-		if (round.allUnits || !unreported.isEmpty()) {
-			// nach dem ersten Vollabgleich: die geänderten Einheiten und die, die der Index als verloren kennt (Kandidaten;
-			// die Verluste leitet reportLosses aus den Dateien ab); in jeder Runde die mit gescheiterter Meldung
-			Set<UnitKey> candidates = new LinkedHashSet<>(round.changed);
-			if (round.allUnits) {
-				candidates.addAll(withUnindexed(index.lostUnits()));
-			}
-			candidates.addAll(unreported);
-			units = candidates;
+		Set<UnitKey> units = new LinkedHashSet<>(round.changed);
+		units.removeAll(settled);
+		if (round.allUnits) {
+			// nach dem ersten Vollabgleich auch die, die der Index als verloren kennt (Kandidaten; die Verluste leitet
+			// reportLosses aus den Dateien ab)
+			units.addAll(withUnindexed(index.lostUnits()));
 		}
-		reportLosses(units);
+		// in jeder Runde die mit gescheiterter Meldung
+		units.addAll(unreported);
+		reportLosses(units, List.of());
 		notifier.unitsChanged(round.changed);
 		// Hat der Durchlauf etwas geändert (oder ist es der Start), stehen die Einheiten jetzt im Index: Die offenen Konflikte
 		// werden neu abgeleitet und mit den zuletzt gemeldeten verglichen. Das fängt jeden Weg ab (Liste, später eintreffender
@@ -3230,27 +3256,56 @@ public final class SyncService {
 	/**
 	 * Leitet für jede Einheit die verlorenen Strecken aus dem Zustand ab und meldet, was noch nicht gemeldet wurde. Ein
 	 * Fehler bei einer Einheit (auch ein ungeprüfter) kostet nur ihre Meldung, und der Rest des Takts läuft weiter. Scheitert
-	 * das Auflösen, bleibt sie Kandidat ({@link #unindexed}); scheitert erst das Ableiten oder Melden danach, holt die
-	 * nächste Runde die Meldung nach ({@link #unreported}).
+	 * das Auflösen, bleibt sie Kandidat ({@link #unindexed}) und gilt im laufenden Durchlauf nicht als erledigt
+	 * ({@link #settled}); scheitert erst das Ableiten oder Melden danach, holt die nächste Runde die Meldung nach
+	 * ({@link #unreported}). Zuerst werden alle Einheiten aufgelöst (Index), dann {@code found} gemeldet, dann die
+	 * abgeleiteten Verluste; eine Version meldet {@link #reportLoss} nur einmal.
+	 *
+	 * @param found Verluste, die der Aufrufer schon kennt (etwa aus dem Abgleich eines Blocks); wirft das Melden eines
+	 *              davon, kommen die abgeleiteten trotzdem dran, und der Fehler wird danach weitergeworfen
 	 */
-	private void reportLosses(Collection<UnitKey> units) {
+	private void reportLosses(Collection<UnitKey> units, Collection<LostVersion> found) {
+		// je Einheit nur die abgeleiteten Verluste, nicht ihre Dateien
+		Map<UnitKey, List<LostVersion>> derived = new LinkedHashMap<>();
 		for (UnitKey unit : units) {
 			Resolved resolved;
 			try {
 				resolved = resolveWithFiles(unit);
 			} catch (IOException | RuntimeException e) {
+				// nicht erledigt: Ein laufender Durchlauf löst sie am Ende erneut auf
+				settled.remove(unit);
 				LOGGER.log(Level.WARNING, "Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
 				continue;
 			}
 			try {
-				LocalScan.losses(resolved.files(), resolved.state()).forEach(this::reportLoss);
-				unreported.remove(unit);
+				derived.put(unit, LocalScan.losses(resolved.files(), resolved.state()));
 			} catch (RuntimeException e) {
-				// der Index kennt den Stand, nur die Meldung fehlt (und das Einreihen zur Auflösung): nächste Runde erneut
-				unreported.add(unit);
-				LOGGER.log(Level.WARNING, "Die Verluste von " + unit.relativePath() + " ließen sich nicht melden", e);
+				notReported(unit, e);
 			}
 		}
+		RuntimeException failure = null;
+		try {
+			found.forEach(this::reportLoss);
+		} catch (RuntimeException e) {
+			failure = e;
+		}
+		derived.forEach((unit, losses) -> {
+			try {
+				losses.forEach(this::reportLoss);
+				unreported.remove(unit);
+			} catch (RuntimeException e) {
+				notReported(unit, e);
+			}
+		});
+		if (failure != null) {
+			throw failure;
+		}
+	}
+
+	/** Der Index kennt den Stand, nur die Meldung fehlt (und das Einreihen zur Auflösung): nächste Runde erneut. */
+	private void notReported(UnitKey unit, RuntimeException e) {
+		unreported.add(unit);
+		LOGGER.log(Level.WARNING, "Die Verluste von " + unit.relativePath() + " ließen sich nicht melden", e);
 	}
 
 	/**
@@ -3474,6 +3529,19 @@ public final class SyncService {
 
 		Round(Link link) {
 			this.link = link;
+			// nur ein Durchlauf zur Zeit (unter workLock): Was ein früherer erledigt hat, gilt für diesen nicht
+			settled.clear();
+		}
+
+		/** Die Einheit hat sich geändert; hat dieser Durchlauf sie schon aufgelöst ({@link #settled}), am Ende erneut. */
+		void touch(UnitKey unit) {
+			changed.add(unit);
+			settled.remove(unit);
+		}
+
+		/** Vor dem Schreiben in die Einheit: Bricht es mittendrin ab, gilt sie trotzdem nicht als erledigt. */
+		void unsettle(UnitKey unit) {
+			settled.remove(unit);
 		}
 
 		void run(IoAction action) {

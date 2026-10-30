@@ -474,8 +474,8 @@ class ConnectFlowStoreTest {
 		seedSharedHalls(3);
 		Node a = new Node("a");
 		a.service.startup("");
-		// gleich nach dem Ende des Laufs wirft der nächste Lesezugriff unerwartet: in der Ableitung der Verluste am Ende des
-		// Takts, die keine Absicherung des Durchlaufs umgibt
+		// gleich nach dem Ende des Laufs wirft der nächste Zugriff auf einen Ordnerinhalt unerwartet (die Hallen hat der Block
+		// schon aufgelöst; danach listet als Erstes die Suche nach neuen Rechnern)
 		AtomicBoolean armed = new AtomicBoolean();
 		AtomicBoolean thrown = new AtomicBoolean();
 		a.service.fullSyncProgress().addListener((property, before, after) -> {
@@ -483,7 +483,7 @@ class ConnectFlowStoreTest {
 				armed.set(true);
 			}
 		});
-		a.layer.onEach("read", () -> {
+		a.layer.onEach("listNames", () -> {
 			if (armed.compareAndSet(true, false)) {
 				thrown.set(true);
 				throw new IllegalStateException("unerwarteter Fehler nach dem Ende des Laufs");
