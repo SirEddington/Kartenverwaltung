@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -91,6 +92,10 @@ class SyncServiceTest {
 		}
 	}
 
+	/** Ein Aufruf von {@link SyncListener#locked}. */
+	private record LockedCall(UnitKey unit, Status status) {
+	}
+
 	/** Zeichnet alle Rückmeldungen eines Dienstes auf. */
 	private static final class Recorder implements SyncListener {
 		final List<Set<UnitKey>> changed = new ArrayList<>();
@@ -98,6 +103,7 @@ class SyncServiceTest {
 		final List<LostVersion> lost = new ArrayList<>();
 		final List<String> unreachable = new ArrayList<>();
 		final List<String> errors = new ArrayList<>();
+		final List<LockedCall> locked = new ArrayList<>();
 		final List<String> duplicates = new ArrayList<>();
 		int reconnected;
 
@@ -129,6 +135,11 @@ class SyncServiceTest {
 		@Override
 		public void error(String message) {
 			errors.add(message);
+		}
+
+		@Override
+		public void locked(UnitKey unit, Status status) {
+			locked.add(new LockedCall(unit, status));
 		}
 
 		@Override
@@ -1331,7 +1342,7 @@ class SyncServiceTest {
 		Files.writeString(sharedV1, "auch kaputt");
 		a.service.unitState(BOOKING);
 		a.service.tick();
-		assertEquals(List.of(StoreMessages.damaged(BOOKING.relativePath())), a.events.errors);
+		assertEquals(List.of(new LockedCall(BOOKING, Status.LOCKED_DAMAGED)), a.events.locked);
 
 		// ein Rechner mit guter Kopie heilt den gemeinsamen Ordner
 		Files.write(sharedV1, good);
@@ -1362,7 +1373,7 @@ class SyncServiceTest {
 
 		b.service.tick();
 
-		assertEquals(List.of(StoreMessages.damaged(second.relativePath())), b.events.errors);
+		assertEquals(List.of(new LockedCall(second, Status.LOCKED_DAMAGED)), b.events.locked);
 		assertEquals(Status.LOCKED_DAMAGED, b.service.unitState(second).status());
 	}
 
@@ -1874,7 +1885,7 @@ class SyncServiceTest {
 
 		assertEquals(Status.LOCKED_DAMAGED, locked.status());
 		assertEquals(k.id(), locked.blockedAt());
-		assertEquals(List.of(StoreMessages.damaged(broken.relativePath())), a.events.errors);
+		assertEquals(List.of(new LockedCall(broken, Status.LOCKED_DAMAGED)), a.events.locked);
 	}
 
 	@Test
@@ -1935,7 +1946,145 @@ class SyncServiceTest {
 
 		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(BOOKING).status());
 
-		assertEquals(List.of(StoreMessages.damaged(BOOKING.relativePath())), a.events.errors);
+		assertEquals(List.of(new LockedCall(BOOKING, Status.LOCKED_DAMAGED)), a.events.locked);
+		assertEquals(List.of(), a.events.errors, "SYS-008 kommt als eigener Rückruf, nicht als Fehlertext");
+	}
+
+	@Test
+	void damagedUnitInSingleModeIsResettable() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v = save(a, create(BOOKING, "Anna"));
+		assertEquals(Set.of(), a.service.resettableUnits());
+		Files.writeString(localFile(a, BOOKING, v.id() + ".json"), "kaputt");
+
+		a.service.unitState(BOOKING);
+		a.service.unitState(BOOKING);
+
+		assertEquals(Set.of(BOOKING), a.service.resettableUnits());
+		assertEquals(List.of(new LockedCall(BOOKING, Status.LOCKED_DAMAGED)), a.events.locked, "einmal je Einheit");
+		assertTrue(a.events.errors.stream().noneMatch(e -> e.contains(StoreMessages.SYS_DAMAGED)), a.events.errors.toString());
+	}
+
+	@Test
+	void repairableUnitInSharedModeIsNotResettable() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Files.writeString(localFile(a, BOOKING, v.id() + ".json"), "kaputt");
+
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(BOOKING).status());
+		assertEquals(Set.of(), a.service.resettableUnits(), "ob es eine gute Kopie gibt, entscheidet erst der Takt");
+		a.service.tick();
+
+		assertEquals(Status.OK, a.service.unitState(BOOKING).status());
+		assertEquals(Set.of(), a.service.resettableUnits());
+		assertEquals(List.of(), a.events.locked);
+	}
+
+	@Test
+	void unrepairableUnitInSharedModeIsResettable() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Files.writeString(localFile(a, BOOKING, v.id() + ".json"), "kaputt");
+		Files.writeString(sharedFile(BOOKING, v.id() + ".json"), "auch kaputt");
+
+		a.service.unitState(BOOKING);
+		a.service.tick();
+		a.service.unitState(BOOKING);
+		a.service.tick();
+
+		assertEquals(Set.of(BOOKING), a.service.resettableUnits());
+		assertEquals(List.of(new LockedCall(BOOKING, Status.LOCKED_DAMAGED)), a.events.locked, "einmal je Einheit");
+	}
+
+	@Test
+	void resetRemovesUnitFromResettable() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		Version v2 = save(a, update(BOOKING, v1, "Anna B"));
+		Files.writeString(localFile(a, BOOKING, v2.id() + ".json"), "kaputt");
+		a.service.unitState(BOOKING);
+		assertEquals(Set.of(BOOKING), a.service.resettableUnits());
+
+		a.service.resetToLastReadable(BOOKING);
+
+		assertEquals(Set.of(), a.service.resettableUnits());
+	}
+
+	@Test
+	void resetRemovesUnrepairableUnitFromResettableInSharedMode() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Version v2 = save(a, update(BOOKING, v1, "Anna B"));
+		a.service.tick();
+		Files.writeString(localFile(a, BOOKING, v2.id() + ".json"), "kaputt");
+		Files.writeString(sharedFile(BOOKING, v2.id() + ".json"), "auch kaputt");
+		a.service.unitState(BOOKING);
+		a.service.tick();
+		assertEquals(Set.of(BOOKING), a.service.resettableUnits());
+
+		a.service.resetToLastReadable(BOOKING);
+
+		assertEquals(Set.of(), a.service.resettableUnits());
+	}
+
+	@Test
+	void unitThatIsNoLongerDamagedLeavesResettableInSingleMode() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v = save(a, create(BOOKING, "Anna"));
+		Path file = localFile(a, BOOKING, v.id() + ".json");
+		byte[] good = Files.readAllBytes(file);
+		Files.writeString(file, "kaputt");
+		a.service.unitState(BOOKING);
+		assertEquals(Set.of(BOOKING), a.service.resettableUnits());
+
+		// jemand legt die Datei von Hand zurück
+		Files.write(file, good);
+
+		assertEquals(Status.OK, a.service.unitState(BOOKING).status());
+		assertEquals(Set.of(), a.service.resettableUnits());
+	}
+
+	@Test
+	void changingTheConnectionClearsResettableOfSingleMode() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v = save(a, create(BOOKING, "Anna"));
+		Files.writeString(localFile(a, BOOKING, v.id() + ".json"), "kaputt");
+		a.service.unitState(BOOKING);
+		assertEquals(Set.of(BOOKING), a.service.resettableUnits());
+
+		a.service.connect(shared, ConnectMode.MERGE);
+
+		assertEquals(Set.of(), a.service.resettableUnits());
+	}
+
+	@Test
+	void newerFormatIsReportedAsLockedButNotResettable() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		// eine Einheit, die der Index nicht kennt: ihre einzige Version stammt aus einem neueren Programm
+		UnitKey stranger = UnitKey.booking("e1", "p1", "Z-9");
+		Version foreign = version("zzzzzzzz", 1_900_000_000_000L, 1, "fremd", null);
+		VersionStore store = new VersionStore(a.localData(), new NioFileLayer());
+		byte[] newer = "{\"format\":2}".getBytes(StandardCharsets.UTF_8);
+		assertTrue(store.writeVersion(stranger, foreign.id(), newer));
+		new LocalArbiter(store, clock).claim(stranger, foreign, newer);
+
+		assertEquals(Status.LOCKED_FORMAT, a.service.unitState(stranger).status());
+		a.service.unitState(stranger);
+
+		assertEquals(List.of(new LockedCall(stranger, Status.LOCKED_FORMAT)), a.events.locked, "einmal je Einheit");
+		assertEquals(Set.of(), a.service.resettableUnits());
+		assertTrue(a.events.errors.stream().noneMatch(e -> e.contains(StoreMessages.SYS_NEWER_FORMAT)), a.events.errors.toString());
 	}
 
 	@Test
@@ -3325,7 +3474,7 @@ class SyncServiceTest {
 		a.service.chains(List.of(stranger));
 		a.service.chains(List.of(stranger));
 
-		assertEquals(List.of(StoreMessages.damaged(stranger.relativePath())), a.events.errors, "SYS-008 einmal je Einheit");
+		assertEquals(List.of(new LockedCall(stranger, Status.LOCKED_DAMAGED)), a.events.locked, "SYS-008 einmal je Einheit");
 	}
 
 	@Test

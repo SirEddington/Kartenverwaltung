@@ -480,6 +480,12 @@ public final class SyncService {
 	 */
 	private final Set<UnitKey> unrepairable = new HashSet<>();
 	/**
+	 * Im Einzelbetrieb die Einheiten, für die SYS-008 gemeldet wurde und deren letzter gesehener Stand noch beschädigt ist
+	 * (es gibt keine zweite Kopie, nur das Zurücksetzen hilft). Unter {@code lock}; eine neue oder getrennte Verbindung
+	 * leert sie.
+	 */
+	private final Set<UnitKey> damagedSingle = new HashSet<>();
+	/**
 	 * Die Einheiten, die der letzte beendete Vollabgleich übersprungen hat (SYS-013), in der Reihenfolge des Überspringens;
 	 * bis zum Ende des nächsten Laufs bleiben sie hier ({@link #skippedUnits()}). Unter {@code lock}; eine neue oder
 	 * getrennte Verbindung leert sie.
@@ -652,6 +658,22 @@ public final class SyncService {
 			Map<UnitKey, SkippedUnit> all = new LinkedHashMap<>(skippedLastRun);
 			all.putAll(skippedInRun);
 			return List.copyOf(all.values());
+		}
+	}
+
+	/**
+	 * Die gesperrten Einheiten, die sich auf den letzten lesbaren Stand zurücksetzen lassen ({@link #resetToLastReadable}):
+	 * im gemeinsamen Betrieb die beschädigten, für die der Takt keine gute Kopie fand; im Einzelbetrieb die beschädigten,
+	 * für die SYS-008 gemeldet wurde. Eine Einheit mit neuerem Format ist nie dabei: Sie braucht ein neueres Programm. Eine
+	 * Einheit fällt heraus, sobald ein späterer Stand nicht mehr beschädigt ist oder das Zurücksetzen gelang; eine neue oder
+	 * getrennte Verbindung leert die Menge des Einzelbetriebs. Ohne Datei-Ein-/Ausgabe, nimmt nur kurz {@code lock}; auf jedem
+	 * Thread aufrufbar.
+	 *
+	 * @return eine unveränderliche Kopie
+	 */
+	public Set<UnitKey> resettableUnits() {
+		synchronized (lock) {
+			return Set.copyOf(link == null ? damagedSingle : unrepairable);
 		}
 	}
 
@@ -1309,7 +1331,8 @@ public final class SyncService {
 	 * Betrieb versucht der nächste Takt die Heilung aus der Kopie im gemeinsamen Ordner (SYS-007 im Log) und meldet die
 	 * Einheit mit {@link SyncListener#unitsChanged}, wenn sich dadurch etwas geändert hat; bleibt sie gesperrt, kommt
 	 * SYS-008, und ein neuer Versuch folgt erst, wenn Abholen oder Vollabgleich die Einheit verändern. SYS-008 und SYS-009
-	 * (neueres Format) kommen einmal je Einheit und Programmlauf über {@link SyncListener#error}.
+	 * (neueres Format) kommen einmal je Einheit und Programmlauf über {@link SyncListener#locked}; welche Einheiten sich
+	 * zurücksetzen lassen, nennt {@link #resettableUnits()}.
 	 */
 	public UnitState unitState(UnitKey unit) throws IOException {
 		UnitState state = resolveLocal(unit);
@@ -1319,30 +1342,56 @@ public final class SyncService {
 
 	/**
 	 * Behandelt eine gesperrte Einheit: beschädigt im gemeinsamen Betrieb zur Heilung vormerken (der nächste Takt versucht
-	 * sie), im Einzelbetrieb sofort SYS-008; neueres Format SYS-009. Nimmt nur kurz {@code lock}, sonst keine Sperre; ein
-	 * Stand ohne Sperre bleibt unberührt.
+	 * sie), im Einzelbetrieb sofort SYS-008 und als zurücksetzbar merken; neueres Format SYS-009. Eine beschädigte Einheit, deren
+	 * Zurücksetzen schon geschrieben ist und auf seinen Anspruch wartet, bleibt unvermerkt, ebenso fällt eine Einheit aus den
+	 * zurücksetzbaren, deren Stand nicht mehr beschädigt ist. Nimmt nur kurz {@code lock}, sonst keine Sperre.
 	 */
 	private void reportLocked(UnitKey unit, UnitState state) {
 		if (state.status() == Status.LOCKED_DAMAGED) {
+			boolean resetWritten = pendingReset(state) != null;
 			boolean single;
 			synchronized (lock) {
 				single = link == null;
-				if (!single && !unrepairable.contains(unit)) {
+				if (resetWritten) {
+					damagedSingle.remove(unit);
+					unrepairable.remove(unit);
+				} else if (single) {
+					damagedSingle.add(unit);
+				} else if (!unrepairable.contains(unit)) {
 					repairQueue.add(unit);
 				}
 			}
 			if (single) {
 				reportDamaged(unit);
 			}
+			return;
 		}
+		forgetResettable(unit);
 		if (state.status() == Status.LOCKED_FORMAT) {
-			notifier.errorOnce(StoreMessages.SYS_NEWER_FORMAT + " " + unit.relativePath(),
-					StoreMessages.newerFormat(unit.relativePath()));
+			notifier.locked(unit, Status.LOCKED_FORMAT);
 		}
 	}
 
 	private void reportDamaged(UnitKey unit) {
-		notifier.errorOnce(StoreMessages.SYS_DAMAGED + " " + unit.relativePath(), StoreMessages.damaged(unit.relativePath()));
+		notifier.locked(unit, Status.LOCKED_DAMAGED);
+	}
+
+	/** Die Einheit ist nicht (mehr) zurücksetzbar: Ihr Stand ist nicht beschädigt, oder ihr Zurücksetzen ist geschrieben. */
+	private void forgetResettable(UnitKey unit) {
+		synchronized (lock) {
+			damagedSingle.remove(unit);
+			unrepairable.remove(unit);
+		}
+	}
+
+	/** Das noch nicht beanspruchte eigene Zurücksetzen der beschädigten Version, an der die Kette endet; sonst {@code null}. */
+	private static Version pendingReset(UnitState state) {
+		for (Version pending : state.pending()) {
+			if (state.blockedAt() != null && state.blockedAt().equals(pending.firstParent())) {
+				return pending;
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -1535,16 +1584,17 @@ public final class SyncService {
 			throw new IllegalStateException(unit.relativePath() + " ist nicht wegen einer beschädigten Version gesperrt ("
 					+ state.status() + ").");
 		}
-		for (Version pending : state.pending()) {
-			if (state.blockedAt().equals(pending.firstParent())) {
-				return pending;
-			}
+		Version written = pendingReset(state);
+		if (written != null) {
+			return written;
 		}
 		Version last = state.head();
 		ObjectNode payload = last == null ? null : last.payload();
 		boolean deleted = last == null || last.deleted();
 		Change change = new Change(unit, List.of(state.blockedAt()), payload, deleted);
-		return append(UUID.randomUUID().toString(), List.of(change)).get(0);
+		Version reset = append(UUID.randomUUID().toString(), List.of(change)).get(0);
+		forgetResettable(unit);
+		return reset;
 	}
 
 	// --- Start-Index
@@ -3401,6 +3451,7 @@ public final class SyncService {
 			sharedRepairs.clear();
 			repairQueue.clear();
 			unrepairable.clear();
+			damagedSingle.clear();
 			skippedLastRun.clear();
 			skippedInRun.clear();
 			notifier.reset();
@@ -3421,6 +3472,7 @@ public final class SyncService {
 			sharedRepairs.clear();
 			repairQueue.clear();
 			unrepairable.clear();
+			damagedSingle.clear();
 			skippedLastRun.clear();
 			skippedInRun.clear();
 			notifier.reset();

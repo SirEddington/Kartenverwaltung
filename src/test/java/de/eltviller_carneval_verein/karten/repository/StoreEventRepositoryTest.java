@@ -640,6 +640,30 @@ class StoreEventRepositoryTest {
 	}
 
 	@Test
+	void lockedUnitsAtLoadAreReportedAsKeys(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		Event event = smallEvent();
+		TestRepositories.events(sync).saveEvent(event);
+		UnitKey head = UnitKey.event(event.getId());
+		Version first = sync.unitState(head).head();
+		ObjectNode changed = first.payload().deepCopy();
+		changed.put("description", "geändert");
+		Version second = sync.append("test", List.of(new Change(head, List.of(first.id()), changed, false))).get(0);
+		// die zweite Version wird beschädigt: Die Kette endet vor ihr, die erste bleibt lesbar
+		Files.writeString(appData.resolve("data/events/" + event.getId() + "/" + second.id() + ".json"), "kaputt");
+		StoreEventRepository repository = TestRepositories.events(started(appData));
+
+		assertEquals(1, repository.loadEvents().size(), "die lesbare Einheit wird geladen");
+
+		assertEquals(Map.of(head, Status.LOCKED_DAMAGED), repository.getAndClearLockedAtLoad());
+		assertTrue(repository.getAndClearLoadWarnings().isEmpty(), "die gesperrte Einheit steht nicht mehr als Text da");
+		assertTrue(repository.getAndClearLockedAtLoad().isEmpty(), "Abholen leert");
+		repository.reloadEvents();
+		assertEquals(Map.of(head, Status.LOCKED_DAMAGED), repository.getAndClearLockedAtLoad(),
+				"jeder Ladevorgang meldet seine gesperrten Einheiten neu");
+	}
+
+	@Test
 	void unreadableUnitIsNeverDeletedBySave(@TempDir Path appData) throws IOException {
 		SyncService sync = started(appData);
 		Event event = eventWithBookings();

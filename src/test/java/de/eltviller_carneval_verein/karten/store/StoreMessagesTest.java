@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.io.IOException;
 import java.nio.file.AccessDeniedException;
@@ -42,6 +43,16 @@ class StoreMessagesTest {
 		assertEquals("SYS-013: halls/h1 ließ sich wiederholt nicht mit dem gemeinsamen Ordner abgleichen und wurde "
 				+ "übersprungen: AccessDeniedException: E:\\ECV\\data\\halls\\h1. Der nächste Abgleich versucht es erneut.",
 				StoreMessages.skipped("halls/h1", "AccessDeniedException: E:\\ECV\\data\\halls\\h1"));
+	}
+
+	@Test
+	void lockedTextFollowsTheStatus() {
+		UnitKey unit = UnitKey.hall("h1");
+
+		assertEquals(StoreMessages.damaged("halls/h1"), StoreMessages.locked(unit, UnitState.Status.LOCKED_DAMAGED));
+		assertEquals(StoreMessages.newerFormat("halls/h1"), StoreMessages.locked(unit, UnitState.Status.LOCKED_FORMAT));
+		assertNull(StoreMessages.locked(unit, UnitState.Status.OK));
+		assertNull(StoreMessages.locked(unit, UnitState.Status.WAITING));
 	}
 
 	@Test

@@ -115,9 +115,10 @@ final class RestorePlanner {
 	 * @throws LockedUnitException wenn der Zielstand unlesbare Teile enthält oder das Gesuchte fehlt
 	 */
 	static <T> T single(UnitMapper.Assembly<T> target, String deletedText) {
-		if (!target.warnings().isEmpty()) {
+		List<String> warnings = target.allWarnings();
+		if (!warnings.isEmpty()) {
 			throw new LockedUnitException("Der Speicherstand enthält unlesbare Teile und wird nicht wiederhergestellt: "
-					+ String.join(" ", target.warnings()));
+					+ String.join(" ", warnings));
 		}
 		if (target.items().isEmpty()) {
 			throw new LockedUnitException(deletedText);

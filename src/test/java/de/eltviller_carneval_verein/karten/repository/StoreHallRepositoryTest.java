@@ -16,6 +16,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.Version;
 
 class StoreHallRepositoryTest {
@@ -249,6 +251,26 @@ class StoreHallRepositoryTest {
 		assertEquals(versionsBefore, restarted.history(unit).size());
 		assertTrue(repository.loadHalls().contains(loaded));
 		assertTrue(recorder.calls.isEmpty());
+	}
+
+	@Test
+	void lockedHallAtLoadIsReportedAsKey(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		Hall hall = named("Stadthalle");
+		TestRepositories.halls(sync).saveHall(hall);
+		UnitKey unit = UnitKey.hall(hall.getId());
+		Version first = sync.unitState(unit).head();
+		ObjectNode changed = first.payload().deepCopy();
+		changed.put("description", "geändert");
+		Version second = sync.append("test", List.of(new Change(unit, List.of(first.id()), changed, false))).get(0);
+		Files.writeString(appData.resolve("data/halls/" + hall.getId() + "/" + second.id() + ".json"), "kaputt");
+		StoreHallRepository repository = TestRepositories.halls(started(appData));
+
+		assertEquals(1, repository.loadHalls().size());
+
+		assertEquals(Map.of(unit, Status.LOCKED_DAMAGED), repository.getAndClearLockedAtLoad());
+		assertTrue(repository.getAndClearLoadWarnings().isEmpty());
+		assertTrue(repository.getAndClearLockedAtLoad().isEmpty());
 	}
 
 	/** Uhr, die der Test von Hand stellt: Jeder Speicherstand bekommt so seinen eigenen Zeitpunkt. */

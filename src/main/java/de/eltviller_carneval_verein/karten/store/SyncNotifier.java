@@ -195,6 +195,23 @@ final class SyncNotifier {
 		deliver(l -> l.skipped(unit, subtree, cause));
 	}
 
+	/**
+	 * Meldet eine gesperrte Einheit ({@link SyncListener#locked}, SYS-008 bzw. SYS-009) einmal je Einheit, Zustand und
+	 * Programmlauf, ohne den Zustand zu ändern; der Log-Eintrag trägt den Text.
+	 */
+	synchronized void locked(UnitKey unit, UnitState.Status status) {
+		String message = StoreMessages.locked(unit, status);
+		if (message == null) {
+			return;
+		}
+		String code = status == UnitState.Status.LOCKED_DAMAGED ? StoreMessages.SYS_DAMAGED : StoreMessages.SYS_NEWER_FORMAT;
+		if (!reportedOnce.add(code + " " + unit.relativePath())) {
+			return;
+		}
+		LOGGER.warning(message);
+		deliver(l -> l.locked(unit, status));
+	}
+
 	/** Meldet einen Fehler für die Fußzeile ohne Log und ohne Zustand; ob er einmal oder öfter kommt, regelt der Aufrufer. */
 	void error(String message) {
 		deliver(l -> l.error(message));

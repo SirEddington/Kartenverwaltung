@@ -643,7 +643,7 @@ class UnitMapperTest {
 	}
 
 	@Test
-	void lockedUnitLoadsWithWarning() {
+	void lockedUnitLoadsAndIsReportedAsLocked() {
 		Event event = simpleEvent();
 		Presentation first = event.getPresentations().get(0);
 		List<UnitSnapshot> snapshots = snapshots(UnitMapper.decompose(event));
@@ -656,9 +656,11 @@ class UnitMapperTest {
 
 		assertEquals(1, assembly.items().size());
 		assertEquals(3, assembly.items().get(0).getBookings().size());
-		assertEquals(2, assembly.warnings().size());
-		assertTrue(assembly.warnings().contains(StoreMessages.damaged(damaged.relativePath())));
-		assertTrue(assembly.warnings().contains(StoreMessages.newerFormat(newer.relativePath())));
+		assertEquals(List.of(), assembly.warnings(), "gesperrte Einheiten stehen nicht als Text da");
+		assertEquals(Map.of(damaged, Status.LOCKED_DAMAGED, newer, Status.LOCKED_FORMAT), assembly.locked());
+		assertEquals(2, assembly.allWarnings().size());
+		assertTrue(assembly.allWarnings().contains(StoreMessages.damaged(damaged.relativePath())));
+		assertTrue(assembly.allWarnings().contains(StoreMessages.newerFormat(newer.relativePath())));
 	}
 
 	@Test
@@ -890,14 +892,16 @@ class UnitMapperTest {
 	}
 
 	@Test
-	void lockedHallLoadsWithWarning() {
+	void lockedHallLoadsAndIsReportedAsLocked() {
 		Hall hall = realisticHall();
 		UnitSnapshot locked = withState(snapshot(UnitMapper.decompose(hall)), Status.LOCKED_FORMAT, false);
 
 		Assembly<Hall> assembly = UnitMapper.assembleHalls(List.of(locked));
 
 		assertEquals(1, assembly.items().size());
-		assertEquals(List.of(StoreMessages.newerFormat("halls/" + hall.getId())), assembly.warnings());
+		assertEquals(List.of(), assembly.warnings());
+		assertEquals(Map.of(UnitKey.hall(hall.getId()), Status.LOCKED_FORMAT), assembly.locked());
+		assertEquals(List.of(StoreMessages.newerFormat("halls/" + hall.getId())), assembly.allWarnings());
 	}
 
 	@Test

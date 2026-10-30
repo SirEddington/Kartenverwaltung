@@ -50,8 +50,17 @@ public interface SyncListener {
 	default void reconnected() {
 	}
 
-	/** Ein Fehler mit fertigem Text samt Code für die Fußzeile ({@code SYS-006}, {@code SYS-008}, {@code SYS-009}, {@code SYS-012}). */
+	/** Ein Fehler mit fertigem Text samt Code für die Fußzeile ({@code SYS-006}, {@code SYS-012}). */
 	default void error(String message) {
+	}
+
+	/**
+	 * Eine Einheit ist gesperrt: beschädigt ohne gute Kopie ({@code SYS-008}, {@link UnitState.Status#LOCKED_DAMAGED}) oder mit
+	 * einem neueren Programm gespeichert ({@code SYS-009}, {@link UnitState.Status#LOCKED_FORMAT}). Kommt einmal je Einheit
+	 * und Programmlauf; der Text steht im Log ({@link StoreMessages#locked}). Ob die Einheit sich zurücksetzen lässt,
+	 * fragt {@link SyncService#resettableUnits()} ab.
+	 */
+	default void locked(UnitKey unit, UnitState.Status status) {
 	}
 
 	/**

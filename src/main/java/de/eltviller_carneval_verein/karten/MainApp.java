@@ -17,6 +17,7 @@ import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
@@ -222,12 +223,15 @@ public class MainApp extends Application {
 			}
 		});
 
+		// gesperrte Einheiten kommen als Schlüssel; die lesbare Bezeichnung folgt später, bis dahin bleibt es beim Text
 		List<String> eventWarnings = repository.getAndClearLoadWarnings();
+		repository.getAndClearLockedAtLoad().forEach((unit, status) -> eventWarnings.add(StoreMessages.locked(unit, status)));
 		if (!eventWarnings.isEmpty()) {
 			showAlert("Warnung beim Laden der Events", String.join("\n\n", eventWarnings), AlertType.WARNING);
 		}
 
 		List<String> hallWarnings = halls.getAndClearLoadWarnings();
+		halls.getAndClearLockedAtLoad().forEach((unit, status) -> hallWarnings.add(StoreMessages.locked(unit, status)));
 		if (!hallWarnings.isEmpty()) {
 			showAlert("Warnung beim Laden der Hallen", String.join("\n\n", hallWarnings), AlertType.WARNING);
 		}

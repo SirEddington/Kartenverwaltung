@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -58,9 +59,12 @@ public class StoreEventRepository implements EventRepository {
 	// damit ungespeicherte Änderungen eines Controllers auch für andere sichtbar sind.
 	private List<Event> cachedEvents;
 
-	// Warnungen aus dem letzten Ladevorgang (unlesbare oder gesperrte Einheiten). Das Repository kennt keine UI,
+	// Warnungen aus dem letzten Ladevorgang (unlesbare Einheiten). Das Repository kennt keine UI,
 	// daher werden sie hier nur gesammelt - anzeigen muss die aufrufende Schicht (siehe getAndClearLoadWarnings()).
 	private final List<String> loadWarnings = new ArrayList<>();
+
+	// Die beim Laden gesperrten Einheiten mit ihrem Zustand (siehe getAndClearLockedAtLoad()).
+	private final Map<UnitKey, UnitState.Status> lockedAtLoad = new LinkedHashMap<>();
 
 	private final RepositoryListeners<Event> listeners = new RepositoryListeners<>();
 
@@ -141,7 +145,7 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
-	 * Warnungen aus dem letzten Ladevorgang (unlesbare oder gesperrte Einheiten).
+	 * Warnungen aus dem letzten Ladevorgang (unlesbare Einheiten; gesperrte nennt {@link #getAndClearLockedAtLoad()}).
 	 * Leert die Liste beim Abholen, damit dieselbe Warnung nicht mehrfach angezeigt wird.
 	 * Anzeigen (z.B. per Alert) ist Sache der aufrufenden UI-Schicht.
 	 */
@@ -149,6 +153,17 @@ public class StoreEventRepository implements EventRepository {
 		List<String> warnings = new ArrayList<>(loadWarnings);
 		loadWarnings.clear();
 		return warnings;
+	}
+
+	/**
+	 * Die Einheiten, die der letzte Ladevorgang gesperrt vorfand (beschädigt oder neueres Format), mit ihrem Zustand. Sie
+	 * stehen nicht mehr als Text in {@link #getAndClearLoadWarnings()}. Leert die Map beim Abholen; wie die Texte zu
+	 * zeigen sind, entscheidet die aufrufende UI-Schicht.
+	 */
+	public synchronized Map<UnitKey, UnitState.Status> getAndClearLockedAtLoad() {
+		Map<UnitKey, UnitState.Status> locked = new LinkedHashMap<>(lockedAtLoad);
+		lockedAtLoad.clear();
+		return locked;
 	}
 
 	private void ensureLoaded() {
@@ -170,12 +185,13 @@ public class StoreEventRepository implements EventRepository {
 		derived.clear();
 		removedByOthers.clear();
 		waiting.forEach(snapshot -> holdUnplaced(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
-		addLoadWarnings(assembly.warnings());
+		addLoadWarnings(assembly.warnings(), assembly.locked());
 		return new ArrayList<>(assembly.items());
 	}
 
-	private synchronized void addLoadWarnings(List<String> warnings) {
+	private synchronized void addLoadWarnings(List<String> warnings, Map<UnitKey, UnitState.Status> locked) {
 		loadWarnings.addAll(warnings);
+		lockedAtLoad.putAll(locked);
 	}
 
 	@Override
@@ -1064,7 +1080,7 @@ public class StoreEventRepository implements EventRepository {
 			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup, waiting);
 			baseline.resetOwner(eventId, all.values(), assembly.shown(), unitsOf(waiting));
 			forgetDerived(eventId);
-			warnings.addAll(assembly.warnings());
+			warnings.addAll(assembly.allWarnings());
 			waiting.forEach(snapshot -> backlog.hold(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
 			removedByOthers.remove(eventId);
 			for (Event added : assembly.items()) {
@@ -1212,7 +1228,7 @@ public class StoreEventRepository implements EventRepository {
 			byte[] state = MAPPER.writeValueAsBytes(fresh);
 			baseline.resetOwner(eventId, all, assembly.shown(), unitsOf(waiting));
 			forgetDerived(eventId);
-			warnings.addAll(assembly.warnings());
+			warnings.addAll(assembly.allWarnings());
 			replaceCachedEvent(fresh);
 			// das frische Event zeigt jeden Stand des Index, außer den Buchungen, die nicht zur Bestuhlung passen
 			forgetWaiting(eventId);

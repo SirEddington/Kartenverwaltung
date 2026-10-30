@@ -75,10 +75,21 @@ final class UnitMapper {
 	}
 
 	/**
-	 * Das Ergebnis des Zusammensetzens: die lesbaren Objekte, die Warnungen für den Nutzer und die Einheiten, die
-	 * tatsächlich in die Objekte eingegangen sind ({@code shown}: Kopf, Vorstellungen, Buchungen bzw. Hallen).
+	 * Das Ergebnis des Zusammensetzens: die lesbaren Objekte, die Warnungen für den Nutzer, die gesperrten Einheiten, die
+	 * dabei geladen wurden, und die Einheiten, die tatsächlich in die Objekte eingegangen sind ({@code shown}: Kopf,
+	 * Vorstellungen, Buchungen bzw. Hallen).
+	 *
+	 * @param warnings Texte zu unlesbaren Einheiten, ohne die gesperrten
+	 * @param locked   die geladenen Einheiten, deren Kette gesperrt ist (beschädigt oder neueres Format), mit ihrem Zustand
 	 */
-	record Assembly<T>(List<T> items, List<String> warnings, Set<UnitKey> shown) {
+	record Assembly<T>(List<T> items, List<String> warnings, Map<UnitKey, Status> locked, Set<UnitKey> shown) {
+
+		/** Alle Warnungen als Text, auch die gesperrten Einheiten (SYS-008 bzw. SYS-009): für alles, was nicht lädt. */
+		List<String> allWarnings() {
+			List<String> all = new ArrayList<>(warnings);
+			locked.forEach((unit, status) -> all.add(lockMessage(unit, status)));
+			return all;
+		}
 	}
 
 	private UnitMapper() {
@@ -292,11 +303,7 @@ final class UnitMapper {
 
 	/** Der Text (SYS-008 bzw. SYS-009), wenn die Einheit gesperrt ist; sonst {@code null}. */
 	static String lockMessage(UnitKey unit, Status status) {
-		return switch (status) {
-		case LOCKED_DAMAGED -> StoreMessages.damaged(unit.relativePath());
-		case LOCKED_FORMAT -> StoreMessages.newerFormat(unit.relativePath());
-		case WAITING, OK -> null;
-		};
+		return StoreMessages.locked(unit, status);
 	}
 
 	/** Der Schlüssel einer Buchung: auf dem Sitz, wenn sie einen hat und nicht "ohne Platz" ist, sonst über ihre Kennung. */
@@ -329,6 +336,7 @@ final class UnitMapper {
 	 */
 	static Assembly<Event> assembleEvents(Collection<UnitSnapshot> snapshots) {
 		List<String> warnings = new ArrayList<>();
+		Map<UnitKey, Status> locked = new LinkedHashMap<>();
 		Set<UnitKey> shown = new HashSet<>();
 		int orphans = 0;
 		// Kinder einer gelöschten Einheit bleiben liegen (Löschen nur am Kopf) und sind gewollt unsichtbar; gemeldet
@@ -345,7 +353,7 @@ final class UnitMapper {
 		for (UnitSnapshot snapshot : snapshots) {
 			UnitKey unit = snapshot.unit();
 			if (unit.type() == UnitType.EVENT) {
-				Event event = read(snapshot, Event.class, warnings, unreadableEvent(unit.eventId()),
+				Event event = read(snapshot, Event.class, warnings, locked, unreadableEvent(unit.eventId()),
 						idMismatch(unit.eventId(), Event::getId));
 				if (event != null) {
 					events.put(unit, event);
@@ -371,7 +379,7 @@ final class UnitMapper {
 				}
 				continue;
 			}
-			Presentation presentation = read(snapshot, Presentation.class, warnings,
+			Presentation presentation = read(snapshot, Presentation.class, warnings, locked,
 					unreadablePresentation(unit.presentationId(), event.getName()),
 					idMismatch(unit.presentationId(), Presentation::getId));
 			if (presentation != null) {
@@ -395,7 +403,7 @@ final class UnitMapper {
 				}
 				continue;
 			}
-			Booking booking = read(snapshot, Booking.class, warnings, unreadableBooking(presentation.getName()),
+			Booking booking = read(snapshot, Booking.class, warnings, locked, unreadableBooking(presentation.getName()),
 					b -> bookingMismatch(unit, b));
 			if (booking != null) {
 				bookingsOfPresentation.computeIfAbsent(presentationKey, k -> new ArrayList<>()).add(booking);
@@ -417,7 +425,7 @@ final class UnitMapper {
 
 		List<Event> result = new ArrayList<>(events.values());
 		result.sort(EVENT_ORDER);
-		return new Assembly<>(result, warnings, shown);
+		return new Assembly<>(result, warnings, locked, shown);
 	}
 
 	/**
@@ -472,12 +480,13 @@ final class UnitMapper {
 	/** Setzt die Hallen aus den Ständen der Einheiten zusammen, nach Name sortiert. */
 	static Assembly<Hall> assembleHalls(Collection<UnitSnapshot> snapshots) {
 		List<String> warnings = new ArrayList<>();
+		Map<UnitKey, Status> locked = new LinkedHashMap<>();
 		List<Hall> halls = new ArrayList<>();
 		Set<UnitKey> shown = new HashSet<>();
 		for (UnitSnapshot snapshot : snapshots) {
 			if (snapshot.unit().type() == UnitType.HALL) {
 				String hallId = snapshot.unit().hallId();
-				Hall hall = read(snapshot, Hall.class, warnings, unreadableHall(hallId),
+				Hall hall = read(snapshot, Hall.class, warnings, locked, unreadableHall(hallId),
 						idMismatch(hallId, Hall::getId));
 				if (hall != null) {
 					halls.add(hall);
@@ -486,19 +495,19 @@ final class UnitMapper {
 			}
 		}
 		halls.sort(HALL_ORDER);
-		return new Assembly<>(halls, warnings, shown);
+		return new Assembly<>(halls, warnings, locked, shown);
 	}
 
 	/**
 	 * Liest die Einheit, wenn sie sichtbar ist. Ergibt {@code null} für eine gelöschte Einheit, für einen Ordner ohne
 	 * eigene Dateien (keine Version, Status {@code OK}: die Einheit gibt es nicht) und, mit der Warnung
 	 * {@code unreadable}, für eine Einheit ohne lesbare Version oder mit Inhalt, den Jackson nicht liest. Eine
-	 * gesperrte Einheit mit lesbarer Version wird geladen und erzeugt die Warnung SYS-008 bzw. SYS-009. Ergibt
-	 * {@code mismatchOf} einen Text, passt der Inhalt nicht zum Ordner der Einheit (die ID zeigt woandershin): Die
-	 * Einheit wird wie eine unlesbare behandelt.
+	 * gesperrte Einheit mit lesbarer Version wird geladen und kommt mit ihrem Zustand in {@code locked} (SYS-008 bzw.
+	 * SYS-009). Ergibt {@code mismatchOf} einen Text, passt der Inhalt nicht zum Ordner der Einheit (die ID zeigt
+	 * woandershin): Die Einheit wird wie eine unlesbare behandelt.
 	 */
-	private static <T> T read(UnitSnapshot snapshot, Class<T> type, List<String> warnings, String unreadable,
-			Function<T, String> mismatchOf) {
+	private static <T> T read(UnitSnapshot snapshot, Class<T> type, List<String> warnings, Map<UnitKey, Status> locked,
+			String unreadable, Function<T, String> mismatchOf) {
 		if (snapshot.version() == null) {
 			if (snapshot.status() != Status.OK) {
 				warnings.add(unreadable);
@@ -517,9 +526,8 @@ final class UnitMapper {
 			warnings.add(unreadable);
 			return null;
 		}
-		String locked = lockMessage(snapshot.unit(), snapshot.status());
-		if (locked != null) {
-			warnings.add(locked);
+		if (lockMessage(snapshot.unit(), snapshot.status()) != null) {
+			locked.put(snapshot.unit(), snapshot.status());
 		}
 		return value;
 	}

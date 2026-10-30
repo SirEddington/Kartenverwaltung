@@ -90,6 +90,15 @@ public final class StoreMessages {
 		return SYS_NEWER_FORMAT + ": " + MessageTemplate.format(NEWER_FORMAT_TEXT, unit);
 	}
 
+	/** Der Text (SYS-008 bzw. SYS-009), wenn die Einheit nach {@code status} gesperrt ist; sonst {@code null}. */
+	public static String locked(UnitKey unit, UnitState.Status status) {
+		return switch (status) {
+		case LOCKED_DAMAGED -> damaged(unit.relativePath());
+		case LOCKED_FORMAT -> newerFormat(unit.relativePath());
+		case WAITING, OK -> null;
+		};
+	}
+
 	/** SYS-010: Die Anwendung läuft auf diesem Rechner schon. */
 	public static String alreadyRunning() {
 		return SYS_ALREADY_RUNNING + ": " + ALREADY_RUNNING_TEXT;

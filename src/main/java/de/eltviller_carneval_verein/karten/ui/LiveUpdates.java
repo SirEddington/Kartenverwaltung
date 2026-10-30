@@ -26,9 +26,11 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncListener;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.VersionId;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
@@ -163,6 +165,12 @@ public final class LiveUpdates {
 			@Override
 			public void error(String message) {
 				StatusMessage.getInstance().show(Severity.ERROR, message);
+			}
+
+			@Override
+			public void locked(UnitKey unit, UnitState.Status status) {
+				// bis die Oberfläche die gesperrten Einheiten mit lesbarer Bezeichnung zeigt, bleibt es beim Text der Fußzeile
+				StatusMessage.getInstance().show(Severity.ERROR, StoreMessages.locked(unit, status));
 			}
 
 			@Override

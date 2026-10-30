@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,9 +49,12 @@ public class StoreHallRepository implements HallRepository {
 	// dieselbe hallId dieselbe Hall-Objektreferenz aus diesem Cache.
 	private List<Hall> cachedHalls;
 
-	// Warnungen aus dem letzten Ladevorgang (unlesbare oder gesperrte Hallen). Das Repository kennt keine UI,
+	// Warnungen aus dem letzten Ladevorgang (unlesbare Hallen). Das Repository kennt keine UI,
 	// daher werden sie hier nur gesammelt - anzeigen muss die aufrufende Schicht (siehe getAndClearLoadWarnings()).
 	private final List<String> loadWarnings = new ArrayList<>();
+
+	// Die beim Laden gesperrten Hallen mit ihrem Zustand (siehe getAndClearLockedAtLoad()).
+	private final Map<UnitKey, UnitState.Status> lockedAtLoad = new LinkedHashMap<>();
 
 	private final RepositoryListeners<Hall> listeners = new RepositoryListeners<>();
 
@@ -123,7 +127,7 @@ public class StoreHallRepository implements HallRepository {
 	}
 
 	/**
-	 * Warnungen aus dem letzten Ladevorgang (unlesbare oder gesperrte Hallen).
+	 * Warnungen aus dem letzten Ladevorgang (unlesbare Hallen; gesperrte nennt {@link #getAndClearLockedAtLoad()}).
 	 * Leert die Liste beim Abholen, damit dieselbe Warnung nicht mehrfach angezeigt wird.
 	 * Anzeigen (z.B. per Alert) ist Sache der aufrufenden UI-Schicht.
 	 */
@@ -131,6 +135,17 @@ public class StoreHallRepository implements HallRepository {
 		List<String> warnings = new ArrayList<>(loadWarnings);
 		loadWarnings.clear();
 		return warnings;
+	}
+
+	/**
+	 * Die Hallen, die der letzte Ladevorgang gesperrt vorfand (beschädigt oder neueres Format), mit ihrem Zustand. Sie
+	 * stehen nicht mehr als Text in {@link #getAndClearLoadWarnings()}. Leert die Map beim Abholen; wie die Texte zu
+	 * zeigen sind, entscheidet die aufrufende UI-Schicht.
+	 */
+	public synchronized Map<UnitKey, UnitState.Status> getAndClearLockedAtLoad() {
+		Map<UnitKey, UnitState.Status> locked = new LinkedHashMap<>(lockedAtLoad);
+		lockedAtLoad.clear();
+		return locked;
 	}
 
 	private void ensureLoaded() {
@@ -148,12 +163,13 @@ public class StoreHallRepository implements HallRepository {
 		Assembly<Hall> assembly = UnitMapper.assembleHalls(snapshots);
 		baseline.reset(snapshots, assembly.shown());
 		removedByOthers.clear();
-		addLoadWarnings(assembly.warnings());
+		addLoadWarnings(assembly.warnings(), assembly.locked());
 		return new ArrayList<>(assembly.items());
 	}
 
-	private synchronized void addLoadWarnings(List<String> warnings) {
+	private synchronized void addLoadWarnings(List<String> warnings, Map<UnitKey, UnitState.Status> locked) {
 		loadWarnings.addAll(warnings);
+		lockedAtLoad.putAll(locked);
 	}
 
 	@Override
