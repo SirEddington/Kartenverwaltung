@@ -473,27 +473,27 @@ class ConnectFlowStoreTest {
 	void outcomeArrivesEvenIfTheTickThatEndsTheFirstRunThrowsAfterwards() throws IOException {
 		seedSharedHalls(3);
 		Node a = new Node("a");
+		// Die Ableitung der offenen Konflikte nach dem ersten Lauf (reportChanges) liegt in keiner Absicherung des Durchlaufs und
+		// liest die bestätigten Konflikte, falls der Start sie nicht lesen konnte. Dort wirft der Zugriff unerwartet, und zwar
+		// erst, nachdem der Lauf zu Ende ist: Davor scheitert er (wie beim Start) mit einer IOException, die nur ins Log kommt.
+		AtomicBoolean runEnded = new AtomicBoolean();
+		IllegalStateException unexpected = new IllegalStateException("unerwarteter Fehler nach dem Ende des Laufs");
+		a.layer.failWhen(p -> !runEnded.get() && p.getFileName().toString().equals("conflicts-ack.json"), "read",
+				new IOException("Bestätigungen nicht lesbar"));
+		a.layer.failNextUnchecked(p -> runEnded.get() && p.getFileName().toString().equals("conflicts-ack.json"), "read", unexpected);
 		a.service.startup("");
-		// gleich nach dem Ende des Laufs wirft der nächste Zugriff auf einen Ordnerinhalt unerwartet (die Hallen hat der Block
-		// schon aufgelöst; danach listet als Erstes die Suche nach neuen Rechnern)
-		AtomicBoolean armed = new AtomicBoolean();
-		AtomicBoolean thrown = new AtomicBoolean();
 		a.service.fullSyncProgress().addListener((property, before, after) -> {
 			if (before != null && after == null) {
-				armed.set(true);
-			}
-		});
-		a.layer.onEach("listNames", () -> {
-			if (armed.compareAndSet(true, false)) {
-				thrown.set(true);
-				throw new IllegalStateException("unerwarteter Fehler nach dem Ende des Laufs");
+				runEnded.set(true);
 			}
 		});
 		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
 
-		a.runScheduled();
+		// der Fehler verlässt den Takt: tick() selbst wirft ihn, nicht erst der Aufrufer des Hintergrund-Threads
+		RuntimeException escaped = assertThrows(RuntimeException.class, a.service::tick);
 
-		assertTrue(thrown.get(), "der Fehler kam nach dem Ende des Laufs");
+		assertEquals(unexpected, escaped, "der Fehler kam nach dem Ende des Laufs aus dem Takt");
+		assertTrue(runEnded.get());
 		assertNull(a.service.fullSyncProgress().get());
 		assertTrue(a.service.connectionComplete().get());
 		assertEquals(outcome(Kind.AKTUELL), result.getNow(null), "das Ende des ersten Laufs liefert sein Ergebnis trotzdem");
