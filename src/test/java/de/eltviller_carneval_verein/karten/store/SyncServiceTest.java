@@ -2994,6 +2994,137 @@ class SyncServiceTest {
 		assertEquals(payload("Anna B"), service.snapshots().get(BOOKING).payload());
 	}
 
+	// --- Verbinden und Trennen warten auf den laufenden Takt (M1)
+
+	/** Wartet, bis der Thread an einer Sperre steht; scheitert, wenn er vorher fertig ist (er hat dann nicht gewartet). */
+	private static void assertParkedOnALock(Thread thread) throws InterruptedException {
+		long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+		while (thread.isAlive() && thread.getState() != Thread.State.WAITING && System.nanoTime() < deadline) {
+			Thread.sleep(5);
+		}
+		assertTrue(thread.isAlive(), "der Aufruf kehrte zurück, obwohl der Takt noch lief");
+		assertEquals(Thread.State.WAITING, thread.getState());
+	}
+
+	@Test
+	void disconnectWaitsForTheRunningUploadOfTheOldConnection() throws Exception {
+		Node b = node("b");
+		b.service.startup(shared);
+		Node a = node("a");
+		a.service.startup(shared);
+		// der erste Takt macht den Vollabgleich; der nächste lädt nur noch hoch
+		a.service.tick();
+		Version other = save(b, create(BOOKING, "B"));
+		b.service.tick();
+		Version mine = save(a, create(BOOKING, "A"));
+		// der Takt schreibt den Index vor der Arbeitssperre; hier ist das schon geschehen, die Uhr steht still
+		a.service.flushIndex();
+		// der Takt von a steht mitten im Hochladen: Die Versionsdatei ist unterwegs, der Anspruch noch nicht gesetzt
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		a.layer.blockNext("createNew", entered, release);
+		AtomicReference<Throwable> failure = new AtomicReference<>();
+		Thread tick = new Thread(() -> {
+			try {
+				a.service.tick();
+			} catch (RuntimeException e) {
+				failure.set(e);
+			}
+		});
+		tick.start();
+		assertTrue(entered.await(10, TimeUnit.SECONDS));
+
+		Thread disconnect = new Thread(() -> {
+			try {
+				a.service.disconnect();
+			} catch (RuntimeException e) {
+				failure.set(e);
+			}
+		});
+		disconnect.start();
+		assertParkedOnALock(disconnect);
+		release.countDown();
+		tick.join(10_000);
+		disconnect.join(10_000);
+
+		assertNull(failure.get());
+		// b war schneller: Die Version von a ist verloren, und der Einzelbetrieb beansprucht sie nicht gegen den gemeinsamen Anspruch
+		assertEquals(other.id(), sharedClaim(BOOKING, "root").version());
+		Path localClaim = localFile(a, BOOKING, "claims/root.json");
+		if (Files.exists(localClaim)) {
+			assertEquals(other.id(), StoreCodec.readClaim(Files.readAllBytes(localClaim)).version());
+		}
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(mine.id()), other.id())), a.events.lost);
+	}
+
+	@Test
+	void appendRejectedRightAfterDisconnectIsClaimedLocally() throws Exception {
+		Node a = node("a");
+		a.service.startup(shared);
+		// append hat die Verbindung gelesen und schreibt gerade die Versionsdatei, als getrennt wird
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		a.layer.blockNext("createNew", entered, release);
+		AtomicReference<Version> saved = new AtomicReference<>();
+		AtomicReference<Throwable> failure = new AtomicReference<>();
+		Thread ui = new Thread(() -> {
+			try {
+				saved.set(a.service.append("s1", List.of(create(BOOKING, "Anna"))).get(0));
+			} catch (IOException | RuntimeException e) {
+				failure.set(e);
+			}
+		});
+		ui.start();
+		assertTrue(entered.await(10, TimeUnit.SECONDS));
+		a.service.disconnect();
+		release.countDown();
+		ui.join(10_000);
+
+		assertNull(failure.get());
+		UnitState state = a.service.unitState(BOOKING);
+		assertEquals(saved.get().id(), state.head().id());
+		assertFalse(state.provisional(), "ohne Verbindung beansprucht der lokale Bestand die Version");
+		assertTrue(Files.exists(localFile(a, BOOKING, "claims/root.json")));
+	}
+
+	@Test
+	void appendRejectedByANewConnectionStaysPendingAndIsUploadedByTheFirstRun() throws Exception {
+		// der Hintergrund-Thread läuft nicht von selbst: Der Test führt die Takte aus, die connect einreiht
+		List<Runnable> queued = new ArrayList<>();
+		Node a = new Node(dir.resolve("a"), "a", new NioFileLayer(), Runnable::run, queued::add);
+		a.service.startup(shared);
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		a.layer.blockNext("createNew", entered, release);
+		AtomicReference<Version> saved = new AtomicReference<>();
+		AtomicReference<Throwable> failure = new AtomicReference<>();
+		Thread ui = new Thread(() -> {
+			try {
+				saved.set(a.service.append("s1", List.of(create(BOOKING, "Anna"))).get(0));
+			} catch (IOException | RuntimeException e) {
+				failure.set(e);
+			}
+		});
+		ui.start();
+		assertTrue(entered.await(10, TimeUnit.SECONDS));
+		queued.clear();
+		a.service.connect(shared, ConnectMode.MERGE);
+		release.countDown();
+		ui.join(10_000);
+
+		assertNull(failure.get());
+		UnitState before = a.service.unitState(BOOKING);
+		assertTrue(before.provisional(), "mit der neuen Verbindung bleibt die Version ausstehend");
+		assertFalse(Files.exists(localFile(a, BOOKING, "claims/root.json")), "kein lokaler Anspruch");
+
+		assertFalse(queued.isEmpty());
+		for (Runnable tick : List.copyOf(queued)) {
+			tick.run();
+		}
+		assertEquals(saved.get().id(), sharedClaim(BOOKING, "root").version());
+		assertFalse(a.service.unitState(BOOKING).provisional());
+	}
+
 	/** Ein Absturz zwischen Schreiben und lokalem Anspruch: eine Halle ist fertig, eine Buchung hat eine Version ohne Anspruch. */
 	private VersionId crashWithPendingBooking(Path appData) throws IOException {
 		Node a = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);

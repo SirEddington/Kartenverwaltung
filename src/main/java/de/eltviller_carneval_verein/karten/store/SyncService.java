@@ -111,6 +111,9 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * wartet nie darauf, mit zwei Ausnahmen: {@link #startup} prüft die Erreichbarkeit (höchstens 5 Sekunden) und lädt
  * ausstehende Versionen hoch, bevor das Hauptmenü erscheint; {@link #needsConnectDecision} liest den gemeinsamen
  * Ordner.</li>
+ * <li>{@link #connect} und {@link #disconnect} nehmen die Arbeitssperre ({@code workLock}) und warten deshalb auf das
+ * Ende des laufenden Takts, damit kein Hochladen der alten Verbindung mit dem Wechsel überlappt; sie dürfen nie auf dem
+ * FX-Thread laufen. Die Sperre ist fair: Sie kommen zwischen zwei Takten dran.</li>
  * <li>{@link #append} und die Abfragen arbeiten nur auf dem lokalen Bestand und laufen auf dem Thread des Aufrufers;
  * {@link #append} ruft auch die Auflösung im {@code worker} auf, gleichzeitig mit der Oberfläche.</li>
  * <li>Zustand ({@link #syncState()}, {@link #lastSync()}) und alle Rückrufe kommen über den {@code ui}-Executor an, in
@@ -122,7 +125,9 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * nie ineinander genommen: Unter {@code lock} gibt es keinen Dateizugriff und keinen Index, nur kurz den Monitor des
  * {@link SyncNotifier}. {@code flushLock} des Index wird vor dessen Monitor genommen, nie darunter. {@link #append} nimmt
  * nur {@code resolveLock}, {@code lock} und den Index, jeweils kurz und nacheinander; niemand hält {@code lock}, während
- * {@link #append} läuft. Deshalb darf {@link #append} von der Oberfläche und aus dem {@code worker} zugleich kommen.
+ * {@link #append} läuft. Deshalb darf {@link #append} von der Oberfläche und aus dem {@code worker} zugleich kommen. Nur
+ * wenn die Verbindung während {@link #append} gewechselt hat, nimmt es zuletzt {@code workLock} (ohne eine andere Sperre
+ * zu halten) und wartet dann auf den laufenden Takt.
  */
 public final class SyncService {
 
@@ -291,8 +296,12 @@ public final class SyncService {
 	 */
 	private volatile boolean ownListsWanted;
 
-	/** Serialisiert die Arbeit am gemeinsamen Ordner: Takt, Hochladen beim Start. */
-	private final ReentrantLock workLock = new ReentrantLock();
+	/**
+	 * Serialisiert die Arbeit am gemeinsamen Ordner und jeden Wechsel der Verbindung: Takt, Hochladen beim Start,
+	 * {@link #connect}, {@link #disconnect}, {@link #closeIndex()}. Fair, damit ein wartendes {@code connect},
+	 * {@code disconnect} oder {@code closeIndex} zwischen zwei Takten drankommt und nicht hinter jedem neuen Takt wartet.
+	 */
+	private final ReentrantLock workLock = new ReentrantLock(true);
 
 	// Alles Folgende wird unter lock gelesen und geschrieben; Dateizugriffe geschehen nie darunter.
 	private final Object lock = new Object();
@@ -554,16 +563,25 @@ public final class SyncService {
 	 * Anspruchsdateien auch im gemeinsamen Ordner an (ein anderer Anspruch dort gewinnt, die eigene Version ist dann
 	 * verloren); {@link ConnectMode#SET_ASIDE} benennt den lokalen Bestand in {@code data-beiseite-<Zeitstempel>} um (nie
 	 * gelöscht) und gleicht in einen leeren Bestand ab. Leer oder {@code null} trennt.
+	 * <p>
+	 * Wartet auf das Ende des laufenden Takts; nicht auf dem FX-Thread aufrufen. So überlappt kein Hochladen der alten
+	 * Verbindung mit dem Wechsel.
 	 */
 	public void connect(String sharedDir, ConnectMode mode) {
 		Objects.requireNonNull(mode, "mode");
-		reopen();
 		String dir = clean(sharedDir);
 		if (dir == null) {
 			disconnect();
 			return;
 		}
-		activate(dir, mode);
+		workLock.lock();
+		try {
+			reopen();
+			activate(dir, mode);
+		} finally {
+			workLock.unlock();
+		}
+		// ohne Sperre: Der Takt nimmt sie selbst
 		schedule();
 	}
 
@@ -571,11 +589,19 @@ public final class SyncService {
 	 * Beendet den gemeinsamen Betrieb: Der lokale Bestand bleibt, wie er ist (nichts wird gelöscht oder umgeschrieben),
 	 * und ist ab jetzt Schiedsrichter ({@link SyncState#AUS}). Noch nicht hochgeladene eigene Versionen werden deshalb
 	 * jetzt lokal beansprucht; verlorene bleiben verloren.
+	 * <p>
+	 * Wartet auf das Ende des laufenden Takts; nicht auf dem FX-Thread aufrufen. Erst danach steht fest, was hochgeladen
+	 * ist und was nicht, und der lokale Anspruch widerspricht keinem gemeinsamen.
 	 */
 	public void disconnect() {
-		reopen();
-		deactivate();
-		claimPendingLocally(withUnindexed(index.pendingUnits()));
+		workLock.lock();
+		try {
+			reopen();
+			deactivate();
+			claimPendingLocally(withUnindexed(index.pendingUnits()));
+		} finally {
+			workLock.unlock();
+		}
 	}
 
 	/**
@@ -689,7 +715,9 @@ public final class SyncService {
 				// erst in den Index, dann in die Warteschlange: Sobald der Auftrag läuft, trägt der Index die Listennummer ein
 				indexUnits(written);
 				index.markOwnListed(feedEntries(written), 0);
-				enqueue(current, saveId, written);
+				if (!enqueue(current, saveId, written)) {
+					claimIfDisconnected(written);
+				}
 			}
 		} catch (IOException | RuntimeException e) {
 			// auch nach einem Fehler spiegelt der Index, was auf der Platte liegt (etwa eine Version ohne Anspruch)
@@ -768,14 +796,19 @@ public final class SyncService {
 		reportLosses(units);
 	}
 
-	private void enqueue(Link current, String saveId, List<UploadJob.Item> items) {
+	/**
+	 * Reiht den Stapel für das Hochladen ein.
+	 *
+	 * @return {@code false}, wenn die Verbindung inzwischen gewechselt hat (dann ist nichts eingereiht); sonst {@code true}
+	 */
+	private boolean enqueue(Link current, String saveId, List<UploadJob.Item> items) {
 		if (items.isEmpty()) {
-			return;
+			return true;
 		}
 		synchronized (lock) {
 			if (link != current) {
 				// inzwischen getrennt oder gewechselt: Die Versionen bleiben ausstehend und kommen beim nächsten Abgleich mit
-				return;
+				return false;
 			}
 			jobs.add(new UploadJob(saveId, items));
 			for (UploadJob.Item item : items) {
@@ -784,6 +817,28 @@ public final class SyncService {
 			if (notifier.state() == SyncState.AKTUELL) {
 				notifier.setState(SyncState.AUSSTEHEND);
 			}
+			return true;
+		}
+	}
+
+	/**
+	 * {@link #append} fand beim Einreihen eine andere Verbindung vor als beim Beginn: Ist inzwischen getrennt, beansprucht
+	 * der lokale Bestand die Versionen jetzt, sonst würde sie nie jemand beanspruchen. Hat eine neue Verbindung begonnen,
+	 * bleiben sie ausstehend, und der Index nennt sie ihrem ersten Vollabgleich. Unter {@code workLock}, damit das nicht mit
+	 * einem Wechsel der Verbindung überlappt; der Aufrufer hält keine andere Sperre (im {@code worker} gehört sie ihm schon).
+	 * Wartet deshalb in diesem seltenen Fall auf das Ende des laufenden Takts.
+	 */
+	private void claimIfDisconnected(List<UploadJob.Item> items) throws IOException {
+		workLock.lock();
+		try {
+			synchronized (lock) {
+				if (link != null) {
+					return;
+				}
+			}
+			claimLocally(items);
+		} finally {
+			workLock.unlock();
 		}
 	}
 
