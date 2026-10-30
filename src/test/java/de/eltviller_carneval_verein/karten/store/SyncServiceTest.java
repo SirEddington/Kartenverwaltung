@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -3200,7 +3201,7 @@ class SyncServiceTest {
 		node.service.index().useDeleter(file -> {
 			throw new IOException("Datei gesperrt");
 		});
-		assertTrue(cleanMarker(node).toFile().setWritable(false));
+		assumeTrue(cleanMarker(node).toFile().setWritable(false), "Schreibschutz lässt sich auf diesem System nicht setzen");
 		assumeFalse(Files.isWritable(cleanMarker(node)), "Schreibschutz greift auf diesem System nicht");
 	}
 
@@ -3208,6 +3209,47 @@ class SyncServiceTest {
 	private static void unlockCleanMarker(Node node) {
 		cleanMarker(node).toFile().setWritable(true);
 		node.service.index().useDeleter(Files::deleteIfExists);
+	}
+
+	/** Der Text der Störung, solange die Marke "sauber beendet" stehen bleibt. */
+	private static String cleanMarkerStuck(Node node) {
+		return "Die Marke 'sauber beendet' ließ sich weder löschen noch leeren: " + cleanMarker(node);
+	}
+
+	@Test
+	void rebuiltIndexStillWritesNothingOverAStuckCleanMarker() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		Node earlier = node("a");
+		earlier.service.startup(shared);
+		earlier.service.tick();
+		earlier.service.closeIndex();
+		Version v = save(b, create(BOOKING, "Anna"));
+		b.service.tick();
+		// Neustart: Die Marke bleibt stehen, und der Abgleich des Index scheitert, also baut der Start ihn neu auf
+		Node a = new Node(earlier.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		lockCleanMarker(a);
+		a.layer.failNext("listTree", new IOException("Bestand nicht auflistbar"));
+		try {
+			assertTrue(a.service.startup(shared));
+			// der neue Index löscht wie der alte nicht
+			lockCleanMarker(a);
+			assumeTrue(Files.isRegularFile(cleanMarker(a)), "der Schreibschutz verhinderte das Löschen nicht");
+			clock.advance(Duration.ofSeconds(31));
+
+			a.service.tick();
+
+			assertFalse(Files.exists(localFile(a, BOOKING, v.id() + ".json")), "über einer gültigen Marke wird nichts abgeholt");
+			assertEquals(a.identity.id(), Files.readString(cleanMarker(a)));
+
+			unlockCleanMarker(a);
+			a.service.tick();
+
+			assertTrue(Files.isRegularFile(localFile(a, BOOKING, v.id() + ".json")));
+			assertFalse(Files.exists(cleanMarker(a)));
+		} finally {
+			unlockCleanMarker(a);
+		}
 	}
 
 	@Test
@@ -3234,6 +3276,7 @@ class SyncServiceTest {
 			assertFalse(Files.exists(localFile(a, BOOKING, v.id() + ".json")), "über einer gültigen Marke wird nichts abgeholt");
 			assertEquals(a.identity.id(), Files.readString(cleanMarker(a)));
 			assertEquals(SyncState.FEHLER, a.service.syncState().get());
+			assertEquals(List.of(cleanMarkerStuck(a)), a.events.errors, "die lokale Datei, nicht SYS-006");
 
 			// der nächste Takt versucht es erneut und holt ab, sobald die Marke weg ist
 			unlockCleanMarker(a);
@@ -3262,7 +3305,8 @@ class SyncServiceTest {
 			// connect öffnet den Dienst wieder, kann die Marke aber nicht entfernen; der Takt läuft gleich hier
 			CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
 
-			assertEquals(Kind.FEHLER, result.getNow(null).kind(), "das Ergebnis kommt, auch wenn die Marke bleibt");
+			assertEquals(new ConnectOutcome(Kind.FEHLER, false, null, cleanMarkerStuck(a)), result.getNow(null),
+					"das Ergebnis kommt, auch wenn die Marke bleibt");
 			assertFalse(Files.exists(localFile(a, BOOKING, v.id() + ".json")));
 			assertFalse(Files.exists(sharedFile(HALL, "")), "nichts hochgeladen");
 			assertEquals(a.identity.id(), Files.readString(cleanMarker(a)));

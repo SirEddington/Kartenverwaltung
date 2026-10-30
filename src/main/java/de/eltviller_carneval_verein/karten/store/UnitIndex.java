@@ -203,8 +203,16 @@ final class UnitIndex {
 	private final Map<String, Long> revisions = new HashMap<>();
 	/** Lässt höchstens einen {@link #flush} zugleich schreiben; wird vor der Sperre des Index genommen, nie umgekehrt. */
 	private final Object flushLock = new Object();
-	/** Ob diese Instanz die Marke "sauber beendet" angelegt hat und sie noch gilt. */
+	/**
+	 * Ob diese Instanz die Marke "sauber beendet" angelegt hat (oder angelegt haben kann) und sie noch gelten kann. Gesetzt
+	 * schon vor dem Schreiben, damit auch ein Schreiben, das nach dem Inhalt scheitert, als angelegt gilt.
+	 */
 	private boolean markerWritten;
+	/**
+	 * Ob das Scheitern von Löschen und Leeren der Marke schon als Warnung im Log steht: Wiederholungen (jeder Takt versucht
+	 * es erneut) kommen nur noch als {@code FINE}, bis die Marke einmal entfernt ist.
+	 */
+	private boolean markerStuckLogged;
 	/** Ob die Reste abgebrochener Schreibvorgänge schon gelöscht wurden (einmal beim Öffnen). */
 	private boolean tempsDeleted;
 	private Deleter deleter = Files::deleteIfExists;
@@ -917,7 +925,8 @@ final class UnitIndex {
 	private record Prepared(String group, long revision, String machineId, List<Entry> entries) {
 	}
 
-	private Path cleanMarker() {
+	/** Die Datei der Marke "sauber beendet". */
+	Path cleanMarker() {
 		return indexDir.resolve(CLEAN);
 	}
 
@@ -927,24 +936,26 @@ final class UnitIndex {
 	 * Änderung ({@link #update}, {@link #clear}) gilt sie.
 	 *
 	 * @return ob die Marke angelegt wurde ({@code false} bei ungeschriebenen Änderungen)
-	 * @throws IOException wenn sie sich nicht schreiben lässt; dann gibt es keine (vollständige) Marke, und eine unvollständige
-	 *                     gilt beim Lesen als fremd
+	 * @throws IOException wenn sie sich nicht schreiben lässt; eine unvollständige Marke gilt beim Lesen als fremd. Weil das
+	 *                     Schreiben auch erst nach dem Inhalt scheitern kann (etwa beim Schließen), gilt die Marke trotzdem
+	 *                     als angelegt: {@link #invalidateCleanMarker} entfernt sie vor der nächsten Änderung
 	 */
 	synchronized boolean writeCleanMarker() throws IOException {
 		if (!dirty.isEmpty()) {
 			return false;
 		}
+		// vorher: Ein Schreiben, das nach dem Inhalt scheitert, hinterlässt sonst eine gültige Marke, von der niemand weiß
+		markerWritten = true;
 		Files.createDirectories(indexDir);
 		Files.writeString(cleanMarker(), machineId, StandardCharsets.UTF_8);
-		markerWritten = true;
 		return true;
 	}
 
 	/**
 	 * Löscht die Marke "sauber beendet", falls es sie gibt. Scheitert das, wird die Datei geleert: Eine leere Marke nennt keine
-	 * Rechner-ID und gilt beim Start als unbrauchbar. Gelingt auch das nicht, steht eine Warnung im Log, und eine von dieser
-	 * Instanz angelegte Marke gilt weiter als vorhanden, damit {@link #invalidateCleanMarker()} es beim nächsten Mal erneut
-	 * versucht.
+	 * Rechner-ID und gilt beim Start als unbrauchbar. Gelingt auch das nicht, steht eine Warnung im Log (Wiederholungen bis
+	 * zum nächsten Gelingen nur als {@code FINE}), und eine von dieser Instanz angelegte Marke gilt weiter als vorhanden,
+	 * damit {@link #invalidateCleanMarker()} es beim nächsten Mal erneut versucht.
 	 */
 	synchronized void deleteCleanMarker() {
 		try {
@@ -955,24 +966,37 @@ final class UnitIndex {
 			}
 		}
 		markerWritten = false;
+		markerStuckLogged = false;
 	}
 
 	/**
 	 * Leert die Marke, nachdem das Löschen gescheitert ist: Eine leere Marke nennt keine Rechner-ID und gilt beim Start als
-	 * unbrauchbar.
+	 * unbrauchbar. Steht das Scheitern schon im Log ({@link #markerStuckLogged}), kommen beide Meldungen nur als {@code FINE}.
 	 *
 	 * @return {@code false}, wenn auch das scheitert und die Marke deshalb noch gültig sein kann
 	 */
 	private boolean emptyCleanMarker(Exception deleteFailure) {
 		Path marker = cleanMarker();
-		LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht löschen und wird geleert: " + marker, deleteFailure);
+		Level level = markerStuckLogged ? Level.FINE : Level.WARNING;
+		LOGGER.log(level, "Die Marke 'sauber beendet' ließ sich nicht löschen und wird geleert: " + marker, deleteFailure);
 		try {
 			Files.write(marker, new byte[0]);
 		} catch (IOException | RuntimeException again) {
-			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich auch nicht leeren: " + marker, again);
+			LOGGER.log(level, "Die Marke 'sauber beendet' ließ sich auch nicht leeren: " + marker, again);
+			markerStuckLogged = true;
 			return false;
 		}
+		markerStuckLogged = false;
 		return true;
+	}
+
+	/**
+	 * Nach einem Neuaufbau des Index: Der vorige konnte eine Marke "sauber beendet" nicht entfernen, die noch gültig sein kann.
+	 * Diese Instanz behandelt sie wie eine selbst angelegte, damit {@link #invalidateCleanMarker} es vor der nächsten
+	 * Änderung erneut versucht und bis dahin {@code false} meldet.
+	 */
+	synchronized void assumeCleanMarkerWritten() {
+		markerWritten = true;
 	}
 
 	/**

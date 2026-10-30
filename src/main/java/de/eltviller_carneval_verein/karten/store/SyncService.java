@@ -183,11 +183,6 @@ public final class SyncService {
 	private static final String SYNC_STATE = "sync-state.json";
 	private static final String CONFLICTS_ACK = "conflicts-ack.json";
 	private static final String ACKNOWLEDGED = "acknowledged";
-	/**
-	 * Die Ursache der Störung, solange ein Takt die Marke "sauber beendet" nicht ungültig machen kann (in SYS-006; die
-	 * Einzelheiten mit dem Pfad stehen schon im Log des Index).
-	 */
-	private static final String CLEAN_MARKER_STUCK = "Die Marke 'sauber beendet' ließ sich weder löschen noch leeren";
 	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 	private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 	/** Für Aufrufer ohne Fortschrittsanzeige. */
@@ -1802,7 +1797,13 @@ public final class SyncService {
 	 */
 	private UnitIndex.Refresh rebuildIndex(DoubleConsumer progress) {
 		synchronized (resolveLock) {
+			// konnte der alte Index die Marke "sauber beendet" nicht entfernen (etwa schon in loadIfClean), kann sie noch
+			// gelten: Der neue versucht es weiter und meldet sie bis dahin, damit kein Takt über ihr schreibt
+			boolean mayStand = !index.invalidateCleanMarker();
 			index = newIndex(ownership());
+			if (mayStand) {
+				index.assumeCleanMarkerWritten();
+			}
 			unindexed.clear();
 		}
 		Set<UnitKey> pending = new LinkedHashSet<>();
@@ -2046,7 +2047,7 @@ public final class SyncService {
 			// nur die Erreichbarkeit war dran; in der Pause vor der Entscheidung schreibt der Takt ohnehin nichts, und ihr
 			// Ergebnis steht schon fest
 			if (!current.deciding && isCurrent(current)) {
-				reportFailure(current, new IOException(CLEAN_MARKER_STUCK));
+				reportFailure(current, new LocalFileException(cleanMarkerStuck(), null));
 			}
 			return true;
 		}
@@ -2423,8 +2424,14 @@ public final class SyncService {
 		return "Die Marke 'verbunden' ließ sich nicht schreiben: " + appDataDir.resolve(ConnectionMarker.FILE_NAME);
 	}
 
+	/** Der Text der Störung, solange ein Takt die Marke "sauber beendet" weder löschen noch leeren kann. */
+	private String cleanMarkerStuck() {
+		return "Die Marke 'sauber beendet' ließ sich weder löschen noch leeren: " + index.cleanMarker();
+	}
+
 	/**
-	 * Ein Takt scheiterte an einer lokalen Datei des Dienstes (der Marke "verbunden"), nicht am gemeinsamen Ordner: Der Text
+	 * Ein Takt scheiterte an einer lokalen Datei des Dienstes (der Marke "verbunden" oder "sauber beendet"), nicht am
+	 * gemeinsamen Ordner: Der Text
 	 * ist fertig und nennt die Datei; {@link #failureText} gibt ihn unverändert weiter statt SYS-006.
 	 */
 	private static final class LocalFileException extends IOException {

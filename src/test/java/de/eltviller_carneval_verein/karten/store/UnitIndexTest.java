@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -27,6 +28,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -1119,6 +1124,80 @@ class UnitIndexTest {
 		} finally {
 			marker.toFile().setWritable(true);
 		}
+	}
+
+	@Test
+	void stuckMarkerIsLoggedAsWarningOnceAndThenOnlyAtFine() throws IOException {
+		saveTwice(EVENT, "event");
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+		assertTrue(index.writeCleanMarker());
+		Path marker = cleanMarker();
+		index.useDeleter(file -> {
+			throw new IOException("Datei gesperrt");
+		});
+		List<LogRecord> logs = new ArrayList<>();
+		Handler capture = new Handler() {
+			@Override
+			public void publish(LogRecord record) {
+				logs.add(record);
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		Logger logger = Logger.getLogger(UnitIndex.class.getName());
+		Level level = logger.getLevel();
+		logger.setLevel(Level.ALL);
+		logger.addHandler(capture);
+		try {
+			assumeTrue(marker.toFile().setWritable(false), "Schreibschutz lässt sich auf diesem System nicht setzen");
+			assumeFalse(Files.isWritable(marker), "Schreibschutz greift auf diesem System nicht");
+			assertFalse(index.invalidateCleanMarker());
+			assertFalse(logs.isEmpty());
+			assertTrue(logs.stream().allMatch(r -> r.getLevel() == Level.WARNING && r.getThrown() != null), logs::toString);
+
+			logs.clear();
+			assertFalse(index.invalidateCleanMarker());
+			assertFalse(logs.isEmpty());
+			assertTrue(logs.stream().allMatch(r -> r.getLevel() == Level.FINE), "die Wiederholung nur noch als FINE");
+
+			// gelungen: Das nächste Scheitern ist wieder eine Warnung
+			assertTrue(marker.toFile().setWritable(true));
+			assertTrue(index.invalidateCleanMarker());
+			assertTrue(index.writeCleanMarker());
+			assertTrue(marker.toFile().setWritable(false));
+			logs.clear();
+			assertFalse(index.invalidateCleanMarker());
+			assertTrue(logs.stream().anyMatch(r -> r.getLevel() == Level.WARNING), logs::toString);
+		} finally {
+			marker.toFile().setWritable(true);
+			logger.removeHandler(capture);
+			logger.setLevel(level);
+		}
+	}
+
+	@Test
+	void markerWhoseWriteFailedStillCountsAsWritten() throws IOException {
+		saveTwice(EVENT, "event");
+		UnitIndex index = index();
+		refresh(index, local);
+		index.flush();
+		// an der Stelle der Marke liegt ein nicht leerer Ordner: Das Schreiben scheitert, kann aber (wie beim Schließen
+		// einer Datei) schon Inhalt hinterlassen haben
+		Path blocker = Files.createDirectories(cleanMarker().resolve("x"));
+		assertThrows(IOException.class, index::writeCleanMarker);
+
+		assertFalse(index.invalidateCleanMarker(), "die Marke kann stehen: Löschen und Leeren scheitern am Ordner");
+		Files.delete(blocker);
+		Files.delete(cleanMarker());
+		assertTrue(index.invalidateCleanMarker());
 	}
 
 	@Test
