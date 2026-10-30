@@ -360,11 +360,27 @@ public final class MachineIdentity {
 	 * @param clock Uhr für den Zeitpunkt der Neuvergabe
 	 * @throws IOException wenn die Datei nicht geschrieben werden kann
 	 */
-	public synchronized MachineIdentity regenerate(Clock clock) throws IOException {
+	public MachineIdentity regenerate(Clock clock) throws IOException {
+		return regenerate(clock.instant(), clock);
+	}
+
+	/**
+	 * Wie {@link #regenerate(Clock)}, mit ausdrücklich genannter Grenze der alten ID: Versionen der alten ID bis
+	 * einschließlich {@code until} (auf die Millisekunde abgeschnitten) bleiben eigen. Der Aufrufer wählt sie so, dass sie
+	 * jede Version deckt, die er mit der alten ID erzeugt hat oder noch erzeugt (siehe {@link VersionIdGenerator#freeze()}).
+	 *
+	 * @param until die Grenze der alten ID
+	 * @throws IOException wenn die Datei nicht geschrieben werden kann
+	 */
+	public MachineIdentity regenerate(Instant until) throws IOException {
+		return regenerate(until, clock);
+	}
+
+	private synchronized MachineIdentity regenerate(Instant until, Clock stamp) throws IOException {
 		String newId = newId();
 		List<Ownership.Previous> all = new ArrayList<>(previous);
-		all.add(new Ownership.Previous(id, clock.instant().truncatedTo(ChronoUnit.MILLIS)));
-		write(newId, name, all, clock);
+		all.add(new Ownership.Previous(id, until.truncatedTo(ChronoUnit.MILLIS)));
+		write(newId, name, all, stamp);
 		return new MachineIdentity(file, newId, all, name, operator, this.clock, false);
 	}
 

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.HashSet;
@@ -95,5 +96,40 @@ class VersionIdTest {
 		VersionIdGenerator first = new VersionIdGenerator("k4m9q2x8", Clock.fixed(Instant.ofEpochMilli(5), ZoneOffset.UTC));
 		VersionIdGenerator second = new VersionIdGenerator("k4m9q2x8", Clock.fixed(Instant.ofEpochMilli(6), ZoneOffset.UTC));
 		assertTrue(first.next().compareTo(second.next()) < 0);
+	}
+
+	@Test
+	void frozenGeneratorIssuesNoIdAfterTheLimit() {
+		TestClock clock = new TestClock();
+		VersionIdGenerator generator = new VersionIdGenerator("k4m9q2x8", clock);
+		VersionId issued = generator.next();
+		// die Uhr geht zurück: Die Grenze ist trotzdem die späteste vergebene ID
+		clock.advance(Duration.ofSeconds(-3));
+
+		Instant limit = generator.freeze();
+
+		assertEquals(issued.epochMillis(), limit.toEpochMilli());
+		clock.advance(Duration.ofSeconds(10));
+		VersionId capped = generator.next();
+		assertEquals(limit.toEpochMilli(), capped.epochMillis());
+		assertTrue(issued.compareTo(capped) < 0, "der Zähler trennt die IDs derselben Millisekunde");
+		generator.thaw();
+		assertEquals(clock.millis(), generator.next().epochMillis());
+	}
+
+	@Test
+	void freezeWithoutEarlierIdsUsesTheClock() {
+		TestClock clock = new TestClock();
+		assertEquals(clock.instant(), new VersionIdGenerator("k4m9q2x8", clock).freeze());
+	}
+
+	@Test
+	void retiredGeneratorIssuesNoId() {
+		VersionIdGenerator generator = new VersionIdGenerator("k4m9q2x8", new TestClock());
+		generator.next();
+
+		generator.retire();
+
+		assertThrows(IllegalStateException.class, generator::next);
 	}
 }

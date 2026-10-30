@@ -33,6 +33,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -1342,6 +1345,80 @@ class SyncServiceTest {
 		assertFalse(Files.exists(sharedFile(BOOKING, "claims/" + v1.id() + ".json")), "nicht für die Kopie beansprucht");
 		// die Listen der alten Kennung liest der Rechner wie die eines fremden: Die Speicherung der Kopie ist unterwegs
 		assertTrue(a.events.pending.stream().anyMatch(sighting -> sighting.version().equals(copy.id())), a.events.pending.toString());
+	}
+
+	/**
+	 * Ein Speichervorgang läuft über SYS-011 hinweg: Er beginnt vor der Neuvergabe und hält beim Schreiben seiner ersten
+	 * Version an; die Neuvergabe läuft durch, die Uhr geht weiter, erst dann entsteht seine zweite Version. Beide gelten als
+	 * eigen und werden hochgeladen, auch nach einem Neustart, bevor der Auftrag lief.
+	 */
+	@Test
+	void saveInFlightAcrossSys011StaysOwn() throws Exception {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		String oldId = a.service.machineId();
+		Feed copy = new Feed(StoreCodec.FORMAT, oldId, 2, START, List.of());
+		Files.write(sharedRoot.resolve("data/feeds/" + oldId + "/2.json"), StoreCodec.write(copy));
+		// ihr Hochladen stößt auf die Liste der Kopie
+		save(a, create(SECOND, "Berta"));
+		UnitKey third = UnitKey.booking("e1", "p1", "A-3");
+		UnitKey fourth = UnitKey.booking("e1", "p1", "A-4");
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		a.layer.blockNext("createNew", entered, release);
+		List<Version> saved;
+		ExecutorService saver = Executors.newSingleThreadExecutor();
+		try {
+			Future<List<Version>> saving = saver.submit(
+					() -> a.service.append("unterwegs", List.of(create(third, "Carla"), create(fourth, "Dora"))));
+			assertTrue(entered.await(10, TimeUnit.SECONDS), "der Speichervorgang schreibt seine erste Version");
+
+			a.service.tick();
+			assertEquals(List.of(StoreMessages.duplicateMachine()), a.events.duplicates);
+			clock.advance(Duration.ofSeconds(1));
+			release.countDown();
+			saved = saving.get(10, TimeUnit.SECONDS);
+		} finally {
+			saver.shutdownNow();
+		}
+
+		Ownership own = a.service.ownership();
+		assertEquals(2, saved.size());
+		assertTrue(own.isOwn(saved.get(0)), saved.get(0).id() + " gegen " + own);
+		assertTrue(own.isOwn(saved.get(1)), saved.get(1).id() + " gegen " + own);
+		// Neustart, bevor der Auftrag hochgeladen wurde: Der Start findet beide als ausstehend
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertEquals(own, b.service.ownership());
+		b.service.startup(shared);
+		assertEquals(saved.get(0).id(), sharedClaim(third, "root").version());
+		assertEquals(saved.get(1).id(), sharedClaim(fourth, "root").version());
+	}
+
+	/**
+	 * Die Uhr ging vor SYS-011 zurück: Die Grenze der alten Kennung ist dann die letzte Millisekunde, die ihr Generator
+	 * vergab, nicht die Uhrzeit der Neuvergabe. Die Speicherung davor bleibt eigen.
+	 */
+	@Test
+	void sys011AfterTheClockWentBackKeepsEarlierVersionsOwn() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		String oldId = a.service.machineId();
+		Feed copy = new Feed(StoreCodec.FORMAT, oldId, 2, START, List.of());
+		Files.write(sharedRoot.resolve("data/feeds/" + oldId + "/2.json"), StoreCodec.write(copy));
+		Version saved = save(a, create(SECOND, "Berta"));
+		clock.advance(Duration.ofSeconds(-5));
+
+		a.service.tick();
+
+		assertEquals(List.of(StoreMessages.duplicateMachine()), a.events.duplicates);
+		Ownership own = a.service.ownership();
+		assertEquals(List.of(new Ownership.Previous(oldId, START)), own.previous());
+		assertTrue(own.isOwn(saved));
+		assertEquals(own, new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run).service.ownership());
 	}
 
 	@Test

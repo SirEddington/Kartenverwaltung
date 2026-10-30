@@ -691,12 +691,8 @@ public final class SyncService {
 	 */
 	public List<Version> append(String saveId, List<Change> changes) throws IOException {
 		Objects.requireNonNull(saveId, "saveId");
-		MachineIdentity me;
-		VersionIdGenerator generator;
 		Link current;
 		synchronized (lock) {
-			me = machine;
-			generator = ids;
 			current = link;
 		}
 		// vor der ersten Datei: eine Marke "sauber beendet" gilt nur über einem unveränderten Bestand
@@ -707,7 +703,7 @@ public final class SyncService {
 		RuntimeException unexpected = null;
 		for (Change change : changes) {
 			try {
-				written.add(writeLocal(saveId, change, me, generator, seenFor(current, change)));
+				written.add(writeLocal(saveId, change, seenFor(current, change)));
 			} catch (IOException e) {
 				failure = e;
 				break;
@@ -783,13 +779,23 @@ public final class SyncService {
 		return items.stream().map(UploadJob.Item::feedEntry).toList();
 	}
 
-	/** Schreibt die Versionsdatei; ist der Name (praktisch nie) schon vergeben, mit der nächsten ID. */
-	private UploadJob.Item writeLocal(String saveId, Change change, MachineIdentity me, VersionIdGenerator generator,
-			Map<String, Long> seen) throws IOException {
+	/**
+	 * Schreibt die Versionsdatei; ist der Name (praktisch nie) schon vergeben, mit der nächsten ID. Versions-ID und
+	 * Kennung entstehen zusammen unter {@code lock}, für jede Version neu: So stammt die ID immer vom Generator der Kennung,
+	 * die in der Datei steht, und eine Neuvergabe (SYS-011) mitten im Speichervorgang sieht jede ID, die der alte Generator
+	 * vergab ({@link #regenerate}).
+	 */
+	private UploadJob.Item writeLocal(String saveId, Change change, Map<String, Long> seen) throws IOException {
 		ObjectNode payload = change.deleted() || change.payload() == null ? JsonNodeFactory.instance.objectNode()
 				: change.payload().deepCopy();
 		for (int attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
-			Version version = new Version(StoreCodec.FORMAT, generator.next(), change.parents(), me.id(), me.name(),
+			VersionId id;
+			MachineIdentity me;
+			synchronized (lock) {
+				id = ids.next();
+				me = machine;
+			}
+			Version version = new Version(StoreCodec.FORMAT, id, change.parents(), me.id(), me.name(),
 					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), seen);
 			byte[] bytes = StoreCodec.write(version);
 			if (local.writeVersion(change.unit(), version.id(), bytes)) {
@@ -2067,16 +2073,37 @@ public final class SyncService {
 	 * Die alte Kennung ist ab jetzt ein fremder Rechner (der, der sie weiter trägt), die Suche nach neuen Rechnern findet
 	 * ihren Ordner und liest ihre Listen ab Nummer 1 nach (für schon vorhandene Dateien nur ein Vergleich). Versionen, die
 	 * dieser Rechner bis zur Neuvergabe mit der alten Kennung schrieb, bleiben eigene ({@link Ownership}): Ausstehende werden
-	 * weiter hochgeladen, verlorene gemeldet und aufgelöst. Den Zeitpunkt der Neuvergabe nimmt die Uhr des Dienstes, dieselbe,
-	 * aus der die Versions-IDs ihre Zeit haben.
+	 * weiter hochgeladen, verlorene gemeldet und aufgelöst.
+	 * <p>
+	 * Die Grenze der alten Kennung ({@link Ownership.Previous#until()}) deckt jede Version, die ihr Generator vergab oder
+	 * noch vergibt: Unter {@code lock} wird er angehalten ({@link VersionIdGenerator#freeze()}); die Grenze ist die Uhrzeit,
+	 * nie früher als seine späteste ID, und keine spätere ID trägt eine spätere Zeit. Dann wird {@code machine.json}
+	 * geschrieben (ohne {@code lock}), danach tauscht ein zweiter Block unter {@code lock} Kennung und Generator und legt den
+	 * alten still. Weil jede Version ihre ID und ihre Kennung zusammen unter {@code lock} holt ({@link #writeLocal}),
+	 * bekommt ein Speichervorgang, der vor dem Austausch begann, danach IDs der neuen Kennung. Scheitert das Schreiben, läuft
+	 * der alte Generator weiter, als wäre nichts gewesen.
 	 */
 	private void regenerate(Link current) throws IOException {
 		MachineIdentity old;
+		VersionIdGenerator retiring;
+		Instant until;
 		synchronized (lock) {
 			old = machine;
+			retiring = ids;
+			until = retiring.freeze();
 		}
-		MachineIdentity renewed = old.regenerate(clock);
+		MachineIdentity renewed;
+		try {
+			renewed = old.regenerate(until);
+		} catch (IOException | RuntimeException e) {
+			synchronized (lock) {
+				retiring.thaw();
+			}
+			throw e;
+		}
 		synchronized (lock) {
+			// seit freeze liegt keine ID nach until: die späteste vergebene braucht keine Korrektur der Grenze
+			retiring.retire();
 			machine = renewed;
 			ids = new VersionIdGenerator(renewed.id(), clock);
 		}

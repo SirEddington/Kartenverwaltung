@@ -251,6 +251,18 @@ class MachineIdentityTest {
 	}
 
 	@Test
+	void regenerateWithAnExplicitUntilKeepsItAsTheLimit() throws IOException {
+		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1", CLOCK);
+		Instant until = CLOCK.instant().plusSeconds(5).plusNanos(1_500_000);
+
+		MachineIdentity fresh = machine.regenerate(until);
+
+		Instant expected = CLOCK.instant().plusSeconds(5).plusMillis(1);
+		assertEquals(List.of(new Ownership.Previous(machine.id(), expected)), fresh.ownership().previous());
+		assertEquals(fresh.ownership(), MachineIdentity.loadOrCreate(dir, () -> "egal").ownership());
+	}
+
+	@Test
 	void regenerateWithoutClockUsesTheSystemClock() throws IOException {
 		MachineIdentity machine = MachineIdentity.loadOrCreate(dir, () -> "KASSE-1");
 		Instant before = Instant.now();
