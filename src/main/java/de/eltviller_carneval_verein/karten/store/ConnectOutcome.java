@@ -4,7 +4,8 @@ import java.nio.file.Path;
 import java.util.Objects;
 
 /**
- * Wie ein {@link SyncService#connect} ausging. Es kommt genau einmal je Aufruf, beim ersten Ausgang: am Ende des ersten
+ * Wie ein {@link SyncService#connect} (oder ein {@link SyncService#decideConnect}) ausging. Es kommt genau einmal je
+ * Aufruf, beim ersten Ausgang: am Ende des ersten
  * Vollabgleichs der Verbindung oder vorher, wenn der Ordner nicht erreichbar ist, ein Abschnitt scheitert oder die
  * Verbindung getrennt bzw. gewechselt wird. Läuft der erste Vollabgleich danach weiter, meldet sein Ende
  * {@link SyncService#connectionComplete()}; ein zweites Ergebnis gibt es nicht.
@@ -28,7 +29,10 @@ public record ConnectOutcome(Kind kind, boolean setAsideAllowed, Path setAsidePa
 		OFFLINE,
 		/** Ein Abschnitt des ersten Vollabgleichs ist gescheitert; der Lauf setzt in einem späteren Takt fort. */
 		FEHLER,
-		/** Beide Seiten haben Einheiten, und der Aufrufer muss entscheiden; der Abgleich pausiert. */
+		/**
+		 * Beide Seiten haben Einheiten, und der Aufrufer muss entscheiden ({@link SyncService#decideConnect}); der Abgleich
+		 * pausiert.
+		 */
 		ENTSCHEIDUNG,
 		/** Getrennt oder neu verbunden, bevor ein anderer Ausgang kam. */
 		ABGEBROCHEN

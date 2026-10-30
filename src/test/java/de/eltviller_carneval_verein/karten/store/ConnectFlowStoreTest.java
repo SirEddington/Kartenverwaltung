@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -13,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -41,7 +44,8 @@ import de.eltviller_carneval_verein.karten.store.ConnectOutcome.Kind;
 
 /**
  * Der Verbindungsablauf im Versionsspeicher (KARV-103, Abschnitt E): das Ergebnis von {@code connect} am Ende des ersten
- * Laufs, der erste Lauf ohne Pause zwischen den Takten, die Marke "verbunden" und {@code connectionComplete()}.
+ * Laufs, der erste Lauf ohne Pause zwischen den Takten, die Marke "verbunden" und {@code connectionComplete()}; der Modus
+ * ASK mit {@code decideConnect} und die Schutzregel, auch gegen Speichervorgänge, die mit dem Beiseitelegen zusammentreffen.
  * <p>
  * Die Takte, die {@code connect} einplant, landen in {@link Node#queued} und laufen nur, wenn der Test sie ausführt; sonst
  * löst der Test die Takte mit {@code tick()} selbst aus. Damit ein Lauf mehrere Takte braucht, kostet jeder Lesezugriff
@@ -52,6 +56,8 @@ class ConnectFlowStoreTest {
 	/** Ein fremder Rechner, der nur als Dateien im gemeinsamen Ordner vorkommt. */
 	private static final String OTHER = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
 	private static final UnitKey BOOKING = UnitKey.booking("e1", "p1", "A-1");
+	/** Die eigene Einheit aus einem früheren Programmlauf ({@link #nodeWithEarlierUnit}). */
+	private static final UnitKey LOCAL_EVENT = UnitKey.event("lokal");
 	/** So viel Zeit kostet ein Lesezugriff auf der Test-Uhr, sobald {@link Node#slowReads()} gilt. */
 	private static final Duration READ_COST = Duration.ofMillis(20);
 	private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -69,6 +75,10 @@ class ConnectFlowStoreTest {
 		shared = sharedRoot.toString();
 	}
 
+	/** Eine Rückfrage des Modus ASK ({@link SyncListener#connectDecisionNeeded}). */
+	private record Question(String dir, boolean setAsideAllowed) {
+	}
+
 	/**
 	 * Ein simulierter Rechner mit eigenem Datenordner und eigenem Dienst. Der gemeinsame Ordner ist erreichbar, solange er
 	 * als Ordner da ist und {@link #down} nicht gesetzt ist; mit {@link #down} scheitert außerdem jeder Zugriff darauf.
@@ -79,6 +89,8 @@ class ConnectFlowStoreTest {
 		final AtomicBoolean down = new AtomicBoolean();
 		/** Die Takte, die der Dienst eingeplant hat (ohne eigenen Worker). */
 		final List<Runnable> queued = new ArrayList<>();
+		/** Die Rückfragen des Modus ASK; ein Test mit eigenem Empfänger zeichnet sie nicht auf. */
+		final List<Question> asked = Collections.synchronizedList(new ArrayList<>());
 		final SyncService service;
 
 		Node(String name) throws IOException {
@@ -94,6 +106,12 @@ class ConnectFlowStoreTest {
 			}
 			this.service = new SyncService(appData, identity, layer, Runnable::run, worker != null ? worker : queued::add,
 					p -> !down.get() && Files.isDirectory(p), clock);
+			service.setListener(new SyncListener() {
+				@Override
+				public void connectDecisionNeeded(String folder, boolean setAsideAllowed) {
+					asked.add(new Question(folder, setAsideAllowed));
+				}
+			});
 		}
 
 		/** Ab jetzt stellt jeder Lesezugriff die Test-Uhr um {@link #READ_COST} vor. */
@@ -187,6 +205,39 @@ class ConnectFlowStoreTest {
 
 	private static ConnectOutcome outcome(Kind kind) {
 		return new ConnectOutcome(kind, false, null, null);
+	}
+
+	private static ConnectOutcome decisionNeeded(boolean setAsideAllowed) {
+		return new ConnectOutcome(Kind.ENTSCHEIDUNG, setAsideAllowed, null, null);
+	}
+
+	/** Ein Neustart auf dem Datenordner des Rechners, gestartet im Einzelbetrieb; der alte Dienst bleibt unbenutzt liegen. */
+	private Node restart(Node node, String name) throws IOException {
+		Node restarted = new Node(node.appData, name, null);
+		assertTrue(restarted.service.startup(""));
+		return restarted;
+	}
+
+	/**
+	 * Ein Rechner im Einzelbetrieb mit der eigenen Einheit {@link #LOCAL_EVENT} aus einem früheren Programmlauf: Dieser Lauf
+	 * hat nach seinem Start nichts gespeichert, das Beiseitelegen ist erlaubt (Schutzregel).
+	 */
+	private Node nodeWithEarlierUnit(String name) throws IOException {
+		Node earlier = new Node(name);
+		assertTrue(earlier.service.startup(""));
+		save(earlier, LOCAL_EVENT, "A");
+		return restart(earlier, name);
+	}
+
+	/** Alle Dateien und Ordner unter dem Ordner, relativ und sortiert. */
+	private static List<String> tree(Path folder) throws IOException {
+		try (Stream<Path> entries = Files.walk(folder)) {
+			return entries.map(p -> folder.relativize(p).toString()).sorted().toList();
+		}
+	}
+
+	private Path sharedUnit(UnitKey unit) {
+		return sharedRoot.resolve("data").resolve(unit.relativePath());
 	}
 
 	// --- Ergebnis am Ende des ersten Laufs
@@ -304,9 +355,7 @@ class ConnectFlowStoreTest {
 	@Test
 	void outcomeIsOfflineWhenTheFolderVanishesDuringTheFirstRun() throws IOException {
 		seedSharedHalls(300);
-		Node a = new Node("a");
-		a.service.startup("");
-		save(a, UnitKey.event("lokal"), "A");
+		Node a = nodeWithEarlierUnit("a");
 		a.slowReads();
 		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.SET_ASIDE);
 		assertTrue(a.service.tick());
@@ -649,5 +698,465 @@ class ConnectFlowStoreTest {
 			worker.shutdownNow();
 			assertTrue(worker.awaitTermination(10, TimeUnit.SECONDS));
 		}
+	}
+
+	// --- Modus ASK, decideConnect und Schutzregel
+
+	@Test
+	void askWithOneEmptySideMergesWithoutAsking() throws IOException {
+		// der gemeinsame Ordner ist leer: Der lokale Verkauf wird mitgenommen
+		Node a = new Node("a");
+		assertTrue(a.service.startup(""));
+		Version sale = save(a, BOOKING, "Anna");
+
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+
+		assertEquals(outcome(Kind.AKTUELL), result.getNow(null));
+		assertEquals(List.of(), a.asked);
+		assertEquals(sale.id(), sharedClaim(BOOKING).version());
+		assertEquals(List.of(), asideFolders(a));
+		assertTrue(a.marker().orElseThrow().complete());
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+
+		// die lokale Seite ist leer: Der gemeinsame Bestand kommt herein
+		Node b = new Node("b");
+		assertTrue(b.service.startup(""));
+		CompletableFuture<ConnectOutcome> second = b.service.connect(shared, ConnectMode.ASK);
+		b.runScheduled();
+
+		assertEquals(outcome(Kind.AKTUELL), second.getNow(null));
+		assertEquals(List.of(), b.asked);
+		assertEquals(sale.id(), b.service.unitState(BOOKING).head().id());
+		assertTrue(b.marker().orElseThrow().complete());
+	}
+
+	@Test
+	void askWithBothSidesPausesAndAsks() throws IOException {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		List<String> sharedBefore = tree(sharedRoot);
+
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.ASK);
+		assertFalse(a.service.tick(), "die Pause folgt nicht ohne Abstand");
+
+		assertEquals(SyncState.ENTSCHEIDUNG, a.service.syncState().get());
+		assertEquals(List.of(new Question(shared, true)), a.asked);
+		assertEquals(decisionNeeded(true), result.getNow(null));
+		assertEquals(Optional.empty(), a.marker(), "die Marke kommt erst nach der Entscheidung");
+		assertFalse(a.service.connectionComplete().get());
+		assertNull(a.service.fullSyncProgress().get(), "kein Lauf");
+
+		// weitere Takte, auch nach Ablauf der Fristen, und ein Verkauf in der Pause: nichts geht hinaus, nichts kommt herein
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		assertFalse(a.service.tick());
+		Version sale = save(a, BOOKING, "Anna");
+		clock.advance(SyncService.TICK);
+		assertFalse(a.service.tick());
+
+		assertEquals(sharedBefore, tree(sharedRoot), "keine neue Datei im gemeinsamen Ordner");
+		assertEquals(List.of(), a.service.hallIds(), "nichts abgeholt");
+		assertTrue(a.service.unitState(BOOKING).provisional(), "der Verkauf bleibt ausstehend");
+		assertEquals(List.of(sale.id()), pending(a, BOOKING));
+		assertEquals(SyncState.ENTSCHEIDUNG, a.service.syncState().get());
+		assertEquals(1, a.asked.size(), "einmal je Eintritt in die Pause");
+		assertNull(a.service.fullSyncProgress().get());
+	}
+
+	@Test
+	void decideMergeContinuesAndCompletesAtTheEndOfTheRun() throws IOException {
+		seedSharedHalls(300);
+		Node a = nodeWithEarlierUnit("a");
+		a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+		assertEquals(SyncState.ENTSCHEIDUNG, a.service.syncState().get());
+		a.slowReads();
+
+		CompletableFuture<ConnectOutcome> decided = a.service.decideConnect(ConnectMode.MERGE);
+		assertFalse(decided.isDone());
+		assertEquals(1, a.queued.size(), "decideConnect plant einen Takt ein");
+		a.service.tick();
+		assertNotNull(a.service.fullSyncProgress().get(), "der Lauf braucht mehrere Takte");
+		assertFalse(decided.isDone(), "nach dem ersten Takt ist der Lauf nicht zu Ende");
+		assertFalse(a.marker().orElseThrow().complete(), "die Marke steht nach der Entscheidung");
+
+		tickUntilRunEnds(a);
+
+		assertEquals(outcome(Kind.AKTUELL), decided.getNow(null));
+		assertEquals(300, a.service.hallIds().size());
+		assertTrue(Files.isDirectory(sharedUnit(LOCAL_EVENT)), "mitgenommen");
+		assertEquals(List.of(), asideFolders(a));
+		assertTrue(a.marker().orElseThrow().complete());
+		assertTrue(a.service.connectionComplete().get());
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+		assertEquals(List.of(new Question(shared, true)), a.asked);
+	}
+
+	@Test
+	void decideSetAsideMovesTheLocalStoreAndCompletes() throws IOException {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+
+		CompletableFuture<ConnectOutcome> decided = a.service.decideConnect(ConnectMode.SET_ASIDE);
+		a.runScheduled();
+
+		List<String> aside = asideFolders(a);
+		assertEquals(1, aside.size());
+		Path asideRoot = a.appData.resolve(aside.get(0));
+		assertEquals(new ConnectOutcome(Kind.AKTUELL, false, asideRoot, null), decided.getNow(null));
+		assertTrue(Files.isDirectory(asideRoot.resolve(LOCAL_EVENT.relativePath())));
+		assertEquals(List.of(), a.service.eventIds());
+		assertEquals(3, a.service.hallIds().size());
+		assertFalse(Files.exists(sharedUnit(LOCAL_EVENT)), "der beiseitegelegte Bestand wird nicht mitgenommen");
+		assertTrue(a.marker().orElseThrow().complete());
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+	}
+
+	@Test
+	void setAsideIsNotAllowedAfterOwnSavesSinceStartup() throws IOException {
+		seedSharedHalls(3);
+		Node a = new Node("a");
+		assertTrue(a.service.startup(""));
+		save(a, LOCAL_EVENT, "A");
+
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+		assertEquals(List.of(new Question(shared, false)), a.asked);
+		assertEquals(decisionNeeded(false), result.getNow(null));
+
+		CompletableFuture<ConnectOutcome> refused = a.service.decideConnect(ConnectMode.SET_ASIDE);
+
+		assertEquals(decisionNeeded(false), refused.getNow(null), "sofort, ohne Takt");
+		assertEquals(List.of(new Question(shared, false), new Question(shared, false)), a.asked, "die Oberfläche fragt erneut");
+		assertEquals(SyncState.ENTSCHEIDUNG, a.service.syncState().get());
+		assertEquals(List.of(), a.queued, "kein Takt eingeplant");
+		assertFalse(a.service.tick(), "die Pause bleibt");
+		assertEquals(List.of(), asideFolders(a));
+
+		// Mitnehmen bleibt möglich
+		CompletableFuture<ConnectOutcome> merged = a.service.decideConnect(ConnectMode.MERGE);
+		a.runScheduled();
+		assertEquals(outcome(Kind.AKTUELL), merged.getNow(null));
+		assertTrue(Files.isDirectory(sharedUnit(LOCAL_EVENT)));
+		assertEquals(List.of(), asideFolders(a));
+	}
+
+	@Test
+	void setAsideIsRecheckedWhenSavedBetweenQuestionAndAnswer() throws IOException {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+		assertEquals(List.of(new Question(shared, true)), a.asked);
+
+		// zwischen Popup und Klick wird gespeichert
+		Version sale = save(a, BOOKING, "Anna");
+		CompletableFuture<ConnectOutcome> refused = a.service.decideConnect(ConnectMode.SET_ASIDE);
+
+		assertEquals(decisionNeeded(false), refused.getNow(null));
+		assertEquals(List.of(new Question(shared, true), new Question(shared, false)), a.asked);
+		assertEquals(SyncState.ENTSCHEIDUNG, a.service.syncState().get());
+		assertEquals(List.of(), a.queued);
+		assertEquals(List.of(), asideFolders(a));
+		assertTrue(Files.exists(a.localData().resolve(BOOKING.relativePath()).resolve(sale.id() + ".json")));
+	}
+
+	/** Eine Version des fremden Rechners auf {@code parent}, lokal geschrieben und lokal beansprucht (wie abgeholt). */
+	private Version foreignOnTop(Node node, UnitKey unit, Version parent, int n) throws IOException {
+		Version theirs = new Version(StoreCodec.FORMAT, VersionId.create(clock.instant().toEpochMilli() - 1000L, OTHER, n),
+				List.of(parent.id()), OTHER, "Kasse", null, clock.instant(), "fremd-" + n, false,
+				MAPPER.createObjectNode().put("name", "Bert"));
+		byte[] bytes = StoreCodec.write(theirs);
+		VersionStore store = new VersionStore(node.localData(), new NioFileLayer());
+		assertTrue(store.writeVersion(unit, theirs.id(), bytes));
+		new LocalArbiter(store, clock).claim(unit, theirs, bytes);
+		return theirs;
+	}
+
+	/**
+	 * Die verlorene Strecke der Einheit ist zusammengeführt: kein Verlust mehr, der Stand (im gemeinsamen Betrieb die
+	 * ausstehende Zusammenführung) hat zwei Vorgänger.
+	 */
+	private static void assertMerged(Node node, UnitKey unit) throws IOException {
+		UnitState state = node.service.unitState(unit);
+		assertEquals(List.of(), state.lost(), unit.relativePath());
+		Version tip = state.pending().isEmpty() ? state.head() : state.pending().get(state.pending().size() - 1);
+		assertEquals(2, tip.parents().size(), unit.relativePath());
+	}
+
+	/** Die ausstehenden eigenen Versionen der Einheit. */
+	private static List<VersionId> pending(Node node, UnitKey unit) throws IOException {
+		return node.service.unitState(unit).pending().stream().map(Version::id).toList();
+	}
+
+	@Test
+	void writesOfStartupAndOfTheResolverDoNotCount() throws IOException {
+		UnitKey first = UnitKey.hall("h1");
+		UnitKey second = UnitKey.hall("h2");
+		// ein früherer Programmlauf hinterlässt zwei verlorene Strecken, noch nicht aufgelöst
+		Node earlier = new Node("a");
+		assertTrue(earlier.service.startup(""));
+		int n = 0;
+		for (UnitKey hall : List.of(first, second)) {
+			Version base = save(earlier, hall, "Anna");
+			foreignOnTop(earlier, hall, base, n++);
+			Version mine = earlier.service.append(UUID.randomUUID().toString(),
+					List.of(new Change(hall, List.of(base.id()), MAPPER.createObjectNode().put("name", "Carla"), false))).get(0);
+			assertEquals(List.of(List.of(mine.id())), earlier.service.unitState(hall).lost());
+		}
+		seedSharedHalls(3);
+		Node a = new Node(earlier.appData, "a", null);
+		a.service.setConflictPolicy(UnitType.HALL,
+				input -> new Resolution(input.mine().payload().deepCopy(), false, List.of(), null));
+		// die Zusammenführung der zweiten Strecke scheitert beim Start einmal: Sie kommt im Takt dran
+		AtomicBoolean blocked = new AtomicBoolean(true);
+		a.layer.failWhen(p -> blocked.get() && p.startsWith(a.localData().resolve(second.relativePath())), "createNew",
+				new IOException("gesperrt"));
+
+		assertTrue(a.service.startup(""));
+		blocked.set(false);
+		assertMerged(a, first);
+		assertEquals(1, a.service.unitState(second).lost().size(), "noch nicht aufgelöst");
+
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+		assertEquals(decisionNeeded(true), result.getNow(null), "die Auflösung beim Start zählt nicht");
+		// die lokale Auflösung in der Pause, nach Ablauf der Wartezeit auf die Änderungslisten
+		clock.advance(ConflictResolver.LIST_WAIT);
+		assertFalse(a.service.tick());
+		assertMerged(a, second);
+
+		CompletableFuture<ConnectOutcome> decided = a.service.decideConnect(ConnectMode.SET_ASIDE);
+		a.runScheduled();
+
+		List<String> aside = asideFolders(a);
+		assertEquals(1, aside.size(), "die Auflösung im Takt zählt nicht");
+		Path asideRoot = a.appData.resolve(aside.get(0));
+		assertEquals(new ConnectOutcome(Kind.AKTUELL, false, asideRoot, null), decided.getNow(null));
+		assertTrue(Files.isDirectory(asideRoot.resolve(second.relativePath())));
+		assertEquals(List.of("f0", "f1", "f2"), a.service.hallIds());
+		assertFalse(Files.exists(sharedUnit(first)));
+		assertFalse(Files.exists(sharedUnit(second)), "die Zusammenführung aus der Pause geht mit dem Bestand beiseite");
+	}
+
+	@Test
+	void askWhileUnreachableIsOfflineAndKeepsSavesPending() throws IOException {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		a.down.set(true);
+
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+
+		assertEquals(new ConnectOutcome(Kind.OFFLINE, false, null, StoreMessages.unreachable(shared)), result.getNow(null));
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertEquals(List.of(), a.asked);
+		Version sale = save(a, BOOKING, "Anna");
+		assertTrue(a.service.unitState(BOOKING).provisional(), "vorläufig, nicht lokal beansprucht");
+		assertFalse(Files.exists(a.localData().resolve(BOOKING.relativePath()).resolve("claims/root.json")));
+		assertFalse(a.service.tick());
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertThrows(IllegalStateException.class, () -> a.service.decideConnect(ConnectMode.MERGE));
+
+		// zurück: Jetzt prüft der Beginn die Dateien und fragt
+		a.down.set(false);
+		assertFalse(a.service.tick());
+
+		assertEquals(SyncState.ENTSCHEIDUNG, a.service.syncState().get());
+		assertEquals(List.of(new Question(shared, false)), a.asked, "inzwischen gespeichert");
+		assertFalse(Files.exists(sharedUnit(BOOKING)), "nicht hochgeladen");
+		assertTrue(a.service.unitState(BOOKING).provisional());
+		assertEquals(List.of(sale.id()), pending(a, BOOKING));
+		assertEquals(Kind.OFFLINE, result.getNow(null).kind(), "ein zweites Ergebnis gibt es nicht");
+	}
+
+	@Test
+	void questionComesAgainAfterARestartUntilDecided() throws IOException {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+		assertEquals(List.of(new Question(shared, true)), a.asked);
+		assertEquals(Optional.empty(), a.marker());
+
+		// Neustart ohne Entscheidung: Ohne Marke ruft der Start (KARV-87) startup(null), dann connect(X, ASK)
+		Node restarted = restart(a, "a");
+		assertEquals(Optional.empty(), restarted.service.connectedDir());
+		CompletableFuture<ConnectOutcome> again = restarted.service.connect(shared, ConnectMode.ASK);
+		restarted.runScheduled();
+
+		assertEquals(decisionNeeded(true), again.getNow(null));
+		assertEquals(List.of(new Question(shared, true)), restarted.asked, "die Frage kommt erneut");
+		assertEquals(SyncState.ENTSCHEIDUNG, restarted.service.syncState().get());
+
+		// entschieden: Die Marke steht, der nächste Start verbindet ohne Frage
+		CompletableFuture<ConnectOutcome> decided = restarted.service.decideConnect(ConnectMode.MERGE);
+		restarted.runScheduled();
+		assertEquals(outcome(Kind.AKTUELL), decided.getNow(null));
+		ConnectionMarker.State marker = restarted.marker().orElseThrow();
+		assertEquals(shared, marker.dir());
+		assertTrue(marker.complete());
+		assertTrue(new Node(a.appData, "a", null).service.connectionComplete().get());
+	}
+
+	@Test
+	void decideConnectOutsideEntscheidungIsRejected() throws IOException {
+		Node a = new Node("a");
+		assertTrue(a.service.startup(""));
+		assertThrows(IllegalStateException.class, () -> a.service.decideConnect(ConnectMode.MERGE), "Einzelbetrieb");
+		assertThrows(IllegalArgumentException.class, () -> a.service.decideConnect(ConnectMode.ASK));
+		assertThrows(NullPointerException.class, () -> a.service.decideConnect(null));
+
+		// verbunden, aber vor dem ersten Takt, danach am Ende des Laufs
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.ASK);
+		assertThrows(IllegalStateException.class, () -> a.service.decideConnect(ConnectMode.MERGE), "vor dem Takt");
+		a.runScheduled();
+		assertEquals(outcome(Kind.AKTUELL), result.getNow(null));
+		assertThrows(IllegalStateException.class, () -> a.service.decideConnect(ConnectMode.SET_ASIDE), "nach dem Lauf");
+
+		// in der Pause genau einmal
+		seedSharedHalls(3);
+		Node b = nodeWithEarlierUnit("b");
+		b.service.connect(shared, ConnectMode.ASK);
+		b.runScheduled();
+		assertThrows(IllegalArgumentException.class, () -> b.service.decideConnect(ConnectMode.ASK));
+		b.service.decideConnect(ConnectMode.MERGE);
+		assertThrows(IllegalStateException.class, () -> b.service.decideConnect(ConnectMode.MERGE), "schon entschieden");
+		b.runScheduled();
+		assertEquals(SyncState.AKTUELL, b.service.syncState().get());
+	}
+
+	// --- Beiseitelegen und laufende Speichervorgänge schließen sich aus
+
+	/** Wartet, bis der Thread an einer Bedingung wartet oder zu Ende ist. */
+	private static void awaitWaitingOrDone(Thread thread) {
+		long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+		while (System.nanoTime() < deadline) {
+			Thread.State state = thread.getState();
+			if (state == Thread.State.WAITING || state == Thread.State.TIMED_WAITING || state == Thread.State.TERMINATED) {
+				return;
+			}
+			Thread.onSpinWait();
+		}
+		fail("der Speichervorgang wartet nicht und endet nicht: " + thread.getState());
+	}
+
+	@Test
+	void saveDuringSetAsideLandsInTheNewStore() throws Exception {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+		AtomicReference<Thread> saver = new AtomicReference<>();
+		AtomicReference<Version> sale = new AtomicReference<>();
+		AtomicReference<Throwable> failure = new AtomicReference<>();
+		// genau zwischen der Prüfung der Schutzregel und dem Umbenennen beginnt ein Speichervorgang
+		a.layer.onEach("rename", () -> {
+			if (saver.get() != null) {
+				return;
+			}
+			Thread thread = new Thread(() -> {
+				try {
+					sale.set(save(a, BOOKING, "Anna"));
+				} catch (Throwable e) {
+					failure.set(e);
+				}
+			});
+			saver.set(thread);
+			thread.start();
+			awaitWaitingOrDone(thread);
+		});
+
+		CompletableFuture<ConnectOutcome> decided = a.service.decideConnect(ConnectMode.SET_ASIDE);
+		a.runScheduled();
+		assertNotNull(saver.get(), "es wurde beiseitegelegt");
+		saver.get().join(10_000);
+		assertFalse(saver.get().isAlive());
+		assertNull(failure.get());
+		a.service.tick();
+
+		List<String> aside = asideFolders(a);
+		assertEquals(1, aside.size());
+		Path asideRoot = a.appData.resolve(aside.get(0));
+		assertEquals(asideRoot, decided.getNow(null).setAsidePath());
+		assertTrue(Files.isDirectory(asideRoot.resolve(LOCAL_EVENT.relativePath())));
+		assertFalse(Files.exists(asideRoot.resolve(BOOKING.relativePath())), "der Verkauf ist nicht beiseitegelegt");
+		assertTrue(Files.exists(a.localData().resolve(BOOKING.relativePath()).resolve(sale.get().id() + ".json")));
+		assertEquals(sale.get().id(), sharedClaim(BOOKING).version(), "hochgeladen");
+		assertFalse(a.service.unitState(BOOKING).provisional());
+	}
+
+	@Test
+	void saveInFlightWhenSetAsideStartsPreventsIt() throws Exception {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+		assertEquals(List.of(new Question(shared, true)), a.asked);
+		CountDownLatch entered = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		a.layer.blockNext("createNew", entered, release);
+		AtomicReference<Version> sale = new AtomicReference<>();
+		AtomicReference<Throwable> failure = new AtomicReference<>();
+		Thread saver = new Thread(() -> {
+			try {
+				sale.set(save(a, BOOKING, "Anna"));
+			} catch (Throwable e) {
+				failure.set(e);
+			}
+		});
+		saver.start();
+		try {
+			assertTrue(entered.await(10, TimeUnit.SECONDS), "der Speichervorgang schreibt");
+
+			CompletableFuture<ConnectOutcome> refused = a.service.decideConnect(ConnectMode.SET_ASIDE);
+
+			assertEquals(decisionNeeded(false), refused.getNow(null));
+			assertEquals(List.of(new Question(shared, true), new Question(shared, false)), a.asked);
+			assertEquals(List.of(), asideFolders(a), "nichts beiseitegelegt");
+		} finally {
+			release.countDown();
+			saver.join(10_000);
+		}
+		assertNull(failure.get());
+		CompletableFuture<ConnectOutcome> merged = a.service.decideConnect(ConnectMode.MERGE);
+		a.runScheduled();
+		assertEquals(Kind.AKTUELL, merged.getNow(null).kind());
+		assertEquals(sale.get().id(), sharedClaim(BOOKING).version());
+		assertEquals(List.of(), asideFolders(a));
+	}
+
+	@Test
+	void setAsideRetryAfterAFailedRenameRespectsTheProtectionRule() throws IOException {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		// unter Windows etwa eine offene Datei: Das Umbenennen von data/ scheitert einmal
+		a.layer.failNext("rename", new AccessDeniedException("data gesperrt"));
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.SET_ASIDE);
+		a.runScheduled();
+		assertEquals(Kind.FEHLER, result.getNow(null).kind());
+		assertEquals(List.of(), asideFolders(a));
+
+		// gespeichert vor dem nächsten Versuch: Das Beiseitelegen ist jetzt verboten
+		Version sale = save(a, BOOKING, "Anna");
+		assertFalse(a.service.tick());
+
+		assertEquals(List.of(), asideFolders(a), "nichts beiseitegelegt");
+		assertTrue(Files.exists(a.localData().resolve(BOOKING.relativePath()).resolve(sale.id() + ".json")));
+		assertEquals(SyncState.ENTSCHEIDUNG, a.service.syncState().get());
+		assertEquals(List.of(new Question(shared, false)), a.asked, "die Oberfläche fragt erneut");
+		assertEquals(Optional.empty(), a.marker());
+		assertFalse(Files.exists(sharedUnit(BOOKING)), "die Pause lädt nichts hoch");
+		assertEquals(Kind.FEHLER, result.getNow(null).kind(), "ein zweites Ergebnis gibt es nicht");
+
+		// Mitnehmen bleibt möglich
+		CompletableFuture<ConnectOutcome> merged = a.service.decideConnect(ConnectMode.MERGE);
+		a.runScheduled();
+		assertEquals(Kind.AKTUELL, merged.getNow(null).kind());
+		assertEquals(sale.id(), sharedClaim(BOOKING).version());
+		assertTrue(Files.isDirectory(sharedUnit(LOCAL_EVENT)));
+		assertEquals(List.of(), asideFolders(a));
 	}
 }

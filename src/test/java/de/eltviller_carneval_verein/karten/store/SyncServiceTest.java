@@ -275,6 +275,17 @@ class SyncServiceTest {
 		return new Node(dir.resolve(name), name, new NioFileLayer(), Runnable::run, Runnable::run);
 	}
 
+	/**
+	 * Ein Neustart auf dem Datenordner des Rechners, gestartet im Einzelbetrieb: Dieser Programmlauf hat nach seinem Start
+	 * nichts gespeichert, das Beiseitelegen ist erlaubt (Schutzregel). Der alte Dienst bleibt unbenutzt liegen.
+	 */
+	private Node restartSingle(Node node) throws IOException {
+		Node restarted = new Node(node.appData, node.appData.getFileName().toString(), new NioFileLayer(), Runnable::run,
+				Runnable::run);
+		assertTrue(restarted.service.startup(""));
+		return restarted;
+	}
+
 	private static ObjectNode payload(String name) {
 		return MAPPER.createObjectNode().put("name", name);
 	}
@@ -2093,10 +2104,14 @@ class SyncServiceTest {
 			seedForeign(sharedStore, UnitKey.hall("f" + i), i);
 		}
 		// die Takte, die connect einplant, verwirft der Worker: Der Test löst sie selbst aus (der erste Lauf liefe sonst am Stück)
+		Node earlier = new Node(dir.resolve("a"), "a", new NioFileLayer(), Runnable::run, task -> {
+		});
+		earlier.service.startup("");
+		save(earlier, create(UnitKey.event("lokal"), "A"));
+		// ein neuer Programmlauf: Seit seinem Start ist nichts gespeichert, das Beiseitelegen ist erlaubt (Schutzregel)
 		Node a = new Node(dir.resolve("a"), "a", new NioFileLayer(), Runnable::run, task -> {
 		});
 		a.service.startup("");
-		save(a, create(UnitKey.event("lokal"), "A"));
 		slowReads(a, READ_COST);
 
 		a.service.connect(shared, ConnectMode.SET_ASIDE);
@@ -2296,9 +2311,10 @@ class SyncServiceTest {
 		b.service.startup(shared);
 		save(b, create(UnitKey.event("gemeinsam"), "B"));
 		b.service.tick();
-		Node a = node("a");
-		a.service.startup("");
-		save(a, create(UnitKey.event("lokal"), "A"));
+		Node earlier = node("a");
+		earlier.service.startup("");
+		save(earlier, create(UnitKey.event("lokal"), "A"));
+		Node a = restartSingle(earlier);
 		// gleich nach dem Beiseitelegen fällt der gemeinsame Ordner weg: Das Bestimmen der Abschnitte scheitert
 		AtomicBoolean dropped = new AtomicBoolean();
 		a.layer.onEach("rename", () -> {
@@ -2362,9 +2378,10 @@ class SyncServiceTest {
 
 	@Test
 	void ownPendingVersionCopiedInByTheRunIsUploadedAtItsEnd() throws IOException {
-		Node a = node("a");
-		a.service.startup("");
-		save(a, create(UnitKey.event("lokal"), "A"));
+		Node earlier = node("a");
+		earlier.service.startup("");
+		save(earlier, create(UnitKey.event("lokal"), "A"));
+		Node a = restartSingle(earlier);
 		// ein früheres Hochladen brach zwischen Versionsdatei und Anspruch ab: Die eigene Version liegt nur im gemeinsamen Ordner
 		Version own = version(a.service.machineId(), START.toEpochMilli() - 60_000L, 0, "abgebrochen", null);
 		assertTrue(new VersionStore(sharedRoot.resolve("data"), new NioFileLayer()).writeVersion(BOOKING, own.id(),
@@ -2485,12 +2502,14 @@ class SyncServiceTest {
 		b.service.startup(shared);
 		Version vb = save(b, create(theirs, "B"));
 		b.service.tick();
-		Node a = node("a");
-		a.service.startup("");
-		save(a, create(mine, "A"));
-		assertTrue(a.service.needsConnectDecision(shared));
+		Node earlier = node("a");
+		earlier.service.startup("");
+		save(earlier, create(mine, "A"));
+		Node a = restartSingle(earlier);
+		assertEquals(new ConnectOutcome(ConnectOutcome.Kind.ENTSCHEIDUNG, true, null, null),
+				a.service.connect(shared, ConnectMode.ASK).getNow(null));
 
-		a.service.connect(shared, ConnectMode.SET_ASIDE);
+		a.service.decideConnect(ConnectMode.SET_ASIDE);
 
 		assertEquals(List.of("gemeinsam"), a.service.eventIds());
 		assertEquals(vb.id(), a.service.unitState(theirs).head().id());
@@ -2513,9 +2532,11 @@ class SyncServiceTest {
 		Node a = node("a");
 		a.service.startup("");
 		Version va = save(a, create(mine, "A"));
-		assertTrue(a.service.needsConnectDecision(shared));
+		// seit dem Start gespeichert: nur Mitnehmen ist erlaubt
+		assertEquals(new ConnectOutcome(ConnectOutcome.Kind.ENTSCHEIDUNG, false, null, null),
+				a.service.connect(shared, ConnectMode.ASK).getNow(null));
 
-		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.decideConnect(ConnectMode.MERGE);
 
 		assertEquals(List.of("gemeinsam", "lokal"), a.service.eventIds());
 		UnitState own = a.service.unitState(mine);
@@ -2532,8 +2553,7 @@ class SyncServiceTest {
 		a.service.startup("");
 		Version va = save(a, create(BOOKING, "Anna"));
 
-		assertFalse(a.service.needsConnectDecision(shared));
-		a.service.connect(shared, ConnectMode.SET_ASIDE);
+		assertEquals(ConnectOutcome.Kind.AKTUELL, a.service.connect(shared, ConnectMode.ASK).getNow(null).kind());
 
 		// eine leere Seite wird ohne Rückfrage vereinigt: nichts beiseitegelegt
 		assertTrue(names(a.appData).stream().noneMatch(n -> n.startsWith("data-beiseite-")));
@@ -2902,9 +2922,10 @@ class SyncServiceTest {
 		b.service.startup(shared);
 		save(b, create(theirs, "B"));
 		b.service.tick();
-		Node a = node("a");
-		a.service.startup("");
-		save(a, create(mine, "A"));
+		Node earlier = node("a");
+		earlier.service.startup("");
+		save(earlier, create(mine, "A"));
+		Node a = restartSingle(earlier);
 		a.service.flushIndex();
 		assertEquals(Set.of(mine), a.service.snapshots().keySet());
 
@@ -3095,9 +3116,10 @@ class SyncServiceTest {
 		b.service.startup(shared);
 		save(b, create(theirs, "B"));
 		b.service.tick();
-		Node a = node("a");
-		a.service.startup("");
-		save(a, create(mine, "A"));
+		Node earlier = node("a");
+		earlier.service.startup("");
+		save(earlier, create(mine, "A"));
+		Node a = restartSingle(earlier);
 		// die Marke liegt auf der Platte, ohne dass der Dienst sie angelegt hat: nur das Beiseitelegen kann sie löschen
 		Files.createDirectories(cleanMarker(a).getParent());
 		Files.writeString(cleanMarker(a), a.identity.id());

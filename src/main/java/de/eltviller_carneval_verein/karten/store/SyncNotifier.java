@@ -217,6 +217,11 @@ final class SyncNotifier {
 		deliver(l -> l.duplicateMachine(message));
 	}
 
+	/** Die Frage beim Verbinden ({@link SyncListener#connectDecisionNeeded}); wie oft sie kommt, regelt der Aufrufer. */
+	void connectDecisionNeeded(String dir, boolean setAsideAllowed) {
+		deliver(l -> l.connectDecisionNeeded(dir, setAsideAllowed));
+	}
+
 	private void deliver(Consumer<SyncListener> call) {
 		notifyUi(() -> call.accept(listener));
 	}

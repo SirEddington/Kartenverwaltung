@@ -11,5 +11,10 @@ public enum SyncState {
 	/** Der Ordner ist nicht erreichbar; es wird lokal weitergearbeitet, neue Versionen sind vorläufig. */
 	OFFLINE,
 	/** Der Ordner ist erreichbar, aber der Abgleich scheitert an einem anderen Fehler (z. B. fehlende Schreibrechte). */
-	FEHLER
+	FEHLER,
+	/**
+	 * Modus {@link ConnectMode#ASK}: Beide Seiten haben Einheiten, und der Abgleich pausiert, bis
+	 * {@link SyncService#decideConnect} entscheidet (nichts wird hochgeladen oder abgeholt); neue Versionen sind vorläufig.
+	 */
+	ENTSCHEIDUNG
 }

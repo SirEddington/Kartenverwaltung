@@ -57,4 +57,17 @@ public interface SyncListener {
 	/** Dieser Rechner hat eine neue Kennung bekommen, weil ein anderer dieselbe verwendet ({@code SYS-011}). */
 	default void duplicateMachine(String message) {
 	}
+
+	/**
+	 * Beim Verbinden haben beide Seiten Einheiten, und der Abgleich pausiert (Zustand {@link SyncState#ENTSCHEIDUNG}), bis
+	 * {@link SyncService#decideConnect} entscheidet: im Modus {@link ConnectMode#ASK}, oder wenn die Schutzregel ein
+	 * Beiseitelegen verbietet. Kommt einmal je Eintritt in die Pause (also auch nach einem Neustart oder nach der Rückkehr
+	 * des Ordners erneut) und noch einmal, wenn {@link SyncService#decideConnect} das Beiseitelegen ablehnt.
+	 *
+	 * @param dir             der gemeinsame Ordner
+	 * @param setAsideAllowed ob Beiseitelegen angeboten werden darf: {@code false}, sobald dieser Programmlauf nach dem
+	 *                        Start eigene Versionen geschrieben hat (Schutzregel); Mitnehmen geht immer
+	 */
+	default void connectDecisionNeeded(String dir, boolean setAsideAllowed) {
+	}
 }

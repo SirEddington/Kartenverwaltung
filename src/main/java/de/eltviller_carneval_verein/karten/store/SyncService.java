@@ -79,6 +79,10 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * Fortschritt zeigt {@link #fullSyncProgress()}. Im ersten Lauf einer Verbindung ({@link #connect}) folgen die Takte ohne
  * Pause aufeinander, solange der Ordner erreichbar ist und nichts scheitert (die Arbeitssperre wird dazwischen frei); sein
  * Ende liefert das Ergebnis von {@link #connect} und vervollständigt die Marke "verbunden" ({@link #connectionComplete()}).
+ * Im Modus {@link ConnectMode#ASK} prüft der Beginn des ersten Laufs an den Dateien, ob beide Seiten Einheiten haben; dann
+ * pausiert der Abgleich ({@link SyncState#ENTSCHEIDUNG}), bis {@link #decideConnect} entscheidet, und jeder Takt prüft nur
+ * die Erreichbarkeit. Die <b>Schutzregel</b> verbietet jedes Beiseitelegen, sobald dieser Programmlauf nach dem Start eigene
+ * Versionen geschrieben hat (siehe {@link #connect}).
  * Trifft ein fremder Listeneintrag einen Platz, dessen lokaler Anspruch
  * abweicht, wird sofort verglichen: So fällt eine späte Niederlage auch nach Ablauf der Beobachtung auf. Deshalb
  * überspringt auch der Vollabgleich keine Liste: Er lässt die Positionen stehen, und jede Liste wird gelesen (nach einem
@@ -114,12 +118,11 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * <ul>
  * <li>Jeder Zugriff auf den gemeinsamen Ordner läuft im {@code worker}, in der Anwendung ein einzelner Daemon-Thread,
  * der auch den Takt ausführt; auch die Heilung beschädigter Dateien aus der Kopie dort läuft im Takt. Die Oberfläche
- * wartet nie darauf, mit zwei Ausnahmen: {@link #startup} prüft die Erreichbarkeit (höchstens 5 Sekunden) und lädt
- * ausstehende Versionen hoch, bevor das Hauptmenü erscheint; {@link #needsConnectDecision} liest den gemeinsamen
- * Ordner.</li>
- * <li>{@link #connect} und {@link #disconnect} nehmen die Arbeitssperre ({@code workLock}) und warten deshalb auf das
- * Ende des laufenden Takts, damit kein Hochladen der alten Verbindung mit dem Wechsel überlappt; sie dürfen nie auf dem
- * FX-Thread laufen. Die Sperre ist fair: Sie kommen zwischen zwei Takten dran.</li>
+ * wartet nie darauf, mit einer Ausnahme: {@link #startup} prüft die Erreichbarkeit (höchstens 5 Sekunden) und lädt
+ * ausstehende Versionen hoch, bevor das Hauptmenü erscheint.</li>
+ * <li>{@link #connect}, {@link #decideConnect} und {@link #disconnect} nehmen die Arbeitssperre ({@code workLock}) und
+ * warten deshalb auf das Ende des laufenden Takts, damit kein Hochladen der alten Verbindung mit dem Wechsel überlappt;
+ * sie dürfen nie auf dem FX-Thread laufen. Die Sperre ist fair: Sie kommen zwischen zwei Takten dran.</li>
  * <li>{@link #append} und die Abfragen arbeiten nur auf dem lokalen Bestand und laufen auf dem Thread des Aufrufers;
  * {@link #append} ruft auch die Auflösung im {@code worker} auf, gleichzeitig mit der Oberfläche.</li>
  * <li>Zustand ({@link #syncState()}, {@link #lastSync()}) und alle Rückrufe kommen über den {@code ui}-Executor an, in
@@ -133,7 +136,10 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * nur {@code resolveLock}, {@code lock} und den Index, jeweils kurz und nacheinander; niemand hält {@code lock}, während
  * {@link #append} läuft. Deshalb darf {@link #append} von der Oberfläche und aus dem {@code worker} zugleich kommen. Nur
  * wenn die Verbindung während {@link #append} gewechselt hat, nimmt es zuletzt {@code workLock} (ohne eine andere Sperre
- * zu halten) und wartet dann auf den laufenden Takt.
+ * zu halten) und wartet dann auf den laufenden Takt. Während der lokale Bestand beiseitegelegt wird (unter
+ * {@code workLock}), wartet ein beginnendes {@link #append} an einer Bedingung von {@code lock} (ohne eine Sperre zu
+ * halten), und das Beiseitelegen wartet dort auf das Ende laufender lokaler Schreibvorgänge; keiner von beiden braucht
+ * dabei eine Sperre, die der andere hält.
  */
 public final class SyncService {
 
@@ -229,7 +235,11 @@ public final class SyncService {
 		final SyncPositions positions;
 		volatile FeedReader reader;
 		volatile FeedWriter writer;
-		/** Beim Verbinden: die Entscheidung des Aufrufers, bis der erste Vollabgleich zu Ende ist. */
+		/**
+		 * Beim Verbinden: die Entscheidung des Aufrufers, bis der erste Vollabgleich zu Ende ist. {@link ConnectMode#ASK}, bis
+		 * der Beginn an den Dateien vereinigt oder {@link SyncService#decideConnect} antwortet; auch nach einem Beiseitelegen,
+		 * das die Schutzregel verbot.
+		 */
 		volatile ConnectMode connectMode;
 		/** Vor der ersten Arbeit die Erreichbarkeit prüfen (nach dem Verbinden). */
 		volatile boolean probeFirst;
@@ -277,6 +287,13 @@ public final class SyncService {
 		 * sofort. Eigenes Feld, unabhängig davon, ob der Takt die Auflösung schon erledigt hat.
 		 */
 		volatile boolean hurry;
+		/**
+		 * Der Abgleich pausiert vor dem Beginn des ersten Laufs (Zustand {@link SyncState#ENTSCHEIDUNG}), bis
+		 * {@link SyncService#decideConnect} entscheidet: Beide Seiten haben Einheiten (Modus {@link ConnectMode#ASK}), oder die
+		 * Schutzregel verbot das Beiseitelegen. Endet auch, wenn der Ordner nicht erreichbar ist; nach seiner Rückkehr prüft
+		 * der Beginn die Dateien erneut und fragt erneut. Unter der Arbeitssperre.
+		 */
+		volatile boolean deciding;
 
 		Link(String text, Path path, VersionStore shared, SyncPositions positions) {
 			this.text = text;
@@ -343,6 +360,14 @@ public final class SyncService {
 	 * liest die Listen nur, wenn eine Entscheidung fehlt.
 	 */
 	private volatile boolean ownListsWanted;
+	/** Ob {@link #startup} zu Ende ist (gesetzt am Ende jedes Wegs, auch nach einem Fehler); erst danach zählt die Schutzregel. */
+	private volatile boolean startupDone;
+	/**
+	 * Schutzregel: Dieser Programmlauf hat nach dem Ende von {@link #startup} eigene Versionen geschrieben (öffentliches
+	 * {@link #append}, nicht die Auflösung). Dann ist Beiseitelegen verboten, denn die Verkäufe verschwänden im
+	 * beiseitegelegten Ordner. Wird nie zurückgesetzt.
+	 */
+	private volatile boolean wroteSinceStartup;
 
 	/**
 	 * Serialisiert die Arbeit am gemeinsamen Ordner und jeden Wechsel der Verbindung: Takt, Hochladen beim Start,
@@ -380,6 +405,16 @@ public final class SyncService {
 	 * Abholen oder Vollabgleich sie als geändert melden.
 	 */
 	private final Set<UnitKey> unrepairable = new HashSet<>();
+	/**
+	 * Wie viele {@link #append} gerade Versionsdateien in den lokalen Bestand schreiben; das Beiseitelegen wartet, bis es
+	 * keine mehr sind ({@link #setAsideLocal}). Auf das Ende wird an {@code lock} gewartet.
+	 */
+	private int localWrites;
+	/**
+	 * Der lokale Bestand wird gerade beiseitegelegt (von der Prüfung der Schutzregel bis der neue Datenordner bereit ist);
+	 * ein {@link #append}, das beginnen will, wartet an {@code lock}.
+	 */
+	private boolean settingAside;
 
 	/**
 	 * Für Tests: Ordner, Kennung, Dateischicht, Threads, Erreichbarkeitsprüfung und Uhr frei wählbar. Es wird kein
@@ -568,81 +603,68 @@ public final class SyncService {
 	 * @throws UncheckedIOException wenn der Bestand nicht vollständig gelesen werden kann; die Meldung nennt die Einheit
 	 */
 	public boolean startup(String sharedDir, DoubleConsumer progress) {
-		reopen();
-		loadAcknowledgedAtStart();
-		UnitIndex.Refresh opened = openIndex(progress != null ? progress : NO_PROGRESS);
-		String dir = clean(sharedDir);
-		if (dir == null) {
-			// unter der Arbeitssperre: Die Auflösung (Sperre der Auflösung) und ein append daraus folgen der Sperrfolge
-			workLock.lock();
-			try {
-				// die Marke "verbunden" bleibt (KARV-87 trennt ausdrücklich mit disconnect); ein offenes Ergebnis endet
-				abortPendingOutcome();
-				deactivate();
-				claimPendingLocally(withUnindexed(opened.pendingUnits()));
-				resolveAtStartup(opened.lostUnits());
-			} finally {
-				unlockWork();
+		try {
+			reopen();
+			loadAcknowledgedAtStart();
+			UnitIndex.Refresh opened = openIndex(progress != null ? progress : NO_PROGRESS);
+			String dir = clean(sharedDir);
+			if (dir == null) {
+				// unter der Arbeitssperre: Die Auflösung (Sperre der Auflösung) und ein append daraus folgen der Sperrfolge
+				workLock.lock();
+				try {
+					// die Marke "verbunden" bleibt (KARV-87 trennt ausdrücklich mit disconnect); ein offenes Ergebnis endet
+					abortPendingOutcome();
+					deactivate();
+					claimPendingLocally(withUnindexed(opened.pendingUnits()));
+					resolveAtStartup(opened.lostUnits());
+				} finally {
+					unlockWork();
+				}
+				return true;
 			}
-			return true;
-		}
-		Link current = activate(dir, null);
-		if (current.path == null || !probe(current.path)) {
-			notifier.unreachable(dir, false);
-			// ohne Verbindung wird lokal aufgelöst und später hochgeladen
+			Link current = activate(dir, null);
+			if (current.path == null || !probe(current.path)) {
+				notifier.unreachable(dir, false);
+				// ohne Verbindung wird lokal aufgelöst und später hochgeladen
+				workLock.lock();
+				try {
+					resolveAtStartup(opened.lostUnits());
+				} finally {
+					workLock.unlock();
+				}
+				return false;
+			}
 			workLock.lock();
 			try {
+				Round round = new Round(current);
+				round.startup = true;
+				round.run(() -> {
+					enqueuePending(current, withUnindexed(opened.pendingUnits()));
+					runJobs(current, round);
+				});
+				reportChanges(round);
+				round.run(() -> decideUnknownListNumbers(round));
 				resolveAtStartup(opened.lostUnits());
+				if (isCurrent(current)) {
+					if (round.unreachable) {
+						notifier.unreachable(dir, false);
+						return false;
+					}
+					if (round.failure != null) {
+						notifier.failed(failureText(current, round.failure), round.failure);
+					} else {
+						notifier.setState(hasJobs() ? SyncState.AUSSTEHEND : SyncState.AKTUELL);
+					}
+				}
 			} finally {
 				workLock.unlock();
 			}
-			return false;
-		}
-		workLock.lock();
-		try {
-			Round round = new Round(current);
-			round.startup = true;
-			round.run(() -> {
-				enqueuePending(current, withUnindexed(opened.pendingUnits()));
-				runJobs(current, round);
-			});
-			reportChanges(round);
-			round.run(() -> decideUnknownListNumbers(round));
-			resolveAtStartup(opened.lostUnits());
-			if (isCurrent(current)) {
-				if (round.unreachable) {
-					notifier.unreachable(dir, false);
-					return false;
-				}
-				if (round.failure != null) {
-					notifier.failed(failureText(current, round.failure), round.failure);
-				} else {
-					notifier.setState(hasJobs() ? SyncState.AUSSTEHEND : SyncState.AKTUELL);
-				}
-			}
+			schedule();
+			return true;
 		} finally {
-			workLock.unlock();
+			// ab hier zählen eigene Versionen für die Schutzregel; was der Start selbst schrieb (Auflösung), zählt nicht
+			startupDone = true;
 		}
-		schedule();
-		return true;
-	}
-
-	/**
-	 * Ob der Aufrufer vor dem Verbinden fragen muss, ob der lokale Bestand mitgenommen oder beiseitegelegt wird: nur,
-	 * wenn beide Seiten schon Einheiten haben. Liest den gemeinsamen Ordner auf dem Thread des Aufrufers.
-	 *
-	 * @throws IOException wenn der Ordner nicht gelesen werden kann oder kein gültiger Pfad ist
-	 */
-	public boolean needsConnectDecision(String sharedDir) throws IOException {
-		String dir = clean(sharedDir);
-		if (dir == null) {
-			return false;
-		}
-		Path path = toPath(dir);
-		if (path == null) {
-			throw new IOException("Kein gültiger Pfad: " + dir);
-		}
-		return FullSync.bothHaveUnits(local, new VersionStore(path.resolve(DATA), files));
 	}
 
 	/**
@@ -650,17 +672,29 @@ public final class SyncService {
 	 * Rücksicht auf den Modus vereinigt. Sonst gilt der Modus: {@link ConnectMode#MERGE} gleicht ab und legt die lokalen
 	 * Anspruchsdateien auch im gemeinsamen Ordner an (ein anderer Anspruch dort gewinnt, die eigene Version ist dann
 	 * verloren); {@link ConnectMode#SET_ASIDE} benennt den lokalen Bestand in {@code data-beiseite-<Zeitstempel>} um (nie
-	 * gelöscht) und gleicht in einen leeren Bestand ab. Leer oder {@code null} trennt.
+	 * gelöscht) und gleicht in einen leeren Bestand ab; {@link ConnectMode#ASK} pausiert den Abgleich vor dem Beginn des
+	 * ersten Laufs (Zustand {@link SyncState#ENTSCHEIDUNG}, Rückruf {@link SyncListener#connectDecisionNeeded}), bis
+	 * {@link #decideConnect} entscheidet. Entschieden wird am Beginn des Laufs an den Dateien, sobald der Ordner erreichbar
+	 * ist; bis dahin bleiben eigene Änderungen vorläufig. Leer oder {@code null} trennt.
 	 * <p>
-	 * Der erste Vollabgleich der Verbindung schreibt an seinem Beginn die Marke "verbunden" als unvollständig, an seinem Ende
-	 * als vollständig; bis dahin ist {@link #connectionComplete()} {@code false}, und seine Takte folgen ohne Pause
-	 * aufeinander (die Arbeitssperre wird dazwischen frei).
+	 * <b>Schutzregel:</b> Hat dieser Programmlauf nach dem Ende von {@link #startup} eigene Versionen geschrieben (auch ein
+	 * Speichervorgang, der gerade schreibt), wird nie beiseitegelegt, auch nicht mit {@link ConnectMode#SET_ASIDE}: Seine
+	 * Verkäufe verschwänden sonst im beiseitegelegten Ordner. Geprüft wird beim Rückruf, in {@link #decideConnect} und
+	 * unmittelbar vor jedem Versuch des Beiseitelegens; verbietet sie es dort, pausiert der Abgleich wie bei
+	 * {@link ConnectMode#ASK}, mit {@code setAsideAllowed = false}. Was {@link #startup} und die Auflösung schreiben, zählt
+	 * nicht. Ein Speichervorgang, der während des Beiseitelegens beginnt, wartet, bis der neue Datenordner bereit ist.
+	 * <p>
+	 * Der erste Vollabgleich der Verbindung schreibt an seinem Beginn (nach der Entscheidung und dem Beiseitelegen) die Marke
+	 * "verbunden" als unvollständig, an seinem Ende als vollständig; bis dahin ist {@link #connectionComplete()}
+	 * {@code false}, und seine Takte folgen ohne Pause aufeinander (die Arbeitssperre wird dazwischen frei). In der Pause gibt
+	 * es noch keine Marke: Nach einem Neustart fragt der Start erneut.
 	 * <p>
 	 * Wartet auf das Ende des laufenden Takts; nicht auf dem FX-Thread aufrufen. So überlappt kein Hochladen der alten
 	 * Verbindung mit dem Wechsel.
 	 *
 	 * @return das Ergebnis, genau einmal: {@link Kind#AKTUELL} bzw. {@link Kind#AUSSTEHEND} am Ende des ersten Laufs,
-	 *         vorher {@link Kind#OFFLINE} (Ordner nicht erreichbar), {@link Kind#FEHLER} (ein Abschnitt scheitert) oder
+	 *         vorher {@link Kind#ENTSCHEIDUNG} (der Abgleich pausiert, siehe oben), {@link Kind#OFFLINE} (Ordner nicht
+	 *         erreichbar), {@link Kind#FEHLER} (ein Abschnitt scheitert) oder
 	 *         {@link Kind#ABGEBROCHEN} (getrennt oder neu verbunden); jeweils mit dem Pfad des beiseitegelegten Bestands,
 	 *         falls schon beiseitegelegt. Bei leerem Pfad sofort {@link Kind#ABGEBROCHEN}. Nach {@link #closeIndex()} (der
 	 *         Takt ruht dann) liefert ein noch offenes Ergebnis erst ein späteres {@code connect}, {@link #disconnect} oder
@@ -685,6 +719,55 @@ public final class SyncService {
 			created.outcome = outcome;
 			created.firstRun = true;
 			notifier.setConnectionComplete(false);
+		} finally {
+			unlockWork();
+		}
+		// ohne Sperre: Der Takt nimmt sie selbst
+		schedule();
+		return outcome;
+	}
+
+	/**
+	 * Beantwortet die Frage beim Verbinden ({@link SyncListener#connectDecisionNeeded}): Der Abgleich der aktuellen
+	 * Verbindung setzt mit {@link ConnectMode#MERGE} (Mitnehmen) oder {@link ConnectMode#SET_ASIDE} (Beiseitelegen) fort,
+	 * im Hintergrund wie nach {@link #connect}. Verbietet die Schutzregel das Beiseitelegen inzwischen (zwischen Frage und
+	 * Antwort wurde gespeichert, oder ein Speichervorgang schreibt gerade), ändert sich nichts: Die Pause bleibt, die Frage
+	 * kommt erneut mit {@code setAsideAllowed = false}, und das Ergebnis ist sofort {@link Kind#ENTSCHEIDUNG}.
+	 * <p>
+	 * Nimmt die Arbeitssperre und wartet deshalb auf das Ende des laufenden Takts; nicht auf dem FX-Thread aufrufen.
+	 *
+	 * @return das Ergebnis wie bei {@link #connect}, genau einmal; geliefert ohne gehaltene Sperre des Dienstes
+	 * @throws IllegalArgumentException wenn {@code mode} weder {@link ConnectMode#MERGE} noch {@link ConnectMode#SET_ASIDE}
+	 *                                  ist
+	 * @throws IllegalStateException    wenn die aktuelle Verbindung nicht auf eine Entscheidung wartet (Zustand
+	 *                                  {@link SyncState#ENTSCHEIDUNG}), etwa im Einzelbetrieb oder nach einer Entscheidung
+	 */
+	public CompletableFuture<ConnectOutcome> decideConnect(ConnectMode mode) {
+		Objects.requireNonNull(mode, "mode");
+		if (mode != ConnectMode.MERGE && mode != ConnectMode.SET_ASIDE) {
+			throw new IllegalArgumentException("Entschieden wird mit MERGE oder SET_ASIDE, nicht mit " + mode);
+		}
+		CompletableFuture<ConnectOutcome> outcome = new CompletableFuture<>();
+		workLock.lock();
+		try {
+			Link current;
+			synchronized (lock) {
+				current = link;
+			}
+			if (current == null || !current.deciding) {
+				throw new IllegalStateException("Keine Verbindung wartet auf eine Entscheidung (Zustand " + notifier.state() + ")");
+			}
+			if (mode == ConnectMode.SET_ASIDE && wroteSinceStartup) {
+				// Schutzregel, zum zweiten Mal geprüft: Zwischen Frage und Antwort kann gespeichert worden sein
+				notifier.connectDecisionNeeded(current.text, false);
+				return CompletableFuture.completedFuture(new ConnectOutcome(Kind.ENTSCHEIDUNG, false, current.setAsidePath, null));
+			}
+			reopen();
+			current.deciding = false;
+			current.connectMode = mode;
+			current.probeFirst = true;
+			// das Ergebnis des Verbindens hat der Eintritt in die Pause festgelegt; dieses ist das neue
+			current.outcome = outcome;
 		} finally {
 			unlockWork();
 		}
@@ -823,7 +906,11 @@ public final class SyncService {
 	/**
 	 * Schreibt je Änderung eine neue Versionsdatei in den lokalen Bestand. Im Einzelbetrieb wird jede sofort lokal
 	 * beansprucht und gilt; im gemeinsamen Betrieb kommt der Stapel als ein Auftrag in die Warteschlange und ist bis zum
-	 * Hochladen vorläufig.
+	 * Hochladen vorläufig (auch, solange der Abgleich auf eine Entscheidung wartet, {@link SyncState#ENTSCHEIDUNG}).
+	 * <p>
+	 * Nach dem Ende von {@link #startup} verbietet jeder Aufruf mit mindestens einer Änderung das Beiseitelegen für den Rest
+	 * des Programmlaufs (Schutzregel, siehe {@link #connect}), schon bevor die erste Datei geschrieben ist. Wird der lokale
+	 * Bestand gerade beiseitegelegt, wartet der Aufruf, bis der neue Datenordner bereit ist, und schreibt dorthin.
 	 *
 	 * @param saveId die ID des Speichervorgangs; alle Versionen tragen sie
 	 * @return die neuen Versionen in der Reihenfolge der Änderungen
@@ -833,29 +920,39 @@ public final class SyncService {
 	 *                     Beanspruchen bzw. Einreihen weitergeworfen, Folgefehler hängen als unterdrückte Ausnahmen an.
 	 */
 	public List<Version> append(String saveId, List<Change> changes) throws IOException {
+		return append(saveId, changes, true);
+	}
+
+	/**
+	 * {@link #append} für beide Schreiber: die Anwendung und die Auflösung ({@link ResolverHost#append}).
+	 *
+	 * @param own ob es ein Speichervorgang der Anwendung ist: Nur er zählt für die Schutzregel ({@link #wroteSinceStartup})
+	 */
+	private List<Version> append(String saveId, List<Change> changes, boolean own) throws IOException {
 		Objects.requireNonNull(saveId, "saveId");
-		Link current;
-		synchronized (lock) {
-			current = link;
-		}
-		// vor der ersten Datei: eine Marke "sauber beendet" gilt nur über einem unveränderten Bestand
-		index.invalidateCleanMarker();
+		Link current = beginLocalWrites(own && !changes.isEmpty());
 		List<UploadJob.Item> written = new ArrayList<>();
 		// der Fehler, der das Schreiben beendet hat: geprüft oder unerwartet (nie beide)
 		IOException failure = null;
 		RuntimeException unexpected = null;
-		for (Change change : changes) {
-			try {
-				written.add(writeLocal(saveId, change, seenFor(current, change)));
-			} catch (IOException e) {
-				failure = e;
-				break;
-			} catch (RuntimeException e) {
-				// die schon geschriebenen Versionen müssen trotzdem in den Index und in die Warteschlange: Spätere Schritte
-				// nehmen die Kandidaten für Ausstehendes aus dem Index
-				unexpected = e;
-				break;
+		try {
+			// vor der ersten Datei: eine Marke "sauber beendet" gilt nur über einem unveränderten Bestand
+			index.invalidateCleanMarker();
+			for (Change change : changes) {
+				try {
+					written.add(writeLocal(saveId, change, seenFor(current, change)));
+				} catch (IOException e) {
+					failure = e;
+					break;
+				} catch (RuntimeException e) {
+					// die schon geschriebenen Versionen müssen trotzdem in den Index und in die Warteschlange: Spätere Schritte
+					// nehmen die Kandidaten für Ausstehendes aus dem Index
+					unexpected = e;
+					break;
+				}
 			}
+		} finally {
+			endLocalWrites();
 		}
 		try {
 			if (current == null) {
@@ -893,6 +990,52 @@ public final class SyncService {
 			throw unexpected;
 		}
 		return written.stream().map(UploadJob.Item::version).toList();
+	}
+
+	/**
+	 * Beginn der lokalen Schreibvorgänge eines {@link #append}, in einem Block unter {@code lock}: Wird der lokale Bestand
+	 * gerade beiseitegelegt, wartet es, bis der neue Datenordner bereit ist; dann setzt es für einen Speichervorgang der
+	 * Anwendung nach dem Start den Merker der Schutzregel (vor der ersten Datei: Auch ein Speichervorgang, der gerade
+	 * schreibt, verhindert das Beiseitelegen; scheitert er, bleibt der Merker, die sichere Richtung) und zählt sich zu den
+	 * laufenden Schreibvorgängen. Wer {@code workLock} hält, findet hier nie ein laufendes Beiseitelegen vor (es läuft
+	 * selbst unter {@code workLock}); gewartet wird nur ohne gehaltene Sperre.
+	 *
+	 * @param counts ob es ein Speichervorgang der Anwendung mit mindestens einer Änderung ist
+	 * @return die Verbindung, mit der geschrieben wird
+	 */
+	private Link beginLocalWrites(boolean counts) {
+		boolean interrupted = false;
+		try {
+			synchronized (lock) {
+				while (settingAside) {
+					try {
+						lock.wait();
+					} catch (InterruptedException e) {
+						// ein Speichervorgang bricht nicht ab: Das Beiseitelegen dauert nur eine Umbenennung
+						interrupted = true;
+					}
+				}
+				if (counts && startupDone) {
+					wroteSinceStartup = true;
+				}
+				localWrites++;
+				return link;
+			}
+		} finally {
+			if (interrupted) {
+				Thread.currentThread().interrupt();
+			}
+		}
+	}
+
+	/** Ende der lokalen Schreibvorgänge eines {@link #append}; ein wartendes Beiseitelegen prüft danach erneut. */
+	private void endLocalWrites() {
+		synchronized (lock) {
+			localWrites--;
+			if (localWrites == 0) {
+				lock.notifyAll();
+			}
+		}
 	}
 
 	/**
@@ -1792,10 +1935,14 @@ public final class SyncService {
 	/**
 	 * Der Takt im gemeinsamen Betrieb. Im ersten Lauf einer Verbindung legt er dessen Ergebnis fest: am Ende des Laufs
 	 * {@link Kind#AKTUELL} bzw. {@link Kind#AUSSTEHEND} (je nachdem, ob danach noch Aufträge warten), vorher
-	 * {@link Kind#OFFLINE}, wenn der Ordner nicht erreichbar ist, und {@link Kind#FEHLER} nach einer Störung; jeweils nur,
-	 * solange das Ergebnis offen ist. Setzt {@link Link#hurry}.
+	 * {@link Kind#OFFLINE}, wenn der Ordner nicht erreichbar ist, {@link Kind#ENTSCHEIDUNG} beim Eintritt in die Pause vor
+	 * der Entscheidung und {@link Kind#FEHLER} nach einer Störung; jeweils nur, solange das Ergebnis offen ist. Im Modus
+	 * {@link ConnectMode#ASK} prüft er nach der Erreichbarkeit, ob beide Seiten Einheiten haben ({@link #askBeforeTheRun}).
+	 * In der Pause ({@link Link#deciding}) endet er nach der Prüfung der Erreichbarkeit: kein Lauf, kein Hochladen, kein
+	 * Abholen. Setzt {@link Link#hurry}.
 	 *
 	 * @return ob die Auflösung der Verluste lief (nach dem Hochladen); {@code false}, wenn der Ordner nicht erreichbar war
+	 *         oder der Abgleich pausiert (dann löst {@link #tick()} lokal auf, wie ohne Verbindung)
 	 */
 	private boolean runTick(Link current) {
 		current.hurry = false;
@@ -1827,10 +1974,22 @@ public final class SyncService {
 				notifier.setState(SyncState.AUSSTEHEND);
 			}
 		}
+		if (current.connectMode == ConnectMode.ASK && !current.deciding && !askBeforeTheRun(current)) {
+			return false;
+		}
+		if (current.deciding) {
+			// Pause bis zur Entscheidung: kein Lauf, kein Hochladen, kein Abholen; der Takt prüft nur die Erreichbarkeit (oben),
+			// aufgelöst wird lokal wie ohne Verbindung
+			return false;
+		}
 		Instant now = clock.instant();
 		Round round = new Round(current);
 		if (current.run == null && fullSyncDue(current, now)) {
 			round.run(() -> beginRun(current));
+			if (current.deciding) {
+				// die Schutzregel verbot das Beiseitelegen: Pause wie oben
+				return false;
+			}
 		}
 		if (current.run != null) {
 			// Verkäufe zuerst: Ein Stück des Laufs dauert bis zu FULL_SYNC_SLICE_BUDGET und einen Block, und ein Verkauf soll
@@ -1869,16 +2028,71 @@ public final class SyncService {
 		if (round.unreachable) {
 			reportUnreachable(current);
 		} else if (round.failure != null) {
-			String text = failureText(current, round.failure);
-			notifier.failed(text, round.failure);
-			if (current.firstRun) {
-				settle(current, new ConnectOutcome(Kind.FEHLER, false, current.setAsidePath, text));
-			}
+			reportFailure(current, round.failure);
 		} else {
 			notifier.succeeded(clock.instant(), hasJobs());
 			current.hurry = true;
 		}
 		return true;
+	}
+
+	/**
+	 * Modus {@link ConnectMode#ASK} vor dem Beginn des ersten Laufs: Haben beide Seiten Einheiten
+	 * ({@link FullSync#bothHaveUnits}), pausiert der Abgleich ({@link #enterDecision}, Beiseitelegen angeboten nach der
+	 * Schutzregel); sonst wird vereinigt wie mit {@link ConnectMode#MERGE}, und der Takt setzt fort. Unter {@code workLock}.
+	 *
+	 * @return ob der Takt fortsetzt (auch in der Pause, die er dann selbst erkennt); {@code false}, wenn die Prüfung
+	 *         scheiterte (Zustand und Ergebnis sind dann gesetzt) oder die Verbindung nicht mehr die aktuelle ist
+	 */
+	private boolean askBeforeTheRun(Link current) {
+		Round check = new Round(current);
+		boolean[] both = new boolean[1];
+		check.run(() -> both[0] = FullSync.bothHaveUnits(local, current.shared));
+		if (!isCurrent(current)) {
+			return false;
+		}
+		if (check.unreachable) {
+			reportUnreachable(current);
+			return false;
+		}
+		if (check.failure != null) {
+			reportFailure(current, check.failure);
+			return false;
+		}
+		if (both[0]) {
+			enterDecision(current, !wroteSinceStartup);
+		} else {
+			current.connectMode = ConnectMode.MERGE;
+		}
+		return true;
+	}
+
+	/**
+	 * Der Abgleich pausiert vor dem Beginn des ersten Laufs, bis {@link #decideConnect} entscheidet: Zustand
+	 * {@link SyncState#ENTSCHEIDUNG}, Rückruf {@link SyncListener#connectDecisionNeeded} (einmal je Eintritt in die Pause),
+	 * ein noch offenes Ergebnis endet mit {@link Kind#ENTSCHEIDUNG}. Die Entscheidung des Verbindens ist wieder offen: Die
+	 * Antwort fasst sie neu ({@link #beginRun}); ein Beiseitelegen verhindert dann die Schutzregel, sobald gespeichert wurde.
+	 * Unter {@code workLock}.
+	 */
+	private void enterDecision(Link current, boolean setAsideAllowed) {
+		current.deciding = true;
+		current.connectMode = ConnectMode.ASK;
+		current.decision = null;
+		notifier.setState(SyncState.ENTSCHEIDUNG);
+		notifier.connectDecisionNeeded(current.text, setAsideAllowed);
+		settle(current, new ConnectOutcome(Kind.ENTSCHEIDUNG, setAsideAllowed, current.setAsidePath, null));
+	}
+
+	/**
+	 * Eine Störung bei erreichbarem Ordner: Zustand {@link SyncState#FEHLER} mit SYS-006 (oder dem Text einer lokalen Datei);
+	 * im ersten Lauf einer Verbindung ist das ihr Ergebnis, falls noch keins feststeht.
+	 */
+	private void reportFailure(Link current, Exception failure) {
+		String text = failureText(current, failure);
+		notifier.failed(text, failure);
+		if (current.firstRun) {
+			settle(current, new ConnectOutcome(Kind.FEHLER, false, current.setAsidePath, text));
+		}
 	}
 
 	/**
@@ -1895,9 +2109,11 @@ public final class SyncService {
 
 	/**
 	 * Der Ordner ist nicht erreichbar: Zustand {@link SyncState#OFFLINE} (SYS-005 einmal je Ausfall). Im ersten Lauf einer
-	 * Verbindung ist das ihr Ergebnis, falls noch keins feststeht.
+	 * Verbindung ist das ihr Ergebnis, falls noch keins feststeht. Eine Pause vor der Entscheidung endet: Nach der Rückkehr
+	 * prüft der Beginn die Dateien erneut und fragt erneut.
 	 */
 	private void reportUnreachable(Link current) {
+		current.deciding = false;
 		notifier.unreachable(current.text, true);
 		if (current.firstRun) {
 			settle(current, new ConnectOutcome(Kind.OFFLINE, false, current.setAsidePath, StoreMessages.unreachable(current.text)));
@@ -1933,8 +2149,9 @@ public final class SyncService {
 	/**
 	 * Beginn eines Vollabgleichs, in einem Takt: beim Verbinden zuerst die Entscheidung über Beiseitelegen und Mitnehmen
 	 * (einmal je Verbindung, {@link Link#decision}; das Mitnehmen gilt für alle Abschnitte des Laufs) und das Beiseitelegen
-	 * (der einzige Schritt, der den ganzen lokalen Bestand ändert, vor allen Abschnitten); im ersten Lauf einer Verbindung
-	 * danach die Marke "verbunden" als unvollständig. Dann die ausstehenden Versionen einreihen, nach einem Neustart die
+	 * (der einzige Schritt, der den ganzen lokalen Bestand ändert, vor allen Abschnitten; {@link #setAsideLocal}). Verbietet
+	 * die Schutzregel das Beiseitelegen, beginnt kein Lauf: Der Abgleich pausiert mit der Frage ({@link #enterDecision}). Im
+	 * ersten Lauf einer Verbindung danach die Marke "verbunden" als unvollständig. Dann die ausstehenden Versionen einreihen, nach einem Neustart die
 	 * jungen eigenen Ansprüche beobachten und die Abschnitte bestimmen ({@link FullSyncRun#begin}). Ein Wunsch nach einem
 	 * Vollabgleich gilt ab hier dem nächsten Lauf; scheitert der Beginn, bleibt er offen. Die Positionen der Änderungslisten
 	 * ändert der Vollabgleich nicht.
@@ -1953,14 +2170,11 @@ public final class SyncService {
 					current.decision = new ConnectDecision(both && mode == ConnectMode.SET_ASIDE, !both || mode == ConnectMode.MERGE);
 				}
 				ConnectDecision decision = current.decision;
-				if (decision.setAside()) {
-					Path aside = FullSync.setAside(local.dataRoot(), files, clock);
-					// ab hier ist beiseitegelegt: nie ein zweites Mal, auch wenn danach etwas scheitert
-					current.decision = new ConnectDecision(false, decision.uploadLocalClaims());
-					current.setAsidePath = aside;
-					LOGGER.info("Der lokale Bestand wurde beiseitegelegt: " + aside);
-					// der Datenordner wird neu gefüllt, und gleiche Dateinamen können anderen Inhalt haben
-					clearIndex();
+				if (decision.setAside() && !setAsideLocal(current, decision)) {
+					// die Schutzregel verbietet es inzwischen (vor jedem Versuch geprüft, auch nach einem gescheiterten
+					// Umbenennen): Pause mit der Frage, nur noch Mitnehmen ist angeboten
+					enterDecision(current, false);
+					return;
 				}
 			}
 			current.uploadLocalClaims = mode != null && current.decision.uploadLocalClaims();
@@ -2003,6 +2217,58 @@ public final class SyncService {
 			current.fullSyncWanted = true;
 			throw e;
 		}
+	}
+
+	/**
+	 * Legt den lokalen Bestand beiseite, wenn die Schutzregel es erlaubt; unter {@code workLock}. Prüfung und Umbenennen
+	 * bilden einen Schritt, mit dem sich kein lokales Schreiben eines {@link #append} überschneidet: Unter {@code lock} wird
+	 * der Merker geprüft und {@link #settingAside} gesetzt, dann gewartet, bis kein {@link #append} mehr schreibt (das
+	 * betrifft nur Schreibvorgänge, die nicht zählen; einer, der zählt, hat den Merker schon gesetzt). Ein {@link #append},
+	 * das danach beginnen will, wartet, bis der neue Datenordner bereit ist (umbenannt, Index geleert), und schreibt dann
+	 * dorthin. Die Aufträge des alten Bestands (etwa Zusammenführungen der Auflösung während der Pause) gehen mit ihm
+	 * beiseite und nicht hinaus. Scheitert das Umbenennen, bleibt die Entscheidung, und der nächste Beginn prüft erneut.
+	 *
+	 * @return {@code false}, wenn die Schutzregel es verbietet (nichts ist geschehen); sonst {@code true}
+	 */
+	private boolean setAsideLocal(Link current, ConnectDecision decision) throws IOException {
+		boolean interrupted = false;
+		synchronized (lock) {
+			if (wroteSinceStartup) {
+				return false;
+			}
+			settingAside = true;
+			while (localWrites > 0) {
+				try {
+					lock.wait();
+				} catch (InterruptedException e) {
+					interrupted = true;
+				}
+			}
+		}
+		try {
+			if (interrupted) {
+				Thread.currentThread().interrupt();
+			}
+			Path aside = FullSync.setAside(local.dataRoot(), files, clock);
+			// ab hier ist beiseitegelegt: nie ein zweites Mal, auch wenn danach etwas scheitert
+			current.decision = new ConnectDecision(false, decision.uploadLocalClaims());
+			current.setAsidePath = aside;
+			LOGGER.info("Der lokale Bestand wurde beiseitegelegt: " + aside);
+			// der Datenordner wird neu gefüllt, und gleiche Dateinamen können anderen Inhalt haben
+			clearIndex();
+			synchronized (lock) {
+				if (link == current) {
+					jobs.clear();
+					queued.clear();
+				}
+			}
+		} finally {
+			synchronized (lock) {
+				settingAside = false;
+				lock.notifyAll();
+			}
+		}
+		return true;
 	}
 
 	/**
@@ -2842,9 +3108,10 @@ public final class SyncService {
 			return index.withOwnBesideChain(units);
 		}
 
+		/** Schreibt ohne den Merker der Schutzregel: Was die Auflösung schreibt, zählt nicht. */
 		@Override
 		public List<Version> append(String saveId, List<Change> changes) throws IOException {
-			return SyncService.this.append(saveId, changes);
+			return SyncService.this.append(saveId, changes, false);
 		}
 
 		/** Ob der laufende Vollabgleich die Vorstellung der Einheit erst zum Teil abgeglichen hat ({@link FullSyncRun#inProgress}). */
