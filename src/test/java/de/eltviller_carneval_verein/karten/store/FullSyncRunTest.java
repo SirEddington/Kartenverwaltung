@@ -12,6 +12,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,14 +34,25 @@ class FullSyncRunTest {
 	private VersionStore shared;
 	private FullSyncRun run;
 
+	/** Eine übersprungene Einheit, wie {@link FullSyncRun.Work#skipped} sie meldet. */
+	private record Skip(UnitKey unit, boolean subtree) {
+	}
+
 	/**
-	 * Zeichnet die Listen auf, mit denen {@code sync} aufgerufen wird; wirft auf Wunsch einmal und stellt auf Wunsch die
-	 * Uhr je Aufruf vor (die Dauer eines Blocks).
+	 * Zeichnet die Listen auf, mit denen {@code sync} aufgerufen wird, und die übersprungenen Einheiten; wirft auf Wunsch
+	 * einmal oder bei jedem Aufruf mit einer bestimmten Einheit und stellt auf Wunsch die Uhr je Aufruf vor (die Dauer eines
+	 * Blocks). Gelingt ein Aufruf nicht, steht er nicht in {@link #calls}.
 	 */
 	private final class Recorder implements FullSyncRun.Work {
 
 		final List<List<UnitKey>> calls = new ArrayList<>();
+		final List<Skip> skips = new ArrayList<>();
 		IOException failOnce;
+		/** Jeder Aufruf, der diese Einheit enthält, scheitert; {@code null}: keiner. */
+		UnitKey broken;
+		/** Jeder Aufruf scheitert. */
+		boolean failAlways;
+		boolean reachable = true;
 		Duration cost = Duration.ZERO;
 
 		@Override
@@ -49,8 +62,21 @@ class FullSyncRunTest {
 				failOnce = null;
 				throw e;
 			}
+			if (failAlways || broken != null && units.contains(broken)) {
+				throw new IOException("unlesbar: " + units);
+			}
 			calls.add(List.copyOf(units));
 			clock.advance(cost);
+		}
+
+		@Override
+		public boolean reachable() {
+			return reachable;
+		}
+
+		@Override
+		public void skipped(UnitKey unit, boolean subtree, Exception cause) {
+			skips.add(new Skip(unit, subtree));
 		}
 	}
 
@@ -60,6 +86,31 @@ class FullSyncRunTest {
 		local = new VersionStore(dir.resolve("local").resolve("data"), files);
 		shared = new VersionStore(dir.resolve("shared").resolve("data"), files);
 		run = new FullSyncRun(local, shared, clock);
+	}
+
+	/** Lässt jedes Auflisten unter dem Ordner im gemeinsamen Bestand scheitern, solange {@code broken} gilt. */
+	private void breakSharedListing(String relativePath, AtomicBoolean broken) {
+		FaultyFileLayer faulty = new FaultyFileLayer(new NioFileLayer());
+		Path folder = dir.resolve("shared").resolve("data").resolve(relativePath);
+		faulty.failWhen(p -> broken.get() && p.equals(folder), "listNames", new IOException("unlesbar: " + folder));
+		shared = new VersionStore(dir.resolve("shared").resolve("data"), faulty);
+		run = new FullSyncRun(local, shared, clock);
+	}
+
+	/**
+	 * Ruft {@code step} auf, bis der Abschnitt nicht mehr scheitert, im Abstand von {@code gap} auf der Uhr; liefert die
+	 * Zahl der gescheiterten Aufrufe.
+	 */
+	private int stepUntilItPasses(Recorder work, Duration gap) throws IOException {
+		for (int failures = 0; failures < 100; failures++) {
+			try {
+				run.step(ALWAYS, work);
+				return failures;
+			} catch (IOException e) {
+				clock.advance(gap);
+			}
+		}
+		throw new AssertionError("der Abschnitt scheitert weiter");
 	}
 
 	private static void folder(VersionStore store, String relativePath) throws IOException {
@@ -336,6 +387,192 @@ class FullSyncRunTest {
 		assertTrue(run.inProgress(presentation("e1", "p2")));
 		run.begin();
 		assertFalse(run.inProgress(presentation("e1", "p2")));
+	}
+
+	// --- ein Block, der dauerhaft scheitert (KARV-106)
+
+	@Test
+	void blockFailingLongEnoughIsWorkedUnitByUnitAndOnlyTheFailingUnitIsSkipped() throws IOException {
+		seats(local, 1, 3);
+		folder(local, "events/e2");
+		Recorder work = new Recorder();
+		run.begin();
+		run.step(ALWAYS, work); // Kopf
+		work.broken = booking("e1", "p1", seat(2));
+		Duration gap = FullSyncRun.SKIP_AFTER.dividedBy(FullSyncRun.FAILURES_BEFORE_SKIP);
+
+		int failures = stepUntilItPasses(work, gap);
+
+		// erst nach genug Fehlversuchen und genug Zeit seit dem ersten
+		assertEquals(FullSyncRun.FAILURES_BEFORE_SKIP, failures);
+		assertEquals(List.of(new Skip(booking("e1", "p1", seat(2)), false)), work.skips);
+		assertEquals(List.of(List.of(UnitKey.event("e1")), List.of(presentation("e1", "p1")),
+				List.of(booking("e1", "p1", seat(1))), List.of(booking("e1", "p1", seat(3)))), work.calls);
+		// die Vorstellung der übersprungenen Buchung bleibt bis zum Ende des Laufs zurückgestellt, die übrigen nicht
+		assertTrue(run.inProgress(booking("e1", "p1", seat(1))));
+		assertFalse(run.inProgress(UnitKey.event("e2")));
+		assertEquals(Set.of(presentation("e1", "p1")), run.skippedTrees());
+		// die folgenden Abschnitte kommen dran, wieder als ganze Blöcke, und der Lauf endet
+		assertTrue(run.step(NEVER, work));
+		assertEquals(List.of(UnitKey.event("e2")), work.calls.get(4));
+		assertEquals(1, work.skips.size());
+	}
+
+	/** Zwei Hallen in einem Bündel, der Lauf ist begonnen, und jeder Block mit h2 scheitert. */
+	private Recorder hallsWithBrokenH2() throws IOException {
+		folder(local, "halls/h1");
+		folder(local, "halls/h2");
+		Recorder work = new Recorder();
+		run.begin();
+		work.broken = UnitKey.hall("h2");
+		return work;
+	}
+
+	/** {@code count} Aufrufe von {@code step}, die alle scheitern müssen, im Abstand {@code gap} auf der Uhr. */
+	private void failSteps(Recorder work, int count, Duration gap) {
+		for (int i = 0; i < count; i++) {
+			assertThrows(IOException.class, () -> run.step(ALWAYS, work));
+			clock.advance(gap);
+		}
+	}
+
+	@Test
+	void manyQuickFailuresDoNotSkip() throws IOException {
+		Recorder work = hallsWithBrokenH2();
+		Instant start = clock.instant();
+
+		failSteps(work, 10 * FullSyncRun.FAILURES_BEFORE_SKIP, Duration.ofSeconds(1));
+
+		// viele Fehlversuche, aber noch nicht lange genug: eine kurze Sperre überspringt nichts
+		assertTrue(Duration.between(start, clock.instant()).compareTo(FullSyncRun.SKIP_AFTER) < 0);
+		assertEquals(List.of(), work.skips);
+		// die Sperre ist vorbei: Der Block gelingt als Ganzes
+		work.broken = null;
+		assertTrue(run.step(ALWAYS, work));
+		assertEquals(List.of(List.of(UnitKey.hall("h1"), UnitKey.hall("h2"))), work.calls);
+	}
+
+	@Test
+	void failuresWhileUnreachableDoNotCount() throws IOException {
+		Recorder work = hallsWithBrokenH2();
+		work.reachable = false;
+		failSteps(work, 2 * FullSyncRun.FAILURES_BEFORE_SKIP, FullSyncRun.SKIP_AFTER);
+
+		// erreichbar: Die Fehlversuche beginnen erst jetzt zu zählen
+		work.reachable = true;
+		int failures = stepUntilItPasses(work, FullSyncRun.SKIP_AFTER);
+
+		assertEquals(FullSyncRun.FAILURES_BEFORE_SKIP, failures);
+		assertEquals(List.of(new Skip(UnitKey.hall("h2"), false)), work.skips);
+		assertEquals(Set.of(), run.skippedTrees(), "Hallen haben keine Geschwister");
+	}
+
+	@Test
+	void outageRestartsTheCount() throws IOException {
+		Recorder work = hallsWithBrokenH2();
+		failSteps(work, 1, Duration.ofSeconds(10));
+		work.reachable = false;
+		failSteps(work, 1, Duration.ofMinutes(10));
+
+		// zurück, und kurz danach scheitert es noch ein paar Mal: Die Auszeit zählt nicht zur Frist
+		work.reachable = true;
+		failSteps(work, FullSyncRun.FAILURES_BEFORE_SKIP + 1, Duration.ofSeconds(2));
+
+		assertEquals(List.of(), work.skips);
+	}
+
+	@Test
+	void blockWhoseUnitsAllFailAloneIsNotSkipped() throws IOException {
+		folder(local, "events/e1");
+		Recorder work = hallsWithBrokenH2();
+		// etwa die Platte voll: Jede Einheit des Bündels scheitert, auch einzeln
+		work.failAlways = true;
+
+		failSteps(work, 3 * FullSyncRun.FAILURES_BEFORE_SKIP, FullSyncRun.SKIP_AFTER);
+
+		assertEquals(List.of(), work.skips, "der Fehler liegt nicht an den Einheiten");
+		work.failAlways = false;
+		work.broken = null;
+		assertTrue(run.step(NEVER, work));
+		assertEquals(List.of(List.of(UnitKey.hall("h1")), List.of(UnitKey.hall("h2")), List.of(UnitKey.event("e1"))),
+				work.calls);
+	}
+
+	@Test
+	void unitFailingWhileUnreachableIsNeverSkipped() throws IOException {
+		Recorder work = hallsWithBrokenH2();
+		failSteps(work, FullSyncRun.FAILURES_BEFORE_SKIP, FullSyncRun.SKIP_AFTER);
+
+		// jetzt einzeln, aber der Ordner ist weg: nichts wird übersprungen, der Abschnitt bleibt stehen
+		work.reachable = false;
+		failSteps(work, 1, Duration.ZERO);
+		assertEquals(List.of(), work.skips);
+		assertFalse(run.finished());
+
+		// zurück: Die Fehlversuche zählen von vorn, der Block gelingt wieder als Ganzes
+		work.reachable = true;
+		work.broken = null;
+		assertTrue(run.step(ALWAYS, work));
+		assertEquals(List.of(), work.skips);
+		assertEquals(List.of(UnitKey.hall("h1"), UnitKey.hall("h2")), work.calls.get(work.calls.size() - 1));
+	}
+
+	@Test
+	void bookingsThatCannotBeListedSkipThePresentationWithEverythingBelow() throws IOException {
+		seats(shared, 1, 2);
+		folder(local, "events/e1/presentations/p2");
+		AtomicBoolean broken = new AtomicBoolean(true);
+		breakSharedListing("events/e1/presentations/p1/bookings", broken);
+		Recorder work = new Recorder();
+		run.begin();
+		run.step(ALWAYS, work); // Kopf
+
+		int failures = stepUntilItPasses(work, FullSyncRun.SKIP_AFTER);
+
+		assertEquals(FullSyncRun.FAILURES_BEFORE_SKIP, failures);
+		assertEquals(List.of(new Skip(presentation("e1", "p1"), true)), work.skips);
+		assertTrue(run.step(NEVER, work));
+		assertEquals(List.of(List.of(UnitKey.event("e1")), List.of(presentation("e1", "p2"))), work.calls);
+	}
+
+	@Test
+	void presentationsThatCannotBeListedAtTheBeginningAreListedLater() throws IOException {
+		seats(local, 1, 1);
+		folder(local, "events/e2");
+		AtomicBoolean broken = new AtomicBoolean(true);
+		breakSharedListing("events/e1/presentations", broken);
+		Recorder work = new Recorder();
+
+		// der Beginn scheitert nicht: Das Event kommt mit seinem Kopf, seine Vorstellungen später
+		run.begin();
+		run.step(ALWAYS, work);
+		assertEquals(List.of(List.of(UnitKey.event("e1"))), work.calls);
+		assertThrows(IOException.class, () -> run.step(ALWAYS, work));
+
+		broken.set(false);
+		assertTrue(run.step(NEVER, work));
+		assertEquals(List.of(List.of(UnitKey.event("e1")),
+				List.of(presentation("e1", "p1"), booking("e1", "p1", seat(1))), List.of(UnitKey.event("e2"))),
+				work.calls);
+		assertEquals(List.of(), work.skips);
+	}
+
+	@Test
+	void presentationsThatStayUnlistableSkipTheEventWithEverythingBelow() throws IOException {
+		seats(local, 1, 1);
+		folder(local, "events/e2");
+		AtomicBoolean broken = new AtomicBoolean(true);
+		breakSharedListing("events/e1/presentations", broken);
+		Recorder work = new Recorder();
+		run.begin();
+		run.step(ALWAYS, work); // Kopf
+
+		int failures = stepUntilItPasses(work, FullSyncRun.SKIP_AFTER);
+
+		assertEquals(FullSyncRun.FAILURES_BEFORE_SKIP, failures);
+		assertEquals(List.of(new Skip(UnitKey.event("e1"), true)), work.skips);
+		assertTrue(run.step(NEVER, work));
+		assertEquals(List.of(List.of(UnitKey.event("e1")), List.of(UnitKey.event("e2"))), work.calls);
 	}
 
 	@Test

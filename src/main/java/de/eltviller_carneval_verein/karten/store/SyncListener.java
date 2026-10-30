@@ -50,7 +50,7 @@ public interface SyncListener {
 	default void reconnected() {
 	}
 
-	/** Ein Fehler mit fertigem Text samt Code für die Fußzeile ({@code SYS-006}, {@code SYS-008}, {@code SYS-009}, {@code SYS-012}). */
+	/** Ein Fehler mit fertigem Text samt Code für die Fußzeile ({@code SYS-006}, {@code SYS-008}, {@code SYS-009}, {@code SYS-012}, {@code SYS-013}). */
 	default void error(String message) {
 	}
 

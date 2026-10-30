@@ -81,7 +81,11 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * Fortschritt zeigt {@link #fullSyncProgress()}. Im ersten Lauf einer Verbindung ({@link #connect}) folgen die Takte ohne
  * Pause aufeinander ({@link #tick()} liefert {@code true}, {@code tickSafely} wiederholt sofort), solange der Ordner
  * erreichbar ist und nichts scheitert; die Arbeitssperre wird dazwischen frei. Sein Ende liefert das Ergebnis von
- * {@link #connect} und vervollständigt die Marke "verbunden" ({@link #connectionComplete()}).
+ * {@link #connect} und vervollständigt die Marke "verbunden" ({@link #connectionComplete()}). Ein Block, der dauerhaft
+ * scheitert, hält den Lauf nicht fest: Er wird nach einer Weile Einheit für Einheit abgeglichen, und eine Einheit, die
+ * auch dann scheitert, wird übersprungen (SYS-013) und im nächsten Lauf erneut versucht; ihre Vorstellung bleibt bis
+ * dahin zurückgestellt. Überspringt ein Lauf mit Mitnehmen, bleibt die Marke unvollständig, bis ein späterer Lauf die
+ * übersprungenen Einheiten mitgenommen hat.
  * <p>
  * <b>Marke "verbunden"</b> ({@code <AppData>/connection.json}, nur lokal): Ordner, Zeitpunkt und ob der erste Lauf zu Ende
  * war. Der erste Lauf schreibt sie an seinem Beginn als unvollständig und an seinem Ende als vollständig,
@@ -277,6 +281,24 @@ public final class SyncService {
 		volatile boolean wantedDuringRun;
 		/** Ob der laufende Vollabgleich alle lokalen Ansprüche hochlädt (Mitnehmen); entschieden bei seinem Beginn. */
 		volatile boolean uploadLocalClaims;
+		/**
+		 * Die Einheiten, die ein Lauf beim Mitnehmen übersprungen hat (jeweils mit allem darunter): Ihre fremden Ansprüche
+		 * kämen ohne Mitnehmen nie in den gemeinsamen Ordner. Spätere Läufe gleichen genau sie mit Mitnehmen ab
+		 * ({@link SyncService#syncSection}); bis einer davon ohne Überspringen zu Ende kommt, bleibt die Marke "verbunden"
+		 * unvollständig und {@link SyncService#connectionComplete()} {@code false}, und ein Neustart setzt wie nach einem
+		 * abgebrochenen ersten Lauf mit Mitnehmen fort. Leer, wenn nichts offen ist. Unter der Arbeitssperre.
+		 */
+		Set<UnitKey> owedMerge = Set.of();
+		/** Wie {@link #owedMerge}, die der laufende Vollabgleich übersprungen hat; zählt erst ab seinem Ende. Unter der Arbeitssperre. */
+		Set<UnitKey> owedMergeInRun = new HashSet<>();
+		/**
+		 * Die Vorstellungen und Events, unter denen der letzte beendete Vollabgleich etwas übersprungen hat
+		 * ({@link FullSyncRun#skippedTrees()}): Ihre Einheiten bleiben zurückgestellt ({@link ResolverHost#deferred}), bis ein
+		 * Lauf zu Ende kommt, der unter ihnen nichts mehr überspringt; die des laufenden kennt er selbst. Ein fremdes Umsetzen
+		 * zwischen einer übersprungenen und einer abgeglichenen Buchung sähe sonst wie ein Storno aus. Geschrieben unter der
+		 * Arbeitssperre, gelesen auch von der Auflösung.
+		 */
+		volatile Set<UnitKey> skippedTrees = Set.of();
 		/**
 		 * Die Entscheidung des Verbindens ({@link ConnectDecision}), gefasst beim ersten Beginn eines Laufs, sobald beide Seiten
 		 * gelesen sind; {@code null} bis dahin. Ein wiederholter Beginn (nach einem Fehler danach) entscheidet nie neu, sondern
@@ -2416,6 +2438,7 @@ public final class SyncService {
 			}
 			FullSyncRun run = new FullSyncRun(local, current.shared, clock);
 			run.begin();
+			current.owedMergeInRun = new HashSet<>();
 			current.run = run;
 			publishProgress(current, run.progress());
 		} catch (IOException | RuntimeException e) {
@@ -2489,12 +2512,29 @@ public final class SyncService {
 		Instant end = sliceStart.plus(FULL_SYNC_SLICE_BUDGET);
 		boolean finished;
 		try {
-			finished = run.step(end, units -> syncSection(current, round, units));
+			finished = run.step(end, new FullSyncRun.Work() {
+				@Override
+				public void sync(List<UnitKey> units) throws IOException {
+					syncSection(current, round, units);
+				}
+
+				@Override
+				public boolean reachable() {
+					return probe(current.path);
+				}
+
+				@Override
+				public void skipped(UnitKey unit, boolean subtree, Exception cause) {
+					unitSkipped(current, unit, subtree, cause);
+				}
+			});
 		} finally {
 			publishProgress(current, run.progress());
 		}
 		if (finished) {
-			if (current.firstRun) {
+			// was beim Mitnehmen übersprungen wurde, lässt das Mitnehmen offen (Link#owedMerge)
+			boolean completes = (current.firstRun || !current.owedMerge.isEmpty()) && current.owedMergeInRun.isEmpty();
+			if (completes) {
 				try {
 					writeConnectionMarker(current, true);
 				} catch (IOException | RuntimeException e) {
@@ -2503,8 +2543,30 @@ public final class SyncService {
 					LOGGER.log(Level.WARNING, markerWriteFailed(), e);
 				}
 			}
-			endRun(current, round);
+			endRun(current, round, completes);
 		}
+	}
+
+	/**
+	 * Der Vollabgleich hat eine Einheit übersprungen ({@link FullSyncRun#step}): SYS-013 einmal je Einheit und Programmlauf.
+	 * Wurde die Einheit mit Mitnehmen abgeglichen, bleibt das Mitnehmen für sie offen ({@link Link#owedMerge}).
+	 */
+	private void unitSkipped(Link current, UnitKey unit, boolean subtree, Exception cause) {
+		if (merges(current, unit)) {
+			current.owedMergeInRun.add(unit);
+		}
+		String text = StoreMessages.skipped(subtree ? unit.relativePath() + " mit allem darunter" : unit.relativePath(),
+				StoreMessages.describe(cause));
+		LOGGER.log(Level.FINE, text, cause);
+		notifier.errorOnce(StoreMessages.SYS_SKIPPED + " " + unit.relativePath(), text);
+	}
+
+	/**
+	 * Ob die Einheit mit Mitnehmen abgeglichen wird: im Lauf mit Mitnehmen alle, sonst die, deren Mitnehmen ein früherer
+	 * Lauf offen ließ ({@link Link#owedMerge}).
+	 */
+	private static boolean merges(Link current, UnitKey unit) {
+		return current.uploadLocalClaims || FullSyncRun.covers(current.owedMerge, unit);
 	}
 
 	/**
@@ -2541,9 +2603,9 @@ public final class SyncService {
 	}
 
 	/**
-	 * Ein Block des Vollabgleichs: gleicht die Einheiten ab ({@link FullSync#syncUnits}, mit der Entscheidung über das
-	 * Mitnehmen vom Beginn des Laufs), löst die geänderten auf, trägt sie in den Index ein, meldet die Verluste und klärt
-	 * umstrittene Plätze.
+	 * Ein Block des Vollabgleichs: gleicht die Einheiten ab ({@link FullSync#syncUnits}; mit Mitnehmen, was
+	 * {@link #merges} nennt), löst die geänderten auf, trägt sie in den Index ein, meldet die Verluste und klärt umstrittene
+	 * Plätze.
 	 * <p>
 	 * Geändert ist auch jede lokale Einheit des Blocks, die der Index nicht kennt ({@link UnitIndex#entry}, eine Abfrage im
 	 * Speicher): Kam sie an der App vorbei in den lokalen Bestand, während der Index als sauber beendet galt (etwa eine
@@ -2564,7 +2626,7 @@ public final class SyncService {
 		Instant now = clock.instant();
 		// Hochgeladene Ansprüche (beim Mitnehmen alle, sonst die eigenen, die im gemeinsamen Ordner fehlten) ab jetzt
 		// beobachten, je Anspruch sofort, damit auch ein abgebrochener Abgleich nichts verliert
-		FullSyncResult result = FullSync.syncUnits(local, current.shared, units, current.uploadLocalClaims, ownership(),
+		FullSyncResult result = FullSync.syncUnits(local, current.shared, units, unit -> merges(current, unit), ownership(),
 				files, clock, unit -> index.entry(unit) != null, uploaded -> watchOwnClaims(
 						List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))),
 				partial -> takeOverSection(round, partial));
@@ -2620,8 +2682,15 @@ public final class SyncService {
 	 * dem ersten Lauf einer Verbindung meldet es {@link #connectionComplete()}, und der Takt liefert das Ergebnis von
 	 * {@link #connect}. Die Marke "verbunden" wurde dann als vollständig geschrieben, oder das Schreiben scheiterte und steht
 	 * nur im Log: Sie bleibt unvollständig, und der nächste Start nimmt ohne Rückfrage mit ({@code runSlice}).
+	 * <p>
+	 * Hat der Lauf beim Mitnehmen Einheiten übersprungen, kommt das Ergebnis trotzdem, aber {@link #connectionComplete()}
+	 * bleibt {@code false}, bis ein späterer Lauf sie mitgenommen hat ({@link Link#owedMerge}); erst dann ist
+	 * {@code completes}. Zurückgestellt bleibt, wo dieser Lauf übersprungen hat ({@link Link#skippedTrees}).
 	 */
-	private void endRun(Link current, Round round) {
+	private void endRun(Link current, Round round, boolean completes) {
+		current.owedMerge = Set.copyOf(current.owedMergeInRun);
+		current.owedMergeInRun = new HashSet<>();
+		current.skippedTrees = current.run.skippedTrees();
 		current.connectMode = null;
 		current.uploadLocalClaims = false;
 		current.run = null;
@@ -2637,6 +2706,8 @@ public final class SyncService {
 		if (current.firstRun) {
 			current.firstRun = false;
 			current.endOutcomeDue = true;
+		}
+		if (completes) {
 			notifier.setConnectionComplete(true);
 		}
 		publishProgress(current, null);
@@ -3446,7 +3517,10 @@ public final class SyncService {
 			return SyncService.this.append(saveId, changes, false);
 		}
 
-		/** Ob der laufende Vollabgleich die Vorstellung der Einheit erst zum Teil abgeglichen hat ({@link FullSyncRun#inProgress}). */
+		/**
+		 * Ob der laufende Vollabgleich die Vorstellung der Einheit erst zum Teil abgeglichen hat ({@link FullSyncRun#inProgress}),
+		 * oder ob er bzw. der letzte unter ihrer Vorstellung oder ihrem Event etwas übersprungen hat ({@link Link#skippedTrees}).
+		 */
 		@Override
 		public boolean deferred(UnitKey unit) {
 			Link current = currentLink();
@@ -3454,7 +3528,7 @@ public final class SyncService {
 				return false;
 			}
 			FullSyncRun run = current.run;
-			return run != null && run.inProgress(unit);
+			return run != null && run.inProgress(unit) || FullSyncRun.covers(current.skippedTrees, unit);
 		}
 
 		/** SYS-006 mit dem gemeinsamen Ordner; im Einzelbetrieb mit dem lokalen Bestand, in den geschrieben wird. */

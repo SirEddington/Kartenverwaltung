@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Handler;
@@ -144,17 +145,28 @@ class ConnectFlowStoreTest {
 
 	/** Fremde Hallen {@code <prefix>0}, {@code <prefix>1}, ... in einem gemeinsamen Ordner (wie {@link #seedSharedHalls}). */
 	private void seedHalls(Path root, String prefix, int count) throws IOException {
-		VersionStore sharedStore = new VersionStore(root.resolve("data"), new NioFileLayer());
 		long millis = clock.instant().toEpochMilli() - 3_600_000L;
 		for (int i = 0; i < count; i++) {
-			UnitKey hall = UnitKey.hall(prefix + i);
-			Version v = new Version(StoreCodec.FORMAT, VersionId.create(millis, OTHER, i), List.of(), OTHER, "Kasse", null,
-					clock.instant(), prefix + i, false, MAPPER.createObjectNode().put("name", "Halle " + i));
-			byte[] bytes = StoreCodec.write(v);
-			assertTrue(sharedStore.writeVersion(hall, v.id(), bytes));
-			assertTrue(sharedStore.createClaim(hall, "root",
-					StoreCodec.write(new Claim(v.id(), StoreCodec.sha256(bytes), OTHER, clock.instant()))));
+			writeForeign(root, UnitKey.hall(prefix + i), VersionId.create(millis, OTHER, i), prefix + i, "Halle " + i, true);
 		}
+	}
+
+	/**
+	 * Eine Version des fremden Rechners {@link #OTHER} im Bestand unter {@code root} (gemeinsamer Ordner oder AppData), mit
+	 * Anspruch {@code root}, wenn {@code claim}.
+	 */
+	private Version writeForeign(Path root, UnitKey unit, VersionId id, String saveId, String name, boolean claim)
+			throws IOException {
+		VersionStore store = new VersionStore(root.resolve("data"), new NioFileLayer());
+		Version v = new Version(StoreCodec.FORMAT, id, List.of(), OTHER, "Kasse", null, clock.instant(), saveId, false,
+				MAPPER.createObjectNode().put("name", name));
+		byte[] bytes = StoreCodec.write(v);
+		assertTrue(store.writeVersion(unit, id, bytes));
+		if (claim) {
+			assertTrue(store.createClaim(unit, "root",
+					StoreCodec.write(new Claim(id, StoreCodec.sha256(bytes), OTHER, clock.instant()))));
+		}
+		return v;
 	}
 
 	private static Version save(Node node, UnitKey unit, String name) throws IOException {
@@ -191,10 +203,16 @@ class ConnectFlowStoreTest {
 	}
 
 	/** Takte, bis kein Vollabgleich mehr läuft; liefert, was {@code tick()} jeweils meldete. */
-	private static List<Boolean> tickUntilRunEnds(Node node) {
+	private List<Boolean> tickUntilRunEnds(Node node) {
+		return tickUntilRunEnds(node, Duration.ZERO);
+	}
+
+	/** Wie {@link #tickUntilRunEnds(Node)}, nach jedem Takt stellt die Uhr um {@code gap} vor. */
+	private List<Boolean> tickUntilRunEnds(Node node, Duration gap) {
 		List<Boolean> results = new ArrayList<>();
 		do {
 			results.add(node.service.tick());
+			clock.advance(gap);
 			assertTrue(results.size() < 100, "der Lauf endet nicht");
 		} while (node.service.fullSyncProgress().get() != null);
 		return results;
@@ -545,13 +563,7 @@ class ConnectFlowStoreTest {
 		a.service.startup("");
 		AtomicBoolean broken = new AtomicBoolean(true);
 		breakMarker(a, broken);
-		List<String> errors = new ArrayList<>();
-		a.service.setListener(new SyncListener() {
-			@Override
-			public void error(String message) {
-				errors.add(message);
-			}
-		});
+		List<String> errors = recordErrors(a);
 		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
 
 		assertFalse(a.service.tick());
@@ -1912,5 +1924,142 @@ class ConnectFlowStoreTest {
 		}
 		assertNotEquals(mine1.id(), again.snapshots().get(h1).version());
 		assertEquals(foreign.payload(), again.unitState(h1).head().payload());
+	}
+
+	// --- eine Einheit, die sich dauerhaft nicht abgleichen lässt (KARV-106)
+
+	/** Lässt das Auflisten der Einheit im gemeinsamen Ordner scheitern, solange {@code broken} gilt. */
+	private void breakSharedUnit(Node node, UnitKey unit, AtomicBoolean broken) {
+		Path folder = sharedUnit(unit);
+		node.layer.failWhen(p -> broken.get() && p.startsWith(folder), "listNamesWithTemps",
+				new AccessDeniedException(folder.toString()));
+	}
+
+	/** Die Fehlermeldungen für die Fußzeile ({@link SyncListener#error}), ab jetzt; ersetzt den Empfänger des Rechners. */
+	private static List<String> recordErrors(Node node) {
+		List<String> errors = Collections.synchronizedList(new ArrayList<>());
+		node.service.setListener(new SyncListener() {
+			@Override
+			public void error(String message) {
+				errors.add(message);
+			}
+		});
+		return errors;
+	}
+
+	/** Eine fremde Version mit Anspruch {@code root} im gemeinsamen Ordner, kurz vor jetzt. */
+	private Version foreignInShared(UnitKey unit, String name, int seq) throws IOException {
+		return writeForeign(sharedRoot, unit, VersionId.create(clock.millis() - 60_000, OTHER, seq), "sb-" + seq, name, true);
+	}
+
+	/**
+	 * Die Halle g0 liegt nur im lokalen Bestand, mit dem Anspruch eines anderen Rechners: Nur das Mitnehmen lädt ihn hoch.
+	 * Im ersten Lauf lässt sie sich im gemeinsamen Ordner nicht abgleichen und wird übersprungen; der Lauf endet trotzdem,
+	 * aber das Mitnehmen bleibt offen (Marke unvollständig), bis ein späterer Lauf g0 mitnimmt.
+	 */
+	@Test
+	void skippedUnitEndsTheFirstRunButItsMergeStaysOwedUntilALaterRunTakesItAlong() throws IOException {
+		seedSharedHalls(2);
+		Node a = new Node("a");
+		seedHalls(a.appData, "g", 1);
+		assertTrue(a.service.startup(""));
+		List<String> errors = recordErrors(a);
+		UnitKey g0 = UnitKey.hall("g0");
+		AtomicBoolean broken = new AtomicBoolean(true);
+		breakSharedUnit(a, g0, broken);
+
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+
+		assertEquals(Kind.FEHLER, result.getNow(null).kind(), "das Ergebnis kam mit dem ersten Fehlversuch");
+		assertEquals(List.of("f0", "f1", "g0"), a.service.hallIds(), "die übrigen Einheiten sind abgeglichen");
+		List<String> skipped = errors.stream().filter(e -> e.startsWith(StoreMessages.SYS_SKIPPED)).toList();
+		assertEquals(1, skipped.size(), "gemeldet: " + errors);
+		assertTrue(skipped.get(0).contains(g0.relativePath()), skipped.get(0));
+		assertFalse(Files.exists(sharedUnit(g0).resolve("claims/root.json")));
+		assertFalse(a.marker().orElseThrow().complete(), "das Mitnehmen ist nicht vollständig");
+		assertFalse(a.service.connectionComplete().get());
+
+		// der Fehler ist behoben: Der nächste Lauf nimmt g0 mit, auch den fremden Anspruch, aber nur g0: Ein fremder Anspruch,
+		// der inzwischen an der App vorbei lokal auftaucht, geht ohne Mitnehmen nicht hinaus
+		broken.set(false);
+		seedHalls(a.appData, "n", 1);
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+
+		assertEquals(OTHER, sharedClaim(g0).machine());
+		assertFalse(Files.exists(sharedUnit(UnitKey.hall("n0")).resolve("claims/root.json")), "kein Lauf mit Mitnehmen für alles");
+		assertTrue(a.marker().orElseThrow().complete());
+		assertTrue(a.service.connectionComplete().get());
+		assertEquals(1, errors.stream().filter(e -> e.startsWith(StoreMessages.SYS_SKIPPED)).count());
+	}
+
+	@Test
+	void skipInARunWithoutMergeLeavesTheConnectionComplete() throws IOException {
+		seedSharedHalls(2);
+		Node a = new Node("a");
+		AtomicBoolean broken = new AtomicBoolean(true);
+		breakSharedUnit(a, UnitKey.hall("f1"), broken);
+		assertTrue(a.service.startup(shared));
+
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+
+		assertEquals(List.of("f0"), a.service.hallIds());
+		assertTrue(a.service.connectionComplete().get());
+		assertEquals(Optional.empty(), a.marker());
+		// der nächste Lauf holt f1 nach
+		broken.set(false);
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+		assertEquals(List.of("f0", "f1"), a.service.hallIds());
+	}
+
+	/**
+	 * Eine übersprungene Buchung hält ihre Vorstellung zurückgestellt, über das Ende des Laufs hinaus: Ein fremdes Umsetzen
+	 * zwischen ihr und einer anderen Buchung sähe sonst wie ein Storno aus. A-1 hat einen Verlust (der eigene Verkauf
+	 * verliert beim Mitnehmen gegen einen fremden Anspruch), A-2 gibt es nur im gemeinsamen Ordner, und sie lässt sich dort
+	 * nicht abgleichen. Erst nach dem Lauf, der A-2 abgleicht, liest die Auflösung A-1.
+	 */
+	@Test
+	void skippedBookingKeepsItsPresentationDeferredUntilALaterRunSyncsIt() throws IOException {
+		Node a = new Node("a");
+		assertTrue(a.service.startup(""));
+		UnitKey first = UnitKey.booking("e1", "p1", "A-1");
+		UnitKey second = UnitKey.booking("e1", "p1", "A-2");
+		save(a, first, "Anna");
+		clock.advance(Duration.ofHours(2));
+		foreignInShared(first, "Bea", 0);
+		foreignInShared(second, "Carl", 1);
+		AtomicBoolean broken = new AtomicBoolean(true);
+		breakSharedUnit(a, second, broken);
+		// zählt, wie oft die Auflösung den Stand von A-1 liest
+		AtomicInteger resolverReads = new AtomicInteger();
+		Path firstLocal = a.localData().resolve(first.relativePath());
+		for (String operation : List.of("read", "listNames")) {
+			a.layer.failWhen(p -> {
+				if (p.startsWith(firstLocal) && calledFrom("mergeStretches")) {
+					resolverReads.incrementAndGet();
+				}
+				return false;
+			}, operation, new IOException("nie"));
+		}
+
+		a.service.connect(shared, ConnectMode.MERGE);
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+		for (int i = 0; i < 3; i++) {
+			a.service.tick();
+			clock.advance(Duration.ofSeconds(5));
+		}
+
+		assertEquals(0, resolverReads.get(), "die Vorstellung bleibt zurückgestellt");
+		assertFalse(Files.exists(a.localData().resolve(second.relativePath())));
+
+		broken.set(false);
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+		a.service.tick();
+
+		assertTrue(Files.exists(a.localData().resolve(second.relativePath())));
+		assertTrue(resolverReads.get() > 0, "nach dem Lauf, der A-2 abgleicht, wird A-1 aufgelöst");
 	}
 }

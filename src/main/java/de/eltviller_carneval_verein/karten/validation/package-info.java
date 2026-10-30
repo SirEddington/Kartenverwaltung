@@ -33,7 +33,7 @@
  * <tr><td>Sitz</td><td>SEA</td><td>{@link SeatValidator} / {@link SeatIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Halle</td><td>HLL</td><td>{@link HallValidator} / {@link HallIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Hallenobjekt</td><td>HOB</td><td>{@link HallObjectValidator} / {@link HallObjectIssue}</td><td>vorhanden</td></tr>
- * <tr><td>technisch (unerwartet)</td><td>SYS</td><td>GlobalErrorHandler.CODE (SYS-001), store.StoreMessages (SYS-005 bis SYS-012)</td><td>vorhanden</td></tr>
+ * <tr><td>technisch (unerwartet)</td><td>SYS</td><td>GlobalErrorHandler.CODE (SYS-001), store.StoreMessages (SYS-005 bis SYS-013)</td><td>vorhanden</td></tr>
  * </table>
  */
 package de.eltviller_carneval_verein.karten.validation;

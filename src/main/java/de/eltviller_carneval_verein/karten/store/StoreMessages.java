@@ -3,7 +3,7 @@ package de.eltviller_carneval_verein.karten.store;
 import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
 
 /**
- * Codes und Texte der technischen Meldungen des Versionsspeichers ({@code SYS-005} bis {@code SYS-012}). Die Texte sind
+ * Codes und Texte der technischen Meldungen des Versionsspeichers ({@code SYS-005} bis {@code SYS-013}). Die Texte sind
  * Vorlagen mit den Platzhaltern {@code &1} und {@code &2}; fertig formatiert lauten sie {@code "<Code>: <Text>"}.
  * Nummern werden nie wiederverwendet; {@code SYS-002} bis {@code SYS-004} bleiben unbesetzt (siehe das Package
  * {@code validation}).
@@ -34,6 +34,9 @@ public final class StoreMessages {
 	/** Im gemeinsamen Ordner liegt eine Versionsdatei gleichen Namens mit anderem Inhalt. */
 	public static final String SYS_CONTENT_MISMATCH = "SYS-012";
 
+	/** Der Vollabgleich hat eine Einheit übersprungen, die sich wiederholt nicht abgleichen ließ. */
+	public static final String SYS_SKIPPED = "SYS-013";
+
 	private static final String UNREACHABLE_TEXT = "Der gemeinsame Ordner &1 ist nicht erreichbar. Du kannst "
 			+ "weiterarbeiten; neue Verkäufe und Änderungen sind vorläufig, bis sie hochgeladen sind.";
 
@@ -55,6 +58,9 @@ public final class StoreMessages {
 
 	private static final String CONTENT_MISMATCH_TEXT = "Im gemeinsamen Ordner liegt &1 mit anderem Inhalt als lokal. Es "
 			+ "wurde nichts überschrieben.";
+
+	private static final String SKIPPED_TEXT = "&1 ließ sich wiederholt nicht mit dem gemeinsamen Ordner abgleichen und wurde "
+			+ "übersprungen: &2. Der nächste Abgleich versucht es erneut.";
 
 	private StoreMessages() {
 	}
@@ -97,6 +103,11 @@ public final class StoreMessages {
 	/** SYS-012: Im gemeinsamen Ordner liegt {@code file} mit anderem Inhalt als lokal. */
 	public static String contentMismatch(String file) {
 		return SYS_CONTENT_MISMATCH + ": " + MessageTemplate.format(CONTENT_MISMATCH_TEXT, file);
+	}
+
+	/** SYS-013: Der Vollabgleich hat {@code unit} übersprungen, weil sie aus dem Grund {@code cause} wiederholt scheiterte. */
+	public static String skipped(String unit, String cause) {
+		return SYS_SKIPPED + ": " + MessageTemplate.format(SKIPPED_TEXT, unit, cause);
 	}
 
 	/**

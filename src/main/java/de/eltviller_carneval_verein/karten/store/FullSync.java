@@ -74,8 +74,8 @@ public final class FullSync {
 	 * @param local             der lokale Bestand
 	 * @param shared            der gemeinsame Bestand
 	 * @param units             die Einheiten; ob es sie auf einer Seite gibt, ist gleich
-	 * @param uploadLocalClaims ob alle lokalen Anspruchsdateien in den gemeinsamen Ordner gelegt werden (Verbinden mit
-	 *                          Mitnehmen); sonst fließen nach außen nur eigene Ansprüche, die dort fehlen
+	 * @param uploadLocalClaims je Einheit, ob alle ihre lokalen Anspruchsdateien in den gemeinsamen Ordner gelegt werden
+	 *                          (Verbinden mit Mitnehmen); sonst fließen nach außen nur eigene Ansprüche, die dort fehlen
 	 * @param own               was dieser Rechner als eigen ansieht (für eigene Ansprüche und die verlorenen Versionen)
 	 * @param files             die Dateischicht, über die ein verdrängter lokaler Anspruch ersetzt wird
 	 * @param clock             die Uhr für den Zeitstempel im Namen verdrängter Ansprüche
@@ -90,12 +90,12 @@ public final class FullSync {
 	 * @throws IOException wenn ein Schritt scheitert; ebenso unverändert eine {@link RuntimeException} aus einem Schritt
 	 */
 	public static FullSyncResult syncUnits(VersionStore local, VersionStore shared, Collection<UnitKey> units,
-			boolean uploadLocalClaims, Ownership own, FileLayer files, Clock clock, Predicate<UnitKey> known,
+			Predicate<UnitKey> uploadLocalClaims, Ownership own, FileLayer files, Clock clock, Predicate<UnitKey> known,
 			Consumer<FullSyncResult.UploadedClaim> uploaded, Consumer<FullSyncResult> onAbort) throws IOException {
 		Run run = new Run(local, shared, own, files, clock, known, uploaded);
 		try {
 			for (UnitKey unit : units) {
-				run.syncUnit(unit, uploadLocalClaims);
+				run.syncUnit(unit, uploadLocalClaims.test(unit));
 			}
 		} catch (IOException | RuntimeException e) {
 			try {

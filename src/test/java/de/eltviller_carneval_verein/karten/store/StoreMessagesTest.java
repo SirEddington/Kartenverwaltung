@@ -12,11 +12,12 @@ import org.junit.jupiter.api.Test;
 class StoreMessagesTest {
 
 	@Test
-	void codesAreTheNumbersFiveToTwelve() {
-		assertEquals(List.of("SYS-005", "SYS-006", "SYS-007", "SYS-008", "SYS-009", "SYS-010", "SYS-011", "SYS-012"),
+	void codesAreTheNumbersFiveToThirteen() {
+		assertEquals(List.of("SYS-005", "SYS-006", "SYS-007", "SYS-008", "SYS-009", "SYS-010", "SYS-011", "SYS-012",
+				"SYS-013"),
 				List.of(StoreMessages.SYS_UNREACHABLE, StoreMessages.SYS_SYNC_FAILED, StoreMessages.SYS_REPAIRED,
 						StoreMessages.SYS_DAMAGED, StoreMessages.SYS_NEWER_FORMAT, StoreMessages.SYS_ALREADY_RUNNING,
-						StoreMessages.SYS_DUPLICATE_MACHINE, StoreMessages.SYS_CONTENT_MISMATCH));
+						StoreMessages.SYS_DUPLICATE_MACHINE, StoreMessages.SYS_CONTENT_MISMATCH, StoreMessages.SYS_SKIPPED));
 	}
 
 	@Test
@@ -38,13 +39,16 @@ class StoreMessagesTest {
 				+ "Installation). Dieser Rechner hat eine neue Kennung erhalten.", StoreMessages.duplicateMachine());
 		assertEquals("SYS-012: Im gemeinsamen Ordner liegt events/e1/v.json mit anderem Inhalt als lokal. Es wurde "
 				+ "nichts überschrieben.", StoreMessages.contentMismatch("events/e1/v.json"));
+		assertEquals("SYS-013: halls/h1 ließ sich wiederholt nicht mit dem gemeinsamen Ordner abgleichen und wurde "
+				+ "übersprungen: AccessDeniedException: E:\\ECV\\data\\halls\\h1. Der nächste Abgleich versucht es erneut.",
+				StoreMessages.skipped("halls/h1", "AccessDeniedException: E:\\ECV\\data\\halls\\h1"));
 	}
 
 	@Test
 	void placeholdersAreAlwaysFilled() {
 		for (String text : List.of(StoreMessages.unreachable("a"), StoreMessages.syncFailed("a", "b"),
 				StoreMessages.repaired("a", "b"), StoreMessages.damaged("a"), StoreMessages.newerFormat("a"),
-				StoreMessages.contentMismatch("a"))) {
+				StoreMessages.contentMismatch("a"), StoreMessages.skipped("a", "b"))) {
 			assertFalse(text.matches("(?s).*&[1-9].*"), text);
 		}
 	}

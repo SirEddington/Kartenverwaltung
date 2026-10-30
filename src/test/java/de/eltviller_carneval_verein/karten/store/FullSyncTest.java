@@ -106,7 +106,7 @@ class FullSyncTest {
 	 */
 	private FullSyncResult syncAll(VersionStore local, VersionStore shared, boolean upload,
 			Consumer<FullSyncResult.UploadedClaim> uploaded) throws IOException {
-		return FullSync.syncUnits(local, shared, unitsOfBoth(local, shared), upload, OWN, files, CLOCK, KNOWN, uploaded,
+		return FullSync.syncUnits(local, shared, unitsOfBoth(local, shared), unit -> upload, OWN, files, CLOCK, KNOWN, uploaded,
 				NO_ABORT);
 	}
 
@@ -179,7 +179,7 @@ class FullSyncTest {
 		UnitKey onlyFolder = E2;
 		List<UnitKey> asked = new ArrayList<>();
 
-		FullSyncResult result = FullSync.syncUnits(local, shared, List.of(E1, HALL, onlyFolder), false, OWN, files, CLOCK,
+		FullSyncResult result = FullSync.syncUnits(local, shared, List.of(E1, HALL, onlyFolder), unit -> false, OWN, files, CLOCK,
 				unit -> {
 					asked.add(unit);
 					return unit.equals(HALL);
@@ -200,7 +200,7 @@ class FullSyncTest {
 		AtomicReference<FullSyncResult> partial = new AtomicReference<>();
 
 		assertThrows(IOException.class,
-				() -> FullSync.syncUnits(local, faultyShared, List.of(E1), false, OWN, files, CLOCK, unit -> false, claim -> {
+				() -> FullSync.syncUnits(local, faultyShared, List.of(E1), unit -> false, OWN, files, CLOCK, unit -> false, claim -> {
 				}, partial::set));
 
 		assertEquals(Set.of(E1), partial.get().changed());
@@ -341,14 +341,14 @@ class FullSyncTest {
 		AtomicReference<FullSyncResult> partial = new AtomicReference<>();
 
 		IllegalStateException thrown = assertThrows(IllegalStateException.class,
-				() -> FullSync.syncUnits(local, faultyShared, units, true, OWN, files, CLOCK, KNOWN, claim -> {
+				() -> FullSync.syncUnits(local, faultyShared, units, unit -> true, OWN, files, CLOCK, KNOWN, claim -> {
 				}, partial::set));
 
 		assertSame(cause, thrown);
 		assertEquals(List.of(new LostVersion(E1, List.of(V1), FOREIGN)), partial.get().lost());
 		assertEquals(Set.of(E1), partial.get().changed());
 		// die Wiederholung findet auf E1 beide Ansprüche gleich: nichts mehr zu melden, nur HALL wird nachgeholt
-		FullSyncResult again = FullSync.syncUnits(local, shared, units, true, OWN, files, CLOCK, KNOWN, claim -> {
+		FullSyncResult again = FullSync.syncUnits(local, shared, units, unit -> true, OWN, files, CLOCK, KNOWN, claim -> {
 		}, NO_ABORT);
 		assertTrue(again.lost().isEmpty());
 		assertTrue(again.changed().isEmpty());
@@ -370,7 +370,7 @@ class FullSyncTest {
 		AtomicReference<FullSyncResult> partial = new AtomicReference<>();
 
 		assertThrows(IllegalStateException.class,
-				() -> FullSync.syncUnits(faultyLocal, shared, List.of(E1), true, OWN, faulty, CLOCK, KNOWN, claim -> {
+				() -> FullSync.syncUnits(faultyLocal, shared, List.of(E1), unit -> true, OWN, faulty, CLOCK, KNOWN, claim -> {
 				}, partial::set));
 
 		assertEquals(List.of(new LostVersion(E1, List.of(V1), FOREIGN)), partial.get().lost());
@@ -390,7 +390,7 @@ class FullSyncTest {
 		AtomicReference<FullSyncResult> partial = new AtomicReference<>();
 
 		IOException thrown = assertThrows(IOException.class,
-				() -> FullSync.syncUnits(local, faultyShared, List.of(HALL), true, OWN, files, CLOCK, KNOWN, claim -> {
+				() -> FullSync.syncUnits(local, faultyShared, List.of(HALL), unit -> true, OWN, files, CLOCK, KNOWN, claim -> {
 				}, partial::set));
 
 		assertSame(cause, thrown);
@@ -410,7 +410,7 @@ class FullSyncTest {
 		IllegalStateException callbackFailure = new IllegalStateException("Melden gescheitert");
 
 		IOException thrown = assertThrows(IOException.class,
-				() -> FullSync.syncUnits(local, faultyShared, List.of(HALL), true, OWN, files, CLOCK, KNOWN, claim -> {
+				() -> FullSync.syncUnits(local, faultyShared, List.of(HALL), unit -> true, OWN, files, CLOCK, KNOWN, claim -> {
 				}, partial -> {
 					throw callbackFailure;
 				}));
@@ -424,7 +424,7 @@ class FullSyncTest {
 		put(local, E1, version(ME, V1));
 		AtomicBoolean called = new AtomicBoolean();
 
-		FullSync.syncUnits(local, shared, List.of(E1), false, OWN, files, CLOCK, KNOWN, claim -> {
+		FullSync.syncUnits(local, shared, List.of(E1), unit -> false, OWN, files, CLOCK, KNOWN, claim -> {
 		}, partial -> called.set(true));
 
 		assertFalse(called.get());
@@ -838,7 +838,7 @@ class FullSyncTest {
 		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
 
 		FullSyncResult expected = run(false);
-		FullSyncResult actual = FullSync.syncUnits(localCopy, sharedCopy, units, false, OWN, files, CLOCK, KNOWN, seen::add,
+		FullSyncResult actual = FullSync.syncUnits(localCopy, sharedCopy, units, unit -> false, OWN, files, CLOCK, KNOWN, seen::add,
 				NO_ABORT);
 
 		assertEquals(expected, actual);
