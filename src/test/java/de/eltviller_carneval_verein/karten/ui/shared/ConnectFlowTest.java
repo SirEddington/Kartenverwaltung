@@ -20,6 +20,7 @@ import de.eltviller_carneval_verein.karten.store.ConnectMode;
 import de.eltviller_carneval_verein.karten.store.ConnectOutcome;
 import de.eltviller_carneval_verein.karten.store.ConnectOutcome.Kind;
 import de.eltviller_carneval_verein.karten.store.ConnectionControl;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncState;
 
 class ConnectFlowTest {
@@ -37,6 +38,8 @@ class ConnectFlowTest {
 	private boolean guardAllows = true;
 	private int guardAsked;
 	private Path shared;
+	private Path appDataDir;
+	private RuntimeException saveFailure;
 	private ConnectFlow flow;
 
 	@BeforeEach
@@ -49,7 +52,33 @@ class ConnectFlowTest {
 		}, dir -> {
 			saves.add(String.valueOf(dir));
 			callsAtSave.add(sync.calls());
+			if (saveFailure != null) {
+				throw saveFailure;
+			}
 		}, appData, path -> true);
+		appDataDir = appData;
+	}
+
+	/**
+	 * Eine Verbindung, die alles an {@link #sync} weitergibt, außer dem Aufruf {@code method}: der wirft {@code failure}.
+	 */
+	private ConnectionControl syncFailingOn(String method, RuntimeException failure) {
+		return (ConnectionControl) Proxy.newProxyInstance(getClass().getClassLoader(),
+				new Class<?>[] { ConnectionControl.class }, (proxy, called, args) -> {
+					if (called.getName().equals(method)) {
+						throw failure;
+					}
+					try {
+						return called.invoke(sync, args);
+					} catch (InvocationTargetException e) {
+						throw e.getCause();
+					}
+				});
+	}
+
+	private ConnectFlow flowOver(ConnectionControl connection) {
+		return new ConnectFlow(connection, Runnable::run, Runnable::run, new RecordingScreen(), () -> true, dir -> {
+		}, appDataDir, path -> true);
 	}
 
 	private String dir() {
@@ -360,24 +389,169 @@ class ConnectFlowTest {
 
 	@Test
 	void connectThrowingCountsAsFailure() {
-		ConnectionControl throwingConnection = (ConnectionControl) Proxy.newProxyInstance(
-				getClass().getClassLoader(), new Class<?>[] { ConnectionControl.class }, (proxy, method, args) -> {
-					if (method.getName().equals("connect")) {
-						throw new IllegalStateException("nicht möglich");
-					}
-					try {
-						return method.invoke(sync, args);
-					} catch (InvocationTargetException e) {
-						throw e.getCause();
-					}
-				});
-		ConnectFlow throwing = new ConnectFlow(throwingConnection, Runnable::run, Runnable::run, new RecordingScreen(),
-				() -> true, dir -> {
-				}, root, path -> true);
+		ConnectFlow throwing = flowOver(syncFailingOn("connect", new IllegalStateException("nicht möglich")));
 
 		throwing.connectAtStart(dir(), ConnectMode.MERGE);
 
 		assertEquals(List.of("showProgress", "showHint:nicht möglich:null"), screenLog);
+	}
+
+	@Test
+	void failingSaveBeforeConnectReportsAndEndsTheFlow() {
+		saveFailure = new IllegalStateException("Datei gesperrt");
+
+		flow.connectByButton(dir());
+
+		assertEquals(List.of("checkFailed:Datei gesperrt"), screenLog);
+		assertEquals(List.of(), sync.calls(), "ohne gespeicherte Einstellung wird nicht verbunden");
+		assertFalse(flow.running());
+	}
+
+	@Test
+	void failingSaveOnCancelStillCancels() {
+		flow.connectByButton(dir());
+		sync.outcome(new ConnectOutcome(Kind.ENTSCHEIDUNG, true, null, null));
+		saveFailure = new IllegalStateException("Datei gesperrt");
+
+		flow.cancelDecision();
+
+		assertEquals("cancelled", screenLog.get(screenLog.size() - 1));
+		assertEquals(List.of("connect:" + dir() + ":ASK", "disconnect"), sync.calls());
+		assertFalse(flow.running());
+	}
+
+	@Test
+	void failingDisconnectStillCancels() {
+		ConnectFlow failing = flowOver(syncFailingOn("disconnect", new IllegalStateException("kaputt")));
+
+		failing.cancelDecision();
+
+		assertEquals(List.of("cancelled"), screenLog);
+		assertFalse(failing.running());
+	}
+
+	@Test
+	void decisionAfterOfflineHintCanBeAnswered() {
+		flow.connectByButton(dir());
+		sync.outcome(new ConnectOutcome(Kind.OFFLINE, false, null, "weg"));
+
+		flow.decisionNeeded(true);
+		assertEquals(List.of("showProgress", "showHint:weg:null", "hideHint", "askDecision:" + dir() + ":true"),
+				screenLog);
+
+		flow.decide(ConnectMode.MERGE);
+		assertEquals(List.of("connect:" + dir() + ":ASK", "decide:MERGE"), sync.calls());
+		sync.outcome(outcome(Kind.AKTUELL));
+
+		assertEquals("finished", screenLog.get(screenLog.size() - 1));
+		assertFalse(flow.running());
+	}
+
+	@Test
+	void decisionNeededIsAskedOnlyOncePerQuestion() {
+		flow.connectByButton(dir());
+
+		flow.decisionNeeded(true);
+		sync.outcome(new ConnectOutcome(Kind.ENTSCHEIDUNG, true, null, null));
+		assertEquals(List.of("showProgress", "askDecision:" + dir() + ":true"), screenLog);
+
+		flow.decide(ConnectMode.SET_ASIDE);
+		flow.decisionNeeded(false);
+		sync.outcome(new ConnectOutcome(Kind.ENTSCHEIDUNG, false, null, null));
+		assertEquals(List.of("showProgress", "askDecision:" + dir() + ":true", "askDecision:" + dir() + ":false"),
+				screenLog);
+	}
+
+	@Test
+	void decisionNeededWithoutRunningFlowDoesNothing() {
+		flow.decisionNeeded(true);
+
+		assertEquals(List.of(), screenLog);
+		assertFalse(flow.running());
+	}
+
+	@Test
+	void secondOutageShowsTheHintAgain() {
+		Path aside = root.resolve("data-beiseite-2026");
+		flow.connectByButton(dir());
+		sync.outcome(new ConnectOutcome(Kind.FEHLER, false, aside, "kaputt"));
+		sync.state(SyncState.AKTUELL);
+
+		sync.state(SyncState.OFFLINE);
+
+		assertEquals(List.of("showProgress", "showHint:kaputt:" + aside, "hideHint", "showHint:kaputt:" + aside),
+				screenLog);
+		assertTrue(flow.running());
+	}
+
+	@Test
+	void startWithAskWhileOfflineFinishesAtOnce() {
+		flow.connectAtStart(dir(), ConnectMode.ASK);
+
+		sync.outcome(new ConnectOutcome(Kind.OFFLINE, false, null, "weg"));
+
+		assertEquals(List.of("showProgress", "finished"), screenLog);
+		assertFalse(flow.running());
+	}
+
+	@Test
+	void startWithAskAfterFailureShowsTheHint() {
+		flow.connectAtStart(dir(), ConnectMode.ASK);
+
+		sync.outcome(new ConnectOutcome(Kind.FEHLER, false, null, "kaputt"));
+
+		assertEquals(List.of("showProgress", "showHint:kaputt:null"), screenLog);
+	}
+
+	@Test
+	void startWithMergeWhileOfflineWaits() {
+		flow.connectAtStart(dir(), ConnectMode.MERGE);
+
+		sync.outcome(new ConnectOutcome(Kind.OFFLINE, false, null, "weg"));
+
+		assertEquals(List.of("showProgress", "showHint:weg:null"), screenLog);
+		assertTrue(flow.running());
+	}
+
+	@Test
+	void buttonWhileOfflineStillWaits() {
+		flow.connectByButton(dir());
+
+		sync.outcome(new ConnectOutcome(Kind.OFFLINE, false, null, "weg"));
+
+		assertEquals(List.of("showProgress", "showHint:weg:null"), screenLog);
+	}
+
+	@Test
+	void decideRefusedWhileOfflineShowsTheUnreachableText() {
+		sync.sharedDir(dir()).state(SyncState.OFFLINE);
+		ConnectFlow failing = flowOver(syncFailingOn("decideConnect", new IllegalStateException("Keine Verbindung wartet")));
+
+		failing.decide(ConnectMode.MERGE);
+
+		assertEquals(List.of("showProgress", "showHint:" + StoreMessages.unreachable(dir()) + ":null"), screenLog);
+	}
+
+	@Test
+	void decideRefusedWhileOnlineShowsTheDeveloperMessage() {
+		sync.sharedDir(dir()).state(SyncState.AKTUELL);
+		ConnectFlow failing = flowOver(syncFailingOn("decideConnect", new IllegalStateException("Keine Verbindung wartet")));
+
+		failing.decide(ConnectMode.MERGE);
+
+		assertEquals(List.of("showProgress", "showHint:Keine Verbindung wartet:null"), screenLog);
+	}
+
+	@Test
+	void progressBeforeTheFailureStillEndsTheRun() {
+		flow.connectByButton(dir());
+		sync.progress(0.2);
+
+		sync.outcome(new ConnectOutcome(Kind.FEHLER, false, null, "kaputt"));
+		assertEquals(List.of("showProgress", "showHint:kaputt:null"), screenLog);
+
+		sync.progress(null);
+		assertEquals(List.of("showProgress", "showHint:kaputt:null", "finished"), screenLog);
 	}
 
 	@Test

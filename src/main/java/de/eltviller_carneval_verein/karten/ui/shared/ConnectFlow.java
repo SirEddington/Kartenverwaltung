@@ -7,11 +7,14 @@ import java.util.concurrent.Executor;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.store.ConnectMode;
 import de.eltviller_carneval_verein.karten.store.ConnectOutcome;
 import de.eltviller_carneval_verein.karten.store.ConnectOutcome.Kind;
 import de.eltviller_carneval_verein.karten.store.ConnectionControl;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncState;
 import javafx.beans.value.ChangeListener;
 
@@ -26,6 +29,8 @@ import javafx.beans.value.ChangeListener;
  * {@code fx} zurück. Es läuft höchstens ein Ablauf; {@link Screen#finished()} kommt je Ablauf höchstens einmal.
  */
 public final class ConnectFlow {
+
+	private static final Logger LOGGER = Logger.getLogger(ConnectFlow.class.getName());
 
 	/** Was die Oberfläche beim Verbinden zeigt. */
 	public interface Screen {
@@ -45,14 +50,15 @@ public final class ConnectFlow {
 		void askDecision(String dir, boolean setAsideAllowed);
 
 		/**
-		 * Unter dem Fortschritt die Ursache zeigen und den Knopf "Trotzdem öffnen" (Antwort:
-		 * {@link ConnectFlow#openAnyway()}).
+		 * Unter dem Fortschritt die Ursache zeigen. Der Knopf "Trotzdem öffnen" (Antwort:
+		 * {@link ConnectFlow#openAnyway()}) steht vom ersten Aufruf an bis zum Ende des Ablaufs zur Verfügung; er hängt nicht
+		 * an der Ursache. Der Aufruf kommt wieder, wenn der Abgleich nach {@link #hideHint()} erneut ausfällt.
 		 *
 		 * @param setAsidePath der Ordner, in den schon beiseitegelegt wurde, sonst {@code null}
 		 */
 		void showHint(String message, Path setAsidePath);
 
-		/** Die Ursache wieder ausblenden: der Abgleich läuft wieder. */
+		/** Nur den Text der Ursache ausblenden, weil der Abgleich wieder läuft; "Trotzdem öffnen" bleibt. */
 		void hideHint();
 
 		/** Der erste Lauf ist zu Ende (oder "Trotzdem öffnen"): neu laden, dann Hauptmenü. */
@@ -74,11 +80,16 @@ public final class ConnectFlow {
 	private final ChangeListener<SyncState> stateListener;
 
 	/** Nummer des laufenden Ablaufs; Rückrufe eines früheren Ablaufs (oder nach {@link #cancel()}) tun nichts. */
-	private int generation;
+	private volatile int generation;
 	private boolean running;
 	private boolean closed;
 	private boolean awaitingDecision;
+	/** Ob die offene Frage "Beiseitelegen" anbot. */
+	private boolean askedAllowed;
 	private boolean hintVisible;
+	/** Text und Beiseite-Ordner des letzten Hinweises, für den Fall, dass er nach einer Pause wieder erscheint. */
+	private String lastMessage;
+	private Path lastSetAsidePath;
 	private String dir;
 	private FirstRunWatch watch;
 	private boolean listeningToState;
@@ -104,7 +115,12 @@ public final class ConnectFlow {
 		this.saveSharedDir = saveSharedDir;
 		this.appDataDir = appDataDir;
 		this.reachable = reachable;
-		this.stateListener = (observable, oldState, newState) -> fx.execute(() -> stateChanged(newState));
+		this.stateListener = (observable, oldState, newState) -> {
+			// Der Ablauf wird beim Ereignis festgehalten: Ein Ereignis, das noch in der Warteschlange steht, wenn der Ablauf
+			// endet, darf nicht im nächsten Ablauf wirken.
+			int id = generation;
+			fx.execute(() -> stateChanged(id, newState));
+		};
 	}
 
 	/** Ob ein Ablauf unterwegs ist. */
@@ -146,7 +162,7 @@ public final class ConnectFlow {
 		int id = begin();
 		dir = dirText;
 		screen.showProgress();
-		connect(id, dirText, mode);
+		connect(id, dirText, mode, true);
 	}
 
 	/**
@@ -176,9 +192,22 @@ public final class ConnectFlow {
 		}
 		background.execute(() -> {
 			try {
-				sync.decideConnect(mode).whenComplete((outcome, error) -> fx.execute(() -> handle(id, outcome, error)));
+				sync.decideConnect(mode).whenComplete((outcome, error) -> fx.execute(() -> handle(id, outcome, error, false)));
+			} catch (IllegalStateException e) {
+				// Keine Verbindung wartet mehr auf die Entscheidung. Ist der Ordner nicht erreichbar, ist das der Grund:
+				// dann den Text von SYS-005 zeigen statt der Entwicklermeldung.
+				fx.execute(() -> {
+					if (!isCurrent(id)) {
+						return;
+					}
+					if (sync.syncState().get() == SyncState.OFFLINE) {
+						showHint(id, StoreMessages.unreachable(dir != null ? dir : sync.sharedDir()), null);
+					} else {
+						handle(id, null, e, false);
+					}
+				});
 			} catch (RuntimeException e) {
-				fx.execute(() -> handle(id, null, e));
+				fx.execute(() -> handle(id, null, e, false));
 			}
 		});
 	}
@@ -196,16 +225,38 @@ public final class ConnectFlow {
 		background.execute(() -> {
 			try {
 				sync.disconnect();
-			} finally {
-				fx.execute(() -> {
-					if (isCurrent(id)) {
-						saveSharedDir.accept(null);
-						end(id);
-						screen.cancelled();
-					}
-				});
+			} catch (RuntimeException e) {
+				LOGGER.log(Level.WARNING, "Trennen vom gemeinsamen Ordner ist fehlgeschlagen", e);
 			}
+			fx.execute(() -> {
+				if (!isCurrent(id)) {
+					return;
+				}
+				try {
+					saveSharedDir.accept(null);
+				} catch (RuntimeException e) {
+					LOGGER.log(Level.WARNING, "Die Einstellung des gemeinsamen Ordners ließ sich nicht löschen", e);
+				} finally {
+					end(id);
+					screen.cancelled();
+				}
+			});
 		});
+	}
+
+	/**
+	 * Der Versionsspeicher meldet über {@code connectDecisionNeeded}, dass er auf eine Entscheidung wartet (auf {@code fx}
+	 * aufrufen). Läuft ein Ablauf, der noch keine Frage gestellt hat, wird ein Hinweis ausgeblendet und die Frage gestellt:
+	 * Kommt die Entscheidung nach {@link Kind#OFFLINE} oder {@link Kind#FEHLER}, ist das Ergebnis von {@code connect} schon
+	 * abgegeben und kommt nicht noch einmal. Dieselbe Frage wird nicht zweimal gestellt (der Rückruf und das Ergebnis
+	 * {@link Kind#ENTSCHEIDUNG} melden sie beide). Ohne laufenden Ablauf tut es nichts; dann antwortet der Aufrufer mit
+	 * {@link #decide}, das einen neuen Ablauf beginnt.
+	 */
+	public void decisionNeeded(boolean setAsideAllowed) {
+		if (closed || !running) {
+			return;
+		}
+		ask(generation, setAsideAllowed);
 	}
 
 	/** "Trotzdem öffnen": der Ablauf endet sofort, die Oberfläche lädt neu und öffnet das Hauptmenü. */
@@ -242,23 +293,36 @@ public final class ConnectFlow {
 			return;
 		}
 		dir = typed;
-		saveSharedDir.accept(typed);
+		try {
+			saveSharedDir.accept(typed);
+		} catch (RuntimeException e) {
+			// Ohne gespeicherte Einstellung wird nicht verbunden: der nächste Start fände den Ordner sonst nicht
+			end(id);
+			screen.checkFailed(messageOf(e));
+			return;
+		}
 		screen.showProgress();
-		connect(id, typed, ConnectMode.ASK);
+		connect(id, typed, ConnectMode.ASK, false);
 	}
 
-	private void connect(int id, String target, ConnectMode mode) {
+	/**
+	 * @param atStart ob das Verbinden beim Start geschieht: Mit {@link ConnectMode#ASK} läuft der Start dann offline weiter
+	 *                (SYS-005 kommt vom Versionsspeicher), statt auf den Ordner zu warten
+	 */
+	private void connect(int id, String target, ConnectMode mode, boolean atStart) {
+		boolean offlineFinishes = atStart && mode == ConnectMode.ASK;
 		background.execute(() -> {
 			try {
-				sync.connect(target, mode).whenComplete((outcome, error) -> fx.execute(() -> handle(id, outcome, error)));
+				sync.connect(target, mode)
+						.whenComplete((outcome, error) -> fx.execute(() -> handle(id, outcome, error, offlineFinishes)));
 			} catch (RuntimeException e) {
-				fx.execute(() -> handle(id, null, e));
+				fx.execute(() -> handle(id, null, e, false));
 			}
 		});
 	}
 
 	/** Das Ergebnis von {@code connect} oder {@code decideConnect}; ein Fehler gilt wie {@link Kind#FEHLER}. */
-	private void handle(int id, ConnectOutcome outcome, Throwable error) {
+	private void handle(int id, ConnectOutcome outcome, Throwable error, boolean offlineFinishes) {
 		if (!isCurrent(id)) {
 			return;
 		}
@@ -267,12 +331,16 @@ public final class ConnectFlow {
 			return;
 		}
 		switch (outcome.kind()) {
-		case ENTSCHEIDUNG -> {
-			awaitingDecision = true;
-			screen.askDecision(dir != null ? dir : sync.sharedDir(), outcome.setAsideAllowed());
-		}
+		case ENTSCHEIDUNG -> ask(id, outcome.setAsideAllowed());
 		case AKTUELL, AUSSTEHEND -> finish(id);
-		case OFFLINE, FEHLER -> showHint(id, outcome.message(), outcome.setAsidePath());
+		case OFFLINE -> {
+			if (offlineFinishes) {
+				finish(id);
+			} else {
+				showHint(id, outcome.message(), outcome.setAsidePath());
+			}
+		}
+		case FEHLER -> showHint(id, outcome.message(), outcome.setAsidePath());
 		case ABGEBROCHEN -> {
 			end(id);
 			screen.cancelled();
@@ -280,9 +348,35 @@ public final class ConnectFlow {
 		}
 	}
 
-	/** Der erste Lauf ist noch nicht zu Ende: Hinweis zeigen und auf das Ende des Laufs oder das Ende der Störung warten. */
+	/** Die Frage stellen (und einen Hinweis ausblenden); dieselbe Frage, die schon offen ist, nicht noch einmal. */
+	private void ask(int id, boolean setAsideAllowed) {
+		if (!isCurrent(id) || (awaitingDecision && askedAllowed == setAsideAllowed)) {
+			return;
+		}
+		if (hintVisible) {
+			hintVisible = false;
+			screen.hideHint();
+		}
+		awaitingDecision = true;
+		askedAllowed = setAsideAllowed;
+		screen.askDecision(dir != null ? dir : sync.sharedDir(), setAsideAllowed);
+	}
+
+	/**
+	 * Der erste Lauf ist noch nicht zu Ende: Hinweis zeigen und auf das Ende des Laufs oder das Ende der Störung warten.
+	 * <p>
+	 * Warum der Watch erst hier beginnt und nicht mit dem Ablauf: Der Versionsspeicher setzt AKTUELL/AUSSTEHEND fest, bevor
+	 * er es meldet, und das erste Ergebnis gilt (first-wins). Ein in einem Takt festgelegtes Ergebnis wird vor den
+	 * Fortschrittsereignissen des nächsten Takts zugestellt, weil der Arbeiter ein einzelner Thread ist und der Fortschritt
+	 * unter {@code workLock} eingereiht wird. Beim Trennen und Neu-Verbinden erscheint aber {@code null} im Fortschritt
+	 * <em>vor</em> ABGEBROCHEN; ein Watch seit Beginn des Ablaufs hielte das für das Laufende. {@code fx} muss dieselbe
+	 * FIFO-Warteschlange sein wie die {@code ui} des Versionsspeichers ({@code Platform::runLater}), sonst gilt die
+	 * Reihenfolge nicht.
+	 */
 	private void showHint(int id, String message, Path setAsidePath) {
 		hintVisible = true;
+		lastMessage = message;
+		lastSetAsidePath = setAsidePath;
 		if (watch == null) {
 			watch = new FirstRunWatch(sync.fullSyncProgress());
 			watch.onEnded(() -> fx.execute(() -> {
@@ -298,13 +392,22 @@ public final class ConnectFlow {
 		screen.showHint(message, setAsidePath);
 	}
 
-	private void stateChanged(SyncState state) {
-		if (!running || closed || !hintVisible) {
+	/**
+	 * Der Abgleich läuft wieder (Hinweis ausblenden) oder fällt erneut aus (Hinweis wieder zeigen). "Trotzdem öffnen" bleibt
+	 * vom ersten Hinweis an bis zum Ende des Ablaufs; ausgeblendet wird nur die Ursache. Während eine Frage offen ist, bleibt
+	 * der Hinweis aus.
+	 *
+	 * @param id der Ablauf, in dem das Ereignis entstand; ein Ereignis eines früheren Ablaufs tut nichts
+	 */
+	private void stateChanged(int id, SyncState state) {
+		if (!isCurrent(id) || awaitingDecision) {
 			return;
 		}
-		if (state == SyncState.AKTUELL || state == SyncState.AUSSTEHEND) {
+		if (hintVisible && (state == SyncState.AKTUELL || state == SyncState.AUSSTEHEND)) {
 			hintVisible = false;
 			screen.hideHint();
+		} else if (!hintVisible && watch != null && (state == SyncState.OFFLINE || state == SyncState.FEHLER)) {
+			showHint(id, lastMessage, lastSetAsidePath);
 		}
 	}
 
@@ -322,7 +425,10 @@ public final class ConnectFlow {
 	private int begin() {
 		running = true;
 		awaitingDecision = false;
+		askedAllowed = false;
 		hintVisible = false;
+		lastMessage = null;
+		lastSetAsidePath = null;
 		dir = null;
 		return ++generation;
 	}

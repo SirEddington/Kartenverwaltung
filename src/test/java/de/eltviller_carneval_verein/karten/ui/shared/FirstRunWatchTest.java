@@ -53,10 +53,11 @@ class FirstRunWatchTest {
 	@Test
 	void outageKeepingTheValueDoesNotEndTheRun() {
 		FirstRunWatch watch = new FirstRunWatch(progress);
-		progress.set(0.5);
+		progress.set(0.2);
 
-		// Ausfall des Ordners: der Versionsspeicher behält den Fortschritt, es gibt keine Änderung
-		progress.set(0.5);
+		// Ausfall des Ordners: der Versionsspeicher behält den Fortschritt (Wert), setzt ihn aber nie auf null;
+		// der Lauf setzt später mit einem anderen Wert fort
+		progress.set(0.3);
 
 		assertFalse(watch.ended());
 	}
