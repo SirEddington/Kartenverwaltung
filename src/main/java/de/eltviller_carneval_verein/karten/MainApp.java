@@ -15,6 +15,7 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
@@ -107,6 +108,14 @@ public class MainApp extends Application {
 		// Die Einstellungen zuerst: Alles Weitere kann sich nach ihnen richten. Jedes Speichern führt den gespeicherten Stand der Änderungserkennung nach.
 		SettingsStore settingsStore = SettingsStore.getInstance();
 		settingsStore.addListener(ChangeTracker.settings()::markSaved);
+		// Teil-Speichern (z. B. der gemeinsame Ordner beim Verbinden): Ist der Einstellungsbildschirm offen, wird nur der
+		// Vergleichsstand nachgeführt, eine noch nicht gespeicherte Änderung daneben bleibt "geändert"
+		settingsStore.addPartialListener(saved -> {
+			AppSettings current = settingsStore.current();
+			if (ChangeTracker.settings().baseline(current) != null) {
+				ChangeTracker.settings().rebase(current, ChangeTracker.settings().snapshotOf(saved));
+			}
+		});
 
 		// Der Versionsspeicher nimmt zuerst die Sperre gegen einen zweiten Start und liest die Kennung des Rechners;
 		// scheitert das, geht es ohne Fenster nicht weiter

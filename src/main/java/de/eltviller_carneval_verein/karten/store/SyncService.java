@@ -166,7 +166,7 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * halten), und das Beiseitelegen wartet dort auf das Ende laufender lokaler Schreibvorgänge; keiner von beiden braucht
  * dabei eine Sperre, die der andere hält.
  */
-public final class SyncService {
+public final class SyncService implements ConnectionControl {
 
 	private static final Logger LOGGER = Logger.getLogger(SyncService.class.getName());
 	/** Der Logtext, wenn {@link #closeIndex()} die Marke "sauber beendet" wegen eines laufenden {@link #append} auslässt. */
