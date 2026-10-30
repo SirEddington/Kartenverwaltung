@@ -135,6 +135,44 @@ class NioFileLayerTest {
 	}
 
 	@Test
+	void listEntriesMarksFoldersAndHidesTemps() throws IOException {
+		Files.write(dir.resolve("b.json"), bytes("b"));
+		Files.write(dir.resolve("a.json"), bytes("a"));
+		Files.write(dir.resolve("~karv-x.tmp"), bytes("t"));
+		Files.createDirectory(dir.resolve("sub"));
+		Files.createDirectory(dir.resolve("~karv-dir"));
+
+		assertEquals(List.of(new FileLayer.DirEntry("a.json", false), new FileLayer.DirEntry("b.json", false),
+				new FileLayer.DirEntry("sub", true)), layer.listEntries(dir));
+	}
+
+	@Test
+	void listEntriesWithTempsKeepsTempsAndMarksFolders() throws IOException {
+		Files.write(dir.resolve("a.json"), bytes("a"));
+		Files.write(dir.resolve("~karv-x.tmp"), bytes("t"));
+		Files.createDirectory(dir.resolve("sub"));
+		Files.createDirectory(dir.resolve("~karv-dir"));
+
+		assertEquals(List.of(new FileLayer.DirEntry("a.json", false), new FileLayer.DirEntry("sub", true),
+				new FileLayer.DirEntry("~karv-dir", true), new FileLayer.DirEntry("~karv-x.tmp", false)),
+				layer.listEntriesWithTemps(dir));
+	}
+
+	@Test
+	void listEntriesOfMissingFolderIsEmpty() throws IOException {
+		assertEquals(List.of(), layer.listEntries(dir.resolve("fehlt")));
+		assertEquals(List.of(), layer.listEntriesWithTemps(dir.resolve("fehlt")));
+	}
+
+	@Test
+	void listEntriesOfAFileIsAnError() throws IOException {
+		Path file = dir.resolve("x.json");
+		Files.write(file, bytes("x"));
+
+		assertThrows(IOException.class, () -> layer.listEntries(file));
+	}
+
+	@Test
 	void listNamesOfMissingFolderIsEmpty() throws IOException {
 		assertEquals(List.of(), layer.listNames(dir.resolve("gibt-es-nicht")));
 	}

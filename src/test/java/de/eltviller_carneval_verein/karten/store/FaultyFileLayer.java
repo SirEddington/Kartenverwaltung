@@ -23,7 +23,9 @@ import java.util.function.Predicate;
  * Die Operationen heißen wie die Methoden der Schnittstelle: {@code createNew}, {@code read}, {@code exists},
  * {@code listNames}, {@code listNamesWithTemps}, {@code listTree}, {@code isDirectory}, {@code replaceDamaged},
  * {@code rename}, {@code deleteOwnTemps}, {@code deleteOldTemps}. Beide Fassungen von {@code createNew} heißen
- * {@code createNew}, beide von {@code replaceDamaged} {@code replaceDamaged}. Threadsicher.
+ * {@code createNew}, beide von {@code replaceDamaged} {@code replaceDamaged}. {@code listEntries} und
+ * {@code listEntriesWithTemps} zählen als {@code listNames} bzw. {@code listNamesWithTemps}: Ein Test, der dort einen Fehler
+ * einstellt oder die Aufrufe zählt, erfasst beide Wege. Threadsicher.
  */
 public final class FaultyFileLayer implements FileLayer {
 
@@ -254,6 +256,24 @@ public final class FaultyFileLayer implements FileLayer {
 	public List<String> listNamesWithTemps(Path dir) throws IOException {
 		IOException late = enter("listNamesWithTemps", dir);
 		List<String> result = delegate.listNamesWithTemps(dir);
+		throwLate(late);
+		return result;
+	}
+
+	/** Zählt als Aufruf von {@code listNames} (dieselben Fehler und Haken); {@code isDirectory} wird dabei nicht aufgerufen. */
+	@Override
+	public List<DirEntry> listEntries(Path dir) throws IOException {
+		IOException late = enter("listNames", dir);
+		List<DirEntry> result = delegate.listEntries(dir);
+		throwLate(late);
+		return result;
+	}
+
+	/** Zählt als Aufruf von {@code listNamesWithTemps}; {@code isDirectory} wird dabei nicht aufgerufen. */
+	@Override
+	public List<DirEntry> listEntriesWithTemps(Path dir) throws IOException {
+		IOException late = enter("listNamesWithTemps", dir);
+		List<DirEntry> result = delegate.listEntriesWithTemps(dir);
 		throwLate(late);
 		return result;
 	}

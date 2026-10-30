@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.store;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +67,35 @@ public interface FileLayer {
 
 	/** Wie {@link #listNames}, aber mit den {@code ~karv-*}-Einträgen: die Namen der temporären Dateien eingeschlossen. */
 	List<String> listNamesWithTemps(Path dir) throws IOException;
+
+	/** Ein Eintrag eines Ordners: der Name (nicht der Pfad) und ob es ein Ordner ist (sonst eine Datei oder etwas anderes). */
+	record DirEntry(String name, boolean directory) {
+	}
+
+	/**
+	 * Wie {@link #listNames}, aber mit der Angabe je Eintrag, ob er ein Ordner ist, aus demselben Durchlauf: Auf einer
+	 * Netzfreigabe kostet ein Zugriff je Eintrag ({@link #isDirectory}) ein Vielfaches des Auflistens. Sortiert nach Namen,
+	 * ohne {@code ~karv-*}; ist der Ordner nicht vorhanden, ist die Liste leer.
+	 * <p>
+	 * Die Standardfassung fragt {@link #listNames} und dann {@link #isDirectory} je Eintrag; eine Schicht überschreibt sie,
+	 * wenn sie beides in einem Durchlauf liefern kann.
+	 */
+	default List<DirEntry> listEntries(Path dir) throws IOException {
+		List<DirEntry> entries = new ArrayList<>();
+		for (String name : listNames(dir)) {
+			entries.add(new DirEntry(name, isDirectory(dir.resolve(name))));
+		}
+		return entries;
+	}
+
+	/** Wie {@link #listEntries}, aber mit den {@code ~karv-*}-Einträgen (wie {@link #listNamesWithTemps}). */
+	default List<DirEntry> listEntriesWithTemps(Path dir) throws IOException {
+		List<DirEntry> entries = new ArrayList<>();
+		for (String name : listNamesWithTemps(dir)) {
+			entries.add(new DirEntry(name, isDirectory(dir.resolve(name))));
+		}
+		return entries;
+	}
 
 	/**
 	 * Der ganze Verzeichnisbaum unter {@code root} in einem Durchlauf: jeder Ordner, auch ein leerer und {@code root}

@@ -197,9 +197,9 @@ public final class VersionStore {
 	private List<String> unitIds(String folder, boolean events) throws IOException {
 		Path parent = dataRoot.resolve(folder);
 		List<String> ids = new ArrayList<>();
-		for (String name : files.listNames(parent)) {
-			if (files.isDirectory(parent.resolve(name)) && isValidUnit(name, events)) {
-				ids.add(name);
+		for (FileLayer.DirEntry entry : files.listEntries(parent)) {
+			if (entry.directory() && isValidUnit(entry.name(), events)) {
+				ids.add(entry.name());
 			}
 		}
 		return ids;
@@ -250,9 +250,10 @@ public final class VersionStore {
 	public List<String> childNames(UnitKey parent, String folder) throws IOException {
 		Path childDir = unitDir(parent).resolve(folder);
 		List<String> names = new ArrayList<>();
-		for (String name : files.listNames(childDir)) {
-			if (files.isDirectory(childDir.resolve(name)) && childUnit(parent, folder, name).isPresent()) {
-				names.add(name);
+		// ein Listenzugriff mit den Ordner-Kennzeichen, nicht je Eintrag eine Frage: auf einer Netzfreigabe kostet jede einen Zugriff
+		for (FileLayer.DirEntry entry : files.listEntries(childDir)) {
+			if (entry.directory() && childUnit(parent, folder, entry.name()).isPresent()) {
+				names.add(entry.name());
 			}
 		}
 		return names;
@@ -326,20 +327,20 @@ public final class VersionStore {
 		Path unitDir = unitDir(unit);
 		Path claimsDir = unitDir.resolve(CLAIMS);
 		String prefix = unit.relativePath() + "/";
-		List<String> unitNames = files.listNamesWithTemps(unitDir);
-		List<String> claimNamesWithTemps = files.listNamesWithTemps(claimsDir);
+		List<FileLayer.DirEntry> unitEntries = files.listEntriesWithTemps(unitDir);
+		List<FileLayer.DirEntry> claimEntries = files.listEntriesWithTemps(claimsDir);
 
 		List<String> data = new ArrayList<>();
-		for (VersionId id : versionIdsOf(unitDir, unitNames)) {
+		for (VersionId id : versionIdsOf(unitEntries)) {
 			data.add(prefix + id + JSON);
 		}
-		for (String name : claimNamesOf(claimsDir, claimNamesWithTemps)) {
+		for (String name : claimNamesOf(claimEntries)) {
 			data.add(prefix + CLAIMS + "/" + name + JSON);
 		}
 		Collections.sort(data);
 		List<String> temps = new ArrayList<>();
-		addTempNames(temps, unitNames, prefix);
-		addTempNames(temps, claimNamesWithTemps, prefix + CLAIMS + "/");
+		addTempNames(temps, unitEntries.stream().map(FileLayer.DirEntry::name).toList(), prefix);
+		addTempNames(temps, claimEntries.stream().map(FileLayer.DirEntry::name).toList(), prefix + CLAIMS + "/");
 		return new UnitScan(data, temps);
 	}
 
@@ -437,15 +438,15 @@ public final class VersionStore {
 
 	/** Die IDs der Versionsdateien im Einheitenordner, sortiert; fremde Namen und Ordner fehlen. */
 	private List<VersionId> versionIds(Path unitDir) throws IOException {
-		return versionIdsOf(unitDir, files.listNames(unitDir));
+		return versionIdsOf(files.listEntries(unitDir));
 	}
 
-	/** Wie {@link #versionIds}, aus den schon gelisteten Namen im Einheitenordner (temporäre Namen sind keine Versions-IDs). */
-	private List<VersionId> versionIdsOf(Path unitDir, List<String> names) {
+	/** Wie {@link #versionIds}, aus den schon gelisteten Einträgen im Einheitenordner (temporäre Namen sind keine Versions-IDs). */
+	private static List<VersionId> versionIdsOf(List<FileLayer.DirEntry> entries) {
 		List<VersionId> ids = new ArrayList<>();
-		for (String name : names) {
-			Optional<VersionId> id = versionIdOf(name);
-			if (id.isPresent() && !files.isDirectory(unitDir.resolve(name))) {
+		for (FileLayer.DirEntry entry : entries) {
+			Optional<VersionId> id = versionIdOf(entry.name());
+			if (id.isPresent() && !entry.directory()) {
 				ids.add(id.get());
 			}
 		}
@@ -455,15 +456,15 @@ public final class VersionStore {
 	/** Die Namen der Anspruchsdateien unter {@code claims/}, sortiert; fremde Namen und Ordner fehlen. */
 	private List<String> claimNames(Path unitDir) throws IOException {
 		Path claimsDir = unitDir.resolve(CLAIMS);
-		return claimNamesOf(claimsDir, files.listNames(claimsDir));
+		return claimNamesOf(files.listEntries(claimsDir));
 	}
 
-	/** Wie {@link #claimNames}, aus den schon gelisteten Namen in {@code claims/}. */
-	private List<String> claimNamesOf(Path claimsDir, List<String> listed) {
+	/** Wie {@link #claimNames}, aus den schon gelisteten Einträgen in {@code claims/}. */
+	private static List<String> claimNamesOf(List<FileLayer.DirEntry> listed) {
 		List<String> names = new ArrayList<>();
-		for (String name : listed) {
-			Optional<String> claimName = claimNameOf(name);
-			if (claimName.isPresent() && !files.isDirectory(claimsDir.resolve(name))) {
+		for (FileLayer.DirEntry entry : listed) {
+			Optional<String> claimName = claimNameOf(entry.name());
+			if (claimName.isPresent() && !entry.directory()) {
 				names.add(claimName.get());
 			}
 		}

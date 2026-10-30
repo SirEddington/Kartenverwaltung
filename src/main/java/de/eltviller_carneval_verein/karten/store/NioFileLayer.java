@@ -4,9 +4,11 @@ import java.io.IOException;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.NotDirectoryException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardOpenOption;
@@ -16,6 +18,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -110,6 +114,43 @@ public final class NioFileLayer implements FileLayer {
 		}
 		Collections.sort(names);
 		return names;
+	}
+
+	@Override
+	public List<DirEntry> listEntries(Path dir) throws IOException {
+		return listWithKinds(dir, false);
+	}
+
+	@Override
+	public List<DirEntry> listEntriesWithTemps(Path dir) throws IOException {
+		return listWithKinds(dir, true);
+	}
+
+	/**
+	 * Ein Durchlauf des Ordners, der zu jedem Eintrag auch sagt, ob er ein Ordner ist. Die Attribute stammen aus der
+	 * Aufzählung selbst: {@link Files#walkFileTree} mit Tiefe 1 nutzt die Attribute, die das Betriebssystem (unter Windows)
+	 * beim Aufzählen liefert, und fragt nicht je Eintrag noch einmal das Dateisystem; {@code Files.readAttributes} je Eintrag
+	 * täte das (gemessen: so schnell wie {@code isDirectory} je Eintrag). Ein Verweis zählt als Ordner, wenn sein Ziel einer
+	 * ist, wie bei {@link Files#isDirectory}. Ein Eintrag, der während des Durchlaufs verschwindet, fehlt in der Liste.
+	 */
+	private static List<DirEntry> listWithKinds(Path dir, boolean withTemps) throws IOException {
+		List<DirEntry> entries = new ArrayList<>();
+		Files.walkFileTree(dir, EnumSet.noneOf(FileVisitOption.class), 1, new MissingTolerantVisitor() {
+			@Override
+			public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+				if (file.equals(dir)) {
+					throw new NotDirectoryException(dir.toString());
+				}
+				String name = file.getFileName().toString();
+				if (withTemps || !name.startsWith(TEMP_PREFIX)) {
+					boolean directory = attrs.isSymbolicLink() ? Files.isDirectory(file) : attrs.isDirectory();
+					entries.add(new DirEntry(name, directory));
+				}
+				return FileVisitResult.CONTINUE;
+			}
+		});
+		entries.sort(Comparator.comparing(DirEntry::name));
+		return entries;
 	}
 
 	@Override

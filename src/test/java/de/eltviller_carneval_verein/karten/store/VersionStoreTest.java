@@ -301,6 +301,35 @@ class VersionStoreTest {
 	}
 
 	@Test
+	void listingUnitsAsksNoPerEntryFolderQuestion() throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		VersionStore store = new VersionStore(dir.resolve("data"), layer);
+		UnitKey event = UnitKey.event("e1");
+		UnitKey presentation = UnitKey.presentation("e1", "p1");
+		int bookings = 40;
+		for (int n = 0; n < bookings; n++) {
+			store.writeVersion(UnitKey.booking("e1", "p1", String.format("s%03d", n)), V1, versionBytes(V1));
+		}
+		store.writeVersion(event, V1, versionBytes(V1));
+		store.createClaim(event, "root", claimBytes(V1, versionBytes(V1)));
+		store.writeVersion(UnitKey.hall("h1"), V2, versionBytes(V2));
+		put(store.dataRoot().resolve("events/e1/presentations/p1/bookings/Datei.txt"), "x");
+		Files.createDirectories(store.dataRoot().resolve("events/e1/presentations/p1/bookings/ungültig!"));
+		int before = layer.calls().size();
+
+		List<String> names = store.childNames(presentation, "bookings");
+		store.eventIds();
+		store.hallIds();
+		store.unitDataFiles(event);
+		store.hasVersions(event);
+		store.scanUnit(event);
+
+		assertEquals(bookings, names.size());
+		assertEquals(List.of(), layer.calls().subList(before, layer.calls().size()).stream()
+				.filter(c -> c.startsWith("isDirectory")).toList());
+	}
+
+	@Test
 	void scanUnitYieldsDataAndTempFilesWithOneListingPerFolder() throws IOException {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		VersionStore store = new VersionStore(dir.resolve("data"), layer);
