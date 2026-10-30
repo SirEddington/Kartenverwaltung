@@ -2576,7 +2576,7 @@ public final class SyncService {
 	 * Das Melden am Ende des Takts ({@link #reportChanges}) übergeht sie ({@link #settled}), außer ein späterer Schritt des
 	 * Takts hat sie wieder geändert.
 	 * <p>
-	 * Scheitert der Block mittendrin, werden die geänderten Einheiten und die Verluste bis dahin ({@link FullSync.Aborted})
+	 * Scheitert der Block mittendrin, werden die geänderten Einheiten und die Verluste bis dahin (das Teilergebnis)
 	 * trotzdem eingetragen und gemeldet, bevor der Fehler weitergeht: Ein ausgeglichener Anspruch ist danach auf beiden
 	 * Seiten gleich, und die Wiederholung des Blocks fände ihn nicht mehr; doppelt meldet sie nichts, weil sie nur noch
 	 * findet, was noch nicht erledigt ist (und {@link #reportLoss} je Version nur einmal meldet). Umstrittene Plätze und
@@ -2585,25 +2585,12 @@ public final class SyncService {
 	 */
 	private void syncSection(Link current, Round round, List<UnitKey> units) throws IOException {
 		Instant now = clock.instant();
-		FullSyncResult result;
-		try {
-			// Hochgeladene Ansprüche (beim Mitnehmen alle, sonst die eigenen, die im gemeinsamen Ordner fehlten) ab jetzt
-			// beobachten, je Anspruch sofort, damit auch ein abgebrochener Abgleich nichts verliert
-			result = FullSync.syncUnits(local, current.shared, units, current.uploadLocalClaims, ownership(), files, clock,
-					unit -> index.entry(unit) != null, uploaded -> watchOwnClaims(
-							List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))));
-		} catch (FullSync.Aborted e) {
-			Throwable cause = e.getCause();
-			try {
-				takeOverSection(round, e.partial());
-			} catch (RuntimeException inner) {
-				cause.addSuppressed(inner);
-			}
-			if (cause instanceof RuntimeException unchecked) {
-				throw unchecked;
-			}
-			throw (IOException) cause;
-		}
+		// Hochgeladene Ansprüche (beim Mitnehmen alle, sonst die eigenen, die im gemeinsamen Ordner fehlten) ab jetzt
+		// beobachten, je Anspruch sofort, damit auch ein abgebrochener Abgleich nichts verliert
+		FullSyncResult result = FullSync.syncUnits(local, current.shared, units, current.uploadLocalClaims, ownership(),
+				files, clock, unit -> index.entry(unit) != null, uploaded -> watchOwnClaims(
+						List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))),
+				partial -> takeOverSection(round, partial));
 		takeOverSection(round, result);
 		settleAll(current, result.contested(), round);
 		deleteOwnOldTemps(current, result.sharedTemps());

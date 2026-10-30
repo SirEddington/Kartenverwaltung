@@ -38,31 +38,6 @@ public final class FullSync {
 	}
 
 	/**
-	 * Ein Abgleich, der mittendrin abbrach. Was er bis dahin erledigt hat, steht schon auf der Platte und kommt als
-	 * Teilergebnis mit: Ein ausgeglichener Anspruch ist danach auf beiden Seiten gleich, die Wiederholung fände ihn nicht
-	 * mehr, und ohne das Teilergebnis gingen Verlust und Indexeintrag verloren. Die Ursache ({@link #getCause()}) ist der
-	 * ursprüngliche Fehler, eine {@link IOException} oder eine {@link RuntimeException}.
-	 */
-	public static final class Aborted extends IOException {
-		private static final long serialVersionUID = 1L;
-
-		private final transient FullSyncResult partial;
-
-		Aborted(FullSyncResult partial, Exception cause) {
-			super(cause.getMessage(), cause);
-			this.partial = partial;
-		}
-
-		/**
-		 * Was der Abgleich bis zum Fehler erledigt hat: {@link FullSyncResult#changed()} und {@link FullSyncResult#lost()}
-		 * vollständig, die übrigen Sammlungen so weit, wie er kam.
-		 */
-		public FullSyncResult partial() {
-			return partial;
-		}
-	}
-
-	/**
 	 * Gleicht die beiden Bestände ab.
 	 * <ol>
 	 * <li>Versionsdateien, die auf einer Seite fehlen, werden auf die andere kopiert.</li>
@@ -112,7 +87,8 @@ public final class FullSync {
 			Ownership own, FileLayer files, Clock clock, Consumer<FullSyncResult.UploadedClaim> uploaded)
 			throws IOException {
 		return syncUnits(local, shared, unitsOfBoth(local, shared), uploadLocalClaims, own, files, clock, unit -> true,
-				uploaded);
+				uploaded, partial -> {
+				});
 	}
 
 	/**
@@ -130,19 +106,29 @@ public final class FullSync {
 	 * @param units    die Einheiten; ob es sie auf einer Seite gibt, ist gleich
 	 * @param known    ob der Aufrufer die Einheit schon kennt (eine Abfrage im Speicher, ohne Dateizugriff)
 	 * @param uploaded erfährt jeden hochgeladenen Anspruch sofort, auch wenn der Abgleich danach abbricht
-	 * @throws Aborted wenn ein Schritt scheitert ({@link IOException} oder {@link RuntimeException}); trägt das Teilergebnis
-	 *                 bis dahin, damit der Aufrufer meldet und einträgt, was schon geschehen ist
+	 * @param onAbort  bekommt, wenn ein Schritt scheitert, das Teilergebnis bis dahin, bevor der Fehler weitergeht: Was
+	 *                 der Abgleich erledigt hat, steht schon auf der Platte (ein ausgeglichener Anspruch ist danach auf beiden
+	 *                 Seiten gleich, die Wiederholung fände ihn nicht mehr), und ohne das Teilergebnis gingen Verlust und
+	 *                 Indexeintrag verloren. {@link FullSyncResult#changed()} und {@link FullSyncResult#lost()} sind
+	 *                 vollständig, die übrigen Sammlungen so weit, wie er kam. Wirft der Rückruf selbst, hängt sein Fehler
+	 *                 als unterdrückte Ausnahme am ursprünglichen
+	 * @throws IOException wenn ein Schritt scheitert; ebenso unverändert eine {@link RuntimeException} aus einem Schritt
 	 */
 	public static FullSyncResult syncUnits(VersionStore local, VersionStore shared, Collection<UnitKey> units,
 			boolean uploadLocalClaims, Ownership own, FileLayer files, Clock clock, Predicate<UnitKey> known,
-			Consumer<FullSyncResult.UploadedClaim> uploaded) throws Aborted {
+			Consumer<FullSyncResult.UploadedClaim> uploaded, Consumer<FullSyncResult> onAbort) throws IOException {
 		Run run = new Run(local, shared, own, files, clock, known, uploaded);
 		try {
 			for (UnitKey unit : units) {
 				run.syncUnit(unit, uploadLocalClaims);
 			}
 		} catch (IOException | RuntimeException e) {
-			throw new Aborted(run.result(), e);
+			try {
+				onAbort.accept(run.result());
+			} catch (RuntimeException inner) {
+				e.addSuppressed(inner);
+			}
+			throw e;
 		}
 		return run.result();
 	}

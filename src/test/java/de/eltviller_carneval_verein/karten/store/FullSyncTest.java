@@ -23,6 +23,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -54,6 +56,9 @@ class FullSyncTest {
 	private static final VersionId FOREIGN = VersionId.create(1_500_000L, "bbbbbbbb", 0);
 	/** Ein Aufrufer, der jede Einheit schon kennt. */
 	private static final Predicate<UnitKey> KNOWN = unit -> true;
+	/** Ein Aufrufer, der mit dem Teilergebnis eines Abbruchs nichts anfängt. */
+	private static final Consumer<FullSyncResult> NO_ABORT = partial -> {
+	};
 
 	@TempDir
 	Path dir;
@@ -146,7 +151,7 @@ class FullSyncTest {
 					asked.add(unit);
 					return unit.equals(HALL);
 				}, claim -> {
-				});
+				}, NO_ABORT);
 
 		assertEquals(Set.of(E1), result.changed(), "unbekannt und lokal: aufnehmen, obwohl nichts zu kopieren war");
 		assertEquals(List.of(E1, HALL), asked, "ohne lokale Dateien wird nicht gefragt");
@@ -159,12 +164,13 @@ class FullSyncTest {
 		faulty.failWhen(p -> p.toString().replace('\\', '/').endsWith("shared/data/events/e1"), "listNamesWithTemps",
 				new IOException("Störung"));
 		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
+		AtomicReference<FullSyncResult> partial = new AtomicReference<>();
 
-		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
+		assertThrows(IOException.class,
 				() -> FullSync.syncUnits(local, faultyShared, List.of(E1), false, OWN, files, CLOCK, unit -> false, claim -> {
-				}));
+				}, partial::set));
 
-		assertEquals(Set.of(E1), aborted.partial().changed());
+		assertEquals(Set.of(E1), partial.get().changed());
 	}
 
 	@Test
@@ -299,17 +305,18 @@ class FullSyncTest {
 				cause);
 		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
 		List<UnitKey> units = List.of(E1, HALL);
+		AtomicReference<FullSyncResult> partial = new AtomicReference<>();
 
-		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
+		IllegalStateException thrown = assertThrows(IllegalStateException.class,
 				() -> FullSync.syncUnits(local, faultyShared, units, true, OWN, files, CLOCK, KNOWN, claim -> {
-				}));
+				}, partial::set));
 
-		assertSame(cause, aborted.getCause());
-		assertEquals(List.of(new LostVersion(E1, List.of(V1), FOREIGN)), aborted.partial().lost());
-		assertEquals(Set.of(E1), aborted.partial().changed());
+		assertSame(cause, thrown);
+		assertEquals(List.of(new LostVersion(E1, List.of(V1), FOREIGN)), partial.get().lost());
+		assertEquals(Set.of(E1), partial.get().changed());
 		// die Wiederholung findet auf E1 beide Ansprüche gleich: nichts mehr zu melden, nur HALL wird nachgeholt
 		FullSyncResult again = FullSync.syncUnits(local, shared, units, true, OWN, files, CLOCK, KNOWN, claim -> {
-		});
+		}, NO_ABORT);
 		assertTrue(again.lost().isEmpty());
 		assertTrue(again.changed().isEmpty());
 		assertEquals(List.of(new FullSyncResult.UploadedClaim(HALL, "root", V2)), again.uploaded());
@@ -327,13 +334,14 @@ class FullSyncTest {
 		FaultyFileLayer faulty = new FaultyFileLayer(files);
 		faulty.onEach("replaceDamaged", () -> faulty.failNextUnchecked("read", new IllegalStateException("Platte weg")));
 		VersionStore faultyLocal = new VersionStore(local.dataRoot(), faulty);
+		AtomicReference<FullSyncResult> partial = new AtomicReference<>();
 
-		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
+		assertThrows(IllegalStateException.class,
 				() -> FullSync.syncUnits(faultyLocal, shared, List.of(E1), true, OWN, faulty, CLOCK, KNOWN, claim -> {
-				}));
+				}, partial::set));
 
-		assertEquals(List.of(new LostVersion(E1, List.of(V1), FOREIGN)), aborted.partial().lost());
-		assertEquals(Set.of(E1), aborted.partial().changed());
+		assertEquals(List.of(new LostVersion(E1, List.of(V1), FOREIGN)), partial.get().lost());
+		assertEquals(Set.of(E1), partial.get().changed());
 		assertEquals(FOREIGN, StoreCodec.readClaim(local.readClaimBytes(E1, "root").orElseThrow()).version());
 	}
 
@@ -346,14 +354,47 @@ class FullSyncTest {
 		IOException cause = new IOException("Störung");
 		faulty.failWhen(p -> p.toString().replace('\\', '/').contains("shared/data/halls/h1/claims"), "createNew", cause);
 		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
+		AtomicReference<FullSyncResult> partial = new AtomicReference<>();
 
-		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
+		IOException thrown = assertThrows(IOException.class,
 				() -> FullSync.syncUnits(local, faultyShared, List.of(HALL), true, OWN, files, CLOCK, KNOWN, claim -> {
+				}, partial::set));
+
+		assertSame(cause, thrown);
+		assertTrue(partial.get().lost().isEmpty());
+		assertTrue(partial.get().changed().isEmpty());
+	}
+
+	@Test
+	void failingAbortCallbackIsSuppressedOnTheOriginalFailure() throws IOException {
+		Version hall = version(ME, V2);
+		put(local, HALL, hall);
+		claim(local, HALL, hall, AT);
+		FaultyFileLayer faulty = new FaultyFileLayer(files);
+		IOException cause = new IOException("Störung");
+		faulty.failWhen(p -> p.toString().replace('\\', '/').contains("shared/data/halls/h1/claims"), "createNew", cause);
+		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
+		IllegalStateException callbackFailure = new IllegalStateException("Melden gescheitert");
+
+		IOException thrown = assertThrows(IOException.class,
+				() -> FullSync.syncUnits(local, faultyShared, List.of(HALL), true, OWN, files, CLOCK, KNOWN, claim -> {
+				}, partial -> {
+					throw callbackFailure;
 				}));
 
-		assertSame(cause, aborted.getCause());
-		assertTrue(aborted.partial().lost().isEmpty());
-		assertTrue(aborted.partial().changed().isEmpty());
+		assertSame(cause, thrown);
+		assertEquals(List.of(callbackFailure), List.of(thrown.getSuppressed()));
+	}
+
+	@Test
+	void abortCallbackIsNotCalledWithoutAFailure() throws IOException {
+		put(local, E1, version(ME, V1));
+		AtomicBoolean called = new AtomicBoolean();
+
+		FullSync.syncUnits(local, shared, List.of(E1), false, OWN, files, CLOCK, KNOWN, claim -> {
+		}, partial -> called.set(true));
+
+		assertFalse(called.get());
 	}
 
 	@Test
@@ -763,7 +804,8 @@ class FullSyncTest {
 		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
 
 		FullSyncResult expected = run(false);
-		FullSyncResult actual = FullSync.syncUnits(localCopy, sharedCopy, units, false, OWN, files, CLOCK, KNOWN, seen::add);
+		FullSyncResult actual = FullSync.syncUnits(localCopy, sharedCopy, units, false, OWN, files, CLOCK, KNOWN, seen::add,
+				NO_ABORT);
 
 		assertEquals(expected, actual);
 		assertEquals(actual.uploaded(), seen);
