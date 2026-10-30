@@ -17,6 +17,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Der Vollabgleich zwischen dem lokalen Bestand und dem gemeinsamen Ordner: das Sicherheitsnetz für alles, was die
@@ -110,7 +111,8 @@ public final class FullSync {
 	public static FullSyncResult run(VersionStore local, VersionStore shared, boolean uploadLocalClaims,
 			Ownership own, FileLayer files, Clock clock, Consumer<FullSyncResult.UploadedClaim> uploaded)
 			throws IOException {
-		return syncUnits(local, shared, unitsOfBoth(local, shared), uploadLocalClaims, own, files, clock, uploaded);
+		return syncUnits(local, shared, unitsOfBoth(local, shared), uploadLocalClaims, own, files, clock, unit -> true,
+				uploaded);
 	}
 
 	/**
@@ -119,16 +121,22 @@ public final class FullSync {
 	 * im Ordner der Einheit und in ihrem {@code claims/} ({@link VersionStore#unitDataFiles}), nicht die ihrer
 	 * Unterordner. Eine Einheit, die dieser Aufruf als umstritten meldet, lädt keinen eigenen Anspruch hoch: Die Klärung
 	 * ist Sache des Aufrufers, und der nächste Lauf lädt hoch, was danach noch gilt.
+	 * <p>
+	 * Eine Einheit mit Dateien im lokalen Bestand, die {@code known} nicht kennt, steht ebenfalls in
+	 * {@link FullSyncResult#changed()}, auch wenn nichts zu kopieren war: So nimmt der Aufrufer Einheiten auf, die an ihm
+	 * vorbei in den lokalen Bestand kamen (etwa eine zurückgespielte Sicherung). Gefragt wird nach dem Auflisten, das
+	 * ohnehin geschieht; die Frage selbst kostet keinen Dateizugriff.
 	 *
 	 * @param units    die Einheiten; ob es sie auf einer Seite gibt, ist gleich
+	 * @param known    ob der Aufrufer die Einheit schon kennt (eine Abfrage im Speicher, ohne Dateizugriff)
 	 * @param uploaded erfährt jeden hochgeladenen Anspruch sofort, auch wenn der Abgleich danach abbricht
 	 * @throws Aborted wenn ein Schritt scheitert ({@link IOException} oder {@link RuntimeException}); trägt das Teilergebnis
 	 *                 bis dahin, damit der Aufrufer meldet und einträgt, was schon geschehen ist
 	 */
 	public static FullSyncResult syncUnits(VersionStore local, VersionStore shared, Collection<UnitKey> units,
-			boolean uploadLocalClaims, Ownership own, FileLayer files, Clock clock,
+			boolean uploadLocalClaims, Ownership own, FileLayer files, Clock clock, Predicate<UnitKey> known,
 			Consumer<FullSyncResult.UploadedClaim> uploaded) throws Aborted {
-		Run run = new Run(local, shared, own, files, clock, uploaded);
+		Run run = new Run(local, shared, own, files, clock, known, uploaded);
 		try {
 			for (UnitKey unit : units) {
 				run.syncUnit(unit, uploadLocalClaims);
@@ -275,21 +283,27 @@ public final class FullSync {
 		private final List<FeedPoll.Contested> contested = new ArrayList<>();
 		/** Die temporären Dateien, die das Auflisten der Einheiten im gemeinsamen Ordner mitgeliefert hat. */
 		private final List<String> sharedTemps = new ArrayList<>();
+		private final Predicate<UnitKey> known;
 		private final Consumer<FullSyncResult.UploadedClaim> onUpload;
 
-		Run(VersionStore local, VersionStore shared, Ownership own, FileLayer files, Clock clock,
+		Run(VersionStore local, VersionStore shared, Ownership own, FileLayer files, Clock clock, Predicate<UnitKey> known,
 				Consumer<FullSyncResult.UploadedClaim> onUpload) {
 			this.local = local;
 			this.shared = shared;
 			this.own = own;
 			this.files = files;
 			this.clock = clock;
+			this.known = known;
 			this.onUpload = onUpload;
 		}
 
 		/** Gleicht eine Einheit ab (siehe {@link FullSync#syncUnits}). */
 		void syncUnit(UnitKey unit, boolean uploadLocalClaims) throws IOException {
 			List<DataPath> localFiles = dataPaths(unit, local.unitDataFiles(unit));
+			if (!localFiles.isEmpty() && !known.test(unit)) {
+				// an der App vorbei in den lokalen Bestand gekommen: Der Aufrufer nimmt sie auf, auch wenn nichts zu kopieren ist
+				changed.add(unit);
+			}
 			// Im gemeinsamen Ordner ein Listenzugriff je Ordner für Dateien und temporäre Reste zugleich
 			VersionStore.UnitScan sharedScan = shared.scanUnit(unit);
 			sharedTemps.addAll(sharedScan.tempFiles());

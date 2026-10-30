@@ -861,6 +861,96 @@ class SyncServiceTest {
 		assertEquals(List.of(), localReadsBesides(a, BOOKING));
 	}
 
+	/** Ein vollständiges Event (Kopf, Vorstellung, Buchung) und zwei Hallen, an der App vorbei in einen Bestand zu kopieren. */
+	private static final List<UnitKey> COPIED = List.of(UnitKey.event("e2"), UnitKey.presentation("e2", "p1"),
+			UnitKey.booking("e2", "p1", "B-1"), UnitKey.hall("k1"), UnitKey.hall("k2"));
+
+	/**
+	 * Legt je Einheit eine Version des Rechners {@code machine} mit ihrem Anspruch {@code root} in jedem der genannten
+	 * Datenordner ab, in allen gleich: wie ein Kopieren an der App vorbei (etwa eine zurückgespielte Sicherung).
+	 */
+	private static void copyPastTheApp(String machine, List<UnitKey> units, Path... dataRoots) throws IOException {
+		for (int i = 0; i < units.size(); i++) {
+			Version v = version(machine, START.toEpochMilli() - 3_600_000L, i, "k" + i, null);
+			byte[] bytes = StoreCodec.write(v);
+			byte[] claim = StoreCodec.write(new Claim(v.id(), StoreCodec.sha256(bytes), machine, START));
+			for (Path dataRoot : dataRoots) {
+				VersionStore store = new VersionStore(dataRoot, new NioFileLayer());
+				assertTrue(store.writeVersion(units.get(i), v.id(), bytes));
+				assertTrue(store.createClaim(units.get(i), "root", claim));
+			}
+		}
+	}
+
+	/** Prüft, dass der Dienst die Einheiten mit dem Stand aus den lokalen Dateien kennt. */
+	private static void assertIndexed(Node node, List<UnitKey> units) throws IOException {
+		Map<UnitKey, UnitSnapshot> expected = snapshotsFromFiles(node.appData, node.identity.id());
+		Map<UnitKey, UnitSnapshot> actual = node.service.snapshots();
+		for (UnitKey unit : units) {
+			assertNotNull(actual.get(unit), unit + " fehlt im Index");
+			assertEquals(expected.get(unit), actual.get(unit));
+		}
+	}
+
+	@Test
+	void fullSyncIndexesLocalUnitsTheIndexDoesNotKnow() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		a.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+		// an der App vorbei in den lokalen und den gemeinsamen Bestand kopiert, gleich: Der Vollabgleich hat nichts zu kopieren
+		copyPastTheApp(OTHER, COPIED, a.localData(), sharedRoot.resolve("data"));
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(shared));
+		b.service.tick();
+
+		assertFalse(walkedTree(b), "der Start vertraut dem Index: " + b.layer.calls());
+		assertIndexed(b, COPIED);
+		assertTrue(b.events.changedUnits().containsAll(COPIED), b.events.changed.toString());
+		assertTrue(b.events.errors.isEmpty(), b.events.errors.toString());
+		b.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+
+		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(c.service.startup(""));
+		assertFalse(walkedTree(c), c.layer.calls().toString());
+		assertIndexed(c, COPIED);
+	}
+
+	@Test
+	void fullSyncIndexesUnknownUnitsThatAreOnlyLocal() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		a.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(a)));
+		// eigene Einheiten nur im lokalen Bestand (etwa eine zurückgespielte Sicherung): Der Vollabgleich lädt sie hoch (M4)
+		copyPastTheApp(a.identity.id(), COPIED, a.localData());
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(shared));
+		b.service.tick();
+
+		assertFalse(walkedTree(b), "der Start vertraut dem Index: " + b.layer.calls());
+		assertIndexed(b, COPIED);
+		assertTrue(b.events.changedUnits().containsAll(COPIED), b.events.changed.toString());
+		assertTrue(b.events.errors.isEmpty(), b.events.errors.toString());
+		for (UnitKey unit : COPIED) {
+			// wie bisher: eigene Ansprüche, die im gemeinsamen Ordner fehlen, kommen hinzu
+			assertEquals(b.service.snapshots().get(unit).version(), sharedClaim(unit, "root").version());
+		}
+		b.service.closeIndex();
+
+		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(c.service.startup(""));
+		assertFalse(walkedTree(c), c.layer.calls().toString());
+		assertIndexed(c, COPIED);
+	}
+
 	@Test
 	void lateDefeatAfterARestartIsStillDetected() throws IOException {
 		Path appData = dir.resolve("a");

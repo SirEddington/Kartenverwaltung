@@ -7,7 +7,8 @@ import java.util.Set;
  * Das Ergebnis eines Vollabgleichs.
  *
  * @param changed  die Einheiten, die im lokalen Bestand neue Dateien bekommen oder einen Anspruch ersetzt bekommen haben
- *                 und deren gültiger Stand sich damit geändert haben kann
+ *                 und deren gültiger Stand sich damit geändert haben kann, dazu die lokalen Einheiten, die der Aufrufer
+ *                 noch nicht kannte ({@link FullSync#syncUnits})
  * @param lost     die eigenen Versionen, die beim Hochladen lokaler Ansprüche gegen einen schon vorhandenen Anspruch
  *                 verloren haben
  * @param uploaded die lokalen Ansprüche, die dieser Abgleich im gemeinsamen Ordner angelegt hat (nur beim Hochladen

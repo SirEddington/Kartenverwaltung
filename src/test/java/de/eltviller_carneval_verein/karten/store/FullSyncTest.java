@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -51,6 +52,8 @@ class FullSyncTest {
 	private static final VersionId V1 = VersionId.create(1_000_000L, "aaaaaaaa", 0);
 	private static final VersionId V2 = VersionId.create(2_000_000L, "aaaaaaaa", 1);
 	private static final VersionId FOREIGN = VersionId.create(1_500_000L, "bbbbbbbb", 0);
+	/** Ein Aufrufer, der jede Einheit schon kennt. */
+	private static final Predicate<UnitKey> KNOWN = unit -> true;
 
 	@TempDir
 	Path dir;
@@ -125,6 +128,28 @@ class FullSyncTest {
 		assertArrayEquals(sharedBytes, shared.readVersionBytes(E1, V1).orElseThrow());
 		assertTrue(result.changed().isEmpty());
 		assertTrue(result.lost().isEmpty());
+	}
+
+	@Test
+	void localUnitsTheCallerDoesNotKnowCountAsChanged() throws IOException {
+		Version a = version(ME, V1);
+		byte[] bytes = put(local, E1, a);
+		shared.writeVersion(E1, V1, bytes);
+		put(local, HALL, version(ME, V2));
+		// ein Event-Ordner ohne eigene Dateien, nur mit einer Vorstellung darunter (im gemeinsamen Ordner): nichts aufzunehmen
+		put(shared, UnitKey.presentation("e2", "p1"), version(OTHER, FOREIGN));
+		UnitKey onlyFolder = E2;
+		List<UnitKey> asked = new ArrayList<>();
+
+		FullSyncResult result = FullSync.syncUnits(local, shared, List.of(E1, HALL, onlyFolder), false, OWN, files, CLOCK,
+				unit -> {
+					asked.add(unit);
+					return unit.equals(HALL);
+				}, claim -> {
+				});
+
+		assertEquals(Set.of(E1), result.changed(), "unbekannt und lokal: aufnehmen, obwohl nichts zu kopieren war");
+		assertEquals(List.of(E1, HALL), asked, "ohne lokale Dateien wird nicht gefragt");
 	}
 
 	@Test
@@ -261,14 +286,14 @@ class FullSyncTest {
 		List<UnitKey> units = List.of(E1, HALL);
 
 		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
-				() -> FullSync.syncUnits(local, faultyShared, units, true, OWN, files, CLOCK, claim -> {
+				() -> FullSync.syncUnits(local, faultyShared, units, true, OWN, files, CLOCK, KNOWN, claim -> {
 				}));
 
 		assertSame(cause, aborted.getCause());
 		assertEquals(List.of(new LostVersion(E1, List.of(V1), FOREIGN)), aborted.partial().lost());
 		assertEquals(Set.of(E1), aborted.partial().changed());
 		// die Wiederholung findet auf E1 beide Ansprüche gleich: nichts mehr zu melden, nur HALL wird nachgeholt
-		FullSyncResult again = FullSync.syncUnits(local, shared, units, true, OWN, files, CLOCK, claim -> {
+		FullSyncResult again = FullSync.syncUnits(local, shared, units, true, OWN, files, CLOCK, KNOWN, claim -> {
 		});
 		assertTrue(again.lost().isEmpty());
 		assertTrue(again.changed().isEmpty());
@@ -289,7 +314,7 @@ class FullSyncTest {
 		VersionStore faultyLocal = new VersionStore(local.dataRoot(), faulty);
 
 		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
-				() -> FullSync.syncUnits(faultyLocal, shared, List.of(E1), true, OWN, faulty, CLOCK, claim -> {
+				() -> FullSync.syncUnits(faultyLocal, shared, List.of(E1), true, OWN, faulty, CLOCK, KNOWN, claim -> {
 				}));
 
 		assertEquals(List.of(new LostVersion(E1, List.of(V1), FOREIGN)), aborted.partial().lost());
@@ -308,7 +333,7 @@ class FullSyncTest {
 		VersionStore faultyShared = new VersionStore(shared.dataRoot(), faulty);
 
 		FullSync.Aborted aborted = assertThrows(FullSync.Aborted.class,
-				() -> FullSync.syncUnits(local, faultyShared, List.of(HALL), true, OWN, files, CLOCK, claim -> {
+				() -> FullSync.syncUnits(local, faultyShared, List.of(HALL), true, OWN, files, CLOCK, KNOWN, claim -> {
 				}));
 
 		assertSame(cause, aborted.getCause());
@@ -723,7 +748,7 @@ class FullSyncTest {
 		List<FullSyncResult.UploadedClaim> seen = new ArrayList<>();
 
 		FullSyncResult expected = run(false);
-		FullSyncResult actual = FullSync.syncUnits(localCopy, sharedCopy, units, false, OWN, files, CLOCK, seen::add);
+		FullSyncResult actual = FullSync.syncUnits(localCopy, sharedCopy, units, false, OWN, files, CLOCK, KNOWN, seen::add);
 
 		assertEquals(expected, actual);
 		assertEquals(actual.uploaded(), seen);

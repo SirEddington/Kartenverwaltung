@@ -2523,6 +2523,12 @@ public final class SyncService {
 	 * Mitnehmen vom Beginn des Laufs), trägt die geänderten in den Index ein, meldet die gefundenen Verluste und klärt
 	 * umstrittene Plätze.
 	 * <p>
+	 * Geändert ist auch jede lokale Einheit des Blocks, die der Index nicht kennt ({@link UnitIndex#entry}, eine Abfrage im
+	 * Speicher): Kam sie an der App vorbei in den lokalen Bestand, während der Index als sauber beendet galt (etwa eine
+	 * zurückgespielte Sicherung), nimmt der Block sie wie eine kopierte auf und meldet sie der Oberfläche. Das Auflösen
+	 * zählt zur Dauer des Blocks, an der {@link FullSyncRun#step} den nächsten misst; nach einem großen Hineinkopieren
+	 * macht ein Takt also weniger Blöcke, das Budget gilt weiter.
+	 * <p>
 	 * Scheitert der Block mittendrin, werden die geänderten Einheiten und die Verluste bis dahin ({@link FullSync.Aborted})
 	 * trotzdem eingetragen und gemeldet, bevor der Fehler weitergeht: Ein ausgeglichener Anspruch ist danach auf beiden
 	 * Seiten gleich, und die Wiederholung des Blocks fände ihn nicht mehr; doppelt meldet sie nichts, weil sie nur noch
@@ -2537,7 +2543,7 @@ public final class SyncService {
 			// Hochgeladene Ansprüche (beim Mitnehmen alle, sonst die eigenen, die im gemeinsamen Ordner fehlten) ab jetzt
 			// beobachten, je Anspruch sofort, damit auch ein abgebrochener Abgleich nichts verliert
 			result = FullSync.syncUnits(local, current.shared, units, current.uploadLocalClaims, ownership(), files, clock,
-					uploaded -> watchOwnClaims(
+					unit -> index.entry(unit) != null, uploaded -> watchOwnClaims(
 							List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))));
 		} catch (FullSync.Aborted e) {
 			Throwable cause = e.getCause();
