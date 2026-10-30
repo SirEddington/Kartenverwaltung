@@ -1758,7 +1758,9 @@ public final class SyncService {
 	 * Macht den Index beim Start benutzbar. Zuerst gilt die Marke "sauber beendet" ({@link UnitIndex#loadIfClean}): Ist sie
 	 * da und der Index lesbar, wird er ohne Durchlauf über den Bestand übernommen; das Aufräumen und der Verzeichnisbaum entfallen, denn
 	 * temporäre Reste und Änderungen am Bestand ohne den Index gibt es nur nach einem Absturz, und dann fehlt die Marke.
-	 * Sonst räumt der Start eigene temporäre Dateien auf und gleicht den Index ab, im Notfall baut er ihn neu auf.
+	 * Sonst gleicht der Start den Index ab und räumt dabei im selben Durchlauf über den Bestand die alten temporären
+	 * Dateien auf ({@link UnitIndex#refresh(VersionStore, DoubleConsumer, Duration)}); im Notfall baut er den
+	 * Index neu auf.
 	 *
 	 * @return die Einheiten mit ausstehenden und mit verlorenen eigenen Versionen
 	 */
@@ -1772,11 +1774,6 @@ public final class SyncService {
 			}
 		} catch (RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht auswerten; der Bestand wird durchsucht", e);
-		}
-		try {
-			files.deleteOwnTemps(local.dataRoot(), TEMP_AGE);
-		} catch (IOException | RuntimeException e) {
-			LOGGER.log(Level.WARNING, "Alte temporäre Dateien im lokalen Bestand ließen sich nicht entfernen", e);
 		}
 		UnitIndex.Refresh refreshed = refreshIndex(progress);
 		// war der Index nicht zu gebrauchen: jede Einheit einzeln aus den Dateien, oder der Start scheitert
@@ -1809,6 +1806,12 @@ public final class SyncService {
 	 *                              unvollständig (eine fehlende Buchung hieße einen freien Platz)
 	 */
 	private UnitIndex.Refresh rebuildIndex(DoubleConsumer progress) {
+		// der Abgleich, der sonst aufräumt, ist gescheitert: die alten temporären Dateien hier entfernen
+		try {
+			files.deleteOwnTemps(local.dataRoot(), TEMP_AGE);
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Alte temporäre Dateien im lokalen Bestand ließen sich nicht entfernen", e);
+		}
 		synchronized (resolveLock) {
 			// konnte der alte Index die Marke "sauber beendet" nicht entfernen (etwa schon in loadIfClean), kann sie noch
 			// gelten: Der neue versucht es weiter und meldet sie bis dahin, damit kein Takt über ihr schreibt

@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -21,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -116,6 +118,63 @@ class UnitIndexTest {
 	private static UnitIndex.Refresh refresh(UnitIndex index, VersionStore store) throws IOException {
 		return index.refresh(store, p -> {
 		});
+	}
+
+	/** Eine temporäre Datei ({@code ~karv-[<Kennung>-]<UUID>.tmp}), zuletzt vor {@code age} geändert. */
+	private static Path tempFile(Path folder, String tag, Duration age) throws IOException {
+		Files.createDirectories(folder);
+		Path temp = folder.resolve(FileLayer.TEMP_PREFIX + (tag == null ? "" : tag + "-") + UUID.randomUUID()
+				+ FileLayer.TEMP_SUFFIX);
+		Files.write(temp, new byte[] { 1 });
+		Files.setLastModifiedTime(temp, FileTime.from(Instant.now().minus(age)));
+		return temp;
+	}
+
+	@Test
+	void refreshDeletesOldLocalTempsFromItsListing() throws IOException {
+		saveTwice(EVENT, "event");
+		Path unitDir = local.dataRoot().resolve(EVENT.relativePath());
+		Path claimsDir = unitDir.resolve("claims");
+		Duration tempAge = Duration.ofDays(1);
+		Duration old = tempAge.plusHours(1);
+		Duration young = tempAge.minusHours(1);
+		Path untaggedOld = tempFile(unitDir, null, old);
+		Path untaggedOldInClaims = tempFile(claimsDir, null, old);
+		Path ownOld = tempFile(unitDir, ME, old);
+		Path untaggedOldAtRoot = tempFile(local.dataRoot(), null, old);
+		Path untaggedYoung = tempFile(unitDir, null, young);
+		Path ownYoung = tempFile(claimsDir, ME, young);
+		Path foreignOld = tempFile(unitDir, OTHER, old);
+		Path versionFile = unitDir.resolve(mine(2) + ".json");
+		Path foreignName = Files.write(unitDir.resolve("Thumbs.db"), new byte[] { 1 });
+		Files.setLastModifiedTime(foreignName, FileTime.from(Instant.now().minus(old)));
+
+		UnitIndex.Refresh refresh = index().refresh(local, p -> {
+		}, tempAge);
+
+		assertFalse(Files.exists(untaggedOld));
+		assertFalse(Files.exists(untaggedOldInClaims));
+		assertFalse(Files.exists(ownOld));
+		assertFalse(Files.exists(untaggedOldAtRoot));
+		assertTrue(Files.exists(untaggedYoung));
+		assertTrue(Files.exists(ownYoung));
+		assertTrue(Files.exists(foreignOld), "eine Datei mit fremder Kennung gehört einem anderen Rechner");
+		assertTrue(Files.exists(foreignName));
+		assertTrue(Files.exists(versionFile));
+		assertEquals(1, refresh.resolved());
+	}
+
+	@Test
+	void refreshWithoutAgeUsesTheStandardTempAge() throws IOException {
+		saveTwice(EVENT, "event");
+		Path unitDir = local.dataRoot().resolve(EVENT.relativePath());
+		Path untaggedYoung = tempFile(unitDir, null, Duration.ofHours(23));
+		Path untaggedOld = tempFile(unitDir, null, Duration.ofHours(25));
+
+		refresh(index(), local);
+
+		assertTrue(Files.exists(untaggedYoung));
+		assertFalse(Files.exists(untaggedOld));
 	}
 
 	@Test

@@ -3061,6 +3061,28 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void startupAfterACrashWalksTheTreeOnce() throws IOException {
+		Node a = cleanlyClosedNode();
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.service.startup("");
+		save(b, update(BOOKING, b.service.history(BOOKING).get(0), "Anna B"));
+		// kein closeIndex: Absturz, dazu alte und junge Reste im lokalen Bestand
+		Path unitDir = localFile(b, BOOKING, "x").getParent();
+		Path old = tempFile(unitDir, null, SyncService.TEMP_AGE.plusHours(1));
+		Path young = tempFile(unitDir, null, SyncService.TEMP_AGE.minusHours(1));
+
+		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		c.service.startup("");
+
+		List<String> calls = c.layer.calls();
+		assertEquals(1, calls.stream().filter(call -> call.startsWith("listTree ")).count(), calls.toString());
+		assertTrue(calls.stream().noneMatch(call -> call.startsWith("deleteOwnTemps ")), calls.toString());
+		assertEquals(List.of("deleteOldTemps " + unitDir), calls.stream().filter(call -> call.startsWith("deleteOldTemps")).toList());
+		assertFalse(Files.exists(old));
+		assertTrue(Files.exists(young));
+	}
+
+	@Test
 	void markerIsGoneAfterAChangeSoACrashWalksAgain() throws IOException {
 		Node a = cleanlyClosedNode();
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
