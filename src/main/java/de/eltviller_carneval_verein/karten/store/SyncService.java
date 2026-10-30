@@ -981,16 +981,22 @@ public final class SyncService {
 					}
 				}
 			} catch (IOException | RuntimeException e) {
-				// auch nach einem Fehler spiegelt der Index, was auf der Platte liegt (etwa eine Version ohne Anspruch)
+				// auch nach einem Fehler spiegelt der Index, was auf der Platte liegt (etwa eine Version ohne Anspruch). Nach dem
+				// Ende der Zählung (Fehler in settleAfterConnectionChange) stehen die Einheiten schon darin: Jedes Eintragen eines
+				// gezählten Speichervorgangs bleibt im gezählten Teil
 				Throwable first = failure != null ? failure : unexpected;
 				if (first == null) {
-					indexUnits(written);
+					if (counted) {
+						indexUnits(written);
+					}
 					throw e;
 				}
-				try {
-					indexUnits(written);
-				} catch (RuntimeException indexFailure) {
-					first.addSuppressed(indexFailure);
+				if (counted) {
+					try {
+						indexUnits(written);
+					} catch (RuntimeException indexFailure) {
+						first.addSuppressed(indexFailure);
+					}
 				}
 				first.addSuppressed(e);
 			}
@@ -2012,9 +2018,10 @@ public final class SyncService {
 				// die Schutzregel verbot das Beiseitelegen: Pause wie oben
 				return false;
 			}
-			if (current.decision != null && current.decision.setAside()) {
-				// das Beiseitelegen scheiterte (etwa am Umbenennen) und steht noch aus: Der Bestand, der beiseitegelegt wird,
-				// lädt nichts hoch, holt nichts ab und heilt nichts; der nächste Takt versucht es erneut
+			if (setAsidePending(current)) {
+				// das Beiseitelegen steht noch aus (das Umbenennen oder schon das Entscheiden scheiterte): Der Bestand, der
+				// beiseitegelegt werden kann, lädt nichts hoch, holt nichts ab und heilt nichts; der nächste Takt versucht es
+				// erneut (nach dem Abstand TICK, denn der Takt gilt als gestört)
 				if (!isCurrent(current)) {
 					return false;
 				}
@@ -2069,6 +2076,16 @@ public final class SyncService {
 			current.hurry = true;
 		}
 		return true;
+	}
+
+	/**
+	 * Ob ein Beiseitelegen noch aussteht: entschieden und noch nicht geschehen, oder mit {@link ConnectMode#SET_ASIDE}
+	 * verlangt (über {@link #connect} oder {@link #decideConnect}) und noch nicht entschieden, weil der Beginn vorher
+	 * scheiterte. Mit {@link ConnectMode#MERGE} nie. Unter {@code workLock}.
+	 */
+	private static boolean setAsidePending(Link current) {
+		ConnectDecision decision = current.decision;
+		return decision != null ? decision.setAside() : current.connectMode == ConnectMode.SET_ASIDE;
 	}
 
 	/**
@@ -2259,12 +2276,13 @@ public final class SyncService {
 	 * bilden einen Schritt, mit dem sich kein lokales Schreiben eines {@link #append} überschneidet: Unter {@code lock} wird
 	 * der Merker geprüft und {@link #settingAside} gesetzt, dann gewartet, bis kein {@link #append} mehr im lokalen Bestand
 	 * arbeitet ({@link #localWrites}: Dateien, Index, Einreihen; das betrifft nur Speichervorgänge, die nicht zählen; einer,
-	 * der zählt, hat den Merker schon gesetzt). Der gezählte Teil nimmt nur {@code resolveLock}, den Monitor des Index und
-	 * kurz {@code lock}, nie {@code workLock}; wer sie hält, wartet nie auf {@code workLock}, die hier allein gehalten wird.
-	 * Deshalb endet das Warten immer. Ein {@link #append},
-	 * das danach beginnen will, wartet, bis der neue Datenordner bereit ist (umbenannt, Index geleert), und schreibt dann
-	 * dorthin. Die Aufträge des alten Bestands (etwa Zusammenführungen der Auflösung während der Pause) gehen mit ihm
-	 * beiseite und nicht hinaus. Scheitert das Umbenennen, bleibt die Entscheidung, und der nächste Beginn prüft erneut.
+	 * der zählt, hat den Merker schon gesetzt). Der gezählte Teil nimmt nur {@code resolveLock}, den Monitor des Index, kurz
+	 * {@code lock} sowie die Monitore der Schlange der Auflösung und des {@link SyncNotifier} (beide ohne weitere Sperre
+	 * darunter), nie {@code workLock}; wer sie hält, wartet nie auf {@code workLock}, die hier allein gehalten wird. Deshalb
+	 * endet das Warten immer. Ein {@link #append}, das danach beginnen will, wartet, bis der neue Datenordner bereit ist
+	 * (umbenannt, Index geleert), und schreibt dann dorthin. Die Aufträge des alten Bestands (etwa Zusammenführungen der
+	 * Auflösung während der Pause) gehen mit ihm beiseite und nicht hinaus. Scheitert das Umbenennen, bleibt die
+	 * Entscheidung, und der nächste Beginn prüft erneut.
 	 *
 	 * @return {@code false}, wenn die Schutzregel es verbietet (nichts ist geschehen); sonst {@code true}
 	 */

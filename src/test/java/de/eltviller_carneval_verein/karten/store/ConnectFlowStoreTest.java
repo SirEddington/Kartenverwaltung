@@ -1000,6 +1000,76 @@ class ConnectFlowStoreTest {
 		assertTrue(a.marker().orElseThrow().complete());
 	}
 
+	/** Ab jetzt scheitert das nächste Auflisten im lokalen Bestand (etwa ein gesperrter Ordner). */
+	private static void failNextLocalListing(Node node) {
+		AtomicBoolean once = new AtomicBoolean(true);
+		node.layer.failWhen(p -> p.startsWith(node.localData()) && once.getAndSet(false), "listNames",
+				new AccessDeniedException("data gesperrt"));
+	}
+
+	/** Die Aufrufe der Dateischicht seit {@code from}, die den gemeinsamen Ordner betreffen. */
+	private List<String> sharedCallsSince(Node node, int from) {
+		List<String> calls = node.layer.calls();
+		return calls.subList(from, calls.size()).stream().filter(c -> c.contains(sharedRoot.toString())).toList();
+	}
+
+	@Test
+	void failedDecisionBeforeASetAsideUploadsNothingOfTheOldStore() throws IOException {
+		UnitKey hall = UnitKey.hall("h2");
+		seedSharedHalls(3);
+		Node a = nodeWithUnresolvedLoss(hall);
+		a.service.connect(shared, ConnectMode.ASK);
+		a.runScheduled();
+		clock.advance(ConflictResolver.LIST_WAIT);
+		assertFalse(a.service.tick());
+		assertMerged(a, hall);
+		// die Antwort ist Beiseitelegen, aber das Lesen beider Seiten scheitert, bevor entschieden ist
+		failNextLocalListing(a);
+		int before = a.layer.calls().size();
+
+		CompletableFuture<ConnectOutcome> decided = a.service.decideConnect(ConnectMode.SET_ASIDE);
+		a.runScheduled();
+
+		assertEquals(Kind.FEHLER, decided.getNow(null).kind());
+		assertEquals(SyncState.FEHLER, a.service.syncState().get());
+		assertEquals(List.of(), sharedCallsSince(a, before), "kein Hochladen, Abholen oder Heilen");
+		assertFalse(Files.exists(sharedUnit(hall)));
+		assertEquals(List.of(), asideFolders(a));
+
+		// der nächste Takt entscheidet und legt beiseite: Die Zusammenführung bleibt beim alten Bestand
+		tickUntilRunEnds(a);
+
+		List<String> aside = asideFolders(a);
+		assertEquals(1, aside.size());
+		assertTrue(Files.isDirectory(a.appData.resolve(aside.get(0)).resolve(hall.relativePath())));
+		assertFalse(Files.exists(sharedUnit(hall)));
+		assertEquals(List.of("f0", "f1", "f2"), a.service.hallIds());
+	}
+
+	@Test
+	void failedDecisionOfASetAsideConnectTouchesNothingShared() throws IOException {
+		seedSharedHalls(3);
+		Node a = nodeWithEarlierUnit("a");
+		failNextLocalListing(a);
+		int before = a.layer.calls().size();
+
+		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.SET_ASIDE);
+		assertFalse(a.service.tick());
+
+		assertEquals(Kind.FEHLER, result.getNow(null).kind());
+		assertEquals(List.of(), sharedCallsSince(a, before), "kein Hochladen, Abholen oder Heilen");
+		// auch eine dauerhafte Störung meldet nur FEHLER, ohne eiligen Takt
+		failNextLocalListing(a);
+		assertFalse(a.service.tick());
+		assertEquals(SyncState.FEHLER, a.service.syncState().get());
+		assertEquals(List.of(), asideFolders(a));
+
+		tickUntilRunEnds(a);
+		assertEquals(1, asideFolders(a).size());
+		assertEquals(3, a.service.hallIds().size());
+		assertTrue(a.marker().orElseThrow().complete());
+	}
+
 	@Test
 	void askWhileUnreachableIsOfflineAndKeepsSavesPending() throws IOException {
 		seedSharedHalls(3);
