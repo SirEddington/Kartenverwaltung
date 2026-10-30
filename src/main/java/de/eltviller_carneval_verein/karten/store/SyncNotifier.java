@@ -183,6 +183,18 @@ final class SyncNotifier {
 		deliver(l -> l.error(message));
 	}
 
+	/**
+	 * Meldet eine übersprungene Einheit ({@link SyncListener#skipped}, SYS-013) einmal je Einheit und Programmlauf, ohne den
+	 * Zustand zu ändern; der Log-Eintrag nennt den Pfad der Einheit.
+	 */
+	synchronized void skipped(UnitKey unit, boolean subtree, String cause) {
+		if (!reportedOnce.add(StoreMessages.SYS_SKIPPED + " " + unit.relativePath())) {
+			return;
+		}
+		LOGGER.warning(StoreMessages.skipped(subtree ? unit.relativePath() + " mit allem darunter" : unit.relativePath(), cause));
+		deliver(l -> l.skipped(unit, subtree, cause));
+	}
+
 	/** Meldet einen Fehler für die Fußzeile ohne Log und ohne Zustand; ob er einmal oder öfter kommt, regelt der Aufrufer. */
 	void error(String message) {
 		deliver(l -> l.error(message));

@@ -50,8 +50,19 @@ public interface SyncListener {
 	default void reconnected() {
 	}
 
-	/** Ein Fehler mit fertigem Text samt Code für die Fußzeile ({@code SYS-006}, {@code SYS-008}, {@code SYS-009}, {@code SYS-012}, {@code SYS-013}). */
+	/** Ein Fehler mit fertigem Text samt Code für die Fußzeile ({@code SYS-006}, {@code SYS-008}, {@code SYS-009}, {@code SYS-012}). */
 	default void error(String message) {
+	}
+
+	/**
+	 * Der Vollabgleich hat eine Einheit übersprungen, weil sie sich wiederholt nicht mit dem gemeinsamen Ordner abgleichen
+	 * ließ ({@code SYS-013}); der nächste Lauf versucht es erneut. Kommt einmal je Einheit und Programmlauf; was gerade
+	 * übersprungen ist, fragt {@link SyncService#skippedUnits()} ab.
+	 *
+	 * @param subtree ob auch alles darunter übersprungen ist: Ihre Vorstellungen bzw. Buchungen ließen sich nicht auflisten
+	 * @param cause   die Ursache ({@link StoreMessages#describe})
+	 */
+	default void skipped(UnitKey unit, boolean subtree, String cause) {
 	}
 
 	/** Dieser Rechner hat eine neue Kennung bekommen, weil ein anderer dieselbe verwendet ({@code SYS-011}). */

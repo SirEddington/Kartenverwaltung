@@ -563,7 +563,7 @@ class ConnectFlowStoreTest {
 		a.service.startup("");
 		AtomicBoolean broken = new AtomicBoolean(true);
 		breakMarker(a, broken);
-		List<String> errors = recordErrors(a);
+		List<String> errors = listen(a).errors();
 		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);
 
 		assertFalse(a.service.tick());
@@ -1935,16 +1935,25 @@ class ConnectFlowStoreTest {
 				new AccessDeniedException(folder.toString()));
 	}
 
-	/** Die Fehlermeldungen für die Fußzeile ({@link SyncListener#error}), ab jetzt; ersetzt den Empfänger des Rechners. */
-	private static List<String> recordErrors(Node node) {
-		List<String> errors = Collections.synchronizedList(new ArrayList<>());
+	/** Was der Empfänger eines Rechners hörte: die Fehlermeldungen der Fußzeile und die übersprungenen Einheiten. */
+	private record Heard(List<String> errors, List<SkippedUnit> skipped) {
+	}
+
+	/** Zeichnet {@link SyncListener#error} und {@link SyncListener#skipped} auf, ab jetzt; ersetzt den Empfänger des Rechners. */
+	private static Heard listen(Node node) {
+		Heard heard = new Heard(Collections.synchronizedList(new ArrayList<>()), Collections.synchronizedList(new ArrayList<>()));
 		node.service.setListener(new SyncListener() {
 			@Override
 			public void error(String message) {
-				errors.add(message);
+				heard.errors().add(message);
+			}
+
+			@Override
+			public void skipped(UnitKey unit, boolean subtree, String cause) {
+				heard.skipped().add(new SkippedUnit(unit, subtree, cause));
 			}
 		});
-		return errors;
+		return heard;
 	}
 
 	/** Eine fremde Version mit Anspruch {@code root} im gemeinsamen Ordner, kurz vor jetzt. */
@@ -1963,7 +1972,7 @@ class ConnectFlowStoreTest {
 		Node a = new Node("a");
 		seedHalls(a.appData, "g", 1);
 		assertTrue(a.service.startup(""));
-		List<String> errors = recordErrors(a);
+		Heard heard = listen(a);
 		UnitKey g0 = UnitKey.hall("g0");
 		AtomicBoolean broken = new AtomicBoolean(true);
 		breakSharedUnit(a, g0, broken);
@@ -1973,9 +1982,10 @@ class ConnectFlowStoreTest {
 
 		assertEquals(Kind.FEHLER, result.getNow(null).kind(), "das Ergebnis kam mit dem ersten Fehlversuch");
 		assertEquals(List.of("f0", "f1", "g0"), a.service.hallIds(), "die übrigen Einheiten sind abgeglichen");
-		List<String> skipped = errors.stream().filter(e -> e.startsWith(StoreMessages.SYS_SKIPPED)).toList();
-		assertEquals(1, skipped.size(), "gemeldet: " + errors);
-		assertTrue(skipped.get(0).contains(g0.relativePath()), skipped.get(0));
+		assertEquals(1, heard.skipped().size(), "gemeldet: " + heard);
+		assertEquals(g0, heard.skipped().get(0).unit());
+		assertEquals(List.of(), heard.errors().stream().filter(e -> e.contains(StoreMessages.SYS_SKIPPED)).toList(),
+				"SYS-013 kommt nicht mehr als Fehlertext");
 		assertFalse(Files.exists(sharedUnit(g0).resolve("claims/root.json")));
 		assertFalse(a.marker().orElseThrow().complete(), "das Mitnehmen ist nicht vollständig");
 		assertFalse(a.service.connectionComplete().get());
@@ -1991,7 +2001,7 @@ class ConnectFlowStoreTest {
 		assertFalse(Files.exists(sharedUnit(UnitKey.hall("n0")).resolve("claims/root.json")), "kein Lauf mit Mitnehmen für alles");
 		assertTrue(a.marker().orElseThrow().complete());
 		assertTrue(a.service.connectionComplete().get());
-		assertEquals(1, errors.stream().filter(e -> e.startsWith(StoreMessages.SYS_SKIPPED)).count());
+		assertEquals(1, heard.skipped().size());
 	}
 
 	@Test
@@ -2061,5 +2071,114 @@ class ConnectFlowStoreTest {
 
 		assertTrue(Files.exists(a.localData().resolve(second.relativePath())));
 		assertTrue(resolverReads.get() > 0, "nach dem Lauf, der A-2 abgleicht, wird A-1 aufgelöst");
+	}
+
+	// --- übersprungene Einheiten abfragbar, mit eigenem Rückruf (KARV-87)
+
+	/** Eine fremde Buchung im gemeinsamen Ordner, deren Einheit sich nicht auflisten lässt, solange {@code broken} gilt. */
+	private Node nodeBesideUnreadableBooking(UnitKey booking, AtomicBoolean broken) throws IOException {
+		foreignInShared(booking, "Bea", 0);
+		Node a = new Node("a");
+		breakSharedUnit(a, booking, broken);
+		assertTrue(a.service.startup(shared));
+		return a;
+	}
+
+	@Test
+	void skippedUnitIsListedAndReportedOnce() throws IOException {
+		AtomicBoolean broken = new AtomicBoolean(true);
+		Node a = nodeBesideUnreadableBooking(BOOKING, broken);
+		Heard heard = listen(a);
+
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+
+		String cause = StoreMessages.describe(new AccessDeniedException(sharedUnit(BOOKING).toString()));
+		SkippedUnit skipped = new SkippedUnit(BOOKING, false, cause);
+		assertEquals(List.of(skipped), a.service.skippedUnits());
+		assertEquals(List.of(skipped), heard.skipped());
+		assertEquals(List.of(), heard.errors().stream().filter(e -> e.contains(StoreMessages.SYS_SKIPPED)).toList());
+
+		// der nächste Lauf überspringt sie erneut: Die Liste bleibt, der Rückruf kommt nicht noch einmal
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+
+		assertEquals(List.of(skipped), a.service.skippedUnits());
+		assertEquals(List.of(skipped), heard.skipped());
+	}
+
+	@Test
+	void skippedUnitLeavesTheListAfterACleanRun() throws IOException {
+		AtomicBoolean broken = new AtomicBoolean(true);
+		Node a = nodeBesideUnreadableBooking(BOOKING, broken);
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+		assertEquals(1, a.service.skippedUnits().size());
+
+		broken.set(false);
+		a.service.syncNow();
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+
+		assertEquals(List.of(), a.service.skippedUnits());
+		assertTrue(Files.exists(a.localData().resolve(BOOKING.relativePath())), "die Buchung ist abgeglichen");
+	}
+
+	@Test
+	void skippedSubtreeIsListedWithFlag() throws IOException {
+		UnitKey presentation = UnitKey.presentation("e1", "p1");
+		foreignInShared(BOOKING, "Bea", 0);
+		Node a = new Node("a");
+		Path bookings = sharedUnit(presentation).resolve("bookings");
+		a.layer.failWhen(p -> p.equals(bookings), "listNames", new AccessDeniedException(bookings.toString()));
+		assertTrue(a.service.startup(shared));
+		Heard heard = listen(a);
+
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+
+		SkippedUnit skipped = new SkippedUnit(presentation, true,
+				StoreMessages.describe(new AccessDeniedException(bookings.toString())));
+		assertEquals(List.of(skipped), a.service.skippedUnits());
+		assertEquals(List.of(skipped), heard.skipped());
+	}
+
+	@Test
+	void skippedUnitsAreClearedOnConnectAndDisconnect() throws IOException {
+		AtomicBoolean broken = new AtomicBoolean(true);
+		Node a = nodeBesideUnreadableBooking(BOOKING, broken);
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+		assertEquals(1, a.service.skippedUnits().size());
+
+		// eine neue Verbindung beginnt ohne die Liste der alten
+		a.service.connect(shared, ConnectMode.MERGE);
+		assertEquals(List.of(), a.service.skippedUnits());
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+		assertEquals(1, a.service.skippedUnits().size(), "der neue Lauf überspringt sie wieder");
+
+		a.service.disconnect();
+		assertEquals(List.of(), a.service.skippedUnits());
+	}
+
+	@Test
+	void skippedUnitsStayListedWhileTheNextRunRuns() throws IOException {
+		seedSharedHalls(2);
+		AtomicBoolean broken = new AtomicBoolean(true);
+		Node a = nodeBesideUnreadableBooking(BOOKING, broken);
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+		assertEquals(1, a.service.skippedUnits().size());
+
+		// beim ersten Lesen des zweiten Laufs: Er hat begonnen, die Buchung ist noch nicht wieder erreicht
+		AtomicBoolean secondRun = new AtomicBoolean();
+		AtomicReference<List<SkippedUnit>> duringRun = new AtomicReference<>();
+		for (String operation : List.of("read", "listNames", "listNamesWithTemps")) {
+			a.layer.onEach(operation, () -> {
+				if (secondRun.get() && a.service.fullSyncProgress().get() != null) {
+					duringRun.compareAndSet(null, a.service.skippedUnits());
+				}
+			});
+		}
+		secondRun.set(true);
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		tickUntilRunEnds(a, Duration.ofSeconds(5));
+
+		assertNotNull(duringRun.get(), "der zweite Lauf hat gelesen");
+		assertEquals(List.of(BOOKING), duringRun.get().stream().map(SkippedUnit::unit).toList());
 	}
 }

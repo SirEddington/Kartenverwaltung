@@ -480,6 +480,14 @@ public final class SyncService {
 	 */
 	private final Set<UnitKey> unrepairable = new HashSet<>();
 	/**
+	 * Die Einheiten, die der letzte beendete Vollabgleich übersprungen hat (SYS-013), in der Reihenfolge des Überspringens;
+	 * bis zum Ende des nächsten Laufs bleiben sie hier ({@link #skippedUnits()}). Unter {@code lock}; eine neue oder
+	 * getrennte Verbindung leert sie.
+	 */
+	private final Map<UnitKey, SkippedUnit> skippedLastRun = new LinkedHashMap<>();
+	/** Wie {@link #skippedLastRun}, die der laufende Vollabgleich bisher übersprungen hat; ersetzt jene mit seinem Ende. Unter {@code lock}. */
+	private final Map<UnitKey, SkippedUnit> skippedInRun = new LinkedHashMap<>();
+	/**
 	 * Wie viele {@link #append} gerade im lokalen Bestand arbeiten: von der ersten Versionsdatei bis zum Einreihen bzw. zum
 	 * lokalen Beanspruchen (ohne {@link #settleAfterConnectionChange}, das {@code workLock} nimmt). Das Beiseitelegen
 	 * wartet, bis es keine mehr sind ({@link #setAsideLocal}); gewartet wird an {@code lock}.
@@ -631,6 +639,20 @@ public final class SyncService {
 	 */
 	public ReadOnlyBooleanProperty connectionComplete() {
 		return notifier.connectionCompleteProperty();
+	}
+
+	/**
+	 * Die Einheiten, die der Vollabgleich übersprungen hat, weil sie sich wiederholt nicht abgleichen ließen (SYS-013): die
+	 * des letzten beendeten Laufs und die des laufenden bisher, in der Reihenfolge des Überspringens, jede Einheit einmal.
+	 * Eine Einheit verlässt die Liste mit dem Ende des ersten Laufs, der sie nicht mehr überspringt; eine neue oder
+	 * getrennte Verbindung leert sie. Ohne Datei-Ein-/Ausgabe, nimmt nur kurz {@code lock}; auf jedem Thread aufrufbar.
+	 */
+	public List<SkippedUnit> skippedUnits() {
+		synchronized (lock) {
+			Map<UnitKey, SkippedUnit> all = new LinkedHashMap<>(skippedLastRun);
+			all.putAll(skippedInRun);
+			return List.copyOf(all.values());
+		}
 	}
 
 	/**
@@ -2547,10 +2569,15 @@ public final class SyncService {
 		if (merges(current, unit)) {
 			current.owedMergeInRun.add(unit);
 		}
-		String text = StoreMessages.skipped(subtree ? unit.relativePath() + " mit allem darunter" : unit.relativePath(),
-				StoreMessages.describe(cause));
-		LOGGER.log(Level.FINE, text, cause);
-		notifier.errorOnce(StoreMessages.SYS_SKIPPED + " " + unit.relativePath(), text);
+		String description = StoreMessages.describe(cause);
+		LOGGER.log(Level.FINE, StoreMessages.skipped(subtree ? unit.relativePath() + " mit allem darunter" : unit.relativePath(),
+				description), cause);
+		synchronized (lock) {
+			if (link == current) {
+				skippedInRun.put(unit, new SkippedUnit(unit, subtree, description));
+			}
+		}
+		notifier.skipped(unit, subtree, description);
 	}
 
 	/**
@@ -2683,6 +2710,13 @@ public final class SyncService {
 		current.owedMerge = Set.copyOf(current.owedMergeInRun);
 		current.owedMergeInRun = new HashSet<>();
 		current.skippedTrees = current.run.skippedTrees();
+		synchronized (lock) {
+			if (link == current) {
+				skippedLastRun.clear();
+				skippedLastRun.putAll(skippedInRun);
+				skippedInRun.clear();
+			}
+		}
 		current.connectMode = null;
 		current.uploadLocalClaims = false;
 		current.run = null;
@@ -3365,6 +3399,8 @@ public final class SyncService {
 			sharedRepairs.clear();
 			repairQueue.clear();
 			unrepairable.clear();
+			skippedLastRun.clear();
+			skippedInRun.clear();
 			notifier.reset();
 			// ein Vollabgleich der vorigen Verbindung ist verworfen (er hing an ihrem Link)
 			notifier.setFullSyncProgress(null);
@@ -3383,6 +3419,8 @@ public final class SyncService {
 			sharedRepairs.clear();
 			repairQueue.clear();
 			unrepairable.clear();
+			skippedLastRun.clear();
+			skippedInRun.clear();
 			notifier.reset();
 			notifier.setState(SyncState.AUS);
 			notifier.setFullSyncProgress(null);
