@@ -2106,7 +2106,9 @@ public final class SyncService {
 	 * Der Index wird nicht neu aufgebaut ({@link UnitIndex#adoptOwnership}): Versionen der alten Kennung bleiben bis zum
 	 * Wechsel eigen, die Stände gelten weiter. Ihre Listennummern gelten als unbekannt, denn sie stammen aus den Listen der
 	 * alten Kennung; der Takt liest danach die eigenen Listen ({@link #ownListsWanted}). Ob der Start den Index abgeglichen
-	 * hat ({@link #isStarted()}), bleibt unberührt.
+	 * hat ({@link #isStarted()}), bleibt unberührt. Der Index übernimmt die neue Ownership vor dem Austausch der Kennung:
+	 * {@link #deriveConflicts} liest erst {@link #ownership()}, dann den Index; sieht es die neue Kennung, sind die Nummern
+	 * der alten schon vergessen (höchstens "unentschieden", nie ein verpasster Konflikt).
 	 */
 	private void regenerate(Link current) throws IOException {
 		MachineIdentity old;
@@ -2118,8 +2120,11 @@ public final class SyncService {
 			until = retiring.freeze();
 		}
 		MachineIdentity renewed;
+		VersionIdGenerator fresh;
 		try {
 			renewed = old.regenerate(until);
+			// vor dem Austausch: Ein Fehler hier lässt den alten Generator laufen, nie eine neue Kennung ohne Generator
+			fresh = new VersionIdGenerator(renewed.id(), clock);
 		} catch (IOException | RuntimeException e) {
 			synchronized (lock) {
 				retiring.thaw();
@@ -2127,17 +2132,18 @@ public final class SyncService {
 			throw e;
 		}
 		index.deleteCleanMarker();
-		// unter resolveLock: Kein Auflösen liegt zwischen dem Austausch und der Übernahme in den Index, jedes danach löst mit
-		// der neuen Ownership auf
+		// unter resolveLock: Kein Auflösen liegt zwischen Übernahme und Austausch
 		synchronized (resolveLock) {
+			// kein Neuaufbau: Eigen bleiben dieselben Versionen; die Listennummern der alten ID werden unbekannt. Erst der Index,
+			// dann die Kennung: Wer ownership() schon als neue sieht, liest danach auch den übernommenen Index (unbekannte
+			// Nummern, also "unentschieden"), nie Nummern der alten ID gegen seen der neuen
+			index.adoptOwnership(renewed.ownership());
 			synchronized (lock) {
 				// seit freeze liegt keine ID nach until: die späteste vergebene braucht keine Korrektur der Grenze
 				retiring.retire();
 				machine = renewed;
-				ids = new VersionIdGenerator(renewed.id(), clock);
+				ids = fresh;
 			}
-			// kein Neuaufbau: Eigen bleiben dieselben Versionen; die Listennummern der alten ID werden unbekannt
-			index.adoptOwnership(renewed.ownership());
 		}
 		ownListsWanted = true;
 		current.bind(renewed.ownership(), local, clock);

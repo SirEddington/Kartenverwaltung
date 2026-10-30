@@ -1579,6 +1579,11 @@ class UnitIndexTest {
 		// ebenso eine vorgemerkte Nummer einer Version, die der Index noch nicht als aktuelle kennt
 		index.markOwnListed(List.of(feedEntry(HALL, mine(4))), 7);
 		assertEquals(3L, index.entries().get(booking).ownSeq());
+		// diesen Zustand darf niemand sehen (neue Ownership, Index noch nicht übernommen): Der Konflikt fiele still weg.
+		// Deshalb übernimmt der Index die Ownership vor dem Austausch der Kennung (SyncService, Neuvergabe)
+		ConflictLedger.Derivation missed = ConflictLedger.derive(index.entries().values(), RENEWED_OWN, Set.of());
+		assertFalse(missed.undecided());
+		assertTrue(missed.conflicts().isEmpty());
 
 		index.adoptOwnership(RENEWED_OWN);
 
@@ -1586,6 +1591,10 @@ class UnitIndexTest {
 		ConflictLedger.Derivation undecided = ConflictLedger.derive(index.entries().values(), RENEWED_OWN, Set.of());
 		assertTrue(undecided.undecided());
 		assertTrue(undecided.conflicts().isEmpty());
+		// zwischen Übernahme und Austausch liest ein anderer Thread vielleicht noch die alte Ownership: ebenfalls unentschieden
+		ConflictLedger.Derivation window = ConflictLedger.derive(index.entries().values(), OWN, Set.of());
+		assertTrue(window.undecided());
+		assertTrue(window.conflicts().isEmpty());
 		// wie readOwnLists: Die Listen der neuen ID nennen die Version nicht, also kannte der Löschende sie nicht
 		index.markUnknownOwnAsUnlisted(Map.of(booking, mine(2)));
 		ConflictLedger.Derivation decided = ConflictLedger.derive(index.entries().values(), RENEWED_OWN, Set.of());
