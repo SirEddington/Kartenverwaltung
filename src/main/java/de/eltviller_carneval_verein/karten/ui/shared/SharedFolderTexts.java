@@ -149,7 +149,7 @@ public final class SharedFolderTexts {
 	public static final String CONNECTED = "Verbunden mit &1.";
 
 	/** Ladeansicht, Hinweis bei Ausfall (&1 = Text von SYS-005 bzw. SYS-006). */
-	public static final String OUTAGE_HINT = "&1 Der Abgleich geht weiter, sobald es wieder geht. Öffnest du die"
+	public static final String OUTAGE_HINT = "&1 Der Abgleich geht weiter, sobald der Ordner wieder erreichbar ist. Öffnest du die"
 			+ " Kartenverwaltung jetzt, fehlen eventuell Verkäufe anderer Rechner; ein Platz, den du dann verkaufst, kann zum"
 			+ " Konflikt werden.";
 
@@ -355,6 +355,11 @@ public final class SharedFolderTexts {
 			return PROGRESS.substring(0, PROGRESS.indexOf(" (&1"));
 		}
 		return MessageTemplate.format(PROGRESS, (int) Math.floor(progress * 100));
+	}
+
+	/** Die Fußzeile nach dem Verbinden. */
+	public static String connected(String dir) {
+		return MessageTemplate.format(CONNECTED, dir);
 	}
 
 	/** Der Hinweis bei Ausfall; ohne bekannte Ursache beginnt er gleich mit dem festen Teil. */

@@ -77,9 +77,8 @@ class StoreMessagesTest {
 
 	@Test
 	void skippedTextNamesMissingForeignChanges() {
-		assertEquals("SYS-013: halls/h1 ließ sich wiederholt nicht mit dem gemeinsamen Ordner abgleichen "
-				+ "(AccessDeniedException: E:\\ECV\\data\\halls\\h1) und wurde übersprungen. Änderungen anderer Rechner "
-				+ "daran fehlen hier, bis ein späterer Abgleich gelingt; die Kartenverwaltung versucht es weiter.",
+		assertEquals("SYS-013: halls/h1 ließ sich nicht abgleichen (AccessDeniedException: E:\\ECV\\data\\halls\\h1) und "
+				+ "wurde übersprungen. Änderungen anderer Rechner daran fehlen hier, bis ein Abgleich gelingt.",
 				StoreMessages.skipped("halls/h1", "AccessDeniedException: E:\\ECV\\data\\halls\\h1"));
 	}
 

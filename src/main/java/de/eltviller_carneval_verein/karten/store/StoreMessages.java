@@ -64,9 +64,8 @@ public final class StoreMessages {
 	private static final String CONTENT_MISMATCH_TEXT = "Im gemeinsamen Ordner liegt &1 mit anderem Inhalt als auf diesem "
 			+ "Rechner. Es wurde nichts überschrieben. Gib den Hinweis bitte an die Betreuung der Kartenverwaltung weiter.";
 
-	private static final String SKIPPED_TEXT = "&1 ließ sich wiederholt nicht mit dem gemeinsamen Ordner abgleichen (&2) und "
-			+ "wurde übersprungen. Änderungen anderer Rechner daran fehlen hier, bis ein späterer Abgleich gelingt; die "
-			+ "Kartenverwaltung versucht es weiter.";
+	private static final String SKIPPED_TEXT = "&1 ließ sich nicht abgleichen (&2) und wurde übersprungen. Änderungen "
+			+ "anderer Rechner daran fehlen hier, bis ein Abgleich gelingt.";
 
 	private StoreMessages() {
 	}

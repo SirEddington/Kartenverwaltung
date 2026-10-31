@@ -24,7 +24,8 @@ import javafx.util.Duration;
  * der Screen wechselt ({@link #clear()}); Info und Erfolg verschwinden nach einigen Sekunden.
  *
  * Zeigt gerade kein Screen ein {@link StatusLabel}, wird die Meldung stattdessen als Dialog
- * ausgegeben, damit sie nicht verloren geht.
+ * ausgegeben, damit sie nicht verloren geht. Im Hauptfenster hat jede Ansicht eines: Ansichten ohne
+ * eigene Fußzeile bekommen eine ohne Trennlinie ({@code MainApp}).
  */
 public final class StatusMessage {
 
@@ -116,8 +117,8 @@ public final class StatusMessage {
 	}
 
 	/**
-	 * Zeigt einen Text nur in der Fußzeile, öffnet aber nie einen Dialog: Ist gerade keine Fußzeile sichtbar (Hauptmenü,
-	 * Ladeansichten), wird nichts angezeigt. Für Hinweise, die nicht wichtig genug sind, die Arbeit zu unterbrechen, und
+	 * Zeigt einen Text nur in der Fußzeile, öffnet aber nie einen Dialog: Ist gerade keine Fußzeile sichtbar (etwa
+	 * während des Starts, bevor das Hauptfenster steht), wird nichts angezeigt. Für Hinweise, die nicht wichtig genug sind, die Arbeit zu unterbrechen, und
 	 * die sich häufen können (etwa "Wieder verbunden" bei jeder Rückkehr).
 	 */
 	public void showInFooter(Severity severity, String text) {

@@ -29,15 +29,20 @@ class SharedFolderTextsTest {
 	}
 
 	@Test
+	void connectedNamesTheFolder() {
+		assertEquals("Verbunden mit E:\\ECV\\Kartenverwaltung.", SharedFolderTexts.connected("E:\\ECV\\Kartenverwaltung"));
+	}
+
+	@Test
 	void outageHintStartsWithTheCause() {
-		assertEquals("Der Ordner fehlt. Der Abgleich geht weiter, sobald es wieder geht. Öffnest du die Kartenverwaltung"
+		assertEquals("Der Ordner fehlt. Der Abgleich geht weiter, sobald der Ordner wieder erreichbar ist. Öffnest du die Kartenverwaltung"
 				+ " jetzt, fehlen eventuell Verkäufe anderer Rechner; ein Platz, den du dann verkaufst, kann zum Konflikt werden.",
 				SharedFolderTexts.outageHint("Der Ordner fehlt."));
 	}
 
 	@Test
 	void outageHintWithoutCauseLeavesThePlaceholderOut() {
-		assertEquals("Der Abgleich geht weiter, sobald es wieder geht. Öffnest du die Kartenverwaltung jetzt, fehlen"
+		assertEquals("Der Abgleich geht weiter, sobald der Ordner wieder erreichbar ist. Öffnest du die Kartenverwaltung jetzt, fehlen"
 				+ " eventuell Verkäufe anderer Rechner; ein Platz, den du dann verkaufst, kann zum Konflikt werden.",
 				SharedFolderTexts.outageHint(null));
 		assertEquals(SharedFolderTexts.outageHint(null), SharedFolderTexts.outageHint("  "));

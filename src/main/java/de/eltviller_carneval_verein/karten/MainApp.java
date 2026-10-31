@@ -253,8 +253,7 @@ public class MainApp extends Application {
 				if (plan.mode() == ConnectMode.ASK && sync.syncState().get() == SyncState.OFFLINE) {
 					unreachableAtStart = plan.connectDir();
 				}
-				loadAfterConnect(settingsStore, () -> {
-				});
+				loadAfterConnect(settingsStore, MainApp::showConnected);
 			}
 
 			@Override
@@ -568,9 +567,23 @@ public class MainApp extends Application {
 		showMenuView();
 		// DataReload liefert die Warnungen beider Repositories zusammen (Hallen zuerst), deshalb ein Fenster für alle
 		showWarnings("Warnung beim Laden", all);
+		// nach den Warnungen: Die Meldung verschwindet nach einigen Sekunden und soll nicht hinter dem Fenster ablaufen
+		showConnected();
 		// Einträge, die schon vor dem Neuladen gesperrt gemeldet waren und es nicht mehr sind, fallen so aus der Liste
 		if (lockedUnits != null) {
 			lockedUnits.refresh(null);
+		}
+	}
+
+	/**
+	 * Das Ergebnis des Verbindens in der Fußzeile (FX-Thread, nach dem Hauptmenü): "Verbunden mit …", wenn der Abgleich
+	 * läuft. Nach "Trotzdem öffnen" oder bei einem erneuten Ausfall sagt das schon der Hinweis daneben.
+	 */
+	private static void showConnected() {
+		SyncService sync = SyncService.getInstance();
+		SyncState state = sync.syncState().get();
+		if (state == SyncState.AKTUELL || state == SyncState.AUSSTEHEND) {
+			StatusMessage.getInstance().show(Severity.INFO, SharedFolderTexts.connected(sync.sharedDir()));
 		}
 	}
 
@@ -825,8 +838,9 @@ public class MainApp extends Application {
 	 * Bildschirminhalt, damit es auf jedem Screen einheitlich im Hintergrund
 	 * erscheint, statt es in jeder FXML einzeln nachzubauen. Skaliert mit der
 	 * tatsächlichen Fenstergröße mit. Mit {@code conflictHint} steht der Hinweis auf offene Konflikte in der Fußzeile vor
-	 * den Meldungen ({@link StatusLabel}; bei "Anzeige" also zwischen beiden), in einer Ansicht ohne Fußzeile unter dem
-	 * Inhalt; er wird der Hinweis, den die App auffrischt.
+	 * den Meldungen ({@link StatusLabel}; bei "Anzeige" also zwischen beiden); er wird der Hinweis, den die App auffrischt.
+	 * Eine Ansicht ohne eigene Fußzeile (Hauptmenü, Menü der Verwaltung, Übersichten, Ladeansichten) bekommt unter dem
+	 * Inhalt eine Fußzeile ohne Trennlinie mit Hinweisen und Meldungen: Ohne beides sieht sie aus wie bisher.
 	 */
 	private static Parent wrapWithBackground(Parent content, boolean conflictHint) {
 		ImageView background = new ImageView(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/wappen.png")));
@@ -859,20 +873,23 @@ public class MainApp extends Application {
 			if (messages != null && messages.getParent() instanceof Pane footer) {
 				footer.getChildren().addAll(footer.getChildren().indexOf(messages), hints);
 			} else {
-				HBox indicatorBar = new HBox(12);
-				indicatorBar.getChildren().addAll(hints);
-				indicatorBar.setAlignment(Pos.CENTER_LEFT);
-				indicatorBar.setPadding(new Insets(0, 20, 8, 20));
-				// die Leiste nimmt nur Platz, solange einer der Links zu sehen ist
-				BooleanExpression anyVisible = hints.get(0).visibleProperty();
-				BooleanExpression anyManaged = hints.get(0).managedProperty();
-				for (Hyperlink hint : hints.subList(1, hints.size())) {
-					anyVisible = anyVisible.or(hint.visibleProperty());
-					anyManaged = anyManaged.or(hint.managedProperty());
+				// Meldungen gehen damit in diese Fußzeile statt in einen Dialog (StatusMessage)
+				List<Node> items = new ArrayList<>(hints);
+				items.add(new StatusLabel());
+				HBox footer = new HBox(12);
+				footer.getChildren().addAll(items);
+				footer.setAlignment(Pos.CENTER_LEFT);
+				footer.setPadding(new Insets(0, 20, 8, 20));
+				// die Fußzeile nimmt nur Platz, solange ein Link oder eine Meldung zu sehen ist
+				BooleanExpression anyVisible = items.get(0).visibleProperty();
+				BooleanExpression anyManaged = items.get(0).managedProperty();
+				for (Node item : items.subList(1, items.size())) {
+					anyVisible = anyVisible.or(item.visibleProperty());
+					anyManaged = anyManaged.or(item.managedProperty());
 				}
-				indicatorBar.visibleProperty().bind(anyVisible);
-				indicatorBar.managedProperty().bind(anyManaged);
-				screen.getChildren().add(indicatorBar);
+				footer.visibleProperty().bind(anyVisible);
+				footer.managedProperty().bind(anyManaged);
+				screen.getChildren().add(footer);
 			}
 		}
 
