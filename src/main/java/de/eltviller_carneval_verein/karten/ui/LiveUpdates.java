@@ -214,6 +214,16 @@ public final class LiveUpdates {
 		later.execute(() -> apply(() -> halls.applyForeign(all), () -> events.applyForeign(all)));
 	}
 
+	/**
+	 * Vergisst, was alte Objekte betrifft: die schon gemeldeten zurückgestellten Stände und die Hallen, die seit dem letzten
+	 * Abgleich neu oder ersetzt waren. Nach dem Neuladen des Bestands ({@code DataReload}), dessen Objekte alle neu sind; ein
+	 * Stand, der dann wieder zurückgestellt wird, wird wieder gemeldet. FX-Thread, sonst ohne Wirkung.
+	 */
+	public void reset() {
+		announced.clear();
+		changedHallIds.clear();
+	}
+
 	// Einarbeiten -->
 
 	private void scheduleRetry() {

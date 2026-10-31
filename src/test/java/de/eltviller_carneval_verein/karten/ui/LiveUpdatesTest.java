@@ -557,6 +557,24 @@ class LiveUpdatesTest {
 	}
 
 	@Test
+	void resetForgetsAnnouncedDeferrals() throws IOException {
+		Booking mine = seat(friday, 0);
+		mine.setLastName("Eigen");
+		eventTracker.check(event);
+		foreignVersion(seatUnit(0), "Fremd", payload -> payload.put("lastName", "Erste"));
+		notifyUnits(seatUnit(0));
+		notifyUnits(seatUnit(0));
+		String label = EntityLabels.booking(mine);
+		assertEquals(List.of(deferralHint(label, "Rechner Fremd")), hints);
+
+		live.reset();
+		notifyUnits(seatUnit(0));
+
+		assertEquals(List.of(deferralHint(label, "Rechner Fremd"), deferralHint(label, "Rechner Fremd")), hints,
+				"nach dem Neuladen gilt der Hinweis wieder als neu");
+	}
+
+	@Test
 	void deferralHintComesAfterTheWarningsOfTheSameBatch() throws IOException {
 		Hall second = new Hall();
 		second.setName("Bürgerhaus");
