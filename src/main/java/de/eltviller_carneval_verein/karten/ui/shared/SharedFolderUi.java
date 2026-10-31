@@ -43,6 +43,12 @@ public final class SharedFolderUi implements SharedFolderEvents.Ui {
 
 	@Override
 	public void footer(Severity severity, String text) {
+		// ohne sichtbare Fußzeile (Hauptmenü, Ladeansichten) kein Dialog: Sonst stapelten sich modale Fenster
+		StatusMessage.getInstance().showInFooter(severity, text);
+	}
+
+	@Override
+	public void message(Severity severity, String text) {
 		StatusMessage.getInstance().show(severity, text);
 	}
 

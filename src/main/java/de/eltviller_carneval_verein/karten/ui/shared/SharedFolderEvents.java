@@ -64,8 +64,18 @@ public final class SharedFolderEvents implements SyncListener {
 		 */
 		void askDecision(String dir, boolean setAsideAllowed, Consumer<ConnectMode> decide, Runnable cancel);
 
-		/** Zeigt einen Text in der Fußzeile. */
+		/**
+		 * Zeigt einen Hinweis nur in der Fußzeile; ist gerade keine zu sehen (Hauptmenü, Ladeansichten), nichts. Für Texte,
+		 * die sich häufen können und keinen Dialog wert sind.
+		 */
 		void footer(Severity severity, String text);
+
+		/** Zeigt eine Meldung, die nicht untergehen darf: in der Fußzeile, ohne sie als Dialog. */
+		void message(Severity severity, String text);
+	}
+
+	/** Die Frage beim Verbinden, die der Versionsspeicher gestellt hat und die noch offen ist. */
+	private record PendingDecision(String dir, boolean setAsideAllowed) {
 	}
 
 	private final SyncListener live;
@@ -75,6 +85,7 @@ public final class SharedFolderEvents implements SyncListener {
 	private final Runnable onSyncChanged;
 	private final Runnable onLockedChanged;
 	private String lastFailure;
+	private PendingDecision pendingDecision;
 
 	/**
 	 * @param live            der Listener von {@code LiveUpdates}
@@ -115,12 +126,25 @@ public final class SharedFolderEvents implements SyncListener {
 
 	/**
 	 * Meldet {@code onSyncChanged}, wenn sich Zustand, Vollständigkeit der Verbindung oder letzter Abgleich ändern: Ein Lauf
-	 * endet, die Verbindung wechselt. Ein Zustand ohne Störung vergisst auch die gemerkte Ursache.
+	 * endet, die Verbindung wechselt.
+	 * <p>
+	 * Die gemerkte Ursache vergisst sie, wenn der Abgleich wieder läuft oder endet ({@code AKTUELL}, {@code AUSSTEHEND},
+	 * {@code AUS}), nicht bei {@code OFFLINE}: Der Speicher meldet denselben Text nicht noch einmal, wenn auf FEHLER ein
+	 * Ausfall und wieder FEHLER folgt. Die wartende Entscheidung vergisst sie, sobald der Zustand {@code ENTSCHEIDUNG}
+	 * verlässt. Steht der Zustand beim Einhängen schon auf {@code ENTSCHEIDUNG}, ohne dass die Frage ankam (der Rückruf kam
+	 * vor dem Einhängen), gilt sie mit Beiseitelegen als wartend: {@code decideConnect} prüft die Schutzregel selbst und
+	 * fragt bei Bedarf erneut, nur mit "Mitnehmen".
 	 */
 	public void watch(ConnectionControl sync) {
+		if (sync.syncState().get() == SyncState.ENTSCHEIDUNG && pendingDecision == null) {
+			pendingDecision = new PendingDecision(sync.sharedDir(), true);
+		}
 		sync.syncState().addListener((observable, oldState, newState) -> {
-			if (newState != SyncState.FEHLER) {
+			if (newState == SyncState.AKTUELL || newState == SyncState.AUSSTEHEND || newState == SyncState.AUS) {
 				lastFailure = null;
+			}
+			if (newState != SyncState.ENTSCHEIDUNG) {
+				pendingDecision = null;
 			}
 			syncChanged();
 		});
@@ -154,6 +178,8 @@ public final class SharedFolderEvents implements SyncListener {
 	public void error(String message) {
 		if (message != null && message.startsWith(StoreMessages.SYS_SYNC_FAILED)) {
 			lastFailure = message;
+			// Der Text kann nach dem Wechsel des Zustands ankommen; die Statuszeile braucht ihn dann nachträglich
+			syncChanged();
 		}
 		live.error(message);
 	}
@@ -181,12 +207,34 @@ public final class SharedFolderEvents implements SyncListener {
 
 	@Override
 	public void connectDecisionNeeded(String dir, boolean setAsideAllowed) {
+		pendingDecision = new PendingDecision(dir, setAsideAllowed);
+		openDecision(pendingDecision);
+	}
+
+	/**
+	 * Öffnet die Frage beim Verbinden noch einmal, wenn der Versionsspeicher noch auf die Antwort wartet (der
+	 * Zustand {@code ENTSCHEIDUNG} dauert an): für den Hinweis in der Fußzeile, nachdem man die Frage geschlossen hat. Läuft
+	 * ein Ablauf, fragt dessen Dialog. Ohne wartende Entscheidung tut es nichts.
+	 */
+	public void askDecisionAgain() {
+		if (pendingDecision != null) {
+			openDecision(pendingDecision);
+		}
+	}
+
+	/** Ob der Versionsspeicher auf eine Entscheidung wartet, die {@link #askDecisionAgain()} erneut stellen kann. */
+	public boolean decisionPending() {
+		return pendingDecision != null;
+	}
+
+	private void openDecision(PendingDecision decision) {
 		if (flow.running()) {
 			// Der Ablauf des Knopfes (oder des Starts) fragt selbst; ein zweiter Dialog neben seinem wäre doppelt
-			flow.decisionNeeded(setAsideAllowed);
+			flow.decisionNeeded(decision.setAsideAllowed());
 			return;
 		}
-		ui.askDecision(dir, setAsideAllowed, mode -> answer(dir, setAsideAllowed, mode), flow::cancelDecision);
+		ui.askDecision(decision.dir(), decision.setAsideAllowed(),
+				mode -> answer(decision.dir(), decision.setAsideAllowed(), mode), flow::cancelDecision);
 	}
 
 	/**
@@ -195,7 +243,7 @@ public final class SharedFolderEvents implements SyncListener {
 	 */
 	private void answer(String dir, boolean setAsideAllowed, ConnectMode mode) {
 		if (!flow.decide(mode) && !flow.running()) {
-			ui.askDecision(dir, setAsideAllowed, next -> answer(dir, setAsideAllowed, next), flow::cancelDecision);
+			openDecision(new PendingDecision(dir, setAsideAllowed));
 		}
 	}
 
@@ -216,7 +264,7 @@ public final class SharedFolderEvents implements SyncListener {
 		if (text == null) {
 			return;
 		}
-		ui.footer(Severity.ERROR, text);
+		ui.message(Severity.ERROR, text);
 		try {
 			onLockedChanged.run();
 		} catch (RuntimeException e) {

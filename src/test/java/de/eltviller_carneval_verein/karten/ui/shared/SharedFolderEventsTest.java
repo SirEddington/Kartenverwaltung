@@ -128,8 +128,8 @@ class SharedFolderEventsTest {
 		events.locked(UNIT, UnitState.Status.LOCKED_DAMAGED);
 		events.locked(UNIT, UnitState.Status.LOCKED_FORMAT);
 
-		assertEquals(List.of("footer:ERROR:" + StoreMessages.damaged("Gala › Samstag"),
-				"footer:ERROR:" + StoreMessages.newerFormat("Gala › Samstag")), ui);
+		assertEquals(List.of("message:ERROR:" + StoreMessages.damaged("Gala › Samstag"),
+				"message:ERROR:" + StoreMessages.newerFormat("Gala › Samstag")), ui);
 		assertFalse(ui.get(0).contains(UNIT.relativePath()));
 		assertEquals(2, lockedChanged);
 	}
@@ -140,7 +140,7 @@ class SharedFolderEventsTest {
 
 		events.locked(UNIT, UnitState.Status.LOCKED_DAMAGED);
 
-		assertEquals(List.of("footer:ERROR:" + StoreMessages.damaged(UNIT.relativePath())), ui);
+		assertEquals(List.of("message:ERROR:" + StoreMessages.damaged(UNIT.relativePath())), ui);
 	}
 
 	@Test
@@ -239,6 +239,120 @@ class SharedFolderEventsTest {
 	}
 
 	@Test
+	void errorSetsCauseAndNotifies() {
+		events.error(StoreMessages.syncFailed(DIR, "IOException: eins"));
+
+		assertEquals(1, syncChanged, "die Statuszeile erfährt die Ursache, auch wenn sie nach dem Zustand kommt");
+		events.error(StoreMessages.contentMismatch("x.json"));
+		assertEquals(1, syncChanged, "SYS-012 ändert die Ursache nicht");
+	}
+
+	@Test
+	void causeSurvivesAnOutage() {
+		events.watch(connection);
+		String failure = StoreMessages.syncFailed(DIR, "IOException: eins");
+		connection.state(SyncState.FEHLER);
+		events.error(failure);
+
+		connection.state(SyncState.OFFLINE);
+		assertEquals(failure, events.lastFailure());
+		connection.state(SyncState.FEHLER);
+		assertEquals(failure, events.lastFailure(), "der Speicher meldet denselben Text nicht noch einmal");
+
+		connection.state(SyncState.AUSSTEHEND);
+		assertNull(events.lastFailure());
+	}
+
+	@Test
+	void causeEndsWhenTheConnectionEnds() {
+		events.watch(connection);
+		events.error(StoreMessages.syncFailed(DIR, "IOException: eins"));
+
+		connection.state(SyncState.ENTSCHEIDUNG);
+		assertEquals(StoreMessages.syncFailed(DIR, "IOException: eins"), events.lastFailure());
+		connection.state(SyncState.AUS);
+
+		assertNull(events.lastFailure());
+	}
+
+	@Test
+	void decisionIsRememberedUntilStateLeavesEntscheidung() {
+		events.watch(connection);
+		connection.state(SyncState.ENTSCHEIDUNG);
+		connection.sharedDir(DIR);
+		events.connectDecisionNeeded(DIR, false);
+		ui.clear();
+
+		events.askDecisionAgain();
+		assertEquals(List.of("askDecision:" + DIR + ":false"), ui);
+
+		connection.state(SyncState.AKTUELL);
+		ui.clear();
+		events.askDecisionAgain();
+		assertEquals(List.of(), ui, "die Entscheidung ist gefallen, es gibt nichts mehr zu fragen");
+	}
+
+	@Test
+	void askDecisionAgainReopensTheQuestion() {
+		connection.sharedDir(DIR);
+		events.connectDecisionNeeded(DIR, true);
+		shownDecide = null;
+		ui.clear();
+
+		events.askDecisionAgain();
+
+		assertEquals(List.of("askDecision:" + DIR + ":true"), ui);
+		shownDecide.accept(ConnectMode.MERGE);
+		assertEquals(List.of("decide:MERGE"), connection.calls(), "die Antwort geht wie bei der ersten Frage an den Ablauf");
+	}
+
+	@Test
+	void askDecisionAgainDuringAFlowGoesToItsDialog() {
+		connection.sharedDir(DIR);
+		events.connectDecisionNeeded(DIR, true);
+		ui.clear();
+		flow.connectAtStart(DIR, ConnectMode.ASK);
+		screen.clear();
+
+		events.askDecisionAgain();
+
+		assertEquals(List.of("askDecision:" + DIR + ":true"), screen);
+		assertEquals(List.of(), ui);
+	}
+
+	@Test
+	void askDecisionAgainWithoutRememberedDecisionDoesNothing() {
+		events.askDecisionAgain();
+
+		assertEquals(List.of(), ui);
+		assertEquals(List.of(), screen);
+	}
+
+	@Test
+	void decisionStateAtInstallIsOfferedWithSetAsideAllowed() {
+		connection.sharedDir(DIR);
+		connection.state(SyncState.ENTSCHEIDUNG);
+
+		events.watch(connection);
+		events.askDecisionAgain();
+
+		assertEquals(List.of("askDecision:" + DIR + ":true"), ui);
+	}
+
+	@Test
+	void rememberedDecisionIsNotOverwrittenAtInstall() {
+		connection.sharedDir(DIR);
+		connection.state(SyncState.ENTSCHEIDUNG);
+		events.connectDecisionNeeded(DIR, false);
+		ui.clear();
+
+		events.watch(connection);
+		events.askDecisionAgain();
+
+		assertEquals(List.of("askDecision:" + DIR + ":false"), ui);
+	}
+
+	@Test
 	void syncChangesAreReportedWhenTheConnectionChanges() {
 		events.watch(connection);
 
@@ -318,6 +432,11 @@ class SharedFolderEventsTest {
 		@Override
 		public void footer(Severity severity, String text) {
 			ui.add("footer:" + severity + ":" + text);
+		}
+
+		@Override
+		public void message(Severity severity, String text) {
+			ui.add("message:" + severity + ":" + text);
 		}
 	}
 

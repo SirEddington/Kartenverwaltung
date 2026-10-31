@@ -116,6 +116,18 @@ public final class StatusMessage {
 	}
 
 	/**
+	 * Zeigt einen Text nur in der Fußzeile, öffnet aber nie einen Dialog: Ist gerade keine Fußzeile sichtbar (Hauptmenü,
+	 * Ladeansichten), wird nichts angezeigt. Für Hinweise, die nicht wichtig genug sind, die Arbeit zu unterbrechen, und
+	 * die sich häufen können (etwa "Wieder verbunden" bei jeder Rückkehr).
+	 */
+	public void showInFooter(Severity severity, String text) {
+		if (!isAnyLabelDisplayed()) {
+			return;
+		}
+		show(new Entry(severity, text, text));
+	}
+
+	/**
 	 * Entfernt eine stehende Fehler- oder Warnmeldung, weil nichts mehr zu beanstanden ist (auch die eines
 	 * gescheiterten Speicherversuchs). Info und Erfolgsmeldungen ("Gespeichert") bleiben.
 	 */

@@ -295,12 +295,14 @@ public class MainApp extends Application {
 	/**
 	 * Das Popup SYS-005, wenn der gemeinsame Ordner beim Start nicht erreichbar war: nach dem Hauptmenü (und einem
 	 * abgebrochenen Verbinden, das die Einstellungen zeigt), nicht blockierend. Der Versionsspeicher meldet diesen Ausfall nicht
-	 * selbst ({@code unreachable} kommt nicht), er gilt dort als gemeldet.
+	 * selbst ({@code unreachable} kommt nicht), er gilt dort als gemeldet. Kam der Ordner während des Ladens zurück, ist der
+	 * Ausfall überholt: Dann erscheint kein Popup.
 	 */
 	private static void showUnreachableAtStart() {
 		String dir = unreachableAtStart;
 		unreachableAtStart = null;
-		if (dir != null && !sharedFolderUi.unreachableOpen()) {
+		if (dir != null && SyncService.getInstance().syncState().get() == SyncState.OFFLINE
+				&& !sharedFolderUi.unreachableOpen()) {
 			sharedFolderUi.showUnreachable(StoreMessages.unreachable(dir));
 		}
 	}

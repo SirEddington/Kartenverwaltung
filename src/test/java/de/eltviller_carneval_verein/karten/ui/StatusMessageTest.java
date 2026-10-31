@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.List;
 
@@ -79,6 +80,18 @@ class StatusMessageTest {
 
 		assertEquals(21, entry.lines().size());
 		assertEquals(new StatusMessage.Line(Severity.INFO, "... und 5 weitere"), entry.lines().get(20));
+	}
+
+	@Test
+	void footerOnlyTextWithoutDisplayedFooterShowsNothingAndOpensNoDialog() {
+		StatusMessage messages = StatusMessage.getInstance();
+		messages.clear();
+
+		// Ohne sichtbare Fußzeile würde show() einen Dialog öffnen, und der scheitert ohne JavaFX mit einer Ausnahme
+		messages.showInFooter(Severity.INFO, "Wieder verbunden.");
+		messages.showInFooter(Severity.WARNING, "Nicht abgeglichen: x");
+
+		assertNull(messages.currentProperty().get());
 	}
 
 	@Test
