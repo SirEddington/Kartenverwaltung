@@ -5,6 +5,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javafx.scene.control.Hyperlink;
+import javafx.scene.layout.Region;
 
 /**
  * Der Hinweis in der Fußzeile auf offene Konflikte: ein Link "1 Konflikt offen" bzw. "N Konflikte offen", sichtbar nur,
@@ -25,6 +26,8 @@ public final class ConflictIndicator extends Hyperlink {
 	public ConflictIndicator(IntSupplier openCount, Runnable open) {
 		this.openCount = openCount;
 		getStyleClass().add("conflict-indicator");
+		// in voller Breite: kürzen soll die Fußzeile die Meldung daneben (StatusLabel)
+		setMinWidth(Region.USE_PREF_SIZE);
 		setOnAction(event -> {
 			// ein Link, der immer wieder gilt, ist nie "besucht"
 			setVisited(false);

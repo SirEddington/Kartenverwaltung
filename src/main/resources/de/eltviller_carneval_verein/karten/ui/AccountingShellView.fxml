@@ -60,11 +60,11 @@
 
     <Separator />
 
-    <!-- UNTERER BEREICH: Identischer Footer -->
+    <!-- UNTERER BEREICH: Identischer Footer; die Knöpfe behalten ihre volle Breite (minWidth -Infinity) -->
     <HBox spacing="10.0" alignment="CENTER_RIGHT">
         <StatusLabel />
         <Region HBox.hgrow="ALWAYS" />
-        <SplitMenuButton fx:id="btnExport" styleClass="button-secondary" text="Exportieren" />
-        <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" />
+        <SplitMenuButton fx:id="btnExport" styleClass="button-secondary" text="Exportieren" minWidth="-Infinity" />
+        <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" minWidth="-Infinity" />
     </HBox>
 </VBox>

@@ -46,11 +46,11 @@
 
     <Region VBox.vgrow="ALWAYS" />
 
-    <!-- Aktionen -->
+    <!-- Aktionen; die Knöpfe behalten ihre volle Breite (minWidth -Infinity), eine lange Meldung wird gekürzt -->
     <HBox alignment="CENTER_RIGHT" spacing="10.0">
         <StatusLabel />
         <Region HBox.hgrow="ALWAYS" />
-        <Button text="Abbrechen" styleClass="button-secondary" onAction="#handleCancel" />
-        <Button text="Event Speichern" styleClass="button-primary" onAction="#handleSave" />
+        <Button text="Abbrechen" styleClass="button-secondary" onAction="#handleCancel" minWidth="-Infinity" />
+        <Button text="Event Speichern" styleClass="button-primary" onAction="#handleSave" minWidth="-Infinity" />
     </HBox>
 </VBox>

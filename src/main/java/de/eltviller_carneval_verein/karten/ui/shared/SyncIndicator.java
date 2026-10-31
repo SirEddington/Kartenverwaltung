@@ -5,6 +5,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javafx.scene.control.Hyperlink;
+import javafx.scene.layout.Region;
 
 /**
  * Der Hinweis in der Fußzeile zum Abgleich mit dem gemeinsamen Ordner (Spec "Fußzeile: SyncIndicator"): ein Link mit
@@ -32,6 +33,8 @@ public final class SyncIndicator extends Hyperlink {
 	public SyncIndicator(SyncStatus status, Runnable askDecision, Runnable openInfo) {
 		this.status = status;
 		getStyleClass().add("sync-indicator");
+		// in voller Breite: kürzen soll die Fußzeile die Meldung daneben (StatusLabel)
+		setMinWidth(Region.USE_PREF_SIZE);
 		setOnAction(event -> {
 			// ein Link, der immer wieder gilt, ist nie "besucht"
 			setVisited(false);

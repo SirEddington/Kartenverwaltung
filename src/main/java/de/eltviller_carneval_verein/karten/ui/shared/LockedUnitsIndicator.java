@@ -5,6 +5,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javafx.scene.control.Hyperlink;
+import javafx.scene.layout.Region;
 
 /**
  * Der Link in der Fußzeile auf gesperrte Einträge (Spec "Gesperrte Einheiten"): "1 gesperrter Eintrag" bzw. "n gesperrte
@@ -26,6 +27,8 @@ public final class LockedUnitsIndicator extends Hyperlink {
 	public LockedUnitsIndicator(IntSupplier count, Runnable open) {
 		this.count = count;
 		getStyleClass().add("locked-indicator");
+		// in voller Breite: kürzen soll die Fußzeile die Meldung daneben (StatusLabel)
+		setMinWidth(Region.USE_PREF_SIZE);
 		setOnAction(event -> {
 			// ein Link, der immer wieder gilt, ist nie "besucht"
 			setVisited(false);
