@@ -24,7 +24,9 @@ import de.eltviller_carneval_verein.karten.validation.Severity;
  * {@code LiveUpdates} schon behandelt ({@code unitsChanged}, {@code conflictsChanged}, {@code error}, {@code lost},
  * {@code pending}), geht unverändert an dessen Listener; der Rest geht an {@link Ui}:
  * <ul>
- * <li>{@code unreachable}: Popup, solange kein solches offen ist;
+ * <li>{@code unreachable}: Popup, solange kein solches offen ist und kein Ablauf des Verbindens läuft (dessen Ladeansicht
+ * zeigt den Hinweis);
+ * <li>{@code error} mit SYS-006 (Abgleich gescheitert): nur Fußzeile, nie ein Dialog;
  * <li>{@code reconnected}: Fußzeile;
  * <li>{@code duplicateMachine}: Popup;
  * <li>{@code connectDecisionNeeded}: Läuft ein Ablauf des Verbindens, stellt dessen Dialog die Frage, sonst öffnet {@link Ui}
@@ -37,7 +39,8 @@ import de.eltviller_carneval_verein.karten.validation.Severity;
  * über {@code onSyncChanged}, wenn sich ändern kann, was das Info-Fenster zeigt: bei {@code skipped}, {@code reconnected},
  * und, wenn man sie mit {@link #watch} an die Verbindung hängt, bei jeder Änderung von Zustand, Vollständigkeit der
  * Verbindung und letztem Abgleich (der Versionsspeicher meldet {@code skipped} nur einmal je Eintrag und Programmlauf, auch
- * über ein Trennen und Verbinden hinweg).
+ * über ein Trennen und Verbinden hinweg). Verlässt der Zustand {@code ENTSCHEIDUNG}, schließt sie die offene Frage im
+ * Betrieb.
  * <p>
  * Alle Rückrufe kommen auf dem FX-Thread an (der {@code ui}-Executor des Versionsspeichers).
  */
@@ -66,6 +69,9 @@ public final class SharedFolderEvents implements SyncListener {
 		 * @param cancel "Abbrechen"
 		 */
 		void askDecision(String dir, boolean setAsideAllowed, Consumer<ConnectMode> decide, Runnable cancel);
+
+		/** Schließt die offene Frage ohne Antwort, weil sie sich erledigt hat; ohne offene Frage nichts. */
+		void closeDecision();
 
 		/**
 		 * Zeigt einen Hinweis nur in der Fußzeile; ist gerade keine zu sehen (Hauptmenü, Ladeansichten), nichts. Für Texte,
@@ -145,7 +151,12 @@ public final class SharedFolderEvents implements SyncListener {
 				lastFailure = null;
 			}
 			if (newState != SyncState.ENTSCHEIDUNG) {
+				boolean questionMayBeOpen = pendingDecision != null || oldState == SyncState.ENTSCHEIDUNG;
 				pendingDecision = null;
+				// Die Frage im Betrieb hat sich erledigt (anderswo entschieden, getrennt); die der Ladeansicht gehört dem Ablauf
+				if (questionMayBeOpen && !flow.running()) {
+					ui.closeDecision();
+				}
 			}
 			syncChanged();
 		});
@@ -181,6 +192,10 @@ public final class SharedFolderEvents implements SyncListener {
 			lastFailure = message;
 			// Der Text kann nach dem Wechsel des Zustands ankommen; die Statuszeile braucht ihn dann nachträglich
 			syncChanged();
+			// Nur in der Fußzeile: LiveUpdates öffnete in Ansichten ohne Fußzeile (Ladeansicht, Hauptmenü) einen modalen
+			// Dialog, und verschiedene Ursachen stapelten sich. Die Ursache steht auch in Statuszeile und Info-Fenster.
+			ui.footer(Severity.ERROR, message);
+			return;
 		}
 		live.error(message);
 	}
@@ -189,7 +204,8 @@ public final class SharedFolderEvents implements SyncListener {
 
 	@Override
 	public void unreachable(String path) {
-		if (!ui.unreachableOpen()) {
+		// Im Ablauf des Verbindens zeigt die Ladeansicht den Hinweis schon (Entscheidung 15): kein Popup dazu
+		if (!flow.running() && !ui.unreachableOpen()) {
 			ui.showUnreachable(StoreMessages.unreachable(path));
 		}
 	}

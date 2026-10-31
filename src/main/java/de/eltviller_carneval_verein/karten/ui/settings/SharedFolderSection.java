@@ -157,7 +157,7 @@ public final class SharedFolderSection {
 		}
 
 		/**
-		 * "Trennen": Rückfrage, {@code disconnect()} im Hintergrund, dann {@code sharedDir} per Teil-Speichern löschen. Der
+		 * "Trennen": Rückfrage, {@code sharedDir} per Teil-Speichern löschen, dann {@code disconnect()} im Hintergrund. Der
 		 * lokale Bestand bleibt, es wird nicht neu geladen. Danach wird der Bildschirm neu aufgebaut.
 		 * <p>
 		 * Trennen fragt nicht nach ungespeicherten Änderungen ({@code LeaveGuard}): Das Teil-Speichern führt die
@@ -173,27 +173,30 @@ public final class SharedFolderSection {
 			}
 			disconnecting = true;
 			refresh();
+			// Zuerst die Einstellung: Schließt die App zwischen beiden Schritten, bliebe nach umgekehrter Reihenfolge der Ordner
+			// eingetragen, und der nächste Start verbände das Getrennte wieder. Sie bleibt gelöscht, auch wenn das Trennen scheitert.
+			String clearFailure = null;
+			try {
+				SettingsStore.getInstance().saveOnly(settings -> settings.setSharedDir(null));
+			} catch (RuntimeException e) {
+				LOG.log(Level.WARNING, "Die Einstellung des gemeinsamen Ordners ließ sich nicht löschen", e);
+				clearFailure = message(e);
+			}
+			String settingFailure = clearFailure;
 			connection.background().execute(() -> {
-				String failure = null;
+				String failure = settingFailure;
 				try {
 					sync.disconnect();
 				} catch (RuntimeException e) {
 					LOG.log(Level.WARNING, "Trennen vom gemeinsamen Ordner ist fehlgeschlagen", e);
-					failure = message(e);
+					failure = failure == null ? message(e) : failure;
 				}
 				String disconnectFailure = failure;
 				Platform.runLater(() -> disconnected(disconnectFailure));
 			});
 		}
 
-		private void disconnected(String disconnectFailure) {
-			String failure = disconnectFailure;
-			try {
-				SettingsStore.getInstance().saveOnly(settings -> settings.setSharedDir(null));
-			} catch (RuntimeException e) {
-				LOG.log(Level.WARNING, "Die Einstellung des gemeinsamen Ordners ließ sich nicht löschen", e);
-				failure = failure == null ? message(e) : failure;
-			}
+		private void disconnected(String failure) {
 			disconnecting = false;
 			Scene scene = node.getScene();
 			if (scene != null && scene == MainApp.primaryStage().getScene()) {

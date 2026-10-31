@@ -44,6 +44,8 @@ public final class SyncInfoWindow {
 	private final GridPane list = new GridPane();
 	private final ScrollPane listScroll = new ScrollPane(list);
 	private final Label listHint = new Label();
+	/** Der Inhalt, der gerade gezeichnet ist; {@code null} vor dem ersten Mal. */
+	private SyncInfo drawn;
 
 	private SyncInfoWindow(Window owner, Supplier<SyncInfo> info, Runnable syncNow) {
 		this.info = info;
@@ -139,6 +141,11 @@ public final class SyncInfoWindow {
 			LOG.log(Level.WARNING, "Das Info-Fenster zum Abgleich ließ sich nicht auffrischen", e);
 			return;
 		}
+		// Der Takt der App ruft es jede Sekunde auf: Nur neu zeichnen, was sich geändert hat (sonst springt die Liste zurück)
+		if (content.equals(drawn)) {
+			return;
+		}
+		drawn = content;
 		folder.setText(content.folderLine());
 		lastSync.setText(content.lastSyncLine());
 		cause.setText(content.causeLine());

@@ -224,7 +224,7 @@ public final class ConnectFlow {
 	}
 
 	/**
-	 * "Abbrechen" in der Frage: trennen (im Hintergrund), {@code sharedDir} löschen, zurück in die Einstellungen.
+	 * "Abbrechen" in der Frage: {@code sharedDir} löschen, dann trennen (im Hintergrund), zurück in die Einstellungen.
 	 */
 	public void cancelDecision() {
 		if (closed) {
@@ -233,6 +233,13 @@ public final class ConnectFlow {
 		// Ein neuer Ablauf macht die Rückrufe des alten unwirksam, auch das ABGEBROCHEN, das das Trennen auslöst.
 		end(generation);
 		int id = begin();
+		// Zuerst die Einstellung: Schließt die App zwischen beiden Schritten, bliebe nach umgekehrter Reihenfolge der Ordner
+		// eingetragen, und der nächste Start verbände die abgebrochene Verbindung wieder.
+		try {
+			saveSharedDir.accept(null);
+		} catch (RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Die Einstellung des gemeinsamen Ordners ließ sich nicht löschen", e);
+		}
 		background.execute(() -> {
 			try {
 				sync.disconnect();
@@ -240,14 +247,7 @@ public final class ConnectFlow {
 				LOGGER.log(Level.WARNING, "Trennen vom gemeinsamen Ordner ist fehlgeschlagen", e);
 			}
 			fx.execute(() -> {
-				if (!isCurrent(id)) {
-					return;
-				}
-				try {
-					saveSharedDir.accept(null);
-				} catch (RuntimeException e) {
-					LOGGER.log(Level.WARNING, "Die Einstellung des gemeinsamen Ordners ließ sich nicht löschen", e);
-				} finally {
+				if (isCurrent(id)) {
 					end(id);
 					screen.cancelled();
 				}
@@ -303,9 +303,11 @@ public final class ConnectFlow {
 			screen.checkFailed(error.get());
 			return;
 		}
-		dir = typed;
+		// Absolut gespeichert: Ein relativer Pfad gälte beim nächsten Start vom damaligen Arbeitsordner aus
+		String absolute = Path.of(typed).toAbsolutePath().normalize().toString();
+		dir = absolute;
 		try {
-			saveSharedDir.accept(typed);
+			saveSharedDir.accept(absolute);
 		} catch (RuntimeException e) {
 			// Ohne gespeicherte Einstellung wird nicht verbunden: der nächste Start fände den Ordner sonst nicht
 			end(id);
@@ -313,7 +315,7 @@ public final class ConnectFlow {
 			return;
 		}
 		screen.showProgress();
-		connect(id, typed, ConnectMode.ASK, false);
+		connect(id, absolute, ConnectMode.ASK, false);
 	}
 
 	/**

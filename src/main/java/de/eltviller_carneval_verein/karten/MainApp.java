@@ -22,6 +22,7 @@ import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
+import de.eltviller_carneval_verein.karten.store.ConnectMode;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
@@ -248,7 +249,8 @@ public class MainApp extends Application {
 			@Override
 			public void finished() {
 				// Modus ASK und Ordner nicht erreichbar: Der Start läuft offline weiter, das Verbinden steht aus
-				if (sync.syncState().get() == SyncState.OFFLINE) {
+				// Nach MERGE stand der Hinweis schon in der Ladeansicht ("Trotzdem öffnen"): kein Popup dazu (Entscheidung 15)
+				if (plan.mode() == ConnectMode.ASK && sync.syncState().get() == SyncState.OFFLINE) {
 					unreachableAtStart = plan.connectDir();
 				}
 				loadAfterConnect(settingsStore, () -> {

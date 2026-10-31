@@ -238,7 +238,56 @@ class SharedFolderEventsTest {
 		events.error(StoreMessages.contentMismatch("x.json"));
 
 		assertEquals(second, events.lastFailure(), "SYS-012 ist keine Störung des Abgleichs");
-		assertEquals(List.of("error:" + first, "error:" + second, "error:" + StoreMessages.contentMismatch("x.json")), live);
+		assertEquals(List.of("error:" + StoreMessages.contentMismatch("x.json")), live, "SYS-006 geht nicht an LiveUpdates");
+	}
+
+	@Test
+	void syncFailureGoesToTheFooterOnly() {
+		String failure = StoreMessages.syncFailed(DIR, "IOException: eins");
+
+		events.error(failure);
+
+		assertEquals(List.of(), live, "kein Aufruf von LiveUpdates: Dessen Meldung wäre in Ansichten ohne Fußzeile ein Dialog");
+		assertEquals(List.of("footer:ERROR:" + failure), ui);
+		assertEquals(failure, events.lastFailure());
+		assertEquals(1, syncChanged);
+	}
+
+	@Test
+	void unreachableDuringAFlowOpensNoPopup() {
+		flow.connectAtStart(DIR, ConnectMode.ASK);
+
+		events.unreachable(DIR);
+
+		assertEquals(List.of(), ui, "die Ladeansicht zeigt den Hinweis schon, ein Popup käme dazu");
+
+		flow.cancel();
+		events.unreachable(DIR);
+
+		assertEquals(List.of("showUnreachable:" + StoreMessages.unreachable(DIR)), ui, "ohne Ablauf bleibt das Popup");
+	}
+
+	@Test
+	void leavingEntscheidungClosesTheOpenQuestion() {
+		events.watch(connection);
+		connection.state(SyncState.ENTSCHEIDUNG);
+		events.connectDecisionNeeded(DIR, true);
+		ui.clear();
+
+		connection.state(SyncState.AKTUELL);
+
+		assertEquals(List.of("closeDecision"), ui);
+	}
+
+	@Test
+	void leavingEntscheidungDuringAFlowLeavesItsDialog() {
+		events.watch(connection);
+		connection.state(SyncState.ENTSCHEIDUNG);
+		flow.connectAtStart(DIR, ConnectMode.ASK);
+
+		connection.state(SyncState.AKTUELL);
+
+		assertEquals(List.of(), ui, "die Frage der Ladeansicht gehört dem Ablauf");
 	}
 
 	@Test
@@ -439,6 +488,11 @@ class SharedFolderEventsTest {
 			ui.add("askDecision:" + dir + ":" + setAsideAllowed);
 			shownDecide = decide;
 			shownCancel = cancel;
+		}
+
+		@Override
+		public void closeDecision() {
+			ui.add("closeDecision");
 		}
 
 		@Override

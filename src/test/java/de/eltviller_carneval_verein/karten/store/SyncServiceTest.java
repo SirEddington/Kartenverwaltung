@@ -2214,6 +2214,31 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void unclaimedResetOfSharedModeIsClaimedLocallyWhenTheUserDisconnects() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Version v2 = save(a, update(BOOKING, v1, "Anna B"));
+		a.service.tick();
+		Files.writeString(localFile(a, BOOKING, v2.id() + ".json"), "kaputt");
+		Files.writeString(sharedFile(BOOKING, v2.id() + ".json"), "auch kaputt");
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(BOOKING).status());
+		a.service.tick();
+		assertEquals(Set.of(BOOKING), a.service.resettableUnits());
+		// im gemeinsamen Modus geschrieben, noch von keinem Takt hochgeladen und beansprucht
+		Version reset = a.service.resetToLastReadable(BOOKING);
+
+		a.service.disconnect();
+
+		UnitState state = a.service.unitState(BOOKING);
+		assertEquals(Status.OK, state.status(), "im Einzelbetrieb wird das Zurücksetzen lokal beansprucht");
+		assertEquals(reset.id(), state.head().id());
+		assertFalse(state.provisional());
+		assertEquals(Set.of(), a.service.resettableUnits());
+	}
+
+	@Test
 	void resetWithoutDamageIsRejected() throws IOException {
 		Node a = node("a");
 		a.service.startup("");

@@ -188,6 +188,33 @@ class ConnectFlowTest {
 	}
 
 	@Test
+	void cancelInDecisionClearsSharedDirBeforeDisconnecting() {
+		flow.connectByButton(dir());
+		sync.outcome(new ConnectOutcome(Kind.ENTSCHEIDUNG, true, null, null));
+
+		flow.cancelDecision();
+
+		assertEquals(2, callsAtSave.size());
+		assertEquals(List.of("connect:" + dir() + ":ASK"), callsAtSave.get(1),
+				"schließt die App zwischen beiden Schritten, darf der nächste Start den Ordner nicht wieder verbinden");
+	}
+
+	@Test
+	void relativePathIsSavedAbsolute() throws IOException {
+		Path relative = Path.of("target", "flow-relative-" + System.nanoTime());
+		Files.createDirectories(relative);
+		try {
+			flow.connectByButton(relative.toString());
+
+			String expected = relative.toAbsolutePath().normalize().toString();
+			assertEquals(List.of(expected), saves);
+			assertEquals(List.of("connect:" + expected + ":ASK"), sync.calls());
+		} finally {
+			Files.deleteIfExists(relative);
+		}
+	}
+
+	@Test
 	void decideAsksLeaveGuardFirst() {
 		flow.connectByButton(dir());
 		sync.outcome(new ConnectOutcome(Kind.ENTSCHEIDUNG, true, null, null));
