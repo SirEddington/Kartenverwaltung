@@ -16,9 +16,8 @@ public final class AppPaths {
 	 * Fällt außerhalb von Windows (z.B. beim Entwickeln) auf das Nutzerverzeichnis zurück.
 	 * <p>
 	 * Ist die Systemeigenschaft {@code karten.appDataDir} gesetzt und nicht leer, gilt dieser Ordner stattdessen. Das dient
-	 * nur dem Handtest mit zwei Instanzen auf einem Rechner (je eigener Datenordner, damit eigene Sperre und eigene
-	 * Rechner-Kennung); zusammen mit {@code karten.sharedDir} (siehe {@code MainApp}), das mit KARV-87 durch die
-	 * Einstellung ersetzt wird und dann entfällt.
+	 * nur dem Handtest mit zwei Instanzen auf einem Rechner (je eigener Datenordner, damit eigene Sperre, eigene
+	 * Rechner-Kennung und eigene Einstellungen samt gemeinsamem Ordner).
 	 */
 	public static File appDataDir() {
 		String override = System.getProperty(APP_DATA_PROPERTY);

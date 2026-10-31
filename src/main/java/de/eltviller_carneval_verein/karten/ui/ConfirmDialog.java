@@ -36,8 +36,19 @@ public final class ConfirmDialog {
 	 * @return {@code true}, wenn der Nutzer die Aktion bestätigt hat
 	 */
 	public static boolean confirm(String title, String message, String actionLabel, String actionStyleClass, Window owner) {
+		return confirm(title, message, actionLabel, actionStyleClass, "Abbrechen", owner);
+	}
+
+	/**
+	 * Wie {@link #confirm(String, String, String, String, Window)}, mit eigener Beschriftung der neutralen Antwort (etwa
+	 * "Verbunden bleiben").
+	 *
+	 * @param cancelLabel Beschriftung der Antwort, die nichts tut
+	 */
+	public static boolean confirm(String title, String message, String actionLabel, String actionStyleClass, String cancelLabel,
+			Window owner) {
 		ButtonType action = new ButtonType(actionLabel, ButtonData.OK_DONE);
-		ButtonType cancel = new ButtonType("Abbrechen", ButtonData.CANCEL_CLOSE);
+		ButtonType cancel = new ButtonType(cancelLabel, ButtonData.CANCEL_CLOSE);
 
 		Alert alert = new Alert(AlertType.CONFIRMATION, message, action, cancel);
 		alert.setTitle(title);

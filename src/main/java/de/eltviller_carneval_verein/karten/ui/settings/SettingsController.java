@@ -10,6 +10,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.SettingsSaver;
+import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -54,13 +55,16 @@ public class SettingsController {
 	}
 
 	/**
-	 * Die Abschnitte dieses Bildschirms. Bisher gibt es keine Einstellung; Folgetickets (zuerst der gemeinsame
-	 * Ordner, KARV-87) ergänzen hier ihre Abschnitte.
+	 * Die Abschnitte dieses Bildschirms: bisher nur "Gemeinsamer Ordner" (KARV-87), sobald der Start das Verbinden
+	 * eingerichtet hat. Folgetickets ergänzen hier ihre Abschnitte.
 	 *
 	 * @param settings die bearbeiteten Einstellungen
 	 */
 	List<SettingsSection> buildSections(AppSettings settings) {
-		return List.of();
+		List<SettingsSection> sections = new ArrayList<>();
+		SharedFolderConnection.instance().ifPresent(
+				connection -> sections.add(SharedFolderSection.build(settings, connection.sync(), connection)));
+		return sections;
 	}
 
 	/**

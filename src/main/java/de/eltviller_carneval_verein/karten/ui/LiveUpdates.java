@@ -191,8 +191,9 @@ public final class LiveUpdates {
 	 * Wie die Anwendung sie braucht: die Repositories und Tracker der App, Wiederholen und Hinweise auf dem FX-Thread.
 	 *
 	 * @param onConflictsChanged was bei geänderten Konflikten geschieht ({@link #setOnConflictsChanged})
+	 * @return die eingehängte Instanz (für {@link #reset()} nach dem Neuladen)
 	 */
-	public static void install(SyncService sync, Runnable onConflictsChanged) {
+	public static LiveUpdates install(SyncService sync, Runnable onConflictsChanged) {
 		LiveUpdates live = new LiveUpdates(StoreHallRepository.getInstance(), StoreEventRepository.getInstance(),
 				ChangeTracker.halls(), ChangeTracker.events(), EditingUnits.getInstance(), Platform::runLater,
 				text -> StatusMessage.getInstance().show(Severity.WARNING, text));
@@ -203,6 +204,7 @@ public final class LiveUpdates {
 		if (sync.sharedDir() != null) {
 			live.catchUp(sync.snapshots().keySet());
 		}
+		return live;
 	}
 
 	/**

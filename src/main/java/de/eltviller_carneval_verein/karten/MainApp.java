@@ -2,7 +2,9 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -20,6 +22,9 @@ import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.SyncState;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions;
@@ -40,6 +45,10 @@ import de.eltviller_carneval_verein.karten.ui.StatusLabel;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
+import de.eltviller_carneval_verein.karten.ui.shared.DataReload;
+import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection;
+import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart;
+import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart.StartResult;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -67,13 +76,15 @@ public class MainApp extends Application {
 
 	private static final Logger LOG = Logger.getLogger(MainApp.class.getName());
 
-	/**
-	 * Systemeigenschaft nur für den Handtest mit zwei Instanzen: der gemeinsame Ordner, mit dem verbunden gestartet wird
-	 * (leer oder nicht gesetzt: Einzelbetrieb). Entfällt mit KARV-87, das den Ordner als Einstellung einführt.
-	 */
-	static final String SHARED_DIR_PROPERTY = "karten.sharedDir";
-
 	private static Stage primaryStage;
+	// Fremde Änderungen und Rückmeldungen des Versionsspeichers; nach dem Neuladen werden ihre Merklisten geleert
+	private static LiveUpdates liveUpdates;
+	/**
+	 * Der gemeinsame Ordner, der beim Start nicht erreichbar war ({@code null}: erreichbar oder Einzelbetrieb). Das Popup
+	 * SYS-005 dazu erscheint nach dem Hauptmenü (KARV-87, Aufgabe 11).
+	 */
+	@SuppressWarnings("unused")
+	private static String unreachableAtStart;
 	// Der Sammel-Dialog für Konflikte (gesetzt, sobald der Bestand geladen ist) und der Hinweis in der Fußzeile des aktuellen Fensterinhalts
 	private static SyncService conflictSync;
 	private static ConflictList conflictList;
@@ -132,39 +143,105 @@ public class MainApp extends Application {
 		}
 		// Die Fachregeln für Konflikte vor dem Start: Schon der Start löst verlorene Änderungen mit ihnen auf
 		ConflictPolicies.install(sync);
+		// Das Verbinden mit dem gemeinsamen Ordner (Knopf in den Einstellungen und Start mit neuem Ordner)
+		SharedFolderConnection connection = SharedFolderConnection.install(sync, MainApp::reloadAfterConnect);
 
-		// Das Fenster steht sofort da, mit Ladeansicht; Abgleich und Laden laufen im Hintergrund (vorläufig ohne
-		// gemeinsamen Ordner, außer im Handtest: karten.sharedDir). Hallen zuerst: Die Events beziehen sich auf sie. Geladen wird einmalig beim Start, damit
-		// unlesbare Einheiten sofort sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu fehlen.
-		Task<Void> loading = new Task<>() {
+		// Das Fenster steht sofort da, mit Ladeansicht; Start des Versionsspeichers und Laden laufen im Hintergrund. Den
+		// gemeinsamen Ordner gibt die Einstellung vor, verglichen mit der Marke "verbunden" (SharedFolderStart). Ist
+		// danach zu verbinden, lädt erst das Ende des ersten Laufs den Bestand: Niemand arbeitet auf einem halb
+		// abgeglichenen Bestand.
+		String sharedDir = settingsStore.current().getSharedDir();
+		Task<StartResult> starting = new Task<>() {
 			@Override
-			protected Void call() {
-				String sharedDir = System.getProperty(SHARED_DIR_PROPERTY);
-				sync.startup(sharedDir, fraction -> updateProgress(fraction, 1.0));
-				StoreHallRepository.getInstance().loadHalls();
-				// schon vor dem Laden der Events: Beim Laden bleiben Buchungen, die nicht zur Bestuhlung ihrer Vorstellung passen, draußen
-				StoreEventRepository.getInstance().setHallLookup(StoreHallRepository.getInstance()::findById);
-				StoreEventRepository.getInstance().loadEvents();
-				return null;
+			protected StartResult call() {
+				StartResult result = SharedFolderStart.run(sync, sharedDir, fraction -> updateProgress(fraction, 1.0));
+				if (result.plan().connectDir() == null) {
+					loadRepositories();
+				}
+				return result;
 			}
 		};
-		loading.setOnSucceeded(e -> onLoaded(settingsStore));
-		loading.setOnFailed(e -> {
-			Throwable failure = loading.getException();
-			LOG.log(Level.SEVERE, "Bestand konnte nicht geladen werden", failure);
-			failStart("Start nicht möglich", "Der Bestand konnte nicht geladen werden: " + failureMessage(failure));
-		});
+		starting.setOnSucceeded(e -> started(settingsStore, connection, starting.getValue()));
+		starting.setOnFailed(e -> loadFailed(starting.getException()));
 
-		primaryStage.setScene(createScene(loadingView(loading)));
+		primaryStage.setScene(createScene(loadingView(starting)));
 		primaryStage.show();
+		startInBackground(starting);
+	}
 
-		Thread loader = new Thread(loading, "start-laden");
+	/**
+	 * Lädt Hallen und Events (im Ladethread). Hallen zuerst: Die Events beziehen sich auf sie. Geladen wird einmalig beim
+	 * Start, damit unlesbare Einheiten sofort sichtbar gemeldet werden, statt beim ersten Öffnen einer Liste lautlos zu
+	 * fehlen.
+	 */
+	private static void loadRepositories() {
+		StoreHallRepository.getInstance().loadHalls();
+		// schon vor dem Laden der Events: Beim Laden bleiben Buchungen, die nicht zur Bestuhlung ihrer Vorstellung passen, draußen
+		StoreEventRepository.getInstance().setHallLookup(StoreHallRepository.getInstance()::findById);
+		StoreEventRepository.getInstance().loadEvents();
+	}
+
+	private static void startInBackground(Task<?> task) {
+		Thread loader = new Thread(task, "start-laden");
 		loader.setDaemon(true);
 		loader.start();
 	}
 
+	private static void loadFailed(Throwable failure) {
+		LOG.log(Level.SEVERE, "Bestand konnte nicht geladen werden", failure);
+		failStart("Start nicht möglich", "Der Bestand konnte nicht geladen werden: " + failureMessage(failure));
+	}
+
+	/**
+	 * Der Versionsspeicher ist gestartet (FX-Thread). Ohne zu verbindenden Ordner ist der Bestand schon geladen; sonst
+	 * folgt die Ladeansicht des Verbindens, und erst deren Ende lädt den Bestand.
+	 */
+	private static void started(SettingsStore settingsStore, SharedFolderConnection connection, StartResult result) {
+		SharedFolderStart.Plan plan = result.plan();
+		if (!result.reachable()) {
+			unreachableAtStart = plan.startupDir();
+		}
+		if (plan.connectDir() == null) {
+			onLoaded(settingsStore, () -> {
+			});
+			return;
+		}
+		SyncService sync = connection.sync();
+		connection.connectAtStart(plan.connectDir(), plan.mode(), new SharedFolderConnection.StartHandler() {
+			@Override
+			public void finished() {
+				// Modus ASK und Ordner nicht erreichbar: Der Start läuft offline weiter, das Verbinden steht aus
+				if (sync.syncState().get() == SyncState.OFFLINE) {
+					unreachableAtStart = plan.connectDir();
+				}
+				loadAfterConnect(settingsStore, () -> {
+				});
+			}
+
+			@Override
+			public void cancelled() {
+				loadAfterConnect(settingsStore, MainApp::showSettingsView);
+			}
+		});
+	}
+
+	/** Nach dem Verbinden beim Start: den Bestand laden, den Start abschließen, dann {@code then}. */
+	private static void loadAfterConnect(SettingsStore settingsStore, Runnable then) {
+		Task<Void> loading = new Task<>() {
+			@Override
+			protected Void call() {
+				loadRepositories();
+				return null;
+			}
+		};
+		loading.setOnSucceeded(e -> onLoaded(settingsStore, then));
+		loading.setOnFailed(e -> loadFailed(loading.getException()));
+		showContent(loadingView(loading));
+		startInBackground(loading);
+	}
+
 	/** Die Ansicht, die der Start zeigt, bis der Bestand geladen ist. */
-	private static Parent loadingView(Task<Void> loading) {
+	private static Parent loadingView(Task<?> loading) {
 		Label label = new Label("Bestand wird geladen …");
 		ProgressBar bar = new ProgressBar();
 		bar.setPrefWidth(320);
@@ -189,10 +266,14 @@ public class MainApp extends Application {
 		return shown.getMessage() != null ? shown.getMessage() : fallback.apply(shown);
 	}
 
-	/** Läuft auf dem FX-Thread, sobald der Bestand geladen ist: der Rest des Starts und dann das Hauptmenü. */
-	private static void onLoaded(SettingsStore settingsStore) {
+	/**
+	 * Läuft auf dem FX-Thread, sobald der Bestand geladen ist: der Rest des Starts, das Hauptmenü und dann {@code then}
+	 * (etwa die Einstellungen nach einem abgebrochenen Verbinden).
+	 */
+	private static void onLoaded(SettingsStore settingsStore, Runnable then) {
 		try {
 			finishStart(settingsStore);
+			then.run();
 		} catch (RuntimeException e) {
 			LOG.log(Level.SEVERE, "Oberfläche konnte nicht geladen werden", e);
 			failStart("Start nicht möglich", "Die Oberfläche konnte nicht geladen werden: " + failureMessage(e));
@@ -221,7 +302,7 @@ public class MainApp extends Application {
 				halls::findById);
 		conflictSync = sync;
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
-		LiveUpdates.install(sync, MainApp::conflictsChanged);
+		liveUpdates = LiveUpdates.install(sync, MainApp::conflictsChanged);
 		ChangeTrigger.install();
 		LiveValidator.install();
 
@@ -232,18 +313,7 @@ public class MainApp extends Application {
 			}
 		});
 
-		// gesperrte Einheiten kommen als Schlüssel; die lesbare Bezeichnung folgt später, bis dahin bleibt es beim Text
-		List<String> eventWarnings = repository.getAndClearLoadWarnings();
-		repository.getAndClearLockedAtLoad().forEach((unit, status) -> eventWarnings.add(StoreMessages.locked(unit, status)));
-		if (!eventWarnings.isEmpty()) {
-			showAlert("Warnung beim Laden der Events", String.join("\n\n", eventWarnings), AlertType.WARNING);
-		}
-
-		List<String> hallWarnings = halls.getAndClearLoadWarnings();
-		halls.getAndClearLockedAtLoad().forEach((unit, status) -> hallWarnings.add(StoreMessages.locked(unit, status)));
-		if (!hallWarnings.isEmpty()) {
-			showAlert("Warnung beim Laden der Hallen", String.join("\n\n", hallWarnings), AlertType.WARNING);
-		}
+		showLoadWarnings(repository.getAndClearLoadWarnings(), halls.getAndClearLoadWarnings());
 
 		List<String> settingsWarnings = settingsStore.getAndClearLoadWarnings();
 		if (!settingsWarnings.isEmpty()) {
@@ -256,8 +326,64 @@ public class MainApp extends Application {
 	}
 
 	/**
+	 * Die Ladewarnungen des Starts, je Repository ein Fenster. Gesperrte Einheiten kommen als Schlüssel; die lesbare
+	 * Bezeichnung folgt später, bis dahin bleibt es beim Text.
+	 */
+	private static void showLoadWarnings(List<String> eventLoadWarnings, List<String> hallLoadWarnings) {
+		List<String> eventWarnings = new ArrayList<>(eventLoadWarnings);
+		eventWarnings.addAll(lockedTexts(StoreEventRepository.getInstance().getAndClearLockedAtLoad()));
+		showWarnings("Warnung beim Laden der Events", eventWarnings);
+
+		List<String> hallWarnings = new ArrayList<>(hallLoadWarnings);
+		hallWarnings.addAll(lockedTexts(StoreHallRepository.getInstance().getAndClearLockedAtLoad()));
+		showWarnings("Warnung beim Laden der Hallen", hallWarnings);
+	}
+
+	private static List<String> lockedTexts(Map<UnitKey, UnitState.Status> locked) {
+		List<String> texts = new ArrayList<>();
+		locked.forEach((unit, status) -> texts.add(StoreMessages.locked(unit, status)));
+		return texts;
+	}
+
+	private static void showWarnings(String title, List<String> warnings) {
+		if (!warnings.isEmpty()) {
+			showAlert(title, String.join("\n\n", warnings), AlertType.WARNING);
+		}
+	}
+
+	/**
+	 * Nach dem Verbinden über den Knopf (FX-Thread): Der erste Lauf ist zu Ende oder "Trotzdem öffnen". Ungespeichertes gibt
+	 * es nicht mehr (der Ablauf fragte vor dem Verbinden danach, die Ladeansicht lässt nichts bearbeiten). Lädt den Bestand
+	 * neu, zeigt die Ladewarnungen und das Hauptmenü; scheitert das Laden, erscheint der Fehler.
+	 */
+	private static void reloadAfterConnect() {
+		DataReload reload = new DataReload(StoreHallRepository.getInstance(), StoreEventRepository.getInstance(),
+				() -> {
+					if (liveUpdates != null) {
+						liveUpdates.reset();
+					}
+				}, MainApp::conflictsChanged);
+		List<String> warnings;
+		try {
+			warnings = reload.reload();
+		} catch (RuntimeException e) {
+			LOG.log(Level.SEVERE, "Bestand konnte nach dem Verbinden nicht neu geladen werden", e);
+			showMenuView();
+			showAlert("Fehler", "Der Bestand konnte nicht geladen werden: " + failureMessage(e), AlertType.ERROR);
+			return;
+		}
+		showMenuView();
+		// DataReload liefert die Warnungen beider Repositories zusammen (Hallen zuerst), deshalb ein Fenster für alle
+		List<String> all = new ArrayList<>(warnings);
+		all.addAll(lockedTexts(StoreHallRepository.getInstance().getAndClearLockedAtLoad()));
+		all.addAll(lockedTexts(StoreEventRepository.getInstance().getAndClearLockedAtLoad()));
+		showWarnings("Warnung beim Laden", all);
+	}
+
+	/**
 	 * Die offenen Konflikte können sich geändert haben (FX-Thread): Die Fußzeile zeigt die Zahl neu; kam ein Konflikt dazu, den
-	 * der Nutzer noch nie gesehen hat, öffnet sich der Sammel-Dialog, sonst wird ein offener nur aufgefrischt.
+	 * der Nutzer noch nie gesehen hat, öffnet sich der Sammel-Dialog, sonst wird ein offener nur aufgefrischt. Während der
+	 * Ladeansicht des Verbindens öffnet er sich nicht von selbst; das Neuladen danach ruft diese Methode noch einmal.
 	 */
 	private static void conflictsChanged() {
 		// einmal je Rückmeldung abgeleitet, für Fußzeile, "neu?" und Dialog
@@ -275,7 +401,8 @@ public class MainApp extends Application {
 		if (conflictIndicator != null) {
 			conflictIndicator.refresh();
 		}
-		if (conflictList != null && conflictList.hasUnseen(open)) {
+		boolean connecting = SharedFolderConnection.instance().map(SharedFolderConnection::connecting).orElse(false);
+		if (!connecting && conflictList != null && conflictList.hasUnseen(open)) {
 			ConflictDialog.show(primaryStage, conflictList, conflictActions, open);
 		} else {
 			ConflictDialog.refreshIfOpen(open);
@@ -303,11 +430,29 @@ public class MainApp extends Application {
 
 	/**
 	 * Beim Beenden den Index schreiben und die Marke "sauber beendet" anlegen (Fehler dabei werden nur geloggt), falls der
-	 * Start den Dienst überhaupt erzeugt hat.
+	 * Start den Dienst überhaupt erzeugt hat. Ein laufendes Verbinden zählt danach nicht mehr.
 	 */
 	@Override
 	public void stop() {
+		SharedFolderConnection.instance().ifPresent(SharedFolderConnection::close);
 		SyncService.instanceIfCreated().ifPresent(SyncService::closeIndex);
+	}
+
+	/** Das Hauptfenster. */
+	@SuppressWarnings("exports")
+	public static Stage primaryStage() {
+		return primaryStage;
+	}
+
+	/**
+	 * Zeigt einen Inhalt im Hauptfenster, ohne nach ungespeicherten Änderungen zu fragen: Der Aufrufer hat das getan oder
+	 * weiß, dass es nichts zu fragen gibt (etwa die Ladeansicht des Verbindens).
+	 */
+	public static void showContent(Parent content) {
+		StatusMessage.getInstance().clear();
+		width = primaryStage.getWidth();
+		height = primaryStage.getHeight();
+		primaryStage.setScene(createScene(content));
 	}
 
 	public static void showMenuView() {

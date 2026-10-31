@@ -739,6 +739,12 @@
     -fx-text-fill: #666666;
 }
 
+/* Fehler an einer Einstellung (etwa eine gescheiterte Prüfung beim Verbinden), direkt unter dem Bedienelement */
+.settings-error {
+    -fx-font-size: 14px;
+    -fx-text-fill: -fx-status-error-text;
+}
+
 /* Hinweis bei leerer Einstellungsansicht ("Noch keine Einstellungen verfügbar", "Keine Treffer") */
 .settings-info {
     -fx-font-size: 14px;
