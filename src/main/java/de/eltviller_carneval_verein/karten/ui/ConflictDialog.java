@@ -49,7 +49,7 @@ import javafx.stage.Window;
  * Spalten Art, Eintrag, Anderer Rechner, Zeitpunkt, Werte, Aktion und "Erledigt". Nicht modal, höchstens ein Fenster je App:
  * Ein erneutes {@link #show} holt es nach vorn und frischt es auf. Die Zeilen liefert {@link ConflictList}, ob und was eine
  * Aktion tut, {@link ConflictActions}; hier ist nur die Anzeige. Scheitert eine Aktion, bleibt die Zeile offen und der Grund
- * steht in der Zeile. Texte vorläufig (Überarbeitung in KARV-87). Alle Aufrufe im JavaFX-Thread.
+ * steht in der Zeile. Die Texte wurden mit KARV-87 überarbeitet. Alle Aufrufe im JavaFX-Thread.
  */
 public final class ConflictDialog {
 

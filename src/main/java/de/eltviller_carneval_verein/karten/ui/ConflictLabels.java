@@ -20,7 +20,7 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 /**
  * Die Anzeigenamen der Einheiten für den Sammel-Dialog ({@link ConflictList}), ohne JavaFX: ein Event heißt wie das Event,
  * eine Vorstellung "Event › Vorstellung", eine Buchung "Event › Vorstellung › Platz" bzw. bei einer Buchung ohne Platz
- * (Einheit {@code _<ID>}) "… › Kunde", eine Halle wie die Halle. Texte vorläufig (Überarbeitung in KARV-87).
+ * (Einheit {@code _<ID>}) "… › Kunde", eine Halle wie die Halle. Dieselben Bezeichnungen setzt die Oberfläche des gemeinsamen Ordners in ihre Meldungen ein.
  */
 public final class ConflictLabels {
 

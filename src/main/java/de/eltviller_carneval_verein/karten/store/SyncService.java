@@ -137,6 +137,12 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * einmal die eigenen Listen im gemeinsamen Ordner und meldet dann {@link SyncListener#conflictsChanged}. Dieses Signal kommt
  * außerdem, wenn eine Liste mit einer fremden Version mit Vermerk oder einer Löschung eingelesen wurde.
  * <p>
+ * <b>Für die Oberfläche</b> (KARV-87): {@link #skippedUnits()} nennt die Einheiten, die der Vollabgleich übersprungen hat
+ * (SYS-013; sie kommen einmal je Einheit über {@link SyncListener#skipped}, nicht über {@link SyncListener#error}), und
+ * {@link #resettableUnits()} die gesperrten, die sich mit {@link #resetToLastReadable} zurücksetzen lassen (SYS-008 kommt
+ * über {@link SyncListener#locked}). Rechnername und Bediener liest und setzt die Oberfläche hier ({@link #machineName()},
+ * {@link #renameMachine}, {@link #operator()}, {@link #setOperator}), weil SYS-011 die {@link MachineIdentity} austauscht.
+ * <p>
  * <b>Threads:</b>
  * <ul>
  * <li>Jeder Zugriff auf den gemeinsamen Ordner läuft im {@code worker}, in der Anwendung ein einzelner Daemon-Thread,
@@ -771,7 +777,7 @@ public final class SyncService implements ConnectionControl {
 		UnitIndex.Refresh opened = openIndex(progress);
 		String dir = clean(sharedDir);
 		if (dir == null) {
-			// die Marke "verbunden" bleibt (KARV-87 trennt ausdrücklich mit disconnect)
+			// die Marke "verbunden" bleibt: Nur disconnect (der Knopf "Trennen") löscht sie
 			deactivate();
 			claimPendingLocally(withUnindexed(opened.pendingUnits()));
 			resolveAtStartup(opened.lostUnits());
@@ -2145,8 +2151,8 @@ public final class SyncService implements ConnectionControl {
 
 	/**
 	 * Ein Takt (in der Anwendung alle 2 Sekunden im {@code worker}): Erreichbarkeit nur nach einem Fehler prüfen, bei
-	 * Bedarf einen Vollabgleich beginnen und ein Stück davon abarbeiten, Aufträge fortsetzen, alle 30 Sekunden neue
-	 * Rechner, Listen lesen, eigene Ansprüche der letzten 15 Minuten nachprüfen; dann Verluste und geänderte Einheiten
+	 * Bedarf einen Vollabgleich beginnen und ein Stück davon abarbeiten, Aufträge fortsetzen, neue Rechner suchen (in
+	 * jedem Takt, eine Auflistung von {@code feeds/}), Listen lesen, eigene Ansprüche der letzten 15 Minuten nachprüfen; dann Verluste und geänderte Einheiten
 	 * melden und den Zustand setzen. Am Anfang, auch im
 	 * Einzelbetrieb, wird der Start-Index geschrieben, wenn er sich geändert hat und das letzte Schreiben
 	 * {@link #INDEX_FLUSH} her ist. Nach dem Hochladen löst der Takt höchstens {@value #RESOLVE_BUDGET} eingereihte

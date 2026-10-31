@@ -58,7 +58,7 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
  * Eine Aktion arbeitet immer auf dem eingearbeiteten Stand: Hat das Event bzw. die Halle ungespeicherte Änderungen oder wird
  * darin gerade etwas bearbeitet, ist sie gesperrt (sonst speicherte sie fremde Eingaben mit; zurückgestellte fremde Stände
  * gibt es nur in diesen Fällen). Fehlt der Gegenstand inzwischen (die Buchung ist platziert, gelöscht oder lebt anderswo,
- * das Event ist weg), bleibt nur das Bestätigen ohne Aktion. Die Texte sind vorläufig (Überarbeitung in KARV-87). Nicht
+ * das Event ist weg), bleibt nur das Bestätigen ohne Aktion. Die Texte wurden mit KARV-87 überarbeitet. Nicht
  * threadsicher: alle Aufrufe im JavaFX-Thread.
  */
 public final class ConflictActions {

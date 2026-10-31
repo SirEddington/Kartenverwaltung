@@ -21,8 +21,9 @@ import javafx.scene.layout.VBox;
 /**
  * Der Einstellungsbildschirm: eine durchsuchbare Liste von Abschnitten mit ihren Einstellungen.
  * <p>
- * Die Abschnitte entstehen in {@link #buildSections(AppSettings)}; Folgetickets hängen ihre Einstellungen dort
- * ein. Solange es keine gibt, zeigt der Bildschirm "Noch keine Einstellungen verfügbar". Die Einstellungen werden
+ * Die Abschnitte entstehen in {@link #buildSections(AppSettings)}. Bisher gibt es den Abschnitt "Gemeinsamer Ordner"
+ * ({@link SharedFolderSection}, KARV-87); Folgetickets hängen ihre Einstellungen dort ein. Gibt es keinen Abschnitt (der
+ * Start hat die Verbindung nicht eingerichtet), zeigt der Bildschirm "Noch keine Einstellungen verfügbar". Die Einstellungen werden
  * über den {@link ChangeTracker#settings() Tracker} verfolgt, sodass Speichern-Knopf und Verlassen-Abfrage wie in
  * den anderen Ansichten arbeiten. Gespeichert wird über den {@link SettingsSaver}.
  */

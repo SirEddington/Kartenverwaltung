@@ -30,7 +30,7 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
  * Das Modell des Sammel-Dialogs ohne JavaFX: macht aus den offenen Konflikten des Rechners ({@code SyncService.openConflicts})
  * die Zeilen der Anzeige, gruppiert Doppelverkäufe eines Speichervorgangs und merkt sich, welche Konflikte schon gezeigt
  * wurden (der Dialog öffnet sich nur bei neuen). Welche Aktion einer Zeile zusteht, folgt aus der Art des Vermerks; ob sie
- * gerade möglich ist, entscheidet {@link ConflictActions}. Die Texte sind vorläufig (Überarbeitung in KARV-87). Nicht
+ * gerade möglich ist, entscheidet {@link ConflictActions}. Die Texte wurden mit KARV-87 überarbeitet. Nicht
  * threadsicher: alle Aufrufe im JavaFX-Thread.
  */
 public final class ConflictList {

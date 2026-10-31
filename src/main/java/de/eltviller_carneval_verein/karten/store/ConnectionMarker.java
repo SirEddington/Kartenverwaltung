@@ -20,7 +20,7 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * Die Marke "verbunden" ({@code <AppData>/connection.json}, nur lokal): mit welchem gemeinsamen Ordner dieser Rechner
  * zuletzt verbunden wurde und ob der erste Vollabgleich dieser Verbindung zu Ende kam. Der Beginn des ersten Laufs
  * schreibt sie als unvollständig (nach der Entscheidung über das Beiseitelegen und nach dem Beiseitelegen), sein Ende als
- * vollständig; {@link SyncService#disconnect} löscht sie. Der Start der Anwendung wählt danach seinen Weg (KARV-87).
+ * vollständig; {@link SyncService#disconnect} löscht sie. Der Start der Anwendung wählt danach seinen Weg ({@code SharedFolderStart}).
  * <p>
  * Inhalt: {@code {"dir": "<Ordner>", "at": "<ISO-Zeitpunkt>", "complete": true|false}}. Geschrieben wird über eine
  * temporäre Datei, die die vorhandene atomar ersetzt ({@link FileLayer#replace}).
