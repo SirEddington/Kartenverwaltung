@@ -92,11 +92,12 @@ public final class SyncInfoWindow {
 
 		VBox root = new VBox(8, folder, lastSync, cause, firstRun, listTitle, listScroll, listHint, buttons);
 		root.setPadding(new Insets(14));
-		Scene scene = new Scene(root, 640, 420);
+		// feste Breite, die Höhe folgt dem Inhalt (refresh): Ohne Ursache und Liste wäre das Fenster sonst halb leer
+		root.setPrefWidth(640);
+		Scene scene = new Scene(root);
 		scene.getStylesheets().add(SyncInfoWindow.class.getResource(STYLESHEET).toExternalForm());
 		stage.setScene(scene);
 		stage.setMinWidth(480);
-		stage.setMinHeight(340);
 		stage.focusedProperty().addListener((observable, was, now) -> {
 			if (now) {
 				refresh();
@@ -145,6 +146,10 @@ public final class SyncInfoWindow {
 		if (content.equals(drawn)) {
 			return;
 		}
+		// Kommt die Zeile "Ursache" oder die Liste hinzu oder fällt sie weg, passt das Fenster seine Höhe an; sonst bleibt
+		// eine Größe, die der Nutzer gewählt hat
+		boolean resize = drawn == null || drawn.causeLine().isEmpty() != content.causeLine().isEmpty()
+				|| drawn.rows().isEmpty() != content.rows().isEmpty();
 		drawn = content;
 		folder.setText(content.folderLine());
 		lastSync.setText(content.lastSyncLine());
@@ -155,6 +160,9 @@ public final class SyncInfoWindow {
 		firstRun.setText(content.firstRunLine());
 		fillList(content);
 		listHint.setText(content.listHint());
+		if (resize) {
+			stage.sizeToScene();
+		}
 	}
 
 	private void fillList(SyncInfo content) {

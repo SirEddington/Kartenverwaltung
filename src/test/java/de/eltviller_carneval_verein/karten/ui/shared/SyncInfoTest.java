@@ -12,6 +12,7 @@ import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.store.SkippedUnit;
+import de.eltviller_carneval_verein.karten.store.SyncState;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 
 class SyncInfoTest {
@@ -79,6 +80,22 @@ class SyncInfoTest {
 		assertEquals("Letzter Abgleich: noch keiner", never.lastSyncLine());
 		assertEquals("", never.causeLine(), "ohne Ursache keine Zeile");
 		assertEquals("", SyncInfo.of(DIR, null, "  ", true, null, List.of(), unit -> null, UTC).causeLine());
+	}
+
+	@Test
+	void causeWhileOfflineIsTheUnreachableText() {
+		assertEquals("SYS-005: Der gemeinsame Ordner D:\\Nextcloud\\Karten ist nicht erreichbar. Du kannst weiterarbeiten: "
+				+ "Neue Verkäufe und Änderungen sind vorläufig und werden hochgeladen, sobald der Ordner wieder erreichbar ist.",
+				SyncInfo.cause(SyncState.OFFLINE, DIR, null));
+		// auch eine ältere Störung tritt hinter den Ausfall zurück, bleibt aber für die Zeit danach erhalten
+		assertTrue(SyncInfo.cause(SyncState.OFFLINE, DIR, "SYS-006: alt").startsWith("SYS-005: "));
+	}
+
+	@Test
+	void causeOtherwiseIsTheLastFailure() {
+		assertEquals("SYS-006: gescheitert", SyncInfo.cause(SyncState.FEHLER, DIR, "SYS-006: gescheitert"));
+		assertEquals(null, SyncInfo.cause(SyncState.AKTUELL, DIR, null));
+		assertEquals(null, SyncInfo.cause(null, DIR, null));
 	}
 
 	@Test

@@ -363,7 +363,8 @@ public class MainApp extends Application {
 	/** Was das Info-Fenster zeigt, nach dem Stand von jetzt; die übersprungenen Einträge liest es jedes Mal neu. */
 	private static SyncInfo syncInfo() {
 		SyncService sync = SyncService.getInstance();
-		String cause = SharedFolderEvents.instance().map(SharedFolderEvents::lastFailure).orElse(null);
+		String cause = SyncInfo.cause(sync.syncState().get(), sync.sharedDir(),
+				SharedFolderEvents.instance().map(SharedFolderEvents::lastFailure).orElse(null));
 		return SyncInfo.of(sync.sharedDir(), sync.lastSync().get(), cause, sync.connectionComplete().get(),
 				sync.fullSyncProgress().get(), sync.skippedUnits(), syncLabels != null ? syncLabels : unit -> null);
 	}

@@ -9,6 +9,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.store.SkippedUnit;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
+import de.eltviller_carneval_verein.karten.store.SyncState;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
 
@@ -45,7 +47,7 @@ public record SyncInfo(String folderLine, String lastSyncLine, String causeLine,
 	/**
 	 * @param dir      der gemeinsame Ordner
 	 * @param lastSync der letzte erfolgreiche Takt, {@code null} solange keiner gelang
-	 * @param cause    die Ursache der Störung (Text von SYS-006), sonst {@code null}
+	 * @param cause    die Ursache der Störung ({@link #cause}), sonst {@code null}
 	 * @param complete {@code connectionComplete()}
 	 * @param progress {@code fullSyncProgress()}, {@code null} ohne laufenden Lauf
 	 * @param skipped  {@code skippedUnits()}
@@ -70,6 +72,18 @@ public record SyncInfo(String folderLine, String lastSyncLine, String causeLine,
 		}
 		String hint = rows.isEmpty() ? SharedFolderTexts.INFO_LIST_EMPTY : SharedFolderTexts.INFO_LIST_HINT;
 		return new SyncInfo(folder, last, causeLine, firstRun, List.copyOf(rows), hint);
+	}
+
+	/**
+	 * Die Ursache für die Zeile "Ursache": bei {@link SyncState#OFFLINE} der Text von SYS-005, sonst die zuletzt gemeldete
+	 * Störung (SYS-006). Eine Störung von vor dem Ausfall bleibt dabei erhalten und gilt wieder, wenn der Ordner zurückkommt.
+	 *
+	 * @param state       {@code syncState()}
+	 * @param dir         der gemeinsame Ordner
+	 * @param lastFailure die zuletzt gemeldete Störung, sonst {@code null}
+	 */
+	public static String cause(SyncState state, String dir, String lastFailure) {
+		return state == SyncState.OFFLINE ? StoreMessages.unreachable(dir) : lastFailure;
 	}
 
 	/** Die Bezeichnung der Einheit; ihr Pfad, wenn sie sich nicht benennen lässt. */
