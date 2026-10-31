@@ -169,18 +169,28 @@ public final class ConnectFlow {
 	 * Die Antwort auf die Frage ("Mitnehmen" bzw. "Beiseitelegen"), vom Knopf oder im Modus ASK im Betrieb: erst die Frage
 	 * nach ungespeicherten Änderungen, dann {@code decideConnect}. Gehört zum laufenden Ablauf, wenn dieser auf die Antwort
 	 * wartet; sonst beginnt ein neuer Ablauf mit der Ladeansicht.
+	 * <p>
+	 * Die Frage ist schon geschlossen, wenn die Antwort ankommt. Verweigert {@code LeaveGuard}, bleibt der Ablauf, der auf
+	 * die Antwort wartet, nicht ohne Frage stehen: Sie wird erneut gezeigt. Ohne laufenden Ablauf tut das der Aufrufer
+	 * (Rückgabe {@code false}), denn dann gehört die Frage nicht zu einem Ablauf.
+	 *
+	 * @return ob die Antwort angenommen wurde ({@code decideConnect} läuft); sonst {@code false}
 	 */
-	public void decide(ConnectMode mode) {
+	public boolean decide(ConnectMode mode) {
 		if (closed || (running && !awaitingDecision)) {
-			return;
+			return false;
 		}
 		boolean fresh = !running;
 		if (!leaveGuard.getAsBoolean()) {
-			return;
+			// Während der Rückfrage kann sich der Ablauf geändert haben; nur die noch offene Frage kommt wieder
+			if (!fresh && !closed && running && awaitingDecision) {
+				screen.askDecision(dir != null ? dir : sync.sharedDir(), askedAllowed);
+			}
+			return false;
 		}
 		// Während der Rückfrage kann sich der Ablauf geändert haben (Schließen, Abbrechen).
 		if (closed || running == fresh || (!fresh && !awaitingDecision)) {
-			return;
+			return false;
 		}
 		int id;
 		if (fresh) {
@@ -210,6 +220,7 @@ public final class ConnectFlow {
 				fx.execute(() -> handle(id, null, e, false));
 			}
 		});
+		return true;
 	}
 
 	/**

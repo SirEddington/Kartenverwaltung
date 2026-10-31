@@ -49,8 +49,10 @@ import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
 import de.eltviller_carneval_verein.karten.ui.shared.DataReload;
 import de.eltviller_carneval_verein.karten.ui.shared.OperatorDialog;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection;
+import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderEvents;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart.StartResult;
+import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderUi;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -83,10 +85,11 @@ public class MainApp extends Application {
 	private static LiveUpdates liveUpdates;
 	/**
 	 * Der gemeinsame Ordner, der beim Start nicht erreichbar war ({@code null}: erreichbar oder Einzelbetrieb). Das Popup
-	 * SYS-005 dazu erscheint nach dem Hauptmenü (KARV-87, Aufgabe 11).
+	 * SYS-005 dazu erscheint nach dem Hauptmenü ({@link #showUnreachableAtStart()}).
 	 */
-	@SuppressWarnings("unused")
 	private static String unreachableAtStart;
+	// Popups, Frage im Betrieb und Fußzeile für die Rückmeldungen des Versionsspeichers (SharedFolderEvents)
+	private static final SharedFolderUi sharedFolderUi = new SharedFolderUi();
 	// Der Sammel-Dialog für Konflikte (gesetzt, sobald der Bestand geladen ist) und der Hinweis in der Fußzeile des aktuellen Fensterinhalts
 	private static SyncService conflictSync;
 	private static ConflictList conflictList;
@@ -282,10 +285,37 @@ public class MainApp extends Application {
 			}
 			finishStart(settingsStore);
 			then.run();
+			showUnreachableAtStart();
 		} catch (RuntimeException e) {
 			LOG.log(Level.SEVERE, "Oberfläche konnte nicht geladen werden", e);
 			failStart("Start nicht möglich", "Die Oberfläche konnte nicht geladen werden: " + failureMessage(e));
 		}
+	}
+
+	/**
+	 * Das Popup SYS-005, wenn der gemeinsame Ordner beim Start nicht erreichbar war: nach dem Hauptmenü (und einem
+	 * abgebrochenen Verbinden, das die Einstellungen zeigt), nicht blockierend. Der Versionsspeicher meldet diesen Ausfall nicht
+	 * selbst ({@code unreachable} kommt nicht), er gilt dort als gemeldet.
+	 */
+	private static void showUnreachableAtStart() {
+		String dir = unreachableAtStart;
+		unreachableAtStart = null;
+		if (dir != null && !sharedFolderUi.unreachableOpen()) {
+			sharedFolderUi.showUnreachable(StoreMessages.unreachable(dir));
+		}
+	}
+
+	/**
+	 * Der Abgleich, sein Zustand oder die Liste der übersprungenen Einträge können sich geändert haben (FX-Thread). Die
+	 * Fußzeile und das Info-Fenster (Aufgabe 12) hängen sich hier ein.
+	 */
+	private static void syncChanged() {
+		// bis dahin gibt es nichts aufzufrischen
+	}
+
+	/** Eine Einheit wurde gesperrt gemeldet (FX-Thread). Der Link "gesperrte Einträge" (Aufgabe 12) hängt sich hier ein. */
+	private static void lockedChanged() {
+		// bis dahin gibt es nichts aufzufrischen
 	}
 
 	/**
@@ -318,11 +348,15 @@ public class MainApp extends Application {
 		ConflictActions conflictActions = new ConflictActions(repository, halls, ChangeTracker.events(), ChangeTracker.halls(),
 				EditingUnits.getInstance(), sync, EventSaver::save, HallSaver::save);
 		MainApp.conflictActions = conflictActions;
-		conflictList = new ConflictList(sync::openConflicts, ConflictLabels.of(repository, halls, sync), conflictActions::isAdopted,
-				halls::findById);
+		Function<UnitKey, String> labels = ConflictLabels.of(repository, halls, sync);
+		conflictList = new ConflictList(sync::openConflicts, labels, conflictActions::isAdopted, halls::findById);
 		conflictSync = sync;
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
-		liveUpdates = LiveUpdates.install(sync, MainApp::conflictsChanged);
+		// Die übrigen Rückmeldungen (nicht erreichbar, Rückkehr, Frage beim Verbinden, übersprungen, gesperrt) verteilt SharedFolderEvents
+		SharedFolderConnection connection = SharedFolderConnection.instance().orElseThrow();
+		liveUpdates = LiveUpdates.install(sync, MainApp::conflictsChanged, live -> SharedFolderEvents.install(
+				new SharedFolderEvents(live, labels, sharedFolderUi, connection.flow(), MainApp::syncChanged, MainApp::lockedChanged)));
+		SharedFolderEvents.instance().ifPresent(events -> events.watch(sync));
 		ChangeTrigger.install();
 		LiveValidator.install();
 

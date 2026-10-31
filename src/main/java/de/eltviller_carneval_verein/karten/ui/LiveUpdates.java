@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -26,11 +27,9 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
-import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncListener;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
-import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.VersionId;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
@@ -142,7 +141,7 @@ public final class LiveUpdates {
 
 	/**
 	 * Die Rückmeldungen des Versionsspeichers kommen auf dem FX-Thread an. Gezeigt wird, was der Nutzer wissen muss und nicht
-	 * selbst sieht: ein Fehler des Dienstes; dazu arbeitet {@code unitsChanged} fremde Stände ein. Eine eigene Änderung,
+	 * selbst sieht: ein Fehler des Dienstes (die übrigen Rückmeldungen verteilt {@code SharedFolderEvents}); dazu arbeitet {@code unitsChanged} fremde Stände ein. Eine eigene Änderung,
 	 * die gegen eine andere verloren hat, steht nur im Log: Der Speicher führt sie zusammen, und der Konflikt erscheint im
 	 * Dialog ({@code conflictsChanged}).
 	 */
@@ -168,12 +167,6 @@ public final class LiveUpdates {
 			}
 
 			@Override
-			public void locked(UnitKey unit, UnitState.Status status) {
-				// bis die Oberfläche die gesperrten Einheiten mit lesbarer Bezeichnung zeigt, bleibt es beim Text der Fußzeile
-				StatusMessage.getInstance().show(Severity.ERROR, StoreMessages.locked(unit, status));
-			}
-
-			@Override
 			public void lost(UnitKey unit, List<VersionId> mine, VersionId winner) {
 				LOG.info("Eigene Versionen " + mine + " von " + unit.relativePath() + " unterlegen gegen " + winner
 						+ "; sie werden zusammengeführt.");
@@ -191,15 +184,17 @@ public final class LiveUpdates {
 	 * Wie die Anwendung sie braucht: die Repositories und Tracker der App, Wiederholen und Hinweise auf dem FX-Thread.
 	 *
 	 * @param onConflictsChanged was bei geänderten Konflikten geschieht ({@link #setOnConflictsChanged})
+	 * @param receiver           macht aus dem Listener von {@link #listener()} den, der am Versionsspeicher hängt: In der App
+	 *                           verteilt er die Rückmeldungen, die {@code LiveUpdates} nicht behandelt, und gibt den Rest weiter
 	 * @return die eingehängte Instanz (für {@link #reset()} nach dem Neuladen)
 	 */
-	public static LiveUpdates install(SyncService sync, Runnable onConflictsChanged) {
+	public static LiveUpdates install(SyncService sync, Runnable onConflictsChanged, UnaryOperator<SyncListener> receiver) {
 		LiveUpdates live = new LiveUpdates(StoreHallRepository.getInstance(), StoreEventRepository.getInstance(),
 				ChangeTracker.halls(), ChangeTracker.events(), EditingUnits.getInstance(), Platform::runLater,
 				text -> StatusMessage.getInstance().show(Severity.WARNING, text));
 		live.setOnConflictsChanged(onConflictsChanged);
 		live.watch(StateRestorer.events(), StateRestorer.halls());
-		sync.setListener(live.listener());
+		sync.setListener(receiver.apply(live.listener()));
 		// Meldungen, die nach dem Lesen des Bestands beim Start, aber vor dieser Stelle ankamen, liefen ins Leere
 		if (sync.sharedDir() != null) {
 			live.catchUp(sync.snapshots().keySet());

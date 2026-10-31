@@ -206,6 +206,45 @@ class ConnectFlowTest {
 	}
 
 	@Test
+	void refusedLeaveGuardKeepsTheQuestionOpen() {
+		flow.connectByButton(dir());
+		sync.outcome(new ConnectOutcome(Kind.ENTSCHEIDUNG, true, null, null));
+		guardAllows = false;
+
+		// Die Frage wurde schon geschlossen, bevor die Antwort ankommt; verweigert LeaveGuard, muss sie wieder erscheinen
+		assertFalse(flow.decide(ConnectMode.MERGE));
+
+		assertEquals(List.of("showProgress", "askDecision:" + dir() + ":true", "askDecision:" + dir() + ":true"), screenLog);
+		assertEquals(List.of("connect:" + dir() + ":ASK"), sync.calls());
+		assertTrue(flow.running());
+
+		guardAllows = true;
+		assertTrue(flow.decide(ConnectMode.MERGE));
+		assertEquals(List.of("connect:" + dir() + ":ASK", "decide:MERGE"), sync.calls());
+		assertEquals(2, screenLog.stream().filter(entry -> entry.startsWith("askDecision")).count(),
+				"nach der Antwort keine weitere Frage");
+	}
+
+	@Test
+	void refusedLeaveGuardWithoutRunningFlowReportsItAndStartsNothing() {
+		sync.sharedDir(dir());
+		guardAllows = false;
+
+		assertFalse(flow.decide(ConnectMode.MERGE), "wer gefragt hat, kann die Frage selbst wieder öffnen");
+
+		assertEquals(List.of(), sync.calls());
+		assertEquals(List.of(), screenLog);
+		assertFalse(flow.running());
+	}
+
+	@Test
+	void decideReportsWhetherItActed() {
+		sync.sharedDir(dir());
+		assertTrue(flow.decide(ConnectMode.MERGE));
+		assertFalse(flow.decide(ConnectMode.MERGE), "ein laufender Ablauf ohne wartende Frage nimmt keine zweite Antwort");
+	}
+
+	@Test
 	void decideWithoutRunningFlowStartsOneWithProgress() {
 		sync.sharedDir(dir());
 

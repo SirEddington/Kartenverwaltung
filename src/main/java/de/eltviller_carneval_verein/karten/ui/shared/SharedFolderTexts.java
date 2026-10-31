@@ -169,7 +169,40 @@ public final class SharedFolderTexts {
 	/** Knopf der Rückfrage beim Trennen: nicht trennen. */
 	public static final String STAY_CONNECTED = "Verbunden bleiben";
 
+	// --- Popups und Fußzeile (Rückmeldungen des Versionsspeichers)
+
+	/** Titel des Popups, wenn der gemeinsame Ordner nicht erreichbar ist (SYS-005). */
+	public static final String UNREACHABLE_TITLE = "Gemeinsamer Ordner nicht erreichbar";
+
+	/** Knopf dieses Popups. */
+	public static final String CONTINUE_WORKING = "Weiterarbeiten";
+
+	/** Titel des Popups bei einer neuen Rechner-Kennung (SYS-011). */
+	public static final String DUPLICATE_MACHINE_TITLE = "Neue Rechner-Kennung";
+
+	/** Knopf dieses Popups. */
+	public static final String OK = "OK";
+
+	/** Fußzeile, wenn der Ordner wieder erreichbar ist. */
+	public static final String RECONNECTED = "Wieder verbunden. Vorläufige Verkäufe werden hochgeladen.";
+
+	/** Fußzeile für einen übersprungenen Eintrag, SYS-013 (&1 = Bezeichnung des Eintrags). */
+	public static final String SKIPPED_FOOTER = "Nicht abgeglichen: &1";
+
+	/** Zusatz zur Bezeichnung, wenn auch alles darunter übersprungen ist. */
+	public static final String WITH_EVERYTHING_BELOW = "mit allem darunter";
+
 	// --- Zusammengesetzte Texte
+
+	/**
+	 * Die Fußzeile für einen übersprungenen Eintrag.
+	 *
+	 * @param label   die Bezeichnung des Eintrags (oder sein Pfad)
+	 * @param subtree ob auch alles darunter übersprungen ist
+	 */
+	public static String skippedFooter(String label, boolean subtree) {
+		return MessageTemplate.format(SKIPPED_FOOTER, subtree ? label + " " + WITH_EVERYTHING_BELOW : label);
+	}
 
 	/** Die erste Zeile der Ladeansicht: ohne Prozent, solange der Lauf nicht begonnen hat ({@code null}). */
 	public static String progressText(Double progress) {

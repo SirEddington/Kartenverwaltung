@@ -20,6 +20,7 @@ import de.eltviller_carneval_verein.karten.ui.shared.OperatorDialog;
 import de.eltviller_carneval_verein.karten.ui.shared.OperatorNames;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection.Pending;
+import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderEvents;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderTexts;
 import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
 import de.eltviller_carneval_verein.karten.validation.Severity;
@@ -139,8 +140,8 @@ public final class SharedFolderSection {
 			setShown(connect, !connected);
 			setShown(disconnect, connected);
 			disconnect.setDisable(disconnecting);
-			// Die Ursache einer Störung kennt erst die Fußzeile (Aufgabe 11); bis dahin steht nur "Abgleich gestört"
-			status.setText(SharedFolderTexts.status(sync.syncState().get(), dir, sync.lastSync().get(), null,
+			String cause = SharedFolderEvents.instance().map(SharedFolderEvents::lastFailure).orElse(null);
+			status.setText(SharedFolderTexts.status(sync.syncState().get(), dir, sync.lastSync().get(), cause,
 					ZoneId.systemDefault()));
 		}
 

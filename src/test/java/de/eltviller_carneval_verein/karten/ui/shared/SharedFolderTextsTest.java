@@ -78,4 +78,11 @@ class SharedFolderTextsTest {
 		assertEquals("Nicht verbunden. Dieser Rechner arbeitet allein.",
 				SharedFolderTexts.status(null, null, null, null, UTC));
 	}
+
+	@Test
+	void skippedFooterNamesTheEntryAndTheSubtree() {
+		assertEquals("Nicht abgeglichen: Gala › Samstag", SharedFolderTexts.skippedFooter("Gala › Samstag", false));
+		assertEquals("Nicht abgeglichen: Gala › Samstag mit allem darunter",
+				SharedFolderTexts.skippedFooter("Gala › Samstag", true));
+	}
 }
