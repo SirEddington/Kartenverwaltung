@@ -4,44 +4,39 @@ import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import javafx.animation.Animation;
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.scene.control.Hyperlink;
-import javafx.util.Duration;
 
 /**
  * Der Hinweis in der Fußzeile zum Abgleich mit dem gemeinsamen Ordner (Spec "Fußzeile: SyncIndicator"): ein Link mit
  * <em>einem</em> Text nach Vorrang ({@link SyncHint}), unsichtbar und ohne Platz, solange nichts zu zeigen ist. Ein Klick
- * stellt bei Vorrang 1 die Frage "Mitnehmen" / "Beiseitelegen" noch einmal, sonst öffnet er das Info-Fenster.
+ * stellt bei Vorrang 1 die Frage "Mitnehmen" / "Beiseitelegen" noch einmal (und öffnet das Info-Fenster, wenn keine
+ * Entscheidung wartet), sonst öffnet er das Info-Fenster.
  * <p>
  * Was der Hinweis wissen muss (seit wann {@code AUSSTEHEND}, ob ein Lauf zu Ende ging), steht in {@link SyncStatus}, das
- * es nur einmal gibt: Jede Ansicht hat eine eigene Fußzeile und damit einen eigenen Hinweis. Aufgefrischt wird er von
- * {@link #refresh()} (die App ruft es bei jeder Rückmeldung des Abgleichs) und, solange er in einem Fenster steht, im
- * 1-s-Takt: für die 30 s von {@code AUSSTEHEND} und den Fortschritt in Prozent. Ohne Fenster läuft der Takt nicht, so bleibt
- * von einer alten Ansicht nichts zurück. Nicht threadsicher: alle Aufrufe im JavaFX-Thread.
+ * es nur einmal gibt: Jede Ansicht hat eine eigene Fußzeile und damit einen eigenen Hinweis. Der Hinweis hat weder
+ * Listener noch einen eigenen Takt: Aufgefrischt wird er von {@link #refresh()}, und das ruft die App bei jeder Rückmeldung
+ * des Abgleichs und im 1-s-Takt der App auf, nur für den Hinweis der aktuellen Ansicht ({@link SyncStatus#track}). Eine
+ * ersetzte Ansicht behält so nichts am Laufen. Nicht threadsicher: alle Aufrufe im JavaFX-Thread.
  */
 public final class SyncIndicator extends Hyperlink {
 
 	private static final Logger LOG = Logger.getLogger(SyncIndicator.class.getName());
 
 	private final SyncStatus status;
-	private final Timeline ticker = new Timeline(new KeyFrame(Duration.seconds(1), event -> refresh()));
 
 	/**
-	 * @param status       der Stand des Abgleichs (einer je App)
-	 * @param askDecision  stellt die Frage beim Verbinden noch einmal (Vorrang 1)
-	 * @param openInfo     öffnet das Info-Fenster (ab Vorrang 2)
+	 * @param status      der Stand des Abgleichs (einer je App)
+	 * @param askDecision stellt die Frage beim Verbinden noch einmal (Vorrang 1)
+	 * @param openInfo    öffnet das Info-Fenster
 	 */
 	public SyncIndicator(SyncStatus status, Runnable askDecision, Runnable openInfo) {
 		this.status = status;
 		getStyleClass().add("sync-indicator");
-		ticker.setCycleCount(Animation.INDEFINITE);
 		setOnAction(event -> {
 			// ein Link, der immer wieder gilt, ist nie "besucht"
 			setVisited(false);
 			Optional<SyncHint> hint = current();
-			if (hint.isEmpty() || !hint.get().clickable()) {
+			if (hint.isEmpty()) {
 				return;
 			}
 			if (hint.get().rank() == 1) {
@@ -50,12 +45,10 @@ public final class SyncIndicator extends Hyperlink {
 				openInfo.run();
 			}
 		});
+		// eine neue Ansicht zeigt gleich den Stand von jetzt
 		sceneProperty().addListener((observable, oldScene, newScene) -> {
-			if (newScene == null) {
-				ticker.stop();
-			} else {
+			if (newScene != null) {
 				refresh();
-				ticker.play();
 			}
 		});
 		refresh();

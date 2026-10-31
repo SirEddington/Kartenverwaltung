@@ -150,6 +150,45 @@ class SyncStatusTest {
 	}
 
 	@Test
+	void onlyTheLatestTrackedViewIsRefreshed() {
+		int[] first = { 0 };
+		int[] second = { 0 };
+		status.refreshTracked();
+		status.track(() -> first[0]++);
+		status.refreshTracked();
+		assertEquals(1, first[0]);
+
+		// eine neue Ansicht ersetzt die alte: Die alte wird nie wieder aufgefrischt
+		status.track(() -> second[0]++);
+		status.refreshTracked();
+		status.refreshTracked();
+		assertEquals(1, first[0]);
+		assertEquals(2, second[0]);
+	}
+
+	@Test
+	void aFailingTrackedViewDoesNotBreakTheTick() {
+		status.track(() -> {
+			throw new IllegalStateException("kaputt");
+		});
+
+		status.refreshTracked();
+		status.track(null);
+		status.refreshTracked();
+	}
+
+	@Test
+	void disposeForgetsTheTrackedView() {
+		int[] calls = { 0 };
+		status.track(() -> calls[0]++);
+
+		status.dispose();
+		status.refreshTracked();
+
+		assertEquals(0, calls[0]);
+	}
+
+	@Test
 	void disposeRemovesTheListeners() {
 		sync.state(SyncState.AKTUELL).complete(false);
 		sync.progress(0.5);

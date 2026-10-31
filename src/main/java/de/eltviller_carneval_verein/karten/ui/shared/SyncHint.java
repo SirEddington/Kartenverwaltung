@@ -11,11 +11,10 @@ import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
  * die erste zutreffende Zeile der Vorrangtabelle. Rein, ohne JavaFX und ohne Uhr; wie lange der Zustand {@code AUSSTEHEND}
  * schon dauert, kommt als Dauer von außen.
  *
- * @param rank      der Vorrang 1 bis 7 (1 = höchster)
- * @param text      die Anzeige
- * @param clickable ob ein Klick etwas öffnet (die Frage bei Vorrang 1, sonst das Info-Fenster)
+ * @param rank der Vorrang 1 bis 7 (1 = höchster)
+ * @param text die Anzeige
  */
-public record SyncHint(int rank, String text, boolean clickable) {
+public record SyncHint(int rank, String text) {
 
 	/** Ab dieser Dauer in {@code AUSSTEHEND} zeigt die Fußzeile "Hochladen verzögert". */
 	public static final Duration PENDING_AFTER = Duration.ofSeconds(30);
@@ -71,7 +70,7 @@ public record SyncHint(int rank, String text, boolean clickable) {
 	}
 
 	private static Optional<SyncHint> hint(int rank, String text) {
-		return Optional.of(new SyncHint(rank, text, true));
+		return Optional.of(new SyncHint(rank, text));
 	}
 
 	/** "Erster Abgleich unvollständig" vor dem Beginn des Laufs: die Vorlage ohne den Prozentteil. */

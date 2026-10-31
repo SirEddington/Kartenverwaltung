@@ -4,9 +4,6 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import javafx.animation.Animation;
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -21,14 +18,13 @@ import javafx.scene.layout.VBox;
 import javafx.scene.image.Image;
 import javafx.stage.Stage;
 import javafx.stage.Window;
-import javafx.util.Duration;
 
 /**
  * Das Info-Fenster zum Abgleich mit dem gemeinsamen Ordner (Spec "Fußzeile: SyncIndicator"): Ordner, letzter Abgleich,
  * Ursache der Störung, Stand des ersten Abgleichs und die Liste der nicht abgeglichenen Einträge. Der Inhalt kommt fertig
  * als {@link SyncInfo}. Knöpfe "Jetzt abgleichen" und "Schließen". Nicht modal, höchstens ein Fenster je App: Ein erneutes
  * {@link #show} holt es nach vorn. Aufgefrischt wird es von {@link #refreshIfOpen()} (bei jeder Rückmeldung des Abgleichs),
- * beim Fokus und im 1-s-Takt, solange es offen ist (Fortschritt, Ende eines Laufs). Alle Aufrufe im JavaFX-Thread.
+ * beim Fokus und im 1-s-Takt der App (Fortschritt, Ende eines Laufs); einen eigenen Takt hat es nicht. Alle Aufrufe im JavaFX-Thread.
  */
 public final class SyncInfoWindow {
 
@@ -48,7 +44,6 @@ public final class SyncInfoWindow {
 	private final GridPane list = new GridPane();
 	private final ScrollPane listScroll = new ScrollPane(list);
 	private final Label listHint = new Label();
-	private final Timeline ticker = new Timeline(new KeyFrame(Duration.seconds(1), event -> refresh()));
 
 	private SyncInfoWindow(Window owner, Supplier<SyncInfo> info, Runnable syncNow) {
 		this.info = info;
@@ -105,9 +100,7 @@ public final class SyncInfoWindow {
 				refresh();
 			}
 		});
-		ticker.setCycleCount(Animation.INDEFINITE);
 		stage.setOnHidden(event -> {
-			ticker.stop();
 			if (open == this) {
 				open = null;
 			}
@@ -129,7 +122,6 @@ public final class SyncInfoWindow {
 		open.refresh();
 		open.stage.show();
 		open.stage.toFront();
-		open.ticker.play();
 	}
 
 	/** Frischt das Fenster auf, wenn es offen ist. */

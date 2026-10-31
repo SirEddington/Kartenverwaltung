@@ -1,7 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.shared;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
 import java.util.Optional;
@@ -22,7 +21,6 @@ class SyncHintTest {
 	private static void assertHint(int rank, String text, SyncHint actual) {
 		assertEquals(rank, actual.rank());
 		assertEquals(text, actual.text());
-		assertTrue(actual.clickable());
 	}
 
 	@Test

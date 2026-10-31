@@ -58,6 +58,9 @@ import de.eltviller_carneval_verein.karten.ui.shared.SyncIndicator;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncInfo;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncInfoWindow;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncStatus;
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -80,6 +83,7 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 
 public class MainApp extends Application {
 
@@ -100,9 +104,10 @@ public class MainApp extends Application {
 	private static ConflictList conflictList;
 	private static ConflictActions conflictActions;
 	private static ConflictIndicator conflictIndicator;
-	// Der Hinweis zum Abgleich in der Fußzeile des aktuellen Fensterinhalts und der Stand, den alle diese Hinweise teilen
-	private static SyncIndicator syncIndicator;
+	// Der Stand des Abgleichs, den alle Hinweise in den Fußzeilen teilen (er merkt sich den der aktuellen Ansicht), und der eine
+	// 1-s-Takt der App, der diesen Hinweis und das Info-Fenster auffrischt (Fortschritt, 30 s von AUSSTEHEND)
 	private static SyncStatus syncStatus;
+	private static Timeline syncTicker;
 	// Die Bezeichnungen der Einträge für das Info-Fenster (gesetzt, sobald der Bestand geladen ist)
 	private static Function<UnitKey, String> syncLabels;
 	// Die Zahl der offenen Konflikte nach der letzten Rückmeldung; jede neue Fußzeile übernimmt sie
@@ -160,6 +165,9 @@ public class MainApp extends Application {
 		ConflictPolicies.install(sync);
 		// Der Stand für die Hinweise zum Abgleich in der Fußzeile, schon für die Ladeansicht des Starts
 		syncStatus = new SyncStatus(sync, Clock.systemUTC(), MainApp::syncChanged);
+		syncTicker = new Timeline(new KeyFrame(Duration.seconds(1), event -> syncChanged()));
+		syncTicker.setCycleCount(Animation.INDEFINITE);
+		syncTicker.play();
 		// Das Verbinden mit dem gemeinsamen Ordner (Knopf in den Einstellungen und Start mit neuem Ordner)
 		SharedFolderConnection connection = SharedFolderConnection.install(sync, MainApp::reloadAfterConnect);
 
@@ -321,12 +329,12 @@ public class MainApp extends Application {
 
 	/**
 	 * Der Abgleich, sein Zustand oder die Liste der übersprungenen Einträge können sich geändert haben (FX-Thread): Der
-	 * Hinweis in der Fußzeile und ein offenes Info-Fenster lesen den Stand neu. Die Hinweise älterer Fensterinhalte sind
-	 * nicht mehr im Fenster und lesen beim nächsten Zeigen neu.
+	 * Hinweis in der Fußzeile der aktuellen Ansicht und ein offenes Info-Fenster lesen den Stand neu. Auch der 1-s-Takt der
+	 * App ruft es auf. Die Hinweise älterer Ansichten sind nicht mehr im Fenster und werden nicht gehalten.
 	 */
 	private static void syncChanged() {
-		if (syncIndicator != null) {
-			syncIndicator.refresh();
+		if (syncStatus != null) {
+			syncStatus.refreshTracked();
 		}
 		SyncInfoWindow.refreshIfOpen();
 	}
@@ -344,9 +352,17 @@ public class MainApp extends Application {
 				sync.fullSyncProgress().get(), sync.skippedUnits(), syncLabels != null ? syncLabels : unit -> null);
 	}
 
-	/** Die Frage "Mitnehmen" / "Beiseitelegen" noch einmal stellen (Klick auf den Hinweis bei Vorrang 1). */
+	/**
+	 * Klick auf den Hinweis bei Vorrang 1: die Frage "Mitnehmen" / "Beiseitelegen" noch einmal stellen. Weiß die App von keiner
+	 * wartenden Entscheidung, öffnet es das Info-Fenster, damit der Klick nicht ins Leere geht.
+	 */
 	private static void askDecisionAgain() {
-		SharedFolderEvents.instance().ifPresent(SharedFolderEvents::askDecisionAgain);
+		Optional<SharedFolderEvents> events = SharedFolderEvents.instance().filter(SharedFolderEvents::decisionPending);
+		if (events.isPresent()) {
+			events.get().askDecisionAgain();
+		} else {
+			openSyncInfo();
+		}
 	}
 
 	/** Eine Einheit wurde gesperrt gemeldet (FX-Thread). Der Link "gesperrte Einträge" (Aufgabe 12) hängt sich hier ein. */
@@ -740,7 +756,10 @@ public class MainApp extends Application {
 			// der Hinweis zum Abgleich steht neben dem auf Konflikte, mit derselben Einfügeregel
 			SyncIndicator syncHint = syncStatus == null ? null
 					: new SyncIndicator(syncStatus, MainApp::askDecisionAgain, MainApp::openSyncInfo);
-			syncIndicator = syncHint;
+			if (syncHint != null) {
+				// ersetzt den Hinweis der vorigen Ansicht; der 1-s-Takt frischt nur diesen auf
+				syncStatus.track(syncHint::refresh);
+			}
 			StatusLabel messages = findStatusLabel(content);
 			if (messages != null && messages.getParent() instanceof Pane footer) {
 				int position = footer.getChildren().indexOf(messages);

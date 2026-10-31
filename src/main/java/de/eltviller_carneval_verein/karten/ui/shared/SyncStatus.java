@@ -4,6 +4,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.store.ConnectionControl;
 import de.eltviller_carneval_verein.karten.store.SyncState;
@@ -21,6 +23,8 @@ import javafx.beans.value.ChangeListener;
  */
 public final class SyncStatus {
 
+	private static final Logger LOG = Logger.getLogger(SyncStatus.class.getName());
+
 	private final ConnectionControl sync;
 	private final Clock clock;
 	private final Runnable onChange;
@@ -30,6 +34,7 @@ public final class SyncStatus {
 	private SyncState seenState;
 	private Instant pendingSince;
 	private FirstRunWatch watch;
+	private Runnable tracked;
 
 	/**
 	 * @param sync     die Verbindung
@@ -60,11 +65,35 @@ public final class SyncStatus {
 				watch != null && watch.ended(), sync.skippedUnits().size());
 	}
 
-	/** Entfernt die Listener; danach meldet nichts mehr. */
+	/**
+	 * Merkt, was der 1-s-Takt der App auffrischen soll: den Hinweis der aktuellen Ansicht. Ein neuer Aufruf ersetzt den
+	 * vorigen; eine ersetzte Ansicht wird nicht mehr aufgefrischt und von hier nicht mehr gehalten.
+	 *
+	 * @param refresh frischt den Hinweis der Ansicht auf; {@code null} vergisst ihn
+	 */
+	public void track(Runnable refresh) {
+		tracked = refresh;
+	}
+
+	/** Frischt die gemerkte Ansicht auf ({@link #track}); eine Ausnahme dort stoppt den Takt nicht. */
+	public void refreshTracked() {
+		Runnable refresh = tracked;
+		if (refresh == null) {
+			return;
+		}
+		try {
+			refresh.run();
+		} catch (RuntimeException e) {
+			LOG.log(Level.WARNING, "Der Hinweis zum Abgleich ließ sich nicht auffrischen", e);
+		}
+	}
+
+	/** Entfernt die Listener und vergisst die gemerkte Ansicht; danach meldet nichts mehr. */
 	public void dispose() {
 		sync.syncState().removeListener(stateListener);
 		sync.connectionComplete().removeListener(completeListener);
 		stopWatch();
+		tracked = null;
 	}
 
 	private void noteState(SyncState state) {
