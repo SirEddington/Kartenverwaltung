@@ -83,6 +83,25 @@ public final class SharedFolderTexts {
 	/** Knopf: Bediener wechseln. */
 	public static final String OPERATOR_SWITCH = "Bediener wechseln";
 
+	/** Titel des Bediener-Dialogs. */
+	public static final String OPERATOR_TITLE = "Wer verkauft?";
+
+	/** Text des Bediener-Dialogs. */
+	public static final String OPERATOR_TEXT = "Dein Name steht bei jeder Änderung, damit an allen Rechnern zu sehen ist,"
+			+ " wer verkauft oder geändert hat. Ein Passwort gibt es nicht.";
+
+	/** Beschriftung des Feldes im Bediener-Dialog. */
+	public static final String OPERATOR_FIELD = "Name";
+
+	/** Knopf beim Start: mit dem Namen weiter. */
+	public static final String OPERATOR_CONTINUE = "Weiter";
+
+	/** Knopf beim Start: die Kartenverwaltung beenden. */
+	public static final String OPERATOR_QUIT = "Beenden";
+
+	/** Knopf beim Wechsel: den Namen übernehmen. */
+	public static final String OPERATOR_APPLY = "Übernehmen";
+
 	/** Beschriftung der Zeile "Buchungen sofort speichern". */
 	public static final String SAVE_IMMEDIATELY = "Buchungen sofort speichern";
 

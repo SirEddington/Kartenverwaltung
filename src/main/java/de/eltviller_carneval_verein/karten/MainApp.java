@@ -5,6 +5,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -46,6 +47,7 @@ import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
 import de.eltviller_carneval_verein.karten.ui.shared.DataReload;
+import de.eltviller_carneval_verein.karten.ui.shared.OperatorDialog;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart.StartResult;
@@ -267,17 +269,35 @@ public class MainApp extends Application {
 	}
 
 	/**
-	 * Läuft auf dem FX-Thread, sobald der Bestand geladen ist: der Rest des Starts, das Hauptmenü und dann {@code then}
-	 * (etwa die Einstellungen nach einem abgebrochenen Verbinden).
+	 * Läuft auf dem FX-Thread, sobald der Bestand geladen ist: der Bediener-Dialog, der Rest des Starts, das Hauptmenü und
+	 * dann {@code then} (etwa die Einstellungen nach einem abgebrochenen Verbinden). Alle Wege des Starts (ohne Verbinden,
+	 * nach dem Verbinden, nach dessen Abbruch) enden hier, der Dialog kommt also genau einmal je Start; "Beenden" und das
+	 * Schließen des Dialogs beenden die Anwendung.
 	 */
 	private static void onLoaded(SettingsStore settingsStore, Runnable then) {
 		try {
+			if (!askOperator(settingsStore)) {
+				Platform.exit();
+				return;
+			}
 			finishStart(settingsStore);
 			then.run();
 		} catch (RuntimeException e) {
 			LOG.log(Level.SEVERE, "Oberfläche konnte nicht geladen werden", e);
 			failStart("Start nicht möglich", "Die Oberfläche konnte nicht geladen werden: " + failureMessage(e));
 		}
+	}
+
+	/**
+	 * Fragt beim Start nach dem Bediener, auch im Einzelbetrieb (Pflicht; die zuletzt verwendeten Namen sind Vorschläge), und
+	 * übernimmt den Namen.
+	 *
+	 * @return {@code false}, wenn der Nutzer den Start abgebrochen hat ("Beenden" oder Fenster geschlossen)
+	 */
+	private static boolean askOperator(SettingsStore settingsStore) {
+		Optional<String> name = OperatorDialog.ask(primaryStage, settingsStore.current().getRecentOperators(), true);
+		name.ifPresent(chosen -> OperatorDialog.adopt(SyncService.getInstance(), chosen));
+		return name.isPresent();
 	}
 
 	/** Meldet, dass der Start scheitert, und beendet die Anwendung. */

@@ -15,8 +15,9 @@ import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
-import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.ui.shared.OperatorDialog;
+import de.eltviller_carneval_verein.karten.ui.shared.OperatorNames;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection.Pending;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderTexts;
@@ -69,12 +70,8 @@ public final class SharedFolderSection {
 		rows.add(new SettingRow(SharedFolderTexts.SECTION_TITLE, SharedFolderTexts.SECTION_HINT, folder.node));
 		rows.add(new SettingRow(SharedFolderTexts.MACHINE_NAME, SharedFolderTexts.MACHINE_NAME_HINT,
 				machineName(sync, connection.background())));
-		// Der Bediener kommt mit dem Bediener-Dialog (KARV-87, Aufgabe 10); bis dahin ist keiner gesetzt
-		String operator = sync.operator();
-		if (operator != null) {
-			rows.add(new SettingRow(SharedFolderTexts.OPERATOR, MessageTemplate.format(SharedFolderTexts.OPERATOR_HINT, operator),
-					operatorControl()));
-		}
+		// Der Hinweis "Angemeldet als …" steht im Bedienelement, nicht als Hinweis der Zeile: Er folgt dem Wechsel sofort
+		rows.add(new SettingRow(SharedFolderTexts.OPERATOR, null, operatorControl(sync)));
 		rows.add(new SettingRow(SharedFolderTexts.SAVE_IMMEDIATELY, SharedFolderTexts.SAVE_IMMEDIATELY_HINT,
 				saveImmediately(settings)));
 		return new SettingsSection(SharedFolderTexts.SECTION_TITLE, rows);
@@ -159,16 +156,18 @@ public final class SharedFolderSection {
 		}
 
 		/**
-		 * "Trennen": Rückfrage, ungespeicherte Änderungen klären, {@code disconnect()} im Hintergrund, dann {@code sharedDir}
-		 * per Teil-Speichern löschen. Der lokale Bestand bleibt, es wird nicht neu geladen. Danach wird der Bildschirm neu
-		 * aufgebaut, weil die Frage nach ungespeicherten Änderungen die Änderungserkennung zurückgesetzt hat.
+		 * "Trennen": Rückfrage, {@code disconnect()} im Hintergrund, dann {@code sharedDir} per Teil-Speichern löschen. Der
+		 * lokale Bestand bleibt, es wird nicht neu geladen. Danach wird der Bildschirm neu aufgebaut.
+		 * <p>
+		 * Trennen fragt nicht nach ungespeicherten Änderungen ({@code LeaveGuard}): Das Teil-Speichern führt die
+		 * Änderungserkennung des Bildschirms nur nach, eine offene Änderung (etwa "Buchungen sofort speichern") bleibt
+		 * "geändert". Ein {@code LeaveGuard.confirmLeave()} vorab ließe die Änderungserkennung den Bildschirm vergessen:
+		 * Eine ungespeicherte Änderung wäre nach dem Neuaufbau nicht mehr als solche erkennbar, sähe gespeichert aus und
+		 * wäre nie geschrieben. Ist beim Neuaufbau etwas offen, fragt der Wechsel der Ansicht selbst.
 		 */
 		private void disconnect() {
 			if (disconnecting || !ConfirmDialog.confirm(SharedFolderTexts.DISCONNECT_TITLE, SharedFolderTexts.DISCONNECT_TEXT,
 					SharedFolderTexts.DISCONNECT, "button-danger", SharedFolderTexts.STAY_CONNECTED, window())) {
-				return;
-			}
-			if (!LeaveGuard.confirmLeave()) {
 				return;
 			}
 			disconnecting = true;
@@ -252,12 +251,35 @@ public final class SharedFolderSection {
 		return new VBox(6, line, error);
 	}
 
-	/** "Bediener wechseln": den Dialog liefert Aufgabe 10, bis dahin ist der Knopf ausgeblendet. */
-	private static Node operatorControl() {
+	/**
+	 * Der angemeldete Bediener und "Bediener wechseln". Der Dialog ({@code atStart = false}) liefert nur einen Namen;
+	 * "Abbrechen" und Schließen lassen den alten. Der Wechsel gilt sofort (nicht erst mit "Speichern") und ändert nichts an
+	 * anderen offenen Änderungen des Bildschirms.
+	 */
+	private static Node operatorControl(SyncService sync) {
+		Label current = new Label();
+		current.setWrapText(true);
+		current.setMinHeight(Region.USE_PREF_SIZE);
+		current.setText(loggedInText(sync.operator()));
 		Button change = new Button(SharedFolderTexts.OPERATOR_SWITCH);
 		change.getStyleClass().add("button-default");
-		setShown(change, false);
-		return new HBox(change);
+		change.setMinWidth(Region.USE_PREF_SIZE);
+		change.setOnAction(e -> {
+			// Der jetzige Bediener steht vorn und ist vorbelegt, auch wenn die Liste ihn (noch) nicht kennt
+			List<String> recent = OperatorNames.remember(SettingsStore.getInstance().current().getRecentOperators(), sync.operator());
+			Optional<String> chosen = OperatorDialog.ask(change.getScene() == null ? null : change.getScene().getWindow(), recent, false);
+			chosen.ifPresent(name -> {
+				OperatorDialog.adopt(sync, name);
+				current.setText(loggedInText(sync.operator()));
+			});
+		});
+		HBox line = new HBox(14, current, change);
+		line.setAlignment(Pos.CENTER_LEFT);
+		return line;
+	}
+
+	private static String loggedInText(String operator) {
+		return operator == null ? "" : MessageTemplate.format(SharedFolderTexts.OPERATOR_HINT, operator);
 	}
 
 	private static Node saveImmediately(AppSettings settings) {
