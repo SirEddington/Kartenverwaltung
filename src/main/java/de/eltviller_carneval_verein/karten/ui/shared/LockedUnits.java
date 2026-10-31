@@ -204,7 +204,14 @@ public final class LockedUnits {
 		background.execute(() -> {
 			Exception failure = null;
 			try {
-				service.resetToLastReadable(unit);
+				// Der Dialog zeichnet den Knopf nach einem früheren Stand: Ein Vollabgleich oder Abholen kann die Einheit
+				// inzwischen wieder reparierbar gemacht haben, dann liegt im Ordner eine heile Kopie, die das Zurücksetzen
+				// mit dem älteren Stand überschriebe (bei einer Buchung ginge ein Verkauf verloren)
+				if (!service.resettableUnits().contains(unit)) {
+					failure = new IllegalStateException(unit.relativePath() + " ist nicht mehr zurücksetzbar.");
+				} else {
+					service.resetToLastReadable(unit);
+				}
 			} catch (IOException | RuntimeException e) {
 				failure = e;
 			}
@@ -226,11 +233,12 @@ public final class LockedUnits {
 			return;
 		}
 		LOG.log(Level.WARNING, "Zurücksetzen von " + unit.relativePath() + " gescheitert", failure);
-		// Der Versionsspeicher lehnt eine Einheit ab, die nicht (mehr) wegen einer beschädigten Version gesperrt ist: Dann
+		// Die Einheit ist nicht (mehr) zurücksetzbar, oder der Versionsspeicher lehnt sie ab, weil sie nicht (mehr) wegen
+		// einer beschädigten Version gesperrt ist: Dann
 		// ist nichts schiefgegangen, nur der Stand hat sich geändert, und die Abfrage unten trägt ihn ein
 		if (!(failure instanceof IllegalStateException)) {
 			try {
-				failed.accept(unit, failure.getMessage() != null ? failure.getMessage() : failure.getClass().getSimpleName());
+				failed.accept(unit, StoreMessages.describe(failure));
 			} catch (RuntimeException e) {
 				LOG.log(Level.SEVERE, "Der Fehler beim Zurücksetzen ließ sich nicht anzeigen", e);
 			}

@@ -29,7 +29,8 @@ class LockedUnitsTest {
 	private static final UnitKey PRESENTATION = UnitKey.presentation("e1", "p1");
 	private static final UnitKey HALL = UnitKey.hall("h1");
 
-	private final FakeService service = new FakeService();
+	/** Der Versionsspeicher nennt die Buchung zunächst als zurücksetzbar (die Reparatur aus dem Ordner ist gescheitert). */
+	private final FakeService service = new FakeService(BOOKING);
 	/** Die Aufgaben für den Hintergrund-Thread und den FX-Thread, die der Test von Hand abarbeitet. */
 	private final Queue<Runnable> background = new ArrayDeque<>();
 	private final Queue<Runnable> fx = new ArrayDeque<>();
@@ -232,7 +233,7 @@ class LockedUnitsTest {
 
 		assertEquals(1, locked.count());
 		assertEquals(List.of(), applied);
-		assertEquals(List.of(BOOKING.relativePath() + ": Platte voll"), failures);
+		assertEquals(List.of(BOOKING.relativePath() + ": IOException: Platte voll"), failures);
 	}
 
 	@Test
@@ -247,6 +248,39 @@ class LockedUnitsTest {
 		assertEquals(0, locked.count(), "die Sperre ist inzwischen weg");
 		assertEquals(List.of(), applied);
 		assertEquals(List.of(), failures, "nichts ist schiefgegangen, nur der Stand hat sich geändert");
+	}
+
+	@Test
+	void resetIsSkippedWhenTheUnitIsNoLongerResettable() {
+		locked.add(BOOKING, Status.LOCKED_DAMAGED);
+		service.resettable.add(BOOKING);
+		List<LockedUnits.Row> drawn = locked.rows(labels);
+		assertTrue(drawn.get(0).resettable());
+
+		// zwischen Zeichnen und Klick wird die Einheit wieder reparierbar (Vollabgleich, Abholen)
+		service.resettable.remove(BOOKING);
+		service.states.put(BOOKING, Status.LOCKED_DAMAGED);
+		locked.reset(BOOKING);
+		runAll();
+
+		assertEquals(List.of(), service.resets, "eine heile Kopie im Ordner dürfte nicht überschrieben werden");
+		assertEquals(List.of(), applied);
+		assertEquals(List.of(), failures, "nichts ist schiefgegangen, die Zeile wird nur neu berechnet");
+		assertEquals(1, locked.count());
+		assertFalse(locked.rows(labels).get(0).resettable());
+		assertTrue(service.asked.contains(BOOKING), "der Zustand wurde neu abgefragt");
+	}
+
+	@Test
+	void failureCauseNamesTheExceptionType() {
+		locked.add(BOOKING, Status.LOCKED_DAMAGED);
+		service.resetFailure = new IOException("Platte voll");
+		service.states.put(BOOKING, Status.LOCKED_DAMAGED);
+
+		locked.reset(BOOKING);
+		runAll();
+
+		assertEquals(List.of(BOOKING.relativePath() + ": IOException: Platte voll"), failures);
 	}
 
 	@Test
@@ -283,6 +317,10 @@ class LockedUnitsTest {
 		final List<UnitKey> asked = new ArrayList<>();
 		final List<UnitKey> resets = new ArrayList<>();
 		Exception resetFailure;
+
+		FakeService(UnitKey... resettableAtStart) {
+			resettable.addAll(List.of(resettableAtStart));
+		}
 
 		@Override
 		public Status status(UnitKey unit) throws IOException {

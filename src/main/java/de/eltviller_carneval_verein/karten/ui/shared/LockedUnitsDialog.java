@@ -47,6 +47,8 @@ public final class LockedUnitsDialog {
 	private final GridPane list = new GridPane();
 	private final ScrollPane listScroll = new ScrollPane(list);
 	private final Label empty = new Label(SharedFolderTexts.LOCKED_EMPTY);
+	/** Die Zeilen, wie sie gezeichnet sind; {@code null} vor dem ersten Mal. */
+	private List<LockedUnits.Row> drawn;
 
 	private LockedUnitsDialog(Window owner, Supplier<List<LockedUnits.Row>> rows, Consumer<UnitKey> reset) {
 		this.rows = rows;
@@ -129,6 +131,11 @@ public final class LockedUnitsDialog {
 			LOG.log(Level.WARNING, "Die gesperrten Einträge ließen sich nicht auffrischen", e);
 			return;
 		}
+		// Der App-Takt ruft das jede Sekunde: Ohne Änderung bleibt die Liste, wie sie ist (Knopf, Fokus, "wird zurückgesetzt")
+		if (current.equals(drawn)) {
+			return;
+		}
+		drawn = current;
 		list.getChildren().clear();
 		boolean any = !current.isEmpty();
 		listScroll.setVisible(any);
@@ -161,8 +168,10 @@ public final class LockedUnitsDialog {
 					SharedFolderTexts.LOCKED_CONFIRM_YES, "button-danger", stage)) {
 				return;
 			}
-			// bis die Liste sich auffrischt, nicht noch einmal
+			// bis die Liste sich auffrischt, nicht noch einmal; die nächste Auffrischung zeichnet neu, auch wenn die Zeilen
+			// gleich bleiben (das Zurücksetzen scheiterte), damit der Knopf wieder da ist
 			button.setDisable(true);
+			drawn = null;
 			try {
 				reset.accept(entry.unit());
 			} catch (RuntimeException e) {

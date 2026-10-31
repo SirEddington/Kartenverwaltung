@@ -348,6 +348,9 @@ public class MainApp extends Application {
 			syncStatus.refreshTracked();
 		}
 		SyncInfoWindow.refreshIfOpen();
+		// Die Reparatur einer gesperrten Einheit kann gelungen oder gescheitert sein (Knopf "zurücksetzen" fällt weg bzw. kommt
+		// dazu); die Zeilen liest {@code resettableUnits()} ohne Datei-Ein-/Ausgabe
+		lockedViewChanged();
 	}
 
 	/** Öffnet das Info-Fenster zum Abgleich (Klick auf den Hinweis in der Fußzeile). */
