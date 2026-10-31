@@ -192,7 +192,91 @@ public final class SharedFolderTexts {
 	/** Zusatz zur Bezeichnung, wenn auch alles darunter übersprungen ist. */
 	public static final String WITH_EVERYTHING_BELOW = "mit allem darunter";
 
+	// --- Fußzeile und Info-Fenster
+
+	/** Hinweis OFFLINE. */
+	public static final String HINT_OFFLINE = "Offline: Verkäufe vorläufig";
+
+	/** Hinweis FEHLER. */
+	public static final String HINT_ERROR = "Abgleich gestört: Verkäufe vorläufig";
+
+	/** Hinweis AUSSTEHEND ab 30 s. */
+	public static final String HINT_PENDING = "Hochladen verzögert: Verkäufe vorläufig";
+
+	/** Hinweis ENTSCHEIDUNG. */
+	public static final String HINT_DECISION = "Gemeinsamer Ordner: Entscheidung nötig";
+
+	/** Hinweis erster Abgleich (&1 = Prozent). */
+	public static final String HINT_FIRST_RUN = "Erster Abgleich unvollständig (&1 %)";
+
+	/** Hinweis erster Abgleich, Lauf zu Ende. */
+	public static final String HINT_FIRST_RUN_ENDED = "Erster Abgleich unvollständig: Einträge übersprungen";
+
+	/** Hinweis übersprungene Einträge, einer. */
+	public static final String HINT_SKIPPED_ONE = "1 Eintrag nicht abgeglichen";
+
+	/** Hinweis übersprungene Einträge, mehrere (&1 = Zahl). */
+	public static final String HINT_SKIPPED_MANY = "&1 Einträge nicht abgeglichen";
+
+	/** Titel des Info-Fensters. */
+	public static final String INFO_TITLE = "Abgleich mit dem gemeinsamen Ordner";
+
+	/** Info-Fenster: Ordner (&1 = Ordner). */
+	public static final String INFO_FOLDER = "Ordner: &1";
+
+	/** Info-Fenster: letzter Abgleich (&1 = Zeitpunkt bzw. "noch keiner"). */
+	public static final String INFO_LAST_SYNC = "Letzter Abgleich: &1";
+
+	/** Info-Fenster: Ursache (&1 = Ursache der Störung). */
+	public static final String INFO_CAUSE = "Ursache: &1";
+
+	/** Info-Fenster: erster Abgleich vollständig. */
+	public static final String INFO_FIRST_RUN_COMPLETE = "Erster Abgleich: vollständig";
+
+	/** Info-Fenster: erster Abgleich läuft (&1 = Prozent). */
+	public static final String INFO_FIRST_RUN_RUNNING = "Erster Abgleich: läuft (&1 %)";
+
+	/** Info-Fenster: erster Abgleich unvollständig. */
+	public static final String INFO_FIRST_RUN_INCOMPLETE = "Erster Abgleich: unvollständig";
+
+	/** Info-Fenster: Überschrift der Liste. */
+	public static final String INFO_LIST_TITLE = "Nicht abgeglichene Einträge";
+
+	/** Info-Fenster: Spalte der Liste. */
+	public static final String INFO_COLUMN_ENTRY = "Eintrag";
+
+	/** Info-Fenster: Spalte der Liste. */
+	public static final String INFO_COLUMN_CAUSE = "Ursache";
+
+	/** Info-Fenster: Hinweis unter der Liste. */
+	public static final String INFO_LIST_HINT = "Die Kartenverwaltung versucht es beim nächsten Abgleich erneut, spätestens"
+			+ " nach 10 Minuten.";
+
+	/** Info-Fenster: Liste leer. */
+	public static final String INFO_LIST_EMPTY = "Keine";
+
+	/** Knopf des Info-Fensters. */
+	public static final String SYNC_NOW = "Jetzt abgleichen";
+
+	/** Knopf des Info-Fensters. */
+	public static final String CLOSE = "Schließen";
+
 	// --- Zusammengesetzte Texte
+
+	/** Die Bezeichnung eines Eintrags, bei Event oder Vorstellung mit dem Zusatz "mit allem darunter". */
+	public static String withSubtree(String label, boolean subtree) {
+		return subtree ? label + " " + WITH_EVERYTHING_BELOW : label;
+	}
+
+	/** Zeitpunkt wie in der Statuszeile: {@code dd.MM.yyyy HH:mm:ss}. */
+	public static String syncTime(Instant time, ZoneId zone) {
+		return time.atZone(zone).format(SYNC_TIME);
+	}
+
+	/** Ganze Prozent des Fortschritts (abgerundet, 0 bis 100). */
+	public static int percent(double progress) {
+		return Math.max(0, Math.min(100, (int) Math.floor(progress * 100)));
+	}
 
 	/**
 	 * Die Fußzeile für einen übersprungenen Eintrag.
@@ -201,7 +285,7 @@ public final class SharedFolderTexts {
 	 * @param subtree ob auch alles darunter übersprungen ist
 	 */
 	public static String skippedFooter(String label, boolean subtree) {
-		return MessageTemplate.format(SKIPPED_FOOTER, subtree ? label + " " + WITH_EVERYTHING_BELOW : label);
+		return MessageTemplate.format(SKIPPED_FOOTER, withSubtree(label, subtree));
 	}
 
 	/** Die erste Zeile der Ladeansicht: ohne Prozent, solange der Lauf nicht begonnen hat ({@code null}). */
@@ -235,7 +319,7 @@ public final class SharedFolderTexts {
 		return switch (state) {
 		case AUS -> STATUS_OFF;
 		case AKTUELL -> MessageTemplate.format(STATUS_CURRENT, dir,
-				lastSync == null ? NO_SYNC_YET : lastSync.atZone(zone).format(SYNC_TIME));
+				lastSync == null ? NO_SYNC_YET : syncTime(lastSync, zone));
 		case AUSSTEHEND -> MessageTemplate.format(STATUS_PENDING, dir);
 		case OFFLINE -> MessageTemplate.format(STATUS_OFFLINE, dir);
 		case FEHLER -> cause == null || cause.isBlank() ? STATUS_ERROR.substring(0, STATUS_ERROR.indexOf(':'))

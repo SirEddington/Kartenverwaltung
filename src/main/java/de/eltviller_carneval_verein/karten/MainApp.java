@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +54,10 @@ import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderEvents;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart.StartResult;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderUi;
+import de.eltviller_carneval_verein.karten.ui.shared.SyncIndicator;
+import de.eltviller_carneval_verein.karten.ui.shared.SyncInfo;
+import de.eltviller_carneval_verein.karten.ui.shared.SyncInfoWindow;
+import de.eltviller_carneval_verein.karten.ui.shared.SyncStatus;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -95,6 +100,11 @@ public class MainApp extends Application {
 	private static ConflictList conflictList;
 	private static ConflictActions conflictActions;
 	private static ConflictIndicator conflictIndicator;
+	// Der Hinweis zum Abgleich in der Fußzeile des aktuellen Fensterinhalts und der Stand, den alle diese Hinweise teilen
+	private static SyncIndicator syncIndicator;
+	private static SyncStatus syncStatus;
+	// Die Bezeichnungen der Einträge für das Info-Fenster (gesetzt, sobald der Bestand geladen ist)
+	private static Function<UnitKey, String> syncLabels;
 	// Die Zahl der offenen Konflikte nach der letzten Rückmeldung; jede neue Fußzeile übernimmt sie
 	private static int lastOpenCount;
 	// Mindestbreite des Hauptfensters: So schmal darf es werden, die Kopfzeilen der Bildschirme sind darauf abgestimmt
@@ -148,6 +158,8 @@ public class MainApp extends Application {
 		}
 		// Die Fachregeln für Konflikte vor dem Start: Schon der Start löst verlorene Änderungen mit ihnen auf
 		ConflictPolicies.install(sync);
+		// Der Stand für die Hinweise zum Abgleich in der Fußzeile, schon für die Ladeansicht des Starts
+		syncStatus = new SyncStatus(sync, Clock.systemUTC(), MainApp::syncChanged);
 		// Das Verbinden mit dem gemeinsamen Ordner (Knopf in den Einstellungen und Start mit neuem Ordner)
 		SharedFolderConnection connection = SharedFolderConnection.install(sync, MainApp::reloadAfterConnect);
 
@@ -308,11 +320,33 @@ public class MainApp extends Application {
 	}
 
 	/**
-	 * Der Abgleich, sein Zustand oder die Liste der übersprungenen Einträge können sich geändert haben (FX-Thread). Die
-	 * Fußzeile und das Info-Fenster (Aufgabe 12) hängen sich hier ein.
+	 * Der Abgleich, sein Zustand oder die Liste der übersprungenen Einträge können sich geändert haben (FX-Thread): Der
+	 * Hinweis in der Fußzeile und ein offenes Info-Fenster lesen den Stand neu. Die Hinweise älterer Fensterinhalte sind
+	 * nicht mehr im Fenster und lesen beim nächsten Zeigen neu.
 	 */
 	private static void syncChanged() {
-		// bis dahin gibt es nichts aufzufrischen
+		if (syncIndicator != null) {
+			syncIndicator.refresh();
+		}
+		SyncInfoWindow.refreshIfOpen();
+	}
+
+	/** Öffnet das Info-Fenster zum Abgleich (Klick auf den Hinweis in der Fußzeile). */
+	private static void openSyncInfo() {
+		SyncInfoWindow.show(primaryStage, MainApp::syncInfo, SyncService.getInstance()::syncNow);
+	}
+
+	/** Was das Info-Fenster zeigt, nach dem Stand von jetzt; die übersprungenen Einträge liest es jedes Mal neu. */
+	private static SyncInfo syncInfo() {
+		SyncService sync = SyncService.getInstance();
+		String cause = SharedFolderEvents.instance().map(SharedFolderEvents::lastFailure).orElse(null);
+		return SyncInfo.of(sync.sharedDir(), sync.lastSync().get(), cause, sync.connectionComplete().get(),
+				sync.fullSyncProgress().get(), sync.skippedUnits(), syncLabels != null ? syncLabels : unit -> null);
+	}
+
+	/** Die Frage "Mitnehmen" / "Beiseitelegen" noch einmal stellen (Klick auf den Hinweis bei Vorrang 1). */
+	private static void askDecisionAgain() {
+		SharedFolderEvents.instance().ifPresent(SharedFolderEvents::askDecisionAgain);
 	}
 
 	/** Eine Einheit wurde gesperrt gemeldet (FX-Thread). Der Link "gesperrte Einträge" (Aufgabe 12) hängt sich hier ein. */
@@ -351,6 +385,7 @@ public class MainApp extends Application {
 				EditingUnits.getInstance(), sync, EventSaver::save, HallSaver::save);
 		MainApp.conflictActions = conflictActions;
 		Function<UnitKey, String> labels = ConflictLabels.of(repository, halls, sync);
+		syncLabels = labels;
 		conflictList = new ConflictList(sync::openConflicts, labels, conflictActions::isAdopted, halls::findById);
 		conflictSync = sync;
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
@@ -702,15 +737,28 @@ public class MainApp extends Application {
 			// ohne Konflikte nimmt der Hinweis keinen Platz, weder in der Fußzeile noch als eigene Zeile
 			ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount, MainApp::openConflictDialog);
 			conflictIndicator = indicator;
+			// der Hinweis zum Abgleich steht neben dem auf Konflikte, mit derselben Einfügeregel
+			SyncIndicator syncHint = syncStatus == null ? null
+					: new SyncIndicator(syncStatus, MainApp::askDecisionAgain, MainApp::openSyncInfo);
+			syncIndicator = syncHint;
 			StatusLabel messages = findStatusLabel(content);
 			if (messages != null && messages.getParent() instanceof Pane footer) {
-				footer.getChildren().add(footer.getChildren().indexOf(messages), indicator);
+				int position = footer.getChildren().indexOf(messages);
+				footer.getChildren().add(position, indicator);
+				if (syncHint != null) {
+					footer.getChildren().add(position + 1, syncHint);
+				}
 			} else {
-				HBox indicatorBar = new HBox(indicator);
+				HBox indicatorBar = syncHint == null ? new HBox(indicator) : new HBox(12, indicator, syncHint);
 				indicatorBar.setAlignment(Pos.CENTER_LEFT);
 				indicatorBar.setPadding(new Insets(0, 20, 8, 20));
-				indicatorBar.visibleProperty().bind(indicator.visibleProperty());
-				indicatorBar.managedProperty().bind(indicator.managedProperty());
+				if (syncHint == null) {
+					indicatorBar.visibleProperty().bind(indicator.visibleProperty());
+					indicatorBar.managedProperty().bind(indicator.managedProperty());
+				} else {
+					indicatorBar.visibleProperty().bind(indicator.visibleProperty().or(syncHint.visibleProperty()));
+					indicatorBar.managedProperty().bind(indicator.managedProperty().or(syncHint.managedProperty()));
+				}
 				screen.getChildren().add(indicatorBar);
 			}
 		}
