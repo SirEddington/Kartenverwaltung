@@ -136,6 +136,23 @@ public final class LockedUnits {
 	}
 
 	/**
+	 * Ob {@code text} eine Sperre meldet (SYS-008 oder SYS-009, auch mit Präfix wie "Nicht gespeichert: "), die nicht mehr
+	 * gilt: Er nennt keine der geführten Einheiten, weder mit Bezeichnung noch mit Pfad. Für die Fußzeile, die eine solche
+	 * Meldung nach dem Zurücksetzen nicht stehen lassen soll; ein anderer Text ist nie veraltet.
+	 */
+	public boolean isStaleLockMessage(String text, Function<UnitKey, String> labels) {
+		if (!text.contains(StoreMessages.SYS_DAMAGED + ": ") && !text.contains(StoreMessages.SYS_NEWER_FORMAT + ": ")) {
+			return false;
+		}
+		for (UnitKey unit : locked.keySet()) {
+			if (text.contains(label(labels, unit)) || text.contains(unit.relativePath())) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
 	 * Die Zeilen des Dialogs in der Reihenfolge, in der die Sperren gemeldet wurden. Die Bezeichnung kommt von
 	 * {@code labels}; liefert sie nichts oder scheitert, steht der Pfad da.
 	 *

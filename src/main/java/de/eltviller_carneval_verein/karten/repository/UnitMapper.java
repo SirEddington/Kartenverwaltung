@@ -301,9 +301,9 @@ final class UnitMapper {
 		}
 	}
 
-	/** Der Text (SYS-008 bzw. SYS-009), wenn die Einheit gesperrt ist; sonst {@code null}. */
+	/** Der Text (SYS-008 bzw. SYS-009) mit der Bezeichnung der Einheit, wenn sie gesperrt ist; sonst {@code null}. */
 	static String lockMessage(UnitKey unit, Status status) {
-		return StoreMessages.locked(unit, status);
+		return LockedUnitException.lockMessage(unit, status);
 	}
 
 	/** Der Schlüssel einer Buchung: auf dem Sitz, wenn sie einen hat und nicht "ohne Platz" ist, sonst über ihre Kennung. */
@@ -503,7 +503,8 @@ final class UnitMapper {
 	 * eigene Dateien (keine Version, Status {@code OK}: die Einheit gibt es nicht) und, mit der Warnung
 	 * {@code unreadable}, für eine Einheit ohne lesbare Version oder mit Inhalt, den Jackson nicht liest. Eine
 	 * gesperrte Einheit mit lesbarer Version wird geladen und kommt mit ihrem Zustand in {@code locked} (SYS-008 bzw.
-	 * SYS-009). Ergibt {@code mismatchOf} einen Text, passt der Inhalt nicht zum Ordner der Einheit (die ID zeigt
+	 * SYS-009); eine ohne lesbare Version fehlt, kommt aber ebenso in {@code locked}, damit sie unter den gesperrten
+	 * Einträgen steht (sonst wirkte etwa ihr Sitz frei, obwohl Speichern darauf abgelehnt wird). Ergibt {@code mismatchOf} einen Text, passt der Inhalt nicht zum Ordner der Einheit (die ID zeigt
 	 * woandershin): Die Einheit wird wie eine unlesbare behandelt.
 	 */
 	private static <T> T read(UnitSnapshot snapshot, Class<T> type, List<String> warnings, Map<UnitKey, Status> locked,
@@ -511,6 +512,9 @@ final class UnitMapper {
 		if (snapshot.version() == null) {
 			if (snapshot.status() != Status.OK) {
 				warnings.add(unreadable);
+			}
+			if (lockMessage(snapshot.unit(), snapshot.status()) != null) {
+				locked.put(snapshot.unit(), snapshot.status());
 			}
 			return null;
 		}

@@ -18,6 +18,7 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
+import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.settings.AppSettings;
@@ -393,6 +394,20 @@ public class MainApp extends Application {
 		lockedViewChanged();
 	}
 
+	/**
+	 * Die Liste der gesperrten Einträge hat sich nach einer Abfrage oder einem Zurücksetzen geändert (FX-Thread): Anzeige wie
+	 * {@link #lockedViewChanged()}; eine Meldung SYS-008 bzw. SYS-009 zu einem Eintrag, der nicht mehr gesperrt ist, verschwindet
+	 * aus der Fußzeile.
+	 */
+	private static void lockedUnitsChanged() {
+		lockedViewChanged();
+		LockedUnits units = lockedUnits;
+		Function<UnitKey, String> labels = syncLabels;
+		if (units != null && labels != null) {
+			StatusMessage.getInstance().clearIf(text -> units.isStaleLockMessage(text, labels));
+		}
+	}
+
 	/** Die gesperrten Einträge haben sich geändert (FX-Thread): der Link der aktuellen Ansicht und ein offener Dialog lesen neu. */
 	private static void lockedViewChanged() {
 		if (lockedIndicator != null) {
@@ -463,6 +478,8 @@ public class MainApp extends Application {
 		MainApp.conflictActions = conflictActions;
 		Function<UnitKey, String> labels = ConflictLabels.of(repository, halls, sync);
 		syncLabels = labels;
+		// SYS-008 und SYS-009 beim Speichern und Einarbeiten nennen den Eintrag wie Fußzeile und Dialog, nicht seinen Pfad
+		LockedUnitException.useLabels(labels);
 		conflictList = new ConflictList(sync::openConflicts, labels, conflictActions::isAdopted, halls::findById);
 		conflictSync = sync;
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
@@ -472,7 +489,7 @@ public class MainApp extends Application {
 		lockedUnits = new LockedUnits(LockedUnits.of(sync), connection.background(), Platform::runLater, MainApp::applyReset,
 				(unit, cause) -> StatusMessage.getInstance().show(Severity.ERROR,
 						SharedFolderTexts.lockedResetFailed(LockedUnits.label(labels, unit), cause)),
-				MainApp::lockedViewChanged);
+				MainApp::lockedUnitsChanged);
 		liveUpdates = LiveUpdates.install(sync, MainApp::conflictsChanged, live -> SharedFolderEvents.install(
 				new SharedFolderEvents(live, labels, sharedFolderUi, connection.flow(), MainApp::syncChanged, MainApp::lockedReported)));
 		SharedFolderEvents.instance().ifPresent(events -> events.watch(sync));

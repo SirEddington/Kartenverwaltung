@@ -64,6 +64,24 @@ class LockedUnitsTest {
 	}
 
 	@Test
+	void lockMessageIsStaleOnceItsUnitIsNoLongerLocked() {
+		locked.add(BOOKING, Status.LOCKED_DAMAGED);
+		String booking = StoreMessages.damaged("Gala › Samstag › Tisch A3, Sitz 2");
+		String hall = StoreMessages.newerFormat("Festhalle");
+
+		assertFalse(locked.isStaleLockMessage(booking, labels));
+		assertFalse(locked.isStaleLockMessage("Nicht gespeichert: " + booking, labels));
+		assertFalse(locked.isStaleLockMessage(StoreMessages.damaged(BOOKING.relativePath()), labels), "auch mit Pfad");
+		assertTrue(locked.isStaleLockMessage(hall, labels), "die Halle ist nicht gesperrt");
+		assertFalse(locked.isStaleLockMessage("Gespeichert", labels), "keine Meldung einer Sperre");
+		assertFalse(locked.isStaleLockMessage(StoreMessages.syncFailed("D:\\x", "IOException"), labels));
+
+		names.clear();
+		assertFalse(locked.isStaleLockMessage(StoreMessages.damaged(BOOKING.relativePath()), labels),
+				"ohne Bezeichnung zählt der Pfad");
+	}
+
+	@Test
 	void damagedResettableUnitOffersReset() {
 		locked.add(BOOKING, Status.LOCKED_DAMAGED);
 

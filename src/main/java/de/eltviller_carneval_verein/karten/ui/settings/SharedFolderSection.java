@@ -198,6 +198,9 @@ public final class SharedFolderSection {
 
 		private void disconnected(String failure) {
 			disconnecting = false;
+			// Lehnt die Rückfrage zu ungespeicherten Änderungen den Neuaufbau ab ("Abbrechen"), bleibt diese Zeile stehen:
+			// Sie zeigt dann den getrennten Stand (Pfad und "Durchsuchen …" frei)
+			refresh();
 			Scene scene = node.getScene();
 			if (scene != null && scene == MainApp.primaryStage().getScene()) {
 				connection.reopenSettings(null, failure);

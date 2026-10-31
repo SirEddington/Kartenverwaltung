@@ -549,6 +549,7 @@ class UnitMapperTest {
 		assertEquals(List.of(fine.getId()), assembly.items().stream().map(Event::getId).toList());
 		assertEquals(List.of("Das Event " + broken.getId() + " konnte nicht gelesen werden und fehlt."),
 				assembly.warnings());
+		assertEquals(Map.of(UnitKey.event(broken.getId()), Status.LOCKED_DAMAGED), assembly.locked());
 	}
 
 	@Test
@@ -607,6 +608,12 @@ class UnitMapperTest {
 		Event loaded = assembly.items().get(0);
 		assertEquals(1, loaded.getPresentations().size());
 		assertEquals(0, loaded.getBookings().size());
+		// auch ohne lesbare Version gesperrt: Link "gesperrte Einträge" und SYS-008/SYS-009, sonst wirkte der Sitz frei
+		UnitKey presentation = UnitKey.presentation(event.getId(), first.getId());
+		UnitKey booking = UnitKey.booking(event.getId(), event.getPresentations().get(1).getId(), "seat-a1x");
+		assertEquals(Map.of(presentation, Status.LOCKED_FORMAT, booking, Status.LOCKED_DAMAGED), assembly.locked());
+		assertTrue(assembly.allWarnings().contains(StoreMessages.newerFormat(presentation.relativePath())));
+		assertTrue(assembly.allWarnings().contains(StoreMessages.damaged(booking.relativePath())));
 	}
 
 	@Test
@@ -889,6 +896,7 @@ class UnitMapperTest {
 		assertEquals(List.of("Gut"), assembly.items().stream().map(Hall::getName).toList());
 		assertEquals(List.of("Die Halle " + hall.getId() + " konnte nicht gelesen werden und fehlt."),
 				assembly.warnings());
+		assertEquals(Map.of(UnitKey.hall(hall.getId()), Status.LOCKED_DAMAGED), assembly.locked());
 	}
 
 	@Test

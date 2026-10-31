@@ -78,6 +78,9 @@ public final class SharedFolderEvents implements SyncListener {
 		 * die sich häufen können und keinen Dialog wert sind.
 		 */
 		void footer(Severity severity, String text);
+
+		/** Nimmt den Hinweis {@code text} aus der Fußzeile, weil er nicht mehr gilt; steht dort ein anderer, bleibt der. */
+		void withdrawFooter(String text);
 	}
 
 	/** Die Frage beim Verbinden, die der Versionsspeicher gestellt hat und die noch offen ist. */
@@ -136,7 +139,7 @@ public final class SharedFolderEvents implements SyncListener {
 	 * endet, die Verbindung wechselt.
 	 * <p>
 	 * Die gemerkte Ursache vergisst sie, wenn der Abgleich wieder läuft oder endet ({@code AKTUELL}, {@code AUSSTEHEND},
-	 * {@code AUS}), nicht bei {@code OFFLINE}: Der Speicher meldet denselben Text nicht noch einmal, wenn auf FEHLER ein
+	 * {@code AUS}), und nimmt ihren Text dann aus der Fußzeile; nicht bei {@code OFFLINE}: Der Speicher meldet denselben Text nicht noch einmal, wenn auf FEHLER ein
 	 * Ausfall und wieder FEHLER folgt. Die wartende Entscheidung vergisst sie, sobald der Zustand {@code ENTSCHEIDUNG}
 	 * verlässt. Steht der Zustand beim Einhängen schon auf {@code ENTSCHEIDUNG}, ohne dass die Frage ankam (der Rückruf kam
 	 * vor dem Einhängen), gilt sie mit Beiseitelegen als wartend: {@code decideConnect} prüft die Schutzregel selbst und
@@ -147,7 +150,10 @@ public final class SharedFolderEvents implements SyncListener {
 			pendingDecision = new PendingDecision(sync.sharedDir(), true);
 		}
 		sync.syncState().addListener((observable, oldState, newState) -> {
-			if (newState == SyncState.AKTUELL || newState == SyncState.AUSSTEHEND || newState == SyncState.AUS) {
+			if ((newState == SyncState.AKTUELL || newState == SyncState.AUSSTEHEND || newState == SyncState.AUS)
+					&& lastFailure != null) {
+				// Die Störung ist vorbei: Ihr Text soll nicht in der Fußzeile stehen bleiben, wenn Hinweis und Ursache weg sind
+				ui.withdrawFooter(lastFailure);
 				lastFailure = null;
 			}
 			if (newState != SyncState.ENTSCHEIDUNG) {
@@ -212,7 +218,10 @@ public final class SharedFolderEvents implements SyncListener {
 
 	@Override
 	public void reconnected() {
-		lastFailure = null;
+		if (lastFailure != null) {
+			ui.withdrawFooter(lastFailure);
+			lastFailure = null;
+		}
 		ui.footer(Severity.INFO, SharedFolderTexts.RECONNECTED);
 		syncChanged();
 	}

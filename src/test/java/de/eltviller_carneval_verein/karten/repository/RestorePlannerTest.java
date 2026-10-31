@@ -185,4 +185,28 @@ class RestorePlannerTest {
 				waiting.getMessage());
 		RestorePlanner.requireRestorable(List.of(fine));
 	}
+
+	@Test
+	void lockedUnitIsNamedByItsLabelWhenOneIsInstalled() {
+		Version version = version(1, "s1", at(1), false);
+		LockedUnitException.useLabels(unit -> unit.equals(BOOKING) ? "Gala › Samstag › Tisch 1, Sitz 2" : null);
+		try {
+			LockedUnitException damaged = assertThrows(LockedUnitException.class,
+					() -> RestorePlanner.requireRestorable(List.of(state(BOOKING, Status.LOCKED_DAMAGED, version))));
+			LockedUnitException format = assertThrows(LockedUnitException.class,
+					() -> RestorePlanner.requireRestorable(List.of(state(EVENT, Status.LOCKED_FORMAT, version))));
+
+			assertEquals(StoreMessages.damaged("Gala › Samstag › Tisch 1, Sitz 2"), damaged.getMessage());
+			assertEquals(StoreMessages.newerFormat(EVENT.relativePath()), format.getMessage(), "ohne Bezeichnung der Pfad");
+
+			LockedUnitException.useLabels(unit -> {
+				throw new IllegalStateException("kein Verlauf");
+			});
+			LockedUnitException failing = assertThrows(LockedUnitException.class,
+					() -> RestorePlanner.requireRestorable(List.of(state(BOOKING, Status.LOCKED_DAMAGED, version))));
+			assertEquals(StoreMessages.damaged(BOOKING.relativePath()), failing.getMessage());
+		} finally {
+			LockedUnitException.useLabels(null);
+		}
+	}
 }

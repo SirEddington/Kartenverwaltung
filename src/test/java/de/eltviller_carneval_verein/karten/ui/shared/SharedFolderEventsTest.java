@@ -437,6 +437,24 @@ class SharedFolderEventsTest {
 		assertNull(events.lastFailure());
 	}
 
+	@Test
+	void failureLeavesTheFooterWhenTheStateRecovers() {
+		events.watch(connection);
+		String failure = StoreMessages.syncFailed(DIR, "IOException: eins");
+		connection.state(SyncState.FEHLER);
+		events.error(failure);
+		ui.clear();
+
+		connection.state(SyncState.OFFLINE);
+		assertEquals(List.of(), ui, "bei einem Ausfall gilt die Ursache weiter");
+
+		connection.state(SyncState.AKTUELL);
+		assertEquals(List.of("withdrawFooter:" + failure), ui);
+
+		connection.state(SyncState.AUSSTEHEND);
+		assertEquals(List.of("withdrawFooter:" + failure), ui, "nur einmal");
+	}
+
 	/** Was {@code LiveUpdates.listener()} bekäme. */
 	private final class RecordingLive implements SyncListener {
 
@@ -498,6 +516,11 @@ class SharedFolderEventsTest {
 		@Override
 		public void footer(Severity severity, String text) {
 			ui.add("footer:" + severity + ":" + text);
+		}
+
+		@Override
+		public void withdrawFooter(String text) {
+			ui.add("withdrawFooter:" + text);
 		}
 	}
 

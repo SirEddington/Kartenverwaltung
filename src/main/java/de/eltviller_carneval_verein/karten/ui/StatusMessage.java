@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import de.eltviller_carneval_verein.karten.MainApp;
@@ -135,6 +136,17 @@ public final class StatusMessage {
 	public void clearIssues() {
 		Entry entry = current.get();
 		if (entry != null && (entry.severity() == Severity.ERROR || entry.severity() == Severity.WARNING)) {
+			clear();
+		}
+	}
+
+	/**
+	 * Entfernt die aktuelle Meldung, wenn ihr Text nach {@code stale} nicht mehr gilt (etwa eine Störung, die vorbei ist);
+	 * eine andere Meldung bleibt.
+	 */
+	public void clearIf(Predicate<String> stale) {
+		Entry entry = current.get();
+		if (entry != null && stale.test(entry.text())) {
 			clear();
 		}
 	}
