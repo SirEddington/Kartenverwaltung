@@ -840,7 +840,8 @@ public class MainApp extends Application {
 	 * tatsächlichen Fenstergröße mit. Mit {@code conflictHint} steht der Hinweis auf offene Konflikte in der Fußzeile vor
 	 * den Meldungen ({@link StatusLabel}; bei "Anzeige" also zwischen beiden); er wird der Hinweis, den die App auffrischt.
 	 * Eine Ansicht ohne eigene Fußzeile (Hauptmenü, Menü der Verwaltung, Übersichten, Ladeansichten) bekommt unter dem
-	 * Inhalt eine Fußzeile ohne Trennlinie mit Hinweisen und Meldungen: Ohne beides sieht sie aus wie bisher.
+	 * Inhalt eine Fußzeile ohne Trennlinie mit Hinweisen und Meldungen. Ohne beides ist sie leer, hält aber ihre Höhe frei,
+	 * damit der Inhalt bei einer Meldung nicht springt.
 	 */
 	private static Parent wrapWithBackground(Parent content, boolean conflictHint) {
 		ImageView background = new ImageView(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/wappen.png")));
@@ -880,15 +881,24 @@ public class MainApp extends Application {
 				footer.getChildren().addAll(items);
 				footer.setAlignment(Pos.CENTER_LEFT);
 				footer.setPadding(new Insets(0, 20, 8, 20));
-				// die Fußzeile nimmt nur Platz, solange ein Link oder eine Meldung zu sehen ist
+				// Die Fußzeile hält immer die Höhe einer Meldung frei: Käme sie erst mit der Meldung, rückte der Inhalt (etwa das
+				// zentrierte Hauptmenü) bei jeder Meldung hoch und danach wieder herunter. Der Platzhalter ist unsichtbar und
+				// ohne Breite, gibt der Zeile aber die Höhe einer Meldung.
+				Label icon = new Label("⚠");
+				icon.getStyleClass().add("status-icon");
+				Label placeholder = new Label(" ", icon);
+				placeholder.getStyleClass().add("status-label");
+				placeholder.setMinWidth(0);
+				placeholder.setPrefWidth(0);
+				placeholder.setMaxWidth(0);
+				placeholder.setVisible(false);
+				footer.getChildren().add(placeholder);
+				// zu sehen ist sie nur, solange ein Link oder eine Meldung zu sehen ist
 				BooleanExpression anyVisible = items.get(0).visibleProperty();
-				BooleanExpression anyManaged = items.get(0).managedProperty();
 				for (Node item : items.subList(1, items.size())) {
 					anyVisible = anyVisible.or(item.visibleProperty());
-					anyManaged = anyManaged.or(item.managedProperty());
 				}
 				footer.visibleProperty().bind(anyVisible);
-				footer.managedProperty().bind(anyManaged);
 				screen.getChildren().add(footer);
 			}
 		}
