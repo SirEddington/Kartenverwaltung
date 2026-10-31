@@ -47,11 +47,6 @@ public final class SharedFolderUi implements SharedFolderEvents.Ui {
 		StatusMessage.getInstance().showInFooter(severity, text);
 	}
 
-	@Override
-	public void message(Severity severity, String text) {
-		StatusMessage.getInstance().show(severity, text);
-	}
-
 	/**
 	 * Ein Popup mit einem Knopf, das die Arbeit nicht blockiert: {@code show()} statt {@code showAndWait()}, und nicht modal,
 	 * sonst ließe sich das Hauptfenster bis zum Schließen nicht bedienen ("Weiterarbeiten").

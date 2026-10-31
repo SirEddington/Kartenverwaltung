@@ -1014,6 +1014,13 @@
     -fx-text-fill: -fx-status-error-text;
 }
 
+/* Link "gesperrte Einträge" in der Fußzeile (LockedUnitsIndicator): Daten, die sich nicht ändern lassen */
+.locked-indicator {
+    -fx-text-fill: -fx-status-error-text;
+    -fx-font-weight: bold;
+    -fx-underline: true;
+}
+
 .conflict-error {
     -fx-text-fill: -fx-status-error-text;
 }

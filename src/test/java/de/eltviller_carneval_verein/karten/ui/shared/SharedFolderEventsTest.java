@@ -36,7 +36,8 @@ class SharedFolderEventsTest {
 	private boolean guardAllows = true;
 	private Function<UnitKey, String> labels = unit -> "Gala › Samstag";
 	private int syncChanged;
-	private int lockedChanged;
+	/** Die Einheiten, die der Empfänger der Sperren bekam (mit Zustand). */
+	private final List<String> lockedReported = new ArrayList<>();
 	/** Die Antworten der zuletzt gezeigten Frage. */
 	private Consumer<ConnectMode> shownDecide;
 	private Runnable shownCancel;
@@ -46,7 +47,7 @@ class SharedFolderEventsTest {
 			}, Path.of("appdata"), path -> true);
 
 	private final SharedFolderEvents events = new SharedFolderEvents(new RecordingLive(), unit -> labels.apply(unit),
-			new RecordingUi(), flow, () -> syncChanged++, () -> lockedChanged++);
+			new RecordingUi(), flow, () -> syncChanged++, (unit, status) -> lockedReported.add(unit.relativePath() + ":" + status));
 
 	@Test
 	void unitsChangedAndErrorsReachLiveUpdates() {
@@ -128,10 +129,20 @@ class SharedFolderEventsTest {
 		events.locked(UNIT, UnitState.Status.LOCKED_DAMAGED);
 		events.locked(UNIT, UnitState.Status.LOCKED_FORMAT);
 
-		assertEquals(List.of("message:ERROR:" + StoreMessages.damaged("Gala › Samstag"),
-				"message:ERROR:" + StoreMessages.newerFormat("Gala › Samstag")), ui);
+		assertEquals(List.of("footer:ERROR:" + StoreMessages.damaged("Gala › Samstag"),
+				"footer:ERROR:" + StoreMessages.newerFormat("Gala › Samstag")), ui);
 		assertFalse(ui.get(0).contains(UNIT.relativePath()));
-		assertEquals(2, lockedChanged);
+	}
+
+	@Test
+	void lockedShowsOnlyTheFooterAndTellsTheLinkWhichUnit() {
+		events.locked(UNIT, UnitState.Status.LOCKED_DAMAGED);
+		events.locked(UNIT, UnitState.Status.LOCKED_FORMAT);
+
+		assertTrue(ui.stream().allMatch(entry -> entry.startsWith("footer:")),
+				"kein Dialog: Mit dem Link in der Fußzeile braucht es keinen");
+		assertEquals(List.of(UNIT.relativePath() + ":LOCKED_DAMAGED", UNIT.relativePath() + ":LOCKED_FORMAT"),
+				lockedReported);
 	}
 
 	@Test
@@ -140,7 +151,7 @@ class SharedFolderEventsTest {
 
 		events.locked(UNIT, UnitState.Status.LOCKED_DAMAGED);
 
-		assertEquals(List.of("message:ERROR:" + StoreMessages.damaged(UNIT.relativePath())), ui);
+		assertEquals(List.of("footer:ERROR:" + StoreMessages.damaged(UNIT.relativePath())), ui);
 	}
 
 	@Test
@@ -148,6 +159,7 @@ class SharedFolderEventsTest {
 		events.locked(UNIT, UnitState.Status.OK);
 
 		assertEquals(List.of(), ui);
+		assertEquals(List.of(), lockedReported);
 	}
 
 	@Test
@@ -155,7 +167,7 @@ class SharedFolderEventsTest {
 		SharedFolderEvents failing = new SharedFolderEvents(new RecordingLive(), unit -> null, new RecordingUi(), flow,
 				() -> {
 					throw new IllegalStateException("Info-Fenster");
-				}, () -> {
+				}, (unit, status) -> {
 					throw new IllegalStateException("Link");
 				});
 
@@ -432,11 +444,6 @@ class SharedFolderEventsTest {
 		@Override
 		public void footer(Severity severity, String text) {
 			ui.add("footer:" + severity + ":" + text);
-		}
-
-		@Override
-		public void message(Severity severity, String text) {
-			ui.add("message:" + severity + ":" + text);
 		}
 	}
 

@@ -80,6 +80,25 @@ class SharedFolderTextsTest {
 	}
 
 	@Test
+	void lockedLinkCountsTheEntries() {
+		assertEquals("1 gesperrter Eintrag", SharedFolderTexts.lockedLink(1));
+		assertEquals("2 gesperrte Einträge", SharedFolderTexts.lockedLink(2));
+		assertEquals("12 gesperrte Einträge", SharedFolderTexts.lockedLink(12));
+	}
+
+	@Test
+	void lockedConfirmationNamesTheEntry() {
+		assertEquals("„Gala › Samstag“ auf den letzten lesbaren Stand zurücksetzen? Die eine beschädigte Änderung geht"
+				+ " dabei verloren, alles davor bleibt.", SharedFolderTexts.lockedConfirm("Gala › Samstag"));
+	}
+
+	@Test
+	void lockedResetFailureNamesEntryAndCause() {
+		assertEquals("„Gala › Samstag“ ließ sich nicht zurücksetzen: Platte voll",
+				SharedFolderTexts.lockedResetFailed("Gala › Samstag", "Platte voll"));
+	}
+
+	@Test
 	void skippedFooterNamesTheEntryAndTheSubtree() {
 		assertEquals("Nicht abgeglichen: Gala › Samstag", SharedFolderTexts.skippedFooter("Gala › Samstag", false));
 		assertEquals("Nicht abgeglichen: Gala › Samstag mit allem darunter",

@@ -261,7 +261,68 @@ public final class SharedFolderTexts {
 	/** Knopf des Info-Fensters. */
 	public static final String CLOSE = "Schließen";
 
+	// --- Gesperrte Einträge
+
+	/** Fußzeile: Link, einer. */
+	public static final String LOCKED_LINK_ONE = "1 gesperrter Eintrag";
+
+	/** Fußzeile: Link, mehrere (&1 = Zahl). */
+	public static final String LOCKED_LINK_MANY = "&1 gesperrte Einträge";
+
+	/** Titel des Dialogs. */
+	public static final String LOCKED_TITLE = "Gesperrte Einträge";
+
+	/** Einleitung des Dialogs. */
+	public static final String LOCKED_INTRO = "Diese Einträge lassen sich nicht ändern, weil ihre Daten beschädigt sind oder"
+			+ " von einer neueren Version der Kartenverwaltung stammen.";
+
+	/** Spalte des Dialogs. */
+	public static final String LOCKED_COLUMN_ENTRY = "Eintrag";
+
+	/** Spalte des Dialogs. */
+	public static final String LOCKED_COLUMN_CAUSE = "Ursache";
+
+	/** Spalte des Dialogs. */
+	public static final String LOCKED_COLUMN_ACTION = "Aktion";
+
+	/** Ursache: beschädigt. */
+	public static final String LOCKED_CAUSE_DAMAGED = "Beschädigt, keine heile Kopie";
+
+	/** Ursache: neueres Format. */
+	public static final String LOCKED_CAUSE_FORMAT = "Neuere Programmversion: Kartenverwaltung aktualisieren";
+
+	/** Knopf: auf den letzten lesbaren Stand zurücksetzen. */
+	public static final String LOCKED_RESET = "Auf letzten lesbaren Stand zurücksetzen";
+
+	/** Rückfrage vor dem Zurücksetzen (&1 = Bezeichnung des Eintrags). */
+	public static final String LOCKED_CONFIRM = "„&1“ auf den letzten lesbaren Stand zurücksetzen? Die eine beschädigte"
+			+ " Änderung geht dabei verloren, alles davor bleibt.";
+
+	/** Knopf der Rückfrage: zurücksetzen. */
+	public static final String LOCKED_CONFIRM_YES = "Zurücksetzen";
+
+	/** Der Dialog hat nichts zu zeigen. */
+	public static final String LOCKED_EMPTY = "Keine gesperrten Einträge.";
+
+	/** Fußzeile, wenn das Zurücksetzen scheitert (&1 = Bezeichnung des Eintrags, &2 = Ursache). */
+	public static final String LOCKED_RESET_FAILED = "„&1“ ließ sich nicht zurücksetzen: &2";
+
 	// --- Zusammengesetzte Texte
+
+	/** Der Link in der Fußzeile: "1 gesperrter Eintrag" bzw. "n gesperrte Einträge". */
+	public static String lockedLink(int count) {
+		return count == 1 ? LOCKED_LINK_ONE : MessageTemplate.format(LOCKED_LINK_MANY, count);
+	}
+
+	/** Die Fußzeile, wenn das Zurücksetzen scheitert. */
+	public static String lockedResetFailed(String label, String cause) {
+		return MessageTemplate.format(LOCKED_RESET_FAILED, label, cause);
+	}
+
+	/** Die Rückfrage vor dem Zurücksetzen. */
+	public static String lockedConfirm(String label) {
+		return MessageTemplate.format(LOCKED_CONFIRM, label);
+	}
 
 	/** Die Bezeichnung eines Eintrags, bei Event oder Vorstellung mit dem Zusatz "mit allem darunter". */
 	public static String withSubtree(String label, boolean subtree) {

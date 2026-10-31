@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -48,21 +49,27 @@ import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
 import de.eltviller_carneval_verein.karten.ui.shared.DataReload;
+import de.eltviller_carneval_verein.karten.ui.shared.LockedUnits;
+import de.eltviller_carneval_verein.karten.ui.shared.LockedUnitsDialog;
+import de.eltviller_carneval_verein.karten.ui.shared.LockedUnitsIndicator;
 import de.eltviller_carneval_verein.karten.ui.shared.OperatorDialog;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderEvents;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart.StartResult;
+import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderTexts;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderUi;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncIndicator;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncInfo;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncInfoWindow;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncStatus;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.beans.binding.BooleanExpression;
 import javafx.concurrent.Task;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Insets;
@@ -72,6 +79,7 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.image.Image;
@@ -110,6 +118,9 @@ public class MainApp extends Application {
 	private static Timeline syncTicker;
 	// Die Bezeichnungen der Einträge für das Info-Fenster (gesetzt, sobald der Bestand geladen ist)
 	private static Function<UnitKey, String> syncLabels;
+	// Die gesperrten Einträge (gesetzt, sobald der Bestand geladen ist) und der Link in der Fußzeile des aktuellen Fensterinhalts
+	private static LockedUnits lockedUnits;
+	private static LockedUnitsIndicator lockedIndicator;
 	// Die Zahl der offenen Konflikte nach der letzten Rückmeldung; jede neue Fußzeile übernimmt sie
 	private static int lastOpenCount;
 	// Mindestbreite des Hauptfensters: So schmal darf es werden, die Kopfzeilen der Bildschirme sind darauf abgestimmt
@@ -365,9 +376,53 @@ public class MainApp extends Application {
 		}
 	}
 
-	/** Eine Einheit wurde gesperrt gemeldet (FX-Thread). Der Link "gesperrte Einträge" (Aufgabe 12) hängt sich hier ein. */
-	private static void lockedChanged() {
-		// bis dahin gibt es nichts aufzufrischen
+	/**
+	 * Eine Einheit wurde gesperrt gemeldet (FX-Thread): Sie kommt in die Liste der gesperrten Einträge, der Link in der Fußzeile
+	 * und ein offener Dialog lesen sie neu.
+	 */
+	private static void lockedReported(UnitKey unit, UnitState.Status status) {
+		if (lockedUnits != null) {
+			lockedUnits.add(unit, status);
+		}
+		lockedViewChanged();
+	}
+
+	/** Die gesperrten Einträge haben sich geändert (FX-Thread): der Link der aktuellen Ansicht und ein offener Dialog lesen neu. */
+	private static void lockedViewChanged() {
+		if (lockedIndicator != null) {
+			lockedIndicator.refresh();
+		}
+		LockedUnitsDialog.refreshIfOpen();
+	}
+
+	/** Die Zahl der gesperrten Einträge für den Link in der Fußzeile; vor dem Laden des Bestands keine. */
+	private static int lockedCount() {
+		return lockedUnits == null ? 0 : lockedUnits.count();
+	}
+
+	/**
+	 * Klick auf den Link "gesperrte Einträge": Erst fragt der Versionsspeicher im Hintergrund den Zustand jeder Einheit ab
+	 * (im gemeinsamen Betrieb stößt das den Reparaturversuch an, im Einzelbetrieb führt es den Stand nach), damit der Dialog den
+	 * Knopf "Auf letzten lesbaren Stand zurücksetzen" genau den Zeilen gibt, die der Versionsspeicher jetzt als zurücksetzbar
+	 * nennt; dann öffnet der Dialog.
+	 */
+	private static void openLockedUnits() {
+		LockedUnits units = lockedUnits;
+		if (units == null) {
+			return;
+		}
+		units.refresh(() -> {
+			if (units.count() > 0) {
+				LockedUnitsDialog.show(primaryStage, () -> units.rows(syncLabels), units::reset);
+			}
+		});
+	}
+
+	/** Das Einarbeiten zurückgesetzter Einheiten ins Modell, wie bei fremden Änderungen ({@code LiveUpdates.catchUp}). */
+	private static void applyReset(Set<UnitKey> units) {
+		if (liveUpdates != null) {
+			liveUpdates.catchUp(units);
+		}
 	}
 
 	/**
@@ -407,8 +462,13 @@ public class MainApp extends Application {
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
 		// Die übrigen Rückmeldungen (nicht erreichbar, Rückkehr, Frage beim Verbinden, übersprungen, gesperrt) verteilt SharedFolderEvents
 		SharedFolderConnection connection = SharedFolderConnection.instance().orElseThrow();
+		// Die gesperrten Einträge (Link in der Fußzeile, Dialog): vor den Rückmeldungen des Versionsspeichers, die sie füllen
+		lockedUnits = new LockedUnits(LockedUnits.of(sync), connection.background(), Platform::runLater, MainApp::applyReset,
+				(unit, cause) -> StatusMessage.getInstance().show(Severity.ERROR,
+						SharedFolderTexts.lockedResetFailed(LockedUnits.label(labels, unit), cause)),
+				MainApp::lockedViewChanged);
 		liveUpdates = LiveUpdates.install(sync, MainApp::conflictsChanged, live -> SharedFolderEvents.install(
-				new SharedFolderEvents(live, labels, sharedFolderUi, connection.flow(), MainApp::syncChanged, MainApp::lockedChanged)));
+				new SharedFolderEvents(live, labels, sharedFolderUi, connection.flow(), MainApp::syncChanged, MainApp::lockedReported)));
 		SharedFolderEvents.instance().ifPresent(events -> events.watch(sync));
 		ChangeTrigger.install();
 		LiveValidator.install();
@@ -433,22 +493,36 @@ public class MainApp extends Application {
 	}
 
 	/**
-	 * Die Ladewarnungen des Starts, je Repository ein Fenster. Gesperrte Einheiten kommen als Schlüssel; die lesbare
-	 * Bezeichnung folgt später, bis dahin bleibt es beim Text.
+	 * Die Ladewarnungen des Starts, je Repository ein Fenster. Beim Laden gesperrte Einheiten kommen als Schlüssel mit
+	 * Zustand: Sie landen in der Liste der gesperrten Einträge (Link in der Fußzeile) und stehen mit ihrer Bezeichnung in der
+	 * Warnung ({@link LockedUnits#warning}).
 	 */
 	private static void showLoadWarnings(List<String> eventLoadWarnings, List<String> hallLoadWarnings) {
 		List<String> eventWarnings = new ArrayList<>(eventLoadWarnings);
-		eventWarnings.addAll(lockedTexts(StoreEventRepository.getInstance().getAndClearLockedAtLoad()));
+		eventWarnings.addAll(lockedAtLoad(StoreEventRepository.getInstance().getAndClearLockedAtLoad()));
 		showWarnings("Warnung beim Laden der Events", eventWarnings);
 
 		List<String> hallWarnings = new ArrayList<>(hallLoadWarnings);
-		hallWarnings.addAll(lockedTexts(StoreHallRepository.getInstance().getAndClearLockedAtLoad()));
+		hallWarnings.addAll(lockedAtLoad(StoreHallRepository.getInstance().getAndClearLockedAtLoad()));
 		showWarnings("Warnung beim Laden der Hallen", hallWarnings);
 	}
 
-	private static List<String> lockedTexts(Map<UnitKey, UnitState.Status> locked) {
+	/**
+	 * Nimmt die beim Laden gesperrten Einheiten in die Liste der gesperrten Einträge auf und liefert ihre Warntexte mit der
+	 * lesbaren Bezeichnung; fehlt sie, steht der Pfad da.
+	 */
+	private static List<String> lockedAtLoad(Map<UnitKey, UnitState.Status> locked) {
+		if (lockedUnits != null) {
+			lockedUnits.addAll(locked);
+		}
+		Function<UnitKey, String> labels = syncLabels != null ? syncLabels : unit -> null;
 		List<String> texts = new ArrayList<>();
-		locked.forEach((unit, status) -> texts.add(StoreMessages.locked(unit, status)));
+		locked.forEach((unit, status) -> {
+			String text = LockedUnits.warning(labels, unit, status);
+			if (text != null) {
+				texts.add(text);
+			}
+		});
 		return texts;
 	}
 
@@ -479,12 +553,17 @@ public class MainApp extends Application {
 			showAlert("Fehler", "Der Bestand konnte nicht geladen werden: " + failureMessage(e), AlertType.ERROR);
 			return;
 		}
+		// vor dem Hauptmenü: Dessen Fußzeile zeigt den Link "gesperrte Einträge" gleich mit der richtigen Zahl
+		List<String> all = new ArrayList<>(warnings);
+		all.addAll(lockedAtLoad(StoreHallRepository.getInstance().getAndClearLockedAtLoad()));
+		all.addAll(lockedAtLoad(StoreEventRepository.getInstance().getAndClearLockedAtLoad()));
 		showMenuView();
 		// DataReload liefert die Warnungen beider Repositories zusammen (Hallen zuerst), deshalb ein Fenster für alle
-		List<String> all = new ArrayList<>(warnings);
-		all.addAll(lockedTexts(StoreHallRepository.getInstance().getAndClearLockedAtLoad()));
-		all.addAll(lockedTexts(StoreEventRepository.getInstance().getAndClearLockedAtLoad()));
 		showWarnings("Warnung beim Laden", all);
+		// Einträge, die schon vor dem Neuladen gesperrt gemeldet waren und es nicht mehr sind, fallen so aus der Liste
+		if (lockedUnits != null) {
+			lockedUnits.refresh(null);
+		}
 	}
 
 	/**
@@ -760,24 +839,31 @@ public class MainApp extends Application {
 				// ersetzt den Hinweis der vorigen Ansicht; der 1-s-Takt frischt nur diesen auf
 				syncStatus.track(syncHint::refresh);
 			}
+			// der Link auf gesperrte Einträge steht gleich hinter dem auf Konflikte; wie dieser ersetzt er den der vorigen
+			// Ansicht, und die App frischt nur den der aktuellen auf
+			LockedUnitsIndicator lockedHint = new LockedUnitsIndicator(MainApp::lockedCount, MainApp::openLockedUnits);
+			lockedIndicator = lockedHint;
+			List<Hyperlink> hints = new ArrayList<>(List.of(indicator, lockedHint));
+			if (syncHint != null) {
+				hints.add(syncHint);
+			}
 			StatusLabel messages = findStatusLabel(content);
 			if (messages != null && messages.getParent() instanceof Pane footer) {
-				int position = footer.getChildren().indexOf(messages);
-				footer.getChildren().add(position, indicator);
-				if (syncHint != null) {
-					footer.getChildren().add(position + 1, syncHint);
-				}
+				footer.getChildren().addAll(footer.getChildren().indexOf(messages), hints);
 			} else {
-				HBox indicatorBar = syncHint == null ? new HBox(indicator) : new HBox(12, indicator, syncHint);
+				HBox indicatorBar = new HBox(12);
+				indicatorBar.getChildren().addAll(hints);
 				indicatorBar.setAlignment(Pos.CENTER_LEFT);
 				indicatorBar.setPadding(new Insets(0, 20, 8, 20));
-				if (syncHint == null) {
-					indicatorBar.visibleProperty().bind(indicator.visibleProperty());
-					indicatorBar.managedProperty().bind(indicator.managedProperty());
-				} else {
-					indicatorBar.visibleProperty().bind(indicator.visibleProperty().or(syncHint.visibleProperty()));
-					indicatorBar.managedProperty().bind(indicator.managedProperty().or(syncHint.managedProperty()));
+				// die Leiste nimmt nur Platz, solange einer der Links zu sehen ist
+				BooleanExpression anyVisible = hints.get(0).visibleProperty();
+				BooleanExpression anyManaged = hints.get(0).managedProperty();
+				for (Hyperlink hint : hints.subList(1, hints.size())) {
+					anyVisible = anyVisible.or(hint.visibleProperty());
+					anyManaged = anyManaged.or(hint.managedProperty());
 				}
+				indicatorBar.visibleProperty().bind(anyVisible);
+				indicatorBar.managedProperty().bind(anyManaged);
 				screen.getChildren().add(indicatorBar);
 			}
 		}

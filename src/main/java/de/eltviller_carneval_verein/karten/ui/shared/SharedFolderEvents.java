@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.shared;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -28,7 +29,9 @@ import de.eltviller_carneval_verein.karten.validation.Severity;
  * <li>{@code duplicateMachine}: Popup;
  * <li>{@code connectDecisionNeeded}: Läuft ein Ablauf des Verbindens, stellt dessen Dialog die Frage, sonst öffnet {@link Ui}
  * sie (schließbar), und die Antwort beginnt einen neuen Ablauf mit Ladeansicht;
- * <li>{@code skipped} und {@code locked}: Fußzeile mit der lesbaren Bezeichnung statt des Pfades.
+ * <li>{@code skipped} und {@code locked}: Fußzeile mit der lesbaren Bezeichnung statt des Pfades; bei {@code locked} dazu
+ * der Link "gesperrte Einträge" (kein Dialog, auch in Ansichten ohne Fußzeile nicht: Dort zeigt ihn die Leiste unter dem
+ * Inhalt).
  * </ul>
  * Dazu merkt sie sich die letzte Störung des Abgleichs (SYS-006) als Ursache für Statuszeile und Info-Fenster und meldet
  * über {@code onSyncChanged}, wenn sich ändern kann, was das Info-Fenster zeigt: bei {@code skipped}, {@code reconnected},
@@ -69,9 +72,6 @@ public final class SharedFolderEvents implements SyncListener {
 		 * die sich häufen können und keinen Dialog wert sind.
 		 */
 		void footer(Severity severity, String text);
-
-		/** Zeigt eine Meldung, die nicht untergehen darf: in der Fußzeile, ohne sie als Dialog. */
-		void message(Severity severity, String text);
 	}
 
 	/** Die Frage beim Verbinden, die der Versionsspeicher gestellt hat und die noch offen ist. */
@@ -83,7 +83,7 @@ public final class SharedFolderEvents implements SyncListener {
 	private final Ui ui;
 	private final ConnectFlow flow;
 	private final Runnable onSyncChanged;
-	private final Runnable onLockedChanged;
+	private final BiConsumer<UnitKey, UnitState.Status> onLocked;
 	private String lastFailure;
 	private PendingDecision pendingDecision;
 
@@ -93,16 +93,17 @@ public final class SharedFolderEvents implements SyncListener {
 	 * @param flow            der Ablauf des Verbindens
 	 * @param onSyncChanged   was geschieht, wenn sich Zustand, Vollständigkeit, letzter Abgleich oder die Liste der
 	 *                        übersprungenen Einträge geändert haben können (Hinweis in der Fußzeile, Info-Fenster)
-	 * @param onLockedChanged was geschieht, wenn eine Einheit gesperrt gemeldet wurde (Link "gesperrte Einträge")
+	 * @param onLocked        was geschieht, wenn eine Einheit gesperrt gemeldet wurde: merkt sie sich und frischt den Link
+	 *                        "gesperrte Einträge" auf
 	 */
 	public SharedFolderEvents(SyncListener live, Function<UnitKey, String> labels, Ui ui, ConnectFlow flow,
-			Runnable onSyncChanged, Runnable onLockedChanged) {
+			Runnable onSyncChanged, BiConsumer<UnitKey, UnitState.Status> onLocked) {
 		this.live = live;
 		this.labels = labels;
 		this.ui = ui;
 		this.flow = flow;
 		this.onSyncChanged = onSyncChanged;
-		this.onLockedChanged = onLockedChanged;
+		this.onLocked = onLocked;
 	}
 
 	/** Legt die Instanz der App an (FX-Thread); {@link #instance()} liefert sie. */
@@ -264,9 +265,10 @@ public final class SharedFolderEvents implements SyncListener {
 		if (text == null) {
 			return;
 		}
-		ui.message(Severity.ERROR, text);
+		// nur in der Fußzeile: Der Link "gesperrte Einträge" führt zur Liste, ein Dialog dazu käme in jeder Ansicht ohne Fußzeile
+		ui.footer(Severity.ERROR, text);
 		try {
-			onLockedChanged.run();
+			onLocked.accept(unit, status);
 		} catch (RuntimeException e) {
 			LOG.log(Level.SEVERE, "Die gesperrten Einträge ließen sich nicht anzeigen", e);
 		}
@@ -274,15 +276,7 @@ public final class SharedFolderEvents implements SyncListener {
 
 	/** Die Bezeichnung der Einheit; ihr Pfad, wenn sie sich nicht benennen lässt. */
 	private String label(UnitKey unit) {
-		try {
-			String label = labels.apply(unit);
-			if (label != null) {
-				return label;
-			}
-		} catch (RuntimeException e) {
-			LOG.log(Level.FINE, "Keine Bezeichnung für " + unit.relativePath(), e);
-		}
-		return unit.relativePath();
+		return LockedUnits.label(labels, unit);
 	}
 
 	private void syncChanged() {
