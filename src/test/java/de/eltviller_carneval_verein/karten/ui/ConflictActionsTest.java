@@ -54,6 +54,7 @@ import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestClock;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions.Availability;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Action;
@@ -279,7 +280,7 @@ class ConflictActionsTest {
 		b.seat(3).setLastName("Neu");
 		b.eventTracker.check(b.event);
 
-		assertEquals(new Availability(false, "Erst speichern oder verwerfen"), actions.availability(row));
+		assertEquals(new Availability(false, "Speichere oder verwirf zuerst deine offenen Änderungen."), actions.availability(row));
 		assertThrows(IllegalStateException.class, () -> actions.takeMyValue(row, "comment"));
 		assertEquals("von A", b.seat(0).getComment(), "nichts angefasst");
 		assertEquals(1, b.sync.openConflicts().size());
@@ -293,7 +294,7 @@ class ConflictActionsTest {
 
 		b.editing.begin(owner, List.of(b.seat(4)));
 
-		assertEquals(new Availability(false, "Erst speichern oder verwerfen"), actions.availability(row));
+		assertEquals(new Availability(false, "Speichere oder verwirf zuerst deine offenen Änderungen."), actions.availability(row));
 		b.editing.end(owner);
 		assertTrue(actions.availability(row).enabled());
 	}
@@ -312,7 +313,7 @@ class ConflictActionsTest {
 		current.setName("Halle C");
 		b.hallTracker.check(current);
 
-		assertEquals(new Availability(false, "Erst speichern oder verwerfen"), b.actions().availability(row));
+		assertEquals(new Availability(false, "Speichere oder verwirf zuerst deine offenen Änderungen."), b.actions().availability(row));
 	}
 
 	@Test
@@ -429,7 +430,7 @@ class ConflictActionsTest {
 		elsewhere.setId(droppedBookingId(b, row));
 		elsewhere.setLastName("Müller");
 
-		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+		assertEquals(new Availability(false, "Inzwischen erledigt"), b.actions().availability(row));
 		assertThrows(IllegalStateException.class, () -> b.actions().restoreBooking(row));
 		assertEquals(1, b.sync.openConflicts().size());
 	}
@@ -495,7 +496,7 @@ class ConflictActionsTest {
 		assertTrue(BookingSync.assign(b.friday(), b.plan(), withoutPlace, free));
 		b.saveEvent();
 
-		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(sale));
+		assertEquals(new Availability(false, "Inzwischen erledigt"), b.actions().availability(sale));
 		assertNull(b.actions().bookingToAssign(sale));
 		assertEquals(Action.ASSIGN_PLACE, sale.action(), "die Art der Zeile ändert sich nicht, nur ihre Verfügbarkeit");
 	}
@@ -507,7 +508,7 @@ class ConflictActionsTest {
 		b.seat(0).setLastName("Neu");
 		b.saveEvent();
 
-		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+		assertEquals(new Availability(false, "Inzwischen erledigt"), b.actions().availability(row));
 		assertThrows(IllegalStateException.class, () -> b.actions().takeMyValue(row, "comment"));
 		assertEquals("Neu", b.seat(0).getLastName());
 		assertNull(b.seat(0).getComment());
@@ -536,7 +537,7 @@ class ConflictActionsTest {
 		b.seat(0).clearCustomerData();
 		b.saveEvent();
 
-		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+		assertEquals(new Availability(false, "Inzwischen erledigt"), b.actions().availability(row));
 		assertThrows(IllegalStateException.class, () -> b.actions().takeMyValue(row, "comment"));
 	}
 
@@ -625,7 +626,8 @@ class ConflictActionsTest {
 		IllegalStateException failure = assertThrows(IllegalStateException.class,
 				() -> b.actions().takeMyValue(row, "comment"));
 
-		assertTrue(failure.getMessage().contains("nicht bestätigt"), failure.getMessage());
+		assertTrue(failure.getMessage().startsWith("Gespeichert. Der Konflikt ließ sich aber nicht abschließen: "),
+				failure.getMessage());
 		assertEquals("von B", b.sync.unitState(unit).current().payload().get("comment").asText(), "es ist geschrieben");
 		assertEquals("von B", b.seat(0).getComment(), "das Modell behält den geschriebenen Wert");
 		assertEquals(Set.of(), b.repository.locallyChangedUnits(), "das nächste Speichern schreibt den Wert nicht zurück");
@@ -641,7 +643,8 @@ class ConflictActionsTest {
 
 		IllegalStateException failure = assertThrows(IllegalStateException.class, () -> b.actions().takeMyHall(row));
 
-		assertTrue(failure.getMessage().contains("nicht bestätigt"), failure.getMessage());
+		assertTrue(failure.getMessage().startsWith("Gespeichert. Der Konflikt ließ sich aber nicht abschließen: "),
+				failure.getMessage());
 		assertEquals("Halle B", b.halls.findById(hallId).getName());
 		assertEquals("Halle B", b.sync.unitState(UnitKey.hall(hallId)).current().payload().get("name").asText());
 		assertEquals(1, b.sync.openConflicts().size());
@@ -762,13 +765,13 @@ class ConflictActionsTest {
 		assertFalse(b.repository.bookingLives(b.event.getId(), b.friday().getId(), bookingId),
 				"weder Modell noch aktueller Stand kennen die Buchung");
 
-		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+		assertEquals(new Availability(false, "Inzwischen erledigt"), b.actions().availability(row));
 
 		broken.set(false);
 		settle();
 		assertEquals(Set.of(), b.sync.lostUnits(List.of(other)), "aufgelöst");
 		assertTrue(b.repository.bookingLives(b.event.getId(), b.friday().getId(), bookingId), "jetzt lebt sie ohne Platz");
-		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+		assertEquals(new Availability(false, "Inzwischen erledigt"), b.actions().availability(row));
 	}
 
 	@Test
@@ -783,7 +786,7 @@ class ConflictActionsTest {
 				"das Modell kennt sie nicht");
 
 		assertTrue(b.repository.bookingLives(b.event.getId(), b.friday().getId(), bookingId));
-		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+		assertEquals(new Availability(false, "Inzwischen erledigt"), b.actions().availability(row));
 	}
 
 	@Test
@@ -794,7 +797,7 @@ class ConflictActionsTest {
 		b.sync.append("unreadable", List.of(new Change(broken, List.of(), garbage, false)));
 
 		assertTrue(b.repository.bookingLives(b.event.getId(), b.friday().getId(), droppedBookingId(b, row)));
-		assertEquals(new Availability(false, "Nicht mehr nötig"), b.actions().availability(row));
+		assertEquals(new Availability(false, "Inzwischen erledigt"), b.actions().availability(row));
 	}
 
 	// <-- Buchung noch am Leben
@@ -824,7 +827,7 @@ class ConflictActionsTest {
 
 		IllegalStateException failure = assertThrows(IllegalStateException.class, () -> b.actions().assignPlace(sale, taken));
 
-		assertEquals("Platz zuweisen nicht möglich: " + AssignPlaceDialog.label(taken) + " ist bereits belegt.",
+		assertEquals(AssignPlaceDialog.label(taken) + " ist inzwischen belegt. Wähle einen anderen Platz.",
 				failure.getMessage());
 		assertEquals(before, b.friday().getBookings());
 		assertTrue(b.actions().bookingToAssign(sale).isUnassigned());
@@ -878,8 +881,31 @@ class ConflictActionsTest {
 
 		IllegalStateException failure = assertThrows(IllegalStateException.class, () -> b.actions().dismiss(row));
 
-		assertTrue(failure.getMessage().contains("nicht bestätigen"), failure.getMessage());
+		assertTrue(failure.getMessage().startsWith("Der Konflikt ließ sich nicht abschließen: "), failure.getMessage());
+		assertTrue(failure.getMessage().endsWith("Platte voll"), failure.getMessage());
 		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	@Test
+	void noPlanTextSaysThePresentationHasNoSeating() {
+		assertEquals(EntityLabels.presentation(b.friday()) + " hat keine Bestuhlung; ein Platz lässt sich nicht zuweisen.",
+				ConflictActions.noPlanText(b.friday()));
+	}
+
+	@Test
+	void writtenButNotAcknowledgedAsksToClickDoneAgain() {
+		Row row = commentConflict();
+		UnitKey unit = b.seatUnit(0);
+		b.files.failAfterWhen(p -> p.toString().replace('\\', '/').contains(unit.relativePath()), "createNew",
+				new IOException("Antwort verloren"));
+
+		IllegalStateException failure = assertThrows(IllegalStateException.class,
+				() -> b.actions().takeMyValue(row, "comment"));
+
+		assertTrue(failure.getMessage().startsWith("Gespeichert. Der Konflikt ließ sich aber nicht abschließen: "),
+				failure.getMessage());
+		assertTrue(failure.getMessage().endsWith(". Klicke erneut auf „Erledigt“."), failure.getMessage());
+		assertFalse(failure.getMessage().contains(".."), failure.getMessage());
 	}
 
 	@Test

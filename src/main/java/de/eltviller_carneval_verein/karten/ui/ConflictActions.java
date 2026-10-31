@@ -73,9 +73,9 @@ public final class ConflictActions {
 	}
 
 	/** Der Hinweis, solange das Event bzw. die Halle ungespeichert ist oder bearbeitet wird. */
-	static final String BLOCKED = "Erst speichern oder verwerfen";
+	static final String BLOCKED = "Speichere oder verwirf zuerst deine offenen Änderungen.";
 	/** Der Hinweis, wenn es nichts mehr zu tun gibt. */
-	static final String NOT_NEEDED = "Nicht mehr nötig";
+	static final String NOT_NEEDED = "Inzwischen erledigt";
 
 	private static final Availability ENABLED = new Availability(true, "");
 	private static final Availability IS_BLOCKED = new Availability(false, BLOCKED);
@@ -169,8 +169,8 @@ public final class ConflictActions {
 
 	/**
 	 * Ob die Aktion der Zeile gerade möglich ist: nicht bei einer Zeile ohne Aktion, nicht solange das Event bzw. die Halle
-	 * ungespeichert ist oder bearbeitet wird ({@code "Erst speichern oder verwerfen"}), nicht ohne Gegenstand
-	 * ({@code "Nicht mehr nötig"}).
+	 * ungespeichert ist oder bearbeitet wird ({@link #BLOCKED}), nicht ohne Gegenstand
+	 * ({@link #NOT_NEEDED}).
 	 */
 	public Availability availability(Row row) {
 		if (row.action() == Action.NONE) {
@@ -225,7 +225,7 @@ public final class ConflictActions {
 
 	/** Der Grund, wenn die Vorstellung keine Bestuhlung hat, der eine Buchung zugewiesen werden könnte. */
 	static String noPlanText(Presentation presentation) {
-		return "Platz zuweisen nicht möglich: " + EntityLabels.presentation(presentation) + " hat keine Bestuhlung.";
+		return EntityLabels.presentation(presentation) + " hat keine Bestuhlung; ein Platz lässt sich nicht zuweisen.";
 	}
 
 	/**
@@ -233,10 +233,11 @@ public final class ConflictActions {
 	 * das Event und bestätigt die Zeile.
 	 *
 	 * @param seat ein Sitz der Bestuhlung aus {@link #planOf}
-	 * @throws IllegalStateException wenn die Aktion gesperrt ist, der Sitz inzwischen belegt ist ({@code "Platz zuweisen nicht
-	 *                               möglich: <Platz> ist bereits belegt."}) oder Speichern oder Bestätigen scheitert; nichts ist
-	 *                               bestätigt. Das Modell ist wieder wie vorher, außer die Zuweisung wurde schon geschrieben:
-	 *                               Dann bleibt es, und der Text beginnt mit "Gespeichert, aber nicht bestätigt".
+	 * @throws IllegalStateException wenn die Aktion gesperrt ist, der Sitz inzwischen belegt ist ({@code "<Platz> ist
+	 *                               inzwischen belegt. Wähle einen anderen Platz."}) oder Speichern oder Bestätigen scheitert;
+	 *                               nichts ist bestätigt. Das Modell ist wieder wie vorher, außer die Zuweisung wurde schon
+	 *                               geschrieben: Dann bleibt es, und der Text beginnt mit "Gespeichert. Der Konflikt ließ sich
+	 *                               aber nicht abschließen".
 	 */
 	public void assignPlace(Row row, Seat seat) {
 		require(row, Action.ASSIGN_PLACE);
@@ -254,7 +255,7 @@ public final class ConflictActions {
 		VersionId versionBefore = versionOf(seatUnit);
 		if (!BookingSync.assign(presentation, plan, booking, seat)) {
 			throw new IllegalStateException(
-					"Platz zuweisen nicht möglich: " + AssignPlaceDialog.label(seat) + " ist bereits belegt.");
+					AssignPlaceDialog.label(seat) + " ist inzwischen belegt. Wähle einen anderen Platz.");
 		}
 		saveOrUndo(seatUnit, versionBefore, this::writtenDespite, () -> save(event), e -> {
 			// die Buchung wieder ohne Platz, und der leere Platzhalter, den die Zuweisung entfernt hat, wieder an seiner Stelle
@@ -270,10 +271,10 @@ public final class ConflictActions {
 	 * Bestätigt die Zeile ohne Aktion ("Erledigt"): Sie verschwindet und kommt nach einem Neustart nicht wieder. Das Modell
 	 * bleibt unberührt.
 	 *
-	 * @throws IllegalStateException wenn sich der Konflikt nicht bestätigen lässt; er bleibt dann offen
+	 * @throws IllegalStateException wenn sich der Konflikt nicht abschließen lässt; er bleibt dann offen
 	 */
 	public void dismiss(Row row) {
-		acknowledge(row, "Der Konflikt ließ sich nicht bestätigen: ");
+		acknowledge(row, false);
 	}
 
 	/**
@@ -391,8 +392,8 @@ public final class ConflictActions {
 	 *
 	 * @throws IllegalStateException wenn die Aktion gesperrt ist, die Gruppe nicht zur Zeile gehört oder Ändern, Speichern
 	 *                               oder Bestätigen scheitert; nichts ist bestätigt. Das Modell ist wieder wie vorher, außer
-	 *                               der Wert wurde schon geschrieben: Dann bleibt es, und der Text beginnt mit "Gespeichert,
-	 *                               aber nicht bestätigt".
+	 *                               der Wert wurde schon geschrieben: Dann bleibt es, und der Text beginnt mit "Gespeichert.
+	 *                               Der Konflikt ließ sich aber nicht abschließen".
 	 */
 	public void takeMyValue(Row row, String group) {
 		require(row, Action.TAKE_MY_VALUE);
@@ -746,8 +747,8 @@ public final class ConflictActions {
 
 	/**
 	 * Das Gerüst jeder Aktion: {@code change} ändert das Modell und speichert. Scheitert das, ist der Stand der Einheit laut
-	 * {@code written} aber doch geschrieben, bleibt das Modell, und der Text beginnt mit "Gespeichert, aber nicht
-	 * bestätigt". Sonst setzt {@code undo} das Modell zurück (es bekommt den Fehler, etwa um einen Fehler beim Zurücksetzen
+	 * {@code written} aber doch geschrieben, bleibt das Modell, und der Text beginnt mit "Gespeichert. Der Konflikt ließ sich
+	 * aber nicht abschließen". Sonst setzt {@code undo} das Modell zurück (es bekommt den Fehler, etwa um einen Fehler beim Zurücksetzen
 	 * anzuhängen), und der Grund kommt als {@link IllegalStateException}. Bestätigt wird hier nichts.
 	 *
 	 * @param versionBefore die aktuelle Version der Einheit vor der Aktion ({@link #versionOf})
@@ -769,7 +770,16 @@ public final class ConflictActions {
 
 	/** Die Aktion ist geschrieben, aber danach gescheitert: Das Modell bleibt, die Zeile bleibt unbestätigt offen. */
 	private static IllegalStateException writtenButNotAcknowledged(RuntimeException cause) {
-		return new IllegalStateException("Gespeichert, aber nicht bestätigt: " + failure(cause).getMessage(), cause);
+		return new IllegalStateException(notAcknowledgedText(failure(cause).getMessage()), cause);
+	}
+
+	/**
+	 * "Gespeichert. Der Konflikt ließ sich aber nicht abschließen: &1. Klicke erneut auf „Erledigt“." Endet der Grund schon
+	 * auf einen Punkt, kommt kein zweiter dazu.
+	 */
+	static String notAcknowledgedText(String reason) {
+		String end = reason.endsWith(".") ? "" : ".";
+		return "Gespeichert. Der Konflikt ließ sich aber nicht abschließen: " + reason + end + " Klicke erneut auf „Erledigt“.";
 	}
 
 	// <-- Gegenstand der Aktionen
@@ -814,15 +824,20 @@ public final class ConflictActions {
 	}
 
 	private void acknowledge(Row row) {
-		acknowledge(row, "Gespeichert, aber der Konflikt ließ sich nicht bestätigen: ");
+		acknowledge(row, true);
 	}
 
-	/** Bestätigt den Konflikt der Zeile; scheitert das, steht der Grund hinter {@code prefix}. */
-	private void acknowledge(Row row, String prefix) {
+	/**
+	 * Bestätigt den Konflikt der Zeile; scheitert das, steht der Grund im Text, nach der Aktion ({@code saved}) mit dem
+	 * Hinweis, dass sie gespeichert ist.
+	 */
+	private void acknowledge(Row row, boolean saved) {
 		try {
 			sync.acknowledge(Set.of(row.conflict().key()));
 		} catch (IOException e) {
-			throw new IllegalStateException(prefix + StoreMessages.describe(e), e);
+			String reason = StoreMessages.describe(e);
+			throw new IllegalStateException(
+					saved ? notAcknowledgedText(reason) : "Der Konflikt ließ sich nicht abschließen: " + reason, e);
 		}
 	}
 

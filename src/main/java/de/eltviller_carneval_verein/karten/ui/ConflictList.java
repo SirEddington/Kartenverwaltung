@@ -226,7 +226,7 @@ public final class ConflictList {
 		case DOUBLE_SALE -> "Doppelverkauf";
 		case FIELDS -> "Gleichzeitig geändert";
 		case DELETE_WINS -> "Gelöscht";
-		case UNMERGED -> "Nicht zusammengeführt";
+		case UNMERGED -> "Nicht zusammenführbar";
 		};
 	}
 

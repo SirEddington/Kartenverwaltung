@@ -46,7 +46,7 @@ import javafx.stage.Window;
 
 /**
  * Der Sammel-Dialog für die offenen Konflikte des Rechners (Spec KARV-86): eine Tabelle mit einer Zeile je Konflikt und den
- * Spalten Art, Eintrag, Gegenseite, Zeitpunkt, Werte, Aktion und "Erledigt". Nicht modal, höchstens ein Fenster je App:
+ * Spalten Art, Eintrag, Anderer Rechner, Zeitpunkt, Werte, Aktion und "Erledigt". Nicht modal, höchstens ein Fenster je App:
  * Ein erneutes {@link #show} holt es nach vorn und frischt es auf. Die Zeilen liefert {@link ConflictList}, ob und was eine
  * Aktion tut, {@link ConflictActions}; hier ist nur die Anzeige. Scheitert eine Aktion, bleibt die Zeile offen und der Grund
  * steht in der Zeile. Texte vorläufig (Überarbeitung in KARV-87). Alle Aufrufe im JavaFX-Thread.
@@ -93,8 +93,8 @@ public final class ConflictDialog {
 			LOG.log(Level.FINE, "Symbol des Konflikt-Dialogs nicht ladbar", e);
 		}
 
-		Label intro = new Label("Diese Änderungen von dir haben gegen die eines anderen Rechners verloren; es gilt der Stand der "
-				+ "anderen Seite. Übernimm deinen Wert oder bestätige mit „Erledigt“.");
+		Label intro = new Label("Ein anderer Rechner hat diese Einträge zuerst gespeichert, deshalb gilt sein Stand. "
+				+ "Übernimm bei Bedarf deinen Wert, oder schließe den Konflikt mit „Erledigt“ ab.");
 		intro.setWrapText(true);
 		table.setPlaceholder(new Label("Keine offenen Konflikte"));
 		// Die Spalten füllen die Breite und werden mit dem Fenster gleichmäßig schmaler, bis zu ihrer Mindestbreite (die
@@ -104,7 +104,7 @@ public final class ConflictDialog {
 		table.setSelectionModel(null);
 		table.getColumns().add(column("Art", 110, 80, (row, col) -> wrapped(kindText(row), col)));
 		table.getColumns().add(column("Eintrag", 190, 120, (row, col) -> wrapped(row.entry(), col)));
-		table.getColumns().add(column("Gegenseite", 120, 90, (row, col) -> wrapped(row.counterpart(), col)));
+		table.getColumns().add(column("Anderer Rechner", 120, 90, (row, col) -> wrapped(row.counterpart(), col)));
 		table.getColumns().add(column("Zeitpunkt", 115, 90, (row, col) -> wrapped(
 				AbstractBackupCatalog.timeText(row.at(), ZoneId.systemDefault()), col)));
 		table.getColumns().add(column("Werte", 290, 180, this::valuesCell));
@@ -240,12 +240,12 @@ public final class ConflictDialog {
 			}
 		}
 		case DELETE_WINS -> {
-			lines.add("Der andere Rechner hat gelöscht; die Löschung gilt.");
+			lines.add("Ein anderer Rechner hat den Eintrag gelöscht; die Löschung gilt.");
 			if (row.action() == ConflictList.Action.NONE) {
 				lines.add("Der Stand lässt sich aus dem Verlauf wiederherstellen.");
 			}
 		}
-		case UNMERGED -> lines.add("Die Änderungen ließen sich nicht zusammenführen; der Stand der anderen Seite gilt.");
+		case UNMERGED -> lines.add("Die Änderungen ließen sich nicht zusammenführen; es gilt der Stand des anderen Rechners.");
 		case FIELDS -> {
 			// die Gruppen stehen in den Feldzeilen; eine Halle zeigt statt ihres Namens beide Fassungen
 			if (row.action() == ConflictList.Action.TAKE_MY_HALL) {
@@ -391,7 +391,7 @@ public final class ConflictDialog {
 	private Node doneButton(Row row) {
 		Button button = new Button("Erledigt");
 		button.getStyleClass().add("button-default");
-		button.setTooltip(new Tooltip("Bestätigt den Konflikt, ohne etwas zu ändern; er verschwindet aus der Liste."));
+		button.setTooltip(new Tooltip("Schließt den Konflikt ab, ohne etwas zu ändern."));
 		button.setOnAction(event -> run(row, () -> actions.dismiss(row)));
 		return button;
 	}
@@ -455,7 +455,7 @@ public final class ConflictDialog {
 			return;
 		}
 		if (AssignPlaceDialog.freeSeats(presentation, plan).isEmpty()) {
-			fail(row, "Platz zuweisen nicht möglich: In der Bestuhlung ist kein Sitz frei.");
+			fail(row, "Kein Platz frei: In dieser Bestuhlung ist jeder Sitz belegt.");
 			return;
 		}
 		Optional<Seat> seat = AssignPlaceDialog.choose(presentation, plan, stage);

@@ -202,7 +202,8 @@ class LiveUpdatesTest {
 	}
 
 	private static String deferralHint(String entry, String machine) {
-		return "„" + entry + "“ wurde auf " + machine + " geändert; deine Änderung ist noch nicht gespeichert.";
+		return "„" + entry + "“ wurde auf " + machine + " geändert. Deine Änderung daran ist noch nicht gespeichert;"
+				+ " speichere sie, dann erscheint ein Konflikt, falls sich etwas widerspricht.";
 	}
 
 	// <-- Bauteile

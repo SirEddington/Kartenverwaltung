@@ -241,7 +241,7 @@ public final class LiveUpdates {
 
 	/**
 	 * Hallen, dann Abgleich der Events mit neuen Hallen, dann Events; zuletzt die Hinweise: erst die Warnungen, dann die
-	 * zurückgestellten Stände. Die Fußzeile zeigt nur den letzten; der Hinweis "deine Änderung ist noch nicht gespeichert"
+	 * zurückgestellten Stände. Die Fußzeile zeigt nur den letzten; der Hinweis "Deine Änderung daran ist noch nicht gespeichert"
 	 * kommt nur einmal je Version und darf nicht von einer Warnung desselben Schubs verdeckt werden. Ein Fehler in einem
 	 * Schritt hält die anderen nicht auf.
 	 */
@@ -354,7 +354,8 @@ public final class LiveUpdates {
 
 	private static String deferralText(Deferral deferral) {
 		String machine = deferral.machineName() == null ? "einem anderen Rechner" : "Rechner " + deferral.machineName();
-		return "„" + label(deferral.model()) + "“ wurde auf " + machine + " geändert; deine Änderung ist noch nicht gespeichert.";
+		return "„" + label(deferral.model()) + "“ wurde auf " + machine + " geändert. Deine Änderung daran ist noch nicht"
+				+ " gespeichert; speichere sie, dann erscheint ein Konflikt, falls sich etwas widerspricht.";
 	}
 
 	/** Der Eintrag, den der Hinweis nennt: Buchung über {@link EntityLabels#booking}, sonst der Name. */

@@ -204,7 +204,7 @@ class ConflictListTest {
 		assertEquals(List.of(Action.TAKE_MY_VALUE, Action.TAKE_MY_HALL, Action.RESTORE_BOOKING, Action.NONE, Action.NONE),
 				rows.stream().map(Row::action).toList());
 		assertEquals(List.of("Gleichzeitig geändert", "Gleichzeitig geändert", "Gelöscht", "Gelöscht",
-				"Nicht zusammengeführt"), rows.stream().map(Row::kindText).toList());
+				"Nicht zusammenführbar"), rows.stream().map(Row::kindText).toList());
 		assertEquals(1, rows.get(0).fields().size());
 		assertEquals("customer", rows.get(0).fields().get(0).group());
 		assertEquals("Meier, Anna", rows.get(0).fields().get(0).mine());
