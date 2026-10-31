@@ -782,6 +782,18 @@
     -fx-border-width: 0px;
 }
 
+/* Hover und gedrückt wie beim Primärknopf; die Regel oben wiegt schwerer als dessen Hover-Regeln */
+.dialog-pane .button:default:hover {
+    -fx-background-color: -fx-ecv-blue, -fx-ecv-yellow;
+    -fx-background-insets: 0, 1;
+    -fx-background-radius: 4px, 3px;
+    -fx-text-fill: -fx-ecv-blue;
+}
+
+.dialog-pane .button:default:pressed {
+    -fx-background-color: -fx-ecv-blue, #E6CC00;
+}
+
 /* Rand als unterste Hintergrundebene statt -fx-border-*: Die Fläche hatte keinen Radius (eckig hinter dem runden Rand),
    und ein Rand mit gleichem Radius lässt helle Eckpixel. */
 .context-menu {
