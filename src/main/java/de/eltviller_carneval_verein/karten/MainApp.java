@@ -48,6 +48,7 @@ import de.eltviller_carneval_verein.karten.ui.StatusLabel;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
+import de.eltviller_carneval_verein.karten.ui.sales.BookingAutoSave;
 import de.eltviller_carneval_verein.karten.ui.shared.DataReload;
 import de.eltviller_carneval_verein.karten.ui.shared.LockedUnits;
 import de.eltviller_carneval_verein.karten.ui.shared.LockedUnitsDialog;
@@ -478,6 +479,8 @@ public class MainApp extends Application {
 
 		// Schließen der App mit ungespeicherten Änderungen: erst nachfragen
 		primaryStage.setOnCloseRequest(e -> {
+			// In der Verkaufsansicht erst speichern, was noch aussteht (sonst fragt der LeaveGuard bei einer Eingabe der letzten 300 ms)
+			BookingAutoSave.flushActive();
 			if (!LeaveGuard.confirmLeave()) {
 				e.consume();
 			}

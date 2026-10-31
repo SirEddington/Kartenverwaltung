@@ -39,7 +39,8 @@ import javafx.util.StringConverter;
 
 /**
  * Kartendetails einer Buchung oder mehrerer Buchungen in einem Popup. Der Dialog ändert das Modell erst mit
- * "Anwenden"; "Abbrechen" (oder Esc) verwirft die Eingaben. Bei mehreren Buchungen stehen ihre Plätze oben (kurz,
+ * "Anwenden" (bei "Buchungen sofort speichern" heißt der Knopf "Speichern" und speichert auch gleich); "Abbrechen"
+ * (oder Esc) verwirft die Eingaben. Bei mehreren Buchungen stehen ihre Plätze oben (kurz,
  * Tooltip mit jedem Platz), die Felder zeigen den gemeinsamen Wert oder "verschieden", und nur geänderte Felder gelten
  * für alle (siehe {@link SeatBulkEdit}). Der Preis ist der effektive Preis; der Rollstuhlplatz gehört zur Bestuhlung
  * und steht nur als Hinweis da. Ohne Bearbeitungsmodus sind die Felder gesperrt und der Dialog hat nur "Schließen".
@@ -51,6 +52,7 @@ public final class SeatDetailPopup {
 
 	private final SeatBulkEdit edit;
 	private final boolean editMode;
+	private final boolean saveImmediately;
 	private final Runnable onApplied;
 	private final Popup popup = new Popup();
 	/** Je Datumsfeld: löst einen nicht lesbaren Text auf (siehe {@link #dateField}); läuft vor "Anwenden". */
@@ -60,11 +62,15 @@ public final class SeatDetailPopup {
 	/**
 	 * @param bookings  die Buchungen, die der Dialog zeigt und ändert (mindestens eine)
 	 * @param editMode  {@code false}: nur ansehen
-	 * @param onApplied wird nach "Anwenden" aufgerufen, damit die Ansicht sich neu zeichnet
+	 * @param saveImmediately {@code true} bei "Buchungen sofort speichern": Der Knopf heißt "Speichern" statt "Anwenden" und
+	 *                  speichert gleich nach dem Übernehmen ({@link BookingAutoSave#flushActive()}), ohne die Wartezeit des
+	 *                  {@code ChangeTrigger} abzuwarten
+	 * @param onApplied wird nach dem Übernehmen aufgerufen, damit die Ansicht sich neu zeichnet
 	 */
-	public SeatDetailPopup(List<Booking> bookings, boolean editMode, Runnable onApplied) {
+	public SeatDetailPopup(List<Booking> bookings, boolean editMode, boolean saveImmediately, Runnable onApplied) {
 		this.edit = new SeatBulkEdit(bookings);
 		this.editMode = editMode;
+		this.saveImmediately = saveImmediately;
 		this.onApplied = onApplied;
 		popup.setAutoHide(!editMode); // Mit Eingaben im Dialog soll ein Klick daneben sie nicht verwerfen
 		popup.setHideOnEscape(true);
@@ -368,7 +374,7 @@ public final class SeatDetailPopup {
 			Button cancelButton = new Button("Abbrechen");
 			cancelButton.getStyleClass().add("button-default");
 			cancelButton.setOnAction(event -> popup.hide());
-			Button applyButton = new Button("Anwenden");
+			Button applyButton = new Button(saveImmediately ? "Speichern" : "Anwenden");
 			applyButton.getStyleClass().add("button-primary");
 			applyButton.setOnAction(event -> {
 				// Eine abgelehnte Eingabe (der Klick auf Anwenden löst sie aus): nichts übernehmen, der Dialog und die Auswahl bleiben
@@ -380,6 +386,9 @@ public final class SeatDetailPopup {
 				edit.apply();
 				popup.hide();
 				onApplied.run();
+				if (saveImmediately) {
+					BookingAutoSave.flushActive();
+				}
 			});
 			buttonBar.getChildren().addAll(cancelButton, applyButton);
 		} else {

@@ -16,6 +16,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.EventSelectionSync;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
@@ -26,6 +27,7 @@ import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelsMenu;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -87,6 +89,9 @@ public class TicketShellController {
 	private List<Booking> pendingSelection = List.of();
 	private ContentController activeContentController;
 	private boolean editMode = false;
+	// Speichert Buchungsänderungen sofort (Einstellung "Buchungen sofort speichern"), solange die Shell zu sehen ist und der Bearbeitungsmodus an
+	private final BookingAutoSave autoSave = new BookingAutoSave(ChangeTracker.events(), EventSaver::save, Platform::runLater,
+			() -> editMode && BookingAutoSave.settingOn());
 	private CustomerDisplay customerDisplay;
 	private final ChangeListener<Boolean> windowShowing = (obs, wasShowing, isShowing) -> {
 		if (!isShowing) {
@@ -130,7 +135,9 @@ public class TicketShellController {
 				});
 
 		// Fremde Änderungen an Events nur, solange die Shell zu sehen ist (danach hielte das Repository sie am Leben)
-		LiveViews.whileShown(contentArea, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges));
+		// Ebenso das sofortige Speichern: nach dem Verlassen der Ansicht hört es nicht mehr am Tracker zu
+		LiveViews.whileShown(contentArea, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges),
+				new Registration(() -> autoSave.setActive(true), () -> autoSave.setActive(false)));
 
 		// "Alle Vorstellungen" ist als echter (null-)Eintrag Teil der Liste, wie in der Abrechnung: So lässt sich die
 		// Auswahl einer Vorstellung wieder aufheben.
@@ -221,6 +228,7 @@ public class TicketShellController {
 
 	@FXML
 	private void showTicketTableView() {
+		autoSave.flush(); // Eine Zelle, die eben noch geändert wurde, geht mit der alten Ansicht nicht verloren
 		StatusMessage.getInstance().clear();
 		lblHeader.setText("Kartentabelle");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/TicketTableView.fxml");
@@ -230,6 +238,7 @@ public class TicketShellController {
 
 	@FXML
 	private void showHallView() {
+		autoSave.flush();
 		StatusMessage.getInstance().clear();
 		lblHeader.setText("Saalübersicht");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml");
@@ -284,6 +293,7 @@ public class TicketShellController {
 	private void toggleEditMode() {
 		// Keine ungespeicherten Änderungen im Anzeigemodus: erst nachfragen
 		if (editMode) {
+			autoSave.flush(); // Sonst fragt der LeaveGuard nach Ungespeichertem, wenn jemand schneller als 300 ms wechselt
 			Outcome outcome = LeaveGuard.confirmSwitchToViewMode();
 			if (outcome == Outcome.STAY) {
 				return;
@@ -359,6 +369,7 @@ public class TicketShellController {
 
 	@FXML
 	private void handleBackToMenu() {
+		autoSave.flush(); // Vor dem Verlassen: Der LeaveGuard soll nur nach dem fragen, was wirklich nicht gespeichert werden konnte
 		MainApp.showMenuView();
 	}
 

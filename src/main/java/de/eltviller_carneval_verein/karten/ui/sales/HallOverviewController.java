@@ -363,11 +363,11 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	/**
 	 * Öffnet ein Popup mit den Kartendetails des angeklickten Sitzes direkt über der Saalübersicht. Änderungen gelten erst
-	 * mit "Anwenden"; danach wird die Saalübersicht neu gezeichnet (Farbe, Tooltip etc.).
+	 * mit "Anwenden" (bzw. "Speichern", siehe {@link BookingAutoSave}); danach wird die Saalübersicht neu gezeichnet (Farbe, Tooltip etc.).
 	 */
 	private void openSeatDetailPopup(Booking booking, Window window, double screenX, double screenY) {
 		closePopup();
-		SeatDetailPopup dialog = new SeatDetailPopup(List.of(booking), editMode, this::renderHall);
+		SeatDetailPopup dialog = new SeatDetailPopup(List.of(booking), editMode, BookingAutoSave.settingOn(), this::renderHall);
 		activePopup = dialog.popup();
 		dialog.show(window, screenX, screenY);
 	}
