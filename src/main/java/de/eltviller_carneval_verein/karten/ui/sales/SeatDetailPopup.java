@@ -55,7 +55,7 @@ public final class SeatDetailPopup {
 	private final boolean saveImmediately;
 	private final Runnable onApplied;
 	private final Popup popup = new Popup();
-	/** Je Datumsfeld: löst einen nicht lesbaren Text auf (siehe {@link #dateField}); läuft vor "Anwenden". */
+	/** Je Datumsfeld: löst einen nicht lesbaren Text auf (siehe {@link #dateField}); läuft vor "Anwenden" bzw. "Speichern". */
 	private final List<Runnable> dateResolvers = new ArrayList<>();
 	private Label totalValue;
 
@@ -335,7 +335,7 @@ public final class SeatDetailPopup {
 		spinner.setPrefWidth(115); // breit genug für "verschieden"
 		spinner.setDisable(!editMode);
 		spinner.getEditor().setPromptText(field.common().isPresent() ? "" : MIXED);
-		// Auf den Text hören (nicht auf den bestätigten Wert): So stimmen Gesamtpreis und "Anwenden" auch mit
+		// Auf den Text hören (nicht auf den bestätigten Wert): So stimmen Gesamtpreis und "Anwenden"/"Speichern" auch mit
 		// noch nicht bestätigter Eingabe. Still lesen: Halb getippte Preise sollen keine Meldung auslösen.
 		spinner.getEditor().textProperty().addListener((obs, oldVal, newVal) -> {
 			Double euros = factory.parseQuietly(newVal);
@@ -377,7 +377,7 @@ public final class SeatDetailPopup {
 			Button applyButton = new Button(saveImmediately ? "Speichern" : "Anwenden");
 			applyButton.getStyleClass().add("button-primary");
 			applyButton.setOnAction(event -> {
-				// Eine abgelehnte Eingabe (der Klick auf Anwenden löst sie aus): nichts übernehmen, der Dialog und die Auswahl bleiben
+				// Eine abgelehnte Eingabe (der Klick auf "Anwenden" bzw. "Speichern" löst sie aus): nichts übernehmen, der Dialog und die Auswahl bleiben
 				if (SpinnerInput.blockSaveIfScreenInputRejected(applyButton)) {
 					return;
 				}

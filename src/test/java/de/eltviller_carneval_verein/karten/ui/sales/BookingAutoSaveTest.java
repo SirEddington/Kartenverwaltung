@@ -7,10 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 
 class BookingAutoSaveTest {
@@ -24,6 +26,14 @@ class BookingAutoSaveTest {
 	private boolean saveSucceeds;
 	private BookingAutoSave autoSave;
 	private Event event;
+	/** Die Meldungen, die die Fußzeile bekäme. */
+	private final List<String> footer = new ArrayList<>();
+	private RuntimeException failure;
+
+	@AfterEach
+	void tearDown() {
+		autoSave.setActive(false); // Das statische "current" soll nicht in den nächsten Test hineinragen
+	}
 
 	@BeforeEach
 	void setUp() {
@@ -31,7 +41,9 @@ class BookingAutoSaveTest {
 		editMode = true;
 		settingOn = true;
 		saveSucceeds = true;
-		autoSave = new BookingAutoSave(tracker, this::save, later::add, () -> editMode && settingOn);
+		failure = null;
+		footer.clear();
+		autoSave = new BookingAutoSave(tracker, this::save, later::add, () -> editMode && settingOn, footer::add);
 		autoSave.setActive(true);
 		event = new Event();
 		event.setName("Sitzung");
@@ -41,6 +53,9 @@ class BookingAutoSaveTest {
 	/** Wie {@code EventSaver.save}: Bei Erfolg gilt der Stand als gespeichert (das Repository meldet es dem Tracker). */
 	private boolean save(Event toSave) {
 		saved.add(toSave);
+		if (failure != null) {
+			throw failure;
+		}
 		if (saveSucceeds) {
 			tracker.markSaved(toSave);
 		}
@@ -181,6 +196,37 @@ class BookingAutoSaveTest {
 
 		assertEquals(2, saved.size());
 		assertTrue(tracker.isDirty(event));
+	}
+
+	@Test
+	void failingSaveShowsTheReasonInTheFooter() {
+		failure = new LockedUnitException("„Sitzung“ wartet noch auf eine Datei aus dem gemeinsamen Ordner. Es wurde nichts gespeichert.");
+		event.setName("Prunksitzung");
+		tracker.check(event);
+		runLater();
+
+		assertEquals(List.of("Nicht gespeichert: „Sitzung“ wartet noch auf eine Datei aus dem gemeinsamen Ordner. Es wurde nichts gespeichert."), footer);
+		assertTrue(tracker.isDirty(event), "Bleibt ungespeichert, 'Speichern *' bleibt sichtbar");
+	}
+
+	@Test
+	void failingSaveWithoutAUserTextShowsTheDescribedCause() {
+		failure = new IllegalStateException("Platte voll");
+		event.setName("Prunksitzung");
+		tracker.check(event);
+		runLater();
+
+		assertEquals(List.of("Nicht gespeichert: IllegalStateException: Platte voll"), footer);
+	}
+
+	@Test
+	void failingSaveInFlushShowsTheReasonToo() {
+		failure = new LockedUnitException("Gesperrt.");
+		event.setName("Schnell geändert");
+
+		autoSave.flush();
+
+		assertEquals(List.of("Nicht gespeichert: Gesperrt."), footer);
 	}
 
 	@Test

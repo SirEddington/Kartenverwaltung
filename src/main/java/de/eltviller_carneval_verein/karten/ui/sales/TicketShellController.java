@@ -228,7 +228,6 @@ public class TicketShellController {
 
 	@FXML
 	private void showTicketTableView() {
-		autoSave.flush(); // Eine Zelle, die eben noch geändert wurde, geht mit der alten Ansicht nicht verloren
 		StatusMessage.getInstance().clear();
 		lblHeader.setText("Kartentabelle");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/TicketTableView.fxml");
@@ -238,7 +237,6 @@ public class TicketShellController {
 
 	@FXML
 	private void showHallView() {
-		autoSave.flush();
 		StatusMessage.getInstance().clear();
 		lblHeader.setText("Saalübersicht");
 		loadContentView("/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml");
