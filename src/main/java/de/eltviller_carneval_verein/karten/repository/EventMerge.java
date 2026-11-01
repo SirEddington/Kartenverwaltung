@@ -130,8 +130,10 @@ final class EventMerge {
 
 		/**
 		 * Die Kennung der Buchung, die auf dem Sitz der gelöschten oder unlesbaren Sitz-Einheit stand (aus ihrem zuletzt
-		 * bekannten Stand), solange keine andere Einheit des Vergleichsstands sie trägt: Hat der Abgleich die Buchung auf einen
-		 * anderen Sitz gesetzt, finden Löschung und Stornierung sie darüber.
+		 * bekannten Stand), solange keine andere Einheit sie trägt: eine angezeigte Einheit des Vergleichsstands, die nicht im
+		 * selben Aufruf gelöscht, unlesbar oder umgekennzeichnet wird. Hat der Abgleich die Buchung auf einen anderen Sitz
+		 * gesetzt, finden Löschung und Stornierung sie darüber, auch wenn dieselbe Stornierung die Einheit ohne Platz mit
+		 * löscht.
 		 */
 		private final Map<UnitKey, String> lastIds;
 

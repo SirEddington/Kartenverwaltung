@@ -2298,10 +2298,15 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(Set.of(), mine.locallyChangedUnits());
 	}
 
-	@Test
-	void cancellationOfTheBookingTheSyncPutOnAnotherSeatInOneBatchRemovesIt() {
+	/**
+	 * {@link #planSwitchAgainstMove(String, boolean)} mit der Beschriftung des Sitzes in der zweiten Bestuhlung, übernommen:
+	 * Der Abgleich hat Müller auf diesen Sitz gesetzt, die Einheit ohne Platz ist abgeleitet. Danach stornieren Sitz-Einheit
+	 * und die Einheit ohne Platz zusammen (ein dritter Rechner löscht beide in einem Speichern).
+	 *
+	 * @return Müllers Kennung
+	 */
+	private String adoptedOnTheSyncedSeatAndCancelledElsewhere() {
 		String bookingId = planSwitchAgainstMove("A", true);
-		UnitKey unassigned = UnitKey.unassignedBooking(event.getId(), friday.getId(), bookingId);
 		// der Sitz mit der Beschriftung ist im Modell noch ohne Platzhalter (die Halle hat ihn eben bekommen, der Abgleich der
 		// Vorstellung folgt erst): Nur ein solcher Sitz nimmt die Buchung beim Abgleich auf
 		SeatingPlan second = hall.getSeatingPlans().get(1);
@@ -2319,11 +2324,54 @@ class StoreEventRepositoryForeignTest {
 		Event loaded = third.loadEvents().get(0);
 		loaded.getPresentations().get(0).getBookings().removeIf(b -> bookingId.equals(b.getId()));
 		third.saveEvent(loaded);
+		return bookingId;
+	}
 
-		mine.applyForeign(List.of(seatUnit(friday, 2), unassigned));
+	@Test
+	void cancellationOfTheBookingTheSyncPutOnAnotherSeatInOneBatchRemovesIt() {
+		String bookingId = adoptedOnTheSyncedSeatAndCancelledElsewhere();
+
+		mine.applyForeign(List.of(seatUnit(friday, 2), UnitKey.unassignedBooking(event.getId(), friday.getId(), bookingId)));
 
 		assertTrue(withId(friday, bookingId).stream().noneMatch(Booking::hasData), "die Stornierung gilt");
 		assertEquals(Set.of(), mine.locallyChangedUnits());
+	}
+
+	@Test
+	void cancellationWaitsWhileTheBookingOnTheSyncedSeatIsChangedLocally() {
+		String bookingId = adoptedOnTheSyncedSeatAndCancelledElsewhere();
+		Booking mueller = withId(friday, bookingId).get(0);
+		mueller.setComment("lokal");
+		UnitKey carrier = UnitKey.booking(event.getId(), friday.getId(), mueller.getSeatId());
+
+		ForeignResult result = mine.applyForeign(
+				List.of(seatUnit(friday, 2), UnitKey.unassignedBooking(event.getId(), friday.getId(), bookingId)));
+
+		assertFalse(result.deferred().isEmpty(), "die Stornierung trifft die Eingabe nicht still");
+		assertSame(mueller, withId(friday, bookingId).get(0));
+		assertEquals("lokal", mueller.getComment());
+		assertEquals("Müller", mueller.getLastName());
+		assertTrue(mine.locallyChangedUnits().contains(carrier));
+	}
+
+	@Test
+	void cancellationWaitsWhileTheBookingOnTheSyncedSeatIsBeingEdited() {
+		String bookingId = adoptedOnTheSyncedSeatAndCancelledElsewhere();
+		Booking mueller = withId(friday, bookingId).get(0);
+		AtomicBoolean editing = new AtomicBoolean(true);
+		mine.setEditingCheck(model -> editing.get() && model == mueller);
+
+		ForeignResult result = mine.applyForeign(
+				List.of(seatUnit(friday, 2), UnitKey.unassignedBooking(event.getId(), friday.getId(), bookingId)));
+
+		assertFalse(result.deferred().isEmpty());
+		assertEquals("Müller", mueller.getLastName());
+		assertSame(mueller, withId(friday, bookingId).get(0));
+
+		editing.set(false);
+		mine.retryDeferred();
+
+		assertTrue(withId(friday, bookingId).stream().noneMatch(Booking::hasData), "nach der Bearbeitung gilt die Stornierung");
 	}
 
 	// <-- Buchung ohne Platz statt Warten

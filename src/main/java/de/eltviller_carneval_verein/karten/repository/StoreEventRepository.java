@@ -893,7 +893,7 @@ public class StoreEventRepository implements EventRepository {
 		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
 		successors.sort(EventMerge.MERGE_ORDER);
 		Map<UnitKey, UnitSnapshot> presentationStates = presentationStates(event, snapshots, successors);
-		Map<UnitKey, String> lastIds = event == null ? Map.of() : lastIds(event, successors, Map.of());
+		Map<UnitKey, String> lastIds = event == null ? Map.of() : lastIds(event, successors, batchIds(successors));
 		Set<UnitKey> appliedPresentations = new HashSet<>();
 		List<UnitSnapshot> apply = new ArrayList<>();
 		for (UnitSnapshot current : successors) {
@@ -977,8 +977,10 @@ public class StoreEventRepository implements EventRepository {
 	 * <p>
 	 * Mit {@code batch} (siehe {@link #batchIds}) zählt eine Einheit nicht als Träger, die im selben Aufruf gelöscht wird, unlesbar
 	 * ist oder eine andere Kennung bekommt: Das braucht das Einarbeiten, damit die Stornierung die Buchung findet, die der
-	 * Abgleich auf einen anderen Sitz gesetzt hat. Die Prüfung, ob der Nutzer eine versetzte Buchung berührt hat, nimmt
-	 * dagegen {@code Map.of()}: Eine Stornierung der Einheit ohne Platz träfe sonst die Eingabe auf dem Sitz.
+	 * Abgleich auf einen anderen Sitz gesetzt hat; dasselbe braucht die Prüfung, ob der Nutzer eine versetzte Buchung berührt
+	 * hat, sonst leerte die Stornierung die Eingabe auf dem Sitz. Das gilt nur für Sitz-Einheiten (nur für sie liest das
+	 * Einarbeiten die Kennung): Für eine Einheit ohne Platz bleibt es beim Vergleichsstand allein, sonst träfe ihre
+	 * Stornierung die Eingabe auf dem Sitz, die sie nicht betrifft.
 	 */
 	private Map<UnitKey, String> lastIds(Event event, List<UnitSnapshot> successors, Map<UnitKey, String> batch) {
 		Map<UnitKey, String> ids = new HashMap<>();
@@ -996,7 +998,7 @@ public class StoreEventRepository implements EventRepository {
 			if (carriers == null) {
 				carriers = shownBookingIds(event.getId());
 			}
-			if (!carriedElsewhere(carriers, last.getId(), unit, batch)) {
+			if (!carriedElsewhere(carriers, last.getId(), unit, unit.isUnassigned() ? Map.of() : batch)) {
 				ids.put(unit, last.getId());
 			}
 		}
