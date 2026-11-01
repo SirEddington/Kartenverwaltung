@@ -212,13 +212,19 @@ public final class ConflictActions {
 	/**
 	 * Warum sich der eigene Platz eines Vermerks "Platz" nicht übernehmen lässt, wenn die Buchung inzwischen auf einem
 	 * anderen Sitz lebt (fremder Umzug, Ruling R31b): Die Vorstellung hat keine Bestuhlung, die Bestuhlung den Sitz nicht
-	 * mehr ({@link #SEAT_GONE}), oder auf ihm steht eine andere Buchung. Dann scheiterte die Aktion immer (KARV-94).
+	 * mehr ({@link #SEAT_GONE}), oder auf ihm steht eine andere Buchung. Dann scheiterte die Aktion immer (KARV-94). Ist der
+	 * eigene Wert "ohne Platz" und die Buchung steht auf einem Sitz, bietet die Aktion nichts an (KARV-117).
 	 *
 	 * @param booking die Buchung, die die eigenen Felder bekommt ({@link #valueTarget})
 	 * @return der Grund; {@code null}, wenn der Umzug gelingen kann, die Buchung schon dort steht, der eigene Wert keinen Sitz
-	 *         hat oder der Vermerk keine Gruppe "Platz"
+	 *         hat (und die Buchung ohne Platz steht) oder der Vermerk keine Gruppe "Platz"
 	 */
 	private String placeRefusal(Row row, Booking booking) {
+		if (isUnassigned(placeOf(row.conflict().note())) && !booking.isUnassigned()) {
+			// der eigene Wert ist "ohne Platz", die Buchung steht inzwischen auf einem Sitz (fremder Umzug): Sie ihrem Platz zu
+			// entreißen, ist nicht Sache dieser Aktion; mit "Erledigt" ist der Vermerk zu schließen (KARV-117)
+			return "Die Buchung steht inzwischen auf " + booking.getPlaceLabel() + ".";
+		}
 		String seatId = mySeatId(row.conflict().note());
 		if (seatId == null || seatId.equals(seatIdOf(booking))) {
 			return null;
@@ -805,22 +811,33 @@ public final class ConflictActions {
 		String mySeatId = mySeatId(note);
 		if (mySeatId != null) {
 			candidates.add(UnitKey.booking(conflict.unit().eventId(), conflict.unit().presentationId(), mySeatId));
-		} else if (isUnassigned(placeOf(note))) {
-			// der eigene Wert ist "ohne Platz": Die eigene Fassung steht auf der Einheit "ohne Platz" der Buchung, deren Kennung
-			// man erst aus ihr kennt; also kommen die Einheiten "ohne Platz" der Vorstellung in Frage
-			UnitKey unit = conflict.unit();
-			for (UnitKey other : eventSnapshots(unit.eventId()).keySet()) {
-				if (other.type() == UnitType.BOOKING && other.isUnassigned() && unit.presentationId().equals(other.presentationId())) {
-					candidates.add(other);
-				}
+		}
+		Version found = droppedOn(candidates, note);
+		if (found != null || !isUnassigned(placeOf(note))) {
+			return found;
+		}
+		// der eigene Wert ist "ohne Platz": Die eigene Fassung steht auf der Einheit "ohne Platz" der Buchung, deren Kennung
+		// man erst aus ihr kennt; also kommen die Einheiten "ohne Platz" der Vorstellung in Frage (erst jetzt gesucht)
+		UnitKey unit = conflict.unit();
+		Set<UnitKey> unassigned = new LinkedHashSet<>();
+		for (UnitKey other : eventSnapshots(unit.eventId()).keySet()) {
+			if (other.type() == UnitType.BOOKING && other.isUnassigned() && unit.presentationId().equals(other.presentationId())) {
+				unassigned.add(other);
+			}
+		}
+		return droppedOn(unassigned, note);
+	}
+
+	/** Die weichende Version des Vermerks auf einer der Einheiten: erst aus dem Merker, dann aus dem lokalen Bestand. */
+	private Version droppedOn(Set<UnitKey> candidates, ConflictNote note) {
+		for (UnitKey unit : candidates) {
+			Version known = dropped.get(new VersionRef(unit, note.dropped()));
+			if (known != null) {
+				return known;
 			}
 		}
 		for (UnitKey unit : candidates) {
 			VersionRef ref = new VersionRef(unit, note.dropped());
-			Version known = dropped.get(ref);
-			if (known != null) {
-				return known;
-			}
 			if (refreshCache != null && refreshCache.missing.contains(ref)) {
 				continue;
 			}

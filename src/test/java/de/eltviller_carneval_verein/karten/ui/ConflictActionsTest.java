@@ -1562,5 +1562,39 @@ class ConflictActionsTest {
 		assertEquals(List.of(), a.sync.openConflicts(), "\"Erledigt\" schließt die Zeile");
 	}
 
+	/**
+	 * a entfernt Müllers Sitz aus der Halle (Müller steht bei a "ohne Platz"), b setzt ihn gleichzeitig auf den dritten Sitz, den
+	 * es noch gibt; b gilt. Der Vermerk "Platz" bei a hat den eigenen Wert "ohne Platz", Müller steht aber auf einem Sitz:
+	 * "Meinen Wert übernehmen" wird nicht angeboten (es hieße, ihn von seinem Sitz zu holen), "Erledigt" schließt die Zeile.
+	 */
+	@Test
+	void noteWithOwnValueWithoutSeatOffersNothingForBookingOnASeat() {
+		Seat first = a.plan().getSeats().get(0);
+		assertTrue(first.getParent().deleteSeat(first));
+		a.halls.saveHall(a.hall);
+		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		a.saveEvent();
+		moveFromFirstSeat(b, 2);
+		clock.advance(ROUND);
+		b.tick();
+		settle();
+		settle();
+
+		Row row = a.onlyRow();
+		String bookingId = b.seat(2).getId();
+		Booking mueller = withId(modelFriday(a), bookingId).stream().filter(Booking::hasData).findFirst().orElseThrow();
+		assertFalse(mueller.isUnassigned(), "b gilt: Müller steht bei a auf dem Sitz");
+		assertFalse(row.fields().get(0).adopted());
+		String refusal = "Die Buchung steht inzwischen auf " + mueller.getPlaceLabel() + ".";
+		assertEquals(new Availability(false, refusal), a.actions().availability(row));
+		IllegalStateException failure = assertThrows(IllegalStateException.class, () -> a.actions().takeMyValue(row, "place"));
+		assertEquals(refusal, failure.getMessage());
+		assertFalse(mueller.isUnassigned(), "nichts angefasst");
+		assertEquals(Set.of(), a.repository.locallyChangedUnits());
+		assertEquals(1, a.sync.openConflicts().size());
+		a.actions().dismiss(row);
+		assertEquals(List.of(), a.sync.openConflicts(), "\"Erledigt\" bleibt");
+	}
+
 	// <-- Buchung ohne Platz statt Warten
 }
