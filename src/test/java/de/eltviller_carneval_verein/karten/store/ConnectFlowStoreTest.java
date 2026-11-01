@@ -425,6 +425,42 @@ class ConnectFlowStoreTest {
 	}
 
 	@Test
+	void firstRunDoesNotCompleteWhenTheFolderVanishesWithinATick() throws IOException {
+		seedSharedHalls(300);
+		Node a = new Node("a");
+		assertTrue(a.service.startup(""));
+		// der gemeinsame Ordner verschwindet mitten in einem Takt, nach den ersten Hallen: Die Prüfung am Beginn des Takts sieht
+		// ihn noch, die übrigen Hallen sind auf keiner Seite mehr zu finden (Handtest KARV-87, Ordner umbenannt)
+		AtomicInteger reads = new AtomicInteger();
+		AtomicReference<Path> moved = new AtomicReference<>();
+		a.layer.onEach("read", () -> {
+			if (reads.incrementAndGet() == 20) {
+				try {
+					moved.set(Files.move(sharedRoot, dir.resolve("weg")));
+				} catch (IOException e) {
+					throw new IllegalStateException(e);
+				}
+			}
+		});
+		a.service.connect(shared, ConnectMode.MERGE);
+		for (int i = 0; i < 5; i++) {
+			a.service.tick();
+		}
+
+		assertNotNull(moved.get(), "der Ordner ist mitten im Lauf verschwunden");
+		assertFalse(a.service.connectionComplete().get(), "ein fehlender Ordner ist kein leerer");
+		assertFalse(a.marker().orElseThrow().complete());
+
+		// zurück: Der Lauf setzt fort und holt alle Hallen
+		Files.move(moved.get(), sharedRoot);
+		tickUntilRunEnds(a);
+		assertTrue(a.service.connectionComplete().get());
+		try (Stream<Path> halls = Files.list(a.localData().resolve("halls"))) {
+			assertEquals(300, halls.count());
+		}
+	}
+
+	@Test
 	void outcomeIsFehlerOnAFailedSlice() throws IOException {
 		Node a = slowNodeBesideHalls();
 		CompletableFuture<ConnectOutcome> result = a.service.connect(shared, ConnectMode.MERGE);

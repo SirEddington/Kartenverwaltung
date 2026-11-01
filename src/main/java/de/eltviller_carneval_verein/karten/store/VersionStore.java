@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.store;
 
 import java.io.IOException;
 import java.nio.file.InvalidPathException;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,6 +20,9 @@ import java.util.function.Supplier;
  * wie Versions- und Anspruchsdateien heißen: {@code <VersionId>.json} im Ordner der Einheit, {@code root.json} und
  * {@code <VersionId>.json} unter {@code claims/}. Alles andere (fremde Namen, Unterordner, {@code Thumbs.db},
  * Konfliktkopien der Synchronisation, Großschreibung) wird stillschweigend übergangen.
+ * <p>
+ * Wo es unten heißt "leer, wenn der Ordner fehlt": Bei einem Bestand mit Anker gilt das nur, solange der Anker da ist.
+ * Fehlt der Anker selbst, wirft das Auflisten {@link NoSuchFileException} ({@link #requireAnchorIfEmpty}).
  */
 public final class VersionStore {
 
@@ -202,7 +206,7 @@ public final class VersionStore {
 	private List<String> unitIds(String folder, boolean events) throws IOException {
 		Path parent = dataRoot.resolve(folder);
 		List<String> ids = new ArrayList<>();
-		for (FileLayer.DirEntry entry : files.listEntries(parent)) {
+		for (FileLayer.DirEntry entry : entries(parent)) {
 			if (entry.directory() && isValidUnit(entry.name(), events)) {
 				ids.add(entry.name());
 			}
@@ -256,7 +260,7 @@ public final class VersionStore {
 		Path childDir = unitDir(parent).resolve(folder);
 		List<String> names = new ArrayList<>();
 		// ein Listenzugriff mit den Ordner-Kennzeichen, nicht je Eintrag eine Frage: auf einer Netzfreigabe kostet jede einen Zugriff
-		for (FileLayer.DirEntry entry : files.listEntries(childDir)) {
+		for (FileLayer.DirEntry entry : entries(childDir)) {
 			if (entry.directory() && childUnit(parent, folder, entry.name()).isPresent()) {
 				names.add(entry.name());
 			}
@@ -324,8 +328,8 @@ public final class VersionStore {
 		Path unitDir = unitDir(unit);
 		Path claimsDir = unitDir.resolve(CLAIMS);
 		String prefix = unit.relativePath() + "/";
-		List<FileLayer.DirEntry> unitEntries = files.listEntriesWithTemps(unitDir);
-		List<FileLayer.DirEntry> claimEntries = files.listEntriesWithTemps(claimsDir);
+		List<FileLayer.DirEntry> unitEntries = requireAnchorIfEmpty(files.listEntriesWithTemps(unitDir));
+		List<FileLayer.DirEntry> claimEntries = requireAnchorIfEmpty(files.listEntriesWithTemps(claimsDir));
 
 		List<String> data = dataPaths(prefix, versionIdsOf(unitEntries), claimNamesOf(claimEntries));
 		List<String> temps = new ArrayList<>();
@@ -371,7 +375,28 @@ public final class VersionStore {
 	 * @throws IllegalArgumentException wenn der Pfad absolut ist oder den Datenordner verlässt
 	 */
 	public List<String> listRelative(String rel) throws IOException {
-		return files.listNames(resolve(rel));
+		return requireAnchorIfEmpty(files.listNames(resolve(rel)));
+	}
+
+	/** Die Einträge des Ordners wie {@link FileLayer#listEntries}; leer nur, wenn der Anker da ist ({@link #requireAnchorIfEmpty}). */
+	private List<FileLayer.DirEntry> entries(Path dir) throws IOException {
+		return requireAnchorIfEmpty(files.listEntries(dir));
+	}
+
+	/**
+	 * Eine leere Liste gilt nur, wenn der Anker (der gemeinsame Ordner) noch da ist. Die Dateischicht liefert für einen
+	 * fehlenden Ordner eine leere Liste; fehlt aber der Anker selbst (Ordner umbenannt, Verknüpfung entfernt), ist der Bestand
+	 * nicht leer, sondern nicht erreichbar. Sonst hielte ein Vollabgleich, dem der Ordner mitten in einem Takt wegfällt, alle
+	 * übrigen Einheiten für auf beiden Seiten abwesend und endete als vollständig (Handtest KARV-87). Geprüft wird nur bei
+	 * einer leeren Liste; ohne Anker (der lokale Bestand) nie.
+	 *
+	 * @throws NoSuchFileException wenn die Liste leer ist und der Anker fehlt
+	 */
+	private <T> List<T> requireAnchorIfEmpty(List<T> listed) throws IOException {
+		if (listed.isEmpty() && anchor != null && !files.isDirectory(anchor)) {
+			throw new NoSuchFileException(anchor.toString(), null, "Der gemeinsame Ordner fehlt");
+		}
+		return listed;
 	}
 
 	/**
@@ -414,7 +439,7 @@ public final class VersionStore {
 
 	/** Die IDs der Versionsdateien im Einheitenordner, sortiert; fremde Namen und Ordner fehlen. */
 	private List<VersionId> versionIds(Path unitDir) throws IOException {
-		return versionIdsOf(files.listEntries(unitDir));
+		return versionIdsOf(entries(unitDir));
 	}
 
 	/** Wie {@link #versionIds}, aus den schon gelisteten Einträgen im Einheitenordner (temporäre Namen sind keine Versions-IDs). */
@@ -432,7 +457,7 @@ public final class VersionStore {
 	/** Die Namen der Anspruchsdateien unter {@code claims/}, sortiert; fremde Namen und Ordner fehlen. */
 	private List<String> claimNames(Path unitDir) throws IOException {
 		Path claimsDir = unitDir.resolve(CLAIMS);
-		return claimNamesOf(files.listEntries(claimsDir));
+		return claimNamesOf(entries(claimsDir));
 	}
 
 	/** Wie {@link #claimNames}, aus den schon gelisteten Einträgen in {@code claims/}. */

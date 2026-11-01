@@ -78,6 +78,33 @@ class VersionStoreTest {
 	}
 
 	@Test
+	void missingAnchorIsNotAnEmptyStore() throws IOException {
+		Path anchor = Files.createDirectories(dir.resolve("gemeinsam"));
+		VersionStore shared = new VersionStore(anchor.resolve("data"), new NioFileLayer(), anchor, null);
+		UnitKey event = UnitKey.event("e1");
+		UnitKey booking = UnitKey.booking("e1", "p1", "A-1");
+
+		// der Anker ist da, nur data oder die Einheit fehlt: leer wie bisher
+		assertEquals(List.of(), shared.eventIds());
+		assertEquals(List.of(), shared.childNames(event, VersionStore.PRESENTATIONS));
+		assertTrue(shared.readUnit(booking).versions().isEmpty());
+
+		// der Anker fehlt (Ordner umbenannt, Verknüpfung entfernt): kein leerer Bestand, sondern ein Fehler
+		Files.delete(anchor);
+		assertThrows(NoSuchFileException.class, shared::eventIds);
+		assertThrows(NoSuchFileException.class, shared::hallIds);
+		assertThrows(NoSuchFileException.class, () -> shared.childNames(event, VersionStore.PRESENTATIONS));
+		assertThrows(NoSuchFileException.class, () -> shared.readUnit(booking));
+		assertThrows(NoSuchFileException.class, () -> shared.hasVersions(booking));
+		assertThrows(NoSuchFileException.class, () -> shared.unitDataFiles(booking));
+		assertThrows(NoSuchFileException.class, () -> shared.scanUnit(booking));
+		assertThrows(NoSuchFileException.class, () -> shared.listRelative("feeds"));
+
+		// ohne Anker (der lokale Bestand) bleibt ein fehlender Ordner leer
+		assertEquals(List.of(), new VersionStore(dir.resolve("weg").resolve("data"), new NioFileLayer()).eventIds());
+	}
+
+	@Test
 	void versionIdOfAcceptsOnlyVersionFileNames() {
 		assertEquals(Optional.of(V1), VersionStore.versionIdOf(V1 + ".json"));
 		assertEquals(Optional.empty(), VersionStore.versionIdOf("Thumbs.db"));
