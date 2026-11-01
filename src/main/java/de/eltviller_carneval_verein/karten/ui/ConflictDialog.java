@@ -451,11 +451,11 @@ public final class ConflictDialog {
 		}
 		SeatingPlan plan = actions.planOf(presentation);
 		if (plan == null) {
-			fail(row, ConflictActions.noPlanText(presentation));
+			fail(row, AssignPlaceDialog.noPlanText(presentation));
 			return;
 		}
 		if (AssignPlaceDialog.freeSeats(presentation, plan).isEmpty()) {
-			fail(row, "Kein Platz frei: In dieser Bestuhlung ist jeder Sitz belegt.");
+			fail(row, AssignPlaceDialog.NO_FREE_SEAT);
 			return;
 		}
 		Optional<Seat> seat = AssignPlaceDialog.choose(presentation, plan, stage);

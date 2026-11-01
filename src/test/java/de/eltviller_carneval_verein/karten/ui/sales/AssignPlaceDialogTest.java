@@ -15,6 +15,7 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 class AssignPlaceDialogTest {
 
@@ -71,5 +72,18 @@ class AssignPlaceDialogTest {
 
 		assertEquals("Tisch A3, Sitz 2", AssignPlaceDialog.label(seat));
 		assertEquals("Tisch 4, Sitz 1", AssignPlaceDialog.label(plainSeat));
+	}
+
+	/** Dieselben Texte für Verkaufstabelle und Konflikt-Dialog (KARV-109). */
+	@Test
+	void reasonsNameTheSituationLikeTheConflictDialog() {
+		Table table = plan.addTable(row("A"));
+		table.setTableNumber(3);
+		Seat seat = table.addSeat(2);
+
+		assertEquals(EntityLabels.presentation(presentation) + " hat keine Bestuhlung; ein Platz lässt sich nicht zuweisen.",
+				AssignPlaceDialog.noPlanText(presentation));
+		assertEquals("Kein Platz frei: In dieser Bestuhlung ist jeder Sitz belegt.", AssignPlaceDialog.NO_FREE_SEAT);
+		assertEquals("Tisch A3, Sitz 2 ist inzwischen belegt. Wähle einen anderen Platz.", AssignPlaceDialog.takenText(seat));
 	}
 }

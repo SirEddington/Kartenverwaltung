@@ -11,6 +11,7 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
@@ -25,11 +26,25 @@ import javafx.stage.Window;
 
 /**
  * Der Dialog "Platz zuweisen…" für eine Buchung ohne Platz: zeigt die freien Sitze der Bestuhlung ("Tisch A3, Sitz 2")
- * zur Auswahl. Zugewiesen wird nicht hier, sondern vom Aufrufer über {@code BookingSync.assign}.
+ * zur Auswahl. Zugewiesen wird nicht hier, sondern vom Aufrufer über {@code BookingSync.assign}. Die Gründe, warum das
+ * nicht geht, stehen hier für Verkaufstabelle und Konflikt-Dialog gleich (KARV-109).
  */
 public final class AssignPlaceDialog {
 
+	/** Der Grund, wenn die Bestuhlung keinen freien Sitz hat. */
+	public static final String NO_FREE_SEAT = "Kein Platz frei: In dieser Bestuhlung ist jeder Sitz belegt.";
+
 	private AssignPlaceDialog() {
+	}
+
+	/** Der Grund, wenn die Vorstellung keine Bestuhlung hat, der eine Buchung zugewiesen werden könnte. */
+	public static String noPlanText(Presentation presentation) {
+		return EntityLabels.presentation(presentation) + " hat keine Bestuhlung; ein Platz lässt sich nicht zuweisen.";
+	}
+
+	/** Der Grund, wenn der gewählte Sitz inzwischen eine Buchung mit Daten hat. */
+	public static String takenText(Seat seat) {
+		return label(seat) + " ist inzwischen belegt. Wähle einen anderen Platz.";
 	}
 
 	/**

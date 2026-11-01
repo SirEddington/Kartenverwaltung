@@ -279,11 +279,11 @@ public class TicketTableController implements ContentController, SalesStateAware
 		}
 		SeatingPlan plan = SalesPlan.of(presentation, hallRepository.findById(presentation.getHallId()));
 		if (plan == null) {
-			StatusMessage.getInstance().show(Severity.ERROR, "Platz zuweisen nicht möglich: " + EntityLabels.presentation(presentation) + " hat keine Bestuhlung.");
+			StatusMessage.getInstance().show(Severity.ERROR, AssignPlaceDialog.noPlanText(presentation));
 			return;
 		}
 		if (AssignPlaceDialog.freeSeats(presentation, plan).isEmpty()) {
-			StatusMessage.getInstance().show(Severity.ERROR, "Platz zuweisen nicht möglich: In der Bestuhlung ist kein Sitz frei.");
+			StatusMessage.getInstance().show(Severity.ERROR, AssignPlaceDialog.NO_FREE_SEAT);
 			return;
 		}
 		Optional<Seat> seat = AssignPlaceDialog.choose(presentation, plan, seatTable.getScene().getWindow());
@@ -292,7 +292,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		}
 		String before = booking.getPlaceLabel();
 		if (!BookingSync.assign(presentation, plan, booking, seat.get())) {
-			StatusMessage.getInstance().show(Severity.ERROR, "Platz zuweisen nicht möglich: " + AssignPlaceDialog.label(seat.get()) + " ist bereits belegt.");
+			StatusMessage.getInstance().show(Severity.ERROR, AssignPlaceDialog.takenText(seat.get()));
 			return;
 		}
 		loadBookings();

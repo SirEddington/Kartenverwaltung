@@ -54,7 +54,6 @@ import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestClock;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
-import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions.Availability;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Action;
@@ -884,12 +883,6 @@ class ConflictActionsTest {
 		assertTrue(failure.getMessage().startsWith("Der Konflikt ließ sich nicht abschließen: "), failure.getMessage());
 		assertTrue(failure.getMessage().endsWith("Platte voll"), failure.getMessage());
 		assertEquals(1, b.sync.openConflicts().size());
-	}
-
-	@Test
-	void noPlanTextSaysThePresentationHasNoSeating() {
-		assertEquals(EntityLabels.presentation(b.friday()) + " hat keine Bestuhlung; ein Platz lässt sich nicht zuweisen.",
-				ConflictActions.noPlanText(b.friday()));
 	}
 
 	@Test

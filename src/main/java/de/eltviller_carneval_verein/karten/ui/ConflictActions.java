@@ -223,11 +223,6 @@ public final class ConflictActions {
 		return SalesPlan.of(presentation, hall);
 	}
 
-	/** Der Grund, wenn die Vorstellung keine Bestuhlung hat, der eine Buchung zugewiesen werden könnte. */
-	static String noPlanText(Presentation presentation) {
-		return EntityLabels.presentation(presentation) + " hat keine Bestuhlung; ein Platz lässt sich nicht zuweisen.";
-	}
-
 	/**
 	 * Weist die Buchung "ohne Platz" eines Doppelverkaufs dem gewählten freien Sitz zu ({@link BookingSync#assign}), speichert
 	 * das Event und bestätigt die Zeile.
@@ -247,15 +242,14 @@ public final class ConflictActions {
 		Presentation presentation = event.findPresentation(moved.presentationId());
 		SeatingPlan plan = planOf(presentation);
 		if (plan == null) {
-			throw new IllegalStateException(noPlanText(presentation));
+			throw new IllegalStateException(AssignPlaceDialog.noPlanText(presentation));
 		}
 		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
 		Booking before = booking.copy();
 		UnitKey seatUnit = UnitKey.booking(event.getId(), presentation.getId(), seat.getId());
 		VersionId versionBefore = versionOf(seatUnit);
 		if (!BookingSync.assign(presentation, plan, booking, seat)) {
-			throw new IllegalStateException(
-					AssignPlaceDialog.label(seat) + " ist inzwischen belegt. Wähle einen anderen Platz.");
+			throw new IllegalStateException(AssignPlaceDialog.takenText(seat));
 		}
 		saveOrUndo(seatUnit, versionBefore, this::writtenDespite, () -> save(event), e -> {
 			// die Buchung wieder ohne Platz, und der leere Platzhalter, den die Zuweisung entfernt hat, wieder an seiner Stelle
