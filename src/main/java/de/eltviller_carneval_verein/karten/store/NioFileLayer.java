@@ -112,25 +112,17 @@ public final class NioFileLayer implements FileLayer {
 		return names;
 	}
 
-	@Override
-	public List<DirEntry> listEntries(Path dir) throws IOException {
-		return listWithKinds(dir, false);
-	}
-
-	@Override
-	public List<DirEntry> listEntriesWithTemps(Path dir) throws IOException {
-		return listWithKinds(dir, true);
-	}
-
 	/**
-	 * Ein Durchlauf des Ordners, der zu jedem Eintrag auch sagt, ob er ein Ordner ist. Die Attribute stammen aus der
+	 * Ein Durchlauf des Ordners, der zu jedem Eintrag auch sagt, ob er ein Ordner ist; {@link #listEntries} ist die
+	 * Standardfassung ohne die {@code ~karv-*}-Einträge. Die Attribute stammen aus der
 	 * Aufzählung selbst: {@link Files#walkFileTree} mit Tiefe 1 nutzt die Attribute, die das Betriebssystem (unter Windows)
 	 * beim Aufzählen liefert, und fragt nicht je Eintrag noch einmal das Dateisystem; {@code Files.readAttributes} je Eintrag
 	 * täte das (gemessen: so schnell wie {@code isDirectory} je Eintrag). Größe und Änderungszeit stammen aus denselben
 	 * Attributen. Ein Verweis zählt als Ordner, wenn sein Ziel einer ist, wie bei {@link Files#isDirectory}. Ein Eintrag,
 	 * der während des Durchlaufs verschwindet, fehlt in der Liste.
 	 */
-	private static List<DirEntry> listWithKinds(Path dir, boolean withTemps) throws IOException {
+	@Override
+	public List<DirEntry> listEntriesWithTemps(Path dir) throws IOException {
 		List<DirEntry> entries = new ArrayList<>();
 		Files.walkFileTree(dir, EnumSet.noneOf(FileVisitOption.class), 1, new MissingTolerantVisitor() {
 			@Override
@@ -138,11 +130,8 @@ public final class NioFileLayer implements FileLayer {
 				if (file.equals(dir)) {
 					throw new NotDirectoryException(dir.toString());
 				}
-				String name = file.getFileName().toString();
-				if (withTemps || !name.startsWith(TEMP_PREFIX)) {
-					boolean directory = attrs.isSymbolicLink() ? Files.isDirectory(file) : attrs.isDirectory();
-					entries.add(entryOf(name, directory, attrs));
-				}
+				boolean directory = attrs.isSymbolicLink() ? Files.isDirectory(file) : attrs.isDirectory();
+				entries.add(entryOf(file.getFileName().toString(), directory, attrs));
 				return FileVisitResult.CONTINUE;
 			}
 		});

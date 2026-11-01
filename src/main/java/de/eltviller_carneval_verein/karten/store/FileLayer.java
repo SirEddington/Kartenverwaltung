@@ -3,7 +3,6 @@ package de.eltviller_carneval_verein.karten.store;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;

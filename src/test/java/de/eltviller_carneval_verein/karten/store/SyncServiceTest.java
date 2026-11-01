@@ -49,10 +49,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
-import java.util.logging.Handler;
-import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -848,11 +845,16 @@ class SyncServiceTest {
 	 * Vollabgleich vergleicht eigene Ansprüche auf beiden Seiten selbst.
 	 */
 	private static List<String> localReadsBesides(Node node, UnitKey... allowed) {
-		String data = "read " + node.localData();
-		return node.layer.calls().stream().filter(c -> c.startsWith(data)).map(c -> c.replace('\\', '/'))
-				.filter(c -> !c.contains("/claims/"))
+		return localReads(node).stream().map(c -> c.replace('\\', '/')).filter(c -> !c.contains("/claims/"))
 				.filter(c -> java.util.Arrays.stream(allowed).noneMatch(unit -> c.contains(unit.relativePath()))).toList();
 	}
+
+	/** Alle Lesezugriffe dieses Rechners im lokalen Bestand, Anspruchsdateien eingeschlossen. */
+	private static List<String> localReads(Node node) {
+		String data = "read " + node.localData();
+		return node.layer.calls().stream().filter(c -> c.startsWith(data)).toList();
+	}
+
 
 	@Test
 	void fullSyncAfterRestartDoesNotReadTheWholeStore() throws IOException {
@@ -3865,8 +3867,7 @@ class SyncServiceTest {
 		assertEquals(payload("Anna"), b.service.snapshots().get(BOOKING).payload());
 		assertFalse(Files.exists(cleanMarker(a)));
 		// die Einheiten selbst wurden nicht gelesen, nur der Index
-		String data = b.localData().toString();
-		assertTrue(b.layer.calls().stream().noneMatch(c -> c.startsWith("read ") && c.contains(data)));
+		assertEquals(List.of(), localReads(b));
 	}
 
 	@Test
@@ -3880,35 +3881,6 @@ class SyncServiceTest {
 	}
 
 	// --- Änderungen am lokalen Bestand an der App vorbei (KARV-107, KARV-112)
-
-	/** Schneidet die Meldungen des Loggers von {@link SyncService} mit, solange sie offen ist. */
-	private static final class LogCapture extends Handler implements AutoCloseable {
-		final List<LogRecord> records = new ArrayList<>();
-		private final Logger logger = Logger.getLogger(SyncService.class.getName());
-
-		LogCapture() {
-			logger.addHandler(this);
-		}
-
-		@Override
-		public synchronized void publish(LogRecord record) {
-			records.add(record);
-		}
-
-		@Override
-		public void flush() {
-		}
-
-		@Override
-		public void close() {
-			logger.removeHandler(this);
-		}
-
-		/** Wie viele Warnungen mit diesem Anfang kamen. */
-		synchronized long warnings(String prefix) {
-			return records.stream().filter(r -> r.getLevel() == Level.WARNING && r.getMessage().startsWith(prefix)).count();
-		}
-	}
 
 	private static final String CHANGED_OUTSIDE = "Der lokale Bestand wurde seit dem letzten Beenden außerhalb der "
 			+ "Kartenverwaltung geändert: ";
@@ -3938,8 +3910,7 @@ class SyncServiceTest {
 		Node a = cleanlyClosedNode();
 		copyPastTheApp(OTHER, COPIED, a.localData());
 
-		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
-		assertTrue(b.service.startup(""));
+		Node b = restartSingle(a);
 
 		assertTrue(trustedIndex(b));
 		assertIndexed(b, COPIED);
@@ -3968,14 +3939,10 @@ class SyncServiceTest {
 	@Test
 	void fileOverwrittenPastTheAppIsLockedAtCleanStart() throws IOException {
 		Node a = cleanlyClosedNode();
-		Path versionFile;
-		try (Stream<Path> files = Files.list(localFile(a, BOOKING, "x").getParent())) {
-			versionFile = files.filter(f -> f.getFileName().toString().endsWith(".json")).findFirst().orElseThrow();
-		}
-		Files.writeString(versionFile, "kaputt");
+		Version v1 = a.service.history(BOOKING).get(0);
+		Files.writeString(localFile(a, BOOKING, v1.id() + ".json"), "kaputt");
 
-		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
-		assertTrue(b.service.startup(""));
+		Node b = restartSingle(a);
 
 		assertTrue(trustedIndex(b));
 		assertEquals(Status.LOCKED_DAMAGED, b.service.snapshots().get(BOOKING).status());
@@ -4012,7 +3979,7 @@ class SyncServiceTest {
 		Node a = cleanlyClosedNode();
 		copyPastTheApp(OTHER, COPIED, a.localData());
 
-		try (LogCapture log = new LogCapture()) {
+		try (LogCapture log = new LogCapture(SyncService.class)) {
 			new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run).service.startup("");
 
 			assertEquals(1, log.warnings(CHANGED_OUTSIDE), log.records.toString());
@@ -4023,7 +3990,7 @@ class SyncServiceTest {
 	void noWarningOnAnOrdinaryCleanRestart() throws IOException {
 		Node a = cleanlyClosedNode();
 
-		try (LogCapture log = new LogCapture()) {
+		try (LogCapture log = new LogCapture(SyncService.class)) {
 			Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 			b.service.startup("");
 
@@ -4051,7 +4018,7 @@ class SyncServiceTest {
 		full.service.startup(shared);
 		full.service.closeIndex();
 
-		try (LogCapture log = new LogCapture()) {
+		try (LogCapture log = new LogCapture(SyncService.class)) {
 			Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, queued::add);
 			assertTrue(b.service.startup(shared));
 
@@ -4076,9 +4043,7 @@ class SyncServiceTest {
 		assertTrue(b.service.startup(shared));
 
 		assertTrue(trustedIndex(b));
-		String data = b.localData().toString();
-		assertTrue(b.layer.calls().stream().noneMatch(c -> c.startsWith("read ") && c.contains(data)),
-				b.layer.calls().toString());
+		assertEquals(List.of(), localReads(b));
 	}
 
 	@Test
@@ -4086,8 +4051,7 @@ class SyncServiceTest {
 		Node a = cleanlyClosedNode();
 		deleteTree(a.localData().resolve(HALL.relativePath()));
 
-		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
-		assertTrue(b.service.startup(""));
+		Node b = restartSingle(a);
 
 		assertTrue(trustedIndex(b));
 		assertFalse(b.service.snapshots().containsKey(HALL));
@@ -4110,13 +4074,9 @@ class SyncServiceTest {
 	@Test
 	void formatChangeResolvesEverythingWithoutWarning() throws IOException {
 		Node a = cleanlyClosedNode();
-		try (Stream<Path> paths = Files.walk(a.appData.resolve("index"))) {
-			for (Path file : paths.filter(p -> p.toString().endsWith(".json")).toList()) {
-				Files.writeString(file, Files.readString(file).replaceAll("\"indexFormat\":\\d+", "\"indexFormat\":3"));
-			}
-		}
+		UnitIndexTest.setIndexFormat(a.appData.resolve("index"), 3);
 
-		try (LogCapture log = new LogCapture()) {
+		try (LogCapture log = new LogCapture(SyncService.class)) {
 			Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 			assertTrue(b.service.startup(""));
 
@@ -4139,7 +4099,7 @@ class SyncServiceTest {
 		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		c.service.startup("");
 
-		assertTrue(c.layer.calls().stream().anyMatch(call -> call.startsWith("listTree ")), c.layer.calls().toString());
+		assertFalse(trustedIndex(c), "nach dem Absturz gilt die Marke nicht");
 		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), c.service.snapshots());
 		assertEquals(v2.id(), c.service.snapshots().get(BOOKING).version());
 	}
@@ -4180,7 +4140,7 @@ class SyncServiceTest {
 		assertFalse(Files.exists(cleanMarker(a)));
 		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		c.service.startup("");
-		assertTrue(c.layer.calls().stream().anyMatch(call -> call.startsWith("listTree ")));
+		assertFalse(trustedIndex(c), "nach der späten Änderung gilt die Marke nicht");
 		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), c.service.snapshots());
 	}
 

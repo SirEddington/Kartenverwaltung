@@ -1910,7 +1910,7 @@ public final class SyncService implements ConnectionControl {
 	 * <p>
 	 * Eine gerade laufende Runde im Hintergrund wartet es kurz ab ({@link #CLOSE_WAIT}); ist sie dann nicht fertig, gibt es
 	 * keine Marke, denn ihre Änderungen am Bestand fehlten im Index. Dasselbe gilt, solange das Auflösen einer Einheit
-	 * gescheitert ist und der Index sie nicht kennt (WARNING im Log): Der nächste Start liest den Index nicht vorab ein. Ebenso,
+	 * gescheitert ist und der Index sie nicht kennt (WARNING im Log). Ebenso,
 	 * solange ein {@link #append} im lokalen Bestand schreibt ({@link #localWrites}) oder eines während des Schreibens der
 	 * Marke beginnt (dann wird sie gleich wieder ungültig gemacht): Seine Dateien stünden sonst unter einer Marke, deren
 	 * Index sie nicht kennt.
@@ -2010,7 +2010,7 @@ public final class SyncService implements ConnectionControl {
 		try {
 			clean = index.loadIfClean();
 		} catch (RuntimeException e) {
-			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht auswerten; der Bestand wird durchsucht", e);
+			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht auswerten; sie gilt nicht", e);
 		}
 		startedFromCleanIndex = clean;
 		// Ansatzpunkt für KARV-113: bei gültiger Marke diesen Abgleich in den Hintergrund verlegen (noch nicht umgesetzt)

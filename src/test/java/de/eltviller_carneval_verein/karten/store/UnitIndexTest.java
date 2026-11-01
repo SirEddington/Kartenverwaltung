@@ -34,10 +34,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import java.util.logging.Logger;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -290,10 +289,7 @@ class UnitIndexTest {
 		refresh(first, local);
 		first.flush();
 		// ein Index, wie ihn die Fassung ohne Kette schrieb
-		Path halls = indexDir.resolve("halls.json");
-		Files.writeString(halls, Files.readString(halls).replace("\"indexFormat\":4", "\"indexFormat\":1"));
-		Path event = eventIndexFile("e1");
-		Files.writeString(event, Files.readString(event).replace("\"indexFormat\":4", "\"indexFormat\":1"));
+		setIndexFormat(indexDir, 1);
 
 		UnitIndex second = index();
 		UnitIndex.Refresh refresh = refresh(second, local);
@@ -651,6 +647,15 @@ class UnitIndexTest {
 		assertEquals(UnitIndex.fingerprint(Map.of(), Map.of()), UnitIndex.fingerprintFromListing(Map.of(), "events/e1"));
 	}
 
+	/** Schreibt in jede Index-Datei unter {@code indexDir} das genannte Format, wie es eine andere Programmfassung täte. Auch für SyncServiceTest. */
+	static void setIndexFormat(Path indexDir, int format) throws IOException {
+		try (Stream<Path> files = Files.walk(indexDir)) {
+			for (Path file : files.filter(f -> f.toString().endsWith(".json")).toList()) {
+				Files.writeString(file, Files.readString(file).replaceAll("\"indexFormat\":\\d+", "\"indexFormat\":" + format));
+			}
+		}
+	}
+
 	/** Die Versionsdatei der Einheit im lokalen Bestand. */
 	private Path versionFile(UnitKey unit, VersionId id) {
 		return local.dataRoot().resolve(unit.relativePath()).resolve(id + ".json");
@@ -697,11 +702,7 @@ class UnitIndexTest {
 	void formatThreeIndexCountsAsEmpty() throws IOException {
 		buildThreeUnits();
 		buildCleanIndex();
-		try (var files = Files.walk(indexDir)) {
-			for (Path file : files.filter(f -> f.toString().endsWith(".json")).toList()) {
-				Files.writeString(file, Files.readString(file).replaceAll("\"indexFormat\":\\d+", "\"indexFormat\":3"));
-			}
-		}
+		setIndexFormat(indexDir, 3);
 
 		UnitIndex second = index();
 
@@ -1029,33 +1030,6 @@ class UnitIndexTest {
 		};
 	}
 
-	/** Schneidet die Logeinträge von {@link UnitIndex} mit, auch {@code FINE}, bis {@link #close}. */
-	private static final class LogCapture extends Handler implements AutoCloseable {
-		final List<LogRecord> records = new ArrayList<>();
-		private final Logger logger = Logger.getLogger(UnitIndex.class.getName());
-		private final Level level = logger.getLevel();
-
-		LogCapture() {
-			logger.setLevel(Level.ALL);
-			logger.addHandler(this);
-		}
-
-		@Override
-		public synchronized void publish(LogRecord record) {
-			records.add(record);
-		}
-
-		@Override
-		public void flush() {
-		}
-
-		@Override
-		public void close() {
-			logger.removeHandler(this);
-			logger.setLevel(level);
-		}
-	}
-
 	/** Ein Index, dessen Dateischicht die Sperrdatei nie anlegt: Dann bleibt nur das Entfernen der Marke. */
 	private UnitIndex indexWithoutUncleanFile() {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
@@ -1349,7 +1323,7 @@ class UnitIndexTest {
 		assertTrue(index.writeCleanMarker());
 		Path marker = cleanMarker();
 		index.useDeleter(failingDeleteOf(marker));
-		try (LogCapture capture = new LogCapture()) {
+		try (LogCapture capture = new LogCapture(UnitIndex.class)) {
 			List<LogRecord> logs = capture.records;
 			assumeTrue(marker.toFile().setWritable(false), "Schreibschutz lässt sich auf diesem System nicht setzen");
 			assumeFalse(Files.isWritable(marker), "Schreibschutz greift auf diesem System nicht");
@@ -1510,7 +1484,7 @@ class UnitIndexTest {
 		buildCleanIndex();
 		UnitIndex second = indexWithoutUncleanFile();
 		List<LogRecord> logs;
-		try (LogCapture capture = new LogCapture()) {
+		try (LogCapture capture = new LogCapture(UnitIndex.class)) {
 			logs = capture.records;
 			// wie ohne Sperrdatei: Die Marke wird gelöscht, und der Index gilt
 			assertTrue(second.loadIfClean());
@@ -1720,10 +1694,7 @@ class UnitIndexTest {
 		UnitIndex first = index();
 		refresh(first, local);
 		first.flush();
-		Path halls = indexDir.resolve("halls.json");
-		Files.writeString(halls, Files.readString(halls).replace("\"indexFormat\":4", "\"indexFormat\":2"));
-		Path event = eventIndexFile("e1");
-		Files.writeString(event, Files.readString(event).replace("\"indexFormat\":4", "\"indexFormat\":2"));
+		setIndexFormat(indexDir, 2);
 
 		UnitIndex second = index();
 		UnitIndex.Refresh refresh = refresh(second, local);

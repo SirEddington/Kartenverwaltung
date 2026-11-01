@@ -273,31 +273,21 @@ final class UnitIndex {
 
 	/** Der Abdruck der gelesenen Dateien einer Einheit, mit den Stempeln aus dem Auflisten vor dem Lesen. */
 	static String fingerprint(UnitFiles unitFiles) {
-		Map<VersionId, String> versions = new HashMap<>();
-		unitFiles.versions().keySet().forEach(id -> versions.put(id, unitFiles.versionStamps().get(id)));
-		Map<String, String> claims = new HashMap<>();
-		unitFiles.claims().keySet().forEach(name -> claims.put(name, unitFiles.claimStamps().get(name)));
-		return fingerprint(versions, claims);
+		return fingerprint(unitFiles.versionStamps(), unitFiles.claimStamps());
 	}
 
 	/**
-	 * Der Abdruck einer Einheit aus einem Verzeichnisbaum ({@link FileLayer#listTree}), ohne eine Datei zu lesen. Es gelten
-	 * die Namensregeln von {@link VersionStore#versionIdOf} und {@link VersionStore#claimNameOf}; alle anderen Namen
-	 * zählen nicht, auch keine Nebenkopien ersetzter Dateien (siehe Klassenbeschreibung).
+	 * Der Abdruck einer Einheit aus einem Verzeichnisbaum ({@link FileLayer#listTree}), ohne eine Datei zu lesen, nach
+	 * denselben Regeln wie {@link VersionStore#readUnit} ({@link VersionStore#versionStampsOf},
+	 * {@link VersionStore#claimStampsOf}); alle anderen Namen zählen nicht, auch keine Nebenkopien ersetzter Dateien (siehe
+	 * Klassenbeschreibung).
 	 *
 	 * @param tree     der Verzeichnisbaum des Datenordners
 	 * @param unitPath der Ordner der Einheit relativ zum Datenordner (siehe {@link UnitKey#relativePath()})
 	 */
 	static String fingerprintFromListing(Map<String, List<FileLayer.DirEntry>> tree, String unitPath) {
-		Map<VersionId, String> versions = new HashMap<>();
-		for (FileLayer.DirEntry file : tree.getOrDefault(unitPath, List.of())) {
-			VersionStore.versionIdOf(file.name()).ifPresent(id -> versions.put(id, file.stamp()));
-		}
-		Map<String, String> claims = new HashMap<>();
-		for (FileLayer.DirEntry file : tree.getOrDefault(unitPath + "/" + CLAIMS, List.of())) {
-			VersionStore.claimNameOf(file.name()).ifPresent(claim -> claims.put(claim, file.stamp()));
-		}
-		return fingerprint(versions, claims);
+		return fingerprint(VersionStore.versionStampsOf(tree.getOrDefault(unitPath, List.of())),
+				VersionStore.claimStampsOf(tree.getOrDefault(unitPath + "/" + CLAIMS, List.of())));
 	}
 
 	/**
@@ -357,7 +347,7 @@ final class UnitIndex {
 			progress.accept(1.0);
 		}
 
-		return refreshOf(units.keySet(), resolved);
+		return new Refresh(unitsWhere(units.keySet(), Entry::pending), unitsWhere(units.keySet(), Entry::lost), resolved);
 	}
 
 	/**
@@ -380,11 +370,6 @@ final class UnitIndex {
 		Ownership mine = own;
 		files.deleteOldTemps(local.dataRoot(), names, tag -> tag == null || mine.isOwnTempTag(tag), SyncService.TEMP_AGE,
 				"im lokalen Bestand");
-	}
-
-	/** Die Einheiten mit ausstehenden und mit verlorenen Versionen unter den genannten, nach den Flags ihrer Einträge. */
-	private Refresh refreshOf(Collection<UnitKey> units, int resolved) {
-		return new Refresh(unitsWhere(units, Entry::pending), unitsWhere(units, Entry::lost), resolved);
 	}
 
 	/** Die Einheiten unter {@code units}, deren Eintrag {@code test} erfüllt, in deren Reihenfolge; unveränderlich. */
@@ -1123,7 +1108,7 @@ final class UnitIndex {
 			return false;
 		}
 		if (wasUnclean) {
-			LOGGER.info("Die Marke 'sauber beendet' gilt nicht, die Sperrdatei stand noch; der Bestand wird durchsucht: "
+			LOGGER.info("Die Marke 'sauber beendet' gilt nicht, die Sperrdatei stand noch: "
 					+ uncleanFile());
 			return false;
 		}
@@ -1136,7 +1121,7 @@ final class UnitIndex {
 				}
 			}
 		} catch (IOException | RuntimeException e) {
-			LOGGER.warning("Der Start-Index ist trotz Marke unbrauchbar, der Bestand wird durchsucht: " + e);
+			LOGGER.warning("Der Start-Index ist trotz Marke unbrauchbar, die Marke gilt nicht: " + e);
 			return false;
 		}
 		read.forEach((group, list) -> {

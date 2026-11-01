@@ -5,8 +5,9 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -142,29 +143,27 @@ public final class VersionStore {
 	 */
 	public UnitFiles readUnit(UnitKey unit) throws IOException {
 		Path unitDir = unitDir(unit);
-		List<FileLayer.DirEntry> unitEntries = files.listEntries(unitDir);
-		List<FileLayer.DirEntry> claimEntries = files.listEntries(unitDir.resolve(CLAIMS));
-		List<VersionId> versionIds = versionIdsOf(unitEntries);
-		List<String> claimNames = claimNamesOf(claimEntries);
-		requireAnchorIfBothEmpty(versionIds, claimNames);
-		Map<String, String> unitStamps = stampsByName(unitEntries);
-		Map<String, String> claimDirStamps = stampsByName(claimEntries);
+		Map<VersionId, String> listedVersions = versionStampsOf(files.listEntries(unitDir));
+		Map<String, String> listedClaims = claimStampsOf(files.listEntries(unitDir.resolve(CLAIMS)));
+		requireAnchorIfBothEmpty(listedVersions.keySet(), listedClaims.keySet());
 		Map<VersionId, VersionFile> versions = new TreeMap<>();
 		Map<VersionId, String> versionStamps = new TreeMap<>();
-		for (VersionId id : versionIds) {
+		for (Map.Entry<VersionId, String> listed : listedVersions.entrySet()) {
+			VersionId id = listed.getKey();
 			Optional<byte[]> bytes = files.read(unitDir.resolve(id + JSON));
 			if (bytes.isPresent()) {
 				versions.put(id, parseVersion(id, bytes.get()));
-				versionStamps.put(id, unitStamps.get(id + JSON));
+				versionStamps.put(id, listed.getValue());
 			}
 		}
 		Map<String, ClaimFile> claims = new TreeMap<>();
 		Map<String, String> claimStamps = new TreeMap<>();
-		for (String name : claimNames) {
+		for (Map.Entry<String, String> listed : listedClaims.entrySet()) {
+			String name = listed.getKey();
 			Optional<byte[]> bytes = files.read(unitDir.resolve(CLAIMS).resolve(name + JSON));
 			if (bytes.isPresent()) {
 				claims.put(name, parseClaim(name, bytes.get()));
-				claimStamps.put(name, claimDirStamps.get(name + JSON));
+				claimStamps.put(name, listed.getValue());
 			}
 		}
 		return new UnitFiles(unit, Collections.unmodifiableMap(versions), Collections.unmodifiableMap(claims),
@@ -412,7 +411,7 @@ public final class VersionStore {
 	 *
 	 * @throws NoSuchFileException wenn die Liste leer ist und der Anker fehlt
 	 */
-	private <T> List<T> requireAnchorIfEmpty(List<T> listed) throws IOException {
+	private <C extends Collection<?>> C requireAnchorIfEmpty(C listed) throws IOException {
 		if (listed.isEmpty() && anchor != null && !files.isDirectory(anchor)) {
 			throw new NoSuchFileException(anchor.toString(), null, "Der gemeinsame Ordner fehlt");
 		}
@@ -423,7 +422,7 @@ public final class VersionStore {
 	 * Wie {@link #requireAnchorIfEmpty} für die beiden Listen einer Einheit (ihr Ordner und {@code claims/}): Der Anker wird
 	 * nur angesehen, wenn beide leer sind, also höchstens einmal je Einheit (auf einer Netzfreigabe kostet jeder Zugriff).
 	 */
-	private void requireAnchorIfBothEmpty(List<?> unitDirEntries, List<?> claimEntries) throws IOException {
+	private void requireAnchorIfBothEmpty(Collection<?> unitDirEntries, Collection<?> claimEntries) throws IOException {
 		if (unitDirEntries.isEmpty()) {
 			requireAnchorIfEmpty(claimEntries);
 		}
@@ -474,14 +473,23 @@ public final class VersionStore {
 
 	/** Wie {@link #versionIds}, aus den schon gelisteten Einträgen im Einheitenordner (temporäre Namen sind keine Versions-IDs). */
 	private static List<VersionId> versionIdsOf(List<FileLayer.DirEntry> entries) {
-		List<VersionId> ids = new ArrayList<>();
+		return new ArrayList<>(versionStampsOf(entries).keySet());
+	}
+
+	/**
+	 * Die Versionsdateien unter den gelisteten Einträgen eines Einheitenordners mit Größe und Änderungszeit
+	 * ({@link FileLayer.DirEntry#stamp()}), in der Reihenfolge der Einträge; fremde Namen und Ordner fehlen. Die eine Regel
+	 * für {@link #readUnit} und den Abdruck des Start-Index ({@link UnitIndex#fingerprintFromListing}).
+	 */
+	static Map<VersionId, String> versionStampsOf(List<FileLayer.DirEntry> entries) {
+		Map<VersionId, String> stamps = new LinkedHashMap<>();
 		for (FileLayer.DirEntry entry : entries) {
 			Optional<VersionId> id = versionIdOf(entry.name());
 			if (id.isPresent() && !entry.directory()) {
-				ids.add(id.get());
+				stamps.put(id.get(), entry.stamp());
 			}
 		}
-		return ids;
+		return stamps;
 	}
 
 	/** Die Namen der Anspruchsdateien unter {@code claims/}, sortiert; fremde Namen und Ordner fehlen. Ohne Blick auf den Anker. */
@@ -490,23 +498,21 @@ public final class VersionStore {
 		return claimNamesOf(files.listEntries(claimsDir));
 	}
 
-	/** Größe und Änderungszeit ({@link FileLayer.DirEntry#stamp()}) der gelisteten Einträge nach Dateiname. */
-	private static Map<String, String> stampsByName(List<FileLayer.DirEntry> entries) {
-		Map<String, String> stamps = new HashMap<>();
-		entries.forEach(entry -> stamps.put(entry.name(), entry.stamp()));
-		return stamps;
-	}
-
 	/** Wie {@link #claimNames}, aus den schon gelisteten Einträgen in {@code claims/}. */
 	private static List<String> claimNamesOf(List<FileLayer.DirEntry> listed) {
-		List<String> names = new ArrayList<>();
+		return new ArrayList<>(claimStampsOf(listed).keySet());
+	}
+
+	/** Wie {@link #versionStampsOf}, für die Anspruchsdateien unter {@code claims/} nach dem Namen des Anspruchs. */
+	static Map<String, String> claimStampsOf(List<FileLayer.DirEntry> listed) {
+		Map<String, String> stamps = new LinkedHashMap<>();
 		for (FileLayer.DirEntry entry : listed) {
 			Optional<String> claimName = claimNameOf(entry.name());
 			if (claimName.isPresent() && !entry.directory()) {
-				names.add(claimName.get());
+				stamps.put(claimName.get(), entry.stamp());
 			}
 		}
-		return names;
+		return stamps;
 	}
 
 	/**
