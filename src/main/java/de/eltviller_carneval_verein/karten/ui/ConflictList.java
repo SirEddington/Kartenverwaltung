@@ -272,7 +272,7 @@ public final class ConflictList {
 	/**
 	 * Die Werte einer Gruppe als Text: die gesetzten Werte, durch Komma getrennt; ohne Werte {@code (leer)}. Halle und
 	 * Bestuhlung stehen mit ihren Namen da (unbekannt wie in den Tabellen als Strich), der Zahlstatus mit seinem Text aus
-	 * den Ansichten, Preis und Kassenbetrag (in Cent gespeichert) als Betrag ({@code 35,00 €}), Daten als {@code 31.10.2026}; die Sitz-ID fehlt, weil Reihe, Tisch und Sitz
+	 * den Ansichten, Preis, gezahlter Betrag und Kassenbetrag (in Cent gespeichert) als Betrag ({@code 35,00 €}), Daten als {@code 31.10.2026}; die Sitz-ID fehlt, weil Reihe, Tisch und Sitz
 	 * daneben stehen.
 	 */
 	private String valueText(ObjectNode values) {

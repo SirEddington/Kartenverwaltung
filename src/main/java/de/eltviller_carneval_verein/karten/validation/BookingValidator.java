@@ -9,7 +9,7 @@ import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 
 /**
  * Plausibilitätsprüfungen für eine Buchung (Kürzel SEA, siehe {@link SeatIssue}): die Verkaufsregeln (Preis, abgeholt,
- * E-Mail, bezahlt ohne Preis oder Namen, gezahlter Betrag gleich Preis) und die Zuordnung zu einem Platz. Die Meldungen nennen die Buchung
+ * E-Mail, bezahlt ohne Preis oder Namen, gezahlter Betrag weicht ab) und die Zuordnung zu einem Platz. Die Meldungen nennen die Buchung
  * ({@link EntityLabels#booking}). Aufbau wie bei {@link SeatValidator}.
  */
 public final class BookingValidator {

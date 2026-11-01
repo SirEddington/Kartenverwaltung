@@ -1791,6 +1791,25 @@ class BookingPolicyTest {
 	}
 
 	@Test
+	void lostAssignmentWithPaymentAgainstTheirPriceIsNoted() {
+		// wie lostAssignmentFromUnassignedNotesTheGroupBothSidesChanged: Meine kassiert beim gescheiterten Zuweisen nach s1,
+		// Deren ändert auf _m den Preis
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		Version base = version(THIRD, withoutPlace("m", price(2000)));
+		Version myDeletion = deletion(OWN, "save-a");
+		Version myS1 = version(OWN, "save-a", booking("m", "s1", both(price(2000), paid(2000))));
+		Version theirM = version(OTHER, "save-b", withoutPlace("m", price(2500)));
+		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
+
+		Resolution resolution = POLICY.resolve(input(unassigned, base, myDeletion, theirM,
+				Map.of(S1, strandedTarget(S1, theirS1, myS1)), theirM));
+
+		assertFalse(resolution.deleted());
+		assertEquals(withoutPlace("m", both(price(2500), paid(2000))), resolution.payload());
+		assertPriceNote(resolution, myDeletion, 2000, 2500);
+	}
+
+	@Test
 	void transferredPaymentAgainstPriceOfTheMovedCopyIsNoted() {
 		// wie moveAndSellInOneSaveTransfersMyEditToTheMovedCopy: Deren verschiebt x nach s2 und ändert dort den Preis,
 		// Meine kassiert x auf s1

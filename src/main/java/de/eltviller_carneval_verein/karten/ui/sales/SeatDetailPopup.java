@@ -346,7 +346,8 @@ public final class SeatDetailPopup {
 			spinner.setDisable(!editMode || !paid);
 			String priceText = priceSpinner.getEditor().getText();
 			if (nonePaid) {
-				spinner.getEditor().setPromptText(priceText == null || priceText.isBlank() ? "Preis" : priceText);
+				// nur bei bezahlt: Im gesperrten Feld läse sich der Preis als "schon bezahlt"
+				spinner.getEditor().setPromptText(!paid ? "" : priceText == null || priceText.isBlank() ? "Preis" : priceText);
 			}
 		};
 		paymentBox.valueProperty().addListener((obs, oldVal, newVal) -> update.run());

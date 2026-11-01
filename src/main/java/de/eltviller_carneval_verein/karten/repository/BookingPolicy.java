@@ -100,9 +100,9 @@ public final class BookingPolicy implements ConflictPolicy {
 	/**
 	 * Der Dreiwegevergleich je Feldgruppe ({@link FieldMerge#merge}) mit der Koppelregel für Zahlung und Preis: Hat die
 	 * eine Seite gegenüber der Basis nur die Gruppe "Zahlung" geändert und dabei zum eigenen Preis kassiert
-	 * ({@link #collected}), die andere nur die Gruppe "Preis", ist das Ergebnis bezahlt und weicht sein gezahlter Betrag vom
-	 * Preis ab (ein leerer Preis, also der Standardpreis der
-	 * Vorstellung, zählt als abweichend: die Einheit kennt ihn nicht), wird die Gruppe "Preis" strittig wie ein
+	 * ({@link #paidAtOwnPrice}), die andere nur die Gruppe "Preis", ist das Ergebnis bezahlt und weicht sein gezahlter
+	 * Betrag vom Preis ab (ein leerer Preis, also der Standardpreis der Vorstellung, zählt als abweichend: die Einheit kennt
+	 * ihn nicht), wird die Gruppe "Preis" strittig wie ein
 	 * gewöhnlicher Feldkonflikt: Es gilt der Preis von "Deren", die Gruppe kommt mit beiden Ständen zu den Konflikten. Die
 	 * Zahlung bleibt so in jedem Fall stehen. Ist "Preis" schon strittig, oder hat eine Seite beide Gruppen geändert, bleibt
 	 * es beim gewöhnlichen Vergleich; ein älterer Stand ohne gezahlten Betrag kennt keine Abweichung.
@@ -131,7 +131,7 @@ public final class BookingPolicy implements ConflictPolicy {
 			return result;
 		}
 		ObjectNode merged = result.merged();
-		if (!collected(payer, before) || !isPaid(merged) || !amountDiffersFromPrice(merged)) {
+		if (!paidAtOwnPrice(payer, before) || !isPaid(merged) || !amountDiffersFromPrice(merged)) {
 			return result;
 		}
 		ObjectNode resolved = merged.deepCopy();
@@ -142,17 +142,17 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/**
-	 * Ob die Zahlungsseite kassiert hat: Sie hat den gezahlten Betrag gegenüber der Basis gesetzt, und er passte bei ihr zum
-	 * Preis (ein leerer Preis zählt als passend, die Einheit kennt den Standardpreis nicht). Ein bloßer Wechsel der Zahlart
-	 * oder ein eigener Betrag (Rabatt) erzeugt die Abweichung nicht erst beim Zusammenführen.
+	 * Ob die Zahlungsseite zum eigenen Preis kassiert hat: Sie hat den gezahlten Betrag gegenüber der Basis gesetzt, und er
+	 * passte bei ihr zum Preis (ein leerer Preis zählt als passend, die Einheit kennt den Standardpreis nicht). Ein bloßer
+	 * Wechsel der Zahlart oder ein eigener Betrag (Rabatt) erzeugt die Abweichung nicht erst beim Zusammenführen.
 	 */
-	private static boolean collected(ObjectNode payer, ObjectNode base) {
+	private static boolean paidAtOwnPrice(ObjectNode payer, ObjectNode base) {
 		if (FieldMerge.same(payer, base, List.of(PAID_AMOUNT))) {
 			return false;
 		}
-		JsonNode amount = payer.get(PAID_AMOUNT);
-		JsonNode price = payer.get(PRICE);
-		return price == null || !price.isNumber() || amount == null || !amount.isNumber() || price.asLong() == amount.asLong();
+		Long amount = cents(payer, PAID_AMOUNT);
+		Long price = cents(payer, PRICE);
+		return amount == null || price == null || price.equals(amount);
 	}
 
 	/** Ob der Zahlstatus eine bezahlte Zahlart ist; ein unbekannter Wert (etwa aus einer neueren App) zählt nicht. */
@@ -163,12 +163,14 @@ public final class BookingPolicy implements ConflictPolicy {
 
 	/** Ob ein gezahlter Betrag eingetragen ist und vom Preis abweicht; ein leerer Preis zählt als abweichend. */
 	private static boolean amountDiffersFromPrice(ObjectNode booking) {
-		JsonNode amount = booking.get(PAID_AMOUNT);
-		JsonNode price = booking.get(PRICE);
-		if (amount == null || !amount.isNumber()) {
-			return false;
-		}
-		return price == null || !price.isNumber() || price.asLong() != amount.asLong();
+		Long amount = cents(booking, PAID_AMOUNT);
+		return amount != null && !amount.equals(cents(booking, PRICE));
+	}
+
+	/** Ein Betrag in Cent; {@code null}, wenn das Feld fehlt, leer oder keine Zahl ist. */
+	private static Long cents(ObjectNode booking, String field) {
+		JsonNode value = booking.get(field);
+		return value != null && value.isNumber() ? value.asLong() : null;
 	}
 
 	/**
