@@ -47,8 +47,10 @@ import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.repository.TestRepositories;
 import de.eltviller_carneval_verein.karten.store.Change;
+import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
 import de.eltviller_carneval_verein.karten.store.NioFileLayer;
+import de.eltviller_carneval_verein.karten.store.OpenConflict;
 import de.eltviller_carneval_verein.karten.store.SyncListener;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestClock;
@@ -1043,4 +1045,143 @@ class ConflictActionsTest {
 	}
 
 	// <-- Platz zuweisen und Hinweise
+
+	// Vermerk "Platz" nach einem fremden Umzug (KARV-94) -->
+
+	/**
+	 * R31b: Mia steht "ohne Platz". b weist ihr den zweiten Sitz zu; a setzt sie gleichzeitig auf den fünften und verkauft
+	 * den zweiten an Tom, a lädt zuerst hoch. a's Umzug gilt; b hat einen FIELDS-Vermerk mit der Gruppe "Platz" auf der
+	 * gelöschten {@code _Mia}, ohne Übertragung ({@code BookingPolicy.bothDeleted}).
+	 */
+	private Row placeConflict() {
+		Booking mia = a.friday().addBooking();
+		mia.setLastName("Mia");
+		mia.setUnassigned(true);
+		a.saveEvent();
+		settle();
+		Booking bMia = b.friday().getBookings().stream().filter(booking -> mia.getId().equals(booking.getId()))
+				.findFirst().orElseThrow();
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), bMia, b.plan().getSeats().get(1)));
+		b.saveEvent();
+		assertTrue(BookingSync.assign(a.friday(), a.plan(), mia, a.plan().getSeats().get(4)));
+		a.seat(1).setLastName("Tom");
+		a.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(Action.TAKE_MY_VALUE, row.action());
+		assertEquals(List.of("place"), row.fields().stream().map(ConflictList.FieldRow::group).toList());
+		assertEquals(UnitKey.unassignedBooking(b.event.getId(), b.friday().getId(), mia.getId()), row.conflict().target());
+		assertNull(row.conflict().note().moved());
+		assertEquals("Mia", b.seat(4).getLastName());
+		assertEquals("Tom", b.seat(1).getLastName());
+		return row;
+	}
+
+	/**
+	 * Derselbe Vermerk, wie ihn die Auflösung bei getrennten Gewinnern schreibt (b's Löschung von {@code _Mia} gilt, b
+	 * verliert den zweiten Sitz; R31b in {@code BookingPolicy.doubleSale}): auf dem zweiten Sitz, übertragen auf Mias Einheit
+	 * auf dem fünften. Ein echter Ablauf dahin braucht eine verzögerte Liste; den Vermerk selbst prüft {@code BookingPolicyTest}.
+	 */
+	private Row transferred(Row row) {
+		ConflictNote note = row.conflict().note();
+		ConflictNote moved = new ConflictNote(note.kind(), note.affected(), note.other(), note.fields(), b.seatUnit(4),
+				note.place(), note.dropped(), note.lostSave());
+		OpenConflict conflict = row.conflict();
+		return new Row(new OpenConflict(conflict.id(), b.seatUnit(1), conflict.at(), conflict.saveId(), moved, null),
+				row.kindText(), row.entry(), row.counterpart(), row.at(), row.fields(), row.action(), row.group());
+	}
+
+	@Test
+	void placeOnATakenSeatOffersNoActionThatMustFail() {
+		assertTakenSeatIsRefused(placeConflict());
+	}
+
+	/** Der Ablauf aus KARV-94: Ohne Prüfung setzte die Aktion Mia auf Toms Sitz, und das Zerlegen scheiterte. */
+	@Test
+	void transferredPlaceOnATakenSeatOffersNoActionThatMustFail() {
+		assertTakenSeatIsRefused(transferred(placeConflict()));
+	}
+
+	private void assertTakenSeatIsRefused(Row row) {
+		String taken = AssignPlaceDialog.takenText(b.plan().getSeats().get(1));
+
+		assertEquals(new Availability(false, taken), b.actions().availability(row));
+		IllegalStateException failure = assertThrows(IllegalStateException.class,
+				() -> b.actions().takeMyValue(row, "place"));
+		assertEquals(taken, failure.getMessage());
+		assertEquals("Mia", b.seat(4).getLastName(), "nichts angefasst");
+		assertEquals("Tom", b.seat(1).getLastName());
+		assertEquals(1, b.sync.openConflicts().size());
+		b.actions().dismiss(row);
+		assertEquals(List.of(), b.sync.openConflicts(), "\"Erledigt\" bleibt");
+	}
+
+	/** Wie {@link #placeConflict}, danach storniert a Tom: Der eigene Sitz ist frei. */
+	private Row placeConflictOnAFreeSeat() {
+		placeConflict();
+		a.seat(1).clearCustomerData();
+		a.saveEvent();
+		settle();
+		return b.onlyRow();
+	}
+
+	@Test
+	void placeOnAFreeSeatMovesTheBookingThereAndAcknowledges() {
+		assertMovedToMySeat(placeConflictOnAFreeSeat());
+	}
+
+	@Test
+	void transferredPlaceOnAFreeSeatMovesTheBookingThereAndAcknowledges() {
+		assertMovedToMySeat(transferred(placeConflictOnAFreeSeat()));
+	}
+
+	private void assertMovedToMySeat(Row row) {
+		String miaId = b.seat(4).getId();
+		assertEquals(new Availability(true, ""), b.actions().availability(row));
+
+		b.actions().takeMyValue(row, "place");
+
+		assertEquals("Mia", b.seat(1).getLastName());
+		assertEquals(miaId, b.seat(1).getId());
+		assertFalse(b.seat(4).hasData(), "der fünfte Sitz ist wieder frei und hat seinen Platzhalter");
+		assertEquals(1, b.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId())).count());
+		assertEquals(List.of(), b.sync.openConflicts());
+		settle();
+		assertEquals("Mia", a.seat(1).getLastName(), "der andere Rechner bekommt den Umzug");
+		assertFalse(a.seat(4).hasData());
+		assertEquals(List.of(), a.sync.openConflicts());
+		assertEquals(List.of(), b.sync.openConflicts());
+	}
+
+	@Test
+	void failedPlaceMovePutsTheBookingBack() {
+		Row row = placeConflictOnAFreeSeat();
+		List<Booking> before = new ArrayList<>(b.friday().getBookings());
+
+		assertThrows(IllegalStateException.class, () -> b.actions(saved -> false, hall -> true).takeMyValue(row, "place"));
+
+		assertEquals(before, b.friday().getBookings(), "auch die Platzhalter beider Sitze sind wieder wie vorher");
+		assertEquals("Mia", b.seat(4).getLastName());
+		assertFalse(b.seat(1).hasData());
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	/** a storniert Mia inzwischen: Der Vermerk hat keinen Gegenstand mehr, auch nicht auf der gelöschten {@code _Mia}. */
+	@Test
+	void placeNoteOfACancelledBookingOffersNoAction() {
+		placeConflict();
+		String miaId = b.seat(4).getId();
+		a.seat(4).clearCustomerData();
+		a.saveEvent();
+		settle();
+
+		for (Row row : List.of(b.onlyRow(), transferred(b.onlyRow()))) {
+			assertEquals(new Availability(false, ConflictActions.NOT_NEEDED), b.actions().availability(row));
+			assertThrows(IllegalStateException.class, () -> b.actions().takeMyValue(row, "place"));
+		}
+		assertTrue(b.friday().getBookings().stream().noneMatch(booking -> miaId.equals(booking.getId()) && booking.hasData()),
+				"nichts wiederbelebt");
+	}
+
+	// <-- Vermerk "Platz" nach einem fremden Umzug
 }

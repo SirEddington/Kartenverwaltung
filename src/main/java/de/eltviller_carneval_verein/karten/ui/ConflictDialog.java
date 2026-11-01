@@ -360,14 +360,18 @@ public final class ConflictDialog {
 		return box;
 	}
 
-	/** Die Aktion einer Gruppe: der Knopf, oder "übernommen", wenn das Modell den eigenen Wert schon hat. */
+	/**
+	 * Die Aktion einer Gruppe: der Knopf, oder "übernommen", wenn das Modell den eigenen Wert schon hat. Bei der Gruppe
+	 * "Platz" heißt der Knopf "Platz zuweisen": Die Buchung zieht auf den eigenen Sitz um (KARV-94).
+	 */
 	private Node valueAction(Row row, FieldRow field, Availability available, boolean several, TableColumn<Row, Row> column) {
 		if (field.adopted()) {
 			Label adopted = new Label(several ? field.label() + ": übernommen" : "übernommen");
 			adopted.getStyleClass().add("conflict-adopted");
 			return adopted;
 		}
-		Button button = actionButton(TAKE_VALUE, available, () -> takeMyValue(row, field));
+		String text = field.group().equals("place") ? "Platz zuweisen" : TAKE_VALUE;
+		Button button = actionButton(text, available, () -> takeMyValue(row, field));
 		if (!several) {
 			return button;
 		}

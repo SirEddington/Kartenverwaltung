@@ -85,6 +85,10 @@ public final class ConflictActions {
 
 	/** Die Feldgruppe einer Vorstellung mit Halle und Bestuhlung ({@code FieldGroups}). */
 	private static final String HALL_GROUP = "hall";
+	/** Die Feldgruppe einer Buchung mit Sitz und Momentaufnahme ({@code FieldGroups}). */
+	private static final String PLACE_GROUP = "place";
+	/** Der Grund, wenn die Bestuhlung den eigenen Sitz eines Vermerks "Platz" nicht mehr hat. */
+	static final String SEAT_GONE = "Deinen Platz gibt es in dieser Bestuhlung nicht mehr.";
 
 	private record VersionRef(UnitKey unit, VersionId id) {
 	}
@@ -170,7 +174,7 @@ public final class ConflictActions {
 	/**
 	 * Ob die Aktion der Zeile gerade möglich ist: nicht bei einer Zeile ohne Aktion, nicht solange das Event bzw. die Halle
 	 * ungespeichert ist oder bearbeitet wird ({@link #BLOCKED}), nicht ohne Gegenstand
-	 * ({@link #NOT_NEEDED}).
+	 * ({@link #NOT_NEEDED}), beim Vermerk "Platz" nicht, solange der eigene Sitz belegt ist oder fehlt ({@link #placeRefusal}).
 	 */
 	public Availability availability(Row row) {
 		if (row.action() == Action.NONE) {
@@ -195,7 +199,43 @@ public final class ConflictActions {
 		case RESTORE_BOOKING -> restoreOf(row) != null;
 		case NONE -> false;
 		};
-		return subject ? ENABLED : IS_NOT_NEEDED;
+		if (!subject) {
+			return IS_NOT_NEEDED;
+		}
+		String refusal = row.action() == Action.TAKE_MY_VALUE ? placeRefusal(row) : null;
+		return refusal == null ? ENABLED : new Availability(false, refusal);
+	}
+
+	/**
+	 * Warum sich der eigene Platz eines Vermerks "Platz" nicht übernehmen lässt, wenn die Buchung inzwischen auf einem
+	 * anderen Sitz lebt (fremder Umzug, Ruling R31b): Die Vorstellung hat keine Bestuhlung, die Bestuhlung den Sitz nicht
+	 * mehr ({@link #SEAT_GONE}), oder auf ihm steht eine andere Buchung. Dann scheiterte die Aktion immer (KARV-94).
+	 *
+	 * @return der Grund; {@code null}, wenn der Umzug gelingen kann, die Buchung schon dort steht, der eigene Wert keinen Sitz
+	 *         hat oder der Vermerk keine Gruppe "Platz"
+	 */
+	private String placeRefusal(Row row) {
+		FieldConflict place = placeField(row.conflict().note());
+		String seatId = place == null ? null : text(place.mine(), "seatId", null);
+		if (seatId == null || !(valueTarget(row) instanceof Booking booking) || seatId.equals(booking.getSeatId())) {
+			return null;
+		}
+		Presentation presentation = booking.getParent();
+		SeatingPlan plan = planOf(presentation);
+		if (plan == null) {
+			return AssignPlaceDialog.noPlanText(presentation);
+		}
+		Seat seat = plan.findSeat(seatId);
+		if (seat == null) {
+			return SEAT_GONE;
+		}
+		return AssignPlaceDialog.freeSeats(presentation, plan).contains(seat) ? null : AssignPlaceDialog.takenText(seat);
+	}
+
+	/** Die Gruppe "Platz" des Vermerks; {@code null}, wenn er keine hat. */
+	private static FieldConflict placeField(ConflictNote note) {
+		return note == null ? null
+				: note.fields().stream().filter(field -> field.group().equals(PLACE_GROUP)).findFirst().orElse(null);
 	}
 
 	/**
@@ -381,8 +421,10 @@ public final class ConflictActions {
 	/**
 	 * Übernimmt den eigenen Wert einer Feldgruppe: Das Modell bekommt die Felder der Gruppe aus dem Vermerk
 	 * ({@link FieldConflict#mine()}), dann wird das Event gespeichert. Die Änderung gilt für die Einheit, auf die der Vermerk
-	 * sie übertragen hat ({@link ConflictNote#moved()}), sonst für die der Zeile. Hat der Vermerk nur eine Gruppe, ist die
-	 * Zeile danach bestätigt; bei mehreren erst, wenn jede Gruppe übernommen ist ({@link #isAdopted}), sonst bleibt sie offen.
+	 * sie übertragen hat ({@link ConflictNote#moved()}), sonst für die der Zeile; beim Vermerk "Platz" für die Einheit, auf der
+	 * die Buchung jetzt lebt ({@link #actionUnit}). Lebt sie dort auf einem anderen Sitz, zieht sie auf den eigenen um
+	 * ({@link #moveToMyPlace}). Hat der Vermerk nur eine Gruppe, ist die Zeile danach bestätigt; bei mehreren erst, wenn jede
+	 * Gruppe übernommen ist ({@link #isAdopted}), sonst bleibt sie offen.
 	 *
 	 * @throws IllegalStateException wenn die Aktion gesperrt ist, die Gruppe nicht zur Zeile gehört oder Ändern, Speichern
 	 *                               oder Bestätigen scheitert; nichts ist bestätigt. Das Modell ist wieder wie vorher, außer
@@ -397,8 +439,13 @@ public final class ConflictActions {
 		if (isAdopted(row.conflict(), group)) {
 			throw new IllegalStateException("Dieser Wert ist schon übernommen.");
 		}
-		UnitKey unit = row.conflict().target();
+		UnitKey unit = actionUnit(row.conflict());
 		Event event = events.findEvent(unit.eventId());
+		String seatId = PLACE_GROUP.equals(group) ? text(conflict.mine(), "seatId", null) : null;
+		if (seatId != null && valueTarget(row) instanceof Booking booking && !seatId.equals(booking.getSeatId())) {
+			moveToMyPlace(row, event, unit, booking, seatId);
+			return;
+		}
 		ObjectNode before = events.payloadOf(unit);
 		VersionId versionBefore = versionOf(unit);
 		saveOrUndo(unit, versionBefore, this::writtenDespite, () -> {
@@ -419,6 +466,39 @@ public final class ConflictActions {
 	}
 
 	/**
+	 * Der eigene Wert der Gruppe "Platz", wenn die Buchung inzwischen auf einem anderen Sitz lebt: Sie zieht auf den eigenen
+	 * Sitz wie beim Zuweisen ({@link BookingSync#assign}, die Momentaufnahme kommt vom Sitz), der bisherige bekommt wieder
+	 * einen leeren Platzhalter; dann wird das Event gespeichert und die Zeile bestätigt. Ein Vermerk "Platz" hat nur diese
+	 * eine Gruppe. {@link #placeRefusal} hat geprüft, dass Bestuhlung und Sitz da sind und der Sitz frei ist.
+	 */
+	private void moveToMyPlace(Row row, Event event, UnitKey unit, Booking booking, String seatId) {
+		Presentation presentation = booking.getParent();
+		SeatingPlan plan = planOf(presentation);
+		Seat seat = plan.findSeat(seatId);
+		Seat left = booking.getSeatId() == null ? null : plan.findSeat(booking.getSeatId());
+		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
+		Booking before = booking.copy();
+		UnitKey seatUnit = UnitKey.booking(event.getId(), presentation.getId(), seat.getId());
+		VersionId versionBefore = versionOf(seatUnit);
+		saveOrUndo(seatUnit, versionBefore, this::writtenDespite, () -> {
+			if (!BookingSync.assign(presentation, plan, booking, seat)) {
+				throw new IllegalStateException(AssignPlaceDialog.takenText(seat));
+			}
+			if (left != null) {
+				presentation.addBooking().takeSnapshot(left.getParent(), left);
+			}
+			save(event);
+		}, e -> {
+			// die Buchung wieder auf ihrem Sitz, und die Platzhalter beider Sitze wieder wie vorher
+			booking.copyFrom(before);
+			presentation.getBookings().clear();
+			presentation.getBookings().addAll(bookingsBefore);
+		});
+		events.announceChange(event, Set.of(unit, seatUnit));
+		acknowledge(row);
+	}
+
+	/**
 	 * Ob das Modell den eigenen Wert der Feldgruppe schon hat ("übernommen"): Jedes Feld des eigenen Werts aus dem Vermerk
 	 * steht so im Modell der Einheit, auf der die Aktion wirkt. Abgeleitet aus dem Modell, nichts davon ist gespeichert.
 	 * Nur für Feldkonflikte von Event, Vorstellung und Buchung; sonst und bei einer Gruppe ohne Felder {@code false}.
@@ -435,7 +515,7 @@ public final class ConflictActions {
 		}
 		ObjectNode payload;
 		try {
-			payload = payloadOf(conflict.target());
+			payload = payloadOf(actionUnit(conflict));
 		} catch (IllegalStateException e) {
 			return false;
 		}
@@ -554,13 +634,51 @@ public final class ConflictActions {
 		if (row.conflict().note() == null) {
 			return null;
 		}
-		Object model = events.modelObject(row.conflict().target());
+		Object model = events.modelObject(actionUnit(row.conflict()));
 		if (model instanceof Booking booking) {
-			Version version = dropped(row.conflict());
-			return booking.hasData() && version != null && !version.deleted()
-					&& booking.getId().equals(ConflictInput.bookingIdOf(version.payload())) ? booking : null;
+			return booking.hasData() && booking.getId().equals(bookingIdOf(row.conflict())) ? booking : null;
 		}
 		return model;
+	}
+
+	/**
+	 * Die Kennung der Buchung, der der Vermerk gilt: die der weichenden Version; {@code null}, wenn sie sich nicht lesen lässt
+	 * oder eine Löschung ist. Beim Vermerk "Platz" auf {@code _<ID>} die aus der Einheit: Die weichende Version liegt dann auf
+	 * dem Sitz, auf dem das eigene Zuweisen verloren hat, und keine Einheit des Vermerks führt dorthin.
+	 */
+	private String bookingIdOf(OpenConflict conflict) {
+		UnitKey target = conflict.target();
+		if (target.isUnassigned() && placeField(conflict.note()) != null) {
+			return target.unassignedBookingId();
+		}
+		Version version = dropped(conflict);
+		return version == null || version.deleted() ? null : ConflictInput.bookingIdOf(version.payload());
+	}
+
+	/**
+	 * Die Einheit, auf der die Aktion wirkt: {@link OpenConflict#target()}. Steht ein Vermerk "Platz" auf einer Buchung "ohne
+	 * Platz" ({@code _<ID>}), die ein anderer Rechner inzwischen auf einen Sitz gesetzt hat (Ruling R31b, die Einheit ist
+	 * gelöscht), wirkt sie auf dem Sitz, auf dem die Buchung jetzt lebt; auf der gelöschten Einheit selbst gibt es nichts zu
+	 * tun (KARV-94).
+	 */
+	private UnitKey actionUnit(OpenConflict conflict) {
+		UnitKey target = conflict.target();
+		if (!target.isUnassigned() || placeField(conflict.note()) == null || events.modelObject(target) != null) {
+			return target;
+		}
+		Event event = events.findEvent(target.eventId());
+		Presentation presentation = event == null ? null : event.findPresentation(target.presentationId());
+		if (presentation == null || presentation.getBookings() == null) {
+			return target;
+		}
+		String bookingId = target.unassignedBookingId();
+		for (Booking booking : presentation.getBookings()) {
+			if (booking.hasData() && !booking.isUnassigned() && booking.getSeatId() != null
+					&& bookingId.equals(booking.getId())) {
+				return UnitKey.booking(target.eventId(), target.presentationId(), booking.getSeatId());
+			}
+		}
+		return target;
 	}
 
 	/** Die Halle im Modell, die die eigene Fassung ersetzt; {@code null}, wenn es sie nicht gibt oder sie schon so ist. */
