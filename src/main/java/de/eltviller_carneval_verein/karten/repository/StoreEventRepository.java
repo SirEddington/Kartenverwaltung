@@ -440,6 +440,14 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
+	 * Die Einheit, in die das Speichern die Buchung der Vorstellung schreibt: ihr Sitz, wenn sie einen hat und nicht "ohne
+	 * Platz" ist, sonst {@code _<ID>}.
+	 */
+	public UnitKey unitOf(String eventId, String presentationId, Booking booking) {
+		return UnitMapper.bookingKey(eventId, presentationId, booking);
+	}
+
+	/**
 	 * Der Inhalt, den das Modell für die Einheit hätte, wenn es jetzt gespeichert würde; {@code null}, wenn es sie im Modell
 	 * nicht gibt oder sie leer ist (eine Buchung ohne Daten wird nie geschrieben).
 	 *

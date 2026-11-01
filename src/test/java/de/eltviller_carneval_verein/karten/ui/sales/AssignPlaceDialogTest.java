@@ -1,6 +1,8 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
@@ -51,6 +53,8 @@ class AssignPlaceDialogTest {
 		bookingOf(a1s1).setPrice(1800); // ein bloßer Einzelpreis belegt den Sitz nicht
 
 		assertEquals(List.of(a1s1, a2s2, b1s1), AssignPlaceDialog.freeSeats(presentation, plan));
+		assertFalse(AssignPlaceDialog.isFree(presentation, a2s1));
+		assertTrue(AssignPlaceDialog.isFree(presentation, a1s1), "wie bei freeSeats belegt ein Einzelpreis nicht");
 	}
 
 	@Test

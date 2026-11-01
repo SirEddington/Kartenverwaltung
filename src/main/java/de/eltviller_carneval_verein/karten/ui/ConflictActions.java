@@ -88,7 +88,7 @@ public final class ConflictActions {
 	/** Die Feldgruppe einer Buchung mit Sitz und Momentaufnahme ({@code FieldGroups}). */
 	static final String PLACE_GROUP = "place";
 	/** Der Grund, wenn die Bestuhlung den eigenen Sitz eines Vermerks "Platz" nicht mehr hat. */
-	static final String SEAT_GONE = "Deinen Platz gibt es in dieser Bestuhlung nicht mehr.";
+	private static final String SEAT_GONE ="Deinen Platz gibt es in dieser Bestuhlung nicht mehr.";
 
 	private record VersionRef(UnitKey unit, VersionId id) {
 	}
@@ -174,7 +174,8 @@ public final class ConflictActions {
 	/**
 	 * Ob die Aktion der Zeile gerade möglich ist: nicht bei einer Zeile ohne Aktion, nicht solange das Event bzw. die Halle
 	 * ungespeichert ist oder bearbeitet wird ({@link #BLOCKED}), nicht ohne Gegenstand
-	 * ({@link #NOT_NEEDED}), beim Vermerk "Platz" nicht, solange der eigene Sitz belegt ist oder fehlt ({@link #placeRefusal}).
+	 * ({@link #NOT_NEEDED}), beim Vermerk "Platz" nicht, solange sich der eigene Sitz nicht übernehmen lässt
+	 * ({@link #placeRefusal}).
 	 */
 	public Availability availability(Row row) {
 		if (row.action() == Action.NONE) {
@@ -192,9 +193,10 @@ public final class ConflictActions {
 				return IS_BLOCKED;
 			}
 		}
+		Object target = row.action() == Action.TAKE_MY_VALUE ? valueTarget(row) : null;
 		boolean subject = switch (row.action()) {
 		case ASSIGN_PLACE -> bookingToAssign(row) != null;
-		case TAKE_MY_VALUE -> valueTarget(row) != null && !allAdopted(row.conflict());
+		case TAKE_MY_VALUE -> target != null && !allAdopted(row.conflict());
 		case TAKE_MY_HALL -> hallToReplace(row) != null;
 		case RESTORE_BOOKING -> restoreOf(row) != null;
 		case NONE -> false;
@@ -202,7 +204,7 @@ public final class ConflictActions {
 		if (!subject) {
 			return IS_NOT_NEEDED;
 		}
-		String refusal = row.action() == Action.TAKE_MY_VALUE ? placeRefusal(row) : null;
+		String refusal = target instanceof Booking booking ? placeRefusal(row, booking) : null;
 		return refusal == null ? ENABLED : new Availability(false, refusal);
 	}
 
@@ -211,16 +213,17 @@ public final class ConflictActions {
 	 * anderen Sitz lebt (fremder Umzug, Ruling R31b): Die Vorstellung hat keine Bestuhlung, die Bestuhlung den Sitz nicht
 	 * mehr ({@link #SEAT_GONE}), oder auf ihm steht eine andere Buchung. Dann scheiterte die Aktion immer (KARV-94).
 	 *
+	 * @param booking die Buchung, die die eigenen Felder bekommt ({@link #valueTarget})
 	 * @return der Grund; {@code null}, wenn der Umzug gelingen kann, die Buchung schon dort steht, der eigene Wert keinen Sitz
 	 *         hat oder der Vermerk keine Gruppe "Platz"
 	 */
-	private String placeRefusal(Row row) {
-		FieldConflict place = placeField(row.conflict().note());
-		String seatId = place == null ? null : text(place.mine(), "seatId", null);
-		if (seatId == null || !(valueTarget(row) instanceof Booking booking) || sitsOn(booking, seatId)) {
+	private String placeRefusal(Row row, Booking booking) {
+		String seatId = mySeatId(row.conflict().note());
+		if (seatId == null || seatId.equals(seatIdOf(booking))) {
 			return null;
 		}
-		Presentation presentation = presentationOf(actionUnit(row.conflict()));
+		// actionUnit wechselt nur den Sitz, nie die Vorstellung
+		Presentation presentation = presentationOf(row.conflict().target());
 		SeatingPlan plan = planOf(presentation);
 		if (plan == null) {
 			return AssignPlaceDialog.noPlanText(presentation);
@@ -229,21 +232,27 @@ public final class ConflictActions {
 		if (seat == null) {
 			return SEAT_GONE;
 		}
-		return AssignPlaceDialog.freeSeats(presentation, plan).contains(seat) ? null : AssignPlaceDialog.takenText(seat);
+		return AssignPlaceDialog.isFree(presentation, seat) ? null : AssignPlaceDialog.takenText(seat);
 	}
 
-	/** Die Gruppe "Platz" des Vermerks; {@code null}, wenn er keine hat. */
-	private static FieldConflict placeField(ConflictNote note) {
+	/** Der eigene Sitz eines Vermerks "Platz"; {@code null} ohne die Gruppe oder wenn der eigene Wert "ohne Platz" ist. */
+	private static String mySeatId(ConflictNote note) {
+		FieldConflict place = fieldOf(note, PLACE_GROUP);
+		return place == null ? null : text(place.mine(), "seatId", null);
+	}
+
+	/** Die Feldgruppe des Vermerks; {@code null} ohne Vermerk oder wenn er die Gruppe nicht hat. */
+	private static FieldConflict fieldOf(ConflictNote note, String group) {
 		return note == null ? null
-				: note.fields().stream().filter(field -> field.group().equals(PLACE_GROUP)).findFirst().orElse(null);
+				: note.fields().stream().filter(field -> field.group().equals(group)).findFirst().orElse(null);
 	}
 
 	/**
-	 * Ob die Buchung auf dem Sitz steht; eine Buchung "ohne Platz" steht auf keinem, auch wenn sie die Sitz-ID von früher
-	 * behält (Abgleich ohne Bestuhlung, {@link BookingSync#sync}).
+	 * Der Sitz, auf dem die Buchung steht; {@code null} "ohne Platz", auch wenn sie die Sitz-ID von früher behält (Abgleich
+	 * ohne Bestuhlung, {@link BookingSync#sync}). Dieselbe Regel wie beim Zerlegen ({@link StoreEventRepository#unitOf}).
 	 */
-	private static boolean sitsOn(Booking booking, String seatId) {
-		return !booking.isUnassigned() && seatId.equals(booking.getSeatId());
+	private static String seatIdOf(Booking booking) {
+		return booking.isUnassigned() ? null : booking.getSeatId();
 	}
 
 	/**
@@ -276,8 +285,8 @@ public final class ConflictActions {
 	 * das Event und bestätigt die Zeile.
 	 *
 	 * @param seat ein Sitz der Bestuhlung aus {@link #planOf}
-	 * @throws IllegalStateException wenn die Aktion gesperrt ist, der Sitz inzwischen belegt ist ({@code "<Platz> ist
-	 *                               inzwischen belegt. Wähle einen anderen Platz."}) oder Speichern oder Bestätigen scheitert;
+	 * @throws IllegalStateException wenn die Aktion gesperrt ist, der Sitz inzwischen belegt ist
+	 *                               ({@link AssignPlaceDialog#takenText}) oder Speichern oder Bestätigen scheitert;
 	 *                               nichts ist bestätigt. Das Modell ist wieder wie vorher, außer die Zuweisung wurde schon
 	 *                               geschrieben: Dann bleibt es, und der Text beginnt mit "Gespeichert. Der Konflikt ließ sich
 	 *                               aber nicht abschließen".
@@ -305,7 +314,8 @@ public final class ConflictActions {
 	 */
 	private void assignAndSave(Row row, Event event, Presentation presentation, SeatingPlan plan, Booking booking, Seat seat,
 			UnitKey from) {
-		Seat left = booking.isUnassigned() || booking.getSeatId() == null ? null : plan.findSeat(booking.getSeatId());
+		String leftId = seatIdOf(booking);
+		Seat left = leftId == null ? null : plan.findSeat(leftId);
 		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
 		Booking before = booking.copy();
 		UnitKey seatUnit = UnitKey.booking(event.getId(), presentation.getId(), seat.getId());
@@ -354,8 +364,7 @@ public final class ConflictActions {
 			return null;
 		}
 		UnitKey unit = row.conflict().target();
-		FieldConflict field = row.conflict().note().fields().stream().filter(candidate -> candidate.group().equals(group))
-				.findFirst().orElse(null);
+		FieldConflict field = fieldOf(row.conflict().note(), group);
 		if (unit.type() != UnitType.PRESENTATION || field == null || !(events.modelObject(unit) instanceof Presentation presentation)) {
 			return null;
 		}
@@ -459,19 +468,20 @@ public final class ConflictActions {
 	 */
 	public void takeMyValue(Row row, String group) {
 		require(row, Action.TAKE_MY_VALUE);
-		FieldConflict conflict = row.conflict().note().fields().stream().filter(field -> field.group().equals(group))
-				.findFirst().orElseThrow(() -> new IllegalStateException(
-						"Die Gruppe \"" + group + "\" gehört nicht zu diesem Konflikt."));
+		FieldConflict conflict = fieldOf(row.conflict().note(), group);
+		if (conflict == null) {
+			throw new IllegalStateException("Die Gruppe \"" + group + "\" gehört nicht zu diesem Konflikt.");
+		}
 		if (isAdopted(row.conflict(), group)) {
 			throw new IllegalStateException("Dieser Wert ist schon übernommen.");
 		}
 		UnitKey unit = actionUnit(row.conflict());
 		Event event = events.findEvent(unit.eventId());
-		String seatId = PLACE_GROUP.equals(group) ? text(conflict.mine(), "seatId", null) : null;
-		if (seatId != null && valueTarget(row) instanceof Booking booking && !sitsOn(booking, seatId)) {
+		String seatId = PLACE_GROUP.equals(group) ? mySeatId(row.conflict().note()) : null;
+		if (seatId != null && valueTarget(row) instanceof Booking booking && !seatId.equals(seatIdOf(booking))) {
 			// die Buchung zieht auf den eigenen Sitz um; placeRefusal hat geprüft, dass Bestuhlung und Sitz da sind und er frei
 			// ist. Ein Vermerk "Platz" hat nur diese eine Gruppe.
-			Presentation presentation = presentationOf(unit);
+			Presentation presentation = event.findPresentation(unit.presentationId());
 			SeatingPlan plan = planOf(presentation);
 			assignAndSave(row, event, presentation, plan, booking, plan.findSeat(seatId), unit);
 			return;
@@ -505,8 +515,7 @@ public final class ConflictActions {
 		if (note == null || note.kind() != ConflictNote.Kind.FIELDS || conflict.unit().type() == UnitType.HALL) {
 			return false;
 		}
-		FieldConflict field = note.fields().stream().filter(candidate -> candidate.group().equals(group)).findFirst()
-				.orElse(null);
+		FieldConflict field = fieldOf(note, group);
 		if (field == null || field.mine().isEmpty()) {
 			return false;
 		}
@@ -645,7 +654,7 @@ public final class ConflictActions {
 	 */
 	private String bookingIdOf(OpenConflict conflict) {
 		UnitKey target = conflict.target();
-		if (target.isUnassigned() && placeField(conflict.note()) != null) {
+		if (target.isUnassigned() && fieldOf(conflict.note(), PLACE_GROUP) != null) {
 			return target.unassignedBookingId();
 		}
 		Version version = dropped(conflict);
@@ -660,7 +669,7 @@ public final class ConflictActions {
 	 */
 	private UnitKey actionUnit(OpenConflict conflict) {
 		UnitKey target = conflict.target();
-		if (target.type() != UnitType.BOOKING || placeField(conflict.note()) == null) {
+		if (target.type() != UnitType.BOOKING || fieldOf(conflict.note(), PLACE_GROUP) == null) {
 			return target;
 		}
 		String bookingId = bookingIdOf(conflict);
@@ -670,9 +679,7 @@ public final class ConflictActions {
 		}
 		for (Booking booking : presentation.getBookings()) {
 			if (booking.hasData() && bookingId.equals(booking.getId())) {
-				return booking.isUnassigned() || booking.getSeatId() == null
-						? UnitKey.unassignedBooking(target.eventId(), target.presentationId(), bookingId)
-						: UnitKey.booking(target.eventId(), target.presentationId(), booking.getSeatId());
+				return events.unitOf(target.eventId(), target.presentationId(), booking);
 			}
 		}
 		return target;

@@ -62,6 +62,7 @@ public final class ConflictDialog {
 	private static final double MIN_HEIGHT = 320;
 	private static final String TAKE_VALUE = "Meinen Wert übernehmen";
 	private static final String TAKE_HALL = "Meine Fassung übernehmen";
+	private static final String ASSIGN_PLACE = "Platz zuweisen";
 
 	/** Das eine Fenster der App; {@code null}, solange keins offen war. */
 	private static ConflictDialog open;
@@ -338,7 +339,7 @@ public final class ConflictDialog {
 		box.setAlignment(Pos.CENTER_LEFT);
 		Availability available = availability.getOrDefault(row.conflict().key(), new Availability(false, ""));
 		switch (row.action()) {
-		case ASSIGN_PLACE -> box.getChildren().add(actionButton("Platz zuweisen", available, () -> assignPlace(row)));
+		case ASSIGN_PLACE -> box.getChildren().add(actionButton(ASSIGN_PLACE, available, () -> assignPlace(row)));
 		case TAKE_MY_HALL -> box.getChildren().add(actionButton(TAKE_HALL, available, () -> takeMyHall(row)));
 		case RESTORE_BOOKING -> box.getChildren()
 				.add(actionButton("Buchung wiederherstellen", available, () -> run(row, () -> actions.restoreBooking(row))));
@@ -370,7 +371,7 @@ public final class ConflictDialog {
 			adopted.getStyleClass().add("conflict-adopted");
 			return adopted;
 		}
-		String text = field.group().equals(ConflictActions.PLACE_GROUP) ? "Platz zuweisen" : TAKE_VALUE;
+		String text = field.group().equals(ConflictActions.PLACE_GROUP) ? ASSIGN_PLACE : TAKE_VALUE;
 		Button button = actionButton(text, available, () -> takeMyValue(row, field));
 		if (!several) {
 			return button;

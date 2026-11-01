@@ -112,6 +112,19 @@ public final class AssignPlaceDialog {
 		if (plan == null) {
 			return List.of();
 		}
+		Set<String> taken = takenSeatIds(presentation);
+		Comparator<Seat> order = Comparator.comparing((Seat seat) -> seat.getParent().getRowLabel(), Booking.ROW_LABEL_ORDER)
+				.thenComparingInt(seat -> seat.getParent().getTableNumber()).thenComparingInt(Seat::getSeatNumber);
+		return plan.getSeats().stream().filter(seat -> !taken.contains(seat.getId())).sorted(order).toList();
+	}
+
+	/** Ob der Sitz frei ist wie bei {@link #freeSeats}, ohne alle freien Sitze zu sammeln und zu sortieren. */
+	public static boolean isFree(Presentation presentation, Seat seat) {
+		return !takenSeatIds(presentation).contains(seat.getId());
+	}
+
+	/** Die Sitze, auf die eine Buchung der Vorstellung mit Daten zeigt. */
+	private static Set<String> takenSeatIds(Presentation presentation) {
 		Set<String> taken = new HashSet<>();
 		if (presentation != null && presentation.getBookings() != null) {
 			for (Booking booking : presentation.getBookings()) {
@@ -120,9 +133,7 @@ public final class AssignPlaceDialog {
 				}
 			}
 		}
-		Comparator<Seat> order = Comparator.comparing((Seat seat) -> seat.getParent().getRowLabel(), Booking.ROW_LABEL_ORDER)
-				.thenComparingInt(seat -> seat.getParent().getTableNumber()).thenComparingInt(Seat::getSeatNumber);
-		return plan.getSeats().stream().filter(seat -> !taken.contains(seat.getId())).sorted(order).toList();
+		return taken;
 	}
 
 	/** "Tisch A3, Sitz 2" bzw. "Tisch 3, Sitz 2" ohne Reihenbuchstaben. */

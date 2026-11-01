@@ -312,7 +312,7 @@ final class UnitMapper {
 	}
 
 	/** Der Schlüssel einer Buchung: auf dem Sitz, wenn sie einen hat und nicht "ohne Platz" ist, sonst über ihre Kennung. */
-	private static UnitKey bookingKey(String eventId, String presentationId, Booking booking) {
+	static UnitKey bookingKey(String eventId, String presentationId, Booking booking) {
 		if (booking.getSeatId() != null && !booking.isUnassigned()) {
 			return UnitKey.booking(eventId, presentationId, booking.getSeatId());
 		}

@@ -28,6 +28,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -1091,18 +1093,11 @@ class ConflictActionsTest {
 				row.kindText(), row.entry(), row.counterpart(), row.at(), row.fields(), row.action(), row.group());
 	}
 
-	@Test
-	void placeOnATakenSeatOffersNoActionThatMustFail() {
-		assertTakenSeatIsRefused(placeConflict());
-	}
-
-	/** Der Ablauf aus KARV-94: Ohne Prüfung setzte die Aktion Mia auf Toms Sitz, und das Zerlegen scheiterte. */
-	@Test
-	void transferredPlaceOnATakenSeatOffersNoActionThatMustFail() {
-		assertTakenSeatIsRefused(transferred(placeConflict()));
-	}
-
-	private void assertTakenSeatIsRefused(Row row) {
+	/** Beide Formen des Vermerks; mit Übertragung ist es der Ablauf aus KARV-94 (die Aktion setzte Mia auf Toms Sitz). */
+	@ParameterizedTest(name = "übertragen: {0}")
+	@ValueSource(booleans = { false, true })
+	void placeOnATakenSeatOffersNoActionThatMustFail(boolean transfer) {
+		Row row = transfer ? transferred(placeConflict()) : placeConflict();
 		String taken = AssignPlaceDialog.takenText(b.plan().getSeats().get(1));
 
 		assertEquals(new Availability(false, taken), b.actions().availability(row));
@@ -1125,14 +1120,25 @@ class ConflictActionsTest {
 		return b.onlyRow();
 	}
 
-	@Test
-	void placeOnAFreeSeatMovesTheBookingThereAndAcknowledges() {
-		assertMovedToMySeat(placeConflictOnAFreeSeat());
-	}
+	@ParameterizedTest(name = "übertragen: {0}")
+	@ValueSource(booleans = { false, true })
+	void placeOnAFreeSeatMovesTheBookingThereAndAcknowledges(boolean transfer) {
+		Row row = transfer ? transferred(placeConflictOnAFreeSeat()) : placeConflictOnAFreeSeat();
+		String miaId = b.seat(4).getId();
+		assertEquals(new Availability(true, ""), b.actions().availability(row));
 
-	@Test
-	void transferredPlaceOnAFreeSeatMovesTheBookingThereAndAcknowledges() {
-		assertMovedToMySeat(transferred(placeConflictOnAFreeSeat()));
+		b.actions().takeMyValue(row, "place");
+
+		assertEquals("Mia", b.seat(1).getLastName());
+		assertEquals(miaId, b.seat(1).getId());
+		assertFalse(b.seat(4).hasData(), "der fünfte Sitz ist wieder frei und hat seinen Platzhalter");
+		assertEquals(1, b.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId())).count());
+		assertEquals(List.of(), b.sync.openConflicts());
+		settle();
+		assertEquals("Mia", a.seat(1).getLastName(), "der andere Rechner bekommt den Umzug");
+		assertFalse(a.seat(4).hasData());
+		assertEquals(List.of(), a.sync.openConflicts());
+		assertEquals(List.of(), b.sync.openConflicts());
 	}
 
 	/** a setzt Mia nach dem Vermerk weiter auf den sechsten Sitz: Die Aktion folgt ihr dorthin, statt "erledigt" zu melden. */
@@ -1155,24 +1161,6 @@ class ConflictActionsTest {
 		assertEquals(miaId, b.seat(1).getId());
 		assertFalse(b.seat(5).hasData(), "der sechste Sitz ist wieder frei");
 		assertFalse(b.seat(4).hasData());
-		assertEquals(List.of(), b.sync.openConflicts());
-	}
-
-	private void assertMovedToMySeat(Row row) {
-		String miaId = b.seat(4).getId();
-		assertEquals(new Availability(true, ""), b.actions().availability(row));
-
-		b.actions().takeMyValue(row, "place");
-
-		assertEquals("Mia", b.seat(1).getLastName());
-		assertEquals(miaId, b.seat(1).getId());
-		assertFalse(b.seat(4).hasData(), "der fünfte Sitz ist wieder frei und hat seinen Platzhalter");
-		assertEquals(1, b.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId())).count());
-		assertEquals(List.of(), b.sync.openConflicts());
-		settle();
-		assertEquals("Mia", a.seat(1).getLastName(), "der andere Rechner bekommt den Umzug");
-		assertFalse(a.seat(4).hasData());
-		assertEquals(List.of(), a.sync.openConflicts());
 		assertEquals(List.of(), b.sync.openConflicts());
 	}
 
