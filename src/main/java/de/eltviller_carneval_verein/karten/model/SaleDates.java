@@ -15,6 +15,13 @@ import java.util.function.Consumer;
  * ohne Aktion. Ändert die Änderung selbst ein Datum (der Nutzer tippt es im selben Schritt), gilt dieses.
  *
  * <p>
+ * Genauso der gezahlte Betrag ({@link Booking#getPaidAmount()}): Wechselt die Buchung auf "bezahlt", wird er der
+ * geltende Preis nach der Änderung (ein im selben Schritt geänderter Preis zählt), es sei denn, die Änderung setzt ihn
+ * selbst. Ein Wechsel der Zahlart lässt ihn stehen. Eine offene Buchung trägt nach der Änderung nie einen Betrag. Ändert
+ * sich der Preis einer schon bezahlten Buchung ohne Betrag (älterer Stand), wird der bisherige Preis festgehalten; sonst
+ * wanderte der Betrag still mit. Deshalb laufen auch Preisänderungen über {@link #change}.
+ *
+ * <p>
  * Die Setter von {@link Booking} tun das nicht selbst, denn Jackson ruft sie beim Laden auf: Ältere Dateien bekämen
  * sonst beim Laden den heutigen Tag.
  */
@@ -36,8 +43,19 @@ public final class SaleDates {
 		LocalDate reservationDate = booking.getReservationDate();
 		LocalDate paymentDate = booking.getPaymentDate();
 		LocalDate collectionDate = booking.getCollectionDate();
+		Integer paidAmount = booking.getPaidAmount();
+		int price = booking.getEffectivePrice();
 
 		edit.accept(booking);
+
+		boolean amountUntouched = Objects.equals(paidAmount, booking.getPaidAmount());
+		if (!booking.isPaid()) {
+			booking.setPaidAmount(null);
+		} else if (!wasPaid && amountUntouched) {
+			booking.setPaidAmount(booking.getEffectivePrice());
+		} else if (wasPaid && amountUntouched && paidAmount == null && booking.getEffectivePrice() != price) {
+			booking.setPaidAmount(price);
+		}
 
 		if (!wasReserved && booking.isReserved() && Objects.equals(reservationDate, booking.getReservationDate())) {
 			booking.setReservationDate(today);

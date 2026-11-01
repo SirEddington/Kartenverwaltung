@@ -17,7 +17,7 @@ final class FieldGroups {
 			group("customer", "lastName", "firstName", "email"),
 			group("place", "seatId", "rowLabel", "tableNumber", "seatNumber", "category", "wheelchairAccessible",
 					"unassigned"),
-			group("payment", "paymentStatus", "paymentDate"),
+			group("payment", "paymentStatus", "paymentDate", "paidAmount"),
 			group("collection", "collected", "collectionDate"),
 			group("price", "price"),
 			group("reservation", "reservationDate"),
