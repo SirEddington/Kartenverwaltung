@@ -2374,5 +2374,76 @@ class StoreEventRepositoryForeignTest {
 		assertTrue(withId(friday, bookingId).stream().noneMatch(Booking::hasData), "nach der Bearbeitung gilt die Stornierung");
 	}
 
+	/**
+	 * Der andere verkauft den fünften und sechsten Sitz ("X" und "Y") und speichert beides auf einmal; ich habe beide Sitze
+	 * gleichzeitig aus der Halle entfernt und meine Vorstellung abgeglichen.
+	 *
+	 * @return die beiden Sitz-Einheiten
+	 */
+	private List<UnitKey> twoSeatsRemovedAgainstTwoSales() {
+		Other other = other();
+		seat(other.friday(), 4).setLastName("X");
+		seat(other.friday(), 5).setLastName("Y");
+		List<UnitKey> units = List.of(seatUnit(friday, 4), seatUnit(friday, 5));
+		Seat fifth = planSeat(4);
+		Seat sixth = planSeat(5);
+		fifth.getParent().deleteSeat(fifth);
+		sixth.getParent().deleteSeat(sixth);
+		mine.deriving(event, () -> BookingSync.sync(friday, plan));
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+		other.save();
+		return units;
+	}
+
+	private List<String> soldNames(Presentation presentation) {
+		return presentation.getBookings().stream().filter(Booking::hasData).map(Booking::getLastName).sorted().toList();
+	}
+
+	/**
+	 * Wie in der App hängt "Halle aktuell" an den ungespeicherten Buchungen ihrer Vorstellungen ({@code hasUnsavedBookings}
+	 * über {@link StoreEventRepository#locallyChangedUnits}). Die Antwort gilt für das ganze Einarbeiten des Events: Sonst
+	 * sähe die erste übernommene Buchung, bis ihr Abgleich gemerkt ist, wie eine Eingabe aus und hielte die zweite fest, und
+	 * das Nachspielen auf der Kopie fragte später erneut und übernähme sie doch.
+	 */
+	@Test
+	void twoDisplacedBookingsInOneBatchAreBothAdoptedWithAppLikeHallCurrent() throws IOException {
+		List<UnitKey> units = twoSeatsRemovedAgainstTwoSales();
+		AtomicInteger asked = new AtomicInteger();
+		mine.setHallCurrent(id -> {
+			asked.incrementAndGet();
+			return mine.locallyChangedUnits().isEmpty();
+		});
+		ObjectMapper mapper = JsonMapperFactory.create();
+		Event copy = mapper.readValue(mapper.writeValueAsBytes(event), Event.class);
+
+		ForeignResult result = mine.applyForeign(units);
+
+		assertEquals(List.of("Müller", "X", "Y"), soldNames(friday), "beide übernommen, ohne Platz");
+		assertEquals(2, result.warnings().size(), result.warnings().toString());
+		assertTrue(result.deferred().isEmpty());
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+		assertEquals(1, asked.get(), "einmal je Halle und Einarbeiten");
+		recorder.batches.get(0).replayOn(copy);
+		assertEquals(mapper.valueToTree(event), mapper.valueToTree(copy), "die Kopie bekommt dieselben Antworten");
+		assertEquals(1, asked.get(), "auch das Nachspielen fragt nicht erneut");
+	}
+
+	@Test
+	void loadingAsksOncePerHall() {
+		twoSeatsRemovedAgainstTwoSales();
+		StoreEventRepository fresh = TestRepositories.events(sync);
+		fresh.setHallLookup(id -> hall.getId().equals(id) ? hall : null);
+		AtomicInteger asked = new AtomicInteger();
+		fresh.setHallCurrent(id -> {
+			asked.incrementAndGet();
+			return true;
+		});
+
+		Event loaded = fresh.loadEvents().get(0);
+
+		assertEquals(List.of("Müller", "X", "Y"), soldNames(loaded.getPresentations().get(0)));
+		assertEquals(1, asked.get(), "einmal je Halle und Laden");
+	}
+
 	// <-- Buchung ohne Platz statt Warten
 }

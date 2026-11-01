@@ -514,7 +514,7 @@ class EventMergeTest {
 		UnitSnapshot presentation = foreign(state, UnitKey.presentation(event.getId(), friday.getId()));
 		UnitSnapshot booking = foreign(state, UnitKey.booking(event.getId(), friday.getId(), seatOf(hall)));
 
-		assertFalse(EventMerge.placeable(event, booking, presentation, lookup(hall, other)));
+		assertFalse(EventMerge.placeable(event, booking, presentation, lookup(hall, other), id -> false));
 	}
 
 	@Test
@@ -527,11 +527,12 @@ class EventMergeTest {
 		UnitSnapshot presentation = foreign(state, UnitKey.presentation(event.getId(), friday.getId()));
 		UnitSnapshot booking = foreign(state, UnitKey.booking(event.getId(), friday.getId(), seatOf(hall)));
 
-		assertTrue(EventMerge.placeable(event, booking, presentation, lookup(hall)));
-		assertFalse(EventMerge.placeable(event, booking, null, lookup(hall)), "ohne Index-Stand der Vorstellung nicht");
-		assertFalse(EventMerge.placeable(event, booking, deleted(presentation.unit()), lookup(hall)),
+		assertTrue(EventMerge.placeable(event, booking, presentation, lookup(hall), id -> false));
+		assertFalse(EventMerge.placeable(event, booking, null, lookup(hall), id -> false),
+				"ohne Index-Stand der Vorstellung nicht");
+		assertFalse(EventMerge.placeable(event, booking, deleted(presentation.unit()), lookup(hall), id -> false),
 				"mit gelöschter Vorstellung nicht");
-		assertFalse(EventMerge.placeable(event, booking, presentation, lookup()), "ohne die Halle nicht");
+		assertFalse(EventMerge.placeable(event, booking, presentation, lookup(), id -> false), "ohne die Halle nicht");
 	}
 
 	@Test
@@ -552,8 +553,8 @@ class EventMergeTest {
 		UnitSnapshot elsewhereUnit = foreign(state,
 				UnitKey.unassignedBooking(event.getId(), friday.getId(), elsewhere.getId()));
 
-		assertFalse(EventMerge.placeable(event, matchingUnit, presentation, lookup(hall)));
-		assertTrue(EventMerge.placeable(event, elsewhereUnit, presentation, lookup(hall)),
+		assertFalse(EventMerge.placeable(event, matchingUnit, presentation, lookup(hall), id -> false));
+		assertTrue(EventMerge.placeable(event, elsewhereUnit, presentation, lookup(hall), id -> false),
 				"trifft sie keinen Sitz, bleibt sie ohne Platz");
 	}
 
@@ -570,7 +571,7 @@ class EventMergeTest {
 		UnitSnapshot presentation = foreign(state, UnitKey.presentation(event.getId(), friday.getId()));
 		UnitSnapshot unit = foreign(state, UnitKey.unassignedBooking(event.getId(), friday.getId(), matching.getId()));
 
-		assertTrue(EventMerge.placeable(event, unit, presentation, lookup(hall)));
+		assertTrue(EventMerge.placeable(event, unit, presentation, lookup(hall), id -> false));
 	}
 
 	/** Ein Event mit einer Vorstellung "Freitag" in der Halle, abgeglichen (der Platzhalter ihres einen Sitzes steht da). */
@@ -596,7 +597,6 @@ class EventMergeTest {
 
 		assertFalse(EventMerge.placeable(event, booking, presentation, lookup(hall), id -> false));
 		assertTrue(EventMerge.placeable(event, booking, presentation, lookup(hall), id -> true));
-		assertFalse(EventMerge.placeable(event, booking, presentation, lookup(hall)), "die alte Form kennt nie eine aktuelle Halle");
 		assertTrue(EventMerge.waits(event, booking, presentation, lookup(hall), id -> false));
 		assertFalse(EventMerge.waits(event, booking, presentation, lookup(hall), id -> true));
 	}

@@ -184,9 +184,10 @@ public class StoreEventRepository implements EventRepository {
 		}
 		List<UnitSnapshot> snapshots = sync.snapshots().values().stream()
 				.filter(snapshot -> snapshot.unit().type() != UnitType.HALL).toList();
-		// Buchungen, die nicht platzierbar sind, bleiben auch nach einem Neustart draußen und warten (wie bei applyForeign)
+		// Buchungen, die nicht platzierbar sind, bleiben auch nach einem Neustart draußen und warten (wie bei applyForeign);
+		// "Halle aktuell" einmal je Halle, nicht je Buchung
 		List<UnitSnapshot> waiting = new ArrayList<>();
-		Assembly<Event> assembly = EventMerge.assembleLoaded(snapshots, hallLookup, hallCurrent, waiting);
+		Assembly<Event> assembly = EventMerge.assembleLoaded(snapshots, hallLookup, frozenHallCurrent(), waiting);
 		baseline.reset(snapshots, assembly.shown());
 		derived.clear();
 		removedByOthers.clear();
@@ -655,9 +656,14 @@ public class StoreEventRepository implements EventRepository {
 	 * Vergleichsstand, ohne Modell, Listener und Hinweis. Ein anderer Nachfolger wird eingearbeitet, außer der Nutzer hat
 	 * die Einheit ungespeichert geändert oder bearbeitet sie gerade (bei Löschung von Kopf oder Vorstellung und beim Wechsel
 	 * von Halle oder Bestuhlung zählt alles darunter); dann wird er zurückgestellt (still, wenn er eine eigene
-	 * Zusammenführung mit Vermerk für diesen Rechner ist), der Vergleichsstand bleibt. Eine Buchung, die im Modell keinen Platz hat (Sitz fehlt in der
-	 * Bestuhlung, Vorstellung fehlt im Modell, Hallenwechsel ihrer Vorstellung zurückgestellt), wartet still ohne Hinweis,
-	 * ohne Vergleichsstand, und wird ebenfalls jedes Mal erneut geprüft. Je Event werden Objekt im Cache und
+	 * Zusammenführung mit Vermerk für diesen Rechner ist), der Vergleichsstand bleibt. Eine Buchung, die im Modell noch
+	 * keinen Platz hat (Vorstellung fehlt im Modell oder weicht von ihrem Index-Stand ab, etwa weil ihr Hallenwechsel
+	 * zurückgestellt ist; Sitz fehlt in der Bestuhlung einer Halle, die noch nicht aktuell ist), wartet still ohne Hinweis,
+	 * ohne Vergleichsstand, und wird ebenfalls jedes Mal erneut geprüft. Fehlt ihr Sitz dagegen in der Bestuhlung einer
+	 * aktuellen Halle ({@link #setHallCurrent}) oder hat ihre Vorstellung keine Halle, fehlt er endgültig: Die Buchung wird
+	 * übernommen, der Abgleich stellt sie ohne Platz oder auf einen passenden Sitz, und verliert sie dabei ihren Sitz in
+	 * einer Halle, kommt ein Hinweis (KARV-117). Ob eine Halle aktuell ist, wird je Event einmal vor dem Einarbeiten
+	 * festgestellt und gilt für den ganzen Aufruf. Je Event werden Objekt im Cache und
 	 * Vergleichsstand in einem Schritt nachgeführt, danach erfahren es die Listener. Ist noch nichts geladen, passiert
 	 * nichts: Das erste Laden liest ohnehin den aktuellen Stand.
 	 * <p>
@@ -918,6 +924,11 @@ public class StoreEventRepository implements EventRepository {
 		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
 		successors.sort(EventMerge.MERGE_ORDER);
 		Map<UnitKey, UnitSnapshot> presentationStates = presentationStates(event, snapshots, successors);
+		// "Halle aktuell" einmal je Halle, bevor Modell oder Vergleichsstand sich ändern: Danach sähe in der App schon die erste
+		// übernommene Buchung (bis ihr Abgleich gemerkt ist) wie eine ungespeicherte aus, und die Halle gälte nicht mehr als
+		// aktuell. Dieselben Antworten gelten für die Vorprüfung, das Einarbeiten und das Nachspielen auf der Kopie.
+		Predicate<String> frozenCurrent = frozenHallCurrent();
+		hallsTouched(event, successors, presentationStates).forEach(frozenCurrent::test);
 		Map<UnitKey, String> lastIds = event == null ? Map.of() : lastIds(event, successors, batchIds(successors));
 		Set<UnitKey> appliedPresentations = new HashSet<>();
 		List<UnitSnapshot> apply = new ArrayList<>();
@@ -929,7 +940,7 @@ public class StoreEventRepository implements EventRepository {
 					|| (lastIds.containsKey(unit) && movedBookingTouched(event, changes, lastIds.get(unit), unit))) {
 				defer(event, current, chainOf(chains, unit));
 			} else if (parent != null && event != null && !appliedPresentations.contains(parent)
-					&& EventMerge.waits(event, current, presentationStates.get(parent), hallLookup, hallCurrent)) {
+					&& EventMerge.waits(event, current, presentationStates.get(parent), hallLookup, frozenCurrent)) {
 				// Wird die Vorstellung in diesem Schritt eingearbeitet, entscheidet das Einarbeiten mit ihrem neuen Stand
 				holdUnplaced(unit, "sie ist im Modell nicht platzierbar");
 			} else if (carrierTouched(event, current, changes)) {
@@ -951,7 +962,7 @@ public class StoreEventRepository implements EventRepository {
 		UnitSnapshot head = apply.stream().filter(s -> s.unit().type() == UnitType.EVENT).findFirst().orElse(null);
 		boolean headReadable = head != null && UnitMapper.readUnit(head, Event.class) != null;
 		if (event == null && headReadable) {
-			addEvent(eventId, apply, warnings);
+			addEvent(eventId, apply, frozenCurrent, warnings);
 		} else if (event == null) {
 			// ohne sichtbares Event übernimmt nur der Vergleichsstand; angezeigt wird nichts
 			for (UnitSnapshot snapshot : apply) {
@@ -961,7 +972,54 @@ public class StoreEventRepository implements EventRepository {
 		} else if (head != null && !headReadable) {
 			removeEvent(event, head, apply, warnings);
 		} else {
-			mergeInto(event, apply, changes, chains, presentationStates, lastIds(event, apply, batchIds(apply)), warnings);
+			mergeInto(event, apply, changes, chains, presentationStates, lastIds(event, apply, batchIds(apply)),
+					frozenCurrent, warnings);
+		}
+	}
+
+	/**
+	 * "Halle aktuell" ({@link #setHallCurrent}) mit festgehaltenen Antworten: Jede Halle wird beim ersten Mal gefragt, danach
+	 * gilt diese Antwort. Die Frage kann in der App über die ungespeicherten Buchungen ({@link #locallyChangedUnits}) auf
+	 * dieses Repository zurückgreifen; mitten im Einarbeiten änderte sich die Antwort sonst durch das Einarbeiten selbst,
+	 * und jede Buchung kostete die Frage erneut.
+	 */
+	private Predicate<String> frozenHallCurrent() {
+		Predicate<String> live = hallCurrent;
+		Map<String, Boolean> answers = new HashMap<>();
+		return hallId -> {
+			Boolean answer = answers.get(hallId);
+			if (answer == null) {
+				answer = live.test(hallId);
+				answers.put(hallId, answer);
+			}
+			return answer;
+		};
+	}
+
+	/**
+	 * Die Hallen der Vorstellungen, die die Nachfolger berühren (eine Vorstellung selbst oder eine ihrer Buchungen), im Modell
+	 * und im Stand des Index: Nur nach ihnen fragt die Platzierungsregel ({@link EventMerge#placeable}).
+	 */
+	private static Set<String> hallsTouched(Event event, List<UnitSnapshot> successors,
+			Map<UnitKey, UnitSnapshot> presentationStates) {
+		Set<String> hallIds = new LinkedHashSet<>();
+		for (UnitSnapshot snapshot : successors) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() != UnitType.PRESENTATION && unit.type() != UnitType.BOOKING) {
+				continue;
+			}
+			UnitKey presentationUnit = unit.type() == UnitType.PRESENTATION ? unit : unit.parent();
+			Presentation model = event == null ? null : EventMerge.presentation(event, unit.presentationId());
+			addHall(hallIds, model);
+			UnitSnapshot indexed = unit.type() == UnitType.PRESENTATION ? snapshot : presentationStates.get(presentationUnit);
+			addHall(hallIds, indexed == null ? null : UnitMapper.readUnit(indexed, Presentation.class));
+		}
+		return hallIds;
+	}
+
+	private static void addHall(Set<String> hallIds, Presentation presentation) {
+		if (presentation != null && presentation.getHallId() != null) {
+			hallIds.add(presentation.getHallId());
 		}
 	}
 
@@ -995,10 +1053,12 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
-	 * Zu den gelöschten oder unlesbaren Buchungen unter {@code apply} die Kennung der Buchung aus ihrem zuletzt bekannten
+	 * Zu den gelöschten oder unlesbaren Buchungen unter {@code successors} die Kennung der Buchung aus ihrem zuletzt bekannten
 	 * Stand (siehe {@link EventMerge.Plan}), außer eine andere angezeigte Einheit des Events trägt diese Kennung schon: Dann
-	 * ist die Buchung dorthin gezogen, und die Löschung betrifft sie nicht mehr. Die Kennungen werden einmal je Aufruf
-	 * gesammelt.
+	 * ist die Buchung dorthin gezogen, und die Löschung betrifft sie nicht mehr. Die angezeigten Kennungen
+	 * ({@link #shownBookingIds}) liest jeder Aufruf höchstens einmal, nur wenn es eine solche Buchung gibt. Je Event ruft
+	 * das Einarbeiten ihn zweimal: für alle Nachfolger (die Prüfung auf eine berührte versetzte Buchung) und für die, die
+	 * eingearbeitet werden (den Plan); {@link #carriedUnits} liest die Kennungen für den Plan ein drittes Mal.
 	 * <p>
 	 * Mit {@code batch} (siehe {@link #batchIds}) zählt eine Einheit nicht als Träger, die im selben Aufruf gelöscht wird, unlesbar
 	 * ist oder eine andere Kennung bekommt: Das braucht das Einarbeiten, damit die Stornierung die Buchung findet, die der
@@ -1217,12 +1277,15 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Ein neues oder wiederbelebtes Event: aus dem Index zusammensetzen, Vergleichsstand wie beim Laden, in den Cache.
 	 * Buchungen, die nicht zur Bestuhlung passen, warten (siehe {@link EventMerge#assembleEvent}).
+	 *
+	 * @param frozenCurrent die festgehaltenen Antworten dieses Einarbeitens ({@link #frozenHallCurrent})
 	 */
-	private void addEvent(String eventId, List<UnitSnapshot> apply, List<String> warnings) {
+	private void addEvent(String eventId, List<UnitSnapshot> apply, Predicate<String> frozenCurrent,
+			List<String> warnings) {
 		try {
 			Map<UnitKey, UnitSnapshot> all = sync.eventSnapshots(eventId);
 			List<UnitSnapshot> waiting = new ArrayList<>();
-			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup, hallCurrent, waiting);
+			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup, frozenCurrent, waiting);
 			baseline.resetOwner(eventId, all.values(), assembly.shown(), unitsOf(waiting));
 			forgetDerived(eventId);
 			warnings.addAll(assembly.allWarnings());
@@ -1277,15 +1340,18 @@ public class StoreEventRepository implements EventRepository {
 	 * Einheit, ist sie im Modell wieder wie vorher ({@link EventMerge#apply}); ein sauberes Event wird dann aus dem Index
 	 * neu zusammengesetzt, sonst bleibt, was schon eingearbeitet ist, und der Rest wird zurückgestellt. Auf
 	 * {@code changingByOthers} folgt immer {@code changedByOthers}.
+	 *
+	 * @param frozenCurrent die festgehaltenen Antworten dieses Einarbeitens ({@link #frozenHallCurrent}); der Plan behält
+	 *                      sie auch für das Nachspielen auf der Kopie
 	 */
 	private void mergeInto(Event event, List<UnitSnapshot> apply, LocalChanges changes,
 			Map<UnitKey, List<ChainStep>> chains, Map<UnitKey, UnitSnapshot> presentationStates,
-			Map<UnitKey, String> lastIds, List<String> warnings) {
+			Map<UnitKey, String> lastIds, Predicate<String> frozenCurrent, List<String> warnings) {
 		String eventId = event.getId();
 		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
 				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
 		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
-		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, hallCurrent, presentationStates, lastIds)
+		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, frozenCurrent, presentationStates, lastIds)
 				.withCarried(carriedUnits(event, apply));
 		Set<UnitKey> adopted = new LinkedHashSet<>();
 		Set<UnitKey> waiting = new HashSet<>();
@@ -1330,7 +1396,7 @@ public class StoreEventRepository implements EventRepository {
 			EventMerge.apply(event, plan, sink);
 		} catch (RuntimeException e) {
 			failed(event.getName(), e, warnings);
-			if (mayRebuild(event, changes) && rebuild(event, warnings)) {
+			if (mayRebuild(event, changes) && rebuild(event, frozenCurrent, warnings)) {
 				return;
 			}
 			for (UnitSnapshot snapshot : apply) {
@@ -1378,14 +1444,15 @@ public class StoreEventRepository implements EventRepository {
 	 * Nach gescheitertem Einarbeiten: setzt das Event aus dem Index neu zusammen, Vergleichsstand wie beim Laden, und
 	 * ersetzt es im Cache. Die Kopie für den Änderungsmelder bekommt genau diesen Stand.
 	 *
+	 * @param frozenCurrent die festgehaltenen Antworten dieses Einarbeitens ({@link #frozenHallCurrent})
 	 * @return ob das gelang; sonst ist nichts verändert
 	 */
-	private boolean rebuild(Event event, List<String> warnings) {
+	private boolean rebuild(Event event, Predicate<String> frozenCurrent, List<String> warnings) {
 		String eventId = event.getId();
 		try {
 			Collection<UnitSnapshot> all = sync.eventSnapshots(eventId).values();
 			List<UnitSnapshot> waiting = new ArrayList<>();
-			Assembly<Event> assembly = EventMerge.assembleEvent(all, hallLookup, hallCurrent, waiting);
+			Assembly<Event> assembly = EventMerge.assembleEvent(all, hallLookup, frozenCurrent, waiting);
 			if (assembly.items().isEmpty()) {
 				return false;
 			}

@@ -453,7 +453,9 @@ public class StoreHallRepository implements HallRepository {
 	 * fehlenden Sitz als endgültig fehlend behandeln, statt auf die Halle zu warten. Ohne geladenen Cache, ohne Stand im Index
 	 * oder Vergleichsstand und für eine unbekannte Halle ist sie nicht aktuell.
 	 * <p>
-	 * Nur auf dem Oberflächen-Thread aufrufen: Modell und Vergleichsstand sind nicht synchronisiert.
+	 * Auf dem Oberflächen-Thread aufrufen: Modell und Vergleichsstand sind nicht synchronisiert. Einzige Ausnahme ist das
+	 * Laden beim Start ({@code MainApp.loadRepositories} im Ladethread, bevor die Oberfläche läuft): Dann ändert niemand
+	 * gleichzeitig Modell oder Vergleichsstand, und die Frage ist dort sicher.
 	 */
 	public boolean isCurrent(String hallId) {
 		if (hallId == null || cachedHalls == null) {

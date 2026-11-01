@@ -220,7 +220,7 @@ public final class ConflictActions {
 	 *         hat (und die Buchung ohne Platz steht) oder der Vermerk keine Gruppe "Platz"
 	 */
 	private String placeRefusal(Row row, Booking booking) {
-		if (isUnassigned(placeOf(row.conflict().note())) && !booking.isUnassigned()) {
+		if (isUnassigned(placeOf(row.conflict().note())) && seatIdOf(booking) != null) {
 			// der eigene Wert ist "ohne Platz", die Buchung steht inzwischen auf einem Sitz (fremder Umzug): Sie ihrem Platz zu
 			// entreißen, ist nicht Sache dieser Aktion; mit "Erledigt" ist der Vermerk zu schließen (KARV-117)
 			return "Die Buchung steht inzwischen auf " + booking.getPlaceLabel() + ".";

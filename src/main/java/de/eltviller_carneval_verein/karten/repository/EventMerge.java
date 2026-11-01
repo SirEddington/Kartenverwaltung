@@ -145,18 +145,12 @@ final class EventMerge {
 		private final Set<UnitKey> carried;
 
 		/**
-		 * Ein Plan ohne bekannte Kennungen der Buchungen hinter gelöschten Sitz-Einheiten (siehe den Konstruktor mit
-		 * {@code lastIds}).
+		 * Ein Plan, für den keine Halle als aktuell gilt, ohne bekannte Kennungen der Buchungen hinter gelöschten
+		 * Sitz-Einheiten (siehe den Konstruktor mit {@code hallCurrent} und {@code lastIds}).
 		 */
 		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup,
 				Map<UnitKey, UnitSnapshot> presentationStates) {
-			this(units, index, hallLookup, presentationStates, Map.of());
-		}
-
-		/** Ein Plan, für den keine Halle als aktuell gilt (siehe den Konstruktor mit {@code hallCurrent}). */
-		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup,
-				Map<UnitKey, UnitSnapshot> presentationStates, Map<UnitKey, String> lastIds) {
-			this(units, index, hallLookup, hallId -> false, presentationStates, lastIds);
+			this(units, index, hallLookup, hallId -> false, presentationStates, Map.of());
 		}
 
 		/**
@@ -367,6 +361,8 @@ final class EventMerge {
 				for (UnitSnapshot below : plan.units) {
 					if (below.unit().type() == UnitType.BOOKING && inSubtree(below.unit(), unit)
 							&& UnitMapper.readUnit(below, Booking.class) == null) {
+						// die Rückgabe (Buchung blieb stehen, weil eine andere Einheit sie trägt) zählt hier nicht: mergeBooking
+						// storniert dieselbe Einheit danach noch einmal und meldet es dann (Sink#reconciled)
 						cancel(existing, below.unit(), plan);
 					}
 				}
@@ -606,12 +602,6 @@ final class EventMerge {
 				|| presentation.getHallId() == null || hallCurrent.test(presentation.getHallId());
 	}
 
-	/** Wie {@link #placeable(Event, UnitSnapshot, UnitSnapshot, Function, Predicate)}, ohne dass eine Halle als aktuell gilt. */
-	static boolean placeable(Event event, UnitSnapshot booking, UnitSnapshot presentationIndexState,
-			Function<String, Hall> hallLookup) {
-		return placeable(event, booking, presentationIndexState, hallLookup, hallId -> false);
-	}
-
 	/**
 	 * Ob für die Buchung nichts auf einen Platz wartet: Ihre Vorstellung steht nicht im Modell, und die Buchung ist gelöscht
 	 * oder unlesbar oder die Vorstellung ist es ({@link #gone}). Sie geht dann nur in den Vergleichsstand. Eine lesbare
@@ -627,12 +617,6 @@ final class EventMerge {
 			Function<String, Hall> hallLookup, Predicate<String> hallCurrent) {
 		return !nothingToPlace(event, booking, presentationIndexState)
 				&& !placeable(event, booking, presentationIndexState, hallLookup, hallCurrent);
-	}
-
-	/** Wie {@link #waits(Event, UnitSnapshot, UnitSnapshot, Function, Predicate)}, ohne dass eine Halle als aktuell gilt. */
-	static boolean waits(Event event, UnitSnapshot booking, UnitSnapshot presentationIndexState,
-			Function<String, Hall> hallLookup) {
-		return waits(event, booking, presentationIndexState, hallLookup, hallId -> false);
 	}
 
 	/**
@@ -710,12 +694,6 @@ final class EventMerge {
 		return assembly;
 	}
 
-	/** Wie {@link #assembleEvent(Collection, Function, Predicate, List)}, ohne dass eine Halle als aktuell gilt. */
-	static Assembly<Event> assembleEvent(Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup,
-			List<UnitSnapshot> waiting) {
-		return assembleEvent(snapshots, hallLookup, hallId -> false, waiting);
-	}
-
 	/**
 	 * Setzt die Events beim Laden zusammen, ohne Abgleich (der folgt beim Vorbereiten für die Anzeige). Wie bei
 	 * {@link #assembleEvent} bleiben die Buchungen draußen, die nicht {@linkplain #placeable platzierbar} sind, und kommen in
@@ -727,12 +705,6 @@ final class EventMerge {
 	static Assembly<Event> assembleLoaded(Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup,
 			Predicate<String> hallCurrent, List<UnitSnapshot> waiting) {
 		return UnitMapper.assembleEvents(withoutWaiting(snapshots, hallLookup, hallCurrent, true, waiting));
-	}
-
-	/** Wie {@link #assembleLoaded(Collection, Function, Predicate, List)}, ohne dass eine Halle als aktuell gilt. */
-	static Assembly<Event> assembleLoaded(Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup,
-			List<UnitSnapshot> waiting) {
-		return assembleLoaded(snapshots, hallLookup, hallId -> false, waiting);
 	}
 
 	/**
