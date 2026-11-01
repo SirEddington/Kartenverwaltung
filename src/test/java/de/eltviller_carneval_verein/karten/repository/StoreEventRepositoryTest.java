@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.repository;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -282,6 +283,36 @@ class StoreEventRepositoryTest {
 
 		assertEquals(before, filesIn(appData));
 		assertEquals(6, events.loadEvents().get(0).getPresentations().get(0).getBookings().size());
+	}
+
+	@Test
+	void olderBookingWithoutPaidAmountIsNotRewritten(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		Event event = eventWithBookings();
+		TestRepositories.events(sync).saveEvent(event);
+		sync.flushIndex();
+		// wie eine Datei aus der Zeit vor dem Feld paidAmount (KARV-102)
+		List<Path> bookingFiles;
+		try (Stream<Path> walk = Files.walk(appData.resolve("data/events"))) {
+			bookingFiles = walk.filter(Files::isRegularFile)
+					.filter(path -> path.toString().contains("bookings") && !path.toString().contains("claims")).toList();
+		}
+		assertFalse(bookingFiles.isEmpty());
+		for (Path file : bookingFiles) {
+			String text = Files.readString(file);
+			String older = text.replaceAll(",\\s*\"paidAmount\"\\s*:\\s*null", "");
+			assertNotEquals(text, older, "das Feld steht in " + file);
+			Files.writeString(file, older);
+		}
+		long before = filesIn(appData);
+
+		SyncService restarted = started(appData);
+		StoreEventRepository events = TestRepositories.events(restarted);
+		for (Event loaded : events.loadEvents()) {
+			events.saveEvent(loaded);
+		}
+
+		assertEquals(before, filesIn(appData));
 	}
 
 	@Test

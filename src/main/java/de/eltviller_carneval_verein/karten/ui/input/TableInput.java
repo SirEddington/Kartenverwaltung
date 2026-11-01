@@ -147,7 +147,8 @@ public final class TableInput {
 			return null;
 		}
 		TableCell<S, ?> cell = cellAt(table, focused.getRow(), focused.getTableColumn());
-		return cell instanceof ParsingTextFieldTableCell<?, ?> ? cell : null;
+		// die Zelle selbst kann gesperrt sein (etwa der gezahlte Betrag einer offenen Buchung)
+		return cell instanceof ParsingTextFieldTableCell<?, ?> && cell.isEditable() ? cell : null;
 	}
 
 	/**

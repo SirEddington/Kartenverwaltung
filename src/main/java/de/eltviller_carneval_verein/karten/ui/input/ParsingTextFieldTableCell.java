@@ -125,6 +125,16 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 
 	@Override
 	public void startEdit() {
+		if (editableRow != null && !isEditable()) {
+			// Die Tabelle hat diese Zelle schon als bearbeitet vermerkt (Klick, Enter, table.edit); bliebe das stehen, nähme sie
+			// keine Taste mehr an und hielte fremde Änderungen zurück
+			TableView<S> table = getTableView();
+			if (table != null && table.getEditingCell() != null && table.getEditingCell().getRow() == getIndex()
+					&& table.getEditingCell().getTableColumn() == getTableColumn()) {
+				table.edit(-1, null);
+			}
+			return;
+		}
 		// Ein Merker aus einer früheren Bearbeitung darf nicht an dieser hängen
 		parsing.takeFailure();
 		super.startEdit();

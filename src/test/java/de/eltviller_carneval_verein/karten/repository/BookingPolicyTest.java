@@ -1737,6 +1737,33 @@ class BookingPolicyTest {
 	}
 
 	@Test
+	void paymentMethodChangeAgainstPriceChangeKeepsMyPrice() {
+		// schon bezahlt: Meine ändert den Preis (die Abweichung meldet SEA-020), Deren nur die Zahlart
+		Version base = version(THIRD, booking("x", "s1", both(price(2000), paid(2000))));
+		Version mine = version(OWN, booking("x", "s1", both(price(2500), paid(2000))));
+		Version theirs = version(OTHER, booking("x", "s1", both(price(2000), both(paid(2000), b -> b.setPaymentStatus(PaymentStatus.CARD)))));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, theirs));
+
+		assertEquals(booking("x", "s1", both(price(2500), both(paid(2000), b -> b.setPaymentStatus(PaymentStatus.CARD)))),
+				resolution.payload());
+		assertNull(resolution.note());
+	}
+
+	@Test
+	void discountedPaymentAgainstPriceChangeKeepsMyPrice() {
+		// Deren kassiert mit eigenem Betrag (Rabatt): Die Abweichung entsteht nicht erst beim Zusammenführen
+		Version base = version(THIRD, booking("x", "s1", price(2000)));
+		Version mine = version(OWN, booking("x", "s1", price(2500)));
+		Version theirs = version(OTHER, booking("x", "s1", both(price(2000), paid(1500))));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, theirs));
+
+		assertEquals(booking("x", "s1", both(price(2500), paid(1500))), resolution.payload());
+		assertNull(resolution.note());
+	}
+
+	@Test
 	void unknownPaymentStatusIsUnmergedWithoutFailing() {
 		Version base = version(THIRD, booking("x", "s1", price(2000)));
 		ObjectNode voucher = booking("x", "s1", both(price(2000), paid(2000)));

@@ -99,8 +99,9 @@ public final class BookingPolicy implements ConflictPolicy {
 
 	/**
 	 * Der Dreiwegevergleich je Feldgruppe ({@link FieldMerge#merge}) mit der Koppelregel für Zahlung und Preis: Hat die
-	 * eine Seite gegenüber der Basis nur die Gruppe "Zahlung" geändert und die andere nur die Gruppe "Preis", ist das
-	 * Ergebnis bezahlt und weicht sein gezahlter Betrag vom Preis ab (ein leerer Preis, also der Standardpreis der
+	 * eine Seite gegenüber der Basis nur die Gruppe "Zahlung" geändert und dabei zum eigenen Preis kassiert
+	 * ({@link #collected}), die andere nur die Gruppe "Preis", ist das Ergebnis bezahlt und weicht sein gezahlter Betrag vom
+	 * Preis ab (ein leerer Preis, also der Standardpreis der
 	 * Vorstellung, zählt als abweichend: die Einheit kennt ihn nicht), wird die Gruppe "Preis" strittig wie ein
 	 * gewöhnlicher Feldkonflikt: Es gilt der Preis von "Deren", die Gruppe kommt mit beiden Ständen zu den Konflikten. Die
 	 * Zahlung bleibt so in jedem Fall stehen. Ist "Preis" schon strittig, oder hat eine Seite beide Gruppen geändert, bleibt
@@ -121,10 +122,16 @@ public final class BookingPolicy implements ConflictPolicy {
 		boolean minePrices = !FieldMerge.same(mine, before, price);
 		boolean theirsPay = !FieldMerge.same(theirs, before, payment);
 		boolean theirsPrice = !FieldMerge.same(theirs, before, price);
-		boolean split = minePays && !minePrices && theirsPrice && !theirsPay
-				|| theirsPay && !theirsPrice && minePrices && !minePays;
+		ObjectNode payer;
+		if (minePays && !minePrices && theirsPrice && !theirsPay) {
+			payer = mine;
+		} else if (theirsPay && !theirsPrice && minePrices && !minePays) {
+			payer = theirs;
+		} else {
+			return result;
+		}
 		ObjectNode merged = result.merged();
-		if (!split || !isPaid(merged) || !amountDiffersFromPrice(merged)) {
+		if (!collected(payer, before) || !isPaid(merged) || !amountDiffersFromPrice(merged)) {
 			return result;
 		}
 		ObjectNode resolved = merged.deepCopy();
@@ -132,6 +139,20 @@ public final class BookingPolicy implements ConflictPolicy {
 		List<FieldConflict> conflicts = new ArrayList<>(result.conflicts());
 		conflicts.add(new FieldConflict(PRICE_GROUP, FieldMerge.slice(mine, price), FieldMerge.slice(theirs, price)));
 		return new FieldMerge.Result(resolved, List.copyOf(conflicts));
+	}
+
+	/**
+	 * Ob die Zahlungsseite kassiert hat: Sie hat den gezahlten Betrag gegenüber der Basis gesetzt, und er passte bei ihr zum
+	 * Preis (ein leerer Preis zählt als passend, die Einheit kennt den Standardpreis nicht). Ein bloßer Wechsel der Zahlart
+	 * oder ein eigener Betrag (Rabatt) erzeugt die Abweichung nicht erst beim Zusammenführen.
+	 */
+	private static boolean collected(ObjectNode payer, ObjectNode base) {
+		if (FieldMerge.same(payer, base, List.of(PAID_AMOUNT))) {
+			return false;
+		}
+		JsonNode amount = payer.get(PAID_AMOUNT);
+		JsonNode price = payer.get(PRICE);
+		return price == null || !price.isNumber() || amount == null || !amount.isNumber() || price.asLong() == amount.asLong();
 	}
 
 	/** Ob der Zahlstatus eine bezahlte Zahlart ist; ein unbekannter Wert (etwa aus einer neueren App) zählt nicht. */
