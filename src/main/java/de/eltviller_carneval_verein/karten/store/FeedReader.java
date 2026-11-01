@@ -25,7 +25,9 @@ import java.util.regex.Pattern;
  * Reihenfolge verarbeitet: erst alle Versionsdateien, dann die Anspruchsdateien. Fehlt eine Versionsdatei noch (bei
  * Nextcloud kann die Liste vor den Dateien ankommen), bleibt die Position stehen; nach fünf Minuten wird ein Vollabgleich
  * angefordert und die Liste übersprungen. Fehlt eine Anspruchsdatei noch, kommt die Version auf eine Beobachtungsliste,
- * die bei jedem Durchlauf neu geprüft wird, bis der Anspruch erscheint oder fünf Minuten vergangen sind.
+ * die bei jedem Durchlauf neu geprüft wird, bis der Anspruch erscheint oder fünf Minuten vergangen sind. Die Listen, die
+ * ein Vollabgleich schreibt (etwa beim Mitnehmen), nennen Ansprüche, die schon vor der Liste im gemeinsamen Ordner lagen:
+ * Sie werden sofort übernommen, ohne Beobachtung.
  * <p>
  * Ein vorhandener lokaler Anspruch wird nie ersetzt. Weicht er ab (der gemeinsame nennt eine andere Version, oder er ist
  * der eigene und der fremde Eintrag nennt eine andere Version), meldet der Durchlauf den Platz als umstritten; passt eine

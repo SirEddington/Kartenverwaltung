@@ -1477,6 +1477,175 @@ class SyncServiceTest {
 		assertTrue(a.events.lost.isEmpty());
 	}
 
+	// --- Der Vollabgleich schreibt, was er hochlädt, in die Änderungsliste (KARV-110)
+
+	/** Der Ordner der Änderungslisten dieses Rechners im gemeinsamen Ordner. */
+	private Path feedDir(String machineId) {
+		return sharedRoot.resolve("data/feeds/" + machineId);
+	}
+
+	/** Fremde Einheiten, die an der App vorbei in den lokalen Bestand des Rechners {@code name} kamen (noch nicht gestartet). */
+	private List<Version> seedLocalForeign(String name, UnitKey... units) throws IOException {
+		VersionStore localStore = new VersionStore(dir.resolve(name).resolve("data"), new NioFileLayer());
+		List<Version> seeded = new ArrayList<>();
+		for (UnitKey unit : units) {
+			seeded.add(seedForeign(localStore, unit, seeded.size() + 1));
+		}
+		return seeded;
+	}
+
+	@Test
+	void mergeListsWhatItUploadsSoThatOthersSeeItInTheNextTick() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		UnitKey hall = UnitKey.hall("h1");
+		List<Version> seeded = seedLocalForeign("a", hall, BOOKING);
+		Node a = node("a");
+		a.service.startup("");
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.tick();
+		// je Block eine Liste: Hallen und Vorstellung sind getrennte Abschnitte
+		assertEquals(List.of("1.json", "2.json"), names(feedDir(a.identity.id())));
+		assertEquals(List.of(seeded.get(0).id()), feedVersions(a.identity.id(), 1));
+		assertEquals(List.of(seeded.get(1).id()), feedVersions(a.identity.id(), 2));
+		b.events.changed.clear();
+		clock.advance(Duration.ofSeconds(2));
+
+		b.service.tick();
+
+		assertNull(b.service.fullSyncProgress().get(), "kein Vollabgleich nötig");
+		assertTrue(b.events.changedUnits().containsAll(Set.of(hall, BOOKING)));
+		assertEquals(seeded.get(1).id(), b.service.unitState(BOOKING).head().id());
+		assertFalse(b.service.unitState(BOOKING).provisional());
+	}
+
+	@Test
+	void ownClaimThatTheFullSyncCreatesAgainIsListedToo() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		assertEquals(List.of("1.json"), names(feedDir(a.identity.id())));
+		// der Anspruch fehlt im gemeinsamen Ordner (geleert oder zurückgespielt)
+		Files.delete(sharedFile(BOOKING, "claims/root.json"));
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+
+		tickUntilRunEnds(a);
+
+		assertEquals(v.id(), sharedClaim(BOOKING, "root").version());
+		assertEquals(List.of("1.json", "2.json"), names(feedDir(a.identity.id())));
+		assertEquals(List.of(v.id()), feedVersions(a.identity.id(), 2));
+	}
+
+	@Test
+	void fullSyncWithNothingToUploadWritesNoList() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+
+		tickUntilRunEnds(a);
+
+		assertEquals(List.of("1.json"), names(feedDir(a.identity.id())));
+	}
+
+	@Test
+	void failingListDoesNotFailTheMerge() throws IOException {
+		seedLocalForeign("a", BOOKING);
+		Node a = node("a");
+		a.layer.failWhen(p -> p.startsWith(sharedRoot.resolve("data/feeds")), "createNew", new IOException("Ordner gesperrt"));
+		a.service.startup("");
+
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.tick();
+
+		assertTrue(Files.exists(sharedFile(BOOKING, "claims/root.json")));
+		assertTrue(a.events.errors.isEmpty());
+		assertNull(a.service.fullSyncProgress().get(), "der Lauf ist zu Ende");
+		assertTrue(a.service.connectionComplete().get());
+	}
+
+	@Test
+	void numberTakenWhileListingRegeneratesTheIdAndListsUnderTheNewOne() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		String oldId = a.identity.id();
+		// eine kopierte Installation schreibt mit derselben Kennung die nächste Liste
+		Feed copy = new Feed(StoreCodec.FORMAT, oldId, 2, START, List.of());
+		Files.write(feedDir(oldId).resolve("2.json"), StoreCodec.write(copy));
+		Files.delete(sharedFile(BOOKING, "claims/root.json"));
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+
+		tickUntilRunEnds(a);
+
+		assertEquals(List.of(StoreMessages.duplicateMachine()), a.events.duplicates);
+		String newId = MachineIdentity.loadOrCreate(a.appData, () -> "a").id();
+		assertNotEquals(oldId, newId);
+		assertEquals(v.id(), sharedClaim(BOOKING, "root").version());
+		assertEquals(List.of(v.id()), feedVersions(newId, 1));
+	}
+
+	@Test
+	void blockThatFailsMidwayListsTheClaimsItAlreadyUploaded() throws IOException {
+		UnitKey first = UnitKey.hall("h1");
+		UnitKey second = UnitKey.hall("h2");
+		List<Version> seeded = seedLocalForeign("a", first, second);
+		Node a = node("a");
+		AtomicBoolean fail = new AtomicBoolean(true);
+		Path secondDir = sharedRoot.resolve("data").resolve(second.relativePath());
+		a.layer.failWhen(p -> fail.get() && p.startsWith(secondDir), "createNew", new IOException("Netzlaufwerk getrennt"));
+		a.service.startup("");
+
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.tick();
+
+		assertTrue(Files.exists(sharedFile(first, "claims/root.json")));
+		assertFalse(Files.exists(sharedFile(second, "claims/root.json")));
+		assertEquals(List.of(seeded.get(0).id()), feedVersions(a.identity.id(), 1));
+
+		fail.set(false);
+		tickUntilRunEnds(a);
+
+		assertTrue(Files.exists(sharedFile(second, "claims/root.json")));
+		assertEquals(List.of(seeded.get(1).id()), feedVersions(a.identity.id(), 2));
+	}
+
+	@Test
+	void listThatThrowsDoesNotFailTheBlock() throws IOException {
+		seedLocalForeign("a", BOOKING);
+		Node a = node("a");
+		a.layer.failNextUnchecked(p -> p.startsWith(sharedRoot.resolve("data/feeds")), "createNew",
+				new IllegalStateException("Fehler beim Schreiben"));
+		a.service.startup("");
+
+		a.service.connect(shared, ConnectMode.MERGE);
+
+		assertNull(a.service.fullSyncProgress().get(), "der Lauf ist zu Ende");
+		assertTrue(a.service.connectionComplete().get());
+	}
+
+	@Test
+	void listThatThrowsInAnAbortedBlockStillLetsItTakeOverThePartialResult() throws IOException {
+		UnitKey inward = UnitKey.hall("h0");
+		UnitKey failing = UnitKey.hall("h2");
+		seedForeign(new VersionStore(sharedRoot.resolve("data"), new NioFileLayer()), inward, 9);
+		seedLocalForeign("a", UnitKey.hall("h1"), failing);
+		Node a = node("a");
+		Path failingDir = sharedRoot.resolve("data").resolve(failing.relativePath());
+		a.layer.failWhen(p -> p.startsWith(failingDir), "createNew", new IOException("Netzlaufwerk getrennt"));
+		a.layer.failNextUnchecked(p -> p.startsWith(sharedRoot.resolve("data/feeds")), "createNew",
+				new IllegalStateException("Fehler beim Schreiben"));
+		a.service.startup("");
+
+		a.service.connect(shared, ConnectMode.MERGE);
+
+		assertTrue(Files.exists(localFile(a, inward, "claims/root.json")), "der Block hat kopiert, bevor er abbrach");
+		assertNotNull(a.service.snapshots().get(inward), "das Teilergebnis ist im Index");
+	}
+
 	// --- Fehler
 
 	@Test
@@ -5159,6 +5328,19 @@ class SyncServiceTest {
 
 		assertEquals(2L, indexEntry(a, BOOKING).get("ownSeq").asLong());
 		assertEquals(List.of("1.json", "2.json"), names(sharedRoot.resolve("data/feeds/" + a.identity.id())));
+	}
+
+	@Test
+	void ownVersionFromSingleModeGetsTheNumberOfTheListOfTheMerge() throws IOException {
+		Node a = node("a");
+		assertTrue(a.service.startup(""));
+		save(a, create(BOOKING, "Anna"));
+
+		a.service.connect(shared, ConnectMode.MERGE);
+		a.service.tick();
+
+		assertEquals(List.of("1.json"), names(sharedRoot.resolve("data/feeds/" + a.identity.id())));
+		assertEquals(1L, indexEntry(a, BOOKING).get("ownSeq").asLong());
 	}
 
 	@Test

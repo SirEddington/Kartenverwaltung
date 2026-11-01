@@ -2762,6 +2762,10 @@ public final class SyncService implements ConnectionControl {
 	 * findet, was noch nicht erledigt ist (und {@link #reportLoss} je Version nur einmal meldet). Umstrittene Plätze und
 	 * temporäre Dateien bleiben der Wiederholung überlassen, sie finden sich dabei wieder. Die Vorstellung des Blocks gilt
 	 * bis zur gelungenen Wiederholung als in Arbeit ({@link FullSyncRun#inProgress}), die Auflösung ihrer Verluste wartet.
+	 * <p>
+	 * Was der Block hochgeladen hat, kommt danach in eine eigene Änderungsliste ({@link #listUploaded}), auch aus dem
+	 * Teilergebnis: Die Ansprüche liegen dann schon im gemeinsamen Ordner. Erst das Übernehmen, dann die Liste: Die Liste
+	 * macht nur früher sichtbar, was der Vollabgleich der anderen ohnehin findet; das Übernehmen dagegen holt niemand nach.
 	 */
 	private void syncSection(Link current, Round round, List<UnitKey> units) throws IOException {
 		Instant now = clock.instant();
@@ -2770,10 +2774,54 @@ public final class SyncService implements ConnectionControl {
 		FullSyncResult result = FullSync.syncUnits(local, current.shared, units, unit -> merges(current, unit), ownership(),
 				files, clock, unit -> index.entry(unit) != null, uploaded -> watchOwnClaims(
 						List.of(new LocalScan.OwnClaim(uploaded.unit(), uploaded.claimName(), uploaded.version(), now))),
-				partial -> takeOverSection(round, partial));
-		takeOverSection(round, result);
+				partial -> {
+					try {
+						takeOverSection(round, partial);
+					} finally {
+						listUploaded(current, partial.uploaded());
+					}
+				});
+		try {
+			takeOverSection(round, result);
+		} finally {
+			listUploaded(current, result.uploaded());
+		}
 		settleAll(current, result.contested(), round);
 		deleteOwnOldTemps(current, result.sharedTemps());
+	}
+
+	/**
+	 * Schreibt die Ansprüche, die ein Block des Vollabgleichs in den gemeinsamen Ordner gelegt hat, in eine eigene
+	 * Änderungsliste: So sehen die anderen Rechner sie im nächsten Takt und nicht erst bei ihrem eigenen Vollabgleich. Anders
+	 * als beim {@link Uploader} liegt der Anspruch schon vor dem Eintrag; der {@link FeedReader} übernimmt ihn dann ohne
+	 * Beobachtung. Eine belegte Nummer behandelt es wie {@link #runJobs}: neue Kennung (SYS-011) und ein weiterer Versuch.
+	 * Scheitert das Schreiben (auch ungeprüft), ist das kein Fehler des Blocks: Der Vollabgleich der anderen findet die
+	 * Ansprüche trotzdem, nur später. Deshalb wirft es nie; im Log steht eine Zeile, die Ursache nur unter {@code FINE}
+	 * (bricht der Block ab, weil der Ordner wegfiel, meldet das schon der Takt). Ohne hochgeladene Ansprüche keine Liste.
+	 */
+	private void listUploaded(Link current, List<FullSyncResult.UploadedClaim> uploaded) {
+		if (uploaded.isEmpty()) {
+			return;
+		}
+		List<FeedEntry> entries = uploaded.stream().map(FullSyncResult.UploadedClaim::feedEntry).toList();
+		try {
+			long seq;
+			try {
+				seq = current.writer.append(entries);
+			} catch (DuplicateMachineException e) {
+				regenerate(current);
+				seq = current.writer.append(entries);
+			}
+			// nur die eigenen: Beim Mitnehmen stehen auch fremde Versionen in der Liste
+			Ownership own = ownership();
+			index.markOwnListed(entries.stream().filter(entry -> own.isOwnId(entry.version())).toList(), seq);
+		} catch (IOException | RuntimeException e) {
+			String text = "Die Änderungsliste für " + entries.size() + " Ansprüche aus dem Vollabgleich ließ sich nicht "
+					+ "schreiben (" + StoreMessages.describe(e) + "); die anderen Rechner finden sie bei ihrem nächsten "
+					+ "Vollabgleich";
+			LOGGER.warning(text);
+			LOGGER.log(Level.FINE, text, e);
+		}
 	}
 
 	/**
