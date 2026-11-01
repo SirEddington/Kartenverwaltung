@@ -238,8 +238,19 @@ public final class ConflictActions {
 
 	/** Der eigene Sitz eines Vermerks "Platz"; {@code null} ohne die Gruppe oder wenn der eigene Wert "ohne Platz" ist. */
 	private static String mySeatId(ConflictNote note) {
+		ObjectNode mine = placeOf(note);
+		return mine == null || isUnassigned(mine) ? null : text(mine, "seatId", null);
+	}
+
+	/** Der eigene Wert der Gruppe "Platz"; {@code null} ohne die Gruppe. */
+	private static ObjectNode placeOf(ConflictNote note) {
 		FieldConflict place = fieldOf(note, PLACE_GROUP);
-		return place == null ? null : text(place.mine(), "seatId", null);
+		return place == null ? null : place.mine();
+	}
+
+	/** Ob der Wert der Gruppe "Platz" "ohne Platz" ist ({@code unassigned: true}); der Sitz darin ist dann ohne Bedeutung. */
+	private static boolean isUnassigned(JsonNode value) {
+		return value != null && value.path("unassigned").asBoolean(false);
 	}
 
 	/** Die Feldgruppe des Vermerks; {@code null} ohne Vermerk oder wenn er die Gruppe nicht hat. */
@@ -529,6 +540,10 @@ public final class ConflictActions {
 		if (payload == null) {
 			return false;
 		}
+		if (PLACE_GROUP.equals(group) && isUnassigned(field.mine())) {
+			// "ohne Platz" ist übernommen, sobald die Buchung ohne Platz steht; der alte Sitz im eigenen Wert zählt dann nicht
+			return isUnassigned(payload);
+		}
 		Iterator<Map.Entry<String, JsonNode>> values = field.mine().fields();
 		while (values.hasNext()) {
 			Map.Entry<String, JsonNode> entry = values.next();
@@ -773,7 +788,8 @@ public final class ConflictActions {
 	/**
 	 * Die Version, deren Inhalt der Vermerk weichen ließ, aus dem lokalen Bestand der Einheit der Zeile (bei einer Übertragung
 	 * auch der Einheit, auf die sie ging; beim Vermerk "Platz" auch des eigenen Sitzes, auf dem die eigene Fassung stand, etwa
-	 * nach zwei gleichzeitigen Umzügen, KARV-114); {@code null}, wenn der Vermerk keine nennt oder sie lokal nicht lesbar ist.
+	 * nach zwei gleichzeitigen Umzügen, KARV-114; ist der eigene Wert "ohne Platz", auch der Einheiten "ohne Platz" der
+	 * Vorstellung, KARV-117); {@code null}, wenn der Vermerk keine nennt oder sie lokal nicht lesbar ist.
 	 */
 	private Version dropped(OpenConflict conflict) {
 		ConflictNote note = conflict.note();
@@ -789,6 +805,15 @@ public final class ConflictActions {
 		String mySeatId = mySeatId(note);
 		if (mySeatId != null) {
 			candidates.add(UnitKey.booking(conflict.unit().eventId(), conflict.unit().presentationId(), mySeatId));
+		} else if (isUnassigned(placeOf(note))) {
+			// der eigene Wert ist "ohne Platz": Die eigene Fassung steht auf der Einheit "ohne Platz" der Buchung, deren Kennung
+			// man erst aus ihr kennt; also kommen die Einheiten "ohne Platz" der Vorstellung in Frage
+			UnitKey unit = conflict.unit();
+			for (UnitKey other : eventSnapshots(unit.eventId()).keySet()) {
+				if (other.type() == UnitType.BOOKING && other.isUnassigned() && unit.presentationId().equals(other.presentationId())) {
+					candidates.add(other);
+				}
+			}
 		}
 		for (UnitKey unit : candidates) {
 			VersionRef ref = new VersionRef(unit, note.dropped());

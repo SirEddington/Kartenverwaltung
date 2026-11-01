@@ -1542,5 +1542,25 @@ class ConflictActionsTest {
 		assertFalse(isLive(b, seatUnit), "die Einheit des entfernten Sitzes ist gelöscht");
 	}
 
+	/**
+	 * Der Vermerk "Platz" bei a (eigener Wert "ohne Platz", Müller steht bei a schon ohne Platz): übernommen, nichts mehr zu tun.
+	 * Der Rest des eigenen Werts (der alte Sitz) zählt dann nicht.
+	 */
+	@Test
+	void planSwitchNoteShowsAdopted() {
+		planSwitchAndMove();
+		clock.advance(ROUND);
+		b.tick();
+		settle();
+		settle();
+
+		Row row = a.onlyRow();
+		assertEquals(1, row.fields().size(), "a: " + row.fields());
+		assertTrue(row.fields().get(0).adopted(), "Müller steht ohne Platz, wie der eigene Wert");
+		assertEquals(new Availability(false, ConflictActions.NOT_NEEDED), a.actions().availability(row));
+		a.actions().dismiss(row);
+		assertEquals(List.of(), a.sync.openConflicts(), "\"Erledigt\" schließt die Zeile");
+	}
+
 	// <-- Buchung ohne Platz statt Warten
 }
