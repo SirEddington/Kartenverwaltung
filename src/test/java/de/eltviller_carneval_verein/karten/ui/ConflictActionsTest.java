@@ -58,6 +58,8 @@ import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestClock;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions.Availability;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Action;
@@ -1464,6 +1466,80 @@ class ConflictActionsTest {
 		a.halls.saveHall(a.hall);
 		settle();
 		assertVisibleWithoutSeat(a, bookingId);
+	}
+
+	/** Die lebenden Buchungs-Einheiten im Index des Rechners, die diese Buchung tragen. */
+	private static List<UnitKey> livingCarriers(Machine machine, String bookingId) {
+		return machine.sync.eventSnapshots(machine.event.getId()).values().stream()
+				.filter(snapshot -> snapshot.unit().type() == UnitType.BOOKING && snapshot.carriesBooking(bookingId))
+				.map(UnitSnapshot::unit).toList();
+	}
+
+	private static boolean isLive(Machine machine, UnitKey unit) {
+		UnitSnapshot snapshot = machine.sync.eventSnapshots(machine.event.getId()).get(unit);
+		return snapshot != null && snapshot.isLive();
+	}
+
+	@Test
+	void editedDisplacedBookingIsMovedOnSave() {
+		String bookingId = planSwitchAndMove();
+		clock.advance(ROUND);
+		b.tick();
+		settle();
+		settle();
+		assertVisibleWithoutSeat(b, bookingId);
+
+		Booking displaced = withId(modelFriday(b), bookingId).get(0);
+		displaced.setComment("nachträglich");
+		UnitKey unassigned = UnitKey.unassignedBooking(b.event.getId(), b.friday().getId(), bookingId);
+		assertEquals(Set.of(unassigned, b.seatUnit(2)), b.repository.locallyChangedUnits(),
+				"die Buchung ist versetzt: Auch der Wegfall am alten Sitz zählt als geändert");
+		b.saveEvent();
+		settle();
+		settle();
+
+		assertEquals(List.of(unassigned), livingCarriers(b, bookingId), "b: genau eine lebende Einheit mit Müllers Kennung");
+		assertEquals(List.of(unassigned), livingCarriers(a, bookingId), "a: dieselbe Sicht");
+		assertFalse(isLive(b, b.seatUnit(2)), "die Einheit auf dem dritten Sitz der ersten Bestuhlung ist gelöscht");
+		List<Booking> seen = withId(modelFriday(a), bookingId);
+		assertEquals(1, seen.size(), "a: " + seen);
+		assertTrue(seen.get(0).hasData(), "a");
+		assertEquals("nachträglich", seen.get(0).getComment(), "a: Müller mit dem Kommentar");
+		assertEquals("nachträglich", withId(modelFriday(b), bookingId).get(0).getComment(), "b");
+	}
+
+	@Test
+	void editedBookingAfterForeignHallChangeIsMovedOnSave() {
+		Seat last = a.plan().getSeats().get(5);
+		a.seat(5).setLastName("Neu");
+		a.saveEvent();
+		settle();
+		String bookingId = b.seat(5).getId();
+		UnitKey seatUnit = b.seatUnit(5);
+		assertEquals("Neu", b.seat(5).getLastName());
+
+		assertTrue(last.getParent().deleteSeat(last));
+		a.halls.saveHall(a.hall);
+		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		settle();
+		// wie die App nach einem Hallenwechsel: b gleicht seine Vorstellung mit der neuen Bestuhlung ab
+		SeatingPlan current = b.halls.findById(b.hall.getId()).getSeatingPlans().get(0);
+		b.repository.deriving(b.event, () -> BookingSync.sync(b.friday(), current));
+		List<Booking> sold = withId(modelFriday(b), bookingId);
+		assertEquals(1, sold.size(), "b: " + sold);
+		assertTrue(sold.get(0).isUnassigned(), "b: ohne Platz");
+		assertEquals(Set.of(), b.repository.locallyChangedUnits(), "b: nichts lokal verändert");
+
+		sold.get(0).setComment("nachträglich");
+		UnitKey unassigned = UnitKey.unassignedBooking(b.event.getId(), b.friday().getId(), bookingId);
+		assertEquals(Set.of(unassigned, seatUnit), b.repository.locallyChangedUnits(),
+				"die Buchung ist versetzt: Auch der Wegfall am alten Sitz zählt als geändert");
+		b.saveEvent();
+		settle();
+		settle();
+
+		assertEquals(List.of(unassigned), livingCarriers(b, bookingId), "b: genau eine lebende Einheit mit der Kennung");
+		assertFalse(isLive(b, seatUnit), "die Einheit des entfernten Sitzes ist gelöscht");
 	}
 
 	// <-- Buchung ohne Platz statt Warten

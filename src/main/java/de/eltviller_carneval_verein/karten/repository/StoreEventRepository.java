@@ -696,8 +696,10 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Die Einheiten aller Events im Cache, die der Nutzer ungespeichert geändert hat: Inhalt im Modell anders als im
 	 * Vergleichsstand, oder nur auf einer Seite vorhanden (im Vergleichsstand zählt nur eine angezeigte). Nicht dazu zählt,
-	 * was das Einarbeiten selbst im Modell umgesetzt hat (siehe {@link #derived}), solange es unverändert ist. Lässt sich ein
-	 * Event nicht zerlegen (zwei Buchungen auf einem Platz), zählen sein Kopf und alles Angezeigte.
+	 * was das Einarbeiten selbst im Modell umgesetzt hat (siehe {@link #derived}), solange es unverändert ist. Ausnahme: Hat
+	 * der Nutzer eine solche Buchung geändert, die das Einarbeiten versetzt hat (etwa auf {@code _<ID>}), zählt auch der
+	 * Wegfall am alten Platz: Das Speichern verschiebt die Buchung und löscht ihn. Lässt sich ein Event nicht zerlegen (zwei
+	 * Buchungen auf einem Platz), zählen sein Kopf und alles Angezeigte.
 	 */
 	public Set<UnitKey> locallyChangedUnits() {
 		Set<UnitKey> changed = new HashSet<>();
@@ -724,6 +726,10 @@ public class StoreEventRepository implements EventRepository {
 	 * als verändert). {@code model} sind die Inhalte der Einheiten im Modell ({@code null} bei {@code all}). {@code moved}
 	 * sind die Buchungs-Einheiten im Modell, deren Inhalt vom Vergleichsstand abweicht oder die keinen haben (auch die vom
 	 * Abgleich abgeleiteten), je Buchungs-Kennung: Dort steht eine Buchung, die gegenüber dem gespeicherten Stand versetzt ist.
+	 * <p>
+	 * Eine angezeigte Einheit, die im Modell fehlt, gilt als verändert, außer das Einarbeiten hat sie herausgenommen
+	 * ({@link #derived} = {@code null}). Auch dann zählt sie, wenn der Nutzer eine Einheit mit derselben Buchungs-Kennung
+	 * geändert hat: Das Speichern verschiebt die Buchung und schreibt den Wegfall.
 	 */
 	private record LocalChanges(Set<UnitKey> units, boolean all, Map<UnitKey, ObjectNode> model,
 			Map<String, List<UnitKey>> moved) {
@@ -747,6 +753,8 @@ public class StoreEventRepository implements EventRepository {
 		}
 		Set<UnitKey> changed = new HashSet<>();
 		Map<String, List<UnitKey>> moved = new HashMap<>();
+		// die Buchungs-Kennungen der Einheiten, die der Nutzer geändert hat (nicht der Abgleich)
+		Set<String> editedBookings = new HashSet<>();
 		for (Map.Entry<UnitKey, ObjectNode> entry : model.entrySet()) {
 			UnitKey unit = entry.getKey();
 			UnitSnapshot known = baseline.known(unit);
@@ -759,14 +767,31 @@ public class StoreEventRepository implements EventRepository {
 			}
 			if (differs && !(derived.containsKey(unit) && entry.getValue().equals(derived.get(unit)))) {
 				changed.add(unit);
+				if (bookingId != null) {
+					editedBookings.add(bookingId);
+				}
 			}
 		}
 		for (UnitKey unit : baseline.shownUnits(event.getId())) {
-			if (!model.containsKey(unit) && !(derived.containsKey(unit) && derived.get(unit) == null)) {
+			if (!model.containsKey(unit) && (!(derived.containsKey(unit) && derived.get(unit) == null)
+					|| carriesEditedBooking(baseline.known(unit), editedBookings))) {
 				changed.add(unit);
 			}
 		}
 		return new LocalChanges(changed, false, model, moved);
+	}
+
+	/**
+	 * Ob der Vergleichsstand einer im Modell fehlenden Einheit eine Buchung trägt, die der Nutzer an anderer Stelle geändert
+	 * hat. Dann ist der Wegfall nicht mehr nur der Abgleich: Die Buchung steht im Modell versetzt (etwa ohne Platz auf
+	 * {@code _<ID>}) und das nächste Speichern verschiebt sie, schreibt also auch diesen Wegfall.
+	 */
+	private static boolean carriesEditedBooking(UnitSnapshot known, Set<String> editedBookings) {
+		if (known == null || editedBookings.isEmpty()) {
+			return false;
+		}
+		String bookingId = ConflictInput.bookingIdOf(known.payload());
+		return bookingId != null && editedBookings.contains(bookingId);
 	}
 
 	/**
