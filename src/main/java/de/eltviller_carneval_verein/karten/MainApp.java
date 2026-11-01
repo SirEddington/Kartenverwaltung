@@ -218,6 +218,7 @@ public class MainApp extends Application {
 		StoreHallRepository.getInstance().loadHalls();
 		// schon vor dem Laden der Events: Beim Laden bleiben Buchungen, die nicht zur Bestuhlung ihrer Vorstellung passen, draußen
 		StoreEventRepository.getInstance().setHallLookup(StoreHallRepository.getInstance()::findById);
+		StoreEventRepository.getInstance().setHallCurrent(StoreHallRepository.getInstance()::isCurrent);
 		StoreEventRepository.getInstance().loadEvents();
 	}
 

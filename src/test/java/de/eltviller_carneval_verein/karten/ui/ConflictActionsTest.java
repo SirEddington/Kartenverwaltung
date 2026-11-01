@@ -84,6 +84,8 @@ class ConflictActionsTest {
 		final EditingUnits editing = new EditingUnits();
 		/** Die Dateischicht des Rechners; Tests lassen sie gezielt scheitern. */
 		final FaultyFileLayer files = new FaultyFileLayer(new NioFileLayer());
+		/** Die Hinweise, die das Einarbeiten fremder Stände dem Nutzer meldete. */
+		final List<String> hints = new ArrayList<>();
 		Hall hall;
 		Event event;
 
@@ -96,12 +98,13 @@ class ConflictActionsTest {
 			halls = TestRepositories.halls(sync);
 			repository = TestRepositories.events(sync);
 			repository.setHallLookup(id -> halls.findById(id));
+			repository.setHallCurrent(halls::isCurrent);
 		}
 
 		@Override
 		public void unitsChanged(Set<UnitKey> units) {
 			halls.applyForeign(units);
-			repository.applyForeign(units);
+			hints.addAll(repository.applyForeign(units).warnings());
 		}
 
 		void load() {
@@ -1336,4 +1339,132 @@ class ConflictActionsTest {
 	}
 
 	// <-- Feldvermerk folgt der Buchung
+
+	// Buchung ohne Platz statt Warten (KARV-117) -->
+
+	private static final String MUELLER_WITHOUT_SEAT = "Müller steht jetzt ohne Platz: Tisch A1, Sitz 3 gibt es in der Bestuhlung"
+			+ " von Vorstellung Freitag nicht.";
+
+	/** Die Vorstellung des Rechners, wie das Repository sie im Modell hält. */
+	private static Presentation modelFriday(Machine machine) {
+		return machine.repository.findEvent(machine.event.getId()).getPresentations().get(0);
+	}
+
+	/** Die Buchungen mit dieser Kennung, auch ohne Daten (Platzhalter tragen eigene Kennungen). */
+	private static List<Booking> withId(Presentation presentation, String bookingId) {
+		return presentation.getBookings().stream().filter(booking -> bookingId.equals(booking.getId())).toList();
+	}
+
+	/** Die Vorstellung nach frischem Laden aus dem Versionsspeicher des Rechners, mit den Regeln der App. */
+	private Presentation loadedFresh(Machine machine) {
+		StoreEventRepository fresh = TestRepositories.events(machine.sync);
+		fresh.setHallLookup(machine.halls::findById);
+		fresh.setHallCurrent(machine.halls::isCurrent);
+		return fresh.loadEvents().get(0).getPresentations().get(0);
+	}
+
+	/** Gleicht die Vorstellung mit ihrer Bestuhlung ab, wie {@code BookingSyncService.prepare} nach dem Laden. */
+	private static void prepared(Machine machine, Presentation presentation) {
+		Hall hall = machine.halls.findById(presentation.getHallId());
+		SeatingPlan plan = hall.getSeatingPlans().stream().filter(candidate -> candidate.getId().equals(presentation.getSeatingPlanId()))
+				.findFirst().orElseThrow();
+		BookingSync.sync(presentation, plan);
+	}
+
+	private static void assertVisibleWithoutSeat(Machine machine, String bookingId) {
+		List<Booking> found = withId(modelFriday(machine), bookingId);
+		assertEquals(1, found.size(), machine.name + ": " + found);
+		assertTrue(found.get(0).hasData(), machine.name);
+		assertTrue(found.get(0).isUnassigned(), machine.name);
+		assertEquals("Müller", found.get(0).getLastName(), machine.name);
+		assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name + ": nichts lokal verändert");
+	}
+
+	/**
+	 * a stellt die Vorstellung auf eine zweite Bestuhlung um (Reihe "B", also ohne Müllers Sitz), b setzt Müller gleichzeitig
+	 * auf den dritten Sitz der ersten.
+	 *
+	 * @return die Kennung von Müllers Buchung
+	 */
+	private String planSwitchAndMove() {
+		SeatingPlan second = a.hall.addSeatingPlan();
+		TableRow secondRow = second.addRow();
+		secondRow.setLabel("B");
+		second.fillRow(secondRow, 1, 3);
+		a.halls.saveHall(a.hall);
+		settle();
+		String bookingId = b.seat(0).getId();
+		BookingSync.switchPlan(a.friday(), second);
+		a.saveEvent();
+		moveFromFirstSeat(b, 2);
+		return bookingId;
+	}
+
+	@Test
+	void planSwitchAgainstMoveKeepsTheBookingVisible() {
+		String bookingId = planSwitchAndMove();
+		clock.advance(ROUND);
+		b.tick();
+		settle();
+		settle();
+
+		assertVisibleWithoutSeat(a, bookingId);
+		assertVisibleWithoutSeat(b, bookingId);
+		for (Machine machine : List.of(a, b)) {
+			Presentation loaded = loadedFresh(machine);
+			List<Booking> found = withId(loaded, bookingId);
+			assertEquals(1, found.size(), machine.name + " frisch geladen: " + found);
+			assertTrue(found.get(0).hasData(), machine.name);
+			prepared(machine, loaded);
+			assertTrue(withId(loaded, bookingId).get(0).isUnassigned(), machine.name + " nach dem Abgleich");
+		}
+		assertEquals(1, a.hints.stream().filter(MUELLER_WITHOUT_SEAT::equals).count(), "a: " + a.hints);
+		assertTrue(b.hints.stream().filter(MUELLER_WITHOUT_SEAT::equals).count() <= 1, "b: " + b.hints);
+	}
+
+	@Test
+	void seatRemovedAgainstSaleKeepsTheBookingVisible() {
+		Seat last = a.plan().getSeats().get(5);
+		assertTrue(last.getParent().deleteSeat(last));
+		a.halls.saveHall(a.hall);
+		// wie die App: Der Abgleich der eigenen Vorstellung folgt dem Speichern der Halle, bevor der fremde Verkauf eintrifft
+		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		b.seat(5).setLastName("Neu");
+		b.saveEvent();
+		clock.advance(ROUND);
+		b.tick();
+		settle();
+		settle();
+
+		List<Booking> sold = modelFriday(a).getBookings().stream().filter(booking -> "Neu".equals(booking.getLastName())).toList();
+		assertEquals(1, sold.size(), "a: " + sold);
+		assertTrue(sold.get(0).isUnassigned(), "a: ohne Platz");
+		String hint = "Neu steht jetzt ohne Platz: Tisch A2, Sitz 3 gibt es in der Bestuhlung von Vorstellung Freitag nicht.";
+		assertEquals(1, a.hints.stream().filter(hint::equals).count(), "a: " + a.hints);
+		for (Machine machine : List.of(a, b)) {
+			List<Booking> loaded = loadedFresh(machine).getBookings().stream()
+					.filter(booking -> "Neu".equals(booking.getLastName()) && booking.hasData()).toList();
+			assertEquals(1, loaded.size(), machine.name + " frisch geladen: " + loaded);
+		}
+	}
+
+	@Test
+	void waitingStaysWhileHallIsBeingEdited() {
+		String bookingId = planSwitchAndMove();
+		a.hall.setName("Lokal");
+		clock.advance(ROUND);
+		b.tick();
+		settle();
+		settle();
+
+		assertEquals(List.of(), withId(modelFriday(a), bookingId).stream().filter(Booking::hasData).toList(),
+				"die Halle wird noch bearbeitet: die Buchung wartet");
+		assertEquals(List.of(), a.hints);
+
+		a.halls.saveHall(a.hall);
+		settle();
+		assertVisibleWithoutSeat(a, bookingId);
+	}
+
+	// <-- Buchung ohne Platz statt Warten
 }

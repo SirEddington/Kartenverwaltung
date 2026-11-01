@@ -118,6 +118,7 @@ public final class LiveUpdates {
 		halls.setBlockedCheck(hall -> editing.isEditing(hall) || isEditingIn(hall, editing) || hasUnsavedBookings(hall));
 		events.setEditingCheck(editing::isEditing);
 		events.setHallLookup(halls::findById);
+		events.setHallCurrent(halls::isCurrent);
 		halls.addListener(new HallListener());
 		events.addListener(eventListener);
 		editing.addEndListener(this::scheduleRetry);

@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,12 @@ class EventMergeTest {
 		final List<String> warnings = new ArrayList<>();
 		final List<UnitKey> displacedUnits = new ArrayList<>();
 		final List<String> displaced = new ArrayList<>();
+		final List<UnitKey> reconciled = new ArrayList<>();
+
+		@Override
+		public void reconciled(UnitKey unit) {
+			reconciled.add(unit);
+		}
 
 		@Override
 		public void displaced(UnitSnapshot snapshot, String hint) {
@@ -721,6 +728,83 @@ class EventMergeTest {
 		assertTrue(sink.displaced.isEmpty(), "ihr Platz fehlt nicht");
 		assertTrue(sink.held.isEmpty());
 		assertEquals(Map.of(unit, true), sink.adopted);
+	}
+
+	@Test
+	void displacedBookingWithTheIdOfAnUnassignedOneIsTheSameBooking() {
+		Hall hall = hallWithOneSeat();
+		Event event = eventInHall(hall);
+		Presentation friday = event.getPresentations().get(0);
+		// Müller steht im Modell schon ohne Platz (der Bestuhlungswechsel hat ihn dorthin gestellt) ...
+		Booking known = booking(friday, null, 3, "Müller");
+		known.setUnassigned(true);
+		Event state = copyOfUnchecked(event);
+		// ... und der andere Rechner hat ihn gleichzeitig auf einen Sitz umgesetzt, den die Bestuhlung nicht hat
+		Booking moved = byId(state.getPresentations().get(0), known.getId());
+		moved.setUnassigned(false);
+		moved.setSeatId("fremder-sitz");
+		moved.setSeatNumber(7);
+		UnitKey unit = UnitKey.booking(event.getId(), friday.getId(), "fremder-sitz");
+		Recording sink = new Recording();
+
+		EventMerge.apply(event, displacedPlan(event, hall, state, unit), sink);
+
+		assertEquals(1, friday.getBookings().stream().filter(b -> known.getId().equals(b.getId())).count(), "keine zweite daneben");
+		Booking result = byId(friday, known.getId());
+		assertTrue(result.isUnassigned());
+		assertEquals("Müller", result.getLastName());
+		assertEquals(List.of("Müller steht jetzt ohne Platz: Tisch A1, Sitz 7 gibt es in der Bestuhlung von Vorstellung Freitag nicht."),
+				sink.displaced);
+		assertEquals(List.of(unit), sink.reconciled);
+	}
+
+	/** Müller steht ohne Platz im Modell; seine Einheit ist fremd gelöscht, und eine andere Einheit trägt ihn (nach {@code carried}). */
+	private Booking cancelledUnassigned(boolean carried, boolean twice, Recording sink) {
+		Hall hall = hallWithOneSeat();
+		Event event = eventInHall(hall);
+		Presentation friday = event.getPresentations().get(0);
+		Booking known = booking(friday, null, 3, "Müller");
+		known.setUnassigned(true);
+		if (twice) {
+			Booking duplicate = booking(friday, "anderer-sitz", 4, "Müller");
+			duplicate.setId(known.getId());
+		}
+		UnitKey unit = UnitKey.unassignedBooking(event.getId(), friday.getId(), known.getId());
+		EventMerge.Plan plan = new EventMerge.Plan(List.of(deleted(unit)), List.of(), lookup(hall), id -> true, indexOf(event),
+				Map.of());
+		EventMerge.apply(event, carried ? plan.withCarried(Set.of(unit)) : plan, sink);
+		assertEquals(Map.of(unit, false), sink.adopted);
+		return known;
+	}
+
+	@Test
+	void cancelOfAnUnassignedUnitThatAnotherUnitCarriesKeepsTheBooking() {
+		Recording sink = new Recording();
+
+		Booking known = cancelledUnassigned(true, false, sink);
+
+		assertTrue(known.getParent().getBookings().contains(known));
+		assertEquals(1, sink.reconciled.size());
+	}
+
+	@Test
+	void cancelOfAnUnassignedUnitNobodyCarriesRemovesTheBooking() {
+		Recording sink = new Recording();
+
+		Booking known = cancelledUnassigned(false, false, sink);
+
+		assertFalse(known.getParent().getBookings().contains(known));
+		assertTrue(sink.reconciled.isEmpty());
+	}
+
+	@Test
+	void cancelOfAnUnassignedUnitRemovesTheCopyWhenTheBookingStandsTwice() {
+		Recording sink = new Recording();
+
+		Booking known = cancelledUnassigned(true, true, sink);
+
+		assertFalse(known.getParent().getBookings().contains(known), "die zweite trägt die Buchung, diese ist überzählig");
+		assertTrue(sink.reconciled.isEmpty());
 	}
 
 	@Test

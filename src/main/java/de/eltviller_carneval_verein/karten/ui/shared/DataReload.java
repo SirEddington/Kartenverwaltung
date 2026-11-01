@@ -44,6 +44,7 @@ public final class DataReload {
 		halls.reloadHalls();
 		// schon vor dem Laden der Events: Beim Laden bleiben Buchungen, die nicht zur Bestuhlung ihrer Vorstellung passen, draußen
 		events.setHallLookup(halls::findById);
+		events.setHallCurrent(halls::isCurrent);
 		events.reloadEvents();
 		clearHeldStates.run();
 		List<String> warnings = new ArrayList<>(halls.getAndClearLoadWarnings());

@@ -106,6 +106,12 @@ public class StoreEventRepository implements EventRepository {
 	private Function<String, Hall> hallLookup = hallId -> null;
 
 	/**
+	 * Ob die Halle zur ID im Modell aktuell ist, also nicht dem Index hinterherhinkt (siehe {@link #setHallCurrent}). Nur
+	 * dann gilt der Sitz einer fremden Buchung, den die Bestuhlung nicht hat, als endgültig fehlend.
+	 */
+	private Predicate<String> hallCurrent = hallId -> false;
+
+	/**
 	 * Liefert die einzige Instanz des Repositorys. Alle Controller sollen sich
 	 * darüber die Instanz holen, statt selbst eine eigene zu erzeugen, damit
 	 * nicht an mehreren Stellen unabhängig voneinander geladen wird.
@@ -180,7 +186,7 @@ public class StoreEventRepository implements EventRepository {
 				.filter(snapshot -> snapshot.unit().type() != UnitType.HALL).toList();
 		// Buchungen, die nicht platzierbar sind, bleiben auch nach einem Neustart draußen und warten (wie bei applyForeign)
 		List<UnitSnapshot> waiting = new ArrayList<>();
-		Assembly<Event> assembly = EventMerge.assembleLoaded(snapshots, hallLookup, waiting);
+		Assembly<Event> assembly = EventMerge.assembleLoaded(snapshots, hallLookup, hallCurrent, waiting);
 		baseline.reset(snapshots, assembly.shown());
 		derived.clear();
 		removedByOthers.clear();
@@ -632,6 +638,16 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
+	 * Woher das Repository weiß, ob die Halle im Modell dem Index entspricht (in der App
+	 * {@code StoreHallRepository.isCurrent}). Fehlt der Sitz einer fremden Buchung in der Bestuhlung einer aktuellen Halle,
+	 * wartet die Buchung nicht, sondern wird übernommen und ohne Platz gestellt (siehe {@link EventMerge#placeable}).
+	 * Vorgabe: nie aktuell, die Buchung wartet dann wie bisher.
+	 */
+	public void setHallCurrent(Predicate<String> hallCurrent) {
+		this.hallCurrent = hallCurrent;
+	}
+
+	/**
 	 * Arbeitet die Stände ein, die andere Rechner für diese Einheiten geschrieben haben (Spec KARV-85, "Entscheidung je
 	 * Einheit", "Einarbeiten" und "Fehlerfälle"). Hallen werden übergangen; die zurückgestellten Einheiten früherer Aufrufe
 	 * werden jedes Mal mit geprüft. Je Einheit gilt {@link ForeignDecision}: Ein Nachfolger des Vergleichsstands (der steht
@@ -797,6 +813,16 @@ public class StoreEventRepository implements EventRepository {
 	 * schon vorher lokal veränderten.
 	 */
 	private void noteDerived(Event event, Map<UnitKey, ObjectNode> before, Set<UnitKey> skip) {
+		noteDerived(event, before, skip, Set.of());
+	}
+
+	/**
+	 * Wie {@link #noteDerived(Event, Map, Set)}; {@code resynced} sind übernommene Einheiten, deren Stand im Modell nicht so
+	 * steht (siehe {@link EventMerge.Sink#reconciled}): Sie zählen trotz {@code skip}, was im Modell unter ihnen steht, auch
+	 * wenn es sich nicht geändert hat. Fehlt ihre Einheit im Modell, hat das Einarbeiten sie herausgenommen, nicht der
+	 * Nutzer.
+	 */
+	private void noteDerived(Event event, Map<UnitKey, ObjectNode> before, Set<UnitKey> skip, Set<UnitKey> resynced) {
 		Map<UnitKey, ObjectNode> after;
 		try {
 			after = UnitMapper.payloads(event);
@@ -805,12 +831,15 @@ public class StoreEventRepository implements EventRepository {
 		}
 		for (Map.Entry<UnitKey, ObjectNode> entry : after.entrySet()) {
 			UnitKey unit = entry.getKey();
-			if (!skip.contains(unit) && !entry.getValue().equals(before.get(unit))) {
+			boolean resyncedUnit = resynced.contains(unit);
+			if ((!skip.contains(unit) || resyncedUnit) && (resyncedUnit || !entry.getValue().equals(before.get(unit)))) {
 				derived.put(unit, entry.getValue());
 			}
 		}
-		for (UnitKey unit : before.keySet()) {
-			if (!after.containsKey(unit) && !skip.contains(unit) && baseline.isShown(unit)) {
+		Set<UnitKey> candidates = new LinkedHashSet<>(before.keySet());
+		candidates.addAll(resynced);
+		for (UnitKey unit : candidates) {
+			if (!after.containsKey(unit) && (!skip.contains(unit) || resynced.contains(unit)) && baseline.isShown(unit)) {
 				derived.put(unit, null);
 			}
 		}
@@ -876,7 +905,7 @@ public class StoreEventRepository implements EventRepository {
 					|| (lastIds.containsKey(unit) && movedBookingTouched(event, changes, lastIds.get(unit), unit))) {
 				defer(event, current, chainOf(chains, unit));
 			} else if (parent != null && event != null && !appliedPresentations.contains(parent)
-					&& EventMerge.waits(event, current, presentationStates.get(parent), hallLookup)) {
+					&& EventMerge.waits(event, current, presentationStates.get(parent), hallLookup, hallCurrent)) {
 				// Wird die Vorstellung in diesem Schritt eingearbeitet, entscheidet das Einarbeiten mit ihrem neuen Stand
 				holdUnplaced(unit, "sie ist im Modell nicht platzierbar");
 			} else {
@@ -959,13 +988,44 @@ public class StoreEventRepository implements EventRepository {
 			if (carriers == null) {
 				carriers = shownBookingIds(event.getId());
 			}
-			boolean carriedElsewhere = carriers.getOrDefault(last.getId(), List.of()).stream()
-					.anyMatch(other -> !other.equals(unit) && other.presentationId().equals(unit.presentationId()));
-			if (!carriedElsewhere) {
+			if (!carriedElsewhere(carriers, last.getId(), unit)) {
 				ids.put(unit, last.getId());
 			}
 		}
 		return ids;
+	}
+
+	/** Ob eine andere angezeigte Einheit derselben Vorstellung die Buchung mit dieser Kennung trägt. */
+	private static boolean carriedElsewhere(Map<String, List<UnitKey>> carriers, String bookingId, UnitKey unit) {
+		return carriers.getOrDefault(bookingId, List.of()).stream()
+				.anyMatch(other -> !other.equals(unit) && other.presentationId().equals(unit.presentationId()));
+	}
+
+	/**
+	 * Die gelöschten oder unlesbaren Einheiten von Buchungen ohne Platz unter {@code successors}, deren Buchung (Kennung aus
+	 * ihrem zuletzt bekannten Stand) eine andere angezeigte Einheit des Events trägt (siehe {@link EventMerge.Plan}).
+	 */
+	private Set<UnitKey> carriedUnits(Event event, List<UnitSnapshot> successors) {
+		Set<UnitKey> units = new HashSet<>();
+		Map<String, List<UnitKey>> carriers = null;
+		for (UnitSnapshot snapshot : successors) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() != UnitType.BOOKING || !unit.isUnassigned() || UnitMapper.isReadable(snapshot)) {
+				continue;
+			}
+			UnitSnapshot known = baseline.known(unit);
+			Booking last = known == null ? null : UnitMapper.readUnit(known, Booking.class);
+			if (last == null || last.getId() == null) {
+				continue;
+			}
+			if (carriers == null) {
+				carriers = shownBookingIds(event.getId());
+			}
+			if (carriedElsewhere(carriers, last.getId(), unit)) {
+				units.add(unit);
+			}
+		}
+		return units;
 	}
 
 	/** Die Kennungen der angezeigten Buchungs-Einheiten des Events im Vergleichsstand, je Kennung die Einheiten, die sie tragen. */
@@ -1085,7 +1145,7 @@ public class StoreEventRepository implements EventRepository {
 		try {
 			Map<UnitKey, UnitSnapshot> all = sync.eventSnapshots(eventId);
 			List<UnitSnapshot> waiting = new ArrayList<>();
-			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup, waiting);
+			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup, hallCurrent, waiting);
 			baseline.resetOwner(eventId, all.values(), assembly.shown(), unitsOf(waiting));
 			forgetDerived(eventId);
 			warnings.addAll(assembly.allWarnings());
@@ -1148,9 +1208,13 @@ public class StoreEventRepository implements EventRepository {
 		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
 				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
 		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
-		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, presentationStates, lastIds);
+		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, hallCurrent, presentationStates, lastIds)
+				.withCarried(carriedUnits(event, apply));
 		Set<UnitKey> adopted = new LinkedHashSet<>();
 		Set<UnitKey> waiting = new HashSet<>();
+		// übernommene Buchungen, die nur wegen eines endgültig fehlenden Sitzes ins Modell kamen: Der Abgleich danach hat das
+		// Modell über den übernommenen Stand hinaus geändert
+		Set<UnitKey> resynced = new LinkedHashSet<>();
 		EventMerge.Sink sink = new EventMerge.Sink() {
 			@Override
 			public void adopted(UnitSnapshot snapshot, boolean shown) {
@@ -1167,6 +1231,16 @@ public class StoreEventRepository implements EventRepository {
 			@Override
 			public void left(UnitKey presentation) {
 				hideBelow(eventId, presentation);
+			}
+
+			@Override
+			public void reconciled(UnitKey unit) {
+				resynced.add(unit);
+			}
+
+			@Override
+			public void displaced(UnitSnapshot booking, String hint) {
+				warnings.add(hint);
 			}
 
 			@Override
@@ -1189,9 +1263,10 @@ public class StoreEventRepository implements EventRepository {
 			}
 			plan = plan.restrictedTo(adopted);
 		}
-		// nur eine Vorstellung kann über den Abgleich Buchungen mitändern
-		if (changes.model() != null && apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION)) {
-			noteDerived(event, changes.model(), adopted);
+		// über den Abgleich ändern Buchungen mit: eine eingearbeitete Vorstellung oder eine Buchung, deren Sitz endgültig fehlt
+		if (changes.model() != null
+				&& (!resynced.isEmpty() || apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION))) {
+			noteDerived(event, changes.model(), adopted, resynced);
 		}
 		EventMerge.Plan applied = plan;
 		listeners.notifyChangedByOthers(event,
@@ -1228,7 +1303,7 @@ public class StoreEventRepository implements EventRepository {
 		try {
 			Collection<UnitSnapshot> all = sync.eventSnapshots(eventId).values();
 			List<UnitSnapshot> waiting = new ArrayList<>();
-			Assembly<Event> assembly = EventMerge.assembleEvent(all, hallLookup, waiting);
+			Assembly<Event> assembly = EventMerge.assembleEvent(all, hallLookup, hallCurrent, waiting);
 			if (assembly.items().isEmpty()) {
 				return false;
 			}
