@@ -78,11 +78,12 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * löschen sie zusätzlich. Scheitert das Löschen, wird die Marke geleert, und eine leere Marke gilt als unbrauchbar. Temporäre Reste und
  * geänderte Dateien entstehen nur bei einem Absturz, dann fehlt die Marke und der nächste Start prüft wie gewohnt.
  * <p>
- * <b>Sperrdatei:</b> Falls sich die Marke weder löschen noch leeren lässt (ein Dateihandle des Sync-Programms oder
- * Virenscanners), legt jeder Start und jedes Ungültigmachen vorher die leere Datei {@code <Index>/unclean} an
- * ({@link #markUnclean}). Solange sie steht, gilt keine Marke; erst {@link #writeCleanMarker} löscht sie, und gelingt das
- * nicht, entsteht keine Marke. So braucht kein einzelner Schreibweg eine eigene Prüfung (KARV-104). Erst wenn auch sie
- * sich nicht anlegen lässt, bleibt es beim Entfernen der Marke. Auch
+ * <b>Sperrdatei:</b> Jeder Start und jedes Ungültigmachen legt vorher die leere Datei {@code <Index>/unclean} an
+ * ({@link #markUnclean}), immer, nicht erst wenn sich die Marke nicht entfernen lässt: Nicht jeder Schreibweg macht die
+ * Marke vorher ungültig. Solange sie steht, gilt keine Marke, auch eine, die sich wegen eines Dateihandles
+ * (Sync-Programm, Virenscanner) weder löschen noch leeren lässt; erst {@link #writeCleanMarker} löscht sie, und gelingt
+ * das nicht, entsteht keine Marke. So braucht kein einzelner Schreibweg eine eigene Prüfung (KARV-104). Erst wenn auch
+ * sie sich nicht anlegen lässt, bleibt es beim Entfernen der Marke. Auch
  * die Marke macht den Index nicht zum Schiedsrichter: Die Entscheidung über ausstehende Versionen bleibt bei
  * {@link ChainResolver} auf den Dateien.
  * <p>
@@ -958,19 +959,32 @@ final class UnitIndex {
 	 * @throws IOException wenn sich die Sperrdatei nicht löschen lässt (dann entsteht keine Marke) oder die Marke nicht
 	 *                     schreiben; eine unvollständige Marke gilt beim Lesen als fremd. Weil das Schreiben auch erst nach
 	 *                     dem Inhalt scheitern kann (etwa beim Schließen), gilt die Marke trotzdem als angelegt:
-	 *                     {@link #invalidateCleanMarker} entfernt sie vor der nächsten Änderung
+	 *                     {@link #invalidateCleanMarker} entfernt sie vor der nächsten Änderung, und die Sperrdatei wird
+	 *                     gleich wieder angelegt
 	 */
 	synchronized boolean writeCleanMarker() throws IOException {
 		if (!dirty.isEmpty()) {
 			return false;
 		}
 		// zuerst die Sperrdatei: Bleibt sie stehen, gälte die Marke ohnehin nicht, also entsteht gar keine
-		deleter.delete(uncleanFile());
+		try {
+			deleter.delete(uncleanFile());
+		} catch (IOException e) {
+			throw new IOException("Die Sperrdatei ließ sich nicht löschen, die Marke 'sauber beendet' entfällt: "
+					+ uncleanFile(), e);
+		}
 		uncleanStands = false;
 		// vorher: Ein Schreiben, das nach dem Inhalt scheitert, hinterlässt sonst eine gültige Marke, von der niemand weiß
 		markerWritten = true;
-		Files.createDirectories(indexDir);
-		Files.writeString(cleanMarker(), machineId(), StandardCharsets.UTF_8);
+		try {
+			Files.createDirectories(indexDir);
+			Files.writeString(cleanMarker(), machineId(), StandardCharsets.UTF_8);
+		} catch (IOException | RuntimeException e) {
+			// eine Marke kann trotzdem stehen (halb geschrieben oder eine alte, festsitzende), und der Dienst bleibt offen:
+			// Bis zur nächsten Änderung schützt wieder die Sperrdatei
+			markUnclean();
+			throw e;
+		}
 		return true;
 	}
 
@@ -1070,7 +1084,7 @@ final class UnitIndex {
 		void delete(Path file) throws IOException;
 	}
 
-	/** Für Tests: ersetzt das Löschen der Marke, um ein Scheitern nachzustellen. */
+	/** Für Tests: ersetzt das Löschen der Marke und der Sperrdatei, um ein Scheitern nachzustellen. */
 	synchronized void useDeleter(Deleter deleter) {
 		this.deleter = deleter;
 	}

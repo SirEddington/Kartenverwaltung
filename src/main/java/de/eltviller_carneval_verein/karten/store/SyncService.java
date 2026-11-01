@@ -128,8 +128,9 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * wird er von {@link #flushIndex()} und im Takt alle {@link #INDEX_FLUSH}, nicht vor dem Abgleich durch {@link #startup}.
  * Bei einer neuen Rechner-ID (SYS-011) wird er nicht neu aufgebaut: Er übernimmt sie, und die früheren IDs zählen bis zum
  * Wechsel weiter als eigen ({@link Ownership}). Beim Beenden ruft die Anwendung {@link #closeIndex()}: Es schreibt den Index und legt die Marke "sauber beendet" an. Findet
- * {@link #startup} sie vor, übernimmt es den Index ohne jeden Durchlauf über den Bestand (zweite Stufe); ohne Marke,
- * also nach einem Absturz, bleibt es beim Abgleich über die Verzeichnisnamen. Der Index ist nie Schiedsrichter: Jede Entscheidung über Vorgänger, Ansprüche und Verluste trifft {@link ChainResolver}
+ * {@link #startup} sie vor (und keine Sperrdatei des Index, siehe {@link UnitIndex}), übernimmt es den Index ohne jeden
+ * Durchlauf über den Bestand (zweite Stufe); ohne Marke, also nach einem Absturz, bleibt es beim Abgleich über die
+ * Verzeichnisnamen. Der Index ist nie Schiedsrichter: Jede Entscheidung über Vorgänger, Ansprüche und Verluste trifft {@link ChainResolver}
  * auf den Dateien. Er nennt nur, welche Einheiten gelesen werden: Die Abläufe im {@code worker} lesen die Kandidaten des
  * Index (ausstehende, verlorene, junge eigene Glieder) und die Einheiten, die nicht im Index stehen, dazu, was der
  * Vollabgleich gerade abgleicht und was sich geändert hat; nicht mehr in jedem Takt alle Einheiten.
@@ -1896,7 +1897,7 @@ public final class SyncService implements ConnectionControl {
 	 * Beim Beenden der Anwendung: wie {@link #flushIndex()}, und gelingt das Schreiben vollständig, bleibt nichts
 	 * ungeschrieben, so legt es die Marke "sauber beendet" an ({@code <Index>/clean}, Inhalt: die eigene Rechner-ID). Der
 	 * nächste {@link #startup} übernimmt den Index dann ohne Durchlauf über den Bestand. Ohne Marke (Fehler beim Schreiben,
-	 * Index nie abgeglichen) startet er wie nach einem Absturz.
+	 * Index nie abgeglichen, Sperrdatei des Index nicht löschbar) startet er wie nach einem Absturz.
 	 * <p>
 	 * Eine gerade laufende Runde im Hintergrund wartet es kurz ab ({@link #CLOSE_WAIT}); ist sie dann nicht fertig, gibt es
 	 * keine Marke, denn ihre Änderungen am Bestand fehlten im Index. Dasselbe gilt, solange das Auflösen einer Einheit
@@ -1986,7 +1987,8 @@ public final class SyncService implements ConnectionControl {
 
 	/**
 	 * Macht den Index beim Start benutzbar. Zuerst gilt die Marke "sauber beendet" ({@link UnitIndex#loadIfClean}): Ist sie
-	 * da und der Index lesbar, wird er ohne Durchlauf über den Bestand übernommen; das Aufräumen und der Verzeichnisbaum entfallen, denn
+	 * da, steht keine Sperrdatei des Index ({@code <Index>/unclean}, siehe {@link UnitIndex}) und ist der Index lesbar,
+	 * wird er ohne Durchlauf über den Bestand übernommen; das Aufräumen und der Verzeichnisbaum entfallen, denn
 	 * temporäre Reste und Änderungen am Bestand ohne den Index gibt es nur nach einem Absturz, und dann fehlt die Marke.
 	 * Sonst gleicht der Start den Index ab und räumt dabei im selben Durchlauf über den Bestand die alten temporären
 	 * Dateien auf ({@link UnitIndex#refresh}); im Notfall baut er den

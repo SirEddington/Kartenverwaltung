@@ -4097,12 +4097,7 @@ class SyncServiceTest {
 	 */
 	private static void lockOnlyCleanMarker(Node node) {
 		Path marker = cleanMarker(node);
-		node.service.index().useDeleter(file -> {
-			if (file.equals(marker)) {
-				throw new IOException("Datei gesperrt");
-			}
-			Files.deleteIfExists(file);
-		});
+		node.service.index().useDeleter(failingDeleteOf(marker));
 		assumeTrue(marker.toFile().setWritable(false), "Schreibschutz lässt sich auf diesem System nicht setzen");
 		assumeFalse(Files.isWritable(marker), "Schreibschutz greift auf diesem System nicht");
 	}
@@ -4116,6 +4111,16 @@ class SyncServiceTest {
 
 	private static Path uncleanFile(Node node) {
 		return node.appData.resolve("index/unclean");
+	}
+
+	/** Ein Löschen für den Index, das nur an dieser einen Datei scheitert. */
+	private static UnitIndex.Deleter failingDeleteOf(Path locked) {
+		return file -> {
+			if (file.equals(locked)) {
+				throw new IOException("Datei gesperrt");
+			}
+			Files.deleteIfExists(file);
+		};
 	}
 
 	@Test
@@ -4136,7 +4141,9 @@ class SyncServiceTest {
 			assertTrue(a.service.startup(shared));
 			// Speichern, dann Trennen (beansprucht lokal): beides schreibt in den Bestand
 			v2 = save(a, update(BOOKING, v1, "Anna B"));
+			assertTrue(a.service.unitState(BOOKING).provisional());
 			a.service.disconnect();
+			assertFalse(a.service.unitState(BOOKING).provisional(), "disconnect hat lokal beansprucht");
 			assertEquals(a.identity.id(), Files.readString(cleanMarker(a)));
 			assertTrue(Files.isRegularFile(uncleanFile(a)));
 			// kein closeIndex: Absturz
@@ -4189,12 +4196,7 @@ class SyncServiceTest {
 		save(a, create(BOOKING, "Anna"));
 		Path unclean = uncleanFile(a);
 		assertTrue(Files.isRegularFile(unclean));
-		a.service.index().useDeleter(file -> {
-			if (file.equals(unclean)) {
-				throw new IOException("Datei gesperrt");
-			}
-			Files.deleteIfExists(file);
-		});
+		a.service.index().useDeleter(failingDeleteOf(unclean));
 
 		a.service.closeIndex();
 

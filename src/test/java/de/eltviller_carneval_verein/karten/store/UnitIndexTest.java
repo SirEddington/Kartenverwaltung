@@ -921,15 +921,41 @@ class UnitIndexTest {
 		return indexDir.resolve("unclean");
 	}
 
-	/** Ein Löschen, das nur an der Marke "sauber beendet" scheitert, nicht an der Sperrdatei. */
-	private UnitIndex.Deleter markerLocked() {
-		Path marker = cleanMarker();
+	/** Ein Löschen, das nur an dieser einen Datei scheitert (etwa der Marke, nicht der Sperrdatei). */
+	private static UnitIndex.Deleter failingDeleteOf(Path locked) {
 		return file -> {
-			if (file.equals(marker)) {
+			if (file.equals(locked)) {
 				throw new IOException("Datei gesperrt");
 			}
 			Files.deleteIfExists(file);
 		};
+	}
+
+	/** Schneidet die Logeinträge von {@link UnitIndex} mit, auch {@code FINE}, bis {@link #close}. */
+	private static final class LogCapture extends Handler implements AutoCloseable {
+		final List<LogRecord> records = new ArrayList<>();
+		private final Logger logger = Logger.getLogger(UnitIndex.class.getName());
+		private final Level level = logger.getLevel();
+
+		LogCapture() {
+			logger.setLevel(Level.ALL);
+			logger.addHandler(this);
+		}
+
+		@Override
+		public synchronized void publish(LogRecord record) {
+			records.add(record);
+		}
+
+		@Override
+		public void flush() {
+		}
+
+		@Override
+		public void close() {
+			logger.removeHandler(this);
+			logger.setLevel(level);
+		}
 	}
 
 	/** Ein Index, dessen Dateischicht die Sperrdatei nie anlegt: Dann bleibt nur das Entfernen der Marke. */
@@ -1214,27 +1240,9 @@ class UnitIndexTest {
 		index.flush();
 		assertTrue(index.writeCleanMarker());
 		Path marker = cleanMarker();
-		index.useDeleter(markerLocked());
-		List<LogRecord> logs = new ArrayList<>();
-		Handler capture = new Handler() {
-			@Override
-			public void publish(LogRecord record) {
-				logs.add(record);
-			}
-
-			@Override
-			public void flush() {
-			}
-
-			@Override
-			public void close() {
-			}
-		};
-		Logger logger = Logger.getLogger(UnitIndex.class.getName());
-		Level level = logger.getLevel();
-		logger.setLevel(Level.ALL);
-		logger.addHandler(capture);
-		try {
+		index.useDeleter(failingDeleteOf(marker));
+		try (LogCapture capture = new LogCapture()) {
+			List<LogRecord> logs = capture.records;
 			assumeTrue(marker.toFile().setWritable(false), "Schreibschutz lässt sich auf diesem System nicht setzen");
 			assumeFalse(Files.isWritable(marker), "Schreibschutz greift auf diesem System nicht");
 			assertFalse(index.invalidateCleanMarker());
@@ -1256,8 +1264,6 @@ class UnitIndexTest {
 			assertTrue(logs.stream().anyMatch(r -> r.getLevel() == Level.WARNING), logs::toString);
 		} finally {
 			marker.toFile().setWritable(true);
-			logger.removeHandler(capture);
-			logger.setLevel(level);
 		}
 	}
 
@@ -1304,7 +1310,7 @@ class UnitIndexTest {
 	}
 
 	@Test
-	void cleanMarkerRemovesTheUncleanFileFirst() throws IOException {
+	void cleanMarkerRemovesTheUncleanFile() throws IOException {
 		buildThreeUnits();
 		UnitIndex first = index();
 		assertFalse(first.loadIfClean());
@@ -1325,15 +1331,60 @@ class UnitIndexTest {
 		assertFalse(first.loadIfClean());
 		refresh(first, local);
 		first.flush();
-		first.useDeleter(file -> {
-			throw new IOException("Datei gesperrt");
-		});
+		first.useDeleter(failingDeleteOf(uncleanFile()));
 
-		assertThrows(IOException.class, first::writeCleanMarker);
+		IOException failure = assertThrows(IOException.class, first::writeCleanMarker);
 
+		// das Log nennt die Sperrdatei, nicht die Marke
+		assertTrue(failure.getMessage().contains(uncleanFile().toString()), failure.getMessage());
 		assertFalse(Files.exists(cleanMarker()));
 		assertTrue(first.invalidateCleanMarker(), "es steht keine Marke");
 		assertFalse(index().loadIfClean());
+	}
+
+	@Test
+	void failedMarkerWriteLeavesTheUncleanFileStanding() throws IOException {
+		buildThreeUnits();
+		UnitIndex first = index();
+		assertFalse(first.loadIfClean());
+		refresh(first, local);
+		first.flush();
+		// an der Stelle der Marke liegt ein nicht leerer Ordner: Das Schreiben scheitert nach dem Löschen der Sperrdatei
+		Path blocker = Files.createDirectories(cleanMarker().resolve("x"));
+
+		assertThrows(IOException.class, first::writeCleanMarker);
+
+		// eine Marke kann trotzdem stehen (etwa eine alte, festsitzende): Bis zur nächsten Änderung schützt wieder die Sperrdatei
+		assertTrue(Files.isRegularFile(uncleanFile()));
+		assertTrue(first.invalidateCleanMarker());
+		Files.delete(blocker);
+	}
+
+	@Test
+	void invalidateAfterTheMarkerCreatesTheUncleanFile() throws IOException {
+		buildThreeUnits();
+		UnitIndex index = index();
+		assertFalse(index.loadIfClean());
+		refresh(index, local);
+		index.flush();
+		assertTrue(index.writeCleanMarker());
+		assertFalse(Files.exists(uncleanFile()));
+		Path marker = cleanMarker();
+		index.useDeleter(failingDeleteOf(marker));
+		assertTrue(marker.toFile().setWritable(false));
+		assumeFalse(Files.isWritable(marker), "Schreibschutz greift auf diesem System nicht");
+		try {
+			// nach closeIndex: reopen oder ein spätes append will den Bestand ändern, die Marke sitzt fest
+			assertTrue(index.invalidateCleanMarker(), "die Sperrdatei steht vor der Änderung");
+			assertTrue(Files.isRegularFile(uncleanFile()));
+			assertEquals(ME, Files.readString(marker, StandardCharsets.UTF_8));
+
+			// Absturz; danach lässt sich die Marke wieder löschen
+			assertTrue(marker.toFile().setWritable(true));
+			assertFalse(index().loadIfClean());
+		} finally {
+			marker.toFile().setWritable(true);
+		}
 	}
 
 	@Test
@@ -1345,7 +1396,7 @@ class UnitIndexTest {
 		assumeFalse(Files.isWritable(marker), "Schreibschutz greift auf diesem System nicht");
 		try {
 			UnitIndex second = index();
-			second.useDeleter(markerLocked());
+			second.useDeleter(failingDeleteOf(marker));
 			assertFalse(second.loadIfClean());
 			// weder Löschen noch Leeren ging: Die Marke nennt weiter die eigene Rechner-ID, aber die Sperrdatei steht
 			assertEquals(ME, Files.readString(marker, StandardCharsets.UTF_8));
@@ -1366,28 +1417,11 @@ class UnitIndexTest {
 		buildThreeUnits();
 		buildCleanIndex();
 		UnitIndex second = indexWithoutUncleanFile();
-		List<LogRecord> logs = new ArrayList<>();
-		Handler capture = new Handler() {
-			@Override
-			public void publish(LogRecord record) {
-				logs.add(record);
-			}
-
-			@Override
-			public void flush() {
-			}
-
-			@Override
-			public void close() {
-			}
-		};
-		Logger logger = Logger.getLogger(UnitIndex.class.getName());
-		logger.addHandler(capture);
-		try {
+		List<LogRecord> logs;
+		try (LogCapture capture = new LogCapture()) {
+			logs = capture.records;
 			// wie ohne Sperrdatei: Die Marke wird gelöscht, und der Index gilt
 			assertTrue(second.loadIfClean());
-		} finally {
-			logger.removeHandler(capture);
 		}
 
 		assertFalse(Files.exists(uncleanFile()));
