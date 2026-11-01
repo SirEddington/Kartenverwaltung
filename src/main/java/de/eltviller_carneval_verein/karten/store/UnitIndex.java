@@ -1056,12 +1056,11 @@ final class UnitIndex {
 	}
 
 	/**
-	 * Legt die Sperrdatei {@link #uncleanFile()} an, bevor sich der Bestand ändern kann (KARV-104): Solange sie steht, gilt
-	 * keine Marke "sauber beendet", auch eine, die sich wegen eines Dateihandles (Sync-Programm, Virenscanner) weder löschen
-	 * noch leeren lässt. So braucht kein einzelner Schreibweg eine eigene Prüfung. Erst {@link #writeCleanMarker} löscht sie
-	 * wieder. Steht sie schon, kostet der Aufruf keinen Dateizugriff. Angelegt wird über die Dateischicht ({@code createNew}:
-	 * eine leere Datei, eine vorhandene bleibt). Scheitert das Anlegen, steht eine Warnung im Log (Wiederholungen bis zum
-	 * nächsten Gelingen nur als {@code FINE}), es gilt nur das Entfernen der Marke, und der nächste Aufruf versucht es erneut.
+	 * Legt die Sperrdatei {@link #uncleanFile()} an, bevor sich der Bestand ändern kann (warum, steht in der Klassenbeschreibung
+	 * unter "Sperrdatei"). Steht sie schon, kostet der Aufruf keinen Dateizugriff. Angelegt wird über die Dateischicht
+	 * ({@code createNew}: eine leere Datei, eine vorhandene bleibt). Scheitert das Anlegen, steht eine Warnung im Log
+	 * (Wiederholungen bis zum nächsten Gelingen nur als {@code FINE}), es gilt nur das Entfernen der Marke, und der nächste
+	 * Aufruf versucht es erneut.
 	 */
 	private void markUnclean() {
 		if (uncleanStands) {

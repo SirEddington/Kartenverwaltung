@@ -921,8 +921,8 @@ class UnitIndexTest {
 		return indexDir.resolve("unclean");
 	}
 
-	/** Ein Löschen, das nur an dieser einen Datei scheitert (etwa der Marke, nicht der Sperrdatei). */
-	private static UnitIndex.Deleter failingDeleteOf(Path locked) {
+	/** Ein Löschen, das nur an dieser einen Datei scheitert (etwa der Marke, nicht der Sperrdatei); auch für SyncServiceTest. */
+	static UnitIndex.Deleter failingDeleteOf(Path locked) {
 		return file -> {
 			if (file.equals(locked)) {
 				throw new IOException("Datei gesperrt");
@@ -963,6 +963,16 @@ class UnitIndexTest {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		layer.failWhen(uncleanFile()::equals, "createNew", new IOException("Ordner gesperrt"));
 		return new UnitIndex(indexDir, layer, OWN);
+	}
+
+	/** Drei Einheiten und ein Index, wie nach einem Start ohne Marke: abgeglichen, geschrieben, die Sperrdatei steht. */
+	private UnitIndex startedIndex() throws IOException {
+		buildThreeUnits();
+		UnitIndex index = index();
+		assertFalse(index.loadIfClean());
+		refresh(index, local);
+		index.flush();
+		return index;
 	}
 
 	/** Ein geschriebener Index samt Marke, wie ihn das saubere Beenden hinterlässt. */
@@ -1311,11 +1321,7 @@ class UnitIndexTest {
 
 	@Test
 	void cleanMarkerRemovesTheUncleanFile() throws IOException {
-		buildThreeUnits();
-		UnitIndex first = index();
-		assertFalse(first.loadIfClean());
-		refresh(first, local);
-		first.flush();
+		UnitIndex first = startedIndex();
 		assertTrue(Files.isRegularFile(uncleanFile()));
 
 		assertTrue(first.writeCleanMarker());
@@ -1326,11 +1332,7 @@ class UnitIndexTest {
 
 	@Test
 	void uncleanFileThatCannotBeDeletedPreventsTheMarker() throws IOException {
-		buildThreeUnits();
-		UnitIndex first = index();
-		assertFalse(first.loadIfClean());
-		refresh(first, local);
-		first.flush();
+		UnitIndex first = startedIndex();
 		first.useDeleter(failingDeleteOf(uncleanFile()));
 
 		IOException failure = assertThrows(IOException.class, first::writeCleanMarker);
@@ -1344,11 +1346,7 @@ class UnitIndexTest {
 
 	@Test
 	void failedMarkerWriteLeavesTheUncleanFileStanding() throws IOException {
-		buildThreeUnits();
-		UnitIndex first = index();
-		assertFalse(first.loadIfClean());
-		refresh(first, local);
-		first.flush();
+		UnitIndex first = startedIndex();
 		// an der Stelle der Marke liegt ein nicht leerer Ordner: Das Schreiben scheitert nach dem Löschen der Sperrdatei
 		Path blocker = Files.createDirectories(cleanMarker().resolve("x"));
 
@@ -1362,11 +1360,7 @@ class UnitIndexTest {
 
 	@Test
 	void invalidateAfterTheMarkerCreatesTheUncleanFile() throws IOException {
-		buildThreeUnits();
-		UnitIndex index = index();
-		assertFalse(index.loadIfClean());
-		refresh(index, local);
-		index.flush();
+		UnitIndex index = startedIndex();
 		assertTrue(index.writeCleanMarker());
 		assertFalse(Files.exists(uncleanFile()));
 		Path marker = cleanMarker();
