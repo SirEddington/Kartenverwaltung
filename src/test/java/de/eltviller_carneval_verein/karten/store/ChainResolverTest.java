@@ -104,7 +104,7 @@ class ChainResolverTest {
 		}
 
 		UnitState resolve() {
-			return ChainResolver.resolve(new UnitFiles(UNIT, versions, claims), OWN);
+			return ChainResolver.resolve(new UnitFiles(UNIT, versions, claims, Map.of(), Map.of()), OWN);
 		}
 	}
 

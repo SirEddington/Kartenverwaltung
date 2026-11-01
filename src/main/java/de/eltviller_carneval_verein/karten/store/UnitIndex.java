@@ -368,8 +368,14 @@ final class UnitIndex {
 	 * den Abgleich nicht scheitern; der Ordner kommt beim nächsten Start wieder dran.
 	 */
 	private void deleteOldLocalTemps(VersionStore local, Map<String, List<FileLayer.DirEntry>> tree) {
+		// nur die temporären Namen: Mehr wertet deleteOldTemps nicht aus, und jeder Start läuft hier durch
 		Map<String, List<String>> names = new LinkedHashMap<>();
-		tree.forEach((folder, entries) -> names.put(folder, entries.stream().map(FileLayer.DirEntry::name).toList()));
+		tree.forEach((folder, entries) -> {
+			List<String> temps = entries.stream().map(FileLayer.DirEntry::name).filter(FileLayer::isTempName).toList();
+			if (!temps.isEmpty()) {
+				names.put(folder, temps);
+			}
+		});
 		// die Kennung einmal, nicht je Datei (wie SyncService#deleteOwnOldTemps)
 		Ownership mine = own;
 		files.deleteOldTemps(local.dataRoot(), names, tag -> tag == null || mine.isOwnTempTag(tag), SyncService.TEMP_AGE,

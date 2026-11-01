@@ -4084,12 +4084,7 @@ class SyncServiceTest {
 	@Test
 	void unitDeletedPastTheAppIsGoneAfterCleanRestart() throws IOException {
 		Node a = cleanlyClosedNode();
-		Path hall = a.localData().resolve(HALL.relativePath());
-		try (Stream<Path> paths = Files.walk(hall)) {
-			for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
-				Files.delete(path);
-			}
-		}
+		deleteTree(a.localData().resolve(HALL.relativePath()));
 
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		assertTrue(b.service.startup(""));

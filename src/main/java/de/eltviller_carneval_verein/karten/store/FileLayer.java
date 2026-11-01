@@ -99,10 +99,10 @@ public interface FileLayer {
 	 * demselben Durchlauf: Auf einer Netzfreigabe kostet ein Zugriff je Eintrag ({@link #isDirectory}) ein Vielfaches des
 	 * Auflistens. Sortiert nach Namen, ohne {@code ~karv-*}; ist der Ordner nicht vorhanden, ist die Liste leer.
 	 * <p>
-	 * Die Standardfassung nimmt {@link #listEntriesWithTemps} ohne die temporären Namen.
+	 * Die Standardfassung nimmt {@link #listEntriesWithTemps} ohne die Namen mit {@code ~karv-}.
 	 */
 	default List<DirEntry> listEntries(Path dir) throws IOException {
-		return listEntriesWithTemps(dir).stream().filter(entry -> !isTempName(entry.name())).toList();
+		return listEntriesWithTemps(dir).stream().filter(entry -> !entry.name().startsWith(TEMP_PREFIX)).toList();
 	}
 
 	/** Wie {@link #listEntries}, aber mit den {@code ~karv-*}-Einträgen: die temporären Dateien eingeschlossen. */

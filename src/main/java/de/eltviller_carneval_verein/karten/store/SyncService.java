@@ -1905,12 +1905,12 @@ public final class SyncService implements ConnectionControl {
 	/**
 	 * Beim Beenden der Anwendung: wie {@link #flushIndex()}, und gelingt das Schreiben vollständig, bleibt nichts
 	 * ungeschrieben, so legt es die Marke "sauber beendet" an ({@code <Index>/clean}, Inhalt: die eigene Rechner-ID). Der
-	 * nächste {@link #startup} übernimmt den Index dann ohne Durchlauf über den Bestand. Ohne Marke (Fehler beim Schreiben,
-	 * Index nie abgeglichen, Sperrdatei des Index nicht löschbar) startet er wie nach einem Absturz.
+	 * nächste {@link #startup} liest den Index dann ohne Durchlauf ein; abgeglichen wird er trotzdem (KARV-107). Ohne Marke
+	 * (Fehler beim Schreiben, Index nie abgeglichen, Sperrdatei des Index nicht löschbar) startet er wie nach einem Absturz.
 	 * <p>
 	 * Eine gerade laufende Runde im Hintergrund wartet es kurz ab ({@link #CLOSE_WAIT}); ist sie dann nicht fertig, gibt es
 	 * keine Marke, denn ihre Änderungen am Bestand fehlten im Index. Dasselbe gilt, solange das Auflösen einer Einheit
-	 * gescheitert ist und der Index sie nicht kennt (WARNING im Log): Der nächste Start durchsucht den Bestand. Ebenso,
+	 * gescheitert ist und der Index sie nicht kennt (WARNING im Log): Der nächste Start liest den Index nicht vorab ein. Ebenso,
 	 * solange ein {@link #append} im lokalen Bestand schreibt ({@link #localWrites}) oder eines während des Schreibens der
 	 * Marke beginnt (dann wird sie gleich wieder ungültig gemacht): Seine Dateien stünden sonst unter einer Marke, deren
 	 * Index sie nicht kennt.
@@ -2013,15 +2013,16 @@ public final class SyncService implements ConnectionControl {
 			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht auswerten; der Bestand wird durchsucht", e);
 		}
 		startedFromCleanIndex = clean;
-		// hier gleicht KARV-113 bei gültiger Marke im Hintergrund ab
+		// Ansatzpunkt für KARV-113: bei gültiger Marke diesen Abgleich in den Hintergrund verlegen (noch nicht umgesetzt)
 		UnitIndex.Refresh refreshed = refreshIndex(progress);
 		if (refreshed == null) {
 			// war der Index nicht zu gebrauchen: jede Einheit einzeln aus den Dateien, oder der Start scheitert
 			return rebuildIndex(progress);
 		}
-		if (clean && refreshed.resolved() > 0) {
+		int resolved = refreshed.resolved();
+		if (clean && resolved > 0) {
 			LOGGER.warning("Der lokale Bestand wurde seit dem letzten Beenden außerhalb der Kartenverwaltung geändert: "
-					+ refreshed.resolved() + " Einheiten neu aufgelöst");
+					+ resolved + (resolved == 1 ? " Einheit" : " Einheiten") + " neu aufgelöst");
 		}
 		return refreshed;
 	}
