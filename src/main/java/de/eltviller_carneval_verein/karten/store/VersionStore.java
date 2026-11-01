@@ -6,6 +6,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -135,27 +136,39 @@ public final class VersionStore {
 	 * Liest alle Versions- und Anspruchsdateien der Einheit. Unlesbare Dateien und solche mit höherem Format sind
 	 * gekennzeichnet (siehe {@link VersionFile}, {@link ClaimFile}), ihre Bytes bleiben erhalten. Fehler beim Lesen
 	 * einer Datei selbst werden als {@link IOException} gemeldet.
+	 * <p>
+	 * Größe und Änderungszeit jeder gelesenen Datei ({@link UnitFiles#versionStamps()}, {@link UnitFiles#claimStamps()})
+	 * stammen aus dem Auflisten vor dem Lesen: Ändert sich eine Datei dazwischen, beschreiben sie den älteren Stand.
 	 */
 	public UnitFiles readUnit(UnitKey unit) throws IOException {
 		Path unitDir = unitDir(unit);
-		List<VersionId> versionIds = versionIds(unitDir);
-		List<String> claimNames = claimNames(unitDir);
+		List<FileLayer.DirEntry> unitEntries = files.listEntries(unitDir);
+		List<FileLayer.DirEntry> claimEntries = files.listEntries(unitDir.resolve(CLAIMS));
+		List<VersionId> versionIds = versionIdsOf(unitEntries);
+		List<String> claimNames = claimNamesOf(claimEntries);
 		requireAnchorIfBothEmpty(versionIds, claimNames);
+		Map<String, String> unitStamps = stampsByName(unitEntries);
+		Map<String, String> claimDirStamps = stampsByName(claimEntries);
 		Map<VersionId, VersionFile> versions = new TreeMap<>();
+		Map<VersionId, String> versionStamps = new TreeMap<>();
 		for (VersionId id : versionIds) {
 			Optional<byte[]> bytes = files.read(unitDir.resolve(id + JSON));
 			if (bytes.isPresent()) {
 				versions.put(id, parseVersion(id, bytes.get()));
+				versionStamps.put(id, unitStamps.get(id + JSON));
 			}
 		}
 		Map<String, ClaimFile> claims = new TreeMap<>();
+		Map<String, String> claimStamps = new TreeMap<>();
 		for (String name : claimNames) {
 			Optional<byte[]> bytes = files.read(unitDir.resolve(CLAIMS).resolve(name + JSON));
 			if (bytes.isPresent()) {
 				claims.put(name, parseClaim(name, bytes.get()));
+				claimStamps.put(name, claimDirStamps.get(name + JSON));
 			}
 		}
-		return new UnitFiles(unit, Collections.unmodifiableMap(versions), Collections.unmodifiableMap(claims));
+		return new UnitFiles(unit, Collections.unmodifiableMap(versions), Collections.unmodifiableMap(claims),
+				Collections.unmodifiableMap(versionStamps), Collections.unmodifiableMap(claimStamps));
 	}
 
 	/**
@@ -475,6 +488,13 @@ public final class VersionStore {
 	private List<String> claimNames(Path unitDir) throws IOException {
 		Path claimsDir = unitDir.resolve(CLAIMS);
 		return claimNamesOf(files.listEntries(claimsDir));
+	}
+
+	/** Größe und Änderungszeit ({@link FileLayer.DirEntry#stamp()}) der gelisteten Einträge nach Dateiname. */
+	private static Map<String, String> stampsByName(List<FileLayer.DirEntry> entries) {
+		Map<String, String> stamps = new HashMap<>();
+		entries.forEach(entry -> stamps.put(entry.name(), entry.stamp()));
+		return stamps;
 	}
 
 	/** Wie {@link #claimNames}, aus den schon gelisteten Einträgen in {@code claims/}. */

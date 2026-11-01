@@ -10,9 +10,11 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileTime;
 import java.time.Clock;
 import java.time.Duration;
@@ -31,6 +33,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -229,7 +232,7 @@ class UnitIndexTest {
 		assertTrue(Files.isRegularFile(eventIndexFile("e1")));
 		assertTrue(Files.isRegularFile(indexDir.resolve("halls.json")));
 		ObjectNode root = (ObjectNode) new ObjectMapper().readTree(Files.readAllBytes(eventIndexFile("e1")));
-		assertEquals(3, root.get("indexFormat").asInt());
+		assertEquals(4, root.get("indexFormat").asInt());
 		assertEquals(ME, root.get("machine").asText());
 		assertEquals(2, root.get("units").size());
 		assertEquals("events/e1", root.get("units").get(0).get("unit").asText());
@@ -288,9 +291,9 @@ class UnitIndexTest {
 		first.flush();
 		// ein Index, wie ihn die Fassung ohne Kette schrieb
 		Path halls = indexDir.resolve("halls.json");
-		Files.writeString(halls, Files.readString(halls).replace("\"indexFormat\":3", "\"indexFormat\":1"));
+		Files.writeString(halls, Files.readString(halls).replace("\"indexFormat\":4", "\"indexFormat\":1"));
 		Path event = eventIndexFile("e1");
-		Files.writeString(event, Files.readString(event).replace("\"indexFormat\":3", "\"indexFormat\":1"));
+		Files.writeString(event, Files.readString(event).replace("\"indexFormat\":4", "\"indexFormat\":1"));
 
 		UnitIndex second = index();
 		UnitIndex.Refresh refresh = refresh(second, local);
@@ -535,11 +538,12 @@ class UnitIndexTest {
 	void fingerprintIsSha256OfSortedLines() {
 		VersionId a = mine(1);
 		VersionId b = mine(2);
-		String expected = StoreCodec.sha256(("v:" + a + "\nv:" + b + "\nc:" + a + "\nc:root\n").getBytes(StandardCharsets.UTF_8));
+		String expected = StoreCodec.sha256(("v:" + a + "|10|1000\nv:" + b + "|20|2000\nc:" + a + "|5|500\nc:root|6|600\n")
+				.getBytes(StandardCharsets.UTF_8));
 
-		assertEquals(expected, UnitIndex.fingerprint(List.of(b, a), List.of("root", a.value())));
-		assertEquals(StoreCodec.sha256(new byte[0]), UnitIndex.fingerprint(List.of(), List.of()));
-		assertNotEquals(UnitIndex.fingerprint(List.of(a), List.of()), UnitIndex.fingerprint(List.of(), List.of(a.value())));
+		assertEquals(expected, UnitIndex.fingerprint(Map.of(b, "20|2000", a, "10|1000"), Map.of("root", "6|600", a.value(), "5|500")));
+		assertEquals(StoreCodec.sha256(new byte[0]), UnitIndex.fingerprint(Map.of(), Map.of()));
+		assertNotEquals(UnitIndex.fingerprint(Map.of(a, "1|1"), Map.of()), UnitIndex.fingerprint(Map.of(), Map.of(a.value(), "1|1")));
 	}
 
 	@Test
@@ -642,7 +646,90 @@ class UnitIndexTest {
 
 	@Test
 	void fingerprintFromListingOfMissingFolderIsFingerprintOfNothing() {
-		assertEquals(UnitIndex.fingerprint(List.of(), List.of()), UnitIndex.fingerprintFromListing(Map.of(), "events/e1"));
+		assertEquals(UnitIndex.fingerprint(Map.of(), Map.of()), UnitIndex.fingerprintFromListing(Map.of(), "events/e1"));
+	}
+
+	/** Die Versionsdatei der Einheit im lokalen Bestand. */
+	private Path versionFile(UnitKey unit, VersionId id) {
+		return local.dataRoot().resolve(unit.relativePath()).resolve(id + ".json");
+	}
+
+	@Test
+	void overwrittenVersionWithOtherSizeIsResolvedAgain() throws IOException {
+		buildThreeUnits();
+		UnitIndex index = index();
+		refresh(index, local);
+		Files.writeString(versionFile(EVENT, mine(2)), "kaputt");
+
+		UnitIndex.Refresh refresh = refresh(index, local);
+
+		assertEquals(1, refresh.resolved());
+		assertEquals(UnitState.Status.LOCKED_DAMAGED, index.entries().get(EVENT).snapshot().status());
+	}
+
+	@Test
+	void overwrittenVersionWithSameSizeOtherTimeIsResolvedAgain() throws IOException {
+		buildThreeUnits();
+		UnitIndex index = index();
+		refresh(index, local);
+		Path file = versionFile(EVENT, mine(2));
+		FileTime before = Files.getLastModifiedTime(file);
+		Files.write(file, Files.readAllBytes(file));
+		Files.setLastModifiedTime(file, FileTime.fromMillis(before.toMillis() + 5_000));
+
+		assertEquals(1, refresh(index, local).resolved());
+	}
+
+	@Test
+	void ownSaveThenCleanCloseResolvesNothingOnRestart() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+
+		UnitIndex second = index();
+		assertTrue(second.loadIfClean());
+
+		assertEquals(0, refresh(second, local).resolved());
+	}
+
+	@Test
+	void formatThreeIndexCountsAsEmpty() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		try (var files = Files.walk(indexDir)) {
+			for (Path file : files.filter(f -> f.toString().endsWith(".json")).toList()) {
+				Files.writeString(file, Files.readString(file).replaceAll("\"indexFormat\":\\d+", "\"indexFormat\":3"));
+			}
+		}
+
+		UnitIndex second = index();
+
+		assertFalse(second.loadIfClean());
+		assertEquals(3, refresh(second, local).resolved());
+	}
+
+	@Test
+	void fingerprintTakesStampsFromTheListingBeforeTheRead() throws IOException {
+		buildThreeUnits();
+		UnitIndex index = index();
+		refresh(index, local);
+		Path file = versionFile(EVENT, mine(2));
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		AtomicBoolean overwritten = new AtomicBoolean();
+		// beim ersten Lesen der Einheit (nach dem Auflisten) wächst die zweite Versionsdatei um ein Leerzeichen
+		layer.onEach("read", () -> {
+			if (overwritten.compareAndSet(false, true)) {
+				try {
+					Files.writeString(file, " ", StandardOpenOption.APPEND);
+				} catch (IOException e) {
+					throw new UncheckedIOException(e);
+				}
+			}
+		});
+		UnitFiles unitFiles = new VersionStore(local.dataRoot(), layer).readUnit(EVENT);
+		assertTrue(overwritten.get());
+		index.update(unitFiles, ChainResolver.resolve(unitFiles, OWN));
+
+		assertEquals(1, refresh(index, local).resolved());
 	}
 
 	@Test
@@ -1085,7 +1172,7 @@ class UnitIndexTest {
 	void cleanLoadFallsBackWhenAnIndexFileIsOfOtherMachine() throws IOException {
 		buildThreeUnits();
 		buildCleanIndex();
-		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":3,\"machine\":\"" + OTHER + "\",\"units\":[]}");
+		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":4,\"machine\":\"" + OTHER + "\",\"units\":[]}");
 
 		assertFalse(index().loadIfClean());
 	}
@@ -1632,9 +1719,9 @@ class UnitIndexTest {
 		refresh(first, local);
 		first.flush();
 		Path halls = indexDir.resolve("halls.json");
-		Files.writeString(halls, Files.readString(halls).replace("\"indexFormat\":3", "\"indexFormat\":2"));
+		Files.writeString(halls, Files.readString(halls).replace("\"indexFormat\":4", "\"indexFormat\":2"));
 		Path event = eventIndexFile("e1");
-		Files.writeString(event, Files.readString(event).replace("\"indexFormat\":3", "\"indexFormat\":2"));
+		Files.writeString(event, Files.readString(event).replace("\"indexFormat\":4", "\"indexFormat\":2"));
 
 		UnitIndex second = index();
 		UnitIndex.Refresh refresh = refresh(second, local);

@@ -36,8 +36,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 
 /**
- * Der Start-Index des lokalen Bestands: je Einheit der zuletzt ermittelte Stand und ein Abdruck der Dateinamen, auf dem
- * er beruht. Beim Start muss so nicht jede Einheit gelesen und aufgelöst werden, sondern nur die, deren Dateinamen sich
+ * Der Start-Index des lokalen Bestands: je Einheit der zuletzt ermittelte Stand und ein Abdruck der Dateien, auf denen
+ * er beruht. Beim Start muss so nicht jede Einheit gelesen und aufgelöst werden, sondern nur die, deren Dateien sich
  * seit dem letzten Speichern geändert haben.
  * <p>
  * Der Index ist ein reiner Zwischenspeicher und nie Schiedsrichter. {@link #refresh} entscheidet nur, ob eine Einheit
@@ -45,10 +45,13 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * Ein fehlender, unlesbarer oder fremder Index kostet nur Zeit, nie Richtigkeit. Er liegt ausschließlich lokal
  * ({@code <AppData>/index/}), nie im gemeinsamen Ordner.
  * <p>
- * Der Abdruck ist der SHA-256 über die sortierten Namen der Versions- und Anspruchsdateien einer Einheit
- * ({@link #fingerprint(Collection, Collection)}). Beim Start entsteht er aus dem Verzeichnisbaum
- * ({@link FileLayer#listTree}) mit denselben Namensregeln wie {@link VersionStore#readUnit}; für dieselbe Einheit ist er
- * gleich dem {@linkplain #fingerprint(UnitFiles) Abdruck der gelesenen Dateien}.
+ * Der Abdruck ist der SHA-256 über die sortierten Namen der Versions- und Anspruchsdateien einer Einheit, je mit Größe
+ * und Änderungszeit ({@link #fingerprint(Map, Map)}): So fällt auch eine Datei auf, die unter gleichem Namen überschrieben
+ * wurde, etwa von außen (KARV-112). Beim Start entsteht er aus dem Verzeichnisbaum ({@link FileLayer#listTree}) mit
+ * denselben Namensregeln wie {@link VersionStore#readUnit}; für dieselbe Einheit ist er gleich dem
+ * {@linkplain #fingerprint(UnitFiles) Abdruck der gelesenen Dateien}. Größe und Zeit stammen in beiden Fällen aus dem
+ * Auflisten vor dem Lesen: Ändert sich eine Datei dazwischen, beschreibt der Abdruck den älteren Stand, und der nächste
+ * Abgleich löst die Einheit neu auf. Ein Fehler kostet so immer nur ein erneutes Auflösen, nie eine übersehene Änderung.
  * <p>
  * Wird eine Datei unter gleichem Namen ersetzt (späte Niederlage, Heilung; siehe {@link FileLayer#replaceDamaged}), bleibt
  * die alte als {@code <Name>.json.<Endung>} (z. B. {@code .corrupt-…}, {@code .verdraengt-…}) daneben liegen. Solche
@@ -60,13 +63,14 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * Verzeichnisbaum aber nicht; das führt höchstens zu einer erneuten Auflösung, nie zu einem falschen Stand.
  * <p>
  * Dateiformat: {@code <Index>/events/<Event-ID>.json} (alle Einheiten dieses Events) und {@code <Index>/halls.json}, je
- * {@code {"indexFormat":3,"machine":…,"units":[…]}}. Je Einheit steht neben dem Stand die gültige Kette ohne Inhalt:
+ * {@code {"indexFormat":4,"machine":…,"units":[…]}}. Je Einheit steht neben dem Stand die gültige Kette ohne Inhalt:
  * {@code "chain":[{"version","saveId","at","machineName","operator","deleted"}]}, ältestes Glied zuerst. Daraus entstehen die
  * Speicherstände eines Events, ohne eine Datei zu lesen ({@link SyncService#chains}). Dazu kommen seit Format 3 die
  * aufgegangenen Versionen ({@code "absorbed"}), die Versionen mit Konfliktvermerk ({@code "notes"}), {@code "seen"} der
  * aktuellen Löschversion, die Nummer der eigenen Änderungsliste der aktuellen Version ({@code "ownSeq"}, fehlt: unbekannt)
- * und die über eine Änderungsliste eingelesenen fremden Versionen ({@code "listed"}), siehe {@link Entry}. Eine Datei mit
- * anderem Format (auch dem ersten ohne Kette und dem zweiten ohne diese Angaben), von einem anderen Rechner oder unlesbar
+ * und die über eine Änderungsliste eingelesenen fremden Versionen ({@code "listed"}), siehe {@link Entry}. Seit Format 4
+ * enthält der Abdruck Größe und Änderungszeit der Dateien. Eine Datei mit anderem Format (auch dem ersten ohne Kette, dem
+ * zweiten ohne diese Angaben und dem dritten mit einem Abdruck nur aus Namen), von einem anderen Rechner oder unlesbar
  * gilt als leer und wird beim nächsten {@link #flush} neu geschrieben.
  * <p>
  * <b>Marke "sauber beendet":</b> Die Datei {@code <Index>/clean} (Inhalt: die Rechner-ID als Text, UTF-8) sagt, dass der
@@ -93,7 +97,7 @@ final class UnitIndex {
 
 	private static final Logger LOGGER = Logger.getLogger(UnitIndex.class.getName());
 
-	private static final int INDEX_FORMAT = 3;
+	private static final int INDEX_FORMAT = 4;
 	private static final String EVENTS = "events";
 	private static final String HALLS = "halls";
 	private static final String CLAIMS = "claims";
@@ -107,7 +111,7 @@ final class UnitIndex {
 	 * Ein Eintrag des Index.
 	 *
 	 * @param snapshot    der zuletzt ermittelte Stand der Einheit
-	 * @param fingerprint der Abdruck der Dateinamen, auf denen der Stand beruht
+	 * @param fingerprint der Abdruck der Dateien (Namen, Größe, Änderungszeit), auf denen der Stand beruht
 	 * @param pending     ob die Einheit eigene, noch nicht beanspruchte Versionen hat
 	 * @param lost        ob die Einheit eigene, verlorene Versionen hat
 	 * @param chain       die gültige Kette ({@link UnitState#chain()}), ältestes Glied zuerst, ohne Inhalt: daraus entstehen die
@@ -250,26 +254,36 @@ final class UnitIndex {
 	}
 
 	/**
-	 * Der Abdruck einer Einheit: SHA-256 (Hex, Kleinbuchstaben) über die sortierten Zeilen {@code v:<ID>} der Versionen und
-	 * danach {@code c:<Name>} der Ansprüche, jede Zeile mit {@code \n} abgeschlossen.
+	 * Der Abdruck einer Einheit: SHA-256 (Hex, Kleinbuchstaben) über die sortierten Zeilen {@code v:<ID>|<Stempel>} der
+	 * Versionen und danach {@code c:<Name>|<Stempel>} der Ansprüche, jede Zeile mit {@code \n} abgeschlossen. Der Stempel
+	 * ist Größe und Änderungszeit der Datei ({@link FileLayer.DirEntry#stamp()}).
+	 *
+	 * @param versions die Stempel der Versionsdateien nach ID
+	 * @param claims   die Stempel der Anspruchsdateien nach Name
 	 */
-	static String fingerprint(Collection<VersionId> versions, Collection<String> claimNames) {
-		return fingerprint(versions, claimNames, List.of());
+	static String fingerprint(Map<VersionId, String> versions, Map<String, String> claims) {
+		return fingerprint(versions, claims, List.of());
 	}
 
-	/** Wie {@link #fingerprint(Collection, Collection)}, mit den Zeilen {@code s:<Name>} der Nebenkopien am Ende. */
-	private static String fingerprint(Collection<VersionId> versions, Collection<String> claimNames,
+	/** Wie {@link #fingerprint(Map, Map)}, mit den Zeilen {@code s:<Name>} der Nebenkopien am Ende. */
+	private static String fingerprint(Map<VersionId, String> versions, Map<String, String> claims,
 			Collection<String> sideCopies) {
 		StringBuilder text = new StringBuilder();
-		versions.stream().map(VersionId::value).sorted().forEach(v -> text.append("v:").append(v).append('\n'));
-		claimNames.stream().sorted().forEach(c -> text.append("c:").append(c).append('\n'));
+		versions.entrySet().stream().map(v -> v.getKey().value() + "|" + v.getValue()).sorted()
+				.forEach(v -> text.append("v:").append(v).append('\n'));
+		claims.entrySet().stream().map(c -> c.getKey() + "|" + c.getValue()).sorted()
+				.forEach(c -> text.append("c:").append(c).append('\n'));
 		sideCopies.stream().sorted().forEach(s -> text.append("s:").append(s).append('\n'));
 		return StoreCodec.sha256(text.toString().getBytes(StandardCharsets.UTF_8));
 	}
 
-	/** Der Abdruck der gelesenen Dateien einer Einheit. */
+	/** Der Abdruck der gelesenen Dateien einer Einheit, mit den Stempeln aus dem Auflisten vor dem Lesen. */
 	static String fingerprint(UnitFiles unitFiles) {
-		return fingerprint(unitFiles.versions().keySet(), unitFiles.claims().keySet());
+		Map<VersionId, String> versions = new HashMap<>();
+		unitFiles.versions().keySet().forEach(id -> versions.put(id, unitFiles.versionStamps().get(id)));
+		Map<String, String> claims = new HashMap<>();
+		unitFiles.claims().keySet().forEach(name -> claims.put(name, unitFiles.claimStamps().get(name)));
+		return fingerprint(versions, claims);
 	}
 
 	/**
@@ -282,26 +296,26 @@ final class UnitIndex {
 	 * @param unitPath der Ordner der Einheit relativ zum Datenordner (siehe {@link UnitKey#relativePath()})
 	 */
 	static String fingerprintFromListing(Map<String, List<FileLayer.DirEntry>> tree, String unitPath) {
-		List<VersionId> versions = new ArrayList<>();
+		Map<VersionId, String> versions = new HashMap<>();
 		List<String> sideCopies = new ArrayList<>();
 		for (FileLayer.DirEntry file : tree.getOrDefault(unitPath, List.of())) {
 			String name = file.name();
-			VersionStore.versionIdOf(name).ifPresent(versions::add);
+			VersionStore.versionIdOf(name).ifPresent(id -> versions.put(id, file.stamp()));
 			String base = sideCopyBase(name);
 			if (base != null && VersionStore.versionIdOf(base).isPresent()) {
 				sideCopies.add(name);
 			}
 		}
-		List<String> claimNames = new ArrayList<>();
+		Map<String, String> claims = new HashMap<>();
 		for (FileLayer.DirEntry file : tree.getOrDefault(unitPath + "/" + CLAIMS, List.of())) {
 			String name = file.name();
-			VersionStore.claimNameOf(name).ifPresent(claimNames::add);
+			VersionStore.claimNameOf(name).ifPresent(claim -> claims.put(claim, file.stamp()));
 			String base = sideCopyBase(name);
 			if (base != null && VersionStore.claimNameOf(base).isPresent()) {
 				sideCopies.add(CLAIMS + "/" + name);
 			}
 		}
-		return fingerprint(versions, claimNames, sideCopies);
+		return fingerprint(versions, claims, sideCopies);
 	}
 
 	/**
