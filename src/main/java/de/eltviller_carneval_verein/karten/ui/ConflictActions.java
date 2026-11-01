@@ -45,7 +45,7 @@ import de.eltviller_carneval_verein.karten.ui.ConflictList.Action;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Row;
 import de.eltviller_carneval_verein.karten.ui.event.PlanSwitchDialog;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanImpact;
-import de.eltviller_carneval_verein.karten.ui.sales.AssignPlaceDialog;
+import de.eltviller_carneval_verein.karten.ui.sales.PlaceAssignment;
 import de.eltviller_carneval_verein.karten.ui.sales.SalesPlan;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
@@ -227,13 +227,13 @@ public final class ConflictActions {
 		Presentation presentation = presentationOf(row.conflict().target());
 		SeatingPlan plan = planOf(presentation);
 		if (plan == null) {
-			return AssignPlaceDialog.noPlanText(presentation);
+			return PlaceAssignment.noPlanText(presentation);
 		}
 		Seat seat = plan.findSeat(seatId);
 		if (seat == null) {
 			return SEAT_GONE;
 		}
-		return AssignPlaceDialog.isFree(presentation, seat) ? null : AssignPlaceDialog.takenText(seat);
+		return PlaceAssignment.isFree(presentation, seat) ? null : PlaceAssignment.takenText(seat);
 	}
 
 	/** Der eigene Sitz eines Vermerks "Platz"; {@code null} ohne die Gruppe oder wenn der eigene Wert "ohne Platz" ist. */
@@ -287,7 +287,7 @@ public final class ConflictActions {
 	 *
 	 * @param seat ein Sitz der Bestuhlung aus {@link #planOf}
 	 * @throws IllegalStateException wenn die Aktion gesperrt ist, der Sitz inzwischen belegt ist
-	 *                               ({@link AssignPlaceDialog#takenText}) oder Speichern oder Bestätigen scheitert;
+	 *                               ({@link PlaceAssignment#takenText}) oder Speichern oder Bestätigen scheitert;
 	 *                               nichts ist bestätigt. Das Modell ist wieder wie vorher, außer die Zuweisung wurde schon
 	 *                               geschrieben: Dann bleibt es, und der Text beginnt mit "Gespeichert. Der Konflikt ließ sich
 	 *                               aber nicht abschließen".
@@ -300,7 +300,7 @@ public final class ConflictActions {
 		Presentation presentation = event.findPresentation(moved.presentationId());
 		SeatingPlan plan = planOf(presentation);
 		if (plan == null) {
-			throw new IllegalStateException(AssignPlaceDialog.noPlanText(presentation));
+			throw new IllegalStateException(PlaceAssignment.noPlanText(presentation));
 		}
 		assignAndSave(row, event, presentation, plan, booking, seat, moved);
 	}
@@ -322,7 +322,7 @@ public final class ConflictActions {
 		UnitKey seatUnit = UnitKey.booking(event.getId(), presentation.getId(), seat.getId());
 		VersionId versionBefore = versionOf(seatUnit);
 		if (!BookingSync.assign(presentation, plan, booking, seat)) {
-			throw new IllegalStateException(AssignPlaceDialog.takenText(seat));
+			throw new IllegalStateException(PlaceAssignment.takenText(seat));
 		}
 		if (left != null) {
 			presentation.addBooking().takeSnapshot(left.getParent(), left);

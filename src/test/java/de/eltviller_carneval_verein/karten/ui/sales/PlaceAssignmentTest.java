@@ -19,7 +19,7 @@ import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
-class AssignPlaceDialogTest {
+class PlaceAssignmentTest {
 
 	private final SeatingPlan plan = new Hall().addSeatingPlan();
 	private final Presentation presentation = new Event().addPresentation("Samstag");
@@ -52,9 +52,9 @@ class AssignPlaceDialogTest {
 		bookingOf(a2s1).setLastName("Meier");
 		bookingOf(a1s1).setPrice(1800); // ein bloßer Einzelpreis belegt den Sitz nicht
 
-		assertEquals(List.of(a1s1, a2s2, b1s1), AssignPlaceDialog.freeSeats(presentation, plan));
-		assertFalse(AssignPlaceDialog.isFree(presentation, a2s1));
-		assertTrue(AssignPlaceDialog.isFree(presentation, a1s1), "wie bei freeSeats belegt ein Einzelpreis nicht");
+		assertEquals(List.of(a1s1, a2s2, b1s1), PlaceAssignment.freeSeats(presentation, plan));
+		assertFalse(PlaceAssignment.isFree(presentation, a2s1));
+		assertTrue(PlaceAssignment.isFree(presentation, a1s1), "wie bei freeSeats belegt ein Einzelpreis nicht");
 	}
 
 	@Test
@@ -62,7 +62,7 @@ class AssignPlaceDialogTest {
 		Table table = plan.addTable(row(""));
 		Seat seat = table.addSeat();
 
-		assertEquals(List.of(seat), AssignPlaceDialog.freeSeats(presentation, plan));
+		assertEquals(List.of(seat), PlaceAssignment.freeSeats(presentation, plan));
 	}
 
 	@Test
@@ -74,8 +74,8 @@ class AssignPlaceDialogTest {
 		plain.setTableNumber(4);
 		Seat plainSeat = plain.addSeat(1);
 
-		assertEquals("Tisch A3, Sitz 2", AssignPlaceDialog.label(seat));
-		assertEquals("Tisch 4, Sitz 1", AssignPlaceDialog.label(plainSeat));
+		assertEquals("Tisch A3, Sitz 2", PlaceAssignment.label(seat));
+		assertEquals("Tisch 4, Sitz 1", PlaceAssignment.label(plainSeat));
 	}
 
 	/** Dieselben Texte für Verkaufstabelle und Konflikt-Dialog (KARV-109). */
@@ -86,8 +86,23 @@ class AssignPlaceDialogTest {
 		Seat seat = table.addSeat(2);
 
 		assertEquals(EntityLabels.presentation(presentation) + " hat keine Bestuhlung; ein Platz lässt sich nicht zuweisen.",
-				AssignPlaceDialog.noPlanText(presentation));
-		assertEquals("Kein Platz frei: In dieser Bestuhlung ist jeder Sitz belegt.", AssignPlaceDialog.NO_FREE_SEAT);
-		assertEquals("Tisch A3, Sitz 2 ist inzwischen belegt. Wähle einen anderen Platz.", AssignPlaceDialog.takenText(seat));
+				PlaceAssignment.noPlanText(presentation));
+		assertEquals("Kein Platz frei: In dieser Bestuhlung ist jeder Sitz belegt.", PlaceAssignment.NO_FREE_SEAT);
+		assertEquals("Tisch A3, Sitz 2 ist inzwischen belegt. Wähle einen anderen Platz.", PlaceAssignment.takenText(seat));
+	}
+
+	/** Die Prüfreihe von Verkaufstabelle und Konflikt-Dialog vor dem Dialog "Platz zuweisen…" (KARV-116). */
+	@Test
+	void refusalNamesMissingPlanThenNoFreeSeat() {
+		assertEquals(PlaceAssignment.noPlanText(presentation), PlaceAssignment.refusal(presentation, null));
+		assertEquals(PlaceAssignment.NO_FREE_SEAT, PlaceAssignment.refusal(presentation, plan), "eine Bestuhlung ohne Sitze");
+
+		Seat seat = plan.addTable(row("A")).addSeat();
+		presentation.setSeatingPlanId(plan.getId());
+		BookingSync.sync(presentation, plan);
+		assertEquals(null, PlaceAssignment.refusal(presentation, plan), "ein Sitz ist frei");
+
+		bookingOf(seat).setLastName("Meier");
+		assertEquals(PlaceAssignment.NO_FREE_SEAT, PlaceAssignment.refusal(presentation, plan));
 	}
 }

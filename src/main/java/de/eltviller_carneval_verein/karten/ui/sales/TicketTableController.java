@@ -278,12 +278,9 @@ public class TicketTableController implements ContentController, SalesStateAware
 			return;
 		}
 		SeatingPlan plan = SalesPlan.of(presentation, hallRepository.findById(presentation.getHallId()));
-		if (plan == null) {
-			StatusMessage.getInstance().show(Severity.ERROR, AssignPlaceDialog.noPlanText(presentation));
-			return;
-		}
-		if (AssignPlaceDialog.freeSeats(presentation, plan).isEmpty()) {
-			StatusMessage.getInstance().show(Severity.ERROR, AssignPlaceDialog.NO_FREE_SEAT);
+		String refusal = PlaceAssignment.refusal(presentation, plan);
+		if (refusal != null) {
+			StatusMessage.getInstance().show(Severity.ERROR, refusal);
 			return;
 		}
 		Optional<Seat> seat = AssignPlaceDialog.choose(presentation, plan, seatTable.getScene().getWindow());
@@ -292,7 +289,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		}
 		String before = booking.getPlaceLabel();
 		if (!BookingSync.assign(presentation, plan, booking, seat.get())) {
-			StatusMessage.getInstance().show(Severity.ERROR, AssignPlaceDialog.takenText(seat.get()));
+			StatusMessage.getInstance().show(Severity.ERROR, PlaceAssignment.takenText(seat.get()));
 			return;
 		}
 		loadBookings();

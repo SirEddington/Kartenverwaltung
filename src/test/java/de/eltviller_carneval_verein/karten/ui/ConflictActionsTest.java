@@ -62,7 +62,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions.Availability;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Action;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Row;
-import de.eltviller_carneval_verein.karten.ui.sales.AssignPlaceDialog;
+import de.eltviller_carneval_verein.karten.ui.sales.PlaceAssignment;
 
 /**
  * Die Aktionen des Sammel-Dialogs auf echten Konflikten: Zwei Rechner mit eigenem Dienst und den Strategien der App tauschen
@@ -830,7 +830,7 @@ class ConflictActionsTest {
 
 		IllegalStateException failure = assertThrows(IllegalStateException.class, () -> b.actions().assignPlace(sale, taken));
 
-		assertEquals(AssignPlaceDialog.label(taken) + " ist inzwischen belegt. Wähle einen anderen Platz.",
+		assertEquals(PlaceAssignment.label(taken) + " ist inzwischen belegt. Wähle einen anderen Platz.",
 				failure.getMessage());
 		assertEquals(before, b.friday().getBookings());
 		assertTrue(b.actions().bookingToAssign(sale).isUnassigned());
@@ -1098,7 +1098,7 @@ class ConflictActionsTest {
 	@ValueSource(booleans = { false, true })
 	void placeOnATakenSeatOffersNoActionThatMustFail(boolean transfer) {
 		Row row = transfer ? transferred(placeConflict()) : placeConflict();
-		String taken = AssignPlaceDialog.takenText(b.plan().getSeats().get(1));
+		String taken = PlaceAssignment.takenText(b.plan().getSeats().get(1));
 
 		assertEquals(new Availability(false, taken), b.actions().availability(row));
 		IllegalStateException failure = assertThrows(IllegalStateException.class,
@@ -1253,7 +1253,7 @@ class ConflictActionsTest {
 		a.saveEvent();
 		settle();
 		Row row = b.onlyRow();
-		String taken = AssignPlaceDialog.takenText(b.plan().getSeats().get(2));
+		String taken = PlaceAssignment.takenText(b.plan().getSeats().get(2));
 
 		assertEquals(new Availability(false, taken), b.actions().availability(row));
 		IllegalStateException failure = assertThrows(IllegalStateException.class,

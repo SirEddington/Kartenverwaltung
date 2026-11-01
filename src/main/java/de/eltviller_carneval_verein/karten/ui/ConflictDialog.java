@@ -25,6 +25,7 @@ import de.eltviller_carneval_verein.karten.ui.ConflictList.FieldRow;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Row;
 import de.eltviller_carneval_verein.karten.ui.backup.AbstractBackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.sales.AssignPlaceDialog;
+import de.eltviller_carneval_verein.karten.ui.sales.PlaceAssignment;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.geometry.Insets;
@@ -455,12 +456,9 @@ public final class ConflictDialog {
 			return;
 		}
 		SeatingPlan plan = actions.planOf(presentation);
-		if (plan == null) {
-			fail(row, AssignPlaceDialog.noPlanText(presentation));
-			return;
-		}
-		if (AssignPlaceDialog.freeSeats(presentation, plan).isEmpty()) {
-			fail(row, AssignPlaceDialog.NO_FREE_SEAT);
+		String refusal = PlaceAssignment.refusal(presentation, plan);
+		if (refusal != null) {
+			fail(row, refusal);
 			return;
 		}
 		Optional<Seat> seat = AssignPlaceDialog.choose(presentation, plan, stage);
