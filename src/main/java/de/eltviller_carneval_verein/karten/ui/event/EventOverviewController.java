@@ -127,7 +127,7 @@ public class EventOverviewController extends AbstractOverviewController {
 		});
 
 		// 5. Spalte: aktuelle Einnahmen, erwartete Einnahmen, potenzielle Einnahmen
-		// Rechnet in Cent mit dem geltenden Preis jeder Buchung (BookingTotals, dieselbe Quelle wie Statistik und
+		// Rechnet in Cent mit gezahltem Betrag und geltendem Preis jeder Buchung (BookingTotals, dieselbe Quelle wie Statistik und
 		// Kassenabgleich), damit hier nie eine andere Zahl herauskommt als dort für dieselben Daten.
 		colRevenue.setCellValueFactory(cell -> {
 			List<Booking> bookings = bookingsOf(cell.getValue().getValue());
