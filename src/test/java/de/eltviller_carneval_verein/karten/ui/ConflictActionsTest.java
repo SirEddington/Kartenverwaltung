@@ -1280,4 +1280,69 @@ class ConflictActionsTest {
 	}
 
 	// <-- Vermerk "Platz" nach zwei gleichzeitigen Umzügen
+
+	// Feldvermerk folgt der Buchung (KARV-115) -->
+
+	/**
+	 * Wie {@link #takeMyValueOnTransferGoesToTheMovedUnit}: a setzt Müller vom ersten auf den zweiten Sitz und benennt ihn um,
+	 * b benennt ihn auf dem ersten um; b hat einen Vermerk "Kunde", übertragen auf den zweiten Sitz. Danach setzt a Müller
+	 * weiter auf den vierten Sitz und verkauft den zweiten an Tom.
+	 */
+	private Row customerConflictMovedOn() {
+		Booking from = a.seat(0);
+		Booking to = a.seat(1);
+		Seat target = a.plan().getSeats().get(1);
+		to.copyFrom(from);
+		to.takeSnapshot(target.getParent(), target);
+		to.setLastName("Müller-A");
+		from.clearCustomerData();
+		a.saveEvent();
+		b.seat(0).setLastName("Müller-B");
+		b.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(List.of("customer"), row.fields().stream().map(ConflictList.FieldRow::group).toList());
+		assertEquals(b.seatUnit(1), row.conflict().note().moved());
+
+		Booking moved = a.seat(1);
+		assertTrue(BookingSync.assign(a.friday(), a.plan(), moved, a.plan().getSeats().get(3)));
+		BookingSync.sync(a.friday(), a.plan());
+		a.seat(1).setLastName("Tom");
+		a.saveEvent();
+		settle();
+		assertEquals("Müller-A", b.seat(3).getLastName());
+		assertEquals("Tom", b.seat(1).getLastName());
+		return b.onlyRow();
+	}
+
+	@Test
+	void fieldNoteFollowsTheBookingThatMovedOn() {
+		Row row = customerConflictMovedOn();
+		String bookingId = b.seat(3).getId();
+		assertEquals(new Availability(true, ""), b.actions().availability(row));
+
+		b.actions().takeMyValue(row, "customer");
+
+		assertEquals("Müller-B", b.seat(3).getLastName(), "der eigene Wert gilt für die Buchung an ihrem neuen Platz");
+		assertEquals(bookingId, b.seat(3).getId());
+		assertEquals("Tom", b.seat(1).getLastName(), "der Kunde auf dem alten Sitz bleibt unberührt");
+		assertEquals(List.of(), b.sync.openConflicts());
+		settle();
+		assertEquals("Müller-B", a.seat(3).getLastName());
+	}
+
+	@Test
+	void fieldNoteOfACancelledBookingOffersNoAction() {
+		customerConflictMovedOn();
+		a.seat(3).clearCustomerData();
+		a.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+
+		assertEquals(new Availability(false, ConflictActions.NOT_NEEDED), b.actions().availability(row));
+		assertThrows(IllegalStateException.class, () -> b.actions().takeMyValue(row, "customer"));
+		assertEquals("Tom", b.seat(1).getLastName());
+	}
+
+	// <-- Feldvermerk folgt der Buchung
 }

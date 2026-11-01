@@ -457,9 +457,9 @@ public final class ConflictActions {
 	/**
 	 * Übernimmt den eigenen Wert einer Feldgruppe: Das Modell bekommt die Felder der Gruppe aus dem Vermerk
 	 * ({@link FieldConflict#mine()}), dann wird das Event gespeichert. Die Änderung gilt für die Einheit, auf die der Vermerk
-	 * sie übertragen hat ({@link ConflictNote#moved()}), sonst für die der Zeile; beim Vermerk "Platz" für die Einheit, auf der
-	 * die Buchung jetzt lebt ({@link #actionUnit}). Lebt sie dort nicht auf dem eigenen Sitz, zieht sie dorthin um wie beim
-	 * Zuweisen ({@link #assignAndSave}). Hat der Vermerk nur eine Gruppe, ist die Zeile danach bestätigt; bei mehreren erst, wenn jede
+	 * sie übertragen hat ({@link ConflictNote#moved()}), sonst für die der Zeile; bei einer Buchung für die Einheit, auf der sie
+	 * jetzt lebt ({@link #actionUnit}). Beim Vermerk "Platz" zieht sie, wenn sie nicht auf dem eigenen Sitz steht, dorthin um
+	 * wie beim Zuweisen ({@link #assignAndSave}). Hat der Vermerk nur eine Gruppe, ist die Zeile danach bestätigt; bei mehreren erst, wenn jede
 	 * Gruppe übernommen ist ({@link #isAdopted}), sonst bleibt sie offen.
 	 *
 	 * @throws IllegalStateException wenn die Aktion gesperrt ist, die Gruppe nicht zur Zeile gehört oder Ändern, Speichern
@@ -650,12 +650,12 @@ public final class ConflictActions {
 
 	/**
 	 * Die Kennung der Buchung, der der Vermerk gilt: die der weichenden Version; {@code null}, wenn sie sich nicht lesen lässt
-	 * oder eine Löschung ist. Beim Vermerk "Platz" auf {@code _<ID>} die aus der Einheit: Sie gilt auch, wenn die weichende
-	 * Version (auf dem Sitz, auf dem das eigene Zuweisen verloren hat) sich lokal nicht lesen lässt.
+	 * oder eine Löschung ist. Bei einem Vermerk auf {@code _<ID>} die aus der Einheit: Sie gilt auch, wenn die weichende
+	 * Version (beim Vermerk "Platz" auf dem Sitz, auf dem das eigene Zuweisen verloren hat) sich lokal nicht lesen lässt.
 	 */
 	private String bookingIdOf(OpenConflict conflict) {
 		UnitKey target = conflict.target();
-		if (target.isUnassigned() && fieldOf(conflict.note(), PLACE_GROUP) != null) {
+		if (target.isUnassigned()) {
 			return target.unassignedBookingId();
 		}
 		Version version = dropped(conflict);
@@ -663,14 +663,15 @@ public final class ConflictActions {
 	}
 
 	/**
-	 * Die Einheit, auf der die Aktion wirkt: {@link OpenConflict#target()}; beim Vermerk "Platz" die Einheit, auf der die
-	 * Buchung des Vermerks jetzt lebt. Ein anderer Rechner kann sie auf einen Sitz gesetzt haben (Ruling R31b; der Vermerk
-	 * steht dann auf der gelöschten {@code _<ID>}) oder nach der Übertragung weitergesetzt. Auf einer Einheit, auf der sie
-	 * nicht mehr lebt, gibt es nichts zu tun (KARV-94); lebt sie nirgends mehr, bleibt es beim Ziel des Vermerks.
+	 * Die Einheit, auf der die Aktion wirkt: {@link OpenConflict#target()}; bei einem Vermerk auf einer Buchung die Einheit, auf
+	 * der die Buchung des Vermerks jetzt lebt. Ein anderer Rechner kann sie auf einen Sitz gesetzt haben (Ruling R31b; der
+	 * Vermerk "Platz" steht dann auf der gelöschten {@code _<ID>}) oder nach dem Vermerk weitergesetzt (KARV-115). Auf einer
+	 * Einheit, auf der sie nicht mehr lebt, gibt es nichts zu tun (KARV-94); lebt sie nirgends mehr oder lässt sich ihre
+	 * Kennung nicht ermitteln, bleibt es beim Ziel des Vermerks.
 	 */
 	private UnitKey actionUnit(OpenConflict conflict) {
 		UnitKey target = conflict.target();
-		if (target.type() != UnitType.BOOKING || fieldOf(conflict.note(), PLACE_GROUP) == null) {
+		if (target.type() != UnitType.BOOKING || conflict.note() == null) {
 			return target;
 		}
 		String bookingId = bookingIdOf(conflict);
