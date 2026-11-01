@@ -34,6 +34,7 @@
                 	<TableColumn fx:id="colReserved" prefWidth="80.0" text="Reserviert" />
                 	<TableColumn fx:id="colReservedOn" prefWidth="100.0" text="Reserviert am" />
                 	<TableColumn fx:id="colPrice" prefWidth="65.0" text="Preis (€)" />
+                	<TableColumn fx:id="colPaidAmount" prefWidth="75.0" text="Bezahlt (€)" />
                 	<TableColumn fx:id="colPaymentStatus" prefWidth="110.0" text="Zahlungsstatus" />
                 	<TableColumn fx:id="colPaidOn" prefWidth="90.0" text="Bezahlt am" />
                 	<TableColumn fx:id="colCollected" prefWidth="75.0" text="Abgeholt" />

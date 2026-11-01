@@ -8,6 +8,7 @@ import java.util.function.BooleanSupplier;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
+import de.eltviller_carneval_verein.karten.model.SaleDates;
 import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.input.DateTimeInput;
 import de.eltviller_carneval_verein.karten.ui.input.InputFeedback;
@@ -131,7 +132,9 @@ public final class SeatDetailPopup {
 		grid.addRow(row++, new Label("Reserviert am:"), reservedOn.box());
 		grid.addRow(row++, new Label("Zahlung:"), paymentBox);
 		grid.addRow(row++, new Label("Bezahlt am:"), paidOn.box());
-		grid.addRow(row++, new Label("Preis (€):"), priceSpinner());
+		Spinner<Double> priceSpinner = priceSpinner();
+		grid.addRow(row++, new Label("Preis (€):"), priceSpinner);
+		grid.addRow(row++, new Label("Bezahlt (€):"), paidAmountSpinner(paymentBox, priceSpinner));
 
 		if (edit.bookings().size() > 1) {
 			totalValue = new Label();
@@ -322,7 +325,38 @@ public final class SeatDetailPopup {
 	}
 
 	private Spinner<Double> priceSpinner() {
-		SeatBulkEdit.Field<Integer> field = edit.price();
+		Spinner<Double> spinner = amountSpinner(edit.price(), "Preis");
+		spinner.setDisable(!editMode);
+		return spinner;
+	}
+
+	/**
+	 * Der gezahlte Betrag: aktiv nur, wenn der Zahlstatus im Dialog bezahlt ist (bei "verschieden", wenn eine der Buchungen
+	 * bezahlt ist). Wird erst im Dialog bezahlt, zeigt der Platzhalter den Preis, den "Anwenden" ohne Eingabe je Buchung
+	 * einträgt ({@link SaleDates}); geschrieben wird er nicht, sonst bekäme bei verschiedenen Preisen jede Buchung denselben.
+	 */
+	private Spinner<Double> paidAmountSpinner(ComboBox<PaymentStatus> paymentBox, Spinner<Double> priceSpinner) {
+		SeatBulkEdit.Field<Integer> field = edit.paidAmount();
+		Spinner<Double> spinner = amountSpinner(field, "Bezahlt");
+		List<Booking> bookings = edit.bookings();
+		boolean nonePaid = bookings.stream().noneMatch(Booking::isPaid);
+		Runnable update = () -> {
+			PaymentStatus status = paymentBox.getValue();
+			boolean paid = status != null ? status.isPaid() : !nonePaid;
+			spinner.setDisable(!editMode || !paid);
+			String priceText = priceSpinner.getEditor().getText();
+			if (nonePaid) {
+				spinner.getEditor().setPromptText(priceText == null || priceText.isBlank() ? "Preis" : priceText);
+			}
+		};
+		paymentBox.valueProperty().addListener((obs, oldVal, newVal) -> update.run());
+		priceSpinner.getEditor().textProperty().addListener((obs, oldVal, newVal) -> update.run());
+		update.run();
+		return spinner;
+	}
+
+	/** Ein Betragsfeld (Euro mit Komma) auf einem Feld in Cent; {@code name} nennt es in Meldungen. */
+	private Spinner<Double> amountSpinner(SeatBulkEdit.Field<Integer> field, String name) {
 		PriceSpinnerValueFactory factory = new PriceSpinnerValueFactory(field.common().map(cents -> cents / 100.0).orElse(null));
 		Spinner<Double> spinner = new Spinner<>();
 		spinner.setValueFactory(factory);
@@ -330,11 +364,10 @@ public final class SeatDetailPopup {
 		// Nicht übernommene Eingaben (unlesbar): Meldung in der Fußzeile, Editor-Text zurück. Die Meldung nennt den Platz,
 		// bei mehreren die Anzahl ("Preis von 12 Sitzen")
 		List<Booking> bookings = edit.bookings();
-		factory.setFieldLabel(InputFeedback.label("Preis", bookings.size() == 1 ? EntityLabels.booking(bookings.get(0)) : bookings.size() + " Sitzen"));
+		factory.setFieldLabel(InputFeedback.label(name, bookings.size() == 1 ? EntityLabels.booking(bookings.get(0)) : bookings.size() + " Sitzen"));
 		factory.setRejectionHandler(issue -> SpinnerInput.reject(spinner, issue));
 		spinner.setPrefWidth(115); // breit genug für "verschieden"
-		spinner.setDisable(!editMode);
-		spinner.getEditor().setPromptText(field.common().isPresent() ? "" : MIXED);
+		spinner.getEditor().setPromptText(field.common().isPresent() || field.allEmpty() ? "" : MIXED);
 		// Auf den Text hören (nicht auf den bestätigten Wert): So stimmen Gesamtpreis und "Anwenden"/"Speichern" auch mit
 		// noch nicht bestätigter Eingabe. Still lesen: Halb getippte Preise sollen keine Meldung auslösen.
 		spinner.getEditor().textProperty().addListener((obs, oldVal, newVal) -> {

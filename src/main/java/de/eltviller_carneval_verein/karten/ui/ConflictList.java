@@ -286,8 +286,8 @@ public final class ConflictList {
 			case "hallId" -> EntityLabels.hallDisplayName(findHall.apply(value.asText()));
 			case "seatingPlanId" -> planName(values.path("hallId").asText(null), value.asText());
 			case "paymentStatus" -> paymentText(value.asText());
-			// gespeichert in Cent (Booking.price, Presentation.actualCashAmount); wie in den Tabellen, mit Währung
-			case "price", "actualCashAmount" ->
+			// gespeichert in Cent (Booking.price, Booking.paidAmount, Presentation.actualCashAmount); wie in den Tabellen, mit Währung
+			case "price", "paidAmount", "actualCashAmount" ->
 				value.isNumber() ? String.format(Locale.GERMANY, "%.2f €", value.asLong() / 100.0) : value.asText();
 			// gespeichert als 2026-10-31 (LocalDate); wie in den Ansichten 31.10.2026
 			case "date", "reservationDate", "paymentDate", "collectionDate" -> dateText(value.asText());

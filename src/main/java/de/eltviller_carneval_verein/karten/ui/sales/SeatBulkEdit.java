@@ -30,6 +30,7 @@ public final class SeatBulkEdit {
 	private final Field<String> firstName;
 	private final Field<PaymentStatus> paymentStatus;
 	private final Field<Integer> price;
+	private final Field<Integer> paidAmount;
 	private final Field<Boolean> collected;
 	private final Field<String> comment;
 	private final Field<LocalDate> reservationDate;
@@ -43,12 +44,14 @@ public final class SeatBulkEdit {
 		firstName = text(Booking::getFirstName, Booking::setFirstName);
 		paymentStatus = new Field<>(Booking::getPaymentStatus, Booking::setPaymentStatus, null);
 		price = new Field<>(Booking::getEffectivePrice, Booking::setEffectivePrice, null);
+		paidAmount = new Field<>(booking -> booking.isPaid() ? booking.getPaidCents() : null, Booking::setPaidAmount, null);
 		collected = new Field<>(Booking::isCollected, Booking::setCollected, null);
 		comment = text(Booking::getComment, Booking::setComment);
 		reservationDate = new Field<>(Booking::getReservationDate, Booking::setReservationDate, null);
 		paymentDate = new Field<>(Booking::getPaymentDate, Booking::setPaymentDate, null);
 		collectionDate = new Field<>(Booking::getCollectionDate, Booking::setCollectionDate, null);
-		fields = List.of(lastName, firstName, paymentStatus, price, collected, comment, reservationDate, paymentDate, collectionDate);
+		fields = List.of(lastName, firstName, paymentStatus, price, paidAmount, collected, comment, reservationDate, paymentDate,
+				collectionDate);
 	}
 
 	/** Textfelder: Kein Text ({@code null}) und leerer Text gelten als gleicher Wert. */
@@ -75,6 +78,15 @@ public final class SeatBulkEdit {
 	/** Effektiver Preis je Buchung in Cent. */
 	public Field<Integer> price() {
 		return price;
+	}
+
+	/**
+	 * Gezahlter Betrag je bezahlter Buchung in Cent ({@link Booking#getPaidCents()}); offene Buchungen haben keinen, ihr
+	 * Wert ist {@code null}. Eine Eingabe gilt nur für Buchungen, die nach dem Übernehmen bezahlt sind ({@link SaleDates});
+	 * ohne Eingabe bekommt jede neu bezahlte Buchung ihren eigenen Preis.
+	 */
+	public Field<Integer> paidAmount() {
+		return paidAmount;
 	}
 
 	public Field<Boolean> collected() {

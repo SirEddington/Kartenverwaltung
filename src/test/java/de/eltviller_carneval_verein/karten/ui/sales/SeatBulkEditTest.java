@@ -125,6 +125,59 @@ class SeatBulkEditTest {
 
 	private static final LocalDate TODAY = LocalDate.of(2026, 10, 20);
 
+	// --- gezahlter Betrag ---
+
+	private Booking paidSeat(int number, int priceCents, int paidCents) {
+		Booking booking = seat(number, "Meier", priceCents);
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(paidCents);
+		return booking;
+	}
+
+	@Test
+	void commonPaidAmountOnlyOverPaidSeats() {
+		assertEquals(Optional.of(2000), new SeatBulkEdit(List.of(paidSeat(1, 2000, 2000), paidSeat(2, 2500, 2000))).paidAmount().common());
+		assertEquals(Optional.empty(), new SeatBulkEdit(List.of(paidSeat(3, 2000, 2000), seat(4, "Schulz", 2000))).paidAmount().common());
+	}
+
+	@Test
+	void untouchedPaidAmountGivesEachNewlyPaidSeatItsOwnPrice() {
+		Booking cheap = seat(1, "Meier", 2000);
+		Booking dear = seat(2, "Schulz", 2500);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(cheap, dear));
+
+		edit.paymentStatus().change(PaymentStatus.CASH);
+		edit.apply(TODAY);
+
+		assertEquals(Integer.valueOf(2000), cheap.getPaidAmount());
+		assertEquals(Integer.valueOf(2500), dear.getPaidAmount());
+	}
+
+	@Test
+	void typedPaidAmountAppliesOnlyToSeatsThatEndUpPaid() {
+		Booking paid = paidSeat(1, 2000, 1800);
+		Booking open = seat(2, "Schulz", 2000);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(paid, open));
+
+		edit.paidAmount().change(2200);
+		edit.apply(TODAY);
+
+		assertEquals(Integer.valueOf(2200), paid.getPaidAmount());
+		assertNull(open.getPaidAmount());
+	}
+
+	@Test
+	void typedPaidAmountWithPaymentWins() {
+		Booking booking = seat(1, "Meier", 2000);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(booking));
+
+		edit.paymentStatus().change(PaymentStatus.CASH);
+		edit.paidAmount().change(1500);
+		edit.apply(TODAY);
+
+		assertEquals(Integer.valueOf(1500), booking.getPaidAmount());
+	}
+
 	@Test
 	void commonValueIsPresentWhenAllSeatsAgree() {
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(seat(1, "Meier", 1000), seat(2, "Meier", 1000)));

@@ -158,6 +158,8 @@ public class EventEditController {
 	@FXML
 	private TableColumn<Booking, Double> colSeatPrice;
 	@FXML
+	private TableColumn<Booking, Double> colSeatPaidAmount;
+	@FXML
 	private TableColumn<Booking, PaymentStatus> colSeatPayment;
 	@FXML
 	private TableColumn<Booking, LocalDate> colSeatPaidOn;
@@ -528,8 +530,18 @@ public class EventEditController {
 		// Preis: der effektive Preis; der Standardpreis der Vorstellung als Eingabe entfernt den Einzelpreis
 		colSeatPrice.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getEffectivePrice() / 100.0).asObject());
 		colSeatPrice.setCellFactory(ParsingTextFieldTableCell.forTableColumn(new GermanDecimalStringConverter(), InputIssue.NOT_A_NUMBER, "Preis", EntityLabels::booking));
+		// über SaleDates: Bei einer bezahlten Buchung ohne Betrag (älterer Stand) hält es den bisherigen Preis als Betrag fest
 		colSeatPrice.setOnEditCommit(e -> {
-			e.getRowValue().setEffectivePrice(e.getNewValue() == null ? 0 : MoneyFormat.toCents(e.getNewValue()));
+			SaleDates.change(e.getRowValue(), booking -> booking.setEffectivePrice(e.getNewValue() == null ? 0 : MoneyFormat.toCents(e.getNewValue())));
+			bookingChanged();
+		});
+
+		// Gezahlter Betrag: nur bei bezahlten Buchungen, sonst leer und nicht bearbeitbar
+		colSeatPaidAmount.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().isPaid() ? cell.getValue().getPaidCents() / 100.0 : null));
+		colSeatPaidAmount.setCellFactory(ParsingTextFieldTableCell.forTableColumn(new GermanDecimalStringConverter(), InputIssue.NOT_A_NUMBER, "Bezahlt",
+				EntityLabels::booking, Booking::isPaid));
+		colSeatPaidAmount.setOnEditCommit(e -> {
+			e.getRowValue().setPaidAmount(e.getNewValue() == null ? 0 : MoneyFormat.toCents(e.getNewValue()));
 			bookingChanged();
 		});
 

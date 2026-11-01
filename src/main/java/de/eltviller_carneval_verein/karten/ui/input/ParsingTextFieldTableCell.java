@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.input;
 import java.time.LocalDate;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import javafx.css.PseudoClass;
@@ -51,6 +52,8 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	private final String fieldName;
 	private final Function<S, String> rowLabel;
 	private final Supplier<T> fallbackIfEmpty;
+	/** Welche Zeilen sich bearbeiten lassen; {@code null}: alle (die Spalte entscheidet). */
+	private Predicate<S> editableRow;
 	private boolean commitFailed;
 
 	/**
@@ -81,6 +84,29 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	public static <S, T> Callback<TableColumn<S, T>, TableCell<S, T>> forTableColumn(StringConverter<T> converter, InputIssue issueOnFailure,
 			String fieldName, Function<S, String> rowLabel) {
 		return column -> new ParsingTextFieldTableCell<>(converter, issueOnFailure, fieldName, rowLabel);
+	}
+
+	/**
+	 * Wie {@link #forTableColumn(StringConverter, InputIssue, String, Function)}, aber nur Zeilen, die {@code editableRow}
+	 * erfüllen, lassen sich bearbeiten (etwa der gezahlte Betrag nur bei bezahlten Buchungen). Geprüft wird beim Zeichnen
+	 * der Zelle; ändert sich die Bedingung, muss die Tabelle neu zeichnen.
+	 */
+	public static <S, T> Callback<TableColumn<S, T>, TableCell<S, T>> forTableColumn(StringConverter<T> converter, InputIssue issueOnFailure,
+			String fieldName, Function<S, String> rowLabel, Predicate<S> editableRow) {
+		return column -> {
+			ParsingTextFieldTableCell<S, T> cell = new ParsingTextFieldTableCell<>(converter, issueOnFailure, fieldName, rowLabel);
+			cell.editableRow = editableRow;
+			return cell;
+		};
+	}
+
+	@Override
+	public void updateItem(T item, boolean empty) {
+		super.updateItem(item, empty);
+		if (editableRow != null) {
+			S row = getTableRow() == null ? null : getTableRow().getItem();
+			setEditable(!empty && row != null && editableRow.test(row));
+		}
 	}
 
 	/**
