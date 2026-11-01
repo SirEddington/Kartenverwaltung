@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.input;
 import java.time.LocalDate;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import javafx.css.PseudoClass;
@@ -51,6 +52,8 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	private final String fieldName;
 	private final Function<S, String> rowLabel;
 	private final Supplier<T> fallbackIfEmpty;
+	/** Welche Zeilen sich bearbeiten lassen; {@code null}: alle (die Spalte entscheidet). */
+	private final Predicate<S> editableRow;
 	private boolean commitFailed;
 
 	/**
@@ -70,17 +73,42 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	 */
 	public ParsingTextFieldTableCell(StringConverter<T> converter, InputIssue issueOnFailure, String fieldName, Function<S, String> rowLabel,
 			Supplier<T> fallbackIfEmpty) {
+		this(converter, issueOnFailure, fieldName, rowLabel, fallbackIfEmpty, null);
+	}
+
+	private ParsingTextFieldTableCell(StringConverter<T> converter, InputIssue issueOnFailure, String fieldName, Function<S, String> rowLabel,
+			Supplier<T> fallbackIfEmpty, Predicate<S> editableRow) {
 		this.parsing = new ParsingConverter<>(converter, issueOnFailure, this::getItem);
 		this.fieldName = fieldName;
 		this.rowLabel = rowLabel;
 		this.fallbackIfEmpty = fallbackIfEmpty;
+		this.editableRow = editableRow;
 		setConverter(parsing);
 	}
 
 	/** Spaltenfabrik für {@code TableColumn.setCellFactory}. */
 	public static <S, T> Callback<TableColumn<S, T>, TableCell<S, T>> forTableColumn(StringConverter<T> converter, InputIssue issueOnFailure,
 			String fieldName, Function<S, String> rowLabel) {
-		return column -> new ParsingTextFieldTableCell<>(converter, issueOnFailure, fieldName, rowLabel);
+		return forTableColumn(converter, issueOnFailure, fieldName, rowLabel, null);
+	}
+
+	/**
+	 * Wie {@link #forTableColumn(StringConverter, InputIssue, String, Function)}, aber nur Zeilen, die {@code editableRow}
+	 * erfüllen, lassen sich bearbeiten (etwa der gezahlte Betrag nur bei bezahlten Buchungen); {@code null}: alle. Gefragt
+	 * wird erst, wenn das Bearbeiten beginnen soll ({@link #canEdit()}).
+	 */
+	public static <S, T> Callback<TableColumn<S, T>, TableCell<S, T>> forTableColumn(StringConverter<T> converter, InputIssue issueOnFailure,
+			String fieldName, Function<S, String> rowLabel, Predicate<S> editableRow) {
+		return column -> new ParsingTextFieldTableCell<>(converter, issueOnFailure, fieldName, rowLabel, null, editableRow);
+	}
+
+	/** Ob die Zeile der Zelle sich bearbeiten lässt (ohne Zeilenbedingung immer); Tabelle und Spalte prüft JavaFX selbst. */
+	boolean canEdit() {
+		if (editableRow == null) {
+			return true;
+		}
+		S row = getTableRow() == null ? null : getTableRow().getItem();
+		return row != null && editableRow.test(row);
 	}
 
 	/**
@@ -99,6 +127,16 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 
 	@Override
 	public void startEdit() {
+		if (!canEdit()) {
+			// Die Tabelle hat diese Zelle schon als bearbeitet vermerkt (Klick, Enter, table.edit); bliebe das stehen, nähme sie
+			// keine Taste mehr an und hielte fremde Änderungen zurück
+			TableView<S> table = getTableView();
+			if (table != null && table.getEditingCell() != null && table.getEditingCell().getRow() == getIndex()
+					&& table.getEditingCell().getTableColumn() == getTableColumn()) {
+				table.edit(-1, null);
+			}
+			return;
+		}
 		// Ein Merker aus einer früheren Bearbeitung darf nicht an dieser hängen
 		parsing.takeFailure();
 		super.startEdit();

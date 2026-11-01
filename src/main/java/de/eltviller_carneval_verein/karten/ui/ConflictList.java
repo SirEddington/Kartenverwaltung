@@ -272,7 +272,7 @@ public final class ConflictList {
 	/**
 	 * Die Werte einer Gruppe als Text: die gesetzten Werte, durch Komma getrennt; ohne Werte {@code (leer)}. Halle und
 	 * Bestuhlung stehen mit ihren Namen da (unbekannt wie in den Tabellen als Strich), der Zahlstatus mit seinem Text aus
-	 * den Ansichten, Preis und Kassenbetrag (in Cent gespeichert) als Betrag ({@code 35,00 €}), Daten als {@code 31.10.2026}; die Sitz-ID fehlt, weil Reihe, Tisch und Sitz
+	 * den Ansichten, Preis, gezahlter Betrag und Kassenbetrag (in Cent gespeichert) als Betrag ({@code 35,00 €}), Daten als {@code 31.10.2026}; die Sitz-ID fehlt, weil Reihe, Tisch und Sitz
 	 * daneben stehen.
 	 */
 	private String valueText(ObjectNode values) {
@@ -286,8 +286,8 @@ public final class ConflictList {
 			case "hallId" -> EntityLabels.hallDisplayName(findHall.apply(value.asText()));
 			case "seatingPlanId" -> planName(values.path("hallId").asText(null), value.asText());
 			case "paymentStatus" -> paymentText(value.asText());
-			// gespeichert in Cent (Booking.price, Presentation.actualCashAmount); wie in den Tabellen, mit Währung
-			case "price", "actualCashAmount" ->
+			// gespeichert in Cent (Booking.price, Booking.paidAmount, Presentation.actualCashAmount); wie in den Tabellen, mit Währung
+			case "price", "paidAmount", "actualCashAmount" ->
 				value.isNumber() ? String.format(Locale.GERMANY, "%.2f €", value.asLong() / 100.0) : value.asText();
 			// gespeichert als 2026-10-31 (LocalDate); wie in den Ansichten 31.10.2026
 			case "date", "reservationDate", "paymentDate", "collectionDate" -> dateText(value.asText());

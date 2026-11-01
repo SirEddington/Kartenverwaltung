@@ -116,6 +116,113 @@ class SaleDatesTest {
 		assertEquals(typed, booking.getPaymentDate());
 	}
 
+	/** Eine leere Buchung einer Vorstellung mit dem Standardpreis 20 €. */
+	private static Booking bookingAt2000() {
+		Presentation presentation = new Presentation();
+		presentation.changePrice(2000);
+		return presentation.addBooking();
+	}
+
+	@Test
+	void bezahlen_setzt_den_geltenden_preis_als_betrag() {
+		Booking booking = bookingAt2000();
+
+		SaleDates.change(booking, b -> b.setPaymentStatus(PaymentStatus.CASH), TODAY);
+
+		assertEquals(Integer.valueOf(2000), booking.getPaidAmount());
+	}
+
+	@Test
+	void preis_und_zahlung_im_selben_schritt_setzt_den_neuen_preis() {
+		Booking priceFirst = bookingAt2000();
+		SaleDates.change(priceFirst, b -> {
+			b.setEffectivePrice(2500);
+			b.setPaymentStatus(PaymentStatus.CASH);
+		}, TODAY);
+		assertEquals(Integer.valueOf(2500), priceFirst.getPaidAmount());
+
+		Booking paymentFirst = bookingAt2000();
+		SaleDates.change(paymentFirst, b -> {
+			b.setPaymentStatus(PaymentStatus.CASH);
+			b.setEffectivePrice(2500);
+		}, TODAY);
+		assertEquals(Integer.valueOf(2500), paymentFirst.getPaidAmount());
+	}
+
+	@Test
+	void eigener_betrag_im_selben_schritt_gilt() {
+		Booking booking = bookingAt2000();
+
+		SaleDates.change(booking, b -> {
+			b.setPaymentStatus(PaymentStatus.CASH);
+			b.setPaidAmount(1000);
+		}, TODAY);
+
+		assertEquals(Integer.valueOf(1000), booking.getPaidAmount());
+	}
+
+	@Test
+	void zuruecknehmen_der_zahlung_leert_den_betrag() {
+		Booking booking = bookingAt2000();
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(2000);
+		booking.setPaymentDate(EARLIER);
+
+		SaleDates.change(booking, b -> b.setPaymentStatus(PaymentStatus.NONE), TODAY);
+
+		assertNull(booking.getPaidAmount());
+		assertEquals(EARLIER, booking.getPaymentDate());
+	}
+
+	@Test
+	void offene_buchung_traegt_keinen_betrag() {
+		Booking booking = bookingAt2000();
+
+		SaleDates.change(booking, b -> b.setPaidAmount(1000), TODAY);
+
+		assertNull(booking.getPaidAmount());
+	}
+
+	@Test
+	void zahlartwechsel_laesst_den_betrag_stehen() {
+		Booking booking = bookingAt2000();
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(1800);
+
+		SaleDates.change(booking, b -> b.setPaymentStatus(PaymentStatus.CARD), TODAY);
+
+		assertEquals(Integer.valueOf(1800), booking.getPaidAmount());
+	}
+
+	@Test
+	void preisaenderung_bei_bezahltem_altem_stand_haelt_den_bisherigen_preis_fest() {
+		Booking booking = bookingAt2000();
+		booking.setPaymentStatus(PaymentStatus.CASH);
+
+		SaleDates.change(booking, b -> b.setEffectivePrice(2500), TODAY);
+
+		assertEquals(Integer.valueOf(2000), booking.getPaidAmount());
+		assertEquals(2500, booking.getEffectivePrice());
+	}
+
+	@Test
+	void preisaenderung_haelt_nichts_fest_wenn_offen_schon_festgehalten_oder_gleich() {
+		Booking open = bookingAt2000();
+		SaleDates.change(open, b -> b.setEffectivePrice(2500), TODAY);
+		assertNull(open.getPaidAmount());
+
+		Booking held = bookingAt2000();
+		held.setPaymentStatus(PaymentStatus.CASH);
+		held.setPaidAmount(1800);
+		SaleDates.change(held, b -> b.setEffectivePrice(2500), TODAY);
+		assertEquals(Integer.valueOf(1800), held.getPaidAmount());
+
+		Booking same = bookingAt2000();
+		same.setPaymentStatus(PaymentStatus.CASH);
+		SaleDates.change(same, b -> b.setEffectivePrice(2000), TODAY);
+		assertNull(same.getPaidAmount());
+	}
+
 	@Test
 	void ohne_datumsangabe_nutzt_change_den_heutigen_tag() {
 		Booking booking = new Booking();
