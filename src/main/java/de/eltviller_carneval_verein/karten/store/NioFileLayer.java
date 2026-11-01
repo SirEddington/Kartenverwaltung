@@ -126,8 +126,9 @@ public final class NioFileLayer implements FileLayer {
 	 * Ein Durchlauf des Ordners, der zu jedem Eintrag auch sagt, ob er ein Ordner ist. Die Attribute stammen aus der
 	 * Aufzählung selbst: {@link Files#walkFileTree} mit Tiefe 1 nutzt die Attribute, die das Betriebssystem (unter Windows)
 	 * beim Aufzählen liefert, und fragt nicht je Eintrag noch einmal das Dateisystem; {@code Files.readAttributes} je Eintrag
-	 * täte das (gemessen: so schnell wie {@code isDirectory} je Eintrag). Ein Verweis zählt als Ordner, wenn sein Ziel einer
-	 * ist, wie bei {@link Files#isDirectory}. Ein Eintrag, der während des Durchlaufs verschwindet, fehlt in der Liste.
+	 * täte das (gemessen: so schnell wie {@code isDirectory} je Eintrag). Größe und Änderungszeit stammen aus denselben
+	 * Attributen. Ein Verweis zählt als Ordner, wenn sein Ziel einer ist, wie bei {@link Files#isDirectory}. Ein Eintrag,
+	 * der während des Durchlaufs verschwindet, fehlt in der Liste.
 	 */
 	private static List<DirEntry> listWithKinds(Path dir, boolean withTemps) throws IOException {
 		List<DirEntry> entries = new ArrayList<>();
@@ -140,7 +141,7 @@ public final class NioFileLayer implements FileLayer {
 				String name = file.getFileName().toString();
 				if (withTemps || !name.startsWith(TEMP_PREFIX)) {
 					boolean directory = attrs.isSymbolicLink() ? Files.isDirectory(file) : attrs.isDirectory();
-					entries.add(new DirEntry(name, directory));
+					entries.add(entryOf(name, directory, attrs));
 				}
 				return FileVisitResult.CONTINUE;
 			}
@@ -149,9 +150,14 @@ public final class NioFileLayer implements FileLayer {
 		return entries;
 	}
 
+	/** Der Eintrag mit Größe und Änderungszeit aus den Attributen, die das Aufzählen liefert. */
+	private static DirEntry entryOf(String name, boolean directory, BasicFileAttributes attrs) {
+		return new DirEntry(name, directory, attrs.size(), attrs.lastModifiedTime().toMillis());
+	}
+
 	@Override
-	public Map<String, List<String>> listTree(Path root) throws IOException {
-		Map<String, List<String>> tree = new TreeMap<>();
+	public Map<String, List<DirEntry>> listTree(Path root) throws IOException {
+		Map<String, List<DirEntry>> tree = new TreeMap<>();
 		Files.walkFileTree(root, new MissingTolerantVisitor() {
 			@Override
 			public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
@@ -162,12 +168,12 @@ public final class NioFileLayer implements FileLayer {
 			@Override
 			public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
 				if (attrs.isRegularFile()) {
-					tree.get(keyOf(root, file.getParent())).add(file.getFileName().toString());
+					tree.get(keyOf(root, file.getParent())).add(entryOf(file.getFileName().toString(), false, attrs));
 				}
 				return FileVisitResult.CONTINUE;
 			}
 		});
-		tree.values().forEach(Collections::sort);
+		tree.values().forEach(files -> files.sort(Comparator.comparing(DirEntry::name)));
 		return tree;
 	}
 

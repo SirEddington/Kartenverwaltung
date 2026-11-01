@@ -215,7 +215,7 @@ class SyncServiceTest {
 		}
 
 		@Override
-		public Map<String, List<String>> listTree(Path root) throws IOException {
+		public Map<String, List<DirEntry>> listTree(Path root) throws IOException {
 			return delegate.listTree(root);
 		}
 
@@ -4403,7 +4403,7 @@ class SyncServiceTest {
 		}
 
 		@Override
-		public Map<String, List<String>> listTree(Path root) throws IOException {
+		public Map<String, List<DirEntry>> listTree(Path root) throws IOException {
 			return delegate.listTree(root);
 		}
 

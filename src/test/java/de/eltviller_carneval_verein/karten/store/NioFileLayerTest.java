@@ -27,6 +27,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -52,6 +53,18 @@ class NioFileLayerTest {
 		try (Stream<Path> stream = Files.list(folder)) {
 			return stream.map(p -> p.getFileName().toString()).sorted().toList();
 		}
+	}
+
+	/** Die Namen der Einträge, Ordner mit {@code /} am Ende. */
+	private static List<String> kinds(List<FileLayer.DirEntry> entries) {
+		return entries.stream().map(e -> e.name() + (e.directory() ? "/" : "")).toList();
+	}
+
+	/** Der Verzeichnisbaum nur mit den Dateinamen. */
+	private static Map<String, List<String>> names(Map<String, List<FileLayer.DirEntry>> tree) {
+		Map<String, List<String>> names = new TreeMap<>();
+		tree.forEach((folder, files) -> names.put(folder, files.stream().map(FileLayer.DirEntry::name).toList()));
+		return names;
 	}
 
 	/** Die temporären Dateien im Ordner (auch die, die {@code listNames} verbirgt). */
@@ -143,8 +156,7 @@ class NioFileLayerTest {
 		Files.createDirectory(dir.resolve("sub"));
 		Files.createDirectory(dir.resolve("~karv-dir"));
 
-		assertEquals(List.of(new FileLayer.DirEntry("a.json", false), new FileLayer.DirEntry("b.json", false),
-				new FileLayer.DirEntry("sub", true)), layer.listEntries(dir));
+		assertEquals(List.of("a.json", "b.json", "sub/"), kinds(layer.listEntries(dir)));
 	}
 
 	@Test
@@ -154,9 +166,21 @@ class NioFileLayerTest {
 		Files.createDirectory(dir.resolve("sub"));
 		Files.createDirectory(dir.resolve("~karv-dir"));
 
-		assertEquals(List.of(new FileLayer.DirEntry("a.json", false), new FileLayer.DirEntry("sub", true),
-				new FileLayer.DirEntry("~karv-dir", true), new FileLayer.DirEntry("~karv-x.tmp", false)),
-				layer.listEntriesWithTemps(dir));
+		assertEquals(List.of("a.json", "sub/", "~karv-dir/", "~karv-x.tmp"), kinds(layer.listEntriesWithTemps(dir)));
+	}
+
+	@Test
+	void listTreeAndListEntriesCarrySizeAndModifiedTime() throws IOException {
+		Path file = dir.resolve("a.json");
+		Files.write(file, new byte[17]);
+		Files.setLastModifiedTime(file, FileTime.fromMillis(1_700_000_000_123L));
+
+		FileLayer.DirEntry fromTree = layer.listTree(dir).get("").get(0);
+		FileLayer.DirEntry fromList = layer.listEntries(dir).get(0);
+
+		assertEquals(new FileLayer.DirEntry("a.json", false, 17, 1_700_000_000_123L), fromTree);
+		assertEquals(fromTree, fromList);
+		assertEquals("17|1700000000123", fromTree.stamp());
 	}
 
 	@Test
@@ -185,7 +209,7 @@ class NioFileLayerTest {
 		Files.write(dir.resolve("a").resolve("x.json"), bytes("x"));
 		Files.write(dir.resolve("a").resolve("b").resolve("y.json"), bytes("y"));
 
-		Map<String, List<String>> tree = layer.listTree(dir);
+		Map<String, List<String>> tree = names(layer.listTree(dir));
 
 		assertEquals(Map.of("", List.of(), "a", List.of("x.json"), "a/b", List.of("y.json"), "c", List.of()), tree);
 	}
@@ -196,7 +220,7 @@ class NioFileLayerTest {
 		Files.write(dir.resolve("b.json"), bytes("b"));
 		Files.write(dir.resolve("a.json"), bytes("a"));
 
-		assertEquals(Map.of("", List.of("a.json", "b.json"), "sub", List.of()), layer.listTree(dir));
+		assertEquals(Map.of("", List.of("a.json", "b.json"), "sub", List.of()), names(layer.listTree(dir)));
 	}
 
 	@Test

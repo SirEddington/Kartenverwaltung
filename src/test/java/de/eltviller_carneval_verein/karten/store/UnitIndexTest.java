@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -553,7 +554,7 @@ class UnitIndexTest {
 		Files.writeString(unitDir.resolve("claims").resolve("Thumbs.db"), "x");
 		Files.writeString(unitDir.resolve("presentations/p1/~karv-1.tmp"), "x");
 		Files.createDirectories(unitDir.resolve("presentations/p1").resolve(mine(9) + ".json"));
-		Map<String, List<String>> tree = new NioFileLayer().listTree(local.dataRoot());
+		Map<String, List<FileLayer.DirEntry>> tree = new NioFileLayer().listTree(local.dataRoot());
 
 		List<UnitKey> units = local.allUnits();
 
@@ -615,20 +616,28 @@ class UnitIndexTest {
 		assertEquals(mine(2), second.entries().get(EVENT).snapshot().version());
 	}
 
+	/** Ein Verzeichnisbaum aus Dateinamen, jede Datei mit derselben Größe und Änderungszeit. */
+	private static Map<String, List<FileLayer.DirEntry>> listing(Map<String, List<String>> names) {
+		Map<String, List<FileLayer.DirEntry>> tree = new HashMap<>();
+		names.forEach((folder, files) -> tree.put(folder,
+				files.stream().map(name -> new FileLayer.DirEntry(name, false, 1, 1_000)).toList()));
+		return tree;
+	}
+
 	@Test
 	void fingerprintFromListingCountsSideCopiesOfReplacedFilesOnly() {
 		String v = mine(1) + ".json";
 		Map<String, List<String>> plain = Map.of("events/e1", List.of(v), "events/e1/claims", List.of("root.json"));
-		String base = UnitIndex.fingerprintFromListing(plain, "events/e1");
+		String base = UnitIndex.fingerprintFromListing(listing(plain), "events/e1");
 
-		assertNotEquals(base, UnitIndex.fingerprintFromListing(
-				Map.of("events/e1", List.of(v, v + ".corrupt-1"), "events/e1/claims", List.of("root.json")), "events/e1"));
-		assertNotEquals(base, UnitIndex.fingerprintFromListing(
-				Map.of("events/e1", List.of(v), "events/e1/claims", List.of("root.json", "root.json.verdraengt-1")),
+		assertNotEquals(base, UnitIndex.fingerprintFromListing(listing(
+				Map.of("events/e1", List.of(v, v + ".corrupt-1"), "events/e1/claims", List.of("root.json"))), "events/e1"));
+		assertNotEquals(base, UnitIndex.fingerprintFromListing(listing(
+				Map.of("events/e1", List.of(v), "events/e1/claims", List.of("root.json", "root.json.verdraengt-1"))),
 				"events/e1"));
-		assertEquals(base, UnitIndex.fingerprintFromListing(Map.of("events/e1", List.of(v, "Thumbs.db", "x.json.corrupt-1",
-				v + ".", "~karv-1.tmp", mine(1) + " (Konfliktkopie).json"), "events/e1/claims", List.of("root.json", "Thumbs.db",
-						"abc.json.bak")), "events/e1"));
+		assertEquals(base, UnitIndex.fingerprintFromListing(listing(Map.of("events/e1", List.of(v, "Thumbs.db",
+				"x.json.corrupt-1", v + ".", "~karv-1.tmp", mine(1) + " (Konfliktkopie).json"), "events/e1/claims",
+				List.of("root.json", "Thumbs.db", "abc.json.bak"))), "events/e1"));
 	}
 
 	@Test

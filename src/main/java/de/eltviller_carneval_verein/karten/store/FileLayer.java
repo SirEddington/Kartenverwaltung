@@ -78,24 +78,31 @@ public interface FileLayer {
 	 */
 	List<String> listNames(Path dir) throws IOException;
 
-	/** Ein Eintrag eines Ordners: der Name (nicht der Pfad) und ob es ein Ordner ist (sonst eine Datei oder etwas anderes). */
-	record DirEntry(String name, boolean directory) {
+	/**
+	 * Ein Eintrag eines Ordners, so wie ihn das Aufzählen liefert.
+	 *
+	 * @param name           der Name (nicht der Pfad)
+	 * @param directory      ob es ein Ordner ist (sonst eine Datei oder etwas anderes)
+	 * @param size           die Größe in Byte; für einen Ordner ohne Bedeutung
+	 * @param modifiedMillis die letzte Änderung in Millisekunden seit 1970; für einen Ordner ohne Bedeutung
+	 */
+	record DirEntry(String name, boolean directory, long size, long modifiedMillis) {
+
+		/** Größe und Änderungszeit als Text {@code <Größe>|<Millisekunden>}, wie sie in den Abdruck des Index eingehen. */
+		String stamp() {
+			return size + "|" + modifiedMillis;
+		}
 	}
 
 	/**
-	 * Wie {@link #listNames}, aber mit der Angabe je Eintrag, ob er ein Ordner ist, aus demselben Durchlauf: Auf einer
-	 * Netzfreigabe kostet ein Zugriff je Eintrag ({@link #isDirectory}) ein Vielfaches des Auflistens. Sortiert nach Namen,
-	 * ohne {@code ~karv-*}; ist der Ordner nicht vorhanden, ist die Liste leer.
+	 * Wie {@link #listNames}, aber mit der Angabe je Eintrag, ob er ein Ordner ist, und mit Größe und Änderungszeit, aus
+	 * demselben Durchlauf: Auf einer Netzfreigabe kostet ein Zugriff je Eintrag ({@link #isDirectory}) ein Vielfaches des
+	 * Auflistens. Sortiert nach Namen, ohne {@code ~karv-*}; ist der Ordner nicht vorhanden, ist die Liste leer.
 	 * <p>
-	 * Die Standardfassung fragt {@link #listNames} und dann {@link #isDirectory} je Eintrag; eine Schicht überschreibt sie,
-	 * wenn sie beides in einem Durchlauf liefern kann.
+	 * Die Standardfassung nimmt {@link #listEntriesWithTemps} ohne die temporären Namen.
 	 */
 	default List<DirEntry> listEntries(Path dir) throws IOException {
-		List<DirEntry> entries = new ArrayList<>();
-		for (String name : listNames(dir)) {
-			entries.add(new DirEntry(name, isDirectory(dir.resolve(name))));
-		}
-		return entries;
+		return listEntriesWithTemps(dir).stream().filter(entry -> !isTempName(entry.name())).toList();
 	}
 
 	/** Wie {@link #listEntries}, aber mit den {@code ~karv-*}-Einträgen: die temporären Dateien eingeschlossen. */
@@ -103,11 +110,12 @@ public interface FileLayer {
 
 	/**
 	 * Der ganze Verzeichnisbaum unter {@code root} in einem Durchlauf: jeder Ordner, auch ein leerer und {@code root}
-	 * selbst (Schlüssel {@code ""}), mit den Namen der regulären Dateien darin, sortiert und ohne Unterordner. Die
-	 * Schlüssel sind die Pfade relativ zu {@code root}, getrennt durch {@code /}. Anders als {@link #listNames} blendet
-	 * der Durchlauf {@code ~karv-*} nicht aus. Fehlt {@code root}, ist die Map leer.
+	 * selbst (Schlüssel {@code ""}), mit den regulären Dateien darin (je ein {@link DirEntry} mit Größe und Änderungszeit),
+	 * sortiert nach Namen und ohne Unterordner. Die Schlüssel sind die Pfade relativ zu {@code root}, getrennt durch
+	 * {@code /}. Anders als {@link #listNames} blendet der Durchlauf {@code ~karv-*} nicht aus. Fehlt {@code root}, ist die
+	 * Map leer.
 	 */
-	Map<String, List<String>> listTree(Path root) throws IOException;
+	Map<String, List<DirEntry>> listTree(Path root) throws IOException;
 
 	/** {@code true}, wenn der Pfad ein vorhandener Ordner ist. */
 	boolean isDirectory(Path path);

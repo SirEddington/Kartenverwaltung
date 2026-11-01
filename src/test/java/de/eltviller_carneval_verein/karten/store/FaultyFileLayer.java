@@ -278,9 +278,9 @@ public final class FaultyFileLayer implements FileLayer {
 	}
 
 	@Override
-	public Map<String, List<String>> listTree(Path root) throws IOException {
+	public Map<String, List<DirEntry>> listTree(Path root) throws IOException {
 		IOException late = enter("listTree", root);
-		Map<String, List<String>> result = delegate.listTree(root);
+		Map<String, List<DirEntry>> result = delegate.listTree(root);
 		throwLate(late);
 		return result;
 	}

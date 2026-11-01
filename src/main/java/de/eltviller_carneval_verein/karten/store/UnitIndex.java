@@ -281,10 +281,11 @@ final class UnitIndex {
 	 * @param tree     der Verzeichnisbaum des Datenordners
 	 * @param unitPath der Ordner der Einheit relativ zum Datenordner (siehe {@link UnitKey#relativePath()})
 	 */
-	static String fingerprintFromListing(Map<String, List<String>> tree, String unitPath) {
+	static String fingerprintFromListing(Map<String, List<FileLayer.DirEntry>> tree, String unitPath) {
 		List<VersionId> versions = new ArrayList<>();
 		List<String> sideCopies = new ArrayList<>();
-		for (String name : tree.getOrDefault(unitPath, List.of())) {
+		for (FileLayer.DirEntry file : tree.getOrDefault(unitPath, List.of())) {
+			String name = file.name();
 			VersionStore.versionIdOf(name).ifPresent(versions::add);
 			String base = sideCopyBase(name);
 			if (base != null && VersionStore.versionIdOf(base).isPresent()) {
@@ -292,7 +293,8 @@ final class UnitIndex {
 			}
 		}
 		List<String> claimNames = new ArrayList<>();
-		for (String name : tree.getOrDefault(unitPath + "/" + CLAIMS, List.of())) {
+		for (FileLayer.DirEntry file : tree.getOrDefault(unitPath + "/" + CLAIMS, List.of())) {
+			String name = file.name();
 			VersionStore.claimNameOf(name).ifPresent(claimNames::add);
 			String base = sideCopyBase(name);
 			if (base != null && VersionStore.claimNameOf(base).isPresent()) {
@@ -327,7 +329,7 @@ final class UnitIndex {
 	 */
 	synchronized Refresh refresh(VersionStore local, DoubleConsumer progress) throws IOException {
 		deleteLeftoverTemps();
-		Map<String, List<String>> tree = files.listTree(local.dataRoot());
+		Map<String, List<FileLayer.DirEntry>> tree = files.listTree(local.dataRoot());
 		deleteOldLocalTemps(local, tree);
 		Map<UnitKey, String> units = new LinkedHashMap<>();
 		for (String rel : new TreeSet<>(tree.keySet())) {
@@ -378,10 +380,12 @@ final class UnitIndex {
 	 * das Löschen nicht erlaubt ist) betrifft nur seinen Ordner und steht nur im Log: Das Aufräumen ist Pflege und lässt
 	 * den Abgleich nicht scheitern; der Ordner kommt beim nächsten Start wieder dran.
 	 */
-	private void deleteOldLocalTemps(VersionStore local, Map<String, List<String>> tree) {
+	private void deleteOldLocalTemps(VersionStore local, Map<String, List<FileLayer.DirEntry>> tree) {
+		Map<String, List<String>> names = new LinkedHashMap<>();
+		tree.forEach((folder, entries) -> names.put(folder, entries.stream().map(FileLayer.DirEntry::name).toList()));
 		// die Kennung einmal, nicht je Datei (wie SyncService#deleteOwnOldTemps)
 		Ownership mine = own;
-		files.deleteOldTemps(local.dataRoot(), tree, tag -> tag == null || mine.isOwnTempTag(tag), SyncService.TEMP_AGE,
+		files.deleteOldTemps(local.dataRoot(), names, tag -> tag == null || mine.isOwnTempTag(tag), SyncService.TEMP_AGE,
 				"im lokalen Bestand");
 	}
 
