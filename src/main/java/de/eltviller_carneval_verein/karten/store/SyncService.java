@@ -128,9 +128,10 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * wird er von {@link #flushIndex()} und im Takt alle {@link #INDEX_FLUSH}, nicht vor dem Abgleich durch {@link #startup}.
  * Bei einer neuen Rechner-ID (SYS-011) wird er nicht neu aufgebaut: Er übernimmt sie, und die früheren IDs zählen bis zum
  * Wechsel weiter als eigen ({@link Ownership}). Beim Beenden ruft die Anwendung {@link #closeIndex()}: Es schreibt den Index und legt die Marke "sauber beendet" an. Findet
- * {@link #startup} sie vor (und keine Sperrdatei des Index, siehe {@link UnitIndex}), übernimmt es den Index ohne jeden
- * Durchlauf über den Bestand (zweite Stufe); ohne Marke, also nach einem Absturz, bleibt es beim Abgleich über die
- * Verzeichnisnamen. Der Index ist nie Schiedsrichter: Jede Entscheidung über Vorgänger, Ansprüche und Verluste trifft {@link ChainResolver}
+ * {@link #startup} sie vor (und keine Sperrdatei des Index, siehe {@link UnitIndex}), liest es den Index ohne Durchlauf
+ * ein; abgeglichen wird er danach bei jedem Start über Namen, Größe und Änderungszeit der Dateien, mit oder ohne Marke,
+ * denn der Bestand kann auch nach sauberem Beenden an der App vorbei geändert worden sein (KARV-107). Der Index ist nie
+ * Schiedsrichter: Jede Entscheidung über Vorgänger, Ansprüche und Verluste trifft {@link ChainResolver}
  * auf den Dateien. Er nennt nur, welche Einheiten gelesen werden: Die Abläufe im {@code worker} lesen die Kandidaten des
  * Index (ausstehende, verlorene, junge eigene Glieder) und die Einheiten, die nicht im Index stehen, dazu, was der
  * Vollabgleich gerade abgleicht und was sich geändert hat; nicht mehr in jedem Takt alle Einheiten.
@@ -392,6 +393,8 @@ public final class SyncService implements ConnectionControl {
 	private volatile UnitIndex index;
 	/** Ob {@link #startup} den Index mit dem Bestand abgeglichen hat; vorher schreibt {@link #flushIndex()} nichts. */
 	private volatile boolean indexRefreshed;
+	/** Ob beim letzten {@link #startup} die Marke "sauber beendet" galt ({@link UnitIndex#loadIfClean}). */
+	private volatile boolean startedFromCleanIndex;
 	/** Wann zuletzt versucht wurde, den Index zu schreiben; {@code null}, solange noch nie. */
 	private volatile Instant lastIndexFlush;
 	/** Ob {@link #closeIndex()} die Marke "sauber beendet" angelegt hat; gesetzt unter {@code workLock}, der Takt tut dann nichts. */
@@ -1867,6 +1870,14 @@ public final class SyncService implements ConnectionControl {
 	}
 
 	/**
+	 * Ob beim letzten {@link #startup} die Marke "sauber beendet" galt: Der Index wurde vor dem Abgleich übernommen. Für
+	 * Tests und als Ansatzpunkt für KARV-113 (Abgleich nach sauberem Beenden im Hintergrund).
+	 */
+	boolean startedFromCleanIndex() {
+		return startedFromCleanIndex;
+	}
+
+	/**
 	 * Schreibt den Start-Index, soweit er sich geändert hat. Vor dem Abgleich durch {@link #startup} schreibt es nichts: Ein
 	 * Index, der nur die bisher berührten Einheiten kennt, würde den vollständigen auf der Platte ersetzen. Wirft nie; ein
 	 * Fehler kommt als {@code WARNING} ins Log, der Index kostet dann nur beim nächsten Start Zeit.
@@ -1986,30 +1997,35 @@ public final class SyncService implements ConnectionControl {
 	}
 
 	/**
-	 * Macht den Index beim Start benutzbar. Zuerst gilt die Marke "sauber beendet" ({@link UnitIndex#loadIfClean}): Ist sie
-	 * da, steht keine Sperrdatei des Index ({@code <Index>/unclean}, siehe {@link UnitIndex}) und ist der Index lesbar,
-	 * wird er ohne Durchlauf über den Bestand übernommen; das Aufräumen und der Verzeichnisbaum entfallen, denn
-	 * temporäre Reste und Änderungen am Bestand ohne den Index gibt es nur nach einem Absturz, und dann fehlt die Marke.
-	 * Sonst gleicht der Start den Index ab und räumt dabei im selben Durchlauf über den Bestand die alten temporären
-	 * Dateien auf ({@link UnitIndex#refresh}); im Notfall baut er den
+	 * Macht den Index beim Start benutzbar. Zuerst wertet {@link UnitIndex#loadIfClean} die Marke "sauber beendet" aus: Ist
+	 * sie da, steht keine Sperrdatei des Index ({@code <Index>/unclean}, siehe {@link UnitIndex}) und ist der Index lesbar,
+	 * liest es den Index schon ein. Danach gleicht der Start den Index immer mit dem Bestand ab und räumt dabei im selben
+	 * Durchlauf die alten temporären Dateien auf ({@link UnitIndex#refresh}): Auch nach sauberem Beenden kann der Bestand an
+	 * der App vorbei geändert worden sein (eine zurückgespielte Sicherung, eine Kopie, eine überschriebene Datei; KARV-107).
+	 * Löst der Abgleich trotz gültiger Marke Einheiten neu auf, steht das als Warnung im Log. Im Notfall baut der Start den
 	 * Index neu auf.
 	 *
 	 * @return die Einheiten mit ausstehenden und mit verlorenen eigenen Versionen
 	 */
 	private UnitIndex.Refresh openIndex(DoubleConsumer progress) {
+		boolean clean = false;
 		try {
-			if (index.loadIfClean()) {
-				UnitIndex.Refresh refresh = index.cleanRefresh();
-				indexRefreshed = true;
-				progress.accept(1.0);
-				return refresh;
-			}
+			clean = index.loadIfClean();
 		} catch (RuntimeException e) {
 			LOGGER.log(Level.WARNING, "Die Marke 'sauber beendet' ließ sich nicht auswerten; der Bestand wird durchsucht", e);
 		}
+		startedFromCleanIndex = clean;
+		// hier gleicht KARV-113 bei gültiger Marke im Hintergrund ab
 		UnitIndex.Refresh refreshed = refreshIndex(progress);
-		// war der Index nicht zu gebrauchen: jede Einheit einzeln aus den Dateien, oder der Start scheitert
-		return refreshed != null ? refreshed : rebuildIndex(progress);
+		if (refreshed == null) {
+			// war der Index nicht zu gebrauchen: jede Einheit einzeln aus den Dateien, oder der Start scheitert
+			return rebuildIndex(progress);
+		}
+		if (clean && refreshed.resolved() > 0) {
+			LOGGER.warning("Der lokale Bestand wurde seit dem letzten Beenden außerhalb der Kartenverwaltung geändert: "
+					+ refreshed.resolved() + " Einheiten neu aufgelöst");
+		}
+		return refreshed;
 	}
 
 	/**

@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.time.Clock;
 import java.time.Duration;
@@ -48,6 +49,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -932,14 +937,16 @@ class SyncServiceTest {
 		a.service.tick();
 		a.service.closeIndex();
 		assertTrue(Files.isRegularFile(cleanMarker(a)));
-		// an der App vorbei in den lokalen und den gemeinsamen Bestand kopiert, gleich: Der Vollabgleich hat nichts zu kopieren
-		copyPastTheApp(OTHER, COPIED, a.localData(), sharedRoot.resolve("data"));
 
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		assertTrue(b.service.startup(shared));
+		// erst im laufenden Betrieb an der App vorbei in den lokalen und den gemeinsamen Bestand kopiert, gleich: Den Start
+		// gleicht der Index selbst ab (KARV-107), hier nimmt sie der Vollabgleich auf, ohne etwas zu kopieren
+		copyPastTheApp(OTHER, COPIED, a.localData(), sharedRoot.resolve("data"));
+		b.service.syncNow();
 		b.service.tick();
 
-		assertFalse(walkedTree(b), "der Start vertraut dem Index: " + b.layer.calls());
+		assertTrue(trustedIndex(b), "der Start vertraut dem Index: " + b.layer.calls());
 		assertIndexed(b, COPIED);
 		assertTrue(b.events.changedUnits().containsAll(COPIED), b.events.changed.toString());
 		assertTrue(b.events.errors.isEmpty(), b.events.errors.toString());
@@ -948,7 +955,7 @@ class SyncServiceTest {
 
 		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		assertTrue(c.service.startup(""));
-		assertFalse(walkedTree(c), c.layer.calls().toString());
+		assertTrue(trustedIndex(c), c.layer.calls().toString());
 		assertIndexed(c, COPIED);
 	}
 
@@ -959,16 +966,19 @@ class SyncServiceTest {
 		save(a, create(BOOKING, "Anna"));
 		a.service.tick();
 		a.service.closeIndex();
-		copyPastTheApp(OTHER, COPIED, a.localData(), sharedRoot.resolve("data"));
 		UnitKey k1 = UnitKey.hall("k1");
 		UnitKey k2 = UnitKey.hall("k2");
 
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(shared));
+		// erst im laufenden Betrieb kopiert (den Start gleicht der Index selbst ab, KARV-107)
+		copyPastTheApp(OTHER, COPIED, a.localData(), sharedRoot.resolve("data"));
 		// das Auflisten von k2 im gemeinsamen Ordner scheitert: Der Block der Hallen bricht dort ab
 		AtomicBoolean broken = new AtomicBoolean(true);
 		Path k2Shared = sharedFile(k2, "x").getParent();
 		b.layer.failWhen(p -> broken.get() && p.equals(k2Shared), "listNamesWithTemps", new IOException("Störung"));
-		assertTrue(b.service.startup(shared));
+		b.service.syncNow();
+		b.service.tick();
 
 		assertNotNull(b.service.fullSyncProgress().get(), "der Lauf steht vor dem gescheiterten Block");
 		assertIndexed(b, List.of(k1, k2));
@@ -991,14 +1001,16 @@ class SyncServiceTest {
 		a.service.tick();
 		a.service.closeIndex();
 		assertTrue(Files.isRegularFile(cleanMarker(a)));
-		// eigene Einheiten nur im lokalen Bestand (etwa eine zurückgespielte Sicherung): Der Vollabgleich lädt sie hoch (M4)
-		copyPastTheApp(a.identity.id(), COPIED, a.localData());
 
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		assertTrue(b.service.startup(shared));
+		// eigene Einheiten nur im lokalen Bestand, im laufenden Betrieb dazugekommen (den Start gleicht der Index selbst ab,
+		// KARV-107): Der Vollabgleich lädt sie hoch (M4)
+		copyPastTheApp(a.identity.id(), COPIED, a.localData());
+		b.service.syncNow();
 		b.service.tick();
 
-		assertFalse(walkedTree(b), "der Start vertraut dem Index: " + b.layer.calls());
+		assertTrue(trustedIndex(b), "der Start vertraut dem Index: " + b.layer.calls());
 		assertIndexed(b, COPIED);
 		assertTrue(b.events.changedUnits().containsAll(COPIED), b.events.changed.toString());
 		assertTrue(b.events.errors.isEmpty(), b.events.errors.toString());
@@ -1010,7 +1022,7 @@ class SyncServiceTest {
 
 		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		assertTrue(c.service.startup(""));
-		assertFalse(walkedTree(c), c.layer.calls().toString());
+		assertTrue(trustedIndex(c), c.layer.calls().toString());
 		assertIndexed(c, COPIED);
 	}
 
@@ -3786,8 +3798,9 @@ class SyncServiceTest {
 		return node.appData.resolve("index/clean");
 	}
 
-	private static boolean walkedTree(Node node) {
-		return node.layer.calls().stream().anyMatch(c -> c.startsWith("listTree ") || c.startsWith("deleteOwnTemps "));
+	/** Ob der Start der Marke "sauber beendet" vertraute. */
+	private static boolean trustedIndex(Node node) {
+		return node.service.startedFromCleanIndex();
 	}
 
 	/** Ein Bestand mit vollständigem Index, sauber beendet: eine Buchung, eine Halle samt den Ordnern von Event und Vorstellung. */
@@ -3839,13 +3852,14 @@ class SyncServiceTest {
 	}
 
 	@Test
-	void startupAfterCleanShutdownSkipsTreeWalks() throws IOException {
+	void startupAfterCleanShutdownWalksTheTreeButReadsNoUnit() throws IOException {
 		Node a = cleanlyClosedNode();
 
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		assertTrue(b.service.startup(""));
 
-		assertFalse(walkedTree(b), b.layer.calls().toString());
+		assertTrue(trustedIndex(b), b.layer.calls().toString());
+		assertEquals(1, b.layer.calls().stream().filter(c -> c.startsWith("listTree ")).count(), b.layer.calls().toString());
 		assertTrue(b.service.isStarted());
 		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), b.service.snapshots());
 		assertEquals(payload("Anna"), b.service.snapshots().get(BOOKING).payload());
@@ -3865,12 +3879,234 @@ class SyncServiceTest {
 		assertEquals(1.0, progress.get(progress.size() - 1));
 	}
 
+	// --- Änderungen am lokalen Bestand an der App vorbei (KARV-107, KARV-112)
+
+	/** Schneidet die Meldungen des Loggers von {@link SyncService} mit, solange sie offen ist. */
+	private static final class LogCapture extends Handler implements AutoCloseable {
+		final List<LogRecord> records = new ArrayList<>();
+		private final Logger logger = Logger.getLogger(SyncService.class.getName());
+
+		LogCapture() {
+			logger.addHandler(this);
+		}
+
+		@Override
+		public synchronized void publish(LogRecord record) {
+			records.add(record);
+		}
+
+		@Override
+		public void flush() {
+		}
+
+		@Override
+		public void close() {
+			logger.removeHandler(this);
+		}
+
+		/** Wie viele Warnungen mit diesem Anfang kamen. */
+		synchronized long warnings(String prefix) {
+			return records.stream().filter(r -> r.getLevel() == Level.WARNING && r.getMessage().startsWith(prefix)).count();
+		}
+	}
+
+	private static final String CHANGED_OUTSIDE = "Der lokale Bestand wurde seit dem letzten Beenden außerhalb der "
+			+ "Kartenverwaltung geändert: ";
+
+	/** Kopiert einen Ordner samt Inhalt; vorhandene Dateien am Ziel werden ersetzt. */
+	private static void copyFolder(Path from, Path to) throws IOException {
+		try (Stream<Path> paths = Files.walk(from)) {
+			for (Path path : paths.toList()) {
+				Path target = to.resolve(from.relativize(path).toString());
+				if (Files.isDirectory(path)) {
+					Files.createDirectories(target);
+				} else {
+					Files.copy(path, target, StandardCopyOption.REPLACE_EXISTING);
+				}
+			}
+		}
+	}
+
+	/** Ersetzt den Index des Rechners durch eine beiseite gelegte Kopie (samt Marke); die Sperrdatei fehlt danach. */
+	private static void restoreIndex(Node node, Path saved) throws IOException {
+		Files.deleteIfExists(node.uncleanFile());
+		copyFolder(saved, node.appData.resolve("index"));
+	}
+
+	@Test
+	void unitCopiedPastTheAppIsIndexedAtCleanStart() throws IOException {
+		Node a = cleanlyClosedNode();
+		copyPastTheApp(OTHER, COPIED, a.localData());
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(""));
+
+		assertTrue(trustedIndex(b));
+		assertIndexed(b, COPIED);
+	}
+
+	@Test
+	void unitExtendedPastTheAppShowsTheNewStateAtCleanStart() throws IOException {
+		Node a = cleanlyClosedNode();
+		Path saved = dir.resolve("index-alt");
+		copyFolder(a.appData.resolve("index"), saved);
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.service.startup("");
+		save(b, update(BOOKING, b.service.history(BOOKING).get(0), "Anna B"));
+		b.service.closeIndex();
+		// der Index ist älter als der Bestand, die Marke gilt
+		restoreIndex(a, saved);
+
+		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(c.service.startup(""));
+
+		assertTrue(trustedIndex(c));
+		assertEquals(payload("Anna B"), c.service.snapshots().get(BOOKING).payload());
+		assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), c.service.snapshots());
+	}
+
+	@Test
+	void fileOverwrittenPastTheAppIsLockedAtCleanStart() throws IOException {
+		Node a = cleanlyClosedNode();
+		Path versionFile;
+		try (Stream<Path> files = Files.list(localFile(a, BOOKING, "x").getParent())) {
+			versionFile = files.filter(f -> f.getFileName().toString().endsWith(".json")).findFirst().orElseThrow();
+		}
+		Files.writeString(versionFile, "kaputt");
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(""));
+
+		assertTrue(trustedIndex(b));
+		assertEquals(Status.LOCKED_DAMAGED, b.service.snapshots().get(BOOKING).status());
+	}
+
+	@Test
+	void sharedStartSeesCopiedAndExtendedUnitsBeforeTheFullSync() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		a.service.closeIndex();
+		Path saved = dir.resolve("index-alt");
+		copyFolder(a.appData.resolve("index"), saved);
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.service.startup(shared);
+		save(b, update(BOOKING, b.service.history(BOOKING).get(0), "Anna B"));
+		b.service.tick();
+		b.service.closeIndex();
+		restoreIndex(a, saved);
+		copyPastTheApp(OTHER, COPIED, a.localData());
+
+		List<Runnable> queued = new ArrayList<>();
+		Node c = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, queued::add);
+		assertTrue(c.service.startup(shared));
+
+		assertTrue(trustedIndex(c));
+		assertIndexed(c, COPIED);
+		assertEquals(payload("Anna B"), c.service.snapshots().get(BOOKING).payload());
+	}
+
+	@Test
+	void warnsWhenTheStoreChangedSinceACleanShutdown() throws IOException {
+		Node a = cleanlyClosedNode();
+		copyPastTheApp(OTHER, COPIED, a.localData());
+
+		try (LogCapture log = new LogCapture()) {
+			new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run).service.startup("");
+
+			assertEquals(1, log.warnings(CHANGED_OUTSIDE), log.records.toString());
+		}
+	}
+
+	@Test
+	void noWarningOnAnOrdinaryCleanRestart() throws IOException {
+		Node a = cleanlyClosedNode();
+
+		try (LogCapture log = new LogCapture()) {
+			Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+			b.service.startup("");
+
+			assertTrue(trustedIndex(b));
+			assertEquals(0, log.warnings(CHANGED_OUTSIDE));
+		}
+	}
+
+	@Test
+	void cleanRestartAfterSharedSaveReadsNoUnit() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		save(a, create(SECOND, "Bea"));
+		a.service.tick();
+		a.service.closeIndex();
+
+		List<Runnable> queued = new ArrayList<>();
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, queued::add);
+		assertTrue(b.service.startup(shared));
+
+		assertTrue(trustedIndex(b));
+		String data = b.localData().toString();
+		assertTrue(b.layer.calls().stream().noneMatch(c -> c.startsWith("read ") && c.contains(data)),
+				b.layer.calls().toString());
+	}
+
+	@Test
+	void unitDeletedPastTheAppIsGoneAfterCleanRestart() throws IOException {
+		Node a = cleanlyClosedNode();
+		Path hall = a.localData().resolve(HALL.relativePath());
+		try (Stream<Path> paths = Files.walk(hall)) {
+			for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+				Files.delete(path);
+			}
+		}
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(b.service.startup(""));
+
+		assertTrue(trustedIndex(b));
+		assertFalse(b.service.snapshots().containsKey(HALL));
+	}
+
+	@Test
+	void cleanStartFallsBackToRebuildWhenTheWalkFails() throws IOException {
+		Node a = cleanlyClosedNode();
+
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.layer.failNext("listTree", new IOException("Störung"));
+		assertTrue(b.service.startup(""));
+
+		assertEquals(1, b.layer.calls().stream().filter(c -> c.startsWith("listTree ")).count(), b.layer.calls().toString());
+		// der Neuaufbau kennt nur Einheiten mit Dateien, nicht die leeren Ordner von Event und Vorstellung
+		assertEquals(payload("Anna"), b.service.snapshots().get(BOOKING).payload());
+		assertEquals(payload("Halle"), b.service.snapshots().get(HALL).payload());
+	}
+
+	@Test
+	void formatChangeResolvesEverythingWithoutWarning() throws IOException {
+		Node a = cleanlyClosedNode();
+		try (Stream<Path> paths = Files.walk(a.appData.resolve("index"))) {
+			for (Path file : paths.filter(p -> p.toString().endsWith(".json")).toList()) {
+				Files.writeString(file, Files.readString(file).replaceAll("\"indexFormat\":\\d+", "\"indexFormat\":3"));
+			}
+		}
+
+		try (LogCapture log = new LogCapture()) {
+			Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+			assertTrue(b.service.startup(""));
+
+			assertFalse(trustedIndex(b));
+			assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), b.service.snapshots());
+			assertEquals(0, log.warnings(CHANGED_OUTSIDE));
+		}
+	}
+
 	@Test
 	void startupAfterCrashWalksAgain() throws IOException {
 		Node a = cleanlyClosedNode();
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		b.service.startup("");
-		assertFalse(walkedTree(b));
+		assertTrue(trustedIndex(b));
 		Version v1 = b.service.history(BOOKING).get(0);
 		Version v2 = save(b, update(BOOKING, v1, "Anna B"));
 		// kein closeIndex: Absturz
@@ -3978,7 +4214,7 @@ class SyncServiceTest {
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		assertTrue(b.service.startup(""));
 
-		assertFalse(walkedTree(b), b.layer.calls().toString());
+		assertTrue(trustedIndex(b), b.layer.calls().toString());
 		assertEquals(pending, b.service.unitState(BOOKING).head().id());
 		assertEquals(pending, b.service.snapshots().get(BOOKING).version());
 		assertEquals(Status.OK, b.service.snapshots().get(BOOKING).status());
@@ -3999,7 +4235,7 @@ class SyncServiceTest {
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		assertTrue(b.service.startup(shared));
 
-		assertFalse(walkedTree(b), b.layer.calls().toString());
+		assertTrue(trustedIndex(b), b.layer.calls().toString());
 		assertEquals(v.id(), sharedClaim(BOOKING, "root").version());
 	}
 
@@ -4147,7 +4383,7 @@ class SyncServiceTest {
 		Node c = new Node(earlier.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		assertTrue(c.service.startup(""));
 
-		assertTrue(walkedTree(c), "der Start vertraut dem Index nicht: " + c.layer.calls());
+		assertFalse(trustedIndex(c), "der Start vertraut dem Index nicht: " + c.layer.calls());
 		assertEquals(snapshotsFromFiles(c.appData, c.identity.id()), c.service.snapshots());
 		assertEquals(v2.id(), c.service.snapshots().get(BOOKING).version());
 		assertFalse(c.service.unitState(BOOKING).provisional());
@@ -4195,7 +4431,7 @@ class SyncServiceTest {
 		assertFalse(Files.exists(cleanMarker(a)));
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
 		b.service.startup("");
-		assertTrue(walkedTree(b));
+		assertFalse(trustedIndex(b));
 		assertEquals(payload("Anna"), b.service.snapshots().get(BOOKING).payload());
 	}
 

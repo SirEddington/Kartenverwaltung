@@ -75,8 +75,9 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * <p>
  * <b>Marke "sauber beendet":</b> Die Datei {@code <Index>/clean} (Inhalt: die Rechner-ID als Text, UTF-8) sagt, dass der
  * Index beim letzten Beenden vollständig geschrieben war und seither nichts am Bestand geändert wurde. {@link #loadIfClean}
- * übernimmt den Index dann ohne Durchlauf über den Verzeichnisbaum und löscht die Marke sofort, damit ein Absturz nicht auf
- * einen veralteten Index trifft. Die Marke entsteht nur in {@link #writeCleanMarker} (und nur ohne ungeschriebene
+ * liest den Index dann ohne Durchlauf über den Verzeichnisbaum und löscht die Marke sofort, damit ein Absturz nicht auf
+ * einen veralteten Index trifft. Abgeglichen wird er trotzdem bei jedem Start ({@link #refresh}): Die Marke sagt nur, dass
+ * die App seither nichts geschrieben hat, nicht, dass niemand sonst den Bestand geändert hat (KARV-107). Die Marke entsteht nur in {@link #writeCleanMarker} (und nur ohne ungeschriebene
  * Änderungen). Wer danach den Bestand ändern will, ruft vor der ersten geschriebenen Datei {@link #invalidateCleanMarker}
  * auf (nicht erst beim Eintragen des Ergebnisses: bis dahin kann der Prozess enden); {@link #update} und {@link #clear}
  * löschen sie zusätzlich. Scheitert das Löschen, wird die Marke geleert, und eine leere Marke gilt als unbrauchbar. Temporäre Reste und
@@ -417,14 +418,6 @@ final class UnitIndex {
 			}
 		}
 		return Collections.unmodifiableSet(found);
-	}
-
-	/**
-	 * Das Ergebnis nach einem erfolgreichen {@link #loadIfClean}: die Einheiten mit ausstehenden und mit verlorenen
-	 * Versionen nach den Flags der geladenen Einträge; es wurde nichts neu aufgelöst ({@code resolved == 0}).
-	 */
-	synchronized Refresh cleanRefresh() {
-		return refreshOf(entries.keySet(), 0);
 	}
 
 	/**
@@ -1107,7 +1100,7 @@ final class UnitIndex {
 	}
 
 	/**
-	 * Übernimmt den Index ohne Durchlauf über den Verzeichnisbaum, wenn er beim letzten Beenden sauber geschrieben wurde. Prüft
+	 * Liest den Index ohne Durchlauf über den Verzeichnisbaum, wenn er beim letzten Beenden sauber geschrieben wurde. Prüft
 	 * dazu die Marke und löscht sie sofort: Sie gilt nur für genau diesen Start. Eine fremde oder unlesbare Marke wird
 	 * ebenfalls gelöscht (scheitert das, steht nur eine Warnung im Log), gilt aber nicht. Lässt sich die Marke nicht löschen,
 	 * wird sie geleert wie in {@link #deleteCleanMarker()}; gelingt auch das nicht, gilt der Start als unsauber, und jedes
@@ -1118,8 +1111,9 @@ final class UnitIndex {
 	 * eine Marke, die sich nicht entfernen lässt, darf keinen späteren Start überstehen. Stand die Sperrdatei schon (der
 	 * letzte Lauf endete ohne {@link #writeCleanMarker}), gilt auch eine eigene Marke nicht.
 	 * <p>
-	 * Bei {@code true} sind alle Einträge geladen; {@link #cleanRefresh()} liefert die Einheiten mit ausstehenden und
-	 * verlorenen Versionen. Bei {@code false} ist der Index unverändert und {@link #refresh} der Weg wie bisher. Wirft nie.
+	 * Bei {@code true} sind alle Einträge geladen, bei {@code false} ist der Index unverändert. In beiden Fällen gleicht der
+	 * Start ihn danach mit {@link #refresh} ab (KARV-107): Der Bestand kann an der App vorbei geändert worden sein. Wirft
+	 * nie.
 	 */
 	synchronized boolean loadIfClean() {
 		deleteLeftoverTemps();

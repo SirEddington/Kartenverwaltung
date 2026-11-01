@@ -1092,7 +1092,7 @@ class UnitIndexTest {
 		assertFalse(Files.exists(cleanMarker()));
 		assertEquals(Set.of(EVENT, PRESENTATION, HALL), second.entries().keySet());
 		assertEquals("presentation-3", name(second.entries().get(PRESENTATION)));
-		UnitIndex.Refresh refresh = second.cleanRefresh();
+		UnitIndex.Refresh refresh = refresh(second, local);
 		assertEquals(0, refresh.resolved());
 		assertEquals(Set.of(PRESENTATION), refresh.pendingUnits());
 		assertTrue(refresh.lostUnits().isEmpty());
