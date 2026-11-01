@@ -151,7 +151,7 @@ final class FieldMerge {
 	}
 
 	/** Ob beide Stände in allen Feldern übereinstimmen; fehlend und {@code null} zählen gleich. */
-	private static boolean same(ObjectNode a, ObjectNode b, List<String> fields) {
+	static boolean same(ObjectNode a, ObjectNode b, List<String> fields) {
 		for (String field : fields) {
 			if (!Objects.equals(valueOf(a, field), valueOf(b, field))) {
 				return false;

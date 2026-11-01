@@ -1,10 +1,14 @@
 package de.eltviller_carneval_verein.karten.repository;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.store.Change;
@@ -33,7 +37,8 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
  * ({@link #cancelledAnotherBooking}).</li>
  * <li>Verschiedene Buchungen auf dem Sitz: entschieden danach, wer die Buchung der Basis trägt, siehe
  * {@link #otherBooking}.</li>
- * <li>Gleiche Buchung: Dreiwegevergleich je Feldgruppe ({@link FieldGroups#booking()}).</li>
+ * <li>Gleiche Buchung: Dreiwegevergleich je Feldgruppe ({@link FieldGroups#booking()}) mit der Koppelregel für Zahlung
+ * und Preis ({@link #mergeBooking}); so auch, wo eine Änderung auf eine Kopie übertragen wird.</li>
  * </ol>
  * Eine Buchungs-ID lebt danach nie in zwei Einheiten zugleich. Ein unlesbares oder gesperrtes "Deren" führt nicht zu
  * UNMERGED, sondern zum Doppelverkauf (K1): Die eigene Buchung weicht "ohne Platz" aus, statt zu verschwinden; außer auf
@@ -51,6 +56,14 @@ public final class BookingPolicy implements ConflictPolicy {
 	private static final List<String> PLACE = List.of(SEAT_ID, ROW_LABEL, TABLE_NUMBER, SEAT_NUMBER);
 	/** Die Feldgruppe "Platz". */
 	private static final String PLACE_GROUP = "place";
+	/** Die Feldgruppen "Zahlung" und "Preis" der Koppelregel ({@link #mergeBooking}). */
+	private static final String PAYMENT_GROUP = "payment";
+	private static final String PRICE_GROUP = "price";
+	private static final String PAYMENT_STATUS = "paymentStatus";
+	private static final String PAID_AMOUNT = "paidAmount";
+	private static final String PRICE = "price";
+	/** Die Zahlstatus, die als bezahlt gelten; wie {@code PaymentStatus.isPaid()}, die Regel kennt das Modell nicht. */
+	private static final Set<String> PAID_STATUSES = Set.of("CASH", "CARD", "TRANSFER");
 
 	@Override
 	public Resolution resolve(ConflictInput input) {
@@ -77,9 +90,64 @@ public final class BookingPolicy implements ConflictPolicy {
 			resolution = otherBooking(input);
 		}
 		if (resolution == null) {
-			resolution = PolicyRules.mergeFields(input, FieldGroups.booking());
+			// Regel 4 erreichen nur zwei lesbare, nicht gelöschte Fassungen derselben Buchung: PolicyRules.common griffe nie
+			resolution = PolicyRules.fromMerge(input, FieldGroups.booking(),
+					mergeBooking(PolicyRules.basePayload(input), input.mine().payload(), input.theirs().payload()));
 		}
 		return resolution;
+	}
+
+	/**
+	 * Der Dreiwegevergleich je Feldgruppe ({@link FieldMerge#merge}) mit der Koppelregel für Zahlung und Preis: Hat die
+	 * eine Seite gegenüber der Basis nur die Gruppe "Zahlung" geändert und die andere nur die Gruppe "Preis", ist das
+	 * Ergebnis bezahlt und weicht sein gezahlter Betrag vom Preis ab (ein leerer Preis, also der Standardpreis der
+	 * Vorstellung, zählt als abweichend: die Einheit kennt ihn nicht), wird die Gruppe "Preis" strittig wie ein
+	 * gewöhnlicher Feldkonflikt: Es gilt der Preis von "Deren", die Gruppe kommt mit beiden Ständen zu den Konflikten. Die
+	 * Zahlung bleibt so in jedem Fall stehen. Ist "Preis" schon strittig, oder hat eine Seite beide Gruppen geändert, bleibt
+	 * es beim gewöhnlichen Vergleich; ein älterer Stand ohne gezahlten Betrag kennt keine Abweichung.
+	 *
+	 * @param base der Inhalt der Basis; {@code null} gilt als leeres Objekt
+	 */
+	private static FieldMerge.Result mergeBooking(ObjectNode base, ObjectNode mine, ObjectNode theirs) {
+		Map<String, List<String>> groups = FieldGroups.booking();
+		FieldMerge.Result result = FieldMerge.merge(base, mine, theirs, groups);
+		if (result.conflicts().stream().anyMatch(conflict -> conflict.group().equals(PRICE_GROUP))) {
+			return result;
+		}
+		ObjectNode before = base != null ? base : JsonNodeFactory.instance.objectNode();
+		List<String> payment = groups.get(PAYMENT_GROUP);
+		List<String> price = groups.get(PRICE_GROUP);
+		boolean minePays = !FieldMerge.same(mine, before, payment);
+		boolean minePrices = !FieldMerge.same(mine, before, price);
+		boolean theirsPay = !FieldMerge.same(theirs, before, payment);
+		boolean theirsPrice = !FieldMerge.same(theirs, before, price);
+		boolean split = minePays && !minePrices && theirsPrice && !theirsPay
+				|| theirsPay && !theirsPrice && minePrices && !minePays;
+		ObjectNode merged = result.merged();
+		if (!split || !isPaid(merged) || !amountDiffersFromPrice(merged)) {
+			return result;
+		}
+		ObjectNode resolved = merged.deepCopy();
+		FieldMerge.copyFields(resolved, theirs, price);
+		List<FieldConflict> conflicts = new ArrayList<>(result.conflicts());
+		conflicts.add(new FieldConflict(PRICE_GROUP, FieldMerge.slice(mine, price), FieldMerge.slice(theirs, price)));
+		return new FieldMerge.Result(resolved, List.copyOf(conflicts));
+	}
+
+	/** Ob der Zahlstatus eine bezahlte Zahlart ist; ein unbekannter Wert (etwa aus einer neueren App) zählt nicht. */
+	private static boolean isPaid(ObjectNode booking) {
+		JsonNode status = booking.get(PAYMENT_STATUS);
+		return status != null && status.isTextual() && PAID_STATUSES.contains(status.asText());
+	}
+
+	/** Ob ein gezahlter Betrag eingetragen ist und vom Preis abweicht; ein leerer Preis zählt als abweichend. */
+	private static boolean amountDiffersFromPrice(ObjectNode booking) {
+		JsonNode amount = booking.get(PAID_AMOUNT);
+		JsonNode price = booking.get(PRICE);
+		if (amount == null || !amount.isNumber()) {
+			return false;
+		}
+		return price == null || !price.isNumber() || price.asLong() != amount.asLong();
 	}
 
 	/**
@@ -227,9 +295,7 @@ public final class BookingPolicy implements ConflictPolicy {
 			ObjectNode change, String affected, Party other, VersionId dropped) {
 		ObjectNode side = change.deepCopy();
 		FieldMerge.copyFields(side, copy.payload(), FieldGroups.booking().get(PLACE_GROUP));
-		Version base = input.base();
-		FieldMerge.Result result = FieldMerge.merge(base == null || base.deleted() ? null : base.payload(), side,
-				copy.payload(), FieldGroups.booking());
+		FieldMerge.Result result = mergeBooking(PolicyRules.basePayload(input), side, copy.payload());
 		List<Change> extra = result.merged().equals(copy.payload()) ? List.of()
 				: List.of(new Change(copy.unit(), List.of(copy.version()), result.merged(), false));
 		ConflictNote note = result.conflicts().isEmpty() ? null
@@ -335,7 +401,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		ObjectNode basePayload = input.base().payload();
 		ObjectNode side = target.payload().deepCopy();
 		FieldMerge.copyFields(side, basePayload, FieldGroups.booking().get(PLACE_GROUP));
-		FieldMerge.Result result = FieldMerge.merge(basePayload, side, theirs.payload(), FieldGroups.booking());
+		FieldMerge.Result result = mergeBooking(basePayload, side, theirs.payload());
 		if (result.conflicts().isEmpty()) {
 			return new Resolution(result.merged(), false, List.of(), null);
 		}

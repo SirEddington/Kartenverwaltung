@@ -1636,4 +1636,151 @@ class BookingPolicyTest {
 	}
 
 	// <-- Regel 4
+
+	// Koppelregel Zahlung und Preis -->
+
+	/** Bar bezahlt mit dem Betrag {@code paidAmount}. */
+	private static Consumer<Booking> paid(int paidAmount) {
+		return b -> {
+			b.setPaymentStatus(PaymentStatus.CASH);
+			b.setPaidAmount(paidAmount);
+		};
+	}
+
+	private static Consumer<Booking> price(Integer cents) {
+		return b -> b.setPrice(cents);
+	}
+
+	private static Consumer<Booking> both(Consumer<Booking> first, Consumer<Booking> second) {
+		return first.andThen(second);
+	}
+
+	/** Der Vermerk FIELDS an diesen Rechner mit genau der Gruppe "Preis", meins gegen deren. */
+	private static void assertPriceNote(Resolution resolution, Version mine, Integer myPrice, Integer theirPrice) {
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.FIELDS, note.kind());
+		assertEquals(OWN, note.affected());
+		assertEquals(mine.id(), note.dropped());
+		assertEquals(1, note.fields().size(), note.fields().toString());
+		assertEquals("price", note.fields().get(0).group());
+		assertEquals(myPrice, priceIn(note.fields().get(0).mine()));
+		assertEquals(theirPrice, priceIn(note.fields().get(0).theirs()));
+	}
+
+	private static Integer priceIn(ObjectNode slice) {
+		return slice.hasNonNull("price") ? slice.get("price").asInt() : null;
+	}
+
+	@Test
+	void paymentAgainstPriceChangeKeepsThePaymentAndNotesThePrice() {
+		Version base = version(THIRD, booking("x", "s1", price(2000)));
+		Version mine = version(OWN, booking("x", "s1", both(price(2000), paid(2000))));
+		Version theirs = version(OTHER, booking("x", "s1", price(2500)));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, theirs));
+
+		assertEquals(booking("x", "s1", both(price(2500), paid(2000))), resolution.payload());
+		assertPriceNote(resolution, mine, 2000, 2500);
+		assertEquals(party(theirs), resolution.note().other());
+	}
+
+	@Test
+	void priceChangeAgainstPaymentKeepsTheirPriceAndNotesMine() {
+		Version base = version(THIRD, booking("x", "s1", price(2000)));
+		Version mine = version(OWN, booking("x", "s1", price(2500)));
+		Version theirs = version(OTHER, booking("x", "s1", both(price(2000), paid(2000))));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, theirs));
+
+		assertEquals(booking("x", "s1", both(price(2000), paid(2000))), resolution.payload());
+		assertPriceNote(resolution, mine, 2500, 2000);
+	}
+
+	@Test
+	void matchingPaymentAndPriceGiveNoNote() {
+		Version base = version(THIRD, booking("x", "s1", price(2000)));
+		Version mine = version(OWN, booking("x", "s1", both(price(2000), paid(2500))));
+		Version theirs = version(OTHER, booking("x", "s1", price(2500)));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, theirs));
+
+		assertEquals(booking("x", "s1", both(price(2500), paid(2500))), resolution.payload());
+		assertNull(resolution.note());
+	}
+
+	@Test
+	void paymentAgainstPriceChangeToStandardPriceIsNoted() {
+		Version base = version(THIRD, booking("x", "s1", price(2500)));
+		Version mine = version(OWN, booking("x", "s1", both(price(2500), paid(2500))));
+		Version theirs = version(OTHER, booking("x", "s1", price(null)));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, theirs));
+
+		assertEquals(booking("x", "s1", paid(2500)), resolution.payload());
+		assertPriceNote(resolution, mine, 2500, null);
+	}
+
+	@Test
+	void noCouplingWhenOpenOrBothChangedOrPriceAlreadyConflicting() {
+		Version base = version(THIRD, booking("x", "s1", price(2000)));
+		Version theirs = version(OTHER, booking("x", "s1", price(2500)));
+
+		Version comment = version(OWN, booking("x", "s1", both(price(2000), b -> b.setComment("Fenster"))));
+		assertNull(POLICY.resolve(input(S1, base, comment, theirs, theirs)).note(), "offen");
+
+		Version paidAndPriced = version(OWN, booking("x", "s1", both(price(3000), paid(3000))));
+		Resolution conflicting = POLICY.resolve(input(S1, base, paidAndPriced, theirs, theirs));
+		assertPriceNote(conflicting, paidAndPriced, 3000, 2500);
+
+		Version olderState = version(OWN, booking("x", "s1", both(price(2000), b -> b.setPaymentStatus(PaymentStatus.CASH))));
+		assertNull(POLICY.resolve(input(S1, base, olderState, theirs, theirs)).note(), "älterer Stand ohne Betrag");
+	}
+
+	@Test
+	void unknownPaymentStatusIsUnmergedWithoutFailing() {
+		Version base = version(THIRD, booking("x", "s1", price(2000)));
+		ObjectNode voucher = booking("x", "s1", both(price(2000), paid(2000)));
+		voucher.put("paymentStatus", "VOUCHER");
+		Version mine = version(OWN, voucher);
+		Version theirs = version(OTHER, booking("x", "s1", price(2500)));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, theirs));
+
+		assertEquals(Kind.UNMERGED, resolution.note().kind());
+		assertEquals(theirs.payload(), resolution.payload());
+	}
+
+	@Test
+	void counterpartOfThePriceNoteIsTheVersionThatSetTheirPrice() {
+		Version base = version(THIRD, booking("x", "s1", price(2000)));
+		Version mine = version(OWN, booking("x", "s1", both(price(2000), paid(2000))));
+		Version priced = version(OTHER, booking("x", "s1", price(2500)));
+		Version theirs = version(THIRD, booking("x", "s1", both(price(2500), b -> b.setComment("Fenster"))));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, priced, theirs));
+
+		assertPriceNote(resolution, mine, 2000, 2500);
+		assertEquals(party(priced), resolution.note().other());
+	}
+
+	@Test
+	void transferredPaymentAgainstPriceOfTheMovedCopyIsNoted() {
+		// wie moveAndSellInOneSaveTransfersMyEditToTheMovedCopy: Deren verschiebt x nach s2 und ändert dort den Preis,
+		// Meine kassiert x auf s1
+		Version base = version(THIRD, booking("x", "s1", price(2000)));
+		Version theirs = version(OTHER, "save-theirs", booking("y", "s1"));
+		Version theirCopy = version(OTHER, "save-theirs", booking("x", "s2", both(price(2500), b -> b.setSeatNumber(2))));
+		Version mine = version(OWN, booking("x", "s1", both(price(2000), paid(2000))));
+
+		Resolution resolution = POLICY.resolve(
+				input(S1, base, mine, theirs, siblings(Map.entry(S2, theirCopy)), theirs));
+
+		assertEquals(theirs.payload(), resolution.payload());
+		ObjectNode merged = booking("x", "s2", both(both(price(2500), b -> b.setSeatNumber(2)), paid(2000)));
+		assertEquals(List.of(new Change(S2, List.of(theirCopy.id()), merged, false)), resolution.extra());
+		assertPriceNote(resolution, mine, 2000, 2500);
+		assertEquals(S2, resolution.note().moved());
+	}
+
+	// <-- Koppelregel
 }
