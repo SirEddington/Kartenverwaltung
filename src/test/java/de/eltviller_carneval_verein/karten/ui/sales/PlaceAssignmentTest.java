@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -100,7 +101,7 @@ class PlaceAssignmentTest {
 		Seat seat = plan.addTable(row("A")).addSeat();
 		presentation.setSeatingPlanId(plan.getId());
 		BookingSync.sync(presentation, plan);
-		assertEquals(null, PlaceAssignment.refusal(presentation, plan), "ein Sitz ist frei");
+		assertNull(PlaceAssignment.refusal(presentation, plan), "ein Sitz ist frei");
 
 		bookingOf(seat).setLastName("Meier");
 		assertEquals(PlaceAssignment.NO_FREE_SEAT, PlaceAssignment.refusal(presentation, plan));

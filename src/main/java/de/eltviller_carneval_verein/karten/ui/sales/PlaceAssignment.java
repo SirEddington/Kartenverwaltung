@@ -19,7 +19,7 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 public final class PlaceAssignment {
 
 	/** Der Grund, wenn die Bestuhlung keinen freien Sitz hat. */
-	public static final String NO_FREE_SEAT = "Kein Platz frei: In dieser Bestuhlung ist jeder Sitz belegt.";
+	static final String NO_FREE_SEAT ="Kein Platz frei: In dieser Bestuhlung ist jeder Sitz belegt.";
 
 	private PlaceAssignment() {
 	}
@@ -35,7 +35,8 @@ public final class PlaceAssignment {
 		if (plan == null) {
 			return noPlanText(presentation);
 		}
-		return freeSeats(presentation, plan).isEmpty() ? NO_FREE_SEAT : null;
+		Set<String> taken = takenSeatIds(presentation);
+		return plan.getSeats().stream().allMatch(seat -> taken.contains(seat.getId())) ? NO_FREE_SEAT : null;
 	}
 
 	/** Der Grund, wenn die Vorstellung keine Bestuhlung hat, der eine Buchung zugewiesen werden könnte. */

@@ -456,9 +456,9 @@ public final class ConflictActions {
 
 	/**
 	 * Übernimmt den eigenen Wert einer Feldgruppe: Das Modell bekommt die Felder der Gruppe aus dem Vermerk
-	 * ({@link FieldConflict#mine()}), dann wird das Event gespeichert. Die Änderung gilt für die Einheit, auf die der Vermerk
-	 * sie übertragen hat ({@link ConflictNote#moved()}), sonst für die der Zeile; bei einer Buchung für die Einheit, auf der sie
-	 * jetzt lebt ({@link #actionUnit}). Beim Vermerk "Platz" zieht sie, wenn sie nicht auf dem eigenen Sitz steht, dorthin um
+	 * ({@link FieldConflict#mine()}), dann wird das Event gespeichert. Die Änderung gilt für das Ziel des Vermerks
+	 * ({@link OpenConflict#target()}), bei einer Buchung für die Einheit, auf der sie jetzt lebt ({@link #actionUnit}). Beim
+	 * Vermerk "Platz" zieht sie, wenn sie nicht auf dem eigenen Sitz steht, dorthin um
 	 * wie beim Zuweisen ({@link #assignAndSave}). Hat der Vermerk nur eine Gruppe, ist die Zeile danach bestätigt; bei mehreren erst, wenn jede
 	 * Gruppe übernommen ist ({@link #isAdopted}), sonst bleibt sie offen.
 	 *
@@ -671,7 +671,7 @@ public final class ConflictActions {
 	 */
 	private UnitKey actionUnit(OpenConflict conflict) {
 		UnitKey target = conflict.target();
-		if (target.type() != UnitType.BOOKING || conflict.note() == null) {
+		if (target.type() != UnitType.BOOKING) {
 			return target;
 		}
 		String bookingId = bookingIdOf(conflict);

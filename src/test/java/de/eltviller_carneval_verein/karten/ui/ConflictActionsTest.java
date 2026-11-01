@@ -336,13 +336,14 @@ class ConflictActionsTest {
 		assertEquals("von B", a.seat(0).getComment(), "der andere Rechner bekommt die neue Version");
 	}
 
-	@Test
-	void takeMyValueOnTransferGoesToTheMovedUnit() throws IOException {
-		// a verschiebt Müller auf den zweiten Sitz und ändert den Namen, b ändert den Namen auf dem ersten Sitz
+	/**
+	 * a verschiebt Müller vom ersten auf den zweiten Sitz und benennt ihn um, b benennt ihn auf dem ersten um: b hat einen
+	 * Vermerk "Kunde", übertragen auf den zweiten Sitz.
+	 */
+	private Row customerConflictOnTransfer() {
 		Booking from = a.seat(0);
 		Booking to = a.seat(1);
 		Seat target = a.plan().getSeats().get(1);
-		String bookingId = from.getId();
 		to.copyFrom(from);
 		to.takeSnapshot(target.getParent(), target);
 		to.setLastName("Müller-A");
@@ -353,7 +354,15 @@ class ConflictActionsTest {
 		settle();
 		Row row = b.onlyRow();
 		assertEquals(Action.TAKE_MY_VALUE, row.action());
+		assertEquals(List.of("customer"), row.fields().stream().map(ConflictList.FieldRow::group).toList());
 		assertEquals(b.seatUnit(1), row.conflict().note().moved());
+		return row;
+	}
+
+	@Test
+	void takeMyValueOnTransferGoesToTheMovedUnit() throws IOException {
+		String bookingId = b.seat(0).getId();
+		Row row = customerConflictOnTransfer();
 		assertEquals("Müller-A", b.seat(1).getLastName());
 
 		b.actions().takeMyValue(row, "customer");
@@ -1283,27 +1292,9 @@ class ConflictActionsTest {
 
 	// Feldvermerk folgt der Buchung (KARV-115) -->
 
-	/**
-	 * Wie {@link #takeMyValueOnTransferGoesToTheMovedUnit}: a setzt Müller vom ersten auf den zweiten Sitz und benennt ihn um,
-	 * b benennt ihn auf dem ersten um; b hat einen Vermerk "Kunde", übertragen auf den zweiten Sitz. Danach setzt a Müller
-	 * weiter auf den vierten Sitz und verkauft den zweiten an Tom.
-	 */
+	/** {@link #customerConflictOnTransfer}, danach setzt a Müller weiter auf den vierten Sitz und verkauft den zweiten an Tom. */
 	private Row customerConflictMovedOn() {
-		Booking from = a.seat(0);
-		Booking to = a.seat(1);
-		Seat target = a.plan().getSeats().get(1);
-		to.copyFrom(from);
-		to.takeSnapshot(target.getParent(), target);
-		to.setLastName("Müller-A");
-		from.clearCustomerData();
-		a.saveEvent();
-		b.seat(0).setLastName("Müller-B");
-		b.saveEvent();
-		settle();
-		Row row = b.onlyRow();
-		assertEquals(List.of("customer"), row.fields().stream().map(ConflictList.FieldRow::group).toList());
-		assertEquals(b.seatUnit(1), row.conflict().note().moved());
-
+		customerConflictOnTransfer();
 		Booking moved = a.seat(1);
 		assertTrue(BookingSync.assign(a.friday(), a.plan(), moved, a.plan().getSeats().get(3)));
 		BookingSync.sync(a.friday(), a.plan());
