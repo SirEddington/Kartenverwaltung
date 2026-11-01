@@ -893,7 +893,7 @@ public class StoreEventRepository implements EventRepository {
 		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
 		successors.sort(EventMerge.MERGE_ORDER);
 		Map<UnitKey, UnitSnapshot> presentationStates = presentationStates(event, snapshots, successors);
-		Map<UnitKey, String> lastIds = event == null ? Map.of() : lastIds(event, successors);
+		Map<UnitKey, String> lastIds = event == null ? Map.of() : lastIds(event, successors, Map.of());
 		Set<UnitKey> appliedPresentations = new HashSet<>();
 		List<UnitSnapshot> apply = new ArrayList<>();
 		for (UnitSnapshot current : successors) {
@@ -936,7 +936,7 @@ public class StoreEventRepository implements EventRepository {
 		} else if (head != null && !headReadable) {
 			removeEvent(event, head, apply, warnings);
 		} else {
-			mergeInto(event, apply, changes, chains, presentationStates, lastIds, warnings);
+			mergeInto(event, apply, changes, chains, presentationStates, lastIds(event, apply, batchIds(apply)), warnings);
 		}
 	}
 
@@ -974,8 +974,13 @@ public class StoreEventRepository implements EventRepository {
 	 * Stand (siehe {@link EventMerge.Plan}), außer eine andere angezeigte Einheit des Events trägt diese Kennung schon: Dann
 	 * ist die Buchung dorthin gezogen, und die Löschung betrifft sie nicht mehr. Die Kennungen werden einmal je Aufruf
 	 * gesammelt.
+	 * <p>
+	 * Mit {@code batch} (siehe {@link #batchIds}) zählt eine Einheit nicht als Träger, die im selben Aufruf gelöscht wird, unlesbar
+	 * ist oder eine andere Kennung bekommt: Das braucht das Einarbeiten, damit die Stornierung die Buchung findet, die der
+	 * Abgleich auf einen anderen Sitz gesetzt hat. Die Prüfung, ob der Nutzer eine versetzte Buchung berührt hat, nimmt
+	 * dagegen {@code Map.of()}: Eine Stornierung der Einheit ohne Platz träfe sonst die Eingabe auf dem Sitz.
 	 */
-	private Map<UnitKey, String> lastIds(Event event, List<UnitSnapshot> successors) {
+	private Map<UnitKey, String> lastIds(Event event, List<UnitSnapshot> successors, Map<UnitKey, String> batch) {
 		Map<UnitKey, String> ids = new HashMap<>();
 		Map<String, List<UnitKey>> carriers = null;
 		for (UnitSnapshot snapshot : successors) {
@@ -991,9 +996,7 @@ public class StoreEventRepository implements EventRepository {
 			if (carriers == null) {
 				carriers = shownBookingIds(event.getId());
 			}
-			// bewusst nach dem Vergleichsstand allein: Löschte derselbe Aufruf die tragende Einheit, räumt die Löschung der
-			// Einheit ohne Platz die Buchung (siehe carriedUnits); eine Stornierung träfe sonst die Eingabe auf dem Sitz
-			if (!carriedElsewhere(carriers, last.getId(), unit, Map.of())) {
+			if (!carriedElsewhere(carriers, last.getId(), unit, batch)) {
 				ids.put(unit, last.getId());
 			}
 		}

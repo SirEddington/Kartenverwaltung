@@ -2198,11 +2198,24 @@ class StoreEventRepositoryForeignTest {
 	 * @return Müllers Kennung
 	 */
 	private String planSwitchAgainstMove() {
+		return planSwitchAgainstMove("B", false);
+	}
+
+	/**
+	 * Wie {@link #planSwitchAgainstMove()}; die zweite Bestuhlung hat die Reihe {@code rowLabel} mit einem Tisch zu drei
+	 * Sitzen, ohne den ersten Sitz, wenn {@code withoutFirstSeat} (mit Reihe "A" hat sie dann die Beschriftung, auf die der
+	 * andere Müller gesetzt hat: Der Abgleich setzt ihn auf diesen Sitz).
+	 */
+	private String planSwitchAgainstMove(String rowLabel, boolean withoutFirstSeat) {
 		Other other = other();
 		SeatingPlan second = hall.addSeatingPlan();
 		TableRow secondRow = second.addRow();
-		secondRow.setLabel("B");
+		secondRow.setLabel(rowLabel);
 		second.fillRow(secondRow, 1, 3);
+		if (withoutFirstSeat) {
+			Seat first = second.getSeats().get(0);
+			first.getParent().deleteSeat(first);
+		}
 		mine.setHallCurrent(id -> true);
 		String bookingId = seat(friday, 0).getId();
 		BookingSync.switchPlan(friday, second);
@@ -2274,6 +2287,34 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(1, withId(friday, bookingId).size(), "übernommen, ohne Platz");
 
 		// ein dritter Rechner storniert Müller: beide Einheiten, die ihn tragen, werden in einem Speichern gelöscht
+		StoreEventRepository third = TestRepositories.events(sync);
+		Event loaded = third.loadEvents().get(0);
+		loaded.getPresentations().get(0).getBookings().removeIf(b -> bookingId.equals(b.getId()));
+		third.saveEvent(loaded);
+
+		mine.applyForeign(List.of(seatUnit(friday, 2), unassigned));
+
+		assertTrue(withId(friday, bookingId).stream().noneMatch(Booking::hasData), "die Stornierung gilt");
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+	}
+
+	@Test
+	void cancellationOfTheBookingTheSyncPutOnAnotherSeatInOneBatchRemovesIt() {
+		String bookingId = planSwitchAgainstMove("A", true);
+		UnitKey unassigned = UnitKey.unassignedBooking(event.getId(), friday.getId(), bookingId);
+		// der Sitz mit der Beschriftung ist im Modell noch ohne Platzhalter (die Halle hat ihn eben bekommen, der Abgleich der
+		// Vorstellung folgt erst): Nur ein solcher Sitz nimmt die Buchung beim Abgleich auf
+		SeatingPlan second = hall.getSeatingPlans().get(1);
+		String label = BookingSync.key(planSeat(2));
+		friday.getBookings().removeIf(b -> b.getSeatId() != null && !b.hasData()
+				&& label.equals(BookingSync.key(second.findSeat(b.getSeatId()))));
+		mine.saveEvent(event);
+		mine.applyForeign(List.of(seatUnit(friday, 2)));
+		List<Booking> adopted = withId(friday, bookingId);
+		assertEquals(1, adopted.size());
+		assertFalse(adopted.get(0).isUnassigned(), "der Abgleich hat Müller auf den Sitz mit der Beschriftung gesetzt");
+		assertEquals("Müller", adopted.get(0).getLastName());
+
 		StoreEventRepository third = TestRepositories.events(sync);
 		Event loaded = third.loadEvents().get(0);
 		loaded.getPresentations().get(0).getBookings().removeIf(b -> bookingId.equals(b.getId()));
