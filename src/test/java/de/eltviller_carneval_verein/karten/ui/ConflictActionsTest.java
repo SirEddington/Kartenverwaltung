@@ -1195,4 +1195,89 @@ class ConflictActionsTest {
 	}
 
 	// <-- Vermerk "Platz" nach einem fremden Umzug
+
+	// Vermerk "Platz" nach zwei gleichzeitigen Umzügen (KARV-114) -->
+
+	/** Setzt Müller in einem Speichervorgang vom ersten Sitz auf den Sitz {@code n}, wie ein Umzug in der App. */
+	private static void moveFromFirstSeat(Machine machine, int n) {
+		Booking from = machine.seat(0);
+		Booking to = machine.seat(n);
+		Seat target = machine.plan().getSeats().get(n);
+		to.copyFrom(from);
+		to.takeSnapshot(target.getParent(), target);
+		from.clearCustomerData();
+		machine.saveEvent();
+	}
+
+	/**
+	 * a setzt Müller vom ersten Sitz auf den fünften, b gleichzeitig auf den dritten; a lädt zuerst hoch. a's Umzug gilt; b hat
+	 * einen Vermerk "Platz" auf dem gelöschten ersten Sitz, ohne Übertragung ({@code BookingPolicy.bothDeleted}). Die weichende
+	 * Version liegt auf b's gelöschtem dritten Sitz.
+	 */
+	private Row twoMovesConflict() {
+		moveFromFirstSeat(a, 4);
+		moveFromFirstSeat(b, 2);
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(Action.TAKE_MY_VALUE, row.action());
+		assertEquals(List.of("place"), row.fields().stream().map(ConflictList.FieldRow::group).toList());
+		assertEquals(b.seatUnit(0), row.conflict().unit());
+		assertNull(row.conflict().note().moved());
+		assertEquals("Müller", b.seat(4).getLastName());
+		assertFalse(b.seat(2).hasData());
+		return row;
+	}
+
+	@Test
+	void twoMovesOnAFreeSeatMovesTheBookingToMySeat() {
+		Row row = twoMovesConflict();
+		String bookingId = b.seat(4).getId();
+		assertEquals(new Availability(true, ""), b.actions().availability(row));
+
+		b.actions().takeMyValue(row, "place");
+
+		assertEquals(bookingId, b.seat(2).getId());
+		assertEquals("Müller", b.seat(2).getLastName());
+		assertFalse(b.seat(4).hasData(), "der fünfte Sitz ist wieder frei");
+		assertEquals(List.of(), b.sync.openConflicts());
+		settle();
+		assertEquals("Müller", a.seat(2).getLastName(), "der andere Rechner bekommt den Umzug");
+		assertFalse(a.seat(4).hasData());
+		assertEquals(List.of(), a.sync.openConflicts());
+	}
+
+	@Test
+	void twoMovesOnATakenSeatOffersNoActionThatMustFail() {
+		twoMovesConflict();
+		a.seat(2).setLastName("Tom");
+		a.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		String taken = AssignPlaceDialog.takenText(b.plan().getSeats().get(2));
+
+		assertEquals(new Availability(false, taken), b.actions().availability(row));
+		IllegalStateException failure = assertThrows(IllegalStateException.class,
+				() -> b.actions().takeMyValue(row, "place"));
+		assertEquals(taken, failure.getMessage());
+		assertEquals("Müller", b.seat(4).getLastName(), "nichts angefasst");
+		b.actions().dismiss(row);
+		assertEquals(List.of(), b.sync.openConflicts(), "\"Erledigt\" bleibt");
+	}
+
+	@Test
+	void twoMovesOfACancelledBookingOffersNoAction() {
+		twoMovesConflict();
+		String bookingId = b.seat(4).getId();
+		a.seat(4).clearCustomerData();
+		a.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+
+		assertEquals(new Availability(false, ConflictActions.NOT_NEEDED), b.actions().availability(row));
+		assertThrows(IllegalStateException.class, () -> b.actions().takeMyValue(row, "place"));
+		assertTrue(b.friday().getBookings().stream().noneMatch(booking -> bookingId.equals(booking.getId()) && booking.hasData()),
+				"nichts wiederbelebt");
+	}
+
+	// <-- Vermerk "Platz" nach zwei gleichzeitigen Umzügen
 }

@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -649,8 +650,8 @@ public final class ConflictActions {
 
 	/**
 	 * Die Kennung der Buchung, der der Vermerk gilt: die der weichenden Version; {@code null}, wenn sie sich nicht lesen lässt
-	 * oder eine Löschung ist. Beim Vermerk "Platz" auf {@code _<ID>} die aus der Einheit: Die weichende Version liegt dann auf
-	 * dem Sitz, auf dem das eigene Zuweisen verloren hat, und keine Einheit des Vermerks führt dorthin.
+	 * oder eine Löschung ist. Beim Vermerk "Platz" auf {@code _<ID>} die aus der Einheit: Sie gilt auch, wenn die weichende
+	 * Version (auf dem Sitz, auf dem das eigene Zuweisen verloren hat) sich lokal nicht lesen lässt.
 	 */
 	private String bookingIdOf(OpenConflict conflict) {
 		UnitKey target = conflict.target();
@@ -770,14 +771,24 @@ public final class ConflictActions {
 
 	/**
 	 * Die Version, deren Inhalt der Vermerk weichen ließ, aus dem lokalen Bestand der Einheit der Zeile (bei einer Übertragung
-	 * auch der Einheit, auf die sie ging); {@code null}, wenn der Vermerk keine nennt oder sie lokal nicht lesbar ist.
+	 * auch der Einheit, auf die sie ging; beim Vermerk "Platz" auch des eigenen Sitzes, auf dem die eigene Fassung stand, etwa
+	 * nach zwei gleichzeitigen Umzügen, KARV-114); {@code null}, wenn der Vermerk keine nennt oder sie lokal nicht lesbar ist.
 	 */
 	private Version dropped(OpenConflict conflict) {
 		ConflictNote note = conflict.note();
 		if (note == null || note.dropped() == null) {
 			return null;
 		}
-		List<UnitKey> candidates = note.moved() == null ? List.of(conflict.unit()) : List.of(conflict.unit(), note.moved());
+		Set<UnitKey> candidates = new LinkedHashSet<>();
+		candidates.add(conflict.unit());
+		if (note.moved() != null) {
+			candidates.add(note.moved());
+		}
+		// nur Buchungsvermerke haben die Gruppe "Platz"
+		String mySeatId = mySeatId(note);
+		if (mySeatId != null) {
+			candidates.add(UnitKey.booking(conflict.unit().eventId(), conflict.unit().presentationId(), mySeatId));
+		}
 		for (UnitKey unit : candidates) {
 			VersionRef ref = new VersionRef(unit, note.dropped());
 			Version known = dropped.get(ref);
