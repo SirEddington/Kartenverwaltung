@@ -5,8 +5,6 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.store.SkippedUnit;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
@@ -26,8 +24,6 @@ import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
  */
 public record SyncInfo(String folderLine, String lastSyncLine, String causeLine, String firstRunLine, List<Row> rows,
 		String listHint) {
-
-	private static final Logger LOG = Logger.getLogger(SyncInfo.class.getName());
 
 	/**
 	 * Eine Zeile der Liste.
@@ -67,7 +63,7 @@ public record SyncInfo(String folderLine, String lastSyncLine, String causeLine,
 								SharedFolderTexts.percent(progress));
 		List<Row> rows = new ArrayList<>();
 		for (SkippedUnit unit : skipped) {
-			rows.add(new Row(SharedFolderTexts.withSubtree(label(labels, unit.unit()), unit.subtree()),
+			rows.add(new Row(SharedFolderTexts.withSubtree(LockedUnits.label(labels, unit.unit()), unit.subtree()),
 					unit.cause() == null ? "" : unit.cause()));
 		}
 		String hint = rows.isEmpty() ? SharedFolderTexts.INFO_LIST_EMPTY : SharedFolderTexts.INFO_LIST_HINT;
@@ -84,18 +80,5 @@ public record SyncInfo(String folderLine, String lastSyncLine, String causeLine,
 	 */
 	public static String cause(SyncState state, String dir, String lastFailure) {
 		return state == SyncState.OFFLINE ? StoreMessages.unreachable(dir) : lastFailure;
-	}
-
-	/** Die Bezeichnung der Einheit; ihr Pfad, wenn sie sich nicht benennen lässt. */
-	private static String label(Function<UnitKey, String> labels, UnitKey unit) {
-		try {
-			String label = labels.apply(unit);
-			if (label != null) {
-				return label;
-			}
-		} catch (RuntimeException e) {
-			LOG.log(Level.FINE, "Keine Bezeichnung für " + unit.relativePath(), e);
-		}
-		return unit.relativePath();
 	}
 }

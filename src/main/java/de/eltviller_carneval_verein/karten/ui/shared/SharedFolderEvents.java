@@ -150,11 +150,9 @@ public final class SharedFolderEvents implements SyncListener {
 			pendingDecision = new PendingDecision(sync.sharedDir(), true);
 		}
 		sync.syncState().addListener((observable, oldState, newState) -> {
-			if ((newState == SyncState.AKTUELL || newState == SyncState.AUSSTEHEND || newState == SyncState.AUS)
-					&& lastFailure != null) {
+			if (newState == SyncState.AKTUELL || newState == SyncState.AUSSTEHEND || newState == SyncState.AUS) {
 				// Die Störung ist vorbei: Ihr Text soll nicht in der Fußzeile stehen bleiben, wenn Hinweis und Ursache weg sind
-				ui.withdrawFooter(lastFailure);
-				lastFailure = null;
+				forgetFailure();
 			}
 			if (newState != SyncState.ENTSCHEIDUNG) {
 				boolean questionMayBeOpen = pendingDecision != null || oldState == SyncState.ENTSCHEIDUNG;
@@ -218,12 +216,17 @@ public final class SharedFolderEvents implements SyncListener {
 
 	@Override
 	public void reconnected() {
+		forgetFailure();
+		ui.footer(Severity.INFO, SharedFolderTexts.RECONNECTED);
+		syncChanged();
+	}
+
+	/** Vergisst die gemerkte Störung und nimmt ihren Text aus der Fußzeile; ohne Störung nichts. */
+	private void forgetFailure() {
 		if (lastFailure != null) {
 			ui.withdrawFooter(lastFailure);
 			lastFailure = null;
 		}
-		ui.footer(Severity.INFO, SharedFolderTexts.RECONNECTED);
-		syncChanged();
 	}
 
 	@Override
@@ -281,12 +284,7 @@ public final class SharedFolderEvents implements SyncListener {
 
 	@Override
 	public void locked(UnitKey unit, UnitState.Status status) {
-		String label = label(unit);
-		String text = switch (status) {
-		case LOCKED_DAMAGED -> StoreMessages.damaged(label);
-		case LOCKED_FORMAT -> StoreMessages.newerFormat(label);
-		case WAITING, OK -> null;
-		};
+		String text = StoreMessages.locked(label(unit), status);
 		if (text == null) {
 			return;
 		}

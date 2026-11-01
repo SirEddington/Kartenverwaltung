@@ -2,9 +2,9 @@ package de.eltviller_carneval_verein.karten.ui.shared;
 
 import java.time.Instant;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 
 import de.eltviller_carneval_verein.karten.store.SyncState;
+import de.eltviller_carneval_verein.karten.ui.backup.AbstractBackupCatalog;
 import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
 
 /**
@@ -13,9 +13,6 @@ import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
  * anders zusammengesetzt wird (Fortschritt, Hinweis bei Ausfall, Statuszeile), tun das die Methoden unten.
  */
 public final class SharedFolderTexts {
-
-	/** Zeitpunkt des letzten Abgleichs in der Statuszeile. */
-	private static final DateTimeFormatter SYNC_TIME = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
 
 	private SharedFolderTexts() {
 	}
@@ -329,9 +326,9 @@ public final class SharedFolderTexts {
 		return subtree ? label + " " + WITH_EVERYTHING_BELOW : label;
 	}
 
-	/** Zeitpunkt wie in der Statuszeile: {@code dd.MM.yyyy HH:mm:ss}. */
+	/** Zeitpunkt wie in der Statuszeile und im Konflikt-Dialog: {@code dd.MM.yyyy HH:mm:ss}. */
 	public static String syncTime(Instant time, ZoneId zone) {
-		return time.atZone(zone).format(SYNC_TIME);
+		return AbstractBackupCatalog.timeText(time, zone);
 	}
 
 	/** Ganze Prozent des Fortschritts (abgerundet, 0 bis 100). */
@@ -354,7 +351,7 @@ public final class SharedFolderTexts {
 		if (progress == null) {
 			return PROGRESS.substring(0, PROGRESS.indexOf(" (&1"));
 		}
-		return MessageTemplate.format(PROGRESS, (int) Math.floor(progress * 100));
+		return MessageTemplate.format(PROGRESS, percent(progress));
 	}
 
 	/** Die Fußzeile nach dem Verbinden. */

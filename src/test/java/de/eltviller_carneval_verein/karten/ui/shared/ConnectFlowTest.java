@@ -543,11 +543,28 @@ class ConnectFlowTest {
 		sync.outcome(new ConnectOutcome(Kind.FEHLER, false, aside, "kaputt"));
 		sync.state(SyncState.AKTUELL);
 
-		sync.state(SyncState.OFFLINE);
+		sync.state(SyncState.FEHLER);
 
 		assertEquals(List.of("showProgress", "showHint:kaputt:" + aside, "hideHint", "showHint:kaputt:" + aside),
 				screenLog);
 		assertTrue(flow.running());
+	}
+
+	@Test
+	void secondOutageOfAnotherKindNamesItsOwnCause() {
+		Path aside = root.resolve("data-beiseite-2026");
+		flow.connectByButton(dir());
+		sync.outcome(new ConnectOutcome(Kind.FEHLER, false, aside, "kaputt"));
+		sync.state(SyncState.AKTUELL);
+
+		// nach der Störung fällt der Ordner weg: nicht mehr "kaputt", sondern SYS-005
+		sync.state(SyncState.OFFLINE);
+		sync.state(SyncState.AKTUELL);
+		// und umgekehrt: Für eine Störung nach dem Ausfall kennt der Ablauf keine Ursache
+		sync.state(SyncState.FEHLER);
+
+		assertEquals(List.of("showProgress", "showHint:kaputt:" + aside, "hideHint",
+				"showHint:" + StoreMessages.unreachable(dir()) + ":" + aside, "hideHint", "showHint:null:" + aside), screenLog);
 	}
 
 	@Test

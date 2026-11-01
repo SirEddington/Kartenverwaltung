@@ -1951,6 +1951,45 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void unitLockedAgainAfterAResetIsReportedAgain() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		Version v2 = save(a, update(BOOKING, v1, "Anna B"));
+		Files.writeString(localFile(a, BOOKING, v2.id() + ".json"), "kaputt");
+		a.service.unitState(BOOKING);
+		Version reset = a.service.resetToLastReadable(BOOKING);
+
+		// eine neue Sperre derselben Einheit im selben Programmlauf: Ohne Meldung fehlte sie unter "gesperrte Einträge"
+		Version v3 = save(a, update(BOOKING, reset, "Anna C"));
+		Files.writeString(localFile(a, BOOKING, v3.id() + ".json"), "kaputt");
+		a.service.unitState(BOOKING);
+		a.service.unitState(BOOKING);
+
+		assertEquals(List.of(new LockedCall(BOOKING, Status.LOCKED_DAMAGED), new LockedCall(BOOKING, Status.LOCKED_DAMAGED)),
+				a.events.locked, "einmal je Sperre");
+	}
+
+	@Test
+	void unitReadableAgainIsReportedWhenItLocksLater() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		Path file = localFile(a, BOOKING, v1.id() + ".json");
+		byte[] good = Files.readAllBytes(file);
+		Files.writeString(file, "kaputt");
+		a.service.unitState(BOOKING);
+		Files.write(file, good);
+		assertEquals(Status.OK, a.service.unitState(BOOKING).status());
+
+		Files.writeString(file, "kaputt");
+		a.service.unitState(BOOKING);
+
+		assertEquals(List.of(new LockedCall(BOOKING, Status.LOCKED_DAMAGED), new LockedCall(BOOKING, Status.LOCKED_DAMAGED)),
+				a.events.locked);
+	}
+
+	@Test
 	void damagedUnitInSingleModeIsResettable() throws IOException {
 		Node a = node("a");
 		a.service.startup("");

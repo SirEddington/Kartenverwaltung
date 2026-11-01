@@ -87,12 +87,13 @@ public final class ConnectFlow {
 	/** Ob die offene Frage "Beiseitelegen" anbot. */
 	private boolean askedAllowed;
 	private boolean hintVisible;
-	/** Text und Beiseite-Ordner des letzten Hinweises, für den Fall, dass er nach einer Pause wieder erscheint. */
+	/** Text, Beiseite-Ordner und Art ({@code OFFLINE}/{@code FEHLER}) des letzten Hinweises, falls er nach einer Pause wieder erscheint. */
 	private String lastMessage;
 	private Path lastSetAsidePath;
+	private SyncState lastOutage;
 	private String dir;
+	/** Wartet auf das Ende des ersten Laufs; solange er besteht, hört der Ablauf auch auf den Zustand. */
 	private FirstRunWatch watch;
-	private boolean listeningToState;
 
 	/**
 	 * @param sync          die Verbindung zum Versionsspeicher
@@ -184,7 +185,7 @@ public final class ConnectFlow {
 		if (!leaveGuard.getAsBoolean()) {
 			// Während der Rückfrage kann sich der Ablauf geändert haben; nur die noch offene Frage kommt wieder
 			if (!fresh && !closed && running && awaitingDecision) {
-				screen.askDecision(dir != null ? dir : sync.sharedDir(), askedAllowed);
+				screen.askDecision(currentDir(), askedAllowed);
 			}
 			return false;
 		}
@@ -211,7 +212,7 @@ public final class ConnectFlow {
 						return;
 					}
 					if (sync.syncState().get() == SyncState.OFFLINE) {
-						showHint(id, StoreMessages.unreachable(dir != null ? dir : sync.sharedDir()), null);
+						showHint(id, StoreMessages.unreachable(currentDir()), null, SyncState.OFFLINE);
 					} else {
 						handle(id, null, e, false);
 					}
@@ -340,7 +341,7 @@ public final class ConnectFlow {
 			return;
 		}
 		if (error != null || outcome == null) {
-			showHint(id, error == null ? null : messageOf(error), null);
+			showHint(id, error == null ? null : messageOf(error), null, SyncState.FEHLER);
 			return;
 		}
 		switch (outcome.kind()) {
@@ -350,10 +351,10 @@ public final class ConnectFlow {
 			if (offlineFinishes) {
 				finish(id);
 			} else {
-				showHint(id, outcome.message(), outcome.setAsidePath());
+				showHint(id, outcome.message(), outcome.setAsidePath(), SyncState.OFFLINE);
 			}
 		}
-		case FEHLER -> showHint(id, outcome.message(), outcome.setAsidePath());
+		case FEHLER -> showHint(id, outcome.message(), outcome.setAsidePath(), SyncState.FEHLER);
 		case ABGEBROCHEN -> {
 			end(id);
 			screen.cancelled();
@@ -372,7 +373,7 @@ public final class ConnectFlow {
 		}
 		awaitingDecision = true;
 		askedAllowed = setAsideAllowed;
-		screen.askDecision(dir != null ? dir : sync.sharedDir(), setAsideAllowed);
+		screen.askDecision(currentDir(), setAsideAllowed);
 	}
 
 	/**
@@ -386,10 +387,12 @@ public final class ConnectFlow {
 	 * FIFO-Warteschlange sein wie die {@code ui} des Versionsspeichers ({@code Platform::runLater}), sonst gilt die
 	 * Reihenfolge nicht.
 	 */
-	private void showHint(int id, String message, Path setAsidePath) {
+	private void showHint(int id, String message, Path setAsidePath, SyncState outage) {
 		hintVisible = true;
 		lastMessage = message;
 		lastSetAsidePath = setAsidePath;
+		lastOutage = outage;
+		// beim ersten Hinweis des Ablaufs: auf das Laufende und auf den Zustand hören (end() nimmt beides wieder weg)
 		if (watch == null) {
 			watch = new FirstRunWatch(sync.fullSyncProgress());
 			watch.onEnded(() -> fx.execute(() -> {
@@ -397,9 +400,6 @@ public final class ConnectFlow {
 					finish(id);
 				}
 			}));
-		}
-		if (!listeningToState) {
-			listeningToState = true;
 			sync.syncState().addListener(stateListener);
 		}
 		screen.showHint(message, setAsidePath);
@@ -420,7 +420,11 @@ public final class ConnectFlow {
 			hintVisible = false;
 			screen.hideHint();
 		} else if (!hintVisible && watch != null && (state == SyncState.OFFLINE || state == SyncState.FEHLER)) {
-			showHint(id, lastMessage, lastSetAsidePath);
+			// Ein Ausfall anderer Art als der vorige hat eine andere Ursache: OFFLINE nennt SYS-005, FEHLER keine (den Text von
+			// SYS-006 bekommt nur die Fußzeile)
+			String message = state == lastOutage ? lastMessage
+					: state == SyncState.OFFLINE ? StoreMessages.unreachable(currentDir()) : null;
+			showHint(id, message, lastSetAsidePath, state);
 		}
 	}
 
@@ -442,6 +446,7 @@ public final class ConnectFlow {
 		hintVisible = false;
 		lastMessage = null;
 		lastSetAsidePath = null;
+		lastOutage = null;
 		dir = null;
 		return ++generation;
 	}
@@ -463,11 +468,13 @@ public final class ConnectFlow {
 		if (watch != null) {
 			watch.dispose();
 			watch = null;
-		}
-		if (listeningToState) {
-			listeningToState = false;
 			sync.syncState().removeListener(stateListener);
 		}
+	}
+
+	/** Der Ordner des Ablaufs; ohne (Antwort im Betrieb) der des Versionsspeichers. */
+	private String currentDir() {
+		return dir != null ? dir : sync.sharedDir();
 	}
 
 	private static String messageOf(Throwable error) {

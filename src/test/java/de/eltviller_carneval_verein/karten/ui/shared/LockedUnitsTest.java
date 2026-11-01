@@ -82,6 +82,20 @@ class LockedUnitsTest {
 	}
 
 	@Test
+	void lockMessageNamingAnotherUnitWithTheSameStartIsStale() {
+		UnitKey hall10 = UnitKey.hall("h10");
+		names.put(HALL, "Halle 1");
+		names.put(hall10, "Halle 10");
+		locked.add(HALL, Status.LOCKED_DAMAGED);
+
+		// "Halle 10" ist zurückgesetzt, "Halle 1" noch gesperrt: Die Meldung zu "Halle 10" gilt nicht mehr
+		assertTrue(locked.isStaleLockMessage(StoreMessages.damaged("Halle 10"), labels));
+		assertTrue(locked.isStaleLockMessage(StoreMessages.damaged(hall10.relativePath()), labels), "auch mit Pfad");
+		assertFalse(locked.isStaleLockMessage(StoreMessages.damaged("Halle 1"), labels));
+		assertFalse(locked.isStaleLockMessage("Nicht gespeichert: " + StoreMessages.newerFormat("Halle 1"), labels));
+	}
+
+	@Test
 	void damagedResettableUnitOffersReset() {
 		locked.add(BOOKING, Status.LOCKED_DAMAGED);
 

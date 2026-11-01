@@ -138,15 +138,18 @@ public final class VersionStore {
 	 */
 	public UnitFiles readUnit(UnitKey unit) throws IOException {
 		Path unitDir = unitDir(unit);
+		List<VersionId> versionIds = versionIds(unitDir);
+		List<String> claimNames = claimNames(unitDir);
+		requireAnchorIfBothEmpty(versionIds, claimNames);
 		Map<VersionId, VersionFile> versions = new TreeMap<>();
-		for (VersionId id : versionIds(unitDir)) {
+		for (VersionId id : versionIds) {
 			Optional<byte[]> bytes = files.read(unitDir.resolve(id + JSON));
 			if (bytes.isPresent()) {
 				versions.put(id, parseVersion(id, bytes.get()));
 			}
 		}
 		Map<String, ClaimFile> claims = new TreeMap<>();
-		for (String name : claimNames(unitDir)) {
+		for (String name : claimNames) {
 			Optional<byte[]> bytes = files.read(unitDir.resolve(CLAIMS).resolve(name + JSON));
 			if (bytes.isPresent()) {
 				claims.put(name, parseClaim(name, bytes.get()));
@@ -190,7 +193,7 @@ public final class VersionStore {
 
 	/** Ob die Einheit mindestens eine Versionsdatei hat (nur ihr eigener Ordner wird aufgelistet, nichts gelesen). */
 	public boolean hasVersions(UnitKey unit) throws IOException {
-		return !versionIds(unitDir(unit)).isEmpty();
+		return !requireAnchorIfEmpty(versionIds(unitDir(unit))).isEmpty();
 	}
 
 	/** Die IDs aller Events (gültige Ordnernamen unter {@code events/}), sortiert. */
@@ -292,7 +295,10 @@ public final class VersionStore {
 	 */
 	public List<String> unitDataFiles(UnitKey unit) throws IOException {
 		Path unitDir = unitDir(unit);
-		return dataPaths(unit.relativePath() + "/", versionIds(unitDir), claimNames(unitDir));
+		List<VersionId> versionIds = versionIds(unitDir);
+		List<String> claimNames = claimNames(unitDir);
+		requireAnchorIfBothEmpty(versionIds, claimNames);
+		return dataPaths(unit.relativePath() + "/", versionIds, claimNames);
 	}
 
 	/** Die Pfade der Versions- und Anspruchsdateien einer Einheit aus ihren Namen, sortiert. */
@@ -328,8 +334,9 @@ public final class VersionStore {
 		Path unitDir = unitDir(unit);
 		Path claimsDir = unitDir.resolve(CLAIMS);
 		String prefix = unit.relativePath() + "/";
-		List<FileLayer.DirEntry> unitEntries = requireAnchorIfEmpty(files.listEntriesWithTemps(unitDir));
-		List<FileLayer.DirEntry> claimEntries = requireAnchorIfEmpty(files.listEntriesWithTemps(claimsDir));
+		List<FileLayer.DirEntry> unitEntries = files.listEntriesWithTemps(unitDir);
+		List<FileLayer.DirEntry> claimEntries = files.listEntriesWithTemps(claimsDir);
+		requireAnchorIfBothEmpty(unitEntries, claimEntries);
 
 		List<String> data = dataPaths(prefix, versionIdsOf(unitEntries), claimNamesOf(claimEntries));
 		List<String> temps = new ArrayList<>();
@@ -400,6 +407,16 @@ public final class VersionStore {
 	}
 
 	/**
+	 * Wie {@link #requireAnchorIfEmpty} für die beiden Listen einer Einheit (ihr Ordner und {@code claims/}): Der Anker wird
+	 * nur angesehen, wenn beide leer sind, also höchstens einmal je Einheit (auf einer Netzfreigabe kostet jeder Zugriff).
+	 */
+	private void requireAnchorIfBothEmpty(List<?> unitDirEntries, List<?> claimEntries) throws IOException {
+		if (unitDirEntries.isEmpty()) {
+			requireAnchorIfEmpty(claimEntries);
+		}
+	}
+
+	/**
 	 * Der Pfad zu einer Datei unter {@link #dataRoot()}.
 	 *
 	 * @param rel Pfad relativ zum Datenordner, mit {@code /} getrennt
@@ -437,9 +454,9 @@ public final class VersionStore {
 		return unitDir(unit).resolve(CLAIMS).resolve(claimName + JSON);
 	}
 
-	/** Die IDs der Versionsdateien im Einheitenordner, sortiert; fremde Namen und Ordner fehlen. */
+	/** Die IDs der Versionsdateien im Einheitenordner, sortiert; fremde Namen und Ordner fehlen. Ohne Blick auf den Anker. */
 	private List<VersionId> versionIds(Path unitDir) throws IOException {
-		return versionIdsOf(entries(unitDir));
+		return versionIdsOf(files.listEntries(unitDir));
 	}
 
 	/** Wie {@link #versionIds}, aus den schon gelisteten Einträgen im Einheitenordner (temporäre Namen sind keine Versions-IDs). */
@@ -454,10 +471,10 @@ public final class VersionStore {
 		return ids;
 	}
 
-	/** Die Namen der Anspruchsdateien unter {@code claims/}, sortiert; fremde Namen und Ordner fehlen. */
+	/** Die Namen der Anspruchsdateien unter {@code claims/}, sortiert; fremde Namen und Ordner fehlen. Ohne Blick auf den Anker. */
 	private List<String> claimNames(Path unitDir) throws IOException {
 		Path claimsDir = unitDir.resolve(CLAIMS);
-		return claimNamesOf(entries(claimsDir));
+		return claimNamesOf(files.listEntries(claimsDir));
 	}
 
 	/** Wie {@link #claimNames}, aus den schon gelisteten Einträgen in {@code claims/}. */

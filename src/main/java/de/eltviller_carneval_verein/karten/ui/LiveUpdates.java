@@ -189,9 +189,10 @@ public final class LiveUpdates {
 	 * @return die eingehängte Instanz (für {@link #reset()} nach dem Neuladen)
 	 */
 	public static LiveUpdates install(SyncService sync, Runnable onConflictsChanged, UnaryOperator<SyncListener> receiver) {
+		// Die Hinweise kommen aus dem Hintergrund: Über einen stehenden Fehler ("Nicht gespeichert: …") blenden sie nur kurz
 		LiveUpdates live = new LiveUpdates(StoreHallRepository.getInstance(), StoreEventRepository.getInstance(),
 				ChangeTracker.halls(), ChangeTracker.events(), EditingUnits.getInstance(), Platform::runLater,
-				text -> StatusMessage.getInstance().show(Severity.WARNING, text));
+				text -> StatusMessage.getInstance().showInFooter(Severity.WARNING, text));
 		live.setOnConflictsChanged(onConflictsChanged);
 		live.watch(StateRestorer.events(), StateRestorer.halls());
 		sync.setListener(receiver.apply(live.listener()));

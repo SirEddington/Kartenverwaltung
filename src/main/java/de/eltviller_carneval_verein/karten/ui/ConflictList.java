@@ -2,7 +2,6 @@ package de.eltviller_carneval_verein.karten.ui;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -27,6 +26,7 @@ import de.eltviller_carneval_verein.karten.store.ConflictNote.FieldConflict;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.ui.input.DateTimeInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
@@ -85,7 +85,6 @@ public final class ConflictList {
 	}
 
 	private static final String UNKNOWN_MACHINE = "ein anderer Rechner";
-	private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
 	/** Die Feldgruppen des Vermerks auf Deutsch; eine unbekannte Gruppe heißt wie ihr Feld. */
 	private static final Map<String, String> GROUP_LABELS = Map.ofEntries(Map.entry("customer", "Kunde"),
@@ -311,7 +310,7 @@ public final class ConflictList {
 	/** Ein Datum als {@code 31.10.2026}; was sich nicht als Datum lesen lässt, bleibt, wie es ist. */
 	private static String dateText(String text) {
 		try {
-			return LocalDate.parse(text).format(DATE_FORMAT);
+			return DateTimeInput.formatDate(LocalDate.parse(text));
 		} catch (DateTimeParseException e) {
 			return text;
 		}

@@ -137,7 +137,8 @@ public final class LockedUnits {
 
 	/**
 	 * Ob {@code text} eine Sperre meldet (SYS-008 oder SYS-009, auch mit Präfix wie "Nicht gespeichert: "), die nicht mehr
-	 * gilt: Er nennt keine der geführten Einheiten, weder mit Bezeichnung noch mit Pfad. Für die Fußzeile, die eine solche
+	 * gilt: Er ist keine der Meldungen zu den geführten Einheiten, weder mit Bezeichnung noch mit Pfad. Verglichen wird der
+	 * ganze Text der Meldung, nicht nur der Name ("Halle 1" steckt auch in "Halle 10"). Für die Fußzeile, die eine solche
 	 * Meldung nach dem Zurücksetzen nicht stehen lassen soll; ein anderer Text ist nie veraltet.
 	 */
 	public boolean isStaleLockMessage(String text, Function<UnitKey, String> labels) {
@@ -145,8 +146,10 @@ public final class LockedUnits {
 			return false;
 		}
 		for (UnitKey unit : locked.keySet()) {
-			if (text.contains(label(labels, unit)) || text.contains(unit.relativePath())) {
-				return false;
+			for (String name : List.of(label(labels, unit), unit.relativePath())) {
+				if (text.contains(StoreMessages.damaged(name)) || text.contains(StoreMessages.newerFormat(name))) {
+					return false;
+				}
 			}
 		}
 		return true;
@@ -317,10 +320,6 @@ public final class LockedUnits {
 	 * @return der Text; {@code null}, wenn {@code status} keine Sperre ist
 	 */
 	public static String warning(Function<UnitKey, String> labels, UnitKey unit, UnitState.Status status) {
-		return switch (status) {
-		case LOCKED_DAMAGED -> StoreMessages.damaged(label(labels, unit));
-		case LOCKED_FORMAT -> StoreMessages.newerFormat(label(labels, unit));
-		case WAITING, OK -> null;
-		};
+		return isLocked(status) ? StoreMessages.locked(label(labels, unit), status) : null;
 	}
 }

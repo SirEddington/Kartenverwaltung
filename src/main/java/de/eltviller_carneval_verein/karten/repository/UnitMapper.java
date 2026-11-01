@@ -306,6 +306,11 @@ final class UnitMapper {
 		return LockedUnitException.lockMessage(unit, status);
 	}
 
+	/** Ob die Kette gesperrt ist (beschädigt oder neueres Format): ohne den Text und ohne die Bezeichnung zu ermitteln. */
+	private static boolean isLocked(Status status) {
+		return status == Status.LOCKED_DAMAGED || status == Status.LOCKED_FORMAT;
+	}
+
 	/** Der Schlüssel einer Buchung: auf dem Sitz, wenn sie einen hat und nicht "ohne Platz" ist, sonst über ihre Kennung. */
 	private static UnitKey bookingKey(String eventId, String presentationId, Booking booking) {
 		if (booking.getSeatId() != null && !booking.isUnassigned()) {
@@ -513,7 +518,7 @@ final class UnitMapper {
 			if (snapshot.status() != Status.OK) {
 				warnings.add(unreadable);
 			}
-			if (lockMessage(snapshot.unit(), snapshot.status()) != null) {
+			if (isLocked(snapshot.status())) {
 				locked.put(snapshot.unit(), snapshot.status());
 			}
 			return null;
@@ -530,7 +535,7 @@ final class UnitMapper {
 			warnings.add(unreadable);
 			return null;
 		}
-		if (lockMessage(snapshot.unit(), snapshot.status()) != null) {
+		if (isLocked(snapshot.status())) {
 			locked.put(snapshot.unit(), snapshot.status());
 		}
 		return value;

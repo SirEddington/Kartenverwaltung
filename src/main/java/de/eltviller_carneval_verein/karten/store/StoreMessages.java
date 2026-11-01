@@ -95,11 +95,20 @@ public final class StoreMessages {
 		return SYS_NEWER_FORMAT + ": " + MessageTemplate.format(NEWER_FORMAT_TEXT, unit);
 	}
 
-	/** Der Text (SYS-008 bzw. SYS-009), wenn die Einheit nach {@code status} gesperrt ist; sonst {@code null}. */
+	/** Der Text (SYS-008 bzw. SYS-009) mit dem Pfad der Einheit, wenn sie nach {@code status} gesperrt ist; sonst {@code null}. */
 	public static String locked(UnitKey unit, UnitState.Status status) {
+		return locked(unit.relativePath(), status);
+	}
+
+	/**
+	 * Der Text (SYS-008 bzw. SYS-009), wenn die Einheit nach {@code status} gesperrt ist; sonst {@code null}.
+	 *
+	 * @param unit wie die Einheit genannt wird: im Log ihr Pfad, in der Oberfläche ihre lesbare Bezeichnung
+	 */
+	public static String locked(String unit, UnitState.Status status) {
 		return switch (status) {
-		case LOCKED_DAMAGED -> damaged(unit.relativePath());
-		case LOCKED_FORMAT -> newerFormat(unit.relativePath());
+		case LOCKED_DAMAGED -> damaged(unit);
+		case LOCKED_FORMAT -> newerFormat(unit);
 		case WAITING, OK -> null;
 		};
 	}
@@ -122,6 +131,11 @@ public final class StoreMessages {
 	/** SYS-013: Der Vollabgleich hat {@code unit} übersprungen, weil sie aus dem Grund {@code cause} wiederholt scheiterte. */
 	public static String skipped(String unit, String cause) {
 		return SYS_SKIPPED + ": " + MessageTemplate.format(SKIPPED_TEXT, unit, cause);
+	}
+
+	/** SYS-013 für das Log: mit dem Pfad der Einheit, bei {@code subtree} mit dem Zusatz "mit allem darunter". */
+	public static String skipped(UnitKey unit, boolean subtree, String cause) {
+		return skipped(subtree ? unit.relativePath() + " mit allem darunter" : unit.relativePath(), cause);
 	}
 
 	/**

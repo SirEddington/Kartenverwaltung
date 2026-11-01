@@ -191,13 +191,14 @@ final class SyncNotifier {
 		if (!reportedOnce.add(StoreMessages.SYS_SKIPPED + " " + unit.relativePath())) {
 			return;
 		}
-		LOGGER.warning(StoreMessages.skipped(subtree ? unit.relativePath() + " mit allem darunter" : unit.relativePath(), cause));
+		LOGGER.warning(StoreMessages.skipped(unit, subtree, cause));
 		deliver(l -> l.skipped(unit, subtree, cause));
 	}
 
 	/**
 	 * Meldet eine gesperrte Einheit ({@link SyncListener#locked}, SYS-008 bzw. SYS-009) einmal je Einheit, Zustand und
-	 * Programmlauf, ohne den Zustand zu ändern; der Log-Eintrag trägt den Text.
+	 * Sperre, ohne den Zustand zu ändern; der Log-Eintrag trägt den Text. Nach {@link #forgetLocked} kommt eine neue Sperre
+	 * wieder.
 	 */
 	synchronized void locked(UnitKey unit, UnitState.Status status) {
 		String message = StoreMessages.locked(unit, status);
@@ -210,6 +211,15 @@ final class SyncNotifier {
 		}
 		LOGGER.warning(message);
 		deliver(l -> l.locked(unit, status));
+	}
+
+	/**
+	 * Die Einheit ist nicht mehr gesperrt (zurückgesetzt oder wieder lesbar): Sperrt sie sich später erneut, kommt
+	 * {@link #locked} wieder. Sonst fehlte sie dann unter den gesperrten Einträgen der Oberfläche.
+	 */
+	synchronized void forgetLocked(UnitKey unit) {
+		reportedOnce.remove(StoreMessages.SYS_DAMAGED + " " + unit.relativePath());
+		reportedOnce.remove(StoreMessages.SYS_NEWER_FORMAT + " " + unit.relativePath());
 	}
 
 	/** Meldet einen Fehler für die Fußzeile ohne Log und ohne Zustand; ob er einmal oder öfter kommt, regelt der Aufrufer. */

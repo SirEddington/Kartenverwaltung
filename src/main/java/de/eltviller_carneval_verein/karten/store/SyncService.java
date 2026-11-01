@@ -1340,7 +1340,7 @@ public final class SyncService implements ConnectionControl {
 	 * Betrieb versucht der nächste Takt die Heilung aus der Kopie im gemeinsamen Ordner (SYS-007 im Log) und meldet die
 	 * Einheit mit {@link SyncListener#unitsChanged}, wenn sich dadurch etwas geändert hat; bleibt sie gesperrt, kommt
 	 * SYS-008, und ein neuer Versuch folgt erst, wenn Abholen oder Vollabgleich die Einheit verändern. SYS-008 und SYS-009
-	 * (neueres Format) kommen einmal je Einheit und Programmlauf über {@link SyncListener#locked}; welche Einheiten sich
+	 * (neueres Format) kommen einmal je Einheit und Sperre über {@link SyncListener#locked}; welche Einheiten sich
 	 * zurücksetzen lassen, nennt {@link #resettableUnits()}.
 	 */
 	public UnitState unitState(UnitKey unit) throws IOException {
@@ -1373,6 +1373,9 @@ public final class SyncService implements ConnectionControl {
 		forgetResettable(unit);
 		if (state.status() == Status.LOCKED_FORMAT) {
 			notifier.locked(unit, Status.LOCKED_FORMAT);
+		} else {
+			// wieder lesbar: Eine spätere Sperre wird wieder gemeldet
+			notifier.forgetLocked(unit);
 		}
 	}
 
@@ -1640,6 +1643,8 @@ public final class SyncService implements ConnectionControl {
 		Change change = new Change(unit, List.of(state.blockedAt()), payload, deleted);
 		Version reset = append(UUID.randomUUID().toString(), List.of(change)).get(0);
 		forgetResettable(unit);
+		// die Sperre ist erledigt: Sperrt sich die Einheit später erneut, kommt SYS-008 wieder (Liste der gesperrten Einträge)
+		notifier.forgetLocked(unit);
 		return reset;
 	}
 
@@ -2666,8 +2671,7 @@ public final class SyncService implements ConnectionControl {
 			current.owedMergeInRun.add(unit);
 		}
 		String description = StoreMessages.describe(cause);
-		LOGGER.log(Level.FINE, StoreMessages.skipped(subtree ? unit.relativePath() + " mit allem darunter" : unit.relativePath(),
-				description), cause);
+		LOGGER.log(Level.FINE, StoreMessages.skipped(unit, subtree, description), cause);
 		synchronized (lock) {
 			if (link == current) {
 				skippedInRun.put(unit, new SkippedUnit(unit, subtree, description));

@@ -115,14 +115,12 @@ public class MainApp extends Application {
 	private static ConflictList conflictList;
 	private static ConflictActions conflictActions;
 	private static ConflictIndicator conflictIndicator;
-	// Der Stand des Abgleichs, den alle Hinweise in den Fußzeilen teilen (er merkt sich den der aktuellen Ansicht), und der eine
-	// 1-s-Takt der App, der diesen Hinweis und das Info-Fenster auffrischt (Fortschritt, 30 s von AUSSTEHEND)
+	// Der Stand des Abgleichs, den alle Hinweise in den Fußzeilen teilen (er merkt sich den der aktuellen Ansicht)
 	private static SyncStatus syncStatus;
-	private static Timeline syncTicker;
 	// Schlüssel in den Properties einer Ladeansicht (markLoadingView)
 	private static final Object LOADING_VIEW = new Object();
-	// Die Bezeichnungen der Einträge für das Info-Fenster (gesetzt, sobald der Bestand geladen ist)
-	private static Function<UnitKey, String> syncLabels;
+	// Die Bezeichnungen der Einträge für das Info-Fenster (gesetzt, sobald der Bestand geladen ist; bis dahin der Pfad)
+	private static Function<UnitKey, String> syncLabels = unit -> null;
 	// Die gesperrten Einträge (gesetzt, sobald der Bestand geladen ist) und der Link in der Fußzeile des aktuellen Fensterinhalts
 	private static LockedUnits lockedUnits;
 	private static LockedUnitsIndicator lockedIndicator;
@@ -181,7 +179,8 @@ public class MainApp extends Application {
 		ConflictPolicies.install(sync);
 		// Der Stand für die Hinweise zum Abgleich in der Fußzeile, schon für die Ladeansicht des Starts
 		syncStatus = new SyncStatus(sync, Clock.systemUTC(), MainApp::syncChanged);
-		syncTicker = new Timeline(new KeyFrame(Duration.seconds(1), event -> syncChanged()));
+		// Der eine 1-s-Takt der App: frischt den Hinweis und das Info-Fenster auf (Fortschritt, 30 s von AUSSTEHEND)
+		Timeline syncTicker = new Timeline(new KeyFrame(Duration.seconds(1), event -> syncChanged()));
 		syncTicker.setCycleCount(Animation.INDEFINITE);
 		syncTicker.play();
 		// Das Verbinden mit dem gemeinsamen Ordner (Knopf in den Einstellungen und Start mit neuem Ordner)
@@ -379,7 +378,7 @@ public class MainApp extends Application {
 		String cause = SyncInfo.cause(sync.syncState().get(), sync.sharedDir(),
 				SharedFolderEvents.instance().map(SharedFolderEvents::lastFailure).orElse(null));
 		return SyncInfo.of(sync.sharedDir(), sync.lastSync().get(), cause, sync.connectionComplete().get(),
-				sync.fullSyncProgress().get(), sync.skippedUnits(), syncLabels != null ? syncLabels : unit -> null);
+				sync.fullSyncProgress().get(), sync.skippedUnits(), syncLabels);
 	}
 
 	/**
@@ -415,7 +414,7 @@ public class MainApp extends Application {
 		lockedViewChanged();
 		LockedUnits units = lockedUnits;
 		Function<UnitKey, String> labels = syncLabels;
-		if (units != null && labels != null) {
+		if (units != null) {
 			StatusMessage.getInstance().clearIf(text -> units.isStaleLockMessage(text, labels));
 		}
 	}
@@ -519,10 +518,7 @@ public class MainApp extends Application {
 
 		showLoadWarnings(repository.getAndClearLoadWarnings(), halls.getAndClearLoadWarnings());
 
-		List<String> settingsWarnings = settingsStore.getAndClearLoadWarnings();
-		if (!settingsWarnings.isEmpty()) {
-			showAlert("Warnung beim Laden der Einstellungen", String.join("\n\n", settingsWarnings), AlertType.WARNING);
-		}
+		showWarnings("Warnung beim Laden der Einstellungen", settingsStore.getAndClearLoadWarnings());
 
 		showMenuView();
 		// Konflikte, die schon beim Start aufgelöst wurden (der Versionsspeicher meldete sie, bevor jemand zuhörte)
@@ -552,7 +548,7 @@ public class MainApp extends Application {
 		if (lockedUnits != null) {
 			lockedUnits.addAll(locked);
 		}
-		Function<UnitKey, String> labels = syncLabels != null ? syncLabels : unit -> null;
+		Function<UnitKey, String> labels = syncLabels;
 		List<String> texts = new ArrayList<>();
 		locked.forEach((unit, status) -> {
 			String text = LockedUnits.warning(labels, unit, status);

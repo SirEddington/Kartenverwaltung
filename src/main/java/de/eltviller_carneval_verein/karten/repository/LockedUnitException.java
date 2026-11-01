@@ -39,11 +39,8 @@ public class LockedUnitException extends RuntimeException {
 
 	/** Der Text (SYS-008 bzw. SYS-009) mit der Bezeichnung der Einheit, wenn sie nach {@code status} gesperrt ist; sonst {@code null}. */
 	static String lockMessage(UnitKey unit, Status status) {
-		return switch (status) {
-		case LOCKED_DAMAGED -> StoreMessages.damaged(label(unit));
-		case LOCKED_FORMAT -> StoreMessages.newerFormat(label(unit));
-		case WAITING, OK -> null;
-		};
+		return status == Status.LOCKED_DAMAGED || status == Status.LOCKED_FORMAT ? StoreMessages.locked(label(unit), status)
+				: null;
 	}
 
 	private static String label(UnitKey unit) {
