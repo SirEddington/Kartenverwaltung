@@ -758,6 +758,27 @@ class EventMergeTest {
 		assertEquals(List.of(unit), sink.reconciled);
 	}
 
+	@Test
+	void displacedBookingDoesNotOverwriteAValidlySeatedBookingWithTheSameId() {
+		Hall hall = hallWithOneSeat();
+		Event event = eventInHall(hall);
+		Presentation friday = event.getPresentations().get(0);
+		// Müller sitzt gültig auf dem Sitz der Bestuhlung
+		Booking seated = friday.getBookings().get(0);
+		seated.setLastName("Müller");
+		String seatId = seated.getSeatId();
+		Event state = copyOfUnchecked(event);
+		Booking moved = booking(state.getPresentations().get(0), "fremder-sitz", 7, "Müller");
+		moved.setId(seated.getId());
+		UnitKey unit = UnitKey.booking(event.getId(), friday.getId(), "fremder-sitz");
+
+		EventMerge.apply(event, displacedPlan(event, hall, state, unit), new Recording());
+
+		assertSame(seated, friday.getBookings().stream().filter(b -> b == seated).findFirst().orElseThrow());
+		assertFalse(seated.isUnassigned(), "ein gültig sitzender Stand wird nicht überschrieben und nicht entsetzt");
+		assertEquals(seatId, seated.getSeatId());
+	}
+
 	/** Müller steht ohne Platz im Modell; seine Einheit ist fremd gelöscht, und eine andere Einheit trägt ihn (nach {@code carried}). */
 	private Booking cancelledUnassigned(boolean carried, boolean twice, Recording sink) {
 		Hall hall = hallWithOneSeat();

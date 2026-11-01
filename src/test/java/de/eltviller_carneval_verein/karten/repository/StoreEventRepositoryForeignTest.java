@@ -2188,4 +2188,102 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	// <-- Regeln
+
+	// Buchung ohne Platz statt Warten (KARV-117) -->
+
+	/**
+	 * Ich stelle die Vorstellung auf eine zweite Bestuhlung ohne Müllers Sitz um (Müller steht ohne Platz), der andere hat
+	 * Müller gleichzeitig auf den dritten Sitz der ersten gesetzt und gespeichert. Meine Halle ist aktuell.
+	 *
+	 * @return Müllers Kennung
+	 */
+	private String planSwitchAgainstMove() {
+		Other other = other();
+		SeatingPlan second = hall.addSeatingPlan();
+		TableRow secondRow = second.addRow();
+		secondRow.setLabel("B");
+		second.fillRow(secondRow, 1, 3);
+		mine.setHallCurrent(id -> true);
+		String bookingId = seat(friday, 0).getId();
+		BookingSync.switchPlan(friday, second);
+		mine.saveEvent(event);
+		Booking from = seat(other.friday(), 0);
+		Booking to = seat(other.friday(), 2);
+		to.copyFrom(from);
+		to.takeSnapshot(planSeat(2).getParent(), planSeat(2));
+		from.clearCustomerData();
+		other.save();
+		return bookingId;
+	}
+
+	private static List<Booking> withId(Presentation presentation, String bookingId) {
+		return presentation.getBookings().stream().filter(b -> bookingId.equals(b.getId())).toList();
+	}
+
+	@Test
+	void displacedBookingWaitsWhileTheBookingWithoutPlaceIsChangedLocally() {
+		String bookingId = planSwitchAgainstMove();
+		Booking mueller = withId(friday, bookingId).get(0);
+		assertTrue(mueller.isUnassigned());
+		mueller.setComment("lokal");
+
+		ForeignResult result = mine.applyForeign(List.of(seatUnit(friday, 2)));
+
+		assertEquals(1, result.deferred().size(), "die Eingabe wird nicht überschrieben");
+		assertSame(mueller, withId(friday, bookingId).get(0));
+		assertEquals("lokal", mueller.getComment());
+		assertEquals(1, withId(friday, bookingId).size());
+		assertEquals(Set.of(UnitKey.unassignedBooking(event.getId(), friday.getId(), bookingId)), mine.locallyChangedUnits());
+
+		mine.saveEvent(event);
+		ForeignResult retried = mine.retryDeferred();
+
+		assertTrue(retried.deferred().isEmpty());
+		assertEquals(1, withId(friday, bookingId).size());
+		assertTrue(withId(friday, bookingId).get(0).isUnassigned());
+		assertEquals("Müller", withId(friday, bookingId).get(0).getLastName());
+		assertEquals(1, retried.warnings().size(), "der Hinweis kommt mit dem Übernehmen");
+	}
+
+	@Test
+	void displacedBookingWaitsWhileTheBookingWithoutPlaceIsBeingEdited() {
+		String bookingId = planSwitchAgainstMove();
+		Booking mueller = withId(friday, bookingId).get(0);
+		AtomicBoolean editing = new AtomicBoolean(true);
+		mine.setEditingCheck(model -> editing.get() && model == mueller);
+
+		ForeignResult result = mine.applyForeign(List.of(seatUnit(friday, 2)));
+
+		assertEquals(1, result.deferred().size());
+		assertSame(mueller, withId(friday, bookingId).get(0));
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+
+		editing.set(false);
+		ForeignResult retried = mine.retryDeferred();
+
+		assertTrue(retried.deferred().isEmpty());
+		assertEquals(1, withId(friday, bookingId).size());
+		assertEquals(1, retried.warnings().size());
+	}
+
+	@Test
+	void cancellationOfTheBookingAndItsUnassignedUnitInOneBatchRemovesIt() {
+		String bookingId = planSwitchAgainstMove();
+		UnitKey unassigned = UnitKey.unassignedBooking(event.getId(), friday.getId(), bookingId);
+		mine.applyForeign(List.of(seatUnit(friday, 2)));
+		assertEquals(1, withId(friday, bookingId).size(), "übernommen, ohne Platz");
+
+		// ein dritter Rechner storniert Müller: beide Einheiten, die ihn tragen, werden in einem Speichern gelöscht
+		StoreEventRepository third = TestRepositories.events(sync);
+		Event loaded = third.loadEvents().get(0);
+		loaded.getPresentations().get(0).getBookings().removeIf(b -> bookingId.equals(b.getId()));
+		third.saveEvent(loaded);
+
+		mine.applyForeign(List.of(seatUnit(friday, 2), unassigned));
+
+		assertTrue(withId(friday, bookingId).stream().noneMatch(Booking::hasData), "die Stornierung gilt");
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+	}
+
+	// <-- Buchung ohne Platz statt Warten
 }

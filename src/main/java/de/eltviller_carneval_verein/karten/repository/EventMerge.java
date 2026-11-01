@@ -285,7 +285,11 @@ final class EventMerge {
 	 * freiem Sitz der leere Platzhalter), alle Felder, auch die Kennung. Steht dort keine, wird sie angehängt. Sonst bleibt
 	 * alles unberührt und sie wartet ({@link Sink#held}). Gelöscht oder unlesbar: nur die Kundendaten leeren, der
 	 * Platzhalter bekommt eine neue Kennung.</li>
-	 * <li>Buchung ohne Platz: anhand der Kennung aktualisieren, sonst anhängen; gelöscht oder unlesbar: entfernen.</li>
+	 * <li>Buchung ohne Platz: anhand der Kennung aktualisieren, sonst anhängen; gelöscht oder unlesbar: entfernen, außer die
+	 * Buchung steht im Modell nur einmal und eine andere Einheit trägt sie ({@link Plan#carried}): Sie bleibt
+	 * ({@link Sink#reconciled}).</li>
+	 * <li>Buchung auf einem Sitz, den die Bestuhlung der aktuellen Halle nicht hat, während dieselbe Buchung (Kennung) im
+	 * Modell schon ohne Platz steht: Deren Stand wird übernommen, es entsteht keine zweite.</li>
 	 * <li>Buchung unter einer Vorstellung, die nicht im Modell steht: Ist die Vorstellung noch nicht da, wartet eine lesbare
 	 * Buchung ({@link Sink#held}) und wird mit ihr sichtbar. Gelöscht oder unlesbar, oder ist die Vorstellung gelöscht oder
 	 * unlesbar (ihr Stand im {@link Plan}): nur in den Vergleichsstand ({@link #nothingToPlace}).</li>
@@ -449,7 +453,7 @@ final class EventMerge {
 			}
 			// steht dieselbe Buchung (Kennung) schon anderswo, etwa ohne Platz nach einem Bestuhlungswechsel, während der andere
 			// Rechner sie auf den nun fehlenden Sitz umgesetzt hat: Sie ist dieselbe, nicht noch eine daneben
-			Booking carrier = displaced ? movedBooking(presentation, state.getId()) : null;
+			Booking carrier = displaced ? unplacedCarrier(presentation, state.getId()) : null;
 			Booking result = state;
 			if (carrier != null) {
 				carrier.copyFrom(state);
@@ -505,6 +509,11 @@ final class EventMerge {
 	 * die Kennung des alten Käufers). Steht auf dem Sitz nichts mehr, weil der Abgleich die Buchung nach einem Wechsel von
 	 * Halle oder Bestuhlung versetzt hat, gilt dasselbe für die Buchung mit der Kennung aus dem letzten bekannten Stand
 	 * ({@link Plan#lastIds}): Sonst schriebe das nächste Speichern die Stornierung als neuen Verkauf über.
+	 * <p>
+	 * Ausnahme: Die Einheit einer Buchung ohne Platz, die eine andere Einheit trägt ({@link Plan#carried}), räumt die
+	 * Buchung nicht, solange sie im Modell nur einmal steht: Sie ist dorthin gezogen.
+	 *
+	 * @return ob die Buchung dieser Ausnahme wegen stehen blieb
 	 */
 	private static boolean cancel(Presentation presentation, UnitKey unit, Plan plan) {
 		Booking current = bookingAt(presentation, unit);
@@ -542,6 +551,23 @@ final class EventMerge {
 		}
 		for (Booking booking : presentation.getBookings()) {
 			if (bookingId.equals(booking.getId()) && booking.hasData()) {
+				return booking;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Die Buchung mit Daten und dieser Kennung, die im Modell ohne Platz steht (unplatziert oder ohne Sitzkennung), sonst
+	 * {@code null}. Eine Buchung, die gültig auf einem Sitz steht, wird nie übernommen.
+	 */
+	private static Booking unplacedCarrier(Presentation presentation, String bookingId) {
+		if (bookingId == null || presentation.getBookings() == null) {
+			return null;
+		}
+		for (Booking booking : presentation.getBookings()) {
+			if (bookingId.equals(booking.getId()) && booking.hasData()
+					&& (booking.isUnassigned() || booking.getSeatId() == null)) {
 				return booking;
 			}
 		}

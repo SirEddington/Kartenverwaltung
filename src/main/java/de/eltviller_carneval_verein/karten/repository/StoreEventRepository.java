@@ -831,15 +831,14 @@ public class StoreEventRepository implements EventRepository {
 		}
 		for (Map.Entry<UnitKey, ObjectNode> entry : after.entrySet()) {
 			UnitKey unit = entry.getKey();
-			boolean resyncedUnit = resynced.contains(unit);
-			if ((!skip.contains(unit) || resyncedUnit) && (resyncedUnit || !entry.getValue().equals(before.get(unit)))) {
+			if (resynced.contains(unit) || (!skip.contains(unit) && !entry.getValue().equals(before.get(unit)))) {
 				derived.put(unit, entry.getValue());
 			}
 		}
 		Set<UnitKey> candidates = new LinkedHashSet<>(before.keySet());
 		candidates.addAll(resynced);
 		for (UnitKey unit : candidates) {
-			if (!after.containsKey(unit) && (!skip.contains(unit) || resynced.contains(unit)) && baseline.isShown(unit)) {
+			if (!after.containsKey(unit) && (resynced.contains(unit) || !skip.contains(unit)) && baseline.isShown(unit)) {
 				derived.put(unit, null);
 			}
 		}
@@ -908,6 +907,10 @@ public class StoreEventRepository implements EventRepository {
 					&& EventMerge.waits(event, current, presentationStates.get(parent), hallLookup, hallCurrent)) {
 				// Wird die Vorstellung in diesem Schritt eingearbeitet, entscheidet das Einarbeiten mit ihrem neuen Stand
 				holdUnplaced(unit, "sie ist im Modell nicht platzierbar");
+			} else if (carrierTouched(event, current, changes)) {
+				// ein Stand, der eine vom Nutzer berührte Buchung ohne Platz übernähme (dieselbe Kennung), wartet wie jede
+				// Änderung daran
+				defer(event, current, chainOf(chains, unit));
 			} else {
 				backlog.settle(unit);
 				apply.add(current);
@@ -988,17 +991,35 @@ public class StoreEventRepository implements EventRepository {
 			if (carriers == null) {
 				carriers = shownBookingIds(event.getId());
 			}
-			if (!carriedElsewhere(carriers, last.getId(), unit)) {
+			// bewusst nach dem Vergleichsstand allein: Löschte derselbe Aufruf die tragende Einheit, räumt die Löschung der
+			// Einheit ohne Platz die Buchung (siehe carriedUnits); eine Stornierung träfe sonst die Eingabe auf dem Sitz
+			if (!carriedElsewhere(carriers, last.getId(), unit, Map.of())) {
 				ids.put(unit, last.getId());
 			}
 		}
 		return ids;
 	}
 
-	/** Ob eine andere angezeigte Einheit derselben Vorstellung die Buchung mit dieser Kennung trägt. */
-	private static boolean carriedElsewhere(Map<String, List<UnitKey>> carriers, String bookingId, UnitKey unit) {
+	/**
+	 * Ob eine andere angezeigte Einheit derselben Vorstellung die Buchung mit dieser Kennung trägt. Eine Einheit, die im
+	 * selben Aufruf gelöscht wird oder unlesbar ist oder eine andere Kennung bekommt ({@code batch}), trägt sie nicht mehr.
+	 */
+	private static boolean carriedElsewhere(Map<String, List<UnitKey>> carriers, String bookingId, UnitKey unit,
+			Map<UnitKey, String> batch) {
 		return carriers.getOrDefault(bookingId, List.of()).stream()
-				.anyMatch(other -> !other.equals(unit) && other.presentationId().equals(unit.presentationId()));
+				.anyMatch(other -> !other.equals(unit) && other.presentationId().equals(unit.presentationId())
+						&& (!batch.containsKey(other) || bookingId.equals(batch.get(other))));
+	}
+
+	/** Die Kennung der Buchung je Buchungs-Einheit unter {@code successors}; {@code null} bei gelöschten und unlesbaren. */
+	private static Map<UnitKey, String> batchIds(List<UnitSnapshot> successors) {
+		Map<UnitKey, String> ids = new HashMap<>();
+		for (UnitSnapshot snapshot : successors) {
+			if (snapshot.unit().type() == UnitType.BOOKING) {
+				ids.put(snapshot.unit(), UnitMapper.isReadable(snapshot) ? ConflictInput.bookingIdOf(snapshot.payload()) : null);
+			}
+		}
+		return ids;
 	}
 
 	/**
@@ -1007,6 +1028,7 @@ public class StoreEventRepository implements EventRepository {
 	 */
 	private Set<UnitKey> carriedUnits(Event event, List<UnitSnapshot> successors) {
 		Set<UnitKey> units = new HashSet<>();
+		Map<UnitKey, String> batch = batchIds(successors);
 		Map<String, List<UnitKey>> carriers = null;
 		for (UnitSnapshot snapshot : successors) {
 			UnitKey unit = snapshot.unit();
@@ -1021,7 +1043,7 @@ public class StoreEventRepository implements EventRepository {
 			if (carriers == null) {
 				carriers = shownBookingIds(event.getId());
 			}
-			if (carriedElsewhere(carriers, last.getId(), unit)) {
+			if (carriedElsewhere(carriers, last.getId(), unit, batch)) {
 				units.add(unit);
 			}
 		}
@@ -1058,6 +1080,31 @@ public class StoreEventRepository implements EventRepository {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Ob der lesbare Stand einer Buchung auf einem Sitz, den das Modell nicht hat, eine Buchung mit derselben Kennung
+	 * übernähme (siehe {@link EventMerge}: dieselbe Buchung steht dort ohne Platz), an der der Nutzer ungespeichert etwas
+	 * geändert hat oder die er gerade bearbeitet. Dann wartet der Stand wie jede Änderung daran: Das Übernehmen
+	 * überschriebe die Eingabe.
+	 */
+	private boolean carrierTouched(Event event, UnitSnapshot current, LocalChanges changes) {
+		UnitKey unit = current.unit();
+		if (event == null || changes.model() == null || unit.type() != UnitType.BOOKING || unit.isUnassigned()
+				|| !UnitMapper.isReadable(current) || EventMerge.modelObject(event, unit) != null) {
+			return false;
+		}
+		String bookingId = ConflictInput.bookingIdOf(current.payload());
+		if (bookingId == null) {
+			return false;
+		}
+		if (movedBookingTouched(event, changes, bookingId, unit)) {
+			return true;
+		}
+		// eine Eingabe an einer sonst unveränderten Buchung ist nicht "versetzt"
+		Presentation presentation = EventMerge.presentation(event, unit.presentationId());
+		return presentation != null && presentation.getBookings() != null && presentation.getBookings().stream()
+				.anyMatch(booking -> bookingId.equals(booking.getId()) && booking.hasData() && inEditing.test(booking));
 	}
 
 	/**
@@ -1266,7 +1313,12 @@ public class StoreEventRepository implements EventRepository {
 		// über den Abgleich ändern Buchungen mit: eine eingearbeitete Vorstellung oder eine Buchung, deren Sitz endgültig fehlt
 		if (changes.model() != null
 				&& (!resynced.isEmpty() || apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION))) {
-			noteDerived(event, changes.model(), adopted, resynced);
+			// was der Nutzer schon vor dem Einarbeiten ungespeichert geändert hatte, bleibt lokal verändert
+			Set<UnitKey> skip = new HashSet<>(adopted);
+			skip.addAll(changes.units());
+			Set<UnitKey> reconciled = new LinkedHashSet<>(resynced);
+			reconciled.removeAll(changes.units());
+			noteDerived(event, changes.model(), skip, reconciled);
 		}
 		EventMerge.Plan applied = plan;
 		listeners.notifyChangedByOthers(event,
