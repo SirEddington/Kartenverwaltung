@@ -160,6 +160,79 @@ class FeedReaderTest {
 		assertFalse(again.fullSyncNeeded());
 	}
 
+	/** Drei Listen von {@link #PEER_A} mit je einem Verkauf an e1, e2, e3; jeder Lesezugriff kostet 100 ms. */
+	private List<UnitKey> threeSlowListsOfPeerA() throws IOException {
+		positions.set(PEER_A, 0);
+		List<UnitKey> units = List.of(UnitKey.event("e1"), UnitKey.event("e2"), UnitKey.event("e3"));
+		for (int i = 0; i < units.size(); i++) {
+			sell(PEER_A, i + 1, units.get(i), version(PEER_A, "Kasse 2", VersionId.create(1_000_000L + i, PEER_A, i)));
+		}
+		sharedLayer.onEach("read", () -> clock.advance(Duration.ofMillis(100)));
+		return units;
+	}
+
+	@Test
+	void pollStopsAfterTheListThatUsedUpTheBudget() throws IOException {
+		List<UnitKey> units = threeSlowListsOfPeerA();
+
+		FeedPoll first = reader.poll(Duration.ofMillis(1));
+
+		// mindestens eine Liste je Durchlauf, auch über das Budget
+		assertEquals(Set.of(units.get(0)), first.changed());
+		assertEquals(1L, positions.position(PEER_A));
+		assertEquals(1L, reloaded().position(PEER_A), "die Position ist gespeichert");
+
+		reader.poll(Duration.ofMillis(1));
+		assertEquals(2L, positions.position(PEER_A));
+		reader.poll();
+		assertEquals(3L, positions.position(PEER_A));
+	}
+
+	@Test
+	void budgetReadsTheMachinesInTurnSoThatManyListsDoNotHoldUpTheOthers() throws IOException {
+		List<UnitKey> units = threeSlowListsOfPeerA();
+		positions.set(PEER_B, 0);
+		UnitKey other = UnitKey.event("e4");
+		sell(PEER_B, 1, other, version(PEER_B, "Kasse 3", FOREIGN));
+
+		FeedPoll poll = reader.poll(Duration.ofMillis(1));
+
+		assertEquals(Set.of(units.get(0), other), poll.changed());
+		assertEquals(1L, positions.position(PEER_A));
+		assertEquals(1L, positions.position(PEER_B));
+	}
+
+	@Test
+	void withoutBudgetAllListsAreReadInOnePoll() throws IOException {
+		threeSlowListsOfPeerA();
+
+		FeedPoll poll = reader.poll();
+
+		assertEquals(3L, positions.position(PEER_A));
+		assertFalse(poll.more());
+	}
+
+	@Test
+	void pollThatStopsAtTheBudgetReportsMore() throws IOException {
+		threeSlowListsOfPeerA();
+
+		assertTrue(reader.poll(Duration.ofMillis(1)).more());
+		assertTrue(reader.poll(Duration.ofMillis(1)).more());
+		// die dritte Liste ist gelesen; ob es eine vierte gibt, weiß erst der nächste Durchlauf
+		reader.poll(Duration.ofMillis(1));
+
+		assertFalse(reader.poll(Duration.ofMillis(1)).more());
+		assertEquals(3L, positions.position(PEER_A));
+	}
+
+	@Test
+	void listWaitingForAVersionFileIsNoBacklog() throws IOException {
+		positions.set(PEER_A, 0);
+		putFeed(PEER_A, 1, entry(UNIT, version(PEER_A, "Kasse 2", V1)));
+
+		assertFalse(reader.poll(Duration.ofMillis(1)).more());
+	}
+
 	@Test
 	void feedsOfOneMachineAreReadInOrder() throws IOException {
 		positions.set(PEER_A, 0);
@@ -473,8 +546,9 @@ class FeedReaderTest {
 
 		reader.poll();
 
-		assertEquals(150L, positions.position(PEER_A));
-		assertEquals(50L, positions.position(PEER_B));
+		// reihum je Rechner eine Liste: Beide teilen sich die 200
+		assertEquals(100L, positions.position(PEER_A));
+		assertEquals(100L, positions.position(PEER_B));
 	}
 
 	@Test

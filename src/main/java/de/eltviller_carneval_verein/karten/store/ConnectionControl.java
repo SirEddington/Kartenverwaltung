@@ -41,6 +41,9 @@ public interface ConnectionControl {
 	/** Ob der erste Vollabgleich der Verbindung zu Ende kam. */
 	ReadOnlyBooleanProperty connectionComplete();
 
+	/** Ob noch Änderungslisten anderer Rechner auf das Lesen warten (mehr, als ein Takt liest). */
+	ReadOnlyBooleanProperty catchingUp();
+
 	/** Der gemeinsame Ordner aus der Marke "verbunden"; leer ohne (lesbare) Marke. */
 	Optional<String> connectedDir();
 

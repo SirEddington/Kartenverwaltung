@@ -64,6 +64,15 @@ class SyncStatusTest {
 	}
 
 	@Test
+	void catchingUpShowsItsHintWhileCurrent() {
+		sync.state(SyncState.AKTUELL).catchingUp(true);
+		assertEquals(7, rank());
+
+		sync.catchingUp(false);
+		assertEquals(0, rank());
+	}
+
+	@Test
 	void pendingRestartsAfterBeingCurrentInBetween() {
 		sync.state(SyncState.AUSSTEHEND);
 		clock.advance(Duration.ofSeconds(40));

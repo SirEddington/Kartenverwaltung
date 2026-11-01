@@ -15,7 +15,30 @@ class SyncHintTest {
 
 	private static SyncHint hint(SyncState state, Duration pendingFor, boolean complete, Double progress,
 			boolean firstRunEnded, int skipped) {
-		return SyncHint.of(state, pendingFor, complete, progress, firstRunEnded, skipped).orElseThrow();
+		return SyncHint.of(state, pendingFor, complete, progress, firstRunEnded, false, skipped).orElseThrow();
+	}
+
+	@Test
+	void catchingUpShowsRankSeven() {
+		assertHint(7, "Verkäufe anderer Rechner kommen noch an",
+				SyncHint.of(SyncState.AKTUELL, NONE, true, null, false, true, 0).orElseThrow());
+	}
+
+	@Test
+	void pendingWinsOverCatchingUpAndCatchingUpOverSkipped() {
+		assertHint(6, "Hochladen verzögert: Verkäufe vorläufig",
+				SyncHint.of(SyncState.AUSSTEHEND, Duration.ofSeconds(31), true, null, false, true, 2).orElseThrow());
+		assertHint(7, "Verkäufe anderer Rechner kommen noch an",
+				SyncHint.of(SyncState.AKTUELL, NONE, true, null, false, true, 2).orElseThrow());
+	}
+
+	@Test
+	void incompleteFirstRunAndOfflineWinOverCatchingUp() {
+		assertHint(4, "Noch nicht vollständig abgeglichen (10 %)",
+				SyncHint.of(SyncState.AKTUELL, NONE, false, 0.1, false, true, 0).orElseThrow());
+		assertHint(2, "Offline: Verkäufe vorläufig",
+				SyncHint.of(SyncState.OFFLINE, NONE, true, null, false, true, 0).orElseThrow());
+		assertEquals(Optional.empty(), SyncHint.of(SyncState.AUS, NONE, true, null, false, true, 0));
 	}
 
 	private static void assertHint(int rank, String text, SyncHint actual) {
@@ -55,7 +78,7 @@ class SyncHintTest {
 
 	@Test
 	void pendingShowsOnlyAfterThirtySeconds() {
-		assertEquals(Optional.empty(), SyncHint.of(SyncState.AUSSTEHEND, Duration.ofSeconds(29), true, null, false, 0));
+		assertEquals(Optional.empty(), SyncHint.of(SyncState.AUSSTEHEND, Duration.ofSeconds(29), true, null, false, false, 0));
 		assertHint(6, "Hochladen verzögert: Verkäufe vorläufig",
 				hint(SyncState.AUSSTEHEND, Duration.ofSeconds(30), true, null, false, 0));
 		assertHint(6, "Hochladen verzögert: Verkäufe vorläufig",
@@ -63,22 +86,22 @@ class SyncHintTest {
 	}
 
 	@Test
-	void skippedEntriesAloneShowRankSevenWithPlural() {
-		assertHint(7, "1 Eintrag nicht abgeglichen", hint(SyncState.AKTUELL, NONE, true, null, false, 1));
-		assertHint(7, "3 Einträge nicht abgeglichen", hint(SyncState.AKTUELL, NONE, true, null, false, 3));
+	void skippedEntriesAloneShowRankEightWithPlural() {
+		assertHint(8, "1 Eintrag nicht abgeglichen", hint(SyncState.AKTUELL, NONE, true, null, false, 1));
+		assertHint(8, "3 Einträge nicht abgeglichen", hint(SyncState.AKTUELL, NONE, true, null, false, 3));
 	}
 
 	@Test
 	void nothingWhenOffOrCurrentOrPendingBriefly() {
-		assertEquals(Optional.empty(), SyncHint.of(SyncState.AUS, NONE, true, null, false, 0));
-		assertEquals(Optional.empty(), SyncHint.of(SyncState.AKTUELL, NONE, true, null, false, 0));
-		assertEquals(Optional.empty(), SyncHint.of(SyncState.AUSSTEHEND, Duration.ofSeconds(10), true, null, false, 0));
-		assertEquals(Optional.empty(), SyncHint.of(null, NONE, true, null, false, 0));
+		assertEquals(Optional.empty(), SyncHint.of(SyncState.AUS, NONE, true, null, false, false, 0));
+		assertEquals(Optional.empty(), SyncHint.of(SyncState.AKTUELL, NONE, true, null, false, false, 0));
+		assertEquals(Optional.empty(), SyncHint.of(SyncState.AUSSTEHEND, Duration.ofSeconds(10), true, null, false, false, 0));
+		assertEquals(Optional.empty(), SyncHint.of(null, NONE, true, null, false, false, 0));
 	}
 
 	@Test
 	void singleModeShowsNothingEvenWithStaleValues() {
-		assertEquals(Optional.empty(), SyncHint.of(SyncState.AUS, NONE, false, 0.5, false, 2));
+		assertEquals(Optional.empty(), SyncHint.of(SyncState.AUS, NONE, false, 0.5, false, true, 2));
 	}
 
 	@Test
