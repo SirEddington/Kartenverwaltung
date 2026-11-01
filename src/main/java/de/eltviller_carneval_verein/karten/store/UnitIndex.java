@@ -55,10 +55,10 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * <p>
  * Wird eine Datei unter gleichem Namen ersetzt (späte Niederlage, Heilung; siehe {@link FileLayer#replaceDamaged}), bleibt
  * die alte als {@code <Name>.json.<Endung>} (z. B. {@code .corrupt-…}, {@code .verdraengt-…}) daneben liegen. Solche
- * Nebenkopien einer Versions- oder Anspruchsdatei gehen deshalb als Zeilen {@code s:<Name>} in den Abdruck aus dem
- * Verzeichnisbaum ein. Der gespeicherte Abdruck der gelesenen Dateien kennt sie nicht: Eine Einheit mit Nebenkopie
- * stimmt nie mit ihrem Eintrag überein und wird bei jedem Start neu aufgelöst, und zwar sofort, sobald die erste
- * Nebenkopie entsteht. Fremde Namen ({@code Thumbs.db}, {@code .tmp}, Konfliktkopien) zählen nicht. Bekannte,
+ * Nebenkopien zählen nicht: Das Ersetzen selbst zeigen Größe und Änderungszeit der neuen Datei (sie entsteht über eine
+ * temporäre Datei, also mit neuer Zeit). Bis Format 3 gingen sie als Zeilen {@code s:<Name>} ein; das löste eine Einheit
+ * mit Nebenkopie bei jedem Start neu auf. Fremde Namen ({@code Thumbs.db}, {@code .tmp}, Konfliktkopien) zählen ebenfalls
+ * nicht. Bekannte,
  * hingenommene Lücke: Ein Eintrag, der weder normale Datei noch Ordner ist, wird von {@code readUnit} gesehen, vom
  * Verzeichnisbaum aber nicht; das führt höchstens zu einer erneuten Auflösung, nie zu einem falschen Stand.
  * <p>
@@ -80,8 +80,8 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * die App seither nichts geschrieben hat, nicht, dass niemand sonst den Bestand geändert hat (KARV-107). Die Marke entsteht nur in {@link #writeCleanMarker} (und nur ohne ungeschriebene
  * Änderungen). Wer danach den Bestand ändern will, ruft vor der ersten geschriebenen Datei {@link #invalidateCleanMarker}
  * auf (nicht erst beim Eintragen des Ergebnisses: bis dahin kann der Prozess enden); {@link #update} und {@link #clear}
- * löschen sie zusätzlich. Scheitert das Löschen, wird die Marke geleert, und eine leere Marke gilt als unbrauchbar. Temporäre Reste und
- * geänderte Dateien entstehen nur bei einem Absturz, dann fehlt die Marke und der nächste Start prüft wie gewohnt.
+ * löschen sie zusätzlich. Scheitert das Löschen, wird die Marke geleert, und eine leere Marke gilt als unbrauchbar.
+ * Temporäre Reste und halb geschriebene Änderungen der App entstehen nur bei einem Absturz, dann fehlt die Marke.
  * <p>
  * <b>Sperrdatei:</b> Jeder Start und jedes Ungültigmachen legt vorher die leere Datei {@code <Index>/unclean} an
  * ({@link #markUnclean}), immer, nicht erst wenn sich die Marke nicht entfernen lässt: Nicht jeder Schreibweg macht die
@@ -263,18 +263,11 @@ final class UnitIndex {
 	 * @param claims   die Stempel der Anspruchsdateien nach Name
 	 */
 	static String fingerprint(Map<VersionId, String> versions, Map<String, String> claims) {
-		return fingerprint(versions, claims, List.of());
-	}
-
-	/** Wie {@link #fingerprint(Map, Map)}, mit den Zeilen {@code s:<Name>} der Nebenkopien am Ende. */
-	private static String fingerprint(Map<VersionId, String> versions, Map<String, String> claims,
-			Collection<String> sideCopies) {
 		StringBuilder text = new StringBuilder();
 		versions.entrySet().stream().map(v -> v.getKey().value() + "|" + v.getValue()).sorted()
 				.forEach(v -> text.append("v:").append(v).append('\n'));
 		claims.entrySet().stream().map(c -> c.getKey() + "|" + c.getValue()).sorted()
 				.forEach(c -> text.append("c:").append(c).append('\n'));
-		sideCopies.stream().sorted().forEach(s -> text.append("s:").append(s).append('\n'));
 		return StoreCodec.sha256(text.toString().getBytes(StandardCharsets.UTF_8));
 	}
 
@@ -289,43 +282,22 @@ final class UnitIndex {
 
 	/**
 	 * Der Abdruck einer Einheit aus einem Verzeichnisbaum ({@link FileLayer#listTree}), ohne eine Datei zu lesen. Es gelten
-	 * die Namensregeln von {@link VersionStore#versionIdOf} und {@link VersionStore#claimNameOf}. Zusätzlich zählen die
-	 * Nebenkopien ersetzter Dateien ({@code <Name>.json.<Endung>} im Einheitenordner bzw. unter {@code claims/}), siehe
-	 * Klassenbeschreibung.
+	 * die Namensregeln von {@link VersionStore#versionIdOf} und {@link VersionStore#claimNameOf}; alle anderen Namen
+	 * zählen nicht, auch keine Nebenkopien ersetzter Dateien (siehe Klassenbeschreibung).
 	 *
 	 * @param tree     der Verzeichnisbaum des Datenordners
 	 * @param unitPath der Ordner der Einheit relativ zum Datenordner (siehe {@link UnitKey#relativePath()})
 	 */
 	static String fingerprintFromListing(Map<String, List<FileLayer.DirEntry>> tree, String unitPath) {
 		Map<VersionId, String> versions = new HashMap<>();
-		List<String> sideCopies = new ArrayList<>();
 		for (FileLayer.DirEntry file : tree.getOrDefault(unitPath, List.of())) {
-			String name = file.name();
-			VersionStore.versionIdOf(name).ifPresent(id -> versions.put(id, file.stamp()));
-			String base = sideCopyBase(name);
-			if (base != null && VersionStore.versionIdOf(base).isPresent()) {
-				sideCopies.add(name);
-			}
+			VersionStore.versionIdOf(file.name()).ifPresent(id -> versions.put(id, file.stamp()));
 		}
 		Map<String, String> claims = new HashMap<>();
 		for (FileLayer.DirEntry file : tree.getOrDefault(unitPath + "/" + CLAIMS, List.of())) {
-			String name = file.name();
-			VersionStore.claimNameOf(name).ifPresent(claim -> claims.put(claim, file.stamp()));
-			String base = sideCopyBase(name);
-			if (base != null && VersionStore.claimNameOf(base).isPresent()) {
-				sideCopies.add(CLAIMS + "/" + name);
-			}
+			VersionStore.claimNameOf(file.name()).ifPresent(claim -> claims.put(claim, file.stamp()));
 		}
-		return fingerprint(versions, claims, sideCopies);
-	}
-
-	/**
-	 * Bei einem Namen der Form {@code <Stamm>.json.<Endung>} (nicht leere Endung) der Teil bis einschließlich
-	 * {@code .json}, den die Namensregeln des Versionsspeichers beurteilen; sonst {@code null}.
-	 */
-	private static String sideCopyBase(String name) {
-		int dot = name.indexOf(JSON + ".");
-		return dot < 0 || name.length() == dot + JSON.length() + 1 ? null : name.substring(0, dot + JSON.length());
+		return fingerprint(versions, claims);
 	}
 
 	/**

@@ -4033,6 +4033,36 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void healedUnitIsNotResolvedAgainAfterACleanRestart() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Path localV1 = localFile(a, BOOKING, v1.id() + ".json");
+		Files.writeString(localV1, "kaputt");
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(BOOKING).status());
+		a.service.tick();
+		assertEquals(Status.OK, a.service.unitState(BOOKING).status());
+		assertTrue(names(localV1.getParent()).stream().anyMatch(n -> n.startsWith(v1.id() + ".json.corrupt-")));
+		a.service.closeIndex();
+		// wie in cleanlyClosedNode: Der Abgleich beim Start nimmt auch die Ordner ohne eigene Dateien auf
+		List<Runnable> queued = new ArrayList<>();
+		Node full = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, queued::add);
+		full.service.startup(shared);
+		full.service.closeIndex();
+
+		try (LogCapture log = new LogCapture()) {
+			Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, queued::add);
+			assertTrue(b.service.startup(shared));
+
+			// die Nebenkopie der Heilung ist keine Änderung von außen
+			assertTrue(trustedIndex(b));
+			assertEquals(0, log.warnings(CHANGED_OUTSIDE), log.records.stream().map(LogRecord::getMessage).toList()
+					.toString());
+		}
+	}
+
+	@Test
 	void cleanRestartAfterSharedSaveReadsNoUnit() throws IOException {
 		Node a = node("a");
 		a.service.startup(shared);

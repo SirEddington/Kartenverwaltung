@@ -122,8 +122,8 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * <b>Start-Index:</b> Der Stand jeder Einheit steht zusätzlich in einem lokalen Index ({@link UnitIndex}, Ordner
  * {@code <AppData>/index}, neben {@code data/}), den {@link #snapshots()} ohne Dateizugriff liefert, mit der gültigen Kette ohne Inhalt
  * ({@link #chains}) für den Verlauf. {@link #startup} gleicht ihn in
- * einem Durchlauf über die Verzeichnisnamen mit dem Bestand ab und löst nur Einheiten neu auf, deren Dateinamen sich
- * geändert haben; nur die dabei gefundenen Kandidaten mit ausstehenden eigenen Versionen untersucht der Start auf dem
+ * einem Durchlauf über den Bestand (Namen, Größe und Änderungszeit der Dateien) ab und löst nur Einheiten neu auf, deren
+ * Dateien sich geändert haben; nur die dabei gefundenen Kandidaten mit ausstehenden eigenen Versionen untersucht der Start auf dem
  * Thread des Aufrufers. Jede Stelle, die den Stand einer Einheit ermittelt, trägt ihn danach in den Index ein. Gespeichert
  * wird er von {@link #flushIndex()} und im Takt alle {@link #INDEX_FLUSH}, nicht vor dem Abgleich durch {@link #startup}.
  * Bei einer neuen Rechner-ID (SYS-011) wird er nicht neu aufgebaut: Er übernimmt sie, und die früheren IDs zählen bis zum
@@ -731,13 +731,11 @@ public final class SyncService implements ConnectionControl {
 
 	/**
 	 * Wie {@link #startup(String)}, mit Fortschritt. Zuerst prüft der Start die Marke "sauber beendet" (siehe
-	 * {@link #closeIndex()}) und löscht sie dabei sofort. Gilt sie und sind alle Index-Dateien lesbar, wird der Index
-	 * ohne Durchlauf über den Bestand übernommen: Weder die eigenen temporären Dateien werden aufgeräumt noch die
-	 * Verzeichnisnamen durchlaufen; die Kandidaten für ausstehende Versionen sind die Einträge des Index mit entsprechender
-	 * Kennzeichnung. Sonst (nach einem Absturz, ohne oder mit fremder Marke, bei unbrauchbarem Index) räumt der Start zuerst
-	 * eigene temporäre Dateien älter als einen Tag auf und gleicht den Start-Index mit dem lokalen
-	 * Bestand ab (ein Durchlauf über die Verzeichnisnamen; nur Einheiten mit geänderten Dateinamen werden neu aufgelöst).
-	 * Ausstehende eigene Versionen werden nur bei den Einheiten gesucht, die der Index dafür nennt; die Entscheidung trifft
+	 * {@link #closeIndex()}) und löscht sie dabei sofort. Gilt sie und sind alle Index-Dateien lesbar, liest er den Index
+	 * schon ein. Danach gleicht der Start den Index in jedem Fall (mit oder ohne Marke) mit dem lokalen Bestand ab, denn
+	 * der Bestand kann auch nach sauberem Beenden an der App vorbei geändert worden sein (KARV-107): ein Durchlauf über
+	 * Namen, Größe und Änderungszeit der Dateien, der dabei eigene temporäre Dateien älter als einen Tag aufräumt; nur
+	 * Einheiten mit geänderten Dateien werden neu aufgelöst. Ausstehende eigene Versionen werden nur bei den Einheiten gesucht, die der Index dafür nennt; die Entscheidung trifft
 	 * wie überall {@link ChainResolver} auf den Dateien. Scheitert der Abgleich, baut der Start den Index neu auf: Er löst jede
 	 * Einheit des Bestands einzeln aus den Dateien auf. Lässt sich dabei eine nicht lesen (oder der Bestand nicht auflisten),
 	 * scheitert der Start, denn mit einem unvollständigen Bestand wäre ein belegter Platz frei.

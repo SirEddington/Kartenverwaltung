@@ -558,6 +558,9 @@ class UnitIndexTest {
 		Files.writeString(unitDir.resolve("claims").resolve("Thumbs.db"), "x");
 		Files.writeString(unitDir.resolve("presentations/p1/~karv-1.tmp"), "x");
 		Files.createDirectories(unitDir.resolve("presentations/p1").resolve(mine(9) + ".json"));
+		// Nebenkopien ersetzter Dateien (Heilung, späte Niederlage)
+		Files.writeString(unitDir.resolve(mine(1) + ".json.corrupt-1"), "x");
+		Files.writeString(unitDir.resolve("claims").resolve("root.json.verdraengt-1"), "x");
 		Map<String, List<FileLayer.DirEntry>> tree = new NioFileLayer().listTree(local.dataRoot());
 
 		List<UnitKey> units = local.allUnits();
@@ -629,19 +632,18 @@ class UnitIndexTest {
 	}
 
 	@Test
-	void fingerprintFromListingCountsSideCopiesOfReplacedFilesOnly() {
+	void fingerprintFromListingCountsOnlyVersionAndClaimFiles() {
 		String v = mine(1) + ".json";
 		Map<String, List<String>> plain = Map.of("events/e1", List.of(v), "events/e1/claims", List.of("root.json"));
 		String base = UnitIndex.fingerprintFromListing(listing(plain), "events/e1");
 
-		assertNotEquals(base, UnitIndex.fingerprintFromListing(listing(
-				Map.of("events/e1", List.of(v, v + ".corrupt-1"), "events/e1/claims", List.of("root.json"))), "events/e1"));
-		assertNotEquals(base, UnitIndex.fingerprintFromListing(listing(
-				Map.of("events/e1", List.of(v), "events/e1/claims", List.of("root.json", "root.json.verdraengt-1"))),
+		// Nebenkopien zählen nicht: Ein Ersetzen unter gleichem Namen zeigen Größe und Änderungszeit der neuen Datei
+		assertEquals(base, UnitIndex.fingerprintFromListing(listing(Map.of("events/e1", List.of(v, v + ".corrupt-1",
+				"Thumbs.db", "x.json.corrupt-1", v + ".", "~karv-1.tmp", mine(1) + " (Konfliktkopie).json"),
+				"events/e1/claims", List.of("root.json", "root.json.verdraengt-1", "Thumbs.db", "abc.json.bak"))),
 				"events/e1"));
-		assertEquals(base, UnitIndex.fingerprintFromListing(listing(Map.of("events/e1", List.of(v, "Thumbs.db",
-				"x.json.corrupt-1", v + ".", "~karv-1.tmp", mine(1) + " (Konfliktkopie).json"), "events/e1/claims",
-				List.of("root.json", "Thumbs.db", "abc.json.bak"))), "events/e1"));
+		assertNotEquals(base, UnitIndex.fingerprintFromListing(listing(
+				Map.of("events/e1", List.of(v, mine(2) + ".json"), "events/e1/claims", List.of("root.json"))), "events/e1"));
 	}
 
 	@Test
