@@ -68,8 +68,9 @@ final class EventMerge {
 		}
 
 		/**
-		 * Die Buchung wurde nur angenommen, weil ihr Platz in der Bestuhlung der aktuellen Halle endgültig fehlt: Sie ist
-		 * eingearbeitet und die Vorstellung abgeglichen, die Buchung steht ohne Platz oder auf einem passenden Sitz.
+		 * Die Buchung auf einem Sitz wurde nur angenommen, weil ihr Sitz in der Bestuhlung der aktuellen Halle endgültig fehlt:
+		 * Sie ist eingearbeitet und die Vorstellung abgeglichen, die Buchung steht ohne Platz oder auf einem Sitz mit anderer
+		 * Beschriftung. Keine Meldung gibt es ohne Halle, für eine Buchung ohne Platz und wenn sich ihr Platz nicht ändert.
 		 *
 		 * @param hint der fertige Hinweistext für den Nutzer
 		 */
@@ -424,9 +425,10 @@ final class EventMerge {
 			presentation.getBookings().add(state);
 			if (displaced) {
 				resync(presentation, plan);
-				// ohne Halle gibt es keine Bestuhlung, die der Hinweis nennen könnte: Die Buchung steht dann still ohne Platz
-				if (presentation.getHallId() != null) {
-					displacedHint = displacedText(resultOf(presentation, state), oldPlace, presentation);
+				// nur ein Sitz, den die Bestuhlung nicht hat, ist einen Hinweis wert; ohne Halle gibt es keine Bestuhlung, die er
+				// nennen könnte (die Buchung steht dann still ohne Platz), und eine Buchung ohne Platz hat keinen Sitz verloren
+				if (presentation.getHallId() != null && !unit.isUnassigned()) {
+					displacedHint = displacedText(state, oldPlace, presentation);
 				}
 			}
 		}
@@ -437,26 +439,23 @@ final class EventMerge {
 		}
 	}
 
-	/** Die Buchung mit der Kennung von {@code state} in der Vorstellung nach dem Abgleich, sonst {@code state} selbst. */
-	private static Booking resultOf(Presentation presentation, Booking state) {
-		for (Booking booking : presentation.getBookings()) {
-			if (Objects.equals(booking.getId(), state.getId())) {
-				return booking;
-			}
-		}
-		return state;
-	}
-
 	/**
-	 * Der Hinweis für eine Buchung, die nur angenommen wurde, weil ihr Platz endgültig fehlt (siehe {@link Sink#displaced}),
-	 * nach dem Ergebnis des Abgleichs: ohne Platz oder auf dem neuen Sitz.
+	 * Der Hinweis für eine Buchung auf einem Sitz, den die Bestuhlung nicht hat (siehe {@link Sink#displaced}), nach dem
+	 * Ergebnis des Abgleichs: ohne Platz oder auf dem neuen Sitz. Steht sie danach auf einem Sitz mit derselben Beschriftung
+	 * (Schritt 2 setzt sie nur auf einen Sitz, dessen Reihe, Tisch und Nummer sie schon trägt), hat sich für den Nutzer
+	 * nichts geändert: kein Hinweis ({@code null}).
 	 *
+	 * @param result   die Buchung nach dem Abgleich (er behält die Identität einer Buchung mit Daten)
 	 * @param oldPlace der Platz des eingearbeiteten Stands, vor dem Abgleich
 	 */
 	private static String displacedText(Booking result, String oldPlace, Presentation presentation) {
+		boolean unassigned = result.isUnassigned();
+		if (!unassigned && Objects.equals(result.getPlaceLabel(), oldPlace)) {
+			return null;
+		}
 		String customer = EntityLabels.customer(result);
 		String who = customer.isEmpty() ? "Eine Buchung" : customer;
-		String now = result.isUnassigned() ? "ohne Platz" : "auf " + result.getPlaceLabel();
+		String now = unassigned ? "ohne Platz" : "auf " + result.getPlaceLabel();
 		return who + " steht jetzt " + now + ": " + oldPlace + " gibt es in der Bestuhlung von "
 				+ EntityLabels.presentation(presentation) + " nicht.";
 	}

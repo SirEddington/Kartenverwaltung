@@ -250,7 +250,7 @@ class EventMergeTest {
 		// eine Buchung des Modells, deren Sitz die Bestuhlung nicht hat: Der Abgleich ändert sie (ohne Platz)
 		Booking old = booking(friday, "alter-sitz", 5, "Alt");
 		Event state = copyOfUnchecked(event);
-		// Reihe A, Tisch 1, Sitz 1 sind die Beschriftung des Sitzes der Bestuhlung: Der Abgleich setzt die Buchung dorthin
+		// Reihe A, Tisch 1, Sitz 1 sind die Beschriftung des Sitzes der Bestuhlung, den im Modell der Platzhalter trägt
 		booking(state.getPresentations().get(0), "fremder-sitz", 1, "Müller");
 		UnitKey unit = UnitKey.booking(event.getId(), friday.getId(), "fremder-sitz");
 		Event control = copyOfUnchecked(event);
@@ -649,6 +649,78 @@ class EventMergeTest {
 		assertEquals(List.of(unit), sink.displacedUnits);
 		assertEquals(Map.of(unit, true), sink.adopted);
 		assertTrue(sink.held.isEmpty());
+	}
+
+	private static Booking byId(Presentation presentation, String id) {
+		return presentation.getBookings().stream().filter(b -> id.equals(b.getId())).findFirst().orElseThrow();
+	}
+
+	@Test
+	void displacedBookingWithoutNameIsReportedAsABooking() {
+		Hall hall = hallWithOneSeat();
+		Event event = eventInHall(hall);
+		Presentation friday = event.getPresentations().get(0);
+		Event state = copyOfUnchecked(event);
+		// nur ein Kommentar: Die Buchung hat Daten, aber keinen Kunden
+		Booking foreign = booking(state.getPresentations().get(0), "fremder-sitz", 7, null);
+		foreign.setComment("Rollstuhl");
+		UnitKey unit = UnitKey.booking(event.getId(), friday.getId(), "fremder-sitz");
+		Recording sink = new Recording();
+
+		EventMerge.apply(event, displacedPlan(event, hall, state, unit), sink);
+
+		assertTrue(byId(friday, foreign.getId()).isUnassigned());
+		assertEquals(List.of("Eine Buchung steht jetzt ohne Platz: Tisch A1, Sitz 7 gibt es in der Bestuhlung von Vorstellung Freitag nicht."),
+				sink.displaced);
+	}
+
+	@Test
+	void displacedBookingSetOntoASeatWithTheSameLabelIsNotReported() {
+		Hall hall = hallWithOneSeat();
+		Event event = eventInHall(hall);
+		Presentation friday = event.getPresentations().get(0);
+		// der Sitz der Bestuhlung ist im Modell frei (keine Buchung trägt ihn): Nur dann trifft Schritt 2 ihn
+		friday.getBookings().clear();
+		Event state = copyOfUnchecked(event);
+		// unbekannte Sitzkennung, aber Reihe A, Tisch 1, Sitz 1 sind die Beschriftung des Sitzes der Bestuhlung: Schritt 2 des
+		// Abgleichs setzt sie dorthin, und das kann nur auf einen Sitz mit derselben Beschriftung geschehen: Der Nutzer sieht
+		// keinen Unterschied
+		Booking foreign = booking(state.getPresentations().get(0), "fremder-sitz", 1, "Müller");
+		UnitKey unit = UnitKey.booking(event.getId(), friday.getId(), "fremder-sitz");
+		Recording sink = new Recording();
+
+		EventMerge.apply(event, displacedPlan(event, hall, state, unit), sink);
+
+		Booking result = byId(friday, foreign.getId());
+		assertFalse(result.isUnassigned());
+		assertEquals(seatOf(hall), result.getSeatId());
+		assertEquals("Müller", result.getLastName());
+		assertTrue(sink.displaced.isEmpty());
+		assertTrue(sink.held.isEmpty());
+		assertEquals(Map.of(unit, true), sink.adopted);
+	}
+
+	@Test
+	void unassignedBookingThatDoesNotFitIsAdoptedAndSyncedWithoutAHint() {
+		Hall hall = hallWithOneSeat();
+		Event event = eventInHall(hall);
+		Presentation friday = event.getPresentations().get(0);
+		Event state = copyOfUnchecked(event);
+		// "ohne Platz", nennt aber einen Sitz, den die Bestuhlung kennt: Schritt 1 des Abgleichs setzt sie dorthin zurück
+		Booking foreign = booking(state.getPresentations().get(0), seatOf(hall), 1, "Müller");
+		foreign.setUnassigned(true);
+		UnitKey unit = UnitKey.unassignedBooking(event.getId(), friday.getId(), foreign.getId());
+		Recording sink = new Recording();
+
+		EventMerge.apply(event, displacedPlan(event, hall, state, unit), sink);
+
+		Booking result = byId(friday, foreign.getId());
+		assertFalse(result.isUnassigned(), "der Abgleich hat sie auf ihren Sitz gesetzt");
+		assertEquals(seatOf(hall), result.getSeatId());
+		assertEquals("Müller", result.getLastName());
+		assertTrue(sink.displaced.isEmpty(), "ihr Platz fehlt nicht");
+		assertTrue(sink.held.isEmpty());
+		assertEquals(Map.of(unit, true), sink.adopted);
 	}
 
 	@Test
