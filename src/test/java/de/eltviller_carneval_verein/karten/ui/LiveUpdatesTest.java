@@ -208,6 +208,15 @@ class LiveUpdatesTest {
 
 	// <-- Bauteile
 
+	@Test
+	void machineInTheHintIsNamedWithoutDoublingRechner() {
+		assertEquals("Rechner Kasse 1", LiveUpdates.onMachine("Kasse 1"));
+		assertEquals("Rechner A", LiveUpdates.onMachine("Rechner A"));
+		assertEquals("rechner b", LiveUpdates.onMachine("rechner b"));
+		assertEquals("Rechner Rechnerraum", LiveUpdates.onMachine("Rechnerraum"));
+		assertEquals("einem anderen Rechner", LiveUpdates.onMachine(null));
+	}
+
 	// Änderungserkennung -->
 
 	@Test

@@ -148,7 +148,12 @@ public final class BookingAutoSave {
 			// Das Event bleibt ungespeichert ("Speichern *", LeaveGuard); die Bedienung läuft weiter. Ohne Dialog: Eine
 			// gesperrte Einheit scheiterte bei jeder Änderung neu. Die Fußzeile nennt den Grund, sonst hielte der Bediener
 			// den Sitz für gebucht.
-			LOG.log(Level.SEVERE, "Sofortiges Speichern fehlgeschlagen: " + event, e);
+			if (e instanceof LockedUnitException) {
+				// ein bekannter Zustand (gesperrte Einheit), der bei jeder Änderung wiederkehrt: ohne Stapel, nicht als schwerer Fehler
+				LOG.log(Level.WARNING, "Sofortiges Speichern abgelehnt: {0}: {1}", new Object[] { event, e.getMessage() });
+			} else {
+				LOG.log(Level.SEVERE, "Sofortiges Speichern fehlgeschlagen: " + event, e);
+			}
 			showFailure.accept(FAILURE_PREFIX + reason(e));
 		}
 	}

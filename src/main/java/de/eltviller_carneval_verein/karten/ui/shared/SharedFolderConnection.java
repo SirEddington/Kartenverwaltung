@@ -167,7 +167,7 @@ public final class SharedFolderConnection implements ConnectProgressView.Host {
 
 	@Override
 	public void show(Parent content) {
-		MainApp.showContent(content);
+		MainApp.showLoadingView(content);
 	}
 
 	@Override

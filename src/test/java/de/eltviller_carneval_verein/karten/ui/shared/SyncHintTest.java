@@ -41,15 +41,15 @@ class SyncHintTest {
 
 	@Test
 	void incompleteFirstRunShowsPercentWhileRunning() {
-		assertHint(4, "Erster Abgleich unvollständig (42 %)", hint(SyncState.AKTUELL, NONE, false, 0.429, false, 0));
+		assertHint(4, "Noch nicht vollständig abgeglichen (42 %)", hint(SyncState.AKTUELL, NONE, false, 0.429, false, 0));
 		// auch ein späterer Lauf nach einem beendeten (nach 10 Minuten) zeigt wieder den Fortschritt
-		assertHint(4, "Erster Abgleich unvollständig (0 %)", hint(SyncState.AKTUELL, NONE, false, 0.0, true, 2));
-		assertHint(4, "Erster Abgleich unvollständig (100 %)", hint(SyncState.AUSSTEHEND, NONE, false, 1.0, false, 0));
+		assertHint(4, "Noch nicht vollständig abgeglichen (0 %)", hint(SyncState.AKTUELL, NONE, false, 0.0, true, 2));
+		assertHint(4, "Noch nicht vollständig abgeglichen (100 %)", hint(SyncState.AUSSTEHEND, NONE, false, 1.0, false, 0));
 	}
 
 	@Test
 	void runEndedWithSkippedEntriesShowsRankFive() {
-		assertHint(5, "Erster Abgleich unvollständig: Einträge übersprungen",
+		assertHint(5, "Noch nicht vollständig abgeglichen: Einträge übersprungen",
 				hint(SyncState.AKTUELL, NONE, false, null, true, 3));
 	}
 
@@ -91,15 +91,15 @@ class SyncHintTest {
 	@Test
 	void noSkippedHintBetweenConnectAndRunStart() {
 		// complete false, der Lauf hat noch nicht begonnen (progress null), keiner ging zu Ende: Rang 4 ohne Prozent
-		assertHint(4, "Erster Abgleich unvollständig", hint(SyncState.AKTUELL, NONE, false, null, false, 0));
-		assertHint(4, "Erster Abgleich unvollständig", hint(SyncState.AUSSTEHEND, NONE, false, null, false, 5));
+		assertHint(4, "Noch nicht vollständig abgeglichen", hint(SyncState.AKTUELL, NONE, false, null, false, 0));
+		assertHint(4, "Noch nicht vollständig abgeglichen", hint(SyncState.AUSSTEHEND, NONE, false, null, false, 5));
 	}
 
 	@Test
 	void incompleteFirstRunWinsOverPendingAndSkipped() {
-		assertHint(4, "Erster Abgleich unvollständig (10 %)",
+		assertHint(4, "Noch nicht vollständig abgeglichen (10 %)",
 				hint(SyncState.AUSSTEHEND, Duration.ofMinutes(2), false, 0.1, false, 2));
-		assertHint(5, "Erster Abgleich unvollständig: Einträge übersprungen",
+		assertHint(5, "Noch nicht vollständig abgeglichen: Einträge übersprungen",
 				hint(SyncState.AUSSTEHEND, Duration.ofMinutes(2), false, null, true, 2));
 	}
 

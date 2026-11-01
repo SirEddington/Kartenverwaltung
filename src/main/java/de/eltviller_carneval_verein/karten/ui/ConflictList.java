@@ -1,6 +1,9 @@
 package de.eltviller_carneval_verein.karten.ui;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -82,6 +85,7 @@ public final class ConflictList {
 	}
 
 	private static final String UNKNOWN_MACHINE = "ein anderer Rechner";
+	private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
 	/** Die Feldgruppen des Vermerks auf Deutsch; eine unbekannte Gruppe heißt wie ihr Feld. */
 	private static final Map<String, String> GROUP_LABELS = Map.ofEntries(Map.entry("customer", "Kunde"),
@@ -244,9 +248,12 @@ public final class ConflictList {
 		};
 	}
 
-	/** {@code Rechner <Name>} und, wenn bekannt, {@code (<Bediener>)}; ohne Namen {@code ein anderer Rechner}. */
+	/**
+	 * Der Rechnername und, wenn bekannt, {@code (<Bediener>)}; ohne Namen {@code ein anderer Rechner}. Ohne Vorsatz
+	 * "Rechner": Die Spalte heißt schon so, und ein Name wie "Rechner A" stünde sonst doppelt da.
+	 */
 	private static String counterpart(String machineName, String operator) {
-		String text = blank(machineName) ? UNKNOWN_MACHINE : "Rechner " + machineName.trim();
+		String text = blank(machineName) ? UNKNOWN_MACHINE : machineName.trim();
 		return blank(operator) ? text : text + " (" + operator.trim() + ")";
 	}
 
@@ -266,7 +273,7 @@ public final class ConflictList {
 	/**
 	 * Die Werte einer Gruppe als Text: die gesetzten Werte, durch Komma getrennt; ohne Werte {@code (leer)}. Halle und
 	 * Bestuhlung stehen mit ihren Namen da (unbekannt wie in den Tabellen als Strich), der Zahlstatus mit seinem Text aus
-	 * den Ansichten, Preis und Kassenbetrag (in Cent gespeichert) als Betrag ({@code 35,00 €}); die Sitz-ID fehlt, weil Reihe, Tisch und Sitz
+	 * den Ansichten, Preis und Kassenbetrag (in Cent gespeichert) als Betrag ({@code 35,00 €}), Daten als {@code 31.10.2026}; die Sitz-ID fehlt, weil Reihe, Tisch und Sitz
 	 * daneben stehen.
 	 */
 	private String valueText(ObjectNode values) {
@@ -283,6 +290,8 @@ public final class ConflictList {
 			// gespeichert in Cent (Booking.price, Presentation.actualCashAmount); wie in den Tabellen, mit Währung
 			case "price", "actualCashAmount" ->
 				value.isNumber() ? String.format(Locale.GERMANY, "%.2f €", value.asLong() / 100.0) : value.asText();
+			// gespeichert als 2026-10-31 (LocalDate); wie in den Ansichten 31.10.2026
+			case "date", "reservationDate", "paymentDate", "collectionDate" -> dateText(value.asText());
 			default -> value.isBoolean() ? (value.asBoolean() ? "ja" : "nein") : value.asText();
 			};
 			if (!text.isBlank()) {
@@ -297,6 +306,15 @@ public final class ConflictList {
 		Hall hall = hallId == null ? null : findHall.apply(hallId);
 		SeatingPlan plan = hall == null ? null : hall.findSeatingPlan(planId);
 		return plan == null ? EntityLabels.hallDisplayName(null) : EntityLabels.nameOrPlaceholder(plan.getName());
+	}
+
+	/** Ein Datum als {@code 31.10.2026}; was sich nicht als Datum lesen lässt, bleibt, wie es ist. */
+	private static String dateText(String text) {
+		try {
+			return LocalDate.parse(text).format(DATE_FORMAT);
+		} catch (DateTimeParseException e) {
+			return text;
+		}
 	}
 
 	/** Der Zahlstatus wie in den Ansichten ("Offen", "Bar", …); ein unbekannter Wert bleibt, wie er ist. */

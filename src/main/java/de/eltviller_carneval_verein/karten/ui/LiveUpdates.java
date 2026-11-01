@@ -353,9 +353,19 @@ public final class LiveUpdates {
 	// Hinweise -->
 
 	private static String deferralText(Deferral deferral) {
-		String machine = deferral.machineName() == null ? "einem anderen Rechner" : "Rechner " + deferral.machineName();
-		return "„" + label(deferral.model()) + "“ wurde auf " + machine + " geändert. Deine Änderung daran ist noch nicht"
-				+ " gespeichert; speichere sie, dann erscheint ein Konflikt, falls sich etwas widerspricht.";
+		return "„" + label(deferral.model()) + "“ wurde auf " + onMachine(deferral.machineName()) + " geändert. Deine Änderung"
+				+ " daran ist noch nicht gespeichert; speichere sie, dann erscheint ein Konflikt, falls sich etwas widerspricht.";
+	}
+
+	/**
+	 * Der Rechner im Satz "… wurde auf … geändert": {@code Rechner <Name>}, aber ohne doppeltes "Rechner", wenn der Name
+	 * schon so beginnt ("Rechner A"); ohne Namen {@code einem anderen Rechner}. Paketsichtbar für Tests.
+	 */
+	static String onMachine(String machineName) {
+		if (machineName == null) {
+			return "einem anderen Rechner";
+		}
+		return machineName.matches("(?iu)rechner\\b.*") ? machineName : "Rechner " + machineName;
 	}
 
 	/** Der Eintrag, den der Hinweis nennt: Buchung über {@link EntityLabels#booking}, sonst der Name. */

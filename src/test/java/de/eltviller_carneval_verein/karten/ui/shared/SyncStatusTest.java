@@ -105,10 +105,10 @@ class SyncStatusTest {
 		sync.state(SyncState.AKTUELL).complete(false);
 		sync.skipped(List.of(new SkippedUnit(UnitKey.event("e1"), false, "x")));
 		assertEquals(4, rank(), "vor dem Beginn des Laufs ohne Prozent");
-		assertEquals("Erster Abgleich unvollständig", status.hint().orElseThrow().text());
+		assertEquals("Noch nicht vollständig abgeglichen", status.hint().orElseThrow().text());
 
 		sync.progress(0.5);
-		assertEquals("Erster Abgleich unvollständig (50 %)", status.hint().orElseThrow().text());
+		assertEquals("Noch nicht vollständig abgeglichen (50 %)", status.hint().orElseThrow().text());
 		assertEquals(0, changes);
 
 		sync.progress(null);

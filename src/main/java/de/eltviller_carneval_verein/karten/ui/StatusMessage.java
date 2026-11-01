@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -22,7 +23,8 @@ import javafx.util.Duration;
  * {@link StatusLabel}, das diese Meldung anzeigt; die Controller schreiben nur hierher und
  * müssen das Label nicht kennen. Es gibt immer höchstens eine aktuelle Meldung, eine neue
  * ersetzt die alte. Fehler und Warnungen bleiben stehen, bis eine andere Meldung kommt oder
- * der Screen wechselt ({@link #clear()}); Info und Erfolg verschwinden nach einigen Sekunden.
+ * der Screen wechselt ({@link #clear()}); Info und Erfolg verschwinden nach einigen Sekunden. Ausnahme: Eine Meldung
+ * des Hintergrunds ({@link #showInFooter}) blendet über einen Fehler nur kurz, dann steht er wieder da.
  *
  * Zeigt gerade kein Screen ein {@link StatusLabel}, wird die Meldung stattdessen als Dialog
  * ausgegeben, damit sie nicht verloren geht. Im Hauptfenster hat jede Ansicht eines: Ansichten ohne
@@ -54,11 +56,33 @@ public final class StatusMessage {
 	private static final Duration AUTO_CLEAR_AFTER = Duration.seconds(5);
 	private static final int MAX_DETAIL_LINES = 20;
 
+	/** Führt etwas nach einer Wartezeit aus (das Ausblenden einer Meldung); paketsichtbar für Tests. */
+	interface Delay {
+		/** Führt {@code action} nach {@code delay} auf dem FX-Thread aus; das Ergebnis bricht das ab. */
+		Runnable after(Duration delay, Runnable action);
+	}
+
 	private final ObjectProperty<Entry> current = new SimpleObjectProperty<>();
 	private final List<WeakReference<StatusLabel>> labels = new ArrayList<>();
-	private PauseTransition autoClear;
+	private final BooleanSupplier footerShown;
+	private final Delay delay;
+	private Runnable cancelAutoClear;
+	/** Der Fehler hinter einer Meldung des Hintergrunds ({@link #showInFooter}); er steht wieder da, wenn sie ausgeblendet wird. */
+	private Entry beneath;
 
 	private StatusMessage() {
+		this(null, null);
+	}
+
+	/**
+	 * Paketsichtbar für Tests.
+	 *
+	 * @param footerShown ob gerade eine Fußzeile zu sehen ist; {@code null}: die angemeldeten {@link StatusLabel}s
+	 * @param delay       das Ausblenden; {@code null}: mit {@link PauseTransition}
+	 */
+	StatusMessage(BooleanSupplier footerShown, Delay delay) {
+		this.footerShown = footerShown != null ? footerShown : this::isAnyLabelDisplayed;
+		this.delay = delay != null ? delay : StatusMessage::pause;
 	}
 
 	public static StatusMessage getInstance() {
@@ -111,7 +135,7 @@ public final class StatusMessage {
 	 * gerade keine Fußzeile sichtbar, wird nichts angezeigt (eine Komfortmeldung ist keinen Dialog wert).
 	 */
 	public void showLive(ValidationResult result) {
-		if (result.isEmpty() || !isAnyLabelDisplayed()) {
+		if (result.isEmpty() || !footerShown.getAsBoolean()) {
 			return;
 		}
 		show(describe(result, ""));
@@ -121,39 +145,64 @@ public final class StatusMessage {
 	 * Zeigt einen Text nur in der Fußzeile, öffnet aber nie einen Dialog: Ist gerade keine Fußzeile sichtbar (etwa
 	 * während des Starts, bevor das Hauptfenster steht), wird nichts angezeigt. Für Hinweise, die nicht wichtig genug sind, die Arbeit zu unterbrechen, und
 	 * die sich häufen können (etwa "Wieder verbunden" bei jeder Rückkehr).
+	 * <p>
+	 * Steht ein Fehler (etwa "Nicht gespeichert: …"), blendet ein Text mit Info oder Warnung nur kurz darüber; danach steht
+	 * der Fehler wieder da. Ein Fehler ersetzt ihn wie jede andere Meldung.
 	 */
 	public void showInFooter(Severity severity, String text) {
-		if (!isAnyLabelDisplayed()) {
+		if (!footerShown.getAsBoolean()) {
 			return;
 		}
+		Entry behind = severity == Severity.ERROR ? null : errorBehind();
 		show(new Entry(severity, text, text));
+		if (behind != null) {
+			beneath = behind;
+			startAutoClear();
+		}
+	}
+
+	/** Der Fehler, zu dem die Fußzeile nach einer Meldung des Hintergrunds zurückkehrt; {@code null}, wenn keiner steht. */
+	private Entry errorBehind() {
+		if (beneath != null) {
+			return beneath;
+		}
+		Entry shown = current.get();
+		return shown != null && shown.severity() == Severity.ERROR ? shown : null;
 	}
 
 	/**
 	 * Entfernt eine stehende Fehler- oder Warnmeldung, weil nichts mehr zu beanstanden ist (auch die eines
-	 * gescheiterten Speicherversuchs). Info und Erfolgsmeldungen ("Gespeichert") bleiben.
+	 * gescheiterten Speicherversuchs). Info und Erfolgsmeldungen ("Gespeichert") bleiben, ein Fehler dahinter kehrt nicht
+	 * zurück.
 	 */
 	public void clearIssues() {
 		Entry entry = current.get();
 		if (entry != null && (entry.severity() == Severity.ERROR || entry.severity() == Severity.WARNING)) {
 			clear();
 		}
+		beneath = null;
 	}
 
 	/**
 	 * Entfernt die aktuelle Meldung, wenn ihr Text nach {@code stale} nicht mehr gilt (etwa eine Störung, die vorbei ist);
-	 * eine andere Meldung bleibt.
+	 * eine andere Meldung bleibt. Ein hinfälliger Fehler hinter einer Meldung des Hintergrunds kehrt nicht zurück.
 	 */
 	public void clearIf(Predicate<String> stale) {
+		if (beneath != null && stale.test(beneath.text())) {
+			beneath = null;
+		}
 		Entry entry = current.get();
 		if (entry != null && stale.test(entry.text())) {
-			clear();
+			stopAutoClear();
+			current.set(beneath);
+			beneath = null;
 		}
 	}
 
 	/** Entfernt die aktuelle Meldung, z. B. beim Wechsel des Screens oder der Ansicht. */
 	public void clear() {
 		stopAutoClear();
+		beneath = null;
 		current.set(null);
 	}
 
@@ -190,17 +239,17 @@ public final class StatusMessage {
 		labels.add(new WeakReference<>(label));
 	}
 
+	/** Zeigt die Meldung; sie ersetzt die aktuelle endgültig, auch einen Fehler hinter einer Meldung des Hintergrunds. */
 	private void show(Entry entry) {
 		stopAutoClear();
-		if (!isAnyLabelDisplayed()) {
+		beneath = null;
+		if (!footerShown.getAsBoolean()) {
 			showDialog(entry);
 			return;
 		}
 		current.set(entry);
 		if (entry.severity() == Severity.INFO || entry.severity() == Severity.SUCCESS) {
-			autoClear = new PauseTransition(AUTO_CLEAR_AFTER);
-			autoClear.setOnFinished(event -> current.set(null));
-			autoClear.play();
+			startAutoClear();
 		}
 	}
 
@@ -208,11 +257,28 @@ public final class StatusMessage {
 		return labels.stream().map(WeakReference::get).anyMatch(label -> label != null && label.isDisplayed());
 	}
 
+	/** Blendet die aktuelle Meldung nach einigen Sekunden aus; ein Fehler dahinter steht dann wieder da. */
+	private void startAutoClear() {
+		stopAutoClear();
+		cancelAutoClear = delay.after(AUTO_CLEAR_AFTER, () -> {
+			cancelAutoClear = null;
+			current.set(beneath);
+			beneath = null;
+		});
+	}
+
 	private void stopAutoClear() {
-		if (autoClear != null) {
-			autoClear.stop();
-			autoClear = null;
+		if (cancelAutoClear != null) {
+			cancelAutoClear.run();
+			cancelAutoClear = null;
 		}
+	}
+
+	private static Runnable pause(Duration delay, Runnable action) {
+		PauseTransition pause = new PauseTransition(delay);
+		pause.setOnFinished(event -> action.run());
+		pause.play();
+		return pause::stop;
 	}
 
 	private static void showDialog(Entry entry) {

@@ -2,10 +2,16 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -217,6 +223,45 @@ class BookingAutoSaveTest {
 		runLater();
 
 		assertEquals(List.of("Nicht gespeichert: IllegalStateException: Platte voll"), footer);
+	}
+
+	@Test
+	void lockedUnitIsLoggedAsWarningWithoutStackOtherFailuresAsSevere() {
+		Logger log = Logger.getLogger(BookingAutoSave.class.getName());
+		List<LogRecord> records = new ArrayList<>();
+		Handler handler = new Handler() {
+			@Override
+			public void publish(LogRecord record) {
+				records.add(record);
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		log.addHandler(handler);
+		try {
+			failure = new LockedUnitException("Gesperrt.");
+			event.setName("Prunksitzung");
+			tracker.check(event);
+			runLater();
+			failure = new IllegalStateException("Platte voll");
+			event.setName("Kappensitzung");
+			tracker.check(event);
+			runLater();
+		} finally {
+			log.removeHandler(handler);
+		}
+
+		assertEquals(2, records.size());
+		assertEquals(Level.WARNING, records.get(0).getLevel());
+		assertNull(records.get(0).getThrown(), "Eine gesperrte Einheit ist bekannt: kein Stapel im Log");
+		assertEquals(Level.SEVERE, records.get(1).getLevel());
+		assertNotNull(records.get(1).getThrown());
 	}
 
 	@Test

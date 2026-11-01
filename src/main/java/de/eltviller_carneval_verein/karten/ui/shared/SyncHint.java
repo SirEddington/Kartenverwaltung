@@ -73,7 +73,7 @@ public record SyncHint(int rank, String text) {
 		return Optional.of(new SyncHint(rank, text));
 	}
 
-	/** "Erster Abgleich unvollständig" vor dem Beginn des Laufs: die Vorlage ohne den Prozentteil. */
+	/** "Noch nicht vollständig abgeglichen" vor dem Beginn des Laufs: die Vorlage ohne den Prozentteil. */
 	private static String firstRunWithoutPercent() {
 		String template = SharedFolderTexts.HINT_FIRST_RUN;
 		return template.substring(0, template.indexOf(" (&1"));

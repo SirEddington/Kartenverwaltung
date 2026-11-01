@@ -172,6 +172,8 @@ public final class SharedFolderSection {
 				return;
 			}
 			disconnecting = true;
+			// der neu aufgebaute Abschnitt zeigt den getrennten Ordner im Feld: bequem, um später wieder zu verbinden
+			String disconnectedDir = sync.sharedDir();
 			refresh();
 			// Zuerst die Einstellung: Schließt die App zwischen beiden Schritten, bliebe nach umgekehrter Reihenfolge der Ordner
 			// eingetragen, und der nächste Start verbände das Getrennte wieder. Sie bleibt gelöscht, auch wenn das Trennen scheitert.
@@ -192,18 +194,18 @@ public final class SharedFolderSection {
 					failure = failure == null ? message(e) : failure;
 				}
 				String disconnectFailure = failure;
-				Platform.runLater(() -> disconnected(disconnectFailure));
+				Platform.runLater(() -> disconnected(disconnectedDir, disconnectFailure));
 			});
 		}
 
-		private void disconnected(String failure) {
+		private void disconnected(String disconnectedDir, String failure) {
 			disconnecting = false;
 			// Lehnt die Rückfrage zu ungespeicherten Änderungen den Neuaufbau ab ("Abbrechen"), bleibt diese Zeile stehen:
 			// Sie zeigt dann den getrennten Stand (Pfad und "Durchsuchen …" frei)
 			refresh();
 			Scene scene = node.getScene();
 			if (scene != null && scene == MainApp.primaryStage().getScene()) {
-				connection.reopenSettings(null, failure);
+				connection.reopenSettings(disconnectedDir, failure);
 			} else if (failure != null) {
 				// Inzwischen in einer anderen Ansicht: dort nicht stören, nur melden
 				StatusMessage.getInstance().show(Severity.ERROR, failure);

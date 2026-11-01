@@ -137,8 +137,8 @@ class ConflictListTest {
 
 		List<String> counterparts = list.rows().stream().map(Row::counterpart).toList();
 
-		assertEquals(List.of("Rechner Kasse 1 (Anna)", "Rechner Kasse 2", "ein anderer Rechner", "ein anderer Rechner"),
-				counterparts);
+		// die Spalte heißt "Anderer Rechner": der Name ohne Vorsatz, sonst hieße es bei "Rechner A" doppelt
+		assertEquals(List.of("Kasse 1 (Anna)", "Kasse 2", "ein anderer Rechner", "ein anderer Rechner"), counterparts);
 	}
 
 	@Test
@@ -154,7 +154,7 @@ class ConflictListTest {
 
 		assertEquals(Action.NONE, rows.get(0).action());
 		assertEquals("Vorstellung gelöscht", rows.get(0).kindText());
-		assertEquals("Rechner Kasse 3 (Bert)", rows.get(0).counterpart());
+		assertEquals("Kasse 3 (Bert)", rows.get(0).counterpart());
 		assertEquals("Label " + show.relativePath(), rows.get(0).entry());
 		assertEquals(Action.NONE, rows.get(1).action());
 		assertEquals("Event gelöscht", rows.get(1).kindText());
@@ -262,6 +262,25 @@ class ConflictListTest {
 		assertEquals("40,50 €", rows.get(0).fields().get(0).valid());
 		assertEquals("1234,50 €, Wechselgeld", rows.get(1).fields().get(0).mine());
 		assertEquals("(leer)", rows.get(1).fields().get(0).valid());
+	}
+
+	@Test
+	void datesShowInGermanFormat() {
+		source.add(conflict(seat("s1"), "a", new ConflictNote(Kind.FIELDS, "me", null,
+				List.of(new FieldConflict("payment",
+						JsonNodeFactory.instance.objectNode().put("paymentStatus", "CARD").put("paymentDate", "2026-10-31"),
+						JsonNodeFactory.instance.objectNode().put("paymentStatus", "CASH").put("paymentDate", "kein Datum"))),
+				null, null, nextId())));
+		source.add(conflict(UnitKey.presentation("ev", "pr"), "b", new ConflictNote(Kind.FIELDS, "me", null,
+				List.of(new FieldConflict("date", JsonNodeFactory.instance.objectNode().put("date", "2027-02-01"),
+						JsonNodeFactory.instance.objectNode().putNull("date"))),
+				null, null, nextId())));
+
+		List<Row> rows = list.rows();
+
+		assertEquals("Karte, 31.10.2026", rows.get(0).fields().get(0).mine());
+		assertEquals("Bar, kein Datum", rows.get(0).fields().get(0).valid(), "was kein Datum ist, bleibt, wie es ist");
+		assertEquals("01.02.2027", rows.get(1).fields().get(0).mine());
 	}
 
 	@Test

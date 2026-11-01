@@ -20,7 +20,7 @@ import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
  * @param folderLine    "Ordner: …"
  * @param lastSyncLine  "Letzter Abgleich: …" bzw. "… noch keiner"
  * @param causeLine     "Ursache: …"; leer, wenn keine Ursache bekannt ist (das Fenster zeigt dann keine Zeile)
- * @param firstRunLine  "Erster Abgleich: vollständig / läuft (n %) / unvollständig"
+ * @param firstRunLine  "Vollständig abgeglichen: ja / läuft (n %) / nein"
  * @param rows          die nicht abgeglichenen Einträge in der Reihenfolge von {@code skippedUnits()}
  * @param listHint      unter der Liste: der Hinweis auf den nächsten Versuch, bei leerer Liste "Keine"
  */

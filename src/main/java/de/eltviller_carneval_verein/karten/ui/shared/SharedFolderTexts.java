@@ -206,11 +206,11 @@ public final class SharedFolderTexts {
 	/** Hinweis ENTSCHEIDUNG. */
 	public static final String HINT_DECISION = "Gemeinsamer Ordner: Entscheidung nötig";
 
-	/** Hinweis erster Abgleich (&1 = Prozent). */
-	public static final String HINT_FIRST_RUN = "Erster Abgleich unvollständig (&1 %)";
+	/** Hinweis erster Abgleich (&1 = Prozent): seit dem Verbinden ging noch kein Lauf vollständig durch. */
+	public static final String HINT_FIRST_RUN = "Noch nicht vollständig abgeglichen (&1 %)";
 
 	/** Hinweis erster Abgleich, Lauf zu Ende. */
-	public static final String HINT_FIRST_RUN_ENDED = "Erster Abgleich unvollständig: Einträge übersprungen";
+	public static final String HINT_FIRST_RUN_ENDED = "Noch nicht vollständig abgeglichen: Einträge übersprungen";
 
 	/** Hinweis übersprungene Einträge, einer. */
 	public static final String HINT_SKIPPED_ONE = "1 Eintrag nicht abgeglichen";
@@ -231,13 +231,13 @@ public final class SharedFolderTexts {
 	public static final String INFO_CAUSE = "Ursache: &1";
 
 	/** Info-Fenster: erster Abgleich vollständig. */
-	public static final String INFO_FIRST_RUN_COMPLETE = "Erster Abgleich: vollständig";
+	public static final String INFO_FIRST_RUN_COMPLETE = "Vollständig abgeglichen: ja";
 
 	/** Info-Fenster: erster Abgleich läuft (&1 = Prozent). */
-	public static final String INFO_FIRST_RUN_RUNNING = "Erster Abgleich: läuft (&1 %)";
+	public static final String INFO_FIRST_RUN_RUNNING = "Vollständig abgeglichen: läuft (&1 %)";
 
 	/** Info-Fenster: erster Abgleich unvollständig. */
-	public static final String INFO_FIRST_RUN_INCOMPLETE = "Erster Abgleich: unvollständig";
+	public static final String INFO_FIRST_RUN_INCOMPLETE = "Vollständig abgeglichen: nein";
 
 	/** Info-Fenster: Überschrift der Liste. */
 	public static final String INFO_LIST_TITLE = "Nicht abgeglichene Einträge";

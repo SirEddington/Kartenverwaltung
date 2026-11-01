@@ -94,6 +94,109 @@ class StatusMessageTest {
 		assertNull(messages.currentProperty().get());
 	}
 
+	/** Ein Ausblenden auf Knopfdruck: {@link #fire()} lässt die Zeit ablaufen, ein abgebrochenes tut nichts. */
+	private static final class ManualDelay implements StatusMessage.Delay {
+		private Runnable pending;
+
+		@Override
+		public Runnable after(javafx.util.Duration delay, Runnable action) {
+			Runnable[] own = { action };
+			pending = () -> {
+				if (own[0] != null) {
+					own[0].run();
+				}
+			};
+			return () -> own[0] = null;
+		}
+
+		void fire() {
+			Runnable action = pending;
+			pending = null;
+			if (action != null) {
+				action.run();
+			}
+		}
+
+		boolean waiting() {
+			return pending != null;
+		}
+	}
+
+	private final ManualDelay delay = new ManualDelay();
+	private final StatusMessage footer = new StatusMessage(() -> true, delay);
+
+	private String shown() {
+		StatusMessage.Entry entry = footer.currentProperty().get();
+		return entry == null ? null : entry.text();
+	}
+
+	@Test
+	void backgroundInfoCoversAStandingErrorOnlyBriefly() {
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+
+		assertEquals("Wieder verbunden.", shown());
+		delay.fire();
+		assertEquals("Nicht gespeichert: SYS-008: x", shown());
+	}
+
+	@Test
+	void backgroundWarningAlsoGivesWayToTheErrorAgain() {
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.WARNING, "Nicht abgeglichen: y");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+
+		assertEquals("Wieder verbunden.", shown());
+		delay.fire();
+		assertEquals("Nicht gespeichert: SYS-008: x", shown());
+	}
+
+	@Test
+	void ownMessageReplacesTheErrorForGood() {
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+		footer.showSaved();
+
+		delay.fire();
+		assertNull(shown());
+
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+		footer.clear();
+		delay.fire();
+		assertNull(shown());
+	}
+
+	@Test
+	void staleErrorDoesNotReturn() {
+		footer.show(Severity.ERROR, "SYS-006: Ordner weg");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+		footer.clearIf("SYS-006: Ordner weg"::equals);
+
+		assertEquals("Wieder verbunden.", shown());
+		delay.fire();
+		assertNull(shown());
+
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+		footer.clearIssues();
+		delay.fire();
+		assertNull(shown());
+	}
+
+	@Test
+	void backgroundErrorReplacesAnErrorAndBackgroundWarningAloneStays() {
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.ERROR, "SYS-006: Ordner weg");
+		assertEquals("SYS-006: Ordner weg", shown());
+		assertEquals(false, delay.waiting());
+
+		footer.clear();
+		footer.showInFooter(Severity.WARNING, "Nicht abgeglichen: y");
+		assertEquals("Nicht abgeglichen: y", shown());
+		assertEquals(false, delay.waiting());
+	}
+
 	@Test
 	void singleMessageHasOneTooltipLineInItsOwnSeverity() {
 		StatusMessage.Entry entry = new StatusMessage.Entry(Severity.SUCCESS, "Gespeichert", "Gespeichert");

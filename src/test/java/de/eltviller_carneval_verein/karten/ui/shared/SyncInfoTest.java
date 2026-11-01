@@ -53,11 +53,11 @@ class SyncInfoTest {
 
 	@Test
 	void firstRunLineForEachState() {
-		assertEquals("Erster Abgleich: vollständig", info(true, null, List.of(), unit -> null).firstRunLine());
-		assertEquals("Erster Abgleich: läuft (42 %)", info(false, 0.429, List.of(), unit -> null).firstRunLine());
-		assertEquals("Erster Abgleich: unvollständig", info(false, null, List.of(), unit -> null).firstRunLine());
+		assertEquals("Vollständig abgeglichen: ja", info(true, null, List.of(), unit -> null).firstRunLine());
+		assertEquals("Vollständig abgeglichen: läuft (42 %)", info(false, 0.429, List.of(), unit -> null).firstRunLine());
+		assertEquals("Vollständig abgeglichen: nein", info(false, null, List.of(), unit -> null).firstRunLine());
 		// vollständig geht vor: spätere Läufe haben auch einen Fortschritt
-		assertEquals("Erster Abgleich: vollständig", info(true, 0.5, List.of(), unit -> null).firstRunLine());
+		assertEquals("Vollständig abgeglichen: ja", info(true, 0.5, List.of(), unit -> null).firstRunLine());
 	}
 
 	@Test

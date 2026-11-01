@@ -119,6 +119,8 @@ public class MainApp extends Application {
 	// 1-s-Takt der App, der diesen Hinweis und das Info-Fenster auffrischt (Fortschritt, 30 s von AUSSTEHEND)
 	private static SyncStatus syncStatus;
 	private static Timeline syncTicker;
+	// Schlüssel in den Properties einer Ladeansicht (markLoadingView)
+	private static final Object LOADING_VIEW = new Object();
 	// Die Bezeichnungen der Einträge für das Info-Fenster (gesetzt, sobald der Bestand geladen ist)
 	private static Function<UnitKey, String> syncLabels;
 	// Die gesperrten Einträge (gesetzt, sobald der Bestand geladen ist) und der Link in der Fußzeile des aktuellen Fensterinhalts
@@ -287,7 +289,17 @@ public class MainApp extends Application {
 		bar.progressProperty().bind(loading.progressProperty());
 		VBox box = new VBox(16, label, bar);
 		box.setAlignment(Pos.CENTER);
-		return box;
+		return markLoadingView(box);
+	}
+
+	/** Kennzeichnet eine Ladeansicht: Ihre Fußzeile bekommt keinen Hinweis zum Abgleich ({@link #wrapWithBackground}). */
+	private static Parent markLoadingView(Parent content) {
+		content.getProperties().put(LOADING_VIEW, Boolean.TRUE);
+		return content;
+	}
+
+	private static boolean isLoadingView(Parent content) {
+		return Boolean.TRUE.equals(content.getProperties().get(LOADING_VIEW));
 	}
 
 	/** Die Meldung eines gescheiterten Ladens; bei einem {@link UncheckedIOException} die der eigentlichen Ursache. */
@@ -680,6 +692,15 @@ public class MainApp extends Application {
 		primaryStage.setScene(createScene(content));
 	}
 
+	/**
+	 * Zeigt eine Ladeansicht wie {@link #showContent}, aber ohne den Hinweis zum Abgleich in der Fußzeile: Die Ansicht zeigt
+	 * Fortschritt und Ursache selbst (etwa die Ladeansicht des Verbindens). Hinweise auf Konflikte und gesperrte Einträge
+	 * bleiben.
+	 */
+	public static void showLoadingView(Parent content) {
+		showContent(markLoadingView(content));
+	}
+
 	public static void showMenuView() {
 		loadScene("/de/eltviller_carneval_verein/karten/ui/MenuView.fxml");
 	}
@@ -873,12 +894,13 @@ public class MainApp extends Application {
 			// ohne Konflikte nimmt der Hinweis keinen Platz, weder in der Fußzeile noch als eigene Zeile
 			ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount, MainApp::openConflictDialog);
 			conflictIndicator = indicator;
-			// der Hinweis zum Abgleich steht neben dem auf Konflikte, mit derselben Einfügeregel
-			SyncIndicator syncHint = syncStatus == null ? null
+			// der Hinweis zum Abgleich steht neben dem auf Konflikte, mit derselben Einfügeregel; nicht in einer Ladeansicht,
+			// die Fortschritt und Ursache selbst zeigt (sonst stünde die Prozentzahl doppelt da)
+			SyncIndicator syncHint = syncStatus == null || isLoadingView(content) ? null
 					: new SyncIndicator(syncStatus, MainApp::askDecisionAgain, MainApp::openSyncInfo);
-			if (syncHint != null) {
+			if (syncStatus != null) {
 				// ersetzt den Hinweis der vorigen Ansicht; der 1-s-Takt frischt nur diesen auf
-				syncStatus.track(syncHint::refresh);
+				syncStatus.track(syncHint == null ? null : syncHint::refresh);
 			}
 			// der Link auf gesperrte Einträge steht gleich hinter dem auf Konflikte; wie dieser ersetzt er den der vorigen
 			// Ansicht, und die App frischt nur den der aktuellen auf
