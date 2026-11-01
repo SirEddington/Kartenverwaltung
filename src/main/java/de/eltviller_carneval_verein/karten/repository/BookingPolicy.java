@@ -8,7 +8,6 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.store.Change;
@@ -56,14 +55,18 @@ public final class BookingPolicy implements ConflictPolicy {
 	private static final List<String> PLACE = List.of(SEAT_ID, ROW_LABEL, TABLE_NUMBER, SEAT_NUMBER);
 	/** Die Feldgruppe "Platz". */
 	private static final String PLACE_GROUP = "place";
-	/** Die Feldgruppen "Zahlung" und "Preis" der Koppelregel ({@link #mergeBooking}). */
+	/** Die Feldgruppe "Zahlung" der Koppelregel ({@link #mergeBooking}). */
 	private static final String PAYMENT_GROUP = "payment";
-	private static final String PRICE_GROUP = "price";
+	/** Die Feldgruppe "Preis" der Koppelregel; sie besteht nur aus dem gleichnamigen Feld. */
+	private static final String PRICE = "price";
 	private static final String PAYMENT_STATUS = "paymentStatus";
 	private static final String PAID_AMOUNT = "paidAmount";
-	private static final String PRICE = "price";
-	/** Die Zahlstatus, die als bezahlt gelten; wie {@code PaymentStatus.isPaid()}, die Regel kennt das Modell nicht. */
-	private static final Set<String> PAID_STATUSES = Set.of("CASH", "CARD", "TRANSFER");
+	private static final List<String> PAID_AMOUNT_ONLY = List.of(PAID_AMOUNT);
+	/**
+	 * Die Zahlstatus, die als bezahlt gelten; wie {@code PaymentStatus.isPaid()}, die Regel kennt das Modell nicht (ein Test
+	 * gleicht beide ab).
+	 */
+	static final Set<String> PAID_STATUSES = Set.of("CASH", "CARD", "TRANSFER");
 
 	@Override
 	public Resolution resolve(ConflictInput input) {
@@ -112,12 +115,12 @@ public final class BookingPolicy implements ConflictPolicy {
 	private static FieldMerge.Result mergeBooking(ObjectNode base, ObjectNode mine, ObjectNode theirs) {
 		Map<String, List<String>> groups = FieldGroups.booking();
 		FieldMerge.Result result = FieldMerge.merge(base, mine, theirs, groups);
-		if (result.conflicts().stream().anyMatch(conflict -> conflict.group().equals(PRICE_GROUP))) {
+		if (result.conflicts().stream().anyMatch(conflict -> conflict.group().equals(PRICE))) {
 			return result;
 		}
-		ObjectNode before = base != null ? base : JsonNodeFactory.instance.objectNode();
+		ObjectNode before = FieldMerge.orEmpty(base);
 		List<String> payment = groups.get(PAYMENT_GROUP);
-		List<String> price = groups.get(PRICE_GROUP);
+		List<String> price = groups.get(PRICE);
 		boolean minePays = !FieldMerge.same(mine, before, payment);
 		boolean minePrices = !FieldMerge.same(mine, before, price);
 		boolean theirsPay = !FieldMerge.same(theirs, before, payment);
@@ -134,11 +137,10 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (!paidAtOwnPrice(payer, before) || !isPaid(merged) || !amountDiffersFromPrice(merged)) {
 			return result;
 		}
-		ObjectNode resolved = merged.deepCopy();
-		FieldMerge.copyFields(resolved, theirs, price);
+		FieldMerge.copyFields(merged, theirs, price); // merged ist schon eine eigene Kopie
 		List<FieldConflict> conflicts = new ArrayList<>(result.conflicts());
-		conflicts.add(new FieldConflict(PRICE_GROUP, FieldMerge.slice(mine, price), FieldMerge.slice(theirs, price)));
-		return new FieldMerge.Result(resolved, List.copyOf(conflicts));
+		conflicts.add(new FieldConflict(PRICE, FieldMerge.slice(mine, price), FieldMerge.slice(theirs, price)));
+		return new FieldMerge.Result(merged, List.copyOf(conflicts));
 	}
 
 	/**
@@ -147,7 +149,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * Wechsel der Zahlart oder ein eigener Betrag (Rabatt) erzeugt die Abweichung nicht erst beim Zusammenführen.
 	 */
 	private static boolean paidAtOwnPrice(ObjectNode payer, ObjectNode base) {
-		if (FieldMerge.same(payer, base, List.of(PAID_AMOUNT))) {
+		if (FieldMerge.same(payer, base, PAID_AMOUNT_ONLY)) {
 			return false;
 		}
 		Long amount = cents(payer, PAID_AMOUNT);

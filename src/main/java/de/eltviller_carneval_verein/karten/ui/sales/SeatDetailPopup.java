@@ -132,7 +132,8 @@ public final class SeatDetailPopup {
 		grid.addRow(row++, new Label("Reserviert am:"), reservedOn.box());
 		grid.addRow(row++, new Label("Zahlung:"), paymentBox);
 		grid.addRow(row++, new Label("Bezahlt am:"), paidOn.box());
-		Spinner<Double> priceSpinner = priceSpinner();
+		Spinner<Double> priceSpinner = amountSpinner(edit.price(), "Preis");
+		priceSpinner.setDisable(!editMode);
 		grid.addRow(row++, new Label("Preis (€):"), priceSpinner);
 		grid.addRow(row++, new Label("Bezahlt (€):"), paidAmountSpinner(paymentBox, priceSpinner));
 
@@ -324,30 +325,26 @@ public final class SeatDetailPopup {
 		return combo;
 	}
 
-	private Spinner<Double> priceSpinner() {
-		Spinner<Double> spinner = amountSpinner(edit.price(), "Preis");
-		spinner.setDisable(!editMode);
-		return spinner;
-	}
-
 	/**
 	 * Der gezahlte Betrag: aktiv nur, wenn der Zahlstatus im Dialog bezahlt ist (bei "verschieden", wenn eine der Buchungen
 	 * bezahlt ist). Wird erst im Dialog bezahlt, zeigt der Platzhalter den Preis, den "Anwenden" ohne Eingabe je Buchung
 	 * einträgt ({@link SaleDates}); geschrieben wird er nicht, sonst bekäme bei verschiedenen Preisen jede Buchung denselben.
 	 */
 	private Spinner<Double> paidAmountSpinner(ComboBox<PaymentStatus> paymentBox, Spinner<Double> priceSpinner) {
-		SeatBulkEdit.Field<Integer> field = edit.paidAmount();
-		Spinner<Double> spinner = amountSpinner(field, "Bezahlt");
-		List<Booking> bookings = edit.bookings();
-		boolean nonePaid = bookings.stream().noneMatch(Booking::isPaid);
+		Spinner<Double> spinner = amountSpinner(edit.paidAmount(), "Bezahlt");
+		boolean nonePaid = edit.bookings().stream().noneMatch(Booking::isPaid);
 		Runnable update = () -> {
 			PaymentStatus status = paymentBox.getValue();
 			boolean paid = status != null ? status.isPaid() : !nonePaid;
 			spinner.setDisable(!editMode || !paid);
-			String priceText = priceSpinner.getEditor().getText();
 			if (nonePaid) {
 				// nur bei bezahlt: Im gesperrten Feld läse sich der Preis als "schon bezahlt"
-				spinner.getEditor().setPromptText(!paid ? "" : priceText == null || priceText.isBlank() ? "Preis" : priceText);
+				String priceText = priceSpinner.getEditor().getText();
+				String prompt = "";
+				if (paid) {
+					prompt = priceText == null || priceText.isBlank() ? "Preis" : priceText;
+				}
+				spinner.getEditor().setPromptText(prompt);
 			}
 		};
 		paymentBox.valueProperty().addListener((obs, oldVal, newVal) -> update.run());

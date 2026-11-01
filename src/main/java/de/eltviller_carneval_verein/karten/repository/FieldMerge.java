@@ -51,7 +51,7 @@ final class FieldMerge {
 	static Result merge(ObjectNode base, ObjectNode mine, ObjectNode theirs, Map<String, List<String>> groups) {
 		Objects.requireNonNull(mine, "mine");
 		Objects.requireNonNull(theirs, "theirs");
-		ObjectNode before = base != null ? base : JsonNodeFactory.instance.objectNode();
+		ObjectNode before = orEmpty(base);
 
 		ObjectNode merged = theirs.deepCopy();
 		List<FieldConflict> conflicts = new ArrayList<>();
@@ -148,6 +148,11 @@ final class FieldMerge {
 			}
 		}
 		return all;
+	}
+
+	/** Die Basis eines Vergleichs; ohne Basis ein leeres Objekt. */
+	static ObjectNode orEmpty(ObjectNode base) {
+		return base != null ? base : JsonNodeFactory.instance.objectNode();
 	}
 
 	/** Ob beide Stände in allen Feldern übereinstimmen; fehlend und {@code null} zählen gleich. */

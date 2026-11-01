@@ -264,9 +264,15 @@ public class Booking {
 		return parentPresentation != null ? parentPresentation.getPrice() : 0;
 	}
 
-	/** Der gezahlte Betrag: {@link #getPaidAmount()}, bei einem älteren Stand ohne Betrag der geltende Preis. */
+	/**
+	 * Der gezahlte Betrag einer bezahlten Buchung: {@link #getPaidAmount()}, bei einem älteren Stand ohne Betrag der geltende
+	 * Preis; {@code null}, wenn die Buchung nicht bezahlt ist.
+	 */
 	@JsonIgnore
-	public int getPaidCents() {
+	public Integer getPaidCents() {
+		if (!isPaid()) {
+			return null;
+		}
 		return paidAmount != null ? paidAmount : getEffectivePrice();
 	}
 

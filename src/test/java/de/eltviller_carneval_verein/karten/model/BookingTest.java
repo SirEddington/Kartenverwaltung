@@ -205,15 +205,17 @@ class BookingTest {
 	}
 
 	@Test
-	void getPaidCents_nimmt_paidAmount_sonst_den_geltenden_Preis() {
+	void getPaidCents_nimmt_paidAmount_sonst_den_geltenden_Preis_und_ist_offen_leer() {
 		Presentation presentation = new Presentation();
 		presentation.changePrice(2000);
 		Booking booking = presentation.addBooking();
+		assertNull(booking.getPaidCents(), "offen");
+
 		booking.setPaymentStatus(PaymentStatus.CASH);
-		assertEquals(2000, booking.getPaidCents());
+		assertEquals(Integer.valueOf(2000), booking.getPaidCents());
 
 		booking.setPaidAmount(1500);
-		assertEquals(1500, booking.getPaidCents());
+		assertEquals(Integer.valueOf(1500), booking.getPaidCents());
 	}
 
 	@Test

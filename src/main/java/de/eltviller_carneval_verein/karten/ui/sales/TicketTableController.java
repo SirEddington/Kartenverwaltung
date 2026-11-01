@@ -163,10 +163,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colFirstName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getBooking().getFirstName()));
 		colPrice.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getBooking().getEffectivePrice() / 100.0).asObject());
 		// gezahlter Betrag nur bei bezahlten Buchungen, sonst leer
-		colPaidAmount.setCellValueFactory(cell -> {
-			Booking booking = cell.getValue().getBooking();
-			return new SimpleObjectProperty<>(booking.isPaid() ? booking.getPaidCents() / 100.0 : null);
-		});
+		colPaidAmount.setCellValueFactory(cell -> new SimpleObjectProperty<>(MoneyFormat.toEuros(cell.getValue().getBooking().getPaidCents())));
 		colPaymentStatus.setCellValueFactory(cell -> cell.getValue().getBooking().getPaymentStatusProperty());
 		colComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getBooking().getComment()));
 
@@ -470,10 +467,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 	 * negativ (SEA-001) gemeldet wird.
 	 */
 	static int toCents(Double euros) {
-		if (euros == null) {
-			return 0;
-		}
-		return MoneyFormat.toCents(euros);
+		return MoneyFormat.toCentsOrZero(euros);
 	}
 
 	private void loadBookings() {

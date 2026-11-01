@@ -44,7 +44,7 @@ public final class SeatBulkEdit {
 		firstName = text(Booking::getFirstName, Booking::setFirstName);
 		paymentStatus = new Field<>(Booking::getPaymentStatus, Booking::setPaymentStatus, null);
 		price = new Field<>(Booking::getEffectivePrice, Booking::setEffectivePrice, null);
-		paidAmount = new Field<>(booking -> booking.isPaid() ? booking.getPaidCents() : null, Booking::setPaidAmount, null);
+		paidAmount = new Field<>(Booking::getPaidCents, Booking::setPaidAmount, null);
 		collected = new Field<>(Booking::isCollected, Booking::setCollected, null);
 		comment = text(Booking::getComment, Booking::setComment);
 		reservationDate = new Field<>(Booking::getReservationDate, Booking::setReservationDate, null);

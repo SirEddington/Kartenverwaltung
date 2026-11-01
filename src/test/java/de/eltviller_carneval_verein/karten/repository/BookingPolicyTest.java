@@ -1639,6 +1639,14 @@ class BookingPolicyTest {
 
 	// Koppelregel Zahlung und Preis -->
 
+	@Test
+	void paidStatusesMatchTheModel() {
+		Set<String> paid = Stream.of(PaymentStatus.values()).filter(PaymentStatus::isPaid).map(Enum::name)
+				.collect(Collectors.toSet());
+
+		assertEquals(paid, BookingPolicy.PAID_STATUSES);
+	}
+
 	/** Bar bezahlt mit dem Betrag {@code paidAmount}. */
 	private static Consumer<Booking> paid(int paidAmount) {
 		return b -> {

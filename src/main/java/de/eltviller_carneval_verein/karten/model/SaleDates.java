@@ -5,8 +5,9 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * Setzt Reservierungs-, Bezahl- und Abholdatum einer {@link Booking Buchung} beim Setzen der Aktion. Jede Stelle, die
- * Nachname, Zahlstatus oder "abgeholt" ändert, führt die Änderung über {@link #change} aus.
+ * Setzt Reservierungs-, Bezahl- und Abholdatum einer {@link Booking Buchung} beim Setzen der Aktion, dazu den gezahlten
+ * Betrag. Jede Stelle, die Nachname, Zahlstatus, Preis oder "abgeholt" ändert, führt die Änderung über {@link #change}
+ * aus.
  *
  * <p>
  * Die Regeln: Wechselt eine Aktion von "nein" auf "ja" (reserviert, bezahlt, abgeholt), wird das zugehörige Datum auf
@@ -48,13 +49,14 @@ public final class SaleDates {
 
 		edit.accept(booking);
 
-		boolean amountUntouched = Objects.equals(paidAmount, booking.getPaidAmount());
 		if (!booking.isPaid()) {
 			booking.setPaidAmount(null);
-		} else if (!wasPaid && amountUntouched) {
-			booking.setPaidAmount(booking.getEffectivePrice());
-		} else if (wasPaid && amountUntouched && paidAmount == null && booking.getEffectivePrice() != price) {
-			booking.setPaidAmount(price);
+		} else if (Objects.equals(paidAmount, booking.getPaidAmount())) { // die Änderung hat den Betrag nicht selbst gesetzt
+			if (!wasPaid) {
+				booking.setPaidAmount(booking.getEffectivePrice());
+			} else if (paidAmount == null && booking.getEffectivePrice() != price) {
+				booking.setPaidAmount(price);
+			}
 		}
 
 		if (!wasReserved && booking.isReserved() && Objects.equals(reservationDate, booking.getReservationDate())) {

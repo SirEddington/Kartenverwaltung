@@ -53,7 +53,7 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	private final Function<S, String> rowLabel;
 	private final Supplier<T> fallbackIfEmpty;
 	/** Welche Zeilen sich bearbeiten lassen; {@code null}: alle (die Spalte entscheidet). */
-	private Predicate<S> editableRow;
+	private final Predicate<S> editableRow;
 	private boolean commitFailed;
 
 	/**
@@ -73,40 +73,42 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	 */
 	public ParsingTextFieldTableCell(StringConverter<T> converter, InputIssue issueOnFailure, String fieldName, Function<S, String> rowLabel,
 			Supplier<T> fallbackIfEmpty) {
+		this(converter, issueOnFailure, fieldName, rowLabel, fallbackIfEmpty, null);
+	}
+
+	private ParsingTextFieldTableCell(StringConverter<T> converter, InputIssue issueOnFailure, String fieldName, Function<S, String> rowLabel,
+			Supplier<T> fallbackIfEmpty, Predicate<S> editableRow) {
 		this.parsing = new ParsingConverter<>(converter, issueOnFailure, this::getItem);
 		this.fieldName = fieldName;
 		this.rowLabel = rowLabel;
 		this.fallbackIfEmpty = fallbackIfEmpty;
+		this.editableRow = editableRow;
 		setConverter(parsing);
 	}
 
 	/** Spaltenfabrik für {@code TableColumn.setCellFactory}. */
 	public static <S, T> Callback<TableColumn<S, T>, TableCell<S, T>> forTableColumn(StringConverter<T> converter, InputIssue issueOnFailure,
 			String fieldName, Function<S, String> rowLabel) {
-		return column -> new ParsingTextFieldTableCell<>(converter, issueOnFailure, fieldName, rowLabel);
+		return forTableColumn(converter, issueOnFailure, fieldName, rowLabel, null);
 	}
 
 	/**
 	 * Wie {@link #forTableColumn(StringConverter, InputIssue, String, Function)}, aber nur Zeilen, die {@code editableRow}
-	 * erfüllen, lassen sich bearbeiten (etwa der gezahlte Betrag nur bei bezahlten Buchungen). Geprüft wird beim Zeichnen
-	 * der Zelle; ändert sich die Bedingung, muss die Tabelle neu zeichnen.
+	 * erfüllen, lassen sich bearbeiten (etwa der gezahlte Betrag nur bei bezahlten Buchungen); {@code null}: alle. Gefragt
+	 * wird erst, wenn das Bearbeiten beginnen soll ({@link #canEdit()}).
 	 */
 	public static <S, T> Callback<TableColumn<S, T>, TableCell<S, T>> forTableColumn(StringConverter<T> converter, InputIssue issueOnFailure,
 			String fieldName, Function<S, String> rowLabel, Predicate<S> editableRow) {
-		return column -> {
-			ParsingTextFieldTableCell<S, T> cell = new ParsingTextFieldTableCell<>(converter, issueOnFailure, fieldName, rowLabel);
-			cell.editableRow = editableRow;
-			return cell;
-		};
+		return column -> new ParsingTextFieldTableCell<>(converter, issueOnFailure, fieldName, rowLabel, null, editableRow);
 	}
 
-	@Override
-	public void updateItem(T item, boolean empty) {
-		super.updateItem(item, empty);
-		if (editableRow != null) {
-			S row = getTableRow() == null ? null : getTableRow().getItem();
-			setEditable(!empty && row != null && editableRow.test(row));
+	/** Ob die Zeile der Zelle sich bearbeiten lässt (ohne Zeilenbedingung immer); Tabelle und Spalte prüft JavaFX selbst. */
+	boolean canEdit() {
+		if (editableRow == null) {
+			return true;
 		}
+		S row = getTableRow() == null ? null : getTableRow().getItem();
+		return row != null && editableRow.test(row);
 	}
 
 	/**
@@ -125,7 +127,7 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 
 	@Override
 	public void startEdit() {
-		if (editableRow != null && !isEditable()) {
+		if (!canEdit()) {
 			// Die Tabelle hat diese Zelle schon als bearbeitet vermerkt (Klick, Enter, table.edit); bliebe das stehen, nähme sie
 			// keine Taste mehr an und hielte fremde Änderungen zurück
 			TableView<S> table = getTableView();
