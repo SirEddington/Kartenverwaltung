@@ -86,7 +86,7 @@ public final class ConflictActions {
 	/** Die Feldgruppe einer Vorstellung mit Halle und Bestuhlung ({@code FieldGroups}). */
 	private static final String HALL_GROUP = "hall";
 	/** Die Feldgruppe einer Buchung mit Sitz und Momentaufnahme ({@code FieldGroups}). */
-	private static final String PLACE_GROUP = "place";
+	static final String PLACE_GROUP = "place";
 	/** Der Grund, wenn die Bestuhlung den eigenen Sitz eines Vermerks "Platz" nicht mehr hat. */
 	static final String SEAT_GONE = "Deinen Platz gibt es in dieser Bestuhlung nicht mehr.";
 
@@ -217,10 +217,10 @@ public final class ConflictActions {
 	private String placeRefusal(Row row) {
 		FieldConflict place = placeField(row.conflict().note());
 		String seatId = place == null ? null : text(place.mine(), "seatId", null);
-		if (seatId == null || !(valueTarget(row) instanceof Booking booking) || seatId.equals(booking.getSeatId())) {
+		if (seatId == null || !(valueTarget(row) instanceof Booking booking) || sitsOn(booking, seatId)) {
 			return null;
 		}
-		Presentation presentation = booking.getParent();
+		Presentation presentation = presentationOf(actionUnit(row.conflict()));
 		SeatingPlan plan = planOf(presentation);
 		if (plan == null) {
 			return AssignPlaceDialog.noPlanText(presentation);
@@ -236,6 +236,14 @@ public final class ConflictActions {
 	private static FieldConflict placeField(ConflictNote note) {
 		return note == null ? null
 				: note.fields().stream().filter(field -> field.group().equals(PLACE_GROUP)).findFirst().orElse(null);
+	}
+
+	/**
+	 * Ob die Buchung auf dem Sitz steht; eine Buchung "ohne Platz" steht auf keinem, auch wenn sie die Sitz-ID von früher
+	 * behält (Abgleich ohne Bestuhlung, {@link BookingSync#sync}).
+	 */
+	private static boolean sitsOn(Booking booking, String seatId) {
+		return !booking.isUnassigned() && seatId.equals(booking.getSeatId());
 	}
 
 	/**
@@ -284,6 +292,20 @@ public final class ConflictActions {
 		if (plan == null) {
 			throw new IllegalStateException(AssignPlaceDialog.noPlanText(presentation));
 		}
+		assignAndSave(row, event, presentation, plan, booking, seat, moved);
+	}
+
+	/**
+	 * Setzt die Buchung auf den Sitz ({@link BookingSync#assign}, die Momentaufnahme kommt vom Sitz); stand sie auf einem
+	 * anderen Sitz, bekommt der wieder einen leeren Platzhalter. Dann wird das Event gespeichert, die Ansichten erfahren es,
+	 * und die Zeile ist bestätigt.
+	 *
+	 * @param from die Einheit, auf der die Buchung bisher lebt
+	 * @throws IllegalStateException wie bei {@link #assignPlace}
+	 */
+	private void assignAndSave(Row row, Event event, Presentation presentation, SeatingPlan plan, Booking booking, Seat seat,
+			UnitKey from) {
+		Seat left = booking.isUnassigned() || booking.getSeatId() == null ? null : plan.findSeat(booking.getSeatId());
 		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
 		Booking before = booking.copy();
 		UnitKey seatUnit = UnitKey.booking(event.getId(), presentation.getId(), seat.getId());
@@ -291,13 +313,17 @@ public final class ConflictActions {
 		if (!BookingSync.assign(presentation, plan, booking, seat)) {
 			throw new IllegalStateException(AssignPlaceDialog.takenText(seat));
 		}
+		if (left != null) {
+			presentation.addBooking().takeSnapshot(left.getParent(), left);
+		}
 		saveOrUndo(seatUnit, versionBefore, this::writtenDespite, () -> save(event), e -> {
-			// die Buchung wieder ohne Platz, und der leere Platzhalter, den die Zuweisung entfernt hat, wieder an seiner Stelle
+			// die Buchung wieder, wo sie war, und die Platzhalter der Sitze wieder wie vorher (auch der, den die Zuweisung
+			// entfernt hat)
 			booking.copyFrom(before);
 			presentation.getBookings().clear();
 			presentation.getBookings().addAll(bookingsBefore);
 		});
-		events.announceChange(event, Set.of(seatUnit, moved));
+		events.announceChange(event, Set.of(seatUnit, from));
 		acknowledge(row);
 	}
 
@@ -422,8 +448,8 @@ public final class ConflictActions {
 	 * Übernimmt den eigenen Wert einer Feldgruppe: Das Modell bekommt die Felder der Gruppe aus dem Vermerk
 	 * ({@link FieldConflict#mine()}), dann wird das Event gespeichert. Die Änderung gilt für die Einheit, auf die der Vermerk
 	 * sie übertragen hat ({@link ConflictNote#moved()}), sonst für die der Zeile; beim Vermerk "Platz" für die Einheit, auf der
-	 * die Buchung jetzt lebt ({@link #actionUnit}). Lebt sie dort auf einem anderen Sitz, zieht sie auf den eigenen um
-	 * ({@link #moveToMyPlace}). Hat der Vermerk nur eine Gruppe, ist die Zeile danach bestätigt; bei mehreren erst, wenn jede
+	 * die Buchung jetzt lebt ({@link #actionUnit}). Lebt sie dort nicht auf dem eigenen Sitz, zieht sie dorthin um wie beim
+	 * Zuweisen ({@link #assignAndSave}). Hat der Vermerk nur eine Gruppe, ist die Zeile danach bestätigt; bei mehreren erst, wenn jede
 	 * Gruppe übernommen ist ({@link #isAdopted}), sonst bleibt sie offen.
 	 *
 	 * @throws IllegalStateException wenn die Aktion gesperrt ist, die Gruppe nicht zur Zeile gehört oder Ändern, Speichern
@@ -442,8 +468,12 @@ public final class ConflictActions {
 		UnitKey unit = actionUnit(row.conflict());
 		Event event = events.findEvent(unit.eventId());
 		String seatId = PLACE_GROUP.equals(group) ? text(conflict.mine(), "seatId", null) : null;
-		if (seatId != null && valueTarget(row) instanceof Booking booking && !seatId.equals(booking.getSeatId())) {
-			moveToMyPlace(row, event, unit, booking, seatId);
+		if (seatId != null && valueTarget(row) instanceof Booking booking && !sitsOn(booking, seatId)) {
+			// die Buchung zieht auf den eigenen Sitz um; placeRefusal hat geprüft, dass Bestuhlung und Sitz da sind und er frei
+			// ist. Ein Vermerk "Platz" hat nur diese eine Gruppe.
+			Presentation presentation = presentationOf(unit);
+			SeatingPlan plan = planOf(presentation);
+			assignAndSave(row, event, presentation, plan, booking, plan.findSeat(seatId), unit);
 			return;
 		}
 		ObjectNode before = events.payloadOf(unit);
@@ -463,39 +493,6 @@ public final class ConflictActions {
 		if (row.conflict().note().fields().size() == 1 || allAdopted(row.conflict())) {
 			acknowledge(row);
 		}
-	}
-
-	/**
-	 * Der eigene Wert der Gruppe "Platz", wenn die Buchung inzwischen auf einem anderen Sitz lebt: Sie zieht auf den eigenen
-	 * Sitz wie beim Zuweisen ({@link BookingSync#assign}, die Momentaufnahme kommt vom Sitz), der bisherige bekommt wieder
-	 * einen leeren Platzhalter; dann wird das Event gespeichert und die Zeile bestätigt. Ein Vermerk "Platz" hat nur diese
-	 * eine Gruppe. {@link #placeRefusal} hat geprüft, dass Bestuhlung und Sitz da sind und der Sitz frei ist.
-	 */
-	private void moveToMyPlace(Row row, Event event, UnitKey unit, Booking booking, String seatId) {
-		Presentation presentation = booking.getParent();
-		SeatingPlan plan = planOf(presentation);
-		Seat seat = plan.findSeat(seatId);
-		Seat left = booking.getSeatId() == null ? null : plan.findSeat(booking.getSeatId());
-		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
-		Booking before = booking.copy();
-		UnitKey seatUnit = UnitKey.booking(event.getId(), presentation.getId(), seat.getId());
-		VersionId versionBefore = versionOf(seatUnit);
-		saveOrUndo(seatUnit, versionBefore, this::writtenDespite, () -> {
-			if (!BookingSync.assign(presentation, plan, booking, seat)) {
-				throw new IllegalStateException(AssignPlaceDialog.takenText(seat));
-			}
-			if (left != null) {
-				presentation.addBooking().takeSnapshot(left.getParent(), left);
-			}
-			save(event);
-		}, e -> {
-			// die Buchung wieder auf ihrem Sitz, und die Platzhalter beider Sitze wieder wie vorher
-			booking.copyFrom(before);
-			presentation.getBookings().clear();
-			presentation.getBookings().addAll(bookingsBefore);
-		});
-		events.announceChange(event, Set.of(unit, seatUnit));
-		acknowledge(row);
 	}
 
 	/**
@@ -656,29 +653,35 @@ public final class ConflictActions {
 	}
 
 	/**
-	 * Die Einheit, auf der die Aktion wirkt: {@link OpenConflict#target()}. Steht ein Vermerk "Platz" auf einer Buchung "ohne
-	 * Platz" ({@code _<ID>}), die ein anderer Rechner inzwischen auf einen Sitz gesetzt hat (Ruling R31b, die Einheit ist
-	 * gelöscht), wirkt sie auf dem Sitz, auf dem die Buchung jetzt lebt; auf der gelöschten Einheit selbst gibt es nichts zu
-	 * tun (KARV-94).
+	 * Die Einheit, auf der die Aktion wirkt: {@link OpenConflict#target()}; beim Vermerk "Platz" die Einheit, auf der die
+	 * Buchung des Vermerks jetzt lebt. Ein anderer Rechner kann sie auf einen Sitz gesetzt haben (Ruling R31b; der Vermerk
+	 * steht dann auf der gelöschten {@code _<ID>}) oder nach der Übertragung weitergesetzt. Auf einer Einheit, auf der sie
+	 * nicht mehr lebt, gibt es nichts zu tun (KARV-94); lebt sie nirgends mehr, bleibt es beim Ziel des Vermerks.
 	 */
 	private UnitKey actionUnit(OpenConflict conflict) {
 		UnitKey target = conflict.target();
-		if (!target.isUnassigned() || placeField(conflict.note()) == null || events.modelObject(target) != null) {
+		if (target.type() != UnitType.BOOKING || placeField(conflict.note()) == null) {
 			return target;
 		}
-		Event event = events.findEvent(target.eventId());
-		Presentation presentation = event == null ? null : event.findPresentation(target.presentationId());
-		if (presentation == null || presentation.getBookings() == null) {
+		String bookingId = bookingIdOf(conflict);
+		Presentation presentation = presentationOf(target);
+		if (bookingId == null || presentation == null || presentation.getBookings() == null) {
 			return target;
 		}
-		String bookingId = target.unassignedBookingId();
 		for (Booking booking : presentation.getBookings()) {
-			if (booking.hasData() && !booking.isUnassigned() && booking.getSeatId() != null
-					&& bookingId.equals(booking.getId())) {
-				return UnitKey.booking(target.eventId(), target.presentationId(), booking.getSeatId());
+			if (booking.hasData() && bookingId.equals(booking.getId())) {
+				return booking.isUnassigned() || booking.getSeatId() == null
+						? UnitKey.unassignedBooking(target.eventId(), target.presentationId(), bookingId)
+						: UnitKey.booking(target.eventId(), target.presentationId(), booking.getSeatId());
 			}
 		}
 		return target;
+	}
+
+	/** Die Vorstellung der Einheit im Modell; {@code null}, wenn es Event oder Vorstellung nicht (mehr) gibt. */
+	private Presentation presentationOf(UnitKey unit) {
+		Event event = events.findEvent(unit.eventId());
+		return event == null ? null : event.findPresentation(unit.presentationId());
 	}
 
 	/** Die Halle im Modell, die die eigene Fassung ersetzt; {@code null}, wenn es sie nicht gibt oder sie schon so ist. */

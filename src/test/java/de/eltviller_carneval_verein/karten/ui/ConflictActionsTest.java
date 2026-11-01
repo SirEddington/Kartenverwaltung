@@ -1135,6 +1135,29 @@ class ConflictActionsTest {
 		assertMovedToMySeat(transferred(placeConflictOnAFreeSeat()));
 	}
 
+	/** a setzt Mia nach dem Vermerk weiter auf den sechsten Sitz: Die Aktion folgt ihr dorthin, statt "erledigt" zu melden. */
+	@Test
+	void placeFollowsTheBookingThatMovedOn() {
+		Row row = placeConflictOnAFreeSeat();
+		Booking mia = a.seat(4);
+		String miaId = mia.getId();
+		assertTrue(BookingSync.assign(a.friday(), a.plan(), mia, a.plan().getSeats().get(5)));
+		BookingSync.sync(a.friday(), a.plan());
+		a.saveEvent();
+		settle();
+		assertEquals("Mia", b.seat(5).getLastName());
+		Row moved = transferred(b.onlyRow());
+		assertEquals(row.conflict().key(), moved.conflict().key());
+		assertEquals(new Availability(true, ""), b.actions().availability(moved));
+
+		b.actions().takeMyValue(moved, "place");
+
+		assertEquals(miaId, b.seat(1).getId());
+		assertFalse(b.seat(5).hasData(), "der sechste Sitz ist wieder frei");
+		assertFalse(b.seat(4).hasData());
+		assertEquals(List.of(), b.sync.openConflicts());
+	}
+
 	private void assertMovedToMySeat(Row row) {
 		String miaId = b.seat(4).getId();
 		assertEquals(new Availability(true, ""), b.actions().availability(row));

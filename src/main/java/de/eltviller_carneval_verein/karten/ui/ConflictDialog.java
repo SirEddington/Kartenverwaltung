@@ -370,7 +370,7 @@ public final class ConflictDialog {
 			adopted.getStyleClass().add("conflict-adopted");
 			return adopted;
 		}
-		String text = field.group().equals("place") ? "Platz zuweisen" : TAKE_VALUE;
+		String text = field.group().equals(ConflictActions.PLACE_GROUP) ? "Platz zuweisen" : TAKE_VALUE;
 		Button button = actionButton(text, available, () -> takeMyValue(row, field));
 		if (!several) {
 			return button;
