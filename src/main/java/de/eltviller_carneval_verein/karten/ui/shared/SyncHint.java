@@ -11,7 +11,7 @@ import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
  * die erste zutreffende Zeile der Vorrangtabelle. Rein, ohne JavaFX und ohne Uhr; wie lange der Zustand {@code AUSSTEHEND}
  * schon dauert, kommt als Dauer von außen.
  *
- * @param rank der Vorrang 1 bis 7 (1 = höchster)
+ * @param rank der Vorrang 1 bis 8 (1 = höchster)
  * @param text die Anzeige
  */
 public record SyncHint(int rank, String text) {
@@ -27,6 +27,7 @@ public record SyncHint(int rank, String text) {
 	 * begonnen hat);
 	 * <li>erster Abgleich unvollständig, kein Lauf, und ein Lauf ist zu Ende gegangen;
 	 * <li>{@code AUSSTEHEND} seit mindestens 30 s;
+	 * <li>Änderungslisten anderer Rechner warten noch auf das Lesen (Verkäufe anderer fehlen womöglich noch);
 	 * <li>übersprungene Einträge.
 	 * </ol>
 	 * Im Einzelbetrieb ({@code AUS}, auch {@code null}) bleibt die Fußzeile leer, was die Werte sonst sagen.
@@ -36,10 +37,11 @@ public record SyncHint(int rank, String text) {
 	 * @param complete      {@code connectionComplete()}
 	 * @param progress      {@code fullSyncProgress()}, {@code null} ohne laufenden Lauf
 	 * @param firstRunEnded ob seit dem Verbinden ein Lauf zu Ende gegangen ist ({@link FirstRunWatch#ended()})
+	 * @param catchingUp    {@code catchingUp()}
 	 * @param skipped       die Zahl der Einträge in {@code skippedUnits()}
 	 */
 	public static Optional<SyncHint> of(SyncState state, Duration pendingFor, boolean complete, Double progress,
-			boolean firstRunEnded, int skipped) {
+			boolean firstRunEnded, boolean catchingUp, int skipped) {
 		if (state == null || state == SyncState.AUS) {
 			return Optional.empty();
 		}
@@ -62,8 +64,11 @@ public record SyncHint(int rank, String text) {
 		if (state == SyncState.AUSSTEHEND && pendingFor != null && pendingFor.compareTo(PENDING_AFTER) >= 0) {
 			return hint(6, SharedFolderTexts.HINT_PENDING);
 		}
+		if (catchingUp) {
+			return hint(7, SharedFolderTexts.HINT_CATCHING_UP);
+		}
 		if (skipped > 0) {
-			return hint(7, skipped == 1 ? SharedFolderTexts.HINT_SKIPPED_ONE
+			return hint(8, skipped == 1 ? SharedFolderTexts.HINT_SKIPPED_ONE
 					: MessageTemplate.format(SharedFolderTexts.HINT_SKIPPED_MANY, skipped));
 		}
 		return Optional.empty();

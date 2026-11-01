@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Das Ergebnis eines Durchlaufs von {@link FeedReader#poll()}.
+ * Das Ergebnis eines Durchlaufs von {@link FeedReader#poll(java.time.Duration)}.
  *
  * @param changed        Einheiten, die einen neuen Anspruch in den lokalen Bestand bekommen haben (ihr gültiger Stand
  *                       kann sich geändert haben)
@@ -20,9 +20,11 @@ import java.util.Set;
  * @param listed         die Einträge der in diesem Durchlauf vollständig verarbeiteten Listen: alle Versionsdateien lagen
  *                       lokal vor und die Ansprüche sind übernommen oder werden beobachtet (nicht die Einträge einer
  *                       Liste, die nach der Wartezeit übersprungen wurde, und nicht ungültige Einträge)
+ * @param more           ob der Durchlauf am Budget (Zeit oder Dateien) endete, während Rechner noch vorankamen: Es liegen
+ *                       wahrscheinlich weitere Listen vor (sicher weiß es erst der nächste Durchlauf)
  */
 public record FeedPoll(Set<UnitKey> changed, List<PendingSighting> pending, boolean fullSyncNeeded,
-		Set<Contested> contested, Set<UnitKey> damaged, List<FeedEntry> listed) {
+		Set<Contested> contested, Set<UnitKey> damaged, List<FeedEntry> listed, boolean more) {
 
 	/**
 	 * Ein umstrittener Platz.

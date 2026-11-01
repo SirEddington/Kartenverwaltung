@@ -94,28 +94,53 @@ public final class FeedReader {
 	}
 
 	/**
-	 * Ein Durchlauf: Beobachtungen nachprüfen, dann je fremdem Rechner (nach ID sortiert) die Listen ab Position+1
-	 * lesen, höchstens {@value #MAX_FEEDS_PER_POLL} Dateien insgesamt. Haben sich Positionen geändert, werden sie
+	 * Ein Durchlauf ohne Zeitbudget (siehe {@link #poll(Duration)}). Kein Aufrufer im Programm, nur für Tests: Der Takt liest
+	 * mit Budget ({@link SyncService#FEED_POLL_BUDGET}), sonst hielte ein großer Rückstand ihn minutenlang auf.
+	 */
+	public synchronized FeedPoll poll() throws IOException {
+		return pollUntil(Instant.MAX);
+	}
+
+	/**
+	 * Ein Durchlauf: Beobachtungen nachprüfen, dann die Listen der fremden Rechner ab Position+1 lesen, reihum je Rechner
+	 * (nach ID sortiert) eine, höchstens {@value #MAX_FEEDS_PER_POLL} Dateien insgesamt. Ist das Budget nach einer Runde
+	 * verbraucht, endet der Durchlauf; die erste Runde läuft immer, so kommt jeder Rechner mit Listen um mindestens eine
+	 * voran. Der nächste Durchlauf liest weiter, wo dieser aufhörte. So hält ein Rechner mit vielen großen Listen (etwa
+	 * nach dem Mitnehmen) weder den Takt lange auf noch die Listen der anderen. Haben sich Positionen geändert, werden sie
 	 * gespeichert.
 	 *
+	 * @param budget wie lange der Durchlauf neue Runden beginnt, gezählt ab seinem Beginn
 	 * @throws IOException bei einer Störung im gemeinsamen Ordner; Position und Beobachtungen bleiben dann in einem
 	 *                     Zustand, von dem der nächste Durchlauf sauber weitermacht
 	 */
-	public synchronized FeedPoll poll() throws IOException {
+	public synchronized FeedPoll poll(Duration budget) throws IOException {
+		return pollUntil(clock.instant().plus(budget));
+	}
+
+	private FeedPoll pollUntil(Instant deadline) throws IOException {
 		Instant now = clock.instant();
 		recheckWatched(now);
-		int budget = MAX_FEEDS_PER_POLL;
-		for (String peer : peers()) {
-			if (budget == 0) {
-				break;
+		int files = MAX_FEEDS_PER_POLL;
+		Set<String> active = peers();
+		do {
+			Iterator<String> peers = active.iterator();
+			while (peers.hasNext() && files > 0) {
+				ReadResult read = readNext(peers.next(), now);
+				if (read != ReadResult.NONE) {
+					files--;
+				}
+				if (read != ReadResult.ADVANCED) {
+					peers.remove();
+				}
 			}
-			budget = readPeer(peer, now, budget);
-		}
+		} while (!active.isEmpty() && files > 0 && clock.instant().isBefore(deadline));
 		if (positionsDirty) {
 			positions.save();
 			positionsDirty = false;
 		}
-		FeedPoll result = new FeedPoll(changed, pending, fullSyncNeeded, contested, damaged, List.copyOf(listed));
+		// wer in der letzten Runde vorankam und noch dabei ist, hat vermutlich weitere Listen
+		FeedPoll result = new FeedPoll(changed, pending, fullSyncNeeded, contested, damaged, List.copyOf(listed),
+				!active.isEmpty());
 		changed.clear();
 		pending.clear();
 		contested.clear();
@@ -229,33 +254,33 @@ public final class FeedReader {
 		return !now.isBefore(since.plus(limit));
 	}
 
-	/**
-	 * Liest die Listen eines Rechners ab Position+1, solange es welche gibt und Dateien übrig sind.
-	 *
-	 * @return die Zahl der Dateien, die dem Durchlauf noch bleiben
-	 */
-	private int readPeer(String peer, Instant now, int budget) throws IOException {
-		int left = budget;
-		long position = positions.position(peer);
-		while (left > 0) {
-			long seq = position + 1;
-			Optional<byte[]> bytes = shared.readRelative(Feeds.feedPath(peer, seq));
-			if (bytes.isEmpty()) {
-				break;
-			}
-			left--;
-			Feed feed = parseFeed(bytes.get(), peer, seq);
-			if (feed == null) {
-				// unbrauchbar: die Nummer überspringen, der Vollabgleich holt nach, was darin stand
-				fullSyncNeeded = true;
-			} else if (!process(peer, feed, now)) {
-				break;
-			}
-			position = seq;
-			positions.set(peer, seq);
-			positionsDirty = true;
+	/** Was {@link #readNext} mit der nächsten Liste eines Rechners erreicht hat. */
+	private enum ReadResult {
+		/** Es gibt sie nicht. */
+		NONE,
+		/** Gelesen, aber sie wartet auf eine Versionsdatei: Die Position bleibt. */
+		WAITING,
+		/** Verarbeitet (oder als unbrauchbar übersprungen): Die Position ist vorgerückt. */
+		ADVANCED
+	}
+
+	/** Liest die Liste eines Rechners ab Position+1, wenn es sie gibt. */
+	private ReadResult readNext(String peer, Instant now) throws IOException {
+		long seq = positions.position(peer) + 1;
+		Optional<byte[]> bytes = shared.readRelative(Feeds.feedPath(peer, seq));
+		if (bytes.isEmpty()) {
+			return ReadResult.NONE;
 		}
-		return left;
+		Feed feed = parseFeed(bytes.get(), peer, seq);
+		if (feed == null) {
+			// unbrauchbar: die Nummer überspringen, der Vollabgleich holt nach, was darin stand
+			fullSyncNeeded = true;
+		} else if (!process(peer, feed, now)) {
+			return ReadResult.WAITING;
+		}
+		positions.set(peer, seq);
+		positionsDirty = true;
+		return ReadResult.ADVANCED;
 	}
 
 	/** Die Liste, oder {@code null}, wenn sie unlesbar ist, ein unbekanntes Format hat oder nicht zu ihrem Pfad passt. */

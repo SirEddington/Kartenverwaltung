@@ -539,6 +539,87 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void tickReadsForeignListsOnlyWithinTheBudgetAndContinuesInTheNext() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		List<UnitKey> halls = new ArrayList<>();
+		for (int i = 1; i <= 30; i++) {
+			halls.add(UnitKey.hall("h" + i));
+			publish(sharedStore, i, halls.get(i - 1), version(OTHER, 1_000_000L + i, i, "fremd-" + i, null));
+		}
+		// je Liste einige Lesezugriffe zu 100 ms: Alle 30 Listen dauerten weit länger als das Budget
+		slowReads(b, Duration.ofMillis(100));
+
+		// mit Rückstand folgt der nächste Takt sofort, und die Oberfläche erfährt, dass noch etwas kommt
+		assertTrue(b.service.tick(), "Rückstand: sofort weiter");
+		assertTrue(b.service.catchingUp().get());
+
+		long known = halls.stream().filter(hall -> b.service.snapshots().get(hall) != null).count();
+		assertTrue(known > 0 && known < halls.size(), "nur ein Teil in diesem Takt: " + known);
+		int ticks = 1;
+		boolean again;
+		do {
+			again = b.service.tick();
+			assertTrue(++ticks < 50, "der Leser kommt nicht voran");
+		} while (again);
+		assertTrue(halls.stream().allMatch(hall -> b.service.snapshots().get(hall) != null));
+		assertFalse(b.service.catchingUp().get());
+		assertNull(b.service.fullSyncProgress().get(), "ohne Vollabgleich");
+	}
+
+	@Test
+	void backlogDoesNotHurryATickThatFailed() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		for (int i = 1; i <= 30; i++) {
+			publish(sharedStore, i, UnitKey.hall("h" + i), version(OTHER, 1_000_000L + i, i, "fremd-" + i, null));
+		}
+		slowReads(b, Duration.ofMillis(100));
+		// das Hochladen eines Verkaufs scheitert in diesem Takt: Der Takt ist gestört
+		Path bookingDir = sharedRoot.resolve("data").resolve(BOOKING.relativePath());
+		b.layer.failWhen(p -> p.startsWith(bookingDir), "createNew", new IOException("Datei gesperrt"));
+		save(b, create(BOOKING, "Bert"));
+
+		assertFalse(b.service.tick(), "nach einer Störung gilt der Abstand");
+		assertTrue(b.service.catchingUp().get(), "der Rückstand gilt trotzdem");
+	}
+
+	@Test
+	void notCatchingUpWithoutForeignLists() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+
+		a.service.tick();
+
+		assertFalse(a.service.catchingUp().get());
+	}
+
+	@Test
+	void backlogOfOneMachineDoesNotHoldUpTheSaleOfAnother() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
+		// ein Rechner mit vielen Listen, nach ID vor dem Verkäufer
+		String busy = "aaaaaaaaaaaaaaaaaaaaaaaaaa";
+		List<UnitKey> halls = new ArrayList<>();
+		for (int i = 1; i <= 30; i++) {
+			halls.add(UnitKey.hall("h" + i));
+			publish(sharedStore, i, halls.get(i - 1), version(busy, 1_000_000L + i, i, "viel-" + i, null));
+		}
+		Version sale = version(OTHER, 2_000_000L, 0, "verkauf", null);
+		publish(sharedStore, 1, BOOKING, sale);
+		slowReads(b, Duration.ofMillis(100));
+
+		b.service.tick();
+
+		assertEquals(sale.id(), b.service.unitState(BOOKING).head().id(), "der Verkauf kommt im ersten Takt an");
+		assertTrue(halls.stream().anyMatch(hall -> b.service.snapshots().get(hall) == null), "der Rückstand bleibt");
+	}
+
+	@Test
 	void listedVersionWithoutClaimIsReportedAsPending() throws IOException {
 		VersionStore sharedStore = new VersionStore(sharedRoot.resolve("data"), new NioFileLayer());
 		Version p1 = version(OTHER, 1_000_000L, 0, "fremd-1", null);

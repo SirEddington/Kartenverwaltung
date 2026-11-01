@@ -36,6 +36,7 @@ final class SyncNotifier {
 	private final ReadOnlyObjectWrapper<Instant> lastSyncProperty = new ReadOnlyObjectWrapper<>();
 	private final ReadOnlyObjectWrapper<Double> fullSyncProgressProperty = new ReadOnlyObjectWrapper<>();
 	private final ReadOnlyBooleanWrapper connectionCompleteProperty;
+	private final ReadOnlyBooleanWrapper catchingUpProperty = new ReadOnlyBooleanWrapper();
 	private volatile SyncListener listener = new SyncListener() {
 	};
 
@@ -44,6 +45,8 @@ final class SyncNotifier {
 	private Double fullSyncProgress;
 	/** Der zuletzt gesetzte Stand von {@link #connectionCompleteProperty()}. */
 	private boolean connectionComplete;
+	/** Der zuletzt gesetzte Stand von {@link #catchingUpProperty()}. */
+	private boolean catchingUp;
 	/** Ob für den laufenden Ausfall schon gemeldet wurde; zurückgesetzt beim nächsten Erfolg. */
 	private boolean unreachableNotified;
 	/** Ob der Ordner ausgefallen war und die Rückkehr noch nicht gemeldet ist. */
@@ -103,6 +106,22 @@ final class SyncNotifier {
 		notifyUi(() -> connectionCompleteProperty.set(complete));
 	}
 
+	ReadOnlyBooleanProperty catchingUpProperty() {
+		return catchingUpProperty.getReadOnlyProperty();
+	}
+
+	/**
+	 * Setzt, ob das Lesen der fremden Änderungslisten im Rückstand ist ({@link FeedPoll#more()}); die Eigenschaft folgt über
+	 * den {@code ui}-Executor, nur bei einer Änderung.
+	 */
+	synchronized void setCatchingUp(boolean behind) {
+		if (catchingUp == behind) {
+			return;
+		}
+		catchingUp = behind;
+		notifyUi(() -> catchingUpProperty.set(behind));
+	}
+
 	void setListener(SyncListener listener) {
 		this.listener = listener != null ? listener : new SyncListener() {
 		};
@@ -121,11 +140,15 @@ final class SyncNotifier {
 		notifyUi(() -> stateProperty.set(state));
 	}
 
-	/** Neuer Ordner oder Einzelbetrieb: vergisst Ausfall und Störung des vorigen Ordners; der Zustand bleibt. */
+	/**
+	 * Neuer Ordner oder Einzelbetrieb: vergisst Ausfall, Störung und Rückstand beim Lesen des vorigen Ordners; der Zustand
+	 * bleibt.
+	 */
 	synchronized void reset() {
 		unreachableNotified = false;
 		wasDown = false;
 		lastErrorMessage = null;
+		setCatchingUp(false);
 	}
 
 	/**

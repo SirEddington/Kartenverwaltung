@@ -195,6 +195,14 @@ public final class SyncService implements ConnectionControl {
 	 * des Takts, und der nächste Takt setzt den Lauf fort.
 	 */
 	static final Duration FULL_SYNC_SLICE_BUDGET = Duration.ofSeconds(2);
+	/**
+	 * So lange beginnt das Lesen der fremden Änderungslisten in einem Takt neue Runden ({@link FeedReader#poll(Duration)}),
+	 * je Runde eine Liste je Rechner. Danach kommt noch das Auflösen der geänderten Einheiten. Gemessen (lokale Platte,
+	 * 15.000 Buchungen mitgenommen): Ein Takt, der etwa drei Listen des Vollabgleichs (je bis zu 150 Einheiten) las und
+	 * auflöste, dauerte etwa 2 s, also etwa 0,7 s je Liste; ohne Budget dauerte ein Takt, der 200 solcher Listen auf einmal
+	 * vorfand, 135 s, und so lange warteten die eigenen Verkäufe aufs Hochladen.
+	 */
+	static final Duration FEED_POLL_BUDGET = Duration.ofSeconds(1);
 	/** So lange werden eigene gewonnene Ansprüche auf eine späte Niederlage geprüft. */
 	static final Duration LATE_DEFEAT_WINDOW = Duration.ofMinutes(15);
 	/**
@@ -341,6 +349,12 @@ public final class SyncService implements ConnectionControl {
 		 * sofort. Eigenes Feld, unabhängig davon, ob der Takt die Auflösung schon erledigt hat.
 		 */
 		volatile boolean hurry;
+		/**
+		 * Ob das Lesen der fremden Änderungslisten im letzten Takt am Budget endete ({@link FeedPoll#more()}): Dann folgt der
+		 * nächste Takt sofort (wenn dieser ohne Störung durchlief), damit ein großer Rückstand nicht in Pausen von
+		 * {@link SyncService#TICK} abgearbeitet wird.
+		 */
+		volatile boolean feedsBehind;
 		/**
 		 * Der Abgleich pausiert vor dem Beginn des ersten Laufs (Zustand {@link SyncState#ENTSCHEIDUNG}), bis
 		 * {@link SyncService#decideConnect} entscheidet: Beide Seiten haben Einheiten (Modus {@link ConnectMode#ASK}), oder die
@@ -659,6 +673,16 @@ public final class SyncService implements ConnectionControl {
 	 */
 	public ReadOnlyBooleanProperty connectionComplete() {
 		return notifier.connectionCompleteProperty();
+	}
+
+	/**
+	 * Ob noch Änderungslisten anderer Rechner auf das Lesen warten: Der letzte Takt endete am Budget
+	 * ({@link #FEED_POLL_BUDGET}), während Rechner noch vorankamen (etwa nach dem Mitnehmen eines großen Bestands). Bis
+	 * dahin fehlen hier womöglich Verkäufe anderer Rechner. {@code false} im Einzelbetrieb und nach einem Wechsel des
+	 * Ordners bis zum ersten Lesen. Änderungen kommen über den {@code ui}-Executor an.
+	 */
+	public ReadOnlyBooleanProperty catchingUp() {
+		return notifier.catchingUpProperty();
 	}
 
 	/**
@@ -2190,8 +2214,8 @@ public final class SyncService implements ConnectionControl {
 	 * stehende Sperrdatei genügt); gelingt das nicht, prüft er nur die Erreichbarkeit (siehe {@code runTick}), und der
 	 * nächste versucht es erneut.
 	 *
-	 * @return ob der nächste Takt sofort folgen soll: Der erste Lauf einer Verbindung läuft noch, und dieser Takt erreichte
-	 *         den Ordner ohne Störung. Sonst (auch nach einer Störung, damit ein dauerhaft scheiternder Block den
+	 * @return ob der nächste Takt sofort folgen soll: Der erste Lauf einer Verbindung läuft noch oder das Lesen der fremden
+	 *         Listen ist im Rückstand ({@link Link#feedsBehind}), und dieser Takt erreichte den Ordner ohne Störung. Sonst (auch nach einer Störung, damit ein dauerhaft scheiternder Block den
 	 *         {@code worker} nicht ohne Pause beschäftigt) gilt der Abstand {@link #TICK}.
 	 */
 	boolean tick() {
@@ -2218,7 +2242,7 @@ public final class SyncService implements ConnectionControl {
 				// Ableitung der Verluste, die keine Absicherung des Durchlaufs umgibt)
 				settleFirstRunEnd(current);
 			}
-			return current.firstRun && current.hurry && isCurrent(current);
+			return current.hurry && (current.firstRun || current.feedsBehind) && isCurrent(current);
 		} finally {
 			boolean interrupt = interruptAfterTick;
 			interruptAfterTick = false;
@@ -3217,7 +3241,9 @@ public final class SyncService implements ConnectionControl {
 	private void poll(Link current, Round round) throws IOException {
 		FeedPoll poll;
 		try {
-			poll = current.reader.poll();
+			poll = current.reader.poll(FEED_POLL_BUDGET);
+			current.feedsBehind = poll.more();
+			notifier.setCatchingUp(poll.more());
 		} catch (IOException | RuntimeException e) {
 			// welche Einheiten das Abholen bis zum Fehler lokal geändert hat, steht erst im nächsten Ergebnis: Alles, was der
 			// Takt schon erledigt hat, löst das Melden am Ende erneut auf
