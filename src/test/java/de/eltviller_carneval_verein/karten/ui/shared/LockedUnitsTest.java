@@ -136,6 +136,35 @@ class LockedUnitsTest {
 	}
 
 	@Test
+	void resetNotYetClaimedIsLeftToTheNextReport() {
+		locked.add(BOOKING, Status.LOCKED_DAMAGED);
+		// gemeinsamer Betrieb: Bis ein Takt das Zurücksetzen beansprucht, ist die Einheit im Speicher noch gesperrt. Jetzt
+		// eingearbeitet, meldete das Modell sie als gesperrt (Handtest KARV-87, 9.10: erneut SYS-008 als Warnung)
+		service.afterReset = Status.LOCKED_DAMAGED;
+
+		locked.reset(BOOKING);
+		runAll();
+
+		assertEquals(List.of(BOOKING), service.resets);
+		assertEquals(List.of(), applied, "die Meldung nach dem Beanspruchen arbeitet ein");
+		assertEquals(0, locked.count(), "zurückgesetzt ist sie trotzdem");
+		assertEquals(1, changed);
+		assertEquals(List.of(), failures);
+	}
+
+	@Test
+	void resetThatHoldsAtOnceIsApplied() {
+		locked.add(BOOKING, Status.LOCKED_DAMAGED);
+		service.afterReset = Status.OK;
+
+		locked.reset(BOOKING);
+		runAll();
+
+		assertEquals(List.of(Set.of(BOOKING)), applied);
+		assertEquals(0, locked.count());
+	}
+
+	@Test
 	void unitsLockedAtLoadAreListed() {
 		Map<UnitKey, Status> atLoad = new LinkedHashMap<>();
 		atLoad.put(HALL, Status.LOCKED_DAMAGED);
@@ -335,6 +364,8 @@ class LockedUnitsTest {
 		final List<UnitKey> asked = new ArrayList<>();
 		final List<UnitKey> resets = new ArrayList<>();
 		Exception resetFailure;
+		/** Der Zustand der Einheit nach einem gelungenen Zurücksetzen; {@code null}: unverändert. */
+		Status afterReset;
 
 		FakeService(UnitKey... resettableAtStart) {
 			resettable.addAll(List.of(resettableAtStart));
@@ -365,6 +396,9 @@ class LockedUnitsTest {
 				throw runtime;
 			}
 			resettable.remove(unit);
+			if (afterReset != null) {
+				states.put(unit, afterReset);
+			}
 		}
 	}
 }

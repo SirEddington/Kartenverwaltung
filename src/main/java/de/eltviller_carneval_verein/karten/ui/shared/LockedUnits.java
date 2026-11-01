@@ -210,7 +210,8 @@ public final class LockedUnits {
 
 	/**
 	 * Setzt die Einheit auf den letzten lesbaren Stand zurück: im Hintergrund {@code resetToLastReadable}, dann auf dem
-	 * FX-Thread das Einarbeiten ins Modell und das Entfernen aus der Liste. Scheitert es, bleibt die Zeile, und
+	 * FX-Thread das Einarbeiten ins Modell (sofern das Zurücksetzen schon gilt, siehe {@link #holdsAtOnce}) und das
+	 * Entfernen aus der Liste. Scheitert es, bleibt die Zeile, und
 	 * {@code failed} bekommt die Ursache; ist die Einheit inzwischen gar nicht mehr beschädigt, wird nur ihr Zustand neu
 	 * abgefragt. Läuft für die Einheit schon ein Zurücksetzen, tut es nichts.
 	 */
@@ -220,6 +221,7 @@ public final class LockedUnits {
 		}
 		background.execute(() -> {
 			Exception failure = null;
+			boolean holds = true;
 			try {
 				// Der Dialog zeichnet den Knopf nach einem früheren Stand: Ein Vollabgleich oder Abholen kann die Einheit
 				// inzwischen wieder reparierbar gemacht haben, dann liegt im Ordner eine heile Kopie, die das Zurücksetzen
@@ -228,22 +230,41 @@ public final class LockedUnits {
 					failure = new IllegalStateException(unit.relativePath() + " ist nicht mehr zurücksetzbar.");
 				} else {
 					service.resetToLastReadable(unit);
+					holds = holdsAtOnce(unit);
 				}
 			} catch (IOException | RuntimeException e) {
 				failure = e;
 			}
 			Exception outcome = failure;
-			fx.execute(() -> finishReset(unit, outcome));
+			boolean applyNow = holds;
+			fx.execute(() -> finishReset(unit, outcome, applyNow));
 		});
 	}
 
-	private void finishReset(UnitKey unit, Exception failure) {
+	/**
+	 * Ob das Zurücksetzen schon gilt. Im gemeinsamen Betrieb gilt es erst, wenn ein Takt es beim Hochladen beansprucht hat;
+	 * bis dahin ist die Einheit im Versionsspeicher noch gesperrt. Jetzt eingearbeitet, meldete das Modell sie erneut als
+	 * gesperrt (SYS-008 als Warnung); die Meldung des Versionsspeichers nach dem Beanspruchen arbeitet sie ein. Lässt sich
+	 * der Zustand nicht lesen, wird wie bisher gleich eingearbeitet.
+	 */
+	private boolean holdsAtOnce(UnitKey unit) {
+		try {
+			return !isLocked(service.status(unit));
+		} catch (IOException | RuntimeException e) {
+			LOG.log(Level.FINE, "Der Zustand von " + unit.relativePath() + " nach dem Zurücksetzen ließ sich nicht abfragen", e);
+			return true;
+		}
+	}
+
+	private void finishReset(UnitKey unit, Exception failure, boolean applyNow) {
 		resetting.remove(unit);
 		if (failure == null) {
-			try {
-				apply.accept(Set.of(unit));
-			} catch (RuntimeException e) {
-				LOG.log(Level.SEVERE, "Die zurückgesetzte Einheit " + unit.relativePath() + " ließ sich nicht einarbeiten", e);
+			if (applyNow) {
+				try {
+					apply.accept(Set.of(unit));
+				} catch (RuntimeException e) {
+					LOG.log(Level.SEVERE, "Die zurückgesetzte Einheit " + unit.relativePath() + " ließ sich nicht einarbeiten", e);
+				}
 			}
 			locked.remove(unit);
 			notifyChanged();

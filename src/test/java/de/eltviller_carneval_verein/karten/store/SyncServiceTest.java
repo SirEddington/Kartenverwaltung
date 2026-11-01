@@ -2188,6 +2188,31 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void resetInSharedModeHoldsOnceATickHasClaimedIt() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		Version v1 = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		Version v2 = save(a, update(BOOKING, v1, "Anna B"));
+		a.service.tick();
+		Files.writeString(localFile(a, BOOKING, v2.id() + ".json"), "kaputt");
+		Files.writeString(sharedFile(BOOKING, v2.id() + ".json"), "auch kaputt");
+		a.service.unitState(BOOKING);
+		a.service.tick();
+
+		Version reset = a.service.resetToLastReadable(BOOKING);
+
+		// bis ein Takt das Zurücksetzen beansprucht, gilt es nicht: Der Stand bleibt gesperrt (Handtest KARV-87, 9.10)
+		assertEquals(Status.LOCKED_DAMAGED, a.service.snapshots(List.of(BOOKING)).get(BOOKING).status());
+		assertEquals(Status.LOCKED_DAMAGED, a.service.unitState(BOOKING).status());
+		a.service.tick();
+		a.service.tick();
+		UnitSnapshot afterTicks = a.service.snapshots(List.of(BOOKING)).get(BOOKING);
+		assertEquals(Status.OK, afterTicks.status(), "nach dem Hochladen");
+		assertEquals(reset.id(), afterTicks.version());
+	}
+
+	@Test
 	void resetSurvivesARestartBeforeTheUpload() throws IOException {
 		Node a = node("a");
 		a.service.startup(shared);
