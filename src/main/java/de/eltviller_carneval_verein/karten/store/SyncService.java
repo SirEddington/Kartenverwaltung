@@ -101,6 +101,9 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * <p>
  * Kein Takt schreibt über einer gültigen Marke "sauber beendet": Jeder macht sie vor der Arbeit am gemeinsamen Ordner und
  * vor der Auflösung ungültig ({@link UnitIndex#invalidateCleanMarker}); gelingt das nicht, prüft er nur die Erreichbarkeit.
+ * Eine Marke, die sich nicht entfernen lässt, gilt schon dann nicht, wenn die Sperrdatei des Index steht (sie entsteht bei
+ * jedem Start): Dann arbeitet der Takt normal, und die übrigen Schreibwege (Start, {@link #append}, das lokale
+ * Beanspruchen) sind ohne eigene Prüfung abgedeckt.
  * <p>
  * Trifft ein fremder Listeneintrag einen Platz, dessen lokaler Anspruch
  * abweicht, wird sofort verglichen: So fällt eine späte Niederlage auch nach Ablauf der Beobachtung auf. Deshalb
@@ -1951,8 +1954,9 @@ public final class SyncService implements ConnectionControl {
 					if (index.invalidateCleanMarker()) {
 						LOGGER.warning(SAVE_IN_PROGRESS);
 					} else {
-						// weder gelöscht noch geleert (die Warnungen des Index stehen schon im Log): Sie kann über den Dateien des
-						// Speichervorgangs gelten. Der Dienst bleibt offen, und jede weitere Änderung versucht es erneut (KARV-104)
+						// weder gelöscht noch geleert, und auch die Sperrdatei fehlt (die Warnungen des Index stehen schon im Log): Sie
+						// kann über den Dateien des Speichervorgangs gelten. Der Dienst bleibt offen, und jede weitere Änderung versucht
+						// es erneut
 						LOGGER.warning("Ein Speichervorgang begann während des Schreibens der Marke 'sauber beendet', und sie ließ "
 								+ "sich weder löschen noch leeren; sie kann noch gelten: " + index.cleanMarker());
 					}
@@ -2165,8 +2169,9 @@ public final class SyncService implements ConnectionControl {
 	 * {@link #connect}, das in diesem Takt feststeht, wird nach der Freigabe der Arbeitssperre geliefert.
 	 * <p>
 	 * Kein Takt schreibt, solange eine gültige Marke "sauber beendet" dieser Instanz stehen kann: Vor jeder Arbeit am
-	 * gemeinsamen Ordner und vor der Auflösung macht er sie ungültig ({@link UnitIndex#invalidateCleanMarker}); gelingt
-	 * das nicht, prüft er nur die Erreichbarkeit (siehe {@code runTick}), und der nächste versucht es erneut.
+	 * gemeinsamen Ordner und vor der Auflösung macht er sie ungültig ({@link UnitIndex#invalidateCleanMarker}; eine
+	 * stehende Sperrdatei genügt); gelingt das nicht, prüft er nur die Erreichbarkeit (siehe {@code runTick}), und der
+	 * nächste versucht es erneut.
 	 *
 	 * @return ob der nächste Takt sofort folgen soll: Der erste Lauf einer Verbindung läuft noch, und dieser Takt erreichte
 	 *         den Ordner ohne Störung. Sonst (auch nach einer Störung, damit ein dauerhaft scheiternder Block den
@@ -2243,7 +2248,7 @@ public final class SyncService implements ConnectionControl {
 	 * Abholen. Setzt {@link Link#hurry}.
 	 * <p>
 	 * Zuerst, vor jeder Arbeit am gemeinsamen Ordner und vor der Auflösung, macht er die Marke "sauber beendet" ungültig
-	 * ({@link UnitIndex#invalidateCleanMarker}). Gelingt das nicht, schreibt dieser Takt nichts: Er prüft nur die
+	 * ({@link UnitIndex#invalidateCleanMarker}; eine stehende Sperrdatei genügt). Gelingt das nicht, schreibt dieser Takt nichts: Er prüft nur die
 	 * Erreichbarkeit und meldet sonst eine Störung (im ersten Lauf auch als Ergebnis von {@link #connect}, damit es nicht
 	 * ausbleibt); der nächste Takt versucht es erneut, nach dem Abstand {@link #TICK}.
 	 *

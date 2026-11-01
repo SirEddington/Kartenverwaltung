@@ -76,7 +76,13 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * Änderungen). Wer danach den Bestand ändern will, ruft vor der ersten geschriebenen Datei {@link #invalidateCleanMarker}
  * auf (nicht erst beim Eintragen des Ergebnisses: bis dahin kann der Prozess enden); {@link #update} und {@link #clear}
  * löschen sie zusätzlich. Scheitert das Löschen, wird die Marke geleert, und eine leere Marke gilt als unbrauchbar. Temporäre Reste und
- * geänderte Dateien entstehen nur bei einem Absturz, dann fehlt die Marke und der nächste Start prüft wie gewohnt. Auch
+ * geänderte Dateien entstehen nur bei einem Absturz, dann fehlt die Marke und der nächste Start prüft wie gewohnt.
+ * <p>
+ * <b>Sperrdatei:</b> Falls sich die Marke weder löschen noch leeren lässt (ein Dateihandle des Sync-Programms oder
+ * Virenscanners), legt jeder Start und jedes Ungültigmachen vorher die leere Datei {@code <Index>/unclean} an
+ * ({@link #markUnclean}). Solange sie steht, gilt keine Marke; erst {@link #writeCleanMarker} löscht sie, und gelingt das
+ * nicht, entsteht keine Marke. So braucht kein einzelner Schreibweg eine eigene Prüfung (KARV-104). Erst wenn auch sie
+ * sich nicht anlegen lässt, bleibt es beim Entfernen der Marke. Auch
  * die Marke macht den Index nicht zum Schiedsrichter: Die Entscheidung über ausstehende Versionen bleibt bei
  * {@link ChainResolver} auf den Dateien.
  * <p>
@@ -92,6 +98,7 @@ final class UnitIndex {
 	private static final String CLAIMS = "claims";
 	private static final String JSON = ".json";
 	private static final String CLEAN = "clean";
+	private static final String UNCLEAN = "unclean";
 
 	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 
@@ -211,6 +218,13 @@ final class UnitIndex {
 	 * es erneut) kommen nur noch als {@code FINE}, bis die Marke einmal entfernt ist.
 	 */
 	private boolean markerStuckLogged;
+	/**
+	 * Ob die Sperrdatei {@link #uncleanFile()} steht (von dieser Instanz angelegt oder beim Start vorgefunden): Solange sie
+	 * steht, gilt keine Marke "sauber beendet", auch eine, die sich weder löschen noch leeren ließ.
+	 */
+	private boolean uncleanStands;
+	/** Wie {@link #markerStuckLogged}, für das Scheitern beim Anlegen der Sperrdatei. */
+	private boolean uncleanFailureLogged;
 	/** Ob die Reste abgebrochener Schreibvorgänge schon gelöscht wurden (einmal beim Öffnen). */
 	private boolean tempsDeleted;
 	private Deleter deleter = Files::deleteIfExists;
@@ -930,20 +944,29 @@ final class UnitIndex {
 		return indexDir.resolve(CLEAN);
 	}
 
+	/** Die Sperrdatei: Solange sie steht, gilt die Marke "sauber beendet" nicht (siehe {@link #markUnclean}). */
+	Path uncleanFile() {
+		return indexDir.resolve(UNCLEAN);
+	}
+
 	/**
 	 * Legt die Marke "sauber beendet" an (Inhalt: die Rechner-ID), aber nur, wenn es keine ungeschriebenen Änderungen gibt:
-	 * Sonst stünde die Marke für einen Index, der nicht dem Stand der Dateien auf der Platte entspricht. Bis zur nächsten
-	 * Änderung ({@link #update}, {@link #clear}) gilt sie.
+	 * Sonst stünde die Marke für einen Index, der nicht dem Stand der Dateien auf der Platte entspricht. Zuerst wird die
+	 * Sperrdatei ({@link #uncleanFile()}) gelöscht. Bis zur nächsten Änderung ({@link #update}, {@link #clear}) gilt sie.
 	 *
 	 * @return ob die Marke angelegt wurde ({@code false} bei ungeschriebenen Änderungen)
-	 * @throws IOException wenn sie sich nicht schreiben lässt; eine unvollständige Marke gilt beim Lesen als fremd. Weil das
-	 *                     Schreiben auch erst nach dem Inhalt scheitern kann (etwa beim Schließen), gilt die Marke trotzdem
-	 *                     als angelegt: {@link #invalidateCleanMarker} entfernt sie vor der nächsten Änderung
+	 * @throws IOException wenn sich die Sperrdatei nicht löschen lässt (dann entsteht keine Marke) oder die Marke nicht
+	 *                     schreiben; eine unvollständige Marke gilt beim Lesen als fremd. Weil das Schreiben auch erst nach
+	 *                     dem Inhalt scheitern kann (etwa beim Schließen), gilt die Marke trotzdem als angelegt:
+	 *                     {@link #invalidateCleanMarker} entfernt sie vor der nächsten Änderung
 	 */
 	synchronized boolean writeCleanMarker() throws IOException {
 		if (!dirty.isEmpty()) {
 			return false;
 		}
+		// zuerst die Sperrdatei: Bleibt sie stehen, gälte die Marke ohnehin nicht, also entsteht gar keine
+		deleter.delete(uncleanFile());
+		uncleanStands = false;
 		// vorher: Ein Schreiben, das nach dem Inhalt scheitert, hinterlässt sonst eine gültige Marke, von der niemand weiß
 		markerWritten = true;
 		Files.createDirectories(indexDir);
@@ -952,12 +975,14 @@ final class UnitIndex {
 	}
 
 	/**
-	 * Löscht die Marke "sauber beendet", falls es sie gibt. Scheitert das, wird die Datei geleert: Eine leere Marke nennt keine
-	 * Rechner-ID und gilt beim Start als unbrauchbar. Gelingt auch das nicht, steht eine Warnung im Log (Wiederholungen bis
-	 * zum nächsten Gelingen nur als {@code FINE}), und eine von dieser Instanz angelegte Marke gilt weiter als vorhanden,
-	 * damit {@link #invalidateCleanMarker()} es beim nächsten Mal erneut versucht.
+	 * Löscht die Marke "sauber beendet", falls es sie gibt; vorher wird die Sperrdatei angelegt ({@link #markUnclean}).
+	 * Scheitert das Löschen, wird die Datei geleert: Eine leere Marke nennt keine Rechner-ID und gilt beim Start als
+	 * unbrauchbar. Gelingt auch das nicht, steht eine Warnung im Log (Wiederholungen bis zum nächsten Gelingen nur als
+	 * {@code FINE}), und eine von dieser Instanz angelegte Marke gilt weiter als vorhanden, damit
+	 * {@link #invalidateCleanMarker()} es beim nächsten Mal erneut versucht.
 	 */
 	synchronized void deleteCleanMarker() {
+		markUnclean();
 		try {
 			deleter.delete(cleanMarker());
 		} catch (IOException | RuntimeException e) {
@@ -1000,19 +1025,44 @@ final class UnitIndex {
 	}
 
 	/**
-	 * Muss vor jeder Änderung am lokalen Bestand aufgerufen werden: Eine von dieser Instanz angelegte Marke wird gelöscht,
-	 * bevor die erste Datei geschrieben wird, damit ein Absturz oder Beenden mitten in der Änderung nie auf eine gültige Marke
-	 * über einem geänderten Bestand trifft. Ohne angelegte Marke kostet der Aufruf keinen Dateizugriff. Scheitern Löschen
-	 * und Leeren, versucht es jeder weitere Aufruf erneut.
+	 * Muss vor jeder Änderung am lokalen Bestand aufgerufen werden: Eine von dieser Instanz angelegte Marke wird gelöscht
+	 * (und vorher die Sperrdatei angelegt), bevor die erste Datei geschrieben wird, damit ein Absturz oder Beenden mitten
+	 * in der Änderung nie auf eine gültige Marke über einem geänderten Bestand trifft. Ohne angelegte Marke kostet der
+	 * Aufruf keinen Dateizugriff. Scheitern Löschen und Leeren, versucht es jeder weitere Aufruf erneut.
 	 *
 	 * @return {@code true}, wenn danach sicher keine gültige Marke dieser Instanz steht (keine angelegt, gelöscht oder
-	 *         geleert); {@code false}, wenn weder Löschen noch Leeren gelang (die Warnungen stehen im Log)
+	 *         geleert, oder die Sperrdatei steht); {@code false}, wenn weder Löschen noch Leeren gelang und auch die
+	 *         Sperrdatei fehlt (die Warnungen stehen im Log)
 	 */
 	synchronized boolean invalidateCleanMarker() {
 		if (markerWritten) {
 			deleteCleanMarker();
 		}
-		return !markerWritten;
+		return !markerWritten || uncleanStands;
+	}
+
+	/**
+	 * Legt die Sperrdatei {@link #uncleanFile()} an, bevor sich der Bestand ändern kann (KARV-104): Solange sie steht, gilt
+	 * keine Marke "sauber beendet", auch eine, die sich wegen eines Dateihandles (Sync-Programm, Virenscanner) weder löschen
+	 * noch leeren lässt. So braucht kein einzelner Schreibweg eine eigene Prüfung. Erst {@link #writeCleanMarker} löscht sie
+	 * wieder. Steht sie schon, kostet der Aufruf keinen Dateizugriff. Angelegt wird über die Dateischicht ({@code createNew}:
+	 * eine leere Datei, eine vorhandene bleibt). Scheitert das Anlegen, steht eine Warnung im Log (Wiederholungen bis zum
+	 * nächsten Gelingen nur als {@code FINE}), es gilt nur das Entfernen der Marke, und der nächste Aufruf versucht es erneut.
+	 */
+	private void markUnclean() {
+		if (uncleanStands) {
+			return;
+		}
+		try {
+			files.createNew(uncleanFile(), new byte[0], null, "index");
+		} catch (IOException | RuntimeException e) {
+			LOGGER.log(uncleanFailureLogged ? Level.FINE : Level.WARNING,
+					"Die Sperrdatei zur Marke 'sauber beendet' ließ sich nicht anlegen: " + uncleanFile(), e);
+			uncleanFailureLogged = true;
+			return;
+		}
+		uncleanStands = true;
+		uncleanFailureLogged = false;
 	}
 
 	/** Löscht eine Datei, falls es sie gibt. */
@@ -1033,11 +1083,18 @@ final class UnitIndex {
 	 * spätere {@link #invalidateCleanMarker()} versucht es erneut. Danach werden alle Index-Dateien gelesen; ist eine unlesbar, hat ein anderes Format
 	 * oder eine andere Rechner-ID, gilt der Start ebenfalls als unsauber, und nichts von dem Gelesenen wird übernommen.
 	 * <p>
+	 * Vor der Marke legt jeder Start die Sperrdatei an ({@link #markUnclean}): Ab hier kann sich der Bestand ändern, und
+	 * eine Marke, die sich nicht entfernen lässt, darf keinen späteren Start überstehen. Stand die Sperrdatei schon (der
+	 * letzte Lauf endete ohne {@link #writeCleanMarker}), gilt auch eine eigene Marke nicht.
+	 * <p>
 	 * Bei {@code true} sind alle Einträge geladen; {@link #cleanRefresh()} liefert die Einheiten mit ausstehenden und
 	 * verlorenen Versionen. Bei {@code false} ist der Index unverändert und {@link #refresh} der Weg wie bisher. Wirft nie.
 	 */
 	synchronized boolean loadIfClean() {
 		deleteLeftoverTemps();
+		boolean wasUnclean = files.exists(uncleanFile());
+		uncleanStands = wasUnclean;
+		markUnclean();
 		Path marker = cleanMarker();
 		markerWritten = false;
 		boolean ownMarker;
@@ -1060,6 +1117,11 @@ final class UnitIndex {
 			return false;
 		}
 		if (!ownMarker) {
+			return false;
+		}
+		if (wasUnclean) {
+			LOGGER.info("Die Marke 'sauber beendet' gilt nicht, die Sperrdatei stand noch; der Bestand wird durchsucht: "
+					+ uncleanFile());
 			return false;
 		}
 		Map<String, List<Entry>> read = new LinkedHashMap<>();

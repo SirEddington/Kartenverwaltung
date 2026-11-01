@@ -917,6 +917,28 @@ class UnitIndexTest {
 		return indexDir.resolve("clean");
 	}
 
+	private Path uncleanFile() {
+		return indexDir.resolve("unclean");
+	}
+
+	/** Ein Löschen, das nur an der Marke "sauber beendet" scheitert, nicht an der Sperrdatei. */
+	private UnitIndex.Deleter markerLocked() {
+		Path marker = cleanMarker();
+		return file -> {
+			if (file.equals(marker)) {
+				throw new IOException("Datei gesperrt");
+			}
+			Files.deleteIfExists(file);
+		};
+	}
+
+	/** Ein Index, dessen Dateischicht die Sperrdatei nie anlegt: Dann bleibt nur das Entfernen der Marke. */
+	private UnitIndex indexWithoutUncleanFile() {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		layer.failWhen(uncleanFile()::equals, "createNew", new IOException("Ordner gesperrt"));
+		return new UnitIndex(indexDir, layer, OWN);
+	}
+
 	/** Ein geschriebener Index samt Marke, wie ihn das saubere Beenden hinterlässt. */
 	private void buildCleanIndex() throws IOException {
 		UnitIndex first = index();
@@ -1155,7 +1177,7 @@ class UnitIndexTest {
 	@Test
 	void invalidateReportsWhetherTheMarkerIsSafelyGone() throws IOException {
 		saveTwice(EVENT, "event");
-		UnitIndex index = index();
+		UnitIndex index = indexWithoutUncleanFile();
 		refresh(index, local);
 		index.flush();
 		// ohne angelegte Marke steht keine gültige
@@ -1186,14 +1208,13 @@ class UnitIndexTest {
 	@Test
 	void stuckMarkerIsLoggedAsWarningOnceAndThenOnlyAtFine() throws IOException {
 		saveTwice(EVENT, "event");
-		UnitIndex index = index();
+		// ohne Sperrdatei: Auch ihr Scheitern kommt nur einmal als Warnung
+		UnitIndex index = indexWithoutUncleanFile();
 		refresh(index, local);
 		index.flush();
 		assertTrue(index.writeCleanMarker());
 		Path marker = cleanMarker();
-		index.useDeleter(file -> {
-			throw new IOException("Datei gesperrt");
-		});
+		index.useDeleter(markerLocked());
 		List<LogRecord> logs = new ArrayList<>();
 		Handler capture = new Handler() {
 			@Override
@@ -1243,7 +1264,7 @@ class UnitIndexTest {
 	@Test
 	void markerWhoseWriteFailedStillCountsAsWritten() throws IOException {
 		saveTwice(EVENT, "event");
-		UnitIndex index = index();
+		UnitIndex index = indexWithoutUncleanFile();
 		refresh(index, local);
 		index.flush();
 		// an der Stelle der Marke liegt ein nicht leerer Ordner: Das Schreiben scheitert, kann aber (wie beim Schließen
@@ -1255,6 +1276,123 @@ class UnitIndexTest {
 		Files.delete(blocker);
 		Files.delete(cleanMarker());
 		assertTrue(index.invalidateCleanMarker());
+	}
+
+	@Test
+	void startCreatesTheUncleanFile() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+
+		assertTrue(index().loadIfClean());
+
+		// ab jetzt kann sich der Bestand ändern: Erst writeCleanMarker entfernt sie wieder
+		assertTrue(Files.isRegularFile(uncleanFile()));
+	}
+
+	@Test
+	void ownMarkerIsNotTrustedWhileTheUncleanFileStands() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		Files.createFile(uncleanFile());
+
+		UnitIndex second = index();
+
+		assertFalse(second.loadIfClean());
+		assertTrue(second.entries().isEmpty());
+		assertFalse(Files.exists(cleanMarker()));
+		assertTrue(Files.isRegularFile(uncleanFile()), "sie bleibt bis zum nächsten sauberen Beenden");
+	}
+
+	@Test
+	void cleanMarkerRemovesTheUncleanFileFirst() throws IOException {
+		buildThreeUnits();
+		UnitIndex first = index();
+		assertFalse(first.loadIfClean());
+		refresh(first, local);
+		first.flush();
+		assertTrue(Files.isRegularFile(uncleanFile()));
+
+		assertTrue(first.writeCleanMarker());
+
+		assertFalse(Files.exists(uncleanFile()));
+		assertTrue(index().loadIfClean());
+	}
+
+	@Test
+	void uncleanFileThatCannotBeDeletedPreventsTheMarker() throws IOException {
+		buildThreeUnits();
+		UnitIndex first = index();
+		assertFalse(first.loadIfClean());
+		refresh(first, local);
+		first.flush();
+		first.useDeleter(file -> {
+			throw new IOException("Datei gesperrt");
+		});
+
+		assertThrows(IOException.class, first::writeCleanMarker);
+
+		assertFalse(Files.exists(cleanMarker()));
+		assertTrue(first.invalidateCleanMarker(), "es steht keine Marke");
+		assertFalse(index().loadIfClean());
+	}
+
+	@Test
+	void stuckMarkerIsHarmlessOnceTheUncleanFileStands() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		Path marker = cleanMarker();
+		assertTrue(marker.toFile().setWritable(false));
+		assumeFalse(Files.isWritable(marker), "Schreibschutz greift auf diesem System nicht");
+		try {
+			UnitIndex second = index();
+			second.useDeleter(markerLocked());
+			assertFalse(second.loadIfClean());
+			// weder Löschen noch Leeren ging: Die Marke nennt weiter die eigene Rechner-ID, aber die Sperrdatei steht
+			assertEquals(ME, Files.readString(marker, StandardCharsets.UTF_8));
+			assertTrue(second.invalidateCleanMarker(), "Schreiben ist sicher, solange die Sperrdatei steht");
+
+			// Absturz ohne sauberes Beenden; danach lässt sich die Marke wieder löschen
+			assertTrue(marker.toFile().setWritable(true));
+
+			assertFalse(index().loadIfClean(), "der nächste Start vertraut dem Index nicht");
+			assertFalse(Files.exists(marker));
+		} finally {
+			marker.toFile().setWritable(true);
+		}
+	}
+
+	@Test
+	void failingUncleanFileIsAWarningAndTheMarkerStillCounts() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		UnitIndex second = indexWithoutUncleanFile();
+		List<LogRecord> logs = new ArrayList<>();
+		Handler capture = new Handler() {
+			@Override
+			public void publish(LogRecord record) {
+				logs.add(record);
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		Logger logger = Logger.getLogger(UnitIndex.class.getName());
+		logger.addHandler(capture);
+		try {
+			// wie ohne Sperrdatei: Die Marke wird gelöscht, und der Index gilt
+			assertTrue(second.loadIfClean());
+		} finally {
+			logger.removeHandler(capture);
+		}
+
+		assertFalse(Files.exists(uncleanFile()));
+		assertFalse(Files.exists(cleanMarker()));
+		assertTrue(logs.stream().anyMatch(r -> r.getLevel() == Level.WARNING && r.getThrown() != null), logs::toString);
 	}
 
 	@Test

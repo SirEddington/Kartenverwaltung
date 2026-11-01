@@ -249,6 +249,8 @@ class SyncServiceTest {
 		final MachineIdentity identity;
 		final FaultyFileLayer layer;
 		final AtomicBoolean down = new AtomicBoolean();
+		/** Solange gesetzt, lässt sich die Sperrdatei des Index ({@code index/unclean}) nicht anlegen. */
+		final AtomicBoolean uncleanLocked = new AtomicBoolean();
 		final Recorder events = new Recorder();
 		final List<SyncState> states = new ArrayList<>();
 		final SyncService service;
@@ -266,6 +268,8 @@ class SyncServiceTest {
 			for (String operation : List.of("createNew", "read", "listNames", "listNamesWithTemps")) {
 				layer.failWhen(p -> down.get() && p.startsWith(sharedRoot), operation, new IOException("Netzlaufwerk getrennt"));
 			}
+			Path unclean = appData.resolve("index/unclean");
+			layer.failWhen(p -> uncleanLocked.get() && p.equals(unclean), "createNew", new IOException("Ordner gesperrt"));
 			this.service = new SyncService(appData, identity, layer, ui, worker,
 					reachable != null ? reachable : p -> !down.get(), clock);
 			service.setListener(events);
@@ -465,7 +469,11 @@ class SyncServiceTest {
 		a.service.tick();
 
 		List<FaultyFileLayer.Creation> inShared = a.layer.creations().stream().filter(c -> c.file().startsWith(sharedRoot)).toList();
-		List<FaultyFileLayer.Creation> local = a.layer.creations().stream().filter(c -> c.file().startsWith(a.appData)).toList();
+		Path indexDir = a.appData.resolve("index");
+		List<FaultyFileLayer.Creation> local = a.layer.creations().stream()
+				.filter(c -> c.file().startsWith(a.appData) && !c.file().startsWith(indexDir)).toList();
+		// die Sperrdatei des Index trägt die Kennung der Index-Dateien: Reste räumt der Index selbst auf
+		List<FaultyFileLayer.Creation> index = a.layer.creations().stream().filter(c -> c.file().startsWith(indexDir)).toList();
 
 		assertFalse(inShared.isEmpty());
 		assertFalse(local.isEmpty());
@@ -477,7 +485,11 @@ class SyncServiceTest {
 			assertNull(creation.anchor(), creation.file().toString());
 			assertNull(creation.tempTag(), creation.file().toString());
 		}
-		assertEquals(inShared.size() + local.size(), a.layer.creations().size());
+		for (FaultyFileLayer.Creation creation : index) {
+			assertNull(creation.anchor(), creation.file().toString());
+			assertEquals("index", creation.tempTag(), creation.file().toString());
+		}
+		assertEquals(inShared.size() + local.size() + index.size(), a.layer.creations().size());
 	}
 
 	@Test
@@ -4070,19 +4082,127 @@ class SyncServiceTest {
 		assertTrue(b.layer.calls().stream().anyMatch(call -> call.startsWith("listTree ")));
 	}
 
-	/** Die Marke "sauber beendet" lässt sich weder löschen noch leeren: Der Index löscht nicht, die Datei ist schreibgeschützt. */
+	/**
+	 * Die Marke "sauber beendet" lässt sich weder löschen noch leeren (der Index löscht nicht, die Datei ist
+	 * schreibgeschützt), und auch die Sperrdatei lässt sich nicht anlegen: Dann kann die Marke gelten.
+	 */
 	private static void lockCleanMarker(Node node) {
-		node.service.index().useDeleter(file -> {
-			throw new IOException("Datei gesperrt");
-		});
-		assumeTrue(cleanMarker(node).toFile().setWritable(false), "Schreibschutz lässt sich auf diesem System nicht setzen");
-		assumeFalse(Files.isWritable(cleanMarker(node)), "Schreibschutz greift auf diesem System nicht");
+		lockOnlyCleanMarker(node);
+		node.uncleanLocked.set(true);
 	}
 
-	/** Hebt {@link #lockCleanMarker} auf. */
+	/**
+	 * Nur die Marke "sauber beendet" lässt sich weder löschen noch leeren, etwa durch ein Dateihandle; die Sperrdatei lässt
+	 * sich anlegen (KARV-104).
+	 */
+	private static void lockOnlyCleanMarker(Node node) {
+		Path marker = cleanMarker(node);
+		node.service.index().useDeleter(file -> {
+			if (file.equals(marker)) {
+				throw new IOException("Datei gesperrt");
+			}
+			Files.deleteIfExists(file);
+		});
+		assumeTrue(marker.toFile().setWritable(false), "Schreibschutz lässt sich auf diesem System nicht setzen");
+		assumeFalse(Files.isWritable(marker), "Schreibschutz greift auf diesem System nicht");
+	}
+
+	/** Hebt {@link #lockCleanMarker} bzw. {@link #lockOnlyCleanMarker} auf. */
 	private static void unlockCleanMarker(Node node) {
 		cleanMarker(node).toFile().setWritable(true);
+		node.uncleanLocked.set(false);
 		node.service.index().useDeleter(Files::deleteIfExists);
+	}
+
+	private static Path uncleanFile(Node node) {
+		return node.appData.resolve("index/unclean");
+	}
+
+	@Test
+	void writesOverAStuckCleanMarkerDoNotSurviveACrash() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		Node earlier = node("a");
+		earlier.service.startup(shared);
+		Version v1 = save(earlier, create(BOOKING, "Anna"));
+		earlier.service.tick();
+		earlier.service.closeIndex();
+		assertTrue(Files.isRegularFile(cleanMarker(earlier)));
+		// Neustart: Die Marke lässt sich weder löschen noch leeren und nennt weiter die eigene Rechner-ID
+		Node a = new Node(earlier.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		lockOnlyCleanMarker(a);
+		Version v2;
+		try {
+			assertTrue(a.service.startup(shared));
+			// Speichern, dann Trennen (beansprucht lokal): beides schreibt in den Bestand
+			v2 = save(a, update(BOOKING, v1, "Anna B"));
+			a.service.disconnect();
+			assertEquals(a.identity.id(), Files.readString(cleanMarker(a)));
+			assertTrue(Files.isRegularFile(uncleanFile(a)));
+			// kein closeIndex: Absturz
+		} finally {
+			// danach lässt sich die Marke wieder löschen
+			unlockCleanMarker(a);
+		}
+
+		Node c = new Node(earlier.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		assertTrue(c.service.startup(""));
+
+		assertTrue(walkedTree(c), "der Start vertraut dem Index nicht: " + c.layer.calls());
+		assertEquals(snapshotsFromFiles(c.appData, c.identity.id()), c.service.snapshots());
+		assertEquals(v2.id(), c.service.snapshots().get(BOOKING).version());
+		assertFalse(c.service.unitState(BOOKING).provisional());
+	}
+
+	@Test
+	void tickWorksOverAStuckCleanMarkerOnceTheUncleanFileStands() throws IOException {
+		Node b = node("b");
+		b.service.startup(shared);
+		Node earlier = node("a");
+		earlier.service.startup(shared);
+		earlier.service.tick();
+		earlier.service.closeIndex();
+		Version v = save(b, create(BOOKING, "Anna"));
+		b.service.tick();
+		Node a = new Node(earlier.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		lockOnlyCleanMarker(a);
+		try {
+			assertTrue(a.service.startup(shared));
+			clock.advance(Duration.ofSeconds(31));
+
+			a.service.tick();
+
+			// die Marke steht noch, aber die Sperrdatei auch: Sie gilt nicht, und der Takt arbeitet
+			assertEquals(a.identity.id(), Files.readString(cleanMarker(a)));
+			assertTrue(Files.isRegularFile(localFile(a, BOOKING, v.id() + ".json")));
+			assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+			assertTrue(a.events.errors.isEmpty(), a.events.errors.toString());
+		} finally {
+			unlockCleanMarker(a);
+		}
+	}
+
+	@Test
+	void closeIndexWritesNoMarkerWhileTheUncleanFileCannotBeDeleted() throws IOException {
+		Node a = node("a");
+		a.service.startup("");
+		save(a, create(BOOKING, "Anna"));
+		Path unclean = uncleanFile(a);
+		assertTrue(Files.isRegularFile(unclean));
+		a.service.index().useDeleter(file -> {
+			if (file.equals(unclean)) {
+				throw new IOException("Datei gesperrt");
+			}
+			Files.deleteIfExists(file);
+		});
+
+		a.service.closeIndex();
+
+		assertFalse(Files.exists(cleanMarker(a)));
+		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+		b.service.startup("");
+		assertTrue(walkedTree(b));
+		assertEquals(payload("Anna"), b.service.snapshots().get(BOOKING).payload());
 	}
 
 	/** Der Text der Störung, solange die Marke "sauber beendet" stehen bleibt. */
