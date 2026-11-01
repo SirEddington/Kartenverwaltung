@@ -446,6 +446,30 @@ public class StoreHallRepository implements HallRepository {
 		return applyForeign(List.of());
 	}
 
+	/**
+	 * Ob die Halle im Modell mit dem Index übereinstimmt ("Halle aktuell", KARV-117): Sie steht im Cache, ihr Vergleichsstand
+	 * hat dieselbe Version wie der Stand im Index, und sie ist weder ungespeichert verändert noch durch
+	 * {@link #setBlockedCheck} gesperrt. Dann ist die Bestuhlung im Modell die gültige, und die Platzierungsregel darf einen
+	 * fehlenden Sitz als endgültig fehlend behandeln, statt auf die Halle zu warten. Ohne geladenen Cache, ohne Stand im Index
+	 * oder Vergleichsstand und für eine unbekannte Halle ist sie nicht aktuell.
+	 * <p>
+	 * Nur auf dem Oberflächen-Thread aufrufen: Modell und Vergleichsstand sind nicht synchronisiert.
+	 */
+	public boolean isCurrent(String hallId) {
+		if (hallId == null || cachedHalls == null) {
+			return false;
+		}
+		Hall hall = cachedHall(hallId);
+		if (hall == null) {
+			return false;
+		}
+		UnitKey unit = UnitKey.hall(hallId);
+		UnitSnapshot known = baseline.known(unit);
+		UnitSnapshot indexed = sync.snapshots(List.of(unit)).get(unit);
+		return known != null && indexed != null && known.version() != null && known.version().equals(indexed.version())
+				&& !isBlocked(hall, known);
+	}
+
 	/** Der Stand der Einheit im Vergleichsstand (nur für Tests). */
 	UnitSnapshot knownUnit(UnitKey unit) {
 		return baseline.known(unit);

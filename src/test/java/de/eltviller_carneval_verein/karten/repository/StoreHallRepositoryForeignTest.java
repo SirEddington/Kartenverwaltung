@@ -561,6 +561,46 @@ class StoreHallRepositoryForeignTest {
 	}
 
 	@Test
+	void currentHallIsCurrent() {
+		assertTrue(mine.isCurrent(hall.getId()));
+	}
+
+	@Test
+	void hallWithNewerForeignVersionIsNotCurrent() throws IOException {
+		foreignName("Neu");
+
+		assertFalse(mine.isCurrent(hall.getId()), "der Index kennt einen neueren Stand als das Modell");
+
+		mine.applyForeign(List.of(unit()));
+
+		assertTrue(mine.isCurrent(hall.getId()), "nach dem Einarbeiten ist das Modell wieder aktuell");
+	}
+
+	@Test
+	void locallyChangedHallIsNotCurrent() {
+		hall.setName("Lokal");
+
+		assertFalse(mine.isCurrent(hall.getId()));
+	}
+
+	@Test
+	void blockedHallIsNotCurrent() {
+		mine.setBlockedCheck(h -> true);
+
+		assertFalse(mine.isCurrent(hall.getId()));
+	}
+
+	@Test
+	void unknownHallIsNotCurrent() {
+		assertFalse(mine.isCurrent("gibt-es-nicht"));
+	}
+
+	@Test
+	void notLoadedRepositoryIsNotCurrent() {
+		assertFalse(TestRepositories.halls(sync).isCurrent(hall.getId()), "ohne geladenen Cache gibt es nichts Aktuelles");
+	}
+
+	@Test
 	void replayOnAHallIsNotSupported() throws IOException {
 		otherRenames("Bürgerhaus");
 		mine.applyForeign(List.of(unit()));
