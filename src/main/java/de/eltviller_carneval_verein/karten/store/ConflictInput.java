@@ -69,15 +69,25 @@ public record ConflictInput(UnitKey unit, Version base, Version mine, Version th
 	 *                  Zusammenführungen (deren Löschung stammt immer aus einem Vorgänger). Daran erkennt die Strategie, ob
 	 *                  die Löschung dort allein dieses Rechners Zuweisen war oder ob ein anderer Rechner die Buchung dort
 	 *                  ebenfalls gelöscht hat (Ruling R35); sonst leer
+	 * @param chain     ihre gültige Kette aus dem Start-Index, ältestes Glied zuerst (ohne Inhalt, ohne Dateizugriff). Daran
+	 *                  erkennt die Strategie, dass ein Speichervorgang die Buchung hierher verschoben und ein späterer sie
+	 *                  weiter verschoben hat (KARV-120); leer, wenn sie keine hat oder der Aufrufer sie nicht kennt
 	 */
 	public record Sibling(UnitSnapshot snapshot, ChainStep head, Set<String> saveIds, Version lostMove,
-			List<Deletion> deletions) {
+			List<Deletion> deletions, List<ChainStep> chain) {
 
-		/** Prüft den Stand und macht Speichervorgänge und Löschungen unveränderlich. */
+		/** Prüft den Stand und macht Speichervorgänge, Löschungen und Kette unveränderlich. */
 		public Sibling {
 			Objects.requireNonNull(snapshot, "snapshot");
 			saveIds = saveIds == null ? Set.of() : Set.copyOf(saveIds);
 			deletions = deletions == null ? List.of() : List.copyOf(deletions);
+			chain = chain == null ? List.of() : List.copyOf(chain);
+		}
+
+		/** Eine Geschwister-Einheit ohne bekannte Kette. */
+		public Sibling(UnitSnapshot snapshot, ChainStep head, Set<String> saveIds, Version lostMove,
+				List<Deletion> deletions) {
+			this(snapshot, head, saveIds, lostMove, deletions, List.of());
 		}
 
 		/** Eine Geschwister-Einheit ohne Löschungen. */

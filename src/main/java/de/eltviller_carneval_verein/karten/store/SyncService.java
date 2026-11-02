@@ -3779,7 +3779,7 @@ public final class SyncService implements ConnectionControl {
 			for (UnitKey unit : keys) {
 				List<ChainStep> chain = chains.getOrDefault(unit, List.of());
 				ChainStep head = chain.isEmpty() ? null : chain.get(chain.size() - 1);
-				siblings.put(unit, new ConflictInput.Sibling(event.get(unit), head, Set.of()));
+				siblings.put(unit, new ConflictInput.Sibling(event.get(unit), head, Set.of(), null, List.of(), chain));
 			}
 			return siblings;
 		}

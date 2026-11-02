@@ -918,11 +918,11 @@ class ConflictScenarioTest {
 	 * KARV-119, wie {@link #cancellationOfABookingMovedByAForeignSwitchSurvives}, aber B ändert Müller nach der Umstellung
 	 * noch einmal und speichert erneut: Mit {@code moved} setzt B ihn von Hand auf den anderen neuen Sitz, sonst heißt er
 	 * danach "Meier". Bei A trifft also nicht der Stand ein, den der Abgleich abgeleitet hat. "Meier" weicht mit Vermerk bei
-	 * B; das Versetzen von Hand geht im Storno auf. Speichert A nach dem Versetzen von Hand vor dem Eintreffen, folgt die
-	 * Auflösung am alten Sitz dem zweiten Umzug nicht (KARV-120); dieser Fall fehlt hier.
+	 * B. Das Versetzen von Hand geht im Storno auf, wenn A nach dem Eintreffen speichert; speichert A vorher, folgt die
+	 * Auflösung am alten Sitz dem zweiten Umzug (KARV-120), und es weicht ebenfalls mit Vermerk.
 	 */
 	@ParameterizedTest
-	@CsvSource({ "false,false", "false,true", "true,false" })
+	@CsvSource({ "false,false", "false,true", "true,false", "true,true" })
 	void cancellationOfABookingMovedByAForeignSwitchSurvivesALaterForeignChange(boolean moved, boolean saveFirst)
 			throws IOException {
 		Machine[] m = machines("a", "b");
@@ -970,10 +970,45 @@ class ConflictScenarioTest {
 		assertEquals(Set.of(), carriers(a, mullerId), "das Storno gilt");
 		assertEquals(List.of(), a.open(), "A");
 		List<OpenConflict> open = b.open();
-		assertEquals(moved ? 0 : 1, open.size(), open.toString());
-		if (!moved) {
-			assertEquals(ConflictNote.Kind.DELETE_WINS, open.get(0).note().kind(), "B's \"Meier\" weicht mit Vermerk");
+		assertEquals(moved && !saveFirst ? 0 : 1, open.size(), open.toString());
+		if (!open.isEmpty()) {
+			assertEquals(ConflictNote.Kind.DELETE_WINS, open.get(0).note().kind(), "B's Änderung weicht mit Vermerk");
 		}
+		for (Machine machine : m) {
+			assertEquals(Set.of(), carriersInModel(machine, mullerId), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+		}
+	}
+
+	/**
+	 * KARV-120, zwei Rechner: A storniert Müller und speichert. B verschiebt ihn zur gleichen Zeit zweimal hintereinander und
+	 * speichert jedes Mal. Das Storno gilt auf beiden Rechnern; Bs Verschieben weicht mit Vermerk.
+	 */
+	@Test
+	void cancellationWinsAgainstTwoMoves() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String mullerId = a.seat(0).getId();
+		a.seat(0).clearCustomerData();
+		a.repository.saveEvent(a.event);
+		Booking atB = booking(b, mullerId);
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), atB, b.plan().getSeats().get(1)));
+		b.repository.saveEvent(b.event);
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), atB, b.plan().getSeats().get(2)));
+		b.repository.saveEvent(b.event);
+
+		untilQuiet(m);
+
+		assertConverged(m);
+		assertEquals(Set.of(), carriers(a, mullerId), "das Storno gilt");
+		assertEquals(List.of(), a.open(), "A");
+		List<OpenConflict> open = b.open();
+		assertEquals(1, open.size(), open.toString());
+		assertEquals(ConflictNote.Kind.DELETE_WINS, open.get(0).note().kind());
+		assertEquals(seatUnit(b, 2), open.get(0).note().moved(), "B stellt Müller auf dem letzten Sitz wieder her");
 		for (Machine machine : m) {
 			assertEquals(Set.of(), carriersInModel(machine, mullerId), machine.name);
 			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);

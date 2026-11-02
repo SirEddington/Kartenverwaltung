@@ -94,8 +94,8 @@ final class ConflictResolver {
 		Ownership ownership();
 
 		/**
-		 * Die anderen Buchungs-Einheiten derselben Vorstellung aus dem Start-Index (Inhalte nicht kopiert, ohne
-		 * Speichervorgänge; die ergänzt die Auflösung).
+		 * Die anderen Buchungs-Einheiten derselben Vorstellung aus dem Start-Index mit ihrer gültigen Kette (Inhalte nicht
+		 * kopiert, ohne Speichervorgänge der Ordner; die ergänzt die Auflösung).
 		 */
 		Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking);
 
@@ -593,7 +593,8 @@ final class ConflictResolver {
 			Version lostMove = !carriesBooking && withOwnBeside.contains(entry.getKey())
 					? lostMoveIn(entry.getKey(), bookingId, mineSaveIds)
 					: null;
-			copies.put(entry.getKey(), new ConflictInput.Sibling(copy, sibling.head(), saveIds, lostMove, deletions));
+			copies.put(entry.getKey(),
+					new ConflictInput.Sibling(copy, sibling.head(), saveIds, lostMove, deletions, sibling.chain()));
 		}
 		return copies;
 	}

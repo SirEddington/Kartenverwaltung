@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.repository;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -10,6 +11,7 @@ import java.util.stream.Stream;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.ConflictInput.Sibling;
@@ -287,15 +289,14 @@ public final class BookingPolicy implements ConflictPolicy {
 	/**
 	 * Die Kopie, die ein Speichervorgang angelegt hat, als er die Buchung verschob: eine {@link #livingCopies lebende
 	 * Kopie}, in deren Ordner eine Version aus diesem Speichervorgang liegt ({@link Sibling#saveIds()}, Ruling R22), auch
-	 * wenn sie seitdem geändert wurde, noch aussteht oder dort verloren hat.
+	 * wenn sie seitdem geändert wurde, noch aussteht oder dort verloren hat. Wurde die Kopie danach weiter verschoben
+	 * (s1 → s2 → s3), zählt auch der Speichervorgang des weiteren Umzugs ({@link #movesOf}, KARV-120).
 	 * <p>
-	 * Nicht erkannt wird ein Verschieben, dessen Kopie keine Version aus dem Speichervorgang der Löschung trägt; die Seite
-	 * gilt dann als storniert:
+	 * Nicht erkannt wird ein Verschieben, dessen Kopie keine Version aus diesen Speichervorgängen trägt; die Seite gilt dann
+	 * als storniert:
 	 * <ul>
 	 * <li>"Meine" ist selbst eine Zusammenführung des Auflösers (er schreibt mit einem eigenen Speichervorgang je Strecke):
 	 * Ein Verschieben, das sie übernommen hat, gehört zu einem anderen Speichervorgang.</li>
-	 * <li>Die Kopie wurde danach weiter verschoben (s1 → s2 → s3): Im Ordner von s3 liegt der Speichervorgang der Löschung
-	 * von s1 nicht.</li>
 	 * <li>Selten, drei Rechner: Das eigene Verschieben nach s2 verlor dort gegen einen Verkauf. Die Buchung lebt erst nach
 	 * der Auflösung von s2 unter {@code _<ID>}, geschrieben in deren Speichervorgang.</li>
 	 * </ul>
@@ -306,7 +307,39 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (saveId == null) {
 			return null;
 		}
-		return first(livingCopies(input, bookingId).filter(sibling -> sibling.saveIds().contains(saveId)));
+		Set<String> moves = movesOf(input, saveId);
+		return first(livingCopies(input, bookingId)
+				.filter(sibling -> sibling.saveIds().stream().anyMatch(moves::contains)));
+	}
+
+	/**
+	 * Der Speichervorgang eines Verschiebens und die Speichervorgänge, mit denen die Buchung danach weiterzog: Hat eine
+	 * Geschwister-Einheit in ihrer gültigen Kette ({@link Sibling#chain()}) ein Glied aus einem dieser Speichervorgänge und
+	 * danach eine Löschung aus einem anderen, hat sie die Buchung aufgenommen und weitergegeben, und der Speichervorgang
+	 * der Löschung gehört dazu. Der Inhalt der Zwischen-Einheit ist nicht bekannt (die Kette hat keinen); dass am Ende
+	 * diese Buchung lebt, prüft {@link #movedCopy} an der lebenden Kopie. Ein Wiederherstellen löscht nichts und gilt so
+	 * nie als Umzug.
+	 */
+	private static Set<String> movesOf(ConflictInput input, String saveId) {
+		Set<String> moves = new HashSet<>(Set.of(saveId));
+		boolean grown = true;
+		while (grown) {
+			grown = false;
+			for (Sibling sibling : input.siblings().values()) {
+				boolean received = false;
+				for (ChainStep step : sibling.chain()) {
+					if (!step.deleted()) {
+						received |= moves.contains(step.saveId());
+					} else {
+						if (received && step.saveId() != null && moves.add(step.saveId())) {
+							grown = true;
+						}
+						received = false;
+					}
+				}
+			}
+		}
+		return moves;
 	}
 
 	/** Irgendeine {@link #livingCopies lebende Kopie} der Buchung, oder {@code null}. */

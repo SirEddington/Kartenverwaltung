@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1514,6 +1515,79 @@ class BookingPolicyTest {
 
 		assertEquals(List.of(deletionOf(S2, theirCopy)), resolution.extra());
 		assertEquals(OTHER, resolution.note().affected());
+	}
+
+	/**
+	 * Eine Geschwister-Einheit mit dieser gültigen Kette (ältestes Glied zuerst), deren Stand das letzte Glied ist; die
+	 * Speichervorgänge ihres Ordners kennt sie nur, wenn sie die Buchung trägt (wie im Store).
+	 */
+	private static Sibling withChain(UnitKey unit, Version... chain) {
+		Version current = chain[chain.length - 1];
+		Set<String> saveIds = current.deleted() ? Set.of()
+				: Arrays.stream(chain).map(Version::saveId).collect(Collectors.toSet());
+		return new Sibling(new UnitSnapshot(unit, current.id(), Status.OK, current.deleted(), current.payload()),
+				ChainStep.of(current), saveIds, null, List.of(), Arrays.stream(chain).map(ChainStep::of).toList());
+	}
+
+	@Test
+	void cancelAgainstTwoMovesDeletesTheFinalCopy() {
+		// dieser Rechner storniert x auf s1; Rechner A verschiebt x nach s2 und danach weiter nach s3
+		Version base = version(THIRD, booking("x", "s1"));
+		Version myDeletion = deletion(OWN, "save-cancel");
+		Version theirDeletion = deletion(OTHER, "save-move1");
+		Version passing = version(OTHER, "save-move1", booking("x", "s2", b -> b.setSeatNumber(2)));
+		Version passed = deletion(OTHER, "save-move2");
+		Version theirCopy = version(OTHER, "save-move2", booking("x", "s3", b -> b.setSeatNumber(3)));
+		Map<UnitKey, Sibling> siblings = Map.of(S2, withChain(S2, passing, passed), S3, withChain(S3, theirCopy));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, siblings, theirDeletion));
+
+		assertTrue(resolution.deleted());
+		assertEquals(List.of(deletionOf(S3, theirCopy)), resolution.extra(), "das Storno folgt dem zweiten Umzug");
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.DELETE_WINS, note.kind());
+		assertEquals(OTHER, note.affected());
+		assertEquals(theirCopy.id(), note.dropped());
+		assertEquals(S3, note.moved(), "wiederhergestellt wird auf dem letzten Sitz");
+	}
+
+	@Test
+	void twoMovesAgainstCancelDeleteTheFinalCopy() {
+		// dieser Rechner verschiebt x von s1 nach s2 und weiter nach s3 (dort wieder verkauft); Rechner A storniert x auf s1
+		Version base = version(THIRD, booking("x", "s1"));
+		Version myDeletion = deletion(OWN, "save-move1");
+		Version passing = version(OWN, "save-move1", booking("x", "s2", b -> b.setSeatNumber(2)));
+		Version passed = deletion(OWN, "save-move2");
+		Version resold = version(OWN, "save-sale", booking("z", "s2", b -> b.setSeatNumber(2)));
+		Version myCopy = version(OWN, "save-move2", booking("x", "s3", b -> b.setSeatNumber(3)));
+		Version theirDeletion = deletion(OTHER, "save-cancel");
+		Map<UnitKey, Sibling> siblings = Map.of(S2, withChain(S2, passing, passed, resold), S3, withChain(S3, myCopy));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, siblings, theirDeletion));
+
+		assertEquals(List.of(deletionOf(S3, myCopy)), resolution.extra());
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.DELETE_WINS, note.kind());
+		assertEquals(OWN, note.affected());
+		assertEquals(S3, note.moved());
+	}
+
+	@Test
+	void restoredBookingIsNoMoveAgainstACancellation() {
+		// beide stornieren x auf s1; auf s3 lebt x wieder, wiederhergestellt in einem eigenen Speichervorgang ohne Löschung
+		Version base = version(THIRD, booking("x", "s1"));
+		Version myDeletion = deletion(OWN, "save-cancel");
+		Version theirDeletion = deletion(OTHER, "save-cancel2");
+		Version sold = version(OTHER, "save-cancel2", booking("z", "s2", b -> b.setSeatNumber(2)));
+		Version cancelledToo = deletion(OTHER, "save-later");
+		Version restored = version(OTHER, "save-restore", booking("x", "s3", b -> b.setSeatNumber(3)));
+		Map<UnitKey, Sibling> siblings = Map.of(S2, withChain(S2, sold, cancelledToo), S3, withChain(S3, restored));
+
+		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, siblings, theirDeletion));
+
+		assertTrue(resolution.deleted());
+		assertEquals(List.of(), resolution.extra(), "eine wiederhergestellte Buchung wird nicht auf Verdacht gelöscht");
+		assertNull(resolution.note());
 	}
 
 	@Test
