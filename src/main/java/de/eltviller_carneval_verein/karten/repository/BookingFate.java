@@ -169,7 +169,8 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		/**
 		 * E9: gescheiterter Umzug gegen Behalten. Die Buchung bleibt an der Quelle, wenn sie frei ist (der Umziehende hat
 		 * dort keine andere Buchung hinterlassen), sonst "ohne Platz"; die Felder des Umziehenden kommen dazu, strittig
-		 * gilt die behaltene Fassung.
+		 * gilt die behaltene Fassung. Der Vermerk ist ohne Platz und ohne strittige Gruppen der Doppelverkauf ("Platz
+		 * zuweisen"), sonst ein Feldkonflikt mit "Platz" und den strittigen Gruppen.
 		 */
 		private BookingFate failedAgainstKept(Side failed, Side kept) {
 			boolean free = failed.trail().removal().deleted();
@@ -178,10 +179,11 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 			FieldMerge.Result merged = carry(fieldsOf(failed), keptPayload);
 			ObjectNode content = carrier.isUnassigned() ? BookingPolicy.withoutPlace(merged.merged()) : merged.merged();
 			ConflictNote note;
-			if (carrier.isUnassigned()) {
+			if (carrier.isUnassigned() && merged.conflicts().isEmpty()) {
 				note = ConflictNote.doubleSale(failed.machine(), kept.party(), carrier, placeOf(failed),
 						failed.dropped());
 			} else {
+				// mit strittigen Gruppen der Feldkonflikt samt "Platz", auch ohne Platz: sonst wichen sie still
 				List<FieldConflict> conflicts = new ArrayList<>();
 				conflicts.add(BookingPolicy.placeConflict(fieldsOf(failed), keptPayload));
 				conflicts.addAll(merged.conflicts());

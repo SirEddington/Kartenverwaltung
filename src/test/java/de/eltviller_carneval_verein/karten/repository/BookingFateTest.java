@@ -215,6 +215,65 @@ class BookingFateTest {
 		assertEquals("s1", note.place().get("seatId").asText());
 	}
 
+	/** Haben beide dieselbe Gruppe geändert, nennt der Vermerk sie (FIELDS mit "Platz"), statt sie still weichen zu lassen. */
+	@Test
+	void e9OnUnassignedWithContestedGroupNotesIt() {
+		BookingTrail mine = failed(OWN, S1, booking("m", "s1", b -> b.setComment("Fenster")));
+		BookingFate fate = decide(mine, kept(OTHER, withoutPlace("m", b -> b.setComment("Gang"))), false);
+
+		assertEquals(M, fate.carrier());
+		assertEquals("Gang", fate.content().get("comment").asText(), "bei derselben Gruppe gilt die behaltene Fassung");
+		ConflictNote note = only(fate, M);
+		assertEquals(ConflictNote.Kind.FIELDS, note.kind());
+		assertEquals(OWN, note.affected());
+		assertEquals(List.of("place", "comment"), note.fields().stream().map(ConflictNote.FieldConflict::group).toList());
+		assertEquals("Fenster", note.fields().get(1).mine().get("comment").asText());
+		assertEquals(mine.last().id(), note.dropped());
+	}
+
+	/** Die Koppelregel für Zahlung und Preis gilt auch beim Übernehmen der Felder eines gescheiterten Umzugs (E9). */
+	@Test
+	void e9CouplesPaymentAndPrice() {
+		Version priced = world.version(THIRD, null, withoutPlace("m", b -> b.setPrice(2000)));
+		BookingTrail mine = new BookingTrail(Kind.FAILED, world.version(OWN, priced, null, to(S1)),
+				world.version(OWN, null, booking("m", "s1", b -> {
+					b.setPrice(2000);
+					b.setPaymentStatus(PaymentStatus.CASH);
+					b.setPaidAmount(2000);
+				})), S1);
+		BookingTrail theirs = new BookingTrail(Kind.KEPT, null,
+				world.version(OTHER, priced, withoutPlace("m", b -> b.setPrice(2500))), M);
+
+		BookingFate fate = BookingFate.decide("m", M, priced, mine, theirs, false, OWN);
+
+		assertEquals(2500, fate.content().get("price").asInt(), "der Preis von Deren gilt");
+		assertEquals(2000, fate.content().get("paidAmount").asInt(), "die Zahlung bleibt");
+		ConflictNote note = only(fate, M);
+		assertTrue(note.fields().stream().anyMatch(field -> field.group().equals("price")), note.toString());
+	}
+
+	/** Die Koppelregel gilt auch beim Übertragen auf eine angekommene Kopie (E5). */
+	@Test
+	void e5CouplesPaymentAndPrice() {
+		Version priced = world.version(THIRD, null, withoutPlace("m", b -> b.setPrice(2000)));
+		BookingTrail mine = new BookingTrail(Kind.KEPT, null, world.version(OWN, priced, withoutPlace("m", b -> {
+			b.setPrice(2000);
+			b.setPaymentStatus(PaymentStatus.CASH);
+			b.setPaidAmount(2000);
+		})), M);
+		BookingTrail theirs = new BookingTrail(Kind.ARRIVED, world.version(OTHER, priced, null, to(S4)),
+				world.version(OTHER, null, booking("m", "s4", b -> b.setPrice(2500))), S4);
+
+		BookingFate fate = BookingFate.decide("m", M, priced, mine, theirs, false, OWN);
+
+		assertEquals(S4, fate.carrier());
+		assertEquals(2500, fate.content().get("price").asInt());
+		assertEquals(2000, fate.content().get("paidAmount").asInt());
+		ConflictNote note = only(fate, M);
+		assertEquals(List.of("price"), note.fields().stream().map(ConflictNote.FieldConflict::group).toList());
+		assertEquals(S4, note.moved());
+	}
+
 	@Test
 	void e9OnASeatRevivesTheSeatWithFieldsNote() {
 		Version seated = world.version(THIRD, null, booking("m", "s3"));

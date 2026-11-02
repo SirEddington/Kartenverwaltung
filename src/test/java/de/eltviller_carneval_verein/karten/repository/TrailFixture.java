@@ -143,6 +143,6 @@ final class TrailFixture {
 		int at = base == null ? -1 : chain.indexOf(base);
 		List<Version> since = chain.subList(at + 1, chain.size());
 		return new ConflictInput(unit, base, stretch.get(stretch.size() - 1), chain.get(chain.size() - 1), since, OWN,
-				Map.of(), null, stretch, trail(unit, base, stretch, since));
+				Map.of(), stretch, trail(unit, base, stretch, since));
 	}
 }

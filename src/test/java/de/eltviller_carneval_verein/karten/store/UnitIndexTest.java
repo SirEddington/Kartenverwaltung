@@ -1800,7 +1800,6 @@ class UnitIndexTest {
 		UnitIndex.Refresh refresh = refresh(index, local);
 
 		assertEquals(Set.of(EVENT), refresh.pendingUnits());
-		assertEquals(Set.of(EVENT), index.withOwnBesideChain(List.of(EVENT, PRESENTATION, HALL)));
 		index.markOwnListed(List.of(feedEntry(PRESENTATION, id(2, previous))), 3);
 		UnitFiles files = local.readUnit(PRESENTATION);
 		index.update(files, ChainResolver.resolve(files, own));

@@ -571,23 +571,6 @@ final class UnitIndex {
 	}
 
 	/**
-	 * Die genannten Einheiten mit eigenen Versionen außerhalb ihrer Kette: verlorene ({@link Entry#lost()}), ausstehende
-	 * ({@link Entry#pending()}) oder aufgegangene von diesem Rechner ({@link Entry#absorbed()}). Einheiten ohne Eintrag
-	 * fehlen. Greift nur auf die genannten Einträge zu. Eigen ist eine aufgegangene Version nach dem Kürzel ihrer ID
-	 * ({@link Ownership#isOwnId}, auch unter einer früheren ID).
-	 */
-	synchronized Set<UnitKey> withOwnBesideChain(Collection<UnitKey> units) {
-		Set<UnitKey> result = new LinkedHashSet<>();
-		for (UnitKey unit : units) {
-			Entry entry = entries.get(unit);
-			if (entry != null && (entry.lost() || entry.pending() || entry.absorbed().stream().anyMatch(own::isOwnId))) {
-				result.add(unit);
-			}
-		}
-		return result;
-	}
-
-	/**
 	 * Die aufgegangenen Versionen ({@link Entry#absorbed()}) der genannten Einheiten, soweit der Index sie kennt; Einheiten
 	 * ohne Eintrag fehlen im Ergebnis. Greift nur auf die genannten Einträge zu.
 	 */

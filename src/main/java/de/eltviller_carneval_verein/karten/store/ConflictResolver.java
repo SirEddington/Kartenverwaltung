@@ -94,17 +94,9 @@ final class ConflictResolver {
 		Ownership ownership();
 
 		/**
-		 * Die anderen Buchungs-Einheiten derselben Vorstellung aus dem Start-Index mit ihrer gültigen Kette (Inhalte nicht
-		 * kopiert, ohne Speichervorgänge der Ordner; die ergänzt die Auflösung).
+		 * Die anderen Buchungs-Einheiten derselben Vorstellung aus dem Start-Index (Inhalte nicht kopiert).
 		 */
 		Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking);
-
-		/**
-		 * Die Einheiten unter {@code units}, die laut Start-Index eigene Versionen außerhalb ihrer gültigen Kette haben:
-		 * verlorene, ausstehende oder in eine Zusammenführung aufgegangene. Nur in ihrem Ordner kann das Ziel eines
-		 * eigenen Umzugs liegen, der dort nicht gilt.
-		 */
-		Set<UnitKey> withOwnVersionsBesideChain(Collection<UnitKey> units);
 
 		/** Schreibt die Änderungen wie {@link SyncService#append}. */
 		List<Version> append(String saveId, List<Change> changes) throws IOException;
@@ -137,10 +129,10 @@ final class ConflictResolver {
 	 * {@link Step#MERGE}.
 	 */
 	private record Stretch(Step step, Version base, Version mine, Version theirs, List<Version> chainSinceBase,
-			Set<String> saveIds, List<Version> versions) {
+			List<Version> versions) {
 
 		static Stretch of(Step step) {
-			return new Stretch(step, null, null, null, List.of(), Set.of(), List.of());
+			return new Stretch(step, null, null, null, List.of(), List.of());
 		}
 	}
 
@@ -362,18 +354,14 @@ final class ConflictResolver {
 		if (mustWait(unit, since)) {
 			return Stretch.of(Step.WAIT);
 		}
-		Set<String> saveIds = new HashSet<>();
 		List<Version> versions = new ArrayList<>();
 		for (VersionId id : lost) {
 			Version version = versionOf(files, id);
 			if (version != null) {
 				versions.add(version);
-				if (version.saveId() != null) {
-					saveIds.add(version.saveId());
-				}
 			}
 		}
-		return new Stretch(Step.MERGE, base, mine, state.head(), since, saveIds, versions);
+		return new Stretch(Step.MERGE, base, mine, state.head(), since, versions);
 	}
 
 	private static Version versionOf(UnitFiles files, VersionId id) {
@@ -454,9 +442,7 @@ final class ConflictResolver {
 			return unmerged(stretch.mine(), stretch.theirs());
 		}
 		boolean booking = unit.type() == UnitType.BOOKING;
-		Map<UnitKey, ConflictInput.Sibling> siblings = booking
-				? siblings(unit, stretch.base(), stretch.mine(), stretch.saveIds())
-				: Map.of();
+		Map<UnitKey, ConflictInput.Sibling> siblings = booking ? siblings(unit) : Map.of();
 		Map<UnitKey, TrailUnit> trail = booking
 				? copy(TrailCollector.collect(unit, stretch.base(), stretch.versions(), stretch.chainSinceBase(),
 						this::folder))
@@ -464,8 +450,7 @@ final class ConflictResolver {
 		try {
 			ConflictInput input = new ConflictInput(unit, copy(stretch.base()), copy(stretch.mine()),
 					copy(stretch.theirs()), stretch.chainSinceBase().stream().map(ConflictResolver::copy).toList(),
-					host.machineId(), siblings, stretch.saveIds(),
-					stretch.versions().stream().map(ConflictResolver::copy).toList(), trail);
+					host.machineId(), siblings, stretch.versions().stream().map(ConflictResolver::copy).toList(), trail);
 			Resolution resolution = Objects.requireNonNull(policy.resolve(input), "Die Strategie lieferte kein Ergebnis.");
 			if (!resolution.deleted() && resolution.payload() == null) {
 				throw new IllegalStateException("Die Strategie lieferte keinen Inhalt.");
@@ -592,133 +577,21 @@ final class ConflictResolver {
 	}
 
 	/**
-	 * Die anderen Buchungs-Einheiten derselben Vorstellung als Kopien. Trägt eine davon die Buchung der Basis oder die von
-	 * "Meine" (gleiche Buchungs-ID, nicht gelöscht), bekommt sie die Speichervorgänge aller lesbaren Versionen in ihrem
-	 * Ordner: Daran erkennt die Strategie ein Verschieben, auch wenn die Kopie seitdem geändert wurde oder noch aussteht.
-	 * Dasselbe bekommt die Einheit {@code _<ID>} der Buchung von "Meine", auch gelöscht, dazu ihre Löschungen
-	 * ({@link ConflictInput.Sibling#deletions()}): Daran erkennt die Strategie, dass "Meine" von dort hierher zugewiesen
-	 * wurde, und ob ein anderer Rechner die Buchung dort ebenfalls gelöscht hat (Rulings R31a, R35). Ist "Meine" eine
-	 * Löschung, bekommt eine Einheit, die die Buchung nicht trägt, das verlorene Ziel eines Umzugs aus einem
-	 * Speichervorgang der Strecke ({@link ConflictInput.Sibling#lostMove()}). Dateien werden nur für die Träger (meist
-	 * keiner oder einer), für {@code _<ID>} und für Einheiten mit eigenen Versionen außerhalb ihrer Kette gelesen (laut
-	 * Index; meist keine).
-	 *
-	 * @param mineSaveIds die Speichervorgänge der Versionen der verlorenen Strecke
+	 * Die anderen Buchungs-Einheiten derselben Vorstellung als Kopien, aus dem Index ohne Dateizugriff. Was ein Umzug war,
+	 * liest die Strategie aus der Umzugsspur (KARV-93), nicht mehr aus den Speichervorgängen der Geschwister.
 	 */
-	private Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey unit, Version base, Version mine,
-			Set<String> mineSaveIds) throws IOException {
-		String bookingId = base == null || base.deleted() ? null : ConflictInput.bookingIdOf(base.payload());
-		String mineId = mine.deleted() ? null : ConflictInput.bookingIdOf(mine.payload());
-		UnitKey ownUnassigned = mineId == null ? null
-				: UnitKey.unassignedBooking(unit.eventId(), unit.presentationId(), mineId);
-		Map<UnitKey, ConflictInput.Sibling> fromIndex = host.siblings(unit);
-		Set<UnitKey> withOwnBeside = bookingId != null && mine.deleted() && !mineSaveIds.isEmpty()
-				? host.withOwnVersionsBesideChain(fromIndex.keySet())
-				: Set.of();
+	private Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey unit) {
 		Map<UnitKey, ConflictInput.Sibling> copies = new LinkedHashMap<>();
-		for (Map.Entry<UnitKey, ConflictInput.Sibling> entry : fromIndex.entrySet()) {
+		for (Map.Entry<UnitKey, ConflictInput.Sibling> entry : host.siblings(unit).entrySet()) {
 			ConflictInput.Sibling sibling = entry.getValue();
 			UnitSnapshot s = sibling.snapshot();
 			UnitSnapshot copy = new UnitSnapshot(s.unit(), s.version(), s.status(), s.deleted(),
 					s.payload() == null ? null : s.payload().deepCopy());
-			boolean carriesBooking = bookingId != null && s.carriesBooking(bookingId);
-			boolean carriesMine = mineId != null && s.carriesBooking(mineId);
-			boolean isOwnUnassigned = entry.getKey().equals(ownUnassigned);
-			SyncService.Resolved files = carriesBooking || carriesMine || isOwnUnassigned ? host.resolve(entry.getKey())
-					: null;
-			Set<String> saveIds = files == null ? Set.of() : saveIdsOf(files);
-			List<ConflictInput.Deletion> deletions = isOwnUnassigned ? deletionsIn(files, mineSaveIds) : List.of();
-			Version lostMove = !carriesBooking && withOwnBeside.contains(entry.getKey())
-					? lostMoveIn(entry.getKey(), bookingId, mineSaveIds)
-					: null;
-			copies.put(entry.getKey(),
-					new ConflictInput.Sibling(copy, sibling.head(), saveIds, lostMove, deletions, sibling.chain()));
+			copies.put(entry.getKey(), new ConflictInput.Sibling(copy, sibling.head()));
 		}
 		return copies;
 	}
 
-	/**
-	 * Die jüngste lesbare Version im Ordner der Einheit aus einem der Speichervorgänge {@code saveIds}, die die Buchung
-	 * trägt (nicht gelöscht, gleiche Buchungs-ID) und nicht in der gültigen Kette der Einheit steht (dort gilt sie, ein
-	 * Umzug dorthin ist nicht gescheitert), als Kopie; {@code null}, wenn es keine gibt.
-	 */
-	private Version lostMoveIn(UnitKey unit, String bookingId, Set<String> saveIds) throws IOException {
-		SyncService.Resolved resolved = host.resolve(unit);
-		Set<VersionId> chain = idsOf(resolved.state().chain());
-		Version found = null;
-		for (VersionFile file : resolved.files().versions().values()) {
-			Version version = file.version();
-			if (version != null && !version.deleted() && version.saveId() != null && saveIds.contains(version.saveId())
-					&& !chain.contains(version.id()) && bookingId.equals(ConflictInput.bookingIdOf(version.payload()))
-					&& (found == null || version.id().compareTo(found.id()) > 0)) {
-				found = version;
-			}
-		}
-		return copy(found);
-	}
-
-	/**
-	 * Die Löschungen im Ordner der Einheit {@code _<ID>} mit ihrem Stand ({@link ConflictInput.Sibling#deletions()}): ohne
-	 * Zusammenführungen (ihre Löschung stammt aus einem Vorgänger) und ohne die Vorgänger der Versionen aus den
-	 * Speichervorgängen der Strecke (sie lagen schon vorher dort, etwa eine frühere Zuweisung, nach der die Buchung wieder
-	 * "ohne Platz" stand).
-	 */
-	private static List<ConflictInput.Deletion> deletionsIn(SyncService.Resolved resolved, Set<String> mineSaveIds) {
-		Map<VersionId, VersionFile> versions = resolved.files().versions();
-		Set<VersionId> earlier = new HashSet<>();
-		for (VersionFile file : versions.values()) {
-			Version version = file.version();
-			if (version != null && version.saveId() != null && mineSaveIds.contains(version.saveId())) {
-				earlier.addAll(ancestorsOf(versions, version));
-			}
-		}
-		UnitState state = resolved.state();
-		Set<VersionId> chain = idsOf(state.chain());
-		Set<VersionId> absorbed = state.current() == null ? Set.of() : ancestorsOf(versions, state.current());
-		List<ConflictInput.Deletion> deletions = new ArrayList<>();
-		for (VersionFile file : versions.values()) {
-			Version version = file.version();
-			if (version == null || !version.deleted() || version.parents().size() > 1 || earlier.contains(version.id())) {
-				continue;
-			}
-			ConflictInput.Standing standing = chain.contains(version.id()) ? ConflictInput.Standing.CHAIN
-					: absorbed.contains(version.id()) ? ConflictInput.Standing.ABSORBED : ConflictInput.Standing.BESIDE;
-			deletions.add(new ConflictInput.Deletion(version.saveId(), standing));
-		}
-		return deletions;
-	}
-
 	/** Die Vorgänger der Version im Ordner über alle Vorgänger, soweit lesbar, ohne sie selbst. */
-	private static Set<VersionId> ancestorsOf(Map<VersionId, VersionFile> versions, Version version) {
-		Set<VersionId> reached = new HashSet<>();
-		List<VersionId> open = new ArrayList<>(version.parents());
-		while (!open.isEmpty()) {
-			VersionId id = open.remove(open.size() - 1);
-			if (reached.add(id)) {
-				VersionFile file = versions.get(id);
-				if (file != null && file.version() != null) {
-					open.addAll(file.version().parents());
-				}
-			}
-		}
-		return reached;
-	}
-
-	private static Set<VersionId> idsOf(List<Version> versions) {
-		Set<VersionId> ids = new HashSet<>();
-		versions.forEach(version -> ids.add(version.id()));
-		return ids;
-	}
-
 	/** Die Speichervorgänge aller lesbaren Versionen im Ordner der Einheit. */
-	private static Set<String> saveIdsOf(SyncService.Resolved resolved) {
-		Set<String> saveIds = new HashSet<>();
-		for (VersionFile file : resolved.files().versions().values()) {
-			Version version = file.version();
-			if (version != null && version.saveId() != null) {
-				saveIds.add(version.saveId());
-			}
-		}
-		return saveIds;
-	}
 }
