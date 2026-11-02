@@ -54,9 +54,9 @@ public final class BookingPolicy implements ConflictPolicy {
 	private static final String SEAT_NUMBER = "seatNumber";
 	private static final String UNASSIGNED = "unassigned";
 	/** Der Platz im Vermerk eines Doppelverkaufs, für die Anzeige im Dialog. */
-	private static final List<String> PLACE = List.of(SEAT_ID, ROW_LABEL, TABLE_NUMBER, SEAT_NUMBER);
+	static final List<String> PLACE = List.of(SEAT_ID, ROW_LABEL, TABLE_NUMBER, SEAT_NUMBER);
 	/** Die Feldgruppe "Platz". */
-	private static final String PLACE_GROUP = "place";
+	static final String PLACE_GROUP = "place";
 	/** Die Feldgruppe "Zahlung" der Koppelregel ({@link #mergeBooking}). */
 	private static final String PAYMENT_GROUP = "payment";
 	/** Die Feldgruppe "Preis" der Koppelregel; sie besteht nur aus dem gleichnamigen Feld. */
@@ -148,7 +148,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	 *
 	 * @param base der Inhalt der Basis; {@code null} gilt als leeres Objekt
 	 */
-	private static FieldMerge.Result mergeBooking(ObjectNode base, ObjectNode mine, ObjectNode theirs) {
+	static FieldMerge.Result mergeBooking(ObjectNode base, ObjectNode mine, ObjectNode theirs) {
 		Map<String, List<String>> groups = FieldGroups.booking();
 		FieldMerge.Result result = FieldMerge.merge(base, mine, theirs, groups);
 		if (result.conflicts().stream().anyMatch(conflict -> conflict.group().equals(PRICE))) {
@@ -360,7 +360,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/** Der Konflikt der Gruppe "Platz" zwischen zwei Fassungen der Buchung (je die Felder der Gruppe als Kopie). */
-	private static FieldConflict placeConflict(ObjectNode mine, ObjectNode theirs) {
+	static FieldConflict placeConflict(ObjectNode mine, ObjectNode theirs) {
 		List<String> place = FieldGroups.booking().get(PLACE_GROUP);
 		return new FieldConflict(PLACE_GROUP, FieldMerge.slice(mine, place), FieldMerge.slice(theirs, place));
 	}
@@ -722,14 +722,19 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * Sitz geleert wie bei einer neuen Buchung; als Nachfolger ihres aktuellen Stands, wenn sie schon einen hat.
 	 */
 	private static Change withoutPlace(Version mine, UnitKey moved, UnitSnapshot current) {
-		ObjectNode withoutPlace = mine.payload().deepCopy();
+		List<VersionId> parents = current != null && current.version() != null ? List.of(current.version()) : List.of();
+		return new Change(moved, parents, withoutPlace(mine.payload()), false);
+	}
+
+	/** Eine Kopie der Buchung "ohne Platz": {@code unassigned}, Sitz-ID, Reihe, Tisch und Sitz geleert. */
+	static ObjectNode withoutPlace(ObjectNode booking) {
+		ObjectNode withoutPlace = booking.deepCopy();
 		withoutPlace.put(UNASSIGNED, true);
 		withoutPlace.putNull(SEAT_ID);
 		withoutPlace.put(ROW_LABEL, "");
 		withoutPlace.put(TABLE_NUMBER, 0);
 		withoutPlace.put(SEAT_NUMBER, 0);
-		List<VersionId> parents = current != null && current.version() != null ? List.of(current.version()) : List.of();
-		return new Change(moved, parents, withoutPlace, false);
+		return withoutPlace;
 	}
 
 	/**
