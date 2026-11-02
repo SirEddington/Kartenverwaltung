@@ -36,6 +36,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
 
 /**
@@ -85,9 +86,11 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Inhalte im Modell, die nicht der Nutzer, sondern das Einarbeiten erzeugt hat: Wechselt eine fremde Vorstellung Halle
 	 * oder Bestuhlung, setzt der Abgleich ihre Buchungen auf die neuen Sitze, bevor deren Einheiten eintreffen. Solange das
-	 * Modell genau diesen Inhalt hat, gilt die Einheit nicht als lokal verändert; der Wert {@code null} heißt, das Einarbeiten
-	 * hat sie aus dem Modell genommen. Ein Eintrag gilt, bis sich der Inhalt des Vergleichsstands der Einheit ändert; eine
-	 * neue Version mit gleichem Inhalt ({@link ForeignDecision#SAME}) lässt ihn stehen.
+	 * Modell genau diesen Inhalt hat, gilt die Einheit nicht als lokal verändert (fehlt er, hat der Nutzer die Buchung
+	 * storniert); der Wert {@code null} heißt, das Einarbeiten hat sie aus dem Modell genommen. Ein Eintrag gilt, bis sich
+	 * der Inhalt des Vergleichsstands der Einheit ändert; eine neue Version mit gleichem Inhalt
+	 * ({@link ForeignDecision#SAME}) lässt ihn stehen, ebenso eine fremde Löschung (siehe {@link #adopt}): Ein Storno des
+	 * Nutzers bleibt so bis zum Speichern gemerkt.
 	 */
 	private final Map<UnitKey, ObjectNode> derived = new HashMap<>();
 
@@ -704,8 +707,9 @@ public class StoreEventRepository implements EventRepository {
 	 * Vergleichsstand, oder nur auf einer Seite vorhanden (im Vergleichsstand zählt nur eine angezeigte). Nicht dazu zählt,
 	 * was das Einarbeiten selbst im Modell umgesetzt hat (siehe {@link #derived}), solange es unverändert ist. Ausnahme: Hat
 	 * der Nutzer eine solche Buchung geändert, die das Einarbeiten versetzt hat (etwa auf {@code _<ID>}), zählt auch der
-	 * Wegfall am alten Platz: Das Speichern verschiebt die Buchung und löscht ihn. Lässt sich ein Event nicht zerlegen (zwei
-	 * Buchungen auf einem Platz), zählen sein Kopf und alles Angezeigte.
+	 * Wegfall am alten Platz: Das Speichern verschiebt die Buchung und löscht ihn. Fehlt eine Buchung, die das Einarbeiten
+	 * ins Modell gesetzt hat, zählt ihre Einheit, auch ohne Version: Der Nutzer hat sie storniert. Lässt sich ein Event
+	 * nicht zerlegen (zwei Buchungen auf einem Platz), zählen sein Kopf und alles Angezeigte.
 	 */
 	public Set<UnitKey> locallyChangedUnits() {
 		Set<UnitKey> changed = new HashSet<>();
@@ -736,9 +740,15 @@ public class StoreEventRepository implements EventRepository {
 	 * Eine angezeigte Einheit, die im Modell fehlt, gilt als verändert, außer das Einarbeiten hat sie herausgenommen
 	 * ({@link #derived} = {@code null}). Auch dann zählt sie, wenn der Nutzer eine Einheit mit derselben Buchungs-Kennung
 	 * geändert hat: Das Speichern verschiebt die Buchung und schreibt den Wegfall.
+	 * <p>
+	 * Eine Einheit, die das Einarbeiten mit Inhalt abgeleitet hat und die im Modell fehlt, gilt ebenfalls als verändert,
+	 * auch wenn sie weder bekannt noch angezeigt ist: Der Nutzer hat die Buchung storniert, bevor ihre Einheit eintraf
+	 * (KARV-119). Trifft sie mit genau diesem Stand ein, wird nur ihre Version übernommen ({@link #derivedAs}), und das
+	 * nächste Speichern löscht sie auf ihr; sonst setzte das Einarbeiten die Buchung wieder ins Modell. {@code cancelled}
+	 * sind die Kennungen dieser stornierten Buchungen (siehe {@link #cancelledBase}).
 	 */
 	private record LocalChanges(Set<UnitKey> units, boolean all, Map<UnitKey, ObjectNode> model,
-			Map<String, List<UnitKey>> moved) {
+			Map<String, List<UnitKey>> moved, Set<String> cancelled) {
 
 		boolean none() {
 			return !all && units.isEmpty();
@@ -755,7 +765,7 @@ public class StoreEventRepository implements EventRepository {
 		try {
 			model = UnitMapper.payloads(event);
 		} catch (IllegalStateException e) {
-			return new LocalChanges(Set.of(), true, null, Map.of());
+			return new LocalChanges(Set.of(), true, null, Map.of(), Set.of());
 		}
 		Set<UnitKey> changed = new HashSet<>();
 		Map<String, List<UnitKey>> moved = new HashMap<>();
@@ -784,7 +794,18 @@ public class StoreEventRepository implements EventRepository {
 				changed.add(unit);
 			}
 		}
-		return new LocalChanges(changed, false, model, moved);
+		// was das Einarbeiten ins Modell gesetzt hat und dort fehlt, hat der Nutzer entfernt (storniert), auch ohne Version
+		Set<String> cancelled = new HashSet<>();
+		derived.forEach((unit, payload) -> {
+			if (payload != null && event.getId().equals(unit.eventId()) && !model.containsKey(unit)) {
+				changed.add(unit);
+				String bookingId = ConflictInput.bookingIdOf(payload);
+				if (bookingId != null) {
+					cancelled.add(bookingId);
+				}
+			}
+		});
+		return new LocalChanges(changed, false, model, moved, cancelled);
 	}
 
 	/**
@@ -838,10 +859,62 @@ public class StoreEventRepository implements EventRepository {
 		return payload != null && current.isLive() && payload.equals(current.payload());
 	}
 
-	/** Übernimmt den Stand in den Vergleichsstand; was das Einarbeiten an der Einheit umgesetzt hatte, gilt damit nicht mehr. */
+	/**
+	 * Übernimmt den Stand in den Vergleichsstand; was das Einarbeiten an der Einheit umgesetzt hatte, gilt damit nicht mehr.
+	 * Ausnahme: Eine fremde Löschung lässt einen abgeleiteten Inhalt stehen. Fehlt er im Modell, hat der Nutzer die Buchung
+	 * storniert, und das bleibt gemerkt, bis er speichert: Der andere Rechner kann sie auf einen anderen Sitz gesetzt haben,
+	 * dessen Einheit erst später eintrifft ({@link #cancelledBase}). Hat das Einarbeiten sie selbst herausgenommen, merkt
+	 * {@link #noteDerivedRemoved} danach das.
+	 */
 	private void adopt(String eventId, UnitSnapshot snapshot, boolean shown) {
 		baseline.adopt(eventId, snapshot, shown);
-		derived.remove(snapshot.unit());
+		if (!UnitMapper.isAbsent(snapshot) || derived.get(snapshot.unit()) == null) {
+			derived.remove(snapshot.unit());
+		}
+	}
+
+	/**
+	 * Hat der Nutzer eine Buchung storniert, die er nur abgeleitet kannte ({@link LocalChanges#cancelled}), und trägt der
+	 * lesbare fremde Stand einer Einheit, die nicht im Modell steht, dieselbe Buchung, ist dieser Stand die Stornierung
+	 * des Nutzers nicht los: auf dem abgeleiteten Sitz mit einer späteren Änderung (etwa ein anderer Name) oder auf einem
+	 * anderen Sitz, auf den der andere Rechner die Buchung danach gesetzt hat. Die Basis ist die älteste Version der Kette,
+	 * ab der die Einheit ohne Unterbrechung diese Buchung trägt: Auf ihr schreibt das Speichern die Löschung. Ist sie nicht
+	 * der aktuelle Stand, tritt die Löschung gegen die späteren Änderungen an, und die Regel für Löschung gegen Änderung
+	 * entscheidet mit Vermerk; sonst ist die Löschung ein gewöhnlicher Nachfolger.
+	 *
+	 * @return die Basis; {@code null}, wenn es keine solche Stornierung gibt oder sich die Kette nicht lesen lässt
+	 */
+	private UnitSnapshot cancelledBase(UnitSnapshot current, LocalChanges changes, List<ChainStep> chain) {
+		UnitKey unit = current.unit();
+		if (changes.cancelled().isEmpty() || unit.type() != UnitType.BOOKING || !current.isLive()
+				|| !UnitMapper.isReadable(current) || changes.model().containsKey(unit)) {
+			return null;
+		}
+		String bookingId = ConflictInput.bookingIdOf(current.payload());
+		if (bookingId == null || !changes.cancelled().contains(bookingId)) {
+			return null;
+		}
+		int at = chain.size() - 1;
+		while (at >= 0 && !chain.get(at).version().equals(current.version())) {
+			at--;
+		}
+		if (at < 0) {
+			return null;
+		}
+		UnitSnapshot base = current;
+		try {
+			for (int i = at - 1; i >= 0 && !chain.get(i).deleted(); i--) {
+				Version older = sync.version(unit, chain.get(i).version());
+				if (older == null || !bookingId.equals(ConflictInput.bookingIdOf(older.payload()))) {
+					break;
+				}
+				base = UnitSnapshot.of(unit, older);
+			}
+		} catch (IOException e) {
+			LOG.log(Level.WARNING, "Die Kette von " + unit.relativePath() + " ließ sich nicht lesen", e);
+			return null;
+		}
+		return base;
 	}
 
 	private void forgetDerived(String eventId) {
@@ -888,6 +961,35 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
+	 * Fehlt eine Einheit, die das Einarbeiten mit Inhalt abgeleitet hat und die vorher noch genau so im Modell stand
+	 * ({@code before}), hat ein weiteres Einarbeiten bzw. ein Abgleich sie herausgenommen, nicht der Nutzer (etwa eine
+	 * fremde Stornierung, die die Buchung auf ihrem abgeleiteten Sitz trifft): Sie gilt nicht als storniert (siehe
+	 * {@link #localChanges}).
+	 */
+	private void noteDerivedRemoved(Event event, Map<UnitKey, ObjectNode> before) {
+		List<UnitKey> candidates = new ArrayList<>();
+		derived.forEach((unit, payload) -> {
+			if (payload != null && payload.equals(before.get(unit))) {
+				candidates.add(unit);
+			}
+		});
+		if (candidates.isEmpty()) {
+			return;
+		}
+		Map<UnitKey, ObjectNode> after;
+		try {
+			after = UnitMapper.payloads(event);
+		} catch (IllegalStateException e) {
+			return;
+		}
+		for (UnitKey unit : candidates) {
+			if (!after.containsKey(unit)) {
+				derived.put(unit, null);
+			}
+		}
+	}
+
+	/**
 	 * Lässt {@code reconcile} das Event mit der Bestuhlung abgleichen (etwa {@code BookingSync.sync} nach einem fremden
 	 * Hallenwechsel) und merkt, was der Abgleich im Modell geändert hat: Das stammt nicht vom Nutzer (siehe {@link #derived}).
 	 * Eine Einheit, die der Nutzer schon vorher ungespeichert geändert hatte, bleibt lokal verändert, auch wenn der Abgleich
@@ -897,6 +999,7 @@ public class StoreEventRepository implements EventRepository {
 		LocalChanges before = localChanges(event);
 		reconcile.run();
 		if (before.model() != null) {
+			noteDerivedRemoved(event, before.model());
 			noteDerived(event, before.model(), before.units());
 		}
 	}
@@ -932,7 +1035,8 @@ public class StoreEventRepository implements EventRepository {
 		}
 
 		// "lokal verändert" kostet das Zerlegen des Events: erst prüfen, wenn ein Nachfolger da ist
-		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false, null, Map.of()) : localChanges(event);
+		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false, null, Map.of(), Set.of())
+				: localChanges(event);
 		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
 		successors.sort(EventMerge.MERGE_ORDER);
 		Map<UnitKey, UnitSnapshot> presentationStates = presentationStates(event, snapshots, successors);
@@ -948,10 +1052,20 @@ public class StoreEventRepository implements EventRepository {
 			UnitKey unit = current.unit();
 			UnitKey parent = unit.type() == UnitType.BOOKING ? unit.parent() : null;
 			boolean blocked = isBlocked(event, current, changes);
-			if (blocked && derivedAs(current)) {
+			boolean onDerived = blocked && derivedAs(current);
+			UnitSnapshot cancelledBase = onDerived ? null : cancelledBase(current, changes, chainOf(chains, unit));
+			if (onDerived) {
 				// die Eingabe baut auf genau diesem Stand auf: nur die Version übernehmen (wie SAME), am Modell ändert sich nichts
 				backlog.settle(unit);
 				adopt(eventId, current, true);
+			} else if (cancelledBase != null) {
+				// der Nutzer hat diese Buchung storniert: ihre Basis gilt als angezeigt, das Speichern löscht sie dort
+				adopt(eventId, cancelledBase, true);
+				if (cancelledBase.version().equals(current.version())) {
+					backlog.settle(unit);
+				} else {
+					defer(event, current, chainOf(chains, unit));
+				}
 			} else if (blocked
 					// Eine Stornierung, die eine vom Nutzer berührte versetzte Buchung träfe, wartet wie jede Änderung daran
 					|| (lastIds.containsKey(unit) && movedBookingTouched(event, changes, lastIds.get(unit), unit))) {
@@ -1422,6 +1536,9 @@ public class StoreEventRepository implements EventRepository {
 				}
 			}
 			plan = plan.restrictedTo(adopted);
+		}
+		if (changes.model() != null) {
+			noteDerivedRemoved(event, changes.model());
 		}
 		// über den Abgleich ändern Buchungen mit: eine eingearbeitete Vorstellung oder eine Buchung, deren Sitz endgültig fehlt
 		if (changes.model() != null

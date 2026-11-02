@@ -574,6 +574,140 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	@Test
+	void cancellingABookingMovedByASwitchIsAnUnsavedChange() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		remoteSwitchesTo(other);
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		UnitKey newSeat = UnitKey.booking(event.getId(), friday.getId(), sold.getSeatId());
+
+		sold.clearCustomerData();
+
+		assertEquals(Set.of(newSeat), mine.locallyChangedUnits(), "das Storno ist eine Änderung des Nutzers");
+	}
+
+	@Test
+	void bookingMovedByASwitchThatLeavesWithItsPresentationIsNoCancellation() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Other remote = remoteSwitchesTo(other);
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+		mine.applyForeign(List.of(presentation));
+		remote.event().getPresentations().clear();
+		remote.save();
+
+		mine.applyForeign(List.of(presentation));
+
+		assertTrue(event.getPresentations().isEmpty(), "die Vorstellung hat das Modell verlassen");
+		assertEquals(Set.of(), mine.locallyChangedUnits(), "das Einarbeiten hat Müller herausgenommen, nicht der Nutzer");
+	}
+
+	@Test
+	void cancellationOfABookingMovedByASwitchAndChangedLaterBuildsOnTheDerivedVersion() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		Other remote = remoteSwitchesTo(other);
+		remote.friday().getBookings().stream().filter(Booking::hasData).findFirst().orElseThrow().setLastName("Meier");
+		remote.save();
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		UnitKey newSeat = UnitKey.booking(event.getId(), friday.getId(), sold.getSeatId());
+		sold.clearCustomerData();
+
+		ForeignResult result = mine.applyForeign(allUnits());
+
+		assertEquals(List.of(newSeat), result.deferred().stream().map(Deferral::unit).toList(), "Meier wartet mit Hinweis");
+		assertTrue(friday.getBookings().stream().noneMatch(Booking::hasData), "Müller bleibt storniert");
+		assertEquals("Müller", mine.knownUnit(newSeat).payload().get("lastName").asText(),
+				"die Version, die der Abgleich abgeleitet hatte, ist der Vergleichsstand");
+		assertEquals(Set.of(newSeat), mine.locallyChangedUnits());
+	}
+
+	@Test
+	void cancellationOfABookingMovedByASwitchSurvivesItsMoveArrivingInTwoParts() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		Other remote = remoteSwitchesTo(other);
+		SeatingPlan otherPlan = other.getSeatingPlans().get(0);
+		Booking atRemote = remote.friday().getBookings().stream().filter(Booking::hasData).findFirst().orElseThrow();
+		assertTrue(BookingSync.assign(remote.friday(), otherPlan, atRemote, otherPlan.getSeats().get(1)));
+		remote.save();
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		UnitKey derivedSeat = UnitKey.booking(event.getId(), friday.getId(), sold.getSeatId());
+		UnitKey movedTo = UnitKey.booking(event.getId(), friday.getId(), otherPlan.getSeats().get(1).getId());
+		assertNotEquals(derivedSeat, movedTo);
+		sold.clearCustomerData();
+
+		// erst die Löschung des abgeleiteten Sitzes, dann der Sitz, auf den der andere Rechner Müller gesetzt hat
+		mine.applyForeign(List.of(derivedSeat));
+		assertTrue(mine.locallyChangedUnits().contains(derivedSeat), "das Storno bleibt gemerkt");
+		ForeignResult result = mine.applyForeign(List.of(movedTo));
+
+		assertTrue(result.deferred().isEmpty(), result.deferred().toString());
+		assertTrue(friday.getBookings().stream().noneMatch(Booking::hasData), "Müller bleibt storniert");
+		assertTrue(mine.locallyChangedUnits().contains(movedTo));
+		mine.saveEvent(event);
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+		assertTrue(mine.knownUnit(movedTo).deleted(), "das Speichern löscht Müller auf dem Sitz des anderen Rechners");
+	}
+
+	@Test
+	void foreignCancellationOfABookingMovedByASwitchIsNoCancellationByTheUser() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Other remote = remoteSwitchesTo(other);
+		remote.friday().getBookings().stream().filter(Booking::hasData).findFirst().orElseThrow().clearCustomerData();
+		remote.save();
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		assertTrue(friday.getBookings().stream().anyMatch(Booking::hasData), "der Abgleich hat Müller versetzt");
+
+		ForeignResult result = mine.applyForeign(allUnits());
+
+		assertTrue(result.deferred().isEmpty(), result.deferred().toString());
+		assertTrue(friday.getBookings().stream().noneMatch(Booking::hasData), "das fremde Storno gilt");
+		assertEquals(Set.of(), mine.locallyChangedUnits(), "das Einarbeiten hat Müller herausgenommen, nicht der Nutzer");
+	}
+
+	@Test
+	void bookingMovedAgainByASecondSyncIsNoCancellation() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		remoteSwitchesTo(other);
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		Booking moved = friday.getBookings().stream().filter(Booking::hasData).findFirst().orElseThrow();
+		UnitKey derivedSeat = UnitKey.booking(event.getId(), friday.getId(), moved.getSeatId());
+
+		// ein zweiter Abgleich setzt Müller wieder um (wie die App nach einer Änderung an den Hallen)
+		mine.deriving(event, () -> BookingSync.sync(friday, plan));
+
+		assertNotEquals(derivedSeat.bookingDir(), moved.getSeatId(), "Müller ist umgesetzt");
+		assertEquals(Set.of(), mine.locallyChangedUnits(), "der Abgleich hat Müller umgesetzt, nicht der Nutzer");
+	}
+
+	@Test
+	void cancellationOfABookingMovedByASwitchSurvivesItsLateArrival() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		remoteSwitchesTo(other);
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		UnitKey newSeat = UnitKey.booking(event.getId(), friday.getId(), sold.getSeatId());
+		sold.clearCustomerData();
+
+		ForeignResult result = mine.applyForeign(allUnits());
+
+		assertTrue(result.deferred().isEmpty(), "die Eingabe baut auf genau diesem Stand auf: " + result.deferred());
+		assertTrue(friday.getBookings().stream().noneMatch(Booking::hasData), "Müller bleibt storniert");
+		assertEquals(Set.of(newSeat), mine.locallyChangedUnits(), "das Storno ist noch nicht gespeichert");
+		mine.saveEvent(event);
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+		assertTrue(mine.knownUnit(newSeat).deleted());
+		assertEquals(2, sync.history(newSeat).size(), "die Löschung setzt auf der fremden Fassung auf");
+	}
+
+	@Test
 	void cancellationIsDeferredWhileTheMovedBookingIsChangedByTheUser() throws IOException {
 		Hall other = secondHall(1, 2);
 		mine.setHallLookup(lookup(other));

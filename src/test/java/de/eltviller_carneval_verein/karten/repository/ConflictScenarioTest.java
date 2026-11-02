@@ -35,6 +35,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
@@ -851,6 +852,141 @@ class ConflictScenarioTest {
 		for (Machine machine : m) {
 			assertEquals(newSeat.bookingDir(), booking(machine, mullerId).getSeatId(), machine.name);
 		}
+	}
+
+	/**
+	 * Zwei Rechner: B stellt die Vorstellung auf eine andere Halle um. A bekommt zuerst nur die Umstellung (Müller wird
+	 * versetzt) und storniert Müller auf dem neuen Sitz, bevor dessen Einheit eintrifft. Mit {@code saveFirst} speichert A
+	 * vorher, sonst trifft der Rest erst ein und A speichert danach.
+	 */
+	@ParameterizedTest
+	@ValueSource(booleans = { true, false })
+	void cancellationOfABookingMovedByAForeignSwitchSurvives(boolean saveFirst) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Hall other = secondHall(true, m);
+		String mullerId = a.seat(0).getId();
+		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
+		b.friday().setHallId(other.getId());
+		BookingSync.switchPlan(b.friday(), other.getSeatingPlans().get(0));
+		b.repository.saveEvent(b.event);
+		clock.advance(ROUND);
+		b.tick();
+		// A arbeitet die Meldungen von Hand ein, um das Zeitfenster zu treffen
+		a.events.halls = null;
+		clock.advance(ROUND);
+		a.tick();
+		a.repository.applyForeign(List.of(presentation));
+		Booking moved = booking(a, mullerId);
+		UnitKey newSeat = UnitKey.booking(a.event.getId(), a.friday().getId(), moved.getSeatId());
+		moved.clearCustomerData();
+		assertEquals(Set.of(), carriersInModel(a, mullerId), "storniert");
+
+		if (saveFirst) {
+			a.repository.saveEvent(a.event);
+			a.repository.applyForeign(List.copyOf(a.eventState().keySet()));
+		} else {
+			a.repository.applyForeign(List.copyOf(a.eventState().keySet()));
+			assertEquals(Set.of(), carriersInModel(a, mullerId), "das Storno bleibt im Modell");
+			a.repository.saveEvent(a.event);
+		}
+		a.events.halls = a.halls;
+		untilQuiet(m);
+
+		assertConverged(m);
+		assertEquals(Set.of(), carriers(a, mullerId), "das Storno gilt");
+		assertEquals(List.of(), a.open(), "A");
+		if (saveFirst) {
+			// A's Löschung am alten Sitz gabelt gegen B's Umstellung: verschoben gegen storniert, das Storno gewinnt
+			List<OpenConflict> open = b.open();
+			assertEquals(1, open.size(), open.toString());
+			assertEquals(ConflictNote.Kind.DELETE_WINS, open.get(0).note().kind());
+			assertEquals(newSeat, open.get(0).note().moved(), "B kann Müller auf dem neuen Sitz wiederherstellen");
+		} else {
+			assertEquals(List.of(), b.open(), "die Löschung setzt auf B's Fassung auf: keine Gabelung");
+		}
+		for (Machine machine : m) {
+			assertEquals(Set.of(), carriersInModel(machine, mullerId), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+		}
+	}
+
+	/**
+	 * KARV-119, wie {@link #cancellationOfABookingMovedByAForeignSwitchSurvives}, aber B ändert Müller nach der Umstellung
+	 * noch einmal und speichert erneut: Mit {@code moved} setzt B ihn von Hand auf den anderen neuen Sitz, sonst heißt er
+	 * danach "Meier". Bei A trifft also nicht der Stand ein, den der Abgleich abgeleitet hat. "Meier" weicht mit Vermerk bei
+	 * B; das Versetzen von Hand geht im Storno auf. Speichert A nach dem Versetzen von Hand vor dem Eintreffen, folgt die
+	 * Auflösung am alten Sitz dem zweiten Umzug nicht (KARV-120); dieser Fall fehlt hier.
+	 */
+	@ParameterizedTest
+	@CsvSource({ "false,false", "false,true", "true,false" })
+	void cancellationOfABookingMovedByAForeignSwitchSurvivesALaterForeignChange(boolean moved, boolean saveFirst)
+			throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Hall other = secondHall(true, m);
+		SeatingPlan otherPlan = other.getSeatingPlans().get(0);
+		String mullerId = a.seat(0).getId();
+		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
+		b.friday().setHallId(other.getId());
+		BookingSync.switchPlan(b.friday(), otherPlan);
+		b.repository.saveEvent(b.event);
+		Booking atB = booking(b, mullerId);
+		if (moved) {
+			String target = otherPlan.getSeats().stream().map(seat -> seat.getId())
+					.filter(id -> !id.equals(atB.getSeatId())).findFirst().orElseThrow();
+			assertTrue(BookingSync.assign(b.friday(), otherPlan, atB, otherPlan.findSeat(target)));
+		} else {
+			atB.setLastName("Meier");
+		}
+		b.repository.saveEvent(b.event);
+		clock.advance(ROUND);
+		b.tick();
+		// A arbeitet die Meldungen von Hand ein, um das Zeitfenster zu treffen
+		a.events.halls = null;
+		clock.advance(ROUND);
+		a.tick();
+		a.repository.applyForeign(List.of(presentation));
+		booking(a, mullerId).clearCustomerData();
+
+		if (saveFirst) {
+			a.repository.saveEvent(a.event);
+			a.repository.applyForeign(List.copyOf(a.eventState().keySet()));
+		} else {
+			a.repository.applyForeign(List.copyOf(a.eventState().keySet()));
+			assertEquals(Set.of(), carriersInModel(a, mullerId), "das Storno bleibt im Modell");
+			a.repository.saveEvent(a.event);
+		}
+		a.repository.retryDeferred();
+		a.events.halls = a.halls;
+		untilQuiet(m);
+
+		assertConverged(m);
+		assertEquals(Set.of(), carriers(a, mullerId), "das Storno gilt");
+		assertEquals(List.of(), a.open(), "A");
+		List<OpenConflict> open = b.open();
+		assertEquals(moved ? 0 : 1, open.size(), open.toString());
+		if (!moved) {
+			assertEquals(ConflictNote.Kind.DELETE_WINS, open.get(0).note().kind(), "B's \"Meier\" weicht mit Vermerk");
+		}
+		for (Machine machine : m) {
+			assertEquals(Set.of(), carriersInModel(machine, mullerId), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+		}
+	}
+
+	/** Die Sitze (bzw. "ohne Platz") der Buchungen mit Daten und dieser Kennung im Modell des Rechners. */
+	private static Set<String> carriersInModel(Machine machine, String bookingId) {
+		Set<String> seats = new HashSet<>();
+		machine.friday().getBookings().stream().filter(x -> x.hasData() && bookingId.equals(x.getId()))
+				.forEach(x -> seats.add(String.valueOf(x.getSeatId())));
+		return seats;
 	}
 
 	/**
