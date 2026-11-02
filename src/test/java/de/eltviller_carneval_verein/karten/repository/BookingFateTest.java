@@ -125,6 +125,7 @@ class BookingFateTest {
 		assertEquals(ConflictNote.Kind.DELETE_WINS, note.kind());
 		assertEquals(OWN, note.affected());
 		assertEquals(move.last().id(), note.dropped());
+		assertEquals(S1, note.moved(), "die weichende Fassung liegt am gescheiterten Ziel; dort sucht das Wiederherstellen");
 	}
 
 	@Test

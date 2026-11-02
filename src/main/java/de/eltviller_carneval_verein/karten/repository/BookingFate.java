@@ -130,7 +130,9 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 				notes.add(atSource(ConflictNote.deleteWins(other.machine(), cancel.party(), other.trail().end(),
 						other.dropped())));
 			}
-			case FAILED -> notes.add(atSource(ConflictNote.deleteWins(other.machine(), cancel.party(), other.dropped())));
+			// die weichende Fassung liegt am gescheiterten Ziel: dort sucht und schreibt "Buchung wiederherstellen"
+			case FAILED -> notes.add(atSource(ConflictNote.deleteWins(other.machine(), cancel.party(),
+					other.trail().last() == null ? null : other.trail().end(), other.dropped())));
 			default -> throw new IllegalStateException(other.kind().name());
 			}
 			return new BookingFate(null, null, deletions, notes);

@@ -1694,7 +1694,7 @@ class ConflictScenarioTest {
 		assertEquals(1, open.size(), open.toString());
 		ConflictNote note = open.get(0).note();
 		assertEquals(ConflictNote.Kind.DELETE_WINS, note.kind());
-		// KARV-93: an der gegabelten Quelle, nicht am Sitz, an dem B verlor; "Wiederherstellen" führt dort ohne Platz zurück
+		// KARV-93: an der gegabelten Quelle, nicht am Sitz, an dem B verlor
 		assertEquals(miaUnit, open.get(0).unit());
 		assertEquals(a.sync.machineId(), note.other().machine());
 		assertTrue(a.open().isEmpty(), a.open().toString());
@@ -1705,6 +1705,23 @@ class ConflictScenarioTest {
 			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
 			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
 		}
+
+		// "Buchung wiederherstellen" findet B's Fassung (sie liegt am Sitz, an dem das Zuweisen scheiterte) und legt Mia
+		// ohne Platz zurück, weil Tom den Sitz hat (Handtest KARV-93: vorher "(Kunde unbekannt)", nicht ausführbar)
+		List<ConflictList.Row> rows = new ConflictList(b::open, unit -> unit.relativePath(), (adopted, group) -> false,
+				hallId -> null).rows();
+		assertEquals(1, rows.size(), rows.toString());
+		assertEquals(ConflictList.Action.RESTORE_BOOKING, rows.get(0).action());
+		new ConflictActions(b.repository, b.halls, new ChangeTracker<>(Event::getId), new ChangeTracker<>(Hall::getId),
+				new EditingUnits(), b.sync, event -> {
+					b.repository.saveEvent(event);
+					return true;
+				}, hall -> true).restoreBooking(rows.get(0));
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals(Set.of(miaUnit), carriers(a, miaId), "Mia lebt wieder, ohne Platz");
+		assertEquals(List.of(), b.open());
 	}
 
 	/**
