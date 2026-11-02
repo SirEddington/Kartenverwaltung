@@ -42,6 +42,7 @@ import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.store.VersionMarks;
 
 class UnitMapperTest {
 
@@ -1083,9 +1084,13 @@ class UnitMapperTest {
 
 		UnitKey oldKey = bookingKey(event, 0, "seat-a1");
 		UnitKey newKey = bookingKey(event, 0, "seat-a2");
-		// zuerst die neue Einheit (Reihenfolge von units), danach die Löschung
-		assertEquals(List.of(new Change(newKey, List.of(), partOf(units, newKey).payload(), false),
-				new Change(oldKey, List.of(baseline.get(oldKey).version()), null, true)), changes);
+		// zuerst die neue Einheit (Reihenfolge von units), danach die Löschung; beide halten den Umzug fest (KARV-93)
+		assertEquals(List.of(
+				new Change(newKey, List.of(), partOf(units, newKey).payload(), false)
+						.withMarks(VersionMarks.NONE.withMovedFrom(oldKey)),
+				new Change(oldKey, List.of(baseline.get(oldKey).version()), null, true)
+						.withMarks(VersionMarks.NONE.withMovedTo(newKey))),
+				changes);
 	}
 
 	@Test
@@ -1365,4 +1370,168 @@ class UnitMapperTest {
 	}
 
 	// <-- changes
+
+	// Umzüge (KARV-93) -->
+
+	/** Die Angaben der Änderung an dieser Einheit. */
+	private static VersionMarks marksOf(List<Change> changes, UnitKey unit) {
+		return changes.stream().filter(change -> change.unit().equals(unit)).findFirst().orElseThrow().marks();
+	}
+
+	/** Die Buchung mit diesem Nachnamen in der Vorstellung. */
+	private static Booking named(Event event, int presentation, String lastName) {
+		return event.getPresentations().get(presentation).getBookings().stream()
+				.filter(booking -> lastName.equals(booking.getLastName())).findFirst().orElseThrow();
+	}
+
+	private static List<Change> changesAfter(Event event, Runnable edit) {
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		edit.run();
+		return UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event));
+	}
+
+	@Test
+	void moveMarksSourceAndTarget() {
+		Event event = simpleEvent();
+		List<Change> changes = changesAfter(event, () -> named(event, 0, "Müller").setSeatId("seat-a9"));
+
+		UnitKey a1 = bookingKey(event, 0, "seat-a1");
+		UnitKey a9 = bookingKey(event, 0, "seat-a9");
+		assertEquals(new VersionMarks(a9, null, false), marksOf(changes, a1));
+		assertEquals(new VersionMarks(null, a1, false), marksOf(changes, a9));
+	}
+
+	@Test
+	void assignmentFromUnassignedMarksBoth() {
+		Event event = simpleEvent();
+		Booking mueller = named(event, 0, "Müller");
+		mueller.setSeatId(null);
+		mueller.setUnassigned(true);
+		UnitKey unassigned = UnitKey.unassignedBooking(event.getId(), event.getPresentations().get(0).getId(),
+				mueller.getId());
+
+		List<Change> changes = changesAfter(event, () -> {
+			mueller.setUnassigned(false);
+			mueller.setSeatId("seat-a9");
+		});
+
+		UnitKey a9 = bookingKey(event, 0, "seat-a9");
+		assertTrue(changes.stream().anyMatch(change -> change.unit().equals(unassigned) && change.deleted()));
+		assertEquals(new VersionMarks(a9, null, false), marksOf(changes, unassigned));
+		assertEquals(new VersionMarks(null, unassigned, false), marksOf(changes, a9));
+	}
+
+	@Test
+	void replacementMarksMovedToOnTheNewContent() {
+		Event event = simpleEvent();
+		List<Change> changes = changesAfter(event, () -> {
+			named(event, 0, "Müller").setSeatId("seat-a9");
+			booking(event.getPresentations().get(0), "seat-a1", "A", 1, 1, "Neu");
+		});
+
+		UnitKey a1 = bookingKey(event, 0, "seat-a1");
+		UnitKey a9 = bookingKey(event, 0, "seat-a9");
+		assertEquals("Neu", changes.stream().filter(change -> change.unit().equals(a1)).findFirst().orElseThrow()
+				.payload().get("lastName").asText());
+		assertEquals(new VersionMarks(a9, null, false), marksOf(changes, a1));
+		assertEquals(new VersionMarks(null, a1, false), marksOf(changes, a9));
+	}
+
+	@Test
+	void swapMarksBothDirections() {
+		Event event = simpleEvent();
+		List<Change> changes = changesAfter(event, () -> {
+			named(event, 0, "Müller").setSeatId("seat-a3");
+			named(event, 0, "Meier").setSeatId("seat-a1");
+		});
+
+		UnitKey a1 = bookingKey(event, 0, "seat-a1");
+		UnitKey a3 = bookingKey(event, 0, "seat-a3");
+		assertEquals(new VersionMarks(a3, a3, false), marksOf(changes, a1));
+		assertEquals(new VersionMarks(a1, a1, false), marksOf(changes, a3));
+	}
+
+	@Test
+	void cancellationHasNoMarks() {
+		Event event = simpleEvent();
+		List<Change> changes = changesAfter(event,
+				() -> event.getPresentations().get(0).getBookings().remove(named(event, 0, "Müller")));
+
+		assertTrue(marksOf(changes, bookingKey(event, 0, "seat-a1")).isNone());
+	}
+
+	@Test
+	void cancellationAndResaleHasNoMarks() {
+		Event event = simpleEvent();
+		List<Change> changes = changesAfter(event, () -> {
+			event.getPresentations().get(0).getBookings().remove(named(event, 0, "Müller"));
+			booking(event.getPresentations().get(0), "seat-a1", "A", 1, 1, "Neu");
+		});
+
+		assertTrue(marksOf(changes, bookingKey(event, 0, "seat-a1")).isNone());
+	}
+
+	@Test
+	void editHasNoMarks() {
+		Event event = simpleEvent();
+		List<Change> changes = changesAfter(event, () -> named(event, 0, "Müller").setComment("Rollator"));
+
+		assertTrue(marksOf(changes, bookingKey(event, 0, "seat-a1")).isNone());
+	}
+
+	@Test
+	void noMoveAcrossPresentations() {
+		Event event = simpleEvent();
+		Booking mueller = named(event, 0, "Müller");
+		List<Change> changes = changesAfter(event, () -> {
+			event.getPresentations().get(0).getBookings().remove(mueller);
+			booking(event.getPresentations().get(1), "seat-b9", "B", 1, 9, "Müller").setId(mueller.getId());
+		});
+
+		assertTrue(marksOf(changes, bookingKey(event, 0, "seat-a1")).isNone());
+		assertTrue(marksOf(changes, bookingKey(event, 1, "seat-b9")).isNone());
+	}
+
+	@Test
+	void ambiguousMoveIsAssignedByPathWithWarning() {
+		Event event = simpleEvent();
+		Booking mueller = named(event, 0, "Müller");
+		Logger logger = Logger.getLogger(UnitMapper.class.getName());
+		List<String> warnings = new ArrayList<>();
+		Handler handler = new Handler() {
+			@Override
+			public void publish(LogRecord record) {
+				if (record.getMessage().contains("mehrdeutig")) {
+					warnings.add(record.getMessage());
+				}
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		logger.addHandler(handler);
+		List<Change> changes;
+		try {
+			changes = changesAfter(event, () -> {
+				mueller.setSeatId("seat-a8");
+				booking(event.getPresentations().get(0), "seat-a9", "A", 1, 9, "Müller").setId(mueller.getId());
+			});
+		} finally {
+			logger.removeHandler(handler);
+		}
+
+		UnitKey a1 = bookingKey(event, 0, "seat-a1");
+		UnitKey a8 = bookingKey(event, 0, "seat-a8");
+		assertEquals(new VersionMarks(a8, null, false), marksOf(changes, a1));
+		assertEquals(new VersionMarks(null, a1, false), marksOf(changes, a8));
+		assertTrue(marksOf(changes, bookingKey(event, 0, "seat-a9")).isNone());
+		assertEquals(1, warnings.size(), warnings.toString());
+	}
+
+	// <-- Umzüge
 }
