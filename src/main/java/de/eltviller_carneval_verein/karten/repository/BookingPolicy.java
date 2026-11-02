@@ -129,7 +129,8 @@ public final class BookingPolicy implements ConflictPolicy {
 					return input;
 				}
 				return new ConflictInput(input.unit(), chain.get(i), input.mine(), input.theirs(),
-						chain.subList(i + 1, chain.size()), input.ownMachineId(), input.siblings(), input.mineSaveIds());
+						chain.subList(i + 1, chain.size()), input.ownMachineId(), input.siblings(), input.mineSaveIds(),
+						input.stretch(), input.trail());
 			}
 		}
 		return input;

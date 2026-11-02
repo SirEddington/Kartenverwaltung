@@ -27,9 +27,14 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * @param mineSaveIds    die Speichervorgänge aller Versionen der verlorenen Strecke, nicht nur der von "Meine": Hat dieser
  *                       Rechner nach einem Umzug weiter gespeichert, stammt "Meine" aus einem späteren Speichervorgang als
  *                       der Umzug (Ruling R35)
+ * @param stretch        die Versionen der verlorenen Strecke, ältestes zuerst, endet mit {@code mine}: Die Angaben eines
+ *                       Umzugs stehen nicht immer an "Meine" (KARV-93)
+ * @param trail          nur bei Buchungen: die Einheiten auf der Umzugsspur ({@link TrailCollector}), mit der Einheit
+ *                       selbst; sonst leer
  */
 public record ConflictInput(UnitKey unit, Version base, Version mine, Version theirs, List<Version> chainSinceBase,
-		String ownMachineId, Map<UnitKey, Sibling> siblings, Set<String> mineSaveIds) {
+		String ownMachineId, Map<UnitKey, Sibling> siblings, Set<String> mineSaveIds, List<Version> stretch,
+		Map<UnitKey, TrailUnit> trail) {
 
 	/**
 	 * Das Feld der Buchungs-ID im Inhalt einer Buchung, wie das Repository es schreibt; dieselbe ID benennt eine Buchung
@@ -138,6 +143,14 @@ public record ConflictInput(UnitKey unit, Version base, Version mine, Version th
 		} else {
 			mineSaveIds = Set.copyOf(mineSaveIds);
 		}
+		stretch = stretch == null ? List.of(mine) : List.copyOf(stretch);
+		trail = trail == null ? Map.of() : Map.copyOf(trail);
+	}
+
+	/** Eine Eingabe ohne Strecke (nur "Meine") und ohne Umzugsspur. */
+	public ConflictInput(UnitKey unit, Version base, Version mine, Version theirs, List<Version> chainSinceBase,
+			String ownMachineId, Map<UnitKey, Sibling> siblings, Set<String> mineSaveIds) {
+		this(unit, base, mine, theirs, chainSinceBase, ownMachineId, siblings, mineSaveIds, null, null);
 	}
 
 	/** Eine Eingabe, deren Strecke nur aus Speichervorgängen von "Meine" besteht (eine Version oder ein Speichervorgang). */

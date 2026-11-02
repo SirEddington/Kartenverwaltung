@@ -137,10 +137,10 @@ final class ConflictResolver {
 	 * {@link Step#MERGE}.
 	 */
 	private record Stretch(Step step, Version base, Version mine, Version theirs, List<Version> chainSinceBase,
-			Set<String> saveIds) {
+			Set<String> saveIds, List<Version> versions) {
 
 		static Stretch of(Step step) {
-			return new Stretch(step, null, null, null, List.of(), Set.of());
+			return new Stretch(step, null, null, null, List.of(), Set.of(), List.of());
 		}
 	}
 
@@ -363,13 +363,17 @@ final class ConflictResolver {
 			return Stretch.of(Step.WAIT);
 		}
 		Set<String> saveIds = new HashSet<>();
+		List<Version> versions = new ArrayList<>();
 		for (VersionId id : lost) {
 			Version version = versionOf(files, id);
-			if (version != null && version.saveId() != null) {
-				saveIds.add(version.saveId());
+			if (version != null) {
+				versions.add(version);
+				if (version.saveId() != null) {
+					saveIds.add(version.saveId());
+				}
 			}
 		}
-		return new Stretch(Step.MERGE, base, mine, state.head(), since, saveIds);
+		return new Stretch(Step.MERGE, base, mine, state.head(), since, saveIds, versions);
 	}
 
 	private static Version versionOf(UnitFiles files, VersionId id) {
@@ -449,13 +453,19 @@ final class ConflictResolver {
 		if (policy == null) {
 			return unmerged(stretch.mine(), stretch.theirs());
 		}
-		Map<UnitKey, ConflictInput.Sibling> siblings = unit.type() == UnitType.BOOKING
+		boolean booking = unit.type() == UnitType.BOOKING;
+		Map<UnitKey, ConflictInput.Sibling> siblings = booking
 				? siblings(unit, stretch.base(), stretch.mine(), stretch.saveIds())
+				: Map.of();
+		Map<UnitKey, TrailUnit> trail = booking
+				? copy(TrailCollector.collect(unit, stretch.base(), stretch.versions(), stretch.chainSinceBase(),
+						this::folder))
 				: Map.of();
 		try {
 			ConflictInput input = new ConflictInput(unit, copy(stretch.base()), copy(stretch.mine()),
 					copy(stretch.theirs()), stretch.chainSinceBase().stream().map(ConflictResolver::copy).toList(),
-					host.machineId(), siblings, stretch.saveIds());
+					host.machineId(), siblings, stretch.saveIds(),
+					stretch.versions().stream().map(ConflictResolver::copy).toList(), trail);
 			Resolution resolution = Objects.requireNonNull(policy.resolve(input), "Die Strategie lieferte kein Ergebnis.");
 			if (!resolution.deleted() && resolution.payload() == null) {
 				throw new IllegalStateException("Die Strategie lieferte keinen Inhalt.");
@@ -472,6 +482,30 @@ final class ConflictResolver {
 		}
 	}
 
+	/** Der Ordner einer Einheit auf der Umzugsspur aus dem lokalen Bestand: Kette, lesbare Versionen, aktueller Stand. */
+	private TrailCollector.Folder folder(UnitKey unit) throws IOException {
+		SyncService.Resolved resolved = host.resolve(unit);
+		List<Version> versions = new ArrayList<>();
+		for (VersionFile file : resolved.files().versions().values()) {
+			if (file.version() != null) {
+				versions.add(file.version());
+			}
+		}
+		Version current = resolved.state().current();
+		return new TrailCollector.Folder(resolved.state().chain(), versions, current == null ? null : current.id());
+	}
+
+	/** Die Spur als Kopien für die Strategie. */
+	private static Map<UnitKey, TrailUnit> copy(Map<UnitKey, TrailUnit> trail) {
+		Map<UnitKey, TrailUnit> copies = new LinkedHashMap<>();
+		trail.forEach((key, unit) -> copies.put(key, new TrailUnit(key,
+				unit.chain().stream().map(ConflictResolver::copy).toList(),
+				unit.outside().stream()
+						.map(other -> new TrailUnit.Outside(copy(other.version()), other.standing())).toList(),
+				unit.current())));
+		return copies;
+	}
+
 	/** Ohne Strategie: Deren bleibt, der Vermerk sagt diesem Rechner, dass sein Inhalt weicht. */
 	private Resolution unmerged(Version mine, Version theirs) {
 		ConflictNote note = ConflictNote.unmerged(host.machineId(), ConflictNote.Party.of(theirs), mine.id());
@@ -480,7 +514,9 @@ final class ConflictResolver {
 
 	/**
 	 * Die zu schreibenden Änderungen: zuerst die weiteren, die noch nicht da sind (eine Wiederholung nach einem Absturz legt
-	 * eine weitere Einheit nicht doppelt an), dann die Zusammenführung {@code [Deren, Meine]}. Jeder Vermerk bekommt den
+	 * eine weitere Einheit nicht doppelt an), dann die Zusammenführung {@code [Deren, Meine]}. Alle tragen
+	 * {@link VersionMarks#RESOLUTION} und keine Umzugsangaben: Was eine Auflösung schreibt, ist keine Absicht eines
+	 * Rechners (KARV-93). Jeder Vermerk bekommt den
 	 * Speichervorgang von "Meine" ({@link ConflictNote#lostSave()}): Die Zusammenführungen bekommen je Strecke einen neuen,
 	 * die Konflikte eines verlorenen Speichervorgangs gehören im Dialog aber zusammen.
 	 */
@@ -489,14 +525,15 @@ final class ConflictResolver {
 		List<Change> changes = new ArrayList<>();
 		for (Change extra : resolution.extra()) {
 			if (!alreadyThere(extra)) {
-				changes.add(extra.note() == null ? extra
-						: new Change(extra.unit(), extra.parents(), extra.payload(), extra.deleted(),
-								extra.note().withLostSave(lostSave), extra.seen()));
+				changes.add(new Change(extra.unit(), extra.parents(), extra.payload(), extra.deleted(),
+						extra.note() == null ? null : extra.note().withLostSave(lostSave), extra.seen(),
+						VersionMarks.RESOLUTION));
 			}
 		}
 		ConflictNote note = resolution.note() == null ? null : resolution.note().withLostSave(lostSave);
 		changes.add(new Change(unit, List.of(stretch.theirs().id(), stretch.mine().id()), resolution.payload(),
-				resolution.deleted(), note, seenOf(unit, resolution, stretch.mine(), stretch.theirs())));
+				resolution.deleted(), note, seenOf(unit, resolution, stretch.mine(), stretch.theirs()),
+				VersionMarks.RESOLUTION));
 		return changes;
 	}
 

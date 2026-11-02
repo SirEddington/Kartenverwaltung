@@ -330,6 +330,50 @@ class ConflictResolverTest {
 		assertEquals(1, policy.inputs.size());
 	}
 
+	/** KARV-93: Was die Auflösung schreibt, trägt {@code resolution} und keine Umzugsangaben. */
+	@Test
+	void resolutionMarksEveryWrite() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(new Change(MOVED, List.of(), MAPPER.createObjectNode().put("id", "X"), false)
+				.withMarks(VersionMarks.NONE.withMovedFrom(BOOKING)));
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		loss(service, appData, BOOKING);
+
+		service.tick();
+
+		assertEquals(VersionMarks.RESOLUTION, service.unitState(BOOKING).head().marks());
+		assertEquals(VersionMarks.RESOLUTION, service.unitState(MOVED).head().marks());
+	}
+
+	/** KARV-93: Die Strategie bekommt die ganze Strecke und die Ordner der Einheiten auf der Umzugsspur. */
+	@Test
+	void trailIsHandedToTheBookingPolicy() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		RecordingPolicy policy = new RecordingPolicy();
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		ObjectNode x = MAPPER.createObjectNode().put("id", "X");
+		Version base = own(service, MOVED, List.of(), x);
+		// ein anderer Rechner verkauft T auf A-1; dieser Rechner weist X dorthin zu und ändert danach den Kommentar
+		foreign(service, appData, BOOKING, List.of(), MAPPER.createObjectNode().put("id", "T"), false, Map.of());
+		List<Version> assigned = service.append("save-a", List.of(
+				new Change(MOVED, List.of(base.id()), null, true).withMarks(VersionMarks.NONE.withMovedTo(BOOKING)),
+				new Change(BOOKING, List.of(), x.deepCopy().put("seat", "A-1"), false)
+						.withMarks(VersionMarks.NONE.withMovedFrom(MOVED))));
+		Version later = service.append("save-c", List.of(new Change(BOOKING, List.of(assigned.get(1).id()),
+				x.deepCopy().put("seat", "A-1").put("comment", "Fenster"), false))).get(0);
+		assertEquals(1, service.unitState(BOOKING).lost().size());
+
+		service.tick();
+
+		ConflictInput input = policy.inputs.stream().filter(i -> i.unit().equals(BOOKING)).findFirst().orElseThrow();
+		assertEquals(List.of(assigned.get(1).id(), later.id()), ids(input.stretch()));
+		assertEquals(Set.of(BOOKING, MOVED), input.trail().keySet());
+		assertEquals(ids(service.unitState(MOVED).chain()), ids(input.trail().get(MOVED).chain()));
+	}
+
 	@Test
 	void inputCarriesBaseMineTheirsAndChain() throws IOException {
 		Path appData = dir.resolve("app");
