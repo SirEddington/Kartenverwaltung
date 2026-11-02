@@ -540,7 +540,8 @@ final class ConflictResolver {
 		}
 		return new Version(version.format(), version.id(), version.parents(), version.machine(), version.machineName(),
 				version.operator(), version.at(), version.saveId(), version.deleted(),
-				version.payload() == null ? null : version.payload().deepCopy(), copy(version.conflict()), version.seen());
+				version.payload() == null ? null : version.payload().deepCopy(), copy(version.conflict()), version.seen(),
+				version.marks());
 	}
 
 	private static ConflictNote copy(ConflictNote note) {

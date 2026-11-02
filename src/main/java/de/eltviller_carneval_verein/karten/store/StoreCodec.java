@@ -62,6 +62,16 @@ public final class StoreCodec {
 			writeConflict(node.putObject("conflict"), version.conflict());
 		}
 		writeSeen(node, version.seen());
+		VersionMarks marks = version.marks();
+		if (marks.movedTo() != null) {
+			node.put("movedTo", marks.movedTo().relativePath());
+		}
+		if (marks.movedFrom() != null) {
+			node.put("movedFrom", marks.movedFrom().relativePath());
+		}
+		if (marks.resolution()) {
+			node.put("resolution", true);
+		}
 		return MAPPER.writeValueAsBytes(node);
 	}
 
@@ -167,7 +177,7 @@ public final class StoreCodec {
 					optionalText(node, "machineName"), optionalText(node, "operator"), instant(node, "at"), text(node, "saveId"),
 					bool(node, "deleted"),
 					payload == null || payload.isNull() ? MAPPER.createObjectNode() : (ObjectNode) payload,
-					readConflict(node.get("conflict")), readSeen(node.get("seen")));
+					readConflict(node.get("conflict")), readSeen(node.get("seen")), readMarks(node));
 		} catch (IllegalArgumentException e) {
 			throw new IOException(e.getMessage(), e);
 		}
@@ -251,6 +261,37 @@ public final class StoreCodec {
 			LOGGER.log(Level.WARNING, "Der Einheitenpfad " + path + " im Feld moved ist unbekannt und wird übergangen.");
 		}
 		return moved;
+	}
+
+	/**
+	 * Die optionalen Angaben zu Umzug und Auflösung. Ein ungültiger Wert (kein Text, kein Pfad einer Buchungs-Einheit, kein
+	 * Wahrheitswert) gilt als nicht gesetzt und steht mit einer Warnung im Log; die Version bleibt lesbar.
+	 */
+	private static VersionMarks readMarks(JsonNode node) {
+		JsonNode resolution = node.get("resolution");
+		boolean resolved = false;
+		if (resolution != null && !resolution.isNull()) {
+			if (resolution.isBoolean()) {
+				resolved = resolution.asBoolean();
+			} else {
+				LOGGER.log(Level.WARNING, "Das Feld resolution ist kein Wahrheitswert und wird übergangen.");
+			}
+		}
+		return new VersionMarks(readBookingUnit(node.get("movedTo"), "movedTo"),
+				readBookingUnit(node.get("movedFrom"), "movedFrom"), resolved);
+	}
+
+	/** Eine Buchungs-Einheit aus einem optionalen Pfad; {@code null}, wenn das Feld fehlt oder ungültig ist. */
+	private static UnitKey readBookingUnit(JsonNode node, String field) {
+		if (node == null || node.isNull()) {
+			return null;
+		}
+		UnitKey unit = node.isTextual() ? UnitKey.parse(node.asText()).orElse(null) : null;
+		if (unit == null || unit.type() != UnitType.BOOKING) {
+			LOGGER.log(Level.WARNING, "Das Feld " + field + " nennt keine Buchungs-Einheit und wird übergangen.");
+			return null;
+		}
+		return unit;
 	}
 
 	/** Die optionalen gelesenen Listen: Rechner-ID auf Nummer; fehlt das Feld, ist die Zuordnung leer. */

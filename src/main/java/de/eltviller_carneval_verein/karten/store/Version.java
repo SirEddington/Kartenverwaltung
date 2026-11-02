@@ -22,14 +22,24 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * @param conflict    der Konfliktvermerk, wenn diese Version einen Konflikt aufgelöst hat, sonst {@code null}
  * @param seen        Rechner-ID auf die Nummer der zuletzt gelesenen Liste dieses Rechners; leer, wenn nichts
  *                    festgehalten ist (nie {@code null})
+ * @param marks       Umzug und Herkunft aus einer Auflösung ({@link VersionMarks}); nie {@code null}
  */
 public record Version(int format, VersionId id, List<VersionId> parents, String machine, String machineName,
 		String operator, Instant at, String saveId, boolean deleted, ObjectNode payload, ConflictNote conflict,
-		Map<String, Long> seen) {
+		Map<String, Long> seen, VersionMarks marks) {
 
-	/** Macht aus einer fehlenden Liste der gelesenen Stände eine leere, unveränderliche. */
+	/** Macht aus einer fehlenden Liste der gelesenen Stände eine leere, unveränderliche, aus fehlenden Angaben keine. */
 	public Version {
 		seen = seen == null ? Map.of() : Map.copyOf(seen);
+		marks = marks == null ? VersionMarks.NONE : marks;
+	}
+
+	/** Eine Version ohne Umzugsangaben. */
+	public Version(int format, VersionId id, List<VersionId> parents, String machine, String machineName,
+			String operator, Instant at, String saveId, boolean deleted, ObjectNode payload, ConflictNote conflict,
+			Map<String, Long> seen) {
+		this(format, id, parents, machine, machineName, operator, at, saveId, deleted, payload, conflict, seen,
+				VersionMarks.NONE);
 	}
 
 	/** Eine Version ohne Konfliktvermerk und ohne gelesene Listen. */

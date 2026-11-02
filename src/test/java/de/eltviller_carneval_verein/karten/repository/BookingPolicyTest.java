@@ -916,7 +916,8 @@ class BookingPolicyTest {
 		return version == null ? null
 				: new Version(version.format(), version.id(), version.parents(), version.machine(), version.machineName(),
 						version.operator(), version.at(), version.saveId(), version.deleted(),
-						version.payload() == null ? null : version.payload().deepCopy(), version.conflict(), version.seen());
+						version.payload() == null ? null : version.payload().deepCopy(), version.conflict(), version.seen(),
+						version.marks());
 	}
 
 	/** Die Buchungs-ID einer Version mit Inhalt; {@code null} ohne Version oder bei einer Löschung. */
