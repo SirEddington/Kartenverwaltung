@@ -745,7 +745,8 @@ public class StoreEventRepository implements EventRepository {
 	 * auch wenn sie weder bekannt noch angezeigt ist: Der Nutzer hat die Buchung storniert, bevor ihre Einheit eintraf
 	 * (KARV-119). Trifft sie mit genau diesem Stand ein, wird nur ihre Version übernommen ({@link #derivedAs}), und das
 	 * nächste Speichern löscht sie auf ihr; sonst setzte das Einarbeiten die Buchung wieder ins Modell. {@code cancelled}
-	 * sind die Kennungen dieser stornierten Buchungen (siehe {@link #cancelledBase}).
+	 * sind die Kennungen dieser stornierten Buchungen (siehe {@link #cancelledBase}). Steht dieselbe Buchung im Modell
+	 * auf einer anderen Einheit, hat der Nutzer sie verschoben, nicht storniert (KARV-97): Ihre Kennung zählt nicht dazu.
 	 */
 	private record LocalChanges(Set<UnitKey> units, boolean all, Map<UnitKey, ObjectNode> model,
 			Map<String, List<UnitKey>> moved, Set<String> cancelled) {
@@ -794,13 +795,21 @@ public class StoreEventRepository implements EventRepository {
 				changed.add(unit);
 			}
 		}
-		// was das Einarbeiten ins Modell gesetzt hat und dort fehlt, hat der Nutzer entfernt (storniert), auch ohne Version
+		// was das Einarbeiten ins Modell gesetzt hat und dort fehlt, hat der Nutzer entfernt: storniert, wenn die Buchung im
+		// Modell nirgends mehr steht, sonst verschoben (das Speichern schreibt den Umzug)
+		Set<String> carried = new HashSet<>();
+		model.forEach((unit, payload) -> {
+			String bookingId = unit.type() == UnitType.BOOKING ? ConflictInput.bookingIdOf(payload) : null;
+			if (bookingId != null) {
+				carried.add(bookingId);
+			}
+		});
 		Set<String> cancelled = new HashSet<>();
 		derived.forEach((unit, payload) -> {
 			if (payload != null && event.getId().equals(unit.eventId()) && !model.containsKey(unit)) {
 				changed.add(unit);
 				String bookingId = ConflictInput.bookingIdOf(payload);
-				if (bookingId != null) {
+				if (bookingId != null && !carried.contains(bookingId)) {
 					cancelled.add(bookingId);
 				}
 			}
@@ -1052,8 +1061,12 @@ public class StoreEventRepository implements EventRepository {
 			UnitKey unit = current.unit();
 			UnitKey parent = unit.type() == UnitType.BOOKING ? unit.parent() : null;
 			boolean blocked = isBlocked(event, current, changes);
-			boolean onDerived = blocked && derivedAs(current);
-			UnitSnapshot cancelledBase = onDerived ? null : cancelledBase(current, changes, chainOf(chains, unit));
+			// vor allem anderen: ein Stand einer Buchung, die der Nutzer auf eine andere Einheit versetzt hat, wartet mit ihren
+			// übrigen Ständen (sonst ginge einer davon allein in den Vergleichsstand, und das Speichern räumte zwei Einheiten)
+			boolean elsewhere = movedAwayByUser(event, current, changes);
+			boolean onDerived = !elsewhere && blocked && derivedAs(current);
+			UnitSnapshot cancelledBase = onDerived || elsewhere ? null
+					: cancelledBase(current, changes, chainOf(chains, unit));
 			if (onDerived) {
 				// die Eingabe baut auf genau diesem Stand auf: nur die Version übernehmen (wie SAME), am Modell ändert sich nichts
 				backlog.settle(unit);
@@ -1066,7 +1079,7 @@ public class StoreEventRepository implements EventRepository {
 				} else {
 					defer(event, current, chainOf(chains, unit));
 				}
-			} else if (blocked
+			} else if (blocked || elsewhere
 					// Eine Stornierung, die eine vom Nutzer berührte versetzte Buchung träfe, wartet wie jede Änderung daran
 					|| (lastIds.containsKey(unit) && movedBookingTouched(event, changes, lastIds.get(unit), unit))) {
 				defer(event, current, chainOf(chains, unit));
@@ -1297,6 +1310,37 @@ public class StoreEventRepository implements EventRepository {
 		for (UnitKey carrier : changes.movedCarriers(bookingId, unit)) {
 			Object model = EventMerge.modelObject(event, carrier);
 			if (changes.units().contains(carrier) || (model != null && inEditing.test(model))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Ob der lesbare Stand eine Buchung trägt, die der Nutzer ungespeichert auf eine andere Einheit versetzt hat: Sie steht
+	 * im Modell auf einer Einheit, die er geändert hat oder gerade bearbeitet und die sie im Vergleichsstand nicht trägt,
+	 * etwa auf dem Sitz, auf den er die vom Abgleich umgesetzte Buchung weitergeschoben hat. Ihre Ankunft wartet dann wie
+	 * die Löschung ihres alten Platzes ({@link #movedBookingTouched}) bis zum Speichern, auch wenn sie genau dem
+	 * Abgeleiteten entspricht; das Speichern zieht vom alten Platz im Vergleichsstand um, und die Gabelung dort löst der
+	 * Versionsspeicher auf (KARV-97). Ginge sie allein in den Vergleichsstand, räumte das Speichern zwei Einheiten, und eine
+	 * davon sähe wie ein Storno aus. Eine Buchung, die der Nutzer nur an ihrem Platz bearbeitet, ist nicht versetzt.
+	 */
+	private boolean movedAwayByUser(Event event, UnitSnapshot current, LocalChanges changes) {
+		UnitKey unit = current.unit();
+		if (event == null || changes.model() == null || unit.type() != UnitType.BOOKING
+				|| !UnitMapper.isReadable(current)) {
+			return false;
+		}
+		String bookingId = ConflictInput.bookingIdOf(current.payload());
+		if (bookingId == null) {
+			return false;
+		}
+		for (UnitKey carrier : changes.movedCarriers(bookingId, unit)) {
+			UnitSnapshot known = baseline.known(carrier);
+			boolean newThere = known == null || !known.isLive() || !baseline.isShown(carrier)
+					|| !bookingId.equals(ConflictInput.bookingIdOf(known.payload()));
+			Object model = EventMerge.modelObject(event, carrier);
+			if (newThere && (changes.units().contains(carrier) || (model != null && inEditing.test(model)))) {
 				return true;
 			}
 		}
