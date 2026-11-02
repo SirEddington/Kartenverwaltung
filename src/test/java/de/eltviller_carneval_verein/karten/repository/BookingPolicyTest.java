@@ -20,11 +20,11 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -976,15 +976,50 @@ class BookingPolicyTest {
 	 * Verlierer in der Reihenfolge des Verlaufs auf.
 	 */
 	private static World assignmentAgainst(ForeignAction action, int ownSaves, Course course) {
+		return assignmentAgainst(action, ownSaves, course, Source.UNASSIGNED, false);
+	}
+
+	/** Wo m vor B's Umzug steht. */
+	enum Source {
+		/** "ohne Platz" ({@code _m}): B weist einen Platz zu. */
+		UNASSIGNED,
+		/** auf s3: B setzt m um (R34 (2), "Sitz als Quelle"). */
+		SEAT;
+
+		UnitKey unit() {
+			return this == UNASSIGNED ? UnitKey.unassignedBooking(EVENT, PRESENTATION, "m") : S3;
+		}
+
+		/** m an der Quelle, danach die Änderungen aus {@code edit}. */
+		ObjectNode booking(Consumer<Booking> edit) {
+			return this == UNASSIGNED ? withoutPlace("m", edit) : BookingPolicyTest.booking("m", "s3", edit);
+		}
+	}
+
+	/**
+	 * Wie {@link #assignmentAgainst(ForeignAction, int, Course)}, mit m an der Quelle {@code source} (in {@link Course}
+	 * steht {@code _m} für die Quelle); mit {@code editFirst} ändert B m dort zuerst in einem eigenen Speichervorgang
+	 * (Kommentar "vorher") und setzt es erst danach um.
+	 */
+	private static World assignmentAgainst(ForeignAction action, int ownSaves, Course course, Source source,
+			boolean editFirst) {
 		World world = new World();
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		UnitKey unassigned = source.unit();
 		UnitKey s4 = seat("s4");
-		Version base = version(THIRD, "save-0", withoutPlace("m", b -> {
+		Version base = version(THIRD, "save-0", source.booking(b -> {
 		}));
 		world.claim(unassigned, base);
-		Version myDeletion = child(OWN, "save-a", base, null, VersionMarks.NONE.withMovedTo(S1));
-		List<Version> mySeat = new ArrayList<>(List.of(version(OWN, "save-a",
-				booking("m", "s1", b -> b.setEMail("neu@example.org")), VersionMarks.NONE.withMovedFrom(unassigned))));
+		List<Version> mySource = new ArrayList<>();
+		if (editFirst) {
+			mySource.add(child(OWN, "save-e", base, source.booking(b -> b.setComment("vorher"))));
+		}
+		mySource.add(child(OWN, "save-a", editFirst ? mySource.get(0) : base, null, VersionMarks.NONE.withMovedTo(S1)));
+		List<Version> mySeat = new ArrayList<>(List.of(version(OWN, "save-a", booking("m", "s1", b -> {
+			b.setEMail("neu@example.org");
+			if (editFirst) {
+				b.setComment("vorher");
+			}
+		}), VersionMarks.NONE.withMovedFrom(unassigned))));
 		if (ownSaves == 2) {
 			mySeat.add(child(OWN, "save-c", mySeat.get(0), booking("m", "s1", b -> {
 				b.setEMail("neu@example.org");
@@ -994,7 +1029,7 @@ class BookingPolicyTest {
 		Version theirSeat = version(OTHER, "save-b", booking("t", "s1", b -> b.setLastName("Tom")));
 		boolean moves = action == ForeignAction.MOVE_TO_S4 || action == ForeignAction.MOVE_TO_S4_THEN_S5;
 		Version theirM = switch (action) {
-		case EDIT -> child(OTHER, "save-b", base, withoutPlace("m", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+		case EDIT -> child(OTHER, "save-b", base, source.booking(b -> b.setPaymentStatus(PaymentStatus.CARD)));
 		case CANCEL -> child(OTHER, "save-b", base, null);
 		case MOVE_TO_S4, MOVE_TO_S4_THEN_S5 -> child(OTHER, "save-b", base, null, VersionMarks.NONE.withMovedTo(s4));
 		};
@@ -1011,11 +1046,11 @@ class BookingPolicyTest {
 			}
 		}
 		if (course.split) {
-			world.claim(unassigned, myDeletion);
+			mySource.forEach(version -> world.claim(unassigned, version));
 			world.lose(unassigned, theirM);
 		} else {
 			world.claim(unassigned, theirM);
-			world.lose(unassigned, myDeletion);
+			mySource.forEach(version -> world.lose(unassigned, version));
 		}
 		switch (course) {
 		case A_WINS_BOTH_SEAT_FIRST -> {
@@ -1119,6 +1154,105 @@ class BookingPolicyTest {
 		}
 	}
 
+	static Stream<Arguments> allCells() {
+		return cells(cell -> true);
+	}
+
+	/** R34 (2), Sitz als Quelle: B setzt m von s3 nach s1 und verliert s1 an t; A ändert, storniert oder verschiebt m. */
+	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
+	@MethodSource("allCells")
+	void seatAsSourceKeepsInvariants(ForeignAction action, int ownSaves, Course course) {
+		assertInvariants(assignmentAgainst(action, ownSaves, course, Source.SEAT, false), action, Source.SEAT);
+	}
+
+	/** B ändert m zuerst auf {@code _m} und weist es im nächsten Speichervorgang zu: Die ganze Strecke zählt. */
+	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
+	@MethodSource("allCells")
+	void severalSavesBeforeAssignmentKeepInvariants(ForeignAction action, int ownSaves, Course course) {
+		World world = assignmentAgainst(action, ownSaves, course, Source.UNASSIGNED, true);
+		assertInvariants(world, action);
+		if (action != ForeignAction.CANCEL && ownSaves == 1) {
+			assertEquals("vorher", world.head(world.carriers("m").get(0)).payload().path("comment").asText(),
+					"B's erste Änderung erreicht den Träger");
+		}
+	}
+
+	/** Ersetzen: B setzt y auf s1 und m nach s2; A ändert m auf s1. Die Änderung geht nach s2 (E5), s1 trägt y. */
+	@ParameterizedTest(name = "B gewinnt s1: {0}")
+	@ValueSource(booleans = { false, true })
+	void replacementAgainstEditTransfersTheEdit(boolean ownWinsSeat) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		world.claim(S1, m);
+		Version replaced = child(OWN, "save-r", m, booking("y", "s1"), VersionMarks.NONE.withMovedTo(S2));
+		Version edited = child(OTHER, "save-e", m, booking("m", "s1", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+		world.claim(S2, version(OWN, "save-r", booking("m", "s2"), VersionMarks.NONE.withMovedFrom(S1)));
+		world.claim(S1, ownWinsSeat ? replaced : edited);
+		world.lose(S1, ownWinsSeat ? edited : replaced);
+
+		world.resolve(S1, ownWinsSeat ? OTHER : OWN);
+
+		assertEquals(List.of(S2), world.carriers("m"));
+		assertEquals("CARD", world.head(S2).payload().path("paymentStatus").asText());
+		assertEquals("y", idOf(world.head(S1)));
+		assertEquals(List.of(), world.notes);
+	}
+
+	/** Tausch: B tauscht m (s1) und n (s2); A ändert m auf s1. Danach n auf s1, m mit A's Änderung auf s2. */
+	@ParameterizedTest(name = "B gewinnt s1: {0}")
+	@ValueSource(booleans = { false, true })
+	void swapAgainstEditKeepsBothBookingsOnce(boolean ownWinsSeat) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		Version n = version(THIRD, "save-0", booking("n", "s2"));
+		world.claim(S1, m);
+		world.claim(S2, n);
+		Version nOnS1 = child(OWN, "save-t", m, booking("n", "s1"), new VersionMarks(S2, S2, false));
+		Version edited = child(OTHER, "save-e", m, booking("m", "s1", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+		world.claim(S2, child(OWN, "save-t", n, booking("m", "s2"), new VersionMarks(S1, S1, false)));
+		world.claim(S1, ownWinsSeat ? nOnS1 : edited);
+		world.lose(S1, ownWinsSeat ? edited : nOnS1);
+
+		world.resolve(S1, ownWinsSeat ? OTHER : OWN);
+
+		assertEquals(List.of(S1), world.carriers("n"));
+		assertEquals(List.of(S2), world.carriers("m"));
+		assertEquals("CARD", world.head(S2).payload().path("paymentStatus").asText());
+		assertEquals(List.of(), world.notes);
+	}
+
+	/**
+	 * Beide setzen y von s9 auf s1 und ziehen m an verschiedene Ziele (A nach s2, B nach s3): s1 ist inhaltlich gleich,
+	 * trotzdem lebt m danach einmal, am Ziel des Gewinners von s1 (E7 vor der Regel "Gleich").
+	 */
+	@ParameterizedTest(name = "B gewinnt s1: {0}")
+	@ValueSource(booleans = { false, true })
+	void differentTargetsWithEqualNewContentLeaveOneCarrier(boolean ownWinsSeat) {
+		World world = new World();
+		UnitKey s9 = seat("s9");
+		Version y = version(THIRD, "save-0", booking("y", "s9"));
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		world.claim(s9, y);
+		world.claim(S1, m);
+		Version theirsAtS1 = child(OTHER, "save-a", m, booking("y", "s1"), new VersionMarks(S2, s9, false));
+		Version mineAtS1 = child(OWN, "save-b", m, booking("y", "s1"), new VersionMarks(S3, s9, false));
+		world.claim(s9, child(OTHER, "save-a", y, null, VersionMarks.NONE.withMovedTo(S1)));
+		world.lose(s9, child(OWN, "save-b", y, null, VersionMarks.NONE.withMovedTo(S1)));
+		world.claim(S2, version(OTHER, "save-a", booking("m", "s2"), VersionMarks.NONE.withMovedFrom(S1)));
+		world.claim(S3, version(OWN, "save-b", booking("m", "s3"), VersionMarks.NONE.withMovedFrom(S1)));
+		world.claim(S1, ownWinsSeat ? mineAtS1 : theirsAtS1);
+		world.lose(S1, ownWinsSeat ? theirsAtS1 : mineAtS1);
+
+		world.resolve(S1, ownWinsSeat ? OTHER : OWN);
+		world.resolve(s9, OWN);
+
+		assertEquals(List.of(ownWinsSeat ? S3 : S2), world.carriers("m"));
+		assertEquals(List.of(S1), world.carriers("y"));
+		String loser = ownWinsSeat ? OTHER : OWN;
+		assertEquals(1, world.notesFor(loser).size(), world.notes.toString());
+		assertEquals(List.of(), world.notesFor(ownWinsSeat ? OWN : OTHER));
+	}
+
 	/** Eine zweite Auflösung mit derselben Strecke findet ihr Ergebnis vor und schreibt nichts noch einmal. */
 	@Test
 	void repeatedResolutionWritesNothingTwice() {
@@ -1132,6 +1266,14 @@ class BookingPolicyTest {
 	}
 
 	private static void assertInvariants(World world, ForeignAction action) {
+		assertInvariants(world, action, Source.UNASSIGNED);
+	}
+
+	/**
+	 * R35 mit KARV-93: wie oben; dazu bleibt A's Änderung immer (E9: m bleibt an der Quelle, B's Umzug ist gescheitert), und
+	 * B weicht bei einer Änderung von A auf einem Sitz mit dem Vermerk "Platz" statt dem Doppelverkauf.
+	 */
+	private static void assertInvariants(World world, ForeignAction action, Source source) {
 		List<UnitKey> carriers = world.carriers("m");
 		assertTrue(carriers.size() <= 1, "1: m lebt höchstens einmal: " + carriers);
 		assertEquals(action == ForeignAction.CANCEL ? 0 : 1, carriers.size(),
@@ -1140,7 +1282,11 @@ class BookingPolicyTest {
 		switch (action) {
 		case MOVE_TO_S4 -> assertEquals(List.of(seat("s4")), carriers, "3: A's Umzug gilt");
 		case MOVE_TO_S4_THEN_S5 -> assertEquals(List.of(seat("s5")), carriers, "3: A's Umzug gilt");
-		case EDIT -> theirChangeYields = !"CARD".equals(world.head(carriers.get(0)).payload().path("paymentStatus").asText());
+		case EDIT -> {
+			assertEquals(List.of(source.unit()), carriers, "3: m bleibt an der Quelle");
+			assertEquals("CARD", world.head(carriers.get(0)).payload().path("paymentStatus").asText(),
+					"3: A's Änderung bleibt");
+		}
 		case CANCEL -> {
 		}
 		}
@@ -1151,7 +1297,7 @@ class BookingPolicyTest {
 		List<ConflictNote> mine = world.notesFor(OWN);
 		assertEquals(1, mine.size(), "4: B weicht mit genau einem Vermerk: " + mine);
 		Kind expected = switch (action) {
-		case EDIT -> Kind.DOUBLE_SALE;
+		case EDIT -> source == Source.UNASSIGNED ? Kind.DOUBLE_SALE : Kind.FIELDS;
 		case CANCEL -> Kind.DELETE_WINS;
 		case MOVE_TO_S4, MOVE_TO_S4_THEN_S5 -> Kind.FIELDS;
 		};

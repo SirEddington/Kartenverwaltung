@@ -111,12 +111,14 @@ class BookingTrailTest {
 	void arrivedAlsoWhenTheOtherSideWonTheTarget() {
 		foreignMoveToS4();
 		Version mine = world.beside(M, world.version(OWN, base, null, to(S4)));
-		world.beside(S4, world.version(OWN, null, booking("m", "s4"), from(M)));
+		Version myCopy = world.beside(S4, world.version(OWN, null, booking("m", "s4", b -> b.setLastName("Hans")),
+				from(M)));
 
 		BookingTrail trail = own(world.input(M, base, List.of(mine)));
 
 		assertEquals(Kind.ARRIVED, trail.kind());
 		assertEquals(S4, trail.end());
+		assertSame(myCopy, trail.mine(), "die eigene Fassung am Ende, zum Wiederherstellen");
 	}
 
 	@Test
@@ -133,6 +135,28 @@ class BookingTrailTest {
 		assertEquals(S1, trail.end());
 		assertSame(atS1, trail.last());
 		assertSame(mine, trail.removal());
+	}
+
+	/**
+	 * Tausch: B setzt n von s2 nach s1 und m von s1 nach s2; A ändert m auf s1 und gewinnt s1. Am Ziel steht nur die
+	 * Buchung, die B dort selbst ersetzt hat (geändert, nicht neu verkauft): Sie verlässt s1 in jedem Fall der Tabelle, also
+	 * ist n's Umzug angekommen, gleich wer s1 gewann.
+	 */
+	@Test
+	void replacedBookingAtTheTargetDoesNotBlockTheArrival() {
+		UnitKey s2 = seat("s2");
+		Version m = world.claim(S1, world.version(THIRD, null, booking("m", "s1")));
+		Version n = world.claim(s2, world.version(THIRD, null, booking("n", "s2")));
+		world.claim(S1, world.version(OTHER, m, booking("m", "s1", b -> b.setComment("bezahlt"))));
+		Version nOnS1 = world.beside(S1, world.version(OWN, "save-t", m, booking("n", "s1"),
+				new VersionMarks(s2, s2, false)));
+		world.claim(s2, world.version(OWN, "save-t", n, booking("m", "s2"), new VersionMarks(S1, S1, false)));
+
+		ConflictInput input = world.input(S1, m, List.of(nOnS1));
+		BookingTrail trail = BookingTrail.of(input, "n", s2, n.id(), true);
+
+		assertEquals(Kind.ARRIVED, trail.kind());
+		assertEquals(S1, trail.end());
 	}
 
 	/** Trägt das Ziel die Buchung, aber nicht aus diesem Umzug (etwa wiederhergestellt), ist der Umzug nicht angekommen. */
@@ -162,6 +186,24 @@ class BookingTrailTest {
 		assertEquals(Kind.FAILED, trail.kind());
 		assertSame(second, trail.last());
 		assertSame(mine, trail.removal());
+	}
+
+	/**
+	 * B ändert m auf {@code _m} und weist es im nächsten Speichervorgang zu: Die Basis an der Quelle ist die, auf der beide
+	 * Seiten aufbauten, nicht B's eigene Änderung davor.
+	 */
+	@Test
+	void sourceBaseIsSharedWithTheOtherSide() {
+		Version edit = world.claim(M, world.version(OWN, "save-e", base, withoutPlace("m", b -> b.setComment("vorher")),
+				VersionMarks.NONE));
+		world.claim(M, world.version(OWN, "save-a", edit, null, to(S1)));
+		world.beside(M, world.version(OTHER, base, withoutPlace("m", b -> b.setComment("A"))));
+		world.claim(S1, world.version(OTHER, null, booking("t", "s1")));
+		Version arrival = world.beside(S1, world.version(OWN, "save-a", null, booking("m", "s1"), from(M)));
+
+		ConflictInput input = world.input(S1, null, List.of(arrival));
+
+		assertEquals(base.id(), BookingTrail.sourceBase(input, M, arrival));
 	}
 
 	@Test
@@ -244,6 +286,20 @@ class BookingTrailTest {
 		BookingTrail trail = foreign(world.input(M, base, List.of(mine)));
 
 		assertEquals(Kind.CANCELLED, trail.kind(), "nicht der ältere Umzug " + move.id());
+	}
+
+	/**
+	 * Drei Rechner, die anderen haben sich noch nicht geeinigt: Ein Umzug gilt an der Quelle, ein Storno liegt daneben. Das
+	 * Storno gewinnt nach der Tabelle gegen alles, also ist es die fremde Absicht.
+	 */
+	@Test
+	void unresolvedForeignCancellationCounts() {
+		world.claim(M, world.version(THIRD, "save-c", base, null, to(S4)));
+		world.claim(S4, world.version(THIRD, "save-c", null, booking("m", "s4"), from(M)));
+		world.beside(M, world.version(OTHER, base, null));
+		Version mine = world.beside(M, world.version(OWN, base, withoutPlace("m", b -> b.setComment("neu"))));
+
+		assertEquals(Kind.CANCELLED, foreign(world.input(M, base, List.of(mine))).kind());
 	}
 
 	@Test

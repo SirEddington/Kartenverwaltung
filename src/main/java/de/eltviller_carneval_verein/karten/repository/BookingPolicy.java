@@ -134,11 +134,13 @@ public final class BookingPolicy implements ConflictPolicy {
 		}
 		UnitKey unit = input.unit();
 		Map<String, BookingFate> fates = new LinkedHashMap<>();
+		Map<String, Version> bases = new LinkedHashMap<>();
 		String baseId = idOf(input.base());
 		if (baseId != null) {
 			BookingFate fate = fateAt(input, baseId, unit, input.base());
 			if (fate != null) {
 				fates.put(baseId, fate);
+				bases.put(baseId, input.base());
 			}
 		}
 		for (Version version : input.stretch()) {
@@ -150,6 +152,7 @@ public final class BookingPolicy implements ConflictPolicy {
 				BookingFate fate = base == null ? null : fateAt(input, id, source, base);
 				if (fate != null) {
 					fates.put(id, fate);
+					bases.put(id, base);
 				}
 			}
 		}
@@ -157,19 +160,28 @@ public final class BookingPolicy implements ConflictPolicy {
 			return null;
 		}
 		ObjectNode payload = null;
-		for (BookingFate fate : fates.values()) {
-			if (unit.equals(fate.carrier())) {
-				if (fate.content() == null) {
-					return null;
-				}
+		ConflictNote note = null;
+		for (Map.Entry<String, BookingFate> entry : fates.entrySet()) {
+			BookingFate fate = entry.getValue();
+			if (!unit.equals(fate.carrier())) {
+				continue;
+			}
+			if (fate.content() != null) {
 				payload = fate.content();
+			} else {
+				// E6 hier: beide Umzüge kamen hier an; ihre Fassungen werden wie Regel 4 zusammengeführt
+				FieldMerge.Result merged = sameArrival(input, entry.getKey(), bases.get(entry.getKey()));
+				payload = merged.merged();
+				if (!merged.conflicts().isEmpty()) {
+					note = ConflictNote.ofFields(input.ownMachineId(), Party.of(input.theirs()), merged.conflicts(), null,
+							input.mine().id());
+				}
 			}
 		}
 		if (payload == null) {
 			payload = newcomer(input, fates.keySet());
 		}
 		List<Change> extra = new ArrayList<>();
-		ConflictNote note = null;
 		for (Map.Entry<String, BookingFate> entry : fates.entrySet()) {
 			BookingFate fate = entry.getValue();
 			if (fate.carrier() != null && !unit.equals(fate.carrier()) && fate.content() != null) {
@@ -195,6 +207,22 @@ public final class BookingPolicy implements ConflictPolicy {
 			}
 		}
 		return new Resolution(payload, payload == null, extra, note);
+	}
+
+	/**
+	 * Beide Seiten haben die Buchung hierher umgezogen (E6): Dreiwegevergleich von "Meine" und "Deren" gegen die Basis an
+	 * der Quelle, deren Platz als der von "Deren" gilt (der Umzug selbst ist kein Unterschied). Trägt eine Seite die Buchung
+	 * hier nicht, gilt "Deren".
+	 */
+	private static FieldMerge.Result sameArrival(ConflictInput input, String bookingId, Version base) {
+		Version mine = input.mine();
+		Version theirs = input.theirs();
+		if (!bookingId.equals(idOf(mine)) || !bookingId.equals(idOf(theirs))) {
+			return new FieldMerge.Result(theirs.payload(), List.of());
+		}
+		ObjectNode before = base.payload().deepCopy();
+		FieldMerge.copyFields(before, theirs.payload(), FieldGroups.booking().get(PLACE_GROUP));
+		return mergeBooking(before, mine.payload(), theirs.payload());
 	}
 
 	/** Die Entscheidung für eine Buchung an ihrer Quelle, oder {@code null}, wenn keine Seite sie weggenommen hat. */

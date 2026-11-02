@@ -72,9 +72,9 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 			return Party.of(trail.removal() != null ? trail.removal() : trail.last());
 		}
 
-		/** Die weichende Version: die jüngste mit der Buchung, sonst der Wegfall. */
+		/** Die weichende Version: die jüngste eigene mit der Buchung, sonst der Wegfall. */
 		VersionId dropped() {
-			return trail.last() != null ? trail.last().id() : trail.removal().id();
+			return trail.mine() != null ? trail.mine().id() : trail.removal().id();
 		}
 	}
 

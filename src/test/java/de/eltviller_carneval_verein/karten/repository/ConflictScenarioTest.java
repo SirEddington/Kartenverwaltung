@@ -847,7 +847,8 @@ class ConflictScenarioTest {
 
 		saveAfterDeferral(a, m);
 
-		assertEquals(List.of(newSeat), a.open().stream().map(OpenConflict::unit).toList(), a.open().toString());
+		// KARV-93: je nach Verlauf steht der Vermerk am alten Sitz (gegabelte Quelle) oder am neuen; er wirkt am neuen
+		assertEquals(List.of(newSeat), a.open().stream().map(OpenConflict::target).toList(), a.open().toString());
 		assertCancellationWinsWithRestorableNote(a, mullerId, m);
 		for (Machine machine : m) {
 			assertEquals(newSeat.bookingDir(), booking(machine, mullerId).getSeatId(), machine.name);
