@@ -16,7 +16,8 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
  *                    wenn er nicht bekannt ist
  * @param model       das Objekt im Modell, das der Hinweis nennt (Event, Presentation, Booking oder Hall)
  * @param silent      ob der Hinweis entfällt: Der Stand ist eine eigene Zusammenführung mit einem Vermerk für diesen
- *                    Rechner, der Hinweis nennte den eigenen Rechner als "anderen Rechner"; den Konflikt zeigt der Dialog
+ *                    Rechner oder eine weitere Änderung derselben Auflösung, der Hinweis nennte den eigenen Rechner als
+ *                    "anderen Rechner"; den Konflikt zeigt der Dialog
  */
 public record Deferral(UnitKey unit, VersionId version, String machineName, Object model, boolean silent) {
 

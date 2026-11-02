@@ -412,6 +412,98 @@ class ConflictLedgerTest {
 	}
 
 	@Test
+	void doubleSaleMergeCarriesTheWinnersBookingAndIsNotOwnUnderTheDeletion() throws IOException {
+		assertMergeOfLosingSaleUnderTheDeletion(ConflictNote.Kind.DOUBLE_SALE, false);
+	}
+
+	@Test
+	void unmergedMergeCarriesTheTheirsContentAndIsNotOwnUnderTheDeletion() throws IOException {
+		assertMergeOfLosingSaleUnderTheDeletion(ConflictNote.Kind.UNMERGED, false);
+	}
+
+	@Test
+	void fieldsMergeMixesBothContentsAndStaysOwnUnderTheDeletion() throws IOException {
+		assertMergeOfLosingSaleUnderTheDeletion(ConflictNote.Kind.FIELDS, true);
+	}
+
+	/**
+	 * A verkauft den Platz und B verkauft ihn auch; B schreibt die Zusammenführung (ID: die von B, Inhalt bei DOUBLE_SALE und
+	 * UNMERGED die Buchung von A, bei FIELDS gemischt), dazu seinen ausgewichenen Verkauf. A löscht die Vorstellung, ohne die
+	 * Zusammenführung zu kennen: Unter der Löschung ist für B der ausgewichene Verkauf eigen, die Zusammenführung nur, wenn
+	 * ihr Inhalt gemischt ist ({@code saleCounts}).
+	 */
+	private void assertMergeOfLosingSaleUnderTheDeletion(ConflictNote.Kind kind, boolean saleCounts) throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		String me = idOf(appData);
+		Version show = foreign(service, appData, SHOW, List.of(), name("Sitzung"), false, Map.of());
+		Version winner = foreign(service, appData, SALE, List.of(), name("Bert"), false, Map.of());
+		Version mine = own(service, SALE, List.of(), name("Anna"));
+		UnitKey moved = UnitKey.unassignedBooking("e1", "p1", me);
+		own(service, moved, List.of(), name("Anna"));
+		ConflictNote.Party other = new ConflictNote.Party(FOREIGN, "Kasse 2", "Bert", winner.id());
+		ConflictNote note = switch (kind) {
+		case DOUBLE_SALE -> ConflictNote.doubleSale(me, other, moved, null, mine.id());
+		case UNMERGED -> ConflictNote.unmerged(me, other, mine.id());
+		default -> ConflictNote.ofFields(me, other, List.of(), null, mine.id());
+		};
+		Version merge = service.append(UUID.randomUUID().toString(),
+				List.of(new Change(SALE, List.of(winner.id(), mine.id()), winner.payload(), false, note, Map.of()))).get(0);
+		assertEquals(merge.id(), service.unitState(SALE).head().id(), "die eigene Zusammenführung ist der aktuelle Stand");
+		Version deletion = foreign(service, appData, SHOW, List.of(show.id()), null, true, Map.of());
+
+		List<OpenConflict> deletions = service.openConflicts().stream().filter(c -> c.deletion() != null).toList();
+
+		assertEquals(1, deletions.size());
+		assertEquals(deletion.id(), deletions.get(0).id());
+		assertEquals(saleCounts ? List.of(SALE, moved) : List.of(moved), deletions.get(0).deletion().affected(),
+				"der Verkauf in der Zusammenführung zählt nur bei gemischtem Inhalt, der ausgewichene eigene immer");
+	}
+
+	@Test
+	void extraChangeOfAResolutionIsPartOfTheOwnNotedMerge() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		String me = idOf(appData);
+		foreign(service, appData, SHOW, List.of(), name("Sitzung"), false, Map.of());
+		Version winner = foreign(service, appData, SALE, List.of(), name("Bert"), false, Map.of());
+		Version mine = own(service, SALE, List.of(), name("Anna"));
+		Version copy = own(service, OTHER_SALE, List.of(), name("Anna"));
+		Version unrelated = own(service, UnitKey.booking("e1", "p1", "A-3"), List.of(), name("Cora"));
+		ConflictNote note = ConflictNote.ofFields(me, new ConflictNote.Party(FOREIGN, "Kasse 2", "Bert", winner.id()),
+				List.of(), null, mine.id());
+		// wie die Auflösung: die weitere Änderung (Löschung der Kopie) und die Zusammenführung in einem Speichervorgang
+		List<Version> written = service.append(UUID.randomUUID().toString(),
+				List.of(new Change(OTHER_SALE, List.of(copy.id()), null, true, null, Map.of()),
+						new Change(SALE, List.of(winner.id(), mine.id()), winner.payload(), false, note, Map.of())));
+		Version extra = written.get(0);
+		Version merge = written.get(1);
+
+		assertTrue(service.isOwnNotedMerge(SALE, merge.id()), "die Zusammenführung mit Vermerk");
+		assertTrue(service.isOwnNotedMerge(OTHER_SALE, extra.id()), "die Zusatz-Änderung derselben Auflösung");
+		assertFalse(service.isOwnNotedMerge(UnitKey.booking("e1", "p1", "A-3"), unrelated.id()),
+				"eine eigene Änderung eines anderen Speichervorgangs");
+	}
+
+	@Test
+	void extraChangeOfAResolutionWithoutNoteForThisMachineIsNotSilent() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		foreign(service, appData, SHOW, List.of(), name("Sitzung"), false, Map.of());
+		Version winner = foreign(service, appData, SALE, List.of(), name("Bert"), false, Map.of());
+		Version mine = own(service, SALE, List.of(), name("Anna"));
+		Version copy = own(service, OTHER_SALE, List.of(), name("Anna"));
+		ConflictNote note = ConflictNote.ofFields(FOREIGN, new ConflictNote.Party(FOREIGN, "Kasse 2", "Bert", winner.id()),
+				List.of(), null, mine.id());
+		List<Version> written = service.append(UUID.randomUUID().toString(),
+				List.of(new Change(OTHER_SALE, List.of(copy.id()), null, true, null, Map.of()),
+						new Change(SALE, List.of(winner.id(), mine.id()), winner.payload(), false, note, Map.of())));
+
+		assertFalse(service.isOwnNotedMerge(OTHER_SALE, written.get(0).id()),
+				"der Vermerk betrifft einen anderen Rechner: der Hinweis bleibt");
+	}
+
+	@Test
 	void parentDeletionCanBeAcknowledgedByTheDeletionVersion() throws IOException {
 		Path appData = dir.resolve("app");
 		SyncService service = single(appData);

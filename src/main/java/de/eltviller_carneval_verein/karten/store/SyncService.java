@@ -1617,10 +1617,53 @@ public final class SyncService implements ConnectionControl {
 	 * ({@link ConflictNote#affected()}, {@link ConflictLedger#affectsMe}). Diesen Konflikt zeigt der Dialog. Die
 	 * Vermerke stammen aus dem Start-Index; kennt er keinen passenden, wird keine Datei gelesen. Sonst liest es höchstens
 	 * diese eine Version (wenn sie selbst keinen Vermerk trägt, kennt der Index Rechner und Vorgänger nicht).
+	 * <p>
+	 * Dasselbe gilt für eine weitere Änderung derselben Auflösung (Löschung der verschobenen Kopie, Übertragung auf die
+	 * Kopie): Sie hat keinen Vermerk, wird aber im Speichervorgang der Zusammenführung geschrieben, und deren Vermerk ist der
+	 * Konflikt im Dialog.
 	 *
 	 * @param version ein Stand der Einheit; {@code null} ist nie eine Zusammenführung
 	 */
 	public boolean isOwnNotedMerge(UnitKey unit, VersionId version) throws IOException {
+		return isOwnMergeWithNote(unit, version) || isExtraOfOwnNotedMerge(unit, version);
+	}
+
+	/**
+	 * Ob der Stand eine Zusatz-Änderung ist: eigen und im Speichervorgang einer eigenen Zusammenführung mit Vermerk für
+	 * diesen Rechner. Die Auflösung schreibt ihre weiteren Änderungen auf Geschwister-Einheiten, also im selben Event; nur
+	 * dessen Einträge werden durchsucht. Der Vermerk muss schon im Index stehen, sonst ist die Antwort "nein".
+	 */
+	private boolean isExtraOfOwnNotedMerge(UnitKey unit, VersionId version) throws IOException {
+		UnitIndex.Entry entry = index.entry(unit);
+		Ownership own = ownership();
+		if (version == null || entry == null || !own.isOwnId(version)) {
+			return false;
+		}
+		String saveId = saveIdOf(entry, unit, version);
+		if (saveId == null) {
+			return false;
+		}
+		String ownerId = unit.ownerId();
+		return index.read(entries -> entries.stream()
+				.filter(other -> ownerId.equals(other.snapshot().unit().ownerId()) && !other.snapshot().unit().equals(unit))
+				.flatMap(other -> other.notes().stream())
+				.anyMatch(noted -> saveId.equals(noted.saveId()) && noted.parents().size() > 1
+						&& own.isOwn(noted.machine(), noted.version()) && ConflictLedger.affectsMe(own, noted)));
+	}
+
+	/** Der Speichervorgang der Version: aus der Kette im Index, sonst aus der Datei; {@code null}, wenn sie keinen hat. */
+	private String saveIdOf(UnitIndex.Entry entry, UnitKey unit, VersionId version) throws IOException {
+		for (ChainStep step : entry.chain()) {
+			if (step.version().equals(version)) {
+				return step.saveId();
+			}
+		}
+		Version read = version(unit, version);
+		return read == null ? null : read.saveId();
+	}
+
+	/** Ob der Stand selbst eine eigene Zusammenführung mit Vermerk für diesen Rechner ist (siehe {@link #isOwnNotedMerge}). */
+	private boolean isOwnMergeWithNote(UnitKey unit, VersionId version) throws IOException {
 		UnitIndex.Entry entry = index.entry(unit);
 		if (version == null || entry == null) {
 			return false;

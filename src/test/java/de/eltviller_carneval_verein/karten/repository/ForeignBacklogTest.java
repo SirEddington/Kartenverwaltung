@@ -19,7 +19,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
@@ -215,6 +219,44 @@ class ForeignBacklogTest {
 		assertFalse(backlog.deferrals().get(0).silent(), "ohne Auskunft bleibt der Hinweis");
 		assertTrue(logged.stream().anyMatch(message -> message.contains(hall.unit().relativePath())
 				&& message.contains("eigene Zusammenführung")), logged.toString());
+	}
+
+	/**
+	 * KARV-96: Die Auflösung schreibt eine weitere Änderung (hier die Buchung A-2) und die Zusammenführung mit Vermerk für
+	 * diesen Rechner (Buchung A-1) in einem Speichervorgang. Die weitere Änderung hat keinen Vermerk. Steht der Vermerk beim ersten
+	 * Zurückstellen noch nicht im Index, bekommt sie den Hinweis; sobald er da ist, wird sie still.
+	 */
+	@Test
+	void extraChangeOfAnOwnResolutionIsDeferredSilentlyOnceItsMergeIsKnown() throws IOException {
+		SyncService sync = TestSyncServices.singleMode(appData);
+		sync.startup(null, p -> {
+		});
+		UnitKey mergeUnit = UnitKey.booking("e1", "p1", "A-1");
+		UnitKey extraUnit = UnitKey.booking("e1", "p1", "A-2");
+		for (UnitKey unit : List.of(mergeUnit, extraUnit)) {
+			sync.append("anlegen-" + unit.bookingDir(),
+					List.of(new Change(unit, List.of(), JsonNodeFactory.instance.objectNode().put("name", "Anna"), false)));
+		}
+		ConflictNote forMe = new ConflictNote(ConflictNote.Kind.FIELDS, sync.machineId(), null, List.of(), null, null, null);
+		Version absorbed = new ForeignVersions(sync, appData).writeUnclaimed(mergeUnit, forMe, payload -> payload.put("name", "B"));
+		String save = "aufloesung";
+		Version before = sync.unitState(extraUnit).head();
+		ObjectNode edited = before.payload().deepCopy();
+		edited.put("name", "Berta");
+		sync.append(save, List.of(new Change(extraUnit, List.of(before.id()), edited, false)));
+		UnitSnapshot extra = sync.snapshots(List.of(extraUnit)).get(extraUnit);
+
+		backlog.defer(extra, List.of(), "Halle", sync);
+
+		assertFalse(backlog.deferrals().get(0).silent(), "der vermerkte Stand der Zusammenführung steht noch nicht im Index");
+
+		Version head = sync.unitState(mergeUnit).head();
+		ObjectNode merged = head.payload().deepCopy();
+		merged.put("name", "Cora");
+		sync.append(save, List.of(new Change(mergeUnit, List.of(head.id(), absorbed.id()), merged, false, forMe)));
+		backlog.defer(extra, List.of(), "Halle", sync);
+
+		assertTrue(backlog.deferrals().get(0).silent(), "die weitere Änderung derselben Auflösung braucht keinen Hinweis");
 	}
 
 	@Test
