@@ -46,6 +46,7 @@ class FieldGroupsTest {
 		booking.setWheelchairAccessible(true);
 		booking.setPrice(1500);
 		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(1500);
 		booking.setCollected(true);
 		booking.setReservationDate(LocalDate.of(2026, 10, 1));
 		booking.setPaymentDate(LocalDate.of(2026, 10, 2));

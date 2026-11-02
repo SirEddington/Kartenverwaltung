@@ -52,7 +52,9 @@ public enum SeatIssue implements Issue {
 	/** Ein Datum liegt nach dem heutigen Tag. &1 = Buchung, &2 = Bezeichnung des Datums, &3 = Datum (dd.MM.yyyy). */
 	DATE_IN_FUTURE("SEA-018", Severity.WARNING, "Das &2 (&3) bei &1 liegt in der Zukunft."),
 	/** Die Reihenfolge Reservierung, Bezahlung, Abholung ist verletzt. &1 = Buchung, &2 = das Datum, das später liegen müsste, &3 = das Datum, vor dem es liegt. */
-	DATE_ORDER("SEA-019", Severity.WARNING, "Bei &1 liegt das &2 vor dem &3.");
+	DATE_ORDER("SEA-019", Severity.WARNING, "Bei &1 liegt das &2 vor dem &3."),
+	/** Der gezahlte Betrag weicht vom geltenden Preis ab. &1 = Buchung, &2 = gezahlter Betrag, &3 = geltender Preis. */
+	PAID_AMOUNT_DIFFERS("SEA-020", Severity.WARNING, "Bei &1 wurden &2 bezahlt, der Preis beträgt aber &3.");
 
 	private final String code;
 	private final Severity severity;

@@ -153,9 +153,23 @@ final class PolicyRules {
 		if (common != null) {
 			return common;
 		}
+		FieldMerge.Result result = FieldMerge.merge(basePayload(input), input.mine().payload(), input.theirs().payload(),
+				groups);
+		return fromMerge(input, groups, result);
+	}
+
+	/** Der Inhalt der Basis; ohne Basis oder bei einer gelöschten {@code null} (gilt im Vergleich als leeres Objekt). */
+	static ObjectNode basePayload(ConflictInput input) {
 		Version base = input.base();
-		ObjectNode basePayload = base == null || base.deleted() ? null : base.payload();
-		FieldMerge.Result result = FieldMerge.merge(basePayload, input.mine().payload(), input.theirs().payload(), groups);
+		return base == null || base.deleted() ? null : base.payload();
+	}
+
+	/**
+	 * Die Auflösung aus einem Dreiwegevergleich von "Meine" und "Deren": ohne strittige Gruppe der zusammengeführte Inhalt;
+	 * sonst mit dem Vermerk FIELDS (betroffen ist dieser Rechner, Gegenseite die Version, die zuletzt einen gewinnenden
+	 * Wert eingebracht hat).
+	 */
+	static Resolution fromMerge(ConflictInput input, Map<String, List<String>> groups, FieldMerge.Result result) {
 		if (result.conflicts().isEmpty()) {
 			return new Resolution(result.merged(), false, List.of(), null);
 		}

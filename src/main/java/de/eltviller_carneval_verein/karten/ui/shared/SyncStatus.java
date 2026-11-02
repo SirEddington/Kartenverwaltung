@@ -62,7 +62,7 @@ public final class SyncStatus {
 		Duration pendingFor = state == SyncState.AUSSTEHEND && pendingSince != null
 				? Duration.between(pendingSince, clock.instant()) : Duration.ZERO;
 		return SyncHint.of(state, pendingFor, sync.connectionComplete().get(), sync.fullSyncProgress().get(),
-				watch != null && watch.ended(), sync.skippedUnits().size());
+				watch != null && watch.ended(), sync.catchingUp().get(), sync.skippedUnits().size());
 	}
 
 	/**

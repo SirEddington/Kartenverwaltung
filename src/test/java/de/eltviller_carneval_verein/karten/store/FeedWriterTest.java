@@ -87,14 +87,33 @@ class FeedWriterTest {
 	}
 
 	@Test
-	void lostReplyFollowedByOtherContentIsADuplicate() throws IOException {
+	void lostReplyFollowedByOtherEntriesContinuesWithTheNextNumber() throws IOException {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		VersionStore shared = new VersionStore(dir.resolve("shared"), layer);
 		FeedWriter writer = new FeedWriter(shared, ME, CLOCK);
+		List<FeedEntry> first = List.of(new FeedEntry("events/e1", V1, "root"));
+		List<FeedEntry> second = List.of(new FeedEntry("events/e1", V2, V1.value()));
 		layer.failAfter("createNew", new IOException("Antwort verloren"));
-		assertThrows(IOException.class, () -> writer.append(List.of(new FeedEntry("events/e1", V1, "root"))));
+		assertThrows(IOException.class, () -> writer.append(first));
 
-		// Andere Einträge unter derselben Nummer: das ist nicht die eigene Datei
+		// Die Datei unter der Nummer ist der frühere Versuch: Die nächste Liste bekommt die nächste Nummer
+		assertEquals(2L, writer.append(second));
+
+		assertEquals(first, StoreCodec.readFeed(shared.readRelative("feeds/" + ME + "/1.json").orElseThrow()).entries());
+		assertEquals(second, StoreCodec.readFeed(shared.readRelative("feeds/" + ME + "/2.json").orElseThrow()).entries());
+		assertEquals(3L, writer.append(first));
+	}
+
+	@Test
+	void failedAttemptAndForeignFileUnderItsNumberIsADuplicate() throws IOException {
+		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
+		VersionStore shared = new VersionStore(dir.resolve("shared"), layer);
+		FeedWriter writer = new FeedWriter(shared, ME, CLOCK);
+		layer.failNext("createNew", new IOException("Störung"));
+		assertThrows(IOException.class, () -> writer.append(List.of(new FeedEntry("events/e1", V1, "root"))));
+		// ein anderer Rechner mit derselben Kennung belegt die Nummer des gescheiterten Versuchs
+		put(shared, "feeds/" + ME + "/1.json", "fremd");
+
 		assertThrows(DuplicateMachineException.class,
 				() -> writer.append(List.of(new FeedEntry("events/e1", V2, V1.value()))));
 	}

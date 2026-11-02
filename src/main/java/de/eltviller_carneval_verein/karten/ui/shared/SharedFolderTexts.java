@@ -209,6 +209,9 @@ public final class SharedFolderTexts {
 	/** Hinweis erster Abgleich, Lauf zu Ende. */
 	public static final String HINT_FIRST_RUN_ENDED = "Noch nicht vollständig abgeglichen: Einträge übersprungen";
 
+	/** Hinweis: Die Änderungslisten anderer Rechner sind noch nicht alle gelesen (etwa nach dem Mitnehmen). */
+	public static final String HINT_CATCHING_UP = "Verkäufe anderer Rechner kommen noch an";
+
 	/** Hinweis übersprungene Einträge, einer. */
 	public static final String HINT_SKIPPED_ONE = "1 Eintrag nicht abgeglichen";
 

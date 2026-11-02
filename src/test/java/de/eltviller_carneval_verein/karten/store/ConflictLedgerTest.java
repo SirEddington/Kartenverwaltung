@@ -505,7 +505,12 @@ class ConflictLedgerTest {
 		byte[] bytes = StoreCodec.write(sale);
 		assertTrue(local.writeVersion(SALE, sale.id(), bytes));
 		new LocalArbiter(local, Clock.systemUTC()).claim(SALE, sale, bytes);
-		SyncService b = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run, path -> true, clock);
+		// der Vollabgleich des Starts legt den Anspruch im gemeinsamen Ordner an; scheitert seine Liste, bleibt der Verkauf in
+		// keiner (gelänge sie, kennte A ihn über seen)
+		FaultyFileLayer files = new FaultyFileLayer(new NioFileLayer());
+		Path feeds = shared.resolve("data/feeds");
+		files.failWhen(path -> path.startsWith(feeds), "createNew", new IOException("Ordner gesperrt"));
+		SyncService b = new SyncService(appData, identity, files, Runnable::run, Runnable::run, path -> true, clock);
 		b.startup(shared.toString());
 		Recorder recorder = new Recorder();
 		b.setListener(recorder);
@@ -519,6 +524,32 @@ class ConflictLedgerTest {
 		assertEquals(deletion.id(), open.get(0).id());
 		assertEquals(List.of(SALE), open.get(0).deletion().affected());
 		assertTrue(recorder.conflicts > 0);
+	}
+
+	/**
+	 * Wie {@link #ownSaleInNoListIsCountedAfterOwnFeedsAreRead}, aber die Liste des Vollabgleichs gelingt: Der Verkauf steht
+	 * in Liste 1 von B, und A hat sie gelesen, bevor es löschte. Er war A bekannt, kein Konflikt.
+	 */
+	@Test
+	void ownSaleListedByTheFullSyncIsKnownToADeleterWhoReadTheList() throws IOException {
+		Path appData = dir.resolve("b");
+		Path shared = Files.createDirectories(dir.resolve("gemeinsam"));
+		MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "Kasse B");
+		Version sale = new Version(StoreCodec.FORMAT, VersionId.create(1_800_000_000_000L, identity.id(), 0), List.of(),
+				identity.id(), "Kasse B", null, Instant.parse("2026-10-20T09:00:00Z"), "einzel", false, name("Anna"));
+		VersionStore local = new VersionStore(appData.resolve("data"), new NioFileLayer());
+		byte[] bytes = StoreCodec.write(sale);
+		assertTrue(local.writeVersion(SALE, sale.id(), bytes));
+		new LocalArbiter(local, Clock.systemUTC()).claim(SALE, sale, bytes);
+		SyncService b = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run, path -> true, clock);
+		b.startup(shared.toString());
+		assertTrue(Files.exists(shared.resolve("data/feeds/" + identity.id() + "/1.json")));
+		aDeletesShow(shared, identity.id(), 1L);
+
+		tickAfterDiscoveryInterval(b);
+
+		assertTrue(b.unitState(SHOW).head().deleted());
+		assertEquals(List.of(), b.openConflicts());
 	}
 
 	// --- Bestätigen

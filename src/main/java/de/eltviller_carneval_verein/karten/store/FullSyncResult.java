@@ -30,6 +30,11 @@ public record FullSyncResult(Set<UnitKey> changed, List<LostVersion> lost, List<
 	 * @param version   die Version, die der Anspruch nennt
 	 */
 	public record UploadedClaim(UnitKey unit, String claimName, VersionId version) {
+
+		/** Der Eintrag für eine Änderungsliste. */
+		public FeedEntry feedEntry() {
+			return new FeedEntry(unit.relativePath(), version, claimName);
+		}
 	}
 
 	/** Macht die Sammlungen unveränderlich. */

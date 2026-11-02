@@ -51,6 +51,12 @@ public class Booking {
 	/** Einzelpreis in Cent; {@code null} heißt: es gilt der Standardpreis der Vorstellung. */
 	private Integer price; // get,set
 	private final ObjectProperty<PaymentStatus> paymentStatus = new SimpleObjectProperty<>(PaymentStatus.NONE); // get,set
+	/**
+	 * Der gezahlte Betrag in Cent. {@code null} heißt: nicht bezahlt, oder älterer Stand ohne das Feld (dann gilt der
+	 * geltende Preis, siehe {@link #getPaidCents()}). Gesetzt beim Bezahlen über {@link SaleDates}, nicht im Setter; ändert
+	 * sich danach der Preis, bleibt der Betrag stehen.
+	 */
+	private Integer paidAmount; // get,set
 	private boolean collected; // get,set
 
 	/**
@@ -168,6 +174,14 @@ public class Booking {
 		this.paymentStatus.set(paymentStatus);
 	}
 
+	public Integer getPaidAmount() {
+		return paidAmount;
+	}
+
+	public void setPaidAmount(Integer paidAmount) {
+		this.paidAmount = paidAmount;
+	}
+
 	public boolean isCollected() {
 		return collected;
 	}
@@ -248,6 +262,18 @@ public class Booking {
 			return price;
 		}
 		return parentPresentation != null ? parentPresentation.getPrice() : 0;
+	}
+
+	/**
+	 * Der gezahlte Betrag einer bezahlten Buchung: {@link #getPaidAmount()}, bei einem älteren Stand ohne Betrag der geltende
+	 * Preis; {@code null}, wenn die Buchung nicht bezahlt ist.
+	 */
+	@JsonIgnore
+	public Integer getPaidCents() {
+		if (!isPaid()) {
+			return null;
+		}
+		return paidAmount != null ? paidAmount : getEffectivePrice();
 	}
 
 	/** Setzt den Einzelpreis; ist der Wert gleich dem Standardpreis der Vorstellung, gilt wieder der Standardpreis. */
@@ -333,6 +359,7 @@ public class Booking {
 		setWheelchairAccessible(source.isWheelchairAccessible());
 		setPrice(source.getPrice());
 		setPaymentStatus(source.getPaymentStatus());
+		setPaidAmount(source.getPaidAmount());
 		setCollected(source.isCollected());
 		setReservationDate(source.getReservationDate());
 		setPaymentDate(source.getPaymentDate());
@@ -346,8 +373,8 @@ public class Booking {
 
 	/**
 	 * Leert die Kundendaten (alles, was {@link #hasData()} prüft, dazu die Daten von Reservierung, Bezahlung und
-	 * Abholung, den Einzelpreis und "Ohne Platz"). Sitz und Momentaufnahme des Platzes bleiben. Die Buchung bekommt eine
-	 * neue Kennung, denn eine Buchung ohne Daten ist nicht mehr dieselbe Buchung.
+	 * Abholung, den gezahlten Betrag, den Einzelpreis und "Ohne Platz"). Sitz und Momentaufnahme des Platzes bleiben. Die
+	 * Buchung bekommt eine neue Kennung, denn eine Buchung ohne Daten ist nicht mehr dieselbe Buchung.
 	 */
 	public void clearCustomerData() {
 		setLastName(null);
@@ -355,6 +382,7 @@ public class Booking {
 		setEMail(null);
 		setComment(null);
 		setPaymentStatus(PaymentStatus.NONE);
+		setPaidAmount(null);
 		setCollected(false);
 		setReservationDate(null);
 		setPaymentDate(null);

@@ -265,6 +265,16 @@ class ConflictListTest {
 	}
 
 	@Test
+	void paidAmountShowsAsEuro() {
+		source.add(conflict(seat("s1"), "a", new ConflictNote(Kind.FIELDS, "me", null,
+				List.of(new FieldConflict("payment", JsonNodeFactory.instance.objectNode().put("paymentStatus", "CASH").put("paidAmount", 2000),
+						JsonNodeFactory.instance.objectNode().put("paymentStatus", "NONE").putNull("paidAmount"))),
+				null, null, nextId())));
+
+		assertEquals("Bar, 20,00 €", list.rows().get(0).fields().get(0).mine());
+	}
+
+	@Test
 	void datesShowInGermanFormat() {
 		source.add(conflict(seat("s1"), "a", new ConflictNote(Kind.FIELDS, "me", null,
 				List.of(new FieldConflict("payment",

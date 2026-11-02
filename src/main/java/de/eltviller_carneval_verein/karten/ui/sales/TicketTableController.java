@@ -126,6 +126,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 	@FXML
 	private TableColumn<BookingDTO, Double> colPrice;
 	@FXML
+	private TableColumn<BookingDTO, Double> colPaidAmount;
+	@FXML
 	private TableColumn<BookingDTO, PaymentStatus> colPaymentStatus;
 	@FXML
 	private TableColumn<BookingDTO, Boolean> colCollected;
@@ -160,6 +162,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colLastName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getBooking().getLastName()));
 		colFirstName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getBooking().getFirstName()));
 		colPrice.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getBooking().getEffectivePrice() / 100.0).asObject());
+		// gezahlter Betrag nur bei bezahlten Buchungen, sonst leer
+		colPaidAmount.setCellValueFactory(cell -> new SimpleObjectProperty<>(MoneyFormat.toEuros(cell.getValue().getBooking().getPaidCents())));
 		colPaymentStatus.setCellValueFactory(cell -> cell.getValue().getBooking().getPaymentStatusProperty());
 		colComment.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getBooking().getComment()));
 
@@ -388,7 +392,16 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 		// Preis: der effektive Preis; der Standardpreis der Vorstellung als Eingabe entfernt den Einzelpreis
 		colPrice.setCellFactory(ParsingTextFieldTableCell.forTableColumn(PRICE_CONVERTER, InputIssue.NOT_A_NUMBER, "Preis", dto -> EntityLabels.booking(dto.getBooking())));
-		colPrice.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setEffectivePrice(toCents(editEvent.getNewValue())));
+		// über SaleDates: Bei einer bezahlten Buchung ohne Betrag (älterer Stand) hält es den bisherigen Preis als Betrag fest
+		colPrice.setOnEditCommit(editEvent -> {
+			SaleDates.change(editEvent.getRowValue().getBooking(), booking -> booking.setEffectivePrice(toCents(editEvent.getNewValue())));
+			refreshAfterCommit();
+		});
+
+		// Gezahlter Betrag: nur bei bezahlten Buchungen bearbeitbar
+		colPaidAmount.setCellFactory(ParsingTextFieldTableCell.forTableColumn(PRICE_CONVERTER, InputIssue.NOT_A_NUMBER, "Bezahlt",
+				dto -> EntityLabels.booking(dto.getBooking()), dto -> dto.getBooking().isPaid()));
+		colPaidAmount.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setPaidAmount(toCents(editEvent.getNewValue())));
 
 		colComment.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
 		colComment.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setComment(editEvent.getNewValue()));
@@ -451,10 +464,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 	 * negativ (SEA-001) gemeldet wird.
 	 */
 	static int toCents(Double euros) {
-		if (euros == null) {
-			return 0;
-		}
-		return MoneyFormat.toCents(euros);
+		return MoneyFormat.toCentsOrZero(euros);
 	}
 
 	private void loadBookings() {
@@ -555,6 +565,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colLastName.setEditable(editMode);
 		colFirstName.setEditable(editMode);
 		colPrice.setEditable(editMode);
+		colPaidAmount.setEditable(editMode);
 		colPaymentStatus.setEditable(editMode);
 		colCollected.setEditable(editMode);
 		colReservedOn.setEditable(editMode);

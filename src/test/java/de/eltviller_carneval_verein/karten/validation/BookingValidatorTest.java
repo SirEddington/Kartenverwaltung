@@ -39,6 +39,39 @@ class BookingValidatorTest {
 		assertTrue(BookingValidator.validate(booking()).isEmpty());
 	}
 
+	/** Bezahlt (bar) mit Namen und Daten, damit nur die Prüfung des Betrags etwas melden kann. */
+	private static Booking paid(Integer price, Integer paidAmount) {
+		Booking booking = booking();
+		booking.setLastName("Müller");
+		booking.setReservationDate(LocalDate.of(2026, 10, 1));
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaymentDate(LocalDate.of(2026, 10, 2));
+		booking.setPrice(price);
+		booking.setPaidAmount(paidAmount);
+		return booking;
+	}
+
+	@Test
+	void paidAmountDifferingFromPriceWarns() {
+		ValidationIssue issue = only(BookingValidator.validate(paid(2500, 2000), LocalDate.of(2026, 10, 20)));
+
+		assertEquals("SEA-020", issue.code());
+		assertEquals(Severity.WARNING, issue.severity());
+		assertEquals("Bei Prunksitzung, Tisch A3, Sitz 2 wurden 20,00 € bezahlt, der Preis beträgt aber 25,00 €.", issue.message());
+	}
+
+	@Test
+	void paidAmountWithoutDifferenceOrWithoutAmountDoesNotWarn() {
+		LocalDate today = LocalDate.of(2026, 10, 20);
+		assertTrue(BookingValidator.validate(paid(2500, 2500), today).isEmpty(), "gleich");
+		assertTrue(BookingValidator.validate(paid(null, 1250), today).isEmpty(), "gleich dem Standardpreis");
+		assertTrue(BookingValidator.validate(paid(2500, null), today).isEmpty(), "älterer Stand ohne Betrag");
+
+		Booking open = booking();
+		open.setPaidAmount(2000);
+		assertTrue(BookingValidator.validate(open, today).isEmpty(), "offen");
+	}
+
 	@Test
 	void negativePriceIsAnError() {
 		Booking booking = booking();

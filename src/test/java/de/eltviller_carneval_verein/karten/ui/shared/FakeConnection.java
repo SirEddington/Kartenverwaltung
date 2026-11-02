@@ -28,6 +28,7 @@ public final class FakeConnection implements ConnectionControl {
 	private final SimpleObjectProperty<SyncState> state = new SimpleObjectProperty<>(SyncState.AUS);
 	private final SimpleObjectProperty<Double> progress = new SimpleObjectProperty<>();
 	private final SimpleBooleanProperty complete = new SimpleBooleanProperty(true);
+	private final SimpleBooleanProperty catchingUp = new SimpleBooleanProperty();
 	private final SimpleObjectProperty<Instant> lastSync = new SimpleObjectProperty<>();
 	private final List<String> calls = Collections.synchronizedList(new ArrayList<>());
 	private final List<CompletableFuture<ConnectOutcome>> pending = new ArrayList<>();
@@ -56,6 +57,11 @@ public final class FakeConnection implements ConnectionControl {
 
 	public FakeConnection lastSync(Instant value) {
 		lastSync.set(value);
+		return this;
+	}
+
+	public FakeConnection catchingUp(boolean value) {
+		catchingUp.set(value);
 		return this;
 	}
 
@@ -148,6 +154,11 @@ public final class FakeConnection implements ConnectionControl {
 	@Override
 	public ReadOnlyBooleanProperty connectionComplete() {
 		return complete;
+	}
+
+	@Override
+	public ReadOnlyBooleanProperty catchingUp() {
+		return catchingUp;
 	}
 
 	@Override

@@ -205,6 +205,20 @@ class BookingTest {
 	}
 
 	@Test
+	void getPaidCents_nimmt_paidAmount_sonst_den_geltenden_Preis_und_ist_offen_leer() {
+		Presentation presentation = new Presentation();
+		presentation.changePrice(2000);
+		Booking booking = presentation.addBooking();
+		assertNull(booking.getPaidCents(), "offen");
+
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		assertEquals(Integer.valueOf(2000), booking.getPaidCents());
+
+		booking.setPaidAmount(1500);
+		assertEquals(Integer.valueOf(1500), booking.getPaidCents());
+	}
+
+	@Test
 	void PLACE_ORDER_sortiert_A2_vor_A10_und_Tische_ohne_Buchstaben_vor_A() {
 		Booking a10 = bookingAt("A", 10, 1);
 		Booking a2 = bookingAt("A", 2, 1);
@@ -304,6 +318,38 @@ class BookingTest {
 	}
 
 	@Test
+	void paidAmount_wird_gespeichert_und_geladen() throws IOException {
+		Booking booking = bookingAt("A", 3, 1);
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(1750);
+		ObjectMapper mapper = JsonMapperFactory.create();
+
+		String json = mapper.writeValueAsString(booking);
+		Booking loaded = mapper.readValue(json, Booking.class);
+
+		assertEquals(1750, mapper.readTree(json).path("paidAmount").asInt(), json);
+		assertEquals(Integer.valueOf(1750), loaded.getPaidAmount());
+	}
+
+	@Test
+	void aeltere_Datei_ohne_paidAmount_laedt_mit_null() throws IOException {
+		Booking loaded = JsonMapperFactory.create().readValue("{\"lastName\":\"Müller\",\"paymentStatus\":\"CASH\"}", Booking.class);
+
+		assertNull(loaded.getPaidAmount());
+	}
+
+	@Test
+	void clearCustomerData_leert_paidAmount() {
+		Booking booking = bookingAt("A", 3, 1);
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(1750);
+
+		booking.clearCustomerData();
+
+		assertNull(booking.getPaidAmount());
+	}
+
+	@Test
 	void copy_uebernimmt_die_verkaufsdaten() {
 		Booking booking = bookingAt("A", 3, 2);
 		booking.setReservationDate(LocalDate.of(2026, 10, 1));
@@ -335,6 +381,7 @@ class BookingTest {
 		booking.setWheelchairAccessible(true);
 		booking.setPrice(1800);
 		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(1234);
 		booking.setCollected(true);
 		booking.setLastName("Müller");
 		booking.setFirstName("Anna");
@@ -353,6 +400,7 @@ class BookingTest {
 		assertTrue(copy.isWheelchairAccessible());
 		assertEquals(Integer.valueOf(1800), copy.getPrice());
 		assertEquals(PaymentStatus.CASH, copy.getPaymentStatus());
+		assertEquals(Integer.valueOf(1234), copy.getPaidAmount());
 		assertTrue(copy.isCollected());
 		assertEquals("Müller", copy.getLastName());
 		assertEquals("Anna", copy.getFirstName());
