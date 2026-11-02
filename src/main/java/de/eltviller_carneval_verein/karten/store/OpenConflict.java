@@ -45,8 +45,9 @@ public record OpenConflict(VersionId id, UnitKey unit, Instant at, String saveId
 	}
 
 	/**
-	 * Die Einheit, auf der der Vermerk wirkt: die, auf die er die Buchung übertragen hat ({@link ConflictNote#moved()}),
-	 * sonst {@link #unit()}.
+	 * Die Einheit, auf der der Vermerk wirkt: die, auf die er die Buchung übertragen hat ({@link ConflictNote#moved()}; bei
+	 * "Gelöscht" nach "verschoben gegen storniert" die gelöschte Kopie, auf der wiederhergestellt wird), sonst
+	 * {@link #unit()}.
 	 */
 	public UnitKey target() {
 		return note != null && note.moved() != null ? note.moved() : unit;

@@ -13,7 +13,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * @param affected ID des betroffenen Rechners (danach filtert der Dialog)
  * @param other    die Gegenseite, deren Stand mit dem eigenen zusammentraf; darf {@code null} sein
  * @param fields   die widersprüchlichen Feldgruppen; leer, wenn die Art keine hat (nie {@code null})
- * @param moved    die Einheit, auf die eine versetzte Buchung ausgewichen ist; darf {@code null} sein
+ * @param moved    die Einheit, auf die eine versetzte Buchung ausgewichen ist; bei {@link Kind#DELETE_WINS} die gelöschte
+ *                 Kopie einer verschobenen Buchung, auf der {@code dropped} liegt und auf der sie wiederhergestellt wird;
+ *                 darf {@code null} sein
  * @param place    der Platz, an den die Buchung versetzt wurde; darf {@code null} sein
  * @param dropped  die Version, deren Inhalt weicht: bei Zusammenführungen meist der zweite Vorgänger, bei
  *                 {@link Kind#DELETE_WINS} gegen die Gegenseite der erste; darf {@code null} sein
@@ -39,7 +41,12 @@ public record ConflictNote(Kind kind, String affected, Party other, List<FieldCo
 
 	/** Ein Vermerk {@link Kind#DELETE_WINS}. */
 	public static ConflictNote deleteWins(String affected, Party other, VersionId dropped) {
-		return new ConflictNote(Kind.DELETE_WINS, affected, other, List.of(), null, null, dropped);
+		return deleteWins(affected, other, null, dropped);
+	}
+
+	/** Ein Vermerk {@link Kind#DELETE_WINS} für eine verschobene Buchung, {@code moved} wie im Vermerk. */
+	public static ConflictNote deleteWins(String affected, Party other, UnitKey moved, VersionId dropped) {
+		return new ConflictNote(Kind.DELETE_WINS, affected, other, List.of(), moved, null, dropped);
 	}
 
 	/** Ein Vermerk {@link Kind#UNMERGED}. */

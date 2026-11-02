@@ -1320,6 +1320,51 @@ class BookingPolicyTest {
 	}
 
 	@Test
+	void firstVersionOfTheCancelledBookingIsAnEditThatLosesToTheCancellation() {
+		// KARV-118: Meine kennt x nur abgeleitet (ohne Version) und ändert es; Deren hat x angelegt und dann storniert
+		Version sold = version(THIRD, booking("x", "s1"));
+		Version theirDeletion = deletion(OTHER);
+		Version mine = version(OWN, booking("x", "s1", b -> b.setFirstName("Hans")));
+
+		Resolution resolution = POLICY.resolve(input(S1, null, mine, theirDeletion, sold, theirDeletion));
+
+		assertTrue(resolution.deleted());
+		assertTrue(resolution.extra().isEmpty());
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.DELETE_WINS, note.kind());
+		assertEquals(OWN, note.affected());
+		assertEquals(party(theirDeletion), note.other());
+		assertEquals(mine.id(), note.dropped());
+	}
+
+	@Test
+	void unreadableFirstVersionOfTheCancelledBookingIsUnmerged() {
+		Version sold = version(THIRD, booking("x", "s1"));
+		Version theirDeletion = deletion(OTHER);
+		ObjectNode broken = booking("x", "s1");
+		broken.put("seatNumber", "keine Zahl");
+		Version mine = version(OWN, broken);
+
+		Resolution resolution = POLICY.resolve(input(S1, null, mine, theirDeletion, sold, theirDeletion));
+
+		assertTrue(resolution.deleted());
+		assertEquals(Kind.UNMERGED, resolution.note().kind());
+		assertEquals(mine.id(), resolution.note().dropped());
+	}
+
+	@Test
+	void twoFirstVersionsOfTheSameBookingDoNotDropTheirChangeSilently() {
+		// beide setzen x nach einem Hallenwechsel auf denselben neuen Sitz (H3); nur Deren hat dabei den Kommentar geändert
+		Version theirs = version(OTHER, booking("x", "s1", b -> b.setComment("Fenster")));
+		Version mine = version(OWN, booking("x", "s1"));
+
+		Resolution resolution = POLICY.resolve(input(S1, null, mine, theirs, theirs));
+
+		assertFalse(resolution.deleted());
+		assertEquals("Fenster", resolution.payload().get("comment").asText(), "Deren's Änderung bleibt");
+	}
+
+	@Test
 	void unreadableNewSaleOnACancelledSeatIsUnmerged() {
 		Version base = version(THIRD, booking("x", "s1"));
 		Version theirDeletion = deletion(OTHER);
@@ -1431,6 +1476,7 @@ class BookingPolicyTest {
 		assertEquals(OWN, note.affected());
 		assertEquals(party(theirDeletion), note.other());
 		assertEquals(myCopy.id(), note.dropped());
+		assertEquals(S2, note.moved(), "die verworfene Version liegt auf der Kopie; dort stellt man wieder her");
 	}
 
 	@Test
@@ -1451,6 +1497,7 @@ class BookingPolicyTest {
 		assertEquals(OTHER, note.affected());
 		assertEquals(party(myDeletion), note.other());
 		assertEquals(theirCopy.id(), note.dropped());
+		assertEquals(S2, note.moved());
 	}
 
 	@Test

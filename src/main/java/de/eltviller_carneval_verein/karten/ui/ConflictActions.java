@@ -94,8 +94,11 @@ public final class ConflictActions {
 	private record VersionRef(UnitKey unit, VersionId id) {
 	}
 
-	/** Wie das Wiederherstellen vorgeht: Inhalt der gelöschten Buchung und der freie Sitz, oder {@code null} für "ohne Platz". */
-	private record Restore(Event event, Presentation presentation, Booking content, Booking placeholder) {
+	/**
+	 * Wie das Wiederherstellen vorgeht: Inhalt der gelöschten Buchung und der freie Sitz, oder {@code null} für "ohne Platz";
+	 * {@code unit} ist die Einheit, die dabei geschrieben wird.
+	 */
+	private record Restore(Event event, Presentation presentation, Booking content, Booking placeholder, UnitKey unit) {
 	}
 
 	private final StoreEventRepository events;
@@ -615,8 +618,7 @@ public final class ConflictActions {
 		Booking before = placeholder == null ? null : placeholder.copy();
 		// die angelegte Buchung "ohne Platz", damit das Zurücksetzen sie wieder entfernt
 		Booking[] added = new Booking[1];
-		UnitKey unit = placeholder != null ? row.conflict().unit()
-				: UnitKey.unassignedBooking(restore.event().getId(), restore.presentation().getId(), content.getId());
+		UnitKey unit = restore.unit();
 		VersionId versionBefore = versionOf(unit);
 		saveOrUndo(unit, versionBefore, this::writtenDespite, () -> {
 			if (placeholder != null) {
@@ -729,10 +731,13 @@ public final class ConflictActions {
 		return halls.readHall(version.payload()) == null ? null : hall;
 	}
 
-	/** Das Vorgehen beim Wiederherstellen; {@code null}, wenn es nichts wiederherzustellen gibt oder die Buchung noch lebt. */
+	/**
+	 * Das Vorgehen beim Wiederherstellen; {@code null}, wenn es nichts wiederherzustellen gibt oder die Buchung noch lebt. Die
+	 * Buchung kommt auf das Ziel des Vermerks ({@link OpenConflict#target()}), wenn es frei ist, sonst "ohne Platz".
+	 */
 	private Restore restoreOf(Row row) {
 		ConflictNote note = row.conflict().note();
-		UnitKey unit = row.conflict().unit();
+		UnitKey unit = row.conflict().target();
 		Event event = note == null ? null : events.findEvent(unit.eventId());
 		Presentation presentation = event == null ? null : event.findPresentation(unit.presentationId());
 		Version version = presentation == null ? null : dropped(row.conflict());
@@ -748,12 +753,12 @@ public final class ConflictActions {
 				|| inOpenLostStretch(unit, bookingId)) {
 			return null;
 		}
-		Booking placeholder = null;
 		if (!unit.isUnassigned() && events.modelObject(unit) instanceof Booking seat
 				&& !seat.hasData() && !storedAt(unit)) {
-			placeholder = seat;
+			return new Restore(event, presentation, content, seat, unit);
 		}
-		return new Restore(event, presentation, content, placeholder);
+		return new Restore(event, presentation, content, null,
+				UnitKey.unassignedBooking(event.getId(), presentation.getId(), bookingId));
 	}
 
 	/** Ob der Index auf der Einheit einen lebenden Stand hat (der Sitz ist dann vergeben, auch wenn das Modell ihn noch nicht kennt). */

@@ -69,7 +69,8 @@ public final class BookingPolicy implements ConflictPolicy {
 	static final Set<String> PAID_STATUSES = Set.of("CASH", "CARD", "TRANSFER");
 
 	@Override
-	public Resolution resolve(ConflictInput input) {
+	public Resolution resolve(ConflictInput given) {
+		ConflictInput input = withBaseFromChain(given);
 		Resolution resolution = bothDeleted(input);
 		if (resolution == null) {
 			resolution = PolicyRules.equal(input);
@@ -98,6 +99,38 @@ public final class BookingPolicy implements ConflictPolicy {
 					mergeBooking(PolicyRules.basePayload(input), input.mine().payload(), input.theirs().payload()));
 		}
 		return resolution;
+	}
+
+	/**
+	 * Hat "Meine" keine Basis, ist "Deren" eine Löschung und trägt ein Glied der gültigen Kette davor dieselbe Buchung (ID)
+	 * wie "Meine", ist "Meine" kein neuer Verkauf, sondern eine Änderung der stornierten Buchung (KARV-118): Ein neuer
+	 * Verkauf bekommt immer eine neue Kennung. Der Rechner kannte die Buchung nur abgeleitet, ohne ihre Version, etwa
+	 * versetzt von einem fremden Wechsel der Bestuhlung, und sein Speichern legte eine Erstfassung an. Dann gilt das älteste
+	 * solche Glied als Basis, die Kette beginnt nach ihm, und die Löschung gewinnt mit Vermerk; sonst gälte "Meine" als
+	 * neuer Verkauf ({@link #saleOnCancelledSeat}), und das Storno ginge still verloren.
+	 * <p>
+	 * Gegen eine lebende Erstfassung derselben Buchung gilt das nicht: Welche Seite dort etwas geändert hat, lässt sich ohne
+	 * gemeinsame Basis nicht sagen (beide setzen etwa dieselbe Buchung nach einem Hallenwechsel um), es bleibt beim
+	 * Feldkonflikt. Eine unlesbare "Meine" bleibt bei {@link #saleOnCancelledSeat} (UNMERGED): Wiederherstellen ließe sie
+	 * sich ohnehin nicht.
+	 */
+	private static ConflictInput withBaseFromChain(ConflictInput input) {
+		String bookingId = idOf(input.mine());
+		if (input.base() != null || !input.theirs().deleted() || bookingId == null) {
+			return input;
+		}
+		List<Version> chain = input.chainSinceBase();
+		for (int i = 0; i < chain.size(); i++) {
+			if (bookingId.equals(idOf(chain.get(i)))) {
+				// erst bei einem Treffer lesen: ohne ihn bleibt es ohnehin bei saleOnCancelledSeat
+				if (!PolicyRules.isReadable(input, input.mine())) {
+					return input;
+				}
+				return new ConflictInput(input.unit(), chain.get(i), input.mine(), input.theirs(),
+						chain.subList(i + 1, chain.size()), input.ownMachineId(), input.siblings(), input.mineSaveIds());
+			}
+		}
+		return input;
 	}
 
 	/**
@@ -180,8 +213,8 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * wenn sie im selben Speichervorgang eine {@link #movedCopy Kopie} angelegt hat. Sonst hat sie storniert.
 	 * <ul>
 	 * <li>Verschoben gegen storniert: Storno gewinnt, die verschobene Einheit bekommt eine Löschung; betroffen ist der
-	 * Rechner, der verschoben hat (Vermerk DELETE_WINS, {@code dropped} ist die Version der verschobenen Einheit). Das
-	 * gilt in beide Richtungen.</li>
+	 * Rechner, der verschoben hat (Vermerk DELETE_WINS, {@code dropped} ist die Version der verschobenen Einheit, {@code moved}
+	 * die Einheit selbst: Dort stellt "Buchung wiederherstellen" sie wieder her). Das gilt in beide Richtungen.</li>
 	 * <li>Beide an verschiedene Sitze verschoben: Die Verschiebung von "Deren" gilt, die eigene verschobene Einheit wird
 	 * gelöscht; Vermerk FIELDS mit der Gruppe "Platz" (beide Plätze aus den verschobenen Einheiten, {@code dropped} ist die
 	 * eigene).</li>
@@ -220,7 +253,8 @@ public final class BookingPolicy implements ConflictPolicy {
 			return new Resolution(theirs.payload(), true, List.of(deletionOf(myCopy)), note);
 		}
 		if (myCopy != null) {
-			ConflictNote note = ConflictNote.deleteWins(input.ownMachineId(), Party.of(theirDeletion), myCopy.version());
+			ConflictNote note = ConflictNote.deleteWins(input.ownMachineId(), Party.of(theirDeletion), myCopy.unit(),
+					myCopy.version());
 			return new Resolution(theirs.payload(), true, List.of(deletionOf(myCopy)), note);
 		}
 		// R31b: Mein Zuweisen aus "ohne Platz" ist am Ziel gescheitert, Deren hat verschoben; Deren gilt, nichts löschen.
@@ -235,7 +269,8 @@ public final class BookingPolicy implements ConflictPolicy {
 			return new Resolution(theirs.payload(), true, List.of(), note);
 		}
 		if (theirCopy != null) {
-			ConflictNote note = ConflictNote.deleteWins(theirDeletion.machine(), Party.of(mine), theirCopy.version());
+			ConflictNote note = ConflictNote.deleteWins(theirDeletion.machine(), Party.of(mine), theirCopy.unit(),
+					theirCopy.version());
 			return new Resolution(theirs.payload(), true, List.of(deletionOf(theirCopy)), note);
 		}
 		return cancelled;

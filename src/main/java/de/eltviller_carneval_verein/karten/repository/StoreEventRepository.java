@@ -826,6 +826,18 @@ public class StoreEventRepository implements EventRepository {
 		return current.isLive() && mine.equals(current.payload());
 	}
 
+	/**
+	 * Ob das Einarbeiten genau diesen fremden Stand im Modell abgeleitet hat ({@link #derived}): etwa die Buchung, die der
+	 * Abgleich nach einem fremden Wechsel der Bestuhlung auf ihren neuen Sitz gesetzt hat, bevor deren Einheit eintraf, so
+	 * wie der andere Rechner sie dort geschrieben hat. Hat der Nutzer sie seither geändert, baut seine Eingabe auf diesem
+	 * Stand auf. Ohne seine Version legte sein Speichern eine Erstfassung neben ihn, und gegen eine spätere Stornierung
+	 * dieser Fassung ginge die Eingabe ohne Vermerk "Gelöscht" unter (KARV-118).
+	 */
+	private boolean derivedAs(UnitSnapshot current) {
+		ObjectNode payload = derived.get(current.unit());
+		return payload != null && current.isLive() && payload.equals(current.payload());
+	}
+
 	/** Übernimmt den Stand in den Vergleichsstand; was das Einarbeiten an der Einheit umgesetzt hatte, gilt damit nicht mehr. */
 	private void adopt(String eventId, UnitSnapshot snapshot, boolean shown) {
 		baseline.adopt(eventId, snapshot, shown);
@@ -935,8 +947,13 @@ public class StoreEventRepository implements EventRepository {
 		for (UnitSnapshot current : successors) {
 			UnitKey unit = current.unit();
 			UnitKey parent = unit.type() == UnitType.BOOKING ? unit.parent() : null;
-			// Eine Stornierung, die eine vom Nutzer berührte versetzte Buchung träfe, wartet wie jede Änderung daran
-			if (isBlocked(event, current, changes)
+			boolean blocked = isBlocked(event, current, changes);
+			if (blocked && derivedAs(current)) {
+				// die Eingabe baut auf genau diesem Stand auf: nur die Version übernehmen (wie SAME), am Modell ändert sich nichts
+				backlog.settle(unit);
+				adopt(eventId, current, true);
+			} else if (blocked
+					// Eine Stornierung, die eine vom Nutzer berührte versetzte Buchung träfe, wartet wie jede Änderung daran
 					|| (lastIds.containsKey(unit) && movedBookingTouched(event, changes, lastIds.get(unit), unit))) {
 				defer(event, current, chainOf(chains, unit));
 			} else if (parent != null && event != null && !appliedPresentations.contains(parent)

@@ -34,6 +34,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
@@ -59,7 +61,10 @@ import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.ui.ConflictActions;
 import de.eltviller_carneval_verein.karten.ui.ConflictList;
+import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 
 /**
  * Konflikte Ende zu Ende über zwei oder drei Rechner: Jeder Rechner hat einen eigenen Dienst mit den Strategien aus
@@ -682,6 +687,269 @@ class ConflictScenarioTest {
 			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
 			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
 		}
+	}
+
+	/**
+	 * KARV-118, zwei Rechner: A verschiebt Müller von Hand und ändert ihn (ungespeichert), B storniert ihn auf dem alten
+	 * Sitz. Das Storno wird bei A zurückgestellt und beim Speichern vergessen; die Auflösung am alten Sitz (verschoben gegen
+	 * storniert) lässt es trotzdem gelten.
+	 */
+	@Test
+	void moveByHandAgainstACancellationLosesWithANoteAfterSaving() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Booking muller = a.seat(0);
+		String mullerId = muller.getId();
+		assertTrue(BookingSync.assign(a.friday(), a.plan(), muller, a.plan().getSeats().get(1)));
+		muller.setFirstName("Hans");
+		b.seat(0).clearCustomerData();
+		b.repository.saveEvent(b.event);
+		for (int round = 0; round < 4 && a.repository.retryDeferred().deferred().isEmpty(); round++) {
+			clock.advance(ROUND);
+			b.tick();
+			clock.advance(ROUND);
+			a.tick();
+		}
+		assertEquals(List.of(seatUnit(a, 0)), a.repository.retryDeferred().deferred().stream().map(Deferral::unit).toList(),
+				"das Storno wartet auf A's Eingabe");
+
+		a.repository.saveEvent(a.event);
+		untilQuiet(a, b);
+
+		assertCancellationWinsWithRestorableNote(a, mullerId, m);
+		for (Machine machine : m) {
+			assertEquals(mullerId, machine.seat(1).getId(), machine.name + ": wiederhergestellt auf A's neuem Sitz");
+		}
+	}
+
+	/**
+	 * KARV-118, zwei Rechner: B storniert Müller und stellt danach die Vorstellung auf eine andere Halle um. A bekommt zuerst
+	 * nur die Umstellung (Müller wird versetzt, ohne Sitz in der neuen Bestuhlung "ohne Platz") und ändert Müller
+	 * ungespeichert; das Storno wird zurückgestellt, dann speichert A.
+	 */
+	@ParameterizedTest
+	@ValueSource(booleans = { true, false })
+	void editOfABookingMovedByASwitchLosesToTheCancellationBeforeIt(boolean withSeats) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Hall other = secondHall(withSeats, m);
+		String mullerId = a.seat(0).getId();
+		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
+		b.seat(0).clearCustomerData();
+		b.repository.saveEvent(b.event);
+		b.friday().setHallId(other.getId());
+		BookingSync.switchPlan(b.friday(), other.getSeatingPlans().get(0));
+		b.repository.saveEvent(b.event);
+		clock.advance(ROUND);
+		b.tick();
+		// A arbeitet die Meldungen von Hand ein, um das Zeitfenster zu treffen
+		a.events.halls = null;
+		clock.advance(ROUND);
+		a.tick();
+		Booking moved = editMovedBooking(a, mullerId, presentation);
+		assertEquals(!withSeats, moved.isUnassigned());
+		String newSeatId = moved.getSeatId();
+
+		saveAfterDeferral(a, m);
+
+		assertCancellationWinsWithRestorableNote(a, mullerId, m);
+		for (Machine machine : m) {
+			Booking restored = booking(machine, mullerId);
+			assertEquals(!withSeats, restored.isUnassigned(), machine.name);
+			if (withSeats) {
+				assertEquals(newSeatId, restored.getSeatId(), machine.name + ": wiederhergestellt auf A's neuem Sitz");
+			}
+		}
+	}
+
+	/**
+	 * KARV-118, zwei Rechner: A ändert Müller auf seinem Sitz (ungespeichert). B storniert Müller und löscht danach dessen
+	 * Tisch aus der Halle. Bei A kommt zuerst die Halle an, und der Abgleich setzt Müller "ohne Platz"; dann kommt das
+	 * Storno und wird zurückgestellt, und A speichert.
+	 */
+	@Test
+	void editOfABookingDerivedAwayAfterwardsLosesToTheCancellation() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Booking muller = a.seat(0);
+		String mullerId = muller.getId();
+		muller.setFirstName("Hans");
+		b.seat(0).clearCustomerData();
+		b.repository.saveEvent(b.event);
+		b.plan().deleteTable(b.plan().getTables().get(0));
+		b.halls.saveHall(b.hall);
+		clock.advance(ROUND);
+		b.tick();
+		// A arbeitet die Meldungen von Hand ein: zuerst die Halle samt Abgleich wie die App, dann das Event
+		a.events.halls = null;
+		clock.advance(ROUND);
+		a.tick();
+		a.hall = a.halls.reloadHalls().get(0);
+		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		assertTrue(muller.isUnassigned(), "der Abgleich setzt Müller ohne Platz");
+		assertEquals("Hans", muller.getFirstName());
+
+		saveAfterDeferral(a, m);
+
+		assertCancellationWinsWithRestorableNote(a, mullerId, m);
+		for (Machine machine : m) {
+			assertTrue(booking(machine, mullerId).isUnassigned(), machine.name + ": wiederhergestellt ohne Platz");
+		}
+	}
+
+	/**
+	 * KARV-118, drei Rechner: C stellt die Vorstellung auf eine andere Halle um, B kennt die Umstellung nicht und storniert
+	 * Müller auf dem alten Sitz. A bekommt zuerst nur die Umstellung (Müller wird versetzt) und ändert Müller ungespeichert;
+	 * C's neuer Sitz und das Storno werden zurückgestellt, dann speichert A. Mit {@code othersResolveFirst} sind B und C sich
+	 * am alten Sitz schon einig (die Kopie ist gelöscht), bevor A speichert; früher galt A's Erstfassung am neuen Sitz dann
+	 * als neuer Verkauf, und das Storno ging verloren. Sonst speichert A vorher, und A's Eingabe wich mit dem falschen
+	 * Vermerk.
+	 */
+	@ParameterizedTest
+	@ValueSource(booleans = { false, true })
+	void editOfABookingMovedByAForeignSwitchLosesToACancellationWithNote(boolean othersResolveFirst) throws IOException {
+		Machine[] m = machines("a", "b", "c");
+		Machine a = m[0];
+		Machine b = m[1];
+		Machine c = m[2];
+		setUp(a, b, c);
+		Hall other = secondHall(true, m);
+		String mullerId = a.seat(0).getId();
+		String oldSeatId = a.seat(0).getSeatId();
+		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
+		// A arbeitet die Meldungen von Hand ein, um das Zeitfenster zu treffen
+		a.events.halls = null;
+		c.friday().setHallId(other.getId());
+		BookingSync.switchPlan(c.friday(), other.getSeatingPlans().get(0));
+		c.repository.saveEvent(c.event);
+		b.seat(0).clearCustomerData();
+		b.repository.saveEvent(b.event);
+		clock.advance(ROUND);
+		c.tick();
+		b.tick();
+		if (othersResolveFirst) {
+			untilQuiet(b, c);
+		}
+		for (int round = 0; round < 3; round++) {
+			clock.advance(ROUND);
+			a.tick();
+		}
+		Booking moved = editMovedBooking(a, mullerId, presentation);
+		assertNotEquals(oldSeatId, moved.getSeatId(), "Müller ist versetzt");
+		UnitKey newSeat = UnitKey.booking(a.event.getId(), a.friday().getId(), moved.getSeatId());
+
+		saveAfterDeferral(a, m);
+
+		assertEquals(List.of(newSeat), a.open().stream().map(OpenConflict::unit).toList(), a.open().toString());
+		assertCancellationWinsWithRestorableNote(a, mullerId, m);
+		for (Machine machine : m) {
+			assertEquals(newSeat.bookingDir(), booking(machine, mullerId).getSeatId(), machine.name);
+		}
+	}
+
+	/**
+	 * Das Storno der Buchung gilt auf allen Rechnern. {@code loser} hat genau einen offenen Konflikt, den Vermerk
+	 * "Gelöscht" mit seinem Stand (Vorname "Hans"), und nichts ist ungespeichert oder zurückgestellt. "Buchung
+	 * wiederherstellen" bringt diesen Stand auf allen Rechnern zurück.
+	 */
+	private void assertCancellationWinsWithRestorableNote(Machine loser, String bookingId, Machine... machines)
+			throws IOException {
+		assertConverged(machines);
+		assertEquals(Set.of(), carriers(loser, bookingId), "das Storno gilt");
+		List<OpenConflict> open = loser.open();
+		assertEquals(1, open.size(), open.toString());
+		OpenConflict conflict = open.get(0);
+		assertEquals(ConflictNote.Kind.DELETE_WINS, conflict.note().kind(), open.toString());
+		// die verworfene Version liegt auf dem Ziel des Vermerks; dort sucht und schreibt das Wiederherstellen
+		assertEquals("Hans", loser.sync.version(conflict.target(), conflict.note().dropped()).payload().get("firstName")
+				.asText(), "der Vermerk trägt den eigenen Stand zum Wiederherstellen");
+		for (Machine machine : machines) {
+			assertTrue(machine.friday().getBookings().stream().noneMatch(x -> bookingId.equals(x.getId())), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+		}
+
+		List<ConflictList.Row> rows = new ConflictList(loser::open, unit -> unit.relativePath(),
+				(adopted, group) -> false, hallId -> null).rows();
+		assertEquals(1, rows.size(), rows.toString());
+		ConflictList.Row row = rows.get(0);
+		assertEquals(ConflictList.Action.RESTORE_BOOKING, row.action());
+		new ConflictActions(loser.repository, loser.halls, new ChangeTracker<>(Event::getId),
+				new ChangeTracker<>(Hall::getId), new EditingUnits(), loser.sync, event -> {
+					loser.repository.saveEvent(event);
+					return true;
+				}, hall -> true).restoreBooking(row);
+		untilQuiet(machines);
+
+		assertConverged(machines);
+		assertEquals(List.of(), loser.open());
+		for (Machine machine : machines) {
+			assertEquals("Hans", booking(machine, bookingId).getFirstName(), machine.name);
+		}
+	}
+
+	/** Die Buchung mit dieser Kennung im Modell des Rechners. */
+	private static Booking booking(Machine machine, String bookingId) {
+		return machine.friday().getBookings().stream().filter(x -> bookingId.equals(x.getId())).findFirst()
+				.orElseThrow(() -> new AssertionError(machine.name + ": die Buchung fehlt"));
+	}
+
+	/**
+	 * Bei {@code machine} kommt nur die Vorstellung an (der Abgleich versetzt die Buchung), dann ändert der Nutzer den
+	 * Vornamen der Buchung ungespeichert in "Hans". Der Rechner arbeitet nichts selbsttätig ein ({@code events.halls} ist
+	 * {@code null}).
+	 */
+	private static Booking editMovedBooking(Machine machine, String bookingId, UnitKey presentation) {
+		machine.repository.applyForeign(List.of(presentation));
+		Booking moved = booking(machine, bookingId);
+		moved.setFirstName("Hans");
+		return moved;
+	}
+
+	/**
+	 * Bei {@code machine} kommt alles Übrige an und wartet auf die Eingabe des Nutzers; dann speichert er, arbeitet wieder
+	 * selbsttätig ein, und alle Rechner takten, bis Ruhe herrscht.
+	 */
+	private void saveAfterDeferral(Machine machine, Machine... machines) throws IOException {
+		assertFalse(machine.repository.applyForeign(List.copyOf(machine.eventState().keySet())).deferred().isEmpty(),
+				"die fremden Stände warten auf die Eingabe");
+		assertEquals("Hans", machine.friday().getBookings().stream().filter(Booking::hasData).findFirst().orElseThrow()
+				.getFirstName(), "die Eingabe bleibt");
+		machine.repository.saveEvent(machine.event);
+		machine.events.halls = machine.halls;
+		untilQuiet(machines);
+	}
+
+	/**
+	 * Eine zweite Halle "Bürgerhaus", angelegt vom ersten Rechner und bei allen angekommen; die Repositories aller Rechner
+	 * finden ihre Hallen über ihr Hallen-Repository. Mit {@code withSeats} hat ihre Bestuhlung eine Reihe A mit einem Tisch
+	 * zu 2 Sitzen, sonst keinen Sitz.
+	 */
+	private Hall secondHall(boolean withSeats, Machine... machines) {
+		Hall other = new Hall();
+		other.setName("Bürgerhaus");
+		SeatingPlan plan = other.addSeatingPlan();
+		if (withSeats) {
+			TableRow row = plan.addRow();
+			row.setLabel("A");
+			plan.fillRow(row, 1, 2);
+		}
+		machines[0].halls.saveHall(other);
+		machines[0].tick();
+		clock.advance(ROUND);
+		for (Machine machine : machines) {
+			if (machine != machines[0]) {
+				machine.tick();
+			}
+			machine.repository.setHallLookup(machine.halls::findById);
+		}
+		return other;
 	}
 
 	/** Die lebenden Einheiten des Events, deren Buchung diese Kennung trägt. */
