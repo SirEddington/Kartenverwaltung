@@ -68,13 +68,27 @@ public record ConflictNote(Kind kind, String affected, Party other, List<FieldCo
 	/** Die Art des Konflikts. */
 	public enum Kind {
 		/** Derselbe Platz wurde zweimal verkauft. */
-		DOUBLE_SALE,
+		DOUBLE_SALE(true),
 		/** Dieselben Felder wurden auf beiden Seiten verschieden geändert. */
-		FIELDS,
+		FIELDS(false),
 		/** Die eine Seite löschte, die andere änderte; die Löschung setzte sich durch. */
-		DELETE_WINS,
+		DELETE_WINS(false),
 		/** Eine Zusammenführung war nicht möglich. */
-		UNMERGED
+		UNMERGED(true);
+
+		private final boolean keepsTheirs;
+
+		Kind(boolean keepsTheirs) {
+			this.keepsTheirs = keepsTheirs;
+		}
+
+		/**
+		 * Ob die Zusammenführung mit diesem Vermerk den Inhalt der Gegenseite unverändert behält und der des Schreibenden
+		 * weicht. Wer eine neue Art einführt, entscheidet das hier.
+		 */
+		public boolean keepsTheirs() {
+			return keepsTheirs;
+		}
 	}
 
 	/**

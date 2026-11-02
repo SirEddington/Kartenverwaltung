@@ -156,15 +156,13 @@ final class ConflictLedger {
 
 	/**
 	 * Ob die eigene Version nur die ID dieses Rechners trägt, ihr Inhalt aber der der Gegenseite ist: bei einem Doppelverkauf
-	 * ({@link ConflictNote.Kind#DOUBLE_SALE}) oder einer unmöglichen Zusammenführung ({@link ConflictNote.Kind#UNMERGED})
-	 * bleibt "Deren", und "Meine" weicht. Der Verkauf darin ist der der Gegenseite, nicht einer, den der Löschende von diesem
-	 * Rechner nicht kannte (der ausgewichene eigene steht in seiner eigenen Einheit).
+	 * oder einer unmöglichen Zusammenführung bleibt "Deren", und "Meine" weicht ({@link ConflictNote.Kind#keepsTheirs}). Der
+	 * Verkauf darin ist der der Gegenseite, nicht einer, den der Löschende von diesem Rechner nicht kannte (der ausgewichene
+	 * eigene steht in seiner eigenen Einheit). Bei gemischtem Inhalt (FIELDS) zählt die Version weiter.
 	 */
 	private static boolean carriesForeignContent(UnitIndex.Entry entry, VersionId version) {
 		for (UnitIndex.NotedVersion noted : entry.notes()) {
-			ConflictNote.Kind kind = noted.note().kind();
-			if (noted.version().equals(version)
-					&& (kind == ConflictNote.Kind.DOUBLE_SALE || kind == ConflictNote.Kind.UNMERGED)) {
+			if (noted.version().equals(version) && noted.note().kind().keepsTheirs()) {
 				return true;
 			}
 		}

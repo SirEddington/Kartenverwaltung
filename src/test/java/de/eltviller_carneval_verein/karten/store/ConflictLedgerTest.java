@@ -413,20 +413,26 @@ class ConflictLedgerTest {
 
 	@Test
 	void doubleSaleMergeCarriesTheWinnersBookingAndIsNotOwnUnderTheDeletion() throws IOException {
-		assertMergeOfLosingSaleIsNotOwnUnderTheDeletion(ConflictNote.Kind.DOUBLE_SALE);
+		assertMergeOfLosingSaleUnderTheDeletion(ConflictNote.Kind.DOUBLE_SALE, false);
 	}
 
 	@Test
 	void unmergedMergeCarriesTheTheirsContentAndIsNotOwnUnderTheDeletion() throws IOException {
-		assertMergeOfLosingSaleIsNotOwnUnderTheDeletion(ConflictNote.Kind.UNMERGED);
+		assertMergeOfLosingSaleUnderTheDeletion(ConflictNote.Kind.UNMERGED, false);
+	}
+
+	@Test
+	void fieldsMergeMixesBothContentsAndStaysOwnUnderTheDeletion() throws IOException {
+		assertMergeOfLosingSaleUnderTheDeletion(ConflictNote.Kind.FIELDS, true);
 	}
 
 	/**
-	 * A verkauft den Platz und B verkauft ihn auch; B schreibt die Zusammenführung (Inhalt: die Buchung von A, ID: die von B),
-	 * dazu seinen ausgewichenen Verkauf. A löscht die Vorstellung, ohne die Zusammenführung zu kennen: Unter der Löschung ist
-	 * für B nur der ausgewichene Verkauf eigen.
+	 * A verkauft den Platz und B verkauft ihn auch; B schreibt die Zusammenführung (ID: die von B, Inhalt bei DOUBLE_SALE und
+	 * UNMERGED die Buchung von A, bei FIELDS gemischt), dazu seinen ausgewichenen Verkauf. A löscht die Vorstellung, ohne die
+	 * Zusammenführung zu kennen: Unter der Löschung ist für B der ausgewichene Verkauf eigen, die Zusammenführung nur, wenn
+	 * ihr Inhalt gemischt ist ({@code saleCounts}).
 	 */
-	private void assertMergeOfLosingSaleIsNotOwnUnderTheDeletion(ConflictNote.Kind kind) throws IOException {
+	private void assertMergeOfLosingSaleUnderTheDeletion(ConflictNote.Kind kind, boolean saleCounts) throws IOException {
 		Path appData = dir.resolve("app");
 		SyncService service = single(appData);
 		String me = idOf(appData);
@@ -436,8 +442,11 @@ class ConflictLedgerTest {
 		UnitKey moved = UnitKey.unassignedBooking("e1", "p1", me);
 		own(service, moved, List.of(), name("Anna"));
 		ConflictNote.Party other = new ConflictNote.Party(FOREIGN, "Kasse 2", "Bert", winner.id());
-		ConflictNote note = kind == ConflictNote.Kind.DOUBLE_SALE ? ConflictNote.doubleSale(me, other, moved, null, mine.id())
-				: ConflictNote.unmerged(me, other, mine.id());
+		ConflictNote note = switch (kind) {
+		case DOUBLE_SALE -> ConflictNote.doubleSale(me, other, moved, null, mine.id());
+		case UNMERGED -> ConflictNote.unmerged(me, other, mine.id());
+		default -> ConflictNote.ofFields(me, other, List.of(), null, mine.id());
+		};
 		Version merge = service.append(UUID.randomUUID().toString(),
 				List.of(new Change(SALE, List.of(winner.id(), mine.id()), winner.payload(), false, note, Map.of()))).get(0);
 		assertEquals(merge.id(), service.unitState(SALE).head().id(), "die eigene Zusammenführung ist der aktuelle Stand");
@@ -447,8 +456,8 @@ class ConflictLedgerTest {
 
 		assertEquals(1, deletions.size());
 		assertEquals(deletion.id(), deletions.get(0).id());
-		assertEquals(List.of(moved), deletions.get(0).deletion().affected(),
-				"der Verkauf des Gewinners in der Zusammenführung ist nicht eigen, der ausgewichene eigene schon");
+		assertEquals(saleCounts ? List.of(SALE, moved) : List.of(moved), deletions.get(0).deletion().affected(),
+				"der Verkauf in der Zusammenführung zählt nur bei gemischtem Inhalt, der ausgewichene eigene immer");
 	}
 
 	@Test

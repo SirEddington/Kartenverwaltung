@@ -53,27 +53,30 @@ final class ForeignBacklog {
 	 * Stand eine eigene Zusammenführung, die einen Konflikt dieses Rechners vermerkt ({@link SyncService#isOwnNotedMerge}),
 	 * entfällt der Hinweis: Er nennte den eigenen Rechner als "anderen Rechner", den Konflikt zeigt der Dialog. Eine eigene
 	 * Zusammenführung ohne solchen Vermerk bringt nur fremde Änderungen und bekommt den Hinweis (Ruling R27). Still ist auch
-	 * eine weitere Änderung derselben Auflösung (Löschung oder Übertragung auf eine Geschwister-Einheit, KARV-96). Nachgesehen
-	 * wird das einmal je Version (die Einheit wird bei jedem Aufruf von {@code applyForeign} erneut zurückgestellt); lässt
-	 * sich die Version nicht lesen, bleibt der Hinweis.
+	 * eine weitere Änderung derselben Auflösung (Löschung oder Übertragung auf eine Geschwister-Einheit, KARV-96). Die Einheit
+	 * wird bei jedem Aufruf von {@code applyForeign} erneut zurückgestellt: Still bleibt, was schon still war. Sonst wird
+	 * erneut nachgesehen, denn der Vermerk einer Zusammenführung kann beim ersten Mal noch nicht im Index stehen; lässt sich
+	 * die Version nicht lesen, bleibt der Hinweis, und die Warnung steht nur beim ersten Mal im Log.
 	 *
 	 * @param current der Stand; ohne Version (gesperrt, kein lesbares Glied) nie still
 	 * @param model   das Objekt im Modell, das der Hinweis nennt
 	 */
 	void defer(UnitSnapshot current, List<ChainStep> chain, Object model, SyncService sync) {
 		Deferral before = deferred.get(current.unit());
-		boolean silent = before != null && Objects.equals(before.version(), current.version()) ? before.silent()
-				: isOwnNotedMerge(current, sync);
+		boolean sameVersion = before != null && Objects.equals(before.version(), current.version());
+		boolean silent = sameVersion && before.silent() || isOwnNotedMerge(current, sync, !sameVersion);
 		defer(silent ? Deferral.silent(current.unit(), current.version(), chain, model)
 				: Deferral.of(current.unit(), current.version(), chain, model));
 	}
 
-	private static boolean isOwnNotedMerge(UnitSnapshot current, SyncService sync) {
+	private static boolean isOwnNotedMerge(UnitSnapshot current, SyncService sync, boolean warn) {
 		try {
 			return sync.isOwnNotedMerge(current.unit(), current.version());
 		} catch (IOException e) {
-			LOG.log(Level.WARNING, "Ob der Stand von " + current.unit().relativePath()
-					+ " eine eigene Zusammenführung ist, ließ sich nicht lesen", e);
+			if (warn) {
+				LOG.log(Level.WARNING, "Ob der Stand von " + current.unit().relativePath()
+						+ " eine eigene Zusammenführung ist, ließ sich nicht lesen", e);
+			}
 			return false;
 		}
 	}
