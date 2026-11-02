@@ -19,15 +19,28 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  *                Event-Kopfs oder einer Vorstellung unverändert übernimmt, etwa die der Löschung, die eine Zusammenführung
  *                übernimmt; {@code null}: die Positionen dieses Rechners zum Zeitpunkt des Schreibens. Bei jeder anderen
  *                Änderung ohne Wirkung
+ * @param marks   Umzug und Herkunft aus einer Auflösung, die in die Version übernommen werden; nie {@code null}
  */
 public record Change(UnitKey unit, List<VersionId> parents, ObjectNode payload, boolean deleted, ConflictNote note,
-		Map<String, Long> seen) {
+		Map<String, Long> seen, VersionMarks marks) {
 
 	/** Prüft Einheit und Vorgänger und macht die Liste unveränderlich. */
 	public Change {
 		Objects.requireNonNull(unit, "unit");
 		parents = List.copyOf(parents);
 		seen = seen == null ? null : Map.copyOf(seen);
+		marks = marks == null ? VersionMarks.NONE : marks;
+	}
+
+	/** Eine Änderung ohne Umzugsangaben. */
+	public Change(UnitKey unit, List<VersionId> parents, ObjectNode payload, boolean deleted, ConflictNote note,
+			Map<String, Long> seen) {
+		this(unit, parents, payload, deleted, note, seen, VersionMarks.NONE);
+	}
+
+	/** Dieselbe Änderung mit diesen Angaben. */
+	public Change withMarks(VersionMarks newMarks) {
+		return new Change(unit, parents, payload, deleted, note, seen, newMarks);
 	}
 
 	/** Eine gewöhnliche Änderung ohne Konfliktvermerk. */

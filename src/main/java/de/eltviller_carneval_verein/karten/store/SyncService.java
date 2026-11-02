@@ -1284,7 +1284,7 @@ public final class SyncService implements ConnectionControl {
 				me = machine;
 			}
 			Version version = new Version(StoreCodec.FORMAT, id, change.parents(), me.id(), me.name(),
-					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), seen);
+					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), seen, change.marks());
 			byte[] bytes = StoreCodec.write(version);
 			try {
 				if (local.writeVersion(change.unit(), version.id(), bytes)) {
@@ -3817,19 +3817,11 @@ public final class SyncService implements ConnectionControl {
 					.filter(unit -> unit.type() == UnitType.BOOKING && unit.presentationId().equals(booking.presentationId())
 							&& !unit.equals(booking))
 					.sorted(Comparator.comparing(UnitKey::relativePath)).toList();
-			Map<UnitKey, List<ChainStep>> chains = index.chains(keys);
 			Map<UnitKey, ConflictInput.Sibling> siblings = new LinkedHashMap<>();
 			for (UnitKey unit : keys) {
-				List<ChainStep> chain = chains.getOrDefault(unit, List.of());
-				ChainStep head = chain.isEmpty() ? null : chain.get(chain.size() - 1);
-				siblings.put(unit, new ConflictInput.Sibling(event.get(unit), head, Set.of(), null, List.of(), chain));
+				siblings.put(unit, new ConflictInput.Sibling(event.get(unit)));
 			}
 			return siblings;
-		}
-
-		@Override
-		public Set<UnitKey> withOwnVersionsBesideChain(Collection<UnitKey> units) {
-			return index.withOwnBesideChain(units);
 		}
 
 		/** Schreibt ohne den Merker der Schutzregel: Was die Auflösung schreibt, zählt nicht. */

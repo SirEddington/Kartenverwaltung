@@ -448,6 +448,19 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void appendWritesMarks() throws IOException {
+		Node a = node("a");
+		assertTrue(a.service.startup(""));
+		UnitKey from = UnitKey.unassignedBooking(BOOKING.eventId(), BOOKING.presentationId(), "m");
+		VersionMarks marks = new VersionMarks(null, from, true);
+
+		Version v = save(a, new Change(BOOKING, List.of(), payload("Anna"), false).withMarks(marks));
+
+		assertEquals(marks, v.marks());
+		assertEquals(marks, StoreCodec.readVersion(Files.readAllBytes(localFile(a, BOOKING, v.id() + ".json"))).marks());
+	}
+
+	@Test
 	void sharedModeUploadsAndValidates() throws IOException {
 		Node a = node("a");
 		assertTrue(a.service.startup(shared));

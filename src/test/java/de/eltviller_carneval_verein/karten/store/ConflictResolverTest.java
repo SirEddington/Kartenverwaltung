@@ -14,7 +14,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -276,11 +275,6 @@ class ConflictResolverTest {
 			}
 
 			@Override
-			public Set<UnitKey> withOwnVersionsBesideChain(Collection<UnitKey> units) {
-				return Set.of();
-			}
-
-			@Override
 			public List<Version> append(String saveId, List<Change> changes) {
 				throw new AssertionError("nichts zu schreiben");
 			}
@@ -330,6 +324,50 @@ class ConflictResolverTest {
 		assertEquals(1, policy.inputs.size());
 	}
 
+	/** KARV-93: Was die Auflösung schreibt, trägt {@code resolution} und keine Umzugsangaben. */
+	@Test
+	void resolutionMarksEveryWrite() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(new Change(MOVED, List.of(), MAPPER.createObjectNode().put("id", "X"), false)
+				.withMarks(VersionMarks.NONE.withMovedFrom(BOOKING)));
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		loss(service, appData, BOOKING);
+
+		service.tick();
+
+		assertEquals(VersionMarks.RESOLUTION, service.unitState(BOOKING).head().marks());
+		assertEquals(VersionMarks.RESOLUTION, service.unitState(MOVED).head().marks());
+	}
+
+	/** KARV-93: Die Strategie bekommt die ganze Strecke und die Ordner der Einheiten auf der Umzugsspur. */
+	@Test
+	void trailIsHandedToTheBookingPolicy() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		RecordingPolicy policy = new RecordingPolicy();
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		ObjectNode x = MAPPER.createObjectNode().put("id", "X");
+		Version base = own(service, MOVED, List.of(), x);
+		// ein anderer Rechner verkauft T auf A-1; dieser Rechner weist X dorthin zu und ändert danach den Kommentar
+		foreign(service, appData, BOOKING, List.of(), MAPPER.createObjectNode().put("id", "T"), false, Map.of());
+		List<Version> assigned = service.append("save-a", List.of(
+				new Change(MOVED, List.of(base.id()), null, true).withMarks(VersionMarks.NONE.withMovedTo(BOOKING)),
+				new Change(BOOKING, List.of(), x.deepCopy().put("seat", "A-1"), false)
+						.withMarks(VersionMarks.NONE.withMovedFrom(MOVED))));
+		Version later = service.append("save-c", List.of(new Change(BOOKING, List.of(assigned.get(1).id()),
+				x.deepCopy().put("seat", "A-1").put("comment", "Fenster"), false))).get(0);
+		assertEquals(1, service.unitState(BOOKING).lost().size());
+
+		service.tick();
+
+		ConflictInput input = policy.inputs.stream().filter(i -> i.unit().equals(BOOKING)).findFirst().orElseThrow();
+		assertEquals(List.of(assigned.get(1).id(), later.id()), ids(input.stretch()));
+		assertEquals(Set.of(BOOKING, MOVED), input.trail().keySet());
+		assertEquals(ids(service.unitState(MOVED).chain()), ids(input.trail().get(MOVED).chain()));
+	}
+
 	@Test
 	void inputCarriesBaseMineTheirsAndChain() throws IOException {
 		Path appData = dir.resolve("app");
@@ -353,7 +391,6 @@ class ConflictResolverTest {
 		assertEquals(Set.of(OTHER_SEAT), input.siblings().keySet(), "nur die anderen Buchungen derselben Vorstellung");
 		ConflictInput.Sibling sibling = input.siblings().get(OTHER_SEAT);
 		assertEquals(name("Dora"), sibling.snapshot().payload());
-		assertEquals(sibling.snapshot().version(), sibling.head().version());
 
 		// die Inhalte der Eingabe sind Kopien: Was die Strategie ändert, erreicht weder Index noch Bestand
 		input.mine().payload().put("name", "verändert");
@@ -379,137 +416,6 @@ class ConflictResolverTest {
 		UnitState state = service.unitState(BOOKING);
 		assertTrue(state.lost().isEmpty());
 		assertEquals(List.of(merge.id(), again.id()), state.head().parents());
-	}
-
-	@Test
-	void siblingsWithTheBookingOfTheBaseCarryAllTheirSaveIds() throws IOException {
-		Path appData = dir.resolve("app");
-		SyncService service = single(appData);
-		RecordingPolicy policy = new RecordingPolicy();
-		service.setConflictPolicy(UnitType.BOOKING, policy);
-		ObjectNode booking = MAPPER.createObjectNode().put("id", "X").put("name", "Anna");
-		// die Buchung X lebt auch auf A-2: dorthin verschoben in einem Speichervorgang, später in einem anderen geändert
-		Version moved = service.append("save-move",
-				List.of(new Change(OTHER_SEAT, List.of(), booking.deepCopy().put("name", "Anna auf A-2"), false))).get(0);
-		service.append("save-later",
-				List.of(new Change(OTHER_SEAT, List.of(moved.id()), booking.deepCopy().put("name", "Anna, Rollstuhl"), false)));
-		UnitKey otherBooking = UnitKey.booking("e1", "p1", "A-3");
-		service.append("save-other",
-				List.of(new Change(otherBooking, List.of(), MAPPER.createObjectNode().put("id", "Y"), false)));
-		Version base = own(service, BOOKING, List.of(), booking);
-		foreign(service, appData, BOOKING, List.of(base.id()), name("Bert"), false, Map.of());
-		own(service, BOOKING, List.of(base.id()), name("Carla"));
-
-		service.tick();
-
-		ConflictInput input = policy.inputs.get(0);
-		assertEquals(Set.of("save-move", "save-later"), input.siblings().get(OTHER_SEAT).saveIds());
-		assertEquals(Set.of(), input.siblings().get(otherBooking).saveIds(), "eine andere Buchung: kein Dateizugriff");
-	}
-
-	@Test
-	void siblingWithTheLostTargetOfMyMoveCarriesIt() throws IOException {
-		Path appData = dir.resolve("app");
-		SyncService service = single(appData);
-		RecordingPolicy policy = new RecordingPolicy();
-		service.setConflictPolicy(UnitType.BOOKING, policy);
-		ObjectNode booking = MAPPER.createObjectNode().put("id", "X").put("name", "Anna");
-		Version base = own(service, BOOKING, List.of(), booking);
-		foreign(service, appData, BOOKING, List.of(base.id()), booking.deepCopy().put("name", "Anna bezahlt"), false,
-				Map.of());
-		// auf A-2 verkauft ein anderer Rechner zuerst T; danach zieht dieser Rechner X in einem Speichervorgang dorthin um
-		foreign(service, appData, OTHER_SEAT, List.of(), MAPPER.createObjectNode().put("id", "T"), false, Map.of());
-		List<Version> move = service.append("save-move", List.of(new Change(BOOKING, List.of(base.id()), null, true),
-				new Change(OTHER_SEAT, List.of(), booking.deepCopy().put("name", "Anna am Fenster"), false)));
-		UnitKey otherBooking = UnitKey.booking("e1", "p1", "A-3");
-		service.append("save-move", List.of(new Change(otherBooking, List.of(), MAPPER.createObjectNode().put("id", "Y"),
-				false)));
-		assertEquals(1, service.unitState(BOOKING).lost().size());
-		assertEquals(1, service.unitState(OTHER_SEAT).lost().size());
-
-		service.tick();
-
-		ConflictInput input = policy.inputs.stream().filter(i -> i.unit().equals(BOOKING)).findFirst().orElseThrow();
-		ConflictInput.Sibling target = input.siblings().get(OTHER_SEAT);
-		assertEquals(move.get(1).id(), target.lostMove().id(), "das verlorene Ziel des Umzugs");
-		assertEquals("Anna am Fenster", target.lostMove().payload().get("name").asText());
-		assertNull(input.siblings().get(otherBooking).lostMove(),
-				"eine Einheit ohne eigene Versionen neben ihrer Kette: kein Dateizugriff, kein Ziel");
-		// ohne Löschung als "Meine" kein Ziel
-		ConflictInput seatInput = policy.inputs.stream().filter(i -> i.unit().equals(OTHER_SEAT)).findFirst().orElseThrow();
-		assertNull(seatInput.siblings().get(BOOKING).lostMove());
-	}
-
-	/**
-	 * R35: Die Eingabe trägt die Speichervorgänge der ganzen verlorenen Strecke, und die Einheit {@code _<ID>} der Buchung
-	 * von "Meine" ihre Löschungen mit ihrem Stand: ohne Zusammenführungen und ohne die, die schon vor der Strecke dort
-	 * lagen.
-	 */
-	@Test
-	void stretchCarriesAllItsSavesAndMyUnassignedUnitItsDeletions() throws IOException {
-		Path appData = dir.resolve("app");
-		SyncService service = single(appData);
-		RecordingPolicy policy = new RecordingPolicy();
-		service.setConflictPolicy(UnitType.BOOKING, policy);
-		ObjectNode booking = MAPPER.createObjectNode().put("id", "X").put("name", "Anna");
-		// X stand schon früher ohne Platz, wurde von dort gelöscht und wieder angelegt: eine ältere Löschung
-		Version first = service.append("save-first", List.of(new Change(MOVED, List.of(), booking.deepCopy(), false)))
-				.get(0);
-		Version earlier = service.append("save-earlier", List.of(new Change(MOVED, List.of(first.id()), null, true)))
-				.get(0);
-		Version base = service.append("save-0",
-				List.of(new Change(MOVED, List.of(earlier.id()), booking.deepCopy(), false))).get(0);
-		// auf A-1 verkauft ein anderer Rechner zuerst T; dieser Rechner weist X dorthin zu und ändert X danach dort noch
-		foreign(service, appData, BOOKING, List.of(), MAPPER.createObjectNode().put("id", "T"), false, Map.of());
-		List<Version> assign = service.append("save-a", List.of(new Change(MOVED, List.of(base.id()), null, true),
-				new Change(BOOKING, List.of(), booking.deepCopy().put("name", "Anna am Fenster"), false)));
-		service.append("save-c", List.of(new Change(BOOKING, List.of(assign.get(1).id()),
-				booking.deepCopy().put("name", "Anna, Rollstuhl"), false)));
-		// ein anderer Rechner hat X ohne Platz ebenfalls gelöscht und dort verloren, und X nach A-2 gesetzt
-		Version theirDeletion = foreign(service, appData, MOVED, List.of(base.id()), null, true, Map.of());
-		Version theirCopy = foreign(service, appData, OTHER_SEAT, List.of(), booking.deepCopy(), false, Map.of());
-		assertEquals(1, service.unitState(BOOKING).lost().size());
-		assertEquals(assign.get(0).id(), service.unitState(MOVED).head().id(), "die eigene Löschung gilt");
-
-		service.tick();
-
-		ConflictInput input = policy.inputs.stream().filter(i -> i.unit().equals(BOOKING)).findFirst().orElseThrow();
-		assertEquals(Set.of("save-a", "save-c"), input.mineSaveIds());
-		assertEquals(Set.of(theirCopy.saveId()), input.siblings().get(OTHER_SEAT).saveIds(),
-				"trägt die Buchung von Meine (die Strecke hat keine Basis)");
-		assertEquals(Set.of(new ConflictInput.Deletion("save-a", ConflictInput.Standing.CHAIN),
-				new ConflictInput.Deletion(theirDeletion.saveId(), ConflictInput.Standing.BESIDE)),
-				Set.copyOf(input.siblings().get(MOVED).deletions()), "ohne die ältere Löschung");
-	}
-
-	/**
-	 * N3: Das verlorene Ziel eines Umzugs ist nie eine Version der gültigen Kette dieser Einheit, auch wenn sie aus dem
-	 * Speichervorgang der Löschung stammt und die Einheit eigene Versionen außerhalb der Kette hat.
-	 */
-	@Test
-	void lostMoveIsNeverAVersionOfTheValidChain() throws IOException {
-		Path appData = dir.resolve("app");
-		SyncService service = single(appData);
-		RecordingPolicy policy = new RecordingPolicy();
-		service.setConflictPolicy(UnitType.BOOKING, policy);
-		ObjectNode booking = MAPPER.createObjectNode().put("id", "X").put("name", "Anna");
-		Version base = own(service, MOVED, List.of(), booking);
-		foreign(service, appData, MOVED, List.of(base.id()), booking.deepCopy().put("name", "Anna bezahlt"), false,
-				Map.of());
-		// dieser Rechner zieht X nach A-2 um; dort gilt das Ziel, ein anderer Rechner setzt danach Y darauf
-		List<Version> move = service.append("save-move", List.of(new Change(MOVED, List.of(base.id()), null, true),
-				new Change(OTHER_SEAT, List.of(), booking.deepCopy().put("name", "Anna am Fenster"), false)));
-		foreign(service, appData, OTHER_SEAT, List.of(move.get(1).id()), MAPPER.createObjectNode().put("id", "Y"), false,
-				Map.of());
-		// eine eigene spätere Änderung auf A-2 verliert: A-2 hat eigene Versionen außerhalb der Kette
-		own(service, OTHER_SEAT, List.of(move.get(1).id()), booking.deepCopy().put("name", "Anna, Rollstuhl"));
-		assertEquals(1, service.unitState(MOVED).lost().size());
-		assertEquals(1, service.unitState(OTHER_SEAT).lost().size());
-
-		service.tick();
-
-		ConflictInput input = policy.inputs.stream().filter(i -> i.unit().equals(MOVED)).findFirst().orElseThrow();
-		assertNull(input.siblings().get(OTHER_SEAT).lostMove(), "das Ziel gilt dort, es ist kein verlorenes");
 	}
 
 	@Test
@@ -855,11 +761,6 @@ class ConflictResolverTest {
 			@Override
 			public Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking) {
 				return Map.of();
-			}
-
-			@Override
-			public Set<UnitKey> withOwnVersionsBesideChain(Collection<UnitKey> units) {
-				return Set.of();
 			}
 
 			@Override

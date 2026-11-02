@@ -9,8 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,11 +18,11 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -38,21 +36,21 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
-import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
-import de.eltviller_carneval_verein.karten.store.ConflictInput.Deletion;
 import de.eltviller_carneval_verein.karten.store.ConflictInput.Sibling;
-import de.eltviller_carneval_verein.karten.store.ConflictInput.Standing;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Kind;
 import de.eltviller_carneval_verein.karten.store.ConflictPolicy;
 import de.eltviller_carneval_verein.karten.store.Resolution;
+import de.eltviller_carneval_verein.karten.store.TrailCollector;
+import de.eltviller_carneval_verein.karten.store.TrailUnit;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.store.VersionMarks;
 
 /** Die Strategie für Buchungen auf JSON, ohne Versionsspeicher. */
 class BookingPolicyTest {
@@ -137,8 +135,7 @@ class BookingPolicyTest {
 
 	/** Eine Geschwister-Einheit, deren gültige Kette mit {@code version} endet und die nur diese Version hat. */
 	private static Sibling sibling(UnitKey unit, Version version) {
-		return new Sibling(new UnitSnapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()),
-				ChainStep.of(version), Set.of(version.saveId()));
+		return new Sibling(new UnitSnapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()));
 	}
 
 	@SafeVarargs
@@ -277,67 +274,6 @@ class BookingPolicyTest {
 	}
 
 	@Test
-	void moveAndSellInOneSaveTransfersMyEditToTheMovedCopy() {
-		// Ergebnis B: Deren verschiebt x nach s2 und verkauft y auf s1 in einem Speichervorgang; Meine ändert x auf s1.
-		// x bekommt die eigene Änderung auf s2, kein zweites x unter _x
-		Version base = version(THIRD, booking("x", "s1"));
-		Version theirs = version(OTHER, "save-theirs", booking("y", "s1"));
-		Version theirCopy = version(OTHER, "save-theirs", booking("x", "s2", b -> {
-			b.setSeatNumber(2);
-			b.setComment("Rollstuhl");
-		}));
-		Version mine = version(OWN, booking("x", "s1", b -> b.setPaymentStatus(PaymentStatus.CASH)));
-
-		Resolution resolution = POLICY.resolve(
-				input(S1, base, mine, theirs, siblings(Map.entry(S2, theirCopy)), theirs));
-
-		assertFalse(resolution.deleted());
-		assertEquals(theirs.payload(), resolution.payload());
-		assertNull(resolution.note());
-		ObjectNode merged = booking("x", "s2", b -> {
-			b.setSeatNumber(2);
-			b.setComment("Rollstuhl");
-			b.setPaymentStatus(PaymentStatus.CASH);
-		});
-		assertEquals(List.of(new Change(S2, List.of(theirCopy.id()), merged, false)), resolution.extra());
-	}
-
-	@Test
-	void transferredEditWithConflictingGroupReportsIt() {
-		Version base = version(THIRD, booking("x", "s1"));
-		Version theirs = version(OTHER, "save-theirs", booking("y", "s1"));
-		Version theirCopy = version(OTHER, "save-theirs", booking("x", "s2", b -> {
-			b.setSeatNumber(2);
-			b.setLastName("Schulz");
-		}));
-		Version mine = version(OWN, booking("x", "s1", b -> {
-			b.setLastName("Meier");
-			b.setComment("Abholung Freitag");
-		}));
-
-		Resolution resolution = POLICY.resolve(
-				input(S1, base, mine, theirs, siblings(Map.entry(S2, theirCopy)), theirs));
-
-		assertEquals(theirs.payload(), resolution.payload());
-		// der Platz bleibt der der Kopie, der Kunde der Kopie gilt, der Kommentar kommt dazu
-		ObjectNode merged = booking("x", "s2", b -> {
-			b.setSeatNumber(2);
-			b.setLastName("Schulz");
-			b.setComment("Abholung Freitag");
-		});
-		assertEquals(List.of(new Change(S2, List.of(theirCopy.id()), merged, false)), resolution.extra());
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.FIELDS, note.kind());
-		assertEquals(OWN, note.affected());
-		assertEquals(mine.id(), note.dropped());
-		assertEquals(S2, note.moved());
-		assertEquals(1, note.fields().size());
-		assertEquals("customer", note.fields().get(0).group());
-		assertEquals("Meier", note.fields().get(0).mine().get("lastName").asText());
-		assertEquals("Schulz", note.fields().get(0).theirs().get("lastName").asText());
-	}
-
-	@Test
 	void myReplacementKeepsTheSeatAndCancelsTheirEditedBooking() {
 		// Spiegel zu Ergebnis A: Meine ersetzt x durch y (storniert x), Deren ändert x: y bleibt auf dem Sitz
 		Version base = version(THIRD, booking("x", "s1"));
@@ -356,93 +292,6 @@ class BookingPolicyTest {
 		assertEquals(theirs.id(), note.dropped());
 	}
 
-	@Test
-	void myMoveAndSaleTransfersTheirEditToMyCopy() {
-		// Spiegel zu Ergebnis B: Meine verschiebt x nach s2 und verkauft y auf s1; Deren ändert x auf s1
-		Version base = version(THIRD, booking("x", "s1"));
-		Version mine = version(OWN, "save-move", booking("y", "s1"));
-		Version myCopy = version(OWN, "save-move", booking("x", "s2", b -> b.setSeatNumber(2)));
-		Version theirs = version(OTHER, booking("x", "s1", b -> b.setPaymentStatus(PaymentStatus.CARD)));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, siblings(Map.entry(S2, myCopy)), theirs));
-
-		assertFalse(resolution.deleted());
-		assertEquals(mine.payload(), resolution.payload());
-		assertNull(resolution.note());
-		ObjectNode merged = booking("x", "s2", b -> {
-			b.setSeatNumber(2);
-			b.setPaymentStatus(PaymentStatus.CARD);
-		});
-		assertEquals(List.of(new Change(S2, List.of(myCopy.id()), merged, false)), resolution.extra());
-	}
-
-	@Test
-	void myMoveFollowedByAnEditOfTheNewSaleStillTransfersTheirEdit() {
-		// Meine: x nach s2 verschoben und y auf s1 verkauft (save-a), danach y geändert (save-b); Deren ändert x auf s1
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myCopy = version(OWN, "save-a", booking("x", "s2", b -> b.setSeatNumber(2)));
-		Version mine = version(OWN, "save-b", booking("y", "s1", b -> b.setComment("geändert")));
-		Version theirs = version(OTHER, booking("x", "s1", b -> b.setPaymentStatus(PaymentStatus.CARD)));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, mine, theirs, siblings(Map.entry(S2, myCopy)), theirs));
-
-		assertEquals(mine.payload(), resolution.payload());
-		assertNull(resolution.note());
-		ObjectNode merged = booking("x", "s2", b -> {
-			b.setSeatNumber(2);
-			b.setPaymentStatus(PaymentStatus.CARD);
-		});
-		assertEquals(List.of(new Change(S2, List.of(myCopy.id()), merged, false)), resolution.extra());
-	}
-
-	/**
-	 * Meine verschiebt m von s3 nach s1 (save-a); ein anderer Rechner ändert m auf s3 und verkauft t auf s1. Meine verliert
-	 * auf beiden Einheiten. Gleich in welcher Reihenfolge sie aufgelöst werden: m lebt danach in einer Einheit.
-	 */
-	@Test
-	void lostMoveOntoADoubleSoldSeatKeepsTheBookingInEitherOrder() {
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
-		Version s3Base = version(THIRD, booking("m", "s3", b -> b.setSeatNumber(3)));
-		Version myS3Deletion = deletion(OWN, "save-a");
-		Version myS1 = version(OWN, "save-a", booking("m", "s1"));
-		Version theirS3 = version(OTHER, booking("m", "s3", b -> {
-			b.setSeatNumber(3);
-			b.setComment("Rollstuhl");
-		}));
-		Version theirS1 = version(OTHER, booking("t", "s1"));
-
-		// s1 zuerst: s3 trägt m noch (die eigene Löschung dort ist offen), trotzdem entsteht _m
-		Resolution s1First = POLICY.resolve(input(S1, null, myS1, theirS1, siblings(Map.entry(S3, theirS3)), theirS1));
-		assertEquals(Kind.DOUBLE_SALE, s1First.note().kind());
-		Change created = s1First.extra().get(0);
-		assertEquals(unassigned, created.unit());
-		assertTrue(created.parents().isEmpty());
-		Version written = version(OWN, "resolver-1", created.payload());
-		Version s1Merge = version(OWN, "resolver-1", theirS1.payload());
-
-		// danach s3: Die Änderung von Deren geht an _m, wo m jetzt lebt
-		Resolution s3Then = POLICY.resolve(input(S3, s3Base, myS3Deletion, theirS3,
-				siblings(Map.entry(S1, s1Merge), Map.entry(unassigned, written)), theirS3));
-		assertTrue(s3Then.deleted());
-		assertEquals(1, s3Then.extra().size());
-		Change transferred = s3Then.extra().get(0);
-		assertEquals(unassigned, transferred.unit());
-		assertFalse(transferred.deleted());
-		assertEquals(List.of(written.id()), transferred.parents());
-		assertEquals("Rollstuhl", transferred.payload().get("comment").asText());
-		assertTrue(transferred.payload().get("unassigned").asBoolean());
-
-		// s3 zuerst: m lebt nirgends sonst, die eigene Löschung gewinnt; danach s1: m weicht nach _m aus
-		Resolution s3First = POLICY.resolve(input(S3, s3Base, myS3Deletion, theirS3, siblings(Map.entry(S1, theirS1)),
-				theirS3));
-		assertTrue(s3First.deleted());
-		assertTrue(s3First.extra().isEmpty());
-		Version s3Merge = deletion(OWN, "resolver-2");
-		Resolution s1Then = POLICY.resolve(input(S1, null, myS1, theirS1, siblings(Map.entry(S3, s3Merge)), theirS1));
-		assertEquals(List.of(unassigned), s1Then.extra().stream().map(Change::unit).toList());
-		assertFalse(s1Then.extra().get(0).deleted());
-	}
-
 	/** Die Buchung m "ohne Platz", wie das Repository sie auf {@code _m} schreibt, danach die Änderungen aus {@code edit}. */
 	private static ObjectNode withoutPlace(String id, Consumer<Booking> edit) {
 		return booking(id, null, b -> {
@@ -452,278 +301,6 @@ class BookingPolicyTest {
 			b.setUnassigned(true);
 			edit.accept(b);
 		});
-	}
-
-	/** Eine Geschwister-Einheit mit ihrem Stand und dem verlorenen Ziel eines eigenen Umzugs in ihrem Ordner. */
-	private static Sibling strandedTarget(UnitKey unit, Version current, Version lostMove) {
-		return new Sibling(new UnitSnapshot(unit, current.id(), Status.OK, current.deleted(), current.payload()),
-				ChainStep.of(current), Set.of(), lostMove);
-	}
-
-	/**
-	 * R31: Meine weist m von {@code _m} dem Sitz s1 zu und ändert dabei die E-Mail (save-a: Löschung von {@code _m}, m auf
-	 * s1); ein anderer Rechner ändert m auf {@code _m} (bezahlt) und verkauft t auf s1. Meine verliert auf beiden Einheiten.
-	 * In beiden Reihenfolgen lebt m danach genau einmal, auf {@code _m}, mit der Änderung von Deren und der von Meine; kein
-	 * DELETE_WINS, s1 trägt t mit dem Doppelverkauf an Meine.
-	 */
-	@Test
-	void lostAssignmentFromUnassignedKeepsTheBookingOnItsUnitInEitherOrder() {
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
-		Version base = version(THIRD, withoutPlace("m", b -> {
-		}));
-		Version myDeletion = deletion(OWN, "save-a");
-		Version myS1 = version(OWN, "save-a", booking("m", "s1", b -> b.setEMail("neu@example.org")));
-		Version theirM = version(OTHER, "save-b", withoutPlace("m", b -> b.setPaymentStatus(PaymentStatus.CARD)));
-		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
-		ObjectNode expected = withoutPlace("m", b -> {
-			b.setPaymentStatus(PaymentStatus.CARD);
-			b.setEMail("neu@example.org");
-		});
-
-		// s1 zuerst: _m lebt (Deren), also keine Zusatz-Einheit; danach _m: Deren bleibt, die E-Mail kommt dazu
-		Resolution s1First = POLICY.resolve(input(S1, null, myS1, theirS1, siblings(Map.entry(unassigned, theirM)), theirS1));
-		assertEquals(theirS1.payload(), s1First.payload());
-		assertEquals(Kind.DOUBLE_SALE, s1First.note().kind());
-		assertEquals(unassigned, s1First.note().moved());
-		assertTrue(s1First.extra().isEmpty());
-		Version s1Merge = version(OWN, "resolver-1", theirS1.payload());
-		Resolution mThen = POLICY.resolve(input(unassigned, base, myDeletion, theirM,
-				Map.of(S1, strandedTarget(S1, s1Merge, myS1)), theirM));
-		assertFalse(mThen.deleted(), "kein Storno: der Umzug ist gescheitert");
-		assertEquals(expected, mThen.payload());
-		assertNull(mThen.note(), "verschiedene Gruppen: still");
-		assertTrue(mThen.extra().isEmpty());
-
-		// _m zuerst: dasselbe Ergebnis; danach s1: _m lebt, also keine Zusatz-Einheit
-		Resolution mFirst = POLICY.resolve(input(unassigned, base, myDeletion, theirM,
-				Map.of(S1, strandedTarget(S1, theirS1, myS1)), theirM));
-		assertFalse(mFirst.deleted());
-		assertEquals(expected, mFirst.payload());
-		assertNull(mFirst.note());
-		Version mMerge = version(OWN, "resolver-2", mFirst.payload());
-		Resolution s1Then = POLICY.resolve(input(S1, null, myS1, theirS1, siblings(Map.entry(unassigned, mMerge)), theirS1));
-		assertEquals(theirS1.payload(), s1Then.payload());
-		assertEquals(Kind.DOUBLE_SALE, s1Then.note().kind());
-		assertEquals(unassigned, s1Then.note().moved());
-		assertTrue(s1Then.extra().isEmpty());
-	}
-
-	@Test
-	void lostAssignmentFromUnassignedNotesTheGroupBothSidesChanged() {
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
-		Version base = version(THIRD, withoutPlace("m", b -> {
-		}));
-		Version myDeletion = deletion(OWN, "save-a");
-		Version myS1 = version(OWN, "save-a", booking("m", "s1", b -> b.setComment("Fenster")));
-		Version theirM = version(OTHER, "save-b", withoutPlace("m", b -> b.setComment("Gang")));
-		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
-
-		Resolution resolution = POLICY.resolve(input(unassigned, base, myDeletion, theirM,
-				Map.of(S1, strandedTarget(S1, theirS1, myS1)), theirM));
-
-		assertFalse(resolution.deleted());
-		assertEquals(theirM.payload(), resolution.payload(), "bei derselben Gruppe gilt Deren");
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.FIELDS, note.kind());
-		assertEquals(OWN, note.affected());
-		assertEquals(party(theirM), note.other());
-		assertEquals(List.of("comment"), note.fields().stream().map(ConflictNote.FieldConflict::group).toList());
-		assertEquals("Fenster", note.fields().get(0).mine().get("comment").asText());
-		assertEquals("Gang", note.fields().get(0).theirs().get("comment").asText());
-		assertNull(note.moved(), "die Änderung blieb auf der Einheit des Vermerks");
-		assertEquals(myDeletion.id(), note.dropped());
-	}
-
-	/**
-	 * Die Einheit {@code _m} mit ihrem Stand als Kette bis {@code current}, den Löschungen in ihrem Ordner (wie der Resolver
-	 * sie liefert) und den Speichervorgängen darin.
-	 */
-	private static Sibling unassignedWith(UnitKey unit, Version current, List<Deletion> deletions, String... saveIds) {
-		return new Sibling(new UnitSnapshot(unit, current.id(), Status.OK, current.deleted(), current.payload()),
-				ChainStep.of(current), Set.of(saveIds), null, deletions);
-	}
-
-	/**
-	 * R31a: Meine weist m von {@code _m} dem Sitz s1 zu (save-a); ein anderer Rechner storniert m (löscht {@code _m}) und
-	 * verkauft t auf s1 (save-b). Storno gewinnt in beiden Reihenfolgen: m lebt nirgends, {@code _m} wird nicht
-	 * wiederbelebt, s1 trägt t; Meine bekommt genau einen Vermerk DELETE_WINS (auf s1), keinen Doppelverkauf.
-	 */
-	@Test
-	void cancellationWinsAgainstALostAssignmentFromUnassignedInEitherOrder() {
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
-		Version base = version(THIRD, "save-0", withoutPlace("m", b -> {
-		}));
-		Version myDeletion = deletion(OWN, "save-a");
-		Version myS1 = version(OWN, "save-a", booking("m", "s1", b -> b.setComment("Fenster")));
-		Version theirDeletion = deletion(OTHER, "save-b");
-		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
-
-		// s1 zuerst: _m ist fremd gelöscht, die eigene Löschung dort (save-a) ist verloren
-		Resolution s1First = POLICY.resolve(input(S1, null, myS1, theirS1,
-				Map.of(unassigned, unassignedWith(unassigned, theirDeletion, ownLost(), "save-0", "save-a", "save-b")),
-				theirS1));
-		assertCancellationWins(s1First, theirS1, myS1);
-		Version s1Merge = version(OWN, "resolver-1", theirS1.payload());
-		Resolution mThen = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
-				Map.of(S1, strandedTarget(S1, s1Merge, myS1)), theirDeletion));
-		assertTrue(mThen.deleted());
-		assertNull(mThen.note(), "ein Vermerk für m genügt");
-		assertTrue(mThen.extra().isEmpty());
-
-		// _m zuerst: die Löschung bleibt ohne Vermerk; danach s1 wie oben
-		Resolution mFirst = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
-				Map.of(S1, strandedTarget(S1, theirS1, myS1)), theirDeletion));
-		assertTrue(mFirst.deleted());
-		assertNull(mFirst.note());
-		assertTrue(mFirst.extra().isEmpty());
-		Version mMerge = deletion(OWN, "resolver-2");
-		Resolution s1Then = POLICY.resolve(input(S1, null, myS1, theirS1,
-				Map.of(unassigned,
-						unassignedWith(unassigned, mMerge, ownAbsorbed(), "save-0", "save-a", "save-b", "resolver-2")),
-				theirS1));
-		assertCancellationWins(s1Then, theirS1, myS1);
-	}
-
-	/** Die Löschungen auf {@code _m}, solange die eigene (save-a) gegen die fremde (save-b) verloren hat. */
-	private static List<Deletion> ownLost() {
-		return List.of(new Deletion("save-b", Standing.CHAIN), new Deletion("save-a", Standing.BESIDE));
-	}
-
-	/** Die Löschungen auf {@code _m}, nachdem die eigene Auflösung die verlorene eigene Löschung zusammengeführt hat. */
-	private static List<Deletion> ownAbsorbed() {
-		return List.of(new Deletion("save-b", Standing.CHAIN), new Deletion("save-a", Standing.ABSORBED));
-	}
-
-	private static void assertCancellationWins(Resolution resolution, Version theirS1, Version myS1) {
-		assertFalse(resolution.deleted());
-		assertEquals(theirS1.payload(), resolution.payload());
-		assertTrue(resolution.extra().isEmpty(), "_m wird nicht wiederbelebt");
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.DELETE_WINS, note.kind());
-		assertEquals(OWN, note.affected());
-		assertEquals(party(theirS1), note.other());
-		assertEquals(myS1.id(), note.dropped(), "die eigene Buchung, zum Wiederherstellen");
-		assertNull(note.moved());
-	}
-
-	/**
-	 * R31b: Meine weist m von {@code _m} dem Sitz s1 zu (save-a); ein anderer Rechner setzt m von {@code _m} auf s4 und
-	 * verkauft t auf s1 (save-b). Die fremde Verschiebung gilt in beiden Reihenfolgen: m bleibt auf s4 (nie gelöscht),
-	 * {@code _m} bleibt gelöscht, s1 trägt t; Meine bekommt genau einen Vermerk FIELDS "place" (auf {@code _m}).
-	 */
-	@Test
-	void foreignMoveWinsAgainstALostAssignmentFromUnassignedInEitherOrder() {
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
-		UnitKey s4 = seat("s4");
-		Version base = version(THIRD, "save-0", withoutPlace("m", b -> {
-		}));
-		Version myDeletion = deletion(OWN, "save-a");
-		Version myS1 = version(OWN, "save-a", booking("m", "s1"));
-		Version theirDeletion = deletion(OTHER, "save-b");
-		Version theirS4 = version(OTHER, "save-b", booking("m", "s4", b -> b.setSeatNumber(4)));
-		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
-
-		// s1 zuerst: m lebt auf s4, also keine Zusatz-Einheit und hier kein Vermerk (den bekommt _m)
-		Resolution s1First = POLICY.resolve(input(S1, null, myS1, theirS1,
-				Map.of(unassigned, unassignedWith(unassigned, theirDeletion, ownLost(), "save-0", "save-a", "save-b"), s4,
-						sibling(s4, theirS4)),
-				theirS1));
-		assertForeignMoveKeptOnSeat(s1First, theirS1);
-		Version s1Merge = version(OWN, "resolver-1", theirS1.payload());
-		Resolution mThen = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
-				Map.of(S1, strandedTarget(S1, s1Merge, myS1), s4, sibling(s4, theirS4)), theirDeletion));
-		assertForeignMoveWinsOnUnassigned(mThen, theirDeletion, myS1);
-
-		// _m zuerst: dasselbe
-		Resolution mFirst = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
-				Map.of(S1, strandedTarget(S1, theirS1, myS1), s4, sibling(s4, theirS4)), theirDeletion));
-		assertForeignMoveWinsOnUnassigned(mFirst, theirDeletion, myS1);
-		Version mMerge = deletion(OWN, "resolver-2");
-		Resolution s1Then = POLICY.resolve(input(S1, null, myS1, theirS1,
-				Map.of(unassigned,
-						unassignedWith(unassigned, mMerge, ownAbsorbed(), "save-0", "save-a", "save-b", "resolver-2"), s4,
-						sibling(s4, theirS4)),
-				theirS1));
-		assertForeignMoveKeptOnSeat(s1Then, theirS1);
-	}
-
-	@Test
-	void foreignCopyThatMovedOnStillGivesTheLoserANote() {
-		// wie R31b, aber A hat m danach von s4 nach s5 weitergesetzt (save-c): Die Kopie trägt save-b nicht mehr
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
-		UnitKey s5 = seat("s5");
-		Version base = version(THIRD, "save-0", withoutPlace("m", b -> {
-		}));
-		Version myDeletion = deletion(OWN, "save-a");
-		Version myS1 = version(OWN, "save-a", booking("m", "s1", b -> b.setComment("Fenster")));
-		Version theirDeletion = deletion(OTHER, "save-b");
-		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
-		Version theirS5 = version(OTHER, "save-c", booking("m", "s5", b -> b.setSeatNumber(5)));
-
-		Resolution resolution = POLICY.resolve(input(unassigned, base, myDeletion, theirDeletion,
-				Map.of(S1, strandedTarget(S1, theirS1, myS1), s5, sibling(s5, theirS5)), theirDeletion));
-
-		assertTrue(resolution.deleted());
-		assertTrue(resolution.extra().isEmpty(), "s5 wird nicht gelöscht");
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.FIELDS, note.kind(), "B's gescheitertes Zuweisen bleibt nicht still");
-		assertEquals("s5", note.fields().get(0).theirs().get("seatId").asText());
-		assertEquals(myS1.id(), note.dropped());
-	}
-
-	private static void assertForeignMoveKeptOnSeat(Resolution resolution, Version theirS1) {
-		assertFalse(resolution.deleted());
-		assertEquals(theirS1.payload(), resolution.payload());
-		assertTrue(resolution.extra().isEmpty(), "_m wird nicht wiederbelebt");
-		assertNull(resolution.note(), "der Vermerk steht auf _m");
-	}
-
-	private static void assertForeignMoveWinsOnUnassigned(Resolution resolution, Version theirDeletion, Version myS1) {
-		assertTrue(resolution.deleted());
-		assertTrue(resolution.extra().isEmpty(), "s4 wird nie gelöscht");
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.FIELDS, note.kind());
-		assertEquals(OWN, note.affected());
-		assertEquals(party(theirDeletion), note.other());
-		assertEquals(List.of("place"), note.fields().stream().map(ConflictNote.FieldConflict::group).toList());
-		assertEquals("s1", note.fields().get(0).mine().get("seatId").asText());
-		assertEquals("s4", note.fields().get(0).theirs().get("seatId").asText());
-		assertEquals(myS1.id(), note.dropped());
-	}
-
-	@Test
-	void ownEarlierAssignmentFromUnassignedStillRevivesOnADoubleSale() {
-		// R21: _m wurde früher in einem anderen Speichervorgang gelöscht (zugewiesen); kein Storno, _m baut auf der Löschung auf
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
-		Version earlierDeletion = deletion(OWN, "save-early");
-		Version myS1 = version(OWN, "save-a", booking("m", "s1"));
-		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
-
-		Resolution resolution = POLICY.resolve(input(S1, null, myS1, theirS1,
-				Map.of(unassigned, unassignedWith(unassigned, earlierDeletion,
-						List.of(new Deletion("save-early", Standing.CHAIN)), "save-0", "save-early")),
-				theirS1));
-
-		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
-		assertEquals(List.of(unassigned), resolution.extra().stream().map(Change::unit).toList());
-		assertEquals(List.of(earlierDeletion.id()), resolution.extra().get(0).parents());
-	}
-
-	@Test
-	void cancellationOfUnassignedBookingStillWinsWithoutStrandedMove() {
-		// ohne verlorenes Umzugsziel bleibt es eine Stornierung von _m: Löschung gewinnt
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
-		Version base = version(THIRD, withoutPlace("m", b -> {
-		}));
-		Version myDeletion = deletion(OWN, "save-a");
-		Version theirM = version(OTHER, "save-b", withoutPlace("m", b -> b.setPaymentStatus(PaymentStatus.CARD)));
-		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
-
-		Resolution resolution = POLICY.resolve(input(unassigned, base, myDeletion, theirM,
-				siblings(Map.entry(S1, theirS1)), theirM));
-
-		assertTrue(resolution.deleted());
-		assertEquals(Kind.DELETE_WINS, resolution.note().kind());
 	}
 
 	// R35: Zuweisen aus "ohne Platz" gegen eine gleichzeitige Änderung, als Matrix -->
@@ -810,21 +387,9 @@ class BookingPolicyTest {
 		/** Löst die verlorene Strecke des Rechners an der Einheit auf, wie der Resolver auf diesem Rechner. */
 		void resolve(UnitKey unit, String machine) {
 			List<Version> stretch = lost.get(unit).remove(machine);
-			Version mine = stretch.get(stretch.size() - 1);
-			VersionId baseId = stretch.get(0).firstParent();
-			List<Version> chain = chains.get(unit);
-			int at = -1;
-			for (int i = 0; baseId != null && i < chain.size(); i++) {
-				if (chain.get(i).id().equals(baseId)) {
-					at = i;
-				}
-			}
-			Version base = at < 0 ? null : chain.get(at);
-			Version theirs = head(unit);
-			Set<String> saveIds = stretch.stream().map(Version::saveId).collect(Collectors.toSet());
-			ConflictInput input = new ConflictInput(unit, copy(base), copy(mine), copy(theirs),
-					chain.subList(at + 1, chain.size()).stream().map(BookingPolicyTest::copy).toList(), machine,
-					siblings(unit, base, mine, saveIds), saveIds);
+			ConflictInput input = input(unit, machine, stretch);
+			Version mine = input.mine();
+			Version theirs = input.theirs();
 			Resolution resolution = POLICY.resolve(input);
 			String saveId = "merge-" + ++merges;
 			for (Change extra : resolution.extra()) {
@@ -839,75 +404,59 @@ class BookingPolicyTest {
 					resolution.note());
 		}
 
+		/**
+		 * Die Eingabe für die verlorene Strecke des Rechners an der Einheit, wie der Resolver auf diesem Rechner sie bildet:
+		 * Basis, Meine, Deren, Kette seit der Basis, Speichervorgänge und Geschwister, Strecke und Umzugsspur
+		 * ({@link TrailCollector} über die Ordner dieser Welt).
+		 */
+		ConflictInput input(UnitKey unit, String machine, List<Version> stretch) {
+			Version mine = stretch.get(stretch.size() - 1);
+			VersionId baseId = stretch.get(0).firstParent();
+			List<Version> chain = chains.get(unit);
+			int at = -1;
+			for (int i = 0; baseId != null && i < chain.size(); i++) {
+				if (chain.get(i).id().equals(baseId)) {
+					at = i;
+				}
+			}
+			Version base = at < 0 ? null : chain.get(at);
+			Version theirs = head(unit);
+			List<Version> since = chain.subList(at + 1, chain.size()).stream().map(BookingPolicyTest::copy).toList();
+			Map<UnitKey, TrailUnit> trail;
+			try {
+				trail = TrailCollector.collect(unit, base, stretch, key -> {
+					Version head = head(key);
+					return new TrailCollector.Folder(chains.getOrDefault(key, List.of()),
+							folders.getOrDefault(key, List.of()), head == null ? null : head.id());
+				});
+			} catch (IOException e) {
+				throw new IllegalStateException(e);
+			}
+			return new ConflictInput(unit, copy(base), copy(mine), copy(theirs), since, machine,
+					siblings(unit), stretch.stream().map(BookingPolicyTest::copy).toList(), trail);
+		}
+
 		private void write(UnitKey unit, List<VersionId> parents, String machine, String saveId, boolean deleted,
 				ObjectNode payload, ConflictNote note) {
 			claim(unit, new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter++), parents, machine,
 					"Kasse " + machine, "Bediener " + machine, Instant.EPOCH, saveId, deleted, deleted ? null : payload,
-					note, Map.of()));
+					note, Map.of(), VersionMarks.RESOLUTION));
 			if (note != null) {
 				notes.add(note);
 			}
 		}
 
-		/** Die Geschwister wie {@code ConflictResolver.siblings}. */
-		private Map<UnitKey, Sibling> siblings(UnitKey unit, Version base, Version mine, Set<String> saveIds) {
-			String bookingId = idOf(base);
-			String mineId = idOf(mine);
-			UnitKey ownUnassigned = mineId == null ? null : UnitKey.unassignedBooking(EVENT, PRESENTATION, mineId);
+		/** Die Geschwister wie {@code ConflictResolver.siblings}: Stand und Kettenende jeder anderen Einheit. */
+		private Map<UnitKey, Sibling> siblings(UnitKey unit) {
 			Map<UnitKey, Sibling> siblings = new LinkedHashMap<>();
 			for (UnitKey other : chains.keySet()) {
 				Version head = head(other);
-				if (other.equals(unit)) {
-					continue;
+				if (!other.equals(unit)) {
+					siblings.put(other, new Sibling(new UnitSnapshot(other, head.id(), Status.OK, head.deleted(),
+							head.deleted() ? null : head.payload().deepCopy())));
 				}
-				boolean carries = bookingId != null && bookingId.equals(idOf(head));
-				boolean carriesMine = mineId != null && mineId.equals(idOf(head));
-				Set<String> folderSaves = carries || carriesMine || other.equals(ownUnassigned)
-						? folders.get(other).stream().map(Version::saveId).collect(Collectors.toSet())
-						: Set.of();
-				Version lostMove = carries || bookingId == null || !mine.deleted() ? null
-						: youngest(other, version -> !chains.get(other).contains(version)
-								&& saveIds.contains(version.saveId()) && bookingId.equals(idOf(version)));
-				List<Deletion> deletions = other.equals(ownUnassigned) ? deletions(other, saveIds) : List.of();
-				siblings.put(other, new Sibling(new UnitSnapshot(other, head.id(), Status.OK, head.deleted(),
-						head.deleted() ? null : head.payload().deepCopy()), ChainStep.of(head), folderSaves, copy(lostMove),
-						deletions));
 			}
 			return siblings;
-		}
-
-		private Version youngest(UnitKey unit, Predicate<Version> filter) {
-			return folders.get(unit).stream().filter(filter).reduce((first, second) -> second).orElse(null);
-		}
-
-		private List<Deletion> deletions(UnitKey unit, Set<String> saveIds) {
-			Set<VersionId> earlier = new HashSet<>();
-			folders.get(unit).stream().filter(version -> saveIds.contains(version.saveId()))
-					.forEach(version -> earlier.addAll(ancestors(unit, version)));
-			Set<VersionId> absorbed = ancestors(unit, head(unit));
-			List<Deletion> deletions = new ArrayList<>();
-			for (Version version : folders.get(unit)) {
-				if (version.deleted() && version.parents().size() < 2 && !earlier.contains(version.id())) {
-					Standing standing = chains.get(unit).contains(version) ? Standing.CHAIN
-							: absorbed.contains(version.id()) ? Standing.ABSORBED : Standing.BESIDE;
-					deletions.add(new Deletion(version.saveId(), standing));
-				}
-			}
-			return deletions;
-		}
-
-		/** Die Vorgänger der Version im Ordner, über alle Vorgänger, ohne sie selbst. */
-		private Set<VersionId> ancestors(UnitKey unit, Version version) {
-			Set<VersionId> found = new HashSet<>();
-			List<VersionId> open = new ArrayList<>(version.parents());
-			while (!open.isEmpty()) {
-				VersionId id = open.remove(open.size() - 1);
-				if (found.add(id)) {
-					folders.get(unit).stream().filter(candidate -> candidate.id().equals(id)).findFirst()
-							.ifPresent(parent -> open.addAll(parent.parents()));
-				}
-			}
-			return found;
 		}
 	}
 
@@ -916,7 +465,8 @@ class BookingPolicyTest {
 		return version == null ? null
 				: new Version(version.format(), version.id(), version.parents(), version.machine(), version.machineName(),
 						version.operator(), version.at(), version.saveId(), version.deleted(),
-						version.payload() == null ? null : version.payload().deepCopy(), version.conflict(), version.seen());
+						version.payload() == null ? null : version.payload().deepCopy(), version.conflict(), version.seen(),
+						version.marks());
 	}
 
 	/** Die Buchungs-ID einer Version mit Inhalt; {@code null} ohne Version oder bei einer Löschung. */
@@ -926,8 +476,20 @@ class BookingPolicyTest {
 
 	/** Eine Version auf einem Vorgänger; ohne Inhalt eine Löschung. */
 	private static Version child(String machine, String saveId, Version parent, ObjectNode payload) {
+		return child(machine, saveId, parent, payload, VersionMarks.NONE);
+	}
+
+	/** Eine Version auf einem Vorgänger mit Angaben zum Umzug; ohne Inhalt eine Löschung. */
+	private static Version child(String machine, String saveId, Version parent, ObjectNode payload, VersionMarks marks) {
 		return new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter++), List.of(parent.id()),
-				machine, "Kasse " + machine, "Bediener " + machine, Instant.EPOCH, saveId, payload == null, payload);
+				machine, "Kasse " + machine, "Bediener " + machine, Instant.EPOCH, saveId, payload == null, payload, null,
+				Map.of(), marks);
+	}
+
+	/** Eine erste Version mit Angaben zum Umzug. */
+	private static Version version(String machine, String saveId, ObjectNode payload, VersionMarks marks) {
+		return new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter++), List.of(), machine,
+				"Kasse " + machine, "Bediener " + machine, Instant.EPOCH, saveId, false, payload, null, Map.of(), marks);
 	}
 
 	/**
@@ -938,15 +500,50 @@ class BookingPolicyTest {
 	 * Verlierer in der Reihenfolge des Verlaufs auf.
 	 */
 	private static World assignmentAgainst(ForeignAction action, int ownSaves, Course course) {
+		return assignmentAgainst(action, ownSaves, course, Source.UNASSIGNED, false);
+	}
+
+	/** Wo m vor B's Umzug steht. */
+	enum Source {
+		/** "ohne Platz" ({@code _m}): B weist einen Platz zu. */
+		UNASSIGNED,
+		/** auf s3: B setzt m um (R34 (2), "Sitz als Quelle"). */
+		SEAT;
+
+		UnitKey unit() {
+			return this == UNASSIGNED ? UnitKey.unassignedBooking(EVENT, PRESENTATION, "m") : S3;
+		}
+
+		/** m an der Quelle, danach die Änderungen aus {@code edit}. */
+		ObjectNode booking(Consumer<Booking> edit) {
+			return this == UNASSIGNED ? withoutPlace("m", edit) : BookingPolicyTest.booking("m", "s3", edit);
+		}
+	}
+
+	/**
+	 * Wie {@link #assignmentAgainst(ForeignAction, int, Course)}, mit m an der Quelle {@code source} (in {@link Course}
+	 * steht {@code _m} für die Quelle); mit {@code editFirst} ändert B m dort zuerst in einem eigenen Speichervorgang
+	 * (Kommentar "vorher") und setzt es erst danach um.
+	 */
+	private static World assignmentAgainst(ForeignAction action, int ownSaves, Course course, Source source,
+			boolean editFirst) {
 		World world = new World();
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		UnitKey unassigned = source.unit();
 		UnitKey s4 = seat("s4");
-		Version base = version(THIRD, "save-0", withoutPlace("m", b -> {
+		Version base = version(THIRD, "save-0", source.booking(b -> {
 		}));
 		world.claim(unassigned, base);
-		Version myDeletion = child(OWN, "save-a", base, null);
-		List<Version> mySeat = new ArrayList<>(
-				List.of(version(OWN, "save-a", booking("m", "s1", b -> b.setEMail("neu@example.org")))));
+		List<Version> mySource = new ArrayList<>();
+		if (editFirst) {
+			mySource.add(child(OWN, "save-e", base, source.booking(b -> b.setComment("vorher"))));
+		}
+		mySource.add(child(OWN, "save-a", editFirst ? mySource.get(0) : base, null, VersionMarks.NONE.withMovedTo(S1)));
+		List<Version> mySeat = new ArrayList<>(List.of(version(OWN, "save-a", booking("m", "s1", b -> {
+			b.setEMail("neu@example.org");
+			if (editFirst) {
+				b.setComment("vorher");
+			}
+		}), VersionMarks.NONE.withMovedFrom(unassigned))));
 		if (ownSaves == 2) {
 			mySeat.add(child(OWN, "save-c", mySeat.get(0), booking("m", "s1", b -> {
 				b.setEMail("neu@example.org");
@@ -954,25 +551,30 @@ class BookingPolicyTest {
 			})));
 		}
 		Version theirSeat = version(OTHER, "save-b", booking("t", "s1", b -> b.setLastName("Tom")));
-		Version theirM = action == ForeignAction.EDIT
-				? child(OTHER, "save-b", base, withoutPlace("m", b -> b.setPaymentStatus(PaymentStatus.CARD)))
-				: child(OTHER, "save-b", base, null);
+		boolean moves = action == ForeignAction.MOVE_TO_S4 || action == ForeignAction.MOVE_TO_S4_THEN_S5;
+		Version theirM = switch (action) {
+		case EDIT -> child(OTHER, "save-b", base, source.booking(b -> b.setPaymentStatus(PaymentStatus.CARD)));
+		case CANCEL -> child(OTHER, "save-b", base, null);
+		case MOVE_TO_S4, MOVE_TO_S4_THEN_S5 -> child(OTHER, "save-b", base, null, VersionMarks.NONE.withMovedTo(s4));
+		};
 		world.claim(S1, theirSeat);
 		mySeat.forEach(version -> world.lose(S1, version));
-		if (action == ForeignAction.MOVE_TO_S4 || action == ForeignAction.MOVE_TO_S4_THEN_S5) {
-			Version theirS4 = version(OTHER, "save-b", booking("m", "s4", b -> b.setSeatNumber(4)));
+		if (moves) {
+			Version theirS4 = version(OTHER, "save-b", booking("m", "s4", b -> b.setSeatNumber(4)),
+					VersionMarks.NONE.withMovedFrom(unassigned));
 			world.claim(s4, theirS4);
 			if (action == ForeignAction.MOVE_TO_S4_THEN_S5) {
-				world.claim(s4, child(OTHER, "save-d", theirS4, null));
-				world.claim(seat("s5"), version(OTHER, "save-d", booking("m", "s5", b -> b.setSeatNumber(5))));
+				world.claim(s4, child(OTHER, "save-d", theirS4, null, VersionMarks.NONE.withMovedTo(seat("s5"))));
+				world.claim(seat("s5"), version(OTHER, "save-d", booking("m", "s5", b -> b.setSeatNumber(5)),
+						VersionMarks.NONE.withMovedFrom(s4)));
 			}
 		}
 		if (course.split) {
-			world.claim(unassigned, myDeletion);
+			mySource.forEach(version -> world.claim(unassigned, version));
 			world.lose(unassigned, theirM);
 		} else {
 			world.claim(unassigned, theirM);
-			world.lose(unassigned, myDeletion);
+			mySource.forEach(version -> world.lose(unassigned, version));
 		}
 		switch (course) {
 		case A_WINS_BOTH_SEAT_FIRST -> {
@@ -1041,11 +643,10 @@ class BookingPolicyTest {
 		assertInvariants(assignmentAgainst(action, ownSaves, course), action);
 	}
 
-	/** Dieselben Invarianten für die Zellen, die ohne einen neuen Mechanismus im Speicher nicht zu halten sind. */
-	@Disabled("Ruling R36, Lösung in KARV-93: Löst A _m auf, bevor B's Auflösung von s1 bei ihm ist, hält A B's "
-			+ "gewonnene Löschung für ein Storno und löscht seine Kopie auf s4 (Regel 0, verschoben gegen storniert), weil "
-			+ "die Strategie B's verlorenes Ziel auf s1 nicht sieht; dazu müsste der Speicher fremde verlorene Versionen "
-			+ "anderer Einheiten liefern, die der Index heute nicht kennt")
+	/**
+	 * Dieselben Invarianten für die Zellen aus Ruling R36 (getrennte Gewinner, A löst {@code _m} auf, bevor B's Auflösung
+	 * von s1 bei ihm ist): Mit {@code movedTo} sieht A B's Löschung als Umzug, dessen Ziel verloren hat (KARV-93).
+	 */
 	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
 	@MethodSource("heldOpenCells")
 	void foreignMoveAgainstAssignmentWithSplitWinnersKeepsInvariants(ForeignAction action, int ownSaves,
@@ -1053,27 +654,207 @@ class BookingPolicyTest {
 		assertInvariants(assignmentAgainst(action, ownSaves, course), action);
 	}
 
-	/**
-	 * Was in den offenen Zellen gilt: nie zwei lebende Einheiten, B hat genau einen Vermerk, und lebt m nirgends, hat A
-	 * einen Vermerk DELETE_WINS auf seine Kopie (zum Wiederherstellen). Nichts geht still verloren.
-	 */
-	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
-	@MethodSource("heldOpenCells")
-	void foreignMoveAgainstAssignmentWithSplitWinnersLosesNothingSilently(ForeignAction action, int ownSaves,
-			Course course) {
-		World world = assignmentAgainst(action, ownSaves, course);
-		List<UnitKey> carriers = world.carriers("m");
-		assertTrue(carriers.size() <= 1, "m lebt höchstens einmal: " + carriers);
-		assertEquals(1, world.notesFor(OWN).size(), "B: " + world.notesFor(OWN));
-		if (carriers.isEmpty()) {
-			List<ConflictNote> theirs = world.notesFor(OTHER);
-			assertEquals(1, theirs.size(), "A: " + theirs);
-			assertEquals(Kind.DELETE_WINS, theirs.get(0).kind());
+	/** Setzen beide Rechner dieselbe Buchung gleich um (H3), gibt es keinen Vermerk, und sie lebt einmal am Ziel. */
+	@Test
+	void sameMoveOnBothMachinesLeavesNoNote() {
+		for (boolean seatFirst : new boolean[] { true, false }) {
+			World world = new World();
+			Version base = version(THIRD, "save-0", booking("m", "s1"));
+			world.claim(S1, base);
+			world.claim(S1, child(OTHER, "save-a", base, null, VersionMarks.NONE.withMovedTo(S2)));
+			world.lose(S1, child(OWN, "save-b", base, null, VersionMarks.NONE.withMovedTo(S2)));
+			world.claim(S2, version(OTHER, "save-a", booking("m", "s2"), VersionMarks.NONE.withMovedFrom(S1)));
+			world.lose(S2, version(OWN, "save-b", booking("m", "s2"), VersionMarks.NONE.withMovedFrom(S1)));
+			if (seatFirst) {
+				world.resolve(S2, OWN);
+				world.resolve(S1, OWN);
+			} else {
+				world.resolve(S1, OWN);
+				world.resolve(S2, OWN);
+			}
+
+			assertEquals(List.of(S2), world.carriers("m"));
+			assertEquals(List.of(), world.notes, "keine Vermerke");
 		}
-		assertEquals("t", idOf(world.head(S1)));
+	}
+
+	static Stream<Arguments> allCells() {
+		return cells(cell -> true);
+	}
+
+	/** R34 (2), Sitz als Quelle: B setzt m von s3 nach s1 und verliert s1 an t; A ändert, storniert oder verschiebt m. */
+	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
+	@MethodSource("allCells")
+	void seatAsSourceKeepsInvariants(ForeignAction action, int ownSaves, Course course) {
+		assertInvariants(assignmentAgainst(action, ownSaves, course, Source.SEAT, false), action, Source.SEAT);
+	}
+
+	/** B ändert m zuerst auf {@code _m} und weist es im nächsten Speichervorgang zu: Die ganze Strecke zählt. */
+	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
+	@MethodSource("allCells")
+	void severalSavesBeforeAssignmentKeepInvariants(ForeignAction action, int ownSaves, Course course) {
+		World world = assignmentAgainst(action, ownSaves, course, Source.UNASSIGNED, true);
+		assertInvariants(world, action);
+		if (action != ForeignAction.CANCEL && ownSaves == 1) {
+			assertEquals("vorher", world.head(world.carriers("m").get(0)).payload().path("comment").asText(),
+					"B's erste Änderung erreicht den Träger");
+		}
+	}
+
+	/** Ersetzen: B setzt y auf s1 und m nach s2; A ändert m auf s1. Die Änderung geht nach s2 (E5), s1 trägt y. */
+	@ParameterizedTest(name = "B gewinnt s1: {0}")
+	@ValueSource(booleans = { false, true })
+	void replacementAgainstEditTransfersTheEdit(boolean ownWinsSeat) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		world.claim(S1, m);
+		Version replaced = child(OWN, "save-r", m, booking("y", "s1"), VersionMarks.NONE.withMovedTo(S2));
+		Version edited = child(OTHER, "save-e", m, booking("m", "s1", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+		world.claim(S2, version(OWN, "save-r", booking("m", "s2"), VersionMarks.NONE.withMovedFrom(S1)));
+		world.claim(S1, ownWinsSeat ? replaced : edited);
+		world.lose(S1, ownWinsSeat ? edited : replaced);
+
+		world.resolve(S1, ownWinsSeat ? OTHER : OWN);
+
+		assertEquals(List.of(S2), world.carriers("m"));
+		assertEquals("CARD", world.head(S2).payload().path("paymentStatus").asText());
+		assertEquals("y", idOf(world.head(S1)));
+		assertEquals(List.of(), world.notes);
+	}
+
+	/**
+	 * Wie beim Ersetzen, aber B ändert y danach noch in einem zweiten Speichervorgang: Die Umzugsangaben stehen nur an der
+	 * ersten Version der Strecke, A's Änderung geht trotzdem nach s2.
+	 */
+	@Test
+	void replacementFollowedByAnEditOfTheNewSaleStillTransfers() {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		world.claim(S1, m);
+		Version replaced = child(OWN, "save-a", m, booking("y", "s1"), VersionMarks.NONE.withMovedTo(S2));
+		Version editedY = child(OWN, "save-b", replaced, booking("y", "s1", b -> b.setComment("geändert")));
+		world.claim(S2, version(OWN, "save-a", booking("m", "s2"), VersionMarks.NONE.withMovedFrom(S1)));
+		world.claim(S1, child(OTHER, "save-e", m, booking("m", "s1", b -> b.setPaymentStatus(PaymentStatus.CARD))));
+		world.lose(S1, replaced);
+		world.lose(S1, editedY);
+
+		world.resolve(S1, OWN);
+
+		assertEquals("geändert", world.head(S1).payload().path("comment").asText());
+		assertEquals(List.of(S2), world.carriers("m"));
+		assertEquals("CARD", world.head(S2).payload().path("paymentStatus").asText());
+		assertEquals(List.of(), world.notes);
+	}
+
+	/**
+	 * B setzt m von s3 nach s1 und verliert s1 an t; danach verkauft ein dritter Rechner z auf dem geräumten s3. A hatte m
+	 * auf s3 geändert. z ist kein Storno von m, und s3 ist nicht mehr frei: m geht mit A's Änderung "ohne Platz", z bleibt.
+	 */
+	@ParameterizedTest(name = "erst s3: {0}")
+	@ValueSource(booleans = { false, true })
+	void saleOnTheVacatedSourceIsNoCancellationAndStays(boolean sourceFirst) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s3"));
+		world.claim(S3, m);
+		Version moved = child(OWN, "save-a", m, null, VersionMarks.NONE.withMovedTo(S1));
+		world.claim(S3, moved);
+		world.claim(S3, child(THIRD, "save-z", moved, booking("z", "s3")));
+		world.lose(S3, child(OTHER, "save-e", m, booking("m", "s3", b -> b.setPaymentStatus(PaymentStatus.CARD))));
+		world.claim(S1, version(OTHER, "save-t", booking("t", "s1")));
+		world.lose(S1, version(OWN, "save-a", booking("m", "s1"), VersionMarks.NONE.withMovedFrom(S3)));
+
+		if (sourceFirst) {
+			world.resolve(S3, OTHER);
+			world.resolve(S1, OWN);
+		} else {
+			world.resolve(S1, OWN);
+			world.resolve(S3, OTHER);
+		}
+
+		assertEquals("z", idOf(world.head(S3)), "der Verkauf auf s3 bleibt");
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		assertEquals(List.of(unassigned), world.carriers("m"));
+		assertEquals("CARD", world.head(unassigned).payload().path("paymentStatus").asText());
+		assertEquals(List.of(), world.notesFor(OTHER), "A's Änderung weicht nicht");
+		assertEquals(1, world.notesFor(OWN).size(), world.notes.toString());
+	}
+
+	/** Tausch: B tauscht m (s1) und n (s2); A ändert m auf s1. Danach n auf s1, m mit A's Änderung auf s2. */
+	@ParameterizedTest(name = "B gewinnt s1: {0}")
+	@ValueSource(booleans = { false, true })
+	void swapAgainstEditKeepsBothBookingsOnce(boolean ownWinsSeat) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		Version n = version(THIRD, "save-0", booking("n", "s2"));
+		world.claim(S1, m);
+		world.claim(S2, n);
+		Version nOnS1 = child(OWN, "save-t", m, booking("n", "s1"), new VersionMarks(S2, S2, false));
+		Version edited = child(OTHER, "save-e", m, booking("m", "s1", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+		world.claim(S2, child(OWN, "save-t", n, booking("m", "s2"), new VersionMarks(S1, S1, false)));
+		world.claim(S1, ownWinsSeat ? nOnS1 : edited);
+		world.lose(S1, ownWinsSeat ? edited : nOnS1);
+
+		world.resolve(S1, ownWinsSeat ? OTHER : OWN);
+
+		assertEquals(List.of(S1), world.carriers("n"));
+		assertEquals(List.of(S2), world.carriers("m"));
+		assertEquals("CARD", world.head(S2).payload().path("paymentStatus").asText());
+		assertEquals(List.of(), world.notes);
+	}
+
+	/**
+	 * Beide setzen y von s9 auf s1 und ziehen m an verschiedene Ziele (A nach s2, B nach s3): s1 ist inhaltlich gleich,
+	 * trotzdem lebt m danach einmal, am Ziel des Gewinners von s1 (E7 vor der Regel "Gleich").
+	 */
+	@ParameterizedTest(name = "B gewinnt s1: {0}")
+	@ValueSource(booleans = { false, true })
+	void differentTargetsWithEqualNewContentLeaveOneCarrier(boolean ownWinsSeat) {
+		World world = new World();
+		UnitKey s9 = seat("s9");
+		Version y = version(THIRD, "save-0", booking("y", "s9"));
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		world.claim(s9, y);
+		world.claim(S1, m);
+		Version theirsAtS1 = child(OTHER, "save-a", m, booking("y", "s1"), new VersionMarks(S2, s9, false));
+		Version mineAtS1 = child(OWN, "save-b", m, booking("y", "s1"), new VersionMarks(S3, s9, false));
+		world.claim(s9, child(OTHER, "save-a", y, null, VersionMarks.NONE.withMovedTo(S1)));
+		world.lose(s9, child(OWN, "save-b", y, null, VersionMarks.NONE.withMovedTo(S1)));
+		world.claim(S2, version(OTHER, "save-a", booking("m", "s2"), VersionMarks.NONE.withMovedFrom(S1)));
+		world.claim(S3, version(OWN, "save-b", booking("m", "s3"), VersionMarks.NONE.withMovedFrom(S1)));
+		world.claim(S1, ownWinsSeat ? mineAtS1 : theirsAtS1);
+		world.lose(S1, ownWinsSeat ? theirsAtS1 : mineAtS1);
+
+		world.resolve(S1, ownWinsSeat ? OTHER : OWN);
+		world.resolve(s9, OWN);
+
+		assertEquals(List.of(ownWinsSeat ? S3 : S2), world.carriers("m"));
+		assertEquals(List.of(S1), world.carriers("y"));
+		String loser = ownWinsSeat ? OTHER : OWN;
+		assertEquals(1, world.notesFor(loser).size(), world.notes.toString());
+		assertEquals(List.of(), world.notesFor(ownWinsSeat ? OWN : OTHER));
+	}
+
+	/** Eine zweite Auflösung mit derselben Strecke findet ihr Ergebnis vor und schreibt nichts noch einmal. */
+	@Test
+	void repeatedResolutionWritesNothingTwice() {
+		World world = assignmentAgainst(ForeignAction.EDIT, 1, Course.SPLIT_SEAT_BEFORE_FOREIGN_MERGE);
+		Version mine = world.folders.get(S1).stream().filter(v -> OWN.equals(v.machine()) && !v.marks().resolution())
+				.findFirst().orElseThrow();
+
+		Resolution again = POLICY.resolve(world.input(S1, OWN, List.of(mine)));
+
+		assertEquals(List.of(), again.extra());
 	}
 
 	private static void assertInvariants(World world, ForeignAction action) {
+		assertInvariants(world, action, Source.UNASSIGNED);
+	}
+
+	/**
+	 * R35 mit KARV-93: wie oben; dazu bleibt A's Änderung immer (E9: m bleibt an der Quelle, B's Umzug ist gescheitert), und
+	 * B weicht bei einer Änderung von A auf einem Sitz mit dem Vermerk "Platz" statt dem Doppelverkauf.
+	 */
+	private static void assertInvariants(World world, ForeignAction action, Source source) {
 		List<UnitKey> carriers = world.carriers("m");
 		assertTrue(carriers.size() <= 1, "1: m lebt höchstens einmal: " + carriers);
 		assertEquals(action == ForeignAction.CANCEL ? 0 : 1, carriers.size(),
@@ -1082,14 +863,22 @@ class BookingPolicyTest {
 		switch (action) {
 		case MOVE_TO_S4 -> assertEquals(List.of(seat("s4")), carriers, "3: A's Umzug gilt");
 		case MOVE_TO_S4_THEN_S5 -> assertEquals(List.of(seat("s5")), carriers, "3: A's Umzug gilt");
-		case EDIT -> theirChangeYields = !"CARD".equals(world.head(carriers.get(0)).payload().path("paymentStatus").asText());
+		case EDIT -> {
+			assertEquals(List.of(source.unit()), carriers, "3: m bleibt an der Quelle");
+			assertEquals("CARD", world.head(carriers.get(0)).payload().path("paymentStatus").asText(),
+					"3: A's Änderung bleibt");
+		}
 		case CANCEL -> {
 		}
+		}
+		if (action != ForeignAction.CANCEL) {
+			assertEquals("neu@example.org", world.head(carriers.get(0)).payload().path("email").asText(),
+					"R34 (1): B's E-Mail erreicht den Träger");
 		}
 		List<ConflictNote> mine = world.notesFor(OWN);
 		assertEquals(1, mine.size(), "4: B weicht mit genau einem Vermerk: " + mine);
 		Kind expected = switch (action) {
-		case EDIT -> Kind.DOUBLE_SALE;
+		case EDIT -> source == Source.UNASSIGNED ? Kind.DOUBLE_SALE : Kind.FIELDS;
 		case CANCEL -> Kind.DELETE_WINS;
 		case MOVE_TO_S4, MOVE_TO_S4_THEN_S5 -> Kind.FIELDS;
 		};
@@ -1383,62 +1172,6 @@ class BookingPolicyTest {
 	}
 
 	@Test
-	void theirMoveAgainstMyEditTransfersTheEdit() {
-		// Deren verschiebt x von s1 nach s2 (Löschung auf s1), Meine ändert x auf s1: Die Änderung geht nach s2
-		Version base = version(THIRD, booking("x", "s1"));
-		Version theirDeletion = deletion(OTHER, "save-move");
-		Version theirCopy = version(OTHER, "save-move", booking("x", "s2", b -> b.setSeatNumber(2)));
-		Version mine = version(OWN, booking("x", "s1", b -> b.setComment("Abholung Freitag")));
-
-		Resolution resolution = POLICY.resolve(
-				input(S1, base, mine, theirDeletion, siblings(Map.entry(S2, theirCopy)), theirDeletion));
-
-		assertTrue(resolution.deleted());
-		assertNull(resolution.note());
-		ObjectNode merged = booking("x", "s2", b -> {
-			b.setSeatNumber(2);
-			b.setComment("Abholung Freitag");
-		});
-		assertEquals(List.of(new Change(S2, List.of(theirCopy.id()), merged, false)), resolution.extra());
-	}
-
-	@Test
-	void myMoveAgainstTheirEditTransfersTheirEditAndReportsConflicts() {
-		// Meine verschiebt x nach s2 und ändert dort später den Kommentar; Deren ändert den Kommentar auf s1 anders
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-move");
-		Version myCopy = version(OWN, "save-later", booking("x", "s2", b -> {
-			b.setSeatNumber(2);
-			b.setComment("meiner");
-		}));
-		Version theirs = version(OTHER, booking("x", "s1", b -> {
-			b.setComment("deren");
-			b.setPaymentStatus(PaymentStatus.TRANSFER);
-		}));
-		Sibling s2 = new Sibling(new UnitSnapshot(S2, myCopy.id(), Status.OK, false, myCopy.payload()),
-				ChainStep.of(myCopy), Set.of("save-move", "save-later"));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirs, Map.of(S2, s2), theirs));
-
-		assertTrue(resolution.deleted());
-		ObjectNode merged = booking("x", "s2", b -> {
-			b.setSeatNumber(2);
-			b.setComment("meiner");
-			b.setPaymentStatus(PaymentStatus.TRANSFER);
-		});
-		assertEquals(List.of(new Change(S2, List.of(myCopy.id()), merged, false)), resolution.extra());
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.FIELDS, note.kind());
-		assertEquals(OTHER, note.affected());
-		assertEquals(party(myDeletion), note.other());
-		assertEquals(theirs.id(), note.dropped());
-		assertEquals(S2, note.moved());
-		assertEquals("comment", note.fields().get(0).group());
-		assertEquals("deren", note.fields().get(0).mine().get("comment").asText());
-		assertEquals("meiner", note.fields().get(0).theirs().get("comment").asText());
-	}
-
-	@Test
 	void cancellationAgainstAnotherBookingKeepsIt() {
 		// Meine storniert x; auf dem Sitz steht inzwischen die Buchung y: Die Stornierung trifft y nicht
 		Version base = version(THIRD, booking("x", "s1"));
@@ -1459,228 +1192,6 @@ class BookingPolicyTest {
 	// Regel 0: beide gelöscht -->
 
 	@Test
-	void moveAgainstCancelDeletesTheMovedCopy() {
-		// Rechner B (dieser) verschiebt x von s1 nach s2; Rechner A storniert x auf s1
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-move");
-		Version myCopy = version(OWN, "save-move", booking("x", "s2", b -> b.setSeatNumber(2)));
-		Version unrelated = version(THIRD, booking("z", "s3"));
-		Version theirDeletion = deletion(OTHER, "save-cancel");
-		Map<UnitKey, Sibling> siblings = siblings(Map.entry(S2, myCopy), Map.entry(S3, unrelated));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, siblings, theirDeletion));
-
-		assertTrue(resolution.deleted());
-		assertEquals(List.of(deletionOf(S2, myCopy)), resolution.extra());
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.DELETE_WINS, note.kind());
-		assertEquals(OWN, note.affected());
-		assertEquals(party(theirDeletion), note.other());
-		assertEquals(myCopy.id(), note.dropped());
-		assertEquals(S2, note.moved(), "die verworfene Version liegt auf der Kopie; dort stellt man wieder her");
-	}
-
-	@Test
-	void cancelAgainstMoveDeletesTheirMovedCopy() {
-		// dieser Rechner storniert x auf s1; Rechner A verschiebt x nach s2 und gewinnt den Anspruch
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-cancel");
-		Version theirDeletion = deletion(OTHER, "save-move");
-		Version theirCopy = version(OTHER, "save-move", booking("x", "s2", b -> b.setSeatNumber(2)));
-		Map<UnitKey, Sibling> siblings = siblings(Map.entry(S2, theirCopy));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, siblings, theirDeletion));
-
-		assertTrue(resolution.deleted());
-		assertEquals(List.of(deletionOf(S2, theirCopy)), resolution.extra());
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.DELETE_WINS, note.kind());
-		assertEquals(OTHER, note.affected());
-		assertEquals(party(myDeletion), note.other());
-		assertEquals(theirCopy.id(), note.dropped());
-		assertEquals(S2, note.moved());
-	}
-
-	@Test
-	void cancelAgainstMoveFindsTheMoveBehindAThirdMachinesMerge() {
-		// Deren ist die Zusammenführung eines dritten Rechners (eigener Speichervorgang); verschoben hat Rechner A
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-cancel");
-		Version moved = deletion(OTHER, "save-move");
-		Version theirCopy = version(OTHER, "save-move", booking("x", "s2", b -> b.setSeatNumber(2)));
-		Version merged = deletion(THIRD, "save-merge");
-
-		Resolution resolution = POLICY.resolve(
-				input(S1, base, myDeletion, merged, siblings(Map.entry(S2, theirCopy)), moved, merged));
-
-		assertEquals(List.of(deletionOf(S2, theirCopy)), resolution.extra());
-		assertEquals(OTHER, resolution.note().affected());
-	}
-
-	/**
-	 * Eine Geschwister-Einheit mit dieser gültigen Kette (ältestes Glied zuerst), deren Stand das letzte Glied ist; die
-	 * Speichervorgänge ihres Ordners kennt sie nur, wenn sie die Buchung trägt (wie im Store).
-	 */
-	private static Sibling withChain(UnitKey unit, Version... chain) {
-		Version current = chain[chain.length - 1];
-		Set<String> saveIds = current.deleted() ? Set.of()
-				: Arrays.stream(chain).map(Version::saveId).collect(Collectors.toSet());
-		return new Sibling(new UnitSnapshot(unit, current.id(), Status.OK, current.deleted(), current.payload()),
-				ChainStep.of(current), saveIds, null, List.of(), Arrays.stream(chain).map(ChainStep::of).toList());
-	}
-
-	@Test
-	void cancelAgainstTwoMovesDeletesTheFinalCopy() {
-		// dieser Rechner storniert x auf s1; Rechner A verschiebt x nach s2 und danach weiter nach s3
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-cancel");
-		Version theirDeletion = deletion(OTHER, "save-move1");
-		Version passing = version(OTHER, "save-move1", booking("x", "s2", b -> b.setSeatNumber(2)));
-		Version passed = deletion(OTHER, "save-move2");
-		Version theirCopy = version(OTHER, "save-move2", booking("x", "s3", b -> b.setSeatNumber(3)));
-		Map<UnitKey, Sibling> siblings = Map.of(S2, withChain(S2, passing, passed), S3, withChain(S3, theirCopy));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, siblings, theirDeletion));
-
-		assertTrue(resolution.deleted());
-		assertEquals(List.of(deletionOf(S3, theirCopy)), resolution.extra(), "das Storno folgt dem zweiten Umzug");
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.DELETE_WINS, note.kind());
-		assertEquals(OTHER, note.affected());
-		assertEquals(theirCopy.id(), note.dropped());
-		assertEquals(S3, note.moved(), "wiederhergestellt wird auf dem letzten Sitz");
-	}
-
-	@Test
-	void twoMovesAgainstCancelDeleteTheFinalCopy() {
-		// dieser Rechner verschiebt x von s1 nach s2 und weiter nach s3 (dort wieder verkauft); Rechner A storniert x auf s1
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-move1");
-		Version passing = version(OWN, "save-move1", booking("x", "s2", b -> b.setSeatNumber(2)));
-		Version passed = deletion(OWN, "save-move2");
-		Version resold = version(OWN, "save-sale", booking("z", "s2", b -> b.setSeatNumber(2)));
-		Version myCopy = version(OWN, "save-move2", booking("x", "s3", b -> b.setSeatNumber(3)));
-		Version theirDeletion = deletion(OTHER, "save-cancel");
-		Map<UnitKey, Sibling> siblings = Map.of(S2, withChain(S2, passing, passed, resold), S3, withChain(S3, myCopy));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, siblings, theirDeletion));
-
-		assertEquals(List.of(deletionOf(S3, myCopy)), resolution.extra());
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.DELETE_WINS, note.kind());
-		assertEquals(OWN, note.affected());
-		assertEquals(S3, note.moved());
-	}
-
-	@Test
-	void restoredBookingIsNoMoveAgainstACancellation() {
-		// beide stornieren x auf s1; auf s3 lebt x wieder, wiederhergestellt in einem eigenen Speichervorgang ohne Löschung
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-cancel");
-		Version theirDeletion = deletion(OTHER, "save-cancel2");
-		Version sold = version(OTHER, "save-cancel2", booking("z", "s2", b -> b.setSeatNumber(2)));
-		Version cancelledToo = deletion(OTHER, "save-later");
-		Version restored = version(OTHER, "save-restore", booking("x", "s3", b -> b.setSeatNumber(3)));
-		Map<UnitKey, Sibling> siblings = Map.of(S2, withChain(S2, sold, cancelledToo), S3, withChain(S3, restored));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, siblings, theirDeletion));
-
-		assertTrue(resolution.deleted());
-		assertEquals(List.of(), resolution.extra(), "eine wiederhergestellte Buchung wird nicht auf Verdacht gelöscht");
-		assertNull(resolution.note());
-	}
-
-	@Test
-	void bothMovedKeepsTheirsAndDeletesMine() {
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-mine");
-		Version myCopy = version(OWN, "save-mine", booking("x", "s3", b -> {
-			b.setRowLabel("B");
-			b.setTableNumber(2);
-			b.setSeatNumber(3);
-		}));
-		Version theirDeletion = deletion(OTHER, "save-theirs");
-		Version theirCopy = version(OTHER, "save-theirs", booking("x", "s2", b -> b.setSeatNumber(2)));
-		Map<UnitKey, Sibling> siblings = siblings(Map.entry(S2, theirCopy), Map.entry(S3, myCopy));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, siblings, theirDeletion));
-
-		assertTrue(resolution.deleted());
-		assertEquals(List.of(deletionOf(S3, myCopy)), resolution.extra());
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.FIELDS, note.kind());
-		assertEquals(OWN, note.affected());
-		assertEquals(party(theirDeletion), note.other());
-		assertEquals(myCopy.id(), note.dropped());
-		assertEquals(1, note.fields().size());
-		ConflictNote.FieldConflict place = note.fields().get(0);
-		assertEquals("place", place.group());
-		assertEquals("s3", place.mine().get("seatId").asText());
-		assertEquals("B", place.mine().get("rowLabel").asText());
-		assertEquals(3, place.mine().get("seatNumber").asInt());
-		assertEquals("s2", place.theirs().get("seatId").asText());
-		assertEquals(2, place.theirs().get("seatNumber").asInt());
-		// nur die Gruppe "Platz", keine Kundendaten
-		assertFalse(place.mine().has("lastName"));
-	}
-
-	@Test
-	void bothMovedToTheSameSeatKeepsTheBookingWithoutNote() {
-		// beide Rechner verschieben x von s1 nach s2: Sie sind sich einig, s2 gabelt für sich (gleiche Buchung)
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-mine");
-		Version theirDeletion = deletion(OTHER, "save-theirs");
-		Version theirCopy = version(OTHER, "save-theirs", booking("x", "s2", b -> b.setSeatNumber(2)));
-		// die eigene Version auf s2 hat verloren, liegt aber im Ordner von s2
-		Sibling s2 = new Sibling(new UnitSnapshot(S2, theirCopy.id(), Status.OK, false, theirCopy.payload()),
-				ChainStep.of(theirCopy), Set.of("save-theirs", "save-mine"));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, Map.of(S2, s2), theirDeletion));
-
-		assertTrue(resolution.deleted());
-		assertNull(resolution.note());
-		assertTrue(resolution.extra().isEmpty());
-	}
-
-	@Test
-	void moveEditedAgainLaterIsStillRecognized() {
-		// die verschobene Kopie auf s2 wurde nach dem Verschieben in einem späteren Speichervorgang geändert
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-move");
-		Version edited = version(OWN, "save-later", booking("x", "s2", b -> {
-			b.setSeatNumber(2);
-			b.setComment("später geändert");
-		}));
-		Version theirDeletion = deletion(OTHER, "save-cancel");
-		Sibling s2 = new Sibling(new UnitSnapshot(S2, edited.id(), Status.OK, false, edited.payload()),
-				ChainStep.of(edited), Set.of("save-move", "save-later"));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, Map.of(S2, s2), theirDeletion));
-
-		assertEquals(List.of(deletionOf(S2, edited)), resolution.extra());
-		assertEquals(Kind.DELETE_WINS, resolution.note().kind());
-		assertEquals(OWN, resolution.note().affected());
-		assertEquals(edited.id(), resolution.note().dropped());
-	}
-
-	@Test
-	void pendingOwnMovedCopyIsRecognized() {
-		// die eigene Kopie auf s2 ist noch nicht beansprucht: Sie steht in keiner Kette, aber im Ordner
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-move");
-		Version pending = version(OWN, "save-move", booking("x", "s2", b -> b.setSeatNumber(2)));
-		Version theirDeletion = deletion(OTHER, "save-cancel");
-		Sibling s2 = new Sibling(new UnitSnapshot(S2, pending.id(), Status.OK, false, pending.payload()), null,
-				Set.of("save-move"));
-
-		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, Map.of(S2, s2), theirDeletion));
-
-		assertEquals(List.of(deletionOf(S2, pending)), resolution.extra());
-		assertEquals(Kind.DELETE_WINS, resolution.note().kind());
-		assertEquals(OWN, resolution.note().affected());
-	}
-
-	@Test
 	void bothCancelledIsSilent() {
 		Version base = version(THIRD, booking("x", "s1"));
 		Version myDeletion = deletion(OWN, "save-mine");
@@ -1691,23 +1202,6 @@ class BookingPolicyTest {
 		Map<UnitKey, Sibling> siblings = siblings(Map.entry(seat("s4"), elsewhere), Map.entry(S3, unrelated));
 
 		Resolution resolution = POLICY.resolve(input(S1, base, myDeletion, theirDeletion, siblings, theirDeletion));
-
-		assertTrue(resolution.deleted());
-		assertNull(resolution.note());
-		assertTrue(resolution.extra().isEmpty());
-	}
-
-	@Test
-	void movedCopyThatIsDeletedAgainDoesNotCount() {
-		// Die verschobene Einheit ist inzwischen gelöscht (im selben Speichervorgang kann das nicht sein, aber die
-		// Kette kann darüber hinaus gewachsen sein): Sie gilt nicht als Verschiebung
-		Version base = version(THIRD, booking("x", "s1"));
-		Version myDeletion = deletion(OWN, "save-mine");
-		Version theirDeletion = deletion(OTHER, "save-theirs");
-		Version gone = deletion(OTHER, "save-theirs");
-
-		Resolution resolution = POLICY.resolve(
-				input(S1, base, myDeletion, theirDeletion, siblings(Map.entry(S2, gone)), theirDeletion));
 
 		assertTrue(resolution.deleted());
 		assertNull(resolution.note());
@@ -1917,44 +1411,6 @@ class BookingPolicyTest {
 
 		assertPriceNote(resolution, mine, 2000, 2500);
 		assertEquals(party(priced), resolution.note().other());
-	}
-
-	@Test
-	void lostAssignmentWithPaymentAgainstTheirPriceIsNoted() {
-		// wie lostAssignmentFromUnassignedNotesTheGroupBothSidesChanged: Meine kassiert beim gescheiterten Zuweisen nach s1,
-		// Deren ändert auf _m den Preis
-		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
-		Version base = version(THIRD, withoutPlace("m", price(2000)));
-		Version myDeletion = deletion(OWN, "save-a");
-		Version myS1 = version(OWN, "save-a", booking("m", "s1", both(price(2000), paid(2000))));
-		Version theirM = version(OTHER, "save-b", withoutPlace("m", price(2500)));
-		Version theirS1 = version(OTHER, "save-b", booking("t", "s1"));
-
-		Resolution resolution = POLICY.resolve(input(unassigned, base, myDeletion, theirM,
-				Map.of(S1, strandedTarget(S1, theirS1, myS1)), theirM));
-
-		assertFalse(resolution.deleted());
-		assertEquals(withoutPlace("m", both(price(2500), paid(2000))), resolution.payload());
-		assertPriceNote(resolution, myDeletion, 2000, 2500);
-	}
-
-	@Test
-	void transferredPaymentAgainstPriceOfTheMovedCopyIsNoted() {
-		// wie moveAndSellInOneSaveTransfersMyEditToTheMovedCopy: Deren verschiebt x nach s2 und ändert dort den Preis,
-		// Meine kassiert x auf s1
-		Version base = version(THIRD, booking("x", "s1", price(2000)));
-		Version theirs = version(OTHER, "save-theirs", booking("y", "s1"));
-		Version theirCopy = version(OTHER, "save-theirs", booking("x", "s2", both(price(2500), b -> b.setSeatNumber(2))));
-		Version mine = version(OWN, booking("x", "s1", both(price(2000), paid(2000))));
-
-		Resolution resolution = POLICY.resolve(
-				input(S1, base, mine, theirs, siblings(Map.entry(S2, theirCopy)), theirs));
-
-		assertEquals(theirs.payload(), resolution.payload());
-		ObjectNode merged = booking("x", "s2", both(both(price(2500), b -> b.setSeatNumber(2)), paid(2000)));
-		assertEquals(List.of(new Change(S2, List.of(theirCopy.id()), merged, false)), resolution.extra());
-		assertPriceNote(resolution, mine, 2000, 2500);
-		assertEquals(S2, resolution.note().moved());
 	}
 
 	// <-- Koppelregel

@@ -219,6 +219,55 @@ class StoreCodecTest {
 		assertNull(read.conflict().lostSave());
 	}
 
+	private static Version versionWith(VersionMarks marks) throws IOException {
+		return new Version(StoreCodec.FORMAT, V3, List.of(V1), "k4m9q2x8-1234", "Kasse 1", "Anna", AT, "save-1", false,
+				payload("{\"a\":1}"), null, Map.of(), marks);
+	}
+
+	@Test
+	void marksRoundTrip() throws IOException {
+		UnitKey s1 = UnitKey.booking("e1", "p1", "s1");
+		UnitKey s2 = UnitKey.booking("e1", "p1", "s2");
+		Version moved = versionWith(new VersionMarks(s2, s1, false));
+
+		String json = text(StoreCodec.write(moved));
+		assertTrue(json.contains("\"movedTo\":\"events/e1/presentations/p1/bookings/s2\""), json);
+		assertTrue(json.contains("\"movedFrom\":\"events/e1/presentations/p1/bookings/s1\""), json);
+		assertFalse(json.contains("\"resolution\""), json);
+		assertEquals(moved, StoreCodec.readVersion(StoreCodec.write(moved)));
+
+		Version resolved = StoreCodec.readVersion(StoreCodec.write(versionWith(VersionMarks.RESOLUTION)));
+		assertTrue(resolved.marks().resolution());
+		assertNull(resolved.marks().movedTo());
+		assertNull(resolved.marks().movedFrom());
+	}
+
+	@Test
+	void versionWithoutMarksHasNone() throws IOException {
+		String json = text(StoreCodec.write(versionWith(VersionMarks.NONE)));
+		assertFalse(json.contains("\"movedTo\""), json);
+		assertFalse(json.contains("\"movedFrom\""), json);
+		assertFalse(json.contains("\"resolution\""), json);
+
+		String old = "{\"format\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
+				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":false,\"payload\":{}}";
+		assertTrue(StoreCodec.readVersion(bytes(old)).marks().isNone());
+	}
+
+	@Test
+	void invalidMarksAreSkipped() throws IOException {
+		String json = "{\"format\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
+				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":true,\"payload\":{},"
+				+ "\"movedTo\":3,\"movedFrom\":\"events/x/unbekannt\",\"resolution\":\"ja\"}";
+		Version read = StoreCodec.readVersion(bytes(json));
+		assertTrue(read.marks().isNone(), read.marks().toString());
+
+		String presentation = "{\"format\":1,\"id\":\"" + V1.value() + "\",\"parents\":[],\"machine\":\"m\","
+				+ "\"at\":\"2026-10-26T19:04:11.512Z\",\"saveId\":\"s\",\"deleted\":true,\"payload\":{},"
+				+ "\"movedTo\":\"" + UnitKey.presentation("e1", "p1").relativePath() + "\"}";
+		assertNull(StoreCodec.readVersion(bytes(presentation)).marks().movedTo());
+	}
+
 	@Test
 	void conflictNoteWithoutNamesInPartyRoundTrips() throws IOException {
 		ConflictNote note = new ConflictNote(ConflictNote.Kind.DELETE_WINS, "k4m9q2x8-1234",

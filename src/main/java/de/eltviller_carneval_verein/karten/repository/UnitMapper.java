@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,11 +26,13 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.store.Change;
+import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.store.VersionMarks;
 
 /**
  * Zerlegt Events und Hallen in die Einheiten des Versionsspeichers und setzt sie wieder zusammen.
@@ -252,7 +255,75 @@ final class UnitMapper {
 				requireWritable(known);
 			}
 		}
-		return changes;
+		return withMoves(baseline, changes);
+	}
+
+	/**
+	 * Setzt an den Änderungen von Buchungs-Einheiten die Umzüge dieses Speichervorgangs (KARV-93): Fällt eine Buchungs-ID
+	 * in einer Einheit weg (der lesbare, lebende Stand im Bestand trägt sie, die Änderung nicht mehr: Löschung oder andere
+	 * Buchung) und taucht sie in einer anderen Einheit derselben Vorstellung auf (die Änderung trägt sie, der Stand im
+	 * Bestand nicht), bekommt die Quelle {@code movedTo} und das Ziel {@code movedFrom}. Sind es je ID mehrere Quellen oder
+	 * Ziele (das verhindert sonst die Prüfung der Vorstellung), werden sie nach Pfad der Reihe nach zugeordnet, mit einer
+	 * Warnung im Log.
+	 */
+	/** Eine Buchung in einer Vorstellung, für die Zuordnung von Wegfall und Auftauchen in {@link #withMoves}. */
+	private record MoveKey(String presentationId, String bookingId) {
+	}
+
+	private static List<Change> withMoves(Map<UnitKey, UnitSnapshot> baseline, List<Change> changes) {
+		// je Vorstellung und Buchungs-ID die Einheiten, aus denen sie wegfällt bzw. in denen sie auftaucht
+		Map<MoveKey, List<UnitKey>> left = new HashMap<>();
+		Map<MoveKey, List<UnitKey>> arrived = new HashMap<>();
+		for (Change change : changes) {
+			UnitKey unit = change.unit();
+			if (unit.type() != UnitType.BOOKING) {
+				continue;
+			}
+			UnitSnapshot known = baseline.get(unit);
+			String before = known != null && known.isLive() ? ConflictInput.bookingIdOf(known.payload()) : null;
+			String after = change.deleted() ? null : ConflictInput.bookingIdOf(change.payload());
+			if (before != null && !before.equals(after)) {
+				left.computeIfAbsent(new MoveKey(unit.presentationId(), before), key -> new ArrayList<>()).add(unit);
+			}
+			if (after != null && !after.equals(before)) {
+				arrived.computeIfAbsent(new MoveKey(unit.presentationId(), after), key -> new ArrayList<>()).add(unit);
+			}
+		}
+		Map<UnitKey, VersionMarks> marks = new HashMap<>();
+		Comparator<UnitKey> byPath = Comparator.comparing(UnitKey::relativePath);
+		left.forEach((key, found) -> {
+			List<UnitKey> targets = arrived.get(key);
+			if (targets == null) {
+				return;
+			}
+			// erst hier lesen (teuer, und meist ist kein Umzug dabei): nur ein lesbarer Stand im Bestand ist eine Quelle
+			List<UnitKey> sources = found.stream().filter(unit -> isReadable(baseline.get(unit)))
+					.collect(Collectors.toCollection(ArrayList::new));
+			if (sources.isEmpty()) {
+				return;
+			}
+			if (sources.size() > 1 || targets.size() > 1) {
+				LOG.warning("Der Umzug der Buchung " + key.bookingId() + " ist mehrdeutig (" + sources.size()
+						+ " Quellen, " + targets.size() + " Ziele); zugeordnet nach Pfad.");
+			}
+			sources.sort(byPath);
+			targets.sort(byPath);
+			for (int i = 0; i < Math.min(sources.size(), targets.size()); i++) {
+				UnitKey source = sources.get(i);
+				UnitKey target = targets.get(i);
+				marks.merge(source, VersionMarks.NONE.withMovedTo(target), (old, add) -> old.withMovedTo(target));
+				marks.merge(target, VersionMarks.NONE.withMovedFrom(source), (old, add) -> old.withMovedFrom(source));
+			}
+		});
+		if (marks.isEmpty()) {
+			return changes;
+		}
+		List<Change> marked = new ArrayList<>(changes.size());
+		for (Change change : changes) {
+			VersionMarks mark = marks.get(change.unit());
+			marked.add(mark == null ? change : change.withMarks(mark));
+		}
+		return marked;
 	}
 
 	/** Die Löschung einer Einheit auf ihrer aktuellen Version (für das Löschen eines ganzen Events oder einer Halle). */
