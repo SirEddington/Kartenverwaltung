@@ -18,7 +18,9 @@ import java.util.Set;
  * <li><b>Elternlöschung:</b> Die aktuelle Version eines Event-Kopfs oder einer Vorstellung ist eine <em>fremde</em>
  * Löschung {@code D}. Darunter zählt jede eigene Einheit (Buchung, bei einem Event-Kopf auch Vorstellung), deren aktueller
  * Stand eine eigene, nicht gelöschte Version ist und deren Listennummer {@code 0} ist (in keiner Liste) oder größer als
- * {@code D.seen[eigene ID]} (fehlt der Eintrag: 0): Der Löschende kannte sie nicht. Eine eigene Löschung ist kein
+ * {@code D.seen[eigene ID]} (fehlt der Eintrag: 0): Der Löschende kannte sie nicht. Eine eigene Zusammenführung, in der
+ * "Deren" blieb (Vermerk DOUBLE_SALE oder UNMERGED), trägt zwar die eigene ID, aber die Buchung der Gegenseite und zählt
+ * deshalb nicht. Eine eigene Löschung ist kein
  * Konflikt, außer sie ist die Zusammenführung, in der eine fremde Löschung gegen eine eigene Änderung gewann
  * (Vermerk DELETE_WINS mit fremder Gegenseite): Sie gilt als die fremde Löschung.</li>
  * <li><b>Unbekannte Listennummer</b> ({@code ownSeq == null} bei einer eigenen Version): zählt weder als Konflikt noch als
@@ -153,6 +155,23 @@ final class ConflictLedger {
 	}
 
 	/**
+	 * Ob die eigene Version nur die ID dieses Rechners trägt, ihr Inhalt aber der der Gegenseite ist: bei einem Doppelverkauf
+	 * ({@link ConflictNote.Kind#DOUBLE_SALE}) oder einer unmöglichen Zusammenführung ({@link ConflictNote.Kind#UNMERGED})
+	 * bleibt "Deren", und "Meine" weicht. Der Verkauf darin ist der der Gegenseite, nicht einer, den der Löschende von diesem
+	 * Rechner nicht kannte (der ausgewichene eigene steht in seiner eigenen Einheit).
+	 */
+	private static boolean carriesForeignContent(UnitIndex.Entry entry, VersionId version) {
+		for (UnitIndex.NotedVersion noted : entry.notes()) {
+			ConflictNote.Kind kind = noted.note().kind();
+			if (noted.version().equals(version)
+					&& (kind == ConflictNote.Kind.DOUBLE_SALE || kind == ConflictNote.Kind.UNMERGED)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Trägt bei jeder fremden Löschung die eigenen Einheiten darunter ein, die der Löschende nicht kannte.
 	 *
 	 * @return ob eine eigene Einheit unter einer Löschung eine unbekannte Listennummer hat
@@ -163,7 +182,7 @@ final class ConflictLedger {
 			UnitSnapshot snapshot = entry.snapshot();
 			UnitKey unit = snapshot.unit();
 			VersionId version = snapshot.version();
-			if (snapshot.deleted() || version == null || !own.isOwnId(version)) {
+			if (snapshot.deleted() || version == null || !own.isOwnId(version) || carriesForeignContent(entry, version)) {
 				continue;
 			}
 			for (UnitKey parent : unit.ancestors()) {

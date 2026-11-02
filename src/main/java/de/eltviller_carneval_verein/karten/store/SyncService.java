@@ -1617,10 +1617,45 @@ public final class SyncService implements ConnectionControl {
 	 * ({@link ConflictNote#affected()}, {@link ConflictLedger#affectsMe}). Diesen Konflikt zeigt der Dialog. Die
 	 * Vermerke stammen aus dem Start-Index; kennt er keinen passenden, wird keine Datei gelesen. Sonst liest es höchstens
 	 * diese eine Version (wenn sie selbst keinen Vermerk trägt, kennt der Index Rechner und Vorgänger nicht).
+	 * <p>
+	 * Dasselbe gilt für eine weitere Änderung derselben Auflösung (Löschung der verschobenen Kopie, Übertragung auf die
+	 * Kopie): Sie hat keinen Vermerk, wird aber im Speichervorgang der Zusammenführung geschrieben, und deren Vermerk ist der
+	 * Konflikt im Dialog.
 	 *
 	 * @param version ein Stand der Einheit; {@code null} ist nie eine Zusammenführung
 	 */
 	public boolean isOwnNotedMerge(UnitKey unit, VersionId version) throws IOException {
+		return isNotedMergeItself(unit, version) || isExtraOfOwnNotedMerge(unit, version);
+	}
+
+	/** Ob der Stand eine Zusatz-Änderung ist: eigen, ohne Vermerk, im Speichervorgang einer eigenen Zusammenführung mit Vermerk. */
+	private boolean isExtraOfOwnNotedMerge(UnitKey unit, VersionId version) throws IOException {
+		UnitIndex.Entry entry = index.entry(unit);
+		Ownership own = ownership();
+		if (version == null || entry == null || !own.isOwnId(version)) {
+			return false;
+		}
+		String saveId = null;
+		for (ChainStep step : entry.chain()) {
+			if (step.version().equals(version)) {
+				saveId = step.saveId();
+			}
+		}
+		if (saveId == null) {
+			Version read = version(unit, version);
+			saveId = read == null ? null : read.saveId();
+		}
+		if (saveId == null) {
+			return false;
+		}
+		String save = saveId;
+		return index.read(entries -> entries.stream().filter(other -> !other.snapshot().unit().equals(unit))
+				.flatMap(other -> other.notes().stream())
+				.anyMatch(noted -> save.equals(noted.saveId()) && noted.parents().size() > 1
+						&& own.isOwn(noted.machine(), noted.version()) && ConflictLedger.affectsMe(own, noted)));
+	}
+
+	private boolean isNotedMergeItself(UnitKey unit, VersionId version) throws IOException {
 		UnitIndex.Entry entry = index.entry(unit);
 		if (version == null || entry == null) {
 			return false;

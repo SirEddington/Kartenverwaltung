@@ -52,7 +52,8 @@ final class ForeignBacklog {
 	 * Stellt den aktuellen Stand der Einheit zurück; der Hinweis nennt den Rechner aus dem letzten Glied der Kette. Ist der
 	 * Stand eine eigene Zusammenführung, die einen Konflikt dieses Rechners vermerkt ({@link SyncService#isOwnNotedMerge}),
 	 * entfällt der Hinweis: Er nennte den eigenen Rechner als "anderen Rechner", den Konflikt zeigt der Dialog. Eine eigene
-	 * Zusammenführung ohne solchen Vermerk bringt nur fremde Änderungen und bekommt den Hinweis (Ruling R27). Nachgesehen
+	 * Zusammenführung ohne solchen Vermerk bringt nur fremde Änderungen und bekommt den Hinweis (Ruling R27). Still ist auch
+	 * eine weitere Änderung derselben Auflösung (Löschung oder Übertragung auf eine Geschwister-Einheit, KARV-96). Nachgesehen
 	 * wird das einmal je Version (die Einheit wird bei jedem Aufruf von {@code applyForeign} erneut zurückgestellt); lässt
 	 * sich die Version nicht lesen, bleibt der Hinweis.
 	 *
