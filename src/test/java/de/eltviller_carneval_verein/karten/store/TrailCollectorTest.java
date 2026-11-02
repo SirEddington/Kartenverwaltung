@@ -229,5 +229,6 @@ class TrailCollectorTest {
 		assertTrue(unit.stands(first.id()));
 		assertTrue(unit.stands(second.id()));
 		assertFalse(unit.stands(lost.id()));
+		assertEquals(List.of(head, first, second), unit.standing());
 	}
 }

@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.store;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,27 +37,28 @@ public record TrailUnit(UnitKey unit, List<Version> chain, List<Outside> outside
 	}
 
 	/**
-	 * Ob die Version hier gilt: Sie steht in der Kette oder auf dem Weg vom aktuellen Stand über erste Vorgänger zurück zur
-	 * Kette (eigene, noch ausstehende Versionen). Eine Zusammenführung einer Auflösung beendet den Weg: Was sie als zweiten
-	 * Vorgänger aufnahm, hat verloren.
+	 * Die Versionen, die hier gelten, ältestes zuerst: die Kette, danach der Weg vom aktuellen Stand über erste Vorgänger
+	 * zurück zur Kette (eigene, noch ausstehende Versionen). Eine Zusammenführung einer Auflösung beendet den Weg (sie
+	 * steht nicht unter {@link #outside()}): Was sie als zweiten Vorgänger aufnahm, hat verloren.
 	 */
-	public boolean stands(VersionId version) {
-		for (Version link : chain) {
-			if (link.id().equals(version)) {
-				return true;
-			}
-		}
+	public List<Version> standing() {
 		Map<VersionId, Version> beside = new HashMap<>();
 		for (Outside other : outside) {
 			beside.put(other.version().id(), other.version());
 		}
+		List<Version> pending = new ArrayList<>();
 		VersionId at = current;
 		while (at != null && beside.containsKey(at)) {
-			if (at.equals(version)) {
-				return true;
-			}
+			pending.add(0, beside.get(at));
 			at = beside.get(at).firstParent();
 		}
-		return false;
+		List<Version> all = new ArrayList<>(chain);
+		all.addAll(pending);
+		return all;
+	}
+
+	/** Ob die Version hier gilt ({@link #standing()}). */
+	public boolean stands(VersionId version) {
+		return standing().stream().anyMatch(link -> link.id().equals(version));
 	}
 }
