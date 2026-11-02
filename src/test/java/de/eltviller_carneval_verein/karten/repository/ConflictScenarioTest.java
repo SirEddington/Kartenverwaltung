@@ -1586,7 +1586,8 @@ class ConflictScenarioTest {
 	 * I1, Platz zuweisen gegen Änderung plus Verkauf (Ruling R31): Mia steht "ohne Platz". B weist ihr Sitz 1 zu und ändert
 	 * dabei den Kommentar (ein Speichervorgang: Löschung von {@code _Mia}, Mia auf Sitz 1); A setzt Mia gleichzeitig auf
 	 * "bezahlt" und verkauft Sitz 1 an Tom, A lädt zuerst hoch. B verliert auf beiden Einheiten. Danach lebt Mia genau
-	 * einmal, "ohne Platz", mit A's und B's Änderung; Sitz 1 trägt Tom; B hat den Doppelverkauf offen, A keinen Konflikt.
+	 * einmal, "ohne Platz", mit A's und B's Änderung; Sitz 1 trägt Tom; B hat den Doppelverkauf offen (auf {@code _Mia}), A
+	 * keinen Konflikt.
 	 */
 	@Test
 	void assigningAPlaceAgainstEditPlusSaleKeepsTheBookingWithoutPlace() throws IOException {
@@ -1623,7 +1624,8 @@ class ConflictScenarioTest {
 		assertWithoutPlace(kept, "Mia");
 		assertEquals("CARD", kept.payload().get("paymentStatus").asText(), "A's Änderung");
 		assertEquals("Fenster", kept.payload().get("comment").asText(), "B's Änderung beim Zuweisen");
-		assertDoubleSale(b, miaUnit, seat);
+		// KARV-93: der Vermerk steht an der gegabelten Quelle
+		assertDoubleSale(b, miaUnit, miaUnit);
 		assertTrue(a.open().isEmpty(), "keine Stornierung, die niemand gemacht hat: " + a.open());
 		assertModelShowsDoubleSale(a, 1, "Tom", miaId, "Mia");
 		assertModelShowsDoubleSale(b, 1, "Tom", miaId, "Mia");
@@ -1632,7 +1634,7 @@ class ConflictScenarioTest {
 	/**
 	 * R31a, Platz zuweisen gegen Stornierung plus Verkauf: Mia steht "ohne Platz". B weist ihr Sitz 1 zu; A storniert Mia
 	 * gleichzeitig und verkauft Sitz 1 an Tom, A lädt zuerst hoch. Storno gewinnt: Mia lebt nirgends, Sitz 1 trägt Tom. B
-	 * hat genau einen offenen Konflikt, DELETE_WINS am Sitz mit A als Gegenseite (kein Doppelverkauf), A keinen.
+	 * hat genau einen offenen Konflikt, DELETE_WINS auf {@code _Mia} mit A als Gegenseite (kein Doppelverkauf), A keinen.
 	 */
 	@Test
 	void cancellationWinsAgainstAssigningAPlace() throws IOException {
@@ -1691,7 +1693,8 @@ class ConflictScenarioTest {
 		assertEquals(1, open.size(), open.toString());
 		ConflictNote note = open.get(0).note();
 		assertEquals(ConflictNote.Kind.DELETE_WINS, note.kind());
-		assertEquals(seat, open.get(0).unit());
+		// KARV-93: an der gegabelten Quelle, nicht am Sitz, an dem B verlor; "Wiederherstellen" führt dort ohne Platz zurück
+		assertEquals(miaUnit, open.get(0).unit());
 		assertEquals(a.sync.machineId(), note.other().machine());
 		assertTrue(a.open().isEmpty(), a.open().toString());
 		for (Machine machine : m) {
@@ -1773,8 +1776,9 @@ class ConflictScenarioTest {
 	 * N1, getrennte Gewinner (R35): Mia steht "ohne Platz". A verkauft Sitz 1 an Tom und lädt hoch; seine Liste kommt bei B
 	 * vorerst nicht an. B weist Mia Sitz 1 zu (mit Kommentar) und lädt hoch: B gewinnt {@code _Mia} und verliert Sitz 1,
 	 * die Strecke wartet auf A's Liste. Inzwischen setzt A Mia auf "bezahlt", verliert auf {@code _Mia} gegen B's Löschung
-	 * und löst auf (DELETE_WINS an A). Erst danach löst B Sitz 1 auf: Die gewinnende Löschung von {@code _Mia} ist B's
-	 * eigene, auch wenn A's Zusammenführung sie bestätigt; niemand hat storniert, also lebt Mia genau einmal "ohne Platz".
+	 * und löst auf: B's Löschung war ein Umzug, dessen Ziel verloren hat (KARV-93, E9), also bleibt Mia auf {@code _Mia},
+	 * bezahlt und mit B's Kommentar; B bekommt den Doppelverkauf dort. Erst danach löst B Sitz 1 auf und findet das Ergebnis
+	 * schon vor. Niemand hat storniert, Mia lebt genau einmal "ohne Platz", A's Änderung weicht nicht.
 	 */
 	@Test
 	void assigningAPlaceWithSplitWinnersKeepsTheBookingOnce() throws IOException {
@@ -1813,7 +1817,7 @@ class ConflictScenarioTest {
 			a.tick();
 		}
 		assertTrue(a.sync.unitState(miaUnit).lost().isEmpty(), "A hat _Mia aufgelöst");
-		assertTrue(a.sync.unitState(miaUnit).current().deleted(), "A's Änderung weicht B's Löschung");
+		assertFalse(a.sync.unitState(miaUnit).current().deleted(), "B's Umzug ist gescheitert, Mia bleibt auf _Mia");
 
 		// die Wartezeit auf Listen ist um: B löst Sitz 1 mit dem auf, was der Vollabgleich bringt (A's Zusammenführung)
 		clock.advance(Duration.ofMinutes(5).plusSeconds(1));
@@ -1828,10 +1832,9 @@ class ConflictScenarioTest {
 		UnitSnapshot kept = a.eventState().get(miaUnit);
 		assertWithoutPlace(kept, "Mia");
 		assertEquals("Fenster", kept.payload().get("comment").asText(), "B's Änderung beim Zuweisen");
-		assertDoubleSale(b, miaUnit, seat);
-		List<OpenConflict> open = a.open();
-		assertEquals(1, open.size(), "A's Änderung weicht mit Vermerk: " + open);
-		assertEquals(ConflictNote.Kind.DELETE_WINS, open.get(0).note().kind());
+		assertEquals("CARD", kept.payload().get("paymentStatus").asText(), "A's Änderung bleibt");
+		assertDoubleSale(b, miaUnit, miaUnit);
+		assertEquals(List.of(), a.open(), "A's Änderung weicht nicht");
 		assertModelShowsDoubleSale(a, 1, "Tom", miaId, "Mia");
 		assertModelShowsDoubleSale(b, 1, "Tom", miaId, "Mia");
 	}

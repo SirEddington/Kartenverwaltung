@@ -3,9 +3,11 @@ package de.eltviller_carneval_verein.karten.repository;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -21,6 +23,7 @@ import de.eltviller_carneval_verein.karten.store.ConflictNote.FieldConflict;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Party;
 import de.eltviller_carneval_verein.karten.store.ConflictPolicy;
 import de.eltviller_carneval_verein.karten.store.Resolution;
+import de.eltviller_carneval_verein.karten.store.TrailUnit;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.Version;
@@ -48,6 +51,8 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
  */
 public final class BookingPolicy implements ConflictPolicy {
 
+	private static final Logger LOGGER = Logger.getLogger(BookingPolicy.class.getName());
+
 	private static final String SEAT_ID = "seatId";
 	private static final String ROW_LABEL = "rowLabel";
 	private static final String TABLE_NUMBER = "tableNumber";
@@ -73,7 +78,10 @@ public final class BookingPolicy implements ConflictPolicy {
 	@Override
 	public Resolution resolve(ConflictInput given) {
 		ConflictInput input = withBaseFromChain(given);
-		Resolution resolution = bothDeleted(input);
+		Resolution resolution = moves(input);
+		if (resolution == null) {
+			resolution = bothDeleted(input);
+		}
 		if (resolution == null) {
 			resolution = PolicyRules.equal(input);
 		}
@@ -101,6 +109,169 @@ public final class BookingPolicy implements ConflictPolicy {
 					mergeBooking(PolicyRules.basePayload(input), input.mine().payload(), input.theirs().payload()));
 		}
 		return resolution;
+	}
+
+	/**
+	 * Die Entscheidung je Buchung (KARV-93, {@link BookingFate}) für die Buchungen, deren Schicksal diese Einheit berührt:
+	 * die Buchung der Basis, wenn eine Seite sie hier weggenommen hat (die Einheit ist ihre Quelle), und die Buchung, die
+	 * die Strecke mit {@code movedFrom} hereingeholt hat (die Einheit ist ihr Ziel). Die Auflösung schreibt davon, was noch
+	 * fehlt:
+	 * <ul>
+	 * <li>Die Fassung der Einheit ist der Inhalt des Ergebnisses, wenn sie der Träger ist; sonst die Buchung, die eine Seite
+	 * hier neu hingesetzt hat (zuerst "Deren"); sonst eine Löschung.</li>
+	 * <li>Ein anderer Träger bekommt den Inhalt als Zusatz-Änderung, wenn sein Stand ihn nicht schon hat; Träger auf der
+	 * Spur, die die Buchung nicht mehr tragen dürfen, eine Löschung.</li>
+	 * <li>Den Vermerk schreibt die Einheit, die das Ergebnis dafür nennt; einem Vermerk ohne Gegenseite (am Ziel eines
+	 * gescheiterten Umzugs) gibt sie die Version, die den Inhalt hier eingebracht hat.</li>
+	 * </ul>
+	 *
+	 * @return die Auflösung, oder {@code null}, wenn keine Buchung zu entscheiden ist (oder beide Seiten dieselbe Buchung
+	 *         hier tragen: dann Regel 4)
+	 */
+	private static Resolution moves(ConflictInput input) {
+		if (input.trail().isEmpty()) {
+			return null;
+		}
+		UnitKey unit = input.unit();
+		Map<String, BookingFate> fates = new LinkedHashMap<>();
+		String baseId = idOf(input.base());
+		if (baseId != null) {
+			BookingFate fate = fateAt(input, baseId, unit, input.base());
+			if (fate != null) {
+				fates.put(baseId, fate);
+			}
+		}
+		for (Version version : input.stretch()) {
+			UnitKey source = version.marks().movedFrom();
+			String id = idOf(version);
+			if (source != null && id != null && !fates.containsKey(id)) {
+				VersionId sourceBase = BookingTrail.sourceBase(input, source, version);
+				Version base = versionAt(input, source, sourceBase);
+				BookingFate fate = base == null ? null : fateAt(input, id, source, base);
+				if (fate != null) {
+					fates.put(id, fate);
+				}
+			}
+		}
+		if (fates.isEmpty()) {
+			return null;
+		}
+		ObjectNode payload = null;
+		for (BookingFate fate : fates.values()) {
+			if (unit.equals(fate.carrier())) {
+				if (fate.content() == null) {
+					return null;
+				}
+				payload = fate.content();
+			}
+		}
+		if (payload == null) {
+			payload = newcomer(input, fates.keySet());
+		}
+		List<Change> extra = new ArrayList<>();
+		ConflictNote note = null;
+		for (Map.Entry<String, BookingFate> entry : fates.entrySet()) {
+			BookingFate fate = entry.getValue();
+			if (fate.carrier() != null && !unit.equals(fate.carrier()) && fate.content() != null) {
+				Change content = contentChange(input, fate.carrier(), fate.content());
+				if (content != null) {
+					extra.add(content);
+				}
+			}
+			for (UnitKey deletion : fate.deletions()) {
+				Sibling sibling = input.siblings().get(deletion);
+				if (!unit.equals(deletion) && sibling != null && sibling.snapshot().carriesBooking(entry.getKey())) {
+					extra.add(deletionOf(sibling.snapshot()));
+				}
+			}
+			for (BookingFate.Placed placed : fate.notes()) {
+				if (unit.equals(placed.writtenAt())) {
+					if (note == null) {
+						note = withOther(input, placed.note());
+					} else {
+						LOGGER.warning("Zwei Vermerke an " + unit.relativePath() + "; nur der erste wird geschrieben.");
+					}
+				}
+			}
+		}
+		return new Resolution(payload, payload == null, extra, note);
+	}
+
+	/** Die Entscheidung für eine Buchung an ihrer Quelle, oder {@code null}, wenn keine Seite sie weggenommen hat. */
+	private static BookingFate fateAt(ConflictInput input, String bookingId, UnitKey source, Version base) {
+		BookingTrail own = BookingTrail.of(input, bookingId, source, base.id(), true);
+		BookingTrail foreign = BookingTrail.of(input, bookingId, source, base.id(), false);
+		if (!removed(own) && !removed(foreign)) {
+			return null;
+		}
+		boolean ownWins = Boolean.TRUE.equals(BookingTrail.ownWinsAt(input, source, base.id()));
+		return BookingFate.decide(bookingId, source, base, own, foreign, ownWins, input.ownMachineId());
+	}
+
+	private static boolean removed(BookingTrail trail) {
+		return trail.kind() == BookingTrail.Kind.CANCELLED || trail.kind() == BookingTrail.Kind.ARRIVED
+				|| trail.kind() == BookingTrail.Kind.FAILED;
+	}
+
+	/** Die Version mit dieser ID in der Einheit auf der Spur (Kette oder daneben), oder {@code null}. */
+	private static Version versionAt(ConflictInput input, UnitKey unit, VersionId id) {
+		TrailUnit trailUnit = input.trail().get(unit);
+		if (trailUnit == null || id == null) {
+			return null;
+		}
+		for (Version version : trailUnit.chain()) {
+			if (version.id().equals(id)) {
+				return version;
+			}
+		}
+		for (TrailUnit.Outside other : trailUnit.outside()) {
+			if (other.version().id().equals(id)) {
+				return other.version();
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Was eine Seite auf die Einheit neu hingesetzt hat, ohne die entschiedenen Buchungen: zuerst "Deren", dann "Meine";
+	 * {@code null}, wenn keine (die Einheit wird gelöscht).
+	 */
+	private static ObjectNode newcomer(ConflictInput input, Set<String> decided) {
+		for (Version side : List.of(input.theirs(), input.mine())) {
+			String id = idOf(side);
+			if (id != null && !decided.contains(id)) {
+				return side.payload();
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Der Inhalt für einen anderen Träger auf seinem aktuellen Stand (wiederbelebt, wenn er gelöscht ist; als erste
+	 * Version, wenn es ihn nicht gibt); {@code null}, wenn sein Stand den Inhalt schon hat.
+	 */
+	private static Change contentChange(ConflictInput input, UnitKey carrier, ObjectNode content) {
+		Sibling sibling = input.siblings().get(carrier);
+		UnitSnapshot current = sibling == null ? null : sibling.snapshot();
+		if (current != null && current.isLive() && content.equals(current.payload())) {
+			return null;
+		}
+		List<VersionId> parents = current != null && current.version() != null ? List.of(current.version())
+				: List.of();
+		return new Change(carrier, parents, content, false);
+	}
+
+	/**
+	 * Ein Vermerk ohne Gegenseite (gescheiterter Umzug, geschrieben an seinem Ziel) bekommt die Version, die den Inhalt von
+	 * "Deren" hier eingebracht hat.
+	 */
+	private static ConflictNote withOther(ConflictInput input, ConflictNote note) {
+		if (note.other() != null) {
+			return note;
+		}
+		Party other = Party.of(introducerOf(input, idOf(input.theirs()), input.theirs()));
+		return new ConflictNote(note.kind(), note.affected(), other, note.fields(), note.moved(), note.place(),
+				note.dropped());
 	}
 
 	/**

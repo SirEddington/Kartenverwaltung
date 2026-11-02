@@ -230,6 +230,22 @@ class BookingTrailTest {
 		assertEquals(Kind.UNTOUCHED, trail.kind());
 	}
 
+	/**
+	 * Drei Rechner: An der Quelle liegen zwei fremde Absichten (ein Umzug, der dort verloren hat, und ein Storno, das gilt).
+	 * Die fremde Seite ist die, die in der Kette steht; die andere ist zwischen den Fremden schon aufgelöst.
+	 */
+	@Test
+	void foreignSideIsTheOneInTheChain() {
+		Version move = world.beside(M, world.version(THIRD, "save-c", base, null, to(S4)));
+		world.claim(S4, world.version(THIRD, "save-c", null, booking("m", "s4"), from(M)));
+		world.claim(M, world.version(OTHER, base, null));
+		Version mine = world.beside(M, world.version(OWN, base, withoutPlace("m", b -> b.setComment("neu"))));
+
+		BookingTrail trail = foreign(world.input(M, base, List.of(mine)));
+
+		assertEquals(Kind.CANCELLED, trail.kind(), "nicht der ältere Umzug " + move.id());
+	}
+
 	@Test
 	void ownWinsAtTellsWhoseVersionStandsAtTheSource() {
 		foreignMoveToS4();

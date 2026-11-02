@@ -146,7 +146,9 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 
 		/**
 		 * Die Buchung lebt am Ende des Umzugs von {@code winner}; die Felder von {@code other} kommen per Dreiwegevergleich
-		 * dazu (Gruppe "Platz" bleibt die der Kopie, strittig gilt die Kopie). Mit {@code place} ist "Platz" selbst strittig.
+		 * dazu (Gruppe "Platz" bleibt die der Kopie, strittig gilt die Kopie). Mit {@code place} ist "Platz" selbst strittig;
+		 * der Vermerk nennt dann wie bisher (Ruling R31b) keine Einheit in {@code moved}, der Dialog folgt der Buchung über
+		 * ihre Kennung. Ohne "Platz" nennt er den Träger (Ruling R26).
 		 */
 		private BookingFate toCopy(Side winner, Side other, List<UnitKey> deletions, boolean place) {
 			UnitKey carrier = winner.trail().end();
@@ -159,8 +161,8 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 			}
 			conflicts.addAll(merged.conflicts());
 			List<Placed> notes = conflicts.isEmpty() ? List.of()
-					: List.of(atSource(ConflictNote.ofFields(other.machine(), winner.party(), conflicts, carrier,
-							other.dropped())));
+					: List.of(atSource(ConflictNote.ofFields(other.machine(), winner.party(), conflicts,
+							place ? null : carrier, other.dropped())));
 			return new BookingFate(carrier, merged.merged(), deletions, notes);
 		}
 

@@ -194,7 +194,7 @@ class BookingFateTest {
 			assertEquals(ConflictNote.Kind.FIELDS, note.kind());
 			assertEquals(OWN, note.affected());
 			assertEquals("place", note.fields().get(0).group());
-			assertEquals(S4, note.moved());
+			assertNull(note.moved(), "wie R31b: der Dialog folgt der Buchung über ihre Kennung");
 		}
 	}
 

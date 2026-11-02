@@ -48,11 +48,14 @@ import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Kind;
 import de.eltviller_carneval_verein.karten.store.ConflictPolicy;
 import de.eltviller_carneval_verein.karten.store.Resolution;
+import de.eltviller_carneval_verein.karten.store.TrailCollector;
+import de.eltviller_carneval_verein.karten.store.TrailUnit;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.store.VersionMarks;
 
 /** Die Strategie für Buchungen auf JSON, ohne Versionsspeicher. */
 class BookingPolicyTest {
@@ -810,21 +813,9 @@ class BookingPolicyTest {
 		/** Löst die verlorene Strecke des Rechners an der Einheit auf, wie der Resolver auf diesem Rechner. */
 		void resolve(UnitKey unit, String machine) {
 			List<Version> stretch = lost.get(unit).remove(machine);
-			Version mine = stretch.get(stretch.size() - 1);
-			VersionId baseId = stretch.get(0).firstParent();
-			List<Version> chain = chains.get(unit);
-			int at = -1;
-			for (int i = 0; baseId != null && i < chain.size(); i++) {
-				if (chain.get(i).id().equals(baseId)) {
-					at = i;
-				}
-			}
-			Version base = at < 0 ? null : chain.get(at);
-			Version theirs = head(unit);
-			Set<String> saveIds = stretch.stream().map(Version::saveId).collect(Collectors.toSet());
-			ConflictInput input = new ConflictInput(unit, copy(base), copy(mine), copy(theirs),
-					chain.subList(at + 1, chain.size()).stream().map(BookingPolicyTest::copy).toList(), machine,
-					siblings(unit, base, mine, saveIds), saveIds);
+			ConflictInput input = input(unit, machine, stretch);
+			Version mine = input.mine();
+			Version theirs = input.theirs();
 			Resolution resolution = POLICY.resolve(input);
 			String saveId = "merge-" + ++merges;
 			for (Change extra : resolution.extra()) {
@@ -839,11 +830,45 @@ class BookingPolicyTest {
 					resolution.note());
 		}
 
+		/**
+		 * Die Eingabe für die verlorene Strecke des Rechners an der Einheit, wie der Resolver auf diesem Rechner sie bildet:
+		 * Basis, Meine, Deren, Kette seit der Basis, Speichervorgänge und Geschwister, Strecke und Umzugsspur
+		 * ({@link TrailCollector} über die Ordner dieser Welt).
+		 */
+		ConflictInput input(UnitKey unit, String machine, List<Version> stretch) {
+			Version mine = stretch.get(stretch.size() - 1);
+			VersionId baseId = stretch.get(0).firstParent();
+			List<Version> chain = chains.get(unit);
+			int at = -1;
+			for (int i = 0; baseId != null && i < chain.size(); i++) {
+				if (chain.get(i).id().equals(baseId)) {
+					at = i;
+				}
+			}
+			Version base = at < 0 ? null : chain.get(at);
+			Version theirs = head(unit);
+			Set<String> saveIds = stretch.stream().map(Version::saveId).collect(Collectors.toSet());
+			List<Version> since = chain.subList(at + 1, chain.size()).stream().map(BookingPolicyTest::copy).toList();
+			Map<UnitKey, TrailUnit> trail;
+			try {
+				trail = TrailCollector.collect(unit, base, stretch, since, key -> {
+					Version head = head(key);
+					return new TrailCollector.Folder(chains.getOrDefault(key, List.of()),
+							folders.getOrDefault(key, List.of()), head == null ? null : head.id());
+				});
+			} catch (IOException e) {
+				throw new IllegalStateException(e);
+			}
+			return new ConflictInput(unit, copy(base), copy(mine), copy(theirs), since, machine,
+					siblings(unit, base, mine, saveIds), saveIds, stretch.stream().map(BookingPolicyTest::copy).toList(),
+					trail);
+		}
+
 		private void write(UnitKey unit, List<VersionId> parents, String machine, String saveId, boolean deleted,
 				ObjectNode payload, ConflictNote note) {
 			claim(unit, new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter++), parents, machine,
 					"Kasse " + machine, "Bediener " + machine, Instant.EPOCH, saveId, deleted, deleted ? null : payload,
-					note, Map.of()));
+					note, Map.of(), VersionMarks.RESOLUTION));
 			if (note != null) {
 				notes.add(note);
 			}
@@ -927,8 +952,20 @@ class BookingPolicyTest {
 
 	/** Eine Version auf einem Vorgänger; ohne Inhalt eine Löschung. */
 	private static Version child(String machine, String saveId, Version parent, ObjectNode payload) {
+		return child(machine, saveId, parent, payload, VersionMarks.NONE);
+	}
+
+	/** Eine Version auf einem Vorgänger mit Angaben zum Umzug; ohne Inhalt eine Löschung. */
+	private static Version child(String machine, String saveId, Version parent, ObjectNode payload, VersionMarks marks) {
 		return new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter++), List.of(parent.id()),
-				machine, "Kasse " + machine, "Bediener " + machine, Instant.EPOCH, saveId, payload == null, payload);
+				machine, "Kasse " + machine, "Bediener " + machine, Instant.EPOCH, saveId, payload == null, payload, null,
+				Map.of(), marks);
+	}
+
+	/** Eine erste Version mit Angaben zum Umzug. */
+	private static Version version(String machine, String saveId, ObjectNode payload, VersionMarks marks) {
+		return new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter++), List.of(), machine,
+				"Kasse " + machine, "Bediener " + machine, Instant.EPOCH, saveId, false, payload, null, Map.of(), marks);
 	}
 
 	/**
@@ -945,9 +982,9 @@ class BookingPolicyTest {
 		Version base = version(THIRD, "save-0", withoutPlace("m", b -> {
 		}));
 		world.claim(unassigned, base);
-		Version myDeletion = child(OWN, "save-a", base, null);
-		List<Version> mySeat = new ArrayList<>(
-				List.of(version(OWN, "save-a", booking("m", "s1", b -> b.setEMail("neu@example.org")))));
+		Version myDeletion = child(OWN, "save-a", base, null, VersionMarks.NONE.withMovedTo(S1));
+		List<Version> mySeat = new ArrayList<>(List.of(version(OWN, "save-a",
+				booking("m", "s1", b -> b.setEMail("neu@example.org")), VersionMarks.NONE.withMovedFrom(unassigned))));
 		if (ownSaves == 2) {
 			mySeat.add(child(OWN, "save-c", mySeat.get(0), booking("m", "s1", b -> {
 				b.setEMail("neu@example.org");
@@ -955,17 +992,22 @@ class BookingPolicyTest {
 			})));
 		}
 		Version theirSeat = version(OTHER, "save-b", booking("t", "s1", b -> b.setLastName("Tom")));
-		Version theirM = action == ForeignAction.EDIT
-				? child(OTHER, "save-b", base, withoutPlace("m", b -> b.setPaymentStatus(PaymentStatus.CARD)))
-				: child(OTHER, "save-b", base, null);
+		boolean moves = action == ForeignAction.MOVE_TO_S4 || action == ForeignAction.MOVE_TO_S4_THEN_S5;
+		Version theirM = switch (action) {
+		case EDIT -> child(OTHER, "save-b", base, withoutPlace("m", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+		case CANCEL -> child(OTHER, "save-b", base, null);
+		case MOVE_TO_S4, MOVE_TO_S4_THEN_S5 -> child(OTHER, "save-b", base, null, VersionMarks.NONE.withMovedTo(s4));
+		};
 		world.claim(S1, theirSeat);
 		mySeat.forEach(version -> world.lose(S1, version));
-		if (action == ForeignAction.MOVE_TO_S4 || action == ForeignAction.MOVE_TO_S4_THEN_S5) {
-			Version theirS4 = version(OTHER, "save-b", booking("m", "s4", b -> b.setSeatNumber(4)));
+		if (moves) {
+			Version theirS4 = version(OTHER, "save-b", booking("m", "s4", b -> b.setSeatNumber(4)),
+					VersionMarks.NONE.withMovedFrom(unassigned));
 			world.claim(s4, theirS4);
 			if (action == ForeignAction.MOVE_TO_S4_THEN_S5) {
-				world.claim(s4, child(OTHER, "save-d", theirS4, null));
-				world.claim(seat("s5"), version(OTHER, "save-d", booking("m", "s5", b -> b.setSeatNumber(5))));
+				world.claim(s4, child(OTHER, "save-d", theirS4, null, VersionMarks.NONE.withMovedTo(seat("s5"))));
+				world.claim(seat("s5"), version(OTHER, "save-d", booking("m", "s5", b -> b.setSeatNumber(5)),
+						VersionMarks.NONE.withMovedFrom(s4)));
 			}
 		}
 		if (course.split) {
@@ -1042,11 +1084,10 @@ class BookingPolicyTest {
 		assertInvariants(assignmentAgainst(action, ownSaves, course), action);
 	}
 
-	/** Dieselben Invarianten für die Zellen, die ohne einen neuen Mechanismus im Speicher nicht zu halten sind. */
-	@Disabled("Ruling R36, Lösung in KARV-93: Löst A _m auf, bevor B's Auflösung von s1 bei ihm ist, hält A B's "
-			+ "gewonnene Löschung für ein Storno und löscht seine Kopie auf s4 (Regel 0, verschoben gegen storniert), weil "
-			+ "die Strategie B's verlorenes Ziel auf s1 nicht sieht; dazu müsste der Speicher fremde verlorene Versionen "
-			+ "anderer Einheiten liefern, die der Index heute nicht kennt")
+	/**
+	 * Dieselben Invarianten für die Zellen aus Ruling R36 (getrennte Gewinner, A löst {@code _m} auf, bevor B's Auflösung
+	 * von s1 bei ihm ist): Mit {@code movedTo} sieht A B's Löschung als Umzug, dessen Ziel verloren hat (KARV-93).
+	 */
 	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
 	@MethodSource("heldOpenCells")
 	void foreignMoveAgainstAssignmentWithSplitWinnersKeepsInvariants(ForeignAction action, int ownSaves,
@@ -1054,24 +1095,40 @@ class BookingPolicyTest {
 		assertInvariants(assignmentAgainst(action, ownSaves, course), action);
 	}
 
-	/**
-	 * Was in den offenen Zellen gilt: nie zwei lebende Einheiten, B hat genau einen Vermerk, und lebt m nirgends, hat A
-	 * einen Vermerk DELETE_WINS auf seine Kopie (zum Wiederherstellen). Nichts geht still verloren.
-	 */
-	@ParameterizedTest(name = "{0}, B speichert {1}x, {2}")
-	@MethodSource("heldOpenCells")
-	void foreignMoveAgainstAssignmentWithSplitWinnersLosesNothingSilently(ForeignAction action, int ownSaves,
-			Course course) {
-		World world = assignmentAgainst(action, ownSaves, course);
-		List<UnitKey> carriers = world.carriers("m");
-		assertTrue(carriers.size() <= 1, "m lebt höchstens einmal: " + carriers);
-		assertEquals(1, world.notesFor(OWN).size(), "B: " + world.notesFor(OWN));
-		if (carriers.isEmpty()) {
-			List<ConflictNote> theirs = world.notesFor(OTHER);
-			assertEquals(1, theirs.size(), "A: " + theirs);
-			assertEquals(Kind.DELETE_WINS, theirs.get(0).kind());
+	/** Setzen beide Rechner dieselbe Buchung gleich um (H3), gibt es keinen Vermerk, und sie lebt einmal am Ziel. */
+	@Test
+	void sameMoveOnBothMachinesLeavesNoNote() {
+		for (boolean seatFirst : new boolean[] { true, false }) {
+			World world = new World();
+			Version base = version(THIRD, "save-0", booking("m", "s1"));
+			world.claim(S1, base);
+			world.claim(S1, child(OTHER, "save-a", base, null, VersionMarks.NONE.withMovedTo(S2)));
+			world.lose(S1, child(OWN, "save-b", base, null, VersionMarks.NONE.withMovedTo(S2)));
+			world.claim(S2, version(OTHER, "save-a", booking("m", "s2"), VersionMarks.NONE.withMovedFrom(S1)));
+			world.lose(S2, version(OWN, "save-b", booking("m", "s2"), VersionMarks.NONE.withMovedFrom(S1)));
+			if (seatFirst) {
+				world.resolve(S2, OWN);
+				world.resolve(S1, OWN);
+			} else {
+				world.resolve(S1, OWN);
+				world.resolve(S2, OWN);
+			}
+
+			assertEquals(List.of(S2), world.carriers("m"));
+			assertEquals(List.of(), world.notes, "keine Vermerke");
 		}
-		assertEquals("t", idOf(world.head(S1)));
+	}
+
+	/** Eine zweite Auflösung mit derselben Strecke findet ihr Ergebnis vor und schreibt nichts noch einmal. */
+	@Test
+	void repeatedResolutionWritesNothingTwice() {
+		World world = assignmentAgainst(ForeignAction.EDIT, 1, Course.SPLIT_SEAT_BEFORE_FOREIGN_MERGE);
+		Version mine = world.folders.get(S1).stream().filter(v -> OWN.equals(v.machine()) && !v.marks().resolution())
+				.findFirst().orElseThrow();
+
+		Resolution again = POLICY.resolve(world.input(S1, OWN, List.of(mine)));
+
+		assertEquals(List.of(), again.extra());
 	}
 
 	private static void assertInvariants(World world, ForeignAction action) {
@@ -1086,6 +1143,10 @@ class BookingPolicyTest {
 		case EDIT -> theirChangeYields = !"CARD".equals(world.head(carriers.get(0)).payload().path("paymentStatus").asText());
 		case CANCEL -> {
 		}
+		}
+		if (action != ForeignAction.CANCEL) {
+			assertEquals("neu@example.org", world.head(carriers.get(0)).payload().path("email").asText(),
+					"R34 (1): B's E-Mail erreicht den Träger");
 		}
 		List<ConflictNote> mine = world.notesFor(OWN);
 		assertEquals(1, mine.size(), "4: B weicht mit genau einem Vermerk: " + mine);

@@ -175,15 +175,24 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end) {
 		return found;
 	}
 
-	/** Die Nutzer-Versionen einer Seite an der Einheit seit der Basis, ältestes zuerst. */
+	/**
+	 * Die Nutzer-Versionen einer Seite an der Einheit seit der Basis, ältestes zuerst. Stehen fremde davon in der Kette,
+	 * zählen nur diese: Mehrere andere Rechner haben ihre Absichten dort schon untereinander aufgelöst, es gilt die der
+	 * Kette.
+	 */
 	private static List<Version> sideVersions(ConflictInput input, TrailUnit unit, VersionId baseId, boolean own) {
 		Set<VersionId> after = baseId == null ? null : descendants(unit, baseId);
+		Set<VersionId> inChain = new HashSet<>();
+		unit.chain().forEach(link -> inChain.add(link.id()));
 		List<Version> side = new ArrayList<>();
 		for (Version version : userVersions(all(unit), unit.unit())) {
 			boolean mine = input.ownMachineId().equals(version.machine());
 			if (mine == own && (after == null || after.contains(version.id()))) {
 				side.add(version);
 			}
+		}
+		if (!own && side.stream().anyMatch(version -> inChain.contains(version.id()))) {
+			side.removeIf(version -> !inChain.contains(version.id()));
 		}
 		side.sort(Comparator.comparing(Version::id));
 		return side;
