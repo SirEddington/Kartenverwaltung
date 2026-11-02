@@ -1841,6 +1841,73 @@ class ConflictScenarioTest {
 	}
 
 	/**
+	 * R36 über den ganzen Ablauf (KARV-93): Mia steht "ohne Platz". A verkauft Sitz 1 an Tom und lädt hoch; seine Liste
+	 * kommt bei B vorerst nicht an. B weist Mia Sitz 1 zu und lädt hoch: B gewinnt {@code _Mia} und verliert Sitz 1. A setzt
+	 * Mia auf Sitz 4, ohne B's Zuweisen zu kennen, und verliert auf {@code _Mia}. A löst zuerst auf, B danach. A's Umzug
+	 * gilt (E8): Mia lebt einmal auf Sitz 4, B's Kommentar kommt mit, B hat einen Vermerk "Platz", A keinen. Die
+	 * Versionsdateien tragen die Umzugsangaben, die Zusammenführungen {@code resolution}.
+	 */
+	@Test
+	void splitWinnersMoveAgainstAssignmentKeepsTheMove() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Booking mia = a.friday().addBooking();
+		mia.setLastName("Mia");
+		mia.setUnassigned(true);
+		a.repository.saveEvent(a.event);
+		String miaId = mia.getId();
+		UnitKey miaUnit = unassignedUnit(a, miaId);
+		UnitKey seat = seatUnit(a, 1);
+		UnitKey fourth = seatUnit(a, 4);
+		untilQuiet(a, b);
+
+		a.seat(1).setLastName("Tom");
+		a.repository.saveEvent(a.event);
+		a.tick();
+		Path feed = newestFeed(a);
+		Path hidden = Files.move(feed, dir.resolve("versteckt.json"));
+		Booking bMia = b.friday().getBookings().stream().filter(booking -> miaId.equals(booking.getId())).findFirst()
+				.orElseThrow();
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), bMia, b.plan().getSeats().get(1)));
+		bMia.setComment("Fenster");
+		b.repository.saveEvent(b.event);
+		clock.advance(Duration.ofSeconds(2));
+		b.tick();
+		assertTrue(b.sync.unitState(miaUnit).current().deleted(), "B's Löschung von _Mia gilt");
+		Version bAssign = b.sync.unitState(miaUnit).current();
+		assertEquals(seat, bAssign.marks().movedTo(), "B's Zuweisen trägt sein Ziel");
+
+		assertTrue(BookingSync.assign(a.friday(), a.plan(), mia, a.plan().getSeats().get(4)));
+		a.repository.saveEvent(a.event);
+		for (int round = 0; round < 3; round++) {
+			clock.advance(ROUND);
+			a.tick();
+		}
+		assertTrue(a.sync.unitState(miaUnit).lost().isEmpty(), "A hat _Mia aufgelöst");
+
+		clock.advance(Duration.ofMinutes(5).plusSeconds(1));
+		b.sync.syncNow();
+		warnings.removeIf(record -> record.getMessage().contains("5 Minuten"));
+		Files.move(hidden, feed);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("Tom", lastName(a.eventState().get(seat)));
+		assertEquals(Set.of(fourth), carriers(a, miaId), "A's Umzug gilt, Mia lebt einmal");
+		assertEquals("Fenster", a.eventState().get(fourth).payload().get("comment").asText(), "B's Änderung kommt mit");
+		List<OpenConflict> open = b.open();
+		assertEquals(1, open.size(), open.toString());
+		assertEquals(ConflictNote.Kind.FIELDS, open.get(0).note().kind());
+		assertEquals(List.of("place"), open.get(0).note().fields().stream().map(ConflictNote.FieldConflict::group).toList());
+		assertEquals(List.of(), a.open(), "A's Umzug weicht nicht");
+		Version merge = a.sync.unitState(miaUnit).head();
+		assertTrue(merge.marks().resolution(), "die Zusammenführung trägt resolution");
+		assertEquals(miaUnit, a.sync.unitState(fourth).chain().get(0).marks().movedFrom(), "A's Umzug trägt seine Quelle");
+	}
+
+	/**
 	 * H3: Nach einer Hallenänderung (Reihe A neu angelegt, die Sitze haben neue IDs) setzen beide Rechner Müller gleich um
 	 * und speichern. Alter Sitz (zwei Löschungen), neuer Sitz (zwei Erstversionen derselben Buchung) und keine Einheit
 	 * bekommt einen Vermerk.
