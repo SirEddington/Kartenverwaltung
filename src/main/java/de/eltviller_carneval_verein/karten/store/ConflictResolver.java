@@ -444,8 +444,7 @@ final class ConflictResolver {
 		boolean booking = unit.type() == UnitType.BOOKING;
 		Map<UnitKey, ConflictInput.Sibling> siblings = booking ? siblings(unit) : Map.of();
 		Map<UnitKey, TrailUnit> trail = booking
-				? copy(TrailCollector.collect(unit, stretch.base(), stretch.versions(), stretch.chainSinceBase(),
-						this::folder))
+				? copy(TrailCollector.collect(unit, stretch.base(), stretch.versions(), this::folder))
 				: Map.of();
 		try {
 			ConflictInput input = new ConflictInput(unit, copy(stretch.base()), copy(stretch.mine()),
@@ -485,9 +484,7 @@ final class ConflictResolver {
 		Map<UnitKey, TrailUnit> copies = new LinkedHashMap<>();
 		trail.forEach((key, unit) -> copies.put(key, new TrailUnit(key,
 				unit.chain().stream().map(ConflictResolver::copy).toList(),
-				unit.outside().stream()
-						.map(other -> new TrailUnit.Outside(copy(other.version()), other.standing())).toList(),
-				unit.current())));
+				unit.outside().stream().map(ConflictResolver::copy).toList(), unit.current())));
 		return copies;
 	}
 
@@ -587,11 +584,8 @@ final class ConflictResolver {
 			UnitSnapshot s = sibling.snapshot();
 			UnitSnapshot copy = new UnitSnapshot(s.unit(), s.version(), s.status(), s.deleted(),
 					s.payload() == null ? null : s.payload().deepCopy());
-			copies.put(entry.getKey(), new ConflictInput.Sibling(copy, sibling.head()));
+			copies.put(entry.getKey(), new ConflictInput.Sibling(copy));
 		}
 		return copies;
 	}
-
-	/** Die Vorgänger der Version im Ordner über alle Vorgänger, soweit lesbar, ohne sie selbst. */
-	/** Die Speichervorgänge aller lesbaren Versionen im Ordner der Einheit. */
 }

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -53,17 +54,17 @@ public final class TrailCollector {
 	}
 
 	/**
-	 * Die Einheiten auf der Spur, jede mit Kette und Versionen daneben; die Einheit selbst immer.
+	 * Die Einheiten auf der Spur, jede mit Kette und Versionen daneben; die Einheit selbst immer, außer es gibt keine
+	 * Buchung zu verfolgen (die Basis trägt keine und die Strecke holt keine herein): dann leer, ohne einen Ordner zu lesen.
 	 *
-	 * @param unit           die Einheit der verlorenen Strecke
-	 * @param base           die Basis der Strecke, oder {@code null}
-	 * @param stretch        die Versionen der Strecke, ältestes zuerst
-	 * @param chainSinceBase die Glieder der Kette seit der Basis (sie stehen im Ordner der Einheit)
-	 * @param folders        der Lesezugriff
+	 * @param unit    die Einheit der verlorenen Strecke
+	 * @param base    die Basis der Strecke, oder {@code null}
+	 * @param stretch die Versionen der Strecke, ältestes zuerst
+	 * @param folders der Lesezugriff
 	 * @throws IOException wenn sich ein Ordner nicht lesen lässt
 	 */
-	public static Map<UnitKey, TrailUnit> collect(UnitKey unit, Version base, List<Version> stretch,
-			List<Version> chainSinceBase, Folders folders) throws IOException {
+	public static Map<UnitKey, TrailUnit> collect(UnitKey unit, Version base, List<Version> stretch, Folders folders)
+			throws IOException {
 		Set<String> bookings = new HashSet<>();
 		addBooking(bookings, base);
 		Deque<UnitKey> open = new ArrayDeque<>();
@@ -73,6 +74,9 @@ public final class TrailCollector {
 				addBooking(bookings, version);
 				open.add(version.marks().movedFrom());
 			}
+		}
+		if (bookings.isEmpty()) {
+			return Map.of();
 		}
 		Map<UnitKey, TrailUnit> trail = new LinkedHashMap<>();
 		Set<UnitKey> seen = new HashSet<>();
@@ -91,6 +95,7 @@ public final class TrailCollector {
 			Map<VersionId, Version> byId = new HashMap<>();
 			folder.versions().forEach(version -> byId.put(version.id(), version));
 			for (Version version : folder.versions()) {
+				// ohne Versionen einer Auflösung: Sie schreiben keine Umzugsangaben
 				if (!version.marks().resolution() && concerns(version, byId, bookings)) {
 					addUnit(open, version.marks().movedTo());
 					addUnit(open, version.marks().movedFrom());
@@ -127,40 +132,17 @@ public final class TrailCollector {
 		return parent != null && !parent.deleted() && bookings.contains(ConflictInput.bookingIdOf(parent.payload()));
 	}
 
-	/** Kette, Versionen daneben (ohne die einer Auflösung) mit ihrem Stand, und der aktuelle Stand. */
+	/** Kette, Versionen daneben (ohne die einer Auflösung, nach ID) und der aktuelle Stand. */
 	private static TrailUnit unitOf(UnitKey unit, Folder folder) {
 		Set<VersionId> inChain = new HashSet<>();
 		folder.chain().forEach(link -> inChain.add(link.id()));
-		Map<VersionId, Version> byId = new HashMap<>();
-		folder.versions().forEach(version -> byId.put(version.id(), version));
-		Set<VersionId> absorbed = ancestors(folder.current(), byId);
-		List<TrailUnit.Outside> outside = new ArrayList<>();
+		List<Version> outside = new ArrayList<>();
 		for (Version version : folder.versions()) {
 			if (!inChain.contains(version.id()) && !version.marks().resolution()) {
-				outside.add(new TrailUnit.Outside(version, absorbed.contains(version.id())
-						? ConflictInput.Standing.ABSORBED
-						: ConflictInput.Standing.BESIDE));
+				outside.add(version);
 			}
 		}
-		outside.sort((a, b) -> a.version().id().compareTo(b.version().id()));
+		outside.sort(Comparator.comparing(Version::id));
 		return new TrailUnit(unit, folder.chain(), outside, folder.current());
-	}
-
-	/** Die Vorgänger der Version im Ordner über alle Vorgänger, ohne sie selbst. */
-	private static Set<VersionId> ancestors(VersionId start, Map<VersionId, Version> byId) {
-		Set<VersionId> found = new HashSet<>();
-		Deque<VersionId> open = new ArrayDeque<>();
-		Version first = start == null ? null : byId.get(start);
-		if (first != null) {
-			open.addAll(first.parents());
-		}
-		while (!open.isEmpty()) {
-			VersionId id = open.removeFirst();
-			Version version = byId.get(id);
-			if (found.add(id) && version != null) {
-				open.addAll(version.parents());
-			}
-		}
-		return found;
 	}
 }

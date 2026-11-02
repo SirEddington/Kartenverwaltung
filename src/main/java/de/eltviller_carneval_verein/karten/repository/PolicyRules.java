@@ -12,6 +12,7 @@ import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.FieldConflict;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Party;
 import de.eltviller_carneval_verein.karten.store.Resolution;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.Version;
@@ -73,8 +74,13 @@ final class PolicyRules {
 	 * Inhalt zu lesen. Eine nicht gelöschte Version ohne Inhalt (gesperrt) ist nicht lesbar.
 	 */
 	static boolean isReadable(ConflictInput input, Version version) {
+		return isReadable(input.unit(), version);
+	}
+
+	/** Wie {@link #isReadable(ConflictInput, Version)} für eine Version der Einheit {@code unit}. */
+	static boolean isReadable(UnitKey unit, Version version) {
 		return version.deleted()
-				|| UnitMapper.isReadable(new UnitSnapshot(input.unit(), version.id(), Status.OK, false, version.payload()));
+				|| UnitMapper.isReadable(new UnitSnapshot(unit, version.id(), Status.OK, false, version.payload()));
 	}
 
 	/** "Gleich": Ist "Meine" gleich "Deren" oder gleich der Basis, gilt "Deren", ohne Vermerk. */

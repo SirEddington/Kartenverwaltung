@@ -51,24 +51,13 @@ public record ConflictInput(UnitKey unit, Version base, Version mine, Version th
 	 * Eine andere Buchungs-Einheit derselben Vorstellung.
 	 *
 	 * @param snapshot ihr aktueller Stand (der Inhalt als Kopie)
-	 * @param head     das letzte Glied ihrer gültigen Kette; {@code null}, wenn sie keine hat
 	 */
-	public record Sibling(UnitSnapshot snapshot, ChainStep head) {
+	public record Sibling(UnitSnapshot snapshot) {
 
 		/** Prüft den Stand. */
 		public Sibling {
 			Objects.requireNonNull(snapshot, "snapshot");
 		}
-	}
-
-	/** Wo eine Version im Ordner ihrer Einheit steht. */
-	public enum Standing {
-		/** In der gültigen Kette. */
-		CHAIN,
-		/** Außerhalb der Kette, aber in einer Zusammenführung aufgegangen (vom aktuellen Stand aus erreichbar). */
-		ABSORBED,
-		/** Daneben: verloren oder ausstehend, noch nicht zusammengeführt. */
-		BESIDE
 	}
 
 	/** Prüft die Pflichtangaben und macht Kette, Geschwister, Strecke und Spur unveränderlich. */

@@ -12,8 +12,6 @@ import java.util.TreeMap;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.TrailUnit;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
-import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
-import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
 
@@ -105,17 +103,15 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 	 */
 	private static BookingTrail of(ConflictInput input, String bookingId, UnitKey source, List<Version> side,
 			TrailUnit unit) {
-		Map<VersionId, Version> byId = new HashMap<>();
-		all(unit).forEach(version -> byId.put(version.id(), version));
 		Version kept = null;
 		for (Version version : side) {
 			if (carries(version, bookingId)) {
 				kept = version;
 				continue;
 			}
-			Version parent = version.firstParent() == null ? null : byId.get(version.firstParent());
+			Version parent = version.firstParent() == null ? null : unit.version(version.firstParent());
 			if (parent != null && carries(parent, bookingId)) {
-				return follow(input, bookingId, source, version, version);
+				return follow(input, bookingId, source, version);
 			}
 		}
 		return kept == null ? UNTOUCHED : new BookingTrail(Kind.KEPT, null, kept, source);
@@ -133,8 +129,9 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 		if (unit == null || arrival.saveId() == null) {
 			return null;
 		}
+		List<Version> versions = unit.versions();
 		Version removal = null;
-		for (Version version : all(unit)) {
+		for (Version version : versions) {
 			if (input.unit().equals(version.marks().movedTo()) && arrival.saveId().equals(version.saveId())) {
 				removal = version;
 			}
@@ -143,9 +140,9 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 			return null;
 		}
 		Map<VersionId, Version> byId = new HashMap<>();
-		all(unit).forEach(version -> byId.put(version.id(), version));
+		versions.forEach(version -> byId.put(version.id(), version));
 		Set<VersionId> shared = new HashSet<>();
-		for (Version other : userVersions(all(unit), source)) {
+		for (Version other : userVersions(versions, source)) {
 			if (!other.machine().equals(removal.machine())) {
 				shared.addAll(firstParents(other.firstParent(), byId));
 			}
@@ -208,10 +205,9 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 	 * geltende Nutzer-Version mit {@code movedFrom} = Herkunft die Buchung trägt (gleich von welcher Seite); dann geht es
 	 * mit den späteren geltenden Versionen dort weiter.
 	 */
-	private static BookingTrail follow(ConflictInput input, String bookingId, UnitKey from, Version leaving,
-			Version removal) {
+	private static BookingTrail follow(ConflictInput input, String bookingId, UnitKey from, Version removal) {
 		UnitKey at = from;
-		Version gone = leaving;
+		Version gone = removal;
 		for (int step = 0; step < MAX_STEPS; step++) {
 			UnitKey target = gone.marks().movedTo();
 			if (target == null) {
@@ -230,7 +226,7 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 				}
 			}
 			if (arrival < 0) {
-				Version mine = latestCarrying(input, unit, bookingId, removal.machine());
+				Version mine = latestCarrying(unit, bookingId, removal.machine());
 				Kind kind = displacedOnly(unit, at, bookingId) ? Kind.ARRIVED : Kind.FAILED;
 				return new BookingTrail(kind, removal, mine, target);
 			}
@@ -244,7 +240,7 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 				last = version;
 			}
 			if (next == null) {
-				Version own = latestCarrying(input, unit, bookingId, removal.machine());
+				Version own = latestCarrying(unit, bookingId, removal.machine());
 				return new BookingTrail(Kind.ARRIVED, removal, last, target, own == null ? last : own);
 			}
 			at = target;
@@ -261,19 +257,16 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 	 * wer das Ziel gewann.
 	 */
 	private static boolean displacedOnly(TrailUnit unit, UnitKey from, String bookingId) {
-		Map<VersionId, Version> byId = new HashMap<>();
-		all(unit).forEach(version -> byId.put(version.id(), version));
-		for (Version version : userVersions(all(unit), unit.unit())) {
+		for (Version version : userVersions(unit.versions(), unit.unit())) {
 			if (!from.equals(version.marks().movedFrom()) || !carries(version, bookingId)
 					|| version.firstParent() == null) {
 				continue;
 			}
-			Version parent = byId.get(version.firstParent());
-			String replaced = parent == null || parent.deleted() ? null : ConflictInput.bookingIdOf(parent.payload());
-			if (replaced == null || replaced.equals(bookingId) || !unit.stands(parent.id())) {
+			String replaced = BookingPolicy.idOf(unit.version(version.firstParent()));
+			if (replaced == null || replaced.equals(bookingId) || !unit.stands(version.firstParent())) {
 				continue;
 			}
-			Set<VersionId> after = descendants(unit, parent.id());
+			Set<VersionId> after = descendants(unit, version.firstParent());
 			boolean onlyReplaced = true;
 			for (Version standing : userVersions(unit.standing(), unit.unit())) {
 				if (after.contains(standing.id()) && !carries(standing, replaced)) {
@@ -288,9 +281,9 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 	}
 
 	/** Die jüngste lesbare Nutzer-Version des Rechners mit der Buchung in der Einheit (Kette oder daneben). */
-	private static Version latestCarrying(ConflictInput input, TrailUnit unit, String bookingId, String machine) {
+	private static Version latestCarrying(TrailUnit unit, String bookingId, String machine) {
 		Version found = null;
-		for (Version version : userVersions(all(unit), unit.unit())) {
+		for (Version version : userVersions(unit.versions(), unit.unit())) {
 			if (machine.equals(version.machine()) && carries(version, bookingId)
 					&& (found == null || version.id().compareTo(found.id()) > 0)) {
 				found = version;
@@ -303,7 +296,7 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 	private static List<Version> sideVersions(ConflictInput input, TrailUnit unit, VersionId baseId, boolean own) {
 		Set<VersionId> after = baseId == null ? null : descendants(unit, baseId);
 		List<Version> side = new ArrayList<>();
-		for (Version version : userVersions(all(unit), unit.unit())) {
+		for (Version version : userVersions(unit.versions(), unit.unit())) {
 			boolean mine = input.ownMachineId().equals(version.machine());
 			if (mine == own && (after == null || after.contains(version.id()))) {
 				side.add(version);
@@ -313,32 +306,20 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 		return side;
 	}
 
-	/** Kette und Versionen daneben. */
-	private static List<Version> all(TrailUnit unit) {
-		List<Version> all = new ArrayList<>(unit.chain());
-		unit.outside().forEach(other -> all.add(other.version()));
-		return all;
-	}
-
 	/** Ohne Versionen einer Auflösung und ohne unlesbare (eine neuere App, ein Inhalt, der nicht zur Einheit passt). */
 	private static List<Version> userVersions(List<Version> versions, UnitKey unit) {
-		return versions.stream().filter(version -> !version.marks().resolution() && readable(version, unit)).toList();
-	}
-
-	private static boolean readable(Version version, UnitKey unit) {
-		return version.deleted()
-				|| UnitMapper.isReadable(new UnitSnapshot(unit, version.id(), Status.OK, false, version.payload()));
+		return versions.stream()
+				.filter(version -> !version.marks().resolution() && PolicyRules.isReadable(unit, version)).toList();
 	}
 
 	/** Die Versionen der Einheit, die die Basis über ihre Vorgänger enthalten, ohne sie selbst. */
 	private static Set<VersionId> descendants(TrailUnit unit, VersionId baseId) {
-		Map<VersionId, Version> byId = new HashMap<>();
-		all(unit).forEach(version -> byId.put(version.id(), version));
+		List<Version> versions = unit.versions();
 		Set<VersionId> reached = new HashSet<>(Set.of(baseId));
 		boolean grown = true;
 		while (grown) {
 			grown = false;
-			for (Version version : byId.values()) {
+			for (Version version : versions) {
 				if (!reached.contains(version.id()) && version.parents().stream().anyMatch(reached::contains)) {
 					reached.add(version.id());
 					grown = true;
@@ -350,6 +331,6 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 	}
 
 	private static boolean carries(Version version, String bookingId) {
-		return !version.deleted() && bookingId.equals(ConflictInput.bookingIdOf(version.payload()));
+		return bookingId.equals(BookingPolicy.idOf(version));
 	}
 }

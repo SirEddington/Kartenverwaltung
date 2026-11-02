@@ -122,9 +122,9 @@ final class TrailFixture {
 	}
 
 	/** Die Spur wie im Resolver. */
-	Map<UnitKey, TrailUnit> trail(UnitKey unit, Version base, List<Version> stretch, List<Version> since) {
+	Map<UnitKey, TrailUnit> trail(UnitKey unit, Version base, List<Version> stretch) {
 		try {
-			return TrailCollector.collect(unit, base, stretch, since, key -> {
+			return TrailCollector.collect(unit, base, stretch, key -> {
 				List<Version> chain = chain(key);
 				VersionId current = currents.getOrDefault(key, chain.isEmpty() ? null : chain.get(chain.size() - 1).id());
 				return new TrailCollector.Folder(chain, folders.getOrDefault(key, List.of()), current);
@@ -143,6 +143,6 @@ final class TrailFixture {
 		int at = base == null ? -1 : chain.indexOf(base);
 		List<Version> since = chain.subList(at + 1, chain.size());
 		return new ConflictInput(unit, base, stretch.get(stretch.size() - 1), chain.get(chain.size() - 1), since, OWN,
-				Map.of(), stretch, trail(unit, base, stretch, since));
+				Map.of(), stretch, trail(unit, base, stretch));
 	}
 }

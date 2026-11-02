@@ -391,7 +391,6 @@ class ConflictResolverTest {
 		assertEquals(Set.of(OTHER_SEAT), input.siblings().keySet(), "nur die anderen Buchungen derselben Vorstellung");
 		ConflictInput.Sibling sibling = input.siblings().get(OTHER_SEAT);
 		assertEquals(name("Dora"), sibling.snapshot().payload());
-		assertEquals(sibling.snapshot().version(), sibling.head().version());
 
 		// die Inhalte der Eingabe sind Kopien: Was die Strategie ändert, erreicht weder Index noch Bestand
 		input.mine().payload().put("name", "verändert");

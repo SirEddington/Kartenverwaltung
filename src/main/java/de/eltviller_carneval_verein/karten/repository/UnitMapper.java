@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -265,37 +266,45 @@ final class UnitMapper {
 	 * Ziele (das verhindert sonst die Prüfung der Vorstellung), werden sie nach Pfad der Reihe nach zugeordnet, mit einer
 	 * Warnung im Log.
 	 */
+	/** Eine Buchung in einer Vorstellung, für die Zuordnung von Wegfall und Auftauchen in {@link #withMoves}. */
+	private record MoveKey(String presentationId, String bookingId) {
+	}
+
 	private static List<Change> withMoves(Map<UnitKey, UnitSnapshot> baseline, List<Change> changes) {
 		// je Vorstellung und Buchungs-ID die Einheiten, aus denen sie wegfällt bzw. in denen sie auftaucht
-		Map<List<String>, List<UnitKey>> left = new HashMap<>();
-		Map<List<String>, List<UnitKey>> arrived = new HashMap<>();
+		Map<MoveKey, List<UnitKey>> left = new HashMap<>();
+		Map<MoveKey, List<UnitKey>> arrived = new HashMap<>();
 		for (Change change : changes) {
 			UnitKey unit = change.unit();
 			if (unit.type() != UnitType.BOOKING) {
 				continue;
 			}
 			UnitSnapshot known = baseline.get(unit);
-			String before = known != null && known.isLive() && isReadable(known)
-					? ConflictInput.bookingIdOf(known.payload())
-					: null;
+			String before = known != null && known.isLive() ? ConflictInput.bookingIdOf(known.payload()) : null;
 			String after = change.deleted() ? null : ConflictInput.bookingIdOf(change.payload());
 			if (before != null && !before.equals(after)) {
-				left.computeIfAbsent(List.of(unit.presentationId(), before), key -> new ArrayList<>()).add(unit);
+				left.computeIfAbsent(new MoveKey(unit.presentationId(), before), key -> new ArrayList<>()).add(unit);
 			}
 			if (after != null && !after.equals(before)) {
-				arrived.computeIfAbsent(List.of(unit.presentationId(), after), key -> new ArrayList<>()).add(unit);
+				arrived.computeIfAbsent(new MoveKey(unit.presentationId(), after), key -> new ArrayList<>()).add(unit);
 			}
 		}
 		Map<UnitKey, VersionMarks> marks = new HashMap<>();
 		Comparator<UnitKey> byPath = Comparator.comparing(UnitKey::relativePath);
-		left.forEach((key, sources) -> {
+		left.forEach((key, found) -> {
 			List<UnitKey> targets = arrived.get(key);
 			if (targets == null) {
 				return;
 			}
+			// erst hier lesen (teuer, und meist ist kein Umzug dabei): nur ein lesbarer Stand im Bestand ist eine Quelle
+			List<UnitKey> sources = found.stream().filter(unit -> isReadable(baseline.get(unit)))
+					.collect(Collectors.toCollection(ArrayList::new));
+			if (sources.isEmpty()) {
+				return;
+			}
 			if (sources.size() > 1 || targets.size() > 1) {
-				LOG.warning("Der Umzug der Buchung " + key.get(1) + " ist mehrdeutig (" + sources.size() + " Quellen, "
-						+ targets.size() + " Ziele); zugeordnet nach Pfad.");
+				LOG.warning("Der Umzug der Buchung " + key.bookingId() + " ist mehrdeutig (" + sources.size()
+						+ " Quellen, " + targets.size() + " Ziele); zugeordnet nach Pfad.");
 			}
 			sources.sort(byPath);
 			targets.sort(byPath);

@@ -36,7 +36,6 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
-import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.ConflictInput.Sibling;
@@ -136,8 +135,7 @@ class BookingPolicyTest {
 
 	/** Eine Geschwister-Einheit, deren gültige Kette mit {@code version} endet und die nur diese Version hat. */
 	private static Sibling sibling(UnitKey unit, Version version) {
-		return new Sibling(new UnitSnapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()),
-				ChainStep.of(version));
+		return new Sibling(new UnitSnapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()));
 	}
 
 	@SafeVarargs
@@ -305,28 +303,6 @@ class BookingPolicyTest {
 		});
 	}
 
-	/** Eine Geschwister-Einheit mit ihrem Stand und dem verlorenen Ziel eines eigenen Umzugs in ihrem Ordner. */
-	/** Die Löschungen auf {@code _m}, solange die eigene (save-a) gegen die fremde (save-b) verloren hat. */
-	/** Die Löschungen auf {@code _m}, nachdem die eigene Auflösung die verlorene eigene Löschung zusammengeführt hat. */
-	private static void assertCancellationWins(Resolution resolution, Version theirS1, Version myS1) {
-		assertFalse(resolution.deleted());
-		assertEquals(theirS1.payload(), resolution.payload());
-		assertTrue(resolution.extra().isEmpty(), "_m wird nicht wiederbelebt");
-		ConflictNote note = resolution.note();
-		assertEquals(Kind.DELETE_WINS, note.kind());
-		assertEquals(OWN, note.affected());
-		assertEquals(party(theirS1), note.other());
-		assertEquals(myS1.id(), note.dropped(), "die eigene Buchung, zum Wiederherstellen");
-		assertNull(note.moved());
-	}
-
-	private static void assertForeignMoveKeptOnSeat(Resolution resolution, Version theirS1) {
-		assertFalse(resolution.deleted());
-		assertEquals(theirS1.payload(), resolution.payload());
-		assertTrue(resolution.extra().isEmpty(), "_m wird nicht wiederbelebt");
-		assertNull(resolution.note(), "der Vermerk steht auf _m");
-	}
-
 	// R35: Zuweisen aus "ohne Platz" gegen eine gleichzeitige Änderung, als Matrix -->
 
 	/** Was A mit m macht, während es s1 an t verkauft. */
@@ -448,7 +424,7 @@ class BookingPolicyTest {
 			List<Version> since = chain.subList(at + 1, chain.size()).stream().map(BookingPolicyTest::copy).toList();
 			Map<UnitKey, TrailUnit> trail;
 			try {
-				trail = TrailCollector.collect(unit, base, stretch, since, key -> {
+				trail = TrailCollector.collect(unit, base, stretch, key -> {
 					Version head = head(key);
 					return new TrailCollector.Folder(chains.getOrDefault(key, List.of()),
 							folders.getOrDefault(key, List.of()), head == null ? null : head.id());
@@ -477,7 +453,7 @@ class BookingPolicyTest {
 				Version head = head(other);
 				if (!other.equals(unit)) {
 					siblings.put(other, new Sibling(new UnitSnapshot(other, head.id(), Status.OK, head.deleted(),
-							head.deleted() ? null : head.payload().deepCopy()), ChainStep.of(head)));
+							head.deleted() ? null : head.payload().deepCopy())));
 				}
 			}
 			return siblings;

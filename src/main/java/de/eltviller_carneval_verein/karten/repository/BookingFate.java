@@ -46,15 +46,8 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 	 * @param foreign       die Absicht der anderen
 	 * @param ownWinsSource ob an der Quelle die Version dieses Rechners gilt
 	 * @param ownMachineId  die ID dieses Rechners
-	 */
-	static BookingFate decide(String bookingId, UnitKey source, Version base, BookingTrail own, BookingTrail foreign,
-			boolean ownWinsSource, String ownMachineId) {
-		return decide(bookingId, source, base, own, foreign, ownWinsSource, ownMachineId, true);
-	}
-
-	/**
-	 * Wie oben; mit {@code sourceFree} = {@code false} gilt an der Quelle inzwischen eine andere Buchung (dort neu
-	 * verkauft), und E9 kann die Buchung nicht dorthin zurücklegen.
+	 * @param sourceFree    ob die Quelle die Buchung wieder aufnehmen kann ({@link BookingTrail#freeFor}); sonst gilt dort
+	 *                      inzwischen eine andere Buchung, und E9 kann sie nicht dorthin zurücklegen
 	 */
 	static BookingFate decide(String bookingId, UnitKey source, Version base, BookingTrail own, BookingTrail foreign,
 			boolean ownWinsSource, String ownMachineId, boolean sourceFree) {
@@ -64,8 +57,13 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		return decider.decide(mine, theirs, ownWinsSource);
 	}
 
+	/** Die Version, die für eine Seite steht: ihr Wegfall, sonst ihre jüngste; {@code null} bei einer unberührten. */
+	private static Version representative(BookingTrail trail) {
+		return trail.removal() != null ? trail.removal() : trail.last();
+	}
+
 	private static String machineOf(BookingTrail trail) {
-		Version version = trail.removal() != null ? trail.removal() : trail.last();
+		Version version = representative(trail);
 		return version == null ? null : version.machine();
 	}
 
@@ -78,7 +76,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 
 		/** Die Version, die für die Gegenseite eines Vermerks steht: der Wegfall, sonst die jüngste. */
 		Party party() {
-			return Party.of(trail.removal() != null ? trail.removal() : trail.last());
+			return Party.of(representative(trail));
 		}
 
 		/** Die weichende Version: die jüngste eigene mit der Buchung, sonst der Wegfall. */
@@ -161,8 +159,8 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		 */
 		private BookingFate toCopy(Side winner, Side other, List<UnitKey> deletions, boolean place) {
 			UnitKey carrier = winner.trail().end();
-			ObjectNode copy = winner.trail().last() == null ? base.payload() : winner.trail().last().payload();
-			ObjectNode fields = other.trail().last() == null ? base.payload() : other.trail().last().payload();
+			ObjectNode copy = fieldsOf(winner);
+			ObjectNode fields = fieldsOf(other);
 			FieldMerge.Result merged = carry(fields, copy);
 			List<FieldConflict> conflicts = new ArrayList<>();
 			if (place) {
@@ -234,9 +232,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 
 		/** Dreiwegevergleich gegen die Basis: {@code fields} ohne Gruppe "Platz" gegen {@code keeper}, strittig gilt der. */
 		private FieldMerge.Result carry(ObjectNode fields, ObjectNode keeper) {
-			ObjectNode side = fields.deepCopy();
-			FieldMerge.copyFields(side, keeper, FieldGroups.booking().get(BookingPolicy.PLACE_GROUP));
-			return BookingPolicy.mergeBooking(base.payload(), side, keeper);
+			return BookingPolicy.carryOnto(base.payload(), fields, keeper);
 		}
 
 		/** Die Fassung einer Seite mit der Buchung (am Ziel bzw. an der Quelle), sonst die der Basis. */

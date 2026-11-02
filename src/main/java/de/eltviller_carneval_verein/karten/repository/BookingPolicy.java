@@ -136,7 +136,8 @@ public final class BookingPolicy implements ConflictPolicy {
 			String id = idOf(version);
 			if (source != null && id != null && !fates.containsKey(id)) {
 				VersionId sourceBase = BookingTrail.sourceBase(input, source, version);
-				Version base = versionAt(input, source, sourceBase);
+				TrailUnit at = input.trail().get(source);
+				Version base = at == null || sourceBase == null ? null : at.version(sourceBase);
 				BookingFate fate = base == null ? null : fateAt(input, id, source, base);
 				if (fate != null) {
 					fates.put(id, fate);
@@ -228,25 +229,6 @@ public final class BookingPolicy implements ConflictPolicy {
 	private static boolean removed(BookingTrail trail) {
 		return trail.kind() == BookingTrail.Kind.CANCELLED || trail.kind() == BookingTrail.Kind.ARRIVED
 				|| trail.kind() == BookingTrail.Kind.FAILED;
-	}
-
-	/** Die Version mit dieser ID in der Einheit auf der Spur (Kette oder daneben), oder {@code null}. */
-	private static Version versionAt(ConflictInput input, UnitKey unit, VersionId id) {
-		TrailUnit trailUnit = input.trail().get(unit);
-		if (trailUnit == null || id == null) {
-			return null;
-		}
-		for (Version version : trailUnit.chain()) {
-			if (version.id().equals(id)) {
-				return version;
-			}
-		}
-		for (TrailUnit.Outside other : trailUnit.outside()) {
-			if (other.version().id().equals(id)) {
-				return other.version();
-			}
-		}
-		return null;
 	}
 
 	/**
@@ -399,9 +381,18 @@ public final class BookingPolicy implements ConflictPolicy {
 		return value != null && value.isNumber() ? value.asLong() : null;
 	}
 
-	/** Irgendeine {@link #livingCopies lebende Kopie} der Buchung, oder {@code null}. */
-	/** Die Geschwister-Einheiten, die die Buchung tragen (nicht gelöscht, gleiche Buchungs-ID). */
-	/** Bei mehreren (sollte nicht vorkommen) die erste nach Ordner, damit eine Wiederholung dasselbe entscheidet. */
+	/**
+	 * Trägt die Felder von {@code change} per Dreiwegevergleich gegen {@code base} auf {@code keeper} über: Die Gruppe
+	 * "Platz" bleibt die von {@code keeper}, bei strittigen Gruppen gilt {@code keeper} ({@link #mergeBooking}).
+	 *
+	 * @param base der Inhalt der Basis; {@code null} gilt als leeres Objekt
+	 */
+	static FieldMerge.Result carryOnto(ObjectNode base, ObjectNode change, ObjectNode keeper) {
+		ObjectNode side = change.deepCopy();
+		FieldMerge.copyFields(side, keeper, FieldGroups.booking().get(PLACE_GROUP));
+		return mergeBooking(base, side, keeper);
+	}
+
 	/** Der Konflikt der Gruppe "Platz" zwischen zwei Fassungen der Buchung (je die Felder der Gruppe als Kopie). */
 	static FieldConflict placeConflict(ObjectNode mine, ObjectNode theirs) {
 		List<String> place = FieldGroups.booking().get(PLACE_GROUP);
@@ -436,7 +427,6 @@ public final class BookingPolicy implements ConflictPolicy {
 		return new Resolution(mine.payload(), false, List.of(), null);
 	}
 
-	/** Ob die Einheit {@code _<ID>} dieser Buchung ist (die Buchung "ohne Platz"). */
 	/**
 	 * Ob "Deren" dieselbe Buchung ist wie die Basis (gleiche Buchungs-ID); nur dann darf eine eigene Stornierung sie
 	 * löschen. Ein unlesbares "Deren" ist es nicht.
@@ -555,9 +545,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	 */
 	private static Resolution transfer(ConflictInput input, ObjectNode payload, UnitSnapshot copy, ObjectNode change,
 			String affected, Party other, VersionId dropped) {
-		ObjectNode side = change.deepCopy();
-		FieldMerge.copyFields(side, copy.payload(), FieldGroups.booking().get(PLACE_GROUP));
-		FieldMerge.Result result = mergeBooking(PolicyRules.basePayload(input), side, copy.payload());
+		FieldMerge.Result result = carryOnto(PolicyRules.basePayload(input), change, copy.payload());
 		List<Change> extra = result.merged().equals(copy.payload()) ? List.of()
 				: List.of(new Change(copy.unit(), List.of(copy.version()), result.merged(), false));
 		ConflictNote note = result.conflicts().isEmpty() ? null
@@ -647,7 +635,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/** Die Buchungs-ID einer Version mit Inhalt; {@code null} ohne Version, bei einer Löschung oder ohne ID. */
-	private static String idOf(Version version) {
+	static String idOf(Version version) {
 		return version == null || version.deleted() ? null : ConflictInput.bookingIdOf(version.payload());
 	}
 }

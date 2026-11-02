@@ -3817,12 +3817,9 @@ public final class SyncService implements ConnectionControl {
 					.filter(unit -> unit.type() == UnitType.BOOKING && unit.presentationId().equals(booking.presentationId())
 							&& !unit.equals(booking))
 					.sorted(Comparator.comparing(UnitKey::relativePath)).toList();
-			Map<UnitKey, List<ChainStep>> chains = index.chains(keys);
 			Map<UnitKey, ConflictInput.Sibling> siblings = new LinkedHashMap<>();
 			for (UnitKey unit : keys) {
-				List<ChainStep> chain = chains.getOrDefault(unit, List.of());
-				ChainStep head = chain.isEmpty() ? null : chain.get(chain.size() - 1);
-				siblings.put(unit, new ConflictInput.Sibling(event.get(unit), head));
+				siblings.put(unit, new ConflictInput.Sibling(event.get(unit)));
 			}
 			return siblings;
 		}

@@ -21,7 +21,6 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import de.eltviller_carneval_verein.karten.store.ConflictInput.Standing;
 import de.eltviller_carneval_verein.karten.store.TrailCollector.Folder;
 
 class TrailCollectorTest {
@@ -65,9 +64,8 @@ class TrailCollectorTest {
 		return version;
 	}
 
-	private Map<UnitKey, TrailUnit> collect(UnitKey unit, Version base, List<Version> stretch, List<Version> since)
-			throws IOException {
-		return TrailCollector.collect(unit, base, stretch, since, key -> {
+	private Map<UnitKey, TrailUnit> collect(UnitKey unit, Version base, List<Version> stretch) throws IOException {
+		return TrailCollector.collect(unit, base, stretch, key -> {
 			read.add(key);
 			List<Version> chain = chains.getOrDefault(key, List.of());
 			VersionId current = currents.getOrDefault(key, chain.isEmpty() ? null : chain.get(chain.size() - 1).id());
@@ -92,7 +90,7 @@ class TrailCollectorTest {
 		claim(seat("s4"), version(OTHER, atS4, null, to(seat("s5"))));
 		claim(seat("s5"), version(OTHER, null, booking("m"), from(seat("s4"))));
 
-		Map<UnitKey, TrailUnit> trail = collect(M, base, List.of(mine), List.of(theirs));
+		Map<UnitKey, TrailUnit> trail = collect(M, base, List.of(mine));
 
 		assertEquals(Set.of(M, seat("s1"), seat("s4"), seat("s5")), trail.keySet());
 		assertEquals(2, trail.get(seat("s4")).chain().size());
@@ -107,7 +105,7 @@ class TrailCollectorTest {
 		Version t = claim(seat("s1"), version(OTHER, null, booking("t"), VersionMarks.NONE));
 		Version mine = beside(seat("s1"), version(OWN, null, booking("m"), from(M)));
 
-		Map<UnitKey, TrailUnit> trail = collect(seat("s1"), null, List.of(mine), List.of(t));
+		Map<UnitKey, TrailUnit> trail = collect(seat("s1"), null, List.of(mine));
 
 		assertEquals(Set.of(seat("s1"), M, seat("s4")), trail.keySet());
 	}
@@ -120,7 +118,7 @@ class TrailCollectorTest {
 		Version x = claim(seat("s4"), version(OTHER, null, booking("x"), from(seat("s9"))));
 		claim(seat("s4"), version(OTHER, x, booking("m"), from(M)));
 
-		Map<UnitKey, TrailUnit> trail = collect(M, base, List.of(mine), List.of(theirs));
+		Map<UnitKey, TrailUnit> trail = collect(M, base, List.of(mine));
 
 		assertEquals(Set.of(M, seat("s4")), trail.keySet());
 		assertFalse(read.contains(seat("s9")));
@@ -135,7 +133,7 @@ class TrailCollectorTest {
 		Version atS2 = claim(seat("s2"), version(OTHER, null, booking("m"), from(seat("s1"))));
 		claim(seat("s2"), version(OTHER, atS2, null, to(seat("s1"))));
 
-		Map<UnitKey, TrailUnit> trail = collect(seat("s1"), base, List.of(mine), chains.get(seat("s1")).subList(1, 3));
+		Map<UnitKey, TrailUnit> trail = collect(seat("s1"), base, List.of(mine));
 
 		assertEquals(Set.of(seat("s1"), seat("s2")), trail.keySet());
 		assertEquals(2, read.size(), "jede Einheit einmal gelesen: " + read);
@@ -171,7 +169,7 @@ class TrailCollectorTest {
 		logger.addHandler(handler);
 		Map<UnitKey, TrailUnit> trail;
 		try {
-			trail = collect(seat("s0"), base, List.of(mine), List.of(theirs));
+			trail = collect(seat("s0"), base, List.of(mine));
 		} finally {
 			logger.removeHandler(handler);
 		}
@@ -187,14 +185,23 @@ class TrailCollectorTest {
 		Version theirs = claim(M, version(OTHER, base, null, to(elsewhere)));
 		Version mine = beside(M, version(OWN, base, booking("m").put("name", "neu"), VersionMarks.NONE));
 
-		Map<UnitKey, TrailUnit> trail = collect(M, base, List.of(mine), List.of(theirs));
+		Map<UnitKey, TrailUnit> trail = collect(M, base, List.of(mine));
 
 		assertEquals(Set.of(M), trail.keySet());
 		assertFalse(read.contains(elsewhere));
 	}
 
+	/** Ohne Buchung zum Verfolgen (zwei Neuverkäufe auf einem freien Sitz) liest die Spur keinen Ordner. */
 	@Test
-	void outsideHasStandingAndSkipsResolutionVersions() throws IOException {
+	void noBookingToFollowReadsNothing() throws IOException {
+		Version mine = beside(seat("s1"), version(OWN, null, booking("y"), VersionMarks.NONE));
+
+		assertEquals(Map.of(), collect(seat("s1"), null, List.of(mine)));
+		assertEquals(List.of(), read);
+	}
+
+	@Test
+	void outsideSkipsResolutionVersions() throws IOException {
 		UnitKey s1 = seat("s1");
 		Version base = claim(s1, version(OTHER, null, booking("m"), VersionMarks.NONE));
 		Version t = claim(s1, version(OTHER, base, booking("t"), VersionMarks.NONE));
@@ -205,12 +212,10 @@ class TrailCollectorTest {
 				VersionMarks.RESOLUTION));
 		currents.put(s1, merge.id());
 
-		TrailUnit unit = collect(s1, base, List.of(other), List.of(t)).get(s1);
+		TrailUnit unit = collect(s1, base, List.of(other)).get(s1);
 
 		assertEquals(List.of(base, t), unit.chain());
-		assertEquals(Map.of(lost, Standing.ABSORBED, other, Standing.BESIDE), Map.of(unit.outside().get(0).version(),
-				unit.outside().get(0).standing(), unit.outside().get(1).version(), unit.outside().get(1).standing()));
-		assertEquals(2, unit.outside().size(), "die Zusammenführung der Auflösung fehlt");
+		assertEquals(Set.of(lost, other), Set.copyOf(unit.outside()), "die Zusammenführung der Auflösung fehlt");
 		assertEquals(merge.id(), unit.current());
 	}
 
@@ -223,7 +228,7 @@ class TrailCollectorTest {
 		Version second = beside(s1, version(OWN, first, booking("m").put("name", "neu"), VersionMarks.NONE));
 		currents.put(s1, second.id());
 
-		TrailUnit unit = collect(s1, head, List.of(lost), List.of()).get(s1);
+		TrailUnit unit = collect(s1, head, List.of(lost)).get(s1);
 
 		assertTrue(unit.stands(head.id()));
 		assertTrue(unit.stands(first.id()));

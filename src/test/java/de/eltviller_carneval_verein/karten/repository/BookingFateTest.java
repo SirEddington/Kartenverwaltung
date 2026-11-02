@@ -60,7 +60,7 @@ class BookingFateTest {
 	private static final BookingTrail UNTOUCHED = new BookingTrail(Kind.UNTOUCHED, null, null, null);
 
 	private BookingFate decide(BookingTrail own, BookingTrail foreign, boolean ownWinsSource) {
-		return BookingFate.decide("m", M, base, own, foreign, ownWinsSource, OWN);
+		return BookingFate.decide("m", M, base, own, foreign, ownWinsSource, OWN, true);
 	}
 
 	private static ConflictNote only(BookingFate fate, UnitKey writtenAt) {
@@ -244,7 +244,7 @@ class BookingFateTest {
 		BookingTrail theirs = new BookingTrail(Kind.KEPT, null,
 				world.version(OTHER, priced, withoutPlace("m", b -> b.setPrice(2500))), M);
 
-		BookingFate fate = BookingFate.decide("m", M, priced, mine, theirs, false, OWN);
+		BookingFate fate = BookingFate.decide("m", M, priced, mine, theirs, false, OWN, true);
 
 		assertEquals(2500, fate.content().get("price").asInt(), "der Preis von Deren gilt");
 		assertEquals(2000, fate.content().get("paidAmount").asInt(), "die Zahlung bleibt");
@@ -264,7 +264,7 @@ class BookingFateTest {
 		BookingTrail theirs = new BookingTrail(Kind.ARRIVED, world.version(OTHER, priced, null, to(S4)),
 				world.version(OTHER, null, booking("m", "s4", b -> b.setPrice(2500))), S4);
 
-		BookingFate fate = BookingFate.decide("m", M, priced, mine, theirs, false, OWN);
+		BookingFate fate = BookingFate.decide("m", M, priced, mine, theirs, false, OWN, true);
 
 		assertEquals(S4, fate.carrier());
 		assertEquals(2500, fate.content().get("price").asInt());
@@ -282,7 +282,7 @@ class BookingFateTest {
 		BookingTrail theirs = new BookingTrail(Kind.KEPT, null,
 				world.version(OTHER, seated, booking("m", "s3", b -> b.setComment("Fenster"))), S3);
 
-		BookingFate fate = BookingFate.decide("m", S3, seated, mine, theirs, true, OWN);
+		BookingFate fate = BookingFate.decide("m", S3, seated, mine, theirs, true, OWN, true);
 
 		assertEquals(S3, fate.carrier());
 		assertEquals("s3", fate.content().get("seatId").asText());
@@ -302,7 +302,7 @@ class BookingFateTest {
 		BookingTrail theirs = new BookingTrail(Kind.KEPT, null,
 				world.version(OTHER, seated, booking("m", "s3", b -> b.setComment("Fenster"))), S3);
 
-		BookingFate fate = BookingFate.decide("m", S3, seated, mine, theirs, true, OWN);
+		BookingFate fate = BookingFate.decide("m", S3, seated, mine, theirs, true, OWN, true);
 
 		assertEquals(M, fate.carrier());
 		assertTrue(fate.content().get("unassigned").asBoolean());
