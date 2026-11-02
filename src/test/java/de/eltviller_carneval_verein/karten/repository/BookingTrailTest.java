@@ -302,6 +302,21 @@ class BookingTrailTest {
 		assertEquals(Kind.CANCELLED, foreign(world.input(M, base, List.of(mine))).kind());
 	}
 
+	/** Ein Verkauf auf dem schon geräumten Platz nimmt die Buchung nicht weg: Er ist kein Storno. */
+	@Test
+	void saleOnTheVacatedSourceIsNoRemoval() {
+		UnitKey s3 = seat("s3");
+		Version seated = world.claim(s3, world.version(THIRD, null, booking("m", "s3")));
+		Version moved = world.claim(s3, world.version(OWN, seated, null, to(S1)));
+		world.claim(s3, world.version(THIRD, moved, booking("z", "s3")));
+		Version edit = world.beside(s3, world.version(OTHER, seated, booking("m", "s3", b -> b.setComment("A"))));
+
+		BookingTrail trail = BookingTrail.of(world.input(s3, seated, List.of(edit)), "m", s3, seated.id(), false);
+
+		assertEquals(Kind.KEPT, trail.kind());
+		assertSame(edit, trail.last());
+	}
+
 	@Test
 	void ownWinsAtTellsWhoseVersionStandsAtTheSource() {
 		foreignMoveToS4();

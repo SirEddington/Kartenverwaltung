@@ -49,9 +49,18 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 	 */
 	static BookingFate decide(String bookingId, UnitKey source, Version base, BookingTrail own, BookingTrail foreign,
 			boolean ownWinsSource, String ownMachineId) {
+		return decide(bookingId, source, base, own, foreign, ownWinsSource, ownMachineId, true);
+	}
+
+	/**
+	 * Wie oben; mit {@code sourceFree} = {@code false} gilt an der Quelle inzwischen eine andere Buchung (dort neu
+	 * verkauft), und E9 kann die Buchung nicht dorthin zurücklegen.
+	 */
+	static BookingFate decide(String bookingId, UnitKey source, Version base, BookingTrail own, BookingTrail foreign,
+			boolean ownWinsSource, String ownMachineId, boolean sourceFree) {
 		Side mine = new Side(own, ownMachineId);
 		Side theirs = new Side(foreign, machineOf(foreign));
-		Decider decider = new Decider(bookingId, source, base);
+		Decider decider = new Decider(bookingId, source, base, sourceFree);
 		return decider.decide(mine, theirs, ownWinsSource);
 	}
 
@@ -79,7 +88,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 	}
 
 	/** Die Entscheidung für eine Buchung an ihrer Quelle. */
-	private record Decider(String bookingId, UnitKey source, Version base) {
+	private record Decider(String bookingId, UnitKey source, Version base, boolean sourceFree) {
 
 		BookingFate decide(Side own, Side foreign, boolean ownWinsSource) {
 			Kind a = own.kind();
@@ -173,7 +182,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		 * zuweisen"), sonst ein Feldkonflikt mit "Platz" und den strittigen Gruppen.
 		 */
 		private BookingFate failedAgainstKept(Side failed, Side kept) {
-			boolean free = failed.trail().removal().deleted();
+			boolean free = failed.trail().removal().deleted() && sourceFree;
 			UnitKey carrier = free ? source : unassigned();
 			ObjectNode keptPayload = kept.trail().last().payload();
 			FieldMerge.Result merged = carry(fieldsOf(failed), keptPayload);

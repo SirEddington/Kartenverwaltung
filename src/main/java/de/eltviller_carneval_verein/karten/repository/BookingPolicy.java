@@ -221,7 +221,8 @@ public final class BookingPolicy implements ConflictPolicy {
 			return null;
 		}
 		boolean ownWins = Boolean.TRUE.equals(BookingTrail.ownWinsAt(input, source, base.id()));
-		return BookingFate.decide(bookingId, source, base, own, foreign, ownWins, input.ownMachineId());
+		return BookingFate.decide(bookingId, source, base, own, foreign, ownWins, input.ownMachineId(),
+				BookingTrail.freeFor(input, source, bookingId));
 	}
 
 	private static boolean removed(BookingTrail trail) {

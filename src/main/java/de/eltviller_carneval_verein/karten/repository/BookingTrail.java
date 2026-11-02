@@ -75,7 +75,7 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 		}
 		List<Version> side = sideVersions(input, unit, baseId, own);
 		if (own) {
-			return of(input, bookingId, source, side);
+			return of(input, bookingId, source, side, unit);
 		}
 		// mehrere andere Rechner: je Rechner eine Absicht; ein Storno gewinnt gegen alles, sonst gilt die der Kette
 		Set<VersionId> inChain = new HashSet<>();
@@ -85,12 +85,12 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 		BookingTrail chosen = UNTOUCHED;
 		boolean chosenInChain = false;
 		for (List<Version> versions : byMachine.values()) {
-			BookingTrail trail = of(input, bookingId, source, versions);
+			BookingTrail trail = of(input, bookingId, source, versions, unit);
 			boolean standsInChain = versions.stream().anyMatch(version -> inChain.contains(version.id()));
 			if (trail.kind() == Kind.CANCELLED) {
 				return trail;
 			}
-			if (chosen.kind() == Kind.UNTOUCHED || (standsInChain && !chosenInChain)) {
+			if (trail.kind() != Kind.UNTOUCHED && (chosen.kind() == Kind.UNTOUCHED || (standsInChain && !chosenInChain))) {
 				chosen = trail;
 				chosenInChain = standsInChain;
 			}
@@ -98,17 +98,27 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 		return chosen;
 	}
 
-	/** Die Absicht aus den Versionen einer Seite an der Quelle, ältestes zuerst. */
-	private static BookingTrail of(ConflictInput input, String bookingId, UnitKey source, List<Version> side) {
-		if (side.isEmpty()) {
-			return UNTOUCHED;
-		}
+	/**
+	 * Die Absicht aus den Versionen einer Seite an der Quelle, ältestes zuerst. Weggenommen hat die Buchung eine Version,
+	 * deren erster Vorgänger sie trug; ein Verkauf auf dem schon geräumten Platz gehört nicht dazu (er ist kein Storno).
+	 * Behalten hat die Seite sie, wenn eine ihrer Versionen sie trägt.
+	 */
+	private static BookingTrail of(ConflictInput input, String bookingId, UnitKey source, List<Version> side,
+			TrailUnit unit) {
+		Map<VersionId, Version> byId = new HashMap<>();
+		all(unit).forEach(version -> byId.put(version.id(), version));
+		Version kept = null;
 		for (Version version : side) {
-			if (!carries(version, bookingId)) {
+			if (carries(version, bookingId)) {
+				kept = version;
+				continue;
+			}
+			Version parent = version.firstParent() == null ? null : byId.get(version.firstParent());
+			if (parent != null && carries(parent, bookingId)) {
 				return follow(input, bookingId, source, version, version);
 			}
 		}
-		return new BookingTrail(Kind.KEPT, null, side.get(side.size() - 1), source);
+		return kept == null ? UNTOUCHED : new BookingTrail(Kind.KEPT, null, kept, source);
 	}
 
 	/**
@@ -158,6 +168,20 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 			at = version == null ? null : version.firstParent();
 		}
 		return line;
+	}
+
+	/**
+	 * Ob die Quelle die Buchung wieder aufnehmen kann: Was dort jetzt gilt, ist eine Löschung oder trägt die Buchung (auch
+	 * eine Wiederbelebung durch eine andere Auflösung). Hat dort inzwischen jemand eine andere Buchung verkauft, nicht.
+	 */
+	static boolean freeFor(ConflictInput input, UnitKey source, String bookingId) {
+		TrailUnit unit = input.trail().get(source);
+		if (unit == null) {
+			return false;
+		}
+		List<Version> standing = unit.standing();
+		Version head = standing.isEmpty() ? null : standing.get(standing.size() - 1);
+		return head == null || head.deleted() || carries(head, bookingId);
 	}
 
 	/**

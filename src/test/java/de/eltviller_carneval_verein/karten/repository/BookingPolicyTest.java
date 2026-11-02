@@ -770,6 +770,39 @@ class BookingPolicyTest {
 		assertEquals(List.of(), world.notes);
 	}
 
+	/**
+	 * B setzt m von s3 nach s1 und verliert s1 an t; danach verkauft ein dritter Rechner z auf dem geräumten s3. A hatte m
+	 * auf s3 geändert. z ist kein Storno von m, und s3 ist nicht mehr frei: m geht mit A's Änderung "ohne Platz", z bleibt.
+	 */
+	@ParameterizedTest(name = "erst s3: {0}")
+	@ValueSource(booleans = { false, true })
+	void saleOnTheVacatedSourceIsNoCancellationAndStays(boolean sourceFirst) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s3"));
+		world.claim(S3, m);
+		Version moved = child(OWN, "save-a", m, null, VersionMarks.NONE.withMovedTo(S1));
+		world.claim(S3, moved);
+		world.claim(S3, child(THIRD, "save-z", moved, booking("z", "s3")));
+		world.lose(S3, child(OTHER, "save-e", m, booking("m", "s3", b -> b.setPaymentStatus(PaymentStatus.CARD))));
+		world.claim(S1, version(OTHER, "save-t", booking("t", "s1")));
+		world.lose(S1, version(OWN, "save-a", booking("m", "s1"), VersionMarks.NONE.withMovedFrom(S3)));
+
+		if (sourceFirst) {
+			world.resolve(S3, OTHER);
+			world.resolve(S1, OWN);
+		} else {
+			world.resolve(S1, OWN);
+			world.resolve(S3, OTHER);
+		}
+
+		assertEquals("z", idOf(world.head(S3)), "der Verkauf auf s3 bleibt");
+		UnitKey unassigned = UnitKey.unassignedBooking(EVENT, PRESENTATION, "m");
+		assertEquals(List.of(unassigned), world.carriers("m"));
+		assertEquals("CARD", world.head(unassigned).payload().path("paymentStatus").asText());
+		assertEquals(List.of(), world.notesFor(OTHER), "A's Änderung weicht nicht");
+		assertEquals(1, world.notesFor(OWN).size(), world.notes.toString());
+	}
+
 	/** Tausch: B tauscht m (s1) und n (s2); A ändert m auf s1. Danach n auf s1, m mit A's Änderung auf s2. */
 	@ParameterizedTest(name = "B gewinnt s1: {0}")
 	@ValueSource(booleans = { false, true })
