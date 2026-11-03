@@ -1414,4 +1414,75 @@ class BookingPolicyTest {
 	}
 
 	// <-- Koppelregel
+
+	// Regel 4 mit informierter Absicht (KARV-98, Spec Abschnitt 1b) -->
+
+	/**
+	 * B gab Mia beim Zuweisen "Fenster" (Br, Bs Wiederbelebung) und änderte danach weiter auf "Fenster2" (Be auf Br); A's
+	 * Zusammenführung Am hat CARD und "Fenster". Gegen Br hat B nur den Kommentar geändert, A nur die Zahlung: kein
+	 * Feldkonflikt, gleich wer auflöst.
+	 */
+	@ParameterizedTest(name = "B löst auf: {0}")
+	@ValueSource(booleans = { true, false })
+	void ruleFourWithAnInformedEditMergesAgainstTheResolution(boolean bResolves) {
+		TrailFixture world = new TrailFixture();
+		UnitKey mia = TrailFixture.unassigned("m");
+		String b = bResolves ? TrailFixture.OWN : TrailFixture.OTHER;
+		String a = bResolves ? TrailFixture.OTHER : TrailFixture.OWN;
+		Version m0 = world.claim(mia, world.version(TrailFixture.THIRD, null, TrailFixture.withoutPlace("m", x -> {
+		})));
+		Version bd = world.claim(mia, world.version(b, m0, null, TrailFixture.to(TrailFixture.seat("s1"))));
+		Version ae = world.beside(mia, world.version(a, m0, TrailFixture.withoutPlace("m",
+				x -> x.setPaymentStatus(PaymentStatus.CARD))));
+		ObjectNode merged = TrailFixture.withoutPlace("m", x -> {
+			x.setPaymentStatus(PaymentStatus.CARD);
+			x.setComment("Fenster");
+		});
+		ObjectNode revived = TrailFixture.withoutPlace("m", x -> x.setComment("Fenster"));
+		ObjectNode edited = TrailFixture.withoutPlace("m", x -> x.setComment("Fenster2"));
+		ConflictInput input;
+		if (bResolves) {
+			world.claim(mia, world.version(a, bd, merged, VersionMarks.RESOLUTION));
+			Version br = world.beside(mia, world.version(b, bd, revived, VersionMarks.RESOLUTION));
+			Version be = world.beside(mia, world.version(b, br, edited));
+			input = world.input(mia, m0, List.of(br, be));
+		} else {
+			Version br = world.claim(mia, world.version(b, bd, revived, VersionMarks.RESOLUTION));
+			world.claim(mia, world.version(b, br, edited));
+			Version am = world.beside(mia, world.version(a, ae, merged, VersionMarks.RESOLUTION));
+			input = world.input(mia, m0, List.of(am));
+		}
+
+		Resolution resolution = new BookingPolicy().resolve(input);
+
+		assertEquals("Fenster2", resolution.payload().get("comment").asText());
+		assertEquals("CARD", resolution.payload().get("paymentStatus").asText());
+		assertNull(resolution.note(), "kein Feldkonflikt gegen sich selbst");
+	}
+
+	/**
+	 * 1b ohne Absenkung (benannte Verhaltensänderung): Ein fremder Umzug scheiterte, E9 belebte die Quelle wieder (R), ein
+	 * anderer Rechner bearbeitete die Buchung dort (F). Ein eigener veralteter Stand verliert dagegen: Fs Änderung bleibt.
+	 */
+	@Test
+	void editOnARevivalSurvivesAgainstAStaleOwnVersion() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		UnitKey s4 = TrailFixture.seat("s4");
+		Version base = world.claim(s1, world.version(TrailFixture.THIRD, null, TrailFixture.booking("m", "s1")));
+		Version removal = world.claim(s1, world.version(TrailFixture.OTHER, base, null, TrailFixture.to(s4)));
+		world.claim(s4, world.version(TrailFixture.THIRD, null, TrailFixture.booking("y", "s4")));
+		world.beside(s4, world.version(TrailFixture.OTHER, null, TrailFixture.booking("m", "s4"), TrailFixture.from(s1)));
+		Version revival = world.claim(s1, world.version(TrailFixture.OTHER, removal, TrailFixture.booking("m", "s1"),
+				VersionMarks.RESOLUTION));
+		world.claim(s1, world.version(TrailFixture.THIRD, revival, TrailFixture.booking("m", "s1",
+				x -> x.setComment("F"))));
+		Version mine = world.beside(s1, world.version(TrailFixture.OWN, base, TrailFixture.booking("m", "s1",
+				x -> x.setPaymentStatus(PaymentStatus.CARD))));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, base, List.of(mine)));
+
+		assertEquals("F", resolution.payload().get("comment").asText(), "Fs Bearbeitung bleibt");
+		assertEquals("CARD", resolution.payload().get("paymentStatus").asText(), "die eigene Änderung auch");
+	}
 }

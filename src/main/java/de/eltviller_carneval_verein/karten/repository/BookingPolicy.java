@@ -94,7 +94,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (resolution == null) {
 			// Regel 4 erreichen nur zwei lesbare, nicht gelöschte Fassungen derselben Buchung: PolicyRules.common griffe nie
 			resolution = PolicyRules.fromMerge(input, FieldGroups.booking(),
-					mergeBooking(PolicyRules.basePayload(input), input.mine().payload(), input.theirs().payload()));
+					mergeBooking(ruleFourBase(input), input.mine().payload(), input.theirs().payload()));
 		}
 		return resolution;
 	}
@@ -196,6 +196,26 @@ public final class BookingPolicy implements ConflictPolicy {
 			}
 		}
 		return new Resolution(payload, payload == null, extra, note);
+	}
+
+	/**
+	 * Die Basis des Dreiwegevergleichs in Regel 4: Baut die Absicht einer Seite auf einer Auflösung auf (KARV-98, Spec
+	 * Abschnitt 1b), ist es deren Inhalt; sonst gälte eine Änderung, die die Seite schon vor der Auflösung machte und danach
+	 * weiterführte, als Konflikt gegen sich selbst, und das Ergebnis hinge davon ab, wer auflöst. Bauen beide auf
+	 * verschiedenen Auflösungen auf, oder keine, bleibt es bei der Basis der Eingabe.
+	 */
+	private static ObjectNode ruleFourBase(ConflictInput input) {
+		String bookingId = idOf(input.base());
+		if (bookingId == null || input.trail().isEmpty()) {
+			return PolicyRules.basePayload(input);
+		}
+		Version own = BookingTrail.of(input, bookingId, input.unit(), input.base().id(), true).after();
+		Version foreign = BookingTrail.of(input, bookingId, input.unit(), input.base().id(), false).after();
+		if (own != null && foreign != null && !own.id().equals(foreign.id())) {
+			return PolicyRules.basePayload(input);
+		}
+		Version after = own != null ? own : foreign;
+		return after == null || after.deleted() ? PolicyRules.basePayload(input) : after.payload();
 	}
 
 	/**
