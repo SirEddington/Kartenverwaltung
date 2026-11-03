@@ -150,7 +150,7 @@ class FullSyncTest {
 		assertTrue(has(shared, "halls/h1/" + V2 + ".json"));
 		assertEquals(Set.of(E2), result.changed());
 		assertTrue(result.lost().isEmpty());
-		assertEquals(VersionStoreTest.allDataFiles(local), VersionStoreTest.allDataFiles(shared));
+		assertEquals(VersionStoreFixtures.allDataFiles(local), VersionStoreFixtures.allDataFiles(shared));
 	}
 
 	@Test
@@ -560,14 +560,14 @@ class FullSyncTest {
 	void setAsideRenamesAndNeverDeletes() throws IOException {
 		byte[] bytes = put(local, E1, version(ME, V1));
 		claim(local, E1, version(ME, V1), AT);
-		List<String> before = VersionStoreTest.allDataFiles(local);
+		List<String> before = VersionStoreFixtures.allDataFiles(local);
 
 		Path aside = FullSync.setAside(local.dataRoot(), files, CLOCK);
 
 		assertEquals(local.dataRoot().resolveSibling("data-beiseite-2026-10-26_10-00-00"), aside);
 		assertFalse(Files.exists(local.dataRoot()));
 		VersionStore moved = new VersionStore(aside, files);
-		assertEquals(before, VersionStoreTest.allDataFiles(moved));
+		assertEquals(before, VersionStoreFixtures.allDataFiles(moved));
 		assertArrayEquals(bytes, moved.readVersionBytes(E1, V1).orElseThrow());
 
 		// ein zweites Mal in derselben Sekunde bekommt einen Zusatz
@@ -629,7 +629,7 @@ class FullSyncTest {
 		FullSyncResult result = run(false);
 
 		assertEquals(Set.of(E2), result.changed());
-		assertEquals(List.of("events/e2/" + FOREIGN + ".json"), VersionStoreTest.allDataFiles(local));
+		assertEquals(List.of("events/e2/" + FOREIGN + ".json"), VersionStoreFixtures.allDataFiles(local));
 	}
 
 	@Test

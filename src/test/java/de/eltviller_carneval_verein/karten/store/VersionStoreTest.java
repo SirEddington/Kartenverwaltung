@@ -1,5 +1,14 @@
 package de.eltviller_carneval_verein.karten.store;
 
+import static de.eltviller_carneval_verein.karten.store.VersionStoreFixtures.V1;
+import static de.eltviller_carneval_verein.karten.store.VersionStoreFixtures.V2;
+import static de.eltviller_carneval_verein.karten.store.VersionStoreFixtures.V3;
+import static de.eltviller_carneval_verein.karten.store.VersionStoreFixtures.allDataFiles;
+import static de.eltviller_carneval_verein.karten.store.VersionStoreFixtures.bytes;
+import static de.eltviller_carneval_verein.karten.store.VersionStoreFixtures.claimBytes;
+import static de.eltviller_carneval_verein.karten.store.VersionStoreFixtures.put;
+import static de.eltviller_carneval_verein.karten.store.VersionStoreFixtures.version;
+import static de.eltviller_carneval_verein.karten.store.VersionStoreFixtures.versionBytes;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -9,72 +18,26 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
+/**
+ * Lesen, Schreiben und Auflisten im {@link VersionStore}. Pfade, Anker und Ordnernamen prüft {@link VersionStorePathTest};
+ * warum die Tests in zwei Klassen stehen, steht bei {@link VersionStoreFixtures}.
+ */
 class VersionStoreTest {
-
-	private static final Instant AT = Instant.parse("2026-10-26T10:00:00Z");
-
-	private static final VersionId V1 = VersionId.create(1_000_000L, "aaaaaaaa", 0);
-	private static final VersionId V2 = VersionId.create(2_000_000L, "bbbbbbbb", 0);
-	private static final VersionId V3 = VersionId.create(3_000_000L, "cccccccc", 0);
 
 	@TempDir
 	Path dir;
 
 	private VersionStore store() {
 		return new VersionStore(dir.resolve("data"), new NioFileLayer());
-	}
-
-	private static byte[] bytes(String text) {
-		return text.getBytes(StandardCharsets.UTF_8);
-	}
-
-	private static Version version(VersionId id, VersionId... parents) {
-		return new Version(1, id, List.of(parents), "maschine-1", "Kasse 1", "Anna", AT, "save-" + id, false,
-				new ObjectMapper().createObjectNode().put("name", "Sitzung"));
-	}
-
-	private static byte[] versionBytes(VersionId id, VersionId... parents) throws IOException {
-		return StoreCodec.write(version(id, parents));
-	}
-
-	private static byte[] claimBytes(VersionId id, byte[] versionBytes) throws IOException {
-		return StoreCodec.write(new Claim(id, StoreCodec.sha256(versionBytes), "maschine-1", AT));
-	}
-
-	private static void put(Path file, String content) throws IOException {
-		Files.createDirectories(file.getParent());
-		Files.write(file, bytes(content));
-	}
-
-	/**
-	 * Test-Hilfe (auch für {@link FullSyncTest}): die Pfade aller Versions- und Anspruchsdateien aller Einheiten des
-	 * Bestands ({@link VersionStore#allUnits}, je Einheit {@link VersionStore#unitDataFiles}), relativ zum Datenordner und
-	 * mit {@code /} getrennt, sortiert. Es sind genau die Dateien, die {@link VersionStore#readUnit} übernimmt;
-	 * Listendateien unter {@code feeds/} gehören nicht dazu.
-	 */
-	static List<String> allDataFiles(VersionStore store) throws IOException {
-		List<String> paths = new ArrayList<>();
-		for (UnitKey unit : store.allUnits()) {
-			paths.addAll(store.unitDataFiles(unit));
-		}
-		Collections.sort(paths);
-		return paths;
 	}
 
 	@Test
@@ -423,117 +386,5 @@ class VersionStoreTest {
 		assertEquals(List.of("events/e1/presentations/p1/~karv-5.tmp"),
 				store.scanUnit(UnitKey.presentation("e1", "p1")).tempFiles());
 		assertEquals(List.of(), store.scanUnit(UnitKey.hall("h1")).tempFiles());
-	}
-
-	@Test
-	void relativeAccessReadsAndCreatesBelowRoot() throws IOException {
-		VersionStore store = store();
-
-		assertEquals(Optional.empty(), store.readRelative("feeds/m1/feed.json"));
-		assertTrue(store.createRelative("feeds/m1/feed.json", bytes("eins")));
-		assertFalse(store.createRelative("feeds/m1/feed.json", bytes("zwei")));
-
-		assertArrayEquals(bytes("eins"), store.readRelative("feeds/m1/feed.json").orElseThrow());
-		assertEquals(store.dataRoot().resolve("feeds").resolve("m1").resolve("feed.json"),
-				store.resolve("feeds/m1/feed.json"));
-	}
-
-	@Test
-	void relativePathsOutsideTheRootAreRejected() {
-		VersionStore store = store();
-
-		for (String bad : new String[] { "", "/etc/passwd", "../x", "a/../../x", "a/./b", "a//b", "a\\b", "C:/x", "C:x",
-				"a/" }) {
-			assertThrows(IllegalArgumentException.class, () -> store.resolve(bad), bad);
-			assertThrows(IllegalArgumentException.class, () -> store.readRelative(bad), bad);
-			assertThrows(IllegalArgumentException.class, () -> store.createRelative(bad, bytes("x")), bad);
-		}
-		assertThrows(IllegalArgumentException.class, () -> store.resolve(null));
-	}
-
-	@Test
-	void sharedStoreWithAnchorDoesNotCreateAMissingFolder() throws IOException {
-		Path anchor = dir.resolve("gemeinsam");
-		VersionStore store = new VersionStore(anchor.resolve("data"), new NioFileLayer(), anchor, () -> "abc");
-		UnitKey unit = UnitKey.event("e1");
-		byte[] version = versionBytes(V1);
-
-		assertEquals(anchor, store.anchor());
-		assertThrows(NoSuchFileException.class, () -> store.writeVersion(unit, V1, version));
-		assertThrows(NoSuchFileException.class, () -> store.createClaim(unit, "root", claimBytes(V1, version)));
-		assertThrows(NoSuchFileException.class, () -> store.createRelative("feeds/m1/feed.json", bytes("{}")));
-
-		assertFalse(Files.exists(anchor));
-		Files.createDirectory(anchor);
-		assertTrue(store.writeVersion(unit, V1, version));
-		assertTrue(Files.isDirectory(anchor.resolve("data").resolve("events").resolve("e1")));
-	}
-
-	@Test
-	void storeHandsAnchorAndCurrentTagToTheFileLayer() throws IOException {
-		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
-		Path anchor = Files.createDirectory(dir.resolve("gemeinsam"));
-		AtomicReference<String> tag = new AtomicReference<>("abc");
-		VersionStore store = new VersionStore(anchor.resolve("data"), layer, anchor, tag::get);
-		UnitKey unit = UnitKey.event("e1");
-		byte[] version = versionBytes(V1);
-
-		store.writeVersion(unit, V1, version);
-		tag.set("xyz");
-		store.createClaim(unit, "root", claimBytes(V1, version));
-		store.createRelative("feeds/m1/feed.json", bytes("{}"));
-
-		assertEquals(List.of(new FaultyFileLayer.Creation(store.resolve("events/e1/" + V1 + ".json"), anchor, "abc"),
-				new FaultyFileLayer.Creation(store.resolve("events/e1/claims/root.json"), anchor, "xyz"),
-				new FaultyFileLayer.Creation(store.resolve("feeds/m1/feed.json"), anchor, "xyz")), layer.creations());
-	}
-
-	@Test
-	void storeWithoutAnchorHandsNoAnchorAndNoTagToTheFileLayer() throws IOException {
-		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
-		VersionStore store = new VersionStore(dir.resolve("data"), layer);
-
-		store.writeVersion(UnitKey.event("e1"), V1, versionBytes(V1));
-
-		assertEquals(List.of(new FaultyFileLayer.Creation(store.resolve("events/e1/" + V1 + ".json"), null, null)),
-				layer.creations());
-	}
-
-	@Test
-	void storeWithoutAnchorCreatesMissingFolders() throws IOException {
-		VersionStore store = store();
-
-		assertNull(store.anchor());
-		assertTrue(store.writeVersion(UnitKey.event("e1"), V1, versionBytes(V1)));
-	}
-
-	@Test
-	void worksInFolderWithSpacesAndUmlauts() throws IOException {
-		Path root = dir.resolve("Gemeinsame Ablage").resolve("Kartenverkäufe").resolve("data");
-		VersionStore store = new VersionStore(root, new NioFileLayer());
-		UnitKey event = UnitKey.event("e1");
-		UnitKey booking = UnitKey.unassignedBooking("e1", "p1", "b1");
-		byte[] first = versionBytes(V1);
-		byte[] second = versionBytes(V2, V1);
-
-		assertTrue(store.writeVersion(event, V1, first));
-		assertFalse(store.writeVersion(event, V1, first));
-		assertTrue(store.writeVersion(event, V2, second));
-		assertTrue(store.createClaim(event, "root", claimBytes(V1, first)));
-		assertTrue(store.writeVersion(booking, V1, first));
-		assertTrue(store.createRelative("feeds/m1/feed.json", bytes("{}")));
-		put(root.resolve("events/e1/presentations/p1/Thumbs.db"), "x");
-
-		assertArrayEquals(first, store.readVersionBytes(event, V1).orElseThrow());
-		UnitFiles files = store.readUnit(event);
-		assertEquals(List.of(V1, V2), List.copyOf(files.versions().keySet()));
-		assertEquals(version(V2, V1), files.versions().get(V2).version());
-		assertEquals(V1, files.claims().get("root").claim().version());
-		assertEquals(List.of("e1"), store.eventIds());
-		assertEquals(List.of(event, UnitKey.presentation("e1", "p1"), booking), store.eventUnits("e1"));
-		assertEquals(List.of(event, UnitKey.presentation("e1", "p1"), booking), store.allUnits());
-		assertEquals(List.of("events/e1/" + V1 + ".json", "events/e1/" + V2 + ".json", "events/e1/claims/root.json",
-				"events/e1/presentations/p1/bookings/_b1/" + V1 + ".json"), allDataFiles(store));
-		assertArrayEquals(bytes("{}"), store.readRelative("feeds/m1/feed.json").orElseThrow());
 	}
 }
