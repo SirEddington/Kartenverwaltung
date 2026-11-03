@@ -998,6 +998,49 @@ class ConflictResolverTest {
 		assertEquals(v[2].id(), input.theirs().id());
 	}
 
+	/**
+	 * Aus dem abschließenden Review: Beide Seiten handelten nach ihrer Auflösung noch einmal (Be auf Br, Ac auf Am). Die
+	 * Basis wird trotzdem auf M0 gesenkt; sie folgt aus den gabelnden Versionen, nicht aus den Spitzen.
+	 */
+	@Test
+	void lowersAlsoWithUserVersionsAboveBothResolutions() throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		long now = clock.instant().toEpochMilli();
+		Version m0 = version(VersionId.create(now - 9000, FOREIGN, 0), List.of(), FOREIGN, "s0", false, name("Mia"),
+				VersionMarks.NONE);
+		Version bd = version(VersionId.create(now - 8000, CURRENT, 0), List.of(m0.id()), CURRENT, "s1", true, null,
+				VersionMarks.NONE);
+		Version ae = version(VersionId.create(now - 7500, FOREIGN, 1), List.of(m0.id()), FOREIGN, "s2", false,
+				name("Mia bezahlt"), VersionMarks.NONE);
+		Version am = version(VersionId.create(now - 7000, FOREIGN, 2), List.of(bd.id(), ae.id()), FOREIGN, "s3", false,
+				name("Mia bezahlt"), VersionMarks.RESOLUTION);
+		Version ac = version(VersionId.create(now - 6000, FOREIGN, 3), List.of(am.id()), FOREIGN, "s4", true, null,
+				VersionMarks.NONE);
+		Version br = version(VersionId.create(now - 5000, CURRENT, 1), List.of(bd.id()), CURRENT, "s5", false,
+				name("Mia wieder"), VersionMarks.RESOLUTION);
+		Version be = version(VersionId.create(now - 4000, CURRENT, 2), List.of(br.id()), CURRENT, "s6", false,
+				name("Mia Fenster2"), VersionMarks.NONE);
+		store(store, arbiter, BOOKING, m0, true);
+		store(store, arbiter, BOOKING, bd, true);
+		store(store, arbiter, BOOKING, ae, false);
+		store(store, arbiter, BOOKING, am, true);
+		store(store, arbiter, BOOKING, ac, true);
+		store(store, arbiter, BOOKING, br, false);
+		store(store, arbiter, BOOKING, be, false);
+		ConflictResolver resolver = new ConflictResolver(
+				storeHost(store, new Ownership(CURRENT, List.of()), new ArrayList<>(), true, true),
+				new SyncNotifier(Runnable::run, true), clock);
+		RecordingPolicy policy = new RecordingPolicy();
+		resolver.setPolicy(UnitType.BOOKING, policy);
+		resolver.enqueue(BOOKING);
+
+		resolver.resolvePending(10);
+
+		assertEquals(1, policy.inputs.size());
+		assertEquals(m0.id(), policy.inputs.get(0).base().id(), "abgesenkt auf M0");
+	}
+
 	@Test
 	void userVersionAgainstResolutionKeepsTheBase() throws IOException {
 		Version[] v = new Version[4];

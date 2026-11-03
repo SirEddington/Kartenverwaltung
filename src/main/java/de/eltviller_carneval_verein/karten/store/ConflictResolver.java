@@ -348,9 +348,11 @@ final class ConflictResolver {
 			return Stretch.of(Step.LATER);
 		}
 		VersionId baseId = firstParent;
-		if (unit.type() == UnitType.BOOKING && oldest.marks().resolution()) {
-			// Auflösung gegen Auflösung (KARV-98): die Basis unter den Nutzer-Versionen beider Seiten
-			ResolutionBase.Result lowered = ResolutionBase.lower(files, mine, state.head());
+		List<Version> forked = chainSinceBase(files, state.chain(), firstParent);
+		if (unit.type() == UnitType.BOOKING && oldest.marks().resolution() && !forked.isEmpty()) {
+			// Auflösung gegen Auflösung (KARV-98): die Basis unter den Nutzer-Versionen beider Seiten, bestimmt aus den
+			// gabelnden Versionen (Nutzer-Versionen darüber liest die Spur als informiertes Handeln)
+			ResolutionBase.Result lowered = ResolutionBase.lower(files, oldest, forked.get(0));
 			if (lowered.kind() == ResolutionBase.Kind.LOWERED) {
 				baseId = lowered.base();
 			} else if (lowered.kind() == ResolutionBase.Kind.MISSING && host.shared() && withinListWait(unit)) {
