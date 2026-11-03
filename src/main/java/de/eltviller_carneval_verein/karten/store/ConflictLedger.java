@@ -154,7 +154,7 @@ final class ConflictLedger {
 	 * Ob {@code later} denselben verlorenen Stand später nennt als {@code earlier}:
 	 * <ul>
 	 * <li>In derselben Einheit an einer späteren Stelle (aufgegangen, Kette, ausstehend); zwei aufgegangene, wenn
-	 * {@code later} die andere als Vorgänger hat.</li>
+	 * {@code later} die andere als Vorgänger hat. Zwei "Löschung gilt" dort auch mit verschiedenem {@code dropped}.</li>
 	 * <li>An einer anderen Einheit, wenn {@code earlier} ein Doppelverkauf oder ein Feldkonflikt mit Träger ist und sein
 	 * {@code moved} (wohin die Buchung kam) diese Einheit nennt: Dort hat eine spätere Auflösung mit Kenntnis des Parkens
 	 * entschieden. Bei "Löschung gilt" nennt {@code moved}, wo die weichende Fassung liegt; er tritt so nie zurück.</li>
@@ -162,7 +162,14 @@ final class ConflictLedger {
 	 */
 	private static boolean supersedes(Candidate later, Candidate earlier) {
 		ConflictNote before = earlier.noted().note();
-		if (!before.dropped().equals(later.noted().note().dropped())) {
+		ConflictNote after = later.noted().note();
+		if (later.unit().equals(earlier.unit()) && later.rank() > earlier.rank()
+				&& before.kind() == ConflictNote.Kind.DELETE_WINS && after.kind() == ConflictNote.Kind.DELETE_WINS) {
+			// die Buchung ist gelöscht: Ein späteres "Löschung gilt" ersetzt das frühere, auch mit anderer weichender
+			// Fassung (etwa eine Bearbeitung nach einer Auflösung); wiederhergestellt wird die jüngere
+			return true;
+		}
+		if (!before.dropped().equals(after.dropped())) {
 			return false;
 		}
 		if (later.unit().equals(earlier.unit())) {

@@ -2191,8 +2191,6 @@ class ConflictScenarioTest {
 	 * Danach gilt R35: Mia lebt nach einer Änderung genau einmal "ohne Platz" mit beiden Änderungen, nach dem Storno
 	 * nirgends; B hat genau einen offenen Eintrag zu Mia, A keinen.
 	 */
-	@Disabled("KARV-98, Ursache 1: Auflösung gegen Auflösung entscheidet nach Inhalten statt nach Absichten (Storno und "
-			+ "Änderung gehen verloren, doppelte Vermerke); nach v1.0")
 	@ParameterizedTest(name = "A: {0}, die Gabel an _Mia gewinnt {1}")
 	@CsvSource({ "EDIT, a", "EDIT, b", "CANCEL, a", "CANCEL, b" })
 	void concurrentResolutionsOfSplitWinnersKeepInvariants(String action, String forkWinner) throws IOException {
@@ -2200,6 +2198,71 @@ class ConflictScenarioTest {
 		Machine a = m[0];
 		Machine b = m[1];
 		setUp(a, b);
+		String miaId = concurrentResolutions(a, b, action, forkWinner, null);
+		UnitKey miaUnit = unassignedUnit(a, miaId);
+		UnitKey seat = seatUnit(a, 1);
+
+		assertConverged(a, b);
+		assertEquals("Tom", lastName(a.eventState().get(seat)));
+		if (action.equals("EDIT")) {
+			assertEquals(Set.of(miaUnit), carriers(a, miaId), "Mia lebt genau einmal, ohne Platz");
+			UnitSnapshot kept = a.eventState().get(miaUnit);
+			assertWithoutPlace(kept, "Mia");
+			assertEquals("Fenster", kept.payload().get("comment").asText(), "B's Änderung beim Zuweisen");
+			assertEquals("CARD", kept.payload().get("paymentStatus").asText(), "A's Änderung");
+		} else {
+			assertEquals(Set.of(), carriers(a, miaId), "Mia bleibt storniert");
+		}
+		assertEquals(1, b.open().size(), "B hat genau einen Eintrag zu Mia: " + b.open());
+		assertEquals(List.of(), a.open(), "A's Änderung weicht nicht");
+		assertSettled(m);
+	}
+
+	/**
+	 * Wie {@link #concurrentResolutionsOfSplitWinnersKeepInvariants}, aber B bearbeitet die wiederbelebte Mia, bevor die
+	 * Gabel an {@code _Mia} aufgelöst ist: den Kommentar, den er beim Zuweisen gesetzt hat, weiter auf "Fenster2" (KARV-98,
+	 * Spec 1b). Nach A's Änderung leben beide Änderungen ohne Feldkonflikt; nach A's Storno bleibt Mia storniert, und B hat
+	 * genau einen Eintrag "Löschung gilt" mit seiner Bearbeitung als weichender Fassung.
+	 */
+	@ParameterizedTest(name = "A: {0}, die Gabel an _Mia gewinnt {1}")
+	@CsvSource({ "EDIT, a", "EDIT, b", "CANCEL, a", "CANCEL, b" })
+	void informedEditOfTheRevivalSurvivesConcurrentResolutions(String action, String forkWinner) throws IOException {
+		Machine[] m = cloudMachines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		VersionId[] edit = new VersionId[1];
+		String miaId = concurrentResolutions(a, b, action, forkWinner, edit);
+		UnitKey miaUnit = unassignedUnit(a, miaId);
+
+		assertConverged(a, b);
+		assertEquals("Tom", lastName(a.eventState().get(seatUnit(a, 1))));
+		List<OpenConflict> open = b.open();
+		assertEquals(1, open.size(), "B hat genau einen Eintrag zu Mia: " + open);
+		if (action.equals("EDIT")) {
+			assertEquals(Set.of(miaUnit), carriers(a, miaId), "Mia lebt genau einmal, ohne Platz");
+			UnitSnapshot kept = a.eventState().get(miaUnit);
+			assertEquals("Fenster2", kept.payload().get("comment").asText(), "Bs Bearbeitung der Wiederbelebung");
+			assertEquals("CARD", kept.payload().get("paymentStatus").asText(), "A's Änderung");
+			assertEquals(ConflictNote.Kind.DOUBLE_SALE, open.get(0).note().kind());
+		} else {
+			assertEquals(Set.of(), carriers(a, miaId), "Mia bleibt storniert");
+			assertEquals(ConflictNote.Kind.DELETE_WINS, open.get(0).note().kind());
+			assertEquals(edit[0], open.get(0).note().dropped(), "Bs Bearbeitung weicht");
+		}
+		assertEquals(List.of(), a.open(), "A's Änderung weicht nicht");
+		assertSettled(m);
+	}
+
+	/**
+	 * Der Ablauf von {@link #concurrentResolutionsOfSplitWinnersKeepInvariants} bis zur Ruhe. Mit {@code edit} bearbeitet B
+	 * die wiederbelebte Mia, nachdem er für sich aufgelöst hat (Kommentar "Fenster2"); {@code edit[0]} ist dann diese
+	 * Version.
+	 *
+	 * @return Mias Kennung
+	 */
+	private String concurrentResolutions(Machine a, Machine b, String action, String forkWinner, VersionId[] edit)
+			throws IOException {
 		Booking mia = a.friday().addBooking();
 		mia.setLastName("Mia");
 		mia.setUnassigned(true);
@@ -2233,26 +2296,20 @@ class ConflictScenarioTest {
 		}
 		assertTrue(a.sync.unitState(miaUnit).lost().isEmpty(), "A hat _Mia für sich aufgelöst");
 		assertTrue(b.sync.unitState(seat).lost().isEmpty(), "B hat Sitz 1 für sich aufgelöst");
+		if (edit != null) {
+			booking(b, miaId).setComment("Fenster2");
+			b.repository.saveEvent(b.event);
+			localTick(b);
+			Version edited = b.sync.unitState(miaUnit).current();
+			assertEquals("Fenster2", edited.payload().get("comment").asText(), "B hat die Wiederbelebung bearbeitet");
+			edit[0] = edited.id();
+		}
 
 		Machine first = forkWinner.equals(a.name) ? a : b;
 		cloud.step(first.name);
 		cloud.step((first == a ? b : a).name);
 		untilQuiet(a, b);
-
-		assertConverged(a, b);
-		assertEquals("Tom", lastName(a.eventState().get(seat)));
-		if (action.equals("EDIT")) {
-			assertEquals(Set.of(miaUnit), carriers(a, miaId), "Mia lebt genau einmal, ohne Platz");
-			UnitSnapshot kept = a.eventState().get(miaUnit);
-			assertWithoutPlace(kept, "Mia");
-			assertEquals("Fenster", kept.payload().get("comment").asText(), "B's Änderung beim Zuweisen");
-			assertEquals("CARD", kept.payload().get("paymentStatus").asText(), "A's Änderung");
-		} else {
-			assertEquals(Set.of(), carriers(a, miaId), "Mia bleibt storniert");
-		}
-		assertEquals(1, b.open().size(), "B hat genau einen Eintrag zu Mia: " + b.open());
-		assertEquals(List.of(), a.open(), "A's Änderung weicht nicht");
-		assertSettled(m);
+		return miaId;
 	}
 
 	/**

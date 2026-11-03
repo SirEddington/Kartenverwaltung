@@ -1192,6 +1192,36 @@ class ConflictLedgerTest {
 		assertEquals(2, ConflictLedger.derive(entries, OWN, Set.of()).conflicts().size());
 	}
 
+	/**
+	 * Nach einem Storno ist die Buchung gelöscht: Ein späteres "Löschung gilt" in derselben Einheit an denselben Rechner
+	 * verdrängt ein früheres, auch mit anderer weichender Fassung; wiederhergestellt wird die jüngere.
+	 */
+	@Test
+	void laterDeleteWinsInTheSameUnitSupersedesAnEarlierOneWithAnotherDroppedVersion() {
+		VersionId first = vid(1_000, 1);
+		VersionId second = vid(2_000, 2);
+		VersionId edit = VersionId.create(1_900_000_000_700L, A_ID, 3);
+		List<UnitIndex.Entry> entries = List.of(entryWith(MIA, List.of(first, second), Set.of(),
+				List.of(notedWith(first, List.of(), deleteWinsAt(SEAT)),
+						notedWith(second, List.of(first), ConflictNote.deleteWins(A_ID, null, null, edit)))));
+
+		assertEquals(List.of(second), ids(ConflictLedger.derive(entries, OWN, Set.of()).conflicts()));
+	}
+
+	/** Zwei Feldkonflikte nacheinander in derselben Einheit sind zwei verlorene Werte: beide bleiben. */
+	@Test
+	void fieldsNotesWithDifferentDroppedVersionsBothStay() {
+		VersionId first = vid(1_000, 1);
+		VersionId second = vid(2_000, 2);
+		VersionId otherEdit = VersionId.create(1_900_000_000_700L, A_ID, 3);
+		ConflictNote earlier = ConflictNote.ofFields(A_ID, null, List.of(), null, DROPPED);
+		ConflictNote later = ConflictNote.ofFields(A_ID, null, List.of(), null, otherEdit);
+		List<UnitIndex.Entry> entries = List.of(entryWith(MIA, List.of(first, second), Set.of(),
+				List.of(notedWith(first, List.of(), earlier), notedWith(second, List.of(first), later))));
+
+		assertEquals(2, ConflictLedger.derive(entries, OWN, Set.of()).conflicts().size());
+	}
+
 	@Test
 	void unrelatedNotesBothStay() {
 		VersionId atSeat = vid(1_000, 1);
