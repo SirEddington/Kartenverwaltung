@@ -200,8 +200,10 @@ public class TicketTableController implements ContentController, SalesStateAware
 		TableInput.install(seatTable);
 		MenuItem sellItem = new MenuItem();
 		MenuItem assignItem = new MenuItem(ASSIGN_TEXT);
-		selectionMenu = new ContextMenu(sellItem, assignItem);
+		MenuItem cancelItem = new MenuItem();
+		selectionMenu = new ContextMenu(sellItem, assignItem, cancelItem);
 		sellItem.setOnAction(event -> sellSelection());
+		cancelItem.setOnAction(event -> cancelSelection());
 		// Das Menü schließt bei jeder Bedienung der Tabelle (wie in der Hallenübersicht). JavaFX schließt ein Menü nur bei
 		// einem unverarbeiteten Ereignis daneben; die Tabelle verarbeitet Klick und Mausrad selbst (Auswahl, Bearbeiten),
 		// deshalb blieb es sonst neben der bearbeiteten Zelle stehen. Der Rechtsklick schließt zuerst und öffnet danach neu.
@@ -210,7 +212,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 		// Das Menü zum Sammelverkauf gehört zu einer Zeile (nicht zur leeren Fläche) und gibt es nicht bei offenem Dialog
 		// (er würde sonst samt Eingaben ersetzt). Im Anzeigemodus sind die Einträge sichtbar, aber nicht ausführbar. Auf einer
 		// nicht gewählten Zeile gilt das Menü nur für diese Zeile, auf einer gewählten für die ganze Auswahl, wie im Explorer.
-		// "Platz zuweisen…" gibt es nur auf einer Buchung ohne Platz und gilt nur für sie.
+		// "Platz zuweisen…" gibt es nur auf einer Buchung ohne Platz und gilt nur für sie. "Stornieren" gilt wie der
+		// Sammelverkauf für die Auswahl und ist gesperrt, wenn keine gewählte Buchung Daten trägt.
 		seatTable.setRowFactory(table -> {
 			TableRow<BookingDTO> row = new TableRow<>() {
 				@Override
@@ -230,6 +233,9 @@ public class TicketTableController implements ContentController, SalesStateAware
 				}
 				sellItem.setDisable(!editMode);
 				sellItem.setText(SeatSelectionEditor.menuText(seatTable.getSelectionModel().getSelectedItems().size()));
+				List<Booking> chosen = selectedBookings();
+				cancelItem.setText(CancelAction.menuText(chosen.size()));
+				cancelItem.setDisable(!editMode || !CancelAction.anyWithData(chosen));
 				BookingDTO clicked = row.getItem();
 				assignItem.setVisible(clicked.getBooking().isUnassigned());
 				assignItem.setDisable(!editMode);
@@ -257,8 +263,20 @@ public class TicketTableController implements ContentController, SalesStateAware
 				Registration.onDetach(() -> EditingUnits.getInstance().end(seatTable)));
 	}
 
+	private List<Booking> selectedBookings() {
+		return seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
+	}
+
+	/** Storniert die gewählten Buchungen nach Rückfrage (KARV-121); stornierte ohne Platz verschwinden aus der Tabelle. */
+	private void cancelSelection() {
+		if (CancelAction.run(selectedBookings(), seatTable.getScene().getWindow())) {
+			seatTable.getSelectionModel().clearSelection();
+			showRows();
+		}
+	}
+
 	private void sellSelection() {
-		List<Booking> bookings = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
+		List<Booking> bookings = selectedBookings();
 		// Der Dialog kann eine Buchung ohne Platz leeren (Namen löschen): Sie ist dann storniert wie nach einer Zelle
 		activeDialog = SeatSelectionEditor.edit(bookings, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), () -> {
 			seatTable.refresh();
