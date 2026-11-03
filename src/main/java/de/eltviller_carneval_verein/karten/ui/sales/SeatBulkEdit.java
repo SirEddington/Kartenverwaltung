@@ -1,7 +1,10 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiConsumer;
@@ -37,26 +40,45 @@ public final class SeatBulkEdit {
 	private final Field<LocalDate> paymentDate;
 	private final Field<LocalDate> collectionDate;
 	private final List<Field<?>> fields;
+	/** Freie Buchungen mit Resten und ihr Stand ohne diese Reste (so zeigt sie der Dialog). */
+	private final Map<Booking, Booking> leftoverViews = new IdentityHashMap<>();
 
 	public SeatBulkEdit(List<Booking> bookings) {
 		this.bookings = List.copyOf(bookings);
+		for (Booking booking : this.bookings) {
+			if (booking.hasLeftovers()) {
+				Booking view = booking.copy();
+				view.clearLeftovers();
+				leftoverViews.put(booking, view);
+			}
+		}
 		lastName = text(Booking::getLastName, Booking::setLastName);
 		firstName = text(Booking::getFirstName, Booking::setFirstName);
-		paymentStatus = new Field<>(Booking::getPaymentStatus, Booking::setPaymentStatus, null);
+		paymentStatus = new Field<>(shown(Booking::getPaymentStatus), Booking::setPaymentStatus, null);
+		// Der Einzelpreis bleibt beim Verwerfen der Reste; der effektive Preis braucht die Vorstellung der Buchung selbst
 		price = new Field<>(Booking::getEffectivePrice, Booking::setEffectivePrice, null);
-		paidAmount = new Field<>(Booking::getPaidCents, Booking::setPaidAmount, null);
-		collected = new Field<>(Booking::isCollected, Booking::setCollected, null);
+		paidAmount = new Field<>(shown(Booking::getPaidCents), Booking::setPaidAmount, null);
+		collected = new Field<>(shown(Booking::isCollected), Booking::setCollected, null);
 		comment = text(Booking::getComment, Booking::setComment);
-		reservationDate = new Field<>(Booking::getReservationDate, Booking::setReservationDate, null);
-		paymentDate = new Field<>(Booking::getPaymentDate, Booking::setPaymentDate, null);
-		collectionDate = new Field<>(Booking::getCollectionDate, Booking::setCollectionDate, null);
+		reservationDate = new Field<>(shown(Booking::getReservationDate), Booking::setReservationDate, null);
+		paymentDate = new Field<>(shown(Booking::getPaymentDate), Booking::setPaymentDate, null);
+		collectionDate = new Field<>(shown(Booking::getCollectionDate), Booking::setCollectionDate, null);
 		fields = List.of(lastName, firstName, paymentStatus, price, paidAmount, collected, comment, reservationDate, paymentDate,
 				collectionDate);
 	}
 
 	/** Textfelder: Kein Text ({@code null}) und leerer Text gelten als gleicher Wert. */
 	private Field<String> text(Function<Booking, String> getter, BiConsumer<Booking, String> setter) {
-		return new Field<>(booking -> Objects.requireNonNullElse(getter.apply(booking), ""), setter, "");
+		Function<Booking, String> shownGetter = shown(getter);
+		return new Field<>(booking -> Objects.requireNonNullElse(shownGetter.apply(booking), ""), setter, "");
+	}
+
+	/**
+	 * Der Wert, den der Dialog zeigt: Bei einer freien Buchung mit Resten ({@link Booking#hasLeftovers()}) der Wert ohne
+	 * diese Reste, denn sie werden beim Übernehmen verworfen (KARV-121).
+	 */
+	private <T> Function<Booking, T> shown(Function<Booking, T> getter) {
+		return booking -> getter.apply(leftoverViews.getOrDefault(booking, booking));
 	}
 
 	public List<Booking> bookings() {
@@ -109,6 +131,29 @@ public final class SeatBulkEdit {
 		return collectionDate;
 	}
 
+	/**
+	 * Die Buchungen, deren Nachname durch das Übernehmen leer wird, die danach aber noch Daten trügen
+	 * ({@link Booking#hasData()}). Für sie fragt der Dialog vor dem Übernehmen, ob storniert werden soll (KARV-121).
+	 */
+	public List<Booking> nameRemovalsLeavingData() {
+		List<Booking> removals = new ArrayList<>();
+		for (Booking booking : bookings) {
+			if (isBlank(booking.getLastName())) {
+				continue;
+			}
+			Booking after = booking.copy();
+			fields.forEach(field -> field.applyTo(after));
+			if (isBlank(after.getLastName()) && after.hasData()) {
+				removals.add(booking);
+			}
+		}
+		return removals;
+	}
+
+	private static boolean isBlank(String text) {
+		return text == null || text.isBlank();
+	}
+
 	public boolean hasChanges() {
 		return fields.stream().anyMatch(Field::changed);
 	}
@@ -121,10 +166,14 @@ public final class SeatBulkEdit {
 	/**
 	 * Wie {@link #apply()}, mit einem festen "heute" (für Tests). Je Buchung laufen alle Felder in einem Schritt über
 	 * {@link SaleDates#change}: Wechselt eine Aktion von "nein" auf "ja" (Name, Zahlung, abgeholt), trägt es das Datum ein,
-	 * es sei denn, das Datum wird im selben Schritt geändert. Das gilt vor dem Tagesdatum.
+	 * es sei denn, das Datum wird im selben Schritt geändert. Das gilt vor dem Tagesdatum. Eine freie Buchung mit Resten
+	 * verliert diese zuerst ({@link Booking#clearLeftovers()}), wie der Dialog sie gezeigt hat.
 	 */
 	public void apply(LocalDate today) {
 		for (Booking booking : bookings) {
+			if (leftoverViews.containsKey(booking)) {
+				booking.clearLeftovers();
+			}
 			SaleDates.change(booking, target -> fields.forEach(field -> field.applyTo(target)), today);
 		}
 	}
