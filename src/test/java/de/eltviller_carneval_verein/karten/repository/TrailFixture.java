@@ -92,6 +92,14 @@ final class TrailFixture {
 				Instant.EPOCH, saveId, payload == null, payload, null, Map.of(), marks);
 	}
 
+	/** Eine Zusammenführung einer Auflösung auf diesen Vorgängern ({@code [Deren, Meine]}). */
+	Version merge(String machine, String saveId, List<Version> parents, ObjectNode payload) {
+		counter++;
+		return new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter),
+				parents.stream().map(Version::id).toList(), machine, "Kasse " + machine, "Bediener " + machine,
+				Instant.EPOCH, saveId, payload == null, payload, null, Map.of(), VersionMarks.RESOLUTION);
+	}
+
 	Version version(String machine, Version parent, ObjectNode payload, VersionMarks marks) {
 		return version(machine, "save-" + (counter + 1), parent, payload, marks);
 	}

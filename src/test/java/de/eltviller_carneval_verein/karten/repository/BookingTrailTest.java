@@ -387,6 +387,118 @@ class BookingTrailTest {
 		assertSame(c, trail.removal());
 	}
 
+	// --- Parkweg (KARV-98, Spec Abschnitt 3c)
+
+	/** A's Anna, Bs Bert auf s1; B verlor den Doppelverkauf, seine Auflösung R parkte Bert nach _m (P). */
+	private record Parked(Version bert, Version merge, Version parking) {
+	}
+
+	private Parked parked(String parkingSave) {
+		Version anna = world.claim(S1, world.version(OTHER, null, booking("t", "s1")));
+		Version bert = world.beside(S1, world.version(OWN, null, booking("m", "s1")));
+		Version merge = world.claim(S1, world.merge(OWN, "save-r", List.of(anna, bert), booking("t", "s1")));
+		Version parking = world.claim(M, world.version(OWN, parkingSave, null, withoutPlace("m", b -> {
+		}), VersionMarks.RESOLUTION.withMovedFrom(S1)));
+		return new Parked(bert, merge, parking);
+	}
+
+	/** B verschiebt Bert veraltet von s1 nach s4 (auf seinem alten Stand). */
+	private Version staleMoveToS4(Version bert) {
+		Version removal = world.beside(S1, world.version(OWN, "save-d", bert, null, to(S4)));
+		world.claim(S4, world.version(OWN, "save-d", null, booking("m", "s4"), from(S1)));
+		return removal;
+	}
+
+	@Test
+	void foreignEditOfTheParkedCopyIsKeptThere() {
+		Parked p = parked("save-r");
+		Version edit = world.claim(M, world.version(OTHER, p.parking(), withoutPlace("m", b -> b.setComment("A"))));
+		Version removal = staleMoveToS4(p.bert());
+		ConflictInput input = world.input(S1, p.bert(), List.of(removal));
+
+		BookingTrail foreign = BookingTrail.of(input, "m", S1, p.bert().id(), false);
+
+		assertEquals(Kind.KEPT, foreign.kind());
+		assertEquals(M, foreign.end());
+		assertSame(edit, foreign.last());
+		assertSame(p.parking(), foreign.after());
+		assertEquals(Kind.ARRIVED, BookingTrail.of(input, "m", S1, p.bert().id(), true).kind());
+	}
+
+	@Test
+	void foreignMoveOfTheParkedCopyArrivesOnTheSeat() {
+		Parked p = parked("save-r");
+		world.claim(M, world.version(OTHER, "save-a", p.parking(), null, to(S5)));
+		world.claim(S5, world.version(OTHER, "save-a", null, booking("m", "s5"), from(M)));
+		Version removal = staleMoveToS4(p.bert());
+
+		BookingTrail foreign = BookingTrail.of(world.input(S1, p.bert(), List.of(removal)), "m", S1, p.bert().id(), false);
+
+		assertEquals(Kind.ARRIVED, foreign.kind());
+		assertEquals(S5, foreign.end());
+	}
+
+	@Test
+	void foreignCancelOfTheParkedCopyIsACancellation() {
+		Parked p = parked("save-r");
+		world.claim(M, world.version(OTHER, p.parking(), null));
+		Version removal = staleMoveToS4(p.bert());
+
+		BookingTrail foreign = BookingTrail.of(world.input(S1, p.bert(), List.of(removal)), "m", S1, p.bert().id(), false);
+
+		assertEquals(Kind.CANCELLED, foreign.kind());
+	}
+
+	/** Ein Parken aus einem anderen Speichervorgang (etwa einem früheren Doppelverkauf) ist kein Parkweg. */
+	@Test
+	void parkingOfAnotherSaveIsIgnored() {
+		Parked p = parked("save-x");
+		world.claim(M, world.version(OTHER, p.parking(), withoutPlace("m", b -> b.setComment("A"))));
+		Version removal = staleMoveToS4(p.bert());
+
+		BookingTrail foreign = BookingTrail.of(world.input(S1, p.bert(), List.of(removal)), "m", S1, p.bert().id(), false);
+
+		assertEquals(Kind.UNTOUCHED, foreign.kind());
+	}
+
+	/** B stornierte veraltet an s1, bearbeitete dann aber die geparkte Kopie: Diese Absicht gilt. */
+	@Test
+	void ownEditOfTheCopyBeatsTheOwnStaleCancellation() {
+		Parked p = parked("save-r");
+		Version edit = world.claim(M, world.version(OWN, p.parking(), withoutPlace("m", b -> b.setComment("B"))));
+		Version cancel = world.beside(S1, world.version(OWN, "save-d", p.bert(), null, VersionMarks.NONE));
+
+		BookingTrail own = BookingTrail.of(world.input(S1, p.bert(), List.of(cancel)), "m", S1, p.bert().id(), true);
+
+		assertEquals(Kind.KEPT, own.kind());
+		assertEquals(M, own.end());
+		assertSame(edit, own.last());
+	}
+
+	/** Haben beide Seiten die Kopie angefasst, liegt ihr Konflikt an _m: An der Quelle entscheidet niemand. */
+	@Test
+	void bothOnTheParkingPathDecideNothingAtTheSource() {
+		Parked p = parked("save-r");
+		Version ownEdit = world.claim(M, world.version(OWN, p.parking(), withoutPlace("m", b -> b.setComment("B"))));
+		world.claim(M, world.version(OTHER, ownEdit, withoutPlace("m", b -> b.setComment("A"))));
+		Version cancel = world.beside(S1, world.version(OWN, "save-d", p.bert(), null, VersionMarks.NONE));
+		ConflictInput input = world.input(S1, p.bert(), List.of(cancel));
+
+		assertEquals(Kind.UNTOUCHED, BookingTrail.of(input, "m", S1, p.bert().id(), true).kind());
+		assertEquals(Kind.UNTOUCHED, BookingTrail.of(input, "m", S1, p.bert().id(), false).kind());
+	}
+
+	/** Niemand hat die Kopie angefasst: Es bleibt bei den Absichten an der Quelle (dann greift E13). */
+	@Test
+	void untouchedCopyLeavesTheSourceIntent() {
+		Parked p = parked("save-r");
+		Version removal = staleMoveToS4(p.bert());
+		ConflictInput input = world.input(S1, p.bert(), List.of(removal));
+
+		assertEquals(Kind.ARRIVED, BookingTrail.of(input, "m", S1, p.bert().id(), true).kind());
+		assertEquals(Kind.UNTOUCHED, BookingTrail.of(input, "m", S1, p.bert().id(), false).kind());
+	}
+
 	@Test
 	void youngestOfSeveralResolutionsCounts() {
 		Version bd = world.claim(M, world.version(OWN, base, null, to(S1)));

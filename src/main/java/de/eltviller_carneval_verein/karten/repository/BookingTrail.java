@@ -84,6 +84,24 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 			return UNTOUCHED;
 		}
 		List<Version> known = known(input, unit);
+		Version parking = parkingOf(input, bookingId, source, known, baseId);
+		if (parking != null) {
+			// Parkweg (KARV-98, Spec 3c): Was eine Seite an der geparkten Kopie tat, kam informiert und danach
+			TrailUnit parked = input.trail().get(parkedUnit(source, bookingId));
+			List<Version> mineThere = afterParking(input, parked, parking, true);
+			List<Version> theirsThere = afterParking(input, parked, parking, false);
+			if (!mineThere.isEmpty() && !theirsThere.isEmpty()) {
+				// ihr Konflikt liegt an der Kopie und wird dort aufgelöst
+				return UNTOUCHED;
+			}
+			List<Version> there = own ? mineThere : theirsThere;
+			if (!there.isEmpty()) {
+				List<Version> parkedKnown = parked.versions();
+				BookingTrail trail = own ? of(input, bookingId, parked.unit(), there, parkedKnown)
+						: foreignIntent(input, bookingId, parked.unit(), there, parked, parkedKnown);
+				return trail.withAfter(parking);
+			}
+		}
 		List<Version> side = sideVersions(input, known, unit.unit(), baseId, own);
 		Version after = informedBase(known, side, baseId);
 		if (after != null) {
@@ -97,6 +115,56 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 		return after != null && decisive != null && ancestors(known, decisive.id()).contains(after.id())
 				? trail.withAfter(after)
 				: trail;
+	}
+
+	/** Die Einheit "ohne Platz" der Buchung in der Vorstellung der Quelle. */
+	private static UnitKey parkedUnit(UnitKey source, String bookingId) {
+		return UnitKey.unassignedBooking(source.eventId(), source.presentationId(), bookingId);
+	}
+
+	/**
+	 * Die Version, mit der eine Auflösung die Buchung von der Quelle nach {@code _<ID>} geparkt hat (KARV-98, Spec 3c): in
+	 * der Kette dort, {@code resolution} mit {@code movedFrom} = Quelle, trägt die Buchung, und aus demselben
+	 * Speichervorgang wie eine Auflösung in der Kette der Quelle seit der Basis (ein früheres Parken zählt nicht). Die
+	 * jüngste solche; {@code null}, wenn keine.
+	 */
+	private static Version parkingOf(ConflictInput input, String bookingId, UnitKey source, List<Version> known,
+			VersionId baseId) {
+		UnitKey parkedKey = parkedUnit(source, bookingId);
+		TrailUnit parked = parkedKey.equals(source) ? null : input.trail().get(parkedKey);
+		TrailUnit at = input.trail().get(source);
+		if (parked == null || at == null) {
+			return null;
+		}
+		Set<VersionId> sinceBase = baseId == null ? null : descendants(known, baseId);
+		Set<String> saves = new HashSet<>();
+		for (Version link : at.chain()) {
+			if (link.marks().resolution() && link.saveId() != null
+					&& (sinceBase == null || sinceBase.contains(link.id()))) {
+				saves.add(link.saveId());
+			}
+		}
+		Version found = null;
+		for (Version link : parked.chain()) {
+			if (link.marks().resolution() && source.equals(link.marks().movedFrom()) && carries(link, bookingId)
+					&& saves.contains(link.saveId())) {
+				found = link;
+			}
+		}
+		return found;
+	}
+
+	/** Die Nutzer-Versionen einer Seite an der geparkten Kopie, die die Parkversion über ihre Vorgänger enthalten. */
+	private static List<Version> afterParking(ConflictInput input, TrailUnit parked, Version parking, boolean own) {
+		Set<VersionId> after = descendants(parked.versions(), parking.id());
+		List<Version> side = new ArrayList<>();
+		for (Version version : userVersions(parked.versions(), parked.unit())) {
+			if (input.ownMachineId().equals(version.machine()) == own && after.contains(version.id())) {
+				side.add(version);
+			}
+		}
+		side.sort(Comparator.comparing(Version::id));
+		return side;
 	}
 
 	/**
