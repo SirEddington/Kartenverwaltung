@@ -1225,6 +1225,23 @@ class ConflictLedgerTest {
 		assertEquals(2, ConflictLedger.derive(entries, OWN, Set.of()).conflicts().size());
 	}
 
+	/**
+	 * Aus dem abschließenden Review: Zwei Feldkonflikte zum selben Stand, deren {@code moved} jeweils die Einheit des
+	 * anderen nennt, verdecken sich nicht gegenseitig: Beide bleiben.
+	 */
+	@Test
+	void notesPointingAtEachOtherDoNotHideEachOther() {
+		VersionId atSeat = vid(1_000, 1);
+		VersionId atMia = vid(2_000, 2);
+		List<UnitIndex.Entry> entries = List.of(
+				entryWith(SEAT, List.of(atSeat), Set.of(),
+						List.of(notedWith(atSeat, List.of(), ConflictNote.ofFields(A_ID, null, List.of(), MIA, DROPPED)))),
+				entryWith(MIA, List.of(atMia), Set.of(),
+						List.of(notedWith(atMia, List.of(), ConflictNote.ofFields(A_ID, null, List.of(), SEAT, DROPPED)))));
+
+		assertEquals(2, ConflictLedger.derive(entries, OWN, Set.of()).conflicts().size());
+	}
+
 	/** Zwei Feldkonflikte nacheinander in derselben Einheit sind zwei verlorene Werte: beide bleiben. */
 	@Test
 	void fieldsNotesWithDifferentDroppedVersionsBothStay() {

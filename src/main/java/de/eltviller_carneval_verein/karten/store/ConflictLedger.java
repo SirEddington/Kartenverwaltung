@@ -142,8 +142,9 @@ final class ConflictLedger {
 	private static List<Candidate> withoutSuperseded(List<Candidate> candidates) {
 		List<Candidate> kept = new ArrayList<>();
 		for (Candidate candidate : candidates) {
-			if (candidate.noted().note().dropped() == null
-					|| candidates.stream().noneMatch(other -> other != candidate && supersedes(other, candidate))) {
+			// zwei, die sich gegenseitig verdrängten, bleiben beide
+			if (candidate.noted().note().dropped() == null || candidates.stream().noneMatch(
+					other -> other != candidate && supersedes(other, candidate) && !supersedes(candidate, other))) {
 				kept.add(candidate);
 			}
 		}

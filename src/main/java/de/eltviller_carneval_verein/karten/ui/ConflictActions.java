@@ -838,7 +838,6 @@ public final class ConflictActions {
 		return droppedOn(unassigned, note);
 	}
 
-	/** Die weichende Version des Vermerks auf einer der Einheiten: erst aus dem Merker, dann aus dem lokalen Bestand. */
 	/**
 	 * Die Einheit "ohne Platz" der Buchung, die das Modell auf diesem Sitz hat; {@code null} ohne eine solche (oder wenn
 	 * sich das Event nicht zerlegen lässt).
@@ -848,13 +847,14 @@ public final class ConflictActions {
 			return null;
 		}
 		try {
-			String bookingId = ConflictInput.bookingIdOf(events.payloadOf(seat));
+			String bookingId = ConflictInput.bookingIdOf(payloadOf(seat));
 			return bookingId == null ? null : UnitKey.unassignedBooking(seat.eventId(), seat.presentationId(), bookingId);
 		} catch (IllegalStateException e) {
 			return null;
 		}
 	}
 
+	/** Die weichende Version des Vermerks auf einer der Einheiten: erst aus dem Merker, dann aus dem lokalen Bestand. */
 	private Version droppedOn(Set<UnitKey> candidates, ConflictNote note) {
 		for (UnitKey unit : candidates) {
 			Version known = dropped.get(new VersionRef(unit, note.dropped()));
