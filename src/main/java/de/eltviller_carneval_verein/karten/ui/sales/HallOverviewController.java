@@ -270,8 +270,12 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		}
 		MenuItem sellItem = new MenuItem(SeatSelectionEditor.menuText(selectedBookings.contains(booking) ? selectedBookings.size() : 1));
 		sellItem.setDisable(!editMode);
-		selectionMenu = new ContextMenu(sellItem);
+		// Stornieren gilt für dieselbe Auswahl wie der Verkauf (KARV-121); gesperrt, wenn keine gewählte Buchung Daten trägt
+		MenuItem cancelItem = new MenuItem();
+		CancelAction.prepare(cancelItem, selectedBookings.contains(booking) ? List.copyOf(selectedBookings) : List.of(booking), editMode);
+		selectionMenu = new ContextMenu(sellItem, cancelItem);
 		sellItem.setOnAction(action -> sellSelection(selectionMenu.getAnchorX(), selectionMenu.getAnchorY()));
+		cancelItem.setOnAction(action -> cancelSelection());
 		selectionMenu.show(viewportPane, event.getScreenX(), event.getScreenY());
 	}
 
@@ -286,6 +290,14 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		});
 		if (dialog != null) {
 			activePopup = dialog.popup();
+		}
+	}
+
+	private void cancelSelection() {
+		closePopup();
+		if (CancelAction.run(List.copyOf(selectedBookings), viewportPane.getScene().getWindow())) {
+			selectedBookings.clear();
+			renderHall();
 		}
 	}
 

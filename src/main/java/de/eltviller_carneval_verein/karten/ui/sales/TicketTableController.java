@@ -12,6 +12,7 @@ import java.util.Set;
 import org.controlsfx.control.table.TableFilter;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingCancellation;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
@@ -200,8 +201,10 @@ public class TicketTableController implements ContentController, SalesStateAware
 		TableInput.install(seatTable);
 		MenuItem sellItem = new MenuItem();
 		MenuItem assignItem = new MenuItem(ASSIGN_TEXT);
-		selectionMenu = new ContextMenu(sellItem, assignItem);
+		MenuItem cancelItem = new MenuItem();
+		selectionMenu = new ContextMenu(sellItem, assignItem, cancelItem);
 		sellItem.setOnAction(event -> sellSelection());
+		cancelItem.setOnAction(event -> cancelSelection());
 		// Das Menü schließt bei jeder Bedienung der Tabelle (wie in der Hallenübersicht). JavaFX schließt ein Menü nur bei
 		// einem unverarbeiteten Ereignis daneben; die Tabelle verarbeitet Klick und Mausrad selbst (Auswahl, Bearbeiten),
 		// deshalb blieb es sonst neben der bearbeiteten Zelle stehen. Der Rechtsklick schließt zuerst und öffnet danach neu.
@@ -210,7 +213,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 		// Das Menü zum Sammelverkauf gehört zu einer Zeile (nicht zur leeren Fläche) und gibt es nicht bei offenem Dialog
 		// (er würde sonst samt Eingaben ersetzt). Im Anzeigemodus sind die Einträge sichtbar, aber nicht ausführbar. Auf einer
 		// nicht gewählten Zeile gilt das Menü nur für diese Zeile, auf einer gewählten für die ganze Auswahl, wie im Explorer.
-		// "Platz zuweisen…" gibt es nur auf einer Buchung ohne Platz und gilt nur für sie.
+		// "Platz zuweisen…" gibt es nur auf einer Buchung ohne Platz und gilt nur für sie. "Stornieren" gilt wie der
+		// Sammelverkauf für die Auswahl und ist gesperrt, wenn keine gewählte Buchung Daten trägt.
 		seatTable.setRowFactory(table -> {
 			TableRow<BookingDTO> row = new TableRow<>() {
 				@Override
@@ -230,6 +234,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 				}
 				sellItem.setDisable(!editMode);
 				sellItem.setText(SeatSelectionEditor.menuText(seatTable.getSelectionModel().getSelectedItems().size()));
+				CancelAction.prepare(cancelItem, selectedBookings(), editMode);
 				BookingDTO clicked = row.getItem();
 				assignItem.setVisible(clicked.getBooking().isUnassigned());
 				assignItem.setDisable(!editMode);
@@ -257,11 +262,27 @@ public class TicketTableController implements ContentController, SalesStateAware
 				Registration.onDetach(() -> EditingUnits.getInstance().end(seatTable)));
 	}
 
+	private List<Booking> selectedBookings() {
+		return seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
+	}
+
+	/** Storniert die gewählten Buchungen nach Rückfrage (KARV-121); stornierte ohne Platz verschwinden aus der Tabelle. */
+	private void cancelSelection() {
+		// Eine laufende Bearbeitung endet zuerst (die Zelle übernimmt ihre Eingabe): Eine stornierte Buchung ohne Platz
+		// verschwindet sofort, eine Eingabe ginge sonst in eine Buchung, die es nicht mehr gibt
+		seatTable.edit(-1, null);
+		if (CancelAction.run(selectedBookings(), seatTable.getScene().getWindow())) {
+			seatTable.getSelectionModel().clearSelection();
+			showRows();
+		}
+	}
+
 	private void sellSelection() {
-		List<Booking> bookings = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
+		List<Booking> bookings = selectedBookings();
 		// Der Dialog kann eine Buchung ohne Platz leeren (Namen löschen): Sie ist dann storniert wie nach einer Zelle
 		activeDialog = SeatSelectionEditor.edit(bookings, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), () -> {
-			seatTable.refresh();
+			// Neu aufbauen statt nur neu zeichnen: Ein Storno im Dialog nimmt Buchungen ohne Platz schon aus der Vorstellung
+			showRows();
 			bookings.forEach(this::removeIfCancelledAfterCommit);
 		}, this::deselect);
 	}
@@ -399,9 +420,16 @@ public class TicketTableController implements ContentController, SalesStateAware
 		// Name, Zahlung und "Abgeholt" über SaleDates: Wird eine Aktion neu gesetzt, trägt es das Datum ein; die Tabelle zeichnet
 		// sich danach neu, weil dabei ein Datum in einer anderen Spalte entsteht
 		colLastName.setOnEditCommit(editEvent -> {
-			SaleDates.change(editEvent.getRowValue().getBooking(), booking -> booking.setLastName(editEvent.getNewValue()));
-			refreshAfterCommit();
-			removeIfCancelledAfterCommit(editEvent.getRowValue().getBooking());
+			Booking edited = editEvent.getRowValue().getBooking();
+			String newLastName = editEvent.getNewValue();
+			Booking after = BookingCancellation.withLastName(edited, newLastName);
+			if (BookingCancellation.leavesData(edited, after)) {
+				// Die Rückfrage erst nach dem Commit: Die Tabelle kann ihn auch im Layout auslösen (Ende des Bearbeitens), und
+				// dort ist ein modaler Dialog verboten. Bis zur Antwort bleibt das Modell unverändert
+				Platform.runLater(() -> applyNameRemoval(edited, newLastName, after));
+				return;
+			}
+			applyLastName(edited, newLastName);
 		});
 
 		colFirstName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
@@ -474,6 +502,29 @@ public class TicketTableController implements ContentController, SalesStateAware
 		// Nur lesbar: Rollstuhlplatz (gehört zur Bestuhlung) und Reserviert (folgt aus dem Namen)
 		colWheelchair.setCellFactory(CheckBoxTableCell.forTableColumn(colWheelchair));
 		colReserved.setCellFactory(CheckBoxTableCell.forTableColumn(colReserved));
+	}
+
+	private void applyLastName(Booking booking, String newLastName) {
+		SaleDates.change(booking, target -> target.setLastName(newLastName));
+		refreshAfterCommit();
+		removeIfCancelledAfterCommit(booking);
+	}
+
+	/**
+	 * Der Nachname wurde geleert, die Buchung trüge ohne ihn noch Daten: Fragt, ob sie storniert werden soll (KARV-121), und
+	 * übernimmt erst dann. So schreibt "sofort speichern" den gelöschten Namen nicht vorher.
+	 */
+	private void applyNameRemoval(Booking booking, String newLastName, Booking remaining) {
+		switch (NameRemovalDialog.ask(List.of(remaining), seatTable.getScene().getWindow())) {
+		case ABORT -> refreshAfterCommit(); // die Zelle zeigt sonst den leeren Text, den sie beim Commit übernommen hat
+		case CANCEL_BOOKINGS -> {
+			// Bearbeitet nach Tab schon die nächste Zelle, endet das zuerst: Eine Buchung ohne Platz verschwindet sofort
+			seatTable.edit(-1, null);
+			BookingCancellation.cancel(List.of(booking));
+			showRows();
+		}
+		case NAME_ONLY -> applyLastName(booking, newLastName);
+		}
 	}
 
 	/**
@@ -570,7 +621,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 	 */
 	private void showRows() {
 		List<BookingDTO> rows = buildRows();
-		List<Booking> selection = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
+		List<Booking> selection = selectedBookings();
 		if (sameBookings(masterData, rows)) {
 			// Dieselben Buchungen mit fremden Daten: Die Suche prüft sie neu (ein fremder Name kann jetzt passen oder nicht mehr)
 			if (!searchQuery.isBlank()) {
@@ -640,7 +691,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 	@Override
 	public void setSalesState(SalesViewState state) {
 		seatTable.getSelectionModel().getSelectedItems().addListener((ListChangeListener<BookingDTO>) change -> {
-			state.replaceSelection(seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList());
+			state.replaceSelection(selectedBookings());
 		});
 	}
 

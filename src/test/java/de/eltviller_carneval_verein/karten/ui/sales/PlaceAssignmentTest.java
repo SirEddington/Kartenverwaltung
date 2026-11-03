@@ -13,6 +13,7 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
@@ -56,6 +57,23 @@ class PlaceAssignmentTest {
 		assertEquals(List.of(a1s1, a2s2, b1s1), PlaceAssignment.freeSeats(presentation, plan));
 		assertFalse(PlaceAssignment.isFree(presentation, a2s1));
 		assertTrue(PlaceAssignment.isFree(presentation, a1s1), "wie bei freeSeats belegt ein Einzelpreis nicht");
+	}
+
+	/** KARV-121: Frei heißt wie in der Saalansicht ohne Nachnamen und nicht bezahlt; Reste einer alten Buchung belegen nicht. */
+	@Test
+	void aSeatWithLeftoversIsFreeButAPaidOneWithoutNameIsTaken() {
+		Table table = plan.addTable(row("A"));
+		Seat leftovers = table.addSeat(1);
+		Seat paid = table.addSeat(2);
+		presentation.setSeatingPlanId(plan.getId());
+		BookingSync.sync(presentation, plan);
+		bookingOf(leftovers).setComment("storniert");
+		bookingOf(leftovers).setFirstName("Anna");
+		bookingOf(paid).setPaymentStatus(PaymentStatus.CASH);
+
+		assertEquals(List.of(leftovers), PlaceAssignment.freeSeats(presentation, plan));
+		assertTrue(PlaceAssignment.isFree(presentation, leftovers));
+		assertFalse(PlaceAssignment.isFree(presentation, paid));
 	}
 
 	@Test
