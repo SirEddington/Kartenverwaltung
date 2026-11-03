@@ -23,6 +23,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.store.VersionMarks;
 
 /**
  * Die Fachregel für Buchungen (Sitz-Einheit oder {@code _<ID>}). Die Regeln gelten in dieser Reihenfolge:
@@ -175,6 +176,10 @@ public final class BookingPolicy implements ConflictPolicy {
 			BookingFate fate = entry.getValue();
 			if (fate.carrier() != null && !unit.equals(fate.carrier()) && fate.content() != null) {
 				Change content = contentChange(input, fate.carrier(), fate.content());
+				if (content != null && fate.carrier().isUnassigned() && !fate.carrier().equals(fate.source())) {
+					// geparkt (E9 ohne freie Quelle, E10, E11): das Parken nennt seine Quelle (KARV-98)
+					content = content.withMarks(VersionMarks.NONE.withMovedFrom(fate.source()));
+				}
 				if (content != null) {
 					extra.add(content);
 				}
@@ -642,7 +647,9 @@ public final class BookingPolicy implements ConflictPolicy {
 		Party other = Party.of(introducerOf(input, idOf(theirs), theirs));
 		Sibling existing = input.siblings().get(moved);
 		UnitSnapshot current = existing == null ? null : existing.snapshot();
-		List<Change> extra = current != null && current.isLive() ? List.of() : List.of(withoutPlace(mine, moved, current));
+		// das Parken nennt seine Quelle (KARV-98): Eine spätere Auflösung an der Quelle findet den Parkweg
+		List<Change> extra = current != null && current.isLive() ? List.of()
+				: List.of(withoutPlace(mine, moved, current).withMarks(VersionMarks.NONE.withMovedFrom(unit)));
 
 		ConflictNote note = ConflictNote.doubleSale(input.ownMachineId(), other, moved,
 				FieldMerge.slice(mine.payload(), PLACE), mine.id());

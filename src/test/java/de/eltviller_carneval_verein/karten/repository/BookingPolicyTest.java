@@ -1460,6 +1460,66 @@ class BookingPolicyTest {
 		assertNull(resolution.note(), "kein Feldkonflikt gegen sich selbst");
 	}
 
+	// Parken nennt seine Quelle (KARV-98, Spec Abschnitt 3a) -->
+
+	/** Die Zusatz-Änderung an der Einheit, oder {@code null}. */
+	private static Change extraAt(Resolution resolution, UnitKey unit) {
+		return resolution.extra().stream().filter(change -> change.unit().equals(unit)).findFirst().orElse(null);
+	}
+
+	/** Regel 3: Zwei Erstverkäufe auf s1; "Meine" weicht nach {@code _m} und nennt s1 als Quelle. */
+	@Test
+	void doubleSaleParksWithMovedFrom() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		world.claim(s1, world.version(TrailFixture.OTHER, null, TrailFixture.booking("t", "s1")));
+		Version mine = world.beside(s1, world.version(TrailFixture.OWN, null, TrailFixture.booking("m", "s1")));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, null, List.of(mine)));
+
+		Change parked = extraAt(resolution, TrailFixture.unassigned("m"));
+		assertEquals(s1, parked.marks().movedFrom());
+	}
+
+	/** E11: Bs Umzug von s3 nach s1 scheitert an t, die andere Seite ist unberührt; m parkt mit Quelle s3. */
+	@Test
+	void aloneFailedParksWithMovedFromTheSource() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		UnitKey s3 = TrailFixture.seat("s3");
+		Version seated = world.claim(s3, world.version(TrailFixture.THIRD, null, TrailFixture.booking("m", "s3")));
+		world.claim(s3, world.version(TrailFixture.OWN, "save-b", seated, null, TrailFixture.to(s1)));
+		world.claim(s1, world.version(TrailFixture.OTHER, null, TrailFixture.booking("t", "s1")));
+		Version arrival = world.beside(s1, world.version(TrailFixture.OWN, "save-b", null, TrailFixture.booking("m", "s1"),
+				TrailFixture.from(s3)));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, null, List.of(arrival)));
+
+		Change parked = extraAt(resolution, TrailFixture.unassigned("m"));
+		assertEquals(s3, parked.marks().movedFrom());
+	}
+
+	/** E9 mit freier Quelle: Die Buchung kommt an ihre Quelle zurück, ohne Umzugsangabe. */
+	@Test
+	void freeSourceRevivalHasNoMovedFrom() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		UnitKey s3 = TrailFixture.seat("s3");
+		Version seated = world.claim(s3, world.version(TrailFixture.THIRD, null, TrailFixture.booking("m", "s3")));
+		world.claim(s3, world.version(TrailFixture.OWN, "save-b", seated, null, TrailFixture.to(s1)));
+		world.beside(s3, world.version(TrailFixture.OTHER, seated, TrailFixture.booking("m", "s3",
+				x -> x.setPaymentStatus(PaymentStatus.CARD))));
+		world.claim(s1, world.version(TrailFixture.OTHER, null, TrailFixture.booking("t", "s1")));
+		Version arrival = world.beside(s1, world.version(TrailFixture.OWN, "save-b", null, TrailFixture.booking("m", "s1"),
+				TrailFixture.from(s3)));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, null, List.of(arrival)));
+
+		Change revived = extraAt(resolution, s3);
+		assertEquals(null, revived.marks().movedFrom());
+		assertNull(extraAt(resolution, TrailFixture.unassigned("m")));
+	}
+
 	/**
 	 * 1b ohne Absenkung (benannte Verhaltensänderung): Ein fremder Umzug scheiterte, E9 belebte die Quelle wieder (R), ein
 	 * anderer Rechner bearbeitete die Buchung dort (F). Ein eigener veralteter Stand verliert dagegen: Fs Änderung bleibt.

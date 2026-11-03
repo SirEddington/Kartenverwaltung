@@ -33,4 +33,9 @@ public record VersionMarks(UnitKey movedTo, UnitKey movedFrom, boolean resolutio
 	public VersionMarks withMovedFrom(UnitKey source) {
 		return new VersionMarks(movedTo, source, resolution);
 	}
+
+	/** Dieselben Angaben, geschrieben von einer Auflösung. */
+	public VersionMarks withResolution() {
+		return new VersionMarks(movedTo, movedFrom, true);
+	}
 }

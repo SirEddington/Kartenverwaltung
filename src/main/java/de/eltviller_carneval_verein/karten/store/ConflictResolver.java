@@ -557,8 +557,8 @@ final class ConflictResolver {
 	/**
 	 * Die zu schreibenden Änderungen: zuerst die weiteren, die noch nicht da sind (eine Wiederholung nach einem Absturz legt
 	 * eine weitere Einheit nicht doppelt an), dann die Zusammenführung {@code [Deren, Meine]}. Alle tragen
-	 * {@link VersionMarks#RESOLUTION} und keine Umzugsangaben: Was eine Auflösung schreibt, ist keine Absicht eines
-	 * Rechners (KARV-93). Jeder Vermerk bekommt den
+	 * {@code resolution}: Was eine Auflösung schreibt, ist keine Absicht eines Rechners (KARV-93). Die Zusammenführung hat
+	 * keine Umzugsangaben; eine weitere Änderung behält ihre (KARV-98: das Parken nennt seine Quelle). Jeder Vermerk bekommt den
 	 * Speichervorgang von "Meine" ({@link ConflictNote#lostSave()}): Die Zusammenführungen bekommen je Strecke einen neuen,
 	 * die Konflikte eines verlorenen Speichervorgangs gehören im Dialog aber zusammen.
 	 */
@@ -569,7 +569,7 @@ final class ConflictResolver {
 			if (!alreadyThere(extra)) {
 				changes.add(new Change(extra.unit(), extra.parents(), extra.payload(), extra.deleted(),
 						extra.note() == null ? null : extra.note().withLostSave(lostSave), extra.seen(),
-						VersionMarks.RESOLUTION));
+						extra.marks().withResolution()));
 			}
 		}
 		ConflictNote note = resolution.note() == null ? null : resolution.note().withLostSave(lostSave);

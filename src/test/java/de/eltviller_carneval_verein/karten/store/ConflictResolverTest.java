@@ -324,9 +324,12 @@ class ConflictResolverTest {
 		assertEquals(1, policy.inputs.size());
 	}
 
-	/** KARV-93: Was die Auflösung schreibt, trägt {@code resolution} und keine Umzugsangaben. */
+	/**
+	 * KARV-93: Was die Auflösung schreibt, trägt {@code resolution}. Die Zusammenführung hat keine Umzugsangaben; eine
+	 * Zusatz-Änderung behält ihre (KARV-98: das Parken nennt seine Quelle).
+	 */
 	@Test
-	void resolutionMarksEveryWrite() throws IOException {
+	void extraChangeKeepsItsMarksAndGetsResolution() throws IOException {
 		Path appData = dir.resolve("app");
 		SyncService service = single(appData);
 		RecordingPolicy policy = new RecordingPolicy();
@@ -338,7 +341,7 @@ class ConflictResolverTest {
 		service.tick();
 
 		assertEquals(VersionMarks.RESOLUTION, service.unitState(BOOKING).head().marks());
-		assertEquals(VersionMarks.RESOLUTION, service.unitState(MOVED).head().marks());
+		assertEquals(new VersionMarks(null, BOOKING, true), service.unitState(MOVED).head().marks());
 	}
 
 	/** KARV-93: Die Strategie bekommt die ganze Strecke und die Ordner der Einheiten auf der Umzugsspur. */

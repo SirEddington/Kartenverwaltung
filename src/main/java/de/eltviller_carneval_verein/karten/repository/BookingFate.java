@@ -25,8 +25,10 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
  * @param deletions Träger auf der Spur, die die Buchung danach nicht mehr tragen
  * @param notes     die Vermerke, je mit der Einheit, deren Auflösung ihn schreibt; ein Vermerk ohne Gegenseite
  *                  ({@code other} = {@code null}) bekommt sie dort von der Anwendung (der Gewinner am Ziel)
+ * @param source    die Quelle, an der entschieden wurde; ein Träger {@code _<ID>}, der nicht die Quelle ist, nennt sie
+ *                  als Herkunft (KARV-98, das Parken)
  */
-record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions, List<Placed> notes) {
+record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions, List<Placed> notes, UnitKey source) {
 
 	/** Ein Vermerk und die Einheit, deren Auflösung ihn schreibt. */
 	record Placed(ConflictNote note, UnitKey writtenAt) {
@@ -35,6 +37,11 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 	BookingFate {
 		deletions = List.copyOf(deletions);
 		notes = List.copyOf(notes);
+	}
+
+	/** Eine Entscheidung, deren Quelle {@link #decide} ergänzt. */
+	BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions, List<Placed> notes) {
+		this(carrier, content, deletions, notes, null);
 	}
 
 	/**
@@ -57,7 +64,8 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		Side mine = new Side(own, ownMachineId);
 		Side theirs = new Side(foreign, machineOf(foreign));
 		Decider decider = new Decider(bookingId, source, base, sourceFree, parked);
-		return decider.decide(mine, theirs, ownWinsSource);
+		BookingFate fate = decider.decide(mine, theirs, ownWinsSource);
+		return fate == null ? null : new BookingFate(fate.carrier(), fate.content(), fate.deletions(), fate.notes(), source);
 	}
 
 	/** Die Version, die für eine Seite steht: ihr Wegfall, sonst ihre jüngste; {@code null} bei einer unberührten. */
