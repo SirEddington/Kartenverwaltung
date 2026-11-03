@@ -791,6 +791,118 @@ class ConflictResolverTest {
 		assertEquals(List.of(winner.id(), mine.id()), appended.get(0).get(0).parents());
 	}
 
+	/**
+	 * KARV-123: Die fremde Gewinnerin räumt die Einheit mit {@code movedTo}, ihre Ankunft am Ziel liegt lokal aber noch
+	 * nicht vor (die Dateien ihres Speichervorgangs kommen verspätet). Die Auflösung wartet darauf, auch über
+	 * {@link ConflictResolver#LIST_WAIT} hinaus: Ohne die Ankunft hielte die Umzugsspur den Umzug für gescheitert, und die
+	 * Buchung lebte danach doppelt.
+	 */
+	@Test
+	void foreignMoveWaitsForItsArrivalAtTheTarget() throws IOException {
+		String current = "jetzt123aaaaaaaaaaaaaaaaaa";
+		Ownership own = new Ownership(current, List.of());
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		long now = clock.instant().toEpochMilli();
+		Version base = version(VersionId.create(now - 3000, FOREIGN, 0), List.of(), FOREIGN, "s1", false, name("Anna"),
+				VersionMarks.NONE);
+		Version removal = version(VersionId.create(now - 2000, FOREIGN, 1), List.of(base.id()), FOREIGN, "s2", true, null,
+				VersionMarks.NONE.withMovedTo(OTHER_SEAT));
+		Version mine = version(VersionId.create(now - 1000, current, 0), List.of(base.id()), current, "s3", false,
+				name("Carla"), VersionMarks.NONE);
+		store(store, arbiter, BOOKING, base, true);
+		store(store, arbiter, BOOKING, removal, true);
+		store(store, arbiter, BOOKING, mine, false);
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = new ConflictResolver(storeHost(store, own, appended),
+				new SyncNotifier(Runnable::run, true), clock);
+		resolver.setPolicy(UnitType.BOOKING, new RecordingPolicy());
+		resolver.enqueue(BOOKING);
+		clock.advance(ConflictResolver.LIST_WAIT.plusMinutes(1));
+
+		resolver.resolvePending(10);
+
+		assertEquals(List.of(), appended, "wartet auf die Ankunft am Ziel");
+
+		// die Ankunft aus demselben Speichervorgang trifft ein
+		Version arrival = version(VersionId.create(now - 1999, FOREIGN, 2), List.of(), FOREIGN, "s2", false, name("Anna"),
+				VersionMarks.NONE.withMovedFrom(BOOKING));
+		store(store, arbiter, OTHER_SEAT, arrival, true);
+		resolver.resolvePending(10);
+
+		assertEquals(1, appended.size(), "jetzt zusammengeführt");
+		List<Change> merge = appended.get(0);
+		assertEquals(List.of(removal.id(), mine.id()), merge.get(merge.size() - 1).parents());
+	}
+
+	private Version version(VersionId id, List<VersionId> parents, String machine, String saveId, boolean deleted,
+			ObjectNode payload, VersionMarks marks) {
+		return new Version(StoreCodec.FORMAT, id, parents, machine, "Kasse", null, clock.instant(), saveId, deleted, payload,
+				null, Map.of(), marks);
+	}
+
+	/** Schreibt die Version in den lokalen Bestand, mit {@code claimed} auch ihren Anspruch. */
+	private static void store(VersionStore store, LocalArbiter arbiter, UnitKey unit, Version version, boolean claimed)
+			throws IOException {
+		byte[] bytes = StoreCodec.write(version);
+		assertTrue(store.writeVersion(unit, version.id(), bytes));
+		if (claimed) {
+			assertTrue(arbiter.claim(unit, version, bytes).won());
+		}
+	}
+
+	/** Ein Dienst auf dem lokalen Bestand im gemeinsamen Betrieb, jede Liste gelesen; Geschriebenes landet in {@code appended}. */
+	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended) {
+		return new ConflictResolver.Host() {
+			@Override
+			public SyncService.Resolved resolve(UnitKey unit) throws IOException {
+				UnitFiles files = store.readUnit(unit);
+				return new SyncService.Resolved(files, ChainResolver.resolve(files, own));
+			}
+
+			@Override
+			public boolean shared() {
+				return true;
+			}
+
+			@Override
+			public boolean isListed(UnitKey unit, VersionId version) {
+				return true;
+			}
+
+			@Override
+			public String machineId() {
+				return own.currentId();
+			}
+
+			@Override
+			public Ownership ownership() {
+				return own;
+			}
+
+			@Override
+			public Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking) {
+				return Map.of();
+			}
+
+			@Override
+			public List<Version> append(String saveId, List<Change> changes) {
+				appended.add(changes);
+				return List.of();
+			}
+
+			@Override
+			public String failureText(Exception failure) {
+				return failure.toString();
+			}
+
+			@Override
+			public boolean deferred(UnitKey unit) {
+				return false;
+			}
+		};
+	}
+
 	@Test
 	void resolutionGivesUpWaitingAfterFiveMinutes() throws IOException {
 		SimulatedCloud cloud = new SimulatedCloud(dir.resolve("server"));

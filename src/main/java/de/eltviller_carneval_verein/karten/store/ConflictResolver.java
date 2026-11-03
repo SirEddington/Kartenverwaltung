@@ -330,7 +330,7 @@ final class ConflictResolver {
 	}
 
 	/** Bildet Basis, Meine und Deren einer verlorenen Strecke und entscheidet, ob sie jetzt zusammengeführt wird. */
-	private Stretch prepare(UnitKey unit, UnitFiles files, UnitState state, List<VersionId> lost) {
+	private Stretch prepare(UnitKey unit, UnitFiles files, UnitState state, List<VersionId> lost) throws IOException {
 		Version oldest = versionOf(files, lost.get(0));
 		Version mine = versionOf(files, lost.get(lost.size() - 1));
 		if (oldest == null || mine == null) {
@@ -351,7 +351,7 @@ final class ConflictResolver {
 			// die Basis ist noch in keinem Glied der Kette aufgegangen (ihre Zusammenführung ist noch nicht beansprucht)
 			return Stretch.of(Step.SKIP);
 		}
-		if (mustWait(unit, since)) {
+		if (mustWait(unit, since) || arrivalMissing(unit, since)) {
 			return Stretch.of(Step.WAIT);
 		}
 		List<Version> versions = new ArrayList<>();
@@ -426,6 +426,36 @@ final class ConflictResolver {
 		}
 		LOGGER.warning("Die Änderungsliste zu einer Version von " + unit.relativePath()
 				+ " ist auch nach 5 Minuten nicht gelesen; der Konflikt wird mit dem lokalen Stand aufgelöst.");
+		return false;
+	}
+
+	/**
+	 * Ob eine fremde Version der Kette seit der Basis die Einheit mit {@code movedTo} räumt, ihre Ankunft am Ziel lokal aber
+	 * noch nicht vorliegt: Dort gibt es keine Version aus demselben Speichervorgang, oder das Ziel ist nicht lesbar
+	 * aufgelöst (etwa weil sein Anspruch noch fehlt). Die Dateien eines Speichervorgangs können verspätet eintreffen, auch
+	 * nachdem die Änderungsliste übersprungen wurde; ohne die Ankunft hielte die Umzugsspur den Umzug für gescheitert, und
+	 * die Buchung lebte nach der Auflösung doppelt (KARV-123). Darauf wartet die Strecke ohne Höchstdauer: Der Vollabgleich
+	 * holt die Datei, sobald sie im Ordner liegt. Ein Umzug, der am Ziel verlor, hat seine Ankunft dort und wartet nicht.
+	 */
+	private boolean arrivalMissing(UnitKey unit, List<Version> since) throws IOException {
+		if (!host.shared()) {
+			return false;
+		}
+		Ownership own = host.ownership();
+		for (Version version : since) {
+			UnitKey target = version.marks().movedTo();
+			if (target == null || version.saveId() == null || own.isOwn(version)) {
+				continue;
+			}
+			SyncService.Resolved resolved = host.resolve(target);
+			boolean arrived = resolved.state().status() == Status.OK && resolved.files().versions().values().stream()
+					.map(VersionFile::version).anyMatch(v -> v != null && version.saveId().equals(v.saveId()));
+			if (!arrived) {
+				LOGGER.fine("Die Ankunft des Umzugs von " + unit.relativePath() + " nach " + target.relativePath()
+						+ " fehlt lokal; die Auflösung wartet");
+				return true;
+			}
+		}
 		return false;
 	}
 
