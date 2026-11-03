@@ -17,6 +17,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import de.eltviller_carneval_verein.karten.repository.BookingTrail.Kind;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -325,5 +327,77 @@ class BookingTrailTest {
 
 		assertEquals(Boolean.FALSE, BookingTrail.ownWinsAt(input, M, base.id()));
 		assertNull(BookingTrail.ownWinsAt(input, S5, null));
+	}
+
+	// --- Informiertes Handeln nach einer Auflösung (KARV-98, Spec Abschnitt 1b)
+
+	private static final String FOURTH = "vierter0";
+
+	/** Eine Auflösung (ohne Inhalt eine Löschung) auf {@code parent}. */
+	private Version resolution(String machine, Version parent, ObjectNode payload) {
+		return world.version(machine, parent, payload, VersionMarks.RESOLUTION);
+	}
+
+	/**
+	 * B weist m Sitz 1 zu (Bd gilt), A's Zusammenführung Am gilt darüber; Bs Wiederbelebung Br verlor, darauf bearbeitet
+	 * B m (Be). Die Spur liest Be als Bs Absicht, nicht das veraltete Zuweisen.
+	 */
+	@Test
+	void editOnAResolutionBeatsAnEarlierStaleRemovalOfTheSameSide() {
+		Version bd = world.claim(M, world.version(OWN, base, null, to(S1)));
+		world.claim(M, resolution(OTHER, bd, withoutPlace("m", b -> b.setComment("Fenster"))));
+		Version br = world.beside(M, resolution(OWN, bd, withoutPlace("m", b -> b.setComment("Fenster"))));
+		Version be = world.beside(M, world.version(OWN, br, withoutPlace("m", b -> b.setComment("Fenster2"))));
+
+		BookingTrail trail = own(world.input(M, base, List.of(br, be)));
+
+		assertEquals(Kind.KEPT, trail.kind());
+		assertSame(be, trail.last());
+		assertSame(br, trail.after());
+	}
+
+	/** C nahm m weg, die Auflösung R kannte das; D bearbeitete auf R: D's informierte Absicht gilt für die Seite. */
+	@Test
+	void informedForeignEditBeatsAStaleRemovalKnownToTheResolution() {
+		Version c = world.claim(M, world.version(OTHER, base, null));
+		Version r = world.claim(M, resolution(THIRD, c, withoutPlace("m", b -> {
+		})));
+		Version d = world.claim(M, world.version(FOURTH, r, withoutPlace("m", b -> b.setComment("D"))));
+		Version mine = world.beside(M, world.version(OWN, base, withoutPlace("m", b -> b.setComment("B"))));
+
+		BookingTrail trail = foreign(world.input(M, base, List.of(mine)));
+
+		assertEquals(Kind.KEPT, trail.kind());
+		assertSame(d, trail.last());
+		assertSame(r, trail.after());
+	}
+
+	/** Kannte die Auflösung Cs Wegnahme nicht, bleibt sie im Wettbewerb: Ein Storno gewinnt wie bisher. */
+	@Test
+	void removalUnknownToTheResolutionStaysInCompetition() {
+		Version r = world.claim(M, resolution(THIRD, base, withoutPlace("m", b -> {
+		})));
+		world.claim(M, world.version(FOURTH, r, withoutPlace("m", b -> b.setComment("D"))));
+		Version c = world.beside(M, world.version(OTHER, base, null));
+		Version mine = world.beside(M, world.version(OWN, base, withoutPlace("m", b -> b.setComment("B"))));
+
+		BookingTrail trail = foreign(world.input(M, base, List.of(mine)));
+
+		assertEquals(Kind.CANCELLED, trail.kind());
+		assertSame(c, trail.removal());
+	}
+
+	@Test
+	void youngestOfSeveralResolutionsCounts() {
+		Version bd = world.claim(M, world.version(OWN, base, null, to(S1)));
+		world.claim(M, resolution(OTHER, bd, withoutPlace("m", b -> {
+		})));
+		Version r1 = world.beside(M, resolution(OWN, bd, withoutPlace("m", b -> {
+		})));
+		Version r2 = world.beside(M, resolution(OWN, r1, withoutPlace("m", b -> {
+		})));
+		Version be = world.beside(M, world.version(OWN, r2, withoutPlace("m", b -> b.setComment("neu"))));
+
+		assertSame(r2, own(world.input(M, base, List.of(r1, r2, be))).after());
 	}
 }
