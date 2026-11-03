@@ -1080,19 +1080,28 @@ class ConflictResolverTest {
 	 */
 	private Version[] lossWithParkedCopy(VersionStore store, LocalArbiter arbiter, ObjectNode f, VersionMarks fMarks)
 			throws IOException {
+		return lossWithParkedCopy(store, arbiter, f, fMarks, "sr");
+	}
+
+	/** Wie oben; {@code parkingSave} ist der Speichervorgang des Parkens (die Auflösung an A-1 hat "sr"). */
+	private Version[] lossWithParkedCopy(VersionStore store, LocalArbiter arbiter, ObjectNode f, VersionMarks fMarks,
+			String parkingSave) throws IOException {
 		long now = clock.instant().toEpochMilli();
 		Version base = version(VersionId.create(now - 5000, FOREIGN, 0), List.of(), FOREIGN, "s0", false,
 				MAPPER.createObjectNode().put("id", "X"), VersionMarks.NONE);
 		Version t = version(VersionId.create(now - 4000, FOREIGN, 1), List.of(base.id()), FOREIGN, "s1", false,
 				MAPPER.createObjectNode().put("id", "T"), VersionMarks.NONE);
+		Version merge = version(VersionId.create(now - 3500, FOREIGN, 5), List.of(t.id()), FOREIGN, "sr", false,
+				MAPPER.createObjectNode().put("id", "T"), VersionMarks.RESOLUTION);
 		Version mine = version(VersionId.create(now - 3000, CURRENT, 0), List.of(base.id()), CURRENT, "s2", false,
 				MAPPER.createObjectNode().put("id", "X").put("name", "neu"), VersionMarks.NONE);
-		Version parking = version(VersionId.create(now - 2500, FOREIGN, 2), List.of(), FOREIGN, "s1", false,
+		Version parking = version(VersionId.create(now - 2500, FOREIGN, 2), List.of(), FOREIGN, parkingSave, false,
 				MAPPER.createObjectNode().put("id", "X"), VersionMarks.RESOLUTION.withMovedFrom(BOOKING));
 		Version foreignOnCopy = version(VersionId.create(now - 2000, FOREIGN, 3), List.of(parking.id()), FOREIGN, "s3",
 				f == null, f, fMarks);
 		store(store, arbiter, BOOKING, base, true);
 		store(store, arbiter, BOOKING, t, true);
+		store(store, arbiter, BOOKING, merge, true);
 		store(store, arbiter, BOOKING, mine, false);
 		store(store, arbiter, MOVED, parking, true);
 		store(store, arbiter, MOVED, foreignOnCopy, true);
@@ -1146,6 +1155,22 @@ class ConflictResolverTest {
 		resolver.enqueue(BOOKING);
 		resolver.resolvePending(10);
 		assertEquals(1, appended.size(), "mit der Ankunft löst sie auf");
+	}
+
+	/**
+	 * Aus dem abschließenden Review: Ein Parken aus einem anderen Speichervorgang (ein früherer Doppelverkauf) hält die
+	 * Auflösung nicht auf, auch wenn ein Umzug von dort nie ankommt; sonst wartete sie ohne Ende.
+	 */
+	@Test
+	void oldParkingDoesNotHoldTheResolution() throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		lossWithParkedCopy(store, new LocalArbiter(store, clock), null, VersionMarks.NONE.withMovedTo(OTHER_SEAT), "alt");
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = parkedResolver(store, id -> true, true, appended);
+
+		resolver.resolvePending(10);
+
+		assertEquals(1, appended.size(), "löst ohne Warten auf");
 	}
 
 	@Test

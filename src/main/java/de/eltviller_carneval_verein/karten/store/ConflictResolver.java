@@ -383,7 +383,7 @@ final class ConflictResolver {
 		Map<UnitKey, TrailUnit> trail = unit.type() == UnitType.BOOKING
 				? copy(TrailCollector.collect(unit, base, versions, this::folder))
 				: Map.of();
-		if (parkingPathWaits(unit, trail)) {
+		if (parkingPathWaits(unit, trail, since)) {
 			return Stretch.of(Step.WAIT);
 		}
 		return new Stretch(Step.MERGE, base, mine, state.head(), since, versions, trail);
@@ -394,19 +394,22 @@ final class ConflictResolver {
 	 * Version ({@code resolution} mit {@code movedFrom}) Nutzer-Versionen, von denen eine fremde noch nicht über ihre Liste
 	 * gelesen ist (wie {@link #mustWait}, höchstens {@link #LIST_WAIT}) oder deren Umzug am Ziel noch nicht angekommen ist
 	 * (wie {@link #arrivalMissing}). Sonst hielte die Spur ein Umsetzen der Kopie für gescheitert, oder E13 löschte eine
-	 * Kopie, deren Änderung schon gelistet ist. Grob: ohne den Abgleich der Speichervorgänge, den die Spur selbst macht;
-	 * ein Warten zu viel schadet nicht.
+	 * Kopie, deren Änderung schon gelistet ist. Nur für ein Parken aus demselben Speichervorgang wie eine Auflösung in der
+	 * Kette seit der Basis (wie die Spur selbst): Ein früheres Parken, dessen Umzug nie ankommt, hielte sonst ohne Ende auf.
 	 */
-	private boolean parkingPathWaits(UnitKey unit, Map<UnitKey, TrailUnit> trail) throws IOException {
+	private boolean parkingPathWaits(UnitKey unit, Map<UnitKey, TrailUnit> trail, List<Version> since)
+			throws IOException {
 		if (!host.shared()) {
 			return false;
 		}
+		Set<String> saves = new HashSet<>();
+		since.stream().filter(v -> v.marks().resolution() && v.saveId() != null).forEach(v -> saves.add(v.saveId()));
 		Ownership own = host.ownership();
 		for (TrailUnit parked : trail.values()) {
 			if (parked.unit().equals(unit) || !parked.unit().isUnassigned()) {
 				continue;
 			}
-			List<Version> after = afterParking(parked.chain());
+			List<Version> after = afterParking(parked.chain(), saves);
 			boolean unlisted = after.stream().anyMatch(v -> !own.isOwn(v) && !host.isListed(parked.unit(), v.id()));
 			if (unlisted && withinListWait(unit)) {
 				LOGGER.fine("Eine Änderung an " + parked.unit().relativePath() + " ist noch nicht gelesen; die Auflösung wartet");
@@ -419,11 +422,15 @@ final class ConflictResolver {
 		return false;
 	}
 
-	/** Die Nutzer-Versionen der Kette nach der letzten geparkten Version; leer, wenn keine geparkt wurde. */
-	private static List<Version> afterParking(List<Version> chain) {
+	/**
+	 * Die Nutzer-Versionen der Kette nach der letzten geparkten Version aus einem dieser Speichervorgänge; leer, wenn keine
+	 * so geparkt wurde.
+	 */
+	private static List<Version> afterParking(List<Version> chain, Set<String> saves) {
 		int parked = -1;
 		for (int i = 0; i < chain.size(); i++) {
-			if (chain.get(i).marks().resolution() && chain.get(i).marks().movedFrom() != null) {
+			Version link = chain.get(i);
+			if (link.marks().resolution() && link.marks().movedFrom() != null && saves.contains(link.saveId())) {
 				parked = i;
 			}
 		}
