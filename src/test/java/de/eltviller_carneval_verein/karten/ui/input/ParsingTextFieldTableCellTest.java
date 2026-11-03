@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui.input;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDate;
 import java.util.concurrent.CompletableFuture;
@@ -22,6 +23,7 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TablePosition;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.skin.VirtualFlow;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.VBox;
@@ -149,6 +151,57 @@ class ParsingTextFieldTableCellTest {
 	private static String editingCellOf(TableView<TextRow> table) {
 		TablePosition<TextRow, ?> editing = table.getEditingCell();
 		return editing == null ? "keine" : editing.getRow() + ":" + editing.getTableColumn().getText();
+	}
+
+	/** Wie {@link #textTable()}, mit 50 Zeilen, von denen nur einige auf einmal zu sehen sind; die Tabelle ist nach unten gescrollt. */
+	private static TableView<TextRow> scrolledTextTable() {
+		TableView<TextRow> table = textTable();
+		for (int row = 2; row < 50; row++) {
+			table.getItems().add(new TextRow("Zeile " + row, true));
+		}
+		table.scrollTo(20);
+		table.layout();
+		return table;
+	}
+
+	private static VirtualFlow<?> flowOf(TableView<?> table) {
+		return (VirtualFlow<?>) table.lookup(".virtual-flow");
+	}
+
+	@Test
+	void tabWithinARowLeavesTheViewWhereItIs() throws Exception {
+		int[] tops = onFx(() -> {
+			TableView<TextRow> table = scrolledTextTable();
+			int before = flowOf(table).getFirstVisibleCell().getIndex();
+			pressTab(typeInto(table, before + 2, "neu"), false);
+			table.layout();
+			return new int[] { before, flowOf(table).getFirstVisibleCell().getIndex() };
+		});
+
+		assertEquals(tops[0], tops[1], "die bearbeitete Zeile springt nicht nach oben");
+	}
+
+	@Test
+	void tabIntoTheRowBelowTheViewScrollsOnlyAsFarAsNeeded() throws Exception {
+		int[] result = onFx(() -> {
+			TableView<TextRow> table = scrolledTextTable();
+			int before = flowOf(table).getFirstVisibleCell().getIndex();
+			int last = flowOf(table).getLastVisibleCell().getIndex();
+			table.edit(last, table.getColumns().get(1));
+			for (Node node : table.lookupAll(".table-cell")) {
+				if (node instanceof ParsingTextFieldTableCell<?, ?> cell && cell.isEditing()) {
+					pressTab(cell, false);
+					break;
+				}
+			}
+			table.layout();
+			return new int[] { before, last, flowOf(table).getFirstVisibleCell().getIndex(), flowOf(table).getLastVisibleCell().getIndex(),
+					table.getEditingCell() == null ? -1 : table.getEditingCell().getRow() };
+		});
+
+		assertEquals(result[1] + 1, result[4], "Tab am Zeilenende bearbeitet die nächste Zeile");
+		assertTrue(result[3] >= result[1] + 1, "die nächste Zeile ist zu sehen");
+		assertTrue(result[2] <= result[0] + 2, "die Tabelle scrollt nur so weit wie nötig, oben stand " + result[0] + ", jetzt " + result[2]);
 	}
 
 	@Test
