@@ -862,6 +862,12 @@ class ConflictResolverTest {
 	 */
 	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended,
 			boolean listed) {
+		return storeHost(store, own, appended, listed, true);
+	}
+
+	/** Wie {@link #storeHost(VersionStore, Ownership, List, boolean)}; mit {@code shared == false} im Einzelbetrieb. */
+	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended,
+			boolean listed, boolean shared) {
 		return new ConflictResolver.Host() {
 			@Override
 			public SyncService.Resolved resolve(UnitKey unit) throws IOException {
@@ -871,7 +877,7 @@ class ConflictResolverTest {
 
 			@Override
 			public boolean shared() {
-				return true;
+				return shared;
 			}
 
 			@Override
@@ -910,6 +916,112 @@ class ConflictResolverTest {
 				return false;
 			}
 		};
+	}
+
+	// --- Auflösung gegen Auflösung (KARV-98, Spec Abschnitt 1)
+
+	private static final String CURRENT = "jetzt123aaaaaaaaaaaaaaaaaa";
+
+	/**
+	 * Zwei Rechner lösen gleichzeitig auf (KARV-98): M0 (fremd) trägt die Buchung; Bd (eigen) nimmt sie weg, Ae (fremd)
+	 * ändert sie, beide auf M0. Am (fremde Auflösung auf Bd und Ae) gilt; Br (eigene Auflösung auf Bd) verliert.
+	 *
+	 * @param unit        die Einheit
+	 * @param resolution  ob Br eine Auflösung ist (sonst eine Nutzer-Version)
+	 * @param storeAe     ob Ae im lokalen Bestand liegt
+	 * @return M0, Bd, Am, Br
+	 */
+	private Version[] resolutionAgainstResolution(VersionStore store, LocalArbiter arbiter, UnitKey unit,
+			boolean resolution, boolean storeAe) throws IOException {
+		long now = clock.instant().toEpochMilli();
+		Version m0 = version(VersionId.create(now - 5000, FOREIGN, 0), List.of(), FOREIGN, "s0", false, name("Mia"),
+				VersionMarks.NONE);
+		Version bd = version(VersionId.create(now - 4000, CURRENT, 0), List.of(m0.id()), CURRENT, "s1", true, null,
+				VersionMarks.NONE);
+		Version ae = version(VersionId.create(now - 3500, FOREIGN, 1), List.of(m0.id()), FOREIGN, "s2", false,
+				name("Mia bezahlt"), VersionMarks.NONE);
+		Version am = version(VersionId.create(now - 3000, FOREIGN, 2), List.of(bd.id(), ae.id()), FOREIGN, "s3", false,
+				name("Mia bezahlt"), VersionMarks.RESOLUTION);
+		Version br = version(VersionId.create(now - 2000, CURRENT, 1), List.of(bd.id()), CURRENT, "s4", false,
+				name("Mia wieder"), resolution ? VersionMarks.RESOLUTION : VersionMarks.NONE);
+		store(store, arbiter, unit, m0, true);
+		store(store, arbiter, unit, bd, true);
+		if (storeAe) {
+			store(store, arbiter, unit, ae, false);
+		}
+		store(store, arbiter, unit, am, true);
+		store(store, arbiter, unit, br, false);
+		return new Version[] { m0, bd, am, br };
+	}
+
+	/** Löst {@link #resolutionAgainstResolution} auf und liefert die Eingaben der Strategie. */
+	private RecordingPolicy resolveLoss(UnitKey unit, boolean resolution, boolean storeAe, boolean shared,
+			List<List<Change>> appended, Version[] versions) throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		System.arraycopy(resolutionAgainstResolution(store, arbiter, unit, resolution, storeAe), 0, versions, 0, 4);
+		ConflictResolver resolver = new ConflictResolver(
+				storeHost(store, new Ownership(CURRENT, List.of()), appended, true, shared),
+				new SyncNotifier(Runnable::run, true), clock);
+		RecordingPolicy policy = new RecordingPolicy();
+		resolver.setPolicy(unit.type(), policy);
+		resolver.enqueue(unit);
+		resolver.resolvePending(10);
+		if (!storeAe && shared) {
+			assertEquals(List.of(), appended, "wartet auf die fehlende Version der Grenze");
+			clock.advance(ConflictResolver.LIST_WAIT.plusMinutes(1));
+			resolver.enqueue(unit);
+			resolver.resolvePending(10);
+		}
+		return policy;
+	}
+
+	@Test
+	void resolutionAgainstResolutionGetsTheLoweredBase() throws IOException {
+		Version[] v = new Version[4];
+		RecordingPolicy policy = resolveLoss(BOOKING, true, true, true, new ArrayList<>(), v);
+
+		assertEquals(1, policy.inputs.size());
+		ConflictInput input = policy.inputs.get(0);
+		assertEquals(v[0].id(), input.base().id(), "abgesenkt auf M0");
+		assertEquals(List.of(v[1].id(), v[2].id()), ids(input.chainSinceBase()));
+		assertEquals(v[3].id(), input.mine().id());
+		assertEquals(v[2].id(), input.theirs().id());
+	}
+
+	@Test
+	void userVersionAgainstResolutionKeepsTheBase() throws IOException {
+		Version[] v = new Version[4];
+		RecordingPolicy policy = resolveLoss(BOOKING, false, true, true, new ArrayList<>(), v);
+
+		assertEquals(v[1].id(), policy.inputs.get(0).base().id(), "Basis bleibt Bd");
+	}
+
+	@Test
+	void missingFrontierVersionWaitsInSharedModeThenFallsBack() throws IOException {
+		Version[] v = new Version[4];
+		List<List<Change>> appended = new ArrayList<>();
+		RecordingPolicy policy = resolveLoss(BOOKING, true, false, true, appended, v);
+
+		assertEquals(1, policy.inputs.size());
+		assertEquals(v[1].id(), policy.inputs.get(0).base().id(), "nach LIST_WAIT die heutige Basis");
+	}
+
+	@Test
+	void missingFrontierVersionFallsBackAtOnceInSingleMode() throws IOException {
+		Version[] v = new Version[4];
+		RecordingPolicy policy = resolveLoss(BOOKING, true, false, false, new ArrayList<>(), v);
+
+		assertEquals(1, policy.inputs.size());
+		assertEquals(v[1].id(), policy.inputs.get(0).base().id(), "ohne Warten die heutige Basis");
+	}
+
+	@Test
+	void presentationKeepsItsBase() throws IOException {
+		Version[] v = new Version[4];
+		RecordingPolicy policy = resolveLoss(SHOW, true, true, true, new ArrayList<>(), v);
+
+		assertEquals(v[1].id(), policy.inputs.get(0).base().id(), "nur Buchungen werden abgesenkt");
 	}
 
 	@Test

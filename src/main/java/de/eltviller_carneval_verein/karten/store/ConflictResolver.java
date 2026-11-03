@@ -125,14 +125,14 @@ final class ConflictResolver {
 	}
 
 	/**
-	 * Eine vorbereitete Strecke; Basis, Meine, Deren, Kette und die Speichervorgänge ihrer Versionen nur bei
-	 * {@link Step#MERGE}.
+	 * Eine vorbereitete Strecke; Basis, Meine, Deren, Kette, die Speichervorgänge ihrer Versionen und die Umzugsspur
+	 * (leer außer bei Buchungen) nur bei {@link Step#MERGE}.
 	 */
 	private record Stretch(Step step, Version base, Version mine, Version theirs, List<Version> chainSinceBase,
-			List<Version> versions) {
+			List<Version> versions, Map<UnitKey, TrailUnit> trail) {
 
 		static Stretch of(Step step) {
-			return new Stretch(step, null, null, null, List.of(), List.of());
+			return new Stretch(step, null, null, null, List.of(), List.of(), Map.of());
 		}
 	}
 
@@ -342,10 +342,21 @@ final class ConflictResolver {
 		if (oldest == null || mine == null) {
 			return Stretch.of(Step.SKIP);
 		}
-		VersionId baseId = oldest.firstParent();
-		if (baseId != null && state.lost().stream().anyMatch(other -> other != lost && other.contains(baseId))) {
+		VersionId firstParent = oldest.firstParent();
+		if (firstParent != null && state.lost().stream().anyMatch(other -> other != lost && other.contains(firstParent))) {
 			// eigene Verzweigung: Die Strecke baut auf einer anderen verlorenen auf und kommt nach deren Auflösung dran
 			return Stretch.of(Step.LATER);
+		}
+		VersionId baseId = firstParent;
+		if (unit.type() == UnitType.BOOKING && oldest.marks().resolution()) {
+			// Auflösung gegen Auflösung (KARV-98): die Basis unter den Nutzer-Versionen beider Seiten
+			ResolutionBase.Result lowered = ResolutionBase.lower(files, mine, state.head());
+			if (lowered.kind() == ResolutionBase.Kind.LOWERED) {
+				baseId = lowered.base();
+			} else if (lowered.kind() == ResolutionBase.Kind.MISSING && host.shared() && withinListWait(unit)) {
+				LOGGER.fine("Eine Version unter der Gabel von " + unit.relativePath() + " fehlt lokal; die Auflösung wartet");
+				return Stretch.of(Step.WAIT);
+			}
 		}
 		Version base = baseId == null ? null : versionOf(files, baseId);
 		if (baseId != null && base == null) {
@@ -367,7 +378,20 @@ final class ConflictResolver {
 				versions.add(version);
 			}
 		}
-		return new Stretch(Step.MERGE, base, mine, state.head(), since, versions);
+		Map<UnitKey, TrailUnit> trail = unit.type() == UnitType.BOOKING
+				? copy(TrailCollector.collect(unit, base, versions, this::folder))
+				: Map.of();
+		return new Stretch(Step.MERGE, base, mine, state.head(), since, versions, trail);
+	}
+
+	/**
+	 * Ob die Einheit noch innerhalb von {@link #LIST_WAIT} seit ihrem ersten Warten ist (dieselbe Frist wie
+	 * {@link #mustWait}; hat sie schon auf eine Liste gewartet, ist sie angebrochen).
+	 */
+	private boolean withinListWait(UnitKey unit) {
+		Instant now = clock.instant();
+		Instant first = waitingSince.computeIfAbsent(unit, key -> now);
+		return now.isBefore(first.plus(LIST_WAIT));
 	}
 
 	private static Version versionOf(UnitFiles files, VersionId id) {
@@ -481,13 +505,11 @@ final class ConflictResolver {
 		}
 		boolean booking = unit.type() == UnitType.BOOKING;
 		Map<UnitKey, ConflictInput.Sibling> siblings = booking ? siblings(unit) : Map.of();
-		Map<UnitKey, TrailUnit> trail = booking
-				? copy(TrailCollector.collect(unit, stretch.base(), stretch.versions(), this::folder))
-				: Map.of();
 		try {
 			ConflictInput input = new ConflictInput(unit, copy(stretch.base()), copy(stretch.mine()),
 					copy(stretch.theirs()), stretch.chainSinceBase().stream().map(ConflictResolver::copy).toList(),
-					host.machineId(), siblings, stretch.versions().stream().map(ConflictResolver::copy).toList(), trail);
+					host.machineId(), siblings, stretch.versions().stream().map(ConflictResolver::copy).toList(),
+					stretch.trail());
 			Resolution resolution = Objects.requireNonNull(policy.resolve(input), "Die Strategie lieferte kein Ergebnis.");
 			if (!resolution.deleted() && resolution.payload() == null) {
 				throw new IllegalStateException("Die Strategie lieferte keinen Inhalt.");
