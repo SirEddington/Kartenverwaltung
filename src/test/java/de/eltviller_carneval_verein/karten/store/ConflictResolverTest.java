@@ -814,15 +814,20 @@ class ConflictResolverTest {
 		store(store, arbiter, BOOKING, removal, true);
 		store(store, arbiter, BOOKING, mine, false);
 		List<List<Change>> appended = new ArrayList<>();
-		ConflictResolver resolver = new ConflictResolver(storeHost(store, own, appended),
+		ConflictResolver resolver = new ConflictResolver(storeHost(store, own, appended, false),
 				new SyncNotifier(Runnable::run, true), clock);
 		resolver.setPolicy(UnitType.BOOKING, new RecordingPolicy());
 		resolver.enqueue(BOOKING);
+		resolver.resolvePending(10);
 		clock.advance(ConflictResolver.LIST_WAIT.plusMinutes(1));
 
 		resolver.resolvePending(10);
+		resolver.resolvePending(10);
+		resolver.resolvePending(10);
 
 		assertEquals(List.of(), appended, "wartet auf die Ankunft am Ziel");
+		assertEquals(1, logsAtLeast(Level.WARNING).stream().filter(r -> r.getMessage().contains("5 Minuten")).count(),
+				"die Warnung zur ungelesenen Liste kommt einmal, nicht bei jedem Versuch");
 
 		// die Ankunft aus demselben Speichervorgang trifft ein
 		Version arrival = version(VersionId.create(now - 1999, FOREIGN, 2), List.of(), FOREIGN, "s2", false, name("Anna"),
@@ -851,8 +856,12 @@ class ConflictResolverTest {
 		}
 	}
 
-	/** Ein Dienst auf dem lokalen Bestand im gemeinsamen Betrieb, jede Liste gelesen; Geschriebenes landet in {@code appended}. */
-	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended) {
+	/**
+	 * Ein Dienst auf dem lokalen Bestand im gemeinsamen Betrieb; mit {@code listed} gilt jede fremde Version als über ihre
+	 * Liste gelesen, sonst keine. Geschriebenes landet in {@code appended}.
+	 */
+	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended,
+			boolean listed) {
 		return new ConflictResolver.Host() {
 			@Override
 			public SyncService.Resolved resolve(UnitKey unit) throws IOException {
@@ -867,7 +876,7 @@ class ConflictResolverTest {
 
 			@Override
 			public boolean isListed(UnitKey unit, VersionId version) {
-				return true;
+				return listed;
 			}
 
 			@Override

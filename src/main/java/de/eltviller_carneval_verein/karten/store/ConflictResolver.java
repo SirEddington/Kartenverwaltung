@@ -146,6 +146,11 @@ final class ConflictResolver {
 	private final ReentrantLock running = new ReentrantLock();
 	/** Seit wann eine Einheit auf Änderungslisten wartet. */
 	private final Map<UnitKey, Instant> waitingSince = new HashMap<>();
+	/**
+	 * Die Einheiten, deren Warten auf Änderungslisten abgelaufen und gemeldet ist: Wartet die Strecke danach noch auf die
+	 * Ankunft eines Umzugs ({@link #arrivalMissing}), kommt die Warnung nicht bei jedem Versuch erneut.
+	 */
+	private final Set<UnitKey> listWaitReported = new HashSet<>();
 	/** Die Einheiten, deren Strategie in diesem Programmlauf schon in der Fußzeile gemeldet wurde. */
 	private final Set<UnitKey> reportedFailures = new HashSet<>();
 	/**
@@ -258,6 +263,7 @@ final class ConflictResolver {
 			if (!again) {
 				// die Einheit verlässt die Schlange: Ein späteres Warten beginnt von vorn
 				waitingSince.remove(unit);
+				listWaitReported.remove(unit);
 			}
 		}
 		return again;
@@ -424,8 +430,10 @@ final class ConflictResolver {
 		if (now.isBefore(first.plus(LIST_WAIT))) {
 			return true;
 		}
-		LOGGER.warning("Die Änderungsliste zu einer Version von " + unit.relativePath()
-				+ " ist auch nach 5 Minuten nicht gelesen; der Konflikt wird mit dem lokalen Stand aufgelöst.");
+		if (listWaitReported.add(unit)) {
+			LOGGER.warning("Die Änderungsliste zu einer Version von " + unit.relativePath()
+					+ " ist auch nach 5 Minuten nicht gelesen; der Konflikt wird mit dem lokalen Stand aufgelöst.");
+		}
 		return false;
 	}
 
