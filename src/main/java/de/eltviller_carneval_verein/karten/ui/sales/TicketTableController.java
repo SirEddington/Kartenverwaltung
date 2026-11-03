@@ -2,6 +2,8 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -92,6 +94,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
 	// Eine fremde Änderung kam, während eine Zelle im Bearbeiten war; die Tabelle zeichnet nach deren Ende neu
 	private boolean foreignChangePending = false;
+	// Zuletzt geänderte Buchungen, die dadurch storniert sein können (nach Identität); geprüft, sobald keine Zelle im Bearbeiten ist
+	private final Set<Booking> cancelCandidates = Collections.newSetFromMap(new IdentityHashMap<>());
 	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
 		// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
 		private final RepositoryListener<Event> refreshing = LiveViews.onFxThread(
@@ -238,6 +242,9 @@ public class TicketTableController implements ContentController, SalesStateAware
 			if (cell == null && foreignChangePending) {
 				Platform.runLater(this::refreshAfterForeignChange);
 			}
+			if (cell == null && !cancelCandidates.isEmpty()) {
+				Platform.runLater(this::removeCancelled);
+			}
 		});
 		// Fremde Änderungen nur, solange die Tabelle zu sehen ist; eine mit der Ansicht verschwundene Zelle gibt ihre Buchung frei
 		LiveViews.whileShown(seatTable, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges),
@@ -246,8 +253,11 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	private void sellSelection() {
 		List<Booking> bookings = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
-		activeDialog = SeatSelectionEditor.edit(bookings, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), seatTable::refresh,
-				this::deselect);
+		// Der Dialog kann eine Buchung ohne Platz leeren (Namen löschen): Sie ist dann storniert wie nach einer Zelle
+		activeDialog = SeatSelectionEditor.edit(bookings, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), () -> {
+			seatTable.refresh();
+			bookings.forEach(this::removeIfCancelledAfterCommit);
+		}, this::deselect);
 	}
 
 	/** Nimmt die Zeilen dieser Buchungen aus der Auswahl der Tabelle (und damit aus dem gemeinsamen Verkaufszustand). */
@@ -385,10 +395,14 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colLastName.setOnEditCommit(editEvent -> {
 			SaleDates.change(editEvent.getRowValue().getBooking(), booking -> booking.setLastName(editEvent.getNewValue()));
 			refreshAfterCommit();
+			removeIfCancelledAfterCommit(editEvent.getRowValue().getBooking());
 		});
 
 		colFirstName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
-		colFirstName.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setFirstName(editEvent.getNewValue()));
+		colFirstName.setOnEditCommit(editEvent -> {
+			editEvent.getRowValue().getBooking().setFirstName(editEvent.getNewValue());
+			removeIfCancelledAfterCommit(editEvent.getRowValue().getBooking());
+		});
 
 		// Preis: der effektive Preis; der Standardpreis der Vorstellung als Eingabe entfernt den Einzelpreis
 		colPrice.setCellFactory(ParsingTextFieldTableCell.forTableColumn(PRICE_CONVERTER, InputIssue.NOT_A_NUMBER, "Preis", dto -> EntityLabels.booking(dto.getBooking())));
@@ -404,12 +418,16 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colPaidAmount.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setPaidAmount(toCents(editEvent.getNewValue())));
 
 		colComment.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
-		colComment.setOnEditCommit(editEvent -> editEvent.getRowValue().getBooking().setComment(editEvent.getNewValue()));
+		colComment.setOnEditCommit(editEvent -> {
+			editEvent.getRowValue().getBooking().setComment(editEvent.getNewValue());
+			removeIfCancelledAfterCommit(editEvent.getRowValue().getBooking());
+		});
 
 		// Enum / ComboBox
 		colPaymentStatus.setOnEditCommit(editEvent -> {
 			SaleDates.change(editEvent.getRowValue().getBooking(), booking -> booking.setPaymentStatus(editEvent.getNewValue()));
 			refreshAfterCommit();
+			removeIfCancelledAfterCommit(editEvent.getRowValue().getBooking());
 		});
 		StringConverter<PaymentStatus> converter = new StringConverter<>() {
 			@Override
@@ -433,6 +451,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 			prop.addListener((obs, oldVal, newVal) -> {
 				SaleDates.change(dto.getBooking(), booking -> booking.setCollected(newVal));
 				refreshAfterCommit();
+				removeIfCancelledAfterCommit(dto.getBooking());
 			});
 			return prop;
 		}));
@@ -497,10 +516,9 @@ public class TicketTableController implements ContentController, SalesStateAware
 	}
 
 	/**
-	 * Fremde Änderungen am gezeigten Event: Sind es dieselben Buchungen in derselben Reihenfolge, genügt ein Neuzeichnen der
-	 * Zellen; sonst wird die Liste neu gesetzt und die bisherige Auswahl wiederhergestellt. Nie, solange eine Zelle im Bearbeiten
-	 * ist (das Neuzeichnen risse sie weg): Dann kommt es nach dem Ende der Bearbeitung nach, und die zurückgestellten Einheiten
-	 * der bearbeiteten Buchung folgen über das erneute Einarbeiten.
+	 * Fremde Änderungen am gezeigten Event zeigen ({@link #showRows()}). Nie, solange eine Zelle im Bearbeiten ist (das
+	 * Neuzeichnen risse sie weg): Dann kommt es nach dem Ende der Bearbeitung nach, und die zurückgestellten Einheiten der
+	 * bearbeiteten Buchung folgen über das erneute Einarbeiten.
 	 */
 	private void refreshAfterForeignChange() {
 		if (seatTable.getEditingCell() != null) {
@@ -508,6 +526,43 @@ public class TicketTableController implements ContentController, SalesStateAware
 			return;
 		}
 		foreignChangePending = false;
+		showRows();
+	}
+
+	/**
+	 * Nach einer Änderung, die die Buchung leeren kann (Name, Kommentar, Zahlung, abgeholt): Ist sie ohne Platz und trägt
+	 * dadurch keine Daten mehr, ist sie storniert. Sie verschwindet gleich aus Vorstellung, Tabelle und Zähler der Leiste
+	 * ({@link BookingSync#removeIfCancelled}), nicht erst beim nächsten Laden. Erst nach dem laufenden Commit, wie
+	 * {@link #refreshAfterCommit()}.
+	 */
+	private void removeIfCancelledAfterCommit(Booking booking) {
+		cancelCandidates.add(booking);
+		Platform.runLater(this::removeCancelled);
+	}
+
+	/**
+	 * Entfernt die zuletzt geänderten Buchungen, die dadurch storniert sind. Bearbeitet schon eine Zelle (Tab aus dem
+	 * geleerten Namen), erst nach deren Ende: Sonst ginge eine Eingabe in eine Buchung, die es nicht mehr gibt.
+	 */
+	private void removeCancelled() {
+		if (seatTable.getEditingCell() != null || cancelCandidates.isEmpty()) {
+			return;
+		}
+		boolean removed = false;
+		for (Booking booking : List.copyOf(cancelCandidates)) {
+			removed |= BookingSync.removeIfCancelled(booking);
+		}
+		cancelCandidates.clear();
+		if (removed) {
+			showRows();
+		}
+	}
+
+	/**
+	 * Zeigt die Zeilen nach dem Stand des Modells: Sind es dieselben Buchungen in derselben Reihenfolge, genügt ein
+	 * Neuzeichnen der Zellen; sonst wird die Liste neu gesetzt und die bisherige Auswahl wiederhergestellt.
+	 */
+	private void showRows() {
 		List<BookingDTO> rows = buildRows();
 		List<Booking> selection = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
 		if (sameBookings(masterData, rows)) {
