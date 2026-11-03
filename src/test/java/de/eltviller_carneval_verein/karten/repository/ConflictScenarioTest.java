@@ -2397,6 +2397,89 @@ class ConflictScenarioTest {
 		assertTrue(a.eventState().get(parked).deleted(), "_Bert bleibt gelöscht");
 	}
 
+	/**
+	 * B verliert den Doppelverkauf um Sitz 1, nachdem er Bert ungespeichert storniert ({@code move == false}) oder mit
+	 * Kommentar "B" auf Sitz 2 verschoben hat; die Zusammenführung parkt Bert. A setzt den Kommentar der geparkten Kopie auf
+	 * "von A" und speichert, danach speichert B.
+	 *
+	 * @return Berts Kennung
+	 */
+	private String lateSaveAgainstAnEditedParkedCopy(Machine a, Machine b, boolean move) throws IOException {
+		a.sell(1, "Anna");
+		Booking bert = b.sell(1, "Bert");
+		String bertId = bert.getId();
+		if (move) {
+			assertTrue(BookingSync.assign(b.friday(), b.plan(), bert, b.plan().getSeats().get(2)));
+			bert.setComment("B");
+		} else {
+			bert.clearCustomerData();
+		}
+		a.tick();
+		b.tick();
+		untilQuiet(a, b);
+		booking(a, bertId).setComment("von A");
+		a.repository.saveEvent(a.event);
+		untilQuiet(a, b);
+		b.repository.saveEvent(b.event);
+		untilQuiet(a, b);
+		return bertId;
+	}
+
+	/** Die Aktionen des Konflikt-Dialogs eines Rechners, die gleich speichern. */
+	private static ConflictActions actions(Machine machine) {
+		return new ConflictActions(machine.repository, machine.halls, new ChangeTracker<>(Event::getId),
+				new ChangeTracker<>(Hall::getId), new EditingUnits(), machine.sync, event -> {
+					machine.repository.saveEvent(event);
+					return true;
+				}, hall -> true);
+	}
+
+	/** E2 gegen die geänderte Kopie: Bs Storno gilt; A stellt seine Fassung von {@code _Bert} wieder her. */
+	@Test
+	void restoreFindsTheDroppedCopyOnTheUnassignedUnit() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String bertId = lateSaveAgainstAnEditedParkedCopy(a, b, false);
+		assertEquals(Set.of(), carriers(a, bertId), "Bs Storno gilt");
+
+		List<ConflictList.Row> rows = new ConflictList(a::open, unit -> unit.relativePath(), (adopted, group) -> false,
+				hallId -> null).rows();
+		assertEquals(1, rows.size(), rows.toString());
+		assertEquals(ConflictList.Action.RESTORE_BOOKING, rows.get(0).action());
+		actions(a).restoreBooking(rows.get(0));
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("von A", booking(a, bertId).getComment(), "A's Fassung ist zurück");
+		assertEquals(Set.of(unassignedUnit(a, bertId)), carriers(a, bertId));
+	}
+
+	/** E5 gegen die geänderte Kopie mit strittigem Kommentar: Bs Umzug gilt; A übernimmt seinen Kommentar auf Sitz 2. */
+	@Test
+	void takeMyValueFindsTheDroppedCopyOnTheUnassignedUnit() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String bertId = lateSaveAgainstAnEditedParkedCopy(a, b, true);
+		UnitKey seat2 = seatUnit(a, 2);
+		assertEquals(Set.of(seat2), carriers(a, bertId), "Bs Umzug gilt");
+		assertEquals("B", a.eventState().get(seat2).payload().get("comment").asText(), "strittig gilt der Umzug");
+
+		List<ConflictList.Row> rows = new ConflictList(a::open, unit -> unit.relativePath(), (adopted, group) -> false,
+				hallId -> null).rows();
+		assertEquals(1, rows.size(), rows.toString());
+		assertEquals(ConflictList.Action.TAKE_MY_VALUE, rows.get(0).action());
+		actions(a).takeMyValue(rows.get(0), "comment");
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals(Set.of(seat2), carriers(a, bertId));
+		assertEquals("von A", a.eventState().get(seat2).payload().get("comment").asText(), "A's Kommentar auf Sitz 2");
+	}
+
 	/** Ein Takt nur im eigenen Client-Ordner, ohne den Sync-Client: Der Rechner sieht nichts Neues von den anderen. */
 	private void localTick(Machine machine) {
 		clock.advance(Duration.ofSeconds(2));
