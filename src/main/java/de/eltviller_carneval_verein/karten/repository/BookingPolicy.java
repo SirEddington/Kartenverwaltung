@@ -244,7 +244,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (!removed(own) && !removed(foreign)) {
 			return null;
 		}
-		boolean ownWins = Boolean.TRUE.equals(BookingTrail.ownWinsAt(input, source, base.id()));
+		Boolean ownWins = BookingTrail.ownWinsAt(input, source, base.id());
 		return BookingFate.decide(bookingId, source, base, own, foreign, ownWins, input.ownMachineId(),
 				BookingTrail.freeFor(input, source, bookingId), parkedUnchanged(input, bookingId, source, base));
 	}
@@ -258,7 +258,12 @@ public final class BookingPolicy implements ConflictPolicy {
 		UnitKey parked = UnitKey.unassignedBooking(source.eventId(), source.presentationId(), bookingId);
 		Sibling sibling = input.siblings().get(parked);
 		return !parked.equals(source) && sibling != null && sibling.snapshot().carriesBooking(bookingId)
-				&& withPlaceOf(sibling.snapshot().payload(), base.payload()).equals(base.payload());
+				&& sameExceptPlace(sibling.snapshot().payload(), base.payload());
+	}
+
+	/** Ob die Fassung bis auf die Gruppe "Platz" die der Basis ist. */
+	static boolean sameExceptPlace(ObjectNode payload, ObjectNode base) {
+		return withPlaceOf(payload, base).equals(base);
 	}
 
 	/** Eine Kopie von {@code payload} mit der Gruppe "Platz" von {@code placeFrom}. */

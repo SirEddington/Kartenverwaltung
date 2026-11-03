@@ -23,6 +23,7 @@ import de.eltviller_carneval_verein.karten.repository.BookingTrail.Kind;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.Version;
+import de.eltviller_carneval_verein.karten.store.VersionMarks;
 
 /** Die Entscheidungstabelle E1–E12 der Spec KARV-93 und E13 (KARV-124), je Zeile. A = fremd (OTHER), B = eigen (OWN). */
 class BookingFateTest {
@@ -31,6 +32,7 @@ class BookingFateTest {
 	private static final UnitKey S1 = seat("s1");
 	private static final UnitKey S3 = seat("s3");
 	private static final UnitKey S4 = seat("s4");
+	private static final UnitKey S5 = seat("s5");
 
 	private final TrailFixture world = new TrailFixture();
 	private final Version base = world.version(THIRD, null, withoutPlace("m", b -> {
@@ -390,13 +392,90 @@ class BookingFateTest {
 	@Test
 	void e13NeedsAParkedCopyAndAnUntouchedSide() {
 		assertNull(decideAtS3(cancelled(OWN), UNTOUCHED, false));
-		BookingTrail edit = kept(OTHER, booking("m", "s3", b -> b.setComment("neu")));
+		BookingTrail edit = new BookingTrail(Kind.KEPT, null,
+				world.version(OTHER, null, booking("m", "s3", b -> b.setComment("neu"))), S3);
 		assertEquals(List.of(), decideAtS3(cancelled(OWN), edit, true).deletions());
 	}
 
 	/** E13 an einem Sitz: Quelle S3, die geparkte Kopie ist M. */
 	private BookingFate decideAtS3(BookingTrail own, BookingTrail foreign, boolean parked) {
+		return decideAtS3(own, foreign, false, parked);
+	}
+
+	private BookingFate decideAtS3(BookingTrail own, BookingTrail foreign, Boolean ownWins, boolean parked) {
 		Version seated = world.version(THIRD, null, booking("m", "s3"));
-		return BookingFate.decide("m", S3, seated, own, foreign, false, OWN, true, parked);
+		return BookingFate.decide("m", S3, seated, own, foreign, ownWins, OWN, true, parked);
+	}
+
+	// Behalten an _<ID> (KARV-98, Spec 3d) -->
+
+	/** Die Parkversion: eine Auflösung hat m von S3 nach M geparkt. */
+	private Version parking() {
+		return world.version(OWN, null, withoutPlace("m", b -> {
+		}), VersionMarks.RESOLUTION.withMovedFrom(S3));
+	}
+
+	/** A hat die geparkte Kopie an M geändert (Parkweg). */
+	private BookingTrail keptAtTheCopy(String comment) {
+		Version parking = parking();
+		Version edit = world.version(OTHER, parking, withoutPlace("m", b -> b.setComment(comment)));
+		return new BookingTrail(Kind.KEPT, null, edit, M, edit, parking);
+	}
+
+	@Test
+	void e2CancellationDeletesAKeptCopyElsewhereWithMovedThere() {
+		BookingFate fate = decideAtS3(cancelled(OWN), keptAtTheCopy("A"), false);
+
+		assertNull(fate.carrier());
+		assertEquals(List.of(M), fate.deletions());
+		ConflictNote note = only(fate, S3);
+		assertEquals(ConflictNote.Kind.DELETE_WINS, note.kind());
+		assertEquals(OTHER, note.affected());
+		assertEquals(M, note.moved(), "dort liegt die weichende Fassung");
+	}
+
+	@Test
+	void e5ArrivedMoveDeletesTheKeptCopyElsewhere() {
+		BookingFate fate = decideAtS3(arrived(OWN, S4, booking("m", "s4")), keptAtTheCopy("A"), false);
+
+		assertEquals(S4, fate.carrier());
+		assertEquals(List.of(M), fate.deletions());
+		assertEquals("A", fate.content().get("comment").asText(), "A's Änderung kommt mit");
+		assertEquals("s4", fate.content().get("seatId").asText(), "der Platz bleibt der des Umzugs");
+	}
+
+	@Test
+	void e9KeptElsewhereStaysCarrierEvenWithAFreeSource() {
+		BookingFate fate = decideAtS3(failed(OWN, S1, booking("m", "s1")), keptAtTheCopy("A"), false);
+
+		assertEquals(M, fate.carrier());
+		assertTrue(fate.content().get("unassigned").asBoolean(), "ohne Platz, nicht auf dem Sitz der Quelle");
+		assertEquals(List.of(), fate.deletions());
+	}
+
+	/** Gilt an der Quelle keine Nutzer-Version (nur die Auflösung), gewinnt die Seite mit dem Parkweg, in beiden Rollen. */
+	@Test
+	void e7ParkingSideWinsWhenNoUserVersionStandsAtTheSource() {
+		Version parking = parking();
+		Version moved = world.version(OTHER, parking, null, to(S5));
+		BookingTrail viaParking = new BookingTrail(Kind.ARRIVED, moved, world.version(OTHER, null, booking("m", "s5")), S5,
+				null, parking);
+		BookingTrail stale = arrived(OWN, S4, booking("m", "s4"));
+
+		BookingFate foreignParks = decideAtS3(stale, viaParking, null, false);
+		BookingFate ownParks = decideAtS3(viaParking, stale, null, false);
+
+		assertEquals(S5, foreignParks.carrier());
+		assertEquals(List.of(S4), foreignParks.deletions());
+		assertEquals(S5, ownParks.carrier());
+		assertEquals(List.of(S4), ownParks.deletions());
+	}
+
+	@Test
+	void e12KeptAtSourceAgainstKeptElsewhereIsRuleFour() {
+		BookingTrail atSource = new BookingTrail(Kind.KEPT, null,
+				world.version(OWN, null, booking("m", "s3", b -> b.setComment("B"))), S3);
+
+		assertNull(decideAtS3(atSource, keptAtTheCopy("A"), false));
 	}
 }
