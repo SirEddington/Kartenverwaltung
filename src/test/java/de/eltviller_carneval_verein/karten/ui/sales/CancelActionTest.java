@@ -27,9 +27,14 @@ class CancelActionTest {
 	}
 
 	@Test
-	void menuTextNamesOneBookingOrTheCount() {
-		assertEquals("Buchung stornieren…", CancelAction.menuText(1));
-		assertEquals("Ausgewählte Buchungen stornieren… (3)", CancelAction.menuText(3));
+	void menuTextCountsOnlyBookingsWithData() {
+		Booking first = seat(1, null, "Müller");
+		Booking second = seat(2, null, "Meier");
+		Booking empty = seat(3, null, null);
+
+		assertEquals("Buchung stornieren…", CancelAction.menuText(List.of(first, empty)));
+		assertEquals("Ausgewählte Buchungen stornieren… (2)", CancelAction.menuText(List.of(first, second, empty)));
+		assertEquals("Buchung stornieren…", CancelAction.menuText(List.of(empty)), "gesperrt, aber benannt");
 	}
 
 	@Test

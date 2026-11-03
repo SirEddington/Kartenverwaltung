@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingCancellation;
@@ -20,9 +21,10 @@ final class CancelAction {
 	private CancelAction() {
 	}
 
-	/** Beschriftung des Menüeintrags (für eine Buchung ohne Anzahl). */
-	static String menuText(int count) {
-		return count == 1 ? "Buchung stornieren…" : "Ausgewählte Buchungen stornieren… (" + count + ")";
+	/** Beschriftung des Menüeintrags; die Anzahl zählt wie die Rückfrage nur Buchungen mit Daten (eine ohne Anzahl). */
+	static String menuText(List<Booking> bookings) {
+		long count = bookings.stream().filter(Booking::hasData).count();
+		return count <= 1 ? "Buchung stornieren…" : "Ausgewählte Buchungen stornieren… (" + count + ")";
 	}
 
 	/** Ob es unter den Buchungen etwas zu stornieren gibt; sonst ist der Menüeintrag gesperrt. */
@@ -31,18 +33,21 @@ final class CancelAction {
 	}
 
 	/**
-	 * Fragt nach und storniert dann die Buchungen mit Daten. Bei "sofort speichern" wird gleich gespeichert, wie nach
-	 * dem Verkaufsdialog.
+	 * Fragt nach und leert dann die Buchungen mit Daten ({@link BookingCancellation#empty}). Bei "sofort speichern" wird
+	 * gleich gespeichert, wie nach dem Verkaufsdialog.
 	 *
+	 * @param removeIfCancelled nimmt eine geleerte Buchung ohne Platz aus der Vorstellung; die Kartentabelle wartet damit
+	 *                          das Ende einer laufenden Bearbeitung ab
 	 * @return {@code true}, wenn storniert wurde; die Ansicht frischt sich dann auf
 	 */
-	static boolean run(List<Booking> bookings, Window owner) {
+	static boolean run(List<Booking> bookings, Window owner, Consumer<Booking> removeIfCancelled) {
 		List<Booking> withData = bookings.stream().filter(Booking::hasData).toList();
 		if (withData.isEmpty() || !ConfirmDialog.confirm(withData.size() == 1 ? "Buchung stornieren" : "Buchungen stornieren",
 				question(withData), "Stornieren", "button-danger", owner)) {
 			return false;
 		}
-		BookingCancellation.cancel(withData);
+		withData.forEach(BookingCancellation::empty);
+		withData.forEach(removeIfCancelled);
 		if (BookingAutoSave.settingOn()) {
 			BookingAutoSave.flushActive();
 		}

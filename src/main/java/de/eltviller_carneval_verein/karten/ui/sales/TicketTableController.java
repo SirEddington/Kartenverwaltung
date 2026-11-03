@@ -235,7 +235,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 				sellItem.setDisable(!editMode);
 				sellItem.setText(SeatSelectionEditor.menuText(seatTable.getSelectionModel().getSelectedItems().size()));
 				List<Booking> chosen = selectedBookings();
-				cancelItem.setText(CancelAction.menuText(chosen.size()));
+				cancelItem.setText(CancelAction.menuText(chosen));
 				cancelItem.setDisable(!editMode || !CancelAction.anyWithData(chosen));
 				BookingDTO clicked = row.getItem();
 				assignItem.setVisible(clicked.getBooking().isUnassigned());
@@ -270,7 +270,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	/** Storniert die gewählten Buchungen nach Rückfrage (KARV-121); stornierte ohne Platz verschwinden aus der Tabelle. */
 	private void cancelSelection() {
-		if (CancelAction.run(selectedBookings(), seatTable.getScene().getWindow())) {
+		if (CancelAction.run(selectedBookings(), seatTable.getScene().getWindow(), this::removeIfCancelledAfterCommit)) {
 			seatTable.getSelectionModel().clearSelection();
 			showRows();
 		}
@@ -420,16 +420,14 @@ public class TicketTableController implements ContentController, SalesStateAware
 		// sich danach neu, weil dabei ein Datum in einer anderen Spalte entsteht
 		colLastName.setOnEditCommit(editEvent -> {
 			Booking edited = editEvent.getRowValue().getBooking();
-			switch (askOnNameRemoval(edited, editEvent.getNewValue())) {
-			case ABORT -> {
-				refreshAfterCommit(); // die Zelle zeigt sonst den leeren Text, den sie nach dem Commit übernimmt
+			String newLastName = editEvent.getNewValue();
+			if (BookingCancellation.leavesData(edited, newLastName)) {
+				// Die Rückfrage erst nach dem Commit: Die Tabelle kann ihn auch im Layout auslösen (Ende des Bearbeitens), und
+				// dort ist ein modaler Dialog verboten. Bis zur Antwort bleibt das Modell unverändert
+				Platform.runLater(() -> applyNameRemoval(edited, newLastName));
 				return;
 			}
-			case CANCEL_BOOKINGS -> BookingCancellation.empty(edited);
-			case NAME_ONLY -> SaleDates.change(edited, booking -> booking.setLastName(editEvent.getNewValue()));
-			}
-			refreshAfterCommit();
-			removeIfCancelledAfterCommit(edited);
+			applyLastName(edited, newLastName);
 		});
 
 		colFirstName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
@@ -504,19 +502,29 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colReserved.setCellFactory(CheckBoxTableCell.forTableColumn(colReserved));
 	}
 
+	private void applyLastName(Booking booking, String newLastName) {
+		SaleDates.change(booking, target -> target.setLastName(newLastName));
+		refreshAfterCommit();
+		removeIfCancelledAfterCommit(booking);
+	}
+
 	/**
-	 * Fragt, wenn der neue Nachname leer ist und die Buchung ohne ihn noch Daten trüge, ob sie storniert werden soll
-	 * (KARV-121). Vor dem Übernehmen, damit "sofort speichern" den gelöschten Namen nicht vorher schreibt. Ohne
-	 * Rückfrage gilt {@link NameRemovalDialog.Choice#NAME_ONLY}: der Name wird übernommen wie eingegeben.
+	 * Der Nachname wurde geleert, die Buchung trüge ohne ihn noch Daten: Fragt, ob sie storniert werden soll (KARV-121), und
+	 * übernimmt erst dann. So schreibt "sofort speichern" den gelöschten Namen nicht vorher.
 	 */
-	private NameRemovalDialog.Choice askOnNameRemoval(Booking booking, String newLastName) {
-		if (!BookingCancellation.leavesData(booking, newLastName)) {
-			return NameRemovalDialog.Choice.NAME_ONLY;
-		}
+	private void applyNameRemoval(Booking booking, String newLastName) {
 		Booking remaining = booking.copy();
 		remaining.setParent(booking.getParent());
 		remaining.setLastName(null);
-		return NameRemovalDialog.ask(List.of(remaining), seatTable.getScene().getWindow());
+		switch (NameRemovalDialog.ask(List.of(remaining), seatTable.getScene().getWindow())) {
+		case ABORT -> refreshAfterCommit(); // die Zelle zeigt sonst den leeren Text, den sie beim Commit übernommen hat
+		case CANCEL_BOOKINGS -> {
+			BookingCancellation.empty(booking);
+			refreshAfterCommit();
+			removeIfCancelledAfterCommit(booking);
+		}
+		case NAME_ONLY -> applyLastName(booking, newLastName);
+		}
 	}
 
 	/**
