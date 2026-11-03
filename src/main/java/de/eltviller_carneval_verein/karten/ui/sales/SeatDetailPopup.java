@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.function.BooleanSupplier;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingCancellation;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.SaleDates;
 import de.eltviller_carneval_verein.karten.ui.EditingUnits;
@@ -414,7 +415,17 @@ public final class SeatDetailPopup {
 				}
 				// Nicht lesbare Daten zuerst auflösen (heute bzw. alter Stand), der Klick löst den Fokusverlust nicht immer aus
 				dateResolvers.forEach(Runnable::run);
+				// Ein gelöschter Nachname, bei dem andere Daten bleiben: stornieren oder nur den Namen löschen (KARV-121)
+				List<Booking> removals = edit.nameRemovalsLeavingData();
+				NameRemovalDialog.Choice choice = removals.isEmpty() ? NameRemovalDialog.Choice.NAME_ONLY
+						: NameRemovalDialog.ask(removals.stream().map(edit::preview).toList(), popup);
+				if (choice == NameRemovalDialog.Choice.ABORT) {
+					return;
+				}
 				edit.apply();
+				if (choice == NameRemovalDialog.Choice.CANCEL_BOOKINGS) {
+					BookingCancellation.cancel(removals);
+				}
 				popup.hide();
 				onApplied.run();
 				if (saveImmediately) {

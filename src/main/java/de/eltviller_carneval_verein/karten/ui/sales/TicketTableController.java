@@ -12,6 +12,7 @@ import java.util.Set;
 import org.controlsfx.control.table.TableFilter;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingCancellation;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
@@ -279,7 +280,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 		List<Booking> bookings = selectedBookings();
 		// Der Dialog kann eine Buchung ohne Platz leeren (Namen löschen): Sie ist dann storniert wie nach einer Zelle
 		activeDialog = SeatSelectionEditor.edit(bookings, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), () -> {
-			seatTable.refresh();
+			// Neu aufbauen statt nur neu zeichnen: Ein Storno im Dialog nimmt Buchungen ohne Platz schon aus der Vorstellung
+			showRows();
 			bookings.forEach(this::removeIfCancelledAfterCommit);
 		}, this::deselect);
 	}
@@ -417,9 +419,17 @@ public class TicketTableController implements ContentController, SalesStateAware
 		// Name, Zahlung und "Abgeholt" über SaleDates: Wird eine Aktion neu gesetzt, trägt es das Datum ein; die Tabelle zeichnet
 		// sich danach neu, weil dabei ein Datum in einer anderen Spalte entsteht
 		colLastName.setOnEditCommit(editEvent -> {
-			SaleDates.change(editEvent.getRowValue().getBooking(), booking -> booking.setLastName(editEvent.getNewValue()));
+			Booking edited = editEvent.getRowValue().getBooking();
+			switch (askOnNameRemoval(edited, editEvent.getNewValue())) {
+			case ABORT -> {
+				refreshAfterCommit(); // die Zelle zeigt sonst den leeren Text, den sie nach dem Commit übernimmt
+				return;
+			}
+			case CANCEL_BOOKINGS -> BookingCancellation.empty(edited);
+			case NAME_ONLY -> SaleDates.change(edited, booking -> booking.setLastName(editEvent.getNewValue()));
+			}
 			refreshAfterCommit();
-			removeIfCancelledAfterCommit(editEvent.getRowValue().getBooking());
+			removeIfCancelledAfterCommit(edited);
 		});
 
 		colFirstName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
@@ -492,6 +502,21 @@ public class TicketTableController implements ContentController, SalesStateAware
 		// Nur lesbar: Rollstuhlplatz (gehört zur Bestuhlung) und Reserviert (folgt aus dem Namen)
 		colWheelchair.setCellFactory(CheckBoxTableCell.forTableColumn(colWheelchair));
 		colReserved.setCellFactory(CheckBoxTableCell.forTableColumn(colReserved));
+	}
+
+	/**
+	 * Fragt, wenn der neue Nachname leer ist und die Buchung ohne ihn noch Daten trüge, ob sie storniert werden soll
+	 * (KARV-121). Vor dem Übernehmen, damit "sofort speichern" den gelöschten Namen nicht vorher schreibt. Ohne
+	 * Rückfrage gilt {@link NameRemovalDialog.Choice#NAME_ONLY}: der Name wird übernommen wie eingegeben.
+	 */
+	private NameRemovalDialog.Choice askOnNameRemoval(Booking booking, String newLastName) {
+		if (!BookingCancellation.leavesData(booking, newLastName)) {
+			return NameRemovalDialog.Choice.NAME_ONLY;
+		}
+		Booking remaining = booking.copy();
+		remaining.setParent(booking.getParent());
+		remaining.setLastName(null);
+		return NameRemovalDialog.ask(List.of(remaining), seatTable.getScene().getWindow());
 	}
 
 	/**

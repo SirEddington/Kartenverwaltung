@@ -141,13 +141,26 @@ public final class SeatBulkEdit {
 			if (isBlank(booking.getLastName())) {
 				continue;
 			}
-			Booking after = booking.copy();
-			fields.forEach(field -> field.applyTo(after));
+			Booking after = preview(booking);
 			if (isBlank(after.getLastName()) && after.hasData()) {
 				removals.add(booking);
 			}
 		}
 		return removals;
+	}
+
+	/**
+	 * Der Stand der Buchung nach dem Übernehmen, ohne sie zu ändern: eine Kopie mit ihrer Vorstellung (für Preis und
+	 * gezahlten Betrag), ohne Reste und mit den Eingaben. Die heutigen Daten von {@link SaleDates} fehlen darin.
+	 */
+	public Booking preview(Booking booking) {
+		Booking after = booking.copy();
+		after.setParent(booking.getParent());
+		if (leftoverViews.containsKey(booking)) {
+			after.clearLeftovers();
+		}
+		fields.forEach(field -> field.applyTo(after));
+		return after;
 	}
 
 	private static boolean isBlank(String text) {
