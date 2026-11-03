@@ -717,4 +717,40 @@ class BookingSyncTest {
 		assertTrue(lost.isUnassigned());
 		assertEquals(9, lost.getTableNumber());
 	}
+
+	/** KARV-121: Reste einer alten Buchung (kein Nachname, nicht bezahlt) belegen den Sitz nicht und gehen verloren. */
+	@Test
+	void assign_ersetzt_den_Platzhalter_mit_Resten() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		BookingSync.sync(presentation, plan);
+		Seat target = seat(plan, 2, 1);
+		Booking leftovers = bookingOf(presentation, target);
+		leftovers.setComment("storniert");
+		Booking lost = snapshotBooking(presentation, "Z", 9, 9);
+		lost.setLastName("Schmidt");
+		lost.setUnassigned(true);
+
+		boolean assigned = BookingSync.assign(presentation, plan, lost, target);
+
+		assertTrue(assigned);
+		assertFalse(presentation.getBookings().contains(leftovers));
+		assertSame(lost, bookingOf(presentation, target));
+	}
+
+	@Test
+	void assign_lehnt_bezahlten_Sitz_ohne_Namen_ab() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		BookingSync.sync(presentation, plan);
+		Seat target = seat(plan, 1, 2);
+		Booking occupant = bookingOf(presentation, target);
+		occupant.setPaymentStatus(PaymentStatus.CARD);
+		Booking lost = snapshotBooking(presentation, "Z", 9, 9);
+		lost.setLastName("Schmidt");
+		lost.setUnassigned(true);
+
+		assertFalse(BookingSync.assign(presentation, plan, lost, target));
+		assertSame(occupant, bookingOf(presentation, target));
+	}
 }

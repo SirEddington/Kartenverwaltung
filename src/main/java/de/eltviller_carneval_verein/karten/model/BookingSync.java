@@ -109,9 +109,10 @@ public final class BookingSync {
 	}
 
 	/**
-	 * Ordnet die Buchung dem Sitz zu (zum Beispiel eine Buchung ohne Platz). Hat die bisherige Buchung des Sitzes
-	 * Daten, passiert nichts und das Ergebnis ist {@code false}; sonst wird diese leere Buchung entfernt und
-	 * {@code booking} bekommt die Momentaufnahme des Sitzes und {@code unassigned = false}.
+	 * Ordnet die Buchung dem Sitz zu (zum Beispiel eine Buchung ohne Platz). Ist die bisherige Buchung des Sitzes
+	 * reserviert oder bezahlt, passiert nichts und das Ergebnis ist {@code false}; sonst wird sie entfernt, samt Resten
+	 * wie einem alten Kommentar ({@link Booking#hasLeftovers()}, KARV-121), und {@code booking} bekommt die
+	 * Momentaufnahme des Sitzes und {@code unassigned = false}.
 	 *
 	 * @return {@code true}, wenn die Buchung dem Sitz zugeordnet wurde
 	 */
@@ -122,7 +123,7 @@ public final class BookingSync {
 		List<Booking> others = new ArrayList<>();
 		for (Booking other : p.getBookings()) {
 			if (other != booking && seat.getId().equals(other.getSeatId())) {
-				if (other.hasData()) {
+				if (other.getStatus() != SeatStatus.FREE) {
 					return false;
 				}
 				others.add(other);
