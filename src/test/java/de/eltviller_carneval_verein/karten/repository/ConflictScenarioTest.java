@@ -33,7 +33,6 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -665,7 +664,6 @@ class ConflictScenarioTest {
 	 * Wie {@link #doubleSaleLoserWhoMovedTheBookingSeesItOnce}, dann speichert B: Bert soll genau einmal leben, Anna behält
 	 * den Sitz, nichts geht verloren.
 	 */
-	@Disabled("KARV-124: Bert lebt danach in zwei Einheiten, auf dem neuen Sitz und ohne Platz (bestand schon vor KARV-97)")
 	@Test
 	void doubleSaleLoserWhoMovedTheBookingKeepsItOnceAfterSaving() throws IOException {
 		Machine[] m = machines("a", "b");
@@ -689,6 +687,57 @@ class ConflictScenarioTest {
 	}
 
 	/**
+	 * KARV-124: Der Verlierer eines Doppelverkaufs storniert seine Buchung ungespeichert, als seine Zusammenführung
+	 * eintrifft, und speichert danach. Das Storno gilt: Die Kopie, die die Zusammenführung "ohne Platz" geparkt hat, fällt
+	 * weg, statt still weiterzuleben.
+	 */
+	@Test
+	void doubleSaleLoserWhoCancelledTheBookingCancelsItAfterSaving() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String bertId = doubleSaleWhileTheLoserCancels(a, b);
+
+		b.repository.saveEvent(b.event);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("Anna", lastName(a.eventState().get(seatUnit(a, 1))));
+		assertEquals(Set.of(), carriers(a, bertId), "Bert bleibt storniert");
+		for (Machine machine : m) {
+			assertEquals(Set.of(), carriersInModel(machine, bertId), machine.name);
+			assertEquals("Anna", machine.seat(1).getLastName(), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+		}
+		assertTrue(a.open().isEmpty(), a.open().toString());
+	}
+
+	/**
+	 * Wie {@link #doubleSaleLoserWhoCancelledTheBookingCancelsItAfterSaving}, aber B ändert Bert "ohne Platz", nachdem er
+	 * dort erschienen ist: Die Kopie ist nicht mehr die geparkte, die Änderung kam nach dem Storno und hält Bert am Leben.
+	 */
+	@Test
+	void doubleSaleLoserWhoEditsTheParkedCopyAfterCancellingKeepsIt() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String bertId = doubleSaleWhileTheLoserCancels(a, b);
+		booking(b, bertId).setComment("Notiz");
+
+		b.repository.saveEvent(b.event);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		UnitKey parked = unassignedUnit(a, bertId);
+		assertEquals("Anna", lastName(a.eventState().get(seatUnit(a, 1))));
+		assertEquals(Set.of(parked), carriers(a, bertId), "Bert lebt einmal, ohne Platz");
+		assertEquals("Notiz", a.eventState().get(parked).payload().get("comment").asText());
+	}
+
+	/**
 	 * A verkauft Sitz 1 an "Anna", B denselben Sitz an "Bert"; beide speichern. B verschiebt Bert ungespeichert auf Sitz 2,
 	 * dann takten beide, bis Ruhe herrscht: Bert verliert den Doppelverkauf.
 	 *
@@ -702,6 +751,24 @@ class ConflictScenarioTest {
 		b.tick();
 		untilQuiet(a, b);
 		return bert.getId();
+	}
+
+	/**
+	 * Wie {@link #doubleSaleWhileTheLoserMoves}, aber B storniert Bert ungespeichert. Danach steht Bert in B's Modell "ohne
+	 * Platz", wie ihn die Zusammenführung geparkt hat.
+	 *
+	 * @return Berts Kennung
+	 */
+	private String doubleSaleWhileTheLoserCancels(Machine a, Machine b) throws IOException {
+		a.sell(1, "Anna");
+		Booking bert = b.sell(1, "Bert");
+		String bertId = bert.getId();
+		bert.clearCustomerData();
+		a.tick();
+		b.tick();
+		untilQuiet(a, b);
+		assertEquals(Set.of("null"), carriersInModel(b, bertId), "Bert steht bei B ohne Platz");
+		return bertId;
 	}
 
 	/**

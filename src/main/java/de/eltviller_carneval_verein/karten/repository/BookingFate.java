@@ -15,8 +15,10 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
 
 /**
  * Was aus einer Buchung wird, wenn zwei Seiten an ihrer Quelle auseinanderliefen (KARV-93, Entscheidungstabelle E1–E12
- * der Spec). Entschieden wird nur aus den Absichten ({@link BookingTrail}), nie aus dem, was Auflösungen schon schrieben:
- * Jeder Rechner kommt in jeder Reihenfolge zum selben Ergebnis. Die Tabelle ist symmetrisch.
+ * der Spec, dazu E13 aus KARV-124). Entschieden wird nur aus den Absichten ({@link BookingTrail}), nie aus dem, was
+ * Auflösungen schon schrieben: Jeder Rechner kommt in jeder Reihenfolge zum selben Ergebnis. Die Tabelle ist symmetrisch.
+ * Einzige Ausnahme ist E13: Ob eine Auflösung die Buchung "ohne Platz" geparkt hat, sagt nur deren Einheit
+ * {@code _<ID>}; dort hängt das Ergebnis davon ab, ob die geparkte Version schon eingetroffen oder schon geändert ist.
  *
  * @param carrier   die Einheit, in der die Buchung danach lebt; {@code null}: nirgends
  * @param content   ihr Inhalt dort; {@code null}: der Inhalt dort bleibt, wie er ist (E6)
@@ -37,7 +39,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 
 	/**
 	 * Entscheidet nach der Tabelle; {@code null}, wenn es nichts zu entscheiden gibt (beide behalten: Regel 4; eine Seite
-	 * unberührt, außer E11).
+	 * unberührt, außer E11 und E13).
 	 *
 	 * @param bookingId     die Buchung
 	 * @param source        ihre Quelle
@@ -48,12 +50,13 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 	 * @param ownMachineId  die ID dieses Rechners
 	 * @param sourceFree    ob die Quelle die Buchung wieder aufnehmen kann ({@link BookingTrail#freeFor}); sonst gilt dort
 	 *                      inzwischen eine andere Buchung, und E9 kann sie nicht dorthin zurücklegen
+	 * @param parked        ob eine Auflösung die Buchung in ihrer Einheit {@code _<ID>} unverändert geparkt hat (E13)
 	 */
 	static BookingFate decide(String bookingId, UnitKey source, Version base, BookingTrail own, BookingTrail foreign,
-			boolean ownWinsSource, String ownMachineId, boolean sourceFree) {
+			boolean ownWinsSource, String ownMachineId, boolean sourceFree, boolean parked) {
 		Side mine = new Side(own, ownMachineId);
 		Side theirs = new Side(foreign, machineOf(foreign));
-		Decider decider = new Decider(bookingId, source, base, sourceFree);
+		Decider decider = new Decider(bookingId, source, base, sourceFree, parked);
 		return decider.decide(mine, theirs, ownWinsSource);
 	}
 
@@ -86,14 +89,18 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 	}
 
 	/** Die Entscheidung für eine Buchung an ihrer Quelle. */
-	private record Decider(String bookingId, UnitKey source, Version base, boolean sourceFree) {
+	private record Decider(String bookingId, UnitKey source, Version base, boolean sourceFree, boolean parked) {
 
 		BookingFate decide(Side own, Side foreign, boolean ownWinsSource) {
 			Kind a = own.kind();
 			Kind b = foreign.kind();
 			if (a == Kind.UNTOUCHED || b == Kind.UNTOUCHED) {
-				Side failed = a == Kind.FAILED ? own : b == Kind.FAILED ? foreign : null;
-				return failed == null ? null : aloneFailed(failed);
+				Side touched = a == Kind.UNTOUCHED ? foreign : own;
+				return switch (touched.kind()) {
+				case FAILED -> aloneFailed(touched);
+				case CANCELLED, ARRIVED -> againstParked(touched);
+				default -> null;
+				};
 			}
 			if (a == Kind.KEPT && b == Kind.KEPT) {
 				return null;
@@ -220,6 +227,19 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 			UnitKey carrier = unassigned();
 			return new BookingFate(carrier, BookingPolicy.withoutPlace(fieldsOf(failed)), List.of(),
 					List.of(atTarget(failed, carrier)));
+		}
+
+		/**
+		 * E13 (KARV-124): Eine Seite hat die Buchung storniert oder umgezogen, die andere nichts getan, aber eine Auflösung
+		 * hat die Buchung unverändert "ohne Platz" geparkt (Doppelverkauf auf dem Stand vor dem Storno oder Umzug). Das
+		 * Parken ist keine Absicht: Die geparkte Kopie fällt weg, die Buchung lebt am Ende des Umzugs, wie sie dort ist,
+		 * nach einem Storno nirgends. Ohne Vermerk; den Doppelverkauf hält dessen eigener Vermerk fest. Ohne geparkte
+		 * Kopie, oder wenn der Umzug in ihrer Einheit selbst endet, gibt es nichts zu entscheiden.
+		 */
+		private BookingFate againstParked(Side removed) {
+			UnitKey copy = unassigned();
+			UnitKey carrier = removed.kind() == Kind.CANCELLED ? null : removed.trail().end();
+			return !parked || copy.equals(carrier) ? null : new BookingFate(carrier, null, List.of(copy), List.of());
 		}
 
 		/** Der Doppelverkauf einer Seite an ihrem gescheiterten Ziel; die Gegenseite dort setzt die Anwendung ein. */
