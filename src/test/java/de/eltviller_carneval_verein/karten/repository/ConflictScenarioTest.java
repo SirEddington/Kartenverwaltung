@@ -682,8 +682,7 @@ class ConflictScenarioTest {
 		assertEquals("Anna", lastName(a.eventState().get(seatUnit(a, 1))));
 		assertEquals(1, carriers(a, bertId).size(), "Bert lebt in genau einer Einheit: " + carriers(a, bertId));
 		for (Machine machine : m) {
-			assertEquals(1, machine.friday().getBookings().stream().filter(booking -> bertId.equals(booking.getId())
-					&& booking.hasData()).count(), machine.name);
+			assertEquals(1, carriersInModel(machine, bertId).size(), machine.name);
 			assertEquals("Anna", machine.seat(1).getLastName(), machine.name);
 			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
 			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
@@ -1088,14 +1087,13 @@ class ConflictScenarioTest {
 		assertEquals(bSeat, atA.getSeatId(), "der Abgleich setzt Müller wie B");
 		Seat chosen = otherPlan.getSeats().stream().filter(seat -> !seat.getId().equals(bSeat)).findFirst().orElseThrow();
 		assertTrue(BookingSync.assign(a.friday(), otherPlan, atA, chosen));
+		UnitKey bUnit = UnitKey.booking(a.event.getId(), a.friday().getId(), bSeat);
 
 		if (saveFirst) {
 			a.repository.saveEvent(a.event);
 			a.repository.applyForeign(List.copyOf(a.eventState().keySet()));
 		} else {
-			UnitKey oldSeat = UnitKey.booking(a.event.getId(), a.friday().getId(), a.plan().getSeats().get(0).getId());
-			UnitKey derivedSeat = UnitKey.booking(a.event.getId(), a.friday().getId(), bSeat);
-			assertEquals(Set.of(oldSeat, derivedSeat), a.repository.applyForeign(List.copyOf(a.eventState().keySet()))
+			assertEquals(Set.of(seatUnit(a, 0), bUnit), a.repository.applyForeign(List.copyOf(a.eventState().keySet()))
 					.deferred().stream().map(Deferral::unit).collect(Collectors.toSet()),
 					"alter und abgeleiteter Sitz warten gemeinsam auf die Platzwahl");
 			assertEquals(Set.of(chosen.getId()), carriersInModel(a, mullerId), "Müller steht einmal, auf dem gewählten Sitz");
@@ -1106,7 +1104,6 @@ class ConflictScenarioTest {
 		untilQuiet(m);
 
 		assertConverged(m);
-		UnitKey bUnit = UnitKey.booking(a.event.getId(), a.friday().getId(), bSeat);
 		assertEquals(Set.of(bUnit), carriers(a, mullerId), "Bs Umzug gilt, B hat zuerst gespeichert");
 		List<OpenConflict> open = a.open();
 		assertEquals(1, open.size(), open.toString());
