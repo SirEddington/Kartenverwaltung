@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -272,12 +271,11 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		MenuItem sellItem = new MenuItem(SeatSelectionEditor.menuText(selectedBookings.contains(booking) ? selectedBookings.size() : 1));
 		sellItem.setDisable(!editMode);
 		// Stornieren gilt für dieselbe Auswahl wie der Verkauf (KARV-121); gesperrt, wenn keine gewählte Buchung Daten trägt
-		List<Booking> chosen = selectedBookings.contains(booking) ? List.copyOf(selectedBookings) : List.of(booking);
-		MenuItem cancelItem = new MenuItem(CancelAction.menuText(chosen));
-		cancelItem.setDisable(!editMode || !CancelAction.anyWithData(chosen));
+		MenuItem cancelItem = new MenuItem();
+		CancelAction.prepare(cancelItem, selectedBookings.contains(booking) ? List.copyOf(selectedBookings) : List.of(booking), editMode);
 		selectionMenu = new ContextMenu(sellItem, cancelItem);
 		sellItem.setOnAction(action -> sellSelection(selectionMenu.getAnchorX(), selectionMenu.getAnchorY()));
-		cancelItem.setOnAction(action -> cancelSelection(chosen));
+		cancelItem.setOnAction(action -> cancelSelection());
 		selectionMenu.show(viewportPane, event.getScreenX(), event.getScreenY());
 	}
 
@@ -295,9 +293,9 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		}
 	}
 
-	private void cancelSelection(List<Booking> bookings) {
+	private void cancelSelection() {
 		closePopup();
-		if (CancelAction.run(bookings, viewportPane.getScene().getWindow(), BookingSync::removeIfCancelled)) {
+		if (CancelAction.run(List.copyOf(selectedBookings), viewportPane.getScene().getWindow())) {
 			selectedBookings.clear();
 			renderHall();
 		}

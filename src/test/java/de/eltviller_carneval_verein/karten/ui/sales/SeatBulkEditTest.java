@@ -498,7 +498,9 @@ class SeatBulkEditTest {
 
 		edit.lastName().clear();
 
-		assertEquals(List.of(withComment, paid), edit.nameRemovalsLeavingData());
+		assertEquals(List.of(withComment, paid), List.copyOf(edit.nameRemovalsLeavingData().keySet()));
+		assertEquals(null, edit.nameRemovalsLeavingData().get(withComment).getLastName(), "der Stand danach");
+		assertEquals("Fensterplatz", edit.nameRemovalsLeavingData().get(withComment).getComment());
 		assertEquals("Meier", withComment.getLastName(), "nur gefragt, nichts übernommen");
 	}
 
@@ -509,13 +511,13 @@ class SeatBulkEditTest {
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(withComment));
 
 		edit.lastName().change("");
-		assertEquals(List.of(withComment), edit.nameRemovalsLeavingData(), "das geleerte Namensfeld");
+		assertEquals(List.of(withComment), List.copyOf(edit.nameRemovalsLeavingData().keySet()), "das geleerte Namensfeld");
 
 		edit.comment().change("");
-		assertEquals(List.of(), edit.nameRemovalsLeavingData(), "auch der Kommentar geleert: nichts bleibt");
+		assertTrue(edit.nameRemovalsLeavingData().isEmpty(), "auch der Kommentar geleert: nichts bleibt");
 
 		SeatBulkEdit renamed = new SeatBulkEdit(List.of(withComment));
 		renamed.lastName().change("Schulz");
-		assertEquals(List.of(), renamed.nameRemovalsLeavingData());
+		assertTrue(renamed.nameRemovalsLeavingData().isEmpty());
 	}
 }

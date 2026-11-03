@@ -9,8 +9,6 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import de.eltviller_carneval_verein.karten.model.BookingCancellation.Summary;
-
 /** Stornieren einer Buchung (KARV-121) und die Frage, ob das Löschen des Nachnamens Daten zurücklässt. */
 class BookingCancellationTest {
 
@@ -68,18 +66,24 @@ class BookingCancellationTest {
 		assertEquals(Integer.valueOf(1800), empty.getPrice());
 	}
 
+	/** Ob das Ändern des Nachnamens auf {@code newLastName} Daten zurückließe. */
+	private static boolean leaves(Booking booking, String newLastName) {
+		return BookingCancellation.leavesData(booking, BookingCancellation.withLastName(booking, newLastName));
+	}
+
 	@Test
-	void empty_laesst_eine_Buchung_ohne_Platz_leer_und_ohne_Platz_in_der_Liste() {
+	void withLastName_ist_eine_Kopie_mit_Vorstellung() {
 		Presentation presentation = new Presentation();
-		Booking booking = onSeat(presentation, "Schmidt");
-		booking.setUnassigned(true);
+		presentation.changePrice(2000);
+		Booking booking = onSeat(presentation, "Müller");
+		booking.setPaymentStatus(PaymentStatus.CASH);
 
-		BookingCancellation.empty(booking);
+		Booking after = BookingCancellation.withLastName(booking, null);
 
-		assertTrue(presentation.getBookings().contains(booking));
-		assertFalse(booking.hasData());
-		assertTrue(booking.isUnassigned());
-		assertTrue(BookingSync.removeIfCancelled(booking));
+		assertEquals("Müller", booking.getLastName());
+		assertEquals(null, after.getLastName());
+		assertEquals(Integer.valueOf(2000), after.getPaidCents(), "der gezahlte Betrag braucht die Vorstellung");
+		assertFalse(presentation.getBookings().contains(after));
 	}
 
 	@Test
@@ -88,9 +92,9 @@ class BookingCancellationTest {
 		booking.setLastName("Müller");
 		booking.setComment("storniert");
 
-		assertTrue(BookingCancellation.leavesData(booking, ""));
-		assertTrue(BookingCancellation.leavesData(booking, null));
-		assertTrue(BookingCancellation.leavesData(booking, "  "));
+		assertTrue(leaves(booking, ""));
+		assertTrue(leaves(booking, null));
+		assertTrue(leaves(booking, "  "));
 	}
 
 	@Test
@@ -100,19 +104,19 @@ class BookingCancellationTest {
 		booking.setPrice(1800);
 		booking.setReservationDate(java.time.LocalDate.of(2026, 10, 1));
 
-		assertFalse(BookingCancellation.leavesData(booking, ""));
+		assertFalse(leaves(booking, ""));
 	}
 
 	@Test
 	void leavesData_ist_falsch_ohne_bisherigen_Namen_oder_mit_neuem_Namen() {
 		Booking noName = new Booking();
 		noName.setComment("Notiz");
-		assertFalse(BookingCancellation.leavesData(noName, ""), "Name war schon leer");
+		assertFalse(leaves(noName, ""), "Name war schon leer");
 
 		Booking renamed = new Booking();
 		renamed.setLastName("Müller");
 		renamed.setComment("Notiz");
-		assertFalse(BookingCancellation.leavesData(renamed, "Meier"), "neuer Name");
+		assertFalse(leaves(renamed, "Meier"), "neuer Name");
 	}
 
 	@Test
@@ -121,24 +125,6 @@ class BookingCancellationTest {
 		booking.setLastName("Müller");
 		booking.setPaymentStatus(PaymentStatus.CARD);
 
-		assertTrue(BookingCancellation.leavesData(booking, ""));
-	}
-
-	@Test
-	void Summary_zaehlt_nur_Buchungen_mit_Daten_samt_bezahlt_Betrag_und_abgeholt() {
-		Presentation presentation = new Presentation();
-		presentation.changePrice(2000);
-		Booking reserved = onSeat(presentation, "Müller");
-		Booking paid = onSeat(presentation, "Meier");
-		paid.setPaymentStatus(PaymentStatus.CASH);
-		Booking paidCollected = onSeat(presentation, "Schulz");
-		paidCollected.setPaymentStatus(PaymentStatus.CARD);
-		paidCollected.setPaidAmount(1500);
-		paidCollected.setCollected(true);
-		Booking empty = onSeat(presentation, null);
-
-		Summary summary = Summary.of(List.of(reserved, paid, paidCollected, empty));
-
-		assertEquals(new Summary(3, 2, 3500, 1), summary);
+		assertTrue(leaves(booking, ""));
 	}
 }

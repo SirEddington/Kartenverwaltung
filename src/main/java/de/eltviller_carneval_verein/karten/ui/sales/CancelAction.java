@@ -2,14 +2,14 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Consumer;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingCancellation;
-import de.eltviller_carneval_verein.karten.model.BookingCancellation.Summary;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
+import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import javafx.scene.control.MenuItem;
 import javafx.stage.Window;
 
 /**
@@ -21,33 +21,31 @@ final class CancelAction {
 	private CancelAction() {
 	}
 
+	/** Beschriftet den Menüeintrag für diese Auswahl und sperrt ihn ohne Bearbeiten-Modus oder ohne Buchung mit Daten. */
+	static void prepare(MenuItem item, List<Booking> bookings, boolean editMode) {
+		item.setText(menuText(bookings));
+		item.setDisable(!editMode || withData(bookings).isEmpty());
+	}
+
 	/** Beschriftung des Menüeintrags; die Anzahl zählt wie die Rückfrage nur Buchungen mit Daten (eine ohne Anzahl). */
 	static String menuText(List<Booking> bookings) {
-		long count = bookings.stream().filter(Booking::hasData).count();
+		int count = withData(bookings).size();
 		return count <= 1 ? "Buchung stornieren…" : "Ausgewählte Buchungen stornieren… (" + count + ")";
 	}
 
-	/** Ob es unter den Buchungen etwas zu stornieren gibt; sonst ist der Menüeintrag gesperrt. */
-	static boolean anyWithData(List<Booking> bookings) {
-		return bookings.stream().anyMatch(Booking::hasData);
-	}
-
 	/**
-	 * Fragt nach und leert dann die Buchungen mit Daten ({@link BookingCancellation#empty}). Bei "sofort speichern" wird
-	 * gleich gespeichert, wie nach dem Verkaufsdialog.
+	 * Fragt nach und storniert dann die Buchungen mit Daten. Bei "sofort speichern" wird gleich gespeichert, wie nach dem
+	 * Verkaufsdialog.
 	 *
-	 * @param removeIfCancelled nimmt eine geleerte Buchung ohne Platz aus der Vorstellung; die Kartentabelle wartet damit
-	 *                          das Ende einer laufenden Bearbeitung ab
 	 * @return {@code true}, wenn storniert wurde; die Ansicht frischt sich dann auf
 	 */
-	static boolean run(List<Booking> bookings, Window owner, Consumer<Booking> removeIfCancelled) {
-		List<Booking> withData = bookings.stream().filter(Booking::hasData).toList();
+	static boolean run(List<Booking> bookings, Window owner) {
+		List<Booking> withData = withData(bookings);
 		if (withData.isEmpty() || !ConfirmDialog.confirm(withData.size() == 1 ? "Buchung stornieren" : "Buchungen stornieren",
 				question(withData), "Stornieren", "button-danger", owner)) {
 			return false;
 		}
-		withData.forEach(BookingCancellation::empty);
-		withData.forEach(removeIfCancelled);
+		BookingCancellation.cancel(withData);
 		if (BookingAutoSave.settingOn()) {
 			BookingAutoSave.flushActive();
 		}
@@ -56,14 +54,13 @@ final class CancelAction {
 
 	/** Die Rückfrage samt Hinweis auf Zahlung und Abholung ({@link #paymentHint}). */
 	static String question(List<Booking> bookings) {
-		List<Booking> withData = bookings.stream().filter(Booking::hasData).toList();
+		List<Booking> withData = withData(bookings);
 		String text;
 		if (withData.size() == 1) {
 			Booking booking = withData.get(0);
 			String customer = EntityLabels.customer(booking);
-			String place = booking.isUnassigned() ? "ohne Platz" : booking.getPlaceLabel();
-			text = "Buchung " + (customer.isEmpty() ? "" : "von " + customer + " ") + "(" + place + ") stornieren?\n"
-					+ "Name, Zahlung und Kommentar werden gelöscht, der Platz ist wieder frei.";
+			text = "Buchung " + (customer.isEmpty() ? "" : "von " + customer + " ") + "stornieren?\n" + EntityLabels.place(booking)
+					+ "\nName, Zahlung und Kommentar werden gelöscht, der Platz ist wieder frei.";
 		} else {
 			text = withData.size() + " Buchungen stornieren?\n"
 					+ "Name, Zahlung und Kommentar werden gelöscht, die Plätze sind wieder frei.";
@@ -78,20 +75,26 @@ final class CancelAction {
 	 * Rückzahlung denken."; leer, wenn keine bezahlt oder abgeholt ist. Auch für die Rückfrage beim Löschen des Namens.
 	 */
 	static String paymentHint(List<Booking> bookings) {
-		Summary summary = Summary.of(bookings);
-		boolean single = summary.count() == 1;
+		List<Booking> withData = withData(bookings);
+		BookingTotals totals = BookingTotals.of(withData);
+		long collected = withData.stream().filter(Booking::isCollected).count();
+		boolean single = withData.size() == 1;
 		List<String> parts = new ArrayList<>();
-		if (summary.paid() > 0) {
-			String amount = MoneyFormat.formatCents(summary.paidCents());
-			parts.add(single ? "bezahlt (" + amount + ")" : summary.paid() + " bezahlt (zusammen " + amount + ")");
+		if (totals.paid() > 0) {
+			String amount = MoneyFormat.formatCents(totals.revenueCents());
+			parts.add(single ? "bezahlt (" + amount + ")" : totals.paid() + " bezahlt (zusammen " + amount + ")");
 		}
-		if (summary.collected() > 0) {
-			parts.add(single ? "abgeholt" : summary.collected() + " abgeholt");
+		if (collected > 0) {
+			parts.add(single ? "abgeholt" : collected + " abgeholt");
 		}
 		if (parts.isEmpty()) {
 			return "";
 		}
 		return (single ? "Die Buchung ist " : "Davon ") + String.join(" und ", parts)
-				+ (summary.paid() > 0 ? " – an die Rückzahlung denken." : ".");
+				+ (totals.paid() > 0 ? " – an die Rückzahlung denken." : ".");
+	}
+
+	private static List<Booking> withData(List<Booking> bookings) {
+		return bookings.stream().filter(Booking::hasData).toList();
 	}
 }

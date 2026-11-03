@@ -3,75 +3,46 @@ package de.eltviller_carneval_verein.karten.model;
 import java.util.List;
 
 /**
- * Stornieren einer Buchung (KARV-121): Eine Buchung auf einem Sitz wird zum leeren Platzhalter des Sitzes, eine Buchung
- * ohne Platz verschwindet aus ihrer Vorstellung. Beides vergibt eine neue Kennung; für den Abgleich mit anderen Rechnern
- * ist die alte Buchung damit gelöscht, wie nach dem vollständigen Leeren einer Zeile.
+ * Stornieren einer Buchung (KARV-121): Eine Buchung auf einem Sitz wird zum leeren Platzhalter des Sitzes
+ * ({@link Booking#clearCustomerData()}, neue Kennung), eine Buchung ohne Platz verschwindet aus ihrer Vorstellung. Für
+ * den Abgleich mit anderen Rechnern ist die alte Buchung damit gelöscht, wie nach dem vollständigen Leeren einer Zeile.
  */
 public final class BookingCancellation {
-
-	/**
-	 * Die Zahlen für die Rückfrage: wie viele Buchungen mit Daten storniert würden, wie viele davon bezahlt sind (samt
-	 * gezahltem Betrag in Cent) und wie viele abgeholt.
-	 */
-	public record Summary(int count, int paid, long paidCents, int collected) {
-
-		public static Summary of(List<Booking> bookings) {
-			int count = 0;
-			int paid = 0;
-			long paidCents = 0;
-			int collected = 0;
-			for (Booking booking : bookings) {
-				if (!booking.hasData()) {
-					continue;
-				}
-				count++;
-				if (booking.isPaid()) {
-					paid++;
-					paidCents += booking.getPaidCents();
-				}
-				if (booking.isCollected()) {
-					collected++;
-				}
-			}
-			return new Summary(count, paid, paidCents, collected);
-		}
-	}
 
 	private BookingCancellation() {
 	}
 
-	/**
-	 * Leert die Buchung ({@link Booking#clearCustomerData()}), ohne sie aus der Vorstellung zu nehmen. Eine Buchung ohne
-	 * Platz bleibt "ohne Platz", damit {@link BookingSync#removeIfCancelled} sie danach als storniert erkennt. Für die
-	 * Kartentabelle, die während eines Commits nichts aus der Liste nehmen darf. Eine Buchung ohne Daten bleibt unberührt.
-	 */
-	public static void empty(Booking booking) {
-		if (!booking.hasData()) {
-			return;
-		}
-		boolean unassigned = booking.isUnassigned();
-		booking.clearCustomerData();
-		booking.setUnassigned(unassigned);
-	}
-
-	/** Storniert die Buchungen: {@link #empty} und danach {@link BookingSync#removeIfCancelled}. */
+	/** Storniert die Buchungen mit Daten; Buchungen ohne Daten bleiben unberührt. */
 	public static void cancel(List<Booking> bookings) {
 		for (Booking booking : bookings) {
-			empty(booking);
-			BookingSync.removeIfCancelled(booking);
+			if (!booking.hasData()) {
+				continue;
+			}
+			Presentation presentation = booking.getParent();
+			if (booking.isUnassigned() && presentation != null && presentation.getBookings() != null) {
+				presentation.getBookings().remove(booking);
+			} else {
+				booking.clearCustomerData();
+			}
 		}
 	}
 
 	/**
-	 * Ob das Löschen des Nachnamens Daten zurücklässt: Der bisherige Nachname ist nicht leer, der neue leer, und ohne
-	 * Nachnamen trüge die Buchung noch Daten ({@link Booking#hasData()}). Dann wird gefragt, ob storniert werden soll.
+	 * Die Buchung mit diesem Nachnamen, als Kopie samt Vorstellung (für Preis und gezahlten Betrag); das Original bleibt.
+	 * Für {@link #leavesData} und die Rückfrage, die den Stand danach zeigt.
 	 */
-	public static boolean leavesData(Booking booking, String newLastName) {
-		if (!booking.isReserved() || !Booking.isBlank(newLastName)) {
-			return false;
-		}
-		Booking withoutName = booking.copy();
-		withoutName.setLastName(null);
-		return withoutName.hasData();
+	public static Booking withLastName(Booking booking, String lastName) {
+		Booking after = booking.copy();
+		after.setParent(booking.getParent());
+		after.setLastName(lastName);
+		return after;
+	}
+
+	/**
+	 * Ob eine Änderung den Nachnamen löscht und die Buchung danach noch Daten trüge ({@link Booking#hasData()}): vorher
+	 * reserviert, nachher nicht, aber nicht leer. Dann wird gefragt, ob storniert werden soll.
+	 */
+	public static boolean leavesData(Booking before, Booking after) {
+		return before.isReserved() && !after.isReserved() && after.hasData();
 	}
 }

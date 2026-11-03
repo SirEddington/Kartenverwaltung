@@ -234,9 +234,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 				}
 				sellItem.setDisable(!editMode);
 				sellItem.setText(SeatSelectionEditor.menuText(seatTable.getSelectionModel().getSelectedItems().size()));
-				List<Booking> chosen = selectedBookings();
-				cancelItem.setText(CancelAction.menuText(chosen));
-				cancelItem.setDisable(!editMode || !CancelAction.anyWithData(chosen));
+				CancelAction.prepare(cancelItem, selectedBookings(), editMode);
 				BookingDTO clicked = row.getItem();
 				assignItem.setVisible(clicked.getBooking().isUnassigned());
 				assignItem.setDisable(!editMode);
@@ -270,7 +268,10 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	/** Storniert die gewählten Buchungen nach Rückfrage (KARV-121); stornierte ohne Platz verschwinden aus der Tabelle. */
 	private void cancelSelection() {
-		if (CancelAction.run(selectedBookings(), seatTable.getScene().getWindow(), this::removeIfCancelledAfterCommit)) {
+		// Eine laufende Bearbeitung endet zuerst (die Zelle übernimmt ihre Eingabe): Eine stornierte Buchung ohne Platz
+		// verschwindet sofort, eine Eingabe ginge sonst in eine Buchung, die es nicht mehr gibt
+		seatTable.edit(-1, null);
+		if (CancelAction.run(selectedBookings(), seatTable.getScene().getWindow())) {
 			seatTable.getSelectionModel().clearSelection();
 			showRows();
 		}
@@ -421,10 +422,11 @@ public class TicketTableController implements ContentController, SalesStateAware
 		colLastName.setOnEditCommit(editEvent -> {
 			Booking edited = editEvent.getRowValue().getBooking();
 			String newLastName = editEvent.getNewValue();
-			if (BookingCancellation.leavesData(edited, newLastName)) {
+			Booking after = BookingCancellation.withLastName(edited, newLastName);
+			if (BookingCancellation.leavesData(edited, after)) {
 				// Die Rückfrage erst nach dem Commit: Die Tabelle kann ihn auch im Layout auslösen (Ende des Bearbeitens), und
 				// dort ist ein modaler Dialog verboten. Bis zur Antwort bleibt das Modell unverändert
-				Platform.runLater(() -> applyNameRemoval(edited, newLastName));
+				Platform.runLater(() -> applyNameRemoval(edited, newLastName, after));
 				return;
 			}
 			applyLastName(edited, newLastName);
@@ -512,16 +514,14 @@ public class TicketTableController implements ContentController, SalesStateAware
 	 * Der Nachname wurde geleert, die Buchung trüge ohne ihn noch Daten: Fragt, ob sie storniert werden soll (KARV-121), und
 	 * übernimmt erst dann. So schreibt "sofort speichern" den gelöschten Namen nicht vorher.
 	 */
-	private void applyNameRemoval(Booking booking, String newLastName) {
-		Booking remaining = booking.copy();
-		remaining.setParent(booking.getParent());
-		remaining.setLastName(null);
+	private void applyNameRemoval(Booking booking, String newLastName, Booking remaining) {
 		switch (NameRemovalDialog.ask(List.of(remaining), seatTable.getScene().getWindow())) {
 		case ABORT -> refreshAfterCommit(); // die Zelle zeigt sonst den leeren Text, den sie beim Commit übernommen hat
 		case CANCEL_BOOKINGS -> {
-			BookingCancellation.empty(booking);
-			refreshAfterCommit();
-			removeIfCancelledAfterCommit(booking);
+			// Bearbeitet nach Tab schon die nächste Zelle, endet das zuerst: Eine Buchung ohne Platz verschwindet sofort
+			seatTable.edit(-1, null);
+			BookingCancellation.cancel(List.of(booking));
+			showRows();
 		}
 		case NAME_ONLY -> applyLastName(booking, newLastName);
 		}
@@ -621,7 +621,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 	 */
 	private void showRows() {
 		List<BookingDTO> rows = buildRows();
-		List<Booking> selection = seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList();
+		List<Booking> selection = selectedBookings();
 		if (sameBookings(masterData, rows)) {
 			// Dieselben Buchungen mit fremden Daten: Die Suche prüft sie neu (ein fremder Name kann jetzt passen oder nicht mehr)
 			if (!searchQuery.isBlank()) {
@@ -691,7 +691,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 	@Override
 	public void setSalesState(SalesViewState state) {
 		seatTable.getSelectionModel().getSelectedItems().addListener((ListChangeListener<BookingDTO>) change -> {
-			state.replaceSelection(seatTable.getSelectionModel().getSelectedItems().stream().map(BookingDTO::getBooking).toList());
+			state.replaceSelection(selectedBookings());
 		});
 	}
 

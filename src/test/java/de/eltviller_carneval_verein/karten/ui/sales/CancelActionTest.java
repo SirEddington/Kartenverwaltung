@@ -38,20 +38,10 @@ class CancelActionTest {
 	}
 
 	@Test
-	void onlyBookingsWithDataCanBeCancelled() {
-		Booking empty = seat(1, null, null);
-		Booking withComment = seat(2, null, null);
-		withComment.setComment("Notiz");
-
-		assertFalse(CancelAction.anyWithData(List.of(empty)));
-		assertTrue(CancelAction.anyWithData(List.of(empty, withComment)));
-	}
-
-	@Test
 	void questionNamesCustomerAndPlaceOfASingleBooking() {
 		Booking booking = seat(2, "Anna", "Müller");
 
-		assertEquals("Buchung von Anna Müller (Tisch A1, Sitz 2) stornieren?\n"
+		assertEquals("Buchung von Anna Müller stornieren?\nTisch A1, Sitz 2\n"
 				+ "Name, Zahlung und Kommentar werden gelöscht, der Platz ist wieder frei. Zurück nur über die Sicherungen des Events.",
 				CancelAction.question(List.of(booking)));
 	}
@@ -63,8 +53,9 @@ class CancelActionTest {
 		Booking commentOnly = seat(2, null, null);
 		commentOnly.setComment("storniert");
 
-		assertTrue(CancelAction.question(List.of(unassigned)).startsWith("Buchung von Schmidt (ohne Platz) stornieren?\n"));
-		assertTrue(CancelAction.question(List.of(commentOnly)).startsWith("Buchung (Tisch A1, Sitz 2) stornieren?\n"));
+		assertTrue(CancelAction.question(List.of(unassigned))
+				.startsWith("Buchung von Schmidt stornieren?\nOhne Platz (bisher Tisch A1, Sitz 1)\n"));
+		assertTrue(CancelAction.question(List.of(commentOnly)).startsWith("Buchung stornieren?\nTisch A1, Sitz 2\n"));
 	}
 
 	@Test

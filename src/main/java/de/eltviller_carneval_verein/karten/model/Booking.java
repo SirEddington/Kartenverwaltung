@@ -454,8 +454,7 @@ public class Booking {
 		return rowLabel != null ? rowLabel.trim() : "";
 	}
 
-	/** Kein Text: {@code null} oder nur Leerraum. */
-	static boolean isBlank(String text) {
+	private static boolean isBlank(String text) {
 		return text == null || text.isBlank();
 	}
 
