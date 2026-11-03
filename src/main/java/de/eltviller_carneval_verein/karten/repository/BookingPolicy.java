@@ -94,8 +94,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		}
 		if (resolution == null) {
 			// Regel 4 erreichen nur zwei lesbare, nicht gelöschte Fassungen derselben Buchung: PolicyRules.common griffe nie
-			resolution = PolicyRules.fromMerge(input, FieldGroups.booking(),
-					mergeBooking(ruleFourBase(input), input.mine().payload(), input.theirs().payload()));
+			resolution = PolicyRules.fromMerge(input, FieldGroups.booking(), ruleFour(input));
 		}
 		return resolution;
 	}
@@ -204,23 +203,46 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/**
-	 * Die Basis des Dreiwegevergleichs in Regel 4: Baut die Absicht einer Seite auf einer Auflösung auf (KARV-98, Spec
-	 * Abschnitt 1b), ist es deren Inhalt; sonst gälte eine Änderung, die die Seite schon vor der Auflösung machte und danach
-	 * weiterführte, als Konflikt gegen sich selbst, und das Ergebnis hinge davon ab, wer auflöst. Bauen beide auf
-	 * verschiedenen Auflösungen auf, oder keine, bleibt es bei der Basis der Eingabe.
+	 * Der Dreiwegevergleich von Regel 4. Baut die Absicht einer Seite auf einer Auflösung auf (KARV-98, Spec Abschnitt 1b),
+	 * rechnet er gegen deren Inhalt; sonst gälte eine Änderung, die die Seite schon vor der Auflösung machte und danach
+	 * weiterführte, als Konflikt gegen sich selbst, und das Ergebnis hinge davon ab, wer auflöst. Die andere Seite gilt dann
+	 * in einer Feldgruppe nur als geändert, wenn sie sich von ihrer Basis und von der Auflösung unterscheidet: Was ihr fehlt,
+	 * weil sie älter ist als die Auflösung, hat sie nicht zurückgesetzt. Bauen beide auf verschiedenen Auflösungen auf,
+	 * oder keine, bleibt es beim Vergleich gegen die Basis der Eingabe.
 	 */
-	private static ObjectNode ruleFourBase(ConflictInput input) {
+	private static FieldMerge.Result ruleFour(ConflictInput input) {
+		ObjectNode base = PolicyRules.basePayload(input);
+		ObjectNode mine = input.mine().payload();
+		ObjectNode theirs = input.theirs().payload();
 		String bookingId = idOf(input.base());
 		if (bookingId == null || input.trail().isEmpty()) {
-			return PolicyRules.basePayload(input);
+			return mergeBooking(base, mine, theirs);
 		}
 		Version own = BookingTrail.of(input, bookingId, input.unit(), input.base().id(), true).after();
 		Version foreign = BookingTrail.of(input, bookingId, input.unit(), input.base().id(), false).after();
-		if (own != null && foreign != null && !own.id().equals(foreign.id())) {
-			return PolicyRules.basePayload(input);
-		}
 		Version after = own != null ? own : foreign;
-		return after == null || after.deleted() ? PolicyRules.basePayload(input) : after.payload();
+		if (after == null || after.deleted() || own != null && foreign != null && !own.id().equals(foreign.id())) {
+			return mergeBooking(base, mine, theirs);
+		}
+		ObjectNode resolved = after.payload();
+		if (own == null) {
+			mine = unchangedTaken(mine, base, resolved);
+		} else if (foreign == null) {
+			theirs = unchangedTaken(theirs, base, resolved);
+		}
+		return mergeBooking(resolved, mine, theirs);
+	}
+
+	/** Eine Kopie von {@code side}, in der jede Feldgruppe, die sie gegenüber {@code base} nicht änderte, die von {@code resolved} ist. */
+	private static ObjectNode unchangedTaken(ObjectNode side, ObjectNode base, ObjectNode resolved) {
+		ObjectNode adjusted = side.deepCopy();
+		ObjectNode before = FieldMerge.orEmpty(base);
+		for (List<String> group : FieldGroups.booking().values()) {
+			if (FieldMerge.same(side, before, group)) {
+				FieldMerge.copyFields(adjusted, resolved, group);
+			}
+		}
+		return adjusted;
 	}
 
 	/**

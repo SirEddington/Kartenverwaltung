@@ -1521,6 +1521,43 @@ class BookingPolicyTest {
 	}
 
 	/**
+	 * Aus dem abschließenden Review: A ändert die Zahlung (Ae1), B den Kommentar (Be1); Bs Zusammenführung R hat beides, C
+	 * bearbeitet darauf (F). A's zweite, veraltete Änderung S (Preis, auf Ae1) verliert. S fehlt Bs Kommentar, weil sie
+	 * älter ist, nicht weil A ihn zurücksetzte: Alle drei Änderungen bleiben, ohne Vermerk.
+	 */
+	@Test
+	void ruleFourKeepsWhatTheResolutionMergedAgainstAStaleVersion() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		Version m0 = world.claim(s1, world.version(TrailFixture.THIRD, null, TrailFixture.booking("m", "s1")));
+		Version ae1 = world.claim(s1, world.version(TrailFixture.OWN, m0, TrailFixture.booking("m", "s1",
+				x -> x.setPaymentStatus(PaymentStatus.CARD))));
+		Version be1 = world.beside(s1, world.version(TrailFixture.OTHER, m0, TrailFixture.booking("m", "s1",
+				x -> x.setComment("B"))));
+		Version r = world.claim(s1, world.merge(TrailFixture.OTHER, "save-r", List.of(ae1, be1),
+				TrailFixture.booking("m", "s1", x -> {
+					x.setPaymentStatus(PaymentStatus.CARD);
+					x.setComment("B");
+				})));
+		world.claim(s1, world.version(TrailFixture.THIRD, r, TrailFixture.booking("m", "s1", x -> {
+			x.setPaymentStatus(PaymentStatus.CARD);
+			x.setComment("B");
+			x.setFirstName("C");
+		})));
+		Version stale = world.beside(s1, world.version(TrailFixture.OWN, ae1, TrailFixture.booking("m", "s1", x -> {
+			x.setPaymentStatus(PaymentStatus.CARD);
+			x.setPrice(2500);
+		})));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, ae1, List.of(stale)));
+
+		assertEquals("B", resolution.payload().get("comment").asText(), "Bs Kommentar aus der Zusammenführung bleibt");
+		assertEquals("C", resolution.payload().get("firstName").asText(), "Cs Änderung bleibt");
+		assertEquals(2500, resolution.payload().get("price").asInt(), "A's Änderung bleibt");
+		assertNull(resolution.note());
+	}
+
+	/**
 	 * 1b ohne Absenkung (benannte Verhaltensänderung): Ein fremder Umzug scheiterte, E9 belebte die Quelle wieder (R), ein
 	 * anderer Rechner bearbeitete die Buchung dort (F). Ein eigener veralteter Stand verliert dagegen: Fs Änderung bleibt.
 	 */
