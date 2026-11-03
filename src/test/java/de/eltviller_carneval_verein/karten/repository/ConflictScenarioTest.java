@@ -665,8 +665,7 @@ class ConflictScenarioTest {
 	 * Wie {@link #doubleSaleLoserWhoMovedTheBookingSeesItOnce}, dann speichert B: Bert soll genau einmal leben, Anna behält
 	 * den Sitz, nichts geht verloren.
 	 */
-	@Disabled("Bestehender Fehler (vor KARV-97, gegen 8743559 geprüft), gefunden im Review zu KARV-97: Bert lebt danach"
-			+ " in zwei Einheiten, auf dem neuen Sitz und ohne Platz")
+	@Disabled("KARV-124: Bert lebt danach in zwei Einheiten, auf dem neuen Sitz und ohne Platz (bestand schon vor KARV-97)")
 	@Test
 	void doubleSaleLoserWhoMovedTheBookingKeepsItOnceAfterSaving() throws IOException {
 		Machine[] m = machines("a", "b");
