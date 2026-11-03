@@ -188,7 +188,13 @@ public final class TableInput {
 		}
 		table.getSelectionModel().clearAndSelect(nextRow);
 		table.getFocusModel().focus(nextRow, columns.get(nextColumn));
-		table.scrollTo(nextRow);
+		// Nur so weit scrollen, dass die Zeile ganz zu sehen ist: TableView.scrollTo setzte sie an den oberen Rand, und die
+		// Zeile sprang bei jedem Tab nach oben
+		if (table.lookup(".virtual-flow") instanceof VirtualFlow<?> flow) {
+			flow.scrollTo(nextRow);
+		} else {
+			table.scrollTo(nextRow);
+		}
 		table.requestFocus();
 		return true;
 	}
