@@ -134,6 +134,21 @@ public final class BookingSync {
 		return true;
 	}
 
+	/**
+	 * Entfernt die Buchung aus ihrer Vorstellung, wenn sie {@link Booking#isUnassigned() ohne Platz} ist und keine Daten
+	 * mehr trägt, nach derselben Regel wie Schritt 3 des Abgleichs: Sie ist storniert, etwa nachdem ihr Name in der Tabelle
+	 * geleert wurde. Eine leere Buchung auf einem Sitz bleibt, sie ist der Platzhalter des Sitzes.
+	 *
+	 * @return {@code true}, wenn die Buchung entfernt wurde
+	 */
+	public static boolean removeIfCancelled(Booking booking) {
+		Presentation p = booking.getParent();
+		if (p == null || p.getBookings() == null || !booking.isUnassigned() || booking.hasData()) {
+			return false;
+		}
+		return p.getBookings().removeIf(other -> other == booking);
+	}
+
 	/** Abgleich ohne Bestuhlung: leere Buchungen entfernen, Buchungen mit Daten ohne Platz behalten. */
 	private static Report withoutPlan(List<Booking> bookings) {
 		if (bookings == null) {

@@ -200,6 +200,43 @@ class BookingSyncTest {
 	}
 
 	@Test
+	void geleerte_Buchung_ohne_Platz_wird_entfernt_andere_bleiben() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		Booking cleared = snapshotBooking(presentation, "Z", 9, 9);
+		cleared.setLastName("Storno");
+		cleared.setPrice(2000);
+		Booking kept = snapshotBooking(presentation, "Z", 9, 8);
+		kept.setComment("bleibt");
+		Booking otherEmpty = snapshotBooking(presentation, "Z", 9, 7);
+		otherEmpty.setLastName("Fremd");
+		BookingSync.sync(presentation, plan);
+		int before = presentation.getBookings().size();
+		cleared.setLastName(null);
+		otherEmpty.setLastName(null);
+
+		boolean removed = BookingSync.removeIfCancelled(cleared);
+
+		assertTrue(removed);
+		assertFalse(presentation.getBookings().contains(cleared));
+		assertTrue(presentation.getBookings().contains(kept));
+		assertTrue(presentation.getBookings().contains(otherEmpty), "nur die genannte Buchung wird entfernt");
+		assertEquals(before - 1, presentation.getBookings().size());
+		assertFalse(BookingSync.removeIfCancelled(kept), "eine Buchung mit Daten bleibt");
+	}
+
+	@Test
+	void leere_Buchung_auf_einem_Sitz_bleibt() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		BookingSync.sync(presentation, plan);
+		Booking placeholder = presentation.getBookings().get(0);
+
+		assertFalse(BookingSync.removeIfCancelled(placeholder));
+		assertTrue(presentation.getBookings().contains(placeholder));
+	}
+
+	@Test
 	void wechsel_entfernt_leere_Buchung_ohne_Treffer() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
