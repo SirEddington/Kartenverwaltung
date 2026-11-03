@@ -28,10 +28,12 @@ import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -639,6 +641,72 @@ class ConflictScenarioTest {
 	}
 
 	/**
+	 * KARV-97: Der Verlierer eines Doppelverkaufs verschiebt seine Buchung ungespeichert auf einen anderen Sitz, als seine
+	 * Zusammenführung eintrifft. Ihr "ohne Platz" wartet dann still mit dem Sitz (die Buchung ist versetzt), statt sie ein
+	 * zweites Mal zu zeigen.
+	 */
+	@Test
+	void doubleSaleLoserWhoMovedTheBookingSeesItOnce() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String bertId = doubleSaleWhileTheLoserMoves(a, b);
+
+		List<Deferral> deferred = b.repository.retryDeferred().deferred();
+		assertTrue(deferred.stream().anyMatch(d -> d.unit().equals(unassignedUnit(b, bertId))), deferred.toString());
+		assertTrue(deferred.stream().allMatch(Deferral::silent), "eine eigene Zusammenführung bekommt keinen Hinweis");
+		assertEquals(1, b.friday().getBookings().stream().filter(booking -> bertId.equals(booking.getId())).count(),
+				"Bert steht einmal, auf dem Sitz, auf den B ihn verschoben hat");
+		assertEquals("Bert", b.seat(2).getLastName());
+	}
+
+	/**
+	 * Wie {@link #doubleSaleLoserWhoMovedTheBookingSeesItOnce}, dann speichert B: Bert soll genau einmal leben, Anna behält
+	 * den Sitz, nichts geht verloren.
+	 */
+	@Disabled("Bestehender Fehler (vor KARV-97, gegen 8743559 geprüft), gefunden im Review zu KARV-97: Bert lebt danach"
+			+ " in zwei Einheiten, auf dem neuen Sitz und ohne Platz")
+	@Test
+	void doubleSaleLoserWhoMovedTheBookingKeepsItOnceAfterSaving() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String bertId = doubleSaleWhileTheLoserMoves(a, b);
+
+		b.repository.saveEvent(b.event);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("Anna", lastName(a.eventState().get(seatUnit(a, 1))));
+		assertEquals(1, carriers(a, bertId).size(), "Bert lebt in genau einer Einheit: " + carriers(a, bertId));
+		for (Machine machine : m) {
+			assertEquals(1, machine.friday().getBookings().stream().filter(booking -> bertId.equals(booking.getId())
+					&& booking.hasData()).count(), machine.name);
+			assertEquals("Anna", machine.seat(1).getLastName(), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+		}
+	}
+
+	/**
+	 * A verkauft Sitz 1 an "Anna", B denselben Sitz an "Bert"; beide speichern. B verschiebt Bert ungespeichert auf Sitz 2,
+	 * dann takten beide, bis Ruhe herrscht: Bert verliert den Doppelverkauf.
+	 *
+	 * @return Berts Kennung
+	 */
+	private String doubleSaleWhileTheLoserMoves(Machine a, Machine b) throws IOException {
+		a.sell(1, "Anna");
+		Booking bert = b.sell(1, "Bert");
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), bert, b.plan().getSeats().get(2)));
+		a.tick();
+		b.tick();
+		untilQuiet(a, b);
+		return bert.getId();
+	}
+
+	/**
 	 * Absicherung Aufgabe 14: Während B's Zusammenführung zurückgestellt ist, zeigt B's Modell Bert zweimal (auf dem Sitz mit
 	 * der Eingabe und "ohne Platz"). A storniert Bert "ohne Platz". Nach dem Einarbeiten und B's Speichern lebt keine falsche
 	 * Kopie von Bert, B's Eingabe geht nicht still verloren (Vermerk an B), und nichts bleibt gegabelt.
@@ -1025,8 +1093,11 @@ class ConflictScenarioTest {
 			a.repository.saveEvent(a.event);
 			a.repository.applyForeign(List.copyOf(a.eventState().keySet()));
 		} else {
-			assertFalse(a.repository.applyForeign(List.copyOf(a.eventState().keySet())).deferred().isEmpty(),
-					"Bs Stände warten auf die Platzwahl");
+			UnitKey oldSeat = UnitKey.booking(a.event.getId(), a.friday().getId(), a.plan().getSeats().get(0).getId());
+			UnitKey derivedSeat = UnitKey.booking(a.event.getId(), a.friday().getId(), bSeat);
+			assertEquals(Set.of(oldSeat, derivedSeat), a.repository.applyForeign(List.copyOf(a.eventState().keySet()))
+					.deferred().stream().map(Deferral::unit).collect(Collectors.toSet()),
+					"alter und abgeleiteter Sitz warten gemeinsam auf die Platzwahl");
 			assertEquals(Set.of(chosen.getId()), carriersInModel(a, mullerId), "Müller steht einmal, auf dem gewählten Sitz");
 			a.repository.saveEvent(a.event);
 		}

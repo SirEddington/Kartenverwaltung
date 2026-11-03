@@ -795,26 +795,40 @@ public class StoreEventRepository implements EventRepository {
 				changed.add(unit);
 			}
 		}
-		// was das Einarbeiten ins Modell gesetzt hat und dort fehlt, hat der Nutzer entfernt: storniert, wenn die Buchung im
-		// Modell nirgends mehr steht, sonst verschoben (das Speichern schreibt den Umzug)
+		// was das Einarbeiten ins Modell gesetzt hat und dort fehlt, hat der Nutzer entfernt: storniert, wenn die Buchung in
+		// ihrer Vorstellung nirgends mehr steht, sonst verschoben (das Speichern schreibt den Umzug)
+		Set<String> cancelled = new HashSet<>();
+		Set<String> carried = null;
+		for (Map.Entry<UnitKey, ObjectNode> entry : derived.entrySet()) {
+			UnitKey unit = entry.getKey();
+			if (entry.getValue() == null || !event.getId().equals(unit.eventId()) || model.containsKey(unit)) {
+				continue;
+			}
+			changed.add(unit);
+			String bookingId = ConflictInput.bookingIdOf(entry.getValue());
+			if (bookingId == null) {
+				continue;
+			}
+			if (carried == null) {
+				carried = carriedBookings(model);
+			}
+			if (!carried.contains(unit.presentationId() + "/" + bookingId)) {
+				cancelled.add(bookingId);
+			}
+		}
+		return new LocalChanges(changed, false, model, moved, cancelled);
+	}
+
+	/** Die Buchungen mit Daten im Modell, je {@code <presentationId>/<Buchungs-Kennung>}. */
+	private static Set<String> carriedBookings(Map<UnitKey, ObjectNode> model) {
 		Set<String> carried = new HashSet<>();
 		model.forEach((unit, payload) -> {
 			String bookingId = unit.type() == UnitType.BOOKING ? ConflictInput.bookingIdOf(payload) : null;
 			if (bookingId != null) {
-				carried.add(bookingId);
+				carried.add(unit.presentationId() + "/" + bookingId);
 			}
 		});
-		Set<String> cancelled = new HashSet<>();
-		derived.forEach((unit, payload) -> {
-			if (payload != null && event.getId().equals(unit.eventId()) && !model.containsKey(unit)) {
-				changed.add(unit);
-				String bookingId = ConflictInput.bookingIdOf(payload);
-				if (bookingId != null && !carried.contains(bookingId)) {
-					cancelled.add(bookingId);
-				}
-			}
-		});
-		return new LocalChanges(changed, false, model, moved, cancelled);
+		return carried;
 	}
 
 	/**
@@ -1308,12 +1322,17 @@ public class StoreEventRepository implements EventRepository {
 	 */
 	private boolean movedBookingTouched(Event event, LocalChanges changes, String bookingId, UnitKey unit) {
 		for (UnitKey carrier : changes.movedCarriers(bookingId, unit)) {
-			Object model = EventMerge.modelObject(event, carrier);
-			if (changes.units().contains(carrier) || (model != null && inEditing.test(model))) {
+			if (touchedByUser(event, changes, carrier)) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/** Ob der Nutzer die Einheit ungespeichert geändert hat oder ihr Objekt im Modell gerade bearbeitet. */
+	private boolean touchedByUser(Event event, LocalChanges changes, UnitKey unit) {
+		Object model = EventMerge.modelObject(event, unit);
+		return changes.units().contains(unit) || (model != null && inEditing.test(model));
 	}
 
 	/**
@@ -1339,8 +1358,7 @@ public class StoreEventRepository implements EventRepository {
 			UnitSnapshot known = baseline.known(carrier);
 			boolean newThere = known == null || !known.isLive() || !baseline.isShown(carrier)
 					|| !bookingId.equals(ConflictInput.bookingIdOf(known.payload()));
-			Object model = EventMerge.modelObject(event, carrier);
-			if (newThere && (changes.units().contains(carrier) || (model != null && inEditing.test(model)))) {
+			if (newThere && touchedByUser(event, changes, carrier)) {
 				return true;
 			}
 		}
