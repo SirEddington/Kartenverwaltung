@@ -25,8 +25,10 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
  * @param deletions Träger auf der Spur, die die Buchung danach nicht mehr tragen
  * @param notes     die Vermerke, je mit der Einheit, deren Auflösung ihn schreibt; ein Vermerk ohne Gegenseite
  *                  ({@code other} = {@code null}) bekommt sie dort von der Anwendung (der Gewinner am Ziel)
+ * @param source    die Quelle, an der entschieden wurde; ein Träger {@code _<ID>}, der nicht die Quelle ist, nennt sie
+ *                  als Herkunft (KARV-98, das Parken)
  */
-record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions, List<Placed> notes) {
+record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions, List<Placed> notes, UnitKey source) {
 
 	/** Ein Vermerk und die Einheit, deren Auflösung ihn schreibt. */
 	record Placed(ConflictNote note, UnitKey writtenAt) {
@@ -53,11 +55,10 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 	 * @param parked        ob eine Auflösung die Buchung in ihrer Einheit {@code _<ID>} unverändert geparkt hat (E13)
 	 */
 	static BookingFate decide(String bookingId, UnitKey source, Version base, BookingTrail own, BookingTrail foreign,
-			boolean ownWinsSource, String ownMachineId, boolean sourceFree, boolean parked) {
+			Boolean ownWinsSource, String ownMachineId, boolean sourceFree, boolean parked) {
 		Side mine = new Side(own, ownMachineId);
 		Side theirs = new Side(foreign, machineOf(foreign));
-		Decider decider = new Decider(bookingId, source, base, sourceFree, parked);
-		return decider.decide(mine, theirs, ownWinsSource);
+		return new Decider(bookingId, source, base, sourceFree, parked).decide(mine, theirs, ownWinsSource);
 	}
 
 	/** Die Version, die für eine Seite steht: ihr Wegfall, sonst ihre jüngste; {@code null} bei einer unberührten. */
@@ -77,6 +78,11 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 			return trail.kind();
 		}
 
+		/** Ob die Absicht aus dem Parkweg stammt (KARV-98): Sie baut auf einer Auflösung auf, die die Buchung parkte. */
+		boolean viaParking() {
+			return trail.after() != null && trail.after().marks().movedFrom() != null;
+		}
+
 		/** Die Version, die für die Gegenseite eines Vermerks steht: der Wegfall, sonst die jüngste. */
 		Party party() {
 			return Party.of(representative(trail));
@@ -91,7 +97,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 	/** Die Entscheidung für eine Buchung an ihrer Quelle. */
 	private record Decider(String bookingId, UnitKey source, Version base, boolean sourceFree, boolean parked) {
 
-		BookingFate decide(Side own, Side foreign, boolean ownWinsSource) {
+		BookingFate decide(Side own, Side foreign, Boolean ownWinsSource) {
 			Kind a = own.kind();
 			Kind b = foreign.kind();
 			if (a == Kind.UNTOUCHED || b == Kind.UNTOUCHED) {
@@ -128,8 +134,16 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 			case CANCELLED -> {
 			}
 			case KEPT -> {
-				if (!PolicyRules.sameContent(other.trail().last(), base)) {
-					notes.add(atSource(ConflictNote.deleteWins(other.machine(), cancel.party(), other.dropped())));
+				// behalten an der geparkten Kopie (KARV-98): Sie fällt weg; dort liegt die weichende Fassung
+				UnitKey elsewhere = keptElsewhere(other);
+				if (elsewhere != null) {
+					deletions.add(elsewhere);
+				}
+				boolean changed = elsewhere == null ? !PolicyRules.sameContent(other.trail().last(), base)
+						: !BookingPolicy.sameExceptPlace(other.trail().last().payload(), base.payload());
+				if (changed) {
+					notes.add(atSource(ConflictNote.deleteWins(other.machine(), cancel.party(), elsewhere,
+							other.dropped())));
 				}
 			}
 			case ARRIVED -> {
@@ -142,22 +156,37 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 					other.trail().last() == null ? null : other.trail().end(), other.dropped())));
 			default -> throw new IllegalStateException(other.kind().name());
 			}
-			return new BookingFate(null, null, deletions, notes);
+			return fate(null, null, deletions, notes);
 		}
 
-		/** E6, E7: beide angekommen; am gleichen Ende nichts zu tun, sonst gilt der Umzug des Gewinners an der Quelle. */
-		private BookingFate bothArrived(Side own, Side foreign, boolean ownWinsSource) {
+		/**
+		 * E6, E7: beide angekommen; am gleichen Ende nichts zu tun, sonst gilt der Umzug des Gewinners an der Quelle. Gilt
+		 * dort keine Nutzer-Version ({@code ownWinsSource == null}, nur eine Auflösung), gewinnt die Seite, deren Absicht
+		 * aus dem Parkweg stammt (KARV-98); so hängt es nicht davon ab, welcher Rechner auflöst.
+		 */
+		private BookingFate bothArrived(Side own, Side foreign, Boolean ownWinsSource) {
 			if (own.trail().end().equals(foreign.trail().end())) {
-				return new BookingFate(own.trail().end(), null, List.of(), List.of());
+				return fate(own.trail().end(), null, List.of(), List.of());
 			}
-			Side winner = ownWinsSource ? own : foreign;
-			Side loser = ownWinsSource ? foreign : own;
+			boolean ownWins = ownWinsSource != null ? ownWinsSource : own.viaParking() && !foreign.viaParking();
+			Side winner = ownWins ? own : foreign;
+			Side loser = ownWins ? foreign : own;
 			return toCopy(winner, loser, List.of(loser.trail().end()), true);
 		}
 
-		/** E5, E8: Ein angekommener Umzug gilt gegen Behalten und gegen einen gescheiterten Umzug. */
+		/**
+		 * E5, E8: Ein angekommener Umzug gilt gegen Behalten und gegen einen gescheiterten Umzug. Eine an der geparkten
+		 * Kopie behaltene Buchung fällt dort weg (KARV-98).
+		 */
 		private BookingFate arrivedAgainst(Side arrived, Side other) {
-			return toCopy(arrived, other, List.of(), other.kind() == Kind.FAILED);
+			UnitKey elsewhere = other.kind() == Kind.KEPT ? keptElsewhere(other) : null;
+			return toCopy(arrived, other, elsewhere == null ? List.of() : List.of(elsewhere), other.kind() == Kind.FAILED);
+		}
+
+		/** Die Einheit, an der die Seite die Buchung behielt, wenn das nicht die Quelle ist (die geparkte Kopie); sonst null. */
+		private UnitKey keptElsewhere(Side kept) {
+			UnitKey end = kept.trail().end();
+			return end == null || source.equals(end) ? null : end;
 		}
 
 		/**
@@ -179,7 +208,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 			List<Placed> notes = conflicts.isEmpty() ? List.of()
 					: List.of(atSource(ConflictNote.ofFields(other.machine(), winner.party(), conflicts,
 							place ? null : carrier, other.dropped())));
-			return new BookingFate(carrier, merged.merged(), deletions, notes);
+			return fate(carrier, merged.merged(), deletions, notes);
 		}
 
 		/**
@@ -190,7 +219,9 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		 */
 		private BookingFate failedAgainstKept(Side failed, Side kept) {
 			boolean free = failed.trail().removal().deleted() && sourceFree;
-			UnitKey carrier = free ? source : unassigned();
+			// an der geparkten Kopie behalten (KARV-98): Sie bleibt Träger; an der Quelle lebte die Buchung sonst zweimal
+			UnitKey elsewhere = keptElsewhere(kept);
+			UnitKey carrier = elsewhere != null ? elsewhere : free ? source : unassigned();
 			ObjectNode keptPayload = kept.trail().last().payload();
 			FieldMerge.Result merged = carry(fieldsOf(failed), keptPayload);
 			ObjectNode content = carrier.isUnassigned() ? BookingPolicy.withoutPlace(merged.merged()) : merged.merged();
@@ -206,26 +237,27 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 				note = ConflictNote.ofFields(failed.machine(), kept.party(), conflicts,
 						carrier.equals(source) ? null : carrier, failed.dropped());
 			}
-			return new BookingFate(carrier, content, List.of(), List.of(atSource(note)));
+			return fate(carrier, content, List.of(), List.of(atSource(note)));
 		}
 
 		/**
 		 * E10: beide gescheitert. Die Buchung lebt "ohne Platz" mit der Fassung des Gewinners an der Quelle und den Feldern
 		 * des anderen; jede Seite bekommt ihren Doppelverkauf an ihrem Ziel.
 		 */
-		private BookingFate bothFailed(Side own, Side foreign, boolean ownWinsSource) {
-			Side winner = ownWinsSource ? own : foreign;
-			Side loser = ownWinsSource ? foreign : own;
+		private BookingFate bothFailed(Side own, Side foreign, Boolean ownWinsSource) {
+			boolean ownWins = Boolean.TRUE.equals(ownWinsSource);
+			Side winner = ownWins ? own : foreign;
+			Side loser = ownWins ? foreign : own;
 			FieldMerge.Result merged = carry(fieldsOf(loser), fieldsOf(winner));
 			UnitKey carrier = unassigned();
-			return new BookingFate(carrier, BookingPolicy.withoutPlace(merged.merged()), List.of(),
+			return fate(carrier, BookingPolicy.withoutPlace(merged.merged()), List.of(),
 					List.of(atTarget(own, carrier), atTarget(foreign, carrier)));
 		}
 
 		/** E11: ein gescheiterter Umzug, die andere Seite unberührt: "ohne Platz", Vermerk an seinem Ziel. */
 		private BookingFate aloneFailed(Side failed) {
 			UnitKey carrier = unassigned();
-			return new BookingFate(carrier, BookingPolicy.withoutPlace(fieldsOf(failed)), List.of(),
+			return fate(carrier, BookingPolicy.withoutPlace(fieldsOf(failed)), List.of(),
 					List.of(atTarget(failed, carrier)));
 		}
 
@@ -239,7 +271,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		private BookingFate againstParked(Side removed) {
 			UnitKey copy = unassigned();
 			UnitKey carrier = removed.kind() == Kind.CANCELLED ? null : removed.trail().end();
-			return !parked || copy.equals(carrier) ? null : new BookingFate(carrier, null, List.of(copy), List.of());
+			return !parked || copy.equals(carrier) ? null : fate(carrier, null, List.of(copy), List.of());
 		}
 
 		/** Der Doppelverkauf einer Seite an ihrem gescheiterten Ziel; die Gegenseite dort setzt die Anwendung ein. */
@@ -265,6 +297,11 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		/** Der Platz, den die Seite haben wollte (für die Anzeige im Doppelverkauf). */
 		private ObjectNode placeOf(Side side) {
 			return FieldMerge.slice(fieldsOf(side), BookingPolicy.PLACE);
+		}
+
+		/** Eine Entscheidung an dieser Quelle. */
+		private BookingFate fate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions, List<Placed> notes) {
+			return new BookingFate(carrier, content, deletions, notes, source);
 		}
 
 		/** Die Einheit "ohne Platz" der Buchung in der Vorstellung der Quelle. */

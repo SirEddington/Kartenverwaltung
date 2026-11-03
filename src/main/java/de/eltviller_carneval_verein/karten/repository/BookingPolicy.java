@@ -23,6 +23,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.store.VersionMarks;
 
 /**
  * Die Fachregel für Buchungen (Sitz-Einheit oder {@code _<ID>}). Die Regeln gelten in dieser Reihenfolge:
@@ -93,8 +94,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		}
 		if (resolution == null) {
 			// Regel 4 erreichen nur zwei lesbare, nicht gelöschte Fassungen derselben Buchung: PolicyRules.common griffe nie
-			resolution = PolicyRules.fromMerge(input, FieldGroups.booking(),
-					mergeBooking(PolicyRules.basePayload(input), input.mine().payload(), input.theirs().payload()));
+			resolution = PolicyRules.fromMerge(input, FieldGroups.booking(), ruleFour(input));
 		}
 		return resolution;
 	}
@@ -176,6 +176,10 @@ public final class BookingPolicy implements ConflictPolicy {
 			if (fate.carrier() != null && !unit.equals(fate.carrier()) && fate.content() != null) {
 				Change content = contentChange(input, fate.carrier(), fate.content());
 				if (content != null) {
+					if (fate.carrier().isUnassigned() && !fate.carrier().equals(fate.source())) {
+						// geparkt (E9 ohne freie Quelle, E10, E11): das Parken nennt seine Quelle (KARV-98)
+						content = content.withMarks(VersionMarks.NONE.withMovedFrom(fate.source()));
+					}
 					extra.add(content);
 				}
 			}
@@ -199,6 +203,42 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/**
+	 * Der Dreiwegevergleich von Regel 4. Baut die Absicht einer Seite auf einer Auflösung auf (KARV-98, Spec Abschnitt 1b),
+	 * rechnet er gegen deren Inhalt; sonst gälte eine Änderung, die die Seite schon vor der Auflösung machte und danach
+	 * weiterführte, als Konflikt gegen sich selbst, und das Ergebnis hinge davon ab, wer auflöst. Die andere Seite gilt dann
+	 * in einer Feldgruppe nur als geändert, wenn sie sich von ihrer Basis und von der Auflösung unterscheidet: Was ihr fehlt,
+	 * weil sie älter ist als die Auflösung, hat sie nicht zurückgesetzt. Bauen beide auf verschiedenen Auflösungen auf,
+	 * oder keine, bleibt es beim Vergleich gegen die Basis der Eingabe.
+	 */
+	private static FieldMerge.Result ruleFour(ConflictInput input) {
+		ObjectNode base = PolicyRules.basePayload(input);
+		ObjectNode mine = input.mine().payload();
+		ObjectNode theirs = input.theirs().payload();
+		String bookingId = idOf(input.base());
+		if (bookingId == null || input.trail().isEmpty()) {
+			return mergeBooking(base, mine, theirs);
+		}
+		Version own = BookingTrail.of(input, bookingId, input.unit(), input.base().id(), true).after();
+		Version foreign = BookingTrail.of(input, bookingId, input.unit(), input.base().id(), false).after();
+		Version after = own != null ? own : foreign;
+		if (after == null || after.deleted() || own != null && foreign != null && !own.id().equals(foreign.id())) {
+			return mergeBooking(base, mine, theirs);
+		}
+		ObjectNode resolved = after.payload();
+		if (own == null) {
+			mine = unchangedTaken(mine, base, resolved);
+		} else if (foreign == null) {
+			theirs = unchangedTaken(theirs, base, resolved);
+		}
+		return mergeBooking(resolved, mine, theirs);
+	}
+
+	/** Eine Kopie von {@code side}, in der jede Feldgruppe, die sie gegenüber {@code base} nicht änderte, die von {@code resolved} ist. */
+	private static ObjectNode unchangedTaken(ObjectNode side, ObjectNode base, ObjectNode resolved) {
+		return FieldMerge.merge(base, resolved, side, FieldGroups.booking()).merged();
+	}
+
+	/**
 	 * Beide Seiten haben die Buchung hierher umgezogen (E6): Dreiwegevergleich von "Meine" und "Deren" gegen die Basis an
 	 * der Quelle, deren Platz als der von "Deren" gilt (der Umzug selbst ist kein Unterschied). Trägt eine Seite die Buchung
 	 * hier nicht, gilt "Deren".
@@ -219,7 +259,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (!removed(own) && !removed(foreign)) {
 			return null;
 		}
-		boolean ownWins = Boolean.TRUE.equals(BookingTrail.ownWinsAt(input, source, base.id()));
+		Boolean ownWins = BookingTrail.ownWinsAt(input, source, base.id());
 		return BookingFate.decide(bookingId, source, base, own, foreign, ownWins, input.ownMachineId(),
 				BookingTrail.freeFor(input, source, bookingId), parkedUnchanged(input, bookingId, source, base));
 	}
@@ -230,10 +270,15 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * Quelle selbst {@code _<ID>} ist. Eine geänderte Kopie zählt nicht: Die Änderung kam nach dem Parken.
 	 */
 	private static boolean parkedUnchanged(ConflictInput input, String bookingId, UnitKey source, Version base) {
-		UnitKey parked = UnitKey.unassignedBooking(source.eventId(), source.presentationId(), bookingId);
+		UnitKey parked = BookingTrail.parkedUnit(source, bookingId);
 		Sibling sibling = input.siblings().get(parked);
 		return !parked.equals(source) && sibling != null && sibling.snapshot().carriesBooking(bookingId)
-				&& withPlaceOf(sibling.snapshot().payload(), base.payload()).equals(base.payload());
+				&& sameExceptPlace(sibling.snapshot().payload(), base.payload());
+	}
+
+	/** Ob die Fassung bis auf die Gruppe "Platz" die der Basis ist. */
+	static boolean sameExceptPlace(ObjectNode payload, ObjectNode base) {
+		return withPlaceOf(payload, base).equals(base);
 	}
 
 	/** Eine Kopie von {@code payload} mit der Gruppe "Platz" von {@code placeFrom}. */
@@ -622,7 +667,9 @@ public final class BookingPolicy implements ConflictPolicy {
 		Party other = Party.of(introducerOf(input, idOf(theirs), theirs));
 		Sibling existing = input.siblings().get(moved);
 		UnitSnapshot current = existing == null ? null : existing.snapshot();
-		List<Change> extra = current != null && current.isLive() ? List.of() : List.of(withoutPlace(mine, moved, current));
+		// das Parken nennt seine Quelle (KARV-98): Eine spätere Auflösung an der Quelle findet den Parkweg
+		List<Change> extra = current != null && current.isLive() ? List.of()
+				: List.of(withoutPlace(mine, moved, current).withMarks(VersionMarks.NONE.withMovedFrom(unit)));
 
 		ConflictNote note = ConflictNote.doubleSale(input.ownMachineId(), other, moved,
 				FieldMerge.slice(mine.payload(), PLACE), mine.id());

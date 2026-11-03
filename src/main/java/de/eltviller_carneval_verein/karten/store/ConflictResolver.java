@@ -125,14 +125,14 @@ final class ConflictResolver {
 	}
 
 	/**
-	 * Eine vorbereitete Strecke; Basis, Meine, Deren, Kette und die Speichervorgänge ihrer Versionen nur bei
-	 * {@link Step#MERGE}.
+	 * Eine vorbereitete Strecke; Basis, Meine, Deren, Kette, die Speichervorgänge ihrer Versionen und die Umzugsspur
+	 * (leer außer bei Buchungen) nur bei {@link Step#MERGE}.
 	 */
 	private record Stretch(Step step, Version base, Version mine, Version theirs, List<Version> chainSinceBase,
-			List<Version> versions) {
+			List<Version> versions, Map<UnitKey, TrailUnit> trail) {
 
 		static Stretch of(Step step) {
-			return new Stretch(step, null, null, null, List.of(), List.of());
+			return new Stretch(step, null, null, null, List.of(), List.of(), Map.of());
 		}
 	}
 
@@ -342,10 +342,25 @@ final class ConflictResolver {
 		if (oldest == null || mine == null) {
 			return Stretch.of(Step.SKIP);
 		}
-		VersionId baseId = oldest.firstParent();
-		if (baseId != null && state.lost().stream().anyMatch(other -> other != lost && other.contains(baseId))) {
+		VersionId firstParent = oldest.firstParent();
+		if (firstParent != null && state.lost().stream().anyMatch(other -> other != lost && other.contains(firstParent))) {
 			// eigene Verzweigung: Die Strecke baut auf einer anderen verlorenen auf und kommt nach deren Auflösung dran
 			return Stretch.of(Step.LATER);
+		}
+		VersionId baseId = firstParent;
+		List<Version> forked = unit.type() == UnitType.BOOKING && oldest.marks().resolution()
+				? chainSinceBase(files, state.chain(), firstParent)
+				: List.of();
+		if (!forked.isEmpty()) {
+			// Auflösung gegen Auflösung (KARV-98): die Basis unter den Nutzer-Versionen beider Seiten, bestimmt aus den
+			// gabelnden Versionen (Nutzer-Versionen darüber liest die Spur als informiertes Handeln)
+			ResolutionBase.Result lowered = ResolutionBase.lower(files, oldest, forked.get(0));
+			if (lowered.kind() == ResolutionBase.Kind.LOWERED) {
+				baseId = lowered.base();
+			} else if (lowered.kind() == ResolutionBase.Kind.MISSING && host.shared() && withinListWait(unit)) {
+				LOGGER.fine("Eine Version unter der Gabel von " + unit.relativePath() + " fehlt lokal; die Auflösung wartet");
+				return Stretch.of(Step.WAIT);
+			}
 		}
 		Version base = baseId == null ? null : versionOf(files, baseId);
 		if (baseId != null && base == null) {
@@ -367,7 +382,76 @@ final class ConflictResolver {
 				versions.add(version);
 			}
 		}
-		return new Stretch(Step.MERGE, base, mine, state.head(), since, versions);
+		Map<UnitKey, TrailUnit> trail = unit.type() == UnitType.BOOKING
+				? TrailCollector.collect(unit, base, versions, this::folder)
+				: Map.of();
+		if (parkingPathWaits(unit, trail, since)) {
+			return Stretch.of(Step.WAIT);
+		}
+		return new Stretch(Step.MERGE, base, mine, state.head(), since, versions, copy(trail));
+	}
+
+	/**
+	 * Ob die Strecke auf den Parkweg wartet (KARV-98): An einer Einheit "ohne Platz" auf der Spur folgen auf eine geparkte
+	 * Version ({@code resolution} mit {@code movedFrom}) Nutzer-Versionen, von denen eine fremde noch nicht über ihre Liste
+	 * gelesen ist (wie {@link #mustWait}, höchstens {@link #LIST_WAIT}) oder deren Umzug am Ziel noch nicht angekommen ist
+	 * (wie {@link #arrivalMissing}). Sonst hielte die Spur ein Umsetzen der Kopie für gescheitert, oder E13 löschte eine
+	 * Kopie, deren Änderung schon gelistet ist. Nur für ein Parken aus demselben Speichervorgang wie eine Auflösung in der
+	 * Kette seit der Basis (wie die Spur selbst): Ein früheres Parken, dessen Umzug nie ankommt, hielte sonst ohne Ende auf.
+	 */
+	private boolean parkingPathWaits(UnitKey unit, Map<UnitKey, TrailUnit> trail, List<Version> since)
+			throws IOException {
+		if (!host.shared()) {
+			return false;
+		}
+		Set<String> saves = new HashSet<>();
+		since.stream().filter(v -> v.marks().resolution() && v.saveId() != null).forEach(v -> saves.add(v.saveId()));
+		for (TrailUnit parked : trail.values()) {
+			if (parked.unit().equals(unit) || !parked.unit().isUnassigned()) {
+				continue;
+			}
+			List<Version> after = afterParking(parked.chain(), saves);
+			if (unlisted(parked.unit(), after) && withinListWait(unit)) {
+				LOGGER.fine("Eine Änderung an " + parked.unit().relativePath() + " ist noch nicht gelesen; die Auflösung wartet");
+				return true;
+			}
+			if (arrivalMissing(parked.unit(), after)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Die Nutzer-Versionen der Kette nach der letzten geparkten Version aus einem dieser Speichervorgänge; leer, wenn keine
+	 * so geparkt wurde.
+	 */
+	private static List<Version> afterParking(List<Version> chain, Set<String> saves) {
+		int parked = -1;
+		for (int i = 0; i < chain.size(); i++) {
+			Version link = chain.get(i);
+			if (link.marks().resolution() && link.marks().movedFrom() != null && saves.contains(link.saveId())) {
+				parked = i;
+			}
+		}
+		return parked < 0 ? List.of()
+				: chain.subList(parked + 1, chain.size()).stream().filter(v -> !v.marks().resolution()).toList();
+	}
+
+	/** Ob eine fremde der Versionen noch nicht über die Änderungsliste der Einheit eingelesen ist. */
+	private boolean unlisted(UnitKey unit, List<Version> versions) {
+		Ownership own = host.ownership();
+		return versions.stream().anyMatch(v -> !own.isOwn(v) && !host.isListed(unit, v.id()));
+	}
+
+	/**
+	 * Ob die Einheit noch innerhalb von {@link #LIST_WAIT} seit ihrem ersten Warten ist (dieselbe Frist wie
+	 * {@link #mustWait}; hat sie schon auf eine Liste gewartet, ist sie angebrochen).
+	 */
+	private boolean withinListWait(UnitKey unit) {
+		Instant now = clock.instant();
+		Instant first = waitingSince.computeIfAbsent(unit, key -> now);
+		return now.isBefore(first.plus(LIST_WAIT));
 	}
 
 	private static Version versionOf(UnitFiles files, VersionId id) {
@@ -417,17 +501,10 @@ final class ConflictResolver {
 	 * wartend) ist auch eine Version einer früheren ID von vor ihrer Neuvergabe.
 	 */
 	private boolean mustWait(UnitKey unit, List<Version> since) {
-		if (!host.shared()) {
+		if (!host.shared() || !unlisted(unit, since)) {
 			return false;
 		}
-		Ownership own = host.ownership();
-		boolean unlisted = since.stream().anyMatch(v -> !own.isOwn(v) && !host.isListed(unit, v.id()));
-		if (!unlisted) {
-			return false;
-		}
-		Instant now = clock.instant();
-		Instant first = waitingSince.computeIfAbsent(unit, key -> now);
-		if (now.isBefore(first.plus(LIST_WAIT))) {
+		if (withinListWait(unit)) {
 			return true;
 		}
 		if (listWaitReported.add(unit)) {
@@ -481,13 +558,11 @@ final class ConflictResolver {
 		}
 		boolean booking = unit.type() == UnitType.BOOKING;
 		Map<UnitKey, ConflictInput.Sibling> siblings = booking ? siblings(unit) : Map.of();
-		Map<UnitKey, TrailUnit> trail = booking
-				? copy(TrailCollector.collect(unit, stretch.base(), stretch.versions(), this::folder))
-				: Map.of();
 		try {
 			ConflictInput input = new ConflictInput(unit, copy(stretch.base()), copy(stretch.mine()),
 					copy(stretch.theirs()), stretch.chainSinceBase().stream().map(ConflictResolver::copy).toList(),
-					host.machineId(), siblings, stretch.versions().stream().map(ConflictResolver::copy).toList(), trail);
+					host.machineId(), siblings, stretch.versions().stream().map(ConflictResolver::copy).toList(),
+					stretch.trail());
 			Resolution resolution = Objects.requireNonNull(policy.resolve(input), "Die Strategie lieferte kein Ergebnis.");
 			if (!resolution.deleted() && resolution.payload() == null) {
 				throw new IllegalStateException("Die Strategie lieferte keinen Inhalt.");
@@ -535,8 +610,8 @@ final class ConflictResolver {
 	/**
 	 * Die zu schreibenden Änderungen: zuerst die weiteren, die noch nicht da sind (eine Wiederholung nach einem Absturz legt
 	 * eine weitere Einheit nicht doppelt an), dann die Zusammenführung {@code [Deren, Meine]}. Alle tragen
-	 * {@link VersionMarks#RESOLUTION} und keine Umzugsangaben: Was eine Auflösung schreibt, ist keine Absicht eines
-	 * Rechners (KARV-93). Jeder Vermerk bekommt den
+	 * {@code resolution}: Was eine Auflösung schreibt, ist keine Absicht eines Rechners (KARV-93). Die Zusammenführung hat
+	 * keine Umzugsangaben; eine weitere Änderung behält ihre (KARV-98: das Parken nennt seine Quelle). Jeder Vermerk bekommt den
 	 * Speichervorgang von "Meine" ({@link ConflictNote#lostSave()}): Die Zusammenführungen bekommen je Strecke einen neuen,
 	 * die Konflikte eines verlorenen Speichervorgangs gehören im Dialog aber zusammen.
 	 */
@@ -547,7 +622,7 @@ final class ConflictResolver {
 			if (!alreadyThere(extra)) {
 				changes.add(new Change(extra.unit(), extra.parents(), extra.payload(), extra.deleted(),
 						extra.note() == null ? null : extra.note().withLostSave(lostSave), extra.seen(),
-						VersionMarks.RESOLUTION));
+						extra.marks().withResolution()));
 			}
 		}
 		ConflictNote note = resolution.note() == null ? null : resolution.note().withLostSave(lostSave);

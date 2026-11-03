@@ -9,6 +9,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -65,19 +66,26 @@ public final class TrailCollector {
 	 */
 	public static Map<UnitKey, TrailUnit> collect(UnitKey unit, Version base, List<Version> stretch, Folders folders)
 			throws IOException {
-		Set<String> bookings = new HashSet<>();
+		Set<String> bookings = new LinkedHashSet<>();
 		addBooking(bookings, base);
-		Deque<UnitKey> open = new ArrayDeque<>();
-		open.add(unit);
+		List<UnitKey> sources = new ArrayList<>();
 		for (Version version : stretch) {
 			if (version.marks().movedFrom() != null) {
 				addBooking(bookings, version);
-				open.add(version.marks().movedFrom());
+				sources.add(version.marks().movedFrom());
 			}
 		}
 		if (bookings.isEmpty()) {
 			return Map.of();
 		}
+		Deque<UnitKey> open = new ArrayDeque<>();
+		open.add(unit);
+		// die Einheit ohne Platz jeder Buchung gleich danach (KARV-98): Dort kann eine Auflösung sie geparkt haben, ohne
+		// dass eine Umzugsangabe hinführt; so verdrängt LIMIT sie nicht
+		Set<UnitKey> unassigned = new LinkedHashSet<>();
+		bookings.forEach(id -> unassigned.add(UnitKey.unassignedBooking(unit.eventId(), unit.presentationId(), id)));
+		open.addAll(unassigned);
+		open.addAll(sources);
 		Map<UnitKey, TrailUnit> trail = new LinkedHashMap<>();
 		Set<UnitKey> seen = new HashSet<>();
 		while (!open.isEmpty()) {
@@ -91,6 +99,10 @@ public final class TrailCollector {
 				break;
 			}
 			Folder folder = folders.folder(next);
+			if (!next.equals(unit) && unassigned.contains(next) && folder.versions().isEmpty()) {
+				// die Buchung stand nie ohne Platz: Die Einheit gehört nicht zur Spur
+				continue;
+			}
 			trail.put(next, unitOf(next, folder));
 			Map<VersionId, Version> byId = new HashMap<>();
 			folder.versions().forEach(version -> byId.put(version.id(), version));

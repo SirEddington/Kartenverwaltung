@@ -818,6 +818,12 @@ public final class ConflictActions {
 			candidates.add(UnitKey.booking(conflict.unit().eventId(), conflict.unit().presentationId(), mySeatId));
 		}
 		Version found = droppedOn(candidates, note);
+		UnitKey parked = found == null && note.moved() != null ? parkedCopyOf(note.moved()) : null;
+		if (parked != null) {
+			// die weichende Fassung kann an der geparkten Kopie der Buchung liegen, die jetzt auf moved lebt (KARV-98, E5;
+			// erst jetzt gesucht, weil das Modell dafür das Event zerlegt)
+			found = droppedOn(Set.of(parked), note);
+		}
 		if (found != null || !isUnassigned(placeOf(note))) {
 			return found;
 		}
@@ -831,6 +837,22 @@ public final class ConflictActions {
 			}
 		}
 		return droppedOn(unassigned, note);
+	}
+
+	/**
+	 * Die Einheit "ohne Platz" der Buchung, die das Modell auf diesem Sitz hat; {@code null} ohne eine solche (oder wenn
+	 * sich das Event nicht zerlegen lässt).
+	 */
+	private UnitKey parkedCopyOf(UnitKey seat) {
+		if (seat.isUnassigned()) {
+			return null;
+		}
+		try {
+			String bookingId = ConflictInput.bookingIdOf(payloadOf(seat));
+			return bookingId == null ? null : UnitKey.unassignedBooking(seat.eventId(), seat.presentationId(), bookingId);
+		} catch (IllegalStateException e) {
+			return null;
+		}
 	}
 
 	/** Die weichende Version des Vermerks auf einer der Einheiten: erst aus dem Merker, dann aus dem lokalen Bestand. */

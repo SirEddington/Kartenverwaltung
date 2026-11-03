@@ -1,9 +1,11 @@
 package de.eltviller_carneval_verein.karten.repository;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,12 +32,24 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
  * @param end     die Einheit, auf die sich {@code last} bezieht; {@code null} bei {@link Kind#UNTOUCHED}
  * @param mine    die jüngste eigene Version der Seite mit der Buchung am Ende, auch wenn sie dort nicht gilt (die weichende
  *                Fassung zum Wiederherstellen); sonst wie {@code last}
+ * @param after   die Auflösung, auf der die Absicht aufbaut (KARV-98, informiertes Handeln danach); {@code null}, wenn
+ *                keine
  */
-record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Version mine) {
+record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Version mine, Version after) {
 
 	/** Eine Absicht, deren eigene Fassung {@code last} ist. */
 	BookingTrail(Kind kind, Version removal, Version last, UnitKey end) {
 		this(kind, removal, last, end, last);
+	}
+
+	/** Eine Absicht ohne Auflösung darunter. */
+	BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Version mine) {
+		this(kind, removal, last, end, mine, null);
+	}
+
+	/** Dieselbe Absicht, aufbauend auf dieser Auflösung. */
+	BookingTrail withAfter(Version resolution) {
+		return new BookingTrail(kind, removal, last, end, mine, resolution);
 	}
 
 	/** Was eine Seite mit der Buchung getan hat. */
@@ -71,10 +85,131 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 		if (unit == null) {
 			return UNTOUCHED;
 		}
-		List<Version> side = sideVersions(input, unit, baseId, own);
-		if (own) {
-			return of(input, bookingId, source, side, unit);
+		Map<VersionId, Version> known = byId(known(input, unit));
+		Set<VersionId> sinceBase = baseId == null ? null : descendants(known.values(), baseId);
+		Version parking = parkingOf(input, bookingId, source, sinceBase);
+		if (parking != null) {
+			// Parkweg (KARV-98, Spec 3c): Was eine Seite an der geparkten Kopie tat, kam informiert und danach
+			TrailUnit parked = input.trail().get(parkedUnit(source, bookingId));
+			Set<VersionId> afterParking = descendants(parked.versions(), parking.id());
+			List<Version> mineThere = sideVersions(input, parked.versions(), parked.unit(), afterParking, true);
+			List<Version> theirsThere = sideVersions(input, parked.versions(), parked.unit(), afterParking, false);
+			if (!mineThere.isEmpty() && !theirsThere.isEmpty()) {
+				// ihr Konflikt liegt an der Kopie und wird dort aufgelöst
+				return UNTOUCHED;
+			}
+			List<Version> there = own ? mineThere : theirsThere;
+			if (!there.isEmpty()) {
+				Map<VersionId, Version> parkedKnown = byId(parked.versions());
+				BookingTrail trail = own ? of(input, bookingId, parked.unit(), there, parkedKnown)
+						: foreignIntent(input, bookingId, there, parked, parkedKnown);
+				return trail.withAfter(parking);
+			}
 		}
+		List<Version> side = sideVersions(input, known.values(), unit.unit(), sinceBase, own);
+		Version after = informedBase(known, side, sinceBase);
+		if (after != null) {
+			// was die Auflösung schon kannte, ist veraltet (KARV-98, informiertes Handeln danach)
+			Set<VersionId> stale = ancestors(known, after.id());
+			side = side.stream().filter(version -> !stale.contains(version.id())).toList();
+		}
+		BookingTrail trail = own ? of(input, bookingId, source, side, known)
+				: foreignIntent(input, bookingId, side, unit, known);
+		Version decisive = trail.removal() != null ? trail.removal() : trail.last();
+		return after != null && decisive != null && ancestors(known, decisive.id()).contains(after.id())
+				? trail.withAfter(after)
+				: trail;
+	}
+
+	/** Die Einheit "ohne Platz" der Buchung in der Vorstellung der Quelle. */
+	static UnitKey parkedUnit(UnitKey source, String bookingId) {
+		return UnitKey.unassignedBooking(source.eventId(), source.presentationId(), bookingId);
+	}
+
+	/**
+	 * Die Version, mit der eine Auflösung die Buchung von der Quelle nach {@code _<ID>} geparkt hat (KARV-98, Spec 3c): in
+	 * der Kette dort, {@code resolution} mit {@code movedFrom} = Quelle, trägt die Buchung, und aus demselben
+	 * Speichervorgang wie eine Auflösung in der Kette der Quelle seit der Basis (ein früheres Parken zählt nicht). Die
+	 * jüngste solche; {@code null}, wenn keine.
+	 */
+	private static Version parkingOf(ConflictInput input, String bookingId, UnitKey source, Set<VersionId> sinceBase) {
+		UnitKey parkedKey = parkedUnit(source, bookingId);
+		TrailUnit parked = parkedKey.equals(source) ? null : input.trail().get(parkedKey);
+		TrailUnit at = input.trail().get(source);
+		if (parked == null || at == null) {
+			return null;
+		}
+		Set<String> saves = new HashSet<>();
+		for (Version link : at.chain()) {
+			if (link.marks().resolution() && link.saveId() != null
+					&& (sinceBase == null || sinceBase.contains(link.id()))) {
+				saves.add(link.saveId());
+			}
+		}
+		Version found = null;
+		for (Version link : parked.chain()) {
+			if (link.marks().resolution() && source.equals(link.marks().movedFrom()) && carries(link, bookingId)
+					&& saves.contains(link.saveId())) {
+				found = link;
+			}
+		}
+		return found;
+	}
+
+	/**
+	 * Die Versionen der Einheit, die die Spur kennt: Kette und Versionen daneben; für die Einheit der Auflösung selbst
+	 * zusätzlich die Strecke (eine verlorene Auflösung steht nicht in {@link TrailUnit#outside()}).
+	 */
+	private static List<Version> known(ConflictInput input, TrailUnit unit) {
+		List<Version> known = new ArrayList<>(unit.versions());
+		if (unit.unit().equals(input.unit())) {
+			Set<VersionId> ids = new HashSet<>();
+			known.forEach(version -> ids.add(version.id()));
+			input.stretch().stream().filter(version -> !ids.contains(version.id())).forEach(known::add);
+		}
+		return known;
+	}
+
+	/**
+	 * Die jüngste Auflösung seit der Basis, auf der eine Version der Seite aufbaut (KARV-98, Spec Abschnitt 1b): Als
+	 * Absicht gilt dann, was die Seite danach tat. {@code null}, wenn keine, oder wenn mehrere nebeneinander die jüngsten
+	 * sind (dann bleibt es bei der bisherigen Lesart).
+	 */
+	private static Version informedBase(Map<VersionId, Version> known, List<Version> side, Set<VersionId> sinceBase) {
+		Set<VersionId> below = new HashSet<>();
+		side.forEach(version -> below.addAll(ancestors(known, version.id())));
+		List<Version> candidates = known.values().stream().filter(version -> version.marks().resolution()
+				&& below.contains(version.id()) && (sinceBase == null || sinceBase.contains(version.id()))).toList();
+		List<Version> youngest = candidates.stream().filter(candidate -> candidates.stream()
+				.noneMatch(other -> other != candidate && ancestors(known, other.id()).contains(candidate.id()))).toList();
+		return youngest.size() == 1 ? youngest.get(0) : null;
+	}
+
+	/** Die Vorfahren der Version unter den bekannten, über alle Vorgänger, ohne sie selbst. */
+	private static Set<VersionId> ancestors(Map<VersionId, Version> known, VersionId start) {
+		Set<VersionId> reached = new HashSet<>();
+		Version first = known.get(start);
+		List<VersionId> open = new ArrayList<>(first == null ? List.of() : first.parents());
+		while (!open.isEmpty()) {
+			VersionId id = open.remove(open.size() - 1);
+			if (reached.add(id) && known.containsKey(id)) {
+				open.addAll(known.get(id).parents());
+			}
+		}
+		return reached;
+	}
+
+	/** Die Versionen nach ihrer ID (bei doppelten die erste), in ihrer Reihenfolge. */
+	private static Map<VersionId, Version> byId(List<Version> versions) {
+		Map<VersionId, Version> byId = new LinkedHashMap<>();
+		versions.forEach(version -> byId.putIfAbsent(version.id(), version));
+		return byId;
+	}
+
+	/** Die Absicht der anderen Rechner aus ihren Versionen an der Quelle {@code unit}. */
+	private static BookingTrail foreignIntent(ConflictInput input, String bookingId, List<Version> side, TrailUnit unit,
+			Map<VersionId, Version> known) {
+		UnitKey source = unit.unit();
 		// mehrere andere Rechner: je Rechner eine Absicht; ein Storno gewinnt gegen alles, sonst gilt die der Kette
 		Set<VersionId> inChain = new HashSet<>();
 		unit.chain().forEach(link -> inChain.add(link.id()));
@@ -83,7 +218,7 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 		BookingTrail chosen = UNTOUCHED;
 		boolean chosenInChain = false;
 		for (List<Version> versions : byMachine.values()) {
-			BookingTrail trail = of(input, bookingId, source, versions, unit);
+			BookingTrail trail = of(input, bookingId, source, versions, known);
 			boolean standsInChain = versions.stream().anyMatch(version -> inChain.contains(version.id()));
 			if (trail.kind() == Kind.CANCELLED) {
 				return trail;
@@ -102,14 +237,15 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 	 * Behalten hat die Seite sie, wenn eine ihrer Versionen sie trägt.
 	 */
 	private static BookingTrail of(ConflictInput input, String bookingId, UnitKey source, List<Version> side,
-			TrailUnit unit) {
+			Map<VersionId, Version> known) {
 		Version kept = null;
 		for (Version version : side) {
 			if (carries(version, bookingId)) {
 				kept = version;
 				continue;
 			}
-			Version parent = version.firstParent() == null ? null : unit.version(version.firstParent());
+			VersionId firstParent = version.firstParent();
+			Version parent = firstParent == null ? null : known.get(firstParent);
 			if (parent != null && carries(parent, bookingId)) {
 				return follow(input, bookingId, source, version);
 			}
@@ -292,11 +428,14 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 		return found;
 	}
 
-	/** Die Nutzer-Versionen einer Seite an der Einheit seit der Basis, ältestes zuerst. */
-	private static List<Version> sideVersions(ConflictInput input, TrailUnit unit, VersionId baseId, boolean own) {
-		Set<VersionId> after = baseId == null ? null : descendants(unit, baseId);
+	/**
+	 * Die Nutzer-Versionen einer Seite unter den bekannten Versionen der Einheit, die in {@code after} liegen (etwa seit der
+	 * Basis; {@code null}: alle), ältestes zuerst.
+	 */
+	private static List<Version> sideVersions(ConflictInput input, Collection<Version> known, UnitKey unit,
+			Set<VersionId> after, boolean own) {
 		List<Version> side = new ArrayList<>();
-		for (Version version : userVersions(unit.versions(), unit.unit())) {
+		for (Version version : userVersions(known, unit)) {
 			boolean mine = input.ownMachineId().equals(version.machine());
 			if (mine == own && (after == null || after.contains(version.id()))) {
 				side.add(version);
@@ -307,14 +446,18 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 	}
 
 	/** Ohne Versionen einer Auflösung und ohne unlesbare (eine neuere App, ein Inhalt, der nicht zur Einheit passt). */
-	private static List<Version> userVersions(List<Version> versions, UnitKey unit) {
+	private static List<Version> userVersions(Collection<Version> versions, UnitKey unit) {
 		return versions.stream()
 				.filter(version -> !version.marks().resolution() && PolicyRules.isReadable(unit, version)).toList();
 	}
 
 	/** Die Versionen der Einheit, die die Basis über ihre Vorgänger enthalten, ohne sie selbst. */
 	private static Set<VersionId> descendants(TrailUnit unit, VersionId baseId) {
-		List<Version> versions = unit.versions();
+		return descendants(unit.versions(), baseId);
+	}
+
+	/** Wie {@link #descendants(TrailUnit, VersionId)} unter diesen Versionen. */
+	private static Set<VersionId> descendants(Collection<Version> versions, VersionId baseId) {
 		Set<VersionId> reached = new HashSet<>(Set.of(baseId));
 		boolean grown = true;
 		while (grown) {

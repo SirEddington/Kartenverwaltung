@@ -324,9 +324,12 @@ class ConflictResolverTest {
 		assertEquals(1, policy.inputs.size());
 	}
 
-	/** KARV-93: Was die Auflösung schreibt, trägt {@code resolution} und keine Umzugsangaben. */
+	/**
+	 * KARV-93: Was die Auflösung schreibt, trägt {@code resolution}. Die Zusammenführung hat keine Umzugsangaben; eine
+	 * Zusatz-Änderung behält ihre (KARV-98: das Parken nennt seine Quelle).
+	 */
 	@Test
-	void resolutionMarksEveryWrite() throws IOException {
+	void extraChangeKeepsItsMarksAndGetsResolution() throws IOException {
 		Path appData = dir.resolve("app");
 		SyncService service = single(appData);
 		RecordingPolicy policy = new RecordingPolicy();
@@ -338,7 +341,7 @@ class ConflictResolverTest {
 		service.tick();
 
 		assertEquals(VersionMarks.RESOLUTION, service.unitState(BOOKING).head().marks());
-		assertEquals(VersionMarks.RESOLUTION, service.unitState(MOVED).head().marks());
+		assertEquals(new VersionMarks(null, BOOKING, true), service.unitState(MOVED).head().marks());
 	}
 
 	/** KARV-93: Die Strategie bekommt die ganze Strecke und die Ordner der Einheiten auf der Umzugsspur. */
@@ -862,6 +865,18 @@ class ConflictResolverTest {
 	 */
 	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended,
 			boolean listed) {
+		return storeHost(store, own, appended, listed, true);
+	}
+
+	/** Wie {@link #storeHost(VersionStore, Ownership, List, boolean)}; mit {@code shared == false} im Einzelbetrieb. */
+	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended,
+			boolean listed, boolean shared) {
+		return storeHost(store, own, appended, version -> listed, shared);
+	}
+
+	/** Wie oben; {@code listed} sagt je Version, ob sie über ihre Liste gelesen ist. */
+	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended,
+			java.util.function.Predicate<VersionId> listed, boolean shared) {
 		return new ConflictResolver.Host() {
 			@Override
 			public SyncService.Resolved resolve(UnitKey unit) throws IOException {
@@ -871,12 +886,12 @@ class ConflictResolverTest {
 
 			@Override
 			public boolean shared() {
-				return true;
+				return shared;
 			}
 
 			@Override
 			public boolean isListed(UnitKey unit, VersionId version) {
-				return listed;
+				return listed.test(version);
 			}
 
 			@Override
@@ -910,6 +925,273 @@ class ConflictResolverTest {
 				return false;
 			}
 		};
+	}
+
+	// --- Auflösung gegen Auflösung (KARV-98, Spec Abschnitt 1)
+
+	private static final String CURRENT = "jetzt123aaaaaaaaaaaaaaaaaa";
+
+	/**
+	 * Zwei Rechner lösen gleichzeitig auf (KARV-98): M0 (fremd) trägt die Buchung; Bd (eigen) nimmt sie weg, Ae (fremd)
+	 * ändert sie, beide auf M0. Am (fremde Auflösung auf Bd und Ae) gilt; Br (eigene Auflösung auf Bd) verliert.
+	 *
+	 * @param unit        die Einheit
+	 * @param resolution  ob Br eine Auflösung ist (sonst eine Nutzer-Version)
+	 * @param storeAe     ob Ae im lokalen Bestand liegt
+	 * @return M0, Bd, Am, Br
+	 */
+	private Version[] resolutionAgainstResolution(VersionStore store, LocalArbiter arbiter, UnitKey unit,
+			boolean resolution, boolean storeAe) throws IOException {
+		long now = clock.instant().toEpochMilli();
+		Version m0 = version(VersionId.create(now - 5000, FOREIGN, 0), List.of(), FOREIGN, "s0", false, name("Mia"),
+				VersionMarks.NONE);
+		Version bd = version(VersionId.create(now - 4000, CURRENT, 0), List.of(m0.id()), CURRENT, "s1", true, null,
+				VersionMarks.NONE);
+		Version ae = version(VersionId.create(now - 3500, FOREIGN, 1), List.of(m0.id()), FOREIGN, "s2", false,
+				name("Mia bezahlt"), VersionMarks.NONE);
+		Version am = version(VersionId.create(now - 3000, FOREIGN, 2), List.of(bd.id(), ae.id()), FOREIGN, "s3", false,
+				name("Mia bezahlt"), VersionMarks.RESOLUTION);
+		Version br = version(VersionId.create(now - 2000, CURRENT, 1), List.of(bd.id()), CURRENT, "s4", false,
+				name("Mia wieder"), resolution ? VersionMarks.RESOLUTION : VersionMarks.NONE);
+		store(store, arbiter, unit, m0, true);
+		store(store, arbiter, unit, bd, true);
+		if (storeAe) {
+			store(store, arbiter, unit, ae, false);
+		}
+		store(store, arbiter, unit, am, true);
+		store(store, arbiter, unit, br, false);
+		return new Version[] { m0, bd, am, br };
+	}
+
+	/** Löst {@link #resolutionAgainstResolution} auf und liefert die Eingaben der Strategie. */
+	private RecordingPolicy resolveLoss(UnitKey unit, boolean resolution, boolean storeAe, boolean shared,
+			List<List<Change>> appended, Version[] versions) throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		System.arraycopy(resolutionAgainstResolution(store, arbiter, unit, resolution, storeAe), 0, versions, 0, 4);
+		ConflictResolver resolver = new ConflictResolver(
+				storeHost(store, new Ownership(CURRENT, List.of()), appended, true, shared),
+				new SyncNotifier(Runnable::run, true), clock);
+		RecordingPolicy policy = new RecordingPolicy();
+		resolver.setPolicy(unit.type(), policy);
+		resolver.enqueue(unit);
+		resolver.resolvePending(10);
+		if (!storeAe && shared) {
+			assertEquals(List.of(), appended, "wartet auf die fehlende Version der Grenze");
+			clock.advance(ConflictResolver.LIST_WAIT.plusMinutes(1));
+			resolver.enqueue(unit);
+			resolver.resolvePending(10);
+		}
+		return policy;
+	}
+
+	@Test
+	void resolutionAgainstResolutionGetsTheLoweredBase() throws IOException {
+		Version[] v = new Version[4];
+		RecordingPolicy policy = resolveLoss(BOOKING, true, true, true, new ArrayList<>(), v);
+
+		assertEquals(1, policy.inputs.size());
+		ConflictInput input = policy.inputs.get(0);
+		assertEquals(v[0].id(), input.base().id(), "abgesenkt auf M0");
+		assertEquals(List.of(v[1].id(), v[2].id()), ids(input.chainSinceBase()));
+		assertEquals(v[3].id(), input.mine().id());
+		assertEquals(v[2].id(), input.theirs().id());
+	}
+
+	/**
+	 * Aus dem abschließenden Review: Beide Seiten handelten nach ihrer Auflösung noch einmal (Be auf Br, Ac auf Am). Die
+	 * Basis wird trotzdem auf M0 gesenkt; sie folgt aus den gabelnden Versionen, nicht aus den Spitzen.
+	 */
+	@Test
+	void lowersAlsoWithUserVersionsAboveBothResolutions() throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		long now = clock.instant().toEpochMilli();
+		Version m0 = version(VersionId.create(now - 9000, FOREIGN, 0), List.of(), FOREIGN, "s0", false, name("Mia"),
+				VersionMarks.NONE);
+		Version bd = version(VersionId.create(now - 8000, CURRENT, 0), List.of(m0.id()), CURRENT, "s1", true, null,
+				VersionMarks.NONE);
+		Version ae = version(VersionId.create(now - 7500, FOREIGN, 1), List.of(m0.id()), FOREIGN, "s2", false,
+				name("Mia bezahlt"), VersionMarks.NONE);
+		Version am = version(VersionId.create(now - 7000, FOREIGN, 2), List.of(bd.id(), ae.id()), FOREIGN, "s3", false,
+				name("Mia bezahlt"), VersionMarks.RESOLUTION);
+		Version ac = version(VersionId.create(now - 6000, FOREIGN, 3), List.of(am.id()), FOREIGN, "s4", true, null,
+				VersionMarks.NONE);
+		Version br = version(VersionId.create(now - 5000, CURRENT, 1), List.of(bd.id()), CURRENT, "s5", false,
+				name("Mia wieder"), VersionMarks.RESOLUTION);
+		Version be = version(VersionId.create(now - 4000, CURRENT, 2), List.of(br.id()), CURRENT, "s6", false,
+				name("Mia Fenster2"), VersionMarks.NONE);
+		store(store, arbiter, BOOKING, m0, true);
+		store(store, arbiter, BOOKING, bd, true);
+		store(store, arbiter, BOOKING, ae, false);
+		store(store, arbiter, BOOKING, am, true);
+		store(store, arbiter, BOOKING, ac, true);
+		store(store, arbiter, BOOKING, br, false);
+		store(store, arbiter, BOOKING, be, false);
+		ConflictResolver resolver = new ConflictResolver(
+				storeHost(store, new Ownership(CURRENT, List.of()), new ArrayList<>(), true, true),
+				new SyncNotifier(Runnable::run, true), clock);
+		RecordingPolicy policy = new RecordingPolicy();
+		resolver.setPolicy(UnitType.BOOKING, policy);
+		resolver.enqueue(BOOKING);
+
+		resolver.resolvePending(10);
+
+		assertEquals(1, policy.inputs.size());
+		assertEquals(m0.id(), policy.inputs.get(0).base().id(), "abgesenkt auf M0");
+	}
+
+	@Test
+	void userVersionAgainstResolutionKeepsTheBase() throws IOException {
+		Version[] v = new Version[4];
+		RecordingPolicy policy = resolveLoss(BOOKING, false, true, true, new ArrayList<>(), v);
+
+		assertEquals(v[1].id(), policy.inputs.get(0).base().id(), "Basis bleibt Bd");
+	}
+
+	@Test
+	void missingFrontierVersionWaitsInSharedModeThenFallsBack() throws IOException {
+		Version[] v = new Version[4];
+		List<List<Change>> appended = new ArrayList<>();
+		RecordingPolicy policy = resolveLoss(BOOKING, true, false, true, appended, v);
+
+		assertEquals(1, policy.inputs.size());
+		assertEquals(v[1].id(), policy.inputs.get(0).base().id(), "nach LIST_WAIT die heutige Basis");
+	}
+
+	@Test
+	void missingFrontierVersionFallsBackAtOnceInSingleMode() throws IOException {
+		Version[] v = new Version[4];
+		RecordingPolicy policy = resolveLoss(BOOKING, true, false, false, new ArrayList<>(), v);
+
+		assertEquals(1, policy.inputs.size());
+		assertEquals(v[1].id(), policy.inputs.get(0).base().id(), "ohne Warten die heutige Basis");
+	}
+
+	// --- Warten auf dem Parkweg (KARV-98, Spec 3b)
+
+	/**
+	 * An A-1 trug die Basis X; B's eigene Änderung verlor gegen T. Eine Auflösung hat X nach {@code _X} geparkt (P, mit
+	 * {@code movedFrom} A-1); darauf liegt eine fremde Nutzer-Version F.
+	 *
+	 * @param f        F's Inhalt (ohne: eine Löschung)
+	 * @param fMarks   F's Umzugsangaben
+	 * @return P und F
+	 */
+	private Version[] lossWithParkedCopy(VersionStore store, LocalArbiter arbiter, ObjectNode f, VersionMarks fMarks)
+			throws IOException {
+		return lossWithParkedCopy(store, arbiter, f, fMarks, "sr");
+	}
+
+	/** Wie oben; {@code parkingSave} ist der Speichervorgang des Parkens (die Auflösung an A-1 hat "sr"). */
+	private Version[] lossWithParkedCopy(VersionStore store, LocalArbiter arbiter, ObjectNode f, VersionMarks fMarks,
+			String parkingSave) throws IOException {
+		long now = clock.instant().toEpochMilli();
+		Version base = version(VersionId.create(now - 5000, FOREIGN, 0), List.of(), FOREIGN, "s0", false,
+				MAPPER.createObjectNode().put("id", "X"), VersionMarks.NONE);
+		Version t = version(VersionId.create(now - 4000, FOREIGN, 1), List.of(base.id()), FOREIGN, "s1", false,
+				MAPPER.createObjectNode().put("id", "T"), VersionMarks.NONE);
+		Version merge = version(VersionId.create(now - 3500, FOREIGN, 5), List.of(t.id()), FOREIGN, "sr", false,
+				MAPPER.createObjectNode().put("id", "T"), VersionMarks.RESOLUTION);
+		Version mine = version(VersionId.create(now - 3000, CURRENT, 0), List.of(base.id()), CURRENT, "s2", false,
+				MAPPER.createObjectNode().put("id", "X").put("name", "neu"), VersionMarks.NONE);
+		Version parking = version(VersionId.create(now - 2500, FOREIGN, 2), List.of(), FOREIGN, parkingSave, false,
+				MAPPER.createObjectNode().put("id", "X"), VersionMarks.RESOLUTION.withMovedFrom(BOOKING));
+		Version foreignOnCopy = version(VersionId.create(now - 2000, FOREIGN, 3), List.of(parking.id()), FOREIGN, "s3",
+				f == null, f, fMarks);
+		store(store, arbiter, BOOKING, base, true);
+		store(store, arbiter, BOOKING, t, true);
+		store(store, arbiter, BOOKING, merge, true);
+		store(store, arbiter, BOOKING, mine, false);
+		store(store, arbiter, MOVED, parking, true);
+		store(store, arbiter, MOVED, foreignOnCopy, true);
+		return new Version[] { parking, foreignOnCopy };
+	}
+
+	private ConflictResolver parkedResolver(VersionStore store, java.util.function.Predicate<VersionId> listed,
+			boolean shared, List<List<Change>> appended) {
+		ConflictResolver resolver = new ConflictResolver(
+				storeHost(store, new Ownership(CURRENT, List.of()), appended, listed, shared),
+				new SyncNotifier(Runnable::run, true), clock);
+		resolver.setPolicy(UnitType.BOOKING, new RecordingPolicy());
+		resolver.enqueue(BOOKING);
+		return resolver;
+	}
+
+	@Test
+	void waitsForAnUnlistedForeignVersionOnTheParkedCopy() throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		Version[] v = lossWithParkedCopy(store, new LocalArbiter(store, clock),
+				MAPPER.createObjectNode().put("id", "X").put("comment", "A"), VersionMarks.NONE);
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = parkedResolver(store, id -> !id.equals(v[1].id()), true, appended);
+
+		resolver.resolvePending(10);
+		assertEquals(List.of(), appended, "wartet auf die Liste der Änderung an der Kopie");
+
+		clock.advance(ConflictResolver.LIST_WAIT.plusMinutes(1));
+		resolver.enqueue(BOOKING);
+		resolver.resolvePending(10);
+		assertEquals(1, appended.size(), "nach LIST_WAIT löst sie auf");
+	}
+
+	@Test
+	void waitsForTheArrivalOfAMoveFromTheParkedCopy() throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		Version[] v = lossWithParkedCopy(store, arbiter, null, VersionMarks.NONE.withMovedTo(OTHER_SEAT));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = parkedResolver(store, id -> true, true, appended);
+
+		resolver.resolvePending(10);
+		clock.advance(ConflictResolver.LIST_WAIT.plusMinutes(1));
+		resolver.enqueue(BOOKING);
+		resolver.resolvePending(10);
+		assertEquals(List.of(), appended, "wartet auf die Ankunft, auch über LIST_WAIT hinaus");
+
+		store(store, arbiter, OTHER_SEAT, version(VersionId.create(clock.instant().toEpochMilli(), FOREIGN, 4), List.of(),
+				FOREIGN, v[1].saveId(), false, MAPPER.createObjectNode().put("id", "X"),
+				VersionMarks.NONE.withMovedFrom(MOVED)), true);
+		resolver.enqueue(BOOKING);
+		resolver.resolvePending(10);
+		assertEquals(1, appended.size(), "mit der Ankunft löst sie auf");
+	}
+
+	/**
+	 * Aus dem abschließenden Review: Ein Parken aus einem anderen Speichervorgang (ein früherer Doppelverkauf) hält die
+	 * Auflösung nicht auf, auch wenn ein Umzug von dort nie ankommt; sonst wartete sie ohne Ende.
+	 */
+	@Test
+	void oldParkingDoesNotHoldTheResolution() throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		lossWithParkedCopy(store, new LocalArbiter(store, clock), null, VersionMarks.NONE.withMovedTo(OTHER_SEAT), "alt");
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = parkedResolver(store, id -> true, true, appended);
+
+		resolver.resolvePending(10);
+
+		assertEquals(1, appended.size(), "löst ohne Warten auf");
+	}
+
+	@Test
+	void noWaitingOnTheParkingPathInSingleMode() throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		Version[] v = lossWithParkedCopy(store, new LocalArbiter(store, clock),
+				MAPPER.createObjectNode().put("id", "X").put("comment", "A"), VersionMarks.NONE);
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = parkedResolver(store, id -> !id.equals(v[1].id()), false, appended);
+
+		resolver.resolvePending(10);
+
+		assertEquals(1, appended.size());
+	}
+
+	@Test
+	void presentationKeepsItsBase() throws IOException {
+		Version[] v = new Version[4];
+		RecordingPolicy policy = resolveLoss(SHOW, true, true, true, new ArrayList<>(), v);
+
+		assertEquals(v[1].id(), policy.inputs.get(0).base().id(), "nur Buchungen werden abgesenkt");
 	}
 
 	@Test
