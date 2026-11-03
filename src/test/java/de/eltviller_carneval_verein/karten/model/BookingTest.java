@@ -367,6 +367,47 @@ class BookingTest {
 		Booking empty = new Booking();
 		empty.setPrice(1800);
 		assertFalse(empty.hasLeftovers(), "nur Einzelpreis");
+
+		Booking unassigned = new Booking();
+		unassigned.setComment("nach Bestuhlungswechsel");
+		unassigned.setUnassigned(true);
+		assertFalse(unassigned.hasLeftovers(), "eine Buchung ohne Platz ist kein Rest eines Sitzes");
+	}
+
+	@Test
+	void dataLabels_nennt_die_Felder_von_hasData_und_ist_leer_ohne_Daten() {
+		Booking booking = new Booking();
+		booking.setPrice(1800);
+		booking.setReservationDate(LocalDate.of(2026, 10, 1));
+		assertEquals(List.of(), booking.dataLabels());
+		assertFalse(booking.hasData());
+
+		booking.setLastName("Müller");
+		booking.setFirstName("Anna");
+		booking.setEMail("a@b.de");
+		booking.setComment("Notiz");
+		booking.setPaymentStatus(PaymentStatus.CARD);
+		booking.setCollected(true);
+		assertEquals(List.of("Nachname", "Vorname", "E-Mail", "Kommentar", "Zahlung", "abgeholt"), booking.dataLabels());
+
+		// je Feld allein: hasData und dataLabels stimmen überein
+		for (java.util.function.Consumer<Booking> field : List.<java.util.function.Consumer<Booking>>of(b -> b.setLastName("M"),
+				b -> b.setFirstName("A"), b -> b.setEMail("a@b.de"), b -> b.setComment("N"), b -> b.setPaymentStatus(PaymentStatus.CASH),
+				b -> b.setCollected(true))) {
+			Booking single = new Booking();
+			field.accept(single);
+			assertTrue(single.hasData());
+			assertEquals(1, single.dataLabels().size());
+		}
+	}
+
+	@Test
+	void isTaken_bei_reserviert_oder_bezahlt() {
+		Booking booking = new Booking();
+		booking.setComment("Rest");
+		assertFalse(booking.isTaken());
+		booking.setPaymentStatus(PaymentStatus.TRANSFER);
+		assertTrue(booking.isTaken());
 	}
 
 	@Test

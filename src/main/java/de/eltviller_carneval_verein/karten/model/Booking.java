@@ -1,7 +1,9 @@
 package de.eltviller_carneval_verein.karten.model;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -308,12 +310,48 @@ public class Booking {
 	}
 
 	/**
+	 * Ob die Buchung ihren Sitz belegt: reserviert oder bezahlt ({@link #getStatus()} nicht frei), wie in der Saalansicht.
+	 * Reste einer alten Buchung ({@link #hasLeftovers()}) und ein Einzelpreis belegen ihn nicht (KARV-121).
+	 */
+	@JsonIgnore
+	public boolean isTaken() {
+		return getStatus() != SeatStatus.FREE;
+	}
+
+	/**
 	 * Ob die Buchung Daten trägt, die nicht verloren gehen dürfen: Name, E-Mail, Kommentar, ein Zahlstatus oder
-	 * abgeholt. Ein bloßer Einzelpreis zählt nicht.
+	 * abgeholt. Ein bloßer Einzelpreis zählt nicht. Dieselben Felder benennt {@link #dataLabels()}.
 	 */
 	public boolean hasData() {
 		return !isBlank(lastName) || !isBlank(firstName) || !isBlank(eMail) || !isBlank(comment)
 				|| (getPaymentStatus() != null && getPaymentStatus() != PaymentStatus.NONE) || collected;
+	}
+
+	/**
+	 * Die Felder, mit denen die Buchung Daten trägt ({@link #hasData()}), in der Reihenfolge der Tabelle, etwa
+	 * "Nachname", "Kommentar"; leer, wenn sie keine trägt. Für Rückfragen, die nennen, was erhalten bliebe.
+	 */
+	public List<String> dataLabels() {
+		List<String> labels = new ArrayList<>();
+		if (!isBlank(lastName)) {
+			labels.add("Nachname");
+		}
+		if (!isBlank(firstName)) {
+			labels.add("Vorname");
+		}
+		if (!isBlank(eMail)) {
+			labels.add("E-Mail");
+		}
+		if (!isBlank(comment)) {
+			labels.add("Kommentar");
+		}
+		if (getPaymentStatus() != null && getPaymentStatus() != PaymentStatus.NONE) {
+			labels.add("Zahlung");
+		}
+		if (collected) {
+			labels.add("abgeholt");
+		}
+		return labels;
 	}
 
 	/** "Tisch A3" bei einer Reihe mit Buchstaben, sonst "Tisch 3" (aus der Momentaufnahme). */
@@ -393,12 +431,12 @@ public class Booking {
 	}
 
 	/**
-	 * Ob die Buchung frei ist (kein Nachname, nicht bezahlt) und trotzdem Daten trägt, etwa einen Kommentar oder einen
-	 * Vornamen. Solche Reste verwirft {@link #clearLeftovers()}, sobald eine neue Buchung den Sitz bekommt (KARV-121).
+	 * Ob die Buchung eines Sitzes frei ist (kein Nachname, nicht bezahlt) und trotzdem Daten trägt, etwa einen Kommentar
+	 * oder einen Vornamen. Solche Reste verwirft {@link #clearLeftovers()}, sobald eine neue Buchung den Sitz bekommt
+	 * (KARV-121). Eine Buchung ohne Platz hat keine Reste: Ihre Daten sind alles, was von ihr bleibt.
 	 */
-	@JsonIgnore
 	public boolean hasLeftovers() {
-		return getStatus() == SeatStatus.FREE && hasData();
+		return !unassigned && !isTaken() && hasData();
 	}
 
 	/**
@@ -416,7 +454,8 @@ public class Booking {
 		return rowLabel != null ? rowLabel.trim() : "";
 	}
 
-	private static boolean isBlank(String text) {
+	/** Kein Text: {@code null} oder nur Leerraum. */
+	static boolean isBlank(String text) {
 		return text == null || text.isBlank();
 	}
 

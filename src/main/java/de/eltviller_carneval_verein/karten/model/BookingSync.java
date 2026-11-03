@@ -123,7 +123,7 @@ public final class BookingSync {
 		List<Booking> others = new ArrayList<>();
 		for (Booking other : p.getBookings()) {
 			if (other != booking && seat.getId().equals(other.getSeatId())) {
-				if (other.getStatus() != SeatStatus.FREE) {
+				if (other.isTaken()) {
 					return false;
 				}
 				others.add(other);

@@ -463,6 +463,20 @@ class SeatBulkEditTest {
 	}
 
 	@Test
+	void aBookingWithoutPlaceKeepsItsDataAndStaysWithoutPlace() {
+		Booking unassigned = leftovers(1, "nach Bestuhlungswechsel");
+		unassigned.setUnassigned(true);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(unassigned));
+		assertEquals(Optional.of("nach Bestuhlungswechsel"), edit.comment().common());
+
+		edit.lastName().change("Meier");
+		edit.apply(TODAY);
+
+		assertEquals("nach Bestuhlungswechsel", unassigned.getComment());
+		assertTrue(unassigned.isUnassigned());
+	}
+
+	@Test
 	void withoutApplyTheLeftoversStay() {
 		Booking leftover = leftovers(1, "storniert");
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(leftover));

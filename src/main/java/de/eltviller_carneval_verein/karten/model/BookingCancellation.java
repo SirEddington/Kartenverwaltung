@@ -67,15 +67,11 @@ public final class BookingCancellation {
 	 * Nachnamen trüge die Buchung noch Daten ({@link Booking#hasData()}). Dann wird gefragt, ob storniert werden soll.
 	 */
 	public static boolean leavesData(Booking booking, String newLastName) {
-		if (isBlank(booking.getLastName()) || !isBlank(newLastName)) {
+		if (!booking.isReserved() || !Booking.isBlank(newLastName)) {
 			return false;
 		}
 		Booking withoutName = booking.copy();
 		withoutName.setLastName(null);
 		return withoutName.hasData();
-	}
-
-	private static boolean isBlank(String text) {
-		return text == null || text.isBlank();
 	}
 }

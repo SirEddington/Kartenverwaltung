@@ -8,7 +8,6 @@ import java.util.Set;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
-import de.eltviller_carneval_verein.karten.model.SeatStatus;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
@@ -52,9 +51,8 @@ public final class PlaceAssignment {
 
 	/**
 	 * Die freien Sitze der Bestuhlung, sortiert nach Reihenbuchstabe ({@link Booking#ROW_LABEL_ORDER}), Tisch- und
-	 * Sitznummer. Frei ist ein Sitz, wenn keine Buchung der Vorstellung auf ihn zeigt, die reserviert oder bezahlt ist
-	 * ({@link Booking#getStatus()}), wie in der Saalansicht. Reste einer alten Buchung ({@link Booking#hasLeftovers()})
-	 * und ein bloßer Einzelpreis belegen ihn nicht (KARV-121).
+	 * Sitznummer. Frei ist ein Sitz, wenn keine Buchung der Vorstellung auf ihn zeigt, die ihn belegt
+	 * ({@link Booking#isTaken()}: reserviert oder bezahlt), wie in der Saalansicht.
 	 */
 	public static List<Seat> freeSeats(Presentation presentation, SeatingPlan plan) {
 		if (plan == null) {
@@ -76,7 +74,7 @@ public final class PlaceAssignment {
 		Set<String> taken = new HashSet<>();
 		if (presentation != null && presentation.getBookings() != null) {
 			for (Booking booking : presentation.getBookings()) {
-				if (booking.getSeatId() != null && booking.getStatus() != SeatStatus.FREE) {
+				if (booking.getSeatId() != null && booking.isTaken()) {
 					taken.add(booking.getSeatId());
 				}
 			}

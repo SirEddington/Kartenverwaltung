@@ -3,7 +3,6 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.SeatStatus;
 
 /**
  * Teilt eine Auswahl in freie Plätze und solche, die schon reserviert oder verkauft sind. Daran entscheidet sich, ob vor
@@ -12,8 +11,8 @@ import de.eltviller_carneval_verein.karten.model.SeatStatus;
 public record SeatSelectionSplit(List<Booking> free, List<Booking> occupied) {
 
 	public static SeatSelectionSplit of(List<Booking> bookings) {
-		return new SeatSelectionSplit(bookings.stream().filter(booking -> booking.getStatus() == SeatStatus.FREE).toList(),
-				bookings.stream().filter(booking -> booking.getStatus() != SeatStatus.FREE).toList());
+		return new SeatSelectionSplit(bookings.stream().filter(booking -> !booking.isTaken()).toList(),
+				bookings.stream().filter(Booking::isTaken).toList());
 	}
 
 	public boolean hasFree() {

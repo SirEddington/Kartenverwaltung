@@ -1,6 +1,5 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.MainApp;
@@ -71,37 +70,12 @@ final class NameRemovalDialog {
 	static String message(List<Booking> remaining) {
 		String text;
 		if (remaining.size() == 1) {
-			text = "Der Name ist gelöscht, aber andere Daten bleiben (" + String.join(", ", remainingData(remaining.get(0)))
+			text = "Der Name ist gelöscht, aber andere Daten bleiben (" + String.join(", ", remaining.get(0).dataLabels())
 					+ "). Buchung stornieren?";
 		} else {
 			text = "Bei " + remaining.size() + " Buchungen wird der Name gelöscht, andere Daten bleiben. Buchungen stornieren?";
 		}
 		String hint = CancelAction.paymentHint(remaining);
 		return hint.isEmpty() ? text : text + "\n" + hint;
-	}
-
-	/** Was die Buchung ohne Namen noch trägt, in der Reihenfolge der Felder. */
-	private static List<String> remainingData(Booking booking) {
-		List<String> data = new ArrayList<>();
-		if (!isBlank(booking.getFirstName())) {
-			data.add("Vorname");
-		}
-		if (!isBlank(booking.getEMail())) {
-			data.add("E-Mail");
-		}
-		if (!isBlank(booking.getComment())) {
-			data.add("Kommentar");
-		}
-		if (booking.isPaid()) {
-			data.add("Zahlung");
-		}
-		if (booking.isCollected()) {
-			data.add("abgeholt");
-		}
-		return data;
-	}
-
-	private static boolean isBlank(String text) {
-		return text == null || text.isBlank();
 	}
 }

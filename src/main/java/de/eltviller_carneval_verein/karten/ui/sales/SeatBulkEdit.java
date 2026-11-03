@@ -138,12 +138,11 @@ public final class SeatBulkEdit {
 	public List<Booking> nameRemovalsLeavingData() {
 		List<Booking> removals = new ArrayList<>();
 		for (Booking booking : bookings) {
-			if (isBlank(booking.getLastName())) {
-				continue;
-			}
-			Booking after = preview(booking);
-			if (isBlank(after.getLastName()) && after.hasData()) {
-				removals.add(booking);
+			if (booking.isReserved()) {
+				Booking after = preview(booking);
+				if (!after.isReserved() && after.hasData()) {
+					removals.add(booking);
+				}
 			}
 		}
 		return removals;
@@ -161,10 +160,6 @@ public final class SeatBulkEdit {
 		}
 		fields.forEach(field -> field.applyTo(after));
 		return after;
-	}
-
-	private static boolean isBlank(String text) {
-		return text == null || text.isBlank();
 	}
 
 	public boolean hasChanges() {
