@@ -33,6 +33,7 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -2178,6 +2179,178 @@ class ConflictScenarioTest {
 			for (UnitKey unit : machine.eventState().keySet()) {
 				assertEquals(0, notes(machine, unit), machine.name + ": Vermerk an " + unit.relativePath());
 			}
+		}
+	}
+
+	/**
+	 * KARV-98, Fall 1 und 2 (getrennte Gewinner, gleichzeitige Auflösung): Mia steht "ohne Platz". A verkauft Sitz 1 an Tom
+	 * und lädt zuerst hoch. B weist Mia Sitz 1 zu (mit Kommentar), A ändert Mia auf {@code _Mia} ({@code EDIT}: bezahlt)
+	 * oder storniert sie, keiner kennt den anderen. B lädt zuerst hoch: B gewinnt {@code _Mia} und verliert Sitz 1, A
+	 * verliert {@code _Mia}. Jeder löst für sich auf, ohne die Zusammenführung des anderen zu kennen: B belebt {@code _Mia}
+	 * wieder, A führt dort zusammen. Die beiden Auflösungen gabeln an {@code _Mia}; {@code forkWinner} lädt zuerst hoch.
+	 * Danach gilt R35: Mia lebt nach einer Änderung genau einmal "ohne Platz" mit beiden Änderungen, nach dem Storno
+	 * nirgends; B hat genau einen offenen Eintrag zu Mia, A keinen.
+	 */
+	@Disabled("KARV-98, Ursache 1: Auflösung gegen Auflösung entscheidet nach Inhalten statt nach Absichten (Storno und "
+			+ "Änderung gehen verloren, doppelte Vermerke); nach v1.0")
+	@ParameterizedTest(name = "A: {0}, die Gabel an _Mia gewinnt {1}")
+	@CsvSource({ "EDIT, a", "EDIT, b", "CANCEL, a", "CANCEL, b" })
+	void concurrentResolutionsOfSplitWinnersKeepInvariants(String action, String forkWinner) throws IOException {
+		Machine[] m = cloudMachines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Booking mia = a.friday().addBooking();
+		mia.setLastName("Mia");
+		mia.setUnassigned(true);
+		a.repository.saveEvent(a.event);
+		String miaId = mia.getId();
+		UnitKey miaUnit = unassignedUnit(a, miaId);
+		UnitKey seat = seatUnit(a, 1);
+		untilQuiet(a, b);
+
+		a.seat(1).setLastName("Tom");
+		a.repository.saveEvent(a.event);
+		localTick(a);
+		cloud.step(a.name);
+		Booking bMia = booking(b, miaId);
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), bMia, b.plan().getSeats().get(1)));
+		bMia.setComment("Fenster");
+		b.repository.saveEvent(b.event);
+		localTick(b);
+		if (action.equals("EDIT")) {
+			mia.setPaymentStatus(PaymentStatus.CARD);
+		} else {
+			a.friday().getBookings().remove(mia);
+		}
+		a.repository.saveEvent(a.event);
+		localTick(a);
+		cloud.step(b.name);
+		cloud.step(a.name);
+		for (int round = 0; round < 3; round++) {
+			localTick(a);
+			localTick(b);
+		}
+		assertTrue(a.sync.unitState(miaUnit).lost().isEmpty(), "A hat _Mia für sich aufgelöst");
+		assertTrue(b.sync.unitState(seat).lost().isEmpty(), "B hat Sitz 1 für sich aufgelöst");
+
+		Machine first = forkWinner.equals(a.name) ? a : b;
+		cloud.step(first.name);
+		cloud.step((first == a ? b : a).name);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("Tom", lastName(a.eventState().get(seat)));
+		if (action.equals("EDIT")) {
+			assertEquals(Set.of(miaUnit), carriers(a, miaId), "Mia lebt genau einmal, ohne Platz");
+			UnitSnapshot kept = a.eventState().get(miaUnit);
+			assertWithoutPlace(kept, "Mia");
+			assertEquals("Fenster", kept.payload().get("comment").asText(), "B's Änderung beim Zuweisen");
+			assertEquals("CARD", kept.payload().get("paymentStatus").asText(), "A's Änderung");
+		} else {
+			assertEquals(Set.of(), carriers(a, miaId), "Mia bleibt storniert");
+		}
+		assertEquals(1, b.open().size(), "B hat genau einen Eintrag zu Mia: " + b.open());
+		assertEquals(List.of(), a.open(), "A's Änderung weicht nicht");
+		assertSettled(m);
+	}
+
+	/**
+	 * KARV-98 mit den Resten aus KARV-124 (späte Auflösung gegen eine geparkte Kopie): A verkauft Sitz 1 an Anna, B an Bert;
+	 * B verschiebt Bert ungespeichert auf Sitz 2 ({@code MOVE}) oder storniert ihn ({@code CANCEL}), dann trifft die
+	 * Zusammenführung ein und parkt Bert "ohne Platz". A ändert die geparkte Kopie ({@code EDIT}) oder setzt sie auf Sitz 3
+	 * ({@code RESEAT}) und speichert; erst danach speichert B. Danach gilt R35: Nach einem Storno lebt Bert nirgends, und
+	 * A's Änderung weicht mit Vermerk an A; sonst lebt Bert genau einmal, und A's Kommentar geht nicht verloren.
+	 */
+	@Disabled("KARV-98, Ursache 2: Die geparkte Kopie hängt nicht an ihrer Quelle; geändert oder umgesetzt lebt Bert "
+			+ "doppelt oder B's Storno geht still verloren (Umzugsmarken für Auflösungen); nach v1.0")
+	@ParameterizedTest(name = "B: {0}, A an der geparkten Kopie: {1}")
+	@CsvSource({ "MOVE, EDIT", "MOVE, RESEAT", "CANCEL, EDIT", "CANCEL, RESEAT" })
+	void lateChangeAgainstAnAlteredParkedCopyKeepsInvariants(String loser, String parked) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		a.sell(1, "Anna");
+		Booking bert = b.sell(1, "Bert");
+		String bertId = bert.getId();
+		if (loser.equals("MOVE")) {
+			assertTrue(BookingSync.assign(b.friday(), b.plan(), bert, b.plan().getSeats().get(2)));
+		} else {
+			bert.clearCustomerData();
+		}
+		a.tick();
+		b.tick();
+		untilQuiet(a, b);
+		UnitKey parkedUnit = unassignedUnit(a, bertId);
+		assertEquals(Set.of(parkedUnit), carriers(a, bertId), "die Zusammenführung hat Bert geparkt");
+
+		Booking aBert = booking(a, bertId);
+		aBert.setComment("von A");
+		if (parked.equals("RESEAT")) {
+			assertTrue(BookingSync.assign(a.friday(), a.plan(), aBert, a.plan().getSeats().get(3)));
+		}
+		a.repository.saveEvent(a.event);
+		untilQuiet(a, b);
+		b.repository.saveEvent(b.event);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("Anna", lastName(a.eventState().get(seatUnit(a, 1))));
+		Set<UnitKey> carriers = carriers(a, bertId);
+		String state = "Träger " + carriers + ", A offen " + a.open() + ", B offen " + b.open();
+		if (loser.equals("CANCEL")) {
+			assertEquals(Set.of(), carriers, "B's Storno gilt: " + state);
+			assertEquals(List.of(ConflictNote.Kind.DELETE_WINS), a.open().stream().map(c -> c.note().kind()).toList(),
+					"A's Änderung weicht mit Vermerk: " + state);
+		} else {
+			assertEquals(1, carriers.size(), "Bert lebt genau einmal: " + state);
+			assertEquals("von A", a.eventState().get(carriers.iterator().next()).payload().get("comment").asText(),
+					"A's Kommentar bleibt: " + state);
+		}
+		assertSettled(m);
+	}
+
+	/**
+	 * KARV-98, Ursache 3: B verliert den Doppelverkauf um Sitz 1 und storniert Bert dort ungespeichert; die Zusammenführung
+	 * parkt ihn "ohne Platz". A setzt ihn von dort auf Sitz 3. B's Vergleichsstand kennt Sitz 1 noch mit Bert (die
+	 * Auflösung dort wartet auf B's Speichern), das Modell nicht mehr: A's Löschung von {@code _Bert} räumt die Buchung
+	 * trotzdem. Bert steht in B's Modell nur einmal, auf Sitz 3, und B's Speichern belebt {@code _Bert} nicht wieder.
+	 */
+	@Test
+	void foreignAssignmentOfTheParkedCopyReachesTheModelOfTheCancellingLoserOnce() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String bertId = doubleSaleWhileTheLoserCancels(a, b);
+		UnitKey parked = unassignedUnit(a, bertId);
+		assertTrue(BookingSync.assign(a.friday(), a.plan(), booking(a, bertId), a.plan().getSeats().get(3)));
+		a.repository.saveEvent(a.event);
+		untilQuiet(a, b);
+
+		List<Booking> berts = b.friday().getBookings().stream().filter(x -> bertId.equals(x.getId())).toList();
+		assertEquals(1, berts.size(), "Bert steht in B's Modell einmal: " + berts);
+		assertEquals(Set.of(b.plan().getSeats().get(3).getId()), carriersInModel(b, bertId));
+
+		b.repository.saveEvent(b.event);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertTrue(a.eventState().get(parked).deleted(), "_Bert bleibt gelöscht");
+	}
+
+	/** Ein Takt nur im eigenen Client-Ordner, ohne den Sync-Client: Der Rechner sieht nichts Neues von den anderen. */
+	private void localTick(Machine machine) {
+		clock.advance(Duration.ofSeconds(2));
+		TestSyncServices.tick(machine.sync);
+	}
+
+	/** Kein Rechner hat noch etwas ungespeichert Geändertes oder Zurückgestelltes. */
+	private static void assertSettled(Machine... machines) {
+		for (Machine machine : machines) {
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
 		}
 	}
 }

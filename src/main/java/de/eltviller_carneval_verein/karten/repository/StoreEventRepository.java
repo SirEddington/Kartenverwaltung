@@ -1260,7 +1260,8 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Die gelöschten oder unlesbaren Einheiten von Buchungen ohne Platz unter {@code successors}, deren Buchung (Kennung aus
-	 * ihrem zuletzt bekannten Stand) eine andere angezeigte Einheit des Events trägt (siehe {@link EventMerge.Plan}).
+	 * ihrem zuletzt bekannten Stand) eine andere angezeigte Einheit des Events trägt (siehe {@link EventMerge.Plan}), auch
+	 * im Modell ({@link #carriesInModel}).
 	 */
 	private Set<UnitKey> carriedUnits(Event event, List<UnitSnapshot> successors) {
 		Set<UnitKey> units = new HashSet<>();
@@ -1279,11 +1280,24 @@ public class StoreEventRepository implements EventRepository {
 			if (carriers == null) {
 				carriers = shownBookingIds(event.getId());
 			}
-			if (carriedElsewhere(carriers, last.getId(), unit, batch)) {
+			String bookingId = last.getId();
+			List<UnitKey> inModel = carriers.getOrDefault(bookingId, List.of()).stream()
+					.filter(carrier -> carriesInModel(event, carrier, bookingId)).toList();
+			if (carriedElsewhere(Map.of(bookingId, inModel), bookingId, unit, batch)) {
 				units.add(unit);
 			}
 		}
 		return units;
+	}
+
+	/**
+	 * Ob die Einheit die Buchung auch im Modell trägt: Sie hat dort kein eigenes Objekt (etwa ein Sitz, den die Bestuhlung
+	 * nicht mehr hat; die Buchung steht dann ohne Platz, KARV-117), oder ihr Objekt hat dieselbe Kennung. Hat der Nutzer
+	 * die Buchung dort ungespeichert storniert, trägt sie nur noch der Vergleichsstand (KARV-98).
+	 */
+	private static boolean carriesInModel(Event event, UnitKey carrier, String bookingId) {
+		Object model = EventMerge.modelObject(event, carrier);
+		return model == null || model instanceof Booking booking && bookingId.equals(booking.getId());
 	}
 
 	/** Die Kennungen der angezeigten Buchungs-Einheiten des Events im Vergleichsstand, je Kennung die Einheiten, die sie tragen. */
