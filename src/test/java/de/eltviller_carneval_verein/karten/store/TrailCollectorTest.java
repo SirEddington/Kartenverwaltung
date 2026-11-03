@@ -96,6 +96,52 @@ class TrailCollectorTest {
 		assertEquals(2, trail.get(seat("s4")).chain().size());
 	}
 
+	/**
+	 * KARV-98: Die Einheit ohne Platz jeder betrachteten Buchung kommt gleich nach der Einheit selbst, auch wenn keine
+	 * Umzugsangabe dorthin zeigt (eine Auflösung hat die Buchung dort geparkt).
+	 */
+	@Test
+	void readsTheUnassignedUnitOfEachBookingRightAfterTheUnit() throws IOException {
+		Version base = claim(seat("s1"), version(OTHER, null, booking("m"), VersionMarks.NONE));
+		claim(seat("s1"), version(OTHER, base, null, to(seat("s4"))));
+		claim(seat("s4"), version(OTHER, null, booking("m"), from(seat("s1"))));
+		claim(M, version(OTHER, null, booking("m"), VersionMarks.RESOLUTION.withMovedFrom(seat("s1"))));
+		Version mine = beside(seat("s1"), version(OWN, base, null, VersionMarks.NONE));
+
+		Map<UnitKey, TrailUnit> trail = collect(seat("s1"), base, List.of(mine));
+
+		assertEquals(List.of(seat("s1"), M, seat("s4")), List.copyOf(trail.keySet()));
+	}
+
+	/** Eine lange Umzugskette verdrängt die Einheit ohne Platz nicht: Sie kommt vor dem Rest der Spur. */
+	@Test
+	void unassignedUnitIsNotDisplacedByTheLimit() throws IOException {
+		Version base = claim(seat("s0"), version(OTHER, null, booking("m"), VersionMarks.NONE));
+		claim(seat("s0"), version(OTHER, base, null, to(seat("s1"))));
+		for (int i = 1; i <= 20; i++) {
+			Version arrival = claim(seat("s" + i), version(OTHER, null, booking("m"), from(seat("s" + (i - 1)))));
+			claim(seat("s" + i), version(OTHER, arrival, null, to(seat("s" + (i + 1)))));
+		}
+		claim(M, version(OTHER, null, booking("m"), VersionMarks.RESOLUTION.withMovedFrom(seat("s0"))));
+		Version mine = beside(seat("s0"), version(OWN, base, null, VersionMarks.NONE));
+
+		Map<UnitKey, TrailUnit> trail = collect(seat("s0"), base, List.of(mine));
+
+		assertTrue(trail.containsKey(M), trail.keySet().toString());
+	}
+
+	/** Gibt es die Einheit ohne Platz nicht, steht sie nicht in der Spur, und nichts scheitert. */
+	@Test
+	void missingUnassignedFolderIsHarmless() throws IOException {
+		Version base = claim(seat("s1"), version(OTHER, null, booking("m"), VersionMarks.NONE));
+		Version mine = beside(seat("s1"), version(OWN, base, null, VersionMarks.NONE));
+
+		Map<UnitKey, TrailUnit> trail = collect(seat("s1"), base, List.of(mine));
+
+		assertEquals(Set.of(seat("s1")), trail.keySet());
+		assertTrue(read.contains(M), "gelesen wurde sie");
+	}
+
 	@Test
 	void includesTargetsOfBothSides() throws IOException {
 		Version base = claim(M, version(OTHER, null, booking("m"), VersionMarks.NONE));
@@ -136,7 +182,7 @@ class TrailCollectorTest {
 		Map<UnitKey, TrailUnit> trail = collect(seat("s1"), base, List.of(mine));
 
 		assertEquals(Set.of(seat("s1"), seat("s2")), trail.keySet());
-		assertEquals(2, read.size(), "jede Einheit einmal gelesen: " + read);
+		assertEquals(List.of(seat("s1"), M, seat("s2")), read, "jede Einheit einmal gelesen (KARV-98: auch _m)");
 	}
 
 	@Test
