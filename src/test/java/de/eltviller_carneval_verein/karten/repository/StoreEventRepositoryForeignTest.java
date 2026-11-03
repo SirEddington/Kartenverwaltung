@@ -21,9 +21,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -1467,8 +1467,6 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(Set.of(), mine.locallyChangedUnits());
 	}
 
-	@Disabled("H2 hingenommen (kein Verlust), siehe Spec: nach U1/U2 bleibt die Buchungs-ID im kurzen Fenster doppelt im Modell;"
-			+ " sie ohne neue Sonderregel auszuschließen, gelingt nicht")
 	@Test
 	void derivedBookingMovedAwayBeforeForeignStateArrivesIsNotShownTwice() throws IOException {
 		Hall other = secondHall(1, 2);
@@ -1476,16 +1474,78 @@ class StoreEventRepositoryForeignTest {
 		mine.setHallLookup(lookup(other));
 		Booking sold = seat(friday, 0);
 		remoteSwitchesTo(other);
+		UnitKey derivedSeat = UnitKey.booking(event.getId(), friday.getId(), otherPlan.getSeats().get(0).getId());
+		UnitKey chosenSeat = UnitKey.booking(event.getId(), friday.getId(), otherPlan.getSeats().get(1).getId());
 		// erst nur die Vorstellung: Der Abgleich setzt Müller auf den ersten Sitz der neuen Bestuhlung ("abgeleitet")
 		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
 		assertEquals(otherPlan.getSeats().get(0).getId(), sold.getSeatId());
 		// der Nutzer verschiebt die abgeleitete Buchung auf den zweiten Sitz, bevor der fremde Buchungsstand kommt
 		assertTrue(BookingSync.assign(friday, otherPlan, sold, otherPlan.getSeats().get(1)));
 
-		mine.applyForeign(allUnits());
+		ForeignResult result = mine.applyForeign(allUnits());
 
-		long shown = friday.getBookings().stream().filter(b -> sold.getId().equals(b.getId())).count();
-		assertTrue(shown <= 1, "die Buchungs-ID steht höchstens einmal im Modell, war " + shown);
+		// Zusammenführung erst nach dem Speichern, über die Gabelung am alten Sitz (siehe ConflictScenarioTest)
+		assertMovedAwayWaits(result, sold, chosenSeat, derivedSeat);
+		assertEquals("Müller", sold.getLastName());
+	}
+
+	@Test
+	void derivedBookingMovedAwayIsNotCancelled() throws IOException {
+		Hall other = secondHall(1, 2);
+		SeatingPlan otherPlan = other.getSeatingPlans().get(0);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		// der andere Rechner wechselt die Halle und ändert im selben Speichern den Vornamen der umgesetzten Buchung
+		Other remote = other();
+		remote.friday().setHallId(other.getId());
+		BookingSync.switchPlan(remote.friday(), otherPlan);
+		withId(remote.friday(), sold.getId()).get(0).setFirstName("Hans");
+		remote.save();
+		UnitKey derivedSeat = UnitKey.booking(event.getId(), friday.getId(), otherPlan.getSeats().get(0).getId());
+		UnitKey chosenSeat = UnitKey.booking(event.getId(), friday.getId(), otherPlan.getSeats().get(1).getId());
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		assertNull(sold.getFirstName(), "abgeleitet ist der alte Stand");
+		assertTrue(BookingSync.assign(friday, otherPlan, sold, otherPlan.getSeats().get(1)));
+
+		ForeignResult result = mine.applyForeign(allUnits());
+
+		// als Storno nähme das Einarbeiten den fremden Stand von X1 als Basis der Löschung, und "Hans" ginge beim Speichern unter
+		assertMovedAwayWaits(result, sold, chosenSeat, derivedSeat);
+	}
+
+	@Test
+	void derivedBookingMovedTwiceDefersItsForeignStates() throws IOException {
+		Hall other = secondHall(1, 3);
+		SeatingPlan otherPlan = other.getSeatingPlans().get(0);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		remoteSwitchesTo(other);
+		UnitKey derivedSeat = UnitKey.booking(event.getId(), friday.getId(), otherPlan.getSeats().get(0).getId());
+		UnitKey lastSeat = UnitKey.booking(event.getId(), friday.getId(), otherPlan.getSeats().get(2).getId());
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		assertTrue(BookingSync.assign(friday, otherPlan, sold, otherPlan.getSeats().get(1)));
+		assertTrue(BookingSync.assign(friday, otherPlan, sold, otherPlan.getSeats().get(2)));
+
+		ForeignResult result = mine.applyForeign(allUnits());
+
+		assertMovedAwayWaits(result, sold, lastSeat, derivedSeat);
+	}
+
+	/**
+	 * Die abgeleitete Buchung, die der Nutzer von {@code derivedSeat} auf {@code chosenSeat} verschoben hat, steht einmal im
+	 * Modell, dort. Die fremden Stände von altem und abgeleitetem Sitz warten mit Hinweis, und der Vergleichsstand hält den
+	 * alten Sitz mit seiner Buchung: Das Speichern zieht von dort um.
+	 */
+	private void assertMovedAwayWaits(ForeignResult result, Booking sold, UnitKey chosenSeat, UnitKey derivedSeat) {
+		UnitKey oldSeat = seatUnit(friday, 0);
+		assertEquals(Set.of(oldSeat, derivedSeat), result.deferred().stream().map(Deferral::unit).collect(Collectors.toSet()));
+		assertTrue(result.deferred().stream().noneMatch(Deferral::silent), result.deferred().toString());
+		assertEquals(List.of(sold), withId(friday, sold.getId()), "die Buchung steht einmal im Modell");
+		assertEquals(chosenSeat.bookingDir(), sold.getSeatId(), "dort, wohin der Nutzer sie verschoben hat");
+		assertNull(mine.knownUnit(derivedSeat), "der abgeleitete Sitz geht nicht in den Vergleichsstand");
+		UnitSnapshot known = mine.knownUnit(oldSeat);
+		assertTrue(known != null && known.isLive(), "der alte Sitz steht mit seiner Buchung im Vergleichsstand");
+		assertEquals(sold.getId(), UnitMapper.readUnit(known, Booking.class).getId());
 	}
 
 	@Test

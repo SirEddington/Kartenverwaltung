@@ -28,10 +28,12 @@ import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -44,6 +46,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
@@ -638,6 +641,71 @@ class ConflictScenarioTest {
 	}
 
 	/**
+	 * KARV-97: Der Verlierer eines Doppelverkaufs verschiebt seine Buchung ungespeichert auf einen anderen Sitz, als seine
+	 * Zusammenführung eintrifft. Ihr "ohne Platz" wartet dann still mit dem Sitz (die Buchung ist versetzt), statt sie ein
+	 * zweites Mal zu zeigen.
+	 */
+	@Test
+	void doubleSaleLoserWhoMovedTheBookingSeesItOnce() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String bertId = doubleSaleWhileTheLoserMoves(a, b);
+
+		List<Deferral> deferred = b.repository.retryDeferred().deferred();
+		assertTrue(deferred.stream().anyMatch(d -> d.unit().equals(unassignedUnit(b, bertId))), deferred.toString());
+		assertTrue(deferred.stream().allMatch(Deferral::silent), "eine eigene Zusammenführung bekommt keinen Hinweis");
+		assertEquals(1, b.friday().getBookings().stream().filter(booking -> bertId.equals(booking.getId())).count(),
+				"Bert steht einmal, auf dem Sitz, auf den B ihn verschoben hat");
+		assertEquals("Bert", b.seat(2).getLastName());
+	}
+
+	/**
+	 * Wie {@link #doubleSaleLoserWhoMovedTheBookingSeesItOnce}, dann speichert B: Bert soll genau einmal leben, Anna behält
+	 * den Sitz, nichts geht verloren.
+	 */
+	@Disabled("Bestehender Fehler (vor KARV-97, gegen 8743559 geprüft), gefunden im Review zu KARV-97: Bert lebt danach"
+			+ " in zwei Einheiten, auf dem neuen Sitz und ohne Platz")
+	@Test
+	void doubleSaleLoserWhoMovedTheBookingKeepsItOnceAfterSaving() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String bertId = doubleSaleWhileTheLoserMoves(a, b);
+
+		b.repository.saveEvent(b.event);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("Anna", lastName(a.eventState().get(seatUnit(a, 1))));
+		assertEquals(1, carriers(a, bertId).size(), "Bert lebt in genau einer Einheit: " + carriers(a, bertId));
+		for (Machine machine : m) {
+			assertEquals(1, carriersInModel(machine, bertId).size(), machine.name);
+			assertEquals("Anna", machine.seat(1).getLastName(), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+		}
+	}
+
+	/**
+	 * A verkauft Sitz 1 an "Anna", B denselben Sitz an "Bert"; beide speichern. B verschiebt Bert ungespeichert auf Sitz 2,
+	 * dann takten beide, bis Ruhe herrscht: Bert verliert den Doppelverkauf.
+	 *
+	 * @return Berts Kennung
+	 */
+	private String doubleSaleWhileTheLoserMoves(Machine a, Machine b) throws IOException {
+		a.sell(1, "Anna");
+		Booking bert = b.sell(1, "Bert");
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), bert, b.plan().getSeats().get(2)));
+		a.tick();
+		b.tick();
+		untilQuiet(a, b);
+		return bert.getId();
+	}
+
+	/**
 	 * Absicherung Aufgabe 14: Während B's Zusammenführung zurückgestellt ist, zeigt B's Modell Bert zweimal (auf dem Sitz mit
 	 * der Eingabe und "ohne Platz"). A storniert Bert "ohne Platz". Nach dem Einarbeiten und B's Speichern lebt keine falsche
 	 * Kopie von Bert, B's Eingabe geht nicht still verloren (Vermerk an B), und nichts bleibt gegabelt.
@@ -977,6 +1045,78 @@ class ConflictScenarioTest {
 		}
 		for (Machine machine : m) {
 			assertEquals(Set.of(), carriersInModel(machine, mullerId), machine.name);
+			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
+			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
+		}
+	}
+
+	/**
+	 * KARV-97, zwei Rechner: B wechselt die Halle, mit {@code foreignChange} heißt Müller dabei mit Vornamen "Hans". Bei A
+	 * kommt erst nur die Vorstellung an; der Abgleich setzt Müller auf denselben neuen Sitz wie bei B, und der Nutzer
+	 * verschiebt ihn auf den anderen, bevor Bs Buchungsstände eintreffen. Diese warten gemeinsam; A's Speichern zieht vom
+	 * alten Sitz um und gabelt dort gegen Bs Umstellung. Beide umgezogen (E7): B hat zuerst gespeichert, Müller bleibt auf
+	 * Bs Sitz, mit Bs Feldern; A's Platzwahl weicht mit Vermerk "Platz". Mit {@code saveFirst} speichert A, bevor Bs
+	 * Buchungsstände eintreffen.
+	 */
+	@ParameterizedTest
+	@CsvSource({ "false,false", "false,true", "true,false", "true,true" })
+	void userMoveOfADerivedBookingMeetsTheForeignSwitch(boolean foreignChange, boolean saveFirst) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		Hall other = secondHall(true, m);
+		SeatingPlan otherPlan = other.getSeatingPlans().get(0);
+		String mullerId = a.seat(0).getId();
+		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
+		b.friday().setHallId(other.getId());
+		BookingSync.switchPlan(b.friday(), otherPlan);
+		if (foreignChange) {
+			booking(b, mullerId).setFirstName("Hans");
+		}
+		b.repository.saveEvent(b.event);
+		String bSeat = booking(b, mullerId).getSeatId();
+		clock.advance(ROUND);
+		b.tick();
+		// A arbeitet die Meldungen von Hand ein, um das Zeitfenster zu treffen
+		a.events.halls = null;
+		clock.advance(ROUND);
+		a.tick();
+		a.repository.applyForeign(List.of(presentation));
+		Booking atA = booking(a, mullerId);
+		assertEquals(bSeat, atA.getSeatId(), "der Abgleich setzt Müller wie B");
+		Seat chosen = otherPlan.getSeats().stream().filter(seat -> !seat.getId().equals(bSeat)).findFirst().orElseThrow();
+		assertTrue(BookingSync.assign(a.friday(), otherPlan, atA, chosen));
+		UnitKey bUnit = UnitKey.booking(a.event.getId(), a.friday().getId(), bSeat);
+
+		if (saveFirst) {
+			a.repository.saveEvent(a.event);
+			a.repository.applyForeign(List.copyOf(a.eventState().keySet()));
+		} else {
+			assertEquals(Set.of(seatUnit(a, 0), bUnit), a.repository.applyForeign(List.copyOf(a.eventState().keySet()))
+					.deferred().stream().map(Deferral::unit).collect(Collectors.toSet()),
+					"alter und abgeleiteter Sitz warten gemeinsam auf die Platzwahl");
+			assertEquals(Set.of(chosen.getId()), carriersInModel(a, mullerId), "Müller steht einmal, auf dem gewählten Sitz");
+			a.repository.saveEvent(a.event);
+		}
+		a.repository.retryDeferred();
+		a.events.halls = a.halls;
+		untilQuiet(m);
+
+		assertConverged(m);
+		assertEquals(Set.of(bUnit), carriers(a, mullerId), "Bs Umzug gilt, B hat zuerst gespeichert");
+		List<OpenConflict> open = a.open();
+		assertEquals(1, open.size(), open.toString());
+		assertEquals(ConflictNote.Kind.FIELDS, open.get(0).note().kind(), open.toString());
+		assertTrue(open.get(0).note().fields().stream().anyMatch(f -> BookingPolicy.PLACE_GROUP.equals(f.group())),
+				"A's Platzwahl weicht mit Vermerk: " + open);
+		assertEquals(List.of(), b.open(), "B");
+		assertTrue(a.sync.history(bUnit).stream().noneMatch(v -> v.deleted() && v.marks().movedTo() == null),
+				"Bs Sitz wird nie wie storniert gelöscht");
+		for (Machine machine : m) {
+			assertEquals(Set.of(bSeat), carriersInModel(machine, mullerId), machine.name);
+			assertEquals(foreignChange ? "Hans" : null, booking(machine, mullerId).getFirstName(),
+					machine.name + ": Bs Änderung geht nicht verloren");
 			assertEquals(Set.of(), machine.repository.locallyChangedUnits(), machine.name);
 			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
 		}
