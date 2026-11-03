@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -23,6 +24,7 @@ import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.ui.ColumnMinWidths;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
@@ -77,6 +79,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	private static final GermanDecimalStringConverter PRICE_CONVERTER = new GermanDecimalStringConverter();
 	private static final String ASSIGN_TEXT = "Platz zuweisen…";
+	/** Namen und Kommentar bleiben auch schmal gezogen so breit, dass vom Inhalt etwas zu lesen ist (KARV-126). */
+	private static final double CONTENT_MIN_WIDTH = 80;
 
 	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 	private Event selectedEvent;
@@ -187,6 +191,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 		// 4. Spaltenkopf-Filter von ControlsFX aktivieren
 		TableFilter.forTableView(seatTable).apply();
+		ColumnMinWidths.install(seatTable, Map.of(colLastName, CONTENT_MIN_WIDTH, colFirstName, CONTENT_MIN_WIDTH,
+				colComment, CONTENT_MIN_WIDTH));
 
 		// 5. Mehrfachauswahl (Strg-/Shift-Klick). Zeilen, die der Suchfilter ausblendet, fallen von selbst aus der Auswahl.
 		seatTable.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
