@@ -1208,6 +1208,23 @@ class ConflictLedgerTest {
 		assertEquals(List.of(second), ids(ConflictLedger.derive(entries, OWN, Set.of()).conflicts()));
 	}
 
+	/**
+	 * Zwei Stornos nacheinander auf demselben Sitz, für verschiedene Buchungen (der spätere baut nicht auf dem früheren
+	 * Vermerk auf): beide bleiben, sonst ließe sich die erste Buchung nicht mehr wiederherstellen.
+	 */
+	@Test
+	void unrelatedDeleteWinsInTheSameUnitBothStay() {
+		VersionId first = vid(1_000, 1);
+		VersionId between = vid(1_500, 2);
+		VersionId second = vid(2_000, 3);
+		VersionId otherBooking = VersionId.create(1_900_000_000_700L, A_ID, 3);
+		List<UnitIndex.Entry> entries = List.of(entryWith(SEAT, List.of(first, between, second), Set.of(),
+				List.of(notedWith(first, List.of(), deleteWinsAt(null)),
+						notedWith(second, List.of(between), ConflictNote.deleteWins(A_ID, null, null, otherBooking)))));
+
+		assertEquals(2, ConflictLedger.derive(entries, OWN, Set.of()).conflicts().size());
+	}
+
 	/** Zwei Feldkonflikte nacheinander in derselben Einheit sind zwei verlorene Werte: beide bleiben. */
 	@Test
 	void fieldsNotesWithDifferentDroppedVersionsBothStay() {
