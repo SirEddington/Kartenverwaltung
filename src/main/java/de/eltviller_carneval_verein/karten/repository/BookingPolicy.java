@@ -209,9 +209,7 @@ public final class BookingPolicy implements ConflictPolicy {
 		if (!bookingId.equals(idOf(mine)) || !bookingId.equals(idOf(theirs))) {
 			return new FieldMerge.Result(theirs.payload(), List.of());
 		}
-		ObjectNode before = base.payload().deepCopy();
-		FieldMerge.copyFields(before, theirs.payload(), FieldGroups.booking().get(PLACE_GROUP));
-		return mergeBooking(before, mine.payload(), theirs.payload());
+		return mergeBooking(withPlaceOf(base.payload(), theirs.payload()), mine.payload(), theirs.payload());
 	}
 
 	/** Die Entscheidung für eine Buchung an ihrer Quelle, oder {@code null}, wenn keine Seite sie weggenommen hat. */
@@ -223,7 +221,26 @@ public final class BookingPolicy implements ConflictPolicy {
 		}
 		boolean ownWins = Boolean.TRUE.equals(BookingTrail.ownWinsAt(input, source, base.id()));
 		return BookingFate.decide(bookingId, source, base, own, foreign, ownWins, input.ownMachineId(),
-				BookingTrail.freeFor(input, source, bookingId));
+				BookingTrail.freeFor(input, source, bookingId), parkedUnchanged(input, bookingId, source, base));
+	}
+
+	/**
+	 * Ob eine Auflösung die Buchung in ihrer Einheit {@code _<ID>} geparkt und seitdem niemand sie geändert hat (E13,
+	 * KARV-124): Die Einheit lebt mit der Fassung der Basis an der Quelle, bis auf die Gruppe "Platz". Nicht, wenn die
+	 * Quelle selbst {@code _<ID>} ist. Eine geänderte Kopie zählt nicht: Die Änderung kam nach dem Parken.
+	 */
+	private static boolean parkedUnchanged(ConflictInput input, String bookingId, UnitKey source, Version base) {
+		UnitKey parked = UnitKey.unassignedBooking(source.eventId(), source.presentationId(), bookingId);
+		Sibling sibling = input.siblings().get(parked);
+		return !parked.equals(source) && sibling != null && sibling.snapshot().carriesBooking(bookingId)
+				&& withPlaceOf(sibling.snapshot().payload(), base.payload()).equals(base.payload());
+	}
+
+	/** Eine Kopie von {@code payload} mit der Gruppe "Platz" von {@code placeFrom}. */
+	private static ObjectNode withPlaceOf(ObjectNode payload, ObjectNode placeFrom) {
+		ObjectNode copy = payload.deepCopy();
+		FieldMerge.copyFields(copy, placeFrom, FieldGroups.booking().get(PLACE_GROUP));
+		return copy;
 	}
 
 	private static boolean removed(BookingTrail trail) {
@@ -388,9 +405,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * @param base der Inhalt der Basis; {@code null} gilt als leeres Objekt
 	 */
 	static FieldMerge.Result carryOnto(ObjectNode base, ObjectNode change, ObjectNode keeper) {
-		ObjectNode side = change.deepCopy();
-		FieldMerge.copyFields(side, keeper, FieldGroups.booking().get(PLACE_GROUP));
-		return mergeBooking(base, side, keeper);
+		return mergeBooking(base, withPlaceOf(change, keeper), keeper);
 	}
 
 	/** Der Konflikt der Gruppe "Platz" zwischen zwei Fassungen der Buchung (je die Felder der Gruppe als Kopie). */

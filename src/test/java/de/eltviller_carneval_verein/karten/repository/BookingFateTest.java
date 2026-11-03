@@ -24,7 +24,7 @@ import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.Version;
 
-/** Die Entscheidungstabelle E1–E12 der Spec KARV-93, je Zeile. A = fremd (OTHER), B = eigen (OWN). */
+/** Die Entscheidungstabelle E1–E12 der Spec KARV-93 und E13 (KARV-124), je Zeile. A = fremd (OTHER), B = eigen (OWN). */
 class BookingFateTest {
 
 	private static final UnitKey M = unassigned("m");
@@ -60,7 +60,7 @@ class BookingFateTest {
 	private static final BookingTrail UNTOUCHED = new BookingTrail(Kind.UNTOUCHED, null, null, null);
 
 	private BookingFate decide(BookingTrail own, BookingTrail foreign, boolean ownWinsSource) {
-		return BookingFate.decide("m", M, base, own, foreign, ownWinsSource, OWN, true);
+		return BookingFate.decide("m", M, base, own, foreign, ownWinsSource, OWN, true, false);
 	}
 
 	private static ConflictNote only(BookingFate fate, UnitKey writtenAt) {
@@ -245,7 +245,7 @@ class BookingFateTest {
 		BookingTrail theirs = new BookingTrail(Kind.KEPT, null,
 				world.version(OTHER, priced, withoutPlace("m", b -> b.setPrice(2500))), M);
 
-		BookingFate fate = BookingFate.decide("m", M, priced, mine, theirs, false, OWN, true);
+		BookingFate fate = BookingFate.decide("m", M, priced, mine, theirs, false, OWN, true, false);
 
 		assertEquals(2500, fate.content().get("price").asInt(), "der Preis von Deren gilt");
 		assertEquals(2000, fate.content().get("paidAmount").asInt(), "die Zahlung bleibt");
@@ -265,7 +265,7 @@ class BookingFateTest {
 		BookingTrail theirs = new BookingTrail(Kind.ARRIVED, world.version(OTHER, priced, null, to(S4)),
 				world.version(OTHER, null, booking("m", "s4", b -> b.setPrice(2500))), S4);
 
-		BookingFate fate = BookingFate.decide("m", M, priced, mine, theirs, false, OWN, true);
+		BookingFate fate = BookingFate.decide("m", M, priced, mine, theirs, false, OWN, true, false);
 
 		assertEquals(S4, fate.carrier());
 		assertEquals(2500, fate.content().get("price").asInt());
@@ -283,7 +283,7 @@ class BookingFateTest {
 		BookingTrail theirs = new BookingTrail(Kind.KEPT, null,
 				world.version(OTHER, seated, booking("m", "s3", b -> b.setComment("Fenster"))), S3);
 
-		BookingFate fate = BookingFate.decide("m", S3, seated, mine, theirs, true, OWN, true);
+		BookingFate fate = BookingFate.decide("m", S3, seated, mine, theirs, true, OWN, true, false);
 
 		assertEquals(S3, fate.carrier());
 		assertEquals("s3", fate.content().get("seatId").asText());
@@ -303,7 +303,7 @@ class BookingFateTest {
 		BookingTrail theirs = new BookingTrail(Kind.KEPT, null,
 				world.version(OTHER, seated, booking("m", "s3", b -> b.setComment("Fenster"))), S3);
 
-		BookingFate fate = BookingFate.decide("m", S3, seated, mine, theirs, true, OWN, true);
+		BookingFate fate = BookingFate.decide("m", S3, seated, mine, theirs, true, OWN, true, false);
 
 		assertEquals(M, fate.carrier());
 		assertTrue(fate.content().get("unassigned").asBoolean());
@@ -350,5 +350,53 @@ class BookingFateTest {
 		assertNull(decide(cancelled(OWN), UNTOUCHED, true));
 		assertNull(decide(arrived(OWN, S4, booking("m", "s4")), UNTOUCHED, true));
 		assertNull(decide(UNTOUCHED, kept(OTHER, base.payload().deepCopy()), true));
+	}
+
+	/**
+	 * E13 (KARV-124): Ein Storno an der Quelle, die andere Seite unberührt, aber eine Auflösung hat die Buchung unverändert
+	 * "ohne Platz" geparkt (Doppelverkauf): Die geparkte Kopie fällt weg, ohne Vermerk.
+	 */
+	@Test
+	void e13CancellationDeletesTheParkedCopy() {
+		BookingFate fate = decideAtS3(cancelled(OWN), UNTOUCHED, true);
+
+		assertNull(fate.carrier());
+		assertEquals(List.of(M), fate.deletions());
+		assertTrue(fate.notes().isEmpty(), fate.notes().toString());
+	}
+
+	/** E13: Ein angekommener Umzug gilt gegen die geparkte Kopie; sie fällt weg, die Buchung lebt am Ziel wie dort. */
+	@Test
+	void e13ArrivedMoveDeletesTheParkedCopy() {
+		BookingFate fate = decideAtS3(UNTOUCHED, arrived(OTHER, S4, booking("m", "s4")), true);
+
+		assertEquals(S4, fate.carrier());
+		assertNull(fate.content(), "der Inhalt am Ziel bleibt, wie er ist");
+		assertEquals(List.of(M), fate.deletions());
+		assertTrue(fate.notes().isEmpty(), fate.notes().toString());
+	}
+
+	/** E13: Endet der Umzug in der Einheit der geparkten Kopie selbst, lebt die Buchung dort; nichts fällt weg. */
+	@Test
+	void e13MoveToTheParkedUnitDeletesNothing() {
+		assertNull(decideAtS3(arrived(OWN, M, withoutPlace("m", b -> {
+		})), UNTOUCHED, true));
+	}
+
+	/**
+	 * E13 greift nur mit geparkter Kopie und nur gegen eine unberührte Seite; sonst entscheidet die Tabelle wie bisher, und
+	 * die Kopie bleibt.
+	 */
+	@Test
+	void e13NeedsAParkedCopyAndAnUntouchedSide() {
+		assertNull(decideAtS3(cancelled(OWN), UNTOUCHED, false));
+		BookingTrail edit = kept(OTHER, booking("m", "s3", b -> b.setComment("neu")));
+		assertEquals(List.of(), decideAtS3(cancelled(OWN), edit, true).deletions());
+	}
+
+	/** E13 an einem Sitz: Quelle S3, die geparkte Kopie ist M. */
+	private BookingFate decideAtS3(BookingTrail own, BookingTrail foreign, boolean parked) {
+		Version seated = world.version(THIRD, null, booking("m", "s3"));
+		return BookingFate.decide("m", S3, seated, own, foreign, false, OWN, true, parked);
 	}
 }
