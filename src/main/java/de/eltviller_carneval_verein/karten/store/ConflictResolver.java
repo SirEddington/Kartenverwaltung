@@ -381,7 +381,52 @@ final class ConflictResolver {
 		Map<UnitKey, TrailUnit> trail = unit.type() == UnitType.BOOKING
 				? copy(TrailCollector.collect(unit, base, versions, this::folder))
 				: Map.of();
+		if (parkingPathWaits(unit, trail)) {
+			return Stretch.of(Step.WAIT);
+		}
 		return new Stretch(Step.MERGE, base, mine, state.head(), since, versions, trail);
+	}
+
+	/**
+	 * Ob die Strecke auf den Parkweg wartet (KARV-98): An einer Einheit "ohne Platz" auf der Spur folgen auf eine geparkte
+	 * Version ({@code resolution} mit {@code movedFrom}) Nutzer-Versionen, von denen eine fremde noch nicht über ihre Liste
+	 * gelesen ist (wie {@link #mustWait}, höchstens {@link #LIST_WAIT}) oder deren Umzug am Ziel noch nicht angekommen ist
+	 * (wie {@link #arrivalMissing}). Sonst hielte die Spur ein Umsetzen der Kopie für gescheitert, oder E13 löschte eine
+	 * Kopie, deren Änderung schon gelistet ist. Grob: ohne den Abgleich der Speichervorgänge, den die Spur selbst macht;
+	 * ein Warten zu viel schadet nicht.
+	 */
+	private boolean parkingPathWaits(UnitKey unit, Map<UnitKey, TrailUnit> trail) throws IOException {
+		if (!host.shared()) {
+			return false;
+		}
+		Ownership own = host.ownership();
+		for (TrailUnit parked : trail.values()) {
+			if (parked.unit().equals(unit) || !parked.unit().isUnassigned()) {
+				continue;
+			}
+			List<Version> after = afterParking(parked.chain());
+			boolean unlisted = after.stream().anyMatch(v -> !own.isOwn(v) && !host.isListed(parked.unit(), v.id()));
+			if (unlisted && withinListWait(unit)) {
+				LOGGER.fine("Eine Änderung an " + parked.unit().relativePath() + " ist noch nicht gelesen; die Auflösung wartet");
+				return true;
+			}
+			if (arrivalMissing(parked.unit(), after)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Die Nutzer-Versionen der Kette nach der letzten geparkten Version; leer, wenn keine geparkt wurde. */
+	private static List<Version> afterParking(List<Version> chain) {
+		int parked = -1;
+		for (int i = 0; i < chain.size(); i++) {
+			if (chain.get(i).marks().resolution() && chain.get(i).marks().movedFrom() != null) {
+				parked = i;
+			}
+		}
+		return parked < 0 ? List.of()
+				: chain.subList(parked + 1, chain.size()).stream().filter(v -> !v.marks().resolution()).toList();
 	}
 
 	/**

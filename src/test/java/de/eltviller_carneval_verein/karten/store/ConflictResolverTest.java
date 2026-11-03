@@ -871,6 +871,12 @@ class ConflictResolverTest {
 	/** Wie {@link #storeHost(VersionStore, Ownership, List, boolean)}; mit {@code shared == false} im Einzelbetrieb. */
 	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended,
 			boolean listed, boolean shared) {
+		return storeHost(store, own, appended, version -> listed, shared);
+	}
+
+	/** Wie oben; {@code listed} sagt je Version, ob sie über ihre Liste gelesen ist. */
+	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended,
+			java.util.function.Predicate<VersionId> listed, boolean shared) {
 		return new ConflictResolver.Host() {
 			@Override
 			public SyncService.Resolved resolve(UnitKey unit) throws IOException {
@@ -885,7 +891,7 @@ class ConflictResolverTest {
 
 			@Override
 			public boolean isListed(UnitKey unit, VersionId version) {
-				return listed;
+				return listed.test(version);
 			}
 
 			@Override
@@ -1017,6 +1023,99 @@ class ConflictResolverTest {
 
 		assertEquals(1, policy.inputs.size());
 		assertEquals(v[1].id(), policy.inputs.get(0).base().id(), "ohne Warten die heutige Basis");
+	}
+
+	// --- Warten auf dem Parkweg (KARV-98, Spec 3b)
+
+	/**
+	 * An A-1 trug die Basis X; B's eigene Änderung verlor gegen T. Eine Auflösung hat X nach {@code _X} geparkt (P, mit
+	 * {@code movedFrom} A-1); darauf liegt eine fremde Nutzer-Version F.
+	 *
+	 * @param f        F's Inhalt (ohne: eine Löschung)
+	 * @param fMarks   F's Umzugsangaben
+	 * @return P und F
+	 */
+	private Version[] lossWithParkedCopy(VersionStore store, LocalArbiter arbiter, ObjectNode f, VersionMarks fMarks)
+			throws IOException {
+		long now = clock.instant().toEpochMilli();
+		Version base = version(VersionId.create(now - 5000, FOREIGN, 0), List.of(), FOREIGN, "s0", false,
+				MAPPER.createObjectNode().put("id", "X"), VersionMarks.NONE);
+		Version t = version(VersionId.create(now - 4000, FOREIGN, 1), List.of(base.id()), FOREIGN, "s1", false,
+				MAPPER.createObjectNode().put("id", "T"), VersionMarks.NONE);
+		Version mine = version(VersionId.create(now - 3000, CURRENT, 0), List.of(base.id()), CURRENT, "s2", false,
+				MAPPER.createObjectNode().put("id", "X").put("name", "neu"), VersionMarks.NONE);
+		Version parking = version(VersionId.create(now - 2500, FOREIGN, 2), List.of(), FOREIGN, "s1", false,
+				MAPPER.createObjectNode().put("id", "X"), VersionMarks.RESOLUTION.withMovedFrom(BOOKING));
+		Version foreignOnCopy = version(VersionId.create(now - 2000, FOREIGN, 3), List.of(parking.id()), FOREIGN, "s3",
+				f == null, f, fMarks);
+		store(store, arbiter, BOOKING, base, true);
+		store(store, arbiter, BOOKING, t, true);
+		store(store, arbiter, BOOKING, mine, false);
+		store(store, arbiter, MOVED, parking, true);
+		store(store, arbiter, MOVED, foreignOnCopy, true);
+		return new Version[] { parking, foreignOnCopy };
+	}
+
+	private ConflictResolver parkedResolver(VersionStore store, java.util.function.Predicate<VersionId> listed,
+			boolean shared, List<List<Change>> appended) {
+		ConflictResolver resolver = new ConflictResolver(
+				storeHost(store, new Ownership(CURRENT, List.of()), appended, listed, shared),
+				new SyncNotifier(Runnable::run, true), clock);
+		resolver.setPolicy(UnitType.BOOKING, new RecordingPolicy());
+		resolver.enqueue(BOOKING);
+		return resolver;
+	}
+
+	@Test
+	void waitsForAnUnlistedForeignVersionOnTheParkedCopy() throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		Version[] v = lossWithParkedCopy(store, new LocalArbiter(store, clock),
+				MAPPER.createObjectNode().put("id", "X").put("comment", "A"), VersionMarks.NONE);
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = parkedResolver(store, id -> !id.equals(v[1].id()), true, appended);
+
+		resolver.resolvePending(10);
+		assertEquals(List.of(), appended, "wartet auf die Liste der Änderung an der Kopie");
+
+		clock.advance(ConflictResolver.LIST_WAIT.plusMinutes(1));
+		resolver.enqueue(BOOKING);
+		resolver.resolvePending(10);
+		assertEquals(1, appended.size(), "nach LIST_WAIT löst sie auf");
+	}
+
+	@Test
+	void waitsForTheArrivalOfAMoveFromTheParkedCopy() throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		Version[] v = lossWithParkedCopy(store, arbiter, null, VersionMarks.NONE.withMovedTo(OTHER_SEAT));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = parkedResolver(store, id -> true, true, appended);
+
+		resolver.resolvePending(10);
+		clock.advance(ConflictResolver.LIST_WAIT.plusMinutes(1));
+		resolver.enqueue(BOOKING);
+		resolver.resolvePending(10);
+		assertEquals(List.of(), appended, "wartet auf die Ankunft, auch über LIST_WAIT hinaus");
+
+		store(store, arbiter, OTHER_SEAT, version(VersionId.create(clock.instant().toEpochMilli(), FOREIGN, 4), List.of(),
+				FOREIGN, v[1].saveId(), false, MAPPER.createObjectNode().put("id", "X"),
+				VersionMarks.NONE.withMovedFrom(MOVED)), true);
+		resolver.enqueue(BOOKING);
+		resolver.resolvePending(10);
+		assertEquals(1, appended.size(), "mit der Ankunft löst sie auf");
+	}
+
+	@Test
+	void noWaitingOnTheParkingPathInSingleMode() throws IOException {
+		VersionStore store = new VersionStore(dir.resolve("data"), new NioFileLayer());
+		Version[] v = lossWithParkedCopy(store, new LocalArbiter(store, clock),
+				MAPPER.createObjectNode().put("id", "X").put("comment", "A"), VersionMarks.NONE);
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = parkedResolver(store, id -> !id.equals(v[1].id()), false, appended);
+
+		resolver.resolvePending(10);
+
+		assertEquals(1, appended.size());
 	}
 
 	@Test
