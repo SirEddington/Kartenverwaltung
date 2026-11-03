@@ -2319,8 +2319,6 @@ class ConflictScenarioTest {
 	 * ({@code RESEAT}) und speichert; erst danach speichert B. Danach gilt R35: Nach einem Storno lebt Bert nirgends, und
 	 * A's Änderung weicht mit Vermerk an A; sonst lebt Bert genau einmal, und A's Kommentar geht nicht verloren.
 	 */
-	@Disabled("KARV-98, Ursache 2: Die geparkte Kopie hängt nicht an ihrer Quelle; geändert oder umgesetzt lebt Bert "
-			+ "doppelt oder B's Storno geht still verloren (Umzugsmarken für Auflösungen); nach v1.0")
 	@ParameterizedTest(name = "B: {0}, A an der geparkten Kopie: {1}")
 	@CsvSource({ "MOVE, EDIT", "MOVE, RESEAT", "CANCEL, EDIT", "CANCEL, RESEAT" })
 	void lateChangeAgainstAnAlteredParkedCopyKeepsInvariants(String loser, String parked) throws IOException {
@@ -2361,9 +2359,16 @@ class ConflictScenarioTest {
 			assertEquals(List.of(ConflictNote.Kind.DELETE_WINS), a.open().stream().map(c -> c.note().kind()).toList(),
 					"A's Änderung weicht mit Vermerk: " + state);
 		} else {
-			assertEquals(1, carriers.size(), "Bert lebt genau einmal: " + state);
-			assertEquals("von A", a.eventState().get(carriers.iterator().next()).payload().get("comment").asText(),
+			// E5: Bs Umzug gilt gegen die geänderte Kopie; E7: gegen das Umsetzen gilt A's Sitz (die Seite des Parkwegs)
+			UnitKey winner = seatUnit(a, parked.equals("EDIT") ? 2 : 3);
+			assertEquals(Set.of(winner), carriers, "Bert lebt genau einmal: " + state);
+			assertEquals("von A", a.eventState().get(winner).payload().get("comment").asText(),
 					"A's Kommentar bleibt: " + state);
+			if (parked.equals("RESEAT")) {
+				assertTrue(b.open().stream().anyMatch(c -> c.note().kind() == ConflictNote.Kind.FIELDS
+						&& c.note().fields().stream().anyMatch(f -> f.group().equals("place"))),
+						"B's Sitz 2 weicht mit Vermerk \"Platz\": " + state);
+			}
 		}
 		assertSettled(m);
 	}
@@ -2478,6 +2483,90 @@ class ConflictScenarioTest {
 		assertConverged(a, b);
 		assertEquals(Set.of(seat2), carriers(a, bertId));
 		assertEquals("von A", a.eventState().get(seat2).payload().get("comment").asText(), "A's Kommentar auf Sitz 2");
+	}
+
+	/**
+	 * KARV-98: B storniert Bert ungespeichert, die Zusammenführung parkt ihn. A setzt die Kopie auf Sitz 3; die Dateien von
+	 * Sitz 3 kommen bei B erst später an, B speichert dazwischen. Am Ende gilt Bs Storno, und A hat "Löschung gilt". (Das
+	 * Warten der Auflösung selbst prüft {@code ConflictResolverTest}: Hier hält die Änderungsliste beide Teile zurück.)
+	 */
+	@Disabled("KARV-98, nicht enthalten: B löst auf, bevor er A's Umsetzen kennen kann (E13 löscht die Kopie); A's Umsetzen "
+			+ "gabelt danach gegen diese Löschung, und Bert lebt auf Sitz 3; nach v1.0")
+	@Test
+	void foreignReseatArrivingInTwoPartsStillLosesToTheCancellation() throws IOException {
+		Machine[] m = cloudMachines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		a.sell(1, "Anna");
+		Booking bert = b.sell(1, "Bert");
+		String bertId = bert.getId();
+		bert.clearCustomerData();
+		untilQuiet(a, b);
+		UnitKey seat1 = seatUnit(a, 1);
+		UnitKey seat3 = seatUnit(a, 3);
+
+		assertTrue(BookingSync.assign(a.friday(), a.plan(), booking(a, bertId), a.plan().getSeats().get(3)));
+		a.repository.saveEvent(a.event);
+		localTick(a);
+		cloud.stepFilesOnly(a.name, rel -> !rel.contains(seat3.bookingDir()));
+		cloud.step(b.name);
+		b.repository.saveEvent(b.event);
+		for (int round = 0; round < 3; round++) {
+			localTick(b);
+		}
+		assertEquals(0, b.sync.unitState(seat3).chain().size(), "die Ankunft auf Sitz 3 ist bei B noch nicht da");
+
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("Anna", lastName(a.eventState().get(seat1)));
+		assertEquals(Set.of(), carriers(a, bertId), "Bs Storno gilt: " + carriers(a, bertId));
+		assertEquals(List.of(ConflictNote.Kind.DELETE_WINS), a.open().stream().map(c -> c.note().kind()).toList(),
+				a.open().toString());
+		assertSettled(m);
+	}
+
+	/**
+	 * Probe (Spec "Nicht enthalten"): Bert steht auf Sitz 3. B setzt ihn auf Sitz 4, A verkauft Sitz 4 an Tom und ändert
+	 * Bert auf Sitz 3; die Gewinner sind getrennt (A Sitz 4, B Sitz 3). Jeder löst für sich auf: B parkt Bert (E11), A
+	 * belebt Sitz 3 wieder (E9). Es entsteht keine Gabel; Bert soll trotzdem genau einmal leben.
+	 */
+	@Disabled("KARV-98, nicht enthalten: gleichzeitige Auflösungen in verschiedenen Einheiten (E11 parkt, E9 belebt die "
+			+ "Quelle wieder); Bert lebt doppelt; nach v1.0")
+	@Test
+	void concurrentResolutionsInDifferentUnitsKeepTheBookingOnce() throws IOException {
+		Machine[] m = cloudMachines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String bertId = a.sell(3, "Bert").getId();
+		untilQuiet(a, b);
+
+		a.seat(4).setLastName("Tom");
+		a.repository.saveEvent(a.event);
+		localTick(a);
+		cloud.step(a.name);
+		assertTrue(BookingSync.assign(b.friday(), b.plan(), booking(b, bertId), b.plan().getSeats().get(4)));
+		b.repository.saveEvent(b.event);
+		localTick(b);
+		booking(a, bertId).setComment("A");
+		a.repository.saveEvent(a.event);
+		localTick(a);
+		cloud.step(b.name);
+		cloud.step(a.name);
+		for (int round = 0; round < 3; round++) {
+			localTick(a);
+			localTick(b);
+		}
+		cloud.step(b.name);
+		cloud.step(a.name);
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		assertEquals("Tom", lastName(a.eventState().get(seatUnit(a, 4))));
+		assertEquals(1, carriers(a, bertId).size(), "Bert lebt genau einmal: " + carriers(a, bertId));
+		assertSettled(m);
 	}
 
 	/** Ein Takt nur im eigenen Client-Ordner, ohne den Sync-Client: Der Rechner sieht nichts Neues von den anderen. */
