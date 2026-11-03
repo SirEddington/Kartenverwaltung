@@ -350,6 +350,52 @@ class BookingTest {
 	}
 
 	@Test
+	void hasLeftovers_nur_bei_freier_Buchung_mit_Daten() {
+		Booking leftover = new Booking();
+		leftover.setComment("storniert");
+		assertTrue(leftover.hasLeftovers());
+
+		Booking reserved = new Booking();
+		reserved.setLastName("Müller");
+		reserved.setComment("Fensterplatz");
+		assertFalse(reserved.hasLeftovers(), "reserviert");
+
+		Booking paid = new Booking();
+		paid.setPaymentStatus(PaymentStatus.CASH);
+		assertFalse(paid.hasLeftovers(), "bezahlt");
+
+		Booking empty = new Booking();
+		empty.setPrice(1800);
+		assertFalse(empty.hasLeftovers(), "nur Einzelpreis");
+	}
+
+	@Test
+	void clearLeftovers_leert_die_Daten_behaelt_Einzelpreis_und_Sitz_und_vergibt_neue_Kennung() {
+		Booking booking = bookingAt("A", 3, 2);
+		booking.setSeatId("s-1");
+		booking.setPrice(1800);
+		booking.setFirstName("Anna");
+		booking.setEMail("a@b.de");
+		booking.setComment("storniert");
+		booking.setCollected(true);
+		booking.setCollectionDate(LocalDate.of(2026, 10, 3));
+		booking.setReservationDate(LocalDate.of(2026, 10, 1));
+		String idBefore = booking.getId();
+
+		booking.clearLeftovers();
+
+		assertFalse(booking.hasData());
+		assertNull(booking.getFirstName());
+		assertNull(booking.getComment());
+		assertNull(booking.getCollectionDate());
+		assertNull(booking.getReservationDate());
+		assertEquals(Integer.valueOf(1800), booking.getPrice());
+		assertEquals("s-1", booking.getSeatId());
+		assertEquals("Tisch A3, Sitz 2", booking.getPlaceLabel());
+		assertFalse(idBefore.equals(booking.getId()), "neue Kennung");
+	}
+
+	@Test
 	void copy_uebernimmt_die_verkaufsdaten() {
 		Booking booking = bookingAt("A", 3, 2);
 		booking.setReservationDate(LocalDate.of(2026, 10, 1));

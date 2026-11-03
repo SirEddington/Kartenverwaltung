@@ -392,6 +392,25 @@ public class Booking {
 		setId(null);
 	}
 
+	/**
+	 * Ob die Buchung frei ist (kein Nachname, nicht bezahlt) und trotzdem Daten trägt, etwa einen Kommentar oder einen
+	 * Vornamen. Solche Reste verwirft {@link #clearLeftovers()}, sobald eine neue Buchung den Sitz bekommt (KARV-121).
+	 */
+	@JsonIgnore
+	public boolean hasLeftovers() {
+		return getStatus() == SeatStatus.FREE && hasData();
+	}
+
+	/**
+	 * Verwirft die Reste einer freien Buchung wie {@link #clearCustomerData()}, mit neuer Kennung. Der Einzelpreis bleibt:
+	 * Er belegt keinen Sitz und ist kein Kundendatum.
+	 */
+	public void clearLeftovers() {
+		Integer keptPrice = price;
+		clearCustomerData();
+		price = keptPrice;
+	}
+
 	/** Reihenbuchstabe ohne Rand, {@code null} als leer. */
 	private String sortLabel() {
 		return rowLabel != null ? rowLabel.trim() : "";
