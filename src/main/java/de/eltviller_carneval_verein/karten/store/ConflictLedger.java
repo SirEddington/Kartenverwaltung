@@ -75,17 +75,24 @@ final class ConflictLedger {
 	static Derivation derive(Collection<UnitIndex.Entry> entries, Ownership own, Set<ConflictKey> acknowledged) {
 		List<OpenConflict> conflicts = new ArrayList<>();
 		Map<UnitKey, Deletion> deletions = new HashMap<>();
+		List<Candidate> candidates = new ArrayList<>();
 		for (UnitIndex.Entry entry : entries) {
 			UnitKey unit = entry.snapshot().unit();
 			for (UnitIndex.NotedVersion noted : entry.notes()) {
-				if (affectsMe(own, noted)
-						&& !acknowledged.contains(new ConflictKey(noted.version(), ConflictKey.Kind.NOTE))) {
-					conflicts.add(new OpenConflict(noted.version(), unit, noted.at(), noted.saveId(), noted.note(), null));
+				if (affectsMe(own, noted)) {
+					candidates.add(new Candidate(unit, rank(entry, noted.version()), noted));
 				}
 			}
 			Deletion deletion = foreignParentDeletion(entry, own, acknowledged);
 			if (deletion != null) {
 				deletions.put(unit, deletion);
+			}
+		}
+		for (Candidate candidate : withoutSuperseded(candidates)) {
+			UnitIndex.NotedVersion noted = candidate.noted();
+			if (!acknowledged.contains(new ConflictKey(noted.version(), ConflictKey.Kind.NOTE))) {
+				conflicts.add(new OpenConflict(noted.version(), candidate.unit(), noted.at(), noted.saveId(), noted.note(),
+						null));
 			}
 		}
 		boolean undecided = !deletions.isEmpty() && collectAffected(entries, own, deletions);
@@ -99,6 +106,74 @@ final class ConflictLedger {
 		}
 		conflicts.sort(Comparator.comparing(OpenConflict::at).thenComparing(OpenConflict::id));
 		return new Derivation(List.copyOf(conflicts), undecided);
+	}
+
+	/**
+	 * Ein Vermerk für diesen Rechner, mit seiner Stelle in der Einheit.
+	 *
+	 * @param unit  die Einheit, an deren Version der Vermerk steht
+	 * @param rank  die Stelle: aufgegangen {@code 0}, in der Kette {@code 1 +} Index, eigene ausstehende
+	 *              {@link Integer#MAX_VALUE}
+	 * @param noted die Version mit dem Vermerk
+	 */
+	private record Candidate(UnitKey unit, int rank, UnitIndex.NotedVersion noted) {
+	}
+
+	/** Die Stelle der Version in ihrer Einheit (siehe {@link Candidate#rank()}); die Reihenfolge ist kausal. */
+	private static int rank(UnitIndex.Entry entry, VersionId version) {
+		if (entry.absorbed().contains(version)) {
+			return 0;
+		}
+		List<ChainStep> chain = entry.chain();
+		for (int i = 0; i < chain.size(); i++) {
+			if (chain.get(i).version().equals(version)) {
+				return 1 + i;
+			}
+		}
+		return Integer.MAX_VALUE;
+	}
+
+	/**
+	 * Ohne die Vermerke, hinter denen ein anderer zum selben verlorenen Stand ({@link ConflictNote#dropped()}) zurücktritt
+	 * (KARV-98): Folgeauflösungen schreiben ihn erneut, und der Dialog zeigte denselben Verlust mehrfach. Die Regeln
+	 * kommen ohne Uhr aus (die Versions-ID beginnt mit der Uhrzeit des Schreibenden), siehe {@link #supersedes}. Vermerke
+	 * ohne {@code dropped} bleiben alle.
+	 */
+	private static List<Candidate> withoutSuperseded(List<Candidate> candidates) {
+		List<Candidate> kept = new ArrayList<>();
+		for (Candidate candidate : candidates) {
+			if (candidate.noted().note().dropped() == null
+					|| candidates.stream().noneMatch(other -> other != candidate && supersedes(other, candidate))) {
+				kept.add(candidate);
+			}
+		}
+		return kept;
+	}
+
+	/**
+	 * Ob {@code later} denselben verlorenen Stand später nennt als {@code earlier}:
+	 * <ul>
+	 * <li>In derselben Einheit an einer späteren Stelle (aufgegangen, Kette, ausstehend); zwei aufgegangene, wenn
+	 * {@code later} die andere als Vorgänger hat.</li>
+	 * <li>An einer anderen Einheit, wenn {@code earlier} ein Doppelverkauf oder ein Feldkonflikt mit Träger ist und sein
+	 * {@code moved} (wohin die Buchung kam) diese Einheit nennt: Dort hat eine spätere Auflösung mit Kenntnis des Parkens
+	 * entschieden. Bei "Löschung gilt" nennt {@code moved}, wo die weichende Fassung liegt; er tritt so nie zurück.</li>
+	 * </ul>
+	 */
+	private static boolean supersedes(Candidate later, Candidate earlier) {
+		ConflictNote before = earlier.noted().note();
+		if (!before.dropped().equals(later.noted().note().dropped())) {
+			return false;
+		}
+		if (later.unit().equals(earlier.unit())) {
+			if (later.rank() != earlier.rank()) {
+				return later.rank() > earlier.rank();
+			}
+			return earlier.rank() == 0 && later.noted().parents().contains(earlier.noted().version());
+		}
+		boolean placed = before.kind() == ConflictNote.Kind.DOUBLE_SALE
+				|| before.kind() == ConflictNote.Kind.FIELDS && before.moved() != null;
+		return placed && later.unit().equals(before.moved());
 	}
 
 	/**

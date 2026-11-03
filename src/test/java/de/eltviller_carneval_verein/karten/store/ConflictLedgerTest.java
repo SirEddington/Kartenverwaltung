@@ -1081,6 +1081,165 @@ class ConflictLedgerTest {
 		return new UnitIndex.NotedVersion(id, A_ID, "Kasse A", "Anna", at, "save-" + id.value(), List.of(), note);
 	}
 
+	// --- Ein Eintrag je verlorenem Stand (KARV-98, Spec Abschnitt 2)
+
+	private static final UnitKey SEAT = UnitKey.booking("e1", "p1", "S-1");
+	private static final UnitKey MIA = UnitKey.unassignedBooking("e1", "p1", "mia");
+	/** Bs Fassung auf Sitz 1, die in allen Vermerken weicht. */
+	private static final VersionId DROPPED = VersionId.create(1_900_000_000_500L, A_ID, 0);
+	private static final Instant AT = Instant.parse("2026-10-28T09:00:00Z");
+
+	private static VersionId vid(long offset, int counter) {
+		return VersionId.create(1_900_000_000_000L + offset, FOREIGN, counter);
+	}
+
+	/** Ein Eintrag mit dieser Kette (ältestes zuerst), diesen aufgegangenen Versionen und diesen Vermerken. */
+	private static UnitIndex.Entry entryWith(UnitKey unit, List<VersionId> chain, Set<VersionId> absorbed,
+			List<UnitIndex.NotedVersion> notes) {
+		VersionId head = chain.get(chain.size() - 1);
+		UnitSnapshot snapshot = new UnitSnapshot(unit, head, UnitState.Status.OK, false, null);
+		List<ChainStep> steps = chain.stream()
+				.map(id -> new ChainStep(id, "save-" + id.value(), AT, "Kasse A", "Anna", false)).toList();
+		return new UnitIndex.Entry(snapshot, "abdruck", false, false, steps, absorbed, notes, Map.of(), null, Set.of());
+	}
+
+	private static UnitIndex.NotedVersion notedWith(VersionId id, List<VersionId> parents, ConflictNote note) {
+		return new UnitIndex.NotedVersion(id, FOREIGN, "Kasse B", "Bert", AT, "save-" + id.value(), parents, note);
+	}
+
+	private static ConflictNote doubleSaleTo(UnitKey moved) {
+		return ConflictNote.doubleSale(A_ID, null, moved, null, DROPPED);
+	}
+
+	private static ConflictNote deleteWinsAt(UnitKey moved) {
+		return ConflictNote.deleteWins(A_ID, null, moved, DROPPED);
+	}
+
+	private static List<VersionId> ids(List<OpenConflict> conflicts) {
+		return conflicts.stream().map(OpenConflict::id).toList();
+	}
+
+	@Test
+	void chainNoteBeatsAbsorbedNoteForTheSameDroppedVersion() {
+		VersionId absorbed = vid(1_000, 1);
+		VersionId merge = vid(2_000, 2);
+		List<UnitIndex.Entry> entries = List.of(entryWith(MIA, List.of(merge), Set.of(absorbed),
+				List.of(notedWith(absorbed, List.of(), doubleSaleTo(MIA)), notedWith(merge, List.of(absorbed),
+						doubleSaleTo(MIA)))));
+
+		assertEquals(List.of(merge), ids(ConflictLedger.derive(entries, OWN, Set.of()).conflicts()));
+	}
+
+	/** Ohne Uhr: Die spätere Stelle der Kette gewinnt, auch wenn ihre ID (Uhr des Schreibenden) kleiner ist. */
+	@Test
+	void laterChainPositionWinsEvenWithASmallerVersionId() {
+		VersionId first = vid(9_000, 1);
+		VersionId second = vid(1_000, 2);
+		List<UnitIndex.Entry> entries = List.of(entryWith(MIA, List.of(first, second), Set.of(),
+				List.of(notedWith(first, List.of(), doubleSaleTo(MIA)), notedWith(second, List.of(first),
+						doubleSaleTo(MIA)))));
+
+		assertEquals(List.of(second), ids(ConflictLedger.derive(entries, OWN, Set.of()).conflicts()));
+	}
+
+	/** Eine eigene ausstehende Zusammenführung kommt nach der Kette: Bis sie beansprucht ist, kein zweiter Eintrag. */
+	@Test
+	void pendingBeatsChain() {
+		VersionId inChain = vid(1_000, 1);
+		VersionId pending = VersionId.create(1_900_000_000_100L, A_ID, 7);
+		List<UnitIndex.Entry> entries = List.of(entryWith(MIA, List.of(inChain), Set.of(),
+				List.of(notedWith(inChain, List.of(), doubleSaleTo(MIA)), notedWith(pending, List.of(inChain),
+						doubleSaleTo(MIA)))));
+
+		assertEquals(List.of(pending), ids(ConflictLedger.derive(entries, OWN, Set.of()).conflicts()));
+	}
+
+	@Test
+	void doubleSaleWhoseMovedNamesTheOtherUnitStepsBack() {
+		VersionId atSeat = vid(1_000, 1);
+		VersionId atMia = vid(500, 2);
+		List<UnitIndex.Entry> entries = List.of(
+				entryWith(SEAT, List.of(atSeat), Set.of(), List.of(notedWith(atSeat, List.of(), doubleSaleTo(MIA)))),
+				entryWith(MIA, List.of(atMia), Set.of(), List.of(notedWith(atMia, List.of(), doubleSaleTo(MIA)))));
+
+		assertEquals(List.of(atMia), ids(ConflictLedger.derive(entries, OWN, Set.of()).conflicts()));
+	}
+
+	/** Storno-Fall: „Löschung gilt“ nennt in {@code moved} das gescheiterte Ziel; das ist kein Kreis. */
+	@Test
+	void deleteWinsAndDoubleSaleFormNoCycle() {
+		VersionId atSeat = vid(1_000, 1);
+		VersionId atMia = vid(500, 2);
+		List<UnitIndex.Entry> entries = List.of(
+				entryWith(SEAT, List.of(atSeat), Set.of(), List.of(notedWith(atSeat, List.of(), doubleSaleTo(MIA)))),
+				entryWith(MIA, List.of(atMia), Set.of(), List.of(notedWith(atMia, List.of(), deleteWinsAt(SEAT)))));
+
+		List<OpenConflict> open = ConflictLedger.derive(entries, OWN, Set.of()).conflicts();
+
+		assertEquals(List.of(atMia), ids(open));
+		assertEquals(ConflictNote.Kind.DELETE_WINS, open.get(0).note().kind());
+	}
+
+	/** In derselben Einheit gilt nur die Stelle: Zwei aufgegangene ohne Vorgänger-Beziehung bleiben, trotz moved. */
+	@Test
+	void crossUnitRuleNeedsDifferentUnits() {
+		VersionId one = vid(1_000, 1);
+		VersionId two = vid(2_000, 2);
+		VersionId merge = vid(3_000, 3);
+		List<UnitIndex.Entry> entries = List.of(entryWith(MIA, List.of(merge), Set.of(one, two),
+				List.of(notedWith(one, List.of(), doubleSaleTo(MIA)), notedWith(two, List.of(), doubleSaleTo(MIA)))));
+
+		assertEquals(2, ConflictLedger.derive(entries, OWN, Set.of()).conflicts().size());
+	}
+
+	@Test
+	void unrelatedNotesBothStay() {
+		VersionId atSeat = vid(1_000, 1);
+		VersionId atOther = vid(2_000, 2);
+		List<UnitIndex.Entry> entries = List.of(
+				entryWith(SEAT, List.of(atSeat), Set.of(), List.of(notedWith(atSeat, List.of(), doubleSaleTo(MIA)))),
+				entryWith(OTHER_SALE, List.of(atOther), Set.of(),
+						List.of(notedWith(atOther, List.of(), doubleSaleTo(OTHER_SALE)))));
+
+		assertEquals(2, ConflictLedger.derive(entries, OWN, Set.of()).conflicts().size());
+	}
+
+	@Test
+	void acknowledgedRemainingNoteHidesBoth() {
+		VersionId first = vid(1_000, 1);
+		VersionId second = vid(2_000, 2);
+		List<UnitIndex.Entry> entries = List.of(entryWith(MIA, List.of(first, second), Set.of(),
+				List.of(notedWith(first, List.of(), doubleSaleTo(MIA)), notedWith(second, List.of(first),
+						doubleSaleTo(MIA)))));
+
+		assertEquals(List.of(), ConflictLedger.derive(entries, OWN,
+				Set.of(new ConflictKey(second, ConflictKey.Kind.NOTE))).conflicts());
+	}
+
+	@Test
+	void laterNoteShowsAlthoughTheEarlierWasAcknowledged() {
+		VersionId first = vid(1_000, 1);
+		VersionId second = vid(2_000, 2);
+		List<UnitIndex.Entry> entries = List.of(entryWith(MIA, List.of(first, second), Set.of(),
+				List.of(notedWith(first, List.of(), doubleSaleTo(MIA)), notedWith(second, List.of(first),
+						deleteWinsAt(SEAT)))));
+
+		assertEquals(List.of(second), ids(ConflictLedger.derive(entries, OWN,
+				Set.of(new ConflictKey(first, ConflictKey.Kind.NOTE))).conflicts()));
+	}
+
+	@Test
+	void notesWithoutDroppedCountEach() {
+		VersionId first = vid(1_000, 1);
+		VersionId second = vid(2_000, 2);
+		ConflictNote withoutDropped = new ConflictNote(ConflictNote.Kind.DOUBLE_SALE, A_ID, null, List.of(), MIA, null,
+				null);
+		List<UnitIndex.Entry> entries = List.of(entryWith(MIA, List.of(first, second), Set.of(),
+				List.of(notedWith(first, List.of(), withoutDropped), notedWith(second, List.of(first), withoutDropped))));
+
+		assertEquals(2, ConflictLedger.derive(entries, OWN, Set.of()).conflicts().size());
+	}
+
 	@Test
 	void openConflictNeedsExactlyOneOfNoteAndDeletion() {
 		VersionId id = VersionId.create(1_900_000_001_000L, A_ID, 1);
