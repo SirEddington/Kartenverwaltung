@@ -39,11 +39,6 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		notes = List.copyOf(notes);
 	}
 
-	/** Eine Entscheidung, deren Quelle {@link #decide} ergänzt. */
-	BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions, List<Placed> notes) {
-		this(carrier, content, deletions, notes, null);
-	}
-
 	/**
 	 * Entscheidet nach der Tabelle; {@code null}, wenn es nichts zu entscheiden gibt (beide behalten: Regel 4; eine Seite
 	 * unberührt, außer E11 und E13).
@@ -63,9 +58,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 			Boolean ownWinsSource, String ownMachineId, boolean sourceFree, boolean parked) {
 		Side mine = new Side(own, ownMachineId);
 		Side theirs = new Side(foreign, machineOf(foreign));
-		Decider decider = new Decider(bookingId, source, base, sourceFree, parked);
-		BookingFate fate = decider.decide(mine, theirs, ownWinsSource);
-		return fate == null ? null : new BookingFate(fate.carrier(), fate.content(), fate.deletions(), fate.notes(), source);
+		return new Decider(bookingId, source, base, sourceFree, parked).decide(mine, theirs, ownWinsSource);
 	}
 
 	/** Die Version, die für eine Seite steht: ihr Wegfall, sonst ihre jüngste; {@code null} bei einer unberührten. */
@@ -163,7 +156,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 					other.trail().last() == null ? null : other.trail().end(), other.dropped())));
 			default -> throw new IllegalStateException(other.kind().name());
 			}
-			return new BookingFate(null, null, deletions, notes);
+			return fate(null, null, deletions, notes);
 		}
 
 		/**
@@ -173,7 +166,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		 */
 		private BookingFate bothArrived(Side own, Side foreign, Boolean ownWinsSource) {
 			if (own.trail().end().equals(foreign.trail().end())) {
-				return new BookingFate(own.trail().end(), null, List.of(), List.of());
+				return fate(own.trail().end(), null, List.of(), List.of());
 			}
 			boolean ownWins = ownWinsSource != null ? ownWinsSource : own.viaParking() && !foreign.viaParking();
 			Side winner = ownWins ? own : foreign;
@@ -215,7 +208,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 			List<Placed> notes = conflicts.isEmpty() ? List.of()
 					: List.of(atSource(ConflictNote.ofFields(other.machine(), winner.party(), conflicts,
 							place ? null : carrier, other.dropped())));
-			return new BookingFate(carrier, merged.merged(), deletions, notes);
+			return fate(carrier, merged.merged(), deletions, notes);
 		}
 
 		/**
@@ -244,7 +237,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 				note = ConflictNote.ofFields(failed.machine(), kept.party(), conflicts,
 						carrier.equals(source) ? null : carrier, failed.dropped());
 			}
-			return new BookingFate(carrier, content, List.of(), List.of(atSource(note)));
+			return fate(carrier, content, List.of(), List.of(atSource(note)));
 		}
 
 		/**
@@ -257,14 +250,14 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 			Side loser = ownWins ? foreign : own;
 			FieldMerge.Result merged = carry(fieldsOf(loser), fieldsOf(winner));
 			UnitKey carrier = unassigned();
-			return new BookingFate(carrier, BookingPolicy.withoutPlace(merged.merged()), List.of(),
+			return fate(carrier, BookingPolicy.withoutPlace(merged.merged()), List.of(),
 					List.of(atTarget(own, carrier), atTarget(foreign, carrier)));
 		}
 
 		/** E11: ein gescheiterter Umzug, die andere Seite unberührt: "ohne Platz", Vermerk an seinem Ziel. */
 		private BookingFate aloneFailed(Side failed) {
 			UnitKey carrier = unassigned();
-			return new BookingFate(carrier, BookingPolicy.withoutPlace(fieldsOf(failed)), List.of(),
+			return fate(carrier, BookingPolicy.withoutPlace(fieldsOf(failed)), List.of(),
 					List.of(atTarget(failed, carrier)));
 		}
 
@@ -278,7 +271,7 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		private BookingFate againstParked(Side removed) {
 			UnitKey copy = unassigned();
 			UnitKey carrier = removed.kind() == Kind.CANCELLED ? null : removed.trail().end();
-			return !parked || copy.equals(carrier) ? null : new BookingFate(carrier, null, List.of(copy), List.of());
+			return !parked || copy.equals(carrier) ? null : fate(carrier, null, List.of(copy), List.of());
 		}
 
 		/** Der Doppelverkauf einer Seite an ihrem gescheiterten Ziel; die Gegenseite dort setzt die Anwendung ein. */
@@ -304,6 +297,11 @@ record BookingFate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions,
 		/** Der Platz, den die Seite haben wollte (für die Anzeige im Doppelverkauf). */
 		private ObjectNode placeOf(Side side) {
 			return FieldMerge.slice(fieldsOf(side), BookingPolicy.PLACE);
+		}
+
+		/** Eine Entscheidung an dieser Quelle. */
+		private BookingFate fate(UnitKey carrier, ObjectNode content, List<UnitKey> deletions, List<Placed> notes) {
+			return new BookingFate(carrier, content, deletions, notes, source);
 		}
 
 		/** Die Einheit "ohne Platz" der Buchung in der Vorstellung der Quelle. */

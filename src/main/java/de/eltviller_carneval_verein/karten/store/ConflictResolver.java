@@ -348,8 +348,10 @@ final class ConflictResolver {
 			return Stretch.of(Step.LATER);
 		}
 		VersionId baseId = firstParent;
-		List<Version> forked = chainSinceBase(files, state.chain(), firstParent);
-		if (unit.type() == UnitType.BOOKING && oldest.marks().resolution() && !forked.isEmpty()) {
+		List<Version> forked = unit.type() == UnitType.BOOKING && oldest.marks().resolution()
+				? chainSinceBase(files, state.chain(), firstParent)
+				: List.of();
+		if (!forked.isEmpty()) {
 			// Auflösung gegen Auflösung (KARV-98): die Basis unter den Nutzer-Versionen beider Seiten, bestimmt aus den
 			// gabelnden Versionen (Nutzer-Versionen darüber liest die Spur als informiertes Handeln)
 			ResolutionBase.Result lowered = ResolutionBase.lower(files, oldest, forked.get(0));
@@ -381,12 +383,12 @@ final class ConflictResolver {
 			}
 		}
 		Map<UnitKey, TrailUnit> trail = unit.type() == UnitType.BOOKING
-				? copy(TrailCollector.collect(unit, base, versions, this::folder))
+				? TrailCollector.collect(unit, base, versions, this::folder)
 				: Map.of();
 		if (parkingPathWaits(unit, trail, since)) {
 			return Stretch.of(Step.WAIT);
 		}
-		return new Stretch(Step.MERGE, base, mine, state.head(), since, versions, trail);
+		return new Stretch(Step.MERGE, base, mine, state.head(), since, versions, copy(trail));
 	}
 
 	/**
@@ -404,14 +406,12 @@ final class ConflictResolver {
 		}
 		Set<String> saves = new HashSet<>();
 		since.stream().filter(v -> v.marks().resolution() && v.saveId() != null).forEach(v -> saves.add(v.saveId()));
-		Ownership own = host.ownership();
 		for (TrailUnit parked : trail.values()) {
 			if (parked.unit().equals(unit) || !parked.unit().isUnassigned()) {
 				continue;
 			}
 			List<Version> after = afterParking(parked.chain(), saves);
-			boolean unlisted = after.stream().anyMatch(v -> !own.isOwn(v) && !host.isListed(parked.unit(), v.id()));
-			if (unlisted && withinListWait(unit)) {
+			if (unlisted(parked.unit(), after) && withinListWait(unit)) {
 				LOGGER.fine("Eine Änderung an " + parked.unit().relativePath() + " ist noch nicht gelesen; die Auflösung wartet");
 				return true;
 			}
@@ -436,6 +436,12 @@ final class ConflictResolver {
 		}
 		return parked < 0 ? List.of()
 				: chain.subList(parked + 1, chain.size()).stream().filter(v -> !v.marks().resolution()).toList();
+	}
+
+	/** Ob eine fremde der Versionen noch nicht über die Änderungsliste der Einheit eingelesen ist. */
+	private boolean unlisted(UnitKey unit, List<Version> versions) {
+		Ownership own = host.ownership();
+		return versions.stream().anyMatch(v -> !own.isOwn(v) && !host.isListed(unit, v.id()));
 	}
 
 	/**
@@ -495,17 +501,10 @@ final class ConflictResolver {
 	 * wartend) ist auch eine Version einer früheren ID von vor ihrer Neuvergabe.
 	 */
 	private boolean mustWait(UnitKey unit, List<Version> since) {
-		if (!host.shared()) {
+		if (!host.shared() || !unlisted(unit, since)) {
 			return false;
 		}
-		Ownership own = host.ownership();
-		boolean unlisted = since.stream().anyMatch(v -> !own.isOwn(v) && !host.isListed(unit, v.id()));
-		if (!unlisted) {
-			return false;
-		}
-		Instant now = clock.instant();
-		Instant first = waitingSince.computeIfAbsent(unit, key -> now);
-		if (now.isBefore(first.plus(LIST_WAIT))) {
+		if (withinListWait(unit)) {
 			return true;
 		}
 		if (listWaitReported.add(unit)) {

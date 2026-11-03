@@ -175,11 +175,11 @@ public final class BookingPolicy implements ConflictPolicy {
 			BookingFate fate = entry.getValue();
 			if (fate.carrier() != null && !unit.equals(fate.carrier()) && fate.content() != null) {
 				Change content = contentChange(input, fate.carrier(), fate.content());
-				if (content != null && fate.carrier().isUnassigned() && !fate.carrier().equals(fate.source())) {
-					// geparkt (E9 ohne freie Quelle, E10, E11): das Parken nennt seine Quelle (KARV-98)
-					content = content.withMarks(VersionMarks.NONE.withMovedFrom(fate.source()));
-				}
 				if (content != null) {
+					if (fate.carrier().isUnassigned() && !fate.carrier().equals(fate.source())) {
+						// geparkt (E9 ohne freie Quelle, E10, E11): das Parken nennt seine Quelle (KARV-98)
+						content = content.withMarks(VersionMarks.NONE.withMovedFrom(fate.source()));
+					}
 					extra.add(content);
 				}
 			}
@@ -235,14 +235,7 @@ public final class BookingPolicy implements ConflictPolicy {
 
 	/** Eine Kopie von {@code side}, in der jede Feldgruppe, die sie gegenüber {@code base} nicht änderte, die von {@code resolved} ist. */
 	private static ObjectNode unchangedTaken(ObjectNode side, ObjectNode base, ObjectNode resolved) {
-		ObjectNode adjusted = side.deepCopy();
-		ObjectNode before = FieldMerge.orEmpty(base);
-		for (List<String> group : FieldGroups.booking().values()) {
-			if (FieldMerge.same(side, before, group)) {
-				FieldMerge.copyFields(adjusted, resolved, group);
-			}
-		}
-		return adjusted;
+		return FieldMerge.merge(base, resolved, side, FieldGroups.booking()).merged();
 	}
 
 	/**
@@ -277,7 +270,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * Quelle selbst {@code _<ID>} ist. Eine geänderte Kopie zählt nicht: Die Änderung kam nach dem Parken.
 	 */
 	private static boolean parkedUnchanged(ConflictInput input, String bookingId, UnitKey source, Version base) {
-		UnitKey parked = UnitKey.unassignedBooking(source.eventId(), source.presentationId(), bookingId);
+		UnitKey parked = BookingTrail.parkedUnit(source, bookingId);
 		Sibling sibling = input.siblings().get(parked);
 		return !parked.equals(source) && sibling != null && sibling.snapshot().carriesBooking(bookingId)
 				&& sameExceptPlace(sibling.snapshot().payload(), base.payload());

@@ -86,18 +86,20 @@ final class TrailFixture {
 
 	/** Eine Version auf {@code parent} (oder ohne); ohne Inhalt eine Löschung. */
 	Version version(String machine, String saveId, Version parent, ObjectNode payload, VersionMarks marks) {
-		counter++;
-		return new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter),
-				parent == null ? List.of() : List.of(parent.id()), machine, "Kasse " + machine, "Bediener " + machine,
-				Instant.EPOCH, saveId, payload == null, payload, null, Map.of(), marks);
+		return create(machine, saveId, parent == null ? List.of() : List.of(parent), payload, marks);
 	}
 
 	/** Eine Zusammenführung einer Auflösung auf diesen Vorgängern ({@code [Deren, Meine]}). */
 	Version merge(String machine, String saveId, List<Version> parents, ObjectNode payload) {
+		return create(machine, saveId, parents, payload, VersionMarks.RESOLUTION);
+	}
+
+	private Version create(String machine, String saveId, List<Version> parents, ObjectNode payload,
+			VersionMarks marks) {
 		counter++;
 		return new Version(1, VersionId.create(1_800_000_000_000L + counter, machine, counter),
 				parents.stream().map(Version::id).toList(), machine, "Kasse " + machine, "Bediener " + machine,
-				Instant.EPOCH, saveId, payload == null, payload, null, Map.of(), VersionMarks.RESOLUTION);
+				Instant.EPOCH, saveId, payload == null, payload, null, Map.of(), marks);
 	}
 
 	Version version(String machine, Version parent, ObjectNode payload, VersionMarks marks) {

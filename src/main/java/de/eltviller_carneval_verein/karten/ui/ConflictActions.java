@@ -811,11 +811,6 @@ public final class ConflictActions {
 		candidates.add(conflict.unit());
 		if (note.moved() != null) {
 			candidates.add(note.moved());
-			// die weichende Fassung kann an der geparkten Kopie der Buchung liegen, die jetzt auf moved lebt (KARV-98, E5)
-			UnitKey parked = parkedCopyOf(note.moved());
-			if (parked != null) {
-				candidates.add(parked);
-			}
 		}
 		// nur Buchungsvermerke haben die Gruppe "Platz"
 		String mySeatId = mySeatId(note);
@@ -823,6 +818,12 @@ public final class ConflictActions {
 			candidates.add(UnitKey.booking(conflict.unit().eventId(), conflict.unit().presentationId(), mySeatId));
 		}
 		Version found = droppedOn(candidates, note);
+		UnitKey parked = found == null && note.moved() != null ? parkedCopyOf(note.moved()) : null;
+		if (parked != null) {
+			// die weichende Fassung kann an der geparkten Kopie der Buchung liegen, die jetzt auf moved lebt (KARV-98, E5;
+			// erst jetzt gesucht, weil das Modell dafür das Event zerlegt)
+			found = droppedOn(Set.of(parked), note);
+		}
 		if (found != null || !isUnassigned(placeOf(note))) {
 			return found;
 		}
