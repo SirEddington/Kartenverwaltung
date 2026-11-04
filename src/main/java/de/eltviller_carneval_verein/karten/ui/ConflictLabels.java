@@ -9,6 +9,8 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.store.SyncService;
@@ -20,7 +22,8 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 /**
  * Die Anzeigenamen der Einheiten für den Sammel-Dialog ({@link ConflictList}), ohne JavaFX: ein Event heißt wie das Event,
  * eine Vorstellung "Event › Vorstellung", eine Buchung "Event › Vorstellung › Platz" bzw. bei einer Buchung ohne Platz
- * (Einheit {@code _<ID>}) "… › Kunde", eine Halle wie die Halle. Dieselben Bezeichnungen setzt die Oberfläche des gemeinsamen Ordners in ihre Meldungen ein.
+ * (Einheit {@code _<ID>}) "… › Kunde", eine Halle wie die Halle. Fehlt die Buchung, heißt sie nach ihrem Sitz in der
+ * Bestuhlung (KARV-111). Dieselben Bezeichnungen setzt die Oberfläche des gemeinsamen Ordners in ihre Meldungen ein.
  */
 public final class ConflictLabels {
 
@@ -81,8 +84,30 @@ public final class ConflictLabels {
 			if (unit.type() == UnitType.PRESENTATION) {
 				return path;
 			}
-			return path + SEPARATOR + bookingPart(modelObject.apply(unit), unit.isUnassigned());
+			Object model = modelObject.apply(unit);
+			if (!(model instanceof Booking) && !unit.isUnassigned()) {
+				String place = placeInPlan(presentation, findHall, unit.bookingDir());
+				if (place != null) {
+					return path + SEPARATOR + place;
+				}
+			}
+			return path + SEPARATOR + bookingPart(model, unit.isUnassigned());
 		};
+	}
+
+	/**
+	 * Der Platz einer Buchung, die im Modell fehlt (KARV-111): ihr Sitz in der Bestuhlung der Vorstellung, wie bei einer
+	 * vorhandenen Buchung. {@code null}, wenn Vorstellung, Halle, Bestuhlung oder Sitz fehlen oder die Vorstellung
+	 * eingefroren ist (ihre Bestuhlung gibt es nicht mehr).
+	 */
+	private static String placeInPlan(Presentation presentation, Function<String, Hall> findHall, String seatId) {
+		if (presentation == null || presentation.isPlanMissing() || presentation.getHallId() == null) {
+			return null;
+		}
+		Hall hall = findHall.apply(presentation.getHallId());
+		SeatingPlan plan = hall == null ? null : hall.findSeatingPlan(presentation.getSeatingPlanId());
+		Seat seat = plan == null ? null : plan.findSeat(seatId);
+		return seat == null ? null : EntityLabels.placeOf(seat);
 	}
 
 	/**

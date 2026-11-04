@@ -84,6 +84,6 @@ public final class PlaceAssignment {
 
 	/** "Tisch A3, Sitz 2" bzw. "Tisch 3, Sitz 2" ohne Reihenbuchstaben. */
 	public static String label(Seat seat) {
-		return seat.getParent().getDisplayName() + ", Sitz " + seat.getSeatNumber();
+		return EntityLabels.placeOf(seat);
 	}
 }

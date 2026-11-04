@@ -25,6 +25,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /** Die Anzeigenamen der Einheiten im Sammel-Dialog. */
 class ConflictLabelsTest {
@@ -33,6 +34,7 @@ class ConflictLabelsTest {
 	private final Event event = new Event();
 	private final Presentation friday;
 	private final Seat seat;
+	private final Seat otherSeat;
 	private final Booking seatBooking;
 	private final Booking unassigned;
 
@@ -43,6 +45,7 @@ class ConflictLabelsTest {
 		row.setLabel("A");
 		plan.fillRow(row, 1, 2);
 		seat = plan.getSeats().get(1);
+		otherSeat = plan.getSeats().get(0);
 		event.setName("Prunksitzung");
 		friday = event.addPresentation("Freitag");
 		friday.setHallId(hall.getId());
@@ -140,5 +143,37 @@ class ConflictLabelsTest {
 				labels().apply(UnitKey.unassignedBooking(event.getId(), friday.getId(), "other")));
 		assertEquals("Prunksitzung › Freitag › (Platz unbekannt)",
 				labels().apply(UnitKey.booking(event.getId(), friday.getId(), "other-seat")));
+	}
+
+	/** KARV-111 (F13): Eine lokal fehlende Buchung heißt nach ihrem Sitz in der Bestuhlung der Vorstellung. */
+	@Test
+	void missingBookingIsNamedByItsSeatInThePlan() {
+		String label = labels().apply(UnitKey.booking(event.getId(), friday.getId(), otherSeat.getId()));
+
+		assertEquals("Prunksitzung › Freitag › " + EntityLabels.placeOf(otherSeat), label);
+		assertEquals("Prunksitzung › Freitag › Tisch A1, Sitz 1", label, "dieselbe Form wie bei einer vorhandenen Buchung");
+		assertEquals("Prunksitzung › Freitag › Tisch A1, Sitz 2", labels().apply(UnitKey.booking(event.getId(), friday.getId(), seat.getId())));
+	}
+
+	@Test
+	void missingBookingStaysUnknownWithoutHallPlanOrSeat() {
+		UnitKey unit = UnitKey.booking(event.getId(), friday.getId(), otherSeat.getId());
+		String unknown = "Prunksitzung › Freitag › (Platz unbekannt)";
+		String hallId = friday.getHallId();
+		String planId = friday.getSeatingPlanId();
+
+		friday.setPlanMissing(true);
+		assertEquals(unknown, labels().apply(unit), "eingefrorene Vorstellung");
+		friday.setPlanMissing(false);
+
+		friday.setSeatingPlanId("weg");
+		assertEquals(unknown, labels().apply(unit), "Bestuhlung fehlt");
+		friday.setSeatingPlanId(planId);
+
+		friday.setHallId("weg");
+		assertEquals(unknown, labels().apply(unit), "Halle fehlt");
+		friday.setHallId(hallId);
+
+		assertEquals(unknown, labels().apply(UnitKey.booking(event.getId(), friday.getId(), "other-seat")), "Sitz fehlt");
 	}
 }
