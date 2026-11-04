@@ -18,12 +18,15 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # Zwei Fat-JARs mit den jeweils passenden JavaFX-Natives (siehe pom.xml): zuerst
-      # Windows (Standardprofil, inkl. Tests), dann Linux ohne "clean", damit das
-      # Windows-Jar in target/ erhalten bleibt.
+      # Erst die Tests wie in der CI: Der Runner ist Linux, also mit den JavaFX-Natives für
+      # Linux und einem virtuellen Display (sonst "No toolkit found"). Dann zwei Fat-JARs mit
+      # den jeweils passenden JavaFX-Natives (siehe pom.xml): zuerst Windows (Standardprofil),
+      # dann Linux ohne "clean", damit das Windows-Jar in target/ erhalten bleibt.
       - name: Build jars with Maven
         run: |
-          ./mvnw --batch-mode clean package
+          ./mvnw --batch-mode clean
+          xvfb-run --auto-servernum ./mvnw --batch-mode -Plinux test
+          ./mvnw --batch-mode package -DskipTests
           ./mvnw --batch-mode package -Plinux -DskipTests
 
       # IMPORTANT: check https://conveyor.hydraulic.dev/latest/ for the current
