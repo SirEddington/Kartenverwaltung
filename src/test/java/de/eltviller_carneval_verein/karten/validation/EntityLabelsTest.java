@@ -135,4 +135,30 @@ class EntityLabelsTest {
 		assertEquals("Tisch 3", EntityLabels.table(table));
 		assertEquals("Sitz 1 an Tisch 3", EntityLabels.seat(seat));
 	}
+
+	/** Der Platz eines Sitzes in der Form, die auch eine Buchung trägt (KARV-111, Platz zuweisen). */
+	@Test
+	void placeOfSeatNamesTableAndSeat() {
+		SeatingPlan plan = new Hall().addSeatingPlan();
+		TableRow a = plan.addRow();
+		a.setLabel("A");
+		Table a3 = plan.addTable(a);
+		a3.setTableNumber(3);
+		TableRow plain = plan.addRow();
+		plain.setLabel("");
+		Table t4 = plan.addTable(plain);
+		t4.setTableNumber(4);
+
+		assertEquals("Tisch A3, Sitz 2", EntityLabels.placeOf(a3.addSeat(2)));
+		assertEquals("Tisch 4, Sitz 1", EntityLabels.placeOf(t4.addSeat(1)));
+	}
+
+	/** Wie {@link EntityLabels#seat}: Ein Sitz ohne Tisch heißt nur nach seiner Nummer, statt zu werfen. */
+	@Test
+	void placeOfSeatWithoutTableNamesTheSeatOnly() {
+		Seat seat = new Seat();
+		seat.setSeatNumber(5);
+
+		assertEquals("Sitz 5", EntityLabels.placeOf(seat));
+	}
 }

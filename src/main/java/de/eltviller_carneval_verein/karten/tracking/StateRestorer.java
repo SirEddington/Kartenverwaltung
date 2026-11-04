@@ -11,8 +11,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
@@ -56,7 +56,7 @@ public final class StateRestorer<T> {
 	/** Der Restorer der App für Events. */
 	public static synchronized StateRestorer<Event> events() {
 		if (eventRestorer == null) {
-			eventRestorer = new StateRestorer<>(Event.class, ChangeTracker.events(), JsonEventRepository.getInstance()::replaceCachedEvent);
+			eventRestorer = new StateRestorer<>(Event.class, ChangeTracker.events(), StoreEventRepository.getInstance()::replaceCachedEvent);
 		}
 		return eventRestorer;
 	}
@@ -64,7 +64,7 @@ public final class StateRestorer<T> {
 	/** Der Restorer der App für Hallen. */
 	public static synchronized StateRestorer<Hall> halls() {
 		if (hallRestorer == null) {
-			hallRestorer = new StateRestorer<>(Hall.class, ChangeTracker.halls(), JsonHallRepository.getInstance()::replaceCachedHall);
+			hallRestorer = new StateRestorer<>(Hall.class, ChangeTracker.halls(), StoreHallRepository.getInstance()::replaceCachedHall);
 		}
 		return hallRestorer;
 	}

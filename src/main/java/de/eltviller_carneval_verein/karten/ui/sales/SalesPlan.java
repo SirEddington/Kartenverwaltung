@@ -8,7 +8,7 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
  * Welche Bestuhlung die Verkaufsansicht für eine Vorstellung zeichnet, und welcher Hinweis ohne Bestuhlung erscheint.
  * Ohne JavaFX prüfbar.
  */
-final class SalesPlan {
+public final class SalesPlan {
 
 	/** Hinweis, wenn die Bestuhlung der Vorstellung gelöscht ist (eingefrorene Vorstellung oder gelöschte Halle). */
 	static final String MISSING_HINT = "Bestuhlung nicht mehr vorhanden";
@@ -22,7 +22,7 @@ final class SalesPlan {
 	 * Die Bestuhlung der Vorstellung in ihrer Halle; {@code null} ohne Vorstellung, ohne Halle, ohne Bestuhlung und bei
 	 * einer eingefrorenen Vorstellung ({@link Presentation#isPlanMissing()}): Dann zeichnet der Plan nur die Halle.
 	 */
-	static SeatingPlan of(Presentation presentation, Hall hall) {
+	public static SeatingPlan of(Presentation presentation, Hall hall) {
 		if (presentation == null || hall == null || presentation.isPlanMissing()) {
 			return null;
 		}

@@ -36,7 +36,8 @@ import javafx.util.Duration;
  * (bei genau einer gewählten Zeile; das Zeichen ersetzt den Inhalt), Enter, F2 oder einem Doppelklick. Bei mehreren
  * gewählten Zeilen, mit Strg/Umschalt und nach dem Ziehen startet ein Klick es nie.</li>
  * <li>Tab und Umschalt+Tab setzen den Fokus auf die nächste bzw. vorherige bearbeitbare Zelle, am Zeilenende in die
- * nächste Zeile. Beim Bearbeiten übernimmt Tab erst die Eingabe, siehe {@link ParsingTextFieldTableCell}.</li>
+ * nächste Zeile. Beim Bearbeiten übernimmt Tab erst die Eingabe und bearbeitet dann gleich die neue Zelle, siehe
+ * {@link ParsingTextFieldTableCell}.</li>
  * <li>Drücken und Ziehen über mehrere Zeilen wählt sie aus; mit Strg bleibt die bisherige Auswahl erhalten. Am oberen
  * und unteren Rand scrollt die Tabelle mit.</li>
  * </ul>
@@ -147,7 +148,8 @@ public final class TableInput {
 			return null;
 		}
 		TableCell<S, ?> cell = cellAt(table, focused.getRow(), focused.getTableColumn());
-		return cell instanceof ParsingTextFieldTableCell<?, ?> ? cell : null;
+		// die Zelle selbst kann gesperrt sein (etwa der gezahlte Betrag einer offenen Buchung)
+		return cell instanceof ParsingTextFieldTableCell<?, ?> parsing && parsing.canEdit() ? cell : null;
 	}
 
 	/**
@@ -186,8 +188,32 @@ public final class TableInput {
 		}
 		table.getSelectionModel().clearAndSelect(nextRow);
 		table.getFocusModel().focus(nextRow, columns.get(nextColumn));
-		table.scrollTo(nextRow);
+		// Nur so weit scrollen, dass die Zeile ganz zu sehen ist: TableView.scrollTo setzte sie an den oberen Rand, und die
+		// Zeile sprang bei jedem Tab nach oben
+		if (table.lookup(".virtual-flow") instanceof VirtualFlow<?> flow) {
+			flow.scrollTo(nextRow);
+		} else {
+			table.scrollTo(nextRow);
+		}
 		table.requestFocus();
+		return true;
+	}
+
+	/**
+	 * Wie {@link #moveFocus}, für Tab aus dem Bearbeiten: Ist die neue Zelle eine Textzelle, die sich bearbeiten lässt,
+	 * beginnt dort gleich das Bearbeiten (mit markiertem Inhalt). Auswahllisten, Checkboxen und gesperrte Zellen bekommen
+	 * nur den Fokus.
+	 */
+	static <S> boolean moveEditing(TableView<S> table, int row, TableColumn<S, ?> column, boolean forward) {
+		if (!moveFocus(table, row, column, forward)) {
+			return false;
+		}
+		// Nach dem Scrollen gibt es die Zellen der neuen Zeile erst nach einem Layout
+		table.layout();
+		TableCell<S, ?> cell = editableCellInFocus(table);
+		if (cell != null) {
+			table.edit(cell.getIndex(), cell.getTableColumn());
+		}
 		return true;
 	}
 

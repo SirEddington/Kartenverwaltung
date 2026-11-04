@@ -13,15 +13,22 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Shape;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.HallBackupCatalog;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.fxml.FXML;
@@ -51,12 +58,16 @@ public class HallManagementController extends AbstractOverviewController {
 	record PlansGroup(Hall hall) {
 	}
 
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
-	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
+	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
 
 	// Anzahl der Vorstellungen je Halle (hallId) und je Bestuhlung (seatingPlanId), wird bei jedem Neuaufbau des Baums berechnet
 	private Map<String, Integer> usageCounts = new HashMap<>();
 	private Map<String, Integer> planUsageCounts = new HashMap<>();
+
+	// Fremde Änderungen an Hallen und, wegen der Nutzungszahlen, an Events (nur Kopf und Vorstellungen, keine Buchungen): Der Baum wird neu aufgebaut
+	private final RepositoryListener<Hall> foreignHallChanges = foreignChangeReloader(LiveViews.ofTypes(UnitType.HALL));
+	private final RepositoryListener<Event> foreignEventChanges = foreignChangeReloader(LiveViews.ofTypes(UnitType.EVENT, UnitType.PRESENTATION));
 
 	@FXML
 	private TreeTableColumn<Object, String> colName;
@@ -78,6 +89,12 @@ public class HallManagementController extends AbstractOverviewController {
 	private TreeTableColumn<Object, String> colUsage;
 	@FXML
 	private TreeTableColumn<Object, String> colShape;
+
+	@Override
+	protected List<Registration> foreignChangeRegistrations() {
+		return List.of(Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges),
+				Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignEventChanges));
+	}
 
 	@Override
 	protected void setupColumns() {
@@ -314,7 +331,12 @@ public class HallManagementController extends AbstractOverviewController {
 			if (!confirmDelete("Halle löschen", "Soll die Halle \"" + hall.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
 				return;
 			}
-			hallRepository.deleteHall(hall);
+			try {
+				hallRepository.deleteHall(hall);
+			} catch (LockedUnitException e) {
+				// Die Liste zeigt eine Halle, die ein anderer Rechner inzwischen ersetzt oder gelöscht hat
+				StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
+			}
 		} else {
 			return;
 		}

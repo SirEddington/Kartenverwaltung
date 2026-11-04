@@ -12,9 +12,15 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
 import javafx.beans.value.ChangeListener;
@@ -48,7 +54,7 @@ import javafx.stage.Window;
  */
 public class HallOverviewController implements ContentController, SalesStateAware {
 
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 	private Event selectedEvent;
 	private Presentation selectedPres;
 	private boolean editMode = false;
@@ -71,6 +77,29 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	// Einpassen auf die Halle erfolgt nur, wenn sich die Halle ändert (Zoom bleibt beim Vorstellungswechsel)
 	private String fittedHallId = null;
+
+	// Fremde Änderungen am gezeigten Event oder an der Halle der gezeigten Vorstellung: Der Plan wird neu gezeichnet
+	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
+	private final RepositoryListener<Event> foreignEventChanges = new RepositoryListener<>() {
+		// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
+		private final RepositoryListener<Event> refreshing = LiveViews.onFxThread(
+				units -> LiveViews.touches(units, selectedEvent, selectedPres), () -> {
+					dropGoneBookingsFromSelection();
+					renderHall();
+				});
+
+		@Override
+		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
+			refreshing.changedByOthers(event, batch);
+		}
+
+		@Override
+		public void changedElsewhere(Event event, Set<UnitKey> units) {
+			refreshing.changedElsewhere(event, units);
+		}
+	};
+	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(
+			units -> LiveViews.touchesHall(units, selectedPres == null ? null : selectedPres.getHallId()), this::renderIfShown);
 
 	@FXML
 	private HallPlanPane viewportPane;
@@ -100,6 +129,30 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		rubberBand.setStroke(HallPlanPane.SELECTION_COLOR);
 		viewportPane.getChildren().add(rubberBand);
 		updateHint();
+
+		// Fremde Änderungen nur, solange der Plan zu sehen ist (danach hielten die Repositories diese Ansicht am Leben)
+		// Ebenso eine geänderte Sperrliste: Ein gesperrter Sitz wird grau oder wieder normal und verlässt die Auswahl, sonst
+		// schlösse "Verkaufen" ihn ein und scheiterte an ihm (KARV-111)
+		LiveViews.whileShown(viewportPane, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignEventChanges),
+				Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges),
+				LockedSeats.whileShown(() -> {
+					LockedSeats.dropFrom(selectedBookings);
+					renderIfShown();
+				}));
+	}
+
+	/** Zeichnet die Halle der gezeigten Vorstellung neu (eine ersetzte Halle hat dieselbe ID, {@link #hallOf} sucht nach ihr). */
+	private void renderIfShown() {
+		if (selectedPres != null) {
+			renderHall();
+		}
+	}
+
+	/** Buchungen, die ein anderer Rechner aus der Vorstellung genommen hat, bleiben nicht ausgewählt. */
+	private void dropGoneBookingsFromSelection() {
+		if (selectedPres != null && selectedPres.getBookings() != null) {
+			selectedBookings.removeIf(booking -> !selectedPres.getBookings().contains(booking));
+		}
 	}
 
 	// Verschoben wird der Plan von der HallPlanPane mit der rechten Maustaste (ein Klick ohne Ziehen öffnet das
@@ -184,7 +237,8 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			selectedBookings.clear();
 		}
 		seatNodes.forEach((node, booking) -> {
-			if (matchesQuery(booking) && node.localToScene(node.getBoundsInLocal()).intersects(band)) {
+			// Ein gesperrter Sitz lässt sich nicht verkaufen und kommt deshalb nicht in die Auswahl (KARV-111)
+			if (matchesQuery(booking) && !LockedSeats.isLocked(booking) && node.localToScene(node.getBoundsInLocal()).intersects(band)) {
 				selectedBookings.add(booking);
 			}
 		});
@@ -204,8 +258,8 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	/**
 	 * Rechtsklick ohne Ziehen (mit gedrückter Taste zu ziehen verschiebt den Plan): Das Menü gehört zu einem Sitz. Auf
 	 * einem gewählten Sitz gilt es für die ganze Auswahl, auf einem anderen Sitz wird dieser zur einzigen Auswahl, wie im
-	 * Explorer. Im Leeren, auf einem Tisch, auf einem vom Suchfilter ausgeblendeten Sitz und bei offenem Dialog (er
-	 * würde sonst samt Eingaben ersetzt) gibt es kein Menü. Im Anzeigemodus ist der Eintrag sichtbar, aber nicht
+	 * Explorer. Im Leeren, auf einem Tisch, auf einem vom Suchfilter ausgeblendeten oder gesperrten Sitz (KARV-111) und bei
+	 * offenem Dialog (er würde sonst samt Eingaben ersetzt) gibt es kein Menü. Im Anzeigemodus ist der Eintrag sichtbar, aber nicht
 	 * ausführbar; die Auswahl ändert der Rechtsklick dort nicht (der Text nennt die Auswahl nur, wenn der Sitz dazugehört).
 	 */
 	private void showSelectionMenu(MouseEvent event) {
@@ -213,7 +267,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			selectionMenu.hide();
 		}
 		Booking booking = bookingAt(event.getTarget());
-		if (booking == null || isDialogOpen() || !matchesQuery(booking)) {
+		if (booking == null || LockedSeats.isLocked(booking) || isDialogOpen() || !matchesQuery(booking)) {
 			return;
 		}
 		if (editMode && !selectedBookings.contains(booking)) {
@@ -223,8 +277,12 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		}
 		MenuItem sellItem = new MenuItem(SeatSelectionEditor.menuText(selectedBookings.contains(booking) ? selectedBookings.size() : 1));
 		sellItem.setDisable(!editMode);
-		selectionMenu = new ContextMenu(sellItem);
+		// Stornieren gilt für dieselbe Auswahl wie der Verkauf (KARV-121); gesperrt, wenn keine gewählte Buchung Daten trägt
+		MenuItem cancelItem = new MenuItem();
+		CancelAction.prepare(cancelItem, selectedBookings.contains(booking) ? List.copyOf(selectedBookings) : List.of(booking), editMode);
+		selectionMenu = new ContextMenu(sellItem, cancelItem);
 		sellItem.setOnAction(action -> sellSelection(selectionMenu.getAnchorX(), selectionMenu.getAnchorY()));
+		cancelItem.setOnAction(action -> cancelSelection());
 		selectionMenu.show(viewportPane, event.getScreenX(), event.getScreenY());
 	}
 
@@ -239,6 +297,14 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		});
 		if (dialog != null) {
 			activePopup = dialog.popup();
+		}
+	}
+
+	private void cancelSelection() {
+		closePopup();
+		if (CancelAction.run(List.copyOf(selectedBookings), viewportPane.getScene().getWindow())) {
+			selectedBookings.clear();
+			renderHall();
 		}
 	}
 
@@ -273,8 +339,11 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	private void styleSeatNode(Booking booking, Node seatNode) {
 		boolean matchesQuery = matchesQuery(booking);
 		boolean selected = selectedBookings.contains(booking);
+		// Ein gesperrter Sitz (unlesbare Buchung, KARV-111) ist grau und öffnet die gesperrten Einträge statt der Buchungskarte
+		boolean locked = LockedSeats.isLocked(booking);
+		SeatStatus status = locked ? SeatStatus.BLOCKED : booking.getStatus();
 		if (seatNode instanceof Shape shape) {
-			shape.setFill(seatColorFor(booking.getStatus()));
+			shape.setFill(seatColorFor(status));
 			// Suchtreffer bekommen keine eigene Hervorhebung: Die übrigen Sitze sind abgeblendet (unten), die Auswahl
 			// trägt ein goldenes Halo hinter dem Sitz (HallPlanPane)
 			shape.setStroke(Color.BLACK);
@@ -286,7 +355,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		seatNode.setOpacity(matchesQuery ? 1.0 : 0.25);
 		seatNodes.put(seatNode, booking);
 
-		Tooltip.install(seatNode, new Tooltip(booking.getPlaceLabel() + " (" + booking.getStatus().getDisplayName() + ")"));
+		Tooltip.install(seatNode, new Tooltip(booking.getPlaceLabel() + " (" + status.getDisplayName() + ")"));
 		seatNode.setOnMouseClicked(event -> {
 			if (event.getButton() != MouseButton.PRIMARY || !event.isStillSincePress()) {
 				return;
@@ -294,6 +363,10 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			event.consume();
 			if (editMode && isDialogOpen()) {
 				return; // Ein zweiter Dialog würde den offenen samt Eingaben ersetzen: erst Anwenden oder Abbrechen
+			}
+			if (locked) {
+				LockedSeats.open(); // auch mit Strg: Der Sitz kommt nicht in die Auswahl
+				return;
 			}
 			if (editMode && event.isShortcutDown()) {
 				toggleSelection(booking);
@@ -316,11 +389,11 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	/**
 	 * Öffnet ein Popup mit den Kartendetails des angeklickten Sitzes direkt über der Saalübersicht. Änderungen gelten erst
-	 * mit "Anwenden"; danach wird die Saalübersicht neu gezeichnet (Farbe, Tooltip etc.).
+	 * mit "Anwenden" (bzw. "Speichern", siehe {@link BookingAutoSave}); danach wird die Saalübersicht neu gezeichnet (Farbe, Tooltip etc.).
 	 */
 	private void openSeatDetailPopup(Booking booking, Window window, double screenX, double screenY) {
 		closePopup();
-		SeatDetailPopup dialog = new SeatDetailPopup(List.of(booking), editMode, this::renderHall);
+		SeatDetailPopup dialog = new SeatDetailPopup(List.of(booking), editMode, BookingAutoSave.settingOn(), this::renderHall);
 		activePopup = dialog.popup();
 		dialog.show(window, screenX, screenY);
 	}
@@ -370,6 +443,8 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		selectedBookings.clear();
 		if (selectedPres != null) {
 			bookings.stream().filter(booking -> booking.getParent() == selectedPres && !booking.isUnassigned()).forEach(selectedBookings::add);
+			// Wurde ein Sitz gesperrt, während die Tabelle zu sehen war, kommt er nicht in die Auswahl (KARV-111)
+			LockedSeats.dropFrom(selectedBookings);
 		}
 		renderHall();
 	}

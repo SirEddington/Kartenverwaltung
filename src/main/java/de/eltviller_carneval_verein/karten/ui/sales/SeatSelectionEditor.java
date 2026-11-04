@@ -40,7 +40,7 @@ final class SeatSelectionEditor {
 			return null;
 		}
 
-		SeatDetailPopup popup = new SeatDetailPopup(bookings, true, onApplied);
+		SeatDetailPopup popup = new SeatDetailPopup(bookings, true, BookingAutoSave.settingOn(), onApplied);
 		popup.show(owner, screenX, screenY);
 		return popup;
 	}

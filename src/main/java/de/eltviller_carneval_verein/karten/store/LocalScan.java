@@ -1,0 +1,191 @@
+package de.eltviller_carneval_verein.karten.store;
+
+import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import de.eltviller_carneval_verein.karten.store.UnitState.Status;
+
+/**
+ * Was der {@link SyncService} aus dem lokalen Bestand ableitet, statt es sich zu merken: die ausstehenden eigenen
+ * Versionen als Aufträge, die verlorenen eigenen Versionen mit ihrem Gewinner und die Stelle, an der eine gesperrte
+ * Kette endet. Weil alles aus den Dateien kommt, übersteht es jeden Absturz.
+ */
+final class LocalScan {
+
+	private static final Logger LOGGER = Logger.getLogger(LocalScan.class.getName());
+	private static final String ROOT = "root";
+
+	/**
+	 * Ein eigener Anspruch, der auf eine späte Niederlage geprüft wird.
+	 *
+	 * @param at seit wann er beobachtet wird (Zeitpunkt des Anspruchs oder des Hochladens)
+	 */
+	record OwnClaim(UnitKey unit, String claimName, VersionId version, Instant at) {
+	}
+
+	private LocalScan() {
+	}
+
+	/**
+	 * Die lesbaren Anspruchsdateien der genannten Einheiten, die dieser Rechner geschrieben hat (Rechner des Anspruchs und
+	 * beanspruchte Version eigen nach {@code own}, auch unter einer früheren ID).
+	 */
+	private static List<OwnClaim> ownClaims(VersionStore local, Ownership own, Collection<UnitKey> units)
+			throws IOException {
+		List<OwnClaim> claims = new ArrayList<>();
+		for (UnitKey unit : units) {
+			for (ClaimFile file : local.readUnit(unit).claims().values()) {
+				Claim claim = file.claim();
+				if (claim != null && own.isOwn(claim)) {
+					claims.add(new OwnClaim(unit, file.name(), claim.version(), claim.at()));
+				}
+			}
+		}
+		return claims;
+	}
+
+	/**
+	 * Die eigenen Anspruchsdateien der genannten Einheiten (etwa die Kandidaten aus dem Start-Index), die jünger sind als
+	 * {@code window}: nach einem Neustart weiter auf eine späte Niederlage zu prüfen. Die übrigen Einheiten werden nicht
+	 * gelesen; ob ein Anspruch jung ist, entscheidet {@link OwnClaim#at()}.
+	 *
+	 * @param units die Einheiten, deren Ansprüche gelesen werden
+	 */
+	static List<OwnClaim> recentOwnClaims(VersionStore local, Ownership own, Instant now, Duration window,
+			Collection<UnitKey> units) throws IOException {
+		Instant since = now.minus(window);
+		return ownClaims(local, own, units).stream().filter(claim -> claim.at().isAfter(since)).toList();
+	}
+
+	/**
+	 * Die ausstehenden eigenen Versionen der genannten Einheiten als Aufträge: je {@code saveId} ein Auftrag, die Aufträge
+	 * nach ihrer kleinsten Versions-ID geordnet. Innerhalb eines Auftrags bleibt je Einheit die Reihenfolge aus
+	 * {@link UnitState#pending()} (Vorgänger zuerst, nicht nach ID, weil Uhren springen können); die Einheiten stehen
+	 * nach ihrer kleinsten Versions-ID. Jede Einheit wird aus den Dateien aufgelöst; eine Auswahl (etwa die Kandidaten aus
+	 * dem Start-Index) spart nur das Lesen der übrigen.
+	 *
+	 * Eine Einheit, die sich nicht lesen oder auflösen lässt, hält die übrigen nicht auf: Sie wird übergangen (WARNING im
+	 * Log) und an {@code unreadable} gemeldet, damit der Aufrufer sie als Kandidaten behält.
+	 *
+	 * @param own        was eigen ist (auch Versionen einer früheren ID bis zu ihrer Neuvergabe: sie werden weiter
+	 *                   hochgeladen)
+	 * @param skip       Versionen, die schon in einem Auftrag stehen; sie kommen nicht noch einmal vor
+	 * @param units      die Einheiten, die untersucht werden (alle: {@link VersionStore#allUnits()})
+	 * @param unreadable erfährt jede Einheit, die übergangen wurde
+	 */
+	static List<UploadJob> pendingJobs(VersionStore local, Ownership own, Set<VersionId> skip,
+			Collection<UnitKey> units, Consumer<UnitKey> unreadable) {
+		Map<String, Map<UnitKey, List<UploadJob.Item>>> groups = new LinkedHashMap<>();
+		for (UnitKey unit : units) {
+			List<UploadJob.Item> found = new ArrayList<>();
+			try {
+				UnitFiles files = local.readUnit(unit);
+				for (Version version : ChainResolver.resolve(files, own).pending()) {
+					if (!skip.contains(version.id())) {
+						found.add(new UploadJob.Item(unit, version, files.versions().get(version.id()).bytes()));
+					}
+				}
+			} catch (IOException | RuntimeException e) {
+				LOGGER.log(Level.WARNING, "Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
+				unreadable.accept(unit);
+				continue;
+			}
+			for (UploadJob.Item item : found) {
+				groups.computeIfAbsent(item.version().saveId(), id -> new LinkedHashMap<>())
+						.computeIfAbsent(unit, u -> new ArrayList<>()).add(item);
+			}
+		}
+		List<UploadJob> jobs = new ArrayList<>();
+		for (Map.Entry<String, Map<UnitKey, List<UploadJob.Item>>> group : groups.entrySet()) {
+			List<List<UploadJob.Item>> perUnit = new ArrayList<>(group.getValue().values());
+			perUnit.sort(Comparator.comparing(LocalScan::smallestId));
+			List<UploadJob.Item> items = new ArrayList<>();
+			perUnit.forEach(items::addAll);
+			jobs.add(new UploadJob(group.getKey(), items));
+		}
+		jobs.sort(Comparator.comparing(job -> smallestId(job.items())));
+		return jobs;
+	}
+
+	private static VersionId smallestId(List<UploadJob.Item> items) {
+		return items.stream().map(item -> item.version().id()).min(Comparator.naturalOrder()).orElseThrow();
+	}
+
+	/**
+	 * Die verlorenen Strecken eigener Versionen mit ihrem Gewinner. Nur bei einer bestimmbaren Kette ({@code OK}); eine
+	 * Strecke, deren Gewinner sich nicht bestimmen lässt, fehlt.
+	 */
+	static List<LostVersion> losses(UnitFiles files, UnitState state) {
+		List<LostVersion> losses = new ArrayList<>();
+		if (state.status() != Status.OK) {
+			return losses;
+		}
+		for (List<VersionId> stretch : state.lost()) {
+			VersionId winner = winner(files, state, stretch.get(0));
+			if (winner != null) {
+				losses.add(new LostVersion(files.unit(), stretch, winner));
+			}
+		}
+		return losses;
+	}
+
+	/**
+	 * Der Gewinner gegen eine verlorene Version: die Version in der Anspruchsdatei des Platzes, um den sie sich beworben
+	 * hat. Das ist {@code claims/<erster Vorgänger | root>}; liegt der Vorgänger selbst außerhalb der Kette (er hat
+	 * ebenfalls verloren), zählt der Platz hinter dem nächsten beanspruchten Vorfahren, wie bei {@link SharedArbiter}.
+	 *
+	 * @return die Gewinner-Version; {@code null}, wenn ein Vorfahr fehlt oder die Anspruchsdatei fehlt oder unlesbar ist
+	 */
+	private static VersionId winner(UnitFiles files, UnitState state, VersionId first) {
+		VersionFile firstFile = files.versions().get(first);
+		VersionId current = firstFile == null || firstFile.version() == null ? null : firstFile.version().firstParent();
+		Set<VersionId> seen = new HashSet<>();
+		while (current != null && !state.claimed().contains(current)) {
+			VersionFile file = files.versions().get(current);
+			if (file == null || file.version() == null || !seen.add(current)) {
+				return null;
+			}
+			current = file.version().firstParent();
+		}
+		ClaimFile slot = files.claims().get(current == null ? ROOT : current.value());
+		return slot == null || slot.claim() == null ? null : slot.claim().version();
+	}
+
+	/**
+	 * Der Name der Anspruchsdatei, an der die Kette endet, auf demselben Weg wie {@link ChainResolver}: bei einer
+	 * unlesbaren Anspruchsdatei sie selbst, bei einer beschädigten, fehlenden oder wiederholten Version die
+	 * Anspruchsdatei, die sie nennt. Bei einer vollständigen Kette ist es der Platz hinter ihrem Ende.
+	 */
+	static String stopSlot(UnitFiles files) {
+		String name = ROOT;
+		Set<VersionId> seen = new HashSet<>();
+		while (true) {
+			ClaimFile claimFile = files.claims().get(name);
+			if (claimFile == null || claimFile.claim() == null) {
+				return name;
+			}
+			VersionId target = claimFile.claim().version();
+			VersionFile file = files.versions().get(target);
+			if (!seen.add(target) || file == null || file.unknownFormat() != null) {
+				return name;
+			}
+			boolean intact = file.version() != null && StoreCodec.sha256(file.bytes()).equals(claimFile.claim().sha256());
+			if (!intact && !files.claims().containsKey(target.value())) {
+				return name;
+			}
+			name = target.value();
+		}
+	}
+}

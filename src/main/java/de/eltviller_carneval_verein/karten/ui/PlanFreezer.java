@@ -13,8 +13,8 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 
 /**
@@ -43,8 +43,8 @@ public final class PlanFreezer {
 	 * @return die gespeicherten Events
 	 */
 	public static List<Event> beforePlanDeletion(Hall hall, SeatingPlan plan) {
-		JsonHallRepository halls = JsonHallRepository.getInstance();
-		return freeze(JsonEventRepository.getInstance().loadEvents(),
+		StoreHallRepository halls = StoreHallRepository.getInstance();
+		return freeze(StoreEventRepository.getInstance().loadEvents(),
 				presentation -> plan.getId().equals(presentation.getSeatingPlanId()),
 				hallId -> hall.getId().equals(hallId) ? hall : halls.findById(hallId), ChangeTracker.events(),
 				EventSaver::saveStructureChange);

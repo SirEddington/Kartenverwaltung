@@ -52,6 +52,26 @@ class BookingTotalsTest {
 	}
 
 	@Test
+	void revenueAndPaidCentsCountThePaidAmount() {
+		presentation.changePrice(1000);
+		Booking paidLess = booking(1);
+		paidLess.setLastName("A");
+		paidLess.setPaymentStatus(PaymentStatus.CASH);
+		paidLess.setPaidAmount(800);
+		Booking olderState = booking(2);
+		olderState.setLastName("B");
+		olderState.setPaymentStatus(PaymentStatus.CASH);
+		booking(3).setLastName("C");
+		List<Booking> bookings = presentation.getBookings();
+
+		BookingTotals totals = BookingTotals.of(bookings);
+
+		assertEquals(800 + 1000, totals.revenueCents());
+		assertEquals(1000 + 1000 + 1000, totals.expectedCents());
+		assertEquals(1800, BookingTotals.paidCents(bookings, PaymentStatus.CASH));
+	}
+
+	@Test
 	void totalsOfNothingAreZero() {
 		BookingTotals totals = BookingTotals.of(List.of());
 

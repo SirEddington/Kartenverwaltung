@@ -17,5 +17,7 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # Der Runner ist Linux: JavaFX-Natives für Linux (-Plinux statt des Windows-Standards) und ein virtuelles
+      # Display, sonst starten die Tests mit JavaFX-Toolkit nicht ("No toolkit found")
       - name: Run tests
-        run: ./mvnw --batch-mode test
+        run: xvfb-run --auto-servernum ./mvnw --batch-mode -Plinux test

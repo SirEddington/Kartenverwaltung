@@ -1,0 +1,150 @@
+package de.eltviller_carneval_verein.karten.store;
+
+import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
+
+/**
+ * Codes und Texte der technischen Meldungen des Versionsspeichers ({@code SYS-005} bis {@code SYS-013}). Die Texte sind
+ * Vorlagen mit den Platzhaltern {@code &1} und {@code &2}; fertig formatiert lauten sie {@code "<Code>: <Text>"}.
+ * Nummern werden nie wiederverwendet; {@code SYS-002} bis {@code SYS-004} bleiben unbesetzt (siehe das Package
+ * {@code validation}).
+ */
+public final class StoreMessages {
+
+	/** Der gemeinsame Ordner ist nicht erreichbar. */
+	public static final String SYS_UNREACHABLE = "SYS-005";
+
+	/** Der Abgleich mit dem gemeinsamen Ordner ist an einem anderen Fehler gescheitert. */
+	public static final String SYS_SYNC_FAILED = "SYS-006";
+
+	/** Eine beschädigte Datei wurde durch eine geprüfte Kopie ersetzt. */
+	public static final String SYS_REPAIRED = "SYS-007";
+
+	/** Eine Einheit ist beschädigt, und es gibt keine unbeschädigte Kopie. */
+	public static final String SYS_DAMAGED = "SYS-008";
+
+	/** Eine Einheit wurde mit einer neueren Programmversion gespeichert. */
+	public static final String SYS_NEWER_FORMAT = "SYS-009";
+
+	/** Die Anwendung läuft auf diesem Rechner schon. */
+	public static final String SYS_ALREADY_RUNNING = "SYS-010";
+
+	/** Ein anderer Rechner verwendet dieselbe Rechner-Kennung. */
+	public static final String SYS_DUPLICATE_MACHINE = "SYS-011";
+
+	/** Im gemeinsamen Ordner liegt eine Versionsdatei gleichen Namens mit anderem Inhalt. */
+	public static final String SYS_CONTENT_MISMATCH = "SYS-012";
+
+	/** Der Vollabgleich hat eine Einheit übersprungen, die sich wiederholt nicht abgleichen ließ. */
+	public static final String SYS_SKIPPED = "SYS-013";
+
+	private static final String UNREACHABLE_TEXT = "Der gemeinsame Ordner &1 ist nicht erreichbar. Du kannst "
+			+ "weiterarbeiten: Neue Verkäufe und Änderungen sind vorläufig und werden hochgeladen, sobald der Ordner "
+			+ "wieder erreichbar ist.";
+
+	private static final String SYNC_FAILED_TEXT = "Der Abgleich mit dem gemeinsamen Ordner &1 ist gescheitert (&2). "
+			+ "Neue Verkäufe bleiben vorläufig; die Kartenverwaltung versucht es weiter.";
+
+	private static final String REPAIRED_TEXT = "Die beschädigte Datei &1 wurde durch eine geprüfte Kopie ersetzt; die "
+			+ "beschädigte liegt als &2 daneben.";
+
+	private static final String DAMAGED_TEXT = "&1 ist beschädigt, und es gibt keine heile Kopie. Der Eintrag ist "
+			+ "gesperrt; über „gesperrte Einträge“ in der Fußzeile kannst du ihn auf den letzten lesbaren Stand "
+			+ "zurücksetzen.";
+
+	private static final String NEWER_FORMAT_TEXT = "&1 wurde mit einer neueren Version der Kartenverwaltung gespeichert "
+			+ "und ist hier gesperrt. Aktualisiere die Kartenverwaltung auf diesem Rechner.";
+
+	private static final String ALREADY_RUNNING_TEXT = "Die Kartenverwaltung ist auf diesem Rechner schon geöffnet. "
+			+ "Wechsle zum offenen Fenster.";
+
+	private static final String DUPLICATE_MACHINE_TEXT = "Ein anderer Rechner verwendet dieselbe Rechner-Kennung, "
+			+ "wahrscheinlich weil die Installation kopiert wurde. Dieser Rechner hat deshalb eine neue Kennung "
+			+ "bekommen. Du musst nichts tun.";
+
+	private static final String CONTENT_MISMATCH_TEXT = "Im gemeinsamen Ordner liegt &1 mit anderem Inhalt als auf diesem "
+			+ "Rechner. Es wurde nichts überschrieben. Gib den Hinweis bitte an die Betreuung der Kartenverwaltung weiter.";
+
+	private static final String SKIPPED_TEXT = "&1 ließ sich nicht abgleichen (&2) und wurde übersprungen. Änderungen "
+			+ "anderer Rechner daran fehlen hier, bis ein Abgleich gelingt.";
+
+	private StoreMessages() {
+	}
+
+	/** SYS-005: Der gemeinsame Ordner {@code path} ist nicht erreichbar. */
+	public static String unreachable(String path) {
+		return SYS_UNREACHABLE + ": " + MessageTemplate.format(UNREACHABLE_TEXT, path);
+	}
+
+	/** SYS-006: Der Abgleich mit {@code path} ist aus dem Grund {@code cause} fehlgeschlagen. */
+	public static String syncFailed(String path, String cause) {
+		return SYS_SYNC_FAILED + ": " + MessageTemplate.format(SYNC_FAILED_TEXT, path, cause);
+	}
+
+	/** SYS-007: Die Datei {@code file} wurde ersetzt; die beschädigte liegt als {@code corruptFile} daneben. */
+	public static String repaired(String file, String corruptFile) {
+		return SYS_REPAIRED + ": " + MessageTemplate.format(REPAIRED_TEXT, file, corruptFile);
+	}
+
+	/** SYS-008: Die Einheit {@code unit} ist beschädigt und ohne unbeschädigte Kopie. */
+	public static String damaged(String unit) {
+		return SYS_DAMAGED + ": " + MessageTemplate.format(DAMAGED_TEXT, unit);
+	}
+
+	/** SYS-009: Die Einheit {@code unit} wurde mit einer neueren Programmversion gespeichert. */
+	public static String newerFormat(String unit) {
+		return SYS_NEWER_FORMAT + ": " + MessageTemplate.format(NEWER_FORMAT_TEXT, unit);
+	}
+
+	/** Der Text (SYS-008 bzw. SYS-009) mit dem Pfad der Einheit, wenn sie nach {@code status} gesperrt ist; sonst {@code null}. */
+	public static String locked(UnitKey unit, UnitState.Status status) {
+		return locked(unit.relativePath(), status);
+	}
+
+	/**
+	 * Der Text (SYS-008 bzw. SYS-009), wenn die Einheit nach {@code status} gesperrt ist; sonst {@code null}.
+	 *
+	 * @param unit wie die Einheit genannt wird: im Log ihr Pfad, in der Oberfläche ihre lesbare Bezeichnung
+	 */
+	public static String locked(String unit, UnitState.Status status) {
+		return switch (status) {
+		case LOCKED_DAMAGED -> damaged(unit);
+		case LOCKED_FORMAT -> newerFormat(unit);
+		case WAITING, OK -> null;
+		};
+	}
+
+	/** SYS-010: Die Anwendung läuft auf diesem Rechner schon. */
+	public static String alreadyRunning() {
+		return SYS_ALREADY_RUNNING + ": " + ALREADY_RUNNING_TEXT;
+	}
+
+	/** SYS-011: Ein anderer Rechner verwendet dieselbe Kennung; dieser hat eine neue bekommen. */
+	public static String duplicateMachine() {
+		return SYS_DUPLICATE_MACHINE + ": " + DUPLICATE_MACHINE_TEXT;
+	}
+
+	/** SYS-012: Im gemeinsamen Ordner liegt {@code file} mit anderem Inhalt als lokal. */
+	public static String contentMismatch(String file) {
+		return SYS_CONTENT_MISMATCH + ": " + MessageTemplate.format(CONTENT_MISMATCH_TEXT, file);
+	}
+
+	/** SYS-013: Der Vollabgleich hat {@code unit} übersprungen, weil sie aus dem Grund {@code cause} wiederholt scheiterte. */
+	public static String skipped(String unit, String cause) {
+		return SYS_SKIPPED + ": " + MessageTemplate.format(SKIPPED_TEXT, unit, cause);
+	}
+
+	/** SYS-013 für das Log: mit dem Pfad der Einheit, bei {@code subtree} mit dem Zusatz "mit allem darunter". */
+	public static String skipped(UnitKey unit, boolean subtree, String cause) {
+		return skipped(subtree ? unit.relativePath() + " mit allem darunter" : unit.relativePath(), cause);
+	}
+
+	/**
+	 * Die Ursache eines Fehlers für die Meldungstexte, zum Beispiel {@code "AccessDeniedException: E:\ECV\data"}. Ohne
+	 * Meldung steht nur der Klassenname da: Manche Ausnahmen haben keine, und der Text endete sonst auf "null".
+	 */
+	public static String describe(Throwable e) {
+		String message = e.getMessage();
+		return message == null || message.isBlank() ? e.getClass().getSimpleName()
+				: e.getClass().getSimpleName() + ": " + message;
+	}
+}

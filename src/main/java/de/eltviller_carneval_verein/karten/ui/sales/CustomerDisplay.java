@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.List;
+import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Booking;
@@ -9,8 +10,14 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
+import de.eltviller_carneval_verein.karten.ui.CoalescedAction;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.application.Platform;
@@ -51,7 +58,7 @@ public final class CustomerDisplay {
 	private static final String LOGO = "/de/eltviller_carneval_verein/karten/ui/images/harlekin_logo.png";
 
 	private final SalesViewState state;
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 	// Der Vollbildmodus ist ein randloses Fenster in Bildschirmgröße und kein JavaFX-Vollbild: Ein Vollbildfenster wird
 	// minimiert, sobald das Hauptfenster den Fokus bekommt. Die Scene wandert beim Umschalten zwischen den Fenstern.
 	private final Stage windowStage = new Stage();
@@ -75,18 +82,32 @@ public final class CustomerDisplay {
 	private boolean attached = false;
 
 	// Eine Auswahl von hundert Sitzen meldet hundert Änderungen: Der Plan wird trotzdem nur einmal neu gezeichnet
-	private final CoalescedAction redraw = new CoalescedAction(Platform::runLater, () -> {
-		if (attached) {
-			refresh();
-			applyView();
-		}
-	});
+	private final CoalescedAction redraw = new CoalescedAction(Platform::runLater, this::redrawIfAttached);
 	private final ChangeListener<Object> contentChanged = (obs, oldValue, newValue) -> redraw.request();
 	private final ChangeListener<Rectangle2D> viewChanged = (obs, oldValue, newValue) -> applyView();
 	private final InvalidationListener placementInvalidated = observable -> placeSummary();
 	private final SetChangeListener<Booking> selectionChanged = change -> redraw.request();
 	// Ein Verkauf im Hauptfenster ändert Buchungen: Die Änderungserkennung meldet es kurz nach der Bedienung
 	private final ChangeTracker.Listener<Event> dataChanged = (changed, before, after) -> onDataChanged(changed);
+	// Fremde Änderungen führt der Tracker still nach (rebase meldet nichts): Das Fenster erfährt sie vom Repository
+	private final RepositoryListener<Event> foreignEventChanges = new RepositoryListener<>() {
+		private final RepositoryListener<Event> redrawing = LiveViews.onFxThread(CustomerDisplay.this::touchesShownPresentation,
+				CustomerDisplay.this::redrawIfAttached);
+
+		@Override
+		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
+			redrawing.changedByOthers(event, batch);
+		}
+
+		@Override
+		public void changedElsewhere(Event event, Set<UnitKey> units) {
+			redrawing.changedElsewhere(event, units);
+		}
+	};
+	// Ersetzt oder ändert ein anderer Rechner die Halle der gezeigten Vorstellung, zeichnet das Fenster neu (die Halle wird über die ID gesucht)
+	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(this::touchesShownHall, this::redrawIfAttached);
+	// Ein gesperrter Sitz wird rot oder wieder grün (KARV-111)
+	private final Runnable lockedChanged = redraw::request;
 
 	private final HallPlanPane.Decorator decorator = new HallPlanPane.Decorator() {
 		@Override
@@ -137,8 +158,8 @@ public final class CustomerDisplay {
 		planPane.contentPane().widthProperty().addListener(refit);
 		planPane.contentPane().heightProperty().addListener(refit);
 
-		// Hintergrund, Wappen und Stylesheet wie in allen Ansichten der App
-		scene = MainApp.createScene(contentLayout);
+		// Hintergrund, Wappen und Stylesheet wie in allen Ansichten der App, aber ohne den Hinweis auf offene Konflikte
+		scene = MainApp.createSceneWithoutConflictHint(contentLayout);
 		// Automatisch steht die Kartenübersicht im Hochformat unter dem Plan, sonst rechts; die Wahl im Menü "Anzeige" geht vor
 		scene.widthProperty().addListener(placementInvalidated);
 		scene.heightProperty().addListener(placementInvalidated);
@@ -339,6 +360,9 @@ public final class CustomerDisplay {
 		state.summaryPlacementProperty().addListener(placementInvalidated);
 		state.selectedBookings().addListener(selectionChanged);
 		ChangeTracker.events().addListener(dataChanged);
+		StoreEventRepository.getInstance().addListener(foreignEventChanges);
+		hallRepository.addListener(foreignHallChanges);
+		LockedSeats.addListener(lockedChanged);
 	}
 
 	private void detach() {
@@ -353,12 +377,34 @@ public final class CustomerDisplay {
 		state.summaryPlacementProperty().removeListener(placementInvalidated);
 		state.selectedBookings().removeListener(selectionChanged);
 		ChangeTracker.events().removeListener(dataChanged);
+		StoreEventRepository.getInstance().removeListener(foreignEventChanges);
+		hallRepository.removeListener(foreignHallChanges);
+		LockedSeats.removeListener(lockedChanged);
 	}
 
 	/** Nur Änderungen am gezeigten Event zeichnen neu; die Änderungserkennung meldet alle verfolgten Events. */
 	private void onDataChanged(Event changed) {
 		if (changed.equals(state.eventProperty().get())) {
 			redraw.request();
+		}
+	}
+
+	/** Ob unter den fremd geänderten Einheiten eine zum gezeigten Event und zur gezeigten Vorstellung gehört. */
+	private boolean touchesShownPresentation(Set<UnitKey> units) {
+		return LiveViews.touches(units, state.eventProperty().get(), state.presentationProperty().get());
+	}
+
+	/** Ob unter den fremd geänderten Einheiten die Halle der gezeigten Vorstellung ist (sie wird über die ID gesucht). */
+	private boolean touchesShownHall(Set<UnitKey> units) {
+		Presentation presentation = state.presentationProperty().get();
+		return presentation != null && LiveViews.touchesHall(units, presentation.getHallId());
+	}
+
+	/** Zeichnet Titel und Plan neu, solange das Fenster angemeldet ist. */
+	private void redrawIfAttached() {
+		if (attached) {
+			refresh();
+			applyView();
 		}
 	}
 

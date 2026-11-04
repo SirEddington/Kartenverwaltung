@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -206,20 +205,13 @@ class StateRestorerTest {
 	}
 
 	@Test
-	void serializationIsStableForTheRealTestData() throws IOException {
+	void serializationRoundTripIsStable() throws IOException {
 		// Darauf beruht alles: Ein wiederhergestelltes Event muss wieder genau dieselben Bytes ergeben,
 		// sonst würde es nach dem Verwerfen sofort wieder als geändert gelten.
 		ObjectMapper mapper = JsonMapperFactory.create();
-		File[] files = new File("events_data").listFiles((dir, name) -> name.endsWith(".json"));
-		if (files == null || files.length == 0) {
-			return; // Testdaten nicht vorhanden (z. B. anderes Arbeitsverzeichnis)
-		}
-		for (File file : files) {
-			Event loaded = mapper.readValue(file, Event.class);
-			byte[] first = mapper.writeValueAsBytes(loaded);
-			byte[] second = mapper.writeValueAsBytes(mapper.readValue(first, Event.class));
-			assertArrayEquals(first, second, "Rundlauf nicht stabil: " + file.getName());
-		}
+		byte[] first = mapper.writeValueAsBytes(event());
+		byte[] second = mapper.writeValueAsBytes(mapper.readValue(first, Event.class));
+		assertArrayEquals(first, second, "Rundlauf nicht stabil");
 	}
 
 	@Test

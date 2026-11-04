@@ -60,7 +60,4 @@ module Kartenverwaltung {
     // Einstellungen (AppSettings für Jackson, SettingsStore für UI und Start)
     opens de.eltviller_carneval_verein.karten.settings to com.fasterxml.jackson.databind;
     exports de.eltviller_carneval_verein.karten.settings;
-
-    // Spiegelung der Datenordner in einen zweiten Ordner
-    exports de.eltviller_carneval_verein.karten.mirror;
 }

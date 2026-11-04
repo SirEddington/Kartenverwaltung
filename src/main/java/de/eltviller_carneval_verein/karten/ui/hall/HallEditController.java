@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.hall;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import de.eltviller_carneval_verein.karten.MainApp;
@@ -11,18 +12,27 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.PlanFreezer;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.Severity;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
@@ -50,6 +60,41 @@ public class HallEditController {
 	private boolean editMode = false;
 	// Verhindert, dass das Befüllen der Felder die Listener auslöst und zurückschreibt
 	private boolean updating = false;
+	// true, solange die Ansicht in einem gezeigten Fenster steht (nur dann ist die Halle bei EditingUnits gemeldet)
+	private boolean shown = false;
+
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
+	// Fremde Änderungen an der gezeigten Halle (nur im Anzeigemodus: im Bearbeitungsmodus hält EditingUnits sie zurück)
+	private final RepositoryListener<Hall> foreignChanges = new RepositoryListener<>() {
+		// Nicht mitten in der Benachrichtigung der Listener, sondern im nächsten Takt: Das Laden der neuen Ansicht meldet diese ab
+		private final RepositoryListener<Hall> reloading = LiveViews.onFxThread(
+				units -> !editMode && hall != null && LiveViews.touchesHall(units, hall.getId()), () -> {
+					if (!editMode && hall != null) {
+						reloadReplacedHall();
+					}
+				});
+
+		@Override
+		public void changedByOthers(Hall changed, ForeignBatch<Hall> batch) {
+			reloading.changedByOthers(changed, batch);
+		}
+
+		// "Meine Fassung übernehmen" ersetzt die Halle im Cache durch ein anderes Objekt
+		@Override
+		public void changedElsewhere(Hall changed, Set<UnitKey> units) {
+			reloading.changedElsewhere(changed, units);
+		}
+
+		// Keine Prüfung des Bearbeitungsmodus nötig: Im Bearbeitungsmodus ist die Halle in Bearbeitung, und das Repository stellt
+		// auch das Löschen zurück (wie jeden fremden Stand); es kommt erst, wenn der Modus oder die Ansicht verlassen ist
+		@Override
+		public void removedByOthers(Hall removed) {
+			if (hall != null && hall.getId().equals(removed.getId())) {
+				// Der Wechsel kann eine Rückfrage öffnen (andere ungespeicherte Hallen): nicht mitten in der Benachrichtigung
+				Platform.runLater(() -> leaveDeletedHall(removed));
+			}
+		}
+	};
 
 	@FXML
 	private Button btnToggleEdit;
@@ -111,6 +156,76 @@ public class HallEditController {
 			}
 		});
 		setupSeatingPlanSelection();
+
+		// Fremde Änderungen nur, solange die Ansicht zu sehen ist; im Bearbeitungsmodus ist die Halle dann in Bearbeitung
+		LiveViews.whileShown(btnSave, Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignChanges), new Registration(() -> {
+			shown = true;
+			reportEditing();
+		}, () -> {
+			shown = false;
+			reportEditing();
+		}));
+	}
+
+	/**
+	 * Ein anderer Rechner hat die Halle ersetzt (neues Objekt mit derselben ID; ein Speichern der alten würde abgelehnt): Die
+	 * Ansicht öffnet sich mit der Halle des Repositorys neu, ohne Rückfrage (im Anzeigemodus gibt es hier nichts Ungespeichertes)
+	 * und mit der gewählten Bestuhlung, wenn der Reiter "Bestuhlung" offen ist (sie zu übergeben öffnet ihn).
+	 */
+	private void reloadReplacedHall() {
+		Hall current = hallRepository.findById(hall.getId());
+		if (!LiveViews.isShown(btnSave) || editMode || current == null || current == hall) {
+			return;
+		}
+		SeatingPlan plan = shownPlan != null && hallPlanController.isSeatingTabActive() ? current.findSeatingPlan(shownPlan.getId()) : null;
+		MainApp.showHallEditViewWithChanges(current, null, plan, false);
+	}
+
+	/**
+	 * Die gezeigte Halle hat ein anderer Rechner gelöscht: zurück zur Hallenverwaltung, die einen Dialog mit dem Grund zeigt.
+	 * Bleibt die Ansicht stehen (Abbruch der Rückfrage zu anderen ungespeicherten Änderungen), zeigt sie die Halle nicht mehr.
+	 */
+	private void leaveDeletedHall(Hall removed) {
+		if (!LiveViews.isShown(btnSave) || hall == null || !hall.getId().equals(removed.getId())) {
+			return;
+		}
+		MainApp.showHallManagementView();
+		if (LiveViews.isShown(btnSave)) {
+			showNoHall();
+		}
+		// Die Hallenverwaltung hat keine Fußzeile: Die Meldung öffnet dort einen Dialog
+		StatusMessage.getInstance().show(Severity.WARNING, "„" + EntityLabels.nameOrPlaceholder(removed.getName()) + "“ wurde auf einem anderen Rechner gelöscht.");
+	}
+
+	/**
+	 * Die gezeigte Halle gibt es nicht mehr, die Ansicht bleibt aber stehen: Sie zeigt keine Halle und lässt sich nicht mehr
+	 * bearbeiten (Speichern lehnte das alte Objekt ohnehin ab). Weiter geht es mit "Zurück".
+	 */
+	private void showNoHall() {
+		setEditable(false);
+		hall = null;
+		reportEditing();
+		btnToggleEdit.setDisable(true);
+		updating = true;
+		try {
+			txtName.setText("");
+			txtDescription.setText("");
+			cmbSeatingPlan.getItems().clear();
+			cmbSeatingPlan.setValue(null);
+		} finally {
+			updating = false;
+		}
+		showPlan(null);
+		hallPlanController.setHall(null);
+	}
+
+	/**
+	 * Im Bearbeitungsmodus (und nur in einem gezeigten Fenster) ist die Halle in Bearbeitung: Ein fremder Stand für sie wird
+	 * zurückgestellt und kommt, sobald der Bearbeitungsmodus oder die Ansicht verlassen ist. Die Meldung geschieht erst, wenn die
+	 * Ansicht wirklich zu sehen ist, und endet auf jedem Weg hinaus, sonst bliebe die Halle für fremde Stände gesperrt.
+	 */
+	private void reportEditing() {
+		EditingUnits.getInstance().report(this, shown && editMode, hall);
 	}
 
 	/** Auswahl der Bestuhlung: Die Auswahl selbst ist keine Änderung an der Halle, Neu/Kopieren/Löschen/Name schon. */
@@ -287,7 +402,7 @@ public class HallEditController {
 			return;
 		}
 		SeatingPlan plan = shownPlan;
-		if (!ConfirmDialog.confirmDelete("Bestuhlung löschen", deletePlanMessage(plan, JsonEventRepository.getInstance().loadEvents()))) {
+		if (!ConfirmDialog.confirmDelete("Bestuhlung löschen", deletePlanMessage(plan, StoreEventRepository.getInstance().loadEvents()))) {
 			return;
 		}
 		// Solange die Bestuhlung noch da ist: "Ohne Platz" und Momentaufnahmen der betroffenen Events festhalten
@@ -346,7 +461,7 @@ public class HallEditController {
 	 * öffnet sich mit ihr neu, im Anzeigemodus.
 	 */
 	private void reloadRestoredData() {
-		Hall restored = hall == null ? null : JsonHallRepository.getInstance().findById(hall.getId());
+		Hall restored = hall == null ? null : StoreHallRepository.getInstance().findById(hall.getId());
 		if (restored == null) {
 			// Eine nie gespeicherte Halle ist mit dem Verwerfen verschwunden
 			MainApp.showHallManagementView();
@@ -367,6 +482,7 @@ public class HallEditController {
 		}
 		hallPlanController.setEditMode(editMode);
 		updatePlanControls();
+		reportEditing();
 	}
 
 	@FXML
@@ -376,7 +492,7 @@ public class HallEditController {
 		MainApp.showHallManagementView();
 		// Hat der Nutzer im Dialog "Abbrechen" gewählt, bleibt dieser Screen stehen: Bearbeitungsmodus zurückgeben,
 		// sonst wäre der Speichern-Button gesperrt, obwohl ungespeicherte Änderungen da sind
-		if (btnSave.getScene() != null && btnSave.getScene().getWindow() != null) {
+		if (LiveViews.isShown(btnSave)) {
 			setEditable(wasEditable);
 		}
 	}

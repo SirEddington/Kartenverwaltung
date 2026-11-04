@@ -6,14 +6,15 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 
 /**
- * Zählungen und Umsätze über Buchungen, in Cent und mit dem geltenden Preis jeder Buchung
- * ({@link Booking#getEffectivePrice()}). Eine Quelle für Event-Übersicht, Statistik und Kassenabgleich, damit alle für
- * dieselben Daten dieselben Zahlen zeigen. Buchungen ohne Platz zählen wie jede andere Buchung mit.
+ * Zählungen und Umsätze über Buchungen, in Cent: Einnahmen mit dem gezahlten Betrag ({@link Booking#getPaidCents()}),
+ * alles andere mit dem geltenden Preis jeder Buchung ({@link Booking#getEffectivePrice()}). Eine Quelle für
+ * Event-Übersicht, Statistik und Kassenabgleich, damit alle für dieselben Daten dieselben Zahlen zeigen. Buchungen ohne
+ * Platz zählen wie jede andere Buchung mit.
  *
  * @param paid           Anzahl bezahlter Buchungen
  * @param reserved       Anzahl reservierter Buchungen (mit Nachnamen, auch wenn bezahlt)
  * @param total          Anzahl aller Buchungen
- * @param revenueCents   Einnahmen: Summe der bezahlten Buchungen
+ * @param revenueCents   Einnahmen: Summe der gezahlten Beträge der bezahlten Buchungen
  * @param expectedCents  erwartet: Summe der reservierten Buchungen
  * @param potentialCents potenziell: Summe aller Buchungen
  */
@@ -34,7 +35,7 @@ public record BookingTotals(int paid, int reserved, int total, long revenueCents
 			}
 			if (booking.isPaid()) {
 				paid++;
-				revenue += price;
+				revenue += booking.getPaidCents();
 			}
 		}
 		return new BookingTotals(paid, reserved, bookings.size(), revenue, expected, potential);
@@ -45,9 +46,9 @@ public record BookingTotals(int paid, int reserved, int total, long revenueCents
 		return (int) bookings.stream().filter(booking -> booking.isPaid() && booking.getPaymentStatus() == status).count();
 	}
 
-	/** Summe der geltenden Preise der Buchungen, die mit genau dieser Zahlungsart bezahlt sind. */
+	/** Summe der gezahlten Beträge der Buchungen, die mit genau dieser Zahlungsart bezahlt sind. */
 	public static long paidCents(Collection<Booking> bookings, PaymentStatus status) {
-		return bookings.stream().filter(booking -> booking.isPaid() && booking.getPaymentStatus() == status).mapToLong(Booking::getEffectivePrice).sum();
+		return bookings.stream().filter(booking -> booking.isPaid() && booking.getPaymentStatus() == status).mapToLong(Booking::getPaidCents).sum();
 	}
 
 	/** "bezahlt / reserviert / gesamt", z. B. "2 / 3 / 4". */

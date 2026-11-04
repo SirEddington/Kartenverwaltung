@@ -67,11 +67,12 @@
     <Separator />
 
     <!-- UNTERER BEREICH: Identischer Footer -->
+    <!-- Wie oben behalten die Knöpfe ihre volle Breite (minWidth -Infinity); eine lange Meldung wird gekürzt -->
     <HBox spacing="10.0" alignment="CENTER_RIGHT">
         <!-- Beschriftungen des Saalplans; immer aktiv, auch vor der Saalansicht (befüllt der Controller) -->
-        <MenuButton fx:id="menuDisplay" text="Anzeige" styleClass="button-secondary" />
+        <MenuButton fx:id="menuDisplay" text="Anzeige" styleClass="button-secondary" minWidth="-Infinity" />
         <StatusLabel />
         <Region HBox.hgrow="ALWAYS" />
-        <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" />
+        <Button fx:id="btnSave" styleClass="button-primary" text="Speichern" prefWidth="100.0" onAction="#handleSave" minWidth="-Infinity" />
     </HBox>
 </VBox>

@@ -109,9 +109,10 @@ public final class BookingSync {
 	}
 
 	/**
-	 * Ordnet die Buchung dem Sitz zu (zum Beispiel eine Buchung ohne Platz). Hat die bisherige Buchung des Sitzes
-	 * Daten, passiert nichts und das Ergebnis ist {@code false}; sonst wird diese leere Buchung entfernt und
-	 * {@code booking} bekommt die Momentaufnahme des Sitzes und {@code unassigned = false}.
+	 * Ordnet die Buchung dem Sitz zu (zum Beispiel eine Buchung ohne Platz). Ist die bisherige Buchung des Sitzes
+	 * reserviert oder bezahlt, passiert nichts und das Ergebnis ist {@code false}; sonst wird sie entfernt, samt Resten
+	 * wie einem alten Kommentar ({@link Booking#hasLeftovers()}, KARV-121), und {@code booking} bekommt die
+	 * Momentaufnahme des Sitzes und {@code unassigned = false}.
 	 *
 	 * @return {@code true}, wenn die Buchung dem Sitz zugeordnet wurde
 	 */
@@ -122,7 +123,7 @@ public final class BookingSync {
 		List<Booking> others = new ArrayList<>();
 		for (Booking other : p.getBookings()) {
 			if (other != booking && seat.getId().equals(other.getSeatId())) {
-				if (other.hasData()) {
+				if (other.isTaken()) {
 					return false;
 				}
 				others.add(other);
@@ -132,6 +133,21 @@ public final class BookingSync {
 		booking.takeSnapshot(seat.getParent(), seat);
 		booking.setUnassigned(false);
 		return true;
+	}
+
+	/**
+	 * Entfernt die Buchung aus ihrer Vorstellung, wenn sie {@link Booking#isUnassigned() ohne Platz} ist und keine Daten
+	 * mehr trägt, nach derselben Regel wie Schritt 3 des Abgleichs: Sie ist storniert, etwa nachdem ihr Name in der Tabelle
+	 * geleert wurde. Eine leere Buchung auf einem Sitz bleibt, sie ist der Platzhalter des Sitzes.
+	 *
+	 * @return {@code true}, wenn die Buchung entfernt wurde
+	 */
+	public static boolean removeIfCancelled(Booking booking) {
+		Presentation p = booking.getParent();
+		if (p == null || p.getBookings() == null || !booking.isUnassigned() || booking.hasData()) {
+			return false;
+		}
+		return p.getBookings().removeIf(other -> other == booking);
 	}
 
 	/** Abgleich ohne Bestuhlung: leere Buchungen entfernen, Buchungen mit Daten ohne Platz behalten. */
@@ -262,14 +278,14 @@ public final class BookingSync {
 		return null;
 	}
 
-	/** Schlüssel eines Sitzes aus Reihenbuchstabe, Tisch- und Sitznummer. */
-	private static String key(Seat seat) {
+	/** Schlüssel eines Sitzes aus Reihenbuchstabe, Tisch- und Sitznummer (Schritt 2 des Abgleichs). */
+	public static String key(Seat seat) {
 		Table table = seat.getParent();
 		return key(table.getRowLabel(), table.getTableNumber(), seat.getSeatNumber());
 	}
 
-	/** Schlüssel der Momentaufnahme einer Buchung. */
-	private static String key(Booking booking) {
+	/** Schlüssel der Momentaufnahme einer Buchung; trifft er den Schlüssel eines Sitzes, setzt Schritt 2 sie dorthin. */
+	public static String key(Booking booking) {
 		return key(booking.getRowLabel(), booking.getTableNumber(), booking.getSeatNumber());
 	}
 

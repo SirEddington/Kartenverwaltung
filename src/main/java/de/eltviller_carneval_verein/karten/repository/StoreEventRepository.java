@@ -1,0 +1,1692 @@
+package de.eltviller_carneval_verein.karten.repository;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingSync;
+import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
+import de.eltviller_carneval_verein.karten.store.ChainStep;
+import de.eltviller_carneval_verein.karten.store.ConflictInput;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
+import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.UnitState;
+import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.store.Version;
+import de.eltviller_carneval_verein.karten.store.VersionId;
+
+/**
+ * Das Repository der Events auf dem Versionsspeicher. Beim Speichern wird das Event in Kopf, Vorstellungen und Buchungen
+ * zerlegt und nur geschrieben, was sich gegenüber dem geladenen Stand geändert hat (siehe {@link UnitBaseline}).
+ */
+public class StoreEventRepository implements EventRepository {
+
+	private static final Logger LOG = Logger.getLogger(StoreEventRepository.class.getName());
+
+	/** Zum Neuzusammensetzen eines Events: der Zustand wird serialisiert und für jede Kopie neu gelesen. */
+	private static final ObjectMapper MAPPER = JsonMapperFactory.create();
+
+	private static StoreEventRepository instance;
+
+	private final SyncService sync;
+	private final UnitBaseline baseline;
+
+	// Im-Speicher-Cache der Events. null bedeutet "noch nicht aus dem Versionsspeicher geladen".
+	// Alle Controller bekommen über loadEvents() dieselben Event-Objektreferenzen,
+	// damit ungespeicherte Änderungen eines Controllers auch für andere sichtbar sind.
+	private List<Event> cachedEvents;
+
+	// Warnungen aus dem letzten Ladevorgang (unlesbare Einheiten). Das Repository kennt keine UI,
+	// daher werden sie hier nur gesammelt - anzeigen muss die aufrufende Schicht (siehe getAndClearLoadWarnings()).
+	private final List<String> loadWarnings = new ArrayList<>();
+
+	// Die beim Laden gesperrten Einheiten mit ihrem Zustand (siehe getAndClearLockedAtLoad()).
+	private final Map<UnitKey, UnitState.Status> lockedAtLoad = new LinkedHashMap<>();
+
+	private final RepositoryListeners<Event> listeners = new RepositoryListeners<>();
+
+	/**
+	 * Die fremden Stände, die noch nicht eingearbeitet sind; {@link #applyForeign} prüft sie bei jedem Aufruf erneut.
+	 * Zurückgestellt (mit Hinweis) sind die Stände von Einheiten, die der Nutzer ungespeichert geändert hat oder bearbeitet.
+	 * Still wartend sind vor allem Buchungen, bis ihr Platz im Modell da ist, also solange sie nicht
+	 * {@linkplain EventMerge#placeable platzierbar} sind: Sie passen nicht zur Bestuhlung der Vorstellung im Modell, ihre
+	 * Vorstellung fehlt im Modell, oder die Vorstellung im Modell weicht von ihrem Stand im Index ab (der Hallen- bzw.
+	 * Bestuhlungswechsel oder das Löschen ist zurückgestellt oder eine Gabelung). Meist kommt nur die Halle oder Vorstellung
+	 * später an; vom Abgleich umgesetzt, überschriebe das nächste Speichern den fremden Stand. Eine wartende Einheit hat
+	 * keinen Vergleichsstand, bis sie eingearbeitet ist: Der Nutzer hat ihren Stand nie gesehen, und sein Verkauf auf
+	 * demselben Platz tritt als Gabelung gegen sie an. Das gilt auch nach einem Neustart ({@link #readEventsFromStore}).
+	 * Außerdem die Einheiten eines Events, bei dem die Entscheidung scheiterte.
+	 */
+	private final ForeignBacklog backlog = new ForeignBacklog();
+
+	/**
+	 * Inhalte im Modell, die nicht der Nutzer, sondern das Einarbeiten erzeugt hat: Wechselt eine fremde Vorstellung Halle
+	 * oder Bestuhlung, setzt der Abgleich ihre Buchungen auf die neuen Sitze, bevor deren Einheiten eintreffen. Solange das
+	 * Modell genau diesen Inhalt hat, gilt die Einheit nicht als lokal verändert (fehlt er, hat der Nutzer die Buchung
+	 * storniert); der Wert {@code null} heißt, das Einarbeiten hat sie aus dem Modell genommen. Ein Eintrag gilt, bis sich
+	 * der Inhalt des Vergleichsstands der Einheit ändert; eine neue Version mit gleichem Inhalt
+	 * ({@link ForeignDecision#SAME}) lässt ihn stehen, ebenso eine fremde Löschung (siehe {@link #adopt}): Ein Storno des
+	 * Nutzers bleibt so bis zum Speichern gemerkt.
+	 */
+	private final Map<UnitKey, ObjectNode> derived = new HashMap<>();
+
+	/**
+	 * Die IDs der Events, die ein fremder gelöschter oder unlesbarer Kopf aus dem Cache genommen hat. Hält eine Ansicht ein
+	 * solches Event noch, lehnt {@link #saveEvent} es ab: Es schriebe seinen alten Stand über die fremden Stände (entfernt
+	 * wird ein Event nur, wenn es sauber und nicht in Bearbeitung ist, und die Ansicht verlässt es). Kommt das Event wieder in
+	 * den Cache, gilt das nicht mehr; das Wiederherstellen schreibt über {@link #write} und ist davon nicht betroffen.
+	 */
+	private final Set<String> removedByOthers = new HashSet<>();
+
+	/** Ob für das Modellobjekt einer Einheit gerade eine Eingabe offen ist (siehe {@link #setEditingCheck}). */
+	private Predicate<Object> inEditing = model -> false;
+
+	/** Die Halle zur ID für den Abgleich der Buchungen fremder Stände (siehe {@link #setHallLookup}). */
+	private Function<String, Hall> hallLookup = hallId -> null;
+
+	/**
+	 * Ob die Halle zur ID im Modell aktuell ist, also nicht dem Index hinterherhinkt (siehe {@link #setHallCurrent}). Nur
+	 * dann gilt der Sitz einer fremden Buchung, den die Bestuhlung nicht hat, als endgültig fehlend.
+	 */
+	private Predicate<String> hallCurrent = hallId -> false;
+
+	/**
+	 * Liefert die einzige Instanz des Repositorys. Alle Controller sollen sich
+	 * darüber die Instanz holen, statt selbst eine eigene zu erzeugen, damit
+	 * nicht an mehreren Stellen unabhängig voneinander geladen wird.
+	 */
+	public static synchronized StoreEventRepository getInstance() {
+		if (instance == null) {
+			instance = new StoreEventRepository(SyncService.getInstance());
+		}
+		return instance;
+	}
+
+	/**
+	 * Paketsichtbar statt privat, damit Tests direkt einen Versionsspeicher in einem temporären Verzeichnis
+	 * injizieren können, ohne den Produktions-Singleton anzufassen.
+	 */
+	StoreEventRepository(SyncService sync) {
+		this.sync = sync;
+		this.baseline = new UnitBaseline(sync);
+	}
+
+	@Override
+	public List<Event> loadEvents() {
+		ensureLoaded();
+		// Kopie der Liste zurückgeben, damit niemand von außen den Cache selbst
+		// verändern kann (add/remove) - die enthaltenen Event-Objekte sind aber
+		// bewusst dieselben Referenzen wie im Cache.
+		return new ArrayList<>(cachedEvents);
+	}
+
+	/**
+	 * Verwirft den Cache und lädt alle Events zwangsweise neu aus dem Versionsspeicher.
+	 * Ungespeicherte Änderungen an den bisherigen Event-Objekten gehen dabei verloren.
+	 */
+	public List<Event> reloadEvents() {
+		cachedEvents = readEventsFromStore();
+		return new ArrayList<>(cachedEvents);
+	}
+
+	/**
+	 * Warnungen aus dem letzten Ladevorgang (unlesbare Einheiten; gesperrte nennt {@link #getAndClearLockedAtLoad()}).
+	 * Leert die Liste beim Abholen, damit dieselbe Warnung nicht mehrfach angezeigt wird.
+	 * Anzeigen (z.B. per Alert) ist Sache der aufrufenden UI-Schicht.
+	 */
+	public synchronized List<String> getAndClearLoadWarnings() {
+		List<String> warnings = new ArrayList<>(loadWarnings);
+		loadWarnings.clear();
+		return warnings;
+	}
+
+	/**
+	 * Die Einheiten, die der letzte Ladevorgang gesperrt vorfand (beschädigt oder neueres Format), mit ihrem Zustand. Sie
+	 * stehen nicht mehr als Text in {@link #getAndClearLoadWarnings()}. Leert die Map beim Abholen; wie die Texte zu
+	 * zeigen sind, entscheidet die aufrufende UI-Schicht.
+	 */
+	public synchronized Map<UnitKey, UnitState.Status> getAndClearLockedAtLoad() {
+		Map<UnitKey, UnitState.Status> locked = new LinkedHashMap<>(lockedAtLoad);
+		lockedAtLoad.clear();
+		return locked;
+	}
+
+	private void ensureLoaded() {
+		if (cachedEvents == null) {
+			cachedEvents = readEventsFromStore();
+		}
+	}
+
+	private List<Event> readEventsFromStore() {
+		if (!sync.isStarted()) {
+			throw new IllegalStateException("Der Versionsspeicher wurde noch nicht gestartet.");
+		}
+		List<UnitSnapshot> snapshots = sync.snapshots().values().stream()
+				.filter(snapshot -> snapshot.unit().type() != UnitType.HALL).toList();
+		// Buchungen, die nicht platzierbar sind, bleiben auch nach einem Neustart draußen und warten (wie bei applyForeign);
+		// "Halle aktuell" einmal je Halle, nicht je Buchung
+		List<UnitSnapshot> waiting = new ArrayList<>();
+		Assembly<Event> assembly = EventMerge.assembleLoaded(snapshots, hallLookup, frozenHallCurrent(), waiting);
+		baseline.reset(snapshots, assembly.shown());
+		derived.clear();
+		removedByOthers.clear();
+		waiting.forEach(snapshot -> holdUnplaced(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
+		addLoadWarnings(assembly.warnings(), assembly.locked());
+		return new ArrayList<>(assembly.items());
+	}
+
+	private synchronized void addLoadWarnings(List<String> warnings, Map<UnitKey, UnitState.Status> locked) {
+		loadWarnings.addAll(warnings);
+		lockedAtLoad.putAll(locked);
+	}
+
+	@Override
+	public void saveEvents(List<Event> events) {
+		for (Event event : events) {
+			saveEvent(event);
+		}
+	}
+
+	@Override
+	public void saveEvent(Event event) {
+		if (event == null) {
+			throw new IllegalArgumentException("Das Event-Objekt darf nicht null sein.");
+		}
+
+		if (event.getName() == null || event.getName().isBlank()) {
+			throw new IllegalArgumentException("Event-Name darf nicht leer oder null sein.");
+		}
+
+		// Ohne geladenen Vergleichsstand würde ein vorhandenes Event wie ein neues geschrieben
+		ensureLoaded();
+		// Ein fremder Stand hat das Objekt im Cache ersetzt oder gelöscht: Das alte zu speichern überschriebe ihn
+		requireCurrent(event);
+		write(event);
+	}
+
+	/** Lehnt ein Event ab, das nicht das im Cache ist, aber dessen Platz einnimmt, oder das ein fremder Stand gelöscht hat. */
+	private void requireCurrent(Event event) {
+		Event cached = cachedEvent(event.getId());
+		if ((cached != null && cached != event) || (cached == null && removedByOthers.contains(event.getId()))) {
+			throw LockedUnitException.replacedMeanwhile(event.getName());
+		}
+	}
+
+	/** Schreibt das Event, ohne zu prüfen, ob es das Objekt im Cache ist (das Wiederherstellen setzt den Cache selbst). */
+	private void write(Event event) {
+		baseline.save(event.getId(), event.getName(), UnitMapper.decompose(event));
+		forgetDerived(event.getId());
+
+		// Cache aktualisieren, falls das Event dort noch nicht enthalten ist
+		// (z.B. ein neu erstelltes Event)
+		if (!cachedEvents.contains(event)) {
+			cachedEvents.add(event);
+		}
+
+		listeners.notifySaved(event);
+	}
+
+	/**
+	 * Alle Events, die dieses Repository kennt, auch die gelöschten (zum Wiederherstellen), nach Name sortiert. Ein
+	 * gelöschtes Event trägt den Namen aus seiner letzten nicht gelöschten Version, sonst seine ID.
+	 */
+	public List<KnownEntity> knownEvents() {
+		ensureLoaded();
+		return RestorePlanner.knownEntities(sync, baseline.heads(UnitType.EVENT));
+	}
+
+	/**
+	 * Die Speicherstände des Events (Kopf, Vorstellungen, Buchungen), neueste zuerst. Sie entstehen aus den Ketten im
+	 * Start-Index, ohne eine Versionsdatei zu lesen.
+	 */
+	public List<SavePoint> savePoints(String eventId) throws IOException {
+		return RestorePlanner.savePoints(sync.chains(sync.eventUnits(eventId)).values());
+	}
+
+	/**
+	 * Stellt das Event auf den Speicherstand zurück. Ablauf: Aus den frisch gelesenen Einheiten wird der Zielstand zusammengesetzt und mit
+	 * {@code adjust} angepasst (liefert Hinweise für den Nutzer); wird er abgelehnt, ist nichts geschehen. Dann werden die
+	 * frisch gelesenen Einheiten Vergleichsstand und angezeigter Stand (Änderungen von anderer Seite seit dem Laden gelten
+	 * damit als Stand, den es zurückzusetzen gilt, nicht als unbekannt) und ein sichtbares Event ersetzt das im Cache. Zuletzt
+	 * wird der Zielstand wie jedes Event gespeichert: Die Unterschiede werden neue Versionen mit gemeinsamer neuer {@code saveId} auf dem aktuellen
+	 * Ende der Ketten. Das Ergebnis ersetzt das Event im Cache.
+	 * <p>
+	 * Scheitert das Speichern, bleibt im Cache der frisch gelesene Stand, passend zum Vergleichsstand. Wird das
+	 * Wiederherstellen abgelehnt, bleiben Cache und Vergleichsstand unberührt.
+	 *
+	 * @throws LockedUnitException wenn eine Einheit des Events gesperrt ist oder noch auf eine Datei wartet, wenn das Event
+	 *                             zu diesem Speicherstand gelöscht war oder der Zielstand unlesbare Teile enthält; es
+	 *                             wurde nichts gespeichert
+	 * @throws RuntimeException    wenn das Schreiben scheitert
+	 */
+	public Restored<Event> restoreEvent(String eventId, SavePoint point, Function<Event, List<String>> adjust)
+			throws IOException {
+		return commitRestore(prepareRestoreEvent(eventId, point), adjust);
+	}
+
+	/**
+	 * Der erste Schritt des Wiederherstellens, geeignet für einen Hintergrund-Thread: liest die Einheiten des Events frisch,
+	 * prüft, dass keine gesperrt ist und keine auf eine Datei wartet, und setzt den Zielstand zusammen. Berührt weder Cache
+	 * noch Vergleichsstand noch Listener und schreibt nichts. Den Änderungszähler des Vergleichsstands liest es zuerst, damit
+	 * {@link #commitRestore} jede Änderung seither bemerkt.
+	 *
+	 * @throws LockedUnitException wie {@link #restoreEvent}; es wurde nichts verändert
+	 */
+	public RestorePlan<Event> prepareRestoreEvent(String eventId, SavePoint point) throws IOException {
+		long changes = baseline.changes(eventId);
+		List<UnitState> states = statesOf(eventId);
+		RestorePlanner.requireRestorable(states);
+		return new RestorePlan<>(eventId, states, targetOf(states, point), changes);
+	}
+
+	/**
+	 * Der zweite Schritt, auf dem Oberflächen-Thread: Hat sich der Vergleichsstand des Events seit der Vorbereitung
+	 * geändert (etwa durch Speichern), wird abgelehnt. Sonst wird der Zielstand mit {@code adjust} angepasst, die
+	 * vorbereiteten Einheiten werden Vergleichsstand und angezeigter Stand und der Zielstand wird wie jedes Event
+	 * gespeichert; Einzelheiten und Fehlerverhalten wie bei {@link #restoreEvent}.
+	 *
+	 * @throws LockedUnitException wenn sich das Event seit der Vorbereitung geändert hat; es wurde nichts geschrieben
+	 */
+	public Restored<Event> commitRestore(RestorePlan<Event> plan, Function<Event, List<String>> adjust) {
+		if (baseline.changes(plan.ownerId()) != plan.changes()) {
+			throw new LockedUnitException("Das Event wurde inzwischen geändert. Bitte erneut wiederherstellen.");
+		}
+		ensureLoaded();
+		Event target = plan.target();
+		List<String> notes = adjust.apply(target);
+		refreshFromStore(plan.ownerId(), plan.states(), UnitMapper.payloads(target).keySet());
+		write(target);
+		replaceCachedEvent(target);
+		return new Restored<>(target, notes);
+	}
+
+	/** Der Änderungszähler des Vergleichsstands des Events (nur für Tests). */
+	long baselineChanges(String eventId) {
+		return baseline.changes(eventId);
+	}
+
+	/**
+	 * Das Event, wie es zum Speicherstand war, als neues Objekt; auch für ein gelöschtes Event. Gespeichert wird nichts
+	 * und der Cache bleibt unberührt (nur für Tests; das Wiederherstellen ist {@link #restoreEvent}).
+	 */
+	Event eventAt(String eventId, SavePoint point) throws IOException {
+		List<UnitState> states = statesOf(eventId);
+		RestorePlanner.requireRestorable(states);
+		return targetOf(states, point);
+	}
+
+	private Event targetOf(List<UnitState> states, SavePoint point) {
+		return RestorePlanner.single(UnitMapper.assembleEvents(RestorePlanner.targetsAt(states, point.at()).values()),
+				"Zu diesem Speicherstand war das Event gelöscht.");
+	}
+
+	/**
+	 * Übernimmt den frisch gelesenen Stand des Events als Vergleichsstand und, wenn es sichtbar ist, in den Cache. Lesbare
+	 * Einheiten, die weder angezeigt werden noch im Zielstand stehen (etwa eine Vorstellung, die ankam, während der Kopf
+	 * unlesbar war), kommen nicht in den Vergleichsstand: Sie gehören nicht zum Modell und warten in der Warteliste auf ihren
+	 * Platz. Das gilt nicht unter einem gelöschten Kopf oder einer gelöschten Vorstellung: Dort gehören die lesbaren
+	 * Einheiten mit dem Wiederbeleben zum Objekt und werden, fehlen sie darin, gelöscht (siehe {@link UnitBaseline#save}).
+	 * Eine unlesbare, nicht gelöschte Einheit des Zielstands gilt als angezeigt: Der Zielstand ersetzt sie, als Nachfolger
+	 * ihres unlesbaren Stands (sie wird nicht gelöscht).
+	 */
+	private void refreshFromStore(String eventId, List<UnitState> states, Set<UnitKey> targetUnits) {
+		List<UnitSnapshot> snapshots = states.stream().map(UnitSnapshot::of).toList();
+		Assembly<Event> current = UnitMapper.assembleEvents(snapshots);
+		Map<UnitKey, UnitSnapshot> byUnit = new HashMap<>();
+		snapshots.forEach(snapshot -> byUnit.put(snapshot.unit(), snapshot));
+		Set<UnitKey> shownNow = new HashSet<>(current.shown());
+		Set<UnitKey> notPlaced = new HashSet<>();
+		for (UnitSnapshot snapshot : snapshots) {
+			UnitKey unit = snapshot.unit();
+			boolean readable = UnitMapper.isReadable(snapshot);
+			if (targetUnits.contains(unit)) {
+				if (!readable && snapshot.isLive()) {
+					shownNow.add(unit);
+				}
+			} else if (readable && !shownNow.contains(unit) && !belowDeleted(unit, byUnit)) {
+				notPlaced.add(unit);
+			}
+		}
+		baseline.resetOwner(eventId, snapshots, shownNow, notPlaced);
+		notPlaced.forEach(unit -> backlog.hold(unit, "sie gehört nicht zum wiederhergestellten Stand und hat noch keinen Platz"));
+		forgetDerived(eventId);
+		removedByOthers.remove(eventId);
+		if (!current.items().isEmpty()) {
+			Event fresh = current.items().get(0);
+			int index = cachedEvents.indexOf(fresh);
+			if (index >= 0) {
+				cachedEvents.set(index, fresh);
+			} else {
+				cachedEvents.add(fresh);
+			}
+		}
+	}
+
+	/** Ob der Kopf oder die Vorstellung der Einheit gelöscht ist. */
+	private static boolean belowDeleted(UnitKey unit, Map<UnitKey, UnitSnapshot> byUnit) {
+		return unit.ancestors().stream().map(byUnit::get).anyMatch(parent -> parent != null && parent.deleted());
+	}
+
+	private List<UnitState> statesOf(String eventId) throws IOException {
+		List<UnitState> states = new ArrayList<>();
+		for (UnitKey unit : sync.eventUnits(eventId)) {
+			states.add(sync.unitState(unit));
+		}
+		return states;
+	}
+
+	/** Meldet einen Listener an, der nach jedem Speichern und Löschen eines Events benachrichtigt wird. */
+	public void addListener(RepositoryListener<Event> listener) {
+		listeners.add(listener);
+	}
+
+	/** Meldet einen Listener ab (etwa wenn eine Ansicht verlassen wird). */
+	public void removeListener(RepositoryListener<Event> listener) {
+		listeners.remove(listener);
+	}
+
+	/**
+	 * Sagt den Listenern, dass eine Stelle außerhalb der Ansichten das Event geändert und gespeichert hat
+	 * ({@link RepositoryListener#changedElsewhere}).
+	 */
+	public void announceChange(Event event, Set<UnitKey> units) {
+		listeners.notifyChangedElsewhere(event, Set.copyOf(units));
+	}
+
+	/**
+	 * Ersetzt das Event mit derselben ID im Cache durch ein anderes Objekt, z. B. nach dem Wiederherstellen eines
+	 * früheren Zustands. Der Versionsspeicher bleibt unberührt, und es wird kein Listener benachrichtigt. Ist das Event
+	 * nicht im Cache (noch nie gespeichert), passiert nichts.
+	 */
+	public void replaceCachedEvent(Event replacement) {
+		if (cachedEvents == null) {
+			return;
+		}
+		int index = cachedEvents.indexOf(replacement);
+		if (index >= 0) {
+			cachedEvents.set(index, replacement);
+		}
+	}
+
+	// Hilfen für den Konflikt-Dialog -->
+
+	/** Das Event mit dieser ID im Cache; {@code null}, wenn es keines gibt (nie gespeichert, gelöscht oder fremd entfernt). */
+	public Event findEvent(String eventId) {
+		ensureLoaded();
+		return cachedEvent(eventId);
+	}
+
+	/**
+	 * Das Objekt im Modell zur Einheit (Event, Presentation oder Booking), sonst {@code null}. Bei einer Buchung auf einem
+	 * Sitz ist es auch der leere Platzhalter, wenn der Sitz frei ist (siehe {@link Booking#hasData()}).
+	 */
+	public Object modelObject(UnitKey unit) {
+		Event event = unit.type() == UnitType.HALL ? null : findEvent(unit.eventId());
+		return event == null ? null : EventMerge.modelObject(event, unit);
+	}
+
+	/**
+	 * Die Einheit, in die das Speichern die Buchung der Vorstellung schreibt: ihr Sitz, wenn sie einen hat und nicht "ohne
+	 * Platz" ist, sonst {@code _<ID>}.
+	 */
+	public UnitKey unitOf(String eventId, String presentationId, Booking booking) {
+		return UnitMapper.bookingKey(eventId, presentationId, booking);
+	}
+
+	/**
+	 * Der Inhalt, den das Modell für die Einheit hätte, wenn es jetzt gespeichert würde; {@code null}, wenn es sie im Modell
+	 * nicht gibt oder sie leer ist (eine Buchung ohne Daten wird nie geschrieben).
+	 *
+	 * @throws IllegalStateException wenn sich das Event nicht zerlegen lässt (zwei Buchungen auf einem Platz)
+	 */
+	public ObjectNode payloadOf(UnitKey unit) {
+		Map<UnitKey, ObjectNode> payloads = unit.type() == UnitType.HALL ? null : payloadsOf(unit.eventId());
+		return payloads == null ? null : payloads.get(unit);
+	}
+
+	/**
+	 * Die Inhalte aller Einheiten des Events, wie {@link #payloadOf} sie einzeln liefert (zum Merken, wenn viele Einheiten
+	 * eines Events gefragt sind); {@code null}, wenn das Event nicht im Cache ist.
+	 *
+	 * @throws IllegalStateException wenn sich das Event nicht zerlegen lässt (zwei Buchungen auf einem Platz)
+	 */
+	public Map<UnitKey, ObjectNode> payloadsOf(String eventId) {
+		Event event = findEvent(eventId);
+		return event == null ? null : UnitMapper.payloads(event);
+	}
+
+	/**
+	 * Setzt die genannten Felder der Einheit im Modell und lässt alle anderen, wie sie sind. Ändert nur das Modell; es wird
+	 * nichts gespeichert und kein Listener benachrichtigt. Wechselt eine Vorstellung dabei Halle oder Bestuhlung, gleicht
+	 * {@link BookingSync} ihre Buchungen ab wie im Vorstellungs-Editor. Nur im JavaFX-Thread aufrufen (das Modell ist nicht
+	 * synchronisiert); der Aufrufer speichert danach oder setzt das Modell zurück.
+	 *
+	 * @param fields die Felder mit JSON-Feldnamen, wie {@link UnitMapper#normalize} sie schreibt
+	 * @throws IllegalStateException wenn die Einheit im Modell fehlt oder das Ergebnis sich nicht lesen lässt; das Modell ist
+	 *                               dann unverändert
+	 */
+	public void applyFields(UnitKey unit, ObjectNode fields) {
+		Object model = modelObject(unit);
+		if (model == null || unit.type() == UnitType.HALL) {
+			throw new IllegalStateException("Die Einheit " + unit.relativePath() + " ist im Modell nicht vorhanden.");
+		}
+		ObjectNode merged = UnitMapper.normalize(model);
+		merged.remove("presentations");
+		merged.remove("bookings");
+		fields.fields().forEachRemaining(field -> merged.set(field.getKey(), field.getValue().deepCopy()));
+		try {
+			switch (unit.type()) {
+			case BOOKING -> ((Booking) model).copyFrom(MAPPER.treeToValue(merged, Booking.class));
+			case EVENT -> ((Event) model).copyFrom(MAPPER.treeToValue(merged, Event.class));
+			case PRESENTATION -> {
+				Presentation presentation = (Presentation) model;
+				String hallId = presentation.getHallId();
+				String planId = presentation.getSeatingPlanId();
+				presentation.copyFrom(MAPPER.treeToValue(merged, Presentation.class));
+				if (!Objects.equals(hallId, presentation.getHallId())
+						|| !Objects.equals(planId, presentation.getSeatingPlanId())) {
+					BookingSync.sync(presentation, EventMerge.planOf(presentation, hallLookup));
+				}
+			}
+			case HALL -> throw new IllegalStateException("Eine Halle ist keine Einheit eines Events.");
+			}
+		} catch (JsonProcessingException e) {
+			throw new IllegalStateException("Der Inhalt von " + unit.relativePath() + " lässt sich nicht lesen: "
+					+ StoreMessages.describe(e), e);
+		}
+	}
+
+	/**
+	 * Wie {@link #applyFields}, für eine ganze Feldgruppe ({@link FieldGroups}): Felder der Gruppe, die {@code values} nicht
+	 * nennt, werden geleert, damit die Gruppe genau den Stand von {@code values} hat. Ein unbekannter Gruppenname gilt als
+	 * Name eines einzelnen Feldes. Nur im JavaFX-Thread aufrufen; der Aufrufer speichert danach oder setzt das Modell zurück.
+	 *
+	 * @param values die Gruppe als JSON-Ausschnitt, wie ihn der Konfliktvermerk trägt
+	 */
+	public void applyGroup(UnitKey unit, String group, ObjectNode values) {
+		Map<String, List<String>> groups = switch (unit.type()) {
+		case BOOKING -> FieldGroups.booking();
+		case PRESENTATION -> FieldGroups.presentation();
+		case EVENT -> FieldGroups.eventHead();
+		case HALL -> throw new IllegalArgumentException("Eine Halle hat keine Feldgruppen im Event.");
+		};
+		ObjectNode fields = values.deepCopy();
+		for (String field : groups.getOrDefault(group, List.of(group))) {
+			if (!fields.has(field)) {
+				fields.putNull(field);
+			}
+		}
+		applyFields(unit, fields);
+	}
+
+	/** Liest den Inhalt einer Buchungs-Version als neues Objekt; {@code null}, wenn er sich nicht lesen lässt. */
+	public Booking readBooking(ObjectNode payload) {
+		try {
+			return MAPPER.treeToValue(payload, Booking.class);
+		} catch (JsonProcessingException | RuntimeException e) {
+			LOG.warning("Der Inhalt einer Buchung lässt sich nicht lesen: " + StoreMessages.describe(e).lines().findFirst().orElse(""));
+			return null;
+		}
+	}
+
+	/**
+	 * Ob die Buchung mit dieser Kennung unter der Vorstellung lebt: als Buchung mit Daten im Modell oder als nicht gelöschte
+	 * Buchungs-Einheit der Vorstellung im Index (auf einem Sitz oder {@code _<ID>}). Eine nicht gelöschte Einheit der
+	 * Vorstellung, deren Inhalt sich nicht lesen lässt, zählt als möglicherweise lebende Buchung.
+	 */
+	public boolean bookingLives(String eventId, String presentationId, String bookingId) {
+		return bookingLives(eventId, presentationId, bookingId, () -> sync.eventSnapshots(eventId));
+	}
+
+	/**
+	 * Wie {@link #bookingLives(String, String, String)}; die Stände des Events im Index ({@link SyncService#eventSnapshots})
+	 * kommen von {@code eventSnapshots}, nur wenn das Modell die Buchung nicht schon trägt.
+	 */
+	public boolean bookingLives(String eventId, String presentationId, String bookingId,
+			Supplier<Map<UnitKey, UnitSnapshot>> eventSnapshots) {
+		Event event = findEvent(eventId);
+		Presentation presentation = event == null ? null : event.findPresentation(presentationId);
+		if (presentation != null && presentation.getBookings() != null) {
+			for (Booking booking : presentation.getBookings()) {
+				if (booking.hasData() && bookingId.equals(booking.getId())) {
+					return true;
+				}
+			}
+		}
+		for (UnitSnapshot snapshot : eventSnapshots.get().values()) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() != UnitType.BOOKING || !presentationId.equals(unit.presentationId()) || !snapshot.isLive()) {
+				continue;
+			}
+			// eine nicht gelöschte Einheit, deren Inhalt sich nicht lesen lässt, kann die Buchung tragen: sie gilt als lebend
+			if (bookingId.equals(ConflictInput.bookingIdOf(snapshot.payload())) || !UnitMapper.isReadable(snapshot)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// <-- Hilfen für den Konflikt-Dialog
+
+	@Override
+	public void deleteEvents(List<Event> events) {
+		for (Event event : events) {
+			deleteEvent(event);
+		}
+	}
+
+	/**
+	 * Löscht das Event: Nur sein Kopf bekommt eine Löschung, Vorstellungen und Buchungen bleiben liegen und sind
+	 * unsichtbar. Ein nie gespeichertes Event verlässt nur den Cache.
+	 *
+	 * @throws LockedUnitException wenn ein fremder Stand das Event ersetzt oder gelöscht hat (die Ansicht ist veraltet, wie beim
+	 *                             Speichern); es wurde nichts geschrieben
+	 */
+	@Override
+	public void deleteEvent(Event event) {
+		if (event == null) {
+			return;
+		}
+
+		ensureLoaded();
+		// Ein fremder Stand hat das Objekt im Cache ersetzt oder gelöscht: Das alte zu löschen träfe den fremden Stand
+		requireCurrent(event);
+		baseline.delete(event.getId(), UnitKey.event(event.getId()), event.getName());
+		forgetDerived(event.getId());
+
+		cachedEvents.remove(event);
+
+		listeners.notifyDeleted(event);
+	}
+
+	// Fremde Stände -->
+
+	/**
+	 * Wer entscheidet, ob für ein Modellobjekt (Event, Presentation oder Booking) gerade eine Eingabe offen ist, die noch
+	 * nicht im Modell steht. Ein fremder Stand dafür wird zurückgestellt. Vorgabe: nie.
+	 */
+	public void setEditingCheck(Predicate<Object> inEditing) {
+		this.inEditing = inEditing;
+	}
+
+	/**
+	 * Woher die Bestuhlung kommt, mit der die Buchungen fremd geänderter oder neuer Vorstellungen abgeglichen werden (in der
+	 * App die Hallen des Hallen-Repositorys). Vorgabe: keine Halle, wie eine nicht gefundene.
+	 */
+	public void setHallLookup(Function<String, Hall> hallLookup) {
+		this.hallLookup = hallLookup;
+	}
+
+	/**
+	 * Woher das Repository weiß, ob die Halle im Modell dem Index entspricht (in der App
+	 * {@code StoreHallRepository.isCurrent}). Fehlt der Sitz einer fremden Buchung in der Bestuhlung einer aktuellen Halle,
+	 * wartet die Buchung nicht, sondern wird übernommen und ohne Platz gestellt (siehe {@link EventMerge#placeable}).
+	 * Vorgabe: nie aktuell, die Buchung wartet dann wie bisher.
+	 */
+	public void setHallCurrent(Predicate<String> hallCurrent) {
+		this.hallCurrent = hallCurrent;
+	}
+
+	/**
+	 * Arbeitet die Stände ein, die andere Rechner für diese Einheiten geschrieben haben (Spec KARV-85, "Entscheidung je
+	 * Einheit", "Einarbeiten" und "Fehlerfälle"). Hallen werden übergangen; die zurückgestellten Einheiten früherer Aufrufe
+	 * werden jedes Mal mit geprüft. Je Einheit gilt {@link ForeignDecision}: Ein Nachfolger des Vergleichsstands (der steht
+	 * in der gültigen Kette oder ist in einer Zusammenführung aufgegangen) mit demselben Inhalt geht nur in den
+	 * Vergleichsstand, ohne Modell, Listener und Hinweis. Ein anderer Nachfolger wird eingearbeitet, außer der Nutzer hat
+	 * die Einheit ungespeichert geändert oder bearbeitet sie gerade (bei Löschung von Kopf oder Vorstellung und beim Wechsel
+	 * von Halle oder Bestuhlung zählt alles darunter); dann wird er zurückgestellt (still, wenn er eine eigene
+	 * Zusammenführung mit Vermerk für diesen Rechner ist), der Vergleichsstand bleibt. Eine Buchung, die im Modell noch
+	 * keinen Platz hat (Vorstellung fehlt im Modell oder weicht von ihrem Index-Stand ab, etwa weil ihr Hallenwechsel
+	 * zurückgestellt ist; Sitz fehlt in der Bestuhlung einer Halle, die noch nicht aktuell ist), wartet still ohne Hinweis,
+	 * ohne Vergleichsstand, und wird ebenfalls jedes Mal erneut geprüft. Fehlt ihr Sitz dagegen in der Bestuhlung einer
+	 * aktuellen Halle ({@link #setHallCurrent}) oder hat ihre Vorstellung keine Halle, fehlt er endgültig: Die Buchung wird
+	 * übernommen, der Abgleich stellt sie ohne Platz oder auf einen passenden Sitz, und verliert sie dabei ihren Sitz in
+	 * einer Halle, kommt ein Hinweis (KARV-117). Ob eine Halle aktuell ist, wird je Event einmal vor dem Einarbeiten
+	 * festgestellt und gilt für den ganzen Aufruf. Je Event werden Objekt im Cache und
+	 * Vergleichsstand in einem Schritt nachgeführt, danach erfahren es die Listener. Ist noch nichts geladen, passiert
+	 * nichts: Das erste Laden liest ohnehin den aktuellen Stand.
+	 * <p>
+	 * Nur auf dem Oberflächen-Thread aufrufen: Modell und Vergleichsstand sind nicht synchronisiert.
+	 *
+	 * @return alle danach zurückgestellten Stände und die Warnungen für den Nutzer
+	 */
+	public ForeignResult applyForeign(Collection<UnitKey> units) {
+		if (cachedEvents == null) {
+			return new ForeignResult(List.of(), List.of());
+		}
+		return backlog.run(units, unit -> unit.type() != UnitType.HALL, sync, new ForeignBacklog.Step() {
+			@Override
+			public void apply(List<UnitSnapshot> ofEvent, Map<UnitKey, List<ChainStep>> chains,
+					Map<UnitKey, Set<VersionId>> absorbed, List<String> warnings) {
+				applyForeign(ofEvent, chains, absorbed, warnings);
+			}
+
+			@Override
+			public void failed(String eventId, List<UnitSnapshot> ofEvent, RuntimeException e, List<String> warnings) {
+				StoreEventRepository.failed(eventId, e, warnings);
+				for (UnitSnapshot snapshot : ofEvent) {
+					if (!backlog.isDeferred(snapshot.unit())) {
+						backlog.hold(snapshot.unit(), "die Entscheidung ist gescheitert");
+					}
+				}
+			}
+		});
+	}
+
+	/** Versucht die zurückgestellten Stände erneut, etwa nach dem Speichern oder wenn eine Bearbeitung endet. */
+	public ForeignResult retryDeferred() {
+		return applyForeign(List.of());
+	}
+
+	/**
+	 * Die Einheiten aller Events im Cache, die der Nutzer ungespeichert geändert hat: Inhalt im Modell anders als im
+	 * Vergleichsstand, oder nur auf einer Seite vorhanden (im Vergleichsstand zählt nur eine angezeigte). Nicht dazu zählt,
+	 * was das Einarbeiten selbst im Modell umgesetzt hat (siehe {@link #derived}), solange es unverändert ist. Ausnahme: Hat
+	 * der Nutzer eine solche Buchung geändert, die das Einarbeiten versetzt hat (etwa auf {@code _<ID>}), zählt auch der
+	 * Wegfall am alten Platz: Das Speichern verschiebt die Buchung und löscht ihn. Fehlt eine Buchung, die das Einarbeiten
+	 * ins Modell gesetzt hat, zählt ihre Einheit, auch ohne Version: Der Nutzer hat sie storniert. Lässt sich ein Event
+	 * nicht zerlegen (zwei Buchungen auf einem Platz), zählen sein Kopf und alles Angezeigte.
+	 */
+	public Set<UnitKey> locallyChangedUnits() {
+		Set<UnitKey> changed = new HashSet<>();
+		if (cachedEvents != null) {
+			for (Event event : cachedEvents) {
+				LocalChanges changes = localChanges(event);
+				changed.addAll(changes.units());
+				if (changes.all()) {
+					changed.add(UnitKey.event(event.getId()));
+					changed.addAll(baseline.shownUnits(event.getId()));
+				}
+			}
+		}
+		return changed;
+	}
+
+	/** Der Stand der Einheit im Vergleichsstand (nur für Tests). */
+	UnitSnapshot knownUnit(UnitKey unit) {
+		return baseline.known(unit);
+	}
+
+	/**
+	 * Die lokal veränderten Einheiten eines Events; {@code all}, wenn es sich nicht zerlegen lässt (dann gilt jede Einheit
+	 * als verändert). {@code model} sind die Inhalte der Einheiten im Modell ({@code null} bei {@code all}). {@code moved}
+	 * sind die Buchungs-Einheiten im Modell, deren Inhalt vom Vergleichsstand abweicht oder die keinen haben (auch die vom
+	 * Abgleich abgeleiteten), je Buchungs-Kennung: Dort steht eine Buchung, die gegenüber dem gespeicherten Stand versetzt ist.
+	 * <p>
+	 * Eine angezeigte Einheit, die im Modell fehlt, gilt als verändert, außer das Einarbeiten hat sie herausgenommen
+	 * ({@link #derived} = {@code null}). Auch dann zählt sie, wenn der Nutzer eine Einheit mit derselben Buchungs-Kennung
+	 * geändert hat: Das Speichern verschiebt die Buchung und schreibt den Wegfall.
+	 * <p>
+	 * Eine Einheit, die das Einarbeiten mit Inhalt abgeleitet hat und die im Modell fehlt, gilt ebenfalls als verändert,
+	 * auch wenn sie weder bekannt noch angezeigt ist: Der Nutzer hat die Buchung storniert, bevor ihre Einheit eintraf
+	 * (KARV-119). Trifft sie mit genau diesem Stand ein, wird nur ihre Version übernommen ({@link #derivedAs}), und das
+	 * nächste Speichern löscht sie auf ihr; sonst setzte das Einarbeiten die Buchung wieder ins Modell. {@code cancelled}
+	 * sind die Kennungen dieser stornierten Buchungen (siehe {@link #cancelledBase}). Steht dieselbe Buchung im Modell
+	 * auf einer anderen Einheit, hat der Nutzer sie verschoben, nicht storniert (KARV-97): Ihre Kennung zählt nicht dazu.
+	 */
+	private record LocalChanges(Set<UnitKey> units, boolean all, Map<UnitKey, ObjectNode> model,
+			Map<String, List<UnitKey>> moved, Set<String> cancelled) {
+
+		boolean none() {
+			return !all && units.isEmpty();
+		}
+
+		/** Die versetzten Einheiten, die die Buchung mit dieser Kennung tragen, ohne {@code except}. */
+		List<UnitKey> movedCarriers(String bookingId, UnitKey except) {
+			return moved.getOrDefault(bookingId, List.of()).stream().filter(unit -> !unit.equals(except)).toList();
+		}
+	}
+
+	private LocalChanges localChanges(Event event) {
+		Map<UnitKey, ObjectNode> model;
+		try {
+			model = UnitMapper.payloads(event);
+		} catch (IllegalStateException e) {
+			return new LocalChanges(Set.of(), true, null, Map.of(), Set.of());
+		}
+		Set<UnitKey> changed = new HashSet<>();
+		Map<String, List<UnitKey>> moved = new HashMap<>();
+		// die Buchungs-Kennungen der Einheiten, die der Nutzer geändert hat (nicht der Abgleich)
+		Set<String> editedBookings = new HashSet<>();
+		// alle Buchungen mit Daten im Modell, je Vorstellung
+		Set<BookingIn> carried = new HashSet<>();
+		for (Map.Entry<UnitKey, ObjectNode> entry : model.entrySet()) {
+			UnitKey unit = entry.getKey();
+			UnitSnapshot known = baseline.known(unit);
+			boolean differs = known == null || known.deleted() || !baseline.isShown(unit)
+					|| !entry.getValue().equals(known.payload());
+			String carriedId = unit.type() == UnitType.BOOKING ? ConflictInput.bookingIdOf(entry.getValue()) : null;
+			if (carriedId != null) {
+				carried.add(new BookingIn(unit.presentationId(), carriedId));
+			}
+			String bookingId = differs ? carriedId : null;
+			if (bookingId != null) {
+				moved.computeIfAbsent(bookingId, id -> new ArrayList<>()).add(unit);
+			}
+			if (differs && !(derived.containsKey(unit) && entry.getValue().equals(derived.get(unit)))) {
+				changed.add(unit);
+				if (bookingId != null) {
+					editedBookings.add(bookingId);
+				}
+			}
+		}
+		for (UnitKey unit : baseline.shownUnits(event.getId())) {
+			if (!model.containsKey(unit) && (!(derived.containsKey(unit) && derived.get(unit) == null)
+					|| carriesEditedBooking(baseline.known(unit), editedBookings))) {
+				changed.add(unit);
+			}
+		}
+		// was das Einarbeiten ins Modell gesetzt hat und dort fehlt, hat der Nutzer entfernt: storniert, wenn die Buchung in
+		// ihrer Vorstellung nirgends mehr steht, sonst verschoben (das Speichern schreibt den Umzug)
+		Set<String> cancelled = new HashSet<>();
+		derived.forEach((unit, payload) -> {
+			if (payload != null && event.getId().equals(unit.eventId()) && !model.containsKey(unit)) {
+				changed.add(unit);
+				String bookingId = ConflictInput.bookingIdOf(payload);
+				if (bookingId != null && !carried.contains(new BookingIn(unit.presentationId(), bookingId))) {
+					cancelled.add(bookingId);
+				}
+			}
+		});
+		return new LocalChanges(changed, false, model, moved, cancelled);
+	}
+
+	/** Eine Buchung (Kennung) in einer Vorstellung. */
+	private record BookingIn(String presentationId, String bookingId) {
+	}
+
+	/**
+	 * Ob der Vergleichsstand einer im Modell fehlenden Einheit eine Buchung trägt, die der Nutzer an anderer Stelle geändert
+	 * hat. Dann ist der Wegfall nicht mehr nur der Abgleich: Die Buchung steht im Modell versetzt (etwa ohne Platz auf
+	 * {@code _<ID>}) und das nächste Speichern verschiebt sie, schreibt also auch diesen Wegfall.
+	 */
+	private static boolean carriesEditedBooking(UnitSnapshot known, Set<String> editedBookings) {
+		if (known == null || editedBookings.isEmpty()) {
+			return false;
+		}
+		String bookingId = ConflictInput.bookingIdOf(known.payload());
+		return bookingId != null && editedBookings.contains(bookingId);
+	}
+
+	/**
+	 * Ob das Modell schon den fremden Stand der Einheit hat: derselbe Inhalt, oder die Einheit fehlt im Modell und ist auch
+	 * fremd gelöscht bzw. ohne Version. Etwa nach einem Hallenwechsel, dessen Buchungen nach der Vorstellung eintreffen: Der
+	 * Abgleich hat sie schon so umgesetzt wie der andere Rechner. Dann gibt es nichts zurückzustellen; der Stand geht still
+	 * in den Vergleichsstand (das Einarbeiten ändert am Modell nichts).
+	 * <p>
+	 * Eine fremde Löschung, die eine Buchung träfe, die im Modell versetzt auf einer anderen Einheit steht (etwa vom Nutzer
+	 * ungespeichert verschoben, siehe {@link LocalChanges#moved}), ist keine Übereinstimmung: Die Buchung trägt dort ihre
+	 * Kennung aus {@code known}, dem Vergleichsstand der Einheit. Steht sie dort schon so im Vergleichsstand, ist sie nicht
+	 * versetzt: Das Modell hat dann genau den fremden Stand.
+	 */
+	private static boolean converged(LocalChanges changes, UnitSnapshot known, UnitSnapshot current) {
+		if (changes.model() == null) {
+			return false;
+		}
+		ObjectNode mine = changes.model().get(current.unit());
+		if (mine == null) {
+			if (!UnitMapper.isAbsent(current)) {
+				return false;
+			}
+			String movedId = known == null ? null : ConflictInput.bookingIdOf(known.payload());
+			return movedId == null || changes.movedCarriers(movedId, current.unit()).isEmpty();
+		}
+		return current.isLive() && mine.equals(current.payload());
+	}
+
+	/**
+	 * Ob das Einarbeiten genau diesen fremden Stand im Modell abgeleitet hat ({@link #derived}): etwa die Buchung, die der
+	 * Abgleich nach einem fremden Wechsel der Bestuhlung auf ihren neuen Sitz gesetzt hat, bevor deren Einheit eintraf, so
+	 * wie der andere Rechner sie dort geschrieben hat. Hat der Nutzer sie seither geändert, baut seine Eingabe auf diesem
+	 * Stand auf. Ohne seine Version legte sein Speichern eine Erstfassung neben ihn, und gegen eine spätere Stornierung
+	 * dieser Fassung ginge die Eingabe ohne Vermerk "Gelöscht" unter (KARV-118).
+	 */
+	private boolean derivedAs(UnitSnapshot current) {
+		ObjectNode payload = derived.get(current.unit());
+		return payload != null && current.isLive() && payload.equals(current.payload());
+	}
+
+	/**
+	 * Übernimmt den Stand in den Vergleichsstand; was das Einarbeiten an der Einheit umgesetzt hatte, gilt damit nicht mehr.
+	 * Ausnahme: Eine fremde Löschung lässt einen abgeleiteten Inhalt stehen. Fehlt er im Modell, hat der Nutzer die Buchung
+	 * storniert, und das bleibt gemerkt, bis er speichert: Der andere Rechner kann sie auf einen anderen Sitz gesetzt haben,
+	 * dessen Einheit erst später eintrifft ({@link #cancelledBase}). Hat das Einarbeiten sie selbst herausgenommen, merkt
+	 * {@link #noteDerivedRemoved} danach das.
+	 */
+	private void adopt(String eventId, UnitSnapshot snapshot, boolean shown) {
+		baseline.adopt(eventId, snapshot, shown);
+		if (!UnitMapper.isAbsent(snapshot) || derived.get(snapshot.unit()) == null) {
+			derived.remove(snapshot.unit());
+		}
+	}
+
+	/**
+	 * Hat der Nutzer eine Buchung storniert, die er nur abgeleitet kannte ({@link LocalChanges#cancelled}), und trägt der
+	 * lesbare fremde Stand einer Einheit, die nicht im Modell steht, dieselbe Buchung, ist dieser Stand die Stornierung
+	 * des Nutzers nicht los: auf dem abgeleiteten Sitz mit einer späteren Änderung (etwa ein anderer Name) oder auf einem
+	 * anderen Sitz, auf den der andere Rechner die Buchung danach gesetzt hat. Die Basis ist die älteste Version der Kette,
+	 * ab der die Einheit ohne Unterbrechung diese Buchung trägt: Auf ihr schreibt das Speichern die Löschung. Ist sie nicht
+	 * der aktuelle Stand, tritt die Löschung gegen die späteren Änderungen an, und die Regel für Löschung gegen Änderung
+	 * entscheidet mit Vermerk; sonst ist die Löschung ein gewöhnlicher Nachfolger.
+	 *
+	 * @return die Basis; {@code null}, wenn es keine solche Stornierung gibt oder sich die Kette nicht lesen lässt
+	 */
+	private UnitSnapshot cancelledBase(UnitSnapshot current, LocalChanges changes, List<ChainStep> chain) {
+		UnitKey unit = current.unit();
+		if (changes.cancelled().isEmpty() || unit.type() != UnitType.BOOKING || !current.isLive()
+				|| !UnitMapper.isReadable(current) || changes.model().containsKey(unit)) {
+			return null;
+		}
+		String bookingId = ConflictInput.bookingIdOf(current.payload());
+		if (bookingId == null || !changes.cancelled().contains(bookingId)) {
+			return null;
+		}
+		int at = chain.size() - 1;
+		while (at >= 0 && !chain.get(at).version().equals(current.version())) {
+			at--;
+		}
+		if (at < 0) {
+			return null;
+		}
+		UnitSnapshot base = current;
+		try {
+			for (int i = at - 1; i >= 0 && !chain.get(i).deleted(); i--) {
+				Version older = sync.version(unit, chain.get(i).version());
+				if (older == null || !bookingId.equals(ConflictInput.bookingIdOf(older.payload()))) {
+					break;
+				}
+				base = UnitSnapshot.of(unit, older);
+			}
+		} catch (IOException e) {
+			LOG.log(Level.WARNING, "Die Kette von " + unit.relativePath() + " ließ sich nicht lesen", e);
+			return null;
+		}
+		return base;
+	}
+
+	private void forgetDerived(String eventId) {
+		derived.keySet().removeIf(unit -> eventId.equals(unit.eventId()));
+	}
+
+	/**
+	 * Merkt sich, was das Einarbeiten neben den übernommenen Einheiten im Modell geändert hat (der Abgleich nach einem
+	 * Hallen- bzw. Bestuhlungswechsel): Diese Inhalte stammen nicht vom Nutzer (siehe {@link #derived}). Unter einer
+	 * Vorstellung, deren Wechsel eingearbeitet wird, ist nichts lokal verändert oder in Bearbeitung, sonst wäre er
+	 * zurückgestellt. {@code skip} sind Einheiten, die nicht gemerkt werden: die eben übernommenen, bei {@link #deriving} die
+	 * schon vorher lokal veränderten.
+	 */
+	private void noteDerived(Event event, Map<UnitKey, ObjectNode> before, Set<UnitKey> skip) {
+		noteDerived(event, before, skip, Set.of());
+	}
+
+	/**
+	 * Wie {@link #noteDerived(Event, Map, Set)}; {@code resynced} sind übernommene Einheiten, deren Stand im Modell nicht so
+	 * steht (siehe {@link EventMerge.Sink#reconciled}): Sie zählen trotz {@code skip}, was im Modell unter ihnen steht, auch
+	 * wenn es sich nicht geändert hat. Fehlt ihre Einheit im Modell, hat das Einarbeiten sie herausgenommen, nicht der
+	 * Nutzer.
+	 */
+	private void noteDerived(Event event, Map<UnitKey, ObjectNode> before, Set<UnitKey> skip, Set<UnitKey> resynced) {
+		Map<UnitKey, ObjectNode> after;
+		try {
+			after = UnitMapper.payloads(event);
+		} catch (IllegalStateException e) {
+			return;
+		}
+		for (Map.Entry<UnitKey, ObjectNode> entry : after.entrySet()) {
+			UnitKey unit = entry.getKey();
+			if (resynced.contains(unit) || (!skip.contains(unit) && !entry.getValue().equals(before.get(unit)))) {
+				derived.put(unit, entry.getValue());
+			}
+		}
+		Set<UnitKey> candidates = new LinkedHashSet<>(before.keySet());
+		candidates.addAll(resynced);
+		for (UnitKey unit : candidates) {
+			if (!after.containsKey(unit) && (resynced.contains(unit) || !skip.contains(unit)) && baseline.isShown(unit)) {
+				derived.put(unit, null);
+			}
+		}
+	}
+
+	/**
+	 * Fehlt eine Einheit, die das Einarbeiten mit Inhalt abgeleitet hat und die vorher noch genau so im Modell stand
+	 * ({@code before}), hat ein weiteres Einarbeiten bzw. ein Abgleich sie herausgenommen, nicht der Nutzer (etwa eine
+	 * fremde Stornierung, die die Buchung auf ihrem abgeleiteten Sitz trifft): Sie gilt nicht als storniert (siehe
+	 * {@link #localChanges}).
+	 */
+	private void noteDerivedRemoved(Event event, Map<UnitKey, ObjectNode> before) {
+		List<UnitKey> candidates = new ArrayList<>();
+		derived.forEach((unit, payload) -> {
+			if (payload != null && payload.equals(before.get(unit))) {
+				candidates.add(unit);
+			}
+		});
+		if (candidates.isEmpty()) {
+			return;
+		}
+		Map<UnitKey, ObjectNode> after;
+		try {
+			after = UnitMapper.payloads(event);
+		} catch (IllegalStateException e) {
+			return;
+		}
+		for (UnitKey unit : candidates) {
+			if (!after.containsKey(unit)) {
+				derived.put(unit, null);
+			}
+		}
+	}
+
+	/**
+	 * Lässt {@code reconcile} das Event mit der Bestuhlung abgleichen (etwa {@code BookingSync.sync} nach einem fremden
+	 * Hallenwechsel) und merkt, was der Abgleich im Modell geändert hat: Das stammt nicht vom Nutzer (siehe {@link #derived}).
+	 * Eine Einheit, die der Nutzer schon vorher ungespeichert geändert hatte, bleibt lokal verändert, auch wenn der Abgleich
+	 * noch darauf aufsetzt. Lässt sich das Event nicht zerlegen, wird nichts gemerkt.
+	 */
+	public void deriving(Event event, Runnable reconcile) {
+		LocalChanges before = localChanges(event);
+		reconcile.run();
+		if (before.model() != null) {
+			noteDerivedRemoved(event, before.model());
+			noteDerived(event, before.model(), before.units());
+		}
+	}
+
+	/** Entscheidet und arbeitet ein für die gemeldeten Einheiten eines Events. */
+	private void applyForeign(List<UnitSnapshot> snapshots, Map<UnitKey, List<ChainStep>> chains,
+			Map<UnitKey, Set<VersionId>> absorbed, List<String> warnings) {
+		String eventId = snapshots.get(0).unit().eventId();
+		Event event = cachedEvent(eventId);
+		List<UnitSnapshot> successors = new ArrayList<>();
+		for (UnitSnapshot current : snapshots) {
+			UnitKey unit = current.unit();
+			ForeignDecision decision = ForeignDecision.decideUnblocked(baseline.known(unit), current, chainOf(chains, unit),
+					absorbed.getOrDefault(unit, Set.of()));
+			if (decision != ForeignDecision.APPLY) {
+				backlog.settle(unit);
+			}
+			if (decision == ForeignDecision.KNOWN) {
+				baseline.adoptStatus(eventId, current, warnings);
+			} else if (decision == ForeignDecision.FORK) {
+				LOG.info("Fremder Stand von " + unit.relativePath()
+						+ " nicht eingearbeitet: Die eigene Version ist unterlegen (Gabelung).");
+			} else if (decision == ForeignDecision.SAME) {
+				// das Modell hat diesen Inhalt schon (oder die ungespeicherte Eingabe baut darauf auf): nur die Version
+				// übernehmen, damit das nächste Speichern auf ihr aufsetzt; was das Einarbeiten umgesetzt hat, gilt weiter
+				baseline.adopt(eventId, current, baseline.isShown(unit));
+			} else if (decision == ForeignDecision.APPLY) {
+				successors.add(current);
+			}
+		}
+		if (successors.isEmpty()) {
+			return;
+		}
+
+		// "lokal verändert" kostet das Zerlegen des Events: erst prüfen, wenn ein Nachfolger da ist
+		LocalChanges changes = event == null ? new LocalChanges(Set.of(), false, null, Map.of(), Set.of())
+				: localChanges(event);
+		// Kopf, Vorstellungen, Buchungen: Was mit einer Vorstellung geschieht, entscheidet über ihre Buchungen
+		successors.sort(EventMerge.MERGE_ORDER);
+		Map<UnitKey, UnitSnapshot> presentationStates = presentationStates(event, snapshots, successors);
+		// "Halle aktuell" einmal je Halle, bevor Modell oder Vergleichsstand sich ändern: Danach sähe in der App schon die erste
+		// übernommene Buchung (bis ihr Abgleich gemerkt ist) wie eine ungespeicherte aus, und die Halle gälte nicht mehr als
+		// aktuell. Dieselben Antworten gelten für die Vorprüfung, das Einarbeiten und das Nachspielen auf der Kopie.
+		Predicate<String> frozenCurrent = frozenHallCurrent();
+		hallsTouched(event, successors, presentationStates).forEach(frozenCurrent::test);
+		Map<UnitKey, String> lastIds = event == null ? Map.of() : lastIds(event, successors, batchIds(successors));
+		Set<UnitKey> appliedPresentations = new HashSet<>();
+		List<UnitSnapshot> apply = new ArrayList<>();
+		for (UnitSnapshot current : successors) {
+			UnitKey unit = current.unit();
+			UnitKey parent = unit.type() == UnitType.BOOKING ? unit.parent() : null;
+			if (movedAwayByUser(event, current, changes, lastIds)) {
+				// ein Stand einer Buchung, die der Nutzer auf eine andere Einheit versetzt hat, wartet mit ihren übrigen Ständen
+				// (sonst ginge einer davon allein in den Vergleichsstand, und das Speichern räumte zwei Einheiten)
+				defer(event, current, chainOf(chains, unit));
+				continue;
+			}
+			boolean blocked = isBlocked(event, current, changes);
+			boolean onDerived = blocked && derivedAs(current);
+			UnitSnapshot cancelledBase = onDerived ? null : cancelledBase(current, changes, chainOf(chains, unit));
+			if (onDerived) {
+				// die Eingabe baut auf genau diesem Stand auf: nur die Version übernehmen (wie SAME), am Modell ändert sich nichts
+				backlog.settle(unit);
+				adopt(eventId, current, true);
+			} else if (cancelledBase != null) {
+				// der Nutzer hat diese Buchung storniert: ihre Basis gilt als angezeigt, das Speichern löscht sie dort
+				adopt(eventId, cancelledBase, true);
+				if (cancelledBase.version().equals(current.version())) {
+					backlog.settle(unit);
+				} else {
+					defer(event, current, chainOf(chains, unit));
+				}
+			} else if (blocked) {
+				defer(event, current, chainOf(chains, unit));
+			} else if (parent != null && event != null && !appliedPresentations.contains(parent)
+					&& EventMerge.waits(event, current, presentationStates.get(parent), hallLookup, frozenCurrent)) {
+				// Wird die Vorstellung in diesem Schritt eingearbeitet, entscheidet das Einarbeiten mit ihrem neuen Stand
+				holdUnplaced(unit, "sie ist im Modell nicht platzierbar");
+			} else if (carrierTouched(event, current, changes)) {
+				// ein Stand, der eine vom Nutzer berührte Buchung ohne Platz übernähme (dieselbe Kennung), wartet wie jede
+				// Änderung daran
+				defer(event, current, chainOf(chains, unit));
+			} else {
+				backlog.settle(unit);
+				apply.add(current);
+				if (unit.type() == UnitType.PRESENTATION) {
+					appliedPresentations.add(unit);
+				}
+			}
+		}
+		if (apply.isEmpty()) {
+			return;
+		}
+
+		UnitSnapshot head = apply.stream().filter(s -> s.unit().type() == UnitType.EVENT).findFirst().orElse(null);
+		boolean headReadable = head != null && UnitMapper.readUnit(head, Event.class) != null;
+		if (event == null && headReadable) {
+			addEvent(eventId, apply, frozenCurrent, warnings);
+		} else if (event == null) {
+			// ohne sichtbares Event übernimmt nur der Vergleichsstand; angezeigt wird nichts
+			for (UnitSnapshot snapshot : apply) {
+				adopt(eventId, snapshot, false);
+			}
+			warnIfUnreadable(head, warnings);
+		} else if (head != null && !headReadable) {
+			removeEvent(event, head, apply, warnings);
+		} else {
+			mergeInto(event, apply, changes, chains, presentationStates, lastIds(event, apply, batchIds(apply)),
+					frozenCurrent, warnings);
+		}
+	}
+
+	/**
+	 * "Halle aktuell" ({@link #setHallCurrent}) mit festgehaltenen Antworten: Jede Halle wird beim ersten Mal gefragt, danach
+	 * gilt diese Antwort. Die Frage kann in der App über die ungespeicherten Buchungen ({@link #locallyChangedUnits}) auf
+	 * dieses Repository zurückgreifen; mitten im Einarbeiten änderte sich die Antwort sonst durch das Einarbeiten selbst,
+	 * und jede Buchung kostete die Frage erneut.
+	 */
+	private Predicate<String> frozenHallCurrent() {
+		Predicate<String> live = hallCurrent;
+		Map<String, Boolean> answers = new HashMap<>();
+		return hallId -> {
+			Boolean answer = answers.get(hallId);
+			if (answer == null) {
+				answer = live.test(hallId);
+				answers.put(hallId, answer);
+			}
+			return answer;
+		};
+	}
+
+	/**
+	 * Die Hallen der Vorstellungen, die die Nachfolger berühren (eine Vorstellung selbst oder eine ihrer Buchungen), im Modell
+	 * und im Stand des Index: Nur nach ihnen fragt die Platzierungsregel ({@link EventMerge#placeable}).
+	 */
+	private static Set<String> hallsTouched(Event event, List<UnitSnapshot> successors,
+			Map<UnitKey, UnitSnapshot> presentationStates) {
+		Set<String> hallIds = new LinkedHashSet<>();
+		for (UnitSnapshot snapshot : successors) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() != UnitType.PRESENTATION && unit.type() != UnitType.BOOKING) {
+				continue;
+			}
+			UnitKey presentationUnit = unit.type() == UnitType.PRESENTATION ? unit : unit.parent();
+			Presentation model = event == null ? null : EventMerge.presentation(event, unit.presentationId());
+			addHall(hallIds, model);
+			UnitSnapshot indexed = unit.type() == UnitType.PRESENTATION ? snapshot : presentationStates.get(presentationUnit);
+			addHall(hallIds, indexed == null ? null : UnitMapper.readUnit(indexed, Presentation.class));
+		}
+		return hallIds;
+	}
+
+	private static void addHall(Set<String> hallIds, Presentation presentation) {
+		if (presentation != null && presentation.getHallId() != null) {
+			hallIds.add(presentation.getHallId());
+		}
+	}
+
+	/**
+	 * Die aktuellen Stände der Vorstellungen der Buchungen unter {@code successors}, wie der Index sie hat (auch gelöschte
+	 * und unlesbare): Daran misst {@link EventMerge#placeable} das Modell. Die Vorstellungen, die in {@code current} stehen,
+	 * sind schon frisch; für die übrigen liest der Index.
+	 */
+	private Map<UnitKey, UnitSnapshot> presentationStates(Event event, List<UnitSnapshot> current,
+			List<UnitSnapshot> successors) {
+		Map<UnitKey, UnitSnapshot> states = new HashMap<>();
+		if (event == null) {
+			return states;
+		}
+		for (UnitSnapshot snapshot : current) {
+			if (snapshot.unit().type() == UnitType.PRESENTATION) {
+				states.put(snapshot.unit(), snapshot);
+			}
+		}
+		Set<UnitKey> missing = new HashSet<>();
+		for (UnitSnapshot snapshot : successors) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() == UnitType.BOOKING && !states.containsKey(unit.parent())) {
+				missing.add(unit.parent());
+			}
+		}
+		if (!missing.isEmpty()) {
+			states.putAll(sync.snapshots(missing));
+		}
+		return states;
+	}
+
+	/**
+	 * Zu den gelöschten oder unlesbaren Buchungen unter {@code successors} die Kennung der Buchung aus ihrem zuletzt bekannten
+	 * Stand (siehe {@link EventMerge.Plan}), außer eine andere angezeigte Einheit des Events trägt diese Kennung schon: Dann
+	 * ist die Buchung dorthin gezogen, und die Löschung betrifft sie nicht mehr. Die angezeigten Kennungen
+	 * ({@link #shownBookingIds}) liest jeder Aufruf höchstens einmal, nur wenn es eine solche Buchung gibt. Je Event ruft
+	 * das Einarbeiten ihn zweimal: für alle Nachfolger (die Prüfung auf eine berührte versetzte Buchung) und für die, die
+	 * eingearbeitet werden (den Plan); {@link #carriedUnits} liest die Kennungen für den Plan ein drittes Mal.
+	 * <p>
+	 * Mit {@code batch} (siehe {@link #batchIds}) zählt eine Einheit nicht als Träger, die im selben Aufruf gelöscht wird, unlesbar
+	 * ist oder eine andere Kennung bekommt: Das braucht das Einarbeiten, damit die Stornierung die Buchung findet, die der
+	 * Abgleich auf einen anderen Sitz gesetzt hat; dasselbe braucht die Prüfung, ob der Nutzer eine versetzte Buchung berührt
+	 * hat, sonst leerte die Stornierung die Eingabe auf dem Sitz. Das gilt nur für Sitz-Einheiten (nur für sie liest das
+	 * Einarbeiten die Kennung): Für eine Einheit ohne Platz bleibt es beim Vergleichsstand allein, sonst träfe ihre
+	 * Stornierung die Eingabe auf dem Sitz, die sie nicht betrifft.
+	 */
+	private Map<UnitKey, String> lastIds(Event event, List<UnitSnapshot> successors, Map<UnitKey, String> batch) {
+		Map<UnitKey, String> ids = new HashMap<>();
+		Map<String, List<UnitKey>> carriers = null;
+		for (UnitSnapshot snapshot : successors) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() != UnitType.BOOKING || UnitMapper.isReadable(snapshot)) {
+				continue;
+			}
+			UnitSnapshot known = baseline.known(unit);
+			Booking last = known == null ? null : UnitMapper.readUnit(known, Booking.class);
+			if (last == null || last.getId() == null) {
+				continue;
+			}
+			if (carriers == null) {
+				carriers = shownBookingIds(event.getId());
+			}
+			if (!carriedElsewhere(carriers, last.getId(), unit, unit.isUnassigned() ? Map.of() : batch)) {
+				ids.put(unit, last.getId());
+			}
+		}
+		return ids;
+	}
+
+	/**
+	 * Ob eine andere angezeigte Einheit derselben Vorstellung die Buchung mit dieser Kennung trägt. Eine Einheit, die im
+	 * selben Aufruf gelöscht wird oder unlesbar ist oder eine andere Kennung bekommt ({@code batch}), trägt sie nicht mehr.
+	 */
+	private static boolean carriedElsewhere(Map<String, List<UnitKey>> carriers, String bookingId, UnitKey unit,
+			Map<UnitKey, String> batch) {
+		return carriers.getOrDefault(bookingId, List.of()).stream()
+				.anyMatch(other -> !other.equals(unit) && other.presentationId().equals(unit.presentationId())
+						&& (!batch.containsKey(other) || bookingId.equals(batch.get(other))));
+	}
+
+	/** Die Kennung der Buchung je Buchungs-Einheit unter {@code successors}; {@code null} bei gelöschten und unlesbaren. */
+	private static Map<UnitKey, String> batchIds(List<UnitSnapshot> successors) {
+		Map<UnitKey, String> ids = new HashMap<>();
+		for (UnitSnapshot snapshot : successors) {
+			if (snapshot.unit().type() == UnitType.BOOKING) {
+				ids.put(snapshot.unit(), UnitMapper.isReadable(snapshot) ? ConflictInput.bookingIdOf(snapshot.payload()) : null);
+			}
+		}
+		return ids;
+	}
+
+	/**
+	 * Die gelöschten oder unlesbaren Einheiten von Buchungen ohne Platz unter {@code successors}, deren Buchung (Kennung aus
+	 * ihrem zuletzt bekannten Stand) eine andere angezeigte Einheit des Events trägt (siehe {@link EventMerge.Plan}), auch
+	 * im Modell ({@link #carriesInModel}).
+	 */
+	private Set<UnitKey> carriedUnits(Event event, List<UnitSnapshot> successors) {
+		Set<UnitKey> units = new HashSet<>();
+		Map<UnitKey, String> batch = batchIds(successors);
+		Map<String, List<UnitKey>> carriers = null;
+		for (UnitSnapshot snapshot : successors) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() != UnitType.BOOKING || !unit.isUnassigned() || UnitMapper.isReadable(snapshot)) {
+				continue;
+			}
+			UnitSnapshot known = baseline.known(unit);
+			Booking last = known == null ? null : UnitMapper.readUnit(known, Booking.class);
+			if (last == null || last.getId() == null) {
+				continue;
+			}
+			if (carriers == null) {
+				carriers = shownBookingIds(event.getId());
+			}
+			String bookingId = last.getId();
+			List<UnitKey> inModel = carriers.getOrDefault(bookingId, List.of()).stream()
+					.filter(carrier -> carriesInModel(event, carrier, bookingId)).toList();
+			if (carriedElsewhere(Map.of(bookingId, inModel), bookingId, unit, batch)) {
+				units.add(unit);
+			}
+		}
+		return units;
+	}
+
+	/**
+	 * Ob die Einheit die Buchung auch im Modell trägt: Sie hat dort kein eigenes Objekt (etwa ein Sitz, den die Bestuhlung
+	 * nicht mehr hat; die Buchung steht dann ohne Platz, KARV-117), oder ihr Objekt hat dieselbe Kennung. Hat der Nutzer
+	 * die Buchung dort ungespeichert storniert, trägt sie nur noch der Vergleichsstand (KARV-98).
+	 */
+	private static boolean carriesInModel(Event event, UnitKey carrier, String bookingId) {
+		Object model = EventMerge.modelObject(event, carrier);
+		return model == null || model instanceof Booking booking && bookingId.equals(booking.getId());
+	}
+
+	/** Die Kennungen der angezeigten Buchungs-Einheiten des Events im Vergleichsstand, je Kennung die Einheiten, die sie tragen. */
+	private Map<String, List<UnitKey>> shownBookingIds(String eventId) {
+		Map<String, List<UnitKey>> carriers = new HashMap<>();
+		for (UnitKey shown : baseline.shownUnits(eventId)) {
+			if (shown.type() == UnitType.BOOKING) {
+				UnitSnapshot known = baseline.known(shown);
+				Booking booking = known == null ? null : UnitMapper.readUnit(known, Booking.class);
+				if (booking != null && booking.getId() != null) {
+					carriers.computeIfAbsent(booking.getId(), k -> new ArrayList<>()).add(shown);
+				}
+			}
+		}
+		return carriers;
+	}
+
+	/**
+	 * Ob die Buchung mit dieser Kennung im Modell versetzt auf einer anderen Einheit als {@code unit} steht (siehe
+	 * {@link LocalChanges#moved}) und der Nutzer sie dort ungespeichert geändert hat oder gerade bearbeitet. Eine
+	 * Stornierung, die eine solche Buchung träfe (sie wurde etwa von einem Wechsel der Bestuhlung versetzt), wird
+	 * zurückgestellt, statt die Eingabe zu leeren oder zu übergehen. Eine nur vom Abgleich versetzte Buchung, an der der
+	 * Nutzer nichts getan hat, wird von der Stornierung getroffen.
+	 */
+	private boolean movedBookingTouched(Event event, LocalChanges changes, String bookingId, UnitKey unit) {
+		return changes.movedCarriers(bookingId, unit).stream().anyMatch(carrier -> touchedByUser(event, changes, carrier));
+	}
+
+	/** Ob der Nutzer die Einheit ungespeichert geändert hat oder ihr Objekt im Modell gerade bearbeitet. */
+	private boolean touchedByUser(Event event, LocalChanges changes, UnitKey unit) {
+		if (changes.units().contains(unit)) {
+			return true;
+		}
+		Object model = EventMerge.modelObject(event, unit);
+		return model != null && inEditing.test(model);
+	}
+
+	/**
+	 * Ob der Stand eine Buchung betrifft, die der Nutzer ungespeichert auf eine andere Einheit versetzt hat; alle ihre
+	 * Stände warten dann bis zum Speichern.
+	 * <ul>
+	 * <li>Gelöscht oder unlesbar (die Kennung aus {@code lastIds}): Sie steht versetzt auf einer Einheit, die er geändert
+	 * hat oder gerade bearbeitet ({@link #movedBookingTouched}). Eine Stornierung, die sie träfe, leerte sonst die Eingabe.
+	 * <li>Lesbar: Sie steht im Modell auf einer solchen Einheit, die sie im Vergleichsstand nicht trägt, etwa auf dem Sitz,
+	 * auf den er die vom Abgleich umgesetzte Buchung weitergeschoben hat, auch wenn der Stand genau dem Abgeleiteten
+	 * entspricht (KARV-97). Ginge er allein in den Vergleichsstand, räumte das Speichern zwei Einheiten, und eine davon sähe
+	 * wie ein Storno aus. Eine Buchung, die der Nutzer nur an ihrem Platz bearbeitet, ist nicht versetzt.
+	 * </ul>
+	 * Das Speichern zieht vom alten Platz im Vergleichsstand um, und die Gabelung dort löst der Versionsspeicher auf.
+	 */
+	private boolean movedAwayByUser(Event event, UnitSnapshot current, LocalChanges changes,
+			Map<UnitKey, String> lastIds) {
+		UnitKey unit = current.unit();
+		if (changes.model() == null || unit.type() != UnitType.BOOKING) {
+			return false;
+		}
+		if (!UnitMapper.isReadable(current)) {
+			String lastId = lastIds.get(unit);
+			return lastId != null && movedBookingTouched(event, changes, lastId, unit);
+		}
+		String bookingId = ConflictInput.bookingIdOf(current.payload());
+		return bookingId != null && changes.movedCarriers(bookingId, unit).stream()
+				.anyMatch(carrier -> !shownWith(carrier, bookingId) && touchedByUser(event, changes, carrier));
+	}
+
+	/** Ob der Vergleichsstand die Einheit angezeigt und lebend mit dieser Buchung kennt. */
+	private boolean shownWith(UnitKey unit, String bookingId) {
+		UnitSnapshot known = baseline.known(unit);
+		return known != null && known.isLive() && baseline.isShown(unit)
+				&& bookingId.equals(ConflictInput.bookingIdOf(known.payload()));
+	}
+
+	/**
+	 * Ob der lesbare Stand einer Buchung auf einem Sitz, den das Modell nicht hat, eine Buchung mit derselben Kennung
+	 * übernähme (siehe {@link EventMerge}: dieselbe Buchung steht dort ohne Platz), an der der Nutzer ungespeichert etwas
+	 * geändert hat oder die er gerade bearbeitet. Dann wartet der Stand wie jede Änderung daran: Das Übernehmen
+	 * überschriebe die Eingabe.
+	 */
+	private boolean carrierTouched(Event event, UnitSnapshot current, LocalChanges changes) {
+		UnitKey unit = current.unit();
+		if (event == null || changes.model() == null || unit.type() != UnitType.BOOKING || unit.isUnassigned()
+				|| !UnitMapper.isReadable(current) || EventMerge.modelObject(event, unit) != null) {
+			return false;
+		}
+		String bookingId = ConflictInput.bookingIdOf(current.payload());
+		if (bookingId == null) {
+			return false;
+		}
+		// versetzt und berührt deckt movedAwayByUser schon ab; hier bleibt die an ihrem Platz geänderte Buchung
+		if (movedBookingTouched(event, changes, bookingId, unit)) {
+			return true;
+		}
+		// eine Eingabe an einer sonst unveränderten Buchung ist nicht "versetzt"
+		Presentation presentation = EventMerge.presentation(event, unit.presentationId());
+		return presentation != null && presentation.getBookings() != null && presentation.getBookings().stream()
+				.anyMatch(booking -> bookingId.equals(booking.getId()) && booking.hasData() && inEditing.test(booking));
+	}
+
+	/**
+	 * Lässt die Buchung warten, bis ihr Platz im Modell da ist. Einen früheren Stand, den der Nutzer nicht im Modell hat
+	 * (etwa weil ihre Vorstellung das Modell verließ), nimmt sie aus dem Vergleichsstand: Sonst gälte er als gesehen, die
+	 * Buchung fiele aus der Warteliste, sobald der Index wieder den bekannten Stand zeigt, und ein Verkauf auf ihrem Sitz
+	 * baute auf dem fremden auf.
+	 */
+	private void holdUnplaced(UnitKey unit, String reason) {
+		baseline.forget(unit);
+		backlog.hold(unit, reason);
+	}
+
+	/** Alle Einheiten des Events sind erledigt: nichts davon ist zurückgestellt oder wartet still. */
+	private void forgetWaiting(String eventId) {
+		backlog.forgetOwner(eventId);
+	}
+
+	private static Set<UnitKey> unitsOf(Collection<UnitSnapshot> snapshots) {
+		Set<UnitKey> units = new HashSet<>();
+		snapshots.forEach(snapshot -> units.add(snapshot.unit()));
+		return units;
+	}
+
+	private static List<ChainStep> chainOf(Map<UnitKey, List<ChainStep>> chains, UnitKey unit) {
+		return chains.getOrDefault(unit, List.of());
+	}
+
+	/**
+	 * Ob der Nutzer die Einheit ungespeichert geändert hat oder gerade bearbeitet; verlässt Kopf oder Vorstellung das
+	 * Modell oder wechselt eine Vorstellung Halle oder Bestuhlung, zählt jede Einheit darunter. Hat das Modell den fremden
+	 * Stand schon ({@link #converged}), ist nichts blockiert.
+	 */
+	private boolean isBlocked(Event event, UnitSnapshot current, LocalChanges changes) {
+		if (event == null || converged(changes, baseline.known(current.unit()), current)) {
+			return false;
+		}
+		if (changes.all()) {
+			return true;
+		}
+		UnitKey unit = current.unit();
+		if (touchedByUser(event, changes, unit)) {
+			return true;
+		}
+		if (!EventMerge.touchesSubtree(event, current)) {
+			return false;
+		}
+		for (UnitKey changed : changes.units()) {
+			if (EventMerge.inSubtree(changed, unit)) {
+				return true;
+			}
+		}
+		for (Object below : EventMerge.subtree(event, unit)) {
+			if (inEditing.test(below)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Stellt den Stand zurück; der Hinweis nennt den Rechner aus dem letzten Glied der Kette, bei einer eigenen
+	 * Zusammenführung mit Vermerk für diesen Rechner entfällt er (siehe
+	 * {@link ForeignBacklog#defer(UnitSnapshot, List, Object, SyncService)}).
+	 */
+	private void defer(Event event, UnitSnapshot current, List<ChainStep> chain) {
+		backlog.defer(current, chain, EventMerge.nearestModelObject(event, current.unit()), sync);
+	}
+
+	private Event cachedEvent(String eventId) {
+		for (Event event : cachedEvents) {
+			if (event.getId().equals(eventId)) {
+				return event;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Ein neues oder wiederbelebtes Event: aus dem Index zusammensetzen, Vergleichsstand wie beim Laden, in den Cache.
+	 * Buchungen, die nicht zur Bestuhlung passen, warten (siehe {@link EventMerge#assembleEvent}).
+	 *
+	 * @param frozenCurrent die festgehaltenen Antworten dieses Einarbeitens ({@link #frozenHallCurrent})
+	 */
+	private void addEvent(String eventId, List<UnitSnapshot> apply, Predicate<String> frozenCurrent,
+			List<String> warnings) {
+		try {
+			Map<UnitKey, UnitSnapshot> all = sync.eventSnapshots(eventId);
+			List<UnitSnapshot> waiting = new ArrayList<>();
+			Assembly<Event> assembly = EventMerge.assembleEvent(all.values(), hallLookup, frozenCurrent, waiting);
+			baseline.resetOwner(eventId, all.values(), assembly.shown(), unitsOf(waiting));
+			forgetDerived(eventId);
+			warnings.addAll(assembly.allWarnings());
+			waiting.forEach(snapshot -> backlog.hold(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
+			removedByOthers.remove(eventId);
+			for (Event added : assembly.items()) {
+				// einsortieren wie beim Laden
+				UnitMapper.insertSorted(cachedEvents, added, UnitMapper.EVENT_ORDER);
+				listeners.notifyAddedByOthers(added);
+			}
+		} catch (RuntimeException e) {
+			// es hat sich nichts geändert; die Einheiten warten und kommen beim nächsten Aufruf wieder
+			failed(eventId, e, warnings);
+			for (UnitSnapshot snapshot : apply) {
+				backlog.hold(snapshot.unit(), "das Zusammensetzen des Events ist gescheitert");
+			}
+		}
+	}
+
+	/** Kopf gelöscht oder unlesbar: Das Event verlässt samt Kindern den Cache, wie beim Laden unter einem solchen Kopf. */
+	private void removeEvent(Event event, UnitSnapshot head, List<UnitSnapshot> apply, List<String> warnings) {
+		String eventId = event.getId();
+		cachedEvents.remove(event);
+		hideBelow(eventId, UnitKey.event(eventId));
+		for (UnitSnapshot snapshot : apply) {
+			adopt(eventId, snapshot, false);
+		}
+		forgetDerived(eventId);
+		removedByOthers.add(eventId);
+		warnIfUnreadable(head, warnings);
+		listeners.notifyRemovedByOthers(event);
+	}
+
+	/** Was unter Kopf bzw. Vorstellung angezeigt war, ist es nicht mehr: Es hat mit ihnen das Modell verlassen. */
+	private void hideBelow(String eventId, UnitKey root) {
+		for (UnitKey unit : baseline.shownUnits(eventId)) {
+			UnitSnapshot known = baseline.known(unit);
+			if (known != null && !unit.equals(root) && EventMerge.inSubtree(unit, root)) {
+				adopt(eventId, known, false);
+			}
+		}
+	}
+
+	private static void warnIfUnreadable(UnitSnapshot head, List<String> warnings) {
+		if (head != null && !UnitMapper.isAbsent(head) && UnitMapper.readUnit(head, Event.class) == null) {
+			warnings.add(UnitMapper.unreadableEvent(head.unit().eventId()));
+		}
+	}
+
+	/**
+	 * Arbeitet die Stände in das Event im Cache ein; jede Einheit geht gleich danach in den Vergleichsstand. Scheitert eine
+	 * Einheit, ist sie im Modell wieder wie vorher ({@link EventMerge#apply}); ein sauberes Event wird dann aus dem Index
+	 * neu zusammengesetzt, sonst bleibt, was schon eingearbeitet ist, und der Rest wird zurückgestellt. Auf
+	 * {@code changingByOthers} folgt immer {@code changedByOthers}.
+	 *
+	 * @param frozenCurrent die festgehaltenen Antworten dieses Einarbeitens ({@link #frozenHallCurrent}); der Plan behält
+	 *                      sie auch für das Nachspielen auf der Kopie
+	 */
+	private void mergeInto(Event event, List<UnitSnapshot> apply, LocalChanges changes,
+			Map<UnitKey, List<ChainStep>> chains, Map<UnitKey, UnitSnapshot> presentationStates,
+			Map<UnitKey, String> lastIds, Predicate<String> frozenCurrent, List<String> warnings) {
+		String eventId = event.getId();
+		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
+				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
+		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
+		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, frozenCurrent, presentationStates, lastIds)
+				.withCarried(carriedUnits(event, apply));
+		Set<UnitKey> adopted = new LinkedHashSet<>();
+		Set<UnitKey> waiting = new HashSet<>();
+		// übernommene Buchungen, die nur wegen eines endgültig fehlenden Sitzes ins Modell kamen: Der Abgleich danach hat das
+		// Modell über den übernommenen Stand hinaus geändert
+		Set<UnitKey> resynced = new LinkedHashSet<>();
+		EventMerge.Sink sink = new EventMerge.Sink() {
+			@Override
+			public void adopted(UnitSnapshot snapshot, boolean shown) {
+				adopt(eventId, snapshot, shown);
+				adopted.add(snapshot.unit());
+			}
+
+			@Override
+			public void held(UnitSnapshot snapshot) {
+				waiting.add(snapshot.unit());
+				holdUnplaced(snapshot.unit(), "sie hat im Modell keinen Platz");
+			}
+
+			@Override
+			public void left(UnitKey presentation) {
+				hideBelow(eventId, presentation);
+			}
+
+			@Override
+			public void reconciled(UnitKey unit) {
+				resynced.add(unit);
+			}
+
+			@Override
+			public void displaced(UnitSnapshot booking, String hint) {
+				warnings.add(hint);
+			}
+
+			@Override
+			public void warning(String text) {
+				warnings.add(text);
+			}
+		};
+		listeners.notifyChangingByOthers(event);
+		try {
+			EventMerge.apply(event, plan, sink);
+		} catch (RuntimeException e) {
+			failed(event.getName(), e, warnings);
+			if (mayRebuild(event, changes) && rebuild(event, frozenCurrent, warnings)) {
+				return;
+			}
+			for (UnitSnapshot snapshot : apply) {
+				if (!adopted.contains(snapshot.unit()) && !waiting.contains(snapshot.unit())) {
+					defer(event, snapshot, chainOf(chains, snapshot.unit()));
+				}
+			}
+			plan = plan.restrictedTo(adopted);
+		}
+		if (changes.model() != null) {
+			noteDerivedRemoved(event, changes.model());
+		}
+		// über den Abgleich ändern Buchungen mit: eine eingearbeitete Vorstellung oder eine Buchung, deren Sitz endgültig fehlt
+		if (changes.model() != null
+				&& (!resynced.isEmpty() || apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION))) {
+			// was der Nutzer schon vor dem Einarbeiten ungespeichert geändert hatte, bleibt lokal verändert
+			Set<UnitKey> skip = new HashSet<>(adopted);
+			skip.addAll(changes.units());
+			Set<UnitKey> reconciled = new LinkedHashSet<>(resynced);
+			reconciled.removeAll(changes.units());
+			noteDerived(event, changes.model(), skip, reconciled);
+		}
+		EventMerge.Plan applied = plan;
+		listeners.notifyChangedByOthers(event,
+				new ForeignBatch<>(adopted, copy -> EventMerge.apply(copy, applied, EventMerge.NONE)));
+	}
+
+	/**
+	 * Ob das Event nach gescheitertem Einarbeiten aus dem Index neu zusammengesetzt werden darf: nur wenn es sauber ist,
+	 * also nichts lokal verändert, nichts davon zurückgestellt oder wartend und kein Objekt darin in Bearbeitung (eine
+	 * offene Eingabe schriebe sonst in ein abgehängtes Objekt).
+	 */
+	private boolean mayRebuild(Event event, LocalChanges changes) {
+		String eventId = event.getId();
+		if (!changes.none() || backlog.anyFor(eventId)) {
+			return false;
+		}
+		try {
+			return EventMerge.subtree(event, UnitKey.event(eventId)).stream().noneMatch(inEditing);
+		} catch (RuntimeException e) {
+			// ohne verlässliche Auskunft gilt das Event als in Bearbeitung; changedByOthers folgt trotzdem
+			LOG.log(Level.SEVERE, "Ob \"" + event.getName() + "\" gerade bearbeitet wird, ließ sich nicht prüfen", e);
+			return false;
+		}
+	}
+
+	/**
+	 * Nach gescheitertem Einarbeiten: setzt das Event aus dem Index neu zusammen, Vergleichsstand wie beim Laden, und
+	 * ersetzt es im Cache. Die Kopie für den Änderungsmelder bekommt genau diesen Stand.
+	 *
+	 * @param frozenCurrent die festgehaltenen Antworten dieses Einarbeitens ({@link #frozenHallCurrent})
+	 * @return ob das gelang; sonst ist nichts verändert
+	 */
+	private boolean rebuild(Event event, Predicate<String> frozenCurrent, List<String> warnings) {
+		String eventId = event.getId();
+		try {
+			Collection<UnitSnapshot> all = sync.eventSnapshots(eventId).values();
+			List<UnitSnapshot> waiting = new ArrayList<>();
+			Assembly<Event> assembly = EventMerge.assembleEvent(all, hallLookup, frozenCurrent, waiting);
+			if (assembly.items().isEmpty()) {
+				return false;
+			}
+			Event fresh = assembly.items().get(0);
+			byte[] state = MAPPER.writeValueAsBytes(fresh);
+			baseline.resetOwner(eventId, all, assembly.shown(), unitsOf(waiting));
+			forgetDerived(eventId);
+			warnings.addAll(assembly.allWarnings());
+			replaceCachedEvent(fresh);
+			// das frische Event zeigt jeden Stand des Index, außer den Buchungen, die nicht zur Bestuhlung passen
+			forgetWaiting(eventId);
+			waiting.forEach(snapshot -> backlog.hold(snapshot.unit(), "sie passt nicht zur Bestuhlung ihrer Vorstellung"));
+			listeners.notifyChangedByOthers(fresh, new ForeignBatch<>(unitsOf(all), copy -> {
+				try {
+					Event rebuilt = MAPPER.readValue(state, Event.class);
+					copy.copyFrom(rebuilt);
+					copy.setPresentations(rebuilt.getPresentations());
+				} catch (IOException e) {
+					throw new UncheckedIOException(e);
+				}
+			}));
+			return true;
+		} catch (JsonProcessingException | RuntimeException e) {
+			LOG.log(Level.SEVERE, "Das Event " + eventId + " ließ sich nicht aus dem Index neu zusammensetzen", e);
+			return false;
+		}
+	}
+
+	private static void failed(String name, RuntimeException e, List<String> warnings) {
+		LOG.log(Level.SEVERE, "Fremde Änderungen an \"" + name + "\" ließen sich nicht einarbeiten", e);
+		warnings.add("Die Änderungen eines anderen Rechners an \"" + name + "\" ließen sich nicht einarbeiten: "
+				+ StoreMessages.describe(e));
+	}
+
+	// <-- Fremde Stände
+}

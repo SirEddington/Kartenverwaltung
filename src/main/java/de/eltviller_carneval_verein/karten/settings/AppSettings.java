@@ -1,7 +1,9 @@
 package de.eltviller_carneval_verein.karten.settings;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * Die Einstellungen der Anwendung, wie sie in {@code settings.json} stehen. Jede Einstellung ist ein Feld mit
@@ -9,33 +11,46 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * unbekannten Feldern lässt sich trotzdem lesen. Ein Folgeticket, das eine Einstellung ergänzt, braucht
  * deshalb keine Migration.
  * <p>
- * Ein Objekt ohne gesetzte Einstellung wird als leeres JSON-Objekt gespeichert.
- * <p>
- * Die erste Einstellung ist {@link #getMirrorDir() mirrorDir}, der Basisordner der Spiegelung (leer oder
- * {@code null} heißt: keine Spiegelung). Sie ändert sich nur durch den Nutzer in der Einstellungsansicht, nie durch
- * die Anwendung selbst, damit der {@code ChangeTracker} sauber bleibt. {@code NON_EMPTY} sorgt dafür, dass ein leerer
- * Wert nicht in die Datei kommt und ein unberührtes Objekt weiter als {@code {}} erscheint.
+ * Die Einstellungen sind der gemeinsame Ordner ({@code sharedDir}, {@code null} heißt Einzelbetrieb), ob Buchungen
+ * sofort gespeichert werden ({@code saveBookingsImmediately}, Standard {@code true}) und die zuletzt angemeldeten Bediener
+ * ({@code recentOperators}, nie {@code null}). Der Spiegelordner ({@code mirrorDir}) ist mit KARV-89 entfallen, ein
+ * Feld dieses Namens in einer älteren {@code settings.json} wird beim Lesen ignoriert.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AppSettings {
 
-	private String mirrorDir;
+	private String sharedDir;
+	private boolean saveBookingsImmediately = true;
+	private List<String> recentOperators = new ArrayList<>();
 
 	public AppSettings() {
 	}
 
-	/**
-	 * Der Basisordner der Spiegelung: Darin liegen {@code events_data} und {@code halls_data} wie im Standardordner.
-	 * Die Anwendung arbeitet weiter im Standardordner, der Spiegelordner ist eine zusätzliche Kopie. {@code null}
-	 * oder leer heißt: keine Spiegelung. Leere Werte werden nicht gespeichert, damit ein unberührtes Objekt weiter
-	 * als {@code {}} erscheint.
-	 */
-	@JsonInclude(JsonInclude.Include.NON_EMPTY)
-	public String getMirrorDir() {
-		return mirrorDir;
+	/** Der gemeinsame Ordner, so wie er eingegeben wurde; {@code null} heißt Einzelbetrieb. */
+	public String getSharedDir() {
+		return sharedDir;
 	}
 
-	public void setMirrorDir(String mirrorDir) {
-		this.mirrorDir = mirrorDir;
+	public void setSharedDir(String sharedDir) {
+		this.sharedDir = sharedDir;
+	}
+
+	/** Ob jede Änderung an einer Buchung sofort gespeichert wird; sonst gilt sie erst nach "Speichern". */
+	public boolean isSaveBookingsImmediately() {
+		return saveBookingsImmediately;
+	}
+
+	public void setSaveBookingsImmediately(boolean saveBookingsImmediately) {
+		this.saveBookingsImmediately = saveBookingsImmediately;
+	}
+
+	/** Die zuletzt verwendeten Bediener, der letzte zuerst; nie {@code null}. */
+	public List<String> getRecentOperators() {
+		return recentOperators;
+	}
+
+	/** {@code null} (etwa {@code "recentOperators": null} in der Datei) gilt als leere Liste. */
+	public void setRecentOperators(List<String> recentOperators) {
+		this.recentOperators = recentOperators == null ? new ArrayList<>() : new ArrayList<>(recentOperators);
 	}
 }

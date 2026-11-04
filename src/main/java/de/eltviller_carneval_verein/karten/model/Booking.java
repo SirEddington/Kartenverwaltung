@@ -1,7 +1,10 @@
 package de.eltviller_carneval_verein.karten.model;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
+import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -30,6 +33,14 @@ public class Booking {
 
 	private Presentation parentPresentation; // gesetzt von Presentation.setBookings/addBooking, wird nicht gespeichert
 
+	/**
+	 * Die Kennung der Buchung. Sie benennt eine Buchung ohne Platz im Versionsspeicher ({@code bookings/_<id>}); bei
+	 * einer Buchung auf einem Sitz bestimmt der Sitz den Ort. Ältere Dateien ohne das Feld laden mit einer neuen Kennung.
+	 * Die Kennung entsteht erst beim ersten Lesen ({@link #getId()}), damit das Laden vieler Buchungen mit gespeicherter
+	 * Kennung keine unnötigen erzeugt.
+	 */
+	private String id; // get,set
+
 	private String seatId; // get,set
 
 	// Momentaufnahme des Platzes
@@ -42,6 +53,12 @@ public class Booking {
 	/** Einzelpreis in Cent; {@code null} heißt: es gilt der Standardpreis der Vorstellung. */
 	private Integer price; // get,set
 	private final ObjectProperty<PaymentStatus> paymentStatus = new SimpleObjectProperty<>(PaymentStatus.NONE); // get,set
+	/**
+	 * Der gezahlte Betrag in Cent. {@code null} heißt: nicht bezahlt, oder älterer Stand ohne das Feld (dann gilt der
+	 * geltende Preis, siehe {@link #getPaidCents()}). Gesetzt beim Bezahlen über {@link SaleDates}, nicht im Setter; ändert
+	 * sich danach der Preis, bleibt der Betrag stehen.
+	 */
+	private Integer paidAmount; // get,set
 	private boolean collected; // get,set
 
 	/**
@@ -75,6 +92,19 @@ public class Booking {
 	@JsonIgnore
 	public void setParent(Presentation parentPresentation) {
 		this.parentPresentation = parentPresentation;
+	}
+
+	/** Die Kennung; sie wird beim ersten Lesen erzeugt und bleibt dann dieselbe (auch zwischen Threads). */
+	public synchronized String getId() {
+		if (id == null) {
+			id = UUID.randomUUID().toString();
+		}
+		return id;
+	}
+
+	/** Ein fehlender Wert ({@code "id": null} in einer Datei) ergibt eine neue Kennung. */
+	public synchronized void setId(String id) {
+		this.id = id;
 	}
 
 	public String getSeatId() {
@@ -144,6 +174,14 @@ public class Booking {
 
 	public void setPaymentStatus(PaymentStatus paymentStatus) {
 		this.paymentStatus.set(paymentStatus);
+	}
+
+	public Integer getPaidAmount() {
+		return paidAmount;
+	}
+
+	public void setPaidAmount(Integer paidAmount) {
+		this.paidAmount = paidAmount;
 	}
 
 	public boolean isCollected() {
@@ -228,6 +266,18 @@ public class Booking {
 		return parentPresentation != null ? parentPresentation.getPrice() : 0;
 	}
 
+	/**
+	 * Der gezahlte Betrag einer bezahlten Buchung: {@link #getPaidAmount()}, bei einem älteren Stand ohne Betrag der geltende
+	 * Preis; {@code null}, wenn die Buchung nicht bezahlt ist.
+	 */
+	@JsonIgnore
+	public Integer getPaidCents() {
+		if (!isPaid()) {
+			return null;
+		}
+		return paidAmount != null ? paidAmount : getEffectivePrice();
+	}
+
 	/** Setzt den Einzelpreis; ist der Wert gleich dem Standardpreis der Vorstellung, gilt wieder der Standardpreis. */
 	@JsonIgnore
 	public void setEffectivePrice(int cents) {
@@ -260,12 +310,48 @@ public class Booking {
 	}
 
 	/**
+	 * Ob die Buchung ihren Sitz belegt: reserviert oder bezahlt ({@link #getStatus()} nicht frei), wie in der Saalansicht.
+	 * Reste einer alten Buchung ({@link #hasLeftovers()}) und ein Einzelpreis belegen ihn nicht (KARV-121).
+	 */
+	@JsonIgnore
+	public boolean isTaken() {
+		return getStatus() != SeatStatus.FREE;
+	}
+
+	/**
 	 * Ob die Buchung Daten trägt, die nicht verloren gehen dürfen: Name, E-Mail, Kommentar, ein Zahlstatus oder
-	 * abgeholt. Ein bloßer Einzelpreis zählt nicht.
+	 * abgeholt. Ein bloßer Einzelpreis zählt nicht. Dieselben Felder benennt {@link #dataLabels()}.
 	 */
 	public boolean hasData() {
 		return !isBlank(lastName) || !isBlank(firstName) || !isBlank(eMail) || !isBlank(comment)
 				|| (getPaymentStatus() != null && getPaymentStatus() != PaymentStatus.NONE) || collected;
+	}
+
+	/**
+	 * Die Felder, mit denen die Buchung Daten trägt ({@link #hasData()}), in der Reihenfolge der Tabelle, etwa
+	 * "Nachname", "Kommentar"; leer, wenn sie keine trägt. Für Rückfragen, die nennen, was erhalten bliebe.
+	 */
+	public List<String> dataLabels() {
+		List<String> labels = new ArrayList<>();
+		if (!isBlank(lastName)) {
+			labels.add("Nachname");
+		}
+		if (!isBlank(firstName)) {
+			labels.add("Vorname");
+		}
+		if (!isBlank(eMail)) {
+			labels.add("E-Mail");
+		}
+		if (!isBlank(comment)) {
+			labels.add("Kommentar");
+		}
+		if (getPaymentStatus() != null && getPaymentStatus() != PaymentStatus.NONE) {
+			labels.add("Zahlung");
+		}
+		if (collected) {
+			labels.add("abgeholt");
+		}
+		return labels;
 	}
 
 	/** "Tisch A3" bei einer Reihe mit Buchstaben, sonst "Tisch 3" (aus der Momentaufnahme). */
@@ -293,24 +379,74 @@ public class Booking {
 	/** Kopie aller gespeicherten Felder (auch "Ohne Platz"); ohne Vorstellung als Elternteil. */
 	public Booking copy() {
 		Booking copy = new Booking();
-		copy.seatId = seatId;
-		copy.rowLabel = rowLabel;
-		copy.tableNumber = tableNumber;
-		copy.seatNumber = seatNumber;
-		copy.category = category;
-		copy.wheelchairAccessible = wheelchairAccessible;
-		copy.price = price;
-		copy.setPaymentStatus(getPaymentStatus());
-		copy.collected = collected;
-		copy.reservationDate = reservationDate;
-		copy.paymentDate = paymentDate;
-		copy.collectionDate = collectionDate;
-		copy.lastName = lastName;
-		copy.firstName = firstName;
-		copy.eMail = eMail;
-		copy.comment = comment;
-		copy.unassigned = unassigned;
+		copy.copyFrom(this);
 		return copy;
+	}
+
+	/**
+	 * Übernimmt alle gespeicherten Felder eines anderen Stands, auch die Kennung, den Sitz und "Ohne Platz". Der
+	 * Elternverweis bleibt.
+	 */
+	public void copyFrom(Booking source) {
+		setId(source.getId());
+		setSeatId(source.getSeatId());
+		setRowLabel(source.getRowLabel());
+		setTableNumber(source.getTableNumber());
+		setSeatNumber(source.getSeatNumber());
+		setCategory(source.getCategory());
+		setWheelchairAccessible(source.isWheelchairAccessible());
+		setPrice(source.getPrice());
+		setPaymentStatus(source.getPaymentStatus());
+		setPaidAmount(source.getPaidAmount());
+		setCollected(source.isCollected());
+		setReservationDate(source.getReservationDate());
+		setPaymentDate(source.getPaymentDate());
+		setCollectionDate(source.getCollectionDate());
+		setLastName(source.getLastName());
+		setFirstName(source.getFirstName());
+		setEMail(source.getEMail());
+		setComment(source.getComment());
+		setUnassigned(source.isUnassigned());
+	}
+
+	/**
+	 * Leert die Kundendaten (alles, was {@link #hasData()} prüft, dazu die Daten von Reservierung, Bezahlung und
+	 * Abholung, den gezahlten Betrag, den Einzelpreis und "Ohne Platz"). Sitz und Momentaufnahme des Platzes bleiben. Die
+	 * Buchung bekommt eine neue Kennung, denn eine Buchung ohne Daten ist nicht mehr dieselbe Buchung.
+	 */
+	public void clearCustomerData() {
+		setLastName(null);
+		setFirstName(null);
+		setEMail(null);
+		setComment(null);
+		setPaymentStatus(PaymentStatus.NONE);
+		setPaidAmount(null);
+		setCollected(false);
+		setReservationDate(null);
+		setPaymentDate(null);
+		setCollectionDate(null);
+		setPrice(null);
+		setUnassigned(false);
+		setId(null);
+	}
+
+	/**
+	 * Ob die Buchung eines Sitzes frei ist (kein Nachname, nicht bezahlt) und trotzdem Daten trägt, etwa einen Kommentar
+	 * oder einen Vornamen. Solche Reste verwirft {@link #clearLeftovers()}, sobald eine neue Buchung den Sitz bekommt
+	 * (KARV-121). Eine Buchung ohne Platz hat keine Reste: Ihre Daten sind alles, was von ihr bleibt.
+	 */
+	public boolean hasLeftovers() {
+		return !unassigned && !isTaken() && hasData();
+	}
+
+	/**
+	 * Verwirft die Reste einer freien Buchung wie {@link #clearCustomerData()}, mit neuer Kennung. Der Einzelpreis bleibt:
+	 * Er belegt keinen Sitz und ist kein Kundendatum.
+	 */
+	public void clearLeftovers() {
+		Integer keptPrice = price;
+		clearCustomerData();
+		price = keptPrice;
 	}
 
 	/** Reihenbuchstabe ohne Rand, {@code null} als leer. */

@@ -23,4 +23,14 @@ public final class MoneyFormat {
 	public static int toCents(double euros) {
 		return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, Math.round(euros * 100)));
 	}
+
+	/** Wie {@link #toCents(double)}; keine Eingabe ({@code null}, etwa eine geleerte Tabellenzelle) ergibt 0. */
+	public static int toCentsOrZero(Double euros) {
+		return euros == null ? 0 : toCents(euros);
+	}
+
+	/** Cent als Euro für eine Tabellenzelle; {@code null} bleibt {@code null} (leere Zelle). */
+	public static Double toEuros(Integer cents) {
+		return cents == null ? null : cents / 100.0;
+	}
 }

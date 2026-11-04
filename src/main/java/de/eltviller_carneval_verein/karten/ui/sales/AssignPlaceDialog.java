@@ -1,16 +1,13 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.MainApp;
-import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
@@ -25,7 +22,8 @@ import javafx.stage.Window;
 
 /**
  * Der Dialog "Platz zuweisen…" für eine Buchung ohne Platz: zeigt die freien Sitze der Bestuhlung ("Tisch A3, Sitz 2")
- * zur Auswahl. Zugewiesen wird nicht hier, sondern vom Aufrufer über {@code BookingSync.assign}.
+ * zur Auswahl. Zugewiesen wird nicht hier, sondern vom Aufrufer über {@code BookingSync.assign}. Welche Sitze frei sind und
+ * warum sich kein Platz zuweisen lässt, steht in {@link PlaceAssignment}.
  */
 public final class AssignPlaceDialog {
 
@@ -41,7 +39,7 @@ public final class AssignPlaceDialog {
 	 * @return der gewählte freie Sitz, leer bei "Abbrechen" oder wenn kein Sitz frei ist
 	 */
 	public static Optional<Seat> choose(Presentation presentation, SeatingPlan plan, Window owner) {
-		List<Seat> free = freeSeats(presentation, plan);
+		List<Seat> free = PlaceAssignment.freeSeats(presentation, plan);
 		if (free.isEmpty()) {
 			return Optional.empty();
 		}
@@ -51,7 +49,7 @@ public final class AssignPlaceDialog {
 			@Override
 			protected void updateItem(Seat seat, boolean empty) {
 				super.updateItem(seat, empty);
-				setText(empty || seat == null ? null : label(seat));
+				setText(empty || seat == null ? null : EntityLabels.placeOf(seat));
 			}
 		});
 		list.setPrefSize(260, 320);
@@ -86,32 +84,5 @@ public final class AssignPlaceDialog {
 			return Optional.ofNullable(list.getSelectionModel().getSelectedItem());
 		}
 		return Optional.empty();
-	}
-
-	/**
-	 * Die freien Sitze der Bestuhlung, sortiert nach Reihenbuchstabe ({@link Booking#ROW_LABEL_ORDER}), Tisch- und
-	 * Sitznummer. Frei ist ein Sitz, wenn keine Buchung der Vorstellung auf ihn zeigt, die Daten trägt
-	 * ({@link Booking#hasData()}); ein bloßer Einzelpreis belegt ihn nicht.
-	 */
-	static List<Seat> freeSeats(Presentation presentation, SeatingPlan plan) {
-		if (plan == null) {
-			return List.of();
-		}
-		Set<String> taken = new HashSet<>();
-		if (presentation != null && presentation.getBookings() != null) {
-			for (Booking booking : presentation.getBookings()) {
-				if (booking.getSeatId() != null && booking.hasData()) {
-					taken.add(booking.getSeatId());
-				}
-			}
-		}
-		Comparator<Seat> order = Comparator.comparing((Seat seat) -> seat.getParent().getRowLabel(), Booking.ROW_LABEL_ORDER)
-				.thenComparingInt(seat -> seat.getParent().getTableNumber()).thenComparingInt(Seat::getSeatNumber);
-		return plan.getSeats().stream().filter(seat -> !taken.contains(seat.getId())).sorted(order).toList();
-	}
-
-	/** "Tisch A3, Sitz 2" bzw. "Tisch 3, Sitz 2" ohne Reihenbuchstaben. */
-	static String label(Seat seat) {
-		return seat.getParent().getDisplayName() + ", Sitz " + seat.getSeatNumber();
 	}
 }

@@ -200,6 +200,43 @@ class BookingSyncTest {
 	}
 
 	@Test
+	void geleerte_Buchung_ohne_Platz_wird_entfernt_andere_bleiben() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		Booking cleared = snapshotBooking(presentation, "Z", 9, 9);
+		cleared.setLastName("Storno");
+		cleared.setPrice(2000);
+		Booking kept = snapshotBooking(presentation, "Z", 9, 8);
+		kept.setComment("bleibt");
+		Booking otherEmpty = snapshotBooking(presentation, "Z", 9, 7);
+		otherEmpty.setLastName("Fremd");
+		BookingSync.sync(presentation, plan);
+		int before = presentation.getBookings().size();
+		cleared.setLastName(null);
+		otherEmpty.setLastName(null);
+
+		boolean removed = BookingSync.removeIfCancelled(cleared);
+
+		assertTrue(removed);
+		assertFalse(presentation.getBookings().contains(cleared));
+		assertTrue(presentation.getBookings().contains(kept));
+		assertTrue(presentation.getBookings().contains(otherEmpty), "nur die genannte Buchung wird entfernt");
+		assertEquals(before - 1, presentation.getBookings().size());
+		assertFalse(BookingSync.removeIfCancelled(kept), "eine Buchung mit Daten bleibt");
+	}
+
+	@Test
+	void leere_Buchung_auf_einem_Sitz_bleibt() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		BookingSync.sync(presentation, plan);
+		Booking placeholder = presentation.getBookings().get(0);
+
+		assertFalse(BookingSync.removeIfCancelled(placeholder));
+		assertTrue(presentation.getBookings().contains(placeholder));
+	}
+
+	@Test
 	void wechsel_entfernt_leere_Buchung_ohne_Treffer() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
@@ -679,5 +716,41 @@ class BookingSyncTest {
 		assertSame(occupant, bookingOf(presentation, target));
 		assertTrue(lost.isUnassigned());
 		assertEquals(9, lost.getTableNumber());
+	}
+
+	/** KARV-121: Reste einer alten Buchung (kein Nachname, nicht bezahlt) belegen den Sitz nicht und gehen verloren. */
+	@Test
+	void assign_ersetzt_den_Platzhalter_mit_Resten() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		BookingSync.sync(presentation, plan);
+		Seat target = seat(plan, 2, 1);
+		Booking leftovers = bookingOf(presentation, target);
+		leftovers.setComment("storniert");
+		Booking lost = snapshotBooking(presentation, "Z", 9, 9);
+		lost.setLastName("Schmidt");
+		lost.setUnassigned(true);
+
+		boolean assigned = BookingSync.assign(presentation, plan, lost, target);
+
+		assertTrue(assigned);
+		assertFalse(presentation.getBookings().contains(leftovers));
+		assertSame(lost, bookingOf(presentation, target));
+	}
+
+	@Test
+	void assign_lehnt_bezahlten_Sitz_ohne_Namen_ab() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		BookingSync.sync(presentation, plan);
+		Seat target = seat(plan, 1, 2);
+		Booking occupant = bookingOf(presentation, target);
+		occupant.setPaymentStatus(PaymentStatus.CARD);
+		Booking lost = snapshotBooking(presentation, "Z", 9, 9);
+		lost.setLastName("Schmidt");
+		lost.setUnassigned(true);
+
+		assertFalse(BookingSync.assign(presentation, plan, lost, target));
+		assertSame(occupant, bookingOf(presentation, target));
 	}
 }

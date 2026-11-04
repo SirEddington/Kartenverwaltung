@@ -88,12 +88,28 @@ public final class EntityLabels {
 		return prefix + booking.getPlaceLabel();
 	}
 
+	/** Der Kunde einer Buchung: Vor- und Nachname, getrimmt; leer, wenn beide fehlen oder leer sind. */
+	public static String customer(Booking booking) {
+		return ((booking.getFirstName() == null ? "" : booking.getFirstName().trim()) + " "
+				+ (booking.getLastName() == null ? "" : booking.getLastName().trim())).trim();
+	}
+
 	/**
 	 * Der Platz einer Buchung für Anzeigen: "Tisch A3, Sitz 2", bei einer Buchung ohne Platz "Ohne Platz (bisher
 	 * Tisch A3, Sitz 2)", damit sie nie mit der Buchung des echten Platzes verwechselt wird.
 	 */
 	public static String place(Booking booking) {
 		return booking.isUnassigned() ? UNASSIGNED_TEXT + " (bisher " + booking.getPlaceLabel() + ")" : booking.getPlaceLabel();
+	}
+
+	/**
+	 * Der Platz eines Sitzes in der Form, die auch eine Buchung auf ihm trägt: "Tisch A3, Sitz 2" bzw. "Tisch 3, Sitz 2" ohne
+	 * Reihenbuchstaben (für "Platz zuweisen" und für eine Buchung, die im Modell fehlt, KARV-111); ohne Tisch "Sitz 2".
+	 */
+	public static String placeOf(Seat seat) {
+		Table table = seat.getParent();
+		String kind = "Sitz " + seat.getSeatNumber();
+		return table == null ? kind : table.getDisplayName() + ", " + kind;
 	}
 
 	/**

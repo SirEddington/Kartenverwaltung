@@ -1,0 +1,299 @@
+package de.eltviller_carneval_verein.karten.store;
+
+import java.time.Instant;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.Executor;
+import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
+import javafx.beans.property.ReadOnlyObjectProperty;
+import javafx.beans.property.ReadOnlyObjectWrapper;
+
+/**
+ * Zustand und Rückmeldungen des {@link SyncService}: hält den Zustand, entscheidet, welche Meldung wirklich hinaus
+ * geht, und reicht alles über den {@code ui}-Executor weiter.
+ * <ul>
+ * <li>Intern gilt immer der sofort gesetzte Zustand; die Eigenschaften folgen über den {@code ui}-Executor in der
+ * Reihenfolge der Änderungen.</li>
+ * <li>{@code unreachable} kommt einmal je Ausfall, {@code reconnected} beim ersten Erfolg danach.</li>
+ * <li>{@code error} kommt bei einer Störung nur, wenn sich der Text gegenüber der zuletzt gemeldeten Störung ändert;
+ * Meldungen zu einer Sache (Einheit, Datei) kommen einmal je Programmlauf.</li>
+ * </ul>
+ * Ein Fehler im Rückruf oder ein nicht laufender UI-Thread beendet nie den Aufrufer. Threadsicher.
+ */
+final class SyncNotifier {
+
+	private static final Logger LOGGER = Logger.getLogger(SyncService.class.getName());
+
+	private final Executor ui;
+	private final ReadOnlyObjectWrapper<SyncState> stateProperty = new ReadOnlyObjectWrapper<>(SyncState.AUS);
+	private final ReadOnlyObjectWrapper<Instant> lastSyncProperty = new ReadOnlyObjectWrapper<>();
+	private final ReadOnlyObjectWrapper<Double> fullSyncProgressProperty = new ReadOnlyObjectWrapper<>();
+	private final ReadOnlyBooleanWrapper connectionCompleteProperty;
+	private final ReadOnlyBooleanWrapper catchingUpProperty = new ReadOnlyBooleanWrapper();
+	private volatile SyncListener listener = new SyncListener() {
+	};
+
+	private SyncState current = SyncState.AUS;
+	/** Der zuletzt gesetzte Fortschritt des Vollabgleichs; {@code null} ohne Lauf. */
+	private Double fullSyncProgress;
+	/** Der zuletzt gesetzte Stand von {@link #connectionCompleteProperty()}. */
+	private boolean connectionComplete;
+	/** Der zuletzt gesetzte Stand von {@link #catchingUpProperty()}. */
+	private boolean catchingUp;
+	/** Ob für den laufenden Ausfall schon gemeldet wurde; zurückgesetzt beim nächsten Erfolg. */
+	private boolean unreachableNotified;
+	/** Ob der Ordner ausgefallen war und die Rückkehr noch nicht gemeldet ist. */
+	private boolean wasDown;
+	/** Die zuletzt gemeldete Störung; zurückgesetzt beim nächsten Erfolg. */
+	private String lastErrorMessage;
+	/** Schlüssel der Meldungen, die in diesem Programmlauf schon einmal kamen. */
+	private final Set<String> reportedOnce = new HashSet<>();
+
+	/**
+	 * @param connectionComplete der Startwert von {@link #connectionCompleteProperty()} (aus der Marke "verbunden"); er gilt
+	 *                           sofort, ohne den {@code ui}-Executor
+	 */
+	SyncNotifier(Executor ui, boolean connectionComplete) {
+		this.ui = ui;
+		this.connectionComplete = connectionComplete;
+		this.connectionCompleteProperty = new ReadOnlyBooleanWrapper(connectionComplete);
+	}
+
+	ReadOnlyObjectProperty<SyncState> stateProperty() {
+		return stateProperty.getReadOnlyProperty();
+	}
+
+	ReadOnlyObjectProperty<Instant> lastSyncProperty() {
+		return lastSyncProperty.getReadOnlyProperty();
+	}
+
+	ReadOnlyObjectProperty<Double> fullSyncProgressProperty() {
+		return fullSyncProgressProperty.getReadOnlyProperty();
+	}
+
+	/**
+	 * Setzt den Fortschritt des Vollabgleichs (Anteil von 0.0 bis 1.0, {@code null} ohne Lauf); die Eigenschaft folgt über
+	 * den {@code ui}-Executor, nur bei einer Änderung.
+	 */
+	synchronized void setFullSyncProgress(Double progress) {
+		if (Objects.equals(fullSyncProgress, progress)) {
+			return;
+		}
+		fullSyncProgress = progress;
+		notifyUi(() -> fullSyncProgressProperty.set(progress));
+	}
+
+	ReadOnlyBooleanProperty connectionCompleteProperty() {
+		return connectionCompleteProperty.getReadOnlyProperty();
+	}
+
+	/**
+	 * Setzt, ob der erste Vollabgleich der Verbindung zu Ende kam ({@code true} auch im Einzelbetrieb); die Eigenschaft
+	 * folgt über den {@code ui}-Executor, nur bei einer Änderung.
+	 */
+	synchronized void setConnectionComplete(boolean complete) {
+		if (connectionComplete == complete) {
+			return;
+		}
+		connectionComplete = complete;
+		notifyUi(() -> connectionCompleteProperty.set(complete));
+	}
+
+	ReadOnlyBooleanProperty catchingUpProperty() {
+		return catchingUpProperty.getReadOnlyProperty();
+	}
+
+	/**
+	 * Setzt, ob das Lesen der fremden Änderungslisten im Rückstand ist ({@link FeedPoll#more()}); die Eigenschaft folgt über
+	 * den {@code ui}-Executor, nur bei einer Änderung.
+	 */
+	synchronized void setCatchingUp(boolean behind) {
+		if (catchingUp == behind) {
+			return;
+		}
+		catchingUp = behind;
+		notifyUi(() -> catchingUpProperty.set(behind));
+	}
+
+	void setListener(SyncListener listener) {
+		this.listener = listener != null ? listener : new SyncListener() {
+		};
+	}
+
+	synchronized SyncState state() {
+		return current;
+	}
+
+	/** Setzt den Zustand; die Eigenschaft folgt über den {@code ui}-Executor. */
+	synchronized void setState(SyncState state) {
+		if (current == state) {
+			return;
+		}
+		current = state;
+		notifyUi(() -> stateProperty.set(state));
+	}
+
+	/**
+	 * Neuer Ordner oder Einzelbetrieb: vergisst Ausfall, Störung und Rückstand beim Lesen des vorigen Ordners; der Zustand
+	 * bleibt.
+	 */
+	synchronized void reset() {
+		unreachableNotified = false;
+		wasDown = false;
+		lastErrorMessage = null;
+		setCatchingUp(false);
+	}
+
+	/**
+	 * Der Ordner ist nicht erreichbar: Zustand {@link SyncState#OFFLINE}, SYS-005 ins Log einmal je Ausfall.
+	 *
+	 * @param callback ob dabei auch {@link SyncListener#unreachable} kommt (nicht beim Start: das Popup zeigt der
+	 *                 Aufrufer, der Ausfall gilt trotzdem als gemeldet)
+	 */
+	synchronized void unreachable(String path, boolean callback) {
+		wasDown = true;
+		setState(SyncState.OFFLINE);
+		if (unreachableNotified) {
+			return;
+		}
+		unreachableNotified = true;
+		LOGGER.warning(StoreMessages.unreachable(path));
+		if (callback) {
+			deliver(l -> l.unreachable(path));
+		}
+	}
+
+	/** Eine Störung bei erreichbarem Ordner: Zustand {@link SyncState#FEHLER}, gemeldet nur bei geändertem Text. */
+	synchronized void failed(String message, Throwable cause) {
+		setState(SyncState.FEHLER);
+		if (message.equals(lastErrorMessage)) {
+			LOGGER.log(Level.FINE, "Andauernder Fehler des Abgleichs: {0}", message);
+			return;
+		}
+		lastErrorMessage = message;
+		LOGGER.log(Level.WARNING, message, cause);
+		deliver(l -> l.error(message));
+	}
+
+	/**
+	 * Ein gelungener Takt: Zeitpunkt fortschreiben, Zustand setzen, Störung vergessen und eine Rückkehr nach einem
+	 * Ausfall melden.
+	 */
+	synchronized void succeeded(Instant at, boolean pending) {
+		lastErrorMessage = null;
+		notifyUi(() -> lastSyncProperty.set(at));
+		setState(pending ? SyncState.AUSSTEHEND : SyncState.AKTUELL);
+		if (wasDown) {
+			wasDown = false;
+			unreachableNotified = false;
+			deliver(SyncListener::reconnected);
+		}
+	}
+
+	/** Meldet eine Störung zu einer Sache (Einheit, Datei) einmal je Programmlauf, ohne den Zustand zu ändern. */
+	synchronized void errorOnce(String key, String message) {
+		if (!reportedOnce.add(key)) {
+			return;
+		}
+		LOGGER.warning(message);
+		deliver(l -> l.error(message));
+	}
+
+	/**
+	 * Meldet eine übersprungene Einheit ({@link SyncListener#skipped}, SYS-013) einmal je Einheit und Programmlauf, ohne den
+	 * Zustand zu ändern; der Log-Eintrag nennt den Pfad der Einheit.
+	 */
+	synchronized void skipped(UnitKey unit, boolean subtree, String cause) {
+		if (!reportedOnce.add(StoreMessages.SYS_SKIPPED + " " + unit.relativePath())) {
+			return;
+		}
+		LOGGER.warning(StoreMessages.skipped(unit, subtree, cause));
+		deliver(l -> l.skipped(unit, subtree, cause));
+	}
+
+	/**
+	 * Meldet eine gesperrte Einheit ({@link SyncListener#locked}, SYS-008 bzw. SYS-009) einmal je Einheit, Zustand und
+	 * Sperre, ohne den Zustand zu ändern; der Log-Eintrag trägt den Text. Nach {@link #forgetLocked} kommt eine neue Sperre
+	 * wieder.
+	 */
+	synchronized void locked(UnitKey unit, UnitState.Status status) {
+		String message = StoreMessages.locked(unit, status);
+		if (message == null) {
+			return;
+		}
+		String code = status == UnitState.Status.LOCKED_DAMAGED ? StoreMessages.SYS_DAMAGED : StoreMessages.SYS_NEWER_FORMAT;
+		if (!reportedOnce.add(code + " " + unit.relativePath())) {
+			return;
+		}
+		LOGGER.warning(message);
+		deliver(l -> l.locked(unit, status));
+	}
+
+	/**
+	 * Die Einheit ist nicht mehr gesperrt (zurückgesetzt oder wieder lesbar): Sperrt sie sich später erneut, kommt
+	 * {@link #locked} wieder. Sonst fehlte sie dann unter den gesperrten Einträgen der Oberfläche.
+	 */
+	synchronized void forgetLocked(UnitKey unit) {
+		reportedOnce.remove(StoreMessages.SYS_DAMAGED + " " + unit.relativePath());
+		reportedOnce.remove(StoreMessages.SYS_NEWER_FORMAT + " " + unit.relativePath());
+	}
+
+	/** Meldet einen Fehler für die Fußzeile ohne Log und ohne Zustand; ob er einmal oder öfter kommt, regelt der Aufrufer. */
+	void error(String message) {
+		deliver(l -> l.error(message));
+	}
+
+	void conflictsChanged() {
+		deliver(SyncListener::conflictsChanged);
+	}
+
+	void unitsChanged(Set<UnitKey> units) {
+		if (!units.isEmpty()) {
+			Set<UnitKey> copy = Set.copyOf(units);
+			deliver(l -> l.unitsChanged(copy));
+		}
+	}
+
+	void pending(PendingSighting sighting) {
+		deliver(l -> l.pending(sighting.unit(), sighting.version(), sighting.machineName()));
+	}
+
+	void lost(LostVersion loss) {
+		deliver(l -> l.lost(loss.unit(), List.copyOf(loss.mine()), loss.winner()));
+	}
+
+	void duplicateMachine(String message) {
+		LOGGER.warning(message);
+		deliver(l -> l.duplicateMachine(message));
+	}
+
+	/** Die Frage beim Verbinden ({@link SyncListener#connectDecisionNeeded}); wie oft sie kommt, regelt der Aufrufer. */
+	void connectDecisionNeeded(String dir, boolean setAsideAllowed) {
+		deliver(l -> l.connectDecisionNeeded(dir, setAsideAllowed));
+	}
+
+	private void deliver(Consumer<SyncListener> call) {
+		notifyUi(() -> call.accept(listener));
+	}
+
+	private void notifyUi(Runnable action) {
+		try {
+			ui.execute(() -> {
+				try {
+					action.run();
+				} catch (RuntimeException e) {
+					LOGGER.log(Level.WARNING, "Rückruf des Versionsspeichers ist fehlgeschlagen", e);
+				}
+			});
+		} catch (RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Die Oberfläche ist für den Versionsspeicher nicht erreichbar", e);
+		}
+	}
+}

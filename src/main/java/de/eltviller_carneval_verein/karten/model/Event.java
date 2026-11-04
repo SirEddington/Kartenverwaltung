@@ -74,9 +74,32 @@ public class Event {
 	}
 	// <-- Getter und Setter
 
+	/** Die Vorstellung mit dieser ID; {@code null} bei unbekannter oder fehlender ID. */
+	public Presentation findPresentation(String id) {
+		if (presentations == null) {
+			return null;
+		}
+		for (Presentation presentation : presentations) {
+			if (presentation.getId().equals(id)) {
+				return presentation;
+			}
+		}
+		return null;
+	}
+
 	/** Nimmt jeden Wert an; ein leerer Name wird vom {@code EventValidator} gemeldet (EVT-002). */
 	public void setName(String name) {
 		this.name = name;
+	}
+
+	/**
+	 * Übernimmt die gespeicherten Felder eines anderen Stands (Name, Beschreibung, archiviert). Nicht kopiert werden
+	 * die Kennung (unveränderlich) und die Vorstellungen: Die Liste samt ihren Objekten bleibt, wie sie ist.
+	 */
+	public void copyFrom(Event source) {
+		setName(source.getName());
+		setDescription(source.getDescription());
+		setArchived(source.isArchived());
 	}
 
 	public Presentation addPresentation() {

@@ -10,18 +10,24 @@ import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.EventSelectionSync;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelsMenu;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
@@ -43,7 +49,7 @@ public class TicketShellController {
 	private static final Logger LOG = Logger.getLogger(TicketShellController.class.getName());
 	private static final String ALL_PRESENTATIONS = "Alle Vorstellungen";
 
-	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
+	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
 	// Gemeinsamer Zustand mit dem Kundenfenster: Die Shell und ihre Inhalte schreiben ihn, das Kundenfenster liest ihn
 	private final SalesViewState state = new SalesViewState();
 
@@ -74,11 +80,18 @@ public class TicketShellController {
 
 	// Wird gerade die Vorstellungsliste neu gefüllt, soll die Auswahl nicht an den Inhalt gemeldet werden
 	private boolean updatingPresentations = false;
+	// Führt die Boxen nach Änderungen anderer Rechner nach; entsteht in initialize, wenn die Boxen da sind
+	private EventSelectionSync selectionSync;
+	// Fremde Änderungen an Events: Die Liste und die Auswahl folgen dem Cache
+	private final RepositoryListener<Event> foreignChanges = LiveViews.onFxThread(LiveViews.ALL_UNITS, () -> selectionSync.sync());
 	private String searchText = "";
 	// Auswahl der verlassenen Ansicht, bis die neue sie zurückbekommt (restorePendingSelection)
 	private List<Booking> pendingSelection = List.of();
 	private ContentController activeContentController;
 	private boolean editMode = false;
+	// Speichert Buchungsänderungen sofort (Einstellung "Buchungen sofort speichern"), solange die Shell zu sehen ist und der Bearbeitungsmodus an
+	private final BookingAutoSave autoSave = new BookingAutoSave(ChangeTracker.events(), EventSaver::save, Platform::runLater,
+			() -> editMode && BookingAutoSave.settingOn());
 	private CustomerDisplay customerDisplay;
 	private final ChangeListener<Boolean> windowShowing = (obs, wasShowing, isShowing) -> {
 		if (!isShowing) {
@@ -113,6 +126,19 @@ public class TicketShellController {
 			}
 		});
 
+		selectionSync = new EventSelectionSync(eventRepository, eventComboBox, presComboBox, event -> !event.isArchived(), () -> state.eventProperty().get(),
+				() -> state.presentationProperty().get(), this::applyEventSelection, presentation -> {
+					state.presentationProperty().set(presentation);
+					if (activeContentController != null) {
+						activeContentController.setPresentation(presentation);
+					}
+				});
+
+		// Fremde Änderungen an Events nur, solange die Shell zu sehen ist (danach hielte das Repository sie am Leben)
+		// Ebenso das sofortige Speichern: nach dem Verlassen der Ansicht hört es nicht mehr am Tracker zu
+		LiveViews.whileShown(contentArea, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges),
+				new Registration(() -> autoSave.setActive(true), () -> autoSave.setActive(false)));
+
 		// "Alle Vorstellungen" ist als echter (null-)Eintrag Teil der Liste, wie in der Abrechnung: So lässt sich die
 		// Auswahl einer Vorstellung wieder aufheben.
 		presComboBox.setConverter(new StringConverter<Presentation>() {
@@ -132,32 +158,13 @@ public class TicketShellController {
 
 		// Event- & Vorstellungs-Listener einrichten
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
-			state.eventProperty().set(selectedEvent);
-			state.presentationProperty().set(null);
-			if (selectedEvent != null) {
-				// Buchungen mit den Bestuhlungen abgleichen, bevor das Event angezeigt wird (gilt nicht als Änderung)
-				BookingSyncService.prepare(selectedEvent);
-			}
-			// Das Neufüllen der Liste meldet der Inhalt nicht einzeln: setEvent unten setzt ihn auf "Alle Vorstellungen"
-			updatingPresentations = true;
-			try {
-				List<Presentation> presentationItems = new ArrayList<>();
-				presentationItems.add(null); // "Alle Vorstellungen"
-				if (selectedEvent != null) {
-					presentationItems.addAll(selectedEvent.getPresentations());
-				}
-				presComboBox.getItems().setAll(presentationItems);
-				presComboBox.getSelectionModel().selectFirst();
-			} finally {
-				updatingPresentations = false;
-			}
-			if (activeContentController != null) {
-				activeContentController.setEvent(selectedEvent);
+			if (!selectionSync.updatingEvents()) {
+				applyEventSelection(selectedEvent);
 			}
 		});
 
 		presComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedPresentation) -> {
-			if (updatingPresentations) {
+			if (updatingPresentations || selectionSync.updatingPresentations()) {
 				return;
 			}
 			state.presentationProperty().set(selectedPresentation);
@@ -190,6 +197,32 @@ public class TicketShellController {
 		// Hat das einzige Event nur eine Vorstellung, ist sie gleich gewählt (Eintrag 0 ist "Alle Vorstellungen")
 		if (presComboBox.getItems().size() == 2) {
 			presComboBox.getSelectionModel().select(1);
+		}
+	}
+
+	/** Das gewählte Event gilt für die Shell und den Inhalt; die Vorstellung steht danach auf "Alle Vorstellungen". */
+	private void applyEventSelection(Event selectedEvent) {
+		state.eventProperty().set(selectedEvent);
+		state.presentationProperty().set(null);
+		if (selectedEvent != null) {
+			// Buchungen mit den Bestuhlungen abgleichen, bevor das Event angezeigt wird (gilt nicht als Änderung)
+			BookingSyncService.prepare(selectedEvent);
+		}
+		// Das Neufüllen der Liste meldet der Inhalt nicht einzeln: setEvent unten setzt ihn auf "Alle Vorstellungen"
+		updatingPresentations = true;
+		try {
+			List<Presentation> presentationItems = new ArrayList<>();
+			presentationItems.add(null); // "Alle Vorstellungen"
+			if (selectedEvent != null) {
+				presentationItems.addAll(selectedEvent.getPresentations());
+			}
+			presComboBox.getItems().setAll(presentationItems);
+			presComboBox.getSelectionModel().selectFirst();
+		} finally {
+			updatingPresentations = false;
+		}
+		if (activeContentController != null) {
+			activeContentController.setEvent(selectedEvent);
 		}
 	}
 
@@ -258,6 +291,7 @@ public class TicketShellController {
 	private void toggleEditMode() {
 		// Keine ungespeicherten Änderungen im Anzeigemodus: erst nachfragen
 		if (editMode) {
+			autoSave.flush(); // Sonst fragt der LeaveGuard nach Ungespeichertem, wenn jemand schneller als 300 ms wechselt
 			Outcome outcome = LeaveGuard.confirmSwitchToViewMode();
 			if (outcome == Outcome.STAY) {
 				return;
@@ -333,6 +367,7 @@ public class TicketShellController {
 
 	@FXML
 	private void handleBackToMenu() {
+		autoSave.flush(); // Vor dem Verlassen: Der LeaveGuard soll nur nach dem fragen, was wirklich nicht gespeichert werden konnte
 		MainApp.showMenuView();
 	}
 

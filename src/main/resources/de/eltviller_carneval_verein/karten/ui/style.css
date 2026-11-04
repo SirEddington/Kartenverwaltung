@@ -83,6 +83,9 @@
     -fx-font-size: 13px;
     -fx-padding: 7px 16px;
     -fx-background-radius: 4px;
+    /* modena zeichnet den Hintergrund 1 px unter den Knopf hinaus (0 0 -1 0); die Hover-Regeln mit eigenen Ebenen
+       nicht. Ohne diese Zeile verschwindet beim Hover unten ein Pixel. */
+    -fx-background-insets: 0;
     -fx-border-radius: 4px;
     -fx-cursor: hand;
     -fx-background-color: -fx-surface-white;
@@ -335,6 +338,13 @@
     -fx-border-width: 1px;
 }
 
+/* Markierter Text wie die Auswahl in Tabellen und Listen: Gelb mit blauer Schrift statt des Standardblaus.
+   ".text-input" trifft alle Eingabefelder, auch die in ComboBox, Spinner und bearbeiteten Tabellenzellen. */
+.text-input {
+    -fx-highlight-fill: -fx-ecv-yellow;
+    -fx-highlight-text-fill: -fx-ecv-blue;
+}
+
 /* ------------------------------------------------------------------------------
  * 5. COMBOBOX & DROPDOWNS
  * ------------------------------------------------------------------------------ */
@@ -536,41 +546,47 @@
  }
 
 /* ------------------------------------------------------------------------------
- * 6b. LISTEN (ListView, z.B. Reihenliste im Hallen-Editor, Dialoge "Platz zuweisen"
- * und "Wiederherstellen")
+ * 6b. LISTEN UND BÄUME (ListView/TreeView, z.B. Reihenliste im Hallen-Editor,
+ * Dialoge "Platz zuweisen" und "Wiederherstellen")
  * Rahmen, Zeilenfarben und Zellenabstand wie bei den Tabellen (Abschnitt 6), Fokus
  * wie bei Textfeldern und ComboBox. Die Zellen-Regeln gelten nur innerhalb einer
  * .list-view: Die Anzeige-Zelle des geschlossenen ComboBox ist auch eine ".list-cell"
  * (immer :filled:selected) und bleibt unberührt. Die Listen der ComboBox-Popups
  * behalten ihren Look aus Abschnitt 5 (dort spezifischere Selektoren).
  * ------------------------------------------------------------------------------ */
- .list-view {
+ .list-view,
+ .tree-view {
      -fx-background-color: transparent;
      -fx-border-color: -fx-border-neutral;
      -fx-border-width: 1px;
      -fx-border-radius: 4px;
  }
 
- .list-view:focused {
+ .list-view:focused,
+ .tree-view:focused {
      /* Breite bewusst gleich wie im Normalzustand, sonst verschiebt sich beim Fokussieren das Layout */
      -fx-border-color: -fx-ecv-blue;
  }
 
  /* Zeilen & Hover/Selection */
- .list-view .list-cell {
+ .list-view .list-cell,
+ .tree-view .tree-cell {
      -fx-background-color: -fx-surface-white;
      -fx-padding: 6px 8px;
  }
 
- .list-view .list-cell:odd {
+ .list-view .list-cell:odd,
+ .tree-view .tree-cell:odd {
      -fx-background-color: #F0F4F8;
  }
 
- .list-view .list-cell:hover {
+ .list-view .list-cell:hover,
+ .tree-view .tree-cell:hover {
      -fx-background-color: #E2E8F0;
  }
 
- .list-view .list-cell:filled:selected {
+ .list-view .list-cell:filled:selected,
+ .tree-view .tree-cell:filled:selected {
      -fx-background-color: -fx-ecv-yellow;
      -fx-text-fill: -fx-ecv-blue;
  }
@@ -723,6 +739,12 @@
     -fx-text-fill: #666666;
 }
 
+/* Fehler an einer Einstellung (etwa eine gescheiterte Prüfung beim Verbinden), direkt unter dem Bedienelement */
+.settings-error {
+    -fx-font-size: 14px;
+    -fx-text-fill: -fx-status-error-text;
+}
+
 /* Hinweis bei leerer Einstellungsansicht ("Noch keine Einstellungen verfügbar", "Keine Treffer") */
 .settings-info {
     -fx-font-size: 14px;
@@ -758,6 +780,18 @@
     -fx-background-color: -fx-ecv-blue;
     -fx-text-fill: -fx-ecv-yellow;
     -fx-border-width: 0px;
+}
+
+/* Hover und gedrückt wie beim Primärknopf; die Regel oben wiegt schwerer als dessen Hover-Regeln */
+.dialog-pane .button:default:hover {
+    -fx-background-color: -fx-ecv-blue, -fx-ecv-yellow;
+    -fx-background-insets: 0, 1;
+    -fx-background-radius: 4px, 3px;
+    -fx-text-fill: -fx-ecv-blue;
+}
+
+.dialog-pane .button:default:pressed {
+    -fx-background-color: -fx-ecv-blue, #E6CC00;
 }
 
 /* Rand als unterste Hintergrundebene statt -fx-border-*: Die Fläche hatte keinen Radius (eckig hinter dem runden Rand),
@@ -967,4 +1001,42 @@
     -fx-background-color: #E0E0E0, -fx-surface-white;
     -fx-background-insets: 0, 0 1 1 1;
     -fx-padding: 10px;
+}
+
+/* ------------------------------------------------------------------------------
+ * KONFLIKTE: Hinweis in der Fußzeile und Sammel-Dialog (ConflictIndicator, ConflictDialog)
+ * ------------------------------------------------------------------------------ */
+.conflict-indicator {
+    -fx-text-fill: -fx-status-warning-text;
+    -fx-font-weight: bold;
+    -fx-underline: true;
+}
+
+/* ------------------------------------------------------------------------------
+ * ABGLEICH MIT DEM GEMEINSAMEN ORDNER: Hinweis in der Fußzeile und Info-Fenster (SyncIndicator, SyncInfoWindow)
+ * ------------------------------------------------------------------------------ */
+.sync-indicator {
+    -fx-text-fill: -fx-status-warning-text;
+    -fx-font-weight: bold;
+    -fx-underline: true;
+}
+
+/* Entscheidung nötig, offline, gestört: hervorgehoben */
+.sync-indicator.sync-alert {
+    -fx-text-fill: -fx-status-error-text;
+}
+
+/* Link "gesperrte Einträge" in der Fußzeile (LockedUnitsIndicator): Daten, die sich nicht ändern lassen */
+.locked-indicator {
+    -fx-text-fill: -fx-status-error-text;
+    -fx-font-weight: bold;
+    -fx-underline: true;
+}
+
+.conflict-error {
+    -fx-text-fill: -fx-status-error-text;
+}
+
+.conflict-adopted {
+    -fx-text-fill: -fx-status-success-text;
 }

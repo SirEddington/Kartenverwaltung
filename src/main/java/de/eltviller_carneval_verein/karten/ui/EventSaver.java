@@ -2,7 +2,7 @@ package de.eltviller_carneval_verein.karten.ui;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.repository.EventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.validation.EventValidator;
 import de.eltviller_carneval_verein.karten.validation.ValidationResult;
 
@@ -27,7 +27,7 @@ public final class EventSaver {
 	 * @return {@code true}, wenn gespeichert wurde
 	 */
 	public static boolean save(Event event) {
-		SaveResult result = trySave(event, JsonEventRepository.getInstance());
+		SaveResult result = trySave(event, StoreEventRepository.getInstance());
 		StatusMessage.getInstance().showSaveResult(result.saved(), result.validation());
 		return result.saved();
 	}
@@ -38,7 +38,7 @@ public final class EventSaver {
 	 * abgefangen.
 	 */
 	public static void saveStructureChange(Event event) {
-		saveStructureChange(event, JsonEventRepository.getInstance());
+		saveStructureChange(event, StoreEventRepository.getInstance());
 	}
 
 	/** Wie {@link #saveStructureChange(Event)} (paketsichtbar für Tests). */

@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.Set;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
@@ -15,6 +17,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 
 class CustomerDisplayTextTest {
 
@@ -133,5 +136,21 @@ class CustomerDisplayTextTest {
 		assertEquals(SalesPlan.NONE_HINT, SalesPlan.hint(presentation, null));
 
 		assertTrue(CustomerDisplayText.showsWaitingHint(presentation, null));
+	}
+
+	/** KARV-111: Ein gesperrter Sitz ist für Kunden nicht frei. */
+	@Test
+	void lockedSeatIsShownAsTaken() {
+		Booking seat = new TestBookings().booking(presentation, 1, 1);
+		assertFalse(CustomerDisplayText.isTaken(seat), "ohne Sperre frei");
+
+		LockedSeats.install(() -> Set.of(UnitKey.booking(event.getId(), presentation.getId(), seat.getSeatId())), () -> {
+		});
+		assertTrue(CustomerDisplayText.isTaken(seat));
+	}
+
+	@AfterEach
+	void forgetLockedSeats() {
+		LockedSeats.reset();
 	}
 }

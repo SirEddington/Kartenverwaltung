@@ -205,6 +205,20 @@ class BookingTest {
 	}
 
 	@Test
+	void getPaidCents_nimmt_paidAmount_sonst_den_geltenden_Preis_und_ist_offen_leer() {
+		Presentation presentation = new Presentation();
+		presentation.changePrice(2000);
+		Booking booking = presentation.addBooking();
+		assertNull(booking.getPaidCents(), "offen");
+
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		assertEquals(Integer.valueOf(2000), booking.getPaidCents());
+
+		booking.setPaidAmount(1500);
+		assertEquals(Integer.valueOf(1500), booking.getPaidCents());
+	}
+
+	@Test
 	void PLACE_ORDER_sortiert_A2_vor_A10_und_Tische_ohne_Buchstaben_vor_A() {
 		Booking a10 = bookingAt("A", 10, 1);
 		Booking a2 = bookingAt("A", 2, 1);
@@ -304,6 +318,125 @@ class BookingTest {
 	}
 
 	@Test
+	void paidAmount_wird_gespeichert_und_geladen() throws IOException {
+		Booking booking = bookingAt("A", 3, 1);
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(1750);
+		ObjectMapper mapper = JsonMapperFactory.create();
+
+		String json = mapper.writeValueAsString(booking);
+		Booking loaded = mapper.readValue(json, Booking.class);
+
+		assertEquals(1750, mapper.readTree(json).path("paidAmount").asInt(), json);
+		assertEquals(Integer.valueOf(1750), loaded.getPaidAmount());
+	}
+
+	@Test
+	void aeltere_Datei_ohne_paidAmount_laedt_mit_null() throws IOException {
+		Booking loaded = JsonMapperFactory.create().readValue("{\"lastName\":\"Müller\",\"paymentStatus\":\"CASH\"}", Booking.class);
+
+		assertNull(loaded.getPaidAmount());
+	}
+
+	@Test
+	void clearCustomerData_leert_paidAmount() {
+		Booking booking = bookingAt("A", 3, 1);
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(1750);
+
+		booking.clearCustomerData();
+
+		assertNull(booking.getPaidAmount());
+	}
+
+	@Test
+	void hasLeftovers_nur_bei_freier_Buchung_mit_Daten() {
+		Booking leftover = new Booking();
+		leftover.setComment("storniert");
+		assertTrue(leftover.hasLeftovers());
+
+		Booking reserved = new Booking();
+		reserved.setLastName("Müller");
+		reserved.setComment("Fensterplatz");
+		assertFalse(reserved.hasLeftovers(), "reserviert");
+
+		Booking paid = new Booking();
+		paid.setPaymentStatus(PaymentStatus.CASH);
+		assertFalse(paid.hasLeftovers(), "bezahlt");
+
+		Booking empty = new Booking();
+		empty.setPrice(1800);
+		assertFalse(empty.hasLeftovers(), "nur Einzelpreis");
+
+		Booking unassigned = new Booking();
+		unassigned.setComment("nach Bestuhlungswechsel");
+		unassigned.setUnassigned(true);
+		assertFalse(unassigned.hasLeftovers(), "eine Buchung ohne Platz ist kein Rest eines Sitzes");
+	}
+
+	@Test
+	void dataLabels_nennt_die_Felder_von_hasData_und_ist_leer_ohne_Daten() {
+		Booking booking = new Booking();
+		booking.setPrice(1800);
+		booking.setReservationDate(LocalDate.of(2026, 10, 1));
+		assertEquals(List.of(), booking.dataLabels());
+		assertFalse(booking.hasData());
+
+		booking.setLastName("Müller");
+		booking.setFirstName("Anna");
+		booking.setEMail("a@b.de");
+		booking.setComment("Notiz");
+		booking.setPaymentStatus(PaymentStatus.CARD);
+		booking.setCollected(true);
+		assertEquals(List.of("Nachname", "Vorname", "E-Mail", "Kommentar", "Zahlung", "abgeholt"), booking.dataLabels());
+
+		// je Feld allein: hasData und dataLabels stimmen überein
+		for (java.util.function.Consumer<Booking> field : List.<java.util.function.Consumer<Booking>>of(b -> b.setLastName("M"),
+				b -> b.setFirstName("A"), b -> b.setEMail("a@b.de"), b -> b.setComment("N"), b -> b.setPaymentStatus(PaymentStatus.CASH),
+				b -> b.setCollected(true))) {
+			Booking single = new Booking();
+			field.accept(single);
+			assertTrue(single.hasData());
+			assertEquals(1, single.dataLabels().size());
+		}
+	}
+
+	@Test
+	void isTaken_bei_reserviert_oder_bezahlt() {
+		Booking booking = new Booking();
+		booking.setComment("Rest");
+		assertFalse(booking.isTaken());
+		booking.setPaymentStatus(PaymentStatus.TRANSFER);
+		assertTrue(booking.isTaken());
+	}
+
+	@Test
+	void clearLeftovers_leert_die_Daten_behaelt_Einzelpreis_und_Sitz_und_vergibt_neue_Kennung() {
+		Booking booking = bookingAt("A", 3, 2);
+		booking.setSeatId("s-1");
+		booking.setPrice(1800);
+		booking.setFirstName("Anna");
+		booking.setEMail("a@b.de");
+		booking.setComment("storniert");
+		booking.setCollected(true);
+		booking.setCollectionDate(LocalDate.of(2026, 10, 3));
+		booking.setReservationDate(LocalDate.of(2026, 10, 1));
+		String idBefore = booking.getId();
+
+		booking.clearLeftovers();
+
+		assertFalse(booking.hasData());
+		assertNull(booking.getFirstName());
+		assertNull(booking.getComment());
+		assertNull(booking.getCollectionDate());
+		assertNull(booking.getReservationDate());
+		assertEquals(Integer.valueOf(1800), booking.getPrice());
+		assertEquals("s-1", booking.getSeatId());
+		assertEquals("Tisch A3, Sitz 2", booking.getPlaceLabel());
+		assertFalse(idBefore.equals(booking.getId()), "neue Kennung");
+	}
+
+	@Test
 	void copy_uebernimmt_die_verkaufsdaten() {
 		Booking booking = bookingAt("A", 3, 2);
 		booking.setReservationDate(LocalDate.of(2026, 10, 1));
@@ -335,6 +468,7 @@ class BookingTest {
 		booking.setWheelchairAccessible(true);
 		booking.setPrice(1800);
 		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(1234);
 		booking.setCollected(true);
 		booking.setLastName("Müller");
 		booking.setFirstName("Anna");
@@ -353,6 +487,7 @@ class BookingTest {
 		assertTrue(copy.isWheelchairAccessible());
 		assertEquals(Integer.valueOf(1800), copy.getPrice());
 		assertEquals(PaymentStatus.CASH, copy.getPaymentStatus());
+		assertEquals(Integer.valueOf(1234), copy.getPaidAmount());
 		assertTrue(copy.isCollected());
 		assertEquals("Müller", copy.getLastName());
 		assertEquals("Anna", copy.getFirstName());
@@ -362,5 +497,24 @@ class BookingTest {
 
 		copy.setLastName("Meier");
 		assertEquals("Müller", booking.getLastName());
+	}
+
+	@Test
+	void copy_behaelt_die_Kennung() {
+		Booking booking = new Booking();
+		booking.setId("buchung-1");
+
+		assertEquals("buchung-1", booking.copy().getId());
+	}
+
+	@Test
+	void ohne_Kennung_in_der_Datei_bekommt_die_Buchung_eine_neue() throws IOException {
+		ObjectMapper mapper = JsonMapperFactory.create();
+
+		Booking withoutId = mapper.readValue("{\"lastName\":\"Müller\"}", Booking.class);
+		Booking nullId = mapper.readValue("{\"id\":null}", Booking.class);
+
+		assertTrue(withoutId.getId() != null && !withoutId.getId().isBlank());
+		assertTrue(nullId.getId() != null && !nullId.getId().isBlank());
 	}
 }

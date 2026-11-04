@@ -1,7 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.List;
 
@@ -15,17 +15,6 @@ class StatusMessageTest {
 
 	private static final ValidationIssue ERROR = new ValidationIssue("TST-001", Severity.ERROR, "Fehler");
 	private static final ValidationIssue WARNING = new ValidationIssue("TST-002", Severity.WARNING, "Warnung");
-
-	@Test
-	void showIfFooterVisibleDoesNothingWithoutAFooter() {
-		StatusMessage status = StatusMessage.getInstance();
-		StatusMessage.Entry before = status.currentProperty().get();
-
-		// Ohne sichtbare Fußzeile weder Dialog (hier gäbe es keinen Toolkit) noch neue Meldung
-		status.showIfFooterVisible(Severity.INFO, "Spiegelordner wieder erreichbar, Änderungen übertragen");
-
-		assertSame(before, status.currentProperty().get());
-	}
 
 	@Test
 	void singleIssueShowsCodeAndMessage() {
@@ -91,6 +80,121 @@ class StatusMessageTest {
 
 		assertEquals(21, entry.lines().size());
 		assertEquals(new StatusMessage.Line(Severity.INFO, "... und 5 weitere"), entry.lines().get(20));
+	}
+
+	@Test
+	void footerOnlyTextWithoutDisplayedFooterShowsNothingAndOpensNoDialog() {
+		StatusMessage messages = StatusMessage.getInstance();
+		messages.clear();
+
+		// Ohne sichtbare Fußzeile würde show() einen Dialog öffnen, und der scheitert ohne JavaFX mit einer Ausnahme
+		messages.showInFooter(Severity.INFO, "Wieder verbunden.");
+		messages.showInFooter(Severity.WARNING, "Nicht abgeglichen: x");
+
+		assertNull(messages.currentProperty().get());
+	}
+
+	/** Ein Ausblenden auf Knopfdruck: {@link #fire()} lässt die Zeit ablaufen, ein abgebrochenes tut nichts. */
+	private static final class ManualDelay implements StatusMessage.Delay {
+		private Runnable pending;
+
+		@Override
+		public Runnable after(javafx.util.Duration delay, Runnable action) {
+			Runnable[] own = { action };
+			pending = () -> {
+				if (own[0] != null) {
+					own[0].run();
+				}
+			};
+			return () -> own[0] = null;
+		}
+
+		void fire() {
+			Runnable action = pending;
+			pending = null;
+			if (action != null) {
+				action.run();
+			}
+		}
+
+		boolean waiting() {
+			return pending != null;
+		}
+	}
+
+	private final ManualDelay delay = new ManualDelay();
+	private final StatusMessage footer = new StatusMessage(() -> true, delay);
+
+	private String shown() {
+		StatusMessage.Entry entry = footer.currentProperty().get();
+		return entry == null ? null : entry.text();
+	}
+
+	@Test
+	void backgroundInfoCoversAStandingErrorOnlyBriefly() {
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+
+		assertEquals("Wieder verbunden.", shown());
+		delay.fire();
+		assertEquals("Nicht gespeichert: SYS-008: x", shown());
+	}
+
+	@Test
+	void backgroundWarningAlsoGivesWayToTheErrorAgain() {
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.WARNING, "Nicht abgeglichen: y");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+
+		assertEquals("Wieder verbunden.", shown());
+		delay.fire();
+		assertEquals("Nicht gespeichert: SYS-008: x", shown());
+	}
+
+	@Test
+	void ownMessageReplacesTheErrorForGood() {
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+		footer.showSaved();
+
+		delay.fire();
+		assertNull(shown());
+
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+		footer.clear();
+		delay.fire();
+		assertNull(shown());
+	}
+
+	@Test
+	void staleErrorDoesNotReturn() {
+		footer.show(Severity.ERROR, "SYS-006: Ordner weg");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+		footer.clearIf("SYS-006: Ordner weg"::equals);
+
+		assertEquals("Wieder verbunden.", shown());
+		delay.fire();
+		assertNull(shown());
+
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.INFO, "Wieder verbunden.");
+		footer.clearIssues();
+		delay.fire();
+		assertNull(shown());
+	}
+
+	@Test
+	void backgroundErrorReplacesAnErrorAndBackgroundWarningAloneStays() {
+		footer.show(Severity.ERROR, "Nicht gespeichert: SYS-008: x");
+		footer.showInFooter(Severity.ERROR, "SYS-006: Ordner weg");
+		assertEquals("SYS-006: Ordner weg", shown());
+		assertEquals(false, delay.waiting());
+
+		footer.clear();
+		footer.showInFooter(Severity.WARNING, "Nicht abgeglichen: y");
+		assertEquals("Nicht abgeglichen: y", shown());
+		assertEquals(false, delay.waiting());
 	}
 
 	@Test

@@ -3,11 +3,15 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingCancellation;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
+import de.eltviller_carneval_verein.karten.model.SaleDates;
+import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.input.DateTimeInput;
 import de.eltviller_carneval_verein.karten.ui.input.InputFeedback;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
@@ -33,11 +37,13 @@ import javafx.scene.shape.SVGPath;
 import javafx.scene.shape.StrokeLineCap;
 import javafx.stage.Popup;
 import javafx.stage.Window;
+import javafx.stage.WindowEvent;
 import javafx.util.StringConverter;
 
 /**
  * Kartendetails einer Buchung oder mehrerer Buchungen in einem Popup. Der Dialog ändert das Modell erst mit
- * "Anwenden"; "Abbrechen" (oder Esc) verwirft die Eingaben. Bei mehreren Buchungen stehen ihre Plätze oben (kurz,
+ * "Anwenden" (bei "Buchungen sofort speichern" heißt der Knopf "Speichern" und speichert auch gleich); "Abbrechen"
+ * (oder Esc) verwirft die Eingaben. Bei mehreren Buchungen stehen ihre Plätze oben (kurz,
  * Tooltip mit jedem Platz), die Felder zeigen den gemeinsamen Wert oder "verschieden", und nur geänderte Felder gelten
  * für alle (siehe {@link SeatBulkEdit}). Der Preis ist der effektive Preis; der Rollstuhlplatz gehört zur Bestuhlung
  * und steht nur als Hinweis da. Ohne Bearbeitungsmodus sind die Felder gesperrt und der Dialog hat nur "Schließen".
@@ -49,20 +55,25 @@ public final class SeatDetailPopup {
 
 	private final SeatBulkEdit edit;
 	private final boolean editMode;
+	private final boolean saveImmediately;
 	private final Runnable onApplied;
 	private final Popup popup = new Popup();
-	/** Je Datumsfeld: löst einen nicht lesbaren Text auf (siehe {@link #dateField}); läuft vor "Anwenden". */
+	/** Je Datumsfeld: löst einen nicht lesbaren Text auf (siehe {@link #dateField}); läuft vor "Anwenden" bzw. "Speichern". */
 	private final List<Runnable> dateResolvers = new ArrayList<>();
 	private Label totalValue;
 
 	/**
 	 * @param bookings  die Buchungen, die der Dialog zeigt und ändert (mindestens eine)
 	 * @param editMode  {@code false}: nur ansehen
-	 * @param onApplied wird nach "Anwenden" aufgerufen, damit die Ansicht sich neu zeichnet
+	 * @param saveImmediately {@code true} bei "Buchungen sofort speichern": Der Knopf heißt "Speichern" statt "Anwenden" und
+	 *                  speichert gleich nach dem Übernehmen ({@link BookingAutoSave#flushActive()}), ohne die Wartezeit des
+	 *                  {@code ChangeTrigger} abzuwarten
+	 * @param onApplied wird nach dem Übernehmen aufgerufen, damit die Ansicht sich neu zeichnet
 	 */
-	public SeatDetailPopup(List<Booking> bookings, boolean editMode, Runnable onApplied) {
+	public SeatDetailPopup(List<Booking> bookings, boolean editMode, boolean saveImmediately, Runnable onApplied) {
 		this.edit = new SeatBulkEdit(bookings);
 		this.editMode = editMode;
+		this.saveImmediately = saveImmediately;
 		this.onApplied = onApplied;
 		popup.setAutoHide(!editMode); // Mit Eingaben im Dialog soll ein Klick daneben sie nicht verwerfen
 		popup.setHideOnEscape(true);
@@ -73,8 +84,24 @@ public final class SeatDetailPopup {
 		return popup;
 	}
 
+	/**
+	 * Zeigt den Dialog. Mit Eingabemöglichkeit zählen seine Buchungen als in Bearbeitung ({@link EditingUnits}), bis der
+	 * Dialog schließt (Anwenden, Abbrechen, Esc, Fenster zu): Ein fremder Stand dafür wird zurückgestellt, statt die
+	 * Eingaben zu überschreiben. Ohne Bearbeitungsmodus gibt es nichts einzugeben.
+	 */
 	public void show(Window owner, double screenX, double screenY) {
-		popup.show(owner, screenX, screenY);
+		if (editMode) {
+			EditingUnits.getInstance().begin(this, edit.bookings());
+			// Ein Handler statt setOnHidden: Die Saalansicht setzt den Handler beim Schließen auf null
+			popup.addEventHandler(WindowEvent.WINDOW_HIDDEN, event -> EditingUnits.getInstance().end(this));
+		}
+		try {
+			popup.show(owner, screenX, screenY);
+		} catch (RuntimeException e) {
+			// Nie gezeigt, also nie geschlossen: Die Buchungen blieben sonst bis zum Neustart "in Bearbeitung"
+			EditingUnits.getInstance().end(this);
+			throw e;
+		}
 		// Ein Popup bekommt die Stylesheets der Haupt-Szene nicht mit: Buttons, Felder usw. sähen sonst anders aus
 		popup.getScene().getStylesheets().add(HallOverviewController.APP_STYLESHEET);
 	}
@@ -107,7 +134,10 @@ public final class SeatDetailPopup {
 		grid.addRow(row++, new Label("Reserviert am:"), reservedOn.box());
 		grid.addRow(row++, new Label("Zahlung:"), paymentBox);
 		grid.addRow(row++, new Label("Bezahlt am:"), paidOn.box());
-		grid.addRow(row++, new Label("Preis (€):"), priceSpinner());
+		Spinner<Double> priceSpinner = amountSpinner(edit.price(), "Preis");
+		priceSpinner.setDisable(!editMode);
+		grid.addRow(row++, new Label("Preis (€):"), priceSpinner);
+		grid.addRow(row++, new Label("Bezahlt (€):"), paidAmountSpinner(paymentBox, priceSpinner));
 
 		if (edit.bookings().size() > 1) {
 			totalValue = new Label();
@@ -297,8 +327,36 @@ public final class SeatDetailPopup {
 		return combo;
 	}
 
-	private Spinner<Double> priceSpinner() {
-		SeatBulkEdit.Field<Integer> field = edit.price();
+	/**
+	 * Der gezahlte Betrag: aktiv nur, wenn der Zahlstatus im Dialog bezahlt ist (bei "verschieden", wenn eine der Buchungen
+	 * bezahlt ist). Wird erst im Dialog bezahlt, zeigt der Platzhalter den Preis, den "Anwenden" ohne Eingabe je Buchung
+	 * einträgt ({@link SaleDates}); geschrieben wird er nicht, sonst bekäme bei verschiedenen Preisen jede Buchung denselben.
+	 */
+	private Spinner<Double> paidAmountSpinner(ComboBox<PaymentStatus> paymentBox, Spinner<Double> priceSpinner) {
+		Spinner<Double> spinner = amountSpinner(edit.paidAmount(), "Bezahlt");
+		boolean nonePaid = edit.bookings().stream().noneMatch(Booking::isPaid);
+		Runnable update = () -> {
+			PaymentStatus status = paymentBox.getValue();
+			boolean paid = status != null ? status.isPaid() : !nonePaid;
+			spinner.setDisable(!editMode || !paid);
+			if (nonePaid) {
+				// nur bei bezahlt: Im gesperrten Feld läse sich der Preis als "schon bezahlt"
+				String priceText = priceSpinner.getEditor().getText();
+				String prompt = "";
+				if (paid) {
+					prompt = priceText == null || priceText.isBlank() ? "Preis" : priceText;
+				}
+				spinner.getEditor().setPromptText(prompt);
+			}
+		};
+		paymentBox.valueProperty().addListener((obs, oldVal, newVal) -> update.run());
+		priceSpinner.getEditor().textProperty().addListener((obs, oldVal, newVal) -> update.run());
+		update.run();
+		return spinner;
+	}
+
+	/** Ein Betragsfeld (Euro mit Komma) auf einem Feld in Cent; {@code name} nennt es in Meldungen. */
+	private Spinner<Double> amountSpinner(SeatBulkEdit.Field<Integer> field, String name) {
 		PriceSpinnerValueFactory factory = new PriceSpinnerValueFactory(field.common().map(cents -> cents / 100.0).orElse(null));
 		Spinner<Double> spinner = new Spinner<>();
 		spinner.setValueFactory(factory);
@@ -306,12 +364,11 @@ public final class SeatDetailPopup {
 		// Nicht übernommene Eingaben (unlesbar): Meldung in der Fußzeile, Editor-Text zurück. Die Meldung nennt den Platz,
 		// bei mehreren die Anzahl ("Preis von 12 Sitzen")
 		List<Booking> bookings = edit.bookings();
-		factory.setFieldLabel(InputFeedback.label("Preis", bookings.size() == 1 ? EntityLabels.booking(bookings.get(0)) : bookings.size() + " Sitzen"));
+		factory.setFieldLabel(InputFeedback.label(name, bookings.size() == 1 ? EntityLabels.booking(bookings.get(0)) : bookings.size() + " Sitzen"));
 		factory.setRejectionHandler(issue -> SpinnerInput.reject(spinner, issue));
 		spinner.setPrefWidth(115); // breit genug für "verschieden"
-		spinner.setDisable(!editMode);
-		spinner.getEditor().setPromptText(field.common().isPresent() ? "" : MIXED);
-		// Auf den Text hören (nicht auf den bestätigten Wert): So stimmen Gesamtpreis und "Anwenden" auch mit
+		spinner.getEditor().setPromptText(field.common().isPresent() || field.allEmpty() ? "" : MIXED);
+		// Auf den Text hören (nicht auf den bestätigten Wert): So stimmen Gesamtpreis und "Anwenden"/"Speichern" auch mit
 		// noch nicht bestätigter Eingabe. Still lesen: Halb getippte Preise sollen keine Meldung auslösen.
 		spinner.getEditor().textProperty().addListener((obs, oldVal, newVal) -> {
 			Double euros = factory.parseQuietly(newVal);
@@ -350,18 +407,31 @@ public final class SeatDetailPopup {
 			Button cancelButton = new Button("Abbrechen");
 			cancelButton.getStyleClass().add("button-default");
 			cancelButton.setOnAction(event -> popup.hide());
-			Button applyButton = new Button("Anwenden");
+			Button applyButton = new Button(saveImmediately ? "Speichern" : "Anwenden");
 			applyButton.getStyleClass().add("button-primary");
 			applyButton.setOnAction(event -> {
-				// Eine abgelehnte Eingabe (der Klick auf Anwenden löst sie aus): nichts übernehmen, der Dialog und die Auswahl bleiben
+				// Eine abgelehnte Eingabe (der Klick auf "Anwenden" bzw. "Speichern" löst sie aus): nichts übernehmen, der Dialog und die Auswahl bleiben
 				if (SpinnerInput.blockSaveIfScreenInputRejected(applyButton)) {
 					return;
 				}
 				// Nicht lesbare Daten zuerst auflösen (heute bzw. alter Stand), der Klick löst den Fokusverlust nicht immer aus
 				dateResolvers.forEach(Runnable::run);
+				// Ein gelöschter Nachname, bei dem andere Daten bleiben: stornieren oder nur den Namen löschen (KARV-121)
+				Map<Booking, Booking> removals = edit.nameRemovalsLeavingData();
+				NameRemovalDialog.Choice choice = removals.isEmpty() ? NameRemovalDialog.Choice.NAME_ONLY
+						: NameRemovalDialog.ask(List.copyOf(removals.values()), popup);
+				if (choice == NameRemovalDialog.Choice.ABORT) {
+					return;
+				}
 				edit.apply();
+				if (choice == NameRemovalDialog.Choice.CANCEL_BOOKINGS) {
+					BookingCancellation.cancel(List.copyOf(removals.keySet()));
+				}
 				popup.hide();
 				onApplied.run();
+				if (saveImmediately) {
+					BookingAutoSave.flushActive();
+				}
 			});
 			buttonBar.getChildren().addAll(cancelButton, applyButton);
 		} else {

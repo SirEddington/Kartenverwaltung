@@ -5,6 +5,7 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -19,17 +20,25 @@ import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SaleDates;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
+import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.InputConverters;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTableCell;
@@ -38,6 +47,7 @@ import de.eltviller_carneval_verein.karten.ui.event.PresentationTables.Item;
 import de.eltviller_carneval_verein.karten.ui.input.TableInput;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
@@ -73,8 +83,8 @@ import javafx.util.StringConverter;
  */
 public class EventEditController {
 
-	private final JsonEventRepository repository = JsonEventRepository.getInstance();
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
+	private final StoreEventRepository repository = StoreEventRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 
 	private final ObservableList<Event> masterEventData = FXCollections.observableArrayList();
 	private FilteredList<Event> filteredEventData;
@@ -148,6 +158,8 @@ public class EventEditController {
 	@FXML
 	private TableColumn<Booking, Double> colSeatPrice;
 	@FXML
+	private TableColumn<Booking, Double> colSeatPaidAmount;
+	@FXML
 	private TableColumn<Booking, PaymentStatus> colSeatPayment;
 	@FXML
 	private TableColumn<Booking, LocalDate> colSeatPaidOn;
@@ -182,6 +194,46 @@ public class EventEditController {
 	// true, solange die Detailfelder aus einer Vorstellung befüllt werden: Dabei wird nichts ins Modell geschrieben
 	private boolean loadingDetails = false;
 
+	// Eine fremde Änderung kam, während eine Eingabe offen war; die Ansicht führt sich nach deren Ende nach
+	private boolean foreignChangePending = false;
+	// Fremde Änderungen an Events: Die Tabellen führen sich nach; ist das gezeigte Event gelöscht, geht es zurück zur Übersicht
+	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
+		// Die Tabellen zeigen Events, Vorstellungen, Tische und Sitze: Jede Einheit ist von Belang
+		private final RepositoryListener<Event> refreshing = LiveViews.onFxThread(LiveViews.ALL_UNITS,
+				EventEditController.this::showForeignChanges);
+
+		@Override
+		public void changedByOthers(Event event, ForeignBatch<Event> batch) {
+			refreshing.changedByOthers(event, batch);
+		}
+
+		@Override
+		public void changedElsewhere(Event event, Set<UnitKey> units) {
+			refreshing.changedElsewhere(event, units);
+		}
+
+		@Override
+		public void addedByOthers(Event event) {
+			refreshing.addedByOthers(event);
+		}
+
+		@Override
+		public void removedByOthers(Event event) {
+			if (event.equals(currentEvent)) {
+				// Der Wechsel kann eine Rückfrage öffnen (ungespeicherte andere Events): nicht mitten in der Benachrichtigung
+				Platform.runLater(() -> leaveDeletedEvent(event));
+			} else {
+				refreshing.removedByOthers(event);
+			}
+		}
+	};
+	// Fremde Änderungen an Hallen: Die Auswahl der Hallen und Bestuhlungen führt sich nach (ein ersetztes Objekt hat dieselbe ID)
+	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(LiveViews.ALL_UNITS, this::showForeignChanges);
+	// Eine Rückfrage (Hallen-/Bestuhlungswechsel, Löschen) ist offen: Während sie wartet, führt sich die Ansicht nicht nach
+	private boolean dialogOpen = false;
+	// Besitzer der Meldung bei EditingUnits für das Objekt, auf das sich die offene Rückfrage bezieht
+	private final Object dialogOwner = new Object();
+
 	public void initData(Event event, Presentation presentation, boolean editable) {
 
 		if (event != null) {
@@ -210,6 +262,147 @@ public class EventEditController {
 		setupContextMenu();
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
 		SaveShortcut.install(btnSave);
+		setupForeignChanges();
+	}
+
+	/**
+	 * Fremde Änderungen: Eine Zelle im Bearbeiten hält ihr Objekt für fremde Stände zurück ({@link EditingUnits#watch}); endet
+	 * die offene Eingabe, kommt Verpasstes nach. Angemeldet ist die Ansicht nur, solange sie zu sehen ist; eine mit ihr
+	 * verschwundene Zelle gibt dabei ihr Objekt frei.
+	 */
+	private void setupForeignChanges() {
+		EditingUnits editing = EditingUnits.getInstance();
+		editing.watch(eventTable, event -> event);
+		editing.watch(presTable, presentation -> presentation);
+		editing.watch(seatTable, booking -> booking);
+		for (TableView<?> table : List.of(eventTable, presTable, seatTable)) {
+			table.editingCellProperty().addListener((obs, before, cell) -> {
+				if (cell == null) {
+					showPendingForeignChanges();
+				}
+			});
+		}
+		// Der getippte Standardpreis steht erst nach dem Bestätigen im Modell: Solange das Feld den Fokus hat, ist die Vorstellung in Bearbeitung
+		spnPresPrice.getEditor().focusedProperty().addListener((obs, wasFocused, focused) -> {
+			if (focused) {
+				if (currentPres != null) {
+					editing.begin(spnPresPrice, List.of(currentPres));
+				}
+			} else {
+				editing.end(spnPresPrice);
+				showPendingForeignChanges();
+			}
+		});
+		LiveViews.whileShown(eventPerfHBox, Registration.of(repository::addListener, repository::removeListener, foreignChanges),
+				Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges), Registration.onDetach(() -> {
+					editing.end(eventTable);
+					editing.end(presTable);
+					editing.end(seatTable);
+					editing.end(spnPresPrice);
+					editing.end(dialogOwner);
+				}));
+	}
+
+	/** Ob eine Eingabe oder Rückfrage offen ist, die ein Neuzeichnen der Tabellen und Felder wegrisse. */
+	private boolean inputOpen() {
+		return dialogOpen || eventTable.getEditingCell() != null || presTable.getEditingCell() != null || seatTable.getEditingCell() != null
+				|| spnPresPrice.getEditor().isFocused();
+	}
+
+	/**
+	 * Zeigt eine Rückfrage, während der {@code model} (das Objekt, das sie ändern oder löschen wird) für fremde Stände als in
+	 * Bearbeitung gilt und die Ansicht sich nicht nachführt; was währenddessen ankam, kommt danach nach.
+	 *
+	 * @return die Antwort der Rückfrage
+	 */
+	private boolean confirmEditing(Object model, BooleanSupplier dialog) {
+		EditingUnits editing = EditingUnits.getInstance();
+		dialogOpen = true;
+		editing.begin(dialogOwner, List.of(model));
+		try {
+			return dialog.getAsBoolean();
+		} finally {
+			dialogOpen = false;
+			editing.end(dialogOwner);
+			showPendingForeignChanges();
+		}
+	}
+
+	/** Füllt die Auswahl der Hallen neu aus dem Repository (ein ersetztes Objekt hat dieselbe ID, eine gelöschte Halle ist nicht mehr wählbar). */
+	private void refreshHallChoices() {
+		List<Hall> choices = new ArrayList<>();
+		choices.add(null);
+		choices.addAll(hallRepository.loadHalls());
+		loadingDetails = true;
+		try {
+			cmbPresHall.getItems().setAll(choices);
+		} finally {
+			loadingDetails = false;
+		}
+	}
+
+	/** Holt eine zurückgestellte Auffrischung nach, nachdem die laufende Bestätigung der Eingabe zu Ende ist. */
+	private void showPendingForeignChanges() {
+		if (foreignChangePending) {
+			Platform.runLater(this::showForeignChanges);
+		}
+	}
+
+	/**
+	 * Führt Event-Tabelle, Vorstellungstabelle, Tische, Sitze und die Felder der gezeigten Vorstellung nach Änderungen
+	 * anderer Rechner nach. Event und Vorstellung bleiben über die ID gewählt, auch wenn ein anderer Rechner das Objekt
+	 * ersetzt hat (ein veraltetes Objekt bliebe sonst gewählt, und sein Speichern würde abgelehnt); der Bearbeitungsmodus
+	 * bleibt. Nie während einer offenen Eingabe (das Neuzeichnen risse sie weg): Dann kommt es nach deren Ende nach.
+	 */
+	private void showForeignChanges() {
+		if (inputOpen()) {
+			foreignChangePending = true;
+			return;
+		}
+		foreignChangePending = false;
+		String eventId = currentEvent == null ? null : currentEvent.getId();
+		String presentationId = currentPres == null ? null : currentPres.getId();
+		Item shownTable = tableTable.getSelectionModel().getSelectedItem();
+		String tableLabel = shownTable == null ? null : shownTable.label();
+		List<Booking> selectedSeats = new ArrayList<>(seatTable.getSelectionModel().getSelectedItems());
+
+		loadEvents();
+		refreshHallChoices();
+		// Erst abwählen: Ein gleiches (ID), aber veraltetes Objekt bliebe sonst die Auswahl der Tabelle
+		eventTable.getSelectionModel().clearSelection();
+		Event event = masterEventData.stream().filter(candidate -> candidate.getId().equals(eventId)).findFirst().orElse(null);
+		if (event == null) {
+			refreshPresentationTable(null, null);
+			return;
+		}
+		eventTable.getSelectionModel().select(event);
+		Presentation presentation = event.findPresentation(presentationId);
+		refreshPresentationTable(event, presentation);
+
+		masterTableData.stream().filter(item -> item.label().equals(tableLabel)).findFirst().ifPresent(item -> tableTable.getSelectionModel().select(item));
+		selectedSeats.stream().filter(masterSeatData::contains).forEach(booking -> seatTable.getSelectionModel().select(booking));
+	}
+
+	/**
+	 * Das gezeigte Event hat ein anderer Rechner gelöscht: zurück zur Übersicht (ohne Rückfrage zu diesem Event, der Tracker
+	 * hat es schon vergessen), die Fußzeile sagt warum. Bleibt die Ansicht stehen (Abbruch der Rückfrage zu anderen
+	 * ungespeicherten Events), verschwindet das Event aus den Tabellen.
+	 */
+	private void leaveDeletedEvent(Event removed) {
+		// Inzwischen ist die Ansicht verlassen oder ein anderes Event gewählt (das gelöschte verschwindet dann aus den Tabellen)
+		if (!LiveViews.isShown(btnSave)) {
+			return;
+		}
+		if (currentEvent != null && !removed.equals(currentEvent)) {
+			showForeignChanges();
+			return;
+		}
+		MainApp.showEventOverviewView();
+		if (LiveViews.isShown(btnSave)) {
+			showForeignChanges();
+		}
+		// Die Übersicht hat keine Fußzeile: Die Meldung öffnet dort einen Dialog
+		StatusMessage.getInstance().show(Severity.WARNING, "„" + EntityLabels.nameOrPlaceholder(removed.getName()) + "“ wurde auf einem anderen Rechner gelöscht.");
 	}
 
 	private void setupCollums() {
@@ -337,8 +530,18 @@ public class EventEditController {
 		// Preis: der effektive Preis; der Standardpreis der Vorstellung als Eingabe entfernt den Einzelpreis
 		colSeatPrice.setCellValueFactory(cell -> new SimpleDoubleProperty(cell.getValue().getEffectivePrice() / 100.0).asObject());
 		colSeatPrice.setCellFactory(ParsingTextFieldTableCell.forTableColumn(new GermanDecimalStringConverter(), InputIssue.NOT_A_NUMBER, "Preis", EntityLabels::booking));
+		// über SaleDates: Bei einer bezahlten Buchung ohne Betrag (älterer Stand) hält es den bisherigen Preis als Betrag fest
 		colSeatPrice.setOnEditCommit(e -> {
-			e.getRowValue().setEffectivePrice(e.getNewValue() == null ? 0 : MoneyFormat.toCents(e.getNewValue()));
+			SaleDates.change(e.getRowValue(), booking -> booking.setEffectivePrice(MoneyFormat.toCentsOrZero(e.getNewValue())));
+			bookingChanged();
+		});
+
+		// Gezahlter Betrag: nur bei bezahlten Buchungen, sonst leer und nicht bearbeitbar
+		colSeatPaidAmount.setCellValueFactory(cell -> new SimpleObjectProperty<>(MoneyFormat.toEuros(cell.getValue().getPaidCents())));
+		colSeatPaidAmount.setCellFactory(ParsingTextFieldTableCell.forTableColumn(new GermanDecimalStringConverter(), InputIssue.NOT_A_NUMBER, "Bezahlt",
+				EntityLabels::booking, Booking::isPaid));
+		colSeatPaidAmount.setOnEditCommit(e -> {
+			e.getRowValue().setPaidAmount(MoneyFormat.toCentsOrZero(e.getNewValue()));
 			bookingChanged();
 		});
 
@@ -550,25 +753,36 @@ public class EventEditController {
 			return;
 		}
 		String message = hallChangeMessage(presentation);
-		if (message != null && !ConfirmDialog.confirm("Halle wechseln", message, "Wechseln", "button-primary", null)) {
-			loadingDetails = true;
-			try {
-				cmbPresHall.setValue(hallRepository.findById(presentation.getHallId()));
-			} finally {
-				loadingDetails = false;
-			}
+		if (message != null && !confirmEditing(presentation, () -> ConfirmDialog.confirm("Halle wechseln", message, "Wechseln", "button-primary", null))) {
+			resetHallChoice(presentation);
 			return;
 		}
 		changeHall(presentation, newHall);
+	}
+
+	/** Die Auswahl der Halle kehrt zur Halle des Modells zurück. */
+	private void resetHallChoice(Presentation presentation) {
+		loadingDetails = true;
+		try {
+			cmbPresHall.setValue(hallRepository.findById(presentation.getHallId()));
+		} finally {
+			loadingDetails = false;
+		}
 	}
 
 	/**
 	 * Hallenwechsel: Die Bestuhlung wird zurückgesetzt. Der Abgleich ohne Bestuhlung ({@link BookingSync#sync}) entfernt
 	 * die leeren Buchungen, Buchungen mit Daten bleiben ohne Platz, bis eine Bestuhlung der neuen Halle gewählt ist.
 	 */
-	private void changeHall(Presentation presentation, Hall newHall) {
-		String newHallId = newHall != null ? newHall.getId() : null;
+	private void changeHall(Presentation presentation, Hall chosen) {
+		String newHallId = chosen != null ? chosen.getId() : null;
 		if (Objects.equals(newHallId, presentation.getHallId())) {
+			return;
+		}
+		// Die Halle des Repositorys, nicht die der Auswahl: Eine fremd ersetzte Halle ist ein neues Objekt mit derselben ID
+		Hall newHall = chosen == null ? null : hallRepository.findById(newHallId);
+		if (chosen != null && newHall == null) {
+			resetHallChoice(presentation); // die Halle ist inzwischen gelöscht
 			return;
 		}
 		presentation.setHallId(newHallId);
@@ -588,11 +802,14 @@ public class EventEditController {
 	 * Bestuhlungswechsel mit Rückfrage; bei "Abbrechen" kehrt die Auswahl zur Bestuhlung des Modells zurück (nicht zum
 	 * vorigen Wert der Auswahl, der nach schnellen Mehrfachwechseln schon ein nie bestätigter sein kann).
 	 */
-	private void changePlan(Presentation presentation, SeatingPlan newPlan) {
-		if (presentation != currentPres || cmbPresPlan.getValue() != newPlan) {
+	private void changePlan(Presentation presentation, SeatingPlan chosen) {
+		if (presentation != currentPres || cmbPresPlan.getValue() != chosen) {
 			return; // die Auswahl hat sich inzwischen wieder geändert
 		}
-		if (!PlanSwitchDialog.confirm(presentation, newPlan)) {
+		// Die Bestuhlung der Halle im Repository, nicht die der Auswahl: Eine fremd ersetzte Halle ist ein neues Objekt
+		Hall hall = hallRepository.findById(presentation.getHallId());
+		SeatingPlan newPlan = hall == null ? null : hall.findSeatingPlan(chosen.getId());
+		if (newPlan == null || !confirmEditing(presentation, () -> PlanSwitchDialog.confirm(presentation, newPlan))) {
 			loadingDetails = true;
 			try {
 				cmbPresPlan.setValue(modelPlan(presentation, hallRepository.findById(presentation.getHallId())));
@@ -738,7 +955,7 @@ public class EventEditController {
 
 	private void handleDeleteEvent(Event event) {
 		boolean neverSaved = ChangeTracker.events().isNew(event);
-		if (!neverSaved && !ConfirmDialog.confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
+		if (!neverSaved && !confirmEditing(event, () -> ConfirmDialog.confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?"))) {
 			return;
 		}
 
@@ -746,7 +963,13 @@ public class EventEditController {
 			// Nie gespeichert: Es gibt nichts zu löschen, es verschwindet nur wieder aus der Tabelle
 			ChangeTracker.events().untrack(event);
 		} else {
-			repository.deleteEvent(event);
+			try {
+				repository.deleteEvent(event);
+			} catch (LockedUnitException e) {
+				// Die Tabelle zeigt ein Event, das ein anderer Rechner inzwischen ersetzt oder gelöscht hat
+				StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
+				return;
+			}
 		}
 
 		if (event.equals(currentEvent)) {
@@ -775,7 +998,7 @@ public class EventEditController {
 	}
 
 	private void handleDeletePres(Presentation presentation) {
-		if (!ConfirmDialog.confirmDelete("Vorstellung löschen", "Soll die Vorstellung \"" + presentation.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
+		if (!confirmEditing(presentation, () -> ConfirmDialog.confirmDelete("Vorstellung löschen", "Soll die Vorstellung \"" + presentation.getName() + "\" wirklich unwiderruflich gelöscht werden?"))) {
 			return;
 		}
 
@@ -835,9 +1058,8 @@ public class EventEditController {
 	private void reloadRestoredData() {
 		String eventId = currentEvent == null ? null : currentEvent.getId();
 		String presentationId = currentPres == null ? null : currentPres.getId();
-		Event event = JsonEventRepository.getInstance().loadEvents().stream().filter(candidate -> candidate.getId().equals(eventId)).findFirst().orElse(null);
-		Presentation presentation = event == null ? null
-				: event.getPresentations().stream().filter(candidate -> candidate.getId().equals(presentationId)).findFirst().orElse(null);
+		Event event = StoreEventRepository.getInstance().loadEvents().stream().filter(candidate -> candidate.getId().equals(eventId)).findFirst().orElse(null);
+		Presentation presentation = event == null ? null : event.findPresentation(presentationId);
 		MainApp.showEventEditView(event, presentation, false);
 	}
 
@@ -886,7 +1108,7 @@ public class EventEditController {
 		setEditable(false);
 		MainApp.showEventOverviewView();
 		// Hat der Nutzer im Dialog "Abbrechen" gewählt, bleibt dieser Screen stehen: Bearbeitungsmodus zurückgeben
-		if (btnSave.getScene() != null && btnSave.getScene().getWindow() != null) {
+		if (LiveViews.isShown(btnSave)) {
 			setEditable(wasEditable);
 		}
 	}

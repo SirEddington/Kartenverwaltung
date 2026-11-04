@@ -13,13 +13,17 @@ import java.util.prefs.Preferences;
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.EventSelectionSync;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard.Outcome;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
@@ -70,7 +74,7 @@ public class AccountingShellController {
 	private static final String PREF_KEY_LAST_EXPORT_FORMAT = "lastExportFormat";
 	private static final DateTimeFormatter FILE_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
-	private final JsonEventRepository repository = JsonEventRepository.getInstance();
+	private final StoreEventRepository repository = StoreEventRepository.getInstance();
 	private final Preferences prefs = Preferences.userNodeForPackage(AccountingShellController.class);
 
 	@FXML
@@ -100,6 +104,11 @@ public class AccountingShellController {
 	private boolean editMode = false;
 	private ExportFormat primaryExportFormat;
 
+	// Führt die Boxen nach Änderungen anderer Rechner nach; entsteht in initialize, wenn die Boxen da sind
+	private EventSelectionSync selectionSync;
+	// Fremde Änderungen an Events: Die Listen und die Auswahl folgen dem Cache
+	private final RepositoryListener<Event> foreignChanges = LiveViews.onFxThread(LiveViews.ALL_UNITS, () -> selectionSync.sync());
+
 	@FXML
 	public void initialize() {
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
@@ -120,6 +129,15 @@ public class AccountingShellController {
 			}
 		});
 
+		selectionSync = new EventSelectionSync(repository, eventComboBox, presComboBox, event -> chkIncludeArchived.isSelected() || !event.isArchived(), () -> currentEvent,
+				() -> currentPresentation, this::applyEventSelection, presentation -> {
+					currentPresentation = presentation;
+					if (activeContentController != null) {
+						activeContentController.setPresentation(presentation);
+					}
+					updateActionAvailability();
+				});
+
 		chkIncludeArchived.selectedProperty().addListener((obs, oldVal, newVal) -> {
 			reloadEventItems();
 			if (activeContentController instanceof StatisticsController stats) {
@@ -128,30 +146,18 @@ public class AccountingShellController {
 		});
 
 		eventComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedEvent) -> {
-			currentEvent = selectedEvent;
-			if (currentEvent != null) {
-				// Buchungen mit den Bestuhlungen abgleichen, bevor das Event angezeigt wird (gilt nicht als Änderung)
-				BookingSyncService.prepare(currentEvent);
+			if (!selectionSync.updatingEvents()) {
+				applyEventSelection(selectedEvent);
 			}
-
-			List<Presentation> presentationItems = new ArrayList<>();
-			presentationItems.add(null); // "Alle (Gesamtbilanz)"
-			if (currentEvent != null) {
-				presentationItems.addAll(currentEvent.getPresentations());
-			}
-			presComboBox.getItems().setAll(presentationItems);
-			presComboBox.getSelectionModel().selectFirst();
-
-			if (activeContentController != null) {
-				activeContentController.setEvent(currentEvent);
-			}
-			updateActionAvailability();
 		});
 
 		// Ohne konkrete Vorstellung gibt es nichts Vorstellungs-Spezifisches zu
 		// speichern (der Ist-Kasseninhalt hängt an genau einer Vorstellung) -
 		// der Bearbeiten-Modus ist dann gesperrt.
 		presComboBox.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, selectedPresentation) -> {
+			if (selectionSync.updatingPresentations()) {
+				return;
+			}
 			currentPresentation = selectedPresentation;
 			if (activeContentController != null) {
 				activeContentController.setPresentation(currentPresentation);
@@ -168,6 +174,9 @@ public class AccountingShellController {
 		});
 
 		setupExportButton();
+
+		// Fremde Änderungen an Events nur, solange die Abrechnung zu sehen ist (danach hielte das Repository sie am Leben)
+		LiveViews.whileShown(contentArea, Registration.of(repository::addListener, repository::removeListener, foreignChanges));
 
 		// Muss NACH den obigen Listenern laufen: setzt bei genau einem Event
 		// automatisch dessen Auswahl, was den eventComboBox-Listener auslöst -
@@ -243,6 +252,28 @@ public class AccountingShellController {
 		} else if (events.size() == 1) {
 			eventComboBox.setValue(events.get(0));
 		}
+	}
+
+	/** Das gewählte Event gilt für die Shell und den Inhalt; die Vorstellung steht danach auf "Alle (Gesamtbilanz)". */
+	private void applyEventSelection(Event selectedEvent) {
+		currentEvent = selectedEvent;
+		if (currentEvent != null) {
+			// Buchungen mit den Bestuhlungen abgleichen, bevor das Event angezeigt wird (gilt nicht als Änderung)
+			BookingSyncService.prepare(currentEvent);
+		}
+
+		List<Presentation> presentationItems = new ArrayList<>();
+		presentationItems.add(null); // "Alle (Gesamtbilanz)"
+		if (currentEvent != null) {
+			presentationItems.addAll(currentEvent.getPresentations());
+		}
+		presComboBox.getItems().setAll(presentationItems);
+		presComboBox.getSelectionModel().selectFirst();
+
+		if (activeContentController != null) {
+			activeContentController.setEvent(currentEvent);
+		}
+		updateActionAvailability();
 	}
 
 	/**

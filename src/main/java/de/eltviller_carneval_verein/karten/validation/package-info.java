@@ -5,11 +5,14 @@
  * eigenem Code-Kürzel. Der Code lautet {@code <Kürzel>-<3-stellige Nummer>}, Nummern werden nie
  * wiederverwendet. Ein Validator wirft keine Ausnahme, sondern liefert ein {@link ValidationResult}.
  *
- * <p>Technische Meldungen der Spiegelung ({@code SYS-002} bis {@code SYS-004}) gehören keinem Validator: Ihre Codes
- * und Texte stehen als Konstanten in {@code mirror.MirrorMessages}, neben {@code GlobalErrorHandler.CODE}
- * ({@code SYS-001}). Die Eingaben zum Spiegelordner, die der Nutzer beim Speichern selbst beheben kann, sind dagegen
- * {@code SET-xxx} im {@link SettingsIssue}: SET-001 prüft der {@link SettingsValidator}, SET-002 und SET-003 prüft
- * {@code mirror.MirrorSetup} am Dateisystem.
+ * <p>Technische Meldungen gehören keinem Validator: Ihre Codes und Texte stehen als Konstanten neben
+ * {@code GlobalErrorHandler.CODE} ({@code SYS-001}) und in {@code store.StoreMessages}. Die Nummern {@code SYS-002}
+ * bis {@code SYS-004} und {@code SET-001} bis {@code SET-003} gehörten zur Spiegelung (KARV-73), die mit KARV-89
+ * entfallen ist; sie werden nicht wieder vergeben.
+ *
+ * <p>Die Texte von {@code SYS-005}, {@code SYS-006} und {@code SYS-008} bis {@code SYS-013} wurden mit KARV-87 neu gefasst:
+ * Sie sagen dem Bediener in Du-Form, was passiert ist und was er tun kann (oder dass er nichts tun muss). Die Codes
+ * bleiben, der Text von {@code SYS-007} ist unverändert.
  *
  * <p>Meldungstexte stehen als Vorlage im Issue-Enum und enthalten Platzhalter {@code &1} bis {@code &9}
  * (wie in SAP, siehe {@link MessageTemplate}). {@code &1} ist in der Regel die Beschreibung der
@@ -34,8 +37,7 @@
  * <tr><td>Sitz</td><td>SEA</td><td>{@link SeatValidator} / {@link SeatIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Halle</td><td>HLL</td><td>{@link HallValidator} / {@link HallIssue}</td><td>vorhanden</td></tr>
  * <tr><td>Hallenobjekt</td><td>HOB</td><td>{@link HallObjectValidator} / {@link HallObjectIssue}</td><td>vorhanden</td></tr>
- * <tr><td>Einstellungen</td><td>SET</td><td>{@link SettingsValidator} / {@link SettingsIssue}</td><td>vorhanden</td></tr>
- * <tr><td>technisch (unerwartet)</td><td>SYS</td><td>GlobalErrorHandler.CODE (SYS-001), mirror.MirrorMessages (SYS-002 bis SYS-004)</td><td>vorhanden</td></tr>
+ * <tr><td>technisch (unerwartet)</td><td>SYS</td><td>GlobalErrorHandler.CODE (SYS-001), store.StoreMessages (SYS-005 bis SYS-013)</td><td>vorhanden</td></tr>
  * </table>
  */
 package de.eltviller_carneval_verein.karten.validation;

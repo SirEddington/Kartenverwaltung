@@ -3,7 +3,6 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.SeatStatus;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.ui.input.DateTimeInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
@@ -50,8 +49,8 @@ final class CustomerDisplayText {
 		return title.toString();
 	}
 
-	/** Rot für Kunden: Jeder Platz, der nicht frei ist (reserviert, verkauft, blockiert). */
+	/** Rot für Kunden: Jeder Platz, der nicht frei ist (reserviert, verkauft, gesperrt nach KARV-111). */
 	static boolean isTaken(Booking booking) {
-		return booking.getStatus() != SeatStatus.FREE;
+		return booking.isTaken() || LockedSeats.isLocked(booking);
 	}
 }

@@ -176,6 +176,23 @@ public class Presentation {
 		this.name = name;
 	}
 
+	/**
+	 * Übernimmt die gespeicherten Felder eines anderen Stands. Nicht kopiert werden die Kennung (unveränderlich), die
+	 * Buchungen (die Liste samt ihren Objekten bleibt), der Elternverweis und die Laufzeitmarke {@code planMissing}.
+	 * Der Standardpreis wird nur gesetzt, nicht über {@link #changePrice(int)} auf die Buchungen verteilt.
+	 */
+	public void copyFrom(Presentation source) {
+		setName(source.getName());
+		setDate(source.getDate());
+		setTime(source.getTime());
+		setDescription(source.getDescription());
+		setHallId(source.getHallId());
+		setSeatingPlanId(source.getSeatingPlanId());
+		setPrice(source.getPrice());
+		setActualCashAmount(source.getActualCashAmount());
+		setCashDifferenceComment(source.getCashDifferenceComment());
+	}
+
 	public Booking addBooking() {
 		Booking newBooking = new Booking();
 		newBooking.setParent(this);

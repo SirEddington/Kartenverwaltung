@@ -8,18 +8,25 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.repository.JsonEventRepository;
-import de.eltviller_carneval_verein.karten.repository.JsonHallRepository;
+import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
+import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.AbstractOverviewController;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.backup.BackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.backup.EventBackupCatalog;
 import de.eltviller_carneval_verein.karten.ui.event.BookingTree.TableGroup;
 import de.eltviller_carneval_verein.karten.ui.event.BookingTree.UnassignedGroup;
 import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
@@ -39,8 +46,12 @@ import javafx.scene.control.cell.CheckBoxTreeTableCell;
  */
 public class EventOverviewController extends AbstractOverviewController {
 
-	private final JsonEventRepository eventRepository = JsonEventRepository.getInstance();
-	private final JsonHallRepository hallRepository = JsonHallRepository.getInstance();
+	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
+
+	// Fremde Änderungen an Events (der Baum zeigt auch Buchungen und Summen) und, wegen der Hallenspalte, an Hallen: Der Baum wird neu aufgebaut
+	private final RepositoryListener<Event> foreignEventChanges = foreignChangeReloader(LiveViews.ALL_UNITS);
+	private final RepositoryListener<Hall> foreignHallChanges = foreignChangeReloader(LiveViews.ofTypes(UnitType.HALL));
 
 	// TableView und Spalten
 	@FXML
@@ -57,6 +68,12 @@ public class EventOverviewController extends AbstractOverviewController {
 	private TreeTableColumn<Object, String> colHallName;
 	@FXML
 	private TreeTableColumn<Object, Boolean> colArchive;
+
+	@Override
+	protected List<Registration> foreignChangeRegistrations() {
+		return List.of(Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignEventChanges),
+				Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges));
+	}
 
 	@Override
 	protected void setupColumns() {
@@ -110,7 +127,7 @@ public class EventOverviewController extends AbstractOverviewController {
 		});
 
 		// 5. Spalte: aktuelle Einnahmen, erwartete Einnahmen, potenzielle Einnahmen
-		// Rechnet in Cent mit dem geltenden Preis jeder Buchung (BookingTotals, dieselbe Quelle wie Statistik und
+		// Rechnet in Cent mit gezahltem Betrag und geltendem Preis jeder Buchung (BookingTotals, dieselbe Quelle wie Statistik und
 		// Kassenabgleich), damit hier nie eine andere Zahl herauskommt als dort für dieselben Daten.
 		colRevenue.setCellValueFactory(cell -> {
 			List<Booking> bookings = bookingsOf(cell.getValue().getValue());
@@ -317,7 +334,12 @@ public class EventOverviewController extends AbstractOverviewController {
 
 		if (data instanceof Event) {
 			if (confirmDelete("Event löschen", "Soll das Event \"" + event.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
-				eventRepository.deleteEvent(event);
+				try {
+					eventRepository.deleteEvent(event);
+				} catch (LockedUnitException e) {
+					// Die Liste zeigt ein Event, das ein anderer Rechner inzwischen ersetzt oder gelöscht hat
+					StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
+				}
 			} else {
 				return;
 			}

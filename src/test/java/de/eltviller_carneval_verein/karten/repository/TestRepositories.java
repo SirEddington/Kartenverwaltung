@@ -1,21 +1,39 @@
 package de.eltviller_carneval_verein.karten.repository;
 
-import java.io.File;
+import java.util.Set;
+
+import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 
 /**
- * Testzugang zu den Repositories mit eigenem Speicherordner für Tests außerhalb dieses Pakets (die Konstruktoren sind
- * paketsichtbar). Jeder Aufruf liefert eine neue Instanz ohne Cache, liest also von der Festplatte.
+ * Testzugang zu den Repositories auf einem eigenen Versionsspeicher für Tests außerhalb dieses Pakets (die
+ * Konstruktoren sind paketsichtbar). Jeder Aufruf liefert eine neue Instanz ohne Cache, liest also aus dem Speicher.
  */
 public final class TestRepositories {
 
 	private TestRepositories() {
 	}
 
-	public static JsonEventRepository events(File storageDir) {
-		return new JsonEventRepository(storageDir);
+	/** Ein Event-Repository auf dem Versionsspeicher; der Dienst muss gestartet sein. */
+	public static StoreEventRepository events(SyncService sync) {
+		return new StoreEventRepository(sync);
 	}
 
-	public static JsonHallRepository halls(File storageDir) {
-		return new JsonHallRepository(storageDir);
+	/** Ein Hallen-Repository auf dem Versionsspeicher; der Dienst muss gestartet sein. */
+	public static StoreHallRepository halls(SyncService sync) {
+		return new StoreHallRepository(sync);
+	}
+
+	/** Ein Schub fremder Stände, dessen Nachspielen nichts tut (für Ansichten, die nur die Einheiten lesen). */
+	public static <T> ForeignBatch<T> batchOf(Set<UnitKey> units) {
+		return new ForeignBatch<>(units, copy -> {
+		});
+	}
+
+	/** Ein Schub fremder Stände, dessen Nachspielen auf einer Kopie scheitert (für den Notweg des Änderungsmelders). */
+	public static <T> ForeignBatch<T> failingBatch(Set<UnitKey> units) {
+		return new ForeignBatch<>(units, copy -> {
+			throw new IllegalStateException("Nachspielen gescheitert (Test)");
+		});
 	}
 }

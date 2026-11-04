@@ -1,0 +1,548 @@
+package de.eltviller_carneval_verein.karten.store;
+
+import java.io.IOException;
+import java.nio.file.InvalidPathException;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
+import java.util.function.Supplier;
+
+/**
+ * Ein Bestand von Versions- und Anspruchsdateien: der lokale unter {@code <AppData>/data} oder der gemeinsame unter
+ * {@code <Ordner>/data}. Alle späteren Bausteine lesen und schreiben Einheiten nur hierüber.
+ * <p>
+ * Der Bestand schreibt ausschließlich über {@link FileLayer#createNew} und löscht nichts. Er übernimmt nur Dateien, die
+ * wie Versions- und Anspruchsdateien heißen: {@code <VersionId>.json} im Ordner der Einheit, {@code root.json} und
+ * {@code <VersionId>.json} unter {@code claims/}. Alles andere (fremde Namen, Unterordner, {@code Thumbs.db},
+ * Konfliktkopien der Synchronisation, Großschreibung) wird stillschweigend übergangen.
+ * <p>
+ * Wo es unten heißt "leer, wenn der Ordner fehlt": Bei einem Bestand mit Anker gilt das nur, solange der Anker da ist.
+ * Fehlt der Anker selbst, wirft das Auflisten {@link NoSuchFileException} ({@link #requireAnchorIfEmpty}).
+ */
+public final class VersionStore {
+
+	private static final String JSON = ".json";
+	private static final String CLAIMS = "claims";
+	private static final String ROOT = "root";
+	private static final String EVENTS = "events";
+	private static final String HALLS = "halls";
+	/** Der Ordner der Auftritte unter einem Event (siehe {@link #childNames}). */
+	static final String PRESENTATIONS = "presentations";
+	/** Der Ordner der Buchungen unter einem Auftritt (siehe {@link #childNames}). */
+	static final String BOOKINGS = "bookings";
+
+	private final Path dataRoot;
+	private final FileLayer files;
+	private final Path anchor;
+	private final Supplier<String> tempTag;
+
+	/**
+	 * Ein Bestand ohne Anker: Beim Schreiben werden fehlende Ordner angelegt, die temporären Dateien tragen keine Kennung.
+	 *
+	 * @param dataRoot der Ordner {@code data} dieses Bestands
+	 * @param files    die Dateischicht, über die gelesen und geschrieben wird
+	 */
+	public VersionStore(Path dataRoot, FileLayer files) {
+		this(dataRoot, files, null, null);
+	}
+
+	/**
+	 * @param dataRoot der Ordner {@code data} dieses Bestands
+	 * @param files    die Dateischicht, über die gelesen und geschrieben wird
+	 * @param anchor   der Ordner, in dem {@code data} liegt (beim gemeinsamen Bestand der gemeinsame Ordner selbst); er wird
+	 *                 beim Schreiben nie angelegt, nur {@code data} und tiefer. {@code null}: kein Anker
+	 * @param tempTag  liefert die Kennung für die Namen der temporären Dateien beim Schreiben (siehe
+	 *                 {@link FileLayer#createNew(Path, byte[], Path, String)}); {@code null}: keine Kennung
+	 */
+	public VersionStore(Path dataRoot, FileLayer files, Path anchor, Supplier<String> tempTag) {
+		this.dataRoot = dataRoot;
+		this.files = files;
+		this.anchor = anchor;
+		this.tempTag = tempTag;
+	}
+
+	/** Der Ordner {@code data} dieses Bestands. */
+	public Path dataRoot() {
+		return dataRoot;
+	}
+
+	/** Für Tests: der Anker, unter dem dieser Bestand schreibt (nie angelegt); {@code null}, wenn er keinen hat. */
+	Path anchor() {
+		return anchor;
+	}
+
+	private boolean create(Path file, byte[] bytes) throws IOException {
+		return files.createNew(file, bytes, anchor, currentTag());
+	}
+
+	/** Die Kennung für die temporären Dateien beim Schreiben, so wie sie jetzt gilt; {@code null}: keine. */
+	private String currentTag() {
+		return tempTag == null ? null : tempTag.get();
+	}
+
+	/**
+	 * Ersetzt eine beschädigte Datei dieses Bestands durch eine gute Fassung und behält die beschädigte (siehe
+	 * {@link FileLayer#replaceDamaged(Path, byte[], String, String)}). Die temporäre Datei trägt wie beim Anlegen die
+	 * Kennung dieses Bestands, im gemeinsamen Ordner also die des schreibenden Rechners.
+	 *
+	 * @param file        die Datei in diesem Bestand
+	 * @param corruptName Dateiname (kein Pfad) im Ordner der Datei, unter dem die beschädigte Fassung bleibt
+	 */
+	public void replaceDamaged(Path file, byte[] good, String corruptName) throws IOException {
+		files.replaceDamaged(file, good, corruptName, currentTag());
+	}
+
+	/**
+	 * Legt die Versionsdatei an, wenn es sie noch nicht gibt.
+	 *
+	 * @return {@code true}, wenn sie angelegt wurde; {@code false}, wenn die Version schon da war (unverändert)
+	 */
+	public boolean writeVersion(UnitKey unit, VersionId id, byte[] bytes) throws IOException {
+		return create(versionFile(unit, id), bytes);
+	}
+
+	/** Die Bytes der Versionsdatei; leer, wenn es sie nicht gibt. */
+	public Optional<byte[]> readVersionBytes(UnitKey unit, VersionId id) throws IOException {
+		return files.read(versionFile(unit, id));
+	}
+
+	/**
+	 * Legt die Anspruchsdatei an, wenn es sie noch nicht gibt: Wer zuerst kommt, gewinnt.
+	 *
+	 * @param claimName {@code root} oder die ID des Vorgängers
+	 * @return {@code true}, wenn dieser Aufruf den Anspruch angelegt hat; {@code false}, wenn er schon vergeben war
+	 * @throws IllegalArgumentException wenn der Name weder {@code root} noch eine Versions-ID ist
+	 */
+	public boolean createClaim(UnitKey unit, String claimName, byte[] bytes) throws IOException {
+		return create(claimFile(unit, claimName), bytes);
+	}
+
+	/**
+	 * Die Bytes der Anspruchsdatei; leer, wenn es sie nicht gibt.
+	 *
+	 * @throws IllegalArgumentException wenn der Name weder {@code root} noch eine Versions-ID ist
+	 */
+	public Optional<byte[]> readClaimBytes(UnitKey unit, String claimName) throws IOException {
+		return files.read(claimFile(unit, claimName));
+	}
+
+	/**
+	 * Liest alle Versions- und Anspruchsdateien der Einheit. Unlesbare Dateien und solche mit höherem Format sind
+	 * gekennzeichnet (siehe {@link VersionFile}, {@link ClaimFile}), ihre Bytes bleiben erhalten. Fehler beim Lesen
+	 * einer Datei selbst werden als {@link IOException} gemeldet.
+	 * <p>
+	 * Größe und Änderungszeit jeder gelesenen Datei ({@link UnitFiles#versionStamps()}, {@link UnitFiles#claimStamps()})
+	 * stammen aus dem Auflisten vor dem Lesen: Ändert sich eine Datei dazwischen, beschreiben sie den älteren Stand.
+	 */
+	public UnitFiles readUnit(UnitKey unit) throws IOException {
+		Path unitDir = unitDir(unit);
+		Map<VersionId, String> listedVersions = versionStampsOf(files.listEntries(unitDir));
+		Map<String, String> listedClaims = claimStampsOf(files.listEntries(unitDir.resolve(CLAIMS)));
+		requireAnchorIfBothEmpty(listedVersions.keySet(), listedClaims.keySet());
+		Map<VersionId, VersionFile> versions = new TreeMap<>();
+		Map<VersionId, String> versionStamps = new TreeMap<>();
+		for (Map.Entry<VersionId, String> listed : listedVersions.entrySet()) {
+			VersionId id = listed.getKey();
+			Optional<byte[]> bytes = files.read(unitDir.resolve(id + JSON));
+			if (bytes.isPresent()) {
+				versions.put(id, parseVersion(id, bytes.get()));
+				versionStamps.put(id, listed.getValue());
+			}
+		}
+		Map<String, ClaimFile> claims = new TreeMap<>();
+		Map<String, String> claimStamps = new TreeMap<>();
+		for (Map.Entry<String, String> listed : listedClaims.entrySet()) {
+			String name = listed.getKey();
+			Optional<byte[]> bytes = files.read(unitDir.resolve(CLAIMS).resolve(name + JSON));
+			if (bytes.isPresent()) {
+				claims.put(name, parseClaim(name, bytes.get()));
+				claimStamps.put(name, listed.getValue());
+			}
+		}
+		return new UnitFiles(unit, Collections.unmodifiableMap(versions), Collections.unmodifiableMap(claims),
+				Collections.unmodifiableMap(versionStamps), Collections.unmodifiableMap(claimStamps));
+	}
+
+	/**
+	 * Liest eine einzelne Version der Einheit.
+	 *
+	 * @return die Version; leer, wenn die Datei fehlt oder nicht lesbar ist (beschädigt, höheres Format, falsche ID)
+	 * @throws IOException wenn das Lesen der Datei selbst scheitert
+	 */
+	public Optional<Version> readVersion(UnitKey unit, VersionId id) throws IOException {
+		return files.read(versionFile(unit, id)).map(bytes -> parseVersion(id, bytes).version());
+	}
+
+	private static VersionFile parseVersion(VersionId id, byte[] bytes) {
+		try {
+			Version version = StoreCodec.readVersion(bytes);
+			if (!version.id().equals(id)) {
+				return new VersionFile(id, bytes, null, null);
+			}
+			return new VersionFile(id, bytes, version, null);
+		} catch (UnknownFormatException e) {
+			return new VersionFile(id, bytes, null, e.format());
+		} catch (IOException e) {
+			return new VersionFile(id, bytes, null, null);
+		}
+	}
+
+	private static ClaimFile parseClaim(String name, byte[] bytes) {
+		try {
+			return new ClaimFile(name, bytes, StoreCodec.readClaim(bytes));
+		} catch (IOException e) {
+			// unlesbar oder unbekanntes Format: ohne gelesenen Inhalt, die Bytes bleiben
+			return new ClaimFile(name, bytes, null);
+		}
+	}
+
+	/** Ob die Einheit mindestens eine Versionsdatei hat (nur ihr eigener Ordner wird aufgelistet, nichts gelesen). */
+	public boolean hasVersions(UnitKey unit) throws IOException {
+		return !requireAnchorIfEmpty(versionIds(unitDir(unit))).isEmpty();
+	}
+
+	/** Die IDs aller Events (gültige Ordnernamen unter {@code events/}), sortiert. */
+	public List<String> eventIds() throws IOException {
+		return unitIds(EVENTS, true);
+	}
+
+	/** Die IDs aller Hallen (gültige Ordnernamen unter {@code halls/}), sortiert. */
+	public List<String> hallIds() throws IOException {
+		return unitIds(HALLS, false);
+	}
+
+	private List<String> unitIds(String folder, boolean events) throws IOException {
+		Path parent = dataRoot.resolve(folder);
+		List<String> ids = new ArrayList<>();
+		for (FileLayer.DirEntry entry : entries(parent)) {
+			if (entry.directory() && isValidUnit(entry.name(), events)) {
+				ids.add(entry.name());
+			}
+		}
+		return ids;
+	}
+
+	private static boolean isValidUnit(String id, boolean event) {
+		try {
+			if (event) {
+				UnitKey.event(id);
+			} else {
+				UnitKey.hall(id);
+			}
+			return true;
+		} catch (IllegalArgumentException e) {
+			return false;
+		}
+	}
+
+	/**
+	 * Alle Einheiten eines Events: zuerst das Event, dann jeder Auftritt gefolgt von seinen Buchungen. Auftritte und
+	 * Buchungen stehen nach Ordnernamen sortiert; es zählen nur Ordner mit gültigem Namen.
+	 */
+	public List<UnitKey> eventUnits(String eventId) throws IOException {
+		UnitKey event = UnitKey.event(eventId);
+		List<UnitKey> units = new ArrayList<>();
+		units.add(event);
+		for (UnitKey presentation : childUnits(event, PRESENTATIONS)) {
+			units.add(presentation);
+			units.addAll(childUnits(presentation, BOOKINGS));
+		}
+		return units;
+	}
+
+	private List<UnitKey> childUnits(UnitKey parent, String folder) throws IOException {
+		List<UnitKey> children = new ArrayList<>();
+		for (String name : childNames(parent, folder)) {
+			children.add(childUnit(parent, folder, name).orElseThrow());
+		}
+		return children;
+	}
+
+	/**
+	 * Die Namen der Unterordner von {@code <parent>/<folder>}, die eine Einheit bezeichnen (gültiger Name), sortiert;
+	 * leer, wenn der Ordner fehlt.
+	 *
+	 * @param folder {@code presentations} unter einem Event oder {@code bookings} unter einem Auftritt
+	 */
+	public List<String> childNames(UnitKey parent, String folder) throws IOException {
+		Path childDir = unitDir(parent).resolve(folder);
+		List<String> names = new ArrayList<>();
+		// ein Listenzugriff mit den Ordner-Kennzeichen, nicht je Eintrag eine Frage: auf einer Netzfreigabe kostet jede einen Zugriff
+		for (FileLayer.DirEntry entry : entries(childDir)) {
+			if (entry.directory() && childUnit(parent, folder, entry.name()).isPresent()) {
+				names.add(entry.name());
+			}
+		}
+		return names;
+	}
+
+	/** Die Einheit im Unterordner {@code <parent>/<folder>/<name>}; leer, wenn der Pfad keine Einheit bezeichnet. */
+	static Optional<UnitKey> childUnit(UnitKey parent, String folder, String name) {
+		return UnitKey.parse(parent.relativePath() + "/" + folder + "/" + name);
+	}
+
+	/** Alle Einheiten des Bestands: die aller Events, dann alle Hallen. */
+	public List<UnitKey> allUnits() throws IOException {
+		List<UnitKey> units = new ArrayList<>();
+		for (String eventId : eventIds()) {
+			units.addAll(eventUnits(eventId));
+		}
+		for (String hallId : hallIds()) {
+			units.add(UnitKey.hall(hallId));
+		}
+		return units;
+	}
+
+	/**
+	 * Die Pfade der Versions- und Anspruchsdateien genau dieser Einheit (ohne die ihrer Unterordner, etwa der Auftritte
+	 * eines Events), relativ zu {@link #dataRoot()} und mit {@code /} getrennt, sortiert. Es sind genau die Dateien, die
+	 * {@link #readUnit} übernimmt; fehlt der Ordner, ist die Liste leer.
+	 */
+	public List<String> unitDataFiles(UnitKey unit) throws IOException {
+		Path unitDir = unitDir(unit);
+		List<VersionId> versionIds = versionIds(unitDir);
+		List<String> claimNames = claimNames(unitDir);
+		requireAnchorIfBothEmpty(versionIds, claimNames);
+		return dataPaths(unit.relativePath() + "/", versionIds, claimNames);
+	}
+
+	/** Die Pfade der Versions- und Anspruchsdateien einer Einheit aus ihren Namen, sortiert. */
+	private static List<String> dataPaths(String prefix, List<VersionId> versionIds, List<String> claimNames) {
+		List<String> paths = new ArrayList<>();
+		for (VersionId id : versionIds) {
+			paths.add(prefix + id + JSON);
+		}
+		for (String name : claimNames) {
+			paths.add(prefix + CLAIMS + "/" + name + JSON);
+		}
+		Collections.sort(paths);
+		return paths;
+	}
+
+	/**
+	 * Was {@link #scanUnit} in einem Durchgang findet.
+	 *
+	 * @param dataFiles die Pfade wie von {@link #unitDataFiles}
+	 * @param tempFiles die Pfade der temporären Dateien dieser Schicht ({@code ~karv-*.tmp}, eigene wie fremde) im Ordner der
+	 *                  Einheit und in ihrem {@code claims/}, relativ zu {@link #dataRoot()} und mit {@code /} getrennt:
+	 *                  zuerst die des Einheitenordners, dann die unter {@code claims/}. Unterordner der Einheit zählen nicht.
+	 */
+	public record UnitScan(List<String> dataFiles, List<String> tempFiles) {
+	}
+
+	/**
+	 * Die Versions- und Anspruchsdateien und die temporären Dateien genau dieser Einheit mit einem Listenzugriff je Ordner
+	 * (Einheitenordner und {@code claims/}): auf einer Netzfreigabe kostet jeder Zugriff. Die Versions- und
+	 * Anspruchsdateien sind dieselben wie bei {@link #unitDataFiles}.
+	 */
+	public UnitScan scanUnit(UnitKey unit) throws IOException {
+		Path unitDir = unitDir(unit);
+		Path claimsDir = unitDir.resolve(CLAIMS);
+		String prefix = unit.relativePath() + "/";
+		List<FileLayer.DirEntry> unitEntries = files.listEntriesWithTemps(unitDir);
+		List<FileLayer.DirEntry> claimEntries = files.listEntriesWithTemps(claimsDir);
+		requireAnchorIfBothEmpty(unitEntries, claimEntries);
+
+		List<String> data = dataPaths(prefix, versionIdsOf(unitEntries), claimNamesOf(claimEntries));
+		List<String> temps = new ArrayList<>();
+		addTempNames(temps, unitEntries.stream().map(FileLayer.DirEntry::name).toList(), prefix);
+		addTempNames(temps, claimEntries.stream().map(FileLayer.DirEntry::name).toList(), prefix + CLAIMS + "/");
+		return new UnitScan(data, temps);
+	}
+
+	private static void addTempNames(List<String> paths, List<String> names, String prefix) {
+		for (String name : names) {
+			if (FileLayer.isTempName(name)) {
+				paths.add(prefix + name);
+			}
+		}
+	}
+
+	/**
+	 * Die Bytes einer Datei unter {@link #dataRoot()}.
+	 *
+	 * @param rel Pfad relativ zum Datenordner, mit {@code /} getrennt
+	 * @throws IllegalArgumentException wenn der Pfad absolut ist oder den Datenordner verlässt
+	 */
+	public Optional<byte[]> readRelative(String rel) throws IOException {
+		return files.read(resolve(rel));
+	}
+
+	/**
+	 * Legt eine Datei unter {@link #dataRoot()} an, wenn es sie noch nicht gibt.
+	 *
+	 * @param rel Pfad relativ zum Datenordner, mit {@code /} getrennt
+	 * @return {@code true}, wenn die Datei angelegt wurde; {@code false}, wenn sie schon da war
+	 * @throws IllegalArgumentException wenn der Pfad absolut ist oder den Datenordner verlässt
+	 */
+	public boolean createRelative(String rel, byte[] bytes) throws IOException {
+		return create(resolve(rel), bytes);
+	}
+
+	/**
+	 * Die Namen der direkten Einträge eines Ordners unter {@link #dataRoot()}, sortiert und ohne temporäre Dateien; leer,
+	 * wenn der Ordner fehlt.
+	 *
+	 * @param rel Pfad relativ zum Datenordner, mit {@code /} getrennt
+	 * @throws IllegalArgumentException wenn der Pfad absolut ist oder den Datenordner verlässt
+	 */
+	public List<String> listRelative(String rel) throws IOException {
+		return requireAnchorIfEmpty(files.listNames(resolve(rel)));
+	}
+
+	/** Die Einträge des Ordners wie {@link FileLayer#listEntries}; leer nur, wenn der Anker da ist ({@link #requireAnchorIfEmpty}). */
+	private List<FileLayer.DirEntry> entries(Path dir) throws IOException {
+		return requireAnchorIfEmpty(files.listEntries(dir));
+	}
+
+	/**
+	 * Eine leere Liste gilt nur, wenn der Anker (der gemeinsame Ordner) noch da ist. Die Dateischicht liefert für einen
+	 * fehlenden Ordner eine leere Liste; fehlt aber der Anker selbst (Ordner umbenannt, Verknüpfung entfernt), ist der Bestand
+	 * nicht leer, sondern nicht erreichbar. Sonst hielte ein Vollabgleich, dem der Ordner mitten in einem Takt wegfällt, alle
+	 * übrigen Einheiten für auf beiden Seiten abwesend und endete als vollständig (Handtest KARV-87). Geprüft wird nur bei
+	 * einer leeren Liste; ohne Anker (der lokale Bestand) nie.
+	 *
+	 * @throws NoSuchFileException wenn die Liste leer ist und der Anker fehlt
+	 */
+	private <C extends Collection<?>> C requireAnchorIfEmpty(C listed) throws IOException {
+		if (listed.isEmpty() && anchor != null && !files.isDirectory(anchor)) {
+			throw new NoSuchFileException(anchor.toString(), null, "Der gemeinsame Ordner fehlt");
+		}
+		return listed;
+	}
+
+	/**
+	 * Wie {@link #requireAnchorIfEmpty} für die beiden Listen einer Einheit (ihr Ordner und {@code claims/}): Der Anker wird
+	 * nur angesehen, wenn beide leer sind, also höchstens einmal je Einheit (auf einer Netzfreigabe kostet jeder Zugriff).
+	 */
+	private void requireAnchorIfBothEmpty(Collection<?> unitDirEntries, Collection<?> claimEntries) throws IOException {
+		if (unitDirEntries.isEmpty()) {
+			requireAnchorIfEmpty(claimEntries);
+		}
+	}
+
+	/**
+	 * Der Pfad zu einer Datei unter {@link #dataRoot()}.
+	 *
+	 * @param rel Pfad relativ zum Datenordner, mit {@code /} getrennt
+	 * @throws IllegalArgumentException wenn der Pfad leer oder absolut ist, leere, {@code .}- oder {@code ..}-Teile,
+	 *                                  einen Rückwärtsstrich oder einen Doppelpunkt enthält
+	 */
+	public Path resolve(String rel) {
+		if (rel == null || rel.isEmpty() || rel.startsWith("/") || rel.indexOf('\\') >= 0 || rel.indexOf(':') >= 0) {
+			throw new IllegalArgumentException("Ungültiger relativer Pfad: " + rel);
+		}
+		for (String part : rel.split("/", -1)) {
+			if (part.isEmpty() || part.equals(".") || part.equals("..")) {
+				throw new IllegalArgumentException("Ungültiger relativer Pfad: " + rel);
+			}
+		}
+		try {
+			return dataRoot.resolve(rel);
+		} catch (InvalidPathException e) {
+			throw new IllegalArgumentException("Ungültiger relativer Pfad: " + rel, e);
+		}
+	}
+
+	private Path unitDir(UnitKey unit) {
+		return resolve(unit.relativePath());
+	}
+
+	private Path versionFile(UnitKey unit, VersionId id) {
+		return unitDir(unit).resolve(id + JSON);
+	}
+
+	private Path claimFile(UnitKey unit, String claimName) {
+		if (!ROOT.equals(claimName) && !VersionId.isValid(claimName)) {
+			throw new IllegalArgumentException("Ungültiger Name einer Anspruchsdatei: " + claimName);
+		}
+		return unitDir(unit).resolve(CLAIMS).resolve(claimName + JSON);
+	}
+
+	/** Die IDs der Versionsdateien im Einheitenordner, sortiert; fremde Namen und Ordner fehlen. Ohne Blick auf den Anker. */
+	private List<VersionId> versionIds(Path unitDir) throws IOException {
+		return versionIdsOf(files.listEntries(unitDir));
+	}
+
+	/** Wie {@link #versionIds}, aus den schon gelisteten Einträgen im Einheitenordner (temporäre Namen sind keine Versions-IDs). */
+	private static List<VersionId> versionIdsOf(List<FileLayer.DirEntry> entries) {
+		return new ArrayList<>(versionStampsOf(entries).keySet());
+	}
+
+	/**
+	 * Die Versionsdateien unter den gelisteten Einträgen eines Einheitenordners mit Größe und Änderungszeit
+	 * ({@link FileLayer.DirEntry#stamp()}), in der Reihenfolge der Einträge; fremde Namen und Ordner fehlen. Die eine Regel
+	 * für {@link #readUnit} und den Abdruck des Start-Index ({@link UnitIndex#fingerprintFromListing}).
+	 */
+	static Map<VersionId, String> versionStampsOf(List<FileLayer.DirEntry> entries) {
+		Map<VersionId, String> stamps = new LinkedHashMap<>();
+		for (FileLayer.DirEntry entry : entries) {
+			Optional<VersionId> id = versionIdOf(entry.name());
+			if (id.isPresent() && !entry.directory()) {
+				stamps.put(id.get(), entry.stamp());
+			}
+		}
+		return stamps;
+	}
+
+	/** Die Namen der Anspruchsdateien unter {@code claims/}, sortiert; fremde Namen und Ordner fehlen. Ohne Blick auf den Anker. */
+	private List<String> claimNames(Path unitDir) throws IOException {
+		Path claimsDir = unitDir.resolve(CLAIMS);
+		return claimNamesOf(files.listEntries(claimsDir));
+	}
+
+	/** Wie {@link #claimNames}, aus den schon gelisteten Einträgen in {@code claims/}. */
+	private static List<String> claimNamesOf(List<FileLayer.DirEntry> listed) {
+		return new ArrayList<>(claimStampsOf(listed).keySet());
+	}
+
+	/** Wie {@link #versionStampsOf}, für die Anspruchsdateien unter {@code claims/} nach dem Namen des Anspruchs. */
+	static Map<String, String> claimStampsOf(List<FileLayer.DirEntry> listed) {
+		Map<String, String> stamps = new LinkedHashMap<>();
+		for (FileLayer.DirEntry entry : listed) {
+			Optional<String> claimName = claimNameOf(entry.name());
+			if (claimName.isPresent() && !entry.directory()) {
+				stamps.put(claimName.get(), entry.stamp());
+			}
+		}
+		return stamps;
+	}
+
+	/**
+	 * Die ID, wenn der Dateiname der einer Versionsdatei ist: {@code <VersionId>.json}, genau in dieser Schreibweise.
+	 * Dies ist die eine Regel, nach der Versionsdateien erkannt werden; ob der Name zu einer Datei oder einem Ordner
+	 * gehört, prüft sie nicht.
+	 *
+	 * @param fileName der Name der Datei (kein Pfad)
+	 * @return die ID; leer bei jedem anderen Namen ({@code Thumbs.db}, Konfliktkopien, Großschreibung, {@code .tmp})
+	 */
+	public static Optional<VersionId> versionIdOf(String fileName) {
+		return stemOf(fileName).filter(VersionId::isValid).map(VersionId::of);
+	}
+
+	/**
+	 * Der Name des Anspruchs, wenn der Dateiname der einer Anspruchsdatei unter {@code claims/} ist: {@code root.json}
+	 * oder {@code <VersionId>.json}. Der Name des Anspruchs ist {@code "root"} bzw. die ID als Text.
+	 *
+	 * @param fileName der Name der Datei (kein Pfad)
+	 * @return der Name des Anspruchs; leer bei jedem anderen Namen
+	 */
+	public static Optional<String> claimNameOf(String fileName) {
+		return stemOf(fileName).filter(stem -> ROOT.equals(stem) || VersionId.isValid(stem));
+	}
+
+	/** Der Dateiname ohne die Endung {@code .json}; leer, wenn er nicht auf {@code .json} endet. */
+	private static Optional<String> stemOf(String fileName) {
+		if (fileName == null || !fileName.endsWith(JSON)) {
+			return Optional.empty();
+		}
+		return Optional.of(fileName.substring(0, fileName.length() - JSON.length()));
+	}
+}

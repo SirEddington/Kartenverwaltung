@@ -125,6 +125,59 @@ class SeatBulkEditTest {
 
 	private static final LocalDate TODAY = LocalDate.of(2026, 10, 20);
 
+	// --- gezahlter Betrag ---
+
+	private Booking paidSeat(int number, int priceCents, int paidCents) {
+		Booking booking = seat(number, "Meier", priceCents);
+		booking.setPaymentStatus(PaymentStatus.CASH);
+		booking.setPaidAmount(paidCents);
+		return booking;
+	}
+
+	@Test
+	void commonPaidAmountOnlyOverPaidSeats() {
+		assertEquals(Optional.of(2000), new SeatBulkEdit(List.of(paidSeat(1, 2000, 2000), paidSeat(2, 2500, 2000))).paidAmount().common());
+		assertEquals(Optional.empty(), new SeatBulkEdit(List.of(paidSeat(3, 2000, 2000), seat(4, "Schulz", 2000))).paidAmount().common());
+	}
+
+	@Test
+	void untouchedPaidAmountGivesEachNewlyPaidSeatItsOwnPrice() {
+		Booking cheap = seat(1, "Meier", 2000);
+		Booking dear = seat(2, "Schulz", 2500);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(cheap, dear));
+
+		edit.paymentStatus().change(PaymentStatus.CASH);
+		edit.apply(TODAY);
+
+		assertEquals(Integer.valueOf(2000), cheap.getPaidAmount());
+		assertEquals(Integer.valueOf(2500), dear.getPaidAmount());
+	}
+
+	@Test
+	void typedPaidAmountAppliesOnlyToSeatsThatEndUpPaid() {
+		Booking paid = paidSeat(1, 2000, 1800);
+		Booking open = seat(2, "Schulz", 2000);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(paid, open));
+
+		edit.paidAmount().change(2200);
+		edit.apply(TODAY);
+
+		assertEquals(Integer.valueOf(2200), paid.getPaidAmount());
+		assertNull(open.getPaidAmount());
+	}
+
+	@Test
+	void typedPaidAmountWithPaymentWins() {
+		Booking booking = seat(1, "Meier", 2000);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(booking));
+
+		edit.paymentStatus().change(PaymentStatus.CASH);
+		edit.paidAmount().change(1500);
+		edit.apply(TODAY);
+
+		assertEquals(Integer.valueOf(1500), booking.getPaidAmount());
+	}
+
 	@Test
 	void commonValueIsPresentWhenAllSeatsAgree() {
 		SeatBulkEdit edit = new SeatBulkEdit(List.of(seat(1, "Meier", 1000), seat(2, "Meier", 1000)));
@@ -370,5 +423,101 @@ class SeatBulkEditTest {
 		Booking only = seat(1, "Meier", 1000);
 
 		assertEquals(List.of(only), new SeatBulkEdit(List.of(only)).bookings());
+	}
+
+	// --- Reste einer freien Buchung (KARV-121) ---
+
+	private Booking leftovers(int number, String comment) {
+		Booking booking = seat(number, null, 1800);
+		booking.setComment(comment);
+		booking.setFirstName("Anna");
+		return booking;
+	}
+
+	@Test
+	void aSeatWithLeftoversLooksEmptyInTheDialog() {
+		Booking leftover = leftovers(1, "storniert");
+		Booking empty = seat(2, null, 1800);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(leftover, empty));
+
+		assertEquals(Optional.of(""), edit.comment().common(), "kein \"verschieden\" durch den alten Kommentar");
+		assertEquals(Optional.of(""), edit.firstName().common());
+		assertEquals(Optional.of(1800), edit.price().common(), "der Einzelpreis bleibt sichtbar");
+	}
+
+	@Test
+	void applyDiscardsTheLeftoversAndKeepsThePrice() {
+		Booking leftover = leftovers(1, "storniert");
+		String idBefore = leftover.getId();
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(leftover));
+
+		edit.lastName().change("Meier");
+		edit.apply(TODAY);
+
+		assertEquals("Meier", leftover.getLastName());
+		assertNull(leftover.getComment());
+		assertNull(leftover.getFirstName());
+		assertEquals(Integer.valueOf(1800), leftover.getPrice());
+		assertEquals(TODAY, leftover.getReservationDate());
+		assertFalse(idBefore.equals(leftover.getId()), "eine neue Buchung");
+	}
+
+	@Test
+	void aBookingWithoutPlaceKeepsItsDataAndStaysWithoutPlace() {
+		Booking unassigned = leftovers(1, "nach Bestuhlungswechsel");
+		unassigned.setUnassigned(true);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(unassigned));
+		assertEquals(Optional.of("nach Bestuhlungswechsel"), edit.comment().common());
+
+		edit.lastName().change("Meier");
+		edit.apply(TODAY);
+
+		assertEquals("nach Bestuhlungswechsel", unassigned.getComment());
+		assertTrue(unassigned.isUnassigned());
+	}
+
+	@Test
+	void withoutApplyTheLeftoversStay() {
+		Booking leftover = leftovers(1, "storniert");
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(leftover));
+
+		edit.lastName().change("Meier");
+
+		assertEquals("storniert", leftover.getComment());
+		assertNull(leftover.getLastName());
+	}
+
+	@Test
+	void nameRemovalsLeavingDataAreTheBookingsThatLoseTheirNameButKeepOtherData() {
+		Booking withComment = seat(1, "Meier", 1000);
+		withComment.setComment("Fensterplatz");
+		Booking nameOnly = seat(2, "Schulz", 1000);
+		Booking paid = seat(3, "Becker", 1000);
+		paid.setPaymentStatus(PaymentStatus.CASH);
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(withComment, nameOnly, paid));
+
+		edit.lastName().clear();
+
+		assertEquals(List.of(withComment, paid), List.copyOf(edit.nameRemovalsLeavingData().keySet()));
+		assertEquals(null, edit.nameRemovalsLeavingData().get(withComment).getLastName(), "der Stand danach");
+		assertEquals("Fensterplatz", edit.nameRemovalsLeavingData().get(withComment).getComment());
+		assertEquals("Meier", withComment.getLastName(), "nur gefragt, nichts übernommen");
+	}
+
+	@Test
+	void noNameRemovalWhenTheOtherDataIsClearedToo() {
+		Booking withComment = seat(1, "Meier", 1000);
+		withComment.setComment("Fensterplatz");
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(withComment));
+
+		edit.lastName().change("");
+		assertEquals(List.of(withComment), List.copyOf(edit.nameRemovalsLeavingData().keySet()), "das geleerte Namensfeld");
+
+		edit.comment().change("");
+		assertTrue(edit.nameRemovalsLeavingData().isEmpty(), "auch der Kommentar geleert: nichts bleibt");
+
+		SeatBulkEdit renamed = new SeatBulkEdit(List.of(withComment));
+		renamed.lastName().change("Schulz");
+		assertTrue(renamed.nameRemovalsLeavingData().isEmpty());
 	}
 }
