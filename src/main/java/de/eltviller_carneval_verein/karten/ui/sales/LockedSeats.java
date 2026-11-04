@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Predicate;
@@ -58,7 +59,23 @@ public final class LockedSeats {
 		if (event == null) {
 			return false;
 		}
-		return locked.test(UnitKey.booking(event.getId(), presentation.getId(), booking.getSeatId()));
+		UnitKey unit;
+		try {
+			unit = UnitKey.booking(event.getId(), presentation.getId(), booking.getSeatId());
+		} catch (IllegalArgumentException e) {
+			// Eine ID, die keine Einheit haben kann: Es gibt nichts, das gesperrt sein könnte (und das Zeichnen läuft weiter)
+			return false;
+		}
+		return locked.test(unit);
+	}
+
+	/**
+	 * Nimmt die gesperrten Sitze aus einer Auswahl: Sie lassen sich weder verkaufen noch stornieren.
+	 *
+	 * @return ob sich die Auswahl geändert hat
+	 */
+	public static boolean dropFrom(Collection<Booking> bookings) {
+		return bookings.removeIf(LockedSeats::isLocked);
 	}
 
 	/** Öffnet den Dialog "Gesperrte Einträge"; ohne Einrichtung nichts. */

@@ -100,8 +100,12 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	};
 	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(
 			units -> LiveViews.touchesHall(units, selectedPres == null ? null : selectedPres.getHallId()), this::renderIfShown);
-	// Ein Feld, damit An- und Abmelden bei LockedSeats dasselbe Objekt treffen (KARV-111)
-	private final Runnable lockedChanged = this::renderIfShown;
+	// Ein Feld, damit An- und Abmelden bei LockedSeats dasselbe Objekt treffen (KARV-111); ein jetzt gesperrter Sitz
+	// verlässt die Auswahl, sonst schlösse "Verkaufen" ihn ein und scheiterte an ihm
+	private final Runnable lockedChanged = () -> {
+		LockedSeats.dropFrom(selectedBookings);
+		renderIfShown();
+	};
 
 	@FXML
 	private HallPlanPane viewportPane;
@@ -441,6 +445,8 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		selectedBookings.clear();
 		if (selectedPres != null) {
 			bookings.stream().filter(booking -> booking.getParent() == selectedPres && !booking.isUnassigned()).forEach(selectedBookings::add);
+			// Wurde ein Sitz gesperrt, während die Tabelle zu sehen war, kommt er nicht in die Auswahl (KARV-111)
+			LockedSeats.dropFrom(selectedBookings);
 		}
 		renderHall();
 	}

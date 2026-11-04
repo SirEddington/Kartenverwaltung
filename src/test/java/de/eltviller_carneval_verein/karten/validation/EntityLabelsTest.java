@@ -152,4 +152,13 @@ class EntityLabelsTest {
 		assertEquals("Tisch A3, Sitz 2", EntityLabels.placeOf(a3.addSeat(2)));
 		assertEquals("Tisch 4, Sitz 1", EntityLabels.placeOf(t4.addSeat(1)));
 	}
+
+	/** Wie {@link EntityLabels#seat}: Ein Sitz ohne Tisch heißt nur nach seiner Nummer, statt zu werfen. */
+	@Test
+	void placeOfSeatWithoutTableNamesTheSeatOnly() {
+		Seat seat = new Seat();
+		seat.setSeatNumber(5);
+
+		assertEquals("Sitz 5", EntityLabels.placeOf(seat));
+	}
 }

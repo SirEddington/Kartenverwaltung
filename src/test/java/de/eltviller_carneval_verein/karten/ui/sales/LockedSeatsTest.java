@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -176,6 +178,28 @@ class LockedSeatsTest {
 		registration.detach().run();
 		LockedSeats.changed();
 		assertEquals(1, calls.get());
+	}
+
+	/** Eine ID, die UnitKey ablehnt, kann zu keiner Einheit gehören: nicht gesperrt, und das Zeichnen läuft weiter. */
+	@Test
+	void seatIdThatNoUnitCanHaveIsNotLockedAndDoesNotThrow() {
+		LockedSeats.install(unit -> true, () -> {
+		});
+		Booking booking = bookingOf(seat);
+		booking.setSeatId("A1_1");
+
+		assertFalse(assertDoesNotThrow(() -> LockedSeats.isLocked(booking)));
+	}
+
+	/** Ein gesperrter Sitz bleibt nicht in einer Auswahl (Saalplan, gemeinsamer Verkaufszustand). */
+	@Test
+	void dropFromRemovesLockedSeatsOnly() {
+		lock(seat);
+		Set<Booking> selection = new LinkedHashSet<>(List.of(bookingOf(seat), bookingOf(other)));
+
+		assertTrue(LockedSeats.dropFrom(selection));
+		assertEquals(Set.of(bookingOf(other)), selection);
+		assertFalse(LockedSeats.dropFrom(selection), "nichts mehr zu entfernen");
 	}
 
 	@Test
