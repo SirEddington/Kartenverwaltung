@@ -46,7 +46,7 @@ public final class PlaceAssignment {
 
 	/** Der Grund, wenn der gewählte Sitz inzwischen eine Buchung mit Daten hat. */
 	public static String takenText(Seat seat) {
-		return label(seat) + " ist inzwischen belegt. Wähle einen anderen Platz.";
+		return EntityLabels.placeOf(seat) + " ist inzwischen belegt. Wähle einen anderen Platz.";
 	}
 
 	/**
@@ -80,10 +80,5 @@ public final class PlaceAssignment {
 			}
 		}
 		return taken;
-	}
-
-	/** "Tisch A3, Sitz 2" bzw. "Tisch 3, Sitz 2" ohne Reihenbuchstaben. */
-	public static String label(Seat seat) {
-		return EntityLabels.placeOf(seat);
 	}
 }

@@ -509,7 +509,7 @@ public class MainApp extends Application {
 				MainApp::lockedUnitsChanged);
 		// Die Verkaufsansicht zeigt einen Sitz, dessen Buchung gesperrt ist und frei wirkt, als gesperrt (KARV-111)
 		LockedSeats.install(unit -> lockedUnits != null && lockedUnits.status(unit) != null, MainApp::openLockedUnits);
-		liveUpdates =LiveUpdates.install(sync, MainApp::conflictsChanged, live -> SharedFolderEvents.install(
+		liveUpdates = LiveUpdates.install(sync, MainApp::conflictsChanged, live -> SharedFolderEvents.install(
 				new SharedFolderEvents(live, labels, sharedFolderUi, connection.flow(), MainApp::syncChanged, MainApp::lockedReported)));
 		SharedFolderEvents.instance().ifPresent(events -> events.watch(sync));
 		ChangeTrigger.install();

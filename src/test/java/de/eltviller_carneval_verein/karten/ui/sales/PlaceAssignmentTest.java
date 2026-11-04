@@ -116,19 +116,6 @@ class PlaceAssignmentTest {
 		assertEquals(List.of(seat), PlaceAssignment.freeSeats(presentation, plan));
 	}
 
-	@Test
-	void labelNamesRowTableAndSeat() {
-		Table table = plan.addTable(row("A"));
-		table.setTableNumber(3);
-		Seat seat = table.addSeat(2);
-		Table plain = plan.addTable(row(""));
-		plain.setTableNumber(4);
-		Seat plainSeat = plain.addSeat(1);
-
-		assertEquals("Tisch A3, Sitz 2", PlaceAssignment.label(seat));
-		assertEquals("Tisch 4, Sitz 1", PlaceAssignment.label(plainSeat));
-	}
-
 	/** Dieselben Texte für Verkaufstabelle und Konflikt-Dialog (KARV-109). */
 	@Test
 	void reasonsNameTheSituationLikeTheConflictDialog() {
