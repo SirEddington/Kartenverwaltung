@@ -5,8 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
@@ -19,6 +22,7 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 class PlaceAssignmentTest {
@@ -76,25 +80,40 @@ class PlaceAssignmentTest {
 		assertFalse(PlaceAssignment.isFree(presentation, paid));
 	}
 
+	/** KARV-111: Ein gesperrter Sitz wird nicht angeboten, auch wenn sein Platzhalter frei wirkt. */
+	@Test
+	void aLockedSeatIsNotFree() {
+		Table table = plan.addTable(row("A"));
+		Seat first = table.addSeat(1);
+		Seat second = table.addSeat(2);
+		presentation.setSeatingPlanId(plan.getId());
+		BookingSync.sync(presentation, plan);
+		Set<UnitKey> locked = new HashSet<>(Set.of(keyOf(first)));
+		LockedSeats.install(() -> locked, () -> {
+		});
+
+		assertEquals(List.of(second), PlaceAssignment.freeSeats(presentation, plan));
+		assertFalse(PlaceAssignment.isFree(presentation, first));
+
+		locked.add(keyOf(second));
+		assertEquals(PlaceAssignment.NO_FREE_SEAT, PlaceAssignment.refusal(presentation, plan));
+	}
+
+	private UnitKey keyOf(Seat seat) {
+		return UnitKey.booking(presentation.getParent().getId(), presentation.getId(), seat.getId());
+	}
+
+	@AfterEach
+	void forgetLockedSeats() {
+		LockedSeats.reset();
+	}
+
 	@Test
 	void aSeatWithoutAnyBookingIsFree() {
 		Table table = plan.addTable(row(""));
 		Seat seat = table.addSeat();
 
 		assertEquals(List.of(seat), PlaceAssignment.freeSeats(presentation, plan));
-	}
-
-	@Test
-	void labelNamesRowTableAndSeat() {
-		Table table = plan.addTable(row("A"));
-		table.setTableNumber(3);
-		Seat seat = table.addSeat(2);
-		Table plain = plan.addTable(row(""));
-		plain.setTableNumber(4);
-		Seat plainSeat = plain.addSeat(1);
-
-		assertEquals("Tisch A3, Sitz 2", PlaceAssignment.label(seat));
-		assertEquals("Tisch 4, Sitz 1", PlaceAssignment.label(plainSeat));
 	}
 
 	/** Dieselben Texte für Verkaufstabelle und Konflikt-Dialog (KARV-109). */

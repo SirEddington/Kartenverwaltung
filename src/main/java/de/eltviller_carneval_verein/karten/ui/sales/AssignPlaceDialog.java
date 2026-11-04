@@ -7,6 +7,7 @@ import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
@@ -48,7 +49,7 @@ public final class AssignPlaceDialog {
 			@Override
 			protected void updateItem(Seat seat, boolean empty) {
 				super.updateItem(seat, empty);
-				setText(empty || seat == null ? null : PlaceAssignment.label(seat));
+				setText(empty || seat == null ? null : EntityLabels.placeOf(seat));
 			}
 		});
 		list.setPrefSize(260, 320);

@@ -51,6 +51,7 @@ import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.event.EventEditController;
 import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
 import de.eltviller_carneval_verein.karten.ui.sales.BookingAutoSave;
+import de.eltviller_carneval_verein.karten.ui.sales.LockedSeats;
 import de.eltviller_carneval_verein.karten.ui.shared.DataReload;
 import de.eltviller_carneval_verein.karten.ui.shared.LockedUnits;
 import de.eltviller_carneval_verein.karten.ui.shared.LockedUnitsDialog;
@@ -420,12 +421,16 @@ public class MainApp extends Application {
 		}
 	}
 
-	/** Die gesperrten Einträge haben sich geändert (FX-Thread): der Link der aktuellen Ansicht und ein offener Dialog lesen neu. */
+	/**
+	 * Die gesperrten Einträge haben sich geändert (FX-Thread): der Link der aktuellen Ansicht, ein offener Dialog und die
+	 * Verkaufsansichten (gesperrte Sitze, KARV-111) lesen neu.
+	 */
 	private static void lockedViewChanged() {
 		if (lockedIndicator != null) {
 			lockedIndicator.refresh();
 		}
 		LockedUnitsDialog.refreshIfOpen();
+		LockedSeats.changed();
 	}
 
 	/** Die Zahl der gesperrten Einträge für den Link in der Fußzeile; vor dem Laden des Bestands keine. */
@@ -502,6 +507,8 @@ public class MainApp extends Application {
 				(unit, cause) -> StatusMessage.getInstance().show(Severity.ERROR,
 						SharedFolderTexts.lockedResetFailed(LockedUnits.label(labels, unit), cause)),
 				MainApp::lockedUnitsChanged);
+		// Die Verkaufsansicht zeigt einen Sitz, dessen Buchung gesperrt ist und frei wirkt, als gesperrt (KARV-111)
+		LockedSeats.install(lockedUnits::units, MainApp::openLockedUnits);
 		liveUpdates = LiveUpdates.install(sync, MainApp::conflictsChanged, live -> SharedFolderEvents.install(
 				new SharedFolderEvents(live, labels, sharedFolderUi, connection.flow(), MainApp::syncChanged, MainApp::lockedReported)));
 		SharedFolderEvents.instance().ifPresent(events -> events.watch(sync));

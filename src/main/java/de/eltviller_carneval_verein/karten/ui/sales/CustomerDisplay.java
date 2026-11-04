@@ -106,6 +106,8 @@ public final class CustomerDisplay {
 	};
 	// Ersetzt oder ändert ein anderer Rechner die Halle der gezeigten Vorstellung, zeichnet das Fenster neu (die Halle wird über die ID gesucht)
 	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(this::touchesShownHall, this::redrawIfAttached);
+	// Ein gesperrter Sitz wird rot oder wieder grün (KARV-111)
+	private final Runnable lockedChanged = redraw::request;
 
 	private final HallPlanPane.Decorator decorator = new HallPlanPane.Decorator() {
 		@Override
@@ -360,6 +362,7 @@ public final class CustomerDisplay {
 		ChangeTracker.events().addListener(dataChanged);
 		StoreEventRepository.getInstance().addListener(foreignEventChanges);
 		hallRepository.addListener(foreignHallChanges);
+		LockedSeats.addListener(lockedChanged);
 	}
 
 	private void detach() {
@@ -376,6 +379,7 @@ public final class CustomerDisplay {
 		ChangeTracker.events().removeListener(dataChanged);
 		StoreEventRepository.getInstance().removeListener(foreignEventChanges);
 		hallRepository.removeListener(foreignHallChanges);
+		LockedSeats.removeListener(lockedChanged);
 	}
 
 	/** Nur Änderungen am gezeigten Event zeichnen neu; die Änderungserkennung meldet alle verfolgten Events. */

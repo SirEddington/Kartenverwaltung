@@ -258,7 +258,10 @@ public class TicketTableController implements ContentController, SalesStateAware
 			}
 		});
 		// Fremde Änderungen nur, solange die Tabelle zu sehen ist; eine mit der Ansicht verschwundene Zelle gibt ihre Buchung frei
+		// Ebenso eine geänderte Sperrliste: Ein gesperrter Sitz verschwindet aus der Tabelle oder kehrt zurück (KARV-111); wie
+		// eine fremde Änderung erst nach dem Ende einer Bearbeitung
 		LiveViews.whileShown(seatTable, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges),
+				LockedSeats.whileShown(this::refreshAfterForeignChange),
 				Registration.onDetach(() -> EditingUnits.getInstance().end(seatTable)));
 	}
 
@@ -561,15 +564,24 @@ public class TicketTableController implements ContentController, SalesStateAware
 			return List.of();
 		}
 
-		// Je Vorstellung: erst die Buchungen ohne Platz, dann nach Platz (A2 vor A10, Tische ohne Reihe vor A)
 		List<BookingDTO> rows = new ArrayList<>();
 		for (Presentation presentation : presentations) {
-			if (presentation.getBookings() != null) {
-				presentation.getBookings().stream().sorted(TableLabel.BOOKING_ORDER)
-						.forEach(booking -> rows.add(new BookingDTO(presentation.getParent(), presentation, booking)));
-			}
+			shownBookings(presentation).forEach(booking -> rows.add(new BookingDTO(presentation.getParent(), presentation, booking)));
 		}
 		return rows;
+	}
+
+	/**
+	 * Die Buchungen der Vorstellung, die als Zeile erscheinen: erst die ohne Platz, dann nach Platz (A2 vor A10, Tische ohne
+	 * Reihe vor A). Ein gesperrter Sitz fehlt ({@link LockedSeats}, KARV-111): Seine Buchung ist unlesbar, der Link
+	 * "gesperrte Einträge" in der Fußzeile nennt ihn.
+	 */
+	static List<Booking> shownBookings(Presentation presentation) {
+		if (presentation.getBookings() == null) {
+			return List.of();
+		}
+		return presentation.getBookings().stream().filter(booking -> !LockedSeats.isLocked(booking)).sorted(TableLabel.BOOKING_ORDER)
+				.toList();
 	}
 
 	/**

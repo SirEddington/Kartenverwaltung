@@ -103,6 +103,16 @@ public final class EntityLabels {
 	}
 
 	/**
+	 * Der Platz eines Sitzes in der Form, die auch eine Buchung auf ihm trägt: "Tisch A3, Sitz 2" bzw. "Tisch 3, Sitz 2" ohne
+	 * Reihenbuchstaben (für "Platz zuweisen" und für eine Buchung, die im Modell fehlt, KARV-111); ohne Tisch "Sitz 2".
+	 */
+	public static String placeOf(Seat seat) {
+		Table table = seat.getParent();
+		String kind = "Sitz " + seat.getSeatNumber();
+		return table == null ? kind : table.getDisplayName() + ", " + kind;
+	}
+
+	/**
 	 * z. B. "Sitz 2 an Tisch A3 in Bestuhlung Prunksitzung in Halle Festhalle" (ohne Bestuhlung: "Sitz 2 an Tisch A3",
 	 * ohne Tisch: "Sitz 2").
 	 */

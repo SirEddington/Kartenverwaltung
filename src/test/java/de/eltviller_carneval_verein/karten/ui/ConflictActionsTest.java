@@ -65,6 +65,7 @@ import de.eltviller_carneval_verein.karten.ui.ConflictActions.Availability;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Action;
 import de.eltviller_carneval_verein.karten.ui.ConflictList.Row;
 import de.eltviller_carneval_verein.karten.ui.sales.PlaceAssignment;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Die Aktionen des Sammel-Dialogs auf echten Konflikten: Zwei Rechner mit eigenem Dienst und den Strategien der App tauschen
@@ -844,7 +845,7 @@ class ConflictActionsTest {
 
 		IllegalStateException failure = assertThrows(IllegalStateException.class, () -> b.actions().assignPlace(sale, taken));
 
-		assertEquals(PlaceAssignment.label(taken) + " ist inzwischen belegt. Wähle einen anderen Platz.",
+		assertEquals(EntityLabels.placeOf(taken) + " ist inzwischen belegt. Wähle einen anderen Platz.",
 				failure.getMessage());
 		assertEquals(before, b.friday().getBookings());
 		assertTrue(b.actions().bookingToAssign(sale).isUnassigned());
