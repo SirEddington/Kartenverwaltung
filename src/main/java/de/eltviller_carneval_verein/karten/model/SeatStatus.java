@@ -4,7 +4,8 @@ public enum SeatStatus {
 	FREE("Frei"),
 	RESERVED("Reserviert"),
 	SOLD("Verkauft"),
-	BLOCKED("Blockiert");
+	/** Gesperrter Sitz (KARV-111): Seine Buchung ist unlesbar, der Saalplan zeigt ihn grau. */
+	BLOCKED("Gesperrt");
 
 	private final String displayName;
 
