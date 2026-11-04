@@ -2,8 +2,9 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -21,19 +22,22 @@ import de.eltviller_carneval_verein.karten.ui.LiveViews;
  * bleibt es bei ihr.
  * <p>
  * Die App richtet die Abfrage mit {@link #install} ein (die Liste ist {@code LockedUnits}); ohne Einrichtung ist nichts
- * gesperrt. Saalplan, Kundenfenster und Kartentabelle zeichnen über {@link #addListener} neu, wenn sich die Liste ändert.
+ * gesperrt. Saalplan, Kundenfenster und Kartentabelle zeichnen über {@link #addListener} neu, wenn sich die Liste ändert
+ * ({@link #changed}).
  * Nicht threadsicher für die Abfrage selbst: alle Aufrufe auf dem FX-Thread.
  */
 public final class LockedSeats {
 
 	private static final Logger LOG = Logger.getLogger(LockedSeats.class.getName());
-	private static final Predicate<UnitKey> NOTHING_LOCKED = unit -> false;
+	private static final Supplier<Set<UnitKey>> NOTHING_LOCKED = Set::of;
 	private static final Runnable NOTHING_TO_OPEN = () -> {
 	};
 
-	private static Predicate<UnitKey> locked = NOTHING_LOCKED;
+	private static Supplier<Set<UnitKey>> locked = NOTHING_LOCKED;
 	private static Runnable open = NOTHING_TO_OPEN;
 	private static final List<Runnable> listeners = new CopyOnWriteArrayList<>();
+	// Der Stand, den die Ansichten zuletzt gezeichnet haben (siehe changed())
+	private static Set<UnitKey> notified = Set.of();
 
 	private LockedSeats() {
 	}
@@ -41,17 +45,21 @@ public final class LockedSeats {
 	/**
 	 * Richtet die Abfrage ein.
 	 *
-	 * @param locked ob die Liste der gesperrten Einträge die Einheit führt
+	 * @param locked die Einheiten, die die Liste der gesperrten Einträge gerade führt (eine Sicht, kein Abzug; in der App
+	 *               {@code LockedUnits.units()})
 	 * @param open   öffnet den Dialog "Gesperrte Einträge" (wie der Link in der Fußzeile)
 	 */
-	public static void install(Predicate<UnitKey> locked, Runnable open) {
+	public static void install(Supplier<Set<UnitKey>> locked, Runnable open) {
 		LockedSeats.locked = locked;
 		LockedSeats.open = open;
+		notified = Set.copyOf(locked.get());
 	}
 
 	/** Ob der Sitz der Buchung gesperrt ist (siehe Klassenbeschreibung). */
 	public static boolean isLocked(Booking booking) {
-		if (booking.getSeatId() == null || booking.isUnassigned() || booking.isTaken()) {
+		Set<UnitKey> units = locked.get();
+		// Meist ist nichts gesperrt: dann ohne Schlüssel (er läuft bei jedem Zeichnen für jeden freien Sitz)
+		if (units.isEmpty() || booking.getSeatId() == null || booking.isUnassigned() || booking.isTaken()) {
 			return false;
 		}
 		Presentation presentation = booking.getParent();
@@ -66,16 +74,12 @@ public final class LockedSeats {
 			// Eine ID, die keine Einheit haben kann: Es gibt nichts, das gesperrt sein könnte (und das Zeichnen läuft weiter)
 			return false;
 		}
-		return locked.test(unit);
+		return units.contains(unit);
 	}
 
-	/**
-	 * Nimmt die gesperrten Sitze aus einer Auswahl: Sie lassen sich weder verkaufen noch stornieren.
-	 *
-	 * @return ob sich die Auswahl geändert hat
-	 */
-	public static boolean dropFrom(Collection<Booking> bookings) {
-		return bookings.removeIf(LockedSeats::isLocked);
+	/** Nimmt die gesperrten Sitze aus einer Auswahl: Sie lassen sich weder verkaufen noch stornieren. */
+	public static void dropFrom(Collection<Booking> bookings) {
+		bookings.removeIf(LockedSeats::isLocked);
 	}
 
 	/** Öffnet den Dialog "Gesperrte Einträge"; ohne Einrichtung nichts. */
@@ -96,8 +100,17 @@ public final class LockedSeats {
 		return new LiveViews.Registration(() -> addListener(listener), () -> removeListener(listener));
 	}
 
-	/** Die gesperrten Einträge haben sich geändert: Jeder Listener zeichnet neu; ein Fehler hält die übrigen nicht auf. */
+	/**
+	 * Die gesperrten Einträge können sich geändert haben (die App meldet das auch im Sekundentakt des Abgleichs): Nur wenn
+	 * sich die gesperrten Einheiten seit der letzten Meldung wirklich geändert haben, zeichnet jeder Listener neu, sonst
+	 * baute der Saalplan jede Sekunde alle Sitze neu. Ein Fehler in einem Listener hält die übrigen nicht auf.
+	 */
 	public static void changed() {
+		Set<UnitKey> now = Set.copyOf(locked.get());
+		if (now.equals(notified)) {
+			return;
+		}
+		notified = now;
 		for (Runnable listener : listeners) {
 			try {
 				listener.run();
@@ -111,6 +124,7 @@ public final class LockedSeats {
 	static void reset() {
 		locked = NOTHING_LOCKED;
 		open = NOTHING_TO_OPEN;
+		notified = Set.of();
 		listeners.clear();
 	}
 }

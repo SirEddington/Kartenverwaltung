@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -72,7 +73,7 @@ class TicketTableControllerTest {
 
 		assertEquals(List.of(first.getId(), middle.getId(), last.getId()), seatIds(TicketTableController.shownBookings(presentation)));
 
-		LockedSeats.install(UnitKey.booking(event.getId(), presentation.getId(), middle.getId())::equals, () -> {
+		LockedSeats.install(() -> Set.of(UnitKey.booking(event.getId(), presentation.getId(), middle.getId())), () -> {
 		});
 		assertEquals(List.of(first.getId(), last.getId()), seatIds(TicketTableController.shownBookings(presentation)));
 	}

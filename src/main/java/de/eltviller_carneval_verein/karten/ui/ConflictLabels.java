@@ -16,6 +16,7 @@ import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.ui.sales.SalesPlan;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
@@ -101,11 +102,8 @@ public final class ConflictLabels {
 	 * eingefroren ist (ihre Bestuhlung gibt es nicht mehr).
 	 */
 	private static String placeInPlan(Presentation presentation, Function<String, Hall> findHall, String seatId) {
-		if (presentation == null || presentation.isPlanMissing() || presentation.getHallId() == null) {
-			return null;
-		}
-		Hall hall = findHall.apply(presentation.getHallId());
-		SeatingPlan plan = hall == null ? null : hall.findSeatingPlan(presentation.getSeatingPlanId());
+		Hall hall = presentation == null || presentation.getHallId() == null ? null : findHall.apply(presentation.getHallId());
+		SeatingPlan plan = SalesPlan.of(presentation, hall);
 		Seat seat = plan == null ? null : plan.findSeat(seatId);
 		return seat == null ? null : EntityLabels.placeOf(seat);
 	}

@@ -89,7 +89,7 @@ class PlaceAssignmentTest {
 		presentation.setSeatingPlanId(plan.getId());
 		BookingSync.sync(presentation, plan);
 		Set<UnitKey> locked = new HashSet<>(Set.of(keyOf(first)));
-		LockedSeats.install(locked::contains, () -> {
+		LockedSeats.install(() -> locked, () -> {
 		});
 
 		assertEquals(List.of(second), PlaceAssignment.freeSeats(presentation, plan));

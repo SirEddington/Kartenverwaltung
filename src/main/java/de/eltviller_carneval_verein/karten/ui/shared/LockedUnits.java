@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui.shared;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -128,6 +129,11 @@ public final class LockedUnits {
 	/** Die Zahl der gesperrten Einheiten (für den Link in der Fußzeile). */
 	public int count() {
 		return locked.size();
+	}
+
+	/** Die gesperrten Einheiten als unveränderliche Sicht (für die gesperrten Sitze der Verkaufsansicht, KARV-111). */
+	public Set<UnitKey> units() {
+		return Collections.unmodifiableSet(locked.keySet());
 	}
 
 	/** Die Ursache der gesperrten Einheit; {@code null}, wenn sie nicht geführt wird. */

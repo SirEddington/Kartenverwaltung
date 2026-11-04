@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -143,7 +144,7 @@ class CustomerDisplayTextTest {
 		Booking seat = new TestBookings().booking(presentation, 1, 1);
 		assertFalse(CustomerDisplayText.isTaken(seat), "ohne Sperre frei");
 
-		LockedSeats.install(UnitKey.booking(event.getId(), presentation.getId(), seat.getSeatId())::equals, () -> {
+		LockedSeats.install(() -> Set.of(UnitKey.booking(event.getId(), presentation.getId(), seat.getSeatId())), () -> {
 		});
 		assertTrue(CustomerDisplayText.isTaken(seat));
 	}

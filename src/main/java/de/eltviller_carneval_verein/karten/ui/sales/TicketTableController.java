@@ -99,8 +99,6 @@ public class TicketTableController implements ContentController, SalesStateAware
 	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
 	// Eine fremde Änderung kam, während eine Zelle im Bearbeiten war; die Tabelle zeichnet nach deren Ende neu
 	private boolean foreignChangePending = false;
-	// Ein Feld, damit An- und Abmelden bei LockedSeats dasselbe Objekt treffen; wartet wie eine fremde Änderung auf das Ende einer Bearbeitung
-	private final Runnable lockedChanged = this::refreshAfterForeignChange;
 	// Zuletzt geänderte Buchungen, die dadurch storniert sein können (nach Identität); geprüft, sobald keine Zelle im Bearbeiten ist
 	private final Set<Booking> cancelCandidates = Collections.newSetFromMap(new IdentityHashMap<>());
 	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
@@ -260,9 +258,11 @@ public class TicketTableController implements ContentController, SalesStateAware
 			}
 		});
 		// Fremde Änderungen nur, solange die Tabelle zu sehen ist; eine mit der Ansicht verschwundene Zelle gibt ihre Buchung frei
-		// Ebenso eine geänderte Sperrliste: Ein gesperrter Sitz verschwindet aus der Tabelle oder kehrt zurück (KARV-111)
+		// Ebenso eine geänderte Sperrliste: Ein gesperrter Sitz verschwindet aus der Tabelle oder kehrt zurück (KARV-111); wie
+		// eine fremde Änderung erst nach dem Ende einer Bearbeitung
 		LiveViews.whileShown(seatTable, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges),
-				LockedSeats.whileShown(lockedChanged), Registration.onDetach(() -> EditingUnits.getInstance().end(seatTable)));
+				LockedSeats.whileShown(this::refreshAfterForeignChange),
+				Registration.onDetach(() -> EditingUnits.getInstance().end(seatTable)));
 	}
 
 	private List<Booking> selectedBookings() {

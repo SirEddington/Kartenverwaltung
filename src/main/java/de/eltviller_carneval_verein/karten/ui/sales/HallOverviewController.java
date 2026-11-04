@@ -100,12 +100,6 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	};
 	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(
 			units -> LiveViews.touchesHall(units, selectedPres == null ? null : selectedPres.getHallId()), this::renderIfShown);
-	// Ein Feld, damit An- und Abmelden bei LockedSeats dasselbe Objekt treffen (KARV-111); ein jetzt gesperrter Sitz
-	// verlässt die Auswahl, sonst schlösse "Verkaufen" ihn ein und scheiterte an ihm
-	private final Runnable lockedChanged = () -> {
-		LockedSeats.dropFrom(selectedBookings);
-		renderIfShown();
-	};
 
 	@FXML
 	private HallPlanPane viewportPane;
@@ -137,10 +131,14 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		updateHint();
 
 		// Fremde Änderungen nur, solange der Plan zu sehen ist (danach hielten die Repositories diese Ansicht am Leben)
-		// Ebenso eine geänderte Sperrliste: Ein gesperrter Sitz wird grau oder wieder normal (KARV-111)
+		// Ebenso eine geänderte Sperrliste: Ein gesperrter Sitz wird grau oder wieder normal und verlässt die Auswahl, sonst
+		// schlösse "Verkaufen" ihn ein und scheiterte an ihm (KARV-111)
 		LiveViews.whileShown(viewportPane, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignEventChanges),
 				Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges),
-				LockedSeats.whileShown(lockedChanged));
+				LockedSeats.whileShown(() -> {
+					LockedSeats.dropFrom(selectedBookings);
+					renderIfShown();
+				}));
 	}
 
 	/** Zeichnet die Halle der gezeigten Vorstellung neu (eine ersetzte Halle hat dieselbe ID, {@link #hallOf} sucht nach ihr). */

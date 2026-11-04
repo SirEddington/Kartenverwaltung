@@ -61,7 +61,7 @@ class LockedSeatsTest {
 	}
 
 	private void lock(Seat target) {
-		LockedSeats.install(Set.of(keyOf(target))::contains, () -> {
+		LockedSeats.install(() -> Set.of(keyOf(target)), () -> {
 		});
 	}
 
@@ -110,8 +110,7 @@ class LockedSeatsTest {
 
 	@Test
 	void bookingWithoutPresentationOrEventIsNotLocked() {
-		LockedSeats.install(unit -> true, () -> {
-		});
+		lock(seat);
 		Booking orphan = new Booking();
 		orphan.setSeatId(seat.getId());
 		assertFalse(LockedSeats.isLocked(orphan), "ohne Vorstellung");
@@ -129,7 +128,7 @@ class LockedSeatsTest {
 	@Test
 	void unlockedAgainWhenTheListNoLongerHasTheUnit() {
 		Set<UnitKey> locked = new HashSet<>(Set.of(keyOf(seat)));
-		LockedSeats.install(locked::contains, () -> {
+		LockedSeats.install(() -> locked, () -> {
 		});
 		assertTrue(LockedSeats.isLocked(bookingOf(seat)));
 
@@ -140,7 +139,7 @@ class LockedSeatsTest {
 	@Test
 	void openCallsTheInstalledAction() {
 		AtomicInteger opened = new AtomicInteger();
-		LockedSeats.install(unit -> false, opened::incrementAndGet);
+		LockedSeats.install(Set::of, opened::incrementAndGet);
 
 		LockedSeats.open();
 		assertEquals(1, opened.get());
@@ -149,8 +148,36 @@ class LockedSeatsTest {
 		assertDoesNotThrow(LockedSeats::open);
 	}
 
+	/**
+	 * Die App meldet jede Sekunde (Takt des Abgleichs): Die Ansichten zeichnen nur neu, wenn sich die gesperrten Einheiten
+	 * seit der letzten Meldung geändert haben, sonst baute der Saalplan jede Sekunde alle Sitze neu.
+	 */
+	@Test
+	void changedNotifiesOnlyWhenTheLockedUnitsChanged() {
+		Set<UnitKey> locked = new HashSet<>();
+		LockedSeats.install(() -> locked, () -> {
+		});
+		AtomicInteger calls = new AtomicInteger();
+		LockedSeats.addListener(calls::incrementAndGet);
+
+		LockedSeats.changed();
+		assertEquals(0, calls.get(), "nichts gesperrt, nichts geändert");
+
+		locked.add(keyOf(seat));
+		LockedSeats.changed();
+		LockedSeats.changed();
+		assertEquals(1, calls.get(), "eine Änderung, eine Meldung");
+
+		locked.remove(keyOf(seat));
+		LockedSeats.changed();
+		assertEquals(2, calls.get(), "die Sperre ist weg");
+	}
+
 	@Test
 	void changedCallsEveryListenerEvenIfOneThrows() {
+		Set<UnitKey> locked = new HashSet<>();
+		LockedSeats.install(() -> locked, () -> {
+		});
 		AtomicInteger calls = new AtomicInteger();
 		Runnable second = calls::incrementAndGet;
 		LockedSeats.addListener(() -> {
@@ -158,24 +185,31 @@ class LockedSeatsTest {
 		});
 		LockedSeats.addListener(second);
 
+		locked.add(keyOf(seat));
 		LockedSeats.changed();
 		assertEquals(1, calls.get());
 
 		LockedSeats.removeListener(second);
+		locked.add(keyOf(other));
 		LockedSeats.changed();
 		assertEquals(1, calls.get());
 	}
 
 	@Test
 	void whileShownAttachesAndDetachesTheListener() {
+		Set<UnitKey> locked = new HashSet<>();
+		LockedSeats.install(() -> locked, () -> {
+		});
 		AtomicInteger calls = new AtomicInteger();
 		LiveViews.Registration registration = LockedSeats.whileShown(calls::incrementAndGet);
 
 		registration.attach().run();
+		locked.add(keyOf(seat));
 		LockedSeats.changed();
 		assertEquals(1, calls.get());
 
 		registration.detach().run();
+		locked.add(keyOf(other));
 		LockedSeats.changed();
 		assertEquals(1, calls.get());
 	}
@@ -183,8 +217,7 @@ class LockedSeatsTest {
 	/** Eine ID, die UnitKey ablehnt, kann zu keiner Einheit gehören: nicht gesperrt, und das Zeichnen läuft weiter. */
 	@Test
 	void seatIdThatNoUnitCanHaveIsNotLockedAndDoesNotThrow() {
-		LockedSeats.install(unit -> true, () -> {
-		});
+		lock(seat);
 		Booking booking = bookingOf(seat);
 		booking.setSeatId("A1_1");
 
@@ -197,9 +230,9 @@ class LockedSeatsTest {
 		lock(seat);
 		Set<Booking> selection = new LinkedHashSet<>(List.of(bookingOf(seat), bookingOf(other)));
 
-		assertTrue(LockedSeats.dropFrom(selection));
+		LockedSeats.dropFrom(selection);
+
 		assertEquals(Set.of(bookingOf(other)), selection);
-		assertFalse(LockedSeats.dropFrom(selection), "nichts mehr zu entfernen");
 	}
 
 	@Test
