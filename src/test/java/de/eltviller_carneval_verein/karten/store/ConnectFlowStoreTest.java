@@ -1356,6 +1356,23 @@ class ConnectFlowStoreTest {
 	}
 
 	/**
+	 * Ob {@code worker} an der Bedingung des Beiseitelegens wartet ({@code awaitUninterruptibly} aus {@code setAsideLocal}).
+	 * Der Zustand steht vor und nach dem Stack: Dazwischen kann er nicht weiterlaufen, solange der Speichervorgang hält.
+	 */
+	private static boolean waitsToSetAside(Thread worker) {
+		if (worker.getState() != Thread.State.WAITING) {
+			return false;
+		}
+		boolean awaiting = false;
+		boolean settingAside = false;
+		for (StackTraceElement frame : worker.getStackTrace()) {
+			awaiting |= frame.getMethodName().equals("awaitUninterruptibly");
+			settingAside |= frame.getMethodName().equals("setAsideLocal");
+		}
+		return awaiting && settingAside && worker.getState() == Thread.State.WAITING;
+	}
+
+	/**
 	 * Ein Speichervorgang, der nicht zählt (vor dem Ende von {@code startup}), hält beim Eintragen in den Index an; das
 	 * Beiseitelegen wartet auf ihn. Mit {@code interrupt} wird der Thread des Takts dabei unterbrochen: Der Takt läuft trotzdem
 	 * ohne Störung zu Ende, und die Unterbrechung steht danach wieder.
@@ -1405,13 +1422,13 @@ class ConnectFlowStoreTest {
 			worker.start();
 			// das Beiseitelegen wartet an der Bedingung auf das Ende des Speichervorgangs; ohne Ausschluss liefe es weiter und
 			// bliebe am Index hängen, den der Speichervorgang gerade hält
+			// Nicht schon beim ersten WAITING: Der Takt kann vorher kurz an einer anderen Sperre parken (etwa beim Loggen); eine
+			// Unterbrechung dort bliebe gesetzt und träfe den nächsten Dateizugriff (CI unter Linux, PR #29)
 			long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-			Thread.State state = worker.getState();
-			while (System.nanoTime() < deadline && (state == Thread.State.NEW || state == Thread.State.RUNNABLE)) {
+			while (System.nanoTime() < deadline && !waitsToSetAside(worker)) {
 				Thread.onSpinWait();
-				state = worker.getState();
 			}
-			assertEquals(Thread.State.WAITING, state, "das Beiseitelegen wartet auf den Speichervorgang");
+			assertTrue(waitsToSetAside(worker), "das Beiseitelegen wartet auf den Speichervorgang");
 			if (interrupt) {
 				worker.interrupt();
 			}
