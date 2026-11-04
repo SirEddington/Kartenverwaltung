@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
+import java.nio.file.FileSystems;
 import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -29,10 +31,14 @@ import java.util.UUID;
 /**
  * {@link FileLayer} auf Basis von {@code java.nio.file}.
  * <p>
- * "Nur wenn nicht vorhanden" beruht auf {@link Files#move} ohne Optionen, das ein vorhandenes Ziel nicht ersetzt. Nicht
- * {@code ATOMIC_MOVE}: Unter Windows ersetzt das ein vorhandenes Ziel stillschweigend.
+ * "Nur wenn nicht vorhanden" beruht unter Windows auf {@link Files#move} ohne Optionen, das ein vorhandenes Ziel nicht
+ * ersetzt, unter Linux und macOS auf einem harten Link (siehe {@code publishNew}). Nicht {@code ATOMIC_MOVE}: Unter
+ * Windows ersetzt das ein vorhandenes Ziel stillschweigend.
  */
 public final class NioFileLayer implements FileLayer {
+
+	/** Ob das Dateisystem POSIX ist (Linux, macOS): Dort ist {@link Files#move} ohne Optionen nicht atomar. */
+	private static final boolean POSIX = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
 	/** Legt einen einzelnen Ordner an, dessen Elternordner vorhanden sein muss; die Naht für Tests. */
 	@FunctionalInterface
@@ -53,16 +59,18 @@ public final class NioFileLayer implements FileLayer {
 
 	@Override
 	public boolean createNew(Path file, byte[] content, Path anchor, String tempTag) throws IOException {
+		// Ziel absolut und normalisiert wie die Ordner: Unter Linux scheitert sonst ein Pfad mit "x/..", dessen "x" fehlt
+		Path target = file.toAbsolutePath().normalize();
 		Path dir;
 		if (anchor == null) {
-			dir = parentOf(file);
+			dir = parentOf(target);
 			Files.createDirectories(dir);
 		} else {
 			dir = createLevelsBelow(anchor, file);
 		}
 		Path temp = writeTemp(dir, content, tempTag);
 		try {
-			Files.move(temp, file);
+			publishNew(temp, target);
 			return true;
 		} catch (FileAlreadyExistsException e) {
 			deleteQuietly(temp, null);
@@ -71,6 +79,32 @@ public final class NioFileLayer implements FileLayer {
 			deleteQuietly(temp, e);
 			throw e;
 		}
+	}
+
+	/**
+	 * Macht die fertige temporäre Datei unter {@code target} sichtbar, nur wenn dort noch nichts liegt.
+	 * <p>
+	 * Unter Windows ist {@link Files#move} ohne Optionen atomar und scheitert an einem vorhandenen Ziel. Unter Linux und
+	 * macOS prüft es dagegen erst und benennt dann um: Zwei gleichzeitige Aufrufe gewinnen dort beide, der zweite ersetzt
+	 * den ersten. Dort legt ein harter Link das Ziel atomar an ({@code link(2)} scheitert an einem vorhandenen Ziel), danach
+	 * fällt die temporäre Datei weg. Kann das Dateisystem keine harten Links (manche Netzfreigaben), bleibt es beim
+	 * Umbenennen.
+	 *
+	 * @throws FileAlreadyExistsException wenn {@code target} schon vorhanden ist; die temporäre Datei räumt der Aufrufer weg
+	 */
+	private static void publishNew(Path temp, Path target) throws IOException {
+		if (POSIX) {
+			try {
+				Files.createLink(target, temp);
+				deleteQuietly(temp, null);
+				return;
+			} catch (FileAlreadyExistsException e) {
+				throw e;
+			} catch (UnsupportedOperationException | FileSystemException e) {
+				// keine harten Links auf diesem Dateisystem: wie unter Windows umbenennen
+			}
+		}
+		Files.move(temp, target);
 	}
 
 	@Override
