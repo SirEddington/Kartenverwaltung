@@ -69,12 +69,12 @@ public final class PlaceAssignment {
 		return !takenSeatIds(presentation).contains(seat.getId());
 	}
 
-	/** Die Sitze, auf die eine reservierte oder bezahlte Buchung der Vorstellung zeigt. */
+	/** Die Sitze, auf die eine reservierte oder bezahlte Buchung der Vorstellung zeigt, und die gesperrten (KARV-111). */
 	private static Set<String> takenSeatIds(Presentation presentation) {
 		Set<String> taken = new HashSet<>();
 		if (presentation != null && presentation.getBookings() != null) {
 			for (Booking booking : presentation.getBookings()) {
-				if (booking.getSeatId() != null && booking.isTaken()) {
+				if (booking.getSeatId() != null && (booking.isTaken() || LockedSeats.isLocked(booking))) {
 					taken.add(booking.getSeatId());
 				}
 			}

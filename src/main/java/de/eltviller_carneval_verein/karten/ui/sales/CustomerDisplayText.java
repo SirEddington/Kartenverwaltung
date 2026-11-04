@@ -49,8 +49,8 @@ final class CustomerDisplayText {
 		return title.toString();
 	}
 
-	/** Rot für Kunden: Jeder Platz, der nicht frei ist (reserviert, verkauft, blockiert). */
+	/** Rot für Kunden: Jeder Platz, der nicht frei ist (reserviert, verkauft, gesperrt nach KARV-111). */
 	static boolean isTaken(Booking booking) {
-		return booking.isTaken();
+		return booking.isTaken() || LockedSeats.isLocked(booking);
 	}
 }

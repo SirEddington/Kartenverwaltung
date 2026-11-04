@@ -5,8 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
@@ -19,6 +22,7 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 class PlaceAssignmentTest {
@@ -74,6 +78,34 @@ class PlaceAssignmentTest {
 		assertEquals(List.of(leftovers), PlaceAssignment.freeSeats(presentation, plan));
 		assertTrue(PlaceAssignment.isFree(presentation, leftovers));
 		assertFalse(PlaceAssignment.isFree(presentation, paid));
+	}
+
+	/** KARV-111: Ein gesperrter Sitz wird nicht angeboten, auch wenn sein Platzhalter frei wirkt. */
+	@Test
+	void aLockedSeatIsNotFree() {
+		Table table = plan.addTable(row("A"));
+		Seat first = table.addSeat(1);
+		Seat second = table.addSeat(2);
+		presentation.setSeatingPlanId(plan.getId());
+		BookingSync.sync(presentation, plan);
+		Set<UnitKey> locked = new HashSet<>(Set.of(keyOf(first)));
+		LockedSeats.install(locked::contains, () -> {
+		});
+
+		assertEquals(List.of(second), PlaceAssignment.freeSeats(presentation, plan));
+		assertFalse(PlaceAssignment.isFree(presentation, first));
+
+		locked.add(keyOf(second));
+		assertEquals(PlaceAssignment.NO_FREE_SEAT, PlaceAssignment.refusal(presentation, plan));
+	}
+
+	private UnitKey keyOf(Seat seat) {
+		return UnitKey.booking(presentation.getParent().getId(), presentation.getId(), seat.getId());
+	}
+
+	@AfterEach
+	void forgetLockedSeats() {
+		LockedSeats.reset();
 	}
 
 	@Test
