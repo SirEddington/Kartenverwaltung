@@ -1198,7 +1198,7 @@ public final class SyncService implements ConnectionControl {
 		boolean interrupted;
 		synchronized (lock) {
 			// ein Speichervorgang bricht nicht ab: Das Beiseitelegen dauert nur eine Umbenennung
-			interrupted = awaitUninterruptibly(() -> !settingAside);
+			interrupted = awaitUninterruptibly(lock, () -> !settingAside);
 			if (counts && startupDone) {
 				wroteSinceStartup = true;
 			}
@@ -1213,21 +1213,24 @@ public final class SyncService implements ConnectionControl {
 	}
 
 	/**
-	 * Wartet an {@code lock}, bis {@code done} gilt; nur unter {@code lock} aufrufen. Eine Unterbrechung beendet das Warten
-	 * nicht, sie wird nur gemerkt: Der Aufrufer stellt sie wieder her, wenn es passt.
+	 * Wartet an {@code monitor}, bis {@code done} gilt; nur unter {@code monitor} aufrufen. Eine Unterbrechung beendet das
+	 * Warten nicht, sie wird nur gemerkt: Der Aufrufer stellt sie wieder her, wenn es passt. Danach ist der Merker immer
+	 * gelöscht: Wird der Thread zugleich geweckt und unterbrochen, darf {@code wait()} normal zurückkehren und den Merker
+	 * stehen lassen (JLS 17.2.4); auch ein Merker, der schon vor dem Warten stand, zählt als Unterbrechung.
 	 *
-	 * @return ob der Thread während des Wartens unterbrochen wurde
+	 * @return ob der Thread vor oder während des Wartens unterbrochen wurde
 	 */
-	private boolean awaitUninterruptibly(BooleanSupplier done) {
+	static boolean awaitUninterruptibly(Object monitor, BooleanSupplier done) {
 		boolean interrupted = false;
 		while (!done.getAsBoolean()) {
 			try {
-				lock.wait();
+				monitor.wait();
 			} catch (InterruptedException e) {
 				interrupted = true;
 			}
 		}
-		return interrupted;
+		// Thread.interrupted() zuerst: Es löscht den Merker in jedem Fall
+		return Thread.interrupted() || interrupted;
 	}
 
 	/** Ende der lokalen Arbeit eines {@link #append} (nach dem Einreihen); ein wartendes Beiseitelegen prüft danach erneut. */
@@ -2673,7 +2676,7 @@ public final class SyncService implements ConnectionControl {
 				return false;
 			}
 			settingAside = true;
-			interrupted = awaitUninterruptibly(() -> localWrites <= 0);
+			interrupted = awaitUninterruptibly(lock, () -> localWrites <= 0);
 		}
 		if (interrupted) {
 			// erst nach dem Takt wiederherstellen: Mit gesetztem Merker scheiterte sonst jeder unterbrechbare Dateizugriff darin
