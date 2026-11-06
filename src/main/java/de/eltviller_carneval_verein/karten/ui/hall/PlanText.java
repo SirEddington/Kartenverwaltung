@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.hall;
 
 import de.eltviller_carneval_verein.karten.model.HallObject;
+import de.eltviller_carneval_verein.karten.model.Labeled;
 import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TextAlignH;
@@ -75,11 +76,9 @@ public final class PlanText {
 	public static Text create(HallObject hallObject) {
 		Area area = areaOf(hallObject);
 		Text text = text(hallObject.getName());
-		Layout layout = resolve(text.getText(), area, hallObject.getTextSettings());
-		text.setFont(font(layout.fontSize()));
+		Layout layout = layoutOn(text, area, hallObject.getTextSettings());
 		text.setRotate(layout.rotation());
-		Bounds bounds = text.getLayoutBounds();
-		double[] box = rotatedBox(bounds.getWidth(), bounds.getHeight(), layout.rotation());
+		double[] box = box(text, layout);
 		double[] origin = boxOrigin(area, box[0], box[1], layout.alignH(), layout.alignV());
 		centerAt(text, origin[0] + box[0] / 2, origin[1] + box[1] / 2);
 		return text;
@@ -91,14 +90,35 @@ public final class PlanText {
 	 */
 	public static Text create(Table table) {
 		Text text = text(table.getDisplayName());
-		Layout layout = resolve(table);
-		text.setFont(font(layout.fontSize()));
+		Layout layout = layoutOn(text, areaOf(table), table.getTextSettings());
 		text.setRotate(screenRotation(table, layout));
-		Bounds bounds = text.getLayoutBounds();
-		double[] box = rotatedBox(bounds.getWidth(), bounds.getHeight(), layout.rotation());
+		double[] box = box(text, layout);
 		double[] center = tableTextCenter(table, box[0], box[1], layout);
 		centerAt(text, center[0], center[1]);
 		return text;
+	}
+
+	/**
+	 * Rechnet das Layout am Text selbst und setzt dessen endgültige Schrift: Bei Auto wird er dafür einmal in der Messgröße
+	 * gemessen, sonst gar nicht (die Werte stehen fest).
+	 */
+	private static Layout layoutOn(Text text, Area area, TextSettings settings) {
+		Layout layout;
+		if (settings.auto()) {
+			text.setFont(font(MEASURE_SIZE));
+			Bounds bounds = text.getLayoutBounds();
+			layout = layout(area, settings, bounds.getWidth() / MEASURE_SIZE, bounds.getHeight() / MEASURE_SIZE);
+		} else {
+			layout = layout(area, settings, 0, 0);
+		}
+		text.setFont(font(layout.fontSize()));
+		return layout;
+	}
+
+	/** Die achsenparallele Box um den in seiner endgültigen Schrift gesetzten und um die Textdrehung gedrehten Text. */
+	private static double[] box(Text text, Layout layout) {
+		Bounds bounds = text.getLayoutBounds();
+		return rotatedBox(bounds.getWidth(), bounds.getHeight(), layout.rotation());
 	}
 
 	private static Text text(String name) {
@@ -144,13 +164,13 @@ public final class PlanText {
 		}
 	}
 
-	/** Schreibt die Werte von {@code layout} (auf eine Nachkommastelle, wie die Felder sie zeigen) und schaltet Auto aus. */
-	static void freeze(Table table, Layout layout) {
-		table.setTextSize(roundForDisplay(layout.fontSize()));
-		table.setTextRotation(roundForDisplay(layout.rotation()));
-		table.setTextAlignH(layout.alignH());
-		table.setTextAlignV(layout.alignV());
-		table.setTextAuto(false);
+	/**
+	 * "Auto aus" an einem beschrifteten Objekt: schreibt die Werte von {@code layout} (auf eine Nachkommastelle, wie die
+	 * Felder sie zeigen) und schaltet Auto aus.
+	 */
+	static void freeze(Labeled labeled, Layout layout) {
+		labeled.setTextSettings(new TextSettings(false, roundForDisplay(layout.fontSize()), layout.alignH(), layout.alignV(),
+				roundForDisplay(layout.rotation())));
 	}
 
 	/** Auf eine Nachkommastelle, damit die Eingabefelder keine langen Dezimalzahlen zeigen. */
@@ -159,10 +179,7 @@ public final class PlanText {
 	}
 
 	private static Layout resolve(String name, Area area, TextSettings settings) {
-		Text probe = new Text(name == null ? "" : name);
-		probe.setFont(font(MEASURE_SIZE));
-		Bounds bounds = probe.getLayoutBounds();
-		return layout(area, settings, bounds.getWidth() / MEASURE_SIZE, bounds.getHeight() / MEASURE_SIZE);
+		return layoutOn(new Text(name == null ? "" : name), area, settings);
 	}
 
 	/** Wie {@link #layout(Area, TextSettings, double, double)} für ein Hallenobjekt. */

@@ -13,7 +13,7 @@ import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class Table {
+public class Table implements Labeled {
 	private final String id;
 	private SeatingPlan parentPlan; // gesetzt von SeatingPlan.setTables/addTable, wird nicht gespeichert
 
@@ -209,19 +209,20 @@ public class Table {
 		this.textRotation = textRotation;
 	}
 
-	/** Die fünf Textfelder für die Rechnung der Beschriftung; nicht in der Datei. */
+	@Override
 	@JsonIgnore
 	public TextSettings getTextSettings() {
 		return new TextSettings(textAuto, textSize, textAlignH, textAlignV, textRotation);
 	}
 
-	/** Übernimmt die Textfelder eines anderen Tischs (Kopie der Bestuhlung). */
-	void copyTextFrom(Table other) {
-		textAuto = other.textAuto;
-		textSize = other.textSize;
-		textAlignH = other.textAlignH;
-		textAlignV = other.textAlignV;
-		textRotation = other.textRotation;
+	@Override
+	@JsonIgnore
+	public void setTextSettings(TextSettings settings) {
+		textAuto = settings.auto();
+		textSize = settings.size();
+		textAlignH = settings.alignH();
+		textAlignV = settings.alignV();
+		textRotation = settings.rotation();
 	}
 	// <-- Getter und Setter
 

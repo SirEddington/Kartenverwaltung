@@ -26,7 +26,7 @@ public final class SeatValidator {
 	}
 
 	/** Größter erlaubter Durchmesser eines Sitzes (wie bisher die Grenze der Spinner). */
-	static final double MAX_SIZE = 100;
+	public static final double MAX_SIZE = 100;
 
 	private ValidationResult run() {
 		validateNumber();

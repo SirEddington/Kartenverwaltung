@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
@@ -30,6 +31,7 @@ public final class TableRowBulkEdit {
 
 	private final List<TableRow> rows;
 	private final List<Table> tables;
+	private final List<Seat> seats;
 	private final Field<Double> angle;
 	private final Field<Double> tableRotation;
 	private final Field<Double> tableGap;
@@ -47,8 +49,8 @@ public final class TableRowBulkEdit {
 
 	public TableRowBulkEdit(List<TableRow> rows) {
 		this.rows = List.copyOf(rows);
-		this.tables = this.rows.stream().flatMap(row -> tablesOf(row).stream()).toList();
-		List<Seat> seats = tables.stream().flatMap(table -> table.getSeats().stream()).toList();
+		this.tables = tablesOf(this.rows);
+		this.seats = tables.stream().flatMap(table -> table.getSeats().stream()).toList();
 		angle = new Field<>(this.rows, TableRow::getAngle, TableRow::setAngle);
 		tableRotation = new Field<>(this.rows, TableRow::getTableRotation, TableRow::setTableRotation);
 		tableGap = new Field<>(this.rows, TableRow::getTableGap, TableRow::setTableGap);
@@ -67,9 +69,9 @@ public final class TableRowBulkEdit {
 				textAlignV, textRotation);
 	}
 
-	private static List<Table> tablesOf(TableRow row) {
-		SeatingPlan plan = row.getParent();
-		return plan == null ? List.of() : plan.getTablesOf(row);
+	/** Die Tische der Reihen, Reihe für Reihe in der Reihenfolge von {@link SeatingPlan#getTablesOf}. */
+	public static List<Table> tablesOf(List<TableRow> rows) {
+		return rows.stream().flatMap(row -> row.getParent() == null ? Stream.<Table>empty() : row.getParent().getTablesOf(row).stream()).toList();
 	}
 
 	/** Der Mittelgang als Zahl für die Eingabe: 0 heißt "kein Gang". */
@@ -86,9 +88,14 @@ public final class TableRowBulkEdit {
 		return rows;
 	}
 
-	/** Die Tische aller Reihen, Reihe für Reihe in der Reihenfolge von {@link SeatingPlan#getTablesOf}. */
+	/** Die Tische aller Reihen ({@link #tablesOf}). */
 	public List<Table> tables() {
 		return tables;
+	}
+
+	/** Die Sitze dieser Tische, Tisch für Tisch. */
+	public List<Seat> seats() {
+		return seats;
 	}
 
 	public Field<Double> angle() {

@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.hall;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -7,7 +8,9 @@ import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
+import de.eltviller_carneval_verein.karten.validation.SeatValidator;
 import de.eltviller_carneval_verein.karten.validation.Severity;
+import de.eltviller_carneval_verein.karten.validation.TableValidator;
 import javafx.application.Platform;
 import javafx.event.ActionEvent;
 import javafx.geometry.Insets;
@@ -38,15 +41,18 @@ public final class RowFillDialog {
 	/** Die Vorbelegung der Maße in ganzen cm. */
 	public record Sizes(int tableWidth, int tableHeight, int seatWidth) {
 
-		/** Die Standardmaße der Bestuhlung, gerundet; fehlt eines (0 oder kleiner), gilt das Standardmaß neuer Bestuhlungen. */
+		/**
+		 * Die Standardmaße der Bestuhlung, gerundet; fehlt eines (0 oder kleiner) oder die Bestuhlung ({@code null}), gilt
+		 * das Standardmaß neuer Bestuhlungen.
+		 */
 		public static Sizes of(SeatingPlan plan) {
-			return new Sizes(rounded(plan.getDefaultTableWidth(), SeatingPlan.STANDARD_TABLE_WIDTH),
-					rounded(plan.getDefaultTableHeight(), SeatingPlan.STANDARD_TABLE_HEIGHT),
-					rounded(plan.getDefaultSeatWidth(), SeatingPlan.STANDARD_SEAT_WIDTH));
+			return new Sizes(rounded(plan == null ? 0 : plan.getDefaultTableWidth(), SeatingPlan.STANDARD_TABLE_WIDTH),
+					rounded(plan == null ? 0 : plan.getDefaultTableHeight(), SeatingPlan.STANDARD_TABLE_HEIGHT),
+					rounded(plan == null ? 0 : plan.getDefaultSeatWidth(), SeatingPlan.STANDARD_SEAT_WIDTH));
 		}
 
 		private static int rounded(double value, double standard) {
-			return (int) Math.round(value > 0 ? value : standard);
+			return (int) Math.round(SeatingPlan.orStandard(value, standard));
 		}
 	}
 
@@ -56,9 +62,9 @@ public final class RowFillDialog {
 	// Obergrenzen je Aufruf, damit eine Tippfehler-Eingabe (z. B. 100000) die Oberfläche nicht einfriert
 	static final int MAX_TABLES = 200;
 	static final int MAX_SEATS_PER_TABLE = 100;
-	// Grenzen der Maße wie in TableValidator und SeatValidator, aber ohne 0: Neue Tische und Sitze brauchen eine Größe
-	static final int MAX_TABLE_SIZE = 1_000;
-	static final int MAX_SEAT_SIZE = 100;
+	// Grenzen der Maße aus TableValidator und SeatValidator, aber ohne 0: Neue Tische und Sitze brauchen eine Größe
+	static final int MAX_TABLE_SIZE = (int) TableValidator.MAX_SIZE;
+	static final int MAX_SEAT_SIZE = (int) SeatValidator.MAX_SIZE;
 
 	private RowFillDialog() {
 	}
@@ -96,8 +102,9 @@ public final class RowFillDialog {
 		Spinner<Integer> tableWidth = spinner(sizes.tableWidth(), "Tischbreite", () -> rowName);
 		Spinner<Integer> tableHeight = spinner(sizes.tableHeight(), "Tischhöhe", () -> rowName);
 		Spinner<Integer> seatWidth = spinner(sizes.seatWidth(), "Sitzdurchmesser", () -> rowName);
-		@SuppressWarnings("unchecked")
-		Spinner<Integer>[] all = new Spinner[] { tableCount, seatsPerTable, tableWidth, tableHeight, seatWidth };
+		List<Spinner<Integer>> all = List.of(tableCount, seatsPerTable, tableWidth, tableHeight, seatWidth);
+		Supplier<Fill> fill = () -> new Fill(tableCount.getValue(), seatsPerTable.getValue(), tableWidth.getValue(), tableHeight.getValue(),
+				seatWidth.getValue());
 
 		GridPane grid = new GridPane();
 		grid.setHgap(10);
@@ -129,14 +136,12 @@ public final class RowFillDialog {
 
 		// Getippter Text gilt auch ohne Verlassen des Feldes; ein unlesbarer hält den Dialog offen (alter Wert bleibt stehen)
 		okButton.addEventFilter(ActionEvent.ACTION, event -> {
-			for (Spinner<Integer> spinner : all) {
-				spinner.commitValue();
-			}
-			if (SpinnerInput.blockSaveIfInputRejected(all)) {
+			all.forEach(Spinner::commitValue);
+			if (SpinnerInput.blockSaveIfInputRejected(all.toArray(Spinner[]::new))) {
 				event.consume();
 				return;
 			}
-			String rejection = rejection(fillOf(all));
+			String rejection = rejection(fill.get());
 			if (rejection != null) {
 				StatusMessage.getInstance().show(Severity.ERROR, rejection);
 				event.consume();
@@ -151,11 +156,7 @@ public final class RowFillDialog {
 		if (pressed.isEmpty() || pressed.get() != ok) {
 			return Optional.empty();
 		}
-		return Optional.of(fillOf(all));
-	}
-
-	private static Fill fillOf(Spinner<Integer>[] all) {
-		return new Fill(all[0].getValue(), all[1].getValue(), all[2].getValue(), all[3].getValue(), all[4].getValue());
+		return Optional.of(fill.get());
 	}
 
 	private static Spinner<Integer> spinner(int initial, String fieldName, Supplier<String> rowLabel) {

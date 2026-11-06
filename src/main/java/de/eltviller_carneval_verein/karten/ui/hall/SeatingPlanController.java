@@ -319,23 +319,13 @@ public class SeatingPlanController {
 		tableWidthSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		tableHeightSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		seatWidthSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
-		textSizeSpinner.setValueFactory(SpinnerInput.doubleFactory(20.0, 1));
-		textRotationSpinner.setValueFactory(RotationInput.factory(15));
-		for (Spinner<?> spinner : List.of(tableWidthSpinner, tableHeightSpinner, seatWidthSpinner, textSizeSpinner, textRotationSpinner)) {
+		for (Spinner<?> spinner : List.of(tableWidthSpinner, tableHeightSpinner, seatWidthSpinner)) {
 			spinner.setEditable(true);
 		}
 		SpinnerInput.install(tableWidthSpinner, "Tischbreite", rowLabel);
 		SpinnerInput.install(tableHeightSpinner, "Tischhöhe", rowLabel);
 		SpinnerInput.install(seatWidthSpinner, "Sitzdurchmesser", rowLabel);
-		SpinnerInput.install(textSizeSpinner, "Schriftgröße", rowLabel);
-		RotationInput.install(textRotationSpinner, "Textdrehung", rowLabel);
-		textAlignHCombo.getItems().setAll(TextAlignH.values());
-		textAlignHCombo.setConverter(HallPlanController.displayNames(TextAlignH::getDisplayName));
-		textAlignVCombo.getItems().setAll(TextAlignV.values());
-		textAlignVCombo.setConverter(HallPlanController.displayNames(TextAlignV::getDisplayName));
-		for (Node field : List.of(textSizeSpinner, textAlignHCombo, textAlignVCombo, textRotationSpinner)) {
-			field.disableProperty().bind(textAutoCheck.selectedProperty());
-		}
+		textFields().setup("Textdrehung", rowLabel);
 
 		tableWidthSpinner.valueProperty().addListener((obs, oldVal, newVal) -> bulkChange(newVal, TableRowBulkEdit::tableWidth));
 		tableHeightSpinner.valueProperty().addListener((obs, oldVal, newVal) -> bulkChange(newVal, TableRowBulkEdit::tableHeight));
@@ -344,7 +334,7 @@ public class SeatingPlanController {
 			if (updatingPanel || !editMode || panelRows.isEmpty()) {
 				return;
 			}
-			List<Table> tables = new TableRowBulkEdit(panelRows).tables();
+			List<Table> tables = TableRowBulkEdit.tablesOf(panelRows);
 			if (tables.isEmpty()) {
 				return;
 			}
@@ -359,6 +349,11 @@ public class SeatingPlanController {
 		textAlignHCombo.valueProperty().addListener((obs, oldVal, newVal) -> textBulkChange(newVal, TableRowBulkEdit::textAlignH));
 		textAlignVCombo.valueProperty().addListener((obs, oldVal, newVal) -> textBulkChange(newVal, TableRowBulkEdit::textAlignV));
 		textRotationSpinner.valueProperty().addListener((obs, oldVal, newVal) -> textBulkChange(newVal, TableRowBulkEdit::textRotation));
+	}
+
+	/** Die fünf Textfelder der Tischbeschriftung ({@link TextFields}). */
+	private TextFields textFields() {
+		return new TextFields(textAutoCheck, textSizeSpinner, textAlignHCombo, textAlignVCombo, textRotationSpinner);
 	}
 
 	/**
@@ -414,15 +409,21 @@ public class SeatingPlanController {
 		SeatingPlanLayout.apply(plan);
 		rowList.refresh();
 		// Maße und (berechnete) Beschriftung der Tische können sich mit jeder Änderung ändern, etwa durch Auto an oder aus
+		refreshTableFieldsAndHints();
+		updateDetailPanel();
+		redraw();
+	}
+
+	/** Befüllt die Felder der Tische neu und frischt alle Hinweise "verschieden" auf, mit einer Mehrfachbearbeitung. */
+	private void refreshTableFieldsAndHints() {
+		TableRowBulkEdit edit = new TableRowBulkEdit(panelRows);
 		updatingPanel = true;
 		try {
-			fillTableFields();
+			fillTableFields(edit);
 		} finally {
 			updatingPanel = false;
 		}
-		refreshMixedHints();
-		updateDetailPanel();
-		redraw();
+		refreshMixedHints(edit);
 	}
 
 	// --- Liste und Panel -->
@@ -453,11 +454,10 @@ public class SeatingPlanController {
 			tableGapSpinner.getValueFactory().setValue(first != null ? first.getTableGap() : 0.0);
 			aisleAfterSpinner.getValueFactory().setValue(first != null ? TableRowBulkEdit.aisleAfterOf(first) : 0);
 			aisleWidthSpinner.getValueFactory().setValue(first != null ? first.getAisleWidth() : 0.0);
-			fillTableFields();
 		} finally {
 			updatingPanel = false;
 		}
-		refreshMixedHints();
+		refreshTableFieldsAndHints();
 
 		boolean editable = editMode && !panelRows.isEmpty();
 		rowPanel.setDisable(!editable);
@@ -479,21 +479,18 @@ public class SeatingPlanController {
 	 * Maße und Beschriftung aus dem ersten Tisch (bzw. ersten Sitz) der markierten Reihen; ohne Tische die Standardmaße der
 	 * Bestuhlung und die Standardbeschriftung. Bei Auto zeigen die gesperrten Textfelder die berechneten Werte.
 	 */
-	private void fillTableFields() {
-		TableRowBulkEdit edit = new TableRowBulkEdit(panelRows);
+	private void fillTableFields(TableRowBulkEdit edit) {
 		Table firstTable = edit.tables().isEmpty() ? null : edit.tables().get(0);
-		Seat firstSeat = edit.tables().stream().flatMap(table -> table.getSeats().stream()).findFirst().orElse(null);
-		RowFillDialog.Sizes standard = plan == null ? RowFillDialog.Sizes.of(new SeatingPlan()) : RowFillDialog.Sizes.of(plan);
+		Seat firstSeat = edit.seats().isEmpty() ? null : edit.seats().get(0);
+		RowFillDialog.Sizes standard = RowFillDialog.Sizes.of(plan);
 		tableWidthSpinner.getValueFactory().setValue(firstTable != null ? firstTable.getWidth() : standard.tableWidth());
 		tableHeightSpinner.getValueFactory().setValue(firstTable != null ? firstTable.getHeight() : standard.tableHeight());
 		seatWidthSpinner.getValueFactory().setValue(firstSeat != null ? firstSeat.getWidth() : standard.seatWidth());
-
-		textAutoCheck.setSelected(firstTable == null || firstTable.isTextAuto());
-		PlanText.Layout text = firstTable == null ? null : PlanText.resolve(firstTable);
-		textSizeSpinner.getValueFactory().setValue(text == null ? 20.0 : PlanText.roundForDisplay(text.fontSize()));
-		textRotationSpinner.getValueFactory().setValue(text == null ? 0.0 : PlanText.roundForDisplay(text.rotation()));
-		textAlignHCombo.setValue(text == null ? TextAlignH.CENTER : text.alignH());
-		textAlignVCombo.setValue(text == null ? TextAlignV.CENTER : text.alignV());
+		if (firstTable == null) {
+			textFields().fill(new Table().getTextSettings(), null);
+		} else {
+			textFields().fill(firstTable.getTextSettings(), firstTable.isTextAuto() ? PlanText.resolve(firstTable) : null);
+		}
 	}
 
 	/** Die Abschnitte der Markierung untereinander: Reihe, darunter Tisch und Sitz; ohne Markierung nur ein Hinweis. */
@@ -552,16 +549,16 @@ public class SeatingPlanController {
 		updatePanel();
 	}
 
-	/** Bei mehreren Reihen mit unterschiedlichen Werten steht "verschieden" an der Beschriftung. */
-	private void refreshMixedHints() {
-		TableRowBulkEdit edit = new TableRowBulkEdit(panelRows);
-		boolean multiple = panelRows.size() > 1;
-		markMixed(angleLabel, multiple && edit.angle().common().isEmpty());
-		markMixed(tableRotationLabel, multiple && edit.tableRotation().common().isEmpty());
-		markMixed(tableGapLabel, multiple && edit.tableGap().common().isEmpty());
-		markMixed(aisleAfterLabel, multiple && edit.aisleAfter().common().isEmpty());
-		markMixed(aisleWidthLabel, multiple && edit.aisleWidth().common().isEmpty());
-		// Tische und Sitze unterscheiden sich auch innerhalb einer Reihe
+	/**
+	 * Bei unterschiedlichen Werten steht "verschieden" an der Beschriftung: bei den Reihenfeldern erst ab zwei Reihen, bei
+	 * Tischen und Sitzen auch innerhalb einer Reihe.
+	 */
+	private void refreshMixedHints(TableRowBulkEdit edit) {
+		markMixed(angleLabel, edit.angle().mixed());
+		markMixed(tableRotationLabel, edit.tableRotation().mixed());
+		markMixed(tableGapLabel, edit.tableGap().mixed());
+		markMixed(aisleAfterLabel, edit.aisleAfter().mixed());
+		markMixed(aisleWidthLabel, edit.aisleWidth().mixed());
 		markMixed(tableWidthLabel, edit.tableWidth().mixed());
 		markMixed(tableHeightLabel, edit.tableHeight().mixed());
 		markMixed(seatWidthLabel, edit.seatWidth().mixed());

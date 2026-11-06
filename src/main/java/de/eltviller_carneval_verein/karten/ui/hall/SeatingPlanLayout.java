@@ -23,10 +23,6 @@ import de.eltviller_carneval_verein.karten.util.Angles;
  */
 public final class SeatingPlanLayout {
 
-	// Rückfall für Tischmaße von 0 oder kleiner (cm): die Standardmaße einer neuen Bestuhlung
-	private static final double DEFAULT_TABLE_WIDTH = SeatingPlan.STANDARD_TABLE_WIDTH;
-	private static final double DEFAULT_TABLE_HEIGHT = SeatingPlan.STANDARD_TABLE_HEIGHT;
-
 	// Freier Raum zwischen Tischkante und Sitz (cm): Der Sitzmittelpunkt liegt Radius + dieser Abstand neben der Kante
 	private static final double SEAT_CLEARANCE = 5;
 	/** Radius eines Sitzes ohne Breite (cm), siehe {@link #seatRadius}. */
@@ -89,12 +85,9 @@ public final class SeatingPlanLayout {
 		double s = 0; // Laufmaß entlang der Reihenachse
 		for (int i = 0; i < tables.size(); i++) {
 			Table table = tables.get(i);
-			if (table.getWidth() <= 0) {
-				table.setWidth(DEFAULT_TABLE_WIDTH);
-			}
-			if (table.getHeight() <= 0) {
-				table.setHeight(DEFAULT_TABLE_HEIGHT);
-			}
+			// Fehlende Tischmaße (0 oder kleiner) werden die Standardmaße einer neuen Bestuhlung
+			table.setWidth(tableWidth(table));
+			table.setHeight(tableHeight(table));
 
 			double extent = extent(table, tableRotation);
 
@@ -170,16 +163,20 @@ public final class SeatingPlanLayout {
 	 * Tischdrehung 0 (längs) ist das die Tischhöhe, bei 90 (quer) die Breite mit den Stühlen links und rechts.
 	 */
 	private static double extent(Table table, double tableRotation) {
-		double width = table.getWidth() > 0 ? table.getWidth() : DEFAULT_TABLE_WIDTH;
-		double height = table.getHeight() > 0 ? table.getHeight() : DEFAULT_TABLE_HEIGHT;
-		return Math.abs((width + 2 * getSeatMargin(table)) * Math.sin(tableRotation)) + Math.abs(height * Math.cos(tableRotation));
+		return Math.abs((tableWidth(table) + 2 * getSeatMargin(table)) * Math.sin(tableRotation)) + Math.abs(tableHeight(table) * Math.cos(tableRotation));
 	}
 
 	/** Wie {@link #extent}, aber quer zur Reihenachse: Projektion desselben Rechtecks auf die Querrichtung. */
 	private static double crossExtent(Table table, double tableRotation) {
-		double width = table.getWidth() > 0 ? table.getWidth() : DEFAULT_TABLE_WIDTH;
-		double height = table.getHeight() > 0 ? table.getHeight() : DEFAULT_TABLE_HEIGHT;
-		return Math.abs((width + 2 * getSeatMargin(table)) * Math.cos(tableRotation)) + Math.abs(height * Math.sin(tableRotation));
+		return Math.abs((tableWidth(table) + 2 * getSeatMargin(table)) * Math.cos(tableRotation)) + Math.abs(tableHeight(table) * Math.sin(tableRotation));
+	}
+
+	private static double tableWidth(Table table) {
+		return SeatingPlan.orStandard(table.getWidth(), SeatingPlan.STANDARD_TABLE_WIDTH);
+	}
+
+	private static double tableHeight(Table table) {
+		return SeatingPlan.orStandard(table.getHeight(), SeatingPlan.STANDARD_TABLE_HEIGHT);
 	}
 
 	/**

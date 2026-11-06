@@ -392,6 +392,7 @@ public class StoreHallRepository implements HallRepository {
 		baseline.delete(hall.getId(), UnitKey.hall(hall.getId()), hall.getName());
 
 		cachedHalls.remove(hall);
+		roundTrips.remove(UnitKey.hall(hall.getId()));
 
 		listeners.notifyDeleted(hall);
 	}
@@ -525,6 +526,7 @@ public class StoreHallRepository implements HallRepository {
 			if (!UnitMapper.isAbsent(current)) {
 				warnings.add(UnitMapper.unreadableHall(hallId));
 			}
+			roundTrips.remove(unit);
 			if (old != null) {
 				cachedHalls.remove(old);
 				removedByOthers.add(hallId);

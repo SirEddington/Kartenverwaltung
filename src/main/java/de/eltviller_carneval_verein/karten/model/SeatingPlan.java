@@ -30,6 +30,11 @@ public class SeatingPlan {
 	public static final double STANDARD_TABLE_HEIGHT = 320;
 	public static final double STANDARD_SEAT_WIDTH = 45;
 
+	/** Das Maß {@code value}, oder {@code standard}, wenn es fehlt (0 oder kleiner). */
+	public static double orStandard(double value, double standard) {
+		return value > 0 ? value : standard;
+	}
+
 	// Standardmaße für neue Tische und Sitze. Sitze sind Kreise: defaultSeatWidth ist ihr Durchmesser; eine
 	// "defaultSeatHeight" älterer Dateien wird beim Laden übergangen.
 	private double defaultTableWidth;
@@ -292,7 +297,7 @@ public class SeatingPlan {
 			copiedTable.setWidth(table.getWidth());
 			copiedTable.setHeight(table.getHeight());
 			copiedTable.setRotation(table.getRotation());
-			copiedTable.copyTextFrom(table);
+			copiedTable.setTextSettings(table.getTextSettings());
 			for (Seat seat : table.getSeats()) {
 				Seat copiedSeat = new Seat();
 				copiedSeat.setParent(copiedTable);
