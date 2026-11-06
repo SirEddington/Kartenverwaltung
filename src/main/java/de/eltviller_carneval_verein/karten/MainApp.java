@@ -999,6 +999,7 @@ public class MainApp extends Application {
 	public static void main(String[] args) {
 		AppLogging.init();
 		GlobalErrorHandler.install();
+		UpdateProbe.runInBackground();
 		launch(args);
 	}
 

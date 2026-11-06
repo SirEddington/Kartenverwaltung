@@ -115,6 +115,13 @@
       <version>1.3.43</version>
     </dependency>
 
+    <!-- Spike KARV-130: Conveyor-Update-API (nur Schnittstelle, die Umsetzung bringt Conveyor ins Paket) -->
+    <dependency>
+      <groupId>dev.hydraulic.conveyor</groupId>
+      <artifactId>conveyor-control</artifactId>
+      <version>1.1</version>
+    </dependency>
+
     <!-- Tests: reine Unit-Tests fuer Repository- und Geldlogik, laufen ohne JavaFX-Oberflaeche. -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>

@@ -9,6 +9,9 @@ module Kartenverwaltung {
     requires java.prefs;
     requires java.desktop;
     requires java.logging;
+    // Spike KARV-130: Conveyor-Update-API
+    requires dev.hydraulic.conveyor.control;
+    uses dev.hydraulic.conveyor.control.SoftwareUpdateController;
 
     // Hauptpaket für JavaFX (für MainApp)
     opens de.eltviller_carneval_verein.karten to javafx.fxml, javafx.graphics;
