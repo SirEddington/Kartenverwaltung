@@ -113,6 +113,21 @@ class PresentationAndTableValidatorTest {
 	}
 
 	@Test
+	void tableTextSizeMustBeBetweenOneAndOneThousand() {
+		for (double ok : new double[] { 1, 20, 1000 }) {
+			Table table = table(4);
+			table.setTextSize(ok);
+			assertTrue(TableValidator.validate(table).isEmpty(), "Gültig: " + ok);
+		}
+
+		Table tiny = table(4);
+		tiny.setTextSize(0);
+		ValidationIssue issue = only(TableValidator.validate(tiny));
+		assertEquals("TBL-006", issue.code());
+		assertTrue(issue.message().startsWith("Schriftgröße von Tisch 4 in Bestuhlung Prunksitzung"), issue.message());
+	}
+
+	@Test
 	void tablePositionMustBeWithinPlusMinusTenThousand() {
 		for (double ok : new double[] { -10_000, 0, 10_000 }) {
 			Table table = table(4);

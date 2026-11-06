@@ -24,7 +24,7 @@ public final class TableValidator {
 	}
 
 	// Wertebereiche, bisher die Grenzen der Spinner (Breite und Höhe 0 = noch ohne Maße, siehe SeatingPlan.addTable)
-	static final double MAX_SIZE = 1_000;
+	public static final double MAX_SIZE = 1_000;
 	static final double MAX_POSITION = 10_000;
 
 	private ValidationResult run() {
@@ -41,6 +41,9 @@ public final class TableValidator {
 		RangeCheck.check(result, TableIssue.SIZE_OUT_OF_RANGE, "Höhe", owner, table.getHeight(), 0, MAX_SIZE);
 		RangeCheck.check(result, TableIssue.POSITION_OUT_OF_RANGE, "Position X", owner, table.getPosX(), -MAX_POSITION, MAX_POSITION);
 		RangeCheck.check(result, TableIssue.POSITION_OUT_OF_RANGE, "Position Y", owner, table.getPosY(), -MAX_POSITION, MAX_POSITION);
+		// Grenzen wie beim Text eines Hallenobjekts (HOB-003)
+		RangeCheck.check(result, TableIssue.TEXT_SIZE_OUT_OF_RANGE, "Schriftgröße", owner, table.getTextSize(), HallObjectValidator.MIN_TEXT_SIZE,
+				HallObjectValidator.MAX_TEXT_SIZE);
 	}
 
 	private void validateNumber() {

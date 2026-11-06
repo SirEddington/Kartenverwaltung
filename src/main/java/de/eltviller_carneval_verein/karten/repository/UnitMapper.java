@@ -667,6 +667,19 @@ final class UnitMapper {
 	}
 
 	/**
+	 * Der Stand einer Einheit, wie ihn das Modell dieser Programmversion daraus macht: gelesen ({@link #readUnit}) und wieder
+	 * normalisiert. Felder, die das Modell beim Lesen verwirft (etwa aus einer anderen Programmversion) oder mit seinen
+	 * Standardwerten ergänzt, fehlen bzw. stehen darin wie im Modell (KARV-128). Nur so ist ein unverändert geladenes
+	 * Objekt gleich seinem Stand.
+	 *
+	 * @return {@code null}, wenn sich die Einheit nicht lesen lässt (siehe {@link #readUnit})
+	 */
+	static ObjectNode roundTrip(UnitSnapshot snapshot, Class<?> type) {
+		Object value = readUnit(snapshot, type);
+		return value == null ? null : normalize(value);
+	}
+
+	/**
 	 * Liest eine einzelne Einheit nach den Regeln des Zusammensetzens ({@link #read}, ID-Prüfung eingeschlossen), aber
 	 * ohne Warnung. Der Payload bleibt unverändert.
 	 *

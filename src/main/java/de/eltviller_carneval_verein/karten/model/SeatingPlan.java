@@ -1,7 +1,6 @@
 package de.eltviller_carneval_verein.karten.model;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,11 +24,21 @@ public class SeatingPlan {
 	private String name;
 	private String description;
 
-	// Standardmaße für neue Tische und Sitze
+	/** Standardmaße einer neuen Bestuhlung und Ersatz für fehlende Maße (cm): Tisch 50 × 320, Sitz 45 (KARV-128). */
+	public static final double STANDARD_TABLE_WIDTH = 50;
+	public static final double STANDARD_TABLE_HEIGHT = 320;
+	public static final double STANDARD_SEAT_WIDTH = 45;
+
+	/** Das Maß {@code value}, oder {@code standard}, wenn es fehlt (0 oder kleiner). */
+	public static double orStandard(double value, double standard) {
+		return value > 0 ? value : standard;
+	}
+
+	// Standardmaße für neue Tische und Sitze. Sitze sind Kreise: defaultSeatWidth ist ihr Durchmesser; eine
+	// "defaultSeatHeight" älterer Dateien wird beim Laden übergangen.
 	private double defaultTableWidth;
 	private double defaultTableHeight;
 	private double defaultSeatWidth;
-	private double defaultSeatHeight;
 
 	// Die Elternverweise setzen setRows und setTables (keine @JsonManagedReference, siehe Event.presentations)
 	private List<TableRow> rows = new ArrayList<>();
@@ -99,14 +108,6 @@ public class SeatingPlan {
 
 	public void setDefaultSeatWidth(double defaultSeatWidth) {
 		this.defaultSeatWidth = defaultSeatWidth;
-	}
-
-	public double getDefaultSeatHeight() {
-		return defaultSeatHeight;
-	}
-
-	public void setDefaultSeatHeight(double defaultSeatHeight) {
-		this.defaultSeatHeight = defaultSeatHeight;
 	}
 
 	public List<TableRow> getRows() {
@@ -202,11 +203,13 @@ public class SeatingPlan {
 		return table != null && tables.remove(table);
 	}
 
-	/** Die Tische der Reihe, nach Nummer sortiert (so werden sie angezeigt). */
+	/**
+	 * Die Tische der Reihe in der Reihenfolge des Anlegens: So stehen sie in der Reihe. Die Nummer ist nur Beschriftung;
+	 * eine neue (auch doppelte) Nummer verschiebt den Tisch nicht.
+	 */
 	public List<Table> getTablesOf(TableRow row) {
 		String rowId = row.getId();
-		return tables.stream().filter(t -> Objects.equals(t.getRowId(), rowId))
-				.sorted(Comparator.comparingInt(Table::getTableNumber)).toList();
+		return tables.stream().filter(t -> Objects.equals(t.getRowId(), rowId)).toList();
 	}
 
 	/**
@@ -223,7 +226,7 @@ public class SeatingPlan {
 
 	/**
 	 * Vergibt die Nummern im Geltungsbereich der Reihe lückenlos von 1 an, in der Reihenfolge der Reihenliste und
-	 * innerhalb einer Reihe nach der bisherigen Nummer.
+	 * innerhalb einer Reihe nach dem Platz ({@link #getTablesOf}).
 	 */
 	public void renumber(TableRow row) {
 		int number = 1;
@@ -232,7 +235,18 @@ public class SeatingPlan {
 		}
 	}
 
-	/** Legt {@code tableCount} Tische mit je {@code seatsPerTable} Sitzen hinten an die Reihe an. */
+	/**
+	 * Wie {@link #fillRow(TableRow, int, int)} mit diesen Maßen (cm): Sie werden zuerst die Standardmaße der Bestuhlung
+	 * und gelten so auch für Tische und Sitze, die später einzeln dazukommen.
+	 */
+	public void fillRow(TableRow row, int tableCount, int seatsPerTable, double tableWidth, double tableHeight, double seatWidth) {
+		defaultTableWidth = tableWidth;
+		defaultTableHeight = tableHeight;
+		defaultSeatWidth = seatWidth;
+		fillRow(row, tableCount, seatsPerTable);
+	}
+
+	/** Legt {@code tableCount} Tische mit je {@code seatsPerTable} Sitzen hinten an die Reihe an (Standardmaße). */
 	public void fillRow(TableRow row, int tableCount, int seatsPerTable) {
 		for (int t = 0; t < tableCount; t++) {
 			Table table = addTable(row);
@@ -244,8 +258,9 @@ public class SeatingPlan {
 
 	/**
 	 * Tiefe Kopie der Bestuhlung (ohne Halle als Elternteil gesetzt): neue Ids für Bestuhlung, Reihen, Tische und
-	 * Sitze, die {@code rowId} der kopierten Tische zeigt auf die kopierten Reihen. Von den Sitzen werden Nummer,
-	 * Rollstuhlkennzeichen, Position und Maße übernommen; Buchungen gehören zur Vorstellung und bleiben unberührt.
+	 * Sitze, die {@code rowId} der kopierten Tische zeigt auf die kopierten Reihen. Von den Tischen werden auch die
+	 * Texteinstellungen übernommen, von den Sitzen Nummer, Rollstuhlkennzeichen, Position und Durchmesser; Buchungen
+	 * gehören zur Vorstellung und bleiben unberührt.
 	 */
 	public SeatingPlan copy() {
 		SeatingPlan copy = new SeatingPlan();
@@ -254,7 +269,6 @@ public class SeatingPlan {
 		copy.setDefaultTableWidth(defaultTableWidth);
 		copy.setDefaultTableHeight(defaultTableHeight);
 		copy.setDefaultSeatWidth(defaultSeatWidth);
-		copy.setDefaultSeatHeight(defaultSeatHeight);
 
 		Map<String, TableRow> copiedRows = new HashMap<>();
 		for (TableRow row : rows) {
@@ -284,6 +298,7 @@ public class SeatingPlan {
 			copiedTable.setWidth(table.getWidth());
 			copiedTable.setHeight(table.getHeight());
 			copiedTable.setRotation(table.getRotation());
+			copiedTable.setTextSettings(table.getTextSettings());
 			for (Seat seat : table.getSeats()) {
 				Seat copiedSeat = new Seat();
 				copiedSeat.setParent(copiedTable);
@@ -293,7 +308,6 @@ public class SeatingPlan {
 				copiedSeat.setPosX(seat.getPosX());
 				copiedSeat.setPosY(seat.getPosY());
 				copiedSeat.setWidth(seat.getWidth());
-				copiedSeat.setHeight(seat.getHeight());
 				copiedTable.getSeats().add(copiedSeat);
 			}
 			copy.getTables().add(copiedTable);
@@ -301,7 +315,7 @@ public class SeatingPlan {
 		return copy;
 	}
 
-	/** Tische im Geltungsbereich der Reihe in der Reihenfolge Reihenliste, dann bisherige Nummer. */
+	/** Tische im Geltungsbereich der Reihe in der Reihenfolge Reihenliste, dann Platz in der Reihe. */
 	private List<Table> tablesInScope(TableRow row) {
 		List<TableRow> scopeRows = new ArrayList<>();
 		if (isUnlabeled(row)) {

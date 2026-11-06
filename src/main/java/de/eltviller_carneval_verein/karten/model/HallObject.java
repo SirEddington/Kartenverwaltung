@@ -5,8 +5,11 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
-public class HallObject {
+// Ab v1.1 übergeht das Laden unbekannte Felder; v1.0.x lehnt sie hier noch ab, darum schreibt das Hallenobjekt keine neuen
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class HallObject implements Labeled {
 	private final String id;
 	@JsonBackReference("hall-hallObject")
 	private Hall parentHall;
@@ -157,6 +160,22 @@ public class HallObject {
 
 	public void setTextRotation(double textRotation) {
 		this.textRotation = textRotation;
+	}
+
+	@Override
+	@JsonIgnore
+	public TextSettings getTextSettings() {
+		return new TextSettings(textAuto, textSize, textAlignH, textAlignV, textRotation);
+	}
+
+	@Override
+	@JsonIgnore
+	public void setTextSettings(TextSettings settings) {
+		textAuto = settings.auto();
+		textSize = settings.size();
+		textAlignH = settings.alignH();
+		textAlignV = settings.alignV();
+		textRotation = settings.rotation();
 	}
 	// <-- Getter und Setter
 
