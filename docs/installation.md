@@ -106,7 +106,9 @@ can reach (a network share or a folder synced by a client such as Nextcloud) and
 **Update all workstations together.** Workstations sharing a folder should run the same version. Version 1.1 adds
 table labels to the seating plan; a workstation still on 1.0.x drops them (back to "Text automatisch") and puts
 automatically placed seats back in their old positions when it saves a hall. Update every workstation to 1.1 at the
-same time and restart it.
+same time and restart it. Then open each hall with a seating plan once in the hall editor and save it: 1.1 places
+seats differently, and until a hall is saved with the new layout, a workstation that opened it in the editor holds
+back changes to that hall from other workstations until it is restarted.
 
 ## Releasing
 
