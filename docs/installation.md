@@ -3,10 +3,11 @@
 ## End users
 
 Installers are published as GitHub Releases and on the download page that Conveyor maintains in the `gh-pages`
-branch. Supported platforms: **Windows x64** (per-user MSIX install, optional desktop shortcut, automatic updates
-from the latest GitHub Release) and **Linux x64 (glibc)**. macOS is intentionally not built (it would require Apple
-signing and notarization). The installer bundles its own Java runtime (Amazon Corretto 21) and the JavaFX native
-libraries; no native libraries are unpacked at run time.
+branch. Supported platforms: **Windows x64** (per-user MSIX install, optional desktop shortcut, updates from the
+latest GitHub Release only after the user agrees to them in the app, see
+[decisions.md](decisions.md#updates-only-with-the-users-consent-appupdates--manual)) and **Linux x64 (glibc)**.
+macOS is intentionally not built (it would require Apple signing and notarization). The installer bundles its own
+Java runtime (Amazon Corretto 21) and the JavaFX native libraries; no native libraries are unpacked at run time.
 
 ## Development setup
 

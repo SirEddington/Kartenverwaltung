@@ -233,8 +233,8 @@ deleted.
 **Decision:** Hydraulic Conveyor builds signed Windows MSIX and Linux packages; releases go to GitHub Releases and
 the download page to the `gh-pages` branch (`make copied-site`).
 
-**Why:** Auto-updates and installers without maintaining a server, and 40–90 MB binaries never enter the history of
-`main`.
+**Why:** Updates and installers without maintaining a server, and 40–90 MB binaries never enter the history of
+`main`. When updates are applied is decided by the app, see "Updates only with the user's consent" below.
 
 **Notes from `conveyor.conf`:** the "update escape hatch" (`updatecheck.exe`) is disabled because Norton quarantines
 it; required JDK modules (`java.scripting`, `java.xml`, `jdk.unsupported`, …) are listed explicitly because jdeps
@@ -288,6 +288,38 @@ part 2, November 2026).
 The preferred route is then Azure Trusted Signing for the club (check the identity validation requirements first).
 Plan the switch together with a release that touches every workstation anyway, and include the data import. Once
 switched, keep the certificate subject unchanged across renewals.
+
+## Updates only with the user's consent (`app.updates = manual`)
+
+**Decision:** Windows no longer checks for updates in the background. An update runs only when a user agrees to it
+in the app (KARV-131) or when it is installed from the shared folder (KARV-132).
+
+**Why:**
+- Workstations sharing a folder must run the same version (see [installation.md](installation.md)). An update must
+  never arrive unnoticed in the middle of a sale.
+- The default mode (`background`, `<AutomaticBackgroundTask />` in the `.appinstaller`) did not deliver in practice.
+  A workstation linked to the GitHub update source was still on 0.9.5 two days after 1.0.0 was released.
+- `aggressive` (check on every start) is not an option: it is not supported on Linux, and its start-up check gives
+  no say in when an update happens.
+
+**Verified in a test build (KARV-130, 06.11.2026, Windows 11 with Norton):**
+- In `manual` mode the `.appinstaller` contains no `UpdateSettings`. The package still keeps its link to the update
+  source.
+- The packaged app gets `app.version`, `app.revision` and `app.repositoryUrl` as system properties.
+- With `dev.hydraulic.conveyor:conveyor-control`, `getInstance()` returns Conveyor's implementation.
+  - `canTriggerUpdateCheckUI()` returns `AVAILABLE`.
+  - `getCurrentVersionFromRepository()` reads the newest version. Without a connection it throws
+    `UpdateCheckException`.
+  - `triggerUpdateCheckUI()` closes the app and installs the update. It does **not** restart the app, and the
+    helper (`updater.exe`) stays behind as a hidden process.
+- `Add-AppxPackage -Path <newer .msix> -ForceApplicationShutdown` updates a running app from a local folder,
+  with no update source and no internet. A helper then restarts the app. The data and the link to the update
+  source are kept.
+- Norton did not touch `updatecheck.exe`, `updater.exe` or the installer during the test. Conveyor ships
+  `updatecheck.exe` in the package even with `use-update-escape-hatch = false`.
+
+**Consequence:** `manual` must not ship without KARV-131. Otherwise there is no way to update apart from a new
+install.
 
 ## OpenPDF 1.3.x
 
