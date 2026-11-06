@@ -35,8 +35,6 @@ public final class PlanNodeFactory {
 	private static final Color SEAT_FILL = Color.WHITE;
 	private static final Color SEAT_STROKE = Color.GRAY;
 	private static final Color ROW_STROKE = Color.web("#2C2F88");
-	// Sitze ohne Breite (0) blieben unsichtbar; der Validator meldet sie, gezeichnet werden sie mit diesem Radius
-	private static final double FALLBACK_SEAT_RADIUS = 10;
 	private static final double ROW_HIT_WIDTH = 30;
 	private static final double ROW_LABEL_SIZE = 36;
 	private static final double ROW_LABEL_DISTANCE = 30;
@@ -102,7 +100,7 @@ public final class PlanNodeFactory {
 	}
 
 	private static double seatRadius(Seat seat) {
-		return seat.getWidth() > 0 ? seat.getWidth() / 2.0 : FALLBACK_SEAT_RADIUS;
+		return SeatingPlanLayout.seatRadius(seat);
 	}
 
 	/**

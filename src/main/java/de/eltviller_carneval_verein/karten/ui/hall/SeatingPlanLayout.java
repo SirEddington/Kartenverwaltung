@@ -23,14 +23,14 @@ import de.eltviller_carneval_verein.karten.util.Angles;
  */
 public final class SeatingPlanLayout {
 
-	// Rückfall für Tischmaße von 0 oder kleiner (cm)
-	private static final double DEFAULT_TABLE_WIDTH = 70;
-	private static final double DEFAULT_TABLE_HEIGHT = 300;
+	// Rückfall für Tischmaße von 0 oder kleiner (cm): die Standardmaße einer neuen Bestuhlung
+	private static final double DEFAULT_TABLE_WIDTH = SeatingPlan.STANDARD_TABLE_WIDTH;
+	private static final double DEFAULT_TABLE_HEIGHT = SeatingPlan.STANDARD_TABLE_HEIGHT;
 
-	// Abstand eines Stuhlmittelpunkts zur Tischkante (cm)
-	private static final double SEAT_GAP = 15;
-	// Abstand der äußeren Stühle zur Ober-/Unterkante des Tischs (cm)
-	private static final double SEAT_MARGIN_Y = 20;
+	// Freier Raum zwischen Tischkante und Sitz (cm): Der Sitzmittelpunkt liegt Radius + dieser Abstand neben der Kante
+	private static final double SEAT_CLEARANCE = 5;
+	/** Radius eines Sitzes ohne Breite (cm), siehe {@link #seatRadius}. */
+	public static final double FALLBACK_SEAT_RADIUS = 10;
 
 	// "+ Reihe": Startpunkt der ersten Reihe (x und y), Gang zwischen zwei Reihen, Abstand neben einer Reihe ohne Tische (cm)
 	private static final double FIRST_ROW_START = 100;
@@ -51,6 +51,14 @@ public final class SeatingPlanLayout {
 		for (TableRow row : plan.getRows()) {
 			layoutRow(plan, row);
 		}
+	}
+
+	/**
+	 * Radius eines Sitzes in cm: Sitze sind Kreise, die Breite ist ihr Durchmesser. Ein Sitz ohne Breite (0) bekäme keine
+	 * Fläche; Anordnung und Zeichnung rechnen für ihn mit {@value #FALLBACK_SEAT_RADIUS}, der Validator meldet ihn.
+	 */
+	public static double seatRadius(Seat seat) {
+		return seat.getWidth() > 0 ? seat.getWidth() / 2.0 : FALLBACK_SEAT_RADIUS;
 	}
 
 	/**
@@ -176,20 +184,24 @@ public final class SeatingPlanLayout {
 
 	/**
 	 * Zusätzlicher Platzbedarf links/rechts eines Tischs durch die dort platzierten Stühle (siehe
-	 * {@link #applySeatPositions(Table)}), damit Stühle benachbarter Tische sich nicht überschneiden.
+	 * {@link #applySeatPositions(Table)}): freier Raum plus Durchmesser des größten Sitzes, damit Stühle benachbarter
+	 * Tische sich nicht überschneiden.
 	 */
 	private static double getSeatMargin(Table table) {
 		List<Seat> seats = table.getSeats();
 		if (seats == null || seats.isEmpty()) {
 			return 0;
 		}
-		double maxSeatRadius = seats.stream().mapToDouble(Seat::getWidth).max().orElse(0) / 2.0;
-		return SEAT_GAP + maxSeatRadius;
+		double maxSeatRadius = seats.stream().mapToDouble(SeatingPlanLayout::seatRadius).max().orElse(0);
+		return SEAT_CLEARANCE + 2 * maxSeatRadius;
 	}
 
 	/**
-	 * Platziert die Stühle paarweise links und rechts am Tisch. Berechnet wird im Tischkoordinatensystem um den
-	 * Tischmittelpunkt, danach um die Drehung des Tischs gedreht. Die Position eines Stuhls ist sein Mittelpunkt.
+	 * Platziert die Stühle paarweise links und rechts am Tisch. Die Tischlänge ist in gleiche Abschnitte je Paar geteilt,
+	 * jedes Paar steht in der Mitte seines Abschnitts: So bleibt der Abstand auch über die Stoßstelle zweier Tische gleich
+	 * (dort kommt nur der Tischabstand der Reihe dazu). Quer steht ein Stuhl Radius + {@value #SEAT_CLEARANCE} cm neben der
+	 * Tischkante. Berechnet wird im Tischkoordinatensystem um den Tischmittelpunkt, danach um die Drehung des Tischs
+	 * gedreht. Die Position eines Stuhls ist sein Mittelpunkt.
 	 */
 	private static void applySeatPositions(Table table) {
 		List<Seat> seats = table.getSeats();
@@ -198,9 +210,7 @@ public final class SeatingPlanLayout {
 		}
 		int totalSeats = seats.size();
 		int pairs = (int) Math.ceil(totalSeats / 2.0);
-
-		double usableHeight = Math.max(table.getHeight() - (2 * SEAT_MARGIN_Y), 20);
-		double stepY = pairs > 1 ? usableHeight / (pairs - 1) : 0;
+		double section = table.getHeight() / pairs;
 
 		double centerX = table.getPosX() + table.getWidth() / 2;
 		double centerY = table.getPosY() + table.getHeight() / 2;
@@ -216,9 +226,8 @@ public final class SeatingPlanLayout {
 			boolean isLeft = (j % 2 == 0); // Index 0, 2, 4... -> links | Index 1, 3, 5... -> rechts
 			int pairIndex = j / 2;
 
-			double localX = (table.getWidth() / 2 + SEAT_GAP) * (isLeft ? -1 : 1);
-			// Bei einem Paar mittig, sonst gleichmäßig verteilt
-			double localY = pairs == 1 ? 0 : -(table.getHeight() / 2) + SEAT_MARGIN_Y + pairIndex * stepY;
+			double localX = (table.getWidth() / 2 + seatRadius(seat) + SEAT_CLEARANCE) * (isLeft ? -1 : 1);
+			double localY = -(table.getHeight() / 2) + (pairIndex + 0.5) * section;
 
 			seat.setPosX(centerX + localX * cos - localY * sin);
 			seat.setPosY(centerY + localX * sin + localY * cos);
