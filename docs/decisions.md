@@ -209,7 +209,7 @@ deleted.
 3. **Install a fixed version over the broken one:**
    - Set `app.jvm.extract-native-libraries = false` in `conveyor.conf`. With the filtered JAR, this was verified to
      start in the KARV-137 spike; the filter can stay.
-   - Raise the version, which must be higher than the broken one, and build it.
+   - Build it with a higher version than the broken one; MSIX accepts only a higher version as an update.
    - On the workstation run `Add-AppxPackage -Path <msix> -ForceApplicationShutdown`, from a USB stick or the shared
      folder. Data and update source are kept.
 4. **Never run `Remove-AppxPackage` on a workstation** without first backing up
