@@ -173,6 +173,7 @@ class SettingsStoreTest {
 		assertTrue(json.isObject());
 		assertTrue(json.get("sharedDir").isNull());
 		assertTrue(json.get("saveBookingsImmediately").asBoolean());
+		assertTrue(json.get("checkCloudServer").asBoolean());
 		assertEquals(0, json.get("recentOperators").size());
 	}
 
@@ -184,6 +185,7 @@ class SettingsStoreTest {
 
 		assertNull(settings.getSharedDir());
 		assertTrue(settings.isSaveBookingsImmediately());
+		assertTrue(settings.isCheckCloudServer(), "eine settings.json aus 1.0.0 prüft den Cloud-Server");
 		assertNotNull(settings.getRecentOperators());
 		assertTrue(settings.getRecentOperators().isEmpty());
 	}
@@ -193,6 +195,7 @@ class SettingsStoreTest {
 		SettingsStore store = new SettingsStore(dir);
 		store.current().setSharedDir("E:\\Nextcloud\\ECV");
 		store.current().setSaveBookingsImmediately(false);
+		store.current().setCheckCloudServer(false);
 		store.current().setRecentOperators(List.of("Anna", "Bert"));
 		store.save();
 
@@ -200,6 +203,7 @@ class SettingsStoreTest {
 
 		assertEquals("E:\\Nextcloud\\ECV", reloaded.getSharedDir());
 		assertFalse(reloaded.isSaveBookingsImmediately());
+		assertFalse(reloaded.isCheckCloudServer());
 		assertEquals(List.of("Anna", "Bert"), reloaded.getRecentOperators());
 	}
 

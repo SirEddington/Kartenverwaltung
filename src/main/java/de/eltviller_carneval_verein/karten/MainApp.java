@@ -25,6 +25,7 @@ import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.store.ConnectMode;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
+import de.eltviller_carneval_verein.karten.store.Reachability;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.SyncState;
@@ -162,6 +163,9 @@ public class MainApp extends Application {
 				ChangeTracker.settings().rebase(current, ChangeTracker.settings().snapshotOf(saved));
 			}
 		});
+		// KARV-127: Die Prüfung des Cloud-Servers folgt dem gespeicherten Stand, nicht einem noch ungespeicherten Häkchen
+		Reachability.setCloudCheck(settingsStore.current().isCheckCloudServer());
+		settingsStore.addListener(saved -> Reachability.setCloudCheck(saved.isCheckCloudServer()));
 
 		// Der Versionsspeicher nimmt zuerst die Sperre gegen einen zweiten Start und liest die Kennung des Rechners;
 		// scheitert das, geht es ohne Fenster nicht weiter

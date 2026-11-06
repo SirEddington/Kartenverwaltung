@@ -119,7 +119,10 @@ entry you are editing at that moment is updated only after you save or discard (
 workstation's change).
 
 **Offline:** when the folder is not reachable (SYS-005) you can keep selling. New sales are provisional and are
-uploaded when the folder is back.
+uploaded when the folder is back. A Nextcloud or OneDrive folder is always present on disk, so for these the app also
+checks that the cloud server answers (every sync tick, i.e. every 2 s); without internet the workstation is
+offline. If a firewall blocks this check although the internet works, switch off **"Verbindung zum
+Cloud-Server prüfen"** in the same settings section; then only the folder itself counts, as before.
 
 ### Conflicts
 

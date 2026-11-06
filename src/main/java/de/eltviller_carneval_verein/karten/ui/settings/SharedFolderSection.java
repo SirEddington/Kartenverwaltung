@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -49,7 +50,8 @@ import javafx.stage.Window;
  * mit "Speichern", und ist gesperrt, solange dieser Rechner verbunden ist (auch offline oder mit ausstehendem Verbinden):
  * Ein Ordnerwechsel heißt erst trennen, dann neu verbinden. Was auf den Takt des Versionsspeichers wartet
  * ({@code disconnect}, {@code renameMachine}), läuft auf dem Hintergrund-Thread der {@link SharedFolderConnection}.
- * "Buchungen sofort speichern" ist eine gewöhnliche Einstellung und wird mit "Speichern" gespeichert.
+ * "Buchungen sofort speichern" und "Verbindung zum Cloud-Server prüfen" (KARV-127) sind gewöhnliche Einstellungen und
+ * werden mit "Speichern" gespeichert.
  */
 public final class SharedFolderSection {
 
@@ -74,7 +76,10 @@ public final class SharedFolderSection {
 		// Der Hinweis "Angemeldet als …" steht im Bedienelement, nicht als Hinweis der Zeile: Er folgt dem Wechsel sofort
 		rows.add(new SettingRow(SharedFolderTexts.OPERATOR, null, operatorControl(sync)));
 		rows.add(new SettingRow(SharedFolderTexts.SAVE_IMMEDIATELY, SharedFolderTexts.SAVE_IMMEDIATELY_HINT,
-				saveImmediately(settings)));
+				checkBox(settings.isSaveBookingsImmediately(), settings::setSaveBookingsImmediately)));
+		// gilt für die Prüfung erst nach "Speichern" (siehe MainApp)
+		rows.add(new SettingRow(SharedFolderTexts.CHECK_CLOUD_SERVER, SharedFolderTexts.CHECK_CLOUD_SERVER_HINT,
+				checkBox(settings.isCheckCloudServer(), settings::setCheckCloudServer)));
 		return new SettingsSection(SharedFolderTexts.SECTION_TITLE, rows);
 	}
 
@@ -291,10 +296,11 @@ public final class SharedFolderSection {
 		return operator == null ? "" : MessageTemplate.format(SharedFolderTexts.OPERATOR_HINT, operator);
 	}
 
-	private static Node saveImmediately(AppSettings settings) {
+	/** Ein Häkchen für eine gewöhnliche Einstellung: Es ändert sie über {@code setter}, gespeichert wird mit "Speichern". */
+	private static Node checkBox(boolean selected, Consumer<Boolean> setter) {
 		CheckBox box = new CheckBox();
-		box.setSelected(settings.isSaveBookingsImmediately());
-		box.selectedProperty().addListener((observable, was, now) -> settings.setSaveBookingsImmediately(now));
+		box.setSelected(selected);
+		box.selectedProperty().addListener((observable, was, now) -> setter.accept(now));
 		return box;
 	}
 

@@ -65,8 +65,8 @@ import javafx.beans.property.ReadOnlyObjectProperty;
  * vorherigen Listeneintrag kann so nicht entstehen. Wer den Anspruch nicht bekommt, hat verloren; die Version bleibt
  * liegen und wird mit {@link SyncListener#lost} gemeldet.
  * <p>
- * <b>Takt</b> (alle 2 Sekunden, {@link #tick()}): Erreichbarkeit prüfen (nach einem Fehler; sonst zuerst, ob der
- * gemeinsame Ordner noch da ist: fehlt er, ist der Zustand offline, und nichts legt ihn an), ein Stück des
+ * <b>Takt</b> (alle 2 Sekunden, {@link #tick()}): Erreichbarkeit voll prüfen (ein Cloud-Ordner ist lokal immer da und
+ * zählt erst, wenn sein Server antwortet, KARV-127; fehlt der Ordner, ist der Zustand offline, und nichts legt ihn an), ein Stück des
  * Vollabgleichs, Aufträge fortsetzen, neue Rechner suchen (eine Auflistung von {@code feeds/}), die Änderungslisten
  * der anderen lesen, die eigenen Ansprüche der letzten 15 Minuten im gemeinsamen Ordner nachlesen (späte Niederlage
  * bei einem Sync-Client; nach einem Neustart auch die aus den lokalen Anspruchsdateien, beim Verbinden mit Mitnehmen
@@ -286,8 +286,6 @@ public final class SyncService implements ConnectionControl {
 		 * das die Schutzregel verbot.
 		 */
 		volatile ConnectMode connectMode;
-		/** Vor der ersten Arbeit die Erreichbarkeit prüfen (nach dem Verbinden). */
-		volatile boolean probeFirst;
 		volatile boolean fullSyncWanted = true;
 		/**
 		 * Der laufende Vollabgleich mit seinem Zeiger; {@code null} ohne Lauf. Gehört zu dieser Verbindung: Eine neue verwirft
@@ -943,7 +941,6 @@ public final class SyncService implements ConnectionControl {
 			reopen();
 			current.deciding = false;
 			current.connectMode = mode;
-			current.probeFirst = true;
 			// das Ergebnis des Verbindens hat der Eintritt in die Pause festgelegt; dieses ist das neue
 			current.outcome = outcome;
 		} finally {
@@ -2246,7 +2243,7 @@ public final class SyncService implements ConnectionControl {
 	// --- Takt
 
 	/**
-	 * Ein Takt (in der Anwendung alle 2 Sekunden im {@code worker}): Erreichbarkeit nur nach einem Fehler prüfen, bei
+	 * Ein Takt (in der Anwendung alle 2 Sekunden im {@code worker}): Erreichbarkeit voll prüfen (KARV-127), bei
 	 * Bedarf einen Vollabgleich beginnen und ein Stück davon abarbeiten, Aufträge fortsetzen, neue Rechner suchen (in
 	 * jedem Takt, eine Auflistung von {@code feeds/}), Listen lesen, eigene Ansprüche der letzten 15 Minuten nachprüfen; dann Verluste und geänderte Einheiten
 	 * melden und den Zustand setzen. Am Anfang, auch im
@@ -2353,16 +2350,9 @@ public final class SyncService implements ConnectionControl {
 		}
 		SyncState state = notifier.state();
 		boolean returning = state == SyncState.OFFLINE;
-		if (returning || state == SyncState.FEHLER || current.probeFirst) {
-			if (!probe(current.path)) {
-				if (isCurrent(current)) {
-					reportUnreachable(current);
-				}
-				return !markerGone;
-			}
-			current.probeFirst = false;
-		} else if (!files.isDirectory(current.path) && !probe(current.path)) {
-			// ein Takt ohne eigene Änderung liest nur, und ein fehlender Ordner sähe dabei leer aus: Er gälte als aktuell
+		// Jeder Takt prüft voll (KARV-127): Ein Cloud-Ordner ist lokal immer da, ein Anspruch darin gälte ohne Server als
+		// hochgeladen; und ein fehlender Ordner sähe beim bloßen Lesen leer aus, er gälte als aktuell
+		if (!probe(current.path)) {
 			if (isCurrent(current)) {
 				reportUnreachable(current);
 			}
@@ -3633,7 +3623,6 @@ public final class SyncService implements ConnectionControl {
 		VersionStore shared = path == null ? null : new VersionStore(path.resolve(DATA), files, path, this::machineId);
 		Link created = new Link(dir, path, shared, new SyncPositions(appDataDir.resolve(SYNC_STATE), dir));
 		created.connectMode = mode;
-		created.probeFirst = mode != null;
 		synchronized (lock) {
 			created.bind(machine.ownership(), local, clock);
 			link = created;

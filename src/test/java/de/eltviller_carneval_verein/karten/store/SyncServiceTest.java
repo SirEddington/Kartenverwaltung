@@ -692,6 +692,52 @@ class SyncServiceTest {
 		assertEquals(List.of("1.json"), names(sharedRoot.resolve("data/feeds/" + a.identity.id())));
 	}
 
+	// --- KARV-127: Ein Cloud-Ordner ist lokal immer da; ob er erreichbar ist, sagt erst die volle Prüfung (der Server)
+
+	/** Ein Rechner, dessen Ordner immer da ist, dessen volle Prüfung aber scheitert, solange {@code serverDown} gilt. */
+	private Node cloudNode(String name, AtomicBoolean serverDown) throws IOException {
+		return new Node(dir.resolve(name), name, new NioFileLayer(), Runnable::run, Runnable::run, p -> !serverDown.get());
+	}
+
+	@Test
+	void saveWithoutServerStaysProvisionalAndIsNotWrittenIntoTheCloudFolder() throws IOException {
+		AtomicBoolean serverDown = new AtomicBoolean();
+		Node a = cloudNode("a", serverDown);
+		assertTrue(a.service.startup(shared));
+		a.service.tick();
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+
+		serverDown.set(true);
+		Version v = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get(), "geprüft vor dem Hochladen, ohne 30 s abzuwarten");
+		assertTrue(a.service.unitState(BOOKING).provisional());
+		assertFalse(Files.exists(sharedFile(BOOKING, "claims/root.json")), "kein Anspruch im Cloud-Ordner");
+		assertEquals(List.of(shared), a.events.unreachable);
+
+		serverDown.set(false);
+		a.service.tick();
+
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+		assertEquals(v.id(), sharedClaim(BOOKING, "root").version());
+	}
+
+	@Test
+	void idleTickChecksTheServerToo() throws IOException {
+		AtomicBoolean serverDown = new AtomicBoolean();
+		Node a = cloudNode("a", serverDown);
+		assertTrue(a.service.startup(shared));
+		a.service.tick();
+		a.service.tick();
+		assertEquals(SyncState.AKTUELL, a.service.syncState().get());
+
+		serverDown.set(true);
+		a.service.tick();
+
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get(), "auch ein Takt ohne eigene Arbeit prüft den Server");
+	}
+
 	@Test
 	void unreachableAtStartupIsOfflineWithoutCallback() throws IOException {
 		Node a = node("a");

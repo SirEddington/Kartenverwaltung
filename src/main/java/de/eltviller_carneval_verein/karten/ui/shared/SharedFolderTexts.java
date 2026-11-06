@@ -106,6 +106,14 @@ public final class SharedFolderTexts {
 	public static final String SAVE_IMMEDIATELY_HINT = "Jede Änderung an einer Buchung wird sofort gespeichert, und andere"
 			+ " Rechner sehen den Platz sofort als belegt. Ohne diese Einstellung gilt eine Buchung erst nach „Speichern“.";
 
+	/** Beschriftung der Zeile "Verbindung zum Cloud-Server prüfen" (KARV-127). */
+	public static final String CHECK_CLOUD_SERVER = "Verbindung zum Cloud-Server prüfen";
+
+	/** Hinweis zu "Verbindung zum Cloud-Server prüfen". */
+	public static final String CHECK_CLOUD_SERVER_HINT = "Liegt der gemeinsame Ordner in Nextcloud oder OneDrive, gilt er nur"
+			+ " als erreichbar, wenn auch der Server antwortet; ohne Internet sind neue Verkäufe dann vorläufig. Schalte das nur"
+			+ " aus, wenn die Kartenverwaltung trotz Internet dauerhaft „nicht erreichbar“ meldet (etwa hinter einer Firewall).";
+
 	// --- Verbinden und Trennen
 
 	/** Titel der Frage beim Verbinden. */

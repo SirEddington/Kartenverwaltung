@@ -44,8 +44,8 @@ Linux:
 ./mvnw -Plinux clean package
 ```
 
-This runs the tests and produces a per-platform fat JAR: `target/Kartenverwaltung-1.0.0-win.jar` or
-`target/Kartenverwaltung-1.0.0-linux.jar`. The two can coexist in `target/` (the release workflow builds both
+This runs the tests and produces a per-platform fat JAR: `target/Kartenverwaltung-1.0.1-win.jar` or
+`target/Kartenverwaltung-1.0.1-linux.jar`. The two can coexist in `target/` (the release workflow builds both
 without `clean` in between). These JARs are the inputs for Conveyor.
 
 ### 3. Run
