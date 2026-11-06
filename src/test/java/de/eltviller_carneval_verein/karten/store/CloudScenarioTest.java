@@ -17,6 +17,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -105,13 +106,16 @@ class CloudScenarioTest {
 		final Recorder events = new Recorder();
 		final SyncService service;
 
+		/** Solange gesetzt, antwortet der Server diesem Rechner nicht (KARV-127: kein Internet, der Client-Ordner bleibt da). */
+		final AtomicBoolean offline = new AtomicBoolean();
+
 		Machine(String name) throws IOException {
 			this.name = name;
 			this.clientFolder = cloud.addClient(name);
 			this.appData = dir.resolve("appdata-" + name);
 			MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> name);
-			this.service = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run, p -> true,
-					clock);
+			this.service = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run,
+					p -> !offline.get(), clock);
 			service.setListener(events);
 			assertTrue(service.startup(clientFolder.toString()));
 		}
@@ -291,6 +295,64 @@ class CloudScenarioTest {
 		assertEquals(1, b.events.lost.size(), "der Verlust wird einmal gemeldet");
 		assertTrue(a.events.errors.isEmpty());
 		assertTrue(b.events.errors.isEmpty());
+	}
+
+	/**
+	 * KARV-127: A ist ohne Internet und deshalb OFFLINE; sein Verkauf bleibt vorläufig und kommt nicht in den Client-Ordner.
+	 * B verkauft denselben Platz online und ist auf dem Server. Kommt A zurück, bevor sein Client B's Anspruch geholt hat,
+	 * lädt A in den eigenen Client-Ordner hoch und hält sich kurz für den Gewinner; der Client legt A's Anspruch dann als
+	 * Konfliktkopie beiseite. A erkennt die späte Niederlage, führt zusammen, und beide enden auf demselben Stand.
+	 */
+	@Test
+	void saleWhileOfflineThatLosesIsFoundAfterReturnAndMerged() throws IOException {
+		Machine a = new Machine("a");
+		Machine b = new Machine("b");
+		a.offline.set(true);
+		Version va = a.sell(BOOKING, "Anna");
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		assertEquals(SyncState.OFFLINE, a.service.syncState().get());
+		assertTrue(a.service.unitState(BOOKING).provisional(), "offline vorläufig");
+		assertFalse(Files.exists(a.clientFolder.resolve("data").resolve(BOOKING.relativePath()).resolve("claims")),
+				"offline nichts im Client-Ordner");
+
+		Version vb = b.sell(BOOKING, "Bert");
+		b.service.tick();
+		cloud.step("b");
+
+		// A ist zurück, sein Client hat B's Anspruch noch nicht geholt: A lädt in den eigenen Client-Ordner hoch
+		a.offline.set(false);
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		assertFalse(a.service.unitState(BOOKING).provisional());
+		assertTrue(a.events.lost.isEmpty(), "bis hierher kennt A nur den eigenen Anspruch");
+
+		// A's Client gleicht ab: B war zuerst, A's Anspruch wird Konfliktkopie, B's liegt am Originalpfad
+		cloud.step("a");
+		Path claimsA = a.clientFolder.resolve("data").resolve(BOOKING.relativePath()).resolve("claims");
+		assertEquals(List.of("root (conflicted copy a).json", "root.json"), names(claimsA));
+
+		clock.advance(Duration.ofSeconds(2));
+		a.service.tick();
+		assertEquals(List.of(new LostVersion(BOOKING, List.of(va.id()), vb.id())), a.events.lost);
+
+		// A liest B's Liste, führt zusammen und lädt hoch; B übernimmt die Zusammenführung
+		for (int i = 0; i < 3; i++) {
+			clock.advance(Duration.ofSeconds(30));
+			a.service.tick();
+		}
+		Version merge = a.service.unitState(BOOKING).head();
+		assertEquals(List.of(vb.id(), va.id()), merge.parents());
+		cloud.step("a");
+		cloud.step("b");
+		clock.advance(Duration.ofSeconds(30));
+		b.service.tick();
+
+		assertEquals(merge.id(), b.service.unitState(BOOKING).head().id());
+		assertTrue(b.events.lost.isEmpty());
+		assertTrue(a.events.errors.isEmpty());
+		assertTrue(b.events.errors.isEmpty());
+		assertEquals(1, a.events.lost.size(), "der Verlust wird einmal gemeldet");
 	}
 
 	/**
