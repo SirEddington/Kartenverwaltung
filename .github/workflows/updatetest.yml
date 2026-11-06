@@ -1,0 +1,61 @@
+# Spike KARV-130, wird nicht gemergt: baut zwei Testpakete der Test-Identitaet
+# "Kartenverwaltung UPDATE-TEST" (conveyor-updatetest.conf) und legt sie NUR als
+# Workflow-Artefakte ab. Keine GitHub-Release, kein gh-pages: echte Installationen
+# bekommen davon nichts mit.
+#
+# Versionen: Buchstaben (1.1.0a) verwirft Windows (Paketversion bliebe 1.1.0.0). Deshalb
+# app.revision: Paket a = 1.1.0.1, Paket b = 1.1.0.2. Echte Releases haben Revision 0.
+name: Update-Test (Spike KARV-130)
+
+on:
+  push:
+    branches: ['spike/KARV-130-Update-Weg']
+  workflow_dispatch: {}
+
+jobs:
+  build-test-packages:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build Windows jar
+        run: ./mvnw --batch-mode clean package -DskipTests
+
+      - name: Testpaket a (1.1.0 Revision 1)
+        uses: hydraulic-software/conveyor/actions/build@v22.2
+        with:
+          command: make --output-dir=site-a site
+          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
+          agree_to_license: 1
+          extra_flags: -f conveyor-updatetest.conf -Kapp.revision=1 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+
+      - name: Testpaket b (1.1.0 Revision 2)
+        uses: hydraulic-software/conveyor/actions/build@v22.2
+        with:
+          command: make --output-dir=site-b site
+          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
+          agree_to_license: 1
+          extra_flags: -f conveyor-updatetest.conf -Kapp.revision=2 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+
+      - name: Upload Testpaket a
+        uses: actions/upload-artifact@v4
+        with:
+          name: updatetest-site-a
+          path: site-a
+          retention-days: 7
+
+      - name: Upload Testpaket b
+        uses: actions/upload-artifact@v4
+        with:
+          name: updatetest-site-b
+          path: site-b
+          retention-days: 7
