@@ -6,14 +6,18 @@ import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.model.TextAlignH;
+import de.eltviller_carneval_verein.karten.model.TextAlignV;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.input.RotationInput;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.value.ChangeListener;
 import javafx.fxml.FXML;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
@@ -69,6 +73,16 @@ public class TableSeatPanelController {
 	@FXML
 	private Spinner<Double> rotationSpinner;
 	@FXML
+	private CheckBox tableTextAutoCheck;
+	@FXML
+	private Spinner<Double> tableTextSizeSpinner;
+	@FXML
+	private ComboBox<TextAlignH> tableTextAlignHCombo;
+	@FXML
+	private ComboBox<TextAlignV> tableTextAlignVCombo;
+	@FXML
+	private Spinner<Double> tableTextRotationSpinner;
+	@FXML
 	private Label tablePositionLabel;
 	@FXML
 	private Button btnResetTablePosition;
@@ -104,7 +118,7 @@ public class TableSeatPanelController {
 		setupTableFields();
 		setupSeatFields();
 		for (Spinner<?> spinner : List.of(tableNumberSpinner, tableWidthSpinner, tableHeightSpinner, tablePosXSpinner, tablePosYSpinner, rotationSpinner,
-				seatNumberSpinner, seatWidthSpinner, seatPosXSpinner, seatPosYSpinner)) {
+				tableTextSizeSpinner, tableTextRotationSpinner, seatNumberSpinner, seatWidthSpinner, seatPosXSpinner, seatPosYSpinner)) {
 			spinner.setEditable(true);
 		}
 		show(null, null, false);
@@ -164,6 +178,53 @@ public class TableSeatPanelController {
 				table.setCategory(newVal);
 			}
 		});
+		setupTableTextFields(tableLabel);
+	}
+
+	/** Die Beschriftung des Tischs wie bei Hallenobjekten: Mit "Text automatisch" gesperrt, mit den berechneten Werten. */
+	private void setupTableTextFields(Supplier<String> tableLabel) {
+		tableTextSizeSpinner.setValueFactory(SpinnerInput.doubleFactory(20.0, 1));
+		tableTextRotationSpinner.setValueFactory(RotationInput.factory(15));
+		SpinnerInput.install(tableTextSizeSpinner, "Schriftgröße", tableLabel);
+		RotationInput.install(tableTextRotationSpinner, "Textdrehung", tableLabel);
+		tableTextAlignHCombo.getItems().setAll(TextAlignH.values());
+		tableTextAlignHCombo.setConverter(HallPlanController.displayNames(TextAlignH::getDisplayName));
+		tableTextAlignVCombo.getItems().setAll(TextAlignV.values());
+		tableTextAlignVCombo.setConverter(HallPlanController.displayNames(TextAlignV::getDisplayName));
+		for (Node field : List.of(tableTextSizeSpinner, tableTextAlignHCombo, tableTextAlignVCombo, tableTextRotationSpinner)) {
+			field.disableProperty().bind(tableTextAutoCheck.selectedProperty());
+		}
+
+		tableTextAutoCheck.selectedProperty().addListener((obs, oldVal, auto) -> {
+			if (!isEditing(table)) {
+				return;
+			}
+			if (auto) {
+				table.setTextAuto(true);
+			} else {
+				// Von Hand weiter: Die Felder starten mit dem, was Auto gerade berechnet hat
+				PlanText.freezeAuto(table);
+			}
+			host.edited();
+		});
+		onTableText(tableTextSizeSpinner, (t, value) -> t.setTextSize(value));
+		onTableText(tableTextRotationSpinner, (t, value) -> t.setTextRotation(value));
+		tableTextAlignHCombo.valueProperty().addListener(textListener((t, value) -> t.setTextAlignH(value)));
+		tableTextAlignVCombo.valueProperty().addListener(textListener((t, value) -> t.setTextAlignV(value)));
+	}
+
+	private <T> void onTableText(Spinner<T> spinner, Change<Table, T> change) {
+		spinner.valueProperty().addListener(textListener(change));
+	}
+
+	/** Textwerte gelten nur für einen Tisch ohne Auto (bei Auto sind die Felder gesperrt und zeigen berechnete Werte). */
+	private <T> ChangeListener<T> textListener(Change<Table, T> change) {
+		return (obs, oldVal, newVal) -> {
+			if (isEditing(table) && !table.isTextAuto() && newVal != null) {
+				change.apply(table, newVal);
+				host.edited();
+			}
+		};
 	}
 
 	private void setupSeatFields() {
@@ -280,6 +341,13 @@ public class TableSeatPanelController {
 		// Die Drehung eines automatisch angeordneten Tischs gibt die Reihe vor
 		rotationSpinner.setDisable(!t.isManualPos());
 		btnResetTablePosition.setDisable(!t.isManualPos());
+		// Bei Auto die berechneten Werte, sonst die gespeicherten (resolve liefert dann genau diese)
+		PlanText.Layout text = PlanText.resolve(t);
+		tableTextAutoCheck.setSelected(t.isTextAuto());
+		tableTextSizeSpinner.getValueFactory().setValue(t.isTextAuto() ? PlanText.roundForDisplay(text.fontSize()) : t.getTextSize());
+		tableTextRotationSpinner.getValueFactory().setValue(t.isTextAuto() ? PlanText.roundForDisplay(text.rotation()) : t.getTextRotation());
+		tableTextAlignHCombo.setValue(text.alignH());
+		tableTextAlignVCombo.setValue(text.alignV());
 	}
 
 	private void fillSeat(Seat s) {

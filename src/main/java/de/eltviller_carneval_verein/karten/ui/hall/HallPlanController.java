@@ -279,7 +279,8 @@ public class HallPlanController {
 		return !updatingPanel && selectedObject != null && !selectedObject.isTextAuto();
 	}
 
-	private static <T> StringConverter<T> displayNames(Function<T, String> displayName) {
+	/** Zeigt Werte einer festen Auswahl mit ihrem Anzeigenamen (auch für die Textfelder der Tische). */
+	static <T> StringConverter<T> displayNames(Function<T, String> displayName) {
 		return new StringConverter<>() {
 			@Override
 			public String toString(T value) {
@@ -293,9 +294,8 @@ public class HallPlanController {
 		};
 	}
 
-	/** Auf eine Nachkommastelle, damit die Spinner keine langen Dezimalzahlen zeigen. */
 	private static double roundForDisplay(double value) {
-		return Math.round(value * 10) / 10.0;
+		return PlanText.roundForDisplay(value);
 	}
 
 	/** Zeigt die Textwerte des Objekts im Panel; bei Auto die berechneten (gesperrt), sonst die gespeicherten. */

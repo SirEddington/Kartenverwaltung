@@ -10,6 +10,7 @@ import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.model.TextAlignV;
+import de.eltviller_carneval_verein.karten.model.TextSettings;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanText.Layout;
 
 /**
@@ -286,6 +287,15 @@ class PlanTextTest {
 		double[] turned = PlanText.tableTextCenter(table(180), 30, 100, top);
 		assertEquals(125, turned[0], 1e-6);
 		assertEquals(315, turned[1], 1e-6);
+	}
+
+	@Test
+	void freeze_switchesAutoOffAndKeepsTheCalculatedValuesRounded() {
+		Table table = table(0);
+
+		PlanText.freeze(table, new Layout(33.3333, 90, TextAlignH.CENTER, TextAlignV.TOP));
+
+		assertEquals(new TextSettings(false, 33.3, TextAlignH.CENTER, TextAlignV.TOP, 90), table.getTextSettings());
 	}
 
 	@Test

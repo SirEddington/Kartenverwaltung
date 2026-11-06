@@ -29,6 +29,15 @@
             <Spinner fx:id="tablePosYSpinner" prefWidth="120.0" />
             <Label text="Drehung (Grad, nur bei manueller Position):" wrapText="true" />
             <Spinner fx:id="rotationSpinner" prefWidth="120.0" />
+            <CheckBox fx:id="tableTextAutoCheck" text="Text automatisch" />
+            <Label text="Textgröße (cm):" />
+            <Spinner fx:id="tableTextSizeSpinner" prefWidth="120.0" />
+            <Label text="Text horizontal:" />
+            <ComboBox fx:id="tableTextAlignHCombo" prefWidth="120.0" />
+            <Label text="Text vertikal:" />
+            <ComboBox fx:id="tableTextAlignVCombo" prefWidth="120.0" />
+            <Label text="Textdrehung (Grad, ab der Tischachse):" wrapText="true" />
+            <Spinner fx:id="tableTextRotationSpinner" prefWidth="120.0" />
             <Label fx:id="tablePositionLabel" />
             <Button fx:id="btnResetTablePosition" text="Position zurücksetzen" styleClass="button-default" onAction="#handleResetTablePosition" />
             <FlowPane hgap="10.0" vgap="8.0">

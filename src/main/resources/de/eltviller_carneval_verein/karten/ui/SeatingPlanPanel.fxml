@@ -46,6 +46,26 @@
             <Spinner fx:id="aisleAfterSpinner" prefWidth="120.0" />
             <Label fx:id="aisleWidthLabel" text="Gangbreite (cm):" />
             <Spinner fx:id="aisleWidthSpinner" prefWidth="120.0" />
+            <!-- Gelten für alle Tische (und deren Sitze) der markierten Reihen (TableRowBulkEdit) -->
+            <Separator />
+            <Label text="Maße aller Tische" style="-fx-font-weight: bold;" />
+            <Label fx:id="tableWidthLabel" text="Tischbreite (cm):" />
+            <Spinner fx:id="tableWidthSpinner" prefWidth="120.0" />
+            <Label fx:id="tableHeightLabel" text="Tischhöhe (cm):" />
+            <Spinner fx:id="tableHeightSpinner" prefWidth="120.0" />
+            <Label fx:id="seatWidthLabel" text="Sitzdurchmesser (cm):" />
+            <Spinner fx:id="seatWidthSpinner" prefWidth="120.0" />
+            <Separator />
+            <Label text="Beschriftung aller Tische" style="-fx-font-weight: bold;" />
+            <CheckBox fx:id="textAutoCheck" text="Text automatisch" />
+            <Label fx:id="textSizeLabel" text="Textgröße (cm):" />
+            <Spinner fx:id="textSizeSpinner" prefWidth="120.0" />
+            <Label fx:id="textAlignHLabel" text="Text horizontal:" />
+            <ComboBox fx:id="textAlignHCombo" prefWidth="120.0" />
+            <Label fx:id="textAlignVLabel" text="Text vertikal:" />
+            <ComboBox fx:id="textAlignVCombo" prefWidth="120.0" />
+            <Label fx:id="textRotationLabel" text="Textdrehung (Grad, ab der Tischachse):" wrapText="true" />
+            <Spinner fx:id="textRotationSpinner" prefWidth="120.0" />
         </VBox>
     </TitledPane>
     <!-- Abschnitte Tisch und Sitz unter der Reihe, sobald im Plan ein Tisch oder Sitz markiert ist; der Controller wird

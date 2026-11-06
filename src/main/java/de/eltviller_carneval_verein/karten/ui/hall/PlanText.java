@@ -134,6 +134,30 @@ public final class PlanText {
 		return resolve(table.getDisplayName(), areaOf(table), table.getTextSettings());
 	}
 
+	/**
+	 * "Auto aus" am Tisch: Die Textfelder starten mit dem, was Auto gerade berechnet hat ({@link #resolve(Table)}). Ein Tisch
+	 * ohne Auto bleibt unverändert.
+	 */
+	public static void freezeAuto(Table table) {
+		if (table.isTextAuto()) {
+			freeze(table, resolve(table));
+		}
+	}
+
+	/** Schreibt die Werte von {@code layout} (auf eine Nachkommastelle, wie die Felder sie zeigen) und schaltet Auto aus. */
+	static void freeze(Table table, Layout layout) {
+		table.setTextSize(roundForDisplay(layout.fontSize()));
+		table.setTextRotation(roundForDisplay(layout.rotation()));
+		table.setTextAlignH(layout.alignH());
+		table.setTextAlignV(layout.alignV());
+		table.setTextAuto(false);
+	}
+
+	/** Auf eine Nachkommastelle, damit die Eingabefelder keine langen Dezimalzahlen zeigen. */
+	static double roundForDisplay(double value) {
+		return Math.round(value * 10) / 10.0;
+	}
+
 	private static Layout resolve(String name, Area area, TextSettings settings) {
 		Text probe = new Text(name == null ? "" : name);
 		probe.setFont(font(MEASURE_SIZE));
