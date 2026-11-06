@@ -528,10 +528,12 @@ public class SeatingPlanController {
 		if (row == null) {
 			return;
 		}
-		RowFillDialog.show(SelectionSections.rowName(row), rowList.getScene() == null ? null : rowList.getScene().getWindow()).ifPresent(fill -> {
-			plan.fillRow(row, fill.tableCount(), fill.seatsPerTable());
-			afterEdit();
-		});
+		RowFillDialog.show(SelectionSections.rowName(row), RowFillDialog.Sizes.of(plan), rowList.getScene() == null ? null : rowList.getScene().getWindow())
+				.ifPresent(fill -> {
+					// Die Maße werden die Standardmaße der Bestuhlung (auch für später einzeln hinzugefügte Tische und Sitze)
+					plan.fillRow(row, fill.tableCount(), fill.seatsPerTable(), fill.tableWidth(), fill.tableHeight(), fill.seatWidth());
+					afterEdit();
+				});
 	}
 
 	@FXML

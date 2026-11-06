@@ -49,11 +49,6 @@ import javafx.util.StringConverter;
  */
 public class HallEditController {
 
-	// Standardmaße neuer Bestuhlungen (cm), wie bisher in der Event-Anlage
-	private static final double DEFAULT_TABLE_WIDTH = 70;
-	private static final double DEFAULT_TABLE_HEIGHT = 300;
-	private static final double DEFAULT_SEAT_SIZE = 30;
-
 	private Hall hall;
 	// Die Bestuhlung, deren Name im Namensfeld steht (Ziel des Umbenennens)
 	private SeatingPlan shownPlan;
@@ -371,14 +366,14 @@ public class HallEditController {
 	}
 
 	/**
-	 * Neue Bestuhlung mit den Standardmaßen, die bisher die Event-Anlage vorgab (Tisch 70 x 300 cm, Sitz 30 x 30 cm). Mit den
-	 * Modell-Standardwerten (0) bekämen neue Sitze keine Größe.
+	 * Neue Bestuhlung mit den Standardmaßen ({@link SeatingPlan#STANDARD_TABLE_WIDTH} usw.: Tisch 50 x 320 cm, Sitz 45 cm).
+	 * Mit den Modell-Standardwerten (0) bekämen neue Sitze keine Größe.
 	 */
 	static SeatingPlan addPlanWithDefaultSizes(Hall hall) {
 		SeatingPlan plan = hall.addSeatingPlan();
-		plan.setDefaultTableWidth(DEFAULT_TABLE_WIDTH);
-		plan.setDefaultTableHeight(DEFAULT_TABLE_HEIGHT);
-		plan.setDefaultSeatWidth(DEFAULT_SEAT_SIZE);
+		plan.setDefaultTableWidth(SeatingPlan.STANDARD_TABLE_WIDTH);
+		plan.setDefaultTableHeight(SeatingPlan.STANDARD_TABLE_HEIGHT);
+		plan.setDefaultSeatWidth(SeatingPlan.STANDARD_SEAT_WIDTH);
 		return plan;
 	}
 
