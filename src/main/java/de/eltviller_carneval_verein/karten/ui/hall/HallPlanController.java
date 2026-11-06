@@ -239,7 +239,7 @@ public class HallPlanController {
 			}
 			if (!auto) {
 				// Von Hand weiter: Die Felder starten mit dem, was Auto gerade berechnet hat
-				HallObjectText.Layout current = HallObjectText.resolve(selectedObject);
+				PlanText.Layout current = PlanText.resolve(selectedObject);
 				selectedObject.setTextSize(roundForDisplay(current.fontSize()));
 				selectedObject.setTextRotation(roundForDisplay(current.rotation()));
 				selectedObject.setTextAlignH(current.alignH());
@@ -308,7 +308,7 @@ public class HallPlanController {
 				return;
 			}
 			if (obj.isTextAuto()) {
-				HallObjectText.Layout layout = HallObjectText.resolve(obj);
+				PlanText.Layout layout = PlanText.resolve(obj);
 				textSizeSpinner.getValueFactory().setValue(roundForDisplay(layout.fontSize()));
 				textRotationSpinner.getValueFactory().setValue(roundForDisplay(layout.rotation()));
 				textAlignHCombo.setValue(layout.alignH());
@@ -519,7 +519,7 @@ public class HallPlanController {
 		shape.setStroke(selected ? SELECTION_STROKE : Color.DARKGRAY);
 		shape.setStrokeWidth(selected ? 3 : 1);
 
-		Group node = labelOptions.hallObjectsProperty().get() ? new Group(shape, HallObjectText.create(hallObject)) : new Group(shape);
+		Group node = labelOptions.hallObjectsProperty().get() ? new Group(shape, PlanText.create(hallObject)) : new Group(shape);
 		node.setCursor(editMode ? Cursor.MOVE : Cursor.HAND);
 		node.setOnMousePressed(event -> startObjectDrag(event, hallObject));
 		node.setOnMouseDragged(event -> dragObject(event, hallObject));

@@ -4,7 +4,6 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
-import de.eltviller_carneval_verein.karten.util.Angles;
 import javafx.beans.binding.Bindings;
 import javafx.beans.value.ObservableDoubleValue;
 import javafx.geometry.VPos;
@@ -18,7 +17,6 @@ import javafx.scene.shape.StrokeLineCap;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
-import javafx.scene.text.TextAlignment;
 
 /**
  * Baut die Knoten für Reihen, Tische und Sitze einer Bestuhlung in Hallenkoordinaten (cm, y nach unten, Winkel im
@@ -50,8 +48,9 @@ public final class PlanNodeFactory {
 
 	/**
 	 * Tisch als Rechteck an {@code posX/posY} (obere linke Ecke des ungedrehten Rechtecks) mit der Größe des Tischs,
-	 * beschriftet mit {@link Table#getDisplayName()}. Rechteck und Beschriftung drehen sich um die Tischmitte um
-	 * {@link Table#getRotation()} Grad im Uhrzeigersinn; die Schrift steht dabei nie auf dem Kopf.
+	 * beschriftet mit {@link Table#getDisplayName()} nach den Texteinstellungen des Tischs ({@link PlanText}). Rechteck und
+	 * Beschriftung drehen sich um die Tischmitte um {@link Table#getRotation()} Grad im Uhrzeigersinn; die Schrift steht
+	 * dabei nie auf dem Kopf.
 	 */
 	public static Group tableNode(Table table, boolean selected) {
 		return tableNode(table, selected, true);
@@ -71,17 +70,7 @@ public final class PlanNodeFactory {
 			return new Group(shape);
 		}
 
-		Text label = new Text(table.getDisplayName());
-		label.setFont(Font.font(16));
-		label.setTextOrigin(VPos.CENTER);
-		label.setTextAlignment(TextAlignment.CENTER);
-		double centerX = table.getPosX() + table.getWidth() / 2.0;
-		double centerY = table.getPosY() + table.getHeight() / 2.0;
-		label.setX(centerX - label.getLayoutBounds().getWidth() / 2.0);
-		label.setY(centerY);
-		label.setRotate(readableRotation(table.getRotation()));
-
-		return new Group(shape, label);
+		return new Group(shape, PlanText.create(table));
 	}
 
 	/** Sitz als Kreis um {@code posX/posY} (der Mittelpunkt des Sitzes) mit der halben Sitzbreite als Radius. */
@@ -193,9 +182,4 @@ public final class PlanNodeFactory {
 		return group;
 	}
 
-	/** Dreht eine Beschriftung mit, aber nie auf den Kopf (zwischen 90 und 270 Grad um 180 Grad weiter). */
-	static double readableRotation(double rotation) {
-		double normalized = Angles.normalize(rotation);
-		return normalized > 90 && normalized < 270 ? normalized - 180 : normalized;
-	}
 }

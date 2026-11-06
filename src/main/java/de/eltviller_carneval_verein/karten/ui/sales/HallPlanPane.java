@@ -11,7 +11,7 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
-import de.eltviller_carneval_verein.karten.ui.hall.HallObjectText;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanText;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabels;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanNodeFactory;
 import de.eltviller_carneval_verein.karten.ui.hall.SeatingPlanLayout;
@@ -276,7 +276,7 @@ public class HallPlanPane extends StackPane {
 		hallObjectShape.setFill(parseHallObjectColor(hallObject.getColor()));
 		hallObjectShape.setStroke(Color.DARKGRAY);
 
-		return showName ? new Group(hallObjectShape, HallObjectText.create(hallObject)) : new Group(hallObjectShape);
+		return showName ? new Group(hallObjectShape, PlanText.create(hallObject)) : new Group(hallObjectShape);
 	}
 
 	private static Color parseHallObjectColor(String color) {
