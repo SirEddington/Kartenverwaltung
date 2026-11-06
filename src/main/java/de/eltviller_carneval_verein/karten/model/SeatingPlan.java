@@ -1,7 +1,6 @@
 package de.eltviller_carneval_verein.karten.model;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -204,11 +203,13 @@ public class SeatingPlan {
 		return table != null && tables.remove(table);
 	}
 
-	/** Die Tische der Reihe, nach Nummer sortiert (so werden sie angezeigt). */
+	/**
+	 * Die Tische der Reihe in der Reihenfolge des Anlegens: So stehen sie in der Reihe. Die Nummer ist nur Beschriftung;
+	 * eine neue (auch doppelte) Nummer verschiebt den Tisch nicht.
+	 */
 	public List<Table> getTablesOf(TableRow row) {
 		String rowId = row.getId();
-		return tables.stream().filter(t -> Objects.equals(t.getRowId(), rowId))
-				.sorted(Comparator.comparingInt(Table::getTableNumber)).toList();
+		return tables.stream().filter(t -> Objects.equals(t.getRowId(), rowId)).toList();
 	}
 
 	/**
@@ -225,7 +226,7 @@ public class SeatingPlan {
 
 	/**
 	 * Vergibt die Nummern im Geltungsbereich der Reihe lückenlos von 1 an, in der Reihenfolge der Reihenliste und
-	 * innerhalb einer Reihe nach der bisherigen Nummer.
+	 * innerhalb einer Reihe nach dem Platz ({@link #getTablesOf}).
 	 */
 	public void renumber(TableRow row) {
 		int number = 1;
@@ -314,7 +315,7 @@ public class SeatingPlan {
 		return copy;
 	}
 
-	/** Tische im Geltungsbereich der Reihe in der Reihenfolge Reihenliste, dann bisherige Nummer. */
+	/** Tische im Geltungsbereich der Reihe in der Reihenfolge Reihenliste, dann Platz in der Reihe. */
 	private List<Table> tablesInScope(TableRow row) {
 		List<TableRow> scopeRows = new ArrayList<>();
 		if (isUnlabeled(row)) {

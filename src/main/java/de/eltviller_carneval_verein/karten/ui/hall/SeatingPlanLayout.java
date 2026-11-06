@@ -9,8 +9,8 @@ import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.util.Angles;
 
 /**
- * Automatische Anordnung der Bestuhlung: Legt die Tische jeder Reihe nach Nummer sortiert entlang der Reihenachse
- * hintereinander und setzt die Stühle paarweise links und rechts an die Tische. Die Berechnung ist reine Geometrie
+ * Automatische Anordnung der Bestuhlung: Legt die Tische jeder Reihe in der Reihenfolge des Anlegens (nicht nach
+ * Nummer, siehe {@link SeatingPlan#getTablesOf}) entlang der Reihenachse hintereinander und setzt die Stühle paarweise links und rechts an die Tische. Die Berechnung ist reine Geometrie
  * (ohne JavaFX), schreibt die Ergebnisse ins Modell und ist idempotent. Koordinaten: y zeigt nach unten, Winkel
  * laufen im Uhrzeigersinn, Grad.
  *

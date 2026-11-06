@@ -375,7 +375,7 @@ class SeatingPlanLayoutTest {
 	}
 
 	@Test
-	void reihen_ohne_buchstaben_werden_nach_nummer_gelegt() {
+	void tische_liegen_in_der_reihenfolge_des_anlegens_nicht_nach_nummer() {
 		Table nine = table();
 		nine.setTableNumber(9);
 		Table one = table();
@@ -386,9 +386,26 @@ class SeatingPlanLayoutTest {
 
 		SeatingPlanLayout.apply(plan);
 
-		assertEquals(125, one.getPosX(), EPS);
-		assertEquals(245, five.getPosX(), EPS);
-		assertEquals(365, nine.getPosX(), EPS);
+		assertEquals(125, nine.getPosX(), EPS);
+		assertEquals(245, one.getPosX(), EPS);
+		assertEquals(365, five.getPosX(), EPS);
+	}
+
+	@Test
+	void eine_neue_nummer_verschiebt_den_tisch_nicht() {
+		Table first = table();
+		Table second = table();
+		Table third = table();
+		SeatingPlanLayout.apply(plan);
+		List<Double> before = snapshot();
+
+		// auf die Nummer eines anderen Tischs (doppelt, meldet der Validator) und auf eine größere
+		first.setTableNumber(third.getTableNumber());
+		SeatingPlanLayout.apply(plan);
+		assertEquals(before, snapshot());
+		second.setTableNumber(99);
+		SeatingPlanLayout.apply(plan);
+		assertEquals(before, snapshot());
 	}
 
 	// --- Nächste Reihe ("+ Reihe"): neben der vorigen, Abstand = deren Querausdehnung + 20 cm ---

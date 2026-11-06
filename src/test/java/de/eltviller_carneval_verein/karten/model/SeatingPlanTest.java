@@ -98,7 +98,7 @@ class SeatingPlanTest {
 	}
 
 	@Test
-	void renumber_ohne_Buchstabe_nummeriert_ueber_alle_Reihen_in_Reihenfolge() {
+	void renumber_ohne_Buchstabe_nummeriert_ueber_alle_Reihen_nach_dem_Platz() {
 		SeatingPlan plan = newPlan();
 		TableRow first = plan.addRow();
 		TableRow second = plan.addRow();
@@ -108,9 +108,25 @@ class SeatingPlanTest {
 
 		plan.renumber(second);
 
-		assertEquals(1, c.getTableNumber());
-		assertEquals(2, b.getTableNumber());
+		// Reihenliste zuerst, in der Reihe der Platz (Reihenfolge des Anlegens), nicht die bisherige Nummer
+		assertEquals(1, b.getTableNumber());
+		assertEquals(2, c.getTableNumber());
 		assertEquals(3, a.getTableNumber());
+	}
+
+	@Test
+	void tische_einer_reihe_behalten_ihren_platz_wenn_sich_die_nummer_aendert() {
+		SeatingPlan plan = newPlan();
+		TableRow row = plan.addRow();
+		row.setLabel("A");
+		Table t1 = addNumberedTable(plan, row, 1);
+		Table t2 = addNumberedTable(plan, row, 2);
+		Table t3 = addNumberedTable(plan, row, 3);
+
+		t1.setTableNumber(3);
+		assertEquals(List.of(t1, t2, t3), plan.getTablesOf(row), "doppelte Nummer: der Platz bleibt");
+		t1.setTableNumber(9);
+		assertEquals(List.of(t1, t2, t3), plan.getTablesOf(row), "größere Nummer: der Platz bleibt");
 	}
 
 	@Test

@@ -40,7 +40,8 @@ Abrechnung                     → reconcile cash, statistics, export
      from the table axis, and the label never stands upside down.
    - Tables and seats can be added, deleted, positioned manually ("Position zurücksetzen" returns to the automatic
      layout), and marked with a category or as wheelchair place.
-   - **"Nummern neu vergeben"** renumbers tables/seats.
+   - Tables stay in the order they were created; a table number is only a label, so changing it (even to a
+     duplicate, which blocks saving) never moves the table. **"Nummern neu vergeben"** renumbers tables by their place.
 4. **"Speichern"** (or the save shortcut). Validation errors appear in the footer and block saving.
 
 Changing or deleting a seating plan that presentations use never deletes a booking with data: bookings whose seat
