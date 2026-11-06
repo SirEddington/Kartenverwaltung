@@ -44,8 +44,8 @@ Linux:
 ./mvnw -Plinux clean package
 ```
 
-This runs the tests and produces a per-platform fat JAR: `target/Kartenverwaltung-1.0.1-win.jar` or
-`target/Kartenverwaltung-1.0.1-linux.jar`. The two can coexist in `target/` (the release workflow builds both
+This runs the tests and produces a per-platform fat JAR: `target/Kartenverwaltung-1.1.0-win.jar` or
+`target/Kartenverwaltung-1.1.0-linux.jar`. The two can coexist in `target/` (the release workflow builds both
 without `clean` in between). These JARs are the inputs for Conveyor.
 
 ### 3. Run
@@ -102,6 +102,11 @@ and assigns a new id, but it is avoidable).
 No installation step is required: in *Einstellungen → Gemeinsamer Ordner* choose a folder that all workstations
 can reach (a network share or a folder synced by a client such as Nextcloud) and click *Verbinden*. See
 [usage.md](usage.md#working-with-several-workstations).
+
+**Update all workstations together.** Workstations sharing a folder should run the same version. Version 1.1 adds
+table labels to the seating plan; a workstation still on 1.0.x drops them (back to "Text automatisch") and puts
+automatically placed seats back in their old positions when it saves a hall. Update every workstation to 1.1 at the
+same time and restart it.
 
 ## Releasing
 

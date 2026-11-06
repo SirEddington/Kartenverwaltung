@@ -29,7 +29,15 @@ Abrechnung                     → reconcile cash, statistics, export
 3. **Seating plans** ("+ Bestuhlung hinzufügen"): a hall can have several, e.g. a theater and a gala layout.
    - **"+ Reihe"** adds a table row with a letter, start point, angle, table rotation, table gap and an optional
      aisle after *n* tables.
-   - **"Reihe füllen…"** creates the tables of a row with a given number of seats per table.
+   - **"Reihe füllen…"** creates the tables of a row with a given number of seats per table, table width and
+     height and seat diameter (default 50 × 320 cm, seat 45 cm). The sizes become the seating plan's defaults for
+     tables and seats added later one by one.
+   - Seats are circles and have only a diameter. They are spread in equal sections along the table, so the spacing
+     stays the same where two tables meet; a seat's center lies its radius + 5 cm beside the table edge.
+   - With one or more rows selected, the row panel also sets **table width, table height and seat diameter** and the
+     **table labels** for all tables of these rows ("verschieden" marks differing values).
+   - Table labels work like hall object texts ("Text automatisch", size, alignment, rotation). The rotation counts
+     from the table axis, and the label never stands upside down.
    - Tables and seats can be added, deleted, positioned manually ("Position zurücksetzen" returns to the automatic
      layout), and marked with a category or as wheelchair place.
    - **"Nummern neu vergeben"** renumbers tables/seats.
