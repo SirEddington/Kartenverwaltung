@@ -159,6 +159,17 @@ On Windows step 1 now finds them in `<install>\bin`. On Linux step 3 finds them,
 of JavaFX and Conveyor. After every update of either, check with `-Djavafx.verbose=true` where the libraries are
 loaded from.
 
+**Linux package dependencies:**
+
+- With the `.so` files loose in the package, Conveyor derives the Debian `Depends` from them too: GTK3, GLib, ATK,
+  Cairo, Pango, GL and friends.
+- It resolves the package names against Ubuntu 24.04, where several carry a `t64` suffix (`libgtk-3-0t64`,
+  `libglib2.0-0t64`, `libatk1.0-0t64`, `libasound2t64`). These names do not exist on Ubuntu 22.04 and Debian 12.
+- `conveyor.conf` removes these entries and adds alternatives with the old names, so the `.deb` installs on all
+  three.
+- `libasound2t64` was already in 1.0.x, so Debian 12 could not install the package before either.
+- This was measured with `apt-get install --simulate`.
+
 **Why the Microsoft runtime files are filtered:**
 
 - JavaFX 21.0.2 ships `msvcp140*`/`vcruntime140*` 14.36, the bundled JDK (Corretto 21) ships 14.44.
