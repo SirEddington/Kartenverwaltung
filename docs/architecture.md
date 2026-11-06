@@ -137,7 +137,9 @@ claim files*, in that order, and `SharedArbiter` creates the claim in the shared
 
 **The tick** (`SyncService.tick`, every 2 s on a background thread):
 
-1. Check reachability (`Reachability`, with timeout, because a hanging network drive blocks for ~30 s).
+1. Check reachability (`Reachability`, with timeout, because a hanging network drive blocks for ~30 s). A folder
+   of a cloud client (`CloudFolders`: Nextcloud from `nextcloud.cfg`, OneDrive from the `OneDrive*` environment
+   variables) also needs its server to answer a TCP connect (`ServerProbe`). Every tick runs this full check.
 2. Run a slice of the full sync (`FullSync`/`FullSyncRun`, budget 2 s per tick; a full run starts every 10 min,
    at startup, after coming back online and on request).
 3. Continue upload jobs.

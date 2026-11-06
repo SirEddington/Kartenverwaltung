@@ -12,7 +12,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  * deshalb keine Migration.
  * <p>
  * Die Einstellungen sind der gemeinsame Ordner ({@code sharedDir}, {@code null} heißt Einzelbetrieb), ob Buchungen
- * sofort gespeichert werden ({@code saveBookingsImmediately}, Standard {@code true}) und die zuletzt angemeldeten Bediener
+ * sofort gespeichert werden ({@code saveBookingsImmediately}, Standard {@code true}), ob bei einem Cloud-Ordner der
+ * Server geprüft wird ({@code checkCloudServer}, Standard {@code true}, KARV-127) und die zuletzt angemeldeten Bediener
  * ({@code recentOperators}, nie {@code null}). Der Spiegelordner ({@code mirrorDir}) ist mit KARV-89 entfallen, ein
  * Feld dieses Namens in einer älteren {@code settings.json} wird beim Lesen ignoriert.
  */
@@ -21,6 +22,7 @@ public class AppSettings {
 
 	private String sharedDir;
 	private boolean saveBookingsImmediately = true;
+	private boolean checkCloudServer = true;
 	private List<String> recentOperators = new ArrayList<>();
 
 	public AppSettings() {
@@ -42,6 +44,18 @@ public class AppSettings {
 
 	public void setSaveBookingsImmediately(boolean saveBookingsImmediately) {
 		this.saveBookingsImmediately = saveBookingsImmediately;
+	}
+
+	/**
+	 * Ob ein gemeinsamer Ordner von Nextcloud oder OneDrive erst als erreichbar gilt, wenn auch der Server antwortet
+	 * (KARV-127); ausgeschaltet zählt nur, dass der Ordner da ist.
+	 */
+	public boolean isCheckCloudServer() {
+		return checkCloudServer;
+	}
+
+	public void setCheckCloudServer(boolean checkCloudServer) {
+		this.checkCloudServer = checkCloudServer;
 	}
 
 	/** Die zuletzt verwendeten Bediener, der letzte zuerst; nie {@code null}. */
