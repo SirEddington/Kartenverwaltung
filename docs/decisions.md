@@ -267,10 +267,22 @@ in the app (KARV-131) or when it is installed from the shared folder (KARV-132).
 - `Add-AppxPackage -Path <newer .msix> -ForceApplicationShutdown` updates a running app from a local folder,
   with no update source and no internet. A helper then restarts the app. The data and the link to the update
   source are kept.
-- Norton: during the test runs it did not touch `updatecheck.exe`, `updater.exe` or the installer, and all five
-  starts of the test app worked. Afterwards Norton's behaviour-based protection blocked the test app's launcher
-  (`bin\Kartenverwaltung UPDATE-TEST.exe`, "IDP.Generic"). The file stayed in place. The trigger is still unknown.
-  Conveyor ships `updatecheck.exe` in the package even with `use-update-escape-hatch = false`.
+- Norton: its behaviour-based protection flagged the launcher of version 1.1.0.1
+  (`bin\Kartenverwaltung UPDATE-TEST.exe`, "IDP.Generic").
+  - Only that version had run `triggerUpdateCheckUI()`, which started `updater.exe` from `%TEMP%`.
+  - Version 1.1.0.2 was not flagged, although a hidden PowerShell helper updated it with `Add-AppxPackage` and
+    started it.
+  - Conclusion: the Conveyor updater, a copy of `updatecheck.exe` started from `%TEMP%`, triggers Norton. This fits
+    the earlier quarantine of `updatecheck.exe`. Conveyor ships `updatecheck.exe` in the package even with
+    `use-update-escape-hatch = false`.
+- Norton's Web/Mail Shield intercepts TLS. The JVMs of Conveyor and Maven do not trust its root certificate and
+  fail with PKIX errors. The bundled runtime of the app is expected to fail the same way on HTTPS downloads
+  (GitHub) unless it uses the Windows trust store (`-Djavax.net.ssl.trustStoreType=Windows-ROOT`).
+
+**Consequence for the update path (KARV-131, KARV-132):**
+- Do not use `triggerUpdateCheckUI()`.
+- The app downloads the `.msix` itself, or takes it from the shared folder.
+- A helper process installs the package with `Add-AppxPackage -ForceApplicationShutdown` and restarts the app.
 
 **Consequence:** `manual` must not ship without KARV-131. Otherwise there is no way to update apart from a new
 install.
