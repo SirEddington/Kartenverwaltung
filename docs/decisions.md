@@ -315,8 +315,10 @@ in the app (KARV-131) or when it is installed from the shared folder (KARV-132).
 - `Add-AppxPackage -Path <newer .msix> -ForceApplicationShutdown` updates a running app from a local folder,
   with no update source and no internet. A helper then restarts the app. The data and the link to the update
   source are kept.
-- Norton did not touch `updatecheck.exe`, `updater.exe` or the installer during the test. Conveyor ships
-  `updatecheck.exe` in the package even with `use-update-escape-hatch = false`.
+- Norton: during the test runs it did not touch `updatecheck.exe`, `updater.exe` or the installer, and all five
+  starts of the test app worked. Afterwards Norton's behaviour-based protection blocked the test app's launcher
+  (`bin\Kartenverwaltung UPDATE-TEST.exe`, "IDP.Generic"). The file stayed in place. The trigger is still unknown.
+  Conveyor ships `updatecheck.exe` in the package even with `use-update-escape-hatch = false`.
 
 **Consequence:** `manual` must not ship without KARV-131. Otherwise there is no way to update apart from a new
 install.
