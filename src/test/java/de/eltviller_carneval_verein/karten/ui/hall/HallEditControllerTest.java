@@ -54,7 +54,6 @@ class HallEditControllerTest {
 		assertEquals(70, created.getDefaultTableWidth());
 		assertEquals(300, created.getDefaultTableHeight());
 		assertEquals(30, created.getDefaultSeatWidth());
-		assertEquals(30, created.getDefaultSeatHeight());
 	}
 
 	@Test

@@ -379,7 +379,6 @@ public class HallEditController {
 		plan.setDefaultTableWidth(DEFAULT_TABLE_WIDTH);
 		plan.setDefaultTableHeight(DEFAULT_TABLE_HEIGHT);
 		plan.setDefaultSeatWidth(DEFAULT_SEAT_SIZE);
-		plan.setDefaultSeatHeight(DEFAULT_SEAT_SIZE);
 		return plan;
 	}
 

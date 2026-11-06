@@ -12,6 +12,10 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+
 class SeatingPlanTest {
 
 	private static SeatingPlan newPlan() {
@@ -110,10 +114,48 @@ class SeatingPlanTest {
 	}
 
 	@Test
+	void fillRow_mit_Massen_legt_Tische_und_Sitze_mit_diesen_Massen_an_und_macht_sie_zum_Standard() {
+		SeatingPlan plan = newPlan();
+		TableRow row = plan.addRow();
+
+		plan.fillRow(row, 2, 3, 50, 320, 45);
+
+		List<Table> tables = plan.getTablesOf(row);
+		assertEquals(2, tables.size());
+		for (Table table : tables) {
+			assertEquals(50, table.getWidth());
+			assertEquals(320, table.getHeight());
+			assertEquals(3, table.getSeats().size());
+			table.getSeats().forEach(seat -> assertEquals(45, seat.getWidth()));
+		}
+		assertEquals(50, plan.getDefaultTableWidth());
+		assertEquals(320, plan.getDefaultTableHeight());
+		assertEquals(45, plan.getDefaultSeatWidth());
+	}
+
+	@Test
+	void sitz_aus_alter_Datei_mit_Hoehe_laedt_mit_der_Breite_als_Durchmesser() throws Exception {
+		ObjectMapper mapper = JsonMapperFactory.create();
+
+		Seat seat = mapper.readValue("{\"id\":\"s1\",\"seatNumber\":1,\"width\":45.0,\"height\":30.0}", Seat.class);
+
+		assertEquals(45, seat.getWidth());
+		assertTrue(!mapper.valueToTree(seat).has("height"), "Die Höhe wird nicht mehr geschrieben");
+	}
+
+	@Test
+	void bestuhlung_aus_alter_Datei_mit_Sitzhoehe_laedt() throws Exception {
+		ObjectMapper mapper = JsonMapperFactory.create();
+
+		SeatingPlan plan = mapper.readValue("{\"id\":\"p1\",\"defaultSeatWidth\":30.0,\"defaultSeatHeight\":30.0}", SeatingPlan.class);
+
+		assertEquals(30, plan.getDefaultSeatWidth());
+	}
+
+	@Test
 	void fillRow_legt_Tische_mit_Sitzen_an() {
 		SeatingPlan plan = newPlan();
 		plan.setDefaultSeatWidth(40);
-		plan.setDefaultSeatHeight(30);
 		TableRow row = plan.addRow();
 
 		plan.fillRow(row, 3, 4);
@@ -128,7 +170,6 @@ class SeatingPlanTest {
 				Seat seat = table.getSeats().get(s);
 				assertEquals(s + 1, seat.getSeatNumber());
 				assertEquals(40, seat.getWidth());
-				assertEquals(30, seat.getHeight());
 				assertSame(table, seat.getParent());
 			}
 		}

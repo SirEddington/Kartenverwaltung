@@ -25,7 +25,7 @@ public final class SeatValidator {
 		return new SeatValidator(seat).run();
 	}
 
-	/** Größte erlaubte Breite und Höhe eines Sitzes (wie bisher die Grenze der Spinner). */
+	/** Größter erlaubter Durchmesser eines Sitzes (wie bisher die Grenze der Spinner). */
 	static final double MAX_SIZE = 100;
 
 	private ValidationResult run() {
@@ -36,8 +36,8 @@ public final class SeatValidator {
 
 	private void validateSize() {
 		String owner = EntityLabels.seat(seat);
-		RangeCheck.check(result, SeatIssue.SIZE_OUT_OF_RANGE, "Breite", owner, seat.getWidth(), 0, MAX_SIZE);
-		RangeCheck.check(result, SeatIssue.SIZE_OUT_OF_RANGE, "Höhe", owner, seat.getHeight(), 0, MAX_SIZE);
+		// Sitze sind Kreise: Die Breite ist der Durchmesser
+		RangeCheck.check(result, SeatIssue.SIZE_OUT_OF_RANGE, "Durchmesser", owner, seat.getWidth(), 0, MAX_SIZE);
 	}
 
 	private void validateNumber() {

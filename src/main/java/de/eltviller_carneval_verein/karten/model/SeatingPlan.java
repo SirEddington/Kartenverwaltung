@@ -25,11 +25,16 @@ public class SeatingPlan {
 	private String name;
 	private String description;
 
-	// Standardmaße für neue Tische und Sitze
+	/** Standardmaße einer neuen Bestuhlung und Ersatz für fehlende Maße (cm): Tisch 50 × 320, Sitz 45 (KARV-128). */
+	public static final double STANDARD_TABLE_WIDTH = 50;
+	public static final double STANDARD_TABLE_HEIGHT = 320;
+	public static final double STANDARD_SEAT_WIDTH = 45;
+
+	// Standardmaße für neue Tische und Sitze. Sitze sind Kreise: defaultSeatWidth ist ihr Durchmesser; eine
+	// "defaultSeatHeight" älterer Dateien wird beim Laden übergangen.
 	private double defaultTableWidth;
 	private double defaultTableHeight;
 	private double defaultSeatWidth;
-	private double defaultSeatHeight;
 
 	// Die Elternverweise setzen setRows und setTables (keine @JsonManagedReference, siehe Event.presentations)
 	private List<TableRow> rows = new ArrayList<>();
@@ -99,14 +104,6 @@ public class SeatingPlan {
 
 	public void setDefaultSeatWidth(double defaultSeatWidth) {
 		this.defaultSeatWidth = defaultSeatWidth;
-	}
-
-	public double getDefaultSeatHeight() {
-		return defaultSeatHeight;
-	}
-
-	public void setDefaultSeatHeight(double defaultSeatHeight) {
-		this.defaultSeatHeight = defaultSeatHeight;
 	}
 
 	public List<TableRow> getRows() {
@@ -232,7 +229,18 @@ public class SeatingPlan {
 		}
 	}
 
-	/** Legt {@code tableCount} Tische mit je {@code seatsPerTable} Sitzen hinten an die Reihe an. */
+	/**
+	 * Wie {@link #fillRow(TableRow, int, int)} mit diesen Maßen (cm): Sie werden zuerst die Standardmaße der Bestuhlung
+	 * und gelten so auch für Tische und Sitze, die später einzeln dazukommen.
+	 */
+	public void fillRow(TableRow row, int tableCount, int seatsPerTable, double tableWidth, double tableHeight, double seatWidth) {
+		defaultTableWidth = tableWidth;
+		defaultTableHeight = tableHeight;
+		defaultSeatWidth = seatWidth;
+		fillRow(row, tableCount, seatsPerTable);
+	}
+
+	/** Legt {@code tableCount} Tische mit je {@code seatsPerTable} Sitzen hinten an die Reihe an (Standardmaße). */
 	public void fillRow(TableRow row, int tableCount, int seatsPerTable) {
 		for (int t = 0; t < tableCount; t++) {
 			Table table = addTable(row);
@@ -244,8 +252,9 @@ public class SeatingPlan {
 
 	/**
 	 * Tiefe Kopie der Bestuhlung (ohne Halle als Elternteil gesetzt): neue Ids für Bestuhlung, Reihen, Tische und
-	 * Sitze, die {@code rowId} der kopierten Tische zeigt auf die kopierten Reihen. Von den Sitzen werden Nummer,
-	 * Rollstuhlkennzeichen, Position und Maße übernommen; Buchungen gehören zur Vorstellung und bleiben unberührt.
+	 * Sitze, die {@code rowId} der kopierten Tische zeigt auf die kopierten Reihen. Von den Tischen werden auch die
+	 * Texteinstellungen übernommen, von den Sitzen Nummer, Rollstuhlkennzeichen, Position und Durchmesser; Buchungen
+	 * gehören zur Vorstellung und bleiben unberührt.
 	 */
 	public SeatingPlan copy() {
 		SeatingPlan copy = new SeatingPlan();
@@ -254,7 +263,6 @@ public class SeatingPlan {
 		copy.setDefaultTableWidth(defaultTableWidth);
 		copy.setDefaultTableHeight(defaultTableHeight);
 		copy.setDefaultSeatWidth(defaultSeatWidth);
-		copy.setDefaultSeatHeight(defaultSeatHeight);
 
 		Map<String, TableRow> copiedRows = new HashMap<>();
 		for (TableRow row : rows) {
@@ -284,6 +292,7 @@ public class SeatingPlan {
 			copiedTable.setWidth(table.getWidth());
 			copiedTable.setHeight(table.getHeight());
 			copiedTable.setRotation(table.getRotation());
+			copiedTable.copyTextFrom(table);
 			for (Seat seat : table.getSeats()) {
 				Seat copiedSeat = new Seat();
 				copiedSeat.setParent(copiedTable);
@@ -293,7 +302,6 @@ public class SeatingPlan {
 				copiedSeat.setPosX(seat.getPosX());
 				copiedSeat.setPosY(seat.getPosY());
 				copiedSeat.setWidth(seat.getWidth());
-				copiedSeat.setHeight(seat.getHeight());
 				copiedTable.getSeats().add(copiedSeat);
 			}
 			copy.getTables().add(copiedTable);

@@ -15,7 +15,9 @@ public enum TableIssue implements Issue {
 	/** Position X oder Y außerhalb von -10.000 bis 10.000 (Platzhalter wie bei {@link #SIZE_OUT_OF_RANGE}). */
 	POSITION_OUT_OF_RANGE("TBL-004", Severity.ERROR, RangeCheck.TEMPLATE),
 	/** Der Tisch einer Bestuhlung hat keine Reihe oder zeigt auf eine Reihe, die es nicht gibt. &1 = Tisch. */
-	ROW_MISSING("TBL-005", Severity.ERROR, "&1 gehört zu keiner vorhandenen Reihe.");
+	ROW_MISSING("TBL-005", Severity.ERROR, "&1 gehört zu keiner vorhandenen Reihe."),
+	/** Schriftgröße der Beschriftung außerhalb von 1 bis 1.000 (Platzhalter wie bei {@link #SIZE_OUT_OF_RANGE}). */
+	TEXT_SIZE_OUT_OF_RANGE("TBL-006", Severity.ERROR, RangeCheck.TEMPLATE);
 
 	private final String code;
 	private final Severity severity;

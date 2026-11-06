@@ -5,7 +5,10 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+// Ab v1.1 übergeht das Laden unbekannte Felder; v1.0.x lehnt sie hier noch ab, darum schreibt das Hallenobjekt keine neuen
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class HallObject {
 	private final String id;
 	@JsonBackReference("hall-hallObject")
@@ -157,6 +160,12 @@ public class HallObject {
 
 	public void setTextRotation(double textRotation) {
 		this.textRotation = textRotation;
+	}
+
+	/** Die fünf Textfelder für die Rechnung der Beschriftung; nicht in der Datei. */
+	@JsonIgnore
+	public TextSettings getTextSettings() {
+		return new TextSettings(textAuto, textSize, textAlignH, textAlignV, textRotation);
 	}
 	// <-- Getter und Setter
 

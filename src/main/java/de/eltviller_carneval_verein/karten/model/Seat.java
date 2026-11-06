@@ -21,8 +21,9 @@ public class Seat {
 	private boolean manualPos;
 	private double posX;
 	private double posY;
+	// Sitze sind Kreise: Die Breite ist ihr Durchmesser. Eine Höhe gibt es nicht (mehr); "height" älterer Dateien wird
+	// beim Laden übergangen. Der Name "width" bleibt, damit Datei und ältere Programmversionen dasselbe Feld lesen.
 	private double width;
-	private double height;
 
 	// Konstuktoren -->
 	public Seat() {
@@ -91,14 +92,6 @@ public class Seat {
 
 	public void setWidth(double width) {
 		this.width = width;
-	}
-
-	public double getHeight() {
-		return height;
-	}
-
-	public void setHeight(double height) {
-		this.height = height;
 	}
 	// <-- Getter und Setter
 

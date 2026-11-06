@@ -565,6 +565,34 @@ class StoreHallRepositoryForeignTest {
 		assertTrue(mine.isCurrent(hall.getId()));
 	}
 
+	/**
+	 * Ein Stand, den eine andere Programmversion schrieb (KARV-128): Er trägt Felder, die das Modell beim Lesen verwirft (die
+	 * Sitzhöhe von v1.0, hier zusätzlich ein unbekanntes Feld). Das Modell weicht davon ab, ohne dass jemand etwas geändert
+	 * hat; die Halle gilt trotzdem nicht als ungespeichert verändert.
+	 */
+	@Test
+	void hallWrittenWithFieldsTheModelDropsIsNotLocallyChanged() throws IOException {
+		Hall withPlan = new Hall(hall.getId());
+		withPlan.addSeatingPlan().addTable(withPlan.getSeatingPlans().get(0).addRow()).addSeat();
+		ObjectNode tree = JsonMapperFactory.create().valueToTree(withPlan);
+		ObjectNode plan = (ObjectNode) tree.get("seatingPlans").get(0);
+		plan.put("defaultSeatHeight", 30.0);
+		ObjectNode seat = (ObjectNode) plan.get("tables").get(0).get("seats").get(0);
+		seat.put("height", 30.0);
+		seat.put("altesFeld", 1);
+		foreignVersion(unit(), payload -> payload.set("seatingPlans", tree.get("seatingPlans")));
+		mine.applyForeign(List.of(unit()));
+		assertEquals(1, mine.findById(hall.getId()).getSeatingPlans().size(), "der Stand mit Bestuhlung ist eingearbeitet");
+
+		assertTrue(mine.isCurrent(hall.getId()), "unverändert geladen gilt die Halle als aktuell");
+
+		foreignName("Bürgerhaus");
+		ForeignResult result = mine.applyForeign(List.of(unit()));
+
+		assertTrue(result.deferred().isEmpty(), "ein neuerer fremder Stand wird eingearbeitet, nicht zurückgestellt");
+		assertEquals("Bürgerhaus", mine.findById(hall.getId()).getName());
+	}
+
 	@Test
 	void hallWithNewerForeignVersionIsNotCurrent() throws IOException {
 		foreignName("Neu");

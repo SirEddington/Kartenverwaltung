@@ -85,10 +85,9 @@ public class TableSeatPanelController {
 	private Spinner<Integer> seatNumberSpinner;
 	@FXML
 	private CheckBox wheelchairCheck;
+	// Sitze sind Kreise: Das Feld "Durchmesser" schreibt die Breite des Sitzes
 	@FXML
 	private Spinner<Double> seatWidthSpinner;
-	@FXML
-	private Spinner<Double> seatHeightSpinner;
 	@FXML
 	private Spinner<Double> seatPosXSpinner;
 	@FXML
@@ -105,7 +104,7 @@ public class TableSeatPanelController {
 		setupTableFields();
 		setupSeatFields();
 		for (Spinner<?> spinner : List.of(tableNumberSpinner, tableWidthSpinner, tableHeightSpinner, tablePosXSpinner, tablePosYSpinner, rotationSpinner,
-				seatNumberSpinner, seatWidthSpinner, seatHeightSpinner, seatPosXSpinner, seatPosYSpinner)) {
+				seatNumberSpinner, seatWidthSpinner, seatPosXSpinner, seatPosYSpinner)) {
 			spinner.setEditable(true);
 		}
 		show(null, null, false);
@@ -170,19 +169,16 @@ public class TableSeatPanelController {
 	private void setupSeatFields() {
 		seatNumberSpinner.setValueFactory(SpinnerInput.integerFactory(1, 1));
 		seatWidthSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
-		seatHeightSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		seatPosXSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		seatPosYSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		Supplier<String> seatLabel = () -> seat == null ? null : EntityLabels.seat(seat);
 		SpinnerInput.installInteger(seatNumberSpinner, "Sitznummer", seatLabel);
-		SpinnerInput.install(seatWidthSpinner, "Breite", seatLabel);
-		SpinnerInput.install(seatHeightSpinner, "Höhe", seatLabel);
+		SpinnerInput.install(seatWidthSpinner, "Durchmesser", seatLabel);
 		SpinnerInput.install(seatPosXSpinner, "Position X", seatLabel);
 		SpinnerInput.install(seatPosYSpinner, "Position Y", seatLabel);
 
 		onSeatValue(seatNumberSpinner, (s, value) -> s.setSeatNumber(value));
 		onSeatValue(seatWidthSpinner, (s, value) -> s.setWidth(value));
-		onSeatValue(seatHeightSpinner, (s, value) -> s.setHeight(value));
 		onSeatValue(seatPosXSpinner, (s, value) -> {
 			s.setPosX(value);
 			s.setManualPos(true);
@@ -290,7 +286,6 @@ public class TableSeatPanelController {
 		seatNumberSpinner.getValueFactory().setValue(s.getSeatNumber());
 		wheelchairCheck.setSelected(s.isWheelchairAccessible());
 		seatWidthSpinner.getValueFactory().setValue(s.getWidth());
-		seatHeightSpinner.getValueFactory().setValue(s.getHeight());
 		seatPosXSpinner.getValueFactory().setValue(s.getPosX());
 		seatPosYSpinner.getValueFactory().setValue(s.getPosY());
 		seatPositionLabel.setText(positionText(s.isManualPos()));

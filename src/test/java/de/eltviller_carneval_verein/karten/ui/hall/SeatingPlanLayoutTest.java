@@ -24,7 +24,6 @@ class SeatingPlanLayoutTest {
 		plan.setDefaultTableWidth(70);
 		plan.setDefaultTableHeight(300);
 		plan.setDefaultSeatWidth(20);
-		plan.setDefaultSeatHeight(20);
 		row.setPosX(100);
 		row.setPosY(50);
 	}
@@ -358,7 +357,6 @@ class SeatingPlanLayoutTest {
 		zero.setHeight(0);
 		Seat noSize = zero.addSeat();
 		noSize.setWidth(0);
-		noSize.setHeight(0);
 		zero.addSeat().setWidth(0);
 
 		assertDoesNotThrow(() -> SeatingPlanLayout.apply(plan));

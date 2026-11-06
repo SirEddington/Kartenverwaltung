@@ -29,7 +29,7 @@ public enum SeatIssue implements Issue {
 	PAID_WITHOUT_NAME("SEA-007", Severity.WARNING, "&1 ist als bezahlt markiert, es ist aber kein Nachname eingetragen."),
 	/** &1 = Sitz (mit der ungültigen Nummer). */
 	NUMBER_TOO_LOW("SEA-008", Severity.ERROR, "Die Sitznummer von &1 muss mindestens 1 sein."),
-	/** Breite oder Höhe außerhalb von 0 bis 100. &1 = "Breite" oder "Höhe", &2 = Sitz, &3 = Wert, &4 = Minimum, &5 = Maximum. */
+	/** Durchmesser (die Breite des Sitzes) außerhalb von 0 bis 100. &1 = "Durchmesser", &2 = Sitz, &3 = Wert, &4 = Minimum, &5 = Maximum. */
 	SIZE_OUT_OF_RANGE("SEA-009", Severity.ERROR, RangeCheck.TEMPLATE),
 	/** Die Buchung hat keinen Platz mehr in der Bestuhlung. &1 = Buchung (siehe {@link EntityLabels#booking}). */
 	NO_PLACE("SEA-010", Severity.WARNING, "&1 hat keinen Platz in der Bestuhlung und muss neu zugewiesen werden."),

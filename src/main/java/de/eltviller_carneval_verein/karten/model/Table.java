@@ -30,6 +30,14 @@ public class Table {
 	private double height;
 	private double rotation;
 
+	// Beschriftung wie bei HallObject (Größe in cm, Drehung in Grad im Uhrzeigersinn ab der Tischachse). Mit textAuto
+	// bestimmt die Anzeige die übrigen Werte selbst aus der Größe des Tischs; sie gelten dann nur als Vorbelegung.
+	private boolean textAuto = true;
+	private double textSize = 20;
+	private TextAlignH textAlignH = TextAlignH.CENTER;
+	private TextAlignV textAlignV = TextAlignV.CENTER;
+	private double textRotation = 0;
+
 	// Den Elternverweis setzt setSeats (keine @JsonManagedReference, siehe Event.presentations)
 	private List<Seat> seats = new ArrayList<Seat>(); // get,set
 
@@ -159,6 +167,62 @@ public class Table {
 	public void setHeight(double height) {
 		this.height = height;
 	}
+
+	public boolean isTextAuto() {
+		return textAuto;
+	}
+
+	public void setTextAuto(boolean textAuto) {
+		this.textAuto = textAuto;
+	}
+
+	/** Nimmt jeden Wert an; eine Größe außerhalb von 1 bis 1.000 meldet der {@code TableValidator} (TBL-006). */
+	public double getTextSize() {
+		return textSize;
+	}
+
+	public void setTextSize(double textSize) {
+		this.textSize = textSize;
+	}
+
+	public TextAlignH getTextAlignH() {
+		return textAlignH;
+	}
+
+	public void setTextAlignH(TextAlignH textAlignH) {
+		this.textAlignH = textAlignH;
+	}
+
+	public TextAlignV getTextAlignV() {
+		return textAlignV;
+	}
+
+	public void setTextAlignV(TextAlignV textAlignV) {
+		this.textAlignV = textAlignV;
+	}
+
+	public double getTextRotation() {
+		return textRotation;
+	}
+
+	public void setTextRotation(double textRotation) {
+		this.textRotation = textRotation;
+	}
+
+	/** Die fünf Textfelder für die Rechnung der Beschriftung; nicht in der Datei. */
+	@JsonIgnore
+	public TextSettings getTextSettings() {
+		return new TextSettings(textAuto, textSize, textAlignH, textAlignV, textRotation);
+	}
+
+	/** Übernimmt die Textfelder eines anderen Tischs (Kopie der Bestuhlung). */
+	void copyTextFrom(Table other) {
+		textAuto = other.textAuto;
+		textSize = other.textSize;
+		textAlignH = other.textAlignH;
+		textAlignV = other.textAlignV;
+		textRotation = other.textRotation;
+	}
 	// <-- Getter und Setter
 
 	/** Nimmt jeden Wert an; eine Nummer unter 1 wird vom {@code TableValidator} gemeldet (TBL-002). */
@@ -193,10 +257,9 @@ public class Table {
 		return newSeat;
 	}
 
-	/** Übernimmt die Sitzmaße aus der Bestuhlung; ohne Bestuhlung bleiben sie 0. */
+	/** Übernimmt den Sitzdurchmesser aus der Bestuhlung; ohne Bestuhlung bleibt er 0. */
 	private void initSeatSize(Seat seat) {
 		if (parentPlan != null) {
-			seat.setHeight(parentPlan.getDefaultSeatHeight());
 			seat.setWidth(parentPlan.getDefaultSeatWidth());
 		}
 	}
