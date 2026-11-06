@@ -267,22 +267,43 @@ in the app (KARV-131) or when it is installed from the shared folder (KARV-132).
 - `Add-AppxPackage -Path <newer .msix> -ForceApplicationShutdown` updates a running app from a local folder,
   with no update source and no internet. A helper then restarts the app. The data and the link to the update
   source are kept.
-- Norton: its behaviour-based protection flagged the launcher of version 1.1.0.1
-  (`bin\Kartenverwaltung UPDATE-TEST.exe`, "IDP.Generic").
-  - Only that version had run `triggerUpdateCheckUI()`, which started `updater.exe` from `%TEMP%`.
-  - Version 1.1.0.2 was not flagged, although a hidden PowerShell helper updated it with `Add-AppxPackage` and
-    started it.
-  - Conclusion: the Conveyor updater, a copy of `updatecheck.exe` started from `%TEMP%`, triggers Norton. This fits
-    the earlier quarantine of `updatecheck.exe`. Conveyor ships `updatecheck.exe` in the package even with
-    `use-update-escape-hatch = false`.
-- Norton's Web/Mail Shield intercepts TLS. The JVMs of Conveyor and Maven do not trust its root certificate and
-  fail with PKIX errors. The bundled runtime of the app is expected to fail the same way on HTTPS downloads
-  (GitHub) unless it uses the Windows trust store (`-Djavax.net.ssl.trustStoreType=Windows-ROOT`).
+- Norton's behaviour-based protection ("IDP.Generic") quarantined the launchers
+  (`bin\Kartenverwaltung UPDATE-TEST.exe`) of two of the three test versions:
+
+  | Version | What the app did | Norton |
+  |---|---|---|
+  | 1.1.0.1 | `triggerUpdateCheckUI()`, which starts `updater.exe` (a copy of `updatecheck.exe`) from `%TEMP%` | quarantined |
+  | 1.1.0.2 | updated with `Add-AppxPackage` by a hidden PowerShell helper and started by it; HTTP to localhost only | not flagged |
+  | 1.1.0.3 | HTTPS to GitHub through the Windows trust store (`jdk.crypto.mscapi`, `Windows-ROOT`) on its first start | quarantined |
+
+  - Norton reports the launchers as unknown ("file version unknown", "no community data"). The self-signed
+    certificate gives them no reputation, so any unusual behaviour is enough to trigger the behaviour-based
+    protection.
+  - **Collateral damage:** while cleaning up, Norton also deleted the JavaFX native libraries in the shared cache
+    `%USERPROFILE%\.openjfx\cache\21.0.2+5\amd64` (`glass.dll`, `prism_d3d.dll`, `javafx_font.dll`, `prism_sw.dll`).
+    They were not in quarantine and could not be recreated until Windows restarted (`AccessDeniedException`).
+    Until then no JavaFX 21.0.2 program started on the machine: not the real app, not `javafx:run`, not the UI
+    tests. The fat JAR extracts these libraries into the user profile on every start, so the real app shares the
+    cache with every other JavaFX program.
+  - Conveyor ships `updatecheck.exe` in the package even with `use-update-escape-hatch = false`.
+- Norton's Web/Mail Shield intercepts TLS. Java's own trust store rejects its root certificate (PKIX), as Conveyor,
+  Maven and a plain JDK test showed. The Windows trust store accepts it, but that requires `jdk.crypto.mscapi`,
+  which the bundled runtime does not contain (it also lacks `java.net.http`). In the packaged app this path is
+  what triggered Norton (1.1.0.3).
 
 **Consequence for the update path (KARV-131, KARV-132):**
+- The app itself should not start executables, use HTTPS or read the certificate store.
 - Do not use `triggerUpdateCheckUI()`.
-- The app downloads the `.msix` itself, or takes it from the shared folder.
-- A helper process installs the package with `Add-AppxPackage -ForceApplicationShutdown` and restarts the app.
+- Windows should check for and download updates. Candidates are `Package.CheckUpdateAvailabilityAsync()` and
+  `Add-AppxPackage -AppInstallerFile`, using the update source the package is already linked to. A local `.msix`
+  from the shared folder is installed with `Add-AppxPackage -Path`. Whether Norton accepts the app starting such a
+  helper is **not verified**: in 1.1.0.2 the helper was started from outside the app.
+- Package JavaFX with Conveyor so that its native libraries live inside the package rather than in the shared
+  user cache. Norton could then no longer break other JavaFX programs.
+- The lasting fix is a code-signing certificate with reputation. Without one, every new launcher is unknown to
+  Norton.
+- Every Norton test can damage the machine it runs on. Run them only on a machine where JavaFX may break for a
+  while, and restart Windows afterwards.
 
 **Consequence:** `manual` must not ship without KARV-131. Otherwise there is no way to update apart from a new
 install.
