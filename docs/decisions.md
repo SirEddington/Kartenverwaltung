@@ -203,15 +203,30 @@ deleted.
 
 **Recovery if a release does not start on a workstation:**
 
-1. Restore the file from the Norton quarantine.
-2. Otherwise build a fixed version and install it over the broken one with
-   `Add-AppxPackage -Path <msix> -ForceApplicationShutdown` (from a USB stick or the shared folder). Data and update
-   source are kept.
-3. Never run `Remove-AppxPackage` on a workstation without first backing up
+1. **Restore the file from the Norton quarantine.**
+2. **Withdraw the broken release** if it is the latest one: mark it as a pre-release on GitHub. "Latest" then points
+   to the previous release again, and no further workstation updates to it.
+3. **Install a fixed version over the broken one:**
+   - Set `app.jvm.extract-native-libraries = false` in `conveyor.conf`. With the filtered JAR, this was verified to
+     start in the KARV-137 spike; the filter can stay.
+   - Raise the version, which must be higher than the broken one, and build it.
+   - On the workstation run `Add-AppxPackage -Path <msix> -ForceApplicationShutdown`, from a USB stick or the shared
+     folder. Data and update source are kept.
+4. **Never run `Remove-AppxPackage` on a workstation** without first backing up
    `%LOCALAPPDATA%\Packages\EcvKarten_0cs1gtds5d9x0\LocalCache\Local\EltvillerCarnevalVerein\Kartenverwaltung`. It
    is deleted with the package.
-4. Downgrade only in an emergency (`-ForceUpdateFromAnyVersion`): 1.0.x drops the table labels of 1.1.
-5. Do not release shortly before a sale; update one workstation first as a pilot.
+5. **Downgrade only in an emergency** (`Add-AppxPackage -ForceUpdateFromAnyVersion`):
+   - 1.0.x drops the table labels of 1.1.
+   - 1.0.x checks for updates in the background and updates itself back to the latest release, so withdraw the
+     broken release first (step 2).
+6. **Pilot:**
+   - Do not release shortly before a sale.
+   - Workstations on 1.0.x update themselves from the latest release. Keep the other workstations switched off until
+     the pilot is done, or withdraw the release at once if it fails (step 2).
+   - On the pilot workstation, after the update, open the app and check the loaded modules:
+     `(Get-Process -Name "Kartenverwaltung - Eltviller Carneval Verein").Modules`. Every `glass.dll`, `prism_*.dll`
+     and `javafx_*.dll` must come from `(Get-AppxPackage EcvKarten).InstallLocation\bin`, and none from `.openjfx` or
+     `Temp`.
 
 ## Conveyor for installers, GitHub for hosting
 
