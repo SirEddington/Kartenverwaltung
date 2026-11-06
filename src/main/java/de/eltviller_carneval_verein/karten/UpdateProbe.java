@@ -53,6 +53,20 @@ final class UpdateProbe {
 		} catch (Throwable e) {
 			sb.append("controller FEHLER = ").append(e).append('\n');
 		}
+		sb.append("javax.net.ssl.trustStoreType = ").append(System.getProperty("javax.net.ssl.trustStoreType")).append('\n');
+		sb.append("https Standard = ").append(httpsCheck(null)).append('\n');
+		try {
+			java.security.KeyStore ks = java.security.KeyStore.getInstance("Windows-ROOT");
+			ks.load(null, null);
+			javax.net.ssl.TrustManagerFactory tmf = javax.net.ssl.TrustManagerFactory
+					.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
+			tmf.init(ks);
+			javax.net.ssl.SSLContext ctx = javax.net.ssl.SSLContext.getInstance("TLS");
+			ctx.init(null, tmf.getTrustManagers(), null);
+			sb.append("https Windows-ROOT = ").append(httpsCheck(ctx.getSocketFactory())).append('\n');
+		} catch (Exception e) {
+			sb.append("Windows-ROOT FEHLER = ").append(e).append('\n');
+		}
 		File trigger = new File(dir, "update-trigger");
 		boolean doTrigger = controller != null && trigger.isFile() && trigger.delete();
 		sb.append("trigger = ").append(doTrigger).append('\n');
@@ -64,6 +78,31 @@ final class UpdateProbe {
 			} catch (Throwable e) {
 				write(out, "triggerUpdateCheckUI FEHLER = " + e + '\n');
 			}
+		}
+	}
+
+	/** HTTPS-Abruf der metadata.properties der echten neuesten Release, mit Standard- oder eigener Socket-Fabrik. */
+	private static String httpsCheck(javax.net.ssl.SSLSocketFactory factory) {
+		try {
+			javax.net.ssl.HttpsURLConnection c = (javax.net.ssl.HttpsURLConnection) java.net.URI
+					.create("https://github.com/SirEddington/Kartenverwaltung/releases/latest/download/metadata.properties")
+					.toURL().openConnection();
+			if (factory != null) {
+				c.setSSLSocketFactory(factory);
+			}
+			c.setConnectTimeout(10_000);
+			c.setReadTimeout(10_000);
+			int code = c.getResponseCode();
+			String version = "?";
+			if (code == 200) {
+				try (java.io.InputStream in = c.getInputStream()) {
+					version = new String(in.readAllBytes(), StandardCharsets.UTF_8).lines()
+							.filter(l -> l.startsWith("app.version=")).findFirst().orElse("?");
+				}
+			}
+			return "HTTP " + code + ", " + version;
+		} catch (Exception e) {
+			return "FEHLER " + e;
 		}
 	}
 
