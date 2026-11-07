@@ -186,7 +186,9 @@ final class UnitMapper {
 	 * angezeigt (unlesbar oder gelöscht, etwa für ein gehaltenes Objekt nach einem fremden unlesbaren Kopf), fehlte die
 	 * Einheit nur mit ihr und bekommt wie jede geänderte eine neue Version auf der aktuellen. Beim Wiederherstellen gelten
 	 * die unlesbaren Einheiten des Zielstands als angezeigt: Das Wiederherstellen ersetzt sie als Nachfolger. Einheiten, die auf ihren Platz im Modell warten, sind nicht im Bestand und zählen als neue Einheit.</li>
-	 * <li>Geänderte oder wieder aufgetauchte (gelöschte) Einheit: neue Version auf der aktuellen Version.</li>
+	 * <li>Geänderte oder wieder aufgetauchte (gelöschte) Einheit: neue Version auf der aktuellen Version. "Geändert" heißt:
+	 * anders als der Stand, wie dieses Programm ihn aus der Datei macht ({@link #sameAsModel}); Zusatzfelder, fehlende
+	 * und verworfene Felder machen eine Einheit nicht zur geänderten (KARV-133).</li>
 	 * <li>Einheit nur im Bestand: Löschung, aber nur wenn sie angezeigt wurde ({@code shown}), ihre Eltern-Einheit
 	 * (Vorstellung: der Kopf, Buchung: ihre Vorstellung) in {@code units} steht und sie eine Version hat und nicht
 	 * schon gelöscht ist. Sonst bleibt sie unberührt, denn gelöscht wird nur am Kopf. Ein Event-Kopf oder eine Halle
