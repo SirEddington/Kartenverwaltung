@@ -13,6 +13,10 @@ import java.util.function.Function;
 
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
+
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
@@ -110,6 +114,24 @@ class EventTemplatesTest {
 		Event copy = EventTemplates.copyEvent(event, List.of("Kampagne", "Kampagne (Kopie)"), halls);
 
 		assertEquals("Kampagne (Kopie 2)", copy.getName());
+	}
+
+	@Test
+	void copyEventAndPresentationCarryUnknownFields() {
+		Event event = new Event();
+		event.setName("Kampagne");
+		event.getUnknown().put("x-test-event", TextNode.valueOf("e"));
+		Presentation original = presentation(event);
+		ObjectNode extra = JsonNodeFactory.instance.objectNode().put("inner", 1);
+		original.getUnknown().put("x-test-presentation", extra);
+
+		Presentation presentationCopy = EventTemplates.copyPresentation(original, new Event(), halls);
+		Event eventCopy = EventTemplates.copyEvent(event, List.of("Kampagne"), halls);
+
+		assertEquals(extra, presentationCopy.getUnknown().asMap().get("x-test-presentation"));
+		assertNotSame(extra, presentationCopy.getUnknown().asMap().get("x-test-presentation"), "Tiefe Kopie");
+		assertEquals(TextNode.valueOf("e"), eventCopy.getUnknown().asMap().get("x-test-event"));
+		assertEquals(extra, eventCopy.getPresentations().get(0).getUnknown().asMap().get("x-test-presentation"));
 	}
 
 	@Test

@@ -225,6 +225,7 @@ public class Presentation {
 		setPrice(source.getPrice());
 		setActualCashAmount(source.getActualCashAmount());
 		setCashDifferenceComment(source.getCashDifferenceComment());
+		unknown.replaceWith(source.unknown);
 	}
 
 	public Booking addBooking() {

@@ -345,11 +345,13 @@ public class Booking {
 
 	/**
 	 * Ob die Buchung Daten trägt, die nicht verloren gehen dürfen: Name, E-Mail, Kommentar, ein Zahlstatus oder
-	 * abgeholt. Ein bloßer Einzelpreis zählt nicht. Dieselben Felder benennt {@link #dataLabels()}.
+	 * abgeholt, dazu Felder einer neueren Version, die diese nicht kennt. Ein bloßer Einzelpreis zählt nicht. Dieselben
+	 * Felder benennt {@link #dataLabels()}.
 	 */
 	public boolean hasData() {
 		return !isBlank(lastName) || !isBlank(firstName) || !isBlank(eMail) || !isBlank(comment)
-				|| (getPaymentStatus() != null && getPaymentStatus() != PaymentStatus.NONE) || collected;
+				|| (getPaymentStatus() != null && getPaymentStatus() != PaymentStatus.NONE) || collected
+				|| !unknown.isEmpty();
 	}
 
 	/**
@@ -375,6 +377,9 @@ public class Booking {
 		}
 		if (collected) {
 			labels.add("abgeholt");
+		}
+		if (!unknown.isEmpty()) {
+			labels.add("weitere Angaben");
 		}
 		return labels;
 	}
@@ -432,6 +437,7 @@ public class Booking {
 		setEMail(source.getEMail());
 		setComment(source.getComment());
 		setUnassigned(source.isUnassigned());
+		unknown.replaceWith(source.unknown);
 	}
 
 	/**
@@ -452,6 +458,7 @@ public class Booking {
 		setCollectionDate(null);
 		setPrice(null);
 		setUnassigned(false);
+		unknown.clear();
 		setId(null);
 	}
 

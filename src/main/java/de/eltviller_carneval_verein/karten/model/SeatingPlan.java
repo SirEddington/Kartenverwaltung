@@ -296,6 +296,7 @@ public class SeatingPlan {
 		copy.setDefaultTableWidth(defaultTableWidth);
 		copy.setDefaultTableHeight(defaultTableHeight);
 		copy.setDefaultSeatWidth(defaultSeatWidth);
+		copy.getUnknown().replaceWith(getUnknown());
 
 		Map<String, TableRow> copiedRows = new HashMap<>();
 		for (TableRow row : rows) {
@@ -308,6 +309,7 @@ public class SeatingPlan {
 			copiedRow.setTableGap(row.getTableGap());
 			copiedRow.setAisleWidth(row.getAisleWidth());
 			copiedRow.setAisleAfter(row.getAisleAfter());
+			copiedRow.getUnknown().replaceWith(row.getUnknown());
 			copiedRows.put(row.getId(), copiedRow);
 		}
 
@@ -326,6 +328,7 @@ public class SeatingPlan {
 			copiedTable.setHeight(table.getHeight());
 			copiedTable.setRotation(table.getRotation());
 			copiedTable.setTextSettings(table.getTextSettings());
+			copiedTable.getUnknown().replaceWith(table.getUnknown());
 			for (Seat seat : table.getSeats()) {
 				Seat copiedSeat = new Seat();
 				copiedSeat.setParent(copiedTable);
@@ -335,6 +338,7 @@ public class SeatingPlan {
 				copiedSeat.setPosX(seat.getPosX());
 				copiedSeat.setPosY(seat.getPosY());
 				copiedSeat.setWidth(seat.getWidth());
+				copiedSeat.getUnknown().replaceWith(seat.getUnknown());
 				copiedTable.getSeats().add(copiedSeat);
 			}
 			copy.getTables().add(copiedTable);

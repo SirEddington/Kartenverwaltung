@@ -39,6 +39,7 @@ public final class EventTemplates {
 		copy.setHallId(source.getHallId());
 		copy.setSeatingPlanId(source.getSeatingPlanId());
 		copy.setPrice(source.getPrice());
+		copy.getUnknown().replaceWith(source.getUnknown());
 		Hall hall = copy.getHallId() == null ? null : hallLookup.apply(copy.getHallId());
 		BookingSync.sync(copy, EventEditController.modelPlan(copy, hall));
 		return copy;
@@ -54,6 +55,7 @@ public final class EventTemplates {
 		Event copy = new Event();
 		copy.setName(Event.createCopyName(source.getName(), existingNames));
 		copy.setDescription(source.getDescription());
+		copy.getUnknown().replaceWith(source.getUnknown());
 		List<Presentation> presentations = source.getPresentations() == null ? List.of() : List.copyOf(source.getPresentations());
 		for (Presentation presentation : presentations) {
 			copyPresentation(presentation, copy, hallLookup);

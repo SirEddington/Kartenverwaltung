@@ -125,6 +125,7 @@ public class Event {
 		setName(source.getName());
 		setDescription(source.getDescription());
 		setArchived(source.isArchived());
+		unknown.replaceWith(source.unknown);
 	}
 
 	public Presentation addPresentation() {
