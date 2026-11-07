@@ -49,6 +49,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 
@@ -973,7 +974,8 @@ class SyncServiceTest {
 
 	/** Baut den Start-Index des Rechners und schreibt ihn, damit der nächste Start keine Einheit lesen muss. */
 	private static void writeStartIndex(Path appData, String machineId) throws IOException {
-		UnitIndex index = new UnitIndex(appData.resolve("index"), new NioFileLayer(), new Ownership(machineId, List.of()));
+		UnitIndex index = new UnitIndex(appData.resolve("index"), new NioFileLayer(), new Ownership(machineId, List.of()),
+				ContentGate.NONE.rulesId());
 		index.refresh(new VersionStore(appData.resolve("data"), new NioFileLayer()), p -> {
 		});
 		index.flush();
@@ -4392,6 +4394,8 @@ class SyncServiceTest {
 			assertFalse(trustedIndex(b));
 			assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), b.service.snapshots());
 			assertEquals(0, log.warnings(CHANGED_OUTSIDE));
+			assertTrue(log.records.stream().anyMatch(r -> r.getLevel() == Level.INFO && r.getMessage().startsWith("Regeln geändert: ")),
+					log.records::toString);
 		}
 	}
 

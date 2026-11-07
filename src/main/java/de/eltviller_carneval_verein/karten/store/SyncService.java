@@ -565,9 +565,13 @@ public final class SyncService implements ConnectionControl {
 		this.resolver = new ConflictResolver(new ResolverHost(), notifier, clock);
 	}
 
-	/** Ein neuer, noch leerer Index im Index-Ordner dieser Installation, für die Kennung des Rechners. */
+	/**
+	 * Ein neuer, noch leerer Index im Index-Ordner dieser Installation, für die Kennung des Rechners und die Regelkennung
+	 * der Inhaltsprüfung.
+	 */
 	private UnitIndex newIndex(Ownership own) {
-		return new UnitIndex(appDataDir.resolve(INDEX), files, own);
+		// bis das Tor des Stores hier ankommt (KARV-135, Aufgabe 9), gilt die Kennung des Tors, das nie sperrt
+		return new UnitIndex(appDataDir.resolve(INDEX), files, own, ContentGate.NONE.rulesId());
 	}
 
 	/**
@@ -2067,8 +2071,9 @@ public final class SyncService implements ConnectionControl {
 	 * liest es den Index schon ein. Danach gleicht der Start den Index immer mit dem Bestand ab und räumt dabei im selben
 	 * Durchlauf die alten temporären Dateien auf ({@link UnitIndex#refresh}): Auch nach sauberem Beenden kann der Bestand an
 	 * der App vorbei geändert worden sein (eine zurückgespielte Sicherung, eine Kopie, eine überschriebene Datei; KARV-107).
-	 * Löst der Abgleich trotz gültiger Marke Einheiten neu auf, steht das als Warnung im Log. Im Notfall baut der Start den
-	 * Index neu auf.
+	 * Löst der Abgleich trotz gültiger Marke Einheiten neu auf, steht das als Warnung im Log. Einheiten aus Index-Dateien
+	 * anderer Regeln (Update; {@link UnitIndex.Refresh#rulesChanged()}) zählen dazu nicht, sie stehen als eine Zeile
+	 * {@code INFO} im Log. Im Notfall baut der Start den Index neu auf.
 	 *
 	 * @return die Einheiten mit ausstehenden und mit verlorenen eigenen Versionen
 	 */
@@ -2090,6 +2095,11 @@ public final class SyncService implements ConnectionControl {
 		if (clean && resolved > 0) {
 			LOGGER.warning("Der lokale Bestand wurde seit dem letzten Beenden außerhalb der Kartenverwaltung geändert: "
 					+ resolved + (resolved == 1 ? " Einheit" : " Einheiten") + " neu aufgelöst");
+		}
+		// Einheiten aus Index-Dateien anderer Regeln (Update) sind keine Änderung von außen: eine Zeile, keine Warnung
+		int rulesChanged = refreshed.rulesChanged();
+		if (rulesChanged > 0) {
+			LOGGER.info("Regeln geändert: " + rulesChanged + " Einheiten neu aufgelöst");
 		}
 		return refreshed;
 	}
@@ -2171,7 +2181,7 @@ public final class SyncService implements ConnectionControl {
 		if (lastPercent != 100) {
 			progress.accept(1.0);
 		}
-		return new UnitIndex.Refresh(Collections.unmodifiableSet(pending), Collections.unmodifiableSet(lost), units.size());
+		return new UnitIndex.Refresh(Collections.unmodifiableSet(pending), Collections.unmodifiableSet(lost), units.size(), 0);
 	}
 
 	/**
