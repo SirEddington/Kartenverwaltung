@@ -592,8 +592,8 @@ final class ConflictResolver {
 		return new TrailCollector.Folder(resolved.state().chain(), versions, current == null ? null : current.id());
 	}
 
-	/** Die Spur als Kopien für die Strategie. */
-	private static Map<UnitKey, TrailUnit> copy(Map<UnitKey, TrailUnit> trail) {
+	/** Die Spur als Kopien für die Strategie; jede Version wie bei {@link #copy(Version)}. */
+	static Map<UnitKey, TrailUnit> copy(Map<UnitKey, TrailUnit> trail) {
 		Map<UnitKey, TrailUnit> copies = new LinkedHashMap<>();
 		trail.forEach((key, unit) -> copies.put(key, new TrailUnit(key,
 				unit.chain().stream().map(ConflictResolver::copy).toList(),
@@ -666,7 +666,8 @@ final class ConflictResolver {
 
 	// --- Kopien für die Strategie: Die Inhalte aus Dateien und Index gehören dem Index
 
-	private static Version copy(Version version) {
+	/** Eine tiefe Kopie der Version; das Merkmal „inhaltlich zu neu“ bleibt erhalten. */
+	static Version copy(Version version) {
 		if (version == null) {
 			return null;
 		}
@@ -696,7 +697,7 @@ final class ConflictResolver {
 			ConflictInput.Sibling sibling = entry.getValue();
 			UnitSnapshot s = sibling.snapshot();
 			UnitSnapshot copy = new UnitSnapshot(s.unit(), s.version(), s.status(), s.deleted(),
-					s.payload() == null ? null : s.payload().deepCopy());
+					s.payload() == null ? null : s.payload().deepCopy(), s.contentLocked());
 			copies.put(entry.getKey(), new ConflictInput.Sibling(copy));
 		}
 		return copies;

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.store.Snapshots;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
@@ -33,7 +34,7 @@ class UnitBaselineTest {
 			ObjectNode plan = (ObjectNode) payload.get("seatingPlans").get(0);
 			((ObjectNode) plan.get("tables").get(0).get("seats").get(0)).put("height", 30.0);
 		}
-		return new UnitSnapshot(UNIT, VersionId.create(1_800_000_000_000L + counter, "abcdefgh", counter), Status.OK, false,
+		return Snapshots.snapshot(UNIT, VersionId.create(1_800_000_000_000L + counter, "abcdefgh", counter), Status.OK, false,
 				payload);
 	}
 

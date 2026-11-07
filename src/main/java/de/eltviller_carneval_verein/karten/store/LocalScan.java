@@ -178,7 +178,8 @@ final class LocalScan {
 			}
 			VersionId target = claimFile.claim().version();
 			VersionFile file = files.versions().get(target);
-			if (!seen.add(target) || file == null || file.unknownFormat() != null) {
+			// wie im ChainResolver: Ein höheres Format beendet den Weg, eine inhaltlich zu neue Version nicht
+			if (!seen.add(target) || file == null || file.reason() == VersionFile.Reason.FORMAT) {
 				return name;
 			}
 			boolean intact = file.version() != null && StoreCodec.sha256(file.bytes()).equals(claimFile.claim().sha256());

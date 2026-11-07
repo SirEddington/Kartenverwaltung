@@ -371,6 +371,28 @@ class ConflictResolverTest {
 		assertEquals(ids(service.unitState(MOVED).chain()), ids(input.trail().get(MOVED).chain()));
 	}
 
+	/** KARV-135: Die Kopien für die Strategie behalten das Merkmal „inhaltlich zu neu“, auch auf der Umzugsspur. */
+	@Test
+	void copiedVersionsKeepNewerContent() {
+		Version newer = new Version(StoreCodec.FORMAT, VersionId.create(1_900_000_000_000L, FOREIGN, 1), List.of(),
+				FOREIGN, "Kasse 2", "Bert", Instant.parse("2026-10-28T09:00:00Z"), "fremd-1", false, name("x-test-neu"),
+				null, Map.of(), VersionMarks.NONE.withMovedFrom(MOVED), true);
+		Version plain = new Version(StoreCodec.FORMAT, VersionId.create(1_900_000_000_001L, FOREIGN, 2),
+				List.of(newer.id()), FOREIGN, "Kasse 2", "Bert", Instant.parse("2026-10-28T09:01:00Z"), "fremd-2", false,
+				name("Bert"), null, Map.of());
+
+		Version copy = ConflictResolver.copy(newer);
+		assertTrue(copy.newerContent());
+		assertEquals(newer, copy);
+		assertFalse(ConflictResolver.copy(plain).newerContent());
+
+		Map<UnitKey, TrailUnit> trail = ConflictResolver.copy(Map.of(BOOKING,
+				new TrailUnit(BOOKING, List.of(newer, plain), List.of(newer), plain.id())));
+		TrailUnit copied = trail.get(BOOKING);
+		assertEquals(List.of(true, false), copied.chain().stream().map(Version::newerContent).toList());
+		assertEquals(List.of(true), copied.outside().stream().map(Version::newerContent).toList());
+	}
+
 	@Test
 	void inputCarriesBaseMineTheirsAndChain() throws IOException {
 		Path appData = dir.resolve("app");

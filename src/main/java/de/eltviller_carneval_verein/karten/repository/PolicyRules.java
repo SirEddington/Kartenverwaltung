@@ -80,7 +80,8 @@ final class PolicyRules {
 	/** Wie {@link #isReadable(ConflictInput, Version)} für eine Version der Einheit {@code unit}. */
 	static boolean isReadable(UnitKey unit, Version version) {
 		return version.deleted()
-				|| UnitMapper.isReadable(new UnitSnapshot(unit, version.id(), Status.OK, false, version.payload()));
+				|| UnitMapper.isReadable(new UnitSnapshot(unit, version.id(), Status.OK, false, version.payload(),
+						version.newerContent()));
 	}
 
 	/** "Gleich": Ist "Meine" gleich "Deren" oder gleich der Basis, gilt "Deren", ohne Vermerk. */

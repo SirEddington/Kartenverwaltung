@@ -1230,7 +1230,7 @@ final class UnitIndex {
 			UnitSnapshot snapshot = new UnitSnapshot(unit,
 					version == null || version.isNull() ? null : VersionId.of(StoreCodec.text(item, "version")),
 					UnitState.Status.valueOf(StoreCodec.text(item, "status")), StoreCodec.bool(item, "deleted"),
-					payload == null || payload.isNull() ? null : (ObjectNode) payload);
+					payload == null || payload.isNull() ? null : (ObjectNode) payload, false);
 			result.add(new Entry(snapshot, StoreCodec.text(item, "fingerprint"), StoreCodec.bool(item, "pending"),
 					StoreCodec.bool(item, "lost"), chain(item.get("chain")), new HashSet<>(versionIds(item.get("absorbed"), "absorbed")),
 					notes(item.get("notes")), StoreCodec.readSeen(item.get("seen")), ownSeq(item.get("ownSeq")),

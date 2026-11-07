@@ -948,7 +948,7 @@ class ConflictLedgerTest {
 
 	private static UnitIndex.Entry entry(UnitKey unit, VersionId version, boolean deleted, Map<String, Long> seen, Long ownSeq,
 			List<UnitIndex.NotedVersion> notes) {
-		UnitSnapshot snapshot = new UnitSnapshot(unit, version, UnitState.Status.OK, deleted, null);
+		UnitSnapshot snapshot = Snapshots.snapshot(unit, version, UnitState.Status.OK, deleted, null);
 		List<ChainStep> chain = version == null ? List.of()
 				: List.of(new ChainStep(version, "save-" + version.value(), Instant.parse("2026-10-28T09:00:00Z"), "Kasse A", "Anna",
 						deleted));
@@ -1097,7 +1097,7 @@ class ConflictLedgerTest {
 	private static UnitIndex.Entry entryWith(UnitKey unit, List<VersionId> chain, Set<VersionId> absorbed,
 			List<UnitIndex.NotedVersion> notes) {
 		VersionId head = chain.get(chain.size() - 1);
-		UnitSnapshot snapshot = new UnitSnapshot(unit, head, UnitState.Status.OK, false, null);
+		UnitSnapshot snapshot = Snapshots.snapshot(unit, head, UnitState.Status.OK, false, null);
 		List<ChainStep> steps = chain.stream()
 				.map(id -> new ChainStep(id, "save-" + id.value(), AT, "Kasse A", "Anna", false)).toList();
 		return new UnitIndex.Entry(snapshot, "abdruck", false, false, steps, absorbed, notes, Map.of(), null, Set.of());

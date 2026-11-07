@@ -87,6 +87,15 @@ class ChainResolverTest {
 			return this;
 		}
 
+		/** Eine ganze, gelesene Version, deren Inhalt von einem neueren Programm stammt (wie sie der Store markiert). */
+		Unit contentVersion(VersionId id, VersionId... parents) throws IOException {
+			Version version = new Version(1, id, List.of(parents), OTHER, "Kasse", "Anna", AT, "save-" + id, false,
+					new ObjectMapper().createObjectNode().put("name", id.value()).put("x-test-neu", true));
+			versions.put(id, new VersionFile(id, StoreCodec.write(version), version.withNewerContent(true), null,
+					VersionFile.Reason.CONTENT));
+			return this;
+		}
+
 		/** Anspruchsdatei {@code name} für eine vorhandene Version, mit der Prüfsumme ihrer Bytes. */
 		Unit claim(String name, VersionId target) throws IOException {
 			return claim(name, target, StoreCodec.sha256(versions.get(target).bytes()));
@@ -125,6 +134,7 @@ class ChainResolverTest {
 		assertTrue(state.lost().isEmpty());
 		assertNull(state.blockedAt());
 		assertFalse(state.provisional());
+		assertFalse(state.contentLocked());
 	}
 
 	@Test
@@ -541,6 +551,90 @@ class ChainResolverTest {
 		assertEquals(Status.LOCKED_FORMAT, state.status());
 		assertEquals(List.of(theirs(1)), ids(state.chain()));
 		assertEquals(theirs(2), state.blockedAt());
+	}
+
+	// --- Inhaltlich zu neue Versionen (KARV-135): ganz, Teil der Kette; als Kopf sperren sie
+
+	@Test
+	void contentHeadLocksFormat() throws IOException {
+		UnitState state = new Unit().version(theirs(1)).contentVersion(theirs(2), theirs(1)).claim("root", theirs(1))
+				.claim(theirs(1).value(), theirs(2)).resolve();
+
+		assertEquals(Status.LOCKED_FORMAT, state.status());
+		assertEquals(List.of(theirs(1), theirs(2)), ids(state.chain()));
+		assertEquals(theirs(2), state.head().id());
+		assertEquals(theirs(2), state.blockedAt());
+		assertTrue(state.contentLocked());
+	}
+
+	@Test
+	void chainWalksOverContentToReadableHead() throws IOException {
+		UnitState state = new Unit().version(theirs(1)).contentVersion(theirs(2), theirs(1)).version(theirs(3), theirs(2))
+				.claim("root", theirs(1)).claim(theirs(1).value(), theirs(2)).claim(theirs(2).value(), theirs(3))
+				.resolve();
+
+		assertEquals(Status.OK, state.status());
+		assertEquals(List.of(theirs(1), theirs(2), theirs(3)), ids(state.chain()));
+		assertNull(state.blockedAt());
+		assertFalse(state.contentLocked());
+	}
+
+	@Test
+	void contentThenDeletionIsOk() throws IOException {
+		UnitState state = new Unit().version(theirs(1)).contentVersion(theirs(2), theirs(1))
+				.deletedVersion(theirs(3), theirs(2)).claim("root", theirs(1)).claim(theirs(1).value(), theirs(2))
+				.claim(theirs(2).value(), theirs(3)).resolve();
+
+		assertEquals(Status.OK, state.status());
+		assertEquals(List.of(theirs(1), theirs(2), theirs(3)), ids(state.chain()));
+		assertTrue(state.head().deleted());
+		assertNull(state.blockedAt());
+		assertFalse(state.contentLocked());
+	}
+
+	/** Die Sperre hat Vorrang vor dem Warten: Sonst wirkte der Sitz frei, bis die Nachfolgerin ankommt. */
+	@Test
+	void contentHeadWinsOverWaiting() throws IOException {
+		Unit unit = new Unit().version(theirs(1)).contentVersion(theirs(2), theirs(1)).claim("root", theirs(1))
+				.claim(theirs(1).value(), theirs(2));
+		unit.claim(theirs(2).value(), theirs(3), "abc");
+
+		UnitState state = unit.resolve();
+
+		assertEquals(Status.LOCKED_FORMAT, state.status());
+		assertEquals(List.of(theirs(1), theirs(2)), ids(state.chain()));
+		assertEquals(theirs(2), state.blockedAt());
+		assertTrue(state.claimed().contains(theirs(3)), "die beanspruchte Nachfolgerin bleibt beansprucht");
+		assertTrue(state.contentLocked());
+	}
+
+	@Test
+	void contentThenDamagedStaysDamaged() throws IOException {
+		Unit unit = new Unit().version(theirs(1)).contentVersion(theirs(2), theirs(1)).unreadableVersion(theirs(3))
+				.claim("root", theirs(1)).claim(theirs(1).value(), theirs(2));
+		unit.claim(theirs(2).value(), theirs(3), "abc");
+
+		UnitState state = unit.resolve();
+
+		assertEquals(Status.LOCKED_DAMAGED, state.status());
+		assertEquals(List.of(theirs(1), theirs(2)), ids(state.chain()));
+		assertEquals(theirs(3), state.blockedAt());
+		assertTrue(state.contentLocked());
+	}
+
+	/** Das Merkmal beschreibt {@code current()}: Ein ausstehendes eigenes Zurücksetzen ist lesbar, auch hinter dem Kopf. */
+	@Test
+	void contentLockedDescribesCurrentNotHead() throws IOException {
+		Unit unit = new Unit().version(theirs(1)).contentVersion(theirs(2), theirs(1)).unreadableVersion(theirs(3))
+				.version(mine(4), theirs(3)).claim("root", theirs(1)).claim(theirs(1).value(), theirs(2));
+		unit.claim(theirs(2).value(), theirs(3), "abc");
+
+		UnitState state = unit.resolve();
+
+		assertEquals(Status.LOCKED_DAMAGED, state.status());
+		assertTrue(state.head().newerContent());
+		assertEquals(mine(4), state.current().id());
+		assertFalse(state.contentLocked());
 	}
 
 	@Test

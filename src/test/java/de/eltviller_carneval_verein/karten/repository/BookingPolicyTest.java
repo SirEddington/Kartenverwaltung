@@ -43,10 +43,10 @@ import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Kind;
 import de.eltviller_carneval_verein.karten.store.ConflictPolicy;
 import de.eltviller_carneval_verein.karten.store.Resolution;
+import de.eltviller_carneval_verein.karten.store.Snapshots;
 import de.eltviller_carneval_verein.karten.store.TrailCollector;
 import de.eltviller_carneval_verein.karten.store.TrailUnit;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
-import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
@@ -135,7 +135,7 @@ class BookingPolicyTest {
 
 	/** Eine Geschwister-Einheit, deren gültige Kette mit {@code version} endet und die nur diese Version hat. */
 	private static Sibling sibling(UnitKey unit, Version version) {
-		return new Sibling(new UnitSnapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()));
+		return new Sibling(Snapshots.snapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()));
 	}
 
 	@SafeVarargs
@@ -186,7 +186,7 @@ class BookingPolicyTest {
 		assertEquals(0, payload.get("tableNumber").asInt());
 		assertEquals(0, payload.get("seatNumber").asInt());
 		// die Buchung "ohne Platz" liest das Zusammensetzen dort, wohin sie geschrieben wird
-		assertTrue(UnitMapper.isReadable(new UnitSnapshot(moved, mine.id(), Status.OK, false, payload)));
+		assertTrue(UnitMapper.isReadable(Snapshots.snapshot(moved, mine.id(), Status.OK, false, payload)));
 
 		ConflictNote note = resolution.note();
 		assertEquals(Kind.DOUBLE_SALE, note.kind());
@@ -452,7 +452,7 @@ class BookingPolicyTest {
 			for (UnitKey other : chains.keySet()) {
 				Version head = head(other);
 				if (!other.equals(unit)) {
-					siblings.put(other, new Sibling(new UnitSnapshot(other, head.id(), Status.OK, head.deleted(),
+					siblings.put(other, new Sibling(Snapshots.snapshot(other, head.id(), Status.OK, head.deleted(),
 							head.deleted() ? null : head.payload().deepCopy())));
 				}
 			}

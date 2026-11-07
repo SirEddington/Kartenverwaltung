@@ -36,6 +36,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.UnitPayload;
 import de.eltviller_carneval_verein.karten.store.Change;
+import de.eltviller_carneval_verein.karten.store.Snapshots;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
@@ -132,7 +133,7 @@ class UnitMapperTest {
 	}
 
 	private static UnitSnapshot snapshot(UnitPayload part) {
-		return new UnitSnapshot(part.unit(), VERSION, Status.OK, false, part.payload());
+		return Snapshots.snapshot(part.unit(), VERSION, Status.OK, false, part.payload());
 	}
 
 	private static List<UnitSnapshot> snapshots(List<UnitPayload> parts) {
@@ -145,11 +146,11 @@ class UnitMapperTest {
 	}
 
 	private static UnitSnapshot withState(UnitSnapshot snapshot, Status status, boolean deleted) {
-		return new UnitSnapshot(snapshot.unit(), snapshot.version(), status, deleted, snapshot.payload());
+		return Snapshots.snapshot(snapshot.unit(), snapshot.version(), status, deleted, snapshot.payload());
 	}
 
 	private static UnitSnapshot noVersion(UnitKey unit, Status status) {
-		return new UnitSnapshot(unit, null, status, false, null);
+		return Snapshots.snapshot(unit, null, status, false, null);
 	}
 
 	private static UnitSnapshot find(List<UnitSnapshot> snapshots, UnitKey unit) {
@@ -337,7 +338,7 @@ class UnitMapperTest {
 		ObjectNode reread = reread(stored.payload());
 
 		Hall loaded = UnitMapper
-				.assembleHalls(List.of(new UnitSnapshot(stored.unit(), VERSION, Status.OK, false, reread))).items().get(0);
+				.assembleHalls(List.of(Snapshots.snapshot(stored.unit(), VERSION, Status.OK, false, reread))).items().get(0);
 
 		assertEquals(reread, UnitMapper.decompose(loaded).payload());
 	}
@@ -647,7 +648,7 @@ class UnitMapperTest {
 	private static UnitSnapshot garbled(UnitSnapshot snapshot, String field) {
 		ObjectNode payload = snapshot.payload().deepCopy();
 		payload.set(field, MAPPER.createObjectNode().put("kaputt", true));
-		return new UnitSnapshot(snapshot.unit(), snapshot.version(), snapshot.status(), snapshot.deleted(), payload);
+		return Snapshots.snapshot(snapshot.unit(), snapshot.version(), snapshot.status(), snapshot.deleted(), payload);
 	}
 
 	@Test
@@ -719,7 +720,7 @@ class UnitMapperTest {
 					? UnitKey.unassignedBooking(copyId, unit.presentationId(), unit.bookingDir().substring(1))
 					: UnitKey.booking(copyId, unit.presentationId(), unit.bookingDir());
 			};
-			snapshots.add(new UnitSnapshot(copy, snapshot.version(), snapshot.status(), false, snapshot.payload()));
+			snapshots.add(Snapshots.snapshot(copy, snapshot.version(), snapshot.status(), false, snapshot.payload()));
 		}
 
 		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
@@ -740,7 +741,7 @@ class UnitMapperTest {
 		UnitSnapshot snapshot = find(snapshots, UnitKey.presentation(event.getId(), first.getId()));
 		// der Inhalt von "second" liegt im Ordner von "first"
 		UnitSnapshot other = find(snapshots, UnitKey.presentation(event.getId(), second.getId()));
-		snapshots = replace(snapshots, new UnitSnapshot(snapshot.unit(), VERSION, Status.OK, false, other.payload()));
+		snapshots = replace(snapshots, Snapshots.snapshot(snapshot.unit(), VERSION, Status.OK, false, other.payload()));
 
 		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
 
@@ -760,7 +761,7 @@ class UnitMapperTest {
 		UnitKey folder = UnitKey.booking(event.getId(), first.getId(), "seat-a1");
 		ObjectNode payload = find(snapshots, folder).payload().deepCopy();
 		payload.put("seatId", "seat-a3");
-		snapshots = replace(snapshots, new UnitSnapshot(folder, VERSION, Status.OK, false, payload));
+		snapshots = replace(snapshots, Snapshots.snapshot(folder, VERSION, Status.OK, false, payload));
 
 		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
 
@@ -778,11 +779,11 @@ class UnitMapperTest {
 		UnitKey folder = UnitKey.unassignedBooking(event.getId(), second.getId(), lost.getId());
 		ObjectNode payload = find(snapshots, folder).payload().deepCopy();
 		payload.put("id", "x");
-		snapshots = replace(snapshots, new UnitSnapshot(folder, VERSION, Status.OK, false, payload));
+		snapshots = replace(snapshots, Snapshots.snapshot(folder, VERSION, Status.OK, false, payload));
 		// ein Ordner "_x" mit dem Inhalt einer Buchung auf einem Sitz
 		UnitKey seated = UnitKey.booking(event.getId(), event.getPresentations().get(0).getId(), "seat-1");
 		snapshots = new ArrayList<>(snapshots);
-		snapshots.add(new UnitSnapshot(UnitKey.unassignedBooking(event.getId(), second.getId(), "x"), VERSION, Status.OK,
+		snapshots.add(Snapshots.snapshot(UnitKey.unassignedBooking(event.getId(), second.getId(), "x"), VERSION, Status.OK,
 				false, find(snapshots, seated).payload()));
 
 		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
@@ -815,7 +816,7 @@ class UnitMapperTest {
 		UnitKey copy = UnitKey.hall(hall.getId() + "-PCNAME");
 
 		Assembly<Hall> assembly = UnitMapper.assembleHalls(
-				List.of(snapshot(part), new UnitSnapshot(copy, VERSION, Status.OK, false, part.payload())));
+				List.of(snapshot(part), Snapshots.snapshot(copy, VERSION, Status.OK, false, part.payload())));
 
 		assertEquals(List.of(hall.getId()), assembly.items().stream().map(Hall::getId).toList());
 		assertEquals(List.of("Die Halle " + hall.getId() + "-PCNAME konnte nicht gelesen werden und fehlt."),
@@ -935,7 +936,7 @@ class UnitMapperTest {
 		Map<UnitKey, UnitSnapshot> baseline = new HashMap<>();
 		int counter = 1;
 		for (UnitPayload part : parts) {
-			baseline.put(part.unit(), new UnitSnapshot(part.unit(), versionOf(counter++), Status.OK, false, part.payload()));
+			baseline.put(part.unit(), Snapshots.snapshot(part.unit(), versionOf(counter++), Status.OK, false, part.payload()));
 		}
 		return baseline;
 	}
@@ -1196,7 +1197,7 @@ class UnitMapperTest {
 		UnitKey broken = bookingKey(event, 0, "seat-a1");
 		ObjectNode payload = find(snapshots, broken).payload().deepCopy();
 		payload.put("seatId", "seat-a3");
-		snapshots = replace(snapshots, new UnitSnapshot(broken, VERSION, Status.OK, false, payload));
+		snapshots = replace(snapshots, Snapshots.snapshot(broken, VERSION, Status.OK, false, payload));
 		Map<UnitKey, UnitSnapshot> baseline = new HashMap<>();
 		snapshots.forEach(s -> baseline.put(s.unit(), s));
 
@@ -1416,7 +1417,7 @@ class UnitMapperTest {
 		raw.put("x-test-neu", 1);
 		raw.remove("email");
 
-		ObjectNode comparable = UnitMapper.comparable(new UnitSnapshot(key, VERSION, Status.OK, false, raw));
+		ObjectNode comparable = UnitMapper.comparable(Snapshots.snapshot(key, VERSION, Status.OK, false, raw));
 
 		assertEquals(part.payload().get("email"), comparable.get("email"), "das fehlende Feld hat den Wert des Modells");
 		assertEquals(1, comparable.get("x-test-neu").asInt(), "das unbekannte Feld bleibt erhalten");
@@ -1430,7 +1431,7 @@ class UnitMapperTest {
 		// ein Payload, den das Modell nicht lesen kann: nur der rohe Vergleich kann ihn als gleich erkennen
 		ObjectNode unreadable = model.deepCopy();
 		unreadable.set("price", MAPPER.createObjectNode().put("kaputt", true));
-		UnitSnapshot snapshot = new UnitSnapshot(key, VERSION, Status.OK, false, unreadable);
+		UnitSnapshot snapshot = Snapshots.snapshot(key, VERSION, Status.OK, false, unreadable);
 		assertEquals(null, UnitMapper.comparable(snapshot));
 
 		assertTrue(UnitMapper.sameAsModel(unreadable, snapshot));
@@ -1444,7 +1445,7 @@ class UnitMapperTest {
 		ObjectNode model = partOf(UnitMapper.decompose(event), key).payload();
 		ObjectNode raw = model.deepCopy();
 		raw.remove("email");
-		UnitSnapshot snapshot = new UnitSnapshot(key, VERSION, Status.OK, false, raw);
+		UnitSnapshot snapshot = Snapshots.snapshot(key, VERSION, Status.OK, false, raw);
 
 		assertTrue(UnitMapper.sameAsModel(model, snapshot));
 
