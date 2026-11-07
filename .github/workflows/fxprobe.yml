@@ -1,0 +1,107 @@
+# Spike KARV-131, wird nicht gemergt: baut die Test-Identitaeten FX-W1..W3 je als Revision 1 und 2
+# (Paketversion 1.1.0.1 und 1.1.0.2) nur als Workflow-Artefakt, ohne Release und ohne gh-pages.
+name: FX-Probe (Spike KARV-131)
+
+on:
+  push:
+    branches: ['spike/KARV-131-Update-Mechanismus']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      OAUTH_TOKEN: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Fat-JAR bauen
+        run: ./mvnw -B clean package -DskipTests
+      - name: Platzhalter conveyor.local.conf
+        run: |
+          mkdir -p deployment
+          : > deployment/conveyor.local.conf
+
+      - name: Datenordner pruefen (Schutz der echten Daten)
+        uses: hydraulic-software/conveyor/actions/build@v22.2
+        with:
+          command: json > json-w1.txt
+          extra_flags: -f conveyor-fxw1.conf
+          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
+          agree_to_license: 1
+      - name: Datenordner auswerten
+        run: |
+          trap 'rm -f json-w1.txt cfg.json' EXIT
+          sed -n '/^{/,/^}/p' json-w1.txt > cfg.json
+          jq -e 'any(.app.jvm.windows.amd64.options[]; . == "-Dkarten.appDataDir=D:/Kartenverwaltung/Test/KARV-131/w1")' cfg.json >/dev/null
+          jq -e '.app.updates == "manual" and .app.jvm."extract-native-libraries" == true and (.app.site | has("copy-to")) == false' cfg.json >/dev/null
+          echo "PASS Konfiguration W1"
+
+      - name: W1 Revision 1
+        uses: hydraulic-software/conveyor/actions/build@v22.2
+        with:
+          command: make --output-dir=sites/w1-r1 site
+          extra_flags: -f conveyor-fxw1.conf -Kapp.revision=1 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
+          agree_to_license: 1
+      - name: W1 Revision 2
+        uses: hydraulic-software/conveyor/actions/build@v22.2
+        with:
+          command: make --output-dir=sites/w1-r2 site
+          extra_flags: -f conveyor-fxw1.conf -Kapp.revision=2 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
+          agree_to_license: 1
+      - name: W2 Revision 1
+        uses: hydraulic-software/conveyor/actions/build@v22.2
+        with:
+          command: make --output-dir=sites/w2-r1 site
+          extra_flags: -f conveyor-fxw2.conf -Kapp.revision=1 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
+          agree_to_license: 1
+      - name: W2 Revision 2
+        uses: hydraulic-software/conveyor/actions/build@v22.2
+        with:
+          command: make --output-dir=sites/w2-r2 site
+          extra_flags: -f conveyor-fxw2.conf -Kapp.revision=2 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
+          agree_to_license: 1
+      - name: W3 Revision 1
+        uses: hydraulic-software/conveyor/actions/build@v22.2
+        with:
+          command: make --output-dir=sites/w3-r1 site
+          extra_flags: -f conveyor-fxw3.conf -Kapp.revision=1 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
+          agree_to_license: 1
+      - name: W3 Revision 2
+        uses: hydraulic-software/conveyor/actions/build@v22.2
+        with:
+          command: make --output-dir=sites/w3-r2 site
+          extra_flags: -f conveyor-fxw3.conf -Kapp.revision=2 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
+          agree_to_license: 1
+
+      - name: Inhalt pruefen
+        run: |
+          for d in sites/*; do echo "== $d"; ls "$d"; done
+          for d in sites/*; do
+            ls "$d"/*.appinstaller "$d"/*.x64.msix "$d"/metadata.properties >/dev/null || { echo "FAIL $d unvollstaendig"; exit 1; }
+            grep -E 'version-quad' "$d/metadata.properties"
+          done
+
+      - name: Artefakt probe-sites
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-sites
+          path: |
+            sites/*/*.appinstaller
+            sites/*/*.x64.msix
+            sites/*/metadata.properties
+            sites/*/*.crt
+          retention-days: 7
+          overwrite: true
