@@ -172,4 +172,18 @@ class ForeignDecisionTest {
 	}
 
 	// <-- Zusammenführungen
+
+	/**
+	 * Inhaltlich zu neu (KARV-135) wie „gesperrt ohne Version“: Die Einheit verlässt das Modell, auch wenn der
+	 * Vergleichsstand nicht in der Kette steht (sonst bliebe der veraltete eigene Stand stehen); dieselbe Version ist
+	 * weiter bekannt.
+	 */
+	@Test
+	void contentLockedUnitLeavesTheModelLikeALockedOneWithoutVersion() {
+		UnitSnapshot newer = new UnitSnapshot(UNIT, W, UnitState.Status.LOCKED_FORMAT, false, payload("x-test"), true);
+
+		assertEquals(ForeignDecision.APPLY, ForeignDecision.decideUnblocked(ok(P), newer, List.of(step(V1), step(W))));
+		assertEquals(ForeignDecision.APPLY, ForeignDecision.decideUnblocked(ok(V1), newer, List.of(step(V1), step(W))));
+		assertEquals(ForeignDecision.KNOWN, ForeignDecision.decideUnblocked(newer, newer, List.of(step(V1), step(W))));
+	}
 }

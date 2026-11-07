@@ -91,13 +91,13 @@ enum ForeignDecision {
 	/**
 	 * Die Entscheidung ohne "blockiert" (das fragt das Repository erst danach, wenn ein Nachfolger da ist). Ist die Einheit
 	 * gesperrt, ohne dass ein Glied lesbar ist, gibt es keine Kette, an der sich ein Nachfolger zeigt: Sie wird wie beim
-	 * Laden behandelt und verlässt das Modell.
+	 * Laden behandelt und verlässt das Modell. Ebenso eine, deren aktueller Stand inhaltlich zu neu ist (KARV-135), auch
+	 * wenn der Vergleichsstand nicht in der Kette steht: Ein veralteter Stand wird nicht angezeigt.
 	 */
 	static ForeignDecision decideUnblocked(UnitSnapshot baseline, UnitSnapshot current, List<ChainStep> chain,
 			Set<VersionId> absorbed) {
-		boolean locked = current.status() == UnitState.Status.LOCKED_DAMAGED
-				|| current.status() == UnitState.Status.LOCKED_FORMAT;
-		if (current.version() == null && locked && baseline != null && baseline.version() != null) {
+		if (UnitMapper.missingLock(current) != null && baseline != null && baseline.version() != null
+				&& !Objects.equals(current.version(), baseline.version())) {
 			return APPLY;
 		}
 		return decide(baseline, current, chain, absorbed, false);

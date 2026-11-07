@@ -27,6 +27,7 @@ import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Das Repository der Hallen auf dem Versionsspeicher. Eine Halle ist eine einzige Einheit; geschrieben wird nur, wenn
@@ -192,9 +193,18 @@ public class StoreHallRepository implements HallRepository {
 		write(hall);
 	}
 
-	/** Lehnt eine Halle ab, die nicht die im Cache ist, aber deren Platz einnimmt, oder die ein fremder Stand gelöscht hat. */
+	/**
+	 * Lehnt eine Halle ab, die nicht die im Cache ist, aber deren Platz einnimmt, oder die ein fremder Stand gelöscht hat.
+	 * Hat ein fremder, inhaltlich zu neuer Stand sie gesperrt (KARV-135), nennt die Meldung die Sperre (SYS-009).
+	 */
 	private void requireCurrent(Hall hall) {
 		Hall cached = cachedHall(hall.getId());
+		if (cached == null && removedByOthers.contains(hall.getId())) {
+			UnitSnapshot known = baseline.known(UnitKey.hall(hall.getId()));
+			if (known != null && known.contentLocked()) {
+				throw new LockedUnitException(StoreMessages.newerFormat(EntityLabels.nameOrPlaceholder(hall.getName())));
+			}
+		}
 		if ((cached != null && cached != hall) || (cached == null && removedByOthers.contains(hall.getId()))) {
 			throw LockedUnitException.replacedMeanwhile(hall.getName());
 		}
@@ -516,9 +526,13 @@ public class StoreHallRepository implements HallRepository {
 
 		Hall fresh = UnitMapper.readUnit(current, Hall.class);
 		if (fresh == null) {
-			// gelöscht oder unlesbar: wie beim Laden unsichtbar
+			// gelöscht, unlesbar oder inhaltlich zu neu: wie beim Laden unsichtbar
 			baseline.adopt(hallId, current, false);
-			if (!UnitMapper.isAbsent(current)) {
+			if (current.contentLocked()) {
+				// gesperrt, nicht entfernt (KARV-135): die Sperrmeldung mit dem Namen, unter dem der Nutzer die Halle kennt
+				warnings.add(old != null ? StoreMessages.newerFormat(EntityLabels.nameOrPlaceholder(old.getName()))
+						: UnitMapper.lockMessage(unit, UnitMapper.missingLock(current)));
+			} else if (!UnitMapper.isAbsent(current)) {
 				warnings.add(UnitMapper.unreadableHall(hallId));
 			}
 			if (old != null) {

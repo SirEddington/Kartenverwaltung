@@ -25,7 +25,6 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
-import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
@@ -346,9 +345,7 @@ final class EventMerge {
 			if (existing != null) {
 				event.getPresentations().remove(existing);
 			}
-			if (!UnitMapper.isAbsent(snapshot)) {
-				sink.warning(UnitMapper.unreadablePresentation(unit.presentationId(), event.getName()));
-			}
+			warnIfMissing(snapshot, UnitMapper.unreadablePresentation(unit.presentationId(), event.getName()), sink);
 			// auch ohne Vorstellung im Modell (der Nutzer hatte sie schon entfernt): Was unter ihr angezeigt war, ist weg
 			sink.left(unit);
 			sink.adopted(snapshot, false);
@@ -396,8 +393,8 @@ final class EventMerge {
 		warnIfLocked(snapshot, sink);
 		for (UnitSnapshot below : fitting) {
 			boolean readable = UnitMapper.readUnit(below, Booking.class) != null;
-			if (!readable && !UnitMapper.isAbsent(below)) {
-				sink.warning(UnitMapper.unreadableBooking(added.getName()));
+			if (!readable) {
+				warnIfMissing(below, UnitMapper.unreadableBooking(added.getName()), sink);
 			}
 			sink.adopted(below, readable);
 			if (readable) {
@@ -431,9 +428,7 @@ final class EventMerge {
 				// im Modell steht noch, was die Einheit trug: nicht mehr vom Stand des Vergleichsstands
 				sink.reconciled(unit);
 			}
-			if (!UnitMapper.isAbsent(snapshot)) {
-				sink.warning(UnitMapper.unreadableBooking(presentation.getName()));
-			}
+			warnIfMissing(snapshot, UnitMapper.unreadableBooking(presentation.getName()), sink);
 			sink.adopted(snapshot, false);
 			return;
 		}
@@ -620,16 +615,16 @@ final class EventMerge {
 	}
 
 	/**
-	 * Ob die Vorstellung gelöscht oder unlesbar ist: gelöscht, ohne lesbare Version, oder gesperrt, ohne dass es eine
-	 * Version gäbe. Fehlt sie im Index nur noch ({@code null}, oder ohne Datei), ist sie nicht weg, sondern wird kommen.
+	 * Ob die Vorstellung gelöscht oder unlesbar ist: gelöscht, ohne lesbare Version, gesperrt, ohne dass es eine
+	 * Version gäbe, oder ihr Stand ist inhaltlich zu neu (KARV-135; {@link UnitMapper#missingLock}). Fehlt sie im Index nur
+	 * noch ({@code null}, oder ohne Datei), ist sie nicht weg, sondern wird kommen.
 	 */
 	static boolean gone(UnitSnapshot presentation) {
 		if (presentation == null) {
 			return false;
 		}
-		boolean lockedWithoutVersion = presentation.version() == null && (presentation.status() == UnitState.Status.LOCKED_DAMAGED
-				|| presentation.status() == UnitState.Status.LOCKED_FORMAT);
-		return lockedWithoutVersion || (presentation.version() != null && !UnitMapper.isReadable(presentation));
+		return UnitMapper.missingLock(presentation) != null
+				|| (presentation.version() != null && !UnitMapper.isReadable(presentation));
 	}
 
 	/**
@@ -806,6 +801,19 @@ final class EventMerge {
 		String locked = UnitMapper.lockMessage(snapshot.unit(), snapshot.status());
 		if (locked != null) {
 			sink.warning(locked);
+		}
+	}
+
+	/**
+	 * Die Warnung für eine Einheit, die sich nicht lesen lässt und deshalb das Modell verlässt: {@code unreadable}, außer
+	 * sie fehlt gewollt ({@link UnitMapper#isAbsent}). Ist ihr Stand inhaltlich zu neu (KARV-135), ist sie gesperrt, nicht
+	 * unlesbar: dann die Sperrmeldung (SYS-009) statt {@code unreadable}.
+	 */
+	private static void warnIfMissing(UnitSnapshot snapshot, String unreadable, Sink sink) {
+		if (snapshot.contentLocked()) {
+			sink.warning(UnitMapper.lockMessage(snapshot.unit(), UnitMapper.missingLock(snapshot)));
+		} else if (!UnitMapper.isAbsent(snapshot)) {
+			sink.warning(unreadable);
 		}
 	}
 

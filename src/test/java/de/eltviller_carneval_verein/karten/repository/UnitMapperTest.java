@@ -3,11 +3,13 @@ package de.eltviller_carneval_verein.karten.repository;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -25,6 +27,7 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -42,6 +45,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
 import de.eltviller_carneval_verein.karten.store.VersionMarks;
 
@@ -913,6 +917,138 @@ class UnitMapperTest {
 		assertEquals(Map.of(UnitKey.hall(hall.getId()), Status.LOCKED_FORMAT), assembly.locked());
 		assertEquals(List.of(StoreMessages.newerFormat("halls/" + hall.getId())), assembly.allWarnings());
 	}
+
+	// Inhaltlich zu neu (KARV-135) -->
+
+	/** Derselbe Stand mit Kopf inhaltlich zu neu: so, wie ihn der Index nach dem Gate weitergibt. */
+	private static UnitSnapshot contentLocked(UnitSnapshot snapshot, Status status) {
+		return new UnitSnapshot(snapshot.unit(), snapshot.version(), status, snapshot.deleted(), snapshot.payload(), true);
+	}
+
+	@Test
+	void contentLockedBookingIsMissingAndLockedWithoutWarning() {
+		Event event = simpleEvent();
+		Presentation first = event.getPresentations().get(0);
+		List<UnitSnapshot> snapshots = snapshots(UnitMapper.decompose(event));
+		UnitKey booking = UnitKey.booking(event.getId(), first.getId(), "seat-a1");
+		UnitSnapshot locked = contentLocked(find(snapshots, booking), Status.LOCKED_FORMAT);
+		snapshots = replace(snapshots, locked);
+
+		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
+
+		Presentation loaded = assembly.items().get(0).getPresentations().get(0);
+		assertEquals(List.of("Meier"), loaded.getBookings().stream().map(Booking::getLastName).toList(),
+				"Müller fehlt im Modell");
+		assertEquals(List.of(), assembly.warnings(), "keine Unlesbar-Warnung");
+		assertEquals(Map.of(booking, Status.LOCKED_FORMAT), assembly.locked());
+		assertEquals(List.of(StoreMessages.newerFormat(booking.relativePath())), assembly.allWarnings());
+		assertFalse(assembly.shown().contains(booking));
+		// zentral in readUnit: lesen, vergleichen und „lesbar“ sagen alle dasselbe
+		assertNull(UnitMapper.readUnit(locked, Booking.class));
+		assertFalse(UnitMapper.isReadable(locked));
+		assertNull(UnitMapper.comparable(locked));
+	}
+
+	@Test
+	void contentLockedPresentationIsMissingWithItsBookings() {
+		Event event = simpleEvent();
+		Presentation first = event.getPresentations().get(0);
+		Presentation second = event.getPresentations().get(1);
+		List<UnitSnapshot> snapshots = snapshots(UnitMapper.decompose(event));
+		UnitKey presentation = UnitKey.presentation(event.getId(), first.getId());
+		snapshots = replace(snapshots, contentLocked(find(snapshots, presentation), Status.LOCKED_FORMAT));
+
+		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
+
+		Event loaded = assembly.items().get(0);
+		assertEquals(List.of(second.getId()), loaded.getPresentations().stream().map(Presentation::getId).toList());
+		assertEquals(List.of("Schmitz"), loaded.getBookings().stream().map(Booking::getLastName)
+				.filter(name -> name != null).toList(), "die Buchungen der gesperrten Vorstellung fehlen mit ihr");
+		assertEquals(List.of(), assembly.warnings());
+		assertEquals(Map.of(presentation, Status.LOCKED_FORMAT), assembly.locked());
+	}
+
+	@Test
+	void contentLockedHallIsMissing() {
+		Hall hall = realisticHall();
+		Hall fine = new Hall("66666666-6666-6666-6666-666666666667");
+		fine.setName("Gut");
+		UnitKey unit = UnitKey.hall(hall.getId());
+		List<UnitSnapshot> snapshots = List.of(contentLocked(snapshot(UnitMapper.decompose(hall)), Status.LOCKED_FORMAT),
+				snapshot(UnitMapper.decompose(fine)));
+
+		Assembly<Hall> assembly = UnitMapper.assembleHalls(snapshots);
+
+		assertEquals(List.of("Gut"), assembly.items().stream().map(Hall::getName).toList());
+		assertEquals(List.of(), assembly.warnings());
+		assertEquals(Map.of(unit, Status.LOCKED_FORMAT), assembly.locked());
+		assertEquals(List.of(StoreMessages.newerFormat(unit.relativePath())), assembly.allWarnings());
+	}
+
+	/**
+	 * Ziele eines Wiederherstellens kommen aus {@code UnitSnapshot.of(unit, version)} mit Zustand {@code OK}: Gesperrt
+	 * wird trotzdem mit {@code LOCKED_FORMAT}, sonst gäbe es keine Sperrmeldung ({@code lockMessage(OK)} ist {@code null}).
+	 * Ein ausstehendes Zurücksetzen hinter einer beschädigten Version behält {@code LOCKED_DAMAGED}.
+	 */
+	@Test
+	void contentLockedWithStatusOkIsRecordedAsLockedFormat() {
+		Event event = simpleEvent();
+		Presentation first = event.getPresentations().get(0);
+		List<UnitSnapshot> snapshots = snapshots(UnitMapper.decompose(event));
+		UnitKey booking = UnitKey.booking(event.getId(), first.getId(), "seat-a1");
+		UnitKey damaged = UnitKey.booking(event.getId(), first.getId(), "seat-a3");
+		Version newer = new Version(1, VERSION, List.of(), "abcdefgh", "Fremd", null, Instant.EPOCH, "save-1",
+				false, find(snapshots, booking).payload()).withNewerContent(true);
+		UnitSnapshot target = UnitSnapshot.of(booking, newer);
+		assertEquals(Status.OK, target.status());
+		snapshots = replace(snapshots, target);
+		snapshots = replace(snapshots, contentLocked(find(snapshots, damaged), Status.LOCKED_DAMAGED));
+
+		Assembly<Event> assembly = UnitMapper.assembleEvents(snapshots);
+
+		assertEquals(Map.of(booking, Status.LOCKED_FORMAT, damaged, Status.LOCKED_DAMAGED), assembly.locked());
+		assertEquals(List.of(), assembly.warnings());
+		assertTrue(assembly.allWarnings().contains(StoreMessages.newerFormat(booking.relativePath())));
+		assertEquals(List.of(), assembly.items().get(0).getPresentations().get(0).getBookings(),
+				"beide gesperrten Buchungen fehlen im Modell");
+	}
+
+	/**
+	 * Fehlend, {@code null} und {@code []} heißen „nichts verlangt“: Halle, Kopf, Vorstellung und Buchung damit sind
+	 * lesbar und nicht gesperrt (das Merkmal kommt wie im Store aus dem Gate).
+	 */
+	@Test
+	void requiresNullOrEmptyIsShownNormally() {
+		for (JsonNode nothing : List.<JsonNode>of(MAPPER.nullNode(), MAPPER.createArrayNode())) {
+			Event event = simpleEvent();
+			List<UnitSnapshot> snapshots = new ArrayList<>();
+			for (UnitPayload part : UnitMapper.decompose(event)) {
+				snapshots.add(gated(part, nothing));
+			}
+			Hall hall = realisticHall();
+			UnitSnapshot hallSnapshot = gated(UnitMapper.decompose(hall), nothing);
+
+			Assembly<Event> events = UnitMapper.assembleEvents(snapshots);
+			Assembly<Hall> halls = UnitMapper.assembleHalls(List.of(hallSnapshot));
+
+			assertEquals(Map.of(), events.locked(), nothing.toString());
+			assertEquals(List.of(), events.warnings(), nothing.toString());
+			assertEquals(snapshots.stream().map(UnitSnapshot::unit).collect(Collectors.toSet()), events.shown(),
+					"alles gezeigt bei requires " + nothing);
+			assertEquals(1, halls.items().size(), nothing.toString());
+			assertEquals(Map.of(), halls.locked(), nothing.toString());
+		}
+	}
+
+	/** Der Stand mit {@code requires} im Payload; „inhaltlich zu neu“ sagt das Gate der App. */
+	private static UnitSnapshot gated(UnitPayload part, JsonNode requires) {
+		ObjectNode payload = part.payload().deepCopy();
+		payload.set("requires", requires);
+		boolean newer = ContentRules.GATE.isNewer(part.unit(), payload);
+		return new UnitSnapshot(part.unit(), VERSION, newer ? Status.LOCKED_FORMAT : Status.OK, false, payload, newer);
+	}
+
+	// <-- Inhaltlich zu neu
 
 	@Test
 	void unitsOfOtherTypesAreIgnored() {

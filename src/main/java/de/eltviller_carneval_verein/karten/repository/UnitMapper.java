@@ -384,6 +384,20 @@ final class UnitMapper {
 		return status == Status.LOCKED_DAMAGED || status == Status.LOCKED_FORMAT;
 	}
 
+	/**
+	 * Der Zustand, mit dem eine gesperrte Einheit im Modell fehlt (KARV-135), oder {@code null}, wenn sie nicht so fehlt:
+	 * gesperrt ohne Version (ihr Zustand), oder ihr aktueller Stand ist inhaltlich zu neu ({@link UnitSnapshot#contentLocked}).
+	 * Im zweiten Fall immer {@code LOCKED_FORMAT}, bei einem ausstehenden Zurücksetzen hinter einer beschädigten Version
+	 * {@code LOCKED_DAMAGED}, nie einfach der Zustand des Stands: Ziele eines Wiederherstellens kommen aus
+	 * {@code UnitSnapshot.of(unit, version)} mit {@code OK}, und dazu gäbe es keine Sperrmeldung.
+	 */
+	static Status missingLock(UnitSnapshot snapshot) {
+		if (snapshot.contentLocked()) {
+			return snapshot.status() == Status.LOCKED_DAMAGED ? Status.LOCKED_DAMAGED : Status.LOCKED_FORMAT;
+		}
+		return snapshot.version() == null && isLocked(snapshot.status()) ? snapshot.status() : null;
+	}
+
 	/** Der Schlüssel einer Buchung: auf dem Sitz, wenn sie einen hat und nicht "ohne Platz" ist, sonst über ihre Kennung. */
 	static UnitKey bookingKey(String eventId, String presentationId, Booking booking) {
 		if (booking.getSeatId() != null && !booking.isUnassigned()) {
@@ -582,11 +596,17 @@ final class UnitMapper {
 	 * {@code unreadable}, für eine Einheit ohne lesbare Version oder mit Inhalt, den Jackson nicht liest. Eine
 	 * gesperrte Einheit mit lesbarer Version wird geladen und kommt mit ihrem Zustand in {@code locked} (SYS-008 bzw.
 	 * SYS-009); eine ohne lesbare Version fehlt, kommt aber ebenso in {@code locked}, damit sie unter den gesperrten
-	 * Einträgen steht (sonst wirkte etwa ihr Sitz frei, obwohl Speichern darauf abgelehnt wird). Ergibt {@code mismatchOf} einen Text, passt der Inhalt nicht zum Ordner der Einheit (die ID zeigt
-	 * woandershin): Die Einheit wird wie eine unlesbare behandelt.
+	 * Einträgen steht (sonst wirkte etwa ihr Sitz frei, obwohl Speichern darauf abgelehnt wird). Ist der aktuelle Stand
+	 * inhaltlich zu neu (KARV-135), fehlt die Einheit ebenso und kommt nach {@link #missingLock} in {@code locked}, ohne
+	 * Warnung: Sie ist gesperrt, nicht unlesbar. Ergibt {@code mismatchOf} einen Text, passt der Inhalt nicht zum Ordner
+	 * der Einheit (die ID zeigt woandershin): Die Einheit wird wie eine unlesbare behandelt.
 	 */
 	private static <T> T read(UnitSnapshot snapshot, Class<T> type, List<String> warnings, Map<UnitKey, Status> locked,
 			String unreadable, Function<T, String> mismatchOf) {
+		if (snapshot.contentLocked()) {
+			locked.put(snapshot.unit(), missingLock(snapshot));
+			return null;
+		}
 		if (snapshot.version() == null) {
 			if (snapshot.status() != Status.OK) {
 				warnings.add(unreadable);
@@ -706,8 +726,9 @@ final class UnitMapper {
 	 * ohne Warnung. Der Payload bleibt unverändert.
 	 *
 	 * @param type die Modellklasse zur Art der Einheit (Event, Presentation, Booking oder Hall)
-	 * @return ein neues Objekt, oder {@code null}, wenn die Einheit gelöscht ist, keine Version hat oder sich nicht lesen
-	 *         lässt
+	 * @return ein neues Objekt, oder {@code null}, wenn die Einheit gelöscht ist, keine Version hat, sich nicht lesen
+	 *         lässt oder ihr aktueller Stand inhaltlich zu neu ist ({@link UnitSnapshot#contentLocked}, KARV-135: Laden
+	 *         und Einarbeiten nehmen sie damit heraus)
 	 * @throws IllegalArgumentException wenn {@code type} nicht zur Art der Einheit passt
 	 */
 	static <T> T readUnit(UnitSnapshot snapshot, Class<T> type) {
@@ -721,7 +742,7 @@ final class UnitMapper {
 		if (type != modelClass(unit.type())) {
 			throw new IllegalArgumentException(type.getSimpleName() + " passt nicht zu " + unit.relativePath());
 		}
-		if (!snapshot.isLive() || snapshot.payload() == null) {
+		if (snapshot.contentLocked() || !snapshot.isLive() || snapshot.payload() == null) {
 			return null;
 		}
 		@SuppressWarnings("unchecked")

@@ -1582,8 +1582,11 @@ public class StoreEventRepository implements EventRepository {
 		}
 	}
 
+	/** Ein inhaltlich zu neuer Kopf (KARV-135) ist gesperrt, nicht unlesbar: dann die Sperrmeldung (SYS-009). */
 	private static void warnIfUnreadable(UnitSnapshot head, List<String> warnings) {
-		if (head != null && !UnitMapper.isAbsent(head) && UnitMapper.readUnit(head, Event.class) == null) {
+		if (head != null && head.contentLocked()) {
+			warnings.add(UnitMapper.lockMessage(head.unit(), UnitMapper.missingLock(head)));
+		} else if (head != null && !UnitMapper.isAbsent(head) && UnitMapper.readUnit(head, Event.class) == null) {
 			warnings.add(UnitMapper.unreadableEvent(head.unit().eventId()));
 		}
 	}

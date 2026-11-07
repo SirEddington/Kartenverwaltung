@@ -34,6 +34,7 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
@@ -2024,6 +2025,84 @@ class StoreEventRepositoryForeignTest {
 		sold.setLastName("Neu");
 		assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
 	}
+
+	// Inhaltlich zu neu (KARV-135) -->
+
+	/**
+	 * Ein neueres Programm verlangt an der Vorstellung ein Merkmal, das dieses nicht kennt: Sie fehlt samt Buchungen im
+	 * Modell, ohne Unlesbar-Warnung; gemeldet wird die Sperre (SYS-009).
+	 */
+	@Test
+	void liveUpdateWithRequiresOnPresentationRemovesItWithoutWarning() throws IOException {
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+		foreign.write(presentation, "Fremd",
+				payload -> payload.set("requires", JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+		assertTrue(sync.unitState(presentation).contentLocked());
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(List.of(presentation));
+
+		assertTrue(event.getPresentations().isEmpty(), "die Vorstellung fehlt samt Buchungen");
+		assertEquals(List.of(StoreMessages.newerFormat(presentation.relativePath())), result.warnings(),
+				"die Sperre, keine Unlesbar-Warnung");
+		assertTrue(mine.knownUnit(presentation).contentLocked(), "der Vergleichsstand kennt die Sperre");
+		mine.saveEvent(event);
+		assertEquals(before, files(), "die gesperrte Vorstellung und ihre Buchungen bleiben unberührt");
+	}
+
+	/**
+	 * Ein unbekannter Zahlstatus sperrt die Buchung: Sie fehlt im Modell, auf ihrem Sitz liegt der leere Platzhalter, dessen
+	 * Einheit die gesperrte ist ({@code LockedSeats} sperrt ihn darüber). Keine Unlesbar-Warnung.
+	 */
+	@Test
+	void liveUpdateWithUnknownPaymentStatusLocksSeatWithoutWarning() throws IOException {
+		Booking sold = seat(friday, 0);
+		UnitKey unit = seatUnit(friday, 0);
+		foreign.write(unit, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		assertTrue(sync.unitState(unit).contentLocked());
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(List.of(unit));
+
+		Booking placeholder = seat(friday, 0);
+		assertSame(sold, placeholder);
+		assertFalse(placeholder.hasData(), "der Sitz zeigt den leeren Platzhalter, nicht den alten Stand");
+		assertEquals(unit, UnitMapper.bookingKey(event.getId(), friday.getId(), placeholder),
+				"der Platzhalter liegt auf der gesperrten Einheit");
+		assertEquals(List.of(StoreMessages.newerFormat(unit.relativePath())), result.warnings(),
+				"die Sperre, keine Unlesbar-Warnung");
+		assertEquals(UnitState.Status.LOCKED_FORMAT, mine.knownUnit(unit).status());
+		assertTrue(mine.knownUnit(unit).contentLocked());
+		mine.saveEvent(event);
+		assertEquals(before, files(), "die gesperrte Buchung wird weder gelöscht noch überschrieben");
+		seat(friday, 1).setLastName("Eigen");
+		mine.saveEvent(event);
+		assertEquals(2, sync.history(unit).size());
+		assertTrue(sync.unitState(unit).contentLocked());
+	}
+
+	/** Schreibt das neuere Programm wieder einen bekannten Zahlstatus, ist die Buchung zurück im Modell und der Sitz belegt. */
+	@Test
+	void lockLiftsWhenForeignWritesKnownValue() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		foreign.write(unit, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		mine.applyForeign(List.of(unit));
+		assertFalse(seat(friday, 0).hasData());
+		foreign.write(unit, "Fremd", payload -> payload.put("paymentStatus", "CASH"));
+		assertFalse(sync.unitState(unit).contentLocked());
+
+		ForeignResult result = mine.applyForeign(List.of(unit));
+
+		Booking back = seat(friday, 0);
+		assertEquals("Müller", back.getLastName());
+		assertEquals(PaymentStatus.CASH, back.getPaymentStatus());
+		assertTrue(back.isTaken(), "der Sitz ist belegt");
+		assertEquals(List.of(), result.warnings());
+		assertEquals(UnitState.Status.OK, mine.knownUnit(unit).status());
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+	}
+
+	// <-- Inhaltlich zu neu
 
 	/**
 	 * Die einzige Version der Buchung wird beschädigt, während der Nutzer sie ändert: Der gesperrte Stand ohne lesbares

@@ -410,6 +410,29 @@ class StoreHallRepositoryForeignTest {
 		assertSame(hall, recorder.entities.get(0));
 	}
 
+	/**
+	 * Ein neueres Programm verlangt an der Halle ein unbekanntes Merkmal (KARV-135): Sie verlässt den Cache wie eine
+	 * unlesbare, gemeldet wird aber die Sperre (SYS-009) mit ihrem Namen, auch beim Speichern aus einer alten Ansicht.
+	 */
+	@Test
+	void foreignContentLockedHallReportsLockNotRemoval() throws IOException {
+		foreignVersion(unit(), payload -> payload.set("requires",
+				JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+		assertTrue(sync.unitState(unit()).contentLocked());
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(List.of(unit()));
+
+		assertNull(mine.findById(hall.getId()), "die gesperrte Halle fehlt im Modell");
+		assertEquals(List.of(StoreMessages.newerFormat("Stadthalle")), result.warnings());
+		assertEquals(List.of("removed Stadthalle"), recorder.calls);
+		// der Hallen-Editor zeigt die Halle noch
+		hall.setName("Alt geändert");
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveHall(hall));
+		assertEquals(StoreMessages.newerFormat("Alt geändert"), refused.getMessage());
+		assertEquals(before, files(), "die gesperrte Halle wird nicht überschrieben");
+	}
+
 	@Test
 	void hallDeletedElsewhereIsRefusedFromAStaleView() throws IOException {
 		StoreHallRepository other = other();
