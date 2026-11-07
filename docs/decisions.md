@@ -241,6 +241,54 @@ it; required JDK modules (`java.scripting`, `java.xml`, `jdk.unsupported`, …) 
 does not detect the reflective use by `FXMLLoader`; `extract-native-libraries` is on, see
 [JavaFX native libraries extracted at build time](#javafx-native-libraries-extracted-at-build-time).
 
+## No public code-signing certificate (for now)
+
+**Decision:** The Windows packages stay signed with Conveyor's self-signed certificate
+(`CN=Kartenverwaltung - Eltviller Carneval Verein`). No public code-signing certificate is bought for now (KARV-137,
+part 2, November 2026).
+
+**Why:**
+
+- **Norton:** The detections seen in KARV-130 ("IDP.Generic", behaviour-based protection) are a behaviour heuristic.
+  They demonstrably also hit software signed with public certificates. A real signature would likely raise the
+  reputation, but would not have prevented what we saw. Avoiding suspicious behaviour helps more: no executables
+  started from `%TEMP%`, no native libraries unpacked at run time (KARV-137).
+- **What a public certificate would bring:**
+  - installation without an administrator importing the certificate
+  - a verified publisher name in Windows instead of "unknown"
+  - acceptance by Smart App Control on Windows 11
+  - SmartScreen still warns for the first weeks; EV certificates no longer skip that either.
+- **Options and approximate prices (2026):**
+  - Azure Trusted Signing: about 120 $/year and supported by Conveyor, but only for organisations in the EU
+    (individuals only in the US and Canada). This would be a certificate for the club.
+  - A certificate in a private person's name (SSL.com or Sectigo with a cloud key): about 230–310 $/year. The name
+    and town would be public in every signed file.
+  - Certum's open-source certificate (49 €): only for free software, and not supported by Conveyor on Linux CI.
+  - SignPath Foundation: free, but the publisher would be "SignPath Foundation", and Conveyor has no integration.
+- **The switch has a one-off cost on every workstation:**
+  - A new certificate changes the MSIX publisher and therefore the package family (`EcvKarten_0cs1gtds5d9x0`).
+    Installed versions then get no further updates.
+  - Conveyor's automatic path for this (the update escape hatch) is disabled, see above.
+  - Every workstation would have to install the new package. Its local data lives in the old package's virtualized
+    `LocalCache` and would have to be imported into the new one. The old `LocalCache` is readable from the new
+    package (tested), so an import at first start is feasible.
+
+**Instead:**
+
+- If Norton flags a release, report it at `https://submissions.norton.com/` (detection name, alert ID, file).
+  Norton promises updated definitions within 48 hours.
+- Optionally submit each Windows release to Microsoft as a software developer:
+  `https://www.microsoft.com/wdsi/filesubmission`.
+
+**Revisit when:**
+
+- Norton or Smart App Control blocks the app on a club workstation again.
+- The club wants a verified publisher.
+
+The preferred route is then Azure Trusted Signing for the club (check the identity validation requirements first).
+Plan the switch together with a release that touches every workstation anyway, and include the data import. Once
+switched, keep the certificate subject unchanged across renewals.
+
 ## OpenPDF 1.3.x
 
 The PDF export uses OpenPDF 1.3.43 on purpose: from 2.x on, ICU4J (~15 MB) is a mandatory dependency, and the
