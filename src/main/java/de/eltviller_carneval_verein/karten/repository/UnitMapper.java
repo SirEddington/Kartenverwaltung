@@ -334,33 +334,55 @@ final class UnitMapper {
 		}
 	}
 
+	/** Eine gesperrte Einheit mit der Art ihrer Sperre ({@link #lockOf}). */
+	private record LockedUnit(UnitKey unit, Status lock) {
+	}
+
 	/** Für {@link #requireNothingLockedBelow}: neueres Format vor beschädigt, dann nach Pfad. */
-	private static final Comparator<UnitSnapshot> LOCKED_BELOW_ORDER = Comparator
-			.comparing((UnitSnapshot state) -> state.status() != Status.LOCKED_FORMAT)
-			.thenComparing(state -> state.unit().relativePath());
+	private static final Comparator<LockedUnit> LOCKED_BELOW_ORDER = Comparator
+			.comparing((LockedUnit locked) -> locked.lock() != Status.LOCKED_FORMAT)
+			.thenComparing(locked -> locked.unit().relativePath());
 
 	/**
-	 * Unter der Vorstellung, die gelöscht wird, darf keine gesperrte Einheit liegen, deren Vorfahren im Versionsspeicher
-	 * nicht gelöscht sind (eine Buchung unter einer schon gelöschten Vorstellung zeigt das Programm nie). Bei mehreren
-	 * nennt die Meldung zuerst eine mit neuerem Format (SYS-009), sonst eine beschädigte (SYS-008).
+	 * Die Sperre einer Einheit nach ihrem Stand, oder {@code null}, wenn sie nicht gesperrt ist: zuerst
+	 * {@link #missingLock} (sie fehlt im Modell, auch bei {@code contentLocked} mit Zustand {@code OK}, etwa bei einem
+	 * ausstehenden rohen Zurücksetzen auf einen inhaltlich zu neuen Stand), sonst der Zustand, wenn die Kette beschädigt
+	 * ist oder ein neueres Format hat. Ein wartender Stand ist nicht gesperrt.
+	 */
+	static Status lockOf(UnitSnapshot state) {
+		Status lock = missingLock(state);
+		if (lock == null && isLocked(state.status())) {
+			lock = state.status();
+		}
+		return lock;
+	}
+
+	/**
+	 * Unter der Vorstellung, die gelöscht wird, darf keine gesperrte Einheit ({@link #lockOf}) liegen, deren Vorfahren im
+	 * Versionsspeicher nicht gelöscht sind (eine Buchung unter einer schon gelöschten Vorstellung zeigt das Programm nie).
+	 * Bei mehreren nennt die Meldung zuerst eine mit neuerem Format (SYS-009), sonst eine beschädigte (SYS-008).
 	 *
 	 * @param eventStates die Stände aller Einheiten des Events im Versionsspeicher
 	 * @throws LockedUnitException mit der Sperrmeldung der gesperrten Einheit
 	 */
 	private static void requireNothingLockedBelow(UnitKey presentation, Map<UnitKey, UnitSnapshot> eventStates) {
-		UnitSnapshot blocking = null;
+		LockedUnit blocking = null;
 		for (UnitSnapshot state : eventStates.values()) {
 			UnitKey unit = state.unit();
-			if (!isLocked(state.status()) || !presentation.equals(unit.parent())
-					|| hasDeletedAncestor(unit, eventStates)) {
+			if (!presentation.equals(unit.parent()) || hasDeletedAncestor(unit, eventStates)) {
 				continue;
 			}
-			if (blocking == null || LOCKED_BELOW_ORDER.compare(state, blocking) < 0) {
-				blocking = state;
+			Status lock = lockOf(state);
+			if (lock == null) {
+				continue;
+			}
+			LockedUnit candidate = new LockedUnit(unit, lock);
+			if (blocking == null || LOCKED_BELOW_ORDER.compare(candidate, blocking) < 0) {
+				blocking = candidate;
 			}
 		}
 		if (blocking != null) {
-			throw new LockedUnitException(lockMessage(blocking.unit(), blocking.status()));
+			throw new LockedUnitException(lockMessage(blocking.unit(), blocking.lock()));
 		}
 	}
 

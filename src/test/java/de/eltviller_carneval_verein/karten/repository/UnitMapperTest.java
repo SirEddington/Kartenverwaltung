@@ -1562,6 +1562,26 @@ class UnitMapperTest {
 	}
 
 	/**
+	 * Ein Kind mit Zustand {@code OK}, dessen aktueller Stand inhaltlich zu neu ist (ein ausstehendes rohes Zurücksetzen),
+	 * fehlt im Modell wie jede gesperrte Einheit: Das Löschen seiner Vorstellung scheitert mit SYS-009.
+	 */
+	@Test
+	void deletingPresentationWithContentLockedOkChildIsRejected() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		Map<UnitKey, UnitSnapshot> store = new HashMap<>(baseline);
+		UnitKey child = bookingKey(event, 1, "seat-a1x");
+		UnitSnapshot known = store.get(child);
+		put(store, new UnitSnapshot(child, known.version(), Status.OK, false, known.payload(), true));
+		event.getPresentations().remove(1);
+
+		LockedUnitException e = assertThrows(LockedUnitException.class,
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event), store));
+
+		assertEquals(StoreMessages.newerFormat(child.relativePath()), e.getMessage());
+	}
+
+	/**
 	 * Lebt ein gelöschter Kopf wieder auf, räumt das Speichern seine alten Vorstellungen; eine gesperrte Buchung darunter hat
 	 * einen gelöschten Vorfahren (den Kopf im Versionsspeicher), war nie zu sehen und blockiert das Räumen nicht.
 	 */
