@@ -31,6 +31,8 @@ class UpdateFlowTest {
 	private final List<String> calls = new ArrayList<>();
 	private boolean confirmAnswer = true;
 	private boolean confirmCloseAnswer = true;
+	/** Antwort ab dem zweiten confirmClose (nach Erfolg bei ersetzter Busy-Ansicht); null = wie das erste. */
+	private Boolean laterConfirmCloseAnswer;
 	private boolean sharedFolder;
 	private boolean busyShown = true;
 	private boolean connecting;
@@ -113,6 +115,9 @@ class UpdateFlowTest {
 			calls.add("confirmClose");
 			if (confirmCloseFailure != null) {
 				throw confirmCloseFailure;
+			}
+			if (laterConfirmCloseAnswer != null && calls.stream().filter("confirmClose"::equals).count() > 1) {
+				return laterConfirmCloseAnswer;
 			}
 			return confirmCloseAnswer;
 		}, text -> {
@@ -254,6 +259,34 @@ class UpdateFlowTest {
 		assertFalse(calls.contains("menu"));
 		assertFalse(calls.stream().anyMatch(c -> c.startsWith("error")));
 		assertFalse(flow.isRunning());
+	}
+
+	@Test
+	void successWithReplacedViewAsksAgainBeforeExit() {
+		busyShown = false;
+		flow.update(info("2", FAMILY));
+		assertEquals(List.of("confirm", "confirmClose", "busy " + UpdateTexts.BUSY, "fetchInfo", "download", "open " + FILE,
+				"confirmClose", "exit"), calls);
+	}
+
+	@Test
+	void successWithReplacedViewAndCancelDoesNotExit() {
+		busyShown = false;
+		laterConfirmCloseAnswer = false;
+		flow.update(info("2", FAMILY));
+		assertFalse(calls.contains("exit"), calls.toString());
+		assertTrue(calls.contains("error " + UpdateTexts.INSTALLER_OPEN), calls.toString());
+		assertTrue(calls.contains("afterAbort"));
+		assertFalse(flow.isRunning());
+	}
+
+	@Test
+	void browserSuccessWithReplacedViewAsksAgainBeforeExit() {
+		busyShown = false;
+		laterConfirmCloseAnswer = false;
+		flow.updateViaBrowser();
+		assertFalse(calls.contains("exit"), calls.toString());
+		assertTrue(calls.contains("error " + UpdateTexts.INSTALLER_OPEN), calls.toString());
 	}
 
 	@Test

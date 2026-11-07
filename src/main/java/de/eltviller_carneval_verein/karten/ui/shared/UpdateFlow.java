@@ -175,7 +175,7 @@ public final class UpdateFlow {
 
 	private void finish(String error, boolean recheckAfter) {
 		if (error == null) {
-			exitApp.run();
+			exitAfterSuccess();
 			return;
 		}
 		try {
@@ -193,6 +193,26 @@ public final class UpdateFlow {
 		} finally {
 			abort();
 		}
+	}
+
+	/**
+	 * Nach dem Öffnen: beenden. Hat inzwischen etwas die Busy-Ansicht ersetzt (etwa eine Frage des gemeinsamen Ordners),
+	 * kann der Nutzer seither Eingaben gemacht haben; dann erst wie beim Schließen sichern bzw. fragen. Bricht er ab,
+	 * bleibt die App offen, und die Fußzeile sagt, dass das Installationsfenster wartet.
+	 */
+	private void exitAfterSuccess() {
+		try {
+			if (busyViewStillShown.getAsBoolean() || confirmClose.getAsBoolean()) {
+				exitApp.run();
+				return;
+			}
+			LOG.info("Update gestartet, App bleibt offen: Sichern nach ersetzter Busy-Ansicht abgebrochen");
+			showError.accept(UpdateTexts.INSTALLER_OPEN);
+		} catch (RuntimeException e) {
+			LOG.log(Level.WARNING, "Beenden nach gestartetem Update scheiterte", e);
+			showError.accept(UpdateTexts.INSTALLER_OPEN);
+		}
+		abort();
 	}
 
 	/** Gibt den Ablauf frei und meldet den Abbruch weiter. */

@@ -73,6 +73,10 @@ public final class UpdateTexts {
 			+ " steht unter Einstellungen → Info und Updates. Kopiere sie in einen Browser und lade die Datei; schließe dann"
 			+ " die Kartenverwaltung und öffne erst danach die Datei.";
 
+	/** Das Update ist gestartet, die App blieb aber offen, weil der Nutzer beim zweiten Sichern abbrach. */
+	public static final String INSTALLER_OPEN = "Das Windows-Fenster zum Installieren ist offen. Speichere zuerst und klicke"
+			+ " erst dann dort auf „Aktualisieren“; die Kartenverwaltung wird dabei geschlossen.";
+
 	public static final String BUSY = "Update wird vorbereitet …";
 	public static final String BUSY_HINT = "Dauert das länger als eine Minute, schließe das Fenster und starte die"
 			+ " Kartenverwaltung neu.";
