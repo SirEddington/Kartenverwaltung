@@ -238,6 +238,8 @@ public final class SyncService implements ConnectionControl {
 	/** Die Sperre gegen einen zweiten Start; gehalten bis zum Programmende. */
 	@SuppressWarnings("unused")
 	private static InstanceLock instanceLock;
+	/** Die Inhaltsprüfung der Anwendung; die App richtet sie vor dem ersten {@link #getInstance()} ein. */
+	private static ContentGate installedGate;
 
 	/** Eine Aktion mit Dateizugriff. */
 	private interface IoAction {
@@ -385,6 +387,8 @@ public final class SyncService implements ConnectionControl {
 	private final Executor worker;
 	private final Predicate<Path> reachable;
 	private final Clock clock;
+	/** Die Inhaltsprüfung für den lokalen und den gemeinsamen Bestand und die Regelkennung des Index. */
+	private final ContentGate gate;
 	private final VersionStore local;
 	private final SyncNotifier notifier;
 	/** Löst die gemeldeten Verluste zu Zusammenführungen auf; eingereiht wird in {@link #reportLoss}. */
@@ -547,15 +551,17 @@ public final class SyncService implements ConnectionControl {
 	 * @param worker     der Thread für die Arbeit am gemeinsamen Ordner
 	 * @param reachable  die Prüfung der Erreichbarkeit (mit Zeitlimit)
 	 * @param clock      die Uhr für Versions-IDs, Zeitpunkte und Fristen
+	 * @param gate       die Inhaltsprüfung, die beide Stores und der Index nutzen
 	 */
 	SyncService(Path appDataDir, MachineIdentity machine, FileLayer files, Executor ui, Executor worker,
-			Predicate<Path> reachable, Clock clock) {
+			Predicate<Path> reachable, Clock clock, ContentGate gate) {
 		this.appDataDir = appDataDir;
 		this.files = files;
 		this.worker = worker;
 		this.reachable = reachable;
 		this.clock = clock;
-		this.local = new VersionStore(appDataDir.resolve(DATA), files);
+		this.gate = Objects.requireNonNull(gate, "gate");
+		this.local = new VersionStore(appDataDir.resolve(DATA), files, null, null, gate);
 		this.connection = ConnectionMarker.read(appDataDir).orElse(null);
 		// eine unvollständige Marke "verbunden": Der erste Lauf einer Verbindung kam nicht zu Ende (auch über einen Neustart)
 		this.notifier = new SyncNotifier(ui, connection == null || connection.complete());
@@ -570,8 +576,7 @@ public final class SyncService implements ConnectionControl {
 	 * der Inhaltsprüfung.
 	 */
 	private UnitIndex newIndex(Ownership own) {
-		// bis das Tor des Stores hier ankommt (KARV-135, Aufgabe 9), gilt die Kennung des Tors, das nie sperrt
-		return new UnitIndex(appDataDir.resolve(INDEX), files, own, ContentGate.NONE.rulesId());
+		return new UnitIndex(appDataDir.resolve(INDEX), files, own, gate.rulesId());
 	}
 
 	/**
@@ -579,11 +584,15 @@ public final class SyncService implements ConnectionControl {
 	 * arbeitet auf {@code AppPaths.appDataDir()}, meldet über {@code Platform.runLater} und hat einen Daemon-Thread für
 	 * die Arbeit und den Takt alle 2 Sekunden.
 	 *
-	 * @throws IllegalStateException mit dem Text von SYS-010, wenn die Anwendung auf diesem Rechner schon läuft
+	 * @throws IllegalStateException mit dem Text von SYS-010, wenn die Anwendung auf diesem Rechner schon läuft; ebenso,
+	 *                               wenn die Inhaltsprüfung nicht eingerichtet ist (siehe {@link #installContentGate})
 	 * @throws UncheckedIOException  wenn Sperre oder Kennung nicht gelesen oder angelegt werden können
 	 */
 	public static synchronized SyncService getInstance() {
 		if (instance == null) {
+			if (installedGate == null) {
+				throw new IllegalStateException("Inhaltsprüfung nicht eingerichtet");
+			}
 			Path appData = AppPaths.appDataDir().toPath();
 			MachineIdentity identity;
 			try {
@@ -602,11 +611,29 @@ public final class SyncService implements ConnectionControl {
 			}
 			ScheduledExecutorService thread = Executors.newSingleThreadScheduledExecutor(SyncService::daemon);
 			SyncService service = new SyncService(appData, identity, new NioFileLayer(), Platform::runLater, thread,
-					Reachability::isReachable, Clock.systemDefaultZone());
+					Reachability::isReachable, Clock.systemDefaultZone(), installedGate);
 			thread.scheduleWithFixedDelay(service::tickSafely, TICK.toMillis(), TICK.toMillis(), TimeUnit.MILLISECONDS);
 			instance = service;
 		}
 		return instance;
+	}
+
+	/**
+	 * Richtet die Inhaltsprüfung der Anwendung ein; sie muss vor dem ersten {@link #getInstance()} geschehen. Ein zweiter
+	 * Aufruf ersetzt die Prüfung für eine noch nicht erzeugte Instanz.
+	 */
+	public static synchronized void installContentGate(ContentGate gate) {
+		installedGate = Objects.requireNonNull(gate, "gate");
+	}
+
+	/** Die eingerichtete Inhaltsprüfung; {@code null}, solange keine eingerichtet ist. */
+	public static synchronized ContentGate installedContentGate() {
+		return installedGate;
+	}
+
+	/** Für Tests: nimmt die eingerichtete Inhaltsprüfung zurück (oder setzt eine frühere wieder ein). */
+	static synchronized void restoreContentGate(ContentGate previous) {
+		installedGate = previous;
 	}
 
 	/**
@@ -3630,7 +3657,7 @@ public final class SyncService implements ConnectionControl {
 
 	private Link activate(String dir, ConnectMode mode) {
 		Path path = toPath(dir);
-		VersionStore shared = path == null ? null : new VersionStore(path.resolve(DATA), files, path, this::machineId);
+		VersionStore shared = path == null ? null : new VersionStore(path.resolve(DATA), files, path, this::machineId, gate);
 		Link created = new Link(dir, path, shared, new SyncPositions(appDataDir.resolve(SYNC_STATE), dir));
 		created.connectMode = mode;
 		synchronized (lock) {

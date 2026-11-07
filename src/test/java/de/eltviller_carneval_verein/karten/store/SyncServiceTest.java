@@ -60,6 +60,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
 import de.eltviller_carneval_verein.karten.store.ConnectOutcome.Kind;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 
@@ -274,7 +275,7 @@ class SyncServiceTest {
 			Path unclean = uncleanFile();
 			layer.failWhen(p -> uncleanLocked.get() && p.equals(unclean), "createNew", new IOException("Ordner gesperrt"));
 			this.service = new SyncService(appData, identity, layer, ui, worker,
-					reachable != null ? reachable : p -> !down.get(), clock);
+					reachable != null ? reachable : p -> !down.get(), clock, ContentRules.GATE);
 			service.setListener(events);
 			service.syncState().addListener((property, before, after) -> states.add(after));
 		}
@@ -975,8 +976,8 @@ class SyncServiceTest {
 	/** Baut den Start-Index des Rechners und schreibt ihn, damit der nächste Start keine Einheit lesen muss. */
 	private static void writeStartIndex(Path appData, String machineId) throws IOException {
 		UnitIndex index = new UnitIndex(appData.resolve("index"), new NioFileLayer(), new Ownership(machineId, List.of()),
-				ContentGate.NONE.rulesId());
-		index.refresh(new VersionStore(appData.resolve("data"), new NioFileLayer()), p -> {
+				ContentRules.GATE.rulesId());
+		index.refresh(new VersionStore(appData.resolve("data"), new NioFileLayer(), null, null, ContentRules.GATE), p -> {
 		});
 		index.flush();
 	}
@@ -4400,6 +4401,44 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void firstStartAfter101LocksContentBookingAndDoesNotWarn() throws IOException {
+		Path appData = dir.resolve("a");
+		// die Fassung 1.0.x kennt die Prüfung nicht: Die Buchung gilt ihr als gültig, der Index steht auf OK
+		SyncService old = TestSyncServices.unstarted(appData, "a", new NioFileLayer(), p -> true, clock, ContentGate.NONE);
+		assertTrue(old.startup(""));
+		ObjectNode voucher = MAPPER.createObjectNode().put("paymentStatus", "x-test-voucher");
+		old.append(UUID.randomUUID().toString(), List.of(new Change(BOOKING, List.of(), voucher, false)));
+		old.closeIndex();
+		Path indexDir = appData.resolve("index");
+		assertTrue(Files.isRegularFile(indexDir.resolve("clean")));
+		assertEquals(Status.OK, old.unitState(BOOKING).status());
+		// der Index, wie ihn 1.0.x schrieb: Format 4, ohne Regelkennung und Sperrmerkmal
+		UnitIndexTest.setIndexFormat(indexDir, 4);
+		try (Stream<Path> files = Files.walk(indexDir)) {
+			for (Path file : files.filter(f -> f.toString().endsWith(".json")).toList()) {
+				Files.writeString(file, Files.readString(file).replaceAll("\"rulesId\":\"[^\"]*\",", "")
+						.replaceAll("\"contentLocked\":(true|false),?", ""));
+			}
+		}
+
+		try (LogCapture log = new LogCapture(UnitIndex.class); LogCapture syncLog = new LogCapture(SyncService.class)) {
+			Node b = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+			assertTrue(b.service.startup(""));
+
+			assertEquals(Status.LOCKED_FORMAT, b.service.unitState(BOOKING).status());
+			assertTrue(b.service.unitState(BOOKING).contentLocked());
+			assertEquals(Status.LOCKED_FORMAT, b.service.snapshots().get(BOOKING).status());
+			assertTrue(b.service.snapshots().get(BOOKING).contentLocked());
+			assertTrue(log.records.stream().noneMatch(r -> r.getLevel().intValue() >= Level.WARNING.intValue()),
+					log.records::toString);
+			// keine Warnung über eine Änderung außerhalb der App; gewarnt wird nur über die Sperre selbst (SYS-009)
+			assertEquals(0, syncLog.warnings(CHANGED_OUTSIDE));
+			assertTrue(syncLog.records.stream().filter(r -> r.getLevel().intValue() >= Level.WARNING.intValue())
+					.allMatch(r -> r.getMessage().startsWith("SYS-009: ")), syncLog.records::toString);
+		}
+	}
+
+	@Test
 	void startupAfterCrashWalksAgain() throws IOException {
 		Node a = cleanlyClosedNode();
 		Node b = new Node(a.appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
@@ -4967,7 +5006,8 @@ class SyncServiceTest {
 		Path appData = dir.resolve("a");
 		GateLayer gate = new GateLayer();
 		MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "a");
-		SyncService service = new SyncService(appData, identity, gate, Runnable::run, Runnable::run, p -> true, clock);
+		SyncService service = new SyncService(appData, identity, gate, Runnable::run, Runnable::run, p -> true, clock,
+				ContentRules.GATE);
 		service.startup("");
 		Version v1 = service.append("s1", List.of(create(BOOKING, "Anna"))).get(0);
 		// der "Worker" löst die Einheit auf (Stand: v1) und bleibt stehen, bevor er den Stand einträgt

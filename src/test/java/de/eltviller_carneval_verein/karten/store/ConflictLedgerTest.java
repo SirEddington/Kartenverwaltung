@@ -36,6 +36,8 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
+
 /**
  * Die offenen Konflikte dieses Rechners aus dem Start-Index: Vermerke, die ihn betreffen, und Elternlöschungen über
  * eigenen, dem Löschenden unbekannten Verkäufen; dazu das Bestätigen.
@@ -602,7 +604,8 @@ class ConflictLedgerTest {
 		FaultyFileLayer files = new FaultyFileLayer(new NioFileLayer());
 		Path feeds = shared.resolve("data/feeds");
 		files.failWhen(path -> path.startsWith(feeds), "createNew", new IOException("Ordner gesperrt"));
-		SyncService b = new SyncService(appData, identity, files, Runnable::run, Runnable::run, path -> true, clock);
+		SyncService b = new SyncService(appData, identity, files, Runnable::run, Runnable::run, path -> true, clock,
+				ContentRules.GATE);
 		b.startup(shared.toString());
 		Recorder recorder = new Recorder();
 		b.setListener(recorder);
@@ -633,7 +636,8 @@ class ConflictLedgerTest {
 		byte[] bytes = StoreCodec.write(sale);
 		assertTrue(local.writeVersion(SALE, sale.id(), bytes));
 		new LocalArbiter(local, Clock.systemUTC()).claim(SALE, sale, bytes);
-		SyncService b = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run, path -> true, clock);
+		SyncService b = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run, path -> true, clock,
+				ContentRules.GATE);
 		b.startup(shared.toString());
 		assertTrue(Files.exists(shared.resolve("data/feeds/" + identity.id() + "/1.json")));
 		aDeletesShow(shared, identity.id(), 1L);
@@ -850,7 +854,7 @@ class ConflictLedgerTest {
 		AtomicBoolean reachable = new AtomicBoolean(false);
 		MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "Kasse B");
 		SyncService b = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run,
-				path -> reachable.get(), clock);
+				path -> reachable.get(), clock, ContentRules.GATE);
 		Recorder recorder = new Recorder();
 		b.setListener(recorder);
 
@@ -876,7 +880,8 @@ class ConflictLedgerTest {
 		AtomicBoolean broken = new AtomicBoolean(true);
 		layer.failWhen(p -> broken.get() && p.toString().replace('\\', '/').endsWith("feeds/" + identity.id()), "listNames",
 				new IOException("Netzlaufwerk getrennt"));
-		SyncService b = new SyncService(appData, identity, layer, Runnable::run, Runnable::run, path -> true, clock);
+		SyncService b = new SyncService(appData, identity, layer, Runnable::run, Runnable::run, path -> true, clock,
+				ContentRules.GATE);
 		b.startup(shared.toString());
 		aDeletesShow(shared, identity.id(), 0L);
 		tickAfterDiscoveryInterval(b);

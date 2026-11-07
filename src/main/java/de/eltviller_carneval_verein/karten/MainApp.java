@@ -19,6 +19,7 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
 import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
@@ -201,6 +202,7 @@ public class MainApp extends Application {
 		// Der Versionsspeicher nimmt zuerst die Sperre gegen einen zweiten Start und liest die Kennung des Rechners;
 		// scheitert das, geht es ohne Fenster nicht weiter
 		SyncService sync;
+		installContentRules();
 		try {
 			sync = SyncService.getInstance();
 		} catch (IllegalStateException e) {
@@ -508,6 +510,14 @@ public class MainApp extends Application {
 		Optional<String> name = OperatorDialog.ask(primaryStage, settingsStore.current().getRecentOperators(), true);
 		name.ifPresent(chosen -> OperatorDialog.adopt(SyncService.getInstance(), chosen));
 		return name.isPresent();
+	}
+
+	/**
+	 * Richtet die Inhaltsprüfung der Anwendung ein ({@link ContentRules#GATE}); sie muss vor dem ersten
+	 * {@link SyncService#getInstance()} geschehen.
+	 */
+	static void installContentRules() {
+		SyncService.installContentGate(ContentRules.GATE);
 	}
 
 	/** Meldet, dass der Start scheitert, und beendet die Anwendung. */
