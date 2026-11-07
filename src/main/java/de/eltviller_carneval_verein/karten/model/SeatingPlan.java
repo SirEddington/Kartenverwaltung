@@ -327,7 +327,7 @@ public class SeatingPlan {
 			copiedTable.setWidth(table.getWidth());
 			copiedTable.setHeight(table.getHeight());
 			copiedTable.setRotation(table.getRotation());
-			copiedTable.setTextSettings(table.getTextSettings());
+			copiedTable.copyTextFrom(table);
 			copiedTable.getUnknown().replaceWith(table.getUnknown());
 			for (Seat seat : table.getSeats()) {
 				Seat copiedSeat = new Seat();

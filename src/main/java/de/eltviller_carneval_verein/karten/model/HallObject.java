@@ -9,6 +9,7 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 
 // Ab v1.1 übergeht das Laden unbekannte Felder; v1.0.x lehnt sie hier noch ab, darum schreibt das Hallenobjekt keine neuen
@@ -26,14 +27,15 @@ public class HallObject implements Labeled {
 	private double width;
 	private double height;
 	private String color;
-	private Shape shape = Shape.RECTANGLE;
+	// Form und Ausrichtungen vertragen einen Namen, den erst eine neuere Version kennt (Rückfallwert, Originaltext bleibt)
+	private final TolerantEnum<Shape> shape = new TolerantEnum<>(Shape.class, Shape.RECTANGLE, Shape.RECTANGLE);
 
 	// Text im Objekt (Größe in cm wie alle Hallenmaße, Drehung in Grad im Uhrzeigersinn). Mit textAuto bestimmt die
 	// Anzeige die übrigen Werte selbst aus Größe und Form des Objekts; sie gelten dann nur als Vorbelegung.
 	private boolean textAuto = true;
 	private double textSize = 20;
-	private TextAlignH textAlignH = TextAlignH.CENTER;
-	private TextAlignV textAlignV = TextAlignV.CENTER;
+	private final TolerantEnum<TextAlignH> textAlignH = new TolerantEnum<>(TextAlignH.class, TextAlignH.CENTER, TextAlignH.CENTER);
+	private final TolerantEnum<TextAlignV> textAlignV = new TolerantEnum<>(TextAlignV.class, TextAlignV.CENTER, TextAlignV.CENTER);
 	private double textRotation = 0;
 
 	// Konstuktoren -->
@@ -139,12 +141,25 @@ public class HallObject implements Labeled {
 		this.color = color;
 	}
 
+	@JsonIgnore
 	public Shape getShape() {
-		return shape;
+		return shape.get();
 	}
 
+	@JsonIgnore
 	public void setShape(Shape shape) {
-		this.shape = shape;
+		this.shape.set(shape);
+	}
+
+	/** Der Name in der Datei: der Originaltext, wenn die Datei eine Form nennt, die diese Version nicht kennt. */
+	@JsonProperty("shape")
+	String shapeJson() {
+		return shape.toJson();
+	}
+
+	@JsonProperty("shape")
+	void shapeJson(String text) {
+		shape.fromJson(text);
 	}
 
 	public boolean isTextAuto() {
@@ -163,20 +178,44 @@ public class HallObject implements Labeled {
 		this.textSize = textSize;
 	}
 
+	@JsonIgnore
 	public TextAlignH getTextAlignH() {
-		return textAlignH;
+		return textAlignH.get();
 	}
 
+	@JsonIgnore
 	public void setTextAlignH(TextAlignH textAlignH) {
-		this.textAlignH = textAlignH;
+		this.textAlignH.set(textAlignH);
 	}
 
+	@JsonProperty("textAlignH")
+	String textAlignHJson() {
+		return textAlignH.toJson();
+	}
+
+	@JsonProperty("textAlignH")
+	void textAlignHJson(String text) {
+		textAlignH.fromJson(text);
+	}
+
+	@JsonIgnore
 	public TextAlignV getTextAlignV() {
-		return textAlignV;
+		return textAlignV.get();
 	}
 
+	@JsonIgnore
 	public void setTextAlignV(TextAlignV textAlignV) {
-		this.textAlignV = textAlignV;
+		this.textAlignV.set(textAlignV);
+	}
+
+	@JsonProperty("textAlignV")
+	String textAlignVJson() {
+		return textAlignV.toJson();
+	}
+
+	@JsonProperty("textAlignV")
+	void textAlignVJson(String text) {
+		textAlignV.fromJson(text);
 	}
 
 	public double getTextRotation() {
@@ -190,16 +229,17 @@ public class HallObject implements Labeled {
 	@Override
 	@JsonIgnore
 	public TextSettings getTextSettings() {
-		return new TextSettings(textAuto, textSize, textAlignH, textAlignV, textRotation);
+		return new TextSettings(textAuto, textSize, textAlignH.get(), textAlignV.get(), textRotation);
 	}
 
+	/** Setzt die Ausrichtungen über die Setter: Eine unveränderte Ausrichtung behält ihren Originaltext. */
 	@Override
 	@JsonIgnore
 	public void setTextSettings(TextSettings settings) {
 		textAuto = settings.auto();
 		textSize = settings.size();
-		textAlignH = settings.alignH();
-		textAlignV = settings.alignV();
+		setTextAlignH(settings.alignH());
+		setTextAlignV(settings.alignV());
 		textRotation = settings.rotation();
 	}
 	// <-- Getter und Setter

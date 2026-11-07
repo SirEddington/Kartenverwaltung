@@ -27,6 +27,8 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.Shape;
+import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.store.ForeignVersions;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
@@ -591,6 +593,47 @@ class StoreHallRepositoryForeignTest {
 
 		assertTrue(result.deferred().isEmpty(), "ein neuerer fremder Stand wird eingearbeitet, nicht zurückgestellt");
 		assertEquals("Bürgerhaus", mine.findById(hall.getId()).getName());
+	}
+
+	/**
+	 * Ein Stand aus einer neueren Version nennt eine Form und Ausrichtungen, die diese Version nicht kennt (KARV-135). Das
+	 * Modell fällt auf RECTANGLE bzw. CENTER zurück, ohne dass jemand etwas geändert hat: Die Halle gilt nicht als verändert.
+	 * Ändert jemand danach etwas anderes, schreibt die neue Version die Originaltexte unverändert zurück.
+	 */
+	@Test
+	void hallWithUnknownShapeAndAlignmentIsNotChangedAndKeepsOriginalsAfterMove() throws IOException {
+		Hall withContent = new Hall(hall.getId());
+		withContent.addHallObject().setPosX(10);
+		withContent.addSeatingPlan().addTable(withContent.getSeatingPlans().get(0).addRow());
+		ObjectNode tree = JsonMapperFactory.create().valueToTree(withContent);
+		ObjectNode object = (ObjectNode) tree.get("hallObjects").get(0);
+		object.put("shape", "x-test-ellipse");
+		object.put("textAlignH", "x-test-blocksatz");
+		ObjectNode table = (ObjectNode) tree.get("seatingPlans").get(0).get("tables").get(0);
+		table.put("textAlignV", "x-test-blocksatz");
+		foreignVersion(unit(), payload -> {
+			payload.set("hallObjects", tree.get("hallObjects"));
+			payload.set("seatingPlans", tree.get("seatingPlans"));
+		});
+
+		ForeignResult result = mine.applyForeign(List.of(unit()));
+
+		assertTrue(result.deferred().isEmpty());
+		assertTrue(result.warnings().isEmpty());
+		Hall loaded = mine.findById(hall.getId());
+		assertEquals(Shape.RECTANGLE, loaded.getHallObjects().get(0).getShape());
+		assertEquals(TextAlignH.CENTER, loaded.getHallObjects().get(0).getTextAlignH());
+		assertTrue(mine.isCurrent(hall.getId()), "unverändert geladen gilt die Halle als aktuell");
+
+		loaded.getHallObjects().get(0).setPosX(99);
+		mine.saveHall(loaded);
+
+		ObjectNode saved = sync.unitState(unit()).head().payload();
+		ObjectNode savedObject = (ObjectNode) saved.get("hallObjects").get(0);
+		assertEquals(99, savedObject.get("posX").asDouble());
+		assertEquals("x-test-ellipse", savedObject.get("shape").asText());
+		assertEquals("x-test-blocksatz", savedObject.get("textAlignH").asText());
+		assertEquals("x-test-blocksatz", saved.get("seatingPlans").get(0).get("tables").get(0).get("textAlignV").asText());
 	}
 
 	@Test
