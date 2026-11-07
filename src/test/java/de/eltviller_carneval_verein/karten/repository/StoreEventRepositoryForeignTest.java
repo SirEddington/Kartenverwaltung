@@ -235,6 +235,81 @@ class StoreEventRepositoryForeignTest {
 
 	// <-- Bauteile
 
+	// Rundlauf statt rohem Vergleich (KARV-133) -->
+
+	/**
+	 * Der andere Rechner schreibt Kopf, Vorstellung und Buchung mit einem Zusatzfeld und ohne ein Feld, das das Modell
+	 * immer schreibt (so schreibt eine andere Programmversion). Danach hat {@code mine} die Stände eingearbeitet.
+	 */
+	private void loadUnitsWithFormatDifferences() throws IOException {
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+		foreign.write(head(), "Fremd", payload -> {
+			payload.put("x-test-neu", 1);
+			payload.remove("description");
+		});
+		foreign.write(presentation, "Fremd", payload -> {
+			payload.put("x-test-neu", 1);
+			payload.remove("cashDifferenceComment");
+		});
+		foreign.write(seatUnit(friday, 0), "Fremd", payload -> {
+			payload.put("x-test-neu", 1);
+			payload.remove("email");
+		});
+		ForeignResult result = mine.applyForeign(List.of(head(), presentation, seatUnit(friday, 0)));
+		assertTrue(result.deferred().isEmpty(), result.deferred().toString());
+		assertEquals(1, event.getUnknown().asMap().get("x-test-neu").asInt(), "das Modell hat den Stand eingearbeitet");
+		assertEquals(1, seat(friday, 0).getUnknown().asMap().get("x-test-neu").asInt());
+	}
+
+	@Test
+	void loadedUnitsWithFormatDifferencesAreNotLocallyChanged() throws IOException {
+		loadUnitsWithFormatDifferences();
+
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+	}
+
+	@Test
+	void saveWithoutChangeWritesNothing() throws IOException {
+		loadUnitsWithFormatDifferences();
+		long before = files();
+
+		mine.saveEvent(event);
+
+		assertEquals(before, files(), "unverändert gespeichert schreibt keine Version");
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+	}
+
+	@Test
+	void derivedAsRecognisesEqualForeignInputWithExtraField() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		// Müller trägt schon ein Zusatzfeld, das der Abgleich mit auf den neuen Sitz nimmt
+		foreign.write(seatUnit(friday, 0), "Fremd", payload -> payload.put("x-test-neu", 1));
+		mine.applyForeign(List.of(seatUnit(friday, 0)));
+		Booking sold = seat(friday, 0);
+		remoteSwitchesTo(other);
+		UnitKey newSeat = UnitKey.booking(event.getId(), friday.getId(),
+				other.getSeatingPlans().get(0).getSeats().get(0).getId());
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		assertEquals("Müller", sold.getLastName());
+		assertEquals(newSeat.bookingDir(), sold.getSeatId(), "der Abgleich hat Müller umgesetzt");
+		// dieselbe Eingabe wie der abgeleitete Stand, nur ohne ein Feld, das das Modell immer schreibt
+		Version arrived = foreign.write(newSeat, "Fremd", payload -> payload.remove("email"));
+		// der Nutzer ändert die umgesetzte Buchung, bevor ihre Einheit eintrifft
+		sold.setFirstName("Hans");
+
+		ForeignResult result = mine.applyForeign(List.of(newSeat));
+
+		assertTrue(result.deferred().isEmpty(), "die Eingabe baut auf diesem Stand auf: " + result.deferred());
+		assertEquals(arrived.id(), mine.knownUnit(newSeat).version(), "der Stand ist der Vergleichsstand");
+		assertEquals("Hans", sold.getFirstName());
+		long versions = sync.history(newSeat).size();
+		mine.saveEvent(event);
+		assertEquals(versions + 1, sync.history(newSeat).size(), "genau eine Version auf dem fremden Stand");
+	}
+
+	// <-- Rundlauf statt rohem Vergleich
+
 	// Einarbeiten -->
 
 	@Test

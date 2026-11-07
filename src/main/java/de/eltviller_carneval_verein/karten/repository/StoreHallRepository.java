@@ -3,7 +3,6 @@ package de.eltviller_carneval_verein.karten.repository;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,9 +70,6 @@ public class StoreHallRepository implements HallRepository {
 	 * wieder in den Cache, gilt das nicht mehr.
 	 */
 	private final Set<String> removedByOthers = new HashSet<>();
-
-	/** Der zuletzt berechnete Rundlauf des Vergleichsstands je Halle (siehe {@link #knownAsModel}). */
-	private final Map<UnitKey, RoundTrip> roundTrips = new HashMap<>();
 
 	/** Ob eine Halle gerade in Bearbeitung ist oder davon abhängt (siehe {@link #setBlockedCheck}). */
 	private Predicate<Hall> blockedCheck = hall -> false;
@@ -392,7 +388,6 @@ public class StoreHallRepository implements HallRepository {
 		baseline.delete(hall.getId(), UnitKey.hall(hall.getId()), hall.getName());
 
 		cachedHalls.remove(hall);
-		roundTrips.remove(UnitKey.hall(hall.getId()));
 
 		listeners.notifyDeleted(hall);
 	}
@@ -526,7 +521,6 @@ public class StoreHallRepository implements HallRepository {
 			if (!UnitMapper.isAbsent(current)) {
 				warnings.add(UnitMapper.unreadableHall(hallId));
 			}
-			roundTrips.remove(unit);
 			if (old != null) {
 				cachedHalls.remove(old);
 				removedByOthers.add(hallId);
@@ -569,31 +563,15 @@ public class StoreHallRepository implements HallRepository {
 			return true;
 		}
 		try {
-			ObjectNode knownAsModel = knownAsModel(known);
-			// ohne lesbaren Vergleichsstand gilt die Halle als verändert
+			// Verglichen wird mit dem Stand, wie das Modell ihn aus der Datei macht, nicht mit dem rohen Payload (KARV-128,
+			// KARV-133): Schrieb eine andere Programmversion die Halle, gälte sie sonst gleich nach dem Laden als verändert.
+			// Ohne lesbaren Vergleichsstand gilt die Halle als verändert.
+			ObjectNode knownAsModel = baseline.comparable(UnitKey.hall(hall.getId()));
 			return knownAsModel == null || !UnitMapper.decompose(hall).payload().equals(knownAsModel);
 		} catch (IllegalStateException e) {
 			// ohne verlässlichen Vergleich gilt die Halle als verändert
 			return true;
 		}
-	}
-
-	/**
-	 * Der Vergleichsstand, wie ihn das Modell daraus macht ({@link UnitMapper#roundTrip}), nicht der rohe Payload: Schrieb
-	 * eine andere Programmversion die Halle, trägt er Felder, die das Modell nicht kennt (KARV-128), und die Halle gälte
-	 * sonst gleich nach dem Laden als verändert. Gemerkt je Halle, bis der Vergleichsstand wechselt.
-	 */
-	private ObjectNode knownAsModel(UnitSnapshot known) {
-		RoundTrip cached = roundTrips.get(known.unit());
-		if (cached == null || cached.source() != known) {
-			cached = new RoundTrip(known, UnitMapper.roundTrip(known, Hall.class));
-			roundTrips.put(known.unit(), cached);
-		}
-		return cached.payload();
-	}
-
-	/** Ein Vergleichsstand und sein Rundlauf durch das Modell ({@code payload} ist {@code null}, wenn er unlesbar ist). */
-	private record RoundTrip(UnitSnapshot source, ObjectNode payload) {
 	}
 
 	private Hall cachedHall(String hallId) {

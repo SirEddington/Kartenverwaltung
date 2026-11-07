@@ -218,7 +218,7 @@ final class UnitMapper {
 			UnitSnapshot known = baseline.get(part.unit());
 			if (known == null || known.version() == null) {
 				changes.add(new Change(part.unit(), List.of(), part.payload(), false));
-			} else if (!known.deleted() && part.payload().equals(known.payload())) {
+			} else if (!known.deleted() && sameAsModel(part.payload(), known)) {
 				continue;
 			} else if (!known.deleted() && !shown.contains(part.unit()) && !isReadable(known)
 					&& parentShown(part.unit(), shown)) {
@@ -667,18 +667,38 @@ final class UnitMapper {
 	}
 
 	/**
-	 * Der Stand einer Einheit, wie ihn das Modell dieser Programmversion daraus macht: gelesen ({@link #readUnit}) und wieder
-	 * normalisiert. Felder, die das Modell beim Lesen verwirft (etwa aus einer anderen Programmversion) oder mit seinen
-	 * Standardwerten ergänzt, fehlen bzw. stehen darin wie im Modell (KARV-128). Nur so ist ein unverändert geladenes
-	 * Objekt gleich seinem Stand.
+	 * Der Stand einer Einheit, wie dieses Programm ihn aus der Datei macht (Rundlauf): gelesen ({@link #readUnit}) und
+	 * geformt wie in {@link #decompose}: der Event-Kopf ohne Vorstellungen, die Vorstellung ohne Buchungen, Buchung und Halle
+	 * normalisiert. Felder, die das Modell beim Lesen verwirft (etwa aus einer anderen Programmversion), fehlen darin, Felder,
+	 * die der Datei fehlen, stehen darin mit dem Wert des Modells, und unbekannte Felder und Rückfall-Enums sind erhalten
+	 * (KARV-128, KARV-133). Nur so ist ein unverändert geladenes Objekt gleich seinem Stand. Gilt für jeden Snapshot, auch
+	 * für fremde.
 	 *
-	 * @return {@code null}, wenn sich die Einheit nicht lesen lässt (siehe {@link #readUnit})
+	 * @return {@code null}, wenn sich die Einheit nicht lesen lässt (siehe {@link #readUnit}); sie gilt dann als verändert
 	 */
-	static ObjectNode roundTrip(UnitSnapshot snapshot, Class<?> type) {
-		Object value = readUnit(snapshot, type);
-		return value == null ? null : normalize(value);
+	static ObjectNode comparable(UnitSnapshot snapshot) {
+		Object value = readUnit(snapshot, modelClass(snapshot.unit().type()));
+		if (value == null) {
+			return null;
+		}
+		ObjectNode node = normalize(value);
+		switch (snapshot.unit().type()) {
+		case EVENT -> node.remove(PRESENTATIONS);
+		case PRESENTATION -> node.remove(BOOKINGS);
+		case BOOKING, HALL -> {
+		}
+		}
+		return node;
 	}
 
+	/**
+	 * Ob die Einheit im Modell ({@code model}, wie {@link #decompose} sie bildet) dem Stand {@code snapshot} entspricht:
+	 * erst roh verglichen, nur bei Ungleichheit mit dem Rundlauf ({@link #comparable}). So kostet der übliche Fall (gleiche
+	 * Version) nichts zusätzlich. Ein unlesbarer Stand ist nie gleich, es sei denn, er ist roh gleich.
+	 */
+	static boolean sameAsModel(ObjectNode model, UnitSnapshot snapshot) {
+		return snapshot.payload() != null && (snapshot.payload().equals(model) || model.equals(comparable(snapshot)));
+	}
 	/**
 	 * Liest eine einzelne Einheit nach den Regeln des Zusammensetzens ({@link #read}, ID-Prüfung eingeschlossen), aber
 	 * ohne Warnung. Der Payload bleibt unverändert.

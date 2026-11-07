@@ -600,6 +600,38 @@ class StoreHallRepositoryForeignTest {
 	 * Modell fällt auf RECTANGLE bzw. CENTER zurück, ohne dass jemand etwas geändert hat: Die Halle gilt nicht als verändert.
 	 * Ändert jemand danach etwas anderes, schreibt die neue Version die Originaltexte unverändert zurück.
 	 */
+	/**
+	 * Speichern ohne Änderung schreibt nichts, auch wenn die Datei Felder trägt, die das Modell verwirft (Sitzhöhe), ein
+	 * unbekanntes Feld und ein Rückfall-Enum hat und ein bekanntes Feld ihr fehlt (KARV-133): Der Vergleich gilt dem Stand,
+	 * wie dieses Programm ihn aus der Datei macht.
+	 */
+	@Test
+	void hallSaveWithoutChangeWritesNothingDespiteFormatDifference() throws IOException {
+		Hall withContent = new Hall(hall.getId());
+		withContent.addHallObject().setPosX(10);
+		withContent.addSeatingPlan().addTable(withContent.getSeatingPlans().get(0).addRow()).addSeat();
+		ObjectNode tree = JsonMapperFactory.create().valueToTree(withContent);
+		((ObjectNode) tree.get("hallObjects").get(0)).put("shape", "x-test-ellipse");
+		ObjectNode plan = (ObjectNode) tree.get("seatingPlans").get(0);
+		ObjectNode seat = (ObjectNode) plan.get("tables").get(0).get("seats").get(0);
+		seat.put("height", 30.0);
+		seat.put("x-test-neu", 1);
+		foreignVersion(unit(), payload -> {
+			payload.set("hallObjects", tree.get("hallObjects"));
+			payload.set("seatingPlans", tree.get("seatingPlans"));
+			payload.remove("description");
+		});
+		mine.applyForeign(List.of(unit()));
+		Hall loaded = mine.findById(hall.getId());
+		assertEquals(1, loaded.getSeatingPlans().size(), "der Stand mit Bestuhlung ist eingearbeitet");
+		long before = files();
+
+		mine.saveHall(loaded);
+
+		assertEquals(before, files(), "unverändert gespeichert schreibt keine Version");
+		assertTrue(mine.isCurrent(hall.getId()));
+	}
+
 	@Test
 	void hallWithUnknownShapeAndAlignmentIsNotChangedAndKeepsOriginalsAfterMove() throws IOException {
 		Hall withContent = new Hall(hall.getId());

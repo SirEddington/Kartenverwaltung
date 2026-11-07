@@ -1371,6 +1371,130 @@ class UnitMapperTest {
 
 	// <-- changes
 
+	// comparable -->
+
+	@Test
+	void comparableOfEventHeadHasNoPresentations() {
+		Event event = simpleEvent();
+		UnitSnapshot head = snapshot(UnitMapper.decompose(event).get(0));
+
+		ObjectNode comparable = UnitMapper.comparable(head);
+
+		assertNotNull(comparable);
+		assertFalse(comparable.has("presentations"), "der Kopf trägt die Vorstellungen nicht");
+		assertEquals(head.payload(), comparable);
+	}
+
+	@Test
+	void comparableOfPresentationHasNoBookings() {
+		Event event = simpleEvent();
+		UnitKey key = UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId());
+		UnitSnapshot presentation = snapshot(partOf(UnitMapper.decompose(event), key));
+
+		ObjectNode comparable = UnitMapper.comparable(presentation);
+
+		assertNotNull(comparable);
+		assertFalse(comparable.has("bookings"), "die Vorstellung trägt die Buchungen nicht");
+		assertEquals(presentation.payload(), comparable);
+	}
+
+	@Test
+	void comparableOfUnreadableUnitIsNull() {
+		Event event = simpleEvent();
+		UnitKey key = bookingKey(event, 0, "seat-a1");
+		UnitSnapshot booking = snapshot(partOf(UnitMapper.decompose(event), key));
+
+		assertEquals(null, UnitMapper.comparable(garbled(booking, "price")));
+	}
+
+	@Test
+	void comparableFollowsTheModelForExtraMissingAndDiscardedFields() {
+		Event event = simpleEvent();
+		UnitKey key = bookingKey(event, 0, "seat-a1");
+		UnitPayload part = partOf(UnitMapper.decompose(event), key);
+		ObjectNode raw = part.payload().deepCopy();
+		raw.put("x-test-neu", 1);
+		raw.remove("email");
+
+		ObjectNode comparable = UnitMapper.comparable(new UnitSnapshot(key, VERSION, Status.OK, false, raw));
+
+		assertEquals(part.payload().get("email"), comparable.get("email"), "das fehlende Feld hat den Wert des Modells");
+		assertEquals(1, comparable.get("x-test-neu").asInt(), "das unbekannte Feld bleibt erhalten");
+	}
+
+	@Test
+	void sameAsModelComparesRawFirst() {
+		Event event = simpleEvent();
+		UnitKey key = bookingKey(event, 0, "seat-a1");
+		ObjectNode model = partOf(UnitMapper.decompose(event), key).payload();
+		// ein Payload, den das Modell nicht lesen kann: nur der rohe Vergleich kann ihn als gleich erkennen
+		ObjectNode unreadable = model.deepCopy();
+		unreadable.set("price", MAPPER.createObjectNode().put("kaputt", true));
+		UnitSnapshot snapshot = new UnitSnapshot(key, VERSION, Status.OK, false, unreadable);
+		assertEquals(null, UnitMapper.comparable(snapshot));
+
+		assertTrue(UnitMapper.sameAsModel(unreadable, snapshot));
+		assertFalse(UnitMapper.sameAsModel(model, snapshot));
+	}
+
+	@Test
+	void sameAsModelUsesTheRoundTripWhenTheRawPayloadsDiffer() {
+		Event event = simpleEvent();
+		UnitKey key = bookingKey(event, 0, "seat-a1");
+		ObjectNode model = partOf(UnitMapper.decompose(event), key).payload();
+		ObjectNode raw = model.deepCopy();
+		raw.remove("email");
+		UnitSnapshot snapshot = new UnitSnapshot(key, VERSION, Status.OK, false, raw);
+
+		assertTrue(UnitMapper.sameAsModel(model, snapshot));
+
+		ObjectNode changed = model.deepCopy();
+		changed.put("lastName", "Anders");
+		assertFalse(UnitMapper.sameAsModel(changed, snapshot));
+	}
+
+	@Test
+	void changesWritesNothingForUnitWithExtraMissingOrDiscardedField() {
+		Event event = simpleEvent();
+		Hall hall = new Hall("66666666-6666-6666-6666-666666666666");
+		hall.addSeatingPlan().addTable(hall.getSeatingPlans().get(0).addRow()).addSeat();
+		List<UnitPayload> stored = new ArrayList<>(UnitMapper.decompose(event));
+		stored.add(UnitMapper.decompose(hall));
+		Map<UnitKey, UnitSnapshot> baseline = baseline(stored);
+
+		// Kopf mit Zusatzfeld, Buchung ohne ein Feld, Halle mit verworfener Sitzhöhe (so, wie eine andere Version sie schrieb)
+		baseline.get(UnitKey.event(event.getId())).payload().put("x-test-neu", 1);
+		baseline.get(bookingKey(event, 0, "seat-a1")).payload().remove("email");
+		ObjectNode plan = (ObjectNode) baseline.get(UnitKey.hall(hall.getId())).payload().get("seatingPlans").get(0);
+		((ObjectNode) plan.get("tables").get(0).get("seats").get(0)).put("height", 30.0);
+
+		// das Modell, wie dieses Programm es aus diesen Dateien lädt
+		UnitKey hallKey = UnitKey.hall(hall.getId());
+		List<UnitSnapshot> eventFiles = baseline.values().stream().filter(s -> s.unit().type() != UnitType.HALL).toList();
+		List<UnitPayload> units = new ArrayList<>(UnitMapper.decompose(UnitMapper.assembleEvents(eventFiles).items().get(0)));
+		units.add(UnitMapper.decompose(UnitMapper.assembleHalls(List.of(baseline.get(hallKey))).items().get(0)));
+		assertEquals(1, units.get(0).payload().get("x-test-neu").asInt(), "das Modell trägt das Zusatzfeld");
+
+		assertEquals(List.of(), UnitMapper.changes(baseline, shown(baseline), units));
+	}
+
+	@Test
+	void changesWritesAChangedUnitDespiteFormatDifferences() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		UnitKey key = bookingKey(event, 0, "seat-a1");
+		baseline.get(key).payload().put("x-test-neu", 1);
+		baseline.get(UnitKey.event(event.getId())).payload().put("x-test-neu", 1);
+		Event loaded = UnitMapper.assembleEvents(new ArrayList<>(baseline.values())).items().get(0);
+		loaded.getPresentations().get(0).getBookings().get(0).setLastName("Anders");
+
+		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(loaded));
+
+		assertEquals(List.of(key), changes.stream().map(Change::unit).toList());
+	}
+
+	// <-- comparable
+
 	// Umzüge (KARV-93) -->
 
 	/** Die Angaben der Änderung an dieser Einheit. */

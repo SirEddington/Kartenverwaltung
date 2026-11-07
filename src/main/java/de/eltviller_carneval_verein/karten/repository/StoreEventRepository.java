@@ -831,8 +831,9 @@ public class StoreEventRepository implements EventRepository {
 		for (Map.Entry<UnitKey, ObjectNode> entry : model.entrySet()) {
 			UnitKey unit = entry.getKey();
 			UnitSnapshot known = baseline.known(unit);
+			// verglichen wird mit dem Stand, wie dieses Programm ihn aus der Datei macht (KARV-133); roh zuerst, das ist billig
 			boolean differs = known == null || known.deleted() || !baseline.isShown(unit)
-					|| !entry.getValue().equals(known.payload());
+					|| !(entry.getValue().equals(known.payload()) || entry.getValue().equals(baseline.comparable(unit)));
 			String carriedId = unit.type() == UnitType.BOOKING ? ConflictInput.bookingIdOf(entry.getValue()) : null;
 			if (carriedId != null) {
 				carried.add(new BookingIn(unit.presentationId(), carriedId));
@@ -909,7 +910,7 @@ public class StoreEventRepository implements EventRepository {
 			String movedId = known == null ? null : ConflictInput.bookingIdOf(known.payload());
 			return movedId == null || changes.movedCarriers(movedId, current.unit()).isEmpty();
 		}
-		return current.isLive() && mine.equals(current.payload());
+		return current.isLive() && UnitMapper.sameAsModel(mine, current);
 	}
 
 	/**
@@ -921,7 +922,7 @@ public class StoreEventRepository implements EventRepository {
 	 */
 	private boolean derivedAs(UnitSnapshot current) {
 		ObjectNode payload = derived.get(current.unit());
-		return payload != null && current.isLive() && payload.equals(current.payload());
+		return payload != null && current.isLive() && UnitMapper.sameAsModel(payload, current);
 	}
 
 	/**
