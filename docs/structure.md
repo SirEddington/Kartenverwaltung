@@ -25,6 +25,7 @@ Kartenverwaltung/
     │   │   ├── store/
     │   │   ├── tracking/
     │   │   ├── settings/
+    │   │   ├── update/
     │   │   ├── util/
     │   │   └── ui/
     │   │       ├── accounting/   backup/   event/   hall/   input/
@@ -83,6 +84,11 @@ machine identity and locking (`MachineIdentity`, `Ownership`, `InstanceLock`), s
 `AppSettings` (fields with defaults: `sharedDir`, `saveBookingsImmediately`, `recentOperators`) and
 `SettingsStore` (`<AppData>/settings.json`). Always read through `SettingsStore.getInstance().current()`.
 
+### `update`
+Update check without JavaFX (KARV-131): `AppVersion`, `Installation` (version, update source, platform, package
+family from Conveyor's system properties), `UpdateInfo` (`metadata.properties`), `HttpUpdateSource`, `Grund`,
+`UpdateState`, `UpdateChecker` (timer) and `DesktopOps`.
+
 ### `util`
 Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
 
@@ -94,8 +100,8 @@ Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
 | `accounting` | Accounting shell, cash reconciliation, statistics, `Exportable` (CSV/PDF) |
 | `event` | Event overview, create/edit, presentations, seating plan switch |
 | `hall` | Hall management, hall editor, hall plan and seating plan drawing/layout, row fill, bulk edits |
-| `settings` | Searchable settings screen, "Gemeinsamer Ordner" section |
-| `shared` | Shared-folder start/connect flow, sync indicator and info window, operator dialog, locked units, data reload |
+| `settings` | Searchable settings screen, "Gemeinsamer Ordner" and "Info und Updates" sections |
+| `shared` | Shared-folder start/connect flow, sync indicator and info window, operator dialog, locked units, data reload, update flow, texts and footer hint |
 | `backup` | Restore dialog and catalogs for events and halls |
 | `input` | Parsing text fields, spinners, date/time and number inputs with inline feedback |
 | *(root)* | Savers, `LeaveGuard`, `ChangeTrigger`, `LiveUpdates`, `LiveValidator`, conflict dialog/list/indicator, status footer |
@@ -109,6 +115,8 @@ Controllers are referenced by `fx:controller` in the FXML files under `src/main/
   read-only properties (`syncState()`, `connectionComplete()`, …) and `Platform` as the default UI executor; no
   scene graph.
 - `repository` depends on `model` and `store`; `ui` depends on everything below it.
+- `update` (version, update source, update check; KARV-131) uses neither JavaFX nor `ui`; `ui.shared.UpdateFlow`,
+  `UpdateIndicator`, `UpdateTexts` and `ui.settings.InfoSection` build on it.
 - Logic that has to be tested without a running JavaFX toolkit is kept in plain classes (e.g. `ConnectFlow`,
   `SyncStatus`, `LockedSeats`, `PlaceAssignment`) with a thin JavaFX wrapper next to it.
 - Tests mirror the main package of the class under test; shared test doubles live next to the tests that use them

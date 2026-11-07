@@ -4,7 +4,8 @@
 
 Installers are published as GitHub Releases and on the download page that Conveyor maintains in the `gh-pages`
 branch. Supported platforms: **Windows x64** (per-user MSIX install, optional desktop shortcut, updates from the
-latest GitHub Release only after the user agrees to them in the app, see
+latest GitHub Release only after the user agrees to them in the app: a hint in the footer and *Einstellungen → Info
+und Updates*, see [usage.md](usage.md#updates) and
 [decisions.md](decisions.md#updates-only-with-the-users-consent-appupdates--manual)) and **Linux x64 (glibc)**.
 macOS is intentionally not built (it would require Apple signing and notarization). The installer bundles its own
 Java runtime (Amazon Corretto 21) and the JavaFX native libraries; no native libraries are unpacked at run time.
@@ -105,7 +106,8 @@ No installation step is required: in *Einstellungen → Gemeinsamer Ordner* choo
 can reach (a network share or a folder synced by a client such as Nextcloud) and click *Verbinden*. See
 [usage.md](usage.md#working-with-several-workstations).
 
-**Update all workstations together.** Workstations sharing a folder should run the same version. Version 1.1 adds
+**Update all workstations together.** Workstations sharing a folder should run the same version; each one shows the
+update hint in its footer (or use *Einstellungen → Info und Updates → "Jetzt prüfen"*). Version 1.1 adds
 table labels to the seating plan; a workstation still on 1.0.x drops them (back to "Text automatisch") and puts
 automatically placed seats back in their old positions when it saves a hall. Update every workstation to 1.1 at the
 same time and restart it. Then open each hall with a seating plan once in the hall editor and save it: 1.1 places
@@ -126,6 +128,10 @@ back changes to that hall from other workstations until it is restarted.
 4. Optionally submit the Windows installer to Microsoft as a software developer
    (`https://www.microsoft.com/wdsi/filesubmission`). If Norton flags a release on a workstation, report it at
    `https://submissions.norton.com/`. See [decisions.md](decisions.md#no-public-code-signing-certificate-for-now).
+5. Running Windows workstations show the update hint within about 4 hours (or at the next start). To withdraw a
+   release, mark it as a pre-release: the previous release becomes "latest" again and the hint disappears.
+   Workstations showing "Update-Prüfung nicht möglich" are updated with *"Update im Browser laden"*. See
+   [decisions.md](decisions.md#update-check-and-update-from-the-app-karv-131).
 
 `conveyor.conf` includes `deployment/conveyor.local.conf`, which is git-ignored and only used for local builds.
 The `deployment/build.bat` script is the old local release path and is superseded by the workflow.

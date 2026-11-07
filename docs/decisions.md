@@ -335,21 +335,46 @@ in the app (KARV-131) or when it is installed from the shared folder (KARV-132).
   which the bundled runtime does not contain (it also lacks `java.net.http`). In the packaged app this path is
   what triggered Norton (1.1.0.3).
 
-**Consequence for the update path (KARV-131, KARV-132):**
-- The app itself should not start executables, use HTTPS or read the certificate store.
-- Do not use `triggerUpdateCheckUI()`.
-- Windows should check for and download updates. Candidates are `Package.CheckUpdateAvailabilityAsync()` and
-  `Add-AppxPackage -AppInstallerFile`, using the update source the package is already linked to. A local `.msix`
-  from the shared folder is installed with `Add-AppxPackage -Path`. Whether Norton accepts the app starting such a
-  helper is **not verified**: in 1.1.0.2 the helper was started from outside the app.
-- The lasting fix is a code-signing certificate with reputation (KARV-137, part 2). Without one, every new
-  launcher is unknown to Norton.
 - Every Norton test can damage the machine it runs on. Since KARV-137 the installed app no longer uses the shared
   JavaFX cache, but development and tests (`javafx:run`, Maven tests) still do: after a Norton hit they may not
   start until Windows has been restarted.
 
 **Consequence:** `manual` must not ship without KARV-131. Otherwise there is no way to update apart from a new
 install.
+
+## Update check and update from the app (KARV-131)
+
+**Decision:**
+- **Check (W3):** the app reads `metadata.properties` of the update source (`app.repositoryUrl` with a trailing `/`)
+  with `HttpURLConnection` and Java's default trust store: 10 s after start, then 4 h after the end of the previous
+  check, and on "Jetzt prüfen". No helper process, no Windows certificate store, never a pop-up.
+- **Update (W2):** on a click and after a confirmation, the app saves or asks about unsaved changes (like closing the
+  window), checks again, downloads the `.appinstaller` file freshly into `java.io.tmpdir` (the package's own
+  `LocalCache\Local\Temp`, passed explicitly) and opens it with `Desktop.open`; then it exits. The App Installer
+  updates and restarts the app.
+- **Fallback:** "Update im Browser laden" opens the `.appinstaller` address with `Desktop.browse` and exits too,
+  because the App Installer would otherwise close the running app without asking.
+- **Package identity:** the button only appears inside an MSIX package (`PACKAGE_LOCALAPPDATA` points into
+  `\Packages\<family>`) whose family (from `app.windows.userModelID`) matches `windows.package-family-name` of the
+  source. Otherwise "Neuinstallation nötig" (e.g. after a certificate change) or, on Linux and the Windows ZIP, a
+  hint only.
+
+**Why:**
+- Probe KARV-131 (07.11.2026, Windows 11 with Norton, no Norton alert):
+  - **W1**, a PowerShell helper (`CheckUpdateAvailabilityAsync`, `Add-AppxPackage -ForceApplicationShutdown`): works,
+    but takes about 90 s while the old app keeps running; it starts a program and the script is fragile. Rejected.
+  - **W2**, `.appinstaller` via the browser: fast and clean; the link to the update source is kept.
+  - **W3**, Java HTTPS from the **installed** app to GitHub: HTTP 200. Norton does not intercept the packaged app on
+    this machine; the plain JDK `java.exe` still gets PKIX. HTTPS with the default trust store is therefore used for
+    the check only, and a failing check is shown, not hidden.
+  - **W4**, `Desktop.open` of a self-downloaded file from inside the package: see the probe result in the KARV-131
+    ticket before the first release.
+- The `.appinstaller` of a release points to a versioned MSIX under `latest`; an old file returns 404 once a newer
+  release is "latest". The file is therefore loaded only on the click.
+- `Desktop.browse` starts the browser as a child process of the package: it runs as its own instance with its own
+  profile, and its data lands in the package folder (seen with Opera in W2). Acceptable for a fallback.
+- **Known gap:** an antivirus that only cuts the connection (instead of presenting its own certificate) looks like
+  "no network" and stays silent; a workstation without internet is normal at a box office.
 
 ## OpenPDF 1.3.x
 
