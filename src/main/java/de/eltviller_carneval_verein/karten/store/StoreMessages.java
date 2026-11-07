@@ -52,7 +52,7 @@ public final class StoreMessages {
 			+ "zurücksetzen.";
 
 	private static final String NEWER_FORMAT_TEXT = "&1 wurde mit einer neueren Version der Kartenverwaltung gespeichert "
-			+ "und ist hier gesperrt. Aktualisiere die Kartenverwaltung auf diesem Rechner.";
+			+ "und ist hier gesperrt. Aktualisiere die Kartenverwaltung unter Einstellungen → Info und Updates → Jetzt prüfen.";
 
 	private static final String ALREADY_RUNNING_TEXT = "Die Kartenverwaltung ist auf diesem Rechner schon geöffnet. "
 			+ "Wechsle zum offenen Fenster.";
