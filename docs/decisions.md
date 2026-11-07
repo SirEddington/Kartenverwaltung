@@ -327,12 +327,8 @@ in the app (KARV-131) or when it is installed from the shared folder (KARV-132).
   - Norton reports the launchers as unknown ("file version unknown", "no community data"). The self-signed
     certificate gives them no reputation, so any unusual behaviour is enough to trigger the behaviour-based
     protection.
-  - **Collateral damage:** while cleaning up, Norton also deleted the JavaFX native libraries in the shared cache
-    `%USERPROFILE%\.openjfx\cache\21.0.2+5\amd64` (`glass.dll`, `prism_d3d.dll`, `javafx_font.dll`, `prism_sw.dll`).
-    They were not in quarantine and could not be recreated until Windows restarted (`AccessDeniedException`).
-    Until then no JavaFX 21.0.2 program started on the machine: not the real app, not `javafx:run`, not the UI
-    tests. The fat JAR extracts these libraries into the user profile on every start, so the real app shares the
-    cache with every other JavaFX program.
+  - Norton also deleted the JavaFX native libraries in the shared cache; see
+    [JavaFX native libraries extracted at build time](#javafx-native-libraries-extracted-at-build-time).
   - Conveyor ships `updatecheck.exe` in the package even with `use-update-escape-hatch = false`.
 - Norton's Web/Mail Shield intercepts TLS. Java's own trust store rejects its root certificate (PKIX), as Conveyor,
   Maven and a plain JDK test showed. The Windows trust store accepts it, but that requires `jdk.crypto.mscapi`,
@@ -346,12 +342,11 @@ in the app (KARV-131) or when it is installed from the shared folder (KARV-132).
   `Add-AppxPackage -AppInstallerFile`, using the update source the package is already linked to. A local `.msix`
   from the shared folder is installed with `Add-AppxPackage -Path`. Whether Norton accepts the app starting such a
   helper is **not verified**: in 1.1.0.2 the helper was started from outside the app.
-- Package JavaFX with Conveyor so that its native libraries live inside the package rather than in the shared
-  user cache. Norton could then no longer break other JavaFX programs.
-- The lasting fix is a code-signing certificate with reputation. Without one, every new launcher is unknown to
-  Norton.
-- Every Norton test can damage the machine it runs on. Run them only on a machine where JavaFX may break for a
-  while, and restart Windows afterwards.
+- The lasting fix is a code-signing certificate with reputation (KARV-137, part 2). Without one, every new
+  launcher is unknown to Norton.
+- Every Norton test can damage the machine it runs on. Since KARV-137 the installed app no longer uses the shared
+  JavaFX cache, but development and tests (`javafx:run`, Maven tests) still do: after a Norton hit they may not
+  start until Windows has been restarted.
 
 **Consequence:** `manual` must not ship without KARV-131. Otherwise there is no way to update apart from a new
 install.
