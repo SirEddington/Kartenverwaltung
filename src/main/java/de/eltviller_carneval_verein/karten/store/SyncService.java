@@ -1284,7 +1284,7 @@ public final class SyncService implements ConnectionControl {
 				me = machine;
 			}
 			Version version = new Version(StoreCodec.FORMAT, id, change.parents(), me.id(), me.name(),
-					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), seen, change.marks());
+					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), seen, change.marks(), false);
 			byte[] bytes = StoreCodec.write(version);
 			try {
 				if (local.writeVersion(change.unit(), version.id(), bytes)) {

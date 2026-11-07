@@ -10,9 +10,12 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Ein Bestand von Versions- und Anspruchsdateien: der lokale unter {@code <AppData>/data} oder der gemeinsame unter
@@ -38,10 +41,13 @@ public final class VersionStore {
 	/** Der Ordner der Buchungen unter einem Auftritt (siehe {@link #childNames}). */
 	static final String BOOKINGS = "bookings";
 
+	private static final Logger LOGGER = Logger.getLogger(VersionStore.class.getName());
+
 	private final Path dataRoot;
 	private final FileLayer files;
 	private final Path anchor;
 	private final Supplier<String> tempTag;
+	private final ContentGate gate;
 
 	/**
 	 * Ein Bestand ohne Anker: Beim Schreiben werden fehlende Ordner angelegt, die temporären Dateien tragen keine Kennung.
@@ -62,10 +68,22 @@ public final class VersionStore {
 	 *                 {@link FileLayer#createNew(Path, byte[], Path, String)}); {@code null}: keine Kennung
 	 */
 	public VersionStore(Path dataRoot, FileLayer files, Path anchor, Supplier<String> tempTag) {
+		this(dataRoot, files, anchor, tempTag, ContentGate.NONE);
+	}
+
+	/**
+	 * @param dataRoot der Ordner {@code data} dieses Bestands
+	 * @param files    die Dateischicht, über die gelesen und geschrieben wird
+	 * @param anchor   siehe {@link #VersionStore(Path, FileLayer, Path, Supplier)}
+	 * @param tempTag  siehe {@link #VersionStore(Path, FileLayer, Path, Supplier)}
+	 * @param gate     die Regel, nach der gelesene Versionen als inhaltlich zu neu gelten (siehe {@link ContentGate})
+	 */
+	public VersionStore(Path dataRoot, FileLayer files, Path anchor, Supplier<String> tempTag, ContentGate gate) {
 		this.dataRoot = dataRoot;
 		this.files = files;
 		this.anchor = anchor;
 		this.tempTag = tempTag;
+		this.gate = Objects.requireNonNull(gate, "gate");
 	}
 
 	/** Der Ordner {@code data} dieses Bestands. */
@@ -135,7 +153,9 @@ public final class VersionStore {
 
 	/**
 	 * Liest alle Versions- und Anspruchsdateien der Einheit. Unlesbare Dateien und solche mit höherem Format sind
-	 * gekennzeichnet (siehe {@link VersionFile}, {@link ClaimFile}), ihre Bytes bleiben erhalten. Fehler beim Lesen
+	 * gekennzeichnet (siehe {@link VersionFile}, {@link ClaimFile}), ihre Bytes bleiben erhalten. Versionen, die das
+	 * {@link ContentGate} als inhaltlich zu neu ansieht, bleiben gelesen und tragen den Grund
+	 * {@link VersionFile.Reason#CONTENT}. Fehler beim Lesen
 	 * einer Datei selbst werden als {@link IOException} gemeldet.
 	 * <p>
 	 * Größe und Änderungszeit jeder gelesenen Datei ({@link UnitFiles#versionStamps()}, {@link UnitFiles#claimStamps()})
@@ -152,7 +172,7 @@ public final class VersionStore {
 			VersionId id = listed.getKey();
 			Optional<byte[]> bytes = files.read(unitDir.resolve(id + JSON));
 			if (bytes.isPresent()) {
-				versions.put(id, parseVersion(id, bytes.get()));
+				versions.put(id, parseVersion(unit, id, bytes.get()));
 				versionStamps.put(id, listed.getValue());
 			}
 		}
@@ -173,24 +193,43 @@ public final class VersionStore {
 	/**
 	 * Liest eine einzelne Version der Einheit.
 	 *
-	 * @return die Version; leer, wenn die Datei fehlt oder nicht lesbar ist (beschädigt, höheres Format, falsche ID)
+	 * @return die Version; leer, wenn die Datei fehlt oder nicht lesbar ist (beschädigt, höheres Format, falsche ID).
+	 *         Eine inhaltlich zu neue Version wird geliefert, ist aber markiert ({@link Version#newerContent()}).
 	 * @throws IOException wenn das Lesen der Datei selbst scheitert
 	 */
 	public Optional<Version> readVersion(UnitKey unit, VersionId id) throws IOException {
-		return files.read(versionFile(unit, id)).map(bytes -> parseVersion(id, bytes).version());
+		return files.read(versionFile(unit, id)).map(bytes -> parseVersion(unit, id, bytes).version());
 	}
 
-	private static VersionFile parseVersion(VersionId id, byte[] bytes) {
+	/**
+	 * Liest eine Versionsdatei und fragt, wenn sie ganz und nicht gelöscht ist, das Tor: Meldet es „neuer“ oder wirft es
+	 * (dann gilt sie vorsichtshalber als neuer), bleibt die Version gelesen und wird als inhaltlich zu neu markiert.
+	 */
+	private VersionFile parseVersion(UnitKey unit, VersionId id, byte[] bytes) {
 		try {
 			Version version = StoreCodec.readVersion(bytes);
 			if (!version.id().equals(id)) {
-				return new VersionFile(id, bytes, null, null);
+				return new VersionFile(id, bytes, null, null, VersionFile.Reason.DAMAGED);
 			}
-			return new VersionFile(id, bytes, version, null);
+			if (!version.deleted() && isNewerContent(unit, version)) {
+				return new VersionFile(id, bytes, version.withNewerContent(true), null, VersionFile.Reason.CONTENT);
+			}
+			return new VersionFile(id, bytes, version, null, VersionFile.Reason.OK);
 		} catch (UnknownFormatException e) {
-			return new VersionFile(id, bytes, null, e.format());
+			return new VersionFile(id, bytes, null, e.format(), VersionFile.Reason.FORMAT);
 		} catch (IOException e) {
-			return new VersionFile(id, bytes, null, null);
+			return new VersionFile(id, bytes, null, null, VersionFile.Reason.DAMAGED);
+		}
+	}
+
+	/** Ob das Tor die Version als inhaltlich zu neu ansieht; ein Fehler im Tor zählt als „ja“ (nie verkäuflich). */
+	private boolean isNewerContent(UnitKey unit, Version version) {
+		try {
+			return gate.isNewer(unit, version.payload());
+		} catch (RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Die Inhaltsprüfung von " + unit.relativePath() + "/" + version.id()
+					+ " ist fehlgeschlagen; die Version gilt als inhaltlich zu neu", e);
+			return true;
 		}
 	}
 

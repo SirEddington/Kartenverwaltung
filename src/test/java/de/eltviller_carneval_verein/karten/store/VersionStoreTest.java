@@ -21,11 +21,16 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.logging.Logger;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * Lesen, Schreiben und Auflisten im {@link VersionStore}. Pfade, Anker und Ordnernamen prüft {@link VersionStorePathTest};
@@ -386,5 +391,126 @@ class VersionStoreTest {
 		assertEquals(List.of("events/e1/presentations/p1/~karv-5.tmp"),
 				store.scanUnit(UnitKey.presentation("e1", "p1")).tempFiles());
 		assertEquals(List.of(), store.scanUnit(UnitKey.hall("h1")).tempFiles());
+	}
+
+	private VersionStore storeWith(ContentGate gate) {
+		return new VersionStore(dir.resolve("data"), new NioFileLayer(), null, null, gate);
+	}
+
+	/** Ein Tor, das jeden Payload mit dem Schlüssel {@code x-test-neu} als inhaltlich zu neu ansieht. */
+	private static ContentGate gateOnNewKey(List<UnitKey> asked) {
+		return new ContentGate() {
+			@Override
+			public boolean isNewer(UnitKey unit, ObjectNode payload) {
+				asked.add(unit);
+				return payload.has("x-test-neu");
+			}
+
+			@Override
+			public String rulesId() {
+				return "test";
+			}
+		};
+	}
+
+	private static byte[] versionBytesWith(VersionId id, boolean deleted, ObjectNode payload) throws IOException {
+		return StoreCodec.write(new Version(1, id, List.of(), "maschine-1", "Kasse 1", "Anna", VersionStoreFixtures.AT,
+				"save-" + id, deleted, payload));
+	}
+
+	@Test
+	void gateHitKeepsVersionAndMarksContent() throws IOException {
+		List<UnitKey> asked = new ArrayList<>();
+		VersionStore store = storeWith(gateOnNewKey(asked));
+		UnitKey unit = UnitKey.event("e1");
+		ObjectNode newer = new ObjectMapper().createObjectNode().put("name", "Sitzung").put("x-test-neu", 1);
+		store.writeVersion(unit, V1, versionBytesWith(V1, false, newer));
+		store.writeVersion(unit, V2, versionBytes(V2, V1));
+
+		UnitFiles files = store.readUnit(unit);
+
+		VersionFile hit = files.versions().get(V1);
+		assertEquals(VersionFile.Reason.CONTENT, hit.reason());
+		assertNotNull(hit.version());
+		assertTrue(hit.version().newerContent());
+		assertEquals(newer, hit.version().payload());
+		assertNull(hit.unknownFormat());
+		assertArrayEquals(versionBytesWith(V1, false, newer), hit.bytes());
+		VersionFile fine = files.versions().get(V2);
+		assertEquals(VersionFile.Reason.OK, fine.reason());
+		assertFalse(fine.version().newerContent());
+		assertEquals(List.of(unit, unit), asked);
+		// auch die einzelne Version wird geliefert, markiert
+		assertTrue(store.readVersion(unit, V1).orElseThrow().newerContent());
+		assertFalse(store.readVersion(unit, V2).orElseThrow().newerContent());
+	}
+
+	@Test
+	void deletionVersionIsNeverAskedAsNewer() throws IOException {
+		List<UnitKey> asked = new ArrayList<>();
+		VersionStore store = storeWith(gateOnNewKey(asked));
+		UnitKey unit = UnitKey.booking("e1", "p1", "A-1");
+		store.writeVersion(unit, V1, versionBytesWith(V1, true, new ObjectMapper().createObjectNode()));
+
+		VersionFile file = store.readUnit(unit).versions().get(V1);
+
+		assertEquals(VersionFile.Reason.OK, file.reason());
+		assertTrue(file.version().deleted());
+		assertFalse(file.version().newerContent());
+		assertEquals(List.of(), asked);
+	}
+
+	@Test
+	void throwingGateCountsAsContent() throws IOException {
+		ContentGate throwing = new ContentGate() {
+			@Override
+			public boolean isNewer(UnitKey unit, ObjectNode payload) {
+				throw new IllegalStateException("x-test-kaputt");
+			}
+
+			@Override
+			public String rulesId() {
+				return "test";
+			}
+		};
+		VersionStore store = storeWith(throwing);
+		UnitKey unit = UnitKey.hall("h1");
+		store.writeVersion(unit, V1, versionBytes(V1));
+		Logger logger = Logger.getLogger(VersionStore.class.getName());
+		boolean parentHandlers = logger.getUseParentHandlers();
+		logger.setUseParentHandlers(false);
+
+		VersionFile file;
+		try (LogCapture log = new LogCapture(VersionStore.class)) {
+			file = store.readUnit(unit).versions().get(V1);
+
+			assertEquals(1, log.warnings("Die Inhaltsprüfung von halls/h1/"));
+		} finally {
+			logger.setUseParentHandlers(parentHandlers);
+		}
+
+		assertEquals(VersionFile.Reason.CONTENT, file.reason());
+		assertTrue(file.version().newerContent());
+	}
+
+	@Test
+	void unknownFormatStillGivesFormatReason() throws IOException {
+		List<UnitKey> asked = new ArrayList<>();
+		VersionStore store = storeWith(gateOnNewKey(asked));
+		UnitKey unit = UnitKey.event("e1");
+		Path unitDir = store.dataRoot().resolve(unit.relativePath());
+		put(unitDir.resolve(V1 + ".json"), "{\"format\":2,\"x-test-neu\":true}");
+		put(unitDir.resolve(V2 + ".json"), "kein JSON");
+		Files.write(unitDir.resolve(V3 + ".json"), versionBytes(V1));
+
+		UnitFiles files = store.readUnit(unit);
+
+		VersionFile newer = files.versions().get(V1);
+		assertEquals(VersionFile.Reason.FORMAT, newer.reason());
+		assertNull(newer.version());
+		assertEquals(2, newer.unknownFormat());
+		assertEquals(VersionFile.Reason.DAMAGED, files.versions().get(V2).reason());
+		assertEquals(VersionFile.Reason.DAMAGED, files.versions().get(V3).reason());
+		assertEquals(List.of(), asked);
 	}
 }

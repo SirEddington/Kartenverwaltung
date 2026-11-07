@@ -66,24 +66,24 @@ class ChainResolverTest {
 		Unit version(String machine, VersionId id, VersionId... parents) throws IOException {
 			Version version = new Version(1, id, List.of(parents), machine, "Kasse", "Anna", AT, "save-" + id, false,
 					new ObjectMapper().createObjectNode().put("name", id.value()));
-			versions.put(id, new VersionFile(id, StoreCodec.write(version), version, null));
+			versions.put(id, new VersionFile(id, StoreCodec.write(version), version, null, VersionFile.Reason.OK));
 			return this;
 		}
 
 		Unit deletedVersion(VersionId id, VersionId... parents) throws IOException {
 			Version version = new Version(1, id, List.of(parents), OTHER, "Kasse", "Anna", AT, "save-" + id, true,
 					new ObjectMapper().createObjectNode());
-			versions.put(id, new VersionFile(id, StoreCodec.write(version), version, null));
+			versions.put(id, new VersionFile(id, StoreCodec.write(version), version, null, VersionFile.Reason.OK));
 			return this;
 		}
 
 		Unit unreadableVersion(VersionId id) {
-			versions.put(id, new VersionFile(id, "kaputt".getBytes(StandardCharsets.UTF_8), null, null));
+			versions.put(id, new VersionFile(id, "kaputt".getBytes(StandardCharsets.UTF_8), null, null, VersionFile.Reason.DAMAGED));
 			return this;
 		}
 
 		Unit unknownFormatVersion(VersionId id) {
-			versions.put(id, new VersionFile(id, "{\"format\":2}".getBytes(StandardCharsets.UTF_8), null, 2));
+			versions.put(id, new VersionFile(id, "{\"format\":2}".getBytes(StandardCharsets.UTF_8), null, 2, VersionFile.Reason.FORMAT));
 			return this;
 		}
 
