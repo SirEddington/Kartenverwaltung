@@ -11,6 +11,7 @@ import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.SettingsSaver;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection;
+import de.eltviller_carneval_verein.karten.update.AppVersion;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -21,9 +22,9 @@ import javafx.scene.layout.VBox;
 /**
  * Der Einstellungsbildschirm: eine durchsuchbare Liste von Abschnitten mit ihren Einstellungen.
  * <p>
- * Die Abschnitte entstehen in {@link #buildSections(AppSettings)}. Bisher gibt es den Abschnitt "Gemeinsamer Ordner"
- * ({@link SharedFolderSection}, KARV-87); Folgetickets hängen ihre Einstellungen dort ein. Gibt es keinen Abschnitt (der
- * Start hat die Verbindung nicht eingerichtet), zeigt der Bildschirm "Noch keine Einstellungen verfügbar". Die Einstellungen werden
+ * Die Abschnitte entstehen in {@link #buildSections(AppSettings)}: "Gemeinsamer Ordner" ({@link SharedFolderSection},
+ * KARV-87), sobald der Start das Verbinden eingerichtet hat, und als letzter immer "Info und Updates"
+ * ({@link InfoSection}, KARV-131); Folgetickets hängen ihre Einstellungen dort ein. Die Einstellungen werden
  * über den {@link ChangeTracker#settings() Tracker} verfolgt, sodass Speichern-Knopf und Verlassen-Abfrage wie in
  * den anderen Ansichten arbeiten. Gespeichert wird über den {@link SettingsSaver}.
  */
@@ -56,8 +57,8 @@ public class SettingsController {
 	}
 
 	/**
-	 * Die Abschnitte dieses Bildschirms: bisher nur "Gemeinsamer Ordner" (KARV-87), sobald der Start das Verbinden
-	 * eingerichtet hat. Folgetickets ergänzen hier ihre Abschnitte.
+	 * Die Abschnitte dieses Bildschirms: "Gemeinsamer Ordner" (KARV-87), sobald der Start das Verbinden eingerichtet hat,
+	 * und zuletzt immer "Info und Updates" (KARV-131). Folgetickets ergänzen hier ihre Abschnitte.
 	 *
 	 * @param settings die bearbeiteten Einstellungen
 	 */
@@ -65,6 +66,10 @@ public class SettingsController {
 		List<SettingsSection> sections = new ArrayList<>();
 		SharedFolderConnection.instance().ifPresent(
 				connection -> sections.add(SharedFolderSection.build(settings, connection.sync(), connection)));
+		sections.add(InfoSection.build(AppVersion.current(), MainApp.updates().map(MainApp.Updates::installation),
+				MainApp.updateStateProperty(), () -> MainApp.updates().ifPresent(u -> u.checker().checkNow()),
+				available -> MainApp.updates().ifPresent(u -> u.flow().update(available.neu())),
+				() -> MainApp.updates().ifPresent(u -> u.flow().updateViaBrowser())));
 		return sections;
 	}
 
@@ -121,9 +126,7 @@ public class SettingsController {
 		}
 
 		String info = null;
-		if (built.isEmpty()) {
-			info = "Noch keine Einstellungen verfügbar";
-		} else if (query != null && !query.isBlank() && !anyVisible) {
+		if (query != null && !query.isBlank() && !anyVisible) {
 			info = "Keine Treffer";
 		}
 		infoLabel.setText(info);
