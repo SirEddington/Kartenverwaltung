@@ -4,10 +4,14 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -82,6 +86,33 @@ public class Booking {
 	 * ohne das Feld laden als {@code false}).
 	 */
 	private boolean unassigned; // get,set
+
+	// Unbekannte Felder -->
+	/** Felder aus der Datei, die diese Version nicht kennt (z. B. von einer neueren Version); sie werden unverändert zurückgeschrieben. */
+	private final UnknownFields unknown = new UnknownFields();
+
+	@JsonIgnore
+	public UnknownFields getUnknown() {
+		return unknown;
+	}
+
+	/**
+	 * Merkt sich ein Feld, das diese Version nicht kennt. Ein {@code requires}, das das Gate durchlässt ({@link Requires#satisfied}),
+	 * wird verworfen: Es soll weder zurückgeschrieben noch in Kopien getragen werden.
+	 */
+	@JsonAnySetter
+	void putUnknown(String key, JsonNode value) {
+		if (Requires.KEY.equals(key) && Requires.satisfied(value)) {
+			return;
+		}
+		unknown.put(key, value);
+	}
+
+	@JsonAnyGetter
+	Map<String, JsonNode> unknownFields() {
+		return unknown.asMap();
+	}
+	// <-- Unbekannte Felder
 
 	// Getter und Setter -->
 	@JsonIgnore

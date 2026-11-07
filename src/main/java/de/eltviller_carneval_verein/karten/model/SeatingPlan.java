@@ -7,16 +7,22 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
+import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  * Eine Bestuhlung einer {@link Hall Halle}: Tischreihen, Tische und Sitze. Die Setter nehmen jeden Wert an; die
  * fachlichen Regeln stehen in den Validatoren.
+ * <p>
+ * Verworfenes Feld (nie in die unbekannten Felder aufnehmen, nie wieder für etwas anderes verwenden):
+ * {@code defaultSeatHeight} (v1.0.x schreibt es noch, seit KARV-128 sind Sitze Kreise mit nur einem Durchmesser).
  */
-@JsonIgnoreProperties(ignoreUnknown = true)
+@JsonIgnoreProperties(value = { "defaultSeatHeight" }, ignoreUnknown = true)
 public class SeatingPlan {
 	private final String id;
 	private Hall parentHall; // gesetzt von Hall.setSeatingPlans/addSeatingPlan, wird nicht gespeichert
@@ -54,6 +60,27 @@ public class SeatingPlan {
 		this.id = (id != null) ? id : UUID.randomUUID().toString();
 	}
 	// <-- Konstuktoren
+
+	// Unbekannte Felder -->
+	/** Felder aus der Datei, die diese Version nicht kennt (z. B. von einer neueren Version); sie werden unverändert zurückgeschrieben. */
+	private final UnknownFields unknown = new UnknownFields();
+
+	@JsonIgnore
+	public UnknownFields getUnknown() {
+		return unknown;
+	}
+
+	/** Merkt sich ein Feld, das diese Version nicht kennt (auch {@code requires}: es hat hier keine Wirkung). */
+	@JsonAnySetter
+	void putUnknown(String key, JsonNode value) {
+		unknown.put(key, value);
+	}
+
+	@JsonAnyGetter
+	Map<String, JsonNode> unknownFields() {
+		return unknown.asMap();
+	}
+	// <-- Unbekannte Felder
 
 	// Getter und Setter -->
 	public String getId() {
