@@ -23,6 +23,20 @@ public final class UnknownFields {
 		fields.put(key, value);
 	}
 
+	/**
+	 * Wie {@link #put}, aber für die Klassen, die eine Einheit bilden (Halle, Event, Vorstellung, Buchung): Ein
+	 * {@code requires}, das das Gate durchlässt ({@link Requires#satisfied}), wird verworfen. Es soll weder
+	 * zurückgeschrieben noch in Kopien getragen werden. Ein Wert, den das Gate nicht durchlässt, bleibt stehen, damit das
+	 * Gate vor dem Speichern ablehnt, statt dass still eine streng gemachte Einheit geschrieben wird. Geschachtelte
+	 * Klassen (Hallenobjekt, Bestuhlung, Reihe, Tisch, Sitz) rufen {@link #put} und bewahren {@code requires} immer.
+	 */
+	public void putUnitField(String key, JsonNode value) {
+		if (Requires.KEY.equals(key) && Requires.satisfied(value)) {
+			return;
+		}
+		fields.put(key, value);
+	}
+
 	/** Unveränderliche Sicht auf die Felder in der Reihenfolge, in der sie gelesen wurden. */
 	public Map<String, JsonNode> asMap() {
 		return Collections.unmodifiableMap(fields);

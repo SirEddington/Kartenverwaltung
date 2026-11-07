@@ -49,16 +49,10 @@ public class Event {
 		return unknown;
 	}
 
-	/**
-	 * Merkt sich ein Feld, das diese Version nicht kennt. Ein {@code requires}, das das Gate durchlässt ({@link Requires#satisfied}),
-	 * wird verworfen: Es soll weder zurückgeschrieben noch in Kopien getragen werden.
-	 */
+	/** Merkt sich ein Feld, das diese Version nicht kennt; ein durchgelassenes {@code requires} fällt weg (siehe {@link UnknownFields#putUnitField}). */
 	@JsonAnySetter
 	void putUnknown(String key, JsonNode value) {
-		if (Requires.KEY.equals(key) && Requires.satisfied(value)) {
-			return;
-		}
-		unknown.put(key, value);
+		unknown.putUnitField(key, value);
 	}
 
 	@JsonAnyGetter

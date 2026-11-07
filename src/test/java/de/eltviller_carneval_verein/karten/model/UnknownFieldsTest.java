@@ -279,6 +279,17 @@ class UnknownFieldsTest {
 	}
 
 	@Test
+	void putUnitFieldDropsOnlyASatisfiedRequires() throws Exception {
+		UnknownFields fields = new UnknownFields();
+		fields.putUnitField("requires", mapper.readTree("[]"));
+		fields.putUnitField("requires", NullNode.getInstance());
+		fields.putUnitField(NEW_FIELD, IntNode.valueOf(1));
+		assertEquals(List.of(NEW_FIELD), new ArrayList<>(fields.asMap().keySet()));
+		fields.putUnitField("requires", mapper.readTree("[\"x-test-merkmal\"]"));
+		assertTrue(fields.has("requires"));
+	}
+
+	@Test
 	void getUnknownReturnsTheSameInstance() {
 		Seat seat = new Seat();
 		assertSame(seat.getUnknown(), seat.getUnknown());
