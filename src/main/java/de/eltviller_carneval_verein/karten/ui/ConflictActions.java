@@ -514,7 +514,7 @@ public final class ConflictActions {
 			save(event);
 		}, e -> {
 			try {
-				events.applyFields(unit, before);
+				events.restoreFields(unit, before);
 			} catch (RuntimeException undoFailed) {
 				e.addSuppressed(undoFailed);
 			}

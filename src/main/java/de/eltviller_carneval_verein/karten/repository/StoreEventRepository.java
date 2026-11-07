@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -19,6 +20,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -49,6 +51,9 @@ public class StoreEventRepository implements EventRepository {
 
 	/** Zum Neuzusammensetzen eines Events: der Zustand wird serialisiert und für jede Kopie neu gelesen. */
 	private static final ObjectMapper MAPPER = JsonMapperFactory.create();
+
+	/** Die Eigenschaftsnamen, die Jackson je Modellklasse kennt (siehe {@link #knownProperties}). */
+	private static final Map<Class<?>, Set<String>> KNOWN_PROPERTIES = new ConcurrentHashMap<>();
 
 	private static StoreEventRepository instance;
 
@@ -485,6 +490,11 @@ public class StoreEventRepository implements EventRepository {
 	 * {@link BookingSync} ihre Buchungen ab wie im Vorstellungs-Editor. Nur im JavaFX-Thread aufrufen (das Modell ist nicht
 	 * synchronisiert); der Aufrufer speichert danach oder setzt das Modell zurück.
 	 *
+	 * <p>
+	 * Ein Feld mit dem Wert {@code null} entfernt einen Schlüssel, den die Modellklasse nicht kennt (er steht dann nicht mehr in
+	 * den bewahrten unbekannten Feldern). Bei einer bekannten Eigenschaft heißt {@code null} wie bisher: Wert des Modells für
+	 * "nicht gesetzt".
+	 *
 	 * @param fields die Felder mit JSON-Feldnamen, wie {@link UnitMapper#normalize} sie schreibt
 	 * @throws IllegalStateException wenn die Einheit im Modell fehlt oder das Ergebnis sich nicht lesen lässt; das Modell ist
 	 *                               dann unverändert
@@ -497,7 +507,14 @@ public class StoreEventRepository implements EventRepository {
 		ObjectNode merged = UnitMapper.normalize(model);
 		merged.remove("presentations");
 		merged.remove("bookings");
-		fields.fields().forEachRemaining(field -> merged.set(field.getKey(), field.getValue().deepCopy()));
+		Set<String> known = knownProperties(model.getClass());
+		fields.fields().forEachRemaining(field -> {
+			if (field.getValue().isNull() && !known.contains(field.getKey())) {
+				merged.remove(field.getKey());
+			} else {
+				merged.set(field.getKey(), field.getValue().deepCopy());
+			}
+		});
 		try {
 			switch (unit.type()) {
 			case BOOKING -> ((Booking) model).copyFrom(MAPPER.treeToValue(merged, Booking.class));
@@ -541,6 +558,43 @@ public class StoreEventRepository implements EventRepository {
 			}
 		}
 		applyFields(unit, fields);
+	}
+
+	/**
+	 * Setzt die Einheit im Modell vollständig auf den Stand {@code before} zurück (zum Rückgängigmachen von
+	 * {@link #applyFields}/{@link #applyGroup}, mit einem Stand von {@link #payloadOf}): Was das Modell jetzt mehr hat als
+	 * {@code before}, wird geleert, auch ein unbekannter Schlüssel, den es zwischendurch dazubekam. Gleiche Regeln wie bei
+	 * {@link #applyFields}.
+	 *
+	 * @throws IllegalStateException wie {@link #applyFields}
+	 */
+	public void restoreFields(UnitKey unit, ObjectNode before) {
+		Objects.requireNonNull(before, "before");
+		Object model = modelObject(unit);
+		if (model == null || unit.type() == UnitType.HALL) {
+			throw new IllegalStateException("Die Einheit " + unit.relativePath() + " ist im Modell nicht vorhanden.");
+		}
+		ObjectNode fields = before.deepCopy();
+		UnitMapper.normalize(model).fieldNames().forEachRemaining(name -> {
+			if (!fields.has(name) && !"presentations".equals(name) && !"bookings".equals(name)) {
+				fields.putNull(name);
+			}
+		});
+		applyFields(unit, fields);
+	}
+
+	/**
+	 * Die Namen, die Jackson für die Modellklasse als Eigenschaft kennt (beim Schreiben oder Lesen). Alles andere in einer
+	 * Datei sind unbekannte Felder, die das Modell nur bewahrt. Je Klasse einmal ermittelt.
+	 */
+	private static Set<String> knownProperties(Class<?> type) {
+		return KNOWN_PROPERTIES.computeIfAbsent(type, t -> {
+			JavaType javaType = MAPPER.constructType(t);
+			Set<String> names = new HashSet<>();
+			MAPPER.getSerializationConfig().introspect(javaType).findProperties().forEach(p -> names.add(p.getName()));
+			MAPPER.getDeserializationConfig().introspect(javaType).findProperties().forEach(p -> names.add(p.getName()));
+			return Set.copyOf(names);
+		});
 	}
 
 	/** Liest den Inhalt einer Buchungs-Version als neues Objekt; {@code null}, wenn er sich nicht lesen lässt. */

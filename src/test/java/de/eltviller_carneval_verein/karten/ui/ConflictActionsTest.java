@@ -31,6 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import com.fasterxml.jackson.databind.node.IntNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -340,6 +341,48 @@ class ConflictActionsTest {
 		assertEquals(List.of(), b.sync.openConflicts());
 		settle();
 		assertEquals("von B", a.seat(0).getComment(), "der andere Rechner bekommt die neue Version");
+	}
+
+	/**
+	 * Beide kennen das unbekannte Feld "x-test-a" der Buchung auf dem ersten Sitz; "a" entfernt es und gewinnt, "b" ändert es:
+	 * b hat einen FIELDS-Konflikt um "x-test-a", und sein Modell hat das Feld nicht (mehr).
+	 */
+	private Row unknownFieldConflict() {
+		a.seat(0).getUnknown().put("x-test-a", IntNode.valueOf(0));
+		a.saveEvent();
+		settle();
+		assertTrue(b.seat(0).getUnknown().has("x-test-a"), "b hat das unbekannte Feld von a übernommen");
+		a.seat(0).getUnknown().remove("x-test-a");
+		a.saveEvent();
+		b.seat(0).getUnknown().put("x-test-a", IntNode.valueOf(2));
+		b.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(List.of("x-test-a"), row.fields().stream().map(ConflictList.FieldRow::group).toList());
+		assertFalse(b.seat(0).getUnknown().has("x-test-a"), "bis zur Wahl gilt der Wert des Gewinners");
+		return row;
+	}
+
+	@Test
+	void takeMyValueOnUnknownFieldUndoesExactlyWhenSaveFails() {
+		Row row = unknownFieldConflict();
+		ObjectNode before = b.repository.payloadOf(b.seatUnit(0));
+		assertFalse(before.has("x-test-a"));
+
+		assertThrows(IllegalStateException.class, () -> b.actions(saved -> false, hall -> true).takeMyValue(row, "x-test-a"));
+
+		assertEquals(before, b.repository.payloadOf(b.seatUnit(0)), "das Modell ist wie vorher, ohne das übernommene Feld");
+		assertFalse(b.seat(0).getUnknown().has("x-test-a"));
+	}
+
+	@Test
+	void takeMyValueOnUnknownFieldWritesIt() throws IOException {
+		Row row = unknownFieldConflict();
+
+		b.actions().takeMyValue(row, "x-test-a");
+
+		assertEquals(2, b.sync.unitState(b.seatUnit(0)).current().payload().get("x-test-a").asInt());
+		assertEquals(List.of(), b.sync.openConflicts());
 	}
 
 	/**
