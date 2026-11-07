@@ -220,7 +220,8 @@ final class UnitBaseline {
 
 	/**
 	 * Schreibt die Unterschiede zwischen dem Vergleichsstand und {@code units} als ein Speichervorgang. Gibt es keine,
-	 * wird nichts geschrieben. Danach gelten die Einheiten von {@code units} als angezeigt.
+	 * wird nichts geschrieben. Danach gelten die Einheiten von {@code units} als angezeigt. Gesperrte Inhalte prüft
+	 * {@link UnitMapper#changes} auch am Stand des Versionsspeichers (Index, ohne Datei-Ein-/Ausgabe).
 	 *
 	 * @param ownerId die ID des Events bzw. der Halle
 	 * @param name    der Name, für die Fehlermeldung
@@ -228,7 +229,8 @@ final class UnitBaseline {
 	 * @throws RuntimeException    wenn das Schreiben scheitert; der Vergleichsstand zeigt dann, was auf der Platte liegt
 	 */
 	void save(String ownerId, String name, List<UnitPayload> units) {
-		List<Change> pending = UnitMapper.changes(baselineOf(ownerId), shownForSave(ownerId, units), units);
+		List<Change> pending = UnitMapper.changes(baselineOf(ownerId), shownForSave(ownerId, units), units,
+				sync::snapshots, sync::eventSnapshots);
 		if (!pending.isEmpty()) {
 			append(ownerId, pending, "Fehler beim Speichern von \"" + name + "\": ");
 		}

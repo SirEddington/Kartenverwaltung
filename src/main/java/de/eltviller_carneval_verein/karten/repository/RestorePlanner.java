@@ -96,14 +96,22 @@ final class RestorePlanner {
 	}
 
 	/**
-	 * Eine gesperrte oder wartende Einheit lässt sich nicht wiederherstellen. Die Texte sind die von
-	 * {@link UnitMapper#requireWritable}.
+	 * Eine gesperrte oder wartende Einheit lässt sich nicht wiederherstellen, ebenso eine unter einem Vorfahren, dessen
+	 * aktueller Stand inhaltlich zu neu ist (KARV-135). Die Texte sind die von {@link UnitMapper#requireWritable} und
+	 * {@link UnitMapper#requireWritableAncestors}.
 	 *
-	 * @throws LockedUnitException wenn eine der Einheiten nicht den Zustand {@code OK} hat
+	 * @param states die Zustände der Einheiten des Events bzw. der Halle; die Vorfahren werden unter ihnen gesucht
+	 * @throws LockedUnitException wenn eine der Einheiten nicht den Zustand {@code OK} hat oder unter einem inhaltlich zu
+	 *                             neuen Vorfahren liegt
 	 */
 	static void requireRestorable(Collection<UnitState> states) {
+		Map<UnitKey, UnitSnapshot> snapshots = new HashMap<>();
+		for (UnitState state : states) {
+			snapshots.put(state.unit(), UnitSnapshot.of(state));
+		}
 		for (UnitState state : states) {
 			UnitMapper.requireWritable(state.unit(), state.status());
+			UnitMapper.requireWritableAncestors(state.unit(), snapshots);
 		}
 	}
 

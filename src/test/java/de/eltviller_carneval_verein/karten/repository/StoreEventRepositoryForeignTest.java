@@ -2122,6 +2122,49 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(Set.of(), mine.locallyChangedUnits());
 	}
 
+	/**
+	 * Der Nutzer ändert eine Buchung, während ein neueres Programm ihre Vorstellung sperrt: Das Live-Update ist
+	 * zurückgestellt, der Vergleichsstand kennt die Vorstellung lesbar, der Index inhaltlich zu neu. Speichern scheitert
+	 * mit SYS-009 und schreibt nichts.
+	 */
+	@Test
+	void bookingUnderContentLockedPresentationInStoreIsNotSaved() throws IOException {
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+		seat(friday, 0).setLastName("Eigen");
+		foreign.write(presentation, "Fremd",
+				payload -> payload.set("requires", JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+		ForeignResult result = mine.applyForeign(List.of(presentation));
+		assertEquals(List.of(presentation), result.deferred().stream().map(Deferral::unit).toList(), "zurückgestellt");
+		assertFalse(mine.knownUnit(presentation).contentLocked(), "der Vergleichsstand kennt die Sperre nicht");
+		long before = files();
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
+
+		assertEquals(StoreMessages.newerFormat(presentation.relativePath()), refused.getMessage());
+		assertEquals(before, files(), "nichts geschrieben");
+		assertEquals("Müller", sync.unitState(seatUnit(friday, 0)).head().payload().get("lastName").asText());
+	}
+
+	/**
+	 * Eine Konfliktgruppe {@code requires} über {@code applyFields} brächte einen Inhalt eines neueren Programms ins Modell:
+	 * Speichern lehnt ihn mit SYS-009 ab, statt eine Einheit zu schreiben, die dieser Rechner für lesbar hielte und die
+	 * anderen sperrten.
+	 */
+	@Test
+	void ownPayloadWithUnsatisfiedRequiresIsRejected() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		ObjectNode fields = JsonMapperFactory.create().createObjectNode();
+		fields.set("requires", JsonMapperFactory.create().createArrayNode().add("x-test-merkmal"));
+		mine.applyFields(unit, fields);
+		long before = files();
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
+
+		assertEquals(StoreMessages.newerFormat(unit.relativePath()), refused.getMessage());
+		assertEquals(before, files(), "nichts geschrieben");
+		assertFalse(sync.unitState(unit).contentLocked());
+	}
+
 	// <-- Inhaltlich zu neu
 
 	/**

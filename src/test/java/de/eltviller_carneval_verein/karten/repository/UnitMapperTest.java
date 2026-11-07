@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -20,7 +21,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.logging.Handler;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -39,6 +42,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.UnitPayload;
 import de.eltviller_carneval_verein.karten.store.Change;
+import de.eltviller_carneval_verein.karten.store.ContentGate;
 import de.eltviller_carneval_verein.karten.store.Snapshots;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -1094,12 +1098,46 @@ class UnitMapperTest {
 		return UnitKey.booking(event.getId(), event.getPresentations().get(presentation).getId(), seatId);
 	}
 
+	/**
+	 * {@link UnitMapper#changes} mit {@code store} als Stand des Versionsspeichers. Die Abfragen lesen die Karte bei jedem
+	 * Aufruf, Änderungen an ihr nach dem Bauen zählen also mit.
+	 */
+	private static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, Set<UnitKey> shown, List<UnitPayload> units,
+			Map<UnitKey, UnitSnapshot> store) {
+		return UnitMapper.changes(baseline, shown, units, storeStates(store), eventStates(store));
+	}
+
+	/** Wie {@link #changes(Map, Set, List, Map)}, der Versionsspeicher kennt genau den Vergleichsstand (nichts zurückgestellt). */
+	private static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, Set<UnitKey> shown, List<UnitPayload> units) {
+		return changes(baseline, shown, units, baseline);
+	}
+
+	/** Die Stände der genannten Einheiten aus {@code store}, wie {@code SyncService.snapshots(units)}. */
+	private static Function<Collection<UnitKey>, Map<UnitKey, UnitSnapshot>> storeStates(Map<UnitKey, UnitSnapshot> store) {
+		return units -> {
+			Map<UnitKey, UnitSnapshot> found = new HashMap<>();
+			for (UnitKey unit : units) {
+				if (store.containsKey(unit)) {
+					found.put(unit, store.get(unit));
+				}
+			}
+			return found;
+		};
+	}
+
+	/** Die Stände der Einheiten eines Events aus {@code store}, wie {@code SyncService.eventSnapshots(eventId)}. */
+	private static Function<String, Map<UnitKey, UnitSnapshot>> eventStates(Map<UnitKey, UnitSnapshot> store) {
+		return eventId -> store.entrySet().stream()
+				.filter(entry -> entry.getKey().type() != UnitType.HALL && eventId.equals(entry.getKey().eventId()))
+				.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+	}
+
 	@Test
 	void unchangedEventYieldsNoChanges() {
 		Event event = realisticEvent();
 		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
 
-		assertEquals(List.of(), UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event)));
+		assertEquals(List.of(), changes(baseline, shown(baseline), UnitMapper.decompose(event)));
 	}
 
 	@Test
@@ -1109,7 +1147,7 @@ class UnitMapperTest {
 		event.getPresentations().get(0).getBookings().get(0).setLastName("Müller-Lüdenscheid");
 		List<UnitPayload> units = UnitMapper.decompose(event);
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), units);
+		List<Change> changes = changes(baseline, shown(baseline), units);
 
 		UnitKey key = bookingKey(event, 0, "seat-a1");
 		assertEquals(1, changes.size());
@@ -1127,7 +1165,7 @@ class UnitMapperTest {
 		booking(event.getPresentations().get(1), "seat-b7", "B", 2, 7, "Neu");
 		List<UnitPayload> units = UnitMapper.decompose(event);
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), units);
+		List<Change> changes = changes(baseline, shown(baseline), units);
 
 		UnitKey key = bookingKey(event, 1, "seat-b7");
 		assertEquals(List.of(new Change(key, List.of(), partOf(units, key).payload(), false)), changes);
@@ -1140,7 +1178,7 @@ class UnitMapperTest {
 		UnitKey key = bookingKey(event, 0, "seat-a1");
 		put(baseline, noVersion(key, Status.OK));
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event));
+		List<Change> changes = changes(baseline, shown(baseline), UnitMapper.decompose(event));
 
 		assertEquals(1, changes.size());
 		assertEquals(key, changes.get(0).unit());
@@ -1164,7 +1202,7 @@ class UnitMapperTest {
 		Set<UnitKey> shown = shown(baseline);
 		shown.remove(key);
 
-		List<Change> changes = UnitMapper.changes(baseline, shown, UnitMapper.decompose(event));
+		List<Change> changes = changes(baseline, shown, UnitMapper.decompose(event));
 
 		// die unlesbare Version hat der Nutzer nie gesehen: Seine Version tritt gegen sie an, statt auf ihr aufzubauen
 		assertEquals(1, changes.size());
@@ -1183,7 +1221,7 @@ class UnitMapperTest {
 		// auch die Vorstellung wurde nicht angezeigt (etwa beim Wiederherstellen): Die Einheit fehlte nur mit ihr
 		shown.remove(UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId()));
 
-		List<Change> changes = UnitMapper.changes(baseline, shown, UnitMapper.decompose(event));
+		List<Change> changes = changes(baseline, shown, UnitMapper.decompose(event));
 
 		Change change = changes.stream().filter(c -> c.unit().equals(key)).findFirst().orElseThrow();
 		assertEquals(List.of(baseline.get(key).version()), change.parents());
@@ -1203,7 +1241,7 @@ class UnitMapperTest {
 		UnitKey key = bookingKey(event, 0, "seat-a1");
 		assertTrue(units.stream().noneMatch(p -> p.unit().equals(key)));
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), units);
+		List<Change> changes = changes(baseline, shown(baseline), units);
 
 		assertEquals(List.of(new Change(key, List.of(baseline.get(key).version()), null, true)), changes);
 	}
@@ -1217,7 +1255,7 @@ class UnitMapperTest {
 		moved.setSeatNumber(2);
 		List<UnitPayload> units = UnitMapper.decompose(event);
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), units);
+		List<Change> changes = changes(baseline, shown(baseline), units);
 
 		UnitKey oldKey = bookingKey(event, 0, "seat-a1");
 		UnitKey newKey = bookingKey(event, 0, "seat-a2");
@@ -1237,7 +1275,7 @@ class UnitMapperTest {
 		Presentation removed = event.getPresentations().remove(1);
 		UnitKey key = UnitKey.presentation(event.getId(), removed.getId());
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event));
+		List<Change> changes = changes(baseline, shown(baseline), UnitMapper.decompose(event));
 
 		// die Buchung der Vorstellung bleibt unberührt und unsichtbar
 		assertEquals(List.of(new Change(key, List.of(baseline.get(key).version()), null, true)), changes);
@@ -1254,7 +1292,7 @@ class UnitMapperTest {
 		booking(event.getPresentations().get(1), "seat-b7", "B", 2, 7, "Neu");
 		List<UnitPayload> units = UnitMapper.decompose(event);
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), units);
+		List<Change> changes = changes(baseline, shown(baseline), units);
 
 		assertEquals(List.of(bookingKey(event, 1, "seat-b7"), bookingKey(event, 0, "seat-a1"),
 				bookingKey(event, 0, "seat-a3")), changes.stream().map(Change::unit).toList());
@@ -1270,7 +1308,7 @@ class UnitMapperTest {
 		List<UnitPayload> units = new ArrayList<>(UnitMapper.decompose(event));
 		Collections.reverse(units);
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), units);
+		List<Change> changes = changes(baseline, shown(baseline), units);
 
 		// auch wenn die Eltern-Einheit erst nach dem Kind in units steht, wird die Löschung gefunden
 		assertEquals(Set.of(bookingKey(event, 0, "seat-a1"), bookingKey(event, 1, "seat-a1x")),
@@ -1286,7 +1324,7 @@ class UnitMapperTest {
 		UnitSnapshot deleted = withState(baseline.get(key), Status.OK, true);
 		put(baseline, deleted);
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event));
+		List<Change> changes = changes(baseline, shown(baseline), UnitMapper.decompose(event));
 
 		// die Löschversion ist der Vorgänger; die unveränderten Buchungen brauchen nichts
 		assertEquals(1, changes.size());
@@ -1305,7 +1343,7 @@ class UnitMapperTest {
 		put(baseline, withState(baseline.get(key), Status.OK, true));
 		put(baseline, noVersion(bookingKey(event, 0, "seat-a2"), Status.OK));
 
-		assertEquals(List.of(), UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event)));
+		assertEquals(List.of(), changes(baseline, shown(baseline), UnitMapper.decompose(event)));
 	}
 
 	@Test
@@ -1318,11 +1356,11 @@ class UnitMapperTest {
 		List<UnitPayload> other = UnitMapper.decompose(realisticEvent());
 
 		// units ohne Kopf und Halle, aber nicht leer: weder Kopf noch Halle noch Vorstellungen werden gelöscht
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), other);
+		List<Change> changes = changes(baseline, shown(baseline), other);
 
 		assertEquals(other.stream().map(UnitPayload::unit).toList(), changes.stream().map(Change::unit).toList());
 		assertTrue(changes.stream().noneMatch(Change::deleted));
-		assertEquals(List.of(), UnitMapper.changes(baseline, shown(baseline), List.of()));
+		assertEquals(List.of(), changes(baseline, shown(baseline), List.of()));
 	}
 
 	@Test
@@ -1343,7 +1381,7 @@ class UnitMapperTest {
 
 		assertEquals(1, assembly.warnings().size());
 		assertFalse(assembly.shown().contains(broken));
-		List<Change> changes = UnitMapper.changes(baseline, assembly.shown(), UnitMapper.decompose(loaded));
+		List<Change> changes = changes(baseline, assembly.shown(), UnitMapper.decompose(loaded));
 		assertEquals(List.of(UnitKey.event(event.getId())), changes.stream().map(Change::unit).toList());
 		assertFalse(changes.get(0).deleted());
 	}
@@ -1365,7 +1403,7 @@ class UnitMapperTest {
 		assertFalse(assembly.shown().contains(broken));
 		// die Buchungen der unlesbaren Vorstellung sind Waisen und nicht angezeigt
 		assertFalse(assembly.shown().contains(bookingKey(event, 0, "seat-a1")));
-		List<Change> changes = UnitMapper.changes(baseline, assembly.shown(), UnitMapper.decompose(loaded));
+		List<Change> changes = changes(baseline, assembly.shown(), UnitMapper.decompose(loaded));
 		assertEquals(List.of(UnitKey.event(event.getId())), changes.stream().map(Change::unit).toList());
 	}
 
@@ -1384,7 +1422,7 @@ class UnitMapperTest {
 
 		assertFalse(assembly.shown().contains(broken));
 		// die gesperrte, unlesbare Einheit wird weder gelöscht noch blockiert sie die Speicherung
-		List<Change> changes = UnitMapper.changes(baseline, assembly.shown(), UnitMapper.decompose(loaded));
+		List<Change> changes = changes(baseline, assembly.shown(), UnitMapper.decompose(loaded));
 		assertEquals(List.of(UnitKey.event(event.getId())), changes.stream().map(Change::unit).toList());
 	}
 
@@ -1409,9 +1447,9 @@ class UnitMapperTest {
 		Set<UnitKey> shown = shown(baseline);
 
 		// vom Nutzer geleert und angezeigt: Löschung; nicht angezeigt: keine
-		assertEquals(1, UnitMapper.changes(baseline, shown, UnitMapper.decompose(event)).size());
+		assertEquals(1, changes(baseline, shown, UnitMapper.decompose(event)).size());
 		shown.remove(key);
-		assertEquals(List.of(), UnitMapper.changes(baseline, shown, UnitMapper.decompose(event)));
+		assertEquals(List.of(), changes(baseline, shown, UnitMapper.decompose(event)));
 	}
 
 	@Test
@@ -1428,13 +1466,13 @@ class UnitMapperTest {
 
 		// nur die gesperrte, geänderte Einheit: die ganze Speicherung scheitert
 		LockedUnitException e = assertThrows(LockedUnitException.class,
-				() -> UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event)));
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event)));
 		assertEquals(StoreMessages.newerFormat(newer.relativePath()), e.getMessage());
 
 		// gelöscht werden zählt als Berühren
 		first.getBookings().get(0).setLastName(null);
 		first.getBookings().get(2).setLastName("Meier");
-		e = assertThrows(LockedUnitException.class, () -> UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event)));
+		e = assertThrows(LockedUnitException.class, () -> changes(baseline, shown(baseline), UnitMapper.decompose(event)));
 		assertEquals(StoreMessages.damaged(damaged.relativePath()), e.getMessage());
 	}
 
@@ -1447,7 +1485,7 @@ class UnitMapperTest {
 		event.getPresentations().get(0).getBookings().get(0).setLastName("Geändert");
 
 		LockedUnitException e = assertThrows(LockedUnitException.class,
-				() -> UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event)));
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event)));
 
 		assertEquals(key.relativePath() + " wartet noch auf eine Datei aus dem gemeinsamen Ordner. "
 				+ "Es wurde nichts gespeichert.", e.getMessage());
@@ -1461,26 +1499,198 @@ class UnitMapperTest {
 		put(baseline, noVersion(key, Status.LOCKED_DAMAGED));
 
 		LockedUnitException e = assertThrows(LockedUnitException.class,
-				() -> UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event)));
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event)));
 
 		assertEquals(StoreMessages.damaged(key.relativePath()), e.getMessage());
 	}
 
+	/** Der Stand mit inhaltlich zu neuem Kopf ({@code contentLocked}), wie ihn der Index nach einem neueren Programm kennt. */
+	private static UnitSnapshot contentLocked(UnitSnapshot snapshot) {
+		return new UnitSnapshot(snapshot.unit(), snapshot.version(), Status.LOCKED_FORMAT, false, snapshot.payload(), true);
+	}
+
+	/**
+	 * Unberührte gesperrte und wartende Buchungen blockieren das Speichern nicht, auch nicht eine gesperrte Buchung unter
+	 * einer schon gelöschten Vorstellung: 1.1 zeigt sie nie (KARV-135). Das Löschen einer angezeigten Vorstellung mit
+	 * gesperrtem Kind prüft {@link #deletingPresentationWithLockedChildInStoreIsRejected}.
+	 */
 	@Test
 	void untouchedLockedUnitDoesNotBlock() {
 		Event event = simpleEvent();
 		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
 		put(baseline, withState(baseline.get(bookingKey(event, 0, "seat-a1")), Status.LOCKED_DAMAGED, false));
 		put(baseline, withState(baseline.get(bookingKey(event, 0, "seat-a3")), Status.WAITING, false));
-		// gesperrte Buchung unter einer Vorstellung, die nicht mehr in units steht: bleibt unberührt
-		put(baseline, withState(baseline.get(bookingKey(event, 1, "seat-a1x")), Status.LOCKED_FORMAT, false));
+		UnitKey belowDeleted = bookingKey(event, 1, "seat-a1x");
+		Presentation deleted = event.getPresentations().remove(1);
+		UnitKey deletedKey = UnitKey.presentation(event.getId(), deleted.getId());
+		put(baseline, withState(baseline.get(deletedKey), Status.OK, true));
+		put(baseline, contentLocked(baseline.get(belowDeleted)));
 		event.getPresentations().get(0).setName("Freitagabend");
-		Presentation removed = event.getPresentations().remove(1);
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event));
+		List<Change> changes = changes(baseline, shown(baseline), UnitMapper.decompose(event));
 
-		assertEquals(List.of(UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId()),
-				UnitKey.presentation(event.getId(), removed.getId())), changes.stream().map(Change::unit).toList());
+		assertEquals(List.of(UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId())),
+				changes.stream().map(Change::unit).toList());
+	}
+
+	/**
+	 * Die gesperrte Buchung liegt nur im Index (eine fremde, zurückgestellte Buchung), nicht im Vergleichsstand: Das Löschen
+	 * ihrer angezeigten Vorstellung scheitert trotzdem, sonst verschwände sie still. Neueres Format geht vor beschädigt.
+	 */
+	@Test
+	void deletingPresentationWithLockedChildInStoreIsRejected() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		Map<UnitKey, UnitSnapshot> store = new HashMap<>(baseline);
+		UnitKey foreign = bookingKey(event, 1, "seat-x9");
+		put(store, contentLocked(Snapshots.snapshot(foreign, versionOf(99), Status.OK, false, MAPPER.createObjectNode())));
+		UnitKey damaged = bookingKey(event, 1, "seat-a1x");
+		put(store, withState(store.get(damaged), Status.LOCKED_DAMAGED, false));
+		event.getPresentations().remove(1);
+
+		LockedUnitException format = assertThrows(LockedUnitException.class,
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event), store));
+		store.remove(foreign);
+		LockedUnitException broken = assertThrows(LockedUnitException.class,
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event), store));
+
+		assertEquals(StoreMessages.newerFormat(foreign.relativePath()), format.getMessage());
+		assertEquals(StoreMessages.damaged(damaged.relativePath()), broken.getMessage());
+		store.remove(damaged);
+		assertEquals(1, changes(baseline, shown(baseline), UnitMapper.decompose(event), store).size(),
+				"ohne gesperrtes Kind wird die Vorstellung gelöscht");
+	}
+
+	/**
+	 * Lebt ein gelöschter Kopf wieder auf, räumt das Speichern seine alten Vorstellungen; eine gesperrte Buchung darunter hat
+	 * einen gelöschten Vorfahren (den Kopf im Versionsspeicher), war nie zu sehen und blockiert das Räumen nicht.
+	 */
+	@Test
+	void lockedUnitBelowDeletedHeadDoesNotBlockTheCleanupOfARevival() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		UnitKey head = UnitKey.event(event.getId());
+		put(baseline, withState(baseline.get(head), Status.OK, true));
+		UnitKey locked = bookingKey(event, 1, "seat-a1x");
+		put(baseline, contentLocked(baseline.get(locked)));
+		Presentation old = event.getPresentations().remove(1);
+
+		List<Change> changes = changes(baseline, shown(baseline), UnitMapper.decompose(event));
+
+		Change cleanup = changes.get(0);
+		assertEquals(UnitKey.presentation(event.getId(), old.getId()), cleanup.unit());
+		assertTrue(cleanup.deleted());
+		assertFalse(changes.stream().anyMatch(change -> change.unit().equals(locked)));
+	}
+
+	/**
+	 * Der Vergleichsstand kennt den Kopf lesbar, der Index inhaltlich zu neu (das Live-Update ist zurückgestellt): Eine
+	 * Vorstellung und eine Buchung darunter lassen sich nicht speichern (SYS-009 mit dem Kopf).
+	 */
+	@Test
+	void presentationUnderContentLockedHeadIsNotSaved() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		Map<UnitKey, UnitSnapshot> store = new HashMap<>(baseline);
+		UnitKey head = UnitKey.event(event.getId());
+		put(store, contentLocked(baseline.get(head)));
+		event.getPresentations().get(1).setName("Samstagabend");
+
+		LockedUnitException presentation = assertThrows(LockedUnitException.class,
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event), store));
+		event.getPresentations().get(1).setName("Samstag");
+		event.getPresentations().get(0).getBookings().get(0).setLastName("Geändert");
+		LockedUnitException booking = assertThrows(LockedUnitException.class,
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event), store));
+
+		assertEquals(StoreMessages.newerFormat(head.relativePath()), presentation.getMessage());
+		assertEquals(StoreMessages.newerFormat(head.relativePath()), booking.getMessage());
+	}
+
+	/**
+	 * Nur {@code contentLocked} an einem Vorfahren sperrt die Kinder: Eine beschädigte Vorstellung und ein Kopf mit
+	 * neuerem Envelope-Format (ein älterer Stand wird angezeigt) lassen ihre Kinder speichern.
+	 */
+	@Test
+	void damagedOrFormatLockedAncestorDoesNotBlockChildren() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		Map<UnitKey, UnitSnapshot> store = new HashMap<>(baseline);
+		UnitKey head = UnitKey.event(event.getId());
+		UnitKey presentation = UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId());
+		put(store, withState(baseline.get(head), Status.LOCKED_FORMAT, false));
+		put(store, withState(baseline.get(presentation), Status.LOCKED_DAMAGED, false));
+		event.getPresentations().get(0).getBookings().get(0).setLastName("Geändert");
+
+		List<Change> changes = changes(baseline, shown(baseline), UnitMapper.decompose(event), store);
+
+		assertEquals(List.of(bookingKey(event, 0, "seat-a1")), changes.stream().map(Change::unit).toList());
+	}
+
+	/** Ein eigener Inhalt, den die Inhaltsprüfung für zu neu hält, wird nicht geschrieben (SYS-009 mit der Einheit). */
+	@Test
+	void ownPayloadTheGateCallsNewerIsRejected() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		Booking changed = event.getPresentations().get(0).getBookings().get(0);
+		changed.setLastName("Geändert");
+		changed.getUnknown().put("requires", MAPPER.createArrayNode().add("x-test-merkmal"));
+
+		LockedUnitException e = assertThrows(LockedUnitException.class,
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event)));
+
+		assertEquals(StoreMessages.newerFormat(bookingKey(event, 0, "seat-a1").relativePath()), e.getMessage());
+	}
+
+	/** Scheitert die Inhaltsprüfung selbst, ist das ein Programmfehler: keine SYS-009, Log auf SEVERE. */
+	@Test
+	void throwingGateOnOwnPayloadIsAProgramError() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		event.getPresentations().get(0).getBookings().get(0).setLastName("Geändert");
+		ContentGate throwing = new ContentGate() {
+			@Override
+			public boolean isNewer(UnitKey unit, ObjectNode payload) {
+				throw new IllegalArgumentException("x-test-fehler");
+			}
+
+			@Override
+			public String rulesId() {
+				return "x-test";
+			}
+		};
+		Logger logger = Logger.getLogger(UnitMapper.class.getName());
+		List<LogRecord> records = new ArrayList<>();
+		Handler handler = new Handler() {
+			@Override
+			public void publish(LogRecord record) {
+				records.add(record);
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		boolean parentHandlers = logger.getUseParentHandlers();
+		logger.addHandler(handler);
+		logger.setUseParentHandlers(false);
+		IllegalStateException e;
+		try {
+			e = assertThrows(IllegalStateException.class, () -> UnitMapper.changes(baseline, shown(baseline),
+					UnitMapper.decompose(event), storeStates(baseline), eventStates(baseline), throwing));
+		} finally {
+			logger.removeHandler(handler);
+			logger.setUseParentHandlers(parentHandlers);
+		}
+
+		assertFalse(e.getMessage().startsWith("SYS-009"), e.getMessage());
+		assertEquals("x-test-fehler", e.getCause().getMessage());
+		assertEquals(1, records.size());
+		assertEquals(Level.SEVERE, records.get(0).getLevel());
 	}
 
 	@Test
@@ -1491,7 +1701,7 @@ class UnitMapperTest {
 		baseline.forEach((k, s) -> before.put(k, s.payload().deepCopy()));
 		event.getPresentations().get(0).getBookings().get(0).setLastName("Geändert");
 
-		UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event));
+		changes(baseline, shown(baseline), UnitMapper.decompose(event));
 
 		baseline.forEach((k, s) -> assertEquals(before.get(k), s.payload()));
 	}
@@ -1612,7 +1822,7 @@ class UnitMapperTest {
 		units.add(UnitMapper.decompose(UnitMapper.assembleHalls(List.of(baseline.get(hallKey))).items().get(0)));
 		assertEquals(1, units.get(0).payload().get("x-test-neu").asInt(), "das Modell trägt das Zusatzfeld");
 
-		assertEquals(List.of(), UnitMapper.changes(baseline, shown(baseline), units));
+		assertEquals(List.of(), changes(baseline, shown(baseline), units));
 	}
 
 	@Test
@@ -1625,7 +1835,7 @@ class UnitMapperTest {
 		Event loaded = UnitMapper.assembleEvents(new ArrayList<>(baseline.values())).items().get(0);
 		loaded.getPresentations().get(0).getBookings().get(0).setLastName("Anders");
 
-		List<Change> changes = UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(loaded));
+		List<Change> changes = changes(baseline, shown(baseline), UnitMapper.decompose(loaded));
 
 		assertEquals(List.of(key), changes.stream().map(Change::unit).toList());
 	}
@@ -1648,7 +1858,7 @@ class UnitMapperTest {
 	private static List<Change> changesAfter(Event event, Runnable edit) {
 		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
 		edit.run();
-		return UnitMapper.changes(baseline, shown(baseline), UnitMapper.decompose(event));
+		return changes(baseline, shown(baseline), UnitMapper.decompose(event));
 	}
 
 	@Test

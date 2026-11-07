@@ -43,6 +43,14 @@ public class LockedUnitException extends RuntimeException {
 				: null;
 	}
 
+	/**
+	 * SYS-009 mit der Bezeichnung der Einheit: Ihr Inhalt stammt von einem neueren Programm (KARV-135), etwa ein gesperrter
+	 * Vorfahr einer geänderten Einheit oder ein eigener Inhalt, den die Inhaltsprüfung für zu neu hält.
+	 */
+	static LockedUnitException newerFormat(UnitKey unit) {
+		return new LockedUnitException(StoreMessages.newerFormat(label(unit)));
+	}
+
 	private static String label(UnitKey unit) {
 		try {
 			String label = labels.apply(unit);

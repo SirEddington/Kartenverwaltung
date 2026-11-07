@@ -9,10 +9,12 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
@@ -27,6 +29,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
+import de.eltviller_carneval_verein.karten.store.ContentGate;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
@@ -199,17 +202,42 @@ final class UnitMapper {
 	 * noch gelöscht und räumt erneut, ohne Schon-Gelöschtes zu wiederholen; lebte der Kopf zuerst, wären die alten Kinder
 	 * nach einem Fehler sofort wieder sichtbar.</li>
 	 * </ul>
+	 * Gesperrte Inhalte fasst das Speichern nicht an (KARV-135); geprüft wird dafür am Stand des Versionsspeichers, nicht
+	 * nur am Vergleichsstand (der kennt eine fremde, zurückgestellte Sperre nicht):
+	 * <ul>
+	 * <li>Liegt eine geänderte Einheit unter einer Vorstellung oder einem Event-Kopf, dessen Stand inhaltlich zu neu ist
+	 * ({@link #requireWritableAncestors}), scheitert das Speichern mit SYS-009.</li>
+	 * <li>Wird eine angezeigte Vorstellung gelöscht, unter der eine gesperrte Einheit ohne gelöschten Vorfahren liegt,
+	 * scheitert es mit SYS-009 bzw. SYS-008: Die gesperrte, womöglich bezahlte Buchung verschwände sonst still.</li>
+	 * <li>Ein eigener Inhalt, den die Inhaltsprüfung ({@link ContentRules#GATE}) für inhaltlich zu neu hält, wird nicht
+	 * geschrieben (SYS-009); sonst hielte dieser Rechner die Einheit für lesbar und die anderen sperrten sie.</li>
+	 * </ul>
 	 * Die Daten von {@code baseline} und {@code units} bleiben unverändert.
 	 *
-	 * @param baseline alle bekannten Einheiten des Events bzw. der Halle, sichtbare wie unsichtbare
-	 * @param shown    die Einheiten des Modells, wie es zuletzt geladen oder gespeichert wurde (siehe
-	 *                 {@link Assembly#shown()}). Eine Einheit, die nicht angezeigt werden konnte (unlesbar, Inhalt
-	 *                 passt nicht zum Ordner), fehlt in {@code units}, ohne dass der Nutzer sie entfernt hat; sie
-	 *                 wird deshalb nie gelöscht.
-	 * @throws LockedUnitException wenn eine betroffene Einheit gesperrt ist oder noch auf eine Datei wartet; dann
-	 *                             wird nichts gespeichert
+	 * @param baseline    alle bekannten Einheiten des Events bzw. der Halle, sichtbare wie unsichtbare
+	 * @param shown       die Einheiten des Modells, wie es zuletzt geladen oder gespeichert wurde (siehe
+	 *                    {@link Assembly#shown()}). Eine Einheit, die nicht angezeigt werden konnte (unlesbar, Inhalt
+	 *                    passt nicht zum Ordner), fehlt in {@code units}, ohne dass der Nutzer sie entfernt hat; sie
+	 *                    wird deshalb nie gelöscht.
+	 * @param storeStates die Stände der genannten Einheiten im Versionsspeicher (Index, ohne Datei-Ein-/Ausgabe); gefragt
+	 *                    werden nur die Vorfahren der geänderten Einheiten
+	 * @param eventStates die Stände aller Einheiten eines Events im Versionsspeicher (Index); nur gefragt, wenn eine
+	 *                    Vorstellung gelöscht wird
+	 * @throws LockedUnitException   wenn eine betroffene Einheit gesperrt ist oder noch auf eine Datei wartet, unter einem
+	 *                               inhaltlich zu neuen Vorfahren liegt, eine gelöschte Vorstellung gesperrte Einheiten hat
+	 *                               oder ein eigener Inhalt inhaltlich zu neu ist; dann wird nichts gespeichert
+	 * @throws IllegalStateException wenn die Inhaltsprüfung selbst scheitert (ein Programmfehler); es wird nichts gespeichert
 	 */
-	static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, Set<UnitKey> shown, List<UnitPayload> units) {
+	static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, Set<UnitKey> shown, List<UnitPayload> units,
+			Function<Collection<UnitKey>, Map<UnitKey, UnitSnapshot>> storeStates,
+			Function<String, Map<UnitKey, UnitSnapshot>> eventStates) {
+		return changes(baseline, shown, units, storeStates, eventStates, ContentRules.GATE);
+	}
+
+	/** Wie {@link #changes(Map, Set, List, Function, Function)}, mit der Inhaltsprüfung {@code gate} (für Tests). */
+	static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, Set<UnitKey> shown, List<UnitPayload> units,
+			Function<Collection<UnitKey>, Map<UnitKey, UnitSnapshot>> storeStates,
+			Function<String, Map<UnitKey, UnitSnapshot>> eventStates, ContentGate gate) {
 		Set<UnitKey> present = new HashSet<>();
 		for (UnitPayload part : units) {
 			present.add(part.unit());
@@ -257,7 +285,121 @@ final class UnitMapper {
 				requireWritable(known);
 			}
 		}
+		requireWritableInStore(changes, storeStates, eventStates);
+		requireOwnContent(changes, gate);
 		return withMoves(baseline, changes);
+	}
+
+	/**
+	 * Die Prüfungen von {@link #changes} am Stand des Versionsspeichers: kein inhaltlich zu neuer Vorfahr einer geänderten
+	 * Einheit, keine gesperrte Einheit unter einer gelöschten Vorstellung.
+	 */
+	private static void requireWritableInStore(List<Change> changes,
+			Function<Collection<UnitKey>, Map<UnitKey, UnitSnapshot>> storeStates,
+			Function<String, Map<UnitKey, UnitSnapshot>> eventStates) {
+		Set<UnitKey> ancestors = new LinkedHashSet<>();
+		for (Change change : changes) {
+			ancestors.addAll(change.unit().ancestors());
+		}
+		if (!ancestors.isEmpty()) {
+			Map<UnitKey, UnitSnapshot> states = storeStates.apply(List.copyOf(ancestors));
+			for (Change change : changes) {
+				requireWritableAncestors(change.unit(), states);
+			}
+		}
+		Map<String, Map<UnitKey, UnitSnapshot>> events = new HashMap<>();
+		for (Change change : changes) {
+			UnitKey unit = change.unit();
+			if (change.deleted() && unit.type() == UnitType.PRESENTATION) {
+				requireNothingLockedBelow(unit, events.computeIfAbsent(unit.eventId(), eventStates));
+			}
+		}
+	}
+
+	/**
+	 * Eine Buchung unter einer Vorstellung oder einem Event-Kopf und eine Vorstellung unter einem Event-Kopf, dessen Stand
+	 * inhaltlich zu neu ist ({@link UnitSnapshot#contentLocked()}), lassen sich nicht speichern: Dieses Programm kennt die
+	 * Bedeutung des Vorfahren nicht. Eine Formatsperre ({@code LOCKED_FORMAT} ohne das Merkmal, ein älterer Stand wird
+	 * angezeigt) und eine beschädigte Kette am Vorfahren sperren die Kinder nicht.
+	 *
+	 * @param storeStates die Stände der Vorfahren im Versionsspeicher; ein Vorfahr ohne Stand sperrt nicht
+	 * @throws LockedUnitException mit SYS-009 und der Bezeichnung des Vorfahren
+	 */
+	static void requireWritableAncestors(UnitKey unit, Map<UnitKey, UnitSnapshot> storeStates) {
+		for (UnitKey ancestor : unit.ancestors()) {
+			UnitSnapshot state = storeStates.get(ancestor);
+			if (state != null && state.contentLocked()) {
+				throw LockedUnitException.newerFormat(ancestor);
+			}
+		}
+	}
+
+	/** Für {@link #requireNothingLockedBelow}: neueres Format vor beschädigt, dann nach Pfad. */
+	private static final Comparator<UnitSnapshot> LOCKED_BELOW_ORDER = Comparator
+			.comparing((UnitSnapshot state) -> state.status() != Status.LOCKED_FORMAT)
+			.thenComparing(state -> state.unit().relativePath());
+
+	/**
+	 * Unter der Vorstellung, die gelöscht wird, darf keine gesperrte Einheit liegen, deren Vorfahren im Versionsspeicher
+	 * nicht gelöscht sind (eine Buchung unter einer schon gelöschten Vorstellung zeigt das Programm nie). Bei mehreren
+	 * nennt die Meldung zuerst eine mit neuerem Format (SYS-009), sonst eine beschädigte (SYS-008).
+	 *
+	 * @param eventStates die Stände aller Einheiten des Events im Versionsspeicher
+	 * @throws LockedUnitException mit der Sperrmeldung der gesperrten Einheit
+	 */
+	private static void requireNothingLockedBelow(UnitKey presentation, Map<UnitKey, UnitSnapshot> eventStates) {
+		UnitSnapshot blocking = null;
+		for (UnitSnapshot state : eventStates.values()) {
+			UnitKey unit = state.unit();
+			if (!isLocked(state.status()) || !presentation.equals(unit.parent())
+					|| hasDeletedAncestor(unit, eventStates)) {
+				continue;
+			}
+			if (blocking == null || LOCKED_BELOW_ORDER.compare(state, blocking) < 0) {
+				blocking = state;
+			}
+		}
+		if (blocking != null) {
+			throw new LockedUnitException(lockMessage(blocking.unit(), blocking.status()));
+		}
+	}
+
+	/** Ob eine Einheit über {@code unit} im Versionsspeicher gelöscht ist. */
+	private static boolean hasDeletedAncestor(UnitKey unit, Map<UnitKey, UnitSnapshot> states) {
+		for (UnitKey ancestor : unit.ancestors()) {
+			UnitSnapshot state = states.get(ancestor);
+			if (state != null && state.deleted()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Kein eigener Inhalt darf inhaltlich zu neu sein: Sonst hielte dieser Rechner die Einheit für lesbar, die anderen
+	 * sperrten sie. Löschungen haben keinen Inhalt.
+	 *
+	 * @throws LockedUnitException   mit SYS-009, wenn die Prüfung anschlägt
+	 * @throws IllegalStateException wenn die Prüfung selbst scheitert: ein Programmfehler, kein neueres Format
+	 */
+	private static void requireOwnContent(List<Change> changes, ContentGate gate) {
+		for (Change change : changes) {
+			if (change.deleted()) {
+				continue;
+			}
+			UnitKey unit = change.unit();
+			boolean newer;
+			try {
+				newer = gate.isNewer(unit, change.payload());
+			} catch (RuntimeException e) {
+				LOG.log(Level.SEVERE, "Die Inhaltsprüfung von " + unit.relativePath() + " ist gescheitert", e);
+				throw new IllegalStateException("Die Inhaltsprüfung von " + unit.relativePath()
+						+ " ist gescheitert. Es wurde nichts gespeichert.", e);
+			}
+			if (newer) {
+				throw LockedUnitException.newerFormat(unit);
+			}
+		}
 	}
 
 	/**

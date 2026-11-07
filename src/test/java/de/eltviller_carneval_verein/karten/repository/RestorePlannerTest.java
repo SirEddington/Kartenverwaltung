@@ -186,6 +186,25 @@ class RestorePlannerTest {
 		RestorePlanner.requireRestorable(List.of(fine));
 	}
 
+	/**
+	 * Der aktuelle Stand der Vorstellung ist inhaltlich zu neu (ein ausstehendes rohes Zurücksetzen, die Kette selbst ist
+	 * {@code OK}): Eine Buchung darunter lässt sich nicht wiederherstellen (SYS-009 mit der Vorstellung, KARV-135).
+	 */
+	@Test
+	void unitUnderContentLockedAncestorBlocksRestore() {
+		Version version = version(1, "s1", at(1), false);
+		Version reset = version(2, "s2", at(2), false).withNewerContent(true);
+		UnitState presentation = new UnitState(PRESENTATION, Status.OK, List.of(version), List.of(reset), List.of(), null,
+				Set.of());
+		assertTrue(presentation.contentLocked());
+
+		LockedUnitException e = assertThrows(LockedUnitException.class,
+				() -> RestorePlanner.requireRestorable(List.of(ok(BOOKING, version), presentation)));
+
+		assertEquals(StoreMessages.newerFormat(PRESENTATION.relativePath()), e.getMessage());
+		RestorePlanner.requireRestorable(List.of(ok(BOOKING, version), ok(PRESENTATION, version)));
+	}
+
 	@Test
 	void lockedUnitIsNamedByItsLabelWhenOneIsInstalled() {
 		Version version = version(1, "s1", at(1), false);
