@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +34,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ChangeTrigger;
+import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions;
 import de.eltviller_carneval_verein.karten.ui.ConflictDialog;
 import de.eltviller_carneval_verein.karten.ui.ConflictIndicator;
@@ -68,6 +70,17 @@ import de.eltviller_carneval_verein.karten.ui.shared.SyncIndicator;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncInfo;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncInfoWindow;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncStatus;
+import de.eltviller_carneval_verein.karten.ui.shared.UpdateFlow;
+import de.eltviller_carneval_verein.karten.ui.shared.UpdateIndicator;
+import de.eltviller_carneval_verein.karten.ui.shared.UpdateTexts;
+import de.eltviller_carneval_verein.karten.update.AppVersion;
+import de.eltviller_carneval_verein.karten.update.AwtDesktopOps;
+import de.eltviller_carneval_verein.karten.update.ExecutorScheduler;
+import de.eltviller_carneval_verein.karten.update.HttpUpdateSource;
+import de.eltviller_carneval_verein.karten.update.Installation;
+import de.eltviller_carneval_verein.karten.update.UpdateChecker;
+import de.eltviller_carneval_verein.karten.update.UpdateSource;
+import de.eltviller_carneval_verein.karten.update.UpdateState;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
@@ -75,6 +88,9 @@ import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.binding.BooleanExpression;
+import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.ReadOnlyObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.concurrent.Task;
 import javafx.fxml.FXMLLoader;
 import javafx.geometry.Insets;
@@ -128,6 +144,21 @@ public class MainApp extends Application {
 	private static LockedUnitsIndicator lockedIndicator;
 	// Die Zahl der offenen Konflikte nach der letzten Rückmeldung; jede neue Fußzeile übernimmt sie
 	private static int lastOpenCount;
+
+	/** Die Update-Prüfung samt Ablauf (KARV-131); fehlt außerhalb eines Pakets. */
+	public record Updates(Installation installation, UpdateSource source, UpdateChecker checker, UpdateFlow flow) {
+	}
+
+	// Schlüssel in den Properties der Ansicht "Update wird vorbereitet …" (markBusyView)
+	private static final Object BUSY_VIEW = new Object();
+	private static final ObjectProperty<UpdateState> updateState = new SimpleObjectProperty<>(new UpdateState.NotChecked());
+	private static Updates updates;
+	private static UpdateIndicator updateIndicator;
+	private static Parent busyView;
+	// das Fenster wird geschlossen (der Close-Handler ließ es zu)
+	private static boolean closing;
+	// gerade ist die Einstellungsansicht zu sehen (Klick auf den Update-Hinweis öffnet sie dann nicht neu)
+	private static boolean settingsViewShown;
 	// Mindestbreite des Hauptfensters: So schmal darf es werden, die Kopfzeilen der Bildschirme sind darauf abgestimmt
 	private static final double MIN_WIDTH = 1250.0;
 	private static double width = 1300.0;
@@ -521,12 +552,13 @@ public class MainApp extends Application {
 
 		// Schließen der App mit ungespeicherten Änderungen: erst nachfragen
 		primaryStage.setOnCloseRequest(e -> {
-			// In der Verkaufsansicht erst speichern, was noch aussteht (sonst fragt der LeaveGuard bei einer Eingabe der letzten 300 ms)
-			BookingAutoSave.flushActive();
-			if (!LeaveGuard.confirmLeave()) {
+			if (confirmClose()) {
+				closing = true;
+			} else {
 				e.consume();
 			}
 		});
+		startUpdates(settingsStore);
 
 		showLoadWarnings(repository.getAndClearLoadWarnings(), halls.getAndClearLoadWarnings());
 
@@ -535,6 +567,113 @@ public class MainApp extends Application {
 		showMenuView();
 		// Konflikte, die schon beim Start aufgelöst wurden (der Versionsspeicher meldete sie, bevor jemand zuhörte)
 		conflictsChanged();
+	}
+
+	/**
+	 * Wie beim Schließen des Fensters: erst speichern, was in der Verkaufsansicht noch aussteht (sonst fragt der LeaveGuard
+	 * bei einer Eingabe der letzten 300 ms), dann nach ungespeicherten Änderungen fragen. Nutzen der Close-Handler und das
+	 * Update (KARV-131).
+	 *
+	 * @return {@code false}, wenn der Nutzer abbricht
+	 */
+	private static boolean confirmClose() {
+		BookingAutoSave.flushActive();
+		return LeaveGuard.confirmLeave();
+	}
+
+	/**
+	 * Richtet die Update-Prüfung ein (KARV-131): außerhalb eines Pakets keine; sonst Prüfung 10 s nach dem Start, alle 4 h
+	 * und auf Wunsch, und der Ablauf des Updates. Scheitert der Aufbau, startet die App trotzdem, nur ohne Update-Prüfung.
+	 */
+	private static void startUpdates(SettingsStore settingsStore) {
+		try {
+			Optional<Installation> inst = Installation.current();
+			LOG.info("Version " + AppVersion.current().map(AppVersion::display).orElse("Entwicklungsversion") + ", Plattform "
+					+ inst.map(i -> i.plattform() + ", Paketfamilie " + i.packageFamilyName().orElse("-")).orElse("ohne Update-Prüfung")
+					+ ", Datenordner " + AppPaths.appDataDir() + ", java.io.tmpdir " + System.getProperty("java.io.tmpdir")
+					+ ", " + appProperties());
+			if (inst.isEmpty()) {
+				updateState.set(new UpdateState.Unsupported());
+				return;
+			}
+			Installation installation = inst.get();
+			HttpUpdateSource source = new HttpUpdateSource(installation, java.time.Duration.ofSeconds(10), 65536,
+					Path.of(System.getProperty("java.io.tmpdir")), Clock.systemUTC());
+			UpdateChecker checker = new UpdateChecker(installation, source, new ExecutorScheduler(), Platform::runLater,
+					Clock.systemUTC());
+			UpdateFlow flow = new UpdateFlow(installation,
+					(title, text, button) -> ConfirmDialog.confirm(title, text, button, "button-primary", primaryStage),
+					() -> settingsStore.current().getSharedDir() != null, MainApp::confirmClose, MainApp::showBusyView,
+					source, new AwtDesktopOps(), Platform::exit, MainApp::showMenuView, MainApp::conflictsChanged,
+					checker::checkNow, text -> StatusMessage.getInstance().show(Severity.ERROR, text), MainApp::busyViewShown,
+					() -> SharedFolderConnection.instance().map(SharedFolderConnection::connecting).orElse(false),
+					Platform::runLater, task -> {
+						Thread t = new Thread(task, "update-start");
+						t.setDaemon(true);
+						t.start();
+					});
+			checker.setListener(state -> {
+				updateState.set(state);
+				if (updateIndicator != null) {
+					updateIndicator.refresh();
+				}
+			});
+			updates = new Updates(installation, source, checker, flow);
+			checker.start();
+		} catch (RuntimeException e) {
+			LOG.log(Level.SEVERE, "Update-Prüfung ließ sich nicht einrichten", e);
+			updates = null;
+			updateState.set(new UpdateState.Unsupported());
+		}
+	}
+
+	private static String appProperties() {
+		return System.getProperties().stringPropertyNames().stream().filter(name -> name.startsWith("app.")).sorted()
+				.map(name -> name + "=" + System.getProperty(name)).toList().toString();
+	}
+
+	/** Die Update-Prüfung, leer außerhalb eines Pakets oder wenn ihr Aufbau scheiterte (KARV-131). */
+	public static Optional<Updates> updates() {
+		return Optional.ofNullable(updates);
+	}
+
+	/** Der Zustand der Update-Prüfung für Fußzeile und Einstellungen (FX-Thread). */
+	@SuppressWarnings("exports")
+	public static ReadOnlyObjectProperty<UpdateState> updateStateProperty() {
+		return updateState;
+	}
+
+	/** Die Ansicht „Update wird vorbereitet …“: unbestimmter Fortschritt, Fußzeile nur mit Meldungen (KARV-131). */
+	private static void showBusyView(String text) {
+		Label label = new Label(text);
+		ProgressBar bar = new ProgressBar();
+		bar.setPrefWidth(320);
+		Label hint = new Label(UpdateTexts.BUSY_HINT);
+		hint.setWrapText(true);
+		VBox box = new VBox(16, label, bar, hint);
+		box.setAlignment(Pos.CENTER);
+		box.setMaxWidth(520);
+		VBox centered = new VBox(box);
+		centered.setAlignment(Pos.CENTER);
+		centered.getProperties().put(BUSY_VIEW, Boolean.TRUE);
+		busyView = centered;
+		showContent(centered);
+	}
+
+	private static boolean isBusyView(Parent content) {
+		return Boolean.TRUE.equals(content.getProperties().get(BUSY_VIEW));
+	}
+
+	/** Ob die Busy-Ansicht noch die aktuelle ist und das Fenster nicht geschlossen wird. */
+	private static boolean busyViewShown() {
+		return !closing && busyView != null && busyView.getScene() != null && busyView.getScene() == primaryStage.getScene();
+	}
+
+	/** Klick auf den Update-Hinweis ohne direktes Update: die Einstellungen, außer sie sind schon offen. */
+	private static void openSettingsFromHint() {
+		if (!settingsViewShown) {
+			showSettingsView();
+		}
 	}
 
 	/**
@@ -647,7 +786,9 @@ public class MainApp extends Application {
 			conflictIndicator.refresh();
 		}
 		boolean connecting = SharedFolderConnection.instance().map(SharedFolderConnection::connecting).orElse(false);
-		if (!connecting && conflictList != null && conflictList.hasUnseen(open)) {
+		// während eines Updates (KARV-131) nicht von selbst: Die App endet gleich, oder der Ablauf ruft diese Methode danach
+		boolean updating = updates != null && updates.flow().isRunning();
+		if (!connecting && !updating && conflictList != null && conflictList.hasUnseen(open)) {
 			ConflictDialog.show(primaryStage, conflictList, conflictActions, open);
 		} else {
 			ConflictDialog.refreshIfOpen(open);
@@ -681,6 +822,9 @@ public class MainApp extends Application {
 	public void stop() {
 		SharedFolderConnection.instance().ifPresent(SharedFolderConnection::close);
 		SyncService.instanceIfCreated().ifPresent(SyncService::closeIndex);
+		if (updates != null) {
+			updates.checker().close();
+		}
 	}
 
 	/** Das Hauptfenster. */
@@ -694,6 +838,7 @@ public class MainApp extends Application {
 	 * weiß, dass es nichts zu fragen gibt (etwa die Ladeansicht des Verbindens).
 	 */
 	public static void showContent(Parent content) {
+		settingsViewShown = false;
 		StatusMessage.getInstance().clear();
 		width = primaryStage.getWidth();
 		height = primaryStage.getHeight();
@@ -772,6 +917,7 @@ public class MainApp extends Application {
 			controller.initData(selectedHall, selectedObject, selectedPlan, editable);
 
 			primaryStage.setScene(createScene(root));
+			settingsViewShown = false;
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
@@ -821,6 +967,7 @@ public class MainApp extends Application {
 
 			// 5. Scene setzen
 			primaryStage.setScene(createScene(root));
+			settingsViewShown = false;
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
@@ -845,6 +992,7 @@ public class MainApp extends Application {
 
 			// 3. Scene setzen
 			primaryStage.setScene(createScene(root));
+			settingsViewShown = fxmlPath.endsWith("/SettingsView.fxml");
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
@@ -899,24 +1047,41 @@ public class MainApp extends Application {
 		VBox.setVgrow(content, Priority.ALWAYS);
 		VBox screen = new VBox(content);
 		if (conflictHint) {
-			// ohne Konflikte nimmt der Hinweis keinen Platz, weder in der Fußzeile noch als eigene Zeile
-			ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount, MainApp::openConflictDialog);
-			conflictIndicator = indicator;
-			// der Hinweis zum Abgleich steht neben dem auf Konflikte, mit derselben Einfügeregel; nicht in einer Ladeansicht,
-			// die Fortschritt und Ursache selbst zeigt (sonst stünde die Prozentzahl doppelt da)
-			SyncIndicator syncHint = syncStatus == null || isLoadingView(content) ? null
-					: new SyncIndicator(syncStatus, MainApp::askDecisionAgain, MainApp::openSyncInfo);
-			if (syncStatus != null) {
-				// ersetzt den Hinweis der vorigen Ansicht; der 1-s-Takt frischt nur diesen auf
-				syncStatus.track(syncHint == null ? null : syncHint::refresh);
-			}
-			// der Link auf gesperrte Einträge steht gleich hinter dem auf Konflikte; wie dieser ersetzt er den der vorigen
-			// Ansicht, und die App frischt nur den der aktuellen auf
-			LockedUnitsIndicator lockedHint = new LockedUnitsIndicator(MainApp::lockedCount, MainApp::openLockedUnits);
-			lockedIndicator = lockedHint;
-			List<Hyperlink> hints = new ArrayList<>(List.of(indicator, lockedHint));
-			if (syncHint != null) {
-				hints.add(syncHint);
+			List<Hyperlink> hints = new ArrayList<>();
+			if (isBusyView(content)) {
+				// "Update wird vorbereitet …" (KARV-131): keine anklickbaren Hinweise, nur Meldungen; die Felder der Hinweise
+				// dürfen auf die vorige Ansicht zeigen, nur der Takt des Abgleichs folgt keinem Hinweis mehr
+				if (syncStatus != null) {
+					syncStatus.track(null);
+				}
+			} else {
+				// ohne Konflikte nimmt der Hinweis keinen Platz, weder in der Fußzeile noch als eigene Zeile
+				ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount, MainApp::openConflictDialog);
+				conflictIndicator = indicator;
+				// der Hinweis zum Abgleich steht neben dem auf Konflikte, mit derselben Einfügeregel; nicht in einer
+				// Ladeansicht, die Fortschritt und Ursache selbst zeigt (sonst stünde die Prozentzahl doppelt da)
+				SyncIndicator syncHint = syncStatus == null || isLoadingView(content) ? null
+						: new SyncIndicator(syncStatus, MainApp::askDecisionAgain, MainApp::openSyncInfo);
+				if (syncStatus != null) {
+					// ersetzt den Hinweis der vorigen Ansicht; der 1-s-Takt frischt nur diesen auf
+					syncStatus.track(syncHint == null ? null : syncHint::refresh);
+				}
+				// der Link auf gesperrte Einträge steht gleich hinter dem auf Konflikte; wie dieser ersetzt er den der vorigen
+				// Ansicht, und die App frischt nur den der aktuellen auf
+				LockedUnitsIndicator lockedHint = new LockedUnitsIndicator(MainApp::lockedCount, MainApp::openLockedUnits);
+				lockedIndicator = lockedHint;
+				hints.add(indicator);
+				hints.add(lockedHint);
+				if (syncHint != null) {
+					hints.add(syncHint);
+				}
+				// der Update-Hinweis (KARV-131) steht zuletzt; nicht in Ladeansichten, damit kein Update mitten im Verbinden startet
+				if (!isLoadingView(content)) {
+					UpdateIndicator updateHint = new UpdateIndicator(updateState::get, () -> updates().map(Updates::installation),
+							available -> updates().ifPresent(u -> u.flow().update(available.neu())), MainApp::openSettingsFromHint);
+					updateIndicator = updateHint;
+					hints.add(updateHint);
+				}
 			}
 			StatusLabel messages = findStatusLabel(content);
 			if (messages != null && messages.getParent() instanceof Pane footer) {
@@ -1000,6 +1165,9 @@ public class MainApp extends Application {
 		AppLogging.init();
 		GlobalErrorHandler.install();
 		launch(args);
+		// launch kehrt erst nach stop() zurück; ein übrig gebliebener Nicht-Daemon-Thread (etwa "AWT-Shutdown" nach
+		// Desktop.open beim Update, KARV-131) soll die JVM nicht am Leben halten
+		System.exit(0);
 	}
 
 }

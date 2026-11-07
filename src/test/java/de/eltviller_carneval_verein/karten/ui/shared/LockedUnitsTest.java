@@ -124,7 +124,7 @@ class LockedUnitsTest {
 		List<LockedUnits.Row> rows = locked.rows(labels, Set.of(PRESENTATION));
 
 		assertEquals(List.of(new LockedUnits.Row(PRESENTATION, "Gala › Samstag",
-				"Neuere Programmversion: Kartenverwaltung aktualisieren", false)), rows);
+				"Neuere Programmversion: Kartenverwaltung aktualisieren (Einstellungen → Info und Updates)", false)), rows);
 	}
 
 	@Test

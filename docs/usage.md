@@ -153,7 +153,32 @@ affected event or hall has unsaved changes.
 An entry that is damaged without an intact copy (SYS-008) or was saved by a newer program version (SYS-009) is
 locked: it cannot be changed, and its seats appear blocked in the sales views. Use the "gesperrte Einträge" link in
 the footer to reset a damaged entry to its last readable state; for SYS-009 update the application on this
-computer.
+computer (*Einstellungen → Info und Updates*, see [Updates](#updates)).
+
+## Updates
+
+Windows does not install updates in the background. The app checks the latest GitHub release itself: 10 s after
+start, then every 4 hours, and on **"Jetzt prüfen"**. It never opens a window on its own.
+
+- **Footer hint:** "Update 1.1.0 verfügbar" appears when a newer version exists. It stays while a check runs or fails.
+- **Updating (Windows):** click the hint (or *Einstellungen → Info und Updates → "Jetzt aktualisieren"*). After the
+  confirmation, the app saves or asks about unsaved changes like when closing the window, shows "Update wird
+  vorbereitet …", loads the update file and closes. The Windows App Installer opens (if not, look in the taskbar);
+  click **"Aktualisieren"**. With "Starten, wenn bereit" ticked, the app restarts by itself. To cancel, close the
+  App Installer window and start the app again.
+- **"Update im Browser laden":** the fallback in the settings when the app cannot reach the update source itself (for
+  example antivirus or proxy). The app closes and the browser downloads the update file; the browser may open in its
+  own window without your usual settings, and may ask whether to keep the file ("Behalten"). Open the file and click
+  "Aktualisieren", then delete the file. Do not open an old update file while the app is running: the App Installer
+  closes it without asking. The settings also show the address of the update file to copy.
+- **"Update-Prüfung nicht möglich"** in the footer (Windows): the check keeps failing for a systematic reason
+  (certificate, proxy, server). Use "Update im Browser laden". Without internet the app stays silent.
+- **Several workstations:** update every workstation that uses the same shared folder at the same time; on a
+  workstation without the hint yet, use **"Jetzt prüfen"**.
+- **"Für diese Version ist eine Neuinstallation nötig."** The new version comes with a different package identity
+  (e.g. a new signing certificate); updating in place is not possible.
+- **Linux and the Windows ZIP:** the hint appears, but updating works the way the app was installed (e.g. apt) or by
+  downloading the new version.
 
 ## Messages
 
@@ -164,7 +189,7 @@ computer.
 | SYS-006 | Sync failed for another reason (e.g. no write permission) | Check folder permissions; the app keeps retrying |
 | SYS-007 | A damaged file was replaced by a verified copy | Nothing; the damaged file stays as `.corrupt-…` |
 | SYS-008 | Entry damaged, no intact copy | Reset via "gesperrte Einträge" |
-| SYS-009 | Entry saved by a newer version | Update the application |
+| SYS-009 | Entry saved by a newer version | Update the application (*Einstellungen → Info und Updates*) |
 | SYS-010 | Application already running on this computer | Switch to the open window |
 | SYS-011 | Another computer uses the same machine id | Nothing; a new id was assigned |
 | SYS-012 | Shared folder has a file with different content | Nothing was overwritten; report it |

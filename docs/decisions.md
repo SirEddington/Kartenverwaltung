@@ -233,8 +233,8 @@ deleted.
 **Decision:** Hydraulic Conveyor builds signed Windows MSIX and Linux packages; releases go to GitHub Releases and
 the download page to the `gh-pages` branch (`make copied-site`).
 
-**Why:** Auto-updates and installers without maintaining a server, and 40–90 MB binaries never enter the history of
-`main`.
+**Why:** Updates and installers without maintaining a server, and 40–90 MB binaries never enter the history of
+`main`. When updates are applied is decided by the app, see "Updates only with the user's consent" below.
 
 **Notes from `conveyor.conf`:** the "update escape hatch" (`updatecheck.exe`) is disabled because Norton quarantines
 it; required JDK modules (`java.scripting`, `java.xml`, `jdk.unsupported`, …) are listed explicitly because jdeps
@@ -288,6 +288,95 @@ part 2, November 2026).
 The preferred route is then Azure Trusted Signing for the club (check the identity validation requirements first).
 Plan the switch together with a release that touches every workstation anyway, and include the data import. Once
 switched, keep the certificate subject unchanged across renewals.
+
+## Updates only with the user's consent (`app.updates = manual`)
+
+**Decision:** Windows no longer checks for updates in the background. An update runs only when a user agrees to it
+in the app (KARV-131) or when it is installed from the shared folder (KARV-132).
+
+**Why:**
+- Workstations sharing a folder must run the same version (see [installation.md](installation.md)). An update must
+  never arrive unnoticed in the middle of a sale.
+- The default mode (`background`, `<AutomaticBackgroundTask />` in the `.appinstaller`) did not deliver in practice.
+  A workstation linked to the GitHub update source was still on 0.9.5 two days after 1.0.0 was released.
+- `aggressive` (check on every start) is not an option: it is not supported on Linux, and its start-up check gives
+  no say in when an update happens.
+
+**Verified in a test build (KARV-130, 06.11.2026, Windows 11 with Norton):**
+- In `manual` mode the `.appinstaller` contains no `UpdateSettings`. The package still keeps its link to the update
+  source.
+- The packaged app gets `app.version`, `app.revision` and `app.repositoryUrl` as system properties.
+- With `dev.hydraulic.conveyor:conveyor-control`, `getInstance()` returns Conveyor's implementation.
+  - `canTriggerUpdateCheckUI()` returns `AVAILABLE`.
+  - `getCurrentVersionFromRepository()` reads the newest version. Without a connection it throws
+    `UpdateCheckException`.
+  - `triggerUpdateCheckUI()` closes the app and installs the update. It does **not** restart the app, and the
+    helper (`updater.exe`) stays behind as a hidden process.
+- `Add-AppxPackage -Path <newer .msix> -ForceApplicationShutdown` updates a running app from a local folder,
+  with no update source and no internet. A helper then restarts the app. The data and the link to the update
+  source are kept.
+- Norton's behaviour-based protection ("IDP.Generic") quarantined the launchers
+  (`bin\Kartenverwaltung UPDATE-TEST.exe`) of two of the three test versions:
+
+  | Version | What the app did | Norton |
+  |---|---|---|
+  | 1.1.0.1 | `triggerUpdateCheckUI()`, which starts `updater.exe` (a copy of `updatecheck.exe`) from `%TEMP%` | quarantined |
+  | 1.1.0.2 | updated with `Add-AppxPackage` by a hidden PowerShell helper and started by it; HTTP to localhost only | not flagged |
+  | 1.1.0.3 | HTTPS to GitHub through the Windows trust store (`jdk.crypto.mscapi`, `Windows-ROOT`) on its first start | quarantined |
+
+  - Norton reports the launchers as unknown ("file version unknown", "no community data"). The self-signed
+    certificate gives them no reputation, so any unusual behaviour is enough to trigger the behaviour-based
+    protection.
+  - Norton also deleted the JavaFX native libraries in the shared cache; see
+    [JavaFX native libraries extracted at build time](#javafx-native-libraries-extracted-at-build-time).
+  - Conveyor ships `updatecheck.exe` in the package even with `use-update-escape-hatch = false`.
+- Norton's Web/Mail Shield intercepts TLS. Java's own trust store rejects its root certificate (PKIX), as Conveyor,
+  Maven and a plain JDK test showed. The Windows trust store accepts it, but that requires `jdk.crypto.mscapi`,
+  which the bundled runtime does not contain (it also lacks `java.net.http`). In the packaged app this path is
+  what triggered Norton (1.1.0.3).
+
+- Every Norton test can damage the machine it runs on. Since KARV-137 the installed app no longer uses the shared
+  JavaFX cache, but development and tests (`javafx:run`, Maven tests) still do: after a Norton hit they may not
+  start until Windows has been restarted.
+
+**Consequence:** `manual` must not ship without KARV-131. Otherwise there is no way to update apart from a new
+install.
+
+## Update check and update from the app (KARV-131)
+
+**Decision:**
+- **Check (W3):** the app reads `metadata.properties` of the update source (`app.repositoryUrl` with a trailing `/`)
+  with `HttpURLConnection` and Java's default trust store: 10 s after start, then 4 h after the end of the previous
+  check, and on "Jetzt prüfen". No helper process, no Windows certificate store, never a pop-up.
+- **Update (W2):** on a click and after a confirmation, the app saves or asks about unsaved changes (like closing the
+  window), checks again, downloads the `.appinstaller` file freshly into `java.io.tmpdir` (the package's own
+  `LocalCache\Local\Temp`, passed explicitly) and opens it with `Desktop.open`; then it exits. The App Installer
+  updates and restarts the app.
+- **Fallback:** "Update im Browser laden" opens the `.appinstaller` address with `Desktop.browse` and exits too,
+  because the App Installer would otherwise close the running app without asking.
+- **Package identity:** the button only appears inside an MSIX package (`PACKAGE_LOCALAPPDATA` points into
+  `\Packages\<family>`) whose family (from `app.windows.userModelID`) matches `windows.package-family-name` of the
+  source. Otherwise "Neuinstallation nötig" (e.g. after a certificate change) or, on Linux and the Windows ZIP, a
+  hint only.
+
+**Why:**
+- Probe KARV-131 (07.11.2026, Windows 11 with Norton, no Norton alert):
+  - **W1**, a PowerShell helper (`CheckUpdateAvailabilityAsync`, `Add-AppxPackage -ForceApplicationShutdown`): works,
+    but takes about 90 s while the old app keeps running; it starts a program and the script is fragile. Rejected.
+  - **W2**, `.appinstaller` via the browser: fast and clean; the link to the update source is kept.
+  - **W3**, Java HTTPS from the **installed** app to GitHub: HTTP 200. Norton does not intercept the packaged app on
+    this machine; the plain JDK `java.exe` still gets PKIX. HTTPS with the default trust store is therefore used for
+    the check only, and a failing check is shown, not hidden.
+  - **W4**, `Desktop.open` of a self-downloaded file from inside the package: works. The file lands in the package's
+    `LocalCache\Local\Temp` (`java.io.tmpdir`, already present), the App Installer opens directly without the
+    "How do you want to open this file?" prompt, shows the new version, updates and, with "Starten wenn bereit",
+    starts it. `PACKAGE_LOCALAPPDATA` is `…\Packages\<family>\LocalCache\Local`.
+- The `.appinstaller` of a release points to a versioned MSIX under `latest`; an old file returns 404 once a newer
+  release is "latest". The file is therefore loaded only on the click.
+- `Desktop.browse` starts the browser as a child process of the package: it runs as its own instance with its own
+  profile, and its data lands in the package folder (seen with Opera in W2). Acceptable for a fallback.
+- **Known gap:** an antivirus that only cuts the connection (instead of presenting its own certificate) looks like
+  "no network" and stays silent; a workstation without internet is normal at a box office.
 
 ## OpenPDF 1.3.x
 

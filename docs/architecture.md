@@ -172,6 +172,15 @@ setters. `ui.ChangeTrigger` runs the comparison after a short debounce on any mo
 `StateRestorer` replaces an entity in the cache from a snapshot ("Nicht speichern"); `LeaveGuard` asks
 save / don't save / cancel when leaving a screen.
 
+### `update` – version and updates
+
+`UpdateChecker` reads `metadata.properties` of the update source (`app.repositoryUrl`) over HTTPS with Java's default
+trust store, 10 s after start and then every 4 hours, and publishes an `UpdateState`. The footer hint
+(`ui.shared.UpdateIndicator`) and *Einstellungen → Info und Updates* (`ui.settings.InfoSection`) follow it.
+`ui.shared.UpdateFlow` runs the update: confirmation, `confirmClose` like closing the window, a fresh check, download
+of the `.appinstaller` file and `Desktop.open`, then the app exits and the Windows App Installer takes over. See
+[decisions.md](decisions.md#update-check-and-update-from-the-app-karv-131).
+
 ### `ui` – screens
 
 Grouped by area: `menu` (main and management menu), `sales` (ticket table, hall overview, customer display),

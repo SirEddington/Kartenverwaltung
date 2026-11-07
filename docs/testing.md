@@ -33,7 +33,7 @@ Temurin 21. The release workflow runs it again before building the JARs.
 
 ## What is covered
 
-About 2,600 test methods in ~175 test classes, organized in the same packages as the production code.
+About 2,950 test runs in ~180 test classes, organized in the same packages as the production code.
 
 | Area | Examples | Kind |
 |---|---|---|
@@ -45,6 +45,7 @@ About 2,600 test methods in ~175 test classes, organized in the same packages as
 | `repository` | `StoreEventRepositoryTest`, `StoreHallRepository*Test`, `UnitMapperTest`, `EventMergeTest`, `FieldMergeTest`, `BookingPolicyTest`, `BookingTrailTest`, `RestorePlannerTest` | Unit / integration |
 | `repository` scenarios | `ConflictScenarioTest` (conflicts end to end across two or three machines) | Integration |
 | `tracking` | `ChangeTrackerTest`, `StateRestorerTest` | Unit |
+| `update` | `AppVersionTest`, `InstallationTest`, `UpdateInfoTest`, `GrundTest`, `UpdateStateTest`, `UpdateCheckerTest` (fake scheduler), `HttpUpdateSourceTest` (small `ServerSocket` server, the module does not read `jdk.httpserver`) | Unit |
 | `ui` logic | savers, `LeaveGuard`, `LiveUpdates`, sales (`SeatBulkEdit`, `BookingSearch`, `PlaceAssignment`, `MoneyConsistencyTest`, …), `shared` (`ConnectFlowTest`, `SharedFolderStartTest`, `SyncStatusTest`, …), `backup`, `input` | Unit |
 | `ui` end to end | `PlanEditsEndToEndTest` (edit seating plan, save, reload, delete plan — no booking with data lost, no cent changed) | Integration |
 

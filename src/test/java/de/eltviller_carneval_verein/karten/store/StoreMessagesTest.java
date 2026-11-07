@@ -52,7 +52,8 @@ class StoreMessagesTest {
 	@Test
 	void newerFormatTextSaysTheEntryIsLockedHere() {
 		assertEquals("SYS-009: halls/h1 wurde mit einer neueren Version der Kartenverwaltung gespeichert und ist hier "
-				+ "gesperrt. Aktualisiere die Kartenverwaltung auf diesem Rechner.", StoreMessages.newerFormat("halls/h1"));
+				+ "gesperrt. Aktualisiere die Kartenverwaltung unter Einstellungen → Info und Updates → Jetzt prüfen.",
+				StoreMessages.newerFormat("halls/h1"));
 	}
 
 	@Test

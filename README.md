@@ -89,6 +89,7 @@ Kartenverwaltung/
     │   ├── store/                       Version store, shared-folder sync, conflict resolution
     │   ├── tracking/                    Unsaved-change detection and state restore
     │   ├── settings/                    settings.json
+    │   ├── update/                      Version, update check against the latest GitHub release
     │   ├── ui/                          JavaFX controllers (sales, accounting, event, hall, settings, shared, …)
     │   └── util/                        Money formatting, totals, angles
     ├── main/resources/…/ui/             FXML views, CSS, fonts, images
