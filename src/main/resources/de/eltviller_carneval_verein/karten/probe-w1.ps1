@@ -20,7 +20,8 @@ try {
     $task = $asTask.MakeGenericMethod([Windows.ApplicationModel.PackageUpdateAvailabilityResult]).Invoke($null, @($p.CheckUpdateAvailabilityAsync()))
     $null = $task.Wait(30000)
     L "CheckUpdateAvailability: $($task.Result.Availability) (Fehler: $($task.Result.ExtendedError))"
-    $xml = [xml](Invoke-WebRequest -UseBasicParsing -Uri $info.Uri).Content
+    $raw = (Invoke-WebRequest -UseBasicParsing -Uri $info.Uri).RawContentStream.ToArray()
+    $xml = [xml][System.Text.Encoding]::UTF8.GetString($raw).TrimStart([char]0xFEFF)
     $msix = $xml.AppInstaller.MainPackage.Uri
     L "Neueste Version laut .appinstaller: $($xml.AppInstaller.MainPackage.Version), Paket $msix"
     $aumid = (Get-StartApps | Where-Object { $_.AppID -like "$($pkg.PackageFamilyName)!*" } | Select-Object -First 1).AppID
