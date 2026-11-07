@@ -1,5 +1,6 @@
-# Spike KARV-131, wird nicht gemergt: baut die Test-Identitaeten FX-W1..W3 je als Revision 1 und 2
+# Spike KARV-131, wird nicht gemergt: baut die Test-Identitaet FX-W4 als Revision 1 und 2
 # (Paketversion 1.1.0.1 und 1.1.0.2) nur als Workflow-Artefakt, ohne Release und ohne gh-pages.
+# W1 bis W3 sind erledigt (Probelauf 07.11.2026).
 name: FX-Probe (Spike KARV-131)
 
 on:
@@ -12,7 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
     env:
       OAUTH_TOKEN: dummy
     steps:
@@ -31,58 +32,30 @@ jobs:
       - name: Datenordner pruefen (Schutz der echten Daten)
         uses: hydraulic-software/conveyor/actions/build@v22.2
         with:
-          command: json > json-w1.txt
-          extra_flags: -f conveyor-fxw1.conf
+          command: json > json-w4.txt
+          extra_flags: -f conveyor-fxw4.conf
           signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
           agree_to_license: 1
       - name: Datenordner auswerten
         run: |
-          trap 'rm -f json-w1.txt cfg.json' EXIT
-          sed -n '/^{/,/^}/p' json-w1.txt > cfg.json
-          jq -e 'any(.app.jvm.windows.amd64.options[]; . == "-Dkarten.appDataDir=D:/Kartenverwaltung/Test/KARV-131/w1")' cfg.json >/dev/null
+          trap 'rm -f json-w4.txt cfg.json' EXIT
+          sed -n '/^{/,/^}/p' json-w4.txt > cfg.json
+          jq -e 'any(.app.jvm.windows.amd64.options[]; . == "-Dkarten.appDataDir=D:/Kartenverwaltung/Test/KARV-131/w4")' cfg.json >/dev/null
           jq -e '.app.updates == "manual" and .app.jvm."extract-native-libraries" == true and (.app.site | has("copy-to")) == false' cfg.json >/dev/null
-          echo "PASS Konfiguration W1"
+          echo "PASS Konfiguration W4"
 
-      - name: W1 Revision 1
+      - name: W4 Revision 1
         uses: hydraulic-software/conveyor/actions/build@v22.2
         with:
-          command: make --output-dir=sites/w1-r1 site
-          extra_flags: -f conveyor-fxw1.conf -Kapp.revision=1 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+          command: make --output-dir=sites/w4-r1 site
+          extra_flags: -f conveyor-fxw4.conf -Kapp.revision=1 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
           signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
           agree_to_license: 1
-      - name: W1 Revision 2
+      - name: W4 Revision 2
         uses: hydraulic-software/conveyor/actions/build@v22.2
         with:
-          command: make --output-dir=sites/w1-r2 site
-          extra_flags: -f conveyor-fxw1.conf -Kapp.revision=2 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
-          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
-          agree_to_license: 1
-      - name: W2 Revision 1
-        uses: hydraulic-software/conveyor/actions/build@v22.2
-        with:
-          command: make --output-dir=sites/w2-r1 site
-          extra_flags: -f conveyor-fxw2.conf -Kapp.revision=1 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
-          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
-          agree_to_license: 1
-      - name: W2 Revision 2
-        uses: hydraulic-software/conveyor/actions/build@v22.2
-        with:
-          command: make --output-dir=sites/w2-r2 site
-          extra_flags: -f conveyor-fxw2.conf -Kapp.revision=2 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
-          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
-          agree_to_license: 1
-      - name: W3 Revision 1
-        uses: hydraulic-software/conveyor/actions/build@v22.2
-        with:
-          command: make --output-dir=sites/w3-r1 site
-          extra_flags: -f conveyor-fxw3.conf -Kapp.revision=1 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
-          signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
-          agree_to_license: 1
-      - name: W3 Revision 2
-        uses: hydraulic-software/conveyor/actions/build@v22.2
-        with:
-          command: make --output-dir=sites/w3-r2 site
-          extra_flags: -f conveyor-fxw3.conf -Kapp.revision=2 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+          command: make --output-dir=sites/w4-r2 site
+          extra_flags: -f conveyor-fxw4.conf -Kapp.revision=2 -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
           signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
           agree_to_license: 1
 

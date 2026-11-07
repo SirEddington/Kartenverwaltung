@@ -1001,6 +1001,8 @@ public class MainApp extends Application {
 		GlobalErrorHandler.install();
 		UpdateProbe131.runInBackground(); // Spike KARV-131, wird nicht gemergt
 		launch(args);
+		// Spike KARV-131 (W4): Endfolge wie im Entwurf, Platform.exit() -> stop() -> hier
+		System.exit(0);
 	}
 
 }
