@@ -119,6 +119,115 @@ transitive `org.openjfx` artifacts are excluded; the shade plugin produces one J
 otherwise contain both Windows and Linux natives, and whichever service registration was merged last decided the
 toolkit at runtime ("No toolkit found" on Windows).
 
+The native libraries inside the fat JAR are unpacked by Conveyor at build time, see
+[JavaFX native libraries extracted at build time](#javafx-native-libraries-extracted-at-build-time).
+
+## JavaFX native libraries extracted at build time
+
+**Decision:** `conveyor.conf` sets `app.jvm.extract-native-libraries = true`. The fat JAR stays as it is.
+
+- At build time Conveyor takes the native libraries out of the JAR and puts them, flat, into the library folder of
+  the bundled Java runtime: `bin\` on Windows, `lib/runtime/lib` on Linux.
+- The shade plugin leaves the Microsoft runtime files of `javafx-graphics` out of the Windows JAR (`msvcp140*.dll`,
+  `vcruntime140*.dll`, `ucrtbase.dll`, `api-ms-win-*.dll`). The Windows JAR keeps the 7 JavaFX DLLs.
+
+**Why:**
+
+- **The old behaviour:** Without the switch, JavaFX unpacked its DLLs on every start into
+  `%USERPROFILE%\.openjfx\cache\21.0.2+5\amd64`, a cache shared by every JavaFX 21.0.2 program of the user.
+- **The incident in KARV-130:** Norton's behaviour-based protection quarantined two test launchers.
+  - While cleaning up, it deleted `glass.dll`, `prism_d3d.dll`, `javafx_font.dll` and `prism_sw.dll` from that cache.
+  - It blocked their paths until Windows restarted (`AccessDeniedException`).
+  - Until then no JavaFX program started on the machine, the real Kartenverwaltung included.
+  - It is not known whether the club laptops run Norton.
+- **A second mechanism is suspected, not proven:**
+  - JavaFX compares the cached file with the resource by MD5 and deletes and rewrites it when they differ.
+  - The installed app ships DLLs signed by Conveyor, while `javafx:run` and the tests use unsigned ones, both in
+    the same cache folder.
+  - Switching between the two rewrites the files. If another process has the DLL loaded, the delete fails, and so
+    does the start.
+
+**How JavaFX finds the libraries:** `NativeLibLoader` (JavaFX 21.0.2) tries, in this order:
+
+1. next to the JAR: `<jar dir>\..\bin` on Windows, `<jar dir>` on Linux
+2. the resource in the JAR, unpacked into the cache
+3. `java.library.path`
+4. `System.loadLibrary`
+
+On Windows step 1 now finds them in `<install>\bin`. On Linux step 3 finds them, through the
+`java.library.path` the Conveyor launcher sets (`lib/app/../runtime/lib/`). Both depend on undocumented behaviour
+of JavaFX and Conveyor. After every update of either, check with `-Djavafx.verbose=true` where the libraries are
+loaded from.
+
+**Linux package dependencies:**
+
+- With the `.so` files loose in the package, Conveyor derives the Debian `Depends` from them too: GTK3, GLib, ATK,
+  Cairo, Pango, GL and friends.
+- It resolves the package names against Ubuntu 24.04, where several carry a `t64` suffix (`libgtk-3-0t64`,
+  `libglib2.0-0t64`, `libatk1.0-0t64`, `libasound2t64`). These names do not exist on Ubuntu 22.04 and Debian 12.
+- `conveyor.conf` removes these entries and adds alternatives with the old names, so the `.deb` installs on all
+  three.
+- `libasound2t64` was already in 1.0.x, so Debian 12 could not install the package before either.
+- This was measured with `apt-get install --simulate`.
+
+**Why the Microsoft runtime files are filtered:**
+
+- JavaFX 21.0.2 ships `msvcp140*`/`vcruntime140*` 14.36, the bundled JDK (Corretto 21) ships 14.44.
+- Conveyor copies extracted libraries into `bin\`, replacing existing files without a warning (the "conflicting
+  native libraries" check only compares JARs with each other). Unfiltered, the whole JVM and the launcher would
+  silently run on the older runtime.
+- With the filter, the runtime in the package is unchanged from before: the same JDK files.
+- The three files the JDK does not ship (`msvcp140_1`, `msvcp140_2`, `api-ms-win-core-console-l1-2-0`) are no longer
+  preloaded by JavaFX. No JavaFX DLL imports them, and JavaFX ignores the failure. With `javafx.verbose` this shows
+  as "failed to load …" lines, which are not errors.
+
+**Rejected alternatives:**
+
+- **The app as a JPMS module:** jlink rejects modules that depend on an automatic module, and the app depends on
+  OpenPDF 1.3.43.
+- **JavaFX as jmods in the runtime:** a larger change with no gain for the goal.
+- **A private cache via `javafx.cachedir`:** the app would still unpack DLLs at run time.
+- **Individual JARs from Maven instead of the fat JAR:** JavaFX and ControlsFX would be jlinked as named modules,
+  and the app JAR would depend on an automatic module.
+
+**Not affected:** Development and tests (`javafx:run`, Maven tests) still load JavaFX from the Maven JARs and use the
+cache in the user profile. An old `.openjfx` folder on a club laptop is harmless and no longer used; it may be
+deleted.
+
+**What this does not achieve:**
+
+- Norton can still quarantine a file inside the package.
+- The cache used to heal itself: a missing file was unpacked again on the next start. That fallback is gone. If
+  `bin\glass.dll` is missing, the app does not start until the file is restored.
+- Other programs are no longer affected.
+
+**Recovery if a release does not start on a workstation:**
+
+1. **Restore the file from the Norton quarantine.**
+2. **Withdraw the broken release** if it is the latest one: mark it as a pre-release on GitHub. "Latest" then points
+   to the previous release again, and no further workstation updates to it.
+3. **Install a fixed version over the broken one:**
+   - Set `app.jvm.extract-native-libraries = false` in `conveyor.conf`. With the filtered JAR, this was verified to
+     start in the KARV-137 spike; the filter can stay.
+   - Build it with a higher version than the broken one; MSIX accepts only a higher version as an update.
+   - On the workstation run `Add-AppxPackage -Path <msix> -ForceApplicationShutdown`, from a USB stick or the shared
+     folder. Data and update source are kept.
+4. **Never run `Remove-AppxPackage` on a workstation** without first backing up
+   `%LOCALAPPDATA%\Packages\EcvKarten_0cs1gtds5d9x0\LocalCache\Local\EltvillerCarnevalVerein\Kartenverwaltung`. It
+   is deleted with the package.
+5. **Downgrade only in an emergency** (`Add-AppxPackage -ForceUpdateFromAnyVersion`):
+   - 1.0.x drops the table labels of 1.1.
+   - 1.0.x checks for updates in the background and updates itself back to the latest release, so withdraw the
+     broken release first (step 2).
+6. **Pilot:**
+   - Do not release shortly before a sale.
+   - Workstations on 1.0.x update themselves from the latest release. Keep the other workstations switched off until
+     the pilot is done, or withdraw the release at once if it fails (step 2).
+   - On the pilot workstation, after the update, open the app and check the loaded modules:
+     `(Get-Process -Name "Kartenverwaltung - Eltviller Carneval Verein").Modules`. Every `glass.dll`, `prism_*.dll`
+     and `javafx_*.dll` must come from `(Get-AppxPackage EcvKarten).InstallLocation\bin`, and none from `.openjfx` or
+     `Temp`.
+
 ## Conveyor for installers, GitHub for hosting
 
 **Decision:** Hydraulic Conveyor builds signed Windows MSIX and Linux packages; releases go to GitHub Releases and
@@ -129,7 +238,8 @@ the download page to the `gh-pages` branch (`make copied-site`).
 
 **Notes from `conveyor.conf`:** the "update escape hatch" (`updatecheck.exe`) is disabled because Norton quarantines
 it; required JDK modules (`java.scripting`, `java.xml`, `jdk.unsupported`, …) are listed explicitly because jdeps
-does not detect the reflective use by `FXMLLoader`.
+does not detect the reflective use by `FXMLLoader`; `extract-native-libraries` is on, see
+[JavaFX native libraries extracted at build time](#javafx-native-libraries-extracted-at-build-time).
 
 ## OpenPDF 1.3.x
 
