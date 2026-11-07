@@ -122,6 +122,9 @@ back changes to that hall from other workstations until it is restarted.
       page in `gh-pages`.
 3. Required repository secrets: `CONVEYOR_SIGNING_KEY`, `CONVEYOR_BILLING_EMAIL`. `GITHUB_TOKEN` is provided by
    Actions.
+4. Optionally submit the Windows installer to Microsoft as a software developer
+   (`https://www.microsoft.com/wdsi/filesubmission`). If Norton flags a release on a workstation, report it at
+   `https://submissions.norton.com/`. See [decisions.md](decisions.md#no-public-code-signing-certificate-for-now).
 
 `conveyor.conf` includes `deployment/conveyor.local.conf`, which is git-ignored and only used for local builds.
 The `deployment/build.bat` script is the old local release path and is superseded by the workflow.
