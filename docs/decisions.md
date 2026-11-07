@@ -367,8 +367,10 @@ install.
   - **W3**, Java HTTPS from the **installed** app to GitHub: HTTP 200. Norton does not intercept the packaged app on
     this machine; the plain JDK `java.exe` still gets PKIX. HTTPS with the default trust store is therefore used for
     the check only, and a failing check is shown, not hidden.
-  - **W4**, `Desktop.open` of a self-downloaded file from inside the package: see the probe result in the KARV-131
-    ticket before the first release.
+  - **W4**, `Desktop.open` of a self-downloaded file from inside the package: works. The file lands in the package's
+    `LocalCache\Local\Temp` (`java.io.tmpdir`, already present), the App Installer opens directly without the
+    "How do you want to open this file?" prompt, shows the new version, updates and, with "Starten wenn bereit",
+    starts it. `PACKAGE_LOCALAPPDATA` is `…\Packages\<family>\LocalCache\Local`.
 - The `.appinstaller` of a release points to a versioned MSIX under `latest`; an old file returns 404 once a newer
   release is "latest". The file is therefore loaded only on the click.
 - `Desktop.browse` starts the browser as a child process of the package: it runs as its own instance with its own
