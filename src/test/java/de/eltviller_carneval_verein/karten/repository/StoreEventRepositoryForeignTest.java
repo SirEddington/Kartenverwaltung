@@ -2081,6 +2081,26 @@ class StoreEventRepositoryForeignTest {
 		assertTrue(sync.unitState(unit).contentLocked());
 	}
 
+	/**
+	 * Ein inhaltlich zu neuer Kopf nimmt das Event aus dem Cache; eine Ansicht, die es noch hält, bekommt beim Speichern die
+	 * Sperre (SYS-009) gemeldet, nicht „inzwischen geändert“.
+	 */
+	@Test
+	void savingAHeldEventAfterAForeignContentLockedHeadReportsTheLock() throws IOException {
+		foreign.write(head(), "Fremd",
+				payload -> payload.set("requires", JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+		ForeignResult result = mine.applyForeign(List.of(head()));
+		assertEquals(List.of("removed Prunksitzung"), recorder.calls);
+		assertEquals(List.of(StoreMessages.newerFormat(head().relativePath())), result.warnings());
+		long before = files();
+		friday.setName("Freitagabend");
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
+
+		assertEquals(StoreMessages.newerFormat("Prunksitzung"), refused.getMessage());
+		assertEquals(before, files(), "der gesperrte Kopf und alles darunter bleiben unberührt");
+	}
+
 	/** Schreibt das neuere Programm wieder einen bekannten Zahlstatus, ist die Buchung zurück im Modell und der Sitz belegt. */
 	@Test
 	void lockLiftsWhenForeignWritesKnownValue() throws IOException {

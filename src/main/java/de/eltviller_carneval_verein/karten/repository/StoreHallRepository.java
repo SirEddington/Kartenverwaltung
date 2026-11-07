@@ -482,6 +482,42 @@ public class StoreHallRepository implements HallRepository {
 				&& !isBlocked(hall, known);
 	}
 
+	/**
+	 * Ob die Halle im Versionsspeicher inhaltlich gesperrt ist (KARV-135): Ihr aktueller Stand stammt von einem neueren
+	 * Programm ({@link UnitSnapshot#contentLocked}), sie fehlt deshalb im Modell. Gefragt wird der Index, ohne Datei-Ein-/Ausgabe;
+	 * eine unbekannte oder ungültige ID ist nicht gesperrt.
+	 */
+	public boolean isContentLocked(String hallId) {
+		return indexedLock(hallId) != null;
+	}
+
+	/** Der Stand der inhaltlich gesperrten Halle im Index, sonst {@code null}. */
+	private UnitSnapshot indexedLock(String hallId) {
+		if (hallId == null || hallId.isBlank()) {
+			return null;
+		}
+		UnitKey unit;
+		try {
+			unit = UnitKey.hall(hallId);
+		} catch (IllegalArgumentException e) {
+			// eine ID, die keine Einheit haben kann, ist nie gesperrt
+			return null;
+		}
+		UnitSnapshot snapshot = sync.snapshots(List.of(unit)).get(unit);
+		return snapshot != null && snapshot.contentLocked() ? snapshot : null;
+	}
+
+	/**
+	 * Die Sperrmeldung (SYS-009) einer inhaltlich gesperrten Halle ({@link #isContentLocked}), sonst {@code null}. Die Halle
+	 * heißt wie in den übrigen Sperrmeldungen ({@link LockedUnitException#useLabels}), ohne Bezeichnung nach ihrem Pfad;
+	 * ihr Inhalt wird nicht gelesen, er stammt von einem neueren Programm. Für die Prüfung der Vorstellungen
+	 * ({@code PresentationValidator.useHallLocks}).
+	 */
+	public String lockTextOfHall(String hallId) {
+		UnitSnapshot locked = indexedLock(hallId);
+		return locked == null ? null : UnitMapper.lockMessage(locked.unit(), UnitMapper.missingLock(locked));
+	}
+
 	/** Der Stand der Einheit im Vergleichsstand (nur für Tests). */
 	UnitSnapshot knownUnit(UnitKey unit) {
 		return baseline.known(unit);

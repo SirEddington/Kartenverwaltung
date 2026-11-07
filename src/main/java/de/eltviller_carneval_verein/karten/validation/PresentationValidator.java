@@ -2,6 +2,9 @@ package de.eltviller_carneval_verein.karten.validation;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -13,6 +16,13 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
  */
 public final class PresentationValidator {
 
+	private static final Logger LOG = Logger.getLogger(PresentationValidator.class.getName());
+
+	private static final Function<String, String> NO_HALL_LOCKS = hallId -> null;
+
+	/** Siehe {@link #useHallLocks}. */
+	private static volatile Function<String, String> hallLocks = NO_HALL_LOCKS;
+
 	private final Presentation presentation;
 	private final ValidationResult result = ValidationResult.ok();
 
@@ -22,6 +32,18 @@ public final class PresentationValidator {
 
 	public static ValidationResult validate(Presentation presentation) {
 		return new PresentationValidator(presentation).run();
+	}
+
+	/**
+	 * Setzt die Abfrage, ob die Halle einer Vorstellung gesperrt ist (KARV-135; in der App
+	 * {@code StoreHallRepository.lockTextOfHall}): Hallen-ID → Sperrtext in der Form „Code: Text“ (SYS-009 aus
+	 * {@code store.StoreMessages}), oder {@code null}, wenn sie nicht gesperrt ist. Eine gesperrte Halle fehlt im Modell
+	 * und friert ihre Vorstellungen ein ({@link Presentation#isPlanMissing()}); die Prüfung meldet dann die Sperre statt
+	 * {@link PresentationIssue#PLAN_GONE}. Ohne Einrichtung, nach {@code null} oder wenn die Abfrage scheitert, ist keine
+	 * Halle gesperrt.
+	 */
+	public static void useHallLocks(Function<String, String> lockTextOfHall) {
+		hallLocks = lockTextOfHall != null ? lockTextOfHall : NO_HALL_LOCKS;
 	}
 
 	/** Größter erlaubter Ist-Betrag im Kassensturz in Cent: 1.000.000 € (wie bisher die Grenze des Spinners). */
@@ -48,8 +70,27 @@ public final class PresentationValidator {
 			result.add(PresentationIssue.PLAN_MISSING.toIssue(EntityLabels.presentation(presentation)));
 		}
 		if (presentation.isPlanMissing()) {
-			result.add(PresentationIssue.PLAN_GONE.toIssue(EntityLabels.presentation(presentation)));
+			String lock = hasHall ? hallLock(hallId) : null;
+			result.add(lock != null ? lockIssue(lock) : PresentationIssue.PLAN_GONE.toIssue(EntityLabels.presentation(presentation)));
 		}
+	}
+
+	/** Der Sperrtext der Halle ({@link #useHallLocks}), oder {@code null}. */
+	private static String hallLock(String hallId) {
+		try {
+			return hallLocks.apply(hallId);
+		} catch (RuntimeException e) {
+			LOG.log(Level.FINE, "Keine Auskunft über die Sperre der Halle " + hallId, e);
+			return null;
+		}
+	}
+
+	/** Die Sperre der Halle statt PRS-007, mit dessen Schwere; Code und Text aus „Code: Text“. */
+	private static ValidationIssue lockIssue(String lock) {
+		int separator = lock.indexOf(": ");
+		String code = separator < 0 ? "" : lock.substring(0, separator);
+		String message = separator < 0 ? lock : lock.substring(separator + 2);
+		return new ValidationIssue(code, PresentationIssue.PLAN_GONE.getSeverity(), message);
 	}
 
 	private void validateDefaultPrice() {

@@ -40,6 +40,7 @@ import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Das Repository der Events auf dem Versionsspeicher. Beim Speichern wird das Event in Kopf, Vorstellungen und Buchungen
@@ -233,9 +234,19 @@ public class StoreEventRepository implements EventRepository {
 		write(event);
 	}
 
-	/** Lehnt ein Event ab, das nicht das im Cache ist, aber dessen Platz einnimmt, oder das ein fremder Stand gelöscht hat. */
+	/**
+	 * Lehnt ein Event ab, das nicht das im Cache ist, aber dessen Platz einnimmt, oder das ein fremder Stand gelöscht hat.
+	 * Hat ein fremder, inhaltlich zu neuer Kopf es gesperrt (KARV-135), nennt die Meldung die Sperre (SYS-009), wie bei
+	 * der Halle.
+	 */
 	private void requireCurrent(Event event) {
 		Event cached = cachedEvent(event.getId());
+		if (cached == null && removedByOthers.contains(event.getId())) {
+			UnitSnapshot head = baseline.known(UnitKey.event(event.getId()));
+			if (head != null && head.contentLocked()) {
+				throw new LockedUnitException(StoreMessages.newerFormat(EntityLabels.nameOrPlaceholder(event.getName())));
+			}
+		}
 		if ((cached != null && cached != event) || (cached == null && removedByOthers.contains(event.getId()))) {
 			throw LockedUnitException.replacedMeanwhile(event.getName());
 		}

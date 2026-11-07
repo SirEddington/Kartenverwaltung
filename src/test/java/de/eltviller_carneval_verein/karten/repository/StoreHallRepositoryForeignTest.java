@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -26,7 +28,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.model.BookingSync;
+import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.store.ForeignVersions;
@@ -38,6 +43,9 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.validation.PresentationIssue;
+import de.eltviller_carneval_verein.karten.validation.PresentationValidator;
+import de.eltviller_carneval_verein.karten.validation.ValidationIssue;
 
 /**
  * Fremde Stände im Hallen-Repository. "Der andere Rechner" ist meist ein zweites Repository auf demselben Dienst: Es
@@ -424,6 +432,7 @@ class StoreHallRepositoryForeignTest {
 		ForeignResult result = mine.applyForeign(List.of(unit()));
 
 		assertNull(mine.findById(hall.getId()), "die gesperrte Halle fehlt im Modell");
+		assertTrue(mine.isContentLocked(hall.getId()), "die Hallen-Ansicht meldet darüber die Sperre statt „gelöscht“");
 		assertEquals(List.of(StoreMessages.newerFormat("Stadthalle")), result.warnings());
 		assertEquals(List.of("removed Stadthalle"), recorder.calls);
 		// der Hallen-Editor zeigt die Halle noch
@@ -431,6 +440,53 @@ class StoreHallRepositoryForeignTest {
 		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveHall(hall));
 		assertEquals(StoreMessages.newerFormat("Alt geändert"), refused.getMessage());
 		assertEquals(before, files(), "die gesperrte Halle wird nicht überschrieben");
+	}
+
+	/**
+	 * Eine gesperrte Halle friert ihre Vorstellungen ein ({@code planMissing}): Die Prüfung meldet dann die Sperre der Halle
+	 * (SYS-009, Schwere wie PRS-007) statt „Bestuhlung existiert nicht mehr“. Die Abfrage gilt auch für ein Repository, das
+	 * die Halle schon gesperrt geladen hat; eine ungesperrte Halle meldet weiter PRS-007.
+	 */
+	@Test
+	void presentationOnLockedHallReportsLockInsteadOfPrs007() throws IOException {
+		foreignVersion(unit(), payload -> payload.set("requires",
+				JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+		mine.applyForeign(List.of(unit()));
+		Presentation frozen = frozenPresentation(hall.getId());
+		assertTrue(frozen.isPlanMissing());
+		Presentation gone = frozenPresentation("x-test-andere-halle");
+		// ohne Bezeichnungen (wie in der App vor dem Einrichten) nennt die Meldung den Pfad der Einheit
+		String expected = StoreMessages.newerFormat(unit().relativePath());
+		assertEquals(expected, mine.lockTextOfHall(hall.getId()));
+		assertEquals(expected, other().lockTextOfHall(hall.getId()), "auch schon beim Laden gesperrt");
+		assertNull(mine.lockTextOfHall("x-test-andere-halle"));
+
+		PresentationValidator.useHallLocks(mine::lockTextOfHall);
+		try {
+			List<ValidationIssue> issues = PresentationValidator.validate(frozen).getIssues();
+			List<ValidationIssue> others = PresentationValidator.validate(gone).getIssues();
+
+			assertEquals(List.of(expected), issues.stream().map(ValidationIssue::toDisplayText).toList());
+			assertEquals(PresentationIssue.PLAN_GONE.getSeverity(), issues.get(0).severity());
+			assertEquals(List.of(PresentationIssue.PLAN_GONE.getCode()),
+					others.stream().map(ValidationIssue::code).toList());
+		} finally {
+			PresentationValidator.useHallLocks(null);
+		}
+		assertEquals(List.of(PresentationIssue.PLAN_GONE.getCode()),
+				PresentationValidator.validate(frozen).getIssues().stream().map(ValidationIssue::code).toList(),
+				"ohne Einrichtung ist keine Halle gesperrt");
+	}
+
+	/** Eine vollständige Vorstellung in der Halle, deren Bestuhlung der Abgleich nicht findet: eingefroren. */
+	private static Presentation frozenPresentation(String hallId) {
+		Presentation presentation = new Event().addPresentation("Freitag");
+		presentation.setDate(LocalDate.of(2027, 2, 5));
+		presentation.setTime(LocalTime.of(19, 11));
+		presentation.setHallId(hallId);
+		presentation.setSeatingPlanId("x-test-bestuhlung");
+		BookingSync.sync(presentation, null);
+		return presentation;
 	}
 
 	@Test

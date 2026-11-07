@@ -16,6 +16,7 @@ import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
@@ -188,8 +189,14 @@ public class HallEditController {
 		if (LiveViews.isShown(btnSave)) {
 			showNoHall();
 		}
-		// Die Hallenverwaltung hat keine Fußzeile: Die Meldung öffnet dort einen Dialog
-		StatusMessage.getInstance().show(Severity.WARNING, "„" + EntityLabels.nameOrPlaceholder(removed.getName()) + "“ wurde auf einem anderen Rechner gelöscht.");
+		// Die Hallenverwaltung hat keine Fußzeile: Die Meldung öffnet dort einen Dialog. Hat ein neueres Programm die Halle
+		// gesperrt (KARV-135), ist sie nicht gelöscht: dann die Sperre (SYS-009)
+		String name = EntityLabels.nameOrPlaceholder(removed.getName());
+		if (hallRepository.isContentLocked(removed.getId())) {
+			StatusMessage.getInstance().show(Severity.ERROR, StoreMessages.newerFormat(name));
+		} else {
+			StatusMessage.getInstance().show(Severity.WARNING, "„" + name + "“ wurde auf einem anderen Rechner gelöscht.");
+		}
 	}
 
 	/**

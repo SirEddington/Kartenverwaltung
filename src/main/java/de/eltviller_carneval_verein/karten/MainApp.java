@@ -82,6 +82,7 @@ import de.eltviller_carneval_verein.karten.update.Installation;
 import de.eltviller_carneval_verein.karten.update.UpdateChecker;
 import de.eltviller_carneval_verein.karten.update.UpdateSource;
 import de.eltviller_carneval_verein.karten.update.UpdateState;
+import de.eltviller_carneval_verein.karten.validation.PresentationValidator;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
@@ -542,6 +543,8 @@ public class MainApp extends Application {
 		syncLabels = labels;
 		// SYS-008 und SYS-009 beim Speichern und Einarbeiten nennen den Eintrag wie Fußzeile und Dialog, nicht seinen Pfad
 		LockedUnitException.useLabels(labels);
+		// Eine inhaltlich gesperrte Halle friert ihre Vorstellungen ein: Die Prüfung nennt die Sperre statt PRS-007 (KARV-135)
+		PresentationValidator.useHallLocks(halls::lockTextOfHall);
 		conflictList = new ConflictList(sync::openConflicts, labels, conflictActions::isAdopted, halls::findById);
 		conflictSync = sync;
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
