@@ -118,17 +118,22 @@ back changes to that hall from other workstations until it is restarted.
 
 1. Bump the version in `conveyor.conf` (`app.version`) **and** in `pom.xml` (`<version>`). The JAR names in
    `conveyor.conf` are derived from `app.version`, so both must match.
-2. Run the **Release build** workflow (`.github/workflows/release.yml`, manual `workflow_dispatch`). It:
+2. Create the format sample of the new version from this final release state: run `FormatSampleGenerator`
+   (`src/test/java/.../store/`) with the target folder `src/test/resources/format-samples/<version>`. It writes
+   `data.zip` there; add a `README.md` next to it (how it was created, contents) and commit both. `FormatSamplesTest`
+   then checks that every later version loads this sample unchanged, so a missed sample means no guard for the next
+   version. Details: [decisions.md](decisions.md#release-steps).
+3. Run the **Release build** workflow (`.github/workflows/release.yml`, manual `workflow_dispatch`). It:
    1. runs the tests on Linux under `xvfb-run` (`-Plinux`),
    2. builds the Windows JAR, then the Linux JAR (`-DskipTests`),
    3. runs `conveyor make copied-site`, which uploads installers as GitHub Release assets and updates the download
       page in `gh-pages`.
-3. Required repository secrets: `CONVEYOR_SIGNING_KEY`, `CONVEYOR_BILLING_EMAIL`. `GITHUB_TOKEN` is provided by
+4. Required repository secrets: `CONVEYOR_SIGNING_KEY`, `CONVEYOR_BILLING_EMAIL`. `GITHUB_TOKEN` is provided by
    Actions.
-4. Optionally submit the Windows installer to Microsoft as a software developer
+5. Optionally submit the Windows installer to Microsoft as a software developer
    (`https://www.microsoft.com/wdsi/filesubmission`). If Norton flags a release on a workstation, report it at
    `https://submissions.norton.com/`. See [decisions.md](decisions.md#no-public-code-signing-certificate-for-now).
-5. Running Windows workstations show the update hint within about 4 hours (or at the next start). To withdraw a
+6. Running Windows workstations show the update hint within about 4 hours (or at the next start). To withdraw a
    release, mark it as a pre-release: the previous release becomes "latest" again and the hint disappears.
    Workstations showing "Update-Prüfung nicht möglich" are updated with *"Update im Browser laden"*. See
    [decisions.md](decisions.md#update-check-and-update-from-the-app-karv-131).
