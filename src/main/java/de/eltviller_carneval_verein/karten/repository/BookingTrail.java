@@ -19,7 +19,8 @@ import de.eltviller_carneval_verein.karten.store.VersionId;
 
 /**
  * Was eine Seite mit einer Buchung getan hat, gelesen aus der Umzugsspur (KARV-93): Ausgehend von der Quelle und der
- * Basis dort zählen nur Nutzer-Versionen (ohne {@code resolution}), die sich lesen lassen. Eine Seite sind die Versionen
+ * Basis dort zählen nur Nutzer-Versionen (ohne {@code resolution}), die sich lesen lassen oder inhaltlich zu neu sind
+ * (KARV-135: ID und Umzugsangaben stehen auf JSON-Ebene). Eine Seite sind die Versionen
  * dieses Rechners ({@link ConflictInput#ownMachineId()}) bzw. die aller anderen.
  *
  * @param kind    was die Seite getan hat
@@ -445,10 +446,13 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 		return side;
 	}
 
-	/** Ohne Versionen einer Auflösung und ohne unlesbare (eine neuere App, ein Inhalt, der nicht zur Einheit passt). */
+	/**
+	 * Ohne Versionen einer Auflösung und ohne unlesbare (ein Inhalt, der nicht zur Einheit passt); inhaltlich zu neue
+	 * zählen mit ({@link PolicyRules#isTrailReadable}).
+	 */
 	private static List<Version> userVersions(Collection<Version> versions, UnitKey unit) {
 		return versions.stream()
-				.filter(version -> !version.marks().resolution() && PolicyRules.isReadable(unit, version)).toList();
+				.filter(version -> !version.marks().resolution() && PolicyRules.isTrailReadable(unit, version)).toList();
 	}
 
 	/** Die Versionen der Einheit, die die Basis über ihre Vorgänger enthalten, ohne sie selbst. */

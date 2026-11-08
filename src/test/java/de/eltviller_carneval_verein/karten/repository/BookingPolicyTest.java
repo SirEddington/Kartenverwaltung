@@ -723,6 +723,30 @@ class BookingPolicyTest {
 	}
 
 	/**
+	 * KARV-135: A setzt m von s1 nach s2; die Ankunft dort schrieb ein neueres Programm (inhaltlich zu neu, nur sie trägt
+	 * {@code movedFrom}), danach folgt eine lesbare Version ohne Umzugsangabe. B ändert m auf s1. Die Spur zählt die
+	 * gesperrte Ankunft mit: m kommt auf s2 an und lebt nicht an der Quelle wieder auf.
+	 */
+	@Test
+	void trailSeesArrivalOnContentLockedSeat() {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		world.claim(S1, m);
+		world.claim(S1, child(OTHER, "save-a", m, null, VersionMarks.NONE.withMovedTo(S2)));
+		ObjectNode newer = booking("m", "s2");
+		newer.putArray("requires").add("x-test-merkmal");
+		Version arrival = version(OTHER, "save-a", newer, VersionMarks.NONE.withMovedFrom(S1)).withNewerContent(true);
+		world.claim(S2, arrival);
+		world.claim(S2, child(OTHER, "save-b", arrival, booking("m", "s2", b -> b.setComment("Fenster"))));
+		world.lose(S1, child(OWN, "save-c", m, booking("m", "s1", b -> b.setEMail("neu@example.org"))));
+
+		world.resolve(S1, OWN);
+
+		assertEquals(List.of(S2), world.carriers("m"), "keine doppelte Buchung");
+		assertNull(idOf(world.head(S1)), "s1 bleibt geräumt");
+	}
+
+	/**
 	 * Wie beim Ersetzen, aber B ändert y danach noch in einem zweiten Speichervorgang: Die Umzugsangaben stehen nur an der
 	 * ersten Version der Strecke, A's Änderung geht trotzdem nach s2.
 	 */

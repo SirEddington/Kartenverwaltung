@@ -666,6 +666,14 @@ public final class SyncService implements ConnectionControl {
 		resolver.setPolicy(type, policy);
 	}
 
+	/**
+	 * Wie viele Einheiten mit ihrer Konfliktauflösung auf eine inhaltlich gesperrte Einheit warten (siehe
+	 * {@link ConflictResolver#waitingCount}); sie laufen, sobald sich eine der blockierenden Einheiten ändert.
+	 */
+	public int waitingResolutions() {
+		return resolver.waitingCount();
+	}
+
 	/** Für Tests: die Auflösung der Verluste. */
 	ConflictResolver resolver() {
 		return resolver;
@@ -3612,6 +3620,11 @@ public final class SyncService implements ConnectionControl {
 				notReported(unit, e);
 			}
 		}
+		// Hier laufen alle geänderten Einheiten durch (Abholen, Vollabgleich, eigenes Schreiben im Einzelbetrieb, Start):
+		// Wartet eine Auflösung auf eine davon (gesperrter Nachbar), kommt sie wieder dran. Erst nach dem Eintragen in den
+		// Index, damit sie die Geschwister auf dem neuen Stand liest.
+		units.forEach(resolver::unitChanged);
+		found.forEach(loss -> resolver.unitChanged(loss.unit()));
 		RuntimeException failure = null;
 		try {
 			found.forEach(this::reportLoss);
@@ -3871,6 +3884,11 @@ public final class SyncService implements ConnectionControl {
 			}
 			FullSyncRun run = current.run;
 			return run != null && run.inProgress(unit) || FullSyncRun.covers(current.skippedTrees, unit);
+		}
+
+		@Override
+		public ContentGate gate() {
+			return gate;
 		}
 
 		/** SYS-006 mit dem gemeinsamen Ordner; im Einzelbetrieb mit dem lokalen Bestand, in den geschrieben wird. */

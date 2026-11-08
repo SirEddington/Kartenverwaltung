@@ -84,6 +84,16 @@ final class PolicyRules {
 						version.newerContent()));
 	}
 
+	/**
+	 * Ob die Version für die Umzugsspur zählt: lesbar ({@link #isReadable(UnitKey, Version)}) oder inhaltlich zu neu. Die
+	 * Spur entscheidet nur über Buchungs-ID und Umzugsangaben auf JSON-Ebene; ohne inhaltlich zu neue Versionen fände sie
+	 * eine Ankunft nicht, deren {@code movedFrom} nur an einer solchen steht, und die Buchung lebte an der Quelle wieder
+	 * auf (doppelt).
+	 */
+	static boolean isTrailReadable(UnitKey unit, Version version) {
+		return isReadable(unit, version) || version.newerContent();
+	}
+
 	/** "Gleich": Ist "Meine" gleich "Deren" oder gleich der Basis, gilt "Deren", ohne Vermerk. */
 	static Resolution equal(ConflictInput input) {
 		if (sameContent(input.mine(), input.theirs()) || sameContent(input.mine(), input.base())) {
