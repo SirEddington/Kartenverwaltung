@@ -4,19 +4,33 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.TestRepositories;
+import de.eltviller_carneval_verein.karten.store.ForeignVersions;
+import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.TestSyncServices;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 
 class BookingSyncServiceTest {
@@ -45,7 +59,7 @@ class BookingSyncServiceTest {
 	}
 
 	private void prepare() {
-		BookingSyncService.prepare(event, id -> Map.of(hall.getId(), hall).get(id), tracker);
+		BookingSyncService.prepare(event, id -> Map.of(hall.getId(), hall).get(id), tracker, p -> Set.of());
 	}
 
 	@Test
@@ -63,7 +77,7 @@ class BookingSyncServiceTest {
 		Booking empty = presentation.addBooking();
 		presentation.setHallId("gibt-es-nicht");
 
-		assertDoesNotThrow(() -> BookingSyncService.prepare(event, id -> null, tracker));
+		assertDoesNotThrow(() -> BookingSyncService.prepare(event, id -> null, tracker, p -> Set.of()));
 
 		assertTrue(presentation.isPlanMissing());
 		assertEquals(2, presentation.getBookings().size());
@@ -78,7 +92,7 @@ class BookingSyncServiceTest {
 		Booking booking = presentation.addBooking();
 		booking.setLastName("Müller");
 
-		assertDoesNotThrow(() -> BookingSyncService.prepare(event, id -> null, tracker));
+		assertDoesNotThrow(() -> BookingSyncService.prepare(event, id -> null, tracker, p -> Set.of()));
 
 		assertTrue(presentation.isPlanMissing());
 		assertEquals(1, presentation.getBookings().size());
@@ -117,7 +131,7 @@ class BookingSyncServiceTest {
 		withoutPresentations.setPresentations(null);
 		presentation.setBookings(null);
 
-		assertDoesNotThrow(() -> BookingSyncService.prepare(withoutPresentations, id -> null, tracker));
+		assertDoesNotThrow(() -> BookingSyncService.prepare(withoutPresentations, id -> null, tracker, p -> Set.of()));
 		assertDoesNotThrow(() -> prepare());
 	}
 
@@ -167,5 +181,66 @@ class BookingSyncServiceTest {
 
 		tracker.check(event);
 		assertTrue(tracker.isDirty(event));
+	}
+
+	/**
+	 * KARV-135: Ein neueres Programm sperrt die Buchung auf dem ersten Sitz (unbekannter Zahlstatus), im Modell steht eine
+	 * Buchung ohne Platz mit Reihe, Tisch und Nummer genau dieses Sitzes. Das Öffnen (etwa der Abrechnung) setzt sie nicht
+	 * auf den gesperrten Sitz: Das Event bleibt sauber, Speichern gelingt ohne zu schreiben, und der Platzhalter des
+	 * gesperrten Sitzes behält beim nächsten Öffnen seine Kennung.
+	 */
+	@Test
+	void openingAccountingWithBookingWithoutSeatMatchingLockedSeatKeepsEventClean(@TempDir Path appData)
+			throws IOException {
+		SyncService sync = TestSyncServices.singleMode(appData);
+		sync.startup(null, p -> {
+		});
+		hall.setName("Stadthalle");
+		TestRepositories.halls(sync).saveHall(hall);
+		Syncs.sync(presentation, plan);
+		Seat first = plan.getSeats().get(0);
+		Booking sold = bookingOn(presentation, first);
+		sold.setLastName("Müller");
+		Booking lost = presentation.addBooking();
+		lost.setLastName("Schulz");
+		lost.setRowLabel(sold.getRowLabel());
+		lost.setTableNumber(sold.getTableNumber());
+		lost.setSeatNumber(sold.getSeatNumber());
+		lost.setUnassigned(true);
+		TestRepositories.events(sync).saveEvent(event);
+		UnitKey lockedUnit = UnitKey.booking(event.getId(), presentation.getId(), first.getId());
+		new ForeignVersions(sync, appData).write(lockedUnit, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+
+		// ein anderer Rechner startet neu und öffnet das Event
+		StoreEventRepository events = TestRepositories.events(sync);
+		Event loaded = events.loadEvents().get(0);
+		Presentation shown = loaded.getPresentations().get(0);
+		ChangeTracker<Event> opened = new ChangeTracker<>(Event::getId);
+		BookingSyncService.prepare(loaded, id -> Map.of(hall.getId(), hall).get(id), opened, events);
+		Booking placeholder = bookingOn(shown, first);
+		String placeholderId = placeholder.getId();
+		Booking shownLost = shown.getBookings().stream().filter(b -> "Schulz".equals(b.getLastName())).findFirst()
+				.orElseThrow();
+		long files = new ForeignVersions(sync, appData).files();
+
+		BookingSyncService.prepare(loaded, id -> Map.of(hall.getId(), hall).get(id), opened, events);
+
+		assertFalse(placeholder.hasData(), "auf dem gesperrten Sitz liegt nur der Platzhalter");
+		assertSame(placeholder, bookingOn(shown, first));
+		assertEquals(placeholderId, placeholder.getId(), "der Platzhalter behält seine Kennung");
+		assertTrue(shownLost.isUnassigned(), "Schulz bleibt ohne Platz");
+		assertNull(shownLost.getSeatId());
+		assertFalse(opened.check(loaded), "keine Änderung");
+		assertFalse(opened.isDirty(loaded));
+		assertEquals(Set.of(), events.locallyChangedUnits());
+		assertDoesNotThrow(() -> events.saveEvent(loaded));
+		assertEquals(files, new ForeignVersions(sync, appData).files(), "Speichern schreibt nichts");
+		assertTrue(sync.unitState(lockedUnit).contentLocked(), "die gesperrte Buchung bleibt unberührt");
+	}
+
+	/** Die Buchung auf dem Sitz (auch der leere Platzhalter). */
+	private static Booking bookingOn(Presentation presentation, Seat seat) {
+		return presentation.getBookings().stream().filter(b -> seat.getId().equals(b.getSeatId())).findFirst()
+				.orElseThrow();
 	}
 }

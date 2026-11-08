@@ -20,10 +20,10 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 import de.eltviller_carneval_verein.karten.settings.AppSettings;
@@ -53,7 +53,7 @@ class StateRestorerTest {
 		Table table = plan.addTable(plan.addRow());
 		table.addSeat(1);
 		table.addSeat(2);
-		BookingSync.switchPlan(presentation, plan);
+		Syncs.switchPlan(presentation, plan);
 		presentation.getBookings().get(0).setPrice(1000);
 		presentation.getBookings().get(1).setPrice(1200);
 		return event;

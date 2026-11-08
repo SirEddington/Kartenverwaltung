@@ -13,13 +13,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -54,7 +54,7 @@ class PlaceAssignmentTest {
 		a1.setTableNumber(1);
 		Seat a1s1 = a1.addSeat();
 		presentation.setSeatingPlanId(plan.getId());
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		bookingOf(a2s1).setLastName("Meier");
 		bookingOf(a1s1).setPrice(1800); // ein bloßer Einzelpreis belegt den Sitz nicht
 
@@ -70,7 +70,7 @@ class PlaceAssignmentTest {
 		Seat leftovers = table.addSeat(1);
 		Seat paid = table.addSeat(2);
 		presentation.setSeatingPlanId(plan.getId());
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		bookingOf(leftovers).setComment("storniert");
 		bookingOf(leftovers).setFirstName("Anna");
 		bookingOf(paid).setPaymentStatus(PaymentStatus.CASH);
@@ -87,7 +87,7 @@ class PlaceAssignmentTest {
 		Seat first = table.addSeat(1);
 		Seat second = table.addSeat(2);
 		presentation.setSeatingPlanId(plan.getId());
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Set<UnitKey> locked = new HashSet<>(Set.of(keyOf(first)));
 		LockedSeats.install(() -> locked, () -> {
 		});
@@ -137,7 +137,7 @@ class PlaceAssignmentTest {
 
 		Seat seat = plan.addTable(row("A")).addSeat();
 		presentation.setSeatingPlanId(plan.getId());
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		assertNull(PlaceAssignment.refusal(presentation, plan), "ein Sitz ist frei");
 
 		bookingOf(seat).setLastName("Meier");

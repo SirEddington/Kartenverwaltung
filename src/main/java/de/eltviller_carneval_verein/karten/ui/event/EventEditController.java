@@ -787,7 +787,8 @@ public class EventEditController {
 		}
 		presentation.setHallId(newHallId);
 		presentation.setSeatingPlanId(null);
-		BookingSync.sync(presentation, null);
+		// ohne Bestuhlung gibt es keine Sitze, also auch keine gesperrten
+		BookingSync.sync(presentation, null, Set.of());
 		loadingDetails = true;
 		try {
 			showPlansOf(newHall, null);

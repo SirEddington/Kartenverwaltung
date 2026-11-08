@@ -12,11 +12,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.validation.EventValidator;
 import de.eltviller_carneval_verein.karten.validation.HallValidator;
@@ -95,7 +95,7 @@ class LiveValidatorTest {
 		presentation.setPrice(1000);
 		SeatingPlan plan = new Hall().addSeatingPlan();
 		plan.addTable(plan.addRow()).addSeat(1);
-		BookingSync.switchPlan(presentation, plan);
+		Syncs.switchPlan(presentation, plan);
 		return event;
 	}
 

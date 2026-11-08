@@ -386,6 +386,63 @@ final class UnitMapper {
 		}
 	}
 
+	/**
+	 * Die gesperrten Einheiten ({@link #lockOf}) unter {@code root} (einer Vorstellung oder einem Event-Kopf, ohne
+	 * {@code root} selbst), deren Vorfahren im Versionsspeicher nicht gelöscht sind (wie bei {@link #requireNothingLockedBelow}),
+	 * mit der Art ihrer Sperre, nach Pfad geordnet.
+	 *
+	 * @param eventStates die Stände aller Einheiten des Events im Versionsspeicher
+	 */
+	static Map<UnitKey, Status> lockedBelow(UnitKey root, Map<UnitKey, UnitSnapshot> eventStates) {
+		List<UnitSnapshot> below = new ArrayList<>();
+		for (UnitSnapshot state : eventStates.values()) {
+			if (state.unit().ancestors().contains(root) && !hasDeletedAncestor(state.unit(), eventStates)) {
+				below.add(state);
+			}
+		}
+		below.sort(Comparator.comparing(state -> state.unit().relativePath()));
+		Map<UnitKey, Status> locked = new LinkedHashMap<>();
+		for (UnitSnapshot state : below) {
+			Status lock = lockOf(state);
+			if (lock != null) {
+				locked.put(state.unit(), lock);
+			}
+		}
+		return locked;
+	}
+
+	/**
+	 * Die Sitze der Vorstellung, die der Abgleich der Buchungen nicht vergeben darf (KARV-135): Ihre Buchungs-Einheit ist
+	 * gesperrt ({@link #lockedBelow}), und das Modell hat keine Buchung mit Daten auf diesem Schlüssel ({@link #bookingKey}).
+	 * Eine gesperrte Buchung, deren letzter lesbarer Stand angezeigt wird (etwa beschädigt nach einem lesbaren Stand),
+	 * behält so ihren Sitz; ein leerer Platzhalter auf dem Sitz zählt nicht als Buchung.
+	 *
+	 * @param presentation  die Einheit der Vorstellung
+	 * @param modelBookings die Buchungen der Vorstellung im Modell; {@code null}, wenn sie dort fehlt
+	 * @param eventStates   die Stände aller Einheiten des Events im Versionsspeicher
+	 * @return die Sitz-IDs ({@link UnitKey#bookingDir})
+	 */
+	static Set<String> lockedSeatIds(UnitKey presentation, List<Booking> modelBookings,
+			Map<UnitKey, UnitSnapshot> eventStates) {
+		Set<UnitKey> shown = new HashSet<>();
+		for (Booking booking : modelBookings != null ? modelBookings : List.<Booking>of()) {
+			if (booking.hasData()) {
+				try {
+					shown.add(bookingKey(presentation.eventId(), presentation.presentationId(), booking));
+				} catch (IllegalArgumentException e) {
+					// Sitz oder Kennung ist als Ordnername unzulässig: Diese Buchung trägt keine Einheit des Versionsspeichers
+				}
+			}
+		}
+		Set<String> seats = new LinkedHashSet<>();
+		for (UnitKey unit : lockedBelow(presentation, eventStates).keySet()) {
+			if (unit.type() == UnitType.BOOKING && !unit.isUnassigned() && !shown.contains(unit)) {
+				seats.add(unit.bookingDir());
+			}
+		}
+		return seats;
+	}
+
 	/** Ob eine Einheit über {@code unit} im Versionsspeicher gelöscht ist. */
 	private static boolean hasDeletedAncestor(UnitKey unit, Map<UnitKey, UnitSnapshot> states) {
 		for (UnitKey ancestor : unit.ancestors()) {

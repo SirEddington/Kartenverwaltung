@@ -1,13 +1,16 @@
 package de.eltviller_carneval_verein.karten.ui.event;
 
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.BookingSync.Report;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
@@ -34,24 +37,32 @@ public final class PlanSwitchDialog {
 	 * @return {@code true}, wenn kein Wechsel nötig war oder der Wechsel angewendet wurde; {@code false} bei "Abbrechen"
 	 */
 	public static boolean confirm(Presentation p, SeatingPlan newPlan) {
-		return confirm(p, newPlan, report -> ask(p, newPlan, report));
+		return confirm(p, newPlan,
+				() -> StoreEventRepository.getInstance().lockedSeatIds(p.getParent().getId(), p.getId()),
+				report -> ask(p, newPlan, report));
 	}
 
-	/** Wie {@link #confirm(Presentation, SeatingPlan)}, die Rückfrage kommt von {@code ask} (paketsichtbar für Tests). */
-	static boolean confirm(Presentation p, SeatingPlan newPlan, Predicate<Report> ask) {
+	/**
+	 * Wie {@link #confirm(Presentation, SeatingPlan)}, die gesperrten Sitze ({@link StoreEventRepository#lockedSeatIds})
+	 * kommen von {@code lockedSeats}, die Rückfrage von {@code ask} (paketsichtbar für Tests).
+	 */
+	static boolean confirm(Presentation p, SeatingPlan newPlan, Supplier<Set<String>> lockedSeats,
+			Predicate<Report> ask) {
 		String newId = newPlan != null ? newPlan.getId() : null;
 		if (Objects.equals(newId, p.getSeatingPlanId())) {
 			return true;
 		}
 		if (newPlan == null) {
-			BookingSync.switchPlan(p, null);
+			// ohne Bestuhlung gibt es keine Sitze, also auch keine gesperrten
+			BookingSync.switchPlan(p, null, Set.of());
 			return true;
 		}
-		Report shown = dialogReport(p, BookingSync.preview(p, newPlan));
+		Set<String> locked = lockedSeats.get();
+		Report shown = dialogReport(p, BookingSync.preview(p, newPlan, locked));
 		if (needsConfirmation(shown) && !ask.test(shown)) {
 			return false;
 		}
-		BookingSync.switchPlan(p, newPlan);
+		BookingSync.switchPlan(p, newPlan, locked);
 		return true;
 	}
 
@@ -87,13 +98,14 @@ public final class PlanSwitchDialog {
 	 * Die Folgen des Wechsels als Text für eine Rückfrage, ohne die Vorstellung zu verändern: für Aufrufer, die den Wechsel
 	 * selbst ausführen (der Sammel-Dialog übernimmt die Werte über das Repository).
 	 *
+	 * @param lockedSeats die gesperrten Sitze der Vorstellung ({@link StoreEventRepository#lockedSeatIds})
 	 * @return der Text; {@code null}, wenn es nichts zu nennen gibt (kein Wechsel, keine Bestuhlung oder keine betroffene Buchung)
 	 */
-	public static String impactMessage(Presentation p, SeatingPlan newPlan) {
+	public static String impactMessage(Presentation p, SeatingPlan newPlan, Set<String> lockedSeats) {
 		if (newPlan == null || Objects.equals(newPlan.getId(), p.getSeatingPlanId())) {
 			return null;
 		}
-		Report shown = dialogReport(p, BookingSync.preview(p, newPlan));
+		Report shown = dialogReport(p, BookingSync.preview(p, newPlan, lockedSeats));
 		return needsConfirmation(shown) ? message(p, newPlan, shown) : null;
 	}
 

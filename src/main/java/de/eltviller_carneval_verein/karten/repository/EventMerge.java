@@ -144,12 +144,20 @@ final class EventMerge {
 		private final Set<UnitKey> carried;
 
 		/**
+		 * Die Sitze einer Vorstellung, die der Abgleich nicht vergeben darf ({@link BookingSync#sync}, KARV-135): gesperrte
+		 * Buchungs-Einheiten nach dem Stand des Versionsspeichers, die in dieser Vorstellung (im Cache oder auf der Kopie)
+		 * keine Buchung tragen. Gefragt wird beim Abgleich, nicht beim Bau des Plans.
+		 */
+		private final Function<Presentation, Set<String>> lockedSeats;
+
+		/**
 		 * Ein Plan, für den keine Halle als aktuell gilt, ohne bekannte Kennungen der Buchungen hinter gelöschten
-		 * Sitz-Einheiten (siehe den Konstruktor mit {@code hallCurrent} und {@code lastIds}).
+		 * Sitz-Einheiten und ohne gesperrte Sitze (siehe den Konstruktor mit {@code hallCurrent}, {@code lastIds} und
+		 * {@code lockedSeats}).
 		 */
 		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup,
 				Map<UnitKey, UnitSnapshot> presentationStates) {
-			this(units, index, hallLookup, hallId -> false, presentationStates, Map.of());
+			this(units, index, hallLookup, hallId -> false, presentationStates, Map.of(), presentation -> Set.of());
 		}
 
 		/**
@@ -164,17 +172,19 @@ final class EventMerge {
 		 *                           einer, ist die Buchung nicht platzierbar, ist er gelöscht oder unlesbar, geht sie nur in
 		 *                           den Vergleichsstand, wenn die Vorstellung nicht (mehr) im Modell steht
 		 * @param lastIds            siehe {@link #lastIds}
+		 * @param lockedSeats        siehe {@link #lockedSeats}
 		 */
 		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup,
 				Predicate<String> hallCurrent, Map<UnitKey, UnitSnapshot> presentationStates,
-				Map<UnitKey, String> lastIds) {
+				Map<UnitKey, String> lastIds, Function<Presentation, Set<String>> lockedSeats) {
 			this(sorted(units), List.copyOf(index), hallLookup, hallCurrent, Map.copyOf(presentationStates),
-					Map.copyOf(lastIds), new HashMap<>(), Set.of());
+					Map.copyOf(lastIds), new HashMap<>(), Set.of(), Objects.requireNonNull(lockedSeats, "lockedSeats"));
 		}
 
 		private Plan(List<UnitSnapshot> units, List<UnitSnapshot> index, Function<String, Hall> hallLookup,
 				Predicate<String> hallCurrent, Map<UnitKey, UnitSnapshot> presentationStates,
-				Map<UnitKey, String> lastIds, Map<String, String> placeholderIds, Set<UnitKey> carried) {
+				Map<UnitKey, String> lastIds, Map<String, String> placeholderIds, Set<UnitKey> carried,
+				Function<Presentation, Set<String>> lockedSeats) {
 			this.units = units;
 			this.index = index;
 			this.hallLookup = hallLookup;
@@ -183,12 +193,13 @@ final class EventMerge {
 			this.lastIds = lastIds;
 			this.placeholderIds = placeholderIds;
 			this.carried = carried;
+			this.lockedSeats = lockedSeats;
 		}
 
 		/** Derselbe Plan, mit den Einheiten, deren Buchung eine andere Einheit trägt (siehe {@link #carried}). */
 		Plan withCarried(Set<UnitKey> carried) {
 			return new Plan(units, index, hallLookup, hallCurrent, presentationStates, lastIds, placeholderIds,
-					Set.copyOf(carried));
+					Set.copyOf(carried), lockedSeats);
 		}
 
 		/** Die einzuarbeitenden Stände in der Reihenfolge des Einarbeitens. */
@@ -200,7 +211,8 @@ final class EventMerge {
 		Plan restrictedTo(Collection<UnitKey> keep) {
 			Set<UnitKey> kept = new HashSet<>(keep);
 			List<UnitSnapshot> remaining = units.stream().filter(s -> kept.contains(s.unit())).toList();
-			return new Plan(remaining, index, hallLookup, hallCurrent, presentationStates, lastIds, placeholderIds, carried);
+			return new Plan(remaining, index, hallLookup, hallCurrent, presentationStates, lastIds, placeholderIds, carried,
+					lockedSeats);
 		}
 
 		/** Die neue Kennung des geleerten Platzhalters auf diesem Sitz, beim ersten Mal ausgewürfelt. */
@@ -675,15 +687,20 @@ final class EventMerge {
 	 * Bestuhlung ab, wie beim Vorbereiten eines geladenen Events für die Anzeige. Lesbare Buchungen, die nicht
 	 * {@linkplain #placeable platzierbar} sind, bleiben draußen und kommen in {@code waiting}: Der Abgleich setzte sie
 	 * sonst um, und das nächste Speichern überschriebe den fremden Stand. Sie sind dann nicht angezeigt. Ist die Halle der
-	 * Vorstellung aktuell ({@code hallCurrent}), warten sie nicht: Der Abgleich stellt sie ohne Platz.
+	 * Vorstellung aktuell ({@code hallCurrent}), warten sie nicht: Der Abgleich stellt sie ohne Platz. Gesperrte Sitze
+	 * (KARV-135) kommen aus denselben Ständen ({@link UnitMapper#lockedSeatIds}).
 	 */
 	static Assembly<Event> assembleEvent(Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup,
 			Predicate<String> hallCurrent, List<UnitSnapshot> waiting) {
 		Assembly<Event> assembly = UnitMapper
 				.assembleEvents(withoutWaiting(snapshots, hallLookup, hallCurrent, false, waiting));
+		Map<UnitKey, UnitSnapshot> states = new HashMap<>();
+		snapshots.forEach(snapshot -> states.put(snapshot.unit(), snapshot));
 		for (Event event : assembly.items()) {
 			for (Presentation presentation : event.getPresentations()) {
-				BookingSync.sync(presentation, planOf(presentation, hallLookup));
+				Set<String> lockedSeats = UnitMapper.lockedSeatIds(UnitKey.presentation(event.getId(), presentation.getId()),
+						presentation.getBookings(), states);
+				BookingSync.sync(presentation, planOf(presentation, hallLookup), lockedSeats);
 			}
 		}
 		return assembly;
@@ -773,7 +790,7 @@ final class EventMerge {
 		if (presentation.getBookings() != null) {
 			before.addAll(presentation.getBookings());
 		}
-		BookingSync.sync(presentation, planOf(presentation, plan.hallLookup));
+		BookingSync.sync(presentation, planOf(presentation, plan.hallLookup), plan.lockedSeats.apply(presentation));
 		plan.fixCreatedIds(presentation, before);
 	}
 

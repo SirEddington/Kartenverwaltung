@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -26,6 +27,12 @@ import java.util.Set;
  * {@code seatId} (die Momentaufnahme bleibt), damit nicht zwei Buchungen auf denselben Sitz zeigen.
  * <li>Sitze ohne Buchung bekommen eine leere Buchung mit Momentaufnahme.
  * </ol>
+ * Ein gesperrter Sitz (KARV-135: seine Buchungs-Einheit ist gesperrt und fehlt im Modell) ist kein Ziel: In Schritt 1
+ * gewinnt ihn nur eine leere Buchung, sein Platzhalter; eine Buchung mit Daten, deren {@code seatId} auf ihn zeigt, geht
+ * zu den übrigen und bleibt ohne Platz, mit geleerter {@code seatId} (ihren alten Sitz findet sie nach dem Entsperren
+ * nicht von selbst wieder). Schritt 2 wählt ihn nicht. Schritt 4 legt seinen Platzhalter nur an, wenn noch keiner dort
+ * liegt; ein vorhandener behält so seine Kennung.
+ * <p>
  * Ein zweiter Abgleich ändert nichts. Die Klasse hat nur statische Methoden.
  */
 public final class BookingSync {
@@ -59,9 +66,12 @@ public final class BookingSync {
 	 * Markierung {@link Booking#isUnassigned() ohne Platz} aus dem letzten Abgleich mit der Bestuhlung. Mit Bestuhlung
 	 * läuft der Abgleich wie in der Klassenbeschreibung; mehrere Buchungen auf demselben Sitz löst er auf.
 	 *
-	 * @param plan die Bestuhlung der Vorstellung oder {@code null}, wenn sie nicht gefunden wurde
+	 * @param plan          die Bestuhlung der Vorstellung oder {@code null}, wenn sie nicht gefunden wurde
+	 * @param lockedSeatIds die Sitze, deren Buchungs-Einheit gesperrt ist und im Modell fehlt (KARV-135): Sie sind kein
+	 *                      Ziel des Abgleichs, nur ihr leerer Platzhalter liegt dort; leer, wenn nichts gesperrt ist
 	 */
-	public static Report sync(Presentation p, SeatingPlan plan) {
+	public static Report sync(Presentation p, SeatingPlan plan, Set<String> lockedSeatIds) {
+		Objects.requireNonNull(lockedSeatIds, "lockedSeatIds");
 		if (p.getSeatingPlanId() == null || p.getSeatingPlanId().isBlank()) {
 			p.setPlanMissing(false);
 			return withoutPlan(p.getBookings());
@@ -78,24 +88,32 @@ public final class BookingSync {
 			bookings = new ArrayList<>();
 			replaced = true;
 		}
-		Report report = reconcile(bookings, plan, p);
+		Report report = reconcile(bookings, plan, p, lockedSeatIds);
 		if (replaced) {
 			p.setBookings(bookings);
 		}
 		return report;
 	}
 
-	/** Weist der Vorstellung die Bestuhlung zu und gleicht dann ab ({@link #sync}). */
-	public static Report switchPlan(Presentation p, SeatingPlan plan) {
+	/**
+	 * Weist der Vorstellung die Bestuhlung zu und gleicht dann ab ({@link #sync}).
+	 *
+	 * @param lockedSeatIds wie bei {@link #sync}
+	 */
+	public static Report switchPlan(Presentation p, SeatingPlan plan, Set<String> lockedSeatIds) {
+		Objects.requireNonNull(lockedSeatIds, "lockedSeatIds");
 		p.setSeatingPlanId(plan != null ? plan.getId() : null);
-		return sync(p, plan);
+		return sync(p, plan, lockedSeatIds);
 	}
 
 	/**
 	 * Rechnet den Wechsel auf die Bestuhlung durch, ohne die Vorstellung zu verändern (der Abgleich läuft auf Kopien
 	 * der Buchungen). Der Report ist derselbe wie bei {@link #switchPlan}.
+	 *
+	 * @param lockedSeatIds wie bei {@link #sync}
 	 */
-	public static Report preview(Presentation p, SeatingPlan plan) {
+	public static Report preview(Presentation p, SeatingPlan plan, Set<String> lockedSeatIds) {
+		Objects.requireNonNull(lockedSeatIds, "lockedSeatIds");
 		if (plan == null) {
 			return NOTHING;
 		}
@@ -105,7 +123,7 @@ public final class BookingSync {
 				copies.add(booking.copy());
 			}
 		}
-		return reconcile(copies, plan, null);
+		return reconcile(copies, plan, null, lockedSeatIds);
 	}
 
 	/**
@@ -174,9 +192,11 @@ public final class BookingSync {
 	 * Der eigentliche Abgleich auf einer Buchungsliste (Schritte siehe Klassenbeschreibung). Doppelte Sitzkennungen
 	 * werden aufgelöst: Danach zeigt höchstens eine Buchung auf jeden Sitz der Bestuhlung.
 	 *
-	 * @param owner die Vorstellung für neue Buchungen (setzt deren Elternteil); {@code null} bei der Vorschau
+	 * @param owner         die Vorstellung für neue Buchungen (setzt deren Elternteil); {@code null} bei der Vorschau
+	 * @param lockedSeatIds die gesperrten Sitze (siehe {@link #sync})
 	 */
-	private static Report reconcile(List<Booking> bookings, SeatingPlan plan, Presentation owner) {
+	private static Report reconcile(List<Booking> bookings, SeatingPlan plan, Presentation owner,
+			Set<String> lockedSeatIds) {
 		List<Seat> seats = plan.getSeats();
 		Map<String, Seat> seatsById = new HashMap<>();
 		Map<String, List<Seat>> seatsByKey = new HashMap<>();
@@ -185,11 +205,12 @@ public final class BookingSync {
 			seatsByKey.computeIfAbsent(key(seat), k -> new ArrayList<>()).add(seat);
 		}
 
-		// (1) auflösbare seatId: je Sitz gewinnt die erste Buchung mit Daten, ohne solche die erste überhaupt
+		// (1) auflösbare seatId: je Sitz gewinnt die erste Buchung mit Daten, ohne solche die erste überhaupt; einen gesperrten
+		// Sitz gewinnt nur eine leere Buchung (sein Platzhalter)
 		Map<Seat, Booking> winners = new HashMap<>();
 		for (Booking booking : bookings) {
 			Seat seat = resolve(booking, seatsById);
-			if (seat != null) {
+			if (seat != null && !(booking.hasData() && lockedSeatIds.contains(seat.getId()))) {
 				Booking winner = winners.get(seat);
 				if (winner == null || (!winner.hasData() && booking.hasData())) {
 					winners.put(seat, booking);
@@ -217,10 +238,10 @@ public final class BookingSync {
 			}
 		}
 
-		// (2) übrige Buchungen: exakter Treffer auf einen noch unbelegten Sitz
+		// (2) übrige Buchungen: exakter Treffer auf einen noch unbelegten, nicht gesperrten Sitz
 		List<Booking> unmatched = new ArrayList<>();
 		for (Booking booking : leftovers) {
-			Seat seat = firstFree(seatsByKey.get(key(booking)), taken);
+			Seat seat = firstFree(seatsByKey.get(key(booking)), taken, lockedSeatIds);
 			if (seat != null) {
 				taken.add(seat);
 				booking.takeSnapshot(seat.getParent(), seat);
@@ -236,7 +257,8 @@ public final class BookingSync {
 		for (Booking booking : unmatched) {
 			if (booking.hasData()) {
 				if (resolve(booking, seatsById) != null) {
-					// Verlierer auf einem Sitz, den eine andere Buchung trägt: die Sitzkennung entfällt (sonst SEA-011)
+					// Verlierer auf einem Sitz, den eine andere Buchung trägt, oder auf einem gesperrten Sitz: die Sitzkennung
+					// entfällt (sonst SEA-011)
 					booking.setSeatId(null);
 				}
 				booking.setUnassigned(true);
@@ -247,7 +269,7 @@ public final class BookingSync {
 			}
 		}
 
-		// (4) Sitze ohne Buchung
+		// (4) Sitze ohne Buchung, auch ein gesperrter ohne Platzhalter: An ihm hängt die Sperre in der Anzeige
 		int created = 0;
 		for (Seat seat : seats) {
 			if (taken.add(seat)) {
@@ -266,12 +288,12 @@ public final class BookingSync {
 		return booking.getSeatId() != null ? seatsById.get(booking.getSeatId()) : null;
 	}
 
-	private static Seat firstFree(List<Seat> candidates, Set<Seat> taken) {
+	private static Seat firstFree(List<Seat> candidates, Set<Seat> taken, Set<String> lockedSeatIds) {
 		if (candidates == null) {
 			return null;
 		}
 		for (Seat candidate : candidates) {
-			if (!taken.contains(candidate)) {
+			if (!taken.contains(candidate) && !lockedSeatIds.contains(candidate.getId())) {
 				return candidate;
 			}
 		}

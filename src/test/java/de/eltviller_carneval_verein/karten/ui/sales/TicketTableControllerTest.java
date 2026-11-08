@@ -11,12 +11,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -69,7 +69,7 @@ class TicketTableControllerTest {
 		Event event = new Event();
 		Presentation presentation = event.addPresentation("Samstag");
 		presentation.setSeatingPlanId(plan.getId());
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 
 		assertEquals(List.of(first.getId(), middle.getId(), last.getId()), seatIds(TicketTableController.shownBookings(presentation)));
 

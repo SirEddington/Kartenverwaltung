@@ -28,12 +28,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.Change;
@@ -1052,7 +1052,7 @@ class BookingPolicyTest {
 			presentation.setSeatingPlanId(plan.getId());
 			presentation.setBookings(new ArrayList<>(winnerFirst ? List.of(winner, loser) : List.of(loser, winner)));
 
-			BookingSync.sync(presentation, plan);
+			Syncs.sync(presentation, plan);
 
 			assertEquals(seat.getId(), winner.getSeatId(), "Reihenfolge Gewinner zuerst: " + winnerFirst);
 			assertFalse(winner.isUnassigned());
@@ -1061,7 +1061,7 @@ class BookingPolicyTest {
 
 			// der Gewinner wird storniert: Der Verlierer rückt nicht still auf den frei gewordenen Sitz
 			winner.clearCustomerData();
-			BookingSync.sync(presentation, plan);
+			Syncs.sync(presentation, plan);
 
 			assertTrue(loser.isUnassigned(), "Reihenfolge Gewinner zuerst: " + winnerFirst);
 			assertNull(loser.getSeatId());

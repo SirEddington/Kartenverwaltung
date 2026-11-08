@@ -15,7 +15,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
@@ -23,6 +22,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -44,7 +44,7 @@ class LockedSeatsTest {
 		seat = table.addSeat(1);
 		other = table.addSeat(2);
 		presentation.setSeatingPlanId(plan.getId());
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 	}
 
 	@AfterEach

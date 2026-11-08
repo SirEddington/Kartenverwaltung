@@ -41,7 +41,8 @@ public final class EventTemplates {
 		copy.setPrice(source.getPrice());
 		copy.getUnknown().replaceWith(source.getUnknown());
 		Hall hall = copy.getHallId() == null ? null : hallLookup.apply(copy.getHallId());
-		BookingSync.sync(copy, EventEditController.modelPlan(copy, hall));
+		// die Kopie ist eine neue Vorstellung ohne Einheiten im Versionsspeicher, also ohne gesperrte Sitze
+		BookingSync.sync(copy, EventEditController.modelPlan(copy, hall), Set.of());
 		return copy;
 	}
 

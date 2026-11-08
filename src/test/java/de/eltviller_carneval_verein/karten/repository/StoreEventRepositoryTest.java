@@ -33,11 +33,11 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.Change;
@@ -260,7 +260,7 @@ class StoreEventRepositoryTest {
 			Presentation presentation = event.addPresentation(name);
 			presentation.setHallId(hall.getId());
 			presentation.setSeatingPlanId(plan.getId());
-			BookingSync.sync(presentation, plan);
+			Syncs.sync(presentation, plan);
 			presentation.getBookings().get(0).setLastName("Müller");
 			presentation.getBookings().get(4).setLastName("Meier");
 		}
@@ -274,7 +274,7 @@ class StoreEventRepositoryTest {
 		for (Event loaded : events.loadEvents()) {
 			for (Presentation presentation : loaded.getPresentations()) {
 				// wie beim Öffnen in der App: die leeren Buchungen kommen aus der Bestuhlung zurück
-				BookingSync.sync(presentation, halls.findById(presentation.getHallId())
+				Syncs.sync(presentation, halls.findById(presentation.getHallId())
 						.findSeatingPlan(presentation.getSeatingPlanId()));
 			}
 			events.saveEvent(loaded);

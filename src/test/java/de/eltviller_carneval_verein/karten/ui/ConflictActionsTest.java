@@ -42,6 +42,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
 import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
@@ -115,7 +116,7 @@ class ConflictActionsTest {
 			hall = halls.loadHalls().get(0);
 			event = repository.loadEvents().get(0);
 			for (Presentation presentation : event.getPresentations()) {
-				BookingSync.sync(presentation, plan());
+				Syncs.sync(presentation, plan());
 			}
 		}
 
@@ -241,7 +242,7 @@ class ConflictActionsTest {
 		Presentation friday = event.addPresentation("Freitag");
 		friday.setHallId(hall.getId());
 		friday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(friday, plan);
+		Syncs.sync(friday, plan);
 		a.event = event;
 		a.seat(0).setLastName("Müller");
 		a.saveEvent();
@@ -1206,7 +1207,7 @@ class ConflictActionsTest {
 		Booking mia = a.seat(4);
 		String miaId = mia.getId();
 		assertTrue(BookingSync.assign(a.friday(), a.plan(), mia, a.plan().getSeats().get(5)));
-		BookingSync.sync(a.friday(), a.plan());
+		Syncs.sync(a.friday(), a.plan());
 		a.saveEvent();
 		settle();
 		assertEquals("Mia", b.seat(5).getLastName());
@@ -1346,7 +1347,7 @@ class ConflictActionsTest {
 		customerConflictOnTransfer();
 		Booking moved = a.seat(1);
 		assertTrue(BookingSync.assign(a.friday(), a.plan(), moved, a.plan().getSeats().get(3)));
-		BookingSync.sync(a.friday(), a.plan());
+		Syncs.sync(a.friday(), a.plan());
 		a.seat(1).setLastName("Tom");
 		a.saveEvent();
 		settle();
@@ -1414,7 +1415,7 @@ class ConflictActionsTest {
 		Hall hall = machine.halls.findById(presentation.getHallId());
 		SeatingPlan plan = hall.getSeatingPlans().stream().filter(candidate -> candidate.getId().equals(presentation.getSeatingPlanId()))
 				.findFirst().orElseThrow();
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 	}
 
 	private static void assertVisibleWithoutSeat(Machine machine, String bookingId) {
@@ -1440,7 +1441,7 @@ class ConflictActionsTest {
 		a.halls.saveHall(a.hall);
 		settle();
 		String bookingId = b.seat(0).getId();
-		BookingSync.switchPlan(a.friday(), second);
+		Syncs.switchPlan(a.friday(), second);
 		a.saveEvent();
 		moveFromFirstSeat(b, 2);
 		return bookingId;
@@ -1474,7 +1475,7 @@ class ConflictActionsTest {
 		assertTrue(last.getParent().deleteSeat(last));
 		a.halls.saveHall(a.hall);
 		// wie die App: Der Abgleich der eigenen Vorstellung folgt dem Speichern der Halle, bevor der fremde Verkauf eintrifft
-		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		a.repository.deriving(a.event, () -> Syncs.sync(a.friday(), a.plan()));
 		b.seat(5).setLastName("Neu");
 		b.saveEvent();
 		clock.advance(ROUND);
@@ -1564,11 +1565,11 @@ class ConflictActionsTest {
 
 		assertTrue(last.getParent().deleteSeat(last));
 		a.halls.saveHall(a.hall);
-		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		a.repository.deriving(a.event, () -> Syncs.sync(a.friday(), a.plan()));
 		settle();
 		// wie die App nach einem Hallenwechsel: b gleicht seine Vorstellung mit der neuen Bestuhlung ab
 		SeatingPlan current = b.halls.findById(b.hall.getId()).getSeatingPlans().get(0);
-		b.repository.deriving(b.event, () -> BookingSync.sync(b.friday(), current));
+		b.repository.deriving(b.event, () -> Syncs.sync(b.friday(), current));
 		List<Booking> sold = withId(modelFriday(b), bookingId);
 		assertEquals(1, sold.size(), "b: " + sold);
 		assertTrue(sold.get(0).isUnassigned(), "b: ohne Platz");
@@ -1616,7 +1617,7 @@ class ConflictActionsTest {
 		Seat first = a.plan().getSeats().get(0);
 		assertTrue(first.getParent().deleteSeat(first));
 		a.halls.saveHall(a.hall);
-		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		a.repository.deriving(a.event, () -> Syncs.sync(a.friday(), a.plan()));
 		a.saveEvent();
 		moveFromFirstSeat(b, 2);
 		clock.advance(ROUND);

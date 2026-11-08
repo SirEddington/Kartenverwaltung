@@ -48,6 +48,7 @@ import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
@@ -170,7 +171,7 @@ class ConflictScenarioTest {
 			hall = halls.loadHalls().get(0);
 			event = repository.loadEvents().get(0);
 			for (Presentation presentation : event.getPresentations()) {
-				BookingSync.sync(presentation, plan());
+				Syncs.sync(presentation, plan());
 			}
 		}
 
@@ -310,7 +311,7 @@ class ConflictScenarioTest {
 		Presentation friday = event.addPresentation("Freitag");
 		friday.setHallId(hall.getId());
 		friday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(friday, plan);
+		Syncs.sync(friday, plan);
 		first.event = event;
 		first.seat(0).setLastName("Müller");
 		first.repository.saveEvent(event);
@@ -878,7 +879,7 @@ class ConflictScenarioTest {
 		b.seat(0).clearCustomerData();
 		b.repository.saveEvent(b.event);
 		b.friday().setHallId(other.getId());
-		BookingSync.switchPlan(b.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(b.friday(), other.getSeatingPlans().get(0));
 		b.repository.saveEvent(b.event);
 		clock.advance(ROUND);
 		b.tick();
@@ -927,7 +928,7 @@ class ConflictScenarioTest {
 		clock.advance(ROUND);
 		a.tick();
 		a.hall = a.halls.reloadHalls().get(0);
-		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		a.repository.deriving(a.event, () -> Syncs.sync(a.friday(), a.plan()));
 		assertTrue(muller.isUnassigned(), "der Abgleich setzt Müller ohne Platz");
 		assertEquals("Hans", muller.getFirstName());
 
@@ -962,7 +963,7 @@ class ConflictScenarioTest {
 		// A arbeitet die Meldungen von Hand ein, um das Zeitfenster zu treffen
 		a.events.halls = null;
 		c.friday().setHallId(other.getId());
-		BookingSync.switchPlan(c.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(c.friday(), other.getSeatingPlans().get(0));
 		c.repository.saveEvent(c.event);
 		b.seat(0).clearCustomerData();
 		b.repository.saveEvent(b.event);
@@ -1006,7 +1007,7 @@ class ConflictScenarioTest {
 		String mullerId = a.seat(0).getId();
 		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
 		b.friday().setHallId(other.getId());
-		BookingSync.switchPlan(b.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(b.friday(), other.getSeatingPlans().get(0));
 		b.repository.saveEvent(b.event);
 		clock.advance(ROUND);
 		b.tick();
@@ -1070,7 +1071,7 @@ class ConflictScenarioTest {
 		String mullerId = a.seat(0).getId();
 		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
 		b.friday().setHallId(other.getId());
-		BookingSync.switchPlan(b.friday(), otherPlan);
+		Syncs.switchPlan(b.friday(), otherPlan);
 		b.repository.saveEvent(b.event);
 		Booking atB = booking(b, mullerId);
 		if (moved) {
@@ -1137,7 +1138,7 @@ class ConflictScenarioTest {
 		String mullerId = a.seat(0).getId();
 		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
 		b.friday().setHallId(other.getId());
-		BookingSync.switchPlan(b.friday(), otherPlan);
+		Syncs.switchPlan(b.friday(), otherPlan);
 		if (foreignChange) {
 			booking(b, mullerId).setFirstName("Hans");
 		}
@@ -1660,7 +1661,7 @@ class ConflictScenarioTest {
 	private static Booking move(Machine machine, int from, int to) {
 		Booking booking = machine.seat(from);
 		assertTrue(BookingSync.assign(machine.friday(), machine.plan(), booking, machine.plan().getSeats().get(to)));
-		BookingSync.sync(machine.friday(), machine.plan());
+		Syncs.sync(machine.friday(), machine.plan());
 		machine.repository.saveEvent(machine.event);
 		return booking;
 	}
@@ -2157,7 +2158,7 @@ class ConflictScenarioTest {
 		assertEquals(a.plan().getSeats().get(0).getId(), b.plan().getSeats().get(0).getId());
 
 		for (Machine machine : m) {
-			BookingSync.sync(machine.friday(), machine.plan());
+			Syncs.sync(machine.friday(), machine.plan());
 			assertEquals(muellerId, machine.seat(0).getId(), "Müller sitzt auf " + machine.name + " auf dem neuen Sitz");
 			machine.repository.saveEvent(machine.event);
 		}

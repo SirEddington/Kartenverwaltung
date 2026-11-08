@@ -23,11 +23,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.Snapshots;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -582,7 +582,7 @@ class EventMergeTest {
 		Presentation friday = event.addPresentation("Freitag");
 		friday.setDate(LocalDate.of(2027, 2, 12));
 		inHall(friday, hall);
-		BookingSync.sync(friday, hall.getSeatingPlans().get(0));
+		Syncs.sync(friday, hall.getSeatingPlans().get(0));
 		return event;
 	}
 
@@ -634,7 +634,7 @@ class EventMergeTest {
 	/** Das Einarbeiten einer Buchung auf einem Sitz, den die Bestuhlung nicht hat, in einer aktuellen Halle. */
 	private EventMerge.Plan displacedPlan(Event event, Hall hall, Event state, UnitKey unit) {
 		return new EventMerge.Plan(List.of(foreign(state, unit)), List.of(), lookup(hall), id -> true, indexOf(event),
-				Map.of());
+				Map.of(), p -> Set.of());
 	}
 
 	@Test
@@ -793,7 +793,7 @@ class EventMergeTest {
 		}
 		UnitKey unit = UnitKey.unassignedBooking(event.getId(), friday.getId(), known.getId());
 		EventMerge.Plan plan = new EventMerge.Plan(List.of(deleted(unit)), List.of(), lookup(hall), id -> true, indexOf(event),
-				Map.of());
+				Map.of(), p -> Set.of());
 		EventMerge.apply(event, carried ? plan.withCarried(Set.of(unit)) : plan, sink);
 		assertEquals(Map.of(unit, false), sink.adopted);
 		return known;

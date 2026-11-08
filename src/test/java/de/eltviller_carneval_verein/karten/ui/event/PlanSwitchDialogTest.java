@@ -9,16 +9,17 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.BookingSync.Report;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 
 class PlanSwitchDialogTest {
@@ -38,7 +39,7 @@ class PlanSwitchDialogTest {
 	/** Vorstellung auf {@code plan} mit einer leeren Buchung je Sitz. */
 	private static Presentation presentationOn(SeatingPlan plan) {
 		Presentation presentation = new Presentation();
-		BookingSync.switchPlan(presentation, plan);
+		Syncs.switchPlan(presentation, plan);
 		return presentation;
 	}
 
@@ -65,7 +66,7 @@ class PlanSwitchDialogTest {
 		bookingAt(presentation, 1, 1).setLastName("Müller");
 		List<Booking> before = new ArrayList<>(presentation.getBookings());
 
-		assertTrue(PlanSwitchDialog.confirm(presentation, plan, NEVER_ASKED));
+		assertTrue(PlanSwitchDialog.confirm(presentation, plan, Set::of, NEVER_ASKED));
 
 		assertEquals(plan.getId(), presentation.getSeatingPlanId());
 		assertEquals(before, presentation.getBookings());
@@ -78,7 +79,7 @@ class PlanSwitchDialogTest {
 		Presentation presentation = new Presentation();
 		presentation.setHallId(hall.getId());
 
-		assertTrue(PlanSwitchDialog.confirm(presentation, plan, NEVER_ASKED));
+		assertTrue(PlanSwitchDialog.confirm(presentation, plan, Set::of, NEVER_ASKED));
 
 		assertEquals(plan.getId(), presentation.getSeatingPlanId());
 		assertEquals(6, presentation.getBookings().size());
@@ -91,7 +92,7 @@ class PlanSwitchDialogTest {
 		SeatingPlan newPlan = plan(hall, 2, 2);
 		Presentation presentation = presentationOn(oldPlan);
 
-		assertTrue(PlanSwitchDialog.confirm(presentation, newPlan, NEVER_ASKED));
+		assertTrue(PlanSwitchDialog.confirm(presentation, newPlan, Set::of, NEVER_ASKED));
 
 		assertEquals(newPlan.getId(), presentation.getSeatingPlanId());
 		assertEquals(4, presentation.getBookings().size());
@@ -106,7 +107,7 @@ class PlanSwitchDialogTest {
 		bookingAt(presentation, 1, 1).setLastName("Müller"); // findet Tisch A1, Sitz 1
 		bookingAt(presentation, 3, 2).setLastName("Meier"); // Tisch A3 fehlt: ohne Platz
 
-		Report shown = PlanSwitchDialog.dialogReport(presentation, BookingSync.preview(presentation, newPlan));
+		Report shown = PlanSwitchDialog.dialogReport(presentation, Syncs.preview(presentation, newPlan));
 
 		// 6 alte Buchungen: 3 leere getroffen (zählen nicht), Müller getroffen, Meier ohne Platz, Tisch A3 Sitz 1 leer entfernt
 		assertEquals(new Report(1, 0, 1, 1), shown);
@@ -124,7 +125,7 @@ class PlanSwitchDialogTest {
 		List<Booking> before = new ArrayList<>(presentation.getBookings());
 		List<Report> asked = new ArrayList<>();
 
-		boolean result = PlanSwitchDialog.confirm(presentation, newPlan, report -> {
+		boolean result = PlanSwitchDialog.confirm(presentation, newPlan, Set::of, report -> {
 			asked.add(report);
 			return false;
 		});
@@ -148,7 +149,7 @@ class PlanSwitchDialogTest {
 		Booking meier = bookingAt(presentation, 3, 2);
 		meier.setLastName("Meier");
 
-		assertTrue(PlanSwitchDialog.confirm(presentation, newPlan, report -> true));
+		assertTrue(PlanSwitchDialog.confirm(presentation, newPlan, Set::of, report -> true));
 
 		assertEquals(newPlan.getId(), presentation.getSeatingPlanId());
 		assertSame(newPlan.findSeat(mueller.getSeatId()).getParent(), newPlan.getTables().get(0));
@@ -166,7 +167,7 @@ class PlanSwitchDialogTest {
 		mueller.setLastName("Müller");
 		String seatId = mueller.getSeatId();
 
-		assertTrue(PlanSwitchDialog.confirm(presentation, null, NEVER_ASKED));
+		assertTrue(PlanSwitchDialog.confirm(presentation, null, Set::of, NEVER_ASKED));
 
 		assertNull(presentation.getSeatingPlanId());
 		// die leere Buchung entfällt, Müller bleibt ohne Platz mit seiner bisherigen seatId

@@ -22,6 +22,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 
 class EventTemplatesTest {
 
@@ -38,7 +39,7 @@ class EventTemplatesTest {
 		presentation.setHallId(hall.getId());
 		presentation.setSeatingPlanId(plan.getId());
 		presentation.setPrice(1700);
-		de.eltviller_carneval_verein.karten.model.BookingSync.sync(presentation, plan);
+		de.eltviller_carneval_verein.karten.model.Syncs.sync(presentation, plan);
 		return presentation;
 	}
 

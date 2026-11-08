@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -44,10 +45,11 @@ public final class PlanFreezer {
 	 */
 	public static List<Event> beforePlanDeletion(Hall hall, SeatingPlan plan) {
 		StoreHallRepository halls = StoreHallRepository.getInstance();
-		return freeze(StoreEventRepository.getInstance().loadEvents(),
-				presentation -> plan.getId().equals(presentation.getSeatingPlanId()),
-				hallId -> hall.getId().equals(hallId) ? hall : halls.findById(hallId), ChangeTracker.events(),
-				EventSaver::saveStructureChange);
+		StoreEventRepository events = StoreEventRepository.getInstance();
+		return freeze(events.loadEvents(), presentation -> plan.getId().equals(presentation.getSeatingPlanId()),
+				hallId -> hall.getId().equals(hallId) ? hall : halls.findById(hallId),
+				presentation -> events.lockedSeatIds(presentation.getParent().getId(), presentation.getId()),
+				ChangeTracker.events(), EventSaver::saveStructureChange);
 	}
 
 	/**
@@ -55,13 +57,15 @@ public final class PlanFreezer {
 	 * keine ungespeicherten Änderungen hatte. Scheitert das Speichern eines Events (etwa ohne Namen), wird das
 	 * protokolliert und mit den übrigen weitergemacht.
 	 *
-	 * @param usesPlan   ob die Vorstellung die zu löschende Bestuhlung verwendet
-	 * @param hallLookup liefert die Halle zur Id, wie für {@link BookingSyncService#prepare(Event, Function, ChangeTracker)}
-	 * @param save       speichert ein Event ohne Prüfung
+	 * @param usesPlan    ob die Vorstellung die zu löschende Bestuhlung verwendet
+	 * @param hallLookup  liefert die Halle zur Id, wie für
+	 *                    {@link BookingSyncService#prepare(Event, Function, ChangeTracker, Function)}
+	 * @param lockedSeats die gesperrten Sitze der Vorstellung, wie dort
+	 * @param save        speichert ein Event ohne Prüfung
 	 * @return die gespeicherten Events
 	 */
 	static List<Event> freeze(List<Event> events, Predicate<Presentation> usesPlan, Function<String, Hall> hallLookup,
-			ChangeTracker<Event> tracker, Consumer<Event> save) {
+			Function<Presentation, Set<String>> lockedSeats, ChangeTracker<Event> tracker, Consumer<Event> save) {
 		List<Event> saved = new ArrayList<>();
 		for (Event event : events) {
 			if (event.getPresentations() == null || event.getPresentations().stream().noneMatch(usesPlan)) {
@@ -69,7 +73,7 @@ public final class PlanFreezer {
 			}
 			tracker.check(event);
 			boolean dirty = tracker.isDirty(event);
-			BookingSyncService.prepare(event, hallLookup, tracker);
+			BookingSyncService.prepare(event, hallLookup, tracker, lockedSeats);
 			if (dirty) {
 				continue;
 			}

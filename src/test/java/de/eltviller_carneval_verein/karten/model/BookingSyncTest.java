@@ -80,7 +80,7 @@ class BookingSyncTest {
 		seat(plan, 2, 2).setWheelchairAccessible(true);
 		Presentation presentation = newPresentation(plan);
 
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertEquals(new Report(0, 4, 0, 0), report);
 		assertEquals(4, presentation.getBookings().size());
@@ -106,10 +106,10 @@ class BookingSyncTest {
 	void zweiter_sync_aendert_nichts_und_zaehlt_alle_als_getroffen() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		List<Booking> before = List.copyOf(presentation.getBookings());
 
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertEquals(new Report(4, 0, 0, 0), report);
 		assertEquals(before, presentation.getBookings());
@@ -119,14 +119,14 @@ class BookingSyncTest {
 	void sync_folgt_dem_Sitz_beim_Umnummerieren() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Seat seat = seat(plan, 2, 1);
 		Booking booking = bookingOf(presentation, seat);
 		booking.setLastName("Müller");
 		String seatId = booking.getSeatId();
 
 		seat.getParent().setTableNumber(7);
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertEquals(new Report(4, 0, 0, 0), report);
 		assertEquals(4, presentation.getBookings().size());
@@ -148,7 +148,7 @@ class BookingSyncTest {
 		booking.setPrice(1800);
 		String oldSeatId = booking.getSeatId();
 
-		Report report = BookingSync.switchPlan(presentation, newPlan);
+		Report report = Syncs.switchPlan(presentation, newPlan);
 
 		assertEquals(newPlan.getId(), presentation.getSeatingPlanId());
 		assertEquals(6, presentation.getBookings().size());
@@ -164,11 +164,11 @@ class BookingSyncTest {
 	void wechsel_laesst_Buchung_mit_Daten_ohne_Treffer_ohne_Platz() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Booking lost = snapshotBooking(presentation, "Z", 9, 9);
 		lost.setLastName("Schmidt");
 
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertTrue(presentation.getBookings().contains(lost));
 		assertTrue(lost.isUnassigned());
@@ -184,7 +184,7 @@ class BookingSyncTest {
 		Booking lost = snapshotBooking(presentation, "A", 5, 1);
 		lost.setLastName("Schmidt");
 
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		assertTrue(lost.isUnassigned());
 
 		// die Bestuhlung bekommt den Platz A5/1 nachträglich: der nächste Lauf ordnet die Buchung zu
@@ -192,7 +192,7 @@ class BookingSyncTest {
 		Table table = plan.addTable(row);
 		table.setTableNumber(5);
 		table.addSeat();
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertFalse(lost.isUnassigned());
 		assertEquals(table.getSeats().get(0).getId(), lost.getSeatId());
@@ -210,7 +210,7 @@ class BookingSyncTest {
 		kept.setComment("bleibt");
 		Booking otherEmpty = snapshotBooking(presentation, "Z", 9, 7);
 		otherEmpty.setLastName("Fremd");
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		int before = presentation.getBookings().size();
 		cleared.setLastName(null);
 		otherEmpty.setLastName(null);
@@ -229,7 +229,7 @@ class BookingSyncTest {
 	void leere_Buchung_auf_einem_Sitz_bleibt() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Booking placeholder = presentation.getBookings().get(0);
 
 		assertFalse(BookingSync.removeIfCancelled(placeholder));
@@ -244,7 +244,7 @@ class BookingSyncTest {
 		Booking onlyPrice = snapshotBooking(presentation, "Z", 9, 8);
 		onlyPrice.setPrice(2000);
 
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertFalse(presentation.getBookings().contains(empty));
 		assertFalse(presentation.getBookings().contains(onlyPrice));
@@ -261,7 +261,7 @@ class BookingSyncTest {
 		Booking second = snapshotBooking(presentation, "A", 1, 2);
 		second.setLastName("Zweite");
 
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		Seat target = seat(plan, 1, 2);
 		assertEquals(target.getId(), first.getSeatId());
@@ -285,7 +285,7 @@ class BookingSyncTest {
 		Booking second = snapshotBooking(presentation, "A", 1, 2);
 		second.setLastName("Zweite");
 
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertFalse(first.isUnassigned());
 		assertFalse(second.isUnassigned());
@@ -311,7 +311,7 @@ class BookingSyncTest {
 		second.setSeatId(target.getId());
 		second.setLastName("Zweite");
 
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 
 		assertSame(first, bookingOf(presentation, target));
 		assertTrue(second.isUnassigned());
@@ -341,7 +341,7 @@ class BookingSyncTest {
 		Seat target = seat(plan, 1, 1);
 		Booking[] pair = twoBookingsOnSeat(presentation, target, null, "Zweite");
 
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertSame(pair[1], bookingOf(presentation, target));
 		assertFalse(pair[1].isUnassigned());
@@ -358,7 +358,7 @@ class BookingSyncTest {
 		Seat target = seat(plan, 1, 1);
 		Booking[] pair = twoBookingsOnSeat(presentation, target, "Erste", null);
 
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertSame(pair[0], bookingOf(presentation, target));
 		assertFalse(pair[0].isUnassigned());
@@ -377,7 +377,7 @@ class BookingSyncTest {
 		pair[1].setPaymentStatus(PaymentStatus.CASH);
 		assertTrue(hasSeatDouble(presentation));
 
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertSame(pair[0], bookingOf(presentation, target));
 		assertFalse(pair[0].isUnassigned());
@@ -397,13 +397,13 @@ class BookingSyncTest {
 		Presentation presentation = newPresentation(plan);
 		Seat target = seat(plan, 1, 1);
 		Booking[] pair = twoBookingsOnSeat(presentation, target, "Erste", "Zweite");
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		List<Booking> before = List.copyOf(presentation.getBookings());
 		String rowLabel = pair[1].getRowLabel();
 		int tableNumber = pair[1].getTableNumber();
 		int seatNumber = pair[1].getSeatNumber();
 
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertEquals(before, presentation.getBookings());
 		assertEquals(new Report(4, 0, 0, 1), report);
@@ -421,11 +421,11 @@ class BookingSyncTest {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
 		twoBookingsOnSeat(presentation, seat(plan, 1, 1), "Erste", "Zweite");
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 
 		ObjectMapper mapper = JsonMapperFactory.create();
 		Presentation loaded = mapper.readValue(mapper.writeValueAsString(presentation), Presentation.class);
-		Report report = BookingSync.sync(loaded, plan);
+		Report report = Syncs.sync(loaded, plan);
 
 		assertEquals(new Report(4, 0, 0, 1), report);
 		Booking loser = loaded.getBookings().stream().filter(b -> "Zweite".equals(b.getLastName())).findFirst().orElseThrow();
@@ -447,7 +447,7 @@ class BookingSyncTest {
 		byId.takeSnapshot(target.getParent(), target);
 		byId.setLastName("PerId");
 
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 
 		assertSame(byId, bookingOf(presentation, target));
 		assertFalse(byId.isUnassigned());
@@ -470,7 +470,7 @@ class BookingSyncTest {
 		Booking upper = snapshotBooking(presentation, "A", 1, 1);
 		upper.setLastName("Gross");
 
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 
 		assertFalse(noLabel.isUnassigned());
 		assertEquals(plain.getId(), plan.findSeat(noLabel.getSeatId()).getParent().getRowId());
@@ -481,12 +481,12 @@ class BookingSyncTest {
 	void fehlende_Bestuhlung_friert_ein() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Booking filled = presentation.getBookings().get(0);
 		filled.setLastName("Müller");
 		List<Booking> before = List.copyOf(presentation.getBookings());
 
-		Report report = BookingSync.sync(presentation, null);
+		Report report = Syncs.sync(presentation, null);
 
 		assertTrue(presentation.isPlanMissing());
 		assertEquals(new Report(0, 0, 0, 0), report);
@@ -496,7 +496,7 @@ class BookingSyncTest {
 		assertEquals(plan.getId(), presentation.getSeatingPlanId());
 
 		// ist die Bestuhlung wieder da, hebt der nächste Lauf die Markierung auf
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		assertFalse(presentation.isPlanMissing());
 	}
 
@@ -504,19 +504,19 @@ class BookingSyncTest {
 	void fehlende_Bestuhlung_laesst_gespeichertes_ohne_Platz_stehen() throws IOException {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Booking seated = bookingOf(presentation, seat(plan, 1, 1));
 		seated.setLastName("Meier");
 		Booking lost = snapshotBooking(presentation, "A", 7, 1);
 		lost.setLastName("Müller");
 		lost.setPaymentStatus(PaymentStatus.CASH);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		assertTrue(lost.isUnassigned());
 
 		// gespeichert und neu geladen, die Bestuhlung gibt es inzwischen nicht mehr
 		ObjectMapper mapper = JsonMapperFactory.create();
 		Presentation loaded = mapper.readValue(mapper.writeValueAsString(presentation), Presentation.class);
-		Report report = BookingSync.sync(loaded, null);
+		Report report = Syncs.sync(loaded, null);
 
 		assertEquals(new Report(0, 0, 0, 0), report);
 		assertTrue(loaded.isPlanMissing());
@@ -542,7 +542,7 @@ class BookingSyncTest {
 		onlyPrice.setPrice(2000);
 		presentation.setPlanMissing(true);
 
-		Report report = BookingSync.sync(presentation, null);
+		Report report = Syncs.sync(presentation, null);
 
 		assertEquals(new Report(0, 0, 2, 1), report);
 		assertFalse(presentation.isPlanMissing());
@@ -565,7 +565,7 @@ class BookingSyncTest {
 		booking.setLastName("Müller");
 		presentation.addBooking();
 
-		BookingSync.sync(presentation, null);
+		Syncs.sync(presentation, null);
 
 		assertFalse(presentation.isPlanMissing());
 		assertEquals(List.of(booking), presentation.getBookings());
@@ -577,7 +577,7 @@ class BookingSyncTest {
 		Presentation presentation = new Presentation();
 		presentation.setBookings(null);
 
-		assertDoesNotThrow(() -> BookingSync.sync(presentation, null));
+		assertDoesNotThrow(() -> Syncs.sync(presentation, null));
 		assertFalse(presentation.isPlanMissing());
 	}
 
@@ -587,10 +587,10 @@ class BookingSyncTest {
 		Booking booking = presentation.addBooking();
 		booking.setLastName("Müller");
 		presentation.addBooking();
-		BookingSync.sync(presentation, null);
+		Syncs.sync(presentation, null);
 		List<Booking> before = List.copyOf(presentation.getBookings());
 
-		BookingSync.sync(presentation, null);
+		Syncs.sync(presentation, null);
 
 		assertEquals(before, presentation.getBookings());
 		assertTrue(booking.isUnassigned());
@@ -601,20 +601,20 @@ class BookingSyncTest {
 	void zurueck_zur_alten_Bestuhlung_stellt_jede_Buchung_am_Sitz_wieder_her() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Seat paidSeat = seat(plan, 2, 1);
 		Booking paid = bookingOf(presentation, paidSeat);
 		paid.setLastName("Müller");
 		paid.setPaymentStatus(PaymentStatus.CASH);
 		// Hallenwechsel: die Vorstellung verliert ihre Bestuhlung
 		presentation.setSeatingPlanId(null);
-		BookingSync.sync(presentation, null);
+		Syncs.sync(presentation, null);
 		assertEquals(List.of(paid), presentation.getBookings());
 		assertTrue(paid.isUnassigned());
 
 		// zurück zur alten Halle und Bestuhlung
 		presentation.setSeatingPlanId(plan.getId());
-		Report report = BookingSync.sync(presentation, plan);
+		Report report = Syncs.sync(presentation, plan);
 
 		assertEquals(new Report(1, 3, 0, 0), report);
 		assertEquals(4, presentation.getBookings().size());
@@ -634,7 +634,7 @@ class BookingSyncTest {
 	void preview_veraendert_nichts_und_liefert_denselben_Report_wie_switchPlan() {
 		SeatingPlan oldPlan = newPlan();
 		Presentation presentation = newPresentation(oldPlan);
-		BookingSync.sync(presentation, oldPlan);
+		Syncs.sync(presentation, oldPlan);
 		Booking filled = bookingOf(presentation, seat(oldPlan, 1, 2));
 		filled.setLastName("Meier");
 		Booking lost = snapshotBooking(presentation, "Z", 9, 9);
@@ -645,7 +645,7 @@ class BookingSyncTest {
 		List<Booking> bookingsBefore = List.copyOf(presentation.getBookings());
 		String seatIdBefore = filled.getSeatId();
 
-		Report preview = BookingSync.preview(presentation, other);
+		Report preview = Syncs.preview(presentation, other);
 
 		assertEquals(oldPlan.getId(), presentation.getSeatingPlanId());
 		assertEquals(bookingsBefore, presentation.getBookings());
@@ -654,7 +654,7 @@ class BookingSyncTest {
 		assertTrue(presentation.getBookings().contains(empty));
 		assertEquals(new Report(2, 1, 3, 1), preview);
 
-		Report actual = BookingSync.switchPlan(presentation, other);
+		Report actual = Syncs.switchPlan(presentation, other);
 
 		assertEquals(preview, actual);
 		assertEquals(other.getId(), presentation.getSeatingPlanId());
@@ -667,7 +667,7 @@ class BookingSyncTest {
 		Presentation presentation = new Presentation();
 		presentation.addBooking().setLastName("Müller");
 
-		assertEquals(new Report(0, 0, 0, 0), BookingSync.preview(presentation, null));
+		assertEquals(new Report(0, 0, 0, 0), Syncs.preview(presentation, null));
 		assertEquals(1, presentation.getBookings().size());
 	}
 
@@ -675,10 +675,10 @@ class BookingSyncTest {
 	void assign_ersetzt_die_leere_Buchung_des_freien_Sitzes() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Booking lost = snapshotBooking(presentation, "Z", 9, 9);
 		lost.setLastName("Schmidt");
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		assertTrue(lost.isUnassigned());
 		Seat target = seat(plan, 2, 1);
 		Booking emptyOfSeat = bookingOf(presentation, target);
@@ -700,7 +700,7 @@ class BookingSyncTest {
 	void assign_lehnt_belegten_Sitz_ab() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Seat target = seat(plan, 1, 1);
 		Booking occupant = bookingOf(presentation, target);
 		occupant.setLastName("Besetzt");
@@ -723,7 +723,7 @@ class BookingSyncTest {
 	void assign_ersetzt_den_Platzhalter_mit_Resten() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Seat target = seat(plan, 2, 1);
 		Booking leftovers = bookingOf(presentation, target);
 		leftovers.setComment("storniert");
@@ -742,7 +742,7 @@ class BookingSyncTest {
 	void assign_lehnt_bezahlten_Sitz_ohne_Namen_ab() {
 		SeatingPlan plan = newPlan();
 		Presentation presentation = newPresentation(plan);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		Seat target = seat(plan, 1, 2);
 		Booking occupant = bookingOf(presentation, target);
 		occupant.setPaymentStatus(PaymentStatus.CARD);
@@ -753,4 +753,118 @@ class BookingSyncTest {
 		assertFalse(BookingSync.assign(presentation, plan, lost, target));
 		assertSame(occupant, bookingOf(presentation, target));
 	}
+
+	// Gesperrte Sitze (KARV-135) -->
+
+	/** Alle Buchungen der Vorstellung, deren Sitzkennung auf den Sitz zeigt. */
+	private static List<Booking> bookingsOn(Presentation presentation, Seat seat) {
+		return presentation.getBookings().stream().filter(b -> seat.getId().equals(b.getSeatId())).toList();
+	}
+
+	/**
+	 * Eine Buchung mit Daten, deren Sitzkennung auf einen gesperrten Sitz zeigt, gewinnt ihn nicht: Sie bleibt ohne Platz
+	 * und ohne Sitzkennung, auf dem Sitz liegt ein leerer Platzhalter.
+	 */
+	@Test
+	void dataBookingDoesNotWinLockedSeat() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		Syncs.sync(presentation, plan);
+		Seat locked = seat(plan, 1, 1);
+		Booking sold = bookingOf(presentation, locked);
+		sold.setLastName("Müller");
+
+		Report report = BookingSync.sync(presentation, plan, Set.of(locked.getId()));
+
+		assertNull(sold.getSeatId(), "die Sitzkennung entfällt");
+		assertTrue(sold.isUnassigned());
+		assertEquals("Müller", sold.getLastName());
+		assertEquals(1, report.unassigned());
+		List<Booking> onLocked = bookingsOn(presentation, locked);
+		assertEquals(1, onLocked.size());
+		assertFalse(onLocked.get(0).hasData(), "der gesperrte Sitz trägt nur den leeren Platzhalter");
+		assertEquals(5, presentation.getBookings().size());
+	}
+
+	/** Schritt 2 setzt keine Buchung auf einen gesperrten Sitz, auch wenn Reihe, Tisch und Nummer genau seine sind. */
+	@Test
+	void step2SkipsLockedSeatEvenForOwnKey() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		Seat locked = seat(plan, 1, 1);
+		Booking lost = presentation.addBooking();
+		lost.setLastName("Schmidt");
+		lost.setRowLabel("A");
+		lost.setTableNumber(1);
+		lost.setSeatNumber(1);
+		lost.setUnassigned(true);
+
+		Report shown = BookingSync.preview(presentation, plan, Set.of(locked.getId()));
+		Report report = BookingSync.sync(presentation, plan, Set.of(locked.getId()));
+
+		assertEquals(report, shown, "die Vorschau rechnet genauso");
+		assertNull(lost.getSeatId());
+		assertTrue(lost.isUnassigned(), "die Buchung bleibt ohne Platz");
+		assertEquals(new Report(0, 4, 0, 1), report);
+		List<Booking> onLocked = bookingsOn(presentation, locked);
+		assertEquals(1, onLocked.size());
+		assertFalse(onLocked.get(0).hasData());
+	}
+
+	/**
+	 * Der leere Platzhalter auf dem gesperrten Sitz bleibt bei jedem Abgleich derselbe, mit derselben Kennung, auch gegen
+	 * eine Buchung mit Daten auf derselben Sitzkennung: Sonst fiele er weg, ein neuer entstünde, und das Event sähe ständig
+	 * verändert aus.
+	 */
+	@Test
+	void emptyPlaceholderKeepsLockedSeatAndItsId() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		Seat locked = seat(plan, 2, 2);
+		BookingSync.sync(presentation, plan, Set.of(locked.getId()));
+		Booking placeholder = bookingOf(presentation, locked);
+		String id = placeholder.getId();
+		Booking rival = snapshotBooking(presentation, "A", 2, 2);
+		rival.setSeatId(locked.getId());
+		rival.setLastName("Schmidt");
+
+		Report report = BookingSync.sync(presentation, plan, Set.of(locked.getId()));
+		Report again = BookingSync.sync(presentation, plan, Set.of(locked.getId()));
+
+		assertEquals(new Report(4, 0, 0, 1), report);
+		assertEquals(new Report(4, 0, 0, 1), again);
+		assertSame(placeholder, bookingOf(presentation, locked));
+		assertEquals(id, placeholder.getId());
+		assertEquals(List.of(placeholder), bookingsOn(presentation, locked));
+		assertTrue(rival.isUnassigned());
+		assertNull(rival.getSeatId());
+	}
+
+	/**
+	 * Beim ersten Abgleich nach dem Laden bekommt der gesperrte Sitz genau einen leeren Platzhalter (daran hängt die
+	 * Sperre), auch wenn eine Buchung mit Daten seine Sitzkennung trägt; danach keinen weiteren.
+	 */
+	@Test
+	void placeholderIsCreatedOnceOnFirstLoad() {
+		SeatingPlan plan = newPlan();
+		Presentation presentation = newPresentation(plan);
+		Seat locked = seat(plan, 1, 2);
+		Booking kept = snapshotBooking(presentation, "A", 1, 2);
+		kept.setSeatId(locked.getId());
+		kept.setLastName("Schmidt");
+		kept.setUnassigned(true);
+
+		Report first = BookingSync.sync(presentation, plan, Set.of(locked.getId()));
+		Report second = BookingSync.sync(presentation, plan, Set.of(locked.getId()));
+
+		assertEquals(new Report(0, 4, 0, 1), first);
+		assertEquals(new Report(4, 0, 0, 1), second, "kein zweiter Platzhalter");
+		List<Booking> onLocked = bookingsOn(presentation, locked);
+		assertEquals(1, onLocked.size());
+		assertFalse(onLocked.get(0).hasData());
+		assertFalse(onLocked.get(0).isUnassigned());
+		assertTrue(kept.isUnassigned());
+	}
+
+	// <-- Gesperrte Sitze
 }

@@ -392,7 +392,8 @@ public final class ConflictActions {
 		String hallId = text(field.mine(), "hallId", presentation.getHallId());
 		String planId = text(field.mine(), "seatingPlanId", presentation.getSeatingPlanId());
 		Hall hall = hallId == null ? null : halls.findById(hallId);
-		return PlanSwitchDialog.impactMessage(presentation, hall == null ? null : hall.findSeatingPlan(planId));
+		return PlanSwitchDialog.impactMessage(presentation, hall == null ? null : hall.findSeatingPlan(planId),
+				events.lockedSeatIds(unit.eventId(), presentation.getId()));
 	}
 
 	/** Der Text des Felds; ohne das Feld {@code fallback}, bei {@code null} im Feld {@code null}. */

@@ -28,11 +28,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Shape;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.store.ForeignVersions;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
@@ -485,7 +485,7 @@ class StoreHallRepositoryForeignTest {
 		presentation.setTime(LocalTime.of(19, 11));
 		presentation.setHallId(hallId);
 		presentation.setSeatingPlanId("x-test-bestuhlung");
-		BookingSync.sync(presentation, null);
+		Syncs.sync(presentation, null);
 		return presentation;
 	}
 

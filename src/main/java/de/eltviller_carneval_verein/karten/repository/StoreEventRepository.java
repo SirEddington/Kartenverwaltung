@@ -537,7 +537,8 @@ public class StoreEventRepository implements EventRepository {
 				presentation.copyFrom(MAPPER.treeToValue(merged, Presentation.class));
 				if (!Objects.equals(hallId, presentation.getHallId())
 						|| !Objects.equals(planId, presentation.getSeatingPlanId())) {
-					BookingSync.sync(presentation, EventMerge.planOf(presentation, hallLookup));
+					BookingSync.sync(presentation, EventMerge.planOf(presentation, hallLookup),
+							lockedSeatIds(unit.eventId(), presentation));
 				}
 			}
 			case HALL -> throw new IllegalStateException("Eine Halle ist keine Einheit eines Events.");
@@ -656,6 +657,49 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	// <-- Hilfen für den Konflikt-Dialog
+
+	/**
+	 * Die Sitze der Vorstellung, die der Abgleich der Buchungen ({@link BookingSync#sync}) nicht vergeben darf (KARV-135):
+	 * gesperrte Buchungs-Einheiten der Vorstellung ohne gelöschten Vorfahren, für die das Modell keine Buchung mit Daten auf
+	 * diesem Schlüssel hat. Gefragt wird der Stand des Versionsspeichers ({@link SyncService#eventSnapshots}, ohne
+	 * Datei-Ein-/Ausgabe), nicht der Vergleichsstand: Der kennt eine zurückgestellte fremde Buchung nicht. Eine gesperrte
+	 * Buchung, deren älterer Stand angezeigt wird, behält ihren Sitz und steht nicht darin.
+	 *
+	 * @return die Sitz-IDs; leer, wenn nichts gesperrt ist
+	 */
+	public Set<String> lockedSeatIds(String eventId, String presentationId) {
+		Event event = findEvent(eventId);
+		Presentation presentation = event == null ? null : event.findPresentation(presentationId);
+		return UnitMapper.lockedSeatIds(UnitKey.presentation(eventId, presentationId),
+				presentation == null ? null : presentation.getBookings(), sync.eventSnapshots(eventId));
+	}
+
+	/**
+	 * Wie {@link #lockedSeatIds(String, String)}, für eine Vorstellung, die nicht die im Cache sein muss (etwa die Kopie
+	 * für den Änderungsmelder): „im Modell“ heißt dann in dieser Vorstellung.
+	 */
+	private Set<String> lockedSeatIds(String eventId, Presentation presentation) {
+		return UnitMapper.lockedSeatIds(UnitKey.presentation(eventId, presentation.getId()), presentation.getBookings(),
+				sync.eventSnapshots(eventId));
+	}
+
+	/**
+	 * Die gesperrten Einheiten unter der Vorstellung bzw. dem Event-Kopf (ohne die Einheit selbst) mit der Art ihrer Sperre,
+	 * ohne die mit gelöschtem Vorfahren: Unter einer gelöschten Vorstellung zeigt das Programm nichts. Gesperrt heißt
+	 * beschädigt, neueres Format oder inhaltlich zu neu, auch wenn ein älterer Stand angezeigt wird. Gefragt wird wie bei
+	 * {@link #lockedSeatIds} der Stand des Versionsspeichers.
+	 *
+	 * @param presentationOrHead die Einheit einer Vorstellung oder eines Event-Kopfs
+	 * @return nach Pfad geordnet; leer, wenn nichts gesperrt ist
+	 * @throws IllegalArgumentException bei einer anderen Art von Einheit
+	 */
+	public Map<UnitKey, UnitState.Status> lockedUnder(UnitKey presentationOrHead) {
+		if (presentationOrHead.type() != UnitType.PRESENTATION && presentationOrHead.type() != UnitType.EVENT) {
+			throw new IllegalArgumentException(
+					presentationOrHead.relativePath() + " ist weder eine Vorstellung noch ein Event-Kopf.");
+		}
+		return UnitMapper.lockedBelow(presentationOrHead, sync.eventSnapshots(presentationOrHead.eventId()));
+	}
 
 	@Override
 	public void deleteEvents(List<Event> events) {
@@ -1618,8 +1662,8 @@ public class StoreEventRepository implements EventRepository {
 		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
 				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
 		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
-		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, frozenCurrent, presentationStates, lastIds)
-				.withCarried(carriedUnits(event, apply));
+		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, frozenCurrent, presentationStates, lastIds,
+				presentation -> lockedSeatIds(eventId, presentation)).withCarried(carriedUnits(event, apply));
 		Set<UnitKey> adopted = new LinkedHashSet<>();
 		Set<UnitKey> waiting = new HashSet<>();
 		// übernommene Buchungen, die nur wegen eines endgültig fehlenden Sitzes ins Modell kamen: Der Abgleich danach hat das
