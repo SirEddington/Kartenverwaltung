@@ -1531,8 +1531,11 @@ class UnitMapperTest {
 
 	/**
 	 * Unberührte gesperrte und wartende Buchungen blockieren das Speichern nicht, auch nicht eine gesperrte Buchung unter
-	 * einer schon gelöschten Vorstellung: 1.1 zeigt sie nie (KARV-135). Das Löschen einer angezeigten Vorstellung mit
-	 * gesperrtem Kind prüft {@link #deletingPresentationWithLockedChildInStoreIsRejected}.
+	 * einer Vorstellung, die im Versionsspeicher schon gelöscht ist: 1.1 zeigt sie nie (KARV-135). Hier löscht der Nutzer
+	 * genau diese Vorstellung, während ihre fremde Löschung noch zurückgestellt ist (der Vergleichsstand kennt sie lebend);
+	 * die Prüfung der gesperrten Kinder übergeht die Buchung wegen ihres gelöschten Vorfahren. Das Löschen einer
+	 * Vorstellung, die auch im Versionsspeicher lebt, mit gesperrtem Kind prüft
+	 * {@link #deletingPresentationWithLockedChildInStoreIsRejected}.
 	 */
 	@Test
 	void untouchedLockedUnitDoesNotBlock() {
@@ -1540,17 +1543,19 @@ class UnitMapperTest {
 		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
 		put(baseline, withState(baseline.get(bookingKey(event, 0, "seat-a1")), Status.LOCKED_DAMAGED, false));
 		put(baseline, withState(baseline.get(bookingKey(event, 0, "seat-a3")), Status.WAITING, false));
+		Map<UnitKey, UnitSnapshot> store = new HashMap<>(baseline);
 		UnitKey belowDeleted = bookingKey(event, 1, "seat-a1x");
 		Presentation deleted = event.getPresentations().remove(1);
 		UnitKey deletedKey = UnitKey.presentation(event.getId(), deleted.getId());
-		put(baseline, withState(baseline.get(deletedKey), Status.OK, true));
-		put(baseline, contentLocked(baseline.get(belowDeleted)));
+		put(store, withState(store.get(deletedKey), Status.OK, true));
+		put(store, contentLocked(store.get(belowDeleted)));
 		event.getPresentations().get(0).setName("Freitagabend");
 
-		List<Change> changes = changes(baseline, shown(baseline), UnitMapper.decompose(event));
+		List<Change> changes = changes(baseline, shown(baseline), UnitMapper.decompose(event), store);
 
-		assertEquals(List.of(UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId())),
+		assertEquals(List.of(UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId()), deletedKey),
 				changes.stream().map(Change::unit).toList());
+		assertTrue(changes.get(1).deleted());
 	}
 
 	/**

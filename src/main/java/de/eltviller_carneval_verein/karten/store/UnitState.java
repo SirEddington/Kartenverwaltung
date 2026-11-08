@@ -66,8 +66,10 @@ public record UnitState(UnitKey unit, Status status, List<Version> chain, List<V
 
 	/**
 	 * Ob der aktuelle Stand ({@link #current()}) inhaltlich zu neu ist ({@link Version#newerContent()}). Beschreibt
-	 * {@code current()}, nicht nur den Kopf: Ein ausstehendes eigenes Zurücksetzen hinter einer beschädigten Version ist
-	 * lesbar, auch wenn der Kopf davor inhaltlich zu neu ist.
+	 * {@code current()}, nicht nur den Kopf, denn mit {@code current()} arbeitet dieser Rechner: Ein ausstehendes eigenes
+	 * rohes Zurücksetzen auf einen inhaltlich zu neuen Stand übernimmt dessen Inhalt unverändert und ist damit selbst
+	 * inhaltlich zu neu. Es sperrt die Einheit auch dann, wenn die Kette danach wieder {@code OK} ist (etwa nachdem die
+	 * beschädigte Stelle geheilt ist, solange das Zurücksetzen noch nicht beansprucht ist).
 	 */
 	public boolean contentLocked() {
 		Version current = current();

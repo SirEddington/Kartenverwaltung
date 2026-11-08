@@ -608,6 +608,26 @@ class ChainResolverTest {
 		assertTrue(state.contentLocked());
 	}
 
+	/**
+	 * Ruling 5: Der inhaltlich zu neue Kopf sperrt, bevor ausstehende und verlorene Versionen bestimmt werden. Eine eigene
+	 * Strecke, die nicht auf dem gesperrten Kopf aufbaut, ist verloren, nicht ausstehend, auch wenn die Kette sonst auf eine
+	 * beanspruchte Nachfolgerin wartete (bei {@code WAITING} wäre jede eigene Strecke ausstehend). Darauf baut die Zählung
+	 * der wartenden Änderungen ({@code SyncService.waitingResolutions}) auf.
+	 */
+	@Test
+	void ownStretchNotOnContentHeadIsLostNotPending() throws IOException {
+		Unit unit = new Unit().version(theirs(1)).contentVersion(theirs(2), theirs(1)).version(mine(4), theirs(1))
+				.claim("root", theirs(1)).claim(theirs(1).value(), theirs(2));
+		unit.claim(theirs(2).value(), theirs(3), "abc");
+
+		UnitState state = unit.resolve();
+
+		assertEquals(Status.LOCKED_FORMAT, state.status());
+		assertEquals(List.of(List.of(mine(4))), state.lost());
+		assertEquals(List.of(), state.pending());
+		assertTrue(state.contentLocked());
+	}
+
 	@Test
 	void contentThenDamagedStaysDamaged() throws IOException {
 		Unit unit = new Unit().version(theirs(1)).contentVersion(theirs(2), theirs(1)).unreadableVersion(theirs(3))
@@ -622,7 +642,11 @@ class ChainResolverTest {
 		assertTrue(state.contentLocked());
 	}
 
-	/** Das Merkmal beschreibt {@code current()}: Ein ausstehendes eigenes Zurücksetzen ist lesbar, auch hinter dem Kopf. */
+	/**
+	 * Das Merkmal beschreibt {@code current()}, nicht den Kopf: Hier ist der Kopf inhaltlich zu neu und die eigene
+	 * ausstehende Version hinter der beschädigten lesbar (von Hand gebaut; ein rohes Zurücksetzen auf diesen Kopf trüge
+	 * dessen Inhalt und wäre selbst inhaltlich zu neu).
+	 */
 	@Test
 	void contentLockedDescribesCurrentNotHead() throws IOException {
 		Unit unit = new Unit().version(theirs(1)).contentVersion(theirs(2), theirs(1)).unreadableVersion(theirs(3))
