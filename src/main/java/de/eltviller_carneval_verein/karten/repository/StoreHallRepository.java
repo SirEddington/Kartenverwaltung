@@ -263,7 +263,6 @@ public class StoreHallRepository implements HallRepository {
 	public RestorePlan<Hall> prepareRestoreHall(String hallId, SavePoint point) throws IOException {
 		long changes = baseline.changes(hallId);
 		List<UnitState> states = List.of(sync.unitState(UnitKey.hall(hallId)));
-		RestorePlanner.requireRestorable(states);
 		return new RestorePlan<>(hallId, states, targetOf(states, point), changes);
 	}
 
@@ -298,13 +297,18 @@ public class StoreHallRepository implements HallRepository {
 	 * und der Cache bleibt unberührt (nur für Tests; das Wiederherstellen ist {@link #restoreHall}).
 	 */
 	Hall hallAt(String hallId, SavePoint point) throws IOException {
-		List<UnitState> states = List.of(sync.unitState(UnitKey.hall(hallId)));
-		RestorePlanner.requireRestorable(states);
-		return targetOf(states, point);
+		return targetOf(List.of(sync.unitState(UnitKey.hall(hallId))), point);
 	}
 
+	/**
+	 * Der Zielstand der Halle zum Speicherstand, nachdem {@link RestorePlanner#requireRestorable} sie gegen ihn geprüft hat.
+	 *
+	 * @throws LockedUnitException wie {@link #restoreHall}
+	 */
 	private Hall targetOf(List<UnitState> states, SavePoint point) {
-		return RestorePlanner.single(UnitMapper.assembleHalls(RestorePlanner.targetsAt(states, point.at()).values()),
+		Map<UnitKey, UnitSnapshot> targets = RestorePlanner.targetsAt(states, point.at());
+		RestorePlanner.requireRestorable(states, targets);
+		return RestorePlanner.single(UnitMapper.assembleHalls(targets.values()),
 				"Zu diesem Speicherstand war die Halle gelöscht.");
 	}
 

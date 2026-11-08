@@ -36,6 +36,7 @@ import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.VersionMarks;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Zerlegt Events und Hallen in die Einheiten des Versionsspeichers und setzt sie wieder zusammen.
@@ -334,15 +335,6 @@ final class UnitMapper {
 		}
 	}
 
-	/** Eine gesperrte Einheit mit der Art ihrer Sperre ({@link #lockOf}). */
-	private record LockedUnit(UnitKey unit, Status lock) {
-	}
-
-	/** Für {@link #requireNothingLockedBelow}: neueres Format vor beschädigt, dann nach Pfad. */
-	private static final Comparator<LockedUnit> LOCKED_BELOW_ORDER = Comparator
-			.comparing((LockedUnit locked) -> locked.lock() != Status.LOCKED_FORMAT)
-			.thenComparing(locked -> locked.unit().relativePath());
-
 	/**
 	 * Die Sperre einer Einheit nach ihrem Stand, oder {@code null}, wenn sie nicht gesperrt ist: zuerst
 	 * {@link #missingLock} (sie fehlt im Modell, auch bei {@code contentLocked} mit Zustand {@code OK}, etwa bei einem
@@ -358,32 +350,37 @@ final class UnitMapper {
 	}
 
 	/**
-	 * Unter der Vorstellung, die gelöscht wird, darf keine gesperrte Einheit ({@link #lockOf}) liegen, deren Vorfahren im
-	 * Versionsspeicher nicht gelöscht sind (eine Buchung unter einer schon gelöschten Vorstellung zeigt das Programm nie).
-	 * Bei mehreren nennt die Meldung zuerst eine mit neuerem Format (SYS-009), sonst eine beschädigte (SYS-008).
+	 * Unter der Vorstellung, die gelöscht wird, darf keine gesperrte Einheit ({@link #lockedBelow}) liegen. Das ist die
+	 * letzte Sicherung beim Speichern; vorher lehnen Oberfläche und Repository das Löschen schon ab
+	 * ({@link StoreEventRepository#requireNothingLockedUnder}), mit demselben Text.
 	 *
 	 * @param eventStates die Stände aller Einheiten des Events im Versionsspeicher
-	 * @throws LockedUnitException mit der Sperrmeldung der gesperrten Einheit
+	 * @throws LockedUnitException mit {@link StoreMessages#lockedBelow}: die Vorstellung mit dem Namen aus ihrem Stand im
+	 *                             Versionsspeicher, ohne lesbaren Stand mit ihrer Bezeichnung
 	 */
 	private static void requireNothingLockedBelow(UnitKey presentation, Map<UnitKey, UnitSnapshot> eventStates) {
-		LockedUnit blocking = null;
-		for (UnitSnapshot state : eventStates.values()) {
-			UnitKey unit = state.unit();
-			if (!presentation.equals(unit.parent()) || hasDeletedAncestor(unit, eventStates)) {
-				continue;
-			}
-			Status lock = lockOf(state);
-			if (lock == null) {
-				continue;
-			}
-			LockedUnit candidate = new LockedUnit(unit, lock);
-			if (blocking == null || LOCKED_BELOW_ORDER.compare(candidate, blocking) < 0) {
-				blocking = candidate;
-			}
+		Map<UnitKey, Status> locked = lockedBelow(presentation, eventStates);
+		if (!locked.isEmpty()) {
+			throw new LockedUnitException(
+					StoreMessages.lockedBelow(nameInStore(presentation, eventStates), lockedBelowCause(locked.values())));
 		}
-		if (blocking != null) {
-			throw new LockedUnitException(lockMessage(blocking.unit(), blocking.lock()));
+	}
+
+	/**
+	 * Der Name der Einheit (Feld {@code name}) aus ihrem Stand im Versionsspeicher, für die Meldungen; ohne lesbaren Stand
+	 * ihre Bezeichnung ({@link LockedUnitException#label}).
+	 */
+	private static String nameInStore(UnitKey unit, Map<UnitKey, UnitSnapshot> states) {
+		UnitSnapshot state = states.get(unit);
+		if (state == null || state.payload() == null) {
+			return LockedUnitException.label(unit);
 		}
+		return EntityLabels.nameOrPlaceholder(state.payload().path("name").asText(null));
+	}
+
+	/** Die Ursache für {@link StoreMessages#lockedBelow}: neueres Format vor beschädigt. */
+	static Status lockedBelowCause(Collection<Status> locks) {
+		return locks.contains(Status.LOCKED_FORMAT) ? Status.LOCKED_FORMAT : Status.LOCKED_DAMAGED;
 	}
 
 	/**

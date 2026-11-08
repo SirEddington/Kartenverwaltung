@@ -45,6 +45,7 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
 import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
@@ -52,6 +53,7 @@ import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.repository.TestRepositories;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
+import de.eltviller_carneval_verein.karten.store.ContentGate;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
 import de.eltviller_carneval_verein.karten.store.NioFileLayer;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
@@ -96,7 +98,7 @@ class ConflictActionsTest {
 
 		Machine(String name, Path shared) {
 			this.name = name;
-			sync = TestSyncServices.unstarted(dir.resolve("app-" + name), name, files, p -> true, clock);
+			sync = TestSyncServices.unstarted(dir.resolve("app-" + name), name, files, p -> true, clock, gate);
 			sync.setListener(this);
 			ConflictPolicies.install(sync);
 			sync.startup(shared.toString());
@@ -179,6 +181,21 @@ class ConflictActionsTest {
 	Path dir;
 
 	private final TestClock clock = new TestClock();
+	/** Ob ein Inhalt mit dem Feld {@value #NEWER_MARKER} ab jetzt als inhaltlich zu neu gilt (wie nach geänderten Regeln). */
+	private final AtomicBoolean markerIsNewer = new AtomicBoolean();
+	private static final String NEWER_MARKER = "x-test-neuer";
+	/** Die Inhaltsprüfung der App, dazu {@link #markerIsNewer}. */
+	private final ContentGate gate = new ContentGate() {
+		@Override
+		public boolean isNewer(UnitKey unit, ObjectNode payload) {
+			return ContentRules.GATE.isNewer(unit, payload) || markerIsNewer.get() && payload.has(NEWER_MARKER);
+		}
+
+		@Override
+		public String rulesId() {
+			return ContentRules.GATE.rulesId();
+		}
+	};
 	private Machine a;
 	private Machine b;
 	/** Die Meldungen des Dienstes und der Repositories ab WARNING; INFO (Gabelungen zwischendurch) bleibt aus der Ausgabe. */
@@ -495,6 +512,53 @@ class ConflictActionsTest {
 		assertEquals(new Availability(false, "Inzwischen erledigt"), b.actions().availability(row));
 		assertThrows(IllegalStateException.class, () -> b.actions().restoreBooking(row));
 		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	/**
+	 * KARV-135: Ist die weichende Fassung inhaltlich zu neu, wird sie nicht wiederhergestellt; sie roh ins Modell zu lesen,
+	 * schriebe einen Inhalt, den die anderen Rechner sperren. Die Zeile bietet dann keine Aktion an.
+	 */
+	@Test
+	void contentVersionIsNotOfferedForRestore() {
+		a.seat(0).clearCustomerData();
+		a.saveEvent();
+		b.seat(0).setComment("von B");
+		b.seat(0).getUnknown().put(NEWER_MARKER, IntNode.valueOf(1));
+		b.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(Action.RESTORE_BOOKING, row.action());
+		assertTrue(b.actions().availability(row).enabled(), "lesbar wird sie angeboten");
+
+		markerIsNewer.set(true);
+
+		assertEquals(new Availability(false, ""), b.actions().availability(row));
+		assertThrows(IllegalStateException.class, () -> b.actions().restoreBooking(row));
+		assertFalse(b.seat(0).hasData(), "nichts wiederhergestellt");
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	/** KARV-135: Eine eigene Fassung der Halle, die inhaltlich zu neu ist, wird nicht zum Übernehmen angeboten. */
+	@Test
+	void contentHallVersionIsNotOfferedForTakeMyHall() {
+		String hallId = a.hall.getId();
+		a.hall.setName("Halle A");
+		a.halls.saveHall(a.hall);
+		Hall mine = b.halls.findById(hallId);
+		mine.setName("Halle B");
+		mine.getUnknown().put(NEWER_MARKER, IntNode.valueOf(1));
+		b.halls.saveHall(mine);
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(Action.TAKE_MY_HALL, row.action());
+		assertTrue(b.actions().availability(row).enabled(), "lesbar wird sie angeboten");
+
+		markerIsNewer.set(true);
+
+		assertEquals(new Availability(false, ""), b.actions().availability(row));
+		assertThrows(IllegalStateException.class, () -> b.actions().takeMyHall(row));
+		assertNull(b.actions().bookingImpact(row, null));
+		assertEquals("Halle A", b.halls.findById(hallId).getName());
 	}
 
 	private String droppedBookingId(Machine machine, Row row) {

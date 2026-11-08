@@ -12,6 +12,11 @@ import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 
 /**
  * Neue Events und Vorstellungen aus "Hinzufügen" und "Als Vorlage verwenden", gemeinsam für die Event-Übersicht und das
@@ -27,7 +32,8 @@ public final class EventTemplates {
 
 	/**
 	 * Kopiert die Vorstellung als Vorlage in {@code target}: Name, Beschreibung, Datum, Zeit, Halle, Bestuhlung und
-	 * Standardpreis. Die Buchungen werden nicht kopiert, die Kopie bekommt je Sitz der Bestuhlung eine leere Buchung.
+	 * Standardpreis. Die Buchungen werden nicht kopiert, die Kopie bekommt je Sitz der Bestuhlung eine leere Buchung. Kopiert
+	 * wird der Stand des Modells; was gesperrt ist, meldet der Aufrufer mit {@link #reportLockedLeftOut(Presentation)}.
 	 *
 	 * @param hallLookup liefert die Halle zur Id oder {@code null}, wenn es sie nicht (mehr) gibt
 	 */
@@ -48,7 +54,8 @@ public final class EventTemplates {
 
 	/**
 	 * Kopiert das Event samt Vorstellungen. Es bekommt einen eigenen Namen ("&lt;Name&gt; (Kopie)"), sonst würde es nie
-	 * gespeichert (EVT-002). Das Ergebnis ist noch in keiner Liste.
+	 * gespeichert (EVT-002). Das Ergebnis ist noch in keiner Liste. Gesperrte Vorstellungen fehlen im Modell (oder stehen
+	 * dort im älteren Stand) und damit in der Kopie; das meldet der Aufrufer mit {@link #reportLockedLeftOut(Event)}.
 	 *
 	 * @param existingNames die Namen der vorhandenen Events, damit der Name der Kopie frei ist
 	 */
@@ -62,6 +69,52 @@ public final class EventTemplates {
 			copyPresentation(presentation, copy, hallLookup);
 		}
 		return copy;
+	}
+
+	/**
+	 * Wie viele gesperrte Einträge die Kopie des Events auslässt (KARV-135): die gesperrten Vorstellungen darunter
+	 * ({@link StoreEventRepository#lockedUnder}); sie fehlen im Modell oder stehen dort nur im älteren, lesbaren Stand.
+	 * Gesperrte Buchungen zählen nicht, Buchungen werden nie kopiert.
+	 */
+	static int lockedLeftOut(Event source, StoreEventRepository repository) {
+		int count = 0;
+		for (UnitKey unit : repository.lockedUnder(UnitKey.event(source.getId())).keySet()) {
+			if (unit.type() == UnitType.PRESENTATION) {
+				count++;
+			}
+		}
+		return count;
+	}
+
+	/** Wie {@link #lockedLeftOut(Event, StoreEventRepository)} für die Kopie einer Vorstellung: 1, wenn sie gesperrt ist. */
+	static int lockedLeftOut(Presentation source, StoreEventRepository repository) {
+		Event event = source.getParent();
+		if (event == null) {
+			return 0;
+		}
+		return repository.lockedUnder(UnitKey.event(event.getId()))
+				.containsKey(UnitKey.presentation(event.getId(), source.getId())) ? 1 : 0;
+	}
+
+	/** Der Hinweis nach dem Kopieren; ohne ausgelassene Einträge {@code null}. */
+	static String lockedNote(int leftOut) {
+		return leftOut > 0 ? "Gesperrte Einträge werden nicht mitkopiert (" + leftOut + ")." : null;
+	}
+
+	/** Meldet in der Fußzeile, wie viele gesperrte Einträge die Kopie des Events ausgelassen hat (nichts, wenn keine). */
+	public static void reportLockedLeftOut(Event source) {
+		report(lockedNote(lockedLeftOut(source, StoreEventRepository.getInstance())));
+	}
+
+	/** Wie {@link #reportLockedLeftOut(Event)} für die Kopie einer Vorstellung. */
+	public static void reportLockedLeftOut(Presentation source) {
+		report(lockedNote(lockedLeftOut(source, StoreEventRepository.getInstance())));
+	}
+
+	private static void report(String note) {
+		if (note != null) {
+			StatusMessage.getInstance().show(Severity.WARNING, note);
+		}
 	}
 
 	/** Ein leeres Event mit einem freien Namen ("Neues Event", "Neues Event 2" ...). */

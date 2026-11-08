@@ -51,7 +51,8 @@ public class LockedUnitException extends RuntimeException {
 		return new LockedUnitException(StoreMessages.newerFormat(label(unit)));
 	}
 
-	private static String label(UnitKey unit) {
+	/** Die Bezeichnung der Einheit ({@link #useLabels}); ohne eine ihr Pfad. */
+	static String label(UnitKey unit) {
 		try {
 			String label = labels.apply(unit);
 			if (label != null) {

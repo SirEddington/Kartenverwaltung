@@ -315,7 +315,6 @@ public class StoreEventRepository implements EventRepository {
 	public RestorePlan<Event> prepareRestoreEvent(String eventId, SavePoint point) throws IOException {
 		long changes = baseline.changes(eventId);
 		List<UnitState> states = statesOf(eventId);
-		RestorePlanner.requireRestorable(states);
 		return new RestorePlan<>(eventId, states, targetOf(states, point), changes);
 	}
 
@@ -350,13 +349,19 @@ public class StoreEventRepository implements EventRepository {
 	 * und der Cache bleibt unberührt (nur für Tests; das Wiederherstellen ist {@link #restoreEvent}).
 	 */
 	Event eventAt(String eventId, SavePoint point) throws IOException {
-		List<UnitState> states = statesOf(eventId);
-		RestorePlanner.requireRestorable(states);
-		return targetOf(states, point);
+		return targetOf(statesOf(eventId), point);
 	}
 
+	/**
+	 * Der Zielstand des Events zum Speicherstand, nachdem {@link RestorePlanner#requireRestorable} die Einheiten gegen ihn
+	 * geprüft hat.
+	 *
+	 * @throws LockedUnitException wie {@link #restoreEvent}
+	 */
 	private Event targetOf(List<UnitState> states, SavePoint point) {
-		return RestorePlanner.single(UnitMapper.assembleEvents(RestorePlanner.targetsAt(states, point.at()).values()),
+		Map<UnitKey, UnitSnapshot> targets = RestorePlanner.targetsAt(states, point.at());
+		RestorePlanner.requireRestorable(states, targets);
+		return RestorePlanner.single(UnitMapper.assembleEvents(targets.values()),
 				"Zu diesem Speicherstand war das Event gelöscht.");
 	}
 
@@ -701,8 +706,34 @@ public class StoreEventRepository implements EventRepository {
 		return UnitMapper.lockedBelow(presentationOrHead, sync.eventSnapshots(presentationOrHead.eventId()));
 	}
 
+	/**
+	 * Lehnt ab, wenn unter der Vorstellung bzw. dem Event-Kopf gesperrte Einträge liegen ({@link #lockedUnder}): Sie zu
+	 * löschen oder die Vorstellung auf eine andere Halle oder Bestuhlung umzustellen, ließe die gesperrten Einträge still
+	 * verschwinden bzw. auf ihrem alten Sitz zurück (KARV-135). Aufzurufen, bevor das Modell sich ändert.
+	 *
+	 * @param presentationOrHead die Einheit einer Vorstellung oder eines Event-Kopfs
+	 * @param name               wie die Meldung das Objekt nennt
+	 * @throws LockedUnitException mit {@link StoreMessages#lockedBelow} (SYS-009 vor SYS-008), wenn etwas gesperrt ist
+	 */
+	public void requireNothingLockedUnder(UnitKey presentationOrHead, String name) {
+		Map<UnitKey, UnitState.Status> locked = lockedUnder(presentationOrHead);
+		if (!locked.isEmpty()) {
+			throw new LockedUnitException(StoreMessages.lockedBelow(name, UnitMapper.lockedBelowCause(locked.values())));
+		}
+	}
+
+	/**
+	 * Löscht die Events wie {@link #deleteEvent}. Liegt unter einem von ihnen etwas Gesperrtes, wird keines gelöscht.
+	 *
+	 * @throws LockedUnitException wie {@link #deleteEvent}
+	 */
 	@Override
 	public void deleteEvents(List<Event> events) {
+		for (Event event : events) {
+			if (event != null) {
+				requireNothingLockedUnder(UnitKey.event(event.getId()), EntityLabels.nameOrPlaceholder(event.getName()));
+			}
+		}
 		for (Event event : events) {
 			deleteEvent(event);
 		}
@@ -713,7 +744,8 @@ public class StoreEventRepository implements EventRepository {
 	 * unsichtbar. Ein nie gespeichertes Event verlässt nur den Cache.
 	 *
 	 * @throws LockedUnitException wenn ein fremder Stand das Event ersetzt oder gelöscht hat (die Ansicht ist veraltet, wie beim
-	 *                             Speichern); es wurde nichts geschrieben
+	 *                             Speichern) oder darunter gesperrte Einträge liegen ({@link #requireNothingLockedUnder});
+	 *                             es wurde nichts geschrieben
 	 */
 	@Override
 	public void deleteEvent(Event event) {
@@ -724,7 +756,9 @@ public class StoreEventRepository implements EventRepository {
 		ensureLoaded();
 		// Ein fremder Stand hat das Objekt im Cache ersetzt oder gelöscht: Das alte zu löschen träfe den fremden Stand
 		requireCurrent(event);
-		baseline.delete(event.getId(), UnitKey.event(event.getId()), event.getName());
+		UnitKey head = UnitKey.event(event.getId());
+		requireNothingLockedUnder(head, EntityLabels.nameOrPlaceholder(event.getName()));
+		baseline.delete(event.getId(), head, event.getName());
 		forgetDerived(event.getId());
 
 		cachedEvents.remove(event);

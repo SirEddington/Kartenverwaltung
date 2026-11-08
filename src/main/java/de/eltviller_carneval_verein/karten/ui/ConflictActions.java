@@ -182,7 +182,7 @@ public final class ConflictActions {
 	 * ({@link #placeRefusal}).
 	 */
 	public Availability availability(Row row) {
-		if (row.action() == Action.NONE) {
+		if (row.action() == Action.NONE || offersNewerContent(row)) {
 			return NO_ACTION;
 		}
 		UnitKey unit = row.conflict().unit();
@@ -210,6 +210,19 @@ public final class ConflictActions {
 		}
 		String refusal = target instanceof Booking booking ? placeRefusal(row, booking) : null;
 		return refusal == null ? ENABLED : new Availability(false, refusal);
+	}
+
+	/**
+	 * Ob die Aktion der Zeile die weichende Fassung roh ins Modell läse ("Wiederherstellen", "Meine Halle übernehmen") und
+	 * diese inhaltlich zu neu ist (KARV-135): Dann bietet die Zeile keine Aktion an, wie eine ohne Gegenstand der
+	 * Aktion, aber ohne "Inzwischen erledigt".
+	 */
+	private boolean offersNewerContent(Row row) {
+		if (row.action() != Action.RESTORE_BOOKING && row.action() != Action.TAKE_MY_HALL) {
+			return false;
+		}
+		Version version = dropped(row.conflict());
+		return version != null && version.newerContent();
 	}
 
 	/**
@@ -469,7 +482,7 @@ public final class ConflictActions {
 			Set<String> removed = new HashSet<>();
 			plan.getSeats().forEach(seat -> removed.add(seat.getId()));
 			removed.removeAll(keptIds);
-			impacts.add(PlanImpact.of(plan.getId(), removed, loaded));
+			impacts.add(PlanImpact.of(plan.getId(), removed, loaded, events::lockedSeatIds));
 		}
 		PlanImpact all = PlanImpact.combine(impacts);
 		return all.isEmpty() ? null : "Die Halle wird durch deine Fassung ersetzt." + all.deleteNote();
@@ -717,12 +730,16 @@ public final class ConflictActions {
 		return event == null ? null : event.findPresentation(unit.presentationId());
 	}
 
-	/** Die Halle im Modell, die die eigene Fassung ersetzt; {@code null}, wenn es sie nicht gibt oder sie schon so ist. */
+	/**
+	 * Die Halle im Modell, die die eigene Fassung ersetzt; {@code null}, wenn es sie nicht gibt, sie schon so ist oder die
+	 * eigene Fassung inhaltlich zu neu ist (KARV-135: roh ins Modell gelesen, schriebe sie einen Inhalt, den die anderen
+	 * Rechner sperren).
+	 */
 	private Hall hallToReplace(Row row) {
 		UnitKey unit = row.conflict().unit();
 		Version version = dropped(row.conflict());
 		Hall hall = halls.findById(unit.hallId());
-		if (hall == null || version == null || version.deleted() || version.payload() == null) {
+		if (hall == null || version == null || version.deleted() || version.payload() == null || version.newerContent()) {
 			return null;
 		}
 		UnitSnapshot stored = sync.snapshots(List.of(unit)).get(unit);
@@ -733,8 +750,9 @@ public final class ConflictActions {
 	}
 
 	/**
-	 * Das Vorgehen beim Wiederherstellen; {@code null}, wenn es nichts wiederherzustellen gibt oder die Buchung noch lebt. Die
-	 * Buchung kommt auf das Ziel des Vermerks ({@link OpenConflict#target()}), wenn es frei ist, sonst "ohne Platz".
+	 * Das Vorgehen beim Wiederherstellen; {@code null}, wenn es nichts wiederherzustellen gibt, die Buchung noch lebt oder
+	 * die weichende Fassung inhaltlich zu neu ist (wie bei {@link #hallToReplace}). Die Buchung kommt auf das Ziel des
+	 * Vermerks ({@link OpenConflict#target()}), wenn es frei ist, sonst "ohne Platz".
 	 */
 	private Restore restoreOf(Row row) {
 		ConflictNote note = row.conflict().note();
@@ -742,7 +760,7 @@ public final class ConflictActions {
 		Event event = note == null ? null : events.findEvent(unit.eventId());
 		Presentation presentation = event == null ? null : event.findPresentation(unit.presentationId());
 		Version version = presentation == null ? null : dropped(row.conflict());
-		if (version == null || version.deleted() || version.payload() == null) {
+		if (version == null || version.deleted() || version.payload() == null || version.newerContent()) {
 			return null;
 		}
 		Booking content = events.readBooking(version.payload());

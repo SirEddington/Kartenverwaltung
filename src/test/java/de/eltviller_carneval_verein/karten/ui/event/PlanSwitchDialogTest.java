@@ -7,20 +7,32 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync.Report;
+import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.TestRepositories;
+import de.eltviller_carneval_verein.karten.store.ForeignVersions;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
+import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.TestSyncServices;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.UnitState;
 
 class PlanSwitchDialogTest {
 
@@ -175,4 +187,119 @@ class PlanSwitchDialogTest {
 		assertTrue(mueller.isUnassigned());
 		assertEquals(seatId, mueller.getSeatId());
 	}
+
+	// Gesperrte Einträge (KARV-135) -->
+
+	@TempDir
+	Path appData;
+
+	/** Der gestartete Dienst des Tests (einzelner Rechner). */
+	private SyncService started() {
+		SyncService sync = TestSyncServices.singleMode(appData);
+		sync.startup(null, p -> {
+		});
+		return sync;
+	}
+
+	/**
+	 * Halle mit zwei gleich gebauten Bestuhlungen; Event "Prunksitzung" mit der Vorstellung "Freitag" auf der ersten,
+	 * "Müller" auf Tisch 1, Sitz 1, gespeichert. Danach setzt ein neueres Programm einen unbekannten Zahlstatus auf
+	 * Müllers Buchung.
+	 *
+	 * @return die Halle; das Event steht im Speicher
+	 */
+	private Hall savedEventWithLockedBooking(SyncService sync) throws IOException {
+		Hall hall = new Hall();
+		hall.setName("Stadthalle");
+		SeatingPlan oldPlan = plan(hall, 2, 2);
+		plan(hall, 2, 2);
+		TestRepositories.halls(sync).saveHall(hall);
+		Event event = new Event();
+		event.setName("Prunksitzung");
+		Presentation friday = event.addPresentation("Freitag");
+		friday.setHallId(hall.getId());
+		Syncs.switchPlan(friday, oldPlan);
+		Booking mueller = bookingAt(friday, 1, 1);
+		mueller.setLastName("Müller");
+		TestRepositories.events(sync).saveEvent(event);
+		UnitKey unit = UnitKey.booking(event.getId(), friday.getId(), mueller.getSeatId());
+		new ForeignVersions(sync, appData).write(unit, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		assertTrue(sync.unitState(unit).contentLocked());
+		return hall;
+	}
+
+	/** Wechselt mit dem Repository; die Rückfrage darf nicht erscheinen, Ablehnungen landen in {@code rejections}. */
+	private static boolean confirmWith(StoreEventRepository repository, Presentation presentation, SeatingPlan newPlan,
+			List<String> rejections) {
+		return PlanSwitchDialog.confirm(presentation, newPlan, repository, NEVER_ASKED, rejections::add);
+	}
+
+	/**
+	 * Eine gesperrte Buchung (nur im Index aktuell, das Modell zeigt den älteren Stand) verbietet den Wechsel der
+	 * Bestuhlung: Sonst bliebe sie auf dem alten Sitz, und der gleichnamige Sitz der neuen Bestuhlung wäre verkäuflich.
+	 */
+	@Test
+	void planSwitchIsRejectedBeforeTheModelChanges() throws IOException {
+		SyncService sync = started();
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Hall hall = savedEventWithLockedBooking(sync);
+		Presentation friday = repository.loadEvents().get(0).getPresentations().get(0);
+		String planBefore = friday.getSeatingPlanId();
+		List<Booking> before = new ArrayList<>(friday.getBookings());
+		List<String> rejections = new ArrayList<>();
+
+		boolean switched = confirmWith(repository, friday, hall.getSeatingPlans().get(1), rejections);
+		boolean removed = confirmWith(repository, friday, null, rejections);
+
+		assertFalse(switched);
+		assertFalse(removed, "auch das Entfernen der Bestuhlung ist ein Wechsel");
+		assertEquals(planBefore, friday.getSeatingPlanId());
+		assertEquals(before, friday.getBookings());
+		String message = StoreMessages.lockedBelow("Freitag", UnitState.Status.LOCKED_FORMAT);
+		assertEquals(List.of(message, message), rejections);
+		assertTrue(confirmWith(repository, friday, hall.getSeatingPlans().get(0), rejections), "kein Wechsel, nichts zu prüfen");
+		assertEquals(2, rejections.size());
+	}
+
+	/**
+	 * Direkt nach dem Start, bevor „Gesperrte Einträge“ (und {@code LockedSeats}) gefüllt sind: Geprüft wird der Index, die
+	 * Ablehnung greift schon.
+	 */
+	@Test
+	void planSwitchRejectedRightAfterStartBeforeLockedListFilled() throws IOException {
+		Hall hall = savedEventWithLockedBooking(started());
+		SyncService restarted = started();
+		StoreEventRepository repository = TestRepositories.events(restarted);
+		Presentation friday = repository.loadEvents().get(0).getPresentations().get(0);
+		String planBefore = friday.getSeatingPlanId();
+		List<String> rejections = new ArrayList<>();
+
+		assertFalse(confirmWith(repository, friday, hall.getSeatingPlans().get(1), rejections));
+
+		assertEquals(planBefore, friday.getSeatingPlanId());
+		assertEquals(List.of(StoreMessages.lockedBelow("Freitag", UnitState.Status.LOCKED_FORMAT)), rejections);
+	}
+
+	/** Ohne gesperrten Eintrag läuft der Wechsel über das Repository wie gewohnt. */
+	@Test
+	void planSwitchWithoutLockedEntriesGoesThrough() {
+		SyncService sync = started();
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Hall hall = new Hall();
+		SeatingPlan oldPlan = plan(hall, 2, 2);
+		SeatingPlan newPlan = plan(hall, 2, 2);
+		Event event = new Event();
+		event.setName("Prunksitzung");
+		Presentation friday = event.addPresentation("Freitag");
+		Syncs.switchPlan(friday, oldPlan);
+		repository.saveEvent(event);
+		List<String> rejections = new ArrayList<>();
+
+		assertTrue(confirmWith(repository, friday, newPlan, rejections));
+
+		assertEquals(newPlan.getId(), friday.getSeatingPlanId());
+		assertEquals(List.of(), rejections);
+	}
+
+	// <-- Gesperrte Einträge
 }

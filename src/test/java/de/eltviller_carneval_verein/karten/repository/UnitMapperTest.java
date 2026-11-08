@@ -1554,8 +1554,9 @@ class UnitMapperTest {
 		LockedUnitException broken = assertThrows(LockedUnitException.class,
 				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event), store));
 
-		assertEquals(StoreMessages.newerFormat(foreign.relativePath()), format.getMessage());
-		assertEquals(StoreMessages.damaged(damaged.relativePath()), broken.getMessage());
+		// dieselben Texte wie die Prüfung vor dem Löschen (StoreEventRepository#requireNothingLockedUnder)
+		assertEquals(StoreMessages.lockedBelow("Samstag", Status.LOCKED_FORMAT), format.getMessage());
+		assertEquals(StoreMessages.lockedBelow("Samstag", Status.LOCKED_DAMAGED), broken.getMessage());
 		store.remove(damaged);
 		assertEquals(1, changes(baseline, shown(baseline), UnitMapper.decompose(event), store).size(),
 				"ohne gesperrtes Kind wird die Vorstellung gelöscht");
@@ -1578,7 +1579,29 @@ class UnitMapperTest {
 		LockedUnitException e = assertThrows(LockedUnitException.class,
 				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event), store));
 
-		assertEquals(StoreMessages.newerFormat(child.relativePath()), e.getMessage());
+		assertEquals(StoreMessages.lockedBelow("Samstag", Status.LOCKED_FORMAT), e.getMessage());
+	}
+
+	/**
+	 * Hat der Index die Vorstellung nicht lesbar (ohne Inhalt), nennt die Meldung sie mit ihrer Bezeichnung, ohne eine mit
+	 * ihrem Pfad.
+	 */
+	@Test
+	void lockedBelowNamesAnUnreadablePresentationByItsPath() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		Map<UnitKey, UnitSnapshot> store = new HashMap<>(baseline);
+		UnitKey child = bookingKey(event, 1, "seat-a1x");
+		put(store, contentLocked(store.get(child)));
+		Presentation removed = event.getPresentations().remove(1);
+		UnitKey presentation = UnitKey.presentation(event.getId(), removed.getId());
+		UnitSnapshot known = store.get(presentation);
+		put(store, new UnitSnapshot(presentation, known.version(), Status.OK, false, null, false));
+
+		LockedUnitException e = assertThrows(LockedUnitException.class,
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event), store));
+
+		assertEquals(StoreMessages.lockedBelow(presentation.relativePath(), Status.LOCKED_FORMAT), e.getMessage());
 	}
 
 	/**

@@ -752,6 +752,11 @@ public class EventEditController {
 		if (Objects.equals(newHallId, presentation.getHallId())) {
 			return;
 		}
+		// KARV-135: Mit gesperrten Einträgen darunter wird nicht umgestellt; das Modell bleibt unverändert
+		if (LockedEntryGuard.rejects(presentation)) {
+			resetHallChoice(presentation);
+			return;
+		}
 		String message = hallChangeMessage(presentation);
 		if (message != null && !confirmEditing(presentation, () -> ConfirmDialog.confirm("Halle wechseln", message, "Wechseln", "button-primary", null))) {
 			resetHallChoice(presentation);
@@ -952,6 +957,7 @@ public class EventEditController {
 		Event copy = EventTemplates.copyEvent(event, masterEventData.stream().map(Event::getName).toList(), hallRepository::findById);
 		ChangeTracker.events().trackNew(copy);
 		refreshEventTable(copy);
+		EventTemplates.reportLockedLeftOut(event);
 	}
 
 	private void handleDeleteEvent(Event event) {
@@ -967,7 +973,8 @@ public class EventEditController {
 			try {
 				repository.deleteEvent(event);
 			} catch (LockedUnitException e) {
-				// Die Tabelle zeigt ein Event, das ein anderer Rechner inzwischen ersetzt oder gelöscht hat
+				// Die Tabelle zeigt ein Event, das ein anderer Rechner inzwischen ersetzt oder gelöscht hat, oder darunter
+				// liegen gesperrte Einträge (KARV-135)
 				StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
 				return;
 			}
@@ -996,6 +1003,7 @@ public class EventEditController {
 		Presentation copy = EventTemplates.copyPresentation(presentation, event, hallRepository::findById);
 		ChangeTracker.events().check(event);
 		refreshPresentationTable(event, copy);
+		EventTemplates.reportLockedLeftOut(presentation);
 	}
 
 	private void handleDeletePres(Presentation presentation) {
@@ -1003,7 +1011,10 @@ public class EventEditController {
 			return;
 		}
 
-		presentation.getParent().deletePresentation(presentation);
+		// KARV-135: Mit gesperrten Einträgen darunter bleibt die Vorstellung, die Meldung steht in der Fußzeile
+		if (!LockedEntryGuard.deletePresentation(presentation)) {
+			return;
+		}
 		if (presentation.equals(currentPres)) {
 			currentPres = null;
 		}

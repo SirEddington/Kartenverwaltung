@@ -1,12 +1,14 @@
 package de.eltviller_carneval_verein.karten.ui.hall;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiFunction;
 
 import org.junit.jupiter.api.Test;
 
@@ -134,7 +136,7 @@ class PlanImpactTest {
 
 		PlanImpact impact = impactOn(Set.of(seat1.getId(), seat2.getId(), seat3.getId()), List.of(event, later));
 
-		assertEquals(List.of(new PlanImpact.Entry("Kampagne 2027", "Prunksitzung", 2), new PlanImpact.Entry("Kampagne 2028", "Fremdensitzung", 1)),
+		assertEquals(List.of(new PlanImpact.Entry("Kampagne 2027", "Prunksitzung", 2, 0), new PlanImpact.Entry("Kampagne 2028", "Fremdensitzung", 1, 0)),
 				impact.entries());
 		assertEquals(3, impact.total());
 	}
@@ -144,7 +146,7 @@ class PlanImpactTest {
 		Event unnamed = event(" ");
 		booked(presentation(unnamed, null, plan.getId()), seat1);
 
-		assertEquals(List.of(new PlanImpact.Entry("(ohne Name)", "(ohne Name)", 1)), impactOn(Set.of(seat1.getId()), List.of(unnamed)).entries());
+		assertEquals(List.of(new PlanImpact.Entry("(ohne Name)", "(ohne Name)", 1, 0)), impactOn(Set.of(seat1.getId()), List.of(unnamed)).entries());
 	}
 	// <-- Zählen
 
@@ -180,6 +182,39 @@ class PlanImpactTest {
 		assertEquals("\n\nBetroffen:\n- 1 Buchung mit Daten in Vorstellung Prunksitzung (Event Kampagne 2027)"
 				+ "\n- 2 Buchungen mit Daten in Vorstellung Kindersitzung (Event Kampagne 2027)" + STAYS,
 				impactOn(Set.of(seat1.getId(), seat2.getId()), List.of(event)).deleteNote());
+	}
+
+	/**
+	 * KARV-135: Gesperrte Buchungen auf den betroffenen Sitzen stehen nicht im Modell; der Hinweis nennt ihre Zahl, je
+	 * Vorstellung gezählt nach den gesperrten Sitzen des Repositorys.
+	 */
+	@Test
+	void planImpactMentionsLockedEntries() {
+		Presentation first = presentation(event, "Prunksitzung", plan.getId());
+		booked(first, seat1);
+		Presentation second = presentation(event, "Kindersitzung", plan.getId());
+		Set<String> affected = Set.of(seat1.getId(), seat2.getId());
+		BiFunction<String, String, Set<String>> lockedSeats = (eventId, presentationId) -> presentationId
+				.equals(first.getId()) ? Set.of(seat2.getId(), seat3.getId()) : Set.of(seat1.getId(), seat2.getId());
+
+		PlanImpact impact = PlanImpact.of(plan.getId(), affected, List.of(event), lockedSeats);
+		PlanImpact single = PlanImpact.of(plan.getId(), affected, List.of(event),
+				(eventId, presentationId) -> presentationId.equals(first.getId()) ? Set.of(seat2.getId()) : Set.of());
+		PlanImpact onlyLocked = PlanImpact.of(plan.getId(), Set.of(seat2.getId()), List.of(event),
+				(eventId, presentationId) -> presentationId.equals(second.getId()) ? Set.of(seat2.getId()) : Set.of());
+
+		assertEquals(List.of(new PlanImpact.Entry("Kampagne 2027", "Prunksitzung", 1, 1),
+				new PlanImpact.Entry("Kampagne 2027", "Kindersitzung", 0, 2)), impact.entries());
+		assertEquals("\n\nBetroffen: 1 Buchung mit Daten in Vorstellung Prunksitzung (Event Kampagne 2027)."
+				+ "\nSie bleibt erhalten und steht danach unter „Ohne Platz“, bis ihr ein neuer Platz zugewiesen wird."
+				+ " Dazu kommen 3 gesperrte Einträge, die hier nicht angezeigt werden.", impact.deleteNote());
+		assertEquals("\n\nBetroffen: 1 Buchung mit Daten in Vorstellung Prunksitzung (Event Kampagne 2027)."
+				+ "\nSie bleibt erhalten und steht danach unter „Ohne Platz“, bis ihr ein neuer Platz zugewiesen wird."
+				+ " Dazu kommt 1 gesperrter Eintrag, der hier nicht angezeigt wird.", single.deleteNote());
+		assertFalse(onlyLocked.isEmpty());
+		assertEquals("\n\nBetroffen: 1 gesperrter Eintrag, der hier nicht angezeigt wird.", onlyLocked.deleteNote());
+		assertNull(onlyLocked.renumberMessage(), "gesperrte Einträge folgen ihren Tischen wie alle Buchungen");
+		assertEquals(impact.renumberMessage(), PlanImpact.of(plan.getId(), affected, List.of(event)).renumberMessage());
 	}
 
 	@Test

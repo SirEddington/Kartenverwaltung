@@ -61,6 +61,16 @@ class RestorePlannerTest {
 		return state(unit, Status.OK, chain);
 	}
 
+	/** Die Prüfung gegen den Zielstand zum Zeitpunkt {@code t}, wie beim Wiederherstellen. */
+	private static void requireRestorable(List<UnitState> states, Instant t) {
+		RestorePlanner.requireRestorable(states, RestorePlanner.targetsAt(states, t));
+	}
+
+	/** Die Prüfung gegen den neuesten Stand als Ziel. */
+	private static void requireRestorable(List<UnitState> states) {
+		requireRestorable(states, at(10_000));
+	}
+
 	/** Die Speicherstände aus den Gliedern der Ketten, wie der Index sie liefert. */
 	private static List<SavePoint> savePoints(UnitState... states) {
 		return RestorePlanner.savePoints(
@@ -172,18 +182,18 @@ class RestorePlannerTest {
 		UnitState fine = ok(EVENT, version);
 
 		LockedUnitException damaged = assertThrows(LockedUnitException.class,
-				() -> RestorePlanner.requireRestorable(List.of(fine, state(BOOKING, Status.LOCKED_DAMAGED, version))));
+				() -> requireRestorable(List.of(fine, state(BOOKING, Status.LOCKED_DAMAGED, version))));
 		LockedUnitException format = assertThrows(LockedUnitException.class,
-				() -> RestorePlanner.requireRestorable(List.of(fine, state(BOOKING, Status.LOCKED_FORMAT, version))));
+				() -> requireRestorable(List.of(fine, state(BOOKING, Status.LOCKED_FORMAT, version))));
 		LockedUnitException waiting = assertThrows(LockedUnitException.class,
-				() -> RestorePlanner.requireRestorable(List.of(fine, state(BOOKING, Status.WAITING, version))));
+				() -> requireRestorable(List.of(fine, state(BOOKING, Status.WAITING, version))));
 
 		String path = BOOKING.relativePath();
 		assertEquals(StoreMessages.damaged(path), damaged.getMessage());
 		assertEquals(StoreMessages.newerFormat(path), format.getMessage());
 		assertEquals(path + " wartet noch auf eine Datei aus dem gemeinsamen Ordner. Es wurde nichts gespeichert.",
 				waiting.getMessage());
-		RestorePlanner.requireRestorable(List.of(fine));
+		requireRestorable(List.of(fine));
 	}
 
 	/**
@@ -199,10 +209,10 @@ class RestorePlannerTest {
 		assertTrue(presentation.contentLocked());
 
 		LockedUnitException e = assertThrows(LockedUnitException.class,
-				() -> RestorePlanner.requireRestorable(List.of(ok(BOOKING, version), presentation)));
+				() -> requireRestorable(List.of(ok(BOOKING, version), presentation)));
 
 		assertEquals(StoreMessages.newerFormat(PRESENTATION.relativePath()), e.getMessage());
-		RestorePlanner.requireRestorable(List.of(ok(BOOKING, version), ok(PRESENTATION, version)));
+		requireRestorable(List.of(ok(BOOKING, version), ok(PRESENTATION, version)));
 	}
 
 	@Test
@@ -211,9 +221,9 @@ class RestorePlannerTest {
 		LockedUnitException.useLabels(unit -> unit.equals(BOOKING) ? "Gala › Samstag › Tisch 1, Sitz 2" : null);
 		try {
 			LockedUnitException damaged = assertThrows(LockedUnitException.class,
-					() -> RestorePlanner.requireRestorable(List.of(state(BOOKING, Status.LOCKED_DAMAGED, version))));
+					() -> requireRestorable(List.of(state(BOOKING, Status.LOCKED_DAMAGED, version))));
 			LockedUnitException format = assertThrows(LockedUnitException.class,
-					() -> RestorePlanner.requireRestorable(List.of(state(EVENT, Status.LOCKED_FORMAT, version))));
+					() -> requireRestorable(List.of(state(EVENT, Status.LOCKED_FORMAT, version))));
 
 			assertEquals(StoreMessages.damaged("Gala › Samstag › Tisch 1, Sitz 2"), damaged.getMessage());
 			assertEquals(StoreMessages.newerFormat(EVENT.relativePath()), format.getMessage(), "ohne Bezeichnung der Pfad");
@@ -222,10 +232,72 @@ class RestorePlannerTest {
 				throw new IllegalStateException("kein Verlauf");
 			});
 			LockedUnitException failing = assertThrows(LockedUnitException.class,
-					() -> RestorePlanner.requireRestorable(List.of(state(BOOKING, Status.LOCKED_DAMAGED, version))));
+					() -> requireRestorable(List.of(state(BOOKING, Status.LOCKED_DAMAGED, version))));
 			assertEquals(StoreMessages.damaged(BOOKING.relativePath()), failing.getMessage());
 		} finally {
 			LockedUnitException.useLabels(null);
 		}
 	}
+
+	// Gesperrte Einheiten nach dem Zielstand (KARV-135) -->
+
+	/** Kopf; Vorstellung bis Minute 10 lebend, dann gelöscht; darunter eine Buchung mit neuerem Format. */
+	private static List<UnitState> lockedBookingUnderPresentationDeletedAt10() {
+		return List.of(ok(EVENT, version(1, "s1", at(1), false)),
+				ok(PRESENTATION, version(2, "s1", at(1), false), version(3, "s2", at(10), true)),
+				state(BOOKING, Status.LOCKED_FORMAT, version(4, "s1", at(1), false)));
+	}
+
+	/**
+	 * Unter einer gelöschten Vorstellung zeigt das Programm nichts. Bleibt sie auch im Zielstand gelöscht, fasst das
+	 * Wiederherstellen ihre gesperrte Buchung nicht an, und die Buchung blockiert es nicht.
+	 */
+	@Test
+	void lockedBookingUnderPresentationDeletedAlsoInTargetIsPassedOver() {
+		requireRestorable(lockedBookingUnderPresentationDeletedAt10(), at(15));
+	}
+
+	/** Ein Wiederherstellen, das die Vorstellung zurückbringt, brächte die gesperrte Buchung mit: SYS-009. */
+	@Test
+	void revivingPresentationWithLockedBookingIsRefused() {
+		LockedUnitException e = assertThrows(LockedUnitException.class,
+				() -> requireRestorable(lockedBookingUnderPresentationDeletedAt10(), at(5)));
+
+		assertEquals(StoreMessages.newerFormat(BOOKING.relativePath()), e.getMessage());
+	}
+
+	/**
+	 * Lebt die Vorstellung jetzt und ist sie nur im Zielstand gelöscht, löschte das Wiederherstellen sie samt der gesperrten
+	 * Buchung darunter (wie das Löschen einer Vorstellung): abgelehnt.
+	 */
+	@Test
+	void lockedBookingUnderPresentationDeletedOnlyInTargetIsRefused() {
+		List<UnitState> states = List.of(ok(EVENT, version(1, "s1", at(1), false)),
+				ok(PRESENTATION, version(2, "s1", at(1), false), version(3, "s2", at(10), true),
+						version(5, "s3", at(20), false)),
+				state(BOOKING, Status.LOCKED_DAMAGED, version(4, "s1", at(1), false)));
+
+		LockedUnitException e = assertThrows(LockedUnitException.class, () -> requireRestorable(states, at(15)));
+
+		assertEquals(StoreMessages.damaged(BOOKING.relativePath()), e.getMessage());
+	}
+
+	/**
+	 * Das Ziel-Glied einer Einheit ist inhaltlich zu neu (ein späteres Glied ist wieder lesbar, die Kette also {@code OK}):
+	 * Es ins Modell zu lesen schriebe einen Inhalt, den die anderen sperren. SYS-009 mit der Einheit.
+	 */
+	@Test
+	void restoreToContentTargetFails() {
+		Version newer = version(2, "s2", at(5), false).withNewerContent(true);
+		List<UnitState> states = List.of(ok(EVENT, version(1, "s1", at(1), false)),
+				ok(BOOKING, version(3, "s1", at(1), false), newer, version(4, "s3", at(10), false)));
+
+		LockedUnitException e = assertThrows(LockedUnitException.class, () -> requireRestorable(states, at(7)));
+
+		assertEquals(StoreMessages.newerFormat(BOOKING.relativePath()), e.getMessage());
+		requireRestorable(states, at(12));
+		requireRestorable(states, at(2));
+	}
+
+	// <-- Gesperrte Einheiten nach dem Zielstand
 }
