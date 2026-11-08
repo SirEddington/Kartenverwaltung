@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +33,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingCancellation;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
@@ -52,6 +54,7 @@ import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.ui.sales.SeatBulkEdit;
 
 /**
  * Fremde Stände im Event-Repository. "Der andere Rechner" ist meist ein zweites Repository auf demselben Dienst: Es
@@ -2230,7 +2233,144 @@ class StoreEventRepositoryForeignTest {
 		assertEquals(Set.of(), mine.lockedSeatIds(event.getId(), friday.getId()));
 	}
 
+	/**
+	 * Der andere Rechner stellt die Vorstellung auf die Bestuhlung von {@code other} um (Müller kommt auf den ersten Sitz
+	 * dort), danach verkauft ein neueres Programm diesen Sitz mit einem unbekannten Zahlstatus: Der Sitz ist für diesen
+	 * Rechner gesperrt.
+	 *
+	 * @return der gesperrte Sitz in der Bestuhlung von {@code other}
+	 */
+	private Seat switchToPlanWithLockedSeat(Hall other) throws IOException {
+		remoteSwitchesTo(other);
+		Seat target = other.getSeatingPlans().get(0).getSeats().get(0);
+		UnitKey locked = UnitKey.booking(event.getId(), friday.getId(), target.getId());
+		foreign.write(locked, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		assertTrue(sync.unitState(locked).contentLocked());
+		return target;
+	}
+
+	/** Auf dem gesperrten Sitz liegt nur der leere Platzhalter; Müller bleibt im Modell, aber nicht dort. */
+	private void assertNobodyOn(Seat locked, Booking sold) {
+		List<Booking> onSeat = friday.getBookings().stream().filter(b -> locked.getId().equals(b.getSeatId())).toList();
+		assertEquals(1, onSeat.size(), "genau ein Platzhalter");
+		assertFalse(onSeat.get(0).hasData(), "keine Buchung bekommt den gesperrten Sitz");
+		assertEquals("Müller", sold.getLastName());
+		assertNotEquals(locked.getId(), sold.getSeatId());
+	}
+
+	/**
+	 * Ein fremder Wechsel der Bestuhlung kommt an, und der Abgleich beim Einarbeiten ({@code EventMerge.resync}) setzt
+	 * Müller nicht auf den gesperrten Sitz, auch wenn Reihe, Tisch und Nummer passen.
+	 */
+	@Test
+	void foreignPlanSwitchDoesNotPutABookingOnALockedSeat() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		Seat locked = switchToPlanWithLockedSeat(other);
+
+		ForeignResult result = mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+
+		assertTrue(result.deferred().isEmpty(), result.deferred().toString());
+		assertEquals(other.getSeatingPlans().get(0).getId(), friday.getSeatingPlanId(), "der Wechsel ist eingearbeitet");
+		assertNobodyOn(locked, sold);
+	}
+
+	/**
+	 * Übernimmt der Nutzer im Konflikt-Dialog Halle und Bestuhlung des anderen Rechners ({@code applyFields}), setzt der
+	 * Abgleich Müller ebenfalls nicht auf den gesperrten Sitz.
+	 */
+	@Test
+	void applyFieldsWithPlanSwitchDoesNotPutABookingOnALockedSeat() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		Seat locked = switchToPlanWithLockedSeat(other);
+		ObjectNode fields = JsonMapperFactory.create().createObjectNode();
+		fields.put("hallId", other.getId());
+		fields.put("seatingPlanId", other.getSeatingPlans().get(0).getId());
+
+		mine.applyFields(UnitKey.presentation(event.getId(), friday.getId()), fields);
+
+		assertEquals(other.getSeatingPlans().get(0).getId(), friday.getSeatingPlanId());
+		assertNobodyOn(locked, sold);
+	}
+
 	// <-- Inhaltlich zu neu
+
+	// Unbekannte Felder an Buchungen (KARV-134) -->
+
+	/**
+	 * Ein anderes Programm hat Müllers Namen entfernt und ein unbekanntes Feld gesetzt: Die Buchung auf dem ersten Sitz
+	 * trägt nur noch dieses Feld und gilt damit als Buchung mit Daten (ein Rest).
+	 */
+	private Booking bookingWithOnlyUnknownField() throws IOException {
+		foreign.write(seatUnit(friday, 0), "Fremd", payload -> {
+			payload.remove("lastName");
+			payload.put("x-test-neu", 1);
+		});
+		mine.applyForeign(List.of(seatUnit(friday, 0)));
+		Booking booking = seat(friday, 0);
+		assertNull(booking.getLastName());
+		assertTrue(booking.hasData(), "das unbekannte Feld zählt als Daten");
+		return booking;
+	}
+
+	/** Storno einer Buchung, die nur ein unbekanntes Feld trägt: Das Speichern löscht ihre Einheit. */
+	@Test
+	void cancellingABookingWithOnlyAnUnknownFieldDeletesItsUnit() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		Booking booking = bookingWithOnlyUnknownField();
+
+		BookingCancellation.cancel(List.of(booking));
+		mine.saveEvent(event);
+
+		assertFalse(seat(friday, 0).hasData());
+		assertTrue(sync.unitState(unit).head().deleted(), "die Buchungs-Einheit ist gelöscht");
+	}
+
+	/**
+	 * Der andere Rechner storniert die Buchung mit nur einem unbekannten Feld: Das Einarbeiten ({@code EventMerge}) leert
+	 * auch das Feld, und das nächste Speichern belebt die Buchung nicht wieder.
+	 */
+	@Test
+	void foreignCancellationOfABookingWithOnlyAnUnknownFieldIsNotRevived() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		Booking booking = bookingWithOnlyUnknownField();
+		Other other = other();
+		BookingCancellation.cancel(List.of(seat(other.friday(), 0)));
+		other.save();
+		assertTrue(sync.unitState(unit).head().deleted());
+
+		mine.applyForeign(List.of(unit));
+		long before = files();
+		mine.saveEvent(event);
+
+		assertSame(booking, seat(friday, 0), "der Platzhalter des Sitzes bleibt");
+		assertFalse(booking.hasData());
+		assertTrue(booking.getUnknown().isEmpty());
+		assertEquals(before, files(), "nichts geschrieben");
+		assertTrue(sync.unitState(unit).head().deleted(), "die Buchung bleibt storniert");
+	}
+
+	/** Neuverkauf über den Sitz-Dialog auf einem Rest mit nur einem unbekannten Feld: Der neue Kunde erbt nichts. */
+	@Test
+	void resaleOnALeftoverWithOnlyAnUnknownFieldInheritsNothing() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		Booking leftover = bookingWithOnlyUnknownField();
+		assertTrue(leftover.hasLeftovers());
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(leftover));
+		edit.lastName().change("Meier");
+
+		edit.apply(LocalDate.of(2026, 11, 8));
+		mine.saveEvent(event);
+
+		ObjectNode written = sync.unitState(unit).head().payload();
+		assertEquals("Meier", written.get("lastName").asText());
+		assertFalse(written.has("x-test-neu"), "das unbekannte Feld des Rests fehlt in der Datei");
+	}
+
+	// <-- Unbekannte Felder an Buchungen
 
 	/**
 	 * Die einzige Version der Buchung wird beschädigt, während der Nutzer sie ändert: Der gesperrte Stand ohne lesbares
