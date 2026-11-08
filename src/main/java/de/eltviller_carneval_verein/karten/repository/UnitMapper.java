@@ -572,11 +572,17 @@ final class UnitMapper {
 	}
 
 	/**
-	 * Eine gesperrte oder noch wartende Einheit lässt sich nicht ändern, auch nicht löschen.
+	 * Eine gesperrte oder noch wartende Einheit lässt sich nicht ändern, auch nicht löschen. Gesperrt nach
+	 * {@link #lockOf}: auch eine Einheit mit Zustand {@code OK}, deren aktueller Stand inhaltlich zu neu ist (ein ausstehendes
+	 * rohes Zurücksetzen, KARV-135).
 	 *
 	 * @throws LockedUnitException wenn die Einheit gesperrt ist oder noch auf eine Datei wartet
 	 */
 	static void requireWritable(UnitSnapshot known) {
+		Status lock = lockOf(known);
+		if (lock != null) {
+			throw new LockedUnitException(lockMessage(known.unit(), lock));
+		}
 		requireWritable(known.unit(), known.status());
 	}
 

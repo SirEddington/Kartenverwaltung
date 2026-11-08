@@ -299,5 +299,25 @@ class RestorePlannerTest {
 		requireRestorable(states, at(2));
 	}
 
+	/**
+	 * Die Einheit selbst ist inhaltlich gesperrt, ihre Kette aber {@code OK}: ein ausstehendes rohes Zurücksetzen auf einen
+	 * inhaltlich zu neuen Stand, nachdem die beschädigte Stelle geheilt ist. Wiederherstellen schriebe über einen Inhalt,
+	 * den dieses Programm nicht lesen kann: SYS-009 mit der Einheit, auch auf ein lesbares Ziel-Glied (KARV-135).
+	 */
+	@Test
+	void contentLockedUnitWithStatusOkBlocksRestore() {
+		Version readable = version(1, "s1", at(1), false);
+		Version reset = version(2, "s2", at(2), false).withNewerContent(true);
+		UnitState booking = new UnitState(BOOKING, Status.OK, List.of(readable), List.of(reset), List.of(), null,
+				Set.of());
+		assertTrue(booking.contentLocked());
+		List<UnitState> states = List.of(ok(EVENT, version(3, "s1", at(1), false)),
+				ok(PRESENTATION, version(4, "s1", at(1), false)), booking);
+
+		LockedUnitException e = assertThrows(LockedUnitException.class, () -> requireRestorable(states, at(1)));
+
+		assertEquals(StoreMessages.newerFormat(BOOKING.relativePath()), e.getMessage());
+	}
+
 	// <-- Gesperrte Einheiten nach dem Zielstand
 }

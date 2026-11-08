@@ -96,7 +96,8 @@ final class RestorePlanner {
 	}
 
 	/**
-	 * Eine gesperrte oder wartende Einheit lässt sich nicht wiederherstellen, ebenso eine unter einem Vorfahren, dessen
+	 * Eine gesperrte oder wartende Einheit lässt sich nicht wiederherstellen (gesperrt nach {@link UnitMapper#lockOf}, also
+	 * auch mit Zustand {@code OK} und inhaltlich zu neuem aktuellem Stand), ebenso eine unter einem Vorfahren, dessen
 	 * aktueller Stand inhaltlich zu neu ist, und eine, deren Ziel-Glied inhaltlich zu neu ist (KARV-135): Das Ziel ins
 	 * Modell zu lesen schriebe einen Inhalt, den die anderen Rechner sperren. Die Texte sind die von
 	 * {@link UnitMapper#requireWritable} und {@link UnitMapper#requireWritableAncestors}, beim Ziel-Glied SYS-009 mit der
@@ -126,7 +127,7 @@ final class RestorePlanner {
 				}
 				continue;
 			}
-			UnitMapper.requireWritable(unit, state.status());
+			UnitMapper.requireWritable(snapshots.get(unit));
 			UnitMapper.requireWritableAncestors(unit, snapshots);
 			UnitSnapshot goal = target.get(unit);
 			if (goal != null && goal.contentLocked()) {

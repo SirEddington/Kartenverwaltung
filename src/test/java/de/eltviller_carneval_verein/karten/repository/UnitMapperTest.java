@@ -1504,6 +1504,26 @@ class UnitMapperTest {
 		assertEquals(StoreMessages.damaged(key.relativePath()), e.getMessage());
 	}
 
+	/**
+	 * Der Vergleichsstand kennt die Einheit inhaltlich gesperrt mit Zustand {@code OK} (ein ausstehendes rohes Zurücksetzen,
+	 * etwa beim Wiederherstellen in den Vergleichsstand geholt): Das Modell darf nicht über sie schreiben, SYS-009 mit der
+	 * Einheit (KARV-135).
+	 */
+	@Test
+	void contentLockedUnitWithStatusOkRejectsWholeSave() {
+		Event event = simpleEvent();
+		Map<UnitKey, UnitSnapshot> baseline = baseline(UnitMapper.decompose(event));
+		UnitKey key = bookingKey(event, 0, "seat-a1");
+		UnitSnapshot known = baseline.get(key);
+		put(baseline, new UnitSnapshot(key, known.version(), Status.OK, false, known.payload(), true));
+		event.getPresentations().get(0).getBookings().get(0).setLastName("Wiederhergestellt");
+
+		LockedUnitException e = assertThrows(LockedUnitException.class,
+				() -> changes(baseline, shown(baseline), UnitMapper.decompose(event)));
+
+		assertEquals(StoreMessages.newerFormat(key.relativePath()), e.getMessage());
+	}
+
 	/** Der Stand mit inhaltlich zu neuem Kopf ({@code contentLocked}), wie ihn der Index nach einem neueren Programm kennt. */
 	private static UnitSnapshot contentLocked(UnitSnapshot snapshot) {
 		return new UnitSnapshot(snapshot.unit(), snapshot.version(), Status.LOCKED_FORMAT, false, snapshot.payload(), true);
