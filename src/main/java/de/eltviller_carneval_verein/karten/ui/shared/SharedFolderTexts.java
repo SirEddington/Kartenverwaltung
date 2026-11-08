@@ -305,7 +305,8 @@ public final class SharedFolderTexts {
 
 	/** Rückfrage vor dem Zurücksetzen (&1 = Bezeichnung des Eintrags). */
 	public static final String LOCKED_CONFIRM = "„&1“ auf den letzten lesbaren Stand zurücksetzen? Die eine beschädigte"
-			+ " Änderung geht dabei verloren, alles davor bleibt.";
+			+ " Änderung geht dabei verloren, alles davor bleibt. Stammt der Stand davor von einer neueren Programmversion,"
+			+ " bleibt der Eintrag gesperrt, bis die Kartenverwaltung aktualisiert ist.";
 
 	/** Knopf der Rückfrage: zurücksetzen. */
 	public static final String LOCKED_CONFIRM_YES = "Zurücksetzen";
