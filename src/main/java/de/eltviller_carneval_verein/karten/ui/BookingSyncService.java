@@ -45,12 +45,13 @@ public final class BookingSyncService {
 	 * @param tracker    der Tracker, in dem das Event verfolgt wird
 	 * @param repository das Event-Repository, dem der Abgleich als vom Einarbeiten abgeleitet gilt, nicht als Änderung des
 	 *                   Nutzers ({@link StoreEventRepository#deriving}); es nennt auch die gesperrten Sitze
-	 *                   ({@link StoreEventRepository#lockedSeatIds})
+	 *                   ({@link StoreEventRepository#lockedSeatIds(String, Presentation)}), beurteilt an der Vorstellung
+	 *                   dieses Events, nicht an der im Cache des Repositorys
 	 */
 	public static void prepare(Event event, Function<String, Hall> hallLookup, ChangeTracker<Event> tracker,
 			StoreEventRepository repository) {
 		prepare(event, hallLookup, tracker, repository,
-				presentation -> repository.lockedSeatIds(event.getId(), presentation.getId()));
+				presentation -> repository.lockedSeatIds(event.getId(), presentation));
 	}
 
 	private static void prepare(Event event, Function<String, Hall> hallLookup, ChangeTracker<Event> tracker,

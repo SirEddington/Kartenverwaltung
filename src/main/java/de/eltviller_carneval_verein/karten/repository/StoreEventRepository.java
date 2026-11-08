@@ -681,9 +681,10 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Wie {@link #lockedSeatIds(String, String)}, für eine Vorstellung, die nicht die im Cache sein muss (etwa die Kopie
-	 * für den Änderungsmelder): „im Modell“ heißt dann in dieser Vorstellung.
+	 * für den Änderungsmelder oder das Event, das {@code BookingSyncService} gerade abgleicht): „im Modell“ heißt dann in
+	 * dieser Vorstellung.
 	 */
-	private Set<String> lockedSeatIds(String eventId, Presentation presentation) {
+	public Set<String> lockedSeatIds(String eventId, Presentation presentation) {
 		return UnitMapper.lockedSeatIds(UnitKey.presentation(eventId, presentation.getId()), presentation.getBookings(),
 				sync.eventSnapshots(eventId));
 	}

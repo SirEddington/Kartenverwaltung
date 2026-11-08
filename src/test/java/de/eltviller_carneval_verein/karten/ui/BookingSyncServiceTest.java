@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
@@ -31,6 +32,8 @@ import de.eltviller_carneval_verein.karten.store.ForeignVersions;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.UnitState;
+import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 
 class BookingSyncServiceTest {
@@ -236,6 +239,39 @@ class BookingSyncServiceTest {
 		assertDoesNotThrow(() -> events.saveEvent(loaded));
 		assertEquals(files, new ForeignVersions(sync, appData).files(), "Speichern schreibt nichts");
 		assertTrue(sync.unitState(lockedUnit).contentLocked(), "die gesperrte Buchung bleibt unberührt");
+	}
+
+	/**
+	 * Die gesperrten Sitze ergeben sich aus der Vorstellung, die abgeglichen wird, nicht aus dem Event im Cache des
+	 * Repositorys: Müllers Buchung ist beschädigt, ihr älterer Stand wird in diesem Event angezeigt und behält ihren Sitz,
+	 * auch wenn das Event im Cache den Sitz leer zeigt (KARV-135). Sonst käme Müller zu den Resten, und jedes Speichern
+	 * scheiterte mit SYS-008.
+	 */
+	@Test
+	void lockedSeatsComeFromThePreparedPresentation(@TempDir Path appData) throws IOException {
+		SyncService sync = TestSyncServices.singleMode(appData);
+		sync.startup(null, p -> {
+		});
+		hall.setName("Stadthalle");
+		TestRepositories.halls(sync).saveHall(hall);
+		Syncs.sync(presentation, plan);
+		Seat first = plan.getSeats().get(0);
+		Booking sold = bookingOn(presentation, first);
+		sold.setLastName("Müller");
+		TestRepositories.events(sync).saveEvent(event);
+		UnitKey unit = UnitKey.booking(event.getId(), presentation.getId(), first.getId());
+		Version damaged = new ForeignVersions(sync, appData).write(unit, "Fremd", payload -> payload.put("lastName", "Neu"));
+		Files.writeString(appData.resolve("data/" + unit.relativePath() + "/" + damaged.id() + ".json"), "kaputt");
+		assertEquals(UnitState.Status.LOCKED_DAMAGED, sync.unitState(unit).status());
+		StoreEventRepository events = TestRepositories.events(sync);
+		// das Event im Cache zeigt den Sitz leer, das abgeglichene Event zeigt Müller
+		bookingOn(events.findEvent(event.getId()).getPresentations().get(0), first).setLastName(null);
+
+		BookingSyncService.prepare(event, id -> Map.of(hall.getId(), hall).get(id), tracker, events);
+
+		assertSame(sold, bookingOn(presentation, first), "Müller bleibt auf seinem Sitz");
+		assertFalse(sold.isUnassigned());
+		assertEquals("Müller", sold.getLastName());
 	}
 
 	/** Die Buchung auf dem Sitz (auch der leere Platzhalter). */
