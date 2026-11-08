@@ -122,7 +122,8 @@ a list.
 - Add fields, if older versions may ignore them.
 - Add values to tolerant enums, if the fallback in older versions is acceptable. A tolerant enum is display only: it
   loads with the fallback (`RECTANGLE`, `CENTER`), but the original value stays in the file until someone changes it
-  on purpose; a value chosen explicitly replaces it.
+  on purpose: only setting a value different from the current (fallback) one drops the original; setting the
+  fallback value itself (e.g. `RECTANGLE` for an unknown shape) keeps it.
 - Add values to strict enums, or put a feature name into `requires`, if older versions must not touch a unit. They
   lock it then, with all consequences described below. Both are deliberate decisions.
 - Remove a field, if older versions can live with a missing or outdated value. The new version keeps it as an
