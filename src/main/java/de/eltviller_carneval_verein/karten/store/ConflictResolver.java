@@ -218,7 +218,8 @@ final class ConflictResolver {
 
 	/**
 	 * Meldet, dass sich der Stand einer Einheit geändert hat: Jede Einheit, deren Auflösung auf sie wartet
-	 * ({@link #waitingOn}), kommt wieder in die Schlange. Von jedem Thread.
+	 * ({@link #waitingOn}), kommt wieder in die Schlange, ebenso die Einheit selbst, wenn sie wartet (ihr Verlust kann
+	 * inzwischen aufgegangen sein; sonst zählte {@link #waitingCount} sie weiter). Von jedem Thread.
 	 */
 	void unitChanged(UnitKey changed) {
 		synchronized (queue) {
@@ -229,7 +230,7 @@ final class ConflictResolver {
 			Iterator<Map.Entry<UnitKey, Set<UnitKey>>> it = waitingOn.entrySet().iterator();
 			while (it.hasNext()) {
 				Map.Entry<UnitKey, Set<UnitKey>> entry = it.next();
-				if (entry.getValue().contains(changed)) {
+				if (entry.getKey().equals(changed) || entry.getValue().contains(changed)) {
 					queue.add(entry.getKey());
 					it.remove();
 				}
@@ -669,8 +670,9 @@ final class ConflictResolver {
 	 * Programm löschte oder überschriebe sonst eine Version, die es nicht lesen kann. Ein beschädigter Nachbar und eine
 	 * echte Formatsperre zählen nicht, dort verliert die Folgeversion ihren Platz wie bisher;</li>
 	 * <li>schlägt die Inhaltsprüfung auf einem Inhalt an, den die Auflösung schreiben würde (Ergebnis oder weitere
-	 * Änderung), die Einheit selbst und die Einheiten der Umzugsspur, die eine inhaltlich zu neue Version haben: Aus ihnen
-	 * kann der Inhalt stammen, und erst wenn sich eine davon ändert, kann die Entscheidung anders ausfallen.</li>
+	 * Änderung), die Einheit selbst, die Einheiten der Umzugsspur, die eine inhaltlich zu neue Version haben, und bei einer
+	 * Buchung die inhaltlich gesperrten Geschwister ({@link Host#siblings}, die die Strategie auch sieht): Aus ihnen kann
+	 * der Inhalt stammen, und erst wenn sich eine davon ändert, kann die Entscheidung anders ausfallen.</li>
 	 * </ul>
 	 */
 	private Set<UnitKey> blockers(UnitKey unit, Stretch stretch, Resolution resolution) throws IOException {
@@ -688,6 +690,13 @@ final class ConflictResolver {
 					blockers.add(key);
 				}
 			});
+			if (unit.type() == UnitType.BOOKING) {
+				host.siblings(unit).forEach((key, sibling) -> {
+					if (sibling.snapshot().contentLocked()) {
+						blockers.add(key);
+					}
+				});
+			}
 			blockers.add(unit);
 		}
 		return blockers;

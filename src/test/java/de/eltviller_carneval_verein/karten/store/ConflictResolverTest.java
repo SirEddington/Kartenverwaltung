@@ -1394,6 +1394,56 @@ class ConflictResolverTest {
 		assertEquals(1, waitingLogs().size(), "einmal im Log");
 	}
 
+	/**
+	 * Ändert sich die wartende Einheit selbst (etwa weil ihr Verlust aufgegangen ist), zählt sie nicht mehr als wartend und
+	 * wird neu gerechnet, auch wenn sie nicht zu ihren Blockern gehört.
+	 */
+	@Test
+	void waitingStretchWakesWhenItsOwnUnitChanges() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		lossAtBooking(store, arbiter);
+		RecordingPolicy policy = deletingNeighbour(lockedNeighbour(store, arbiter));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, policy, appended, List.of());
+		resolver.resolvePending(10);
+		assertEquals(1, resolver.waitingCount());
+
+		resolver.unitChanged(BOOKING);
+
+		assertEquals(0, resolver.waitingCount(), "kein veralteter Zähler");
+		resolver.resolvePending(10);
+		assertEquals(2, policy.inputs.size(), "neu gerechnet");
+	}
+
+	/**
+	 * Die Inhaltsprüfung schlägt auf einem Inhalt an, den die Strategie von einem inhaltlich gesperrten Geschwister
+	 * übernommen hat (keine Umzugsspur): Die Strecke wartet auch auf dieses Geschwister und wird neu gerechnet, sobald es
+	 * sich ändert, nicht erst nach einem Neustart.
+	 */
+	@Test
+	void gateHitWaitsOnContentLockedSibling() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		lossAtBooking(store, arbiter);
+		lockedNeighbour(store, arbiter);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(new Change(MOVED, List.of(), newer(carrying("Y")), false));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, policy, appended, List.of(OTHER_SEAT));
+
+		resolver.resolvePending(10);
+		assertEquals(List.of(), appended, "nichts geschrieben");
+		assertEquals(1, resolver.waitingCount());
+		assertEquals(List.of("Auflösung von " + BOOKING.relativePath() + " wartet auf gesperrte Einheit "
+				+ OTHER_SEAT.relativePath()), waitingLogs());
+
+		resolver.unitChanged(OTHER_SEAT);
+		resolver.resolvePending(10);
+
+		assertEquals(2, policy.inputs.size(), "mit der Änderung des Geschwisters neu gerechnet");
+	}
+
 	/** Wird der Nachbar wieder lesbar und gemeldet, läuft die Auflösung und schreibt. */
 	@Test
 	void waitingStretchRunsAfterUnlock() throws IOException {
