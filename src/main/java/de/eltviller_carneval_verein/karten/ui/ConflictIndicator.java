@@ -26,8 +26,9 @@ public final class ConflictIndicator extends Hyperlink {
 	/**
 	 * @param openCount    liefert die Zahl der offenen Konflikte (in der App die nach der letzten Rückmeldung des
 	 *                     Versionsspeichers, damit eine neue Fußzeile nicht neu ableitet)
-	 * @param waitingCount liefert die Zahl der eigenen Änderungen, deren Auflösung auf eine gesperrte Einheit wartet (in der
-	 *                     App {@code SyncService.waitingResolutions()})
+	 * @param waitingCount liefert die Zahl der Einheiten mit eigenen Änderungen, die auf eine gesperrte Einheit warten (in
+	 *                     der App {@code SyncService.waitingResolutions()}: eine geparkte Auflösung oder eine verlorene
+	 *                     Änderung an einer selbst inhaltlich gesperrten Einheit)
 	 * @param open         öffnet den Sammel-Dialog
 	 */
 	public ConflictIndicator(IntSupplier openCount, IntSupplier waitingCount, Runnable open) {

@@ -1632,6 +1632,39 @@ class ConflictResolverTest {
 		assertTrue(service.unitState(BOOKING).lost().isEmpty());
 	}
 
+	/**
+	 * Die eigene Änderung verliert an einer Einheit, die selbst inhaltlich gesperrt ist (ein neueres Programm hat denselben
+	 * Sitz verkauft): Sie ist verloren (Ruling 5), der Resolver überspringt die gesperrte Kette, und trotzdem zählt sie in
+	 * „N Änderungen warten“, neben einer geparkten Auflösung an einer anderen Einheit. Mit dem Entsperren sinkt die Zahl.
+	 */
+	@Test
+	void ownLossOnContentLockedUnitCountsAsWaiting() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Version neighbour = foreign(service, appData, OTHER_SEAT, List.of(), newer(carrying("Y")), false, Map.of());
+		service.setConflictPolicy(UnitType.BOOKING, deletingNeighbour(neighbour));
+		loss(service, appData, BOOKING);
+		Version base = own(service, OTHER_SHOW_SEAT, List.of(), name("Anna"));
+		Version locked = foreign(service, appData, OTHER_SHOW_SEAT, List.of(base.id()), newer(name("Bert")), false,
+				Map.of());
+		Version mine = own(service, OTHER_SHOW_SEAT, List.of(base.id()), name("Carla"));
+		UnitState state = service.unitState(OTHER_SHOW_SEAT);
+		assertTrue(state.contentLocked());
+		assertEquals(List.of(List.of(mine.id())), state.lost());
+
+		service.tick();
+		service.tick();
+
+		assertEquals(2, service.waitingResolutions(), "die geparkte Auflösung und die Änderung an der gesperrten Einheit");
+		assertEquals(List.of(List.of(mine.id())), service.unitState(OTHER_SHOW_SEAT).lost(), "nichts geschrieben");
+
+		// ein neueres Programm schreibt einen lesbaren Stand: Die Sperre fällt, die Änderung wartet nicht mehr auf sie
+		foreign(service, appData, OTHER_SHOW_SEAT, List.of(locked.id()), name("Bert"), false, Map.of());
+		assertFalse(service.unitState(OTHER_SHOW_SEAT).contentLocked());
+
+		assertEquals(1, service.waitingResolutions(), "nur noch die geparkte Auflösung");
+	}
+
 	// --- Folgefälle
 
 	@Test

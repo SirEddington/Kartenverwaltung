@@ -244,6 +244,13 @@ final class ConflictResolver {
 		}
 	}
 
+	/** Die Einheiten, deren Auflösung auf gesperrte Einheiten wartet (eine Kopie). */
+	Set<UnitKey> waitingUnits() {
+		synchronized (queue) {
+			return Set.copyOf(waitingOn.keySet());
+		}
+	}
+
 	/**
 	 * Löst höchstens {@code budget} eingereihte Einheiten auf, die zuerst eingereihten zuerst; der Rest bleibt in der
 	 * Schlange. Eine Einheit, die auf Änderungslisten wartet, kommt wieder ans Ende; eine, die auf gesperrte Einheiten

@@ -667,11 +667,22 @@ public final class SyncService implements ConnectionControl {
 	}
 
 	/**
-	 * Wie viele Einheiten mit ihrer Konfliktauflösung auf eine inhaltlich gesperrte Einheit warten (siehe
-	 * {@link ConflictResolver#waitingCount}); sie laufen, sobald sich eine der blockierenden Einheiten ändert.
+	 * Wie viele Einheiten mit eigenen Änderungen auf eine inhaltlich gesperrte Einheit warten, jede Einheit einmal:
+	 * <ul>
+	 * <li>deren Konfliktauflösung auf eine gesperrte Einheit wartet ({@link ConflictResolver#waitingUnits}); sie läuft,
+	 * sobald sich eine der blockierenden Einheiten ändert;</li>
+	 * <li>die selbst inhaltlich gesperrt sind und eigene verlorene Versionen haben (nach dem Index): Eine eigene Strecke,
+	 * die nicht auf dem gesperrten Kopf aufbaut, ist verloren, und die Auflösung überspringt die gesperrte Kette bis zum
+	 * Entsperren (etwa wenn ein neueres Programm denselben Sitz verkauft hat).</li>
+	 * </ul>
+	 * Ohne Datei-Ein-/Ausgabe; günstig genug für den Takt der Anzeige.
 	 */
 	public int waitingResolutions() {
-		return resolver.waitingCount();
+		Set<UnitKey> waiting = new HashSet<>(resolver.waitingUnits());
+		waiting.addAll(index.read(entries -> entries.stream()
+				.filter(entry -> entry.lost() && entry.snapshot().contentLocked())
+				.map(entry -> entry.snapshot().unit()).toList()));
+		return waiting.size();
 	}
 
 	/** Für Tests: die Auflösung der Verluste. */
