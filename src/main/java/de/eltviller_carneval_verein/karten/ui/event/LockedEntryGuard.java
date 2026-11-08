@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.event;
 
+import java.util.Objects;
 import java.util.function.Consumer;
 
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -45,6 +46,21 @@ final class LockedEntryGuard {
 			show.accept(e.getMessage());
 			return true;
 		}
+	}
+
+	/** Wie {@link #rejectsHallChange(Presentation, String, StoreEventRepository, Consumer)} mit dem Repository und der Fußzeile der App. */
+	static boolean rejectsHallChange(Presentation presentation, String newHallId) {
+		return rejectsHallChange(presentation, newHallId, StoreEventRepository.getInstance(), LockedEntryGuard::showError);
+	}
+
+	/**
+	 * Ob der Wechsel der Vorstellung auf die Halle {@code newHallId} abgelehnt wird ({@link #rejects}); dieselbe Halle ist
+	 * kein Wechsel. Geprüft wird unabhängig davon, ob das Modell Buchungen mit Daten hat: Eine gesperrte Buchung fehlt dort
+	 * (auf ihrem Sitz liegt nur ein leerer Platzhalter), der Wechsel liefe sonst ohne Rückfrage durch.
+	 */
+	static boolean rejectsHallChange(Presentation presentation, String newHallId, StoreEventRepository repository,
+			Consumer<String> show) {
+		return !Objects.equals(newHallId, presentation.getHallId()) && rejects(presentation, repository, show);
 	}
 
 	/** Wie {@link #deletePresentation(Presentation, StoreEventRepository, Consumer)} mit dem Repository und der Fußzeile der App. */

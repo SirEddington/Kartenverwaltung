@@ -91,6 +91,26 @@ class LockedEntryGuardTest {
 		assertEquals(List.of(), rejections);
 	}
 
+	/**
+	 * Der Hallenwechsel im Event-Editor: Ist die einzige verkaufte Buchung gesperrt, steht im Modell keine Buchung mit
+	 * Daten, der Wechsel liefe ohne Rückfrage. Er wird trotzdem abgelehnt; dieselbe Halle ist kein Wechsel.
+	 */
+	@Test
+	void hallChangeWithOnlyALockedBookingIsRejected() throws IOException {
+		friday.setHallId("halle-1");
+		repository.saveEvent(event);
+		lockBookingOf(friday);
+
+		assertTrue(LockedEntryGuard.rejectsHallChange(friday, "halle-2", repository, rejections::add));
+		assertTrue(LockedEntryGuard.rejectsHallChange(friday, null, repository, rejections::add), "auch ohne Halle");
+		assertFalse(LockedEntryGuard.rejectsHallChange(friday, "halle-1", repository, rejections::add), "kein Wechsel");
+		assertFalse(LockedEntryGuard.rejectsHallChange(saturday, "halle-2", repository, rejections::add));
+
+		String message = StoreMessages.lockedBelow("Freitag", UnitState.Status.LOCKED_FORMAT);
+		assertEquals(List.of(message, message), rejections);
+		assertEquals("halle-1", friday.getHallId(), "das Modell bleibt unverändert");
+	}
+
 	/** Eine nie gespeicherte Vorstellung hat keine Einheiten im Versionsspeicher, also nichts Gesperrtes. */
 	@Test
 	void neverSavedPresentationIsDeleted() {

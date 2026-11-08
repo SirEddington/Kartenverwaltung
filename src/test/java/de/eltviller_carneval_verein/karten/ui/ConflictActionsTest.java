@@ -57,12 +57,14 @@ import de.eltviller_carneval_verein.karten.store.ContentGate;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
 import de.eltviller_carneval_verein.karten.store.NioFileLayer;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncListener;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestClock;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions.Availability;
@@ -1167,6 +1169,44 @@ class ConflictActionsTest {
 
 		assertNotNull(note);
 		assertTrue(note.contains("1 ohne Platz"), note);
+	}
+
+	/**
+	 * KARV-135: Die eigene Bestuhlung zu übernehmen ist ein Bestuhlungswechsel; mit einer gesperrten Buchung unter der
+	 * Vorstellung wird er abgelehnt (die Buchung bliebe sonst auf ihrem alten Sitz, der Sitz der neuen Bestuhlung wäre
+	 * verkäuflich). Die Meldung ist die der übrigen Wege.
+	 */
+	@Test
+	void takeMyValueOfAnotherSeatingPlanIsRejectedWithLockedBookingBelow() throws IOException {
+		a.seat(0).getUnknown().put(NEWER_MARKER, IntNode.valueOf(1));
+		a.saveEvent();
+		settle();
+		Hall shared = a.hall;
+		SeatingPlan second = shared.addSeatingPlan();
+		second.fillRow(second.addRow(), 1, 1);
+		SeatingPlan third = shared.addSeatingPlan();
+		third.fillRow(third.addRow(), 1, 1);
+		a.halls.saveHall(shared);
+		settle();
+		a.friday().setSeatingPlanId(second.getId());
+		a.saveEvent();
+		b.friday().setSeatingPlanId(third.getId());
+		b.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(List.of("hall"), row.fields().stream().map(ConflictList.FieldRow::group).toList());
+		UnitKey locked = b.seatUnit(0);
+		markerIsNewer.set(true);
+		assertTrue(b.sync.unitState(locked).contentLocked(), "Müllers Buchung ist jetzt gesperrt");
+		UnitKey presentation = UnitKey.presentation(b.event.getId(), b.friday().getId());
+		var before = b.sync.unitState(presentation).head().id();
+
+		IllegalStateException refused = assertThrows(IllegalStateException.class, () -> b.actions().takeMyValue(row, "hall"));
+
+		assertEquals(StoreMessages.lockedBelow("Freitag", UnitState.Status.LOCKED_FORMAT), refused.getMessage());
+		assertEquals(second.getId(), b.friday().getSeatingPlanId(), "das Modell bleibt beim gültigen Wert");
+		assertEquals(before, b.sync.unitState(presentation).head().id(), "nichts geschrieben");
+		assertEquals(1, b.sync.openConflicts().size());
 	}
 
 	// <-- Platz zuweisen und Hinweise

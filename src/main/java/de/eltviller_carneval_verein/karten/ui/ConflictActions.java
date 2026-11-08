@@ -494,7 +494,8 @@ public final class ConflictActions {
 	 * ({@link OpenConflict#target()}), bei einer Buchung für die Einheit, auf der sie jetzt lebt ({@link #actionUnit}). Beim
 	 * Vermerk "Platz" zieht sie, wenn sie nicht auf dem eigenen Sitz steht, dorthin um
 	 * wie beim Zuweisen ({@link #assignAndSave}). Hat der Vermerk nur eine Gruppe, ist die Zeile danach bestätigt; bei mehreren erst, wenn jede
-	 * Gruppe übernommen ist ({@link #isAdopted}), sonst bleibt sie offen.
+	 * Gruppe übernommen ist ({@link #isAdopted}), sonst bleibt sie offen. Die Gruppe "Halle" einer Vorstellung wechselt Halle
+	 * bzw. Bestuhlung und wird mit gesperrten Einträgen darunter abgelehnt, ohne etwas zu ändern (KARV-135).
 	 *
 	 * @throws IllegalStateException wenn die Aktion gesperrt ist, die Gruppe nicht zur Zeile gehört oder Ändern, Speichern
 	 *                               oder Bestätigen scheitert; nichts ist bestätigt. Das Modell ist wieder wie vorher, außer
@@ -512,6 +513,9 @@ public final class ConflictActions {
 		}
 		UnitKey unit = actionUnit(row.conflict());
 		Event event = events.findEvent(unit.eventId());
+		if (HALL_GROUP.equals(group) && unit.type() == UnitType.PRESENTATION) {
+			requireNothingLockedUnder(unit, event);
+		}
 		String seatId = PLACE_GROUP.equals(group) ? mySeatId(row.conflict().note()) : null;
 		if (seatId != null && valueTarget(row) instanceof Booking booking && !seatId.equals(seatIdOf(booking))) {
 			// die Buchung zieht auf den eigenen Sitz um; placeRefusal hat geprüft, dass Bestuhlung und Sitz da sind und er frei
@@ -537,6 +541,22 @@ public final class ConflictActions {
 		// mehrere Gruppen: Die Zeile bleibt offen, bis jede übernommen ist (oder der Nutzer sie mit "Erledigt" schließt)
 		if (row.conflict().note().fields().size() == 1 || allAdopted(row.conflict())) {
 			acknowledge(row);
+		}
+	}
+
+	/**
+	 * Die eigene Halle bzw. Bestuhlung zu übernehmen ist ein Wechsel von Halle oder Bestuhlung: Mit gesperrten Einträgen
+	 * unter der Vorstellung wird er abgelehnt, bevor sich das Modell ändert (KARV-135, wie im Event-Editor).
+	 *
+	 * @throws IllegalStateException mit {@code StoreMessages#lockedBelow}, wenn etwas gesperrt ist
+	 */
+	private void requireNothingLockedUnder(UnitKey presentationUnit, Event event) {
+		Presentation presentation = event == null ? null : event.findPresentation(presentationUnit.presentationId());
+		String name = EntityLabels.nameOrPlaceholder(presentation == null ? null : presentation.getName());
+		try {
+			events.requireNothingLockedUnder(presentationUnit, name);
+		} catch (LockedUnitException e) {
+			throw failure(e);
 		}
 	}
 

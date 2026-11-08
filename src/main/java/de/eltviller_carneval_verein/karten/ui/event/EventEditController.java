@@ -716,7 +716,15 @@ public class EventEditController {
 		cmbPresHall.valueProperty().addListener((obs, oldHall, newHall) -> {
 			if (!loadingDetails && currentPres != null) {
 				Presentation presentation = currentPres;
-				if (hallChangeMessage(presentation) == null) {
+				// KARV-135: vor beiden Wegen; eine gesperrte Buchung fehlt im Modell, ohne Prüfung liefe der Wechsel direkt
+				if (LockedEntryGuard.rejectsHallChange(presentation, newHall != null ? newHall.getId() : null)) {
+					// die Auswahl erst nach der Benachrichtigung der ComboBox zurücksetzen
+					Platform.runLater(() -> {
+						if (presentation == currentPres) {
+							resetHallChoice(presentation);
+						}
+					});
+				} else if (hallChangeMessage(presentation) == null) {
 					changeHall(presentation, newHall);
 				} else {
 					// Die Rückfrage erst nach der Auswahl zeigen, nicht mitten in der Benachrichtigung der ComboBox
@@ -752,8 +760,9 @@ public class EventEditController {
 		if (Objects.equals(newHallId, presentation.getHallId())) {
 			return;
 		}
-		// KARV-135: Mit gesperrten Einträgen darunter wird nicht umgestellt; das Modell bleibt unverändert
-		if (LockedEntryGuard.rejects(presentation)) {
+		// KARV-135: Mit gesperrten Einträgen darunter wird nicht umgestellt; das Modell bleibt unverändert (erneut geprüft,
+		// der Stand kann sich seit der Auswahl geändert haben)
+		if (LockedEntryGuard.rejectsHallChange(presentation, newHallId)) {
 			resetHallChoice(presentation);
 			return;
 		}
