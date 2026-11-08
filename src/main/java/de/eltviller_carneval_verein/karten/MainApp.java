@@ -402,6 +402,11 @@ public class MainApp extends Application {
 			syncStatus.refreshTracked();
 		}
 		SyncInfoWindow.refreshIfOpen();
+		// Ob eine eigene Änderung auf eine Sperre wartet, meldet der Versionsspeicher nicht (es wird nichts geschrieben): Der
+		// Hinweis auf Konflikte liest die Zahl im Takt neu (die offenen Konflikte nur aus dem gemerkten Stand)
+		if (conflictIndicator != null) {
+			conflictIndicator.refresh();
+		}
 		// Die Reparatur einer gesperrten Einheit kann gelungen oder gescheitert sein (Knopf "zurücksetzen" fällt weg bzw. kommt
 		// dazu); die Zeilen liest {@code resettableUnits()} ohne Datei-Ein-/Ausgabe
 		lockedViewChanged();
@@ -1069,7 +1074,8 @@ public class MainApp extends Application {
 				}
 			} else {
 				// ohne Konflikte nimmt der Hinweis keinen Platz, weder in der Fußzeile noch als eigene Zeile
-				ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount, MainApp::openConflictDialog);
+				ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount,
+						() -> SyncService.getInstance().waitingResolutions(), MainApp::openConflictDialog);
 				conflictIndicator = indicator;
 				// der Hinweis zum Abgleich steht neben dem auf Konflikte, mit derselben Einfügeregel; nicht in einer
 				// Ladeansicht, die Fortschritt und Ursache selbst zeigt (sonst stünde die Prozentzahl doppelt da)
