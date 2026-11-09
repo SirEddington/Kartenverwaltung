@@ -99,6 +99,8 @@ class ConflictScenarioTest {
 	private static final class Recorder implements SyncListener {
 		final List<String> errors = new ArrayList<>();
 		final List<String> warnings = new ArrayList<>();
+		/** Die gemeldeten Sperren ({@link SyncListener#locked}): daraus füllt die App „Gesperrte Einträge“ und sperrt Sitze. */
+		final List<UnitKey> locked = new ArrayList<>();
 		/** Die Repositories, sobald es sie gibt; vor dem Start kommt nichts an, was sie einarbeiten könnten. */
 		StoreHallRepository halls;
 		StoreEventRepository events;
@@ -115,6 +117,11 @@ class ConflictScenarioTest {
 		@Override
 		public void error(String message) {
 			errors.add(message);
+		}
+
+		@Override
+		public void locked(UnitKey unit, UnitState.Status status) {
+			locked.add(unit);
 		}
 	}
 
@@ -2694,6 +2701,15 @@ class ConflictScenarioTest {
 		String seatId = a.plan().getSeats().get(0).getId();
 		writeNewer(newer, seat, payload -> payload.put("paymentStatus", "x-test-voucher"));
 
+		// nur die Takte, ohne die Prüfungen von untilQuiet (die fragen den Stand ab und lösten die Meldung selbst aus):
+		// gemeldet wird schon beim Abholen, sonst fehlte die Einheit bis zum Neustart in „Gesperrte Einträge“, und ihr
+		// Sitz wirkte frei
+		for (int round = 0; round < 10; round++) {
+			clock.advance(ROUND);
+			a.tick();
+			newer.tick();
+		}
+		assertEquals(List.of(seat), a.events.locked, "die abgeholte Sperre ist gemeldet");
 		untilQuiet(a, newer);
 
 		assertEquals(UnitState.Status.LOCKED_FORMAT, a.sync.unitState(seat).status());

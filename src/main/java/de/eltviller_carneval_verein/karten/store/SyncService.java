@@ -3654,6 +3654,12 @@ public final class SyncService implements ConnectionControl {
 				LOGGER.log(Level.WARNING, "Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
 				continue;
 			}
+			// eine Sperre (neueres Format oder inhaltlich zu neu, KARV-135) gleich beim Abholen melden wie unitState, nicht
+			// erst bei der nächsten Abfrage: Sonst fehlte die Einheit bis zum Neustart in „Gesperrte Einträge“, und ihr Sitz
+			// wirkte frei. Beschädigte behält die Heilung (der Takt versucht sie, dann SYS-008).
+			if (resolved.state().status() != Status.LOCKED_DAMAGED) {
+				reportLocked(unit, resolved.state());
+			}
 			try {
 				derived.put(unit, LocalScan.losses(resolved.files(), resolved.state()));
 			} catch (RuntimeException e) {
