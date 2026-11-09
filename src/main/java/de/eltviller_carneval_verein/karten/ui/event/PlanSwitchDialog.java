@@ -13,9 +13,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
-import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
-import de.eltviller_carneval_verein.karten.validation.Severity;
 
 /**
  * Wechsel der Bestuhlung einer Vorstellung mit Rückfrage: Vorher rechnet {@link BookingSync#preview} die Folgen durch,
@@ -44,7 +42,7 @@ public final class PlanSwitchDialog {
 	 */
 	public static boolean confirm(Presentation p, SeatingPlan newPlan) {
 		return confirm(p, newPlan, StoreEventRepository.getInstance(), report -> ask(p, newPlan, report),
-				message -> StatusMessage.getInstance().show(Severity.ERROR, message));
+				LockedEntryGuard::showError);
 	}
 
 	/**
@@ -57,7 +55,9 @@ public final class PlanSwitchDialog {
 		if (!isSamePlan(p, newPlan) && LockedEntryGuard.rejects(p, repository, reject)) {
 			return false;
 		}
-		return confirm(p, newPlan, () -> repository.lockedSeatIds(p.getParent().getId(), p.getId()), ask);
+		// an dieser Vorstellung beurteilt, nicht an der im Cache; ohne Event war sie nie gespeichert und hat nichts Gesperrtes
+		return confirm(p, newPlan,
+				() -> p.getParent() == null ? Set.of() : repository.lockedSeatIds(p.getParent().getId(), p), ask);
 	}
 
 	private static boolean isSamePlan(Presentation p, SeatingPlan newPlan) {

@@ -71,7 +71,8 @@ public final class BookingSyncService {
 				}
 				Hall hall = presentation.getHallId() != null ? hallLookup.apply(presentation.getHallId()) : null;
 				SeatingPlan plan = hall != null ? hall.findSeatingPlan(presentation.getSeatingPlanId()) : null;
-				BookingSync.sync(presentation, plan, lockedSeats.apply(presentation));
+				// ohne Bestuhlung gibt es keine Sitze, also nichts Gesperrtes nachzuschlagen
+				BookingSync.sync(presentation, plan, plan == null ? Set.of() : lockedSeats.apply(presentation));
 			}
 		};
 		if (repository != null) {

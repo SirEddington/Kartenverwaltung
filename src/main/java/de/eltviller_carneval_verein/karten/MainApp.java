@@ -550,7 +550,9 @@ public class MainApp extends Application {
 		LockedUnitException.useLabels(labels);
 		// Eine inhaltlich gesperrte Halle friert ihre Vorstellungen ein: Die Prüfung nennt die Sperre statt PRS-007 (KARV-135)
 		PresentationValidator.useHallLocks(halls::lockTextOfHall);
-		conflictList = new ConflictList(sync::openConflicts, labels, conflictActions::isAdopted, halls::findById);
+		// der Dialog nennt auch die eigenen Änderungen, die auf eine Sperre warten (KARV-135; der Hinweis zählt sie nur)
+		conflictList = new ConflictList(sync::openConflicts, labels, conflictActions::isAdopted, halls::findById,
+				sync::waitingChanges);
 		conflictSync = sync;
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
 		// Die übrigen Rückmeldungen (nicht erreichbar, Rückkehr, Frage beim Verbinden, übersprungen, gesperrt) verteilt SharedFolderEvents

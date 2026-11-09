@@ -345,13 +345,14 @@ public class Booking {
 
 	/**
 	 * Ob die Buchung Daten trägt, die nicht verloren gehen dürfen: Name, E-Mail, Kommentar, ein Zahlstatus oder
-	 * abgeholt, dazu Felder einer neueren Version, die diese nicht kennt. Ein bloßer Einzelpreis zählt nicht. Dieselben
-	 * Felder benennt {@link #dataLabels()}.
+	 * abgeholt, dazu Felder einer neueren Version, die diese nicht kennt, sofern sie einen Wert tragen (ein neues Feld mit
+	 * Standardwert steht als {@code null} in der Datei, {@link UnknownFields#hasValues}). Ein bloßer Einzelpreis zählt
+	 * nicht. Dieselben Felder benennt {@link #dataLabels()}.
 	 */
 	public boolean hasData() {
 		return !isBlank(lastName) || !isBlank(firstName) || !isBlank(eMail) || !isBlank(comment)
 				|| (getPaymentStatus() != null && getPaymentStatus() != PaymentStatus.NONE) || collected
-				|| !unknown.isEmpty();
+				|| unknown.hasValues();
 	}
 
 	/**
@@ -378,7 +379,7 @@ public class Booking {
 		if (collected) {
 			labels.add("abgeholt");
 		}
-		if (!unknown.isEmpty()) {
+		if (unknown.hasValues()) {
 			labels.add("weitere Angaben");
 		}
 		return labels;

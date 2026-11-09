@@ -394,6 +394,12 @@ public final class SyncService implements ConnectionControl {
 	/** Löst die gemeldeten Verluste zu Zusammenführungen auf; eingereiht wird in {@link #reportLoss}. */
 	private final ConflictResolver resolver;
 	/**
+	 * Die Einheiten, die inhaltlich gesperrt sind und eigene verlorene Versionen haben (für {@link #waitingResolutions}).
+	 * Bestimmt auf dem Arbeits-Thread nach jedem {@link #reportLosses}, gelesen ohne Sperre: Der Takt der Oberfläche fragt
+	 * die Zahl jede Sekunde und darf nicht auf den Monitor des Index warten, den der Abgleich beim Start lange hält.
+	 */
+	private volatile Set<UnitKey> contentLockedLosses = Set.of();
+	/**
 	 * Die Marke "verbunden", wie sie in {@code connection.json} steht; {@code null} ohne (lesbare) Marke. Gelesen im
 	 * Konstruktor, danach bei jedem gelungenen Schreiben ({@link #writeConnectionMarker}) und Löschen ({@link #disconnect})
 	 * nachgeführt; ein gescheitertes ändert die Datei nicht (atomares Ersetzen) und deshalb auch dieses Feld nicht. Nur dieser
@@ -675,14 +681,30 @@ public final class SyncService implements ConnectionControl {
 	 * die nicht auf dem gesperrten Kopf aufbaut, ist verloren, und die Auflösung überspringt die gesperrte Kette bis zum
 	 * Entsperren (etwa wenn ein neueres Programm denselben Sitz verkauft hat).</li>
 	 * </ul>
-	 * Ohne Datei-Ein-/Ausgabe; günstig genug für den Takt der Anzeige.
+	 * Ohne Datei-Ein-/Ausgabe und ohne den Monitor des Index (der zweite Teil ist der Stand nach dem letzten
+	 * {@link #reportLosses}); günstig genug für den Takt der Anzeige.
 	 */
 	public int waitingResolutions() {
-		Set<UnitKey> waiting = new HashSet<>(resolver.waitingUnits());
-		waiting.addAll(index.read(entries -> entries.stream()
+		return waitingChanges().size();
+	}
+
+	/**
+	 * Die Einheiten aus {@link #waitingResolutions}, je mit der gesperrten Einheit, auf die sie warten (für die Anzeige im
+	 * Konfliktdialog): bei einer geparkten Auflösung der blockierende Nachbar (ohne einen die Einheit selbst), bei einer
+	 * selbst gesperrten Einheit diese. Nach Pfad geordnet; ohne Datei-Ein-/Ausgabe und ohne den Monitor des Index.
+	 */
+	public Map<UnitKey, UnitKey> waitingChanges() {
+		Map<UnitKey, UnitKey> waiting = new TreeMap<>(Comparator.comparing(UnitKey::relativePath));
+		waiting.putAll(resolver.waitingFor());
+		contentLockedLosses.forEach(unit -> waiting.putIfAbsent(unit, unit));
+		return waiting;
+	}
+
+	/** Bestimmt {@link #contentLockedLosses} aus dem Index neu; auf dem Arbeits-Thread. */
+	private void refreshContentLockedLosses() {
+		contentLockedLosses = Set.copyOf(index.read(entries -> entries.stream()
 				.filter(entry -> entry.lost() && entry.snapshot().contentLocked())
 				.map(entry -> entry.snapshot().unit()).toList()));
-		return waiting.size();
 	}
 
 	/** Für Tests: die Auflösung der Verluste. */
@@ -1334,7 +1356,7 @@ public final class SyncService implements ConnectionControl {
 				me = machine;
 			}
 			Version version = new Version(StoreCodec.FORMAT, id, change.parents(), me.id(), me.name(),
-					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), seen, change.marks(), false);
+					me.operator(), clock.instant(), saveId, change.deleted(), payload, change.note(), seen, change.marks());
 			byte[] bytes = StoreCodec.write(version);
 			try {
 				if (local.writeVersion(change.unit(), version.id(), bytes)) {
@@ -2241,6 +2263,7 @@ public final class SyncService implements ConnectionControl {
 			unindexed.clear();
 			settled.clear();
 			indexRefreshed = true;
+			contentLockedLosses = Set.of();
 		}
 	}
 
@@ -2343,6 +2366,12 @@ public final class SyncService implements ConnectionControl {
 			}
 			return current.hurry && (current.firstRun || current.feedsBehind) && isCurrent(current);
 		} finally {
+			// auch Stände, die ohne Meldung in den Index kamen (Abfrage einer Einheit), erreichen so den Takt der Anzeige
+			try {
+				refreshContentLockedLosses();
+			} catch (RuntimeException e) {
+				LOGGER.log(Level.WARNING, "Die wartenden Änderungen ließen sich nicht zählen", e);
+			}
 			boolean interrupt = interruptAfterTick;
 			interruptAfterTick = false;
 			unlockWork();
@@ -3650,6 +3679,8 @@ public final class SyncService implements ConnectionControl {
 				notReported(unit, e);
 			}
 		});
+		// der Index ist jetzt für diese Einheiten nachgeführt: die Zahl für den Takt der Anzeige
+		refreshContentLockedLosses();
 		if (failure != null) {
 			throw failure;
 		}

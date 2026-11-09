@@ -121,7 +121,7 @@ final class RestorePlanner {
 		for (UnitState state : states) {
 			UnitKey unit = state.unit();
 			if (staysHidden(unit, snapshots, target)) {
-				if (!isLocked(state.status())) {
+				if (!UnitMapper.isLocked(state.status())) {
 					// eine wartende Einheit lehnt weiter ab, wie bisher
 					UnitMapper.requireWritable(unit, state.status());
 				}
@@ -134,10 +134,6 @@ final class RestorePlanner {
 				throw LockedUnitException.newerFormat(unit);
 			}
 		}
-	}
-
-	private static boolean isLocked(Status status) {
-		return status == Status.LOCKED_DAMAGED || status == Status.LOCKED_FORMAT;
 	}
 
 	/** Ob ein Vorfahr der Einheit jetzt gelöscht ist und es nach dem Zielstand bleibt (dort gelöscht oder ohne Glied). */

@@ -108,6 +108,24 @@ class UnknownFieldsCopyTest {
 		assertEquals(List.of("weitere Angaben"), booking.dataLabels());
 	}
 
+	/**
+	 * Ein neues Feld steht mit seinem Standardwert als {@code null} in der Datei (docs/decisions.md, „Rules for new
+	 * fields“): Das sind keine Daten. Sonst bliebe eine geleerte Buchung einer neueren Version als namenloser Rest stehen.
+	 */
+	@Test
+	void unknownFieldWithNullValueIsNoData() {
+		Booking booking = new Booking();
+		booking.getUnknown().put("x-test-feld", JsonNodeFactory.instance.nullNode());
+		booking.getUnknown().put("x-test-fehlt", null);
+
+		assertFalse(booking.hasData());
+		assertEquals(List.of(), booking.dataLabels());
+		assertEquals(2, booking.getUnknown().asMap().size(), "die Felder bleiben trotzdem erhalten");
+
+		booking.getUnknown().put("x-test-wert", text("wert"));
+		assertTrue(booking.hasData());
+	}
+
 	@Test
 	void clearCustomerDataClearsUnknownFields() {
 		Booking booking = new Booking();

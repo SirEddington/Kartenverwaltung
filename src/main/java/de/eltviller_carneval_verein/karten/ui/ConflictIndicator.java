@@ -47,21 +47,21 @@ public final class ConflictIndicator extends Hyperlink {
 
 	/** Liest beide Zahlen neu und zeigt oder versteckt den Link. Scheitert eine, zählt sie als 0. */
 	public void refresh() {
-		int open = 0;
-		try {
-			open = openCount.getAsInt();
-		} catch (RuntimeException e) {
-			LOG.log(Level.WARNING, "Die offenen Konflikte ließen sich nicht zählen", e);
-		}
-		int waiting = 0;
-		try {
-			waiting = waitingCount.getAsInt();
-		} catch (RuntimeException e) {
-			LOG.log(Level.WARNING, "Die wartenden Änderungen ließen sich nicht zählen", e);
-		}
+		int open = count(openCount, "Die offenen Konflikte");
+		int waiting = count(waitingCount, "Die wartenden Änderungen");
 		setText(text(open, waiting));
 		setVisible(open > 0 || waiting > 0);
 		setManaged(open > 0 || waiting > 0);
+	}
+
+	/** Die Zahl von {@code count}; scheitert sie, 0 (Log auf WARNING mit {@code what}). */
+	private static int count(IntSupplier count, String what) {
+		try {
+			return count.getAsInt();
+		} catch (RuntimeException e) {
+			LOG.log(Level.WARNING, what + " ließen sich nicht zählen", e);
+			return 0;
+		}
 	}
 
 	/**

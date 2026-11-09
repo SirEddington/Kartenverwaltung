@@ -48,7 +48,7 @@ public final class PlanFreezer {
 		StoreEventRepository events = StoreEventRepository.getInstance();
 		return freeze(events.loadEvents(), presentation -> plan.getId().equals(presentation.getSeatingPlanId()),
 				hallId -> hall.getId().equals(hallId) ? hall : halls.findById(hallId),
-				presentation -> events.lockedSeatIds(presentation.getParent().getId(), presentation.getId()),
+				presentation -> events.lockedSeatIds(presentation.getParent().getId(), presentation),
 				ChangeTracker.events(), EventSaver::saveStructureChange);
 	}
 

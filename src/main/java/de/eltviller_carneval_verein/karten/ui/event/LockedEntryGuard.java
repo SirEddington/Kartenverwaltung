@@ -82,7 +82,8 @@ final class LockedEntryGuard {
 		return true;
 	}
 
-	private static void showError(String message) {
+	/** Zeigt die Ablehnung in der Fußzeile (ohne Fußzeile als Dialog). */
+	static void showError(String message) {
 		StatusMessage.getInstance().show(Severity.ERROR, message);
 	}
 }

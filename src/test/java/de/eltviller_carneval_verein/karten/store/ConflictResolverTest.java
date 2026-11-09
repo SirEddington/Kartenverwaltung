@@ -19,9 +19,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -1365,7 +1367,7 @@ class ConflictResolverTest {
 
 		assertEquals(List.of(), appended, "nichts geschrieben");
 		assertEquals(1, policy.inputs.size());
-		assertEquals(1, resolver.waitingCount());
+		assertEquals(1, resolver.waitingUnits().size());
 		assertEquals(List.of("Auflösung von " + BOOKING.relativePath() + " wartet auf gesperrte Einheit "
 				+ OTHER_SEAT.relativePath()), waitingLogs());
 	}
@@ -1390,7 +1392,7 @@ class ConflictResolverTest {
 
 		assertEquals(1, policy.inputs.size(), "nicht neu gerechnet");
 		assertEquals(List.of(), appended);
-		assertEquals(1, resolver.waitingCount());
+		assertEquals(1, resolver.waitingUnits().size());
 		assertEquals(1, waitingLogs().size(), "einmal im Log");
 	}
 
@@ -1407,11 +1409,11 @@ class ConflictResolverTest {
 		List<List<Change>> appended = new ArrayList<>();
 		ConflictResolver resolver = lockResolver(store, policy, appended, List.of());
 		resolver.resolvePending(10);
-		assertEquals(1, resolver.waitingCount());
+		assertEquals(1, resolver.waitingUnits().size());
 
 		resolver.unitChanged(BOOKING);
 
-		assertEquals(0, resolver.waitingCount(), "kein veralteter Zähler");
+		assertEquals(0, resolver.waitingUnits().size(), "kein veralteter Zähler");
 		resolver.resolvePending(10);
 		assertEquals(2, policy.inputs.size(), "neu gerechnet");
 	}
@@ -1434,7 +1436,7 @@ class ConflictResolverTest {
 
 		resolver.resolvePending(10);
 		assertEquals(List.of(), appended, "nichts geschrieben");
-		assertEquals(1, resolver.waitingCount());
+		assertEquals(1, resolver.waitingUnits().size());
 		assertEquals(List.of("Auflösung von " + BOOKING.relativePath() + " wartet auf gesperrte Einheit "
 				+ OTHER_SEAT.relativePath()), waitingLogs());
 
@@ -1468,7 +1470,7 @@ class ConflictResolverTest {
 		assertEquals(2, policy.inputs.size());
 		assertEquals(1, appended.size());
 		assertEquals(List.of(OTHER_SEAT, BOOKING), appended.get(0).stream().map(Change::unit).toList());
-		assertEquals(0, resolver.waitingCount());
+		assertEquals(0, resolver.waitingUnits().size());
 	}
 
 	/** Ein beschädigter Nachbar ({@code LOCKED_DAMAGED}) blockiert die Auflösung nicht: Sie schreibt wie bisher. */
@@ -1493,7 +1495,7 @@ class ConflictResolverTest {
 
 		assertEquals(1, appended.size());
 		assertEquals(List.of(OTHER_SEAT, BOOKING), appended.get(0).stream().map(Change::unit).toList());
-		assertEquals(0, resolver.waitingCount());
+		assertEquals(0, resolver.waitingUnits().size());
 		assertEquals(List.of(), waitingLogs());
 	}
 
@@ -1534,7 +1536,7 @@ class ConflictResolverTest {
 
 		assertEquals(List.of(), appended, "nichts geschrieben");
 		assertEquals(1, policy.inputs.size(), "ohne Änderung an einer Quelle nicht neu gerechnet");
-		assertEquals(1, resolver.waitingCount());
+		assertEquals(1, resolver.waitingUnits().size());
 		assertEquals(List.of("Auflösung von " + BOOKING.relativePath() + " wartet auf gesperrte Einheit "
 				+ OTHER_SEAT.relativePath()), waitingLogs());
 
@@ -1543,7 +1545,7 @@ class ConflictResolverTest {
 		resolver.resolvePending(10);
 		assertEquals(2, policy.inputs.size());
 		assertEquals(List.of(), appended);
-		assertEquals(1, resolver.waitingCount());
+		assertEquals(1, resolver.waitingUnits().size());
 
 		// die Einheit der Spurversion ändert sich: neu gerechnet, jetzt ohne gesperrten Inhalt
 		store(store, arbiter, OTHER_SEAT, version(VersionId.create(now - 100, FOREIGN, 4), List.of(later.id()), FOREIGN,
@@ -1554,7 +1556,7 @@ class ConflictResolverTest {
 
 		assertEquals(3, policy.inputs.size());
 		assertEquals(1, appended.size());
-		assertEquals(0, resolver.waitingCount());
+		assertEquals(0, resolver.waitingUnits().size());
 		assertEquals(1, waitingLogs().size(), "das Warten steht einmal im Log");
 	}
 
@@ -1580,7 +1582,7 @@ class ConflictResolverTest {
 				"die Strategie sieht den gesperrten Nachbarn");
 		assertEquals(1, appended.size());
 		assertEquals(List.of(MOVED, BOOKING), appended.get(0).stream().map(Change::unit).toList());
-		assertEquals(0, resolver.waitingCount());
+		assertEquals(0, resolver.waitingUnits().size());
 	}
 
 	/**
@@ -1646,7 +1648,7 @@ class ConflictResolverTest {
 		});
 
 		resolver.resolvePending(10);
-		assertEquals(0, resolver.waitingCount(), "bleibt eingereiht");
+		assertEquals(0, resolver.waitingUnits().size(), "bleibt eingereiht");
 		resolver.resolvePending(10);
 
 		assertEquals(2, recording.inputs.size(), "im nächsten Durchlauf neu gerechnet");
@@ -1671,6 +1673,7 @@ class ConflictResolverTest {
 		service.tick();
 		assertEquals(1, policy.inputs.size());
 		assertEquals(1, service.waitingResolutions());
+		assertEquals(Map.of(BOOKING, OTHER_SEAT), service.waitingChanges(), "wartet auf den gesperrten Nachbarn");
 		assertEquals(1, service.unitState(BOOKING).lost().size(), "nichts geschrieben");
 
 		own(service, OTHER_SEAT, List.of(locked.id()), carrying("Y"));
@@ -1706,13 +1709,45 @@ class ConflictResolverTest {
 		service.tick();
 
 		assertEquals(2, service.waitingResolutions(), "die geparkte Auflösung und die Änderung an der gesperrten Einheit");
+		assertEquals(OTHER_SHOW_SEAT, service.waitingChanges().get(OTHER_SHOW_SEAT), "wartet auf sich selbst");
 		assertEquals(List.of(List.of(mine.id())), service.unitState(OTHER_SHOW_SEAT).lost(), "nichts geschrieben");
 
 		// ein neueres Programm schreibt einen lesbaren Stand: Die Sperre fällt, die Änderung wartet nicht mehr auf sie
 		foreign(service, appData, OTHER_SHOW_SEAT, List.of(locked.id()), name("Bert"), false, Map.of());
 		assertFalse(service.unitState(OTHER_SHOW_SEAT).contentLocked());
+		// die Zahl für den Takt der Anzeige führt der Dienst nach, wenn er die geänderte Einheit meldet (nächster Takt)
+		service.tick();
 
 		assertEquals(1, service.waitingResolutions(), "nur noch die geparkte Auflösung");
+	}
+
+	/**
+	 * Der Takt der Oberfläche fragt die Zahl jede Sekunde: Sie darf nicht auf den Monitor des Index warten, den der
+	 * Abgleich beim Start (nach einem Update für den ganzen Bestand) lange hält.
+	 */
+	@Test
+	void waitingResolutionsDoesNotWaitForTheIndex() throws Exception {
+		SyncService service = single(dir.resolve("app"));
+		CountDownLatch held = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		Thread holder = new Thread(() -> {
+			synchronized (service.index()) {
+				held.countDown();
+				try {
+					release.await();
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			}
+		});
+		holder.start();
+		try {
+			assertTrue(held.await(5, TimeUnit.SECONDS));
+			assertEquals(0, assertTimeoutPreemptively(Duration.ofSeconds(5), service::waitingResolutions));
+		} finally {
+			release.countDown();
+			holder.join();
+		}
 	}
 
 	// --- Folgefälle

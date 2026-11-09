@@ -516,13 +516,10 @@ public class StoreEventRepository implements EventRepository {
 	 *                               dann unverändert
 	 */
 	public void applyFields(UnitKey unit, ObjectNode fields) {
-		Object model = modelObject(unit);
-		if (model == null || unit.type() == UnitType.HALL) {
-			throw new IllegalStateException("Die Einheit " + unit.relativePath() + " ist im Modell nicht vorhanden.");
-		}
+		Object model = requireEventModel(unit);
 		ObjectNode merged = UnitMapper.normalize(model);
-		merged.remove("presentations");
-		merged.remove("bookings");
+		merged.remove(UnitMapper.PRESENTATIONS);
+		merged.remove(UnitMapper.BOOKINGS);
 		Set<String> known = knownProperties(model.getClass());
 		fields.fields().forEachRemaining(field -> {
 			if (field.getValue().isNull() && !known.contains(field.getKey())) {
@@ -587,17 +584,27 @@ public class StoreEventRepository implements EventRepository {
 	 */
 	public void restoreFields(UnitKey unit, ObjectNode before) {
 		Objects.requireNonNull(before, "before");
-		Object model = modelObject(unit);
-		if (model == null || unit.type() == UnitType.HALL) {
-			throw new IllegalStateException("Die Einheit " + unit.relativePath() + " ist im Modell nicht vorhanden.");
-		}
+		Object model = requireEventModel(unit);
 		ObjectNode fields = before.deepCopy();
 		UnitMapper.normalize(model).fieldNames().forEachRemaining(name -> {
-			if (!fields.has(name) && !"presentations".equals(name) && !"bookings".equals(name)) {
+			if (!fields.has(name) && !UnitMapper.PRESENTATIONS.equals(name) && !UnitMapper.BOOKINGS.equals(name)) {
 				fields.putNull(name);
 			}
 		});
 		applyFields(unit, fields);
+	}
+
+	/**
+	 * Das Objekt der Einheit im Modell eines Events (für {@link #applyFields} und {@link #restoreFields}).
+	 *
+	 * @throws IllegalStateException wenn die Einheit im Modell fehlt oder eine Halle ist
+	 */
+	private Object requireEventModel(UnitKey unit) {
+		Object model = modelObject(unit);
+		if (model == null || unit.type() == UnitType.HALL) {
+			throw new IllegalStateException("Die Einheit " + unit.relativePath() + " ist im Modell nicht vorhanden.");
+		}
+		return model;
 	}
 
 	/**
@@ -675,8 +682,7 @@ public class StoreEventRepository implements EventRepository {
 	public Set<String> lockedSeatIds(String eventId, String presentationId) {
 		Event event = findEvent(eventId);
 		Presentation presentation = event == null ? null : event.findPresentation(presentationId);
-		return UnitMapper.lockedSeatIds(UnitKey.presentation(eventId, presentationId),
-				presentation == null ? null : presentation.getBookings(), sync.eventSnapshots(eventId));
+		return lockedSeatIds(eventId, presentationId, presentation == null ? null : presentation.getBookings());
 	}
 
 	/**
@@ -685,7 +691,11 @@ public class StoreEventRepository implements EventRepository {
 	 * dieser Vorstellung.
 	 */
 	public Set<String> lockedSeatIds(String eventId, Presentation presentation) {
-		return UnitMapper.lockedSeatIds(UnitKey.presentation(eventId, presentation.getId()), presentation.getBookings(),
+		return lockedSeatIds(eventId, presentation.getId(), presentation.getBookings());
+	}
+
+	private Set<String> lockedSeatIds(String eventId, String presentationId, List<Booking> modelBookings) {
+		return UnitMapper.lockedSeatIds(UnitKey.presentation(eventId, presentationId), modelBookings,
 				sync.eventSnapshots(eventId));
 	}
 
@@ -700,11 +710,15 @@ public class StoreEventRepository implements EventRepository {
 	 * @throws IllegalArgumentException bei einer anderen Art von Einheit
 	 */
 	public Map<UnitKey, UnitState.Status> lockedUnder(UnitKey presentationOrHead) {
-		if (presentationOrHead.type() != UnitType.PRESENTATION && presentationOrHead.type() != UnitType.EVENT) {
-			throw new IllegalArgumentException(
-					presentationOrHead.relativePath() + " ist weder eine Vorstellung noch ein Event-Kopf.");
-		}
+		requireEventRoot(presentationOrHead);
 		return UnitMapper.lockedBelow(presentationOrHead, sync.eventSnapshots(presentationOrHead.eventId()));
+	}
+
+	/** @throws IllegalArgumentException wenn die Einheit weder eine Vorstellung noch ein Event-Kopf ist */
+	private static void requireEventRoot(UnitKey unit) {
+		if (unit.type() != UnitType.PRESENTATION && unit.type() != UnitType.EVENT) {
+			throw new IllegalArgumentException(unit.relativePath() + " ist weder eine Vorstellung noch ein Event-Kopf.");
+		}
 	}
 
 	/**
@@ -717,10 +731,17 @@ public class StoreEventRepository implements EventRepository {
 	 * @throws LockedUnitException mit {@link StoreMessages#lockedBelow} (SYS-009 vor SYS-008), wenn etwas gesperrt ist
 	 */
 	public void requireNothingLockedUnder(UnitKey presentationOrHead, String name) {
-		Map<UnitKey, UnitState.Status> locked = lockedUnder(presentationOrHead);
-		if (!locked.isEmpty()) {
-			throw new LockedUnitException(StoreMessages.lockedBelow(name, UnitMapper.lockedBelowCause(locked.values())));
-		}
+		requireEventRoot(presentationOrHead);
+		UnitMapper.requireNothingLockedBelow(presentationOrHead, name, sync.eventSnapshots(presentationOrHead.eventId()));
+	}
+
+	/**
+	 * Die Schlüssel der Buchungen mit Daten in der Vorstellung (was das Modell anzeigt), nach derselben Regel wie
+	 * {@link #lockedSeatIds}: Mit {@link #lockedUnder} trennt das eine gesperrte Buchung, die im Modell fehlt, von einer,
+	 * deren älterer Stand angezeigt wird.
+	 */
+	public Set<UnitKey> keysOfBookingsWithData(String eventId, Presentation presentation) {
+		return UnitMapper.keysOfBookingsWithData(eventId, presentation.getId(), presentation.getBookings());
 	}
 
 	/**

@@ -8,7 +8,6 @@ import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
@@ -83,7 +82,7 @@ public final class LockedBookingsNotice extends Hyperlink {
 	/**
 	 * Die gesperrten Buchungs-Einheiten der Vorstellung (bzw. des ganzen Events) aus {@link StoreEventRepository#lockedUnder}:
 	 * "fehlend", wenn das Modell keine Buchung mit Daten auf diesem Schlüssel hat
-	 * ({@link StoreEventRepository#unitOf}, wie beim Abgleich der Sitze), sonst "älterer Stand".
+	 * ({@link StoreEventRepository#keysOfBookingsWithData}, wie beim Abgleich der Sitze), sonst "älterer Stand".
 	 *
 	 * @param presentation {@code null} für alle Vorstellungen des Events
 	 */
@@ -119,15 +118,7 @@ public final class LockedBookingsNotice extends Hyperlink {
 				: event.getPresentations() != null ? event.getPresentations() : List.of();
 		Set<UnitKey> shown = new HashSet<>();
 		for (Presentation p : presentations) {
-			for (Booking booking : p.getBookings() != null ? p.getBookings() : List.<Booking>of()) {
-				if (booking.hasData()) {
-					try {
-						shown.add(repository.unitOf(event.getId(), p.getId(), booking));
-					} catch (IllegalArgumentException e) {
-						// Sitz oder Kennung ist als Ordnername unzulässig: Diese Buchung trägt keine Einheit des Versionsspeichers
-					}
-				}
-			}
+			shown.addAll(repository.keysOfBookingsWithData(event.getId(), p));
 		}
 		return shown;
 	}

@@ -286,8 +286,6 @@ public class EventOverviewController extends AbstractOverviewController {
 			Presentation copy = EventTemplates.copyPresentation(presentation, event, hallRepository::findById);
 			ChangeTracker.events().check(event);
 			MainApp.showEventEditViewWithChanges(event, copy, true);
-			// erst nach dem Wechsel der Ansicht, der die Fußzeile leert
-			EventTemplates.reportLockedLeftOut(presentation);
 		} else if (data instanceof Event event) {
 			Event copy = EventTemplates.copyEvent(event, eventRepository.loadEvents().stream().map(Event::getName).toList(), hallRepository::findById);
 			ChangeTracker.events().trackNew(copy);

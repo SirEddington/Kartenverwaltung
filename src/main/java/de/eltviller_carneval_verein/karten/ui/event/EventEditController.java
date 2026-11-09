@@ -1012,7 +1012,6 @@ public class EventEditController {
 		Presentation copy = EventTemplates.copyPresentation(presentation, event, hallRepository::findById);
 		ChangeTracker.events().check(event);
 		refreshPresentationTable(event, copy);
-		EventTemplates.reportLockedLeftOut(presentation);
 	}
 
 	private void handleDeletePres(Presentation presentation) {

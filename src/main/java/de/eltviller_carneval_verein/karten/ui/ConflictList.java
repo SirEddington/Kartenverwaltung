@@ -98,6 +98,7 @@ public final class ConflictList {
 	private final Function<UnitKey, String> labelOf;
 	private final BiPredicate<OpenConflict, String> adopted;
 	private final Function<String, Hall> findHall;
+	private final Supplier<Map<UnitKey, UnitKey>> waiting;
 
 	/** Die Konflikte, die der Nutzer im Dialog gesehen hat. */
 	private final Set<ConflictKey> seen = new HashSet<>();
@@ -114,11 +115,50 @@ public final class ConflictList {
 	 */
 	public ConflictList(Supplier<List<OpenConflict>> source, Function<UnitKey, String> labelOf,
 			BiPredicate<OpenConflict, String> adopted, Function<String, Hall> findHall) {
+		this(source, labelOf, adopted, findHall, Map::of);
+	}
+
+	/**
+	 * Wie {@link #ConflictList(Supplier, Function, BiPredicate, Function)}, dazu die eigenen Änderungen, die auf eine
+	 * gesperrte Einheit warten ({@link #waitingLines}).
+	 *
+	 * @param waiting je wartender Einheit die gesperrte, auf die sie wartet (in der App {@code SyncService::waitingChanges})
+	 */
+	public ConflictList(Supplier<List<OpenConflict>> source, Function<UnitKey, String> labelOf,
+			BiPredicate<OpenConflict, String> adopted, Function<String, Hall> findHall,
+			Supplier<Map<UnitKey, UnitKey>> waiting) {
 		this.source = source;
 		this.labelOf = labelOf;
 		this.adopted = adopted;
 		this.findHall = findHall;
+		this.waiting = waiting;
 	}
+
+	/**
+	 * Die eigenen Änderungen, die auf eine gesperrte Einheit warten (KARV-135), je eine Zeile mit dem Eintrag und dem
+	 * gesperrten Eintrag, auf den sie wartet; leer, wenn keine wartet. Sie sind kein Konflikt (es gibt nichts zu
+	 * entscheiden), aber der Nutzer soll erfahren, warum seine Änderung nicht zu sehen ist.
+	 */
+	public List<String> waitingLines() {
+		List<String> lines = new ArrayList<>();
+		waiting.get().forEach((unit, blocker) -> lines.add(
+				waitingLine(labelOf.apply(unit), unit.equals(blocker) ? null : labelOf.apply(blocker))));
+		return lines;
+	}
+
+	/**
+	 * Eine Zeile von {@link #waitingLines}.
+	 *
+	 * @param blocker der gesperrte Eintrag, auf den die Änderung wartet; {@code null}, wenn der Eintrag selbst gesperrt ist
+	 */
+	static String waitingLine(String entry, String blocker) {
+		return blocker == null ? "„" + entry + "“ ist gesperrt; die eigene Änderung daran wartet, bis er wieder lesbar ist."
+				: "„" + entry + "“ wartet auf den gesperrten Eintrag „" + blocker + "“.";
+	}
+
+	/** Die Überschrift über {@link #waitingLines} im Dialog. */
+	public static final String WAITING_HEADING = "Eigene Änderungen, die auf gesperrte Einträge warten. Sie sind erst nach "
+			+ "dem Entsperren zu sehen; bitte nichts neu erfassen. Die Sperren stehen unter „Gesperrte Einträge“.";
 
 	/**
 	 * Die Zeilen der offenen Konflikte in der Reihenfolge der Quelle; Doppelverkäufe desselben Speichervorgangs stehen

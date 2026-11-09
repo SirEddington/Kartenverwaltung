@@ -53,8 +53,8 @@ final class UnitMapper {
 	/** Derselbe Mapper wie beim Speichern und im Versionsspeicher. */
 	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 
-	private static final String PRESENTATIONS = "presentations";
-	private static final String BOOKINGS = "bookings";
+	static final String PRESENTATIONS = "presentations";
+	static final String BOOKINGS = "bookings";
 
 	/** Vorstellungen: Datum, Uhrzeit (je {@code null} zuletzt), Name ohne Groß-/Kleinschreibung ({@code null} zuletzt), ID. */
 	static final Comparator<Presentation> PRESENTATION_ORDER = Comparator
@@ -359,10 +359,21 @@ final class UnitMapper {
 	 *                             Versionsspeicher, ohne lesbaren Stand mit ihrer Bezeichnung
 	 */
 	private static void requireNothingLockedBelow(UnitKey presentation, Map<UnitKey, UnitSnapshot> eventStates) {
-		Map<UnitKey, Status> locked = lockedBelow(presentation, eventStates);
+		requireNothingLockedBelow(presentation, nameInStore(presentation, eventStates), eventStates);
+	}
+
+	/**
+	 * Lehnt ab, wenn unter {@code root} gesperrte Einheiten liegen ({@link #lockedBelow}); die eine Regel für die
+	 * Sicherung beim Speichern und die Prüfung vorher ({@link StoreEventRepository#requireNothingLockedUnder}).
+	 *
+	 * @param name        wie die Meldung das Objekt nennt
+	 * @param eventStates die Stände aller Einheiten des Events im Versionsspeicher
+	 * @throws LockedUnitException mit {@link StoreMessages#lockedBelow} (neueres Format vor beschädigt)
+	 */
+	static void requireNothingLockedBelow(UnitKey root, String name, Map<UnitKey, UnitSnapshot> eventStates) {
+		Map<UnitKey, Status> locked = lockedBelow(root, eventStates);
 		if (!locked.isEmpty()) {
-			throw new LockedUnitException(
-					StoreMessages.lockedBelow(nameInStore(presentation, eventStates), lockedBelowCause(locked.values())));
+			throw new LockedUnitException(StoreMessages.lockedBelow(name, lockedBelowCause(locked.values())));
 		}
 	}
 
@@ -379,7 +390,7 @@ final class UnitMapper {
 	}
 
 	/** Die Ursache für {@link StoreMessages#lockedBelow}: neueres Format vor beschädigt. */
-	static Status lockedBelowCause(Collection<Status> locks) {
+	private static Status lockedBelowCause(Collection<Status> locks) {
 		return locks.contains(Status.LOCKED_FORMAT) ? Status.LOCKED_FORMAT : Status.LOCKED_DAMAGED;
 	}
 
@@ -391,21 +402,39 @@ final class UnitMapper {
 	 * @param eventStates die Stände aller Einheiten des Events im Versionsspeicher
 	 */
 	static Map<UnitKey, Status> lockedBelow(UnitKey root, Map<UnitKey, UnitSnapshot> eventStates) {
-		List<UnitSnapshot> below = new ArrayList<>();
+		// erst die (wenigen) gesperrten, dann die Vorfahren: Die Prüfung der Vorfahren legt Listen an
+		Map<UnitKey, Status> found = new HashMap<>();
 		for (UnitSnapshot state : eventStates.values()) {
-			if (state.unit().ancestors().contains(root) && !hasDeletedAncestor(state.unit(), eventStates)) {
-				below.add(state);
-			}
-		}
-		below.sort(Comparator.comparing(state -> state.unit().relativePath()));
-		Map<UnitKey, Status> locked = new LinkedHashMap<>();
-		for (UnitSnapshot state : below) {
 			Status lock = lockOf(state);
-			if (lock != null) {
-				locked.put(state.unit(), lock);
+			if (lock != null && state.unit().ancestors().contains(root) && !hasDeletedAncestor(state.unit(), eventStates)) {
+				found.put(state.unit(), lock);
 			}
 		}
+		Map<UnitKey, Status> locked = new LinkedHashMap<>();
+		found.keySet().stream().sorted(Comparator.comparing(UnitKey::relativePath))
+				.forEach(unit -> locked.put(unit, found.get(unit)));
 		return locked;
+	}
+
+	/**
+	 * Die Schlüssel der Buchungen mit Daten ({@link Booking#hasData}) einer Vorstellung im Modell ({@link #bookingKey}): was
+	 * dort angezeigt wird. Ein leerer Platzhalter zählt nicht; eine Buchung, deren Sitz oder Kennung als Ordnername
+	 * unzulässig ist, trägt keine Einheit und fehlt.
+	 *
+	 * @param modelBookings die Buchungen der Vorstellung im Modell; {@code null}, wenn sie dort fehlt
+	 */
+	static Set<UnitKey> keysOfBookingsWithData(String eventId, String presentationId, List<Booking> modelBookings) {
+		Set<UnitKey> shown = new HashSet<>();
+		for (Booking booking : modelBookings != null ? modelBookings : List.<Booking>of()) {
+			if (booking.hasData()) {
+				try {
+					shown.add(bookingKey(eventId, presentationId, booking));
+				} catch (IllegalArgumentException e) {
+					// Sitz oder Kennung ist als Ordnername unzulässig: Diese Buchung trägt keine Einheit des Versionsspeichers
+				}
+			}
+		}
+		return shown;
 	}
 
 	/**
@@ -421,16 +450,7 @@ final class UnitMapper {
 	 */
 	static Set<String> lockedSeatIds(UnitKey presentation, List<Booking> modelBookings,
 			Map<UnitKey, UnitSnapshot> eventStates) {
-		Set<UnitKey> shown = new HashSet<>();
-		for (Booking booking : modelBookings != null ? modelBookings : List.<Booking>of()) {
-			if (booking.hasData()) {
-				try {
-					shown.add(bookingKey(presentation.eventId(), presentation.presentationId(), booking));
-				} catch (IllegalArgumentException e) {
-					// Sitz oder Kennung ist als Ordnername unzulässig: Diese Buchung trägt keine Einheit des Versionsspeichers
-				}
-			}
-		}
+		Set<UnitKey> shown = keysOfBookingsWithData(presentation.eventId(), presentation.presentationId(), modelBookings);
 		Set<String> seats = new LinkedHashSet<>();
 		for (UnitKey unit : lockedBelow(presentation, eventStates).keySet()) {
 			if (unit.type() == UnitType.BOOKING && !unit.isUnassigned() && !shown.contains(unit)) {
@@ -604,7 +624,7 @@ final class UnitMapper {
 	}
 
 	/** Ob die Kette gesperrt ist (beschädigt oder neueres Format): ohne den Text und ohne die Bezeichnung zu ermitteln. */
-	private static boolean isLocked(Status status) {
+	static boolean isLocked(Status status) {
 		return status == Status.LOCKED_DAMAGED || status == Status.LOCKED_FORMAT;
 	}
 

@@ -33,7 +33,7 @@ Temurin 21. The release workflow runs it again before building the JARs.
 
 ## What is covered
 
-About 2,950 test runs in ~180 test classes, organized in the same packages as the production code.
+About 3,170 test runs in ~195 test classes, organized in the same packages as the production code.
 
 | Area | Examples | Kind |
 |---|---|---|

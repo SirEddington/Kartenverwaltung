@@ -67,6 +67,14 @@ public final class UnknownFields {
 		return fields.isEmpty();
 	}
 
+	/**
+	 * Ob ein Feld einen Wert trägt, also nicht fehlt und nicht {@code null} ist. Ein neues Feld steht mit seinem
+	 * Standardwert als {@code null} in der Datei (Regel für neue Felder), das sind keine Daten.
+	 */
+	public boolean hasValues() {
+		return fields.values().stream().anyMatch(value -> value != null && !value.isNull());
+	}
+
 	public boolean has(String key) {
 		return fields.containsKey(key);
 	}

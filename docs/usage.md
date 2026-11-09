@@ -164,8 +164,10 @@ is intact.
   missing from the figures, and "N Buchungen sind mit einem älteren Stand gezählt" for bookings counted with an
   older state. A click opens "Gesperrte Einträge".
 - **Waiting changes.** The conflict indicator appends "· N Änderungen warten" for own changes that wait for a lock.
-  They are not visible until the lock is gone, so do not enter the customer again.
-- **Copies** of an event or presentation leave locked entries out ("Gesperrte Einträge werden nicht mitkopiert (n).").
+  A click opens the conflict dialog, which lists each waiting change with the locked entry it waits for. They are not
+  visible until the lock is gone, so do not enter the customer again.
+- **Copies** of an event leave out locked presentations that are not shown ("Gesperrte Einträge werden nicht mitkopiert
+  (n)."). A locked presentation shown with an older state is copied with that state; bookings are never copied.
 - A booking without a seat does not find its seat by itself after the unlock; assign it with "Platz zuweisen…".
 - Resetting a damaged entry whose last readable state came from a newer version leads from SYS-008 to SYS-009: it
   stays locked until the application is updated.

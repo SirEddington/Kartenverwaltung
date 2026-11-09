@@ -219,7 +219,7 @@ final class ConflictResolver {
 	/**
 	 * Meldet, dass sich der Stand einer Einheit geändert hat: Jede Einheit, deren Auflösung auf sie wartet
 	 * ({@link #waitingOn}), kommt wieder in die Schlange, ebenso die Einheit selbst, wenn sie wartet (ihr Verlust kann
-	 * inzwischen aufgegangen sein; sonst zählte {@link #waitingCount} sie weiter). Von jedem Thread.
+	 * inzwischen aufgegangen sein; sonst zählte {@link #waitingUnits} sie weiter). Von jedem Thread.
 	 */
 	void unitChanged(UnitKey changed) {
 		synchronized (queue) {
@@ -238,17 +238,23 @@ final class ConflictResolver {
 		}
 	}
 
-	/** Wie viele Einheiten mit ihrer Auflösung auf gesperrte Einheiten warten. */
-	int waitingCount() {
-		synchronized (queue) {
-			return waitingOn.size();
-		}
-	}
-
 	/** Die Einheiten, deren Auflösung auf gesperrte Einheiten wartet (eine Kopie). */
 	Set<UnitKey> waitingUnits() {
 		synchronized (queue) {
 			return Set.copyOf(waitingOn.keySet());
+		}
+	}
+
+	/**
+	 * Je wartender Einheit die Einheit, auf die sie wartet, für die Anzeige: ein gesperrter Nachbar, wenn einer blockiert,
+	 * sonst die Einheit selbst (die Inhaltsprüfung schlug auf dem an, was die Auflösung schreiben würde). Eine Kopie.
+	 */
+	Map<UnitKey, UnitKey> waitingFor() {
+		synchronized (queue) {
+			Map<UnitKey, UnitKey> waiting = new HashMap<>();
+			waitingOn.forEach((unit, blockers) -> waiting.put(unit,
+					blockers.stream().filter(blocker -> !blocker.equals(unit)).findFirst().orElse(unit)));
+			return waiting;
 		}
 	}
 
@@ -719,12 +725,13 @@ final class ConflictResolver {
 	/**
 	 * Lässt die Einheit auf die Blocker warten: Sie verlässt die Schlange und kommt erst wieder, wenn sich einer davon
 	 * ändert ({@link #unitChanged}), statt in jedem Takt Strategie und Spur neu zu rechnen und das Budget zu verbrauchen.
-	 * Hat sich ein Blocker schon in diesem Durchlauf geändert, bleibt sie eingereiht (die Meldung kam vor dem Eintrag).
-	 * Einmal je Einheit im Log (INFO), bevorzugt mit einem Nachbarn statt der Einheit selbst.
+	 * Hat sich ein Blocker oder die Einheit selbst schon in diesem Durchlauf geändert, bleibt sie eingereiht (die Meldung
+	 * kam vor dem Eintrag; {@link #unitChanged} weckt auch bei einer Änderung der Einheit selbst). Einmal je Einheit im
+	 * Log (INFO), bevorzugt mit einem Nachbarn statt der Einheit selbst.
 	 */
 	private void park(UnitKey unit, Set<UnitKey> blockers) {
 		synchronized (queue) {
-			if (blockers.stream().anyMatch(changedInPass::contains)) {
+			if (changedInPass.contains(unit) || blockers.stream().anyMatch(changedInPass::contains)) {
 				return;
 			}
 			waitingOn.put(unit, blockers);

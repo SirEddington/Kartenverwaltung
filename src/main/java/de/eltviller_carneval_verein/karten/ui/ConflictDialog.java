@@ -72,6 +72,8 @@ public final class ConflictDialog {
 	private final ConflictActions actions;
 	private final Stage stage = new Stage();
 	private final TableView<Row> table = new TableView<>();
+	/** Die eigenen Änderungen, die auf eine Sperre warten (KARV-135); ohne solche unsichtbar und ohne Platz. */
+	private final Label waiting = new Label();
 
 	/** Zu jeder Zeile, wie {@link #refresh} sie vorfand: ob die Aktion möglich ist (einmal je Auffrischen, nicht je Zeichnen). */
 	private final Map<ConflictKey, Availability> availability = new HashMap<>();
@@ -113,7 +115,10 @@ public final class ConflictDialog {
 		table.getColumns().add(column("Aktion", 225, 200, this::actionCell));
 		table.getColumns().add(column("Erledigt", 95, 95, (row, col) -> doneButton(row)));
 
-		VBox root = new VBox(10, intro, table);
+		waiting.setWrapText(true);
+		waiting.getStyleClass().add("conflict-waiting");
+		showWaiting(List.of());
+		VBox root = new VBox(10, intro, waiting, table);
 		root.setPadding(new Insets(12));
 		VBox.setVgrow(table, Priority.ALWAYS);
 		Scene scene = new Scene(root, 1230, 520);
@@ -208,6 +213,30 @@ public final class ConflictDialog {
 		});
 		// die Tabelle zeigt jetzt alles, was die Liste geliefert hat
 		list.markSeen();
+		List<String> lines = List.of();
+		try {
+			lines = list.waitingLines();
+		} catch (RuntimeException e) {
+			LOG.log(Level.WARNING, "Die wartenden Änderungen ließen sich nicht zeigen", e);
+		}
+		showWaiting(lines);
+	}
+
+	/** Zeigt die wartenden Änderungen unter der Überschrift, je Zeile eine; ohne Zeilen versteckt. */
+	private void showWaiting(List<String> lines) {
+		waiting.setText(waitingText(lines));
+		waiting.setVisible(!lines.isEmpty());
+		waiting.setManaged(!lines.isEmpty());
+	}
+
+	/** Der Text über der Tabelle: {@link ConflictList#WAITING_HEADING}, dann je Zeile „– …“; leer ohne Zeilen. */
+	static String waitingText(List<String> lines) {
+		if (lines.isEmpty()) {
+			return "";
+		}
+		StringBuilder text = new StringBuilder(ConflictList.WAITING_HEADING);
+		lines.forEach(line -> text.append("\n– ").append(line));
+		return text.toString();
 	}
 
 	private Availability availabilityOf(Row row) {

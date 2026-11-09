@@ -146,8 +146,9 @@ class EventTemplatesTest {
 	}
 
 	/**
-	 * KARV-135: Was gesperrt ist, steht nicht (oder nur im älteren Stand) im Modell und kommt nicht in die Kopie; der
-	 * Hinweis nennt die Zahl. Buchungen zählen nicht mit, sie werden nie kopiert.
+	 * KARV-135: Eine gesperrte Vorstellung, die im Modell fehlt, kommt nicht in die Kopie; der Hinweis nennt die Zahl. Steht
+	 * sie noch im Modell (älterer Stand angezeigt, oder die fremde Änderung ist zurückgestellt), wird sie mitkopiert und
+	 * zählt nicht. Buchungen zählen nicht mit, sie werden nie kopiert.
 	 */
 	@Test
 	void copiesCountTheLockedEntriesTheyLeaveOut(@TempDir Path appData) throws IOException {
@@ -169,16 +170,17 @@ class EventTemplatesTest {
 		assertTrue(sync.unitState(booking).contentLocked());
 
 		assertEquals(0, EventTemplates.lockedLeftOut(event, repository), "eine gesperrte Buchung zählt nicht");
-		assertEquals(0, EventTemplates.lockedLeftOut(friday, repository));
 
 		UnitKey presentation = UnitKey.presentation(event.getId(), saturday.getId());
 		foreign.write(presentation, "Fremd",
 				payload -> payload.set("requires", JsonNodeFactory.instance.arrayNode().add("x-test-merkmal")));
 		assertTrue(sync.unitState(presentation).contentLocked());
 
+		assertEquals(0, EventTemplates.lockedLeftOut(event, repository),
+				"noch im Modell (die fremde Änderung ist nicht eingearbeitet): wird mitkopiert");
+		// so, wie das Einarbeiten die gesperrte Vorstellung aus dem Modell nimmt
+		event.getPresentations().remove(saturday);
 		assertEquals(1, EventTemplates.lockedLeftOut(event, repository));
-		assertEquals(1, EventTemplates.lockedLeftOut(saturday, repository));
-		assertEquals(0, EventTemplates.lockedLeftOut(friday, repository));
 		assertEquals(0, EventTemplates.lockedLeftOut(new Event(), repository), "nie gespeichert");
 		assertEquals("Gesperrte Einträge werden nicht mitkopiert (1).", EventTemplates.lockedNote(1));
 		assertNull(EventTemplates.lockedNote(0));
