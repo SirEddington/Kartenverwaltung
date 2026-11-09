@@ -161,8 +161,12 @@ names, sizes and modification times. Only units whose fingerprint changed are re
 never an arbiter: losing it costs time, not correctness.
 
 **Locked units.** A unit whose only version is unreadable (SYS-008) or was written by a newer program version
-(SYS-009) is locked. The UI lists it under "gesperrte Einträge", shows affected seats as blocked
-(`ui.sales.LockedSeats`), and offers a reset to the last readable state.
+(SYS-009) is locked. SYS-009 also covers content this version cannot process safely: a `requires` entry or an unknown
+payment status (`ContentGate`, rules in `repository.ContentRules`); the version is read but marked as too new in
+content, and `ChainResolver` steps over it. The UI lists locked units under "gesperrte Einträge", shows affected
+seats as blocked (`ui.sales.LockedSeats`), and offers a reset to the last readable state for damaged ones. A newer
+workstation that writes a readable state unlocks the unit. The rules for changing the data format are in
+[decisions.md](decisions.md#forward-compatible-data-format).
 
 ### `tracking` – unsaved changes
 

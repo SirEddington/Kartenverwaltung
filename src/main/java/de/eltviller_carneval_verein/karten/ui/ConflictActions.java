@@ -182,7 +182,7 @@ public final class ConflictActions {
 	 * ({@link #placeRefusal}).
 	 */
 	public Availability availability(Row row) {
-		if (row.action() == Action.NONE) {
+		if (row.action() == Action.NONE || offersNewerContent(row)) {
 			return NO_ACTION;
 		}
 		UnitKey unit = row.conflict().unit();
@@ -210,6 +210,19 @@ public final class ConflictActions {
 		}
 		String refusal = target instanceof Booking booking ? placeRefusal(row, booking) : null;
 		return refusal == null ? ENABLED : new Availability(false, refusal);
+	}
+
+	/**
+	 * Ob die Aktion der Zeile die weichende Fassung roh ins Modell läse ("Wiederherstellen", "Meine Halle übernehmen") und
+	 * diese inhaltlich zu neu ist (KARV-135): Dann bietet die Zeile keine Aktion an, wie eine ohne Gegenstand der
+	 * Aktion, aber ohne "Inzwischen erledigt".
+	 */
+	private boolean offersNewerContent(Row row) {
+		if (row.action() != Action.RESTORE_BOOKING && row.action() != Action.TAKE_MY_HALL) {
+			return false;
+		}
+		Version version = dropped(row.conflict());
+		return version != null && version.newerContent();
 	}
 
 	/**
@@ -392,7 +405,8 @@ public final class ConflictActions {
 		String hallId = text(field.mine(), "hallId", presentation.getHallId());
 		String planId = text(field.mine(), "seatingPlanId", presentation.getSeatingPlanId());
 		Hall hall = hallId == null ? null : halls.findById(hallId);
-		return PlanSwitchDialog.impactMessage(presentation, hall == null ? null : hall.findSeatingPlan(planId));
+		return PlanSwitchDialog.impactMessage(presentation, hall == null ? null : hall.findSeatingPlan(planId),
+				events.lockedSeatIds(unit.eventId(), presentation.getId()));
 	}
 
 	/** Der Text des Felds; ohne das Feld {@code fallback}, bei {@code null} im Feld {@code null}. */
@@ -468,7 +482,7 @@ public final class ConflictActions {
 			Set<String> removed = new HashSet<>();
 			plan.getSeats().forEach(seat -> removed.add(seat.getId()));
 			removed.removeAll(keptIds);
-			impacts.add(PlanImpact.of(plan.getId(), removed, loaded));
+			impacts.add(PlanImpact.of(plan.getId(), removed, loaded, events::lockedSeatIds));
 		}
 		PlanImpact all = PlanImpact.combine(impacts);
 		return all.isEmpty() ? null : "Die Halle wird durch deine Fassung ersetzt." + all.deleteNote();
@@ -480,7 +494,8 @@ public final class ConflictActions {
 	 * ({@link OpenConflict#target()}), bei einer Buchung für die Einheit, auf der sie jetzt lebt ({@link #actionUnit}). Beim
 	 * Vermerk "Platz" zieht sie, wenn sie nicht auf dem eigenen Sitz steht, dorthin um
 	 * wie beim Zuweisen ({@link #assignAndSave}). Hat der Vermerk nur eine Gruppe, ist die Zeile danach bestätigt; bei mehreren erst, wenn jede
-	 * Gruppe übernommen ist ({@link #isAdopted}), sonst bleibt sie offen.
+	 * Gruppe übernommen ist ({@link #isAdopted}), sonst bleibt sie offen. Die Gruppe "Halle" einer Vorstellung wechselt Halle
+	 * bzw. Bestuhlung und wird mit gesperrten Einträgen darunter abgelehnt, ohne etwas zu ändern (KARV-135).
 	 *
 	 * @throws IllegalStateException wenn die Aktion gesperrt ist, die Gruppe nicht zur Zeile gehört oder Ändern, Speichern
 	 *                               oder Bestätigen scheitert; nichts ist bestätigt. Das Modell ist wieder wie vorher, außer
@@ -498,6 +513,9 @@ public final class ConflictActions {
 		}
 		UnitKey unit = actionUnit(row.conflict());
 		Event event = events.findEvent(unit.eventId());
+		if (HALL_GROUP.equals(group) && unit.type() == UnitType.PRESENTATION) {
+			requireNothingLockedUnder(unit, event);
+		}
 		String seatId = PLACE_GROUP.equals(group) ? mySeatId(row.conflict().note()) : null;
 		if (seatId != null && valueTarget(row) instanceof Booking booking && !seatId.equals(seatIdOf(booking))) {
 			// die Buchung zieht auf den eigenen Sitz um; placeRefusal hat geprüft, dass Bestuhlung und Sitz da sind und er frei
@@ -514,7 +532,7 @@ public final class ConflictActions {
 			save(event);
 		}, e -> {
 			try {
-				events.applyFields(unit, before);
+				events.restoreFields(unit, before);
 			} catch (RuntimeException undoFailed) {
 				e.addSuppressed(undoFailed);
 			}
@@ -523,6 +541,22 @@ public final class ConflictActions {
 		// mehrere Gruppen: Die Zeile bleibt offen, bis jede übernommen ist (oder der Nutzer sie mit "Erledigt" schließt)
 		if (row.conflict().note().fields().size() == 1 || allAdopted(row.conflict())) {
 			acknowledge(row);
+		}
+	}
+
+	/**
+	 * Die eigene Halle bzw. Bestuhlung zu übernehmen ist ein Wechsel von Halle oder Bestuhlung: Mit gesperrten Einträgen
+	 * unter der Vorstellung wird er abgelehnt, bevor sich das Modell ändert (KARV-135, wie im Event-Editor).
+	 *
+	 * @throws IllegalStateException mit {@code StoreMessages#lockedBelow}, wenn etwas gesperrt ist
+	 */
+	private void requireNothingLockedUnder(UnitKey presentationUnit, Event event) {
+		Presentation presentation = event == null ? null : event.findPresentation(presentationUnit.presentationId());
+		String name = EntityLabels.nameOrPlaceholder(presentation == null ? null : presentation.getName());
+		try {
+			events.requireNothingLockedUnder(presentationUnit, name);
+		} catch (LockedUnitException e) {
+			throw failure(e);
 		}
 	}
 
@@ -716,12 +750,16 @@ public final class ConflictActions {
 		return event == null ? null : event.findPresentation(unit.presentationId());
 	}
 
-	/** Die Halle im Modell, die die eigene Fassung ersetzt; {@code null}, wenn es sie nicht gibt oder sie schon so ist. */
+	/**
+	 * Die Halle im Modell, die die eigene Fassung ersetzt; {@code null}, wenn es sie nicht gibt, sie schon so ist oder die
+	 * eigene Fassung inhaltlich zu neu ist (KARV-135: roh ins Modell gelesen, schriebe sie einen Inhalt, den die anderen
+	 * Rechner sperren).
+	 */
 	private Hall hallToReplace(Row row) {
 		UnitKey unit = row.conflict().unit();
 		Version version = dropped(row.conflict());
 		Hall hall = halls.findById(unit.hallId());
-		if (hall == null || version == null || version.deleted() || version.payload() == null) {
+		if (hall == null || version == null || version.deleted() || version.payload() == null || version.newerContent()) {
 			return null;
 		}
 		UnitSnapshot stored = sync.snapshots(List.of(unit)).get(unit);
@@ -732,8 +770,9 @@ public final class ConflictActions {
 	}
 
 	/**
-	 * Das Vorgehen beim Wiederherstellen; {@code null}, wenn es nichts wiederherzustellen gibt oder die Buchung noch lebt. Die
-	 * Buchung kommt auf das Ziel des Vermerks ({@link OpenConflict#target()}), wenn es frei ist, sonst "ohne Platz".
+	 * Das Vorgehen beim Wiederherstellen; {@code null}, wenn es nichts wiederherzustellen gibt, die Buchung noch lebt oder
+	 * die weichende Fassung inhaltlich zu neu ist (wie bei {@link #hallToReplace}). Die Buchung kommt auf das Ziel des
+	 * Vermerks ({@link OpenConflict#target()}), wenn es frei ist, sonst "ohne Platz".
 	 */
 	private Restore restoreOf(Row row) {
 		ConflictNote note = row.conflict().note();
@@ -741,7 +780,7 @@ public final class ConflictActions {
 		Event event = note == null ? null : events.findEvent(unit.eventId());
 		Presentation presentation = event == null ? null : event.findPresentation(unit.presentationId());
 		Version version = presentation == null ? null : dropped(row.conflict());
-		if (version == null || version.deleted() || version.payload() == null) {
+		if (version == null || version.deleted() || version.payload() == null || version.newerContent()) {
 			return null;
 		}
 		Booking content = events.readBooking(version.payload());

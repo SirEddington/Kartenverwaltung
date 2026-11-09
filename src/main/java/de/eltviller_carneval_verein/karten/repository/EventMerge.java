@@ -25,7 +25,6 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.Assembly;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
-import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
@@ -145,12 +144,20 @@ final class EventMerge {
 		private final Set<UnitKey> carried;
 
 		/**
+		 * Die Sitze einer Vorstellung, die der Abgleich nicht vergeben darf ({@link BookingSync#sync}, KARV-135): gesperrte
+		 * Buchungs-Einheiten nach dem Stand des Versionsspeichers, die in dieser Vorstellung (im Cache oder auf der Kopie)
+		 * keine Buchung tragen. Gefragt wird beim Abgleich, nicht beim Bau des Plans.
+		 */
+		private final Function<Presentation, Set<String>> lockedSeats;
+
+		/**
 		 * Ein Plan, für den keine Halle als aktuell gilt, ohne bekannte Kennungen der Buchungen hinter gelöschten
-		 * Sitz-Einheiten (siehe den Konstruktor mit {@code hallCurrent} und {@code lastIds}).
+		 * Sitz-Einheiten und ohne gesperrte Sitze (siehe den Konstruktor mit {@code hallCurrent}, {@code lastIds} und
+		 * {@code lockedSeats}).
 		 */
 		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup,
 				Map<UnitKey, UnitSnapshot> presentationStates) {
-			this(units, index, hallLookup, hallId -> false, presentationStates, Map.of());
+			this(units, index, hallLookup, hallId -> false, presentationStates, Map.of(), presentation -> Set.of());
 		}
 
 		/**
@@ -165,17 +172,19 @@ final class EventMerge {
 		 *                           einer, ist die Buchung nicht platzierbar, ist er gelöscht oder unlesbar, geht sie nur in
 		 *                           den Vergleichsstand, wenn die Vorstellung nicht (mehr) im Modell steht
 		 * @param lastIds            siehe {@link #lastIds}
+		 * @param lockedSeats        siehe {@link #lockedSeats}
 		 */
 		Plan(List<UnitSnapshot> units, Collection<UnitSnapshot> index, Function<String, Hall> hallLookup,
 				Predicate<String> hallCurrent, Map<UnitKey, UnitSnapshot> presentationStates,
-				Map<UnitKey, String> lastIds) {
+				Map<UnitKey, String> lastIds, Function<Presentation, Set<String>> lockedSeats) {
 			this(sorted(units), List.copyOf(index), hallLookup, hallCurrent, Map.copyOf(presentationStates),
-					Map.copyOf(lastIds), new HashMap<>(), Set.of());
+					Map.copyOf(lastIds), new HashMap<>(), Set.of(), Objects.requireNonNull(lockedSeats, "lockedSeats"));
 		}
 
 		private Plan(List<UnitSnapshot> units, List<UnitSnapshot> index, Function<String, Hall> hallLookup,
 				Predicate<String> hallCurrent, Map<UnitKey, UnitSnapshot> presentationStates,
-				Map<UnitKey, String> lastIds, Map<String, String> placeholderIds, Set<UnitKey> carried) {
+				Map<UnitKey, String> lastIds, Map<String, String> placeholderIds, Set<UnitKey> carried,
+				Function<Presentation, Set<String>> lockedSeats) {
 			this.units = units;
 			this.index = index;
 			this.hallLookup = hallLookup;
@@ -184,12 +193,13 @@ final class EventMerge {
 			this.lastIds = lastIds;
 			this.placeholderIds = placeholderIds;
 			this.carried = carried;
+			this.lockedSeats = lockedSeats;
 		}
 
 		/** Derselbe Plan, mit den Einheiten, deren Buchung eine andere Einheit trägt (siehe {@link #carried}). */
 		Plan withCarried(Set<UnitKey> carried) {
 			return new Plan(units, index, hallLookup, hallCurrent, presentationStates, lastIds, placeholderIds,
-					Set.copyOf(carried));
+					Set.copyOf(carried), lockedSeats);
 		}
 
 		/** Die einzuarbeitenden Stände in der Reihenfolge des Einarbeitens. */
@@ -201,7 +211,8 @@ final class EventMerge {
 		Plan restrictedTo(Collection<UnitKey> keep) {
 			Set<UnitKey> kept = new HashSet<>(keep);
 			List<UnitSnapshot> remaining = units.stream().filter(s -> kept.contains(s.unit())).toList();
-			return new Plan(remaining, index, hallLookup, hallCurrent, presentationStates, lastIds, placeholderIds, carried);
+			return new Plan(remaining, index, hallLookup, hallCurrent, presentationStates, lastIds, placeholderIds, carried,
+					lockedSeats);
 		}
 
 		/** Die neue Kennung des geleerten Platzhalters auf diesem Sitz, beim ersten Mal ausgewürfelt. */
@@ -346,9 +357,7 @@ final class EventMerge {
 			if (existing != null) {
 				event.getPresentations().remove(existing);
 			}
-			if (!UnitMapper.isAbsent(snapshot)) {
-				sink.warning(UnitMapper.unreadablePresentation(unit.presentationId(), event.getName()));
-			}
+			warnIfMissing(snapshot, UnitMapper.unreadablePresentation(unit.presentationId(), event.getName()), sink);
 			// auch ohne Vorstellung im Modell (der Nutzer hatte sie schon entfernt): Was unter ihr angezeigt war, ist weg
 			sink.left(unit);
 			sink.adopted(snapshot, false);
@@ -396,8 +405,8 @@ final class EventMerge {
 		warnIfLocked(snapshot, sink);
 		for (UnitSnapshot below : fitting) {
 			boolean readable = UnitMapper.readUnit(below, Booking.class) != null;
-			if (!readable && !UnitMapper.isAbsent(below)) {
-				sink.warning(UnitMapper.unreadableBooking(added.getName()));
+			if (!readable) {
+				warnIfMissing(below, UnitMapper.unreadableBooking(added.getName()), sink);
 			}
 			sink.adopted(below, readable);
 			if (readable) {
@@ -431,9 +440,7 @@ final class EventMerge {
 				// im Modell steht noch, was die Einheit trug: nicht mehr vom Stand des Vergleichsstands
 				sink.reconciled(unit);
 			}
-			if (!UnitMapper.isAbsent(snapshot)) {
-				sink.warning(UnitMapper.unreadableBooking(presentation.getName()));
-			}
+			warnIfMissing(snapshot, UnitMapper.unreadableBooking(presentation.getName()), sink);
 			sink.adopted(snapshot, false);
 			return;
 		}
@@ -620,16 +627,16 @@ final class EventMerge {
 	}
 
 	/**
-	 * Ob die Vorstellung gelöscht oder unlesbar ist: gelöscht, ohne lesbare Version, oder gesperrt, ohne dass es eine
-	 * Version gäbe. Fehlt sie im Index nur noch ({@code null}, oder ohne Datei), ist sie nicht weg, sondern wird kommen.
+	 * Ob die Vorstellung gelöscht oder unlesbar ist: gelöscht, ohne lesbare Version, gesperrt, ohne dass es eine
+	 * Version gäbe, oder ihr Stand ist inhaltlich zu neu (KARV-135; {@link UnitMapper#missingLock}). Fehlt sie im Index nur
+	 * noch ({@code null}, oder ohne Datei), ist sie nicht weg, sondern wird kommen.
 	 */
 	static boolean gone(UnitSnapshot presentation) {
 		if (presentation == null) {
 			return false;
 		}
-		boolean lockedWithoutVersion = presentation.version() == null && (presentation.status() == UnitState.Status.LOCKED_DAMAGED
-				|| presentation.status() == UnitState.Status.LOCKED_FORMAT);
-		return lockedWithoutVersion || (presentation.version() != null && !UnitMapper.isReadable(presentation));
+		return UnitMapper.missingLock(presentation) != null
+				|| (presentation.version() != null && !UnitMapper.isReadable(presentation));
 	}
 
 	/**
@@ -680,15 +687,20 @@ final class EventMerge {
 	 * Bestuhlung ab, wie beim Vorbereiten eines geladenen Events für die Anzeige. Lesbare Buchungen, die nicht
 	 * {@linkplain #placeable platzierbar} sind, bleiben draußen und kommen in {@code waiting}: Der Abgleich setzte sie
 	 * sonst um, und das nächste Speichern überschriebe den fremden Stand. Sie sind dann nicht angezeigt. Ist die Halle der
-	 * Vorstellung aktuell ({@code hallCurrent}), warten sie nicht: Der Abgleich stellt sie ohne Platz.
+	 * Vorstellung aktuell ({@code hallCurrent}), warten sie nicht: Der Abgleich stellt sie ohne Platz. Gesperrte Sitze
+	 * (KARV-135) kommen aus denselben Ständen ({@link UnitMapper#lockedSeatIds}).
 	 */
 	static Assembly<Event> assembleEvent(Collection<UnitSnapshot> snapshots, Function<String, Hall> hallLookup,
 			Predicate<String> hallCurrent, List<UnitSnapshot> waiting) {
 		Assembly<Event> assembly = UnitMapper
 				.assembleEvents(withoutWaiting(snapshots, hallLookup, hallCurrent, false, waiting));
+		Map<UnitKey, UnitSnapshot> states = new HashMap<>();
+		snapshots.forEach(snapshot -> states.put(snapshot.unit(), snapshot));
 		for (Event event : assembly.items()) {
 			for (Presentation presentation : event.getPresentations()) {
-				BookingSync.sync(presentation, planOf(presentation, hallLookup));
+				Set<String> lockedSeats = UnitMapper.lockedSeatIds(UnitKey.presentation(event.getId(), presentation.getId()),
+						presentation.getBookings(), states);
+				BookingSync.sync(presentation, planOf(presentation, hallLookup), lockedSeats);
 			}
 		}
 		return assembly;
@@ -778,7 +790,7 @@ final class EventMerge {
 		if (presentation.getBookings() != null) {
 			before.addAll(presentation.getBookings());
 		}
-		BookingSync.sync(presentation, planOf(presentation, plan.hallLookup));
+		BookingSync.sync(presentation, planOf(presentation, plan.hallLookup), plan.lockedSeats.apply(presentation));
 		plan.fixCreatedIds(presentation, before);
 	}
 
@@ -806,6 +818,19 @@ final class EventMerge {
 		String locked = UnitMapper.lockMessage(snapshot.unit(), snapshot.status());
 		if (locked != null) {
 			sink.warning(locked);
+		}
+	}
+
+	/**
+	 * Die Warnung für eine Einheit, die sich nicht lesen lässt und deshalb das Modell verlässt: {@code unreadable}, außer
+	 * sie fehlt gewollt ({@link UnitMapper#isAbsent}). Ist ihr Stand inhaltlich zu neu (KARV-135), ist sie gesperrt, nicht
+	 * unlesbar: dann die Sperrmeldung (SYS-009) statt {@code unreadable}.
+	 */
+	private static void warnIfMissing(UnitSnapshot snapshot, String unreadable, Sink sink) {
+		if (snapshot.contentLocked()) {
+			sink.warning(UnitMapper.lockMessage(snapshot.unit(), UnitMapper.missingLock(snapshot)));
+		} else if (!UnitMapper.isAbsent(snapshot)) {
+			sink.warning(unreadable);
 		}
 	}
 

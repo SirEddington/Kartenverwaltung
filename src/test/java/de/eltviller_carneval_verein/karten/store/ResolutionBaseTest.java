@@ -39,7 +39,7 @@ class ResolutionBaseTest {
 				Arrays.stream(parents).map(Version::id).toList(), MACHINE, "Kasse", null, Instant.EPOCH, "s" + counter,
 				false, JsonNodeFactory.instance.objectNode(), null, Map.of(),
 				resolution ? VersionMarks.RESOLUTION : VersionMarks.NONE);
-		files.put(version.id(), new VersionFile(version.id(), new byte[0], version, null));
+		files.put(version.id(), new VersionFile(version.id(), new byte[0], version, null, VersionFile.Reason.OK));
 		return version;
 	}
 
@@ -124,7 +124,7 @@ class ResolutionBaseTest {
 		Version br = resolution(bd);
 		Version ae = user(m0);
 		Version am = resolution(bd, ae);
-		files.put(ae.id(), new VersionFile(ae.id(), new byte[0], null, 99));
+		files.put(ae.id(), new VersionFile(ae.id(), new byte[0], null, 99, VersionFile.Reason.FORMAT));
 
 		assertEquals(Kind.KEEP, lower(br, am).kind());
 	}

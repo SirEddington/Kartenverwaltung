@@ -26,6 +26,7 @@ import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.ui.sales.LockedSeats;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
@@ -97,6 +98,8 @@ public class AccountingShellController {
 	private SplitMenuButton btnExport;
 	@FXML
 	private StackPane contentArea;
+	@FXML
+	private LockedBookingsNotice lockedBookingsNotice;
 
 	private ContentController activeContentController;
 	private Event currentEvent;
@@ -136,6 +139,7 @@ public class AccountingShellController {
 						activeContentController.setPresentation(presentation);
 					}
 					updateActionAvailability();
+					refreshLockedNotice();
 				});
 
 		chkIncludeArchived.selectedProperty().addListener((obs, oldVal, newVal) -> {
@@ -163,6 +167,7 @@ public class AccountingShellController {
 				activeContentController.setPresentation(currentPresentation);
 			}
 			updateActionAvailability();
+			refreshLockedNotice();
 		});
 
 		viewToggleGroup.selectedToggleProperty().addListener((obs, oldToggle, newToggle) -> {
@@ -177,6 +182,8 @@ public class AccountingShellController {
 
 		// Fremde Änderungen an Events nur, solange die Abrechnung zu sehen ist (danach hielte das Repository sie am Leben)
 		LiveViews.whileShown(contentArea, Registration.of(repository::addListener, repository::removeListener, foreignChanges));
+		// Geänderte Sperren (etwa nach dem Zurücksetzen im Dialog, den der Hinweis öffnet): neu zählen
+		LiveViews.whileShown(contentArea, LockedSeats.whileShown(this::refreshLockedNotice));
 
 		// Muss NACH den obigen Listenern laufen: setzt bei genau einem Event
 		// automatisch dessen Auswahl, was den eventComboBox-Listener auslöst -
@@ -274,6 +281,12 @@ public class AccountingShellController {
 			activeContentController.setEvent(currentEvent);
 		}
 		updateActionAvailability();
+		refreshLockedNotice();
+	}
+
+	/** Der Hinweis auf gesperrte Buchungen der Auswahl (KARV-135), am Stand des Versionsspeichers gezählt. */
+	private void refreshLockedNotice() {
+		lockedBookingsNotice.refresh(repository, currentEvent, currentPresentation);
 	}
 
 	/**

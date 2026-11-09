@@ -716,7 +716,15 @@ public class EventEditController {
 		cmbPresHall.valueProperty().addListener((obs, oldHall, newHall) -> {
 			if (!loadingDetails && currentPres != null) {
 				Presentation presentation = currentPres;
-				if (hallChangeMessage(presentation) == null) {
+				// KARV-135: vor beiden Wegen; eine gesperrte Buchung fehlt im Modell, ohne Prüfung liefe der Wechsel direkt
+				if (LockedEntryGuard.rejectsHallChange(presentation, newHall != null ? newHall.getId() : null)) {
+					// die Auswahl erst nach der Benachrichtigung der ComboBox zurücksetzen
+					Platform.runLater(() -> {
+						if (presentation == currentPres) {
+							resetHallChoice(presentation);
+						}
+					});
+				} else if (hallChangeMessage(presentation) == null) {
 					changeHall(presentation, newHall);
 				} else {
 					// Die Rückfrage erst nach der Auswahl zeigen, nicht mitten in der Benachrichtigung der ComboBox
@@ -750,6 +758,12 @@ public class EventEditController {
 		}
 		String newHallId = newHall != null ? newHall.getId() : null;
 		if (Objects.equals(newHallId, presentation.getHallId())) {
+			return;
+		}
+		// KARV-135: Mit gesperrten Einträgen darunter wird nicht umgestellt; das Modell bleibt unverändert (erneut geprüft,
+		// der Stand kann sich seit der Auswahl geändert haben)
+		if (LockedEntryGuard.rejectsHallChange(presentation, newHallId)) {
+			resetHallChoice(presentation);
 			return;
 		}
 		String message = hallChangeMessage(presentation);
@@ -787,7 +801,8 @@ public class EventEditController {
 		}
 		presentation.setHallId(newHallId);
 		presentation.setSeatingPlanId(null);
-		BookingSync.sync(presentation, null);
+		// ohne Bestuhlung gibt es keine Sitze, also auch keine gesperrten
+		BookingSync.sync(presentation, null, Set.of());
 		loadingDetails = true;
 		try {
 			showPlansOf(newHall, null);
@@ -951,6 +966,7 @@ public class EventEditController {
 		Event copy = EventTemplates.copyEvent(event, masterEventData.stream().map(Event::getName).toList(), hallRepository::findById);
 		ChangeTracker.events().trackNew(copy);
 		refreshEventTable(copy);
+		EventTemplates.reportLockedLeftOut(event);
 	}
 
 	private void handleDeleteEvent(Event event) {
@@ -966,7 +982,8 @@ public class EventEditController {
 			try {
 				repository.deleteEvent(event);
 			} catch (LockedUnitException e) {
-				// Die Tabelle zeigt ein Event, das ein anderer Rechner inzwischen ersetzt oder gelöscht hat
+				// Die Tabelle zeigt ein Event, das ein anderer Rechner inzwischen ersetzt oder gelöscht hat, oder darunter
+				// liegen gesperrte Einträge (KARV-135)
 				StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
 				return;
 			}
@@ -1002,7 +1019,10 @@ public class EventEditController {
 			return;
 		}
 
-		presentation.getParent().deletePresentation(presentation);
+		// KARV-135: Mit gesperrten Einträgen darunter bleibt die Vorstellung, die Meldung steht in der Fußzeile
+		if (!LockedEntryGuard.deletePresentation(presentation)) {
+			return;
+		}
 		if (presentation.equals(currentPres)) {
 			currentPres = null;
 		}

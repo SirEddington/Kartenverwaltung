@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.fasterxml.jackson.databind.node.IntNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -85,6 +86,87 @@ class StoreEventRepositoryApplyFieldsTest {
 		assertEquals("Neu", sale.getComment());
 		assertEquals("Müller", sale.getLastName());
 		assertEquals("Anna", sale.getFirstName());
+	}
+
+	@Test
+	void applyFieldsWithNullRemovesUnknownKey() {
+		sale.getUnknown().put("x-test-a", IntNode.valueOf(1));
+		sale.getUnknown().put("x-test-b", IntNode.valueOf(2));
+		assertTrue(repository.payloadOf(saleUnit).has("x-test-a"));
+
+		repository.applyFields(saleUnit, node().putNull("x-test-a"));
+
+		ObjectNode payload = repository.payloadOf(saleUnit);
+		assertFalse(payload.has("x-test-a"));
+		assertEquals(2, payload.get("x-test-b").asInt(), "andere unbekannte Schlüssel bleiben");
+		assertFalse(sale.getUnknown().has("x-test-a"));
+		assertEquals("Notiz", sale.getComment());
+	}
+
+	@Test
+	void applyFieldsWithNullOnKnownPropertyKeepsTheModelMeaning() {
+		repository.applyFields(saleUnit, node().putNull("comment"));
+
+		assertNull(sale.getComment());
+		assertEquals("Müller", sale.getLastName());
+	}
+
+	@Test
+	void applyFieldsWithNullRemovesUnknownKeyOfPresentationAndEventHead() {
+		show.getUnknown().put("x-test-a", IntNode.valueOf(1));
+		event.getUnknown().put("x-test-a", IntNode.valueOf(1));
+
+		repository.applyFields(UnitKey.presentation(event.getId(), show.getId()), node().putNull("x-test-a"));
+		repository.applyFields(UnitKey.event(event.getId()), node().putNull("x-test-a"));
+
+		assertFalse(show.getUnknown().has("x-test-a"));
+		assertFalse(event.getUnknown().has("x-test-a"));
+		assertEquals(1, show.getBookings().size(), "die Buchungen bleiben");
+	}
+
+	@Test
+	void applyGroupWithoutValueRemovesUnknownKey() {
+		sale.getUnknown().put("x-test-a", IntNode.valueOf(1));
+
+		repository.applyGroup(saleUnit, "x-test-a", node());
+
+		assertFalse(repository.payloadOf(saleUnit).has("x-test-a"));
+		assertFalse(sale.getUnknown().has("x-test-a"));
+	}
+
+	@Test
+	void applyGroupWithValueSetsUnknownKey() {
+		repository.applyGroup(saleUnit, "x-test-a", node().put("x-test-a", 7));
+
+		assertEquals(7, repository.payloadOf(saleUnit).get("x-test-a").asInt());
+	}
+
+	@Test
+	void restoreFieldsRemovesKeyAddedMeanwhile() {
+		ObjectNode before = repository.payloadOf(saleUnit);
+		assertFalse(before.has("x-test-a"));
+
+		repository.applyGroup(saleUnit, "x-test-a", node().put("x-test-a", 7));
+		repository.applyGroup(saleUnit, "comment", node().put("comment", "Anders"));
+		assertTrue(repository.payloadOf(saleUnit).has("x-test-a"));
+
+		repository.restoreFields(saleUnit, before);
+
+		assertEquals(before, repository.payloadOf(saleUnit));
+		assertEquals("Notiz", sale.getComment());
+	}
+
+	@Test
+	void restoreFieldsBringsBackAnUnknownKeyRemovedMeanwhile() {
+		sale.getUnknown().put("x-test-a", IntNode.valueOf(1));
+		ObjectNode before = repository.payloadOf(saleUnit);
+
+		repository.applyGroup(saleUnit, "x-test-a", node());
+		assertFalse(repository.payloadOf(saleUnit).has("x-test-a"));
+
+		repository.restoreFields(saleUnit, before);
+
+		assertEquals(before, repository.payloadOf(saleUnit));
 	}
 
 	@Test

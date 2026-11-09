@@ -103,6 +103,128 @@ each start would dominate startup time. Because the index is
 never authoritative, a missing or corrupt index only costs time. Size and mtime are part of the fingerprint so that
 a file replaced under the same name (healing, external tools) is noticed.
 
+## Forward-compatible data format
+
+**Decision:** Versions 1.1 and later keep what they do not understand. Unknown fields survive load, edit, save, copy
+and merge (`UnknownFields`, an any-setter/any-getter on every model class); unknown values of tolerant enums
+(`Shape`, `TextAlignH`, `TextAlignV`) load with a fallback and keep the original on save; content that must not be
+processed without understanding it (an unknown `paymentStatus`, a `requires` entry) locks the unit like a version of
+a newer program (SYS-009). `StoreCodec.FORMAT` stays `1`; the envelope of the version files does not change.
+
+**Why:** Workstations share one folder and are not updated at the same moment. An older version that silently drops
+fields, or shows a paid booking as unpaid, damages what the newer version wrote. Only the older version can protect
+the data, so the protection had to be in 1.1. The guard tests (`FormatGuardTest`, `JsonKeysTest`,
+`FormatSamplesTest`, `ArchitectureGuardTest`) point to this section when they fail: read the rules before you extend
+a list.
+
+### Allowed without a new `StoreCodec.FORMAT`
+
+- Add fields, if older versions may ignore them.
+- Add values to tolerant enums, if the fallback in older versions is acceptable. A tolerant enum is display only: it
+  loads with the fallback (`RECTANGLE`, `CENTER`), but the original value stays in the file until someone changes it
+  on purpose: only setting a value different from the current (fallback) one drops the original; setting the
+  fallback value itself (e.g. `RECTANGLE` for an unknown shape) keeps it.
+- Add values to strict enums, or put a feature name into `requires`, if older versions must not touch a unit. They
+  lock it then, with all consequences described below. Both are deliberate decisions.
+- Remove a field, if older versions can live with a missing or outdated value. The new version keeps it as an
+  unknown field but no longer maintains it; older versions see the default for objects of the new version and an
+  outdated value for objects the new version edited. If it should disappear from the files, put it on the ignore
+  list (the name is then burned, see below).
+
+### Rules for new fields
+
+- A new field is absent or `null` while it has its default value (`FieldMerge` treats absent and `null` as equal,
+  `false` and `""` are not).
+- It needs no group-wise merging with existing fields, and it is no identifier that has to stay unique when copying.
+- Occupancy or customer data never live only in new fields.
+- **No derived fields** (e.g. `amountDue` from price and discount) and **no per-copy state** (e.g. "accounting
+  finished" on a presentation). An older version changes the source field and carries the derived one along
+  unchanged, i.e. outdated; and it copies per-copy state into new objects. A new meaning for money or accounting that
+  older versions cannot represent (a discount they cannot apply) needs `requires`.
+- **Strict only through `requires`.** A new field or enum that a later version treats strictly in its own gate rule
+  is just an unknown field for older versions: they keep it and lock nothing.
+- **Never remove enum values**, neither from strict nor from tolerant enums. The gate cannot tell "unknown because
+  newer" from "unknown because removed": a removed payment status would lock every old booking with that value for
+  good, with the wrong message (SYS-009); a removed tolerant value would show old data with the fallback. Mark a
+  value as deprecated instead (not selectable in the UI, still readable). `FormatGuardTest` keeps a fixed list of
+  values per stored enum and fails when one is missing.
+- **A field that replaces an old one** (e.g. `priceCents` for `price`) is not enough as an extra field: an older
+  version changes `price` and carries the new field back unchanged, so the newer version would read the old amount
+  and lose the change. While older versions write the old field, **the old field wins**: the new version writes both,
+  notices when they do not match on reading, and derives the new one from the old one. If that is impossible, change
+  the format or use `requires` on the unit.
+- **A format change is needed** to rename a field, change the type or meaning of a field or value, or restructure
+  units.
+
+### Burned names and `requires`
+
+Removed fields are never reused. The lists are per class and live in the `@JsonIgnoreProperties` annotations (and in
+`JsonKeysTest`):
+
+| Class | Burned names |
+|---|---|
+| `Presentation` | `tables`, `defaultTableWidth`, `defaultTableHeight`, `defaultSeatWidth`, `defaultSeatHeight`, `hallWidth`, `hallHeight`, `tableRows`, `hallObjects` |
+| `SeatingPlan` | `defaultSeatHeight` |
+| `Seat` | `height`, `price`, `paymentStatus`, `collected`, `lastName`, `firstName`, `email`, `comment` |
+
+`requires` is reserved. No model class has a property of that name, and the unit classes never write it from a freshly
+built model. A version that uses it **derives it when writing** from the state of the model ("this presentation
+carries the new lock flag"), removes it from the collected fields when reading, **never keeps it and never copies it
+into another unit**, not even on JSON level (resolver, `FieldMerge`/`transfer`). Otherwise a unit would never unlock
+and copies would be locked for no reason. Inside the same unit the payload stays as it is, so raw comparisons do not
+write a version because of a removed `"requires": []`. `requires` works at the top of a unit only; inside a nested
+object (a hall object in a hall) it is only kept. To make part of a hall strict, set `requires` on the hall.
+
+The gate (`ContentGate`) calls a version too new if `requires` is present, not `null`, and not an array of texts the
+program knows (1.1 knows none; absent, `null` and `[]` mean "nothing required"), or if a booking has a `paymentStatus`
+that is not `null` and not the name of a `PaymentStatus` (a number counts as unknown). `rulesId()` is computed from
+these inputs, so a new `PaymentStatus` value changes it, and the startup index then resolves the units again.
+
+### Boundary to 1.0.x
+
+1.0.x drops unknown fields on save, so the protection works among workstations running 1.1 or later (checked
+against tag `1.0.1`):
+
+- A new value of a strict enum (`paymentStatus`) makes the booking unreadable on 1.0.x, but not locked (its chain is
+  `OK`): the seat looks free and can be sold twice.
+- `HallObject` has no `ignoreUnknown` in 1.0.x, and `shape`/alignment are strict there: a new field on a hall object
+  or a new shape or alignment value makes the whole hall unreadable on 1.0.x, and its presentations freeze.
+- 1.0.x does not know `requires` and drops it on save.
+- A hall saved by 1.1 counts as changed on 1.0.x, and its next hall save there drops the keys only 1.1 knows (text
+  and alignment on tables).
+- If a downgrade keeps the index folder of 1.1, 1.0.1 warns "Unbekanntes Format des Index: 5" and rebuilds the index
+  (`INDEX_FORMAT` is 5 since 1.1).
+
+So new values of strict enums, `requires`, and new fields or values on hall objects may only be used once no
+workstation runs 1.0.x. The release notes of the version that introduces them say so.
+
+### Permanent locks
+
+If no newer workstation exists any more (single use, or after a downgrade from 1.2), a locked unit stays locked until
+someone installs a newer version again. SYS-009 then says "newer program" even if the cause is a hand-edited file.
+Meanwhile the unit is fixed in place: the presentation or event above it can be neither deleted nor switched to
+another hall or plan.
+
+Consequences to keep in mind:
+
+- A booking without a seat does not find its seat by itself after the unlock.
+- An own change that waits for a lock is invisible until then; do not enter the customer again.
+- Resetting a unit that became damaged after a head that was too new in content leads from SYS-008 to SYS-009: the
+  last readable state is the one the newer version wrote.
+
+### Release steps
+
+For every release, create the sample for the new version from the final release state, not during development
+(otherwise the sample does not match the shipped format):
+
+1. Run `FormatSampleGenerator` (`src/test/java/.../store/`) with `main(<target folder>)`. It writes
+   `<target folder>/data.zip`.
+2. Put `data.zip` plus a `README.md` (how it was created, contents) into
+   `src/test/resources/format-samples/<version>/` and commit. An archive keeps the paths short; the plain files
+   exceed the Windows path limit.
+3. `FormatSamplesTest` picks up every folder automatically: every version must load all samples, nothing counts as
+   changed, and saving without a change writes nothing. Samples are immutable; the tests copy them first.
+
 ## One instance per machine, random machine id
 
 `InstanceLock` prevents two processes on one machine, because they would generate colliding version ids and write

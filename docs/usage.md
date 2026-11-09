@@ -153,7 +153,26 @@ affected event or hall has unsaved changes.
 An entry that is damaged without an intact copy (SYS-008) or was saved by a newer program version (SYS-009) is
 locked: it cannot be changed, and its seats appear blocked in the sales views. Use the "gesperrte Einträge" link in
 the footer to reset a damaged entry to its last readable state; for SYS-009 update the application on this
-computer (*Einstellungen → Info und Updates*, see [Updates](#updates)).
+computer (*Einstellungen → Info und Updates*, see [Updates](#updates)). Content that this version cannot process
+safely (for example a payment status it does not know) is locked the same way (SYS-009), although the file itself
+is intact.
+
+- **Deleting or switching** a presentation or event that has locked entries below it is rejected: SYS-009 for
+  entries of a newer version, SYS-008 for damaged ones. The same goes for switching its hall or seating plan.
+  Reset damaged entries first; newer ones unlock when a newer version has written a readable state.
+- **Accounting** shows a note in the footer: "N gesperrte Buchungen sind nicht berücksichtigt" for bookings that are
+  missing from the figures, and "N Buchungen sind mit einem älteren Stand gezählt" for bookings counted with an
+  older state. A click opens "Gesperrte Einträge".
+- **Waiting changes.** The conflict indicator appends "· N Änderungen warten" for own changes that wait for a lock.
+  A click opens the conflict dialog, which lists each waiting change with the locked entry it waits for. They are not
+  visible until the lock is gone, so do not enter the customer again.
+- **Copies** of an event leave out locked presentations that are not shown ("Gesperrte Einträge werden nicht mitkopiert
+  (n)."). A locked presentation shown with an older state is copied with that state; bookings are never copied.
+- A booking without a seat does not find its seat by itself after the unlock; assign it with "Platz zuweisen…".
+- Resetting a damaged entry whose last readable state came from a newer version leads from SYS-008 to SYS-009: it
+  stays locked until the application is updated.
+- Without a newer workstation (single use, or after a downgrade) locked entries stay locked until a newer version
+  is installed. Background: [decisions.md](decisions.md#forward-compatible-data-format).
 
 ## Updates
 

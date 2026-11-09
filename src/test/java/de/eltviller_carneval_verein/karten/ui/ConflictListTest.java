@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -306,6 +308,29 @@ class ConflictListTest {
 		assertEquals("1 Konflikt offen", ConflictList.indicatorText(1));
 		assertEquals("2 Konflikte offen", ConflictList.indicatorText(2));
 		assertEquals("12 Konflikte offen", ConflictList.indicatorText(12));
+	}
+
+	/**
+	 * KARV-135: Der Dialog nennt die eigenen Änderungen, die auf eine Sperre warten, mit dem gesperrten Eintrag; bei einem
+	 * selbst gesperrten Eintrag ohne Nachbarn.
+	 */
+	@Test
+	void waitingLinesNameTheChangeAndWhatItWaitsFor() {
+		UnitKey seat = UnitKey.booking("e1", "p1", "s1");
+		UnitKey neighbour = UnitKey.booking("e1", "p1", "s2");
+		UnitKey locked = UnitKey.booking("e1", "p1", "s3");
+		Map<UnitKey, UnitKey> waiting = new LinkedHashMap<>();
+		waiting.put(seat, neighbour);
+		waiting.put(locked, locked);
+		ConflictList withWaiting = new ConflictList(List::of, unit -> "Sitz " + unit.bookingDir(), (conflict, group) -> false,
+				hallId -> null, () -> waiting);
+
+		assertEquals(List.of("„Sitz s1“ wartet auf den gesperrten Eintrag „Sitz s2“.",
+				"„Sitz s3“ ist gesperrt; die eigene Änderung daran wartet, bis er wieder lesbar ist."),
+				withWaiting.waitingLines());
+		assertEquals(List.of(), list.waitingLines(), "ohne Quelle wartet nichts");
+		assertEquals(ConflictList.WAITING_HEADING + "\n– a\n– b", ConflictDialog.waitingText(List.of("a", "b")));
+		assertEquals("", ConflictDialog.waitingText(List.of()));
 	}
 
 	@Test

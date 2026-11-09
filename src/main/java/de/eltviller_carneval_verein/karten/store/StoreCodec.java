@@ -177,7 +177,7 @@ public final class StoreCodec {
 					optionalText(node, "machineName"), optionalText(node, "operator"), instant(node, "at"), text(node, "saveId"),
 					bool(node, "deleted"),
 					payload == null || payload.isNull() ? MAPPER.createObjectNode() : (ObjectNode) payload,
-					readConflict(node.get("conflict")), readSeen(node.get("seen")), readMarks(node));
+					readConflict(node.get("conflict")), readSeen(node.get("seen")), readMarks(node), false);
 		} catch (IllegalArgumentException e) {
 			throw new IOException(e.getMessage(), e);
 		}

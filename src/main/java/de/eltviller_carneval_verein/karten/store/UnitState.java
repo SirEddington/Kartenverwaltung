@@ -18,7 +18,8 @@ import java.util.Set;
  *                  Verzweigung), steht sie nur in der ersten, und eine spätere Liste kann mit einer Version
  *                  beginnen, deren erster Vorgänger in einer früheren Liste steht
  * @param blockedAt die Version, an der die Kette endet ({@code WAITING}: die fehlende, {@code LOCKED_FORMAT}: die
- *                  mit unbekanntem Format, {@code LOCKED_DAMAGED}: die beschädigte oder bei einem Kreis die
+ *                  mit unbekanntem Format oder der inhaltlich zu neue Kopf der Kette, auch wenn eine Nachfolgerin
+ *                  beansprucht ist und noch fehlt, {@code LOCKED_DAMAGED}: die beschädigte oder bei einem Kreis die
  *                  wiederholte); {@code null} bei {@code OK} und bei einer unlesbaren Anspruchsdatei
  * @param claimed   jede Version, die eine Anspruchsdatei auf dem Weg der Kette nennt, auch die beschädigten und
  *                  übersprungenen (sie haben ihren Platz bekommen, stehen aber nicht in {@code chain}); bei
@@ -35,7 +36,10 @@ public record UnitState(UnitKey unit, Status status, List<Version> chain, List<V
 		WAITING,
 		/** Eine Datei der Kette ist beschädigt und ohne Ersatz; die Kette endet davor. */
 		LOCKED_DAMAGED,
-		/** Eine Datei der Kette hat ein unbekanntes Format (neueres Programm); die Kette endet davor. */
+		/**
+		 * Eine Datei der Kette hat ein unbekanntes Format (neueres Programm), und die Kette endet davor; oder der Kopf der
+		 * Kette ist inhaltlich zu neu ({@link UnitState#contentLocked()}), dann endet die Kette mit ihm.
+		 */
 		LOCKED_FORMAT
 	}
 
@@ -58,6 +62,18 @@ public record UnitState(UnitKey unit, Status status, List<Version> chain, List<V
 	 */
 	public Version current() {
 		return pending.isEmpty() ? head() : pending.get(pending.size() - 1);
+	}
+
+	/**
+	 * Ob der aktuelle Stand ({@link #current()}) inhaltlich zu neu ist ({@link Version#newerContent()}). Beschreibt
+	 * {@code current()}, nicht nur den Kopf, denn mit {@code current()} arbeitet dieser Rechner: Ein ausstehendes eigenes
+	 * rohes Zurücksetzen auf einen inhaltlich zu neuen Stand übernimmt dessen Inhalt unverändert und ist damit selbst
+	 * inhaltlich zu neu. Es sperrt die Einheit auch dann, wenn die Kette danach wieder {@code OK} ist (etwa nachdem die
+	 * beschädigte Stelle geheilt ist, solange das Zurücksetzen noch nicht beansprucht ist).
+	 */
+	public boolean contentLocked() {
+		Version current = current();
+		return current != null && current.newerContent();
 	}
 
 	/** Ob der aktuelle Stand vorläufig ist, also eigene Versionen noch auf ihren Anspruch warten. */

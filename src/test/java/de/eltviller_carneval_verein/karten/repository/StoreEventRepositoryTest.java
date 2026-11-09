@@ -33,19 +33,21 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.ChainStep;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
 import de.eltviller_carneval_verein.karten.store.FileLayer;
+import de.eltviller_carneval_verein.karten.store.ForeignVersions;
 import de.eltviller_carneval_verein.karten.store.LocalArbiter;
 import de.eltviller_carneval_verein.karten.store.NioFileLayer;
 import de.eltviller_carneval_verein.karten.store.StoreCodec;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
@@ -260,7 +262,7 @@ class StoreEventRepositoryTest {
 			Presentation presentation = event.addPresentation(name);
 			presentation.setHallId(hall.getId());
 			presentation.setSeatingPlanId(plan.getId());
-			BookingSync.sync(presentation, plan);
+			Syncs.sync(presentation, plan);
 			presentation.getBookings().get(0).setLastName("Müller");
 			presentation.getBookings().get(4).setLastName("Meier");
 		}
@@ -274,7 +276,7 @@ class StoreEventRepositoryTest {
 		for (Event loaded : events.loadEvents()) {
 			for (Presentation presentation : loaded.getPresentations()) {
 				// wie beim Öffnen in der App: die leeren Buchungen kommen aus der Bestuhlung zurück
-				BookingSync.sync(presentation, halls.findById(presentation.getHallId())
+				Syncs.sync(presentation, halls.findById(presentation.getHallId())
 						.findSeatingPlan(presentation.getSeatingPlanId()));
 			}
 			events.saveEvent(loaded);
@@ -1444,4 +1446,133 @@ class StoreEventRepositoryTest {
 		assertTrue(notStarted.isStarted());
 		assertTrue(repository.loadEvents().isEmpty());
 	}
+
+	// Löschen und Wiederherstellen mit gesperrten Einträgen (KARV-135) -->
+
+	/** Die Einheit der Buchung auf dem Sitz {@code seatId} der Vorstellung. */
+	private static UnitKey bookingUnit(Event event, int presentation, String seatId) {
+		return UnitKey.booking(event.getId(), event.getPresentations().get(presentation).getId(), seatId);
+	}
+
+	/** Ein anderer Rechner mit neuerem Programm setzt einen unbekannten Zahlstatus: Die Buchung ist inhaltlich zu neu. */
+	private static void lockNewer(ForeignVersions foreign, SyncService sync, UnitKey unit) throws IOException {
+		foreign.write(unit, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		assertTrue(sync.unitState(unit).contentLocked());
+	}
+
+	/** Die jüngste Version der Buchung wird beschädigt; ihr älterer Stand bleibt lesbar. */
+	private static void damage(ForeignVersions foreign, SyncService sync, Path appData, UnitKey unit)
+			throws IOException {
+		Version damaged = foreign.write(unit, "Fremd", payload -> payload.put("lastName", "Neu"));
+		Files.writeString(appData.resolve("data/" + unit.relativePath() + "/" + damaged.id() + ".json"), "kaputt");
+		assertEquals(Status.LOCKED_DAMAGED, sync.unitState(unit).status());
+	}
+
+	@Test
+	void deletingEventWithLockedBookingIsRejected(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = eventWithBookings();
+		Event other = named("Kindersitzung");
+		repository.saveEvents(List.of(event, other));
+		lockNewer(new ForeignVersions(sync, appData), sync, bookingUnit(event, 1, "seat-3"));
+		Recorder recorder = new Recorder();
+		repository.addListener(recorder);
+		long files = filesIn(appData);
+
+		LockedUnitException single = assertThrows(LockedUnitException.class, () -> repository.deleteEvent(event));
+		LockedUnitException several = assertThrows(LockedUnitException.class,
+				() -> repository.deleteEvents(List.of(other, event)));
+
+		assertEquals(StoreMessages.lockedBelow("Prunksitzung", Status.LOCKED_FORMAT), single.getMessage());
+		assertEquals(single.getMessage(), several.getMessage());
+		assertEquals(files, filesIn(appData), "nichts geschrieben, auch nicht für das andere Event");
+		assertEquals(List.of(), recorder.calls);
+		assertTrue(repository.loadEvents().containsAll(List.of(event, other)));
+	}
+
+	/** Eine gesperrte Buchung unter einer schon gelöschten Vorstellung findet der Nutzer nie: Sie blockiert nichts. */
+	@Test
+	void lockedBookingUnderDeletedPresentationDoesNotBlockEventDeletion(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = eventWithBookings();
+		repository.saveEvent(event);
+		UnitKey locked = bookingUnit(event, 0, "seat-1");
+		event.deletePresentation(event.getPresentations().get(0));
+		repository.saveEvent(event);
+		lockNewer(new ForeignVersions(sync, appData), sync, locked);
+
+		repository.deleteEvent(event);
+
+		assertTrue(sync.unitState(UnitKey.event(event.getId())).current().deleted());
+		assertTrue(sync.unitState(locked).contentLocked(), "die gesperrte Buchung bleibt unberührt");
+	}
+
+	/** Bei mehreren Ursachen nennt die Meldung das neuere Format (SYS-009), sonst die Beschädigung (SYS-008). */
+	@Test
+	void lockedBelowPrefersNewerFormatOverDamage(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = eventWithBookings();
+		repository.saveEvent(event);
+		ForeignVersions foreign = new ForeignVersions(sync, appData);
+		UnitKey head = UnitKey.event(event.getId());
+		UnitKey friday = UnitKey.presentation(event.getId(), event.getPresentations().get(0).getId());
+		damage(foreign, sync, appData, bookingUnit(event, 0, "seat-1"));
+
+		LockedUnitException damaged = assertThrows(LockedUnitException.class,
+				() -> repository.requireNothingLockedUnder(head, "Prunksitzung"));
+		lockNewer(foreign, sync, bookingUnit(event, 1, "seat-3"));
+		LockedUnitException both = assertThrows(LockedUnitException.class,
+				() -> repository.requireNothingLockedUnder(head, "Prunksitzung"));
+		LockedUnitException onlyFriday = assertThrows(LockedUnitException.class,
+				() -> repository.requireNothingLockedUnder(friday, "Freitag"));
+
+		assertEquals(StoreMessages.lockedBelow("Prunksitzung", Status.LOCKED_DAMAGED), damaged.getMessage());
+		assertEquals(StoreMessages.lockedBelow("Prunksitzung", Status.LOCKED_FORMAT), both.getMessage());
+		assertEquals(StoreMessages.lockedBelow("Freitag", Status.LOCKED_DAMAGED), onlyFriday.getMessage());
+	}
+
+	/**
+	 * Ein Wiederherstellen, das eine gelöschte Vorstellung mit gesperrter Buchung zurückbrächte, scheitert schon bei der
+	 * Planung, nicht erst beim Schreiben. Bleibt die Vorstellung im Zielstand gelöscht, steht die Buchung nicht im Weg.
+	 */
+	@Test
+	void restoreRevivingPresentationWithLockedBookingFailsInPlanning(@TempDir Path appData) throws IOException {
+		SteppedClock clock = new SteppedClock();
+		SyncService sync = started(TestSyncServices.singleMode(appData, clock));
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = eventWithBookings();
+		repository.saveEvent(event);
+		UnitKey locked = bookingUnit(event, 0, "seat-1");
+		clock.advance(10);
+		event.deletePresentation(event.getPresentations().get(0));
+		repository.saveEvent(event);
+		clock.advance(10);
+		bookingOf(event, 0, "Schmitz").setLastName("Schulz");
+		repository.saveEvent(event);
+		lockNewer(new ForeignVersions(sync, appData), sync, locked);
+		// die eigenen Speicherstände, neueste zuerst: Schulz, Freitag gelöscht, Anfang
+		List<SavePoint> own = repository.savePoints(event.getId()).stream()
+				.filter(point -> !point.saveId().startsWith("fremd")).toList();
+		assertEquals(3, own.size());
+		long files = filesIn(appData);
+		long changes = repository.baselineChanges(event.getId());
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class,
+				() -> repository.prepareRestoreEvent(event.getId(), own.get(2)));
+
+		assertEquals(StoreMessages.newerFormat(locked.relativePath()), refused.getMessage());
+		assertEquals(files, filesIn(appData));
+		assertEquals(changes, repository.baselineChanges(event.getId()));
+		clock.advance(10);
+		Event restored = repository.restoreEvent(event.getId(), own.get(1), e -> List.of()).restored();
+		assertEquals(List.of("Samstag"), restored.getPresentations().stream().map(Presentation::getName).toList());
+		assertEquals(List.of("Schmitz", "Becker"), bookingNames(restored));
+		assertTrue(sync.unitState(locked).contentLocked(), "die gesperrte Buchung bleibt unberührt");
+		assertTrue(sync.unitState(UnitKey.presentation(event.getId(), locked.presentationId())).current().deleted());
+	}
+
+	// <-- Löschen und Wiederherstellen mit gesperrten Einträgen
 }

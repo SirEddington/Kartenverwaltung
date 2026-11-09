@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Format samples are byte-exact archives (claims hold the SHA-256 of each version file)
+src/test/resources/format-samples/**/*.zip binary

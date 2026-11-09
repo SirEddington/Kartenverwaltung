@@ -42,6 +42,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
 import de.eltviller_carneval_verein.karten.store.ConnectOutcome.Kind;
 
 /**
@@ -107,7 +108,7 @@ class ConnectFlowStoreTest {
 				layer.failWhen(p -> down.get() && p.startsWith(sharedRoot), operation, new IOException("Netzlaufwerk getrennt"));
 			}
 			this.service = new SyncService(appData, identity, layer, Runnable::run, worker != null ? worker : queued::add,
-					p -> !down.get() && Files.isDirectory(p), clock);
+					p -> !down.get() && Files.isDirectory(p), clock, ContentRules.GATE);
 			service.setListener(new SyncListener() {
 				@Override
 				public void connectDecisionNeeded(String folder, boolean setAsideAllowed) {

@@ -1,5 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.event;
 
+import java.util.Set;
+
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
@@ -128,7 +130,8 @@ public class EventCreateController {
 			}
 			// Neue Vorstellung ohne Buchungen mit Daten: Es gibt keinen Preis festzuhalten, daher setPrice statt changePrice
 			pres.setPrice(priceCents);
-			BookingSync.sync(pres, plan);
+			// eine neue Vorstellung hat keine Einheiten im Versionsspeicher, also auch keine gesperrten Sitze
+			BookingSync.sync(pres, plan, Set.of());
 		}
 		return event;
 	}

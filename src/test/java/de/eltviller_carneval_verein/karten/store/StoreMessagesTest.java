@@ -93,6 +93,23 @@ class StoreMessagesTest {
 		assertNull(StoreMessages.locked(unit, UnitState.Status.WAITING));
 	}
 
+	/** KARV-135: Löschen und Umstellen mit gesperrten Einträgen darunter; die Meldung richtet sich nach der Ursache. */
+	@Test
+	void lockedBelowNamesTheObjectAndTheCause() {
+		assertEquals("SYS-009: \"Freitag\" enthält Einträge, die mit einer neueren Programmversion gespeichert wurden. "
+				+ "Löschen und Umstellen sind erst möglich, wenn sie wieder lesbar sind (Kartenverwaltung aktualisieren).",
+				StoreMessages.lockedBelow("Freitag", UnitState.Status.LOCKED_FORMAT));
+	}
+
+	@Test
+	void damagedCauseGivesSys008Text() {
+		assertEquals("SYS-008: \"Freitag\" enthält beschädigte Einträge. Erst unter „Gesperrte Einträge“ zurücksetzen, "
+				+ "dann löschen oder umstellen.", StoreMessages.lockedBelow("Freitag", UnitState.Status.LOCKED_DAMAGED));
+		// ein Name mit Platzhalter-Zeichen bleibt, wie er ist
+		assertEquals("SYS-008: \"A &1\" enthält beschädigte Einträge. Erst unter „Gesperrte Einträge“ zurücksetzen, "
+				+ "dann löschen oder umstellen.", StoreMessages.lockedBelow("A &1", UnitState.Status.LOCKED_DAMAGED));
+	}
+
 	@Test
 	void placeholdersAreAlwaysFilled() {
 		for (String text : List.of(StoreMessages.unreachable("a"), StoreMessages.syncFailed("a", "b"),

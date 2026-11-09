@@ -12,6 +12,11 @@ import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.UnitType;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 
 /**
  * Neue Events und Vorstellungen aus "Hinzufügen" und "Als Vorlage verwenden", gemeinsam für die Event-Übersicht und das
@@ -27,7 +32,9 @@ public final class EventTemplates {
 
 	/**
 	 * Kopiert die Vorstellung als Vorlage in {@code target}: Name, Beschreibung, Datum, Zeit, Halle, Bestuhlung und
-	 * Standardpreis. Die Buchungen werden nicht kopiert, die Kopie bekommt je Sitz der Bestuhlung eine leere Buchung.
+	 * Standardpreis. Die Buchungen werden nicht kopiert, die Kopie bekommt je Sitz der Bestuhlung eine leere Buchung. Kopiert
+	 * wird der Stand des Modells; eine gesperrte Vorstellung mit angezeigtem älterem Stand also mit diesem Stand. Es fehlt
+	 * nichts, was ein Hinweis nennen müsste (gesperrte Buchungen fehlen ohnehin, Buchungen werden nie kopiert).
 	 *
 	 * @param hallLookup liefert die Halle zur Id oder {@code null}, wenn es sie nicht (mehr) gibt
 	 */
@@ -39,14 +46,17 @@ public final class EventTemplates {
 		copy.setHallId(source.getHallId());
 		copy.setSeatingPlanId(source.getSeatingPlanId());
 		copy.setPrice(source.getPrice());
+		copy.getUnknown().replaceWith(source.getUnknown());
 		Hall hall = copy.getHallId() == null ? null : hallLookup.apply(copy.getHallId());
-		BookingSync.sync(copy, EventEditController.modelPlan(copy, hall));
+		// die Kopie ist eine neue Vorstellung ohne Einheiten im Versionsspeicher, also ohne gesperrte Sitze
+		BookingSync.sync(copy, EventEditController.modelPlan(copy, hall), Set.of());
 		return copy;
 	}
 
 	/**
 	 * Kopiert das Event samt Vorstellungen. Es bekommt einen eigenen Namen ("&lt;Name&gt; (Kopie)"), sonst würde es nie
-	 * gespeichert (EVT-002). Das Ergebnis ist noch in keiner Liste.
+	 * gespeichert (EVT-002). Das Ergebnis ist noch in keiner Liste. Eine gesperrte Vorstellung, die im Modell fehlt, fehlt
+	 * damit auch in der Kopie; das meldet der Aufrufer mit {@link #reportLockedLeftOut(Event)}.
 	 *
 	 * @param existingNames die Namen der vorhandenen Events, damit der Name der Kopie frei ist
 	 */
@@ -54,11 +64,41 @@ public final class EventTemplates {
 		Event copy = new Event();
 		copy.setName(Event.createCopyName(source.getName(), existingNames));
 		copy.setDescription(source.getDescription());
+		copy.getUnknown().replaceWith(source.getUnknown());
 		List<Presentation> presentations = source.getPresentations() == null ? List.of() : List.copyOf(source.getPresentations());
 		for (Presentation presentation : presentations) {
 			copyPresentation(presentation, copy, hallLookup);
 		}
 		return copy;
+	}
+
+	/**
+	 * Wie viele gesperrte Einträge die Kopie des Events auslässt (KARV-135): die gesperrten Vorstellungen darunter
+	 * ({@link StoreEventRepository#lockedUnder}), die im Modell fehlen. Eine gesperrte Vorstellung, deren älterer Stand
+	 * angezeigt wird, steht im Modell und kommt mit diesem Stand in die Kopie; sie zählt nicht. Gesperrte Buchungen zählen
+	 * nicht, Buchungen werden nie kopiert.
+	 */
+	static int lockedLeftOut(Event source, StoreEventRepository repository) {
+		int count = 0;
+		for (UnitKey unit : repository.lockedUnder(UnitKey.event(source.getId())).keySet()) {
+			if (unit.type() == UnitType.PRESENTATION && source.findPresentation(unit.presentationId()) == null) {
+				count++;
+			}
+		}
+		return count;
+	}
+
+	/** Der Hinweis nach dem Kopieren; ohne ausgelassene Einträge {@code null}. */
+	static String lockedNote(int leftOut) {
+		return leftOut > 0 ? "Gesperrte Einträge werden nicht mitkopiert (" + leftOut + ")." : null;
+	}
+
+	/** Meldet in der Fußzeile, wie viele gesperrte Einträge die Kopie des Events ausgelassen hat (nichts, wenn keine). */
+	public static void reportLockedLeftOut(Event source) {
+		String note = lockedNote(lockedLeftOut(source, StoreEventRepository.getInstance()));
+		if (note != null) {
+			StatusMessage.getInstance().show(Severity.WARNING, note);
+		}
 	}
 
 	/** Ein leeres Event mit einem freien Namen ("Neues Event", "Neues Event 2" ...). */

@@ -23,10 +23,13 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * @param seen        Rechner-ID auf die Nummer der zuletzt gelesenen Liste dieses Rechners; leer, wenn nichts
  *                    festgehalten ist (nie {@code null})
  * @param marks       Umzug und Herkunft aus einer Auflösung ({@link VersionMarks}); nie {@code null}
+ * @param newerContent ob der Inhalt von einem neueren Programm stammt, das dieses nicht sicher verarbeiten kann (siehe
+ *                    {@link ContentGate}); setzt der Store beim Lesen. Eine frisch geschriebene Version ist nie neuer.
+ *                    Jede Kopie einer gelesenen Version übernimmt das Merkmal.
  */
 public record Version(int format, VersionId id, List<VersionId> parents, String machine, String machineName,
 		String operator, Instant at, String saveId, boolean deleted, ObjectNode payload, ConflictNote conflict,
-		Map<String, Long> seen, VersionMarks marks) {
+		Map<String, Long> seen, VersionMarks marks, boolean newerContent) {
 
 	/** Macht aus einer fehlenden Liste der gelesenen Stände eine leere, unveränderliche, aus fehlenden Angaben keine. */
 	public Version {
@@ -39,7 +42,21 @@ public record Version(int format, VersionId id, List<VersionId> parents, String 
 			String operator, Instant at, String saveId, boolean deleted, ObjectNode payload, ConflictNote conflict,
 			Map<String, Long> seen) {
 		this(format, id, parents, machine, machineName, operator, at, saveId, deleted, payload, conflict, seen,
-				VersionMarks.NONE);
+				VersionMarks.NONE, false);
+	}
+
+	/** Eine frische eigene Version mit Umzugsangaben; inhaltlich nie zu neu. */
+	public Version(int format, VersionId id, List<VersionId> parents, String machine, String machineName,
+			String operator, Instant at, String saveId, boolean deleted, ObjectNode payload, ConflictNote conflict,
+			Map<String, Long> seen, VersionMarks marks) {
+		this(format, id, parents, machine, machineName, operator, at, saveId, deleted, payload, conflict, seen, marks,
+				false);
+	}
+
+	/** Dieselbe Version mit anderem Merkmal „inhaltlich zu neu“. */
+	public Version withNewerContent(boolean newerContent) {
+		return new Version(format, id, parents, machine, machineName, operator, at, saveId, deleted, payload, conflict,
+				seen, marks, newerContent);
 	}
 
 	/** Eine Version ohne Konfliktvermerk und ohne gelesene Listen. */

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -366,6 +367,36 @@ class StoreCodecTest {
 		assertEquals("{\"format\":1,\"id\":\"00000000003-p7r2t5w1-0000\",\"parents\":[\"00000000001-k4m9q2x8-0001\"],"
 				+ "\"machine\":\"m\",\"machineName\":\"Kasse 1\",\"operator\":\"Anna\",\"at\":\"2026-10-26T19:04:11.512Z\","
 				+ "\"saveId\":\"save-1\",\"deleted\":false,\"payload\":{\"a\":1}}", text(StoreCodec.write(version)));
+	}
+
+	/**
+	 * Der Envelope der Versionsdateien bleibt unverändert (KARV-136, {@code FORMAT} bleibt 1): genau diese Schlüssel in
+	 * dieser Reihenfolge, die optionalen nur, wenn sie belegt sind, und kein Merkmal, das erst beim Lesen entsteht
+	 * ({@code newerContent}). Schützt etwa vor einem Schreiben des ganzen Records über den Mapper. Ein neuer Schlüssel
+	 * braucht eine Entscheidung nach den Regeln in {@code docs/decisions.md}.
+	 */
+	@Test
+	void envelopeKeysAreUnchanged() throws IOException {
+		assertEquals(1, StoreCodec.FORMAT);
+		List<String> required = List.of("format", "id", "parents", "machine", "machineName", "operator", "at", "saveId",
+				"deleted", "payload");
+		Version minimal = new Version(StoreCodec.FORMAT, V3, List.of(V1), "m", "Kasse 1", "Anna", AT, "save-1", false,
+				payload("{\"a\":1}"));
+		Version full = new Version(StoreCodec.FORMAT, V3, List.of(V1, V2), "k4m9q2x8-1234", "Kasse 1", "Anna", AT,
+				"save-1", false, payload("{\"a\":1}"), fullNote(), Map.of("k4m9q2x8-1234", 17L),
+				new VersionMarks(UnitKey.booking("e1", "p1", "s2"), UnitKey.booking("e1", "p1", "s1"), true), true);
+
+		List<String> withOptional = new ArrayList<>(required);
+		withOptional.addAll(List.of("conflict", "seen", "movedTo", "movedFrom", "resolution"));
+		assertEquals(required, keys(StoreCodec.write(minimal)));
+		assertEquals(withOptional, keys(StoreCodec.write(full)));
+	}
+
+	/** Die Schlüssel der obersten Ebene einer geschriebenen Datei, in ihrer Reihenfolge. */
+	private static List<String> keys(byte[] written) throws IOException {
+		List<String> keys = new ArrayList<>();
+		MAPPER.readTree(written).fieldNames().forEachRemaining(keys::add);
+		return keys;
 	}
 
 	@Test

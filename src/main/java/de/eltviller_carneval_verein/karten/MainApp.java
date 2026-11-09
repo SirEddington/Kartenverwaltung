@@ -19,6 +19,7 @@ import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
 import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
@@ -81,6 +82,7 @@ import de.eltviller_carneval_verein.karten.update.Installation;
 import de.eltviller_carneval_verein.karten.update.UpdateChecker;
 import de.eltviller_carneval_verein.karten.update.UpdateSource;
 import de.eltviller_carneval_verein.karten.update.UpdateState;
+import de.eltviller_carneval_verein.karten.validation.PresentationValidator;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
@@ -201,6 +203,7 @@ public class MainApp extends Application {
 		// Der Versionsspeicher nimmt zuerst die Sperre gegen einen zweiten Start und liest die Kennung des Rechners;
 		// scheitert das, geht es ohne Fenster nicht weiter
 		SyncService sync;
+		installContentRules();
 		try {
 			sync = SyncService.getInstance();
 		} catch (IllegalStateException e) {
@@ -399,6 +402,11 @@ public class MainApp extends Application {
 			syncStatus.refreshTracked();
 		}
 		SyncInfoWindow.refreshIfOpen();
+		// Ob eine eigene Änderung auf eine Sperre wartet, meldet der Versionsspeicher nicht (es wird nichts geschrieben): Der
+		// Hinweis auf Konflikte liest die Zahl im Takt neu (die offenen Konflikte nur aus dem gemerkten Stand)
+		if (conflictIndicator != null) {
+			conflictIndicator.refresh();
+		}
 		// Die Reparatur einer gesperrten Einheit kann gelungen oder gescheitert sein (Knopf "zurücksetzen" fällt weg bzw. kommt
 		// dazu); die Zeilen liest {@code resettableUnits()} ohne Datei-Ein-/Ausgabe
 		lockedViewChanged();
@@ -510,6 +518,14 @@ public class MainApp extends Application {
 		return name.isPresent();
 	}
 
+	/**
+	 * Richtet die Inhaltsprüfung der Anwendung ein ({@link ContentRules#GATE}); sie muss vor dem ersten
+	 * {@link SyncService#getInstance()} geschehen.
+	 */
+	static void installContentRules() {
+		SyncService.installContentGate(ContentRules.GATE);
+	}
+
 	/** Meldet, dass der Start scheitert, und beendet die Anwendung. */
 	private static void failStart(String title, String text) {
 		showAlert(title, text, AlertType.ERROR);
@@ -532,7 +548,11 @@ public class MainApp extends Application {
 		syncLabels = labels;
 		// SYS-008 und SYS-009 beim Speichern und Einarbeiten nennen den Eintrag wie Fußzeile und Dialog, nicht seinen Pfad
 		LockedUnitException.useLabels(labels);
-		conflictList = new ConflictList(sync::openConflicts, labels, conflictActions::isAdopted, halls::findById);
+		// Eine inhaltlich gesperrte Halle friert ihre Vorstellungen ein: Die Prüfung nennt die Sperre statt PRS-007 (KARV-135)
+		PresentationValidator.useHallLocks(halls::lockTextOfHall);
+		// der Dialog nennt auch die eigenen Änderungen, die auf eine Sperre warten (KARV-135; der Hinweis zählt sie nur)
+		conflictList = new ConflictList(sync::openConflicts, labels, conflictActions::isAdopted, halls::findById,
+				sync::waitingChanges);
 		conflictSync = sync;
 		// Fremde Änderungen und die Rückmeldungen des Versionsspeichers; nach dem Aktualisierer, damit dessen "gespeichert" zuerst läuft
 		// Die übrigen Rückmeldungen (nicht erreichbar, Rückkehr, Frage beim Verbinden, übersprungen, gesperrt) verteilt SharedFolderEvents
@@ -1056,7 +1076,8 @@ public class MainApp extends Application {
 				}
 			} else {
 				// ohne Konflikte nimmt der Hinweis keinen Platz, weder in der Fußzeile noch als eigene Zeile
-				ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount, MainApp::openConflictDialog);
+				ConflictIndicator indicator = new ConflictIndicator(MainApp::openConflictCount,
+						() -> SyncService.getInstance().waitingResolutions(), MainApp::openConflictDialog);
 				conflictIndicator = indicator;
 				// der Hinweis zum Abgleich steht neben dem auf Konflikte, mit derselben Einfügeregel; nicht in einer
 				// Ladeansicht, die Fortschritt und Ursache selbst zeigt (sonst stünde die Prozentzahl doppelt da)

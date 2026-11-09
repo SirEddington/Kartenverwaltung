@@ -3,7 +3,6 @@ package de.eltviller_carneval_verein.karten.repository;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,6 +27,7 @@ import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Das Repository der Hallen auf dem Versionsspeicher. Eine Halle ist eine einzige Einheit; geschrieben wird nur, wenn
@@ -71,9 +71,6 @@ public class StoreHallRepository implements HallRepository {
 	 * wieder in den Cache, gilt das nicht mehr.
 	 */
 	private final Set<String> removedByOthers = new HashSet<>();
-
-	/** Der zuletzt berechnete Rundlauf des Vergleichsstands je Halle (siehe {@link #knownAsModel}). */
-	private final Map<UnitKey, RoundTrip> roundTrips = new HashMap<>();
 
 	/** Ob eine Halle gerade in Bearbeitung ist oder davon abhängt (siehe {@link #setBlockedCheck}). */
 	private Predicate<Hall> blockedCheck = hall -> false;
@@ -196,9 +193,18 @@ public class StoreHallRepository implements HallRepository {
 		write(hall);
 	}
 
-	/** Lehnt eine Halle ab, die nicht die im Cache ist, aber deren Platz einnimmt, oder die ein fremder Stand gelöscht hat. */
+	/**
+	 * Lehnt eine Halle ab, die nicht die im Cache ist, aber deren Platz einnimmt, oder die ein fremder Stand gelöscht hat.
+	 * Hat ein fremder, inhaltlich zu neuer Stand sie gesperrt (KARV-135), nennt die Meldung die Sperre (SYS-009).
+	 */
 	private void requireCurrent(Hall hall) {
 		Hall cached = cachedHall(hall.getId());
+		if (cached == null && removedByOthers.contains(hall.getId())) {
+			UnitSnapshot known = baseline.known(UnitKey.hall(hall.getId()));
+			if (known != null && known.contentLocked()) {
+				throw new LockedUnitException(StoreMessages.newerFormat(EntityLabels.nameOrPlaceholder(hall.getName())));
+			}
+		}
 		if ((cached != null && cached != hall) || (cached == null && removedByOthers.contains(hall.getId()))) {
 			throw LockedUnitException.replacedMeanwhile(hall.getName());
 		}
@@ -257,7 +263,6 @@ public class StoreHallRepository implements HallRepository {
 	public RestorePlan<Hall> prepareRestoreHall(String hallId, SavePoint point) throws IOException {
 		long changes = baseline.changes(hallId);
 		List<UnitState> states = List.of(sync.unitState(UnitKey.hall(hallId)));
-		RestorePlanner.requireRestorable(states);
 		return new RestorePlan<>(hallId, states, targetOf(states, point), changes);
 	}
 
@@ -292,13 +297,18 @@ public class StoreHallRepository implements HallRepository {
 	 * und der Cache bleibt unberührt (nur für Tests; das Wiederherstellen ist {@link #restoreHall}).
 	 */
 	Hall hallAt(String hallId, SavePoint point) throws IOException {
-		List<UnitState> states = List.of(sync.unitState(UnitKey.hall(hallId)));
-		RestorePlanner.requireRestorable(states);
-		return targetOf(states, point);
+		return targetOf(List.of(sync.unitState(UnitKey.hall(hallId))), point);
 	}
 
+	/**
+	 * Der Zielstand der Halle zum Speicherstand, nachdem {@link RestorePlanner#requireRestorable} sie gegen ihn geprüft hat.
+	 *
+	 * @throws LockedUnitException wie {@link #restoreHall}
+	 */
 	private Hall targetOf(List<UnitState> states, SavePoint point) {
-		return RestorePlanner.single(UnitMapper.assembleHalls(RestorePlanner.targetsAt(states, point.at()).values()),
+		Map<UnitKey, UnitSnapshot> targets = RestorePlanner.targetsAt(states, point.at());
+		RestorePlanner.requireRestorable(states, targets);
+		return RestorePlanner.single(UnitMapper.assembleHalls(targets.values()),
 				"Zu diesem Speicherstand war die Halle gelöscht.");
 	}
 
@@ -392,7 +402,6 @@ public class StoreHallRepository implements HallRepository {
 		baseline.delete(hall.getId(), UnitKey.hall(hall.getId()), hall.getName());
 
 		cachedHalls.remove(hall);
-		roundTrips.remove(UnitKey.hall(hall.getId()));
 
 		listeners.notifyDeleted(hall);
 	}
@@ -477,6 +486,42 @@ public class StoreHallRepository implements HallRepository {
 				&& !isBlocked(hall, known);
 	}
 
+	/**
+	 * Ob die Halle im Versionsspeicher inhaltlich gesperrt ist (KARV-135): Ihr aktueller Stand stammt von einem neueren
+	 * Programm ({@link UnitSnapshot#contentLocked}), sie fehlt deshalb im Modell. Gefragt wird der Index, ohne Datei-Ein-/Ausgabe;
+	 * eine unbekannte oder ungültige ID ist nicht gesperrt.
+	 */
+	public boolean isContentLocked(String hallId) {
+		return indexedLock(hallId) != null;
+	}
+
+	/** Der Stand der inhaltlich gesperrten Halle im Index, sonst {@code null}. */
+	private UnitSnapshot indexedLock(String hallId) {
+		if (hallId == null || hallId.isBlank()) {
+			return null;
+		}
+		UnitKey unit;
+		try {
+			unit = UnitKey.hall(hallId);
+		} catch (IllegalArgumentException e) {
+			// eine ID, die keine Einheit haben kann, ist nie gesperrt
+			return null;
+		}
+		UnitSnapshot snapshot = sync.snapshots(List.of(unit)).get(unit);
+		return snapshot != null && snapshot.contentLocked() ? snapshot : null;
+	}
+
+	/**
+	 * Die Sperrmeldung (SYS-009) einer inhaltlich gesperrten Halle ({@link #isContentLocked}), sonst {@code null}. Die Halle
+	 * heißt wie in den übrigen Sperrmeldungen ({@link LockedUnitException#useLabels}), ohne Bezeichnung nach ihrem Pfad;
+	 * ihr Inhalt wird nicht gelesen, er stammt von einem neueren Programm. Für die Prüfung der Vorstellungen
+	 * ({@code PresentationValidator.useHallLocks}).
+	 */
+	public String lockTextOfHall(String hallId) {
+		UnitSnapshot locked = indexedLock(hallId);
+		return locked == null ? null : UnitMapper.lockMessage(locked.unit(), UnitMapper.missingLock(locked));
+	}
+
 	/** Der Stand der Einheit im Vergleichsstand (nur für Tests). */
 	UnitSnapshot knownUnit(UnitKey unit) {
 		return baseline.known(unit);
@@ -521,12 +566,15 @@ public class StoreHallRepository implements HallRepository {
 
 		Hall fresh = UnitMapper.readUnit(current, Hall.class);
 		if (fresh == null) {
-			// gelöscht oder unlesbar: wie beim Laden unsichtbar
+			// gelöscht, unlesbar oder inhaltlich zu neu: wie beim Laden unsichtbar
 			baseline.adopt(hallId, current, false);
-			if (!UnitMapper.isAbsent(current)) {
+			if (current.contentLocked()) {
+				// gesperrt, nicht entfernt (KARV-135): die Sperrmeldung mit dem Namen, unter dem der Nutzer die Halle kennt
+				warnings.add(old != null ? StoreMessages.newerFormat(EntityLabels.nameOrPlaceholder(old.getName()))
+						: UnitMapper.lockMessage(unit, UnitMapper.missingLock(current)));
+			} else if (!UnitMapper.isAbsent(current)) {
 				warnings.add(UnitMapper.unreadableHall(hallId));
 			}
-			roundTrips.remove(unit);
 			if (old != null) {
 				cachedHalls.remove(old);
 				removedByOthers.add(hallId);
@@ -569,31 +617,15 @@ public class StoreHallRepository implements HallRepository {
 			return true;
 		}
 		try {
-			ObjectNode knownAsModel = knownAsModel(known);
-			// ohne lesbaren Vergleichsstand gilt die Halle als verändert
+			// Verglichen wird mit dem Stand, wie das Modell ihn aus der Datei macht, nicht mit dem rohen Payload (KARV-128,
+			// KARV-133): Schrieb eine andere Programmversion die Halle, gälte sie sonst gleich nach dem Laden als verändert.
+			// Ohne lesbaren Vergleichsstand gilt die Halle als verändert.
+			ObjectNode knownAsModel = baseline.comparable(UnitKey.hall(hall.getId()));
 			return knownAsModel == null || !UnitMapper.decompose(hall).payload().equals(knownAsModel);
 		} catch (IllegalStateException e) {
 			// ohne verlässlichen Vergleich gilt die Halle als verändert
 			return true;
 		}
-	}
-
-	/**
-	 * Der Vergleichsstand, wie ihn das Modell daraus macht ({@link UnitMapper#roundTrip}), nicht der rohe Payload: Schrieb
-	 * eine andere Programmversion die Halle, trägt er Felder, die das Modell nicht kennt (KARV-128), und die Halle gälte
-	 * sonst gleich nach dem Laden als verändert. Gemerkt je Halle, bis der Vergleichsstand wechselt.
-	 */
-	private ObjectNode knownAsModel(UnitSnapshot known) {
-		RoundTrip cached = roundTrips.get(known.unit());
-		if (cached == null || cached.source() != known) {
-			cached = new RoundTrip(known, UnitMapper.roundTrip(known, Hall.class));
-			roundTrips.put(known.unit(), cached);
-		}
-		return cached.payload();
-	}
-
-	/** Ein Vergleichsstand und sein Rundlauf durch das Modell ({@code payload} ist {@code null}, wenn er unlesbar ist). */
-	private record RoundTrip(UnitSnapshot source, ObjectNode payload) {
 	}
 
 	private Hall cachedHall(String hallId) {

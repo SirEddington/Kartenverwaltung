@@ -33,7 +33,7 @@ Temurin 21. The release workflow runs it again before building the JARs.
 
 ## What is covered
 
-About 2,950 test runs in ~180 test classes, organized in the same packages as the production code.
+About 3,170 test runs in ~195 test classes, organized in the same packages as the production code.
 
 | Area | Examples | Kind |
 |---|---|---|
@@ -43,7 +43,8 @@ About 2,950 test runs in ~180 test classes, organized in the same packages as th
 | `store` | `VersionStoreTest`, `ChainResolverTest`, `UploaderTest`, `FeedReaderTest`/`FeedWriterTest`, `FullSyncTest`, `DamageRepairTest`, `UnitIndexTest`, `InstanceLockTest`, `SyncServiceTest` | Unit / integration on temp dirs |
 | `store` scenarios | `CloudScenarioTest` (several services behind a simulated Nextcloud), `ConnectFlowStoreTest` | Integration |
 | `repository` | `StoreEventRepositoryTest`, `StoreHallRepository*Test`, `UnitMapperTest`, `EventMergeTest`, `FieldMergeTest`, `BookingPolicyTest`, `BookingTrailTest`, `RestorePlannerTest` | Unit / integration |
-| `repository` scenarios | `ConflictScenarioTest` (conflicts end to end across two or three machines) | Integration |
+| `repository` scenarios | `ConflictScenarioTest` (conflicts end to end across two or three machines; also a simulated newer-version machine, see below) | Integration |
+| data format guards | `FormatGuardTest`, `JsonKeysTest`, `ArchitectureGuardTest`, `FormatSamplesTest`, `StoreCodecTest` | Unit / integration |
 | `tracking` | `ChangeTrackerTest`, `StateRestorerTest` | Unit |
 | `update` | `AppVersionTest`, `InstallationTest`, `UpdateInfoTest`, `GrundTest`, `UpdateStateTest`, `UpdateCheckerTest` (fake scheduler), `HttpUpdateSourceTest` (small `ServerSocket` server, the module does not read `jdk.httpserver`) | Unit |
 | `ui` logic | savers, `LeaveGuard`, `LiveUpdates`, sales (`SeatBulkEdit`, `BookingSearch`, `PlaceAssignment`, `MoneyConsistencyTest`, …), `shared` (`ConnectFlowTest`, `SharedFolderStartTest`, `SyncStatusTest`, …), `backup`, `input` | Unit |
@@ -65,9 +66,25 @@ controls such as table cells and column widths; this is why CI needs `xvfb-run`.
   test decides when each client syncs, so arrival order is exact; it reproduces conflict copies, ignored `~*.tmp`
   files and non-propagated deletions.
 - **Real files.** Store and repository tests work on JUnit temp directories with the production `NioFileLayer`.
+- **Data format guards** (forward-compatible format, rules in
+  [decisions.md](decisions.md#forward-compatible-data-format)). They fail on a format change that needs a decision:
+  - `FormatGuardTest` finds every stored class and enum through the app's mapper: a new class, field or enum value,
+    or a removed enum value, must follow the rules (tolerant or strict enum, `rulesId` matches the strict enum).
+  - `JsonKeysTest` pins the exact keys every stored class writes and that no hidden, discarded or reserved name is
+    written.
+  - `ArchitectureGuardTest` scans `src/main/java`: a payload is read into the model only through
+    `UnitMapper.readUnit`, which leaves out locked content.
+  - `StoreCodecTest.envelopeKeysAreUnchanged` pins the keys of a version file's envelope (`StoreCodec.FORMAT` stays 1).
+  - `FormatSamplesTest` loads every sample under `src/test/resources/format-samples/<version>/data.zip` (one per
+    release, created with `FormatSampleGenerator`, see [installation.md](installation.md#releasing)): nothing counts
+    as changed, and saving without a change writes nothing. It also builds the folder of a "1.2 machine" with
+    `FutureWriter` and checks that extra fields survive and exactly the unsafe content is locked.
+  - `ConflictScenarioTest` runs the same newer-version machine (`FutureWriter`, its own service with a permissive
+    gate) against a 1.1 machine over the shared folder: extra fields survive edits, an unknown payment status locks
+    the seat until a known value arrives, and `requires` on a presentation locks it.
 - **Test doubles in the test tree:** `FakeConnection` (connection control for UI flows), `TestRepositories`,
-  `TrailFixture`, `VersionStoreFixtures`, `ForeignVersions`, `TestBookings`, `LogCapture` (assert log output),
-  `SteppedClock`.
+  `TrailFixture`, `VersionStoreFixtures`, `ForeignVersions`, `FutureWriter` (raw writes of a newer program version),
+  `TestBookings`, `LogCapture` (assert log output), `SteppedClock`.
 
 ## Conventions
 

@@ -20,13 +20,13 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.core.JsonProcessingException;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
@@ -119,7 +119,7 @@ class PlanEditsEndToEndTest {
 		presentation.setHallId(hall.getId());
 		presentation.setSeatingPlanId(plan.getId());
 		presentation.setPrice(DEFAULT_PRICE);
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 
 		Booking card = booking(presentation, 1, 1);
 		card.setLastName("Schmidt");
@@ -171,7 +171,7 @@ class PlanEditsEndToEndTest {
 	/** Abgleich nach dem Laden wie in der App, mit frischem Tracker gegen genau diese Halle. */
 	private static ChangeTracker<Event> prepare(Event event, Hall hall) {
 		ChangeTracker<Event> tracker = new ChangeTracker<>(Event::getId);
-		BookingSyncService.prepare(event, id -> hall.getId().equals(id) ? hall : null, tracker);
+		BookingSyncService.prepare(event, id -> hall.getId().equals(id) ? hall : null, tracker, p -> Set.of());
 		return tracker;
 	}
 
@@ -288,7 +288,7 @@ class PlanEditsEndToEndTest {
 		StoreEventRepository eventRepository = events();
 		Event stored = eventRepository.loadEvents().stream().filter(e -> e.getId().equals(f.eventId())).findFirst().orElseThrow();
 		List<Event> saved = PlanFreezer.freeze(List.of(stored), presentation -> doomed.getId().equals(presentation.getSeatingPlanId()),
-				id -> editorHall.getId().equals(id) ? editorHall : null, new ChangeTracker<>(Event::getId), eventRepository::saveEvent);
+				id -> editorHall.getId().equals(id) ? editorHall : null, unlocked -> Set.of(), new ChangeTracker<>(Event::getId), eventRepository::saveEvent);
 		assertEquals(List.of(stored), saved, "das betroffene Event wird vor dem Löschen gespeichert");
 		assertTrue(editorHall.getSeatingPlans().remove(doomed), "Bestuhlung entfernt");
 		doomedHalls.saveHall(editorHall);

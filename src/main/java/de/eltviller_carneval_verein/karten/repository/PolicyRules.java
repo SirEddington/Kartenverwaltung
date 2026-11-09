@@ -80,7 +80,18 @@ final class PolicyRules {
 	/** Wie {@link #isReadable(ConflictInput, Version)} für eine Version der Einheit {@code unit}. */
 	static boolean isReadable(UnitKey unit, Version version) {
 		return version.deleted()
-				|| UnitMapper.isReadable(new UnitSnapshot(unit, version.id(), Status.OK, false, version.payload()));
+				|| UnitMapper.isReadable(new UnitSnapshot(unit, version.id(), Status.OK, false, version.payload(),
+						version.newerContent()));
+	}
+
+	/**
+	 * Ob die Version für die Umzugsspur zählt: lesbar ({@link #isReadable(UnitKey, Version)}) oder inhaltlich zu neu. Die
+	 * Spur entscheidet nur über Buchungs-ID und Umzugsangaben auf JSON-Ebene; ohne inhaltlich zu neue Versionen fände sie
+	 * eine Ankunft nicht, deren {@code movedFrom} nur an einer solchen steht, und die Buchung lebte an der Quelle wieder
+	 * auf (doppelt).
+	 */
+	static boolean isTrailReadable(UnitKey unit, Version version) {
+		return isReadable(unit, version) || version.newerContent();
 	}
 
 	/** "Gleich": Ist "Meine" gleich "Deren" oder gleich der Basis, gilt "Deren", ohne Vermerk. */

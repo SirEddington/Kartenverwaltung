@@ -4,10 +4,14 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -82,6 +86,27 @@ public class Booking {
 	 * ohne das Feld laden als {@code false}).
 	 */
 	private boolean unassigned; // get,set
+
+	// Unbekannte Felder -->
+	/** Felder aus der Datei, die diese Version nicht kennt (z. B. von einer neueren Version); sie werden unverändert zurückgeschrieben. */
+	private final UnknownFields unknown = new UnknownFields();
+
+	@JsonIgnore
+	public UnknownFields getUnknown() {
+		return unknown;
+	}
+
+	/** Merkt sich ein Feld, das diese Version nicht kennt; ein durchgelassenes {@code requires} fällt weg (siehe {@link UnknownFields#putUnitField}). */
+	@JsonAnySetter
+	void putUnknown(String key, JsonNode value) {
+		unknown.putUnitField(key, value);
+	}
+
+	@JsonAnyGetter
+	Map<String, JsonNode> unknownFields() {
+		return unknown.asMap();
+	}
+	// <-- Unbekannte Felder
 
 	// Getter und Setter -->
 	@JsonIgnore
@@ -320,11 +345,14 @@ public class Booking {
 
 	/**
 	 * Ob die Buchung Daten trägt, die nicht verloren gehen dürfen: Name, E-Mail, Kommentar, ein Zahlstatus oder
-	 * abgeholt. Ein bloßer Einzelpreis zählt nicht. Dieselben Felder benennt {@link #dataLabels()}.
+	 * abgeholt, dazu Felder einer neueren Version, die diese nicht kennt, sofern sie einen Wert tragen (ein neues Feld mit
+	 * Standardwert steht als {@code null} in der Datei, {@link UnknownFields#hasValues}). Ein bloßer Einzelpreis zählt
+	 * nicht. Dieselben Felder benennt {@link #dataLabels()}.
 	 */
 	public boolean hasData() {
 		return !isBlank(lastName) || !isBlank(firstName) || !isBlank(eMail) || !isBlank(comment)
-				|| (getPaymentStatus() != null && getPaymentStatus() != PaymentStatus.NONE) || collected;
+				|| (getPaymentStatus() != null && getPaymentStatus() != PaymentStatus.NONE) || collected
+				|| unknown.hasValues();
 	}
 
 	/**
@@ -350,6 +378,9 @@ public class Booking {
 		}
 		if (collected) {
 			labels.add("abgeholt");
+		}
+		if (unknown.hasValues()) {
+			labels.add("weitere Angaben");
 		}
 		return labels;
 	}
@@ -407,6 +438,7 @@ public class Booking {
 		setEMail(source.getEMail());
 		setComment(source.getComment());
 		setUnassigned(source.isUnassigned());
+		unknown.replaceWith(source.unknown);
 	}
 
 	/**
@@ -427,6 +459,7 @@ public class Booking {
 		setCollectionDate(null);
 		setPrice(null);
 		setUnassigned(false);
+		unknown.clear();
 		setId(null);
 	}
 

@@ -21,6 +21,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
+
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 
@@ -45,6 +48,10 @@ import de.eltviller_carneval_verein.karten.store.UnitState.Status;
  * <li>Eine gesperrte oder wartende Kette wird übersprungen: {@code LOCKED_FORMAT} bis zum neueren Programm,
  * {@code LOCKED_DAMAGED} bis die Heilung oder {@link SyncService#resetToLastReadable} eine neue Version schreibt (dann
  * meldet der Dienst den Verlust erneut), {@code WAITING} bis die fehlende Version da ist.</li>
+ * <li>Gesperrte Nachbarn (KARV-135): Zielt eine weitere Änderung der Entscheidung auf eine inhaltlich gesperrte Einheit,
+ * oder schlägt die Inhaltsprüfung ({@link Host#gate}) auf einem Inhalt an, den die Auflösung schreiben würde, wird nichts
+ * geschrieben. Die Einheit wartet außerhalb der Schlange, bis der Dienst eine Änderung an einer blockierenden Einheit meldet
+ * ({@link #unitChanged}); einmal im Log (INFO), worauf sie wartet.</li>
  * </ul>
  * Geschrieben wird über {@link SyncService#append} mit einer neuen {@code saveId} je Strecke: zuerst die weiteren
  * Änderungen der {@link Resolution}, dann die Zusammenführung. Eine weitere neue Einheit (ohne Vorgänger) entfällt, sobald
@@ -110,6 +117,12 @@ final class ConflictResolver {
 		 * sähe wie eine Stornierung aus. Die Einheit bleibt eingereiht und kommt nach dem letzten Block dran.
 		 */
 		boolean deferred(UnitKey unit);
+
+		/**
+		 * Die Inhaltsprüfung, die auch die Stores nutzen: Was die Auflösung schreiben würde, geht vorher durch sie, damit
+		 * dieses Programm nie Inhalte eines neueren schreibt (etwa eine gesperrte Spurversion auf einen neuen Träger).
+		 */
+		ContentGate gate();
 	}
 
 	/** Was mit einer verlorenen Strecke in diesem Durchlauf geschieht. */
@@ -158,6 +171,20 @@ final class ConflictResolver {
 	 * wieder durchläuft. Ist die Menge leer, ist keine Störung im Gang.
 	 */
 	private final Set<UnitKey> disrupted = new HashSet<>();
+	/**
+	 * Die Einheiten, deren Auflösung auf gesperrte Einheiten wartet, je mit den Einheiten, deren Änderung sie wieder
+	 * einreiht ({@link #unitChanged}); sie stehen nicht in der Schlange. Gehört wie {@link #changedInPass} zur Sperre
+	 * {@link #queue}.
+	 */
+	private final Map<UnitKey, Set<UnitKey>> waitingOn = new HashMap<>();
+	/**
+	 * Die Einheiten, die sich während des laufenden Durchlaufs geändert haben: Eine Strecke, die gerade auf eine davon zu
+	 * warten beschließt, bleibt eingereiht, statt eine Meldung zu verpassen, die vor ihrem Eintrag in {@link #waitingOn}
+	 * kam.
+	 */
+	private final Set<UnitKey> changedInPass = new HashSet<>();
+	/** Die wartenden Einheiten, deren Warten schon im Log steht (einmal je Einheit, bis sie wieder durchläuft). */
+	private final Set<UnitKey> waitLogged = new HashSet<>();
 
 	ConflictResolver(Host host, SyncNotifier notifier, Clock clock) {
 		this.host = host;
@@ -190,8 +217,51 @@ final class ConflictResolver {
 	}
 
 	/**
+	 * Meldet, dass sich der Stand einer Einheit geändert hat: Jede Einheit, deren Auflösung auf sie wartet
+	 * ({@link #waitingOn}), kommt wieder in die Schlange, ebenso die Einheit selbst, wenn sie wartet (ihr Verlust kann
+	 * inzwischen aufgegangen sein; sonst zählte {@link #waitingUnits} sie weiter). Von jedem Thread.
+	 */
+	void unitChanged(UnitKey changed) {
+		synchronized (queue) {
+			if (running.isLocked()) {
+				// ein Durchlauf läuft: Was er schon gelesen hat, ist vielleicht überholt (siehe park)
+				changedInPass.add(changed);
+			}
+			Iterator<Map.Entry<UnitKey, Set<UnitKey>>> it = waitingOn.entrySet().iterator();
+			while (it.hasNext()) {
+				Map.Entry<UnitKey, Set<UnitKey>> entry = it.next();
+				if (entry.getKey().equals(changed) || entry.getValue().contains(changed)) {
+					queue.add(entry.getKey());
+					it.remove();
+				}
+			}
+		}
+	}
+
+	/** Die Einheiten, deren Auflösung auf gesperrte Einheiten wartet (eine Kopie). */
+	Set<UnitKey> waitingUnits() {
+		synchronized (queue) {
+			return Set.copyOf(waitingOn.keySet());
+		}
+	}
+
+	/**
+	 * Je wartender Einheit die Einheit, auf die sie wartet, für die Anzeige: ein gesperrter Nachbar, wenn einer blockiert,
+	 * sonst die Einheit selbst (die Inhaltsprüfung schlug auf dem an, was die Auflösung schreiben würde). Eine Kopie.
+	 */
+	Map<UnitKey, UnitKey> waitingFor() {
+		synchronized (queue) {
+			Map<UnitKey, UnitKey> waiting = new HashMap<>();
+			waitingOn.forEach((unit, blockers) -> waiting.put(unit,
+					blockers.stream().filter(blocker -> !blocker.equals(unit)).findFirst().orElse(unit)));
+			return waiting;
+		}
+	}
+
+	/**
 	 * Löst höchstens {@code budget} eingereihte Einheiten auf, die zuerst eingereihten zuerst; der Rest bleibt in der
-	 * Schlange. Eine Einheit, die auf Änderungslisten wartet, kommt wieder ans Ende.
+	 * Schlange. Eine Einheit, die auf Änderungslisten wartet, kommt wieder ans Ende; eine, die auf gesperrte Einheiten
+	 * wartet, erst mit {@link #unitChanged}.
 	 * <p>
 	 * Gemeldet wird einmal je Durchlauf, am Ende (auch bei einem unerwarteten Fehler): die geschriebenen Einheiten in einem
 	 * {@link SyncNotifier#unitsChanged} und, wenn eine geschriebene Version einen Vermerk trägt, danach ein
@@ -204,6 +274,7 @@ final class ConflictResolver {
 		try {
 			List<UnitKey> units = new ArrayList<>();
 			synchronized (queue) {
+				changedInPass.clear();
 				Iterator<UnitKey> it = queue.iterator();
 				while (it.hasNext() && units.size() < budget) {
 					units.add(it.next());
@@ -212,7 +283,19 @@ final class ConflictResolver {
 			}
 			List<UnitKey> again = new ArrayList<>();
 			for (UnitKey unit : units) {
-				if (resolveUnit(unit, written)) {
+				// wieder eingereiht oder neu gemeldet: Die Einheit wird jetzt neu gerechnet
+				synchronized (queue) {
+					waitingOn.remove(unit);
+				}
+				boolean requeue = resolveUnit(unit, written);
+				boolean waiting;
+				synchronized (queue) {
+					waiting = waitingOn.containsKey(unit);
+				}
+				if (!requeue) {
+					// erledigt oder übersprungen: Ein späteres Warten steht wieder im Log
+					waitLogged.remove(unit);
+				} else if (!waiting) {
 					again.add(unit);
 				}
 			}
@@ -290,8 +373,9 @@ final class ConflictResolver {
 	 * Führt die verlorenen Strecken einer Einheit nacheinander zusammen; nach jeder Zusammenführung wird der Stand neu
 	 * gelesen (eine Strecke kann dadurch wachsen oder eine neue entstehen, wenn die Zusammenführung sofort verliert).
 	 *
-	 * @return ob die Einheit wieder eingereiht wird: Eine Strecke wartet auf Änderungslisten, oder die Höchstzahl der
-	 *         Zusammenführungen ist erreicht
+	 * @return ob die Einheit wieder eingereiht wird: Eine Strecke wartet auf Änderungslisten oder auf gesperrte Einheiten
+	 *         (dann steht sie in {@link #waitingOn} und kommt erst mit {@link #unitChanged} in die Schlange), oder die
+	 *         Höchstzahl der Zusammenführungen ist erreicht
 	 */
 	private boolean mergeStretches(UnitKey unit, Written written) throws IOException {
 		Set<VersionId> tried = new HashSet<>();
@@ -326,6 +410,12 @@ final class ConflictResolver {
 			Resolution resolution = decide(unit, merge);
 			if (resolution == null) {
 				return false;
+			}
+			Set<UnitKey> blockers = blockers(unit, merge, resolution);
+			if (!blockers.isEmpty()) {
+				// nichts schreiben: Die Einheit wartet wie bei Step.WAIT, aber außerhalb der Schlange (siehe park)
+				park(unit, blockers);
+				return true;
 			}
 			List<Change> changes = changes(unit, merge, resolution);
 			changes.forEach(change -> written.units.add(change.unit()));
@@ -579,6 +669,79 @@ final class ConflictResolver {
 		}
 	}
 
+	/**
+	 * Worauf die Entscheidung warten muss, bevor sie geschrieben wird (KARV-135); leer, wenn sie jetzt geschrieben wird:
+	 * <ul>
+	 * <li>jede Einheit einer weiteren Änderung, deren Stand inhaltlich zu neu ist ({@link UnitState#contentLocked}): Dieses
+	 * Programm löschte oder überschriebe sonst eine Version, die es nicht lesen kann. Ein beschädigter Nachbar und eine
+	 * echte Formatsperre zählen nicht, dort verliert die Folgeversion ihren Platz wie bisher;</li>
+	 * <li>schlägt die Inhaltsprüfung auf einem Inhalt an, den die Auflösung schreiben würde (Ergebnis oder weitere
+	 * Änderung), die Einheit selbst, die Einheiten der Umzugsspur, die eine inhaltlich zu neue Version haben, und bei einer
+	 * Buchung die inhaltlich gesperrten Geschwister ({@link Host#siblings}, die die Strategie auch sieht): Aus ihnen kann
+	 * der Inhalt stammen, und erst wenn sich eine davon ändert, kann die Entscheidung anders ausfallen.</li>
+	 * </ul>
+	 */
+	private Set<UnitKey> blockers(UnitKey unit, Stretch stretch, Resolution resolution) throws IOException {
+		Set<UnitKey> blockers = new LinkedHashSet<>();
+		boolean newer = !resolution.deleted() && isNewer(unit, resolution.payload());
+		for (Change extra : resolution.extra()) {
+			if (host.resolve(extra.unit()).state().contentLocked()) {
+				blockers.add(extra.unit());
+			}
+			newer |= !extra.deleted() && isNewer(extra.unit(), extra.payload());
+		}
+		if (newer) {
+			stretch.trail().forEach((key, trailUnit) -> {
+				if (Stream.concat(trailUnit.chain().stream(), trailUnit.outside().stream()).anyMatch(Version::newerContent)) {
+					blockers.add(key);
+				}
+			});
+			if (unit.type() == UnitType.BOOKING) {
+				host.siblings(unit).forEach((key, sibling) -> {
+					if (sibling.snapshot().contentLocked()) {
+						blockers.add(key);
+					}
+				});
+			}
+			blockers.add(unit);
+		}
+		return blockers;
+	}
+
+	/** Ob die Inhaltsprüfung den Inhalt als zu neu ansieht; ein Fehler in ihr zählt als „ja“ (die Auflösung wartet). */
+	private boolean isNewer(UnitKey unit, ObjectNode payload) {
+		if (payload == null) {
+			return false;
+		}
+		try {
+			return host.gate().isNewer(unit, payload);
+		} catch (RuntimeException e) {
+			LOGGER.log(Level.WARNING, "Die Inhaltsprüfung der Auflösung an " + unit.relativePath()
+					+ " ist fehlgeschlagen; der Inhalt gilt als inhaltlich zu neu", e);
+			return true;
+		}
+	}
+
+	/**
+	 * Lässt die Einheit auf die Blocker warten: Sie verlässt die Schlange und kommt erst wieder, wenn sich einer davon
+	 * ändert ({@link #unitChanged}), statt in jedem Takt Strategie und Spur neu zu rechnen und das Budget zu verbrauchen.
+	 * Hat sich ein Blocker oder die Einheit selbst schon in diesem Durchlauf geändert, bleibt sie eingereiht (die Meldung
+	 * kam vor dem Eintrag; {@link #unitChanged} weckt auch bei einer Änderung der Einheit selbst). Einmal je Einheit im
+	 * Log (INFO), bevorzugt mit einem Nachbarn statt der Einheit selbst.
+	 */
+	private void park(UnitKey unit, Set<UnitKey> blockers) {
+		synchronized (queue) {
+			if (changedInPass.contains(unit) || blockers.stream().anyMatch(changedInPass::contains)) {
+				return;
+			}
+			waitingOn.put(unit, blockers);
+		}
+		if (waitLogged.add(unit)) {
+			UnitKey blocker = blockers.stream().filter(key -> !key.equals(unit)).findFirst().orElse(unit);
+			LOGGER.info("Auflösung von " + unit.relativePath() + " wartet auf gesperrte Einheit " + blocker.relativePath());
+		}
+	}
+
 	/** Der Ordner einer Einheit auf der Umzugsspur aus dem lokalen Bestand: Kette, lesbare Versionen, aktueller Stand. */
 	private TrailCollector.Folder folder(UnitKey unit) throws IOException {
 		SyncService.Resolved resolved = host.resolve(unit);
@@ -592,8 +755,8 @@ final class ConflictResolver {
 		return new TrailCollector.Folder(resolved.state().chain(), versions, current == null ? null : current.id());
 	}
 
-	/** Die Spur als Kopien für die Strategie. */
-	private static Map<UnitKey, TrailUnit> copy(Map<UnitKey, TrailUnit> trail) {
+	/** Die Spur als Kopien für die Strategie; jede Version wie bei {@link #copy(Version)}. */
+	static Map<UnitKey, TrailUnit> copy(Map<UnitKey, TrailUnit> trail) {
 		Map<UnitKey, TrailUnit> copies = new LinkedHashMap<>();
 		trail.forEach((key, unit) -> copies.put(key, new TrailUnit(key,
 				unit.chain().stream().map(ConflictResolver::copy).toList(),
@@ -666,14 +829,15 @@ final class ConflictResolver {
 
 	// --- Kopien für die Strategie: Die Inhalte aus Dateien und Index gehören dem Index
 
-	private static Version copy(Version version) {
+	/** Eine tiefe Kopie der Version; das Merkmal „inhaltlich zu neu“ bleibt erhalten. */
+	static Version copy(Version version) {
 		if (version == null) {
 			return null;
 		}
 		return new Version(version.format(), version.id(), version.parents(), version.machine(), version.machineName(),
 				version.operator(), version.at(), version.saveId(), version.deleted(),
 				version.payload() == null ? null : version.payload().deepCopy(), copy(version.conflict()), version.seen(),
-				version.marks());
+				version.marks(), version.newerContent());
 	}
 
 	private static ConflictNote copy(ConflictNote note) {
@@ -696,7 +860,7 @@ final class ConflictResolver {
 			ConflictInput.Sibling sibling = entry.getValue();
 			UnitSnapshot s = sibling.snapshot();
 			UnitSnapshot copy = new UnitSnapshot(s.unit(), s.version(), s.status(), s.deleted(),
-					s.payload() == null ? null : s.payload().deepCopy());
+					s.payload() == null ? null : s.payload().deepCopy(), s.contentLocked());
 			copies.put(entry.getKey(), new ConflictInput.Sibling(copy));
 		}
 		return copies;

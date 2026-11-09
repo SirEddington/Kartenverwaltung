@@ -3,21 +3,36 @@ package de.eltviller_carneval_verein.karten.ui.event;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.function.Function;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
+import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.TestRepositories;
+import de.eltviller_carneval_verein.karten.store.ForeignVersions;
+import de.eltviller_carneval_verein.karten.store.SyncService;
+import de.eltviller_carneval_verein.karten.store.TestSyncServices;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 
 class EventTemplatesTest {
 
@@ -34,7 +49,7 @@ class EventTemplatesTest {
 		presentation.setHallId(hall.getId());
 		presentation.setSeatingPlanId(plan.getId());
 		presentation.setPrice(1700);
-		de.eltviller_carneval_verein.karten.model.BookingSync.sync(presentation, plan);
+		de.eltviller_carneval_verein.karten.model.Syncs.sync(presentation, plan);
 		return presentation;
 	}
 
@@ -110,6 +125,65 @@ class EventTemplatesTest {
 		Event copy = EventTemplates.copyEvent(event, List.of("Kampagne", "Kampagne (Kopie)"), halls);
 
 		assertEquals("Kampagne (Kopie 2)", copy.getName());
+	}
+
+	@Test
+	void copyEventAndPresentationCarryUnknownFields() {
+		Event event = new Event();
+		event.setName("Kampagne");
+		event.getUnknown().put("x-test-event", TextNode.valueOf("e"));
+		Presentation original = presentation(event);
+		ObjectNode extra = JsonNodeFactory.instance.objectNode().put("inner", 1);
+		original.getUnknown().put("x-test-presentation", extra);
+
+		Presentation presentationCopy = EventTemplates.copyPresentation(original, new Event(), halls);
+		Event eventCopy = EventTemplates.copyEvent(event, List.of("Kampagne"), halls);
+
+		assertEquals(extra, presentationCopy.getUnknown().asMap().get("x-test-presentation"));
+		assertNotSame(extra, presentationCopy.getUnknown().asMap().get("x-test-presentation"), "Tiefe Kopie");
+		assertEquals(TextNode.valueOf("e"), eventCopy.getUnknown().asMap().get("x-test-event"));
+		assertEquals(extra, eventCopy.getPresentations().get(0).getUnknown().asMap().get("x-test-presentation"));
+	}
+
+	/**
+	 * KARV-135: Eine gesperrte Vorstellung, die im Modell fehlt, kommt nicht in die Kopie; der Hinweis nennt die Zahl. Steht
+	 * sie noch im Modell (älterer Stand angezeigt, oder die fremde Änderung ist zurückgestellt), wird sie mitkopiert und
+	 * zählt nicht. Buchungen zählen nicht mit, sie werden nie kopiert.
+	 */
+	@Test
+	void copiesCountTheLockedEntriesTheyLeaveOut(@TempDir Path appData) throws IOException {
+		SyncService sync = TestSyncServices.singleMode(appData);
+		sync.startup(null, p -> {
+		});
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = new Event();
+		event.setName("Kampagne");
+		Presentation friday = event.addPresentation("Freitag");
+		Presentation saturday = event.addPresentation("Samstag");
+		Booking sold = friday.addBooking();
+		sold.setUnassigned(true);
+		sold.setLastName("Müller");
+		repository.saveEvent(event);
+		ForeignVersions foreign = new ForeignVersions(sync, appData);
+		UnitKey booking = UnitKey.unassignedBooking(event.getId(), friday.getId(), sold.getId());
+		foreign.write(booking, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		assertTrue(sync.unitState(booking).contentLocked());
+
+		assertEquals(0, EventTemplates.lockedLeftOut(event, repository), "eine gesperrte Buchung zählt nicht");
+
+		UnitKey presentation = UnitKey.presentation(event.getId(), saturday.getId());
+		foreign.write(presentation, "Fremd",
+				payload -> payload.set("requires", JsonNodeFactory.instance.arrayNode().add("x-test-merkmal")));
+		assertTrue(sync.unitState(presentation).contentLocked());
+
+		assertEquals(0, EventTemplates.lockedLeftOut(event, repository),
+				"noch im Modell (die fremde Änderung ist nicht eingearbeitet): wird mitkopiert");
+		// so, wie das Einarbeiten die gesperrte Vorstellung aus dem Modell nimmt
+		event.getPresentations().remove(saturday);
+		assertEquals(1, EventTemplates.lockedLeftOut(event, repository));
+		assertEquals(0, EventTemplates.lockedLeftOut(new Event(), repository), "nie gespeichert");
+		assertEquals("Gesperrte Einträge werden nicht mitkopiert (1).", EventTemplates.lockedNote(1));
+		assertNull(EventTemplates.lockedNote(0));
 	}
 
 	@Test

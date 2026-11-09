@@ -1,12 +1,25 @@
 package de.eltviller_carneval_verein.karten.model;
 
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 
-@JsonIgnoreProperties(ignoreUnknown = true)
+/**
+ * Ein Sitz eines {@link Table Tisches}.
+ * <p>
+ * Verworfene Felder (nie in die unbekannten Felder aufnehmen, nie wieder für etwas anderes verwenden): {@code height}
+ * (v1.0.x schreibt sie noch, seit KARV-128 gibt es keine Höhe mehr) und die alten Verkaufsdaten aus der Zeit vor v0.9.5
+ * ({@code price}, {@code paymentStatus}, {@code collected}, {@code lastName}, {@code firstName}, {@code email},
+ * {@code comment}); verkauft wird über {@link Booking}.
+ */
+@JsonIgnoreProperties(value = { "height", "price", "paymentStatus", "collected", "lastName", "firstName", "email",
+		"comment" }, ignoreUnknown = true)
 public class Seat {
 	private final String id;
 	private Table parentTable; // gesetzt von Table.setSeats/addSeat, wird nicht gespeichert
@@ -34,6 +47,27 @@ public class Seat {
 		this.id = (id != null) ? id : UUID.randomUUID().toString();
 	}
 	// <-- Konstuktoren
+
+	// Unbekannte Felder -->
+	/** Felder aus der Datei, die diese Version nicht kennt (z. B. von einer neueren Version); sie werden unverändert zurückgeschrieben. */
+	private final UnknownFields unknown = new UnknownFields();
+
+	@JsonIgnore
+	public UnknownFields getUnknown() {
+		return unknown;
+	}
+
+	/** Merkt sich ein Feld, das diese Version nicht kennt (auch {@code requires}: es hat hier keine Wirkung). */
+	@JsonAnySetter
+	void putUnknown(String key, JsonNode value) {
+		unknown.put(key, value);
+	}
+
+	@JsonAnyGetter
+	Map<String, JsonNode> unknownFields() {
+		return unknown.asMap();
+	}
+	// <-- Unbekannte Felder
 
 	// Getter und Setter -->
 	public String getId() {
