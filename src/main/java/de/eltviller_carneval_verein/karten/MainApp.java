@@ -1101,8 +1101,10 @@ public class MainApp extends Application {
 				}
 				// der Update-Hinweis (KARV-131) steht zuletzt; nicht in Ladeansichten, damit kein Update mitten im Verbinden startet
 				if (!isLoadingView(content)) {
-					UpdateIndicator updateHint = new UpdateIndicator(updateState::get, () -> updates().map(Updates::installation),
-							available -> updates().ifPresent(u -> u.flow().update(available.neu())), MainApp::openSettingsFromHint);
+					UpdateIndicator updateHint = new UpdateIndicator(updateState::get,
+							de.eltviller_carneval_verein.karten.update.FolderState::empty, () -> updates().map(Updates::installation),
+							available -> updates().ifPresent(u -> u.flow().update(available.neu())), offer -> {
+							}, MainApp::openSettingsFromHint);
 					updateIndicator = updateHint;
 					hints.add(updateHint);
 				}

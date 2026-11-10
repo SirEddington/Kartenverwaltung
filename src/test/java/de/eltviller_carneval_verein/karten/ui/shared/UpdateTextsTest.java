@@ -36,6 +36,49 @@ class UpdateTextsTest {
 	}
 
 	@Test
+	void folderTexts() {
+		AppVersion rel = AppVersion.parse("1.1.1", "0").orElseThrow();
+		assertEquals("Update 1.1.0 (Rev. 2) im gemeinsamen Ordner", UpdateTexts.folderIndicatorText(REV2));
+		assertEquals("Update 1.1.1 im gemeinsamen Ordner", UpdateTexts.folderIndicatorText(rel));
+		assertEquals("Klicken, um die Kartenverwaltung aus dem gemeinsamen Ordner zu aktualisieren", UpdateTexts.FOLDER_TOOLTIP);
+		assertEquals("„Kasse 2“ nutzt 1.1.1 – bitte aktualisieren", UpdateTexts.newerStationText("Kasse 2", rel));
+		assertEquals("Klicken für Details", UpdateTexts.NEWER_STATION_TOOLTIP);
+		assertEquals("Update im gemeinsamen Ordner", UpdateTexts.START_TITLE);
+		assertEquals("Version 1.1.1 liegt im gemeinsamen Ordner. Jetzt aktualisieren? Die Kartenverwaltung schließt sich dafür;"
+				+ " bricht die Installation ab, starte sie von Hand neu.", UpdateTexts.startText(rel));
+		assertEquals("Später", UpdateTexts.BUTTON_LATER);
+		assertEquals("Version 1.1.0 (Rev. 2) aus dem gemeinsamen Ordner installieren? Die Kartenverwaltung schließt sich"
+				+ " dafür; bricht die Installation ab, starte sie von Hand neu.", UpdateTexts.confirmFolderText(REV2));
+		assertEquals("Die Datei im gemeinsamen Ordner ist unvollständig oder verändert und wird nicht installiert.",
+				UpdateTexts.ERROR_FOLDER_FILE);
+		assertEquals("Das Update wird gerade auch für die anderen Kassen in den gemeinsamen Ordner geladen; das geht nach"
+				+ " dem Neustart weiter.", UpdateTexts.DOWNLOAD_RUNNING_NOTE);
+		assertEquals("Update wird in den gemeinsamen Ordner geladen …", UpdateTexts.LOADING);
+		assertEquals("Im gemeinsamen Ordner liegt Version 1.1.1, neuer als die Update-Quelle (zurückgezogen?)",
+				UpdateTexts.withdrawnText(rel));
+		assertEquals("An einer Kasse mit Internet „Jetzt prüfen“ – dann liegt das Update bald im gemeinsamen Ordner.",
+				UpdateTexts.NEXT_STEP_PACKAGE);
+		assertEquals("Von Hand aktualisieren.", UpdateTexts.NEXT_STEP_MANUAL);
+		assertEquals("Kassen am gemeinsamen Ordner", UpdateTexts.STATIONS_TITLE);
+	}
+
+	@Test
+	void stationLine() {
+		de.eltviller_carneval_verein.karten.update.StationEntry e = new de.eltviller_carneval_verein.karten.update.StationEntry(
+				"bbbb2222", "Kasse 2", "ecv-karten", REV2, "WINDOWS_PAKET", T);
+		assertEquals("Kasse 2 – 1.1.0 (Rev. 2) – zuletzt gestartet 07.11.2026 14:05 – bbbb2222",
+				UpdateTexts.stationLine(e, false, UTC));
+		assertEquals("Kasse 2 – 1.1.0 (Rev. 2) – zuletzt gestartet 07.11.2026 14:05 – bbbb2222 (diese Kasse)",
+				UpdateTexts.stationLine(e, true, UTC));
+	}
+
+	@Test
+	void confirmDirectWithRunningDownload() {
+		assertTrue(UpdateTexts.confirmDirectText(REV2, false, true).endsWith(" " + UpdateTexts.DOWNLOAD_RUNNING_NOTE));
+		assertEquals(UpdateTexts.confirmDirectText(REV2, true), UpdateTexts.confirmDirectText(REV2, true, false));
+	}
+
+	@Test
 	void reasons() {
 		assertEquals("keine Verbindung zum Update-Server", UpdateTexts.reason(Grund.NETWORK));
 		assertEquals("Zeitüberschreitung", UpdateTexts.reason(Grund.TIMEOUT));

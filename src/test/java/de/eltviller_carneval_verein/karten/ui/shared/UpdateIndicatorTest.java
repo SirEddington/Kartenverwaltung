@@ -17,6 +17,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.update.AppVersion;
+import de.eltviller_carneval_verein.karten.update.FolderOffer;
+import de.eltviller_carneval_verein.karten.update.FolderState;
 import de.eltviller_carneval_verein.karten.update.Grund;
 import de.eltviller_carneval_verein.karten.update.Installation;
 import de.eltviller_carneval_verein.karten.update.UpdateInfo;
@@ -64,8 +66,48 @@ class UpdateIndicatorTest {
 	}
 
 	private UpdateIndicator indicator(UpdateState state, Optional<Installation> inst) {
-		return new UpdateIndicator(() -> state, () -> inst, a -> calls.add("update " + a.neu().version().display()),
-				() -> calls.add("settings"));
+		return indicator(state, FolderState.empty(), inst);
+	}
+
+	private UpdateIndicator indicator(UpdateState state, FolderState folder, Optional<Installation> inst) {
+		return new UpdateIndicator(() -> state, () -> folder, () -> inst,
+				a -> calls.add("update " + a.neu().version().display()),
+				o -> calls.add("folder " + o.version().display()), () -> calls.add("settings"));
+	}
+
+	@Test
+	void clickOnFolderHintStartsFolderUpdate() throws Exception {
+		AppVersion v = AppVersion.parse("1.1.0", "3").orElseThrow();
+		FolderOffer offer = new FolderOffer() {
+			@Override
+			public java.nio.file.Path file() {
+				return java.nio.file.Path.of("a.msix");
+			}
+
+			@Override
+			public AppVersion version() {
+				return v;
+			}
+
+			@Override
+			public Instant firstSeen() {
+				return T;
+			}
+
+			@Override
+			public boolean stillValid() {
+				return true;
+			}
+		};
+		FolderState folder = new FolderState(List.of(), Optional.empty(), Optional.of(offer), Optional.empty(),
+				Optional.empty(), Optional.empty());
+		UpdateIndicator i = onFx(() -> {
+			UpdateIndicator ind = indicator(AVAILABLE, folder, installation("Windows 11", true));
+			ind.fire();
+			return ind;
+		});
+		assertEquals("Update 1.1.0 (Rev. 3) im gemeinsamen Ordner", i.getText());
+		assertEquals(List.of("folder 1.1.0 (Rev. 3)"), calls);
 	}
 
 	@Test
