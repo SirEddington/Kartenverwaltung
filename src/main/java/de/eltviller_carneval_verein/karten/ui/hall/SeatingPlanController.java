@@ -65,6 +65,8 @@ public class SeatingPlanController {
 	// Anzeige im Plan: Menü "Anzeige" und Zoom (setPlanView); ohne beides ist alles beschriftet
 	private PlanLabelOptions labelOptions = new PlanLabelOptions();
 	private final ChangeListener<Boolean> labelsChanged = (obs, oldValue, newValue) -> redraw();
+	// Angemeldet ist dieser Wrapper; nur mit ihm lässt sich wieder abmelden
+	private final WeakChangeListener<Boolean> weakLabelsChanged = new WeakChangeListener<>(labelsChanged);
 	private ObservableDoubleValue scale = new SimpleDoubleProperty(1);
 	// Verhindert, dass das Befüllen des Panels die Listener auslöst und zurückschreibt
 	private boolean updatingPanel = false;
@@ -715,11 +717,11 @@ public class SeatingPlanController {
 	 * Zoom entscheidet, ab wann die Sitznummern erscheinen.
 	 */
 	public void setPlanView(PlanLabelOptions options, ObservableDoubleValue zoom) {
-		labelOptions.removeListener(labelsChanged);
+		labelOptions.removeListener(weakLabelsChanged);
 		this.labelOptions = options;
 		this.scale = zoom;
 		// Schwach: Die Optionen gelten für die ganze App (DisplayPreferences), dieser Editor nicht
-		options.addListener(new WeakChangeListener<>(labelsChanged));
+		options.addListener(weakLabelsChanged);
 		redraw();
 	}
 	// <-- Zeichnung

@@ -84,6 +84,8 @@ public class HallPlanController {
 	// Menü "Anzeige" des Hallen-Editors (setLabelOptions); ohne Menü ist alles beschriftet
 	private PlanLabelOptions labelOptions = new PlanLabelOptions();
 	private final ChangeListener<Boolean> labelsChanged = (obs, oldValue, newValue) -> renderHall();
+	// Angemeldet ist dieser Wrapper; nur mit ihm lässt sich wieder abmelden
+	private final WeakChangeListener<Boolean> weakLabelsChanged = new WeakChangeListener<>(labelsChanged);
 
 	@FXML
 	private StackPane viewportPane;
@@ -417,10 +419,10 @@ public class HallPlanController {
 	 * bekommt dazu den Zoom des Plans, denn die Sitznummern erscheinen erst bei genügend großen Sitzen.
 	 */
 	public void setLabelOptions(PlanLabelOptions options) {
-		labelOptions.removeListener(labelsChanged);
+		labelOptions.removeListener(weakLabelsChanged);
 		this.labelOptions = options;
 		// Schwach: Die Optionen gelten für die ganze App (DisplayPreferences), dieser Editor nicht
-		options.addListener(new WeakChangeListener<>(labelsChanged));
+		options.addListener(weakLabelsChanged);
 		seatingPanelController.setPlanView(options, hallPane.scaleXProperty());
 		renderHall();
 	}

@@ -4,6 +4,7 @@ import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import de.eltviller_carneval_verein.karten.model.TolerantEnum;
 import de.eltviller_carneval_verein.karten.settings.DisplaySettings;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import javafx.beans.property.ObjectProperty;
@@ -29,6 +30,10 @@ public final class DisplayPreferences {
 
 	private final PlanLabelOptions planLabels = new PlanLabelOptions();
 	private final ObjectProperty<SummaryPlacement> summaryPlacement = new SimpleObjectProperty<>(SummaryPlacement.AUTO);
+	// Die Platzierung, wie sie in der Datei steht: Eine unbekannte (aus einer neueren Version) gilt als automatisch und
+	// wird unverändert zurückgeschrieben, bis jemand eine andere als "Automatisch" wählt
+	private final TolerantEnum<SummaryPlacement> filePlacement = new TolerantEnum<>(SummaryPlacement.class, SummaryPlacement.AUTO,
+			SummaryPlacement.AUTO);
 	private final Consumer<Consumer<DisplaySettings>> writer;
 
 	/**
@@ -37,19 +42,24 @@ public final class DisplayPreferences {
 	 */
 	DisplayPreferences(DisplaySettings saved, Consumer<Consumer<DisplaySettings>> writer) {
 		this.writer = writer;
+		filePlacement.fromJson(saved.getSummaryPlacement());
 		if (saved.isRestoreAtStart()) {
 			planLabels.rowsProperty().set(saved.isRows());
 			planLabels.tablesProperty().set(saved.isTables());
 			planLabels.seatNumbersProperty().set(saved.isSeatNumbers());
 			planLabels.hallObjectsProperty().set(saved.isHallObjects());
-			summaryPlacement.set(placementOf(saved.getSummaryPlacement()));
+			summaryPlacement.set(filePlacement.get());
 		}
 		// Erst nach dem Übernehmen, damit der Start nichts schreibt
 		planLabels.addListener((obs, oldValue, newValue) -> write());
 		summaryPlacement.addListener((obs, oldValue, newValue) -> write());
 	}
 
-	/** Die Instanz der App, beim ersten Aufruf aus den gespeicherten Einstellungen aufgebaut. */
+	/**
+	 * Die Instanz der App, beim ersten Aufruf aus den gespeicherten Einstellungen aufgebaut. {@code MainApp} ruft das gleich
+	 * nach dem Laden der Einstellungen auf, damit "Anzeige beim Start wiederherstellen" wirklich der Stand beim Start ist
+	 * und nicht der beim ersten Öffnen von Verkauf oder Hallen-Editor.
+	 */
 	public static DisplayPreferences instance() {
 		if (instance == null) {
 			SettingsStore store = SettingsStore.getInstance();
@@ -76,9 +86,11 @@ public final class DisplayPreferences {
 	}
 
 	private void write() {
-		PlanLabels labels = planLabels.snapshot();
-		String placement = summaryPlacement.get().name();
 		try {
+			PlanLabels labels = planLabels.snapshot();
+			SummaryPlacement current = summaryPlacement.get();
+			filePlacement.set(current == null ? SummaryPlacement.AUTO : current);
+			String placement = filePlacement.toJson();
 			writer.accept(display -> {
 				display.setRows(labels.rows());
 				display.setTables(labels.tables());
@@ -87,17 +99,6 @@ public final class DisplayPreferences {
 				display.setSummaryPlacement(placement);
 			});
 		} catch (RuntimeException e) {
-			LOG.log(Level.WARNING, "Die Auswahl im Menü \"Anzeige\" ließ sich nicht speichern", e);
-		}
-	}
-
-	/** Die gespeicherte Platzierung; eine unbekannte (etwa aus einer neueren Version) gilt als automatisch. */
-	private static SummaryPlacement placementOf(String name) {
-		for (SummaryPlacement value : SummaryPlacement.values()) {
-			if (value.name().equals(name)) {
-				return value;
-			}
-		}
-		return SummaryPlacement.AUTO;
+			LOG.log(Level.WARNING, "Die Auswahl im Menü \"Anzeige\" ließ sich nicht speichern", e);		}
 	}
 }

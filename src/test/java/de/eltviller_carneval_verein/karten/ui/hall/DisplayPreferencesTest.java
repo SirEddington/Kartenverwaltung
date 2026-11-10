@@ -59,6 +59,37 @@ class DisplayPreferencesTest {
 	}
 
 	@Test
+	void anUnknownPlacementIsWrittenBackUntilAnotherIsChosen() {
+		DisplaySettings saved = saved(true);
+		saved.setSummaryPlacement("CORNER");
+		DisplayPreferences prefs = load(saved);
+
+		prefs.planLabels().tablesProperty().set(false);
+		assertEquals("CORNER", file.getSummaryPlacement(), "eine neuere Version findet ihre Wahl wieder");
+
+		prefs.summaryPlacementProperty().set(SummaryPlacement.LEFT);
+		assertEquals("LEFT", file.getSummaryPlacement());
+		prefs.summaryPlacementProperty().set(SummaryPlacement.AUTO);
+		assertEquals("AUTO", file.getSummaryPlacement());
+	}
+
+	@Test
+	void theDefaultPlacementOfTheFileIsTheAutomaticOne() {
+		// settings kennt die Oberfläche nicht und führt den Namen deshalb als Text
+		assertEquals(SummaryPlacement.AUTO.name(), DisplaySettings.DEFAULT_SUMMARY_PLACEMENT);
+	}
+
+	@Test
+	void aMissingPlacementIsWrittenAsAutomatic() {
+		DisplayPreferences prefs = load(saved(true));
+
+		prefs.summaryPlacementProperty().set(null);
+
+		assertEquals(1, writes.size());
+		assertEquals("AUTO", file.getSummaryPlacement());
+	}
+
+	@Test
 	void loadingWritesNothing() {
 		load(saved(true));
 
@@ -90,17 +121,29 @@ class DisplayPreferencesTest {
 		assertEquals(1, writes.size());
 		assertFalse(file.isHallObjects());
 		assertTrue(file.isRows(), "geschrieben wird, was gerade gilt, nicht der alte gespeicherte Stand");
+		assertEquals("AUTO", file.getSummaryPlacement(), "gilt gerade, gespeichert war LEFT");
 	}
 
 	@Test
-	void aFailedWriteKeepsTheSelectionForTheSession() {
+	void aFailedWriteKeepsTheSelectionAndThrowsNothing() {
 		DisplayPreferences prefs = new DisplayPreferences(saved(true), change -> {
 			throw new IllegalStateException("Datenträger voll");
 		});
+		// JavaFX fängt Ausnahmen aus Listenern ab und gibt sie hierhin; in der App zeigte der GlobalErrorHandler sie an
+		List<Throwable> uncaught = new ArrayList<>();
+		Thread thread = Thread.currentThread();
+		Thread.UncaughtExceptionHandler before = thread.getUncaughtExceptionHandler();
+		thread.setUncaughtExceptionHandler((t, e) -> uncaught.add(e));
+		try {
+			prefs.planLabels().rowsProperty().set(true);
+			prefs.summaryPlacementProperty().set(SummaryPlacement.TOP);
+		} finally {
+			thread.setUncaughtExceptionHandler(before);
+		}
 
-		prefs.planLabels().rowsProperty().set(true);
-
+		assertTrue(uncaught.isEmpty(), "das Scheitern wird nur protokolliert: " + uncaught);
 		assertTrue(prefs.planLabels().rowsProperty().get());
+		assertEquals(SummaryPlacement.TOP, prefs.summaryPlacementProperty().get());
 	}
 
 	@Test
