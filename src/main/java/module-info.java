@@ -9,6 +9,7 @@ module Kartenverwaltung {
     requires java.prefs;
     requires java.desktop;
     requires java.logging;
+    requires java.xml;
 
     // Hauptpaket für JavaFX (für MainApp)
     opens de.eltviller_carneval_verein.karten to javafx.fxml, javafx.graphics;
