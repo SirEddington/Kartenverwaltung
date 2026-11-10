@@ -38,6 +38,23 @@ public record AppVersion(String version, int revision) implements Comparable<App
 		return parse(props.apply("app.version"), props.apply("app.revision"));
 	}
 
+	/**
+	 * Liest eine Paketversion, wie Conveyor sie aus {@code app.version} {@code a.b.c} und {@code app.revision} {@code d}
+	 * bildet ({@code a.b.c.d}, KARV-132), zurück in Version und Revision.
+	 *
+	 * @return leer, wenn es nicht genau vier Zahlen sind
+	 */
+	public static Optional<AppVersion> fromPackageVersion(String quad) {
+		if (quad == null) {
+			return Optional.empty();
+		}
+		int[] f = fields(quad);
+		if (f == null || f.length != 4) {
+			return Optional.empty();
+		}
+		return Optional.of(new AppVersion(f[0] + "." + f[1] + "." + f[2], f[3]));
+	}
+
 	/** Die Version dieser laufenden App, leer außerhalb eines Pakets (Eclipse, {@code javafx:run}). */
 	public static Optional<AppVersion> current() {
 		return from(System::getProperty);
