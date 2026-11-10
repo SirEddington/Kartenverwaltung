@@ -16,6 +16,7 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.DisplayPreferences;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.EventSelectionSync;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
@@ -50,8 +51,9 @@ public class TicketShellController {
 	private static final String ALL_PRESENTATIONS = "Alle Vorstellungen";
 
 	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
-	// Gemeinsamer Zustand mit dem Kundenfenster: Die Shell und ihre Inhalte schreiben ihn, das Kundenfenster liest ihn
-	private final SalesViewState state = new SalesViewState();
+	// Gemeinsamer Zustand mit dem Kundenfenster: Die Shell und ihre Inhalte schreiben ihn, das Kundenfenster liest ihn.
+	// Das Menü "Anzeige" teilt er mit dem Hallen-Editor (KARV-76).
+	private final SalesViewState state = new SalesViewState(DisplayPreferences.instance());
 
 	@FXML
 	private ComboBox<Event> eventComboBox;

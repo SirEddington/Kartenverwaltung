@@ -23,8 +23,6 @@ import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
-import javafx.beans.value.ChangeListener;
-import javafx.beans.value.WeakChangeListener;
 import javafx.fxml.FXML;
 import javafx.geometry.BoundingBox;
 import javafx.geometry.Bounds;
@@ -109,7 +107,6 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	// Menü "Anzeige" der Shell: Mit gesetztem Verkaufszustand sind es dessen Einstellungen (so folgt das Kundenfenster)
 	private PlanLabelOptions labelOptions = new PlanLabelOptions();
-	private final ChangeListener<Boolean> labelsChanged = (obs, oldValue, newValue) -> renderHall();
 
 	@FXML
 	public void initialize() {
@@ -429,10 +426,8 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	@Override
 	public void setSalesState(SalesViewState state) {
 		selectedBookings = state.selectedBookings();
-		labelOptions.removeListener(labelsChanged);
 		labelOptions = state.planLabels();
-		// Schwach: Der Verkaufszustand überlebt den Wechsel der Ansicht, diese Instanz nicht
-		labelOptions.addListener(new WeakChangeListener<>(labelsChanged));
+		labelOptions.follow(viewportPane, this::renderHall);
 		viewportPane.visibleHallRectProperty().addListener((obs, oldRect, newRect) -> state.visibleHallRectProperty().set(newRect));
 		state.visibleHallRectProperty().set(viewportPane.visibleHallRectProperty().get());
 	}

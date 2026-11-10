@@ -21,6 +21,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.DisplayPreferences;
 import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
@@ -126,8 +127,8 @@ public class HallEditController {
 		DirtyIndicator.bind(btnSave, ChangeTracker.halls());
 		SaveShortcut.install(btnSave);
 
-		// Beschriftungen des Plans (Reihen, Tische, Sitznummern, Hallenobjekte), nicht gespeichert
-		PlanLabelOptions planLabels = new PlanLabelOptions();
+		// Beschriftungen des Plans (Reihen, Tische, Sitznummern, Hallenobjekte), gemeinsam mit der Saalansicht (KARV-76)
+		PlanLabelOptions planLabels = DisplayPreferences.instance().planLabels();
 		PlanLabelsMenu.bind(menuDisplay, planLabels);
 		hallPlanController.setLabelOptions(planLabels);
 

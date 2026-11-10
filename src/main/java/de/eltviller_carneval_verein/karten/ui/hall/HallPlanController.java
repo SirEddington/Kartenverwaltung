@@ -415,7 +415,7 @@ public class HallPlanController {
 	 */
 	public void setLabelOptions(PlanLabelOptions options) {
 		this.labelOptions = options;
-		options.addListener((obs, oldValue, newValue) -> renderHall());
+		options.follow(hallPane, this::renderHall);
 		seatingPanelController.setPlanView(options, hallPane.scaleXProperty());
 		renderHall();
 	}

@@ -714,7 +714,7 @@ public class SeatingPlanController {
 	public void setPlanView(PlanLabelOptions options, ObservableDoubleValue zoom) {
 		this.labelOptions = options;
 		this.scale = zoom;
-		options.addListener((obs, oldValue, newValue) -> redraw());
+		options.follow(rowList, this::redraw);
 		redraw();
 	}
 	// <-- Zeichnung

@@ -42,6 +42,7 @@ import de.eltviller_carneval_verein.karten.ui.ConflictIndicator;
 import de.eltviller_carneval_verein.karten.ui.ConflictLabels;
 import de.eltviller_carneval_verein.karten.ui.ConflictList;
 import de.eltviller_carneval_verein.karten.ui.ContextMenuGuard;
+import de.eltviller_carneval_verein.karten.ui.DisplayPreferences;
 import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EnterOnButtons;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
@@ -199,6 +200,8 @@ public class MainApp extends Application {
 		// KARV-127: Die Prüfung des Cloud-Servers folgt dem gespeicherten Stand, nicht einem noch ungespeicherten Häkchen
 		Reachability.setCloudCheck(settingsStore.current().isCheckCloudServer());
 		settingsStore.addListener(saved -> Reachability.setCloudCheck(saved.isCheckCloudServer()));
+		// KARV-76: Das Menü "Anzeige" übernimmt den Stand beim Start, nicht den beim ersten Öffnen einer Ansicht
+		DisplayPreferences.install(settingsStore);
 
 		// Der Versionsspeicher nimmt zuerst die Sperre gegen einen zweiten Start und liest die Kennung des Rechners;
 		// scheitert das, geht es ohne Fenster nicht weiter

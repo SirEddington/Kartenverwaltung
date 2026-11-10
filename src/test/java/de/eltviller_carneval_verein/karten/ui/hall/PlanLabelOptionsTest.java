@@ -10,6 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import javafx.beans.value.ChangeListener;
+import javafx.scene.Group;
 
 class PlanLabelOptionsTest {
 
@@ -45,5 +46,19 @@ class PlanLabelOptionsTest {
 		options.rowsProperty().set(false);
 
 		assertEquals(List.of(false, false), seen);
+	}
+
+	@Test
+	void followCallsBackOnEverySwitchAndTheOwnerHoldsTheListener() {
+		Group owner = new Group();
+		List<String> calls = new ArrayList<>();
+		options.follow(owner, () -> calls.add("neu"));
+
+		options.rowsProperty().set(false);
+		options.hallObjectsProperty().set(false);
+
+		assertEquals(List.of("neu", "neu"), calls);
+		// Nur der Knoten hält den Listener stark; die Optionen kennen ihn schwach
+		assertEquals(1, owner.getProperties().size());
 	}
 }
