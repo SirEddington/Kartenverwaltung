@@ -18,7 +18,9 @@ import de.eltviller_carneval_verein.karten.ui.input.RotationInput;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.beans.property.SimpleDoubleProperty;
+import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableDoubleValue;
+import javafx.beans.value.WeakChangeListener;
 import javafx.collections.ListChangeListener;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
@@ -62,6 +64,7 @@ public class SeatingPlanController {
 	private boolean editMode = false;
 	// Anzeige im Plan: Menü "Anzeige" und Zoom (setPlanView); ohne beides ist alles beschriftet
 	private PlanLabelOptions labelOptions = new PlanLabelOptions();
+	private final ChangeListener<Boolean> labelsChanged = (obs, oldValue, newValue) -> redraw();
 	private ObservableDoubleValue scale = new SimpleDoubleProperty(1);
 	// Verhindert, dass das Befüllen des Panels die Listener auslöst und zurückschreibt
 	private boolean updatingPanel = false;
@@ -712,9 +715,11 @@ public class SeatingPlanController {
 	 * Zoom entscheidet, ab wann die Sitznummern erscheinen.
 	 */
 	public void setPlanView(PlanLabelOptions options, ObservableDoubleValue zoom) {
+		labelOptions.removeListener(labelsChanged);
 		this.labelOptions = options;
 		this.scale = zoom;
-		options.addListener((obs, oldValue, newValue) -> redraw());
+		// Schwach: Die Optionen gelten für die ganze App (DisplayPreferences), dieser Editor nicht
+		options.addListener(new WeakChangeListener<>(labelsChanged));
 		redraw();
 	}
 	// <-- Zeichnung

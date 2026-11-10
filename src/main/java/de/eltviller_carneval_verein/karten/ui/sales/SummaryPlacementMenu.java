@@ -1,6 +1,9 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
+import de.eltviller_carneval_verein.karten.ui.hall.SummaryPlacement;
 import javafx.beans.property.ObjectProperty;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.WeakChangeListener;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.RadioMenuItem;
@@ -32,9 +35,12 @@ final class SummaryPlacementMenu {
 				placement.set((SummaryPlacement) newToggle.getUserData());
 			}
 		});
-		// Auch eine Änderung von außen zeigt sich im Menü
-		placement.addListener((obs, oldValue, newValue) -> group.getToggles().stream().filter(toggle -> toggle.getUserData() == newValue).findFirst()
-				.ifPresent(toggle -> toggle.setSelected(true)));
+		// Auch eine Änderung von außen zeigt sich im Menü. Schwach angemeldet, das Untermenü hält den Listener: Die
+		// Platzierung gilt für die ganze App (DisplayPreferences), dieses Menü nur so lange wie seine Shell.
+		ChangeListener<SummaryPlacement> follow = (obs, oldValue, newValue) -> group.getToggles().stream()
+				.filter(toggle -> toggle.getUserData() == newValue).findFirst().ifPresent(toggle -> toggle.setSelected(true));
+		submenu.getProperties().put(SummaryPlacementMenu.class, follow);
+		placement.addListener(new WeakChangeListener<>(follow));
 		menu.getItems().addAll(new SeparatorMenuItem(), submenu);
 	}
 }

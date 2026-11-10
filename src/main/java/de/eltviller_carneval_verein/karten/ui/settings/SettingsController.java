@@ -23,7 +23,8 @@ import javafx.scene.layout.VBox;
  * Der Einstellungsbildschirm: eine durchsuchbare Liste von Abschnitten mit ihren Einstellungen.
  * <p>
  * Die Abschnitte entstehen in {@link #buildSections(AppSettings)}: "Gemeinsamer Ordner" ({@link SharedFolderSection},
- * KARV-87), sobald der Start das Verbinden eingerichtet hat, und als letzter immer "Info und Updates"
+ * KARV-87), sobald der Start das Verbinden eingerichtet hat, "Anzeige" ({@link DisplaySection}, KARV-76) und als
+ * letzter immer "Info und Updates"
  * ({@link InfoSection}, KARV-131); Folgetickets hängen ihre Einstellungen dort ein. Die Einstellungen werden
  * über den {@link ChangeTracker#settings() Tracker} verfolgt, sodass Speichern-Knopf und Verlassen-Abfrage wie in
  * den anderen Ansichten arbeiten. Gespeichert wird über den {@link SettingsSaver}.
@@ -58,7 +59,7 @@ public class SettingsController {
 
 	/**
 	 * Die Abschnitte dieses Bildschirms: "Gemeinsamer Ordner" (KARV-87), sobald der Start das Verbinden eingerichtet hat,
-	 * und zuletzt immer "Info und Updates" (KARV-131). Folgetickets ergänzen hier ihre Abschnitte.
+	 * dann "Anzeige" (KARV-76) und zuletzt immer "Info und Updates" (KARV-131). Folgetickets ergänzen hier ihre Abschnitte.
 	 *
 	 * @param settings die bearbeiteten Einstellungen
 	 */
@@ -66,6 +67,7 @@ public class SettingsController {
 		List<SettingsSection> sections = new ArrayList<>();
 		SharedFolderConnection.instance().ifPresent(
 				connection -> sections.add(SharedFolderSection.build(settings, connection.sync(), connection)));
+		sections.add(DisplaySection.build(settings));
 		sections.add(InfoSection.build(AppVersion.current(), MainApp.updates().map(MainApp.Updates::installation),
 				MainApp.updateStateProperty(), () -> MainApp.updates().ifPresent(u -> u.checker().checkNow()),
 				available -> MainApp.updates().ifPresent(u -> u.flow().update(available.neu())),

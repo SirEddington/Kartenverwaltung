@@ -126,8 +126,8 @@ public class HallEditController {
 		DirtyIndicator.bind(btnSave, ChangeTracker.halls());
 		SaveShortcut.install(btnSave);
 
-		// Beschriftungen des Plans (Reihen, Tische, Sitznummern, Hallenobjekte), nicht gespeichert
-		PlanLabelOptions planLabels = new PlanLabelOptions();
+		// Beschriftungen des Plans (Reihen, Tische, Sitznummern, Hallenobjekte), gemeinsam mit der Saalansicht (KARV-76)
+		PlanLabelOptions planLabels = DisplayPreferences.instance().planLabels();
 		PlanLabelsMenu.bind(menuDisplay, planLabels);
 		hallPlanController.setLabelOptions(planLabels);
 

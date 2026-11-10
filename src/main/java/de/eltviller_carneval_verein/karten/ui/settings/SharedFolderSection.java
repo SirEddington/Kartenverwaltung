@@ -297,7 +297,8 @@ public final class SharedFolderSection {
 	}
 
 	/** Ein Häkchen für eine gewöhnliche Einstellung: Es ändert sie über {@code setter}, gespeichert wird mit "Speichern". */
-	private static Node checkBox(boolean selected, Consumer<Boolean> setter) {
+	/** Ein Häkchen, das jede Änderung an {@code setter} gibt (auch für {@link DisplaySection}). */
+	static Node checkBox(boolean selected, Consumer<Boolean> setter) {
 		CheckBox box = new CheckBox();
 		box.setSelected(selected);
 		box.selectedProperty().addListener((observable, was, now) -> setter.accept(now));

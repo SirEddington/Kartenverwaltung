@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.ui.sales;
+package de.eltviller_carneval_verein.karten.ui.hall;
 
 import javafx.geometry.Side;
 

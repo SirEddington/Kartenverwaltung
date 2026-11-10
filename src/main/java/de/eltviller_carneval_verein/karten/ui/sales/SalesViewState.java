@@ -7,7 +7,9 @@ import java.util.Set;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.ui.hall.DisplayPreferences;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
+import de.eltviller_carneval_verein.karten.ui.hall.SummaryPlacement;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -25,8 +27,17 @@ public final class SalesViewState {
 	private final ObjectProperty<Presentation> presentation = new SimpleObjectProperty<>();
 	private final ObjectProperty<Rectangle2D> visibleHallRect = new SimpleObjectProperty<>();
 	private final ObservableSet<Booking> selectedBookings = FXCollections.observableSet(new LinkedHashSet<>());
-	private final PlanLabelOptions planLabels = new PlanLabelOptions();
-	private final ObjectProperty<SummaryPlacement> summaryPlacement = new SimpleObjectProperty<>(SummaryPlacement.AUTO);
+	private final PlanLabelOptions planLabels;
+	private final ObjectProperty<SummaryPlacement> summaryPlacement;
+
+	/**
+	 * @param display die Auswahl im Menü "Anzeige"; in der App die gemeinsame ({@link DisplayPreferences#instance()}),
+	 *                die auch der Hallen-Editor nutzt
+	 */
+	public SalesViewState(DisplayPreferences display) {
+		this.planLabels = display.planLabels();
+		this.summaryPlacement = display.summaryPlacementProperty();
+	}
 
 	public ObjectProperty<Event> eventProperty() {
 		return event;
@@ -48,14 +59,14 @@ public final class SalesViewState {
 
 	/**
 	 * Welche Beschriftungen der Saalplan zeigt (Menü "Anzeige"): Reihen, Tischnamen, Sitznummern, Namen der
-	 * Hallenobjekte. Standard alles an, gilt für Saalübersicht und Kundenfenster und bleibt beim Wechsel der Ansicht
-	 * erhalten.
+	 * Hallenobjekte. Gilt für Saalübersicht und Kundenfenster, bleibt beim Wechsel der Ansicht erhalten und kommt aus
+	 * der {@link DisplayPreferences} (KARV-76).
 	 */
 	public PlanLabelOptions planLabels() {
 		return planLabels;
 	}
 
-	/** Wo das Kundenfenster die Kartenübersicht zeigt (Menü "Anzeige"); Standard automatisch, bleibt beim Wechsel der Ansicht erhalten. */
+	/** Wo das Kundenfenster die Kartenübersicht zeigt (Menü "Anzeige"); bleibt beim Wechsel der Ansicht erhalten, aus der {@link DisplayPreferences}. */
 	public ObjectProperty<SummaryPlacement> summaryPlacementProperty() {
 		return summaryPlacement;
 	}

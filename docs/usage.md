@@ -86,7 +86,13 @@ with unsaved changes asks *Speichern / Nicht speichern / Abbrechen*.
 
 **Customer display ("Verkaufsmodus"):** opens a second window, e.g. on a monitor facing the buyer, that shows the
 same seating plan without controls. Seats are only green (free) or red (taken); zoom, panning, the current selection
-and "Reihen anzeigen" follow the main window.
+and the labels chosen in the **"Anzeige"** menu follow the main window.
+
+**"Anzeige" menu** (footer, left): ticks for **Reihen**, **Tische**, **Sitznummern** and **Hallenobjekte**, and in
+the sales view the submenu **"Kaufzusammenfassung"** (where the customer display shows the purchase summary). The
+choice is the same in the sales view, the customer display and the hall editor: hiding rows in the editor hides them
+in the sales view too. With *Einstellungen → Anzeige → "Anzeige beim Start wiederherstellen"* (on by default) the
+choice is kept for the next start of this workstation; with it off, every start shows everything.
 
 ## Accounting (*Abrechnung*)
 

@@ -12,6 +12,8 @@ import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.model.TextAlignV;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.WeakChangeListener;
 import javafx.fxml.FXML;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
@@ -81,6 +83,7 @@ public class HallPlanController {
 	private boolean objectDragged = false;
 	// Menü "Anzeige" des Hallen-Editors (setLabelOptions); ohne Menü ist alles beschriftet
 	private PlanLabelOptions labelOptions = new PlanLabelOptions();
+	private final ChangeListener<Boolean> labelsChanged = (obs, oldValue, newValue) -> renderHall();
 
 	@FXML
 	private StackPane viewportPane;
@@ -414,8 +417,10 @@ public class HallPlanController {
 	 * bekommt dazu den Zoom des Plans, denn die Sitznummern erscheinen erst bei genügend großen Sitzen.
 	 */
 	public void setLabelOptions(PlanLabelOptions options) {
+		labelOptions.removeListener(labelsChanged);
 		this.labelOptions = options;
-		options.addListener((obs, oldValue, newValue) -> renderHall());
+		// Schwach: Die Optionen gelten für die ganze App (DisplayPreferences), dieser Editor nicht
+		options.addListener(new WeakChangeListener<>(labelsChanged));
 		seatingPanelController.setPlanView(options, hallPane.scaleXProperty());
 		renderHall();
 	}

@@ -16,13 +16,15 @@ import org.junit.jupiter.api.Test;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.ui.hall.DisplayPreferences;
+import de.eltviller_carneval_verein.karten.ui.hall.SummaryPlacement;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.geometry.Rectangle2D;
 
 class SalesViewStateTest {
 
-	private final SalesViewState state = new SalesViewState();
+	private final SalesViewState state = new SalesViewState(DisplayPreferences.unsaved());
 	private final Event event = new Event();
 	private final Presentation presentation = event.addPresentation("P");
 	private final TestBookings bookings = new TestBookings();
@@ -115,5 +117,18 @@ class SalesViewStateTest {
 		assertNull(state.visibleHallRectProperty().get());
 		assertSame(event, state.eventProperty().get());
 		assertSame(presentation, state.presentationProperty().get());
+	}
+
+	@Test
+	void theMenuDisplayComesFromTheSharedPreferences() {
+		DisplayPreferences display = DisplayPreferences.unsaved();
+		SalesViewState shared = new SalesViewState(display);
+
+		display.planLabels().rowsProperty().set(false);
+		shared.summaryPlacementProperty().set(SummaryPlacement.LEFT);
+
+		assertSame(display.planLabels(), shared.planLabels());
+		assertFalse(shared.showRowsProperty().get(), "Reihen aus im Editor heißt aus in der Saalansicht");
+		assertSame(SummaryPlacement.LEFT, display.summaryPlacementProperty().get());
 	}
 }

@@ -6,8 +6,9 @@ import javafx.beans.value.ChangeListener;
 
 /**
  * Die einstellbaren Beschriftungen des Hallenplans, beobachtbar für das Menü "Anzeige" (siehe
- * {@link PlanLabelsMenu}). Alles ist beim Start an; die Einstellung wird nicht gespeichert. Die Saalansicht gibt sie über
- * den Verkaufszustand an das Kundenfenster weiter, der Hallen-Editor hat eigene.
+ * {@link PlanLabelsMenu}). Eine neue Instanz zeigt alles. Die App hat eine gemeinsame für Saalansicht, Kundenfenster
+ * und Hallen-Editor, die gespeichert wird ({@link DisplayPreferences}, KARV-76). Wer sie beobachtet und kürzer lebt als
+ * die App, meldet sich schwach an ({@code WeakChangeListener}) oder wieder ab.
  */
 public final class PlanLabelOptions {
 

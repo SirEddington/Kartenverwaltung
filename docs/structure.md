@@ -81,7 +81,8 @@ machine identity and locking (`MachineIdentity`, `Ownership`, `InstanceLock`), s
 `ChangeTracker` (snapshot comparison) and `StateRestorer` (replace an entity from a snapshot). JavaFX-thread only.
 
 ### `settings`
-`AppSettings` (fields with defaults: `sharedDir`, `saveBookingsImmediately`, `recentOperators`) and
+`AppSettings` (fields with defaults: `sharedDir`, `saveBookingsImmediately`, `checkCloudServer`, `recentOperators`,
+`display` → `DisplaySettings`, the "Anzeige" menu and whether it is restored at start) and
 `SettingsStore` (`<AppData>/settings.json`). Always read through `SettingsStore.getInstance().current()`.
 
 ### `update`
@@ -99,8 +100,8 @@ Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
 | `sales` | Ticket sales shell, ticket table, hall overview, customer display window, bulk edit, search, cancel, assign place |
 | `accounting` | Accounting shell, cash reconciliation, statistics, `Exportable` (CSV/PDF) |
 | `event` | Event overview, create/edit, presentations, seating plan switch |
-| `hall` | Hall management, hall editor, hall plan and seating plan drawing/layout, row fill, bulk edits |
-| `settings` | Searchable settings screen, "Gemeinsamer Ordner" and "Info und Updates" sections |
+| `hall` | Hall management, hall editor, hall plan and seating plan drawing/layout, row fill, bulk edits; `DisplayPreferences` (the app-wide "Anzeige" menu shared with sales) |
+| `settings` | Searchable settings screen, "Gemeinsamer Ordner", "Anzeige" and "Info und Updates" sections |
 | `shared` | Shared-folder start/connect flow, sync indicator and info window, operator dialog, locked units, data reload, update flow, texts and footer hint |
 | `backup` | Restore dialog and catalogs for events and halls |
 | `input` | Parsing text fields, spinners, date/time and number inputs with inline feedback |
