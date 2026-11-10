@@ -111,17 +111,6 @@ public final class HttpUpdateSource implements UpdateSource {
 	}
 
 	private HttpURLConnection open(URI uri) throws IOException {
-		HttpURLConnection c = (HttpURLConnection) uri.toURL().openConnection();
-		c.setInstanceFollowRedirects(true);
-		c.setConnectTimeout((int) timeout.toMillis());
-		c.setReadTimeout((int) timeout.toMillis());
-		c.setRequestProperty("Cache-Control", "no-cache");
-		int code = c.getResponseCode();
-		if (code != HttpURLConnection.HTTP_OK) {
-			c.disconnect();
-			LOG.warning("Update-Quelle antwortete mit HTTP " + code + ": " + uri);
-			throw new HttpStatusException(code);
-		}
-		return c;
+		return HttpGet.open(uri, timeout, timeout);
 	}
 }

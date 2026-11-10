@@ -21,8 +21,18 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 final class MiniHttpServer implements AutoCloseable {
 
-	record Route(int status, Map<String, String> headers, byte[] body, long delayMs) {
+	/**
+	 * @param declaredLength {@link #ACTUAL_LENGTH}: echte Länge senden; {@link #NO_LENGTH}: keine {@code Content-Length};
+	 *                       sonst diese (falsche) Länge
+	 */
+	record Route(int status, Map<String, String> headers, byte[] body, long delayMs, long declaredLength) {
+		Route(int status, Map<String, String> headers, byte[] body, long delayMs) {
+			this(status, headers, body, delayMs, ACTUAL_LENGTH);
+		}
 	}
+
+	static final long ACTUAL_LENGTH = -1;
+	static final long NO_LENGTH = -2;
 
 	private final ServerSocket server;
 	private final Map<String, Route> routes = new ConcurrentHashMap<>();
@@ -37,6 +47,15 @@ final class MiniHttpServer implements AutoCloseable {
 
 	URI base(String path) {
 		return URI.create("http://127.0.0.1:" + server.getLocalPort() + path);
+	}
+
+	/** Dieselbe Adresse über den Namen {@code localhost} (ein anderer Host als {@code 127.0.0.1} für Weiterleitungen). */
+	URI viaLocalhost(String path) {
+		return URI.create("http://localhost:" + server.getLocalPort() + path);
+	}
+
+	MiniHttpServer route(String path, byte[] body) {
+		return route(path, new Route(200, Map.of(), body, 0));
 	}
 
 	MiniHttpServer route(String path, int status, String body) {
@@ -91,7 +110,12 @@ final class MiniHttpServer implements AutoCloseable {
 			}
 			StringBuilder head = new StringBuilder("HTTP/1.1 " + route.status() + " X\r\n");
 			route.headers().forEach((k, v) -> head.append(k).append(": ").append(v).append("\r\n"));
-			head.append("Content-Length: ").append(route.body().length).append("\r\nConnection: close\r\n\r\n");
+			if (route.declaredLength() == ACTUAL_LENGTH) {
+				head.append("Content-Length: ").append(route.body().length).append("\r\n");
+			} else if (route.declaredLength() != NO_LENGTH) {
+				head.append("Content-Length: ").append(route.declaredLength()).append("\r\n");
+			}
+			head.append("Connection: close\r\n\r\n");
 			OutputStream out = s.getOutputStream();
 			out.write(head.toString().getBytes(StandardCharsets.ISO_8859_1));
 			out.write(route.body());
