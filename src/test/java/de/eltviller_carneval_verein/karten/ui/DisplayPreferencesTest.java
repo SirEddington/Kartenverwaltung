@@ -1,4 +1,4 @@
-package de.eltviller_carneval_verein.karten.ui.hall;
+package de.eltviller_carneval_verein.karten.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -6,22 +6,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
 
+import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.settings.DisplaySettings;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanLabels;
+import de.eltviller_carneval_verein.karten.ui.sales.SummaryPlacement;
 
 class DisplayPreferencesTest {
 
-	/** Was geschrieben wurde: jede Änderung angewendet auf eine eigene Kopie der Datei. */
-	private final DisplaySettings file = new DisplaySettings();
-	private final List<Consumer<DisplaySettings>> writes = new ArrayList<>();
+	/** Was geschrieben wurde: jede Änderung angewendet auf eigene Einstellungen. */
+	private final AppSettings written = new AppSettings();
+	private final DisplaySettings file = written.getDisplay();
+	private int writes;
 
 	private DisplayPreferences load(DisplaySettings saved) {
 		return new DisplayPreferences(saved, change -> {
-			writes.add(change);
-			change.accept(file);
+			writes++;
+			change.accept(written);
 		});
 	}
 
@@ -85,7 +88,7 @@ class DisplayPreferencesTest {
 
 		prefs.summaryPlacementProperty().set(null);
 
-		assertEquals(1, writes.size());
+		assertEquals(1, writes);
 		assertEquals("AUTO", file.getSummaryPlacement());
 	}
 
@@ -93,7 +96,7 @@ class DisplayPreferencesTest {
 	void loadingWritesNothing() {
 		load(saved(true));
 
-		assertTrue(writes.isEmpty());
+		assertEquals(0, writes);
 	}
 
 	@Test
@@ -103,7 +106,7 @@ class DisplayPreferencesTest {
 		prefs.planLabels().tablesProperty().set(false);
 		prefs.summaryPlacementProperty().set(SummaryPlacement.BOTTOM);
 
-		assertEquals(2, writes.size());
+		assertEquals(2, writes);
 		assertFalse(file.isRows());
 		assertFalse(file.isTables());
 		assertFalse(file.isSeatNumbers());
@@ -118,7 +121,7 @@ class DisplayPreferencesTest {
 
 		prefs.planLabels().hallObjectsProperty().set(false);
 
-		assertEquals(1, writes.size());
+		assertEquals(1, writes);
 		assertFalse(file.isHallObjects());
 		assertTrue(file.isRows(), "geschrieben wird, was gerade gilt, nicht der alte gespeicherte Stand");
 		assertEquals("AUTO", file.getSummaryPlacement(), "gilt gerade, gespeichert war LEFT");
@@ -144,15 +147,5 @@ class DisplayPreferencesTest {
 		assertTrue(uncaught.isEmpty(), "das Scheitern wird nur protokolliert: " + uncaught);
 		assertTrue(prefs.planLabels().rowsProperty().get());
 		assertEquals(SummaryPlacement.TOP, prefs.summaryPlacementProperty().get());
-	}
-
-	@Test
-	void theUnsavedVariantStartsWithEverythingShown() {
-		DisplayPreferences prefs = DisplayPreferences.unsaved();
-
-		prefs.planLabels().rowsProperty().set(false);
-
-		assertFalse(prefs.planLabels().snapshot().rows());
-		assertEquals(SummaryPlacement.AUTO, prefs.summaryPlacementProperty().get());
 	}
 }

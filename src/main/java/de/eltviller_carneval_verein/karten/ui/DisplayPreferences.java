@@ -1,12 +1,16 @@
-package de.eltviller_carneval_verein.karten.ui.hall;
+package de.eltviller_carneval_verein.karten.ui;
 
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.model.TolerantEnum;
+import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.settings.DisplaySettings;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
+import de.eltviller_carneval_verein.karten.ui.hall.PlanLabels;
+import de.eltviller_carneval_verein.karten.ui.sales.SummaryPlacement;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 
@@ -14,11 +18,11 @@ import javafx.beans.property.SimpleObjectProperty;
  * Die Auswahl im Menü "Anzeige", gemeinsam für Saalansicht, Kundenfenster und Hallen-Editor (KARV-76): Reihen im
  * Editor ausblenden blendet sie auch in der Saalansicht aus und umgekehrt.
  * <p>
- * Die App hat eine Instanz ({@link #instance()}). Sie übernimmt beim ersten Zugriff die Auswahl aus {@code settings.json},
- * wenn dort "Anzeige beim Start wiederherstellen" an ist ({@link DisplaySettings#isRestoreAtStart()}); sonst ist alles
- * sichtbar und die Kaufzusammenfassung steht automatisch. Jede Änderung im Menü wird sofort geschrieben, auch bei
- * ausgeschaltetem Schalter, per Teil-Speichern ({@link SettingsStore#saveOnly}), damit andere offene Änderungen der
- * Einstellungen unberührt bleiben. Scheitert das Schreiben, gilt die Auswahl trotzdem für die laufende Sitzung.
+ * Die App hat eine Instanz, die {@code MainApp} beim Start einrichtet ({@link #install}). Ist "Anzeige beim Start
+ * wiederherstellen" an ({@link DisplaySettings#isRestoreAtStart()}), übernimmt sie die gespeicherte Auswahl, sonst ist
+ * alles sichtbar und die Kaufzusammenfassung steht automatisch. Jede Änderung im Menü wird sofort per Teil-Speichern
+ * ({@link SettingsStore#saveOnly}) geschrieben, auch bei ausgeschaltetem Schalter; der Schalter entscheidet nur über
+ * den nächsten Start. Scheitert das Schreiben, gilt die Auswahl trotzdem für die laufende Sitzung.
  * <p>
  * Nur im JavaFX-Thread verwenden.
  */
@@ -34,14 +38,14 @@ public final class DisplayPreferences {
 	// wird unverändert zurückgeschrieben, bis jemand eine andere als "Automatisch" wählt
 	private final TolerantEnum<SummaryPlacement> filePlacement = new TolerantEnum<>(SummaryPlacement.class, SummaryPlacement.AUTO,
 			SummaryPlacement.AUTO);
-	private final Consumer<Consumer<DisplaySettings>> writer;
+	private final Consumer<Consumer<AppSettings>> saveOnly;
 
 	/**
-	 * @param saved  der gespeicherte Stand
-	 * @param writer schreibt eine Änderung des gespeicherten Stands (in der App per {@link SettingsStore#saveOnly})
+	 * @param saved    der gespeicherte Stand
+	 * @param saveOnly schreibt eine Änderung der Einstellungen (in der App {@link SettingsStore#saveOnly})
 	 */
-	DisplayPreferences(DisplaySettings saved, Consumer<Consumer<DisplaySettings>> writer) {
-		this.writer = writer;
+	DisplayPreferences(DisplaySettings saved, Consumer<Consumer<AppSettings>> saveOnly) {
+		this.saveOnly = saveOnly;
 		filePlacement.fromJson(saved.getSummaryPlacement());
 		if (saved.isRestoreAtStart()) {
 			planLabels.rowsProperty().set(saved.isRows());
@@ -55,21 +59,20 @@ public final class DisplayPreferences {
 		summaryPlacement.addListener((obs, oldValue, newValue) -> write());
 	}
 
-	/**
-	 * Die Instanz der App, beim ersten Aufruf aus den gespeicherten Einstellungen aufgebaut. {@code MainApp} ruft das gleich
-	 * nach dem Laden der Einstellungen auf, damit "Anzeige beim Start wiederherstellen" wirklich der Stand beim Start ist
-	 * und nicht der beim ersten Öffnen von Verkauf oder Hallen-Editor.
-	 */
+	/** Richtet die Instanz der App aus den geladenen Einstellungen ein (beim Start, bevor eine Ansicht sie braucht). */
+	public static void install(SettingsStore store) {
+		instance = new DisplayPreferences(store.current().getDisplay(), store::saveOnly);
+	}
+
+	/** Die Instanz der App. */
 	public static DisplayPreferences instance() {
 		if (instance == null) {
-			SettingsStore store = SettingsStore.getInstance();
-			instance = new DisplayPreferences(store.current().getDisplay(),
-					change -> store.saveOnly(settings -> change.accept(settings.getDisplay())));
+			throw new IllegalStateException("DisplayPreferences.install wurde beim Start nicht aufgerufen");
 		}
 		return instance;
 	}
 
-	/** Eine Auswahl, die nichts liest und nichts schreibt (für Tests und Ansichten ohne gespeicherte Anzeige). */
+	/** Eine Auswahl, die nichts liest und nichts schreibt (für Tests). */
 	public static DisplayPreferences unsaved() {
 		return new DisplayPreferences(new DisplaySettings(), change -> {
 		});
@@ -91,7 +94,8 @@ public final class DisplayPreferences {
 			SummaryPlacement current = summaryPlacement.get();
 			filePlacement.set(current == null ? SummaryPlacement.AUTO : current);
 			String placement = filePlacement.toJson();
-			writer.accept(display -> {
+			saveOnly.accept(settings -> {
+				DisplaySettings display = settings.getDisplay();
 				display.setRows(labels.rows());
 				display.setTables(labels.tables());
 				display.setSeatNumbers(labels.seatNumbers());
@@ -99,6 +103,7 @@ public final class DisplayPreferences {
 				display.setSummaryPlacement(placement);
 			});
 		} catch (RuntimeException e) {
-			LOG.log(Level.WARNING, "Die Auswahl im Menü \"Anzeige\" ließ sich nicht speichern", e);		}
+			LOG.log(Level.WARNING, "Die Auswahl im Menü \"Anzeige\" ließ sich nicht speichern", e);
+		}
 	}
 }

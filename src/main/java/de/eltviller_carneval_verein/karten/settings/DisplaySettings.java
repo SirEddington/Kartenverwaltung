@@ -5,12 +5,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 /**
  * Das Menü "Anzeige" der Saalansicht und des Hallen-Editors, wie es in {@code settings.json} steht (KARV-76): die
  * Beschriftungen des Plans, die Platzierung der Kaufzusammenfassung im Kundenfenster und ob diese Auswahl beim
- * nächsten Start wieder gilt ({@code restoreAtStart}, Standard an).
- * <p>
- * Die Auswahl wird bei jeder Änderung im Menü geschrieben, auch wenn {@code restoreAtStart} aus ist; der Schalter
- * entscheidet nur, ob der Start sie übernimmt. Die Platzierung steht als Text darin, damit dieses Paket die
- * Oberfläche nicht kennt und ein unbekannter Wert aus einer neueren Version die Datei nicht unlesbar macht; aufgelöst
- * wird er in {@code DisplayPreferences}.
+ * nächsten Start wieder gilt ({@code restoreAtStart}, Standard an). Wann geschrieben und gelesen wird, regelt
+ * {@code DisplayPreferences}. Die Platzierung steht als Text darin, damit dieses Paket die Oberfläche nicht kennt und
+ * ein unbekannter Wert aus einer neueren Version die Datei nicht unlesbar macht.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DisplaySettings {

@@ -7,9 +7,8 @@ import java.util.Set;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.ui.hall.DisplayPreferences;
+import de.eltviller_carneval_verein.karten.ui.DisplayPreferences;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
-import de.eltviller_carneval_verein.karten.ui.hall.SummaryPlacement;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -27,16 +26,14 @@ public final class SalesViewState {
 	private final ObjectProperty<Presentation> presentation = new SimpleObjectProperty<>();
 	private final ObjectProperty<Rectangle2D> visibleHallRect = new SimpleObjectProperty<>();
 	private final ObservableSet<Booking> selectedBookings = FXCollections.observableSet(new LinkedHashSet<>());
-	private final PlanLabelOptions planLabels;
-	private final ObjectProperty<SummaryPlacement> summaryPlacement;
+	private final DisplayPreferences display;
 
 	/**
 	 * @param display die Auswahl im Menü "Anzeige"; in der App die gemeinsame ({@link DisplayPreferences#instance()}),
 	 *                die auch der Hallen-Editor nutzt
 	 */
 	public SalesViewState(DisplayPreferences display) {
-		this.planLabels = display.planLabels();
-		this.summaryPlacement = display.summaryPlacementProperty();
+		this.display = display;
 	}
 
 	public ObjectProperty<Event> eventProperty() {
@@ -59,21 +56,20 @@ public final class SalesViewState {
 
 	/**
 	 * Welche Beschriftungen der Saalplan zeigt (Menü "Anzeige"): Reihen, Tischnamen, Sitznummern, Namen der
-	 * Hallenobjekte. Gilt für Saalübersicht und Kundenfenster, bleibt beim Wechsel der Ansicht erhalten und kommt aus
-	 * der {@link DisplayPreferences} (KARV-76).
+	 * Hallenobjekte. Gilt für Saalübersicht und Kundenfenster.
 	 */
 	public PlanLabelOptions planLabels() {
-		return planLabels;
+		return display.planLabels();
 	}
 
-	/** Wo das Kundenfenster die Kartenübersicht zeigt (Menü "Anzeige"); bleibt beim Wechsel der Ansicht erhalten, aus der {@link DisplayPreferences}. */
+	/** Wo das Kundenfenster die Kartenübersicht zeigt (Menü "Anzeige"). */
 	public ObjectProperty<SummaryPlacement> summaryPlacementProperty() {
-		return summaryPlacement;
+		return display.summaryPlacementProperty();
 	}
 
 	/** Ob der Saalplan die Reihen (Linie mit Buchstabe) zeigt; Tische und Sitze sind immer zu sehen. */
 	public BooleanProperty showRowsProperty() {
-		return planLabels.rowsProperty();
+		return display.planLabels().rowsProperty();
 	}
 
 	/** Setzt die Auswahl auf {@code bookings}: entfernt fehlende und fügt neue hinzu, gemeinsame bleiben unberührt. */

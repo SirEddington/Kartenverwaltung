@@ -100,12 +100,12 @@ Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
 | `sales` | Ticket sales shell, ticket table, hall overview, customer display window, bulk edit, search, cancel, assign place |
 | `accounting` | Accounting shell, cash reconciliation, statistics, `Exportable` (CSV/PDF) |
 | `event` | Event overview, create/edit, presentations, seating plan switch |
-| `hall` | Hall management, hall editor, hall plan and seating plan drawing/layout, row fill, bulk edits; `DisplayPreferences` (the app-wide "Anzeige" menu shared with sales) |
+| `hall` | Hall management, hall editor, hall plan and seating plan drawing/layout, row fill, bulk edits |
 | `settings` | Searchable settings screen, "Gemeinsamer Ordner", "Anzeige" and "Info und Updates" sections |
 | `shared` | Shared-folder start/connect flow, sync indicator and info window, operator dialog, locked units, data reload, update flow, texts and footer hint |
 | `backup` | Restore dialog and catalogs for events and halls |
 | `input` | Parsing text fields, spinners, date/time and number inputs with inline feedback |
-| *(root)* | Savers, `LeaveGuard`, `ChangeTrigger`, `LiveUpdates`, `LiveValidator`, conflict dialog/list/indicator, status footer |
+| *(root)* | Savers, `LeaveGuard`, `ChangeTrigger`, `LiveUpdates`, `LiveValidator`, conflict dialog/list/indicator, status footer, `DisplayPreferences` (the app-wide "Anzeige" menu of sales and hall editor) |
 
 Controllers are referenced by `fx:controller` in the FXML files under `src/main/resources/.../ui/`.
 

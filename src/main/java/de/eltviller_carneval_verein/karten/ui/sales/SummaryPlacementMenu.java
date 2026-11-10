@@ -1,6 +1,5 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
-import de.eltviller_carneval_verein.karten.ui.hall.SummaryPlacement;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
