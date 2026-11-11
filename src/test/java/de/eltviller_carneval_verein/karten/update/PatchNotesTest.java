@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import java.util.Optional;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.update.PatchNotes.Kind;
@@ -213,7 +212,6 @@ class PatchNotesTest {
 		assertEquals(List.of("1.2.0"), versions(notes.upTo(AppVersion.parse("1.2.0", "5").orElseThrow()).subList(0, 1)));
 	}
 
-	@Disabled("bis Task 4: die Datei kommt erst mit dem freigegebenen Text")
 	@Test
 	void bundledReadsTheResource() {
 		assertFalse(PatchNotes.bundled().releases().isEmpty());

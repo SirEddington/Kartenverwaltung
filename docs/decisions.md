@@ -508,7 +508,9 @@ install.
 - After an update the first start shows "Was ist neu" once (not after a fresh installation); *Info und Updates*
   shows it at any time. Before an update the app only links to the GitHub release page; it never loads the text.
 - Fixed sections "Neu", "Verbessert", "Behoben", "Hinter den Kulissen" in plain language for the box office. Claude
-  drafts the text from the tickets of the version; the maintainer approves it.
+  drafts the final text from the tickets of the version shortly before the pull request from the release branch to
+  `main`; the maintainer approves it. Until then the section holds a provisional text, because the guard test requires
+  a valid section for the version on every build.
 - The file format is strict and checked by a test against `pom.xml` and `conveyor.conf`: placeholders, empty
   sections, formatting and anything GitHub would turn into a mention, a reference or an emoji (`@name`, `#12`,
   `:word:`) are errors, so no release can go out with unfinished or misleading notes.

@@ -120,8 +120,10 @@ back changes to that hall from other workstations until it is restarted.
    `conveyor.conf` are derived from `app.version`, so both must match. In the same commit add a section for the new
    version at the top of `src/main/resources/de/eltviller_carneval_verein/karten/patchnotes.md` with at least one
    real entry; `PatchNotesBundledTest` fails otherwise (it also requires a three-part version `a.b.c`).
-2. **Before running the workflow (patch notes):** compare `patchnotes.md` with the tickets of the fixVersion in Jira
-   (`git log <previous tag>..HEAD` helps) and have the maintainer approve the text. Plain language for the box
+2. **Before the pull request from `release/<version>` to `main` (patch notes):** until then the section of the new
+   version only holds a provisional text, so that the tests stay green on the release branch. Shortly before the pull
+   request, write the final text from the tickets of the fixVersion in Jira (`git log <previous tag>..HEAD` helps) and
+   have the maintainer approve it. Plain language for the box
    office; sections "Neu", "Verbessert", "Behoben", "Hinter den Kulissen"; no placeholders, no `@name`, `#12` or
    `:word:` (the parser rejects them, see [decisions.md](decisions.md#patch-notes-karv-125)).
 3. Create the format sample of the new version from this final release state: run `FormatSampleGenerator`
