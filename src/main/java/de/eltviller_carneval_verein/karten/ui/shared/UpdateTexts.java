@@ -104,7 +104,6 @@ public final class UpdateTexts {
 			+ " im gemeinsamen Ordner.";
 	public static final String NEXT_STEP_MANUAL = "Von Hand aktualisieren.";
 	public static final String STATIONS_TITLE = "Kassen am gemeinsamen Ordner";
-	public static final String ROW_FOLDER_UPDATE = "Gemeinsamer Ordner";
 	private static final String STATION_LINE = "&1 – &2 – zuletzt gestartet &3 – &4";
 	private static final String OWN_STATION = " (diese Kasse)";
 

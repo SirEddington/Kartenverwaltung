@@ -78,6 +78,7 @@ import de.eltviller_carneval_verein.karten.ui.shared.UpdateTexts;
 import de.eltviller_carneval_verein.karten.update.AppVersion;
 import de.eltviller_carneval_verein.karten.update.AwtDesktopOps;
 import de.eltviller_carneval_verein.karten.update.ExecutorScheduler;
+import de.eltviller_carneval_verein.karten.update.FolderState;
 import de.eltviller_carneval_verein.karten.update.HttpUpdateSource;
 import de.eltviller_carneval_verein.karten.update.Installation;
 import de.eltviller_carneval_verein.karten.update.UpdateChecker;
@@ -155,6 +156,7 @@ public class MainApp extends Application {
 	// Schlüssel in den Properties der Ansicht "Update wird vorbereitet …" (markBusyView)
 	private static final Object BUSY_VIEW = new Object();
 	private static final ObjectProperty<UpdateState> updateState = new SimpleObjectProperty<>(new UpdateState.NotChecked());
+	private static final ObjectProperty<FolderState> folderState = new SimpleObjectProperty<>(FolderState.empty());
 	private static Updates updates;
 	private static UpdateIndicator updateIndicator;
 	private static Parent busyView;
@@ -664,6 +666,26 @@ public class MainApp extends Application {
 	@SuppressWarnings("exports")
 	public static ReadOnlyObjectProperty<UpdateState> updateStateProperty() {
 		return updateState;
+	}
+
+	/** Der Stand des gemeinsamen Ordners zu Versionen und Updates für Fußzeile und Einstellungen (FX-Thread, KARV-132). */
+	@SuppressWarnings("exports")
+	public static ReadOnlyObjectProperty<FolderState> folderStateProperty() {
+		return folderState;
+	}
+
+	/** Die Rechner-ID dieser Kasse (Markierung in der Liste der Kassen, KARV-132). */
+	public static String ownMachineId() {
+		try {
+			return SyncService.getInstance().machineId();
+		} catch (RuntimeException e) {
+			return "";
+		}
+	}
+
+	/** „Jetzt prüfen“: Update-Prüfung anstoßen (KARV-131). */
+	public static void checkForUpdatesNow() {
+		updates().ifPresent(u -> u.checker().checkNow());
 	}
 
 	/** Die Ansicht „Update wird vorbereitet …“: unbestimmter Fortschritt, Fußzeile nur mit Meldungen (KARV-131). */
