@@ -112,6 +112,36 @@ public final class PatchNotes {
 				.toList();
 	}
 
+	/**
+	 * Die Abschnitte einer Version als Markdown für den Text des GitHub-Releases: {@code ### Abschnitt} und
+	 * {@code - Eintrag}, jede Zeile mit {@code \n}, eine Leerzeile zwischen Abschnitten, ohne die Versionszeile. In den
+	 * Einträgen ist jedes ASCII-Satzzeichen maskiert, damit GitHub sie wie die App als reinen Text zeigt.
+	 */
+	public String markdown(Release release) {
+		StringBuilder md = new StringBuilder();
+		for (Section section : release.sections()) {
+			if (!md.isEmpty()) {
+				md.append('\n');
+			}
+			md.append("### ").append(section.kind().title()).append('\n');
+			for (String entry : section.entries()) {
+				md.append("- ").append(escape(entry)).append('\n');
+			}
+		}
+		return md.toString();
+	}
+
+	private static String escape(String text) {
+		StringBuilder escaped = new StringBuilder(text.length() + 16);
+		for (char c : text.toCharArray()) {
+			if (c < 128 && "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~".indexOf(c) >= 0) {
+				escaped.append('\\');
+			}
+			escaped.append(c);
+		}
+		return escaped.toString();
+	}
+
 	static AppVersion base(AppVersion v) {
 		return new AppVersion(v.version(), 0);
 	}
