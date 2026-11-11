@@ -10,6 +10,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Shape;
+import de.eltviller_carneval_verein.karten.model.Table;
 
 class HallValidatorTest {
 
@@ -338,6 +339,26 @@ class HallValidatorTest {
 		Hall overlap = validHall();
 		addObject(overlap, "Sektbar", 100, 50, 80, 0);
 		assertTrue(HallValidator.validate(overlap).isValid());
+	}
+
+	@Test
+	void twoPlansOfOneHallMayCoincide() {
+		Hall hall = new Hall();
+		hall.setName("Halle 1");
+		hall.setHallWidth(2_000);
+		hall.setHallHeight(2_000);
+		for (int i = 0; i < 2; i++) {
+			SeatingPlan plan = hall.addSeatingPlan();
+			Table table = plan.addTable(plan.addRow());
+			table.setWidth(50);
+			table.setHeight(100);
+			table.setPosX(500);
+			table.setPosY(500);
+		}
+
+		ValidationResult result = HallValidator.validate(hall);
+
+		assertTrue(result.getIssues().stream().noneMatch(i -> i.code().equals("SPL-004")), result.getIssues().toString());
 	}
 
 	@Test

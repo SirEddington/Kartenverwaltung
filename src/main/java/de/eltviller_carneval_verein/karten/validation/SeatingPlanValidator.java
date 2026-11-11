@@ -1,8 +1,11 @@
 package de.eltviller_carneval_verein.karten.validation;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
@@ -14,23 +17,34 @@ import de.eltviller_carneval_verein.karten.model.TableRow;
 public final class SeatingPlanValidator {
 
 	private final SeatingPlan plan;
+	private final Hall hall;
 	private final ValidationResult result = ValidationResult.ok();
+	/** Umrisse der Tische (Platte und Stühle) parallel zu {@code plan.getTables()}, je Lauf einmal berechnet. */
+	private List<Optional<Footprint>> footprints = List.of();
 
-	private SeatingPlanValidator(SeatingPlan plan) {
+	private SeatingPlanValidator(SeatingPlan plan, Hall hall) {
 		this.plan = plan;
+		this.hall = hall;
 	}
 
 	public static ValidationResult validate(SeatingPlan plan) {
-		return new SeatingPlanValidator(plan).run();
+		return validate(plan, plan.getParent());
+	}
+
+	/** @param hall die Halle für die Lageprüfung der Tische (TBL-007); darf {@code null} sein */
+	static ValidationResult validate(SeatingPlan plan, Hall hall) {
+		return new SeatingPlanValidator(plan, hall).run();
 	}
 
 	private ValidationResult run() {
+		footprints = plan.getTables().stream().map(Footprint::of).toList();
 		validateName();
 		validateRowLabelsAreUnique();
 		validateRows();
 		validateTableNamesAreUnique();
 		validateTableRows();
 		validateTables();
+		validateTablesDoNotOverlap();
 		return result;
 	}
 
@@ -84,8 +98,29 @@ public final class SeatingPlanValidator {
 	}
 
 	private void validateTables() {
-		for (Table table : plan.getTables()) {
-			result.addAll(TableValidator.validate(table));
+		List<Table> tables = plan.getTables();
+		for (int i = 0; i < tables.size(); i++) {
+			result.addAll(TableValidator.validate(tables.get(i), hall, footprints.get(i).orElse(null)));
+		}
+	}
+
+	/**
+	 * Warnt je Paar von Tischen, deren Platten oder Stühle sich überlappen (die Meldung nennt sie in Listenreihenfolge).
+	 * Tische ohne Umriss nehmen nicht teil.
+	 */
+	private void validateTablesDoNotOverlap() {
+		List<Table> tables = plan.getTables();
+		for (int i = 0; i < tables.size(); i++) {
+			if (footprints.get(i).isEmpty()) {
+				continue;
+			}
+			Footprint a = footprints.get(i).get();
+			for (int j = i + 1; j < tables.size(); j++) {
+				if (footprints.get(j).isPresent() && a.overlaps(footprints.get(j).get())) {
+					result.add(SeatingPlanIssue.TABLES_OVERLAP.toIssue(EntityLabels.plan(plan), tables.get(i).getDisplayName(),
+							tables.get(j).getDisplayName()));
+				}
+			}
 		}
 	}
 }

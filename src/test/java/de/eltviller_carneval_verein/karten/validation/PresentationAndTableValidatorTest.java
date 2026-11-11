@@ -13,6 +13,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 
@@ -182,9 +183,15 @@ class PresentationAndTableValidatorTest {
 	@Test
 	void planValidatorChecksEveryTable() {
 		SeatingPlan plan = plan();
-		table(plan, 1).addSeat(1).setWidth(-1);
-		table(plan, 2).addSeat(1).setWidth(-1);
-		table(plan, 3).addSeat(1).setWidth(30);
+		// Sitze auseinanderlegen: alle Tische starten bei (0|0) und würden sich sonst überlappen (SPL-004)
+		Seat first = table(plan, 1).addSeat(1);
+		first.setWidth(-1);
+		Seat second = table(plan, 2).addSeat(1);
+		second.setWidth(-1);
+		second.setPosX(200);
+		Seat third = table(plan, 3).addSeat(1);
+		third.setWidth(30);
+		third.setPosX(400);
 
 		assertEquals(2, SeatingPlanValidator.validate(plan).getIssues().size());
 	}

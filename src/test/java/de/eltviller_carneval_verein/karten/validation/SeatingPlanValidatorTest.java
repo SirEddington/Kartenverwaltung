@@ -3,9 +3,12 @@ package de.eltviller_carneval_verein.karten.validation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
@@ -282,5 +285,147 @@ class SeatingPlanValidatorTest {
 
 		assertEquals("TBL-003", issue.code());
 		assertTrue(issue.message().startsWith("Breite von Tisch A1"), issue.message());
+	}
+
+	// --- Tische in der Halle und ohne Überlappung (TBL-007, SPL-004) ---
+
+	/** Bestuhlung "Prunksitzung" in der Halle "Festhalle" ({@code hallSize} x {@code hallSize}) mit Reihe "A", noch ohne Tische. */
+	private static SeatingPlan emptyPlan(double hallSize) {
+		Hall hall = new Hall();
+		hall.setName("Festhalle");
+		hall.setHallWidth(hallSize);
+		hall.setHallHeight(hallSize);
+		SeatingPlan plan = hall.addSeatingPlan();
+		plan.setName("Prunksitzung");
+		plan.addRow().setLabel("A");
+		return plan;
+	}
+
+	/** Tisch 50 x 100 mit der linken oberen Ecke bei ({@code x}|{@code y}) in der ersten Reihe. */
+	private static Table addTable(SeatingPlan plan, double x, double y) {
+		Table table = plan.addTable(row(plan));
+		table.setWidth(50);
+		table.setHeight(100);
+		table.setPosX(x);
+		table.setPosY(y);
+		return table;
+	}
+
+	private static Seat addSeat(Table table, double x, double y) {
+		Seat seat = table.addSeat();
+		seat.setWidth(20);
+		seat.setPosX(x);
+		seat.setPosY(y);
+		return seat;
+	}
+
+	@Test
+	void overlappingTablesAreReportedOnce() {
+		SeatingPlan plan = emptyPlan(2_000);
+		addTable(plan, 0, 0);
+		addTable(plan, 20, 0);
+		addTable(plan, 500, 0);
+
+		ValidationIssue issue = only(SeatingPlanValidator.validate(plan));
+
+		assertEquals("SPL-004", issue.code());
+		assertEquals(Severity.WARNING, issue.severity());
+		assertEquals("Tisch A1 und Tisch A2 überlappen sich in Bestuhlung Prunksitzung in Halle Festhalle (Tischplatten oder Stühle).",
+				issue.message());
+	}
+
+	@Test
+	void seatReachingIntoNeighbourOverlaps() {
+		SeatingPlan plan = emptyPlan(2_000);
+		Table first = addTable(plan, 0, 0);
+		addTable(plan, 100, 0);
+		addSeat(first, 105, 50);
+
+		assertEquals("SPL-004", only(SeatingPlanValidator.validate(plan)).code());
+	}
+
+	@Test
+	void tableWithoutSeatsAndEmptyPlanAreFine() {
+		SeatingPlan plan = emptyPlan(2_000);
+		assertTrue(SeatingPlanValidator.validate(plan).isEmpty());
+
+		addTable(plan, 0, 0);
+		addTable(plan, 500, 0);
+		assertTrue(SeatingPlanValidator.validate(plan).isEmpty());
+	}
+
+	@Test
+	void seatOutsideHallWarns() {
+		SeatingPlan plan = emptyPlan(2_000);
+		Table first = addTable(plan, 0, 0);
+		addSeat(first, -15, 50);
+
+		ValidationIssue issue = only(SeatingPlanValidator.validate(plan));
+
+		assertEquals("TBL-007", issue.code());
+		assertEquals(Severity.WARNING, issue.severity());
+		assertEquals("Tisch A1 in Bestuhlung Prunksitzung in Halle Festhalle ragt mit Tischplatte oder Stühlen über den Rand der Halle hinaus.",
+				issue.message());
+	}
+
+	@Test
+	void rotatedTableCornerOutsideWarns() {
+		SeatingPlan plan = emptyPlan(2_000);
+		Table table = addTable(plan, 0, 0);
+		table.setHeight(320);
+		table.setRotation(30);
+
+		assertEquals("TBL-007", only(SeatingPlanValidator.validate(plan)).code());
+	}
+
+	@Test
+	void hallWithoutSizeSkipsTbl007() {
+		SeatingPlan plan = emptyPlan(0);
+		Table first = addTable(plan, 0, 0);
+		addSeat(first, -15, 50);
+
+		assertTrue(SeatingPlanValidator.validate(plan).isEmpty());
+	}
+
+	@Test
+	void planWithoutHallStillChecksOverlap() {
+		SeatingPlan plan = new SeatingPlan();
+		plan.setName("Prunksitzung");
+		TableRow row = plan.addRow();
+		row.setLabel("A");
+		Table first = plan.addTable(row);
+		first.setWidth(50);
+		first.setHeight(100);
+		Table second = plan.addTable(row);
+		second.setWidth(50);
+		second.setHeight(100);
+		second.setPosX(20);
+
+		assertEquals("SPL-004", only(SeatingPlanValidator.validate(plan)).code());
+	}
+
+	@Test
+	void duplicateTableIdsDoNotInventOverlaps() {
+		SeatingPlan plan = emptyPlan(2_000);
+		Table first = new Table("t1");
+		first.setWidth(50);
+		first.setHeight(100);
+		Table second = new Table("t1");
+		second.setWidth(50);
+		second.setHeight(100);
+		second.setPosX(500);
+		plan.setTables(List.of(first, second));
+
+		assertTrue(SeatingPlanValidator.validate(plan).getIssues().stream().noneMatch(i -> i.code().equals("SPL-004")));
+	}
+
+	@Test
+	void seatWithNaNPositionIsIgnoredByGeometry() {
+		SeatingPlan plan = emptyPlan(2_000);
+		Table first = addTable(plan, 0, 0);
+		addSeat(first, Double.NaN, 50);
+
+		assertTrue(SeatingPlanValidator.validate(plan).getIssues().stream()
+				.noneMatch(i -> i.code().equals("SPL-004") || i.code().equals("TBL-007")));
 	}
 }

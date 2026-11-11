@@ -3,7 +3,8 @@ package de.eltviller_carneval_verein.karten.validation;
 /**
  * Plausibilitätsfehler am Tisch (Kürzel TBL). Codes sind stabil und werden nie wiederverwendet.
  *
- * <p>{@code &1} steht für die Beschreibung des Tisches (siehe {@link EntityLabels#table}).
+ * <p>{@code &1} steht für die Beschreibung des Tisches (siehe {@link EntityLabels#table}); das gilt für alle Codes,
+ * die nicht die {@link RangeCheck}-Vorlage verwenden.
  */
 public enum TableIssue implements Issue {
 	/** &1 = Tisch, &2 = mehrfach vergebene Sitznummer. */
@@ -17,7 +18,9 @@ public enum TableIssue implements Issue {
 	/** Der Tisch einer Bestuhlung hat keine Reihe oder zeigt auf eine Reihe, die es nicht gibt. &1 = Tisch. */
 	ROW_MISSING("TBL-005", Severity.ERROR, "&1 gehört zu keiner vorhandenen Reihe."),
 	/** Schriftgröße der Beschriftung außerhalb von 1 bis 1.000 (Platzhalter wie bei {@link #SIZE_OUT_OF_RANGE}). */
-	TEXT_SIZE_OUT_OF_RANGE("TBL-006", Severity.ERROR, RangeCheck.TEMPLATE);
+	TEXT_SIZE_OUT_OF_RANGE("TBL-006", Severity.ERROR, RangeCheck.TEMPLATE),
+	/** Tischplatte oder ein Stuhl liegt (nach Abzug der Toleranz) außerhalb der Halle. &1 = Tisch. */
+	OUTSIDE_HALL("TBL-007", Severity.WARNING, "&1 ragt mit Tischplatte oder Stühlen über den Rand der Halle hinaus.");
 
 	private final String code;
 	private final Severity severity;

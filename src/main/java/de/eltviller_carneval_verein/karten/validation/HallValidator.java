@@ -94,7 +94,7 @@ public final class HallValidator {
 	private void validateSeatingPlans() {
 		validatePlanNamesAreUnique();
 		for (SeatingPlan plan : hall.getSeatingPlans()) {
-			result.addAll(SeatingPlanValidator.validate(plan));
+			result.addAll(SeatingPlanValidator.validate(plan, hall));
 		}
 	}
 }
