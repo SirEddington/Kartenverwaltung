@@ -25,8 +25,8 @@ public final class SeatingPlanLayout {
 
 	// Freier Raum zwischen Tischkante und Sitz (cm): Der Sitzmittelpunkt liegt Radius + dieser Abstand neben der Kante
 	private static final double SEAT_CLEARANCE = 5;
-	/** Radius eines Sitzes ohne Breite (cm), siehe {@link #seatRadius}. */
-	public static final double FALLBACK_SEAT_RADIUS = 10;
+	/** Radius eines Sitzes ohne Breite (cm), siehe {@link Seat#radius()}. */
+	public static final double FALLBACK_SEAT_RADIUS = Seat.FALLBACK_RADIUS;
 
 	// "+ Reihe": Startpunkt der ersten Reihe (x und y), Gang zwischen zwei Reihen, Abstand neben einer Reihe ohne Tische (cm)
 	private static final double FIRST_ROW_START = 100;
@@ -50,11 +50,10 @@ public final class SeatingPlanLayout {
 	}
 
 	/**
-	 * Radius eines Sitzes in cm: Sitze sind Kreise, die Breite ist ihr Durchmesser. Ein Sitz ohne Breite (0) bekäme keine
-	 * Fläche; Anordnung und Zeichnung rechnen für ihn mit {@value #FALLBACK_SEAT_RADIUS}, der Validator meldet ihn.
+	 * Radius eines Sitzes in cm, siehe {@link Seat#radius()}.
 	 */
 	public static double seatRadius(Seat seat) {
-		return seat.getWidth() > 0 ? seat.getWidth() / 2.0 : FALLBACK_SEAT_RADIUS;
+		return seat.radius();
 	}
 
 	/**
