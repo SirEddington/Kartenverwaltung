@@ -744,7 +744,8 @@ public class MainApp extends Application {
 							return t;
 						});
 				downloader = Optional.of(new FolderDownloader(inst.get(), access, own, clock,
-						java.util.random.RandomGenerator.getDefault(), FolderDownloader.Tasks.of(loader),
+						// java.util.Random aus java.base: der Standard-Zufallsgenerator von Java braucht jdk.random, das im Paket fehlt
+					new java.util.Random(), FolderDownloader.Tasks.of(loader),
 						java.time.Duration.ofSeconds(10), java.time.Duration.ofSeconds(60), java.time.Duration.ofMinutes(30),
 						MsixManifest.MAX_MSIX_BYTES));
 			}
