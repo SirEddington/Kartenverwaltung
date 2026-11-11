@@ -87,10 +87,15 @@ public final class PatchNotesWindow {
 		if (open == null) {
 			open = new PatchNotesWindow(owner);
 		}
+		// nur beim Öffnen an den Inhalt anpassen: ist das Fenster schon offen, behält es die Größe, die der Nutzer
+		// gewählt hat (unter Linux setzte sizeToScene sie sonst bei jedem „Patchnotes anzeigen“ zurück)
+		boolean opening = !open.stage.isShowing();
 		open.fill(releases);
 		open.stage.setMaxHeight(screenHeight(owner) * 0.7);
 		open.stage.show();
-		open.stage.sizeToScene();
+		if (opening) {
+			open.stage.sizeToScene();
+		}
 		open.stage.toFront();
 	}
 
