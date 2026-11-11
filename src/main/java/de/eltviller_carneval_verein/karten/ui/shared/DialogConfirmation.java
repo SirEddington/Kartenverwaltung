@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import javafx.stage.Window;
 
 /**
@@ -14,7 +15,6 @@ import javafx.stage.Window;
  */
 public final class DialogConfirmation implements Confirmation {
 
-	private static final String CANCEL = "Abbrechen";
 	private static final String ACTION_STYLE = "button-primary";
 
 	/** Die Signatur von {@code ConfirmDialog.confirm} mit Abbruchtext und Link; {@code linkText null} = ohne Link. */
@@ -45,7 +45,7 @@ public final class DialogConfirmation implements Confirmation {
 
 	@Override
 	public boolean ask(String titel, String text, String knopf, String abbrechen, Optional<Link> link) {
-		return dialog.confirm(titel, text, knopf, ACTION_STYLE, abbrechen == null ? CANCEL : abbrechen, owner,
+		return dialog.confirm(titel, text, knopf, ACTION_STYLE, abbrechen == null ? ConfirmDialog.CANCEL : abbrechen, owner,
 				link.map(Link::text).orElse(null), link.map(Link::page).orElse(null), link.map(Link::open).orElse(null));
 	}
 }

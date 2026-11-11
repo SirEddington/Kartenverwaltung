@@ -682,7 +682,7 @@ public class MainApp extends Application {
 			StatusMessage.getInstance().show(Severity.ERROR, UpdateTexts.PATCH_NOTES_UNREADABLE);
 			return;
 		}
-		List<PatchNotes.Release> releases = AppVersion.current().map(notes::upTo).orElse(notes.releases());
+		List<PatchNotes.Release> releases = notes.forDisplay(AppVersion.current());
 		if (releases.isEmpty()) {
 			StatusMessage.getInstance().show(Severity.INFO, UpdateTexts.PATCH_NOTES_NONE);
 			return;

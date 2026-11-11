@@ -213,6 +213,14 @@ class PatchNotesTest {
 	}
 
 	@Test
+	void forDisplay() {
+		PatchNotes notes = parse("## 1.2.0", "### Neu", "- A", "## 1.1.0", "### Neu", "- B");
+		assertEquals(List.of("1.1.0"), versions(notes.forDisplay(AppVersion.parse("1.1.0", "2"))));
+		assertEquals(List.of("1.2.0", "1.1.0"), versions(notes.forDisplay(Optional.empty())));
+		assertEquals(List.of(), versions(notes.forDisplay(Optional.of(v("1.0.0")))));
+	}
+
+	@Test
 	void bundledReadsTheResource() {
 		assertFalse(PatchNotes.bundled().releases().isEmpty());
 	}

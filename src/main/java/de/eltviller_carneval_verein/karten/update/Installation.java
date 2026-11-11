@@ -4,7 +4,6 @@ import java.net.URI;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -17,7 +16,7 @@ import java.util.regex.Pattern;
 public record Installation(AppVersion version, URI base, String fsname, Plattform plattform,
 		Optional<String> packageFamilyName) {
 
-	private static final Pattern GITHUB_LATEST = Pattern.compile("/([^/]+)/([^/]+)/releases/latest/download/");
+	private static final Pattern GITHUB_LATEST = Pattern.compile("/[^/]+/[^/]+/releases/latest/download/");
 
 	/**
 	 * Liest die Installation aus Systemeigenschaften und Umgebung. Fehlt {@code app.version}, {@code app.repositoryUrl}
@@ -61,17 +60,13 @@ public record Installation(AppVersion version, URI base, String fsname, Plattfor
 	 * sonst leer, etwa bei der lokalen Testquelle. Die Revision zählt nicht, das Tag ist die Versionsnummer.
 	 */
 	public Optional<URI> releasePage(AppVersion v) {
-		if (!"https".equalsIgnoreCase(base.getScheme()) || base.getHost() == null
-				|| !"github.com".equalsIgnoreCase(base.getHost()) || base.getPort() != -1 || base.getUserInfo() != null
-				|| base.getQuery() != null || base.getFragment() != null || base.getRawPath() == null) {
+		if (!"https".equalsIgnoreCase(base.getScheme()) || !"github.com".equalsIgnoreCase(base.getHost())
+				|| base.getPort() != -1 || base.getUserInfo() != null || base.getQuery() != null || base.getFragment() != null
+				|| !GITHUB_LATEST.matcher(base.getRawPath()).matches()) {
 			return Optional.empty();
 		}
-		// der rohe (kodierte) Pfad, damit die neue Adresse genauso kodiert bleibt und URI.create nicht scheitert
-		Matcher m = GITHUB_LATEST.matcher(base.getRawPath());
-		if (!m.matches()) {
-			return Optional.empty();
-		}
-		return Optional.of(URI.create("https://github.com/" + m.group(1) + "/" + m.group(2) + "/releases/tag/" + v.version()));
+		// …/releases/latest/download/ → …/releases/tag/<Version>, wie metadataUri über resolve (Kodierung bleibt erhalten)
+		return Optional.of(base.resolve("../../tag/" + v.version()));
 	}
 
 	/**

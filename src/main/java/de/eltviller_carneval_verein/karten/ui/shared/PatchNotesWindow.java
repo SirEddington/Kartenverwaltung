@@ -14,8 +14,6 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.image.Image;
-import javafx.scene.input.KeyCode;
-import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -39,10 +37,8 @@ public final class PatchNotesWindow {
 
 	private final Stage stage = new Stage();
 	private final VBox content = new VBox(6);
-	private final Window owner;
 
 	private PatchNotesWindow(Window owner) {
-		this.owner = owner;
 		if (owner != null) {
 			stage.initOwner(owner);
 		}
@@ -63,6 +59,8 @@ public final class PatchNotesWindow {
 		close.setId("patch-notes-close");
 		close.getStyleClass().add("button-default");
 		close.setOnAction(e -> stage.close());
+		// Escape schließt wie in SyncInfoWindow
+		close.setCancelButton(true);
 		HBox buttons = new HBox(close);
 		buttons.setAlignment(Pos.CENTER_RIGHT);
 
@@ -71,12 +69,6 @@ public final class PatchNotesWindow {
 		root.setPrefWidth(560);
 		Scene scene = new Scene(root);
 		scene.getStylesheets().add(PatchNotesWindow.class.getResource(STYLESHEET).toExternalForm());
-		scene.addEventHandler(KeyEvent.KEY_PRESSED, e -> {
-			if (e.getCode() == KeyCode.ESCAPE) {
-				stage.close();
-				e.consume();
-			}
-		});
 		stage.setScene(scene);
 		stage.setMinWidth(480);
 	}
@@ -92,10 +84,7 @@ public final class PatchNotesWindow {
 		if (releases.isEmpty()) {
 			return;
 		}
-		if (open == null || open.owner != owner) {
-			if (open != null) {
-				open.stage.close();
-			}
+		if (open == null) {
 			open = new PatchNotesWindow(owner);
 		}
 		open.fill(releases);

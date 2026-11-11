@@ -54,9 +54,12 @@ class UpdateFlowTest {
 	private UpdateFlow flow;
 
 	private static Installation installation(boolean packaged) {
+		return installation(packaged, "http://localhost:8765/upd");
+	}
+
+	private static Installation installation(boolean packaged, String repositoryUrl) {
 		Map<String, String> props = Map.of("app.version", "1.1.0", "app.revision", "1", "app.fsname", "ecv-karten",
-				"app.repositoryUrl", "http://localhost:8765/upd", "os.name", "Windows 11",
-				"app.windows.userModelID", FAMILY + "!EcvKarten");
+				"app.repositoryUrl", repositoryUrl, "os.name", "Windows 11", "app.windows.userModelID", FAMILY + "!EcvKarten");
 		Map<String, String> env = packaged ? Map.of("PACKAGE_LOCALAPPDATA", "C:\\Users\\u\\AppData\\Local\\Packages\\" + FAMILY)
 				: Map.of();
 		return Installation.from(props::get, env::get).orElseThrow();
@@ -159,11 +162,19 @@ class UpdateFlowTest {
 
 	/** Wie {@link #installation(boolean)} im Paket, aber mit der echten Update-Quelle auf GitHub (KARV-125). */
 	private static Installation githubInstallation() {
-		Map<String, String> props = Map.of("app.version", "1.1.0", "app.revision", "1", "app.fsname", "ecv-karten",
-				"app.repositoryUrl", "https://github.com/SirEddington/Kartenverwaltung/releases/latest/download",
-				"os.name", "Windows 11", "app.windows.userModelID", FAMILY + "!EcvKarten");
-		return Installation.from(props::get,
-				Map.of("PACKAGE_LOCALAPPDATA", "C:\\Users\\u\\AppData\\Local\\Packages\\" + FAMILY)::get).orElseThrow();
+		return installation(true, "https://github.com/SirEddington/Kartenverwaltung/releases/latest/download");
+	}
+
+	/** Executoren, die in {@code calls} vermerken, auf welchem Weg eine Aufgabe lief. */
+	private void recordThreads() {
+		worker = r -> {
+			calls.add("worker");
+			r.run();
+		};
+		ui = r -> {
+			calls.add("ui");
+			r.run();
+		};
 	}
 
 	private static AppVersion version(String version, String revision) {
@@ -395,14 +406,7 @@ class UpdateFlowTest {
 
 	@Test
 	void openReleasePageBrowsesOnWorker() {
-		worker = r -> {
-			calls.add("worker");
-			r.run();
-		};
-		ui = r -> {
-			calls.add("ui");
-			r.run();
-		};
+		recordThreads();
 		flow = flow(githubInstallation());
 		List<String> errors = new ArrayList<>();
 		flow.openReleasePage(PAGE_120, errors::add);
@@ -412,14 +416,7 @@ class UpdateFlowTest {
 
 	@Test
 	void openReleasePageReportsFailureOnUi() {
-		worker = r -> {
-			calls.add("worker");
-			r.run();
-		};
-		ui = r -> {
-			calls.add("ui");
-			r.run();
-		};
+		recordThreads();
 		browseFailure = new IOException("kein Browser");
 		flow = flow(githubInstallation());
 		List<String> errors = new ArrayList<>();

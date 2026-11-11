@@ -45,9 +45,10 @@ public final class PatchNotesOnStart {
 		AppVersion now = current.get().withoutRevision();
 		Optional<String> remember = Optional.of(now.version());
 		boolean seenBlank = seen == null || seen.isEmpty();
-		Optional<AppVersion> seenVersion = seenBlank ? Optional.empty() : AppVersion.parse(seen, null);
+		// parse liefert für null und "" leer, und gespeichert wird nie eine Revision
+		Optional<AppVersion> seenVersion = AppVersion.parse(seen, null);
 		if (seenVersion.isPresent()) {
-			int order = seenVersion.get().withoutRevision().compareTo(now);
+			int order = seenVersion.get().compareTo(now);
 			if (order == 0) {
 				return new Decision(List.of(), Optional.empty());
 			}

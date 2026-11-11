@@ -95,6 +95,14 @@ public final class PatchNotes {
 		return releases;
 	}
 
+	/**
+	 * Was „Patchnotes anzeigen“ zeigt: alle Versionen bis zur laufenden, in der Entwicklung (ohne Version) alle; leer,
+	 * wenn die laufende Version älter ist als jede in der Datei.
+	 */
+	public List<Release> forDisplay(Optional<AppVersion> current) {
+		return current.map(this::upTo).orElse(releases);
+	}
+
 	/** Die Version {@code v}; nur die Versionsnummer zählt, nicht die Revision. */
 	public Optional<Release> of(AppVersion v) {
 		AppVersion wanted = v.withoutRevision();
@@ -235,9 +243,6 @@ public final class PatchNotes {
 		private void entry(int number, String text) {
 			if (kind == null) {
 				throw new InvalidPatchNotesException(number, "Eintrag vor dem ersten Abschnitt");
-			}
-			if (text.isEmpty()) {
-				throw new InvalidPatchNotesException(number, "leerer Eintrag");
 			}
 			closeEntry();
 			entry = new StringBuilder(text);

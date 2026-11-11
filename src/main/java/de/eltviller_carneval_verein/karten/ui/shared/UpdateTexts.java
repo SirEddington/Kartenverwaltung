@@ -172,7 +172,7 @@ public final class UpdateTexts {
 
 	/** Der Link zur Release-Seite (KARV-125); die Versionsnummer ohne Revision, passend zum Tag. */
 	public static String releaseLink(AppVersion version) {
-		return "Was ist neu in Version " + version.version() + "?";
+		return patchNotesTitle(version.version()) + "?";
 	}
 
 	/** Die Release-Seite ließ sich nicht im Browser öffnen (KARV-125). */

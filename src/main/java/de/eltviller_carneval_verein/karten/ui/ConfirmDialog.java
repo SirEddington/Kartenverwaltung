@@ -24,6 +24,9 @@ import javafx.stage.Window;
  */
 public final class ConfirmDialog {
 
+	/** Die übliche neutrale Antwort. */
+	public static final String CANCEL = "Abbrechen";
+
 	private ConfirmDialog() {
 	}
 
@@ -45,7 +48,7 @@ public final class ConfirmDialog {
 	 * @return {@code true}, wenn der Nutzer die Aktion bestätigt hat
 	 */
 	public static boolean confirm(String title, String message, String actionLabel, String actionStyleClass, Window owner) {
-		return confirm(title, message, actionLabel, actionStyleClass, "Abbrechen", owner);
+		return confirm(title, message, actionLabel, actionStyleClass, CANCEL, owner);
 	}
 
 	/**
