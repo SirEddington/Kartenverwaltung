@@ -106,7 +106,7 @@ Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
 | `accounting` | Accounting shell, cash reconciliation, statistics, `Exportable` (CSV/PDF) |
 | `event` | Event overview, create/edit, presentations, seating plan switch |
 | `hall` | Hall management, hall editor, hall plan and seating plan drawing/layout, row fill, bulk edits |
-| `settings` | Searchable settings screen, "Gemeinsamer Ordner", "Anzeige" and "Info und Updates" sections |
+| `settings` | Searchable settings screen, "Gemeinsamer Ordner", "Anzeige" and "Info und Updates" sections; `PatchNoteActions` bundles what "Info und Updates" needs for the patch notes (KARV-125) |
 | `shared` | Shared-folder start/connect flow, sync indicator and info window, operator dialog, locked units, data reload, update flow, texts and footer hint, `PatchNotesWindow` ("Was ist neu"), `DialogConfirmation` (confirmation with an optional link) |
 | `backup` | Restore dialog and catalogs for events and halls |
 | `input` | Parsing text fields, spinners, date/time and number inputs with inline feedback |
