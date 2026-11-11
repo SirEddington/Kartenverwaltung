@@ -75,6 +75,7 @@ import de.eltviller_carneval_verein.karten.ui.shared.SyncStatus;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateFlow;
 import de.eltviller_carneval_verein.karten.ui.shared.Confirmation;
 import de.eltviller_carneval_verein.karten.ui.shared.StartPrompt;
+import de.eltviller_carneval_verein.karten.ui.shared.StartPromptTicker;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateIndicator;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateTexts;
 import de.eltviller_carneval_verein.karten.update.AppVersion;
@@ -775,23 +776,34 @@ public class MainApp extends Application {
 	 */
 	private static void startStartPrompt() {
 		startPrompt.menuShown();
+		StartPromptTicker step = new StartPromptTicker(startPrompt, new StartPromptTicker.Conditions() {
+			@Override
+			public Optional<FolderOffer> offer() {
+				return folderState.get().offer();
+			}
+
+			@Override
+			public boolean firstCheckDone() {
+				return updates().isEmpty() || !(updateState.get().effective() instanceof UpdateState.NotChecked);
+			}
+
+			@Override
+			public boolean noBlockingWindow() {
+				return MENU_VIEW.equals(currentView) && MainApp.noBlockingWindow();
+			}
+
+			@Override
+			public boolean flowIdle() {
+				boolean connecting = SharedFolderConnection.instance().map(SharedFolderConnection::connecting).orElse(false);
+				return updates().map(u -> !u.flow().isRunning()).orElse(false) && !connecting;
+			}
+			// die Rückfrage nicht im Animationsschritt der Timeline: dort verbietet JavaFX showAndWait
+		}, offer -> updates().ifPresent(u -> u.flow().updateFromFolder(offer, true)), Platform::runLater);
 		Timeline ticker = new Timeline();
 		ticker.getKeyFrames().add(new KeyFrame(Duration.seconds(1), event -> {
 			try {
-				if (startPrompt.expired()) {
+				if (step.tick()) {
 					ticker.stop();
-					return;
-				}
-				Optional<FolderOffer> offer = folderState.get().offer();
-				boolean firstCheckDone = updates().isEmpty()
-						|| !(updateState.get().effective() instanceof UpdateState.NotChecked);
-				boolean connecting = SharedFolderConnection.instance().map(SharedFolderConnection::connecting).orElse(false);
-				boolean flowIdle = updates().map(u -> !u.flow().isRunning()).orElse(false) && !connecting;
-				boolean noBlocking = MENU_VIEW.equals(currentView) && noBlockingWindow();
-				if (startPrompt.due(offer.isPresent(), firstCheckDone, noBlocking, flowIdle)) {
-					startPrompt.asked();
-					ticker.stop();
-					updates().ifPresent(u -> u.flow().updateFromFolder(offer.get(), true));
 				}
 			} catch (RuntimeException e) {
 				LOG.log(Level.WARNING, "Rückfrage zum Update im gemeinsamen Ordner scheiterte", e);
