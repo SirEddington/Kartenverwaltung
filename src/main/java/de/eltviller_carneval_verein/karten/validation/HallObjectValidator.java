@@ -43,7 +43,7 @@ public final class HallObjectValidator {
 	 * (0 = noch nicht festgelegt) oder das Objekt keine Fläche hat; solche Fälle meldet die Bereichsprüfung.
 	 */
 	private void validateInsideHall() {
-		if (hall == null || !(hall.getHallWidth() > 0) || !(hall.getHallHeight() > 0)) {
+		if (hall == null || !hall.hasSize()) {
 			return;
 		}
 		Footprint.of(object).ifPresent(footprint -> {

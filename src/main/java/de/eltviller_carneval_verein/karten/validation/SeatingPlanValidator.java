@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
@@ -19,12 +20,27 @@ public final class SeatingPlanValidator {
 	private final SeatingPlan plan;
 	private final Hall hall;
 	private final ValidationResult result = ValidationResult.ok();
-	/** Umrisse der Tische (Platte und Stühle) parallel zu {@code plan.getTables()}, je Lauf einmal berechnet. */
-	private List<Optional<Footprint>> footprints = List.of();
+	/** Umrisse der Tische (Platte und Stühle) parallel zu {@code plan.getTables()}, einmal im Konstruktor berechnet. */
+	private final List<Optional<Footprint>> footprints;
 
 	private SeatingPlanValidator(SeatingPlan plan, Hall hall) {
 		this.plan = plan;
 		this.hall = hall;
+		this.footprints = plan.getTables().stream().map(this::footprintOf).toList();
+	}
+
+	/**
+	 * Umriss eines Tischs für die Lageprüfungen. Ein Tisch ohne gültige Reihe (Reihenkennung leer oder unbekannt, wie
+	 * in {@link #validateTableRows}) hat keinen Umriss: Die Anordnung setzt nur Tische in vorhandenen Reihen, seine Stühle
+	 * liegen noch an ungeordneten Positionen, oft bei (0|0). Der eigentliche Fehler wird als TBL-005 gemeldet; Lagewarnungen
+	 * (TBL-007, SPL-004, SPL-005) wären Folgemeldungen ohne Aussage.
+	 */
+	private Optional<Footprint> footprintOf(Table table) {
+		String rowId = table.getRowId();
+		if (rowId == null || rowId.isBlank() || plan.findRow(rowId) == null) {
+			return Optional.empty();
+		}
+		return Footprint.of(table);
 	}
 
 	public static ValidationResult validate(SeatingPlan plan) {
@@ -40,7 +56,6 @@ public final class SeatingPlanValidator {
 	}
 
 	private ValidationResult run() {
-		footprints = plan.getTables().stream().map(Footprint::of).toList();
 		validateName();
 		validateRowLabelsAreUnique();
 		validateRows();
@@ -137,18 +152,21 @@ public final class SeatingPlanValidator {
 		if (hall == null) {
 			return;
 		}
-		List<Optional<Footprint>> objects = hall.getHallObjects().stream().map(Footprint::of).toList();
+		List<HallObject> hallObjects = hall.getHallObjects();
+		List<Optional<Footprint>> objectFootprints = hallObjects.stream().map(Footprint::of).toList();
 		List<Table> tables = plan.getTables();
 		for (int i = 0; i < tables.size(); i++) {
 			if (footprints.get(i).isEmpty()) {
 				continue;
 			}
 			Footprint tableFootprint = footprints.get(i).get();
-			for (int j = 0; j < objects.size(); j++) {
-				if (objects.get(j).isPresent() && tableFootprint.overlaps(objects.get(j).get())
-						&& !tableFootprint.within(objects.get(j).get())) {
+			for (int j = 0; j < hallObjects.size(); j++) {
+				HallObject object = hallObjects.get(j);
+				Optional<Footprint> objectFootprint = objectFootprints.get(j);
+				if (objectFootprint.isPresent() && tableFootprint.overlaps(objectFootprint.get())
+						&& !tableFootprint.within(objectFootprint.get())) {
 					result.add(SeatingPlanIssue.TABLE_OVERLAPS_OBJECT.toIssue(EntityLabels.table(tables.get(i)),
-							EntityLabels.hallObjectName(hall.getHallObjects().get(j))));
+							EntityLabels.hallObjectName(object)));
 				}
 			}
 		}

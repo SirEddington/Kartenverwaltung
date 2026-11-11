@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.validation;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import de.eltviller_carneval_verein.karten.model.HallObject;
@@ -30,6 +31,8 @@ final class Footprint {
 	private static final double SHRINK = TOLERANCE / 2;
 
 	private final List<Part> parts;
+	/** Die um {@code TOLERANCE / 2} verkleinerten Teile für {@link #overlaps}; Teile, die dabei verschwinden, fehlen. */
+	private final List<Part> shrunkParts;
 	private final double minX;
 	private final double minY;
 	private final double maxX;
@@ -40,6 +43,7 @@ final class Footprint {
 			throw new IllegalArgumentException("Ein Footprint braucht mindestens ein Teil");
 		}
 		this.parts = List.copyOf(parts);
+		this.shrunkParts = this.parts.stream().map(Part::shrunk).filter(Objects::nonNull).toList();
 		double x0 = Double.POSITIVE_INFINITY;
 		double y0 = Double.POSITIVE_INFINITY;
 		double x1 = Double.NEGATIVE_INFINITY;
@@ -71,7 +75,7 @@ final class Footprint {
 		double width = table.getWidth();
 		double height = table.getHeight();
 		if (width > 0 && height > 0) {
-			Rect plate = new Rect(table.getPosX() + width / 2, table.getPosY() + height / 2, width / 2, height / 2,
+			Rect plate = Rect.of(table.getPosX() + width / 2, table.getPosY() + height / 2, width / 2, height / 2,
 					table.getRotation());
 			if (plate.isFinite()) {
 				parts.add(plate);
@@ -111,14 +115,14 @@ final class Footprint {
 			if (!(height > 0)) {
 				return Optional.empty();
 			}
-			part = new Rect(object.getPosX() + width / 2, object.getPosY() + height / 2, width / 2, height / 2, 0);
+			part = Rect.of(object.getPosX() + width / 2, object.getPosY() + height / 2, width / 2, height / 2, 0);
 		}
 		return part.isFinite() ? Optional.of(new Footprint(List.of(part))) : Optional.empty();
 	}
 
 	/** Ein gedrehtes Rechteck mit Mittelpunkt, vollen Maßen und Drehung in Grad (im Uhrzeigersinn). */
 	static Footprint rect(double cx, double cy, double width, double height, double degrees) {
-		return new Footprint(List.of(new Rect(cx, cy, width / 2, height / 2, degrees)));
+		return new Footprint(List.of(Rect.of(cx, cy, width / 2, height / 2, degrees)));
 	}
 
 	/** Ein Kreis mit Mittelpunkt und Radius. */
@@ -147,14 +151,9 @@ final class Footprint {
 		if (!boundsOverlap(other)) {
 			return false;
 		}
-		for (Part a : parts) {
-			Part shrunkA = a.shrunk();
-			if (shrunkA == null) {
-				continue;
-			}
-			for (Part b : other.parts) {
-				Part shrunkB = b.shrunk();
-				if (shrunkB != null && intersect(shrunkA, shrunkB)) {
+		for (Part a : shrunkParts) {
+			for (Part b : other.shrunkParts) {
+				if (intersect(a, b)) {
 					return true;
 				}
 			}
@@ -201,7 +200,7 @@ final class Footprint {
 			switch (part) {
 			case Rect rect -> {
 				for (double[] corner : rect.corners()) {
-					if (!(inRange(corner[0], lowX, highX) && inRange(corner[1], lowY, highY))) {
+					if (RangeCheck.outside(corner[0], lowX, highX) || RangeCheck.outside(corner[1], lowY, highY)) {
 						return false;
 					}
 				}
@@ -223,10 +222,6 @@ final class Footprint {
 	}
 
 	// --- Geometrie der Teile ---
-
-	private static boolean inRange(double value, double min, double max) {
-		return value >= min && value <= max;
-	}
 
 	/** Echte Überschneidung zweier (schon verkleinerter) Teile; Berührung zählt nicht. */
 	private static boolean intersect(Part a, Part b) {
@@ -284,7 +279,7 @@ final class Footprint {
 			case Rect rect -> {
 				for (double[] corner : rect.corners()) {
 					double[] local = box.toLocal(corner[0], corner[1]);
-					if (!(inRange(local[0], -hw, hw) && inRange(local[1], -hh, hh))) {
+					if (RangeCheck.outside(local[0], -hw, hw) || RangeCheck.outside(local[1], -hh, hh)) {
 						yield false;
 					}
 				}
@@ -292,7 +287,8 @@ final class Footprint {
 			}
 			case Circle c -> {
 				double[] local = box.toLocal(c.cx(), c.cy());
-				yield inRange(local[0], -hw + c.r(), hw - c.r()) && inRange(local[1], -hh + c.r(), hh - c.r());
+				yield !RangeCheck.outside(local[0], -hw + c.r(), hw - c.r())
+						&& !RangeCheck.outside(local[1], -hh + c.r(), hh - c.r());
 			}
 			};
 		}
@@ -335,38 +331,35 @@ final class Footprint {
 		boolean isFinite();
 	}
 
-	/** Rechteck mit Mittelpunkt, halber Breite und Höhe und Drehung in Grad um den Mittelpunkt (im Uhrzeigersinn). */
-	private record Rect(double cx, double cy, double hw, double hh, double degrees) implements Part {
+	/**
+	 * Rechteck mit Mittelpunkt, halber Breite und Höhe und der Drehung um den Mittelpunkt (im Uhrzeigersinn) als Kosinus
+	 * und Sinus, einmal in {@link #of} berechnet.
+	 */
+	private record Rect(double cx, double cy, double hw, double hh, double cos, double sin) implements Part {
 
-		private double cos() {
-			return Math.cos(Math.toRadians(degrees));
-		}
-
-		private double sin() {
-			return Math.sin(Math.toRadians(degrees));
+		/** Rechteck mit Drehung in Grad. */
+		static Rect of(double cx, double cy, double hw, double hh, double degrees) {
+			double radians = Math.toRadians(degrees);
+			return new Rect(cx, cy, hw, hh, Math.cos(radians), Math.sin(radians));
 		}
 
 		/** Richtung der lokalen x-Achse (Breite) in der Halle. */
 		double[] axisX() {
-			return new double[] { cos(), sin() };
+			return new double[] { cos, sin };
 		}
 
 		/** Richtung der lokalen y-Achse (Höhe) in der Halle. */
 		double[] axisY() {
-			return new double[] { -sin(), cos() };
+			return new double[] { -sin, cos };
 		}
 
 		/** Halbe Länge der Projektion auf eine Achse (Einheitsvektor). */
 		double halfProjection(double[] axis) {
-			double cos = cos();
-			double sin = sin();
 			return hw * Math.abs(cos * axis[0] + sin * axis[1]) + hh * Math.abs(-sin * axis[0] + cos * axis[1]);
 		}
 
 		/** Punkt der Halle im Koordinatensystem des Rechtecks (um den Mittelpunkt mit −Drehung zurückgedreht). */
 		double[] toLocal(double x, double y) {
-			double cos = cos();
-			double sin = sin();
 			double dx = x - cx;
 			double dy = y - cy;
 			return new double[] { dx * cos + dy * sin, -dx * sin + dy * cos };
@@ -374,8 +367,6 @@ final class Footprint {
 
 		/** Die vier Ecken in der Halle. */
 		double[][] corners() {
-			double cos = cos();
-			double sin = sin();
 			double[][] corners = new double[4][];
 			int i = 0;
 			for (double lx : new double[] { -hw, hw }) {
@@ -388,25 +379,26 @@ final class Footprint {
 
 		@Override
 		public double extentX() {
-			return hw * Math.abs(cos()) + hh * Math.abs(sin());
+			return hw * Math.abs(cos) + hh * Math.abs(sin);
 		}
 
 		@Override
 		public double extentY() {
-			return hw * Math.abs(sin()) + hh * Math.abs(cos());
+			return hw * Math.abs(sin) + hh * Math.abs(cos);
 		}
 
 		@Override
 		public Part shrunk() {
 			double w = hw - SHRINK;
 			double h = hh - SHRINK;
-			return w > 0 && h > 0 ? new Rect(cx, cy, w, h, degrees) : null;
+			return w > 0 && h > 0 ? new Rect(cx, cy, w, h, cos, sin) : null;
 		}
 
+		/** Kosinus und Sinus sind nur bei endlicher Drehung endlich (sonst NaN). */
 		@Override
 		public boolean isFinite() {
 			return Double.isFinite(cx) && Double.isFinite(cy) && Double.isFinite(hw) && Double.isFinite(hh)
-					&& Double.isFinite(degrees);
+					&& Double.isFinite(cos) && Double.isFinite(sin);
 		}
 	}
 

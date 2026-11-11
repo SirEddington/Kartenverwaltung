@@ -55,7 +55,7 @@ public final class TableValidator {
 	 * gültige Größe hat (0 = noch nicht festgelegt) oder ohne Umriss; solche Fälle meldet die Bereichsprüfung.
 	 */
 	private void validateInsideHall() {
-		if (hall == null || footprint == null || !(hall.getHallWidth() > 0) || !(hall.getHallHeight() > 0)) {
+		if (hall == null || footprint == null || !hall.hasSize()) {
 			return;
 		}
 		if (!footprint.insideHall(hall.getHallWidth(), hall.getHallHeight())) {

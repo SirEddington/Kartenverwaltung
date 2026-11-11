@@ -564,8 +564,8 @@ class SeatingPlanLayoutTest {
 
 		assertSeat(table.getSeats().get(0), 100 - 25 - 10 - 5, 210);
 		assertEquals(0, table.getSeats().get(0).getWidth(), EPS, "das Modell bleibt unverändert");
-		assertEquals(10, SeatingPlanLayout.seatRadius(table.getSeats().get(0)), EPS);
-		assertEquals(22.5, SeatingPlanLayout.seatRadius(standardTable(1).getSeats().get(0)), EPS);
+		assertEquals(10, table.getSeats().get(0).radius(), EPS);
+		assertEquals(22.5, standardTable(1).getSeats().get(0).radius(), EPS);
 	}
 
 	@Test

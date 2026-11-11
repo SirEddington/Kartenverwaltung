@@ -461,8 +461,7 @@ class SeatingPlanValidatorTest {
 		SeatingPlan plan = emptyPlan(2_000);
 		addObject(plan, "Tanzfläche", 600, 600, 0, 0);
 		Table table = addTable(plan, 100, 100);
-		Seat seat = addSeat(table, 595, 150);
-		seat.setWidth(20);
+		addSeat(table, 595, 150);
 
 		assertEquals("SPL-005", only(SeatingPlanValidator.validate(plan)).code());
 	}
@@ -488,6 +487,22 @@ class SeatingPlanValidatorTest {
 		table.setHeight(100);
 
 		assertTrue(SeatingPlanValidator.validate(plan).getIssues().stream().noneMatch(i -> i.code().equals("SPL-005")));
+	}
+
+	@Test
+	void tableWithoutRowTakesPartInNoLayoutCheck() {
+		SeatingPlan plan = emptyPlan(2_000);
+		Table first = addTable(plan, 500, 500);
+		first.setRowId("gibt-es-nicht");
+		addSeat(first, 0, 0);
+		Table second = addTable(plan, 1_000, 500);
+		second.setRowId("gibt-es-nicht");
+		addSeat(second, 0, 0);
+
+		List<String> codes = SeatingPlanValidator.validate(plan).getIssues().stream().map(ValidationIssue::code).toList();
+
+		assertEquals(2, codes.stream().filter("TBL-005"::equals).count());
+		assertTrue(codes.stream().noneMatch(c -> c.equals("TBL-007") || c.equals("SPL-004") || c.equals("SPL-005")));
 	}
 
 	@Test
