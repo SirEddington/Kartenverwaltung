@@ -4,6 +4,8 @@ import java.net.URI;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Die installierte App aus Sicht der Updates: Version, Update-Quelle ({@code app.repositoryUrl}), {@code app.fsname},
@@ -14,6 +16,8 @@ import java.util.function.Function;
  */
 public record Installation(AppVersion version, URI base, String fsname, Plattform plattform,
 		Optional<String> packageFamilyName) {
+
+	private static final Pattern GITHUB_LATEST = Pattern.compile("/([^/]+)/([^/]+)/releases/latest/download/");
 
 	/**
 	 * Liest die Installation aus Systemeigenschaften und Umgebung. Fehlt {@code app.version}, {@code app.repositoryUrl}
@@ -49,6 +53,24 @@ public record Installation(AppVersion version, URI base, String fsname, Plattfor
 	/** Die Adresse der {@code .appinstaller}-Datei der Update-Quelle. */
 	public URI appInstallerUri() {
 		return base.resolve(fsname + ".appinstaller");
+	}
+
+	/**
+	 * Die Release-Seite von {@code v} auf GitHub (KARV-125): nur, wenn die Update-Quelle genau
+	 * {@code https://github.com/<owner>/<repo>/releases/latest/download} ist (ohne Port, Userinfo, Query und Fragment);
+	 * sonst leer, etwa bei der lokalen Testquelle. Die Revision zählt nicht, das Tag ist die Versionsnummer.
+	 */
+	public Optional<URI> releasePage(AppVersion v) {
+		if (!"https".equalsIgnoreCase(base.getScheme()) || base.getHost() == null
+				|| !"github.com".equalsIgnoreCase(base.getHost()) || base.getPort() != -1 || base.getUserInfo() != null
+				|| base.getQuery() != null || base.getFragment() != null || base.getPath() == null) {
+			return Optional.empty();
+		}
+		Matcher m = GITHUB_LATEST.matcher(base.getPath());
+		if (!m.matches()) {
+			return Optional.empty();
+		}
+		return Optional.of(URI.create("https://github.com/" + m.group(1) + "/" + m.group(2) + "/releases/tag/" + v.version()));
 	}
 
 	/**
