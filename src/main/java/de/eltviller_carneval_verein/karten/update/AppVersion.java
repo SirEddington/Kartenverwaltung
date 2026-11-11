@@ -60,6 +60,11 @@ public record AppVersion(String version, int revision) implements Comparable<App
 		return from(System::getProperty);
 	}
 
+	/** Die Paketversion {@code a.b.c.d} (Version und Revision); das Gegenstück zu {@link #fromPackageVersion}. */
+	public String packageVersion() {
+		return version + "." + revision;
+	}
+
 	/** {@code 1.1.0}, bei einer Revision über 0 {@code 1.1.0 (Rev. 1)}. */
 	public String display() {
 		return revision > 0 ? version + " (Rev. " + revision + ")" : version;

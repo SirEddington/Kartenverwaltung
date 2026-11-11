@@ -59,16 +59,7 @@ public final class HttpUpdateSource implements UpdateSource {
 
 	@Override
 	public Path downloadAppInstaller() throws IOException {
-		byte[] body;
-		HttpURLConnection c = open(inst.appInstallerUri());
-		try (InputStream in = c.getInputStream()) {
-			body = in.readNBytes(maxBytes + 1);
-		} finally {
-			c.disconnect();
-		}
-		if (body.length > maxBytes) {
-			throw new InvalidUpdateDataException("Update-Datei größer als " + maxBytes + " Bytes");
-		}
+		byte[] body = HttpGet.fetch(inst.appInstallerUri(), timeout, timeout, maxBytes);
 		String text = new String(body, StandardCharsets.UTF_8).replace("﻿", "").strip();
 		if (!text.startsWith("<?xml") || !text.contains("<AppInstaller")) {
 			throw new InvalidUpdateDataException("Keine .appinstaller-Datei: " + inst.appInstallerUri());

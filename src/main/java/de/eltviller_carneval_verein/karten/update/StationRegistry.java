@@ -1,7 +1,6 @@
 package de.eltviller_carneval_verein.karten.update;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,10 +16,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 
 /**
  * Die Versionseinträge der Kassen in {@code updates/kassen/} (KARV-132). Jede Kasse schreibt nur ihre eigene Datei;
@@ -28,15 +24,12 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  */
 public final class StationRegistry {
 
-	/** Größte Datei, die gelesen wird. */
-	static final int MAX_JSON_BYTES = 65536;
 	/** Höchstens so viele Einträge werden gelesen. */
 	static final int MAX_ENTRIES = 200;
 	/** So lange wird ein unveränderter eigener Eintrag nicht neu geschrieben. */
 	static final Duration REWRITE_AFTER = Duration.ofDays(1);
 
 	private static final Logger LOG = Logger.getLogger(StationRegistry.class.getName());
-	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 
 	private final SharedFolderAccess access;
 	private final OwnFiles own;
@@ -112,8 +105,8 @@ public final class StationRegistry {
 				&& a.plattform().equals(b.plattform());
 	}
 
-	private static byte[] toJson(StationEntry e) throws IOException {
-		ObjectNode n = MAPPER.createObjectNode();
+	private static byte[] toJson(StationEntry e) {
+		ObjectNode n = UpdateFiles.JSON.createObjectNode();
 		n.put("format", 1);
 		n.put("machineId", e.machineId());
 		n.put("name", e.name());
@@ -122,7 +115,7 @@ public final class StationRegistry {
 		n.put("revision", e.version().revision());
 		n.put("plattform", e.plattform());
 		n.put("gestartet", e.gestartet().toString());
-		return MAPPER.writeValueAsBytes(n);
+		return UpdateFiles.json(n);
 	}
 
 	/** Liest einen Eintrag; leer bei fehlender, zu großer oder unlesbarer Datei (protokolliert). */
@@ -131,15 +124,12 @@ public final class StationRegistry {
 			return Optional.empty();
 		}
 		try {
-			byte[] data;
-			try (InputStream in = Files.newInputStream(file)) {
-				data = in.readNBytes(MAX_JSON_BYTES + 1);
-			}
-			if (data.length > MAX_JSON_BYTES) {
+			Optional<byte[]> data = UpdateFiles.readAtMost(file, UpdateFiles.MAX_JSON_BYTES);
+			if (data.isEmpty()) {
 				LOG.warning("Kasseneintrag zu groß, übersprungen: " + file);
 				return Optional.empty();
 			}
-			JsonNode n = MAPPER.readTree(data);
+			JsonNode n = UpdateFiles.JSON.readTree(data.get());
 			String id = text(n, "machineId");
 			String version = text(n, "version");
 			Optional<AppVersion> v = AppVersion.parse(version, n.path("revision").asText(""));

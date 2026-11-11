@@ -1,8 +1,6 @@
 package de.eltviller_carneval_verein.karten.update;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 
 /**
  * Die Paketfamilie eines MSIX-Pakets aus Name und Publisher, wie Windows sie bildet (KARV-132):
@@ -22,12 +20,7 @@ public final class PackageFamily {
 	}
 
 	static String publisherId(String publisher) {
-		byte[] hash;
-		try {
-			hash = MessageDigest.getInstance("SHA-256").digest(publisher.getBytes(StandardCharsets.UTF_16LE));
-		} catch (NoSuchAlgorithmException e) {
-			throw new IllegalStateException("SHA-256 fehlt", e);
-		}
+		byte[] hash = UpdateFiles.sha256().digest(publisher.getBytes(StandardCharsets.UTF_16LE));
 		long bits = 0;
 		for (int i = 0; i < 8; i++) {
 			bits = bits << 8 | hash[i] & 0xFF;

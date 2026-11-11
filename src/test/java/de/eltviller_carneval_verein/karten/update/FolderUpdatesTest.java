@@ -48,7 +48,7 @@ class FolderUpdatesTest {
 
 	private void describe(Path msix, String quad) throws IOException {
 		Files.write(updates.resolve(msix.getFileName() + ".json"),
-				FolderUpdates.descriptionJson(quad, FAMILY, FolderUpdates.sha256Hex(msix), Files.size(msix)));
+				FolderUpdates.descriptionJson(quad, FAMILY, UpdateFiles.sha256Hex(msix), Files.size(msix)));
 	}
 
 	private Optional<String> candidateName() {
@@ -86,13 +86,13 @@ class FolderUpdatesTest {
 		Files.write(updates.resolve("a.msix.json"), FolderUpdates.descriptionJson("1.1.0.2", FAMILY, "00".repeat(32), Files.size(a)));
 		assertEquals(Optional.empty(), candidateName(), "falsche Prüfsumme");
 		Files.write(updates.resolve("a.msix.json"),
-				FolderUpdates.descriptionJson("1.1.0.2", FAMILY, FolderUpdates.sha256Hex(a), Files.size(a) + 1));
+				FolderUpdates.descriptionJson("1.1.0.2", FAMILY, UpdateFiles.sha256Hex(a), Files.size(a) + 1));
 		assertEquals(Optional.empty(), candidateName(), "falsche Größe");
 		Files.write(updates.resolve("a.msix.json"),
-				FolderUpdates.descriptionJson("9.9.9.0", FAMILY, FolderUpdates.sha256Hex(a), Files.size(a)));
+				FolderUpdates.descriptionJson("9.9.9.0", FAMILY, UpdateFiles.sha256Hex(a), Files.size(a)));
 		assertEquals(Optional.empty(), candidateName(), "falsche Version");
 		Files.write(updates.resolve("a.msix.json"),
-				FolderUpdates.descriptionJson("1.1.0.2", "Andere_x", FolderUpdates.sha256Hex(a), Files.size(a)));
+				FolderUpdates.descriptionJson("1.1.0.2", "Andere_x", UpdateFiles.sha256Hex(a), Files.size(a)));
 		assertEquals(Optional.empty(), candidateName(), "falsche Familie");
 		describe(a, "1.1.0.2");
 		assertEquals(Optional.of("a.msix"), candidateName());

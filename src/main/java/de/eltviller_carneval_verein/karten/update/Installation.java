@@ -51,13 +51,18 @@ public record Installation(AppVersion version, URI base, String fsname, Plattfor
 		return base.resolve(fsname + ".appinstaller");
 	}
 
+	/** Ob die App als Windows-Paket mit bekannter Paketfamilie läuft (nur dann gibt es Updates über den Ordner). */
+	public boolean isPackaged() {
+		return plattform == Plattform.WINDOWS_PAKET && packageFamilyName.isPresent();
+	}
+
 	/**
 	 * Ob der App Installer diese Installation auf {@code info} aktualisieren kann, statt ein zweites Paket zu installieren:
 	 * nur im Paket und bei gleicher Paketfamilie. Nennt die Quelle keine Familie, entscheidet ihr Kennzeichen
 	 * {@code internal.windows.package-family-name-changed}.
 	 */
 	public boolean canUpdateInPlace(UpdateInfo info) {
-		if (plattform != Plattform.WINDOWS_PAKET || packageFamilyName.isEmpty()) {
+		if (!isPackaged()) {
 			return false;
 		}
 		if (info.packageFamilyName() != null) {

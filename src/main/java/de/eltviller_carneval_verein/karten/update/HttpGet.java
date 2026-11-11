@@ -1,9 +1,11 @@
 package de.eltviller_carneval_verein.karten.update;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.logging.Logger;
 
 /**
@@ -36,5 +38,22 @@ final class HttpGet {
 			throw new HttpStatusException(code);
 		}
 		return c;
+	}
+
+	/**
+	 * Holt eine kleine Antwort ganz.
+	 *
+	 * @param max höchste Größe
+	 * @throws InvalidUpdateDataException wenn die Antwort größer ist
+	 */
+	static byte[] fetch(URI uri, Duration connect, Duration read, int max) throws IOException {
+		HttpURLConnection c = open(uri, connect, read);
+		Optional<byte[]> body;
+		try (InputStream in = c.getInputStream()) {
+			body = UpdateFiles.readAtMost(in, max);
+		} finally {
+			c.disconnect();
+		}
+		return body.orElseThrow(() -> new InvalidUpdateDataException("Antwort größer als " + max + " Bytes: " + uri));
 	}
 }

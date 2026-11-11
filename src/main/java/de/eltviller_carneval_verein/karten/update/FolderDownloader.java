@@ -11,7 +11,6 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
@@ -105,10 +104,7 @@ public final class FolderDownloader {
 		}
 	}
 
-	private record Key(long size, FileTime modified) {
-	}
-
-	private record Stable(Key key, Instant since) {
+	private record Stable(FileKey key, Instant since) {
 	}
 
 	static final Duration RETRY_AFTER = Duration.ofHours(1);
@@ -131,7 +127,6 @@ public final class FolderDownloader {
 	private final Duration total;
 	private final long maxBytes;
 	private final Map<Path, Stable> stable = new ConcurrentHashMap<>();
-	private final Map<Path, Instant> doneClaims = new ConcurrentHashMap<>();
 	private volatile FreeSpace freeSpace = dir -> Files.getFileStore(dir).getUsableSpace();
 	private volatile BeforeMove beforeMove = target -> {
 	};
@@ -147,6 +142,7 @@ public final class FolderDownloader {
 	private volatile Instant failedAt;
 	private volatile boolean stopped;
 	private volatile Path claim;
+	private volatile Instant claimCreated;
 	private volatile Path tmp;
 
 	/**
@@ -225,8 +221,9 @@ public final class FolderDownloader {
 			return;
 		}
 		AppVersion v = source.info().version();
-		if (inst.plattform() != Plattform.WINDOWS_PAKET || inst.packageFamilyName().isEmpty() || v.compareTo(own) < 0
-				|| !inst.canUpdateInPlace(source.info()) || highestValidOwn.map(h -> h.compareTo(v) >= 0).orElse(false)) {
+		// canUpdateInPlace setzt das Paket mit bekannter Familie voraus
+		if (v.compareTo(own) < 0 || !inst.canUpdateInPlace(source.info())
+				|| highestValidOwn.map(h -> h.compareTo(v) >= 0).orElse(false)) {
 			return;
 		}
 		phase = Phase.PENDING;
@@ -240,24 +237,12 @@ public final class FolderDownloader {
 	 */
 	public void cleanupClaims(Path folder) {
 		Path dir = folder.resolve(UpdatesDir.UPDATES);
-		Instant now = clock.instant();
 		for (LoadClaims.Claim c : claims.read(dir, null)) {
 			boolean mine = c.machineId().equals(access.machineId()) || access.isOwnTempTag(c.machineId());
-			if (mine) {
-				if (own.contains(c.file())) {
-					Instant done = doneClaims.get(c.file());
-					if (done != null && Duration.between(done, now).compareTo(LoadClaims.DONE_FRESH) >= 0) {
-						own.remove(c.file());
-						doneClaims.remove(c.file());
-						delete(c.file());
-					}
-				} else if (!(c.done() && claims.isFresh(c))) {
-					// aus einem früheren Lauf: unfertig sofort weg; „fertig“ bleibt 3 h (Spec), denn Nextcloud lädt die
-					// .msix vielleicht noch hoch, und die anderen Kassen sollen solange nicht selbst laden
-					delete(c.file());
-				}
-			} else if (claims.isExpired(c)) {
-				delete(c.file());
+			if (mine ? !own.contains(c.file()) && !(c.done() && claims.isFresh(c)) : claims.isExpired(c)) {
+				// eigene: die laufende nie, unfertige sofort; „fertig“ bleibt 3 h (Spec), denn Nextcloud lädt die .msix
+				// vielleicht noch hoch, und die anderen Kassen sollen solange nicht selbst laden
+				UpdateFiles.deleteQuietly(c.file());
 			}
 		}
 	}
@@ -272,8 +257,8 @@ public final class FolderDownloader {
 		Path c = claim;
 		Path t = tmp;
 		Thread cleaner = new Thread(() -> {
-			delete(c);
-			delete(t);
+			UpdateFiles.deleteQuietly(c);
+			UpdateFiles.deleteQuietly(t);
 		}, "update-ordner-stopp");
 		cleaner.setDaemon(true);
 		cleaner.start();
@@ -310,7 +295,7 @@ public final class FolderDownloader {
 			throw new Withdraw("gemeinsamer Ordner nicht erreichbar");
 		}
 		Path dir = UpdatesDir.ensure(folder).orElseThrow(() -> new Withdraw("Ordner updates fehlt"));
-		String quad = quad(v);
+		String quad = v.packageVersion();
 		String me = access.machineId();
 		for (LoadClaims.Claim c : claims.read(dir, quad)) {
 			if (!c.machineId().equals(me) && claims.isFresh(c)) {
@@ -320,7 +305,8 @@ public final class FolderDownloader {
 		Path path = dir.resolve(UpdatesDir.claimName(quad, me));
 		own.add(path);
 		claim = path;
-		byte[] json = LoadClaims.json(me, access.machineName(), clock.instant(), null);
+		claimCreated = clock.instant();
+		byte[] json = LoadClaims.json(me, access.machineName(), claimCreated, null);
 		try {
 			Files.write(path, json, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
 		} catch (FileAlreadyExistsException e) {
@@ -377,7 +363,7 @@ public final class FolderDownloader {
 				Path desc = dir.resolve(UpdatesDir.descriptionOf(name));
 				if (Files.exists(desc) && !FolderUpdates.descriptionMatches(desc, target, MsixManifest.read(target))) {
 					LOG.info("Unpassende Beschreibung zu einem gültigen Installer entfernt: " + desc);
-					delete(desc);
+					UpdateFiles.deleteQuietly(desc);
 				}
 				throw new Withdraw("gültiger Installer liegt schon da: " + name);
 			}
@@ -385,13 +371,13 @@ public final class FolderDownloader {
 				throw new Withdraw("Datei unter dem Zielnamen ändert sich noch: " + name);
 			}
 			LOG.info("Ungültige Datei unter dem Zielnamen wird ersetzt: " + target);
-			delete(target);
-			delete(dir.resolve(UpdatesDir.descriptionOf(name)));
+			UpdateFiles.deleteQuietly(target);
+			UpdateFiles.deleteQuietly(dir.resolve(UpdatesDir.descriptionOf(name)));
 		}
 		String family = inst.packageFamilyName().orElseThrow();
 		HttpURLConnection c = HttpGet.open(ai.uri(), connect, read);
 		long n = 0;
-		MessageDigest md = FolderUpdates.sha256();
+		MessageDigest md = UpdateFiles.sha256();
 		Path t = dir.resolve(UpdatesDir.tempName(access.machineId()));
 		try {
 			long length = c.getContentLengthLong();
@@ -445,8 +431,8 @@ public final class FolderDownloader {
 		try {
 			Files.move(t, target);
 		} catch (FileAlreadyExistsException e) {
-			delete(t);
-			if (Files.size(target) == n && FolderUpdates.sha256Hex(target).equalsIgnoreCase(sha)) {
+			UpdateFiles.deleteQuietly(t);
+			if (Files.size(target) == n && UpdateFiles.sha256Hex(target).equalsIgnoreCase(sha)) {
 				writeDescription(dir, name, quad, family, sha, n);
 				markDone(ownClaim);
 				return;
@@ -462,17 +448,7 @@ public final class FolderDownloader {
 	}
 
 	private AppInstallerFile fetchAppInstaller() throws IOException {
-		HttpURLConnection c = HttpGet.open(inst.appInstallerUri(), connect, read);
-		byte[] body;
-		try (InputStream in = c.getInputStream()) {
-			body = in.readNBytes(MAX_APPINSTALLER_BYTES + 1);
-		} finally {
-			c.disconnect();
-		}
-		if (body.length > MAX_APPINSTALLER_BYTES) {
-			throw new InvalidUpdateDataException(".appinstaller-Datei zu groß");
-		}
-		return AppInstallerFile.parse(body);
+		return AppInstallerFile.parse(HttpGet.fetch(inst.appInstallerUri(), connect, read, MAX_APPINSTALLER_BYTES));
 	}
 
 	/** Der letzte Pfadteil der Adresse, dekodiert; nur ein strenger Installer-Name ohne Pfadtrenner. */
@@ -509,10 +485,14 @@ public final class FolderDownloader {
 	}
 
 	/** Ob diese Kasse die Datei seit mindestens einer Stunde unverändert sieht. */
-	private boolean isStable(Path file) throws IOException {
-		Key key = new Key(Files.size(file), Files.getLastModifiedTime(file));
+	private boolean isStable(Path file) {
+		Optional<FileKey> key = FileKey.of(file);
+		if (key.isEmpty()) {
+			return false;
+		}
 		Instant now = clock.instant();
-		Stable s = stable.compute(file, (k, old) -> old != null && old.key().equals(key) ? old : new Stable(key, now));
+		Stable s = stable.compute(file,
+				(k, old) -> old != null && old.key().equals(key.get()) ? old : new Stable(key.get(), now));
 		return Duration.between(s.since(), now).compareTo(STABLE_AFTER) >= 0;
 	}
 
@@ -528,12 +508,12 @@ public final class FolderDownloader {
 
 	private void markDone(Path ownClaim) throws IOException {
 		Instant now = clock.instant();
-		Optional<LoadClaims.Claim> current = claims.read(ownClaim.getParent(), null).stream()
-				.filter(c -> c.file().equals(ownClaim)).findFirst();
-		Instant angelegt = current.flatMap(LoadClaims.Claim::angelegt).orElse(now);
-		SharedFileReplace.write(ownClaim, LoadClaims.json(access.machineId(), access.machineName(), angelegt, now),
+		Instant angelegt = claimCreated;
+		SharedFileReplace.write(ownClaim,
+				LoadClaims.json(access.machineId(), access.machineName(), angelegt != null ? angelegt : now, now),
 				access.machineId(), own);
-		doneClaims.put(ownClaim, now);
+		// ab jetzt wie eine „fertig“-Datei aus einem früheren Lauf: cleanupClaims löscht sie nach 3 h
+		own.remove(ownClaim);
 		claim = null;
 		loading = null;
 		phase = Phase.IDLE;
@@ -543,7 +523,7 @@ public final class FolderDownloader {
 	private void withdraw() {
 		Path c = claim;
 		if (c != null) {
-			delete(c);
+			UpdateFiles.deleteQuietly(c);
 			own.remove(c);
 		}
 		claim = null;
@@ -562,7 +542,7 @@ public final class FolderDownloader {
 		LOG.log(Level.WARNING, "Download in den gemeinsamen Ordner gescheitert: " + message, e);
 		Path t = tmp;
 		if (t != null) {
-			delete(t);
+			UpdateFiles.deleteQuietly(t);
 			own.remove(t);
 			tmp = null;
 		}
@@ -575,21 +555,6 @@ public final class FolderDownloader {
 			onChange.run();
 		} catch (RuntimeException e) {
 			LOG.log(Level.WARNING, "Rückmeldung des Downloads scheiterte", e);
-		}
-	}
-
-	private static String quad(AppVersion v) {
-		return v.version() + "." + v.revision();
-	}
-
-	private static void delete(Path p) {
-		if (p == null) {
-			return;
-		}
-		try {
-			Files.deleteIfExists(p);
-		} catch (IOException | RuntimeException e) {
-			LOG.log(Level.WARNING, "Ließ sich nicht löschen: " + p, e);
 		}
 	}
 }

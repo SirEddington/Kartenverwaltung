@@ -32,7 +32,7 @@ public final class StartPrompt {
 
 	/** Ob die Rückfrage jetzt kommen soll. */
 	public boolean due(boolean offerPresent, boolean firstCheckDone, boolean noBlockingWindow, boolean flowIdle) {
-		return menuShownAt != null && !asked && !expired() && offerPresent && firstCheckDone && noBlockingWindow && flowIdle;
+		return menuShownAt != null && !expired() && offerPresent && firstCheckDone && noBlockingWindow && flowIdle;
 	}
 
 	/** Ob die Rückfrage für diesen Lauf erledigt ist (gestellt oder das Fenster ist vorbei). */

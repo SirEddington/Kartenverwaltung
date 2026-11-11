@@ -19,9 +19,15 @@ public final class UpdateHint {
 		UPDATE_FOLDER, UPDATE_GITHUB, OPEN_SETTINGS
 	}
 
-	/** Ein Hinweis mit Text, Tooltip und Ziel des Klicks. */
-	public record Hint(String text, String tooltip, Action action, Optional<UpdateState.Available> github,
+	/** Ein Hinweis mit Text, Tooltip und dem Update, das ein Klick startet (keins: die Einstellungen öffnen). */
+	public record Hint(String text, String tooltip, Optional<UpdateState.Available> github,
 			Optional<FolderOffer> folder) {
+
+		/** Was ein Klick tut. */
+		public Action action() {
+			return folder.isPresent() ? Action.UPDATE_FOLDER
+					: github.isPresent() ? Action.UPDATE_GITHUB : Action.OPEN_SETTINGS;
+		}
 	}
 
 	private UpdateHint() {
@@ -31,28 +37,27 @@ public final class UpdateHint {
 		if (folder.offer().isPresent()) {
 			FolderOffer o = folder.offer().get();
 			return Optional.of(new Hint(UpdateTexts.folderIndicatorText(o.version()), UpdateTexts.FOLDER_TOOLTIP,
-					Action.UPDATE_FOLDER, Optional.empty(), Optional.of(o)));
+					Optional.empty(), Optional.of(o)));
 		}
 		Optional<UpdateState.Available> known = state.knownUpdate();
 		if (known.isPresent()) {
 			boolean inPlace = inst.map(i -> i.canUpdateInPlace(known.get().neu())).orElse(false);
 			return Optional.of(new Hint(UpdateTexts.indicatorText(known.get().neu().version()),
 					inPlace ? UpdateTexts.INDICATOR_TOOLTIP_UPDATE : UpdateTexts.INDICATOR_TOOLTIP_DETAILS,
-					inPlace ? Action.UPDATE_GITHUB : Action.OPEN_SETTINGS, inPlace ? known : Optional.empty(),
-					Optional.empty()));
+					inPlace ? known : Optional.empty(), Optional.empty()));
 		}
 		if (folder.reinstallNeeded().isPresent()) {
 			return Optional.of(new Hint(UpdateTexts.indicatorText(folder.reinstallNeeded().get()),
-					UpdateTexts.INDICATOR_TOOLTIP_DETAILS, Action.OPEN_SETTINGS, Optional.empty(), Optional.empty()));
+					UpdateTexts.INDICATOR_TOOLTIP_DETAILS, Optional.empty(), Optional.empty()));
 		}
 		if (folder.newerStation().isPresent()) {
 			return Optional.of(new Hint(
 					UpdateTexts.newerStationText(folder.newerStation().get().name(), folder.newerStation().get().version()),
-					UpdateTexts.NEWER_STATION_TOOLTIP, Action.OPEN_SETTINGS, Optional.empty(), Optional.empty()));
+					UpdateTexts.NEWER_STATION_TOOLTIP, Optional.empty(), Optional.empty()));
 		}
 		if (state.checkImpossible() && inst.map(i -> i.plattform() == Plattform.WINDOWS_PAKET).orElse(false)) {
 			return Optional.of(new Hint(UpdateTexts.CHECK_IMPOSSIBLE, UpdateTexts.CHECK_IMPOSSIBLE_TOOLTIP,
-					Action.OPEN_SETTINGS, Optional.empty(), Optional.empty()));
+					Optional.empty(), Optional.empty()));
 		}
 		return Optional.empty();
 	}

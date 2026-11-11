@@ -2,13 +2,17 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -90,7 +94,6 @@ import de.eltviller_carneval_verein.karten.update.HttpUpdateSource;
 import de.eltviller_carneval_verein.karten.update.Installation;
 import de.eltviller_carneval_verein.karten.update.MsixManifest;
 import de.eltviller_carneval_verein.karten.update.OwnFiles;
-import de.eltviller_carneval_verein.karten.update.Plattform;
 import de.eltviller_carneval_verein.karten.update.SharedFolderAccess;
 import de.eltviller_carneval_verein.karten.update.StationRegistry;
 import de.eltviller_carneval_verein.karten.update.UpdateChecker;
@@ -707,7 +710,7 @@ public class MainApp extends Application {
 
 				@Override
 				public boolean isPresent(Path folder) {
-					return Reachability.isReachable(folder, java.nio.file.Files::isDirectory, java.time.Duration.ofSeconds(5));
+					return Reachability.isReachable(folder, Files::isDirectory, Reachability.DEFAULT_TIMEOUT);
 				}
 
 				@Override
@@ -732,21 +735,19 @@ public class MainApp extends Application {
 			};
 			Clock clock = Clock.systemUTC();
 			OwnFiles own = new OwnFiles();
-			boolean paket = inst.map(i -> i.plattform() == Plattform.WINDOWS_PAKET && i.packageFamilyName().isPresent())
-					.orElse(false);
+			boolean paket = inst.map(Installation::isPackaged).orElse(false);
 			Optional<FolderUpdates> folderUpdates = paket ? Optional.of(new FolderUpdates(clock, own, access::isOwnTempTag))
 					: Optional.empty();
 			Optional<FolderDownloader> downloader = Optional.empty();
 			if (paket) {
-				java.util.concurrent.ScheduledExecutorService loader = java.util.concurrent.Executors
-						.newSingleThreadScheduledExecutor(task -> {
-							Thread t = new Thread(task, "update-ordner-laden");
-							t.setDaemon(true);
-							return t;
-						});
+				ScheduledExecutorService loader = Executors.newSingleThreadScheduledExecutor(task -> {
+					Thread t = new Thread(task, "update-ordner-laden");
+					t.setDaemon(true);
+					return t;
+				});
 				downloader = Optional.of(new FolderDownloader(inst.get(), access, own, clock,
 						// java.util.Random aus java.base: der Standard-Zufallsgenerator von Java braucht jdk.random, das im Paket fehlt
-					new java.util.Random(), FolderDownloader.Tasks.of(loader),
+						new Random(), FolderDownloader.Tasks.of(loader),
 						java.time.Duration.ofSeconds(10), java.time.Duration.ofSeconds(60), java.time.Duration.ofMinutes(30),
 						MsixManifest.MAX_MSIX_BYTES));
 			}

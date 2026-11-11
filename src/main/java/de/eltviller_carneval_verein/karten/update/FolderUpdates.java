@@ -1,13 +1,9 @@
 package de.eltviller_carneval_verein.karten.update;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileTime;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -15,7 +11,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -27,10 +22,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 
 /**
  * Sucht und prüft die Installer in {@code updates/} des gemeinsamen Ordners und räumt dort auf (KARV-132).
@@ -45,12 +37,9 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  */
 public final class FolderUpdates {
 
-	/** Größte Beschreibung, die gelesen wird. */
-	static final int MAX_JSON_BYTES = 65536;
 	private static final Duration ORPHAN_SEEN = Duration.ofHours(1);
 	private static final Duration ORPHAN_AGE = Duration.ofDays(1);
 	private static final Logger LOG = Logger.getLogger(FolderUpdates.class.getName());
-	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 
 	/** Das Ergebnis eines Durchsuchens. */
 	public record Scan(Optional<FolderOffer> candidate, Optional<AppVersion> highestValidOwn,
@@ -61,9 +50,6 @@ public final class FolderUpdates {
 		}
 	}
 
-	private record FileKey(long size, FileTime modified) {
-	}
-
 	private record Seen(FileKey key, Instant firstSeen) {
 	}
 
@@ -71,6 +57,10 @@ public final class FolderUpdates {
 	}
 
 	private record Evaluated(Path file, Check check, Instant firstSeen) {
+		/** Die Version aus dem Manifest; nur bei gelesenem Manifest aufrufen. */
+		AppVersion version() {
+			return check.manifest().get().version();
+		}
 	}
 
 	private final Clock clock;
@@ -110,7 +100,7 @@ public final class FolderUpdates {
 				continue;
 			}
 			Path file = dir.resolve(name);
-			Optional<FileKey> key = key(file);
+			Optional<FileKey> key = FileKey.of(file);
 			if (key.isEmpty() || key.get().size() > MsixManifest.MAX_MSIX_BYTES) {
 				continue;
 			}
@@ -119,10 +109,10 @@ public final class FolderUpdates {
 				s = new Seen(key.get(), now);
 				seen.put(name, s);
 			}
-			FileKey descKey = key(dir.resolve(UpdatesDir.descriptionOf(name))).orElse(null);
+			FileKey descKey = FileKey.of(dir.resolve(UpdatesDir.descriptionOf(name))).orElse(null);
 			Check c = checks.get(name);
 			if (c == null || !c.msix().equals(key.get()) || !Objects.equals(c.description(), descKey)) {
-				c = check(file, key.get(), descKey);
+				c = check(file, key.get(), descKey, ownFamily);
 				checks.put(name, c);
 			}
 			evaluated.add(new Evaluated(file, c, s.firstSeen()));
@@ -138,16 +128,15 @@ public final class FolderUpdates {
 		last = List.copyOf(evaluated);
 
 		Optional<Evaluated> candidate = evaluated.stream().filter(e -> isValidOwn(e, ownFamily))
-				.filter(e -> e.check().manifest().get().version().compareTo(own) > 0)
-				.max(Comparator.<Evaluated, AppVersion>comparing(e -> e.check().manifest().get().version())
+				.filter(e -> e.version().compareTo(own) > 0)
+				.max(Comparator.comparing(Evaluated::version)
 						.thenComparing(e -> e.file().getFileName().toString(), Comparator.reverseOrder()));
-		Optional<AppVersion> highest = evaluated.stream().filter(e -> isValidOwn(e, ownFamily))
-				.map(e -> e.check().manifest().get().version()).max(Comparator.naturalOrder());
+		Optional<AppVersion> highest = highestValidOwn(evaluated, ownFamily);
 		Optional<AppVersion> otherNewer = evaluated.stream().filter(e -> e.check().manifest().isPresent())
 				.map(e -> e.check().manifest().get())
 				.filter(m -> !m.packageFamilyName().equals(ownFamily) && m.version().compareTo(own) > 0)
 				.map(MsixManifest::version).max(Comparator.naturalOrder());
-		return new Scan(candidate.map(this::offer), highest, otherNewer);
+		return new Scan(candidate.map(e -> offer(e, ownFamily)), highest, otherNewer);
 	}
 
 	/**
@@ -162,29 +151,28 @@ public final class FolderUpdates {
 			return;
 		}
 		Instant now = clock.instant();
-		Optional<AppVersion> highest = last.stream().filter(e -> isValidOwn(e, ownFamily))
-				.map(e -> e.check().manifest().get().version()).max(Comparator.naturalOrder());
+		Optional<AppVersion> highest = highestValidOwn(last, ownFamily);
 		if (highest.isPresent()) {
 			for (Evaluated e : last) {
-				if (isValidOwn(e, ownFamily) && e.check().manifest().get().version().compareTo(highest.get()) < 0
-						&& e.file().getParent().equals(dir)) {
-					delete(e.file());
-					delete(dir.resolve(UpdatesDir.descriptionOf(e.file().getFileName().toString())));
+				if (isValidOwn(e, ownFamily) && e.version().compareTo(highest.get()) < 0 && e.file().getParent().equals(dir)) {
+					UpdateFiles.deleteQuietly(e.file());
+					UpdateFiles.deleteQuietly(dir.resolve(UpdatesDir.descriptionOf(e.file().getFileName().toString())));
 				}
 			}
 		}
+		Set<String> present = new HashSet<>(names);
 		for (String name : names) {
 			Path p = dir.resolve(name);
 			if (UpdatesDir.isConflictCopy(name)) {
-				delete(p);
+				UpdateFiles.deleteQuietly(p);
 			} else if (UpdatesDir.tempTag(name).filter(ownTempTag).isPresent() && !own.contains(p)) {
-				delete(p);
-			} else if (UpdatesDir.isDescription(name) && !Files.exists(dir.resolve(UpdatesDir.installerOf(name)))) {
+				UpdateFiles.deleteQuietly(p);
+			} else if (UpdatesDir.isDescription(name) && !present.contains(UpdatesDir.installerOf(name))) {
 				Instant firstSeen = orphanSeen.getOrDefault(name, now);
 				boolean seenLong = !Duration.between(firstSeen, now).minus(ORPHAN_SEEN).isNegative();
-				boolean old = key(p).map(k -> k.modified().toInstant().isBefore(now.minus(ORPHAN_AGE))).orElse(false);
+				boolean old = FileKey.of(p).map(k -> k.modified().toInstant().isBefore(now.minus(ORPHAN_AGE))).orElse(false);
 				if (seenLong || old) {
-					delete(p);
+					UpdateFiles.deleteQuietly(p);
 					orphanSeen.remove(name);
 				}
 			}
@@ -196,24 +184,9 @@ public final class FolderUpdates {
 		return fullChecks.get();
 	}
 
-	/** Die SHA-256 einer Datei in Kleinbuchstaben-Hex. */
-	public static String sha256Hex(Path file) throws IOException {
-		MessageDigest md = sha256();
-		try (InputStream in = Files.newInputStream(file)) {
-			byte[] buf = new byte[1 << 16];
-			for (int n; (n = in.read(buf)) > 0;) {
-				md.update(buf, 0, n);
-			}
-		}
-		return HexFormat.of().formatHex(md.digest());
-	}
-
-	static MessageDigest sha256() {
-		try {
-			return MessageDigest.getInstance("SHA-256");
-		} catch (NoSuchAlgorithmException e) {
-			throw new IllegalStateException("SHA-256 fehlt", e);
-		}
+	private static Optional<AppVersion> highestValidOwn(List<Evaluated> evaluated, String ownFamily) {
+		return evaluated.stream().filter(e -> isValidOwn(e, ownFamily)).map(Evaluated::version)
+				.max(Comparator.naturalOrder());
 	}
 
 	/**
@@ -221,17 +194,13 @@ public final class FolderUpdates {
 	 * Kassen schreiben für dieselbe Datei bytegleiche Beschreibungen.
 	 */
 	public static byte[] descriptionJson(String packageVersion, String packageFamilyName, String sha256, long size) {
-		ObjectNode n = MAPPER.createObjectNode();
+		ObjectNode n = UpdateFiles.JSON.createObjectNode();
 		n.put("format", 1);
 		n.put("paketversion", packageVersion);
 		n.put("packageFamilyName", packageFamilyName);
 		n.put("sha256", sha256);
 		n.put("size", size);
-		try {
-			return MAPPER.writeValueAsBytes(n);
-		} catch (IOException e) {
-			throw new IllegalStateException(e);
-		}
+		return UpdateFiles.json(n);
 	}
 
 	private static boolean isValidOwn(Evaluated e, String ownFamily) {
@@ -240,9 +209,9 @@ public final class FolderUpdates {
 				&& "x64".equalsIgnoreCase(e.check().manifest().get().architecture());
 	}
 
-	private FolderOffer offer(Evaluated e) {
+	private FolderOffer offer(Evaluated e, String ownFamily) {
 		Path file = e.file();
-		AppVersion version = e.check().manifest().get().version();
+		AppVersion version = e.version();
 		Instant firstSeen = e.firstSeen();
 		FileKey msixKey = e.check().msix();
 		FileKey descKey = e.check().description();
@@ -265,16 +234,16 @@ public final class FolderUpdates {
 			@Override
 			public boolean stillValid() {
 				try {
-					Optional<FileKey> now = key(file);
+					Optional<FileKey> now = FileKey.of(file);
 					if (now.isEmpty()) {
 						return false;
 					}
-					FileKey descNow = key(file.resolveSibling(UpdatesDir.descriptionOf(file.getFileName().toString())))
+					FileKey descNow = FileKey.of(file.resolveSibling(UpdatesDir.descriptionOf(file.getFileName().toString())))
 							.orElse(null);
 					if (now.get().equals(msixKey) && Objects.equals(descNow, descKey)) {
 						return true;
 					}
-					Check c = check(file, now.get(), descNow);
+					Check c = check(file, now.get(), descNow, ownFamily);
 					return c.valid() && c.manifest().isPresent() && c.manifest().get().version().compareTo(version) == 0;
 				} catch (RuntimeException ex) {
 					LOG.log(Level.WARNING, "Installer im gemeinsamen Ordner ließ sich nicht erneut prüfen: " + file, ex);
@@ -289,8 +258,11 @@ public final class FolderUpdates {
 		};
 	}
 
-	/** Volle Prüfung einer Datei; wirft nie. */
-	private Check check(Path file, FileKey key, FileKey descKey) {
+	/**
+	 * Volle Prüfung einer Datei; wirft nie. Eine andere Familie oder Architektur kommt nie in Frage: dafür genügt das
+	 * Manifest (Hinweis „Neuinstallation nötig“), SHA-256 bzw. ZIP-Prüfung entfallen.
+	 */
+	private Check check(Path file, FileKey key, FileKey descKey, String ownFamily) {
 		fullChecks.incrementAndGet();
 		MsixManifest m;
 		try {
@@ -298,6 +270,9 @@ public final class FolderUpdates {
 		} catch (IOException | RuntimeException e) {
 			LOG.log(Level.INFO, "Installer im gemeinsamen Ordner ungültig oder unvollständig: " + file + " (" + e + ")");
 			return new Check(key, descKey, Optional.empty(), false);
+		}
+		if (!m.packageFamilyName().equals(ownFamily) || !"x64".equalsIgnoreCase(m.architecture())) {
+			return new Check(key, descKey, Optional.of(m), false);
 		}
 		boolean valid;
 		try {
@@ -320,14 +295,11 @@ public final class FolderUpdates {
 
 	/** Ob die Beschreibung zu Datei und Manifest passt (Größe, SHA-256, Familie, Paketversion). */
 	static boolean descriptionMatches(Path desc, Path file, MsixManifest m) throws IOException {
-		byte[] data;
-		try (InputStream in = Files.newInputStream(desc)) {
-			data = in.readNBytes(MAX_JSON_BYTES + 1);
-		}
-		if (data.length > MAX_JSON_BYTES) {
+		Optional<byte[]> data = UpdateFiles.readAtMost(desc, UpdateFiles.MAX_JSON_BYTES);
+		if (data.isEmpty()) {
 			return false;
 		}
-		JsonNode n = MAPPER.readTree(data);
+		JsonNode n = UpdateFiles.JSON.readTree(data.get());
 		Optional<AppVersion> v = AppVersion.fromPackageVersion(n.path("paketversion").asText(null));
 		if (v.isEmpty() || v.get().compareTo(m.version()) != 0) {
 			return false;
@@ -338,18 +310,7 @@ public final class FolderUpdates {
 		if (!n.path("size").canConvertToLong() || n.path("size").asLong() != Files.size(file)) {
 			return false;
 		}
-		return sha256Hex(file).equalsIgnoreCase(n.path("sha256").asText(""));
-	}
-
-	private static Optional<FileKey> key(Path file) {
-		try {
-			if (!Files.isRegularFile(file)) {
-				return Optional.empty();
-			}
-			return Optional.of(new FileKey(Files.size(file), Files.getLastModifiedTime(file)));
-		} catch (IOException | RuntimeException e) {
-			return Optional.empty();
-		}
+		return UpdateFiles.sha256Hex(file).equalsIgnoreCase(n.path("sha256").asText(""));
 	}
 
 	/** Die Namen im Ordner, {@code null}, wenn er fehlt oder nicht lesbar ist. */
@@ -368,15 +329,5 @@ public final class FolderUpdates {
 		}
 		names.sort(Comparator.naturalOrder());
 		return names;
-	}
-
-	private static void delete(Path p) {
-		try {
-			if (Files.deleteIfExists(p)) {
-				LOG.info("Im gemeinsamen Ordner aufgeräumt: " + p.getFileName());
-			}
-		} catch (IOException | RuntimeException e) {
-			LOG.log(Level.WARNING, "Ließ sich nicht löschen: " + p, e);
-		}
 	}
 }

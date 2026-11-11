@@ -222,7 +222,7 @@ class FolderDownloaderTest {
 		runAll();
 		Path target = updates.resolve(MSIX_NAME);
 		assertArrayEquals(msixBytes, Files.readAllBytes(target));
-		assertArrayEquals(FolderUpdates.descriptionJson(QUAD, FAMILY, FolderUpdates.sha256Hex(target), msixBytes.length),
+		assertArrayEquals(FolderUpdates.descriptionJson(QUAD, FAMILY, UpdateFiles.sha256Hex(target), msixBytes.length),
 				Files.readAllBytes(updates.resolve(MSIX_NAME + ".json")));
 		assertTrue(new LoadClaims(clock).read(updates, QUAD).get(0).done());
 		assertEquals(List.of(MSIX_NAME, MSIX_NAME + ".json", UpdatesDir.claimName(QUAD, access.machineId)), names());
@@ -388,7 +388,7 @@ class FolderDownloaderTest {
 	void validTargetWithMatchingDescriptionKeepsIt() throws IOException {
 		Path target = Files.write(updates.resolve(MSIX_NAME), msixBytes);
 		Files.write(updates.resolve(MSIX_NAME + ".json"),
-				FolderUpdates.descriptionJson(QUAD, FAMILY, FolderUpdates.sha256Hex(target), msixBytes.length));
+				FolderUpdates.descriptionJson(QUAD, FAMILY, UpdateFiles.sha256Hex(target), msixBytes.length));
 		runAll();
 		assertEquals(List.of(MSIX_NAME, MSIX_NAME + ".json"), names());
 	}

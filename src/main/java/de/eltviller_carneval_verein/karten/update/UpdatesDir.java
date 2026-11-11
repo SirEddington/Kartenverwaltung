@@ -5,6 +5,7 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -122,7 +123,7 @@ public final class UpdatesDir {
 
 	/** Der Name einer eigenen temporären Datei ({@code ~karv-<Rechner-ID>-<UUID>.tmp}). */
 	public static String tempName(String machineId) {
-		return "~karv-" + machineId + "-" + java.util.UUID.randomUUID() + ".tmp";
+		return "~karv-" + machineId + "-" + UUID.randomUUID() + ".tmp";
 	}
 
 	/** Die Kennung im Namen einer temporären Datei {@code ~karv-<Kennung>-<UUID>.tmp}, leer bei anderen Namen. */

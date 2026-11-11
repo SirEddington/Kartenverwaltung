@@ -1,12 +1,15 @@
 package de.eltviller_carneval_verein.karten.ui.shared;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.concurrent.Executor;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import de.eltviller_carneval_verein.karten.store.Reachability;
 import de.eltviller_carneval_verein.karten.update.DesktopOps;
 import de.eltviller_carneval_verein.karten.update.FolderOffer;
 import de.eltviller_carneval_verein.karten.update.Grund;
@@ -57,7 +60,7 @@ public final class UpdateFlow {
 	private final BooleanSupplier connecting;
 	private volatile BooleanSupplier folderDownloadRunning = () -> false;
 	// so lange darf die erneute Prüfung der Datei im gemeinsamen Ordner vor dem Öffnen dauern (KARV-132)
-	private volatile java.time.Duration folderCheckTimeout = java.time.Duration.ofSeconds(30);
+	private volatile Duration folderCheckTimeout = Duration.ofSeconds(30);
 	private final Executor ui;
 	private final Executor worker;
 	private boolean running;
@@ -128,7 +131,7 @@ public final class UpdateFlow {
 	}
 
 	/** Für Tests: Zeitlimit der erneuten Prüfung vor dem Öffnen. */
-	void setFolderCheckTimeout(java.time.Duration timeout) {
+	void setFolderCheckTimeout(Duration timeout) {
 		this.folderCheckTimeout = timeout;
 	}
 
@@ -136,29 +139,8 @@ public final class UpdateFlow {
 	 * Prüft die Datei im gemeinsamen Ordner auf einem eigenen Daemon-Thread mit Zeitlimit: Hängt die Freigabe, gilt sie als
 	 * nicht gültig, statt die Busy-Ansicht unbegrenzt festzuhalten.
 	 */
-	private static boolean stillValidWithin(FolderOffer offer, java.time.Duration timeout) {
-		java.util.concurrent.CompletableFuture<Boolean> result = new java.util.concurrent.CompletableFuture<>();
-		Thread t = new Thread(() -> {
-			try {
-				result.complete(offer.stillValid());
-			} catch (RuntimeException e) {
-				result.complete(Boolean.FALSE);
-			}
-		}, "update-ordner-pruefen");
-		t.setDaemon(true);
-		t.start();
-		try {
-			return Boolean.TRUE.equals(result.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS));
-		} catch (java.util.concurrent.TimeoutException e) {
-			LOG.warning("Datei im gemeinsamen Ordner antwortet nicht innerhalb von " + timeout + ": " + offer.file());
-			t.interrupt();
-			return false;
-		} catch (InterruptedException e) {
-			Thread.currentThread().interrupt();
-			return false;
-		} catch (java.util.concurrent.ExecutionException e) {
-			return false;
-		}
+	private static boolean stillValidWithin(FolderOffer offer, Duration timeout) {
+		return Reachability.isReachable(offer.file(), file -> offer.stillValid(), timeout);
 	}
 
 	/** Der direkte Weg: frisch prüfen, {@code .appinstaller} laden und öffnen, App beenden. Nur bei passender Paketfamilie. */
@@ -189,7 +171,7 @@ public final class UpdateFlow {
 	}
 
 	private void start(String title, String text, String button, String cancel, Work work,
-			java.util.function.Function<Grund, String> errorText) {
+			Function<Grund, String> errorText) {
 		if (running || connecting.getAsBoolean()) {
 			return;
 		}
@@ -217,7 +199,7 @@ public final class UpdateFlow {
 		}
 	}
 
-	private void runWork(Work work, java.util.function.Function<Grund, String> errorText) {
+	private void runWork(Work work, Function<Grund, String> errorText) {
 		String error;
 		boolean recheckAfter = false;
 		try {

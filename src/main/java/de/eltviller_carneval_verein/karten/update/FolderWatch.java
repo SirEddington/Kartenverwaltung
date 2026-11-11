@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -51,6 +52,7 @@ public final class FolderWatch {
 	private volatile Consumer<FolderState> listener = s -> {
 	};
 	private volatile boolean closed;
+	private final AtomicBoolean rescanPending = new AtomicBoolean();
 
 	/**
 	 * @param own        die eigene Version; leer in der Entwicklung ohne {@code app.version} (dann kein Eintrag)
@@ -92,14 +94,18 @@ public final class FolderWatch {
 		scheduler.scheduleWithFixedDelay(this::tick, FIRST, INTERVAL);
 	}
 
-	/** Durchsucht sofort neu (im Hintergrund). */
+	/** Durchsucht sofort neu (im Hintergrund); Wünsche, bevor das Durchsuchen beginnt, fallen zu einem zusammen. */
 	public void rescanNow() {
-		if (closed) {
+		if (closed || !rescanPending.compareAndSet(false, true)) {
 			return;
 		}
 		try {
-			scheduler.execute(this::tick);
+			scheduler.execute(() -> {
+				rescanPending.set(false);
+				tick();
+			});
 		} catch (RejectedExecutionException e) {
+			rescanPending.set(false);
 			LOG.log(Level.FINE, "Durchsuchen des gemeinsamen Ordners nicht mehr möglich", e);
 		}
 	}
@@ -152,8 +158,7 @@ public final class FolderWatch {
 		Optional<FolderOffer> offer = Optional.empty();
 		Optional<AppVersion> withdrawn = Optional.empty();
 		Optional<AppVersion> reinstall = Optional.empty();
-		boolean paket = inst.map(i -> i.plattform() == Plattform.WINDOWS_PAKET && i.packageFamilyName().isPresent())
-				.orElse(false);
+		boolean paket = inst.map(Installation::isPackaged).orElse(false);
 		if (paket && own.isPresent() && updates.isPresent()) {
 			String family = inst.get().packageFamilyName().get();
 			FolderUpdates.Scan scan = updates.get().scan(folder, family, own.get());
