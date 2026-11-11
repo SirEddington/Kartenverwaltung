@@ -285,6 +285,23 @@ class FolderWatchTest {
 	}
 
 	@Test
+	void retryDownloadNowLiftsBlockAndRescans() throws IOException {
+		// die Quelle 127.0.0.1:9 antwortet nicht: der Download scheitert und ist dann eine Stunde gesperrt
+		lastSuccess = success(new AppVersion("1.1.0", 2), NOW);
+		FolderWatch w = watch(windows(), Optional.of(OWN));
+		scheduler.tick.run();
+		tasks.drain();
+		tasks.fireLater();
+		scheduler.runQueued();
+		tasks.now.clear();
+		scheduler.tick.run();
+		assertTrue(tasks.now.isEmpty(), "gesperrt nach dem Fehler");
+		w.retryDownloadNow();
+		scheduler.runQueued();
+		assertEquals(1, tasks.now.size(), "neuer Versuch ohne Warten");
+	}
+
+	@Test
 	void exceptionInStepKeepsTicking() throws IOException {
 		installer("a.msix", "1.1.0.2");
 		checkState = () -> {

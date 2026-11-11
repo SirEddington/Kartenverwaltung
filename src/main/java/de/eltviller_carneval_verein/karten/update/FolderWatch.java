@@ -106,6 +106,12 @@ public final class FolderWatch {
 		return state;
 	}
 
+	/** „Jetzt prüfen“: hebt die Sperre nach einem gescheiterten Download auf und durchsucht neu. */
+	public void retryDownloadNow() {
+		downloader.ifPresent(FolderDownloader::retryNow);
+		rescanNow();
+	}
+
 	/** Beendet Takt und Download. */
 	public void close() {
 		closed = true;
