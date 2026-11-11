@@ -38,7 +38,7 @@ About 3,170 test runs in ~195 test classes, organized in the same packages as th
 | Area | Examples | Kind |
 |---|---|---|
 | `model` | `BookingTest`, `SeatingPlanTest`, `SaleDatesTest`, `BookingSyncTest`, `BookingCancellationTest` | Unit |
-| `validation` | one test per validator, `MessageTemplateTest`, `IssueConventionsTest` (codes, prefixes, placeholders of every issue enum) | Unit |
+| `validation` | one test per validator, `FootprintTest`, `MessageTemplateTest`, `IssueConventionsTest` (codes, prefixes, placeholders of every issue enum) | Unit |
 | `util` | `MoneyFormatTest`, `BookingTotalsTest` | Unit |
 | `store` | `VersionStoreTest`, `ChainResolverTest`, `UploaderTest`, `FeedReaderTest`/`FeedWriterTest`, `FullSyncTest`, `DamageRepairTest`, `UnitIndexTest`, `InstanceLockTest`, `SyncServiceTest` | Unit / integration on temp dirs |
 | `store` scenarios | `CloudScenarioTest` (several services behind a simulated Nextcloud), `ConnectFlowStoreTest` | Integration |
@@ -47,7 +47,7 @@ About 3,170 test runs in ~195 test classes, organized in the same packages as th
 | data format guards | `FormatGuardTest`, `JsonKeysTest`, `ArchitectureGuardTest`, `FormatSamplesTest`, `StoreCodecTest` | Unit / integration |
 | `tracking` | `ChangeTrackerTest`, `StateRestorerTest` | Unit |
 | `update` | `AppVersionTest`, `InstallationTest`, `UpdateInfoTest`, `GrundTest`, `UpdateStateTest`, `UpdateCheckerTest` (fake scheduler), `HttpUpdateSourceTest` (small `ServerSocket` server, the module does not read `jdk.httpserver`) | Unit |
-| `ui` logic | savers, `LeaveGuard`, `LiveUpdates`, sales (`SeatBulkEdit`, `BookingSearch`, `PlaceAssignment`, `MoneyConsistencyTest`, …), `shared` (`ConnectFlowTest`, `SharedFolderStartTest`, `SyncStatusTest`, …), `backup`, `input` | Unit |
+| `ui` logic | savers, `LayoutChecksTest`, `LeaveGuard`, `LiveUpdates`, sales (`SeatBulkEdit`, `BookingSearch`, `PlaceAssignment`, `MoneyConsistencyTest`, …), `shared` (`ConnectFlowTest`, `SharedFolderStartTest`, `SyncStatusTest`, …), `backup`, `input` | Unit |
 | `ui` end to end | `PlanEditsEndToEndTest` (edit seating plan, save, reload, delete plan — no booking with data lost, no cent changed) | Integration |
 
 There are no UI tests that click through screens. A few tests start the JavaFX toolkit (`Platform.startup`) for

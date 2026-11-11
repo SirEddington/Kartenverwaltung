@@ -88,6 +88,15 @@ value. Messages are coded enums with SAP-style `&1…&9` templates.
 what to do with errors (block save) and warnings (show after save). Stable codes make user reports traceable;
 `IssueConventionsTest` enforces code and placeholder conventions.
 
+## Layout checks only warn
+
+**Decision:** Overlaps between tables and hall objects, and parts lying outside the hall, are warnings, never errors.
+The tolerance is 1 cm (`Footprint.TOLERANCE`). A table counts together with its seats. Objects or tables that lie
+fully inside another one do not count as overlapping, and seats are not checked against their own table.
+
+**Why:** Some overlaps are intended (a door on the wall, a stage with a table on it), and while rows or objects are
+being moved into place the intermediate state must not block saving.
+
 ## Money in integer cents
 
 All prices and amounts are `int`/`Integer` cents; formatting is centralized in `util.MoneyFormat` and

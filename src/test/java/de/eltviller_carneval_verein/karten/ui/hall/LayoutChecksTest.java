@@ -204,7 +204,6 @@ class LayoutChecksTest {
 		HallValidator.validate(hall);
 		long millis = (System.nanoTime() - start) / 1_000_000;
 
-		System.out.println("HallValidator.validate (große Halle): " + millis + " ms");
 		assertTrue(millis < 1_000, "Prüfung der großen Halle dauerte " + millis + " ms");
 	}
 }
