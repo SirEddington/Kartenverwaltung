@@ -538,7 +538,11 @@ install.
 **Consequences:**
 - Reading entries and updating from the folder only need the folder to be present locally; a Nextcloud workstation
   without internet (offline for the version store) can still update. Only the download needs the cloud server.
-- If the winning workstation shuts down before Nextcloud uploaded the `.msix`, the others wait up to 3 hours.
+- If the winning workstation shuts down before Nextcloud uploaded the `.msix`, the others wait up to 3 hours. The
+  winner's own "done" claim survives a restart for those 3 hours, too.
+- After a withdrawal (another workstation downloads, folder not reachable, source changed during the wait) the next
+  attempt waits for the next regular tick (10 minutes) or a newer update check; otherwise tick and download thread
+  would trigger each other without pause. A changed source also triggers a new update check.
 - A withdrawn version in the folder blocks the older source version: no workstation places it next to it (otherwise
   candidate choice, download and "delete older" cleanup would have to change together and the cleanup would delete it
   again). The withdrawn file is deleted by hand ([usage.md](usage.md#updates)). Likewise only the current GitHub version

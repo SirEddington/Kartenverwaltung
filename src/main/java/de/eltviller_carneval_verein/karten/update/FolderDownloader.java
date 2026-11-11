@@ -112,6 +112,8 @@ public final class FolderDownloader {
 	}
 
 	static final Duration RETRY_AFTER = Duration.ofHours(1);
+	/** So lange nach einem Rückzug kein neuer Versuch (ein regulärer Takt von {@code FolderWatch}). */
+	static final Duration HOLD_AFTER_WITHDRAW = Duration.ofMinutes(10);
 	static final Duration STABLE_AFTER = Duration.ofHours(1);
 	static final long RESERVE_BYTES = 500L * 1024 * 1024;
 	private static final int MAX_APPINSTALLER_BYTES = 65536;
@@ -135,6 +137,11 @@ public final class FolderDownloader {
 	};
 	private volatile Runnable onChange = () -> {
 	};
+	private volatile Runnable recheck = () -> {
+	};
+	// nach einem Rückzug erst beim nächsten regulären Takt wieder (sonst kreiseln Takt und Download), außer eine
+	// jüngere Prüfung liegt vor
+	private volatile Instant withdrawnAt;
 	private volatile Phase phase = Phase.IDLE;
 	private volatile AppVersion loading;
 	private volatile Instant failedAt;
@@ -173,6 +180,11 @@ public final class FolderDownloader {
 		this.onChange = onChange;
 	}
 
+	/** Stößt eine Update-Prüfung an (in der App {@code UpdateChecker.checkNow}), wenn sich die Quelle geändert hat. */
+	public void setRecheck(Runnable recheck) {
+		this.recheck = recheck;
+	}
+
 	void setFreeSpace(FreeSpace freeSpace) {
 		this.freeSpace = freeSpace;
 	}
@@ -186,9 +198,10 @@ public final class FolderDownloader {
 		return Optional.ofNullable(loading);
 	}
 
-	/** Hebt die Sperre nach einem Fehler auf („Jetzt prüfen“). */
+	/** Hebt die Sperre nach einem Fehler oder Rückzug auf („Jetzt prüfen“). */
 	public void retryNow() {
 		failedAt = null;
+		withdrawnAt = null;
 	}
 
 	/**
@@ -201,8 +214,14 @@ public final class FolderDownloader {
 		if (stopped || phase != Phase.IDLE) {
 			return;
 		}
+		Instant now = clock.instant();
 		Instant failed = failedAt;
-		if (failed != null && clock.instant().isBefore(failed.plus(RETRY_AFTER))) {
+		if (failed != null && now.isBefore(failed.plus(RETRY_AFTER))) {
+			return;
+		}
+		Instant withdrawn = withdrawnAt;
+		if (withdrawn != null && now.isBefore(withdrawn.plus(HOLD_AFTER_WITHDRAW))
+				&& !source.geprueft().isAfter(withdrawn)) {
 			return;
 		}
 		AppVersion v = source.info().version();
@@ -216,8 +235,8 @@ public final class FolderDownloader {
 	}
 
 	/**
-	 * Räumt Ladedateien auf: fremde nach einem Tag, eigene aus früheren Läufen oder unter früheren Rechner-IDs sofort, die
-	 * eigene „fertig“-Datei dieses Laufs nach drei Stunden; die laufende nie.
+	 * Räumt Ladedateien auf: fremde nach einem Tag, eigene unfertige aus früheren Läufen oder unter früheren Rechner-IDs
+	 * sofort, eigene „fertig“-Dateien (auch aus früheren Läufen) nach drei Stunden; die laufende nie.
 	 */
 	public void cleanupClaims(Path folder) {
 		Path dir = folder.resolve(UpdatesDir.UPDATES);
@@ -232,7 +251,9 @@ public final class FolderDownloader {
 						doneClaims.remove(c.file());
 						delete(c.file());
 					}
-				} else {
+				} else if (!(c.done() && claims.isFresh(c))) {
+					// aus einem früheren Lauf: unfertig sofort weg; „fertig“ bleibt 3 h (Spec), denn Nextcloud lädt die
+					// .msix vielleicht noch hoch, und die anderen Kassen sollen solange nicht selbst laden
 					delete(c.file());
 				}
 			} else if (claims.isExpired(c)) {
@@ -342,8 +363,9 @@ public final class FolderDownloader {
 		Instant deadline = clock.instant().plus(total);
 		AppInstallerFile ai = fetchAppInstaller();
 		if (ai.version().compareTo(v) != 0) {
-			// die Quelle hat sich seit der Prüfung geändert (z. B. während der Wartezeit): kein Fehler, das Neu-Durchsuchen
-			// nach der Rückmeldung bietet die aktuelle Version an
+			// die Quelle hat sich seit der Prüfung geändert (z. B. während der Wartezeit): kein Fehler; eine neue Prüfung
+			// liefert die aktuelle Version, mit ihr hebt offer die Pause nach dem Rückzug auf
+			recheck.run();
 			throw new Withdraw("Die .appinstaller-Datei nennt " + ai.version().display() + " statt " + v.display());
 		}
 		String name = targetName(ai.uri());
@@ -518,9 +540,15 @@ public final class FolderDownloader {
 			own.remove(c);
 		}
 		claim = null;
+		boolean wasLoading = loading != null;
 		loading = null;
+		withdrawnAt = clock.instant();
 		phase = Phase.IDLE;
-		changed();
+		// nur melden, wenn sich der Ladestand wirklich ändert: Ein Rückzug ohne eigene Ladedatei ändert nichts, und eine
+		// Meldung stieße ein Neu-Durchsuchen an, das sofort wieder anböte (Schleife)
+		if (wasLoading) {
+			changed();
+		}
 	}
 
 	private void fail(String message, Throwable e) {

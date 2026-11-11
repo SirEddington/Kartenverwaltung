@@ -76,7 +76,10 @@ public final class FolderWatch {
 		this.scheduler = scheduler;
 		this.ui = ui;
 		this.clock = clock;
-		downloader.ifPresent(d -> d.setOnChange(this::rescanNow));
+		downloader.ifPresent(d -> {
+			d.setOnChange(this::rescanNow);
+			d.setRecheck(checkNow);
+		});
 	}
 
 	/** Setzt den einen Listener; er läuft über {@code ui}. */

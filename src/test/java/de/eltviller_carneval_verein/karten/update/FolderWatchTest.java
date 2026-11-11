@@ -266,6 +266,39 @@ class FolderWatchTest {
 		assertEquals(2, published.size());
 	}
 
+	/** Review: Eine Kasse, die nicht gewinnt (fremde frische Ladedatei), darf nicht zwischen Takt und Download kreiseln. */
+	@Test
+	void losingStationDoesNotLoop() throws IOException {
+		Files.createDirectories(updates);
+		Files.write(updates.resolve(UpdatesDir.claimName("1.1.0.2", "bbbb2222")),
+				LoadClaims.json("bbbb2222", "Kasse 2", NOW, null));
+		lastSuccess = success(new AppVersion("1.1.0", 2), NOW);
+		watch(windows(), Optional.of(OWN));
+		scheduler.tick.run();
+		int begins = 0;
+		for (int i = 0; i < 5; i++) {
+			begins += tasks.now.size();
+			tasks.drain();
+			scheduler.runQueued();
+		}
+		assertEquals(1, begins, "ein Versuch je Takt, keine Schleife");
+	}
+
+	@Test
+	void unreachableStationDoesNotLoop() {
+		access.reachable = false;
+		lastSuccess = success(new AppVersion("1.1.0", 2), NOW);
+		watch(windows(), Optional.of(OWN));
+		scheduler.tick.run();
+		int begins = 0;
+		for (int i = 0; i < 5; i++) {
+			begins += tasks.now.size();
+			tasks.drain();
+			scheduler.runQueued();
+		}
+		assertEquals(1, begins, "ein Versuch je Takt, keine Schleife");
+	}
+
 	@Test
 	void loadingShownWhileWaiting() {
 		lastSuccess = success(new AppVersion("1.1.0", 2), NOW);

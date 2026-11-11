@@ -49,6 +49,7 @@ class FolderDownloaderTest {
 	private FolderDownloader dl;
 	private byte[] msixBytes;
 	private int changes;
+	private int rechecks;
 
 	/** Führt Aufgaben auf Abruf aus; verzögerte erst mit {@link #fireLater()}. */
 	static final class FakeTasks implements FolderDownloader.Tasks {
@@ -124,7 +125,63 @@ class FolderDownloaderTest {
 		FolderDownloader d = new FolderDownloader(inst, access, own, new LoadClaims(clock), clock, new java.util.Random(7),
 				tasks, Duration.ofSeconds(5), Duration.ofSeconds(5), Duration.ofMinutes(30), maxBytes);
 		d.setOnChange(() -> changes++);
+		d.setRecheck(() -> rechecks++);
 		return d;
+	}
+
+	/** Review: Ein Rückzug in begin (ohne eigene Ladedatei) meldet keine Änderung, sonst kreiseln Takt und Download. */
+	@Test
+	void withdrawInBeginReportsNoChange() throws IOException {
+		foreignClaim("bbbb2222", NOW, null);
+		int before = changes;
+		offer();
+		tasks.drain();
+		assertEquals(before, changes);
+		access.reachable = false;
+		Files.delete(updates.resolve(UpdatesDir.claimName(QUAD, "bbbb2222")));
+		clock.now = NOW.plus(Duration.ofMinutes(11));
+		offer();
+		tasks.drain();
+		assertEquals(before, changes, "auch nicht bei unerreichbarem Ordner");
+	}
+
+	/** Review: Nach einem Rückzug erst beim nächsten regulären Takt wieder, außer eine jüngere Prüfung liegt vor. */
+	@Test
+	void noReofferBeforeNextTickAfterWithdraw() throws IOException {
+		access.reachable = false;
+		offer();
+		tasks.drain();
+		access.reachable = true;
+		offer();
+		assertTrue(tasks.now.isEmpty(), "gleich danach kein neuer Versuch");
+		clock.now = NOW.plus(Duration.ofMinutes(9));
+		offer();
+		assertTrue(tasks.now.isEmpty());
+		dl.offer(folder, new UpdateSuccess(new UpdateInfo(V, FAMILY, false), NOW.plus(Duration.ofMinutes(9))), OWN,
+				Optional.empty());
+		assertEquals(1, tasks.now.size(), "eine jüngere Prüfung hebt die Pause auf");
+	}
+
+	@Test
+	void reofferAfterTenMinutes() {
+		access.reachable = false;
+		offer();
+		tasks.drain();
+		access.reachable = true;
+		clock.now = NOW.plus(Duration.ofMinutes(10));
+		offer();
+		assertEquals(1, tasks.now.size());
+	}
+
+	/** Review: Die eigene „fertig“-Ladedatei eines früheren Laufs bleibt 3 h stehen (Spec), eine unfertige nicht. */
+	@Test
+	void cleanupKeepsOwnDoneClaimFromEarlierRun() throws IOException {
+		foreignClaim(access.machineId, NOW.minus(Duration.ofMinutes(5)), NOW);
+		dl.cleanupClaims(folder);
+		assertEquals(1, names().size(), "fertig und frisch: bleibt");
+		clock.now = NOW.plus(Duration.ofMinutes(181));
+		dl.cleanupClaims(folder);
+		assertEquals(List.of(), names());
 	}
 
 	private static UpdateSuccess source(AppVersion v, String family) {
@@ -282,12 +339,14 @@ class FolderDownloaderTest {
 	@Test
 	void sourceChangedDuringWaitIsNoFailure() throws IOException {
 		server.route("/src/ecv-karten-fx132.appinstaller", 200, appInstaller("1.1.0.3", server.base(MSIX_PATH).toString()));
-		int before = changes;
 		runAll();
 		assertEquals(List.of(), names());
-		assertTrue(changes > before, "die Rückmeldung stößt ein neues Durchsuchen an");
+		assertEquals(1, rechecks, "eine neue Update-Prüfung wird angestoßen");
 		offer();
-		assertEquals(1, tasks.now.size(), "keine Sperre: gleich ein neuer Versuch");
+		assertTrue(tasks.now.isEmpty(), "dasselbe alte Ergebnis wird nicht gleich wieder angeboten");
+		dl.offer(folder, new UpdateSuccess(new UpdateInfo(new AppVersion("1.1.0", 3), FAMILY, false), NOW.plusSeconds(1)),
+				OWN, Optional.empty());
+		assertEquals(1, tasks.now.size(), "keine Sperre: mit dem neuen Ergebnis gleich ein neuer Versuch");
 	}
 
 	@Test
