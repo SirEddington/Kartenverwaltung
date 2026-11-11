@@ -9,15 +9,16 @@ import org.junit.jupiter.api.Test;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Shape;
 
 class HallValidatorTest {
 
-	/** Halle "Halle 1" (50 x 30) mit einem Objekt "Bühne" (100 x 60, Schrift 20), ohne jede Meldung. */
+	/** Halle "Halle 1" (500 x 300) mit einem Objekt "Bühne" (100 x 60, Schrift 20) in der Ecke (0|0), ohne jede Meldung. */
 	private static Hall validHall() {
 		Hall hall = new Hall();
 		hall.setName("Halle 1");
-		hall.setHallWidth(50);
-		hall.setHallHeight(30);
+		hall.setHallWidth(500);
+		hall.setHallHeight(300);
 		HallObject stage = hall.addHallObject("Bühne");
 		stage.setWidth(100);
 		stage.setHeight(60);
@@ -108,6 +109,7 @@ class HallValidatorTest {
 	void hallSizeMustBeBetweenZeroAndOneHundredThousand() {
 		for (double ok : new double[] { 0, 1, 100_000 }) {
 			Hall hall = validHall();
+			hall.getHallObjects().clear();
 			hall.setHallWidth(ok);
 			hall.setHallHeight(ok);
 			assertTrue(HallValidator.validate(hall).isEmpty(), "Gültig: " + ok);
@@ -130,18 +132,24 @@ class HallValidatorTest {
 	void hallObjectSizeMustBeBetweenOneAndTenThousand() {
 		for (double ok : new double[] { 1, 100, 10_000 }) {
 			Hall hall = validHall();
+			hall.setHallWidth(0);
+			hall.setHallHeight(0);
 			object(hall).setWidth(ok);
 			object(hall).setHeight(ok);
 			assertTrue(HallValidator.validate(hall).isEmpty(), "Gültig: " + ok);
 		}
 
 		Hall zero = validHall();
+		zero.setHallWidth(0);
+		zero.setHallHeight(0);
 		object(zero).setWidth(0);
 		ValidationIssue width = only(HallValidator.validate(zero));
 		assertEquals("HOB-002", width.code());
 		assertEquals("Breite von Hallenobjekt Bühne in Halle Halle 1 liegt mit 0 nicht zwischen 1 und 10000.", width.message());
 
 		Hall tall = validHall();
+		tall.setHallWidth(0);
+		tall.setHallHeight(0);
 		object(tall).setHeight(10_001);
 		assertEquals("HOB-002", only(HallValidator.validate(tall)).code());
 	}
@@ -166,12 +174,16 @@ class HallValidatorTest {
 	void hallObjectPositionMustBeWithinPlusMinusOneHundredThousand() {
 		for (double ok : new double[] { -100_000, 0, 100_000 }) {
 			Hall hall = validHall();
+			hall.setHallWidth(0);
+			hall.setHallHeight(0);
 			object(hall).setPosX(ok);
 			object(hall).setPosY(ok);
 			assertTrue(HallValidator.validate(hall).isEmpty(), "Gültig: " + ok);
 		}
 
 		Hall far = validHall();
+		far.setHallWidth(0);
+		far.setHallHeight(0);
 		object(far).setPosX(100_001);
 		object(far).setPosY(-100_001);
 		ValidationResult result = HallValidator.validate(far);
@@ -195,6 +207,137 @@ class HallValidatorTest {
 		assertTrue(result.getIssues().stream().anyMatch(i -> i.code().equals("SPL-001")
 				&& i.message().equals("Der Name einer Bestuhlung in Halle Halle 1 darf nicht leer sein.")));
 		assertTrue(result.getIssues().stream().anyMatch(i -> i.code().equals("ROW-002")));
+	}
+
+	// --- Lage in der Halle und Überlappung (HOB-005, HLL-003) ---
+
+	private static HallObject addObject(Hall hall, String name, double width, double height, double x, double y) {
+		HallObject object = hall.addHallObject(name);
+		object.setWidth(width);
+		object.setHeight(height);
+		object.setPosX(x);
+		object.setPosY(y);
+		return object;
+	}
+
+	@Test
+	void objectOutsideHallIsWarned() {
+		Hall hall = validHall();
+		addObject(hall, "Sektbar", 100, 50, 450, 0);
+
+		ValidationIssue issue = only(HallValidator.validate(hall));
+
+		assertEquals("HOB-005", issue.code());
+		assertEquals(Severity.WARNING, issue.severity());
+		assertEquals("Hallenobjekt Sektbar in Halle Halle 1 ragt über den Rand der Halle hinaus.", issue.message());
+	}
+
+	@Test
+	void objectInsideHallIsFine() {
+		Hall hall = validHall();
+		addObject(hall, "Sektbar", 100, 50, 390, 0);
+
+		assertTrue(HallValidator.validate(hall).isEmpty());
+	}
+
+	@Test
+	void hallWithoutSizeSkipsOutsideCheck() {
+		Hall hall = validHall();
+		hall.setHallWidth(0);
+		hall.setHallHeight(0);
+		addObject(hall, "Sektbar", 100, 50, 450, 0);
+		assertTrue(HallValidator.validate(hall).isEmpty());
+
+		hall.setHallWidth(500);
+		hall.setHallHeight(0);
+		assertTrue(HallValidator.validate(hall).isEmpty());
+	}
+
+	@Test
+	void hallWithInvalidSizeSkipsOutsideChecks() {
+		for (double bad : new double[] { Double.NaN, -1 }) {
+			Hall hall = validHall();
+			hall.setHallWidth(bad);
+			addObject(hall, "Sektbar", 100, 50, 450, 0);
+
+			ValidationResult result = HallValidator.validate(hall);
+
+			assertTrue(result.getIssues().stream().noneMatch(i -> i.code().equals("HOB-005")), result.getIssues().toString());
+		}
+	}
+
+	@Test
+	void circleObjectIgnoresHeightForHall() {
+		Hall hall = validHall();
+		HallObject column = addObject(hall, "Säule", 40, 5000, 200, 100);
+		column.setShape(Shape.CIRCLE);
+
+		ValidationResult result = HallValidator.validate(hall);
+
+		assertTrue(result.getIssues().stream().noneMatch(i -> i.code().equals("HOB-005")), result.getIssues().toString());
+	}
+
+	@Test
+	void partlyOverlappingObjectsWarn() {
+		Hall hall = validHall();
+		addObject(hall, "Sektbar", 100, 50, 80, 0);
+
+		ValidationIssue issue = only(HallValidator.validate(hall));
+
+		assertEquals("HLL-003", issue.code());
+		assertEquals(Severity.WARNING, issue.severity());
+		assertEquals("Hallenobjekt Bühne und Hallenobjekt Sektbar überlappen sich teilweise in Halle Halle 1.", issue.message());
+	}
+
+	@Test
+	void objectFullyOnStageIsFine() {
+		Hall hall = validHall();
+		addObject(hall, "Pult", 20, 20, 40, 20);
+
+		assertTrue(HallValidator.validate(hall).isEmpty());
+	}
+
+	@Test
+	void circleOverStageEdgeWarns() {
+		Hall hall = validHall();
+		HallObject column = addObject(hall, "Säule", 40, 40, 90, 30);
+		column.setShape(Shape.CIRCLE);
+
+		assertEquals("HLL-003", only(HallValidator.validate(hall)).code());
+	}
+
+	@Test
+	void onlyTheOverlappingPairIsReported() {
+		Hall hall = validHall();
+		addObject(hall, "Sektbar", 100, 50, 80, 0);
+		addObject(hall, "Garderobe", 50, 50, 300, 200);
+
+		ValidationResult result = HallValidator.validate(hall);
+
+		assertEquals(1, result.getIssues().size(), result.getIssues().toString());
+		assertEquals("HLL-003", result.getIssues().get(0).code());
+	}
+
+	@Test
+	void objectWithoutSizeTakesPartInNoGeometry() {
+		Hall hall = validHall();
+		addObject(hall, "Leer", 0, 0, 0, 0);
+
+		ValidationResult result = HallValidator.validate(hall);
+
+		assertEquals(2, result.getIssues().size(), result.getIssues().toString());
+		assertTrue(result.getIssues().stream().allMatch(i -> i.code().equals("HOB-002")));
+	}
+
+	@Test
+	void newWarningsKeepHallValid() {
+		Hall outside = validHall();
+		addObject(outside, "Sektbar", 100, 50, 450, 0);
+		assertTrue(HallValidator.validate(outside).isValid());
+
+		Hall overlap = validHall();
+		addObject(overlap, "Sektbar", 100, 50, 80, 0);
+		assertTrue(HallValidator.validate(overlap).isValid());
 	}
 
 	@Test

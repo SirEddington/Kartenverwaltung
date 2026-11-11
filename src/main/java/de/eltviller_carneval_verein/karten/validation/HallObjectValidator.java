@@ -34,7 +34,23 @@ public final class HallObjectValidator {
 	private ValidationResult run() {
 		validateName();
 		validateSizeAndPosition();
+		validateInsideHall();
 		return result;
+	}
+
+	/**
+	 * Warnt, wenn das Objekt über den Rand der Halle hinausragt. Entfällt, wenn die Halle keine gültige Größe hat
+	 * (0 = noch nicht festgelegt) oder das Objekt keine Fläche hat; solche Fälle meldet die Bereichsprüfung.
+	 */
+	private void validateInsideHall() {
+		if (hall == null || !(hall.getHallWidth() > 0) || !(hall.getHallHeight() > 0)) {
+			return;
+		}
+		Footprint.of(object).ifPresent(footprint -> {
+			if (!footprint.insideHall(hall.getHallWidth(), hall.getHallHeight())) {
+				result.add(HallObjectIssue.OUTSIDE_HALL.toIssue(EntityLabels.hallObject(object, hall)));
+			}
+		});
 	}
 
 	private void validateSizeAndPosition() {

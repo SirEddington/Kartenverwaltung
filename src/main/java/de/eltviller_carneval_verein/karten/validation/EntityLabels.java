@@ -45,7 +45,12 @@ public final class EntityLabels {
 
 	/** z. B. "Hallenobjekt Bühne in Halle Festhalle" (ohne Namen: "Hallenobjekt ohne Namen in ..."). */
 	public static String hallObject(HallObject object, Hall hall) {
-		return named("Hallenobjekt", object.getName()) + " in " + hall(hall);
+		return hallObjectName(object) + " in " + hall(hall);
+	}
+
+	/** z. B. "Hallenobjekt Bühne" (ohne Namen: "Hallenobjekt ohne Namen"), ohne die Halle. */
+	public static String hallObjectName(HallObject object) {
+		return named("Hallenobjekt", object.getName());
 	}
 
 	/** z. B. "Vorstellung Prunksitzung" (ohne Namen: "Vorstellung ohne Namen"). */

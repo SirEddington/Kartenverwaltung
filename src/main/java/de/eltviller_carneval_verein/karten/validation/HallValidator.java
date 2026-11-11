@@ -1,5 +1,8 @@
 package de.eltviller_carneval_verein.karten.validation;
 
+import java.util.List;
+import java.util.Optional;
+
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
@@ -29,8 +32,34 @@ public final class HallValidator {
 		validateName();
 		validateSize();
 		validateHallObjects();
+		validateObjectsDoNotOverlap();
 		validateSeatingPlans();
 		return result;
+	}
+
+	/**
+	 * Warnt je Paar von Hallenobjekten, die sich nur teilweise überlappen; liegt eines ganz auf dem anderen (Pult auf
+	 * der Bühne), ist das gewollt. Objekte ohne Fläche nehmen nicht teil.
+	 */
+	private void validateObjectsDoNotOverlap() {
+		List<HallObject> objects = hall.getHallObjects();
+		List<Optional<Footprint>> footprints = objects.stream().map(Footprint::of).toList();
+		for (int i = 0; i < objects.size(); i++) {
+			if (footprints.get(i).isEmpty()) {
+				continue;
+			}
+			Footprint a = footprints.get(i).get();
+			for (int j = i + 1; j < objects.size(); j++) {
+				if (footprints.get(j).isEmpty()) {
+					continue;
+				}
+				Footprint b = footprints.get(j).get();
+				if (a.overlaps(b) && !a.within(b) && !b.within(a)) {
+					result.add(HallIssue.OBJECTS_OVERLAP.toIssue(EntityLabels.hall(hall),
+							EntityLabels.hallObjectName(objects.get(i)), EntityLabels.hallObjectName(objects.get(j))));
+				}
+			}
+		}
 	}
 
 	private void validateSize() {
