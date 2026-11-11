@@ -56,6 +56,8 @@ public final class UpdateFlow {
 	private final BooleanSupplier busyViewStillShown;
 	private final BooleanSupplier connecting;
 	private volatile BooleanSupplier folderDownloadRunning = () -> false;
+	// so lange darf die erneute Prüfung der Datei im gemeinsamen Ordner vor dem Öffnen dauern (KARV-132)
+	private volatile java.time.Duration folderCheckTimeout = java.time.Duration.ofSeconds(30);
 	private final Executor ui;
 	private final Executor worker;
 	private boolean running;
@@ -118,11 +120,45 @@ public final class UpdateFlow {
 		start(atStart ? UpdateTexts.START_TITLE : UpdateTexts.CONFIRM_DIRECT_TITLE,
 				atStart ? UpdateTexts.startText(offer.version()) : UpdateTexts.confirmFolderText(offer.version()),
 				UpdateTexts.BUTTON_UPDATE, atStart ? UpdateTexts.BUTTON_LATER : null, () -> {
-					if (!offer.stillValid()) {
+					if (!stillValidWithin(offer, folderCheckTimeout)) {
 						throw new Stop(UpdateTexts.ERROR_FOLDER_FILE);
 					}
 					desktop.open(offer.file());
 				}, UpdateTexts::errorDirect);
+	}
+
+	/** Für Tests: Zeitlimit der erneuten Prüfung vor dem Öffnen. */
+	void setFolderCheckTimeout(java.time.Duration timeout) {
+		this.folderCheckTimeout = timeout;
+	}
+
+	/**
+	 * Prüft die Datei im gemeinsamen Ordner auf einem eigenen Daemon-Thread mit Zeitlimit: Hängt die Freigabe, gilt sie als
+	 * nicht gültig, statt die Busy-Ansicht unbegrenzt festzuhalten.
+	 */
+	private static boolean stillValidWithin(FolderOffer offer, java.time.Duration timeout) {
+		java.util.concurrent.CompletableFuture<Boolean> result = new java.util.concurrent.CompletableFuture<>();
+		Thread t = new Thread(() -> {
+			try {
+				result.complete(offer.stillValid());
+			} catch (RuntimeException e) {
+				result.complete(Boolean.FALSE);
+			}
+		}, "update-ordner-pruefen");
+		t.setDaemon(true);
+		t.start();
+		try {
+			return Boolean.TRUE.equals(result.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS));
+		} catch (java.util.concurrent.TimeoutException e) {
+			LOG.warning("Datei im gemeinsamen Ordner antwortet nicht innerhalb von " + timeout + ": " + offer.file());
+			t.interrupt();
+			return false;
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return false;
+		} catch (java.util.concurrent.ExecutionException e) {
+			return false;
+		}
 	}
 
 	/** Der direkte Weg: frisch prüfen, {@code .appinstaller} laden und öffnen, App beenden. Nur bei passender Paketfamilie. */

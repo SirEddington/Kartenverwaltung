@@ -78,7 +78,8 @@ public final class InfoSection {
 		private final Optional<Installation> inst;
 		private final ReadOnlyObjectProperty<UpdateState> state;
 		private final ReadOnlyObjectProperty<FolderState> folder;
-		private final Supplier<String> ownMachineId;
+		// einmal beim Aufbau gelesen: die ID ändert sich praktisch nie, und so nimmt das Auffrischen keine Sperre
+		private final String ownMachineId;
 		private final Label status = new Label();
 		private final Label platform = new Label();
 		private final Button checkNowButton = new Button(UpdateTexts.BUTTON_CHECK_NOW);
@@ -99,7 +100,7 @@ public final class InfoSection {
 			this.inst = inst;
 			this.state = state;
 			this.folder = folder;
-			this.ownMachineId = ownMachineId;
+			this.ownMachineId = ownMachineId.get();
 			status.setId("update-status");
 			status.setWrapText(true);
 			platform.setId("update-platform");
@@ -160,7 +161,7 @@ public final class InfoSection {
 			String folderText = folderText(f, plattform, inPlace);
 			folderStatus.setText(folderText);
 			show(folderStatus, folderText != null);
-			String own = ownMachineId.get();
+			String own = ownMachineId;
 			List<String> lines = f.stations().stream()
 					.map(e -> UpdateTexts.stationLine(e, e.machineId().equals(own), ZoneId.systemDefault())).toList();
 			stations.setText(String.join("\n", lines));
@@ -177,7 +178,7 @@ public final class InfoSection {
 			if (f.newerStation().isPresent()) {
 				StationEntry e = f.newerStation().get();
 				String text = UpdateTexts.newerStationText(e.name(), e.version());
-				if (f.offer().isEmpty() && !githubInPlace) {
+				if (f.offer().isEmpty() && !githubInPlace && f.loading().isEmpty()) {
 					text += ". " + (plattform == Plattform.WINDOWS_PAKET ? UpdateTexts.NEXT_STEP_PACKAGE
 							: UpdateTexts.NEXT_STEP_MANUAL);
 				}

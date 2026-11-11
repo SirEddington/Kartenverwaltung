@@ -77,6 +77,16 @@ class StationRegistryTest {
 		assertEquals(NOW, registry.readAll(folder).get(0).gestartet());
 	}
 
+	/** code-review: „zuletzt gestartet“ stimmt nach jedem Start, nicht erst nach einem Tag. */
+	@Test
+	void newRunRewritesStartTime() throws IOException {
+		registry.writeOwn(folder, v("1.1.0", 0), "ecv-karten", Plattform.LINUX);
+		clock.now = NOW.plus(Duration.ofHours(4));
+		StationRegistry nextRun = new StationRegistry(access, new OwnFiles(), clock);
+		nextRun.writeOwn(folder, v("1.1.0", 0), "ecv-karten", Plattform.LINUX);
+		assertEquals(NOW.plus(Duration.ofHours(4)), nextRun.readAll(folder).get(0).gestartet());
+	}
+
 	@Test
 	void rewriteAfterOneDay() throws IOException {
 		registry.writeOwn(folder, v("1.1.0", 0), "ecv-karten", Plattform.LINUX);

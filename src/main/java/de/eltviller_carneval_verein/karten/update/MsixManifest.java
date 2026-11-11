@@ -26,6 +26,8 @@ public record MsixManifest(String name, String publisher, AppVersion version, St
 	public static final long MAX_MSIX_BYTES = 200L * 1024 * 1024;
 	/** Größtes entpacktes {@code AppxManifest.xml}. */
 	static final int MAX_MANIFEST_BYTES = 1024 * 1024;
+	/** Größte entpackte Gesamtgröße beim vollständigen Prüfen (echte Pakete: rund 150 MB). */
+	static final long MAX_UNPACKED_BYTES = 1024L * 1024 * 1024;
 
 	private static final String FOUNDATION = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
 
@@ -81,7 +83,13 @@ public record MsixManifest(String name, String publisher, AppVersion version, St
 	 * @throws IOException bei einem Fehler im ZIP oder einer falschen Prüfsumme
 	 */
 	public static void verifyComplete(Path msix) throws IOException {
+		verifyComplete(msix, MAX_UNPACKED_BYTES);
+	}
+
+	/** Wie {@link #verifyComplete(Path)}, mit eigener Obergrenze für die entpackte Gesamtgröße (gegen Zip-Bomben). */
+	static void verifyComplete(Path msix, long maxUnpacked) throws IOException {
 		checkSize(msix);
+		long unpacked = 0;
 		try (ZipFile zip = new ZipFile(msix.toFile())) {
 			if (zip.getEntry("AppxSignature.p7x") == null || zip.getEntry("AppxBlockMap.xml") == null) {
 				throw new InvalidUpdateDataException("Signatur oder BlockMap fehlt in " + msix.getFileName());
@@ -94,6 +102,11 @@ public record MsixManifest(String name, String publisher, AppVersion version, St
 				try (InputStream in = zip.getInputStream(e)) {
 					for (int n; (n = in.read(buf)) >= 0;) {
 						crc.update(buf, 0, n);
+						unpacked += n;
+						if (unpacked > maxUnpacked) {
+							throw new InvalidUpdateDataException(
+									"Entpackt größer als " + maxUnpacked + " Bytes: " + msix.getFileName());
+						}
 					}
 				}
 				// ZipFile prüft die CRC32 selbst nicht (anders als ZipInputStream): nachrechnen

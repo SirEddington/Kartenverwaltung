@@ -374,6 +374,33 @@ class FolderDownloaderTest {
 		assertEquals(List.of(MSIX_NAME), names());
 	}
 
+	/** code-review: Eine gültige Datei mit veralteter Beschreibung blockierte Angebot und Download dauerhaft. */
+	@Test
+	void validTargetWithStaleDescriptionLosesTheDescription() throws IOException {
+		Files.write(updates.resolve(MSIX_NAME), msixBytes);
+		Files.write(updates.resolve(MSIX_NAME + ".json"), FolderUpdates.descriptionJson(QUAD, FAMILY, "00".repeat(32), 1));
+		runAll();
+		assertEquals(0, msixRequests());
+		assertEquals(List.of(MSIX_NAME), names(), "die unpassende Beschreibung ist weg; die Suche prüft dann das ZIP");
+	}
+
+	@Test
+	void validTargetWithMatchingDescriptionKeepsIt() throws IOException {
+		Path target = Files.write(updates.resolve(MSIX_NAME), msixBytes);
+		Files.write(updates.resolve(MSIX_NAME + ".json"),
+				FolderUpdates.descriptionJson(QUAD, FAMILY, FolderUpdates.sha256Hex(target), msixBytes.length));
+		runAll();
+		assertEquals(List.of(MSIX_NAME, MSIX_NAME + ".json"), names());
+	}
+
+	/** code-review: Testlücke – Antwort länger als angekündigt. */
+	@Test
+	void longerBodyThanLengthIsRejected() throws IOException {
+		server.route(MSIX_PATH, new MiniHttpServer.Route(200, Map.of(), msixBytes, 0, msixBytes.length - 500));
+		runAll();
+		assertEquals(List.of(), names());
+	}
+
 	@Test
 	void growingTargetIsNotReplaced() throws IOException {
 		Path target = TestMsix.standard(updates.resolve(MSIX_NAME), QUAD);

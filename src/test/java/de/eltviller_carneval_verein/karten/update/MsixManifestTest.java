@@ -95,4 +95,12 @@ class MsixManifestTest {
 		Path f = TestMsix.standard(dir.resolve("a.msix"), "1.1.0.3");
 		assertDoesNotThrow(() -> MsixManifest.verifyComplete(f));
 	}
+
+	/** code-review: eine Zip-Bombe darf den Takt nicht beliebig lange binden. */
+	@Test
+	void verifyCompleteStopsAtUnpackedLimit() throws IOException {
+		Path f = TestMsix.standard(dir.resolve("a.msix"), "1.1.0.3");
+		assertThrows(InvalidUpdateDataException.class, () -> MsixManifest.verifyComplete(f, 500));
+		assertDoesNotThrow(() -> MsixManifest.verifyComplete(f, 1_000_000));
+	}
 }

@@ -203,6 +203,43 @@ class UpdateFlowTest {
 		assertTrue(calls.contains("exit"));
 	}
 
+	/** code-review: Eine hängende Freigabe hält die Busy-Ansicht nicht unbegrenzt fest. */
+	@Test
+	void hangingFolderCheckStopsWithError() {
+		flow.setFolderCheckTimeout(java.time.Duration.ofMillis(200));
+		FolderOffer hanging = new FolderOffer() {
+			@Override
+			public Path file() {
+				return MSIX;
+			}
+
+			@Override
+			public AppVersion version() {
+				return AppVersion.parse("1.1.0", "3").orElseThrow();
+			}
+
+			@Override
+			public java.time.Instant firstSeen() {
+				return java.time.Instant.EPOCH;
+			}
+
+			@Override
+			public boolean stillValid() {
+				try {
+					Thread.sleep(60_000);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+				return true;
+			}
+		};
+		long t0 = System.nanoTime();
+		flow.updateFromFolder(hanging, false);
+		assertTrue(System.nanoTime() - t0 < 10_000_000_000L, "kehrt nach dem Zeitlimit zurück");
+		assertTrue(calls.contains("error " + UpdateTexts.ERROR_FOLDER_FILE), calls.toString());
+		assertFalse(calls.contains("open " + MSIX));
+	}
+
 	@Test
 	void folderFileChangedStopsWithError() {
 		folderFileValid = false;

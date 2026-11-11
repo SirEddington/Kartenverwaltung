@@ -41,6 +41,7 @@ public final class StationRegistry {
 	private final SharedFolderAccess access;
 	private final OwnFiles own;
 	private final Clock clock;
+	private volatile boolean writtenThisRun;
 
 	public StationRegistry(SharedFolderAccess access, OwnFiles own, Clock clock) {
 		this.access = access;
@@ -49,8 +50,8 @@ public final class StationRegistry {
 	}
 
 	/**
-	 * Schreibt den eigenen Eintrag, wenn sich etwas geändert hat oder der vorhandene älter als einen Tag ist. Fehlt der
-	 * gemeinsame Ordner, geschieht nichts.
+	 * Schreibt den eigenen Eintrag beim ersten Aufruf eines Programmlaufs, danach nur, wenn sich etwas geändert hat oder
+	 * der vorhandene älter als einen Tag ist. Fehlt der gemeinsame Ordner, geschieht nichts.
 	 */
 	public void writeOwn(Path folder, AppVersion version, String fsname, Plattform plattform) throws IOException {
 		Optional<Path> dir = UpdatesDir.ensure(folder, UpdatesDir.STATIONS);
@@ -63,11 +64,13 @@ public final class StationRegistry {
 		StationEntry wanted = new StationEntry(id, access.machineName(), fsname == null ? "" : fsname, version,
 				plattform.name(), now);
 		Optional<StationEntry> existing = read(file);
-		if (existing.isPresent() && sameExceptTime(existing.get(), wanted)
+		// der erste Aufruf eines Programmlaufs schreibt immer, damit „zuletzt gestartet“ stimmt
+		if (writtenThisRun && existing.isPresent() && sameExceptTime(existing.get(), wanted)
 				&& Duration.between(existing.get().gestartet(), now).compareTo(REWRITE_AFTER) < 0) {
 			return;
 		}
 		SharedFileReplace.write(file, toJson(wanted), id, own);
+		writtenThisRun = true;
 	}
 
 	/** Alle lesbaren Einträge, nach Rechner-ID sortiert; leer, wenn der Ordner fehlt. */

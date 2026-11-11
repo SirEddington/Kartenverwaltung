@@ -318,7 +318,8 @@ public final class FolderUpdates {
 		return new Check(key, descKey, Optional.of(m), valid);
 	}
 
-	private static boolean descriptionMatches(Path desc, Path file, MsixManifest m) throws IOException {
+	/** Ob die Beschreibung zu Datei und Manifest passt (Größe, SHA-256, Familie, Paketversion). */
+	static boolean descriptionMatches(Path desc, Path file, MsixManifest m) throws IOException {
 		byte[] data;
 		try (InputStream in = Files.newInputStream(desc)) {
 			data = in.readNBytes(MAX_JSON_BYTES + 1);

@@ -372,6 +372,13 @@ public final class FolderDownloader {
 		Path target = dir.resolve(name);
 		if (Files.exists(target)) {
 			if (isValidInstaller(target, ai)) {
+				// eine veraltete Beschreibung machte die gültige Datei für die Suche ungültig (kein Angebot, kein
+				// Download): weg damit, dann prüft die Suche das ganze ZIP
+				Path desc = dir.resolve(UpdatesDir.descriptionOf(name));
+				if (Files.exists(desc) && !FolderUpdates.descriptionMatches(desc, target, MsixManifest.read(target))) {
+					LOG.info("Unpassende Beschreibung zu einem gültigen Installer entfernt: " + desc);
+					delete(desc);
+				}
 				throw new Withdraw("gültiger Installer liegt schon da: " + name);
 			}
 			if (!isStable(target)) {

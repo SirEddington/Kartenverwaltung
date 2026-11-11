@@ -176,6 +176,15 @@ class InfoSectionTest {
 		assertEquals(UpdateTexts.withdrawnText(V3), text(windowsPackage(), "folder-status"));
 	}
 
+	/** code-review: Die Kasse, die gerade selbst lädt, bekommt keinen Rat, an einer Kasse mit Internet zu prüfen. */
+	@Test
+	void noNextStepWhileThisStationLoads() throws Exception {
+		folder.set(folderState(List.of(), Optional.of(station("bbbb2222", "Kasse 2", V3)), Optional.empty(), Optional.empty(),
+				Optional.of(V3)));
+		assertEquals(UpdateTexts.LOADING + "\n" + UpdateTexts.newerStationText("Kasse 2", V3),
+				text(windowsPackage(), "folder-status"));
+	}
+
 	@Test
 	void nextStepForPackage() throws Exception {
 		folder.set(folderState(List.of(), Optional.of(station("bbbb2222", "Kasse 2", V3)), Optional.empty(), Optional.empty(),
