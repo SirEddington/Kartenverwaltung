@@ -74,10 +74,12 @@ import de.eltviller_carneval_verein.karten.ui.shared.SyncInfoWindow;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncStatus;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateFlow;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateIndicator;
+import de.eltviller_carneval_verein.karten.ui.shared.DialogConfirmation;
 import de.eltviller_carneval_verein.karten.ui.shared.PatchNotesWindow;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateTexts;
 import de.eltviller_carneval_verein.karten.update.AppVersion;
 import de.eltviller_carneval_verein.karten.update.PatchNotes;
+import de.eltviller_carneval_verein.karten.update.PatchNotesOnStart;
 import de.eltviller_carneval_verein.karten.update.AwtDesktopOps;
 import de.eltviller_carneval_verein.karten.update.ExecutorScheduler;
 import de.eltviller_carneval_verein.karten.update.HttpUpdateSource;
@@ -375,6 +377,11 @@ public class MainApp extends Application {
 			}
 			finishStart(settingsStore);
 			then.run();
+			// KARV-125: nach einem Update einmal „Was ist neu“; vor SYS-005, damit die Warnung obenauf liegt
+			PatchNotesOnStart.run(AppVersion.current(), settingsStore.current().getPatchNotesSeen(),
+					settingsStore.existedAtLoad(), PatchNotes::bundled,
+					releases -> PatchNotesWindow.show(primaryStage, releases),
+					version -> settingsStore.saveOnly(s -> s.setPatchNotesSeen(version)));
 			showUnreachableAtStart();
 		} catch (RuntimeException e) {
 			LOG.log(Level.SEVERE, "Oberfläche konnte nicht geladen werden", e);
@@ -627,7 +634,7 @@ public class MainApp extends Application {
 			UpdateChecker checker = new UpdateChecker(installation, source, new ExecutorScheduler(), Platform::runLater,
 					Clock.systemUTC());
 			UpdateFlow flow = new UpdateFlow(installation,
-					(title, text, button) -> ConfirmDialog.confirm(title, text, button, "button-primary", primaryStage),
+					new DialogConfirmation(ConfirmDialog::confirm, primaryStage),
 					() -> settingsStore.current().getSharedDir() != null, MainApp::confirmClose, MainApp::showBusyView,
 					source, new AwtDesktopOps(), Platform::exit, MainApp::showMenuView, MainApp::conflictsChanged,
 					checker::checkNow, text -> StatusMessage.getInstance().show(Severity.ERROR, text), MainApp::busyViewShown,
