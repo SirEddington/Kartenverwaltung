@@ -135,7 +135,8 @@ public class Seat {
 	/**
 	 * Radius des Sitzes in cm: Sitze sind Kreise, die Breite ist ihr Durchmesser. Ohne Breite (0, negativ oder keine
 	 * Zahl) bekäme der Sitz keine Fläche; Anordnung, Zeichnung und Prüfung rechnen dann mit {@value #FALLBACK_RADIUS}.
-	 * Bewusst kein {@code getRadius}: Es soll kein Feld der Datei werden.
+	 * Bewusst kein {@code getRadius}: Es soll kein Feld der Datei werden. Die Anordnung rechnet über
+	 * {@code SeatingPlanLayout.seatRadius} mit demselben Wert.
 	 */
 	public double radius() {
 		return width > 0 ? width / 2.0 : FALLBACK_RADIUS;

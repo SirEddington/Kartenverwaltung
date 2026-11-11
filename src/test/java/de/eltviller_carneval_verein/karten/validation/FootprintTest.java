@@ -131,6 +131,25 @@ class FootprintTest {
 		assertFalse(a.overlaps(b));
 	}
 
+	/** Unterschiedlich gedreht: Hüllen je 20,7 cm übereinander, nur die 45°-Achse von B trennt (Abstand 20,7 cm). */
+	@Test
+	void differentlyRotatedSquaresWithOverlappingBounds() {
+		Footprint a = rect(0, 0, 100, 100, 0);
+		Footprint b = rect(100, 100, 100, 100, 45);
+		assertTrue(a.boundsOverlap(b));
+		assertFalse(a.overlaps(b));
+		assertFalse(b.overlaps(a));
+	}
+
+	/** Unterschiedlich gedreht: Die Ecke von A ragt 7,6 cm in B hinein. */
+	@Test
+	void differentlyRotatedSquaresOverlapping() {
+		Footprint a = rect(0, 0, 100, 100, 0);
+		Footprint b = rect(80, 80, 100, 100, 45);
+		assertTrue(a.overlaps(b));
+		assertTrue(b.overlaps(a));
+	}
+
 	@Test
 	void rotatedSquaresOverlapping() {
 		assertTrue(rect(0, 0, 100, 100, 45).overlaps(rect(60, 60, 100, 100, 45)));

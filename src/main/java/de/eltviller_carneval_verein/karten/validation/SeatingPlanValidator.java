@@ -31,7 +31,10 @@ public final class SeatingPlanValidator {
 		return validate(plan, plan.getParent());
 	}
 
-	/** @param hall die Halle für die Lageprüfung der Tische (TBL-007); darf {@code null} sein */
+	/**
+	 * @param hall die Halle für die Lageprüfung der Tische (TBL-007) und der Hallenobjekte (SPL-005); darf
+	 *             {@code null} sein
+	 */
 	static ValidationResult validate(SeatingPlan plan, Hall hall) {
 		return new SeatingPlanValidator(plan, hall).run();
 	}

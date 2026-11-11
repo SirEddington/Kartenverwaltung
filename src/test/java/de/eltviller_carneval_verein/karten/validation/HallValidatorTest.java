@@ -298,6 +298,17 @@ class HallValidatorTest {
 		assertTrue(HallValidator.validate(hall).isEmpty());
 	}
 
+	/** Wie {@link #objectFullyOnStageIsFine()}, nur steht das kleine Objekt vor der Bühne in der Liste. */
+	@Test
+	void objectFullyOnStageListedFirstIsFine() {
+		Hall hall = validHall();
+		hall.getHallObjects().clear();
+		addObject(hall, "Pult", 20, 20, 40, 20);
+		addObject(hall, "Bühne", 100, 60, 0, 0);
+
+		assertTrue(HallValidator.validate(hall).isEmpty());
+	}
+
 	@Test
 	void circleOverStageEdgeWarns() {
 		Hall hall = validHall();
