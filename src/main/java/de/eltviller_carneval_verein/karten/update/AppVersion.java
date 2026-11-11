@@ -43,6 +43,14 @@ public record AppVersion(String version, int revision) implements Comparable<App
 		return from(System::getProperty);
 	}
 
+	/**
+	 * Dieselbe Versionsnummer mit Revision 0: für Vergleiche, bei denen nur die Versionsnummer zählt (KARV-125, etwa
+	 * Patchnotes und Release-Seite; das Tag auf GitHub hat keine Revision).
+	 */
+	public AppVersion withoutRevision() {
+		return revision == 0 ? this : new AppVersion(version, 0);
+	}
+
 	/** {@code 1.1.0}, bei einer Revision über 0 {@code 1.1.0 (Rev. 1)}. */
 	public String display() {
 		return revision > 0 ? version + " (Rev. " + revision + ")" : version;

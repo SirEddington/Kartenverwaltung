@@ -12,7 +12,8 @@ java -cp "target/Kartenverwaltung-$VERSION-linux.jar" \
   de.eltviller_carneval_verein.karten.update.PatchNotesExport "$VERSION" \
   "[Download](https://SirEddington.github.io/Kartenverwaltung/download.html)" > release-notes.md
 
-# Nicht leer, nicht abgeschnitten, gültiges UTF-8 (auch unter LANG=C auf dem Runner)
+# Nicht leer, nicht abgeschnitten, keine ungültigen UTF-8-Bytes. Dass Umlaute auch unter LANG=C richtig ankommen,
+# sichert PatchNotesExport selbst (UTF-8-PrintStream); iconv fängt nur kaputte Bytes, keine Ersatzzeichen.
 grep -q '^### ' release-notes.md
 tail -n 1 release-notes.md | grep -q '^\[Download\]'
 iconv -f UTF-8 -t UTF-8 release-notes.md > /dev/null

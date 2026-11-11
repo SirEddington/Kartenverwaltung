@@ -149,6 +149,32 @@ class PatchNotesWindowTest {
 	}
 
 	@Test
+	void reshowKeepsTheSizeTheUserChose() throws Exception {
+		Stage stage = show(null, ONE);
+		onFx(() -> {
+			stage.setWidth(900);
+			return null;
+		});
+		show(null, TWO);
+		assertEquals(900, onFx(stage::getWidth), 0.5);
+	}
+
+	@Test
+	void ownerOutsideEveryScreenFallsBackToPrimary() throws Exception {
+		double height = onFx(() -> {
+			Stage away = new Stage();
+			away.setX(-100000);
+			away.setY(-100000);
+			away.setWidth(200);
+			away.setHeight(200);
+			return PatchNotesWindow.screenHeight(away);
+		});
+		assertEquals(onFx(() -> Screen.getPrimary().getVisualBounds().getHeight()), height, 0.5);
+		assertEquals(onFx(() -> Screen.getPrimary().getVisualBounds().getHeight()),
+				onFx(() -> PatchNotesWindow.screenHeight(null)), 0.5);
+	}
+
+	@Test
 	void escapeCloses() throws Exception {
 		Stage stage = show(null, ONE);
 		onFx(() -> {

@@ -64,7 +64,7 @@ public final class ConfirmDialog {
 	 * „Was ist neu in Version …?“). Ein Klick ruft {@code open} und lässt die Rückfrage offen; meldet {@code open} einen
 	 * Fehler, erscheint er im Dialog mit der Adresse zum Kopieren.
 	 *
-	 * @param linkText der Linktext; {@code null} für keinen Link (dann sind {@code page} und {@code open} ohne Belang)
+	 * @param linkText der Linktext; {@code null} für keinen Link (ebenso, wenn {@code page} oder {@code open} fehlt)
 	 * @param page     die Adresse, auch als Tooltip
 	 * @param open     öffnet die Adresse und meldet einen Fehler an den zweiten Parameter
 	 */
@@ -100,7 +100,8 @@ public final class ConfirmDialog {
 		// Der Fokus liegt auf "Abbrechen": Leertaste und Enter lösen die Aktion nicht aus. Erst nach dem Anzeigen
 		// setzen, sonst überschreibt ihn der Fokus, den die Szene beim Öffnen selbst vergibt
 		alert.setOnShown(event -> Platform.runLater(cancelButton::requestFocus));
-		if (linkText != null) {
+		// ein Link nur mit allen drei Teilen; fehlt einer, bleibt es die Rückfrage wie bisher
+		if (linkText != null && page != null && open != null) {
 			alert.getDialogPane().setContent(linkContent(alert, message, linkText, page, open));
 		}
 		return new Built(alert, action);

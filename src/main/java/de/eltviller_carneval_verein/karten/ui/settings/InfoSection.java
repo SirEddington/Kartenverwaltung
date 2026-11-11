@@ -84,6 +84,7 @@ public final class InfoSection {
 		private final Button updateButton = new Button(UpdateTexts.BUTTON_UPDATE_NOW);
 		private final Button browserButton = new Button(UpdateTexts.BUTTON_UPDATE_BROWSER);
 		private final Hyperlink releaseLink = new Hyperlink();
+		private final Tooltip releaseTooltip = new Tooltip();
 		private final TextField releaseAddress = new TextField();
 		private final PatchNoteActions patchNotes;
 		private final VBox node;
@@ -97,6 +98,7 @@ public final class InfoSection {
 			this.state = state;
 			this.patchNotes = patchNotes;
 			releaseLink.setId("update-patch-notes");
+			releaseLink.setTooltip(releaseTooltip);
 			releaseLink.setOnAction(e -> {
 				if (releaseLink.getUserData() instanceof URI page) {
 					patchNotes.openReleasePage().accept(page, text -> {
@@ -164,7 +166,7 @@ public final class InfoSection {
 				}
 				releaseLink.setText(UpdateTexts.releaseLink(neu.get()));
 				releaseLink.setUserData(page.get());
-				releaseLink.setTooltip(new Tooltip(page.get().toString()));
+				releaseTooltip.setText(page.get().toString());
 			} else {
 				releaseLink.setUserData(null);
 				show(releaseAddress, false);

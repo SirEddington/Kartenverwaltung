@@ -146,6 +146,12 @@ class InstallationTest {
 	}
 
 	@Test
+	void encodedPathStaysEncoded() {
+		assertEquals(Optional.of(URI.create("https://github.com/a%20b/c/releases/tag/1.2.0")),
+				releasePage("https://github.com/a%20b/c/releases/latest/download", "1.2.0", null));
+	}
+
+	@Test
 	void noReleasePageElsewhere() {
 		for (String source : new String[] { "http://github.com/SirEddington/Kartenverwaltung/releases/latest/download",
 				"https://example.org/a/b/releases/latest/download", "https://github.com/a/b/releases/download",

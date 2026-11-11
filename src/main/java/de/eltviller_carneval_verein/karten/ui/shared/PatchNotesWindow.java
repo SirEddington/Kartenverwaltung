@@ -144,7 +144,8 @@ public final class PatchNotesWindow {
 		}
 	}
 
-	private static double screenHeight(Window owner) {
+	/** Die Höhe der sichtbaren Fläche des Bildschirms von {@code owner}; ohne Besitzer oder außerhalb jedes Bildschirms der Hauptbildschirm. */
+	static double screenHeight(Window owner) {
 		List<Screen> screens = owner == null ? List.of()
 				: Screen.getScreensForRectangle(owner.getX(), owner.getY(), Math.max(1, owner.getWidth()),
 						Math.max(1, owner.getHeight()));

@@ -18,5 +18,5 @@ CLAUDE.md
 deployment/
 
 # Erzeugt von .github/scripts/release-notes.sh (KARV-125)
-release-notes.md
-release-version.txt
+/release-notes.md
+/release-version.txt

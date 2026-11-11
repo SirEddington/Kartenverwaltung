@@ -135,7 +135,7 @@ public final class UpdateFlow {
 	 * installierte Version: Ein reines Revisions-Update hätte die Seite der schon installierten Version.
 	 */
 	public Optional<URI> releasePage(AppVersion neu) {
-		if (new AppVersion(neu.version(), 0).compareTo(new AppVersion(inst.version().version(), 0)) <= 0) {
+		if (neu.withoutRevision().compareTo(inst.version().withoutRevision()) <= 0) {
 			return Optional.empty();
 		}
 		return inst.releasePage(neu);

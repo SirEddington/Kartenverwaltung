@@ -42,12 +42,12 @@ public final class PatchNotesOnStart {
 		if (current.isEmpty()) {
 			return new Decision(List.of(), Optional.empty());
 		}
-		AppVersion now = PatchNotes.base(current.get());
+		AppVersion now = current.get().withoutRevision();
 		Optional<String> remember = Optional.of(now.version());
 		boolean seenBlank = seen == null || seen.isEmpty();
 		Optional<AppVersion> seenVersion = seenBlank ? Optional.empty() : AppVersion.parse(seen, null);
 		if (seenVersion.isPresent()) {
-			int order = PatchNotes.base(seenVersion.get()).compareTo(now);
+			int order = seenVersion.get().withoutRevision().compareTo(now);
 			if (order == 0) {
 				return new Decision(List.of(), Optional.empty());
 			}

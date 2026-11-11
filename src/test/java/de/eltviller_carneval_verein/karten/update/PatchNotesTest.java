@@ -48,7 +48,7 @@ class PatchNotesTest {
 
 	@Test
 	void bomAndCrlfAreAccepted() {
-		PatchNotes notes = PatchNotes.parse("﻿# T\r\n## 1.1.0\r\n### Neu\r\n- A\r\n");
+		PatchNotes notes = PatchNotes.parse((char) 0xFEFF + "# T\r\n## 1.1.0\r\n### Neu\r\n- A\r\n");
 		assertEquals(List.of("A"), notes.releases().get(0).sections().get(0).entries());
 	}
 

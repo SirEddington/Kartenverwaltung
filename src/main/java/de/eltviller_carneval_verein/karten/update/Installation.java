@@ -63,10 +63,11 @@ public record Installation(AppVersion version, URI base, String fsname, Plattfor
 	public Optional<URI> releasePage(AppVersion v) {
 		if (!"https".equalsIgnoreCase(base.getScheme()) || base.getHost() == null
 				|| !"github.com".equalsIgnoreCase(base.getHost()) || base.getPort() != -1 || base.getUserInfo() != null
-				|| base.getQuery() != null || base.getFragment() != null || base.getPath() == null) {
+				|| base.getQuery() != null || base.getFragment() != null || base.getRawPath() == null) {
 			return Optional.empty();
 		}
-		Matcher m = GITHUB_LATEST.matcher(base.getPath());
+		// der rohe (kodierte) Pfad, damit die neue Adresse genauso kodiert bleibt und URI.create nicht scheitert
+		Matcher m = GITHUB_LATEST.matcher(base.getRawPath());
 		if (!m.matches()) {
 			return Optional.empty();
 		}

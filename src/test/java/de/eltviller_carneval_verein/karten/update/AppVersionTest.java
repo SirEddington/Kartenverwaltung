@@ -68,4 +68,11 @@ class AppVersionTest {
 		assertEquals(Optional.of(v("1.1.0", "2")), AppVersion.from(props::get));
 		assertEquals(Optional.empty(), AppVersion.from(Map.<String, String>of()::get));
 	}
+
+	@Test
+	void withoutRevisionKeepsTheVersionText() {
+		assertEquals(new AppVersion("1.1.0", 0), v("1.1.0", "3").withoutRevision());
+		assertEquals(0, v("1.1.0", "3").withoutRevision().compareTo(v("1.1.0", "0")));
+		assertEquals("1.1", v("1.1", "2").withoutRevision().version());
+	}
 }

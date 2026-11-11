@@ -271,6 +271,19 @@ class InfoSectionTest {
 	}
 
 	@Test
+	void linkKeepsItsTooltipAcrossChecks() throws Exception {
+		page = Optional.of(PAGE);
+		state.set(available(FAMILY));
+		SettingsSection s = windowsPackage();
+		Hyperlink link = (Hyperlink) find(s, "update-patch-notes");
+		javafx.scene.control.Tooltip tooltip = link.getTooltip();
+		set(new UpdateState.Checking(available(FAMILY)));
+		set(available(FAMILY));
+		assertTrue(tooltip == link.getTooltip());
+		assertEquals(PAGE.toString(), link.getTooltip().getText());
+	}
+
+	@Test
 	void linkFollowsState() throws Exception {
 		page = Optional.of(PAGE);
 		state.set(available(FAMILY));

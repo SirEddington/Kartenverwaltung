@@ -16,6 +16,8 @@ import java.util.regex.Pattern;
 public final class PatchNotes {
 
 	private static final String RESOURCE = "/de/eltviller_carneval_verein/karten/patchnotes.md";
+	/** Byte Order Mark als Zahl, nicht als unsichtbares Zeichen im Quelltext, das ein Editor still entfernen könnte. */
+	private static final char BOM = 0xFEFF;
 
 	private static final Pattern PLACEHOLDER_WORD = Pattern.compile("\\b(TODO|TBD|XXX)\\b",
 			Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS);
@@ -85,7 +87,7 @@ public final class PatchNotes {
 	 * @throws InvalidPatchNotesException bei jeder Regelverletzung, mit Zeile und Grund
 	 */
 	public static PatchNotes parse(String text) {
-		return new Parser().parse(text.startsWith("﻿") ? text.substring(1) : text);
+		return new Parser().parse(!text.isEmpty() && text.charAt(0) == BOM ? text.substring(1) : text);
 	}
 
 	/** Alle Versionen, die neueste zuerst. */
@@ -95,12 +97,14 @@ public final class PatchNotes {
 
 	/** Die Version {@code v}; nur die Versionsnummer zählt, nicht die Revision. */
 	public Optional<Release> of(AppVersion v) {
-		return releases.stream().filter(r -> base(r.version()).compareTo(base(v)) == 0).findFirst();
+		AppVersion wanted = v.withoutRevision();
+		return releases.stream().filter(r -> r.version().compareTo(wanted) == 0).findFirst();
 	}
 
 	/** Alle Versionen bis einschließlich {@code v} (ohne Revision), die neueste zuerst. */
 	public List<Release> upTo(AppVersion v) {
-		return releases.stream().filter(r -> base(r.version()).compareTo(base(v)) <= 0).toList();
+		AppVersion limit = v.withoutRevision();
+		return releases.stream().filter(r -> r.version().compareTo(limit) <= 0).toList();
 	}
 
 	/**
@@ -108,8 +112,8 @@ public final class PatchNotes {
 	 * {@code seen} wie {@link #upTo(AppVersion)}.
 	 */
 	public List<Release> after(Optional<AppVersion> seen, AppVersion upTo) {
-		return upTo(upTo).stream().filter(r -> seen.isEmpty() || base(r.version()).compareTo(base(seen.get())) > 0)
-				.toList();
+		Optional<AppVersion> after = seen.map(AppVersion::withoutRevision);
+		return upTo(upTo).stream().filter(r -> after.isEmpty() || r.version().compareTo(after.get()) > 0).toList();
 	}
 
 	/**
@@ -140,10 +144,6 @@ public final class PatchNotes {
 			escaped.append(c);
 		}
 		return escaped.toString();
-	}
-
-	static AppVersion base(AppVersion v) {
-		return new AppVersion(v.version(), 0);
 	}
 
 	/** Ein Durchlauf über die Zeilen; hält fest, wo er gerade steht. */
@@ -209,7 +209,7 @@ public final class PatchNotes {
 			closeVersion();
 			AppVersion parsed = AppVersion.parse(text, null)
 					.orElseThrow(() -> new InvalidPatchNotesException(number, "ungültige Version „" + text + "“"));
-			if (!releases.isEmpty() && base(parsed).compareTo(base(releases.get(releases.size() - 1).version())) >= 0) {
+			if (!releases.isEmpty() && parsed.compareTo(releases.get(releases.size() - 1).version()) >= 0) {
 				throw new InvalidPatchNotesException(number,
 						"die Versionen müssen streng absteigend stehen (neueste oben, jede nur einmal)");
 			}

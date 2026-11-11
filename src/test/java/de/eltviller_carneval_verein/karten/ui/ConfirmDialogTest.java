@@ -72,6 +72,18 @@ class ConfirmDialogTest {
 	}
 
 	@Test
+	void linkTextWithoutPageOrOpenBuildsNoLink() throws Exception {
+		ConfirmDialog.Built withoutPage = onFx(() -> ConfirmDialog.build("T", "Frage", "OK", "button-primary",
+				"Abbrechen", null, "Link", null, (p, e) -> {
+				}));
+		assertNull(find(withoutPage, "confirm-link"));
+		ConfirmDialog.Built withoutOpen = onFx(() -> ConfirmDialog.build("T", "Frage", "OK", "button-primary",
+				"Abbrechen", null, "Link", PAGE, null));
+		assertNull(find(withoutOpen, "confirm-link"));
+		assertEquals("Frage", withoutOpen.alert().getDialogPane().getContentText());
+	}
+
+	@Test
 	void linkWithTooltip() throws Exception {
 		ConfirmDialog.Built built = build("Was ist neu in Version 1.2.0?", (p, e) -> calls.add("open " + p));
 		Hyperlink link = (Hyperlink) find(built, "confirm-link");
