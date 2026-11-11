@@ -342,7 +342,9 @@ public final class FolderDownloader {
 		Instant deadline = clock.instant().plus(total);
 		AppInstallerFile ai = fetchAppInstaller();
 		if (ai.version().compareTo(v) != 0) {
-			throw new Failure("Die .appinstaller-Datei nennt " + ai.version().display() + " statt " + v.display());
+			// die Quelle hat sich seit der Prüfung geändert (z. B. während der Wartezeit): kein Fehler, das Neu-Durchsuchen
+			// nach der Rückmeldung bietet die aktuelle Version an
+			throw new Withdraw("Die .appinstaller-Datei nennt " + ai.version().display() + " statt " + v.display());
 		}
 		String name = targetName(ai.uri());
 		Path target = dir.resolve(name);

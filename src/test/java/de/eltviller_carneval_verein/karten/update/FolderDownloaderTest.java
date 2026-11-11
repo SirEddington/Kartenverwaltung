@@ -278,6 +278,18 @@ class FolderDownloaderTest {
 		assertEquals(List.of(), names());
 	}
 
+	/** Handtest KARV-132: Die Quelle meldet während der Wartezeit eine neuere Version; das ist kein Fehler. */
+	@Test
+	void sourceChangedDuringWaitIsNoFailure() throws IOException {
+		server.route("/src/ecv-karten-fx132.appinstaller", 200, appInstaller("1.1.0.3", server.base(MSIX_PATH).toString()));
+		int before = changes;
+		runAll();
+		assertEquals(List.of(), names());
+		assertTrue(changes > before, "die Rückmeldung stößt ein neues Durchsuchen an");
+		offer();
+		assertEquals(1, tasks.now.size(), "keine Sperre: gleich ein neuer Versuch");
+	}
+
 	@Test
 	void versionMismatchInAppInstallerAborts() throws IOException {
 		server.route("/src/ecv-karten-fx132.appinstaller", 200, appInstaller("1.1.0.3", server.base(MSIX_PATH).toString()));
