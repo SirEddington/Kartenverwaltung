@@ -62,10 +62,12 @@ import de.eltviller_carneval_verein.karten.ui.hall.HallEditController;
 import de.eltviller_carneval_verein.karten.ui.sales.BookingAutoSave;
 import de.eltviller_carneval_verein.karten.ui.sales.LockedSeats;
 import de.eltviller_carneval_verein.karten.ui.shared.DataReload;
+import de.eltviller_carneval_verein.karten.ui.shared.DialogConfirmation;
 import de.eltviller_carneval_verein.karten.ui.shared.LockedUnits;
 import de.eltviller_carneval_verein.karten.ui.shared.LockedUnitsDialog;
 import de.eltviller_carneval_verein.karten.ui.shared.LockedUnitsIndicator;
 import de.eltviller_carneval_verein.karten.ui.shared.OperatorDialog;
+import de.eltviller_carneval_verein.karten.ui.shared.PatchNotesWindow;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderEvents;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderStart;
@@ -77,7 +79,6 @@ import de.eltviller_carneval_verein.karten.ui.shared.SyncInfo;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncInfoWindow;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncStatus;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateFlow;
-import de.eltviller_carneval_verein.karten.ui.shared.Confirmation;
 import de.eltviller_carneval_verein.karten.ui.shared.StartPrompt;
 import de.eltviller_carneval_verein.karten.ui.shared.StartPromptTicker;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateIndicator;
@@ -94,6 +95,8 @@ import de.eltviller_carneval_verein.karten.update.HttpUpdateSource;
 import de.eltviller_carneval_verein.karten.update.Installation;
 import de.eltviller_carneval_verein.karten.update.MsixManifest;
 import de.eltviller_carneval_verein.karten.update.OwnFiles;
+import de.eltviller_carneval_verein.karten.update.PatchNotes;
+import de.eltviller_carneval_verein.karten.update.PatchNotesOnStart;
 import de.eltviller_carneval_verein.karten.update.SharedFolderAccess;
 import de.eltviller_carneval_verein.karten.update.StationRegistry;
 import de.eltviller_carneval_verein.karten.update.UpdateChecker;
@@ -397,6 +400,11 @@ public class MainApp extends Application {
 			}
 			finishStart(settingsStore);
 			then.run();
+			// KARV-125: nach einem Update einmal „Was ist neu“; vor SYS-005, damit die Warnung obenauf liegt
+			PatchNotesOnStart.run(AppVersion.current(), settingsStore.current().getPatchNotesSeen(),
+					settingsStore.existedAtLoad(), PatchNotes::bundled,
+					releases -> PatchNotesWindow.show(primaryStage, releases),
+					version -> settingsStore.saveOnly(s -> s.setPatchNotesSeen(version)));
 			showUnreachableAtStart();
 		} catch (RuntimeException e) {
 			LOG.log(Level.SEVERE, "Oberfläche konnte nicht geladen werden", e);
@@ -650,19 +658,8 @@ public class MainApp extends Application {
 					Path.of(System.getProperty("java.io.tmpdir")), Clock.systemUTC());
 			UpdateChecker checker = new UpdateChecker(installation, source, new ExecutorScheduler(), Platform::runLater,
 					Clock.systemUTC());
-			Confirmation confirmation = new Confirmation() {
-				@Override
-				public boolean ask(String title, String text, String button) {
-					return ConfirmDialog.confirm(title, text, button, "button-primary", primaryStage);
-				}
-
-				@Override
-				public boolean ask(String title, String text, String button, String cancel) {
-					return cancel == null ? ask(title, text, button)
-							: ConfirmDialog.confirm(title, text, button, "button-primary", cancel, primaryStage);
-				}
-			};
-			UpdateFlow flow = new UpdateFlow(installation, confirmation,
+			// KARV-125: DialogConfirmation statt der anonymen Klasse aus KARV-132, damit auch der Link ankommt
+			UpdateFlow flow = new UpdateFlow(installation, new DialogConfirmation(ConfirmDialog::confirm, primaryStage),
 					() -> settingsStore.current().getSharedDir() != null, MainApp::confirmClose, MainApp::showBusyView,
 					source, new AwtDesktopOps(), Platform::exit, MainApp::showMenuView, MainApp::conflictsChanged,
 					checker::checkNow, text -> StatusMessage.getInstance().show(Severity.ERROR, text), MainApp::busyViewShown,
@@ -836,6 +833,27 @@ public class MainApp extends Application {
 	/** Die Update-Prüfung, leer außerhalb eines Pakets oder wenn ihr Aufbau scheiterte (KARV-131). */
 	public static Optional<Updates> updates() {
 		return Optional.ofNullable(updates);
+	}
+
+	/**
+	 * „Patchnotes anzeigen“ in den Einstellungen (KARV-125): alle Versionen bis zur laufenden (in der Entwicklung alle).
+	 * Eine ungültige Datei und eine leere Liste meldet die Fußzeile statt eines Fensters.
+	 */
+	public static void showPatchNotes() {
+		PatchNotes notes;
+		try {
+			notes = PatchNotes.bundled();
+		} catch (RuntimeException e) {
+			LOG.log(Level.WARNING, "Patchnotes ließen sich nicht lesen", e);
+			StatusMessage.getInstance().show(Severity.ERROR, UpdateTexts.PATCH_NOTES_UNREADABLE);
+			return;
+		}
+		List<PatchNotes.Release> releases = notes.forDisplay(AppVersion.current());
+		if (releases.isEmpty()) {
+			StatusMessage.getInstance().show(Severity.INFO, UpdateTexts.PATCH_NOTES_NONE);
+			return;
+		}
+		PatchNotesWindow.show(primaryStage, releases);
 	}
 
 	/** Der Zustand der Update-Prüfung für Fußzeile und Einstellungen (FX-Thread). */

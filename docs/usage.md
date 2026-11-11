@@ -183,7 +183,14 @@ is intact.
 ## Updates
 
 Windows does not install updates in the background. The app checks the latest GitHub release itself: 10 s after
-start, then every 4 hours, and on **"Jetzt prüfen"**. It never opens a window on its own.
+start, then every 4 hours, and on **"Jetzt prüfen"**. The check never opens a window on its own.
+
+- **"Was ist neu" (patch notes):** after an update, the first start shows a window with what changed in every version
+  since the one last shown (not after a fresh installation). It does not block work; close it with "Schließen" or
+  Esc. *Einstellungen → Info und Updates → "Patchnotes anzeigen"* shows it again at any time.
+- **Before updating:** when a newer version is known, *Info und Updates* and the update confirmation show the link
+  **"Was ist neu in Version X?"**. It opens the release page on GitHub in the browser; the app itself never loads
+  anything from the internet for it. If the browser does not open, the address is shown to copy.
 
 - **Footer hint:** "Update 1.1.0 verfügbar" appears when a newer version exists. It stays while a check runs or fails.
 - **Updating (Windows):** click the hint (or *Einstellungen → Info und Updates → "Jetzt aktualisieren"*). After the

@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.shared;
 
+import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -211,6 +212,34 @@ public final class UpdateTexts {
 	/** Der Fehler nach einem technisch gescheiterten direkten Weg. */
 	public static String errorDirect(Grund grund) {
 		return MessageTemplate.format(ERROR_DIRECT, reason(grund));
+	}
+
+	/** Patchnotes (KARV-125): Zeile und Knopf in „Info und Updates“, Fenster, Meldungen in der Fußzeile. */
+	public static final String PATCH_NOTES_ROW = "Was ist neu";
+	public static final String PATCH_NOTES_BUTTON = "Patchnotes anzeigen";
+	public static final String PATCH_NOTES_TITLE = "Was ist neu";
+	public static final String PATCH_NOTES_CLOSE = "Schließen";
+	public static final String PATCH_NOTES_UNREADABLE = "Die Patchnotes ließen sich nicht lesen.";
+	public static final String PATCH_NOTES_NONE = "Für diese Version gibt es keine Patchnotes.";
+
+	/** Der Fenstertitel, wenn das Fenster genau eine Version zeigt. */
+	public static String patchNotesTitle(String version) {
+		return "Was ist neu in Version " + version;
+	}
+
+	/** Die Überschrift einer Version im Fenster. */
+	public static String patchNotesVersion(String version) {
+		return "Version " + version;
+	}
+
+	/** Der Link zur Release-Seite (KARV-125); die Versionsnummer ohne Revision, passend zum Tag. */
+	public static String releaseLink(AppVersion version) {
+		return patchNotesTitle(version.version()) + "?";
+	}
+
+	/** Die Release-Seite ließ sich nicht im Browser öffnen (KARV-125). */
+	public static String releasePageFailed(URI page) {
+		return "Die Seite ließ sich nicht öffnen: " + page;
 	}
 
 	private static String time(Instant instant, ZoneId zone) {

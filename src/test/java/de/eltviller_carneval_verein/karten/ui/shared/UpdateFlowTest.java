@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.Executor;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,13 +50,19 @@ class UpdateFlowTest {
 	private String lastConfirmText;
 	private String lastConfirmButton;
 	private String lastConfirmCancel;
+	private Optional<Confirmation.Link> lastConfirmLink;
+	private Executor ui = Runnable::run;
+	private Executor worker = Runnable::run;
 	private boolean folderFileValid = true;
 	private UpdateFlow flow;
 
 	private static Installation installation(boolean packaged) {
+		return installation(packaged, "http://localhost:8765/upd");
+	}
+
+	private static Installation installation(boolean packaged, String repositoryUrl) {
 		Map<String, String> props = Map.of("app.version", "1.1.0", "app.revision", "1", "app.fsname", "ecv-karten",
-				"app.repositoryUrl", "http://localhost:8765/upd", "os.name", "Windows 11",
-				"app.windows.userModelID", FAMILY + "!EcvKarten");
+				"app.repositoryUrl", repositoryUrl, "os.name", "Windows 11", "app.windows.userModelID", FAMILY + "!EcvKarten");
 		Map<String, String> env = packaged ? Map.of("PACKAGE_LOCALAPPDATA", "C:\\Users\\u\\AppData\\Local\\Packages\\" + FAMILY)
 				: Map.of();
 		return Installation.from(props::get, env::get).orElseThrow();
@@ -110,6 +118,7 @@ class UpdateFlowTest {
 				}
 			}
 		};
+		// Form aus KARV-132, dazu die Fünf-Argument-Methode mit dem Link (KARV-125)
 		Confirmation confirmation = new Confirmation() {
 			@Override
 			public boolean ask(String title, String text, String button) {
@@ -124,6 +133,12 @@ class UpdateFlowTest {
 				lastConfirmButton = button;
 				lastConfirmCancel = cancel;
 				return confirmAnswer;
+			}
+
+			@Override
+			public boolean ask(String title, String text, String button, String cancel, Optional<Confirmation.Link> link) {
+				lastConfirmLink = link;
+				return ask(title, text, button, cancel);
 			}
 		};
 		return new UpdateFlow(inst, confirmation, () -> sharedFolder, () -> {
@@ -146,7 +161,28 @@ class UpdateFlowTest {
 				throw afterAbortFailure;
 			}
 		}, () -> calls.add("recheck"), text -> calls.add("error " + text), () -> busyShown, () -> connecting,
-				Runnable::run, Runnable::run);
+				ui, worker);
+	}
+
+	/** Wie {@link #installation(boolean)} im Paket, aber mit der echten Update-Quelle auf GitHub (KARV-125). */
+	private static Installation githubInstallation() {
+		return installation(true, "https://github.com/SirEddington/Kartenverwaltung/releases/latest/download");
+	}
+
+	/** Executoren, die in {@code calls} vermerken, auf welchem Weg eine Aufgabe lief. */
+	private void recordThreads() {
+		worker = r -> {
+			calls.add("worker");
+			r.run();
+		};
+		ui = r -> {
+			calls.add("ui");
+			r.run();
+		};
+	}
+
+	private static AppVersion version(String version, String revision) {
+		return AppVersion.parse(version, revision).orElseThrow();
 	}
 
 	@BeforeEach
@@ -158,7 +194,10 @@ class UpdateFlowTest {
 	private static final Path MSIX = Path.of("updates", "ecv-karten-1.1.0-3.x64.msix");
 
 	private FolderOffer folderOffer() {
-		AppVersion v = AppVersion.parse("1.1.0", "3").orElseThrow();
+		return folderOffer(AppVersion.parse("1.1.0", "3").orElseThrow());
+	}
+
+	private FolderOffer folderOffer(AppVersion v) {
 		return new FolderOffer() {
 			@Override
 			public Path file() {
@@ -191,6 +230,24 @@ class UpdateFlowTest {
 		assertEquals(UpdateTexts.CONFIRM_DIRECT_TITLE, lastConfirmTitle);
 		assertEquals(UpdateTexts.confirmFolderText(AppVersion.parse("1.1.0", "3").orElseThrow()), lastConfirmText);
 		assertEquals(UpdateTexts.BUTTON_UPDATE, lastConfirmButton);
+	}
+
+	/** KARV-125: Auch die Rückfrage zum Update aus dem Ordner verlinkt die Release-Seite, beim Start mit „Später“. */
+	@Test
+	void folderUpdateAsksWithLinkToHigherVersion() {
+		flow = flow(githubInstallation());
+		flow.updateFromFolder(folderOffer(AppVersion.parse("1.2.0", "0").orElseThrow()), true);
+		Confirmation.Link link = lastConfirmLink.orElseThrow();
+		assertEquals("Was ist neu in Version 1.2.0?", link.text());
+		assertEquals(URI.create("https://github.com/SirEddington/Kartenverwaltung/releases/tag/1.2.0"), link.page());
+		assertEquals(UpdateTexts.BUTTON_LATER, lastConfirmCancel);
+	}
+
+	@Test
+	void folderUpdateWithOnlyNewerRevisionAsksWithoutLink() {
+		flow = flow(githubInstallation());
+		flow.updateFromFolder(folderOffer(), false);
+		assertEquals(Optional.empty(), lastConfirmLink);
 	}
 
 	@Test
@@ -457,5 +514,73 @@ class UpdateFlowTest {
 		flow = flow(installation(false));
 		flow.update(info("2", FAMILY));
 		assertEquals(List.of(), calls);
+	}
+
+	private static final URI PAGE_120 = URI.create("https://github.com/SirEddington/Kartenverwaltung/releases/tag/1.2.0");
+
+	@Test
+	void releasePageOnlyForHigherVersion() {
+		flow = flow(githubInstallation());
+		assertEquals(Optional.of(PAGE_120), flow.releasePage(version("1.2.0", null)));
+		assertEquals(Optional.empty(), flow.releasePage(version("1.1.0", "2")));
+		assertEquals(Optional.empty(), flow.releasePage(version("1.0.9", null)));
+		assertEquals(Optional.empty(), flow(installation(true)).releasePage(version("1.2.0", null)));
+	}
+
+	@Test
+	void updateAsksWithLink() {
+		flow = flow(githubInstallation());
+		flow.update(new UpdateInfo(version("1.2.0", null), FAMILY, false));
+		Confirmation.Link link = lastConfirmLink.orElseThrow();
+		assertEquals("Was ist neu in Version 1.2.0?", link.text());
+		assertEquals(PAGE_120, link.page());
+	}
+
+	@Test
+	void updateWithOnlyNewerRevisionAsksWithoutLink() {
+		flow = flow(githubInstallation());
+		flow.update(info("2", FAMILY));
+		assertEquals(Optional.empty(), lastConfirmLink);
+	}
+
+	@Test
+	void updateViaBrowserAsksWithoutLink() {
+		flow = flow(githubInstallation());
+		flow.updateViaBrowser();
+		assertEquals(Optional.empty(), lastConfirmLink);
+	}
+
+	@Test
+	void openReleasePageBrowsesOnWorker() {
+		recordThreads();
+		flow = flow(githubInstallation());
+		List<String> errors = new ArrayList<>();
+		flow.openReleasePage(PAGE_120, errors::add);
+		assertEquals(List.of("worker", "browse " + PAGE_120), calls);
+		assertEquals(List.of(), errors);
+	}
+
+	@Test
+	void openReleasePageReportsFailureOnUi() {
+		recordThreads();
+		browseFailure = new IOException("kein Browser");
+		flow = flow(githubInstallation());
+		List<String> errors = new ArrayList<>();
+		flow.openReleasePage(PAGE_120, text -> {
+			calls.add("onError");
+			errors.add(text);
+		});
+		assertEquals(List.of("worker", "browse " + PAGE_120, "ui", "onError"), calls);
+		assertEquals(List.of("Die Seite ließ sich nicht öffnen: " + PAGE_120), errors);
+	}
+
+	@Test
+	void linkOpensThroughTheFlow() {
+		flow = flow(githubInstallation());
+		flow.update(new UpdateInfo(version("1.2.0", null), FAMILY, false));
+		calls.clear();
+		Confirmation.Link link = lastConfirmLink.orElseThrow();
+		link.open().accept(link.page(), text -> calls.add("onError"));
+		assertEquals(List.of("browse " + PAGE_120), calls);
 	}
 }

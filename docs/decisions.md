@@ -501,6 +501,26 @@ install.
 - **Known gap:** an antivirus that only cuts the connection (instead of presenting its own certificate) looks like
   "no network" and stays silent; a workstation without internet is normal at a box office.
 
+## Patch notes (KARV-125)
+
+**Decision:**
+- One Markdown file in the app, `patchnotes.md`, is the only source. The app shows it offline; the GitHub release
+  text is generated from it by the release workflow, before Conveyor publishes.
+- After an update the first start shows "Was ist neu" once (not after a fresh installation); *Info und Updates*
+  shows it at any time. Before an update the app only links to the GitHub release page; it never loads the text.
+- Fixed sections "Neu", "Verbessert", "Behoben", "Hinter den Kulissen" in plain language for the box office. Claude
+  drafts the final text from the tickets of the version shortly before the pull request from the release branch to
+  `main`; the maintainer approves it. Until then the section holds a provisional text, because the guard test requires
+  a valid section for the version on every build.
+- The file format is strict and checked by a test against `pom.xml` and `conveyor.conf`: placeholders, empty
+  sections, formatting and anything GitHub would turn into a mention, a reference or an emoji (`@name`, `#12`,
+  `:word:`) are errors, so no release can go out with unfinished or misleading notes.
+
+**Why:**
+- A file inside the app works without internet and explains each installed version by itself. Rejected: a JSON file
+  (harder to write and review) and the GitHub release as the source (needs internet, against "only a link").
+- Generating the release text before Conveyor means a broken file stops the release before installers are public.
+
 ## Update over the shared folder (KARV-132)
 
 **Decision:**

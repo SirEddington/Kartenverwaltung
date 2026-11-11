@@ -203,6 +203,13 @@ The package only sees the shared folder through `SharedFolderAccess`, which `Mai
     └── ~karv-<machineId>-<UUID>.tmp         download in progress
 ```
 
+**Patch notes (KARV-125)** have one source, `src/main/resources/.../patchnotes.md`. `PatchNotes` reads and checks it
+(fixed sections, plain text, no placeholders); `PatchNotesOnStart` decides in `MainApp.onLoaded` whether the window
+`ui.shared.PatchNotesWindow` appears and remembers the version in `settings.json`. The release workflow prints the
+section of the new version with `PatchNotesExport` before Conveyor publishes and then sets it as the GitHub release
+text; the app links to that page (`Installation.releasePage`, also from the shared-folder prompt) but never downloads
+it. See [installation.md](installation.md#releasing) and [decisions.md](decisions.md#patch-notes-karv-125).
+
 ### `ui` – screens
 
 Grouped by area: `menu` (main and management menu), `sales` (ticket table, hall overview, customer display),

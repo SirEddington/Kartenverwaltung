@@ -1,7 +1,9 @@
 package de.eltviller_carneval_verein.karten.ui.shared;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -10,6 +12,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import de.eltviller_carneval_verein.karten.store.Reachability;
+import de.eltviller_carneval_verein.karten.update.AppVersion;
 import de.eltviller_carneval_verein.karten.update.DesktopOps;
 import de.eltviller_carneval_verein.karten.update.FolderOffer;
 import de.eltviller_carneval_verein.karten.update.Grund;
@@ -127,7 +130,7 @@ public final class UpdateFlow {
 						throw new Stop(UpdateTexts.ERROR_FOLDER_FILE);
 					}
 					desktop.open(offer.file());
-				}, UpdateTexts::errorDirect);
+				}, UpdateTexts::errorDirect, releaseLink(offer.version()));
 	}
 
 	/** Für Tests: Zeitlimit der erneuten Prüfung vor dem Öffnen. */
@@ -161,24 +164,56 @@ public final class UpdateFlow {
 					}
 					Path file = source.downloadAppInstaller();
 					desktop.open(file);
-				}, UpdateTexts::errorDirect);
+				}, UpdateTexts::errorDirect, releaseLink(info.version()));
 	}
 
 	/** Der Browser-Weg: die Adresse der {@code .appinstaller}-Datei im Browser zeigen, App beenden; ohne eigene Prüfung. */
 	public void updateViaBrowser() {
 		start(UpdateTexts.CONFIRM_BROWSER_TITLE, UpdateTexts.confirmBrowserText(sharedFolderConfigured.getAsBoolean()),
-				UpdateTexts.BUTTON_BROWSER, null, () -> desktop.browse(source.appInstallerUri()), grund -> UpdateTexts.ERROR_BROWSER);
+				UpdateTexts.BUTTON_BROWSER, null, () -> desktop.browse(source.appInstallerUri()), grund -> UpdateTexts.ERROR_BROWSER,
+				Optional.empty());
+	}
+
+	/**
+	 * Die Release-Seite von {@code neu} auf GitHub (KARV-125), nur wenn {@code neu} ohne Revision neuer ist als die
+	 * installierte Version: Ein reines Revisions-Update hätte die Seite der schon installierten Version.
+	 */
+	public Optional<URI> releasePage(AppVersion neu) {
+		if (neu.withoutRevision().compareTo(inst.version().withoutRevision()) <= 0) {
+			return Optional.empty();
+		}
+		return inst.releasePage(neu);
+	}
+
+	/**
+	 * Öffnet {@code page} im Browser, auf {@code worker}, damit ein hängender Browser-Start die Oberfläche nicht
+	 * blockiert; ein Fehler kommt über {@code ui} als Text für den Nutzer an {@code onError}.
+	 */
+	public void openReleasePage(URI page, Consumer<String> onError) {
+		worker.execute(() -> {
+			try {
+				desktop.browse(page);
+			} catch (Throwable e) {
+				LOG.log(Level.WARNING, "Release-Seite ließ sich nicht öffnen: " + page, e);
+				ui.execute(() -> onError.accept(UpdateTexts.releasePageFailed(page)));
+			}
+		});
+	}
+
+	/** Der Link „Was ist neu in Version …?“ für eine Rückfrage, leer ohne Release-Seite. */
+	public Optional<Confirmation.Link> releaseLink(AppVersion neu) {
+		return releasePage(neu).map(page -> new Confirmation.Link(UpdateTexts.releaseLink(neu), page, this::openReleasePage));
 	}
 
 	private void start(String title, String text, String button, String cancel, Work work,
-			Function<Grund, String> errorText) {
+			Function<Grund, String> errorText, Optional<Confirmation.Link> link) {
 		if (running || connecting.getAsBoolean()) {
 			return;
 		}
 		running = true;
 		boolean closed = false;
 		try {
-			if (!(cancel == null ? confirm.ask(title, text, button) : confirm.ask(title, text, button, cancel))) {
+			if (!confirm.ask(title, text, button, cancel, link)) {
 				abort();
 				return;
 			}

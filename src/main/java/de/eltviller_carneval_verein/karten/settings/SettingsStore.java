@@ -33,6 +33,7 @@ public final class SettingsStore {
 
 	private final File settingsFile;
 	private final ObjectMapper objectMapper;
+	private final boolean existedAtLoad;
 
 	private AppSettings current;
 
@@ -71,10 +72,20 @@ public final class SettingsStore {
 			storageDir.mkdirs();
 		}
 
+		// Vor load(): das legt eine defekte Datei beiseite, und schon die Bedienerfrage schreibt die Datei (KARV-125)
+		this.existedAtLoad = settingsFile.exists();
 		this.current = load();
 		this.saved = copyOf(current);
 	}
 	// <-- Konstuktoren
+
+	/**
+	 * Ob {@code settings.json} beim Laden schon da war, auch defekt (KARV-125: Neuinstallation oder Update). Spätere
+	 * Speichervorgänge ändern das nicht.
+	 */
+	public boolean existedAtLoad() {
+		return existedAtLoad;
+	}
 
 	/** Die aktuellen Einstellungen. Die Referenz nicht aufbewahren, siehe Klassenbeschreibung. */
 	public AppSettings current() {

@@ -29,6 +29,21 @@ jobs:
           ./mvnw --batch-mode package -DskipTests
           ./mvnw --batch-mode package -Plinux -DskipTests
 
+      # KARV-125: Der Text des Releases kommt aus patchnotes.md. Erzeugt VOR Conveyor: Conveyor veröffentlicht sofort
+      # (kein Entwurf), ein Fehler hier beendet den Lauf also, bevor ein Installer draußen ist.
+      - name: Release notes from patchnotes.md
+        run: bash .github/scripts/release-notes.sh
+
+      # overwrite, damit ein erneuter Lauf dieses Jobs nicht am schon vorhandenen Artefakt scheitert
+      - name: Keep release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          overwrite: true
+          path: |
+            release-notes.md
+            release-version.txt
+
       # IMPORTANT: check https://conveyor.hydraulic.dev/latest/ for the current
       # version and bump the tag below (@v22.2) when it changes.
       #
@@ -45,3 +60,21 @@ jobs:
           signing_key: ${{ secrets.CONVEYOR_SIGNING_KEY }}
           agree_to_license: 1
           extra_flags: -Kconveyor.billing-email="${{ secrets.CONVEYOR_BILLING_EMAIL }}"
+
+  # KARV-125: Eigener Job, damit "Re-run failed jobs" nur diesen Schritt wiederholt und nie Conveyor.
+  # Ersetzt den Text, den Conveyor setzt, durch die Patchnotes der Version (der Download-Link bleibt).
+  release-notes:
+    needs: build-and-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Get release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      - name: Set release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$(cat release-version.txt)" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md

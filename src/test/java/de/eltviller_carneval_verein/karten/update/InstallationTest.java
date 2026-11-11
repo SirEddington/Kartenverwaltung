@@ -128,4 +128,37 @@ class InstallationTest {
 		assertEquals(Plattform.SONSTIGE, from(props("Mac OS X"), Map.of()).orElseThrow().plattform());
 		assertTrue(from(props("Linux"), Map.of()).orElseThrow().packageFamilyName().isEmpty());
 	}
+
+	private static Optional<URI> releasePage(String repositoryUrl, String version, String revision) {
+		Map<String, String> p = props("Linux");
+		p.put("app.repositoryUrl", repositoryUrl);
+		return from(p, Map.of()).orElseThrow().releasePage(AppVersion.parse(version, revision).orElseThrow());
+	}
+
+	@Test
+	void releasePageOnGithub() {
+		String source = "https://github.com/SirEddington/Kartenverwaltung/releases/latest/download";
+		URI expected = URI.create("https://github.com/SirEddington/Kartenverwaltung/releases/tag/1.2.0");
+		assertEquals(Optional.of(expected), releasePage(source, "1.2.0", null));
+		assertEquals(Optional.of(expected), releasePage(source, "1.2.0", "2"));
+		assertEquals(Optional.of(expected), releasePage(source + "/", "1.2.0", null));
+		assertEquals(Optional.of(expected), releasePage(source.replace("github.com", "GitHub.com"), "1.2.0", null));
+	}
+
+	@Test
+	void encodedPathStaysEncoded() {
+		assertEquals(Optional.of(URI.create("https://github.com/a%20b/c/releases/tag/1.2.0")),
+				releasePage("https://github.com/a%20b/c/releases/latest/download", "1.2.0", null));
+	}
+
+	@Test
+	void noReleasePageElsewhere() {
+		for (String source : new String[] { "http://github.com/SirEddington/Kartenverwaltung/releases/latest/download",
+				"https://example.org/a/b/releases/latest/download", "https://github.com/a/b/releases/download",
+				"https://github.com/a/b/c/releases/latest/download", "https://github.com:8443/a/b/releases/latest/download",
+				"https://u@github.com/a/b/releases/latest/download", "https://github.com/a/b/releases/latest/download?x=1",
+				"https://github.com/a/b/releases/latest/download#f", "http://localhost:8765/upd" }) {
+			assertEquals(Optional.empty(), releasePage(source, "1.2.0", null), source);
+		}
+	}
 }

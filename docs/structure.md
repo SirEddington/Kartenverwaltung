@@ -31,11 +31,13 @@ Kartenverwaltung/
     │   │       ├── accounting/   backup/   event/   hall/   input/
     │   │       ├── menu/         sales/    settings/  shared/
     │   │       └── *.java        cross-cutting UI helpers
-    │   └── resources/de/eltviller_carneval_verein/karten/ui/
-    │       ├── *View.fxml, *Panel.fxml   one FXML per screen/panel
-    │       ├── style.css
-    │       ├── fonts/            Yanone Kaffeesatz (OFL)
-    │       └── images/           harlekin_logo.png (app icon), wappen.png
+    │   └── resources/de/eltviller_carneval_verein/karten/
+    │       ├── patchnotes.md     patch notes of every version (KARV-125), newest first
+    │       └── ui/
+    │           ├── *View.fxml, *Panel.fxml   one FXML per screen/panel
+    │           ├── style.css
+    │           ├── fonts/        Yanone Kaffeesatz (OFL)
+    │           └── images/       harlekin_logo.png (app icon), wappen.png
     └── test/java/de/eltviller_carneval_verein/karten/
         └── (same packages as main)
 ```
@@ -82,8 +84,9 @@ machine identity and locking (`MachineIdentity`, `Ownership`, `InstanceLock`), s
 
 ### `settings`
 `AppSettings` (fields with defaults: `sharedDir`, `saveBookingsImmediately`, `checkCloudServer`, `recentOperators`,
-`display` → `DisplaySettings`, the "Anzeige" menu and whether it is restored at start) and
-`SettingsStore` (`<AppData>/settings.json`). Always read through `SettingsStore.getInstance().current()`.
+`display` → `DisplaySettings`, the "Anzeige" menu and whether it is restored at start, `patchNotesSeen`, the version whose
+patch notes were last shown) and `SettingsStore` (`<AppData>/settings.json`; `existedAtLoad()` tells a fresh installation
+from an update). Always read through `SettingsStore.getInstance().current()`.
 
 ### `update`
 Update check without JavaFX (KARV-131): `AppVersion`, `Installation` (version, update source, platform, package
@@ -92,7 +95,9 @@ family from Conveyor's system properties), `UpdateInfo` (`metadata.properties`),
 `UpdatesDir` (folder `updates/` and name rules), `StationEntry`/`StationRegistry` (version entries), `MsixManifest`,
 `PackageFamily`, `AppInstallerFile`, `SecureXml`, `HttpGet`, `FolderUpdates` (candidate, check, cleanup),
 `FolderDownloader` and `LoadClaims` (background download with claim files), `FolderDecision` (candidate against the
-update source), `FolderState`, `FolderWatch` (timer), `SharedFolderAccess`, `SharedFileReplace`, `OwnFiles`.
+update source), `FolderState`, `FolderWatch` (timer), `SharedFolderAccess`, `SharedFileReplace`, `OwnFiles`. Patch
+notes (KARV-125): `PatchNotes` (reads and checks `patchnotes.md` from the resources), `PatchNotesOnStart` (what to show
+after an update), `PatchNotesExport` (command line, prints the GitHub release text) and `Installation.releasePage`.
 
 ### `util`
 Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
@@ -105,8 +110,8 @@ Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
 | `accounting` | Accounting shell, cash reconciliation, statistics, `Exportable` (CSV/PDF) |
 | `event` | Event overview, create/edit, presentations, seating plan switch |
 | `hall` | Hall management, hall editor, hall plan and seating plan drawing/layout, row fill, bulk edits |
-| `settings` | Searchable settings screen, "Gemeinsamer Ordner", "Anzeige" and "Info und Updates" sections |
-| `shared` | Shared-folder start/connect flow, sync indicator and info window, operator dialog, locked units, data reload, update flow, texts and footer hint |
+| `settings` | Searchable settings screen, "Gemeinsamer Ordner", "Anzeige" and "Info und Updates" sections; `PatchNoteActions` bundles what "Info und Updates" needs for the patch notes (KARV-125) |
+| `shared` | Shared-folder start/connect flow, sync indicator and info window, operator dialog, locked units, data reload, update flow, texts and footer hint, `PatchNotesWindow` ("Was ist neu"), `DialogConfirmation` (confirmation with an optional link) |
 | `backup` | Restore dialog and catalogs for events and halls |
 | `input` | Parsing text fields, spinners, date/time and number inputs with inline feedback |
 | *(root)* | Savers, `LeaveGuard`, `ChangeTrigger`, `LiveUpdates`, `LiveValidator`, conflict dialog/list/indicator, status footer, `DisplayPreferences` (the app-wide "Anzeige" menu of sales and hall editor) |

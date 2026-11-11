@@ -10,8 +10,10 @@ import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
 import de.eltviller_carneval_verein.karten.ui.SaveShortcut;
 import de.eltviller_carneval_verein.karten.ui.SettingsSaver;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.shared.SharedFolderConnection;
 import de.eltviller_carneval_verein.karten.update.AppVersion;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -72,7 +74,10 @@ public class SettingsController {
 				MainApp.updateStateProperty(), MainApp.folderStateProperty(), MainApp::ownMachineId,
 				MainApp::checkForUpdatesNow, available -> MainApp.updates().ifPresent(u -> u.flow().update(available.neu())),
 				offer -> MainApp.updates().ifPresent(u -> u.flow().updateFromFolder(offer, false)),
-				() -> MainApp.updates().ifPresent(u -> u.flow().updateViaBrowser())));
+				() -> MainApp.updates().ifPresent(u -> u.flow().updateViaBrowser()),
+				new PatchNoteActions(v -> MainApp.updates().flatMap(u -> u.flow().releasePage(v)),
+						(page, onError) -> MainApp.updates().ifPresent(u -> u.flow().openReleasePage(page, onError)),
+						MainApp::showPatchNotes, text -> StatusMessage.getInstance().show(Severity.ERROR, text))));
 		return sections;
 	}
 

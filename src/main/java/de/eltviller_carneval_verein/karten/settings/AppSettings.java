@@ -26,6 +26,7 @@ public class AppSettings {
 	private boolean checkCloudServer = true;
 	private List<String> recentOperators = new ArrayList<>();
 	private DisplaySettings display = new DisplaySettings();
+	private String patchNotesSeen;
 
 	public AppSettings() {
 	}
@@ -78,5 +79,17 @@ public class AppSettings {
 	/** {@code null} (etwa {@code "display": null} in der Datei) gilt als Standard. */
 	public void setDisplay(DisplaySettings display) {
 		this.display = display == null ? new DisplaySettings() : display;
+	}
+
+	/**
+	 * Die Versionsnummer, deren Patchnotes zuletzt gezeigt wurden (KARV-125); {@code null}, wenn noch keine gezeigt
+	 * wurden (Neuinstallation oder Update von 1.0.x).
+	 */
+	public String getPatchNotesSeen() {
+		return patchNotesSeen;
+	}
+
+	public void setPatchNotesSeen(String patchNotesSeen) {
+		this.patchNotesSeen = patchNotesSeen;
 	}
 }
