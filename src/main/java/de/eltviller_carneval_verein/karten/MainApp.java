@@ -74,8 +74,10 @@ import de.eltviller_carneval_verein.karten.ui.shared.SyncInfoWindow;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncStatus;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateFlow;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateIndicator;
+import de.eltviller_carneval_verein.karten.ui.shared.PatchNotesWindow;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateTexts;
 import de.eltviller_carneval_verein.karten.update.AppVersion;
+import de.eltviller_carneval_verein.karten.update.PatchNotes;
 import de.eltviller_carneval_verein.karten.update.AwtDesktopOps;
 import de.eltviller_carneval_verein.karten.update.ExecutorScheduler;
 import de.eltviller_carneval_verein.karten.update.HttpUpdateSource;
@@ -658,6 +660,27 @@ public class MainApp extends Application {
 	/** Die Update-Prüfung, leer außerhalb eines Pakets oder wenn ihr Aufbau scheiterte (KARV-131). */
 	public static Optional<Updates> updates() {
 		return Optional.ofNullable(updates);
+	}
+
+	/**
+	 * „Patchnotes anzeigen“ in den Einstellungen (KARV-125): alle Versionen bis zur laufenden (in der Entwicklung alle).
+	 * Eine ungültige Datei und eine leere Liste meldet die Fußzeile statt eines Fensters.
+	 */
+	public static void showPatchNotes() {
+		PatchNotes notes;
+		try {
+			notes = PatchNotes.bundled();
+		} catch (RuntimeException e) {
+			LOG.log(Level.WARNING, "Patchnotes ließen sich nicht lesen", e);
+			StatusMessage.getInstance().show(Severity.ERROR, UpdateTexts.PATCH_NOTES_UNREADABLE);
+			return;
+		}
+		List<PatchNotes.Release> releases = AppVersion.current().map(notes::upTo).orElse(notes.releases());
+		if (releases.isEmpty()) {
+			StatusMessage.getInstance().show(Severity.INFO, UpdateTexts.PATCH_NOTES_NONE);
+			return;
+		}
+		PatchNotesWindow.show(primaryStage, releases);
 	}
 
 	/** Der Zustand der Update-Prüfung für Fußzeile und Einstellungen (FX-Thread). */

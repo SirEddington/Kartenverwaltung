@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.settings;
 
+import java.net.URI;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,8 +18,10 @@ import javafx.beans.value.WeakChangeListener;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
@@ -43,16 +46,23 @@ public final class InfoSection {
 	 * @param checkNow         „Jetzt prüfen“
 	 * @param update           „Jetzt aktualisieren“ auf die bekannte Version
 	 * @param updateViaBrowser „Update im Browser laden“
+	 * @param patchNotes       „Patchnotes anzeigen“ und der Link „Was ist neu in Version …?“ (KARV-125)
 	 */
 	public static SettingsSection build(Optional<AppVersion> version, Optional<Installation> inst,
 			ReadOnlyObjectProperty<UpdateState> state, Runnable checkNow, Consumer<UpdateState.Available> update,
-			Runnable updateViaBrowser) {
+			Runnable updateViaBrowser, PatchNoteActions patchNotes) {
 		List<SettingRow> rows = new ArrayList<>();
 		Label versionLabel = new Label(version.map(AppVersion::display).orElse(UpdateTexts.DEVELOPMENT_VERSION));
 		versionLabel.setId("update-version");
 		rows.add(new SettingRow(UpdateTexts.ROW_VERSION, null, versionLabel));
+		Button showPatchNotes = new Button(UpdateTexts.PATCH_NOTES_BUTTON);
+		showPatchNotes.setId("patch-notes-show");
+		showPatchNotes.getStyleClass().add("button-default");
+		showPatchNotes.setMinWidth(Region.USE_PREF_SIZE);
+		showPatchNotes.setOnAction(e -> patchNotes.showPatchNotes().run());
+		rows.add(new SettingRow(UpdateTexts.PATCH_NOTES_ROW, null, showPatchNotes));
 		rows.add(new SettingRow(UpdateTexts.ROW_UPDATES, null,
-				new UpdatesRow(version, inst, state, checkNow, update, updateViaBrowser).node));
+				new UpdatesRow(version, inst, state, checkNow, update, updateViaBrowser, patchNotes).node));
 		if (inst.map(i -> i.plattform() == Plattform.WINDOWS_PAKET).orElse(false)) {
 			TextField file = new TextField(inst.get().appInstallerUri().toString());
 			file.setId("update-file");
@@ -73,14 +83,32 @@ public final class InfoSection {
 		private final Button checkNowButton = new Button(UpdateTexts.BUTTON_CHECK_NOW);
 		private final Button updateButton = new Button(UpdateTexts.BUTTON_UPDATE_NOW);
 		private final Button browserButton = new Button(UpdateTexts.BUTTON_UPDATE_BROWSER);
+		private final Hyperlink releaseLink = new Hyperlink();
+		private final TextField releaseAddress = new TextField();
+		private final PatchNoteActions patchNotes;
 		private final VBox node;
 		private final ChangeListener<UpdateState> refresher = (obs, old, now) -> refresh();
 
 		UpdatesRow(Optional<AppVersion> version, Optional<Installation> inst, ReadOnlyObjectProperty<UpdateState> state,
-				Runnable checkNow, Consumer<UpdateState.Available> update, Runnable updateViaBrowser) {
+				Runnable checkNow, Consumer<UpdateState.Available> update, Runnable updateViaBrowser,
+				PatchNoteActions patchNotes) {
 			this.version = version;
 			this.inst = inst;
 			this.state = state;
+			this.patchNotes = patchNotes;
+			releaseLink.setId("update-patch-notes");
+			releaseLink.setOnAction(e -> {
+				if (releaseLink.getUserData() instanceof URI page) {
+					patchNotes.openReleasePage().accept(page, text -> {
+						patchNotes.showError().accept(text);
+						releaseAddress.setText(page.toString());
+						show(releaseAddress, true);
+					});
+				}
+			});
+			releaseAddress.setId("update-patch-notes-address");
+			releaseAddress.setEditable(false);
+			show(releaseAddress, false);
 			status.setId("update-status");
 			status.setWrapText(true);
 			platform.setId("update-platform");
@@ -99,7 +127,7 @@ public final class InfoSection {
 			}
 			HBox buttons = new HBox(10, checkNowButton, updateButton, browserButton);
 			buttons.setAlignment(Pos.CENTER_LEFT);
-			node = new VBox(6, status, platform, buttons);
+			node = new VBox(6, status, releaseLink, releaseAddress, platform, buttons);
 			node.getProperties().put(UpdatesRow.class, this);
 			state.addListener(new WeakChangeListener<>(refresher));
 			refresh();
@@ -123,6 +151,25 @@ public final class InfoSection {
 			boolean browser = windowsPackage && !(s.effective() instanceof UpdateState.UpToDate)
 					&& !(known.isPresent() && !inPlace);
 			show(browserButton, browser);
+			refreshReleaseLink(known);
+		}
+
+		/** Der Link „Was ist neu in Version …?“ zur bekannten neueren Version, nur mit Installation und Release-Seite. */
+		private void refreshReleaseLink(Optional<UpdateState.Available> known) {
+			Optional<AppVersion> neu = known.map(a -> a.neu().version());
+			Optional<URI> page = inst.isPresent() ? neu.flatMap(patchNotes.releasePage()) : Optional.empty();
+			if (page.isPresent()) {
+				if (!page.get().equals(releaseLink.getUserData())) {
+					show(releaseAddress, false);
+				}
+				releaseLink.setText(UpdateTexts.releaseLink(neu.get()));
+				releaseLink.setUserData(page.get());
+				releaseLink.setTooltip(new Tooltip(page.get().toString()));
+			} else {
+				releaseLink.setUserData(null);
+				show(releaseAddress, false);
+			}
+			show(releaseLink, page.isPresent());
 		}
 
 		private static void show(Node n, boolean shown) {

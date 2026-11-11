@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.net.URI;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +28,7 @@ import javafx.application.Platform;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 
@@ -38,6 +40,9 @@ class InfoSectionTest {
 
 	private final List<String> calls = new ArrayList<>();
 	private final SimpleObjectProperty<UpdateState> state = new SimpleObjectProperty<>(new UpdateState.NotChecked());
+	/** Was {@code releasePage} der Aktionen liefert (KARV-125). */
+	private Optional<URI> page = Optional.empty();
+	private boolean openFails;
 
 	@BeforeAll
 	static void startFx() {
@@ -75,8 +80,14 @@ class InfoSectionTest {
 	}
 
 	private SettingsSection build(Optional<AppVersion> version, Optional<Installation> inst) throws Exception {
+		PatchNoteActions actions = new PatchNoteActions(v -> page, (p, onError) -> {
+			calls.add("open " + p);
+			if (openFails) {
+				onError.accept("Die Seite ließ sich nicht öffnen: " + p);
+			}
+		}, () -> calls.add("patchnotes"), text -> calls.add("error " + text));
 		return onFx(() -> InfoSection.build(version, inst, state, () -> calls.add("check"),
-				a -> calls.add("update " + a.neu().version().display()), () -> calls.add("browser")));
+				a -> calls.add("update " + a.neu().version().display()), () -> calls.add("browser"), actions));
 	}
 
 	private SettingsSection windowsPackage() throws Exception {
@@ -113,10 +124,10 @@ class InfoSectionTest {
 	void rowsAndTitle() throws Exception {
 		SettingsSection s = windowsPackage();
 		assertEquals(UpdateTexts.SECTION_TITLE, s.title());
-		assertEquals(List.of(UpdateTexts.ROW_VERSION, UpdateTexts.ROW_UPDATES, UpdateTexts.ROW_UPDATE_FILE),
-				s.rows().stream().map(SettingRow::label).toList());
+		assertEquals(List.of(UpdateTexts.ROW_VERSION, UpdateTexts.PATCH_NOTES_ROW, UpdateTexts.ROW_UPDATES,
+				UpdateTexts.ROW_UPDATE_FILE), s.rows().stream().map(SettingRow::label).toList());
 		assertEquals("1.1.0 (Rev. 1)", text(s, "update-version"));
-		assertNull(s.rows().get(1).hint());
+		assertNull(s.rows().get(2).hint());
 	}
 
 	@Test
@@ -187,7 +198,8 @@ class InfoSectionTest {
 		assertFalse(shown(s, "update-now"));
 		assertFalse(shown(s, "update-browser"));
 		assertTrue(text(s, "update-platform").startsWith("Bitte so aktualisieren"));
-		assertEquals(2, s.rows().size());
+		// Version, „Was ist neu“ (KARV-125), Updates; keine Update-Datei außerhalb des Windows-Pakets
+		assertEquals(3, s.rows().size());
 	}
 
 	@Test
@@ -212,7 +224,7 @@ class InfoSectionTest {
 		TextField field = (TextField) find(s, "update-file");
 		assertFalse(field.isEditable());
 		assertEquals("http://localhost:8765/upd/ecv-karten.appinstaller", field.getText());
-		assertEquals(UpdateTexts.UPDATE_FILE_HINT, s.rows().get(2).hint());
+		assertEquals(UpdateTexts.UPDATE_FILE_HINT, s.rows().get(3).hint());
 		assertNull(find(build(INSTALLED, installation("Windows 11", false)), "update-file"));
 	}
 
@@ -224,5 +236,64 @@ class InfoSectionTest {
 		set(available(FAMILY));
 		assertTrue(shown(s, "update-now"));
 		assertTrue(text(s, "update-status").startsWith("Version 1.1.0 (Rev. 2) verfügbar"));
+	}
+
+	private static final URI PAGE = URI.create("https://github.com/SirEddington/Kartenverwaltung/releases/tag/1.1.0");
+
+	@Test
+	void patchNotesRowAlwaysThere() throws Exception {
+		for (SettingsSection s : List.of(windowsPackage(), build(INSTALLED, installation("Linux", false)),
+				build(Optional.empty(), Optional.empty()))) {
+			assertTrue(shown(s, "patch-notes-show"));
+			assertEquals(UpdateTexts.PATCH_NOTES_BUTTON, ((Button) find(s, "patch-notes-show")).getText());
+		}
+		SettingsSection s = windowsPackage();
+		onFx(() -> {
+			((Button) find(s, "patch-notes-show")).fire();
+			return null;
+		});
+		assertEquals(List.of("patchnotes"), calls);
+	}
+
+	@Test
+	void linkOnlyWithKnownUpdateAndPage() throws Exception {
+		assertFalse(shown(windowsPackage(), "update-patch-notes"));
+		state.set(available(FAMILY));
+		assertFalse(shown(windowsPackage(), "update-patch-notes"));
+		page = Optional.of(PAGE);
+		SettingsSection s = windowsPackage();
+		assertTrue(shown(s, "update-patch-notes"));
+		Hyperlink link = (Hyperlink) find(s, "update-patch-notes");
+		assertEquals("Was ist neu in Version 1.1.0?", link.getText());
+		assertEquals(PAGE, link.getUserData());
+		assertEquals(PAGE.toString(), link.getTooltip().getText());
+		assertFalse(shown(s, "update-patch-notes-address"));
+	}
+
+	@Test
+	void linkFollowsState() throws Exception {
+		page = Optional.of(PAGE);
+		state.set(available(FAMILY));
+		SettingsSection s = windowsPackage();
+		assertTrue(shown(s, "update-patch-notes"));
+		set(new UpdateState.UpToDate(T));
+		assertFalse(shown(s, "update-patch-notes"));
+	}
+
+	@Test
+	void linkFailureShowsFooterAndAddress() throws Exception {
+		page = Optional.of(PAGE);
+		openFails = true;
+		state.set(available(FAMILY));
+		SettingsSection s = build(INSTALLED, installation("Linux", false));
+		onFx(() -> {
+			((Hyperlink) find(s, "update-patch-notes")).fire();
+			return null;
+		});
+		assertEquals(List.of("open " + PAGE, "error Die Seite ließ sich nicht öffnen: " + PAGE), calls);
+		assertTrue(shown(s, "update-patch-notes-address"));
+		TextField address = (TextField) find(s, "update-patch-notes-address");
+		assertFalse(address.isEditable());
+		assertEquals(PAGE.toString(), address.getText());
 	}
 }
