@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.shared;
 
+import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -149,6 +150,16 @@ public final class UpdateTexts {
 	/** Der Fehler nach einem technisch gescheiterten direkten Weg. */
 	public static String errorDirect(Grund grund) {
 		return MessageTemplate.format(ERROR_DIRECT, reason(grund));
+	}
+
+	/** Der Link zur Release-Seite (KARV-125); die Versionsnummer ohne Revision, passend zum Tag. */
+	public static String releaseLink(AppVersion version) {
+		return "Was ist neu in Version " + version.version() + "?";
+	}
+
+	/** Die Release-Seite ließ sich nicht im Browser öffnen (KARV-125). */
+	public static String releasePageFailed(URI page) {
+		return "Die Seite ließ sich nicht öffnen: " + page;
 	}
 
 	private static String time(Instant instant, ZoneId zone) {

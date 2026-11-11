@@ -137,4 +137,11 @@ class UpdateTextsTest {
 		assertEquals("Jetzt aktualisieren", UpdateTexts.BUTTON_UPDATE_NOW);
 		assertEquals("Update im Browser laden", UpdateTexts.BUTTON_UPDATE_BROWSER);
 	}
+
+	@Test
+	void releaseLinkUsesTheVersionWithoutRevision() {
+		assertEquals("Was ist neu in Version 1.2.0?", UpdateTexts.releaseLink(AppVersion.parse("1.2.0", "3").orElseThrow()));
+		assertEquals("Die Seite ließ sich nicht öffnen: https://example.org/x",
+				UpdateTexts.releasePageFailed(java.net.URI.create("https://example.org/x")));
+	}
 }

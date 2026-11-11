@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.Executor;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,6 +47,10 @@ class UpdateFlowTest {
 	private IOException browseFailure;
 	private String lastConfirmText;
 	private String lastConfirmButton;
+	private String lastConfirmCancel;
+	private Optional<Confirmation.Link> lastConfirmLink;
+	private Executor ui = Runnable::run;
+	private Executor worker = Runnable::run;
 	private UpdateFlow flow;
 
 	private static Installation installation(boolean packaged) {
@@ -106,12 +112,29 @@ class UpdateFlowTest {
 				}
 			}
 		};
-		return new UpdateFlow(inst, (title, text, button) -> {
-			calls.add("confirm");
-			lastConfirmText = text;
-			lastConfirmButton = button;
-			return confirmAnswer;
-		}, () -> sharedFolder, () -> {
+		// Form wie auf dem KARV-132-Branch, dazu die Fünf-Argument-Methode mit dem Link (KARV-125)
+		Confirmation confirmation = new Confirmation() {
+			@Override
+			public boolean ask(String title, String text, String button) {
+				return ask(title, text, button, null);
+			}
+
+			@Override
+			public boolean ask(String title, String text, String button, String cancel) {
+				calls.add("confirm");
+				lastConfirmText = text;
+				lastConfirmButton = button;
+				lastConfirmCancel = cancel;
+				return confirmAnswer;
+			}
+
+			@Override
+			public boolean ask(String title, String text, String button, String cancel, Optional<Confirmation.Link> link) {
+				lastConfirmLink = link;
+				return ask(title, text, button, cancel);
+			}
+		};
+		return new UpdateFlow(inst, confirmation, () -> sharedFolder, () -> {
 			calls.add("confirmClose");
 			if (confirmCloseFailure != null) {
 				throw confirmCloseFailure;
@@ -131,7 +154,20 @@ class UpdateFlowTest {
 				throw afterAbortFailure;
 			}
 		}, () -> calls.add("recheck"), text -> calls.add("error " + text), () -> busyShown, () -> connecting,
-				Runnable::run, Runnable::run);
+				ui, worker);
+	}
+
+	/** Wie {@link #installation(boolean)} im Paket, aber mit der echten Update-Quelle auf GitHub (KARV-125). */
+	private static Installation githubInstallation() {
+		Map<String, String> props = Map.of("app.version", "1.1.0", "app.revision", "1", "app.fsname", "ecv-karten",
+				"app.repositoryUrl", "https://github.com/SirEddington/Kartenverwaltung/releases/latest/download",
+				"os.name", "Windows 11", "app.windows.userModelID", FAMILY + "!EcvKarten");
+		return Installation.from(props::get,
+				Map.of("PACKAGE_LOCALAPPDATA", "C:\\Users\\u\\AppData\\Local\\Packages\\" + FAMILY)::get).orElseThrow();
+	}
+
+	private static AppVersion version(String version, String revision) {
+		return AppVersion.parse(version, revision).orElseThrow();
 	}
 
 	@BeforeEach
@@ -321,5 +357,87 @@ class UpdateFlowTest {
 		flow = flow(installation(false));
 		flow.update(info("2", FAMILY));
 		assertEquals(List.of(), calls);
+	}
+
+	private static final URI PAGE_120 = URI.create("https://github.com/SirEddington/Kartenverwaltung/releases/tag/1.2.0");
+
+	@Test
+	void releasePageOnlyForHigherVersion() {
+		flow = flow(githubInstallation());
+		assertEquals(Optional.of(PAGE_120), flow.releasePage(version("1.2.0", null)));
+		assertEquals(Optional.empty(), flow.releasePage(version("1.1.0", "2")));
+		assertEquals(Optional.empty(), flow.releasePage(version("1.0.9", null)));
+		assertEquals(Optional.empty(), flow(installation(true)).releasePage(version("1.2.0", null)));
+	}
+
+	@Test
+	void updateAsksWithLink() {
+		flow = flow(githubInstallation());
+		flow.update(new UpdateInfo(version("1.2.0", null), FAMILY, false));
+		Confirmation.Link link = lastConfirmLink.orElseThrow();
+		assertEquals("Was ist neu in Version 1.2.0?", link.text());
+		assertEquals(PAGE_120, link.page());
+	}
+
+	@Test
+	void updateWithOnlyNewerRevisionAsksWithoutLink() {
+		flow = flow(githubInstallation());
+		flow.update(info("2", FAMILY));
+		assertEquals(Optional.empty(), lastConfirmLink);
+	}
+
+	@Test
+	void updateViaBrowserAsksWithoutLink() {
+		flow = flow(githubInstallation());
+		flow.updateViaBrowser();
+		assertEquals(Optional.empty(), lastConfirmLink);
+	}
+
+	@Test
+	void openReleasePageBrowsesOnWorker() {
+		worker = r -> {
+			calls.add("worker");
+			r.run();
+		};
+		ui = r -> {
+			calls.add("ui");
+			r.run();
+		};
+		flow = flow(githubInstallation());
+		List<String> errors = new ArrayList<>();
+		flow.openReleasePage(PAGE_120, errors::add);
+		assertEquals(List.of("worker", "browse " + PAGE_120), calls);
+		assertEquals(List.of(), errors);
+	}
+
+	@Test
+	void openReleasePageReportsFailureOnUi() {
+		worker = r -> {
+			calls.add("worker");
+			r.run();
+		};
+		ui = r -> {
+			calls.add("ui");
+			r.run();
+		};
+		browseFailure = new IOException("kein Browser");
+		flow = flow(githubInstallation());
+		List<String> errors = new ArrayList<>();
+		flow.openReleasePage(PAGE_120, text -> {
+			calls.add("onError");
+			errors.add(text);
+		});
+		assertEquals(List.of("worker", "browse " + PAGE_120, "ui", "onError"), calls);
+		assertEquals(List.of("Die Seite ließ sich nicht öffnen: " + PAGE_120), errors);
+	}
+
+	@Test
+	void linkOpensThroughTheFlow() {
+		flow = flow(githubInstallation());
+		flow.update(new UpdateInfo(version("1.2.0", null), FAMILY, false));
+		calls.clear();
+		Confirmation.Link link = lastConfirmLink.orElseThrow();
+		link.open().accept(link.page(), text -> calls.add("onError"));
+		assertEquals(List.of("browse " + PAGE_120), calls);
 	}
 }
