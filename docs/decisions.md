@@ -414,7 +414,8 @@ switched, keep the certificate subject unchanged across renewals.
 ## Updates only with the user's consent (`app.updates = manual`)
 
 **Decision:** Windows no longer checks for updates in the background. An update runs only when a user agrees to it
-in the app (KARV-131) or when it is installed from the shared folder (KARV-132).
+in the app (KARV-131) or when it is installed from the shared folder
+([KARV-132](#update-over-the-shared-folder-karv-132)).
 
 **Why:**
 - Workstations sharing a folder must run the same version (see [installation.md](installation.md)). An update must
@@ -499,6 +500,57 @@ install.
   profile, and its data lands in the package folder (seen with Opera in W2). Acceptable for a fallback.
 - **Known gap:** an antivirus that only cuts the connection (instead of presenting its own certificate) looks like
   "no network" and stays silent; a workstation without internet is normal at a box office.
+
+## Update over the shared folder (KARV-132)
+
+**Decision:**
+- **Version alignment:** every workstation with a version writes `<shared folder>/updates/kassen/<machine id>.json`
+  (version, revision, `fsname`, name, platform, last start). A newer entry with the same `fsname` gives the footer
+  warning "„Kasse Y“ nutzt … – bitte aktualisieren". Entries do not expire: a retired newer workstation still left data
+  in the newer format.
+- **Installer in the folder:** a Windows package workstation whose last successful check knows a version V ≥ its own
+  (also right after it updated itself) downloads the `.msix` of V into `updates/` in the background, unless a valid
+  installer ≥ V is there. Coordination: claim file `laden-<a.b.c.d>-<machine id>.json`, a random wait of 2 to 5
+  minutes, then the smallest machine id wins; a fresh "done" claim (3 h) stops everyone else. The download goes to a
+  `~karv-….tmp` file (Nextcloud does not upload those), is checked (length, manifest, ZIP with CRC32) and placed with
+  `Files.move` without options (only under a free name), followed by a byte-identical description `<name>.msix.json`
+  (size, SHA-256, package family, package version).
+- **Update from the folder:** on every Windows package workstation, the newest valid installer of its own package family
+  above its version is offered (footer, *Info und Updates*, once at start). The app checks the file again, opens it with
+  `Desktop.open` and exits; the App Installer updates and restarts the app. A candidate newer than the update source
+  after a younger check is treated as withdrawn and not offered.
+- **Placement:** `updates/` sits next to `data/`. The version store only works below `data/` (the shared folder itself
+  is only its anchor and is never listed), so `updates/` causes no sync, conflict or SYS error (test
+  `updatesFolderBesideDataIsIgnoredByTheStore`). `updates/` and `kassen/` are created only if the shared folder exists.
+- **First replaced file in the shared folder:** a workstation's own entry is replaced in place (temporary file, atomic
+  move). Everywhere else in the shared folder files are only created; this is safe because exactly one workstation
+  writes each entry, so the sync client cannot produce a conflict.
+
+**Why / verified (probe W5, 10.11.2026, Windows 11 with Norton, no Norton alert):**
+- `Desktop.open` on an `.msix` in a Nextcloud-synced folder from inside the package: the App Installer opened
+  directly (no "How do you want to open this file?"), offered "aktualisieren?" with the new version and the folder as
+  source, updated and restarted the app with "Starten wenn bereit". The package kept its update source
+  (`AppInstallerUri` unchanged), and the normal update from the app (KARV-131) worked afterwards; the App Installer then
+  downloaded only changed blocks.
+- A rejected or cancelled installation does **not** restart the app; the user starts it again by hand.
+- `java.util.zip.ZipFile` does not verify CRC32 itself; the app recomputes it for every entry.
+
+**Consequences:**
+- Reading entries and updating from the folder only need the folder to be present locally; a Nextcloud workstation
+  without internet (offline for the version store) can still update. Only the download needs the cloud server.
+- If the winning workstation shuts down before Nextcloud uploaded the `.msix`, the others wait up to 3 hours. The
+  winner's own "done" claim survives a restart for those 3 hours, too.
+- After a withdrawal (another workstation downloads, folder not reachable, source changed during the wait) the next
+  attempt waits for the next regular tick (10 minutes) or a newer update check; otherwise tick and download thread
+  would trigger each other without pause. A changed source also triggers a new update check.
+- A withdrawn version in the folder blocks the older source version: no workstation places it next to it (otherwise
+  candidate choice, download and "delete older" cleanup would have to change together and the cleanup would delete it
+  again). The withdrawn file is deleted by hand ([usage.md](usage.md#updates)). Likewise only the current GitHub version
+  should be placed by hand.
+- Files in `updates/` may be planted by anyone with write access: names follow strict patterns, `.json` files are at
+  most 64 KB, at most 200 entries are read, `.msix` at most 200 MB, the manifest at most 1 MB, XML without DOCTYPE.
+  Protection against a foreign package rests on Windows' signature check and the private signing key.
+- Workstations on 1.0.x do not write entries; the release-notes hint for the boundary to 1.0.x stays.
 
 ## OpenPDF 1.3.x
 

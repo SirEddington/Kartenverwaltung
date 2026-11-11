@@ -185,6 +185,24 @@ trust store, 10 s after start and then every 4 hours, and publishes an `UpdateSt
 of the `.appinstaller` file and `Desktop.open`, then the app exits and the Windows App Installer takes over. See
 [decisions.md](decisions.md#update-check-and-update-from-the-app-karv-131).
 
+**Shared folder (KARV-132).** `FolderWatch` ticks 30 s after start, after connecting and every 10 minutes:
+`StationRegistry` writes the own entry and reads the others (warning about a newer workstation); on the Windows package
+`FolderUpdates` finds and checks installers (`MsixManifest`, description with SHA-256) and cleans up, `FolderDecision`
+weighs the candidate against `UpdateChecker.lastSuccess()`, and `FolderDownloader` loads the current version in the
+background (claim files, `HttpGet`, `AppInstallerFile`). `FolderState` feeds the footer (`ui.shared.UpdateHint`),
+*Info und Updates* and the prompt at start (`ui.shared.StartPrompt`); `UpdateFlow.updateFromFolder` opens the file.
+The package only sees the shared folder through `SharedFolderAccess`, which `MainApp` connects to `SyncService`.
+
+```
+<shared folder>/
+├── data/                                    version store (above)
+└── updates/
+    ├── kassen/<machineId>.json              version entry per workstation
+    ├── <name>.msix, <name>.msix.json        installer and its description (only the newest stays)
+    ├── laden-<a.b.c.d>-<machineId>.json     claim while a workstation downloads
+    └── ~karv-<machineId>-<UUID>.tmp         download in progress
+```
+
 ### `ui` – screens
 
 Grouped by area: `menu` (main and management menu), `sales` (ticket table, hall overview, customer display),

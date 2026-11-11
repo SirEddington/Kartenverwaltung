@@ -162,6 +162,58 @@ class UpdateCheckerTest {
 	}
 
 	@Test
+	void lastSuccessAfterAvailable() {
+		checker.start();
+		scheduler.tick.run();
+		assertEquals(Optional.of(new UpdateSuccess(info("1.1.0", "2"), NOW)), checker.lastSuccess());
+	}
+
+	@Test
+	void lastSuccessAfterUpToDate() {
+		source.info = info("1.1.0", "1");
+		checker.start();
+		scheduler.tick.run();
+		assertEquals(Optional.of(new UpdateSuccess(info("1.1.0", "1"), NOW)), checker.lastSuccess());
+	}
+
+	@Test
+	void lastSuccessSurvivesCheckFailed() {
+		source.info = info("1.1.0", "1");
+		checker.start();
+		scheduler.tick.run();
+		source.failure = new UnknownHostException("github.com");
+		scheduler.tick.run();
+		assertInstanceOf(UpdateState.CheckFailed.class, checker.state());
+		assertEquals(Optional.of(new UpdateSuccess(info("1.1.0", "1"), NOW)), checker.lastSuccess());
+	}
+
+	@Test
+	void lastSuccessSetBeforeListener() {
+		List<Optional<UpdateSuccess>> atListener = new ArrayList<>();
+		checker.setListener(state -> {
+			if (state instanceof UpdateState.Available) {
+				atListener.add(checker.lastSuccess());
+			}
+		});
+		checker.start();
+		scheduler.tick.run();
+		assertEquals(List.of(Optional.of(new UpdateSuccess(info("1.1.0", "2"), NOW))), atListener);
+	}
+
+	@Test
+	void noLastSuccessAfterClose() {
+		checker.start();
+		checker.close();
+		scheduler.tick.run();
+		assertEquals(Optional.empty(), checker.lastSuccess());
+	}
+
+	@Test
+	void noLastSuccessBeforeFirstCheck() {
+		assertEquals(Optional.empty(), checker.lastSuccess());
+	}
+
+	@Test
 	void unexpectedRuntimeExceptionBecomesUnknown() {
 		source.failure = new IllegalStateException("unerwartet");
 		checker.start();

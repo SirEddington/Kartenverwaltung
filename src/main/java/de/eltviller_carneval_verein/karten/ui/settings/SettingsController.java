@@ -69,8 +69,9 @@ public class SettingsController {
 				connection -> sections.add(SharedFolderSection.build(settings, connection.sync(), connection)));
 		sections.add(DisplaySection.build(settings));
 		sections.add(InfoSection.build(AppVersion.current(), MainApp.updates().map(MainApp.Updates::installation),
-				MainApp.updateStateProperty(), () -> MainApp.updates().ifPresent(u -> u.checker().checkNow()),
-				available -> MainApp.updates().ifPresent(u -> u.flow().update(available.neu())),
+				MainApp.updateStateProperty(), MainApp.folderStateProperty(), MainApp::ownMachineId,
+				MainApp::checkForUpdatesNow, available -> MainApp.updates().ifPresent(u -> u.flow().update(available.neu())),
+				offer -> MainApp.updates().ifPresent(u -> u.flow().updateFromFolder(offer, false)),
 				() -> MainApp.updates().ifPresent(u -> u.flow().updateViaBrowser())));
 		return sections;
 	}

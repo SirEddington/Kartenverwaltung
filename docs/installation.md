@@ -107,7 +107,13 @@ can reach (a network share or a folder synced by a client such as Nextcloud) and
 [usage.md](usage.md#working-with-several-workstations).
 
 **Update all workstations together.** Workstations sharing a folder should run the same version; each one shows the
-update hint in its footer (or use *Einstellungen → Info und Updates → "Jetzt prüfen"*). Version 1.1 adds
+update hint in its footer (or use *Einstellungen → Info und Updates → "Jetzt prüfen"*). Since 1.1, every workstation
+enters its version in `<folder>/updates/kassen/`, an older one warns, and a Windows workstation with internet places
+the installer in `<folder>/updates/`, from which the other Windows workstations update without internet of their own
+(see [usage.md](usage.md#updates)). The sync client then distributes 50 to 90 MB per version to every workstation;
+only the newest installer is kept. With Nextcloud "virtual files", keep `updates/` (like `data/`) always available on
+the device, otherwise a workstation without internet sees only a placeholder. An installer can also be placed in
+`updates/` by hand (the `.msix` of the current GitHub release). Version 1.1 adds
 table labels to the seating plan; a workstation still on 1.0.x drops them (back to "Text automatisch") and puts
 automatically placed seats back in their old positions when it saves a hall. Update every workstation to 1.1 at the
 same time and restart it. Then open each hall with a seating plan once in the hall editor and save it: 1.1 places

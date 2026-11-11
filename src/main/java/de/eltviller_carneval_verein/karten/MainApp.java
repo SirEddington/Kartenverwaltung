@@ -2,13 +2,17 @@ package de.eltviller_carneval_verein.karten;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -73,13 +77,25 @@ import de.eltviller_carneval_verein.karten.ui.shared.SyncInfo;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncInfoWindow;
 import de.eltviller_carneval_verein.karten.ui.shared.SyncStatus;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateFlow;
+import de.eltviller_carneval_verein.karten.ui.shared.Confirmation;
+import de.eltviller_carneval_verein.karten.ui.shared.StartPrompt;
+import de.eltviller_carneval_verein.karten.ui.shared.StartPromptTicker;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateIndicator;
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateTexts;
 import de.eltviller_carneval_verein.karten.update.AppVersion;
 import de.eltviller_carneval_verein.karten.update.AwtDesktopOps;
 import de.eltviller_carneval_verein.karten.update.ExecutorScheduler;
+import de.eltviller_carneval_verein.karten.update.FolderDownloader;
+import de.eltviller_carneval_verein.karten.update.FolderOffer;
+import de.eltviller_carneval_verein.karten.update.FolderState;
+import de.eltviller_carneval_verein.karten.update.FolderUpdates;
+import de.eltviller_carneval_verein.karten.update.FolderWatch;
 import de.eltviller_carneval_verein.karten.update.HttpUpdateSource;
 import de.eltviller_carneval_verein.karten.update.Installation;
+import de.eltviller_carneval_verein.karten.update.MsixManifest;
+import de.eltviller_carneval_verein.karten.update.OwnFiles;
+import de.eltviller_carneval_verein.karten.update.SharedFolderAccess;
+import de.eltviller_carneval_verein.karten.update.StationRegistry;
 import de.eltviller_carneval_verein.karten.update.UpdateChecker;
 import de.eltviller_carneval_verein.karten.update.UpdateSource;
 import de.eltviller_carneval_verein.karten.update.UpdateState;
@@ -114,7 +130,9 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
+import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.stage.Window;
 import javafx.util.Duration;
 
 public class MainApp extends Application {
@@ -155,6 +173,12 @@ public class MainApp extends Application {
 	// Schlüssel in den Properties der Ansicht "Update wird vorbereitet …" (markBusyView)
 	private static final Object BUSY_VIEW = new Object();
 	private static final ObjectProperty<UpdateState> updateState = new SimpleObjectProperty<>(new UpdateState.NotChecked());
+	private static final ObjectProperty<FolderState> folderState = new SimpleObjectProperty<>(FolderState.empty());
+	private static final String MENU_VIEW = "/de/eltviller_carneval_verein/karten/ui/MenuView.fxml";
+	private static final StartPrompt startPrompt = new StartPrompt(Clock.systemUTC());
+	private static FolderWatch folderWatch;
+	// die zuletzt über loadScene gezeigte Ansicht (Rückfrage beim Start nur im Hauptmenü, KARV-132)
+	private static String currentView;
 	private static Updates updates;
 	private static UpdateIndicator updateIndicator;
 	private static Parent busyView;
@@ -582,12 +606,14 @@ public class MainApp extends Application {
 			}
 		});
 		startUpdates(settingsStore);
+		startFolderWatch();
 
 		showLoadWarnings(repository.getAndClearLoadWarnings(), halls.getAndClearLoadWarnings());
 
 		showWarnings("Warnung beim Laden der Einstellungen", settingsStore.getAndClearLoadWarnings());
 
 		showMenuView();
+		startStartPrompt();
 		// Konflikte, die schon beim Start aufgelöst wurden (der Versionsspeicher meldete sie, bevor jemand zuhörte)
 		conflictsChanged();
 	}
@@ -624,8 +650,19 @@ public class MainApp extends Application {
 					Path.of(System.getProperty("java.io.tmpdir")), Clock.systemUTC());
 			UpdateChecker checker = new UpdateChecker(installation, source, new ExecutorScheduler(), Platform::runLater,
 					Clock.systemUTC());
-			UpdateFlow flow = new UpdateFlow(installation,
-					(title, text, button) -> ConfirmDialog.confirm(title, text, button, "button-primary", primaryStage),
+			Confirmation confirmation = new Confirmation() {
+				@Override
+				public boolean ask(String title, String text, String button) {
+					return ConfirmDialog.confirm(title, text, button, "button-primary", primaryStage);
+				}
+
+				@Override
+				public boolean ask(String title, String text, String button, String cancel) {
+					return cancel == null ? ask(title, text, button)
+							: ConfirmDialog.confirm(title, text, button, "button-primary", cancel, primaryStage);
+				}
+			};
+			UpdateFlow flow = new UpdateFlow(installation, confirmation,
 					() -> settingsStore.current().getSharedDir() != null, MainApp::confirmClose, MainApp::showBusyView,
 					source, new AwtDesktopOps(), Platform::exit, MainApp::showMenuView, MainApp::conflictsChanged,
 					checker::checkNow, text -> StatusMessage.getInstance().show(Severity.ERROR, text), MainApp::busyViewShown,
@@ -635,10 +672,15 @@ public class MainApp extends Application {
 						t.setDaemon(true);
 						t.start();
 					});
+			flow.setFolderDownloadRunning(() -> folderWatch != null && folderWatch.state().loading().isPresent());
 			checker.setListener(state -> {
 				updateState.set(state);
 				if (updateIndicator != null) {
 					updateIndicator.refresh();
+				}
+				// KARV-132: ein neues Ergebnis der Prüfung kann Angebot, Rückzug oder Download im Ordner ändern
+				if (folderWatch != null && !(state instanceof UpdateState.Checking)) {
+					folderWatch.rescanNow();
 				}
 			});
 			updates = new Updates(installation, source, checker, flow);
@@ -648,6 +690,142 @@ public class MainApp extends Application {
 			updates = null;
 			updateState.set(new UpdateState.Unsupported());
 		}
+	}
+
+	/**
+	 * Richtet Versionsabgleich und Update über den gemeinsamen Ordner ein (KARV-132), unabhängig von der Update-Prüfung:
+	 * Den Kasseneintrag schreibt jede Kasse mit Version, Installer suchen und laden nur das Windows-Paket. Scheitert der
+	 * Aufbau, startet die App trotzdem, nur ohne diese Funktion.
+	 */
+	private static void startFolderWatch() {
+		try {
+			SyncService sync = SyncService.getInstance();
+			Optional<Installation> inst = Installation.current();
+			SharedFolderAccess access = new SharedFolderAccess() {
+				@Override
+				public Optional<Path> folder() {
+					String dir = sync.sharedDir();
+					return dir == null || sync.connectedDir().isEmpty() ? Optional.empty() : Optional.of(Path.of(dir));
+				}
+
+				@Override
+				public boolean isPresent(Path folder) {
+					return Reachability.isReachable(folder, Files::isDirectory, Reachability.DEFAULT_TIMEOUT);
+				}
+
+				@Override
+				public boolean isReachable(Path folder) {
+					return Reachability.isReachable(folder);
+				}
+
+				@Override
+				public String machineId() {
+					return sync.machineId();
+				}
+
+				@Override
+				public String machineName() {
+					return sync.machineName();
+				}
+
+				@Override
+				public boolean isOwnTempTag(String tag) {
+					return sync.isOwnTempTag(tag);
+				}
+			};
+			Clock clock = Clock.systemUTC();
+			OwnFiles own = new OwnFiles();
+			boolean paket = inst.map(Installation::isPackaged).orElse(false);
+			Optional<FolderUpdates> folderUpdates = paket ? Optional.of(new FolderUpdates(clock, own, access::isOwnTempTag))
+					: Optional.empty();
+			Optional<FolderDownloader> downloader = Optional.empty();
+			if (paket) {
+				ScheduledExecutorService loader = Executors.newSingleThreadScheduledExecutor(task -> {
+					Thread t = new Thread(task, "update-ordner-laden");
+					t.setDaemon(true);
+					return t;
+				});
+				downloader = Optional.of(new FolderDownloader(inst.get(), access, own, clock,
+						// java.util.Random aus java.base: der Standard-Zufallsgenerator von Java braucht jdk.random, das im Paket fehlt
+						new Random(), FolderDownloader.Tasks.of(loader),
+						java.time.Duration.ofSeconds(10), java.time.Duration.ofSeconds(60), java.time.Duration.ofMinutes(30),
+						MsixManifest.MAX_MSIX_BYTES));
+			}
+			FolderWatch watch = new FolderWatch(inst, AppVersion.current(), System.getProperty("app.fsname"), access,
+					new StationRegistry(access, own, clock), folderUpdates, downloader,
+					() -> updates().flatMap(u -> u.checker().lastSuccess()),
+					() -> updates().map(u -> u.checker().state()).orElse(new UpdateState.Unsupported()),
+					() -> updates().ifPresent(u -> u.checker().checkNow()), new ExecutorScheduler("update-ordner"),
+					Platform::runLater, clock);
+			watch.setListener(state -> {
+				folderState.set(state);
+				if (updateIndicator != null) {
+					updateIndicator.refresh();
+				}
+			});
+			folderWatch = watch;
+			watch.start();
+		} catch (RuntimeException e) {
+			LOG.log(Level.SEVERE, "Versionsabgleich über den gemeinsamen Ordner ließ sich nicht einrichten", e);
+			folderWatch = null;
+		}
+	}
+
+	/**
+	 * Die Rückfrage beim Start, wenn ein Update im gemeinsamen Ordner liegt (KARV-132): ein 1-s-Takt, bis {@link StartPrompt}
+	 * sie stellt oder ihr Zeitfenster vorbei ist.
+	 */
+	private static void startStartPrompt() {
+		startPrompt.menuShown();
+		StartPromptTicker step = new StartPromptTicker(startPrompt, new StartPromptTicker.Conditions() {
+			@Override
+			public Optional<FolderOffer> offer() {
+				return folderState.get().offer();
+			}
+
+			@Override
+			public boolean firstCheckDone() {
+				return updates().isEmpty() || !(updateState.get().effective() instanceof UpdateState.NotChecked);
+			}
+
+			@Override
+			public boolean noBlockingWindow() {
+				return MENU_VIEW.equals(currentView) && MainApp.noBlockingWindow();
+			}
+
+			@Override
+			public boolean flowIdle() {
+				boolean connecting = SharedFolderConnection.instance().map(SharedFolderConnection::connecting).orElse(false);
+				return updates().map(u -> !u.flow().isRunning()).orElse(false) && !connecting;
+			}
+			// die Rückfrage nicht im Animationsschritt der Timeline: dort verbietet JavaFX showAndWait
+		}, offer -> updates().ifPresent(u -> u.flow().updateFromFolder(offer, true)), Platform::runLater);
+		Timeline ticker = new Timeline();
+		ticker.getKeyFrames().add(new KeyFrame(Duration.seconds(1), event -> {
+			try {
+				if (step.tick()) {
+					ticker.stop();
+				}
+			} catch (RuntimeException e) {
+				LOG.log(Level.WARNING, "Rückfrage zum Update im gemeinsamen Ordner scheiterte", e);
+				ticker.stop();
+			}
+		}));
+		ticker.setCycleCount(Animation.INDEFINITE);
+		ticker.play();
+	}
+
+	/** Ob ein modaler Dialog oder ein Fenster mit dem Hauptfenster als Owner offen ist (die Kundenanzeige zählt nicht). */
+	private static boolean noBlockingWindow() {
+		for (Window w : new ArrayList<>(Window.getWindows())) {
+			if (w == primaryStage || !w.isShowing() || !(w instanceof Stage s)) {
+				continue;
+			}
+			if (s.getOwner() == primaryStage || s.getModality() != Modality.NONE) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private static String appProperties() {
@@ -664,6 +842,30 @@ public class MainApp extends Application {
 	@SuppressWarnings("exports")
 	public static ReadOnlyObjectProperty<UpdateState> updateStateProperty() {
 		return updateState;
+	}
+
+	/** Der Stand des gemeinsamen Ordners zu Versionen und Updates für Fußzeile und Einstellungen (FX-Thread, KARV-132). */
+	@SuppressWarnings("exports")
+	public static ReadOnlyObjectProperty<FolderState> folderStateProperty() {
+		return folderState;
+	}
+
+	/** Die Rechner-ID dieser Kasse (Markierung in der Liste der Kassen, KARV-132). */
+	public static String ownMachineId() {
+		try {
+			return SyncService.getInstance().machineId();
+		} catch (RuntimeException e) {
+			return "";
+		}
+	}
+
+	/** „Jetzt prüfen“: Update-Prüfung anstoßen (KARV-131). */
+	public static void checkForUpdatesNow() {
+		updates().ifPresent(u -> u.checker().checkNow());
+		// KARV-132: ein gescheiterter Download in den gemeinsamen Ordner darf sofort neu versucht werden
+		if (folderWatch != null) {
+			folderWatch.retryDownloadNow();
+		}
 	}
 
 	/** Die Ansicht „Update wird vorbereitet …“: unbestimmter Fortschritt, Fußzeile nur mit Meldungen (KARV-131). */
@@ -765,6 +967,10 @@ public class MainApp extends Application {
 		all.addAll(lockedAtLoad(StoreHallRepository.getInstance().getAndClearLockedAtLoad()));
 		all.addAll(lockedAtLoad(StoreEventRepository.getInstance().getAndClearLockedAtLoad()));
 		showMenuView();
+		// KARV-132: nach dem Verbinden den Kasseneintrag schreiben und den Ordner durchsuchen
+		if (folderWatch != null) {
+			folderWatch.rescanNow();
+		}
 		// DataReload liefert die Warnungen beider Repositories zusammen (Hallen zuerst), deshalb ein Fenster für alle
 		showWarnings("Warnung beim Laden", all);
 		// nach den Warnungen: Die Meldung verschwindet nach einigen Sekunden und soll nicht hinter dem Fenster ablaufen
@@ -848,6 +1054,9 @@ public class MainApp extends Application {
 		if (updates != null) {
 			updates.checker().close();
 		}
+		if (folderWatch != null) {
+			folderWatch.close();
+		}
 	}
 
 	/** Das Hauptfenster. */
@@ -862,6 +1071,7 @@ public class MainApp extends Application {
 	 */
 	public static void showContent(Parent content) {
 		settingsViewShown = false;
+		currentView = null;
 		StatusMessage.getInstance().clear();
 		width = primaryStage.getWidth();
 		height = primaryStage.getHeight();
@@ -878,7 +1088,7 @@ public class MainApp extends Application {
 	}
 
 	public static void showMenuView() {
-		loadScene("/de/eltviller_carneval_verein/karten/ui/MenuView.fxml");
+		loadScene(MENU_VIEW);
 	}
 
 	public static void showTicketShellView() {
@@ -1016,6 +1226,7 @@ public class MainApp extends Application {
 			// 3. Scene setzen
 			primaryStage.setScene(createScene(root));
 			settingsViewShown = fxmlPath.endsWith("/SettingsView.fxml");
+			currentView = fxmlPath;
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ansicht konnte nicht geladen werden: " + fxmlPath, e);
 			showAlert("Fehler", "Ansicht konnte nicht geladen werden: " + e.getMessage(), AlertType.ERROR);
@@ -1101,8 +1312,11 @@ public class MainApp extends Application {
 				}
 				// der Update-Hinweis (KARV-131) steht zuletzt; nicht in Ladeansichten, damit kein Update mitten im Verbinden startet
 				if (!isLoadingView(content)) {
-					UpdateIndicator updateHint = new UpdateIndicator(updateState::get, () -> updates().map(Updates::installation),
-							available -> updates().ifPresent(u -> u.flow().update(available.neu())), MainApp::openSettingsFromHint);
+					UpdateIndicator updateHint = new UpdateIndicator(updateState::get, folderState::get,
+							() -> updates().map(Updates::installation),
+							available -> updates().ifPresent(u -> u.flow().update(available.neu())),
+							offer -> updates().ifPresent(u -> u.flow().updateFromFolder(offer, false)),
+							MainApp::openSettingsFromHint);
 					updateIndicator = updateHint;
 					hints.add(updateHint);
 				}

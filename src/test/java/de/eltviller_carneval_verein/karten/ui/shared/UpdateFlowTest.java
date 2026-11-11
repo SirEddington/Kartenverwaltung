@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.update.AppVersion;
 import de.eltviller_carneval_verein.karten.update.DesktopOps;
+import de.eltviller_carneval_verein.karten.update.FolderOffer;
 import de.eltviller_carneval_verein.karten.update.Grund;
 import de.eltviller_carneval_verein.karten.update.Installation;
 import de.eltviller_carneval_verein.karten.update.UpdateInfo;
@@ -43,8 +44,11 @@ class UpdateFlowTest {
 	private IOException downloadFailure;
 	private Throwable openFailure;
 	private IOException browseFailure;
+	private String lastConfirmTitle;
 	private String lastConfirmText;
 	private String lastConfirmButton;
+	private String lastConfirmCancel;
+	private boolean folderFileValid = true;
 	private UpdateFlow flow;
 
 	private static Installation installation(boolean packaged) {
@@ -106,12 +110,23 @@ class UpdateFlowTest {
 				}
 			}
 		};
-		return new UpdateFlow(inst, (title, text, button) -> {
-			calls.add("confirm");
-			lastConfirmText = text;
-			lastConfirmButton = button;
-			return confirmAnswer;
-		}, () -> sharedFolder, () -> {
+		Confirmation confirmation = new Confirmation() {
+			@Override
+			public boolean ask(String title, String text, String button) {
+				return ask(title, text, button, null);
+			}
+
+			@Override
+			public boolean ask(String title, String text, String button, String cancel) {
+				calls.add("confirm");
+				lastConfirmTitle = title;
+				lastConfirmText = text;
+				lastConfirmButton = button;
+				lastConfirmCancel = cancel;
+				return confirmAnswer;
+			}
+		};
+		return new UpdateFlow(inst, confirmation, () -> sharedFolder, () -> {
 			calls.add("confirmClose");
 			if (confirmCloseFailure != null) {
 				throw confirmCloseFailure;
@@ -138,6 +153,127 @@ class UpdateFlowTest {
 	void setUp() {
 		fresh = info("2", FAMILY);
 		flow = flow(installation(true));
+	}
+
+	private static final Path MSIX = Path.of("updates", "ecv-karten-1.1.0-3.x64.msix");
+
+	private FolderOffer folderOffer() {
+		AppVersion v = AppVersion.parse("1.1.0", "3").orElseThrow();
+		return new FolderOffer() {
+			@Override
+			public Path file() {
+				return MSIX;
+			}
+
+			@Override
+			public AppVersion version() {
+				return v;
+			}
+
+			@Override
+			public java.time.Instant firstSeen() {
+				return java.time.Instant.EPOCH;
+			}
+
+			@Override
+			public boolean stillValid() {
+				calls.add("stillValid");
+				return folderFileValid;
+			}
+		};
+	}
+
+	@Test
+	void folderUpdateOpensFileAndExits() {
+		flow.updateFromFolder(folderOffer(), false);
+		assertEquals(List.of("confirm", "confirmClose", "busy " + UpdateTexts.BUSY, "stillValid", "open " + MSIX, "exit"),
+				calls);
+		assertEquals(UpdateTexts.CONFIRM_DIRECT_TITLE, lastConfirmTitle);
+		assertEquals(UpdateTexts.confirmFolderText(AppVersion.parse("1.1.0", "3").orElseThrow()), lastConfirmText);
+		assertEquals(UpdateTexts.BUTTON_UPDATE, lastConfirmButton);
+	}
+
+	@Test
+	void folderUpdateAtStartAsksOnceWithLater() {
+		flow.updateFromFolder(folderOffer(), true);
+		assertEquals(1, calls.stream().filter("confirm"::equals).count());
+		assertEquals(UpdateTexts.START_TITLE, lastConfirmTitle);
+		assertEquals(UpdateTexts.startText(AppVersion.parse("1.1.0", "3").orElseThrow()), lastConfirmText);
+		assertEquals(UpdateTexts.BUTTON_LATER, lastConfirmCancel);
+		assertTrue(calls.contains("exit"));
+	}
+
+	/** code-review: Eine hängende Freigabe hält die Busy-Ansicht nicht unbegrenzt fest. */
+	@Test
+	void hangingFolderCheckStopsWithError() {
+		flow.setFolderCheckTimeout(java.time.Duration.ofMillis(200));
+		FolderOffer hanging = new FolderOffer() {
+			@Override
+			public Path file() {
+				return MSIX;
+			}
+
+			@Override
+			public AppVersion version() {
+				return AppVersion.parse("1.1.0", "3").orElseThrow();
+			}
+
+			@Override
+			public java.time.Instant firstSeen() {
+				return java.time.Instant.EPOCH;
+			}
+
+			@Override
+			public boolean stillValid() {
+				try {
+					Thread.sleep(60_000);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+				return true;
+			}
+		};
+		long t0 = System.nanoTime();
+		flow.updateFromFolder(hanging, false);
+		assertTrue(System.nanoTime() - t0 < 10_000_000_000L, "kehrt nach dem Zeitlimit zurück");
+		assertTrue(calls.contains("error " + UpdateTexts.ERROR_FOLDER_FILE), calls.toString());
+		assertFalse(calls.contains("open " + MSIX));
+	}
+
+	@Test
+	void folderFileChangedStopsWithError() {
+		folderFileValid = false;
+		flow.updateFromFolder(folderOffer(), false);
+		assertEquals(List.of("confirm", "confirmClose", "busy " + UpdateTexts.BUSY, "stillValid", "menu",
+				"error " + UpdateTexts.ERROR_FOLDER_FILE, "recheck", "afterAbort"), calls);
+		assertFalse(flow.isRunning());
+	}
+
+	@Test
+	void folderUpdateBlockedWhileConnecting() {
+		connecting = true;
+		flow.updateFromFolder(folderOffer(), true);
+		assertEquals(List.of(), calls);
+	}
+
+	@Test
+	void laterAtStartDoesNothing() {
+		confirmAnswer = false;
+		flow.updateFromFolder(folderOffer(), true);
+		assertEquals(List.of("confirm", "afterAbort"), calls);
+	}
+
+	@Test
+	void directConfirmMentionsRunningDownload() {
+		flow.setFolderDownloadRunning(() -> true);
+		flow.update(info("2", FAMILY));
+		assertTrue(lastConfirmText.endsWith(UpdateTexts.DOWNLOAD_RUNNING_NOTE), lastConfirmText);
+	}
+
+	@Test
+	void directConfirmWithoutDownloadHasNoNote() {
+		flow.update(info("2", FAMILY));
+		assertFalse(lastConfirmText.contains(UpdateTexts.DOWNLOAD_RUNNING_NOTE));
 	}
 
 	@Test

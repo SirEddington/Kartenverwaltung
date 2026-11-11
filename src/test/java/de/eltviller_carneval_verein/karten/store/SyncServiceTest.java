@@ -1973,6 +1973,67 @@ class SyncServiceTest {
 	}
 
 	@Test
+	void ownTempTagForCurrentAndEarlierId() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		String oldId = a.service.machineId();
+		triggerSys011(a);
+		String newId = a.service.machineId();
+		assertNotEquals(oldId, newId);
+
+		assertTrue(a.service.isOwnTempTag(newId));
+		assertTrue(a.service.isOwnTempTag(oldId));
+		assertFalse(a.service.isOwnTempTag(OTHER));
+		assertFalse(a.service.isOwnTempTag(null));
+	}
+
+	/** KARV-132: Der Ordner {@code updates/} neben {@code data/} stört weder Verbinden noch Abgleich. */
+	@Test
+	void updatesFolderBesideDataIsIgnoredByTheStore() throws IOException {
+		Path updates = Files.createDirectories(sharedRoot.resolve("updates").resolve("kassen")).getParent();
+		Map<String, String> files = new java.util.TreeMap<>(Map.of(
+				"ecv-karten-1.1.1.x64.msix", "MSIX",
+				"ecv-karten-1.1.1.x64.msix.json", "{\"format\":1}",
+				"~karv-x-1.tmp", "tmp",
+				"laden-1.1.1.0-x.json", "{}",
+				"kassen/x.json", "{\"format\":1}",
+				"ecv-karten-1.1.1.x64 (conflicted copy 2026-11-10 120000).msix", "KOPIE"));
+		for (Map.Entry<String, String> f : files.entrySet()) {
+			Files.writeString(updates.resolve(f.getKey()), f.getValue());
+		}
+		Node a = node("a");
+		assertTrue(a.service.startup(shared));
+		Node b = node("b");
+		assertTrue(b.service.startup(shared));
+		b.events.changed.clear();
+
+		Version va = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		b.service.tick();
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		tickUntilRunEnds(a);
+		tickUntilRunEnds(b);
+
+		assertEquals(va.id(), b.service.unitState(BOOKING).head().id());
+		assertEquals(Set.of(BOOKING), b.events.changedUnits());
+		for (Node n : List.of(a, b)) {
+			assertEquals(List.of(), n.events.errors);
+			assertEquals(List.of(), n.events.locked);
+			assertEquals(List.of(), n.events.lost);
+			assertEquals(List.of(), n.events.unreachable);
+		}
+		Map<String, String> after = new java.util.TreeMap<>();
+		try (var stream = Files.walk(updates)) {
+			for (Path p : stream.filter(Files::isRegularFile).toList()) {
+				after.put(updates.relativize(p).toString().replace('\\', '/'), Files.readString(p));
+			}
+		}
+		assertEquals(files, after);
+	}
+
+	@Test
 	void versionOfThePreviousIdAfterUntilIsForeign() throws IOException {
 		Node a = node("a");
 		a.service.startup(shared);

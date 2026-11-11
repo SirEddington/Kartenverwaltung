@@ -1,0 +1,560 @@
+package de.eltviller_carneval_verein.karten.update;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.random.RandomGenerator;
+
+/**
+ * Lädt den Installer der aktuellen Version im Hintergrund in {@code updates/} des gemeinsamen Ordners (KARV-132).
+ * <ol>
+ * <li>Abstimmung: eigene Ladedatei anlegen, 2 bis 5 Minuten warten, dann gewinnt die kleinste Rechner-ID; eine frische
+ * „fertig“-Ladedatei verhindert das Laden.</li>
+ * <li>{@code .appinstaller} frisch holen, Version und Zielname prüfen, {@code .msix} in eine tmp-Datei laden (SHA-256
+ * beim Schreiben), Manifest und ZIP prüfen.</li>
+ * <li>Ablegen nur unter freiem Namen ({@code Files.move} ohne Optionen), dann Beschreibung ({@code CREATE_NEW}), dann
+ * die eigene Ladedatei auf „fertig“; sie bleibt stehen.</li>
+ * </ol>
+ * Nie mehr als ein Ablauf; nach einem Fehler frühestens nach einer Stunde wieder (außer nach {@link #retryNow()}).
+ * {@link #offer} kehrt sofort zurück; die Arbeit läuft über {@link Tasks}.
+ */
+public final class FolderDownloader {
+
+	/** Wo die Arbeit läuft: sofort im Hintergrund oder nach einer Wartezeit. */
+	public interface Tasks {
+		void run(Runnable task);
+
+		void runLater(Runnable task, Duration delay);
+
+		void shutdown();
+
+		/** Über einen eigenen {@link ScheduledExecutorService}. */
+		static Tasks of(ScheduledExecutorService executor) {
+			return new Tasks() {
+				@Override
+				public void run(Runnable task) {
+					executor.execute(task);
+				}
+
+				@Override
+				public void runLater(Runnable task, Duration delay) {
+					executor.schedule(task, delay.toMillis(), TimeUnit.MILLISECONDS);
+				}
+
+				@Override
+				public void shutdown() {
+					executor.shutdownNow();
+				}
+			};
+		}
+	}
+
+	/** Freier Platz auf dem Laufwerk eines Ordners. */
+	@FunctionalInterface
+	interface FreeSpace {
+		long usable(Path dir) throws IOException;
+	}
+
+	/** Ein Eingriff kurz vor dem Ablegen (nur für Tests). */
+	@FunctionalInterface
+	interface BeforeMove {
+		void accept(Path target) throws IOException;
+	}
+
+	private enum Phase {
+		IDLE, PENDING, WAITING, LOADING
+	}
+
+	/** Ein Abbruch mit Grund fürs Protokoll; zählt als Fehler (Sperre 1 h). */
+	private static final class Failure extends Exception {
+		private static final long serialVersionUID = 1L;
+
+		Failure(String message) {
+			super(message, null, false, false);
+		}
+	}
+
+	/** Ein Rückzug ohne Fehler (andere Kasse lädt, Datei wächst noch …). */
+	private static final class Withdraw extends Exception {
+		private static final long serialVersionUID = 1L;
+
+		Withdraw(String message) {
+			super(message, null, false, false);
+		}
+	}
+
+	private record Stable(FileKey key, Instant since) {
+	}
+
+	static final Duration RETRY_AFTER = Duration.ofHours(1);
+	/** So lange nach einem Rückzug kein neuer Versuch (ein regulärer Takt von {@code FolderWatch}). */
+	static final Duration HOLD_AFTER_WITHDRAW = Duration.ofMinutes(10);
+	static final Duration STABLE_AFTER = Duration.ofHours(1);
+	static final long RESERVE_BYTES = 500L * 1024 * 1024;
+	private static final int MAX_APPINSTALLER_BYTES = 65536;
+	private static final Logger LOG = Logger.getLogger(FolderDownloader.class.getName());
+
+	private final Installation inst;
+	private final SharedFolderAccess access;
+	private final OwnFiles own;
+	private final LoadClaims claims;
+	private final Clock clock;
+	private final RandomGenerator random;
+	private final Tasks tasks;
+	private final Duration connect;
+	private final Duration read;
+	private final Duration total;
+	private final long maxBytes;
+	private final Map<Path, Stable> stable = new ConcurrentHashMap<>();
+	private volatile FreeSpace freeSpace = dir -> Files.getFileStore(dir).getUsableSpace();
+	private volatile BeforeMove beforeMove = target -> {
+	};
+	private volatile Runnable onChange = () -> {
+	};
+	private volatile Runnable recheck = () -> {
+	};
+	// nach einem Rückzug erst beim nächsten regulären Takt wieder (sonst kreiseln Takt und Download), außer eine
+	// jüngere Prüfung liegt vor
+	private volatile Instant withdrawnAt;
+	private volatile Phase phase = Phase.IDLE;
+	private volatile AppVersion loading;
+	private volatile Instant failedAt;
+	private volatile boolean stopped;
+	private volatile Path claim;
+	private volatile Instant claimCreated;
+	private volatile Path tmp;
+
+	/**
+	 * @param connect  Zeitlimit für den Verbindungsaufbau
+	 * @param read     Zeitlimit je gelesenem Block
+	 * @param total    Gesamtfrist eines Downloads
+	 * @param maxBytes größte {@code .msix}
+	 */
+	public FolderDownloader(Installation inst, SharedFolderAccess access, OwnFiles own, Clock clock,
+			RandomGenerator random, Tasks tasks, Duration connect, Duration read, Duration total, long maxBytes) {
+		this(inst, access, own, new LoadClaims(clock), clock, random, tasks, connect, read, total, maxBytes);
+	}
+
+	FolderDownloader(Installation inst, SharedFolderAccess access, OwnFiles own, LoadClaims claims, Clock clock,
+			RandomGenerator random, Tasks tasks, Duration connect, Duration read, Duration total, long maxBytes) {
+		this.inst = inst;
+		this.access = access;
+		this.own = own;
+		this.claims = claims;
+		this.clock = clock;
+		this.random = random;
+		this.tasks = tasks;
+		this.connect = connect;
+		this.read = read;
+		this.total = total;
+		this.maxBytes = maxBytes;
+	}
+
+	/** Wird nach jeder Änderung von {@link #loading()} gerufen (auf dem Download-Thread). */
+	public void setOnChange(Runnable onChange) {
+		this.onChange = onChange;
+	}
+
+	/** Stößt eine Update-Prüfung an (in der App {@code UpdateChecker.checkNow}), wenn sich die Quelle geändert hat. */
+	public void setRecheck(Runnable recheck) {
+		this.recheck = recheck;
+	}
+
+	void setFreeSpace(FreeSpace freeSpace) {
+		this.freeSpace = freeSpace;
+	}
+
+	void setBeforeMove(BeforeMove beforeMove) {
+		this.beforeMove = beforeMove;
+	}
+
+	/** Die Version, die gerade abgestimmt oder geladen wird. */
+	public Optional<AppVersion> loading() {
+		return Optional.ofNullable(loading);
+	}
+
+	/** Hebt die Sperre nach einem Fehler oder Rückzug auf („Jetzt prüfen“). */
+	public void retryNow() {
+		failedAt = null;
+		withdrawnAt = null;
+	}
+
+	/**
+	 * Startet einen Ablauf, wenn die Quelle eine Version V ≥ der eigenen in derselben Familie meldet, im Ordner noch kein
+	 * gültiger Installer ≥ V liegt und gerade keiner läuft. Kehrt sofort zurück.
+	 *
+	 * @param highestValidOwn der höchste gültige Installer der eigenen Familie im Ordner (aus dem letzten Durchsuchen)
+	 */
+	public void offer(Path folder, UpdateSuccess source, AppVersion own, Optional<AppVersion> highestValidOwn) {
+		if (stopped || phase != Phase.IDLE) {
+			return;
+		}
+		Instant now = clock.instant();
+		Instant failed = failedAt;
+		if (failed != null && now.isBefore(failed.plus(RETRY_AFTER))) {
+			return;
+		}
+		Instant withdrawn = withdrawnAt;
+		if (withdrawn != null && now.isBefore(withdrawn.plus(HOLD_AFTER_WITHDRAW))
+				&& !source.geprueft().isAfter(withdrawn)) {
+			return;
+		}
+		AppVersion v = source.info().version();
+		// canUpdateInPlace setzt das Paket mit bekannter Familie voraus
+		if (v.compareTo(own) < 0 || !inst.canUpdateInPlace(source.info())
+				|| highestValidOwn.map(h -> h.compareTo(v) >= 0).orElse(false)) {
+			return;
+		}
+		phase = Phase.PENDING;
+		failedAt = null;
+		tasks.run(() -> guarded(() -> begin(folder, v)));
+	}
+
+	/**
+	 * Räumt Ladedateien auf: fremde nach einem Tag, eigene unfertige aus früheren Läufen oder unter früheren Rechner-IDs
+	 * sofort, eigene „fertig“-Dateien (auch aus früheren Läufen) nach drei Stunden; die laufende nie.
+	 */
+	public void cleanupClaims(Path folder) {
+		Path dir = folder.resolve(UpdatesDir.UPDATES);
+		for (LoadClaims.Claim c : claims.read(dir, null)) {
+			boolean mine = c.machineId().equals(access.machineId()) || access.isOwnTempTag(c.machineId());
+			if (mine ? !own.contains(c.file()) && !(c.done() && claims.isFresh(c)) : claims.isExpired(c)) {
+				// eigene: die laufende nie, unfertige sofort; „fertig“ bleibt 3 h (Spec), denn Nextcloud lädt die .msix
+				// vielleicht noch hoch, und die anderen Kassen sollen solange nicht selbst laden
+				UpdateFiles.deleteQuietly(c.file());
+			}
+		}
+	}
+
+	/** Bricht ab und löscht eine eigene unfertige Ladedatei und tmp-Datei (höchstens 2 s, auf einem Daemon-Thread). */
+	public void stop() {
+		stopped = true;
+		tasks.shutdown();
+		if (phase == Phase.IDLE) {
+			return;
+		}
+		Path c = claim;
+		Path t = tmp;
+		Thread cleaner = new Thread(() -> {
+			UpdateFiles.deleteQuietly(c);
+			UpdateFiles.deleteQuietly(t);
+		}, "update-ordner-stopp");
+		cleaner.setDaemon(true);
+		cleaner.start();
+		try {
+			cleaner.join(2000);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+	}
+
+	private interface Step {
+		void run() throws Exception;
+	}
+
+	private void guarded(Step step) {
+		try {
+			step.run();
+		} catch (Withdraw w) {
+			LOG.info("Download in den gemeinsamen Ordner zurückgestellt: " + w.getMessage());
+			withdraw();
+		} catch (Failure f) {
+			fail(f.getMessage(), null);
+		} catch (Throwable e) {
+			fail("unerwartet", e);
+		}
+	}
+
+	private void begin(Path folder, AppVersion v) throws Exception {
+		if (stopped) {
+			phase = Phase.IDLE;
+			return;
+		}
+		if (!access.isReachable(folder)) {
+			throw new Withdraw("gemeinsamer Ordner nicht erreichbar");
+		}
+		Path dir = UpdatesDir.ensure(folder).orElseThrow(() -> new Withdraw("Ordner updates fehlt"));
+		String quad = v.packageVersion();
+		String me = access.machineId();
+		for (LoadClaims.Claim c : claims.read(dir, quad)) {
+			if (!c.machineId().equals(me) && claims.isFresh(c)) {
+				throw new Withdraw("Kasse " + c.machineId() + " lädt schon");
+			}
+		}
+		Path path = dir.resolve(UpdatesDir.claimName(quad, me));
+		own.add(path);
+		claim = path;
+		claimCreated = clock.instant();
+		byte[] json = LoadClaims.json(me, access.machineName(), claimCreated, null);
+		try {
+			Files.write(path, json, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+		} catch (FileAlreadyExistsException e) {
+			SharedFileReplace.write(path, json, me, own);
+		}
+		loading = v;
+		phase = Phase.WAITING;
+		changed();
+		Duration wait = Duration.ofMinutes(2).plusMillis(random.nextLong(Duration.ofMinutes(3).toMillis() + 1));
+		LOG.info("Download von " + v.display() + " in den gemeinsamen Ordner: Abstimmung, Wartezeit " + wait);
+		tasks.runLater(() -> guarded(() -> afterWait(folder, dir, v, quad, path)), wait);
+	}
+
+	private void afterWait(Path folder, Path dir, AppVersion v, String quad, Path ownClaim) throws Exception {
+		if (stopped) {
+			return;
+		}
+		List<LoadClaims.Claim> all = claims.read(dir, quad);
+		String me = access.machineId();
+		String smallest = me;
+		for (LoadClaims.Claim c : all) {
+			if (c.file().equals(ownClaim) || !claims.isFresh(c)) {
+				continue;
+			}
+			if (c.done()) {
+				throw new Withdraw("Kasse " + c.machineId() + " hat schon geladen");
+			}
+			if (c.machineId().compareTo(smallest) < 0) {
+				smallest = c.machineId();
+			}
+		}
+		if (!smallest.equals(me)) {
+			throw new Withdraw("Kasse " + smallest + " lädt (kleinere Rechner-ID)");
+		}
+		download(folder, dir, v, quad, ownClaim);
+	}
+
+	private void download(Path folder, Path dir, AppVersion v, String quad, Path ownClaim) throws Exception {
+		phase = Phase.LOADING;
+		Instant deadline = clock.instant().plus(total);
+		AppInstallerFile ai = fetchAppInstaller();
+		if (ai.version().compareTo(v) != 0) {
+			// die Quelle hat sich seit der Prüfung geändert (z. B. während der Wartezeit): kein Fehler; eine neue Prüfung
+			// liefert die aktuelle Version, mit ihr hebt offer die Pause nach dem Rückzug auf
+			recheck.run();
+			throw new Withdraw("Die .appinstaller-Datei nennt " + ai.version().display() + " statt " + v.display());
+		}
+		String name = targetName(ai.uri());
+		Path target = dir.resolve(name);
+		if (Files.exists(target)) {
+			if (isValidInstaller(target, ai)) {
+				// eine veraltete Beschreibung machte die gültige Datei für die Suche ungültig (kein Angebot, kein
+				// Download): weg damit, dann prüft die Suche das ganze ZIP
+				Path desc = dir.resolve(UpdatesDir.descriptionOf(name));
+				if (Files.exists(desc) && !FolderUpdates.descriptionMatches(desc, target, MsixManifest.read(target))) {
+					LOG.info("Unpassende Beschreibung zu einem gültigen Installer entfernt: " + desc);
+					UpdateFiles.deleteQuietly(desc);
+				}
+				throw new Withdraw("gültiger Installer liegt schon da: " + name);
+			}
+			if (!isStable(target)) {
+				throw new Withdraw("Datei unter dem Zielnamen ändert sich noch: " + name);
+			}
+			LOG.info("Ungültige Datei unter dem Zielnamen wird ersetzt: " + target);
+			UpdateFiles.deleteQuietly(target);
+			UpdateFiles.deleteQuietly(dir.resolve(UpdatesDir.descriptionOf(name)));
+		}
+		String family = inst.packageFamilyName().orElseThrow();
+		HttpURLConnection c = HttpGet.open(ai.uri(), connect, read);
+		long n = 0;
+		MessageDigest md = UpdateFiles.sha256();
+		Path t = dir.resolve(UpdatesDir.tempName(access.machineId()));
+		try {
+			long length = c.getContentLengthLong();
+			if (length > maxBytes) {
+				throw new Failure("Installer größer als erlaubt: " + length + " Bytes");
+			}
+			long need = (length >= 0 ? length : maxBytes) * 2 + RESERVE_BYTES;
+			if (freeSpace.usable(dir) < need) {
+				throw new Failure("zu wenig freier Platz im gemeinsamen Ordner");
+			}
+			own.add(t);
+			tmp = t;
+			try (InputStream in = c.getInputStream();
+					OutputStream out = Files.newOutputStream(t, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+				byte[] buf = new byte[1 << 16];
+				for (int k; (k = in.read(buf)) >= 0;) {
+					n += k;
+					if (n > maxBytes) {
+						throw new Failure("Installer größer als erlaubt (ohne Längenangabe)");
+					}
+					if (stopped) {
+						throw new Failure("App wird beendet");
+					}
+					if (clock.instant().isAfter(deadline)) {
+						throw new Failure("Download dauert länger als " + total);
+					}
+					if (!access.folder().equals(Optional.of(folder))) {
+						throw new Failure("gemeinsamer Ordner wurde gewechselt");
+					}
+					out.write(buf, 0, k);
+					md.update(buf, 0, k);
+				}
+			}
+			if (length >= 0 && n != length) {
+				throw new Failure("Download unvollständig: " + n + " von " + length + " Bytes");
+			}
+		} finally {
+			c.disconnect();
+		}
+		MsixManifest m = MsixManifest.read(t);
+		MsixManifest.verifyComplete(t);
+		if (!m.name().equals(ai.name()) || !m.publisher().equals(ai.publisher()) || m.version().compareTo(v) != 0
+				|| !m.packageFamilyName().equals(family) || !"x64".equalsIgnoreCase(m.architecture())) {
+			throw new Failure("Manifest passt nicht zur .appinstaller-Datei oder zur eigenen Familie");
+		}
+		beforeMove.accept(target);
+		if (!access.folder().equals(Optional.of(folder))) {
+			throw new Failure("gemeinsamer Ordner wurde gewechselt");
+		}
+		String sha = HexFormat.of().formatHex(md.digest());
+		try {
+			Files.move(t, target);
+		} catch (FileAlreadyExistsException e) {
+			UpdateFiles.deleteQuietly(t);
+			if (Files.size(target) == n && UpdateFiles.sha256Hex(target).equalsIgnoreCase(sha)) {
+				writeDescription(dir, name, quad, family, sha, n);
+				markDone(ownClaim);
+				return;
+			}
+			throw new Withdraw("eine andere Kasse hat unter " + name + " eine andere Datei abgelegt");
+		} finally {
+			own.remove(t);
+			tmp = null;
+		}
+		writeDescription(dir, name, quad, family, sha, n);
+		LOG.info("Installer " + v.display() + " in den gemeinsamen Ordner gelegt: " + target + " (" + n + " Bytes)");
+		markDone(ownClaim);
+	}
+
+	private AppInstallerFile fetchAppInstaller() throws IOException {
+		return AppInstallerFile.parse(HttpGet.fetch(inst.appInstallerUri(), connect, read, MAX_APPINSTALLER_BYTES));
+	}
+
+	/** Der letzte Pfadteil der Adresse, dekodiert; nur ein strenger Installer-Name ohne Pfadtrenner. */
+	static String targetName(URI uri) throws Failure {
+		String raw = uri.getRawPath();
+		if (raw == null || raw.isEmpty()) {
+			throw new Failure("Adresse ohne Dateinamen: " + uri);
+		}
+		String seg = raw.substring(raw.lastIndexOf('/') + 1);
+		String name;
+		try {
+			name = URLDecoder.decode(seg.replace("+", "%2B"), StandardCharsets.UTF_8);
+		} catch (IllegalArgumentException e) {
+			throw new Failure("Unlesbarer Dateiname in " + uri);
+		}
+		if (name.contains("/") || name.contains("\\") || name.contains("..") || !UpdatesDir.isInstaller(name)) {
+			throw new Failure("Unzulässiger Dateiname: " + name);
+		}
+		return name;
+	}
+
+	private static boolean isValidInstaller(Path file, AppInstallerFile ai) {
+		try {
+			MsixManifest m = MsixManifest.read(file);
+			if (m.version().compareTo(ai.version()) != 0 || !m.name().equals(ai.name())
+					|| !m.publisher().equals(ai.publisher())) {
+				return false;
+			}
+			MsixManifest.verifyComplete(file);
+			return true;
+		} catch (IOException | RuntimeException e) {
+			return false;
+		}
+	}
+
+	/** Ob diese Kasse die Datei seit mindestens einer Stunde unverändert sieht. */
+	private boolean isStable(Path file) {
+		Optional<FileKey> key = FileKey.of(file);
+		if (key.isEmpty()) {
+			return false;
+		}
+		Instant now = clock.instant();
+		Stable s = stable.compute(file,
+				(k, old) -> old != null && old.key().equals(key.get()) ? old : new Stable(key.get(), now));
+		return Duration.between(s.since(), now).compareTo(STABLE_AFTER) >= 0;
+	}
+
+	private static void writeDescription(Path dir, String name, String quad, String family, String sha, long size)
+			throws IOException {
+		try {
+			Files.write(dir.resolve(UpdatesDir.descriptionOf(name)), FolderUpdates.descriptionJson(quad, family, sha, size),
+					StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+		} catch (FileAlreadyExistsException e) {
+			// eine andere Kasse war schneller; die Beschreibung ist bytegleich
+		}
+	}
+
+	private void markDone(Path ownClaim) throws IOException {
+		Instant now = clock.instant();
+		Instant angelegt = claimCreated;
+		SharedFileReplace.write(ownClaim,
+				LoadClaims.json(access.machineId(), access.machineName(), angelegt != null ? angelegt : now, now),
+				access.machineId(), own);
+		// ab jetzt wie eine „fertig“-Datei aus einem früheren Lauf: cleanupClaims löscht sie nach 3 h
+		own.remove(ownClaim);
+		claim = null;
+		loading = null;
+		phase = Phase.IDLE;
+		changed();
+	}
+
+	private void withdraw() {
+		Path c = claim;
+		if (c != null) {
+			UpdateFiles.deleteQuietly(c);
+			own.remove(c);
+		}
+		claim = null;
+		boolean wasLoading = loading != null;
+		loading = null;
+		withdrawnAt = clock.instant();
+		phase = Phase.IDLE;
+		// nur melden, wenn sich der Ladestand wirklich ändert: Ein Rückzug ohne eigene Ladedatei ändert nichts, und eine
+		// Meldung stieße ein Neu-Durchsuchen an, das sofort wieder anböte (Schleife)
+		if (wasLoading) {
+			changed();
+		}
+	}
+
+	private void fail(String message, Throwable e) {
+		LOG.log(Level.WARNING, "Download in den gemeinsamen Ordner gescheitert: " + message, e);
+		Path t = tmp;
+		if (t != null) {
+			UpdateFiles.deleteQuietly(t);
+			own.remove(t);
+			tmp = null;
+		}
+		failedAt = clock.instant();
+		withdraw();
+	}
+
+	private void changed() {
+		try {
+			onChange.run();
+		} catch (RuntimeException e) {
+			LOG.log(Level.WARNING, "Rückmeldung des Downloads scheiterte", e);
+		}
+	}
+}
