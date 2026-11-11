@@ -16,3 +16,7 @@ CLAUDE.md
 
 # Lokales Deployment (Release läuft jetzt über .github/workflows/release.yml)
 deployment/
+
+# Erzeugt von .github/scripts/release-notes.sh (KARV-125)
+release-notes.md
+release-version.txt
