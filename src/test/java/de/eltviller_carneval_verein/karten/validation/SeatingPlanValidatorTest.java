@@ -8,6 +8,8 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.HallObject;
+import de.eltviller_carneval_verein.karten.model.Shape;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
@@ -417,6 +419,75 @@ class SeatingPlanValidatorTest {
 		plan.setTables(List.of(first, second));
 
 		assertTrue(SeatingPlanValidator.validate(plan).getIssues().stream().noneMatch(i -> i.code().equals("SPL-004")));
+	}
+
+	// --- Tische und Hallenobjekte (SPL-005) ---
+
+	private static HallObject addObject(SeatingPlan plan, String name, double width, double height, double x, double y) {
+		HallObject object = plan.getParent().addHallObject(name);
+		object.setWidth(width);
+		object.setHeight(height);
+		object.setPosX(x);
+		object.setPosY(y);
+		return object;
+	}
+
+	@Test
+	void tableHalfOnStageWarns() {
+		SeatingPlan plan = emptyPlan(2_000);
+		addObject(plan, "Bühne", 400, 80, 0, 300);
+		addTable(plan, 100, 250);
+
+		ValidationIssue issue = only(SeatingPlanValidator.validate(plan));
+
+		assertEquals("SPL-005", issue.code());
+		assertEquals(Severity.WARNING, issue.severity());
+		assertEquals("Tisch A1 in Bestuhlung Prunksitzung in Halle Festhalle überlappt teilweise mit Hallenobjekt Bühne (Tischplatte oder Stühle).",
+				issue.message());
+	}
+
+	@Test
+	void tableFullyOnAreaIsFine() {
+		SeatingPlan plan = emptyPlan(2_000);
+		addObject(plan, "Tanzfläche", 600, 600, 0, 0);
+		Table table = addTable(plan, 100, 100);
+		addSeat(table, 60, 150);
+
+		assertTrue(SeatingPlanValidator.validate(plan).isEmpty());
+	}
+
+	@Test
+	void seatOverAreaEdgeWarns() {
+		SeatingPlan plan = emptyPlan(2_000);
+		addObject(plan, "Tanzfläche", 600, 600, 0, 0);
+		Table table = addTable(plan, 100, 100);
+		Seat seat = addSeat(table, 595, 150);
+		seat.setWidth(20);
+
+		assertEquals("SPL-005", only(SeatingPlanValidator.validate(plan)).code());
+	}
+
+	@Test
+	void circleObjectPartialOverlap() {
+		SeatingPlan plan = emptyPlan(2_000);
+		HallObject circle = addObject(plan, "Rondell", 100, 100, 120, 200);
+		circle.setShape(Shape.CIRCLE);
+		addTable(plan, 100, 250);
+
+		assertEquals("SPL-005", only(SeatingPlanValidator.validate(plan)).code());
+	}
+
+	@Test
+	void noHallNoSpl005() {
+		SeatingPlan plan = new SeatingPlan();
+		plan.setName("Prunksitzung");
+		TableRow row = plan.addRow();
+		row.setLabel("A");
+		Table table = plan.addTable(row);
+		table.setWidth(50);
+		table.setHeight(100);
+
+		assertTrue(SeatingPlanValidator.validate(plan).getIssues().stream().noneMatch(i -> i.code().equals("SPL-005")));
 	}
 
 	@Test

@@ -362,6 +362,25 @@ class HallValidatorTest {
 	}
 
 	@Test
+	void objectInsideTableIsReported() {
+		Hall hall = new Hall();
+		hall.setName("Halle 1");
+		hall.setHallWidth(2_000);
+		hall.setHallHeight(2_000);
+		addObject(hall, "Pult", 50, 50, 575, 575);
+		SeatingPlan plan = hall.addSeatingPlan();
+		Table table = plan.addTable(plan.addRow());
+		table.setWidth(200);
+		table.setHeight(200);
+		table.setPosX(500);
+		table.setPosY(500);
+
+		ValidationResult result = HallValidator.validate(hall);
+
+		assertEquals(1, result.getIssues().stream().filter(i -> i.code().equals("SPL-005")).count(), result.getIssues().toString());
+	}
+
+	@Test
 	void notANumberCountsAsOutOfRange() {
 		Hall hall = validHall();
 		hall.setHallWidth(Double.NaN);

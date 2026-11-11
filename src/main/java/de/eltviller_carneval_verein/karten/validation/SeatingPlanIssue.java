@@ -11,7 +11,9 @@ public enum SeatingPlanIssue implements Issue {
 	/** Mehrere Bestuhlungen einer Halle heißen gleich. &1 = Halle (siehe {@link EntityLabels#hall}), &2 = Name der Bestuhlung. */
 	NAME_DUPLICATE("SPL-003", Severity.WARNING, "Es gibt mehrere Bestuhlungen mit dem Namen &2 in &1."),
 	/** Zwei Tische (Platten oder Stühle) überlappen sich. &1 = Bestuhlung (siehe {@link EntityLabels#plan}), &2 und &3 = die Tische in Listenreihenfolge, z. B. "Tisch A3". */
-	TABLES_OVERLAP("SPL-004", Severity.WARNING, "&2 und &3 überlappen sich in &1 (Tischplatten oder Stühle).");
+	TABLES_OVERLAP("SPL-004", Severity.WARNING, "&2 und &3 überlappen sich in &1 (Tischplatten oder Stühle)."),
+	/** Ein Tisch (Platte oder Stühle) überlappt teilweise ein Hallenobjekt. &1 = Tisch (siehe {@link EntityLabels#table}), &2 = Hallenobjekt (siehe {@link EntityLabels#hallObjectName}). */
+	TABLE_OVERLAPS_OBJECT("SPL-005", Severity.WARNING, "&1 überlappt teilweise mit &2 (Tischplatte oder Stühle).");
 
 	private final String code;
 	private final Severity severity;

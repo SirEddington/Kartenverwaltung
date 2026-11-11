@@ -45,6 +45,7 @@ public final class SeatingPlanValidator {
 		validateTableRows();
 		validateTables();
 		validateTablesDoNotOverlap();
+		validateTablesDoNotOverlapObjects();
 		return result;
 	}
 
@@ -119,6 +120,32 @@ public final class SeatingPlanValidator {
 				if (footprints.get(j).isPresent() && a.overlaps(footprints.get(j).get())) {
 					result.add(SeatingPlanIssue.TABLES_OVERLAP.toIssue(EntityLabels.plan(plan), tables.get(i).getDisplayName(),
 							tables.get(j).getDisplayName()));
+				}
+			}
+		}
+	}
+
+	/**
+	 * Warnt je Tisch und Hallenobjekt, die sich nur teilweise überlappen. Liegt der Tisch (Platte und Stühle) ganz auf
+	 * dem Objekt, etwa auf einer Tanzfläche, ist das gewollt. Ohne Halle gibt es nichts zu prüfen; Tische und Objekte
+	 * ohne Umriss nehmen nicht teil.
+	 */
+	private void validateTablesDoNotOverlapObjects() {
+		if (hall == null) {
+			return;
+		}
+		List<Optional<Footprint>> objects = hall.getHallObjects().stream().map(Footprint::of).toList();
+		List<Table> tables = plan.getTables();
+		for (int i = 0; i < tables.size(); i++) {
+			if (footprints.get(i).isEmpty()) {
+				continue;
+			}
+			Footprint tableFootprint = footprints.get(i).get();
+			for (int j = 0; j < objects.size(); j++) {
+				if (objects.get(j).isPresent() && tableFootprint.overlaps(objects.get(j).get())
+						&& !tableFootprint.within(objects.get(j).get())) {
+					result.add(SeatingPlanIssue.TABLE_OVERLAPS_OBJECT.toIssue(EntityLabels.table(tables.get(i)),
+							EntityLabels.hallObjectName(hall.getHallObjects().get(j))));
 				}
 			}
 		}
