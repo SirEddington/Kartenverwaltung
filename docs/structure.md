@@ -91,9 +91,13 @@ from an update). Always read through `SettingsStore.getInstance().current()`.
 ### `update`
 Update check without JavaFX (KARV-131): `AppVersion`, `Installation` (version, update source, platform, package
 family from Conveyor's system properties), `UpdateInfo` (`metadata.properties`), `HttpUpdateSource`, `Grund`,
-`UpdateState`, `UpdateChecker` (timer) and `DesktopOps`. Patch notes (KARV-125): `PatchNotes` (reads and checks
-`patchnotes.md` from the resources), `PatchNotesOnStart` (what to show after an update), `PatchNotesExport` (command
-line, prints the GitHub release text) and `Installation.releasePage`.
+`UpdateState`, `UpdateChecker` (timer, `lastSuccess`) and `DesktopOps`. Update over the shared folder (KARV-132):
+`UpdatesDir` (folder `updates/` and name rules), `StationEntry`/`StationRegistry` (version entries), `MsixManifest`,
+`PackageFamily`, `AppInstallerFile`, `SecureXml`, `HttpGet`, `FolderUpdates` (candidate, check, cleanup),
+`FolderDownloader` and `LoadClaims` (background download with claim files), `FolderDecision` (candidate against the
+update source), `FolderState`, `FolderWatch` (timer), `SharedFolderAccess`, `SharedFileReplace`, `OwnFiles`. Patch
+notes (KARV-125): `PatchNotes` (reads and checks `patchnotes.md` from the resources), `PatchNotesOnStart` (what to show
+after an update), `PatchNotesExport` (command line, prints the GitHub release text) and `Installation.releasePage`.
 
 ### `util`
 Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
@@ -121,8 +125,10 @@ Controllers are referenced by `fx:controller` in the FXML files under `src/main/
   read-only properties (`syncState()`, `connectionComplete()`, …) and `Platform` as the default UI executor; no
   scene graph.
 - `repository` depends on `model` and `store`; `ui` depends on everything below it.
-- `update` (version, update source, update check; KARV-131) uses neither JavaFX nor `ui`; `ui.shared.UpdateFlow`,
-  `UpdateIndicator`, `UpdateTexts` and `ui.settings.InfoSection` build on it.
+- `update` (version, update source, update check, update over the shared folder; KARV-131/132) uses neither JavaFX nor
+  `ui` nor `store`; inside the app it uses only `repository.JsonMapperFactory` (JSON as `JsonNode` trees). It sees the
+  shared folder through `SharedFolderAccess`, which `MainApp` connects to `SyncService`. `ui.shared.UpdateFlow`,
+  `UpdateIndicator`, `UpdateHint`, `StartPrompt`, `UpdateTexts` and `ui.settings.InfoSection` build on it.
 - Logic that has to be tested without a running JavaFX toolkit is kept in plain classes (e.g. `ConnectFlow`,
   `SyncStatus`, `LockedSeats`, `PlaceAssignment`) with a thin JavaFX wrapper next to it.
 - Tests mirror the main package of the class under test; shared test doubles live next to the tests that use them

@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.update;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -30,6 +31,7 @@ public final class UpdateChecker {
 	private final AtomicBoolean busy = new AtomicBoolean();
 	private volatile boolean closed;
 	private volatile UpdateState state = new UpdateState.NotChecked();
+	private volatile UpdateSuccess lastSuccess;
 	private volatile Consumer<UpdateState> listener = s -> {
 	};
 
@@ -80,6 +82,14 @@ public final class UpdateChecker {
 		return state;
 	}
 
+	/**
+	 * Das Ergebnis der letzten erfolgreichen Prüfung (KARV-132), auch wenn spätere Prüfungen scheiterten; leer, solange
+	 * keine gelang. Wird vor dem Melden des Zustands gesetzt, damit ein Listener schon den neuen Wert sieht.
+	 */
+	public Optional<UpdateSuccess> lastSuccess() {
+		return Optional.ofNullable(lastSuccess);
+	}
+
 	/** Beendet den Takt; Ergebnisse danach werden verworfen. */
 	public void close() {
 		closed = true;
@@ -95,8 +105,10 @@ public final class UpdateChecker {
 			UpdateState before = state;
 			publish(new UpdateState.Checking(before));
 			UpdateState result;
+			UpdateSuccess success = null;
 			try {
 				UpdateInfo info = source.fetchInfo();
+				success = new UpdateSuccess(info, clock.instant());
 				if (info.version().compareTo(inst.version()) > 0) {
 					result = new UpdateState.Available(info, clock.instant());
 					LOG.info("Update-Prüfung: Version " + info.version().display() + " verfügbar (installiert "
@@ -112,6 +124,9 @@ public final class UpdateChecker {
 				LOG.log(Level.WARNING, "Update-Prüfung gescheitert (" + grund + ")", e);
 			}
 			if (!closed) {
+				if (success != null) {
+					lastSuccess = success;
+				}
 				publish(result);
 			}
 		} catch (Throwable e) {

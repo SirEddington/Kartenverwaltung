@@ -2,15 +2,19 @@ package de.eltviller_carneval_verein.karten.ui.shared;
 
 import java.net.URI;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import de.eltviller_carneval_verein.karten.store.Reachability;
 import de.eltviller_carneval_verein.karten.update.AppVersion;
 import de.eltviller_carneval_verein.karten.update.DesktopOps;
+import de.eltviller_carneval_verein.karten.update.FolderOffer;
 import de.eltviller_carneval_verein.karten.update.Grund;
 import de.eltviller_carneval_verein.karten.update.Installation;
 import de.eltviller_carneval_verein.karten.update.UpdateInfo;
@@ -57,6 +61,9 @@ public final class UpdateFlow {
 	private final Consumer<String> showError;
 	private final BooleanSupplier busyViewStillShown;
 	private final BooleanSupplier connecting;
+	private volatile BooleanSupplier folderDownloadRunning = () -> false;
+	// so lange darf die erneute Prüfung der Datei im gemeinsamen Ordner vor dem Öffnen dauern (KARV-132)
+	private volatile Duration folderCheckTimeout = Duration.ofSeconds(30);
 	private final Executor ui;
 	private final Executor worker;
 	private boolean running;
@@ -103,14 +110,51 @@ public final class UpdateFlow {
 		return running;
 	}
 
+	/** Ob diese Kasse gerade ein Update in den gemeinsamen Ordner lädt (Hinweis in der Rückfrage, KARV-132). */
+	public void setFolderDownloadRunning(BooleanSupplier folderDownloadRunning) {
+		this.folderDownloadRunning = folderDownloadRunning;
+	}
+
+	/**
+	 * Das Update aus dem gemeinsamen Ordner (KARV-132): eine Rückfrage (beim Start mit „Später“; sie ersetzt jede
+	 * weitere), offene Eingaben sichern, Busy-Ansicht, die Datei im Hintergrund erneut prüfen und öffnen, App beenden.
+	 * Stimmt die Datei nicht mehr, bleibt die App offen und die Fußzeile sagt es.
+	 *
+	 * @param atStart ob die Rückfrage beim Programmstart kommt
+	 */
+	public void updateFromFolder(FolderOffer offer, boolean atStart) {
+		start(atStart ? UpdateTexts.START_TITLE : UpdateTexts.CONFIRM_DIRECT_TITLE,
+				atStart ? UpdateTexts.startText(offer.version()) : UpdateTexts.confirmFolderText(offer.version()),
+				UpdateTexts.BUTTON_UPDATE, atStart ? UpdateTexts.BUTTON_LATER : null, () -> {
+					if (!stillValidWithin(offer, folderCheckTimeout)) {
+						throw new Stop(UpdateTexts.ERROR_FOLDER_FILE);
+					}
+					desktop.open(offer.file());
+				}, UpdateTexts::errorDirect, releaseLink(offer.version()));
+	}
+
+	/** Für Tests: Zeitlimit der erneuten Prüfung vor dem Öffnen. */
+	void setFolderCheckTimeout(Duration timeout) {
+		this.folderCheckTimeout = timeout;
+	}
+
+	/**
+	 * Prüft die Datei im gemeinsamen Ordner auf einem eigenen Daemon-Thread mit Zeitlimit: Hängt die Freigabe, gilt sie als
+	 * nicht gültig, statt die Busy-Ansicht unbegrenzt festzuhalten.
+	 */
+	private static boolean stillValidWithin(FolderOffer offer, Duration timeout) {
+		return Reachability.isReachable(offer.file(), file -> offer.stillValid(), timeout);
+	}
+
 	/** Der direkte Weg: frisch prüfen, {@code .appinstaller} laden und öffnen, App beenden. Nur bei passender Paketfamilie. */
 	public void update(UpdateInfo info) {
 		if (!inst.canUpdateInPlace(info)) {
 			return;
 		}
 		start(UpdateTexts.CONFIRM_DIRECT_TITLE,
-				UpdateTexts.confirmDirectText(info.version(), sharedFolderConfigured.getAsBoolean()),
-				UpdateTexts.BUTTON_UPDATE, () -> {
+				UpdateTexts.confirmDirectText(info.version(), sharedFolderConfigured.getAsBoolean(),
+						folderDownloadRunning.getAsBoolean()),
+				UpdateTexts.BUTTON_UPDATE, null, () -> {
 					UpdateInfo fresh = source.fetchInfo();
 					if (fresh.version().compareTo(inst.version()) <= 0) {
 						throw new Stop(UpdateTexts.ERROR_NO_NEWER);
@@ -126,7 +170,7 @@ public final class UpdateFlow {
 	/** Der Browser-Weg: die Adresse der {@code .appinstaller}-Datei im Browser zeigen, App beenden; ohne eigene Prüfung. */
 	public void updateViaBrowser() {
 		start(UpdateTexts.CONFIRM_BROWSER_TITLE, UpdateTexts.confirmBrowserText(sharedFolderConfigured.getAsBoolean()),
-				UpdateTexts.BUTTON_BROWSER, () -> desktop.browse(source.appInstallerUri()), grund -> UpdateTexts.ERROR_BROWSER,
+				UpdateTexts.BUTTON_BROWSER, null, () -> desktop.browse(source.appInstallerUri()), grund -> UpdateTexts.ERROR_BROWSER,
 				Optional.empty());
 	}
 
@@ -161,15 +205,15 @@ public final class UpdateFlow {
 		return releasePage(neu).map(page -> new Confirmation.Link(UpdateTexts.releaseLink(neu), page, this::openReleasePage));
 	}
 
-	private void start(String title, String text, String button, Work work, java.util.function.Function<Grund, String> errorText,
-			Optional<Confirmation.Link> link) {
+	private void start(String title, String text, String button, String cancel, Work work,
+			Function<Grund, String> errorText, Optional<Confirmation.Link> link) {
 		if (running || connecting.getAsBoolean()) {
 			return;
 		}
 		running = true;
 		boolean closed = false;
 		try {
-			if (!confirm.ask(title, text, button, null, link)) {
+			if (!confirm.ask(title, text, button, cancel, link)) {
 				abort();
 				return;
 			}
@@ -190,7 +234,7 @@ public final class UpdateFlow {
 		}
 	}
 
-	private void runWork(Work work, java.util.function.Function<Grund, String> errorText) {
+	private void runWork(Work work, Function<Grund, String> errorText) {
 		String error;
 		boolean recheckAfter = false;
 		try {

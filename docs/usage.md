@@ -206,11 +206,31 @@ start, then every 4 hours, and on **"Jetzt prüfen"**. The check never opens a w
 - **"Update-Prüfung nicht möglich"** in the footer (Windows): the check keeps failing for a systematic reason
   (certificate, proxy, server). Use "Update im Browser laden". Without internet the app stays silent.
 - **Several workstations:** update every workstation that uses the same shared folder at the same time; on a
-  workstation without the hint yet, use **"Jetzt prüfen"**.
+  workstation without the hint yet, use **"Jetzt prüfen"**. The shared folder helps (see below).
+- **"„Kasse 2“ nutzt 1.1.1 – bitte aktualisieren"** in the footer: another workstation at the same shared folder runs
+  a newer version. An older version may undo data of the newer one when it saves, so update this workstation.
+  *Einstellungen → Info und Updates* lists all workstations at the shared folder with version, last start and machine
+  id, and says what to do next.
+- **Update from the shared folder (Windows):** a Windows workstation with internet places the installer of the current
+  version in `<shared folder>/updates/` in the background (only one workstation downloads; the others wait for it).
+  Every Windows workstation at the folder then shows **"Update 1.1.1 im gemeinsamen Ordner"**, also without internet of
+  its own. Within two minutes after start, the app asks once: "Version … liegt im gemeinsamen Ordner. Jetzt
+  aktualisieren?" (**"Später"** leaves only the footer hint). Updating works like above: the App Installer opens
+  directly with the file from the folder. If the installation is cancelled or rejected, **start the app again by
+  hand**. If the file in the folder is incomplete or has changed, the app says so and stays open.
+- **Placing an installer by hand:** copy the `.msix` of the current GitHub release (e.g. `ecv-karten-1.1.1.x64.msix`)
+  into `<shared folder>/updates/`. The app reads the version from the file and checks it completely. Only place the
+  current GitHub version: a newer one is shown as "neuer als die Update-Quelle (zurückgezogen?)" on workstations with
+  internet and not offered there.
+- **Wrong warning / withdrawing a version:** if a version was withdrawn (pre-release) or a test build was connected to
+  the real folder by mistake, delete by hand: `updates/<name>.msix` and `updates/<name>.msix.json` of that version,
+  and `updates/kassen/<machine id>.json` of the workstation that shows the wrong version (the machine id is in
+  *Info und Updates*). Workstations write their entry again at their next start.
 - **"Für diese Version ist eine Neuinstallation nötig."** The new version comes with a different package identity
   (e.g. a new signing certificate); updating in place is not possible.
 - **Linux and the Windows ZIP:** the hint appears, but updating works the way the app was installed (e.g. apt) or by
-  downloading the new version.
+  downloading the new version. They write their version entry and show the warning about newer workstations, but do
+  not download into or update from the shared folder.
 
 ## Messages
 

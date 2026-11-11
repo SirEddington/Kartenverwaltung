@@ -3795,6 +3795,15 @@ public final class SyncService implements ConnectionControl {
 	}
 
 	/**
+	 * Ob die Kennung im Namen einer temporären Datei diesem Rechner gehört: die aktuelle ID oder eine frühere vor ihrer
+	 * Neuvergabe (SYS-011, {@link Ownership#isOwnTempTag}). Für das Aufräumen in {@code updates/} (KARV-132); nimmt nur
+	 * kurz {@code lock}.
+	 */
+	public boolean isOwnTempTag(String tag) {
+		return ownership().isOwnTempTag(tag);
+	}
+
+	/**
 	 * Ändert den Anzeigenamen dieses Rechners und schreibt {@code machine.json}. Die Oberfläche hält keine eigene
 	 * {@link MachineIdentity}: Eine Neuvergabe der Kennung (SYS-011) tauscht sie aus. Nimmt {@code workLock} (wie
 	 * {@link #connect}) und ist damit gegen die Neuvergabe im Takt abgeschlossen; nicht auf dem FX-Thread aufrufen. Die

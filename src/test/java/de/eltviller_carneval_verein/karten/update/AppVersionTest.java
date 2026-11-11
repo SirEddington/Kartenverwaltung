@@ -15,6 +15,30 @@ class AppVersionTest {
 	}
 
 	@Test
+	void fromPackageVersionMapsFourthFieldToRevision() {
+		assertEquals(Optional.of(new AppVersion("1.1.0", 2)), AppVersion.fromPackageVersion("1.1.0.2"));
+		assertEquals(Optional.of(new AppVersion("1.1.1", 0)), AppVersion.fromPackageVersion("1.1.1.0"));
+	}
+
+	@Test
+	void fromPackageVersionRejectsOtherForms() {
+		assertEquals(Optional.empty(), AppVersion.fromPackageVersion("1.1.0"));
+		assertEquals(Optional.empty(), AppVersion.fromPackageVersion("1.1.0.2.1"));
+		assertEquals(Optional.empty(), AppVersion.fromPackageVersion("1.1.0.x"));
+		assertEquals(Optional.empty(), AppVersion.fromPackageVersion(""));
+		assertEquals(Optional.empty(), AppVersion.fromPackageVersion(null));
+		assertEquals(Optional.empty(), AppVersion.fromPackageVersion("1.1..2"));
+	}
+
+	@Test
+	void packageVersionComparesWithPropertyVersion() {
+		AppVersion pkg = AppVersion.fromPackageVersion("1.1.0.2").orElseThrow();
+		assertEquals(0, pkg.compareTo(v("1.1.0", "2")));
+		assertTrue(pkg.compareTo(v("1.1.0", "3")) < 0);
+		assertTrue(pkg.compareTo(v("1.1.0", "1")) > 0);
+	}
+
+	@Test
 	void parseAcceptsOneToFourFields() {
 		assertTrue(AppVersion.parse("1", null).isPresent());
 		assertTrue(AppVersion.parse("1.1.0", null).isPresent());

@@ -185,12 +185,30 @@ trust store, 10 s after start and then every 4 hours, and publishes an `UpdateSt
 of the `.appinstaller` file and `Desktop.open`, then the app exits and the Windows App Installer takes over. See
 [decisions.md](decisions.md#update-check-and-update-from-the-app-karv-131).
 
-Patch notes (KARV-125) have one source, `src/main/resources/.../patchnotes.md`. `PatchNotes` reads and checks it
+**Shared folder (KARV-132).** `FolderWatch` ticks 30 s after start, after connecting and every 10 minutes:
+`StationRegistry` writes the own entry and reads the others (warning about a newer workstation); on the Windows package
+`FolderUpdates` finds and checks installers (`MsixManifest`, description with SHA-256) and cleans up, `FolderDecision`
+weighs the candidate against `UpdateChecker.lastSuccess()`, and `FolderDownloader` loads the current version in the
+background (claim files, `HttpGet`, `AppInstallerFile`). `FolderState` feeds the footer (`ui.shared.UpdateHint`),
+*Info und Updates* and the prompt at start (`ui.shared.StartPrompt`); `UpdateFlow.updateFromFolder` opens the file.
+The package only sees the shared folder through `SharedFolderAccess`, which `MainApp` connects to `SyncService`.
+
+```
+<shared folder>/
+├── data/                                    version store (above)
+└── updates/
+    ├── kassen/<machineId>.json              version entry per workstation
+    ├── <name>.msix, <name>.msix.json        installer and its description (only the newest stays)
+    ├── laden-<a.b.c.d>-<machineId>.json     claim while a workstation downloads
+    └── ~karv-<machineId>-<UUID>.tmp         download in progress
+```
+
+**Patch notes (KARV-125)** have one source, `src/main/resources/.../patchnotes.md`. `PatchNotes` reads and checks it
 (fixed sections, plain text, no placeholders); `PatchNotesOnStart` decides in `MainApp.onLoaded` whether the window
 `ui.shared.PatchNotesWindow` appears and remembers the version in `settings.json`. The release workflow prints the
 section of the new version with `PatchNotesExport` before Conveyor publishes and then sets it as the GitHub release
-text; the app links to that page (`Installation.releasePage`) but never downloads it. See
-[installation.md](installation.md#releasing) and [decisions.md](decisions.md#patch-notes-karv-125).
+text; the app links to that page (`Installation.releasePage`, also from the shared-folder prompt) but never downloads
+it. See [installation.md](installation.md#releasing) and [decisions.md](decisions.md#patch-notes-karv-125).
 
 ### `ui` – screens
 

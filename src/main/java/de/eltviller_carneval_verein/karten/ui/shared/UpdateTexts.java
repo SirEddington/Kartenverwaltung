@@ -82,7 +82,69 @@ public final class UpdateTexts {
 	public static final String BUSY_HINT = "Dauert das länger als eine Minute, schließe das Fenster und starte die"
 			+ " Kartenverwaltung neu.";
 
+	// --- Gemeinsamer Ordner (KARV-132)
+
+	private static final String FOLDER_INDICATOR = "Update &1 im gemeinsamen Ordner";
+	public static final String FOLDER_TOOLTIP = "Klicken, um die Kartenverwaltung aus dem gemeinsamen Ordner zu aktualisieren";
+	private static final String NEWER_STATION = "„&1“ nutzt &2 – bitte aktualisieren";
+	public static final String NEWER_STATION_TOOLTIP = "Klicken für Details";
+	public static final String START_TITLE = "Update im gemeinsamen Ordner";
+	private static final String RESTART_BY_HAND = " Die Kartenverwaltung schließt sich dafür; bricht die Installation ab,"
+			+ " starte sie von Hand neu.";
+	private static final String START = "Version &1 liegt im gemeinsamen Ordner. Jetzt aktualisieren?";
+	public static final String BUTTON_LATER = "Später";
+	private static final String CONFIRM_FOLDER = "Version &1 aus dem gemeinsamen Ordner installieren?";
+	public static final String ERROR_FOLDER_FILE = "Die Datei im gemeinsamen Ordner ist unvollständig oder verändert und wird"
+			+ " nicht installiert.";
+	public static final String DOWNLOAD_RUNNING_NOTE = "Das Update wird gerade auch für die anderen Kassen in den gemeinsamen"
+			+ " Ordner geladen; das geht nach dem Neustart weiter.";
+	public static final String LOADING = "Update wird in den gemeinsamen Ordner geladen …";
+	private static final String WITHDRAWN = "Im gemeinsamen Ordner liegt Version &1, neuer als die Update-Quelle"
+			+ " (zurückgezogen?)";
+	public static final String NEXT_STEP_PACKAGE = "An einer Kasse mit Internet „Jetzt prüfen“ – dann liegt das Update bald"
+			+ " im gemeinsamen Ordner.";
+	public static final String NEXT_STEP_MANUAL = "Von Hand aktualisieren.";
+	public static final String STATIONS_TITLE = "Kassen am gemeinsamen Ordner";
+	private static final String STATION_LINE = "&1 – &2 – zuletzt gestartet &3 – &4";
+	private static final String OWN_STATION = " (diese Kasse)";
+
 	private UpdateTexts() {
+	}
+
+	/** „Update 1.1.1 im gemeinsamen Ordner“. */
+	public static String folderIndicatorText(AppVersion version) {
+		return MessageTemplate.format(FOLDER_INDICATOR, version.display());
+	}
+
+	/** „„Kasse 2“ nutzt 1.1.1 – bitte aktualisieren“. */
+	public static String newerStationText(String name, AppVersion version) {
+		return MessageTemplate.format(NEWER_STATION, name, version.display());
+	}
+
+	/** Die Rückfrage beim Start. */
+	public static String startText(AppVersion version) {
+		return MessageTemplate.format(START, version.display()) + RESTART_BY_HAND;
+	}
+
+	/** Die Rückfrage beim Klick auf das Update aus dem Ordner. */
+	public static String confirmFolderText(AppVersion version) {
+		return MessageTemplate.format(CONFIRM_FOLDER, version.display()) + RESTART_BY_HAND;
+	}
+
+	/** „Im gemeinsamen Ordner liegt Version 1.1.1, neuer als die Update-Quelle (zurückgezogen?)“. */
+	public static String withdrawnText(AppVersion version) {
+		return MessageTemplate.format(WITHDRAWN, version.display());
+	}
+
+	/** Eine Zeile der Liste „Kassen am gemeinsamen Ordner“. */
+	public static String stationLine(de.eltviller_carneval_verein.karten.update.StationEntry e, boolean own, ZoneId zone) {
+		return MessageTemplate.format(STATION_LINE, e.name(), e.version().display(), time(e.gestartet(), zone), e.machineId())
+				+ (own ? OWN_STATION : "");
+	}
+
+	/** Die Rückfrage auf dem direkten Weg; mit Hinweis, wenn diese Kasse gerade in den gemeinsamen Ordner lädt. */
+	public static String confirmDirectText(AppVersion version, boolean sharedFolder, boolean folderDownloadRunning) {
+		return confirmDirectText(version, sharedFolder) + (folderDownloadRunning ? " " + DOWNLOAD_RUNNING_NOTE : "");
 	}
 
 	/** „Update 1.1.0 (Rev. 2) verfügbar“. */

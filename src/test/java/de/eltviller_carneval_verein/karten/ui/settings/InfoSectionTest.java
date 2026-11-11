@@ -20,7 +20,10 @@ import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.ui.shared.UpdateTexts;
 import de.eltviller_carneval_verein.karten.update.AppVersion;
+import de.eltviller_carneval_verein.karten.update.FolderOffer;
+import de.eltviller_carneval_verein.karten.update.FolderState;
 import de.eltviller_carneval_verein.karten.update.Grund;
+import de.eltviller_carneval_verein.karten.update.StationEntry;
 import de.eltviller_carneval_verein.karten.update.Installation;
 import de.eltviller_carneval_verein.karten.update.UpdateInfo;
 import de.eltviller_carneval_verein.karten.update.UpdateState;
@@ -86,8 +89,144 @@ class InfoSectionTest {
 				onError.accept("Die Seite ließ sich nicht öffnen: " + p);
 			}
 		}, () -> calls.add("patchnotes"), text -> calls.add("error " + text));
-		return onFx(() -> InfoSection.build(version, inst, state, () -> calls.add("check"),
-				a -> calls.add("update " + a.neu().version().display()), () -> calls.add("browser"), actions));
+		return onFx(() -> InfoSection.build(version, inst, state, folder, () -> OWN_ID, () -> calls.add("check"),
+				a -> calls.add("update " + a.neu().version().display()),
+				o -> calls.add("folder " + o.version().display()), () -> calls.add("browser"), actions));
+	}
+
+	private static final String OWN_ID = "aaaa1111";
+	private static final AppVersion V3 = AppVersion.parse("1.1.0", "3").orElseThrow();
+	private final SimpleObjectProperty<FolderState> folder = new SimpleObjectProperty<>(FolderState.empty());
+
+	private static FolderOffer offer(AppVersion v) {
+		return new FolderOffer() {
+			@Override
+			public java.nio.file.Path file() {
+				return java.nio.file.Path.of("a.msix");
+			}
+
+			@Override
+			public AppVersion version() {
+				return v;
+			}
+
+			@Override
+			public Instant firstSeen() {
+				return T;
+			}
+
+			@Override
+			public boolean stillValid() {
+				return true;
+			}
+		};
+	}
+
+	private static StationEntry station(String id, String name, AppVersion v) {
+		return new StationEntry(id, name, "ecv-karten", v, "WINDOWS_PAKET", T);
+	}
+
+	private static FolderState folderState(List<StationEntry> stations, Optional<StationEntry> newer,
+			Optional<FolderOffer> offer, Optional<AppVersion> withdrawn, Optional<AppVersion> loading) {
+		return new FolderState(stations, newer, offer, withdrawn, Optional.empty(), loading);
+	}
+
+	private void setFolder(FolderState next) throws Exception {
+		onFx(() -> {
+			folder.set(next);
+			return null;
+		});
+	}
+
+	@Test
+	void stationsListedWithOwnMarked() throws Exception {
+		folder.set(folderState(List.of(station(OWN_ID, "Kasse 1", INSTALLED.get()), station("bbbb2222", "Kasse 2", V3)),
+				Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty()));
+		SettingsSection s = windowsPackage();
+		assertTrue(shown(s, "folder-stations"));
+		assertEquals(UpdateTexts.STATIONS_TITLE, text(s, "folder-stations-title"));
+		String list = text(s, "folder-stations");
+		assertTrue(list.startsWith("Kasse 1 – 1.1.0 (Rev. 1) – zuletzt gestartet "), list);
+		assertTrue(list.contains(OWN_ID + " (diese Kasse)\nKasse 2 – 1.1.0 (Rev. 3)"), list);
+	}
+
+	@Test
+	void noStationsRowWhenEmpty() throws Exception {
+		SettingsSection s = windowsPackage();
+		assertFalse(shown(s, "folder-stations"));
+		assertFalse(shown(s, "folder-stations-title"));
+		assertFalse(shown(s, "folder-status"));
+		assertFalse(shown(s, "folder-update"));
+	}
+
+	@Test
+	void loadingShown() throws Exception {
+		folder.set(folderState(List.of(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(V3)));
+		SettingsSection s = windowsPackage();
+		assertEquals(UpdateTexts.LOADING, text(s, "folder-status"));
+	}
+
+	@Test
+	void folderOfferButtonStartsFolderUpdate() throws Exception {
+		state.set(available(FAMILY));
+		folder.set(folderState(List.of(), Optional.empty(), Optional.of(offer(V3)), Optional.empty(), Optional.empty()));
+		SettingsSection s = windowsPackage();
+		assertEquals(UpdateTexts.folderIndicatorText(V3), text(s, "folder-status"));
+		assertTrue(shown(s, "folder-update"));
+		assertFalse(shown(s, "update-now"), "der Ordner hat Vorrang");
+		onFx(() -> {
+			((Button) find(s, "folder-update")).fire();
+			return null;
+		});
+		assertEquals(List.of("folder 1.1.0 (Rev. 3)"), calls);
+	}
+
+	@Test
+	void withdrawnShown() throws Exception {
+		folder.set(folderState(List.of(), Optional.empty(), Optional.empty(), Optional.of(V3), Optional.empty()));
+		assertEquals(UpdateTexts.withdrawnText(V3), text(windowsPackage(), "folder-status"));
+	}
+
+	/** code-review: Die Kasse, die gerade selbst lädt, bekommt keinen Rat, an einer Kasse mit Internet zu prüfen. */
+	@Test
+	void noNextStepWhileThisStationLoads() throws Exception {
+		folder.set(folderState(List.of(), Optional.of(station("bbbb2222", "Kasse 2", V3)), Optional.empty(), Optional.empty(),
+				Optional.of(V3)));
+		assertEquals(UpdateTexts.LOADING + "\n" + UpdateTexts.newerStationText("Kasse 2", V3),
+				text(windowsPackage(), "folder-status"));
+	}
+
+	@Test
+	void nextStepForPackage() throws Exception {
+		folder.set(folderState(List.of(), Optional.of(station("bbbb2222", "Kasse 2", V3)), Optional.empty(), Optional.empty(),
+				Optional.empty()));
+		assertEquals(UpdateTexts.newerStationText("Kasse 2", V3) + ". " + UpdateTexts.NEXT_STEP_PACKAGE,
+				text(windowsPackage(), "folder-status"));
+	}
+
+	@Test
+	void nextStepManualOnLinux() throws Exception {
+		folder.set(folderState(List.of(), Optional.of(station("bbbb2222", "Kasse 2", V3)), Optional.empty(), Optional.empty(),
+				Optional.empty()));
+		assertEquals(UpdateTexts.newerStationText("Kasse 2", V3) + ". " + UpdateTexts.NEXT_STEP_MANUAL,
+				text(build(INSTALLED, installation("Linux", false)), "folder-status"));
+	}
+
+	@Test
+	void noNextStepWhenGithubUpdateKnown() throws Exception {
+		state.set(available(FAMILY));
+		folder.set(folderState(List.of(), Optional.of(station("bbbb2222", "Kasse 2", V3)), Optional.empty(), Optional.empty(),
+				Optional.empty()));
+		assertEquals(UpdateTexts.newerStationText("Kasse 2", V3), text(windowsPackage(), "folder-status"));
+	}
+
+	@Test
+	void rowsFollowFolderProperty() throws Exception {
+		SettingsSection s = windowsPackage();
+		assertFalse(shown(s, "folder-status"));
+		setFolder(folderState(List.of(), Optional.empty(), Optional.of(offer(V3)), Optional.empty(), Optional.empty()));
+		assertTrue(shown(s, "folder-status"));
+		assertTrue(shown(s, "folder-update"));
 	}
 
 	private SettingsSection windowsPackage() throws Exception {

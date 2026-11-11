@@ -54,6 +54,11 @@ public record Installation(AppVersion version, URI base, String fsname, Plattfor
 		return base.resolve(fsname + ".appinstaller");
 	}
 
+	/** Ob die App als Windows-Paket mit bekannter Paketfamilie läuft (nur dann gibt es Updates über den Ordner). */
+	public boolean isPackaged() {
+		return plattform == Plattform.WINDOWS_PAKET && packageFamilyName.isPresent();
+	}
+
 	/**
 	 * Die Release-Seite von {@code v} auf GitHub (KARV-125): nur, wenn die Update-Quelle genau
 	 * {@code https://github.com/<owner>/<repo>/releases/latest/download} ist (ohne Port, Userinfo, Query und Fragment);
@@ -75,7 +80,7 @@ public record Installation(AppVersion version, URI base, String fsname, Plattfor
 	 * {@code internal.windows.package-family-name-changed}.
 	 */
 	public boolean canUpdateInPlace(UpdateInfo info) {
-		if (plattform != Plattform.WINDOWS_PAKET || packageFamilyName.isEmpty()) {
+		if (!isPackaged()) {
 			return false;
 		}
 		if (info.packageFamilyName() != null) {
