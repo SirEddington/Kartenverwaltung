@@ -5,7 +5,6 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
@@ -174,7 +173,8 @@ public final class MachineIdentity {
 		Files.createDirectories(dir);
 		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
 		try {
-			Files.write(temp, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+			// erst auf die Platte, dann umbenennen: sonst kann machine.json nach einem Stromausfall leer dastehen (KARV-90)
+			DurableWrite.writeNew(temp, bytes);
 			// ohne Optionen: ein vorhandenes Ziel wird nicht ersetzt
 			Files.move(temp, file);
 			return true;

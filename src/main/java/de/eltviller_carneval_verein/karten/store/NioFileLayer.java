@@ -13,7 +13,6 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.NotDirectoryException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
-import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.time.Instant;
@@ -34,6 +33,8 @@ import java.util.UUID;
  * "Nur wenn nicht vorhanden" beruht unter Windows auf {@link Files#move} ohne Optionen, das ein vorhandenes Ziel nicht
  * ersetzt, unter Linux und macOS auf einem harten Link (siehe {@code publishNew}). Nicht {@code ATOMIC_MOVE}: Unter
  * Windows ersetzt das ein vorhandenes Ziel stillschweigend.
+ * <p>
+ * Jede temporäre Datei ist auf der Platte, bevor sie ihren richtigen Namen bekommt ({@link DurableWrite}, KARV-90).
  */
 public final class NioFileLayer implements FileLayer {
 
@@ -48,13 +49,22 @@ public final class NioFileLayer implements FileLayer {
 
 	private final DirectoryCreator directories;
 
+	/** Schreibt die temporären Dateien und wartet, bis sie auf der Platte sind (KARV-90); die Naht für Tests. */
+	private final DurableWrite.TempWriter tempWriter;
+
 	public NioFileLayer() {
 		this(Files::createDirectory);
 	}
 
 	/** Nur für Tests: Ordner einer Netzfreigabe nachstellen, die sich anders verhält als das lokale Dateisystem. */
 	NioFileLayer(DirectoryCreator directories) {
+		this(directories, DurableWrite::writeNew);
+	}
+
+	/** Nur für Tests: zusätzlich beobachten, wann die temporäre Datei auf die Platte geschrieben wird. */
+	NioFileLayer(DirectoryCreator directories, DurableWrite.TempWriter tempWriter) {
 		this.directories = directories;
+		this.tempWriter = tempWriter;
 	}
 
 	@Override
@@ -338,12 +348,16 @@ public final class NioFileLayer implements FileLayer {
 		return dir;
 	}
 
-	/** Schreibt den Inhalt in eine neue temporäre Datei im Ordner; bei einem Fehler bleibt keine zurück. */
-	private static Path writeTemp(Path dir, byte[] content, String tempTag) throws IOException {
+	/**
+	 * Schreibt den Inhalt in eine neue temporäre Datei im Ordner und wartet, bis er auf der Platte ist: Erst danach darf
+	 * die Datei ihren richtigen Namen bekommen, sonst kann sie nach einem Stromausfall darunter leer stehen (KARV-90). Bei
+	 * einem Fehler bleibt keine temporäre Datei zurück.
+	 */
+	private Path writeTemp(Path dir, byte[] content, String tempTag) throws IOException {
 		String tag = tempTag == null || tempTag.isEmpty() ? "" : tempTag + "-";
 		Path temp = dir.resolve(TEMP_PREFIX + tag + UUID.randomUUID() + TEMP_SUFFIX);
 		try {
-			Files.write(temp, content, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+			tempWriter.write(temp, content);
 		} catch (IOException | RuntimeException e) {
 			deleteQuietly(temp, e);
 			throw e;

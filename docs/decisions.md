@@ -103,6 +103,44 @@ each start would dominate startup time. Because the index is
 never authoritative, a missing or corrupt index only costs time. Size and mtime are part of the fingerprint so that
 a file replaced under the same name (healing, external tools) is noticed.
 
+## Durable writes before rename (KARV-90)
+
+**Decision:** Every temporary file that is later renamed (or hard-linked) into place is written with
+`FileChannel.force(true)` first (`store.DurableWrite`). This covers version and claim files (local and shared),
+`index/unclean`, healed files (`NioFileLayer.createNew`, `replaceDamaged`), the index files, the "connected" marker,
+acknowledged conflicts and `machine.json` (`AtomicFileReplace.write`), the first `machine.json`, `sync-state.json` and
+the settings file. The "cleanly closed" marker `index/clean` is written in place and forced as well.
+
+**Why:** Without it, a power cut seconds after a save can leave a file under its final name with missing or zeroed
+content: the rename is already in the file system journal while the data is still in the write cache. The startup
+index cannot see this (same name; size and mtime may even match). A zeroed claim file makes the next sale on that unit
+count as lost; a zeroed `machine.json` would give the workstation a new id; a zeroed settings file drops the shared
+folder. A failing `force` fails the write like any other I/O error; there is no silent fallback.
+
+**Cost:** One wait for the disk per file, about 2 ms on NVMe. A saved booking writes two files (version and claim).
+Measured on 12.11.2026 (Ryzen 7 5800X, NVMe, median of 3 runs; shared folder on the local disk):
+
+| Case | Before | After |
+|---|---|---|
+| Single mode: save one booking | 0.057 s | 0.044 s |
+| Single mode: save an event with 3,000 changed bookings | 20.6 s | 32.8 s |
+| Single mode: start with index | 5.5 s | 4.2 s |
+| Shared mode: save one booking (background upload) | 0.050 s (2.1 s) | 0.051 s (2.0 s) |
+| Shared mode: save 3,000 changed bookings (background upload) | 11.5 s (27.9 s) | 19.0 s (51.0 s) |
+
+A sale is not affected. Large batches (restoring a big event, the first upload after connecting a full workstation)
+take noticeably longer. This was accepted for 1.1.0: a zeroed claim after a power cut is worse than a rare
+operation that takes longer. Speeding up large batches is a follow-up.
+
+**Not covered:**
+- Forcing the directory after the rename (only possible on Linux/macOS). Without it a rename may be lost, which leaves
+  the older, readable state, not a damaged one.
+- Making deletes and renames without new content durable (`rename`, setting aside the damaged file, deleting the
+  marker): a lost delete or rename also leaves an older, readable state.
+- The update files of KARV-132 (`update.SharedFileReplace`, `FolderDownloader`); they are rewritten or downloaded
+  again.
+- A real network drive (SMB) was not measured. There every `force` goes to the server and costs noticeably more.
+
 ## Forward-compatible data format
 
 **Decision:** Versions 1.1 and later keep what they do not understand. Unknown fields survive load, edit, save, copy

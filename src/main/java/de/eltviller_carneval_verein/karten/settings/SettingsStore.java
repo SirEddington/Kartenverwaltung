@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import de.eltviller_carneval_verein.karten.AppPaths;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.store.DurableWrite;
 
 /**
  * Der zentrale Speicher für die {@link AppSettings}, gelesen aus und geschrieben nach {@code settings.json}.
@@ -160,13 +161,14 @@ public final class SettingsStore {
 
 	/**
 	 * In eine temporäre Datei im selben Verzeichnis schreiben und erst danach atomar umbenennen, damit ein Absturz mitten
-	 * im Schreiben nicht die Einstellungsdatei zerstört.
+	 * im Schreiben nicht die Einstellungsdatei zerstört. Die temporäre Datei ist vor dem Umbenennen auf der Platte, sonst
+	 * kann die Einstellungsdatei nach einem Stromausfall leer dastehen (KARV-90).
 	 */
 	private void write(AppSettings settings) {
 		try {
 			File tempFile = File.createTempFile("settings", ".tmp", settingsFile.getParentFile());
 			try {
-				objectMapper.writeValue(tempFile, settings);
+				DurableWrite.overwrite(tempFile.toPath(), objectMapper.writeValueAsBytes(settings));
 				Files.move(tempFile.toPath(), settingsFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
 			} catch (IOException | RuntimeException e) {
 				tempFile.delete();

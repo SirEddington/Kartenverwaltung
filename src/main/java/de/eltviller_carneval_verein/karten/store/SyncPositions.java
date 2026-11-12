@@ -3,13 +3,10 @@ package de.eltviller_carneval_verein.karten.store;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.UUID;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -121,20 +118,7 @@ public final class SyncPositions {
 		ObjectNode own = MAPPER.createObjectNode();
 		positions.forEach(own::put);
 		root.set(sharedKey, own);
-		byte[] bytes = MAPPER.writeValueAsBytes(root);
-		Path dir = file.toAbsolutePath().getParent();
-		Files.createDirectories(dir);
-		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
-		try {
-			Files.write(temp, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-			Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-		} catch (IOException | RuntimeException e) {
-			try {
-				Files.deleteIfExists(temp);
-			} catch (IOException | RuntimeException suppressed) {
-				e.addSuppressed(suppressed);
-			}
-			throw e;
-		}
+		// temporäre Datei erst auf der Platte, dann ersetzen (KARV-90)
+		AtomicFileReplace.write(file, MAPPER.writeValueAsBytes(root), null);
 	}
 }

@@ -152,6 +152,41 @@ class AtomicFileReplaceTest {
 		assertEquals(List.of(), pauses);
 	}
 
+	@Test
+	void writeForcesTheTempFileBeforeReplacingTheTarget() throws IOException {
+		Path target = Files.writeString(dir.resolve("E1.json"), "alt", StandardCharsets.UTF_8);
+		List<String> targetAtForce = new ArrayList<>();
+		List<Path> forcedTemps = new ArrayList<>();
+
+		AtomicFileReplace.write(target, "neu".getBytes(StandardCharsets.UTF_8), "index",
+				(temp, content) -> DurableWrite.writeNew(temp, content, channel -> {
+					forcedTemps.add(temp);
+					targetAtForce.add(Files.readString(target));
+					channel.force(true);
+				}));
+
+		assertEquals(List.of("alt"), targetAtForce);
+		assertEquals(1, forcedTemps.size());
+		assertEquals(dir, forcedTemps.get(0).getParent());
+		assertArrayEquals("neu".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(target));
+		assertEquals(List.of(target), listFiles());
+	}
+
+	@Test
+	void writeWithFailingForceKeepsTheTargetAndLeavesNoTemp() throws IOException {
+		Path target = Files.writeString(dir.resolve("E1.json"), "alt", StandardCharsets.UTF_8);
+		IOException failure = new IOException("Platte weg");
+
+		assertSame(failure, assertThrows(IOException.class,
+				() -> AtomicFileReplace.write(target, "neu".getBytes(StandardCharsets.UTF_8), "index",
+						(temp, content) -> DurableWrite.writeNew(temp, content, channel -> {
+							throw failure;
+						}))));
+
+		assertArrayEquals("alt".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(target));
+		assertEquals(List.of(target), listFiles());
+	}
+
 	private List<Path> listFiles() throws IOException {
 		try (var files = Files.list(dir)) {
 			return files.toList();

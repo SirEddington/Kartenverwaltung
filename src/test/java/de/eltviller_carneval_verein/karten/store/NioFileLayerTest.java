@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -674,5 +675,87 @@ class NioFileLayerTest {
 	@Test
 	void deleteOldTempsOfMissingFolderDoesNothing() throws IOException {
 		layer.deleteOldTemps(dir.resolve("gibt-es-nicht"), List.of("~karv-a.tmp"), Duration.ZERO);
+	}
+
+	/**
+	 * Ein Schreiber für die temporäre Datei, der beim Erzwingen festhält, welche Datei es war und was in diesem Moment am
+	 * Ziel steht (KARV-90: erst auf die Platte, dann umbenennen).
+	 */
+	private static final class ForceProbe implements DurableWrite.TempWriter {
+		final List<Path> forcedTemps = new ArrayList<>();
+		final List<String> targetAtForce = new ArrayList<>();
+		private final Path target;
+
+		ForceProbe(Path target) {
+			this.target = target;
+		}
+
+		@Override
+		public void write(Path temp, byte[] content) throws IOException {
+			DurableWrite.writeNew(temp, content, channel -> {
+				forcedTemps.add(temp);
+				targetAtForce.add(Files.exists(target) ? Files.readString(target) : "<fehlt>");
+				channel.force(true);
+			});
+		}
+	}
+
+	private static DurableWrite.TempWriter failingForce(IOException failure) {
+		return (temp, content) -> DurableWrite.writeNew(temp, content, channel -> {
+			throw failure;
+		});
+	}
+
+	@Test
+	void createNewForcesTheTempFileBeforeTheTargetAppears() throws IOException {
+		Path file = dir.resolve("v.json");
+		ForceProbe probe = new ForceProbe(file);
+		FileLayer probed = new NioFileLayer(Files::createDirectory, probe);
+
+		assertTrue(probed.createNew(file, bytes("neu"), null, "m1"));
+
+		assertEquals(List.of("<fehlt>"), probe.targetAtForce);
+		assertEquals(1, probe.forcedTemps.size());
+		assertEquals(dir, probe.forcedTemps.get(0).getParent());
+		assertTrue(FileLayer.isTempName(probe.forcedTemps.get(0).getFileName().toString()));
+		assertArrayEquals(bytes("neu"), Files.readAllBytes(file));
+	}
+
+	@Test
+	void replaceDamagedForcesTheGoodVersionBeforeItTakesTheName() throws IOException {
+		Path file = dir.resolve("v.json");
+		Files.write(file, bytes("kaputt"));
+		ForceProbe probe = new ForceProbe(file);
+		FileLayer probed = new NioFileLayer(Files::createDirectory, probe);
+
+		probed.replaceDamaged(file, bytes("gut"), "v.json.corrupt-2026-11-12_12-00-00", "m1");
+
+		assertEquals(List.of("kaputt"), probe.targetAtForce);
+		assertArrayEquals(bytes("gut"), Files.readAllBytes(file));
+	}
+
+	@Test
+	void createNewWithFailingForceLeavesNothingBehind() throws IOException {
+		Path file = dir.resolve("v.json");
+		IOException failure = new IOException("Platte weg");
+		FileLayer probed = new NioFileLayer(Files::createDirectory, failingForce(failure));
+
+		assertSame(failure, assertThrows(IOException.class, () -> probed.createNew(file, bytes("neu"), null, "m1")));
+
+		assertEquals(List.of(), namesIn(dir));
+	}
+
+	@Test
+	void replaceDamagedWithFailingForceKeepsTheDamagedFile() throws IOException {
+		Path file = dir.resolve("v.json");
+		Files.write(file, bytes("kaputt"));
+		IOException failure = new IOException("Platte weg");
+		FileLayer probed = new NioFileLayer(Files::createDirectory, failingForce(failure));
+
+		assertSame(failure, assertThrows(IOException.class,
+				() -> probed.replaceDamaged(file, bytes("gut"), "v.json.corrupt-2026-11-12_12-00-00", "m1")));
+
+		assertArrayEquals(bytes("kaputt"), Files.readAllBytes(file));
+		assertEquals(List.of("v.json"), namesIn(dir));
 	}
 }
