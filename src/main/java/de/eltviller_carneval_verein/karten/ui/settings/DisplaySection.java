@@ -10,9 +10,10 @@ final class DisplaySection {
 
 	static final String TITLE = "Anzeige";
 	static final String RESTORE = "Anzeige beim Start wiederherstellen";
-	static final String RESTORE_HINT = "Die Auswahl im Menü „Anzeige“ (Reihen, Tische, Sitznummern, Hallenobjekte und die"
-			+ " Kaufzusammenfassung im Kundenfenster) gilt beim nächsten Start wieder. Sie ist für Saalansicht, Kundenfenster"
-			+ " und Hallen-Editor dieselbe. Ausgeschaltet zeigt jeder Start alles an.";
+	static final String RESTORE_HINT = "Die Auswahl im Menü „Anzeige“ (Reihen, Tische, Sitznummern, Hallenobjekte, barrierefreie"
+			+ " Sitzdarstellung und die Kaufzusammenfassung im Kundenfenster) gilt beim nächsten Start wieder. Sie ist für"
+			+ " Saalansicht, Kundenfenster und Hallen-Editor dieselbe. Ausgeschaltet zeigt jeder Start alles an, mit"
+			+ " barrierefreier Sitzdarstellung.";
 
 	private DisplaySection() {
 	}

@@ -30,6 +30,7 @@ class DisplaySettingsTest {
 		assertTrue(display.isTables());
 		assertTrue(display.isSeatNumbers());
 		assertTrue(display.isHallObjects());
+		assertTrue(display.isSeatPatterns());
 		assertEquals("AUTO", display.getSummaryPlacement());
 	}
 
@@ -47,7 +48,16 @@ class DisplaySettingsTest {
 		assertTrue(display.get("tables").asBoolean());
 		assertTrue(display.get("seatNumbers").asBoolean());
 		assertTrue(display.get("hallObjects").asBoolean());
+		assertTrue(display.get("seatPatterns").asBoolean());
 		assertEquals("AUTO", display.get("summaryPlacement").asText());
+	}
+
+	@Test
+	void settingsFrom110WithoutSeatPatternsShowThePatterns(@TempDir File dir) throws IOException {
+		// KARV-26: Der Schalter kam nach KARV-76; ein Block ohne ihn zeigt die barrierefreie Darstellung
+		write(dir, "{\"display\": {\"restoreAtStart\": true, \"rows\": false, \"summaryPlacement\": \"LEFT\"}}");
+
+		assertTrue(new SettingsStore(dir).current().getDisplay().isSeatPatterns());
 	}
 
 	@Test
@@ -103,6 +113,7 @@ class DisplaySettingsTest {
 		display.setTables(false);
 		display.setSeatNumbers(false);
 		display.setHallObjects(false);
+		display.setSeatPatterns(false);
 		display.setSummaryPlacement("LEFT");
 		store.save();
 
@@ -113,6 +124,7 @@ class DisplaySettingsTest {
 		assertFalse(reloaded.isTables());
 		assertFalse(reloaded.isSeatNumbers());
 		assertFalse(reloaded.isHallObjects());
+		assertFalse(reloaded.isSeatPatterns());
 		assertEquals("LEFT", reloaded.getSummaryPlacement());
 	}
 

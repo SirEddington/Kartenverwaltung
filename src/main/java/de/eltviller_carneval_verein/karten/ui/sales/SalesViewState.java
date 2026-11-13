@@ -62,6 +62,14 @@ public final class SalesViewState {
 		return display.planLabels();
 	}
 
+	/**
+	 * Ob Saalübersicht und Kundenfenster den Sitzstatus barrierefrei zeigen (Menü "Anzeige", KARV-26), siehe
+	 * {@link SeatLook}.
+	 */
+	public BooleanProperty seatPatternsProperty() {
+		return display.seatPatternsProperty();
+	}
+
 	/** Wo das Kundenfenster die Kartenübersicht zeigt (Menü "Anzeige"). */
 	public ObjectProperty<SummaryPlacement> summaryPlacementProperty() {
 		return display.summaryPlacementProperty();

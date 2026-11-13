@@ -4,7 +4,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /**
  * Das Menü "Anzeige" der Saalansicht und des Hallen-Editors, wie es in {@code settings.json} steht (KARV-76): die
- * Beschriftungen des Plans, die Platzierung der Kaufzusammenfassung im Kundenfenster und ob diese Auswahl beim
+ * Beschriftungen des Plans, die barrierefreie Sitzdarstellung (KARV-26), die Platzierung der Kaufzusammenfassung im
+ * Kundenfenster und ob diese Auswahl beim
  * nächsten Start wieder gilt ({@code restoreAtStart}, Standard an). Wann geschrieben und gelesen wird, regelt
  * {@code DisplayPreferences}. Die Platzierung steht als Text darin, damit dieses Paket die Oberfläche nicht kennt und
  * ein unbekannter Wert aus einer neueren Version die Datei nicht unlesbar macht.
@@ -20,6 +21,7 @@ public class DisplaySettings {
 	private boolean tables = true;
 	private boolean seatNumbers = true;
 	private boolean hallObjects = true;
+	private boolean seatPatterns = true;
 	private String summaryPlacement = DEFAULT_SUMMARY_PLACEMENT;
 
 	public DisplaySettings() {
@@ -64,6 +66,18 @@ public class DisplaySettings {
 
 	public void setHallObjects(boolean hallObjects) {
 		this.hallObjects = hallObjects;
+	}
+
+	/**
+	 * Ob der Saalplan den Sitzstatus barrierefrei zeigt, also nicht nur über die Farbe (KARV-26). Fehlt das Feld (Datei
+	 * von vor KARV-26), ist es an.
+	 */
+	public boolean isSeatPatterns() {
+		return seatPatterns;
+	}
+
+	public void setSeatPatterns(boolean seatPatterns) {
+		this.seatPatterns = seatPatterns;
 	}
 
 	/** Der Name der Platzierung (z. B. {@code "AUTO"}); nie {@code null}, kann aber aus einer neueren Version unbekannt sein. */
