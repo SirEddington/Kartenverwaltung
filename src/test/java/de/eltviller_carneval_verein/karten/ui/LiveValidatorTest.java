@@ -17,6 +17,8 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Syncs;
+import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.validation.EventValidator;
 import de.eltviller_carneval_verein.karten.validation.HallValidator;
@@ -82,6 +84,30 @@ class LiveValidatorTest {
 		hallTracker.check(hall);
 
 		assertEquals(List.of("HOB-001"), shown);
+	}
+
+	@Test
+	void overlapAppearsAndClears() {
+		ChangeTracker<Hall> hallTracker = hallTracker();
+		Hall hall = new Hall();
+		hall.setName("Festhalle");
+		SeatingPlan plan = hall.addSeatingPlan();
+		TableRow row = plan.addRow();
+		Table first = plan.addTable(row);
+		first.setWidth(50);
+		first.setHeight(100);
+		Table second = plan.addTable(row);
+		second.setWidth(50);
+		second.setHeight(100);
+		second.setPosX(200);
+		hallTracker.track(hall);
+
+		second.setPosX(20);
+		hallTracker.check(hall);
+		second.setPosX(200);
+		hallTracker.check(hall);
+
+		assertEquals(List.of("SPL-004", "clear"), shown);
 	}
 
 	/** Event ohne jede Meldung. */

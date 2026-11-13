@@ -80,7 +80,7 @@ public final class PlanNodeFactory {
 
 	/** Wie {@link #seatNode(Seat)}, ein markierter Sitz mit dem Rand der Auswahl. */
 	public static Node seatNode(Seat seat, boolean selected) {
-		double radius = SeatingPlanLayout.seatRadius(seat);
+		double radius = seat.radius();
 		Circle circle = new Circle(seat.getPosX(), seat.getPosY(), radius);
 		circle.setFill(SEAT_FILL);
 		circle.setStroke(selected ? SELECTION_STROKE : SEAT_STROKE);
@@ -93,7 +93,7 @@ public final class PlanNodeFactory {
 	 * (grün, gelb, rot) zu wenig Kontrast; das Halo liegt auf dem hellen Plan, der Sitz bleibt davor unverändert.
 	 */
 	public static Node seatHalo(Seat seat) {
-		double radius = SeatingPlanLayout.seatRadius(seat);
+		double radius = seat.radius();
 		Circle halo = new Circle(seat.getPosX(), seat.getPosY(), radius + haloWidth(radius));
 		halo.setFill(SELECTION_STROKE);
 		halo.setMouseTransparent(true);
@@ -110,7 +110,7 @@ public final class PlanNodeFactory {
 	 * Herauszoomen entstünde sonst ein Zahlenbrei); {@code scale} ist der Zoom der Fläche, auf der sie liegt.
 	 */
 	public static Text seatNumberText(Seat seat, ObservableDoubleValue scale) {
-		double diameter = SeatingPlanLayout.seatRadius(seat) * 2;
+		double diameter = seat.radius() * 2;
 		Text text = new Text(String.valueOf(seat.getSeatNumber()));
 		text.setFont(Font.font(null, FontWeight.BOLD, diameter * SEAT_NUMBER_FONT_RATIO));
 		text.setFill(Color.BLACK);

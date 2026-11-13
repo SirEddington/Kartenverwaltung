@@ -2,8 +2,6 @@ package de.eltviller_carneval_verein.karten.settings;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -15,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import de.eltviller_carneval_verein.karten.AppPaths;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
+import de.eltviller_carneval_verein.karten.store.NioFileLayer;
 
 /**
  * Der zentrale Speicher für die {@link AppSettings}, gelesen aus und geschrieben nach {@code settings.json}.
@@ -159,19 +158,13 @@ public final class SettingsStore {
 	}
 
 	/**
-	 * In eine temporäre Datei im selben Verzeichnis schreiben und erst danach atomar umbenennen, damit ein Absturz mitten
-	 * im Schreiben nicht die Einstellungsdatei zerstört.
+	 * Über {@link NioFileLayer#replace}: temporäre Datei im selben Verzeichnis, vor dem Ersetzen auf der Platte (KARV-90),
+	 * dann atomar ersetzen, mit kurzer Wiederholung, wenn ein Virenscanner die Datei gerade offen hält. So zerstört weder
+	 * ein Absturz mitten im Schreiben noch ein Stromausfall danach die Einstellungsdatei.
 	 */
 	private void write(AppSettings settings) {
 		try {
-			File tempFile = File.createTempFile("settings", ".tmp", settingsFile.getParentFile());
-			try {
-				objectMapper.writeValue(tempFile, settings);
-				Files.move(tempFile.toPath(), settingsFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-			} catch (IOException | RuntimeException e) {
-				tempFile.delete();
-				throw e;
-			}
+			new NioFileLayer().replace(settingsFile.toPath(), objectMapper.writeValueAsBytes(settings), "settings");
 		} catch (IOException e) {
 			throw new RuntimeException("Fehler beim Speichern der Datei: " + FILE_NAME, e);
 		}

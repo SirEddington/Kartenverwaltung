@@ -102,6 +102,11 @@ public class Hall {
 		this.hallHeight = hallHeight;
 	}
 
+	/** {@code true}, wenn Breite und Höhe der Halle festgelegt sind (beide über 0; 0 = noch nicht festgelegt). */
+	public boolean hasSize() {
+		return hallWidth > 0 && hallHeight > 0;
+	}
+
 	public List<HallObject> getHallObjects() {
 		return hallObjects;
 	}

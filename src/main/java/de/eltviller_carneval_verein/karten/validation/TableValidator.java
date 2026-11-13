@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.validation;
 import java.util.Map;
 import java.util.TreeMap;
 
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 
@@ -13,14 +14,27 @@ import de.eltviller_carneval_verein.karten.model.Table;
 public final class TableValidator {
 
 	private final Table table;
+	private final Hall hall;
+	private final Footprint footprint;
 	private final ValidationResult result = ValidationResult.ok();
 
-	private TableValidator(Table table) {
+	private TableValidator(Table table, Hall hall, Footprint footprint) {
 		this.table = table;
+		this.hall = hall;
+		this.footprint = footprint;
 	}
 
 	public static ValidationResult validate(Table table) {
-		return new TableValidator(table).run();
+		return validate(table, null, null);
+	}
+
+	/**
+	 * @param hall die Halle der Bestuhlung für die Lageprüfung (TBL-007); {@code null} lässt sie entfallen
+	 * @param footprint der Umriss des Tisches (Platte und Stühle), den der Aufrufer schon berechnet hat; {@code null}
+	 *            lässt die Lageprüfung entfallen
+	 */
+	static ValidationResult validate(Table table, Hall hall, Footprint footprint) {
+		return new TableValidator(table, hall, footprint).run();
 	}
 
 	// Wertebereiche, bisher die Grenzen der Spinner (Breite und Höhe 0 = noch ohne Maße, siehe SeatingPlan.addTable)
@@ -30,9 +44,23 @@ public final class TableValidator {
 	private ValidationResult run() {
 		validateNumber();
 		validateSizeAndPosition();
+		validateInsideHall();
 		validateSeatNumbersAreUnique();
 		validateSeats();
 		return result;
+	}
+
+	/**
+	 * Warnt, wenn Tischplatte oder Stühle über den Rand der Halle hinausragen. Entfällt ohne Halle, wenn die Halle keine
+	 * gültige Größe hat (0 = noch nicht festgelegt) oder ohne Umriss; solche Fälle meldet die Bereichsprüfung.
+	 */
+	private void validateInsideHall() {
+		if (hall == null || footprint == null || !hall.hasSize()) {
+			return;
+		}
+		if (!footprint.insideHall(hall.getHallWidth(), hall.getHallHeight())) {
+			result.add(TableIssue.OUTSIDE_HALL.toIssue(EntityLabels.table(table)));
+		}
 	}
 
 	private void validateSizeAndPosition() {

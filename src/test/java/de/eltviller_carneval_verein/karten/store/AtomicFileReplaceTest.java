@@ -152,6 +152,31 @@ class AtomicFileReplaceTest {
 		assertEquals(List.of(), pauses);
 	}
 
+	@Test
+	void writeForcesTheTempFileBeforeReplacingTheTarget() throws IOException {
+		Path target = Files.writeString(dir.resolve("E1.json"), "alt", StandardCharsets.UTF_8);
+		ForceProbe probe = new ForceProbe(target);
+
+		AtomicFileReplace.write(target, "neu".getBytes(StandardCharsets.UTF_8), "index", probe);
+
+		assertEquals(List.of("alt"), probe.targetAtForce);
+		assertArrayEquals("neu".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(target));
+		assertEquals(List.of(target), listFiles());
+	}
+
+	@Test
+	void writeWithFailingForceKeepsTheTargetAndLeavesNoTemp() throws IOException {
+		Path target = Files.writeString(dir.resolve("E1.json"), "alt", StandardCharsets.UTF_8);
+		IOException failure = new IOException("Platte weg");
+
+		assertSame(failure, assertThrows(IOException.class,
+				() -> AtomicFileReplace.write(target, "neu".getBytes(StandardCharsets.UTF_8), "index",
+						ForceProbe.failing(failure))));
+
+		assertArrayEquals("alt".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(target));
+		assertEquals(List.of(target), listFiles());
+	}
+
 	private List<Path> listFiles() throws IOException {
 		try (var files = Files.list(dir)) {
 			return files.toList();

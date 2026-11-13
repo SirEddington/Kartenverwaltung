@@ -43,6 +43,9 @@ Abrechnung                     → reconcile cash, statistics, export
    - Tables stay in the order they were created; a table number is only a label, so changing it (even to a
      duplicate, which blocks saving) never moves the table. **"Nummern neu vergeben"** renumbers tables by their place.
 4. **"Speichern"** (or the save shortcut). Validation errors appear in the footer and block saving.
+   Overlaps and parts outside the hall appear as warnings and do not block saving.
+   Intended overlaps (e.g. a door on the wall) are harmless, and warnings right after adding a row or object are
+   expected until it is moved into place.
 
 Changing or deleting a seating plan that presentations use never deletes a booking with data: bookings whose seat
 disappeared are kept as **"Ohne Platz"** (unassigned).

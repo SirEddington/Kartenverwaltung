@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
@@ -47,6 +48,18 @@ class EntityLabelsTest {
 		hall.setName("  ");
 		assertEquals("Halle ohne Namen", EntityLabels.hall(hall));
 		assertEquals("Halle ohne Namen", EntityLabels.hall(null));
+	}
+
+	@Test
+	void hallObjectNameWithAndWithoutName() {
+		HallObject object = new HallObject();
+		object.setName("Bühne");
+		assertEquals("Hallenobjekt Bühne", EntityLabels.hallObjectName(object));
+
+		object.setName("");
+		assertEquals("Hallenobjekt ohne Namen", EntityLabels.hallObjectName(object));
+		object.setName(null);
+		assertEquals("Hallenobjekt ohne Namen", EntityLabels.hallObjectName(object));
 	}
 
 	@Test

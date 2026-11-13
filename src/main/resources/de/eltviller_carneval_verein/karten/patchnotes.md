@@ -34,5 +34,6 @@
 ### Hinter den Kulissen
 - Daten, die eine neuere Version geschrieben hat, bleiben beim Speichern erhalten. Einträge, die
   eine neuere Version brauchen, bleiben gesperrt, bis diese Kasse aktualisiert ist.
+- Gespeicherte Verkäufe überstehen auch einen Stromausfall direkt nach dem Speichern.
 - Alle Kassen, die denselben gemeinsamen Ordner nutzen, bitte gleichzeitig auf 1.1 aktualisieren
   und danach jede Halle mit Bestuhlung einmal im Hallen-Editor öffnen und speichern.
