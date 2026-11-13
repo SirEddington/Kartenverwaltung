@@ -1,5 +1,25 @@
 # Technical decisions
 
+State: release 1.1.0.
+
+Decisions added or changed in 1.1:
+
+| Decision | Ticket |
+|---|---|
+| [Offline detection for cloud folders](#offline-detection-for-cloud-folders-karv-127) | KARV-127 |
+| [Layout checks only warn](#layout-checks-only-warn) | KARV-60 |
+| [Round seats in equal sections, tables keep their place](#round-seats-in-equal-sections-tables-keep-their-place-karv-128) | KARV-128 |
+| [Durable writes before rename](#durable-writes-before-rename-karv-90) | KARV-90 |
+| [Forward-compatible data format](#forward-compatible-data-format) | KARV-133 – KARV-136 |
+| [JavaFX native libraries extracted at build time](#javafx-native-libraries-extracted-at-build-time) | KARV-137 |
+| [No public code-signing certificate (for now)](#no-public-code-signing-certificate-for-now) | KARV-137 |
+| [Updates only with the user's consent](#updates-only-with-the-users-consent-appupdates--manual) | KARV-130 |
+| [Update check and update from the app](#update-check-and-update-from-the-app-karv-131) | KARV-131 |
+| [Patch notes](#patch-notes-karv-125) | KARV-125 |
+| [Update over the shared folder](#update-over-the-shared-folder-karv-132) | KARV-132 |
+| [Accessible seat display](#accessible-seat-display-karv-26) | KARV-26 |
+| [One "Anzeige" choice for all plan views, restored at start](#one-anzeige-choice-for-all-plan-views-restored-at-start-karv-76) | KARV-76 |
+
 ## Desktop app with local data, no server
 
 **Decision:** A JavaFX desktop application; every workstation has the full data set on its own disk.
@@ -21,6 +41,20 @@ uploads only when the test says so, ignores `~*.tmp` files and never propagates 
 
 **Consequences:** The store may only rely on "create file if absent" and atomic rename. Locks across machines are
 not available, so there is no locking; arbitration is done by who creates a claim file first.
+
+## Offline detection for cloud folders (KARV-127)
+
+**Decision:** A shared folder that belongs to Nextcloud (found through `nextcloud.cfg`) or OneDrive (the `OneDrive*`
+environment variables) only counts as reachable if its server also answers a TCP connect (`CloudFolders`,
+`ServerProbe`: no proxy, two attempts, 5 s in total). Network drives and plain local folders are checked as before.
+Every tick runs the full check. "Verbindung zum Cloud-Server prüfen" (on by default) switches the server check off.
+
+**Why:** A sync folder lies on the local disk and was therefore always "reachable". Without internet, new sales
+counted as uploaded although the client could not transfer them. With the server check the workstation shows
+`OFFLINE`, and its sales stay provisional until the folder is really reachable again.
+
+**Trade-off:** A firewall that blocks the direct TCP connect while the client itself syncs makes the workstation look
+offline; the setting is the escape hatch for that case.
 
 ## Append-only versions and claim files
 
@@ -96,6 +130,31 @@ fully inside another one do not count as overlapping, and seats are not checked 
 
 **Why:** Some overlaps are intended (a door on the wall, a stage with a table on it), and while rows or objects are
 being moved into place the intermediate state must not block saving.
+
+**Detail:** The geometry (`Footprint`) lives in `validation` without JavaFX and uses the seat radius from the model
+(`Seat.radius()`), so the checks run in plain unit tests and never depend on `ui.hall`. Tables without a valid row take
+no part in the layout checks; `TBL-005` already reports them as an error.
+
+## Round seats in equal sections, tables keep their place (KARV-128)
+
+**Decision:**
+- A seat is a circle; `Seat.width` is its diameter, `height` is gone (a burned name, see below). Seats without a width
+  use a fallback radius of 10 cm.
+- `SeatingPlanLayout` divides a table into equal sections per seat pair and places the seat center radius + 5 cm beside
+  the table edge. New seating plans start with 50 × 320 cm tables and 45 cm seats; "Reihe füllen…" makes its sizes the
+  plan's defaults.
+- Tables carry labels with the same five text fields as hall objects (`Labeled`, `TextSettings`); one computation
+  (`PlanText`) draws both.
+- Tables stay in creation order; the table number is only a label. "Nummern neu vergeben" renumbers by place.
+
+**Why:** The only size of a chair that matters for the plan is how much room it takes. With equal sections the spacing
+stays the same where two tables meet. A table number that decided the order made a table move when its number was
+changed (or duplicated for a moment while editing).
+
+**Consequences:** 1.1 places automatically positioned seats differently from 1.0.x. A hall therefore has to be saved
+once in 1.1, and a 1.0.x workstation that saves it puts the seats back and drops the labels
+([installation.md](installation.md#shared-folder-multi-workstation)). "Locally changed" in `StoreHallRepository`
+compares with the round trip of the baseline, so fields written by other program versions never count as a change.
 
 ## Money in integer cents
 
@@ -618,6 +677,40 @@ install.
   most 64 KB, at most 200 entries are read, `.msix` at most 200 MB, the manifest at most 1 MB, XML without DOCTYPE.
   Protection against a foreign package rests on Windows' signature check and the private signing key.
 - Workstations on 1.0.x do not write entries; the release-notes hint for the boundary to 1.0.x stays.
+
+## Accessible seat display (KARV-26)
+
+**Decision:** With "Barrierefreie Sitzdarstellung" (menu "Anzeige", on by default) the seat status no longer depends on
+color alone: free is white with a green ring, reserved yellow with dark stripes, sold solid red, blocked gray with a
+white cross. A legend below the plan explains it. The customer display only distinguishes free (ring) and taken (red).
+Switched off, the plain colors of earlier versions apply. The choice is stored as `display.seatPatterns`.
+
+**Why:** Red and green are the hardest pair for the most common color vision deficiency, and free versus sold is the
+distinction that matters at the box office. The look has to survive grayscale and simulated red-green deficiency;
+`SeatLookTest` checks exactly that.
+
+**How:** Ring and stripes are gradients with hard stops (`SeatLook`), i.e. plain fills: they stay sharp when zooming
+and need no extra node per seat. Only the cross is a separate node, laid between seat and number, and it lets clicks
+through to the seat. The cross is white because a dark one swallowed the black seat number.
+
+## One "Anzeige" choice for all plan views, restored at start (KARV-76)
+
+**Decision:** Sales view, customer display and hall editor share one app-wide `DisplayPreferences` (rows, tables, seat
+numbers, hall objects, seat patterns, purchase summary placement). It is installed in `MainApp` at start and written to
+`settings.json` (`display`) on every change as a partial save. With "Anzeige beim Start wiederherstellen" (on by
+default) the next start uses the stored choice; off, every start shows everything with the placement "Automatisch".
+
+**Why:** Hiding rows in the editor but still seeing them in the sales view (or the other way round) was confusing, and
+operators had to set up the menu again after every start. Installing at start makes "beim Start" mean the state at
+program start, not the state when sales or editor are opened for the first time.
+
+**Details:**
+- Views follow the preferences through weak listeners (`PlanLabelOptions.follow`), so closed editors and shells are
+  not kept alive by the app-wide instance.
+- The placement is stored as text (`settings` does not know the UI) and read through `TolerantEnum`: an unknown value
+  from a newer version means "Automatisch" and is written back unchanged until someone picks another one.
+- A failing write is logged as a warning and never reaches the global error dialog: losing a menu tick is not worth
+  interrupting a sale.
 
 ## OpenPDF 1.3.x
 

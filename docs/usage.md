@@ -1,6 +1,6 @@
 # Usage guide
 
-The application is in German; button and menu names below are quoted as they appear on screen.
+State: release 1.1.0. The application is in German; button and menu names below are quoted as they appear on screen.
 
 ## Starting
 
@@ -43,8 +43,18 @@ Abrechnung                     → reconcile cash, statistics, export
    - Tables stay in the order they were created; a table number is only a label, so changing it (even to a
      duplicate, which blocks saving) never moves the table. **"Nummern neu vergeben"** renumbers tables by their place.
 4. **"Speichern"** (or the save shortcut). Validation errors appear in the footer and block saving.
-   Overlaps and parts outside the hall appear as warnings and do not block saving.
-   Intended overlaps (e.g. a door on the wall) are harmless, and warnings right after adding a row or object are
+   Overlaps and parts outside the hall appear as warnings and do not block saving:
+
+   | Code | Warning |
+   |---|---|
+   | `HLL-003` | Two hall objects partly overlap |
+   | `HOB-005` | A hall object reaches beyond the edge of the hall |
+   | `TBL-007` | A table (plate or seats) reaches beyond the edge of the hall |
+   | `SPL-004` | Two tables overlap (plates or seats) |
+   | `SPL-005` | A table partly overlaps a hall object |
+
+   Up to 1 cm counts as touching, and something lying fully inside another object (a lectern on the stage) does not
+   count. Intended overlaps (e.g. a door on the wall) are harmless, and warnings right after adding a row or object are
    expected until it is moved into place.
 
 Changing or deleting a seating plan that presentations use never deletes a booking with data: bookings whose seat
@@ -110,6 +120,17 @@ choice is kept for the next start of this workstation; with it off, every start 
   amount and a comment for deviations.
 - **"Statistik"** aggregated per event over all events, independent of the header selection.
 - **"Exportieren"** writes the active view as **CSV** or **PDF**; the last used format is remembered.
+
+## Settings (*Einstellungen*)
+
+The settings screen has a search field ("Keine Treffer" when nothing matches) and three sections; changed options take
+effect with "Speichern".
+
+| Section | Settings |
+|---|---|
+| **Gemeinsamer Ordner** | folder ("Durchsuchen …", "Verbinden"/"Trennen"), computer name ("Ändern"), operator ("Bediener wechseln"), "Buchungen sofort speichern" (on), "Verbindung zum Cloud-Server prüfen" (on) |
+| **Anzeige** | "Anzeige beim Start wiederherstellen" (on): keep the choices of the "Anzeige" menu for the next start |
+| **Info und Updates** | installed version, state of the update check, "Jetzt prüfen", "Jetzt aktualisieren", "Update im Browser laden", "Patchnotes anzeigen", workstations at the shared folder |
 
 ## Restore points
 
@@ -256,5 +277,17 @@ start, then every 4 hours, and on **"Jetzt prüfen"**. The check never opens a w
 | SYS-012 | Shared folder has a file with different content | Nothing was overwritten; report it |
 | SYS-013 | An entry could not be synced and was skipped | Retried in the next full sync |
 
-Input and validation messages use entity prefixes (`EVT-`, `PRS-`, `HLL-`, `HOB-`, `SPL-`, `ROW-`, `TBL-`,
-`SEA-`, `INP-` …) and appear in the footer of the current screen.
+Input and validation messages appear in the footer of the current screen. Errors block saving, warnings are shown
+after saving. The prefix names the entity:
+
+| Prefix | Entity | Examples |
+|---|---|---|
+| `EVT-` | Event | `EVT-002` name empty (error), `EVT-001` duplicate presentation name |
+| `PRS-` | Presentation | `PRS-001` duplicate table number, `PRS-003` no hall, `PRS-006` no seating plan, `PRS-007` seating plan gone |
+| `HLL-` | Hall | `HLL-001` name empty, `HLL-002` size out of range, `HLL-003` objects overlap |
+| `HOB-` | Hall object | `HOB-001` name empty, `HOB-003` text size, `HOB-005` outside the hall |
+| `SPL-` | Seating plan | `SPL-001` name empty, `SPL-002` duplicate table, `SPL-004`/`SPL-005` overlaps |
+| `ROW-` | Table row | `ROW-001` letter used twice, `ROW-002` value out of range |
+| `TBL-` | Table | `TBL-001` duplicate seat number, `TBL-005` no row, `TBL-006` text size, `TBL-007` outside the hall |
+| `SEA-` | Seat / booking | `SEA-004` collected but not paid, `SEA-009` seat diameter, `SEA-010` no place, `SEA-020` paid amount differs |
+| `INP-` | Input field | `INP-001` not a number, `INP-002` not a date, `INP-003` not a time |
