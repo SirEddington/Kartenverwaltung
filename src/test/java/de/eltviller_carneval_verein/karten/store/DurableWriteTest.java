@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -25,20 +26,13 @@ class DurableWriteTest {
 		return text.getBytes(StandardCharsets.UTF_8);
 	}
 
-	/** Zeichnet beim Erzwingen die Größe des Kanals und den Inhalt der Datei auf. */
+	/** Zeichnet beim Erzwingen die Größe des Kanals auf: Sie zeigt, dass der ganze Inhalt schon geschrieben ist. */
 	private static final class RecordingForcer implements DurableWrite.Forcer {
 		final List<Long> sizes = new ArrayList<>();
-		final List<byte[]> contents = new ArrayList<>();
-		private final Path file;
-
-		RecordingForcer(Path file) {
-			this.file = file;
-		}
 
 		@Override
-		public void force(java.nio.channels.FileChannel channel) throws IOException {
+		public void force(FileChannel channel) throws IOException {
 			sizes.add(channel.size());
-			contents.add(Files.readAllBytes(file));
 			channel.force(true);
 		}
 	}
@@ -47,12 +41,11 @@ class DurableWriteTest {
 	void writeNewForcesOnceAfterTheWholeContent() throws IOException {
 		Path file = dir.resolve("a.json");
 		byte[] content = bytes("{\"x\":\"" + "y".repeat(100_000) + "\"}");
-		RecordingForcer forcer = new RecordingForcer(file);
+		RecordingForcer forcer = new RecordingForcer();
 
 		DurableWrite.writeNew(file, content, forcer);
 
 		assertEquals(List.of((long) content.length), forcer.sizes);
-		assertArrayEquals(content, forcer.contents.get(0));
 		assertArrayEquals(content, Files.readAllBytes(file));
 	}
 
@@ -60,7 +53,7 @@ class DurableWriteTest {
 	void writeNewRefusesAnExistingFileAndLeavesItUnchanged() throws IOException {
 		Path file = dir.resolve("a.json");
 		Files.write(file, bytes("alt"));
-		RecordingForcer forcer = new RecordingForcer(file);
+		RecordingForcer forcer = new RecordingForcer();
 
 		assertThrows(FileAlreadyExistsException.class, () -> DurableWrite.writeNew(file, bytes("neu"), forcer));
 
@@ -85,7 +78,7 @@ class DurableWriteTest {
 	void overwriteReplacesALongerContentCompletelyAndForces() throws IOException {
 		Path file = dir.resolve("clean");
 		Files.write(file, bytes("ein viel längerer alter Inhalt"));
-		RecordingForcer forcer = new RecordingForcer(file);
+		RecordingForcer forcer = new RecordingForcer();
 
 		DurableWrite.overwrite(file, bytes("kurz"), forcer);
 

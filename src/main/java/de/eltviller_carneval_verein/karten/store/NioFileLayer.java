@@ -49,8 +49,8 @@ public final class NioFileLayer implements FileLayer {
 
 	private final DirectoryCreator directories;
 
-	/** Schreibt die temporären Dateien und wartet, bis sie auf der Platte sind (KARV-90); die Naht für Tests. */
-	private final DurableWrite.TempWriter tempWriter;
+	/** Bringt jede temporäre Datei auf die Platte, bevor sie ihren Namen bekommt (KARV-90); die Naht für Tests. */
+	private final DurableWrite.Forcer forcer;
 
 	public NioFileLayer() {
 		this(Files::createDirectory);
@@ -58,13 +58,13 @@ public final class NioFileLayer implements FileLayer {
 
 	/** Nur für Tests: Ordner einer Netzfreigabe nachstellen, die sich anders verhält als das lokale Dateisystem. */
 	NioFileLayer(DirectoryCreator directories) {
-		this(directories, DurableWrite::writeNew);
+		this(directories, DurableWrite.FORCE);
 	}
 
-	/** Nur für Tests: zusätzlich beobachten, wann die temporäre Datei auf die Platte geschrieben wird. */
-	NioFileLayer(DirectoryCreator directories, DurableWrite.TempWriter tempWriter) {
+	/** Nur für Tests: zusätzlich beobachten, wann eine temporäre Datei auf die Platte geschrieben wird. */
+	NioFileLayer(DirectoryCreator directories, DurableWrite.Forcer forcer) {
 		this.directories = directories;
-		this.tempWriter = tempWriter;
+		this.forcer = forcer;
 	}
 
 	@Override
@@ -119,7 +119,7 @@ public final class NioFileLayer implements FileLayer {
 
 	@Override
 	public void replace(Path file, byte[] content, String tempTag) throws IOException {
-		AtomicFileReplace.write(file, content, tempTag);
+		AtomicFileReplace.write(file, content, tempTag, forcer);
 	}
 
 	@Override
@@ -357,7 +357,7 @@ public final class NioFileLayer implements FileLayer {
 		String tag = tempTag == null || tempTag.isEmpty() ? "" : tempTag + "-";
 		Path temp = dir.resolve(TEMP_PREFIX + tag + UUID.randomUUID() + TEMP_SUFFIX);
 		try {
-			tempWriter.write(temp, content);
+			DurableWrite.writeNew(temp, content, forcer);
 		} catch (IOException | RuntimeException e) {
 			deleteQuietly(temp, e);
 			throw e;

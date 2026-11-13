@@ -60,20 +60,20 @@ final class AtomicFileReplace {
 	 * @param tempTag die Kennung im Namen der temporären Datei; {@code null} oder leer für keine
 	 */
 	static void write(Path file, byte[] bytes, String tempTag) throws IOException {
-		write(file, bytes, tempTag, DurableWrite::writeNew);
+		write(file, bytes, tempTag, DurableWrite.FORCE);
 	}
 
 	/**
-	 * Wie {@link #write(Path, byte[], String)}; {@code tempWriter} schreibt die temporäre Datei (im Betrieb
-	 * {@link DurableWrite#writeNew}: erst auf der Platte, dann ersetzen, KARV-90), im Test ersetzbar.
+	 * Wie {@link #write(Path, byte[], String)}; {@code forcer} bringt die temporäre Datei vor dem Ersetzen auf die Platte
+	 * (KARV-90), im Test ersetzbar.
 	 */
-	static void write(Path file, byte[] bytes, String tempTag, DurableWrite.TempWriter tempWriter) throws IOException {
+	static void write(Path file, byte[] bytes, String tempTag, DurableWrite.Forcer forcer) throws IOException {
 		Path dir = file.toAbsolutePath().getParent();
 		Files.createDirectories(dir);
 		String tag = tempTag == null || tempTag.isEmpty() ? "" : tempTag + "-";
 		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + tag + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
 		try {
-			tempWriter.write(temp, bytes);
+			DurableWrite.writeNew(temp, bytes, forcer);
 			replace(temp, file);
 		} catch (IOException | RuntimeException e) {
 			try {

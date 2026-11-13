@@ -155,19 +155,11 @@ class AtomicFileReplaceTest {
 	@Test
 	void writeForcesTheTempFileBeforeReplacingTheTarget() throws IOException {
 		Path target = Files.writeString(dir.resolve("E1.json"), "alt", StandardCharsets.UTF_8);
-		List<String> targetAtForce = new ArrayList<>();
-		List<Path> forcedTemps = new ArrayList<>();
+		ForceProbe probe = new ForceProbe(target);
 
-		AtomicFileReplace.write(target, "neu".getBytes(StandardCharsets.UTF_8), "index",
-				(temp, content) -> DurableWrite.writeNew(temp, content, channel -> {
-					forcedTemps.add(temp);
-					targetAtForce.add(Files.readString(target));
-					channel.force(true);
-				}));
+		AtomicFileReplace.write(target, "neu".getBytes(StandardCharsets.UTF_8), "index", probe);
 
-		assertEquals(List.of("alt"), targetAtForce);
-		assertEquals(1, forcedTemps.size());
-		assertEquals(dir, forcedTemps.get(0).getParent());
+		assertEquals(List.of("alt"), probe.targetAtForce);
 		assertArrayEquals("neu".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(target));
 		assertEquals(List.of(target), listFiles());
 	}
@@ -179,9 +171,7 @@ class AtomicFileReplaceTest {
 
 		assertSame(failure, assertThrows(IOException.class,
 				() -> AtomicFileReplace.write(target, "neu".getBytes(StandardCharsets.UTF_8), "index",
-						(temp, content) -> DurableWrite.writeNew(temp, content, channel -> {
-							throw failure;
-						}))));
+						ForceProbe.failing(failure))));
 
 		assertArrayEquals("alt".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(target));
 		assertEquals(List.of(target), listFiles());

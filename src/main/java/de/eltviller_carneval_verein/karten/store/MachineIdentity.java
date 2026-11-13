@@ -14,7 +14,6 @@ import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -163,32 +162,14 @@ public final class MachineIdentity {
 	}
 
 	/**
-	 * Legt {@code machine.json} an, ohne eine vorhandene zu ersetzen.
+	 * Legt {@code machine.json} an, ohne eine vorhandene zu ersetzen: über {@link NioFileLayer#createNew}, also mit
+	 * temporärer Datei, die vor dem Umbenennen auf der Platte ist (KARV-90), und unter Linux/macOS über einen harten Link,
+	 * damit zwei gleichzeitige erste Starts nicht beide gewinnen.
 	 *
 	 * @return {@code false}, wenn es die Datei schon gibt
 	 */
 	private boolean writeNew(String name) throws IOException {
-		byte[] bytes = toBytes(id, name, previous);
-		Path dir = file.toAbsolutePath().getParent();
-		Files.createDirectories(dir);
-		Path temp = dir.resolve(FileLayer.TEMP_PREFIX + UUID.randomUUID() + FileLayer.TEMP_SUFFIX);
-		try {
-			// erst auf die Platte, dann umbenennen: sonst kann machine.json nach einem Stromausfall leer dastehen (KARV-90)
-			DurableWrite.writeNew(temp, bytes);
-			// ohne Optionen: ein vorhandenes Ziel wird nicht ersetzt
-			Files.move(temp, file);
-			return true;
-		} catch (FileAlreadyExistsException e) {
-			Files.deleteIfExists(temp);
-			return false;
-		} catch (IOException | RuntimeException e) {
-			try {
-				Files.deleteIfExists(temp);
-			} catch (IOException | RuntimeException suppressed) {
-				e.addSuppressed(suppressed);
-			}
-			throw e;
-		}
+		return new NioFileLayer().createNew(file, toBytes(id, name, previous), null, null);
 	}
 
 	/** Der Computername als Anzeigename; "Rechner", wenn der Lieferant nichts oder nur Leerraum liefert. */

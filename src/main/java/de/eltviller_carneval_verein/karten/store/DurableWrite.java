@@ -21,19 +21,14 @@ import java.nio.file.StandardOpenOption;
  */
 public final class DurableWrite {
 
-	/** Das Erzwingen auf die Platte; im Test ersetzbar. */
+	/** Das Erzwingen auf die Platte; die Naht, über die Tests es beobachten oder scheitern lassen. */
 	@FunctionalInterface
 	interface Forcer {
 		void force(FileChannel channel) throws IOException;
 	}
 
-	/** Schreibt eine neue temporäre Datei; die Naht, über die Tests das Erzwingen beobachten. */
-	@FunctionalInterface
-	interface TempWriter {
-		void write(Path temp, byte[] content) throws IOException;
-	}
-
-	private static final Forcer FORCE = channel -> channel.force(true);
+	/** Das Erzwingen im Betrieb. */
+	static final Forcer FORCE = channel -> channel.force(true);
 
 	private DurableWrite() {
 	}
