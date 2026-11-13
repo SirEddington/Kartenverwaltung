@@ -1,0 +1,1779 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Code Map</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --surface-2: #eef2f6;
+      --ink: #17202a;
+      --muted: #617080;
+      --line: #c7d0d9;
+      --strong-line: #738395;
+      --api: #2563eb;
+      --auth: #0f766e;
+      --worker: #7c3aed;
+      --data: #b45309;
+      --external: #475569;
+      --risk: #b91c1c;
+      --ok: #047857;
+      --radius: 8px;
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 10px 28px rgba(15, 23, 42, 0.08);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.45;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      padding: 16px 22px 14px;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0;
+      font-weight: 720;
+    }
+
+    .subtitle {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+      padding: 3px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: #2e3b48;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(640px, 1fr) 390px;
+      gap: 16px;
+      padding: 16px;
+      min-height: 0;
+    }
+
+    .workspace {
+      display: grid;
+      grid-auto-rows: min-content;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .search {
+      min-width: min(360px, 100%);
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      background: #fbfcfe;
+      border-radius: 7px;
+      padding: 6px 10px;
+    }
+
+    .search input {
+      width: 100%;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--ink);
+      min-height: 26px;
+    }
+
+    .segmented {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .segmented button,
+    .flow-tabs button {
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      color: #263544;
+      min-height: 30px;
+      border-radius: 7px;
+      padding: 5px 9px;
+      cursor: pointer;
+    }
+
+    .segmented button.active,
+    .flow-tabs button.active {
+      color: #fff;
+      border-color: #1f2937;
+      background: #1f2937;
+    }
+
+    .diagram-shell {
+      position: relative;
+      height: 58vh;
+      min-height: 440px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.05) 1px, transparent 0) 0 0 / 22px 22px,
+        #fbfcfe;
+      box-shadow: var(--shadow);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 440px;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    svg.panning {
+      cursor: grabbing;
+    }
+
+    .zoom-controls {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      gap: 6px;
+      z-index: 3;
+    }
+
+    .zoom-controls button {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.94);
+      color: #263544;
+      min-width: 30px;
+      min-height: 30px;
+      border-radius: 7px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-weight: 650;
+      box-shadow: var(--shadow);
+    }
+
+    .zoom-controls button:hover {
+      border-color: #1f2937;
+    }
+
+    .zoom-hint {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 3;
+      font-size: 11px;
+      color: #5a6b7c;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+    }
+
+    .cluster-label {
+      fill: #64748b;
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    .cluster-box {
+      fill: transparent;
+      stroke: #d7dee7;
+      stroke-width: 1;
+      stroke-dasharray: 6 5;
+    }
+
+    .edge {
+      fill: none;
+      stroke: var(--strong-line);
+      stroke-width: 1.4;
+      marker-end: url(#arrow);
+      opacity: 0.4;
+      transition: opacity 0.18s ease, stroke 0.18s ease, stroke-width 0.18s ease;
+    }
+
+    .edge-group {
+      cursor: pointer;
+    }
+
+    .edge-hit {
+      fill: none;
+      stroke: transparent;
+      stroke-width: 14;
+    }
+
+    .edge-label {
+      pointer-events: none;
+      fill: #34414e;
+      font-size: 10px;
+      font-weight: 600;
+      paint-order: stroke;
+      stroke: #fbfcfe;
+      stroke-width: 3.5px;
+      opacity: 0;
+      transition: opacity 0.18s ease;
+    }
+
+    /* Connected to the current selection (or part of a traced flow) */
+    .edge-group.flow .edge {
+      stroke-width: 2.6;
+      opacity: 0.95;
+      stroke: #1f2937;
+      marker-end: url(#arrow-active);
+    }
+
+    .edge-group.flow .edge-label {
+      opacity: 1;
+    }
+
+    .edge-group.faded {
+      opacity: 0.12;
+    }
+
+    .edge-group.dim {
+      opacity: 0.07;
+    }
+
+    .node {
+      cursor: pointer;
+    }
+
+    .node rect {
+      stroke: #cdd6e0;
+      stroke-width: 1.2;
+      rx: 11;
+      ry: 11;
+      filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.08));
+      transition: stroke 0.18s ease, stroke-width 0.18s ease, opacity 0.18s ease;
+    }
+
+    .node text {
+      pointer-events: none;
+      letter-spacing: 0;
+    }
+
+    .node .label {
+      fill: var(--ink);
+      font-weight: 720;
+      font-size: 13px;
+    }
+
+    .node .hint {
+      fill: var(--muted);
+      font-size: 11px;
+    }
+
+    .node .stripe {
+      stroke-width: 4;
+      stroke-linecap: round;
+    }
+
+    .node.active rect {
+      stroke: #1f2937;
+      stroke-width: 2.6;
+      filter: drop-shadow(0 3px 10px rgba(15, 23, 42, 0.18));
+    }
+
+    .node.focus rect {
+      stroke: #5a6b7c;
+      stroke-width: 1.8;
+    }
+
+    .node.faded {
+      opacity: 0.34;
+    }
+
+    .node.dim {
+      opacity: 0.16;
+    }
+
+    .legend {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      max-width: 70%;
+      padding: 8px;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .legend .key {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #344456;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    aside {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 14px;
+    }
+
+    .panel,
+    .section {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .panel {
+      overflow: hidden;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .panel-head {
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .panel-head h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .panel-head p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .panel-body {
+      overflow: auto;
+      padding: 14px;
+    }
+
+    .detail-block {
+      margin-bottom: 18px;
+    }
+
+    .detail-block h3,
+    .section h2 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #415162;
+    }
+
+    .detail-block ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .detail-block li {
+      margin: 5px 0;
+    }
+
+    .file-list {
+      display: grid;
+      gap: 5px;
+    }
+
+    code,
+    .file {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #1f3b57;
+      background: #eef4fa;
+      border: 1px solid #dae6ef;
+      padding: 2px 5px;
+      border-radius: 5px;
+    }
+
+    .section {
+      padding: 14px;
+    }
+
+    .flows {
+      display: grid;
+      grid-template-rows: auto auto;
+      gap: 12px;
+    }
+
+    .flow-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .flow-content {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+      gap: 12px;
+    }
+
+    .flow-content ol {
+      margin: 0;
+      padding-left: 19px;
+    }
+
+    .flow-content li {
+      margin: 6px 0;
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: 1.1fr 0.8fr 1.4fr 1.4fr 0.9fr;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--surface);
+    }
+
+    .matrix div {
+      padding: 8px 9px;
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      font-size: 12px;
+      min-height: 34px;
+    }
+
+    .matrix .head {
+      background: #edf2f7;
+      color: #334155;
+      font-weight: 720;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 11px;
+    }
+
+    .matrix div:nth-child(5n) {
+      border-right: 0;
+    }
+
+    .matrix div:nth-last-child(-n + 5) {
+      border-bottom: 0;
+    }
+
+    .warn {
+      border-left: 4px solid var(--risk);
+      padding-left: 10px;
+    }
+
+    .ok {
+      border-left: 4px solid var(--ok);
+      padding-left: 10px;
+    }
+
+    .info {
+      border-left: 4px solid var(--api);
+      padding-left: 10px;
+    }
+
+    .guide {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      margin-top: 8px;
+    }
+
+    .guide .item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: #44545f;
+    }
+
+    .guide .glyph {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      border: 1px solid var(--line);
+      background: #f1f5f9;
+      font-size: 11px;
+      color: #334155;
+    }
+
+    .detail-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+      color: #344456;
+    }
+
+    .neighbors {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .neighbors button {
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      color: #1f3b57;
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .neighbors button:hover {
+      border-color: #1f2937;
+    }
+
+    .neighbors .dir {
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    .job-matrix {
+      grid-template-columns: 1.3fr 0.8fr 1.7fr 1.6fr;
+    }
+
+    .job-matrix div:nth-child(5n) {
+      border-right: 1px solid var(--line);
+    }
+
+    .job-matrix div:nth-child(4n) {
+      border-right: 0;
+    }
+
+    .job-matrix div:nth-last-child(-n + 4) {
+      border-bottom: 0;
+    }
+
+    .job-matrix code {
+      font-size: 11px;
+    }
+
+    /* ----- Overview ----- */
+    .overview {
+      padding: 16px;
+    }
+
+    .overview h2 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      letter-spacing: 0;
+      text-transform: none;
+      color: var(--ink);
+    }
+
+    .overview p {
+      margin: 0 0 10px;
+      font-size: 13.5px;
+      color: #38454f;
+      max-width: 78ch;
+    }
+
+    .overview p .accent {
+      color: var(--ink);
+      font-weight: 650;
+    }
+
+    .caps {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .cap {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: #2e3b48;
+      border: 1px solid var(--line);
+      background: #fbfcfe;
+      border-radius: 999px;
+      padding: 4px 11px;
+    }
+
+    .cap .dot {
+      width: 8px;
+      height: 8px;
+    }
+
+    .runtimes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .runtime {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      background: #fbfcfe;
+    }
+
+    .runtime h3 {
+      margin: 0 0 3px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .runtime.api h3 {
+      color: var(--api);
+    }
+
+    .runtime.worker h3 {
+      color: var(--worker);
+    }
+
+    .runtime p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* ----- Request lifecycle ----- */
+    .req {
+      display: grid;
+      gap: 12px;
+    }
+
+    .req-top {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .req-controls {
+      display: flex;
+      gap: 6px;
+    }
+
+    .req-controls button {
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      color: #263544;
+      min-height: 30px;
+      border-radius: 7px;
+      padding: 5px 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .req-controls button.primary {
+      background: #1f2937;
+      color: #fff;
+      border-color: #1f2937;
+    }
+
+    .req-controls button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .req-request {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      line-height: 1.7;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .req-request .method {
+      color: #7dd3fc;
+      font-weight: 700;
+    }
+
+    .req-request .path {
+      color: #fbbf24;
+    }
+
+    .req-request .hdr-k {
+      color: #94a3b8;
+    }
+
+    .req-request .hdr-v {
+      color: #cbd5e1;
+    }
+
+    .req-progress {
+      height: 6px;
+      background: var(--surface-2);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .req-progress .bar {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, var(--api), var(--worker));
+      transition: width 0.35s ease;
+    }
+
+    .req-track {
+      display: grid;
+      gap: 8px;
+    }
+
+    .req-stage {
+      display: grid;
+      grid-template-columns: 34px 1fr auto;
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px 10px 14px;
+      background: #fbfcfe;
+      opacity: 0.5;
+      transition: opacity 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+      position: relative;
+    }
+
+    .req-stage .stripe2 {
+      position: absolute;
+      left: 0;
+      top: 9px;
+      bottom: 9px;
+      width: 4px;
+      border-radius: 0 4px 4px 0;
+    }
+
+    .req-stage .num {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      background: var(--surface-2);
+      color: #475569;
+      border: 1px solid var(--line);
+    }
+
+    .req-stage.done {
+      opacity: 1;
+    }
+
+    .req-stage.done .num {
+      background: var(--ok);
+      color: #fff;
+      border-color: var(--ok);
+    }
+
+    .req-stage.active {
+      opacity: 1;
+      border-color: #1f2937;
+      box-shadow: var(--shadow);
+    }
+
+    .req-stage.active .num {
+      background: #1f2937;
+      color: #fff;
+      border-color: #1f2937;
+    }
+
+    .req-stage .title {
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .req-stage .desc {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    .req-stage .file {
+      margin-top: 6px;
+      display: inline-block;
+    }
+
+    .req-stage .badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+      align-self: center;
+    }
+
+    .req-stage .badge.gate {
+      background: #fef2f2;
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+    }
+
+    .req-stage .badge.pass {
+      background: #ecfdf5;
+      color: #047857;
+      border: 1px solid #a7f3d0;
+    }
+
+    .req-stage .badge.return {
+      background: #eff6ff;
+      color: #1d4ed8;
+      border: 1px solid #bfdbfe;
+    }
+
+    @media (max-width: 1040px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+
+      aside {
+        grid-template-rows: auto;
+      }
+
+      .flow-content {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      header,
+      main {
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+
+      .toolbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .matrix {
+        grid-template-columns: 1fr;
+      }
+
+      .matrix div {
+        border-right: 0;
+      }
+
+      .matrix .head {
+        display: none;
+      }
+
+      .runtimes {
+        grid-template-columns: 1fr;
+      }
+
+      .req-stage {
+        grid-template-columns: 30px 1fr;
+      }
+
+      .req-stage .badge {
+        grid-column: 2;
+        justify-self: start;
+        margin-top: 6px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="title-row">
+        <div>
+          <h1 id="bm-title"></h1>
+          <p class="subtitle" id="bm-subtitle"></p>
+          <div class="guide">
+            <span class="item"><span class="glyph">&#9673;</span> click a node to spotlight its connections + see details</span>
+            <span class="item"><span class="glyph">&rarr;</span> click an edge to read what flows between two parts</span>
+            <span class="item"><span class="glyph">&#9678;</span> pick a flow tab to trace a whole path</span>
+            <span class="item"><span class="glyph">&times;</span> click empty space to clear</span>
+          </div>
+        </div>
+        <div class="meta" id="bm-meta"></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="workspace">
+        <div class="section overview">
+          <h2 id="bm-ov-title">Overview</h2>
+          <p id="bm-summary"></p>
+          <div class="caps" id="bm-caps"></div>
+        </div>
+
+        <div class="toolbar">
+          <label class="search" aria-label="Search components">
+            <span>Search</span>
+            <input id="search" type="search" placeholder="component, file, endpoint, design decision" />
+          </label>
+          <div class="segmented" role="group" aria-label="Layer filter" id="bm-segmented"></div>
+        </div>
+
+        <div class="diagram-shell">
+          <span class="zoom-hint">Drag to pan &middot; scroll to zoom</span>
+          <div class="zoom-controls">
+            <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+            <button type="button" data-zoom="out" aria-label="Zoom out">&minus;</button>
+            <button type="button" data-zoom="reset">Reset</button>
+          </div>
+          <svg id="diagram" viewBox="0 0 1560 720" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Interactive backend architecture diagram">
+            <defs>
+              <marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L8,3 z" fill="#738395"></path>
+              </marker>
+              <marker id="arrow-active" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L8,3 z" fill="#1f2937"></path>
+              </marker>
+            </defs>
+            <g id="viewport">
+              <g id="clusters"></g>
+              <g id="edges"></g>
+              <g id="nodes"></g>
+            </g>
+          </svg>
+          <div class="legend" id="bm-legend"></div>
+        </div>
+
+        <div class="section req">
+          <div class="req-top">
+            <div>
+              <h2 id="bm-wt-title">Worked example</h2>
+              <p class="subtitle" style="margin:4px 0 0">Step through a path stage by stage. Pick a scenario, then play or step.</p>
+            </div>
+            <div class="flow-tabs" id="reqScenarios"></div>
+          </div>
+          <div id="reqRequest" class="req-request"></div>
+          <div class="req-progress"><div id="reqBar" class="bar"></div></div>
+          <div class="req-top">
+            <span class="subtitle" id="reqStatus">Stage 0 / 0</span>
+            <div class="req-controls">
+              <button type="button" id="reqPlay" class="primary">Play</button>
+              <button type="button" id="reqStep">Step</button>
+              <button type="button" id="reqReset">Reset</button>
+            </div>
+          </div>
+          <div id="reqTrack" class="req-track"></div>
+        </div>
+
+        <div class="section flows">
+          <div>
+            <h2>Flow Walkthroughs</h2>
+            <div id="flowTabs" class="flow-tabs"></div>
+          </div>
+          <div id="flowContent" class="flow-content"></div>
+        </div>
+
+        <div class="section" id="bm-matrices-section">
+          <h2 id="bm-matrices-title">Reference tables</h2>
+          <div id="bm-matrices"></div>
+        </div>
+
+            </section>
+
+      <aside>
+        <div class="panel">
+          <div class="panel-head">
+            <h2 id="detailTitle">Select a component</h2>
+            <p id="detailSubtitle">Click any node in the diagram or a flow tab to inspect how it works.</p>
+          </div>
+          <div id="detailBody" class="panel-body"></div>
+        </div>
+
+        <div class="section">
+          <h2>Scan Notes</h2>
+          <div id="bm-notes"></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script>
+    const DATA = {"title":"Kartenverwaltung — Architektur 1.1","subtitle":"Aus einem Scan von src/main/java/…/karten, patchnotes.md und docs/ auf release/1.1.0","summary":"Eine JavaFX-Desktop-App für den Kartenvorverkauf, ohne Server und ohne Datenbank. Jeder Arbeitsplatz hält alle Daten als JSON-Versionen lokal; Arbeitsplätze tauschen sich über einen gemeinsamen Ordner aus (Netzlaufwerk, Nextcloud). Die Schichten laufen strikt von oben nach unten: UI → Repository/Validierung/Modell → Version-Store → FileLayer. Neu in 1.1: das Paket update (Update-Prüfung, Update über den gemeinsamen Ordner, Patchnotes), ein vorwärtskompatibles Datenformat, dauerhaftes Schreiben auf die Platte, Lageprüfungen für Hallen, das gemerkte Menü „Anzeige“ und die barrierefreie Sitzdarstellung. Knoten mit „neu in 1.1“ im Untertitel sind in diesem Release hinzugekommen.","mode":"architecture","meta":["Java + JavaFX","Jackson JSON","Append-only Version-Store","Gemeinsamer Ordner","Conveyor (MSIX)","v1.1.0"],"layers":[{"key":"ui","label":"Start & UI","color":"#2563eb","tint":"#e0e9fc"},{"key":"domain","label":"Modell & Regeln","color":"#7c3aed","tint":"#ede3fc"},{"key":"repo","label":"Repository","color":"#b45309","tint":"#f5e7dd"},{"key":"store","label":"Version-Store","color":"#be123c","tint":"#f6dee4"},{"key":"update","label":"Updates","color":"#0f766e","tint":"#ddeceb"},{"key":"fs","label":"Ablage & extern","color":"#475569","tint":"#e5e7ea"}],"clusters":[{"key":"boot","label":"Programmstart","x":24,"y":24,"w":368,"h":202},{"key":"screens","label":"Bildschirme","x":422,"y":24,"w":368,"h":286},{"key":"updateui","label":"Update-Oberfläche (neu)","x":820,"y":24,"w":368,"h":202},{"key":"plumbing","label":"UI-Verkabelung","x":24,"y":346,"w":368,"h":202},{"key":"domain","label":"Modell & Validierung","x":422,"y":346,"w":368,"h":286},{"key":"repo","label":"Repository-Schicht","x":24,"y":668,"w":368,"h":286},{"key":"updates","label":"Paket update (neu)","x":422,"y":668,"w":368,"h":286},{"key":"store","label":"Version-Store & Sync","x":24,"y":990,"w":546,"h":286},{"key":"disk","label":"Ablage & extern","x":600,"y":990,"w":368,"h":202}],"nodes":[{"id":"mainapp","label":"MainApp","hint":"Start, Bildwechsel","layer":"ui","x":44,"y":68,"description":"Einstiegspunkt. main() richtet Logdatei und globalen Fehlerdialog (SYS-001) ein; start() lädt Einstellungen, installiert DisplayPreferences, erzeugt den SyncService, installiert die Konflikt-Policies, startet den Ordner-Abgleich im Hintergrund und lädt dann Säle vor Events. Seit 1.1 verdrahtet MainApp auch die Updates: UpdateChecker, UpdateFlow (record Updates), FolderWatch mit SharedFolderAccess und nach dem Laden die Patchnotes (onLoaded).","decisions":["Konflikt-Policies werden vor dem Store-Start installiert, weil schon der Start verlorene Änderungen auflöst.","Säle werden vor Events geladen: Das Event-Laden braucht den Saalplan, um Buchungen ohne passenden Sitz auszusortieren.","Das Paket update kennt den Store nicht; MainApp verbindet es über eine anonyme SharedFolderAccess mit dem SyncService."],"files":["src/main/java/de/eltviller_carneval_verein/karten/MainApp.java:199","src/main/java/de/eltviller_carneval_verein/karten/MainApp.java:248","src/main/java/de/eltviller_carneval_verein/karten/MainApp.java:395","src/main/java/de/eltviller_carneval_verein/karten/MainApp.java:659","src/main/java/de/eltviller_carneval_verein/karten/MainApp.java:697","src/main/java/de/eltviller_carneval_verein/karten/MainApp.java:1420","src/main/java/de/eltviller_carneval_verein/karten/AppLogging.java","src/main/java/de/eltviller_carneval_verein/karten/GlobalErrorHandler.java","src/main/java/de/eltviller_carneval_verein/karten/ui/menu/MenuController.java"],"data":["Primäre Stage","record Updates","globale UI-Singletons"]},{"id":"settings","label":"Einstellungen","hint":"settings.json","layer":"ui","x":222,"y":68,"description":"AppSettings mit Vorgabewerten (sharedDir, saveBookingsImmediately, checkCloudServer, recentOperators, display → DisplaySettings, patchNotesSeen), gespeichert von SettingsStore unter <AppData>/settings.json. existedAtLoad() unterscheidet Neuinstallation und Update. Der Einstellungsbildschirm hat neu die Abschnitte „Anzeige“ und „Info und Updates“.","decisions":["Immer über SettingsStore.getInstance().current() lesen, nie eigene Kopien halten.","patchNotesSeen merkt die zuletzt gezeigte Version; bei einer Neuinstallation erscheinen keine Patchnotes."],"files":["src/main/java/de/eltviller_carneval_verein/karten/settings/SettingsStore.java","src/main/java/de/eltviller_carneval_verein/karten/settings/AppSettings.java","src/main/java/de/eltviller_carneval_verein/karten/settings/DisplaySettings.java","src/main/java/de/eltviller_carneval_verein/karten/AppPaths.java","src/main/java/de/eltviller_carneval_verein/karten/ui/settings/SettingsController.java","src/main/java/de/eltviller_carneval_verein/karten/ui/settings/SharedFolderSection.java","src/main/java/de/eltviller_carneval_verein/karten/ui/settings/DisplaySection.java"],"data":["AppSettings","DisplaySettings"]},{"id":"sharedstart","label":"Ordner-Start","hint":"SharedFolderStart","layer":"ui","x":44,"y":152,"description":"Vergleicht beim Start die Einstellung sharedDir mit der Verbunden-Markierung des Stores (connection.json) und entscheidet: offline starten, weitermachen oder neu verbinden. ConnectFlow führt die Verbindung (MERGE, SET_ASIDE, ASK) ohne Szenengraph aus.","decisions":["ConnectFlow ist eine reine Logikklasse mit dünnem JavaFX-Wrapper — testbar ohne Toolkit."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/shared/SharedFolderStart.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/ConnectFlow.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/ConnectDecisionDialog.java","src/main/java/de/eltviller_carneval_verein/karten/store/ConnectionMarker.java"],"data":["connection.json","ConnectMode"]},{"id":"sales","label":"Kartenverkauf","hint":"Tabelle, Saalplan","layer":"ui","x":442,"y":68,"description":"Verkaufsoberfläche: Kartentabelle, Saalübersicht mit Sitzauswahl, Sammelbearbeitung, Suche, Storno, Platz zuweisen und das Kundenfenster auf dem zweiten Bildschirm. Gesperrte Units erscheinen als blockierte Sitze. Saalansicht und Kundenfenster folgen dem gemeinsamen Menü „Anzeige“.","decisions":["Zustandsänderungen an Buchungen laufen immer über SaleDates.change, damit Datum und bezahlter Betrag überall gleich gesetzt werden."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/sales/TicketShellController.java","src/main/java/de/eltviller_carneval_verein/karten/ui/sales/TicketTableController.java","src/main/java/de/eltviller_carneval_verein/karten/ui/sales/HallOverviewController.java","src/main/java/de/eltviller_carneval_verein/karten/ui/sales/HallPlanPane.java","src/main/java/de/eltviller_carneval_verein/karten/ui/sales/CustomerDisplay.java","src/main/java/de/eltviller_carneval_verein/karten/ui/sales/LockedSeats.java","src/main/java/de/eltviller_carneval_verein/karten/ui/sales/SalesViewState.java","src/main/resources/de/eltviller_carneval_verein/karten/ui/TicketShellView.fxml"],"data":["Booking","BookingDTO"]},{"id":"seatlook","label":"Sitzdarstellung","hint":"barrierefrei · neu in 1.1","layer":"ui","x":620,"y":68,"description":"KARV-26: Der Sitzstatus ist nicht mehr nur Farbe. Frei = weiß mit grünem Ring, reserviert = gelb gestreift, verkauft = rot, gesperrt = grau mit Kreuz; eine Legende unter dem Plan erklärt es. Abschaltbar im Menü „Anzeige“.","decisions":["Form und Muster tragen die Information, damit Plätze auch bei Rot-Grün-Schwäche unterscheidbar bleiben.","SeatLook ist eine reine Zeichenklasse; Saalansicht und Kundenfenster nutzen sie gleich."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/sales/SeatLook.java:32","src/main/java/de/eltviller_carneval_verein/karten/ui/sales/HallOverviewController.java","src/main/resources/de/eltviller_carneval_verein/karten/ui/HallOverviewView.fxml","src/main/resources/de/eltviller_carneval_verein/karten/ui/style.css"],"data":["Sitzstatus","Legende"]},{"id":"accounting","label":"Abrechnung","hint":"Kasse, Statistik","layer":"ui","x":442,"y":152,"description":"Kassenabgleich je Vorstellung, Statistik und Export als CSV/PDF. Neu: ein Hinweis, wenn gesperrte Buchungen in den Summen fehlen (LockedBookingsNotice).","decisions":["Geld ist überall int-Cent; Formatierung zentral in util.MoneyFormat.","Gesperrte Buchungen werden nicht still mitgezählt oder weggelassen — die Abrechnung sagt, dass sie fehlen."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/accounting/AccountingShellController.java","src/main/java/de/eltviller_carneval_verein/karten/ui/accounting/CashReconciliationController.java","src/main/java/de/eltviller_carneval_verein/karten/ui/accounting/StatisticsController.java","src/main/java/de/eltviller_carneval_verein/karten/ui/accounting/LockedBookingsNotice.java","src/main/java/de/eltviller_carneval_verein/karten/util/BookingTotals.java","src/main/resources/de/eltviller_carneval_verein/karten/ui/AccountingShellView.fxml"],"data":["actualCashAmount","paidAmount"]},{"id":"editors","label":"Event- & Saal-Editor","hint":"Verwaltung","layer":"ui","x":620,"y":152,"description":"Events und Vorstellungen anlegen/bearbeiten, Saalplan umstellen; Saalplan- und Sitzplan-Editor mit Reihen, Tischen, Sitzen und Saalobjekten. Neu in 1.1 (KARV-128): Tische mit Beschriftung (Text, Größe, Ausrichtung, Drehung, PlanText), „Reihe füllen…“ mit Tisch- und Sitzmaßen, Sammeländern ganzer Reihen, gesperrte Einträge werden vor dem Bearbeiten abgefangen (LockedEntryGuard).","decisions":["Ein Sitzplanwechsel zeigt vorher per BookingSync.preview, welche Buchungen ohne Platz landen.","Ein Tisch behält beim Umnummerieren seinen Platz; „Nummern neu vergeben“ nummeriert nach dem Platz."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/event/EventEditController.java","src/main/java/de/eltviller_carneval_verein/karten/ui/event/PlanSwitchDialog.java","src/main/java/de/eltviller_carneval_verein/karten/ui/event/LockedEntryGuard.java","src/main/java/de/eltviller_carneval_verein/karten/ui/hall/HallEditController.java","src/main/java/de/eltviller_carneval_verein/karten/ui/hall/SeatingPlanController.java","src/main/java/de/eltviller_carneval_verein/karten/ui/hall/SeatingPlanLayout.java","src/main/java/de/eltviller_carneval_verein/karten/ui/hall/PlanText.java","src/main/java/de/eltviller_carneval_verein/karten/ui/hall/RowFillDialog.java","src/main/java/de/eltviller_carneval_verein/karten/ui/hall/TableRowBulkEdit.java","src/main/java/de/eltviller_carneval_verein/karten/ui/hall/PlanImpact.java"],"data":["Event","Presentation","Hall","SeatingPlan"]},{"id":"syncui","label":"Sync & Konflikte","hint":"Statusleiste, Dialoge","layer":"ui","x":442,"y":236,"description":"Sync-Anzeige und Info-Fenster, Konfliktliste und -dialog, gesperrte Einträge mit Zurücksetzen, Bediener-Dialog. Die Statusleiste trägt seit 1.1 auch den Update-Hinweis.","decisions":["SyncStatus ist reine Logik; SyncIndicator nur die Darstellung."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/shared/SyncIndicator.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/SyncStatus.java","src/main/java/de/eltviller_carneval_verein/karten/ui/ConflictDialog.java","src/main/java/de/eltviller_carneval_verein/karten/ui/ConflictList.java","src/main/java/de/eltviller_carneval_verein/karten/ui/ConflictIndicator.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/LockedUnitsDialog.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/OperatorDialog.java"],"data":["SyncState","ConflictLedger-Einträge"]},{"id":"updateflow","label":"UpdateFlow","hint":"Update ausführen · neu","layer":"ui","x":840,"y":68,"description":"Führt ein Update nur mit Zustimmung aus (KARV-130/131): Rückfrage, offene Eingaben sichern wie beim Schließen, frisch prüfen, .appinstaller laden bzw. die Datei im gemeinsamen Ordner erneut prüfen, öffnen, App beenden — den Rest erledigt der Windows App Installer. Drei Wege: update (direkt), updateFromFolder (KARV-132), updateViaBrowser.","decisions":["Nie ohne Zustimmung: Auch das Angebot beim Start (StartPrompt) hat „Später“.","Die Ordnerdatei wird vor dem Öffnen mit Zeitlimit neu geprüft, damit eine hängende Freigabe die Busy-Ansicht nicht festhält."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/shared/UpdateFlow.java:125","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/UpdateFlow.java:150","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/StartPrompt.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/StartPromptTicker.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/DialogConfirmation.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/Confirmation.java"],"data":["UpdateInfo","FolderOffer"]},{"id":"updatehint","label":"Update-Hinweise","hint":"Fußzeile, Info · neu","layer":"ui","x":1018,"y":68,"description":"UpdateIndicator (Update von der Quelle) und UpdateHint (Ordner: neuere Kasse, Installer bereit, wird geladen) in der Fußzeile; Einstellungen → „Info und Updates“ zeigt installierte Version und Stand der Prüfung. Alle Texte zentral in UpdateTexts.","decisions":["Die Anzeige folgt nur UpdateState bzw. FolderState — sie entscheidet nichts selbst."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/shared/UpdateIndicator.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/UpdateHint.java","src/main/java/de/eltviller_carneval_verein/karten/ui/settings/InfoSection.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/UpdateTexts.java"],"data":["UpdateState","FolderState"]},{"id":"patchwindow","label":"„Was ist neu“","hint":"Patchnotes-Fenster · neu","layer":"ui","x":840,"y":152,"description":"KARV-125: PatchNotesWindow zeigt nach einem Update einmal die Abschnitte der neuen Versionen; unter „Info und Updates“ jederzeit wieder (PatchNoteActions). Verlinkt auf die GitHub-Release-Seite.","decisions":["Die App lädt die Release-Seite nie herunter, sie verlinkt nur — die Texte kommen aus den eigenen Ressourcen."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/shared/PatchNotesWindow.java","src/main/java/de/eltviller_carneval_verein/karten/ui/settings/PatchNoteActions.java"],"data":["PatchNotes"]},{"id":"tracking","label":"Änderungserkennung","hint":"JSON-Snapshots","layer":"ui","x":44,"y":390,"description":"ChangeTracker (je einer für Events, Säle, Einstellungen) vergleicht JSON-Snapshots mit dem zuletzt geladenen/gespeicherten Stand. ChangeTrigger stößt den Vergleich nach kurzem Debounce bei jedem Maus-/Tasten-/Action-Ereignis an. LeaveGuard fragt beim Verlassen: speichern / nicht speichern / abbrechen; StateRestorer setzt einen Snapshot zurück.","decisions":["Snapshot-Vergleich statt instrumentierter Setter — das Modell bleibt aus einfachen Jackson-Objekten.","Gleicher ObjectMapper wie die Repositories (JsonMapperFactory), damit Snapshot und Speicherstand identisch serialisieren."],"files":["src/main/java/de/eltviller_carneval_verein/karten/tracking/ChangeTracker.java","src/main/java/de/eltviller_carneval_verein/karten/tracking/StateRestorer.java","src/main/java/de/eltviller_carneval_verein/karten/ui/ChangeTrigger.java","src/main/java/de/eltviller_carneval_verein/karten/ui/LeaveGuard.java","src/main/java/de/eltviller_carneval_verein/karten/ui/DirtyIndicator.java"],"data":["Snapshots je Entität"]},{"id":"savers","label":"Speichern","hint":"EventSaver, AutoSave","layer":"ui","x":222,"y":390,"description":"EventSaver/HallSaver/SettingsSaver validieren und speichern über das Repository. BookingAutoSave plant bei aktiver Einstellung „Buchungen sofort speichern“ ein Speichern, sobald der Tracker eine Buchungsänderung meldet.","decisions":["Fehler blockieren das Speichern, Warnungen werden danach angezeigt."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/EventSaver.java:29","src/main/java/de/eltviller_carneval_verein/karten/ui/HallSaver.java","src/main/java/de/eltviller_carneval_verein/karten/ui/SettingsSaver.java","src/main/java/de/eltviller_carneval_verein/karten/ui/sales/BookingAutoSave.java"],"data":["SaveResult"]},{"id":"liveupdates","label":"LiveUpdates","hint":"fremde Änderungen","layer":"ui","x":44,"y":474,"description":"Empfängt SyncListener-Meldungen auf dem FX-Thread und reicht geänderte Units zuerst ans Saal-, dann ans Event-Repository. Nach Saaländerungen synchronisiert BookingSyncService betroffene Buchungen neu; der ChangeTracker wird rebased, damit fremde Änderungen nie als eigene ungespeicherte zählen.","decisions":["Saal vor Event: Buchungen brauchen den neuen Sitzplan, bevor sie eingeordnet werden."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/LiveUpdates.java:152","src/main/java/de/eltviller_carneval_verein/karten/ui/LiveViews.java","src/main/java/de/eltviller_carneval_verein/karten/ui/BookingSyncService.java","src/main/java/de/eltviller_carneval_verein/karten/ui/EditingUnits.java"],"data":["Set<UnitKey>"]},{"id":"displayprefs","label":"Menü „Anzeige“","hint":"DisplayPreferences · neu","layer":"ui","x":222,"y":474,"description":"KARV-76: Eine app-weite Auswahl (Reihen, Tische, Platznummern, Hallenobjekte, barrierefreie Sitzdarstellung, Lage der Kaufzusammenfassung) für Saalansicht, Kundenfenster und Hallen-Editor. Wird in settings.json (display) gemerkt und beim Start wiederhergestellt; abschaltbar unter Einstellungen → „Anzeige“.","decisions":["Ein Singleton (install/instance) statt Zustand je Bildschirm, damit alle Ansichten dieselbe Auswahl zeigen.","unsaved() für Tests und für den Fall „nicht merken“ — dann schreibt die Auswahl nichts in die Einstellungen."],"files":["src/main/java/de/eltviller_carneval_verein/karten/ui/DisplayPreferences.java:68","src/main/java/de/eltviller_carneval_verein/karten/settings/DisplaySettings.java","src/main/java/de/eltviller_carneval_verein/karten/ui/settings/DisplaySection.java","src/main/java/de/eltviller_carneval_verein/karten/ui/hall/PlanLabelOptions.java","src/main/java/de/eltviller_carneval_verein/karten/ui/sales/SummaryPlacementMenu.java"],"data":["DisplaySettings"]},{"id":"model","label":"Domänenmodell","hint":"Event, Booking, Hall","layer":"domain","x":442,"y":390,"description":"Einfache, veränderliche Java-Objekte, von Jackson serialisiert: Event → Presentation → Booking; Hall → HallObject, SeatingPlan → TableRow → Table → Seat. Geld immer als int-Cent. Neu in 1.1: Sitze sind Kreise mit Durchmesser und verteilen sich gleichmäßig am Tisch; Tische tragen eine Beschriftung (TextSettings, Labeled).","decisions":["Setter nehmen jeden Wert an — Jackson ruft sie beim Laden auf; Regeln stehen in Validatoren und statischen Helfern.","Neue Bestuhlungen starten mit Tischen 50 × 320 cm und Sitzen mit 45 cm Durchmesser."],"files":["src/main/java/de/eltviller_carneval_verein/karten/model/Event.java","src/main/java/de/eltviller_carneval_verein/karten/model/Presentation.java","src/main/java/de/eltviller_carneval_verein/karten/model/Booking.java","src/main/java/de/eltviller_carneval_verein/karten/model/Hall.java","src/main/java/de/eltviller_carneval_verein/karten/model/HallObject.java","src/main/java/de/eltviller_carneval_verein/karten/model/SeatingPlan.java","src/main/java/de/eltviller_carneval_verein/karten/model/Table.java","src/main/java/de/eltviller_carneval_verein/karten/model/Seat.java","src/main/java/de/eltviller_carneval_verein/karten/model/TextSettings.java","src/main/java/de/eltviller_carneval_verein/karten/model/PaymentStatus.java"],"data":["Event","Presentation","Booking","Hall","SeatingPlan","Table","Seat"]},{"id":"fwdcompat","label":"Vorwärts-kompatibel","hint":"UnknownFields · neu in 1.1","layer":"domain","x":620,"y":390,"description":"KARV-133 bis 136: Jede gespeicherte Modellklasse hält ein UnknownFields und reicht es über @JsonAnySetter/@JsonAnyGetter durch, sodass Felder einer neueren Version beim Speichern erhalten bleiben. TolerantEnum liest unbekannte Enum-Werte mit Rückfallwert; Requires markiert Inhalte, die eine neuere Version voraussetzen.","decisions":["Nichts Unbekanntes wird verworfen: Lesen tolerant, Schreiben unverändert durchreichen.","Requires.KNOWN ist in 1.1 leer — jeder requires-Eintrag einer neueren Version sperrt die Unit."],"files":["src/main/java/de/eltviller_carneval_verein/karten/model/UnknownFields.java:17","src/main/java/de/eltviller_carneval_verein/karten/model/TolerantEnum.java:14","src/main/java/de/eltviller_carneval_verein/karten/model/Requires.java:12","src/main/java/de/eltviller_carneval_verein/karten/repository/UnitMapper.java"],"data":["unbekannte JSON-Felder","requires"]},{"id":"bookingrules","label":"Buchungsregeln","hint":"BookingSync, SaleDates","layer":"domain","x":442,"y":474,"description":"BookingSync gleicht die Buchungen einer Vorstellung mit ihrem Sitzplan ab (gesperrte Sitze bleiben unangetastet); SaleDates.change setzt Reservierungs-, Zahlungs- und Abholdatum sowie den bezahlten Betrag bei Zustandswechseln; BookingCancellation macht aus einer Buchung einen leeren Platzhalter mit neuer ID.","decisions":["BookingSync verwirft nie eine Buchung mit Daten und vergibt nie einen Sitz doppelt; verwaiste Buchungen werden „ohne Platz“.","Leere Buchungen werden nie gespeichert — BookingSync erzeugt sie beim Laden neu."],"files":["src/main/java/de/eltviller_carneval_verein/karten/model/BookingSync.java:73","src/main/java/de/eltviller_carneval_verein/karten/model/BookingSync.java:115","src/main/java/de/eltviller_carneval_verein/karten/model/SaleDates.java:35","src/main/java/de/eltviller_carneval_verein/karten/model/BookingCancellation.java"],"data":["Booking","BookingSync.Report"]},{"id":"validation","label":"Validierung","hint":"Validator → Issues","layer":"domain","x":620,"y":474,"description":"Ein Validator je Entität. Validatoren werfen nie, sie liefern ein ValidationResult aus ValidationIssues mit stabilem Code (EVT-, PRS-, HLL-, SPL-, TBL-, SEA- …), Severity und Meldungsvorlage mit Platzhaltern &1–&9.","decisions":["Neue Issue-Enums müssen in IssueConventionsTest eingetragen werden.","Technische Fehler sind keine Issues, sondern SYS-Meldungen (StoreMessages)."],"files":["src/main/java/de/eltviller_carneval_verein/karten/validation/EventValidator.java","src/main/java/de/eltviller_carneval_verein/karten/validation/PresentationValidator.java","src/main/java/de/eltviller_carneval_verein/karten/validation/BookingValidator.java","src/main/java/de/eltviller_carneval_verein/karten/validation/ValidationResult.java","src/main/java/de/eltviller_carneval_verein/karten/validation/MessageTemplate.java"],"data":["ValidationIssue","Severity"]},{"id":"footprint","label":"Lageprüfungen","hint":"Footprint · neu in 1.1","layer":"domain","x":442,"y":558,"description":"KARV-60: Footprint bildet Tische (mit Sitzen) und Hallenobjekte als gedrehte Rechtecke, Kreise und Vereinigungen ab. Hall-, SeatingPlan-, Table- und HallObjectValidator prüfen damit Überlappungen und ob alles innerhalb der Hallengrenzen liegt.","decisions":["Geometrie als reine Rechnung im Paket validation — testbar ohne JavaFX und ohne Saalplan-Ansicht."],"files":["src/main/java/de/eltviller_carneval_verein/karten/validation/Footprint.java:73","src/main/java/de/eltviller_carneval_verein/karten/validation/Footprint.java:227","src/main/java/de/eltviller_carneval_verein/karten/validation/HallValidator.java","src/main/java/de/eltviller_carneval_verein/karten/validation/SeatingPlanValidator.java","src/main/java/de/eltviller_carneval_verein/karten/validation/TableValidator.java","src/main/java/de/eltviller_carneval_verein/karten/validation/HallObjectValidator.java"],"data":["Footprint","HLL-/SPL-/TBL-Issues"]},{"id":"repos","label":"Repositories","hint":"Event- & Saal-Cache","layer":"repo","x":44,"y":712,"description":"StoreEventRepository und StoreHallRepository halten alle Events und Säle im Speicher (Singletons) und sind die einzige Brücke zwischen Modell und Store. saveEvent schreibt Deltas, applyForeign arbeitet fremde Stände ein.","decisions":["Ein Event mit nicht eingearbeiteten fremden Ständen wird beim Speichern abgelehnt — es würde sonst fremde Stände überschreiben.","Gesperrte Units (LockedUnitException) werden nie überschrieben."],"files":["src/main/java/de/eltviller_carneval_verein/karten/repository/StoreEventRepository.java:221","src/main/java/de/eltviller_carneval_verein/karten/repository/StoreEventRepository.java:842","src/main/java/de/eltviller_carneval_verein/karten/repository/StoreHallRepository.java","src/main/java/de/eltviller_carneval_verein/karten/repository/EventRepository.java","src/main/java/de/eltviller_carneval_verein/karten/repository/LockedUnitException.java"],"data":["List<Event>","List<Hall>"]},{"id":"unitmapper","label":"Unit-Mapping","hint":"UnitMapper, Baseline","layer":"repo","x":222,"y":712,"description":"Zerlegt ein Event in Event-Kopf, je eine Presentation-Unit und je Sitz eine Booking-Unit (_<bookingId> für Buchungen ohne Platz); ein Saal ist eine Unit. UnitBaseline merkt sich den geladenen Stand, sodass nur geänderte Units angehängt werden. Seit 1.1 tragen die Units die unbekannten Felder der jeweiligen Ebene mit.","decisions":["Feine Units (pro Sitz) machen parallele Verkäufe an verschiedenen Kassen konfliktfrei."],"files":["src/main/java/de/eltviller_carneval_verein/karten/repository/UnitMapper.java","src/main/java/de/eltviller_carneval_verein/karten/repository/UnitBaseline.java","src/main/java/de/eltviller_carneval_verein/karten/repository/JsonMapperFactory.java"],"data":["UnitKey","JSON-Payload"]},{"id":"foreign","label":"Fremde Stände","hint":"EventMerge, Backlog","layer":"repo","x":44,"y":796,"description":"Mergt Versionen anderer Arbeitsplätze in die bestehenden Modellobjekte, damit offene Bildschirme ihre Objektidentität behalten. Units, die gerade bearbeitet werden, werden zurückgestellt (Statusleiste); Buchungen ohne bekannten Sitz still gehalten.","decisions":["In-place-Update statt Austausch der Objekte — Controller halten Referenzen."],"files":["src/main/java/de/eltviller_carneval_verein/karten/repository/EventMerge.java","src/main/java/de/eltviller_carneval_verein/karten/repository/ForeignBacklog.java","src/main/java/de/eltviller_carneval_verein/karten/repository/ForeignDecision.java","src/main/java/de/eltviller_carneval_verein/karten/repository/ForeignBatch.java"],"data":["UnitSnapshot"]},{"id":"policies","label":"Konflikt-Policies","hint":"3-Wege-Merge","layer":"repo","x":222,"y":796,"description":"Je Unit-Typ ein ConflictPolicy (EventHead, Presentation, Booking, Hall): Drei-Wege-Merge von Basis, Mein und Deren je Feldgruppe. BookingPolicy verfolgt zusätzlich Umzüge und Stornos und macht aus einem Doppelverkauf „meine Buchung wird ohne Platz“ statt einen Verkauf zu verlieren.","decisions":["Strategy-Muster: Der Store kennt keine Fachregeln; die Policies werden aus der Repository-Schicht injiziert."],"files":["src/main/java/de/eltviller_carneval_verein/karten/repository/ConflictPolicies.java:17","src/main/java/de/eltviller_carneval_verein/karten/repository/BookingPolicy.java:77","src/main/java/de/eltviller_carneval_verein/karten/repository/EventHeadPolicy.java","src/main/java/de/eltviller_carneval_verein/karten/repository/PresentationPolicy.java","src/main/java/de/eltviller_carneval_verein/karten/repository/HallPolicy.java","src/main/java/de/eltviller_carneval_verein/karten/repository/FieldMerge.java"],"data":["ConflictInput","Resolution"]},{"id":"contentrules","label":"Inhaltsprüfung","hint":"ContentRules · neu in 1.1","layer":"repo","x":44,"y":880,"description":"ContentRules ist die fachliche Umsetzung der Store-Schnittstelle ContentGate: Eine Version ist „inhaltlich zu neu“, wenn sie einen unbekannten requires-Eintrag oder einen unbekannten Zahlungsstatus (STRICT_FIELDS: Booking.paymentStatus) trägt. Der Store liest sie, ChainResolver beendet die Kette davor, die Unit wird mit SYS-009 gesperrt.","decisions":["Der Store bleibt fachfrei: Er fragt nur gate.isNewer(unit, payload), die Regeln liegen in repository.","Schreibt eine neuere Kasse einen lesbaren Stand, ist die Unit wieder frei."],"files":["src/main/java/de/eltviller_carneval_verein/karten/repository/ContentRules.java:32","src/main/java/de/eltviller_carneval_verein/karten/store/ContentGate.java:10","src/main/java/de/eltviller_carneval_verein/karten/store/UnitState.java:74"],"data":["rulesId","SYS-009"]},{"id":"restore","label":"Wiederherstellen","hint":"RestorePlanner","layer":"repo","x":222,"y":880,"description":"Berechnet Sicherungspunkte aus den gültigen Ketten der Units eines Events oder Saals. Die Wiederherstellung selbst ist ein normales Speichern des Zielstands.","decisions":["Kein Sonderpfad: Wiederherstellen erzeugt neue Versionen, die History bleibt erhalten."],"files":["src/main/java/de/eltviller_carneval_verein/karten/repository/RestorePlanner.java","src/main/java/de/eltviller_carneval_verein/karten/ui/backup/BackupRestoreDialog.java","src/main/java/de/eltviller_carneval_verein/karten/ui/backup/EventBackupCatalog.java"],"data":["Sicherungspunkte"]},{"id":"updatechecker","label":"UpdateChecker","hint":"alle 4 h · neu","layer":"update","x":442,"y":712,"description":"KARV-131: Liest metadata.properties der Update-Quelle (app.repositoryUrl) per HTTPS, 10 s nach dem Start und dann alle 4 Stunden, und veröffentlicht einen UpdateState (NotChecked, Checking, UpToDate, Available, CheckFailed mit Grund, Unsupported). Installation liest Version, Quelle, Plattform und Paketfamilie aus Conveyors Systemeigenschaften.","decisions":["Java-Standard-Truststore, kein eigenes Zertifikat (KARV-137: vorerst kein öffentliches Code-Signing).","lastSuccess() bleibt auch nach einem Fehlschlag erhalten — FolderDecision vergleicht Ordner-Installer damit.","Das Paket update kennt weder JavaFX noch ui noch store; nur JsonMapperFactory für JSON."],"files":["src/main/java/de/eltviller_carneval_verein/karten/update/UpdateChecker.java:52","src/main/java/de/eltviller_carneval_verein/karten/update/UpdateChecker.java:100","src/main/java/de/eltviller_carneval_verein/karten/update/UpdateState.java:9","src/main/java/de/eltviller_carneval_verein/karten/update/Installation.java","src/main/java/de/eltviller_carneval_verein/karten/update/AppVersion.java","src/main/java/de/eltviller_carneval_verein/karten/update/HttpUpdateSource.java","src/main/java/de/eltviller_carneval_verein/karten/update/UpdateInfo.java","src/main/java/de/eltviller_carneval_verein/karten/update/Grund.java"],"data":["UpdateState","UpdateInfo","UpdateSuccess"]},{"id":"folderwatch","label":"FolderWatch","hint":"alle 10 min · neu","layer":"update","x":620,"y":712,"description":"KARV-132: Tickt 30 s nach dem Start, nach dem Verbinden und alle 10 Minuten. Schreibt den eigenen Kasseneintrag, liest die anderen, sucht und prüft auf dem Windows-Paket die Installer im Ordner (FolderUpdates mit MsixManifest und SHA-256-Beschreibung), räumt auf, entscheidet mit FolderDecision und stößt den FolderDownloader an. Ergebnis ist ein FolderState für Fußzeile, Info und StartPrompt.","decisions":["FolderDecision: FOLDER, GITHUB, WITHDRAWN, UNCLEAR, NONE — ist der Ordner-Installer neuer als die letzte Prüfung, wird einmal nachgeprüft (höchstens 5 min warten).","Jeder Schritt läuft einzeln abgesichert (guard), ein Fehler im Aufräumen verhindert nicht das Angebot."],"files":["src/main/java/de/eltviller_carneval_verein/karten/update/FolderWatch.java:93","src/main/java/de/eltviller_carneval_verein/karten/update/FolderWatch.java:131","src/main/java/de/eltviller_carneval_verein/karten/update/FolderUpdates.java:85","src/main/java/de/eltviller_carneval_verein/karten/update/FolderDecision.java:36","src/main/java/de/eltviller_carneval_verein/karten/update/FolderState.java","src/main/java/de/eltviller_carneval_verein/karten/update/MsixManifest.java","src/main/java/de/eltviller_carneval_verein/karten/update/SecureXml.java","src/main/java/de/eltviller_carneval_verein/karten/update/SharedFolderAccess.java"],"data":["FolderState","FolderOffer","FolderDecision.Result"]},{"id":"folderdownloader","label":"FolderDownloader","hint":"Installer in den Ordner · neu","layer":"update","x":442,"y":796,"description":"Lädt den Installer der aktuellen Version im Hintergrund nach updates/: Ladedatei anlegen, 2–5 min warten, die kleinste Rechner-ID gewinnt (LoadClaims). Dann .appinstaller frisch holen, .msix in eine tmp-Datei laden (SHA-256 beim Schreiben), Manifest und ZIP prüfen, unter freiem Namen ablegen, Beschreibung anlegen, Ladedatei auf „fertig“.","decisions":["Nur eine Kasse lädt — Abstimmung wie beim Store über Dateien, nicht über einen Server.","Nach einem Fehler frühestens nach einer Stunde wieder (außer retryNow)."],"files":["src/main/java/de/eltviller_carneval_verein/karten/update/FolderDownloader.java:154","src/main/java/de/eltviller_carneval_verein/karten/update/LoadClaims.java","src/main/java/de/eltviller_carneval_verein/karten/update/HttpGet.java","src/main/java/de/eltviller_carneval_verein/karten/update/AppInstallerFile.java","src/main/java/de/eltviller_carneval_verein/karten/update/SharedFileReplace.java","src/main/java/de/eltviller_carneval_verein/karten/update/OwnFiles.java"],"data":["laden-<version>-<machineId>.json","*.msix","*.msix.json"]},{"id":"stations","label":"Kassen-Register","hint":"StationRegistry · neu","layer":"update","x":620,"y":796,"description":"Jede Kasse schreibt updates/kassen/<machineId>.json mit Version und Plattform; newestForeign findet eine neuere Kasse am selben Ordner und löst den Hinweis aus, dass diese Kasse aktualisiert werden sollte. UpdatesDir kennt Ordner und Namensregeln.","decisions":["Gemischte Versionen am gleichen Ordner sind gewollt sichtbar, weil eine neuere Kasse Units sperren kann (SYS-009)."],"files":["src/main/java/de/eltviller_carneval_verein/karten/update/StationRegistry.java:49","src/main/java/de/eltviller_carneval_verein/karten/update/StationRegistry.java:96","src/main/java/de/eltviller_carneval_verein/karten/update/StationEntry.java","src/main/java/de/eltviller_carneval_verein/karten/update/UpdatesDir.java"],"data":["StationEntry","updates/kassen/"]},{"id":"patchnotes","label":"Patchnotes","hint":"patchnotes.md · neu","layer":"update","x":442,"y":880,"description":"KARV-125: Eine Quelle, patchnotes.md in den Ressourcen. PatchNotes liest und prüft sie (feste Abschnitte, Klartext, keine Platzhalter); PatchNotesOnStart entscheidet in MainApp.onLoaded, ob das Fenster erscheint; PatchNotesExport druckt im Release-Workflow den Abschnitt der neuen Version als GitHub-Release-Text.","decisions":["Derselbe Text in App und GitHub-Release — kein zweites Pflegen.","Eine ungültige patchnotes.md lässt den Build scheitern, nicht erst die App beim Kunden."],"files":["src/main/java/de/eltviller_carneval_verein/karten/update/PatchNotes.java:73","src/main/java/de/eltviller_carneval_verein/karten/update/PatchNotesOnStart.java:69","src/main/java/de/eltviller_carneval_verein/karten/update/PatchNotesExport.java","src/main/resources/de/eltviller_carneval_verein/karten/patchnotes.md",".github/workflows/release.yml",".github/scripts/release-notes.sh"],"data":["PatchNotes","patchNotesSeen"]},{"id":"syncservice","label":"SyncService","hint":"Tick alle 2 s","layer":"store","x":44,"y":1034,"description":"Herz des Stores. append() schreibt neue Versionen lokal; der Tick auf einem Hintergrund-Thread prüft Erreichbarkeit, arbeitet ein Stück FullSync ab, setzt Uploads fort, liest fremde Feeds, prüft eigene Claims der letzten 15 min nach, heilt beschädigte Dateien und löst verlorene Versionen auf. Hält Instanz-Lock und Maschinenidentität, meldet SyncState.","decisions":["Store kennt keine Events/Säle — er versioniert undurchsichtige JSON-Payloads je UnitKey.","UI-Executor und Hintergrund-Thread sind Konstruktor-Argumente, damit Tests auf dem Aufrufer-Thread laufen (TestSyncServices).","Claims der letzten 15 min werden erneut geprüft, weil ein Sync-Client eine Niederlage spät melden kann."],"files":["src/main/java/de/eltviller_carneval_verein/karten/store/SyncService.java:1168","src/main/java/de/eltviller_carneval_verein/karten/store/SyncService.java:2391","src/main/java/de/eltviller_carneval_verein/karten/store/InstanceLock.java","src/main/java/de/eltviller_carneval_verein/karten/store/MachineIdentity.java"],"data":["SyncState","UploadJob","Version"]},{"id":"versionstore","label":"VersionStore","hint":"Versionen + Claims","layer":"store","x":222,"y":1034,"description":"Ein Verzeichnisbaum unter data/ (lokal und im gemeinsamen Ordner identisch): je Unit Versionsdateien <VersionId>.json und claims/. Eine Version trägt Eltern, Maschine, Bediener, Zeit, saveId, deleted, Payload. VersionIds sind <millis base36>-<Maschine>-<Zähler> mit fester Breite, sodass String- gleich Zeitordnung ist. Seit 1.1 bekommt der Store ein ContentGate.","decisions":["Dateien werden nur angelegt, nie überschrieben oder gelöscht — ein append-only DAG je Unit."],"files":["src/main/java/de/eltviller_carneval_verein/karten/store/VersionStore.java:81","src/main/java/de/eltviller_carneval_verein/karten/store/Version.java","src/main/java/de/eltviller_carneval_verein/karten/store/VersionId.java","src/main/java/de/eltviller_carneval_verein/karten/store/VersionFile.java","src/main/java/de/eltviller_carneval_verein/karten/store/Claim.java","src/main/java/de/eltviller_carneval_verein/karten/store/StoreCodec.java"],"data":["events/<id>/…","halls/<id>/…","feeds/<machine>/"]},{"id":"chain","label":"Kette & Arbiter","hint":"ChainResolver","layer":"store","x":400,"y":1034,"description":"Ein Claim hält fest, welche Version auf einen Vorgänger folgt (inkl. SHA-256 der Datei). Vom root-Claim aus ergibt sich die gültige Kette; eine inhaltlich zu neue Version beendet sie (contentLocked). Eigene Versionen außerhalb sind „pending“ oder „lost“. LocalArbiter claimt sofort, SharedArbiter im gemeinsamen Ordner: wer zuerst hochlädt, gewinnt.","decisions":["Konfliktentscheidung über atomares Anlegen einer Datei („nur wenn nicht vorhanden“) — braucht keinen Server."],"files":["src/main/java/de/eltviller_carneval_verein/karten/store/ChainResolver.java:42","src/main/java/de/eltviller_carneval_verein/karten/store/SharedArbiter.java:59","src/main/java/de/eltviller_carneval_verein/karten/store/LocalArbiter.java","src/main/java/de/eltviller_carneval_verein/karten/store/Ownership.java","src/main/java/de/eltviller_carneval_verein/karten/store/UnitState.java"],"data":["Claim","UnitState"]},{"id":"uploader","label":"Uploader","hint":"Version → Feed → Claim","layer":"store","x":44,"y":1118,"description":"Lädt je Speichervorgang in fester Reihenfolge hoch: Versionsdateien, dann Feed-Eintrag, dann Claims. Verliert ein Claim, wird die Version als lost gemeldet.","decisions":["Die Reihenfolge stellt sicher, dass ein Claim nie auf eine fehlende Version zeigt."],"files":["src/main/java/de/eltviller_carneval_verein/karten/store/Uploader.java:55","src/main/java/de/eltviller_carneval_verein/karten/store/FeedWriter.java","src/main/java/de/eltviller_carneval_verein/karten/store/UploadJob.java"],"data":["UploadJob","LostVersion"]},{"id":"feedreader","label":"FeedReader","hint":"fremde Feeds","layer":"store","x":222,"y":1118,"description":"Entdeckt neue Arbeitsplätze im gemeinsamen Ordner und liest deren Änderungslisten (feeds/<machineId>/<n>.json); kopiert neue Versionen in den lokalen Store.","decisions":["Jede Version vermerkt in seen die zuletzt gelesene Feed-Nummer je Maschine."],"files":["src/main/java/de/eltviller_carneval_verein/karten/store/FeedReader.java:116","src/main/java/de/eltviller_carneval_verein/karten/store/FeedReader.java:157","src/main/java/de/eltviller_carneval_verein/karten/store/Feed.java"],"data":["Feed","FeedPoll"]},{"id":"fullsync","label":"FullSync","hint":"voller Abgleich","layer":"store","x":400,"y":1118,"description":"Vergleicht lokalen und gemeinsamen Bestand vollständig. Läuft beim Start, nach Wiederverbindung, auf Anforderung und alle 10 min — pro Tick nur ein Stück mit 2-s-Budget.","decisions":["Zeitbudget je Tick, damit ein großer Abgleich die übrige Sync-Arbeit nicht blockiert.","SET_ASIDE benennt lokales data in data-beiseite-<Zeit> um."],"files":["src/main/java/de/eltviller_carneval_verein/karten/store/FullSync.java","src/main/java/de/eltviller_carneval_verein/karten/store/FullSyncRun.java"],"data":["DataPath"]},{"id":"conflicts","label":"ConflictResolver","hint":"Merge-Versionen","layer":"store","x":44,"y":1202,"description":"Löst verlorene Versionen mit der installierten ConflictPolicy auf und schreibt eine Merge-Version mit Eltern [deren, mein]. ConflictLedger hält das Ergebnis für den Konfliktdialog (z. B. DOUBLE_SALE, UNMERGED). Seit 1.1 bleiben dabei die unbekannten Felder beider Seiten erhalten.","decisions":["Konflikte werden automatisch zusammengeführt und nur zur Kenntnis gemeldet — nichts geht still verloren."],"files":["src/main/java/de/eltviller_carneval_verein/karten/store/ConflictResolver.java","src/main/java/de/eltviller_carneval_verein/karten/store/ConflictLedger.java","src/main/java/de/eltviller_carneval_verein/karten/store/ConflictNote.java","src/main/java/de/eltviller_carneval_verein/karten/store/ConflictPolicy.java"],"data":["ConflictNote","Ledger-Einträge"]},{"id":"maintenance","label":"Index & Heilung","hint":"UnitIndex, DamageRepair","layer":"store","x":222,"y":1202,"description":"UnitIndex (<AppData>/index/) speichert je Unit den letzten Zustand und einen Fingerabdruck über Dateinamen, Größen und Zeiten; nur geänderte Units werden neu aufgelöst. DamageRepair ersetzt beschädigte Dateien aus geprüften Kopien (alte bleibt als .corrupt-<Zeit>). Reachability prüft den Ordner mit Timeout.","decisions":["Der Index ist Cache, nie Schiedsrichter: Verlust kostet Zeit, nicht Korrektheit; er merkt sich auch die rulesId des ContentGate.","Erreichbarkeit mit Timeout, weil ein hängendes Netzlaufwerk ~30 s blockiert.","Unlesbare (SYS-008) oder zu neue (SYS-009) Units werden gesperrt statt geraten."],"files":["src/main/java/de/eltviller_carneval_verein/karten/store/UnitIndex.java","src/main/java/de/eltviller_carneval_verein/karten/store/DamageRepair.java","src/main/java/de/eltviller_carneval_verein/karten/store/Reachability.java","src/main/java/de/eltviller_carneval_verein/karten/store/StoreMessages.java"],"data":["Fingerabdrücke","*.corrupt-*"]},{"id":"filelayer","label":"FileLayer","hint":"einziger Plattenzugriff","layer":"fs","x":620,"y":1034,"description":"Schnittstelle für alle Dateizugriffe des Stores; NioFileLayer ist die echte Implementierung. createNew legt nur an, wenn die Datei fehlt. Temporäre Dateien heißen ~karv-….tmp und sind in Listings unsichtbar. Neu (KARV-90): DurableWrite zwingt jede tmp-Datei mit force(true) auf die Platte, bevor sie ihren richtigen Namen bekommt.","decisions":["Port für I/O: Tests injizieren FaultyFileLayer und SimulatedCloud, um Fehler und Sync-Clients nachzustellen.","force vor dem Umbenennen: Ein gespeicherter Verkauf übersteht einen Stromausfall direkt danach."],"files":["src/main/java/de/eltviller_carneval_verein/karten/store/FileLayer.java:51","src/main/java/de/eltviller_carneval_verein/karten/store/NioFileLayer.java:61","src/main/java/de/eltviller_carneval_verein/karten/store/DurableWrite.java:41","src/main/java/de/eltviller_carneval_verein/karten/store/AtomicFileReplace.java"],"data":["Path","byte[]"]},{"id":"local","label":"Lokale Daten","hint":"<AppData>/data","layer":"fs","x":798,"y":1034,"description":"Vollständige lokale Kopie aller Versionen, dazu settings.json, machine.json, instance.lock, index/ und logs/.","decisions":["Jeder Arbeitsplatz arbeitet auch offline vollständig weiter."],"files":["src/main/java/de/eltviller_carneval_verein/karten/AppPaths.java","src/main/java/de/eltviller_carneval_verein/karten/store/VersionStore.java"],"data":["data/","index/","logs/","settings.json"]},{"id":"shared","label":"Gemeinsamer Ordner","hint":"Netz / Nextcloud","layer":"fs","x":620,"y":1118,"description":"Beliebiger Ordner, den alle Kassen sehen: gleiche data/-Struktur plus feeds/<machineId>/. Seit 1.1 zusätzlich updates/ mit kassen/<machineId>.json, dem neuesten Installer (.msix + .msix.json) und Ladedateien. Kein Server — Abstimmung nur über Dateien.","decisions":["Funktioniert auch mit verzögert synchronisierenden Clients, weil Claims nachgeprüft werden."],"files":["src/main/java/de/eltviller_carneval_verein/karten/store/SharedArbiter.java","src/main/java/de/eltviller_carneval_verein/karten/store/FeedWriter.java","src/main/java/de/eltviller_carneval_verein/karten/ui/shared/SharedFolderConnection.java","src/main/java/de/eltviller_carneval_verein/karten/update/UpdatesDir.java"],"data":["data/","feeds/","updates/"]},{"id":"updatesource","label":"Update-Quelle","hint":"GitHub-Release · neu","layer":"fs","x":798,"y":1118,"description":"Von Conveyor gebaute Pakete auf der Release-Seite (app.repositoryUrl): metadata.properties, .appinstaller und .msix. Der Release-Workflow baut, setzt den Patchnotes-Abschnitt als Release-Text und veröffentlicht.","decisions":["Die App liest nur — veröffentlicht wird ausschließlich über den Release-Workflow."],"files":["conveyor.conf",".github/workflows/release.yml","src/main/java/de/eltviller_carneval_verein/karten/update/HttpUpdateSource.java","src/main/java/de/eltviller_carneval_verein/karten/update/Installation.java"],"data":["metadata.properties","*.appinstaller","*.msix"]}],"edges":[["mainapp","settings","lädt"],["mainapp","displayprefs","install()"],["mainapp","syncservice","erzeugt"],["mainapp","policies","install()"],["mainapp","sharedstart","Hintergrund-Task"],["mainapp","repos","Säle, dann Events"],["mainapp","sales","show*View"],["mainapp","updatechecker","start()"],["mainapp","folderwatch","startFolderWatch"],["mainapp","patchnotes","onLoaded"],["settings","sharedstart","sharedDir"],["settings","displayprefs","display"],["sharedstart","syncservice","connect / offline"],["sales","bookingrules","SaleDates.change"],["sales","seatlook","zeichnet Sitze"],["displayprefs","sales","Anzeige-Auswahl"],["displayprefs","editors","Anzeige-Auswahl"],["editors","model","bearbeitet"],["editors","footprint","Lage live prüfen"],["sales","tracking","UI-Ereignisse"],["tracking","savers","dirty"],["savers","validation","prüfen"],["validation","footprint","Überlappung, Grenzen"],["savers","repos","saveEvent"],["bookingrules","model","ändert Booking"],["model","fwdcompat","unbekannte Felder"],["repos","unitmapper","Delta-Units"],["repos","bookingrules","BookingSync beim Laden"],["repos","foreign","einarbeiten"],["foreign","model","in-place"],["unitmapper","fwdcompat","durchreichen"],["unitmapper","syncservice","append()"],["syncservice","versionstore","schreibt lokal"],["syncservice","uploader","Upload-Jobs"],["syncservice","feedreader","Feeds lesen"],["syncservice","fullsync","Slice ≤ 2 s"],["syncservice","conflicts","lost-Versionen"],["syncservice","maintenance","prüfen / heilen"],["syncservice","chain","Zustand je Unit"],["versionstore","contentrules","gate.isNewer()"],["chain","contentrules","contentLocked"],["uploader","chain","Claim anlegen"],["conflicts","policies","resolve()"],["versionstore","filelayer","createNew"],["uploader","filelayer","Version, Feed, Claim"],["feedreader","filelayer","liest Feeds"],["chain","filelayer","Claims"],["filelayer","local","NIO + force"],["filelayer","shared","NIO + force"],["syncservice","liveupdates","SyncListener"],["syncservice","syncui","SyncState"],["liveupdates","repos","applyForeign"],["liveupdates","tracking","rebase"],["restore","repos","Zielstand speichern"],["updatechecker","updatesource","HTTPS metadata"],["updatechecker","updatehint","UpdateState"],["updatehint","updateflow","Klick „Aktualisieren“"],["updateflow","updatesource",".appinstaller"],["updateflow","tracking","confirmClose"],["syncservice","folderwatch","SharedFolderAccess"],["folderwatch","stations","writeOwn / readAll"],["folderwatch","updatechecker","lastSuccess / checkNow"],["folderwatch","folderdownloader","offer()"],["folderwatch","updatehint","FolderState"],["folderwatch","updateflow","StartPrompt"],["folderdownloader","updatesource","HttpGet .msix"],["folderdownloader","shared","updates/*.msix"],["stations","shared","kassen/*.json"],["folderwatch","shared","scan + cleanup"],["updateflow","shared","öffnet Installer"],["patchnotes","patchwindow","Abschnitte"],["patchnotes","updatesource","Release-Text"],["patchnotes","settings","patchNotesSeen"]],"flows":[{"id":"sale","label":"Verkauf speichern","title":"Ein Kartenverkauf im Mehrplatzbetrieb","nodes":["sales","bookingrules","tracking","savers","validation","repos","unitmapper","syncservice","versionstore","uploader","chain","filelayer","shared"],"steps":["Der Verkaufs-Controller ändert eine Booking über SaleDates.change (Status, Datum, bezahlter Betrag).","ChangeTrigger lässt den ChangeTracker vergleichen: Das Event ist ungespeichert. Mit „Buchungen sofort speichern“ plant BookingAutoSave den EventSaver.","EventSaver validiert das Event; Fehler brechen ab.","StoreEventRepository.saveEvent vergleicht mit UnitBaseline — nur die Booking-Unit des Sitzes hat sich geändert.","SyncService.append schreibt die Version lokal (eine saveId pro Speichern); DurableWrite bringt sie vor dem Umbenennen auf die Platte. Zustand AUSSTEHEND.","Der nächste Tick lädt hoch: Version → Feed-Eintrag → Claim. SharedArbiter legt den Claim im gemeinsamen Ordner an.","Wer zuerst claimt, gewinnt; hat ein anderer Platz den Slot schon, wird die eigene Version lost und geht an den ConflictResolver."],"decisions":["Speichern ist lokal sofort fertig und stromausfallfest; der Upload ist entkoppelt und übersteht Offline-Phasen."]},{"id":"foreign","label":"Fremde Änderung","title":"Ein anderer Arbeitsplatz hat gespeichert","nodes":["shared","filelayer","feedreader","syncservice","liveupdates","repos","foreign","model","tracking","sales"],"steps":["FeedReader findet im Feed eines anderen Arbeitsplatzes neue Einträge und kopiert die Versionen in den lokalen Store.","SyncService meldet die geänderten Units per SyncListener auf dem FX-Thread.","LiveUpdates gibt sie erst ans Saal-, dann ans Event-Repository (applyForeign).","EventMerge aktualisiert die gecachten Objekte in place; gerade bearbeitete Units werden zurückgestellt.","Der ChangeTracker wird rebased, offene Bildschirme zeigen den neuen Stand ohne Neuladen."],"decisions":["Objektidentität bleibt erhalten, damit Controller und Bindings nicht neu verdrahtet werden müssen."]},{"id":"conflict","label":"Doppelverkauf","title":"Zwei Kassen verkaufen denselben Sitz","nodes":["uploader","chain","syncservice","conflicts","policies","versionstore","syncui"],"steps":["Beide Kassen haben eine Version derselben Booking-Unit auf demselben Vorgänger gebaut.","Kasse B claimt zuerst; der Claim von Kasse A scheitert, ihre Version ist lost.","ConflictResolver ruft BookingPolicy mit Basis, Mein und Deren auf.","BookingPolicy lässt „Deren“ auf dem Sitz und verschiebt die eigene Buchung nach „ohne Platz“.","Die Merge-Version mit Eltern [deren, mein] wird geschrieben; ConflictLedger vermerkt DOUBLE_SALE für den Konfliktdialog."],"decisions":["Kein Verkauf geht verloren — die Kasse muss nur einen neuen Platz zuweisen."]},{"id":"toonew","label":"Daten einer neueren Version","title":"Eine Kasse mit 1.2 hat gespeichert, diese läuft noch mit 1.1","nodes":["shared","feedreader","versionstore","contentrules","chain","maintenance","repos","fwdcompat","unitmapper","syncui","stations"],"steps":["FeedReader kopiert die Version der neueren Kasse in den lokalen Store.","VersionStore fragt das ContentGate: ContentRules findet einen unbekannten requires-Eintrag oder Zahlungsstatus — die Version ist inhaltlich zu neu.","ChainResolver beendet die gültige Kette vor dieser Version (contentLocked); die Unit wird mit SYS-009 gesperrt und erscheint unter „gesperrte Einträge“, betroffene Sitze als blockiert.","Nur unbekannte Felder ohne requires sind dagegen harmlos: UnknownFields hält sie, UnitMapper schreibt sie beim nächsten Speichern unverändert zurück.","Das Kassen-Register zeigt in der Fußzeile, dass eine neuere Kasse am Ordner arbeitet — nach dem Update auf deren Version ist die Unit wieder frei."],"decisions":["Lieber sperren als raten: Ein unbekannter Zahlungsstatus würde sonst falsch abgerechnet."]},{"id":"updatecheck","label":"Update von GitHub","title":"Neue Version auf der Update-Quelle, Update mit Zustimmung","nodes":["mainapp","updatechecker","updatesource","updatehint","updateflow","tracking"],"steps":["MainApp startet den UpdateChecker; 10 s nach dem Start und dann alle 4 h liest er metadata.properties per HTTPS.","Ist die Version neuer, wird der Zustand Available; UpdateIndicator zeigt den Hinweis in der Fußzeile, „Info und Updates“ den Stand.","Ein Klick startet UpdateFlow.update: Rückfrage, offene Eingaben sichern wie beim Schließen (confirmClose).","Im Hintergrund wird frisch geprüft (Version noch neuer? Paketfamilie passt?), dann die .appinstaller-Datei geladen und mit Desktop.open geöffnet.","Die App beendet sich, der Windows App Installer übernimmt. Nach dem Neustart zeigt PatchNotesOnStart einmal „Was ist neu“."],"decisions":["Passt die Paketfamilie nicht (z. B. andere Signatur), gibt es nur den Browser-Weg — kein stilles Neuinstallieren.","Scheitert die Prüfung, liefert UpdateState.CheckFailed einen Grund, und der zuletzt bekannte Stand bleibt sichtbar."]},{"id":"folderupdate","label":"Update über den Ordner","title":"Eine Kasse lädt den Installer, die anderen installieren aus dem Ordner","nodes":["syncservice","folderwatch","stations","updatechecker","folderdownloader","updatesource","shared","updatehint","updateflow"],"steps":["FolderWatch tickt (30 s nach Start, nach dem Verbinden, alle 10 min) und sieht den Ordner über SharedFolderAccess, die MainApp mit dem SyncService verbindet.","StationRegistry schreibt den eigenen Kasseneintrag und liest die anderen.","FolderUpdates sucht in updates/ den neuesten Installer der eigenen Paketfamilie, prüft Manifest und SHA-256-Beschreibung und räumt alte Dateien auf.","FolderDecision vergleicht ihn mit UpdateChecker.lastSuccess(): FOLDER, GITHUB, WITHDRAWN oder UNCLEAR (dann einmal checkNow).","Mit dem letzten Prüfergebnis bietet FolderWatch dem FolderDownloader die Version der Quelle an; fehlt sie im Ordner: Ladedatei, Wartezeit, kleinste Rechner-ID lädt die .msix und legt sie mit Beschreibung ab.","Die anderen Kassen sehen beim nächsten Tick das Angebot; UpdateHint bzw. StartPrompt fragen, UpdateFlow.updateFromFolder prüft die Datei erneut und öffnet sie."],"decisions":["Spart Bandbreite am Veranstaltungsort: nur eine Kasse lädt aus dem Internet.","Ein Installer, der neuer ist als die Quelle nach einer jüngeren Prüfung, gilt als zurückgezogen und wird nicht angeboten."]},{"id":"startup","label":"Programmstart","title":"Vom Doppelklick bis zum Hauptmenü","nodes":["mainapp","settings","displayprefs","syncservice","policies","sharedstart","fullsync","repos","bookingrules","patchnotes","patchwindow","updatechecker","folderwatch","syncui"],"steps":["main() richtet Logging und den globalen Fehlerdialog ein, startet JavaFX.","start() lädt Schriften und Einstellungen, installiert DisplayPreferences (gemerktes Menü „Anzeige“) und erzeugt den SyncService (Instanz-Lock, machine.json). Läuft schon eine Instanz, bricht die App ab.","ConflictPolicies.install hängt die Fach-Policies ein, bevor der Store startet.","SharedFolderStart entscheidet im Hintergrund: offline, weiter oder neu verbinden; ein erster FullSync läuft.","Säle, dann Events werden geladen; BookingSync ordnet Buchungen den Sitzplänen zu.","onLoaded: Bediener-Dialog, Ladewarnungen, PatchNotesOnStart (nach einem Update einmal „Was ist neu“), dann das Hauptmenü.","UpdateChecker (nach 10 s) und FolderWatch (nach 30 s) laufen im Hintergrund an."],"decisions":["Ladeansicht sofort zeigen; die langsame Ordnerprüfung und die Update-Prüfungen laufen in Hintergrund-Tasks."]}],"matrices":[{"title":"Neu in Release 1.1","headers":["Ticket","Thema","Wo im Code"],"rows":[["KARV-125","Patchnotes in der App und als GitHub-Release-Text","update.PatchNotes*, ui.shared.PatchNotesWindow, patchnotes.md"],["KARV-130/131","Update-Prüfung, Update nur mit Zustimmung, Version in der App","update.UpdateChecker, ui.shared.UpdateFlow, ui.settings.InfoSection"],["KARV-132","Versionsabgleich und Update über den gemeinsamen Ordner","update.FolderWatch, FolderDownloader, StationRegistry"],["KARV-133–136","Datenformat vorwärtskompatibel","model.UnknownFields, TolerantEnum, Requires, repository.ContentRules, store.ContentGate"],["KARV-90","Dateien vor dem Umbenennen auf die Platte schreiben","store.DurableWrite, NioFileLayer"],["KARV-60","Lageprüfungen für Hallen","validation.Footprint + Hall-/Plan-/Table-Validatoren"],["KARV-76","Menü „Anzeige“ merken und wiederherstellen","ui.DisplayPreferences, settings.DisplaySettings"],["KARV-26","Barrierefreie Sitzdarstellung","ui.sales.SeatLook"],["KARV-128","Hallenverwaltung aufbereiten (Tischbeschriftung, Reihe füllen)","ui.hall.PlanText, RowFillDialog, TableRowBulkEdit, model.Table/Seat"],["KARV-137","JavaFX ins Paket, vorerst kein Code-Signing-Zertifikat","pom.xml, conveyor.conf, docs/decisions.md"]]},{"title":"Unit-Typen im Store","headers":["UnitType","Pfad unter data/","Inhalt","Policy"],"rows":[["EVENT","events/<eventId>/","Event-Kopf ohne Vorstellungen","EventHeadPolicy"],["PRESENTATION","events/<eventId>/presentations/<id>/","Vorstellung ohne Buchungen","PresentationPolicy"],["BOOKING","…/bookings/<seatId>/ bzw. _<bookingId>/","Eine Buchung je Sitz (oder ohne Platz)","BookingPolicy"],["HALL","halls/<hallId>/","Kompletter Saal mit Sitzplänen","HallPolicy"]]},{"title":"Gemeinsamer Ordner: updates/","headers":["Pfad","Inhalt","Wer schreibt"],"rows":[["updates/kassen/<machineId>.json","Versionseintrag je Kasse","StationRegistry"],["updates/<name>.msix","Installer (nur der neueste bleibt)","FolderDownloader"],["updates/<name>.msix.json","Beschreibung mit SHA-256 und Größe","FolderDownloader"],["updates/laden-<a.b.c.d>-<machineId>.json","Ladedatei während eine Kasse lädt","LoadClaims"],["updates/~karv-<machineId>-<UUID>.tmp","Download in Arbeit","FolderDownloader"]]},{"title":"Zeitgeber","headers":["Was","Takt","Klasse"],"rows":[["Sync-Tick","alle 2 s","SyncService"],["FullSync","Start, Wiederverbindung, alle 10 min (2-s-Stücke)","FullSync"],["Update-Prüfung","10 s nach Start, dann alle 4 h","UpdateChecker"],["Ordner-Updates","30 s nach Start, nach Verbinden, alle 10 min","FolderWatch"],["Download-Abstimmung","2–5 min Wartezeit, nach Fehler ≥ 1 h","FolderDownloader"]]},{"title":"SyncState","headers":["Zustand","Bedeutung"],"rows":[["AUS","Einzelbetrieb, kein gemeinsamer Ordner"],["AKTUELL","Alles hochgeladen und abgeglichen"],["AUSSTEHEND","Lokale Versionen warten auf Upload"],["OFFLINE","Gemeinsamer Ordner nicht erreichbar"],["FEHLER","Technischer Fehler (SYS-Meldung)"],["ENTSCHEIDUNG","Wartet auf Wahl der Verbindungsart (beide Seiten haben Daten)"]]}],"walkthroughs":[{"id":"doublesale","label":"Doppelverkauf","header":{"kind":"SAVE","path":"Booking-Unit Reihe 3 · Tisch 2 · Sitz 4","pairs":[["Kasse A","Bar, 12,00 €"],["Kasse B","Karte, 12,00 € — 1 s früher"]]},"stages":[{"layer":"ui","title":"Verkauf an Kasse A","desc":"SaleDates.change setzt PaymentStatus CASH, paidAmount 1200, Zahlungsdatum heute.","file":"src/main/java/de/eltviller_carneval_verein/karten/model/SaleDates.java"},{"layer":"ui","title":"Speichern","desc":"BookingAutoSave löst EventSaver.save aus; die Validierung ist grün.","file":"src/main/java/de/eltviller_carneval_verein/karten/ui/EventSaver.java","badge":{"type":"gate","text":"Fehler blockieren"}},{"layer":"repo","title":"Delta bilden","desc":"UnitBaseline erkennt genau eine geänderte Unit: die Booking-Unit dieses Sitzes.","file":"src/main/java/de/eltviller_carneval_verein/karten/repository/UnitBaseline.java"},{"layer":"store","title":"Lokal anhängen","desc":"SyncService.append schreibt die Version lokal; DurableWrite erzwingt force vor dem Umbenennen. Status AUSSTEHEND.","file":"src/main/java/de/eltviller_carneval_verein/karten/store/DurableWrite.java","badge":{"type":"pass","text":"lokal gespeichert"}},{"layer":"store","title":"Upload & Claim","desc":"Uploader schreibt Version und Feed; der Claim scheitert, weil Kasse B den Slot schon belegt hat.","file":"src/main/java/de/eltviller_carneval_verein/karten/store/SharedArbiter.java","badge":{"type":"gate","text":"Claim verloren"}},{"layer":"repo","title":"BookingPolicy","desc":"Drei-Wege-Merge: Kasse B behält den Sitz, die Buchung von Kasse A wird „ohne Platz“ — die Zahlung bleibt erhalten.","file":"src/main/java/de/eltviller_carneval_verein/karten/repository/BookingPolicy.java"},{"layer":"store","title":"Merge-Version","desc":"ConflictResolver schreibt die Merge-Version mit Eltern [deren, mein]; ConflictLedger vermerkt DOUBLE_SALE.","file":"src/main/java/de/eltviller_carneval_verein/karten/store/ConflictResolver.java","badge":{"type":"return","text":"DOUBLE_SALE"}},{"layer":"ui","title":"Konfliktdialog","desc":"Die Statusleiste zeigt einen offenen Konflikt; Kasse A weist der Buchung einen neuen Platz zu.","file":"src/main/java/de/eltviller_carneval_verein/karten/ui/ConflictDialog.java"}]},{"id":"folderupdate","label":"Update über den Ordner","header":{"kind":"UPDATE","path":"1.1.0 → 1.1.1 · drei Kassen am Nextcloud-Ordner","pairs":[["Quelle","metadata.properties: 1.1.1"],["Ordner","updates/ enthält noch 1.1.0"]]},"stages":[{"layer":"update","title":"Prüfung","desc":"UpdateChecker an allen drei Kassen: Available(1.1.1). Die Fußzeile zeigt den Hinweis.","file":"src/main/java/de/eltviller_carneval_verein/karten/update/UpdateChecker.java","badge":{"type":"return","text":"Available 1.1.1"}},{"layer":"update","title":"Ordner-Tick","desc":"FolderWatch findet keinen 1.1.1-Installer im Ordner (FolderDecision: NONE) und bietet dem FolderDownloader die Version der Quelle an.","file":"src/main/java/de/eltviller_carneval_verein/karten/update/FolderWatch.java"},{"layer":"update","title":"Abstimmung","desc":"Alle drei legen laden-1.1.1.0-<machineId>.json an und warten 2–5 min. Die kleinste Rechner-ID gewinnt, die anderen lassen es.","file":"src/main/java/de/eltviller_carneval_verein/karten/update/LoadClaims.java","badge":{"type":"gate","text":"nur eine lädt"}},{"layer":"update","title":"Download","desc":"Die Gewinnerin holt .appinstaller frisch, lädt die .msix in eine ~karv-…tmp (SHA-256 beim Schreiben), prüft Manifest und ZIP.","file":"src/main/java/de/eltviller_carneval_verein/karten/update/FolderDownloader.java"},{"layer":"fs","title":"Ablegen","desc":"Files.move unter freiem Namen, dann <name>.msix.json mit CREATE_NEW, dann die Ladedatei auf „fertig“.","file":"src/main/java/de/eltviller_carneval_verein/karten/update/FolderUpdates.java","badge":{"type":"pass","text":"Installer im Ordner"}},{"layer":"update","title":"Angebot","desc":"Beim nächsten Tick sehen die anderen Kassen den Kandidaten, FolderDecision ergibt FOLDER; UpdateHint bietet „aus dem Ordner aktualisieren“.","file":"src/main/java/de/eltviller_carneval_verein/karten/update/FolderDecision.java","badge":{"type":"return","text":"FOLDER"}},{"layer":"ui","title":"Zustimmung","desc":"UpdateFlow.updateFromFolder: Rückfrage, offene Eingaben sichern, Datei mit Zeitlimit erneut prüfen, öffnen, App beenden.","file":"src/main/java/de/eltviller_carneval_verein/karten/ui/shared/UpdateFlow.java"},{"layer":"ui","title":"Nach dem Neustart","desc":"PatchNotesOnStart sieht patchNotesSeen = 1.1.0 und zeigt einmal den Abschnitt 1.1.1.","file":"src/main/java/de/eltviller_carneval_verein/karten/update/PatchNotesOnStart.java"}]}],"notes":[{"kind":"ok","text":"Strikte Schichtung: ui → repository/validation/model → store → FileLayer. Der Store kennt weder Events noch Säle; auch das ContentGate ist nur eine Schnittstelle, die Regeln stehen in repository."},{"kind":"ok","text":"Das neue Paket update ist unabhängig von JavaFX, ui und store; es sieht den gemeinsamen Ordner nur über SharedFolderAccess und ist dadurch ohne Toolkit testbar."},{"kind":"ok","text":"Append-only: Datendateien werden nur angelegt, nie überschrieben oder gelöscht — Konflikte entscheidet das atomare Anlegen von Claim-Dateien. Seit 1.1 zusätzlich mit force auf die Platte (KARV-90)."},{"kind":"info","text":"Kein Server, keine Datenbank: Abstimmung zwischen Kassen — auch beim Laden des Installers — ausschließlich über Dateien im gemeinsamen Ordner."},{"kind":"warn","text":"Laut Patchnotes: Alle Kassen an einem gemeinsamen Ordner gleichzeitig auf 1.1 aktualisieren und danach jede Halle mit Bestuhlung einmal im Hallen-Editor öffnen und speichern."},{"kind":"info","text":"Tests ersetzen I/O über FileLayer (FaultyFileLayer, SimulatedCloud), den Forcer von DurableWrite und Scheduler/DesktopOps im Paket update; der SyncService läuft auf dem Aufrufer-Thread (TestSyncServices)."},{"kind":"warn","text":"SyncService.java hat ~4.000 Zeilen und MainApp.java ~1.400 (in 1.1 um ~470 gewachsen, vor allem Update-Verdrahtung) — die größten Brocken beim Einarbeiten."},{"kind":"info","text":"Die Karte fasst Klassen zu Knoten zusammen; Details stehen in docs/architecture.md, docs/structure.md und docs/decisions.md."}],"sections":{"walkthroughTitle":"Beispiele Schritt für Schritt","matricesTitle":"Nachschlagetabellen"},"viewBox":"0 0 1212 1300"};
+
+    const colors = Object.fromEntries((DATA.layers || []).map((l) => [l.key, l.color]));
+    const layerTint = Object.fromEntries((DATA.layers || []).map((l) => [l.key, l.tint]));
+    const clusters = DATA.clusters || [];
+    const nodes = DATA.nodes || [];
+    const edges = DATA.edges || [];
+    const flowDefs = DATA.flows || [];
+    const matrices = DATA.matrices || [];
+    const requestScenarios = (DATA.walkthroughs || []).map((w) => ({
+      id: w.id,
+      label: w.label,
+      request: { method: (w.header && w.header.kind) || '', path: (w.header && w.header.path) || '', headers: (w.header && w.header.pairs) || [] },
+      stages: w.stages || []
+    }));
+
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const edgeKey = (a, b) => `${a}->${b}`;
+    const edgeByKey = new Map(edges.map(([a, b, label]) => [edgeKey(a, b), label]));
+
+    const NODE_W = 150;
+    const NODE_H = 58;
+
+    const adjacency = new Map(nodes.map((node) => [node.id, new Set([node.id])]));
+    const neighborEdges = new Map(nodes.map((node) => [node.id, []]));
+    for (const [a, b, label] of edges) {
+      adjacency.get(a)?.add(b);
+      adjacency.get(b)?.add(a);
+      neighborEdges.get(a)?.push({ other: b, label, dir: 'out' });
+      neighborEdges.get(b)?.push({ other: a, label, dir: 'in' });
+    }
+
+    let currentFilter = 'all';
+    let currentQuery = '';
+    let selectedId = (nodes[0] && nodes[0].id) || null;
+    let selectedEdge = null; // { from, to }
+    let highlighted = new Set();
+
+    // Pan / zoom state
+    const view = { scale: 1, tx: 0, ty: 0 };
+
+    function borderPoint(node, target) {
+      const cx = node.x + NODE_W / 2;
+      const cy = node.y + NODE_H / 2;
+      const dx = target.x + NODE_W / 2 - cx;
+      const dy = target.y + NODE_H / 2 - cy;
+      if (dx === 0 && dy === 0) return { x: cx, y: cy };
+      const halfW = NODE_W / 2 + 3;
+      const halfH = NODE_H / 2 + 3;
+      const scaleX = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+      const scaleY = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+      const scale = Math.min(scaleX, scaleY);
+      return { x: cx + dx * scale, y: cy + dy * scale };
+    }
+
+    function wrapText(text, maxChars) {
+      const words = text.split(' ');
+      const lines = [];
+      let line = '';
+      for (const word of words) {
+        const candidate = line ? `${line} ${word}` : word;
+        if (candidate.length > maxChars && line) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = candidate;
+        }
+      }
+      if (line) lines.push(line);
+      return lines.slice(0, 2);
+    }
+
+    function matchesNode(node) {
+      if (currentFilter !== 'all' && node.layer !== currentFilter) return false;
+      if (!currentQuery) return true;
+      const haystack = [
+        node.label,
+        node.hint,
+        node.description,
+        ...(node.decisions || []),
+        ...(node.files || []),
+        ...(node.data || [])
+      ].join(' ').toLowerCase();
+      return haystack.includes(currentQuery);
+    }
+
+    function renderDiagram() {
+      const clusterGroup = document.getElementById('clusters');
+      const edgeGroup = document.getElementById('edges');
+      const nodeGroup = document.getElementById('nodes');
+      clusterGroup.innerHTML = '';
+      edgeGroup.innerHTML = '';
+      nodeGroup.innerHTML = '';
+
+      for (const cluster of clusters) {
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('class', 'cluster-box');
+        rect.setAttribute('x', cluster.x);
+        rect.setAttribute('y', cluster.y);
+        rect.setAttribute('width', cluster.w);
+        rect.setAttribute('height', cluster.h);
+        rect.setAttribute('rx', 10);
+        clusterGroup.appendChild(rect);
+
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('class', 'cluster-label');
+        label.setAttribute('x', cluster.x + 12);
+        label.setAttribute('y', cluster.y + 18);
+        label.textContent = cluster.label;
+        clusterGroup.appendChild(label);
+      }
+
+      const visible = new Set(nodes.filter(matchesNode).map((node) => node.id));
+      const flowActive = highlighted.size > 0;
+      const flowEdges = new Set();
+      if (flowActive) {
+        const ids = Array.from(highlighted);
+        for (let i = 0; i < ids.length - 1; i++) flowEdges.add(edgeKey(ids[i], ids[i + 1]));
+      }
+      const neighborSet = (!flowActive && selectedId) ? (adjacency.get(selectedId) || new Set([selectedId])) : null;
+      const hasFocusContext = flowActive || !!neighborSet || !!selectedEdge;
+
+      for (const [fromId, toId, label] of edges) {
+        const from = nodeById.get(fromId);
+        const to = nodeById.get(toId);
+        const p1 = borderPoint(from, to);
+        const p2 = borderPoint(to, from);
+
+        const isSearchDim = (currentFilter !== 'all' || currentQuery) && (!visible.has(fromId) || !visible.has(toId));
+        let connects = false;
+        if (flowActive) {
+          connects = flowEdges.has(edgeKey(fromId, toId)) || (highlighted.has(fromId) && highlighted.has(toId));
+        } else if (selectedEdge) {
+          connects = selectedEdge.from === fromId && selectedEdge.to === toId;
+        } else if (selectedId) {
+          connects = fromId === selectedId || toId === selectedId;
+        }
+
+        let edgeClass = 'edge-group';
+        if (isSearchDim) edgeClass += ' dim';
+        else if (connects) edgeClass += ' flow';
+        else if (hasFocusContext) edgeClass += ' faded';
+
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        group.setAttribute('class', edgeClass);
+        group.dataset.from = fromId;
+        group.dataset.to = toId;
+        group.dataset.label = label;
+
+        // gentle curve via quadratic control point offset perpendicular to the segment
+        const mx = (p1.x + p2.x) / 2;
+        const my = (p1.y + p2.y) / 2;
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const bow = Math.min(26, len * 0.08);
+        const cxp = mx + (-dy / len) * bow;
+        const cyp = my + (dx / len) * bow;
+        const d = `M ${p1.x} ${p1.y} Q ${cxp} ${cyp} ${p2.x} ${p2.y}`;
+
+        const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        hit.setAttribute('class', 'edge-hit');
+        hit.setAttribute('d', d);
+        group.appendChild(hit);
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'edge');
+        path.setAttribute('d', d);
+        group.appendChild(path);
+
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('class', 'edge-label');
+        text.setAttribute('x', cxp);
+        text.setAttribute('y', cyp - 3);
+        text.setAttribute('text-anchor', 'middle');
+        text.textContent = label;
+        group.appendChild(text);
+
+        group.addEventListener('click', (event) => {
+          event.stopPropagation();
+          selectEdge(fromId, toId, label);
+        });
+
+        edgeGroup.appendChild(group);
+      }
+
+      for (const node of nodes) {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const visibleMatch = matchesNode(node);
+
+        const classList = ['node'];
+        if (node.id === selectedId) classList.push('active');
+        if (!visibleMatch) {
+          classList.push('dim');
+        } else if (flowActive) {
+          if (!highlighted.has(node.id)) classList.push('dim');
+        } else if (selectedEdge) {
+          if (node.id === selectedEdge.from || node.id === selectedEdge.to) classList.push('focus');
+          else classList.push('faded');
+        } else if (neighborSet && node.id !== selectedId) {
+          classList.push(neighborSet.has(node.id) ? 'focus' : 'faded');
+        }
+        g.setAttribute('class', classList.join(' '));
+        g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
+        g.setAttribute('role', 'button');
+        g.setAttribute('tabindex', '0');
+        g.dataset.id = node.id;
+
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('width', 150);
+        rect.setAttribute('height', 58);
+        rect.setAttribute('fill', layerTint[node.layer] || '#ffffff');
+        g.appendChild(rect);
+
+        const stripe = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        stripe.setAttribute('class', 'stripe');
+        stripe.setAttribute('x1', 8);
+        stripe.setAttribute('y1', 7);
+        stripe.setAttribute('x2', 8);
+        stripe.setAttribute('y2', 51);
+        stripe.setAttribute('stroke', colors[node.layer]);
+        g.appendChild(stripe);
+
+        const lines = wrapText(node.label, 17);
+        lines.forEach((lineText, index) => {
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('class', 'label');
+          text.setAttribute('x', 18);
+          text.setAttribute('y', 22 + index * 14);
+          text.textContent = lineText;
+          g.appendChild(text);
+        });
+
+        const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        hint.setAttribute('class', 'hint');
+        hint.setAttribute('x', 18);
+        hint.setAttribute('y', 48);
+        hint.textContent = node.hint;
+        g.appendChild(hint);
+
+        g.addEventListener('click', (event) => {
+          event.stopPropagation();
+          selectNode(node.id);
+        });
+        g.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            selectNode(node.id);
+          }
+        });
+        nodeGroup.appendChild(g);
+      }
+
+      applyViewTransform();
+    }
+
+    function applyViewTransform() {
+      const viewport = document.getElementById('viewport');
+      if (viewport) {
+        viewport.setAttribute('transform', `translate(${view.tx} ${view.ty}) scale(${view.scale})`);
+      }
+    }
+
+    function selectNode(id) {
+      selectedId = id;
+      selectedEdge = null;
+      highlighted = new Set();
+      renderDiagram();
+      renderDetail(nodeById.get(id));
+      setActiveFlowButton(null);
+    }
+
+    function selectEdge(fromId, toId, label) {
+      selectedId = null;
+      selectedEdge = { from: fromId, to: toId };
+      highlighted = new Set();
+      renderDiagram();
+      renderEdgeDetail(fromId, toId, label);
+      setActiveFlowButton(null);
+    }
+
+    function deselect() {
+      if (!selectedId && !selectedEdge && highlighted.size === 0) return;
+      selectedId = null;
+      selectedEdge = null;
+      highlighted = new Set();
+      renderDiagram();
+      setActiveFlowButton(null);
+      document.getElementById('detailTitle').textContent = 'Select a component';
+      document.getElementById('detailSubtitle').textContent = 'Click any node or edge in the diagram, or pick a flow tab.';
+      document.getElementById('detailBody').innerHTML =
+        '<div class="detail-block"><p class="hint">Click a node to see its files, design decisions, and connections. Click an edge to read what flows between two components. Click empty space to clear.</p></div>';
+    }
+
+    const layerNames = Object.fromEntries((DATA.layers || []).map((l) => [l.key, l.label]));
+
+    function renderDetail(node) {
+      document.getElementById('detailTitle').textContent = node.label;
+      document.getElementById('detailSubtitle').textContent = `${node.hint} - ${layerNames[node.layer] || node.layer}`;
+      const conns = (neighborEdges.get(node.id) || []);
+      const body = document.getElementById('detailBody');
+      body.innerHTML = `
+        <div class="detail-meta">
+          <span class="tag"><span class="dot" style="background:${colors[node.layer]}"></span>${escapeHtml(layerNames[node.layer] || node.layer)}</span>
+          <span class="tag">${conns.length} connection${conns.length === 1 ? '' : 's'}</span>
+        </div>
+        <div class="detail-block" style="margin-top:14px">
+          <h3>What it does</h3>
+          <p>${escapeHtml(node.description)}</p>
+        </div>
+        <div class="detail-block">
+          <h3>Design decisions</h3>
+          <ul>${node.decisions.map((d) => `<li>${escapeHtml(d)}</li>`).join('')}</ul>
+        </div>
+        <div class="detail-block">
+          <h3>Connections</h3>
+          <div class="neighbors">${conns.map((c) => `<button data-goto="${c.other}"><span class="dir">${c.dir === 'out' ? '&rarr;' : '&larr;'}</span> ${escapeHtml(nodeById.get(c.other).label)}</button>`).join('') || '<span class="hint">No direct edges.</span>'}</div>
+        </div>
+        <div class="detail-block">
+          <h3>Source files</h3>
+          <div class="file-list">${node.files.map((f) => `<span class="file">${escapeHtml(f)}</span>`).join('')}</div>
+        </div>
+        <div class="detail-block">
+          <h3>Data touched</h3>
+          <ul>${node.data.map((d) => `<li>${escapeHtml(d)}</li>`).join('')}</ul>
+        </div>
+      `;
+      body.querySelectorAll('button[data-goto]').forEach((button) => {
+        button.addEventListener('click', () => selectNode(button.dataset.goto));
+      });
+    }
+
+    function renderEdgeDetail(fromId, toId, label) {
+      const from = nodeById.get(fromId);
+      const to = nodeById.get(toId);
+      document.getElementById('detailTitle').textContent = `${from.label} \u2192 ${to.label}`;
+      document.getElementById('detailSubtitle').textContent = `Relationship: ${label}`;
+      const body = document.getElementById('detailBody');
+      body.innerHTML = `
+        <div class="detail-block" style="margin-top:6px">
+          <h3>Direction</h3>
+          <p><strong>${escapeHtml(from.label)}</strong> (${escapeHtml(layerNames[from.layer] || from.layer)}) calls <strong>${escapeHtml(to.label)}</strong> (${escapeHtml(layerNames[to.layer] || to.layer)}).</p>
+          <p class="hint">${escapeHtml(label)}</p>
+        </div>
+        <div class="detail-block">
+          <h3>Source endpoints</h3>
+          <p>${escapeHtml(from.label)}</p>
+          <p>${escapeHtml(from.description)}</p>
+        </div>
+        <div class="detail-block">
+          <h3>Target endpoint</h3>
+          <p>${escapeHtml(to.label)}</p>
+          <p>${escapeHtml(to.description)}</p>
+        </div>
+        <div class="detail-block">
+          <h3>Inspect</h3>
+          <div class="neighbors">
+            <button data-goto="${fromId}">Open ${escapeHtml(from.label)}</button>
+            <button data-goto="${toId}">Open ${escapeHtml(to.label)}</button>
+          </div>
+        </div>
+      `;
+      body.querySelectorAll('button[data-goto]').forEach((button) => {
+        button.addEventListener('click', () => selectNode(button.dataset.goto));
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function setActiveFlowButton(id) {
+      document.querySelectorAll('#flowTabs button').forEach((button) => {
+        button.classList.toggle('active', button.dataset.flow === id);
+      });
+    }
+
+    function renderFlow(flowId) {
+      const flow = flowDefs.find((item) => item.id === flowId) || flowDefs[0];
+      highlighted = new Set(flow.nodes);
+      selectedId = flow.nodes[0];
+      selectedEdge = null;
+      setActiveFlowButton(flow.id);
+      renderDiagram();
+      document.getElementById('flowContent').innerHTML = `
+        <div>
+          <h3>${escapeHtml(flow.title)}</h3>
+          <ol>${flow.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
+        </div>
+        <div>
+          <h3>Design decisions</h3>
+          <ul>${flow.decisions.map((decision) => `<li>${escapeHtml(decision)}</li>`).join('')}</ul>
+        </div>
+      `;
+      renderDetail(nodeById.get(flow.nodes[0]));
+    }
+
+    function renderFlows() {
+      const tabs = document.getElementById('flowTabs');
+      tabs.innerHTML = flowDefs.map((flow) => `<button data-flow="${flow.id}">${escapeHtml(flow.label)}</button>`).join('');
+      tabs.querySelectorAll('button').forEach((button) => {
+        button.addEventListener('click', () => renderFlow(button.dataset.flow));
+      });
+      if (flowDefs.length) renderFlow(flowDefs[0].id);
+    }
+
+    function renderMatrices() {
+      const host = document.getElementById('bm-matrices');
+      if (!host) return;
+      if (!matrices.length) { const sec = host.closest('.section'); if (sec) sec.style.display = 'none'; return; }
+      host.innerHTML = matrices.map((m) => {
+        const cols = (m.headers || []).length || 1;
+        const head = (m.headers || []).map((h) => `<div class="head">${escapeHtml(h)}</div>`).join('');
+        const rows = (m.rows || []).map((r) => r.map((c) => `<div>${escapeHtml(c)}</div>`).join('')).join('');
+        return `<div style="margin-bottom:18px"><h3 style="margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:0.04em;color:#415162">${escapeHtml(m.title || '')}</h3>` +
+          `<div class="matrix" style="grid-template-columns:repeat(${cols}, minmax(0,1fr))">${head}${rows}</div></div>`;
+      }).join('');
+    }
+
+    // ----- Request lifecycle -----
+    let reqScenarioId = requestScenarios[0] ? requestScenarios[0].id : null;
+    let reqStep = 0;
+    let reqTimer = null;
+
+    function currentReqScenario() {
+      return requestScenarios.find((s) => s.id === reqScenarioId) || requestScenarios[0];
+    }
+
+    function renderReqScenarios() {
+      const tabs = document.getElementById('reqScenarios');
+      tabs.innerHTML = requestScenarios
+        .map((s) => `<button data-req="${s.id}"${s.id === reqScenarioId ? ' class="active"' : ''}>${escapeHtml(s.label)}</button>`)
+        .join('');
+      tabs.querySelectorAll('button').forEach((button) => {
+        button.addEventListener('click', () => selectReqScenario(button.dataset.req));
+      });
+    }
+
+    function renderReqRequest() {
+      const scenario = currentReqScenario();
+      const headers = scenario.request.headers
+        .map(([k, v]) => `<div><span class="hdr-k">${escapeHtml(k)}:</span> <span class="hdr-v">${escapeHtml(v)}</span></div>`)
+        .join('');
+      document.getElementById('reqRequest').innerHTML =
+        `<div><span class="method">${escapeHtml(scenario.request.method)}</span> <span class="path">${escapeHtml(scenario.request.path)}</span></div>` + headers;
+    }
+
+    function renderReqTrack() {
+      const scenario = currentReqScenario();
+      const track = document.getElementById('reqTrack');
+      track.innerHTML = scenario.stages.map((stage, index) => {
+        const badge = stage.badge ? `<span class="badge ${stage.badge.type}">${escapeHtml(stage.badge.text)}</span>` : '<span></span>';
+        const file = stage.file ? `<span class="file">${escapeHtml(stage.file)}</span>` : '';
+        return `
+          <div class="req-stage" data-index="${index}">
+            <span class="stripe2" style="background:${colors[stage.layer]}"></span>
+            <span class="num">${index + 1}</span>
+            <div>
+              <div class="title">${escapeHtml(stage.title)}</div>
+              <div class="desc">${escapeHtml(stage.desc)}</div>
+              ${file}
+            </div>
+            ${badge}
+          </div>`;
+      }).join('');
+      track.querySelectorAll('.req-stage').forEach((el) => {
+        el.addEventListener('click', () => {
+          stopReqPlay();
+          reqStep = Number(el.dataset.index) + 1;
+          paintReqState();
+        });
+      });
+      paintReqState();
+    }
+
+    function paintReqState() {
+      const scenario = currentReqScenario();
+      const total = scenario.stages.length;
+      document.querySelectorAll('#reqTrack .req-stage').forEach((el) => {
+        const index = Number(el.dataset.index);
+        el.classList.toggle('done', index < reqStep - 1);
+        el.classList.toggle('active', index === reqStep - 1);
+        if (index >= reqStep) el.classList.remove('done', 'active');
+      });
+      const pct = total > 1 ? (Math.max(0, reqStep - 1) / (total - 1)) * 100 : 0;
+      document.getElementById('reqBar').style.width = `${reqStep === 0 ? 0 : pct}%`;
+      document.getElementById('reqStatus').textContent =
+        reqStep === 0 ? `Ready - ${total} stages` : `Stage ${reqStep} / ${total}: ${scenario.stages[reqStep - 1].title}`;
+      const active = document.querySelector('#reqTrack .req-stage.active');
+      if (active) active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    function stepReq() {
+      const total = currentReqScenario().stages.length;
+      if (reqStep >= total) {
+        stopReqPlay();
+        return false;
+      }
+      reqStep += 1;
+      paintReqState();
+      return reqStep < total;
+    }
+
+    function stopReqPlay() {
+      if (reqTimer) {
+        clearInterval(reqTimer);
+        reqTimer = null;
+      }
+      const play = document.getElementById('reqPlay');
+      if (play) play.textContent = 'Play';
+    }
+
+    function playReq() {
+      if (reqTimer) {
+        stopReqPlay();
+        return;
+      }
+      const total = currentReqScenario().stages.length;
+      if (reqStep >= total) reqStep = 0;
+      document.getElementById('reqPlay').textContent = 'Pause';
+      stepReq();
+      reqTimer = setInterval(() => {
+        if (!stepReq()) stopReqPlay();
+      }, 950);
+    }
+
+    function resetReq() {
+      stopReqPlay();
+      reqStep = 0;
+      paintReqState();
+    }
+
+    function selectReqScenario(id) {
+      stopReqPlay();
+      reqScenarioId = id;
+      reqStep = 0;
+      renderReqScenarios();
+      renderReqRequest();
+      renderReqTrack();
+    }
+
+    function initRequestFlow() {
+      renderReqScenarios();
+      renderReqRequest();
+      renderReqTrack();
+      document.getElementById('reqPlay').addEventListener('click', playReq);
+      document.getElementById('reqStep').addEventListener('click', () => {
+        stopReqPlay();
+        stepReq();
+      });
+      document.getElementById('reqReset').addEventListener('click', resetReq);
+    }
+
+    // ----- Pan & zoom -----
+    const svg = document.getElementById('diagram');
+
+    function clampScale(value) {
+      return Math.max(0.5, Math.min(3, value));
+    }
+
+    function clientToViewBox(clientX, clientY) {
+      const pt = svg.createSVGPoint();
+      pt.x = clientX;
+      pt.y = clientY;
+      return pt.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    function zoomAt(clientX, clientY, factor) {
+      const v = clientToViewBox(clientX, clientY);
+      const cx = (v.x - view.tx) / view.scale;
+      const cy = (v.y - view.ty) / view.scale;
+      view.scale = clampScale(view.scale * factor);
+      view.tx = v.x - view.scale * cx;
+      view.ty = v.y - view.scale * cy;
+      applyViewTransform();
+    }
+
+    function resetView() {
+      view.scale = 1;
+      view.tx = 0;
+      view.ty = 0;
+      applyViewTransform();
+    }
+
+    function initPanZoom() {
+      svg.addEventListener('wheel', (event) => {
+        event.preventDefault();
+        zoomAt(event.clientX, event.clientY, event.deltaY < 0 ? 1.12 : 1 / 1.12);
+      }, { passive: false });
+
+      let pending = false; // pointer down on background, not yet a drag
+      let dragging = false;
+      let moved = 0;
+      const DRAG_THRESHOLD = 4;
+
+      svg.addEventListener('pointerdown', (event) => {
+        if (event.target.closest('.node') || event.target.closest('.edge-group')) return;
+        pending = true;
+        dragging = false;
+        moved = 0;
+      });
+      svg.addEventListener('pointermove', (event) => {
+        if (!pending) return;
+        moved += Math.abs(event.movementX) + Math.abs(event.movementY);
+        if (!dragging && moved > DRAG_THRESHOLD) {
+          dragging = true;
+          svg.classList.add('panning');
+          svg.setPointerCapture(event.pointerId);
+        }
+        if (dragging) {
+          const ctm = svg.getScreenCTM();
+          view.tx += event.movementX / ctm.a;
+          view.ty += event.movementY / ctm.d;
+          applyViewTransform();
+        }
+      });
+      const endPointer = () => {
+        if (pending && !dragging) deselect(); // clean click on empty canvas
+        pending = false;
+        dragging = false;
+        svg.classList.remove('panning');
+      };
+      svg.addEventListener('pointerup', endPointer);
+      svg.addEventListener('pointercancel', endPointer);
+
+      document.querySelectorAll('.zoom-controls button').forEach((button) => {
+        button.addEventListener('click', () => {
+          const action = button.dataset.zoom;
+          if (action === 'reset') return resetView();
+          const rect = svg.getBoundingClientRect();
+          zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, action === 'in' ? 1.2 : 1 / 1.2);
+        });
+      });
+    }
+
+    document.getElementById('search').addEventListener('input', (event) => {
+      currentQuery = event.target.value.trim().toLowerCase();
+      renderDiagram();
+    });
+
+    function renderHeader() {
+      const t = document.getElementById('bm-title'); if (t) t.textContent = DATA.title || 'Code Map';
+      const s = document.getElementById('bm-subtitle'); if (s) s.textContent = DATA.subtitle || '';
+      const m = document.getElementById('bm-meta'); if (m) m.innerHTML = (DATA.meta || []).map((x) => `<span class="pill">${escapeHtml(x)}</span>`).join('');
+      const ot = document.getElementById('bm-ov-title'); if (ot) ot.textContent = DATA.title || 'Overview';
+      const wt = document.getElementById('bm-wt-title'); if (wt) wt.textContent = (DATA.sections && DATA.sections.walkthroughTitle) || 'Worked example';
+      const mt = document.getElementById('bm-matrices-title'); if (mt) mt.textContent = (DATA.sections && DATA.sections.matricesTitle) || 'Reference tables';
+    }
+    function renderOverview() {
+      const p = document.getElementById('bm-summary'); if (p) p.textContent = DATA.summary || '';
+      const caps = document.getElementById('bm-caps');
+      if (caps) caps.innerHTML = (DATA.layers || []).map((l) => `<span class="cap"><span class="dot" style="background:${l.color}"></span>${escapeHtml(l.label)}</span>`).join('');
+    }
+    function renderFilters() {
+      const host = document.getElementById('bm-segmented'); if (!host) return;
+      const btns = ['<button class="active" data-filter="all">All</button>']
+        .concat((DATA.layers || []).map((l) => `<button data-filter="${escapeHtml(l.key)}">${escapeHtml(l.label)}</button>`));
+      host.innerHTML = btns.join('');
+      host.querySelectorAll('button').forEach((button) => {
+        button.addEventListener('click', () => {
+          host.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
+          button.classList.add('active');
+          currentFilter = button.dataset.filter;
+          selectedId = null; selectedEdge = null; highlighted = new Set();
+          setActiveFlowButton(null); renderDiagram();
+        });
+      });
+    }
+    function renderLegend() {
+      const host = document.getElementById('bm-legend'); if (!host) return;
+      host.innerHTML = (DATA.layers || []).map((l) => `<span class="key"><span class="dot" style="background:${l.color}"></span>${escapeHtml(l.label)}</span>`).join('');
+    }
+    function renderNotes() {
+      const host = document.getElementById('bm-notes'); if (!host) return;
+      if (!(DATA.notes || []).length) { const sec = host.closest('.section'); if (sec) sec.style.display = 'none'; return; }
+      host.innerHTML = (DATA.notes || []).map((n) => `<div class="detail-block ${n.kind || 'info'}"><p>${escapeHtml(n.text)}</p></div>`).join('');
+    }
+    function hideWalkSection() {
+      const el = document.getElementById('reqRequest'); const sec = el && el.closest('.section'); if (sec) sec.style.display = 'none';
+    }
+
+    renderHeader();
+    renderOverview();
+    renderFilters();
+    renderLegend();
+    renderMatrices();
+    renderNotes();
+    document.getElementById('diagram').setAttribute('viewBox', DATA.viewBox || '0 0 1560 720');
+    renderFlows();
+    if (!flowDefs.length) { renderDiagram(); if (selectedId) renderDetail(nodeById.get(selectedId)); }
+    if (requestScenarios.length) initRequestFlow(); else hideWalkSection();
+    initPanZoom();
+  </script>
+</body>
+</html>

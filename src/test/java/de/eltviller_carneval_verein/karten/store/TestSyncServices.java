@@ -6,6 +6,8 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.util.function.Predicate;
 
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
+
 /**
  * Test-Hilfe: ein {@link SyncService} für den Einzelbetrieb, ohne Threads und ohne Takt. Oberfläche und Hintergrund
  * laufen auf dem Thread des Aufrufers ({@code Runnable::run}), der gemeinsame Ordner gilt immer als erreichbar. Der
@@ -35,7 +37,8 @@ public final class TestSyncServices {
 	public static SyncService singleMode(Path appData, FileLayer files, Clock clock) {
 		try {
 			MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "test");
-			return new SyncService(appData, identity, files, Runnable::run, Runnable::run, path -> true, clock);
+			return new SyncService(appData, identity, files, Runnable::run, Runnable::run, path -> true, clock,
+					ContentRules.GATE);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
@@ -51,7 +54,7 @@ public final class TestSyncServices {
 		try {
 			MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> machineName);
 			SyncService service = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run,
-					path -> true, clock);
+					path -> true, clock, ContentRules.GATE);
 			service.startup(sharedDir.toString());
 			return service;
 		} catch (IOException e) {
@@ -67,9 +70,15 @@ public final class TestSyncServices {
 	 */
 	public static SyncService unstarted(Path appData, String machineName, FileLayer files, Predicate<Path> reachable,
 			Clock clock) {
+		return unstarted(appData, machineName, files, reachable, clock, ContentRules.GATE);
+	}
+
+	/** Wie {@link #unstarted(Path, String, FileLayer, Predicate, Clock)}, mit einer Inhaltsprüfung nach Wahl. */
+	public static SyncService unstarted(Path appData, String machineName, FileLayer files, Predicate<Path> reachable,
+			Clock clock, ContentGate gate) {
 		try {
 			MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> machineName);
-			return new SyncService(appData, identity, files, Runnable::run, Runnable::run, reachable, clock);
+			return new SyncService(appData, identity, files, Runnable::run, Runnable::run, reachable, clock, gate);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}

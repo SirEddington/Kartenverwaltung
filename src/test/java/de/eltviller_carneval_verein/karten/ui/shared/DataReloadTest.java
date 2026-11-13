@@ -14,11 +14,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
@@ -90,7 +90,7 @@ class DataReloadTest {
 		Presentation presentation = created.addPresentation("Freitag");
 		presentation.setHallId(hall.getId());
 		presentation.setSeatingPlanId(plan.getId());
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 		String newSeat = plan.getSeats().stream().map(seat -> seat.getId()).filter(id -> !oldSeats.contains(id)).findFirst()
 				.orElseThrow();
 		presentation.getBookings().stream().filter(b -> newSeat.equals(b.getSeatId())).findFirst().orElseThrow()

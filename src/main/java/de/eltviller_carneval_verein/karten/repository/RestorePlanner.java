@@ -96,15 +96,56 @@ final class RestorePlanner {
 	}
 
 	/**
-	 * Eine gesperrte oder wartende Einheit lässt sich nicht wiederherstellen. Die Texte sind die von
-	 * {@link UnitMapper#requireWritable}.
+	 * Eine gesperrte oder wartende Einheit lässt sich nicht wiederherstellen (gesperrt nach {@link UnitMapper#lockOf}, also
+	 * auch mit Zustand {@code OK} und inhaltlich zu neuem aktuellem Stand), ebenso eine unter einem Vorfahren, dessen
+	 * aktueller Stand inhaltlich zu neu ist, und eine, deren Ziel-Glied inhaltlich zu neu ist (KARV-135): Das Ziel ins
+	 * Modell zu lesen schriebe einen Inhalt, den die anderen Rechner sperren. Die Texte sind die von
+	 * {@link UnitMapper#requireWritable} und {@link UnitMapper#requireWritableAncestors}, beim Ziel-Glied SYS-009 mit der
+	 * Einheit.
+	 * <p>
+	 * Übergangen wird eine gesperrte Einheit (auch ihr Ziel-Glied), deren Vorfahr jetzt gelöscht ist und es nach dem
+	 * Zielstand bleibt (dort gelöscht oder ohne Glied): Das Programm zeigt sie nie, und das Wiederherstellen fasst sie nicht
+	 * an. Bringt es den Vorfahren zurück, scheitert es hier, schon bei der Planung; ebenso, wenn es einen jetzt lebenden
+	 * Vorfahren löschte (wie das Löschen einer Vorstellung mit gesperrten Einträgen).
 	 *
-	 * @throws LockedUnitException wenn eine der Einheiten nicht den Zustand {@code OK} hat
+	 * @param states die Zustände der Einheiten des Events bzw. der Halle; die Vorfahren werden unter ihnen gesucht
+	 * @param target der Zielstand je Einheit ({@link #targetsAt}); eine Einheit ohne Ziel fehlt darin
+	 * @throws LockedUnitException wenn eine der Einheiten nicht den Zustand {@code OK} hat, unter einem inhaltlich zu neuen
+	 *                             Vorfahren liegt oder ihr Ziel-Glied inhaltlich zu neu ist
 	 */
-	static void requireRestorable(Collection<UnitState> states) {
+	static void requireRestorable(Collection<UnitState> states, Map<UnitKey, UnitSnapshot> target) {
+		Map<UnitKey, UnitSnapshot> snapshots = new HashMap<>();
 		for (UnitState state : states) {
-			UnitMapper.requireWritable(state.unit(), state.status());
+			snapshots.put(state.unit(), UnitSnapshot.of(state));
 		}
+		for (UnitState state : states) {
+			UnitKey unit = state.unit();
+			if (staysHidden(unit, snapshots, target)) {
+				if (!UnitMapper.isLocked(state.status())) {
+					// eine wartende Einheit lehnt weiter ab, wie bisher
+					UnitMapper.requireWritable(unit, state.status());
+				}
+				continue;
+			}
+			UnitMapper.requireWritable(snapshots.get(unit));
+			UnitMapper.requireWritableAncestors(unit, snapshots);
+			UnitSnapshot goal = target.get(unit);
+			if (goal != null && goal.contentLocked()) {
+				throw LockedUnitException.newerFormat(unit);
+			}
+		}
+	}
+
+	/** Ob ein Vorfahr der Einheit jetzt gelöscht ist und es nach dem Zielstand bleibt (dort gelöscht oder ohne Glied). */
+	private static boolean staysHidden(UnitKey unit, Map<UnitKey, UnitSnapshot> now, Map<UnitKey, UnitSnapshot> target) {
+		for (UnitKey ancestor : unit.ancestors()) {
+			UnitSnapshot current = now.get(ancestor);
+			UnitSnapshot goal = target.get(ancestor);
+			if (current != null && current.deleted() && (goal == null || goal.deleted())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

@@ -24,7 +24,6 @@ class SeatingPlanLayoutTest {
 		plan.setDefaultTableWidth(70);
 		plan.setDefaultTableHeight(300);
 		plan.setDefaultSeatWidth(20);
-		plan.setDefaultSeatHeight(20);
 		row.setPosX(100);
 		row.setPosY(50);
 	}
@@ -358,7 +357,6 @@ class SeatingPlanLayoutTest {
 		zero.setHeight(0);
 		Seat noSize = zero.addSeat();
 		noSize.setWidth(0);
-		noSize.setHeight(0);
 		zero.addSeat().setWidth(0);
 
 		assertDoesNotThrow(() -> SeatingPlanLayout.apply(plan));
@@ -368,15 +366,16 @@ class SeatingPlanLayoutTest {
 		assertEquals(3, stray.getRotation(), EPS);
 		assertEquals(0, stray.getWidth(), EPS);
 		assertEquals(0, stray.getHeight(), EPS);
-		// Maße 0: Rückfall auf 70 x 300; Rand m = 15, Mittelpunkt x = 100 + (70 + 30) / 2
-		assertEquals(70, zero.getWidth(), EPS);
-		assertEquals(300, zero.getHeight(), EPS);
-		assertEquals(150, zero.getPosX() + 35, EPS);
-		assertSeat(noSize, 150 - 50, 50);
+		// Maße 0: Rückfall auf 50 x 320; Sitze ohne Breite mit Ersatzradius 10, Rand m = 5 + 20 = 25,
+		// Mittelpunkt x = 100 + (50 + 50) / 2
+		assertEquals(50, zero.getWidth(), EPS);
+		assertEquals(320, zero.getHeight(), EPS);
+		assertEquals(150, zero.getPosX() + 25, EPS);
+		assertSeat(noSize, 150 - 25 - 10 - 5, 50);
 	}
 
 	@Test
-	void reihen_ohne_buchstaben_werden_nach_nummer_gelegt() {
+	void tische_liegen_in_der_reihenfolge_des_anlegens_nicht_nach_nummer() {
 		Table nine = table();
 		nine.setTableNumber(9);
 		Table one = table();
@@ -387,14 +386,31 @@ class SeatingPlanLayoutTest {
 
 		SeatingPlanLayout.apply(plan);
 
-		assertEquals(125, one.getPosX(), EPS);
-		assertEquals(245, five.getPosX(), EPS);
-		assertEquals(365, nine.getPosX(), EPS);
+		assertEquals(125, nine.getPosX(), EPS);
+		assertEquals(245, one.getPosX(), EPS);
+		assertEquals(365, five.getPosX(), EPS);
+	}
+
+	@Test
+	void eine_neue_nummer_verschiebt_den_tisch_nicht() {
+		Table first = table();
+		Table second = table();
+		Table third = table();
+		SeatingPlanLayout.apply(plan);
+		List<Double> before = snapshot();
+
+		// auf die Nummer eines anderen Tischs (doppelt, meldet der Validator) und auf eine größere
+		first.setTableNumber(third.getTableNumber());
+		SeatingPlanLayout.apply(plan);
+		assertEquals(before, snapshot());
+		second.setTableNumber(99);
+		SeatingPlanLayout.apply(plan);
+		assertEquals(before, snapshot());
 	}
 
 	// --- Nächste Reihe ("+ Reihe"): neben der vorigen, Abstand = deren Querausdehnung + 20 cm ---
 
-	/** Tisch 70 x 300 mit zwei Sitzen der Breite 30 (Rand m = 15 + 15 = 30). */
+	/** Tisch 70 x 300 mit zwei Sitzen der Breite 30 (Rand m = 5 + 30 = 35). */
 	private Table tableWithWideSeats() {
 		Table table = table();
 		table.getSeats().forEach(seat -> seat.setWidth(30));
@@ -411,8 +427,8 @@ class SeatingPlanLayoutTest {
 		tableWithWideSeats();
 		tableWithWideSeats();
 
-		// 70 + 2 * 30
-		assertEquals(130, SeatingPlanLayout.crossExtent(plan, row), EPS);
+		// 70 + 2 * 35
+		assertEquals(140, SeatingPlanLayout.crossExtent(plan, row), EPS);
 	}
 
 	@Test
@@ -420,7 +436,7 @@ class SeatingPlanLayoutTest {
 		tableWithWideSeats();
 		tableWithWideSeats().setWidth(90);
 
-		assertEquals(150, SeatingPlanLayout.crossExtent(plan, row), EPS);
+		assertEquals(160, SeatingPlanLayout.crossExtent(plan, row), EPS);
 	}
 
 	@Test
@@ -428,8 +444,8 @@ class SeatingPlanLayoutTest {
 		tableWithWideSeats();
 		tableWithWideSeats();
 
-		// Reihe nach unten: die nächste rechts daneben, 130 + 20 weiter, auf gleicher Höhe
-		assertPoint(SeatingPlanLayout.nextRowStart(plan, row), 100 + 130 + 20, 50);
+		// Reihe nach unten: die nächste rechts daneben, 140 + 20 weiter, auf gleicher Höhe
+		assertPoint(SeatingPlanLayout.nextRowStart(plan, row), 100 + 140 + 20, 50);
 	}
 
 	@Test
@@ -450,7 +466,7 @@ class SeatingPlanLayoutTest {
 		row.setAngle(90);
 
 		// Reihe nach links: die nächste darunter, gleicher Start entlang der Achse
-		assertPoint(SeatingPlanLayout.nextRowStart(plan, row), 100, 50 + 130 + 20);
+		assertPoint(SeatingPlanLayout.nextRowStart(plan, row), 100, 50 + 140 + 20);
 	}
 
 	@Test
@@ -458,8 +474,8 @@ class SeatingPlanLayoutTest {
 		tableWithWideSeats();
 		row.setTableRotation(45);
 
-		// Projektion des Rechtecks 130 x 300 quer zur Achse: (130 + 300) * cos 45
-		double extent = (130 + 300) * Math.sqrt(0.5);
+		// Projektion des Rechtecks 140 x 300 quer zur Achse: (140 + 300) * cos 45
+		double extent = (140 + 300) * Math.sqrt(0.5);
 		assertEquals(extent, SeatingPlanLayout.crossExtent(plan, row), EPS);
 		assertPoint(SeatingPlanLayout.nextRowStart(plan, row), 100 + extent + 20, 50);
 	}
@@ -473,6 +489,108 @@ class SeatingPlanLayoutTest {
 	@Test
 	void erste_reihe_am_standardstart() {
 		assertPoint(SeatingPlanLayout.nextRowStart(plan, null), 100, 100);
+	}
+
+	// --- KARV-128: Sitze in gleichen Abschnitten, Abstand zur Tischkante nach dem Durchmesser ---
+
+	/** Tisch 50 x 320 mit {@code seats} Sitzen vom Durchmesser 45 hinten in der Reihe (Reihe nach unten, Tische längs). */
+	private Table standardTable(int seats) {
+		plan.setDefaultTableWidth(50);
+		plan.setDefaultTableHeight(320);
+		plan.setDefaultSeatWidth(45);
+		Table table = plan.addTable(row);
+		for (int i = 0; i < seats; i++) {
+			table.addSeat();
+		}
+		return table;
+	}
+
+	@Test
+	void sitze_stehen_in_der_mitte_gleicher_abschnitte_auch_an_der_stossstelle() {
+		Table first = standardTable(12);
+		Table second = standardTable(12);
+
+		SeatingPlanLayout.apply(plan);
+
+		double step = 320.0 / 6;
+		// Tisch 1 von y = 50 bis 370: erster Sitz einen halben Abschnitt unter der Oberkante
+		assertEquals(50 + step / 2, first.getSeats().get(0).getPosY(), EPS);
+		for (int i = 2; i < 12; i += 2) {
+			assertEquals(step, first.getSeats().get(i).getPosY() - first.getSeats().get(i - 2).getPosY(), EPS, "Abstand innen");
+		}
+		assertEquals(step, second.getSeats().get(0).getPosY() - first.getSeats().get(10).getPosY(), EPS, "Abstand an der Stoßstelle");
+	}
+
+	@Test
+	void an_der_stossstelle_kommt_der_tischabstand_dazu() {
+		Table first = standardTable(12);
+		Table second = standardTable(12);
+		row.setTableGap(20);
+
+		SeatingPlanLayout.apply(plan);
+
+		assertEquals(320.0 / 6 + 20, second.getSeats().get(0).getPosY() - first.getSeats().get(10).getPosY(), EPS);
+	}
+
+	@Test
+	void sitzmittelpunkt_liegt_radius_plus_5_neben_der_tischkante() {
+		Table table = standardTable(2);
+
+		SeatingPlanLayout.apply(plan);
+
+		// Tischmitte x = 100, Kante bei 75 bzw. 125, Radius 22,5
+		assertSeat(table.getSeats().get(0), 100 - 25 - 22.5 - 5, 210);
+		assertSeat(table.getSeats().get(1), 100 + 25 + 22.5 + 5, 210);
+	}
+
+	@Test
+	void ungerade_zahl_der_letzte_sitz_steht_allein_links() {
+		Table table = standardTable(3);
+
+		SeatingPlanLayout.apply(plan);
+
+		// zwei Abschnitte zu 160: Mitten bei 210 - 80 und 210 + 80
+		assertSeat(table.getSeats().get(0), 47.5, 130);
+		assertSeat(table.getSeats().get(1), 152.5, 130);
+		assertSeat(table.getSeats().get(2), 47.5, 290);
+	}
+
+	@Test
+	void sitz_ohne_breite_liegt_mit_ersatzradius_neben_dem_tisch() {
+		Table table = standardTable(2);
+		table.getSeats().forEach(seat -> seat.setWidth(0));
+
+		SeatingPlanLayout.apply(plan);
+
+		assertSeat(table.getSeats().get(0), 100 - 25 - 10 - 5, 210);
+		assertEquals(0, table.getSeats().get(0).getWidth(), EPS, "das Modell bleibt unverändert");
+		assertEquals(10, table.getSeats().get(0).radius(), EPS);
+		assertEquals(22.5, standardTable(1).getSeats().get(0).radius(), EPS);
+	}
+
+	@Test
+	void reihenbreite_und_reihenlaenge_folgen_dem_durchmesser() {
+		standardTable(12);
+		standardTable(12);
+
+		// 50 + 2 * (5 + 45)
+		assertEquals(150, SeatingPlanLayout.crossExtent(plan, row), EPS);
+		row.setTableRotation(90);
+		assertEquals(150 + 150, SeatingPlanLayout.rowLength(plan, row), EPS);
+	}
+
+	@Test
+	void manueller_sitz_bleibt_stehen() {
+		Table table = standardTable(2);
+		Seat manual = table.getSeats().get(0);
+		manual.setManualPos(true);
+		manual.setPosX(1);
+		manual.setPosY(2);
+
+		SeatingPlanLayout.apply(plan);
+
+		assertSeat(manual, 1, 2);
+		assertSeat(table.getSeats().get(1), 152.5, 210);
 	}
 
 	private List<Double> snapshot() {

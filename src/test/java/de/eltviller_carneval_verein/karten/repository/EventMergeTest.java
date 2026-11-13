@@ -23,12 +23,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.store.Snapshots;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
@@ -91,11 +92,11 @@ class EventMergeTest {
 
 	/** Der Stand einer Einheit, wie ihn ein anderer Rechner geschrieben hat: genau der Inhalt des Zerlegens. */
 	private UnitSnapshot foreign(Event state, UnitKey unit) {
-		return new UnitSnapshot(unit, nextVersion(), Status.OK, false, UnitMapper.payloads(state).get(unit));
+		return Snapshots.snapshot(unit, nextVersion(), Status.OK, false, UnitMapper.payloads(state).get(unit));
 	}
 
 	private UnitSnapshot deleted(UnitKey unit) {
-		return new UnitSnapshot(unit, nextVersion(), Status.OK, true, JsonNodeFactory.instance.objectNode());
+		return Snapshots.snapshot(unit, nextVersion(), Status.OK, true, JsonNodeFactory.instance.objectNode());
 	}
 
 	/** Eine unabhängige Kopie über JSON, wie sie der Tracker aus seinen Bytes liest. */
@@ -378,7 +379,7 @@ class EventMergeTest {
 		Event event = event();
 		UnitKey unit = UnitKey.booking(event.getId(), "fehlt", "s1");
 		Event state = copyOfUnchecked(event);
-		UnitSnapshot snapshot = new UnitSnapshot(unit, nextVersion(), Status.OK, false,
+		UnitSnapshot snapshot = Snapshots.snapshot(unit, nextVersion(), Status.OK, false,
 				UnitMapper.payloads(state).get(seat(event, "s1")));
 		Recording sink = new Recording();
 
@@ -394,7 +395,7 @@ class EventMergeTest {
 		Event event = event();
 		UnitKey unit = UnitKey.booking(event.getId(), "fehlt", "s1");
 		Event state = copyOfUnchecked(event);
-		UnitSnapshot snapshot = new UnitSnapshot(unit, nextVersion(), Status.OK, false,
+		UnitSnapshot snapshot = Snapshots.snapshot(unit, nextVersion(), Status.OK, false,
 				UnitMapper.payloads(state).get(seat(event, "s1")));
 		Recording sink = new Recording();
 		// die Vorstellung ist gelöscht oder unlesbar: Auf einen Platz wartet nichts
@@ -431,7 +432,7 @@ class EventMergeTest {
 	void deletedBookingOfAnInvisiblePresentationIsOnlyAdopted() {
 		Event event = event();
 		UnitKey unit = UnitKey.booking(event.getId(), "fehlt", "s1");
-		UnitSnapshot snapshot = new UnitSnapshot(unit, nextVersion(), Status.OK, true, null);
+		UnitSnapshot snapshot = Snapshots.snapshot(unit, nextVersion(), Status.OK, true, null);
 		Recording sink = new Recording();
 
 		EventMerge.apply(event, plan(List.of(snapshot), List.of()), sink);
@@ -581,7 +582,7 @@ class EventMergeTest {
 		Presentation friday = event.addPresentation("Freitag");
 		friday.setDate(LocalDate.of(2027, 2, 12));
 		inHall(friday, hall);
-		BookingSync.sync(friday, hall.getSeatingPlans().get(0));
+		Syncs.sync(friday, hall.getSeatingPlans().get(0));
 		return event;
 	}
 
@@ -633,7 +634,7 @@ class EventMergeTest {
 	/** Das Einarbeiten einer Buchung auf einem Sitz, den die Bestuhlung nicht hat, in einer aktuellen Halle. */
 	private EventMerge.Plan displacedPlan(Event event, Hall hall, Event state, UnitKey unit) {
 		return new EventMerge.Plan(List.of(foreign(state, unit)), List.of(), lookup(hall), id -> true, indexOf(event),
-				Map.of());
+				Map.of(), p -> Set.of());
 	}
 
 	@Test
@@ -792,7 +793,7 @@ class EventMergeTest {
 		}
 		UnitKey unit = UnitKey.unassignedBooking(event.getId(), friday.getId(), known.getId());
 		EventMerge.Plan plan = new EventMerge.Plan(List.of(deleted(unit)), List.of(), lookup(hall), id -> true, indexOf(event),
-				Map.of());
+				Map.of(), p -> Set.of());
 		EventMerge.apply(event, carried ? plan.withCarried(Set.of(unit)) : plan, sink);
 		assertEquals(Map.of(unit, false), sink.adopted);
 		return known;

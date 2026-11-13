@@ -109,6 +109,27 @@ class BookingTrailTest {
 		assertSame(atS5, trail.last());
 	}
 
+	/**
+	 * KARV-135: Die Ankunft auf s4 ist inhaltlich zu neu und trägt als einzige {@code movedFrom}; darauf folgt eine lesbare
+	 * Version ohne Umzugsangabe. Die Spur zählt die gesperrte Ankunft mit (ID und Marken liest sie auf JSON-Ebene).
+	 */
+	@Test
+	void arrivalOnAContentLockedVersionCounts() {
+		Version deletion = world.claim(M, world.version(OTHER, "save-a", base, null, to(S4)));
+		ObjectNode newer = booking("m", "s4");
+		newer.putArray("requires").add("x-test-merkmal");
+		Version arrival = world.claim(S4, world.version(OTHER, "save-a", null, newer, from(M)).withNewerContent(true));
+		Version later = world.claim(S4, world.version(OTHER, arrival, booking("m", "s4", b -> b.setComment("Fenster"))));
+		Version mine = world.beside(M, world.version(OWN, base, withoutPlace("m", b -> b.setComment("neu"))));
+
+		BookingTrail trail = foreign(world.input(M, base, List.of(mine)));
+
+		assertEquals(Kind.ARRIVED, trail.kind());
+		assertSame(deletion, trail.removal());
+		assertEquals(S4, trail.end());
+		assertSame(later, trail.last());
+	}
+
 	@Test
 	void arrivedAlsoWhenTheOtherSideWonTheTarget() {
 		foreignMoveToS4();

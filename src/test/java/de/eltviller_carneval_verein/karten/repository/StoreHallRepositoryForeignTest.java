@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -26,7 +28,12 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Shape;
+import de.eltviller_carneval_verein.karten.model.Syncs;
+import de.eltviller_carneval_verein.karten.model.TextAlignH;
 import de.eltviller_carneval_verein.karten.store.ForeignVersions;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncService;
@@ -36,6 +43,9 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.validation.PresentationIssue;
+import de.eltviller_carneval_verein.karten.validation.PresentationValidator;
+import de.eltviller_carneval_verein.karten.validation.ValidationIssue;
 
 /**
  * Fremde Stände im Hallen-Repository. "Der andere Rechner" ist meist ein zweites Repository auf demselben Dienst: Es
@@ -408,6 +418,77 @@ class StoreHallRepositoryForeignTest {
 		assertSame(hall, recorder.entities.get(0));
 	}
 
+	/**
+	 * Ein neueres Programm verlangt an der Halle ein unbekanntes Merkmal (KARV-135): Sie verlässt den Cache wie eine
+	 * unlesbare, gemeldet wird aber die Sperre (SYS-009) mit ihrem Namen, auch beim Speichern aus einer alten Ansicht.
+	 */
+	@Test
+	void foreignContentLockedHallReportsLockNotRemoval() throws IOException {
+		foreignVersion(unit(), payload -> payload.set("requires",
+				JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+		assertTrue(sync.unitState(unit()).contentLocked());
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(List.of(unit()));
+
+		assertNull(mine.findById(hall.getId()), "die gesperrte Halle fehlt im Modell");
+		assertTrue(mine.isContentLocked(hall.getId()), "die Hallen-Ansicht meldet darüber die Sperre statt „gelöscht“");
+		assertEquals(List.of(StoreMessages.newerFormat("Stadthalle")), result.warnings());
+		assertEquals(List.of("removed Stadthalle"), recorder.calls);
+		// der Hallen-Editor zeigt die Halle noch
+		hall.setName("Alt geändert");
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveHall(hall));
+		assertEquals(StoreMessages.newerFormat("Alt geändert"), refused.getMessage());
+		assertEquals(before, files(), "die gesperrte Halle wird nicht überschrieben");
+	}
+
+	/**
+	 * Eine gesperrte Halle friert ihre Vorstellungen ein ({@code planMissing}): Die Prüfung meldet dann die Sperre der Halle
+	 * (SYS-009, Schwere wie PRS-007) statt „Bestuhlung existiert nicht mehr“. Die Abfrage gilt auch für ein Repository, das
+	 * die Halle schon gesperrt geladen hat; eine ungesperrte Halle meldet weiter PRS-007.
+	 */
+	@Test
+	void presentationOnLockedHallReportsLockInsteadOfPrs007() throws IOException {
+		foreignVersion(unit(), payload -> payload.set("requires",
+				JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+		mine.applyForeign(List.of(unit()));
+		Presentation frozen = frozenPresentation(hall.getId());
+		assertTrue(frozen.isPlanMissing());
+		Presentation gone = frozenPresentation("x-test-andere-halle");
+		// ohne Bezeichnungen (wie in der App vor dem Einrichten) nennt die Meldung den Pfad der Einheit
+		String expected = StoreMessages.newerFormat(unit().relativePath());
+		assertEquals(expected, mine.lockTextOfHall(hall.getId()));
+		assertEquals(expected, other().lockTextOfHall(hall.getId()), "auch schon beim Laden gesperrt");
+		assertNull(mine.lockTextOfHall("x-test-andere-halle"));
+
+		PresentationValidator.useHallLocks(mine::lockTextOfHall);
+		try {
+			List<ValidationIssue> issues = PresentationValidator.validate(frozen).getIssues();
+			List<ValidationIssue> others = PresentationValidator.validate(gone).getIssues();
+
+			assertEquals(List.of(expected), issues.stream().map(ValidationIssue::toDisplayText).toList());
+			assertEquals(PresentationIssue.PLAN_GONE.getSeverity(), issues.get(0).severity());
+			assertEquals(List.of(PresentationIssue.PLAN_GONE.getCode()),
+					others.stream().map(ValidationIssue::code).toList());
+		} finally {
+			PresentationValidator.useHallLocks(null);
+		}
+		assertEquals(List.of(PresentationIssue.PLAN_GONE.getCode()),
+				PresentationValidator.validate(frozen).getIssues().stream().map(ValidationIssue::code).toList(),
+				"ohne Einrichtung ist keine Halle gesperrt");
+	}
+
+	/** Eine vollständige Vorstellung in der Halle, deren Bestuhlung der Abgleich nicht findet: eingefroren. */
+	private static Presentation frozenPresentation(String hallId) {
+		Presentation presentation = new Event().addPresentation("Freitag");
+		presentation.setDate(LocalDate.of(2027, 2, 5));
+		presentation.setTime(LocalTime.of(19, 11));
+		presentation.setHallId(hallId);
+		presentation.setSeatingPlanId("x-test-bestuhlung");
+		Syncs.sync(presentation, null);
+		return presentation;
+	}
+
 	@Test
 	void hallDeletedElsewhereIsRefusedFromAStaleView() throws IOException {
 		StoreHallRepository other = other();
@@ -563,6 +644,107 @@ class StoreHallRepositoryForeignTest {
 	@Test
 	void currentHallIsCurrent() {
 		assertTrue(mine.isCurrent(hall.getId()));
+	}
+
+	/**
+	 * Ein Stand, den eine andere Programmversion schrieb (KARV-128): Er trägt Felder, die das Modell beim Lesen verwirft (die
+	 * Sitzhöhe von v1.0, hier zusätzlich ein unbekanntes Feld). Das Modell weicht davon ab, ohne dass jemand etwas geändert
+	 * hat; die Halle gilt trotzdem nicht als ungespeichert verändert.
+	 */
+	@Test
+	void hallWrittenWithFieldsTheModelDropsIsNotLocallyChanged() throws IOException {
+		Hall withPlan = new Hall(hall.getId());
+		withPlan.addSeatingPlan().addTable(withPlan.getSeatingPlans().get(0).addRow()).addSeat();
+		ObjectNode tree = JsonMapperFactory.create().valueToTree(withPlan);
+		ObjectNode plan = (ObjectNode) tree.get("seatingPlans").get(0);
+		plan.put("defaultSeatHeight", 30.0);
+		ObjectNode seat = (ObjectNode) plan.get("tables").get(0).get("seats").get(0);
+		seat.put("height", 30.0);
+		seat.put("altesFeld", 1);
+		foreignVersion(unit(), payload -> payload.set("seatingPlans", tree.get("seatingPlans")));
+		mine.applyForeign(List.of(unit()));
+		assertEquals(1, mine.findById(hall.getId()).getSeatingPlans().size(), "der Stand mit Bestuhlung ist eingearbeitet");
+
+		assertTrue(mine.isCurrent(hall.getId()), "unverändert geladen gilt die Halle als aktuell");
+
+		foreignName("Bürgerhaus");
+		ForeignResult result = mine.applyForeign(List.of(unit()));
+
+		assertTrue(result.deferred().isEmpty(), "ein neuerer fremder Stand wird eingearbeitet, nicht zurückgestellt");
+		assertEquals("Bürgerhaus", mine.findById(hall.getId()).getName());
+	}
+
+	/**
+	 * Ein Stand aus einer neueren Version nennt eine Form und Ausrichtungen, die diese Version nicht kennt (KARV-135). Das
+	 * Modell fällt auf RECTANGLE bzw. CENTER zurück, ohne dass jemand etwas geändert hat: Die Halle gilt nicht als verändert.
+	 * Ändert jemand danach etwas anderes, schreibt die neue Version die Originaltexte unverändert zurück.
+	 */
+	/**
+	 * Speichern ohne Änderung schreibt nichts, auch wenn die Datei Felder trägt, die das Modell verwirft (Sitzhöhe), ein
+	 * unbekanntes Feld und ein Rückfall-Enum hat und ein bekanntes Feld ihr fehlt (KARV-133): Der Vergleich gilt dem Stand,
+	 * wie dieses Programm ihn aus der Datei macht.
+	 */
+	@Test
+	void hallSaveWithoutChangeWritesNothingDespiteFormatDifference() throws IOException {
+		Hall withContent = new Hall(hall.getId());
+		withContent.addHallObject().setPosX(10);
+		withContent.addSeatingPlan().addTable(withContent.getSeatingPlans().get(0).addRow()).addSeat();
+		ObjectNode tree = JsonMapperFactory.create().valueToTree(withContent);
+		((ObjectNode) tree.get("hallObjects").get(0)).put("shape", "x-test-ellipse");
+		ObjectNode plan = (ObjectNode) tree.get("seatingPlans").get(0);
+		ObjectNode seat = (ObjectNode) plan.get("tables").get(0).get("seats").get(0);
+		seat.put("height", 30.0);
+		seat.put("x-test-neu", 1);
+		foreignVersion(unit(), payload -> {
+			payload.set("hallObjects", tree.get("hallObjects"));
+			payload.set("seatingPlans", tree.get("seatingPlans"));
+			payload.remove("description");
+		});
+		mine.applyForeign(List.of(unit()));
+		Hall loaded = mine.findById(hall.getId());
+		assertEquals(1, loaded.getSeatingPlans().size(), "der Stand mit Bestuhlung ist eingearbeitet");
+		long before = files();
+
+		mine.saveHall(loaded);
+
+		assertEquals(before, files(), "unverändert gespeichert schreibt keine Version");
+		assertTrue(mine.isCurrent(hall.getId()));
+	}
+
+	@Test
+	void hallWithUnknownShapeAndAlignmentIsNotChangedAndKeepsOriginalsAfterMove() throws IOException {
+		Hall withContent = new Hall(hall.getId());
+		withContent.addHallObject().setPosX(10);
+		withContent.addSeatingPlan().addTable(withContent.getSeatingPlans().get(0).addRow());
+		ObjectNode tree = JsonMapperFactory.create().valueToTree(withContent);
+		ObjectNode object = (ObjectNode) tree.get("hallObjects").get(0);
+		object.put("shape", "x-test-ellipse");
+		object.put("textAlignH", "x-test-blocksatz");
+		ObjectNode table = (ObjectNode) tree.get("seatingPlans").get(0).get("tables").get(0);
+		table.put("textAlignV", "x-test-blocksatz");
+		foreignVersion(unit(), payload -> {
+			payload.set("hallObjects", tree.get("hallObjects"));
+			payload.set("seatingPlans", tree.get("seatingPlans"));
+		});
+
+		ForeignResult result = mine.applyForeign(List.of(unit()));
+
+		assertTrue(result.deferred().isEmpty());
+		assertTrue(result.warnings().isEmpty());
+		Hall loaded = mine.findById(hall.getId());
+		assertEquals(Shape.RECTANGLE, loaded.getHallObjects().get(0).getShape());
+		assertEquals(TextAlignH.CENTER, loaded.getHallObjects().get(0).getTextAlignH());
+		assertTrue(mine.isCurrent(hall.getId()), "unverändert geladen gilt die Halle als aktuell");
+
+		loaded.getHallObjects().get(0).setPosX(99);
+		mine.saveHall(loaded);
+
+		ObjectNode saved = sync.unitState(unit()).head().payload();
+		ObjectNode savedObject = (ObjectNode) saved.get("hallObjects").get(0);
+		assertEquals(99, savedObject.get("posX").asDouble());
+		assertEquals("x-test-ellipse", savedObject.get("shape").asText());
+		assertEquals("x-test-blocksatz", savedObject.get("textAlignH").asText());
+		assertEquals("x-test-blocksatz", saved.get("seatingPlans").get(0).get("tables").get(0).get("textAlignV").asText());
 	}
 
 	@Test

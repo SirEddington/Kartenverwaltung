@@ -52,6 +52,8 @@ class UnitIndexTest {
 	private static final String ME = "maschine-1";
 	private static final String OTHER = "fremder2";
 	private static final Ownership OWN = new Ownership(ME, List.of());
+	/** Die Regelkennung, unter der die Tests den Index schreiben und lesen, wenn es nicht um die Regeln geht. */
+	private static final String RULES = "regeln-a";
 
 	private static final UnitKey EVENT = UnitKey.event("e1");
 	private static final UnitKey PRESENTATION = UnitKey.presentation("e1", "p1");
@@ -73,7 +75,11 @@ class UnitIndexTest {
 	}
 
 	private UnitIndex index() {
-		return new UnitIndex(indexDir, new NioFileLayer(), OWN);
+		return index(RULES);
+	}
+
+	private UnitIndex index(String rulesId) {
+		return new UnitIndex(indexDir, new NioFileLayer(), OWN, rulesId);
 	}
 
 	private static VersionId id(int n, String machine) {
@@ -231,8 +237,10 @@ class UnitIndexTest {
 		assertTrue(Files.isRegularFile(eventIndexFile("e1")));
 		assertTrue(Files.isRegularFile(indexDir.resolve("halls.json")));
 		ObjectNode root = (ObjectNode) new ObjectMapper().readTree(Files.readAllBytes(eventIndexFile("e1")));
-		assertEquals(4, root.get("indexFormat").asInt());
+		assertEquals(5, root.get("indexFormat").asInt());
 		assertEquals(ME, root.get("machine").asText());
+		assertEquals(RULES, root.get("rulesId").asText());
+		assertFalse(root.get("units").get(0).get("contentLocked").asBoolean());
 		assertEquals(2, root.get("units").size());
 		assertEquals("events/e1", root.get("units").get(0).get("unit").asText());
 	}
@@ -257,7 +265,7 @@ class UnitIndexTest {
 	@Test
 	void indexOfOtherMachineIsIgnored() throws IOException {
 		buildThreeUnits();
-		UnitIndex foreign = new UnitIndex(indexDir, new NioFileLayer(), new Ownership("x", List.of()));
+		UnitIndex foreign = new UnitIndex(indexDir, new NioFileLayer(), new Ownership("x", List.of()), RULES);
 		refresh(foreign, local);
 		foreign.flush();
 
@@ -270,16 +278,163 @@ class UnitIndexTest {
 	}
 
 	@Test
-	void indexWithOtherFormatIsIgnored() throws IOException {
+	void indexWithNewerFormatIsIgnored() throws IOException {
 		buildThreeUnits();
 		UnitIndex first = index();
 		refresh(first, local);
 		first.flush();
-		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":4,\"machine\":\"" + ME + "\",\"units\":[]}");
+		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":6,\"machine\":\"" + ME + "\",\"units\":[]}");
 
 		UnitIndex.Refresh refresh = refresh(index(), local);
 
 		assertEquals(1, refresh.resolved());
+		assertEquals(0, refresh.rulesChanged());
+	}
+
+	/** Ein Tor, das jeden Payload mit dem Schlüssel {@code x-test-neu} als inhaltlich zu neu ansieht. */
+	private static final ContentGate NEWER_KEY = new ContentGate() {
+		@Override
+		public boolean isNewer(UnitKey unit, ObjectNode payload) {
+			return payload.has("x-test-neu");
+		}
+
+		@Override
+		public String rulesId() {
+			return RULES;
+		}
+	};
+
+	/** Der lokale Bestand, gelesen mit {@link #NEWER_KEY}. */
+	private VersionStore gatedLocal() {
+		return new VersionStore(local.dataRoot(), new NioFileLayer(), null, null, NEWER_KEY);
+	}
+
+	/** Schreibt und beansprucht eine eigene Version, die das Tor {@link #NEWER_KEY} als inhaltlich zu neu ansieht. */
+	private void writeNewerContent(UnitKey unit, VersionId id) throws IOException {
+		ObjectNode payload = new ObjectMapper().createObjectNode().put("name", "neu").put("x-test-neu", true);
+		Version version = new Version(1, id, List.of(), ME, "Kasse", "Anna", AT, "save-" + id, false, payload);
+		byte[] bytes = StoreCodec.write(version);
+		assertTrue(local.writeVersion(unit, id, bytes));
+		assertTrue(arbiter.claim(unit, version, bytes).won());
+	}
+
+	/** Ein sauber beendeter Index über Event (lesbar) und Vorstellung (inhaltlich zu neu). */
+	private void buildCleanIndexWithLockedPresentation() throws IOException {
+		saveTwice(EVENT, "event");
+		writeNewerContent(PRESENTATION, mine(1));
+		UnitIndex first = index();
+		refresh(first, gatedLocal());
+		assertTrue(first.snapshots().get(PRESENTATION).contentLocked());
+		assertFalse(first.snapshots().get(EVENT).contentLocked());
+		first.flush();
+		assertTrue(first.writeCleanMarker());
+	}
+
+	@Test
+	void indexKeepsContentLockedAcrossRestart() throws IOException {
+		buildCleanIndexWithLockedPresentation();
+
+		UnitIndex second = index();
+		assertTrue(second.loadIfClean());
+
+		assertTrue(second.snapshots().get(PRESENTATION).contentLocked());
+		assertFalse(second.snapshots().get(EVENT).contentLocked());
+		assertEquals(0, refresh(second, gatedLocal()).resolved());
+	}
+
+	@Test
+	void missingContentLockedReadsAsFalse() throws IOException {
+		buildCleanIndexWithLockedPresentation();
+		Path file = eventIndexFile("e1");
+		String text = Files.readString(file);
+		assertTrue(text.contains("\"contentLocked\":true"), text);
+		// ein Eintrag ohne das Feld (etwa aus einer Fassung, die es nicht schrieb)
+		Files.writeString(file, text.replaceAll("\"contentLocked\":(true|false),", ""));
+
+		UnitIndex second = index();
+		assertTrue(second.loadIfClean());
+
+		assertFalse(second.snapshots().get(PRESENTATION).contentLocked());
+	}
+
+	@Test
+	void differentRulesIdResolvesAgain() throws IOException {
+		buildThreeUnits();
+		UnitIndex first = index("regeln-a");
+		refresh(first, local);
+		first.flush();
+
+		UnitIndex second = index("regeln-b");
+		UnitIndex.Refresh refresh = refresh(second, local);
+
+		assertEquals(3, refresh.rulesChanged());
+		assertEquals(0, refresh.resolved());
+		assertEquals(first.entries(), second.entries());
+		second.flush();
+		assertEquals("regeln-b", new ObjectMapper().readTree(Files.readAllBytes(eventIndexFile("e1"))).get("rulesId").asText());
+		UnitIndex.Refresh again = refresh(index("regeln-b"), local);
+		assertEquals(0, again.rulesChanged());
+		assertEquals(0, again.resolved());
+	}
+
+	@Test
+	void missingRulesIdResolvesAgain() throws IOException {
+		buildThreeUnits();
+		UnitIndex first = index();
+		refresh(first, local);
+		first.flush();
+		removeFromIndexFiles("\"rulesId\":\"" + RULES + "\",");
+
+		UnitIndex.Refresh refresh = refresh(index(), local);
+
+		assertEquals(3, refresh.rulesChanged());
+		assertEquals(0, refresh.resolved());
+	}
+
+	@Test
+	void olderIndexFormatCountsAsRulesChange() throws IOException {
+		buildThreeUnits();
+		buildCleanIndex();
+		// ein Index, wie ihn die Fassung 1.0.x schrieb: Format 4, ohne Regelkennung und Sperrmerkmal
+		setIndexFormat(indexDir, 4);
+		removeFromIndexFiles("\"rulesId\":\"" + RULES + "\",");
+		removeFromIndexFiles("\"contentLocked\":false,");
+
+		try (LogCapture capture = new LogCapture(UnitIndex.class)) {
+			UnitIndex second = index();
+			second.loadIfClean();
+			UnitIndex.Refresh refresh = refresh(second, local);
+
+			assertEquals(3, refresh.rulesChanged());
+			assertEquals(0, refresh.resolved());
+			assertTrue(capture.records.stream().noneMatch(r -> r.getLevel().intValue() >= Level.WARNING.intValue()),
+					capture.records::toString);
+		}
+	}
+
+	@Test
+	void foreignMachineIndexStillWarns() throws IOException {
+		buildThreeUnits();
+		UnitIndex foreign = new UnitIndex(indexDir, new NioFileLayer(), new Ownership("x", List.of()), RULES);
+		refresh(foreign, local);
+		foreign.flush();
+
+		try (LogCapture capture = new LogCapture(UnitIndex.class)) {
+			UnitIndex.Refresh refresh = refresh(index(), local);
+
+			assertEquals(3, refresh.resolved());
+			assertEquals(0, refresh.rulesChanged());
+			assertTrue(capture.records.stream().anyMatch(r -> r.getLevel() == Level.WARNING), capture.records::toString);
+		}
+	}
+
+	/** Entfernt den Text aus jeder Index-Datei, wie ihn eine andere Programmfassung nicht geschrieben hätte. */
+	private void removeFromIndexFiles(String text) throws IOException {
+		try (Stream<Path> files = Files.walk(indexDir)) {
+			for (Path file : files.filter(f -> f.toString().endsWith(".json")).toList()) {
+				Files.writeString(file, Files.readString(file).replace(text, ""));
+			}
+		}
 	}
 
 	@Test
@@ -294,10 +449,13 @@ class UnitIndexTest {
 		UnitIndex second = index();
 		UnitIndex.Refresh refresh = refresh(second, local);
 
-		assertEquals(3, refresh.resolved());
+		assertEquals(3, refresh.rulesChanged());
+		assertEquals(0, refresh.resolved());
 		assertEquals(first.entries(), second.entries());
 		second.flush();
-		assertEquals(0, refresh(index(), local).resolved());
+		UnitIndex.Refresh again = refresh(index(), local);
+		assertEquals(0, again.resolved());
+		assertEquals(0, again.rulesChanged());
 	}
 
 	@Test
@@ -707,7 +865,9 @@ class UnitIndexTest {
 		UnitIndex second = index();
 
 		assertFalse(second.loadIfClean());
-		assertEquals(3, refresh(second, local).resolved());
+		UnitIndex.Refresh refresh = refresh(second, local);
+		assertEquals(3, refresh.rulesChanged());
+		assertEquals(0, refresh.resolved());
 	}
 
 	@Test
@@ -768,7 +928,7 @@ class UnitIndexTest {
 		saveTwice(EVENT2, "event2");
 		saveTwice(HALL, "hall");
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
-		UnitIndex index = new UnitIndex(indexDir, layer, OWN);
+		UnitIndex index = new UnitIndex(indexDir, layer, OWN, RULES);
 		refresh(index, local);
 		index.flush();
 		assertEquals(3, createdFiles(layer));
@@ -787,7 +947,7 @@ class UnitIndexTest {
 	void failedFlushKeepsFileMarkedChanged() throws IOException {
 		saveTwice(EVENT, "event");
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
-		UnitIndex index = new UnitIndex(indexDir, layer, OWN);
+		UnitIndex index = new UnitIndex(indexDir, layer, OWN, RULES);
 		refresh(index, local);
 		layer.failNext("replace", new IOException("Platte voll"));
 
@@ -807,7 +967,7 @@ class UnitIndexTest {
 
 		SlowWrite() throws Exception {
 			FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
-			index = new UnitIndex(indexDir, layer, OWN);
+			index = new UnitIndex(indexDir, layer, OWN, RULES);
 			refresh(index, local);
 			CountDownLatch entered = new CountDownLatch(1);
 			layer.blockNext("replace", entered, release);
@@ -1034,7 +1194,7 @@ class UnitIndexTest {
 	private UnitIndex indexWithoutUncleanFile() {
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 		layer.failWhen(uncleanFile()::equals, "createNew", new IOException("Ordner gesperrt"));
-		return new UnitIndex(indexDir, layer, OWN);
+		return new UnitIndex(indexDir, layer, OWN, RULES);
 	}
 
 	/** Drei Einheiten und ein Index, wie nach einem Start ohne Marke: abgeglichen, geschrieben, die Sperrdatei steht. */
@@ -1082,7 +1242,7 @@ class UnitIndexTest {
 		buildCleanIndex();
 		FaultyFileLayer layer = new FaultyFileLayer(new NioFileLayer());
 
-		assertTrue(new UnitIndex(indexDir, layer, OWN).loadIfClean());
+		assertTrue(new UnitIndex(indexDir, layer, OWN, RULES).loadIfClean());
 
 		assertTrue(layer.calls().stream().noneMatch(c -> c.startsWith("listTree ")), layer.calls().toString());
 	}
@@ -1148,7 +1308,7 @@ class UnitIndexTest {
 	void cleanLoadFallsBackWhenAnIndexFileIsOfOtherMachine() throws IOException {
 		buildThreeUnits();
 		buildCleanIndex();
-		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":4,\"machine\":\"" + OTHER + "\",\"units\":[]}");
+		Files.writeString(indexDir.resolve("halls.json"), "{\"indexFormat\":5,\"machine\":\"" + OTHER + "\",\"rulesId\":\"" + RULES + "\",\"units\":[]}");
 
 		assertFalse(index().loadIfClean());
 	}
@@ -1699,7 +1859,8 @@ class UnitIndexTest {
 		UnitIndex second = index();
 		UnitIndex.Refresh refresh = refresh(second, local);
 
-		assertEquals(3, refresh.resolved());
+		assertEquals(3, refresh.rulesChanged());
+		assertEquals(0, refresh.resolved());
 		assertNull(second.entries().get(EVENT).ownSeq());
 		assertEquals(first.entries(), second.entries());
 	}
@@ -1795,7 +1956,7 @@ class UnitIndexTest {
 		write(PRESENTATION, previous, id(2, previous), null, "grenze", true);
 		// danach: die Kopie, die die alte ID weiter trägt (fremd)
 		write(HALL, previous, id(3, previous), null, "kopie", true);
-		UnitIndex index = new UnitIndex(indexDir, new NioFileLayer(), own);
+		UnitIndex index = new UnitIndex(indexDir, new NioFileLayer(), own, RULES);
 
 		UnitIndex.Refresh refresh = refresh(index, local);
 
@@ -1960,10 +2121,10 @@ class UnitIndexTest {
 		assertTrue(index.writeCleanMarker());
 		assertEquals(RENEWED, Files.readString(cleanMarker(), StandardCharsets.UTF_8));
 		// ein Start mit der neuen ID übernimmt die Dateien, ohne eine Einheit neu aufzulösen
-		UnitIndex restarted = new UnitIndex(indexDir, new NioFileLayer(), RENEWED_OWN);
+		UnitIndex restarted = new UnitIndex(indexDir, new NioFileLayer(), RENEWED_OWN, RULES);
 		assertTrue(restarted.loadIfClean());
 		assertEquals(before, restarted.entries());
-		assertEquals(0, refresh(new UnitIndex(indexDir, new NioFileLayer(), RENEWED_OWN), local).resolved());
+		assertEquals(0, refresh(new UnitIndex(indexDir, new NioFileLayer(), RENEWED_OWN, RULES), local).resolved());
 	}
 
 	@Test

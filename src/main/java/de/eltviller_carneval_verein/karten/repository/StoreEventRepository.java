@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -19,6 +20,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -38,6 +40,7 @@ import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
  * Das Repository der Events auf dem Versionsspeicher. Beim Speichern wird das Event in Kopf, Vorstellungen und Buchungen
@@ -49,6 +52,9 @@ public class StoreEventRepository implements EventRepository {
 
 	/** Zum Neuzusammensetzen eines Events: der Zustand wird serialisiert und für jede Kopie neu gelesen. */
 	private static final ObjectMapper MAPPER = JsonMapperFactory.create();
+
+	/** Die Eigenschaftsnamen, die Jackson je Modellklasse kennt (siehe {@link #knownProperties}). */
+	private static final Map<Class<?>, Set<String>> KNOWN_PROPERTIES = new ConcurrentHashMap<>();
 
 	private static StoreEventRepository instance;
 
@@ -228,9 +234,19 @@ public class StoreEventRepository implements EventRepository {
 		write(event);
 	}
 
-	/** Lehnt ein Event ab, das nicht das im Cache ist, aber dessen Platz einnimmt, oder das ein fremder Stand gelöscht hat. */
+	/**
+	 * Lehnt ein Event ab, das nicht das im Cache ist, aber dessen Platz einnimmt, oder das ein fremder Stand gelöscht hat.
+	 * Hat ein fremder, inhaltlich zu neuer Kopf es gesperrt (KARV-135), nennt die Meldung die Sperre (SYS-009), wie bei
+	 * der Halle.
+	 */
 	private void requireCurrent(Event event) {
 		Event cached = cachedEvent(event.getId());
+		if (cached == null && removedByOthers.contains(event.getId())) {
+			UnitSnapshot head = baseline.known(UnitKey.event(event.getId()));
+			if (head != null && head.contentLocked()) {
+				throw new LockedUnitException(StoreMessages.newerFormat(EntityLabels.nameOrPlaceholder(event.getName())));
+			}
+		}
 		if ((cached != null && cached != event) || (cached == null && removedByOthers.contains(event.getId()))) {
 			throw LockedUnitException.replacedMeanwhile(event.getName());
 		}
@@ -299,7 +315,6 @@ public class StoreEventRepository implements EventRepository {
 	public RestorePlan<Event> prepareRestoreEvent(String eventId, SavePoint point) throws IOException {
 		long changes = baseline.changes(eventId);
 		List<UnitState> states = statesOf(eventId);
-		RestorePlanner.requireRestorable(states);
 		return new RestorePlan<>(eventId, states, targetOf(states, point), changes);
 	}
 
@@ -334,13 +349,19 @@ public class StoreEventRepository implements EventRepository {
 	 * und der Cache bleibt unberührt (nur für Tests; das Wiederherstellen ist {@link #restoreEvent}).
 	 */
 	Event eventAt(String eventId, SavePoint point) throws IOException {
-		List<UnitState> states = statesOf(eventId);
-		RestorePlanner.requireRestorable(states);
-		return targetOf(states, point);
+		return targetOf(statesOf(eventId), point);
 	}
 
+	/**
+	 * Der Zielstand des Events zum Speicherstand, nachdem {@link RestorePlanner#requireRestorable} die Einheiten gegen ihn
+	 * geprüft hat.
+	 *
+	 * @throws LockedUnitException wie {@link #restoreEvent}
+	 */
 	private Event targetOf(List<UnitState> states, SavePoint point) {
-		return RestorePlanner.single(UnitMapper.assembleEvents(RestorePlanner.targetsAt(states, point.at()).values()),
+		Map<UnitKey, UnitSnapshot> targets = RestorePlanner.targetsAt(states, point.at());
+		RestorePlanner.requireRestorable(states, targets);
+		return RestorePlanner.single(UnitMapper.assembleEvents(targets.values()),
 				"Zu diesem Speicherstand war das Event gelöscht.");
 	}
 
@@ -485,19 +506,28 @@ public class StoreEventRepository implements EventRepository {
 	 * {@link BookingSync} ihre Buchungen ab wie im Vorstellungs-Editor. Nur im JavaFX-Thread aufrufen (das Modell ist nicht
 	 * synchronisiert); der Aufrufer speichert danach oder setzt das Modell zurück.
 	 *
+	 * <p>
+	 * Ein Feld mit dem Wert {@code null} entfernt einen Schlüssel, den die Modellklasse nicht kennt (er steht dann nicht mehr in
+	 * den bewahrten unbekannten Feldern). Bei einer bekannten Eigenschaft heißt {@code null} wie bisher: Wert des Modells für
+	 * "nicht gesetzt".
+	 *
 	 * @param fields die Felder mit JSON-Feldnamen, wie {@link UnitMapper#normalize} sie schreibt
 	 * @throws IllegalStateException wenn die Einheit im Modell fehlt oder das Ergebnis sich nicht lesen lässt; das Modell ist
 	 *                               dann unverändert
 	 */
 	public void applyFields(UnitKey unit, ObjectNode fields) {
-		Object model = modelObject(unit);
-		if (model == null || unit.type() == UnitType.HALL) {
-			throw new IllegalStateException("Die Einheit " + unit.relativePath() + " ist im Modell nicht vorhanden.");
-		}
+		Object model = requireEventModel(unit);
 		ObjectNode merged = UnitMapper.normalize(model);
-		merged.remove("presentations");
-		merged.remove("bookings");
-		fields.fields().forEachRemaining(field -> merged.set(field.getKey(), field.getValue().deepCopy()));
+		merged.remove(UnitMapper.PRESENTATIONS);
+		merged.remove(UnitMapper.BOOKINGS);
+		Set<String> known = knownProperties(model.getClass());
+		fields.fields().forEachRemaining(field -> {
+			if (field.getValue().isNull() && !known.contains(field.getKey())) {
+				merged.remove(field.getKey());
+			} else {
+				merged.set(field.getKey(), field.getValue().deepCopy());
+			}
+		});
 		try {
 			switch (unit.type()) {
 			case BOOKING -> ((Booking) model).copyFrom(MAPPER.treeToValue(merged, Booking.class));
@@ -509,7 +539,8 @@ public class StoreEventRepository implements EventRepository {
 				presentation.copyFrom(MAPPER.treeToValue(merged, Presentation.class));
 				if (!Objects.equals(hallId, presentation.getHallId())
 						|| !Objects.equals(planId, presentation.getSeatingPlanId())) {
-					BookingSync.sync(presentation, EventMerge.planOf(presentation, hallLookup));
+					BookingSync.sync(presentation, EventMerge.planOf(presentation, hallLookup),
+							lockedSeatIds(unit.eventId(), presentation));
 				}
 			}
 			case HALL -> throw new IllegalStateException("Eine Halle ist keine Einheit eines Events.");
@@ -541,6 +572,53 @@ public class StoreEventRepository implements EventRepository {
 			}
 		}
 		applyFields(unit, fields);
+	}
+
+	/**
+	 * Setzt die Einheit im Modell vollständig auf den Stand {@code before} zurück (zum Rückgängigmachen von
+	 * {@link #applyFields}/{@link #applyGroup}, mit einem Stand von {@link #payloadOf}): Was das Modell jetzt mehr hat als
+	 * {@code before}, wird geleert, auch ein unbekannter Schlüssel, den es zwischendurch dazubekam. Gleiche Regeln wie bei
+	 * {@link #applyFields}.
+	 *
+	 * @throws IllegalStateException wie {@link #applyFields}
+	 */
+	public void restoreFields(UnitKey unit, ObjectNode before) {
+		Objects.requireNonNull(before, "before");
+		Object model = requireEventModel(unit);
+		ObjectNode fields = before.deepCopy();
+		UnitMapper.normalize(model).fieldNames().forEachRemaining(name -> {
+			if (!fields.has(name) && !UnitMapper.PRESENTATIONS.equals(name) && !UnitMapper.BOOKINGS.equals(name)) {
+				fields.putNull(name);
+			}
+		});
+		applyFields(unit, fields);
+	}
+
+	/**
+	 * Das Objekt der Einheit im Modell eines Events (für {@link #applyFields} und {@link #restoreFields}).
+	 *
+	 * @throws IllegalStateException wenn die Einheit im Modell fehlt oder eine Halle ist
+	 */
+	private Object requireEventModel(UnitKey unit) {
+		Object model = modelObject(unit);
+		if (model == null || unit.type() == UnitType.HALL) {
+			throw new IllegalStateException("Die Einheit " + unit.relativePath() + " ist im Modell nicht vorhanden.");
+		}
+		return model;
+	}
+
+	/**
+	 * Die Namen, die Jackson für die Modellklasse als Eigenschaft kennt (beim Schreiben oder Lesen). Alles andere in einer
+	 * Datei sind unbekannte Felder, die das Modell nur bewahrt. Je Klasse einmal ermittelt.
+	 */
+	private static Set<String> knownProperties(Class<?> type) {
+		return KNOWN_PROPERTIES.computeIfAbsent(type, t -> {
+			JavaType javaType = MAPPER.constructType(t);
+			Set<String> names = new HashSet<>();
+			MAPPER.getSerializationConfig().introspect(javaType).findProperties().forEach(p -> names.add(p.getName()));
+			MAPPER.getDeserializationConfig().introspect(javaType).findProperties().forEach(p -> names.add(p.getName()));
+			return Set.copyOf(names);
+		});
 	}
 
 	/** Liest den Inhalt einer Buchungs-Version als neues Objekt; {@code null}, wenn er sich nicht lesen lässt. */
@@ -592,8 +670,92 @@ public class StoreEventRepository implements EventRepository {
 
 	// <-- Hilfen für den Konflikt-Dialog
 
+	/**
+	 * Die Sitze der Vorstellung, die der Abgleich der Buchungen ({@link BookingSync#sync}) nicht vergeben darf (KARV-135):
+	 * gesperrte Buchungs-Einheiten der Vorstellung ohne gelöschten Vorfahren, für die das Modell keine Buchung mit Daten auf
+	 * diesem Schlüssel hat. Gefragt wird der Stand des Versionsspeichers ({@link SyncService#eventSnapshots}, ohne
+	 * Datei-Ein-/Ausgabe), nicht der Vergleichsstand: Der kennt eine zurückgestellte fremde Buchung nicht. Eine gesperrte
+	 * Buchung, deren älterer Stand angezeigt wird, behält ihren Sitz und steht nicht darin.
+	 *
+	 * @return die Sitz-IDs; leer, wenn nichts gesperrt ist
+	 */
+	public Set<String> lockedSeatIds(String eventId, String presentationId) {
+		Event event = findEvent(eventId);
+		Presentation presentation = event == null ? null : event.findPresentation(presentationId);
+		return lockedSeatIds(eventId, presentationId, presentation == null ? null : presentation.getBookings());
+	}
+
+	/**
+	 * Wie {@link #lockedSeatIds(String, String)}, für eine Vorstellung, die nicht die im Cache sein muss (etwa die Kopie
+	 * für den Änderungsmelder oder das Event, das {@code BookingSyncService} gerade abgleicht): „im Modell“ heißt dann in
+	 * dieser Vorstellung.
+	 */
+	public Set<String> lockedSeatIds(String eventId, Presentation presentation) {
+		return lockedSeatIds(eventId, presentation.getId(), presentation.getBookings());
+	}
+
+	private Set<String> lockedSeatIds(String eventId, String presentationId, List<Booking> modelBookings) {
+		return UnitMapper.lockedSeatIds(UnitKey.presentation(eventId, presentationId), modelBookings,
+				sync.eventSnapshots(eventId));
+	}
+
+	/**
+	 * Die gesperrten Einheiten unter der Vorstellung bzw. dem Event-Kopf (ohne die Einheit selbst) mit der Art ihrer Sperre,
+	 * ohne die mit gelöschtem Vorfahren: Unter einer gelöschten Vorstellung zeigt das Programm nichts. Gesperrt heißt
+	 * beschädigt, neueres Format oder inhaltlich zu neu, auch wenn ein älterer Stand angezeigt wird. Gefragt wird wie bei
+	 * {@link #lockedSeatIds} der Stand des Versionsspeichers.
+	 *
+	 * @param presentationOrHead die Einheit einer Vorstellung oder eines Event-Kopfs
+	 * @return nach Pfad geordnet; leer, wenn nichts gesperrt ist
+	 * @throws IllegalArgumentException bei einer anderen Art von Einheit
+	 */
+	public Map<UnitKey, UnitState.Status> lockedUnder(UnitKey presentationOrHead) {
+		requireEventRoot(presentationOrHead);
+		return UnitMapper.lockedBelow(presentationOrHead, sync.eventSnapshots(presentationOrHead.eventId()));
+	}
+
+	/** @throws IllegalArgumentException wenn die Einheit weder eine Vorstellung noch ein Event-Kopf ist */
+	private static void requireEventRoot(UnitKey unit) {
+		if (unit.type() != UnitType.PRESENTATION && unit.type() != UnitType.EVENT) {
+			throw new IllegalArgumentException(unit.relativePath() + " ist weder eine Vorstellung noch ein Event-Kopf.");
+		}
+	}
+
+	/**
+	 * Lehnt ab, wenn unter der Vorstellung bzw. dem Event-Kopf gesperrte Einträge liegen ({@link #lockedUnder}): Sie zu
+	 * löschen oder die Vorstellung auf eine andere Halle oder Bestuhlung umzustellen, ließe die gesperrten Einträge still
+	 * verschwinden bzw. auf ihrem alten Sitz zurück (KARV-135). Aufzurufen, bevor das Modell sich ändert.
+	 *
+	 * @param presentationOrHead die Einheit einer Vorstellung oder eines Event-Kopfs
+	 * @param name               wie die Meldung das Objekt nennt
+	 * @throws LockedUnitException mit {@link StoreMessages#lockedBelow} (SYS-009 vor SYS-008), wenn etwas gesperrt ist
+	 */
+	public void requireNothingLockedUnder(UnitKey presentationOrHead, String name) {
+		requireEventRoot(presentationOrHead);
+		UnitMapper.requireNothingLockedBelow(presentationOrHead, name, sync.eventSnapshots(presentationOrHead.eventId()));
+	}
+
+	/**
+	 * Die Schlüssel der Buchungen mit Daten in der Vorstellung (was das Modell anzeigt), nach derselben Regel wie
+	 * {@link #lockedSeatIds}: Mit {@link #lockedUnder} trennt das eine gesperrte Buchung, die im Modell fehlt, von einer,
+	 * deren älterer Stand angezeigt wird.
+	 */
+	public Set<UnitKey> keysOfBookingsWithData(String eventId, Presentation presentation) {
+		return UnitMapper.keysOfBookingsWithData(eventId, presentation.getId(), presentation.getBookings());
+	}
+
+	/**
+	 * Löscht die Events wie {@link #deleteEvent}. Liegt unter einem von ihnen etwas Gesperrtes, wird keines gelöscht.
+	 *
+	 * @throws LockedUnitException wie {@link #deleteEvent}
+	 */
 	@Override
 	public void deleteEvents(List<Event> events) {
+		for (Event event : events) {
+			if (event != null) {
+				requireNothingLockedUnder(UnitKey.event(event.getId()), EntityLabels.nameOrPlaceholder(event.getName()));
+			}
+		}
 		for (Event event : events) {
 			deleteEvent(event);
 		}
@@ -604,7 +766,8 @@ public class StoreEventRepository implements EventRepository {
 	 * unsichtbar. Ein nie gespeichertes Event verlässt nur den Cache.
 	 *
 	 * @throws LockedUnitException wenn ein fremder Stand das Event ersetzt oder gelöscht hat (die Ansicht ist veraltet, wie beim
-	 *                             Speichern); es wurde nichts geschrieben
+	 *                             Speichern) oder darunter gesperrte Einträge liegen ({@link #requireNothingLockedUnder});
+	 *                             es wurde nichts geschrieben
 	 */
 	@Override
 	public void deleteEvent(Event event) {
@@ -615,7 +778,9 @@ public class StoreEventRepository implements EventRepository {
 		ensureLoaded();
 		// Ein fremder Stand hat das Objekt im Cache ersetzt oder gelöscht: Das alte zu löschen träfe den fremden Stand
 		requireCurrent(event);
-		baseline.delete(event.getId(), UnitKey.event(event.getId()), event.getName());
+		UnitKey head = UnitKey.event(event.getId());
+		requireNothingLockedUnder(head, EntityLabels.nameOrPlaceholder(event.getName()));
+		baseline.delete(event.getId(), head, event.getName());
 		forgetDerived(event.getId());
 
 		cachedEvents.remove(event);
@@ -777,8 +942,9 @@ public class StoreEventRepository implements EventRepository {
 		for (Map.Entry<UnitKey, ObjectNode> entry : model.entrySet()) {
 			UnitKey unit = entry.getKey();
 			UnitSnapshot known = baseline.known(unit);
+			// verglichen wird mit dem Stand, wie dieses Programm ihn aus der Datei macht (KARV-133); roh zuerst, das ist billig
 			boolean differs = known == null || known.deleted() || !baseline.isShown(unit)
-					|| !entry.getValue().equals(known.payload());
+					|| !(entry.getValue().equals(known.payload()) || entry.getValue().equals(baseline.comparable(unit)));
 			String carriedId = unit.type() == UnitType.BOOKING ? ConflictInput.bookingIdOf(entry.getValue()) : null;
 			if (carriedId != null) {
 				carried.add(new BookingIn(unit.presentationId(), carriedId));
@@ -855,7 +1021,7 @@ public class StoreEventRepository implements EventRepository {
 			String movedId = known == null ? null : ConflictInput.bookingIdOf(known.payload());
 			return movedId == null || changes.movedCarriers(movedId, current.unit()).isEmpty();
 		}
-		return current.isLive() && mine.equals(current.payload());
+		return current.isLive() && UnitMapper.sameAsModel(mine, current);
 	}
 
 	/**
@@ -867,7 +1033,7 @@ public class StoreEventRepository implements EventRepository {
 	 */
 	private boolean derivedAs(UnitSnapshot current) {
 		ObjectNode payload = derived.get(current.unit());
-		return payload != null && current.isLive() && payload.equals(current.payload());
+		return payload != null && current.isLive() && UnitMapper.sameAsModel(payload, current);
 	}
 
 	/**
@@ -1527,8 +1693,11 @@ public class StoreEventRepository implements EventRepository {
 		}
 	}
 
+	/** Ein inhaltlich zu neuer Kopf (KARV-135) ist gesperrt, nicht unlesbar: dann die Sperrmeldung (SYS-009). */
 	private static void warnIfUnreadable(UnitSnapshot head, List<String> warnings) {
-		if (head != null && !UnitMapper.isAbsent(head) && UnitMapper.readUnit(head, Event.class) == null) {
+		if (head != null && head.contentLocked()) {
+			warnings.add(UnitMapper.lockMessage(head.unit(), UnitMapper.missingLock(head)));
+		} else if (head != null && !UnitMapper.isAbsent(head) && UnitMapper.readUnit(head, Event.class) == null) {
 			warnings.add(UnitMapper.unreadableEvent(head.unit().eventId()));
 		}
 	}
@@ -1549,8 +1718,8 @@ public class StoreEventRepository implements EventRepository {
 		boolean newPresentation = apply.stream().anyMatch(s -> s.unit().type() == UnitType.PRESENTATION
 				&& EventMerge.presentation(event, s.unit().presentationId()) == null);
 		Collection<UnitSnapshot> index = newPresentation ? sync.eventSnapshots(eventId).values() : List.of();
-		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, frozenCurrent, presentationStates, lastIds)
-				.withCarried(carriedUnits(event, apply));
+		EventMerge.Plan plan = new EventMerge.Plan(apply, index, hallLookup, frozenCurrent, presentationStates, lastIds,
+				presentation -> lockedSeatIds(eventId, presentation)).withCarried(carriedUnits(event, apply));
 		Set<UnitKey> adopted = new LinkedHashSet<>();
 		Set<UnitKey> waiting = new HashSet<>();
 		// übernommene Buchungen, die nur wegen eines endgültig fehlenden Sitzes ins Modell kamen: Der Abgleich danach hat das

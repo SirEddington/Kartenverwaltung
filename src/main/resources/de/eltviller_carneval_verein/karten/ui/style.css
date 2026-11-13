@@ -1033,6 +1033,12 @@
     -fx-underline: true;
 }
 
+/* Link "Update … verfügbar" in der Fußzeile (UpdateIndicator, KARV-131): ruhig, kein Alarm */
+.update-indicator {
+    -fx-text-fill: -fx-status-success-text;
+    -fx-underline: true;
+}
+
 .conflict-error {
     -fx-text-fill: -fx-status-error-text;
 }

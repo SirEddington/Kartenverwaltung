@@ -94,7 +94,8 @@ class SharedFolderTextsTest {
 	@Test
 	void lockedConfirmationNamesTheEntry() {
 		assertEquals("„Gala › Samstag“ auf den letzten lesbaren Stand zurücksetzen? Die eine beschädigte Änderung geht"
-				+ " dabei verloren, alles davor bleibt.", SharedFolderTexts.lockedConfirm("Gala › Samstag"));
+				+ " dabei verloren, alles davor bleibt. Stammt der Stand davor von einer neueren Programmversion, bleibt der"
+				+ " Eintrag gesperrt, bis die Kartenverwaltung aktualisiert ist.", SharedFolderTexts.lockedConfirm("Gala › Samstag"));
 	}
 
 	@Test

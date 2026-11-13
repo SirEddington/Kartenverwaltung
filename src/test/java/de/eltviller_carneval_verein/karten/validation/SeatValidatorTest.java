@@ -52,14 +52,13 @@ class SeatValidatorTest {
 		}
 	}
 
-	// --- Größe (SEA-009), früher Grenzen der Spinner ---
+	// --- Durchmesser (SEA-009), früher Grenzen der Spinner; Sitze sind Kreise, die Breite ist der Durchmesser ---
 
 	@Test
-	void seatSizeMustBeBetweenZeroAndOneHundred() {
+	void seatDiameterMustBeBetweenZeroAndOneHundred() {
 		for (double ok : new double[] { 0, 30, 100 }) {
 			Seat seat = seat();
 			seat.setWidth(ok);
-			seat.setHeight(ok);
 			assertTrue(SeatValidator.validate(seat).isEmpty(), "Gültig: " + ok);
 		}
 
@@ -67,13 +66,13 @@ class SeatValidatorTest {
 		wide.setWidth(100.5);
 		ValidationIssue width = only(SeatValidator.validate(wide));
 		assertEquals("SEA-009", width.code());
-		assertEquals("Breite von Sitz 2 an Tisch 4 in Bestuhlung Prunksitzung in Halle Festhalle liegt mit 100,5 nicht zwischen 0 und 100.",
+		assertEquals("Durchmesser von Sitz 2 an Tisch 4 in Bestuhlung Prunksitzung in Halle Festhalle liegt mit 100,5 nicht zwischen 0 und 100.",
 				width.message());
 
 		Seat negative = seat();
-		negative.setHeight(-1);
-		ValidationIssue height = only(SeatValidator.validate(negative));
-		assertEquals("SEA-009", height.code());
-		assertTrue(height.message().startsWith("Höhe von Sitz 2 an Tisch 4 in Bestuhlung Prunksitzung"), height.message());
+		negative.setWidth(-1);
+		ValidationIssue diameter = only(SeatValidator.validate(negative));
+		assertEquals("SEA-009", diameter.code());
+		assertTrue(diameter.message().startsWith("Durchmesser von Sitz 2 an Tisch 4 in Bestuhlung Prunksitzung"), diameter.message());
 	}
 }

@@ -9,6 +9,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
+import de.eltviller_carneval_verein.karten.model.SeatStatus;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
@@ -18,7 +19,6 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.CoalescedAction;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
-import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
@@ -113,7 +113,9 @@ public final class CustomerDisplay {
 		@Override
 		public void decorateSeat(Booking booking, Seat seat, Node seatNode) {
 			if (seatNode instanceof Shape shape) {
-				shape.setFill((CustomerDisplayText.isTaken(booking) ? UiColors.STATUS_DANGER : UiColors.STATUS_SUCCESS).getFxColor());
+				// Der Gast sieht nur frei oder belegt: belegt wie verkauft, frei wie frei, mit oder ohne Muster (KARV-26)
+				SeatStatus shown = CustomerDisplayText.isTaken(booking) ? SeatStatus.SOLD : SeatStatus.FREE;
+				shape.setFill(SeatLook.fill(shown, state.seatPatternsProperty().get()));
 				shape.setStroke(Color.BLACK);
 				shape.setStrokeWidth(1);
 			}
@@ -356,6 +358,7 @@ public final class CustomerDisplay {
 		state.eventProperty().addListener(contentChanged);
 		state.presentationProperty().addListener(contentChanged);
 		state.planLabels().addListener(contentChanged);
+		state.seatPatternsProperty().addListener(contentChanged);
 		state.visibleHallRectProperty().addListener(viewChanged);
 		state.summaryPlacementProperty().addListener(placementInvalidated);
 		state.selectedBookings().addListener(selectionChanged);
@@ -373,6 +376,7 @@ public final class CustomerDisplay {
 		state.eventProperty().removeListener(contentChanged);
 		state.presentationProperty().removeListener(contentChanged);
 		state.planLabels().removeListener(contentChanged);
+		state.seatPatternsProperty().removeListener(contentChanged);
 		state.visibleHallRectProperty().removeListener(viewChanged);
 		state.summaryPlacementProperty().removeListener(placementInvalidated);
 		state.selectedBookings().removeListener(selectionChanged);

@@ -3,11 +3,14 @@ package de.eltviller_carneval_verein.karten.ui.hall;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ChangeListener;
+import javafx.beans.value.WeakChangeListener;
+import javafx.scene.Node;
 
 /**
  * Die einstellbaren Beschriftungen des Hallenplans, beobachtbar für das Menü "Anzeige" (siehe
- * {@link PlanLabelsMenu}). Alles ist beim Start an; die Einstellung wird nicht gespeichert. Die Saalansicht gibt sie über
- * den Verkaufszustand an das Kundenfenster weiter, der Hallen-Editor hat eigene.
+ * {@link PlanLabelsMenu}). Eine neue Instanz zeigt alles. Die App hat eine gemeinsame für Saalansicht, Kundenfenster
+ * und Hallen-Editor ({@code DisplayPreferences}, KARV-76); eine Ansicht beobachtet sie deshalb mit
+ * {@link #follow(Node, Runnable)}, damit die Optionen sie nicht über ihr Ende hinaus festhalten.
  */
 public final class PlanLabelOptions {
 
@@ -43,6 +46,19 @@ public final class PlanLabelOptions {
 		tables.addListener(listener);
 		seatNumbers.addListener(listener);
 		hallObjects.addListener(listener);
+	}
+
+	/**
+	 * Ruft {@code onChange} bei jeder Änderung, solange {@code owner} lebt: Der Knoten hält den Listener, die Optionen
+	 * kennen ihn nur schwach. So hält eine app-weite Instanz eine geschlossene Ansicht nicht fest.
+	 *
+	 * @param owner    ein Knoten der beobachtenden Ansicht
+	 * @param onChange zum Beispiel das Neuzeichnen des Plans
+	 */
+	public void follow(Node owner, Runnable onChange) {
+		ChangeListener<Boolean> listener = (obs, oldValue, newValue) -> onChange.run();
+		owner.getProperties().put(listener, listener);
+		addListener(new WeakChangeListener<>(listener));
 	}
 
 	public void removeListener(ChangeListener<? super Boolean> listener) {

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package IgnorableNamespaces="rescap6 virtualization desktop6 uap7 uap8" xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10" xmlns:com2="http://schemas.microsoft.com/appx/manifest/com/windows10/2" xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10" xmlns:desktop2="http://schemas.microsoft.com/appx/manifest/desktop/windows10/2" xmlns:desktop3="http://schemas.microsoft.com/appx/manifest/desktop/windows10/3" xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4" xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5" xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6" xmlns:desktop7="http://schemas.microsoft.com/appx/manifest/desktop/windows10/7" xmlns:desktop8="http://schemas.microsoft.com/appx/manifest/desktop/windows10/8" xmlns:desktop9="http://schemas.microsoft.com/appx/manifest/desktop/windows10/9" xmlns:f2="http://schemas.microsoft.com/appx/manifest/foundation/windows10/2" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" xmlns:rescap2="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities/2" xmlns:rescap3="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities/3" xmlns:rescap4="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities/4" xmlns:rescap6="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities/6" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:uap2="http://schemas.microsoft.com/appx/manifest/uap/windows10/2" xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3" xmlns:uap4="http://schemas.microsoft.com/appx/manifest/uap/windows10/4" xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5" xmlns:uap6="http://schemas.microsoft.com/appx/manifest/uap/windows10/6" xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7" xmlns:uap8="http://schemas.microsoft.com/appx/manifest/uap/windows10/8" xmlns:virtualization="http://schemas.microsoft.com/appx/manifest/virtualization/windows10">
+  <Identity Name="EcvKartenFx132" Version="1.1.0.3" 
+            Publisher="CN=Kartenverwaltung - Eltviller Carneval Verein" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Kartenverwaltung FX-132</DisplayName>
+    <PublisherDisplayName>Eltviller Carneval Verein</PublisherDisplayName>
+    
+    <Logo>ConveyorMsixResources/StoreLogo.png</Logo>
+    
+
+  </Properties>
+  <Resources>
+    <Resource Language="en" />
+  </Resources>
+  <Applications>
+    <Application Id="EcvKartenFx132" EntryPoint="Windows.FullTrustApplication" Executable="bin\Kartenverwaltung FX-132.exe">
+      <uap:VisualElements AppListEntry="default" DisplayName="Kartenverwaltung FX-132" Description="Application" BackgroundColor="transparent" Square150x150Logo="ConveyorMsixResources/Square150x150Logo.png" Square44x44Logo="ConveyorMsixResources/Square44x44Logo.png"/>
+      <uap7:Properties><uap8:ActiveCodePage>UTF-8</uap8:ActiveCodePage></uap7:Properties>
+      <Extensions>
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="bin\Kartenverwaltung FX-132.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias><uap8:ExecutionAlias Alias="kartenverwaltung-fx-132.exe"/></uap3:AppExecutionAlias>
+        </uap3:Extension>
+
+      </Extensions>
+    </Application>            
+
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26200.7623" />
+    
+  </Dependencies>
+  <Extensions>
+
+  </Extensions>
+</Package>

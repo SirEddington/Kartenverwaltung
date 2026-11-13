@@ -63,15 +63,20 @@ import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
  * Verzeichnisbaum aber nicht; das führt höchstens zu einer erneuten Auflösung, nie zu einem falschen Stand.
  * <p>
  * Dateiformat: {@code <Index>/events/<Event-ID>.json} (alle Einheiten dieses Events) und {@code <Index>/halls.json}, je
- * {@code {"indexFormat":4,"machine":…,"units":[…]}}. Je Einheit steht neben dem Stand die gültige Kette ohne Inhalt:
+ * {@code {"indexFormat":5,"machine":…,"rulesId":…,"units":[…]}}. Je Einheit steht neben dem Stand die gültige Kette ohne Inhalt:
  * {@code "chain":[{"version","saveId","at","machineName","operator","deleted"}]}, ältestes Glied zuerst. Daraus entstehen die
  * Speicherstände eines Events, ohne eine Datei zu lesen ({@link SyncService#chains}). Dazu kommen seit Format 3 die
  * aufgegangenen Versionen ({@code "absorbed"}), die Versionen mit Konfliktvermerk ({@code "notes"}), {@code "seen"} der
  * aktuellen Löschversion, die Nummer der eigenen Änderungsliste der aktuellen Version ({@code "ownSeq"}, fehlt: unbekannt)
  * und die über eine Änderungsliste eingelesenen fremden Versionen ({@code "listed"}), siehe {@link Entry}. Seit Format 4
- * enthält der Abdruck Größe und Änderungszeit der Dateien. Eine Datei mit anderem Format (auch dem ersten ohne Kette, dem
- * zweiten ohne diese Angaben und dem dritten mit einem Abdruck nur aus Namen), von einem anderen Rechner oder unlesbar
- * gilt als leer und wird beim nächsten {@link #flush} neu geschrieben.
+ * enthält der Abdruck Größe und Änderungszeit der Dateien. Seit Format 5 steht im Kopf die Kennung der Inhaltsregel
+ * ({@code "rulesId"}, {@link ContentGate#rulesId()}) und je Einheit das Merkmal {@code "contentLocked"} (fehlt:
+ * {@code false}). Eine Datei mit älterem Format (auch dem ersten ohne Kette, dem zweiten ohne diese Angaben, dem dritten
+ * mit einem Abdruck nur aus Namen und dem vierten ohne Regelkennung) oder mit fehlender oder abweichender Regelkennung
+ * wurde unter anderen Regeln geschrieben: Ihre Einträge entfallen, ihre Einheiten werden neu aufgelöst und zählen in
+ * {@link Refresh#rulesChanged()}, nicht in {@link Refresh#resolved()}. Eine Datei mit neuerem Format, von einem anderen
+ * Rechner oder unlesbar gilt als leer und wird beim nächsten {@link #flush} neu geschrieben (die Einheiten zählen zu
+ * {@code resolved}).
  * <p>
  * <b>Marke "sauber beendet":</b> Die Datei {@code <Index>/clean} (Inhalt: die Rechner-ID als Text, UTF-8) sagt, dass der
  * Index beim letzten Beenden vollständig geschrieben war und seither nichts am Bestand geändert wurde. {@link #loadIfClean}
@@ -98,7 +103,7 @@ final class UnitIndex {
 
 	private static final Logger LOGGER = Logger.getLogger(UnitIndex.class.getName());
 
-	private static final int INDEX_FORMAT = 4;
+	private static final int INDEX_FORMAT = 5;
 	private static final String EVENTS = "events";
 	private static final String HALLS = "halls";
 	private static final String CLAIMS = "claims";
@@ -181,9 +186,12 @@ final class UnitIndex {
 	 *
 	 * @param pendingUnits die Einheiten mit eigenen, noch nicht beanspruchten Versionen
 	 * @param lostUnits    die Einheiten mit eigenen, verlorenen Versionen
-	 * @param resolved     wie viele Einheiten neu aufgelöst wurden
+	 * @param resolved     wie viele Einheiten neu aufgelöst wurden, weil ihr Bestand nicht zum Eintrag passte oder der Eintrag
+	 *                     fehlte
+	 * @param rulesChanged wie viele Einheiten neu aufgelöst wurden, weil ihre Index-Datei unter anderen Regeln geschrieben
+	 *                     wurde (älteres Format, fehlende oder abweichende Regelkennung); sie zählen nicht zu {@code resolved}
 	 */
-	record Refresh(Set<UnitKey> pendingUnits, Set<UnitKey> lostUnits, int resolved) {
+	record Refresh(Set<UnitKey> pendingUnits, Set<UnitKey> lostUnits, int resolved, int rulesChanged) {
 	}
 
 	private final Path indexDir;
@@ -194,6 +202,8 @@ final class UnitIndex {
 	 * mit {@link #adoptOwnership}.
 	 */
 	private Ownership own;
+	/** Die Kennung der Inhaltsregel ({@link ContentGate#rulesId()}), unter der die Stände entstehen; steht im Kopf jeder Datei. */
+	private final String rulesId;
 
 	private final Map<UnitKey, Entry> entries = new HashMap<>();
 	/**
@@ -208,6 +218,11 @@ final class UnitIndex {
 	private final Map<UnitKey, Map<VersionId, Long>> ownListedYet = new HashMap<>();
 	/** Die Gruppen ({@code events/<Event-ID>} bzw. {@code halls}), deren Datei schon gelesen wurde. */
 	private final Set<String> loaded = new HashSet<>();
+	/**
+	 * Die Gruppen, deren Datei unter anderen Regeln geschrieben war ({@link #load}): Ihre Einträge fehlen, ihre Einheiten
+	 * zählt {@link #refresh} als {@link Refresh#rulesChanged()}. Nur bis zum Ende des nächsten Abgleichs.
+	 */
+	private final Set<String> rulesChangedGroups = new HashSet<>();
 	/** Die Gruppen, deren Datei neu geschrieben werden muss. */
 	private final Set<String> dirty = new TreeSet<>();
 	/** Wie oft sich eine Gruppe seit dem Start geändert hat ({@link #markChanged}); so erkennt {@link #flush} ein Update während des Schreibens. */
@@ -242,11 +257,15 @@ final class UnitIndex {
 	 *                 mit einer anderen ID (auch einer früheren eigenen) werden nicht übernommen, denn ihre Stände hingen
 	 *                 von einem anderen "eigen" ab. Bei einer Neuvergabe zur Laufzeit übernimmt der Index die neue
 	 *                 Ownership ohne Neuaufbau ({@link #adoptOwnership})
+	 * @param rulesId  die Kennung der Inhaltsregel ({@link ContentGate#rulesId()}); sie kommt in den Kopf jeder Index-Datei.
+	 *                 Eine Datei mit fehlender oder anderer Kennung wird nicht übernommen, denn ihre Stände (Sperre wegen
+	 *                 neuer Inhalte) hingen von einer anderen Regel ab
 	 */
-	UnitIndex(Path indexDir, FileLayer files, Ownership own) {
+	UnitIndex(Path indexDir, FileLayer files, Ownership own, String rulesId) {
 		this.indexDir = indexDir;
 		this.files = files;
 		this.own = own;
+		this.rulesId = rulesId;
 	}
 
 	/** Die aktuelle ID dieses Rechners; unter dem Monitor des Index. */
@@ -302,7 +321,8 @@ final class UnitIndex {
 	 *
 	 * @param local    der lokale Bestand
 	 * @param progress bekommt den Anteil der behandelten Einheiten von 0.0 bis 1.0, zuletzt 1.0
-	 * @return die Einheiten mit ausstehenden und mit verlorenen Versionen und die Zahl der neu aufgelösten Einheiten
+	 * @return die Einheiten mit ausstehenden und mit verlorenen Versionen und die Zahl der neu aufgelösten Einheiten, getrennt
+	 *         nach Abweichung vom Bestand und geänderten Regeln
 	 */
 	synchronized Refresh refresh(VersionStore local, DoubleConsumer progress) throws IOException {
 		deleteLeftoverTemps();
@@ -326,6 +346,7 @@ final class UnitIndex {
 		}
 
 		int resolved = 0;
+		int rulesChanged = 0;
 		int done = 0;
 		int lastPercent = 0;
 		progress.accept(0.0);
@@ -334,7 +355,11 @@ final class UnitIndex {
 			if (entry == null || !entry.fingerprint().equals(fingerprintFromListing(tree, unit.getValue()))) {
 				UnitFiles unitFiles = local.readUnit(unit.getKey());
 				update(unitFiles, ChainResolver.resolve(unitFiles, own));
-				resolved++;
+				if (rulesChangedGroups.contains(groupOf(unit.getKey()))) {
+					rulesChanged++;
+				} else {
+					resolved++;
+				}
 			}
 			done++;
 			int percent = (int) (done * 100L / units.size());
@@ -347,7 +372,9 @@ final class UnitIndex {
 			progress.accept(1.0);
 		}
 
-		return new Refresh(unitsWhere(units.keySet(), Entry::pending), unitsWhere(units.keySet(), Entry::lost), resolved);
+		rulesChangedGroups.clear();
+		return new Refresh(unitsWhere(units.keySet(), Entry::pending), unitsWhere(units.keySet(), Entry::lost), resolved,
+				rulesChanged);
 	}
 
 	/**
@@ -935,7 +962,8 @@ final class UnitIndex {
 		markerWritten = true;
 		try {
 			Files.createDirectories(indexDir);
-			Files.writeString(cleanMarker(), machineId(), StandardCharsets.UTF_8);
+			// auf die Platte, bevor die App endet (KARV-90); die Index-Dateien sind es schon (flush über DurableWrite)
+			DurableWrite.overwrite(cleanMarker(), machineId().getBytes(StandardCharsets.UTF_8));
 		} catch (IOException | RuntimeException e) {
 			// eine Marke kann trotzdem stehen (halb geschrieben oder eine alte, festsitzende), und der Dienst bleibt offen:
 			// Bis zur nächsten Änderung schützt wieder die Sperrdatei
@@ -1051,7 +1079,9 @@ final class UnitIndex {
 	 * ebenfalls gelöscht (scheitert das, steht nur eine Warnung im Log), gilt aber nicht. Lässt sich die Marke nicht löschen,
 	 * wird sie geleert wie in {@link #deleteCleanMarker()}; gelingt auch das nicht, gilt der Start als unsauber, und jedes
 	 * spätere {@link #invalidateCleanMarker()} versucht es erneut. Danach werden alle Index-Dateien gelesen; ist eine unlesbar, hat ein anderes Format
-	 * oder eine andere Rechner-ID, gilt der Start ebenfalls als unsauber, und nichts von dem Gelesenen wird übernommen.
+	 * oder eine andere Rechner-ID, gilt der Start ebenfalls als unsauber, und nichts von dem Gelesenen wird übernommen. Das gilt
+	 * auch für eine Datei aus anderen Regeln (älteres Format, fehlende oder abweichende Regelkennung), nur ohne Warnung: Der
+	 * Abgleich löst ihre Einheiten dann neu auf und zählt sie als {@link Refresh#rulesChanged()}.
 	 * <p>
 	 * Vor der Marke legt jeder Start die Sperrdatei an ({@link #markUnclean}): Ab hier kann sich der Bestand ändern, und
 	 * eine Marke, die sich nicht entfernen lässt, darf keinen späteren Start überstehen. Stand die Sperrdatei schon (der
@@ -1100,7 +1130,13 @@ final class UnitIndex {
 			for (String group : storedGroups()) {
 				if (!loaded.contains(group)) {
 					Optional<byte[]> bytes = files.read(fileOf(group));
-					read.put(group, bytes.isPresent() ? parse(bytes.get(), group) : List.of());
+					Parsed parsed = bytes.isPresent() ? parse(bytes.get(), group) : Parsed.EMPTY;
+					if (parsed.rulesChanged()) {
+						// kein Fehler: Die Stände gelten nicht mehr, der Abgleich löst sie neu auf (siehe load)
+						LOGGER.info("Der Start-Index " + fileOf(group) + " stammt aus anderen Regeln, die Marke gilt nicht");
+						return false;
+					}
+					read.put(group, parsed.entries());
 				}
 			}
 		} catch (IOException | RuntimeException e) {
@@ -1183,8 +1219,16 @@ final class UnitIndex {
 		try {
 			Optional<byte[]> bytes = files.read(file);
 			if (bytes.isPresent()) {
+				Parsed parsed = parse(bytes.get(), group);
+				if (parsed.rulesChanged()) {
+					// unter anderen Regeln geschrieben (Update, neuere Regel): nichts übernehmen, neu auflösen, neu schreiben
+					LOGGER.log(Level.FINE, "Der Start-Index " + file + " stammt aus anderen Regeln und wird neu aufgebaut");
+					rulesChangedGroups.add(group);
+					markChanged(group);
+					return;
+				}
 				boolean zeroReset = false;
-				for (Entry entry : parse(bytes.get(), group)) {
+				for (Entry entry : parsed.entries()) {
 					// "in keiner Liste" wurde vielleicht vor einem Absturz geschrieben, nachdem die Liste entstanden war: unbekannt
 					if (entry.ownSeq() != null && entry.ownSeq() == 0) {
 						entry = entry.withOwnSeq(null);
@@ -1203,13 +1247,39 @@ final class UnitIndex {
 		}
 	}
 
-	private List<Entry> parse(byte[] bytes, String group) throws IOException {
+	/**
+	 * Das Ergebnis von {@link #parse}.
+	 *
+	 * @param entries      die Einträge der Datei; leer, wenn sie unter anderen Regeln geschrieben wurde
+	 * @param rulesChanged ob die Datei unter anderen Regeln geschrieben wurde (älteres Format, fehlende oder abweichende
+	 *                     Regelkennung): Kein Fehler, ihre Einheiten werden neu aufgelöst
+	 */
+	private record Parsed(List<Entry> entries, boolean rulesChanged) {
+
+		static final Parsed EMPTY = new Parsed(List.of(), false);
+		static final Parsed RULES_CHANGED = new Parsed(List.of(), true);
+	}
+
+	/**
+	 * Liest eine Index-Datei. Ein älteres Format oder eine fehlende oder abweichende Regelkennung ergibt
+	 * {@link Parsed#RULES_CHANGED}; ein neueres oder unbekanntes Format, ein anderer Rechner und alles Beschädigte werfen
+	 * eine {@link IOException}.
+	 */
+	private Parsed parse(byte[] bytes, String group) throws IOException {
 		JsonNode root = StoreCodec.readTree(bytes);
-		if (!root.path("indexFormat").isInt() || root.get("indexFormat").asInt() != INDEX_FORMAT) {
+		JsonNode format = root.path("indexFormat");
+		if (!format.isInt() || format.asInt() < 1 || format.asInt() > INDEX_FORMAT) {
 			throw new IOException("Unbekanntes Format des Index: " + root.get("indexFormat"));
+		}
+		if (format.asInt() < INDEX_FORMAT) {
+			return Parsed.RULES_CHANGED;
 		}
 		if (!machineId().equals(StoreCodec.text(root, "machine"))) {
 			throw new IOException("Der Index stammt von einem anderen Rechner: " + root.get("machine"));
+		}
+		JsonNode storedRules = root.get("rulesId");
+		if (storedRules == null || !storedRules.isTextual() || !rulesId.equals(storedRules.asText())) {
+			return Parsed.RULES_CHANGED;
 		}
 		JsonNode units = root.get("units");
 		if (units == null || !units.isArray()) {
@@ -1230,13 +1300,24 @@ final class UnitIndex {
 			UnitSnapshot snapshot = new UnitSnapshot(unit,
 					version == null || version.isNull() ? null : VersionId.of(StoreCodec.text(item, "version")),
 					UnitState.Status.valueOf(StoreCodec.text(item, "status")), StoreCodec.bool(item, "deleted"),
-					payload == null || payload.isNull() ? null : (ObjectNode) payload);
+					payload == null || payload.isNull() ? null : (ObjectNode) payload, contentLocked(item.get("contentLocked")));
 			result.add(new Entry(snapshot, StoreCodec.text(item, "fingerprint"), StoreCodec.bool(item, "pending"),
 					StoreCodec.bool(item, "lost"), chain(item.get("chain")), new HashSet<>(versionIds(item.get("absorbed"), "absorbed")),
 					notes(item.get("notes")), StoreCodec.readSeen(item.get("seen")), ownSeq(item.get("ownSeq")),
 					new HashSet<>(versionIds(item.get("listed"), "listed"))));
 		}
-		return result;
+		return new Parsed(result, false);
+	}
+
+	/** Das Merkmal "inhaltlich zu neu": fehlt das Feld oder ist es {@code null}, gilt {@code false}; sonst muss es ein Wahrheitswert sein. */
+	private static boolean contentLocked(JsonNode node) throws IOException {
+		if (node == null || node.isNull()) {
+			return false;
+		}
+		if (!node.isBoolean()) {
+			throw new IOException("Das Feld contentLocked ist kein Wahrheitswert: " + node);
+		}
+		return node.asBoolean();
 	}
 
 	private static List<VersionId> versionIds(JsonNode node, String field) throws IOException {
@@ -1303,10 +1384,11 @@ final class UnitIndex {
 		return chain;
 	}
 
-	private static byte[] serialize(String machine, List<Entry> groupEntries) throws IOException {
+	private byte[] serialize(String machine, List<Entry> groupEntries) throws IOException {
 		ObjectNode root = MAPPER.createObjectNode();
 		root.put("indexFormat", INDEX_FORMAT);
 		root.put("machine", machine);
+		root.put("rulesId", rulesId);
 		ArrayNode units = root.putArray("units");
 		groupEntries.stream()
 				.sorted((a, b) -> a.snapshot().unit().relativePath().compareTo(b.snapshot().unit().relativePath()))
@@ -1318,6 +1400,7 @@ final class UnitIndex {
 					item.put("version", snapshot.version() == null ? null : snapshot.version().value());
 					item.put("status", snapshot.status().name());
 					item.put("deleted", snapshot.deleted());
+					item.put("contentLocked", snapshot.contentLocked());
 					item.put("pending", entry.pending());
 					item.put("lost", entry.lost());
 					item.set("payload", snapshot.payload() == null ? MAPPER.nullNode() : snapshot.payload());

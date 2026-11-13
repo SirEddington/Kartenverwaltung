@@ -49,6 +49,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.stream.Stream;
 
@@ -59,6 +60,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
 import de.eltviller_carneval_verein.karten.store.ConnectOutcome.Kind;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 
@@ -273,7 +275,7 @@ class SyncServiceTest {
 			Path unclean = uncleanFile();
 			layer.failWhen(p -> uncleanLocked.get() && p.equals(unclean), "createNew", new IOException("Ordner gesperrt"));
 			this.service = new SyncService(appData, identity, layer, ui, worker,
-					reachable != null ? reachable : p -> !down.get(), clock);
+					reachable != null ? reachable : p -> !down.get(), clock, ContentRules.GATE);
 			service.setListener(events);
 			service.syncState().addListener((property, before, after) -> states.add(after));
 		}
@@ -973,8 +975,9 @@ class SyncServiceTest {
 
 	/** Baut den Start-Index des Rechners und schreibt ihn, damit der nächste Start keine Einheit lesen muss. */
 	private static void writeStartIndex(Path appData, String machineId) throws IOException {
-		UnitIndex index = new UnitIndex(appData.resolve("index"), new NioFileLayer(), new Ownership(machineId, List.of()));
-		index.refresh(new VersionStore(appData.resolve("data"), new NioFileLayer()), p -> {
+		UnitIndex index = new UnitIndex(appData.resolve("index"), new NioFileLayer(), new Ownership(machineId, List.of()),
+				ContentRules.GATE.rulesId());
+		index.refresh(new VersionStore(appData.resolve("data"), new NioFileLayer(), null, null, ContentRules.GATE), p -> {
 		});
 		index.flush();
 	}
@@ -1967,6 +1970,67 @@ class SyncServiceTest {
 		b.service.tick();
 
 		assertEquals(List.of(new LostVersion(BOOKING, List.of(v1.id()), foreign.id())), b.events.lost);
+	}
+
+	@Test
+	void ownTempTagForCurrentAndEarlierId() throws IOException {
+		Node a = node("a");
+		a.service.startup(shared);
+		save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		String oldId = a.service.machineId();
+		triggerSys011(a);
+		String newId = a.service.machineId();
+		assertNotEquals(oldId, newId);
+
+		assertTrue(a.service.isOwnTempTag(newId));
+		assertTrue(a.service.isOwnTempTag(oldId));
+		assertFalse(a.service.isOwnTempTag(OTHER));
+		assertFalse(a.service.isOwnTempTag(null));
+	}
+
+	/** KARV-132: Der Ordner {@code updates/} neben {@code data/} stört weder Verbinden noch Abgleich. */
+	@Test
+	void updatesFolderBesideDataIsIgnoredByTheStore() throws IOException {
+		Path updates = Files.createDirectories(sharedRoot.resolve("updates").resolve("kassen")).getParent();
+		Map<String, String> files = new java.util.TreeMap<>(Map.of(
+				"ecv-karten-1.1.1.x64.msix", "MSIX",
+				"ecv-karten-1.1.1.x64.msix.json", "{\"format\":1}",
+				"~karv-x-1.tmp", "tmp",
+				"laden-1.1.1.0-x.json", "{}",
+				"kassen/x.json", "{\"format\":1}",
+				"ecv-karten-1.1.1.x64 (conflicted copy 2026-11-10 120000).msix", "KOPIE"));
+		for (Map.Entry<String, String> f : files.entrySet()) {
+			Files.writeString(updates.resolve(f.getKey()), f.getValue());
+		}
+		Node a = node("a");
+		assertTrue(a.service.startup(shared));
+		Node b = node("b");
+		assertTrue(b.service.startup(shared));
+		b.events.changed.clear();
+
+		Version va = save(a, create(BOOKING, "Anna"));
+		a.service.tick();
+		b.service.tick();
+		clock.advance(SyncService.FULL_SYNC_INTERVAL);
+		tickUntilRunEnds(a);
+		tickUntilRunEnds(b);
+
+		assertEquals(va.id(), b.service.unitState(BOOKING).head().id());
+		assertEquals(Set.of(BOOKING), b.events.changedUnits());
+		for (Node n : List.of(a, b)) {
+			assertEquals(List.of(), n.events.errors);
+			assertEquals(List.of(), n.events.locked);
+			assertEquals(List.of(), n.events.lost);
+			assertEquals(List.of(), n.events.unreachable);
+		}
+		Map<String, String> after = new java.util.TreeMap<>();
+		try (var stream = Files.walk(updates)) {
+			for (Path p : stream.filter(Files::isRegularFile).toList()) {
+				after.put(updates.relativize(p).toString().replace('\\', '/'), Files.readString(p));
+			}
+		}
+		assertEquals(files, after);
 	}
 
 	@Test
@@ -4392,6 +4456,46 @@ class SyncServiceTest {
 			assertFalse(trustedIndex(b));
 			assertEquals(snapshotsFromFiles(a.appData, a.identity.id()), b.service.snapshots());
 			assertEquals(0, log.warnings(CHANGED_OUTSIDE));
+			assertTrue(log.records.stream().anyMatch(r -> r.getLevel() == Level.INFO && r.getMessage().startsWith("Regeln geändert: ")),
+					log.records::toString);
+		}
+	}
+
+	@Test
+	void firstStartAfter101LocksContentBookingAndDoesNotWarn() throws IOException {
+		Path appData = dir.resolve("a");
+		// die Fassung 1.0.x kennt die Prüfung nicht: Die Buchung gilt ihr als gültig, der Index steht auf OK
+		SyncService old = TestSyncServices.unstarted(appData, "a", new NioFileLayer(), p -> true, clock, ContentGate.NONE);
+		assertTrue(old.startup(""));
+		ObjectNode voucher = MAPPER.createObjectNode().put("paymentStatus", "x-test-voucher");
+		old.append(UUID.randomUUID().toString(), List.of(new Change(BOOKING, List.of(), voucher, false)));
+		old.closeIndex();
+		Path indexDir = appData.resolve("index");
+		assertTrue(Files.isRegularFile(indexDir.resolve("clean")));
+		assertEquals(Status.OK, old.unitState(BOOKING).status());
+		// der Index, wie ihn 1.0.x schrieb: Format 4, ohne Regelkennung und Sperrmerkmal
+		UnitIndexTest.setIndexFormat(indexDir, 4);
+		try (Stream<Path> files = Files.walk(indexDir)) {
+			for (Path file : files.filter(f -> f.toString().endsWith(".json")).toList()) {
+				Files.writeString(file, Files.readString(file).replaceAll("\"rulesId\":\"[^\"]*\",", "")
+						.replaceAll("\"contentLocked\":(true|false),?", ""));
+			}
+		}
+
+		try (LogCapture log = new LogCapture(UnitIndex.class); LogCapture syncLog = new LogCapture(SyncService.class)) {
+			Node b = new Node(appData, "a", new NioFileLayer(), Runnable::run, Runnable::run);
+			assertTrue(b.service.startup(""));
+
+			assertEquals(Status.LOCKED_FORMAT, b.service.unitState(BOOKING).status());
+			assertTrue(b.service.unitState(BOOKING).contentLocked());
+			assertEquals(Status.LOCKED_FORMAT, b.service.snapshots().get(BOOKING).status());
+			assertTrue(b.service.snapshots().get(BOOKING).contentLocked());
+			assertTrue(log.records.stream().noneMatch(r -> r.getLevel().intValue() >= Level.WARNING.intValue()),
+					log.records::toString);
+			// keine Warnung über eine Änderung außerhalb der App; gewarnt wird nur über die Sperre selbst (SYS-009)
+			assertEquals(0, syncLog.warnings(CHANGED_OUTSIDE));
+			assertTrue(syncLog.records.stream().filter(r -> r.getLevel().intValue() >= Level.WARNING.intValue())
+					.allMatch(r -> r.getMessage().startsWith("SYS-009: ")), syncLog.records::toString);
 		}
 	}
 
@@ -4963,7 +5067,8 @@ class SyncServiceTest {
 		Path appData = dir.resolve("a");
 		GateLayer gate = new GateLayer();
 		MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> "a");
-		SyncService service = new SyncService(appData, identity, gate, Runnable::run, Runnable::run, p -> true, clock);
+		SyncService service = new SyncService(appData, identity, gate, Runnable::run, Runnable::run, p -> true, clock,
+				ContentRules.GATE);
 		service.startup("");
 		Version v1 = service.append("s1", List.of(create(BOOKING, "Anna"))).get(0);
 		// der "Worker" löst die Einheit auf (Stand: v1) und bleibt stehen, bevor er den Stand einträgt

@@ -4,15 +4,28 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
+import com.fasterxml.jackson.databind.JsonNode;
 
-@JsonIgnoreProperties(ignoreUnknown = true)
+/**
+ * Eine Vorstellung eines {@link Event Events}.
+ * <p>
+ * Verworfene Felder aus Dateien vor v0.9.5 (nie in die unbekannten Felder aufnehmen, nie wieder für etwas anderes
+ * verwenden): {@code tables} (Tische und Sitze gehören zur Bestuhlung der Halle), die Standardmaße
+ * {@code defaultTableWidth}, {@code defaultTableHeight}, {@code defaultSeatWidth}, {@code defaultSeatHeight} sowie
+ * {@code hallWidth}, {@code hallHeight}, {@code tableRows} und {@code hallObjects} (v0.6.5/v0.7.0).
+ */
+@JsonIgnoreProperties(value = { "tables", "defaultTableWidth", "defaultTableHeight", "defaultSeatWidth", "defaultSeatHeight",
+		"hallWidth", "hallHeight", "tableRows", "hallObjects" }, ignoreUnknown = true)
 public class Presentation {
 	private final String id;
 	private Event parentEvent; // gesetzt von Event.setPresentations/addPresentation, wird nicht gespeichert
@@ -52,6 +65,27 @@ public class Presentation {
 		this.id = (id != null) ? id : UUID.randomUUID().toString();
 	}
 	// <-- Konstuktoren
+
+	// Unbekannte Felder -->
+	/** Felder aus der Datei, die diese Version nicht kennt (z. B. von einer neueren Version); sie werden unverändert zurückgeschrieben. */
+	private final UnknownFields unknown = new UnknownFields();
+
+	@JsonIgnore
+	public UnknownFields getUnknown() {
+		return unknown;
+	}
+
+	/** Merkt sich ein Feld, das diese Version nicht kennt; ein durchgelassenes {@code requires} fällt weg (siehe {@link UnknownFields#putUnitField}). */
+	@JsonAnySetter
+	void putUnknown(String key, JsonNode value) {
+		unknown.putUnitField(key, value);
+	}
+
+	@JsonAnyGetter
+	Map<String, JsonNode> unknownFields() {
+		return unknown.asMap();
+	}
+	// <-- Unbekannte Felder
 
 	// Getter und Setter -->
 	public String getId() {
@@ -191,6 +225,7 @@ public class Presentation {
 		setPrice(source.getPrice());
 		setActualCashAmount(source.getActualCashAmount());
 		setCashDifferenceComment(source.getCashDifferenceComment());
+		unknown.replaceWith(source.unknown);
 	}
 
 	public Booking addBooking() {

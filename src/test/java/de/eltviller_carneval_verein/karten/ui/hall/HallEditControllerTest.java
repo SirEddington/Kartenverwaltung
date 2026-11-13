@@ -45,16 +45,15 @@ class HallEditControllerTest {
 	}
 
 	@Test
-	void newPlanGetsTheDefaultSizesOfTheFormerEventCreation() {
+	void newPlanGetsTheStandardSizes() {
 		Hall hall = new Hall();
 
 		SeatingPlan created = HallEditController.addPlanWithDefaultSizes(hall);
 
 		assertEquals(List.of(created), hall.getSeatingPlans());
-		assertEquals(70, created.getDefaultTableWidth());
-		assertEquals(300, created.getDefaultTableHeight());
-		assertEquals(30, created.getDefaultSeatWidth());
-		assertEquals(30, created.getDefaultSeatHeight());
+		assertEquals(50, created.getDefaultTableWidth());
+		assertEquals(320, created.getDefaultTableHeight());
+		assertEquals(45, created.getDefaultSeatWidth());
 	}
 
 	@Test

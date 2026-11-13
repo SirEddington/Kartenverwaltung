@@ -290,6 +290,7 @@ public class EventOverviewController extends AbstractOverviewController {
 			Event copy = EventTemplates.copyEvent(event, eventRepository.loadEvents().stream().map(Event::getName).toList(), hallRepository::findById);
 			ChangeTracker.events().trackNew(copy);
 			MainApp.showEventEditViewWithChanges(copy, presentationsOf(copy).isEmpty() ? null : presentationsOf(copy).get(0), true);
+			EventTemplates.reportLockedLeftOut(event);
 		}
 	}
 
@@ -337,7 +338,8 @@ public class EventOverviewController extends AbstractOverviewController {
 				try {
 					eventRepository.deleteEvent(event);
 				} catch (LockedUnitException e) {
-					// Die Liste zeigt ein Event, das ein anderer Rechner inzwischen ersetzt oder gelöscht hat
+					// Die Liste zeigt ein Event, das ein anderer Rechner inzwischen ersetzt oder gelöscht hat, oder darunter
+					// liegen gesperrte Einträge (KARV-135)
 					StatusMessage.getInstance().show(Severity.ERROR, e.getMessage());
 				}
 			} else {
@@ -345,7 +347,10 @@ public class EventOverviewController extends AbstractOverviewController {
 			}
 		} else if (data instanceof Presentation) {
 			if (confirmDelete("Vorstellung löschen", "Soll die Vorstellung \"" + pres.getName() + "\" wirklich unwiderruflich gelöscht werden?")) {
-				event.deletePresentation(pres);
+				// KARV-135: Mit gesperrten Einträgen darunter bleibt die Vorstellung, die Meldung steht in der Fußzeile
+				if (!LockedEntryGuard.deletePresentation(pres)) {
+					return;
+				}
 				EventSaver.saveStructureChange(event);
 			} else {
 				return;

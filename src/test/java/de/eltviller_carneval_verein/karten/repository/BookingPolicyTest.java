@@ -28,12 +28,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.Change;
@@ -43,10 +43,10 @@ import de.eltviller_carneval_verein.karten.store.ConflictNote;
 import de.eltviller_carneval_verein.karten.store.ConflictNote.Kind;
 import de.eltviller_carneval_verein.karten.store.ConflictPolicy;
 import de.eltviller_carneval_verein.karten.store.Resolution;
+import de.eltviller_carneval_verein.karten.store.Snapshots;
 import de.eltviller_carneval_verein.karten.store.TrailCollector;
 import de.eltviller_carneval_verein.karten.store.TrailUnit;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
-import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
@@ -135,7 +135,7 @@ class BookingPolicyTest {
 
 	/** Eine Geschwister-Einheit, deren gültige Kette mit {@code version} endet und die nur diese Version hat. */
 	private static Sibling sibling(UnitKey unit, Version version) {
-		return new Sibling(new UnitSnapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()));
+		return new Sibling(Snapshots.snapshot(unit, version.id(), Status.OK, version.deleted(), version.payload()));
 	}
 
 	@SafeVarargs
@@ -186,7 +186,7 @@ class BookingPolicyTest {
 		assertEquals(0, payload.get("tableNumber").asInt());
 		assertEquals(0, payload.get("seatNumber").asInt());
 		// die Buchung "ohne Platz" liest das Zusammensetzen dort, wohin sie geschrieben wird
-		assertTrue(UnitMapper.isReadable(new UnitSnapshot(moved, mine.id(), Status.OK, false, payload)));
+		assertTrue(UnitMapper.isReadable(Snapshots.snapshot(moved, mine.id(), Status.OK, false, payload)));
 
 		ConflictNote note = resolution.note();
 		assertEquals(Kind.DOUBLE_SALE, note.kind());
@@ -452,7 +452,7 @@ class BookingPolicyTest {
 			for (UnitKey other : chains.keySet()) {
 				Version head = head(other);
 				if (!other.equals(unit)) {
-					siblings.put(other, new Sibling(new UnitSnapshot(other, head.id(), Status.OK, head.deleted(),
+					siblings.put(other, new Sibling(Snapshots.snapshot(other, head.id(), Status.OK, head.deleted(),
 							head.deleted() ? null : head.payload().deepCopy())));
 				}
 			}
@@ -720,6 +720,30 @@ class BookingPolicyTest {
 		assertEquals("CARD", world.head(S2).payload().path("paymentStatus").asText());
 		assertEquals("y", idOf(world.head(S1)));
 		assertEquals(List.of(), world.notes);
+	}
+
+	/**
+	 * KARV-135: A setzt m von s1 nach s2; die Ankunft dort schrieb ein neueres Programm (inhaltlich zu neu, nur sie trägt
+	 * {@code movedFrom}), danach folgt eine lesbare Version ohne Umzugsangabe. B ändert m auf s1. Die Spur zählt die
+	 * gesperrte Ankunft mit: m kommt auf s2 an und lebt nicht an der Quelle wieder auf.
+	 */
+	@Test
+	void trailSeesArrivalOnContentLockedSeat() {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		world.claim(S1, m);
+		world.claim(S1, child(OTHER, "save-a", m, null, VersionMarks.NONE.withMovedTo(S2)));
+		ObjectNode newer = booking("m", "s2");
+		newer.putArray("requires").add("x-test-merkmal");
+		Version arrival = version(OTHER, "save-a", newer, VersionMarks.NONE.withMovedFrom(S1)).withNewerContent(true);
+		world.claim(S2, arrival);
+		world.claim(S2, child(OTHER, "save-b", arrival, booking("m", "s2", b -> b.setComment("Fenster"))));
+		world.lose(S1, child(OWN, "save-c", m, booking("m", "s1", b -> b.setEMail("neu@example.org"))));
+
+		world.resolve(S1, OWN);
+
+		assertEquals(List.of(S2), world.carriers("m"), "keine doppelte Buchung");
+		assertNull(idOf(world.head(S1)), "s1 bleibt geräumt");
 	}
 
 	/**
@@ -1028,7 +1052,7 @@ class BookingPolicyTest {
 			presentation.setSeatingPlanId(plan.getId());
 			presentation.setBookings(new ArrayList<>(winnerFirst ? List.of(winner, loser) : List.of(loser, winner)));
 
-			BookingSync.sync(presentation, plan);
+			Syncs.sync(presentation, plan);
 
 			assertEquals(seat.getId(), winner.getSeatId(), "Reihenfolge Gewinner zuerst: " + winnerFirst);
 			assertFalse(winner.isUnassigned());
@@ -1037,7 +1061,7 @@ class BookingPolicyTest {
 
 			// der Gewinner wird storniert: Der Verlierer rückt nicht still auf den frei gewordenen Sitz
 			winner.clearCustomerData();
-			BookingSync.sync(presentation, plan);
+			Syncs.sync(presentation, plan);
 
 			assertTrue(loser.isUnassigned(), "Reihenfolge Gewinner zuerst: " + winnerFirst);
 			assertNull(loser.getSeatId());

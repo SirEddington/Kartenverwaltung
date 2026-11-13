@@ -14,6 +14,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import de.eltviller_carneval_verein.karten.repository.UnitMapper.UnitPayload;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.StoreMessages;
@@ -46,6 +48,9 @@ final class UnitBaseline {
 	/** Die angezeigten Einheiten je Event bzw. Halle. */
 	private final Map<String, Set<UnitKey>> shown = new HashMap<>();
 
+	/** Der gemerkte Rundlauf je Einheit (siehe {@link #comparable}); veraltet, sobald der Snapshot ein anderer ist. */
+	private final Map<UnitKey, RoundTrip> roundTrips = new HashMap<>();
+
 	/**
 	 * Je Event bzw. Halle ein Zähler, der bei jeder Änderung des Vergleichsstands oder der angezeigten Einheiten hochgezählt
 	 * wird. Er ist von jedem Thread lesbar: Die Vorbereitung eines Wiederherstellens (im Hintergrund) merkt sich seinen Wert,
@@ -71,6 +76,7 @@ final class UnitBaseline {
 	void reset(Collection<UnitSnapshot> snapshots, Set<UnitKey> shownUnits) {
 		known.keySet().forEach(this::changed);
 		known.clear();
+		roundTrips.clear();
 		shown.clear();
 		for (UnitSnapshot snapshot : snapshots) {
 			known.computeIfAbsent(snapshot.unit().ownerId(), k -> new HashMap<>()).put(snapshot.unit(), snapshot);
@@ -102,6 +108,7 @@ final class UnitBaseline {
 			}
 		}
 		known.put(ownerId, units);
+		roundTrips.keySet().removeIf(unit -> unit.ownerId().equals(ownerId));
 		shown.put(ownerId, new HashSet<>(shownUnits));
 		changed(ownerId);
 	}
@@ -130,6 +137,7 @@ final class UnitBaseline {
 	void forget(UnitKey unit) {
 		Map<UnitKey, UnitSnapshot> units = known.get(unit.ownerId());
 		if (units != null && !isShown(unit) && units.remove(unit) != null) {
+			roundTrips.remove(unit);
 			changed(unit.ownerId());
 		}
 	}
@@ -161,6 +169,31 @@ final class UnitBaseline {
 		return units == null ? null : units.get(unit);
 	}
 
+	/** Ein Stand und sein Rundlauf durch das Modell ({@code payload} ist {@code null}, wenn er unlesbar ist). */
+	private record RoundTrip(UnitSnapshot source, ObjectNode payload) {
+	}
+
+	/**
+	 * Der Rundlauf ({@link UnitMapper#comparable}) des bekannten Stands der Einheit: so, wie dieses Programm ihn aus der
+	 * Datei macht, nicht der rohe Payload (KARV-133). Beim ersten Bedarf gebildet und an der Identität des Snapshots
+	 * gemerkt: Jeder Weg, der den Stand ändert, ersetzt oder entfernt den Snapshot, und der Rundlauf entsteht dann neu.
+	 * Nur auf dem Oberflächen-Thread zu benutzen, wie der ganze Vergleichsstand.
+	 *
+	 * @return {@code null}, wenn die Einheit nicht bekannt, gelöscht oder unlesbar ist
+	 */
+	ObjectNode comparable(UnitKey unit) {
+		UnitSnapshot snapshot = known(unit);
+		if (snapshot == null) {
+			return null;
+		}
+		RoundTrip cached = roundTrips.get(unit);
+		if (cached == null || cached.source() != snapshot) {
+			cached = new RoundTrip(snapshot, UnitMapper.comparable(snapshot));
+			roundTrips.put(unit, cached);
+		}
+		return cached.payload();
+	}
+
 	/** Ob die Einheit angezeigt wird (siehe {@link UnitMapper.Assembly#shown()}). */
 	boolean isShown(UnitKey unit) {
 		Set<UnitKey> units = shown.get(unit.ownerId());
@@ -187,7 +220,8 @@ final class UnitBaseline {
 
 	/**
 	 * Schreibt die Unterschiede zwischen dem Vergleichsstand und {@code units} als ein Speichervorgang. Gibt es keine,
-	 * wird nichts geschrieben. Danach gelten die Einheiten von {@code units} als angezeigt.
+	 * wird nichts geschrieben. Danach gelten die Einheiten von {@code units} als angezeigt. Gesperrte Inhalte prüft
+	 * {@link UnitMapper#changes} auch am Stand des Versionsspeichers (Index, ohne Datei-Ein-/Ausgabe).
 	 *
 	 * @param ownerId die ID des Events bzw. der Halle
 	 * @param name    der Name, für die Fehlermeldung
@@ -195,7 +229,8 @@ final class UnitBaseline {
 	 * @throws RuntimeException    wenn das Schreiben scheitert; der Vergleichsstand zeigt dann, was auf der Platte liegt
 	 */
 	void save(String ownerId, String name, List<UnitPayload> units) {
-		List<Change> pending = UnitMapper.changes(baselineOf(ownerId), shownForSave(ownerId, units), units);
+		List<Change> pending = UnitMapper.changes(baselineOf(ownerId), shownForSave(ownerId, units), units,
+				sync::snapshots, sync::eventSnapshots);
 		if (!pending.isEmpty()) {
 			append(ownerId, pending, "Fehler beim Speichern von \"" + name + "\": ");
 		}

@@ -297,14 +297,16 @@ public final class SharedFolderTexts {
 	public static final String LOCKED_CAUSE_DAMAGED = "Beschädigt, keine heile Kopie";
 
 	/** Ursache: neueres Format. */
-	public static final String LOCKED_CAUSE_FORMAT = "Neuere Programmversion: Kartenverwaltung aktualisieren";
+	public static final String LOCKED_CAUSE_FORMAT = "Neuere Programmversion: Kartenverwaltung aktualisieren"
+			+ " (Einstellungen → Info und Updates)";
 
 	/** Knopf: auf den letzten lesbaren Stand zurücksetzen. */
 	public static final String LOCKED_RESET = "Auf letzten lesbaren Stand zurücksetzen";
 
 	/** Rückfrage vor dem Zurücksetzen (&1 = Bezeichnung des Eintrags). */
 	public static final String LOCKED_CONFIRM = "„&1“ auf den letzten lesbaren Stand zurücksetzen? Die eine beschädigte"
-			+ " Änderung geht dabei verloren, alles davor bleibt.";
+			+ " Änderung geht dabei verloren, alles davor bleibt. Stammt der Stand davor von einer neueren Programmversion,"
+			+ " bleibt der Eintrag gesperrt, bis die Kartenverwaltung aktualisiert ist.";
 
 	/** Knopf der Rückfrage: zurücksetzen. */
 	public static final String LOCKED_CONFIRM_YES = "Zurücksetzen";

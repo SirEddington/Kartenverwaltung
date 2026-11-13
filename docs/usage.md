@@ -1,6 +1,6 @@
 # Usage guide
 
-The application is in German; button and menu names below are quoted as they appear on screen.
+State: release 1.1.0. The application is in German; button and menu names below are quoted as they appear on screen.
 
 ## Starting
 
@@ -29,11 +29,33 @@ Abrechnung                     → reconcile cash, statistics, export
 3. **Seating plans** ("+ Bestuhlung hinzufügen"): a hall can have several, e.g. a theater and a gala layout.
    - **"+ Reihe"** adds a table row with a letter, start point, angle, table rotation, table gap and an optional
      aisle after *n* tables.
-   - **"Reihe füllen…"** creates the tables of a row with a given number of seats per table.
+   - **"Reihe füllen…"** creates the tables of a row with a given number of seats per table, table width and
+     height and seat diameter (default 50 × 320 cm, seat 45 cm). The sizes become the seating plan's defaults for
+     tables and seats added later one by one.
+   - Seats are circles and have only a diameter. They are spread in equal sections along the table, so the spacing
+     stays the same where two tables meet; a seat's center lies its radius + 5 cm beside the table edge.
+   - With one or more rows selected, the row panel also sets **table width, table height and seat diameter** and the
+     **table labels** for all tables of these rows ("verschieden" marks differing values).
+   - Table labels work like hall object texts ("Text automatisch", size, alignment, rotation). The rotation counts
+     from the table axis, and the label never stands upside down.
    - Tables and seats can be added, deleted, positioned manually ("Position zurücksetzen" returns to the automatic
      layout), and marked with a category or as wheelchair place.
-   - **"Nummern neu vergeben"** renumbers tables/seats.
+   - Tables stay in the order they were created; a table number is only a label, so changing it (even to a
+     duplicate, which blocks saving) never moves the table. **"Nummern neu vergeben"** renumbers tables by their place.
 4. **"Speichern"** (or the save shortcut). Validation errors appear in the footer and block saving.
+   Overlaps and parts outside the hall appear as warnings and do not block saving:
+
+   | Code | Warning |
+   |---|---|
+   | `HLL-003` | Two hall objects partly overlap |
+   | `HOB-005` | A hall object reaches beyond the edge of the hall |
+   | `TBL-007` | A table (plate or seats) reaches beyond the edge of the hall |
+   | `SPL-004` | Two tables overlap (plates or seats) |
+   | `SPL-005` | A table partly overlaps a hall object |
+
+   Up to 1 cm counts as touching, and something lying fully inside another object (a lectern on the stage) does not
+   count. Intended overlaps (e.g. a door on the wall) are harmless, and warnings right after adding a row or object are
+   expected until it is moved into place.
 
 Changing or deleting a seating plan that presentations use never deletes a booking with data: bookings whose seat
 disappeared are kept as **"Ohne Platz"** (unassigned).
@@ -55,7 +77,11 @@ Select **Event** and **Vorstellung** in the header. Two views:
 
 - **"Tabelle"** – one row per booking (or all presentations of the event). Bookings without a seat are grouped as
   "Ohne Platz" at the top; **"Platz zuweisen…"** assigns one to a free seat.
-- **"Saalansicht"** – the seating plan; seat colors show free, reserved, sold and blocked seats.
+- **"Saalansicht"** – the seating plan; seats show whether they are free, reserved, sold or blocked. With
+  **"Barrierefreie Sitzdarstellung"** (menu "Anzeige", on by default) the status does not depend on color alone: a
+  free seat is white with a green ring, a reserved one yellow with dark stripes, a sold one solid red and a blocked
+  one gray with a cross; a legend below the plan explains them. Turned off, the seats are plain green, yellow, red
+  and gray as before 1.1.0, without legend.
 
 Selling:
 
@@ -76,8 +102,16 @@ button is then called "Speichern" instead of "Anwenden". With the setting off, u
 with unsaved changes asks *Speichern / Nicht speichern / Abbrechen*.
 
 **Customer display ("Verkaufsmodus"):** opens a second window, e.g. on a monitor facing the buyer, that shows the
-same seating plan without controls. Seats are only green (free) or red (taken); zoom, panning, the current selection
-and "Reihen anzeigen" follow the main window.
+same seating plan without controls. Seats are only free (green; with "Barrierefreie Sitzdarstellung" white with a
+green ring) or taken (red); zoom, panning, the current selection and the choices in the **"Anzeige"** menu follow
+the main window.
+
+**"Anzeige" menu** (footer, left): ticks for **Reihen**, **Tische**, **Sitznummern** and **Hallenobjekte**, and in
+the sales view the tick **"Barrierefreie Sitzdarstellung"** and the submenu **"Kaufzusammenfassung"** (where the
+customer display shows the purchase summary). The
+choice is the same in the sales view, the customer display and the hall editor: hiding rows in the editor hides them
+in the sales view too. With *Einstellungen → Anzeige → "Anzeige beim Start wiederherstellen"* (on by default) the
+choice is kept for the next start of this workstation; with it off, every start shows everything.
 
 ## Accounting (*Abrechnung*)
 
@@ -86,6 +120,17 @@ and "Reihen anzeigen" follow the main window.
   amount and a comment for deviations.
 - **"Statistik"** aggregated per event over all events, independent of the header selection.
 - **"Exportieren"** writes the active view as **CSV** or **PDF**; the last used format is remembered.
+
+## Settings (*Einstellungen*)
+
+The settings screen has a search field ("Keine Treffer" when nothing matches) and three sections; changed options take
+effect with "Speichern".
+
+| Section | Settings |
+|---|---|
+| **Gemeinsamer Ordner** | folder ("Durchsuchen …", "Verbinden"/"Trennen"), computer name ("Ändern"), operator ("Bediener wechseln"), "Buchungen sofort speichern" (on), "Verbindung zum Cloud-Server prüfen" (on) |
+| **Anzeige** | "Anzeige beim Start wiederherstellen" (on): keep the choices of the "Anzeige" menu for the next start |
+| **Info und Updates** | installed version, state of the update check, "Jetzt prüfen", "Jetzt aktualisieren", "Update im Browser laden", "Patchnotes anzeigen", workstations at the shared folder |
 
 ## Restore points
 
@@ -144,7 +189,78 @@ affected event or hall has unsaved changes.
 An entry that is damaged without an intact copy (SYS-008) or was saved by a newer program version (SYS-009) is
 locked: it cannot be changed, and its seats appear blocked in the sales views. Use the "gesperrte Einträge" link in
 the footer to reset a damaged entry to its last readable state; for SYS-009 update the application on this
-computer.
+computer (*Einstellungen → Info und Updates*, see [Updates](#updates)). Content that this version cannot process
+safely (for example a payment status it does not know) is locked the same way (SYS-009), although the file itself
+is intact.
+
+- **Deleting or switching** a presentation or event that has locked entries below it is rejected: SYS-009 for
+  entries of a newer version, SYS-008 for damaged ones. The same goes for switching its hall or seating plan.
+  Reset damaged entries first; newer ones unlock when a newer version has written a readable state.
+- **Accounting** shows a note in the footer: "N gesperrte Buchungen sind nicht berücksichtigt" for bookings that are
+  missing from the figures, and "N Buchungen sind mit einem älteren Stand gezählt" for bookings counted with an
+  older state. A click opens "Gesperrte Einträge".
+- **Waiting changes.** The conflict indicator appends "· N Änderungen warten" for own changes that wait for a lock.
+  A click opens the conflict dialog, which lists each waiting change with the locked entry it waits for. They are not
+  visible until the lock is gone, so do not enter the customer again.
+- **Copies** of an event leave out locked presentations that are not shown ("Gesperrte Einträge werden nicht mitkopiert
+  (n)."). A locked presentation shown with an older state is copied with that state; bookings are never copied.
+- A booking without a seat does not find its seat by itself after the unlock; assign it with "Platz zuweisen…".
+- Resetting a damaged entry whose last readable state came from a newer version leads from SYS-008 to SYS-009: it
+  stays locked until the application is updated.
+- Without a newer workstation (single use, or after a downgrade) locked entries stay locked until a newer version
+  is installed. Background: [decisions.md](decisions.md#forward-compatible-data-format).
+
+## Updates
+
+Windows does not install updates in the background. The app checks the latest GitHub release itself: 10 s after
+start, then every 4 hours, and on **"Jetzt prüfen"**. The check never opens a window on its own.
+
+- **"Was ist neu" (patch notes):** after an update, the first start shows a window with what changed in every version
+  since the one last shown (not after a fresh installation). It does not block work; close it with "Schließen" or
+  Esc. *Einstellungen → Info und Updates → "Patchnotes anzeigen"* shows it again at any time.
+- **Before updating:** when a newer version is known, *Info und Updates* and the update confirmation show the link
+  **"Was ist neu in Version X?"**. It opens the release page on GitHub in the browser; the app itself never loads
+  anything from the internet for it. If the browser does not open, the address is shown to copy.
+
+- **Footer hint:** "Update 1.1.0 verfügbar" appears when a newer version exists. It stays while a check runs or fails.
+- **Updating (Windows):** click the hint (or *Einstellungen → Info und Updates → "Jetzt aktualisieren"*). After the
+  confirmation, the app saves or asks about unsaved changes like when closing the window, shows "Update wird
+  vorbereitet …", loads the update file and closes. The Windows App Installer opens (if not, look in the taskbar);
+  click **"Aktualisieren"**. With "Starten, wenn bereit" ticked, the app restarts by itself. To cancel, close the
+  App Installer window and start the app again.
+- **"Update im Browser laden":** the fallback in the settings when the app cannot reach the update source itself (for
+  example antivirus or proxy). The app closes and the browser downloads the update file; the browser may open in its
+  own window without your usual settings, and may ask whether to keep the file ("Behalten"). Open the file and click
+  "Aktualisieren", then delete the file. Do not open an old update file while the app is running: the App Installer
+  closes it without asking. The settings also show the address of the update file to copy.
+- **"Update-Prüfung nicht möglich"** in the footer (Windows): the check keeps failing for a systematic reason
+  (certificate, proxy, server). Use "Update im Browser laden". Without internet the app stays silent.
+- **Several workstations:** update every workstation that uses the same shared folder at the same time; on a
+  workstation without the hint yet, use **"Jetzt prüfen"**. The shared folder helps (see below).
+- **"„Kasse 2“ nutzt 1.1.1 – bitte aktualisieren"** in the footer: another workstation at the same shared folder runs
+  a newer version. An older version may undo data of the newer one when it saves, so update this workstation.
+  *Einstellungen → Info und Updates* lists all workstations at the shared folder with version, last start and machine
+  id, and says what to do next.
+- **Update from the shared folder (Windows):** a Windows workstation with internet places the installer of the current
+  version in `<shared folder>/updates/` in the background (only one workstation downloads; the others wait for it).
+  Every Windows workstation at the folder then shows **"Update 1.1.1 im gemeinsamen Ordner"**, also without internet of
+  its own. Within two minutes after start, the app asks once: "Version … liegt im gemeinsamen Ordner. Jetzt
+  aktualisieren?" (**"Später"** leaves only the footer hint). Updating works like above: the App Installer opens
+  directly with the file from the folder. If the installation is cancelled or rejected, **start the app again by
+  hand**. If the file in the folder is incomplete or has changed, the app says so and stays open.
+- **Placing an installer by hand:** copy the `.msix` of the current GitHub release (e.g. `ecv-karten-1.1.1.x64.msix`)
+  into `<shared folder>/updates/`. The app reads the version from the file and checks it completely. Only place the
+  current GitHub version: a newer one is shown as "neuer als die Update-Quelle (zurückgezogen?)" on workstations with
+  internet and not offered there.
+- **Wrong warning / withdrawing a version:** if a version was withdrawn (pre-release) or a test build was connected to
+  the real folder by mistake, delete by hand: `updates/<name>.msix` and `updates/<name>.msix.json` of that version,
+  and `updates/kassen/<machine id>.json` of the workstation that shows the wrong version (the machine id is in
+  *Info und Updates*). Workstations write their entry again at their next start.
+- **"Für diese Version ist eine Neuinstallation nötig."** The new version comes with a different package identity
+  (e.g. a new signing certificate); updating in place is not possible.
+- **Linux and the Windows ZIP:** the hint appears, but updating works the way the app was installed (e.g. apt) or by
+  downloading the new version. They write their version entry and show the warning about newer workstations, but do
+  not download into or update from the shared folder.
 
 ## Messages
 
@@ -155,11 +271,23 @@ computer.
 | SYS-006 | Sync failed for another reason (e.g. no write permission) | Check folder permissions; the app keeps retrying |
 | SYS-007 | A damaged file was replaced by a verified copy | Nothing; the damaged file stays as `.corrupt-…` |
 | SYS-008 | Entry damaged, no intact copy | Reset via "gesperrte Einträge" |
-| SYS-009 | Entry saved by a newer version | Update the application |
+| SYS-009 | Entry saved by a newer version | Update the application (*Einstellungen → Info und Updates*) |
 | SYS-010 | Application already running on this computer | Switch to the open window |
 | SYS-011 | Another computer uses the same machine id | Nothing; a new id was assigned |
 | SYS-012 | Shared folder has a file with different content | Nothing was overwritten; report it |
 | SYS-013 | An entry could not be synced and was skipped | Retried in the next full sync |
 
-Input and validation messages use entity prefixes (`EVT-`, `PRS-`, `HLL-`, `HOB-`, `SPL-`, `ROW-`, `TBL-`,
-`SEA-`, `INP-` …) and appear in the footer of the current screen.
+Input and validation messages appear in the footer of the current screen. Errors block saving, warnings are shown
+after saving. The prefix names the entity:
+
+| Prefix | Entity | Examples |
+|---|---|---|
+| `EVT-` | Event | `EVT-002` name empty (error), `EVT-001` duplicate presentation name |
+| `PRS-` | Presentation | `PRS-001` duplicate table number, `PRS-003` no hall, `PRS-006` no seating plan, `PRS-007` seating plan gone |
+| `HLL-` | Hall | `HLL-001` name empty, `HLL-002` size out of range, `HLL-003` objects overlap |
+| `HOB-` | Hall object | `HOB-001` name empty, `HOB-003` text size, `HOB-005` outside the hall |
+| `SPL-` | Seating plan | `SPL-001` name empty, `SPL-002` duplicate table, `SPL-004`/`SPL-005` overlaps |
+| `ROW-` | Table row | `ROW-001` letter used twice, `ROW-002` value out of range |
+| `TBL-` | Table | `TBL-001` duplicate seat number, `TBL-005` no row, `TBL-006` text size, `TBL-007` outside the hall |
+| `SEA-` | Seat / booking | `SEA-004` collected but not paid, `SEA-009` seat diameter, `SEA-010` no place, `SEA-020` paid amount differs |
+| `INP-` | Input field | `INP-001` not a number, `INP-002` not a date, `INP-003` not a time |

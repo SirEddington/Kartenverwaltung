@@ -16,10 +16,12 @@ import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConfirmDialog;
 import de.eltviller_carneval_verein.karten.ui.DirtyIndicator;
+import de.eltviller_carneval_verein.karten.ui.DisplayPreferences;
 import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.HallSaver;
 import de.eltviller_carneval_verein.karten.ui.LeaveGuard;
@@ -48,11 +50,6 @@ import javafx.util.StringConverter;
  * Screen ohne Speichern verlässt, verwirft die Änderungen an neuen Hallen.
  */
 public class HallEditController {
-
-	// Standardmaße neuer Bestuhlungen (cm), wie bisher in der Event-Anlage
-	private static final double DEFAULT_TABLE_WIDTH = 70;
-	private static final double DEFAULT_TABLE_HEIGHT = 300;
-	private static final double DEFAULT_SEAT_SIZE = 30;
 
 	private Hall hall;
 	// Die Bestuhlung, deren Name im Namensfeld steht (Ziel des Umbenennens)
@@ -130,8 +127,8 @@ public class HallEditController {
 		DirtyIndicator.bind(btnSave, ChangeTracker.halls());
 		SaveShortcut.install(btnSave);
 
-		// Beschriftungen des Plans (Reihen, Tische, Sitznummern, Hallenobjekte), nicht gespeichert
-		PlanLabelOptions planLabels = new PlanLabelOptions();
+		// Beschriftungen des Plans (Reihen, Tische, Sitznummern, Hallenobjekte), gemeinsam mit der Saalansicht (KARV-76)
+		PlanLabelOptions planLabels = DisplayPreferences.instance().planLabels();
 		PlanLabelsMenu.bind(menuDisplay, planLabels);
 		hallPlanController.setLabelOptions(planLabels);
 
@@ -193,8 +190,14 @@ public class HallEditController {
 		if (LiveViews.isShown(btnSave)) {
 			showNoHall();
 		}
-		// Die Hallenverwaltung hat keine Fußzeile: Die Meldung öffnet dort einen Dialog
-		StatusMessage.getInstance().show(Severity.WARNING, "„" + EntityLabels.nameOrPlaceholder(removed.getName()) + "“ wurde auf einem anderen Rechner gelöscht.");
+		// Die Hallenverwaltung hat keine Fußzeile: Die Meldung öffnet dort einen Dialog. Hat ein neueres Programm die Halle
+		// gesperrt (KARV-135), ist sie nicht gelöscht: dann die Sperre (SYS-009)
+		String name = EntityLabels.nameOrPlaceholder(removed.getName());
+		if (hallRepository.isContentLocked(removed.getId())) {
+			StatusMessage.getInstance().show(Severity.ERROR, StoreMessages.newerFormat(name));
+		} else {
+			StatusMessage.getInstance().show(Severity.WARNING, "„" + name + "“ wurde auf einem anderen Rechner gelöscht.");
+		}
 	}
 
 	/**
@@ -371,15 +374,14 @@ public class HallEditController {
 	}
 
 	/**
-	 * Neue Bestuhlung mit den Standardmaßen, die bisher die Event-Anlage vorgab (Tisch 70 x 300 cm, Sitz 30 x 30 cm). Mit den
-	 * Modell-Standardwerten (0) bekämen neue Sitze keine Größe.
+	 * Neue Bestuhlung mit den Standardmaßen ({@link SeatingPlan#STANDARD_TABLE_WIDTH} usw.: Tisch 50 x 320 cm, Sitz 45 cm).
+	 * Mit den Modell-Standardwerten (0) bekämen neue Sitze keine Größe.
 	 */
 	static SeatingPlan addPlanWithDefaultSizes(Hall hall) {
 		SeatingPlan plan = hall.addSeatingPlan();
-		plan.setDefaultTableWidth(DEFAULT_TABLE_WIDTH);
-		plan.setDefaultTableHeight(DEFAULT_TABLE_HEIGHT);
-		plan.setDefaultSeatWidth(DEFAULT_SEAT_SIZE);
-		plan.setDefaultSeatHeight(DEFAULT_SEAT_SIZE);
+		plan.setDefaultTableWidth(SeatingPlan.STANDARD_TABLE_WIDTH);
+		plan.setDefaultTableHeight(SeatingPlan.STANDARD_TABLE_HEIGHT);
+		plan.setDefaultSeatWidth(SeatingPlan.STANDARD_SEAT_WIDTH);
 		return plan;
 	}
 

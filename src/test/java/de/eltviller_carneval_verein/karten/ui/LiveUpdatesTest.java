@@ -26,11 +26,11 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
@@ -111,7 +111,7 @@ class LiveUpdatesTest {
 		Presentation presentation = createdEvent.addPresentation("Freitag");
 		presentation.setHallId(created.getId());
 		presentation.setSeatingPlanId(createdPlan.getId());
-		BookingSync.sync(presentation, createdPlan);
+		Syncs.sync(presentation, createdPlan);
 		presentation.getBookings().stream().filter(b -> createdPlan.getSeats().get(0).getId().equals(b.getSeatId())).findFirst()
 				.orElseThrow().setLastName("Müller");
 		TestRepositories.events(sync).saveEvent(createdEvent);
@@ -134,7 +134,7 @@ class LiveUpdatesTest {
 		plan = hall.getSeatingPlans().get(0);
 		hallTracker.track(hall);
 		event = events.loadEvents().get(0);
-		BookingSyncService.prepare(event, halls::findById, eventTracker);
+		BookingSyncService.prepare(event, halls::findById, eventTracker, p -> Set.of());
 		friday = event.getPresentations().get(0);
 	}
 
@@ -159,7 +159,7 @@ class LiveUpdatesTest {
 		StoreEventRepository repository = TestRepositories.events(sync);
 		Event loaded = repository.loadEvents().stream().filter(e -> e.getId().equals(event.getId())).findFirst().orElseThrow();
 		for (Presentation presentation : loaded.getPresentations()) {
-			BookingSync.sync(presentation, plan);
+			Syncs.sync(presentation, plan);
 		}
 		return new Other(repository, loaded);
 	}
@@ -393,7 +393,7 @@ class LiveUpdatesTest {
 		// der andere Rechner öffnet das Event mit der geänderten Halle und speichert es: Die Momentaufnahme wird eine Version
 		StoreEventRepository repository = TestRepositories.events(sync);
 		Event loaded = repository.loadEvents().get(0);
-		BookingSyncService.prepare(loaded, TestRepositories.halls(sync)::findById, new ChangeTracker<>(Event::getId));
+		BookingSyncService.prepare(loaded, TestRepositories.halls(sync)::findById, new ChangeTracker<>(Event::getId), p -> Set.of());
 		repository.saveEvent(loaded);
 		long before = files();
 
@@ -417,7 +417,7 @@ class LiveUpdatesTest {
 		// der andere Rechner öffnet das Event mit der geänderten Halle, verkauft auf dem ersten Sitz und speichert
 		StoreEventRepository repository = TestRepositories.events(sync);
 		Event loaded = repository.loadEvents().get(0);
-		BookingSyncService.prepare(loaded, TestRepositories.halls(sync)::findById, new ChangeTracker<>(Event::getId));
+		BookingSyncService.prepare(loaded, TestRepositories.halls(sync)::findById, new ChangeTracker<>(Event::getId), p -> Set.of());
 		seat(loaded.getPresentations().get(0), 0).setLastName("Fremd");
 		repository.saveEvent(loaded);
 		long before = files();

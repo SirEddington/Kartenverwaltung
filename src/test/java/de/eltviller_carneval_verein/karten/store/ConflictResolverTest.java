@@ -19,9 +19,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -33,9 +35,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
 
 /**
  * Die Auflösung verlorener eigener Strecken im Versionsspeicher: Eingaben der Strategie, Reihenfolge des Schreibens,
@@ -288,6 +294,11 @@ class ConflictResolverTest {
 			public boolean deferred(UnitKey unit) {
 				return deferred.get();
 			}
+
+			@Override
+			public ContentGate gate() {
+				return ContentRules.GATE;
+			}
 		};
 		ConflictResolver resolver = new ConflictResolver(host, new SyncNotifier(Runnable::run, true), clock);
 		resolver.enqueue(BOOKING);
@@ -369,6 +380,28 @@ class ConflictResolverTest {
 		assertEquals(List.of(assigned.get(1).id(), later.id()), ids(input.stretch()));
 		assertEquals(Set.of(BOOKING, MOVED), input.trail().keySet());
 		assertEquals(ids(service.unitState(MOVED).chain()), ids(input.trail().get(MOVED).chain()));
+	}
+
+	/** KARV-135: Die Kopien für die Strategie behalten das Merkmal „inhaltlich zu neu“, auch auf der Umzugsspur. */
+	@Test
+	void copiedVersionsKeepNewerContent() {
+		Version newer = new Version(StoreCodec.FORMAT, VersionId.create(1_900_000_000_000L, FOREIGN, 1), List.of(),
+				FOREIGN, "Kasse 2", "Bert", Instant.parse("2026-10-28T09:00:00Z"), "fremd-1", false, name("x-test-neu"),
+				null, Map.of(), VersionMarks.NONE.withMovedFrom(MOVED), true);
+		Version plain = new Version(StoreCodec.FORMAT, VersionId.create(1_900_000_000_001L, FOREIGN, 2),
+				List.of(newer.id()), FOREIGN, "Kasse 2", "Bert", Instant.parse("2026-10-28T09:01:00Z"), "fremd-2", false,
+				name("Bert"), null, Map.of());
+
+		Version copy = ConflictResolver.copy(newer);
+		assertTrue(copy.newerContent());
+		assertEquals(newer, copy);
+		assertFalse(ConflictResolver.copy(plain).newerContent());
+
+		Map<UnitKey, TrailUnit> trail = ConflictResolver.copy(Map.of(BOOKING,
+				new TrailUnit(BOOKING, List.of(newer, plain), List.of(newer), plain.id())));
+		TrailUnit copied = trail.get(BOOKING);
+		assertEquals(List.of(true, false), copied.chain().stream().map(Version::newerContent).toList());
+		assertEquals(List.of(true), copied.outside().stream().map(Version::newerContent).toList());
 	}
 
 	@Test
@@ -781,6 +814,11 @@ class ConflictResolverTest {
 			public boolean deferred(UnitKey unit) {
 				return false;
 			}
+
+			@Override
+			public ContentGate gate() {
+				return ContentRules.GATE;
+			}
 		};
 		assertEquals(List.of(List.of(mine.id())), host.resolve(BOOKING).state().lost());
 		ConflictResolver resolver = new ConflictResolver(host, new SyncNotifier(Runnable::run, true), clock);
@@ -877,6 +915,15 @@ class ConflictResolverTest {
 	/** Wie oben; {@code listed} sagt je Version, ob sie über ihre Liste gelesen ist. */
 	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended,
 			java.util.function.Predicate<VersionId> listed, boolean shared) {
+		return storeHost(store, own, appended, listed, shared, List.of());
+	}
+
+	/**
+	 * Wie oben; {@code siblings} sind die Geschwister jeder Buchung, mit ihrem Stand aus dem Bestand (wie der Index ihn
+	 * kennt, auch gesperrt).
+	 */
+	private static ConflictResolver.Host storeHost(VersionStore store, Ownership own, List<List<Change>> appended,
+			java.util.function.Predicate<VersionId> listed, boolean shared, List<UnitKey> siblings) {
 		return new ConflictResolver.Host() {
 			@Override
 			public SyncService.Resolved resolve(UnitKey unit) throws IOException {
@@ -906,7 +953,15 @@ class ConflictResolverTest {
 
 			@Override
 			public Map<UnitKey, ConflictInput.Sibling> siblings(UnitKey booking) {
-				return Map.of();
+				Map<UnitKey, ConflictInput.Sibling> known = new java.util.LinkedHashMap<>();
+				for (UnitKey sibling : siblings) {
+					try {
+						known.put(sibling, new ConflictInput.Sibling(UnitSnapshot.of(resolve(sibling).state())));
+					} catch (IOException e) {
+						throw new java.io.UncheckedIOException(e);
+					}
+				}
+				return known;
 			}
 
 			@Override
@@ -923,6 +978,11 @@ class ConflictResolverTest {
 			@Override
 			public boolean deferred(UnitKey unit) {
 				return false;
+			}
+
+			@Override
+			public ContentGate gate() {
+				return ContentRules.GATE;
 			}
 		};
 	}
@@ -1218,6 +1278,476 @@ class ConflictResolverTest {
 				.anyMatch(r -> r.getLevel() == Level.WARNING && r.getMessage().contains("5 Minuten")
 						&& r.getMessage().contains(BOOKING.relativePath())),
 				"Warnung im Log");
+	}
+
+	// --- Gesperrte Nachbarn (KARV-135, Spec Abschnitt 3)
+
+	/** Ein Bestand mit der Inhaltsprüfung der Anwendung: Was ein neueres Programm verlangt, ist inhaltlich zu neu. */
+	private VersionStore gatedStore() {
+		return new VersionStore(dir.resolve("data"), new NioFileLayer(), null, null, ContentRules.GATE);
+	}
+
+	/** Der Inhalt, wie ihn ein neueres Programm schreibt: Er verlangt ein Merkmal, das dieses Programm nicht kennt. */
+	private static ObjectNode newer(ObjectNode payload) {
+		payload.putArray("requires").add("x-test-merkmal");
+		return payload;
+	}
+
+	private static ObjectNode carrying(String bookingId) {
+		return MAPPER.createObjectNode().put("id", bookingId);
+	}
+
+	/** An A-1 verliert die eigene Änderung gegen eine fremde, beide auf einer fremden Basis. */
+	private void lossAtBooking(VersionStore store, LocalArbiter arbiter) throws IOException {
+		long now = clock.instant().toEpochMilli();
+		Version base = version(VersionId.create(now - 5000, FOREIGN, 0), List.of(), FOREIGN, "s0", false, carrying("X"),
+				VersionMarks.NONE);
+		Version theirs = version(VersionId.create(now - 4000, FOREIGN, 1), List.of(base.id()), FOREIGN, "s1", false,
+				carrying("X").put("name", "fremd"), VersionMarks.NONE);
+		Version mine = version(VersionId.create(now - 3000, CURRENT, 0), List.of(base.id()), CURRENT, "s2", false,
+				carrying("X").put("name", "eigen"), VersionMarks.NONE);
+		store(store, arbiter, BOOKING, base, true);
+		store(store, arbiter, BOOKING, theirs, true);
+		store(store, arbiter, BOOKING, mine, false);
+	}
+
+	/** A-2 trägt als Kopf eine Buchung eines neueren Programms: Die Einheit ist inhaltlich gesperrt. */
+	private Version lockedNeighbour(VersionStore store, LocalArbiter arbiter) throws IOException {
+		Version locked = version(VersionId.create(clock.instant().toEpochMilli() - 6000, FOREIGN, 7), List.of(), FOREIGN,
+				"s9", false, newer(carrying("Y")), VersionMarks.NONE);
+		store(store, arbiter, OTHER_SEAT, locked, true);
+		assertTrue(ChainResolver.resolve(store.readUnit(OTHER_SEAT), new Ownership(CURRENT, List.of())).contentLocked());
+		return locked;
+	}
+
+	/** Eine Auflösung im Einzelbetrieb auf dem Bestand, mit A-1 eingereiht. */
+	private ConflictResolver lockResolver(VersionStore store, RecordingPolicy policy, List<List<Change>> appended,
+			List<UnitKey> siblings) {
+		ConflictResolver resolver = new ConflictResolver(
+				storeHost(store, new Ownership(CURRENT, List.of()), appended, id -> true, false, siblings),
+				new SyncNotifier(Runnable::run, true), clock);
+		resolver.setPolicy(UnitType.BOOKING, policy);
+		resolver.enqueue(BOOKING);
+		return resolver;
+	}
+
+	/** Die Log-Einträge (INFO), dass eine Auflösung auf eine gesperrte Einheit wartet. */
+	private List<String> waitingLogs() {
+		synchronized (logs) {
+			return logs.stream().filter(r -> r.getLevel() == Level.INFO)
+					.map(LogRecord::getMessage).filter(m -> m.contains("wartet auf gesperrte Einheit")).toList();
+		}
+	}
+
+	/** Eine Auflösung, die A-1 auflöst und dabei den gesperrten Nachbarn A-2 löscht. */
+	private RecordingPolicy deletingNeighbour(Version locked) {
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(new Change(OTHER_SEAT, List.of(locked.id()), null, true));
+		return policy;
+	}
+
+	/**
+	 * Eine zusätzliche Änderung (Löschen oder Ändern) auf einer inhaltlich gesperrten Nachbar-Einheit: Nichts wird
+	 * geschrieben, auch nicht die Zusammenführung, und die Auflösung wartet; einmal im Log, welcher Nachbar blockiert.
+	 */
+	@ParameterizedTest(name = "Löschung: {0}")
+	@ValueSource(booleans = { true, false })
+	void extraChangeOnContentLockedSiblingWaits(boolean deletion) throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		lossAtBooking(store, arbiter);
+		Version locked = lockedNeighbour(store, arbiter);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(deletion ? new Change(OTHER_SEAT, List.of(locked.id()), null, true)
+				: new Change(OTHER_SEAT, List.of(locked.id()), carrying("Y").put("comment", "neu"), false));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, policy, appended, List.of());
+
+		resolver.resolvePending(10);
+
+		assertEquals(List.of(), appended, "nichts geschrieben");
+		assertEquals(1, policy.inputs.size());
+		assertEquals(1, resolver.waitingUnits().size());
+		assertEquals(List.of("Auflösung von " + BOOKING.relativePath() + " wartet auf gesperrte Einheit "
+				+ OTHER_SEAT.relativePath()), waitingLogs());
+	}
+
+	/**
+	 * Die wartende Strecke wird ohne Änderung an ihrem Nachbarn nicht neu gerechnet (keine Strategie, keine Spur), auch
+	 * wenn sich eine andere Einheit ändert, und verbraucht kein Budget; das Log meldet das Warten nur einmal.
+	 */
+	@Test
+	void waitingStretchIsNotRecomputedWithoutChange() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		lossAtBooking(store, arbiter);
+		RecordingPolicy policy = deletingNeighbour(lockedNeighbour(store, arbiter));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, policy, appended, List.of());
+		resolver.resolvePending(10);
+
+		resolver.resolvePending(10);
+		resolver.unitChanged(OTHER_SHOW_SEAT);
+		resolver.resolvePending(10);
+
+		assertEquals(1, policy.inputs.size(), "nicht neu gerechnet");
+		assertEquals(List.of(), appended);
+		assertEquals(1, resolver.waitingUnits().size());
+		assertEquals(1, waitingLogs().size(), "einmal im Log");
+	}
+
+	/**
+	 * Ändert sich die wartende Einheit selbst (etwa weil ihr Verlust aufgegangen ist), zählt sie nicht mehr als wartend und
+	 * wird neu gerechnet, auch wenn sie nicht zu ihren Blockern gehört.
+	 */
+	@Test
+	void waitingStretchWakesWhenItsOwnUnitChanges() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		lossAtBooking(store, arbiter);
+		RecordingPolicy policy = deletingNeighbour(lockedNeighbour(store, arbiter));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, policy, appended, List.of());
+		resolver.resolvePending(10);
+		assertEquals(1, resolver.waitingUnits().size());
+
+		resolver.unitChanged(BOOKING);
+
+		assertEquals(0, resolver.waitingUnits().size(), "kein veralteter Zähler");
+		resolver.resolvePending(10);
+		assertEquals(2, policy.inputs.size(), "neu gerechnet");
+	}
+
+	/**
+	 * Die Inhaltsprüfung schlägt auf einem Inhalt an, den die Strategie von einem inhaltlich gesperrten Geschwister
+	 * übernommen hat (keine Umzugsspur): Die Strecke wartet auch auf dieses Geschwister und wird neu gerechnet, sobald es
+	 * sich ändert, nicht erst nach einem Neustart.
+	 */
+	@Test
+	void gateHitWaitsOnContentLockedSibling() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		lossAtBooking(store, arbiter);
+		lockedNeighbour(store, arbiter);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(new Change(MOVED, List.of(), newer(carrying("Y")), false));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, policy, appended, List.of(OTHER_SEAT));
+
+		resolver.resolvePending(10);
+		assertEquals(List.of(), appended, "nichts geschrieben");
+		assertEquals(1, resolver.waitingUnits().size());
+		assertEquals(List.of("Auflösung von " + BOOKING.relativePath() + " wartet auf gesperrte Einheit "
+				+ OTHER_SEAT.relativePath()), waitingLogs());
+
+		resolver.unitChanged(OTHER_SEAT);
+		resolver.resolvePending(10);
+
+		assertEquals(2, policy.inputs.size(), "mit der Änderung des Geschwisters neu gerechnet");
+	}
+
+	/** Wird der Nachbar wieder lesbar und gemeldet, läuft die Auflösung und schreibt. */
+	@Test
+	void waitingStretchRunsAfterUnlock() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		lossAtBooking(store, arbiter);
+		Version locked = lockedNeighbour(store, arbiter);
+		RecordingPolicy policy = deletingNeighbour(locked);
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, policy, appended, List.of());
+		resolver.resolvePending(10);
+
+		// ein neueres Programm schreibt einen lesbaren Stand: Die Sperre fällt
+		store(store, arbiter, OTHER_SEAT, version(VersionId.create(clock.instant().toEpochMilli() - 500, FOREIGN, 8),
+				List.of(locked.id()), FOREIGN, "s10", false, carrying("Y"), VersionMarks.NONE), true);
+		resolver.resolvePending(10);
+		assertEquals(List.of(), appended, "ohne Meldung der Änderung noch nicht");
+
+		resolver.unitChanged(OTHER_SEAT);
+		resolver.resolvePending(10);
+
+		assertEquals(2, policy.inputs.size());
+		assertEquals(1, appended.size());
+		assertEquals(List.of(OTHER_SEAT, BOOKING), appended.get(0).stream().map(Change::unit).toList());
+		assertEquals(0, resolver.waitingUnits().size());
+	}
+
+	/** Ein beschädigter Nachbar ({@code LOCKED_DAMAGED}) blockiert die Auflösung nicht: Sie schreibt wie bisher. */
+	@Test
+	void damagedSiblingDoesNotBlock() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		lossAtBooking(store, arbiter);
+		Version damaged = version(VersionId.create(clock.instant().toEpochMilli() - 6000, FOREIGN, 7), List.of(), FOREIGN,
+				"s9", false, carrying("Y"), VersionMarks.NONE);
+		store(store, arbiter, OTHER_SEAT, damaged, true);
+		Files.writeString(dir.resolve("data").resolve(OTHER_SEAT.relativePath()).resolve(damaged.id() + ".json"), "kaputt");
+		UnitState neighbour = ChainResolver.resolve(store.readUnit(OTHER_SEAT), new Ownership(CURRENT, List.of()));
+		assertEquals(UnitState.Status.LOCKED_DAMAGED, neighbour.status());
+		assertFalse(neighbour.contentLocked());
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(new Change(OTHER_SEAT, List.of(damaged.id()), carrying("Y").put("comment", "neu"), false));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, policy, appended, List.of());
+
+		resolver.resolvePending(10);
+
+		assertEquals(1, appended.size());
+		assertEquals(List.of(OTHER_SEAT, BOOKING), appended.get(0).stream().map(Change::unit).toList());
+		assertEquals(0, resolver.waitingUnits().size());
+		assertEquals(List.of(), waitingLogs());
+	}
+
+	/**
+	 * Die Ausgabe der Auflösung geht durch die Inhaltsprüfung: Trüge eine zusätzliche Änderung den Inhalt der inhaltlich zu
+	 * neuen Ankunft auf A-2 auf einen neuen Träger, wartet die Strecke. Wieder gerechnet wird sie, wenn sich die Einheit
+	 * selbst oder die Einheit der verursachenden Spurversion ändert, sonst nicht.
+	 */
+	@Test
+	void gateHitInResolverOutputWaitsAndWakesOnSourceChange() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		long now = clock.instant().toEpochMilli();
+		Version base = version(VersionId.create(now - 5000, FOREIGN, 0), List.of(), FOREIGN, "s0", false, carrying("X"),
+				VersionMarks.NONE);
+		Version removal = version(VersionId.create(now - 4000, FOREIGN, 1), List.of(base.id()), FOREIGN, "s1", true, null,
+				VersionMarks.NONE.withMovedTo(OTHER_SEAT));
+		Version mine = version(VersionId.create(now - 3000, CURRENT, 0), List.of(base.id()), CURRENT, "s2", false,
+				carrying("X").put("name", "eigen"), VersionMarks.NONE);
+		Version arrival = version(VersionId.create(now - 3999, FOREIGN, 2), List.of(), FOREIGN, "s1", false,
+				newer(carrying("X")), VersionMarks.NONE.withMovedFrom(BOOKING));
+		Version later = version(VersionId.create(now - 3500, FOREIGN, 3), List.of(arrival.id()), FOREIGN, "s3", false,
+				carrying("X").put("comment", "Fenster"), VersionMarks.NONE);
+		store(store, arbiter, BOOKING, base, true);
+		store(store, arbiter, BOOKING, removal, true);
+		store(store, arbiter, BOOKING, mine, false);
+		store(store, arbiter, OTHER_SEAT, arrival, true);
+		store(store, arbiter, OTHER_SEAT, later, true);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(new Change(MOVED, List.of(), newer(carrying("X")), false));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, policy, appended, List.of());
+
+		resolver.resolvePending(10);
+		resolver.resolvePending(10);
+		resolver.unitChanged(OTHER_SHOW_SEAT);
+		resolver.resolvePending(10);
+
+		assertEquals(List.of(), appended, "nichts geschrieben");
+		assertEquals(1, policy.inputs.size(), "ohne Änderung an einer Quelle nicht neu gerechnet");
+		assertEquals(1, resolver.waitingUnits().size());
+		assertEquals(List.of("Auflösung von " + BOOKING.relativePath() + " wartet auf gesperrte Einheit "
+				+ OTHER_SEAT.relativePath()), waitingLogs());
+
+		// die Einheit selbst ändert sich: neu gerechnet, die Strategie liefert weiter den gesperrten Inhalt
+		resolver.unitChanged(BOOKING);
+		resolver.resolvePending(10);
+		assertEquals(2, policy.inputs.size());
+		assertEquals(List.of(), appended);
+		assertEquals(1, resolver.waitingUnits().size());
+
+		// die Einheit der Spurversion ändert sich: neu gerechnet, jetzt ohne gesperrten Inhalt
+		store(store, arbiter, OTHER_SEAT, version(VersionId.create(now - 100, FOREIGN, 4), List.of(later.id()), FOREIGN,
+				"s4", false, carrying("X").put("comment", "Gang"), VersionMarks.NONE), true);
+		policy.extra = List.of(new Change(MOVED, List.of(), carrying("X"), false));
+		resolver.unitChanged(OTHER_SEAT);
+		resolver.resolvePending(10);
+
+		assertEquals(3, policy.inputs.size());
+		assertEquals(1, appended.size());
+		assertEquals(0, resolver.waitingUnits().size());
+		assertEquals(1, waitingLogs().size(), "das Warten steht einmal im Log");
+	}
+
+	/**
+	 * Die Strategie sieht den gesperrten Nachbarn (die Geschwister werden nicht gefiltert) und parkt nach {@code _<ID>}, eine
+	 * neue Einheit mit {@code OK}: Die Auflösung wartet nicht.
+	 */
+	@Test
+	void parkingNextToLockedSeatGoesToNewCarrier() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		lossAtBooking(store, arbiter);
+		lockedNeighbour(store, arbiter);
+		RecordingPolicy policy = new RecordingPolicy();
+		policy.extra = List.of(new Change(MOVED, List.of(), carrying("X").put("unassigned", true), false)
+				.withMarks(VersionMarks.NONE.withMovedFrom(BOOKING)));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, policy, appended, List.of(OTHER_SEAT));
+
+		resolver.resolvePending(10);
+
+		assertTrue(policy.inputs.get(0).siblings().get(OTHER_SEAT).snapshot().contentLocked(),
+				"die Strategie sieht den gesperrten Nachbarn");
+		assertEquals(1, appended.size());
+		assertEquals(List.of(MOVED, BOOKING), appended.get(0).stream().map(Change::unit).toList());
+		assertEquals(0, resolver.waitingUnits().size());
+	}
+
+	/**
+	 * Umzug auf einen Sitz, dessen Ankunft ein neueres Programm schrieb: Solange das Ziel gesperrt ist, wartet die
+	 * Auflösung ({@code arrivalMissing} verlangt {@code OK}); mit einem lesbaren Stand dort löst sie auf.
+	 */
+	@Test
+	void moveToContentLockedSeatWaitsUntilItIsOk() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		long now = clock.instant().toEpochMilli();
+		Version base = version(VersionId.create(now - 5000, FOREIGN, 0), List.of(), FOREIGN, "s0", false, carrying("X"),
+				VersionMarks.NONE);
+		Version removal = version(VersionId.create(now - 4000, FOREIGN, 1), List.of(base.id()), FOREIGN, "s1", true, null,
+				VersionMarks.NONE.withMovedTo(OTHER_SEAT));
+		Version mine = version(VersionId.create(now - 3000, CURRENT, 0), List.of(base.id()), CURRENT, "s2", false,
+				carrying("X").put("name", "eigen"), VersionMarks.NONE);
+		Version arrival = version(VersionId.create(now - 3999, FOREIGN, 2), List.of(), FOREIGN, "s1", false,
+				newer(carrying("X")), VersionMarks.NONE.withMovedFrom(BOOKING));
+		store(store, arbiter, BOOKING, base, true);
+		store(store, arbiter, BOOKING, removal, true);
+		store(store, arbiter, BOOKING, mine, false);
+		store(store, arbiter, OTHER_SEAT, arrival, true);
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = new ConflictResolver(
+				storeHost(store, new Ownership(CURRENT, List.of()), appended, id -> true, true),
+				new SyncNotifier(Runnable::run, true), clock);
+		RecordingPolicy policy = new RecordingPolicy();
+		resolver.setPolicy(UnitType.BOOKING, policy);
+		resolver.enqueue(BOOKING);
+
+		resolver.resolvePending(10);
+		resolver.resolvePending(10);
+		assertEquals(List.of(), appended, "das Ziel ist gesperrt");
+		assertEquals(List.of(), policy.inputs, "die Strategie wird erst mit lesbarem Ziel gefragt");
+
+		store(store, arbiter, OTHER_SEAT, version(VersionId.create(now - 100, FOREIGN, 3), List.of(arrival.id()), FOREIGN,
+				"s3", false, carrying("X").put("comment", "Fenster"), VersionMarks.NONE), true);
+		resolver.resolvePending(10);
+
+		assertEquals(1, appended.size(), "mit lesbarem Ziel aufgelöst");
+		// die Spur der Strategie enthält die gesperrte Ankunft mit ihrem Merkmal (BookingTrail liest ihre Umzugsangabe)
+		TrailUnit target = policy.inputs.get(0).trail().get(OTHER_SEAT);
+		assertEquals(List.of(arrival.id(), true), List.of(target.chain().get(0).id(), target.chain().get(0).newerContent()));
+	}
+
+	/**
+	 * Ändert sich ein Blocker, während der Durchlauf die Strecke rechnet (die Meldung kommt vor dem Eintrag ins Warten),
+	 * bleibt die Einheit eingereiht und wird im nächsten Durchlauf neu gerechnet, statt die Meldung zu verpassen.
+	 */
+	@Test
+	void blockerChangedDuringThePassKeepsTheStretchQueued() throws IOException {
+		VersionStore store = gatedStore();
+		LocalArbiter arbiter = new LocalArbiter(store, clock);
+		lossAtBooking(store, arbiter);
+		RecordingPolicy recording = deletingNeighbour(lockedNeighbour(store, arbiter));
+		List<List<Change>> appended = new ArrayList<>();
+		ConflictResolver resolver = lockResolver(store, recording, appended, List.of());
+		resolver.setPolicy(UnitType.BOOKING, input -> {
+			// wie eine Meldung des Dienstes von einem anderen Thread, während die Strategie rechnet
+			resolver.unitChanged(OTHER_SEAT);
+			return recording.resolve(input);
+		});
+
+		resolver.resolvePending(10);
+		assertEquals(0, resolver.waitingUnits().size(), "bleibt eingereiht");
+		resolver.resolvePending(10);
+
+		assertEquals(2, recording.inputs.size(), "im nächsten Durchlauf neu gerechnet");
+		assertEquals(List.of(), appended);
+	}
+
+	/**
+	 * Der Dienst meldet dem Resolver jede geänderte Einheit: Ein eigener lesbarer Stand auf dem gesperrten Nachbarn weckt
+	 * die wartende Auflösung im nächsten Takt.
+	 */
+	@Test
+	void serviceWakesTheWaitingResolutionWhenTheNeighbourChanges() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Version locked = foreign(service, appData, OTHER_SEAT, List.of(), newer(carrying("Y")), false, Map.of());
+		assertTrue(service.unitState(OTHER_SEAT).contentLocked());
+		RecordingPolicy policy = deletingNeighbour(locked);
+		service.setConflictPolicy(UnitType.BOOKING, policy);
+		loss(service, appData, BOOKING);
+
+		service.tick();
+		service.tick();
+		assertEquals(1, policy.inputs.size());
+		assertEquals(1, service.waitingResolutions());
+		assertEquals(Map.of(BOOKING, OTHER_SEAT), service.waitingChanges(), "wartet auf den gesperrten Nachbarn");
+		assertEquals(1, service.unitState(BOOKING).lost().size(), "nichts geschrieben");
+
+		own(service, OTHER_SEAT, List.of(locked.id()), carrying("Y"));
+		policy.extra = List.of();
+		service.tick();
+
+		assertEquals(2, policy.inputs.size());
+		assertEquals(0, service.waitingResolutions());
+		assertTrue(service.unitState(BOOKING).lost().isEmpty());
+	}
+
+	/**
+	 * Die eigene Änderung verliert an einer Einheit, die selbst inhaltlich gesperrt ist (ein neueres Programm hat denselben
+	 * Sitz verkauft): Sie ist verloren (Ruling 5), der Resolver überspringt die gesperrte Kette, und trotzdem zählt sie in
+	 * „N Änderungen warten“, neben einer geparkten Auflösung an einer anderen Einheit. Mit dem Entsperren sinkt die Zahl.
+	 */
+	@Test
+	void ownLossOnContentLockedUnitCountsAsWaiting() throws IOException {
+		Path appData = dir.resolve("app");
+		SyncService service = single(appData);
+		Version neighbour = foreign(service, appData, OTHER_SEAT, List.of(), newer(carrying("Y")), false, Map.of());
+		service.setConflictPolicy(UnitType.BOOKING, deletingNeighbour(neighbour));
+		loss(service, appData, BOOKING);
+		Version base = own(service, OTHER_SHOW_SEAT, List.of(), name("Anna"));
+		Version locked = foreign(service, appData, OTHER_SHOW_SEAT, List.of(base.id()), newer(name("Bert")), false,
+				Map.of());
+		Version mine = own(service, OTHER_SHOW_SEAT, List.of(base.id()), name("Carla"));
+		UnitState state = service.unitState(OTHER_SHOW_SEAT);
+		assertTrue(state.contentLocked());
+		assertEquals(List.of(List.of(mine.id())), state.lost());
+
+		service.tick();
+		service.tick();
+
+		assertEquals(2, service.waitingResolutions(), "die geparkte Auflösung und die Änderung an der gesperrten Einheit");
+		assertEquals(OTHER_SHOW_SEAT, service.waitingChanges().get(OTHER_SHOW_SEAT), "wartet auf sich selbst");
+		assertEquals(List.of(List.of(mine.id())), service.unitState(OTHER_SHOW_SEAT).lost(), "nichts geschrieben");
+
+		// ein neueres Programm schreibt einen lesbaren Stand: Die Sperre fällt, die Änderung wartet nicht mehr auf sie
+		foreign(service, appData, OTHER_SHOW_SEAT, List.of(locked.id()), name("Bert"), false, Map.of());
+		assertFalse(service.unitState(OTHER_SHOW_SEAT).contentLocked());
+		// die Zahl für den Takt der Anzeige führt der Dienst nach, wenn er die geänderte Einheit meldet (nächster Takt)
+		service.tick();
+
+		assertEquals(1, service.waitingResolutions(), "nur noch die geparkte Auflösung");
+	}
+
+	/**
+	 * Der Takt der Oberfläche fragt die Zahl jede Sekunde: Sie darf nicht auf den Monitor des Index warten, den der
+	 * Abgleich beim Start (nach einem Update für den ganzen Bestand) lange hält.
+	 */
+	@Test
+	void waitingResolutionsDoesNotWaitForTheIndex() throws Exception {
+		SyncService service = single(dir.resolve("app"));
+		CountDownLatch held = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		Thread holder = new Thread(() -> {
+			synchronized (service.index()) {
+				held.countDown();
+				try {
+					release.await();
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			}
+		});
+		holder.start();
+		try {
+			assertTrue(held.await(5, TimeUnit.SECONDS));
+			assertEquals(0, assertTimeoutPreemptively(Duration.ofSeconds(5), service::waitingResolutions));
+		} finally {
+			release.countDown();
+			holder.join();
+		}
 	}
 
 	// --- Folgefälle

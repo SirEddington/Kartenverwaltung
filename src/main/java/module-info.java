@@ -9,6 +9,7 @@ module Kartenverwaltung {
     requires java.prefs;
     requires java.desktop;
     requires java.logging;
+    requires java.xml;
 
     // Hauptpaket für JavaFX (für MainApp)
     opens de.eltviller_carneval_verein.karten to javafx.fxml, javafx.graphics;
@@ -60,4 +61,7 @@ module Kartenverwaltung {
     // Einstellungen (AppSettings für Jackson, SettingsStore für UI und Start)
     opens de.eltviller_carneval_verein.karten.settings to com.fasterxml.jackson.databind;
     exports de.eltviller_carneval_verein.karten.settings;
+
+    // Update-Prüfung (KARV-131, ohne JavaFX)
+    exports de.eltviller_carneval_verein.karten.update;
 }

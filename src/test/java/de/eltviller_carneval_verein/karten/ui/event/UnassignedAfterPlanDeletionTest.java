@@ -6,19 +6,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.repository.JsonMapperFactory;
@@ -48,7 +49,7 @@ class UnassignedAfterPlanDeletionTest {
 		presentation.setHallId(hall.getId());
 		presentation.setSeatingPlanId(plan.getId());
 		ChangeTracker<Event> tracker = new ChangeTracker<>(Event::getId);
-		BookingSyncService.prepare(event, id -> Map.of(hall.getId(), hall).get(id), tracker);
+		BookingSyncService.prepare(event, id -> Map.of(hall.getId(), hall).get(id), tracker, p -> Set.of());
 
 		Seat seat = table(plan, 3).getSeats().stream().filter(s -> s.getSeatNumber() == 1).findFirst().orElseThrow();
 		Booking paid = presentation.getBookings().stream().filter(b -> seat.getId().equals(b.getSeatId())).findFirst().orElseThrow();
@@ -57,7 +58,7 @@ class UnassignedAfterPlanDeletionTest {
 
 		// Tisch 3 verschwindet aus der Bestuhlung: Der Abgleich macht die Buchung "Ohne Platz"
 		plan.deleteTable(table(plan, 3));
-		BookingSyncService.prepare(event, id -> Map.of(hall.getId(), hall).get(id), tracker);
+		BookingSyncService.prepare(event, id -> Map.of(hall.getId(), hall).get(id), tracker, p -> Set.of());
 		assertTrue(paid.isUnassigned());
 
 		// Speichern und Laden, danach fehlt die Bestuhlung (alte seatingPlanId, Bestuhlung nicht gefunden)
@@ -65,7 +66,7 @@ class UnassignedAfterPlanDeletionTest {
 		Event loaded = mapper.readValue(mapper.writeValueAsString(event), Event.class);
 		Presentation loadedPresentation = loaded.getPresentations().get(0);
 		assertEquals(plan.getId(), loadedPresentation.getSeatingPlanId());
-		BookingSync.sync(loadedPresentation, null);
+		Syncs.sync(loadedPresentation, null);
 
 		assertTrue(loadedPresentation.isPlanMissing());
 		Booking loadedPaid = loadedPresentation.getBookings().stream().filter(b -> "Müller".equals(b.getLastName())).findFirst().orElseThrow();

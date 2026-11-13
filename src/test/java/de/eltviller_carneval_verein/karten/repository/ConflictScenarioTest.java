@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -24,6 +25,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -40,6 +42,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
@@ -48,12 +52,16 @@ import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
+import de.eltviller_carneval_verein.karten.store.ContentGate;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
+import de.eltviller_carneval_verein.karten.store.FutureWriter;
 import de.eltviller_carneval_verein.karten.store.NioFileLayer;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
 import de.eltviller_carneval_verein.karten.store.SimulatedCloud;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncListener;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.SyncState;
@@ -91,6 +99,8 @@ class ConflictScenarioTest {
 	private static final class Recorder implements SyncListener {
 		final List<String> errors = new ArrayList<>();
 		final List<String> warnings = new ArrayList<>();
+		/** Die gemeldeten Sperren ({@link SyncListener#locked}): daraus füllt die App „Gesperrte Einträge“ und sperrt Sitze. */
+		final List<UnitKey> locked = new ArrayList<>();
 		/** Die Repositories, sobald es sie gibt; vor dem Start kommt nichts an, was sie einarbeiten könnten. */
 		StoreHallRepository halls;
 		StoreEventRepository events;
@@ -108,6 +118,11 @@ class ConflictScenarioTest {
 		public void error(String message) {
 			errors.add(message);
 		}
+
+		@Override
+		public void locked(UnitKey unit, UnitState.Status status) {
+			locked.add(unit);
+		}
 	}
 
 	/**
@@ -118,6 +133,8 @@ class ConflictScenarioTest {
 	private final class Machine {
 		final String name;
 		final Path sharedDir;
+		/** Die Inhaltsprüfung des Dienstes: die Regel dieses Programms, beim 1.2-Rechner die durchlässige. */
+		final ContentGate gate;
 		final AtomicBoolean down = new AtomicBoolean();
 		/** Die Dateischicht des Rechners, damit ein Szenario Haken setzen kann (etwa eine Uhr, die mit jedem Lesen weiterläuft). */
 		final FaultyFileLayer layer;
@@ -134,15 +151,21 @@ class ConflictScenarioTest {
 
 		/** Mit {@code reachable == false} startet der Rechner ohne den gemeinsamen Ordner ({@link #down}). */
 		Machine(String name, Path sharedDir, boolean reachable) {
+			this(name, sharedDir, reachable, ContentRules.GATE);
+		}
+
+		/** Wie {@link #Machine(String, Path, boolean)}, mit der Inhaltsprüfung {@code gate}. */
+		Machine(String name, Path sharedDir, boolean reachable, ContentGate gate) {
 			this.name = name;
 			this.sharedDir = sharedDir;
+			this.gate = gate;
 			down.set(!reachable);
 			layer = new FaultyFileLayer(new NioFileLayer());
 			for (String operation : List.of("createNew", "read", "listNames")) {
 				layer.failWhen(p -> down.get() && p.startsWith(sharedDir), operation,
 						new IOException("Netzlaufwerk getrennt"));
 			}
-			sync = TestSyncServices.unstarted(dir.resolve("app-" + name), name, layer, p -> !down.get(), clock);
+			sync = TestSyncServices.unstarted(dir.resolve("app-" + name), name, layer, p -> !down.get(), clock, gate);
 			sync.setListener(events);
 			ConflictPolicies.install(sync);
 			assertEquals(reachable, sync.startup(sharedDir.toString()));
@@ -160,7 +183,7 @@ class ConflictScenarioTest {
 		 */
 		Machine restartOffline() {
 			sync.closeIndex();
-			Machine restarted = new Machine(name, sharedDir, false);
+			Machine restarted = new Machine(name, sharedDir, false, gate);
 			restarted.load();
 			return restarted;
 		}
@@ -170,7 +193,7 @@ class ConflictScenarioTest {
 			hall = halls.loadHalls().get(0);
 			event = repository.loadEvents().get(0);
 			for (Presentation presentation : event.getPresentations()) {
-				BookingSync.sync(presentation, plan());
+				Syncs.sync(presentation, plan());
 			}
 		}
 
@@ -310,7 +333,7 @@ class ConflictScenarioTest {
 		Presentation friday = event.addPresentation("Freitag");
 		friday.setHallId(hall.getId());
 		friday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(friday, plan);
+		Syncs.sync(friday, plan);
 		first.event = event;
 		first.seat(0).setLastName("Müller");
 		first.repository.saveEvent(event);
@@ -878,7 +901,7 @@ class ConflictScenarioTest {
 		b.seat(0).clearCustomerData();
 		b.repository.saveEvent(b.event);
 		b.friday().setHallId(other.getId());
-		BookingSync.switchPlan(b.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(b.friday(), other.getSeatingPlans().get(0));
 		b.repository.saveEvent(b.event);
 		clock.advance(ROUND);
 		b.tick();
@@ -927,7 +950,7 @@ class ConflictScenarioTest {
 		clock.advance(ROUND);
 		a.tick();
 		a.hall = a.halls.reloadHalls().get(0);
-		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		a.repository.deriving(a.event, () -> Syncs.sync(a.friday(), a.plan()));
 		assertTrue(muller.isUnassigned(), "der Abgleich setzt Müller ohne Platz");
 		assertEquals("Hans", muller.getFirstName());
 
@@ -962,7 +985,7 @@ class ConflictScenarioTest {
 		// A arbeitet die Meldungen von Hand ein, um das Zeitfenster zu treffen
 		a.events.halls = null;
 		c.friday().setHallId(other.getId());
-		BookingSync.switchPlan(c.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(c.friday(), other.getSeatingPlans().get(0));
 		c.repository.saveEvent(c.event);
 		b.seat(0).clearCustomerData();
 		b.repository.saveEvent(b.event);
@@ -1006,7 +1029,7 @@ class ConflictScenarioTest {
 		String mullerId = a.seat(0).getId();
 		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
 		b.friday().setHallId(other.getId());
-		BookingSync.switchPlan(b.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(b.friday(), other.getSeatingPlans().get(0));
 		b.repository.saveEvent(b.event);
 		clock.advance(ROUND);
 		b.tick();
@@ -1070,7 +1093,7 @@ class ConflictScenarioTest {
 		String mullerId = a.seat(0).getId();
 		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
 		b.friday().setHallId(other.getId());
-		BookingSync.switchPlan(b.friday(), otherPlan);
+		Syncs.switchPlan(b.friday(), otherPlan);
 		b.repository.saveEvent(b.event);
 		Booking atB = booking(b, mullerId);
 		if (moved) {
@@ -1137,7 +1160,7 @@ class ConflictScenarioTest {
 		String mullerId = a.seat(0).getId();
 		UnitKey presentation = UnitKey.presentation(a.event.getId(), a.friday().getId());
 		b.friday().setHallId(other.getId());
-		BookingSync.switchPlan(b.friday(), otherPlan);
+		Syncs.switchPlan(b.friday(), otherPlan);
 		if (foreignChange) {
 			booking(b, mullerId).setFirstName("Hans");
 		}
@@ -1660,7 +1683,7 @@ class ConflictScenarioTest {
 	private static Booking move(Machine machine, int from, int to) {
 		Booking booking = machine.seat(from);
 		assertTrue(BookingSync.assign(machine.friday(), machine.plan(), booking, machine.plan().getSeats().get(to)));
-		BookingSync.sync(machine.friday(), machine.plan());
+		Syncs.sync(machine.friday(), machine.plan());
 		machine.repository.saveEvent(machine.event);
 		return booking;
 	}
@@ -2157,7 +2180,7 @@ class ConflictScenarioTest {
 		assertEquals(a.plan().getSeats().get(0).getId(), b.plan().getSeats().get(0).getId());
 
 		for (Machine machine : m) {
-			BookingSync.sync(machine.friday(), machine.plan());
+			Syncs.sync(machine.friday(), machine.plan());
 			assertEquals(muellerId, machine.seat(0).getId(), "Müller sitzt auf " + machine.name + " auf dem neuen Sitz");
 			machine.repository.saveEvent(machine.event);
 		}
@@ -2582,4 +2605,198 @@ class ConflictScenarioTest {
 			assertEquals(List.of(), machine.repository.retryDeferred().deferred(), machine.name);
 		}
 	}
+
+	// Ein Rechner mit neuerer Programmversion (KARV-136) -->
+
+	/**
+	 * Der simulierte 1.2-Rechner im gemeinsamen Ordner {@code shared}: ein eigener Dienst mit der durchlässigen
+	 * Inhaltsprüfung ({@link ContentGate#NONE}), der nicht sperrt, was er selbst geschrieben hat. Er schreibt roh über
+	 * {@link FutureWriter} und arbeitet nichts in ein Modell ein: Sein Modell wäre das dieses Programms und kennt die
+	 * Testwerte nicht (etwa einen unbekannten Zahlstatus).
+	 */
+	private Machine newerMachine(String name) throws IOException {
+		Machine machine = new Machine(name, Files.createDirectories(dir.resolve("shared")), true, ContentGate.NONE);
+		machine.events.halls = null;
+		machine.events.events = null;
+		return machine;
+	}
+
+	/**
+	 * Der 1.2-Rechner schreibt eine Version der Einheit auf ihren Kopf, wie er ihn sieht; {@code changes} ändert dessen
+	 * Daten.
+	 */
+	private static Version writeNewer(Machine newer, UnitKey unit, Consumer<ObjectNode> changes) throws IOException {
+		Version parent = newer.sync.unitState(unit).head();
+		ObjectNode payload = parent.payload().deepCopy();
+		changes.accept(payload);
+		return FutureWriter.write(newer.sharedDir, unit, payload, parent);
+	}
+
+	/**
+	 * Der 1.2-Rechner schreibt Felder und einen Formwert, die dieses Programm nicht kennt, in ein Hallenobjekt und eine
+	 * Buchung: Dieses Programm hält danach nichts für lokal verändert und stellt nichts zurück. Ändert es ein anderes Feld
+	 * und speichert, stehen die fremden Felder unverändert in der neuen Version.
+	 */
+	@Test
+	void newerMachineFieldsSurviveEditsOnOlderMachine() throws IOException {
+		Machine a = machines("a")[0];
+		setUp(a);
+		a.hall.addHallObject("Bühne");
+		a.halls.saveHall(a.hall);
+		Machine newer = newerMachine("neu");
+		untilQuiet(a, newer);
+		String hallId = a.hall.getId();
+		UnitKey hall = UnitKey.hall(hallId);
+		UnitKey seat = seatUnit(a, 0);
+		writeNewer(newer, hall, payload -> {
+			ObjectNode object = (ObjectNode) payload.get("hallObjects").get(0);
+			object.put("x-test-neu", "Notausgang");
+			object.put("shape", "x-test-ellipse");
+		});
+		writeNewer(newer, seat, payload -> payload.put("x-test-telefon", "06123 4567"));
+
+		untilQuiet(a, newer);
+
+		assertEquals(FutureWriter.MACHINE, a.sync.unitState(hall).head().machine(), "der Stand des 1.2-Rechners ist da");
+		assertEquals(FutureWriter.MACHINE, a.sync.unitState(seat).head().machine(), "der Stand des 1.2-Rechners ist da");
+		assertEquals(UnitState.Status.OK, a.sync.unitState(hall).status());
+		assertEquals(UnitState.Status.OK, a.sync.unitState(seat).status());
+		a.hall = a.halls.findById(hallId);
+		assertTrue(a.halls.isCurrent(hallId), "die Halle gilt nicht als verändert");
+		assertEquals(List.of(), a.halls.retryDeferred().deferred());
+		assertSettled(a);
+		assertEquals("Müller", a.seat(0).getLastName());
+
+		a.hall.getHallObjects().get(0).setPosX(42);
+		a.halls.saveHall(a.hall);
+		a.seat(0).setComment("Rollstuhlplatz");
+		a.repository.saveEvent(a.event);
+		untilQuiet(a, newer);
+
+		Version ownHall = newer.sync.unitState(hall).head();
+		assertNotEquals(FutureWriter.MACHINE, ownHall.machine(), "die neue Version der Halle ist die von a");
+		ObjectNode object = (ObjectNode) ownHall.payload().get("hallObjects").get(0);
+		assertEquals(42.0, object.get("posX").asDouble());
+		assertEquals("Notausgang", object.path("x-test-neu").asText());
+		assertEquals("x-test-ellipse", object.path("shape").asText());
+		Version ownBooking = newer.sync.unitState(seat).head();
+		assertNotEquals(FutureWriter.MACHINE, ownBooking.machine(), "die neue Version der Buchung ist die von a");
+		assertEquals("Rollstuhlplatz", ownBooking.payload().get("comment").asText());
+		assertEquals("06123 4567", ownBooking.payload().path("x-test-telefon").asText());
+		assertSettled(a);
+	}
+
+	/**
+	 * Der 1.2-Rechner schreibt eine Buchung mit einem Zahlstatus, den dieses Programm nicht kennt: Sie ist gesperrt, fehlt im
+	 * Modell, ihr Sitz ist gesperrt, und ein Verkauf darauf scheitert mit SYS-009, ohne etwas zu schreiben. Schreibt der
+	 * 1.2-Rechner wieder einen bekannten Wert, ist die Buchung zurück und der Sitz belegt.
+	 */
+	@Test
+	void unknownPaymentStatusLocksSeatUntilKnownValue() throws IOException {
+		Machine a = machines("a")[0];
+		setUp(a);
+		Machine newer = newerMachine("neu");
+		untilQuiet(a, newer);
+		UnitKey seat = seatUnit(a, 0);
+		String seatId = a.plan().getSeats().get(0).getId();
+		writeNewer(newer, seat, payload -> payload.put("paymentStatus", "x-test-voucher"));
+
+		// nur die Takte, ohne die Prüfungen von untilQuiet (die fragen den Stand ab und lösten die Meldung selbst aus):
+		// gemeldet wird schon beim Abholen, sonst fehlte die Einheit bis zum Neustart in „Gesperrte Einträge“, und ihr
+		// Sitz wirkte frei
+		for (int round = 0; round < 10; round++) {
+			clock.advance(ROUND);
+			a.tick();
+			newer.tick();
+		}
+		assertEquals(List.of(seat), a.events.locked, "die abgeholte Sperre ist gemeldet");
+		untilQuiet(a, newer);
+
+		assertEquals(UnitState.Status.LOCKED_FORMAT, a.sync.unitState(seat).status());
+		assertTrue(a.sync.unitState(seat).contentLocked());
+		assertEquals(UnitState.Status.OK, newer.sync.unitState(seat).status(), "der 1.2-Rechner sperrt nicht");
+		assertFalse(newer.sync.unitState(seat).contentLocked());
+		assertFalse(a.seat(0).hasData(), "auf dem Sitz liegt der leere Platzhalter, nicht der alte Stand");
+		assertTrue(a.friday().getBookings().stream().noneMatch(b -> "Müller".equals(b.getLastName())),
+				"die Buchung fehlt im Modell");
+		assertEquals(Set.of(seatId), a.repository.lockedSeatIds(a.event.getId(), a.friday().getId()));
+		assertEquals(List.of(StoreMessages.newerFormat(seat.relativePath())), a.events.warnings,
+				"die Sperre, keine Unlesbar-Warnung");
+		a.events.warnings.clear();
+		assertSettled(a);
+		int versions = newer.sync.history(seat).size();
+		String before = a.seat(0).getLastName();
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> a.sell(0, "Neu"));
+
+		assertTrue(refused.getMessage().startsWith(StoreMessages.SYS_NEWER_FORMAT), refused.getMessage());
+		// der Nutzer verwirft den gescheiterten Verkauf
+		a.seat(0).setLastName(before);
+		untilQuiet(a, newer);
+		assertEquals(versions, newer.sync.history(seat).size(), "nichts geschrieben");
+		assertSettled(a);
+
+		writeNewer(newer, seat, payload -> payload.put("paymentStatus", "CASH"));
+		untilQuiet(a, newer);
+
+		assertEquals(UnitState.Status.OK, a.sync.unitState(seat).status());
+		assertFalse(a.sync.unitState(seat).contentLocked());
+		Booking back = a.seat(0);
+		assertEquals("Müller", back.getLastName());
+		assertEquals(PaymentStatus.CASH, back.getPaymentStatus());
+		assertTrue(back.isTaken(), "der Sitz ist belegt");
+		assertEquals(Set.of(), a.repository.lockedSeatIds(a.event.getId(), a.friday().getId()));
+		assertSettled(a);
+	}
+
+	/**
+	 * Der 1.2-Rechner verlangt an einer Vorstellung ein Merkmal, das dieses Programm nicht kennt ({@code requires}): Sie ist
+	 * gesperrt und fehlt samt ihren Buchungen im Modell. Speichert dieses Programm das Event, bleiben die Vorstellung und
+	 * ihre Buchungen unberührt. Ohne {@code requires} ist sie zurück.
+	 */
+	@Test
+	void requiresOnPresentationLocksItForOlderMachine() throws IOException {
+		Machine a = machines("a")[0];
+		setUp(a);
+		Machine newer = newerMachine("neu");
+		untilQuiet(a, newer);
+		String fridayId = a.friday().getId();
+		UnitKey presentation = UnitKey.presentation(a.event.getId(), fridayId);
+		UnitKey seat = seatUnit(a, 0);
+		writeNewer(newer, presentation, payload -> payload.set("requires",
+				JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+
+		untilQuiet(a, newer);
+
+		assertEquals(UnitState.Status.LOCKED_FORMAT, a.sync.unitState(presentation).status());
+		assertTrue(a.sync.unitState(presentation).contentLocked());
+		assertEquals(UnitState.Status.OK, newer.sync.unitState(presentation).status(), "der 1.2-Rechner sperrt nicht");
+		a.event = a.repository.loadEvents().get(0);
+		assertNull(a.event.findPresentation(fridayId), "die Vorstellung fehlt samt Buchungen");
+		assertEquals(List.of(StoreMessages.newerFormat(presentation.relativePath())), a.events.warnings,
+				"die Sperre, keine Unlesbar-Warnung");
+		a.events.warnings.clear();
+		assertSettled(a);
+		int presentationVersions = newer.sync.history(presentation).size();
+		int seatVersions = newer.sync.history(seat).size();
+		a.event.setName("Prunksitzung 2027");
+		a.repository.saveEvent(a.event);
+		untilQuiet(a, newer);
+
+		assertEquals("Prunksitzung 2027",
+				newer.sync.unitState(UnitKey.event(a.event.getId())).head().payload().get("name").asText());
+		assertEquals(presentationVersions, newer.sync.history(presentation).size(), "die Vorstellung bleibt unberührt");
+		assertEquals(seatVersions, newer.sync.history(seat).size(), "ihre Buchungen ebenso");
+
+		writeNewer(newer, presentation, payload -> payload.remove("requires"));
+		untilQuiet(a, newer);
+
+		assertEquals(UnitState.Status.OK, a.sync.unitState(presentation).status());
+		a.event = a.repository.loadEvents().get(0);
+		assertNotNull(a.event.findPresentation(fridayId), "die Vorstellung ist zurück");
+		assertEquals("Müller", a.seat(0).getLastName());
+		assertSettled(a);
+	}
+
+	// <-- Ein Rechner mit neuerer Programmversion
 }

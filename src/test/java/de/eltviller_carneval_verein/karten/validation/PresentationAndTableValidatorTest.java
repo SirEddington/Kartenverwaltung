@@ -13,6 +13,7 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 
@@ -113,6 +114,21 @@ class PresentationAndTableValidatorTest {
 	}
 
 	@Test
+	void tableTextSizeMustBeBetweenOneAndOneThousand() {
+		for (double ok : new double[] { 1, 20, 1000 }) {
+			Table table = table(4);
+			table.setTextSize(ok);
+			assertTrue(TableValidator.validate(table).isEmpty(), "Gültig: " + ok);
+		}
+
+		Table tiny = table(4);
+		tiny.setTextSize(0);
+		ValidationIssue issue = only(TableValidator.validate(tiny));
+		assertEquals("TBL-006", issue.code());
+		assertTrue(issue.message().startsWith("Schriftgröße von Tisch 4 in Bestuhlung Prunksitzung"), issue.message());
+	}
+
+	@Test
 	void tablePositionMustBeWithinPlusMinusTenThousand() {
 		for (double ok : new double[] { -10_000, 0, 10_000 }) {
 			Table table = table(4);
@@ -167,9 +183,15 @@ class PresentationAndTableValidatorTest {
 	@Test
 	void planValidatorChecksEveryTable() {
 		SeatingPlan plan = plan();
-		table(plan, 1).addSeat(1).setWidth(-1);
-		table(plan, 2).addSeat(1).setWidth(-1);
-		table(plan, 3).addSeat(1).setWidth(30);
+		// Sitze auseinanderlegen: alle Tische starten bei (0|0) und würden sich sonst überlappen (SPL-004)
+		Seat first = table(plan, 1).addSeat(1);
+		first.setWidth(-1);
+		Seat second = table(plan, 2).addSeat(1);
+		second.setWidth(-1);
+		second.setPosX(200);
+		Seat third = table(plan, 3).addSeat(1);
+		third.setWidth(30);
+		third.setPosX(400);
 
 		assertEquals(2, SeatingPlanValidator.validate(plan).getIssues().size());
 	}

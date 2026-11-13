@@ -238,6 +238,8 @@ public final class SyncService implements ConnectionControl {
 	/** Die Sperre gegen einen zweiten Start; gehalten bis zum Programmende. */
 	@SuppressWarnings("unused")
 	private static InstanceLock instanceLock;
+	/** Die Inhaltsprüfung der Anwendung; die App richtet sie vor dem ersten {@link #getInstance()} ein. */
+	private static ContentGate installedGate;
 
 	/** Eine Aktion mit Dateizugriff. */
 	private interface IoAction {
@@ -385,10 +387,18 @@ public final class SyncService implements ConnectionControl {
 	private final Executor worker;
 	private final Predicate<Path> reachable;
 	private final Clock clock;
+	/** Die Inhaltsprüfung für den lokalen und den gemeinsamen Bestand und die Regelkennung des Index. */
+	private final ContentGate gate;
 	private final VersionStore local;
 	private final SyncNotifier notifier;
 	/** Löst die gemeldeten Verluste zu Zusammenführungen auf; eingereiht wird in {@link #reportLoss}. */
 	private final ConflictResolver resolver;
+	/**
+	 * Die Einheiten, die inhaltlich gesperrt sind und eigene verlorene Versionen haben (für {@link #waitingResolutions}).
+	 * Bestimmt auf dem Arbeits-Thread nach jedem {@link #reportLosses}, gelesen ohne Sperre: Der Takt der Oberfläche fragt
+	 * die Zahl jede Sekunde und darf nicht auf den Monitor des Index warten, den der Abgleich beim Start lange hält.
+	 */
+	private volatile Set<UnitKey> contentLockedLosses = Set.of();
 	/**
 	 * Die Marke "verbunden", wie sie in {@code connection.json} steht; {@code null} ohne (lesbare) Marke. Gelesen im
 	 * Konstruktor, danach bei jedem gelungenen Schreiben ({@link #writeConnectionMarker}) und Löschen ({@link #disconnect})
@@ -547,15 +557,17 @@ public final class SyncService implements ConnectionControl {
 	 * @param worker     der Thread für die Arbeit am gemeinsamen Ordner
 	 * @param reachable  die Prüfung der Erreichbarkeit (mit Zeitlimit)
 	 * @param clock      die Uhr für Versions-IDs, Zeitpunkte und Fristen
+	 * @param gate       die Inhaltsprüfung, die beide Stores und der Index nutzen
 	 */
 	SyncService(Path appDataDir, MachineIdentity machine, FileLayer files, Executor ui, Executor worker,
-			Predicate<Path> reachable, Clock clock) {
+			Predicate<Path> reachable, Clock clock, ContentGate gate) {
 		this.appDataDir = appDataDir;
 		this.files = files;
 		this.worker = worker;
 		this.reachable = reachable;
 		this.clock = clock;
-		this.local = new VersionStore(appDataDir.resolve(DATA), files);
+		this.gate = Objects.requireNonNull(gate, "gate");
+		this.local = new VersionStore(appDataDir.resolve(DATA), files, null, null, gate);
 		this.connection = ConnectionMarker.read(appDataDir).orElse(null);
 		// eine unvollständige Marke "verbunden": Der erste Lauf einer Verbindung kam nicht zu Ende (auch über einen Neustart)
 		this.notifier = new SyncNotifier(ui, connection == null || connection.complete());
@@ -565,9 +577,12 @@ public final class SyncService implements ConnectionControl {
 		this.resolver = new ConflictResolver(new ResolverHost(), notifier, clock);
 	}
 
-	/** Ein neuer, noch leerer Index im Index-Ordner dieser Installation, für die Kennung des Rechners. */
+	/**
+	 * Ein neuer, noch leerer Index im Index-Ordner dieser Installation, für die Kennung des Rechners und die Regelkennung
+	 * der Inhaltsprüfung.
+	 */
 	private UnitIndex newIndex(Ownership own) {
-		return new UnitIndex(appDataDir.resolve(INDEX), files, own);
+		return new UnitIndex(appDataDir.resolve(INDEX), files, own, gate.rulesId());
 	}
 
 	/**
@@ -575,11 +590,15 @@ public final class SyncService implements ConnectionControl {
 	 * arbeitet auf {@code AppPaths.appDataDir()}, meldet über {@code Platform.runLater} und hat einen Daemon-Thread für
 	 * die Arbeit und den Takt alle 2 Sekunden.
 	 *
-	 * @throws IllegalStateException mit dem Text von SYS-010, wenn die Anwendung auf diesem Rechner schon läuft
+	 * @throws IllegalStateException mit dem Text von SYS-010, wenn die Anwendung auf diesem Rechner schon läuft; ebenso,
+	 *                               wenn die Inhaltsprüfung nicht eingerichtet ist (siehe {@link #installContentGate})
 	 * @throws UncheckedIOException  wenn Sperre oder Kennung nicht gelesen oder angelegt werden können
 	 */
 	public static synchronized SyncService getInstance() {
 		if (instance == null) {
+			if (installedGate == null) {
+				throw new IllegalStateException("Inhaltsprüfung nicht eingerichtet");
+			}
 			Path appData = AppPaths.appDataDir().toPath();
 			MachineIdentity identity;
 			try {
@@ -598,11 +617,29 @@ public final class SyncService implements ConnectionControl {
 			}
 			ScheduledExecutorService thread = Executors.newSingleThreadScheduledExecutor(SyncService::daemon);
 			SyncService service = new SyncService(appData, identity, new NioFileLayer(), Platform::runLater, thread,
-					Reachability::isReachable, Clock.systemDefaultZone());
+					Reachability::isReachable, Clock.systemDefaultZone(), installedGate);
 			thread.scheduleWithFixedDelay(service::tickSafely, TICK.toMillis(), TICK.toMillis(), TimeUnit.MILLISECONDS);
 			instance = service;
 		}
 		return instance;
+	}
+
+	/**
+	 * Richtet die Inhaltsprüfung der Anwendung ein; sie muss vor dem ersten {@link #getInstance()} geschehen. Ein zweiter
+	 * Aufruf ersetzt die Prüfung für eine noch nicht erzeugte Instanz.
+	 */
+	public static synchronized void installContentGate(ContentGate gate) {
+		installedGate = Objects.requireNonNull(gate, "gate");
+	}
+
+	/** Die eingerichtete Inhaltsprüfung; {@code null}, solange keine eingerichtet ist. */
+	public static synchronized ContentGate installedContentGate() {
+		return installedGate;
+	}
+
+	/** Für Tests: nimmt die eingerichtete Inhaltsprüfung zurück (oder setzt eine frühere wieder ein). */
+	static synchronized void restoreContentGate(ContentGate previous) {
+		installedGate = previous;
 	}
 
 	/**
@@ -633,6 +670,41 @@ public final class SyncService implements ConnectionControl {
 	 */
 	public void setConflictPolicy(UnitType type, ConflictPolicy policy) {
 		resolver.setPolicy(type, policy);
+	}
+
+	/**
+	 * Wie viele Einheiten mit eigenen Änderungen auf eine inhaltlich gesperrte Einheit warten, jede Einheit einmal:
+	 * <ul>
+	 * <li>deren Konfliktauflösung auf eine gesperrte Einheit wartet ({@link ConflictResolver#waitingUnits}); sie läuft,
+	 * sobald sich eine der blockierenden Einheiten ändert;</li>
+	 * <li>die selbst inhaltlich gesperrt sind und eigene verlorene Versionen haben (nach dem Index): Eine eigene Strecke,
+	 * die nicht auf dem gesperrten Kopf aufbaut, ist verloren, und die Auflösung überspringt die gesperrte Kette bis zum
+	 * Entsperren (etwa wenn ein neueres Programm denselben Sitz verkauft hat).</li>
+	 * </ul>
+	 * Ohne Datei-Ein-/Ausgabe und ohne den Monitor des Index (der zweite Teil ist der Stand nach dem letzten
+	 * {@link #reportLosses}); günstig genug für den Takt der Anzeige.
+	 */
+	public int waitingResolutions() {
+		return waitingChanges().size();
+	}
+
+	/**
+	 * Die Einheiten aus {@link #waitingResolutions}, je mit der gesperrten Einheit, auf die sie warten (für die Anzeige im
+	 * Konfliktdialog): bei einer geparkten Auflösung der blockierende Nachbar (ohne einen die Einheit selbst), bei einer
+	 * selbst gesperrten Einheit diese. Nach Pfad geordnet; ohne Datei-Ein-/Ausgabe und ohne den Monitor des Index.
+	 */
+	public Map<UnitKey, UnitKey> waitingChanges() {
+		Map<UnitKey, UnitKey> waiting = new TreeMap<>(Comparator.comparing(UnitKey::relativePath));
+		waiting.putAll(resolver.waitingFor());
+		contentLockedLosses.forEach(unit -> waiting.putIfAbsent(unit, unit));
+		return waiting;
+	}
+
+	/** Bestimmt {@link #contentLockedLosses} aus dem Index neu; auf dem Arbeits-Thread. */
+	private void refreshContentLockedLosses() {
+		contentLockedLosses = Set.copyOf(index.read(entries -> entries.stream()
+				.filter(entry -> entry.lost() && entry.snapshot().contentLocked())
+				.map(entry -> entry.snapshot().unit()).toList()));
 	}
 
 	/** Für Tests: die Auflösung der Verluste. */
@@ -2067,8 +2139,9 @@ public final class SyncService implements ConnectionControl {
 	 * liest es den Index schon ein. Danach gleicht der Start den Index immer mit dem Bestand ab und räumt dabei im selben
 	 * Durchlauf die alten temporären Dateien auf ({@link UnitIndex#refresh}): Auch nach sauberem Beenden kann der Bestand an
 	 * der App vorbei geändert worden sein (eine zurückgespielte Sicherung, eine Kopie, eine überschriebene Datei; KARV-107).
-	 * Löst der Abgleich trotz gültiger Marke Einheiten neu auf, steht das als Warnung im Log. Im Notfall baut der Start den
-	 * Index neu auf.
+	 * Löst der Abgleich trotz gültiger Marke Einheiten neu auf, steht das als Warnung im Log. Einheiten aus Index-Dateien
+	 * anderer Regeln (Update; {@link UnitIndex.Refresh#rulesChanged()}) zählen dazu nicht, sie stehen als eine Zeile
+	 * {@code INFO} im Log. Im Notfall baut der Start den Index neu auf.
 	 *
 	 * @return die Einheiten mit ausstehenden und mit verlorenen eigenen Versionen
 	 */
@@ -2090,6 +2163,11 @@ public final class SyncService implements ConnectionControl {
 		if (clean && resolved > 0) {
 			LOGGER.warning("Der lokale Bestand wurde seit dem letzten Beenden außerhalb der Kartenverwaltung geändert: "
 					+ resolved + (resolved == 1 ? " Einheit" : " Einheiten") + " neu aufgelöst");
+		}
+		// Einheiten aus Index-Dateien anderer Regeln (Update) sind keine Änderung von außen: eine Zeile, keine Warnung
+		int rulesChanged = refreshed.rulesChanged();
+		if (rulesChanged > 0) {
+			LOGGER.info("Regeln geändert: " + rulesChanged + " Einheiten neu aufgelöst");
 		}
 		return refreshed;
 	}
@@ -2171,7 +2249,7 @@ public final class SyncService implements ConnectionControl {
 		if (lastPercent != 100) {
 			progress.accept(1.0);
 		}
-		return new UnitIndex.Refresh(Collections.unmodifiableSet(pending), Collections.unmodifiableSet(lost), units.size());
+		return new UnitIndex.Refresh(Collections.unmodifiableSet(pending), Collections.unmodifiableSet(lost), units.size(), 0);
 	}
 
 	/**
@@ -2185,6 +2263,7 @@ public final class SyncService implements ConnectionControl {
 			unindexed.clear();
 			settled.clear();
 			indexRefreshed = true;
+			contentLockedLosses = Set.of();
 		}
 	}
 
@@ -2287,6 +2366,12 @@ public final class SyncService implements ConnectionControl {
 			}
 			return current.hurry && (current.firstRun || current.feedsBehind) && isCurrent(current);
 		} finally {
+			// auch Stände, die ohne Meldung in den Index kamen (Abfrage einer Einheit), erreichen so den Takt der Anzeige
+			try {
+				refreshContentLockedLosses();
+			} catch (RuntimeException e) {
+				LOGGER.log(Level.WARNING, "Die wartenden Änderungen ließen sich nicht zählen", e);
+			}
 			boolean interrupt = interruptAfterTick;
 			interruptAfterTick = false;
 			unlockWork();
@@ -3569,12 +3654,23 @@ public final class SyncService implements ConnectionControl {
 				LOGGER.log(Level.WARNING, "Der Stand von " + unit.relativePath() + " ließ sich nicht lesen", e);
 				continue;
 			}
+			// eine Sperre (neueres Format oder inhaltlich zu neu, KARV-135) gleich beim Abholen melden wie unitState, nicht
+			// erst bei der nächsten Abfrage: Sonst fehlte die Einheit bis zum Neustart in „Gesperrte Einträge“, und ihr Sitz
+			// wirkte frei. Beschädigte behält die Heilung (der Takt versucht sie, dann SYS-008).
+			if (resolved.state().status() != Status.LOCKED_DAMAGED) {
+				reportLocked(unit, resolved.state());
+			}
 			try {
 				derived.put(unit, LocalScan.losses(resolved.files(), resolved.state()));
 			} catch (RuntimeException e) {
 				notReported(unit, e);
 			}
 		}
+		// Hier laufen alle geänderten Einheiten durch (Abholen, Vollabgleich, eigenes Schreiben im Einzelbetrieb, Start):
+		// Wartet eine Auflösung auf eine davon (gesperrter Nachbar), kommt sie wieder dran. Erst nach dem Eintragen in den
+		// Index, damit sie die Geschwister auf dem neuen Stand liest.
+		units.forEach(resolver::unitChanged);
+		found.forEach(loss -> resolver.unitChanged(loss.unit()));
 		RuntimeException failure = null;
 		try {
 			found.forEach(this::reportLoss);
@@ -3589,6 +3685,8 @@ public final class SyncService implements ConnectionControl {
 				notReported(unit, e);
 			}
 		});
+		// der Index ist jetzt für diese Einheiten nachgeführt: die Zahl für den Takt der Anzeige
+		refreshContentLockedLosses();
 		if (failure != null) {
 			throw failure;
 		}
@@ -3620,7 +3718,7 @@ public final class SyncService implements ConnectionControl {
 
 	private Link activate(String dir, ConnectMode mode) {
 		Path path = toPath(dir);
-		VersionStore shared = path == null ? null : new VersionStore(path.resolve(DATA), files, path, this::machineId);
+		VersionStore shared = path == null ? null : new VersionStore(path.resolve(DATA), files, path, this::machineId, gate);
 		Link created = new Link(dir, path, shared, new SyncPositions(appDataDir.resolve(SYNC_STATE), dir));
 		created.connectMode = mode;
 		synchronized (lock) {
@@ -3694,6 +3792,15 @@ public final class SyncService implements ConnectionControl {
 		synchronized (lock) {
 			return machine.name();
 		}
+	}
+
+	/**
+	 * Ob die Kennung im Namen einer temporären Datei diesem Rechner gehört: die aktuelle ID oder eine frühere vor ihrer
+	 * Neuvergabe (SYS-011, {@link Ownership#isOwnTempTag}). Für das Aufräumen in {@code updates/} (KARV-132); nimmt nur
+	 * kurz {@code lock}.
+	 */
+	public boolean isOwnTempTag(String tag) {
+		return ownership().isOwnTempTag(tag);
 	}
 
 	/**
@@ -3834,6 +3941,11 @@ public final class SyncService implements ConnectionControl {
 			}
 			FullSyncRun run = current.run;
 			return run != null && run.inProgress(unit) || FullSyncRun.covers(current.skippedTrees, unit);
+		}
+
+		@Override
+		public ContentGate gate() {
+			return gate;
 		}
 
 		/** SYS-006 mit dem gemeinsamen Ordner; im Einzelbetrieb mit dem lokalen Bestand, in den geschrieben wird. */

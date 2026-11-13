@@ -2,16 +2,20 @@ package de.eltviller_carneval_verein.karten.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
+import com.fasterxml.jackson.databind.JsonNode;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Hall {
@@ -39,6 +43,27 @@ public class Hall {
 		this.id = (id != null) ? id : UUID.randomUUID().toString();
 	}
 	// <-- Konstuktoren
+
+	// Unbekannte Felder -->
+	/** Felder aus der Datei, die diese Version nicht kennt (z. B. von einer neueren Version); sie werden unverändert zurückgeschrieben. */
+	private final UnknownFields unknown = new UnknownFields();
+
+	@JsonIgnore
+	public UnknownFields getUnknown() {
+		return unknown;
+	}
+
+	/** Merkt sich ein Feld, das diese Version nicht kennt; ein durchgelassenes {@code requires} fällt weg (siehe {@link UnknownFields#putUnitField}). */
+	@JsonAnySetter
+	void putUnknown(String key, JsonNode value) {
+		unknown.putUnitField(key, value);
+	}
+
+	@JsonAnyGetter
+	Map<String, JsonNode> unknownFields() {
+		return unknown.asMap();
+	}
+	// <-- Unbekannte Felder
 
 	public String getId() {
 		return id;
@@ -75,6 +100,11 @@ public class Hall {
 
 	public void setHallHeight(double hallHeight) {
 		this.hallHeight = hallHeight;
+	}
+
+	/** {@code true}, wenn Breite und Höhe der Halle festgelegt sind (beide über 0; 0 = noch nicht festgelegt). */
+	public boolean hasSize() {
+		return hallWidth > 0 && hallHeight > 0;
 	}
 
 	public List<HallObject> getHallObjects() {

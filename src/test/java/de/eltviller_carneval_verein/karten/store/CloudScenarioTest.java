@@ -30,6 +30,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
+
 /**
  * Szenarien mit einem nachgebauten Nextcloud-Ordner: Jeder Dienst nimmt seinen eigenen, lokal synchronisierten
  * Client-Ordner als gemeinsamen Ordner, und {@link SimulatedCloud} spielt Sync-Client und Server dazwischen.
@@ -115,7 +117,7 @@ class CloudScenarioTest {
 			this.appData = dir.resolve("appdata-" + name);
 			MachineIdentity identity = MachineIdentity.loadOrCreate(appData, () -> name);
 			this.service = new SyncService(appData, identity, new NioFileLayer(), Runnable::run, Runnable::run,
-					p -> !offline.get(), clock);
+					p -> !offline.get(), clock, ContentRules.GATE);
 			service.setListener(events);
 			assertTrue(service.startup(clientFolder.toString()));
 		}
@@ -441,7 +443,7 @@ class CloudScenarioTest {
 		cloud.step("a");
 		Recorder events = new Recorder();
 		SyncService restarted = new SyncService(a.appData, MachineIdentity.loadOrCreate(a.appData, () -> "a"),
-				new NioFileLayer(), Runnable::run, Runnable::run, p -> true, clock);
+				new NioFileLayer(), Runnable::run, Runnable::run, p -> true, clock, ContentRules.GATE);
 		restarted.setListener(events);
 		assertTrue(restarted.startup(a.clientFolder.toString()));
 		clock.advance(Duration.ofSeconds(2));

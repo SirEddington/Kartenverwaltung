@@ -24,11 +24,11 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
-import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker.Snapshot;
 
@@ -97,7 +97,7 @@ class ChangeTrackerTest {
 		presentation.setTime(LocalTime.of(19, 11));
 		SeatingPlan plan = new Hall().addSeatingPlan();
 		plan.addTable(plan.addRow()).addSeat(1);
-		BookingSync.switchPlan(presentation, plan);
+		Syncs.switchPlan(presentation, plan);
 		presentation.getBookings().get(0).setPrice(1000);
 		return event;
 	}

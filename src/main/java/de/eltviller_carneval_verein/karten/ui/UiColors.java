@@ -18,7 +18,8 @@ public enum UiColors {
 	STATUS_DANGER(ECV_ROT), // Strawberry Red / ECV-Rot (Storniert / Gesperrt)
 
 	// --- Sitzplatz-Farben ---
-	SEAT_FREE(STATUS_SUCCESS), SEAT_RESEREVED(STATUS_WARNING), SEAT_SOLD(STATUS_DANGER), SEAT_BLOCKED(GRAY);
+	// Wie sie im Saalplan erscheinen (mit oder ohne Muster), legt SeatLook fest (KARV-26)
+	SEAT_FREE(STATUS_SUCCESS), SEAT_RESERVED(STATUS_WARNING), SEAT_SOLD(STATUS_DANGER), SEAT_BLOCKED(GRAY);
 
 	private final String hex;
 	private final Color color;

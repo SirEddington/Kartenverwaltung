@@ -14,7 +14,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  * Die Einstellungen sind der gemeinsame Ordner ({@code sharedDir}, {@code null} heißt Einzelbetrieb), ob Buchungen
  * sofort gespeichert werden ({@code saveBookingsImmediately}, Standard {@code true}), ob bei einem Cloud-Ordner der
  * Server geprüft wird ({@code checkCloudServer}, Standard {@code true}, KARV-127) und die zuletzt angemeldeten Bediener
- * ({@code recentOperators}, nie {@code null}). Der Spiegelordner ({@code mirrorDir}) ist mit KARV-89 entfallen, ein
+ * ({@code recentOperators}, nie {@code null}) und das Menü "Anzeige" ({@code display}, nie {@code null}, KARV-76,
+ * siehe {@link DisplaySettings}). Der Spiegelordner ({@code mirrorDir}) ist mit KARV-89 entfallen, ein
  * Feld dieses Namens in einer älteren {@code settings.json} wird beim Lesen ignoriert.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -24,6 +25,8 @@ public class AppSettings {
 	private boolean saveBookingsImmediately = true;
 	private boolean checkCloudServer = true;
 	private List<String> recentOperators = new ArrayList<>();
+	private DisplaySettings display = new DisplaySettings();
+	private String patchNotesSeen;
 
 	public AppSettings() {
 	}
@@ -66,5 +69,27 @@ public class AppSettings {
 	/** {@code null} (etwa {@code "recentOperators": null} in der Datei) gilt als leere Liste. */
 	public void setRecentOperators(List<String> recentOperators) {
 		this.recentOperators = recentOperators == null ? new ArrayList<>() : new ArrayList<>(recentOperators);
+	}
+
+	/** Das Menü "Anzeige" und ob es beim Start wieder gilt (KARV-76); nie {@code null}. */
+	public DisplaySettings getDisplay() {
+		return display;
+	}
+
+	/** {@code null} (etwa {@code "display": null} in der Datei) gilt als Standard. */
+	public void setDisplay(DisplaySettings display) {
+		this.display = display == null ? new DisplaySettings() : display;
+	}
+
+	/**
+	 * Die Versionsnummer, deren Patchnotes zuletzt gezeigt wurden (KARV-125); {@code null}, wenn noch keine gezeigt
+	 * wurden (Neuinstallation oder Update von 1.0.x).
+	 */
+	public String getPatchNotesSeen() {
+		return patchNotesSeen;
+	}
+
+	public void setPatchNotesSeen(String patchNotesSeen) {
+		this.patchNotesSeen = patchNotesSeen;
 	}
 }

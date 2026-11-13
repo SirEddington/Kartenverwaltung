@@ -14,8 +14,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -31,12 +33,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingCancellation;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ForeignVersions;
@@ -49,6 +54,7 @@ import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.ui.sales.SeatBulkEdit;
 
 /**
  * Fremde Stände im Event-Repository. "Der andere Rechner" ist meist ein zweites Repository auf demselben Dienst: Es
@@ -133,7 +139,7 @@ class StoreEventRepositoryForeignTest {
 		friday = event.addPresentation("Freitag");
 		friday.setHallId(hall.getId());
 		friday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(friday, plan);
+		Syncs.sync(friday, plan);
 		seat(friday, 0).setLastName("Müller");
 		mine = TestRepositories.events(sync);
 		mine.saveEvent(event);
@@ -171,7 +177,7 @@ class StoreEventRepositoryForeignTest {
 		Event loaded = repository.loadEvents().stream().filter(e -> e.getId().equals(event.getId())).findFirst()
 				.orElseThrow();
 		for (Presentation presentation : loaded.getPresentations()) {
-			BookingSync.sync(presentation, plan);
+			Syncs.sync(presentation, plan);
 		}
 		return new Other(repository, loaded);
 	}
@@ -234,6 +240,81 @@ class StoreEventRepositoryForeignTest {
 	}
 
 	// <-- Bauteile
+
+	// Rundlauf statt rohem Vergleich (KARV-133) -->
+
+	/**
+	 * Der andere Rechner schreibt Kopf, Vorstellung und Buchung mit einem Zusatzfeld und ohne ein Feld, das das Modell
+	 * immer schreibt (so schreibt eine andere Programmversion). Danach hat {@code mine} die Stände eingearbeitet.
+	 */
+	private void loadUnitsWithFormatDifferences() throws IOException {
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+		foreign.write(head(), "Fremd", payload -> {
+			payload.put("x-test-neu", 1);
+			payload.remove("description");
+		});
+		foreign.write(presentation, "Fremd", payload -> {
+			payload.put("x-test-neu", 1);
+			payload.remove("cashDifferenceComment");
+		});
+		foreign.write(seatUnit(friday, 0), "Fremd", payload -> {
+			payload.put("x-test-neu", 1);
+			payload.remove("email");
+		});
+		ForeignResult result = mine.applyForeign(List.of(head(), presentation, seatUnit(friday, 0)));
+		assertTrue(result.deferred().isEmpty(), result.deferred().toString());
+		assertEquals(1, event.getUnknown().asMap().get("x-test-neu").asInt(), "das Modell hat den Stand eingearbeitet");
+		assertEquals(1, seat(friday, 0).getUnknown().asMap().get("x-test-neu").asInt());
+	}
+
+	@Test
+	void loadedUnitsWithFormatDifferencesAreNotLocallyChanged() throws IOException {
+		loadUnitsWithFormatDifferences();
+
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+	}
+
+	@Test
+	void saveWithoutChangeWritesNothing() throws IOException {
+		loadUnitsWithFormatDifferences();
+		long before = files();
+
+		mine.saveEvent(event);
+
+		assertEquals(before, files(), "unverändert gespeichert schreibt keine Version");
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+	}
+
+	@Test
+	void derivedAsRecognisesEqualForeignInputWithExtraField() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		// Müller trägt schon ein Zusatzfeld, das der Abgleich mit auf den neuen Sitz nimmt
+		foreign.write(seatUnit(friday, 0), "Fremd", payload -> payload.put("x-test-neu", 1));
+		mine.applyForeign(List.of(seatUnit(friday, 0)));
+		Booking sold = seat(friday, 0);
+		remoteSwitchesTo(other);
+		UnitKey newSeat = UnitKey.booking(event.getId(), friday.getId(),
+				other.getSeatingPlans().get(0).getSeats().get(0).getId());
+		mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+		assertEquals("Müller", sold.getLastName());
+		assertEquals(newSeat.bookingDir(), sold.getSeatId(), "der Abgleich hat Müller umgesetzt");
+		// dieselbe Eingabe wie der abgeleitete Stand, nur ohne ein Feld, das das Modell immer schreibt
+		Version arrived = foreign.write(newSeat, "Fremd", payload -> payload.remove("email"));
+		// der Nutzer ändert die umgesetzte Buchung, bevor ihre Einheit eintrifft
+		sold.setFirstName("Hans");
+
+		ForeignResult result = mine.applyForeign(List.of(newSeat));
+
+		assertTrue(result.deferred().isEmpty(), "die Eingabe baut auf diesem Stand auf: " + result.deferred());
+		assertEquals(arrived.id(), mine.knownUnit(newSeat).version(), "der Stand ist der Vergleichsstand");
+		assertEquals("Hans", sold.getFirstName());
+		long versions = sync.history(newSeat).size();
+		mine.saveEvent(event);
+		assertEquals(versions + 1, sync.history(newSeat).size(), "genau eine Version auf dem fremden Stand");
+	}
+
+	// <-- Rundlauf statt rohem Vergleich
 
 	// Einarbeiten -->
 
@@ -339,7 +420,7 @@ class StoreEventRepositoryForeignTest {
 		mine.setHallLookup(id -> hall.getId().equals(id) ? hall : other.getId().equals(id) ? other : null);
 		Other remote = other();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), otherPlan);
+		Syncs.switchPlan(remote.friday(), otherPlan);
 		String newSeat = otherPlan.getSeats().get(1).getId();
 		Booking sold = remote.friday().getBookings().stream().filter(b -> newSeat.equals(b.getSeatId())).findFirst()
 				.orElseThrow();
@@ -393,7 +474,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation saturday = other.event().addPresentation("Samstag");
 		saturday.setHallId(hall.getId());
 		saturday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(saturday, plan);
+		Syncs.sync(saturday, plan);
 		seat(saturday, 2).setLastName("Schmitz");
 		other.save();
 		long before = files();
@@ -422,7 +503,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation sunday = children.addPresentation("Sonntag");
 		sunday.setHallId(hall.getId());
 		sunday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(sunday, plan);
+		Syncs.sync(sunday, plan);
 		seat(sunday, 0).setLastName("Klein");
 		others.saveEvent(children);
 
@@ -480,7 +561,7 @@ class StoreEventRepositoryForeignTest {
 		Booking sold = seat(friday, 0);
 		Other remote = other();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), otherPlan);
+		Syncs.switchPlan(remote.friday(), otherPlan);
 		remote.save();
 		long before = files();
 
@@ -500,7 +581,7 @@ class StoreEventRepositoryForeignTest {
 	private Other remoteSwitchesTo(Hall other) {
 		Other remote = other();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
 		remote.save();
 		return remote;
 	}
@@ -680,7 +761,7 @@ class StoreEventRepositoryForeignTest {
 		UnitKey derivedSeat = UnitKey.booking(event.getId(), friday.getId(), moved.getSeatId());
 
 		// ein zweiter Abgleich setzt Müller wieder um (wie die App nach einer Änderung an den Hallen)
-		mine.deriving(event, () -> BookingSync.sync(friday, plan));
+		mine.deriving(event, () -> Syncs.sync(friday, plan));
 
 		assertNotEquals(derivedSeat.bookingDir(), moved.getSeatId(), "Müller ist umgesetzt");
 		assertEquals(Set.of(), mine.locallyChangedUnits(), "der Abgleich hat Müller umgesetzt, nicht der Nutzer");
@@ -764,7 +845,7 @@ class StoreEventRepositoryForeignTest {
 		}
 		remote.save();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
 		remote.save();
 		long before = files();
 
@@ -856,7 +937,7 @@ class StoreEventRepositoryForeignTest {
 		mine.setHallLookup(failingAt(1, lookup(other)));
 		Other remote = other();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), otherPlan);
+		Syncs.switchPlan(remote.friday(), otherPlan);
 		remote.save();
 		long before = files();
 
@@ -879,7 +960,7 @@ class StoreEventRepositoryForeignTest {
 		mine.setHallLookup(failingAt(1, lookup(other)));
 		Other remote = other();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
 		remote.save();
 		mine.applyForeign(allUnits());
 		Event rebuilt = mine.loadEvents().get(0);
@@ -1159,7 +1240,7 @@ class StoreEventRepositoryForeignTest {
 		Other other = other();
 		// ohne Bestuhlung wird Müller "ohne Platz": seine Sitz-Einheit wird gelöscht, eine Einheit _<id> entsteht
 		other.friday().setSeatingPlanId(null);
-		BookingSync.sync(other.friday(), null);
+		Syncs.sync(other.friday(), null);
 		other.save();
 		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
 
@@ -1187,7 +1268,7 @@ class StoreEventRepositoryForeignTest {
 		Other other = other();
 		// ohne Bestuhlung wird Müller "ohne Platz" unter _<id> und behält die Kennung seines alten Sitzes
 		other.friday().setSeatingPlanId(null);
-		BookingSync.sync(other.friday(), null);
+		Syncs.sync(other.friday(), null);
 		other.save();
 		Booking remote = other.friday().getBookings().get(0);
 		UnitKey unassigned = UnitKey.unassignedBooking(event.getId(), friday.getId(), remote.getId());
@@ -1218,7 +1299,7 @@ class StoreEventRepositoryForeignTest {
 		Booking sold = seat(friday, 0);
 		Other other = other();
 		other.friday().setSeatingPlanId(null);
-		BookingSync.sync(other.friday(), null);
+		Syncs.sync(other.friday(), null);
 		other.save();
 		// A ändert die Vorstellung selbst und speichert, ohne Bs Stand zu kennen: seine Version unterliegt
 		friday.setName("Freitagabend");
@@ -1255,7 +1336,7 @@ class StoreEventRepositoryForeignTest {
 		Booking sold = seat(friday, 0);
 		Other other = other();
 		other.friday().setSeatingPlanId(null);
-		BookingSync.sync(other.friday(), null);
+		Syncs.sync(other.friday(), null);
 		other.save();
 		friday.setName("Freitagabend");
 		mine.saveEvent(event);
@@ -1302,7 +1383,7 @@ class StoreEventRepositoryForeignTest {
 		seat(remote.friday(), 0).clearCustomerData();
 		remote.save();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
 		remote.save();
 		return UnitKey.presentation(event.getId(), friday.getId());
 	}
@@ -1498,7 +1579,7 @@ class StoreEventRepositoryForeignTest {
 		// der andere Rechner wechselt die Halle und ändert im selben Speichern den Vornamen der umgesetzten Buchung
 		Other remote = other();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), otherPlan);
+		Syncs.switchPlan(remote.friday(), otherPlan);
 		withId(remote.friday(), sold.getId()).get(0).setFirstName("Hans");
 		remote.save();
 		UnitKey derivedSeat = UnitKey.booking(event.getId(), friday.getId(), otherPlan.getSeats().get(0).getId());
@@ -1559,7 +1640,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation saturday = remote.event().addPresentation("Samstag");
 		saturday.setHallId(other.getId());
 		saturday.setSeatingPlanId(otherPlan.getId());
-		BookingSync.sync(saturday, otherPlan);
+		Syncs.sync(saturday, otherPlan);
 		saturday.getBookings().get(1).setLastName("Schmitz");
 		remote.save();
 		UnitKey booking = UnitKey.booking(event.getId(), saturday.getId(), otherPlan.getSeats().get(1).getId());
@@ -1599,7 +1680,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation saturday = remote.event().addPresentation("Samstag");
 		saturday.setHallId(other.getId());
 		saturday.setSeatingPlanId(otherPlan.getId());
-		BookingSync.sync(saturday, otherPlan);
+		Syncs.sync(saturday, otherPlan);
 		saturday.getBookings().get(1).setLastName("Schmitz");
 		remote.save();
 		return new SplitSale(saturday,
@@ -1641,7 +1722,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation added = event.getPresentations().get(1);
 		// die Halle kommt an und eine Ansicht bereitet die Vorstellung vor, bevor die Buchung erneut geprüft wird
 		arrived.set(true);
-		BookingSync.sync(added, sale.plan());
+		Syncs.sync(added, sale.plan());
 		Booking mySale = added.getBookings().stream()
 				.filter(b -> sale.booking().bookingDir().equals(b.getSeatId())).findFirst().orElseThrow();
 		assertFalse(mySale.hasData(), "der Sitz sieht frei aus");
@@ -1674,7 +1755,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation sunday = children.addPresentation("Sonntag");
 		sunday.setHallId(other.getId());
 		sunday.setSeatingPlanId(otherPlan.getId());
-		BookingSync.sync(sunday, otherPlan);
+		Syncs.sync(sunday, otherPlan);
 		sunday.getBookings().get(1).setLastName("Klein");
 		others.saveEvent(children);
 		return new NewEventInUnknownHall(children,
@@ -1720,7 +1801,7 @@ class StoreEventRepositoryForeignTest {
 		String missingSeat = otherPlan.getSeats().get(1).getId();
 		Other remote = other();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), otherPlan);
+		Syncs.switchPlan(remote.friday(), otherPlan);
 		remote.friday().getBookings().stream().filter(b -> missingSeat.equals(b.getSeatId())).findFirst().orElseThrow()
 				.setLastName("Fremd");
 		remote.save();
@@ -1765,7 +1846,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation saturday = other.event().addPresentation("Samstag");
 		saturday.setHallId(hall.getId());
 		saturday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(saturday, plan);
+		Syncs.sync(saturday, plan);
 		seat(saturday, 2).setLastName("Schmitz");
 		other.save();
 		UnitKey booking = seatUnit(saturday, 2);
@@ -1797,7 +1878,7 @@ class StoreEventRepositoryForeignTest {
 		// die Halle kommt an, eine Ansicht bereitet die Vorstellung vor: Der Sitz sieht frei aus, und der Nutzer verkauft ihn
 		arrived.set(true);
 		Presentation sunday = added.getPresentations().get(0);
-		BookingSync.sync(sunday, sale.plan());
+		Syncs.sync(sunday, sale.plan());
 		Booking mySale = sunday.getBookings().stream().filter(b -> sale.booking().bookingDir().equals(b.getSeatId()))
 				.findFirst().orElseThrow();
 		assertFalse(mySale.hasData(), "der Sitz sieht frei aus");
@@ -1824,7 +1905,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation sunday = children.addPresentation("Sonntag");
 		sunday.setHallId(hall.getId());
 		sunday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(sunday, plan);
+		Syncs.sync(sunday, plan);
 		seat(sunday, 0).setLastName("Klein");
 		others.saveEvent(children);
 		// beim neuen Event fragt erst das Zusammensetzen nach der Halle
@@ -1878,7 +1959,7 @@ class StoreEventRepositoryForeignTest {
 		});
 		Other remote = other();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
 		remote.save();
 		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
 
@@ -1950,6 +2031,347 @@ class StoreEventRepositoryForeignTest {
 		assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
 	}
 
+	// Inhaltlich zu neu (KARV-135) -->
+
+	/**
+	 * Ein neueres Programm verlangt an der Vorstellung ein Merkmal, das dieses nicht kennt: Sie fehlt samt Buchungen im
+	 * Modell, ohne Unlesbar-Warnung; gemeldet wird die Sperre (SYS-009).
+	 */
+	@Test
+	void liveUpdateWithRequiresOnPresentationRemovesItWithoutWarning() throws IOException {
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+		foreign.write(presentation, "Fremd",
+				payload -> payload.set("requires", JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+		assertTrue(sync.unitState(presentation).contentLocked());
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(List.of(presentation));
+
+		assertTrue(event.getPresentations().isEmpty(), "die Vorstellung fehlt samt Buchungen");
+		assertEquals(List.of(StoreMessages.newerFormat(presentation.relativePath())), result.warnings(),
+				"die Sperre, keine Unlesbar-Warnung");
+		assertTrue(mine.knownUnit(presentation).contentLocked(), "der Vergleichsstand kennt die Sperre");
+		mine.saveEvent(event);
+		assertEquals(before, files(), "die gesperrte Vorstellung und ihre Buchungen bleiben unberührt");
+	}
+
+	/**
+	 * Ein unbekannter Zahlstatus sperrt die Buchung: Sie fehlt im Modell, auf ihrem Sitz liegt der leere Platzhalter, dessen
+	 * Einheit die gesperrte ist ({@code LockedSeats} sperrt ihn darüber). Keine Unlesbar-Warnung.
+	 */
+	@Test
+	void liveUpdateWithUnknownPaymentStatusLocksSeatWithoutWarning() throws IOException {
+		Booking sold = seat(friday, 0);
+		UnitKey unit = seatUnit(friday, 0);
+		foreign.write(unit, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		assertTrue(sync.unitState(unit).contentLocked());
+		long before = files();
+
+		ForeignResult result = mine.applyForeign(List.of(unit));
+
+		Booking placeholder = seat(friday, 0);
+		assertSame(sold, placeholder);
+		assertFalse(placeholder.hasData(), "der Sitz zeigt den leeren Platzhalter, nicht den alten Stand");
+		assertEquals(unit, UnitMapper.bookingKey(event.getId(), friday.getId(), placeholder),
+				"der Platzhalter liegt auf der gesperrten Einheit");
+		assertEquals(List.of(StoreMessages.newerFormat(unit.relativePath())), result.warnings(),
+				"die Sperre, keine Unlesbar-Warnung");
+		assertEquals(UnitState.Status.LOCKED_FORMAT, mine.knownUnit(unit).status());
+		assertTrue(mine.knownUnit(unit).contentLocked());
+		mine.saveEvent(event);
+		assertEquals(before, files(), "die gesperrte Buchung wird weder gelöscht noch überschrieben");
+		seat(friday, 1).setLastName("Eigen");
+		mine.saveEvent(event);
+		assertEquals(2, sync.history(unit).size());
+		assertTrue(sync.unitState(unit).contentLocked());
+	}
+
+	/**
+	 * Ein inhaltlich zu neuer Kopf nimmt das Event aus dem Cache; eine Ansicht, die es noch hält, bekommt beim Speichern die
+	 * Sperre (SYS-009) gemeldet, nicht „inzwischen geändert“.
+	 */
+	@Test
+	void savingAHeldEventAfterAForeignContentLockedHeadReportsTheLock() throws IOException {
+		foreign.write(head(), "Fremd",
+				payload -> payload.set("requires", JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+		ForeignResult result = mine.applyForeign(List.of(head()));
+		assertEquals(List.of("removed Prunksitzung"), recorder.calls);
+		assertEquals(List.of(StoreMessages.newerFormat(head().relativePath())), result.warnings());
+		long before = files();
+		friday.setName("Freitagabend");
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
+
+		assertEquals(StoreMessages.newerFormat("Prunksitzung"), refused.getMessage());
+		assertEquals(before, files(), "der gesperrte Kopf und alles darunter bleiben unberührt");
+	}
+
+	/** Schreibt das neuere Programm wieder einen bekannten Zahlstatus, ist die Buchung zurück im Modell und der Sitz belegt. */
+	@Test
+	void lockLiftsWhenForeignWritesKnownValue() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		foreign.write(unit, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		mine.applyForeign(List.of(unit));
+		assertFalse(seat(friday, 0).hasData());
+		foreign.write(unit, "Fremd", payload -> payload.put("paymentStatus", "CASH"));
+		assertFalse(sync.unitState(unit).contentLocked());
+
+		ForeignResult result = mine.applyForeign(List.of(unit));
+
+		Booking back = seat(friday, 0);
+		assertEquals("Müller", back.getLastName());
+		assertEquals(PaymentStatus.CASH, back.getPaymentStatus());
+		assertTrue(back.isTaken(), "der Sitz ist belegt");
+		assertEquals(List.of(), result.warnings());
+		assertEquals(UnitState.Status.OK, mine.knownUnit(unit).status());
+		assertEquals(Set.of(), mine.locallyChangedUnits());
+	}
+
+	/**
+	 * Der Nutzer ändert eine Buchung, während ein neueres Programm ihre Vorstellung sperrt: Das Live-Update ist
+	 * zurückgestellt, der Vergleichsstand kennt die Vorstellung lesbar, der Index inhaltlich zu neu. Speichern scheitert
+	 * mit SYS-009 und schreibt nichts.
+	 */
+	@Test
+	void bookingUnderContentLockedPresentationInStoreIsNotSaved() throws IOException {
+		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
+		seat(friday, 0).setLastName("Eigen");
+		foreign.write(presentation, "Fremd",
+				payload -> payload.set("requires", JsonMapperFactory.create().createArrayNode().add("x-test-merkmal")));
+		ForeignResult result = mine.applyForeign(List.of(presentation));
+		assertEquals(List.of(presentation), result.deferred().stream().map(Deferral::unit).toList(), "zurückgestellt");
+		assertFalse(mine.knownUnit(presentation).contentLocked(), "der Vergleichsstand kennt die Sperre nicht");
+		long before = files();
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
+
+		assertEquals(StoreMessages.newerFormat(presentation.relativePath()), refused.getMessage());
+		assertEquals(before, files(), "nichts geschrieben");
+		assertEquals("Müller", sync.unitState(seatUnit(friday, 0)).head().payload().get("lastName").asText());
+	}
+
+	/**
+	 * Eine Konfliktgruppe {@code requires} über {@code applyFields} brächte einen Inhalt eines neueren Programms ins Modell:
+	 * Speichern lehnt ihn mit SYS-009 ab, statt eine Einheit zu schreiben, die dieser Rechner für lesbar hielte und die
+	 * anderen sperrten.
+	 */
+	@Test
+	void ownPayloadWithUnsatisfiedRequiresIsRejected() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		ObjectNode fields = JsonMapperFactory.create().createObjectNode();
+		fields.set("requires", JsonMapperFactory.create().createArrayNode().add("x-test-merkmal"));
+		mine.applyFields(unit, fields);
+		long before = files();
+
+		LockedUnitException refused = assertThrows(LockedUnitException.class, () -> mine.saveEvent(event));
+
+		assertEquals(StoreMessages.newerFormat(unit.relativePath()), refused.getMessage());
+		assertEquals(before, files(), "nichts geschrieben");
+		assertFalse(sync.unitState(unit).contentLocked());
+	}
+
+	/**
+	 * Eine beschädigte Buchung, deren älterer Stand angezeigt wird, ist gesperrt, behält aber ihren Sitz: Sie steht nicht
+	 * in den gesperrten Sitzen für den Abgleich, wohl aber unter den gesperrten Einheiten der Vorstellung.
+	 */
+	@Test
+	void shownDamagedBookingKeepsItsSeat() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		Version damaged = foreignVersion(unit, "Neu");
+		Files.writeString(appData.resolve("data/" + unit.relativePath() + "/" + damaged.id() + ".json"), "kaputt");
+		UnitState state = sync.unitState(unit);
+		assertEquals(UnitState.Status.LOCKED_DAMAGED, state.status());
+		assertNotNull(state.current(), "der ältere Stand ist lesbar");
+		Booking sold = seat(friday, 0);
+
+		Set<String> locked = mine.lockedSeatIds(event.getId(), friday.getId());
+		BookingSync.sync(friday, plan, locked);
+
+		assertEquals(Set.of(), locked);
+		assertSame(sold, seat(friday, 0), "Müller bleibt auf seinem Sitz");
+		assertEquals("Müller", sold.getLastName());
+		assertFalse(sold.isUnassigned());
+		assertEquals(Map.of(unit, UnitState.Status.LOCKED_DAMAGED),
+				mine.lockedUnder(UnitKey.presentation(event.getId(), friday.getId())));
+	}
+
+	/**
+	 * Eine neue fremde, inhaltlich zu neue Buchung, deren Einarbeiten zurückgestellt ist: Der Vergleichsstand kennt sie
+	 * nicht, der Index schon. Ihr Sitz ist für den Abgleich gesperrt.
+	 */
+	@Test
+	void deferredForeignLockedBookingIsInLockedSeatIds() throws IOException {
+		UnitKey unit = seatUnit(friday, 1);
+		Other other = other();
+		seat(other.friday(), 1).setLastName("Schmidt");
+		other.save();
+		foreign.write(unit, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		assertTrue(sync.unitState(unit).contentLocked());
+		Booking placeholder = seat(friday, 1);
+		mine.setEditingCheck(o -> o == placeholder);
+
+		ForeignResult result = mine.applyForeign(List.of(unit));
+
+		assertEquals(List.of(unit), result.deferred().stream().map(Deferral::unit).toList(), "zurückgestellt");
+		assertNull(mine.knownUnit(unit), "der Vergleichsstand kennt die Buchung nicht");
+		assertEquals(Set.of(planSeat(1).getId()), mine.lockedSeatIds(event.getId(), friday.getId()));
+		assertEquals(Map.of(unit, UnitState.Status.LOCKED_FORMAT), mine.lockedUnder(head()));
+	}
+
+	/** Unter einer gelöschten Vorstellung zeigt das Programm nichts: Ihre gesperrten Buchungen zählen nicht. */
+	@Test
+	void lockedUnitsBelowDeletedPresentationAreNotCounted() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		Other other = other();
+		other.event().getPresentations().remove(other.friday());
+		other.save();
+		foreign.write(unit, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		assertTrue(sync.unitState(unit).contentLocked());
+
+		assertEquals(Map.of(), mine.lockedUnder(head()));
+		assertEquals(Map.of(), mine.lockedUnder(UnitKey.presentation(event.getId(), friday.getId())));
+		assertEquals(Set.of(), mine.lockedSeatIds(event.getId(), friday.getId()));
+	}
+
+	/**
+	 * Der andere Rechner stellt die Vorstellung auf die Bestuhlung von {@code other} um (Müller kommt auf den ersten Sitz
+	 * dort), danach verkauft ein neueres Programm diesen Sitz mit einem unbekannten Zahlstatus: Der Sitz ist für diesen
+	 * Rechner gesperrt.
+	 *
+	 * @return der gesperrte Sitz in der Bestuhlung von {@code other}
+	 */
+	private Seat switchToPlanWithLockedSeat(Hall other) throws IOException {
+		remoteSwitchesTo(other);
+		Seat target = other.getSeatingPlans().get(0).getSeats().get(0);
+		UnitKey locked = UnitKey.booking(event.getId(), friday.getId(), target.getId());
+		foreign.write(locked, "Fremd", payload -> payload.put("paymentStatus", "x-test-voucher"));
+		assertTrue(sync.unitState(locked).contentLocked());
+		return target;
+	}
+
+	/** Auf dem gesperrten Sitz liegt nur der leere Platzhalter; Müller bleibt im Modell, aber nicht dort. */
+	private void assertNobodyOn(Seat locked, Booking sold) {
+		List<Booking> onSeat = friday.getBookings().stream().filter(b -> locked.getId().equals(b.getSeatId())).toList();
+		assertEquals(1, onSeat.size(), "genau ein Platzhalter");
+		assertFalse(onSeat.get(0).hasData(), "keine Buchung bekommt den gesperrten Sitz");
+		assertEquals("Müller", sold.getLastName());
+		assertNotEquals(locked.getId(), sold.getSeatId());
+	}
+
+	/**
+	 * Ein fremder Wechsel der Bestuhlung kommt an, und der Abgleich beim Einarbeiten ({@code EventMerge.resync}) setzt
+	 * Müller nicht auf den gesperrten Sitz, auch wenn Reihe, Tisch und Nummer passen.
+	 */
+	@Test
+	void foreignPlanSwitchDoesNotPutABookingOnALockedSeat() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		Seat locked = switchToPlanWithLockedSeat(other);
+
+		ForeignResult result = mine.applyForeign(List.of(UnitKey.presentation(event.getId(), friday.getId())));
+
+		assertTrue(result.deferred().isEmpty(), result.deferred().toString());
+		assertEquals(other.getSeatingPlans().get(0).getId(), friday.getSeatingPlanId(), "der Wechsel ist eingearbeitet");
+		assertNobodyOn(locked, sold);
+	}
+
+	/**
+	 * Übernimmt der Nutzer im Konflikt-Dialog Halle und Bestuhlung des anderen Rechners ({@code applyFields}), setzt der
+	 * Abgleich Müller ebenfalls nicht auf den gesperrten Sitz.
+	 */
+	@Test
+	void applyFieldsWithPlanSwitchDoesNotPutABookingOnALockedSeat() throws IOException {
+		Hall other = secondHall(1, 2);
+		mine.setHallLookup(lookup(other));
+		Booking sold = seat(friday, 0);
+		Seat locked = switchToPlanWithLockedSeat(other);
+		ObjectNode fields = JsonMapperFactory.create().createObjectNode();
+		fields.put("hallId", other.getId());
+		fields.put("seatingPlanId", other.getSeatingPlans().get(0).getId());
+
+		mine.applyFields(UnitKey.presentation(event.getId(), friday.getId()), fields);
+
+		assertEquals(other.getSeatingPlans().get(0).getId(), friday.getSeatingPlanId());
+		assertNobodyOn(locked, sold);
+	}
+
+	// <-- Inhaltlich zu neu
+
+	// Unbekannte Felder an Buchungen (KARV-134) -->
+
+	/**
+	 * Ein anderes Programm hat Müllers Namen entfernt und ein unbekanntes Feld gesetzt: Die Buchung auf dem ersten Sitz
+	 * trägt nur noch dieses Feld und gilt damit als Buchung mit Daten (ein Rest).
+	 */
+	private Booking bookingWithOnlyUnknownField() throws IOException {
+		foreign.write(seatUnit(friday, 0), "Fremd", payload -> {
+			payload.remove("lastName");
+			payload.put("x-test-neu", 1);
+		});
+		mine.applyForeign(List.of(seatUnit(friday, 0)));
+		Booking booking = seat(friday, 0);
+		assertNull(booking.getLastName());
+		assertTrue(booking.hasData(), "das unbekannte Feld zählt als Daten");
+		return booking;
+	}
+
+	/** Storno einer Buchung, die nur ein unbekanntes Feld trägt: Das Speichern löscht ihre Einheit. */
+	@Test
+	void cancellingABookingWithOnlyAnUnknownFieldDeletesItsUnit() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		Booking booking = bookingWithOnlyUnknownField();
+
+		BookingCancellation.cancel(List.of(booking));
+		mine.saveEvent(event);
+
+		assertFalse(seat(friday, 0).hasData());
+		assertTrue(sync.unitState(unit).head().deleted(), "die Buchungs-Einheit ist gelöscht");
+	}
+
+	/**
+	 * Der andere Rechner storniert die Buchung mit nur einem unbekannten Feld: Das Einarbeiten ({@code EventMerge}) leert
+	 * auch das Feld, und das nächste Speichern belebt die Buchung nicht wieder.
+	 */
+	@Test
+	void foreignCancellationOfABookingWithOnlyAnUnknownFieldIsNotRevived() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		Booking booking = bookingWithOnlyUnknownField();
+		Other other = other();
+		BookingCancellation.cancel(List.of(seat(other.friday(), 0)));
+		other.save();
+		assertTrue(sync.unitState(unit).head().deleted());
+
+		mine.applyForeign(List.of(unit));
+		long before = files();
+		mine.saveEvent(event);
+
+		assertSame(booking, seat(friday, 0), "der Platzhalter des Sitzes bleibt");
+		assertFalse(booking.hasData());
+		assertTrue(booking.getUnknown().isEmpty());
+		assertEquals(before, files(), "nichts geschrieben");
+		assertTrue(sync.unitState(unit).head().deleted(), "die Buchung bleibt storniert");
+	}
+
+	/** Neuverkauf über den Sitz-Dialog auf einem Rest mit nur einem unbekannten Feld: Der neue Kunde erbt nichts. */
+	@Test
+	void resaleOnALeftoverWithOnlyAnUnknownFieldInheritsNothing() throws IOException {
+		UnitKey unit = seatUnit(friday, 0);
+		Booking leftover = bookingWithOnlyUnknownField();
+		assertTrue(leftover.hasLeftovers());
+		SeatBulkEdit edit = new SeatBulkEdit(List.of(leftover));
+		edit.lastName().change("Meier");
+
+		edit.apply(LocalDate.of(2026, 11, 8));
+		mine.saveEvent(event);
+
+		ObjectNode written = sync.unitState(unit).head().payload();
+		assertEquals("Meier", written.get("lastName").asText());
+		assertFalse(written.has("x-test-neu"), "das unbekannte Feld des Rests fehlt in der Datei");
+	}
+
+	// <-- Unbekannte Felder an Buchungen
+
 	/**
 	 * Die einzige Version der Buchung wird beschädigt, während der Nutzer sie ändert: Der gesperrte Stand ohne lesbares
 	 * Glied (ohne Version) wird zurückgestellt und bei jedem weiteren Aufruf ohne Fehler erneut geprüft.
@@ -2009,7 +2431,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation saturday = other.event().addPresentation("Samstag");
 		saturday.setHallId(hall.getId());
 		saturday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(saturday, plan);
+		Syncs.sync(saturday, plan);
 		seat(saturday, 2).setLastName("Schmitz");
 		other.save();
 		unreadableForeignHead();
@@ -2042,7 +2464,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation saturday = other.event().addPresentation("Samstag");
 		saturday.setHallId(hall.getId());
 		saturday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(saturday, plan);
+		Syncs.sync(saturday, plan);
 		seat(saturday, 2).setLastName("Schmitz");
 		other.save();
 		unreadableForeignHead();
@@ -2117,7 +2539,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation shown = event.getPresentations().get(0);
 		shown.setHallId(hall.getId());
 		shown.setSeatingPlanId(plan.getId());
-		BookingSync.switchPlan(shown, plan);
+		Syncs.switchPlan(shown, plan);
 		seat(shown, 0).setLastName("Eigen");
 		mine.saveEvent(event);
 
@@ -2173,7 +2595,7 @@ class StoreEventRepositoryForeignTest {
 
 		// B nimmt der Vorstellung die Bestuhlung: Jetzt passt die Buchung
 		saturday.setSeatingPlanId(null);
-		BookingSync.sync(saturday, null);
+		Syncs.sync(saturday, null);
 		remote.save();
 		long afterSwitch = files();
 		mine.applyForeign(List.of(presentation));
@@ -2237,11 +2659,11 @@ class StoreEventRepositoryForeignTest {
 		Event copy = mapper.readValue(mapper.writeValueAsBytes(event), Event.class);
 		Other other = other();
 		other.friday().setHallId(big.getId());
-		BookingSync.switchPlan(other.friday(), bigPlan);
+		Syncs.switchPlan(other.friday(), bigPlan);
 		Presentation saturday = other.event().addPresentation("Samstag");
 		saturday.setHallId(big.getId());
 		saturday.setSeatingPlanId(bigPlan.getId());
-		BookingSync.sync(saturday, bigPlan);
+		Syncs.sync(saturday, bigPlan);
 		saturday.getBookings().get(4).setLastName("Schmitz");
 		other.save();
 		long before = files();
@@ -2262,7 +2684,7 @@ class StoreEventRepositoryForeignTest {
 		Presentation saturday = event.addPresentation("Samstag");
 		saturday.setHallId(hall.getId());
 		saturday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(saturday, plan);
+		Syncs.sync(saturday, plan);
 		mine.saveEvent(event);
 		seat(saturday, 1).setLastName("Eigen");
 		Hall other = secondHall(1, 2);
@@ -2272,7 +2694,7 @@ class StoreEventRepositoryForeignTest {
 		Other remote = other();
 		remote.event().setDescription("Große Sitzung");
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
 		remote.save();
 		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
 
@@ -2309,7 +2731,7 @@ class StoreEventRepositoryForeignTest {
 		mine.setEditingCheck(o -> o == event);
 		Other remote = other();
 		remote.friday().setHallId(other.getId());
-		BookingSync.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
+		Syncs.switchPlan(remote.friday(), other.getSeatingPlans().get(0));
 		remote.save();
 		UnitKey presentation = UnitKey.presentation(event.getId(), friday.getId());
 
@@ -2412,7 +2834,7 @@ class StoreEventRepositoryForeignTest {
 		}
 		mine.setHallCurrent(id -> true);
 		String bookingId = seat(friday, 0).getId();
-		BookingSync.switchPlan(friday, second);
+		Syncs.switchPlan(friday, second);
 		mine.saveEvent(event);
 		Booking from = seat(other.friday(), 0);
 		Booking to = seat(other.friday(), 2);
@@ -2583,7 +3005,7 @@ class StoreEventRepositoryForeignTest {
 		Seat sixth = planSeat(5);
 		fifth.getParent().deleteSeat(fifth);
 		sixth.getParent().deleteSeat(sixth);
-		mine.deriving(event, () -> BookingSync.sync(friday, plan));
+		mine.deriving(event, () -> Syncs.sync(friday, plan));
 		assertEquals(Set.of(), mine.locallyChangedUnits());
 		other.save();
 		return units;

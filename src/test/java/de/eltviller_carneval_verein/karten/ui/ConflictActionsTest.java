@@ -31,6 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import com.fasterxml.jackson.databind.node.IntNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -41,8 +42,10 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
+import de.eltviller_carneval_verein.karten.repository.ContentRules;
 import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
@@ -50,15 +53,18 @@ import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.repository.TestRepositories;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ConflictNote;
+import de.eltviller_carneval_verein.karten.store.ContentGate;
 import de.eltviller_carneval_verein.karten.store.FaultyFileLayer;
 import de.eltviller_carneval_verein.karten.store.NioFileLayer;
 import de.eltviller_carneval_verein.karten.store.OpenConflict;
+import de.eltviller_carneval_verein.karten.store.StoreMessages;
 import de.eltviller_carneval_verein.karten.store.SyncListener;
 import de.eltviller_carneval_verein.karten.store.SyncService;
 import de.eltviller_carneval_verein.karten.store.TestClock;
 import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
+import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions.Availability;
@@ -94,7 +100,7 @@ class ConflictActionsTest {
 
 		Machine(String name, Path shared) {
 			this.name = name;
-			sync = TestSyncServices.unstarted(dir.resolve("app-" + name), name, files, p -> true, clock);
+			sync = TestSyncServices.unstarted(dir.resolve("app-" + name), name, files, p -> true, clock, gate);
 			sync.setListener(this);
 			ConflictPolicies.install(sync);
 			sync.startup(shared.toString());
@@ -114,7 +120,7 @@ class ConflictActionsTest {
 			hall = halls.loadHalls().get(0);
 			event = repository.loadEvents().get(0);
 			for (Presentation presentation : event.getPresentations()) {
-				BookingSync.sync(presentation, plan());
+				Syncs.sync(presentation, plan());
 			}
 		}
 
@@ -177,6 +183,21 @@ class ConflictActionsTest {
 	Path dir;
 
 	private final TestClock clock = new TestClock();
+	/** Ob ein Inhalt mit dem Feld {@value #NEWER_MARKER} ab jetzt als inhaltlich zu neu gilt (wie nach geänderten Regeln). */
+	private final AtomicBoolean markerIsNewer = new AtomicBoolean();
+	private static final String NEWER_MARKER = "x-test-neuer";
+	/** Die Inhaltsprüfung der App, dazu {@link #markerIsNewer}. */
+	private final ContentGate gate = new ContentGate() {
+		@Override
+		public boolean isNewer(UnitKey unit, ObjectNode payload) {
+			return ContentRules.GATE.isNewer(unit, payload) || markerIsNewer.get() && payload.has(NEWER_MARKER);
+		}
+
+		@Override
+		public String rulesId() {
+			return ContentRules.GATE.rulesId();
+		}
+	};
 	private Machine a;
 	private Machine b;
 	/** Die Meldungen des Dienstes und der Repositories ab WARNING; INFO (Gabelungen zwischendurch) bleibt aus der Ausgabe. */
@@ -240,7 +261,7 @@ class ConflictActionsTest {
 		Presentation friday = event.addPresentation("Freitag");
 		friday.setHallId(hall.getId());
 		friday.setSeatingPlanId(plan.getId());
-		BookingSync.sync(friday, plan);
+		Syncs.sync(friday, plan);
 		a.event = event;
 		a.seat(0).setLastName("Müller");
 		a.saveEvent();
@@ -340,6 +361,48 @@ class ConflictActionsTest {
 		assertEquals(List.of(), b.sync.openConflicts());
 		settle();
 		assertEquals("von B", a.seat(0).getComment(), "der andere Rechner bekommt die neue Version");
+	}
+
+	/**
+	 * Beide kennen das unbekannte Feld "x-test-a" der Buchung auf dem ersten Sitz; "a" entfernt es und gewinnt, "b" ändert es:
+	 * b hat einen FIELDS-Konflikt um "x-test-a", und sein Modell hat das Feld nicht (mehr).
+	 */
+	private Row unknownFieldConflict() {
+		a.seat(0).getUnknown().put("x-test-a", IntNode.valueOf(0));
+		a.saveEvent();
+		settle();
+		assertTrue(b.seat(0).getUnknown().has("x-test-a"), "b hat das unbekannte Feld von a übernommen");
+		a.seat(0).getUnknown().remove("x-test-a");
+		a.saveEvent();
+		b.seat(0).getUnknown().put("x-test-a", IntNode.valueOf(2));
+		b.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(List.of("x-test-a"), row.fields().stream().map(ConflictList.FieldRow::group).toList());
+		assertFalse(b.seat(0).getUnknown().has("x-test-a"), "bis zur Wahl gilt der Wert des Gewinners");
+		return row;
+	}
+
+	@Test
+	void takeMyValueOnUnknownFieldUndoesExactlyWhenSaveFails() {
+		Row row = unknownFieldConflict();
+		ObjectNode before = b.repository.payloadOf(b.seatUnit(0));
+		assertFalse(before.has("x-test-a"));
+
+		assertThrows(IllegalStateException.class, () -> b.actions(saved -> false, hall -> true).takeMyValue(row, "x-test-a"));
+
+		assertEquals(before, b.repository.payloadOf(b.seatUnit(0)), "das Modell ist wie vorher, ohne das übernommene Feld");
+		assertFalse(b.seat(0).getUnknown().has("x-test-a"));
+	}
+
+	@Test
+	void takeMyValueOnUnknownFieldWritesIt() throws IOException {
+		Row row = unknownFieldConflict();
+
+		b.actions().takeMyValue(row, "x-test-a");
+
+		assertEquals(2, b.sync.unitState(b.seatUnit(0)).current().payload().get("x-test-a").asInt());
+		assertEquals(List.of(), b.sync.openConflicts());
 	}
 
 	/**
@@ -451,6 +514,53 @@ class ConflictActionsTest {
 		assertEquals(new Availability(false, "Inzwischen erledigt"), b.actions().availability(row));
 		assertThrows(IllegalStateException.class, () -> b.actions().restoreBooking(row));
 		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	/**
+	 * KARV-135: Ist die weichende Fassung inhaltlich zu neu, wird sie nicht wiederhergestellt; sie roh ins Modell zu lesen,
+	 * schriebe einen Inhalt, den die anderen Rechner sperren. Die Zeile bietet dann keine Aktion an.
+	 */
+	@Test
+	void contentVersionIsNotOfferedForRestore() {
+		a.seat(0).clearCustomerData();
+		a.saveEvent();
+		b.seat(0).setComment("von B");
+		b.seat(0).getUnknown().put(NEWER_MARKER, IntNode.valueOf(1));
+		b.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(Action.RESTORE_BOOKING, row.action());
+		assertTrue(b.actions().availability(row).enabled(), "lesbar wird sie angeboten");
+
+		markerIsNewer.set(true);
+
+		assertEquals(new Availability(false, ""), b.actions().availability(row));
+		assertThrows(IllegalStateException.class, () -> b.actions().restoreBooking(row));
+		assertFalse(b.seat(0).hasData(), "nichts wiederhergestellt");
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
+	/** KARV-135: Eine eigene Fassung der Halle, die inhaltlich zu neu ist, wird nicht zum Übernehmen angeboten. */
+	@Test
+	void contentHallVersionIsNotOfferedForTakeMyHall() {
+		String hallId = a.hall.getId();
+		a.hall.setName("Halle A");
+		a.halls.saveHall(a.hall);
+		Hall mine = b.halls.findById(hallId);
+		mine.setName("Halle B");
+		mine.getUnknown().put(NEWER_MARKER, IntNode.valueOf(1));
+		b.halls.saveHall(mine);
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(Action.TAKE_MY_HALL, row.action());
+		assertTrue(b.actions().availability(row).enabled(), "lesbar wird sie angeboten");
+
+		markerIsNewer.set(true);
+
+		assertEquals(new Availability(false, ""), b.actions().availability(row));
+		assertThrows(IllegalStateException.class, () -> b.actions().takeMyHall(row));
+		assertNull(b.actions().bookingImpact(row, null));
+		assertEquals("Halle A", b.halls.findById(hallId).getName());
 	}
 
 	private String droppedBookingId(Machine machine, Row row) {
@@ -1061,6 +1171,44 @@ class ConflictActionsTest {
 		assertTrue(note.contains("1 ohne Platz"), note);
 	}
 
+	/**
+	 * KARV-135: Die eigene Bestuhlung zu übernehmen ist ein Bestuhlungswechsel; mit einer gesperrten Buchung unter der
+	 * Vorstellung wird er abgelehnt (die Buchung bliebe sonst auf ihrem alten Sitz, der Sitz der neuen Bestuhlung wäre
+	 * verkäuflich). Die Meldung ist die der übrigen Wege.
+	 */
+	@Test
+	void takeMyValueOfAnotherSeatingPlanIsRejectedWithLockedBookingBelow() throws IOException {
+		a.seat(0).getUnknown().put(NEWER_MARKER, IntNode.valueOf(1));
+		a.saveEvent();
+		settle();
+		Hall shared = a.hall;
+		SeatingPlan second = shared.addSeatingPlan();
+		second.fillRow(second.addRow(), 1, 1);
+		SeatingPlan third = shared.addSeatingPlan();
+		third.fillRow(third.addRow(), 1, 1);
+		a.halls.saveHall(shared);
+		settle();
+		a.friday().setSeatingPlanId(second.getId());
+		a.saveEvent();
+		b.friday().setSeatingPlanId(third.getId());
+		b.saveEvent();
+		settle();
+		Row row = b.onlyRow();
+		assertEquals(List.of("hall"), row.fields().stream().map(ConflictList.FieldRow::group).toList());
+		UnitKey locked = b.seatUnit(0);
+		markerIsNewer.set(true);
+		assertTrue(b.sync.unitState(locked).contentLocked(), "Müllers Buchung ist jetzt gesperrt");
+		UnitKey presentation = UnitKey.presentation(b.event.getId(), b.friday().getId());
+		var before = b.sync.unitState(presentation).head().id();
+
+		IllegalStateException refused = assertThrows(IllegalStateException.class, () -> b.actions().takeMyValue(row, "hall"));
+
+		assertEquals(StoreMessages.lockedBelow("Freitag", UnitState.Status.LOCKED_FORMAT), refused.getMessage());
+		assertEquals(second.getId(), b.friday().getSeatingPlanId(), "das Modell bleibt beim gültigen Wert");
+		assertEquals(before, b.sync.unitState(presentation).head().id(), "nichts geschrieben");
+		assertEquals(1, b.sync.openConflicts().size());
+	}
+
 	// <-- Platz zuweisen und Hinweise
 
 	// Vermerk "Platz" nach einem fremden Umzug (KARV-94) -->
@@ -1163,7 +1311,7 @@ class ConflictActionsTest {
 		Booking mia = a.seat(4);
 		String miaId = mia.getId();
 		assertTrue(BookingSync.assign(a.friday(), a.plan(), mia, a.plan().getSeats().get(5)));
-		BookingSync.sync(a.friday(), a.plan());
+		Syncs.sync(a.friday(), a.plan());
 		a.saveEvent();
 		settle();
 		assertEquals("Mia", b.seat(5).getLastName());
@@ -1303,7 +1451,7 @@ class ConflictActionsTest {
 		customerConflictOnTransfer();
 		Booking moved = a.seat(1);
 		assertTrue(BookingSync.assign(a.friday(), a.plan(), moved, a.plan().getSeats().get(3)));
-		BookingSync.sync(a.friday(), a.plan());
+		Syncs.sync(a.friday(), a.plan());
 		a.seat(1).setLastName("Tom");
 		a.saveEvent();
 		settle();
@@ -1371,7 +1519,7 @@ class ConflictActionsTest {
 		Hall hall = machine.halls.findById(presentation.getHallId());
 		SeatingPlan plan = hall.getSeatingPlans().stream().filter(candidate -> candidate.getId().equals(presentation.getSeatingPlanId()))
 				.findFirst().orElseThrow();
-		BookingSync.sync(presentation, plan);
+		Syncs.sync(presentation, plan);
 	}
 
 	private static void assertVisibleWithoutSeat(Machine machine, String bookingId) {
@@ -1397,7 +1545,7 @@ class ConflictActionsTest {
 		a.halls.saveHall(a.hall);
 		settle();
 		String bookingId = b.seat(0).getId();
-		BookingSync.switchPlan(a.friday(), second);
+		Syncs.switchPlan(a.friday(), second);
 		a.saveEvent();
 		moveFromFirstSeat(b, 2);
 		return bookingId;
@@ -1431,7 +1579,7 @@ class ConflictActionsTest {
 		assertTrue(last.getParent().deleteSeat(last));
 		a.halls.saveHall(a.hall);
 		// wie die App: Der Abgleich der eigenen Vorstellung folgt dem Speichern der Halle, bevor der fremde Verkauf eintrifft
-		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		a.repository.deriving(a.event, () -> Syncs.sync(a.friday(), a.plan()));
 		b.seat(5).setLastName("Neu");
 		b.saveEvent();
 		clock.advance(ROUND);
@@ -1521,11 +1669,11 @@ class ConflictActionsTest {
 
 		assertTrue(last.getParent().deleteSeat(last));
 		a.halls.saveHall(a.hall);
-		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		a.repository.deriving(a.event, () -> Syncs.sync(a.friday(), a.plan()));
 		settle();
 		// wie die App nach einem Hallenwechsel: b gleicht seine Vorstellung mit der neuen Bestuhlung ab
 		SeatingPlan current = b.halls.findById(b.hall.getId()).getSeatingPlans().get(0);
-		b.repository.deriving(b.event, () -> BookingSync.sync(b.friday(), current));
+		b.repository.deriving(b.event, () -> Syncs.sync(b.friday(), current));
 		List<Booking> sold = withId(modelFriday(b), bookingId);
 		assertEquals(1, sold.size(), "b: " + sold);
 		assertTrue(sold.get(0).isUnassigned(), "b: ohne Platz");
@@ -1573,7 +1721,7 @@ class ConflictActionsTest {
 		Seat first = a.plan().getSeats().get(0);
 		assertTrue(first.getParent().deleteSeat(first));
 		a.halls.saveHall(a.hall);
-		a.repository.deriving(a.event, () -> BookingSync.sync(a.friday(), a.plan()));
+		a.repository.deriving(a.event, () -> Syncs.sync(a.friday(), a.plan()));
 		a.saveEvent();
 		moveFromFirstSeat(b, 2);
 		clock.advance(ROUND);

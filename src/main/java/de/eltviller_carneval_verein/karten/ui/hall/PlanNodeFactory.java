@@ -4,7 +4,6 @@ import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
-import de.eltviller_carneval_verein.karten.util.Angles;
 import javafx.beans.binding.Bindings;
 import javafx.beans.value.ObservableDoubleValue;
 import javafx.geometry.VPos;
@@ -18,7 +17,6 @@ import javafx.scene.shape.StrokeLineCap;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
-import javafx.scene.text.TextAlignment;
 
 /**
  * Baut die Knoten für Reihen, Tische und Sitze einer Bestuhlung in Hallenkoordinaten (cm, y nach unten, Winkel im
@@ -35,8 +33,6 @@ public final class PlanNodeFactory {
 	private static final Color SEAT_FILL = Color.WHITE;
 	private static final Color SEAT_STROKE = Color.GRAY;
 	private static final Color ROW_STROKE = Color.web("#2C2F88");
-	// Sitze ohne Breite (0) blieben unsichtbar; der Validator meldet sie, gezeichnet werden sie mit diesem Radius
-	private static final double FALLBACK_SEAT_RADIUS = 10;
 	private static final double ROW_HIT_WIDTH = 30;
 	private static final double ROW_LABEL_SIZE = 36;
 	private static final double ROW_LABEL_DISTANCE = 30;
@@ -52,8 +48,9 @@ public final class PlanNodeFactory {
 
 	/**
 	 * Tisch als Rechteck an {@code posX/posY} (obere linke Ecke des ungedrehten Rechtecks) mit der Größe des Tischs,
-	 * beschriftet mit {@link Table#getDisplayName()}. Rechteck und Beschriftung drehen sich um die Tischmitte um
-	 * {@link Table#getRotation()} Grad im Uhrzeigersinn; die Schrift steht dabei nie auf dem Kopf.
+	 * beschriftet mit {@link Table#getDisplayName()} nach den Texteinstellungen des Tischs ({@link PlanText}). Rechteck und
+	 * Beschriftung drehen sich um die Tischmitte um {@link Table#getRotation()} Grad im Uhrzeigersinn; die Schrift steht
+	 * dabei nie auf dem Kopf.
 	 */
 	public static Group tableNode(Table table, boolean selected) {
 		return tableNode(table, selected, true);
@@ -73,17 +70,7 @@ public final class PlanNodeFactory {
 			return new Group(shape);
 		}
 
-		Text label = new Text(table.getDisplayName());
-		label.setFont(Font.font(16));
-		label.setTextOrigin(VPos.CENTER);
-		label.setTextAlignment(TextAlignment.CENTER);
-		double centerX = table.getPosX() + table.getWidth() / 2.0;
-		double centerY = table.getPosY() + table.getHeight() / 2.0;
-		label.setX(centerX - label.getLayoutBounds().getWidth() / 2.0);
-		label.setY(centerY);
-		label.setRotate(readableRotation(table.getRotation()));
-
-		return new Group(shape, label);
+		return new Group(shape, PlanText.create(table));
 	}
 
 	/** Sitz als Kreis um {@code posX/posY} (der Mittelpunkt des Sitzes) mit der halben Sitzbreite als Radius. */
@@ -93,7 +80,7 @@ public final class PlanNodeFactory {
 
 	/** Wie {@link #seatNode(Seat)}, ein markierter Sitz mit dem Rand der Auswahl. */
 	public static Node seatNode(Seat seat, boolean selected) {
-		double radius = seatRadius(seat);
+		double radius = seat.radius();
 		Circle circle = new Circle(seat.getPosX(), seat.getPosY(), radius);
 		circle.setFill(SEAT_FILL);
 		circle.setStroke(selected ? SELECTION_STROKE : SEAT_STROKE);
@@ -101,16 +88,12 @@ public final class PlanNodeFactory {
 		return circle;
 	}
 
-	private static double seatRadius(Seat seat) {
-		return seat.getWidth() > 0 ? seat.getWidth() / 2.0 : FALLBACK_SEAT_RADIUS;
-	}
-
 	/**
 	 * Goldener Kreis hinter einem gewählten Sitz in der Saalansicht. Ein Rand auf dem Sitz hätte auf den Statusfarben
 	 * (grün, gelb, rot) zu wenig Kontrast; das Halo liegt auf dem hellen Plan, der Sitz bleibt davor unverändert.
 	 */
 	public static Node seatHalo(Seat seat) {
-		double radius = seatRadius(seat);
+		double radius = seat.radius();
 		Circle halo = new Circle(seat.getPosX(), seat.getPosY(), radius + haloWidth(radius));
 		halo.setFill(SELECTION_STROKE);
 		halo.setMouseTransparent(true);
@@ -127,7 +110,7 @@ public final class PlanNodeFactory {
 	 * Herauszoomen entstünde sonst ein Zahlenbrei); {@code scale} ist der Zoom der Fläche, auf der sie liegt.
 	 */
 	public static Text seatNumberText(Seat seat, ObservableDoubleValue scale) {
-		double diameter = seatRadius(seat) * 2;
+		double diameter = seat.radius() * 2;
 		Text text = new Text(String.valueOf(seat.getSeatNumber()));
 		text.setFont(Font.font(null, FontWeight.BOLD, diameter * SEAT_NUMBER_FONT_RATIO));
 		text.setFill(Color.BLACK);
@@ -195,9 +178,4 @@ public final class PlanNodeFactory {
 		return group;
 	}
 
-	/** Dreht eine Beschriftung mit, aber nie auf den Kopf (zwischen 90 und 270 Grad um 180 Grad weiter). */
-	static double readableRotation(double rotation) {
-		double normalized = Angles.normalize(rotation);
-		return normalized > 90 && normalized < 270 ? normalized - 180 : normalized;
-	}
 }

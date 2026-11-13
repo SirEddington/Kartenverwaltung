@@ -5,7 +5,7 @@
   
   <groupId>de.eltviller-carneval-verein.karten</groupId>
   <artifactId>Kartenverwaltung</artifactId>
-  <version>1.0.1</version>
+  <version>1.1.0</version>
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
@@ -157,6 +157,21 @@
                                 <mainClass>de.eltviller_carneval_verein.karten.MainApp</mainClass>
                             </transformer>
                         </transformers>
+                        <!-- KARV-137: Die Microsoft-Laufzeit aus dem JavaFX-JAR nicht mitnehmen. JavaFX bringt
+                             aeltere msvcp140/vcruntime140 (14.36) mit als das JDK (14.44), und Conveyor wuerde die
+                             JDK-Dateien beim Auspacken der nativen Bibliotheken still ersetzen.
+                             Siehe docs/decisions.md, "JavaFX native libraries extracted at build time". -->
+                        <filters>
+                            <filter>
+                                <artifact>org.openjfx:javafx-graphics:*</artifact>
+                                <excludes>
+                                    <exclude>msvcp140*.dll</exclude>
+                                    <exclude>vcruntime140*.dll</exclude>
+                                    <exclude>ucrtbase.dll</exclude>
+                                    <exclude>api-ms-win-*.dll</exclude>
+                                </excludes>
+                            </filter>
+                        </filters>
                     </configuration>
                 </execution>
             </executions>

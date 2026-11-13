@@ -11,7 +11,10 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.model.TextAlignH;
+import de.eltviller_carneval_verein.karten.model.TextAlignV;
 
 class TableRowBulkEditTest {
 
@@ -160,5 +163,126 @@ class TableRowBulkEditTest {
 		TableRow only = row("A", 0, 0);
 
 		assertEquals(List.of(only), new TableRowBulkEdit(List.of(only)).rows());
+	}
+
+	// --- KARV-128: Maße und Beschriftung der Tische und Sitze aller gewählten Reihen ---
+
+	private Table table(TableRow row, double width, int seats, double seatWidth) {
+		Table table = plan.addTable(row);
+		table.setWidth(width);
+		table.setHeight(320);
+		for (int i = 0; i < seats; i++) {
+			table.addSeat().setWidth(seatWidth);
+		}
+		return table;
+	}
+
+	@Test
+	void tablesAreTheTablesOfAllRowsInOrder() {
+		TableRow a = row("A", 0, 0);
+		TableRow b = row("B", 0, 0);
+		Table a1 = table(a, 50, 0, 0);
+		Table b1 = table(b, 50, 0, 0);
+		Table a2 = table(a, 50, 0, 0);
+
+		assertEquals(List.of(a1, a2, b1), new TableRowBulkEdit(List.of(a, b)).tables());
+	}
+
+	@Test
+	void tableSizeIsCommonOnlyWhenAllTablesAgree() {
+		TableRow a = row("A", 0, 0);
+		TableRow b = row("B", 0, 0);
+		table(a, 50, 0, 0);
+		table(b, 50, 0, 0);
+		assertEquals(Optional.of(50.0), new TableRowBulkEdit(List.of(a, b)).tableWidth().common());
+		assertEquals(Optional.of(320.0), new TableRowBulkEdit(List.of(a, b)).tableHeight().common());
+
+		assertFalse(new TableRowBulkEdit(List.of(a, b)).tableWidth().mixed());
+
+		table(b, 60, 0, 0);
+		assertEquals(Optional.empty(), new TableRowBulkEdit(List.of(a, b)).tableWidth().common());
+		assertTrue(new TableRowBulkEdit(List.of(a, b)).tableWidth().mixed());
+	}
+
+	@Test
+	void fieldWithoutTargetsIsNotMixed() {
+		TableRow a = row("A", 0, 0);
+		table(a, 50, 0, 0);
+
+		assertFalse(new TableRowBulkEdit(List.of(a)).seatWidth().mixed(), "Tische ohne Sitze haben keinen verschiedenen Durchmesser");
+		assertFalse(new TableRowBulkEdit(List.of(row("B", 0, 0))).tableWidth().mixed());
+	}
+
+	@Test
+	void changedTableSizeGoesToEveryTableAlsoManualOnesWhichKeepTheirCorner() {
+		TableRow a = row("A", 0, 0);
+		Table automatic = table(a, 50, 0, 0);
+		Table manual = table(a, 60, 0, 0);
+		manual.setManualPos(true);
+		manual.setPosX(7);
+		manual.setPosY(8);
+		TableRowBulkEdit edit = new TableRowBulkEdit(List.of(a));
+
+		edit.tableWidth().change(70.0);
+		edit.apply();
+
+		assertEquals(70, automatic.getWidth());
+		assertEquals(70, manual.getWidth());
+		assertEquals(7, manual.getPosX());
+		assertEquals(8, manual.getPosY());
+	}
+
+	@Test
+	void seatWidthCountsOnlyTablesWithSeatsAndGoesToEverySeat() {
+		TableRow a = row("A", 0, 0);
+		Table withSeats = table(a, 50, 3, 45);
+		table(a, 50, 0, 0);
+		TableRowBulkEdit edit = new TableRowBulkEdit(List.of(a));
+		assertEquals(Optional.of(45.0), edit.seatWidth().common());
+
+		edit.seatWidth().change(40.0);
+		edit.apply();
+
+		withSeats.getSeats().forEach(seat -> assertEquals(40, seat.getWidth()));
+	}
+
+	@Test
+	void rowWithoutTablesHasNoCommonValuesAndChangesNothing() {
+		TableRow empty = row("A", 0, 0);
+		TableRowBulkEdit edit = new TableRowBulkEdit(List.of(empty));
+		assertEquals(Optional.empty(), edit.tableWidth().common());
+		assertEquals(Optional.empty(), edit.seatWidth().common());
+		assertEquals(Optional.empty(), edit.textAuto().common());
+
+		edit.tableWidth().change(70.0);
+		edit.textSize().change(30.0);
+
+		assertFalse(edit.hasChanges(), "ohne Tische gibt es nichts zu ändern");
+		edit.apply();
+		assertTrue(plan.getTablesOf(empty).isEmpty());
+	}
+
+	@Test
+	void textFieldsWorkLikeTheSizes() {
+		TableRow a = row("A", 0, 0);
+		Table first = table(a, 50, 0, 0);
+		Table second = table(a, 50, 0, 0);
+		second.setTextAuto(false);
+		TableRowBulkEdit edit = new TableRowBulkEdit(List.of(a));
+		assertEquals(Optional.empty(), edit.textAuto().common());
+		assertEquals(Optional.of(TextAlignH.CENTER), edit.textAlignH().common());
+
+		edit.textAlignH().change(TextAlignH.LEFT);
+		edit.textAlignV().change(TextAlignV.TOP);
+		edit.textSize().change(30.0);
+		edit.textRotation().change(90.0);
+		edit.apply();
+
+		for (Table table : List.of(first, second)) {
+			assertEquals(TextAlignH.LEFT, table.getTextAlignH());
+			assertEquals(TextAlignV.TOP, table.getTextAlignV());
+			assertEquals(30, table.getTextSize());
+			assertEquals(90, table.getTextRotation());
+		}
 	}
 }

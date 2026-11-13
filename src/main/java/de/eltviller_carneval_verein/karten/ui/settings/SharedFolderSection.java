@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executor;
-import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -32,7 +31,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
-import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
@@ -76,10 +74,10 @@ public final class SharedFolderSection {
 		// Der Hinweis "Angemeldet als …" steht im Bedienelement, nicht als Hinweis der Zeile: Er folgt dem Wechsel sofort
 		rows.add(new SettingRow(SharedFolderTexts.OPERATOR, null, operatorControl(sync)));
 		rows.add(new SettingRow(SharedFolderTexts.SAVE_IMMEDIATELY, SharedFolderTexts.SAVE_IMMEDIATELY_HINT,
-				checkBox(settings.isSaveBookingsImmediately(), settings::setSaveBookingsImmediately)));
+				SettingControls.checkBox(settings.isSaveBookingsImmediately(), settings::setSaveBookingsImmediately)));
 		// gilt für die Prüfung erst nach "Speichern" (siehe MainApp)
 		rows.add(new SettingRow(SharedFolderTexts.CHECK_CLOUD_SERVER, SharedFolderTexts.CHECK_CLOUD_SERVER_HINT,
-				checkBox(settings.isCheckCloudServer(), settings::setCheckCloudServer)));
+				SettingControls.checkBox(settings.isCheckCloudServer(), settings::setCheckCloudServer)));
 		return new SettingsSection(SharedFolderTexts.SECTION_TITLE, rows);
 	}
 
@@ -294,14 +292,6 @@ public final class SharedFolderSection {
 
 	private static String loggedInText(String operator) {
 		return operator == null ? "" : MessageTemplate.format(SharedFolderTexts.OPERATOR_HINT, operator);
-	}
-
-	/** Ein Häkchen für eine gewöhnliche Einstellung: Es ändert sie über {@code setter}, gespeichert wird mit "Speichern". */
-	private static Node checkBox(boolean selected, Consumer<Boolean> setter) {
-		CheckBox box = new CheckBox();
-		box.setSelected(selected);
-		box.selectedProperty().addListener((observable, was, now) -> setter.accept(now));
-		return box;
 	}
 
 	private static Label errorLabel() {

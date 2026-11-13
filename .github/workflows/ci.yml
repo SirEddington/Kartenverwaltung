@@ -19,5 +19,11 @@ jobs:
 
       # Der Runner ist Linux: JavaFX-Natives für Linux (-Plinux statt des Windows-Standards) und ein virtuelles
       # Display, sonst starten die Tests mit JavaFX-Toolkit nicht ("No toolkit found")
+      # package statt test: die Tests laufen genauso, danach liegt das Linux-Jar für den nächsten Schritt bereit
       - name: Run tests
-        run: xvfb-run --auto-servernum ./mvnw --batch-mode -Plinux test
+        run: xvfb-run --auto-servernum ./mvnw --batch-mode -Plinux package
+
+      # KARV-125: Der Release-Text aus patchnotes.md entsteht bei jedem Push wie im Release (Jar, Klasse, Inhalt),
+      # damit ein Fehler nicht erst beim Release auffällt
+      - name: Release notes from patchnotes.md
+        run: bash .github/scripts/release-notes.sh

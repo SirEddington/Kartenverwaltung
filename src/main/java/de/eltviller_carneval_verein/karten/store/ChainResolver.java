@@ -67,7 +67,9 @@ public final class ChainResolver {
 				blockedAt = target;
 				break;
 			}
-			if (file.unknownFormat() != null) {
+			// Ein höheres Dateiformat beendet die Kette; eine inhaltlich zu neue Version ist ganz und wird wie jede andere
+			// aufgenommen (ihre Prüfsumme gilt).
+			if (file.reason() == VersionFile.Reason.FORMAT) {
 				status = Status.LOCKED_FORMAT;
 				blockedAt = target;
 				break;
@@ -84,7 +86,14 @@ public final class ChainResolver {
 			name = target.value();
 		}
 
-		VersionId headId = chain.isEmpty() ? null : chain.get(chain.size() - 1).id();
+		Version head = chain.isEmpty() ? null : chain.get(chain.size() - 1);
+		// Ein inhaltlich zu neuer Kopf sperrt, auch vor dem Warten auf eine beanspruchte Nachfolgerin: Sonst wirkte die
+		// Einheit frei, bis deren Datei ankommt. Endet die Kette danach beschädigt, bleibt es bei dieser Sperre.
+		if (head != null && head.newerContent() && (status == Status.OK || status == Status.WAITING)) {
+			status = Status.LOCKED_FORMAT;
+			blockedAt = head.id();
+		}
+		VersionId headId = head == null ? null : head.id();
 		List<Version> pending = new ArrayList<>();
 		List<List<VersionId>> lost = new ArrayList<>();
 		Set<VersionId> assigned = new HashSet<>();

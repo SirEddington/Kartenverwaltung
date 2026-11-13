@@ -1,8 +1,12 @@
 package de.eltviller_carneval_verein.karten.validation;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
+import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
@@ -14,14 +18,41 @@ import de.eltviller_carneval_verein.karten.model.TableRow;
 public final class SeatingPlanValidator {
 
 	private final SeatingPlan plan;
+	private final Hall hall;
 	private final ValidationResult result = ValidationResult.ok();
+	/** Umrisse der Tische (Platte und Stühle) parallel zu {@code plan.getTables()}, einmal im Konstruktor berechnet. */
+	private final List<Optional<Footprint>> footprints;
 
-	private SeatingPlanValidator(SeatingPlan plan) {
+	private SeatingPlanValidator(SeatingPlan plan, Hall hall) {
 		this.plan = plan;
+		this.hall = hall;
+		this.footprints = plan.getTables().stream().map(this::footprintOf).toList();
+	}
+
+	/**
+	 * Umriss eines Tischs für die Lageprüfungen. Ein Tisch ohne gültige Reihe (Reihenkennung leer oder unbekannt, wie
+	 * in {@link #validateTableRows}) hat keinen Umriss: Die Anordnung setzt nur Tische in vorhandenen Reihen, seine Stühle
+	 * liegen noch an ungeordneten Positionen, oft bei (0|0). Der eigentliche Fehler wird als TBL-005 gemeldet; Lagewarnungen
+	 * (TBL-007, SPL-004, SPL-005) wären Folgemeldungen ohne Aussage.
+	 */
+	private Optional<Footprint> footprintOf(Table table) {
+		String rowId = table.getRowId();
+		if (rowId == null || rowId.isBlank() || plan.findRow(rowId) == null) {
+			return Optional.empty();
+		}
+		return Footprint.of(table);
 	}
 
 	public static ValidationResult validate(SeatingPlan plan) {
-		return new SeatingPlanValidator(plan).run();
+		return validate(plan, plan.getParent());
+	}
+
+	/**
+	 * @param hall die Halle für die Lageprüfung der Tische (TBL-007) und der Hallenobjekte (SPL-005); darf
+	 *             {@code null} sein
+	 */
+	static ValidationResult validate(SeatingPlan plan, Hall hall) {
+		return new SeatingPlanValidator(plan, hall).run();
 	}
 
 	private ValidationResult run() {
@@ -31,6 +62,8 @@ public final class SeatingPlanValidator {
 		validateTableNamesAreUnique();
 		validateTableRows();
 		validateTables();
+		validateTablesDoNotOverlap();
+		validateTablesDoNotOverlapObjects();
 		return result;
 	}
 
@@ -84,8 +117,58 @@ public final class SeatingPlanValidator {
 	}
 
 	private void validateTables() {
-		for (Table table : plan.getTables()) {
-			result.addAll(TableValidator.validate(table));
+		List<Table> tables = plan.getTables();
+		for (int i = 0; i < tables.size(); i++) {
+			result.addAll(TableValidator.validate(tables.get(i), hall, footprints.get(i).orElse(null)));
+		}
+	}
+
+	/**
+	 * Warnt je Paar von Tischen, deren Platten oder Stühle sich überlappen (die Meldung nennt sie in Listenreihenfolge).
+	 * Tische ohne Umriss nehmen nicht teil.
+	 */
+	private void validateTablesDoNotOverlap() {
+		List<Table> tables = plan.getTables();
+		for (int i = 0; i < tables.size(); i++) {
+			if (footprints.get(i).isEmpty()) {
+				continue;
+			}
+			Footprint a = footprints.get(i).get();
+			for (int j = i + 1; j < tables.size(); j++) {
+				if (footprints.get(j).isPresent() && a.overlaps(footprints.get(j).get())) {
+					result.add(SeatingPlanIssue.TABLES_OVERLAP.toIssue(EntityLabels.plan(plan), tables.get(i).getDisplayName(),
+							tables.get(j).getDisplayName()));
+				}
+			}
+		}
+	}
+
+	/**
+	 * Warnt je Tisch und Hallenobjekt, die sich nur teilweise überlappen. Liegt der Tisch (Platte und Stühle) ganz auf
+	 * dem Objekt, etwa auf einer Tanzfläche, ist das gewollt. Ohne Halle gibt es nichts zu prüfen; Tische und Objekte
+	 * ohne Umriss nehmen nicht teil.
+	 */
+	private void validateTablesDoNotOverlapObjects() {
+		if (hall == null) {
+			return;
+		}
+		List<HallObject> hallObjects = hall.getHallObjects();
+		List<Optional<Footprint>> objectFootprints = hallObjects.stream().map(Footprint::of).toList();
+		List<Table> tables = plan.getTables();
+		for (int i = 0; i < tables.size(); i++) {
+			if (footprints.get(i).isEmpty()) {
+				continue;
+			}
+			Footprint tableFootprint = footprints.get(i).get();
+			for (int j = 0; j < hallObjects.size(); j++) {
+				HallObject object = hallObjects.get(j);
+				Optional<Footprint> objectFootprint = objectFootprints.get(j);
+				if (objectFootprint.isPresent() && tableFootprint.overlaps(objectFootprint.get())
+						&& !tableFootprint.within(objectFootprint.get())) {
+					result.add(SeatingPlanIssue.TABLE_OVERLAPS_OBJECT.toIssue(EntityLabels.table(tables.get(i)),
+							EntityLabels.hallObjectName(object)));
+				}
+			}
 		}
 	}
 }

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -57,7 +58,7 @@ class PlanFreezerTest {
 		Presentation presentation = event.addPresentation("Samstag");
 		presentation.setHallId(hall.getId());
 		presentation.setSeatingPlanId(seatingPlan.getId());
-		BookingSyncService.prepare(event, hallLookup, tracker);
+		BookingSyncService.prepare(event, hallLookup, tracker, p -> Set.of());
 		Booking paid = paidBooking(event);
 		paid.setLastName("Müller");
 		paid.setPaymentStatus(PaymentStatus.CASH);
@@ -86,7 +87,7 @@ class PlanFreezerTest {
 		plan.deleteTable(table3(plan));
 		assertFalse(paid.isUnassigned());
 
-		List<Event> result = PlanFreezer.freeze(List.of(event), usesPlan(), hallLookup, tracker, save);
+		List<Event> result = PlanFreezer.freeze(List.of(event), usesPlan(), hallLookup, p -> Set.of(), tracker, save);
 
 		assertEquals(List.of(event), saved);
 		assertEquals(List.of(event), result);
@@ -101,7 +102,7 @@ class PlanFreezerTest {
 		tracker.untrack(event);
 		plan.deleteTable(table3(plan));
 
-		PlanFreezer.freeze(List.of(event), usesPlan(), hallLookup, tracker, save);
+		PlanFreezer.freeze(List.of(event), usesPlan(), hallLookup, p -> Set.of(), tracker, save);
 
 		assertEquals(List.of(event), saved);
 		assertTrue(paidBooking(event).isUnassigned());
@@ -114,7 +115,7 @@ class PlanFreezerTest {
 		event.getPresentations().get(0).setDescription("Noch nicht gespeichert");
 		plan.deleteTable(table3(plan));
 
-		List<Event> result = PlanFreezer.freeze(List.of(event), usesPlan(), hallLookup, tracker, save);
+		List<Event> result = PlanFreezer.freeze(List.of(event), usesPlan(), hallLookup, p -> Set.of(), tracker, save);
 
 		assertTrue(saved.isEmpty());
 		assertTrue(result.isEmpty());
@@ -129,7 +130,7 @@ class PlanFreezerTest {
 		otherPlan.deleteTable(table3(otherPlan));
 		int bookingsBefore = other.getPresentations().get(0).getBookings().size();
 
-		PlanFreezer.freeze(List.of(other), usesPlan(), hallLookup, tracker, save);
+		PlanFreezer.freeze(List.of(other), usesPlan(), hallLookup, p -> Set.of(), tracker, save);
 
 		assertTrue(saved.isEmpty());
 		assertFalse(otherPaid.isUnassigned());
@@ -145,7 +146,7 @@ class PlanFreezerTest {
 		withoutPresentations.setName("Leer");
 		withoutPresentations.setPresentations(null);
 
-		PlanFreezer.freeze(List.of(affected, other, withoutPresentations), usesPlan(), hallLookup, tracker, save);
+		PlanFreezer.freeze(List.of(affected, other, withoutPresentations), usesPlan(), hallLookup, p -> Set.of(), tracker, save);
 
 		assertEquals(List.of(affected), saved);
 	}
@@ -161,7 +162,7 @@ class PlanFreezerTest {
 			saved.add(event);
 		};
 
-		List<Event> result = PlanFreezer.freeze(List.of(broken, fine), usesPlan(), hallLookup, tracker, failingForBroken);
+		List<Event> result = PlanFreezer.freeze(List.of(broken, fine), usesPlan(), hallLookup, p -> Set.of(), tracker, failingForBroken);
 
 		assertEquals(List.of(fine), saved);
 		assertEquals(List.of(fine), result);

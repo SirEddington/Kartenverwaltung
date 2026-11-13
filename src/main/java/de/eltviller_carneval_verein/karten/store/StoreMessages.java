@@ -52,7 +52,7 @@ public final class StoreMessages {
 			+ "zurücksetzen.";
 
 	private static final String NEWER_FORMAT_TEXT = "&1 wurde mit einer neueren Version der Kartenverwaltung gespeichert "
-			+ "und ist hier gesperrt. Aktualisiere die Kartenverwaltung auf diesem Rechner.";
+			+ "und ist hier gesperrt. Aktualisiere die Kartenverwaltung unter Einstellungen → Info und Updates → Jetzt prüfen.";
 
 	private static final String ALREADY_RUNNING_TEXT = "Die Kartenverwaltung ist auf diesem Rechner schon geöffnet. "
 			+ "Wechsle zum offenen Fenster.";
@@ -110,6 +110,27 @@ public final class StoreMessages {
 		case LOCKED_DAMAGED -> damaged(unit);
 		case LOCKED_FORMAT -> newerFormat(unit);
 		case WAITING, OK -> null;
+		};
+	}
+
+	/**
+	 * SYS-009 bzw. SYS-008: Unter dem Objekt (Vorstellung oder Event) liegen gesperrte Einträge, deshalb lässt es sich
+	 * nicht löschen und nicht auf eine andere Halle oder Bestuhlung umstellen (KARV-135). Der Name wird nicht als Vorlage
+	 * gelesen, er erscheint, wie er ist.
+	 *
+	 * @param objectName der Name des Objekts für die Anzeige
+	 * @param cause      die Sperre: {@code LOCKED_FORMAT} oder {@code LOCKED_DAMAGED}; bei mehreren Ursachen gibt der
+	 *                   Aufrufer {@code LOCKED_FORMAT} an
+	 * @throws IllegalArgumentException bei einem Zustand, der keine Sperre ist
+	 */
+	public static String lockedBelow(String objectName, UnitState.Status cause) {
+		return switch (cause) {
+		case LOCKED_FORMAT -> SYS_NEWER_FORMAT + ": \"" + objectName + "\" enthält Einträge, die mit einer neueren "
+				+ "Programmversion gespeichert wurden. Löschen und Umstellen sind erst möglich, wenn sie wieder lesbar "
+				+ "sind (Kartenverwaltung aktualisieren).";
+		case LOCKED_DAMAGED -> SYS_DAMAGED + ": \"" + objectName + "\" enthält beschädigte Einträge. Erst unter "
+				+ "„Gesperrte Einträge“ zurücksetzen, dann löschen oder umstellen.";
+		case WAITING, OK -> throw new IllegalArgumentException(cause + " ist keine Sperre.");
 		};
 	}
 
