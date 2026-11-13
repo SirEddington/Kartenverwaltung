@@ -962,7 +962,8 @@ final class UnitIndex {
 		markerWritten = true;
 		try {
 			Files.createDirectories(indexDir);
-			Files.writeString(cleanMarker(), machineId(), StandardCharsets.UTF_8);
+			// auf die Platte, bevor die App endet (KARV-90); die Index-Dateien sind es schon (flush über DurableWrite)
+			DurableWrite.overwrite(cleanMarker(), machineId().getBytes(StandardCharsets.UTF_8));
 		} catch (IOException | RuntimeException e) {
 			// eine Marke kann trotzdem stehen (halb geschrieben oder eine alte, festsitzende), und der Dienst bleibt offen:
 			// Bis zur nächsten Änderung schützt wieder die Sperrdatei
