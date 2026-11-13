@@ -18,7 +18,8 @@ public final class PlanLabelsMenu {
 				item("Hallenobjekte", options.hallObjectsProperty()));
 	}
 
-	private static CheckMenuItem item(String text, BooleanProperty property) {
+	/** Ein Haken im Menü "Anzeige", in beide Richtungen an die Einstellung gebunden. */
+	public static CheckMenuItem item(String text, BooleanProperty property) {
 		CheckMenuItem item = new CheckMenuItem(text);
 		item.selectedProperty().bindBidirectional(property);
 		return item;

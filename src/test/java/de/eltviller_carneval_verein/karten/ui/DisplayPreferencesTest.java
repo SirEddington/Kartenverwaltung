@@ -33,6 +33,7 @@ class DisplayPreferencesTest {
 		saved.setRestoreAtStart(restore);
 		saved.setRows(false);
 		saved.setSeatNumbers(false);
+		saved.setSeatPatterns(false);
 		saved.setSummaryPlacement("LEFT");
 		return saved;
 	}
@@ -42,6 +43,7 @@ class DisplayPreferencesTest {
 		DisplayPreferences prefs = load(saved(true));
 
 		assertEquals(new PlanLabels(false, true, false, true), prefs.planLabels().snapshot());
+		assertFalse(prefs.seatPatternsProperty().get());
 		assertEquals(SummaryPlacement.LEFT, prefs.summaryPlacementProperty().get());
 	}
 
@@ -50,7 +52,22 @@ class DisplayPreferencesTest {
 		DisplayPreferences prefs = load(saved(false));
 
 		assertEquals(PlanLabels.ALL, prefs.planLabels().snapshot());
+		assertTrue(prefs.seatPatternsProperty().get(), "die barrierefreie Darstellung ist der Normalfall");
 		assertEquals(SummaryPlacement.AUTO, prefs.summaryPlacementProperty().get());
+	}
+
+	@Test
+	void switchingSeatPatternsWritesTheWholeSelection() {
+		DisplayPreferences prefs = load(saved(true));
+
+		prefs.seatPatternsProperty().set(true);
+		assertEquals(1, writes);
+		assertTrue(file.isSeatPatterns());
+		assertFalse(file.isRows(), "die übrige Auswahl wird mitgeschrieben");
+		assertEquals("LEFT", file.getSummaryPlacement());
+
+		prefs.planLabels().rowsProperty().set(true);
+		assertTrue(file.isSeatPatterns(), "eine andere Änderung schreibt den Schalter unverändert mit");
 	}
 
 	@Test
@@ -111,6 +128,7 @@ class DisplayPreferencesTest {
 		assertFalse(file.isTables());
 		assertFalse(file.isSeatNumbers());
 		assertTrue(file.isHallObjects());
+		assertFalse(file.isSeatPatterns());
 		assertEquals("BOTTOM", file.getSummaryPlacement());
 		assertTrue(file.isRestoreAtStart(), "der Schalter gehört den Einstellungen, das Menü schreibt ihn nicht");
 	}

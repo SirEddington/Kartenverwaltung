@@ -40,6 +40,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.RadioButton;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.layout.StackPane;
@@ -108,6 +109,8 @@ public class TicketShellController {
 		btnSave.setDisable(!editMode); // Im Anzeigemodus gibt es nichts zu speichern
 		// Immer aktiv, auch in der Tabelle: Die Einstellungen gelten für die Saalansicht und lassen sich vorher treffen
 		PlanLabelsMenu.bind(menuDisplay, state.planLabels());
+		// Sitzstatus nicht nur über die Farbe (KARV-26); nur hier, der Hallen-Editor zeigt keinen Status
+		menuDisplay.getItems().addAll(new SeparatorMenuItem(), PlanLabelsMenu.item("Barrierefreie Sitzdarstellung", state.seatPatternsProperty()));
 		SummaryPlacementMenu.append(menuDisplay, state.summaryPlacementProperty());
 
 		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das

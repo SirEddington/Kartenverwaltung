@@ -11,7 +11,9 @@ import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabels;
 import de.eltviller_carneval_verein.karten.ui.sales.SummaryPlacement;
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 
 /**
@@ -33,6 +35,7 @@ public final class DisplayPreferences {
 	private static DisplayPreferences instance;
 
 	private final PlanLabelOptions planLabels = new PlanLabelOptions();
+	private final BooleanProperty seatPatterns = new SimpleBooleanProperty(true);
 	private final ObjectProperty<SummaryPlacement> summaryPlacement = new SimpleObjectProperty<>(SummaryPlacement.AUTO);
 	// Die Platzierung, wie sie in der Datei steht: Eine unbekannte (aus einer neueren Version) gilt als automatisch und
 	// wird unverändert zurückgeschrieben, bis jemand eine andere als "Automatisch" wählt
@@ -52,10 +55,12 @@ public final class DisplayPreferences {
 			planLabels.tablesProperty().set(saved.isTables());
 			planLabels.seatNumbersProperty().set(saved.isSeatNumbers());
 			planLabels.hallObjectsProperty().set(saved.isHallObjects());
+			seatPatterns.set(saved.isSeatPatterns());
 			summaryPlacement.set(filePlacement.get());
 		}
 		// Erst nach dem Übernehmen, damit der Start nichts schreibt
 		planLabels.addListener((obs, oldValue, newValue) -> write());
+		seatPatterns.addListener((obs, oldValue, newValue) -> write());
 		summaryPlacement.addListener((obs, oldValue, newValue) -> write());
 	}
 
@@ -83,6 +88,14 @@ public final class DisplayPreferences {
 		return planLabels;
 	}
 
+	/**
+	 * Ob Saalansicht und Kundenfenster den Sitzstatus barrierefrei zeigen (KARV-26): mit Ring, Schraffur und Kreuz statt
+	 * nur über die Farbe, die Saalansicht dazu mit Legende. Standard an.
+	 */
+	public BooleanProperty seatPatternsProperty() {
+		return seatPatterns;
+	}
+
 	/** Wo das Kundenfenster die Kaufzusammenfassung zeigt. */
 	public ObjectProperty<SummaryPlacement> summaryPlacementProperty() {
 		return summaryPlacement;
@@ -91,6 +104,7 @@ public final class DisplayPreferences {
 	private void write() {
 		try {
 			PlanLabels labels = planLabels.snapshot();
+			boolean patterns = seatPatterns.get();
 			SummaryPlacement current = summaryPlacement.get();
 			filePlacement.set(current == null ? SummaryPlacement.AUTO : current);
 			String placement = filePlacement.toJson();
@@ -100,6 +114,7 @@ public final class DisplayPreferences {
 				display.setTables(labels.tables());
 				display.setSeatNumbers(labels.seatNumbers());
 				display.setHallObjects(labels.hallObjects());
+				display.setSeatPatterns(patterns);
 				display.setSummaryPlacement(placement);
 			});
 		} catch (RuntimeException e) {

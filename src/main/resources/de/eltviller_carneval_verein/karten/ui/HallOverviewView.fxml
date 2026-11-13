@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
 <?import de.eltviller_carneval_verein.karten.ui.sales.HallPlanPane?>
 
@@ -16,4 +17,7 @@
         <!-- Hinweis, solange keine einzelne Vorstellung gewählt ist (Text und Sichtbarkeit setzt der Controller) -->
         <Label fx:id="lblHint" styleClass="subheader-label" mouseTransparent="true" />
     </HallPlanPane>
+
+    <!-- Legende der Sitze (KARV-26); der Controller füllt sie und zeigt sie nur mit "Barrierefreie Sitzdarstellung" -->
+    <StackPane fx:id="legendSlot" alignment="CENTER_LEFT" />
 </VBox>

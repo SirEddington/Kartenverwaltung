@@ -64,7 +64,11 @@ Select **Event** and **Vorstellung** in the header. Two views:
 
 - **"Tabelle"** – one row per booking (or all presentations of the event). Bookings without a seat are grouped as
   "Ohne Platz" at the top; **"Platz zuweisen…"** assigns one to a free seat.
-- **"Saalansicht"** – the seating plan; seat colors show free, reserved, sold and blocked seats.
+- **"Saalansicht"** – the seating plan; seats show whether they are free, reserved, sold or blocked. With
+  **"Barrierefreie Sitzdarstellung"** (menu "Anzeige", on by default) the status does not depend on color alone: a
+  free seat is white with a green ring, a reserved one yellow with dark stripes, a sold one solid red and a blocked
+  one gray with a cross; a legend below the plan explains them. Turned off, the seats are plain green, yellow, red
+  and gray as before 1.1.0, without legend.
 
 Selling:
 
@@ -85,11 +89,13 @@ button is then called "Speichern" instead of "Anwenden". With the setting off, u
 with unsaved changes asks *Speichern / Nicht speichern / Abbrechen*.
 
 **Customer display ("Verkaufsmodus"):** opens a second window, e.g. on a monitor facing the buyer, that shows the
-same seating plan without controls. Seats are only green (free) or red (taken); zoom, panning, the current selection
-and the labels chosen in the **"Anzeige"** menu follow the main window.
+same seating plan without controls. Seats are only free (green; with "Barrierefreie Sitzdarstellung" white with a
+green ring) or taken (red); zoom, panning, the current selection and the choices in the **"Anzeige"** menu follow
+the main window.
 
 **"Anzeige" menu** (footer, left): ticks for **Reihen**, **Tische**, **Sitznummern** and **Hallenobjekte**, and in
-the sales view the submenu **"Kaufzusammenfassung"** (where the customer display shows the purchase summary). The
+the sales view the tick **"Barrierefreie Sitzdarstellung"** and the submenu **"Kaufzusammenfassung"** (where the
+customer display shows the purchase summary). The
 choice is the same in the sales view, the customer display and the hall editor: hiding rows in the editor hides them
 in the sales view too. With *Einstellungen → Anzeige → "Anzeige beim Start wiederherstellen"* (on by default) the
 choice is kept for the next start of this workstation; with it off, every start shows everything.

@@ -69,6 +69,17 @@ public class HallPlanPane extends StackPane {
 		 */
 		default void decorateSeat(Booking booking, Seat seat, Node node) {
 		}
+
+		/**
+		 * Eine Markierung über dem Sitz, etwa das Kreuz des gesperrten Sitzes (KARV-26). Die Fläche legt sie zwischen Sitz
+		 * und Sitznummer, blendet sie mit dem Sitz ab und lässt Klicks zum Sitz durch. Wird nach
+		 * {@link #decorateSeat} gefragt.
+		 *
+		 * @return die Markierung in Hallenkoordinaten, {@code null} ohne
+		 */
+		default Node seatMark(Booking booking, Seat seat) {
+			return null;
+		}
 	}
 
 	private final Pane contentPane = new Pane();
@@ -226,8 +237,10 @@ public class HallPlanPane extends StackPane {
 		for (Seat seat : plan.getSeats()) {
 			Node seatNode = PlanNodeFactory.seatNode(seat);
 			Booking booking = bookingBySeat.get(seat.getId());
+			Node mark = null;
 			if (booking != null) {
 				decorator.decorateSeat(booking, seat, seatNode);
+				mark = decorator.seatMark(booking, seat);
 			} else {
 				// Nach dem Abgleich hat jeder Sitz eine Buchung; sonst bleibt der Sitz grau und ohne Verhalten
 				seatNode.setOpacity(0.4);
@@ -237,6 +250,11 @@ public class HallPlanPane extends StackPane {
 				contentPane.getChildren().add(PlanNodeFactory.seatHalo(seat));
 			}
 			contentPane.getChildren().add(seatNode);
+			if (mark != null) {
+				mark.setMouseTransparent(true);
+				mark.opacityProperty().bind(seatNode.opacityProperty());
+				contentPane.getChildren().add(mark);
+			}
 			if (labels.seatNumbers()) {
 				Text number = PlanNodeFactory.seatNumberText(seat, contentPane.scaleXProperty());
 				number.opacityProperty().bind(seatNode.opacityProperty());

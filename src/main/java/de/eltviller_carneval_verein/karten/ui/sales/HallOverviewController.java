@@ -12,6 +12,7 @@ import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatStatus;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.ForeignBatch;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
@@ -21,8 +22,10 @@ import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
-import de.eltviller_carneval_verein.karten.ui.UiColors;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
+import de.eltviller_carneval_verein.karten.ui.hall.SeatingPlanLayout;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.fxml.FXML;
 import javafx.geometry.BoundingBox;
 import javafx.geometry.Bounds;
@@ -38,6 +41,7 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.input.ZoomEvent;
+import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.Shape;
@@ -105,8 +109,13 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	@FXML
 	private Label lblHint;
 
+	// Unter dem Plan: welcher Sitz was bedeutet; nur mit barrierefreier Darstellung zu sehen (KARV-26)
+	@FXML
+	private StackPane legendSlot;
+
 	// Menü "Anzeige" der Shell: Mit gesetztem Verkaufszustand sind es dessen Einstellungen (so folgt das Kundenfenster)
 	private PlanLabelOptions labelOptions = new PlanLabelOptions();
+	private BooleanProperty seatPatterns = new SimpleBooleanProperty(true);
 
 	@FXML
 	public void initialize() {
@@ -125,6 +134,10 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		rubberBand.setFill(HallPlanPane.SELECTION_COLOR.deriveColor(0, 1, 1, 0.15));
 		rubberBand.setStroke(HallPlanPane.SELECTION_COLOR);
 		viewportPane.getChildren().add(rubberBand);
+		legendSlot.getChildren().setAll(SeatLook.legend());
+		// Sichtbar erst, wenn ein Plan gezeichnet ist (renderHall)
+		legendSlot.setVisible(false);
+		legendSlot.setManaged(false);
 		updateHint();
 
 		// Fremde Änderungen nur, solange der Plan zu sehen ist (danach hielten die Repositories diese Ansicht am Leben)
@@ -308,7 +321,12 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	public void renderHall() {
 		seatNodes.clear();
 		Hall hall = hallOf(selectedPres);
-		viewportPane.render(hall, SalesPlan.of(selectedPres, hall), selectedPres, labelOptions.snapshot(), planDecorator);
+		SeatingPlan plan = SalesPlan.of(selectedPres, hall);
+		viewportPane.render(hall, plan, selectedPres, labelOptions.snapshot(), planDecorator);
+		// Die Legende erklärt gezeichnete Sitze: nur mit barrierefreier Darstellung und nur, wenn ein Plan zu sehen ist
+		boolean legend = seatPatterns.get() && selectedPres != null && plan != null;
+		legendSlot.setVisible(legend);
+		legendSlot.setManaged(legend);
 	}
 
 	private Hall hallOf(Presentation presentation) {
@@ -321,26 +339,29 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		public void decorateSeat(Booking booking, Seat seat, Node seatNode) {
 			styleSeatNode(booking, seatNode);
 		}
+
+		@Override
+		public Node seatMark(Booking booking, Seat seat) {
+			return SeatLook.hasCross(statusOf(booking), seatPatterns.get())
+					? SeatLook.cross(seat.getPosX(), seat.getPosY(), SeatingPlanLayout.seatRadius(seat))
+					: null;
+		}
 	};
 
-	/** Farbzuordnung für den Saalplan - gehört hierher in die UI-Schicht, nicht ins Modell. */
-	private static Color seatColorFor(SeatStatus status) {
-		return switch (status) {
-		case FREE -> UiColors.SEAT_FREE.getFxColor();
-		case RESERVED -> UiColors.SEAT_RESEREVED.getFxColor();
-		case SOLD -> UiColors.SEAT_SOLD.getFxColor();
-		case BLOCKED -> UiColors.SEAT_BLOCKED.getFxColor();
-		};
+	/** Ein gesperrter Sitz (unlesbare Buchung, KARV-111) zeigt sich gesperrt, gleich was die Buchung sagt. */
+	private static SeatStatus statusOf(Booking booking) {
+		return LockedSeats.isLocked(booking) ? SeatStatus.BLOCKED : booking.getStatus();
 	}
 
 	private void styleSeatNode(Booking booking, Node seatNode) {
 		boolean matchesQuery = matchesQuery(booking);
 		boolean selected = selectedBookings.contains(booking);
-		// Ein gesperrter Sitz (unlesbare Buchung, KARV-111) ist grau und öffnet die gesperrten Einträge statt der Buchungskarte
+		// Ein gesperrter Sitz ist grau und öffnet die gesperrten Einträge statt der Buchungskarte
 		boolean locked = LockedSeats.isLocked(booking);
 		SeatStatus status = locked ? SeatStatus.BLOCKED : booking.getStatus();
 		if (seatNode instanceof Shape shape) {
-			shape.setFill(seatColorFor(status));
+			// Wie der Status aussieht (mit oder ohne barrierefreie Darstellung), legt SeatLook fest (KARV-26)
+			shape.setFill(SeatLook.fill(status, seatPatterns.get()));
 			// Suchtreffer bekommen keine eigene Hervorhebung: Die übrigen Sitze sind abgeblendet (unten), die Auswahl
 			// trägt ein goldenes Halo hinter dem Sitz (HallPlanPane)
 			shape.setStroke(Color.BLACK);
@@ -428,6 +449,9 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		selectedBookings = state.selectedBookings();
 		labelOptions = state.planLabels();
 		labelOptions.follow(viewportPane, this::renderHall);
+		seatPatterns = state.seatPatternsProperty();
+		// Neu gezeichnet werden Sitze und Legende (renderHall)
+		LiveViews.follow(viewportPane, seatPatterns, this::renderHall);
 		viewportPane.visibleHallRectProperty().addListener((obs, oldRect, newRect) -> state.visibleHallRectProperty().set(newRect));
 		state.visibleHallRectProperty().set(viewportPane.visibleHallRectProperty().get());
 	}

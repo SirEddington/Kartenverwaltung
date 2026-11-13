@@ -9,9 +9,14 @@
   in der Fußzeile. Aktualisiert wird nur, wenn Sie zustimmen.
 - Unter Einstellungen, „Info und Updates“, stehen die installierte Version und der Stand der
   Update-Prüfung.
-- Die Auswahl im Menü „Anzeige“ (Reihen, Tische, Platznummern, Hallenobjekte, Lage der
-  Kaufzusammenfassung) gilt gemeinsam für Saalansicht, Kundenfenster und Hallen-Editor und bleibt
+- Die Auswahl im Menü „Anzeige“ (Reihen, Tische, Platznummern, Hallenobjekte, barrierefreie
+  Sitzdarstellung, Lage der Kaufzusammenfassung) gilt gemeinsam für Saalansicht, Kundenfenster und Hallen-Editor und bleibt
   nach einem Neustart erhalten. Abschalten lässt sich das unter Einstellungen, „Anzeige“.
+- Die Saalansicht zeigt den Sitzstatus nicht mehr nur über die Farbe: Freie Plätze sind weiß mit
+  grünem Ring, reservierte gelb gestreift, verkaufte rot, gesperrte grau mit Kreuz. Eine Legende
+  unter dem Plan erklärt das. So bleiben die Plätze auch bei Rot-Grün-Schwäche gut zu
+  unterscheiden. Im Menü „Anzeige“ lässt sich das unter „Barrierefreie Sitzdarstellung“
+  ausschalten.
 - Tische lassen sich beschriften wie Hallenobjekte: Text, Größe, Ausrichtung und Drehung.
 - „Reihe füllen…“ fragt auch Tischbreite, Tischhöhe und Sitzdurchmesser ab. Maße und Beschriftung
   lassen sich für alle Tische ganzer Reihen auf einmal ändern.

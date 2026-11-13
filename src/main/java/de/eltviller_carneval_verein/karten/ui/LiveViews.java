@@ -13,6 +13,9 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
+import javafx.beans.value.WeakChangeListener;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.stage.Window;
@@ -50,6 +53,20 @@ public final class LiveViews {
 				registration.detach().run();
 			}
 		});
+	}
+
+	/**
+	 * Ruft {@code onChange} bei jeder Änderung von {@code value}, solange {@code owner} lebt: Der Knoten hält den Listener,
+	 * {@code value} kennt ihn nur schwach. So hält eine app-weite Einstellung (Menü "Anzeige") eine geschlossene Ansicht
+	 * nicht fest.
+	 *
+	 * @param owner    ein Knoten der beobachtenden Ansicht
+	 * @param onChange zum Beispiel das Neuzeichnen des Plans
+	 */
+	public static void follow(Node owner, ObservableValue<?> value, Runnable onChange) {
+		ChangeListener<Object> listener = (obs, oldValue, newValue) -> onChange.run();
+		owner.getProperties().put(listener, listener);
+		value.addListener(new WeakChangeListener<>(listener));
 	}
 
 	/** Jede Einheit ist für die Ansicht von Belang (Abrechnung, Statistik, Kopf-Boxen der Shells). */
