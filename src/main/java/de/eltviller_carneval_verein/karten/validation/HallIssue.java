@@ -5,7 +5,12 @@ public enum HallIssue implements Issue {
 	/** Der Name der Halle ist leer. */
 	NAME_EMPTY("HLL-001", Severity.ERROR, "Der Name einer Halle darf nicht leer sein."),
 	/** Breite oder Höhe der Halle außerhalb von 0 bis 100.000. &1 = "Breite" oder "Höhe", &2 = Halle, &3 = Wert, &4 = Minimum, &5 = Maximum. */
-	SIZE_OUT_OF_RANGE("HLL-002", Severity.ERROR, RangeCheck.TEMPLATE);
+	SIZE_OUT_OF_RANGE("HLL-002", Severity.ERROR, RangeCheck.TEMPLATE),
+	/**
+	 * Zwei Hallenobjekte überlappen sich teilweise (ein Objekt ganz auf dem anderen ist erlaubt). &1 = Halle, &2 und
+	 * &3 = Hallenobjekte (siehe {@link EntityLabels#hallObjectName}) in der Reihenfolge der Liste.
+	 */
+	OBJECTS_OVERLAP("HLL-003", Severity.WARNING, "&2 und &3 überlappen sich teilweise in &1.");
 
 	private final String code;
 	private final Severity severity;

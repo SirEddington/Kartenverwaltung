@@ -11,6 +11,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
+import de.eltviller_carneval_verein.karten.model.SeatingPlan;
+import de.eltviller_carneval_verein.karten.model.Table;
+import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.repository.HallRepository;
 
 class HallSaverTest {
@@ -67,6 +70,28 @@ class HallSaverTest {
 
 		assertTrue(result.saved());
 		assertTrue(result.validation().isEmpty());
+		assertEquals(List.of(hall), repository.saved);
+	}
+
+	@Test
+	void hallWithOverlappingTablesIsSavedWithWarning() {
+		RecordingRepository repository = new RecordingRepository();
+		Hall hall = hall();
+		SeatingPlan plan = hall.addSeatingPlan();
+		TableRow row = plan.addRow();
+		Table first = plan.addTable(row);
+		first.setWidth(50);
+		first.setHeight(100);
+		Table second = plan.addTable(row);
+		second.setWidth(50);
+		second.setHeight(100);
+		second.setPosX(20);
+
+		SaveResult result = HallSaver.trySave(hall, repository);
+
+		assertTrue(result.saved());
+		assertTrue(result.validation().getIssues().stream().anyMatch(i -> i.code().equals("SPL-004")),
+				result.validation().getIssues().toString());
 		assertEquals(List.of(hall), repository.saved);
 	}
 

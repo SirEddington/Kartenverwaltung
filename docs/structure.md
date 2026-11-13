@@ -60,7 +60,7 @@ the same way everywhere (`BookingSync`, `SaleDates`, `BookingCancellation`).
 
 ### `validation`
 One `*Validator` and one `*Issue` enum per entity, plus `ValidationResult`, `Severity`, `MessageTemplate`,
-`RangeCheck`, `DuplicateNames`, `EntityLabels`. New issue enums must be registered in `IssueConventionsTest`.
+`RangeCheck`, `DuplicateNames`, `EntityLabels`, `Footprint`. New issue enums must be registered in `IssueConventionsTest`.
 **Not here:** technical errors (those are `SYS-` messages in `store.StoreMessages` and `GlobalErrorHandler`).
 
 ### `repository`

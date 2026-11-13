@@ -21,6 +21,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 @JsonIgnoreProperties(value = { "height", "price", "paymentStatus", "collected", "lastName", "firstName", "email",
 		"comment" }, ignoreUnknown = true)
 public class Seat {
+	/** Radius eines Sitzes ohne Breite (cm), siehe {@link #radius()}. */
+	public static final double FALLBACK_RADIUS = 10;
+
 	private final String id;
 	private Table parentTable; // gesetzt von Table.setSeats/addSeat, wird nicht gespeichert
 
@@ -128,6 +131,15 @@ public class Seat {
 		this.width = width;
 	}
 	// <-- Getter und Setter
+
+	/**
+	 * Radius des Sitzes in cm: Sitze sind Kreise, die Breite ist ihr Durchmesser. Ohne Breite (0, negativ oder keine
+	 * Zahl) bekäme der Sitz keine Fläche; Anordnung, Zeichnung und Prüfung rechnen dann mit {@value #FALLBACK_RADIUS}.
+	 * Bewusst kein {@code getRadius}: Es soll kein Feld der Datei werden.
+	 */
+	public double radius() {
+		return width > 0 ? width / 2.0 : FALLBACK_RADIUS;
+	}
 
 	/** Nimmt jeden Wert an; eine Nummer unter 1 wird vom {@code SeatValidator} gemeldet (SEA-008). */
 	public void setSeatNumber(int seatNumber) {

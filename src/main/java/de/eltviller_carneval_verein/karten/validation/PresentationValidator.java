@@ -147,7 +147,10 @@ public final class PresentationValidator {
 		}
 	}
 
-	/** Prüft nur, ob eine Halle zugeordnet ist, nicht ob sie existiert (dafür wäre das Hallen-Repository nötig). */
+	/**
+	 * Prüft nur, ob eine Halle zugeordnet ist, nicht ob sie existiert. Das Fehlen der Bestuhlung der Halle meldet
+	 * PRS-007; ohne {@code seatingPlanId} meldet nur PRS-006.
+	 */
 	private void validateHall() {
 		String hallId = presentation.getHallId();
 		if (hallId == null || hallId.isBlank()) {

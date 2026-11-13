@@ -25,8 +25,6 @@ public final class SeatingPlanLayout {
 
 	// Freier Raum zwischen Tischkante und Sitz (cm): Der Sitzmittelpunkt liegt Radius + dieser Abstand neben der Kante
 	private static final double SEAT_CLEARANCE = 5;
-	/** Radius eines Sitzes ohne Breite (cm), siehe {@link #seatRadius}. */
-	public static final double FALLBACK_SEAT_RADIUS = 10;
 
 	// "+ Reihe": Startpunkt der ersten Reihe (x und y), Gang zwischen zwei Reihen, Abstand neben einer Reihe ohne Tische (cm)
 	private static final double FIRST_ROW_START = 100;
@@ -47,14 +45,6 @@ public final class SeatingPlanLayout {
 		for (TableRow row : plan.getRows()) {
 			layoutRow(plan, row);
 		}
-	}
-
-	/**
-	 * Radius eines Sitzes in cm: Sitze sind Kreise, die Breite ist ihr Durchmesser. Ein Sitz ohne Breite (0) bekäme keine
-	 * Fläche; Anordnung und Zeichnung rechnen für ihn mit {@value #FALLBACK_SEAT_RADIUS}, der Validator meldet ihn.
-	 */
-	public static double seatRadius(Seat seat) {
-		return seat.getWidth() > 0 ? seat.getWidth() / 2.0 : FALLBACK_SEAT_RADIUS;
 	}
 
 	/**
@@ -189,7 +179,7 @@ public final class SeatingPlanLayout {
 		if (seats == null || seats.isEmpty()) {
 			return 0;
 		}
-		double maxSeatRadius = seats.stream().mapToDouble(SeatingPlanLayout::seatRadius).max().orElse(0);
+		double maxSeatRadius = seats.stream().mapToDouble(Seat::radius).max().orElse(0);
 		return SEAT_CLEARANCE + 2 * maxSeatRadius;
 	}
 
@@ -223,7 +213,7 @@ public final class SeatingPlanLayout {
 			boolean isLeft = (j % 2 == 0); // Index 0, 2, 4... -> links | Index 1, 3, 5... -> rechts
 			int pairIndex = j / 2;
 
-			double localX = (table.getWidth() / 2 + seatRadius(seat) + SEAT_CLEARANCE) * (isLeft ? -1 : 1);
+			double localX = (table.getWidth() / 2 + seat.radius() + SEAT_CLEARANCE) * (isLeft ? -1 : 1);
 			double localY = -(table.getHeight() / 2) + (pairIndex + 0.5) * section;
 
 			seat.setPosX(centerX + localX * cos - localY * sin);
