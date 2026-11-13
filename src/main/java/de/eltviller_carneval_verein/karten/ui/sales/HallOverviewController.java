@@ -23,7 +23,6 @@ import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
-import de.eltviller_carneval_verein.karten.ui.hall.SeatingPlanLayout;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.fxml.FXML;
@@ -343,7 +342,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		@Override
 		public Node seatMark(Booking booking, Seat seat) {
 			return SeatLook.hasCross(statusOf(booking), seatPatterns.get())
-					? SeatLook.cross(seat.getPosX(), seat.getPosY(), SeatingPlanLayout.seatRadius(seat))
+					? SeatLook.cross(seat.getPosX(), seat.getPosY(), seat.radius())
 					: null;
 		}
 	};
