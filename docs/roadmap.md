@@ -1,12 +1,13 @@
 # Langfristige Roadmap – Design
 
-Stand: 13.11.2026, ausgehend von Release 1.1.0.
+Stand: 16.11.2026, ausgehend von Release 1.1.0.
 
 Dieses Dokument legt die **Reihenfolge** der längerfristigen Vorhaben fest und begründet sie. Es ist kein
 Umsetzungsplan: Jede Stufe bekommt ein eigenes Design, wenn sie an der Reihe ist. Die offenen Fragen je Stufe sind
 dafür schon gesammelt.
 
-Hinweis: Jira war beim Schreiben nicht erreichbar. Der Inhalt von 1.2 stammt aus dem Gespräch, nicht aus den Tickets.
+Die Versionsnummern folgen den Fix-Versionen in Jira (Projekt KARV, abgeglichen am 16.11.2026). Gelesen wurden die
+offenen Tickets mit Titel und Version, bei den Epics und einzelnen Tickets auch die Beschreibung.
 
 ## Absicht
 
@@ -66,6 +67,8 @@ Die drei Umbauten, um die es geht:
 
 ### 1.2 – ECV-Alltag (in Planung, nicht Teil dieses Designs)
 
+Jira: KARV-143 „Abrechnung & Bilanz", KARV-181 „Verkauf & Preise".
+
 Kassen am Event anlegen und verwalten, Kassenbewegungen (Einlage, Entnahme), Kassensturz je Kasse mit Soll/Ist für
 alle Zahlungsmittel, Gesamtbilanz des Events mit einer Zeile je Kasse, Erstattung beim Storno, Buchungen auf andere
 Sitze verschieben, Preis je Kategorie und Vorstellung.
@@ -73,6 +76,8 @@ Sitze verschieben, Preis je Kategorie und Vorstellung.
 Bezug zur Roadmap: Die Kasse ist die Vorstufe der späteren Rollen ("wer sitzt an welcher Kasse" → "wer darf was").
 
 ### 1.3 – Archivierung und Export (Umbau: Löschen können)
+
+Jira: KARV-180 „Archivierung & Aufbewahrung" (KARV-65, KARV-78, KARV-88), KARV-5 „Kartendruck/-export".
 
 **Inhalt**
 - Archivierung abgeschlossener Events. Ein `archived`-Kennzeichen am Event gibt es bereits.
@@ -91,7 +96,25 @@ dringender, weil der Datenbestand nur wächst. Der Export ist das sichtbare Gege
 - Hallenplan-Export als Grundlage für Flucht- und Rettungspläne: Der Export liefert die Zeichnung. Ein normgerechter
   Plan hat eigene Vorgaben, die das Programm nicht erfüllen soll.
 
-### 1.4 – Warteliste und Kundenmail (Umbau: Bestellung und Kunde)
+**Bezug zu Jira**
+- KARV-88 sieht für das Aufräumen alter Versionen schon eine Löschliste im gemeinsamen Ordner vor, damit kein
+  Rechner Gelöschtes wieder hochlädt. Das Löschen von Kundendaten kann denselben Mechanismus nutzen. KARV-88 löscht
+  aber nach Alter und behält die aktuelle Version immer. Für Kundendaten reicht das nicht.
+- KARV-5 meint Eintrittskarten und Türlisten. Der Export von Hallenplänen und Buchungslisten hat noch kein Ticket.
+
+### 1.4 – bereits in Jira geplant
+
+Nicht aus der Ideenliste, sondern schon als Fix-Version v1.4 vorhanden: KARV-6 „Hallenverwaltung" (Gang als Objekt,
+Tische je Vorstellung deaktivieren, dynamische Standardwerte), KARV-7 „Verkaufs-Workflows" (Zufallszuteilung,
+Stehplätze), KARV-8 „Qualität & Robustheit" (Undo/Redo), KARV-72 „Benutzereinstellungen".
+
+Bezug zur Roadmap: Stehplätze (KARV-92) sind Karten ohne festen Platz. Das berührt dieselbe Frage wie die Bestellung
+in 1.5, weil die Buchung heute am Sitz hängt.
+
+### 1.5 – Warteliste und Kundenmail (Umbau: Bestellung und Kunde)
+
+Jira: KARV-11 „Stammkundenverwaltung", KARV-12 „Warteliste & Benachrichtigungen". Beide sind dort als Idee
+vermerkt, über die noch nicht entschieden ist.
 
 **Inhalt**
 - Eine Bestellung fasst mehrere Plätze eines Kunden zusammen.
@@ -110,7 +133,10 @@ Verschieben von Buchungen aus 1.2 zeigt vorher, wie sich mehrere zusammengehöri
 - Mailversand bei mehreren Kassen: genau eine verschickt, auch nach Offline-Phasen. Wo liegen die Zugangsdaten zum
   Postfach, wenn nicht im gemeinsamen Ordner?
 
-### 1.5 – Customizing und Englisch (Umbau: Texte auslagern)
+### 1.6 – Customizing und Englisch (Umbau: Texte auslagern)
+
+Jira: KARV-80 „Theming/White-Label Ansatz" mit KARV-79 „Strenge der Prüfung einstellen". Die Übersetzung hat noch
+kein Ticket.
 
 **Inhalt**
 - Alle Texte in Sprachdateien, Deutsch und Englisch.
@@ -131,7 +157,7 @@ Programm vorzeigbar für einen fremden Verein und steht deshalb direkt vor dem T
 Mac-Nutzer gibt es, vor allem zum Vorbereiten und Auswerten zu Hause, nicht an der Kasse. Ziel ist, den Mac so
 weit zu unterstützen, wie es **ohne Apple-Entwicklerkonto** geht (Entscheidung des Entwicklers: rund 99 $ im Jahr
 sind es derzeit nicht wert). Die Mac-Unterstützung ändert nichts am Datenformat und kann deshalb mit jedem Release
-mitkommen. Vorgeschlagen ist 1.5, weil dort ohnehin die Windows- und ECV-spezifischen Stellen angefasst werden.
+mitkommen. Vorgeschlagen ist 1.6, weil dort ohnehin die Windows- und ECV-spezifischen Stellen angefasst werden.
 
 **Inhalt**
 - Mac-Pakete für Intel und Apple Silicon aus dem bestehenden Release-Lauf (zwei weitere Fat-JARs, Ziele in
@@ -156,6 +182,8 @@ Ausgaben.
 
 ### Vorgezogen: Offline-Erkennung unter Linux
 
+Jira: KARV-179 (Bug, ohne Fix-Version).
+
 Beim Prüfen für den Mac aufgefallen, nur im Code gelesen, nicht unter Linux ausprobiert: `CloudFolders` findet
 Nextcloud nur über `%APPDATA%` und OneDrive nur über Windows-Umgebungsvariablen. Im heutigen Linux-Paket gilt ein
 Nextcloud-Ordner damit immer als erreichbar, und Verkäufe ohne Internet zählen als hochgeladen. Das ist der Fall,
@@ -164,13 +192,17 @@ die Mac-Arbeit, sobald geprüft ist, dass es wirklich so auftritt.
 
 ### Testlauf bei einem Nachbarverein
 
-Nach der ersten echten ECV-Saison und nach 1.5 probiert ein befreundeter Verein das Programm aus. Ziel ist Lernen,
+Nach der ersten echten ECV-Saison und nach 1.6 probiert ein befreundeter Verein das Programm aus. Ziel ist Lernen,
 nicht Vertrieb: Was fehlt, was ist unverständlich, was braucht die Einrichtung ohne den Entwickler? Das Ergebnis
 bestimmt, was in 2.0 zuerst kommt und ob der Vertrieb weiterverfolgt wird.
 
 Vermutung, zu prüfen: Vereine, die heute Excel-Listen führen, wollen ihre Daten übernehmen (Import).
 
 ### 2.0 – Server als Zusatz
+
+Jira: KARV-9 „Server-Datenbank & Nutzerkonten", KARV-10 „Rollen & Berechtigungen". KARV-9 beschreibt noch die
+„Ablösung der lokalen JSON-Dateien durch eine Server-Datenbank". Das widerspricht dem Grundsatz dieser Roadmap
+(Server als Zusatz, nicht als Ersatz) und sollte im Ticket angepasst werden.
 
 **Inhalt**
 - Nutzerkonten (Name, Passwort) und Berechtigungen.
@@ -200,15 +232,24 @@ Offen. Mit GPL-3.0 vereinbar sind Spenden, bezahlter Support, Einrichtung und sp
 eine Lizenzänderung brauchen. Die ist möglich, weil die Rechte beim Entwickler liegen. Vorher ist zu prüfen, ob die
 Paketierung mit Conveyor dann kostenpflichtig wird. Entschieden wird frühestens nach dem Testlauf.
 
+## Noch ohne Jira-Ticket
+
+- Löschen von Kundendaten (1.3)
+- Export von Hallenplänen und Buchungslisten (1.3)
+- Bestellung als eigenes Ding (1.5). KARV-11 deckt nur den Kundenstamm ab.
+- Texte auslagern und Englisch (1.6)
+- macOS (Beigabe zu 1.6)
+- Testlauf bei einem Nachbarverein
+- Bestellannahme über eine Schnittstelle und Self-Hosting (2.0)
+
 ## Annahmen des Verfassers (zu prüfen)
 
 Diese Punkte sind im Gespräch nicht entschieden worden, sondern Vorschläge:
 
-- Die Zuordnung zu den Versionsnummern 1.3, 1.4, 1.5 und 2.0.
-- Neue Fenster in 1.2 bis 1.4 bekommen ihre Texte weiter fest auf Deutsch. Ausgelagert wird einmal, in 1.5. Wenn bis
+- Neue Fenster in 1.2 bis 1.5 bekommen ihre Texte weiter fest auf Deutsch. Ausgelagert wird einmal, in 1.6. Wenn bis
   dahin sehr viele Fenster dazukommen, lohnt es sich, das Auslagern vorzuziehen.
-- Die einfache Kundenmail gehört zu 1.4, die automatische zu 2.0.
-- Die Bestellannahme gehört zu 2.0. Braucht der ECV sie früher, wäre ein händischer Import in 1.4 der Zwischenschritt.
-- Der Export gehört zu 1.3.
+- Die einfache Kundenmail gehört zu 1.5, die automatische zu 2.0.
+- Die Bestellannahme gehört zu 2.0. Braucht der ECV sie früher, wäre ein händischer Import in 1.5 der Zwischenschritt.
+- Der Export von Hallenplänen und Buchungen gehört zu 1.3.
 - Dieses Dokument ist auf Deutsch, obwohl die übrige Dokumentation unter `docs/` englisch ist, weil es Grundlage für
   die deutschen Jira-Tickets ist.
