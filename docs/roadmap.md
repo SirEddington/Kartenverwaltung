@@ -126,6 +126,42 @@ Programm vorzeigbar für einen fremden Verein und steht deshalb direkt vor dem T
 - Umzug des Datenpfads auf bestehenden Installationen.
 - Bleibt der Code selbst deutsch? Annahme: ja, übersetzt wird nur die Oberfläche.
 
+### Beigabe: macOS (kein eigenes Release)
+
+Mac-Nutzer gibt es, vor allem zum Vorbereiten und Auswerten zu Hause, nicht an der Kasse. Ziel ist, den Mac so
+weit zu unterstützen, wie es **ohne Apple-Entwicklerkonto** geht (Entscheidung des Entwicklers: rund 99 $ im Jahr
+sind es derzeit nicht wert). Die Mac-Unterstützung ändert nichts am Datenformat und kann deshalb mit jedem Release
+mitkommen. Vorgeschlagen ist 1.5, weil dort ohnehin die Windows- und ECV-spezifischen Stellen angefasst werden.
+
+**Inhalt**
+- Mac-Pakete für Intel und Apple Silicon aus dem bestehenden Release-Lauf (zwei weitere Fat-JARs, Ziele in
+  `conveyor.conf`).
+- Offline-Erkennung für Cloud-Ordner auf dem Mac (`CloudFolders` kennt bisher nur die Windows-Orte).
+- Bedienung: Cmd statt Strg bei der Mehrfachauswahl und in den Texten.
+- Datenpfad nach Mac-Konvention.
+- Anleitung für die einmalige Freigabe unter Systemeinstellungen → Datenschutz & Sicherheit.
+
+**Grenzen ohne Apple-Konto**
+- Das Paket ist nicht notarisiert. macOS blockiert den ersten Start, der Nutzer gibt die App von Hand frei.
+  Vermutlich nach jedem Update erneut (nicht geprüft).
+- Update nur per Hinweis und von Hand, wie bei Linux.
+- Für Kassen mit Ehrenamtlichen wird der Mac deshalb nicht empfohlen.
+
+**Zuerst zu klären (kurzer Versuch vor jeder Code-Arbeit)**
+- Baut Conveyor ohne Apple-Zertifikat ein startbares Mac-Paket, auch für Apple Silicon?
+- Wer testet auf einem echten Mac (zweiter Bildschirm, Menüleiste, Schrift, Installation)?
+
+**Später:** Kommt über andere Vereine Geld herein, sind Signierung und Notarisierung eine der ersten sinnvollen
+Ausgaben.
+
+### Vorgezogen: Offline-Erkennung unter Linux
+
+Beim Prüfen für den Mac aufgefallen, nur im Code gelesen, nicht unter Linux ausprobiert: `CloudFolders` findet
+Nextcloud nur über `%APPDATA%` und OneDrive nur über Windows-Umgebungsvariablen. Im heutigen Linux-Paket gilt ein
+Nextcloud-Ordner damit immer als erreichbar, und Verkäufe ohne Internet zählen als hochgeladen. Das ist der Fall,
+den KARV-127 unter Windows behoben hat. Es betrifft ein bestehendes Paket und gehört deshalb als eigenes Ticket vor
+die Mac-Arbeit, sobald geprüft ist, dass es wirklich so auftritt.
+
 ### Testlauf bei einem Nachbarverein
 
 Nach der ersten echten ECV-Saison und nach 1.5 probiert ein befreundeter Verein das Programm aus. Ziel ist Lernen,
