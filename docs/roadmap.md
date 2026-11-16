@@ -77,7 +77,8 @@ Bezug zur Roadmap: Die Kasse ist die Vorstufe der späteren Rollen ("wer sitzt a
 
 ### 1.3 – Archivierung und Export (Umbau: Löschen können)
 
-Jira: KARV-180 „Archivierung & Aufbewahrung" (KARV-65, KARV-78, KARV-88), KARV-5 „Kartendruck/-export".
+Jira: KARV-180 „Archivierung & Aufbewahrung" (KARV-65, KARV-78, KARV-88, Löschen von Kundendaten KARV-183),
+KARV-5 „Kartendruck/-export" (Export von Hallenplänen und Buchungslisten KARV-184).
 
 **Inhalt**
 - Archivierung abgeschlossener Events. Ein `archived`-Kennzeichen am Event gibt es bereits.
@@ -100,24 +101,26 @@ dringender, weil der Datenbestand nur wächst. Der Export ist das sichtbare Gege
 - KARV-88 sieht für das Aufräumen alter Versionen schon eine Löschliste im gemeinsamen Ordner vor, damit kein
   Rechner Gelöschtes wieder hochlädt. Das Löschen von Kundendaten kann denselben Mechanismus nutzen. KARV-88 löscht
   aber nach Alter und behält die aktuelle Version immer. Für Kundendaten reicht das nicht.
-- KARV-5 meint Eintrittskarten und Türlisten. Der Export von Hallenplänen und Buchungslisten hat noch kein Ticket.
+- KARV-5 nannte nur Eintrittskarten und Türlisten. Der Export von Hallenplänen und Buchungslisten ist als KARV-184
+  dazugekommen.
 
 ### 1.4 – bereits in Jira geplant
 
 Nicht aus der Ideenliste, sondern schon als Fix-Version v1.4 vorhanden: KARV-6 „Hallenverwaltung" (Gang als Objekt,
-Tische je Vorstellung deaktivieren, dynamische Standardwerte), KARV-7 „Verkaufs-Workflows" (Zufallszuteilung,
-Stehplätze), KARV-8 „Qualität & Robustheit" (Undo/Redo), KARV-72 „Benutzereinstellungen".
+Tische je Vorstellung deaktivieren, dynamische Standardwerte), KARV-7 „Verkaufs-Workflows" (Zufallszuteilung),
+KARV-8 „Qualität & Robustheit" (Undo/Redo), KARV-72 „Benutzereinstellungen".
 
-Bezug zur Roadmap: Stehplätze (KARV-92) sind Karten ohne festen Platz. Das berührt dieselbe Frage wie die Bestellung
-in 1.5, weil die Buchung heute am Sitz hängt.
+Stehplätze (KARV-92) sind von hier nach 1.5 gewandert, siehe dort.
 
 ### 1.5 – Warteliste und Kundenmail (Umbau: Bestellung und Kunde)
 
-Jira: KARV-11 „Stammkundenverwaltung", KARV-12 „Warteliste & Benachrichtigungen". Beide sind dort als Idee
-vermerkt, über die noch nicht entschieden ist.
+Jira: KARV-11 „Stammkundenverwaltung" mit der Bestellung (KARV-185), KARV-12 „Warteliste & Benachrichtigungen",
+KARV-92 „Stehplätze". KARV-11 und KARV-12 sind dort als Idee vermerkt, über die noch nicht entschieden ist.
 
 **Inhalt**
 - Eine Bestellung fasst mehrere Plätze eines Kunden zusammen.
+- Stehplätze: Karten ohne festen Platz (KARV-92). Sie stellen dieselbe Frage wie die Bestellung, weil mehrere
+  Buchungen zusammengehören und die Buchung heute am Sitz hängt. Beide werden zusammen entworfen.
 - Warteliste je Vorstellung.
 - Einfache Kundenmail von der Kasse aus (z. B. Bestätigung, Platz frei geworden), ohne Server.
 
@@ -135,8 +138,8 @@ Verschieben von Buchungen aus 1.2 zeigt vorher, wie sich mehrere zusammengehöri
 
 ### 1.6 – Customizing und Englisch (Umbau: Texte auslagern)
 
-Jira: KARV-80 „Theming/White-Label Ansatz" mit KARV-79 „Strenge der Prüfung einstellen". Die Übersetzung hat noch
-kein Ticket.
+Jira: KARV-80 „Theming/White-Label Ansatz" mit KARV-79 „Strenge der Prüfung einstellen" und KARV-186 „Texte
+auslagern und englische Übersetzung".
 
 **Inhalt**
 - Alle Texte in Sprachdateien, Deutsch und Englisch.
@@ -153,6 +156,8 @@ Programm vorzeigbar für einen fremden Verein und steht deshalb direkt vor dem T
 - Bleibt der Code selbst deutsch? Annahme: ja, übersetzt wird nur die Oberfläche.
 
 ### Beigabe: macOS (kein eigenes Release)
+
+Jira: KARV-187, Fix-Version v1.6.
 
 Mac-Nutzer gibt es, vor allem zum Vorbereiten und Auswerten zu Hause, nicht an der Kasse. Ziel ist, den Mac so
 weit zu unterstützen, wie es **ohne Apple-Entwicklerkonto** geht (Entscheidung des Entwicklers: rund 99 $ im Jahr
@@ -192,6 +197,8 @@ die Mac-Arbeit, sobald geprüft ist, dass es wirklich so auftritt.
 
 ### Testlauf bei einem Nachbarverein
 
+Jira: KARV-188, ohne Fix-Version.
+
 Nach der ersten echten ECV-Saison und nach 1.6 probiert ein befreundeter Verein das Programm aus. Ziel ist Lernen,
 nicht Vertrieb: Was fehlt, was ist unverständlich, was braucht die Einrichtung ohne den Entwickler? Das Ergebnis
 bestimmt, was in 2.0 zuerst kommt und ob der Vertrieb weiterverfolgt wird.
@@ -200,9 +207,9 @@ Vermutung, zu prüfen: Vereine, die heute Excel-Listen führen, wollen ihre Date
 
 ### 2.0 – Server als Zusatz
 
-Jira: KARV-9 „Server-Datenbank & Nutzerkonten", KARV-10 „Rollen & Berechtigungen". KARV-9 beschreibt noch die
-„Ablösung der lokalen JSON-Dateien durch eine Server-Datenbank". Das widerspricht dem Grundsatz dieser Roadmap
-(Server als Zusatz, nicht als Ersatz) und sollte im Ticket angepasst werden.
+Jira: KARV-9 „Server-Datenbank & Nutzerkonten" mit KARV-190 „Self-Hosting", KARV-10 „Rollen & Berechtigungen",
+KARV-189 „Bestellannahme über eine Schnittstelle". KARV-9 beschreibt seit dem 16.11.2026 den Server als Zusatz; der
+frühere Text („Ablösung der lokalen JSON-Dateien durch eine Server-Datenbank") gilt nicht mehr.
 
 **Inhalt**
 - Nutzerkonten (Name, Passwort) und Berechtigungen.
@@ -231,16 +238,6 @@ aktiv im Einsatz ist.
 Offen. Mit GPL-3.0 vereinbar sind Spenden, bezahlter Support, Einrichtung und später Hosting. Lizenzgebühren würden
 eine Lizenzänderung brauchen. Die ist möglich, weil die Rechte beim Entwickler liegen. Vorher ist zu prüfen, ob die
 Paketierung mit Conveyor dann kostenpflichtig wird. Entschieden wird frühestens nach dem Testlauf.
-
-## Noch ohne Jira-Ticket
-
-- Löschen von Kundendaten (1.3)
-- Export von Hallenplänen und Buchungslisten (1.3)
-- Bestellung als eigenes Ding (1.5). KARV-11 deckt nur den Kundenstamm ab.
-- Texte auslagern und Englisch (1.6)
-- macOS (Beigabe zu 1.6)
-- Testlauf bei einem Nachbarverein
-- Bestellannahme über eine Schnittstelle und Self-Hosting (2.0)
 
 ## Annahmen des Verfassers (zu prüfen)
 
