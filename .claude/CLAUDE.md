@@ -4,8 +4,15 @@ Anleitung für Claude Code in diesem Repository.
 
 Kartenverwaltung des Eltviller Carneval Vereins: JavaFX-21-Desktopanwendung (Java 21, Maven) zum Verwalten von Events,
 Vorstellungen, Hallen und Bestuhlungen sowie zum Kartenverkauf und zur Abrechnung, auch mit mehreren Kassen über einen
-gemeinsamen Ordner. Code, Kommentare, Meldungen sowie Jira und Confluence sind deutsch; die Dokumentation unter `docs/`
-ist englisch.
+gemeinsamen Ordner.
+
+## Regeln
+
+Branch-Modell, Merge-Arten, der Ablauf einer Änderung (Spec, Prüfung, Freigabe, danach `/simplify` und
+`/code-review`), Bugfixes, Release, Commits und Sprache stehen in `.github/CONTRIBUTING.md`. Die Datei ist hier
+eingebunden und gilt vollständig; diese Anleitung wiederholt sie nicht.
+
+@../.github/CONTRIBUTING.md
 
 ## Befehle
 
@@ -22,9 +29,8 @@ bash .github/scripts/release-notes.sh                # Release-Text nach target/
 Es gibt keinen Linter. Die CI (`.github/workflows/ci.yml`) baut bei jedem Push mit `-Plinux` unter `xvfb-run`, führt
 alle Tests aus und erzeugt den Release-Text.
 
-Neue Version: `<version>` in `pom.xml`, `app.version` in `conveyor.conf` und ein Abschnitt oben in
-`src/main/resources/de/eltviller_carneval_verein/karten/patchnotes.md`. Der ganze Ablauf steht in
-`docs/installation.md`, Abschnitt „Releasing".
+Neue Version: Was dafür zu ändern ist und wie ein Release gebaut wird, steht in `docs/installation.md`, Abschnitt
+„Releasing".
 
 ## Wo was steht
 
@@ -45,7 +51,7 @@ committet, und außerhalb von `.local/` und `target/` entstehen keine lokalen Hi
 | Ordner | Inhalt |
 |---|---|
 | `.local/tmp/` | Scratch-Programme, Zwischenergebnisse, Logs; jederzeit löschbar |
-| `.local/superpowers/specs/` | Specs und Designs |
+| `.local/superpowers/specs/` | alte Specs und Designs (bis 16.11.2026); neue liegen versioniert in `docs/specs/` |
 | `.local/superpowers/plans/` | Umsetzungspläne |
 | `.local/superpowers/handoffs/` | Übergaben zwischen Sitzungen |
 | `.local/superpowers/sdd/` | Arbeitsstände je Plan (Ledger, Briefe, Review-Pakete) |
@@ -55,14 +61,19 @@ committet, und außerhalb von `.local/` und `target/` entstehen keine lokalen Hi
 | `.local/testrunner/` | JUnit-Launcher mit eigenem Classpath (README dort) |
 | `.local/deployment/` | `conveyor.local.conf` für lokale Conveyor-Läufe |
 
-Das gilt ausdrücklich anstelle der Standardpfade der Superpowers-Skills: Specs und Pläne gehören nicht nach
-`docs/superpowers/`, Arbeitsstände nicht nach `.superpowers/`. Skripte der Skills, die diese Pfade fest anlegen, werden
-nicht benutzt.
+Das gilt ausdrücklich anstelle der Standardpfade der Superpowers-Skills: Specs gehören nach `docs/specs/`, Pläne und
+Arbeitsstände nach `.local/superpowers/`, nichts nach `docs/superpowers/` oder `.superpowers/`. Skripte der Skills, die
+diese Pfade fest anlegen, werden nicht benutzt.
+
+Wer das Superpowers-Plugin nutzt: Das Gespräch führt dessen Brainstorming. Ablageort, Aufbau, Prüfung und Freigabe
+des Specs richten sich nach der `CONTRIBUTING.md`, ausgeführt mit dem Skill `spec` (zwei unabhängige Prüfer statt des
+einen Prüfers des Plugins).
 
 ## Arbeitsweise
 
-- Pull Requests einer Version gehen auf `release/<version>`, nur die fertige Version geht nach `main`.
-- Commit-Betreff `KARV-xx: …`, wenn es ein Ticket gibt. Push und Pull Request nur auf ausdrückliche Anweisung.
+- Push und Pull Request nur auf ausdrückliche Anweisung.
+- Beim Anlegen eines Pull Requests die Vorlage `.github/pull_request_template.md` lesen und ausfüllen;
+  `gh pr create --body` übernimmt sie nicht von selbst.
 - Im Arbeitsverzeichnis haben die meisten Dateien CRLF: bestehende Dateien mit dem Edit-Werkzeug ändern, nicht mit
   `sed -i`. Shell-Skripte (`*.sh`) bleiben LF.
 - Es wird parallel in Eclipse gearbeitet: vor einem Commit `git status` und `git diff` ansehen.
