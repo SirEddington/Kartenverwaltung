@@ -1,7 +1,7 @@
 # Build
 target/
 
-# Lokale Ablage, nicht versioniert: Scratch, Specs, Pläne, Handtests (siehe CLAUDE.md)
+# Lokale Ablage, nicht versioniert: Scratch, Specs, Pläne, Handtests (siehe .claude/CLAUDE.md)
 .local/
 
 # Eclipse

@@ -6,6 +6,8 @@ State: release 1.1.0.
 
 ```
 Kartenverwaltung/
+├── .claude/
+│   └── CLAUDE.md                 Guidance for Claude Code: commands, where things are, local working folder
 ├── .github/
 │   ├── workflows/
 │   │   ├── ci.yml                Every push and pull request: tests + Linux JAR (xvfb), release text check
@@ -16,7 +18,6 @@ Kartenverwaltung/
 ├── mvnw, mvnw.cmd
 ├── pom.xml                       Dependencies, -Plinux profile, shade + javafx plugins
 ├── conveyor.conf                 Installer configuration (Windows amd64, Linux amd64), app.updates = manual
-├── CLAUDE.md                     Guidance for Claude Code: commands, where things are, local working folder
 ├── LICENSE                       GPL-3.0
 ├── docs/                         This documentation
 │   └── kartenverwaltung-map.html Interactive code map (standalone HTML)
