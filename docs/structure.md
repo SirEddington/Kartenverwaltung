@@ -16,9 +16,10 @@ Kartenverwaltung/
 ├── mvnw, mvnw.cmd
 ├── pom.xml                       Dependencies, -Plinux profile, shade + javafx plugins
 ├── conveyor.conf                 Installer configuration (Windows amd64, Linux amd64), app.updates = manual
-├── kartenverwaltung-map.html     Interactive code map (standalone HTML)
+├── CLAUDE.md                     Guidance for Claude Code: commands, where things are, local working folder
 ├── LICENSE                       GPL-3.0
 ├── docs/                         This documentation
+│   └── kartenverwaltung-map.html Interactive code map (standalone HTML)
 └── src/
     ├── main/
     │   ├── java/de/eltviller_carneval_verein/karten/
@@ -51,9 +52,10 @@ Kartenverwaltung/
             └── format-samples/<version>/data.zip + README.md   Data of each release (1.0.1 so far)
 ```
 
-Files that exist locally but are git-ignored: `target/`, `bin/`, Eclipse metadata (`.classpath`, `.project`,
-`.settings/`), `dependency-reduced-pom.xml`, `deployment/` (old local release script and `conveyor.local.conf`),
-`docs/superpowers/` (working specs and plans), `events_data/`, `CLAUDE.md`, `*.log`.
+Files that exist locally but are git-ignored: `target/` (build output, including the release text written by
+`release-notes.sh`), Eclipse metadata (`.classpath`, `.project`, `.settings/`) and `.local/`. `.local/` is the one
+place for everything that only lives on a developer's machine: `tmp/` (scratch files), `superpowers/` (working specs,
+plans and handoffs), `handtest/` (drivers for manual tests) and `deployment/conveyor.local.conf`.
 
 ## Packages and responsibilities
 

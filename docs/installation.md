@@ -196,5 +196,5 @@ Pull requests of a version go to `release/<version>`; only the finished version 
    Workstations showing "Update-Prüfung nicht möglich" are updated with *"Update im Browser laden"*. See
    [decisions.md](decisions.md#update-check-and-update-from-the-app-karv-131).
 
-`conveyor.conf` includes `deployment/conveyor.local.conf`, which is git-ignored and only used for local builds. The
-`deployment/build.bat` script is the old local release path and is superseded by the workflow.
+`conveyor.conf` includes `.local/deployment/conveyor.local.conf`, which is git-ignored and only used for local builds.
+The include is optional: without the file (as in the workflow) Conveyor simply skips it.
