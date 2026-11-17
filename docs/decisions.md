@@ -716,3 +716,23 @@ program start, not the state when sales or editor are opened for the first time.
 
 The PDF export uses OpenPDF 1.3.43 on purpose: from 2.x on, ICU4J (~15 MB) is a mandatory dependency, and the
 reports need no complex text layout.
+
+## Development workflow
+
+**Decision:** How the project is developed (branch model, how branches are merged, specs and their review, bug
+fixes, releases) is defined in one place, [CONTRIBUTING.md](../.github/CONTRIBUTING.md) (in German), for people and
+for Claude Code alike. This entry only records why the rules are what they are.
+
+**Why:**
+- `main` only holds published versions, so its tip is always what the box office runs.
+- Release 1.1.0 was squashed into `main`. `main` then did not know the commits of the release branch, and a fix on
+  that branch could no longer be merged without conflicts. With a merge commit the release branch stays an ancestor
+  of `main`: a fix is made once, on the oldest affected line, and merged forward.
+- Keeping the release branch until the next version gives fixes for the published version a fixed place.
+- Specs used to live on one machine only. In the repository a second developer can read and review them, and a pull
+  request can link to its spec. A spec is a snapshot and is not maintained after the merge; what lasts goes into
+  this file.
+- Two reviewers who do not know the conversation find what the author no longer sees: one asks whether it can be
+  built without asking back, the other checks the claims against the code.
+- The rules live in the repository, not in plugins on one developer's machine: whoever clones it has them, and
+  whoever opens it with Claude Code has the skill `/spec`.

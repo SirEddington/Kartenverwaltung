@@ -7,8 +7,11 @@ State: release 1.1.0.
 ```
 Kartenverwaltung/
 ├── .claude/
-│   └── CLAUDE.md                 Guidance for Claude Code: commands, where things are, local working folder
+│   ├── CLAUDE.md                 Guidance for Claude Code: commands, where things are, local working folder
+│   └── skills/spec/              Project skill /spec: writes a spec and has two independent reviewers check it
 ├── .github/
+│   ├── CONTRIBUTING.md           Rules for working on the project (German): branches, workflow of a change, releases
+│   ├── pull_request_template.md  Checklist of every pull request
 │   ├── workflows/
 │   │   ├── ci.yml                Every push and pull request: tests + Linux JAR (xvfb), release text check
 │   │   └── release.yml           Manual release: tests, two fat JARs, release text, Conveyor publish
@@ -20,7 +23,8 @@ Kartenverwaltung/
 ├── conveyor.conf                 Installer configuration (Windows amd64, Linux amd64), app.updates = manual
 ├── LICENSE                       GPL-3.0
 ├── docs/                         This documentation
-│   └── kartenverwaltung-map.html Interactive code map (standalone HTML)
+│   ├── kartenverwaltung-map.html Interactive code map (standalone HTML)
+│   └── specs/                    Specs of changes (German); snapshots, not maintained after the merge
 └── src/
     ├── main/
     │   ├── java/de/eltviller_carneval_verein/karten/
@@ -50,12 +54,12 @@ Kartenverwaltung/
         ├── java/de/eltviller_carneval_verein/karten/   (same packages as main, 230 test classes)
         └── resources/
             ├── de/…/karten/update/   AppxManifest.xml, ecv-karten-fx132.appinstaller (update fixtures)
-            └── format-samples/<version>/data.zip + README.md   Data of each release (1.0.1 so far)
+            └── format-samples/<version>/data.zip + README.md   Data of each release (1.0.1, 1.1.0)
 ```
 
 Files that exist locally but are git-ignored: `target/` (build output, including the release text written by
 `release-notes.sh`), Eclipse metadata (`.classpath`, `.project`, `.settings/`) and `.local/`. `.local/` is the one
-place for everything that only lives on a developer's machine: `tmp/` (scratch files), `superpowers/` (working specs,
+place for everything that only lives on a developer's machine: `tmp/` (scratch files), `superpowers/` (specs from before `docs/specs/` existed,
 plans, handoffs, notes and task reports), `handtest/` (drivers for manual tests), `testrunner/` (a JUnit launcher
 with its own classpath) and `deployment/conveyor.local.conf`.
 

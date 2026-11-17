@@ -12,6 +12,7 @@ Ticket box office for the carnival sessions of the Eltviller Carneval Verein (EC
 | [🧠 Technical decisions](docs/decisions.md) | Trade-offs and design justifications |
 | [📖 Usage guide](docs/usage.md) | How to use the application, main flows, messages |
 | [🧪 Testing](docs/testing.md) | How to run tests and testing strategy |
+| [🤝 Contributing](.github/CONTRIBUTING.md) | Branch model, workflow of a change, releases (in German) |
 
 ---
 
