@@ -22,7 +22,7 @@ Claude Code gleichermaßen. Wie man das Projekt baut und startet, steht in
 |---|---|---|---|
 | `main` | enthält nur veröffentlichte Versionen | – | nie |
 | `release/<version>` (dreiteilig, z. B. `release/1.2.0`) | sammelt alle Änderungen einer Version; nach der Veröffentlichung ist er die Wartungslinie dieser Version | von `main`, sobald die vorige Version veröffentlicht ist | wird gelöscht, sobald die **nächste** Version veröffentlicht ist |
-| `<art>/KARV-<nr>-<kurzname>` | eine Änderung | vom Release-Branch, in den sie gehört | wird nach dem Merge gelöscht |
+| `<art>/KARV-<nr>-<kurzname>` | eine Änderung | vom Release-Branch, in den sie gehört | wird nach dem Merge automatisch gelöscht |
 
 - **Arten:** `feature`, `bugfix`, `docs`, `test`, `chore`. Gibt es kein Ticket, entfällt `KARV-<nr>-`
   (`<art>/<kurzname>`).
@@ -48,8 +48,9 @@ Claude Code gleichermaßen. Wie man das Projekt baut und startet, steht in
 | `release/<version>` → `main` | Merge-Commit | `main` kennt danach alle Commits der Version, und die Wartungslinie bleibt ein Vorfahr von `main` |
 | `chore/main-nach-<version>` → `release/<version>` (Vorwärts-Merge, siehe [Bugfixes](#bugfixes-und-patch-versionen)) | Merge-Commit | ein Squash würde die Abstammung verlieren und beim nächsten Release Konflikte erzeugen |
 
-Die Merge-Art wählt, wer mergt. GitHub unterscheidet dabei nicht nach dem Quell-Branch; deshalb steht die Frage in
-der Checkliste jedes Pull Requests.
+Nach `main` lässt GitHub nur den Merge-Commit zu. In einen Release-Branch sind Squash und Merge-Commit möglich, und
+GitHub unterscheidet dabei nicht nach dem Quell-Branch; die Merge-Art wählt dort, wer mergt. Deshalb steht die Frage
+in der Checkliste jedes Pull Requests.
 
 ## Ablauf einer Änderung
 
@@ -164,12 +165,14 @@ Diese Datei sagt, welche Branches wann gemergt, angelegt und gelöscht werden. W
 2. **Pull Request** `release/<version>` → `main`.
 3. **Release bauen** (Workflow „Release build" auf `main`).
 4. **Nach der Veröffentlichung einer neuen Version** (nicht einer Patch-Version): den Release-Branch der **vorigen**
-   Version löschen, `release/<nächste Version>` von `main` anlegen, Versionssprung.
+   Version löschen, `release/<nächste Version>` von `main` anlegen, Versionssprung. Zum Löschen das Ruleset
+   `release-nicht-loeschen` kurz auf „Disabled" stellen, den Branch löschen und das Ruleset wieder auf „Active"
+   stellen (siehe [Einstellungen am Repository](#einstellungen-am-repository)).
 
 ## Commits und Pull Requests
 
 - Commit-Betreff `KARV-<nr>: …`, wenn es ein Ticket gibt.
-- Titel eines Pull Requests:
+- Titel eines Pull Requests. Er wird beim Mergen zum Betreff des Commits, bei Squash wie bei Merge-Commit:
 
   | Pull Request | Titel |
   |---|---|
@@ -196,3 +199,36 @@ Wer das Repository mit Claude Code öffnet, hat alles Nötige, ohne ein Plugin z
 | `/code-review` | sucht Fehler im Diff (in Claude Code enthalten) |
 
 Die Anleitung für Claude steht in [.claude/CLAUDE.md](../.claude/CLAUDE.md); sie bindet diese Datei ein.
+
+## Einstellungen am Repository
+
+Stand 17.11.2026. Die Einstellungen schützen vor Versehen; die Regeln oben ersetzen sie nicht. Wer sie ändert, zieht
+diesen Abschnitt nach.
+
+**Rulesets** (Settings → Rules → Rulesets), alle aktiv und ohne Ausnahmen, auch nicht für Admins:
+
+| Ruleset | Ziel | Regeln |
+|---|---|---|
+| `mainMerge` | `main` | kein Löschen, kein Force-Push, Änderungen nur per Pull Request, nur Merge-Commit, Check `test` muss grün sein |
+| `release-branches` | `release/*` | kein Force-Push, Änderungen nur per Pull Request, Squash oder Merge-Commit, Check `test` muss grün sein (nicht beim Anlegen eines Branches) |
+| `release-nicht-loeschen` | `release/*` | kein Löschen |
+
+- Die Löschsperre steht in einem eigenen Ruleset, damit sie sich einzeln abschalten lässt, wenn ein alter
+  Release-Branch gelöscht wird. Die übrigen Regeln bleiben dabei in Kraft.
+- `test` ist der Job der CI (`.github/workflows/ci.yml`). Wer den Job umbenennt, passt beide Rulesets an, sonst lässt
+  sich nichts mehr mergen.
+- Auf Arbeits-Branches liegt kein Ruleset: Dort sind Push, Rebase und Löschen frei.
+
+**Pull Requests** (Settings → General → Pull Requests):
+
+- „Automatically delete head branches" ist an: Ein gemergter Arbeits-Branch wird gelöscht. Release-Branches bleiben
+  wegen der Löschsperre stehen.
+- Der Commit trägt den Titel des Pull Requests: bei „Allow merge commits" die Vorgabe „Pull request title", bei
+  „Allow squash merging" die Vorgabe „Pull request title and commit details".
+
+**Was die Einstellungen nicht verhindern:** GitHub unterscheidet nicht nach dem Quell-Branch. Ein Vorwärts-Merge lässt
+sich squashen, ein Arbeits-Branch mit Merge-Commit in einen Release-Branch oder per Pull Request direkt nach `main`
+mergen. Dafür gibt es den letzten Punkt der Checkliste.
+
+**Erprobt am 17.11.2026:** Ein neuer Release-Branch lässt sich trotz der Regeln von `main` anlegen. Die Löschsperre
+hält gegen das Löschen von Hand und gegen das automatische Löschen nach einem Merge.
