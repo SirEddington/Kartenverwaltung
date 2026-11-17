@@ -49,7 +49,10 @@ committet, und außerhalb von `.local/` und `target/` entstehen keine lokalen Hi
 | `.local/superpowers/plans/` | Umsetzungspläne |
 | `.local/superpowers/handoffs/` | Übergaben zwischen Sitzungen |
 | `.local/superpowers/sdd/` | Arbeitsstände je Plan (Ledger, Briefe, Review-Pakete) |
+| `.local/superpowers/notizen/` | Handtest-Protokolle, PR-Texte, Entwürfe für Confluence |
+| `.local/superpowers/reports/` | Berichte einzelner Aufgaben |
 | `.local/handtest/` | Treiber für Handtests per Fernsteuerung |
+| `.local/testrunner/` | JUnit-Launcher mit eigenem Classpath (README dort) |
 | `.local/deployment/` | `conveyor.local.conf` für lokale Conveyor-Läufe |
 
 Das gilt ausdrücklich anstelle der Standardpfade der Superpowers-Skills: Specs und Pläne gehören nicht nach

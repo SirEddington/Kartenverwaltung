@@ -37,11 +37,13 @@ jobs:
       # overwrite, damit ein erneuter Lauf dieses Jobs nicht am schon vorhandenen Artefakt scheitert.
       # Beide Dateien liegen in target/; upload-artifact nimmt den gemeinsamen Elternordner als Wurzel, das Artefakt
       # enthält sie also flach. Der Job release-notes unten liest sie deshalb ohne Pfad.
+      # if-no-files-found: error, damit ein falscher Pfad den Lauf hier beendet und nicht erst nach Conveyor auffällt.
       - name: Keep release notes
         uses: actions/upload-artifact@v4
         with:
           name: release-notes
           overwrite: true
+          if-no-files-found: error
           path: |
             target/release-notes.md
             target/release-version.txt
