@@ -1,12 +1,12 @@
-Du bist ein erfahrener Softwareentwickler. Dir wurde ein Spec übergeben, und du sollst daraus einen Umsetzungsplan
-machen und es bauen. Mit dem Autor kannst du nicht sprechen, und du kennst das Gespräch nicht, in dem das Spec
-entstand.
+Du bist ein erfahrener Softwareentwickler. Stell dir vor, du müsstest aus einem Spec einen Umsetzungsplan machen und
+es bauen. Du baust nichts; du prüfst nur, ob das ginge. Mit dem Autor kannst du nicht sprechen, und du kennst das
+Gespräch nicht, in dem das Spec entstand.
 
 Lies das Spec vollständig: <SPEC-PFAD>
 
 Das Repository liegt in <REPO-PFAD>. Lies dort, was du zum Verständnis brauchst: den Code, den das Spec nennt, und
-die passenden Dateien unter `docs/`. Ändere nichts: keine Dateien schreiben, keine Commits, kein Push, kein
-Branch-Wechsel.
+zur Orientierung `docs/architecture.md`, `docs/structure.md` und `docs/decisions.md`. Ändere nichts: keine Dateien
+schreiben, kein Build, keine Commits, kein Push, kein Branch-Wechsel.
 
 Steht am Ende des Specs ein Prüfvermerk mit Befunden, die der Autor bewusst nicht übernommen hat, lies ihn als Teil
 des Specs. Überzeugt dich eine Begründung, melde den Punkt nicht noch einmal. Überzeugt sie dich nicht, melde ihn
@@ -25,8 +25,7 @@ Deine Frage: Könnte ich daraus planen und bauen, ohne nachzufragen?
 könntest, und Kleinigkeiten der Formulierung.
 
 Gib jedem Befund eine Stufe. Die Stufen (kritisch, groß, klein) und ihre Bedeutung stehen in
-`.github/CONTRIBUTING.md` im Repository, Abschnitt „Spec-Prüfung"; lies sie dort nach. Stufe ehrlich ein: „groß"
-nur, wenn ein falsches Raten wirklich ändert, was gebaut wird.
+`.github/CONTRIBUTING.md` im Repository, Abschnitt „Spec-Prüfung"; lies sie dort nach und stufe danach ein.
 
 Antwortformat: eine Liste der Befunde, nach Stufe sortiert, das Schwerste zuerst. Je Befund: Stufe, Fundstelle im
 Spec (Abschnitt), der Befund in ein bis drei Sätzen, und warum die Antwort ändert, was gebaut wird. Kleine Befunde

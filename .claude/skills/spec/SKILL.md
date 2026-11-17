@@ -17,7 +17,7 @@ Kein Code, bevor das Spec geprüft und freigegeben ist.
    Sätzen wiedergeben kannst und er zustimmt.
 2. **Bestand lesen.** Lies den betroffenen Code und die passenden Dateien unter `docs/` (`architecture.md`,
    `decisions.md`, `structure.md`). Was du über den Bestand behauptest, musst du gesehen haben.
-3. **Wege vorstellen.** Zeige zwei oder drei Wege mit ihren Folgen und sage, welchen du nimmst und warum. Der
+3. **Wege vorstellen.** Zeige zwei oder drei Wege mit ihren Folgen und sage, welchen du empfiehlst und warum. Der
    Entwickler wählt.
 4. **Arbeits-Branch.** Stelle sicher, dass du auf einem Arbeits-Branch stehst (Namen und Basis: `CONTRIBUTING.md`,
    „Branches").
@@ -36,9 +36,8 @@ Kein Code, bevor das Spec geprüft und freigegeben ist.
    Gesprächs, keine eigene Einschätzung, nicht die Befunde des anderen.
 7. **Einarbeiten.** Behebe kritische und große Befunde im Spec. Was du nicht übernimmst oder herabstufst, kommt mit
    Begründung in den Prüfvermerk. Kleine Befunde arbeitest du ein, wenn sie das Spec besser machen.
-8. **Wiederholen.** Solange in einer Runde ein Prüfer Kritisches oder Großes meldet, folgt eine weitere Runde mit
-   einem neuen Paar. Wann die Prüfung endet und wann sie abbricht, steht in der `CONTRIBUTING.md`, „Spec-Prüfung".
-   Es zählt die Einstufung der Prüfer, nicht deine.
+8. **Wiederholen** mit einem neuen Paar. Wann die Prüfung endet und wann sie abbricht, steht in der
+   `CONTRIBUTING.md`, „Spec-Prüfung"; halte dich genau daran.
 9. **Abschließen.** Schreibe den Prüfvermerk, committe das Spec auf dem Arbeits-Branch und zeige es dem Entwickler.
    Nenne ihm den Weg der Freigabe (`CONTRIBUTING.md`, „Freigabe"). Pushe nicht von dir aus.
 10. **Warten.** Vor der Freigabe wird nichts gebaut.
@@ -47,7 +46,7 @@ Kein Code, bevor das Spec geprüft und freigegeben ist.
 
 - Ziel, Grund und Weg sind im Gespräch schon geklärt (etwa durch das Brainstorming des Superpowers-Plugins): Beginne
   bei Schritt 4.
-- Es gibt schon ein Spec, das nur geprüft werden soll: Beginne bei Schritt 6.
+- Es gibt schon ein Spec, das nur geprüft werden soll: Beginne bei Schritt 4 und überspringe Schritt 5.
 
 ## Was du dem Entwickler am Ende sagst
 

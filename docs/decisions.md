@@ -724,7 +724,9 @@ fixes, releases) is defined in one place, [CONTRIBUTING.md](../.github/CONTRIBUT
 for Claude Code alike. This entry only records why the rules are what they are.
 
 **Why:**
-- `main` only holds published versions, so its tip is always what the box office runs.
+- `main` only holds published versions, so its tip is always the latest published version.
+- Changes are squashed into the release branch: one commit per change keeps the history of a version readable, and
+  `git log --first-parent` lists its changes.
 - Release 1.1.0 was squashed into `main`. `main` then did not know the commits of the release branch, and a fix on
   that branch could no longer be merged without conflicts. With a merge commit the release branch stays an ancestor
   of `main`: a fix is made once, on the oldest affected line, and merged forward.
@@ -733,6 +735,6 @@ for Claude Code alike. This entry only records why the rules are what they are.
   request can link to its spec. A spec is a snapshot and is not maintained after the merge; what lasts goes into
   this file.
 - Two reviewers who do not know the conversation find what the author no longer sees: one asks whether it can be
-  built without asking back, the other checks the claims against the code.
+  built without having to ask, the other checks the claims against the code.
 - The rules live in the repository, not in plugins on one developer's machine: whoever clones it has them, and
   whoever opens it with Claude Code has the skill `/spec`.

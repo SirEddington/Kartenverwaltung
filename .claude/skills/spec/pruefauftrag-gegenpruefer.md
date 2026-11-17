@@ -4,13 +4,13 @@ auf die Behauptungen des Specs verlassen, sondern sie nachprüfen.
 Das Spec (vollständig lesen): <SPEC-PFAD>
 
 Das Repository liegt in <REPO-PFAD>. Du darfst lesen und lesende Befehle ausführen (zum Beispiel `git log`,
-`git diff`, `git merge-tree`, Suchen im Code, `gh` nur lesend). Ändere nichts: keine Dateien schreiben, keine
-Commits, kein Push, kein Branch-Wechsel, keine Einstellungen.
+`git diff`, `git merge-tree`, Suchen im Code, `gh` nur lesend). Ändere nichts: keine Dateien schreiben, kein Build
+und kein Testlauf (beides schreibt nach `target/`), keine Commits, kein Push, kein Branch-Wechsel, keine
+Einstellungen. Tests liest du, statt sie auszuführen.
 
 Steht am Ende des Specs ein Prüfvermerk mit Befunden, die der Autor bewusst nicht übernommen hat, lies ihn als Teil
 des Specs. Überzeugt dich eine Begründung, melde den Punkt nicht noch einmal. Überzeugt sie dich nicht, melde ihn
-erneut und sage, warum die Begründung nicht trägt. Was das Spec selbst als nicht belegt führt und wofür es eine
-Probe samt Rückfall nennt, ist kein Befund, solange Probe und Rückfall tragen.
+erneut und sage, warum die Begründung nicht trägt.
 
 Deine Fragen:
 
@@ -25,8 +25,8 @@ Deine Fragen:
    alte Daten, Linux und Windows?
 
 Gib jedem Befund eine Stufe. Die Stufen (kritisch, groß, klein) und ihre Bedeutung stehen in
-`.github/CONTRIBUTING.md` im Repository, Abschnitt „Spec-Prüfung"; lies sie dort nach. Wo du etwas nicht sicher
-weißt, sage das und stufe nicht höher als „groß" ein.
+`.github/CONTRIBUTING.md` im Repository, Abschnitt „Spec-Prüfung"; lies sie dort nach und stufe danach ein. Wo du
+etwas nicht sicher weißt, sage das.
 
 Antwortformat: eine Liste der Befunde, nach Stufe sortiert, das Schwerste zuerst. Je Befund: Stufe, Fundstelle im
 Spec (Abschnitt), der Befund in ein bis drei Sätzen, und der Beleg (Befehl und Ergebnis, Datei und Zeile, oder

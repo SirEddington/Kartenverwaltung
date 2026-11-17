@@ -4,8 +4,7 @@ Diese Datei ist die eine Stelle für die Regeln, nach denen hier entwickelt wird
 Claude Code gleichermaßen. Wie man das Projekt baut und startet, steht in
 [docs/installation.md](../docs/installation.md).
 
-„Maintainer" ist der Inhaber des Repositorys. Er gibt Specs frei, entscheidet über Patch-Versionen und mergt nach
-`main`.
+„Maintainer" ist der Inhaber des Repositorys. Er gibt Specs frei und entscheidet über Patch-Versionen.
 
 ## Kurzfassung
 
@@ -49,8 +48,8 @@ Claude Code gleichermaßen. Wie man das Projekt baut und startet, steht in
 | `release/<version>` → `main` | Merge-Commit | `main` kennt danach alle Commits der Version, und die Wartungslinie bleibt ein Vorfahr von `main` |
 | `chore/main-nach-<version>` → `release/<version>` (Vorwärts-Merge, siehe [Bugfixes](#bugfixes-und-patch-versionen)) | Merge-Commit | ein Squash würde die Abstammung verlieren und beim nächsten Release Konflikte erzeugen |
 
-Die Merge-Art wählt, wer mergt. GitHub lässt in einem Release-Branch beide Arten zu und unterscheidet nicht nach dem
-Quell-Branch; deshalb steht die Frage in der Checkliste jedes Pull Requests.
+Die Merge-Art wählt, wer mergt. GitHub unterscheidet dabei nicht nach dem Quell-Branch; deshalb steht die Frage in
+der Checkliste jedes Pull Requests.
 
 ## Ablauf einer Änderung
 
@@ -95,8 +94,8 @@ Jeder Befund trägt eine Stufe:
   folgen oder den Befund erneut melden.
 - **Abbruch:** Melden die Prüfer nach drei Runden weiter Kritisches oder Großes, endet die Prüfung, und der
   Maintainer entscheidet über die strittigen Befunde. Meist ist das Spec dann zu groß und gehört geteilt.
-- **Prüfvermerk:** Er steht am Ende des Specs und nennt Datum, Zahl der Runden, das Ergebnis der letzten Runde und
-  die bewusst nicht übernommenen Befunde mit Begründung.
+- **Prüfvermerk:** Er steht am Ende des Specs und nennt je Runde Datum und Ergebnis, die bewusst nicht übernommenen
+  Befunde mit Begründung und was nicht belegt werden konnte.
 - **Ohne Claude Code** gilt dieselbe Regel als Ergebnis. Wer prüft (Menschen oder ein anderes Werkzeug), wählt der
   Entwickler; die Prüfer dürfen das Gespräch nicht kennen und einander nicht lesen.
 
@@ -139,8 +138,9 @@ gemergt.
   1. Einmal je Patch-Version: Pull Request `chore/version-<patch-version>` in die Wartungslinie (Versionssprung wie
      unter [Branches](#branches)). Weitere Fixes derselben Patch-Version ergänzen nur deren Patchnotes.
   2. `bugfix/…` von der Wartungslinie, Pull Request dorthin.
-  3. Die Patch-Version veröffentlichen wie ein Release: Schritte 1 bis 3 unter [Release](#release). Schritt 4 dort
-     entfällt, die Wartungslinie bleibt bestehen.
+  3. Die Patch-Version veröffentlichen wie ein Release, Schritte 1 bis 3 unter [Release](#release): Vorbereitung
+     `chore/release-<patch-version>` in die Wartungslinie, Pull Request Wartungslinie → `main`, Release bauen.
+     Schritt 4 dort entfällt, die Wartungslinie bleibt bestehen.
   4. Vorwärts-Merge: Branch `chore/main-nach-<version in Arbeit>` vom Release-Branch in Arbeit, `main` hineinmergen,
      Pull Request in den Release-Branch in Arbeit. Konflikte bei der Version und in den Patchnotes sind dabei der
      Normalfall, sobald die Version in Arbeit hochgesetzt ist. Auflösung: Die Version in Arbeit bleibt; in den

@@ -146,8 +146,8 @@ in [CONTRIBUTING.md](../.github/CONTRIBUTING.md) (in German); steps 1 to 3 below
    `conveyor.conf` are derived from `app.version`, so both must match. In the same commit add a section for the new
    version at the top of `src/main/resources/de/eltviller_carneval_verein/karten/patchnotes.md` with at least one real
    entry; `PatchNotesBundledTest` fails otherwise (all three versions must be equal and three-part `a.b.c`).
-2. **Before the pull request from `release/<version>` to `main` (patch notes):** until then the section of the new
-   version only holds a provisional text, so that the tests stay green on the release branch. Shortly before the pull
+2. **Before the pull request to `main` (patch notes; for the pull request itself see CONTRIBUTING.md):** until then
+   the section of the new version only holds a provisional text, so that the tests stay green. Shortly before the pull
    request, write the final text from the tickets of the fixVersion in Jira and have the maintainer approve it
    (`git log --first-parent <previous tag>..HEAD` helps; without `--first-parent`, commits of older versions that
    were merged in show up as new). Plain language for the box office; sections "Neu", "Verbessert", "Behoben",

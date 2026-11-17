@@ -59,7 +59,7 @@ Kartenverwaltung/
 
 Files that exist locally but are git-ignored: `target/` (build output, including the release text written by
 `release-notes.sh`), Eclipse metadata (`.classpath`, `.project`, `.settings/`) and `.local/`. `.local/` is the one
-place for everything that only lives on a developer's machine: `tmp/` (scratch files), `superpowers/` (specs from before `docs/specs/` existed,
+place for everything that only lives on a developer's machine: `tmp/` (scratch files), `superpowers/` (old specs,
 plans, handoffs, notes and task reports), `handtest/` (drivers for manual tests), `testrunner/` (a JUnit launcher
 with its own classpath) and `deployment/conveyor.local.conf`.
 
