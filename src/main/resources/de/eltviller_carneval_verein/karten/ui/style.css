@@ -952,6 +952,17 @@
     -fx-padding: 6px;
 }
 
+/* Anzahl und Preis der Auswahl am Mauszeiger (SelectionHint, KARV-194): hell wie der Status-Tooltip, damit er sich
+   vom blauen Tooltip der Sitze abhebt und über Plan und Tabellenzeilen lesbar bleibt */
+.selection-hint {
+    -fx-background-color: #B8B8B8, -fx-surface-white;
+    -fx-background-insets: 0, 1;
+    -fx-background-radius: 4px, 3px;
+    -fx-padding: 4px 8px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -fx-ecv-blue;
+}
+
 /* ------------------------------------------------------------------------------
  * KURZE ROTE MARKIERUNG EINER NICHT UEBERNOMMENEN EINGABE (InputFeedback)
  * Die Klasse .input-error setzt InputFeedback an der Zelle oder dem Spinner und nimmt sie nach

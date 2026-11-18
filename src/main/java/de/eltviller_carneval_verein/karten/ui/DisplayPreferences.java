@@ -36,6 +36,7 @@ public final class DisplayPreferences {
 
 	private final PlanLabelOptions planLabels = new PlanLabelOptions();
 	private final BooleanProperty seatPatterns = new SimpleBooleanProperty(true);
+	private final BooleanProperty selectionHint = new SimpleBooleanProperty(true);
 	private final ObjectProperty<SummaryPlacement> summaryPlacement = new SimpleObjectProperty<>(SummaryPlacement.AUTO);
 	// Die Platzierung, wie sie in der Datei steht: Eine unbekannte (aus einer neueren Version) gilt als automatisch und
 	// wird unverändert zurückgeschrieben, bis jemand eine andere als "Automatisch" wählt
@@ -56,11 +57,13 @@ public final class DisplayPreferences {
 			planLabels.seatNumbersProperty().set(saved.isSeatNumbers());
 			planLabels.hallObjectsProperty().set(saved.isHallObjects());
 			seatPatterns.set(saved.isSeatPatterns());
+			selectionHint.set(saved.isSelectionHint());
 			summaryPlacement.set(filePlacement.get());
 		}
 		// Erst nach dem Übernehmen, damit der Start nichts schreibt
 		planLabels.addListener((obs, oldValue, newValue) -> write());
 		seatPatterns.addListener((obs, oldValue, newValue) -> write());
+		selectionHint.addListener((obs, oldValue, newValue) -> write());
 		summaryPlacement.addListener((obs, oldValue, newValue) -> write());
 	}
 
@@ -96,6 +99,11 @@ public final class DisplayPreferences {
 		return seatPatterns;
 	}
 
+	/** Ob die Verkaufsansicht Anzahl und Preis der gewählten Karten am Mauszeiger zeigt (KARV-194). Standard an. */
+	public BooleanProperty selectionHintProperty() {
+		return selectionHint;
+	}
+
 	/** Wo das Kundenfenster die Kaufzusammenfassung zeigt. */
 	public ObjectProperty<SummaryPlacement> summaryPlacementProperty() {
 		return summaryPlacement;
@@ -105,6 +113,7 @@ public final class DisplayPreferences {
 		try {
 			PlanLabels labels = planLabels.snapshot();
 			boolean patterns = seatPatterns.get();
+			boolean hint = selectionHint.get();
 			SummaryPlacement current = summaryPlacement.get();
 			filePlacement.set(current == null ? SummaryPlacement.AUTO : current);
 			String placement = filePlacement.toJson();
@@ -115,6 +124,7 @@ public final class DisplayPreferences {
 				display.setSeatNumbers(labels.seatNumbers());
 				display.setHallObjects(labels.hallObjects());
 				display.setSeatPatterns(patterns);
+				display.setSelectionHint(hint);
 				display.setSummaryPlacement(placement);
 			});
 		} catch (RuntimeException e) {

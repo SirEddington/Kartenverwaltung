@@ -697,7 +697,7 @@ through to the seat. The cross is white because a dark one swallowed the black s
 ## One "Anzeige" choice for all plan views, restored at start (KARV-76)
 
 **Decision:** Sales view, customer display and hall editor share one app-wide `DisplayPreferences` (rows, tables, seat
-numbers, hall objects, seat patterns, purchase summary placement). It is installed in `MainApp` at start and written to
+numbers, hall objects, seat patterns, selection hint at the pointer (KARV-194), purchase summary placement). It is installed in `MainApp` at start and written to
 `settings.json` (`display`) on every change as a partial save. With "Anzeige beim Start wiederherstellen" (on by
 default) the next start uses the stored choice; off, every start shows everything with the placement "Automatisch".
 

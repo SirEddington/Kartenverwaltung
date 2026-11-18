@@ -2,8 +2,15 @@
 
 ## 1.1.1
 
+### Neu
+- Beim Auswählen von Plätzen steht neben dem Mauszeiger, wie viele Karten gewählt sind und was sie
+  zusammen kosten, in der Saalansicht und in der Tabelle. Im Menü „Anzeige“ lässt sich das unter
+  „Auswahl am Mauszeiger“ abschalten.
+
 ### Behoben
 - Fehlerbehebungen für Version 1.1.0.
+- Im Anzeigemodus übernimmt die Saalansicht keine Auswahl mehr aus der Tabelle. Bisher blieben
+  die Plätze dort markiert und ließen sich erst im Bearbeitungsmodus wieder abwählen.
 
 ## 1.1.0
 

@@ -31,7 +31,16 @@ class DisplaySettingsTest {
 		assertTrue(display.isSeatNumbers());
 		assertTrue(display.isHallObjects());
 		assertTrue(display.isSeatPatterns());
+		assertTrue(display.isSelectionHint());
 		assertEquals("AUTO", display.getSummaryPlacement());
+	}
+
+	@Test
+	void settingsFrom110WithoutSelectionHintShowTheHint(@TempDir File dir) throws IOException {
+		// KARV-194: Der Schalter kam mit 1.1.1; ein Block ohne ihn zeigt den Hinweis am Mauszeiger
+		write(dir, "{\"display\": {\"restoreAtStart\": true, \"rows\": false, \"seatPatterns\": false}}");
+
+		assertTrue(new SettingsStore(dir).current().getDisplay().isSelectionHint());
 	}
 
 	@Test
@@ -49,6 +58,7 @@ class DisplaySettingsTest {
 		assertTrue(display.get("seatNumbers").asBoolean());
 		assertTrue(display.get("hallObjects").asBoolean());
 		assertTrue(display.get("seatPatterns").asBoolean());
+		assertTrue(display.get("selectionHint").asBoolean());
 		assertEquals("AUTO", display.get("summaryPlacement").asText());
 	}
 
@@ -114,6 +124,7 @@ class DisplaySettingsTest {
 		display.setSeatNumbers(false);
 		display.setHallObjects(false);
 		display.setSeatPatterns(false);
+		display.setSelectionHint(false);
 		display.setSummaryPlacement("LEFT");
 		store.save();
 
@@ -125,6 +136,7 @@ class DisplaySettingsTest {
 		assertFalse(reloaded.isSeatNumbers());
 		assertFalse(reloaded.isHallObjects());
 		assertFalse(reloaded.isSeatPatterns());
+		assertFalse(reloaded.isSelectionHint());
 		assertEquals("LEFT", reloaded.getSummaryPlacement());
 	}
 
