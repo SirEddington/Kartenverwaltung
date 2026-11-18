@@ -94,7 +94,8 @@ data/               local version store (all units)
 index/              start index (cache, safe to lose); index/clean marks a clean shutdown
 logs/               kartenverwaltung-0.log … -4.log (5 × 1 MB, rotating)
 settings.json       application settings (shared folder, operators, auto-save, "Anzeige" menu, patch notes seen)
-machine.json        random machine id and display name of this workstation
+machine.json        random machine id and display name of this workstation (preset from the computer name:
+                    COMPUTERNAME on Windows, /etc/hostname on Linux; "Rechner" if none is found)
 connection.json     "connected" marker for the shared folder (only when connected)
 sync-state.json     read positions in the feeds of the other workstations
 conflicts-ack.json  conflicts marked "Erledigt"
