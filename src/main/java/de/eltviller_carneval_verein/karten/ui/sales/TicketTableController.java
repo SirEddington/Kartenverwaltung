@@ -710,15 +710,25 @@ public class TicketTableController implements ContentController, SalesStateAware
 	/** Wählt die Zeilen der Buchungen, die die Tabelle zeigt (nach dem Wechsel von der Saalansicht). */
 	@Override
 	public void restoreSelection(java.util.Collection<Booking> bookings) {
-		seatTable.getSelectionModel().clearSelection();
+		select(seatTable, bookings);
+	}
+
+	/**
+	 * Wählt die Zeilen der Buchungen. Die Indizes zählen in den Zeilen der Tabelle, nicht in filteredData: Die
+	 * Spaltenkopf-Filter von ControlsFX ersetzen die Liste der Tabelle durch eine eigene, sortierte und gefilterte
+	 * (KARV-196).
+	 */
+	static void select(TableView<BookingDTO> table, java.util.Collection<Booking> bookings) {
+		table.getSelectionModel().clearSelection();
+		List<BookingDTO> rows = table.getItems();
 		List<Integer> indices = new ArrayList<>();
-		for (int index = 0; index < filteredData.size(); index++) {
-			if (bookings.contains(filteredData.get(index).getBooking())) {
+		for (int index = 0; index < rows.size(); index++) {
+			if (bookings.contains(rows.get(index).getBooking())) {
 				indices.add(index);
 			}
 		}
 		if (!indices.isEmpty()) {
-			seatTable.getSelectionModel().selectIndices(indices.get(0), indices.subList(1, indices.size()).stream().mapToInt(Integer::intValue).toArray());
+			table.getSelectionModel().selectIndices(indices.get(0), indices.subList(1, indices.size()).stream().mapToInt(Integer::intValue).toArray());
 		}
 	}
 
