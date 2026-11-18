@@ -207,7 +207,8 @@ save / cancel when leaving a screen.
 ### `settings` – `settings.json`
 
 `AppSettings` holds `sharedDir`, `saveBookingsImmediately`, `checkCloudServer`, `recentOperators`, `display`
-(`DisplaySettings`: rows, tables, seat numbers, hall objects, `seatPatterns`, `summaryPlacement`, `restoreAtStart`)
+(`DisplaySettings`: rows, tables, seat numbers, hall objects, `seatPatterns`, `selectionHint`, `summaryPlacement`,
+`restoreAtStart`)
 and `patchNotesSeen`. `SettingsStore` reads and writes `<AppData>/settings.json`; `existedAtLoad()` tells a fresh
 installation from an update. `DisplaySettings` stores the summary placement as text and ignores unknown fields, so a
 value from a newer version never makes the file unreadable.
@@ -266,9 +267,15 @@ Notable 1.1 pieces:
   seat with a green ring, reserved yellow with dark stripes, sold solid red, blocked gray with a white cross; rings and
   stripes are gradients with hard stops, only the cross is a separate node that lets clicks through.
 - **Display preferences** (`ui.DisplayPreferences`, KARV-76): one app-wide instance of the "Anzeige" choices
-  (`PlanLabelOptions`, seat patterns, summary placement), shared by sales view, customer display and hall editor.
-  Views follow it through weak listeners (`PlanLabelOptions.follow`), and every change is written to
-  `settings.json` as a partial save.
+  (`PlanLabelOptions`, seat patterns, selection hint, summary placement), shared by sales view, customer display and
+  hall editor. Views follow it through weak listeners (`PlanLabelOptions.follow`, `LiveViews.follow`), and every
+  change is written to `settings.json` as a partial save.
+- **Selection hint** (`ui.sales.SelectionHint`, KARV-194): a mouse-transparent, unmanaged label that the sales shell
+  lays over its content area (table or hall view). It reads the shared selection (`SalesViewState`) and shows count
+  and total ("5 Karten gewählt · 60,00 €") above and right of the pointer, left of it at the right edge and left
+  below it at the top edge (seat tooltips appear right below). It hides when the pointer leaves the content area,
+  when the main window loses focus (modal dialogs) and while a non-tooltip popup of the window is open (seat popup,
+  context menu, drop-downs). Window listeners are attached only while the shell is shown.
 
 ## Data flow
 

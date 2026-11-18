@@ -70,6 +70,11 @@ public final class SalesViewState {
 		return display.seatPatternsProperty();
 	}
 
+	/** Ob Anzahl und Preis der Auswahl am Mauszeiger stehen (Menü "Anzeige", KARV-194), siehe {@link SelectionHint}. */
+	public BooleanProperty selectionHintProperty() {
+		return display.selectionHintProperty();
+	}
+
 	/** Wo das Kundenfenster die Kartenübersicht zeigt (Menü "Anzeige"). */
 	public ObjectProperty<SummaryPlacement> summaryPlacementProperty() {
 		return display.summaryPlacementProperty();

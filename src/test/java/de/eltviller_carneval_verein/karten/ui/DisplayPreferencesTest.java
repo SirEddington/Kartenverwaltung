@@ -34,6 +34,7 @@ class DisplayPreferencesTest {
 		saved.setRows(false);
 		saved.setSeatNumbers(false);
 		saved.setSeatPatterns(false);
+		saved.setSelectionHint(false);
 		saved.setSummaryPlacement("LEFT");
 		return saved;
 	}
@@ -44,6 +45,7 @@ class DisplayPreferencesTest {
 
 		assertEquals(new PlanLabels(false, true, false, true), prefs.planLabels().snapshot());
 		assertFalse(prefs.seatPatternsProperty().get());
+		assertFalse(prefs.selectionHintProperty().get());
 		assertEquals(SummaryPlacement.LEFT, prefs.summaryPlacementProperty().get());
 	}
 
@@ -53,7 +55,21 @@ class DisplayPreferencesTest {
 
 		assertEquals(PlanLabels.ALL, prefs.planLabels().snapshot());
 		assertTrue(prefs.seatPatternsProperty().get(), "die barrierefreie Darstellung ist der Normalfall");
+		assertTrue(prefs.selectionHintProperty().get(), "der Hinweis am Mauszeiger ist der Normalfall");
 		assertEquals(SummaryPlacement.AUTO, prefs.summaryPlacementProperty().get());
+	}
+
+	@Test
+	void switchingTheSelectionHintWritesTheWholeSelection() {
+		DisplayPreferences prefs = load(saved(true));
+
+		prefs.selectionHintProperty().set(true);
+		assertEquals(1, writes);
+		assertTrue(file.isSelectionHint());
+		assertFalse(file.isSeatPatterns(), "die übrige Auswahl wird mitgeschrieben");
+
+		prefs.planLabels().rowsProperty().set(true);
+		assertTrue(file.isSelectionHint(), "eine andere Änderung schreibt den Schalter unverändert mit");
 	}
 
 	@Test

@@ -96,6 +96,8 @@ public class TicketShellController {
 	private final BookingAutoSave autoSave = new BookingAutoSave(ChangeTracker.events(), EventSaver::save, Platform::runLater,
 			() -> editMode && BookingAutoSave.settingOn());
 	private CustomerDisplay customerDisplay;
+	// Anzahl und Preis der Auswahl am Mauszeiger, über Tabelle und Saalansicht (KARV-194)
+	private SelectionHint selectionHint;
 	private final ChangeListener<Boolean> windowShowing = (obs, wasShowing, isShowing) -> {
 		if (!isShowing) {
 			closeCustomerDisplay();
@@ -110,8 +112,11 @@ public class TicketShellController {
 		// Immer aktiv, auch in der Tabelle: Die Einstellungen gelten für die Saalansicht und lassen sich vorher treffen
 		PlanLabelsMenu.bind(menuDisplay, state.planLabels());
 		// Sitzstatus nicht nur über die Farbe (KARV-26); nur hier, der Hallen-Editor zeigt keinen Status
-		menuDisplay.getItems().addAll(new SeparatorMenuItem(), PlanLabelsMenu.item("Barrierefreie Sitzdarstellung", state.seatPatternsProperty()));
+		menuDisplay.getItems().addAll(new SeparatorMenuItem(), PlanLabelsMenu.item("Barrierefreie Sitzdarstellung", state.seatPatternsProperty()),
+				PlanLabelsMenu.item("Auswahl am Mauszeiger", state.selectionHintProperty()));
 		SummaryPlacementMenu.append(menuDisplay, state.summaryPlacementProperty());
+		// Vor der ersten Ansicht (showTicketTableView unten): loadContentView legt den Hinweis über jede Ansicht
+		selectionHint = new SelectionHint(contentArea, state.selectedBookings(), state.selectionHintProperty());
 
 		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das
 		// Hauptfenster geschlossen, schließt es mit (sonst hielte es die App am Leben). Die Szene bleibt an contentArea
@@ -271,7 +276,8 @@ public class TicketShellController {
 
 			// Inhalt im mittleren Bereich austauschen; ein offener Dialog der alten Ansicht würde sonst stehen bleiben
 			PopupWindows.hideOwnedBy(contentArea.getScene() == null ? null : contentArea.getScene().getWindow());
-			contentArea.getChildren().setAll(view);
+			// Der Hinweis zur Auswahl liegt über der Ansicht (KARV-194)
+			contentArea.getChildren().setAll(view, selectionHint.node());
 
 			// Der Ausschnitt der alten Ansicht gilt nicht mehr, die Auswahl bleibt: Die neue Ansicht bekommt sie unten zurück
 			List<Booking> keptSelection = new ArrayList<>(state.selectedBookings());

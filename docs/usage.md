@@ -89,6 +89,10 @@ Selling:
 2. Click a seat to open the booking popup. In edit mode, **Ctrl+click** or dragging a rectangle selects
    several seats for a bulk sale; fields show "verschieden" where the selected bookings differ, and only changed
    fields are applied to all.
+   While seats (or table rows) are selected, a small note next to the mouse pointer shows how many and their total,
+   e.g. "5 Karten gewählt · 60,00 €". It counts like the context menu and hides while a popup, menu or dialog is
+   open; **"Auswahl am Mauszeiger"** in the "Anzeige" menu turns it off. In display mode the hall view has no
+   selection.
 3. Enter last/first name, e-mail, comment, optional individual price, and the payment status: **Offen**, **Bar**,
    **Karte** or **Überweisung**; tick **"Abgeholt"** when the ticket is handed out.
    Reservation, payment and collection dates and the paid amount are filled in automatically.
@@ -107,7 +111,7 @@ green ring) or taken (red); zoom, panning, the current selection and the choices
 the main window.
 
 **"Anzeige" menu** (footer, left): ticks for **Reihen**, **Tische**, **Sitznummern** and **Hallenobjekte**, and in
-the sales view the tick **"Barrierefreie Sitzdarstellung"** and the submenu **"Kaufzusammenfassung"** (where the
+the sales view the ticks **"Barrierefreie Sitzdarstellung"** and **"Auswahl am Mauszeiger"** and the submenu **"Kaufzusammenfassung"** (where the
 customer display shows the purchase summary). The
 choice is the same in the sales view, the customer display and the hall editor: hiding rows in the editor hides them
 in the sales view too. With *Einstellungen → Anzeige → "Anzeige beim Start wiederherstellen"* (on by default) the

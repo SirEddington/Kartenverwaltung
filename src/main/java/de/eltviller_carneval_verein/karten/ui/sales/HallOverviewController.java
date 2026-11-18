@@ -269,7 +269,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	 * einem gewählten Sitz gilt es für die ganze Auswahl, auf einem anderen Sitz wird dieser zur einzigen Auswahl, wie im
 	 * Explorer. Im Leeren, auf einem Tisch, auf einem vom Suchfilter ausgeblendeten oder gesperrten Sitz (KARV-111) und bei
 	 * offenem Dialog (er würde sonst samt Eingaben ersetzt) gibt es kein Menü. Im Anzeigemodus ist der Eintrag sichtbar, aber nicht
-	 * ausführbar; die Auswahl ändert der Rechtsklick dort nicht (der Text nennt die Auswahl nur, wenn der Sitz dazugehört).
+	 * ausführbar; dort gibt es keine Auswahl ({@link #restoreSelection}), der Text nennt deshalb einen Sitz.
 	 */
 	private void showSelectionMenu(MouseEvent event) {
 		if (selectionMenu != null) {
@@ -455,11 +455,15 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		state.visibleHallRectProperty().set(viewportPane.visibleHallRectProperty().get());
 	}
 
-	/** Markiert die Sitze der Vorstellung, die in der Auswahl der verlassenen Ansicht waren (nach dem Wechsel von der Tabelle). */
+	/**
+	 * Markiert die Sitze der Vorstellung, die in der Auswahl der verlassenen Ansicht waren (nach dem Wechsel von der
+	 * Tabelle). Im Anzeigemodus bleibt die Auswahl leer: Die Mehrfachauswahl gibt es nur im Bearbeitungsmodus, und dort
+	 * ließe sie sich nicht wieder aufheben (KARV-194). Die Shell setzt den Modus vorher ({@code setEditMode}).
+	 */
 	@Override
 	public void restoreSelection(java.util.Collection<Booking> bookings) {
 		selectedBookings.clear();
-		if (selectedPres != null) {
+		if (editMode && selectedPres != null) {
 			bookings.stream().filter(booking -> booking.getParent() == selectedPres && !booking.isUnassigned()).forEach(selectedBookings::add);
 			// Wurde ein Sitz gesperrt, während die Tabelle zu sehen war, kommt er nicht in die Auswahl (KARV-111)
 			LockedSeats.dropFrom(selectedBookings);
