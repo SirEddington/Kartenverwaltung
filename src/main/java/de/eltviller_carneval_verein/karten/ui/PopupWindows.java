@@ -14,6 +14,21 @@ public final class PopupWindows {
 	private PopupWindows() {
 	}
 
+	/**
+	 * Ob {@code window} ein Popup ist, das letztlich zu {@code owner} gehört: direkt oder über ein anderes Popup (etwa die
+	 * Auswahlliste im Sitz-Dialog).
+	 */
+	public static boolean belongsTo(Window window, Window owner) {
+		if (!(window instanceof PopupWindow popup)) {
+			return false;
+		}
+		Window root = popup.getOwnerWindow();
+		while (root instanceof PopupWindow parent) {
+			root = parent.getOwnerWindow();
+		}
+		return root == owner;
+	}
+
 	/** Schließt alle Popups, die direkt zum Fenster gehören; {@code null} (noch kein Fenster) tut nichts. */
 	public static void hideOwnedBy(Window owner) {
 		if (owner == null) {

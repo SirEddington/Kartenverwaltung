@@ -129,7 +129,6 @@ class DisplaySettingsTest {
 		store.save();
 
 		DisplaySettings reloaded = new SettingsStore(dir).current().getDisplay();
-		assertFalse(reloaded.isSelectionHint());
 
 		assertFalse(reloaded.isRestoreAtStart());
 		assertFalse(reloaded.isRows());
@@ -137,6 +136,7 @@ class DisplaySettingsTest {
 		assertFalse(reloaded.isSeatNumbers());
 		assertFalse(reloaded.isHallObjects());
 		assertFalse(reloaded.isSeatPatterns());
+		assertFalse(reloaded.isSelectionHint());
 		assertEquals("LEFT", reloaded.getSummaryPlacement());
 	}
 

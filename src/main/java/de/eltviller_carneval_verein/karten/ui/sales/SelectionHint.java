@@ -1,11 +1,14 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.Collection;
-import java.util.List;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.ui.CoalescedAction;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.PopupWindows;
+import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
+import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
 import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.ListChangeListener;
@@ -17,7 +20,6 @@ import javafx.scene.control.Label;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.Region;
-import javafx.stage.PopupWindow;
 import javafx.stage.Window;
 
 /**
@@ -62,7 +64,8 @@ final class SelectionHint {
 	private Point2D pointer;
 	/** Das Hauptfenster, solange die Shell zu sehen ist. */
 	private Window window;
-	private final InvalidationListener changed = observable -> update();
+	/** Ob ein Popup des Hauptfensters offen ist; neu bestimmt, wenn sich die Fensterliste ändert, nicht je Mausbewegung. */
+	private boolean popupOpen;
 
 	/**
 	 * @param area      der Inhaltsbereich der Shell; der Hinweis liegt als nicht angeordnetes Kind darin ({@link #node()})
@@ -86,22 +89,25 @@ final class SelectionHint {
 			pointer = null;
 			update();
 		});
-		selection.addListener((SetChangeListener<Booking>) change -> update());
+		// Ein Rahmen über hundert Sitze meldet hundert Änderungen: einmal je Takt auswerten
+		CoalescedAction selectionChanged = new CoalescedAction(Platform::runLater, this::update);
+		selection.addListener((SetChangeListener<Booking>) change -> selectionChanged.request());
 		LiveViews.follow(area, enabled, this::update);
 		// Die Fensterliste ist statisch, das Hauptfenster überlebt die Shell: Beides nur, solange sie zu sehen ist
-		ListChangeListener<Window> windowsChanged = change -> update();
+		InvalidationListener focusChanged = observable -> update();
+		ListChangeListener<Window> windowsChanged = change -> updatePopups();
 		LiveViews.whileShown(area, () -> {
 			window = area.getScene().getWindow();
-			window.focusedProperty().addListener(changed);
+			window.focusedProperty().addListener(focusChanged);
 			Window.getWindows().addListener(windowsChanged);
-			update();
+			updatePopups();
 		}, () -> {
 			Window.getWindows().removeListener(windowsChanged);
 			if (window != null) {
-				window.focusedProperty().removeListener(changed);
+				window.focusedProperty().removeListener(focusChanged);
 			}
 			window = null;
-			update();
+			updatePopups();
 		});
 	}
 
@@ -112,8 +118,7 @@ final class SelectionHint {
 
 	/** „1 Karte gewählt · 12,00 €": Anzahl wie im Kontextmenü (alle gewählten Buchungen), Preis wie im Kundenfenster. */
 	static String text(Collection<Booking> selected) {
-		long cents = selected.stream().mapToLong(Booking::getEffectivePrice).sum();
-		return SelectionSummary.countText(selected.size()) + " gewählt · " + MoneyFormat.formatCents(cents);
+		return SelectionSummary.countText(selected.size()) + " gewählt · " + MoneyFormat.formatCents(BookingTotals.of(selected).potentialCents());
 	}
 
 	/**
@@ -139,14 +144,13 @@ final class SelectionHint {
 	 * der Sitze.
 	 */
 	static boolean blocks(Window candidate, Window main) {
-		if (!(candidate instanceof PopupWindow popup) || candidate instanceof Tooltip || !candidate.isShowing()) {
-			return false;
-		}
-		Window owner = popup.getOwnerWindow();
-		while (owner instanceof PopupWindow parent) {
-			owner = parent.getOwnerWindow();
-		}
-		return owner == main;
+		return !(candidate instanceof Tooltip) && PopupWindows.belongsTo(candidate, main);
+	}
+
+	/** {@link Window#getWindows()} enthält nur gezeigte Fenster. */
+	private void updatePopups() {
+		popupOpen = window != null && Window.getWindows().stream().anyMatch(candidate -> blocks(candidate, window));
+		update();
 	}
 
 	private void track(MouseEvent event) {
@@ -157,15 +161,17 @@ final class SelectionHint {
 	}
 
 	private void update() {
-		boolean popupOpen = window != null && List.copyOf(Window.getWindows()).stream().anyMatch(candidate -> blocks(candidate, window));
 		boolean visible = new Conditions(enabled.get(), !selection.isEmpty(), pointer != null, window != null && window.isFocused(), popupOpen)
 				.visible();
 		if (visible) {
 			// Bei jeder Auswertung neu: Ändert ein anderer Rechner einen Preis, folgt der Betrag mit der nächsten Mausbewegung
-			label.setText(text(selection));
-			// Nicht angeordnete Kinder legt der StackPane nicht aus: Größe selbst bestimmen, bevor sie in die Lage eingeht
-			label.applyCss();
-			label.autosize();
+			String text = text(selection);
+			if (!text.equals(label.getText()) || !label.isVisible()) {
+				label.setText(text);
+				// Nicht angeordnete Kinder legt der StackPane nicht aus: Größe selbst bestimmen, bevor sie in die Lage eingeht
+				label.applyCss();
+				label.autosize();
+			}
 			Point2D corner = place(pointer.getX(), pointer.getY(), label.getWidth(), label.getHeight(), area.getWidth(), area.getHeight());
 			label.relocate(corner.getX(), corner.getY());
 		}
