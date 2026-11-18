@@ -278,7 +278,9 @@ Ausgabe: ein Baum aus Gruppen und Buchungen.
 - **Gruppenkopf:** Die Zeile zeigt „<Überschrift>: <Text> (<Anzahl>)“, etwa „Nachname: Müller (4)“, in Fettschrift,
   über die ganze Breite der Zeile und nicht auf eine Spalte beschnitten, eingerückt nach Ebene, mit dem Pfeil zum
   Auf- und Zuklappen.
-- **Eigene Spalte für Pfeil und Einrückung** (`colTree`, neu): schmal, ohne Überschrift, ganz links, nicht sortierbar,
+- **Eigene Spalte für Pfeil und Einrückung** (`colTree`, neu): schmal, ohne Überschrift, ganz links und nicht
+  verschiebbar (`setReorderable(false)`; JavaFX bestimmt die Stelle des Pfeils aus der Position der `treeColumn`,
+  `TableRowSkinBase` Zeilen 272–274), nicht sortierbar,
   ohne Filter, nicht bearbeitbar, nicht im Menü „Gruppieren“ und kein Eintrag in `TicketColumn`. Sie ist die
   `treeColumn` der Tabelle und nur bei aktiver Gruppierung sichtbar, breit genug für Pfeil und Einrückung der tiefsten
   Ebene. Grund: JavaFX merkt sich die größte Pfeilbreite je `treeColumn` in einer statischen Tabelle, die nie kleiner
@@ -345,20 +347,23 @@ Gruppe.
 | Strg-Klick | Buchung hinein bzw. heraus | ganz markiert: alle heraus, sonst: alle hinein |
 | Pfeil auf/ab, Pos1, Ende, Bild auf/ab ohne Umschalt | Menge = diese Buchung | Menge = alle Buchungen der Gruppe |
 | Tab mit `clearAndSelect` (`TableInput.moveFocus`); Tab überspringt Gruppenzeilen (Abschnitt 9) | Menge = diese Buchung | kommt nicht vor |
-| Leertaste (wählt die Zeile im Fokus) | wie Klick | wie Klick |
+| Leertaste (heute: fügt die Zeile im Fokus hinzu, ohne die Auswahl zu leeren, und startet im Bearbeitungsmodus das Bearbeiten der Zelle im Fokus; `TableViewBehaviorBase` Zeilen 213, 919–943) | Buchung hinein, Bearbeiten wie heute | alle Buchungen der Gruppe hinein, kein Bearbeiten |
+| Strg+Leertaste | wie Strg-Klick | wie Strg-Klick |
+| Strg mit Pfeil, Pos1, Ende, Bild | nur der Fokus wandert, die Menge bleibt | ebenso |
+| Doppelklick | wie heute (startet das Bearbeiten) | klappt auf bzw. zu (Regel zum Zuklappen); die Menge ist schon durch den ersten Klick gesetzt |
 | Umschalt-Klick, Umschalt mit Pfeil, Pos1, Ende, Bild; Ziehen | Bereich, siehe unten | Bereich, siehe unten |
 | Strg+A | alle Buchungen der Tabelle, auch in zugeklappten Gruppen | ebenso |
 | Klick auf den Pfeil | keine Änderung außer der Regel zum Zuklappen | ebenso |
-| Rechts, Plus | keine Wirkung | Gruppe im Fokus aufklappen; Auswahl unverändert |
-| Links, Minus | Fokus geht auf die Gruppenzeile darüber; Auswahl unverändert | Gruppe im Fokus zuklappen (Regel zum Zuklappen); steht sie schon zu, Fokus auf die Gruppenzeile darüber |
-| Stern | keine Wirkung | Gruppe im Fokus samt Untergruppen aufklappen; Auswahl unverändert |
+| Links, Rechts | wie heute in der `TableView`: Fokus auf die Zelle links bzw. rechts, Menge = diese Buchung (`selectLeftCell`/`selectRightCell` → `clearAndSelect(row, column)`) | Rechts: Gruppe im Fokus aufklappen; Links: zuklappen (Regel zum Zuklappen), steht sie schon zu, Fokus auf die Gruppenzeile darüber; Menge sonst unverändert |
+| Plus, Minus, Stern | keine Wirkung (wie heute) | Plus: aufklappen; Minus: zuklappen (Regel zum Zuklappen); Stern: samt Untergruppen aufklappen; Menge sonst unverändert |
 
-- **Tasten zum Auf- und Zuklappen** behandelt die Kartentabelle selbst nach der Zeile im **Fokus** und verbraucht das
-  Ereignis. JavaFX richtet sie sonst nach der gewählten Zeile im Auswahlmodell (`TreeViewBehavior.expandRow` und
-  `collapseRow`, Zeilen 643–709, aus `TreeTableViewBehavior` 82–89). Weil Gruppenzeilen nie im Auswahlmodell stehen,
-  täten sie auf einem Gruppenkopf nichts. Bei Links auf einer Buchung riefe JavaFX außerdem `clearSelection()` und
-  `select(parent)`. Ohne Gruppierung gibt es keine Gruppenzeilen; die Tasten bleiben dann wirkungslos, wie heute in der
-  `TableView`.
+- **Diese Tasten** behandelt die Kartentabelle selbst nach der Zeile im **Fokus** und verbraucht das Ereignis. In der
+  `TreeTableView` belegt eine vorrangige InputMap Links und Rechts mit Auf- und Zuklappen (`TreeTableViewBehavior`
+  Zeilen 82–90) und richtet sich nach der gewählten Zeile im Auswahlmodell (`TreeViewBehavior.expandRow` und
+  `collapseRow`, Zeilen 643–709). Ohne eigene Behandlung ginge in Buchungszeilen das Wechseln der Spalte verloren, mit
+  dem heute Tippen, Enter und F2 die Zelle wählen (`TableInput.editableCellInFocus` liest `getFocusedCell()`), und auf
+  einem Gruppenkopf täten die Tasten nichts, weil Gruppenzeilen nie im Auswahlmodell stehen. Ohne Gruppierung verhalten
+  sich die Tasten damit genau wie heute.
 - Die Regel zum Zuklappen gilt für jeden Auslöser, auch für die Tastatur.
 - **Gewollte Abweichung:** Ist eine zugeklappte Gruppe gewählt und dazu genau eine sichtbare Buchung, steht im
   Auswahlmodell genau ein Index. `TableInput` behandelt das wie eine Einzelauswahl: Klick oder Tippen bearbeiten die
@@ -404,8 +409,9 @@ gewählt ist.
 - **`deselect(bookings)`** (etwa „Nur freie Sitze“ im Verkaufsdialog, `SeatSelectionEditor`): nimmt die Buchungen aus
   der Menge und gleicht die Anzeige an. Eine bisher ganz gewählte, zugeklappte Gruppe wird dabei aufgeklappt, und ihre
   übrigen Buchungen bleiben einzeln markiert. Das Kundenfenster zählt die abgewählten nicht mehr mit.
-- **`assignPlace`** wählt nach dem Zuweisen die Buchung über die Menge (statt über den Index), klappt ihre Gruppe nach
-  Regel 3 auf und scrollt zu ihrer Zeile.
+- **`assignPlace`** baut nach dem Zuweisen neu auf wie bei einer eigenen Änderung (nicht über `loadBookings` mit
+  Leeren der Menge), setzt die Menge auf die zugewiesene Buchung (wie heute `clearAndSelect`), behält sie als selbst
+  geänderte Buchung sichtbar (Abschnitt 11), klappt ihre Gruppe nach Regel 3 auf und scrollt zu ihrer Zeile.
 - Die Commit-Handler der Spalten erhalten die Buchung aus `getRowValue().getValue()` (ein `TreeItem<TicketRow>`); eine
   Gruppenzeile kann nicht bearbeitet werden, ein Commit auf ihr kommt nicht vor.
 - **Rechtsklick auf eine Gruppenzeile:** wie in der Tabelle oben. „Platz zuweisen…“ ist auf einer Gruppenzeile nicht
@@ -437,8 +443,8 @@ Nachbau der Bedienung von ControlsFX, in Deutsch:
 - Rechtsklick auf einen Spaltenkopf öffnet den Filter der Spalte (`TreeTableColumn.setContextMenu` mit einem
   `CustomMenuItem`): Suchfeld „Suchen…“ (filtert die Werteliste nach Text, ohne Groß- und Kleinschreibung), Werteliste
   mit Häkchen, Text und Anzahl, Knöpfe „Anwenden“, „Keine“, „Alle“, „Alle Filter zurücksetzen“.
-- „Keine“ und „Alle“ setzen die Häkchen der gerade sichtbaren Werte; erst „Anwenden“ oder das Schließen über
-  „Anwenden“ ändert die Tabelle. „Alle Filter zurücksetzen“ leert die Filter aller Spalten sofort.
+- „Keine“ und „Alle“ setzen die Häkchen der gerade sichtbaren Werte; erst „Anwenden“ ändert die Tabelle. Schließen
+  ohne „Anwenden“ (Esc, Klick daneben) verwirft die geänderten Häkchen. „Alle Filter zurücksetzen“ leert die Filter aller Spalten sofort.
 - Eine Spalte mit aktivem Filter zeigt im Kopf ein Filtersymbol (`graphic`), wie heute bei ControlsFX.
 - Gruppenanzahlen und die Auswahl richten sich nach dem gefilterten Stand. Die Zahl in der Leiste „Ohne Platz“ zählt
   wie heute alle Buchungen ohne Platz der gezeigten Vorstellungen, unabhängig von Suche und Filter; nur ihr Knopf folgt
@@ -508,14 +514,17 @@ Das entspricht der Regel von KARV-192 „gezählt wird, was die Ansicht als Tref
 ihre Buchungen in ihrer Anzahl. `reportSearchHits` über `getItems()` entfällt.
 
 **Auswahl leeren:** Wie heute leeren zwei Stellen die Menge ausdrücklich: jeder Aufruf von `setEvent` oder
-`setPresentation` (→ `loadBookings`) und ein ausgeführtes Storno (`cancelSelection`, heute Zeile 278). Das gilt auch,
+`setPresentation` (das Leeren hängt an diesen beiden, nicht an `loadBookings`; `assignPlace` leert nicht, siehe 6) und
+ein ausgeführtes Storno (`cancelSelection`, heute Zeile 278). Das gilt auch,
 wenn die Shell ein neu zusammengesetztes Event oder dieselbe Vorstellung neu setzt (`TicketShellController` Zeilen
 134–140, 220–231; Kommentar `TicketTableController` Zeile 105), wie heute, wo `loadBookings` alle Zeilen ersetzt.
 Diese Aufrufe beenden auch die Ausnahme für selbst geänderte Buchungen (unten). Jeder andere Neuaufbau behält die
 Menge nach Abschnitt 6.
 
 **Fokus nach dem Neuaufbau:** Fokus und Anker folgen der Buchung bzw. Gruppenzeile (über ihren Pfad), auf der sie
-vorher standen, nicht dem alten Index. Gibt es sie nicht mehr, steht der Fokus auf keiner Zeile.
+vorher standen, nicht dem alten Index. Gibt es sie nicht mehr, steht der Fokus auf keiner Zeile. Nach einem Klick auf
+einen Spaltenkopf setzt JavaFX den Fokus nach der `sortPolicy` selbst auf die Hauptauswahl (`TreeTableView.java`
+Zeilen 2081–2085), also vor dem Neuaufbau; „vorher“ meint dann diese Zeile.
 
 **Anlässe:** fremde Änderung, Suche, Filter, Gruppierung, Gruppenordnung, Sortierung und **jede eigene Änderung** an
 einer Buchung aus der Kartentabelle: jeder Commit einer Zelle (auch Vorname, Kommentar, Bezahlt), die Checkbox
@@ -531,8 +540,9 @@ und keine Zeile verschiebt sich unter der Bearbeitung.
 
 **Eigene Änderung gegen Suche und Filter:** Eine Buchung, die die Kassenkraft selbst geändert hat, bleibt sichtbar,
 auch wenn sie danach die Suche oder einen Spaltenfilter nicht mehr besteht. Sie zählt dann überall als passend
-(Gruppen, Anzahlen, Wertelisten). Die Ausnahme endet, sobald die Kassenkraft Suche oder Filter ändert oder die
-Vorstellung wechselt; fremde Änderungen beenden sie nicht. In ihre neue Gruppe und an ihre neue Sortierstelle zieht die
+(Gruppen, Anzahlen, Wertelisten). Die Ausnahme endet, sobald die Kassenkraft den Suchtext oder die Menge der
+abgewählten Filterwerte ändert („Anwenden“ ohne geänderte Häkchen zählt nicht) oder `setEvent`/`setPresentation` läuft;
+fremde Änderungen beenden sie nicht. In ihre neue Gruppe und an ihre neue Sortierstelle zieht die
 Buchung trotzdem um. Das ist eine bewusste Änderung: Heute verschwindet eine solche Buchung bei der nächsten fremden
 Änderung, denn `showRows()` wendet die Suche dann neu an (Zeilen 639–642). Mitten im Verkauf soll eine gerade
 bearbeitete Buchung aber nicht wegen eines anderen Rechners verschwinden. Stornierte Buchungen ohne Platz verschwinden
@@ -575,7 +585,8 @@ auskommt. Die Tests bauen eine `TreeTableView` selbst, wie der Test von KARV-196
   „Abgeholt“ ändert die richtige Buchung in gruppierter, sortierter Tabelle; ein eigener neuer Nachname zieht die
   Buchung erst nach dem Ende der Bearbeitung um und bleibt trotz Suche sichtbar; die Sortierung überlebt einen
   Neuaufbau; eine einzelne Buchung allein in ihrer Gruppe lässt sich nach Klick durch Tippen bearbeiten; Pfeil ab auf
-  eine Gruppenzeile wählt die Gruppe; Umschalt-Klick nach Klick auf einen Gruppenkopf rechnet den Bereich vom Kopf; der
+  eine Gruppenzeile wählt die Gruppe; Links und Rechts wechseln in einer Buchungszeile die Spalte (danach bearbeitet
+  Tippen die neue Zelle) und klappen auf einem Gruppenkopf zu bzw. auf; Umschalt-Klick nach Klick auf einen Gruppenkopf rechnet den Bereich vom Kopf; der
   Fall aus dem Test von KARV-196 (Randbedingungen).
 
 Die bestehenden Tests der Event-Verwaltung und von `ParsingTextFieldTableCell` bleiben grün und unverändert.
@@ -731,6 +742,20 @@ Behoben:
   eigene Klasse neben dem Controller ohne Singletons (12); ältere Version verliert die neuen Felder beim Schreiben (10);
   Werteliste des Filters nach Schlüsseln als bewusster Unterschied zu ControlsFX (8); neu gesetztes Event oder
   Vorstellung leert Auswahl und Ausnahme wie heute (11).
+
+Nicht übernommen: nichts.
+
+**Runde 6, 18.11.2026.** Umsetzer: 0 kritisch, 0 groß, 4 klein. Gegenprüfer: 0 kritisch, 1 groß, 4 klein.
+
+Behoben:
+
+- Links und Rechts (Gegenprüfer, groß): Sie wechseln heute die Spalte, in der Tippen und Enter bearbeiten; Runde 5 hatte
+  das auf Buchungszeilen weggenommen. Neu: Auf Buchungszeilen gilt die heutige Bedeutung, nur auf Gruppenköpfen klappen
+  sie; Plus, Minus, Stern nur auf Gruppenköpfen (6); Test dazu (12).
+- Klein, übernommen: Leertaste wie heute (hinzufügen, Bearbeiten), Strg+Leertaste, Strg+Pfeil, Doppelklick auf einen
+  Gruppenkopf (6); `assignPlace` leert die Menge nicht und das Leeren hängt an `setEvent`/`setPresentation` (6, 11);
+  Filter ohne „Anwenden“ schließen verwirft (8); „Anwenden“ ohne Änderung beendet die Ausnahme nicht (11); Fokus nach
+  der `sortPolicy` (11); `colTree` nicht verschiebbar (4).
 
 Nicht übernommen: nichts.
 
