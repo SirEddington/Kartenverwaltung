@@ -109,6 +109,14 @@ class SelectionHintTest {
 	}
 
 	@Test
+	void neverLeavesTheAreaAtTheBottom() {
+		// Sehr niedriger Inhaltsbereich, Zeiger oben: links unter dem Zeiger, aber nicht unter den Rand
+		Point2D corner = SelectionHint.place(200, 10, 120, 24, 1000, 40);
+
+		assertEquals(new Point2D(72, 16), corner);
+	}
+
+	@Test
 	void neverLeavesTheAreaToTheLeftOrTop() {
 		// Bereich schmaler als der Hinweis: Er beginnt am linken Rand statt außerhalb
 		Point2D corner = SelectionHint.place(60, 10, 120, 24, 100, 800);

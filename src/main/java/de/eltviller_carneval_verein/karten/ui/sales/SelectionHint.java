@@ -9,7 +9,7 @@ import de.eltviller_carneval_verein.karten.ui.PopupWindows;
 import de.eltviller_carneval_verein.karten.util.BookingTotals;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import javafx.application.Platform;
-import javafx.beans.InvalidationListener;
+import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableSet;
@@ -94,7 +94,7 @@ final class SelectionHint {
 		selection.addListener((SetChangeListener<Booking>) change -> selectionChanged.request());
 		LiveViews.follow(area, enabled, this::update);
 		// Die Fensterliste ist statisch, das Hauptfenster überlebt die Shell: Beides nur, solange sie zu sehen ist
-		InvalidationListener focusChanged = observable -> update();
+		ChangeListener<Boolean> focusChanged = (obs, wasFocused, isFocused) -> update();
 		ListChangeListener<Window> windowsChanged = change -> updatePopups();
 		LiveViews.whileShown(area, () -> {
 			window = area.getScene().getWindow();
@@ -123,7 +123,8 @@ final class SelectionHint {
 
 	/**
 	 * Die linke obere Ecke des Hinweises: rechts über dem Zeiger; ragte er rechts hinaus, links über dem Zeiger; ragte er
-	 * oben hinaus, links unter dem Zeiger (rechts darunter stünde der Tooltip eines Sitzes). Nie links oder oben außerhalb.
+	 * oben hinaus, links unter dem Zeiger (rechts darunter stünde der Tooltip eines Sitzes). Bleibt im Bereich; ist der
+	 * Bereich kleiner als der Hinweis, beginnt er links bzw. oben am Rand.
 	 */
 	static Point2D place(double pointerX, double pointerY, double width, double height, double areaWidth, double areaHeight) {
 		double left = pointerX - GAP_LEFT - width;
@@ -135,7 +136,12 @@ final class SelectionHint {
 		} else if (x + width > areaWidth) {
 			x = left;
 		}
-		return new Point2D(Math.max(0, x), Math.max(0, y));
+		return new Point2D(clamp(x, areaWidth - width), clamp(y, areaHeight - height));
+	}
+
+	/** {@code value} zwischen 0 und {@code max}; ist {@code max} negativ (Bereich kleiner als der Hinweis), 0. */
+	private static double clamp(double value, double max) {
+		return Math.max(0, Math.min(value, max));
 	}
 
 	/**
