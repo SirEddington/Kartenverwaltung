@@ -91,8 +91,10 @@ Selling:
    fields are applied to all.
    While seats (or table rows) are selected, a small note next to the mouse pointer shows how many and their total,
    e.g. "5 Karten gewählt · 60,00 €". It counts like the context menu and hides while a popup, menu or dialog is
-   open; **"Auswahl am Mauszeiger"** in the "Anzeige" menu turns it off. In display mode the hall view has no
-   selection.
+   open. The submenu **"Auswahl am Mauszeiger"** in the "Anzeige" menu puts it **above** or **below** the pointer
+   ("Über dem Zeiger", the default, or "Unter dem Zeiger") or turns it off ("Aus"). With the tick **"Am Rand
+   ausweichen"** (on by default) it moves to the other side of the pointer near an edge; with it off it keeps its side
+   and is only pushed back to the edge, even over the pointer. In display mode the hall view has no selection.
 3. Enter last/first name, e-mail, comment, optional individual price, and the payment status: **Offen**, **Bar**,
    **Karte** or **Überweisung**; tick **"Abgeholt"** when the ticket is handed out.
    Reservation, payment and collection dates and the paid amount are filled in automatically.
@@ -114,8 +116,8 @@ green ring) or taken (red); zoom, panning, the current selection and the choices
 the main window.
 
 **"Anzeige" menu** (footer, left): ticks for **Reihen**, **Tische**, **Sitznummern** and **Hallenobjekte**, and in
-the sales view the ticks **"Barrierefreie Sitzdarstellung"** and **"Auswahl am Mauszeiger"** and the submenu **"Kaufzusammenfassung"** (where the
-customer display shows the purchase summary). The
+the sales view the tick **"Barrierefreie Sitzdarstellung"** and the submenus **"Auswahl am Mauszeiger"** (see above)
+and **"Kaufzusammenfassung"** (where the customer display shows the purchase summary). The
 choice is the same in the sales view, the customer display and the hall editor: hiding rows in the editor hides them
 in the sales view too. With *Einstellungen → Anzeige → "Anzeige beim Start wiederherstellen"* (on by default) the
 choice is kept for the next start of this workstation; with it off, every start shows everything.

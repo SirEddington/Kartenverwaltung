@@ -60,7 +60,7 @@ public class HallPlanPane extends StackPane {
 	private static final double MAX_SCALE = 4.0;
 	private static final double ZOOM_FACTOR_PER_NOTCH = 1.1;
 
-	/** Bestimmt Aussehen und Verhalten der gezeichneten Sitze (Füllung, Rand, Klick, Tooltip ...). */
+	/** Bestimmt Aussehen und Verhalten der gezeichneten Sitze (Füllung, Rand, Klick ...). */
 	public interface Decorator {
 		/**
 		 * @param booking die Buchung der Vorstellung auf diesem Sitz
