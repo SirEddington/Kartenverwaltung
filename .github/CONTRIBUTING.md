@@ -185,8 +185,9 @@ Diese Datei sagt, welche Branches wann gemergt, angelegt und gelöscht werden. W
 
 ## Sprache
 
-Code, Kommentare, Meldungen, Commits, Pull Requests, Tickets und Specs (`docs/specs/`) sind deutsch. Die
-beschreibende Dokumentation (`README.md`, `docs/*.md`) ist englisch.
+Code, Kommentare, Meldungen, Commits, Pull Requests und Tickets sind deutsch. Deutsch sind auch die
+Planungsdokumente: die Specs (`docs/specs/`) und die Roadmap (`docs/roadmap.md`). Die beschreibende Dokumentation
+(`README.md` und die übrigen Dateien unter `docs/`) ist englisch.
 
 ## Arbeiten mit Claude Code
 
