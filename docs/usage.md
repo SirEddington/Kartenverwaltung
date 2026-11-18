@@ -99,7 +99,10 @@ Selling:
 4. **"Stornieren"** cancels the selected bookings after a confirmation.
 
 **Search** ("Suche") matches every word against first name, last name and comment together, case-insensitive and in
-any order (e.g. `ns wurs` finds "Hans Wurst").
+any order (e.g. `ns wurs` finds "Hans Wurst"). Above the field, **"n Treffer"** counts what the view currently shows
+as a hit — the table rows (after search and column filters) or the seats in the hall view that are not dimmed — also
+with an empty search, where it includes free seats. Its tooltip breaks the hits down by name (at most 15 names) and,
+with "Alle Vorstellungen", by presentation.
 
 **"Buchungen sofort speichern"** (setting, on by default): every booking change is saved immediately; the popup's
 button is then called "Speichern" instead of "Anwenden". With the setting off, use "Speichern"; leaving the screen
