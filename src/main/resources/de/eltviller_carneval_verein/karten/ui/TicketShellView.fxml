@@ -38,7 +38,13 @@
         </VBox>
 
         <VBox spacing="2.0" HBox.hgrow="SOMETIMES">
-            <Label text="Suche" styleClass="field-caption" />
+            <!-- Rechts die Trefferzahl (KARV-192). Die Zeile hebt weder Mindest- noch Vorzugsbreite der Suche (prefWidth 0,
+                 die VBox zieht sie auf die Breite des Felds); bei Platzmangel kürzt "Suche", die Zahl bleibt lesbar. -->
+            <HBox minWidth="0.0" prefWidth="0.0">
+                <Label text="Suche" styleClass="field-caption" minWidth="0.0" />
+                <Region HBox.hgrow="ALWAYS" minWidth="4.0" />
+                <Label fx:id="lblSearchHits" text="0 Treffer" styleClass="field-caption" minWidth="-Infinity" />
+            </HBox>
             <TextField fx:id="searchField" prefWidth="160.0" minWidth="90.0" maxWidth="Infinity" promptText="Suche..." />
         </VBox>
 

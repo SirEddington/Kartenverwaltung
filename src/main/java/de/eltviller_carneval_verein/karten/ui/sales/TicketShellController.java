@@ -30,6 +30,7 @@ import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelsMenu;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
+import javafx.collections.ListChangeListener;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -43,6 +44,7 @@ import javafx.scene.control.RadioButton;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.StackPane;
 import javafx.util.StringConverter;
 
@@ -62,6 +64,8 @@ public class TicketShellController {
 	private ComboBox<Presentation> presComboBox;
 	@FXML
 	private TextField searchField;
+	@FXML
+	private Label lblSearchHits;
 	@FXML
 	private ToggleGroup viewToggleGroup;
 	@FXML
@@ -189,6 +193,8 @@ public class TicketShellController {
 			activeContentController.filter(searchText);
 		});
 
+		bindSearchHits();
+
 		viewToggleGroup.selectedToggleProperty().addListener((obs, oldToggle, newToggle) -> {
 			if (newToggle == btnTableView) {
 				showTicketTableView();
@@ -208,6 +214,30 @@ public class TicketShellController {
 		if (presComboBox.getItems().size() == 2) {
 			presComboBox.getSelectionModel().select(1);
 		}
+	}
+
+	/**
+	 * "n Treffer" über dem Suchfeld (KARV-192): zählt, was die aktive Ansicht als Treffer zeigt. Der Tooltip wird mit
+	 * jeder neuen Trefferliste neu gebaut und zusätzlich beim Anzeigen (Namen können sich ohne neue Trefferliste ändern).
+	 */
+	private void bindSearchHits() {
+		Tooltip tooltip = new Tooltip(SearchHits.NO_HITS);
+		tooltip.setOnShowing(event -> updateSearchHitsTooltip(tooltip));
+		lblSearchHits.setTooltip(tooltip);
+		state.searchHits().addListener((ListChangeListener<Booking>) change -> refreshSearchHits(tooltip));
+		refreshSearchHits(tooltip);
+	}
+
+	/** Zahl und Tooltip nach neuen Treffern; der Text steht so schon fest, bevor der Tooltip sich bemisst. */
+	private void refreshSearchHits(Tooltip tooltip) {
+		lblSearchHits.setText(SearchHits.countText(state.searchHits().size()));
+		updateSearchHitsTooltip(tooltip);
+	}
+
+	private void updateSearchHitsTooltip(Tooltip tooltip) {
+		Event event = state.eventProperty().get();
+		List<Presentation> presentations = event == null || event.getPresentations() == null ? List.of() : event.getPresentations();
+		tooltip.setText(SearchHits.tooltipText(state.searchHits(), presentations, state.presentationProperty().get() == null));
 	}
 
 	/** Das gewählte Event gilt für die Shell und den Inhalt; die Vorstellung steht danach auf "Alle Vorstellungen". */
@@ -281,6 +311,8 @@ public class TicketShellController {
 
 			// Der Ausschnitt der alten Ansicht gilt nicht mehr, die Auswahl bleibt: Die neue Ansicht bekommt sie unten zurück
 			List<Booking> keptSelection = new ArrayList<>(state.selectedBookings());
+			// Ab jetzt zählen nur die Treffer der neuen Ansicht; die alte kann noch zeichnen (KARV-192)
+			state.setActiveView(activeContentController);
 			state.resetView();
 			if (activeContentController instanceof SalesStateAware aware) {
 				aware.setSalesState(state);

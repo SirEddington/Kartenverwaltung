@@ -115,6 +115,8 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	// Menü "Anzeige" der Shell: Mit gesetztem Verkaufszustand sind es dessen Einstellungen (so folgt das Kundenfenster)
 	private PlanLabelOptions labelOptions = new PlanLabelOptions();
 	private BooleanProperty seatPatterns = new SimpleBooleanProperty(true);
+	// Der gemeinsame Verkaufszustand, sobald die Shell ihn setzt; bekommt die Treffer der Suche (KARV-192)
+	private SalesViewState salesState;
 
 	@FXML
 	public void initialize() {
@@ -322,10 +324,21 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		Hall hall = hallOf(selectedPres);
 		SeatingPlan plan = SalesPlan.of(selectedPres, hall);
 		viewportPane.render(hall, plan, selectedPres, labelOptions.snapshot(), planDecorator);
+		reportSearchHits();
 		// Die Legende erklärt gezeichnete Sitze: nur mit barrierefreier Darstellung und nur, wenn ein Plan zu sehen ist
 		boolean legend = seatPatterns.get() && selectedPres != null && plan != null;
 		legendSlot.setVisible(legend);
 		legendSlot.setManaged(legend);
+	}
+
+	/**
+	 * Meldet die nicht abgeblendeten Sitze als Treffer (KARV-192), sortiert wie die Kartentabelle. Zeichnet diese Ansicht
+	 * noch, nachdem die Shell zur Tabelle gewechselt hat (Menü "Anzeige"), ignoriert der Zustand die Meldung.
+	 */
+	private void reportSearchHits() {
+		if (salesState != null) {
+			salesState.showSearchHits(this, seatNodes.values().stream().filter(this::matchesQuery).sorted(TableLabel.BOOKING_ORDER).toList());
+		}
 	}
 
 	private Hall hallOf(Presentation presentation) {
@@ -445,6 +458,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	 */
 	@Override
 	public void setSalesState(SalesViewState state) {
+		salesState = state;
 		selectedBookings = state.selectedBookings();
 		labelOptions = state.planLabels();
 		labelOptions.follow(viewportPane, this::renderHall);

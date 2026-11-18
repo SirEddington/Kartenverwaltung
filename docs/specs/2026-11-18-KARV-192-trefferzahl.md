@@ -157,12 +157,13 @@ Statische Hilfen, aus denen die Shell Text und Tooltip baut:
   `Label fx:id="lblSearchHits"` mit Stilklasse `field-caption`, dazwischen ein wachsender Abstand. Die Zeile darf
   weder Mindest- noch Vorzugsbreite der `VBox` erhöhen: Die `HBox` bekommt `minWidth="0"` und `prefWidth="0"` (die
   `VBox` zieht sie auf die Breite des Suchfelds), das Label `minWidth="0"`; ist kein Platz, kürzt es mit „…“.
-  „Suche“ wird nicht gekürzt (`minWidth="-Infinity"`).
+  Bei Platzmangel wird „Suche“ gekürzt, nicht die Zahl (`minWidth="-Infinity"` auf der Zahl). Nachtrag aus dem
+  Code-Review: Ursprünglich stand hier das Umgekehrte; dann wäre bei schmalem Fenster die Zahl unlesbar geworden.
 - Text: `SearchHits.countText(state.searchHits().size())`, aktualisiert bei jeder Änderung der Liste; beim Start
   „0 Treffer“.
-- Tooltip auf dem Label mit dem Starttext „Keine Treffer“. Sein Text wird bei jedem Anzeigen (`setOnShowing`) aus dem
-  aktuellen Stand neu gebaut, damit eigene Änderungen an Namen ohne Neuaufbau der Liste darin stimmen. Ändert sich die
-  Liste, während er offen ist, wird er ebenfalls neu gebaut. `byPresentation` ist wahr, wenn
+- Tooltip auf dem Label mit dem Starttext „Keine Treffer“. Sein Text wird bei jeder Änderung der Liste und zusätzlich
+  bei jedem Anzeigen (`setOnShowing`) aus dem aktuellen Stand neu gebaut, damit eigene Änderungen an Namen ohne
+  Neuaufbau der Liste darin stimmen. `byPresentation` ist wahr, wenn
   `state.presentationProperty().get() == null`; `presentations` sind die Vorstellungen des gewählten Events (leer ohne
   Event oder wenn `getPresentations()` `null` ist).
 

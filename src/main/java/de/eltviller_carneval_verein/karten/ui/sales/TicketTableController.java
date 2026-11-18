@@ -705,6 +705,28 @@ public class TicketTableController implements ContentController, SalesStateAware
 		seatTable.getSelectionModel().getSelectedItems().addListener((ListChangeListener<BookingDTO>) change -> {
 			state.replaceSelection(selectedBookings());
 		});
+		reportSearchHits(state);
+	}
+
+	/**
+	 * Meldet die gezeigten Zeilen als Treffer (KARV-192): die Items der Tabelle, also nach Suche und Spaltenfilter von
+	 * ControlsFX und in der Sortierung der Ansicht, nicht {@code filteredData}. Ersetzt jemand die Items, gilt die neue
+	 * Liste.
+	 */
+	private void reportSearchHits(SalesViewState state) {
+		Runnable report = () -> state.showSearchHits(this, seatTable.getItems().stream().map(BookingDTO::getBooking).toList());
+		ListChangeListener<BookingDTO> rowsChanged = change -> report.run();
+		seatTable.getItems().addListener(rowsChanged);
+		seatTable.itemsProperty().addListener((obs, oldItems, newItems) -> {
+			if (oldItems != null) {
+				oldItems.removeListener(rowsChanged);
+			}
+			if (newItems != null) {
+				newItems.addListener(rowsChanged);
+			}
+			report.run();
+		});
+		report.run();
 	}
 
 	/** Wählt die Zeilen der Buchungen, die die Tabelle zeigt (nach dem Wechsel von der Saalansicht). */
