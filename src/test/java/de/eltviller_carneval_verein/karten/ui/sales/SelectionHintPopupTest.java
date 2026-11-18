@@ -18,7 +18,7 @@ import javafx.scene.control.Tooltip;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 
-/** Welche Fenster den Hinweis am Mauszeiger ausblenden (KARV-194): Menüs und Dialoge ja, Tooltips der Sitze nicht. */
+/** Welche Fenster den Hinweis am Mauszeiger ausblenden (KARV-194): Menüs und Dialoge ja, Tooltips nicht. */
 class SelectionHintPopupTest {
 
 	@BeforeAll
@@ -52,7 +52,7 @@ class SelectionHintPopupTest {
 			main.show();
 			ContextMenu menu = new ContextMenu(new MenuItem("Verkaufen"));
 			menu.show(main);
-			Tooltip tooltip = new Tooltip("Tisch 1, Sitz 1 (Frei)");
+			Tooltip tooltip = new Tooltip("3 Treffer");
 			tooltip.show(main);
 			Stage customerDisplay = new Stage();
 			customerDisplay.initOwner(main);

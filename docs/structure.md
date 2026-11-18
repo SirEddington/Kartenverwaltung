@@ -99,7 +99,8 @@ user-facing technical messages (`StoreMessages`, SYS-005…SYS-013).
 ### `settings`
 `AppSettings` (`sharedDir`, `saveBookingsImmediately`, `checkCloudServer`, `recentOperators`, `display`,
 `patchNotesSeen`), `DisplaySettings` (the "Anzeige" menu: rows, tables, seat numbers, hall objects, `seatPatterns`,
-`selectionHint`, `summaryPlacement` as text, `restoreAtStart`) and `SettingsStore` (`<AppData>/settings.json`, `saveOnly` for partial
+`selectionHint`, `selectionHintPlacement` and `summaryPlacement` as text, `selectionHintAvoidEdges`,
+`restoreAtStart`) and `SettingsStore` (`<AppData>/settings.json`, `saveOnly` for partial
 saves, `existedAtLoad()`). Always read through `SettingsStore.getInstance().current()`.
 
 ### `update`

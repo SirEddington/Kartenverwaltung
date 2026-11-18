@@ -79,48 +79,104 @@ class SelectionHintTest {
 		assertFalse(new Conditions(true, true, true, true, true).visible(), "Dialog oder Menü offen");
 	}
 
-	@Test
-	void standsRightAboveThePointer() {
-		Point2D corner = SelectionHint.place(200, 300, 120, 24, 1000, 800);
+	// Lage (KARV-197): Hinweis 120 x 24, Inhaltsbereich 1000 x 800, wenn nicht anders angegeben
 
-		assertEquals(new Point2D(216, 268), corner, "linke Kante 16 px rechts, untere Kante 8 px über dem Zeiger");
+	private static Point2D above(double pointerX, double pointerY, double areaWidth, double areaHeight) {
+		return SelectionHint.place(SelectionHintPlacement.ABOVE, true, pointerX, pointerY, 120, 24, areaWidth, areaHeight);
+	}
+
+	private static Point2D below(double pointerX, double pointerY, double areaWidth, double areaHeight) {
+		return SelectionHint.place(SelectionHintPlacement.BELOW, true, pointerX, pointerY, 120, 24, areaWidth, areaHeight);
+	}
+
+	/** Mit ausgeschaltetem "Am Rand ausweichen": Die Seite bleibt, der Hinweis wird nur bis an den Rand geschoben. */
+	private static Point2D stay(SelectionHintPlacement placement, double pointerX, double pointerY) {
+		return SelectionHint.place(placement, false, pointerX, pointerY, 120, 24, 1000, 800);
 	}
 
 	@Test
-	void movesLeftOfThePointerAtTheRightEdge() {
-		Point2D corner = SelectionHint.place(950, 300, 120, 24, 1000, 800);
-
-		assertEquals(new Point2D(822, 268), corner, "rechte Kante 8 px links vom Zeiger");
+	void withoutAvoidingEdgesTheNormalCaseIsUnchanged() {
+		assertEquals(new Point2D(216, 268), stay(SelectionHintPlacement.ABOVE, 200, 300));
+		assertEquals(new Point2D(216, 320), stay(SelectionHintPlacement.BELOW, 200, 300));
 	}
 
 	@Test
-	void movesLeftBelowThePointerAtTheTopEdge() {
-		// Rechts unter dem Zeiger erschiene der Tooltip eines Sitzes und verdeckte den Hinweis
-		Point2D corner = SelectionHint.place(200, 10, 120, 24, 1000, 800);
-
-		assertEquals(new Point2D(72, 30), corner, "rechte Kante 8 px links vom Zeiger, obere Kante 20 px darunter");
+	void withoutAvoidingEdgesItStopsAtTheRightEdgeInsteadOfMovingLeft() {
+		assertEquals(new Point2D(880, 268), stay(SelectionHintPlacement.ABOVE, 950, 300), "rechte Kante am Rand, weiter über dem Zeiger");
 	}
 
 	@Test
-	void topRightCornerUsesLeftBelow() {
-		Point2D corner = SelectionHint.place(990, 5, 120, 24, 1000, 800);
+	void withoutAvoidingEdgesAboveStaysAboveAtTheTopEdge() {
+		assertEquals(new Point2D(216, 0), stay(SelectionHintPlacement.ABOVE, 200, 10), "obere Kante am Rand statt unter den Zeiger");
+	}
 
-		assertEquals(new Point2D(862, 25), corner);
+	@Test
+	void withoutAvoidingEdgesBelowStaysBelowAtTheBottomEdge() {
+		assertEquals(new Point2D(216, 776), stay(SelectionHintPlacement.BELOW, 200, 790), "untere Kante am Rand statt über den Zeiger");
+	}
+
+	@Test
+	void withoutAvoidingEdgesTheCornerCoversThePointer() {
+		// Vom Entwickler hingenommen: In der Ecke auf seiner Seite liegt der Hinweis auf der Zeigerspitze
+		assertEquals(new Point2D(880, 776), stay(SelectionHintPlacement.BELOW, 990, 790));
+	}
+
+	@Test
+	void aboveStandsRightAboveThePointer() {
+		assertEquals(new Point2D(216, 268), above(200, 300, 1000, 800), "linke Kante 16 px rechts, untere Kante 8 px über dem Zeiger");
+	}
+
+	@Test
+	void aboveMovesLeftOfThePointerAtTheRightEdge() {
+		assertEquals(new Point2D(822, 268), above(950, 300, 1000, 800), "rechte Kante 8 px links vom Zeiger");
+	}
+
+	@Test
+	void aboveMovesRightBelowThePointerAtTheTopEdge() {
+		assertEquals(new Point2D(216, 30), above(200, 10, 1000, 800), "obere Kante 20 px unter dem Zeiger, weiter rechts davon");
+	}
+
+	@Test
+	void aboveUsesLeftBelowOnlyInTheTopRightCorner() {
+		assertEquals(new Point2D(862, 25), above(990, 5, 1000, 800));
+	}
+
+	@Test
+	void belowStandsRightBelowThePointer() {
+		assertEquals(new Point2D(216, 320), below(200, 300, 1000, 800), "linke Kante 16 px rechts, obere Kante 20 px unter dem Zeiger");
+	}
+
+	@Test
+	void belowMovesLeftOfThePointerAtTheRightEdge() {
+		assertEquals(new Point2D(822, 320), below(950, 300, 1000, 800));
+	}
+
+	@Test
+	void belowMovesAboveThePointerAtTheBottomEdge() {
+		assertEquals(new Point2D(216, 758), below(200, 790, 1000, 800), "untere Kante 8 px über dem Zeiger");
+	}
+
+	@Test
+	void belowUsesLeftAboveInTheBottomRightCorner() {
+		assertEquals(new Point2D(862, 758), below(990, 790, 1000, 800));
+	}
+
+	@Test
+	void belowStaysBelowAtTheTopEdge() {
+		assertEquals(new Point2D(216, 25), below(200, 5, 1000, 800));
 	}
 
 	@Test
 	void neverLeavesTheAreaAtTheBottom() {
-		// Sehr niedriger Inhaltsbereich, Zeiger oben: links unter dem Zeiger, aber nicht unter den Rand
-		Point2D corner = SelectionHint.place(200, 10, 120, 24, 1000, 40);
-
-		assertEquals(new Point2D(72, 16), corner);
+		// Sehr niedriger Inhaltsbereich: Auf keiner Seite passt er ganz, er bleibt trotzdem im Bereich
+		assertEquals(new Point2D(216, 16), above(200, 10, 1000, 40), "oben nicht, also darunter, am unteren Rand begrenzt");
+		assertEquals(new Point2D(216, 0), below(200, 10, 1000, 40), "unten nicht, also darüber, am oberen Rand begrenzt");
 	}
 
 	@Test
 	void neverLeavesTheAreaToTheLeftOrTop() {
-		// Bereich schmaler als der Hinweis: Er beginnt am linken Rand statt außerhalb
-		Point2D corner = SelectionHint.place(60, 10, 120, 24, 100, 800);
-
-		assertEquals(new Point2D(0, 30), corner);
+		// Bereich schmaler bzw. niedriger als der Hinweis: Er beginnt am linken bzw. oberen Rand statt außerhalb
+		assertEquals(new Point2D(0, 30), above(60, 10, 100, 800));
+		assertEquals(new Point2D(0, 0), below(60, 10, 100, 20));
 	}
 }

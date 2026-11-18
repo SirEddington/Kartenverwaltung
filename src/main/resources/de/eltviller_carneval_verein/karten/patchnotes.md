@@ -4,8 +4,10 @@
 
 ### Neu
 - Beim Auswählen von Plätzen steht neben dem Mauszeiger, wie viele Karten gewählt sind und was sie
-  zusammen kosten, in der Saalansicht und in der Tabelle. Im Menü „Anzeige“ lässt sich das unter
-  „Auswahl am Mauszeiger“ abschalten.
+  zusammen kosten, in der Saalansicht und in der Tabelle. Im Menü „Anzeige“ unter „Auswahl am
+  Mauszeiger“ wählen Sie, ob der Hinweis über oder unter dem Mauszeiger steht, oder schalten ihn ab.
+  Ohne „Am Rand ausweichen“ springt er am Rand nicht auf die andere Seite des Mauszeigers. Die
+  Saalansicht zeigt beim Überfahren eines Platzes dafür keinen Tooltip mit Platz und Status mehr.
 - Über dem Suchfeld steht, wie viele Treffer die Tabelle bzw. die Saalansicht gerade zeigt. Fährt
   man mit der Maus darüber, steht dort, wie viele davon auf welchen Namen gebucht sind, bei „Alle
   Vorstellungen“ auch je Vorstellung. So lässt sich schnell prüfen, ob ein Kunde die richtige

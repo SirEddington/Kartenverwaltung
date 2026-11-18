@@ -34,7 +34,6 @@ import javafx.scene.Node;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
-import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
@@ -385,7 +384,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		seatNode.setOpacity(matchesQuery ? 1.0 : 0.25);
 		seatNodes.put(seatNode, booking);
 
-		Tooltip.install(seatNode, new Tooltip(booking.getPlaceLabel() + " (" + status.getDisplayName() + ")"));
+		// Kein Tooltip mit Platz und Status: Er läge unter dem Zeiger, wo der Hinweis zur Auswahl stehen kann (KARV-197)
 		seatNode.setOnMouseClicked(event -> {
 			if (event.getButton() != MouseButton.PRIMARY || !event.isStillSincePress()) {
 				return;
@@ -419,7 +418,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	/**
 	 * Öffnet ein Popup mit den Kartendetails des angeklickten Sitzes direkt über der Saalübersicht. Änderungen gelten erst
-	 * mit "Anwenden" (bzw. "Speichern", siehe {@link BookingAutoSave}); danach wird die Saalübersicht neu gezeichnet (Farbe, Tooltip etc.).
+	 * mit "Anwenden" (bzw. "Speichern", siehe {@link BookingAutoSave}); danach wird die Saalübersicht neu gezeichnet (Farbe, Auswahl etc.).
 	 */
 	private void openSeatDetailPopup(Booking booking, Window window, double screenX, double screenY) {
 		closePopup();

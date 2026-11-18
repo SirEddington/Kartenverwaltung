@@ -117,10 +117,12 @@ public class TicketShellController {
 		PlanLabelsMenu.bind(menuDisplay, state.planLabels());
 		// Sitzstatus nicht nur über die Farbe (KARV-26); nur hier, der Hallen-Editor zeigt keinen Status
 		menuDisplay.getItems().addAll(new SeparatorMenuItem(), PlanLabelsMenu.item("Barrierefreie Sitzdarstellung", state.seatPatternsProperty()),
-				PlanLabelsMenu.item("Auswahl am Mauszeiger", state.selectionHintProperty()));
+				SelectionHintMenu.create(state.selectionHintProperty(), state.selectionHintPlacementProperty(),
+						state.selectionHintAvoidEdgesProperty()));
 		SummaryPlacementMenu.append(menuDisplay, state.summaryPlacementProperty());
 		// Vor der ersten Ansicht (showTicketTableView unten): loadContentView legt den Hinweis über jede Ansicht
-		selectionHint = new SelectionHint(contentArea, state.selectedBookings(), state.selectionHintProperty());
+		selectionHint = new SelectionHint(contentArea, state.selectedBookings(), state.selectionHintProperty(),
+				state.selectionHintPlacementProperty(), state.selectionHintAvoidEdgesProperty());
 
 		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das
 		// Hauptfenster geschlossen, schließt es mit (sonst hielte es die App am Leben). Die Szene bleibt an contentArea

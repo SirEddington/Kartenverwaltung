@@ -81,6 +81,16 @@ public final class SalesViewState {
 		return display.selectionHintProperty();
 	}
 
+	/** Ob der Hinweis am Mauszeiger über oder unter dem Zeiger steht (Menü "Anzeige", KARV-197). */
+	public ObjectProperty<SelectionHintPlacement> selectionHintPlacementProperty() {
+		return display.selectionHintPlacementProperty();
+	}
+
+	/** Ob der Hinweis am Mauszeiger am Rand ausweicht (Menü "Anzeige", KARV-197). */
+	public BooleanProperty selectionHintAvoidEdgesProperty() {
+		return display.selectionHintAvoidEdgesProperty();
+	}
+
 	/** Wo das Kundenfenster die Kartenübersicht zeigt (Menü "Anzeige"). */
 	public ObjectProperty<SummaryPlacement> summaryPlacementProperty() {
 		return display.summaryPlacementProperty();
