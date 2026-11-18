@@ -25,10 +25,12 @@ Kein Code, bevor das Spec geprüft und freigegeben ist.
      ist der Release-Branch in Arbeit. Hole dafür den Stand des Hauptrepositorys; bei einem Fork ist das nicht
      `origin`, und ein Fork enthält zunächst nur `main`.
    - Auf einem Arbeits-Branch, der zu etwas anderem gehört, oder auf einem Branch außerhalb des Schemas
-     (`claude/…`, `worktree-…`): nachfragen.
+     (`claude/…`, `worktree-…`): fragen, ob ein neuer Arbeits-Branch vom Release-Branch in Arbeit entstehen soll
+     oder das Spec auf dem aktuellen Branch.
 5. **Schreiben.** Lege das Spec nach [vorlage.md](vorlage.md) unter `docs/specs/` an (Dateiname: `CONTRIBUTING.md`,
    „Spec"). Keine privaten Daten, keine Zugangsdaten: Das Repository ist öffentlich.
-6. **Prüfen lassen.** Starte zwei Subagents in derselben Nachricht, damit sie gleichzeitig und unabhängig laufen:
+6. **Prüfen lassen.** Starte zwei Subagents (Typ `general-purpose`) in derselben Nachricht, damit sie gleichzeitig
+   und unabhängig laufen:
    - einen mit dem Text aus [pruefauftrag-umsetzer.md](pruefauftrag-umsetzer.md),
    - einen mit dem Text aus [pruefauftrag-gegenpruefer.md](pruefauftrag-gegenpruefer.md).
 
@@ -45,7 +47,8 @@ Kein Code, bevor das Spec geprüft und freigegeben ist.
 ## Einstieg später im Ablauf
 
 - Ziel, Grund und Weg sind im Gespräch schon geklärt (etwa durch das Brainstorming des Superpowers-Plugins): Beginne
-  bei Schritt 4.
+  bei Schritt 4. Hast du den Bestand dabei noch nicht gelesen, hole Schritt 2 vor dem Schreiben nach; die
+  Ausgangslage braucht geprüfte Fundstellen.
 - Es gibt schon ein Spec, das nur geprüft werden soll: Beginne bei Schritt 4 und überspringe Schritt 5.
 
 ## Was du dem Entwickler am Ende sagst

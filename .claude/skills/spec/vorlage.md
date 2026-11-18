@@ -44,5 +44,7 @@ Woran man erkennt, dass es fertig ist: prüfbare Aussagen, keine Absichten.
 
 ## Prüfvermerk
 
+Vor der ersten Runde steht hier nur „Noch nicht geprüft."
+
 Je Runde: Datum, Ergebnis beider Prüfer (Zahl der kritischen und großen Befunde), was behoben wurde. Bewusst nicht
 übernommene oder herabgestufte Befunde mit Begründung. Am Ende: was nicht belegt werden konnte.

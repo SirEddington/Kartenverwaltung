@@ -568,6 +568,10 @@ einen Rückfall.
   diesem Pull Request behoben.
 - 17.11.2026: Das Ruleset für `main` heißt `mainMerge` (vom Maintainer umbenannt), hat keine Ausnahme mehr und
   verlangt den Check `test`. Die Vorgabe für Squash-Commits ist „Pull request title and commit details".
+- 18.11.2026: Der Probelauf aus der Abnahme ist bestanden. Eine neue Sitzung im Arbeitsverzeichnis des Branches
+  kannte die Regeln der `CONTRIBUTING.md` aus dem geladenen Kontext, fand und lud den Skill `spec`, schrieb ein
+  Probe-Spec nach der Vorlage und startete beide Prüfer gleichzeitig. Fünf kleine Unklarheiten in Skill, Vorlage und
+  Prüfaufträgen sind danach behoben (unter anderem eine Schlusszeile mit der Zahl der Befunde je Stufe).
 - 18.11.2026: Die Sprachregel nennt die Roadmap (`docs/roadmap.md`) als deutsches Planungsdokument.
 - 18.11.2026: Das Versionsschema (Entscheidung des Maintainers vom 18.11.2026, bisher nur in der Roadmap) steht als
   Regel in der `CONTRIBUTING.md`, Abschnitt „Versionen". In eine Patch-Version dürfen danach auch kleine Ergänzungen,

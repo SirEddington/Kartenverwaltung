@@ -32,4 +32,5 @@ Antwortformat: eine Liste der Befunde, nach Stufe sortiert, das Schwerste zuerst
 Spec (Abschnitt), der Befund in ein bis drei Sätzen, und der Beleg (Befehl und Ergebnis, Datei und Zeile, oder
 „Überlegung, nicht belegt"). Kleine Befunde höchstens fünf, knapp. Nenne am Ende in wenigen Zeilen, was du nicht
 prüfen konntest. Gibt es nichts Kritisches oder Großes, schreibe ausdrücklich „nichts Kritisches oder Großes".
-Antworte auf Deutsch und fasse dich kurz: keine Liste dessen, was stimmt.
+Schließe mit der Zeile `Befunde: <n> kritisch, <n> groß, <n> klein`. Antworte auf Deutsch und fasse dich kurz:
+keine Liste dessen, was stimmt oder was du gelesen hast.

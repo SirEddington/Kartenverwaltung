@@ -30,4 +30,6 @@ Gib jedem Befund eine Stufe. Die Stufen (kritisch, groß, klein) und ihre Bedeut
 Antwortformat: eine Liste der Befunde, nach Stufe sortiert, das Schwerste zuerst. Je Befund: Stufe, Fundstelle im
 Spec (Abschnitt), der Befund in ein bis drei Sätzen, und warum die Antwort ändert, was gebaut wird. Kleine Befunde
 höchstens fünf, knapp. Gibt es nichts Kritisches oder Großes, schreibe ausdrücklich „nichts Kritisches oder Großes".
-Antworte auf Deutsch.
+Nenne danach in wenigen Zeilen, was du nicht prüfen konntest, und schließe mit der Zeile
+`Befunde: <n> kritisch, <n> groß, <n> klein`. Antworte auf Deutsch und fasse dich kurz: keine Liste dessen, was
+stimmt oder was du gelesen hast.
