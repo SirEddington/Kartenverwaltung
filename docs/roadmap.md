@@ -1,19 +1,21 @@
 # Langfristige Roadmap – Design
 
-Stand: 16.11.2026, ausgehend von Release 1.1.0.
+Stand: 18.11.2026, ausgehend von Release 1.1.0.
 
 Dieses Dokument legt die **Reihenfolge** der längerfristigen Vorhaben fest und begründet sie. Es ist kein
 Umsetzungsplan: Jede Stufe bekommt ein eigenes Design, wenn sie an der Reihe ist. Die offenen Fragen je Stufe sind
 dafür schon gesammelt.
 
-Die Versionsnummern folgen den Fix-Versionen in Jira (Projekt KARV, abgeglichen am 16.11.2026). Gelesen wurden die
-offenen Tickets mit Titel und Version, bei den Epics und einzelnen Tickets auch die Beschreibung.
+Die Versionsnummern folgen den Fix-Versionen in Jira (Projekt KARV, abgeglichen am 16.11.2026). Die Roadmap nennt
+Themen, keine einzelnen Tickets. Zu welcher Stufe ein Ticket gehört, steht in Jira an der Fix-Version. Kleinere Punkte
+kommen über neue Tickets dazu und brauchen hier keinen Eintrag.
 
 ## Absicht
 
 Das Programm ist als reines ECV-Projekt entstanden und läuft. Was der ECV-Alltag bisher verlangt, steckt in
 Release 1.2. Darüber hinaus gibt es eine Liste von Ideen ohne Termin (Archivierung, Warteliste, Kundenmails,
-Bestellannahme, Customizing, Übersetzung, Konten und Rechte, Export, Serverbetrieb mit Self-Hosting, Weitergabe an
+Bestellannahme, Customizing, Übersetzung, Konten und Rechte, Export, Stehplätze, Ausbau der Saalplanung, Rückgängig
+und Wiederholen, Serverbetrieb mit Self-Hosting, Weitergabe an
 andere Vereine). Die Roadmap ordnet diese Liste so, dass nichts doppelt angefasst und nichts auf Verdacht gebaut
 wird.
 
@@ -63,63 +65,109 @@ Die drei Umbauten, um die es geht:
 3. **Texte auslagern.** Alle Texte stehen fest auf Deutsch in 17 FXML-Dateien und im Java-Code. Es gibt keine
    Sprachdateien.
 
+Nicht jede Stufe braucht einen Umbau. 1.2 und 1.4 kommen ohne aus: Sie bündeln, was der Alltag verlangt und an keinem
+der drei Umbauten hängt.
+
+## Versionsnummern
+
+Die Version bleibt dreistellig (Entscheidung des Entwicklers am 18.11.2026).
+
+| Stelle | Bedeutung | Beispiel |
+|---|---|---|
+| 1. | Neue Ausbaustufe: Serverbetrieb. | 2.0.0 |
+| 2. | Geplantes Release mit neuem Inhalt. Es darf das Datenformat erweitern und verlangen, dass alle Rechner eines gemeinsamen Ordners zusammen umsteigen. | 1.2.0 |
+| 3. | Fehlerbehebungen und kleine Ergänzungen. Es ändert nichts an gespeicherten Daten, jeder Rechner kann einzeln aktualisieren. | 1.1.1 |
+
+Die Grenze zwischen zweiter und dritter Stelle ist nicht die Größe, sondern die Frage, ob alle Rechner eines
+gemeinsamen Ordners zusammen umsteigen müssen. Eine kleine Funktion, die ein neues Feld speichert, gehört deshalb in
+die zweite Stelle. Ob ein Release der zweiten Stelle den gemeinsamen Umstieg wirklich verlangt, steht in seinen
+Patchnotes. 1.0.1 (Offline-Erkennung) passt bereits in dieses Schema.
+
+Eine vierte Stelle für Fehlerbehebungen gibt es nicht:
+
+- Sie ist technisch belegt. Conveyor bildet die Paketversion `a.b.c.d` aus der Version und der Revision, und
+  `AppVersion` liest sie so wieder auseinander.
+- `PatchNotesGuard` verlangt eine dreistellige Version, die in `pom.xml`, `conveyor.conf` und den Patchnotes gleich
+  ist. Test, Update-Prüfung und Release-Ablauf müssten umgebaut werden.
+- Bei einem Entwickler und wenigen Releases im Jahr hilft die Trennung von kleiner Funktion und Fehlerbehebung
+  niemandem. Die Nutzer lesen die Patchnotes.
+
+Die Stufen unten sind Releases der zweiten Stelle (1.2 steht für 1.2.0). In Jira heißen sie v1.2, v1.3 und so weiter.
+Ein Zwischenrelease der dritten Stelle bekommt bei Bedarf eine eigene Fix-Version, zum Beispiel v1.1.1. Ein Kandidat
+dafür ist die Offline-Erkennung unter Linux (siehe unten).
+
 ## Stufen
 
 ### 1.2 – ECV-Alltag (in Planung, nicht Teil dieses Designs)
 
-Jira: KARV-143 „Abrechnung & Bilanz", KARV-181 „Verkauf & Preise".
-
 Kassen am Event anlegen und verwalten, Kassenbewegungen (Einlage, Entnahme), Kassensturz je Kasse mit Soll/Ist für
-alle Zahlungsmittel, Gesamtbilanz des Events mit einer Zeile je Kasse, Erstattung beim Storno, Buchungen auf andere
-Sitze verschieben, Preis je Kategorie und Vorstellung.
+alle Zahlungsmittel und mit Abschluss (gezählt am, von), Bilanz je Vorstellung und Gesamtbilanz des Events mit einer
+Zeile je Kasse, Erstattung beim Storno, Export für die Kassenprüfer (Kassenbericht und Einzelnachweis), Buchungen auf
+andere Sitze verschieben, Preis je Kategorie und Vorstellung. Wenn Platz bleibt: Auswertung nach Tag.
+
+Dazu als Pflege: Die Saalansicht öffnet auch beim ersten Mal nach dem Start ohne spürbares Einfrieren.
 
 Bezug zur Roadmap: Die Kasse ist die Vorstufe der späteren Rollen ("wer sitzt an welcher Kasse" → "wer darf was").
 
 ### 1.3 – Archivierung und Export (Umbau: Löschen können)
 
-Jira: KARV-180 „Archivierung & Aufbewahrung" (KARV-65, KARV-78, KARV-88, Löschen von Kundendaten KARV-183),
-KARV-5 „Kartendruck/-export" (Export von Hallenplänen und Buchungslisten KARV-184).
-
 **Inhalt**
-- Archivierung abgeschlossener Events. Ein `archived`-Kennzeichen am Event gibt es bereits.
+- Archivierung abgeschlossener Events. Ein `archived`-Kennzeichen am Event gibt es bereits. Hallen und Bestuhlungen,
+  die nicht mehr gebraucht werden, lassen sich ebenfalls archivieren statt löschen.
 - Löschkonzept: Kundendaten eines Events lassen sich endgültig entfernen oder unkenntlich machen.
-- Export von Hallenplänen (PDF oder Bild) und von Buchungen (Liste je Vorstellung).
+- Aufbewahrung: Alte Versionen und Sicherungen werden nach einer gemeinsamen Regel aufgeräumt. Wie lange Sicherungen
+  bleiben, ist einstellbar.
+- Export von Hallenplänen (PDF oder Bild) und von Buchungen (Liste je Vorstellung, Türliste je Tisch).
 
 **Warum zuerst:** Es ist der kleinste der drei Umbauten, hängt von keinem anderen ab und wird mit jeder Saison
-dringender, weil der Datenbestand nur wächst. Der Export ist das sichtbare Gegenstück und für sich nützlich.
+dringender, weil der Datenbestand nur wächst. Der Export ist das sichtbare Gegenstück und für sich nützlich. Das
+Aufräumen alter Versionen gehört dazu, weil es denselben Mechanismus braucht wie das Löschen von Kundendaten: eine
+Regel, die jeder Arbeitsplatz gleich anwendet.
 
 **Offen für das eigene Design**
 - Löschen in einem Speicher, der bewusst nie löscht: Wie erfahren alle Arbeitsplätze davon, und wie wird verhindert,
   dass ein Arbeitsplatz die gelöschten Dateien wieder hochlädt? Sync-Clients geben Löschungen nicht zuverlässig weiter.
+  Für das Aufräumen alter Versionen ist schon eine Löschliste im gemeinsamen Ordner vorgesehen. Das Löschen von
+  Kundendaten kann denselben Mechanismus nutzen. Das Aufräumen löscht aber nach Alter und behält die aktuelle Version
+  immer. Für Kundendaten reicht das nicht.
 - Löschen oder unkenntlich machen? Die Abrechnung muss stimmig bleiben.
 - Was ist ein Archiv: ein Zustand im Speicher oder eine ausgelagerte Datei?
+- Archivierte Hallen und Bestuhlungen: in den Auswahllisten ausblenden, bereits zugewiesene weiter anzeigen. Bleibt
+  das Löschen daneben möglich?
 - Wiederherstellungspunkte und Löschpflicht widersprechen sich. Welche Seite gewinnt wann?
 - Hallenplan-Export als Grundlage für Flucht- und Rettungspläne: Der Export liefert die Zeichnung. Ein normgerechter
   Plan hat eigene Vorgaben, die das Programm nicht erfüllen soll.
+- Eintrittskarten drucken: Gehört der Kartendruck hierher, oder reicht zunächst die Türliste? Ein Kartendruck braucht
+  Vorlagen je Verein und hängt damit am Customizing (1.6).
 
-**Bezug zu Jira**
-- KARV-88 sieht für das Aufräumen alter Versionen schon eine Löschliste im gemeinsamen Ordner vor, damit kein
-  Rechner Gelöschtes wieder hochlädt. Das Löschen von Kundendaten kann denselben Mechanismus nutzen. KARV-88 löscht
-  aber nach Alter und behält die aktuelle Version immer. Für Kundendaten reicht das nicht.
-- KARV-5 nannte nur Eintrittskarten und Türlisten. Der Export von Hallenplänen und Buchungslisten ist als KARV-184
-  dazugekommen.
+### 1.4 – Saal und Verkauf (kein Umbau)
 
-### 1.4 – bereits in Jira geplant
+**Inhalt**
+- Platzvorschlag: Das Programm schlägt eine gewünschte Zahl zusammenhängender freier Plätze vor.
+- Saalplanung: Gang als eigenes Objekt in der Bestuhlung (auch Seitengänge und Zugänge), einzelne Tische je
+  Vorstellung deaktivieren, Vorgabewerte einer neuen Reihe aus der vorigen ableiten.
+- Rückgängig und Wiederholen für Änderungen an Events und Hallen.
+- Bedienung: Fenstergröße und -position merken.
 
-Nicht aus der Ideenliste, sondern schon als Fix-Version v1.4 vorhanden: KARV-6 „Hallenverwaltung" (Gang als Objekt,
-Tische je Vorstellung deaktivieren, dynamische Standardwerte), KARV-7 „Verkaufs-Workflows" (Zufallszuteilung),
-KARV-8 „Qualität & Robustheit" (Undo/Redo), KARV-72 „Benutzereinstellungen".
+**Warum hier:** Diese Punkte verlangt der Alltag, sie hängen an keinem der drei Umbauten und sind zum Teil schon
+ausgearbeitet. Gebündelt ergeben sie ein Release zwischen zwei schweren Umbauten (Löschen, Bestellung). 1.3 und 1.4
+hängen nicht voneinander ab und lassen sich tauschen. Der Platz nach der Archivierung ist gewählt, weil die
+Archivierung mit dem Ende der ersten Saison gebraucht wird, die Saalplanung erst vor der nächsten (vom Entwickler am
+16.11.2026 bestätigt).
 
-Stehplätze (KARV-92) sind von hier nach 1.5 gewandert, siehe dort.
+**Offen für das eigene Design**
+- Platzvorschlag: nur je Tisch oder über Tische hinweg (z. B. bei Bankreihen)?
+- Gang: Geometrie bei gedrehten Reihen, und ob er den heutigen Mittelgang an der Reihe ablöst oder ergänzt.
+- Deaktivierte Tische: Wie zählen sie in Statistik und Abrechnung, und was gilt, wenn an einem Tisch schon Buchungen
+  hängen?
+- Rückgängig: Der Ansatz (Zustandsabbilder) ist im Oktober 2026 ausgearbeitet worden, vor dem Versionsspeicher. Er ist
+  gegen den heutigen Stand zu prüfen.
 
 ### 1.5 – Warteliste und Kundenmail (Umbau: Bestellung und Kunde)
 
-Jira: KARV-11 „Stammkundenverwaltung" mit der Bestellung (KARV-185), KARV-12 „Warteliste & Benachrichtigungen",
-KARV-92 „Stehplätze". KARV-11 und KARV-12 sind dort als Idee vermerkt, über die noch nicht entschieden ist.
-
 **Inhalt**
 - Eine Bestellung fasst mehrere Plätze eines Kunden zusammen.
-- Stehplätze: Karten ohne festen Platz (KARV-92). Sie stellen dieselbe Frage wie die Bestellung, weil mehrere
+- Stehplätze: Karten ohne festen Platz, mit Höchstzahl je Vorstellung. Sie stellen dieselbe Frage wie die Bestellung, weil mehrere
   Buchungen zusammengehören und die Buchung heute am Sitz hängt. Beide werden zusammen entworfen.
 - Warteliste je Vorstellung.
 - Einfache Kundenmail von der Kasse aus (z. B. Bestätigung, Platz frei geworden), ohne Server.
@@ -130,16 +178,18 @@ Verschieben von Buchungen aus 1.2 zeigt vorher, wie sich mehrere zusammengehöri
 **Offen für das eigene Design**
 - Die Buchung je Platz ist der Kern der Konfliktbehandlung (`bookings/<seatId>`). Wie kommt die Bestellung dazu, ohne
   dass zwei Kassen, die verschiedene Plätze verkaufen, plötzlich in Konflikt geraten?
-- Gibt es einen Kundenstamm über Events hinweg? Das hängt am Löschkonzept aus 1.3.
+- Gibt es einen Kundenstamm über Events hinweg? Das hängt am Löschkonzept aus 1.3. Stammkundenverwaltung und
+  Warteliste sind in Jira noch als Idee vermerkt, über die nicht entschieden ist.
+- Stehplätze: Kommt die Höchstzahl aus der Halle (Stehplatzbereich in der Bestuhlung) oder als Kontingent je
+  Vorstellung? Zwei Kassen können gleichzeitig die letzte Karte verkaufen; der Überverkauf muss erkannt und gemeldet
+  werden. Abrechnung und Statistik zählen Stehplätze getrennt.
+- Benachrichtigung auf anderen Wegen als Mail (SMS, Telefon)?
 - Warteliste: je Vorstellung oder je Kategorie, und was passiert bei einem Storno (Hinweis an die Kasse oder
   automatisches Nachrücken)? Nicht zugeordnete Buchungen (`unassigned`) sind bereits ein verwandter Zustand.
 - Mailversand bei mehreren Kassen: genau eine verschickt, auch nach Offline-Phasen. Wo liegen die Zugangsdaten zum
   Postfach, wenn nicht im gemeinsamen Ordner?
 
 ### 1.6 – Customizing und Englisch (Umbau: Texte auslagern)
-
-Jira: KARV-80 „Theming/White-Label Ansatz" mit KARV-79 „Strenge der Prüfung einstellen" und KARV-186 „Texte
-auslagern und englische Übersetzung".
 
 **Inhalt**
 - Alle Texte in Sprachdateien, Deutsch und Englisch.
@@ -156,8 +206,6 @@ Programm vorzeigbar für einen fremden Verein und steht deshalb direkt vor dem T
 - Bleibt der Code selbst deutsch? Annahme: ja, übersetzt wird nur die Oberfläche.
 
 ### Beigabe: macOS (kein eigenes Release)
-
-Jira: KARV-187, Fix-Version v1.6.
 
 Mac-Nutzer gibt es, vor allem zum Vorbereiten und Auswerten zu Hause, nicht an der Kasse. Ziel ist, den Mac so
 weit zu unterstützen, wie es **ohne Apple-Entwicklerkonto** geht (Entscheidung des Entwicklers: rund 99 $ im Jahr
@@ -187,17 +235,13 @@ Ausgaben.
 
 ### Vorgezogen: Offline-Erkennung unter Linux
 
-Jira: KARV-179 (Bug, ohne Fix-Version).
-
 Beim Prüfen für den Mac aufgefallen, nur im Code gelesen, nicht unter Linux ausprobiert: `CloudFolders` findet
 Nextcloud nur über `%APPDATA%` und OneDrive nur über Windows-Umgebungsvariablen. Im heutigen Linux-Paket gilt ein
 Nextcloud-Ordner damit immer als erreichbar, und Verkäufe ohne Internet zählen als hochgeladen. Das ist der Fall,
-den KARV-127 unter Windows behoben hat. Es betrifft ein bestehendes Paket und gehört deshalb als eigenes Ticket vor
+den 1.0.1 unter Windows behoben hat. Es betrifft ein bestehendes Paket und gehört deshalb als eigenes Ticket vor
 die Mac-Arbeit, sobald geprüft ist, dass es wirklich so auftritt.
 
 ### Testlauf bei einem Nachbarverein
-
-Jira: KARV-188, ohne Fix-Version.
 
 Nach der ersten echten ECV-Saison und nach 1.6 probiert ein befreundeter Verein das Programm aus. Ziel ist Lernen,
 nicht Vertrieb: Was fehlt, was ist unverständlich, was braucht die Einrichtung ohne den Entwickler? Das Ergebnis
@@ -206,10 +250,6 @@ bestimmt, was in 2.0 zuerst kommt und ob der Vertrieb weiterverfolgt wird.
 Vermutung, zu prüfen: Vereine, die heute Excel-Listen führen, wollen ihre Daten übernehmen (Import).
 
 ### 2.0 – Server als Zusatz
-
-Jira: KARV-9 „Server-Datenbank & Nutzerkonten" mit KARV-190 „Self-Hosting", KARV-10 „Rollen & Berechtigungen",
-KARV-189 „Bestellannahme über eine Schnittstelle". KARV-9 beschreibt seit dem 16.11.2026 den Server als Zusatz; der
-frühere Text („Ablösung der lokalen JSON-Dateien durch eine Server-Datenbank") gilt nicht mehr.
 
 **Inhalt**
 - Nutzerkonten (Name, Passwort) und Berechtigungen.
@@ -226,6 +266,19 @@ aktiv im Einsatz ist.
 - Rechte sind nur dann ein Schutz, wenn nicht jeder Arbeitsplatz alle Dateien hat. Im Ordnerbetrieb wären sie eine
   Sperre in der Oberfläche. Reicht das dort, oder gibt es Rechte nur mit Server?
 - Betrieb, Updates und Datensicherung bei Vereinen ohne IT.
+
+## Ohne eigene Stufe
+
+Diese Themen bekommen keine Stufe. Sie werden bei der Planung eines Releases dazugenommen, wenn Platz ist oder wenn sie
+drängen:
+
+- **Versionsspeicher:** Robustheit und Geschwindigkeit (Prüflauf im Hintergrund, Startzeit bei großem Bestand, große
+  Stapel, seltene Fälle rund um die Rechner-Uhr).
+- **Innere Ordnung:** große Controller aufteilen, Logik ohne Oberfläche testbar machen.
+- **Fehler:** gehen in das nächste Release oder in ein Zwischenrelease der dritten Stelle. Offen ist die
+  Offline-Erkennung unter Linux (siehe oben).
+- **Ideen ohne Entscheidung:** Prüfungen nach Kontext ordnen (Hallenprüfungen nur in der Hallenverwaltung) und ein
+  Formular, über das Nutzer Vorschläge und Fehler melden. Das Formular wäre spätestens zum Testlauf nützlich.
 
 ## Leitplanken ab sofort
 
@@ -248,5 +301,6 @@ Diese Punkte sind im Gespräch nicht entschieden worden, sondern Vorschläge:
 - Die einfache Kundenmail gehört zu 1.5, die automatische zu 2.0.
 - Die Bestellannahme gehört zu 2.0. Braucht der ECV sie früher, wäre ein händischer Import in 1.5 der Zwischenschritt.
 - Der Export von Hallenplänen und Buchungen gehört zu 1.3.
+- Die Aufbewahrung alter Versionen und Sicherungen gehört zu 1.3.
 - Dieses Dokument ist auf Deutsch, obwohl die übrige Dokumentation unter `docs/` englisch ist, weil es Grundlage für
   die deutschen Jira-Tickets ist.
