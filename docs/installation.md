@@ -139,24 +139,25 @@ and later, see [decisions.md](decisions.md#boundary-to-10x)). So:
 
 ## Releasing
 
-Pull requests of a version go to `release/<version>`; only the finished version goes to `main`.
+This section describes how a release is built. Which branches are merged, created and deleted, and when, is described
+in [CONTRIBUTING.md](../.github/CONTRIBUTING.md) (in German); steps 1 to 3 below go through pull requests as well.
 
 1. Bump the version in `conveyor.conf` (`app.version`) **and** in `pom.xml` (`<version>`). The JAR names in
    `conveyor.conf` are derived from `app.version`, so both must match. In the same commit add a section for the new
    version at the top of `src/main/resources/de/eltviller_carneval_verein/karten/patchnotes.md` with at least one real
    entry; `PatchNotesBundledTest` fails otherwise (all three versions must be equal and three-part `a.b.c`).
-2. **Before the pull request from `release/<version>` to `main` (patch notes):** until then the section of the new
-   version only holds a provisional text, so that the tests stay green on the release branch. Shortly before the pull
-   request, write the final text from the tickets of the fixVersion in Jira (`git log <previous tag>..HEAD` helps) and
-   have the maintainer approve it. Plain language for the box office; sections "Neu", "Verbessert", "Behoben",
+2. **Before the pull request to `main` (patch notes; for the pull request itself see CONTRIBUTING.md):** until then
+   the section of the new version only holds a provisional text, so that the tests stay green. Shortly before the pull
+   request, write the final text from the tickets of the fixVersion in Jira and have the maintainer approve it
+   (`git log --first-parent <previous tag>..HEAD` helps; without `--first-parent`, commits of older versions that
+   were merged in show up as new). Plain language for the box office; sections "Neu", "Verbessert", "Behoben",
    "Hinter den Kulissen"; no placeholders, no `@name`, `#12` or `:word:` (the parser rejects them, see
    [decisions.md](decisions.md#patch-notes-karv-125)).
 3. Create the format sample of the new version from this final release state: run `FormatSampleGenerator`
    (`src/test/java/.../store/`) with the target folder `src/test/resources/format-samples/<version>`. It writes
    `data.zip` there; add a `README.md` next to it (how it was created, contents) and commit both. `FormatSamplesTest`
    then checks that every later version loads this sample unchanged, so a missed sample means no guard for the next
-   version. For 1.1.0 this sample does not exist yet (only `1.0.1`). Details:
-   [decisions.md](decisions.md#release-steps).
+   version. Details: [decisions.md](decisions.md#release-steps).
 4. Run the **Release build** workflow (`.github/workflows/release.yml`, manual `workflow_dispatch`). Job
    `build-and-publish`:
    1. runs the tests on Linux under `xvfb-run` (`-Plinux`),
@@ -196,5 +197,5 @@ Pull requests of a version go to `release/<version>`; only the finished version 
    Workstations showing "Update-Prüfung nicht möglich" are updated with *"Update im Browser laden"*. See
    [decisions.md](decisions.md#update-check-and-update-from-the-app-karv-131).
 
-`conveyor.conf` includes `deployment/conveyor.local.conf`, which is git-ignored and only used for local builds. The
-`deployment/build.bat` script is the old local release path and is superseded by the workflow.
+`conveyor.conf` includes `.local/deployment/conveyor.local.conf`, which is git-ignored and only used for local builds.
+The include is optional: without the file (as in the workflow) Conveyor simply skips it.
