@@ -42,6 +42,8 @@ Die Architektur wird hier nicht wiederholt. Vor einer Änderung die passende Dat
 - `docs/testing.md`: Tests ausführen, Abdeckung, Konventionen
 - `docs/installation.md`: Entwicklungsumgebung, gemeinsamer Ordner, Release
 - `docs/usage.md`: Bedienung aus Sicht der Kasse
+- `docs/roadmap.md`: Reihenfolge der geplanten Versionen und ihre Begründung
+- `docs/specs/`: Specs einzelner Änderungen, Momentaufnahmen
 
 ## Lokale Ablage: `.local/`
 

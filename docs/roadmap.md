@@ -70,27 +70,10 @@ der drei Umbauten hängt.
 
 ## Versionsnummern
 
-Die Version bleibt dreistellig (Entscheidung des Entwicklers am 18.11.2026).
-
-| Stelle | Bedeutung | Beispiel |
-|---|---|---|
-| 1. | Neue Ausbaustufe: Serverbetrieb. | 2.0.0 |
-| 2. | Geplantes Release mit neuem Inhalt. Es darf das Datenformat erweitern und verlangen, dass alle Rechner eines gemeinsamen Ordners zusammen umsteigen. | 1.2.0 |
-| 3. | Fehlerbehebungen und kleine Ergänzungen. Es ändert nichts an gespeicherten Daten, jeder Rechner kann einzeln aktualisieren. | 1.1.1 |
-
-Die Grenze zwischen zweiter und dritter Stelle ist nicht die Größe, sondern die Frage, ob alle Rechner eines
-gemeinsamen Ordners zusammen umsteigen müssen. Eine kleine Funktion, die ein neues Feld speichert, gehört deshalb in
-die zweite Stelle. Ob ein Release der zweiten Stelle den gemeinsamen Umstieg wirklich verlangt, steht in seinen
-Patchnotes. 1.0.1 (Offline-Erkennung) passt bereits in dieses Schema.
-
-Eine vierte Stelle für Fehlerbehebungen gibt es nicht:
-
-- Sie ist technisch belegt. Conveyor bildet die Paketversion `a.b.c.d` aus der Version und der Revision, und
-  `AppVersion` liest sie so wieder auseinander.
-- `PatchNotesGuard` verlangt eine dreistellige Version, die in `pom.xml`, `conveyor.conf` und den Patchnotes gleich
-  ist. Test, Update-Prüfung und Release-Ablauf müssten umgebaut werden.
-- Bei einem Entwickler und wenigen Releases im Jahr hilft die Trennung von kleiner Funktion und Fehlerbehebung
-  niemandem. Die Nutzer lesen die Patchnotes.
+Das Versionsschema steht in [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md), Abschnitt „Versionen": Die
+Version ist dreiteilig, und was die zweite von der dritten Stelle trennt, ist die Frage, ob alle Rechner eines
+gemeinsamen Ordners zusammen umsteigen müssen. Warum es keine vierte Stelle gibt, steht in
+[decisions.md](decisions.md#development-workflow). 1.0.1 (Offline-Erkennung) passt bereits in dieses Schema.
 
 Die Stufen unten sind Releases der zweiten Stelle (1.2 steht für 1.2.0). In Jira heißen sie v1.2, v1.3 und so weiter.
 Ein Zwischenrelease der dritten Stelle bekommt bei Bedarf eine eigene Fix-Version, zum Beispiel v1.1.1. Ein Kandidat

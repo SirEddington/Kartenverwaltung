@@ -24,6 +24,7 @@ Kartenverwaltung/
 ├── LICENSE                       GPL-3.0
 ├── docs/                         This documentation
 │   ├── kartenverwaltung-map.html Interactive code map (standalone HTML)
+│   ├── roadmap.md                Long-term roadmap (German): order of the planned versions and why
 │   └── specs/                    Specs of changes (German); snapshots, not maintained after the merge
 └── src/
     ├── main/
