@@ -44,9 +44,10 @@ not available, so there is no locking; arbitration is done by who creates a clai
 
 ## Offline detection for cloud folders (KARV-127)
 
-**Decision:** A shared folder that belongs to Nextcloud (found through `nextcloud.cfg`) or OneDrive (the `OneDrive*`
-environment variables) only counts as reachable if its server also answers a TCP connect (`CloudFolders`,
-`ServerProbe`: no proxy, two attempts, 5 s in total). Network drives and plain local folders are checked as before.
+**Decision:** A shared folder that belongs to Nextcloud (found through `nextcloud.cfg`: `%APPDATA%\Nextcloud` on
+Windows; on Linux `$XDG_CONFIG_HOME/Nextcloud` or `~/.config/Nextcloud` and the Flatpak's config folder, KARV-179)
+or OneDrive (the `OneDrive*` environment variables) only counts as reachable if its server also answers a TCP connect
+(`CloudFolders`, `ServerProbe`: no proxy, two attempts, 5 s in total). Network drives and plain local folders are checked as before.
 Every tick runs the full check. "Verbindung zum Cloud-Server prüfen" (on by default) switches the server check off.
 
 **Why:** A sync folder lies on the local disk and was therefore always "reachable". Without internet, new sales
