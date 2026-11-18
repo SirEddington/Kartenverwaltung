@@ -69,10 +69,11 @@ wird die Kartentabelle eine `TreeTableView`; Bedienung, Bearbeiten und Spaltenfi
   von Abschnitt 6. Ist der Vorwärts-Merge beim Beginn der Umsetzung noch nicht da, wird er abgewartet oder der
   Arbeits-Branch danach auf `release/1.2.0` gebracht.
 - **KARV-192 und KARV-194** sind für 1.1.1 auf der Wartungslinie geplant und kommen per Vorwärts-Merge nach
-  `release/1.2.0`. Stand 18.11.2026: KARV-194 ist gemergt (Pull Request #52, Commit `8fa442d` auf `release/1.1.0`);
-  KARV-192 liegt erst als lokaler Branch `feature/KARV-192-trefferzahl` ohne Pull Request vor. Beide berühren die
+  `release/1.2.0`. Stand 18.11.2026, 20:35: Beide sind auf `release/1.1.0` gemergt, KARV-194 mit Pull Request #52
+  (Commit `8fa442d`), KARV-192 mit Pull Request #54 (Commit `624cce2`). KARV-196 kam mit dem Merge-Commit `fec56db`.
+  Nach dem Vorwärts-Merge verschieben sich Zeilen in `style.css` (etwa `.input-error` auf 974–975). Beide berühren die
   umgebauten Stellen:
-  - KARV-192 meldet auf seinem Branch die gezeigten Treffer der Kartentabelle aus `seatTable.getItems()` und hört dafür
+  - KARV-192 meldet die gezeigten Treffer der Kartentabelle aus `seatTable.getItems()` und hört dafür
     auf `itemsProperty()` (`reportSearchHits`, an `setSalesState` gehängt), an `SalesViewState.showSearchHits(this, …)`.
     Das gibt es in der Baumtabelle nicht. Abschnitt 11 legt fest, was künftig gemeldet wird; gilt beim Umbau eine
     geänderte Signatur, wird sie übernommen.
@@ -280,7 +281,9 @@ Ausgabe: ein Baum aus Gruppen und Buchungen.
   Auf- und Zuklappen.
 - **Eigene Spalte für Pfeil und Einrückung** (`colTree`, neu): schmal, ohne Überschrift, ganz links und nicht
   verschiebbar (`setReorderable(false)`; JavaFX bestimmt die Stelle des Pfeils aus der Position der `treeColumn`,
-  `TableRowSkinBase` Zeilen 272–274), nicht sortierbar,
+  `TableRowSkinBase` Zeilen 272–274), mit einer Mindestbreite für Pfeil und Einrückung der tiefsten Ebene (über
+  `ColumnMinWidths`, Untergrenze je Zahl der Ebenen; sonst blendet JavaFX den Pfeil bei zu schmaler Spalte aus,
+  `TableRowSkinBase` um Zeile 381), nicht sortierbar,
   ohne Filter, nicht bearbeitbar, nicht im Menü „Gruppieren“ und kein Eintrag in `TicketColumn`. Sie ist die
   `treeColumn` der Tabelle und nur bei aktiver Gruppierung sichtbar, breit genug für Pfeil und Einrückung der tiefsten
   Ebene. Grund: JavaFX merkt sich die größte Pfeilbreite je `treeColumn` in einer statischen Tabelle, die nie kleiner
@@ -355,9 +358,12 @@ Gruppe.
 | Strg+A | alle Buchungen der Tabelle, auch in zugeklappten Gruppen | ebenso |
 | Klick auf den Pfeil | keine Änderung außer der Regel zum Zuklappen | ebenso |
 | Links, Rechts | wie heute in der `TableView`: Fokus auf die Zelle links bzw. rechts, Menge = diese Buchung (`selectLeftCell`/`selectRightCell` → `clearAndSelect(row, column)`) | Rechts: Gruppe im Fokus aufklappen; Links: zuklappen (Regel zum Zuklappen), steht sie schon zu, Fokus auf die Gruppenzeile darüber; Menge sonst unverändert |
-| Plus, Minus, Stern | keine Wirkung (wie heute) | Plus: aufklappen; Minus: zuklappen (Regel zum Zuklappen); Stern: samt Untergruppen aufklappen; Menge sonst unverändert |
+| Plus, Minus, Stern des Ziffernblocks (`ADD`, `SUBTRACT`, `MULTIPLY`, `TreeTableViewBehavior` Zeilen 86–88) | keine Wirkung (wie heute) | Plus: aufklappen; Minus: zuklappen (Regel zum Zuklappen); Stern: samt Untergruppen aufklappen; Menge sonst unverändert |
+| Enter, F2 | wie heute (Bearbeiten über `TableInput`) | keine Wirkung; das Ereignis wird verbraucht, damit JavaFX `activate` die Gruppenzeile nicht ins Auswahlmodell legt |
 
-- **Diese Tasten** behandelt die Kartentabelle selbst nach der Zeile im **Fokus** und verbraucht das Ereignis. In der
+- **Diese Tasten** behandelt die Kartentabelle selbst nach der Zeile im **Fokus** und verbraucht nur das
+  `KEY_PRESSED`-Ereignis, nie `KEY_TYPED`: Ein getipptes „+“, „-“ oder „*“ beginnt in einer Buchungszeile weiter das
+  Bearbeiten (`TableInput.onKeyTyped`, Zeilen 106–121), etwa ein „-“ im Preisfeld. In der
   `TreeTableView` belegt eine vorrangige InputMap Links und Rechts mit Auf- und Zuklappen (`TreeTableViewBehavior`
   Zeilen 82–90) und richtet sich nach der gewählten Zeile im Auswahlmodell (`TreeViewBehavior.expandRow` und
   `collapseRow`, Zeilen 643–709). Ohne eigene Behandlung ginge in Buchungszeilen das Wechseln der Spalte verloren, mit
@@ -491,8 +497,9 @@ Die Logik bleibt je einmal im Code:
   andere Ordnung wählt (`TolerantEnum`). Beim nächsten Schreiben entfallen unbekannte Spaltennamen. Ebenso verliert
   eine ältere Version (1.1.x), die `settings.json` schreibt, die beiden neuen Felder ganz, denn sie liest sie nicht
   ein. Beides ist hinnehmbar: Die Datei ist lokal, und verloren geht nur die gemerkte Gruppierung.
-- Der Hinweis zum Schalter in den Einstellungen (`ui/settings/DisplaySection.RESTORE_HINT`) nennt die Gruppierung der
-  Kartentabelle mit.
+- Der Hinweis zum Schalter in den Einstellungen (`ui/settings/DisplaySection.RESTORE_HINT`) wird umformuliert: Er
+  spricht heute von der Auswahl im Menü „Anzeige“; künftig nennt er zusätzlich die Gruppierung der Kartentabelle, die in
+  deren eigener Leiste steht.
 - Die Kartentabelle liest die Properties beim Laden und folgt ihren Änderungen über schwache Listener, wie es
   `docs/decisions.md` für Ansichten von `DisplayPreferences` verlangt (KARV-76). Ihr Controller entsteht bei jedem
   Wechsel neu, starke Listener hielten alte Controller samt Baum am Leben. Damit überlebt die Gruppierung den Wechsel
@@ -542,7 +549,9 @@ und keine Zeile verschiebt sich unter der Bearbeitung.
 auch wenn sie danach die Suche oder einen Spaltenfilter nicht mehr besteht. Sie zählt dann überall als passend
 (Gruppen, Anzahlen, Wertelisten). Die Ausnahme endet, sobald die Kassenkraft den Suchtext oder die Menge der
 abgewählten Filterwerte ändert („Anwenden“ ohne geänderte Häkchen zählt nicht) oder `setEvent`/`setPresentation` läuft;
-fremde Änderungen beenden sie nicht. In ihre neue Gruppe und an ihre neue Sortierstelle zieht die
+fremde Änderungen beenden sie nicht, außer die Shell setzt danach ein neu zusammengesetztes Event per `setEvent`
+(„Auswahl leeren“ oben). Als selbst geändert gilt eine Buchung nur, wenn sich ein Wert tatsächlich geändert hat; ein
+Commit ohne Änderung (Enter auf dem alten Text) löst die Ausnahme nicht aus. In ihre neue Gruppe und an ihre neue Sortierstelle zieht die
 Buchung trotzdem um. Das ist eine bewusste Änderung: Heute verschwindet eine solche Buchung bei der nächsten fremden
 Änderung, denn `showRows()` wendet die Suche dann neu an (Zeilen 639–642). Mitten im Verkauf soll eine gerade
 bearbeitete Buchung aber nicht wegen eines anderen Rechners verschwinden. Stornierte Buchungen ohne Platz verschwinden
@@ -568,7 +577,9 @@ Mit JavaFX-Toolkit (wie die vorhandenen Zellen-Tests). Kein Test lädt heute das
 Controller zieht beim Erzeugen `StoreEventRepository.getInstance()` und künftig `DisplayPreferences.instance()`. Deshalb
 liegt die JavaFX-Logik der Baumtabelle (Baum setzen, Auswahl angleichen, Tasten, Fokus) in einer eigenen Klasse neben
 dem Controller (etwa `TicketTreeTable`), die eine `TreeTableView` und ihre Eingaben übergeben bekommt und ohne Singletons
-auskommt. Die Tests bauen eine `TreeTableView` selbst, wie der Test von KARV-196 eine `TableView`:
+auskommt. Ebenso aus dem Controller herausgezogen und dort getestet werden die Commit-Handler der Spalten, das Warten
+auf das Ende der Bearbeitung vor dem Neuaufbau und die Ausnahme für selbst geänderte Buchungen; einige Fälle unten
+hängen daran. Die Tests bauen eine `TreeTableView` selbst, wie der Test von KARV-196 eine `TableView`:
 
 - **Zuerst, vor dem Umbau:** `TableInputTest` hält das heutige Verhalten an einer `TableView` fest: ein Klick auf eine
   Zelle der einzigen gewählten Zeile startet das Bearbeiten, bei mehreren gewählten nicht; Tippen ersetzt den Inhalt;
@@ -758,6 +769,18 @@ Behoben:
   der `sortPolicy` (11); `colTree` nicht verschiebbar (4).
 
 Nicht übernommen: nichts.
+
+**Runde 7, 18.11.2026.** Umsetzer: 0 kritisch, 0 groß, 3 klein. Gegenprüfer: 0 kritisch, 0 groß, 5 klein. **Damit ist
+die Prüfung beendet.**
+
+Eingearbeitet (klein): Plus, Minus, Stern nur auf dem Ziffernblock und nur `KEY_PRESSED` verbraucht (6); Enter und F2
+auf einer Gruppenzeile (6); Mindestbreite von `colTree` (4); neuer Wortlaut von `RESTORE_HINT` (10); Querverweis zum
+neu zusammengesetzten Event und „selbst geändert“ nur bei geändertem Wert (11); welche Logik zusätzlich aus dem
+Controller zieht (12); Stand von KARV-192, KARV-194 und KARV-196 (Randbedingungen).
+
+Nicht übernommen: Der Gegenprüfer vermutet, `setReorderable(false)` verhindere nicht, dass eine andere Spalte links von
+`colTree` abgelegt wird. Das ist nicht belegt, und nach seiner eigenen Einschätzung stört es nicht, weil der Pfeil der
+`treeColumn` folgt. Das Spec bleibt dabei; die Umsetzung prüft es beim Ausprobieren.
 
 Nicht belegt: ob der Gruppenkopf über die ganze Zeile in `TreeTableRowSkin` (JavaFX 21.0.2) sauber baubar ist; dafür
 regelt „Der Umsetzung überlassen“ das Vorgehen. Die Lösung mit `colTree` ist aus den Quellen abgeleitet, nicht
