@@ -13,6 +13,11 @@ Ziel: Der Haken „Auswahl am Mauszeiger" im Menü „Anzeige" wird zu einem gle
 Zeiger* und *Unter dem Zeiger*; die Wahl wird gespeichert wie die übrigen Einträge des Menüs. Der Tooltip der Sitze in
 der Saalansicht der Verkaufsansicht entfällt, damit er den Hinweis unter dem Zeiger nicht verdeckt.
 
+Nachtrag (Entwickler, 18.11.2026, nach der ersten Umsetzung): Im selben Untermenü kommt der Haken *Am Rand ausweichen*
+dazu (Standard an). Ist er aus, springt der Hinweis am Rand nicht auf die andere Seite des Zeigers, sondern behält
+seine Seite und wird nur so weit verschoben, dass er im Inhaltsbereich bleibt (Abschnitt „Nachtrag: Am Rand
+ausweichen").
+
 ## Ziele, Nicht-Ziele, Anti-Ziele
 
 **Ziele:**
@@ -21,6 +26,7 @@ der Saalansicht der Verkaufsansicht entfällt, damit er den Hinweis unter dem Ze
 - „Über dem Zeiger" ist der Standard und verhält sich wie heute, bis auf den oberen Rand (siehe Entwurf, „Platz").
 - „Unter dem Zeiger" stellt den Hinweis rechts unter den Zeiger, mit Ausweichen an den Rändern.
 - Die Wahl gilt sofort und, mit „Anzeige beim Start wiederherstellen", auch beim nächsten Start.
+- Haken „Am Rand ausweichen" im Untermenü, Standard an, gespeichert und wiederhergestellt wie die Lage.
 - Der Sitz-Tooltip „Tisch A4, Sitz 3 (Verkauft)" der Saalansicht entfällt.
 
 **Nicht-Ziele:**
@@ -35,7 +41,9 @@ der Saalansicht der Verkaufsansicht entfällt, damit er den Hinweis unter dem Ze
 
 **Anti-Ziele:**
 
-- Der Hinweis verdeckt die Spitze des Mauszeigers (der Punkt, auf den ein Klick wirkt).
+- Der Hinweis verdeckt die Spitze des Mauszeigers (der Punkt, auf den ein Klick wirkt). Ausnahme mit Absicht: Bei
+  ausgeschaltetem „Am Rand ausweichen" in der Ecke des Bereichs (siehe Nachtrag); Klicks gehen weiter durch, weil der
+  Hinweis mausdurchlässig ist.
 - „Aus" und eine Lage widersprechen sich, z. B. ist nach dem Wiedereinschalten eine andere Lage gewählt als vor dem
   Ausschalten, ohne dass jemand sie geändert hat.
 - Eine `settings.json` aus 1.1.0 oder aus einer neueren Version mit unbekannter Lage macht die Einstellungen unlesbar
@@ -161,7 +169,8 @@ Baut das Untermenü „Auswahl am Mauszeiger" mit drei `RadioMenuItem`s in einer
   vom Untermenü gehalten, wie in `SummaryPlacementMenu`.
 - Gegen Rückkopplung: Während das Menü selbst die Properties setzt, tun seine beiden Folge-Listener nichts (eine
   Sperre); danach steht die Auswahl ohnehin richtig. Sonst wählte z. B. beim Wechsel von „Aus" auf „Unter" der
-  Listener der Lage kurz wieder „Aus", weil `selectionHint` noch `false` ist.
+  Listener der Lage kurz wieder „Aus", weil `selectionHint` noch `false` ist. (Umgesetzt nach `/simplify` ohne Sperre:
+  Das Menü folgt einem aus beiden Properties abgeleiteten Wert, der sich beim Wechsel erst mit dem Schalter ändert.)
 - Zwei Schreibvorgänge beim Wechsel von „Aus" auf eine andere Lage als die gespeicherte sind in Ordnung.
 
 `TicketShellController.initialize`: Statt `PlanLabelsMenu.item("Auswahl am Mauszeiger", …)` steht nach
@@ -263,6 +272,85 @@ Beispiele (Hinweis 120 × 24, Bereich 1000 × 800):
   Mauszeigers den Anfang des Texts verdeckt (normale Zeigergröße). Mit vergrößertem Mauszeiger (Barrierefreiheit,
   HiDPI) kann er das, weil die Abstände fest sind; das wird hingenommen, dafür gibt es „Über dem Zeiger".
 
+### Nachtrag: Am Rand ausweichen
+
+Vom Entwickler gewünscht am 18.11.2026, nach der ersten Umsetzung. Gewählt: „Seite halten, am Rand stoppen" (statt
+„wirklich über den Rand ragen", bei dem die Fußleiste den Hinweis verdeckt, der Fensterrand ihn abschneidet und er
+oben über der Kopfleiste läge); Standard an.
+
+**Stand vor dem Nachtrag** (Arbeitskopie des Branches, 18.11.2026): `SelectionHint.place(placement, pointerX,
+pointerY, width, height, areaWidth, areaHeight)` weicht immer aus (Schritte 1 bis 3 unter „Platz") und begrenzt
+danach (`clamp`). `SelectionHintMenu.create(enabled, placement)` baut die drei Radio-Einträge über `RadioMenus` und
+folgt einem `ObjectBinding` aus beiden Properties. `DisplayPreferences` hält `selectionHint` und
+`selectionHintPlacement`, `DisplaySettings` die Felder `selectionHint` und `selectionHintPlacement`.
+`PlanLabelsMenu.item(text, BooleanProperty)` (`ui/hall/PlanLabelsMenu.java:22-26`) liefert einen Haken, der per
+`bindBidirectional` an die Property gebunden ist; JavaFX hält beide Seiten einer solchen Bindung nur schwach.
+
+**Verhalten.** Neuer Parameter `avoidEdges` für `place`:
+
+- an (Standard): wie unter „Platz", Schritte 1 bis 4.
+- aus: Schritte 1 bis 3 entfallen. Die Ecke ist immer linke Kante `GAP_RIGHT` rechts vom Zeiger und, je nach Lage,
+  untere Kante `GAP_ABOVE` über bzw. obere Kante `GAP_BELOW` unter dem Zeiger; danach Schritt 4 (`clamp`). Am rechten
+  Rand rückt der Hinweis damit nach links bis an den Rand, am oberen bzw. unteren Rand nach unten bzw. oben bis an den
+  Rand, er wechselt aber nie die Seite. In der rechten Ecke auf seiner Seite (bei „Über" rechts oben, bei „Unter"
+  rechts unten; ein Feld etwa so breit wie der Hinweis und so hoch wie Hinweis plus Abstand) überdeckt er so die
+  Spitze des Zeigers (Ausnahme zum Anti-Ziel, vom Entwickler hingenommen).
+
+Beispiele mit ausgeschaltetem Ausweichen (Hinweis 120 × 24, Bereich 1000 × 800):
+
+| Zeiger | Lage | linke obere Ecke |
+|---|---|---|
+| (200, 300) | über | (216, 268) |
+| (950, 300) | über | (880, 268) |
+| (200, 10) | über | (216, 0) |
+| (200, 790) | unter | (216, 776) |
+| (990, 790) | unter | (880, 776) |
+
+**Speicherung.** `DisplaySettings`: neues Feld `selectionHintAvoidEdges` (`boolean`, Standard `true`); fehlt es,
+gilt `true`. `DisplayPreferences`: `BooleanProperty selectionHintAvoidEdges` (Standard `true`), beim Start mit
+`restoreAtStart` übernommen, ohne gilt `true`; Listener auf `write()`, `write()` schreibt das Feld mit.
+`SalesViewState.selectionHintAvoidEdgesProperty()` reicht durch. Randbedingungen zu Patch-Version und
+Abwärts-/Vorwärtsrichtung wie für `selectionHintPlacement` (lokale Datei; fehlt das Feld, gilt an; 1.1.0 ignoriert es).
+
+**Menü.** Im Untermenü „Auswahl am Mauszeiger" nach den drei Radio-Einträgen ein `SeparatorMenuItem` und der Haken
+„Am Rand ausweichen" (`PlanLabelsMenu.item("Am Rand ausweichen", …)` oder gleichwertig mit `bindBidirectional`). Er
+bleibt auch bei „Aus" bedienbar und ändert dann nur die gespeicherte Einstellung; an Schalter und Lage ändert er nichts.
+
+**Hinweis.** `SelectionHint` bekommt `avoidEdges` als `ObservableBooleanValue`, folgt ihm schwach über
+`LiveViews.follow` wie Schalter und Lage und gibt den Wert an `place` weiter. `TicketShellController` übergibt
+`state.selectionHintAvoidEdgesProperty()` an `SelectionHint` und an das Untermenü.
+
+**Texte und Doku.** `DisplaySection.RESTORE_HINT` bleibt (der Haken gehört zu „Auswahl am Mauszeiger").
+`docs/usage.md` nennt den Haken; `docs/architecture.md`, `docs/structure.md` und `docs/decisions.md` nennen das Feld
+bzw. die Einstellung neben der Lage. Wo `docs/usage.md` („near an edge it moves to the other side") und
+`docs/architecture.md` (Ausweichen am rechten, oberen und unteren Rand) das Ausweichen als feste Regel beschreiben,
+wird es an den Haken geknüpft, mit dem Verhalten ohne ihn. Patchnotes (vorläufig): ein Halbsatz, dass sich das Ausweichen am Rand
+abschalten lässt.
+
+**Fälle.**
+
+| Fall | Ergebnis |
+|---|---|
+| `settings.json` ohne `selectionHintAvoidEdges` | Haken an, Verhalten wie unter „Platz" |
+| Haken aus, Zeiger am rechten Rand, „Über" | Hinweis über dem Zeiger, rechte Kante am Rand des Bereichs, rückt über den Zeiger |
+| Haken aus, Zeiger am unteren Rand, „Unter" | Hinweis bleibt unter dem Zeiger, untere Kante am Rand des Bereichs |
+| Haken aus, „Aus" gewählt | kein Hinweis; der Haken wird gespeichert und gilt beim Wiedereinschalten |
+| Ohne „Anzeige beim Start wiederherstellen" | jeder Start: Haken an |
+
+**Tests.** `SelectionHintTest`: `place` mit ausgeschaltetem Ausweichen für die Beispiele oben; die bisherigen Fälle mit
+eingeschaltetem. `DisplaySettingsTest`: fehlendes Feld ergibt `true`, Hin- und Rückweg. `DisplayPreferencesTest`:
+Übernahme mit und ohne `restoreAtStart`, eine Änderung schreibt das Feld. `SelectionHintMenuTest`: Haken vorhanden,
+an die Property gebunden (beide Richtungen), ändert Radio-Auswahl nicht; die vorhandenen Tests und ihre Helfer
+(`offersOffAboveAndBelowInThisOrder`, `chosen`, `entry`) rechnen mit Trenner und Haken statt nur mit Radio-Einträgen,
+und `withMenu` ruft `create` mit der neuen Property auf. Handtest: Haken aus, rechter, unterer und
+oberer Rand, Ecke; nach Neustart erhalten.
+
+**Abnahme.** Das Untermenü hat nach einem Trenner den Haken „Am Rand ausweichen", standardmäßig an. Ist er aus,
+wechselt der Hinweis am Rand nie von über nach unter dem Zeiger oder umgekehrt, springt nicht auf die linke Seite und
+bleibt vollständig im Inhaltsbereich (nah am Rand rückt er dabei bis neben oder auf den Zeiger); ist er an, verhält er
+sich wie unter „Platz". Die Wahl gilt sofort und mit „Anzeige beim Start wiederherstellen" auch nach dem Neustart;
+eine `settings.json` ohne das Feld ergibt „an".
+
 ### Dokumentation
 
 - `docs/usage.md`: Untermenü statt Haken (`:94`, `:117`), Lage über oder unter dem Zeiger.
@@ -281,12 +369,15 @@ Beispiele (Hinweis 120 × 24, Bereich 1000 × 800):
 ## Abnahme
 
 - Das Menü „Anzeige" der Verkaufsansicht hat statt des Hakens das Untermenü „Auswahl am Mauszeiger" mit „Aus",
-  „Über dem Zeiger", „Unter dem Zeiger"; genau ein Eintrag ist gewählt.
+  „Über dem Zeiger", „Unter dem Zeiger"; genau einer dieser drei Einträge ist gewählt (dazu der Haken aus dem
+  Nachtrag).
 - „Aus" blendet den Hinweis aus, „Über" und „Unter" zeigen ihn an der gewählten Lage, sobald der Zeiger nach dem
   Schließen des Menüs wieder über dem Inhaltsbereich ist; ein Neustart oder Ansichtswechsel ist nicht nötig.
-- Bei „Unter dem Zeiger" steht der Hinweis rechts unter dem Zeiger; am rechten Rand links davon, am unteren Rand
-  darüber; er bleibt in allen vier Ecken vollständig im Inhaltsbereich und verdeckt die Spitze des Zeigers nicht.
-- Bei „Über dem Zeiger" steht er wie bisher rechts darüber; am oberen Rand rechts darunter (links nur am rechten Rand).
+- Bei „Unter dem Zeiger" steht der Hinweis rechts unter dem Zeiger; mit eingeschaltetem „Am Rand ausweichen" am
+  rechten Rand links davon, am unteren Rand darüber; er bleibt in allen vier Ecken vollständig im Inhaltsbereich und
+  verdeckt die Spitze des Zeigers nicht.
+- Bei „Über dem Zeiger" steht er wie bisher rechts darüber; mit eingeschaltetem „Am Rand ausweichen" am oberen Rand
+  rechts darunter (links nur am rechten Rand).
 - Über den Sitzen der Saalansicht der Verkaufsansicht erscheint kein Tooltip mehr; im Hallen-Editor ändert sich nichts.
 - Mit „Anzeige beim Start wiederherstellen" gelten An/Aus und Lage beim nächsten Start wieder; ohne gilt „Über dem
   Zeiger". Nach „Aus" und Wiedereinschalten über „Über dem Zeiger" oder „Unter dem Zeiger" gilt die gewählte Lage.
@@ -311,3 +402,15 @@ Beispiele (Hinweis 120 × 24, Bereich 1000 × 800):
 - Nicht belegt: wie `RadioMenuItem`s in einer `ToggleGroup` ohne Fenster im Test reagieren; die tatsächliche Größe des
   Mauszeigers gegenüber den Abständen; Verhalten unter Linux. Das deckt der Handtest ab bzw. bleibt im Pull Request
   offen.
+
+### Nachtrag „Am Rand ausweichen"
+
+Runde 2, 18.11.2026 (nur der Nachtrag ist neu; der Rest war geprüft, freigegeben und auf dem Branch umgesetzt):
+
+- Umsetzer: 0 kritisch, 0 groß, 3 klein. Gegenprüfer: 0 kritisch, 0 groß, 4 klein. Damit ist die Prüfung beendet.
+- Eingearbeitet (klein): Abnahme des Nachtrags genauer (nie über/unter getauscht, kein Sprung nach links, rückt nah
+  am Rand bis neben oder auf den Zeiger); Haupt-Abnahme auf eingeschaltetes Ausweichen bzw. die drei Radio-Einträge
+  eingeschränkt; Anpassung der vorhandenen Menü-Tests und ihrer Helfer genannt; Doku knüpft das Ausweichen an den
+  Haken; die Ecke, in der die Zeigerspitze verdeckt wird, genau benannt.
+- Nicht belegt: ob ein Klick auf den Haken das Menü schließt und wie Radio-Einträge und Haken im selben Untermenü
+  aussehen; Verhalten unter Linux. Das deckt der Handtest ab bzw. bleibt im Pull Request offen.
