@@ -16,6 +16,26 @@ Claude Code gleichermaßen. Wie man das Projekt baut und startet, steht in
 4. Pull Request mit ausgefüllter Vorlage, in den richtigen Branch und mit der richtigen Merge-Art.
 5. `main` enthält nur veröffentlichte Versionen.
 
+## Versionen
+
+Die Version ist dreiteilig (`a.b.c`).
+
+| Stelle | Bedeutung | Beispiel |
+|---|---|---|
+| 1. | neue Ausbaustufe (Serverbetrieb) | 2.0.0 |
+| 2. | geplantes Release mit neuem Inhalt. Es darf das Datenformat erweitern und verlangen, dass alle Rechner eines gemeinsamen Ordners zusammen umsteigen. | 1.2.0 |
+| 3. | Patch-Version: Fehlerbehebungen und kleine Ergänzungen. Sie ändert nichts an gespeicherten Daten, jeder Rechner kann einzeln aktualisieren. | 1.1.1 |
+
+- Die Grenze zwischen zweiter und dritter Stelle ist nicht die Größe der Änderung, sondern die Frage, ob alle Rechner
+  eines gemeinsamen Ordners zusammen umsteigen müssen. Eine kleine Funktion, die ein neues Feld speichert, gehört
+  deshalb in die zweite Stelle.
+- Ob ein Release der zweiten Stelle den gemeinsamen Umstieg wirklich verlangt, steht in seinen Patchnotes.
+- Eine vierte Stelle gibt es nicht. Die Gründe stehen in [docs/decisions.md](../docs/decisions.md), „Development
+  workflow".
+- Eine Version der ersten oder zweiten Stelle bekommt einen eigenen Release-Branch. Eine Patch-Version entsteht auf
+  der Wartungslinie (siehe [Bugfixes und Patch-Versionen](#bugfixes-und-patch-versionen)).
+- In Jira hat jede Version eine Fix-Version (`v1.2` für 1.2.0, `v1.1.1` für 1.1.1).
+
 ## Branches
 
 | Branch | Zweck | Entsteht | Endet |
@@ -130,15 +150,17 @@ gilt von der Checkliste nur der letzte Punkt, dazu grüne Tests.
 Ein Fehler wird einmal behoben, auf der ältesten betroffenen Linie, die noch gepflegt wird, und von dort nach vorn
 gemergt.
 
-- **Wer entscheidet:** Steckt ein Fehler auch in der veröffentlichten Version, entscheidet der Maintainer, ob er eine
-  Patch-Version wert ist. Maßstab: Der Fehler stört den Betrieb an der Kasse (Verkauf, Abrechnung, Daten) und kann
-  nicht bis zur nächsten Version warten. Sonst wird er nur in der Version in Arbeit behoben.
+- **Wer entscheidet:** Der Maintainer legt fest, ob es eine Patch-Version gibt und was hineinkommt. Maßstab für
+  einen Fehler, der auch in der veröffentlichten Version steckt: Er stört den Betrieb an der Kasse (Verkauf,
+  Abrechnung, Daten) und kann nicht bis zur nächsten Version warten. Sonst wird er nur in der Version in Arbeit
+  behoben. In eine Patch-Version kommt nur, was nichts an gespeicherten Daten ändert (siehe
+  [Versionen](#versionen)).
 - **Fehler nur in der Version in Arbeit, oder ohne Patch-Version:** `bugfix/…` vom Release-Branch in Arbeit, Pull
   Request dorthin.
-- **Fehler in der veröffentlichten Version, mit Patch-Version:**
+- **Für eine Patch-Version** (Fehler in der veröffentlichten Version oder kleine Ergänzung):
   1. Einmal je Patch-Version: Pull Request `chore/version-<patch-version>` in die Wartungslinie (Versionssprung wie
      unter [Branches](#branches)). Weitere Fixes derselben Patch-Version ergänzen nur deren Patchnotes.
-  2. `bugfix/…` von der Wartungslinie, Pull Request dorthin.
+  2. `bugfix/…` (für eine kleine Ergänzung `feature/…`) von der Wartungslinie, Pull Request dorthin.
   3. Die Patch-Version veröffentlichen wie ein Release, Schritte 1 bis 3 unter [Release](#release): Vorbereitung
      `chore/release-<patch-version>` in die Wartungslinie, Pull Request Wartungslinie → `main`, Release bauen.
      Schritt 4 dort entfällt, die Wartungslinie bleibt bestehen.

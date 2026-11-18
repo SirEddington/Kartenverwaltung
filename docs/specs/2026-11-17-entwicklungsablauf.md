@@ -560,3 +560,15 @@ Altlast).
 
 Nicht belegt bleiben zwei Punkte zum Verhalten von GitHub; für beide nennt „Einstellungen auf GitHub" eine Probe und
 einen Rückfall.
+
+**Nachträge nach der Prüfung** (nicht erneut geprüft, maßgeblich ist die `CONTRIBUTING.md`):
+
+- 17.11.2026: Beide Proben sind bestanden. Ein Release-Branch lässt sich unter den Regeln anlegen, und die
+  Löschsperre hält auch gegen das automatische Löschen (Pull Request #45). Die Altlast `release/1.1.0` ist mit
+  diesem Pull Request behoben.
+- 17.11.2026: Das Ruleset für `main` heißt `mainMerge` (vom Maintainer umbenannt), hat keine Ausnahme mehr und
+  verlangt den Check `test`. Die Vorgabe für Squash-Commits ist „Pull request title and commit details".
+- 18.11.2026: Die Sprachregel nennt die Roadmap (`docs/roadmap.md`) als deutsches Planungsdokument.
+- 18.11.2026: Das Versionsschema (Entscheidung des Maintainers vom 18.11.2026, bisher nur in der Roadmap) steht als
+  Regel in der `CONTRIBUTING.md`, Abschnitt „Versionen". In eine Patch-Version dürfen danach auch kleine Ergänzungen,
+  die nichts an gespeicherten Daten ändern.

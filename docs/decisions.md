@@ -731,6 +731,11 @@ for Claude Code alike. This entry only records why the rules are what they are.
   that branch could no longer be merged without conflicts. With a merge commit the release branch stays an ancestor
   of `main`: a fix is made once, on the oldest affected line, and merged forward.
 - Keeping the release branch until the next version gives fixes for the published version a fixed place.
+- The version has three parts. What separates the second from the third part is not the size of a change but whether
+  all workstations of a shared folder have to upgrade together. There is no fourth part for fixes: Conveyor builds
+  the package version `a.b.c.d` from the version and the revision, and `AppVersion` reads it back that way;
+  `PatchNotesGuard` requires a three-part version that is equal in `pom.xml`, `conveyor.conf` and the patch notes;
+  and with one developer and a few releases a year, separating small features from fixes helps nobody.
 - Specs used to live on one machine only. In the repository a second developer can read and review them, and a pull
   request can link to its spec. A spec is a snapshot and is not maintained after the merge; what lasts goes into
   this file.
