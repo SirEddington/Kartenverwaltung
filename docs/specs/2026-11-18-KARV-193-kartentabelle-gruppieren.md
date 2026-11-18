@@ -63,6 +63,17 @@ wird die Kartentabelle eine `TreeTableView`; Bedienung, Bearbeiten und Spaltenfi
   Test für die Baumtabelle neu; der alte Test mit ControlsFX entfällt mit dem Code. Konflikte löst der Umbau zugunsten
   von Abschnitt 6. Ist der Vorwärts-Merge beim Beginn der Umsetzung noch nicht da, wird er abgewartet oder der
   Arbeits-Branch danach auf `release/1.2.0` gebracht.
+- **KARV-192 und KARV-194** entstehen für 1.1.1 auf der Wartungslinie (Branches `feature/KARV-192-trefferzahl`,
+  `feature/KARV-194-auswahl-am-mauszeiger`, Pull Request #52) und kommen ebenfalls per Vorwärts-Merge nach
+  `release/1.2.0`. Sie berühren die umgebauten Stellen:
+  - KARV-192 meldet die gezeigten Treffer der Kartentabelle aus `seatTable.getItems()` und hört dafür auf
+    `itemsProperty()` (`reportSearchHits`, an `setSalesState` gehängt), an `SalesViewState.showSearchHits`. Das gibt es
+    in der Baumtabelle nicht. Abschnitt 11 legt fest, was künftig gemeldet wird.
+  - KARV-194 erweitert `DisplaySettings`, `DisplayPreferences`, `DisplaySection.RESTORE_HINT` und `style.css` und
+    nutzt `state.selectedBookings()`. Bei den Konflikten bleiben beide Ergänzungen erhalten; der Hinweis am Mauszeiger
+    passt zur Auswahl als Menge, denn er liest `SalesViewState`.
+  - Dieselbe Regel wie bei KARV-196: Die Umsetzung beginnt auf einem `release/1.2.0`, der diese Änderungen schon
+    enthält, oder holt sie vor dem Umbau der betroffenen Stellen herein.
 
 ## Ausgangslage
 
@@ -83,8 +94,9 @@ Geprüft am 18.11.2026 auf `release/1.2.0` (Commit `55af126`). Der Quellcode unt
   den Comparator an die Tabelle und setzt diese Liste als Items. Den Filter öffnet ein Rechtsklick auf den
   Spaltenkopf; er zeigt ein Suchfeld, eine Liste der Werte mit Häkchen und die Knöpfe „Apply“, „None“, „All“, „Reset
   All“ (`FilterPanel`, englische Texte, ControlsFX bringt keine deutschen mit).
-- ControlsFX 11.2.1 hat keinen Filter für `TreeTableView` (Paket `org.controlsfx.control.table` enthält nur
-  `TableFilter`, `ColumnFilter`, `FilterPanel`, `FilterValue` für `TableView`).
+- ControlsFX 11.2.1 hat keinen Filter für `TreeTableView`. Die Filterklassen im Paket `org.controlsfx.control.table`
+  (`TableFilter`, `ColumnFilter`, `FilterPanel`, `FilterValue`) gibt es nur für `TableView`; die übrigen Klassen dort
+  (`TableRowExpanderColumn`, `DupeCounter`, `TableViewUtils`, `model.*`) filtern nicht.
 - Mehrfachauswahl (199), `TableInput.install` (201), `ColumnMinWidths.install` (195–196),
   `EditingUnits.getInstance().watch(seatTable, BookingDTO::getBooking)` (251).
 - Kontextmenü je Zeile (218–245): „n Karten verkaufen“ (`SeatSelectionEditor.menuText`), „Platz zuweisen…“ (nur
@@ -213,6 +225,8 @@ Ein Enum mit einem Eintrag je Spalte der Kartentabelle in FXML-Reihenfolge: `PRE
 - Die **Grundordnung** der Buchungen ist die heutige: Reihenfolge der Vorstellungen, darin `TableLabel.BOOKING_ORDER`
   (wie `buildRows`).
 - Der Name eines Eintrags (`LAST_NAME` …) ist zugleich sein Text in `settings.json` und bleibt stabil.
+- Die Ordnung der Vorstellung hängt vom Event ab; ihr Comparator bekommt die Vorstellungen des Events (bzw. die
+  Grundordnung) als Kontext. Wie das in die Signatur kommt, entscheidet die Umsetzung.
 
 ### 2. Spaltenfilter: `TicketFilter` (neu, `ui.sales`, ohne JavaFX)
 
@@ -319,14 +333,19 @@ Gruppe.
 
 | Bedienung | Meint eine Buchungszeile | Meint eine Gruppenzeile |
 |---|---|---|
-| Klick, Rechtsklick auf eine nicht markierte Zeile | Menge = diese Buchung | Menge = alle Buchungen der Gruppe |
+| Klick (auch auf eine schon markierte Zeile), Rechtsklick auf eine nicht markierte Zeile | Menge = diese Buchung | Menge = alle Buchungen der Gruppe |
 | Rechtsklick auf eine markierte Zeile | Menge bleibt (wie heute) | Menge bleibt |
 | Strg-Klick | Buchung hinein bzw. heraus | ganz markiert: alle heraus, sonst: alle hinein |
 | Pfeil auf/ab, Pos1, Ende, Bild auf/ab ohne Umschalt; Tab mit `clearAndSelect` (`TableInput.moveFocus`) | Menge = diese Buchung | Menge = alle Buchungen der Gruppe |
 | Leertaste (wählt die Zeile im Fokus) | wie Klick | wie Klick |
 | Umschalt-Klick, Umschalt mit Pfeil, Pos1, Ende, Bild; Ziehen | Bereich, siehe unten | Bereich, siehe unten |
 | Strg+A | alle Buchungen der Tabelle, auch in zugeklappten Gruppen | ebenso |
-| Klick auf den Pfeil | keine Änderung außer der Regel zum Zuklappen | ebenso |
+| Klick auf den Pfeil; Auf- und Zuklappen über die Tastatur (Links, Rechts, Plus, Minus, Stern) | keine Änderung außer der Regel zum Zuklappen | ebenso |
+
+- Die Regel zum Zuklappen gilt für jeden Auslöser, auch für die Tastatur.
+- **Gewollte Abweichung:** Ist eine zugeklappte Gruppe gewählt und dazu genau eine sichtbare Buchung, steht im
+  Auswahlmodell genau ein Index. `TableInput` behandelt das wie eine Einzelauswahl: Klick oder Tippen bearbeiten die
+  sichtbare Buchung. Das bleibt so; es betrifft nur diese eine Zelle, nicht die Gruppe.
 
 - **Bereiche** übertragen nur die Buchungszeilen zwischen Anker und Ziel (Menge = diese Buchungen, mit Strg dazu).
   Gruppenzeilen im Bereich zählen nicht als Gruppe, zugeklappte Gruppen im Bereich tragen nichts bei. Ob eine
@@ -458,6 +477,19 @@ Wurzel ersetzt** (`root.getChildren().setAll(…)`), und die Anzeige der Auswahl
 selbst wird nur einmal beim Laden gesetzt und danach nie ausgetauscht, denn eine neue Wurzel leert die Sortierung
 (Ausgangslage). Die Sperre gegen Rückkopplung (6) deckt das Ersetzen der Kinder ab.
 
+**Treffer (KARV-192):** Nach jedem Neuaufbau und jedem bloßen Neuzeichnen meldet die Kartentabelle an
+`SalesViewState.showSearchHits` alle Buchungen des Baums in Reihenfolge der Tabelle. Das sind die Buchungen nach
+Suche und Spaltenfilter, die selbst geänderten Ausnahmen (unten) eingeschlossen, auch die in zugeklappten Gruppen.
+Das entspricht der Regel von KARV-192 „gezählt wird, was die Ansicht als Treffer zeigt“: Eine zugeklappte Gruppe zeigt
+ihre Buchungen in ihrer Anzahl. `reportSearchHits` über `getItems()` entfällt.
+
+**Auswahl leeren:** Wie heute leeren zwei Stellen die Menge ausdrücklich: das Laden einer anderen Vorstellung oder
+eines anderen Events (`setEvent`, `setPresentation` → `loadBookings`) und ein ausgeführtes Storno (`cancelSelection`,
+heute Zeile 278). Jeder andere Neuaufbau behält die Menge nach Abschnitt 6.
+
+**Fokus nach dem Neuaufbau:** Fokus und Anker folgen der Buchung bzw. Gruppenzeile (über ihren Pfad), auf der sie
+vorher standen, nicht dem alten Index. Gibt es sie nicht mehr, steht der Fokus auf keiner Zeile.
+
 **Anlässe:** fremde Änderung, Suche, Filter, Gruppierung, Gruppenordnung, Sortierung und **jede eigene Änderung** an
 einer Buchung aus der Kartentabelle: jeder Commit einer Zelle (auch Vorname, Kommentar, Bezahlt), die Checkbox
 „Abgeholt“, der Sitz-Dialog, „Platz zuweisen…“ und das Storno. Abgeleitete Werte (etwa „Reserviert“ und „Reserviert
@@ -500,8 +532,9 @@ Mit JavaFX-Toolkit (wie die vorhandenen Zellen-Tests):
 - **Zuerst, vor dem Umbau:** `TableInputTest` hält das heutige Verhalten an einer `TableView` fest: ein Klick auf eine
   Zelle der einzigen gewählten Zeile startet das Bearbeiten, bei mehreren gewählten nicht; Tippen ersetzt den Inhalt;
   Enter; Tab und Umschalt+Tab samt Sprung über das Zeilenende; Tab aus dem Bearbeiten bearbeitet die nächste Zelle;
-  Ziehen wählt einen Bereich, mit Strg bleibt die bisherige Auswahl. Der Test läuft danach unverändert grün und
-  zusätzlich (parametrisiert) gegen eine flache `TreeTableView`.
+  Ziehen wählt einen Bereich, mit Strg bleibt die bisherige Auswahl. Nach dem Umbau laufen dieselben Fälle mit
+  denselben Erwartungen gegen `TableView` und gegen eine flache `TreeTableView`; nur die Erzeugung der Tabelle wird dafür
+  parametrisiert.
 - `ParsingTextFieldTreeTableCellTest` mit denselben Fällen wie `ParsingTextFieldTableCellTest`; die gemeinsame Logik
   wird für beide Zellarten geprüft.
 - `TableInput` für `TreeTableView`: Tab überspringt eine Gruppenzeile; Tab am Ende einer Gruppe springt in die erste
@@ -626,30 +659,32 @@ die Prüfung nach `CONTRIBUTING.md` („Abbruch“). Der Maintainer hat am 18.11
 und die Runden fortsetzen zu lassen, bis keine kritischen oder großen Befunde mehr kommen; das Spec wird nicht geteilt.
 Eingearbeitet nach Runde 3:
 
-- Gruppenzeilen stehen nie im Auswahlmodell, ihre Markierung ist eine Pseudoklasse (6, Regel 2); neue Abnahme 11.
-- Neuaufbau ersetzt nur die Kinder der Wurzel (11, Ausgangslage); neue Abnahme 12.
-- Tabelle der Bedienungen samt Tastatur, Anker und Fokus (6).
-- `TableInputTest` am heutigen Verhalten vor dem Umbau, als Vorgabe der Reihenfolge (12, „Der Umsetzung überlassen“).
+- Kritisch (Umsetzer): Regel 2 markierte den Kopf einer Gruppe mit nur einer Buchung im Auswahlmodell mit, `TableInput`
+  hätte die Zeile dann nicht mehr bearbeiten lassen. Neu: Gruppenzeilen stehen nie im Auswahlmodell, ihre Markierung
+  ist eine Pseudoklasse (6, Regel 2); neue Abnahme 11.
+- Kritisch (Gegenprüfer): `setRoot` leert die Sortierung. Neu: Neuaufbau ersetzt nur die Kinder der Wurzel (11,
+  Ausgangslage); neue Abnahme 12.
+- Groß (Umsetzer): Tastatur ohne Regel. Neu: Tabelle der Bedienungen samt Tastatur, Anker und Fokus (6).
+- Groß (Gegenprüfer): `TableInput` ohne Test. Neu: `TableInputTest` am heutigen Verhalten vor dem Umbau, als Vorgabe der
+  Reihenfolge (12, „Der Umsetzung überlassen“).
 - Alle kleinen Befunde der Runde: Abnahme 1 nennt die Ausnahme der Suche; `Comparator<BookingDTO>` (3, 5); Menge der
   zugeklappten Pfade (4); KARV-196 (Ausgangslage, Randbedingungen); CSS über eine eigene Style-Klasse (4);
   Kundenfenster in Abnahme 4 und 10; Vorstellung über die ID (1); Fabriken mit Bedingung je Zeile (9).
 
-Befunde der Runde 3 im Wortlaut:
+**Runde 4, 18.11.2026.** Umsetzer: 0 kritisch, 1 groß, 4 klein. Gegenprüfer: 0 kritisch, 1 groß, 3 klein.
 
-- **kritisch (Umsetzer), Abschnitt 6 gegen 9:** Regel 2 markiert den Kopf einer Gruppe mit nur einer Buchung mit. Dann
-  sind zwei Zeilen gewählt, und `TableInput` (genau ein gewählter Index, Zeilen 84 und 143) lässt diese Zeile nicht mehr
-  bearbeiten.
-- **kritisch (Gegenprüfer), Abschnitte 5, 6, 11:** `setRoot` leert die `sortOrder` (`TreeTableView.java` Zeile 1076);
-  jeder Neuaufbau verlöre die Spaltensortierung.
-- **groß (Umsetzer), Abschnitt 6:** Pfeiltasten, Pos1/Ende, Bild auf/ab, Leertaste und `clearAndSelect` von Tab sind
-  in der Übertragung nicht geregelt.
-- **groß (Gegenprüfer), Abschnitt 12 / Reihenfolge:** Für `TableInput` gibt es keinen Test; der Umbau hätte für die
-  `TableView`-Seite keine Sicherung.
-- **klein:** Abnahme 1 und die Ausnahme der Suche (11); `Comparator<BookingDTO>` statt Spalten-Comparator in
-  `TicketGrouping` (3, 5); Zustand zugeklappter Gruppen, die kurz verschwinden (4); Anker und Fokus nach dem Angleichen
-  (6); KARV-196 hat inzwischen Commit `6928e63` mit `TableView`-Test (Randbedingungen); CSS-Regeln nur für die
-  Kartentabelle, nicht für alle Baumtabellen (4); Kundenfenster zählt bei „Alle Vorstellungen“ nichts (Abnahme 4, 10);
-  Vorstellung als Schlüssel über ID statt Objekt (1); `forTableColumn` mit Bedingung je Zeile gibt es schon (9).
+Behoben:
+
+- Wann die Menge geleert wird (Umsetzer, groß): Wechsel von Vorstellung oder Event und Storno leeren sie wie heute
+  (11).
+- KARV-192 und KARV-194 auf der Wartungslinie (Gegenprüfer, groß): Randbedingungen nennen beide; Abschnitt 11 legt
+  fest, welche Treffer die Baumtabelle an `showSearchHits` meldet.
+- Klein, übernommen: Klick auf eine schon markierte Zeile (6); eine sichtbare Buchung plus zugeklappte Gruppe als
+  gewollte Abweichung in `TableInput` (6); Wortlaut zum parametrisierten `TableInputTest` (12); Ordnung der
+  Vorstellung mit Event als Kontext (1); Fokus und Anker nach dem Neuaufbau (11); Zuklappen über die Tastatur (6);
+  Inhalt des ControlsFX-Pakets (Ausgangslage).
+
+Nicht übernommen: nichts.
 
 Nicht belegt: ob der Gruppenkopf über die ganze Zeile in `TreeTableRowSkin` (JavaFX 21.0.2) sauber baubar ist; dafür
 regelt „Der Umsetzung überlassen“ das Vorgehen. Die Lösung mit `colTree` ist aus den Quellen abgeleitet, nicht
