@@ -1,10 +1,10 @@
-# Langfristige Roadmap – Design
+# Langfristige Roadmap
 
 Stand: 18.11.2026, ausgehend von Release 1.1.0.
 
 Dieses Dokument legt die **Reihenfolge** der längerfristigen Vorhaben fest und begründet sie. Es ist kein
-Umsetzungsplan: Jede Stufe bekommt ein eigenes Design, wenn sie an der Reihe ist. Die offenen Fragen je Stufe sind
-dafür schon gesammelt.
+Umsetzungsplan: Jede Stufe bekommt einen eigenen Spec unter `docs/specs/`, wenn sie an der Reihe ist. Der Ablauf dafür
+steht in `.github/CONTRIBUTING.md`. Die offenen Fragen je Stufe sind schon gesammelt.
 
 Die Versionsnummern folgen den Fix-Versionen in Jira (Projekt KARV, abgeglichen am 16.11.2026). Die Roadmap nennt
 Themen, keine einzelnen Tickets. Zu welcher Stufe ein Ticket gehört, steht in Jira an der Fix-Version. Kleinere Punkte
@@ -98,7 +98,7 @@ dafür ist die Offline-Erkennung unter Linux (siehe unten).
 
 ## Stufen
 
-### 1.2 – ECV-Alltag (in Planung, nicht Teil dieses Designs)
+### 1.2 – ECV-Alltag (in Planung, nicht Teil dieser Roadmap)
 
 Kassen am Event anlegen und verwalten, Kassenbewegungen (Einlage, Entnahme), Kassensturz je Kasse mit Soll/Ist für
 alle Zahlungsmittel und mit Abschluss (gezählt am, von), Bilanz je Vorstellung und Gesamtbilanz des Events mit einer
@@ -124,7 +124,7 @@ dringender, weil der Datenbestand nur wächst. Der Export ist das sichtbare Gege
 Aufräumen alter Versionen gehört dazu, weil es denselben Mechanismus braucht wie das Löschen von Kundendaten: eine
 Regel, die jeder Arbeitsplatz gleich anwendet.
 
-**Offen für das eigene Design**
+**Offen für den eigenen Spec**
 - Löschen in einem Speicher, der bewusst nie löscht: Wie erfahren alle Arbeitsplätze davon, und wie wird verhindert,
   dass ein Arbeitsplatz die gelöschten Dateien wieder hochlädt? Sync-Clients geben Löschungen nicht zuverlässig weiter.
   Für das Aufräumen alter Versionen ist schon eine Löschliste im gemeinsamen Ordner vorgesehen. Das Löschen von
@@ -155,7 +155,7 @@ hängen nicht voneinander ab und lassen sich tauschen. Der Platz nach der Archiv
 Archivierung mit dem Ende der ersten Saison gebraucht wird, die Saalplanung erst vor der nächsten (vom Entwickler am
 16.11.2026 bestätigt).
 
-**Offen für das eigene Design**
+**Offen für den eigenen Spec**
 - Platzvorschlag: nur je Tisch oder über Tische hinweg (z. B. bei Bankreihen)?
 - Gang: Geometrie bei gedrehten Reihen, und ob er den heutigen Mittelgang an der Reihe ablöst oder ergänzt.
 - Deaktivierte Tische: Wie zählen sie in Statistik und Abrechnung, und was gilt, wenn an einem Tisch schon Buchungen
@@ -175,7 +175,7 @@ Archivierung mit dem Ende der ersten Saison gebraucht wird, die Saalplanung erst
 **Warum hier:** Warteliste, Kundenmail und die spätere Bestellannahme brauchen alle dasselbe Fundament. Das
 Verschieben von Buchungen aus 1.2 zeigt vorher, wie sich mehrere zusammengehörige Plätze im Alltag verhalten.
 
-**Offen für das eigene Design**
+**Offen für den eigenen Spec**
 - Die Buchung je Platz ist der Kern der Konfliktbehandlung (`bookings/<seatId>`). Wie kommt die Bestellung dazu, ohne
   dass zwei Kassen, die verschiedene Plätze verkaufen, plötzlich in Konflikt geraten?
 - Gibt es einen Kundenstamm über Events hinweg? Das hängt am Löschkonzept aus 1.3. Stammkundenverwaltung und
@@ -199,7 +199,7 @@ Verschieben von Buchungen aus 1.2 zeigt vorher, wie sich mehrere zusammengehöri
 **Warum hier:** Ohne ausgelagerte Texte gibt es weder Übersetzung noch anpassbare Meldungen. Diese Stufe macht das
 Programm vorzeigbar für einen fremden Verein und steht deshalb direkt vor dem Testlauf.
 
-**Offen für das eigene Design**
+**Offen für den eigenen Spec**
 - Gilt das Customizing je Arbeitsplatz oder für den ganzen Verein (dann im gemeinsamen Ordner, als neue Einheit)?
 - Meldungshärte: Welche Meldungen darf ein Verein abschwächen, welche schützen die Daten und bleiben fest?
 - Umzug des Datenpfads auf bestehenden Installationen.
@@ -260,7 +260,7 @@ Vermutung, zu prüfen: Vereine, die heute Excel-Listen führen, wollen ihre Date
 **Auslöser:** Der Entwickler entscheidet, dass der Serverbetrieb angegangen wird. Voraussetzung ist, dass das Programm
 aktiv im Einsatz ist.
 
-**Offen für das eigene Design**
+**Offen für den eigenen Spec**
 - Ist der Server ein weiterer, immer laufender Teilnehmer am bestehenden Versionsspeicher oder eine echte zentrale
   Instanz?
 - Rechte sind nur dann ein Schutz, wenn nicht jeder Arbeitsplatz alle Dateien hat. Im Ordnerbetrieb wären sie eine
@@ -302,5 +302,3 @@ Diese Punkte sind im Gespräch nicht entschieden worden, sondern Vorschläge:
 - Die Bestellannahme gehört zu 2.0. Braucht der ECV sie früher, wäre ein händischer Import in 1.5 der Zwischenschritt.
 - Der Export von Hallenplänen und Buchungen gehört zu 1.3.
 - Die Aufbewahrung alter Versionen und Sicherungen gehört zu 1.3.
-- Dieses Dokument ist auf Deutsch, obwohl die übrige Dokumentation unter `docs/` englisch ist, weil es Grundlage für
-  die deutschen Jira-Tickets ist.
