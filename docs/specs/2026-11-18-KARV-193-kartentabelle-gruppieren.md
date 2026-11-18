@@ -57,9 +57,12 @@ wird die Kartentabelle eine `TreeTableView`; Bedienung, Bearbeiten und Spaltenfi
   Spalten stehen dort als Text.
 - **JavaFX 21.0.2, ControlsFX 11.2.1** (`pom.xml`); keine neue Abhängigkeit.
 - **Sprache:** Oberfläche, Meldungen und Code-Kommentare deutsch.
-- **KARV-196** (Auswahl in sortierter Tabelle, eigener Bugfix-Branch) wird unabhängig behoben. Dieses Spec ersetzt
-  `restoreSelection` ohnehin. Wird KARV-196 vorher gemergt, übernimmt der Umbau dessen Test als Abnahmefall für die
-  sortierte Baumtabelle; Konflikte in `restoreSelection` löst der Umbau zugunsten von Abschnitt 6.
+- **KARV-196** (Auswahl in sortierter Tabelle) ist auf der Wartungslinie behoben und kommt per Vorwärts-Merge nach
+  `release/1.2.0`. Dieses Spec ersetzt `restoreSelection` und `select(TableView…)`. Den Fall aus dessen Test
+  (sortierte oder gefilterte Tabelle, Rückkehr aus der Saalansicht wählt die richtigen Buchungen) schreibt der Umbau als
+  Test für die Baumtabelle neu; der alte Test mit ControlsFX entfällt mit dem Code. Konflikte löst der Umbau zugunsten
+  von Abschnitt 6. Ist der Vorwärts-Merge beim Beginn der Umsetzung noch nicht da, wird er abgewartet oder der
+  Arbeits-Branch danach auf `release/1.2.0` gebracht.
 
 ## Ausgangslage
 
@@ -137,8 +140,24 @@ Wechsel neu. Das Suchfeld liegt in der Kopfzeile der Shell (`TicketShellView.fxm
 Tabellen. Zeilenhöhe 30 px (Zeile 508), Zellabstand (502), Höhe der Auswahlliste (526) und zentrierte Checkbox (620)
 gelten nur für `.table-view`.
 
-**Andere Arbeit:** Es gibt einen lokalen Branch `bugfix/KARV-196-auswahl-sortierte-tabelle` (noch ohne Commits) für den
-Fehler in `restoreSelection`.
+**Andere Arbeit:** KARV-196 behebt den Fehler in `restoreSelection` auf der Wartungslinie (Pull Request #50 nach
+`release/1.1.0`, gemergt am 18.11.2026, Commit `6928e63` auf dem Branch). Es führt `static select(TableView<BookingDTO>,
+…)` und einen Test mit echtem ControlsFX-`TableFilter` ein. Nach `release/1.2.0` kommt es mit dem nächsten
+Vorwärts-Merge.
+
+**Tests der Eingabehilfen:** Für `TableInput` gibt es keinen Test (`src/test` enthält keinen `TableInput*Test`).
+Getestet sind `ColumnMinWidthsTest`, `EditingUnitsTest`, `ParsingTextFieldTableCellTest`.
+`ParsingTextFieldTableCell.forTableColumn` hat schon heute eine Fassung mit Bedingung je Zeile (Zeilen 109–112,
+genutzt für „Bezahlt“).
+
+**Wurzel der Baumtabelle:** Das Setzen einer neuen Wurzel leert die Sortierung (`TreeTableView.java`,
+`root.invalidated()`, Zeilen 1062–1080, darin 1076 `getSortOrder().clear()`).
+
+**Kundenfenster:** zählt nur Buchungen der gezeigten Vorstellung, bei „Alle Vorstellungen“ keine
+(`SelectionSummary.of`, Zeilen 31–37).
+
+**Andere Baumtabellen:** Event-Übersicht und Hallenverwaltung sind `TreeTableView` (`EventOverviewView.fxml` und
+`HallManagementView.fxml`, je Zeile 32).
 
 ## Betrachtete Wege
 
@@ -180,7 +199,7 @@ Ein Enum mit einem Eintrag je Spalte der Kartentabelle in FXML-Reihenfolge: `PRE
 
 | Spalte | Schlüssel | Text | Ordnung |
 |---|---|---|---|
-| Vorstellung | die Vorstellung (Objekt) | `EntityLabels.nameOrPlaceholder(name)` | Reihenfolge der Vorstellungen im Event |
+| Vorstellung | die ID der Vorstellung (`getId()`); ein neu zusammengesetztes Objekt (`EventMerge`) behält so Pfad und Filter | `EntityLabels.nameOrPlaceholder(name)` | Reihenfolge der Vorstellungen im Event |
 | Tisch | `TableLabel.of(booking)`; alle ohne Platz bilden eine Gruppe | `TableLabel.toString()` („Ohne Platz“, „A3“) | `TableLabel.compareTo` |
 | Kategorie, Nachname, Vorname, Kommentar | Text ohne Rand, Groß- und Kleinschreibung gleich (`Locale.GERMAN`) | der Text der ersten Buchung der Gruppe in der Grundordnung | nach Text, ohne Groß- und Kleinschreibung |
 | Sitz | Sitznummer wie in der Spalte; 0 gilt als „(leer)“ | Zahl | numerisch |
@@ -209,8 +228,9 @@ Ein Enum mit einem Eintrag je Spalte der Kartentabelle in FXML-Reihenfolge: `PRE
 ### 3. Gruppieren: `TicketGrouping` (neu, `ui.sales`, ohne JavaFX)
 
 Eingabe: die Buchungen nach Suche und Filter in Grundordnung, die Gruppierung (geordnete Liste von `TicketColumn`,
-ohne Doppelte), die Gruppenordnung (`VALUE` oder `SIZE`), die Sortierung der Tabelle (siehe 5). Ausgabe: ein Baum aus
-Gruppen und Buchungen.
+ohne Doppelte), die Gruppenordnung (`VALUE` oder `SIZE`) und die Sortierung der Tabelle als `Comparator<BookingDTO>`
+oder keiner (siehe 5). Den Comparator baut der Controller aus den Spalten; `TicketGrouping` kennt JavaFX nicht.
+Ausgabe: ein Baum aus Gruppen und Buchungen.
 
 - Ebene *i* gruppiert die Buchungen einer Gruppe der Ebene *i−1* nach dem Schlüssel der *i*-ten Spalte. Leere Gruppen
   gibt es nicht.
@@ -230,8 +250,10 @@ Gruppen und Buchungen.
 - **Spalten** liefern für `BookingRow` dieselben Werte wie heute, für `GroupRow` nichts. Keine Zelle einer Gruppenzeile
   zeigt ein Bedienelement (Checkbox, Auswahlliste, Textfeld), keine lässt sich bearbeiten. Die Checkbox-Spalten und die
   Auswahlliste brauchen dafür eigene Unterklassen der Baumzellen von JavaFX (Ausgangslage).
-- `style.css` bekommt für `.tree-table-view` und `.tree-table-row-cell` dieselben Regeln wie für Tabellen (Zeilenhöhe,
-  Zellabstand, Auswahlliste, Checkbox), damit Abnahme 1 auch im Aussehen gilt.
+- `style.css` bekommt für die Kartentabelle dieselben Regeln wie für Tabellen (Zeilenhöhe, Zellabstand, Auswahlliste,
+  Checkbox, rote Markierung `.input-error` wie Zeilen 963–964), damit Abnahme 1 auch im Aussehen gilt. Die Regeln hängen
+  an einer eigenen Style-Klasse der Kartentabelle (etwa `ticket-table`), nicht allgemein an `.tree-table-view`: Die
+  Event-Übersicht und die Hallenverwaltung bleiben unverändert.
 - **Gruppenkopf:** Die Zeile zeigt „<Überschrift>: <Text> (<Anzahl>)“, etwa „Nachname: Müller (4)“, in Fettschrift,
   über die ganze Breite der Zeile und nicht auf eine Spalte beschnitten, eingerückt nach Ebene, mit dem Pfeil zum
   Auf- und Zuklappen.
@@ -245,8 +267,10 @@ Gruppen und Buchungen.
   andere Spalte ein (`TreeTableCellSkin` Zeile 161). Ist `colTree` ausgeblendet, sind die Datenspalten also nie
   eingerückt, auch nicht nach „Gruppierung aufheben“.
 - **Ohne Gruppierung** gibt es keine Pfeile und keine Einrückung. Die Tabelle sieht aus wie heute.
-- **Aufgeklappt:** Neue Gruppen sind aufgeklappt. Beim Neuaufbau behalten Gruppen ihren Zustand über ihren Pfad. Der
-  Zustand lebt im Controller und endet mit ihm.
+- **Aufgeklappt:** Der Controller merkt sich die Pfade der **zugeklappten** Gruppen; alle anderen sind aufgeklappt.
+  Neue Gruppen sind also aufgeklappt, und eine Gruppe, die durch Suche oder Filter kurz verschwindet, kommt zugeklappt
+  zurück, wenn sie es war. Die Menge lebt im Controller und endet mit ihm; „Gruppierung aufheben“ und eine andere
+  Gruppierung leeren sie.
 - Der Text eines Gruppenkopfs wird bei jedem Neuaufbau aus den aktuellen Buchungen der Gruppe neu bestimmt.
 - Buchungen ohne Platz bleiben kursiv (heute Zeile 224). Die Leiste „Ohne Platz“ bleibt, ihr Zusatz „(oben in der
   Tabelle)“ steht nur, solange die Tabelle weder gruppiert noch sortiert ist.
@@ -258,7 +282,9 @@ Gruppen und Buchungen.
   Gruppen bestimmt allein die Gruppenordnung.
 - Verglichen wird wie heute: die Zellwerte der Spalte mit dem Comparator der Spalte (Standard
   `TreeTableColumn.DEFAULT_COMPARATOR`, wie bisher `TableColumn.DEFAULT_COMPARATOR`), nicht die Ordnung aus
-  `TicketColumn`. Bei Gleichstand gilt die Grundordnung.
+  `TicketColumn`. Der Controller baut daraus den `Comparator<BookingDTO>` für `TicketGrouping` (Zellwert je Buchung
+  über die Wert-Fabrik der Spalte, Richtung und Reihenfolge aus `getSortOrder()`). Bei Gleichstand gilt die
+  Grundordnung.
 - Ohne Sortierung gilt die Grundordnung.
 - Umsetzung über eine eigene `sortPolicy` der `TreeTableView`. Die Standard-Sortierung verglich sonst Gruppenzeilen über
   ihre leeren Zellwerte. Die Policy liefert immer `true` und baut den Baum nicht selbst um, denn sie läuft innerhalb
@@ -273,35 +299,49 @@ kann JavaFX nicht wählen, und beim Zuklappen geht seine Auswahl je nach Hauptau
 
 **Regel der Anzeige.** Nach jeder Änderung an Auswahl oder Baum gilt:
 
-1. Eine Buchungszeile ist markiert genau dann, wenn ihre Buchung gewählt ist.
-2. Eine Gruppenzeile ist markiert genau dann, wenn alle Buchungen darunter gewählt sind.
+1. Eine Buchungszeile ist markiert genau dann, wenn ihre Buchung gewählt ist. Markiert heißt hier: im Auswahlmodell
+   der `TreeTableView` gewählt.
+2. Eine Gruppenzeile gilt als markiert genau dann, wenn alle Buchungen darunter gewählt sind. Sie wird dafür **nie** im
+   Auswahlmodell gewählt, sondern nur über eine Pseudoklasse (etwa `:group-selected`) im Aussehen einer gewählten
+   Zeile gezeigt. Das Auswahlmodell enthält also nur Buchungszeilen. So gilt weiter, worauf `TableInput` baut: Ist eine
+   einzige Buchung gewählt, ist genau ein Index gewählt (Zeilen 84 und 143), auch wenn sie allein in ihrer Gruppe
+   steht.
 3. Eine zugeklappte Gruppe enthält nie nur einen Teil gewählter Buchungen. Tritt das ein, wird sie aufgeklappt (beim
-   Neuaufbau, bei `restoreSelection`) oder ihr gewählter Teil fällt heraus (beim Zuklappen, siehe unten).
+   Neuaufbau, bei `restoreSelection`, `deselect`, `assignPlace`) oder ihr gewählter Teil fällt heraus (beim Zuklappen,
+   siehe unten).
 
 So ist gewählt, was markiert aussieht, und jede gewählte Buchung ist sichtbar oder steckt in einer ganz markierten
 Gruppe.
 
-**Bedienung** (Klick, Strg-Klick, Umschalt-Klick, Ziehen, Tastatur, Rechtsklick) wirkt wie heute auf Zeilen. Danach
-wird die Änderung in die Menge übertragen:
+**Bedienung.** Klicks und Tasten wirken zunächst wie heute auf Zeilen und damit auf das Auswahlmodell. Danach wird die
+Änderung in die Menge übertragen, und die Anzeige wird angeglichen. Maßgeblich ist, welche Zeile die Bedienung meint
+(die geklickte Zeile bzw. die Zeile, auf die der Fokus geht), nicht, was JavaFX im Auswahlmodell daraus macht:
 
-- **Gruppe als Ganzes** nur bei einer Bedienung, die genau diese Gruppenzeile meint: Klick, Strg-Klick oder Rechtsklick
-  auf sie. Markiert nimmt sie alle Buchungen darunter auf, abgewählt nimmt sie alle heraus, auch bei aufgeklappter
-  Gruppe; deren Buchungszeilen werden dann mitmarkiert.
-- **Bereiche** (Umschalt-Klick, Umschalt mit Pfeiltasten, Ziehen) übertragen nur die Buchungszeilen im Bereich.
-  Gruppenzeilen im Bereich zählen nicht als Gruppe, und zugeklappte Gruppen im Bereich tragen nichts bei. Ob eine
+| Bedienung | Meint eine Buchungszeile | Meint eine Gruppenzeile |
+|---|---|---|
+| Klick, Rechtsklick auf eine nicht markierte Zeile | Menge = diese Buchung | Menge = alle Buchungen der Gruppe |
+| Rechtsklick auf eine markierte Zeile | Menge bleibt (wie heute) | Menge bleibt |
+| Strg-Klick | Buchung hinein bzw. heraus | ganz markiert: alle heraus, sonst: alle hinein |
+| Pfeil auf/ab, Pos1, Ende, Bild auf/ab ohne Umschalt; Tab mit `clearAndSelect` (`TableInput.moveFocus`) | Menge = diese Buchung | Menge = alle Buchungen der Gruppe |
+| Leertaste (wählt die Zeile im Fokus) | wie Klick | wie Klick |
+| Umschalt-Klick, Umschalt mit Pfeil, Pos1, Ende, Bild; Ziehen | Bereich, siehe unten | Bereich, siehe unten |
+| Strg+A | alle Buchungen der Tabelle, auch in zugeklappten Gruppen | ebenso |
+| Klick auf den Pfeil | keine Änderung außer der Regel zum Zuklappen | ebenso |
+
+- **Bereiche** übertragen nur die Buchungszeilen zwischen Anker und Ziel (Menge = diese Buchungen, mit Strg dazu).
+  Gruppenzeilen im Bereich zählen nicht als Gruppe, zugeklappte Gruppen im Bereich tragen nichts bei. Ob eine
   Gruppenzeile danach markiert ist, folgt allein aus Regel 2. So gilt wie heute: Gewählt ist, was zwischen den
   Endpunkten zu sehen ist.
-- **Strg+A** wählt alle Buchungen der Tabelle, auch in zugeklappten Gruppen.
-- Eine neu markierte oder nicht mehr markierte Buchungszeile nimmt ihre Buchung auf bzw. heraus.
-- Ein Klick ohne Strg oder Umschalt ersetzt die Auswahl wie heute.
-- Ein Klick auf den Pfeil klappt nur auf oder zu; er ändert die Auswahl nicht über die Regel zum Zuklappen hinaus.
-- Danach wird die Anzeige nach der Regel oben angeglichen. Wird etwa in einer ganz gewählten, aufgeklappten Gruppe
-  eine Buchung mit Strg abgewählt, verliert die Gruppenzeile ihre Markierung.
+- **Anker und Fokus** stehen nach dem Angleichen auf der Zeile, die die Bedienung meinte, auch wenn das eine
+  Gruppenzeile ist, die nicht im Auswahlmodell steht. Ein folgender Umschalt-Klick rechnet seinen Bereich von dort.
+- **Angleichen** heißt: Das Auswahlmodell wird auf die sichtbaren Buchungszeilen der Menge gesetzt, die Pseudoklasse
+  der Gruppenzeilen nach Regel 2 gesetzt und Regel 3 angewandt. Wird etwa in einer ganz gewählten, aufgeklappten
+  Gruppe eine Buchung mit Strg abgewählt, verliert die Gruppenzeile ihre Markierung.
 - **Keine Rückkopplung:** Übertragen werden nur Änderungen, die eine Bedienung auslöst. Änderungen des Auswahlmodells
   durch das Angleichen, durch JavaFX beim Zu- und Aufklappen (das ändert die Auswahl schon in
-  `TreeItem.expanded.invalidated()`, bevor ein Listener davon erfährt) und durch `setRoot` beim Neuaufbau ändern die
-  Menge nicht. Das Verfahren dafür (etwa eine Sperre während dieser Schritte, mit der Menge als Stand davor) wählt die
-  Umsetzung.
+  `TreeItem.expanded.invalidated()`, bevor ein Listener davon erfährt) und durch das Ersetzen der Kinder beim
+  Neuaufbau ändern die Menge nicht. Das Verfahren dafür (etwa eine Sperre während dieser Schritte, mit der Menge als
+  Stand davor) wählt die Umsetzung.
 - `setSalesState` meldet die **Menge** an `SalesViewState`, nicht das Auswahlmodell, und nur ihren Stand nach einem
   abgeschlossenen Schritt. Zwischenstände erreichen das Kundenfenster nicht.
 
@@ -330,8 +370,9 @@ gewählt ist.
   Regel 3 auf und scrollt zu ihrer Zeile.
 - Die Commit-Handler der Spalten erhalten die Buchung aus `getRowValue().getValue()` (ein `TreeItem<TicketRow>`); eine
   Gruppenzeile kann nicht bearbeitet werden, ein Commit auf ihr kommt nicht vor.
-- **Rechtsklick auf eine Gruppenzeile:** wie auf eine Buchungszeile. Ist sie nicht markiert, wird nur ihre Gruppe
-  gewählt. „Platz zuweisen…“ ist auf einer Gruppenzeile nicht sichtbar.
+- **Rechtsklick auf eine Gruppenzeile:** wie in der Tabelle oben. „Platz zuweisen…“ ist auf einer Gruppenzeile nicht
+  sichtbar. Das Menü öffnet auch auf einer Gruppenzeile, die nicht im Auswahlmodell steht; „markiert“ meint hier
+  Regel 2, nicht `row.isSelected()`.
 - `freezeSelectionWhileDialogOpen` und `isRowArea` erkennen Zeilen und Zellen der Baumtabelle (`TreeTableRow`,
   `TreeTableCell`); bei offenem Verkaufsdialog ändert sich die Auswahl weiterhin nicht, auch nicht durch Auf- und
   Zuklappen. Den Pfeil sperrt der Dialog dafür mit.
@@ -380,14 +421,15 @@ Die Logik bleibt je einmal im Code:
 - **`ParsingTextFieldTableCell`:** Die Logik (Merker für unlesbare Eingabe, Ersatzwert, Übernahme beim Beenden durch die
   Tabelle, Tab, Esc, Fokusverlust) zieht in eine gemeinsame Klasse; `ParsingTextFieldTableCell` (erbt weiter von
   `TextFieldTableCell`) und eine neue `ParsingTextFieldTreeTableCell` (erbt von `TextFieldTreeTableCell`) nutzen sie.
-  Beide bieten dieselben Fabriken (`forTableColumn`, `forDateColumn`, `forTextColumn`); die der neuen Klasse nehmen
-  zusätzlich die Bedingung je Zeile.
+  Beide bieten dieselben Fabriken (`forTableColumn` auch mit Bedingung je Zeile, wie heute; `forDateColumn`,
+  `forTextColumn`). In der Baumtabelle gilt in jeder Fabrik zusätzlich: Gruppenzeilen sind nie bearbeitbar.
 - **`EditingUnits.watch`** bekommt eine Variante für `TreeTableView`; `modelOf` liefert für `GroupRow` `null` (keine
   Einheit in Bearbeitung).
 - **`ColumnMinWidths.install`** bekommt eine Variante für `TreeTableView` mit gleicher Wirkung.
-- Auswahlliste (Zahlungsstatus) und Checkboxen (Abgeholt; nur lesbar Reserviert, Rollstuhl) nutzen die JavaFX-Zellen
-  für Baumtabellen (`ComboBoxTreeTableCell`, `CheckBoxTreeTableCell`). Sie erhalten die Buchung über das `TreeItem`
-  der Zeile, nicht über einen Listenindex.
+- Auswahlliste (Zahlungsstatus) und Checkboxen (Abgeholt; nur lesbar Reserviert, Rollstuhl) nutzen Unterklassen der
+  JavaFX-Zellen für Baumtabellen (`ComboBoxTreeTableCell`, `CheckBoxTreeTableCell`), die in Gruppenzeilen nichts zeigen
+  (Abschnitt 4). Sie erhalten die Buchung über das `TreeItem` der Zeile (`getTreeItem(index)`), nicht über einen
+  Listenindex.
 - Die Event-Verwaltung nutzt weiter die `TableView`-Varianten und verhält sich unverändert.
 
 ### 10. Speichern der Gruppierung
@@ -411,8 +453,10 @@ Die Logik bleibt je einmal im Code:
 
 `showRows()` und `loadBookings()` bauen den Baum über `TicketTreeBuilder` (neu, JavaFX) aus dem Ergebnis von
 `TicketGrouping`. Die Regel von heute bleibt: Kommen dieselben Buchungen in derselben Struktur (gleiche Pfade, gleiche
-Buchungen je Gruppe, gleiche Reihenfolge, gleiche Kopftexte), genügt `refresh()`. Sonst wird der Baum neu gesetzt und
-die Anzeige der Auswahl nach 6 angeglichen.
+Buchungen je Gruppe, gleiche Reihenfolge, gleiche Kopftexte), genügt `refresh()`. Sonst werden die **Kinder der
+Wurzel ersetzt** (`root.getChildren().setAll(…)`), und die Anzeige der Auswahl wird nach 6 angeglichen. Die Wurzel
+selbst wird nur einmal beim Laden gesetzt und danach nie ausgetauscht, denn eine neue Wurzel leert die Sortierung
+(Ausgangslage). Die Sperre gegen Rückkopplung (6) deckt das Ersetzen der Kinder ab.
 
 **Anlässe:** fremde Änderung, Suche, Filter, Gruppierung, Gruppenordnung, Sortierung und **jede eigene Änderung** an
 einer Buchung aus der Kartentabelle: jeder Commit einer Zelle (auch Vorname, Kommentar, Bezahlt), die Checkbox
@@ -453,6 +497,11 @@ Ohne JavaFX:
 
 Mit JavaFX-Toolkit (wie die vorhandenen Zellen-Tests):
 
+- **Zuerst, vor dem Umbau:** `TableInputTest` hält das heutige Verhalten an einer `TableView` fest: ein Klick auf eine
+  Zelle der einzigen gewählten Zeile startet das Bearbeiten, bei mehreren gewählten nicht; Tippen ersetzt den Inhalt;
+  Enter; Tab und Umschalt+Tab samt Sprung über das Zeilenende; Tab aus dem Bearbeiten bearbeitet die nächste Zelle;
+  Ziehen wählt einen Bereich, mit Strg bleibt die bisherige Auswahl. Der Test läuft danach unverändert grün und
+  zusätzlich (parametrisiert) gegen eine flache `TreeTableView`.
 - `ParsingTextFieldTreeTableCellTest` mit denselben Fällen wie `ParsingTextFieldTableCellTest`; die gemeinsame Logik
   wird für beide Zellarten geprüft.
 - `TableInput` für `TreeTableView`: Tab überspringt eine Gruppenzeile; Tab am Ende einer Gruppe springt in die erste
@@ -460,7 +509,10 @@ Mit JavaFX-Toolkit (wie die vorhandenen Zellen-Tests):
 - Kartentabelle: `selectedBookings()` mit gewählter zugeklappter Gruppe; Zuklappen mit Hauptauswahl außerhalb der
   Gruppe (das JavaFX-Verhalten wird überschrieben); `restoreSelection` klappt teilweise gewählte Gruppen auf; Checkbox
   „Abgeholt“ ändert die richtige Buchung in gruppierter, sortierter Tabelle; ein eigener neuer Nachname zieht die
-  Buchung erst nach dem Ende der Bearbeitung um und bleibt trotz Suche sichtbar.
+  Buchung erst nach dem Ende der Bearbeitung um und bleibt trotz Suche sichtbar; die Sortierung überlebt einen
+  Neuaufbau; eine einzelne Buchung allein in ihrer Gruppe lässt sich nach Klick durch Tippen bearbeiten; Pfeil ab auf
+  eine Gruppenzeile wählt die Gruppe; Umschalt-Klick nach Klick auf einen Gruppenkopf rechnet den Bereich vom Kopf; der
+  Fall aus dem Test von KARV-196 (Randbedingungen).
 
 Die bestehenden Tests der Event-Verwaltung und von `ParsingTextFieldTableCell` bleiben grün und unverändert.
 
@@ -484,20 +536,23 @@ Die bestehenden Tests der Event-Verwaltung und von `ParsingTextFieldTableCell` b
 - Aussehen des Filtersymbols, der Leiste „Gruppieren“ und der Gruppenköpfe im Rahmen von `style.css`.
 - Ob die gemeinsame Logik von `ParsingTextFieldTableCell` als Hilfsklasse oder anders geteilt wird, solange sie nur
   einmal im Code steht.
-- Reihenfolge der Arbeitsschritte. Empfohlen: zuerst die Eingabehilfen für beide Tabellenarten, mit den bestehenden
-  Tests als Sicherung; dann die Kartentabelle flach als `TreeTableView`, die sich wie heute verhält; dann Filter,
+- Reihenfolge der Arbeitsschritte, mit einer Vorgabe: `TableInputTest` (Abschnitt 12) entsteht und ist grün, bevor
+  `TableInput` umgebaut wird. Empfohlen danach: die Eingabehilfen für beide Tabellenarten, mit diesem und den
+  bestehenden Tests als Sicherung; dann die Kartentabelle flach als `TreeTableView`, die sich wie heute verhält; dann Filter,
   Gruppierung und Speichern.
 
 ## Abnahme
 
 1. Ohne Gruppierung und ohne Filter zeigt die Kartentabelle dieselben Zeilen in derselben Reihenfolge wie vorher, ohne
    Pfeile oder Einrückung. Bearbeiten, Tab, Tippen, Ziehen, Kontextmenü, Leiste „Ohne Platz“, Suche und Sortierung
-   verhalten sich wie vorher.
+   verhalten sich wie vorher, mit einer gewollten Ausnahme: Eine selbst geänderte Buchung bleibt trotz Suche sichtbar
+   (Abschnitt 11).
 2. Gruppieren nach „Nachname“, dann „Vorname“ zeigt zwei Ebenen. Jeder Kopf hat die Form „Nachname: Müller (6)“ bzw.
    „Vorname: Hans (4)“, und die Zahl stimmt mit den Buchungen darunter überein.
 3. Mit „Gruppen nach Größe ordnen“ stehen die Gruppen mit den meisten Buchungen oben, bei Gleichstand nach Wert.
 4. Ein Klick auf einen Gruppenkopf wählt die Gruppe. Das Kontextmenü zeigt „n Karten verkaufen“ mit n gleich der
-   Anzahl der Gruppe, auch wenn sie zugeklappt ist. Das Kundenfenster zeigt dieselbe Zahl.
+   Anzahl der Gruppe, auch wenn sie zugeklappt ist. Bei einer gewählten Vorstellung (nicht „Alle Vorstellungen“, dort
+   zählt das Kundenfenster wie heute nichts) zeigt das Kundenfenster dieselbe Zahl.
 5. Verkaufen und Stornieren über eine gewählte Gruppe betreffen genau ihre Buchungen.
 6. Auf- und Zuklappen bleibt erhalten, wenn ein anderer Rechner eine Buchung ändert oder die Suche sich ändert. Die
    einzige Ausnahme ist Regel 3 in Abschnitt 6: Eine zugeklappte Gruppe, die nur noch teilweise gewählt ist, wird
@@ -510,16 +565,20 @@ Die bestehenden Tests der Event-Verwaltung und von `ParsingTextFieldTableCell` b
 9. Zuklappen einer teilweise gewählten Gruppe nimmt deren gewählte Buchungen aus der Auswahl, unabhängig davon, welche
    Zeile zuletzt angeklickt wurde. Zuklappen einer ganz gewählten Gruppe lässt die Auswahl gleich.
 10. „Nur freie Sitze“ im Verkaufsdialog über eine gewählte Gruppe nimmt die belegten Buchungen aus der Auswahl; das
-   Kundenfenster zählt sie nicht mehr.
-11. Tab aus der letzten bearbeitbaren Zelle einer Gruppe springt in die erste Buchung der nächsten Gruppe; eine
+   Kundenfenster (bei gewählter Vorstellung) zählt sie nicht mehr.
+11. Ist eine einzelne Buchung gewählt, die allein in ihrer Gruppe steht, startet Tippen, Enter oder ein zweiter Klick
+   das Bearbeiten wie in der ungruppierten Tabelle.
+12. Nach einem Neuaufbau (fremde Änderung, Suche, eigene Änderung) ist die Tabelle weiter nach den gewählten Spalten
+   sortiert.
+13. Tab aus der letzten bearbeitbaren Zelle einer Gruppe springt in die erste Buchung der nächsten Gruppe; eine
    Gruppenzeile bekommt keinen Fokus zum Bearbeiten.
-12. Der Spaltenfilter öffnet per Rechtsklick auf den Spaltenkopf, in Deutsch. Er filtert Buchungen, die Gruppen zählen
+14. Der Spaltenfilter öffnet per Rechtsklick auf den Spaltenkopf, in Deutsch. Er filtert Buchungen, die Gruppen zählen
    danach, und eine gefilterte Spalte zeigt das Symbol.
-13. Die Gruppierung und die Gruppenordnung gelten nach dem Wechsel zur Saalansicht und zurück und, mit „Anzeige beim
+15. Die Gruppierung und die Gruppenordnung gelten nach dem Wechsel zur Saalansicht und zurück und, mit „Anzeige beim
     Start wiederherstellen“, nach einem Neustart. Ohne den Schalter beginnt die Tabelle ungruppiert.
-14. Die Event-Verwaltung verhält sich unverändert (Bearbeiten, Tab, ControlsFX-Filter).
-15. `./mvnw test` ist grün, die neuen Tests aus Entwurf, Abschnitt 12, sind vorhanden.
-16. Am gemeinsamen Ordner ändert sich nichts: `FormatGuardTest`, `JsonKeysTest` und `FormatSamplesTest` laufen
+16. Die Event-Verwaltung verhält sich unverändert (Bearbeiten, Tab, ControlsFX-Filter).
+17. `./mvnw test` ist grün, die neuen Tests aus Entwurf, Abschnitt 12, sind vorhanden.
+18. Am gemeinsamen Ordner ändert sich nichts: `FormatGuardTest`, `JsonKeysTest` und `FormatSamplesTest` laufen
     unverändert durch.
 
 ## Prüfvermerk
@@ -562,9 +621,20 @@ Behoben:
 
 Nicht übernommen: nichts.
 
-**Runde 3, 18.11.2026.** Umsetzer: 1 kritisch, 1 groß, 4 klein. Gegenprüfer: 1 kritisch, 1 groß, 5 klein. Damit endet
-die Prüfung nach `CONTRIBUTING.md` („Abbruch“); über die offenen Befunde entscheidet der Maintainer. Noch nicht
-eingearbeitet:
+**Runde 3, 18.11.2026.** Umsetzer: 1 kritisch, 1 groß, 4 klein. Gegenprüfer: 1 kritisch, 1 groß, 5 klein. Damit endete
+die Prüfung nach `CONTRIBUTING.md` („Abbruch“). Der Maintainer hat am 18.11.2026 entschieden, die Befunde einarbeiten
+und die Runden fortsetzen zu lassen, bis keine kritischen oder großen Befunde mehr kommen; das Spec wird nicht geteilt.
+Eingearbeitet nach Runde 3:
+
+- Gruppenzeilen stehen nie im Auswahlmodell, ihre Markierung ist eine Pseudoklasse (6, Regel 2); neue Abnahme 11.
+- Neuaufbau ersetzt nur die Kinder der Wurzel (11, Ausgangslage); neue Abnahme 12.
+- Tabelle der Bedienungen samt Tastatur, Anker und Fokus (6).
+- `TableInputTest` am heutigen Verhalten vor dem Umbau, als Vorgabe der Reihenfolge (12, „Der Umsetzung überlassen“).
+- Alle kleinen Befunde der Runde: Abnahme 1 nennt die Ausnahme der Suche; `Comparator<BookingDTO>` (3, 5); Menge der
+  zugeklappten Pfade (4); KARV-196 (Ausgangslage, Randbedingungen); CSS über eine eigene Style-Klasse (4);
+  Kundenfenster in Abnahme 4 und 10; Vorstellung über die ID (1); Fabriken mit Bedingung je Zeile (9).
+
+Befunde der Runde 3 im Wortlaut:
 
 - **kritisch (Umsetzer), Abschnitt 6 gegen 9:** Regel 2 markiert den Kopf einer Gruppe mit nur einer Buchung mit. Dann
   sind zwei Zeilen gewählt, und `TableInput` (genau ein gewählter Index, Zeilen 84 und 143) lässt diese Zeile nicht mehr
