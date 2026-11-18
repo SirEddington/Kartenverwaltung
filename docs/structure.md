@@ -89,7 +89,7 @@ The domain-agnostic version store: file formats (`Version`, `Claim`, `Feed`, `St
 `LocalArbiter`, `SharedArbiter`), content gate (`ContentGate`), sync (`SyncService`, `Uploader`,
 `FeedReader`/`FeedWriter`, `FullSync`, `FullSyncRun`, `Reachability`, `CloudFolders`, `ServerProbe`), conflicts
 (`ConflictResolver`, `ConflictLedger`, `ConflictNote`), healing (`DamageRepair`), machine identity and locking
-(`MachineIdentity`, `Ownership`, `InstanceLock`), start index (`UnitIndex`), `connection.json` (`ConnectionMarker`),
+(`MachineIdentity`, `ComputerName`, `Ownership`, `InstanceLock`), start index (`UnitIndex`), `connection.json` (`ConnectionMarker`),
 user-facing technical messages (`StoreMessages`, SYS-005…SYS-013).
 **Not here:** UI code or knowledge of events/halls; business conflict rules are injected via `ConflictPolicy`.
 
