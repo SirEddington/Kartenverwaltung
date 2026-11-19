@@ -1,6 +1,6 @@
 # Kartentabelle nach Spalten gruppieren (KARV-193)
 
-Stand: Entscheidung vom 18.11.2026. Ein Spec ist eine Momentaufnahme und wird nach dem Merge nicht gepflegt; was
+Stand: Entscheidung vom 18.11.2026, freigegeben vom Maintainer am 19.11.2026. Ein Spec ist eine Momentaufnahme und wird nach dem Merge nicht gepflegt; was
 dauerhaft gilt, steht in `docs/decisions.md` und der übrigen Dokumentation.
 
 ## Anlass und Ziel
@@ -62,17 +62,18 @@ wird die Kartentabelle eine `TreeTableView`; Bedienung, Bearbeiten und Spaltenfi
   Spalten stehen dort als Text.
 - **JavaFX 21.0.2, ControlsFX 11.2.1** (`pom.xml`); keine neue Abhängigkeit.
 - **Sprache:** Oberfläche, Meldungen und Code-Kommentare deutsch.
-- **KARV-196** (Auswahl in sortierter Tabelle) ist auf der Wartungslinie behoben und kommt per Vorwärts-Merge nach
-  `release/1.2.0`. Dieses Spec ersetzt `restoreSelection` und `select(TableView…)`. Den Fall aus dessen Test
-  (sortierte oder gefilterte Tabelle, Rückkehr aus der Saalansicht wählt die richtigen Buchungen) schreibt der Umbau als
-  Test für die Baumtabelle neu; der alte Test mit ControlsFX entfällt mit dem Code. Konflikte löst der Umbau zugunsten
-  von Abschnitt 6. Ist der Vorwärts-Merge beim Beginn der Umsetzung noch nicht da, wird er abgewartet oder der
-  Arbeits-Branch danach auf `release/1.2.0` gebracht.
-- **KARV-192 und KARV-194** sind für 1.1.1 auf der Wartungslinie geplant und kommen per Vorwärts-Merge nach
-  `release/1.2.0`. Stand 18.11.2026, 20:35: Beide sind auf `release/1.1.0` gemergt, KARV-194 mit Pull Request #52
-  (Commit `8fa442d`), KARV-192 mit Pull Request #54 (Commit `624cce2`). KARV-196 kam mit dem Merge-Commit `fec56db`.
-  Nach dem Vorwärts-Merge verschieben sich Zeilen in `style.css` (etwa `.input-error` auf 974–975). Beide berühren die
-  umgebauten Stellen:
+- **Stand der Wartungslinie:** 1.1.1 ist veröffentlicht, und der Vorwärts-Merge ist da (Pull Request #58, Commit
+  `ec0833b` auf `release/1.2.0`). KARV-192, KARV-194, KARV-196 und KARV-197 stehen damit schon auf `release/1.2.0`.
+  Der Arbeits-Branch ist am 19.11.2026 darauf gebracht. Die Zeilenangaben der Ausgangslage beziehen sich auf den
+  älteren Stand `55af126`. In `TicketTableController.java` haben sich die Zeilen durch diese Änderungen verschoben,
+  etwa `restoreSelection` von 712 auf 734.
+- **KARV-196** (Auswahl in sortierter Tabelle): Dieses Spec ersetzt `restoreSelection` und `select(TableView…)`. Den
+  Fall aus dessen Test (sortierte oder gefilterte Tabelle, Rückkehr aus der Saalansicht wählt die richtigen Buchungen)
+  schreibt der Umbau als Test für die Baumtabelle neu. Der alte Test mit ControlsFX (`TicketTableSelectionTest`)
+  entfällt mit dem Code. Konflikte löst der Umbau zugunsten von Abschnitt 6.
+- **KARV-192 und KARV-194** sind auf `release/1.1.0` gemergt: KARV-194 mit Pull Request #52 (Commit `8fa442d`),
+  KARV-192 mit Pull Request #54 (Commit `624cce2`). KARV-196 kam mit dem Merge-Commit `fec56db`. In `style.css`
+  verschieben sich dadurch Zeilen (etwa `.input-error` auf 974–975). Beide berühren die umgebauten Stellen:
   - KARV-192 meldet die gezeigten Treffer der Kartentabelle aus `seatTable.getItems()` und hört dafür
     auf `itemsProperty()` (`reportSearchHits`, an `setSalesState` gehängt), an `SalesViewState.showSearchHits(this, …)`.
     Das gibt es in der Baumtabelle nicht. Abschnitt 11 legt fest, was künftig gemeldet wird; gilt beim Umbau eine
@@ -80,8 +81,11 @@ wird die Kartentabelle eine `TreeTableView`; Bedienung, Bearbeiten und Spaltenfi
   - KARV-194 erweitert `DisplaySettings`, `DisplayPreferences`, `DisplaySection.RESTORE_HINT` und `style.css` und
     nutzt `state.selectedBookings()`. Bei den Konflikten bleiben beide Ergänzungen erhalten; der Hinweis am Mauszeiger
     passt zur Auswahl als Menge, denn er liest `SalesViewState`.
-  - Dieselbe Regel wie bei KARV-196: Die Umsetzung beginnt auf einem `release/1.2.0`, der diese Änderungen schon
-    enthält, oder holt sie vor dem Umbau der betroffenen Stellen herein.
+- **KARV-197** (Pull Request #55, Commit `50543bb`) ergänzt `DisplaySettings` um `selectionHintPlacement` und
+  `selectionHintAvoidEdges` und `DisplayPreferences` um die passenden Properties. Die Kartentabelle berührt es nicht.
+  Die Felder aus Abschnitt 10 kommen neben diese, nach demselben Muster (Text plus `TolerantEnum` für die
+  Gruppenordnung). `DisplaySection.RESTORE_HINT` nennt inzwischen „Auswahl am Mauszeiger“ unter den Inhalten des Menüs
+  „Anzeige“. Die Umformulierung aus Abschnitt 10 setzt auf diesem Text auf.
 
 ## Ausgangslage
 
@@ -162,8 +166,8 @@ gelten nur für `.table-view`.
 
 **Andere Arbeit:** KARV-196 behebt den Fehler in `restoreSelection` auf der Wartungslinie (Pull Request #50 nach
 `release/1.1.0`, gemergt am 18.11.2026, Commit `6928e63` auf dem Branch). Es führt `static select(TableView<BookingDTO>,
-…)` und einen Test mit echtem ControlsFX-`TableFilter` ein. Nach `release/1.2.0` kommt es mit dem nächsten
-Vorwärts-Merge.
+…)` und einen Test mit echtem ControlsFX-`TableFilter` ein. Seit dem Vorwärts-Merge `ec0833b` steht es auch auf
+`release/1.2.0` (Randbedingungen).
 
 **Tests der Eingabehilfen:** Für `TableInput` gibt es keinen Test (`src/test` enthält keinen `TableInput*Test`).
 Getestet sind `ColumnMinWidthsTest`, `EditingUnitsTest`, `ParsingTextFieldTableCellTest`.
