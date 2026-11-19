@@ -65,6 +65,7 @@ class TicketTreeTableTest {
 	private final Booking w2 = booking("Weber", "Emil");
 
 	private List<TicketColumn> grouping = List.of(TicketColumn.LAST_NAME);
+	private final TicketFilter filter = new TicketFilter();
 	private Stage stage;
 	private TreeTableView<TicketRow> table;
 	private TicketTreeTable tree;
@@ -129,7 +130,7 @@ class TicketTreeTableTest {
 	// ---- Aufbau ----
 
 	private List<TicketNode> nodes() {
-		List<BookingDTO> rows = bookings.stream().map(b -> new BookingDTO(event, presentation, b)).toList();
+		List<BookingDTO> rows = bookings.stream().map(b -> new BookingDTO(event, presentation, b)).filter(filter::passes).toList();
 		return TicketGrouping.group(rows, grouping, GroupOrder.VALUE, tree.sortComparator(), event.getPresentations());
 	}
 
@@ -459,6 +460,29 @@ class TicketTreeTableTest {
 
 		assertEquals(List.of(colFirst), onFx(() -> List.copyOf(table.getSortOrder())), "die Sortierung bleibt nach dem Neuaufbau");
 		assertEquals(List.of("Carl", "Bernd", "Anna"), List.of(bookingAt(1).getFirstName(), bookingAt(2).getFirstName(), bookingAt(3).getFirstName()));
+	}
+
+	/**
+	 * Fall aus KARV-196: Die Rückkehr aus der Saalansicht wählt dieselben Buchungen, auch wenn die Tabelle sortiert und
+	 * nach einer Spalte gefiltert ist; eine ausgefilterte Buchung bleibt ungewählt.
+	 */
+	@Test
+	void rueckkehrAusSaalansichtWaehltRichtigeInSortierterGefilterterTabelle() throws Exception {
+		grouping = List.of();
+		filter.setDeselected(TicketColumn.LAST_NAME, java.util.Set.of(TicketColumn.LAST_NAME.keyOf(new BookingDTO(event, presentation, s1))));
+		show();
+		TreeTableColumn<TicketRow, ?> colLast = onFx(() -> table.getColumns().get(LAST));
+		run(() -> {
+			colLast.setSortType(TreeTableColumn.SortType.DESCENDING);
+			table.getSortOrder().setAll(List.of(colLast));
+		});
+		// Zeilen jetzt: 0 w1, 1 w2, 2 m1, 3 m2 (Schmidt ausgefiltert)
+		assertSame(w1, bookingAt(0));
+
+		run(() -> tree.restoreSelection(List.of(s1, m1, w2)));
+
+		assertEquals(List.of(w2, m1), selected(), "in Reihenfolge der Tabelle, ohne die ausgefilterte Buchung");
+		assertEquals(List.of(1, 2), modelRows());
 	}
 
 	@Test

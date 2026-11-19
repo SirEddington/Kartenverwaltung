@@ -499,14 +499,26 @@
  /* Tabellen haben eine feste Zeilenhöhe (30 px, siehe unten): Ein senkrechter Innenabstand von 6 px ließ den Text 3 px
     über der Mitte sitzen (gemessen: Textmitte 12 statt 15 px) und machte die Zeile höher, sobald eine Zelle mehr als Text
     enthält (z. B. die Zahlungs-ComboBox: 42 statt 30 px). Ohne ihn sitzt der Text mittig. */
- .table-view .table-cell {
+ .table-view .table-cell,
+ .ticket-table .tree-table-cell {
      -fx-padding: 0 8px;
  }
 
  /* Feste Zeilenhöhe: Bisher bestimmten die Checkbox-Zellen mit ihrem Zellenabstand die Höhe (30 px). Ohne ihren Abstand
     (siehe .check-box-table-cell) bliebe es sonst bei 28 px. */
- .table-view .table-row-cell {
+ .table-view .table-row-cell,
+ .ticket-table .tree-table-row-cell {
      -fx-cell-size: 30px;
+ }
+
+ /* Kartentabelle (KARV-193): Eine Gruppenzeile steht nie im Auswahlmodell; sind alle ihre Buchungen gewählt, sieht sie
+    aus wie eine gewählte Zeile (Pseudoklasse aus TicketTreeTable). */
+ .ticket-table .tree-table-row-cell:group-selected {
+     -fx-background-color: -fx-ecv-yellow;
+ }
+
+ .ticket-table .tree-table-row-cell:group-selected .tree-table-cell {
+     -fx-text-fill: -fx-ecv-blue;
  }
 
  /* Bearbeitete Zelle: Die Zeile bleibt gleich hoch und die Spalte gleich breit. Das Eingabefeld erbt sonst die Maße
@@ -523,7 +535,8 @@
 
  /* Zahlungs-ComboBox in der Zelle: 28 px hoch, damit die Zeile beim Wählen bei 30 px bleibt (ohne die Regel wurde sie
     42 px hoch und der Text der übrigen Zellen rutschte nach oben). */
- .table-view .combo-box-table-cell > .combo-box {
+ .table-view .combo-box-table-cell > .combo-box,
+ .ticket-table .combo-box-tree-table-cell > .combo-box {
      -fx-pref-height: 28px;
      -fx-min-height: 28px;
      -fx-max-height: 28px;
@@ -617,7 +630,8 @@
  }
 
  /* Checkbox in einer Tabellenzelle: mittig, waagerecht und senkrecht (ohne den Zellenabstand saß das Kästchen oben) */
- .table-view .check-box-table-cell {
+ .table-view .check-box-table-cell,
+ .ticket-table .check-box-tree-table-cell {
      -fx-alignment: center;
      -fx-padding: 0;
  }
@@ -972,7 +986,9 @@
 .table-cell.input-error,
 .tree-table-cell.input-error,
 .table-row-cell:filled .table-cell.input-error,
-.table-row-cell:filled:selected .table-cell.input-error {
+.table-row-cell:filled:selected .table-cell.input-error,
+.ticket-table .tree-table-row-cell:filled .tree-table-cell.input-error,
+.ticket-table .tree-table-row-cell:filled:selected .tree-table-cell.input-error {
     -fx-background-color: -fx-ecv-red;
     -fx-border-color: -fx-ecv-red;
     -fx-border-width: 1.5px;
