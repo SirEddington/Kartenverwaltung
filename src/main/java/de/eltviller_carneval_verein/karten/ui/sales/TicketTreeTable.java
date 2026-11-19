@@ -460,6 +460,11 @@ public final class TicketTreeTable {
 
 	private void applyFocus(TreeItem<TicketRow> focus, TreeTableColumn<TicketRow, ?> column) {
 		int row = focus == null ? -1 : table.getRow(focus);
+		// steckt die Zeile in einer zugeklappten Gruppe, steht der Fokus auf der nächsten sichtbaren Gruppe darüber
+		for (TreeItem<TicketRow> parent = focus == null ? null : focus.getParent(); row < 0 && parent != null && parent != root; parent = parent
+				.getParent()) {
+			row = table.getRow(parent);
+		}
 		TreeTablePosition<TicketRow, ?> focused = table.getFocusModel().getFocusedCell();
 		if (focused == null || focused.getRow() != row || focused.getTableColumn() != column) {
 			if (row < 0) {
@@ -771,8 +776,8 @@ public final class TicketTreeTable {
 		}
 		boolean shift = event.isShiftDown();
 		boolean ctrl = event.isShortcutDown();
-		int focus = table.getFocusModel().getFocusedIndex();
 		TreeItem<TicketRow> item = focusedItem();
+		int focus = item == null ? table.getFocusModel().getFocusedIndex() : table.getRow(item);
 		TicketNode node = item == null ? null : nodeOf.get(item);
 		boolean group = node != null && node.row() instanceof TicketRow.GroupRow;
 		switch (event.getCode()) {
@@ -919,9 +924,12 @@ public final class TicketTreeTable {
 
 	// ---- Hilfen ----
 
+	/**
+	 * Die Zeile im Fokus als gespeichertes Element, nicht über {@code getTreeItem(index)}: Nach dem Klappen verschiebt
+	 * JavaFX den Index erst später, bis dahin nennt er eine andere Zeile.
+	 */
 	private TreeItem<TicketRow> focusedItem() {
-		TreeTablePosition<TicketRow, ?> focused = table.getFocusModel().getFocusedCell();
-		return focused == null || focused.getRow() < 0 ? null : typed.get(table.getTreeItem(focused.getRow()));
+		return typed.get(table.getFocusModel().getFocusedItem());
 	}
 
 	private TreeTableColumn<TicketRow, ?> focusedColumn() {

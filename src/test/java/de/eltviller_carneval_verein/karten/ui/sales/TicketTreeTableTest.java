@@ -733,6 +733,74 @@ class TicketTreeTableTest {
 		assertEquals(List.of(w1, w2), selected(), "die Buchungen bleiben gewählt");
 	}
 
+	private Booking focusedBooking() throws Exception {
+		return onFx(() -> table.getFocusModel().getFocusedItem() != null
+				&& table.getFocusModel().getFocusedItem().getValue() instanceof TicketRow.BookingRow row ? row.dto().getBooking() : null);
+	}
+
+	@Test
+	void fokusBleibtBeimKlappenDarueber() throws Exception {
+		show();
+		click(4); // s1
+
+		clickArrow(0); // Müller zu
+		assertEquals(2, focusedRow(), "der Fokus bleibt auf s1");
+		assertSame(s1, focusedBooking());
+
+		clickArrow(0); // Müller auf
+		assertEquals(4, focusedRow());
+		assertSame(s1, focusedBooking());
+		assertEquals(List.of(s1), selected());
+	}
+
+	@Test
+	void fokusBleibtBeimKlappenMitTasten() throws Exception {
+		show();
+		click(5); // Kopf Weber
+
+		press(KeyCode.LEFT);
+		assertEquals(5, focusedRow());
+		press(KeyCode.RIGHT);
+		assertEquals(5, focusedRow());
+		press(KeyCode.SUBTRACT);
+		assertEquals(5, focusedRow());
+		press(KeyCode.MULTIPLY);
+		assertEquals(5, focusedRow());
+
+		click(4); // s1
+		run(() -> table.getTreeItem(0).setExpanded(false)); // Müller zu, wie mit Minus auf dem Kopf
+		assertEquals(2, focusedRow());
+		assertSame(s1, focusedBooking());
+	}
+
+	@Test
+	void fokusBleibtBeimAufklappenNachRegel3UndClearCollapsed() throws Exception {
+		show();
+		setExpanded(0, false);
+		click(2); // s1
+
+		run(() -> tree.restoreSelection(List.of(m1, s1))); // Regel 3 klappt Müller auf
+		assertTrue(onFx(() -> table.getTreeItem(0).isExpanded()));
+		assertEquals(4, focusedRow(), "der Fokus bleibt auf s1");
+
+		setExpanded(0, false);
+		assertEquals(2, focusedRow());
+		run(() -> tree.clearCollapsed());
+		assertEquals(4, focusedRow());
+		assertSame(s1, focusedBooking());
+	}
+
+	@Test
+	void zuklappenUeberDemFokusFokussiertDieGruppe() throws Exception {
+		show();
+		click(2); // m2
+
+		clickArrow(0);
+
+		assertEquals(0, focusedRow(), "ist die Zeile verdeckt, steht der Fokus auf ihrer Gruppe");
+		assertEquals(List.of(), selected());
+	}
+
 	@Test
 	void gleicheStrukturZeichntNurNeu() throws Exception {
 		show();
