@@ -4,17 +4,19 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /**
  * Das Menü "Anzeige" der Saalansicht und des Hallen-Editors, wie es in {@code settings.json} steht (KARV-76): die
- * Beschriftungen des Plans, die barrierefreie Sitzdarstellung (KARV-26), die Platzierung der Kaufzusammenfassung im
- * Kundenfenster und ob diese Auswahl beim
- * nächsten Start wieder gilt ({@code restoreAtStart}, Standard an). Wann geschrieben und gelesen wird, regelt
- * {@code DisplayPreferences}. Die Platzierung steht als Text darin, damit dieses Paket die Oberfläche nicht kennt und
- * ein unbekannter Wert aus einer neueren Version die Datei nicht unlesbar macht.
+ * Beschriftungen des Plans, die barrierefreie Sitzdarstellung (KARV-26), der Hinweis zur Auswahl am Mauszeiger
+ * (KARV-194) samt Lage und Ausweichen am Rand (KARV-197), die Platzierung der Kaufzusammenfassung im Kundenfenster und ob diese Auswahl
+ * beim nächsten Start wieder gilt ({@code restoreAtStart}, Standard an). Wann geschrieben und gelesen wird, regelt
+ * {@code DisplayPreferences}. Lage und Platzierung stehen als Text darin, damit dieses Paket die Oberfläche nicht kennt
+ * und ein unbekannter Wert aus einer neueren Version die Datei nicht unlesbar macht.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DisplaySettings {
 
 	/** Die Platzierung, wenn keine oder eine unbekannte gespeichert ist. */
 	public static final String DEFAULT_SUMMARY_PLACEMENT = "AUTO";
+	/** Die Lage des Hinweises am Mauszeiger, wenn keine oder eine unbekannte gespeichert ist. */
+	public static final String DEFAULT_SELECTION_HINT_PLACEMENT = "ABOVE";
 
 	private boolean restoreAtStart = true;
 	private boolean rows = true;
@@ -22,6 +24,9 @@ public class DisplaySettings {
 	private boolean seatNumbers = true;
 	private boolean hallObjects = true;
 	private boolean seatPatterns = true;
+	private boolean selectionHint = true;
+	private String selectionHintPlacement = DEFAULT_SELECTION_HINT_PLACEMENT;
+	private boolean selectionHintAvoidEdges = true;
 	private String summaryPlacement = DEFAULT_SUMMARY_PLACEMENT;
 
 	public DisplaySettings() {
@@ -78,6 +83,43 @@ public class DisplaySettings {
 
 	public void setSeatPatterns(boolean seatPatterns) {
 		this.seatPatterns = seatPatterns;
+	}
+
+	/**
+	 * Ob die Verkaufsansicht Anzahl und Preis der gewählten Karten am Mauszeiger zeigt (KARV-194). Fehlt das Feld (Datei
+	 * von vor 1.1.1), ist es an.
+	 */
+	public boolean isSelectionHint() {
+		return selectionHint;
+	}
+
+	public void setSelectionHint(boolean selectionHint) {
+		this.selectionHint = selectionHint;
+	}
+
+	/**
+	 * Der Name der Lage des Hinweises am Mauszeiger (z. B. {@code "BELOW"}, KARV-197); nie {@code null}, kann aber aus einer
+	 * neueren Version unbekannt sein. Fehlt das Feld, gilt {@link #DEFAULT_SELECTION_HINT_PLACEMENT}.
+	 */
+	public String getSelectionHintPlacement() {
+		return selectionHintPlacement;
+	}
+
+	/** {@code null} gilt als {@link #DEFAULT_SELECTION_HINT_PLACEMENT}. */
+	public void setSelectionHintPlacement(String selectionHintPlacement) {
+		this.selectionHintPlacement = selectionHintPlacement == null ? DEFAULT_SELECTION_HINT_PLACEMENT : selectionHintPlacement;
+	}
+
+	/**
+	 * Ob der Hinweis am Mauszeiger am Rand auf die andere Seite des Zeigers ausweicht (KARV-197); sonst behält er seine
+	 * Seite und wird nur an den Rand geschoben. Fehlt das Feld, ist es an.
+	 */
+	public boolean isSelectionHintAvoidEdges() {
+		return selectionHintAvoidEdges;
+	}
+
+	public void setSelectionHintAvoidEdges(boolean selectionHintAvoidEdges) {
+		this.selectionHintAvoidEdges = selectionHintAvoidEdges;
 	}
 
 	/** Der Name der Platzierung (z. B. {@code "AUTO"}); nie {@code null}, kann aber aus einer neueren Version unbekannt sein. */

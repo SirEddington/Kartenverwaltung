@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.settings.DisplaySettings;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabels;
+import de.eltviller_carneval_verein.karten.ui.sales.SelectionHintPlacement;
 import de.eltviller_carneval_verein.karten.ui.sales.SummaryPlacement;
 
 class DisplayPreferencesTest {
@@ -34,6 +35,9 @@ class DisplayPreferencesTest {
 		saved.setRows(false);
 		saved.setSeatNumbers(false);
 		saved.setSeatPatterns(false);
+		saved.setSelectionHint(false);
+		saved.setSelectionHintPlacement("BELOW");
+		saved.setSelectionHintAvoidEdges(false);
 		saved.setSummaryPlacement("LEFT");
 		return saved;
 	}
@@ -44,7 +48,23 @@ class DisplayPreferencesTest {
 
 		assertEquals(new PlanLabels(false, true, false, true), prefs.planLabels().snapshot());
 		assertFalse(prefs.seatPatternsProperty().get());
+		assertFalse(prefs.selectionHintProperty().get());
+		assertEquals(SelectionHintPlacement.BELOW, prefs.selectionHintPlacementProperty().get());
+		assertFalse(prefs.selectionHintAvoidEdgesProperty().get());
 		assertEquals(SummaryPlacement.LEFT, prefs.summaryPlacementProperty().get());
+	}
+
+	@Test
+	void switchingAvoidEdgesWritesTheWholeSelection() {
+		DisplayPreferences prefs = load(saved(true));
+
+		prefs.selectionHintAvoidEdgesProperty().set(true);
+		assertEquals(1, writes);
+		assertTrue(file.isSelectionHintAvoidEdges());
+		assertEquals("BELOW", file.getSelectionHintPlacement(), "die übrige Auswahl wird mitgeschrieben");
+
+		prefs.selectionHintProperty().set(true);
+		assertTrue(file.isSelectionHintAvoidEdges(), "eine andere Änderung schreibt den Haken unverändert mit");
 	}
 
 	@Test
@@ -53,7 +73,59 @@ class DisplayPreferencesTest {
 
 		assertEquals(PlanLabels.ALL, prefs.planLabels().snapshot());
 		assertTrue(prefs.seatPatternsProperty().get(), "die barrierefreie Darstellung ist der Normalfall");
+		assertTrue(prefs.selectionHintProperty().get(), "der Hinweis am Mauszeiger ist der Normalfall");
+		assertEquals(SelectionHintPlacement.ABOVE, prefs.selectionHintPlacementProperty().get());
+		assertTrue(prefs.selectionHintAvoidEdgesProperty().get(), "Ausweichen am Rand ist der Normalfall");
 		assertEquals(SummaryPlacement.AUTO, prefs.summaryPlacementProperty().get());
+	}
+
+	@Test
+	void changingTheHintPlacementWritesTheWholeSelection() {
+		DisplayPreferences prefs = load(saved(true));
+
+		prefs.selectionHintPlacementProperty().set(SelectionHintPlacement.ABOVE);
+		assertEquals(1, writes);
+		assertEquals("ABOVE", file.getSelectionHintPlacement());
+		assertFalse(file.isSelectionHint(), "die übrige Auswahl wird mitgeschrieben");
+
+		prefs.selectionHintProperty().set(true);
+		assertEquals("ABOVE", file.getSelectionHintPlacement(), "eine andere Änderung schreibt die Lage unverändert mit");
+	}
+
+	@Test
+	void anUnknownHintPlacementIsAboveAndWrittenBackUntilAnotherIsChosen() {
+		DisplaySettings saved = saved(true);
+		saved.setSelectionHintPlacement("LEFT");
+		DisplayPreferences prefs = load(saved);
+
+		assertEquals(SelectionHintPlacement.ABOVE, prefs.selectionHintPlacementProperty().get());
+		prefs.selectionHintProperty().set(true);
+		assertEquals("LEFT", file.getSelectionHintPlacement(), "eine neuere Version findet ihre Wahl wieder");
+
+		prefs.selectionHintPlacementProperty().set(SelectionHintPlacement.BELOW);
+		assertEquals("BELOW", file.getSelectionHintPlacement());
+	}
+
+	@Test
+	void aMissingHintPlacementIsWrittenAsAbove() {
+		DisplayPreferences prefs = load(saved(true));
+
+		prefs.selectionHintPlacementProperty().set(null);
+
+		assertEquals("ABOVE", file.getSelectionHintPlacement());
+	}
+
+	@Test
+	void switchingTheSelectionHintWritesTheWholeSelection() {
+		DisplayPreferences prefs = load(saved(true));
+
+		prefs.selectionHintProperty().set(true);
+		assertEquals(1, writes);
+		assertTrue(file.isSelectionHint());
+		assertFalse(file.isSeatPatterns(), "die übrige Auswahl wird mitgeschrieben");
+
+		prefs.planLabels().rowsProperty().set(true);
+		assertTrue(file.isSelectionHint(), "eine andere Änderung schreibt den Schalter unverändert mit");
 	}
 
 	@Test

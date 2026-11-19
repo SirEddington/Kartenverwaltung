@@ -26,8 +26,9 @@ import java.util.regex.Pattern;
  * Ein Sync-Ordner liegt lokal und ist deshalb immer "da"; ob der Rechner wirklich mit den anderen austauscht, zeigt erst
  * der Server. Erkannt werden:
  * <ul>
- * <li><b>Nextcloud</b>: die Konfiguration des Clients ({@code %APPDATA%\Nextcloud\nextcloud.cfg}), Abschnitt
- * {@code [Accounts]}: je Konto die URL (<code>N&#92;url</code>) und dessen Ordner (<code>N&#92;Folders…&#92;M&#92;localPath</code>, auch
+ * <li><b>Nextcloud</b>: die Konfiguration des Clients ({@code nextcloud.cfg}, wo sie liegt, sagt
+ * {@link #nextcloudConfigFiles}; gibt es mehrere, zählen die Ordner aller), Abschnitt {@code [Accounts]}: je Konto die
+ * URL (<code>N&#92;url</code>) und dessen Ordner (<code>N&#92;Folders…&#92;M&#92;localPath</code>, auch
  * {@code FoldersWithPlaceholders} und {@code Multifolders}).</li>
  * <li><b>OneDrive</b>: die Umgebungsvariablen {@code OneDriveCommercial} (geschäftlich), {@code OneDriveConsumer} und
  * {@code OneDrive} (privat, außer sie nennt denselben Ordner wie die geschäftliche). Geprüft wird ein Server von
@@ -35,7 +36,8 @@ import java.util.regex.Pattern;
  * </ul>
  * Pfade werden als Text verglichen (Trenner vereinheitlicht, ohne Groß- und Kleinschreibung, nur an Ordnergrenzen); die
  * längste passende Wurzel gewinnt, bei gleicher Länge die zuerst eingetragene. Die Konfiguration von Nextcloud wird bei
- * jeder Abfrage neu gelesen; fehlt sie oder ist sie unlesbar, gilt der Ordner als keiner (das zweite einmal im Log). Die
+ * jeder Abfrage neu gelesen; eine unlesbare zählt nicht. Fehlt jede oder ist keine lesbar, gilt der Ordner als keiner
+ * (das zweite einmal im Log). Die
  * Umgebung ändert sich während des Programmlaufs nicht und wird einmal gelesen. Ohne JavaFX.
  */
 public final class CloudFolders {
@@ -62,23 +64,58 @@ public final class CloudFolders {
 	private record Root(String path, CloudTarget target) {
 	}
 
-	private final Supplier<Optional<String>> nextcloudConfig;
+	private final Supplier<List<String>> nextcloudConfigs;
 	private final List<Root> oneDriveRoots;
 	private final AtomicBoolean warned = new AtomicBoolean();
 
 	/**
-	 * @param nextcloudConfig liefert den Inhalt von {@code nextcloud.cfg}, leer, wenn es sie nicht gibt; darf werfen
-	 * @param environment     Umgebungsvariablen nach Namen ({@code null}, wenn nicht gesetzt); nur hier gelesen
+	 * @param nextcloudConfigs liefert den Inhalt jeder {@code nextcloud.cfg}, die es gibt (leer, wenn keine); darf werfen
+	 * @param environment      Umgebungsvariablen nach Namen ({@code null}, wenn nicht gesetzt); nur hier gelesen
 	 */
-	public CloudFolders(Supplier<Optional<String>> nextcloudConfig, Function<String, String> environment) {
-		this.nextcloudConfig = nextcloudConfig;
+	public CloudFolders(Supplier<List<String>> nextcloudConfigs, Function<String, String> environment) {
+		this.nextcloudConfigs = nextcloudConfigs;
 		this.oneDriveRoots = oneDriveRoots(environment);
 	}
 
 	/** Mit der Konfiguration und der Umgebung dieses Rechners. */
 	public static CloudFolders system() {
-		String appData = System.getenv("APPDATA");
-		return new CloudFolders(() -> readNextcloudConfig(appData), System::getenv);
+		List<Path> configs = nextcloudConfigFiles(System::getenv, System.getProperty("user.home"));
+		return new CloudFolders(() -> readExisting(configs), System::getenv);
+	}
+
+	/**
+	 * Wo der Client von Nextcloud seine Konfiguration ablegt. Unter Windows {@code %APPDATA%\Nextcloud\nextcloud.cfg}.
+	 * Sonst (Linux, KARV-179) im Konfigurationsordner nach XDG ({@code $XDG_CONFIG_HOME}, wenn es ein absoluter Pfad
+	 * ist, sonst {@code ~/.config}) und in dem des Flatpak-Pakets
+	 * ({@code ~/.var/app/com.nextcloud.desktopclient.nextcloud/config}). Beide zählen, denn nach einem Wechsel zwischen
+	 * den Paketen bleibt die alte Datei liegen, und welche die aktuelle ist, lässt sich nicht sagen.
+	 *
+	 * @param environment Umgebungsvariablen nach Namen ({@code null}, wenn nicht gesetzt)
+	 * @param userHome    das Nutzerverzeichnis; ohne es nur, was die Umgebung nennt
+	 */
+	static List<Path> nextcloudConfigFiles(Function<String, String> environment, String userHome) {
+		String appData = environment.apply("APPDATA");
+		if (appData != null && !appData.isBlank()) {
+			return List.of(nextcloudConfigIn(Path.of(appData)));
+		}
+		List<Path> files = new ArrayList<>();
+		// nach XDG gilt ein relativer Pfad als nicht gesetzt; "/" statt Path.isAbsolute, das unter Windows anders urteilt
+		String xdg = environment.apply("XDG_CONFIG_HOME");
+		boolean absoluteXdg = xdg != null && xdg.startsWith("/");
+		if (absoluteXdg) {
+			files.add(nextcloudConfigIn(Path.of(xdg)));
+		}
+		if (userHome != null && !userHome.isBlank()) {
+			if (!absoluteXdg) {
+				files.add(nextcloudConfigIn(Path.of(userHome, ".config")));
+			}
+			files.add(nextcloudConfigIn(Path.of(userHome, ".var", "app", "com.nextcloud.desktopclient.nextcloud", "config")));
+		}
+		return List.copyOf(files);
+	}
+
+	private static Path nextcloudConfigIn(Path configDir) {
+		return configDir.resolve("Nextcloud").resolve("nextcloud.cfg");
 	}
 
 	/** Der Server des Cloud-Clients, zu dem {@code folder} gehört; leer, wenn er zu keinem erkannten gehört. */
@@ -99,7 +136,7 @@ public final class CloudFolders {
 	private List<Root> roots() {
 		List<Root> roots = new ArrayList<>();
 		try {
-			nextcloudConfig.get().ifPresent(cfg -> roots.addAll(nextcloudRoots(cfg)));
+			nextcloudConfigs.get().forEach(cfg -> roots.addAll(nextcloudRoots(cfg)));
 		} catch (RuntimeException e) {
 			if (warned.compareAndSet(false, true)) {
 				LOGGER.log(Level.WARNING, "Die Konfiguration von Nextcloud ist nicht lesbar", e);
@@ -229,15 +266,24 @@ public final class CloudFolders {
 		return path.equals(root) || path.startsWith(root.endsWith("/") ? root : root + "/");
 	}
 
-	private static Optional<String> readNextcloudConfig(String appData) {
-		if (appData == null || appData.isBlank()) {
-			return Optional.empty();
+	/**
+	 * Der Inhalt jeder Datei, die es gibt, in der Reihenfolge von {@code files}. Eine unlesbare überspringt sie, damit sie
+	 * die anderen nicht mitnimmt; nur wenn keine lesbar ist, wirft sie den ersten Fehler.
+	 */
+	static List<String> readExisting(List<Path> files) {
+		NioFileLayer layer = new NioFileLayer();
+		List<String> contents = new ArrayList<>();
+		IOException failure = null;
+		for (Path file : files) {
+			try {
+				layer.read(file).ifPresent(bytes -> contents.add(new String(bytes, StandardCharsets.UTF_8)));
+			} catch (IOException e) {
+				failure = failure == null ? e : failure;
+			}
 		}
-		try {
-			return new NioFileLayer().read(Path.of(appData, "Nextcloud", "nextcloud.cfg"))
-					.map(bytes -> new String(bytes, StandardCharsets.UTF_8));
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+		if (contents.isEmpty() && failure != null) {
+			throw new UncheckedIOException(failure);
 		}
+		return contents;
 	}
 }

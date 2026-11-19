@@ -5,7 +5,6 @@ import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuButton;
-import javafx.scene.control.RadioMenuItem;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.ToggleGroup;
 
@@ -23,12 +22,9 @@ final class SummaryPlacementMenu {
 		ToggleGroup group = new ToggleGroup();
 		Menu submenu = new Menu("Kaufzusammenfassung");
 		for (SummaryPlacement value : SummaryPlacement.values()) {
-			RadioMenuItem item = new RadioMenuItem(value.label());
-			item.setToggleGroup(group);
-			item.setUserData(value);
-			item.setSelected(value == placement.get());
-			submenu.getItems().add(item);
+			submenu.getItems().add(RadioMenus.item(value.label(), value, group));
 		}
+		RadioMenus.select(group, placement.get());
 		group.selectedToggleProperty().addListener((obs, oldToggle, newToggle) -> {
 			if (newToggle != null) {
 				placement.set((SummaryPlacement) newToggle.getUserData());
@@ -36,8 +32,7 @@ final class SummaryPlacementMenu {
 		});
 		// Auch eine Änderung von außen zeigt sich im Menü. Schwach angemeldet, das Untermenü hält den Listener: Die
 		// Platzierung gilt für die ganze App (DisplayPreferences), dieses Menü nur so lange wie seine Shell.
-		ChangeListener<SummaryPlacement> follow = (obs, oldValue, newValue) -> group.getToggles().stream()
-				.filter(toggle -> toggle.getUserData() == newValue).findFirst().ifPresent(toggle -> toggle.setSelected(true));
+		ChangeListener<SummaryPlacement> follow = (obs, oldValue, newValue) -> RadioMenus.select(group, newValue);
 		submenu.getProperties().put(SummaryPlacementMenu.class, follow);
 		placement.addListener(new WeakChangeListener<>(follow));
 		menu.getItems().addAll(new SeparatorMenuItem(), submenu);

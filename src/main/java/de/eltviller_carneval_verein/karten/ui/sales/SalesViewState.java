@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
@@ -13,6 +14,7 @@ import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.collections.ObservableSet;
 import javafx.geometry.Rectangle2D;
 
@@ -26,6 +28,10 @@ public final class SalesViewState {
 	private final ObjectProperty<Presentation> presentation = new SimpleObjectProperty<>();
 	private final ObjectProperty<Rectangle2D> visibleHallRect = new SimpleObjectProperty<>();
 	private final ObservableSet<Booking> selectedBookings = FXCollections.observableSet(new LinkedHashSet<>());
+	private final ObservableList<Booking> searchHits = FXCollections.observableArrayList();
+	private final ObservableList<Booking> searchHitsView = FXCollections.unmodifiableObservableList(searchHits);
+	// Der Inhalt, der gerade zu sehen ist: Nur er meldet Treffer (eine verlassene Ansicht kann noch zeichnen, KARV-192)
+	private Object activeView;
 	private final DisplayPreferences display;
 
 	/**
@@ -70,6 +76,21 @@ public final class SalesViewState {
 		return display.seatPatternsProperty();
 	}
 
+	/** Ob Anzahl und Preis der Auswahl am Mauszeiger stehen (Menü "Anzeige", KARV-194), siehe {@link SelectionHint}. */
+	public BooleanProperty selectionHintProperty() {
+		return display.selectionHintProperty();
+	}
+
+	/** Ob der Hinweis am Mauszeiger über oder unter dem Zeiger steht (Menü "Anzeige", KARV-197). */
+	public ObjectProperty<SelectionHintPlacement> selectionHintPlacementProperty() {
+		return display.selectionHintPlacementProperty();
+	}
+
+	/** Ob der Hinweis am Mauszeiger am Rand ausweicht (Menü "Anzeige", KARV-197). */
+	public BooleanProperty selectionHintAvoidEdgesProperty() {
+		return display.selectionHintAvoidEdgesProperty();
+	}
+
 	/** Wo das Kundenfenster die Kartenübersicht zeigt (Menü "Anzeige"). */
 	public ObjectProperty<SummaryPlacement> summaryPlacementProperty() {
 		return display.summaryPlacementProperty();
@@ -87,9 +108,37 @@ public final class SalesViewState {
 		selectedBookings.addAll(wanted);
 	}
 
-	/** Beim Wechsel der Ansicht: leert die Auswahl und den Ausschnitt, Event, Vorstellung und "Reihen anzeigen" bleiben. */
+	/**
+	 * Die Buchungen, die die aktive Ansicht gerade als Treffer der Suche zeigt, in ihrer Reihenfolge (KARV-192): die
+	 * Zeilen der Kartentabelle bzw. die nicht abgeblendeten Sitze der Saalansicht. Nur lesbar; geschrieben wird über
+	 * {@link #showSearchHits}.
+	 */
+	public ObservableList<Booking> searchHits() {
+		return searchHitsView;
+	}
+
+	/** Die Shell meldet den Inhalt, der gerade zu sehen ist; nur seine Treffer zählen ({@link #showSearchHits}). */
+	public void setActiveView(Object view) {
+		activeView = view;
+	}
+
+	/**
+	 * Ersetzt die Treffer, wenn {@code view} die aktive Ansicht ist; eine verlassene Ansicht, die noch zeichnet (etwa über
+	 * das Menü "Anzeige"), ändert nichts.
+	 */
+	public void showSearchHits(Object view, List<Booking> hits) {
+		if (view == activeView) {
+			searchHits.setAll(hits);
+		}
+	}
+
+	/**
+	 * Beim Wechsel der Ansicht: leert die Auswahl, den Ausschnitt und die Treffer, Event, Vorstellung, die aktive Ansicht
+	 * und "Reihen anzeigen" bleiben.
+	 */
 	public void resetView() {
 		selectedBookings.clear();
 		visibleHallRect.set(null);
+		searchHits.clear();
 	}
 }

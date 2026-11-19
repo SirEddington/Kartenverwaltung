@@ -94,7 +94,8 @@ data/               local version store (all units)
 index/              start index (cache, safe to lose); index/clean marks a clean shutdown
 logs/               kartenverwaltung-0.log … -4.log (5 × 1 MB, rotating)
 settings.json       application settings (shared folder, operators, auto-save, "Anzeige" menu, patch notes seen)
-machine.json        random machine id and display name of this workstation
+machine.json        random machine id and display name of this workstation (preset from the computer name:
+                    COMPUTERNAME on Windows, /etc/hostname on Linux; "Rechner" if none is found)
 connection.json     "connected" marker for the shared folder (only when connected)
 sync-state.json     read positions in the feeds of the other workstations
 conflicts-ack.json  conflicts marked "Erledigt"
@@ -157,7 +158,7 @@ in [CONTRIBUTING.md](../.github/CONTRIBUTING.md) (in German); steps 1 to 3 below
    (`src/test/java/.../store/`) with the target folder `src/test/resources/format-samples/<version>`. It writes
    `data.zip` there; add a `README.md` next to it (how it was created, contents) and commit both. `FormatSamplesTest`
    then checks that every later version loads this sample unchanged, so a missed sample means no guard for the next
-   version. Details: [decisions.md](decisions.md#release-steps).
+   version. Patch versions get a sample too. Details: [decisions.md](decisions.md#release-steps).
 4. Run the **Release build** workflow (`.github/workflows/release.yml`, manual `workflow_dispatch`). Job
    `build-and-publish`:
    1. runs the tests on Linux under `xvfb-run` (`-Plinux`),

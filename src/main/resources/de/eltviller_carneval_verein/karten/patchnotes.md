@@ -1,5 +1,30 @@
 # Patchnotes
 
+## 1.1.1
+
+### Neu
+- Beim Auswählen von Plätzen steht neben dem Mauszeiger, wie viele Karten gewählt sind und was sie
+  zusammen kosten, in der Saalansicht und in der Tabelle. Im Menü „Anzeige“ unter „Auswahl am
+  Mauszeiger“ wählen Sie, ob der Hinweis über oder unter dem Mauszeiger steht, oder schalten ihn ab.
+  Ohne „Am Rand ausweichen“ springt er am Rand nicht auf die andere Seite des Mauszeigers. Die
+  Saalansicht zeigt beim Überfahren eines Platzes dafür keinen Tooltip mit Platz und Status mehr.
+- Über dem Suchfeld steht, wie viele Treffer die Tabelle bzw. die Saalansicht gerade zeigt. Fährt
+  man mit der Maus darüber, steht dort, wie viele davon auf welchen Namen gebucht sind, bei „Alle
+  Vorstellungen“ auch je Vorstellung. So lässt sich schnell prüfen, ob ein Kunde die richtige
+  Anzahl Karten hat.
+
+### Behoben
+- Im Anzeigemodus übernimmt die Saalansicht keine Auswahl mehr aus der Tabelle. Bisher blieben
+  die Plätze dort markiert und ließen sich erst im Bearbeitungsmodus wieder abwählen.
+- Ist die Kartentabelle sortiert oder gefiltert, bleiben nach dem Wechsel aus der Saalansicht und
+  nach Änderungen anderer Kassen dieselben Buchungen gewählt. Bisher konnte die Auswahl auf andere
+  Plätze springen, und „Verkaufen“ oder „Stornieren“ traf dann die falschen.
+- Unter Linux erkennt die Kartenverwaltung jetzt auch, wenn ein Nextcloud-Ordner keine Verbindung
+  zum Server hat. Ohne Internet bleiben Verkäufe dann vorläufig, statt als hochgeladen zu gelten.
+- Unter Linux bekommt eine neu eingerichtete Kasse den Namen des Computers statt „Rechner“. Kassen,
+  die schon „Rechner“ heißen, benennen Sie unter Einstellungen, „Gemeinsamer Ordner“, mit „Ändern“
+  um.
+
 ## 1.1.0
 
 ### Neu
