@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -8,6 +9,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import javafx.application.Platform;
 
 /**
@@ -20,6 +22,21 @@ import javafx.application.Platform;
  * gezeigt wird ({@link #endPinning}).
  */
 final class TicketEdits {
+
+	/**
+	 * Die Werte einer Buchung, die der Sitz-Dialog ändern kann (dazu die E-Mail, die beim Verwerfen von Resten leer wird),
+	 * roh wie gespeichert. Ein Vergleich vorher/nachher sagt, ob sich ein Wert tatsächlich geändert hat (Spec Abschnitt
+	 * 11).
+	 */
+	record Values(String lastName, String firstName, String eMail, String comment, PaymentStatus paymentStatus, Integer paidAmount,
+			Integer price, boolean collected, LocalDate reservationDate, LocalDate paymentDate, LocalDate collectionDate) {
+
+		static Values of(Booking booking) {
+			return new Values(booking.getLastName(), booking.getFirstName(), booking.getEMail(), booking.getComment(),
+					booking.getPaymentStatus(), booking.getPaidAmount(), booking.getPrice(), booking.isCollected(),
+					booking.getReservationDate(), booking.getPaymentDate(), booking.getCollectionDate());
+		}
+	}
 
 	private final BooleanSupplier editing;
 	private final Runnable rebuild;
@@ -49,6 +66,14 @@ final class TicketEdits {
 		pending = true;
 		// Nicht mitten im Commit: Ein Neuaufbau ließe die Zelle (etwa die Auswahlliste) im Bearbeiten hängen
 		Platform.runLater(this::flush);
+	}
+
+	/**
+	 * Merkt die Buchung als selbst geändert, ohne einen Neuaufbau anzufordern: für Aufrufer, die gleich selbst neu
+	 * aufbauen (Platz zuweisen), damit danach kein zweiter Durchgang folgt.
+	 */
+	void pin(Booking booking) {
+		pinned.add(booking);
 	}
 
 	/** Ein Neuaufbau aus anderem Anlass (fremde Änderung, Suche, Filter, Sortierung): sofort, sonst nach der Bearbeitung. */

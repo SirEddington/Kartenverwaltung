@@ -360,9 +360,12 @@ public class TicketTableController implements ContentController, SalesStateAware
 	private void sellSelection() {
 		List<Booking> bookings = selectedBookings();
 		// Der Dialog kann eine Buchung ohne Platz leeren (Namen löschen): Sie ist dann storniert wie nach einer Zelle. Die
-		// Buchungen des Dialogs gelten als selbst geändert und bleiben trotz Suche und Filter sichtbar.
+		// Buchungen, deren Werte der Dialog tatsächlich geändert hat, gelten als selbst geändert und bleiben trotz Suche und
+		// Filter sichtbar (Spec Abschnitt 11).
+		Map<Booking, TicketEdits.Values> before = new IdentityHashMap<>();
+		bookings.forEach(booking -> before.put(booking, TicketEdits.Values.of(booking)));
 		activeDialog = SeatSelectionEditor.edit(bookings, seatTable.getScene().getWindow(), selectionMenu.getAnchorX(), selectionMenu.getAnchorY(), () -> {
-			bookings.forEach(booking -> edits.changed(booking, true));
+			bookings.forEach(booking -> edits.changed(booking, !before.get(booking).equals(TicketEdits.Values.of(booking))));
 			bookings.forEach(this::removeIfCancelledAfterCommit);
 		}, this::deselect);
 	}
@@ -413,7 +416,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		// wie eine eigene Änderung, ohne die Auswahl zu leeren; dann gleich, damit die Buchung gewählt werden kann. Eine
 		// noch laufende Bearbeitung endet zuerst, sonst verschöbe der Neuaufbau ihre Zeile
 		seatTable.edit(-1, null);
-		edits.changed(booking, true);
+		edits.pin(booking);
 		rebuild();
 		treeTable.selectAndReveal(booking);
 		StatusMessage.getInstance().show(Severity.SUCCESS, "Buchung von bisher " + before + " auf " + booking.getPlaceLabel() + " zugewiesen");

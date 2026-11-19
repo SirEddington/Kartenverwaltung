@@ -1,15 +1,18 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTreeTableCell;
 import de.eltviller_carneval_verein.karten.ui.input.TableInput;
@@ -169,6 +173,34 @@ class TicketEditsTest {
 
 		assertTrue(edits.pinned().isEmpty());
 		assertEquals(List.of(), edits.visible(rows(), dto -> false), "die Ausnahme endet mit der neuen Suche");
+	}
+
+	@Test
+	void pinBautNichtNeuAuf() throws Exception {
+		edits = new TicketEdits(() -> false, () -> rebuilds++);
+
+		run(() -> edits.pin(m1));
+
+		assertTrue(edits.pinned().contains(m1));
+		assertEquals(0, rebuilds, "den Neuaufbau ruft, wer pinnt, selbst (Platz zuweisen); kein zweiter danach");
+	}
+
+	@Test
+	void standErkenntGeaenderteWerte() {
+		TicketEdits.Values before = TicketEdits.Values.of(m1);
+		assertEquals(before, TicketEdits.Values.of(m1), "unverändert: gleicher Stand");
+
+		List<Consumer<Booking>> changes = List.of(b -> b.setLastName("Zander"), b -> b.setFirstName("Anja"),
+				b -> b.setEMail("a@example.org"), b -> b.setComment("Fenster"), b -> b.setPaymentStatus(PaymentStatus.CARD),
+				b -> b.setPaidAmount(1200), b -> b.setPrice(900), b -> b.setCollected(true),
+				b -> b.setReservationDate(LocalDate.of(2026, 1, 2)), b -> b.setPaymentDate(LocalDate.of(2026, 1, 3)),
+				b -> b.setCollectionDate(LocalDate.of(2026, 1, 4)));
+		for (Consumer<Booking> change : changes) {
+			Booking copy = m1.copy();
+			TicketEdits.Values original = TicketEdits.Values.of(copy);
+			change.accept(copy);
+			assertNotEquals(original, TicketEdits.Values.of(copy), "jede Änderung eines Felds des Dialogs zählt");
+		}
 	}
 
 	private List<BookingDTO> rows() {
