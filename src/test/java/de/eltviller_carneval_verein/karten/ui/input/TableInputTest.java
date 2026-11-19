@@ -9,12 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -23,25 +25,37 @@ import javafx.event.Event;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.control.Control;
+import javafx.scene.control.IndexedCell;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableColumnBase;
 import javafx.scene.control.TablePosition;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeTableCell;
+import javafx.scene.control.TreeTableColumn;
+import javafx.scene.control.TreeTablePosition;
+import javafx.scene.control.TreeTableRow;
+import javafx.scene.control.TreeTableView;
+import javafx.scene.control.cell.TextFieldTreeTableCell;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.PickResult;
 import javafx.stage.Stage;
+import javafx.util.converter.DefaultStringConverter;
 
 /**
- * Hält fest, wie {@link TableInput} eine Tabelle bedient: Klick, Tippen, Enter, Tab und Ziehen. Der Test hält das
- * Verhalten fest, bevor die Kartentabelle auf eine andere Tabellenart umgestellt wird. Die Tabelle entsteht an genau
- * einer Stelle ({@link #createTable()}), und alle Eingaben laufen über die Hilfen {@code click}, {@code ctrlClick},
- * {@code press}, {@code type} und {@code drag}; die Fälle selbst kennen die Tabellenart nicht.
+ * Hält fest, wie {@link TableInput} eine Tabelle bedient: Klick, Tippen, Enter, Tab und Ziehen. Jeder Fall läuft gegen
+ * eine {@link TableView} und gegen eine flache {@link TreeTableView} (ohne sichtbare Wurzel, die Zeilen direkt darunter)
+ * mit denselben Erwartungen. Die Tabelle entsteht an genau einer Stelle ({@link Art#create()}), und alle Eingaben laufen
+ * über die Hilfen {@code click}, {@code ctrlClick}, {@code press}, {@code type} und {@code drag}; die Fälle selbst
+ * kennen die Tabellenart nicht.
  */
 class TableInputTest {
 
@@ -66,8 +80,294 @@ class TableInputTest {
 	private static final int NUMBER = 3;
 	private static final int ROWS = 6;
 
+	/** Zeile und Spalte einer Zelle, unabhängig von der Tabellenart. */
+	private record Position(int row, TableColumnBase<?, ?> column) {
+	}
+
+	/** Was die Fälle von der Tabelle brauchen; je Tabellenart einmal umgesetzt. */
+	private interface Tabelle {
+		Control control();
+
+		List<? extends TableColumnBase<?, ?>> columns();
+
+		void select(int row);
+
+		void clearSelection();
+
+		void focus(int row, TableColumnBase<?, ?> column);
+
+		void edit(int row, TableColumnBase<?, ?> column);
+
+		List<Integer> selectedRows();
+
+		/** Die bearbeitete Zelle, {@code null}: keine. */
+		Position editing();
+
+		/** Die Zelle mit dem Fokus, {@code null}: keine. */
+		Position focused();
+
+		IndexedCell<?> cell(int row, TableColumnBase<?, ?> column);
+
+		Person person(int row);
+	}
+
+	/** Die Tabellenarten, gegen die jeder Fall läuft. */
+	enum Art {
+		TABLE_VIEW {
+			@Override
+			Tabelle create() {
+				TableView<Person> table = new TableView<>();
+				table.setEditable(true);
+				table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+				table.getColumns().add(textColumn("Nachname", p -> p.lastName));
+				table.getColumns().add(textColumn("Vorname", p -> p.firstName));
+				table.getColumns().add(textColumn("Ort", p -> p.city));
+				TableColumn<Person, String> number = new TableColumn<>("Nummer");
+				number.setEditable(false);
+				number.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().number));
+				table.getColumns().add(number);
+				for (int i = 0; i < ROWS; i++) {
+					table.getItems().add(new Person(i));
+				}
+				TableInput.install(table);
+				return new FlatTable(table);
+			}
+		},
+		TREE_TABLE_VIEW {
+			@Override
+			Tabelle create() {
+				TreeTableView<Person> table = new TreeTableView<>();
+				table.setEditable(true);
+				table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+				table.getColumns().add(treeTextColumn("Nachname", p -> p.lastName));
+				table.getColumns().add(treeTextColumn("Vorname", p -> p.firstName));
+				table.getColumns().add(treeTextColumn("Ort", p -> p.city));
+				TreeTableColumn<Person, String> number = new TreeTableColumn<>("Nummer");
+				number.setEditable(false);
+				number.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getValue().number));
+				table.getColumns().add(number);
+				TreeItem<Person> root = new TreeItem<>();
+				root.setExpanded(true);
+				for (int i = 0; i < ROWS; i++) {
+					root.getChildren().add(new TreeItem<>(new Person(i)));
+				}
+				table.setRoot(root);
+				table.setShowRoot(false);
+				TableInput.install(table, person -> true);
+				return new TreeTable(table);
+			}
+		};
+
+		abstract Tabelle create();
+	}
+
+	static Stream<Art> tabellen() {
+		return Stream.of(Art.values());
+	}
+
+	private static TableColumn<Person, String> textColumn(String title, Function<Person, StringProperty> property) {
+		TableColumn<Person, String> column = new TableColumn<>(title);
+		column.setEditable(true);
+		column.setCellValueFactory(cell -> property.apply(cell.getValue()));
+		column.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
+		return column;
+	}
+
+	private static TreeTableColumn<Person, String> treeTextColumn(String title, Function<Person, StringProperty> property) {
+		TreeTableColumn<Person, String> column = new TreeTableColumn<>(title);
+		column.setEditable(true);
+		column.setCellValueFactory(cell -> property.apply(cell.getValue().getValue()));
+		column.setCellFactory(c -> new TreeTextCell());
+		return column;
+	}
+
+	/**
+	 * Eine Textzelle der Baumtabelle, die nur das kann, was {@link TableInput} von einer Textzelle erwartet: Sie gibt sich
+	 * als {@link ParsingCell} zu erkennen, und Tab übernimmt die Eingabe und bearbeitet die nächste Zelle.
+	 */
+	private static final class TreeTextCell extends TextFieldTreeTableCell<Person, String> implements ParsingCell {
+
+		TreeTextCell() {
+			super(new DefaultStringConverter());
+		}
+
+		@Override
+		public boolean canEdit() {
+			return true;
+		}
+
+		@Override
+		public void startEdit() {
+			super.startEdit();
+			if (isEditing() && getGraphic() instanceof TextField field && field.getProperties().putIfAbsent(TreeTextCell.class, Boolean.TRUE) == null) {
+				// Das Feld bleibt der Zelle über mehrere Bearbeitungen erhalten; der Filter kommt nur einmal dazu
+				field.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+					if (event.getCode() != KeyCode.TAB) {
+						return;
+					}
+					event.consume();
+					TreeTableView<Person> table = getTreeTableView();
+					int row = getIndex();
+					TreeTableColumn<Person, String> column = getTableColumn();
+					commitEdit(getConverter().fromString(field.getText()));
+					TableInput.moveEditing(table, row, column, !event.isShiftDown());
+				});
+			}
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private static final class FlatTable implements Tabelle {
+		private final TableView<Person> table;
+
+		FlatTable(TableView<Person> table) {
+			this.table = table;
+		}
+
+		@Override
+		public Control control() {
+			return table;
+		}
+
+		@Override
+		public List<? extends TableColumnBase<?, ?>> columns() {
+			return table.getColumns();
+		}
+
+		@Override
+		public void select(int row) {
+			table.getSelectionModel().select(row);
+		}
+
+		@Override
+		public void clearSelection() {
+			table.getSelectionModel().clearSelection();
+		}
+
+		@Override
+		public void focus(int row, TableColumnBase<?, ?> column) {
+			table.getFocusModel().focus(row, (TableColumn<Person, ?>) column);
+		}
+
+		@Override
+		public void edit(int row, TableColumnBase<?, ?> column) {
+			table.edit(row, (TableColumn<Person, ?>) column);
+		}
+
+		@Override
+		public List<Integer> selectedRows() {
+			return List.copyOf(table.getSelectionModel().getSelectedIndices());
+		}
+
+		@Override
+		public Position editing() {
+			TablePosition<Person, ?> editing = table.getEditingCell();
+			return editing == null ? null : new Position(editing.getRow(), editing.getTableColumn());
+		}
+
+		@Override
+		public Position focused() {
+			TablePosition<Person, ?> focused = table.getFocusModel().getFocusedCell();
+			return focused == null ? null : new Position(focused.getRow(), focused.getTableColumn());
+		}
+
+		@Override
+		public IndexedCell<?> cell(int row, TableColumnBase<?, ?> column) {
+			for (Node node : table.lookupAll(".table-row-cell")) {
+				if (node instanceof TableRow<?> tableRow && tableRow.getIndex() == row) {
+					for (Node cellNode : tableRow.lookupAll(".table-cell")) {
+						if (cellNode instanceof TableCell<?, ?> candidate && candidate.getTableColumn() == column) {
+							return candidate;
+						}
+					}
+				}
+			}
+			return null;
+		}
+
+		@Override
+		public Person person(int row) {
+			return table.getItems().get(row);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private static final class TreeTable implements Tabelle {
+		private final TreeTableView<Person> table;
+
+		TreeTable(TreeTableView<Person> table) {
+			this.table = table;
+		}
+
+		@Override
+		public Control control() {
+			return table;
+		}
+
+		@Override
+		public List<? extends TableColumnBase<?, ?>> columns() {
+			return table.getColumns();
+		}
+
+		@Override
+		public void select(int row) {
+			table.getSelectionModel().select(row);
+		}
+
+		@Override
+		public void clearSelection() {
+			table.getSelectionModel().clearSelection();
+		}
+
+		@Override
+		public void focus(int row, TableColumnBase<?, ?> column) {
+			table.getFocusModel().focus(row, (TreeTableColumn<Person, ?>) column);
+		}
+
+		@Override
+		public void edit(int row, TableColumnBase<?, ?> column) {
+			table.edit(row, (TreeTableColumn<Person, ?>) column);
+		}
+
+		@Override
+		public List<Integer> selectedRows() {
+			return List.copyOf(table.getSelectionModel().getSelectedIndices());
+		}
+
+		@Override
+		public Position editing() {
+			TreeTablePosition<Person, ?> editing = table.getEditingCell();
+			return editing == null ? null : new Position(editing.getRow(), editing.getTableColumn());
+		}
+
+		@Override
+		public Position focused() {
+			TreeTablePosition<Person, ?> focused = table.getFocusModel().getFocusedCell();
+			return focused == null ? null : new Position(focused.getRow(), focused.getTableColumn());
+		}
+
+		@Override
+		public IndexedCell<?> cell(int row, TableColumnBase<?, ?> column) {
+			for (Node node : table.lookupAll(".tree-table-row-cell")) {
+				if (node instanceof TreeTableRow<?> tableRow && tableRow.getIndex() == row) {
+					for (Node cellNode : tableRow.lookupAll(".tree-table-cell")) {
+						if (cellNode instanceof TreeTableCell<?, ?> candidate && candidate.getTableColumn() == column) {
+							return candidate;
+						}
+					}
+				}
+			}
+			return null;
+		}
+
+		@Override
+		public Person person(int row) {
+			return table.getTreeItem(row).getValue();
+		}
+	}
+
 	private Stage stage;
-	private TableView<Person> table;
+	private Tabelle table;
 
 	@BeforeAll
 	static void startFx() {
@@ -100,45 +400,18 @@ class TableInputTest {
 	}
 
 	/**
-	 * Die einzige Stelle, an der die Tabelle entsteht: drei bearbeitbare Textspalten (Nachname, Vorname, Ort) und eine
-	 * gesperrte (Nummer), sechs Zeilen, mehrfache Auswahl, die Bedienung von {@link TableInput}.
+	 * Zeigt die Tabelle der Art: drei bearbeitbare Textspalten (Nachname, Vorname, Ort) und eine gesperrte (Nummer), sechs
+	 * Zeilen, mehrfache Auswahl, die Bedienung von {@link TableInput}.
 	 */
-	private static TableView<Person> createTable() {
-		TableView<Person> table = new TableView<>();
-		table.setEditable(true);
-		table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-		table.getColumns().add(textColumn("Nachname", p -> p.lastName));
-		table.getColumns().add(textColumn("Vorname", p -> p.firstName));
-		table.getColumns().add(textColumn("Ort", p -> p.city));
-		TableColumn<Person, String> number = new TableColumn<>("Nummer");
-		number.setEditable(false);
-		number.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().number));
-		table.getColumns().add(number);
-		for (int i = 0; i < ROWS; i++) {
-			table.getItems().add(new Person(i));
-		}
-		TableInput.install(table);
-		return table;
-	}
-
-	private static TableColumn<Person, String> textColumn(String title, java.util.function.Function<Person, StringProperty> property) {
-		TableColumn<Person, String> column = new TableColumn<>(title);
-		column.setEditable(true);
-		column.setCellValueFactory(cell -> property.apply(cell.getValue()));
-		column.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
-		return column;
-	}
-
-	@BeforeEach
-	void showTable() throws Exception {
+	private void show(Art art) throws Exception {
 		onFx(() -> {
-			table = createTable();
+			table = art.create();
 			stage = new Stage();
-			stage.setScene(new Scene(table, 600, 400));
+			stage.setScene(new Scene(table.control(), 600, 400));
 			stage.show();
-			table.applyCss();
-			table.layout();
-			table.requestFocus();
+			table.control().applyCss();
+			table.control().layout();
+			table.control().requestFocus();
 			return null;
 		});
 		flush();
@@ -146,23 +419,26 @@ class TableInputTest {
 
 	@AfterEach
 	void closeStage() throws Exception {
+		if (stage == null) {
+			return;
+		}
 		onFx(() -> {
 			stage.hide();
 			return null;
 		});
 	}
 
-	// ---- Zugriff auf die Tabelle: hier wird sie in einer anderen Tabellenart anders angesprochen ----
+	// ---- Zugriff auf die Tabelle ----
 
-	private TableColumn<Person, ?> column(int index) {
-		return table.getColumns().get(index);
+	private TableColumnBase<?, ?> column(int index) {
+		return table.columns().get(index);
 	}
 
 	private void select(int... rows) throws Exception {
 		onFx(() -> {
-			table.getSelectionModel().clearSelection();
+			table.clearSelection();
 			for (int row : rows) {
-				table.getSelectionModel().select(row);
+				table.select(row);
 			}
 			return null;
 		});
@@ -171,8 +447,8 @@ class TableInputTest {
 
 	private void focus(int row, int column) throws Exception {
 		onFx(() -> {
-			table.getFocusModel().focus(row, column(column));
-			table.requestFocus();
+			table.focus(row, column(column));
+			table.control().requestFocus();
 			return null;
 		});
 		flush();
@@ -181,46 +457,39 @@ class TableInputTest {
 	private void startEditing(int row, int column) throws Exception {
 		onFx(() -> {
 			table.edit(row, column(column));
-			table.layout();
+			table.control().layout();
 			return null;
 		});
 		flush();
 	}
 
 	private List<Integer> selectedRows() throws Exception {
-		return onFx(() -> List.copyOf(table.getSelectionModel().getSelectedIndices()));
+		return onFx(() -> table.selectedRows());
 	}
 
-	private TablePosition<Person, ?> editingCell() throws Exception {
-		return onFx(() -> table.getEditingCell());
+	private Position editingCell() throws Exception {
+		return onFx(() -> table.editing());
 	}
 
-	private TablePosition<Person, ?> focusedCell() throws Exception {
-		return onFx(() -> table.getFocusModel().getFocusedCell());
+	private Position focusedCell() throws Exception {
+		return onFx(() -> table.focused());
 	}
 
 	private String editorText(int row, int column) throws Exception {
 		return onFx(() -> cell(row, column).getGraphic() instanceof TextField field ? field.getText() : null);
 	}
 
-	private TableCell<Person, ?> cell(int row, int column) {
-		for (Node node : table.lookupAll(".table-row-cell")) {
-			if (node instanceof TableRow<?> tableRow && tableRow.getIndex() == row) {
-				for (Node cellNode : tableRow.lookupAll(".table-cell")) {
-					if (cellNode instanceof TableCell<?, ?> candidate && candidate.getTableColumn() == column(column)) {
-						@SuppressWarnings("unchecked")
-						TableCell<Person, ?> found = (TableCell<Person, ?>) candidate;
-						return found;
-					}
-				}
-			}
+	private IndexedCell<?> cell(int row, int column) {
+		IndexedCell<?> cell = table.cell(row, column(column));
+		if (cell == null) {
+			throw new AssertionError("keine Zelle in Zeile " + row + ", Spalte " + column);
 		}
-		throw new AssertionError("keine Zelle in Zeile " + row + ", Spalte " + column);
+		return cell;
 	}
 
 	/** Mitte der Zelle in Szenenkoordinaten. */
 	private double[] center(int row, int column) {
-		TableCell<Person, ?> cell = cell(row, column);
+		IndexedCell<?> cell = cell(row, column);
 		Bounds bounds = cell.localToScene(cell.getBoundsInLocal());
 		return new double[] { (bounds.getMinX() + bounds.getMaxX()) / 2, (bounds.getMinY() + bounds.getMaxY()) / 2 };
 	}
@@ -235,8 +504,8 @@ class TableInputTest {
 
 	private void clickWith(int row, int column, boolean ctrl) throws Exception {
 		onFx(() -> {
-			table.layout();
-			TableCell<Person, ?> cell = cell(row, column);
+			table.control().layout();
+			IndexedCell<?> cell = cell(row, column);
 			double[] at = center(row, column);
 			fireMouse(cell, MouseEvent.MOUSE_PRESSED, at[0], at[1], 1, ctrl);
 			fireMouse(cell, MouseEvent.MOUSE_RELEASED, at[0], at[1], 1, ctrl);
@@ -256,8 +525,8 @@ class TableInputTest {
 
 	private void press(KeyCode code, boolean shift) throws Exception {
 		onFx(() -> {
-			Node target = table.getEditingCell() != null && cell(table.getEditingCell().getRow(), indexOf(table.getEditingCell().getTableColumn()))
-					.getGraphic() instanceof TextField field ? field : table;
+			Position editing = table.editing();
+			Node target = editing != null && cell(editing.row(), indexOf(editing.column())).getGraphic() instanceof TextField field ? field : table.control();
 			Event.fireEvent(target, new KeyEvent(this, target, KeyEvent.KEY_PRESSED, KeyEvent.CHAR_UNDEFINED, "", code, shift, false, false, false));
 			return null;
 		});
@@ -268,14 +537,15 @@ class TableInputTest {
 		press(code, false);
 	}
 
-	private int indexOf(TableColumn<Person, ?> column) {
-		return table.getColumns().indexOf(column);
+	private int indexOf(TableColumnBase<?, ?> column) {
+		return table.columns().indexOf(column);
 	}
 
 	private void type(String text) throws Exception {
 		onFx(() -> {
-			Event.fireEvent(table, new KeyEvent(this, table, KeyEvent.KEY_TYPED, text, "", KeyCode.UNDEFINED, false, false, false, false));
-			table.layout();
+			Control control = table.control();
+			Event.fireEvent(control, new KeyEvent(this, control, KeyEvent.KEY_TYPED, text, "", KeyCode.UNDEFINED, false, false, false, false));
+			control.layout();
 			return null;
 		});
 		flush();
@@ -284,8 +554,8 @@ class TableInputTest {
 	/** Drückt in Zeile {@code fromRow} und zieht bis Zeile {@code toRow}, jeweils Spalte Nachname. */
 	private void drag(int fromRow, int toRow, boolean ctrl) throws Exception {
 		onFx(() -> {
-			table.layout();
-			TableCell<Person, ?> start = cell(fromRow, LAST_NAME);
+			table.control().layout();
+			IndexedCell<?> start = cell(fromRow, LAST_NAME);
 			double[] from = center(fromRow, LAST_NAME);
 			double[] to = center(toRow, LAST_NAME);
 			fireMouse(start, MouseEvent.MOUSE_PRESSED, from[0], from[1], 1, ctrl);
@@ -301,21 +571,25 @@ class TableInputTest {
 
 	// ---- Fälle ----
 
-	@Test
-	void klickAufZelleDerEinzigenGewaehltenZeileStartetBearbeiten() throws Exception {
+	@ParameterizedTest
+	@MethodSource("tabellen")
+	void klickAufZelleDerEinzigenGewaehltenZeileStartetBearbeiten(Art art) throws Exception {
+		show(art);
 		select(1);
 		focus(1, LAST_NAME);
 
 		click(1, LAST_NAME);
 
-		TablePosition<Person, ?> editing = editingCell();
+		Position editing = editingCell();
 		assertNotNull(editing, "der Klick auf die einzige gewählte Zeile startet das Bearbeiten");
-		assertEquals(1, editing.getRow());
-		assertSame(column(LAST_NAME), editing.getTableColumn());
+		assertEquals(1, editing.row());
+		assertSame(column(LAST_NAME), editing.column());
 	}
 
-	@Test
-	void klickBeiMehrerenGewaehltenStartetNicht() throws Exception {
+	@ParameterizedTest
+	@MethodSource("tabellen")
+	void klickBeiMehrerenGewaehltenStartetNicht(Art art) throws Exception {
+		show(art);
 		select(1, 2);
 		focus(1, LAST_NAME);
 
@@ -324,55 +598,63 @@ class TableInputTest {
 		assertNull(editingCell(), "bei mehreren gewählten Zeilen startet ein Klick das Bearbeiten nicht");
 	}
 
-	@Test
-	void tippenErsetztInhalt() throws Exception {
+	@ParameterizedTest
+	@MethodSource("tabellen")
+	void tippenErsetztInhalt(Art art) throws Exception {
+		show(art);
 		select(1);
 		focus(1, LAST_NAME);
 
 		type("X");
 
-		TablePosition<Person, ?> editing = editingCell();
+		Position editing = editingCell();
 		assertNotNull(editing, "Tippen startet das Bearbeiten");
-		assertEquals(1, editing.getRow());
-		assertSame(column(LAST_NAME), editing.getTableColumn());
+		assertEquals(1, editing.row());
+		assertSame(column(LAST_NAME), editing.column());
 		assertEquals("X", editorText(1, LAST_NAME));
 	}
 
-	@Test
-	void enterStartetBearbeiten() throws Exception {
+	@ParameterizedTest
+	@MethodSource("tabellen")
+	void enterStartetBearbeiten(Art art) throws Exception {
+		show(art);
 		select(1);
 		focus(1, FIRST_NAME);
 
 		press(KeyCode.ENTER);
 
-		TablePosition<Person, ?> editing = editingCell();
+		Position editing = editingCell();
 		assertNotNull(editing, "Enter startet das Bearbeiten");
-		assertEquals(1, editing.getRow());
-		assertSame(column(FIRST_NAME), editing.getTableColumn());
+		assertEquals(1, editing.row());
+		assertSame(column(FIRST_NAME), editing.column());
 	}
 
-	@Test
-	void tabUndUmschaltTabMitZeilenumbruch() throws Exception {
+	@ParameterizedTest
+	@MethodSource("tabellen")
+	void tabUndUmschaltTabMitZeilenumbruch(Art art) throws Exception {
+		show(art);
 		select(0);
 		focus(0, CITY);
 
 		press(KeyCode.TAB);
 
-		TablePosition<Person, ?> forward = focusedCell();
-		assertEquals(1, forward.getRow(), "Tab am Zeilenende springt in die nächste Zeile");
-		assertSame(column(LAST_NAME), forward.getTableColumn(), "und dort in die erste bearbeitbare Spalte");
+		Position forward = focusedCell();
+		assertEquals(1, forward.row(), "Tab am Zeilenende springt in die nächste Zeile");
+		assertSame(column(LAST_NAME), forward.column(), "und dort in die erste bearbeitbare Spalte");
 		assertEquals(List.of(1), selectedRows(), "gewählt ist genau die neue Zeile");
 
 		press(KeyCode.TAB, true);
 
-		TablePosition<Person, ?> back = focusedCell();
-		assertEquals(0, back.getRow(), "Umschalt+Tab am Zeilenanfang springt zurück");
-		assertSame(column(CITY), back.getTableColumn(), "in die letzte bearbeitbare Spalte (die gesperrte wird übersprungen)");
+		Position back = focusedCell();
+		assertEquals(0, back.row(), "Umschalt+Tab am Zeilenanfang springt zurück");
+		assertSame(column(CITY), back.column(), "in die letzte bearbeitbare Spalte (die gesperrte wird übersprungen)");
 		assertEquals(List.of(0), selectedRows());
 	}
 
-	@Test
-	void tabAusBearbeitenBearbeitetNaechsteZelle() throws Exception {
+	@ParameterizedTest
+	@MethodSource("tabellen")
+	void tabAusBearbeitenBearbeitetNaechsteZelle(Art art) throws Exception {
+		show(art);
 		select(0);
 		focus(0, LAST_NAME);
 		startEditing(0, LAST_NAME);
@@ -383,27 +665,31 @@ class TableInputTest {
 
 		press(KeyCode.TAB);
 
-		assertEquals("Neu", onFx(() -> table.getItems().get(0).lastName.get()), "Tab übernimmt die Eingabe");
-		TablePosition<Person, ?> editing = editingCell();
+		assertEquals("Neu", onFx(() -> table.person(0).lastName.get()), "Tab übernimmt die Eingabe");
+		Position editing = editingCell();
 		assertNotNull(editing, "und bearbeitet die nächste Zelle");
-		assertEquals(0, editing.getRow());
-		assertSame(column(FIRST_NAME), editing.getTableColumn());
+		assertEquals(0, editing.row());
+		assertSame(column(FIRST_NAME), editing.column());
 	}
 
-	@Test
-	void ziehenWaehltBereich() throws Exception {
+	@ParameterizedTest
+	@MethodSource("tabellen")
+	void ziehenWaehltBereich(Art art) throws Exception {
+		show(art);
 		drag(0, 2, false);
 
 		assertEquals(List.of(0, 1, 2), selectedRows());
-		assertTrue(onFx(() -> table.getEditingCell() == null), "Ziehen startet kein Bearbeiten");
+		assertTrue(onFx(() -> table.editing() == null), "Ziehen startet kein Bearbeiten");
 	}
 
-	@Test
-	void ziehenMitStrgBehaeltAuswahl() throws Exception {
+	@ParameterizedTest
+	@MethodSource("tabellen")
+	void ziehenMitStrgBehaeltAuswahl(Art art) throws Exception {
+		show(art);
 		select(4);
 
 		drag(0, 1, true);
 
-		assertEquals(List.of(0, 1, 4), onFx(() -> table.getSelectionModel().getSelectedIndices().stream().sorted().toList()));
+		assertEquals(List.of(0, 1, 4), onFx(() -> table.selectedRows().stream().sorted().toList()));
 	}
 }

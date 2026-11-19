@@ -45,7 +45,7 @@ import javafx.util.converter.DefaultStringConverter;
  * @param <S> Typ der Zeilen
  * @param <T> Typ des Zellwerts
  */
-public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
+public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> implements ParsingCell {
 
 	/** JavaFX kennt keine Pseudoklasse für die bearbeitete Zelle; das Stylesheet (style.css) braucht sie für ihren Rahmen. */
 	private static final PseudoClass EDITING = PseudoClass.getPseudoClass("editing");
@@ -112,7 +112,8 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> {
 	}
 
 	/** Ob die Zeile der Zelle sich bearbeiten lässt (ohne Zeilenbedingung immer); Tabelle und Spalte prüft JavaFX selbst. */
-	boolean canEdit() {
+	@Override
+	public boolean canEdit() {
 		if (editableRow == null) {
 			return true;
 		}
