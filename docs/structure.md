@@ -42,8 +42,8 @@ Kartenverwaltung/
     │   │   ├── update/       (40 classes)
     │   │   ├── util/         (4 classes)
     │   │   └── ui/           (33 classes in the root package)
-    │   │       ├── accounting/ (6)  backup/ (6)   event/ (8)    hall/ (17)   input/ (11)
-    │   │       └── menu/ (2)        sales/ (33)   settings/ (9) shared/ (30)
+    │   │       ├── accounting/ (6)  backup/ (6)   event/ (8)    hall/ (17)   input/ (17)
+    │   │       └── menu/ (2)        sales/ (50)   settings/ (9) shared/ (30)
     │   └── resources/de/eltviller_carneval_verein/karten/
     │       ├── patchnotes.md     Patch notes of every version (KARV-125), newest first
     │       └── ui/
@@ -109,7 +109,7 @@ user-facing technical messages (`StoreMessages`, SYS-005…SYS-013).
 `AppSettings` (`sharedDir`, `saveBookingsImmediately`, `checkCloudServer`, `recentOperators`, `display`,
 `patchNotesSeen`), `DisplaySettings` (the "Anzeige" menu: rows, tables, seat numbers, hall objects, `seatPatterns`,
 `selectionHint`, `selectionHintPlacement` and `summaryPlacement` as text, `selectionHintAvoidEdges`,
-`restoreAtStart`) and `SettingsStore` (`<AppData>/settings.json`, `saveOnly` for partial
+`ticketGrouping` as a list of column names and `ticketGroupOrder` as text, `restoreAtStart`) and `SettingsStore` (`<AppData>/settings.json`, `saveOnly` for partial
 saves, `existedAtLoad()`). Always read through `SettingsStore.getInstance().current()`.
 
 ### `update`
@@ -133,14 +133,14 @@ Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
 | Subpackage | Content |
 |---|---|
 | `menu` | Main menu (Abrechnung, Kartenverkauf, Verwaltung, Einstellungen) and management menu |
-| `sales` | Ticket sales shell, ticket table, hall overview (`HallPlanPane`, `HallViewport`), customer display, `SeatLook` (accessible seat display), bulk edit, search, cancel, assign place, purchase summary placement |
+| `sales` | Ticket sales shell, ticket table, hall overview (`HallPlanPane`, `HallViewport`), customer display, `SeatLook` (accessible seat display), bulk edit, search, cancel, assign place, purchase summary placement. The ticket table (KARV-193) is split into JavaFX-free decisions and the tree table: `TicketColumn` (columns as values: heading, group key, text, order), `TicketFilter` (column filters), `TicketGrouping` with `TicketNode` and `GroupOrder` (groups and counts), `TicketSelection` (selection as a set of bookings) and `TicketRow` (row type: booking or group); and the JavaFX side: `TicketTreeTable` (the `TreeTableView`) with `TicketTreeBuilder` (the `TreeItem`s), `TicketTreeRow`, `TicketCells`, `TicketEdits` (when to rebuild, which bookings stay visible), `ColumnFilterMenu` and `GroupingMenu` |
 | `accounting` | Accounting shell, cash reconciliation, statistics, `Exportable` (CSV/PDF), locked bookings notice |
 | `event` | Event overview, create/edit, presentations, templates (copies), seating plan switch, locked entry guard |
 | `hall` | Hall management and editor, hall plan and seating plan drawing (`SeatingPlanDrawing`, `PlanNodeFactory`), seat layout (`SeatingPlanLayout`), labels (`PlanText`, `PlanLabels`, `PlanLabelOptions`), row fill dialog, bulk edits of rows (`TableRowBulkEdit`) |
 | `settings` | Searchable settings screen with the sections "Gemeinsamer Ordner", "Anzeige" and "Info und Updates"; `PatchNoteActions` |
 | `shared` | Shared-folder start/connect flow, sync indicator and info window, operator dialog, locked units, data reload, update flow, footer hints, start prompt, `PatchNotesWindow` ("Was ist neu"), `DialogConfirmation` |
 | `backup` | Restore dialog and catalogs for events and halls |
-| `input` | Parsing text fields, spinners, date/time, rotation and number inputs with inline feedback (`INP-` messages) |
+| `input` | Parsing text fields, spinners, date/time, rotation and number inputs with inline feedback (`INP-` messages). The spreadsheet-like table handling `TableInput` works against `TableAccess` with two implementations, `TableViewAccess` and `TreeTableViewAccess`; the parsing text cells share their logic in `ParsingEditing` (`ParsingTextFieldTableCell` and `ParsingTextFieldTreeTableCell`, `ParsingCell` marks the cells `TableInput` edits itself) |
 | *(root)* | Savers, `LeaveGuard`, `ChangeTrigger`, `LiveUpdates`, `LiveValidator`, conflict dialog/list/indicator, status footer, `DisplayPreferences` (the app-wide "Anzeige" choices) |
 
 Controllers are referenced by `fx:controller` in the FXML files under `src/main/resources/.../ui/`.

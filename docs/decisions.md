@@ -20,6 +20,12 @@ Decisions added or changed in 1.1:
 | [Accessible seat display](#accessible-seat-display-karv-26) | KARV-26 |
 | [One "Anzeige" choice for all plan views, restored at start](#one-anzeige-choice-for-all-plan-views-restored-at-start-karv-76) | KARV-76 |
 
+Decisions added or changed in 1.2:
+
+| Decision | Ticket |
+|---|---|
+| [Ticket table as tree table](#ticket-table-as-tree-table-karv-193) | KARV-193 |
+
 ## Desktop app with local data, no server
 
 **Decision:** A JavaFX desktop application; every workstation has the full data set on its own disk.
@@ -697,7 +703,7 @@ through to the seat. The cross is white because a dark one swallowed the black s
 ## One "Anzeige" choice for all plan views, restored at start (KARV-76)
 
 **Decision:** Sales view, customer display and hall editor share one app-wide `DisplayPreferences` (rows, tables, seat
-numbers, hall objects, seat patterns, selection hint at the pointer (KARV-194) and its placement above or below, with or without avoiding edges (KARV-197), purchase summary placement). It is installed in `MainApp` at start and written to
+numbers, hall objects, seat patterns, selection hint at the pointer (KARV-194) and its placement above or below, with or without avoiding edges (KARV-197), purchase summary placement, and since KARV-193 the grouping of the ticket table with its group order). It is installed in `MainApp` at start and written to
 `settings.json` (`display`) on every change as a partial save. With "Anzeige beim Start wiederherstellen" (on by
 default) the next start uses the stored choice; off, every start shows everything with the placement "Automatisch".
 
@@ -712,6 +718,47 @@ program start, not the state when sales or editor are opened for the first time.
   from a newer version means "Automatisch" and is written back unchanged until someone picks another one.
 - A failing write is logged as a warning and never reaches the global error dialog: losing a menu tick is not worth
   interrupting a sale.
+
+## Ticket table as tree table (KARV-193)
+
+**Decision:** The ticket table is a `TreeTableView<TicketRow>` and can be grouped by one or more columns, as levels in
+the order they were ticked. A group header shows column, value and number of bookings. The grouping and the group
+order (by value or by size) are kept in `settings.json` as part of the "Anzeige" choices (KARV-76). Column filters stay,
+rebuilt by hand (`ColumnFilterMenu`). The selection is a set of bookings, kept in the controller. Other tables (event
+editor, conflict dialog) are not grouped and keep ControlsFX `TableFilter`.
+
+**Why:** Groups are a hierarchy, and `TreeTableView` is the component for that. Two cheaper ways were rejected:
+group headers as rows of a flat `TableView` would make every column, cell, selection, sort and the ControlsFX filter
+know header rows, and would be built against the internal lists of `TableFilter`; only sorting with a count column
+gives no collapsing and no free levels. Because of its size and the risk at the most used table of the box office
+the ticket went from 1.1.1 to 1.2.
+
+**Details:**
+- **Own column filter instead of ControlsFX:** ControlsFX 11.2.1 offers a filter only for `TableView`. The rebuilt
+  filter keeps the operation (right-click on the heading, search, values with ticks, "Anwenden"). `TicketFilter` stores
+  the deselected keys per column, so that a value that appears through another workstation's change is visible. The
+  value list merges texts by the group key (trimmed, case-insensitive), so that filter and groups agree.
+  ControlsFX stays a dependency for `EventEditController` and `CheckComboBox`.
+- **Group order separate from column sorting:** A click on a heading sorts only the bookings within the lowest group
+  (`sortPolicy` of the table is its own); the order of the groups is only `GroupOrder.VALUE` or `SIZE`. Sorting the
+  groups by their empty cells, as the default sort policy would, makes no sense. The sort policy always returns `true`
+  and starts the rebuild later, because it runs inside an atomic selection change of JavaFX.
+- **Selection as a set of bookings:** JavaFX cannot select rows inside closed groups and drops the selection when a
+  group closes, depending on the main selection. So the controller keeps the bookings by identity
+  (`TicketSelection`), the selection model shows only the visible booking rows, and a group row is never selected
+  there but shown as selected when all its bookings are. A selected closed group therefore counts as all its bookings
+  for selling, cancelling, customer display and hall view; a closed group is never only partly selected (it opens
+  instead). Changes JavaFX makes while expanding, collapsing and rebuilding do not change the set.
+- **Rebuild only after editing:** Every rebuild (own change, foreign change, search, filter, grouping, sort) waits
+  until no cell is edited, so no row moves under the typing hand (`TicketEdits`, as `refreshAfterForeignChange` did
+  before). A booking the operator changed moves to its new place and stays visible despite search and filter until
+  these change or another presentation is shown. Before, a changed booking stayed where it was, because the lists of
+  ControlsFX do not re-sort without a list change; with groups, headers and counts would be wrong.
+- **Input helpers once for both table kinds:** `TableInput` works against `TableAccess`
+  (`TableViewAccess`, `TreeTableViewAccess`), the parsing text cells share `ParsingEditing`. Group rows are never
+  editable, and Tab skips them.
+- **Local only:** The grouping is not part of the shared folder. An older version (1.1.x) ignores the new fields and
+  loses them when it writes `settings.json`; that is acceptable, only the remembered grouping is lost.
 
 ## OpenPDF 1.3.x
 
