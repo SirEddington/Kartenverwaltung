@@ -724,8 +724,8 @@ program start, not the state when sales or editor are opened for the first time.
 **Decision:** The ticket table is a `TreeTableView<TicketRow>` and can be grouped by one or more columns, as levels in
 the order they were ticked. A group header shows column, value and number of bookings. The grouping and the group
 order (by value or by size) are kept in `settings.json` as part of the "Anzeige" choices (KARV-76). Column filters stay,
-rebuilt by hand (`ColumnFilterMenu`). The selection is a set of bookings, kept in the controller. Other tables (event
-editor, conflict dialog) are not grouped and keep ControlsFX `TableFilter`.
+rebuilt by hand (`ColumnFilterMenu`). The selection is a set of bookings, kept in the controller. The other tables are not grouped;
+the event editor keeps ControlsFX `TableFilter`.
 
 **Why:** Groups are a hierarchy, and `TreeTableView` is the component for that. Two cheaper ways were rejected:
 group headers as rows of a flat `TableView` would make every column, cell, selection, sort and the ControlsFX filter
