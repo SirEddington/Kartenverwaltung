@@ -31,7 +31,37 @@ class DisplaySettingsTest {
 		assertTrue(display.isSeatNumbers());
 		assertTrue(display.isHallObjects());
 		assertTrue(display.isSeatPatterns());
+		assertTrue(display.isSelectionHint());
+		assertEquals("ABOVE", display.getSelectionHintPlacement());
+		assertTrue(display.isSelectionHintAvoidEdges());
 		assertEquals("AUTO", display.getSummaryPlacement());
+	}
+
+	@Test
+	void settingsWithoutAvoidEdgesLetTheHintAvoidEdges(@TempDir File dir) throws IOException {
+		// KARV-197: Der Haken kam nach der Lage; ein Block ohne ihn weicht am Rand aus
+		write(dir, "{\"display\": {\"restoreAtStart\": true, \"selectionHintPlacement\": \"BELOW\"}}");
+
+		assertTrue(new SettingsStore(dir).current().getDisplay().isSelectionHintAvoidEdges());
+	}
+
+	@Test
+	void settingsWithoutTheHintPlacementPutTheHintAbove(@TempDir File dir) throws IOException {
+		// KARV-197: Die Lage kam nach dem Schalter; ein Block ohne sie (1.1.0, Testbuilds von 1.1.1) zeigt ihn oben
+		write(dir, "{\"display\": {\"restoreAtStart\": true, \"selectionHint\": false}}");
+
+		DisplaySettings display = new SettingsStore(dir).current().getDisplay();
+
+		assertEquals("ABOVE", display.getSelectionHintPlacement());
+		assertFalse(display.isSelectionHint());
+	}
+
+	@Test
+	void settingsFrom110WithoutSelectionHintShowTheHint(@TempDir File dir) throws IOException {
+		// KARV-194: Der Schalter kam mit 1.1.1; ein Block ohne ihn zeigt den Hinweis am Mauszeiger
+		write(dir, "{\"display\": {\"restoreAtStart\": true, \"rows\": false, \"seatPatterns\": false}}");
+
+		assertTrue(new SettingsStore(dir).current().getDisplay().isSelectionHint());
 	}
 
 	@Test
@@ -49,6 +79,9 @@ class DisplaySettingsTest {
 		assertTrue(display.get("seatNumbers").asBoolean());
 		assertTrue(display.get("hallObjects").asBoolean());
 		assertTrue(display.get("seatPatterns").asBoolean());
+		assertTrue(display.get("selectionHint").asBoolean());
+		assertEquals("ABOVE", display.get("selectionHintPlacement").asText());
+		assertTrue(display.get("selectionHintAvoidEdges").asBoolean());
 		assertEquals("AUTO", display.get("summaryPlacement").asText());
 	}
 
@@ -87,6 +120,8 @@ class DisplaySettingsTest {
 		DisplaySettings display = new DisplaySettings();
 		display.setSummaryPlacement(null);
 		assertEquals("AUTO", display.getSummaryPlacement());
+		display.setSelectionHintPlacement(null);
+		assertEquals("ABOVE", display.getSelectionHintPlacement());
 		AppSettings settings = new AppSettings();
 		settings.setDisplay(null);
 		assertNotNull(settings.getDisplay());
@@ -114,6 +149,9 @@ class DisplaySettingsTest {
 		display.setSeatNumbers(false);
 		display.setHallObjects(false);
 		display.setSeatPatterns(false);
+		display.setSelectionHint(false);
+		display.setSelectionHintPlacement("BELOW");
+		display.setSelectionHintAvoidEdges(false);
 		display.setSummaryPlacement("LEFT");
 		store.save();
 
@@ -125,6 +163,9 @@ class DisplaySettingsTest {
 		assertFalse(reloaded.isSeatNumbers());
 		assertFalse(reloaded.isHallObjects());
 		assertFalse(reloaded.isSeatPatterns());
+		assertFalse(reloaded.isSelectionHint());
+		assertEquals("BELOW", reloaded.getSelectionHintPlacement());
+		assertFalse(reloaded.isSelectionHintAvoidEdges());
 		assertEquals("LEFT", reloaded.getSummaryPlacement());
 	}
 

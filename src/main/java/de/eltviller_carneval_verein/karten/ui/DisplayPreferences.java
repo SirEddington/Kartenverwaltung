@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui;
 
+import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -10,6 +11,7 @@ import de.eltviller_carneval_verein.karten.settings.DisplaySettings;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabels;
+import de.eltviller_carneval_verein.karten.ui.sales.SelectionHintPlacement;
 import de.eltviller_carneval_verein.karten.ui.sales.SummaryPlacement;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
@@ -22,7 +24,7 @@ import javafx.beans.property.SimpleObjectProperty;
  * <p>
  * Die App hat eine Instanz, die {@code MainApp} beim Start einrichtet ({@link #install}). Ist "Anzeige beim Start
  * wiederherstellen" an ({@link DisplaySettings#isRestoreAtStart()}), übernimmt sie die gespeicherte Auswahl, sonst ist
- * alles sichtbar und die Kaufzusammenfassung steht automatisch. Jede Änderung im Menü wird sofort per Teil-Speichern
+ * alles sichtbar, der Hinweis am Mauszeiger steht über dem Zeiger und die Kaufzusammenfassung automatisch. Jede Änderung im Menü wird sofort per Teil-Speichern
  * ({@link SettingsStore#saveOnly}) geschrieben, auch bei ausgeschaltetem Schalter; der Schalter entscheidet nur über
  * den nächsten Start. Scheitert das Schreiben, gilt die Auswahl trotzdem für die laufende Sitzung.
  * <p>
@@ -36,6 +38,12 @@ public final class DisplayPreferences {
 
 	private final PlanLabelOptions planLabels = new PlanLabelOptions();
 	private final BooleanProperty seatPatterns = new SimpleBooleanProperty(true);
+	private final BooleanProperty selectionHint = new SimpleBooleanProperty(true);
+	private final ObjectProperty<SelectionHintPlacement> selectionHintPlacement = new SimpleObjectProperty<>(SelectionHintPlacement.ABOVE);
+	private final BooleanProperty selectionHintAvoidEdges = new SimpleBooleanProperty(true);
+	// Wie bei der Platzierung unten: Eine unbekannte Lage gilt als ABOVE und bleibt in der Datei, bis eine andere gewählt wird
+	private final TolerantEnum<SelectionHintPlacement> fileHintPlacement = new TolerantEnum<>(SelectionHintPlacement.class,
+			SelectionHintPlacement.ABOVE, SelectionHintPlacement.ABOVE);
 	private final ObjectProperty<SummaryPlacement> summaryPlacement = new SimpleObjectProperty<>(SummaryPlacement.AUTO);
 	// Die Platzierung, wie sie in der Datei steht: Eine unbekannte (aus einer neueren Version) gilt als automatisch und
 	// wird unverändert zurückgeschrieben, bis jemand eine andere als "Automatisch" wählt
@@ -50,17 +58,24 @@ public final class DisplayPreferences {
 	DisplayPreferences(DisplaySettings saved, Consumer<Consumer<AppSettings>> saveOnly) {
 		this.saveOnly = saveOnly;
 		filePlacement.fromJson(saved.getSummaryPlacement());
+		fileHintPlacement.fromJson(saved.getSelectionHintPlacement());
 		if (saved.isRestoreAtStart()) {
 			planLabels.rowsProperty().set(saved.isRows());
 			planLabels.tablesProperty().set(saved.isTables());
 			planLabels.seatNumbersProperty().set(saved.isSeatNumbers());
 			planLabels.hallObjectsProperty().set(saved.isHallObjects());
 			seatPatterns.set(saved.isSeatPatterns());
+			selectionHint.set(saved.isSelectionHint());
+			selectionHintPlacement.set(fileHintPlacement.get());
+			selectionHintAvoidEdges.set(saved.isSelectionHintAvoidEdges());
 			summaryPlacement.set(filePlacement.get());
 		}
 		// Erst nach dem Übernehmen, damit der Start nichts schreibt
 		planLabels.addListener((obs, oldValue, newValue) -> write());
 		seatPatterns.addListener((obs, oldValue, newValue) -> write());
+		selectionHint.addListener((obs, oldValue, newValue) -> write());
+		selectionHintPlacement.addListener((obs, oldValue, newValue) -> write());
+		selectionHintAvoidEdges.addListener((obs, oldValue, newValue) -> write());
 		summaryPlacement.addListener((obs, oldValue, newValue) -> write());
 	}
 
@@ -96,6 +111,24 @@ public final class DisplayPreferences {
 		return seatPatterns;
 	}
 
+	/** Ob die Verkaufsansicht Anzahl und Preis der gewählten Karten am Mauszeiger zeigt (KARV-194). Standard an. */
+	public BooleanProperty selectionHintProperty() {
+		return selectionHint;
+	}
+
+	/** Ob der Hinweis am Mauszeiger über oder unter dem Zeiger steht (KARV-197). Standard über dem Zeiger. */
+	public ObjectProperty<SelectionHintPlacement> selectionHintPlacementProperty() {
+		return selectionHintPlacement;
+	}
+
+	/**
+	 * Ob der Hinweis am Mauszeiger am Rand auf die andere Seite ausweicht; sonst wird er nur an den Rand geschoben
+	 * (KARV-197). Standard an.
+	 */
+	public BooleanProperty selectionHintAvoidEdgesProperty() {
+		return selectionHintAvoidEdges;
+	}
+
 	/** Wo das Kundenfenster die Kaufzusammenfassung zeigt. */
 	public ObjectProperty<SummaryPlacement> summaryPlacementProperty() {
 		return summaryPlacement;
@@ -105,6 +138,10 @@ public final class DisplayPreferences {
 		try {
 			PlanLabels labels = planLabels.snapshot();
 			boolean patterns = seatPatterns.get();
+			boolean hint = selectionHint.get();
+			fileHintPlacement.set(Objects.requireNonNullElse(selectionHintPlacement.get(), SelectionHintPlacement.ABOVE));
+			String hintPlacement = fileHintPlacement.toJson();
+			boolean avoidEdges = selectionHintAvoidEdges.get();
 			SummaryPlacement current = summaryPlacement.get();
 			filePlacement.set(current == null ? SummaryPlacement.AUTO : current);
 			String placement = filePlacement.toJson();
@@ -115,6 +152,9 @@ public final class DisplayPreferences {
 				display.setSeatNumbers(labels.seatNumbers());
 				display.setHallObjects(labels.hallObjects());
 				display.setSeatPatterns(patterns);
+				display.setSelectionHint(hint);
+				display.setSelectionHintPlacement(hintPlacement);
+				display.setSelectionHintAvoidEdges(avoidEdges);
 				display.setSummaryPlacement(placement);
 			});
 		} catch (RuntimeException e) {

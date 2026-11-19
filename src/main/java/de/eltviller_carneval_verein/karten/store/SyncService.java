@@ -611,7 +611,7 @@ public final class SyncService implements ConnectionControl {
 					}
 					instanceLock = acquired.get();
 				}
-				identity = MachineIdentity.loadOrCreate(appData, () -> System.getenv("COMPUTERNAME"));
+				identity = MachineIdentity.loadOrCreate(appData, ComputerName::system);
 			} catch (IOException e) {
 				throw new UncheckedIOException(e);
 			}
