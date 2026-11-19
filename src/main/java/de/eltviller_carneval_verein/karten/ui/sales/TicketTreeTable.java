@@ -4,11 +4,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 
@@ -16,7 +14,6 @@ import de.eltviller_carneval_verein.karten.model.Booking;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
-import javafx.beans.value.ObservableValue;
 import javafx.collections.ListChangeListener;
 import javafx.css.PseudoClass;
 import javafx.event.EventType;
@@ -26,7 +23,6 @@ import javafx.scene.control.ButtonBase;
 import javafx.scene.control.ComboBoxBase;
 import javafx.scene.control.ScrollBar;
 import javafx.scene.control.SelectionMode;
-import javafx.scene.control.TableColumnBase;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
@@ -70,10 +66,7 @@ public final class TicketTreeTable {
 	private final ReadOnlyObjectWrapper<List<Booking>> selectedBookings = new ReadOnlyObjectWrapper<>(this, "selectedBookings", List.of());
 
 	private List<TicketNode> nodes = List.of();
-	private final Map<TreeItem<?>, TicketNode> nodeOf = new IdentityHashMap<>();
-	private final Map<TreeItem<?>, TreeItem<TicketRow>> typed = new IdentityHashMap<>();
-	private final Map<Booking, TreeItem<TicketRow>> itemOfBooking = new IdentityHashMap<>();
-	private final Map<List<Object>, TreeItem<TicketRow>> itemOfPath = new HashMap<>();
+	private final TicketTreeBuilder tree = new TicketTreeBuilder();
 
 	private Runnable rebuild = () -> {
 	};
@@ -184,88 +177,25 @@ public final class TicketTreeTable {
 	 */
 	public void show(List<TicketNode> newNodes) {
 		flushAdopt();
-		if (sameStructure(nodes, newNodes)) {
+		if (TicketTreeBuilder.sameStructure(nodes, newNodes)) {
 			table.refresh();
 			markGroups();
 			return;
 		}
-		Object focusKey = keyOf(focusedItem());
+		Object focusKey = tree.keyOf(focusedItem());
 		TreeTableColumn<TicketRow, ?> focusColumn = focusedColumn();
-		Object anchorKey = keyOf(anchor);
+		Object anchorKey = tree.keyOf(anchor);
 		quiet++;
 		try {
-			nodeOf.clear();
-			typed.clear();
-			itemOfBooking.clear();
-			itemOfPath.clear();
 			nodes = List.copyOf(newNodes);
-			root.getChildren().setAll(build(nodes));
+			root.getChildren().setAll(tree.build(nodes, collapsed, this::toggled));
 			selection.rebuilt(nodes);
 		} finally {
 			quiet--;
 		}
-		anchor = itemOf(anchorKey);
-		adjust(itemOf(focusKey), focusColumn);
+		anchor = tree.itemOf(anchorKey);
+		adjust(tree.itemOf(focusKey), focusColumn);
 		publish();
-	}
-
-	private List<TreeItem<TicketRow>> build(List<TicketNode> list) {
-		List<TreeItem<TicketRow>> items = new ArrayList<>(list.size());
-		for (TicketNode node : list) {
-			TreeItem<TicketRow> item = new TreeItem<>(node.row());
-			nodeOf.put(item, node);
-			typed.put(item, item);
-			if (node.row() instanceof TicketRow.GroupRow group) {
-				item.getChildren().setAll(build(node.children()));
-				// vor dem Listener: Das Klappen beim Aufbau ist keine Bedienung
-				item.setExpanded(!collapsed.contains(group.path()));
-				item.expandedProperty().addListener((property, was, now) -> toggled(item, now));
-				itemOfPath.put(group.path(), item);
-			} else if (node.row() instanceof TicketRow.BookingRow booking) {
-				itemOfBooking.put(booking.dto().getBooking(), item);
-			}
-			items.add(item);
-		}
-		return items;
-	}
-
-	private static boolean sameStructure(List<TicketNode> a, List<TicketNode> b) {
-		if (a.size() != b.size()) {
-			return false;
-		}
-		for (int i = 0; i < a.size(); i++) {
-			TicketRow left = a.get(i).row();
-			TicketRow right = b.get(i).row();
-			if (left instanceof TicketRow.BookingRow x && right instanceof TicketRow.BookingRow y) {
-				if (x.dto().getBooking() != y.dto().getBooking()) {
-					return false;
-				}
-			} else if (left instanceof TicketRow.GroupRow x && right instanceof TicketRow.GroupRow y) {
-				if (x.column() != y.column() || !x.path().equals(y.path()) || !x.text().equals(y.text()) || x.count() != y.count()
-						|| !sameStructure(a.get(i).children(), b.get(i).children())) {
-					return false;
-				}
-			} else {
-				return false;
-			}
-		}
-		return true;
-	}
-
-	/** Schlüssel einer Zeile über einen Neuaufbau: die Buchung bzw. der Pfad der Gruppe. */
-	private Object keyOf(TreeItem<?> item) {
-		TicketNode node = item == null ? null : nodeOf.get(item);
-		if (node == null) {
-			return null;
-		}
-		return node.row() instanceof TicketRow.GroupRow group ? group.path() : ((TicketRow.BookingRow) node.row()).dto().getBooking();
-	}
-
-	private TreeItem<TicketRow> itemOf(Object key) {
-		if (key instanceof Booking booking) {
-			return itemOfBooking.get(booking);
-		}
-		return key instanceof List<?> path ? itemOfPath.get(path) : null;
 	}
 
 	// ---- Sortieren ----
@@ -275,30 +205,7 @@ public final class TicketTreeTable {
 	 * Spalte; Gleichstand bleibt dem Aufrufer (Grundordnung). {@code null} ohne Sortierung.
 	 */
 	public Comparator<BookingDTO> sortComparator() {
-		List<TreeTableColumn<TicketRow, ?>> order = List.copyOf(table.getSortOrder());
-		if (order.isEmpty()) {
-			return null;
-		}
-		Map<BookingDTO, TreeItem<TicketRow>> items = new IdentityHashMap<>();
-		Comparator<BookingDTO> result = null;
-		for (TreeTableColumn<TicketRow, ?> column : order) {
-			Comparator<BookingDTO> byColumn = byColumn(column, items);
-			result = result == null ? byColumn : result.thenComparing(byColumn);
-		}
-		return result;
-	}
-
-	@SuppressWarnings("unchecked")
-	private static <T> Comparator<BookingDTO> byColumn(TreeTableColumn<TicketRow, T> column, Map<BookingDTO, TreeItem<TicketRow>> items) {
-		Comparator<T> comparator = column.getComparator() != null ? column.getComparator() : (Comparator<T>) TableColumnBase.DEFAULT_COMPARATOR;
-		Comparator<BookingDTO> byValue = (a, b) -> comparator.compare(cellValue(column, a, items), cellValue(column, b, items));
-		return column.getSortType() == TreeTableColumn.SortType.DESCENDING ? byValue.reversed() : byValue;
-	}
-
-	private static <T> T cellValue(TreeTableColumn<TicketRow, T> column, BookingDTO dto, Map<BookingDTO, TreeItem<TicketRow>> items) {
-		TreeItem<TicketRow> item = items.computeIfAbsent(dto, row -> new TreeItem<>(new TicketRow.BookingRow(row)));
-		ObservableValue<T> value = column.getCellObservableValue(item);
-		return value == null ? null : value.getValue();
+		return TicketTreeBuilder.sortComparator(List.copyOf(table.getSortOrder()));
 	}
 
 	// ---- Auswahl nach außen ----
@@ -333,7 +240,7 @@ public final class TicketTreeTable {
 	public void selectAndReveal(Booking booking) {
 		flushAdopt();
 		selection.set(List.of(booking), nodes);
-		TreeItem<TicketRow> item = itemOfBooking.get(booking);
+		TreeItem<TicketRow> item = tree.item(booking);
 		if (item != null) {
 			quiet++;
 			try {
@@ -364,7 +271,7 @@ public final class TicketTreeTable {
 		collapsed.clear();
 		quiet++;
 		try {
-			itemOfPath.values().forEach(item -> item.setExpanded(true));
+			tree.groupItems().forEach(item -> item.setExpanded(true));
 		} finally {
 			quiet--;
 		}
@@ -390,7 +297,7 @@ public final class TicketTreeTable {
 
 	/** Regel 2: ob die Zeile eine Gruppe ist, deren Buchungen alle gewählt sind. */
 	public boolean isGroupSelected(TreeItem<TicketRow> item) {
-		TicketNode node = item == null ? null : nodeOf.get(item);
+		TicketNode node = item == null ? null : tree.node(item);
 		return node != null && node.row() instanceof TicketRow.GroupRow && selection.fullySelected(node);
 	}
 
@@ -421,7 +328,7 @@ public final class TicketTreeTable {
 		quiet++;
 		try {
 			for (List<Object> path : selection.pathsToExpand(nodes, collapsed)) {
-				TreeItem<TicketRow> item = itemOfPath.get(path);
+				TreeItem<TicketRow> item = tree.item(path);
 				if (item != null) {
 					item.setExpanded(true);
 				}
@@ -429,7 +336,7 @@ public final class TicketTreeTable {
 			List<Integer> wanted = new ArrayList<>();
 			int count = table.getExpandedItemCount();
 			for (int row = 0; row < count; row++) {
-				TicketNode node = nodeOf.get(table.getTreeItem(row));
+				TicketNode node = tree.node(table.getTreeItem(row));
 				if (node != null && node.row() instanceof TicketRow.BookingRow && selection.fullySelected(node)) {
 					wanted.add(row);
 				}
@@ -479,7 +386,7 @@ public final class TicketTreeTable {
 	private void markGroups() {
 		for (Node node : table.lookupAll(".tree-table-row-cell")) {
 			if (node instanceof TreeTableRow<?> row) {
-				TicketNode group = nodeOf.get(row.getTreeItem());
+				TicketNode group = tree.node(row.getTreeItem());
 				row.pseudoClassStateChanged(GROUP_SELECTED,
 						group != null && group.row() instanceof TicketRow.GroupRow && selection.fullySelected(group));
 			}
@@ -490,7 +397,7 @@ public final class TicketTreeTable {
 
 	/** Läuft, bevor JavaFX beim Klappen das Auswahlmodell ändert; {@link #toggled} beendet den Schritt. */
 	private void beforeToggle(TreeItem<TicketRow> item, boolean expanding) {
-		TicketNode node = nodeOf.get(item);
+		TicketNode node = tree.node(item);
 		if (node == null || !(node.row() instanceof TicketRow.GroupRow)) {
 			return;
 		}
@@ -502,7 +409,7 @@ public final class TicketTreeTable {
 	}
 
 	private void toggled(TreeItem<TicketRow> item, boolean expanded) {
-		TicketNode node = nodeOf.get(item);
+		TicketNode node = tree.node(item);
 		if (node == null || !(node.row() instanceof TicketRow.GroupRow group)) {
 			return;
 		}
@@ -519,7 +426,7 @@ public final class TicketTreeTable {
 	}
 
 	private void expandAll(TreeItem<TicketRow> item) {
-		if (nodeOf.get(item) instanceof TicketNode node && node.row() instanceof TicketRow.GroupRow) {
+		if (tree.node(item) instanceof TicketNode node && node.row() instanceof TicketRow.GroupRow) {
 			item.setExpanded(true);
 			item.getChildren().forEach(this::expandAll);
 		}
@@ -565,7 +472,7 @@ public final class TicketTreeTable {
 		List<Integer> indices = new ArrayList<>(table.getSelectionModel().getSelectedIndices());
 		Collections.sort(indices);
 		for (int index : indices) {
-			TicketNode node = nodeOf.get(table.getTreeItem(index));
+			TicketNode node = tree.node(table.getTreeItem(index));
 			if (node != null) {
 				rows.add(node);
 				if (node.row() instanceof TicketRow.BookingRow booking) {
@@ -585,7 +492,7 @@ public final class TicketTreeTable {
 			List<Booking> removed = new ArrayList<>();
 			int count = table.getExpandedItemCount();
 			for (int row = 0; row < count; row++) {
-				TicketNode node = nodeOf.get(table.getTreeItem(row));
+				TicketNode node = tree.node(table.getTreeItem(row));
 				if (node != null && node.row() instanceof TicketRow.BookingRow booking) {
 					Booking shown = booking.dto().getBooking();
 					if (inModel.contains(shown)) {
@@ -655,7 +562,7 @@ public final class TicketTreeTable {
 		if (row == null) {
 			return; // Kopf, Scroll-Balken
 		}
-		TreeItem<TicketRow> item = row.isEmpty() ? null : typed.get(row.getTreeItem());
+		TreeItem<TicketRow> item = row.isEmpty() ? null : tree.typed(row.getTreeItem());
 		if (item != null && (insideControl(event.getTarget(), row) || onDisclosure(event, row))) {
 			item = null;
 		}
@@ -669,7 +576,7 @@ public final class TicketTreeTable {
 		}
 		press.applied = true;
 		TreeItem<TicketRow> item = press.item;
-		TicketNode node = item == null ? null : nodeOf.get(item);
+		TicketNode node = item == null ? null : tree.node(item);
 		if (node != null) {
 			if (press.button == MouseButton.PRIMARY) {
 				if (press.shift) {
@@ -778,7 +685,7 @@ public final class TicketTreeTable {
 		boolean ctrl = event.isShortcutDown();
 		TreeItem<TicketRow> item = focusedItem();
 		int focus = item == null ? table.getFocusModel().getFocusedIndex() : table.getRow(item);
-		TicketNode node = item == null ? null : nodeOf.get(item);
+		TicketNode node = item == null ? null : tree.node(item);
 		boolean group = node != null && node.row() instanceof TicketRow.GroupRow;
 		switch (event.getCode()) {
 		case UP, KP_UP -> navigate(focus - 1, shift, ctrl);
@@ -830,7 +737,7 @@ public final class TicketTreeTable {
 		}
 		int row = Math.max(0, Math.min(count - 1, target));
 		TreeItem<TicketRow> item = table.getTreeItem(row);
-		TicketNode node = nodeOf.get(item);
+		TicketNode node = tree.node(item);
 		if (shift) {
 			selection.range(rowsBetween(anchorRow(focusedItem()), row), ctrl);
 		} else if (!ctrl && node != null) {
@@ -929,7 +836,7 @@ public final class TicketTreeTable {
 	 * JavaFX den Index erst später, bis dahin nennt er eine andere Zeile.
 	 */
 	private TreeItem<TicketRow> focusedItem() {
-		return typed.get(table.getFocusModel().getFocusedItem());
+		return tree.typed(table.getFocusModel().getFocusedItem());
 	}
 
 	private TreeTableColumn<TicketRow, ?> focusedColumn() {
@@ -949,7 +856,7 @@ public final class TicketTreeTable {
 		int end = from < 0 ? to : Math.max(from, to);
 		List<TicketNode> rows = new ArrayList<>();
 		for (int row = Math.max(0, start); row <= end && row < table.getExpandedItemCount(); row++) {
-			TicketNode node = nodeOf.get(table.getTreeItem(row));
+			TicketNode node = tree.node(table.getTreeItem(row));
 			if (node != null) {
 				rows.add(node);
 			}
