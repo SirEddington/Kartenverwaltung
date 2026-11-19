@@ -39,8 +39,9 @@ import javafx.util.Duration;
  * gewählten Zeilen, mit Strg/Umschalt und nach dem Ziehen startet ein Klick es nie.</li>
  * <li>Tab und Umschalt+Tab setzen den Fokus auf die nächste bzw. vorherige bearbeitbare Zelle, am Zeilenende in die
  * nächste Zeile. Zeilen, die die Bedingung der Tabelle nicht zulässt (die Gruppenzeilen einer Baumtabelle), werden
- * übersprungen, ebenso zugeklappte Einträge, ohne sie aufzuklappen. Beim Bearbeiten übernimmt Tab erst die Eingabe und
- * bearbeitet dann gleich die neue Zelle, siehe {@link ParsingTextFieldTableCell}.</li>
+ * übersprungen, ebenso zugeklappte Einträge, ohne sie aufzuklappen; Enter startet dort kein Bearbeiten. Beim Bearbeiten
+ * übernimmt Tab erst die Eingabe und bearbeitet dann gleich die neue Zelle, siehe {@link ParsingTextFieldTableCell} und
+ * {@link ParsingTextFieldTreeTableCell}.</li>
  * <li>Drücken und Ziehen über mehrere Zeilen wählt sie aus; mit Strg bleibt die bisherige Auswahl erhalten. Am oberen
  * und unteren Rand scrollt die Tabelle mit.</li>
  * </ul>
@@ -153,6 +154,9 @@ public final class TableInput {
 			if (cell != null) {
 				access.edit(cell.getIndex(), access.columnOf(cell));
 				event.consume();
+			} else if (access.focusedRow() >= 0 && !access.rowEditable(access.focusedRow())) {
+				// Eine Zeile, die die Bedingung nicht zulässt (Gruppenzeile): JavaFX startete das Bearbeiten sonst selbst
+				event.consume();
 			}
 		} else if (event.getCode() == KeyCode.TAB) {
 			int row = access.focusedRow();
@@ -236,14 +240,18 @@ public final class TableInput {
 		return true;
 	}
 
-	/** Wie {@link #moveEditing(TableAccess, int, TableColumnBase, boolean)} für eine {@link TableView}. */
+	/**
+	 * Wie {@link #moveEditing(TableAccess, int, TableColumnBase, boolean)} für eine {@link TableView}. Eine Tabelle ohne
+	 * {@link #install(TableView)} behandelt jede Zeile als bearbeitbar.
+	 */
 	static <S> boolean moveEditing(TableView<S> table, int row, TableColumn<S, ?> column, boolean forward) {
 		return moveEditing(accessOf(table, new TableViewAccess<>(table)), row, column, forward);
 	}
 
 	/**
 	 * Wie {@link #moveEditing(TableAccess, int, TableColumnBase, boolean)} für eine {@link TreeTableView}; es gilt die
-	 * Zeilenbedingung aus {@link #install(TreeTableView, Predicate)}, ohne sie ist jede Zeile bearbeitbar.
+	 * Zeilenbedingung aus {@link #install(TreeTableView, Predicate)}. Eine Tabelle ohne {@code install} behandelt jede
+	 * Zeile als bearbeitbar.
 	 */
 	static <S> boolean moveEditing(TreeTableView<S> table, int row, TreeTableColumn<S, ?> column, boolean forward) {
 		return moveEditing(accessOf(table, new TreeTableViewAccess<>(table, value -> true)), row, column, forward);

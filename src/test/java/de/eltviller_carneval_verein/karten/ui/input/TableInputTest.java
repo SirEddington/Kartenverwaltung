@@ -41,14 +41,12 @@ import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTablePosition;
 import javafx.scene.control.TreeTableRow;
 import javafx.scene.control.TreeTableView;
-import javafx.scene.control.cell.TextFieldTreeTableCell;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.PickResult;
 import javafx.stage.Stage;
-import javafx.util.converter.DefaultStringConverter;
 
 /**
  * Hält fest, wie {@link TableInput} eine Tabelle bedient: Klick, Tippen, Enter, Tab und Ziehen. Jeder Fall läuft gegen
@@ -177,43 +175,8 @@ class TableInputTest {
 		TreeTableColumn<Person, String> column = new TreeTableColumn<>(title);
 		column.setEditable(true);
 		column.setCellValueFactory(cell -> property.apply(cell.getValue().getValue()));
-		column.setCellFactory(c -> new TreeTextCell());
+		column.setCellFactory(ParsingTextFieldTreeTableCell.forTextColumn());
 		return column;
-	}
-
-	/**
-	 * Eine Textzelle der Baumtabelle, die nur das kann, was {@link TableInput} von einer Textzelle erwartet: Sie gibt sich
-	 * als {@link ParsingCell} zu erkennen, und Tab übernimmt die Eingabe und bearbeitet die nächste Zelle.
-	 */
-	private static final class TreeTextCell extends TextFieldTreeTableCell<Person, String> implements ParsingCell {
-
-		TreeTextCell() {
-			super(new DefaultStringConverter());
-		}
-
-		@Override
-		public boolean canEdit() {
-			return true;
-		}
-
-		@Override
-		public void startEdit() {
-			super.startEdit();
-			if (isEditing() && getGraphic() instanceof TextField field && field.getProperties().putIfAbsent(TreeTextCell.class, Boolean.TRUE) == null) {
-				// Das Feld bleibt der Zelle über mehrere Bearbeitungen erhalten; der Filter kommt nur einmal dazu
-				field.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
-					if (event.getCode() != KeyCode.TAB) {
-						return;
-					}
-					event.consume();
-					TreeTableView<Person> table = getTreeTableView();
-					int row = getIndex();
-					TreeTableColumn<Person, String> column = getTableColumn();
-					commitEdit(getConverter().fromString(field.getText()));
-					TableInput.moveEditing(table, row, column, !event.isShiftDown());
-				});
-			}
-		}
 	}
 
 	@SuppressWarnings("unchecked")

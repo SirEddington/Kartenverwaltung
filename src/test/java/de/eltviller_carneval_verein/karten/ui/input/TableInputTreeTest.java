@@ -93,6 +93,8 @@ class TableInputTreeTest {
 				TreeTableColumn<Zeile, String> column = new TreeTableColumn<>(title);
 				column.setEditable(true);
 				column.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getValue().name()));
+				// ohne eigene Zeilenbedingung: Ob eine Gruppenzeile bearbeitbar ist, entscheidet allein die von install
+				column.setCellFactory(ParsingTextFieldTreeTableCell.forTextColumn());
 				table.getColumns().add(column);
 			}
 			TreeItem<Zeile> root = new TreeItem<>();
@@ -149,6 +151,44 @@ class TableInputTreeTest {
 
 	private List<Integer> selectedRows() throws Exception {
 		return onFx(() -> List.copyOf(table.getSelectionModel().getSelectedIndices()));
+	}
+
+	private void type(String text) throws Exception {
+		onFx(() -> {
+			Event.fireEvent(table, new KeyEvent(this, table, KeyEvent.KEY_TYPED, text, "", KeyCode.UNDEFINED, false, false, false, false));
+			table.layout();
+			return null;
+		});
+		flush();
+	}
+
+	/** Zeile der bearbeiteten Zelle, {@code -1}: keine; beendet das Bearbeiten danach. */
+	private int editingRowAndStop() throws Exception {
+		return onFx(() -> {
+			TreeTablePosition<Zeile, ?> editing = table.getEditingCell();
+			table.edit(-1, null);
+			return editing == null ? -1 : editing.getRow();
+		});
+	}
+
+	@Test
+	void enterUndTippenAufGruppenzeileStartenKeinBearbeiten() throws Exception {
+		// Zeilen: 0 Gruppe, 1 Buchung
+		show(gruppe("G", true, buchung("A")));
+
+		focus(0, FIRST);
+		press(KeyCode.ENTER, false);
+		assertEquals(-1, editingRowAndStop(), "Enter auf der Gruppenzeile startet kein Bearbeiten");
+		type("X");
+		assertEquals(-1, editingRowAndStop(), "Tippen auf der Gruppenzeile startet kein Bearbeiten");
+
+		// Gegenprobe: dieselbe Tabelle bearbeitet eine Buchung
+		focus(1, FIRST);
+		press(KeyCode.ENTER, false);
+		assertEquals(1, editingRowAndStop(), "Enter auf einer Buchung startet das Bearbeiten");
+		focus(1, FIRST);
+		type("X");
+		assertEquals(1, editingRowAndStop(), "Tippen auf einer Buchung startet das Bearbeiten");
 	}
 
 	@Test
