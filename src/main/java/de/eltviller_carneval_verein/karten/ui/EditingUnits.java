@@ -12,6 +12,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javafx.scene.control.TableView;
+import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeTableView;
 
 /**
  * Die Registratur der Objekte, für die gerade eine Eingabe offen ist (ein Popup, eine Zelle im Bearbeiten, der
@@ -109,14 +111,31 @@ public final class EditingUnits {
 	 */
 	public <S> void watch(TableView<S> table, Function<S, ?> modelOf) {
 		table.editingCellProperty().addListener((obs, before, cell) -> {
-			if (cell == null) {
-				end(table);
-				return;
-			}
-			int row = cell.getRow();
-			Object model = row >= 0 && row < table.getItems().size() ? modelOf.apply(table.getItems().get(row)) : null;
-			begin(table, model == null ? List.of() : List.of(model));
+			int row = cell == null ? -1 : cell.getRow();
+			reportCell(table, cell != null,
+					row >= 0 && row < table.getItems().size() ? modelOf.apply(table.getItems().get(row)) : null);
 		});
+	}
+
+	/**
+	 * Wie {@link #watch(TableView, Function)} für eine Baumtabelle. Die Zeile einer Zelle ist ein Index in die sichtbaren
+	 * Zeilen; {@code modelOf} bekommt den Wert ihres {@code TreeItem} und liefert für Zeilen ohne Einheit (Gruppenzeilen)
+	 * {@code null}: Dann ist nichts in Bearbeitung.
+	 */
+	public <S> void watch(TreeTableView<S> table, Function<S, ?> modelOf) {
+		table.editingCellProperty().addListener((obs, before, cell) -> {
+			TreeItem<S> item = cell == null ? null : table.getTreeItem(cell.getRow());
+			reportCell(table, cell != null, item == null ? null : modelOf.apply(item.getValue()));
+		});
+	}
+
+	/** Der gemeinsame Teil der beiden {@code watch}: Zelle im Bearbeiten mit Modellobjekt oder ohne, oder keine Zelle mehr. */
+	private void reportCell(Object table, boolean editingCell, Object model) {
+		if (!editingCell) {
+			end(table);
+		} else {
+			begin(table, model == null ? List.of() : List.of(model));
+		}
 	}
 
 	private void fireEnd() {

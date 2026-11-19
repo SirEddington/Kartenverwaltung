@@ -5,16 +5,25 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import javafx.application.Platform;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeTableColumn;
+import javafx.scene.control.TreeTableView;
 
 /**
  * Die Registratur der Eingaben, die offen sind. {@code watch} braucht eine Tabelle und damit das JavaFX-Toolkit (das
- * Erzeugen eines {@code TableView} scheitert ohne); es wird von Hand geprüft.
+ * Erzeugen eines {@code TableView} scheitert ohne); die Fassung für {@code TableView} wird von Hand geprüft, die für
+ * {@code TreeTableView} hier.
  */
 class EditingUnitsTest {
 
@@ -100,6 +109,80 @@ class EditingUnitsTest {
 
 		assertTrue(editing.isEditing(booking));
 		assertEquals(0, ended.get());
+	}
+
+	private static void startFx() {
+		try {
+			Platform.startup(() -> {
+			});
+		} catch (IllegalStateException alreadyStarted) {
+			// der Toolkit läuft schon (anderer Test im selben Lauf)
+		}
+		Platform.setImplicitExit(false);
+	}
+
+	private static <T> T onFx(Supplier<T> action) throws Exception {
+		startFx();
+		CompletableFuture<T> result = new CompletableFuture<>();
+		Platform.runLater(() -> {
+			try {
+				result.complete(action.get());
+			} catch (Throwable e) {
+				result.completeExceptionally(e);
+			}
+		});
+		return result.get(10, TimeUnit.SECONDS);
+	}
+
+	/** Eine bearbeitbare Baumtabelle: eine Gruppenzeile (Wert ohne Buchung) mit einer Buchung darunter. */
+	private static TreeTableView<Object> tree(Booking booking, String group) {
+		TreeItem<Object> root = new TreeItem<>("Wurzel");
+		TreeItem<Object> groupItem = new TreeItem<>(group);
+		groupItem.setExpanded(true);
+		groupItem.getChildren().add(new TreeItem<>(booking));
+		root.getChildren().add(groupItem);
+		TreeTableView<Object> table = new TreeTableView<>(root);
+		table.setShowRoot(false);
+		table.setEditable(true);
+		TreeTableColumn<Object, String> column = new TreeTableColumn<>("Name");
+		column.setEditable(true);
+		column.setCellValueFactory(cell -> new SimpleStringProperty(String.valueOf(cell.getValue().getValue())));
+		table.getColumns().add(column);
+		return table;
+	}
+
+	private static Object bookingOrNull(Object item) {
+		return item instanceof Booking ? item : null;
+	}
+
+	@Test
+	void watchBaumMeldetBuchungDerBearbeitetenZeile() throws Exception {
+		Booking booking = new Booking();
+		boolean[] result = onFx(() -> {
+			TreeTableView<Object> table = tree(booking, "Gruppe");
+			editing.watch(table, EditingUnitsTest::bookingOrNull);
+			table.edit(1, table.getColumns().get(0));
+			boolean during = editing.isEditing(booking);
+			table.edit(-1, null);
+			return new boolean[] { during, editing.isEditing(booking) };
+		});
+		assertTrue(result[0], "während der Bearbeitung");
+		assertFalse(result[1], "nach dem Ende");
+		assertEquals(1, ended.get());
+	}
+
+	@Test
+	void watchBaumGruppenzeileOhneEinheit() throws Exception {
+		Booking booking = new Booking();
+		boolean[] result = onFx(() -> {
+			TreeTableView<Object> table = tree(booking, "Gruppe");
+			editing.watch(table, EditingUnitsTest::bookingOrNull);
+			table.edit(0, table.getColumns().get(0));
+			return new boolean[] { table.getEditingCell() != null, editing.isEditing(booking), editing.isEditing("Gruppe") };
+		});
+		assertTrue(result[0], "die Zelle ist im Bearbeiten");
+		assertFalse(result[1]);
+		assertFalse(result[2]);
 	}
 
 	@Test

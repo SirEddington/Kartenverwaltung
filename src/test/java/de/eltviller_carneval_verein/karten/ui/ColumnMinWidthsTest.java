@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +21,9 @@ import javafx.scene.Scene;
 import javafx.scene.control.ScrollBar;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeTableColumn;
+import javafx.scene.control.TreeTableView;
 import javafx.scene.control.skin.TableColumnHeader;
 import javafx.scene.text.Text;
 
@@ -83,9 +87,13 @@ class ColumnMinWidthsTest {
 
 	/** Zwei Durchläufe: Der erste legt die Spaltenköpfe an und misst sie, der zweite verteilt die Breiten danach. */
 	private static void layout(TableView<?> table) {
+		layout(table.getScene());
+	}
+
+	private static void layout(Scene scene) {
 		for (int i = 0; i < 2; i++) {
-			table.getScene().getRoot().applyCss();
-			table.getScene().getRoot().layout();
+			scene.getRoot().applyCss();
+			scene.getRoot().layout();
 		}
 	}
 
@@ -156,6 +164,41 @@ class ColumnMinWidthsTest {
 		boolean scrollBar = onFx(() -> horizontalScrollBarShown(
 				table(200, Map.of(), column("Zahlungsstatus"), column("Reserviert am"), column("Kommentar"))));
 		assertTrue(scrollBar);
+	}
+
+	@Test
+	void installBaumSetztMindestbreiten() throws Exception {
+		double[] result = onFx(() -> {
+			TreeTableColumn<String, String> status = new TreeTableColumn<>("Zahlungsstatus");
+			TreeTableColumn<String, String> seat = new TreeTableColumn<>("Sitz");
+			TreeTableColumn<String, String> comment = new TreeTableColumn<>("Kommentar");
+			for (TreeTableColumn<String, String> column : List.of(status, seat, comment)) {
+				column.setPrefWidth(100);
+				column.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getValue()));
+			}
+			TreeTableView<String> table = new TreeTableView<>(new TreeItem<>("Wurzel"));
+			table.setShowRoot(false);
+			table.getRoot().getChildren().add(new TreeItem<>("Meier"));
+			table.getColumns().addAll(status, seat, comment);
+			table.setColumnResizePolicy(TreeTableView.CONSTRAINED_RESIZE_POLICY);
+			ColumnMinWidths.install(table, Map.of(seat, 80.0));
+			table.setPrefSize(600, 200);
+			Scene scene = new Scene(new Group(table));
+			scene.getStylesheets().add(STYLESHEET);
+			layout(scene);
+			table.resizeColumn(status, -1000);
+			table.resizeColumn(seat, -1000);
+			layout(scene);
+			String shown = null;
+			for (Node node : table.lookupAll(".column-header")) {
+				if (node instanceof TableColumnHeader header && header.getTableColumn() == status) {
+					shown = ((Text) header.lookup(".label .text")).getText();
+				}
+			}
+			assertEquals("Zahlungsstatus", shown);
+			return new double[] { seat.getWidth() };
+		});
+		assertTrue(result[0] >= 80, "Breite " + result[0]);
 	}
 
 	@Test
