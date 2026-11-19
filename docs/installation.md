@@ -156,7 +156,7 @@ Pull requests of a version go to `release/<version>`; only the finished version 
    (`src/test/java/.../store/`) with the target folder `src/test/resources/format-samples/<version>`. It writes
    `data.zip` there; add a `README.md` next to it (how it was created, contents) and commit both. `FormatSamplesTest`
    then checks that every later version loads this sample unchanged, so a missed sample means no guard for the next
-   version. For 1.1.0 this sample does not exist yet (only `1.0.1`). Details:
+   version. Patch versions get a sample too. Details:
    [decisions.md](decisions.md#release-steps).
 4. Run the **Release build** workflow (`.github/workflows/release.yml`, manual `workflow_dispatch`). Job
    `build-and-publish`:
