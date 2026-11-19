@@ -98,4 +98,16 @@ class TicketFilterTest {
 		assertTrue(filter.setDeselected(TicketColumn.SEAT, Set.of()));
 		assertFalse(filter.isActive(TicketColumn.SEAT));
 	}
+
+	@Test
+	void ausnahmenZaehlenTrotzAndererFilterInDerWerteliste() {
+		BookingDTO a = row(first, 1, "Abel");
+		BookingDTO b = row(second, 2, "Bode");
+		filter.setDeselected(TicketColumn.PRESENTATION, Set.of(TicketColumn.PRESENTATION.keyOf(a)));
+
+		// a ist selbst geändert (Spec Abschnitt 11): Es zählt in der Werteliste, obwohl der Filter der Vorstellung es ausschließt
+		List<FilterValue> names = filter.values(TicketColumn.LAST_NAME, List.of(a, b), row -> row == a, order());
+		assertEquals(List.of("Abel", "Bode"), names.stream().map(FilterValue::text).toList());
+		assertEquals(List.of("Bode"), filter.values(TicketColumn.LAST_NAME, List.of(a, b), order()).stream().map(FilterValue::text).toList());
+	}
 }

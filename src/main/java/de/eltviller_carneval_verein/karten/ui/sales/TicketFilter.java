@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import de.eltviller_carneval_verein.karten.model.Presentation;
 
@@ -65,9 +66,18 @@ public final class TicketFilter {
 	 * tragen.
 	 */
 	public List<FilterValue> values(TicketColumn column, List<BookingDTO> afterSearch, List<Presentation> order) {
+		return values(column, afterSearch, row -> false, order);
+	}
+
+	/**
+	 * Wie {@link #values(TicketColumn, List, List)}; Buchungen, für die {@code exempt} gilt (selbst geänderte, Spec
+	 * Abschnitt 11), zählen auch, wenn sie die Filter der anderen Spalten nicht bestehen.
+	 */
+	public List<FilterValue> values(TicketColumn column, List<BookingDTO> afterSearch, Predicate<BookingDTO> exempt,
+			List<Presentation> order) {
 		List<BookingDTO> rows = new ArrayList<>();
 		for (BookingDTO row : afterSearch) {
-			if (passesExcept(row, column)) {
+			if (exempt.test(row) || passesExcept(row, column)) {
 				rows.add(row);
 			}
 		}

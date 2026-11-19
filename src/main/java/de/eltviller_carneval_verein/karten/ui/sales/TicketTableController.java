@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -39,6 +40,7 @@ import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.input.InputIssue;
 import de.eltviller_carneval_verein.karten.ui.input.ParsingTextFieldTreeTableCell;
 import de.eltviller_carneval_verein.karten.ui.input.TableInput;
+import de.eltviller_carneval_verein.karten.ui.sales.TicketFilter.FilterValue;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
@@ -200,8 +202,9 @@ public class TicketTableController implements ContentController, SalesStateAware
 		treeTable.setRebuild(edits::requestRebuild);
 		treeTable.setFrozen(this::isDialogOpen);
 
-		// 3. CellFactories & Edit-Handler einmalig aufsetzen
+		// 3. CellFactories & Edit-Handler einmalig aufsetzen, Spaltenfilter im Kopf jeder Datenspalte
 		setupCellFactories();
+		installColumnFilters();
 		ColumnMinWidths.install(seatTable, Map.of(colLastName, CONTENT_MIN_WIDTH, colFirstName, CONTENT_MIN_WIDTH, colComment, CONTENT_MIN_WIDTH));
 
 		// 4. Mehrfachauswahl (Strg-/Shift-Klick) setzt TicketTreeTable; bei offenem Dialog erreicht keine Bedienung der Zeilen
@@ -277,6 +280,46 @@ public class TicketTableController implements ContentController, SalesStateAware
 		LiveViews.whileShown(seatTable, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges),
 				LockedSeats.whileShown(this::refreshAfterForeignChange),
 				Registration.onDetach(() -> EditingUnits.getInstance().end(seatTable)));
+	}
+
+	/**
+	 * Rechtsklick auf den Kopf einer Datenspalte öffnet ihren Filter ({@link ColumnFilterMenu}, Spec Abschnitt 8). Ändert
+	 * er die Menge der abgewählten Werte, endet die Ausnahme für selbst geänderte Buchungen (Spec Abschnitt 11).
+	 */
+	private void installColumnFilters() {
+		Map<TreeTableColumn<TicketRow, ?>, TicketColumn> columns = new LinkedHashMap<>();
+		columns.put(colPresentation, TicketColumn.PRESENTATION);
+		columns.put(colTable, TicketColumn.TABLE);
+		columns.put(colCategory, TicketColumn.CATEGORY);
+		columns.put(colSeatNumber, TicketColumn.SEAT);
+		columns.put(colLastName, TicketColumn.LAST_NAME);
+		columns.put(colFirstName, TicketColumn.FIRST_NAME);
+		columns.put(colReserved, TicketColumn.RESERVED);
+		columns.put(colReservedOn, TicketColumn.RESERVED_ON);
+		columns.put(colPrice, TicketColumn.PRICE);
+		columns.put(colPaidAmount, TicketColumn.PAID_AMOUNT);
+		columns.put(colPaymentStatus, TicketColumn.PAYMENT_STATUS);
+		columns.put(colPaidOn, TicketColumn.PAID_ON);
+		columns.put(colCollected, TicketColumn.COLLECTED);
+		columns.put(colCollectedOn, TicketColumn.COLLECTED_ON);
+		columns.put(colWheelchair, TicketColumn.WHEELCHAIR);
+		columns.put(colComment, TicketColumn.COMMENT);
+		Runnable applied = () -> {
+			edits.endPinning();
+			edits.requestRebuild();
+		};
+		columns.forEach((column, key) -> ColumnFilterMenu.install(column, key, columnFilter, () -> filterValues(key), applied));
+	}
+
+	/**
+	 * Die Werteliste einer Spalte: Buchungen nach der Suche unter den Filtern der anderen Spalten; selbst geänderte
+	 * bestehen beide (Spec Abschnitte 2 und 11).
+	 */
+	private List<FilterValue> filterValues(TicketColumn key) {
+		String query = searchQuery;
+		List<BookingDTO> afterSearch = edits.visible(allRows, dto -> BookingSearch.matches(dto.getBooking(), query));
+		Set<Booking> pinned = edits.pinned();
+		return columnFilter.values(key, afterSearch, dto -> pinned.contains(dto.getBooking()), shownPresentations());
 	}
 
 	/** Die gewählten Buchungen in Reihenfolge der Tabelle, auch die in zugeklappten Gruppen. */

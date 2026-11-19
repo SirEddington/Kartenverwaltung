@@ -521,6 +521,26 @@
      -fx-text-fill: -fx-ecv-blue;
  }
 
+ /* Kartentabelle (KARV-193): Filtersymbol im Kopf einer Spalte mit aktivem Filter (ColumnFilterMenu), gelb auf dem
+    blauen Kopf. */
+ .ticket-table .column-header .filter-symbol {
+     -fx-fill: -fx-ecv-yellow;
+ }
+
+ /* Der Spaltenfilter ist ein Kontextmenü mit einem einzigen Eintrag (Suchfeld, Werteliste, Knöpfe). Er färbt sich nicht
+    gelb wie ein Menüeintrag unter der Maus; das Menü liegt in einem eigenen Fenster außerhalb von .ticket-table und
+    trägt deshalb eine eigene Klasse. */
+ .column-filter-menu .custom-menu-item,
+ .column-filter-menu .custom-menu-item:hover,
+ .column-filter-menu .custom-menu-item:focused,
+ .column-filter-menu .custom-menu-item:armed {
+     -fx-background-color: transparent;
+ }
+
+ .column-filter-menu .column-filter {
+     -fx-padding: 4px;
+ }
+
  /* Bearbeitete Zelle: Die Zeile bleibt gleich hoch und die Spalte gleich breit. Das Eingabefeld erbt sonst die Maße
     der allgemeinen Textfelder (Innenabstand und Rahmen) und streckt die Zeile. Als Zeichen für "wird bearbeitet"
     trägt die Zelle selbst einen ECV-blauen Rahmen innerhalb ihrer Fläche; das Feld ist darin unsichtbar. Die
