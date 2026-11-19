@@ -89,13 +89,22 @@ Selling:
 2. Click a seat to open the booking popup. In edit mode, **Ctrl+click** or dragging a rectangle selects
    several seats for a bulk sale; fields show "verschieden" where the selected bookings differ, and only changed
    fields are applied to all.
+   While seats (or table rows) are selected, a small note next to the mouse pointer shows how many and their total,
+   e.g. "5 Karten gewählt · 60,00 €". It counts like the context menu and hides while a popup, menu or dialog is
+   open. The submenu **"Auswahl am Mauszeiger"** in the "Anzeige" menu puts it **above** or **below** the pointer
+   ("Über dem Zeiger", the default, or "Unter dem Zeiger") or turns it off ("Aus"). With the tick **"Am Rand
+   ausweichen"** (on by default) it moves to the other side of the pointer near an edge; with it off it keeps its side
+   and is only pushed back to the edge, even over the pointer. In display mode the hall view has no selection.
 3. Enter last/first name, e-mail, comment, optional individual price, and the payment status: **Offen**, **Bar**,
    **Karte** or **Überweisung**; tick **"Abgeholt"** when the ticket is handed out.
    Reservation, payment and collection dates and the paid amount are filled in automatically.
 4. **"Stornieren"** cancels the selected bookings after a confirmation.
 
 **Search** ("Suche") matches every word against first name, last name and comment together, case-insensitive and in
-any order (e.g. `ns wurs` finds "Hans Wurst").
+any order (e.g. `ns wurs` finds "Hans Wurst"). Above the field, **"n Treffer"** counts what the view currently shows
+as a hit — the table rows (after search and column filters) or the seats in the hall view that are not dimmed — also
+with an empty search, where it includes free seats. Its tooltip breaks the hits down by name (at most 15 names) and,
+with "Alle Vorstellungen", by presentation.
 
 **"Buchungen sofort speichern"** (setting, on by default): every booking change is saved immediately; the popup's
 button is then called "Speichern" instead of "Anwenden". With the setting off, use "Speichern"; leaving the screen
@@ -107,8 +116,8 @@ green ring) or taken (red); zoom, panning, the current selection and the choices
 the main window.
 
 **"Anzeige" menu** (footer, left): ticks for **Reihen**, **Tische**, **Sitznummern** and **Hallenobjekte**, and in
-the sales view the tick **"Barrierefreie Sitzdarstellung"** and the submenu **"Kaufzusammenfassung"** (where the
-customer display shows the purchase summary). The
+the sales view the tick **"Barrierefreie Sitzdarstellung"** and the submenus **"Auswahl am Mauszeiger"** (see above)
+and **"Kaufzusammenfassung"** (where the customer display shows the purchase summary). The
 choice is the same in the sales view, the customer display and the hall editor: hiding rows in the editor hides them
 in the sales view too. With *Einstellungen → Anzeige → "Anzeige beim Start wiederherstellen"* (on by default) the
 choice is kept for the next start of this workstation; with it off, every start shows everything.

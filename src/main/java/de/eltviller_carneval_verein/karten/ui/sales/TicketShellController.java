@@ -30,6 +30,7 @@ import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelsMenu;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
+import javafx.collections.ListChangeListener;
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Node;
@@ -43,6 +44,7 @@ import javafx.scene.control.RadioButton;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.StackPane;
 import javafx.util.StringConverter;
 
@@ -62,6 +64,8 @@ public class TicketShellController {
 	private ComboBox<Presentation> presComboBox;
 	@FXML
 	private TextField searchField;
+	@FXML
+	private Label lblSearchHits;
 	@FXML
 	private ToggleGroup viewToggleGroup;
 	@FXML
@@ -96,6 +100,8 @@ public class TicketShellController {
 	private final BookingAutoSave autoSave = new BookingAutoSave(ChangeTracker.events(), EventSaver::save, Platform::runLater,
 			() -> editMode && BookingAutoSave.settingOn());
 	private CustomerDisplay customerDisplay;
+	// Anzahl und Preis der Auswahl am Mauszeiger, über Tabelle und Saalansicht (KARV-194)
+	private SelectionHint selectionHint;
 	private final ChangeListener<Boolean> windowShowing = (obs, wasShowing, isShowing) -> {
 		if (!isShowing) {
 			closeCustomerDisplay();
@@ -110,8 +116,13 @@ public class TicketShellController {
 		// Immer aktiv, auch in der Tabelle: Die Einstellungen gelten für die Saalansicht und lassen sich vorher treffen
 		PlanLabelsMenu.bind(menuDisplay, state.planLabels());
 		// Sitzstatus nicht nur über die Farbe (KARV-26); nur hier, der Hallen-Editor zeigt keinen Status
-		menuDisplay.getItems().addAll(new SeparatorMenuItem(), PlanLabelsMenu.item("Barrierefreie Sitzdarstellung", state.seatPatternsProperty()));
+		menuDisplay.getItems().addAll(new SeparatorMenuItem(), PlanLabelsMenu.item("Barrierefreie Sitzdarstellung", state.seatPatternsProperty()),
+				SelectionHintMenu.create(state.selectionHintProperty(), state.selectionHintPlacementProperty(),
+						state.selectionHintAvoidEdgesProperty()));
 		SummaryPlacementMenu.append(menuDisplay, state.summaryPlacementProperty());
+		// Vor der ersten Ansicht (showTicketTableView unten): loadContentView legt den Hinweis über jede Ansicht
+		selectionHint = new SelectionHint(contentArea, state.selectedBookings(), state.selectionHintProperty(),
+				state.selectionHintPlacementProperty(), state.selectionHintAvoidEdgesProperty());
 
 		// Das Kundenfenster verschwindet mit der Ansicht: Wird die Szene ersetzt (Menü, anderer Bildschirm) oder das
 		// Hauptfenster geschlossen, schließt es mit (sonst hielte es die App am Leben). Die Szene bleibt an contentArea
@@ -184,6 +195,8 @@ public class TicketShellController {
 			activeContentController.filter(searchText);
 		});
 
+		bindSearchHits();
+
 		viewToggleGroup.selectedToggleProperty().addListener((obs, oldToggle, newToggle) -> {
 			if (newToggle == btnTableView) {
 				showTicketTableView();
@@ -203,6 +216,30 @@ public class TicketShellController {
 		if (presComboBox.getItems().size() == 2) {
 			presComboBox.getSelectionModel().select(1);
 		}
+	}
+
+	/**
+	 * "n Treffer" über dem Suchfeld (KARV-192): zählt, was die aktive Ansicht als Treffer zeigt. Der Tooltip wird mit
+	 * jeder neuen Trefferliste neu gebaut und zusätzlich beim Anzeigen (Namen können sich ohne neue Trefferliste ändern).
+	 */
+	private void bindSearchHits() {
+		Tooltip tooltip = new Tooltip(SearchHits.NO_HITS);
+		tooltip.setOnShowing(event -> updateSearchHitsTooltip(tooltip));
+		lblSearchHits.setTooltip(tooltip);
+		state.searchHits().addListener((ListChangeListener<Booking>) change -> refreshSearchHits(tooltip));
+		refreshSearchHits(tooltip);
+	}
+
+	/** Zahl und Tooltip nach neuen Treffern; der Text steht so schon fest, bevor der Tooltip sich bemisst. */
+	private void refreshSearchHits(Tooltip tooltip) {
+		lblSearchHits.setText(SearchHits.countText(state.searchHits().size()));
+		updateSearchHitsTooltip(tooltip);
+	}
+
+	private void updateSearchHitsTooltip(Tooltip tooltip) {
+		Event event = state.eventProperty().get();
+		List<Presentation> presentations = event == null || event.getPresentations() == null ? List.of() : event.getPresentations();
+		tooltip.setText(SearchHits.tooltipText(state.searchHits(), presentations, state.presentationProperty().get() == null));
 	}
 
 	/** Das gewählte Event gilt für die Shell und den Inhalt; die Vorstellung steht danach auf "Alle Vorstellungen". */
@@ -271,10 +308,13 @@ public class TicketShellController {
 
 			// Inhalt im mittleren Bereich austauschen; ein offener Dialog der alten Ansicht würde sonst stehen bleiben
 			PopupWindows.hideOwnedBy(contentArea.getScene() == null ? null : contentArea.getScene().getWindow());
-			contentArea.getChildren().setAll(view);
+			// Der Hinweis zur Auswahl liegt über der Ansicht (KARV-194)
+			contentArea.getChildren().setAll(view, selectionHint.node());
 
 			// Der Ausschnitt der alten Ansicht gilt nicht mehr, die Auswahl bleibt: Die neue Ansicht bekommt sie unten zurück
 			List<Booking> keptSelection = new ArrayList<>(state.selectedBookings());
+			// Ab jetzt zählen nur die Treffer der neuen Ansicht; die alte kann noch zeichnen (KARV-192)
+			state.setActiveView(activeContentController);
 			state.resetView();
 			if (activeContentController instanceof SalesStateAware aware) {
 				aware.setSalesState(state);

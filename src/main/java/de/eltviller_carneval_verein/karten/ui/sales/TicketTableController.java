@@ -705,20 +705,52 @@ public class TicketTableController implements ContentController, SalesStateAware
 		seatTable.getSelectionModel().getSelectedItems().addListener((ListChangeListener<BookingDTO>) change -> {
 			state.replaceSelection(selectedBookings());
 		});
+		reportSearchHits(state);
+	}
+
+	/**
+	 * Meldet die gezeigten Zeilen als Treffer (KARV-192): die Items der Tabelle, also nach Suche und Spaltenfilter von
+	 * ControlsFX und in der Sortierung der Ansicht, nicht {@code filteredData}. Ersetzt jemand die Items, gilt die neue
+	 * Liste.
+	 */
+	private void reportSearchHits(SalesViewState state) {
+		Runnable report = () -> state.showSearchHits(this, seatTable.getItems().stream().map(BookingDTO::getBooking).toList());
+		ListChangeListener<BookingDTO> rowsChanged = change -> report.run();
+		seatTable.getItems().addListener(rowsChanged);
+		seatTable.itemsProperty().addListener((obs, oldItems, newItems) -> {
+			if (oldItems != null) {
+				oldItems.removeListener(rowsChanged);
+			}
+			if (newItems != null) {
+				newItems.addListener(rowsChanged);
+			}
+			report.run();
+		});
+		report.run();
 	}
 
 	/** Wählt die Zeilen der Buchungen, die die Tabelle zeigt (nach dem Wechsel von der Saalansicht). */
 	@Override
 	public void restoreSelection(java.util.Collection<Booking> bookings) {
-		seatTable.getSelectionModel().clearSelection();
+		select(seatTable, bookings);
+	}
+
+	/**
+	 * Wählt die Zeilen der Buchungen. Die Indizes zählen in den Zeilen der Tabelle, nicht in filteredData: Die
+	 * Spaltenkopf-Filter von ControlsFX ersetzen die Liste der Tabelle durch eine eigene, sortierte und gefilterte
+	 * (KARV-196).
+	 */
+	static void select(TableView<BookingDTO> table, java.util.Collection<Booking> bookings) {
+		table.getSelectionModel().clearSelection();
+		List<BookingDTO> rows = table.getItems();
 		List<Integer> indices = new ArrayList<>();
-		for (int index = 0; index < filteredData.size(); index++) {
-			if (bookings.contains(filteredData.get(index).getBooking())) {
+		for (int index = 0; index < rows.size(); index++) {
+			if (bookings.contains(rows.get(index).getBooking())) {
 				indices.add(index);
 			}
 		}
 		if (!indices.isEmpty()) {
-			seatTable.getSelectionModel().selectIndices(indices.get(0), indices.subList(1, indices.size()).stream().mapToInt(Integer::intValue).toArray());
+			table.getSelectionModel().selectIndices(indices.get(0), indices.subList(1, indices.size()).stream().mapToInt(Integer::intValue).toArray());
 		}
 	}
 

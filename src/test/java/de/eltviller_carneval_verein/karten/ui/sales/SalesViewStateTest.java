@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -116,6 +117,40 @@ class SalesViewStateTest {
 		assertNull(state.visibleHallRectProperty().get());
 		assertSame(event, state.eventProperty().get());
 		assertSame(presentation, state.presentationProperty().get());
+	}
+
+	@Test
+	void onlyTheActiveViewReportsSearchHits() {
+		Object table = new Object();
+		Object hall = new Object();
+		Booking a = seat(1);
+		Booking b = seat(2);
+		state.setActiveView(table);
+
+		state.showSearchHits(table, List.of(a, b));
+		state.showSearchHits(hall, List.of(b)); // verlassene oder fremde Ansicht
+
+		assertEquals(List.of(a, b), state.searchHits());
+
+		state.setActiveView(hall);
+		state.showSearchHits(table, List.of(a)); // die verlassene Tabelle zeichnet noch
+		assertEquals(List.of(a, b), state.searchHits());
+		state.showSearchHits(hall, List.of(b));
+		assertEquals(List.of(b), state.searchHits());
+	}
+
+	@Test
+	void searchHitsAreReadOnlyAndClearedOnResetView() {
+		Object view = new Object();
+		state.setActiveView(view);
+		state.showSearchHits(view, List.of(seat(1)));
+
+		state.resetView();
+
+		assertTrue(state.searchHits().isEmpty());
+		assertThrows(UnsupportedOperationException.class, () -> state.searchHits().add(seat(2)));
+		state.showSearchHits(view, List.of(seat(3)));
+		assertEquals(1, state.searchHits().size(), "die aktive Ansicht bleibt nach resetView");
 	}
 
 	@Test

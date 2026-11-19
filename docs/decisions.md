@@ -44,9 +44,10 @@ not available, so there is no locking; arbitration is done by who creates a clai
 
 ## Offline detection for cloud folders (KARV-127)
 
-**Decision:** A shared folder that belongs to Nextcloud (found through `nextcloud.cfg`) or OneDrive (the `OneDrive*`
-environment variables) only counts as reachable if its server also answers a TCP connect (`CloudFolders`,
-`ServerProbe`: no proxy, two attempts, 5 s in total). Network drives and plain local folders are checked as before.
+**Decision:** A shared folder that belongs to Nextcloud (found through `nextcloud.cfg`: `%APPDATA%\Nextcloud` on
+Windows; on Linux `$XDG_CONFIG_HOME/Nextcloud` or `~/.config/Nextcloud` and the Flatpak's config folder, KARV-179)
+or OneDrive (the `OneDrive*` environment variables) only counts as reachable if its server also answers a TCP connect
+(`CloudFolders`, `ServerProbe`: no proxy, two attempts, 5 s in total). Network drives and plain local folders are checked as before.
 Every tick runs the full check. "Verbindung zum Cloud-Server prüfen" (on by default) switches the server check off.
 
 **Why:** A sync folder lies on the local disk and was therefore always "reachable". Without internet, new sales
@@ -696,7 +697,7 @@ through to the seat. The cross is white because a dark one swallowed the black s
 ## One "Anzeige" choice for all plan views, restored at start (KARV-76)
 
 **Decision:** Sales view, customer display and hall editor share one app-wide `DisplayPreferences` (rows, tables, seat
-numbers, hall objects, seat patterns, purchase summary placement). It is installed in `MainApp` at start and written to
+numbers, hall objects, seat patterns, selection hint at the pointer (KARV-194) and its placement above or below, with or without avoiding edges (KARV-197), purchase summary placement). It is installed in `MainApp` at start and written to
 `settings.json` (`display`) on every change as a partial save. With "Anzeige beim Start wiederherstellen" (on by
 default) the next start uses the stored choice; off, every start shows everything with the placement "Automatisch".
 

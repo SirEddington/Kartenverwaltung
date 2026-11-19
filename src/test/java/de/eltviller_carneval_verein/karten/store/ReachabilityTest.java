@@ -8,7 +8,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.BooleanSupplier;
 
 import org.junit.jupiter.api.Test;
@@ -74,10 +73,10 @@ class ReachabilityTest {
 	private static CloudFolders cloudAt(Path dir) {
 		String cfg = "[Accounts]\n0\\url=https://cloud.example.de\n0\\Folders\\1\\localPath="
 				+ dir.toString().replace('\\', '/') + "/\n";
-		return new CloudFolders(() -> Optional.of(cfg), name -> null);
+		return new CloudFolders(() -> List.of(cfg), name -> null);
 	}
 
-	private static final CloudFolders NO_CLOUD = new CloudFolders(Optional::empty, name -> null);
+	private static final CloudFolders NO_CLOUD = new CloudFolders(List::of, name -> null);
 
 	/** Antwortet nach der Reihe mit {@code answers} (danach wie zuletzt) und zählt die Fragen. */
 	private static final class ScriptedServer implements ServerProbe {

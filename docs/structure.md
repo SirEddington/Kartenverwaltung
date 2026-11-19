@@ -43,7 +43,7 @@ Kartenverwaltung/
     │   │   ├── util/         (4 classes)
     │   │   └── ui/           (33 classes in the root package)
     │   │       ├── accounting/ (6)  backup/ (6)   event/ (8)    hall/ (17)   input/ (11)
-    │   │       └── menu/ (2)        sales/ (31)   settings/ (9) shared/ (30)
+    │   │       └── menu/ (2)        sales/ (33)   settings/ (9) shared/ (30)
     │   └── resources/de/eltviller_carneval_verein/karten/
     │       ├── patchnotes.md     Patch notes of every version (KARV-125), newest first
     │       └── ui/
@@ -98,7 +98,7 @@ The domain-agnostic version store: file formats (`Version`, `Claim`, `Feed`, `St
 `LocalArbiter`, `SharedArbiter`), content gate (`ContentGate`), sync (`SyncService`, `Uploader`,
 `FeedReader`/`FeedWriter`, `FullSync`, `FullSyncRun`, `Reachability`, `CloudFolders`, `ServerProbe`), conflicts
 (`ConflictResolver`, `ConflictLedger`, `ConflictNote`), healing (`DamageRepair`), machine identity and locking
-(`MachineIdentity`, `Ownership`, `InstanceLock`), start index (`UnitIndex`), `connection.json` (`ConnectionMarker`),
+(`MachineIdentity`, `ComputerName`, `Ownership`, `InstanceLock`), start index (`UnitIndex`), `connection.json` (`ConnectionMarker`),
 user-facing technical messages (`StoreMessages`, SYS-005…SYS-013).
 **Not here:** UI code or knowledge of events/halls; business conflict rules are injected via `ConflictPolicy`.
 
@@ -108,7 +108,8 @@ user-facing technical messages (`StoreMessages`, SYS-005…SYS-013).
 ### `settings`
 `AppSettings` (`sharedDir`, `saveBookingsImmediately`, `checkCloudServer`, `recentOperators`, `display`,
 `patchNotesSeen`), `DisplaySettings` (the "Anzeige" menu: rows, tables, seat numbers, hall objects, `seatPatterns`,
-`summaryPlacement` as text, `restoreAtStart`) and `SettingsStore` (`<AppData>/settings.json`, `saveOnly` for partial
+`selectionHint`, `selectionHintPlacement` and `summaryPlacement` as text, `selectionHintAvoidEdges`,
+`restoreAtStart`) and `SettingsStore` (`<AppData>/settings.json`, `saveOnly` for partial
 saves, `existedAtLoad()`). Always read through `SettingsStore.getInstance().current()`.
 
 ### `update`
