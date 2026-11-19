@@ -31,6 +31,7 @@ import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.ui.ColumnMinWidths;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
+import de.eltviller_carneval_verein.karten.ui.DisplayPreferences;
 import de.eltviller_carneval_verein.karten.ui.EditingUnits;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.GermanDecimalStringConverter;
@@ -50,12 +51,15 @@ import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.WeakChangeListener;
 import javafx.event.EventType;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollBar;
 import javafx.scene.control.TreeItem;
@@ -100,9 +104,20 @@ public class TicketTableController implements ContentController, SalesStateAware
 	// Der Suchtext, nach dem die Tabelle gerade filtert (die Shell gibt ihn mit filter vor)
 	private String searchQuery = "";
 	private final TicketFilter columnFilter = new TicketFilter();
-	/** Die Gruppierung; ohne Bedienung dafür noch keine (KARV-193, folgt). */
-	private final List<TicketColumn> grouping = List.of();
-	private final GroupOrder groupOrder = GroupOrder.VALUE;
+	/** Gruppierung und Gruppenordnung aus {@link DisplayPreferences} (Menü "Gruppieren"), Stand der letzten Änderung. */
+	private List<TicketColumn> grouping = List.of();
+	private GroupOrder groupOrder = GroupOrder.VALUE;
+	// Schwach angemeldet (KARV-76): Der Controller entsteht bei jedem Wechsel zur Saalansicht und zurück neu, die
+	// Einstellungen leben mit der App. Die Felder halten die Listener, solange die Tabelle lebt. Der Neuaufbau wartet wie
+	// jeder andere, bis keine Zelle mehr bearbeitet wird; erst er übernimmt die Gruppierung in die Tabelle.
+	private final ChangeListener<List<TicketColumn>> groupingChanges = (obs, before, now) -> {
+		grouping = now;
+		this.edits.requestRebuild();
+	};
+	private final ChangeListener<GroupOrder> groupOrderChanges = (obs, before, now) -> {
+		groupOrder = now == null ? GroupOrder.VALUE : now;
+		this.edits.requestRebuild();
+	};
 	private TicketTreeTable treeTable;
 	private TicketEdits edits;
 	private SalesViewState salesState;
@@ -166,6 +181,12 @@ public class TicketTableController implements ContentController, SalesStateAware
 	@FXML
 	private TreeTableColumn<TicketRow, LocalDate> colCollectedOn;
 
+	// Leiste "Gruppieren" über der Tabelle
+	@FXML
+	private MenuButton btnGrouping;
+	@FXML
+	private Label lblGrouping;
+
 	// Leiste über der Tabelle, solange Buchungen ohne Platz da sind
 	@FXML
 	private HBox unassignedBar;
@@ -201,6 +222,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		edits = new TicketEdits(() -> seatTable.getEditingCell() != null, this::rebuild);
 		treeTable.setRebuild(edits::requestRebuild);
 		treeTable.setFrozen(this::isDialogOpen);
+		bindGrouping();
 
 		// 3. CellFactories & Edit-Handler einmalig aufsetzen, Spaltenfilter im Kopf jeder Datenspalte
 		setupCellFactories();
@@ -227,17 +249,9 @@ public class TicketTableController implements ContentController, SalesStateAware
 		// nicht markierten Zeile gilt das Menü nur für diese Zeile (bei einer Gruppe für ihre Buchungen), auf einer markierten
 		// für die ganze Auswahl, wie im Explorer. "Platz zuweisen…" gibt es nur auf einer Buchung ohne Platz und gilt nur für
 		// sie. "Stornieren" gilt wie der Sammelverkauf für die Auswahl und ist gesperrt, wenn keine gewählte Buchung Daten trägt.
+		// Die Zeilen zeigen den Kopf einer Gruppe über die ganze Breite und Buchungen ohne Platz kursiv (TicketTreeRow)
 		seatTable.setRowFactory(table -> {
-			TreeTableRow<TicketRow> row = new TreeTableRow<>() {
-				@Override
-				protected void updateItem(TicketRow item, boolean empty) {
-					super.updateItem(item, empty);
-					// Buchungen ohne Platz kursiv: Sie haben keinen Sitz in der Bestuhlung
-					boolean unassigned = !empty && item instanceof TicketRow.BookingRow booking && booking.dto().getBooking().isUnassigned();
-					setStyle(unassigned ? "-fx-font-style: italic;" : "");
-					pseudoClassStateChanged(TicketTreeTable.GROUP_SELECTED, !empty && treeTable.isGroupSelected(getTreeItem()));
-				}
-			};
+			TreeTableRow<TicketRow> row = new TicketTreeRow(treeTable);
 			row.setOnContextMenuRequested(event -> {
 				event.consume();
 				TreeItem<TicketRow> clicked = row.getTreeItem();
@@ -280,6 +294,20 @@ public class TicketTableController implements ContentController, SalesStateAware
 		LiveViews.whileShown(seatTable, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges),
 				LockedSeats.whileShown(this::refreshAfterForeignChange),
 				Registration.onDetach(() -> EditingUnits.getInstance().end(seatTable)));
+	}
+
+	/**
+	 * Gruppierung und Gruppenordnung kommen aus {@link DisplayPreferences} (beim Start nur mit "Anzeige beim Start
+	 * wiederherstellen") und gelten so auch nach dem Wechsel zur Saalansicht und zurück. Das Menü "Gruppieren" ändert sie
+	 * dort; jede Änderung baut die Tabelle neu auf.
+	 */
+	private void bindGrouping() {
+		DisplayPreferences preferences = DisplayPreferences.instance();
+		grouping = preferences.ticketGroupingProperty().get();
+		groupOrder = Objects.requireNonNullElse(preferences.ticketGroupOrderProperty().get(), GroupOrder.VALUE);
+		preferences.ticketGroupingProperty().addListener(new WeakChangeListener<>(groupingChanges));
+		preferences.ticketGroupOrderProperty().addListener(new WeakChangeListener<>(groupOrderChanges));
+		new GroupingMenu(btnGrouping, lblGrouping, preferences.ticketGroupingProperty(), preferences.ticketGroupOrderProperty());
 	}
 
 	/**
@@ -716,6 +744,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		allRows = buildRows();
 		String query = searchQuery;
 		List<BookingDTO> shown = edits.visible(allRows, dto -> BookingSearch.matches(dto.getBooking(), query) && columnFilter.passes(dto));
+		treeTable.setGrouping(grouping);
 		treeTable.show(TicketGrouping.group(shown, grouping, groupOrder, treeTable.sortComparator(), shownPresentations()));
 		if (salesState != null) {
 			salesState.showSearchHits(this, treeTable.allBookings());

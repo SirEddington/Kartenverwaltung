@@ -34,6 +34,9 @@ public final class ColumnMinWidths {
 	static final double SORT_ARROW_SPACE = 16;
 	/** Platz, den der senkrechte Rollbalken von der Tabellenbreite abzieht, sobald die Zeilen nicht mehr hineinpassen. */
 	static final double SCROLL_BAR_SPACE = 20;
+	/** Schlüssel in {@code getProperties()} der Spalte: ihre Untergrenze und die Neuberechnung ihrer Mindestbreite. */
+	private static final Object FLOOR = new Object();
+	private static final Object UPDATE = new Object();
 
 	private ColumnMinWidths() {
 	}
@@ -109,18 +112,32 @@ public final class ColumnMinWidths {
 		headers.forEach(header -> watch(header, contentFloors));
 	}
 
+	/**
+	 * Ändert die Untergrenze einer Spalte nachträglich, etwa die der Spalte für Pfeil und Einrückung der Kartentabelle mit
+	 * der Zahl der Ebenen (KARV-193). Die Mindestbreite bleibt mindestens so breit wie die Überschrift.
+	 */
+	public static void setFloor(TableColumnBase<?, ?> column, double floor) {
+		column.getProperties().put(FLOOR, floor);
+		if (column.getProperties().get(UPDATE) instanceof Runnable update) {
+			update.run();
+		} else {
+			column.setMinWidth(floor); // der Kopf ist noch nicht gemessen; watch nimmt die Untergrenze dann mit
+		}
+	}
+
 	private static void watch(TableColumnHeader header, Map<? extends TableColumnBase<?, ?>, Double> contentFloors) {
 		if (!(header.lookup(".label") instanceof Label label)) {
 			return;
 		}
 		TableColumnBase<?, ?> column = header.getTableColumn();
-		double floor = contentFloors.getOrDefault(column, 0.0);
-		InvalidationListener update = o -> column.setMinWidth(Math.max(floor, label.prefWidth(-1)
+		column.getProperties().putIfAbsent(FLOOR, contentFloors.getOrDefault(column, 0.0));
+		Runnable update = () -> column.setMinWidth(Math.max((Double) column.getProperties().get(FLOOR), label.prefWidth(-1)
 				+ header.snappedLeftInset() + header.snappedRightInset() + SORT_ARROW_SPACE));
+		column.getProperties().put(UPDATE, update);
 		// Das Stylesheet setzt die Schrift, bevor das Label seine Skin hat; erst mit ihr lässt es sich messen
 		for (Observable measure : List.of(label.skinProperty(), label.fontProperty(), label.textProperty(), label.graphicProperty())) {
-			measure.addListener(update);
+			measure.addListener(o -> update.run());
 		}
-		update.invalidated(null);
+		update.run();
 	}
 }

@@ -14,6 +14,12 @@
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
 
+    <!-- Gruppieren (KARV-193): Menü mit den Spalten und der Gruppenordnung, daneben die aktive Gruppierung -->
+    <HBox spacing="10.0" alignment="CENTER_LEFT">
+        <MenuButton fx:id="btnGrouping" text="Gruppieren" styleClass="button-secondary" minWidth="-Infinity" />
+        <Label fx:id="lblGrouping" />
+    </HBox>
+
     <!-- Buchungen ohne Platz (nach einem Bestuhlungswechsel): nur sichtbar, wenn es welche gibt -->
     <HBox fx:id="unassignedBar" spacing="10.0" alignment="CENTER_LEFT" visible="false" managed="false">
         <Label fx:id="lblUnassigned" />

@@ -145,16 +145,20 @@ class TicketTreeTableTest {
 		return row instanceof TicketRow.BookingRow booking ? value.apply(booking.dto().getBooking()) : null;
 	}
 
-	/** Zeigt die Tabelle mit Gruppierung {@link #grouping}; die Bedienung von {@link TableInput} hängt hinter der Baumtabelle. */
+	/**
+	 * Zeigt die Tabelle mit Gruppierung {@link #grouping} und den Zeilen der Kartentabelle ({@link TicketTreeRow}); die
+	 * Bedienung von {@link TableInput} hängt hinter der Baumtabelle. Die Spalte für Pfeil und Einrückung ist schmal und
+	 * zeigt nichts, wie im FXML.
+	 */
 	private void show() throws Exception {
 		run(() -> {
 			table = new TreeTableView<>();
 			table.setEditable(true);
-			TreeTableColumn<TicketRow, String> colTree = column("", row -> row instanceof TicketRow.GroupRow group
-					? group.column().header() + ": " + group.text() + " (" + group.count() + ")" : null);
-			colTree.setPrefWidth(200);
+			TreeTableColumn<TicketRow, String> colTree = new TreeTableColumn<>("");
+			colTree.setPrefWidth(30);
 			colTree.setSortable(false);
 			colTree.setEditable(false);
+			colTree.setReorderable(false);
 			TreeTableColumn<TicketRow, String> colLast = column("Nachname", row -> bookingText(row, Booking::getLastName));
 			TreeTableColumn<TicketRow, String> colFirst = column("Vorname", row -> bookingText(row, Booking::getFirstName));
 			for (TreeTableColumn<TicketRow, String> data : List.of(colLast, colFirst)) {
@@ -163,12 +167,13 @@ class TicketTreeTableTest {
 			}
 			table.getColumns().setAll(List.of(colTree, colLast, colFirst));
 			tree = new TicketTreeTable(table, colTree);
+			table.setRowFactory(view -> new TicketTreeRow(tree));
 			tree.setRebuild(() -> {
 				rebuilds++;
-				tree.show(nodes());
+				showNodes();
 			});
 			TableInput.install(table, row -> row instanceof TicketRow.BookingRow);
-			tree.show(nodes());
+			showNodes();
 			stage = new Stage();
 			stage.setScene(new Scene(table, 700, 500));
 			stage.show();
@@ -178,8 +183,14 @@ class TicketTreeTableTest {
 		});
 	}
 
+	/** Neuaufbau wie im Controller: erst die Gruppierung (eine Kopie, wie aus den Einstellungen), dann der Baum. */
+	private void showNodes() {
+		tree.setGrouping(List.copyOf(grouping));
+		tree.show(nodes());
+	}
+
 	private void rebuild() throws Exception {
-		run(() -> tree.show(nodes()));
+		run(this::showNodes);
 	}
 
 	// ---- Zugriff ----
@@ -889,5 +900,157 @@ class TicketTreeTableTest {
 
 		assertEquals(List.of(s1), selected(), "Tab: Menge = die Buchung im neuen Fokus");
 		assertEquals(4, focusedRow());
+	}
+
+	// ---- Gruppenkopf und Spalte für Pfeil und Einrückung ----
+
+	/** Der Kopf einer Gruppenzeile; {@code null}, wenn die Zeile keinen zeigt. */
+	private javafx.scene.control.Label header(int row) {
+		for (Node node : rowNode(row).getChildrenUnmodifiable()) {
+			if (node instanceof javafx.scene.control.Label label && label.getStyleClass().contains(TicketTreeRow.HEADER_STYLE_CLASS)) {
+				return label.isVisible() ? label : null;
+			}
+		}
+		return null;
+	}
+
+	private String headerText(int row) throws Exception {
+		return onFx(() -> {
+			javafx.scene.control.Label label = header(row);
+			return label == null ? null : label.getText();
+		});
+	}
+
+	/** Die Spalte für Pfeil und Einrückung; nur auf dem FX-Thread. */
+	private TreeTableColumn<TicketRow, ?> treeColumn() {
+		return table.getColumns().get(TREE);
+	}
+
+	@Test
+	void kopftextMitAnzahl() throws Exception {
+		booking("Müller", "Carl");
+		booking("Müller", "Dirk");
+		show();
+
+		// 0 Müller (4), 1–4 Buchungen, 5 Schmidt (1), 6 s1, 7 Weber (2)
+		assertEquals("Nachname: Müller (4)", headerText(0));
+		assertEquals("Nachname: Schmidt (1)", headerText(5));
+		assertNull(headerText(1), "eine Buchungszeile zeigt keinen Kopf");
+
+		double[] bounds = onFx(() -> {
+			TreeTableRow<?> row = rowNode(0);
+			javafx.scene.control.Label label = header(0);
+			Bounds arrow = row.getDisclosureNode().getBoundsInParent();
+			return new double[] { label.getBoundsInParent().getMinX(), label.getBoundsInParent().getMaxX(), arrow.getMaxX(), label.getWidth(),
+					table.getColumns().get(TREE).getWidth(), label.prefWidth(-1) };
+		});
+		assertTrue(bounds[0] >= bounds[2] - 0.5, "der Kopf beginnt hinter dem Pfeil");
+		assertTrue(bounds[0] < bounds[4], "der Kopf beginnt noch in der Spalte des Pfeils");
+		assertTrue(bounds[1] > bounds[4], "der Kopf reicht über die Spalte des Pfeils hinaus");
+		assertEquals(bounds[5], bounds[3], 0.5, "der Kopf ist nicht auf eine Spalte beschnitten, sondern so breit wie sein Text");
+		assertTrue(onFx(() -> rowNode(0).getPseudoClassStates().contains(TicketTreeRow.GROUP)));
+		assertFalse(onFx(() -> rowNode(1).getPseudoClassStates().contains(TicketTreeRow.GROUP)));
+	}
+
+	@Test
+	void kopfFolgtNeuaufbau() throws Exception {
+		show();
+		assertEquals("Nachname: Müller (2)", headerText(0));
+
+		booking("Müller", "Carl");
+		rebuild();
+
+		assertEquals("Nachname: Müller (3)", headerText(0));
+	}
+
+	@Test
+	void tiefereEbeneRuecktKopfEinUndPfeilBleibtSichtbar() throws Exception {
+		grouping = List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME);
+		show();
+		// 0 Müller, 1 Anna, 2 m1, ...
+		assertEquals("Vorname: Anna (1)", headerText(1));
+
+		double[] result = onFx(() -> {
+			Node top = rowNode(0).getDisclosureNode();
+			Node deep = rowNode(1).getDisclosureNode();
+			return new double[] { header(0).getBoundsInParent().getMinX(), header(1).getBoundsInParent().getMinX(), deep.isVisible() ? 1 : 0,
+					deep.getOpacity(), top.getOpacity() };
+		});
+		assertTrue(result[1] > result[0], "der Kopf der zweiten Ebene steht weiter rechts");
+		assertEquals(1, result[2]);
+		assertEquals(1.0, result[3], 0.01, "die Spalte ist breit genug für den Pfeil der tiefsten Ebene");
+		assertEquals(1.0, result[4], 0.01);
+		double twoLevels = onFx(() -> treeColumn().getMinWidth());
+
+		grouping = List.of(TicketColumn.LAST_NAME);
+		rebuild();
+		double oneLevel = onFx(() -> treeColumn().getMinWidth());
+		assertTrue(twoLevels > oneLevel, "die Mindestbreite richtet sich nach der Zahl der Ebenen: " + twoLevels + " / " + oneLevel);
+	}
+
+	@Test
+	void ohneGruppierungKeineEinrueckungNachAufheben() throws Exception {
+		grouping = List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME);
+		show();
+		assertTrue(onFx(() -> treeColumn().isVisible()), "mit Gruppierung ist die Spalte für den Pfeil zu sehen");
+
+		grouping = List.of();
+		rebuild();
+
+		assertFalse(onFx(() -> treeColumn().isVisible()), "ohne Gruppierung ist sie ausgeblendet");
+		assertSame(m1, bookingAt(0));
+		double[] result = onFx(() -> {
+			TreeTableRow<?> row = rowNode(0);
+			IndexedCell<?> cell = cell(0, LAST);
+			Node text = cell.lookup(".text");
+			return new double[] { text.getBoundsInParent().getMinX(), cell.snappedLeftInset(), row.getDisclosureNode() == null
+					|| !row.getDisclosureNode().isVisible() ? 0 : 1, cell.getBoundsInParent().getMinX() };
+		});
+		assertEquals(result[1], result[0], 0.5, "die erste Datenspalte ist nicht eingerückt");
+		assertEquals(0, result[2], "kein Pfeil");
+		assertEquals(0, result[3], 0.5, "die erste Datenspalte steht ganz links");
+		assertNull(headerText(0));
+	}
+
+	@Test
+	void zugeklapptBleibtNachFremderAenderung() throws Exception {
+		show();
+		setExpanded(5, false); // Weber
+
+		s1.setFirstName("Clarissa"); // fremde Änderungen
+		booking("Albers", "Gerd");
+		rebuild();
+
+		// 0 Albers, 1 a, 2 Müller, 3 m1, 4 m2, 5 Schmidt, 6 s1, 7 Weber (zu)
+		assertFalse(onFx(() -> table.getTreeItem(7).isExpanded()), "dieselbe Gruppierung behält die zugeklappten Gruppen");
+
+		grouping = List.of(TicketColumn.FIRST_NAME);
+		rebuild();
+		grouping = List.of(TicketColumn.LAST_NAME);
+		rebuild();
+
+		assertTrue(onFx(() -> table.getTreeItem(7).isExpanded()), "eine andere Gruppierung vergisst die zugeklappten Gruppen");
+		assertEquals(10, onFx(() -> table.getExpandedItemCount()));
+	}
+
+	@Test
+	void markierungDerGruppeUeberlebtNeuzeichnen() throws Exception {
+		show();
+		click(0);
+
+		run(() -> table.refresh()); // Zeilen werden neu befüllt, wie beim Scrollen
+
+		assertTrue(onFx(() -> rowNode(0).getPseudoClassStates().contains(TicketTreeTable.GROUP_SELECTED)));
+		assertFalse(onFx(() -> rowNode(3).getPseudoClassStates().contains(TicketTreeTable.GROUP_SELECTED)));
+	}
+
+	@Test
+	void buchungOhnePlatzKursiv() throws Exception {
+		m1.setUnassigned(true);
+		show();
+
+		assertTrue(onFx(() -> rowNode(1).getStyle().contains("italic")), "eine Buchung ohne Platz ist kursiv");
+		assertFalse(onFx(() -> rowNode(2).getStyle().contains("italic")));
+		assertFalse(onFx(() -> rowNode(0).getStyle().contains("italic")), "ein Gruppenkopf nicht");
 	}
 }

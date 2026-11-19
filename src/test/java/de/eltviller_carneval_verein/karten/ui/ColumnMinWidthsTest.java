@@ -158,6 +158,30 @@ class ColumnMinWidthsTest {
 		assertTrue(width >= 80, "Breite " + width);
 	}
 
+	/** Die Spalte für Pfeil und Einrückung der Kartentabelle ändert ihre Untergrenze mit der Zahl der Ebenen (KARV-193). */
+	@Test
+	void untergrenzeLaesstSichSpaeterAendern() throws Exception {
+		double[] result = onFx(() -> {
+			TableColumn<String, String> tree = column("");
+			TableColumn<String, String> comment = column("Kommentar");
+			TableView<String> table = table(Map.of(), tree, comment);
+			double headerOnly = tree.getMinWidth();
+			ColumnMinWidths.setFloor(tree, 90);
+			table.resizeColumn(tree, -1000);
+			layout(table);
+			double raised = tree.getWidth();
+			tree.setText("x"); // ein neu gemessener Kopf behält die Untergrenze
+			layout(table);
+			double afterHeader = tree.getMinWidth();
+			ColumnMinWidths.setFloor(tree, 0);
+			return new double[] { headerOnly, raised, afterHeader, tree.getMinWidth() };
+		});
+		assertTrue(result[0] < 90, "ohne Untergrenze nur der Kopf: " + result[0]);
+		assertTrue(result[1] >= 90, "Breite " + result[1]);
+		assertTrue(result[2] >= 90, "Mindestbreite " + result[2]);
+		assertTrue(result[3] < 90, "wieder nur der Kopf: " + result[3]);
+	}
+
 	/** Passen die Mindestbreiten nicht hinein, ragten die letzten Spalten sonst ohne Rollbalken aus der Tabelle. */
 	@Test
 	void narrowTableScrollsInsteadOfCuttingOffColumns() throws Exception {

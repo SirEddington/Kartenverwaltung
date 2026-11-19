@@ -519,6 +519,21 @@
 
  .ticket-table .tree-table-row-cell:group-selected .tree-table-cell {
      -fx-text-fill: -fx-ecv-blue;
+     -fx-border-color: transparent -fx-ecv-blue transparent transparent;
+     -fx-border-width: 1px;
+ }
+
+ /* Kopf einer Gruppenzeile (TicketTreeRow): fett, ab dem Pfeil über so viele Spalten wie nötig. Der Hintergrund der
+    Zeile verdeckt die Spaltenlinien hinter dem Text. */
+ .ticket-table .tree-table-row-cell > .group-header {
+     -fx-background-color: inherit;
+     -fx-font-weight: bold;
+     -fx-padding: 0 8px 0 2px;
+     -fx-text-fill: -fx-text-background-color;
+ }
+
+ .ticket-table .tree-table-row-cell:group-selected > .group-header {
+     -fx-text-fill: -fx-ecv-blue;
  }
 
  /* Kartentabelle (KARV-193): Filtersymbol im Kopf einer Spalte mit aktivem Filter (ColumnFilterMenu), gelb auf dem

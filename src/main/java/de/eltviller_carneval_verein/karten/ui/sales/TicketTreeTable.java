@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.ui.ColumnMinWidths;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
@@ -56,6 +57,8 @@ public final class TicketTreeTable {
 
 	/** Ab dieser Strecke ist ein Druck ein Ziehen, wie in {@code TableInput}. */
 	private static final double DRAG_THRESHOLD = 4;
+	/** Rand rechts vom Pfeil der tiefsten Ebene in seiner Spalte. */
+	private static final double TREE_COLUMN_SPACE = 4;
 
 	private final TreeTableView<TicketRow> table;
 	private final TreeTableColumn<TicketRow, ?> treeColumn;
@@ -67,6 +70,10 @@ public final class TicketTreeTable {
 
 	private List<TicketNode> nodes = List.of();
 	private final TicketTreeBuilder tree = new TicketTreeBuilder();
+	private List<TicketColumn> grouping = List.of();
+	/** Bis zur ersten Messung die Werte von Modena bei 13 px (Einrückung 1em, Pfeil mit Innenabstand). */
+	private double indentPerLevel = 13;
+	private double arrowWidth = 20;
 
 	private Runnable rebuild = () -> {
 	};
@@ -264,6 +271,43 @@ public final class TicketTreeTable {
 		selection.clear();
 		adjust();
 		publish();
+	}
+
+	// ---- Gruppierung und Spalte für Pfeil und Einrückung ----
+
+	/**
+	 * Die Gruppierung, nach der der nächste Baum für {@link #show} gebaut ist; vor jedem Neuaufbau aufzurufen. Eine andere
+	 * Gruppierung als bisher vergisst die zugeklappten Gruppen ({@link #clearCollapsed}). Die Spalte für Pfeil und
+	 * Einrückung ist nur mit Gruppierung zu sehen und mindestens so breit wie Pfeil und Einrückung der tiefsten Ebene:
+	 * JavaFX blendet den Pfeil sonst aus. Ausgeblendet rückt sie keine Datenspalte ein, denn sie bleibt die
+	 * {@code treeColumn} der Tabelle (Spec Abschnitt 4).
+	 */
+	public void setGrouping(List<TicketColumn> columns) {
+		List<TicketColumn> next = List.copyOf(columns);
+		if (!next.equals(grouping)) {
+			grouping = next;
+			clearCollapsed();
+		}
+		treeColumn.setVisible(!grouping.isEmpty());
+		updateTreeColumnFloor();
+	}
+
+	/**
+	 * Was eine Gruppenzeile beim Layout misst ({@link TicketTreeRow}): Einrückung je Ebene und Breite des Pfeils, beide
+	 * aus dem Stylesheet. Ändern sie sich, passt die Mindestbreite der Spalte für den Pfeil sich an.
+	 */
+	void arrowMeasured(double indent, double arrowWidth) {
+		if (indent != indentPerLevel || arrowWidth != this.arrowWidth) {
+			indentPerLevel = indent;
+			this.arrowWidth = arrowWidth;
+			updateTreeColumnFloor();
+		}
+	}
+
+	private void updateTreeColumnFloor() {
+		if (!grouping.isEmpty()) {
+			ColumnMinWidths.setFloor(treeColumn, indentPerLevel * (grouping.size() - 1) + arrowWidth + TREE_COLUMN_SPACE);
+		}
 	}
 
 	/** Vergisst die zugeklappten Gruppen und klappt alle auf (andere oder keine Gruppierung). */
