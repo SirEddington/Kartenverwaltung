@@ -118,7 +118,7 @@ public final class TableInput {
 				|| !(access.cellOf(event.getTarget()) instanceof ParsingCell) || !access.isEditable()) {
 			return;
 		}
-		TableGestures.suspendEditing(access::setEditable);
+		TableGestures.suspendEditing(access.editableProperty());
 	}
 
 	private static void onKeyTyped(TableAccess access, KeyEvent event) {

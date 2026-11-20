@@ -449,10 +449,18 @@ public final class TicketTreeTable {
 		}
 	}
 
-	/** Setzt die Pseudoklasse der sichtbaren Zeilen; die Zeilenfabrik setzt sie beim Wechsel des Inhalts selbst. */
+	/**
+	 * Setzt die Pseudoklasse der sichtbaren Zeilen, über die Zellen des {@code VirtualFlow} statt einer Suche im ganzen
+	 * Szenengraphen der Tabelle; die Zeilenfabrik setzt sie beim Wechsel des Inhalts selbst.
+	 */
 	private void markGroups() {
-		for (Node node : table.lookupAll(".tree-table-row-cell")) {
-			if (node instanceof TreeTableRow<?> row) {
+		VirtualFlow<?> flow = TableGestures.flowOf(table);
+		if (flow == null || flow.getFirstVisibleCell() == null || flow.getLastVisibleCell() == null) {
+			return;
+		}
+		int last = flow.getLastVisibleCell().getIndex();
+		for (int index = flow.getFirstVisibleCell().getIndex(); index <= last; index++) {
+			if (flow.getVisibleCell(index) instanceof TreeTableRow<?> row) {
 				row.pseudoClassStateChanged(GROUP_SELECTED, isGroupSelected(row.getTreeItem()));
 			}
 		}
@@ -637,9 +645,6 @@ public final class TicketTreeTable {
 			}
 			return;
 		}
-		if (type == MouseEvent.MOUSE_PRESSED || type == MouseEvent.MOUSE_RELEASED) {
-			guardMultiClick(event, row);
-		}
 		if (type == MouseEvent.MOUSE_PRESSED) {
 			onPress(event, row);
 		} else if (type == MouseEvent.MOUSE_DRAGGED) {
@@ -665,24 +670,40 @@ public final class TicketTreeTable {
 	}
 
 	/**
-	 * Ein Doppelklick bearbeitet nur die Zeile seines ersten Klicks. Ein Neuaufbau zwischen den Klicks (etwa nach dem Commit,
-	 * den der erste Druck auslöst) kann eine andere Buchung unter den Zeiger schieben; JavaFX begänne beim zweiten Druck
-	 * oder, ist die Zeile dort schon gewählt, beim Loslassen ihr Bearbeiten. Trifft ein Druck oder Loslassen mit Klickzahl
-	 * ab 2 eine andere Zeile, ist die Tabelle für die Dauer dieses Ereignisses nicht bearbeitbar
-	 * ({@link TableGestures#suspendEditing}). Nicht, solange eine Zelle bearbeitet wird: Deren Ende
-	 * ({@code table.edit(-1, null)}) bliebe sonst ohne Wirkung.
+	 * Sperre für längere Doppelklickzeiten (Spec Abschnitt 14.5): Ein Doppelklick wirkt nur auf die Zeile seines ersten
+	 * Klicks. Der Neuaufbau wartet zwar auf das Ende der Mausbedienung ({@link MouseGesture}); ist die Doppelklickzeit des
+	 * Systems aber länger als deren Nachlaufzeit, kann er zwischen die Klicks fallen und eine andere Buchung oder einen
+	 * Gruppenkopf unter den Zeiger schieben. Trifft ein Druck oder Loslassen mit Klickzahl ab 2 eine andere Zeile (andere
+	 * Buchung bzw. anderer Gruppenpfad, {@link TicketTreeBuilder#keyOf}) als der erste Klick, wird es verworfen: kein
+	 * Bearbeiten, kein Auf- oder Zuklappen, keine Änderung der Auswahl.
+	 *
+	 * <p>Die Filter hängen am Elternknoten {@code area} der Tabelle wie das Einfrieren bei offenem Dialog: Was dort
+	 * verbraucht wird, erreicht weder die Filter dieser Klasse noch {@code TableInput} noch das Verhalten von JavaFX (auf
+	 * der Tabelle selbst liefen die übrigen Filter trotz Verbrauch weiter).
 	 */
-	private void guardMultiClick(MouseEvent event, TreeTableRow<?> row) {
-		if (event.getButton() != MouseButton.PRIMARY) {
+	public void installMultiClickGuard(Node area) {
+		for (EventType<MouseEvent> type : List.of(MouseEvent.MOUSE_PRESSED, MouseEvent.MOUSE_RELEASED)) {
+			area.addEventFilter(type, this::guardMultiClick);
+		}
+	}
+
+	private void guardMultiClick(MouseEvent event) {
+		if (event.getButton() != MouseButton.PRIMARY || TableGestures.ancestor(event.getTarget(), node -> node == table) == null) {
 			return;
 		}
+		TreeTableRow<?> row = (TreeTableRow<?>) TableGestures.rowOf(event.getTarget(), TreeTableRow.class::isInstance);
 		Object key = row == null || row.isEmpty() ? null : tree.keyOf(row.getTreeItem());
+		boolean released = event.getEventType() == MouseEvent.MOUSE_RELEASED;
 		if (event.getClickCount() < 2) {
-			if (event.getEventType() == MouseEvent.MOUSE_PRESSED) {
+			if (!released) {
 				clickKey = key;
 			}
-		} else if (!Objects.equals(key, clickKey) && table.isEditable() && table.getEditingCell() == null) {
-			TableGestures.suspendEditing(table::setEditable);
+		} else if (!Objects.equals(key, clickKey) && (!released || event.isStillSincePress())) {
+			// Ein Loslassen nach einem Ziehen ist kein Klick: Es beendet das Ziehen und bleibt
+			event.consume();
+			if (released) {
+				finishPress(); // der Druck davor kam durch; ohne Loslassen bliebe er offen
+			}
 		}
 	}
 

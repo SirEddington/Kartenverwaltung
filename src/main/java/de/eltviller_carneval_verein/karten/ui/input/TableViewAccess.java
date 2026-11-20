@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui.input;
 
 import java.util.List;
 
+import javafx.beans.property.BooleanProperty;
 import javafx.scene.control.Control;
 import javafx.scene.control.IndexedCell;
 import javafx.scene.control.TableCell;
@@ -31,8 +32,8 @@ final class TableViewAccess<S> implements TableAccess {
 	}
 
 	@Override
-	public void setEditable(boolean editable) {
-		table.setEditable(editable);
+	public BooleanProperty editableProperty() {
+		return table.editableProperty();
 	}
 
 	@Override

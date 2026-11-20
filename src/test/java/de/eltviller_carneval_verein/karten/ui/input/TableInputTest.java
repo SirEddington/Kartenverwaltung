@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.input;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -15,10 +16,13 @@ import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import javafx.application.Platform;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.event.Event;
@@ -654,5 +658,31 @@ class TableInputTest {
 		drag(0, 1, true);
 
 		assertEquals(List.of(0, 1, 4), onFx(() -> table.selectedRows().stream().sorted().toList()));
+	}
+
+	/**
+	 * Die kurze Sperre des Bearbeitens ({@link TableGestures#suspendEditing}) stellt „bearbeitbar“ nur wieder her, wenn
+	 * während der Sperre niemand sonst den Wert geändert hat (etwa ein Wechsel in den Anzeigemodus und zurück).
+	 */
+	@Test
+	void sperreStelltBearbeitbarNichtGegenAenderungVonAussenHer() throws Exception {
+		BooleanProperty untouched = new SimpleBooleanProperty(true);
+		BooleanProperty switchedOff = new SimpleBooleanProperty(true);
+		BooleanProperty switchedOn = new SimpleBooleanProperty(true);
+		onFx(() -> {
+			TableGestures.suspendEditing(untouched);
+			TableGestures.suspendEditing(switchedOff);
+			TableGestures.suspendEditing(switchedOn);
+			assertFalse(untouched.get(), "für die Dauer des Ereignisses nicht bearbeitbar");
+			switchedOff.set(true);
+			switchedOff.set(false);
+			switchedOn.set(true);
+			return null;
+		});
+		flush();
+
+		assertTrue(untouched.get(), "ohne Änderung von außen wieder bearbeitbar");
+		assertFalse(switchedOff.get(), "von außen abgeschaltet: bleibt aus");
+		assertTrue(switchedOn.get());
 	}
 }

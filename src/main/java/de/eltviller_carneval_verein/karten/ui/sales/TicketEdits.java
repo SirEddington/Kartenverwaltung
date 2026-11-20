@@ -17,7 +17,9 @@ import javafx.application.Platform;
  * Abschnitt 11).
  *
  * <p>Jeder Neuaufbau wartet, bis keine Zelle mehr bearbeitet wird: Eine Tab-Folge durch mehrere Zellen ordnet die
- * Tabelle erst nach ihrem Ende neu, und keine Zeile verschiebt sich unter der Bearbeitung. Eine Buchung, deren Wert die
+ * Tabelle erst nach ihrem Ende neu, und keine Zeile verschiebt sich unter der Bearbeitung. Ebenso wartet er auf das Ende
+ * einer Mausbedienung ({@link MouseGesture}, Spec Abschnitt 14.5), damit unter dem zweiten Klick eines Doppelklicks
+ * dieselbe Zeile liegt; das Entfernen stornierter Buchungen wartet an derselben Stelle. Eine Buchung, deren Wert die
  * Kassenkraft selbst geändert hat, bleibt sichtbar, bis Suche oder Filter sich ändern oder eine andere Vorstellung
  * gezeigt wird ({@link #endPinning}).
  */
@@ -39,19 +41,28 @@ final class TicketEdits {
 	}
 
 	private final BooleanSupplier editing;
+	private final BooleanSupplier gesture;
 	private final Runnable rebuild;
+	private final Runnable removeCancelled;
 	/** Selbst geänderte Buchungen, nach Identität. */
 	private final Set<Booking> pinned = Collections.newSetFromMap(new IdentityHashMap<>());
 	/** Ein Neuaufbau ist angefordert und noch nicht gelaufen. */
 	private boolean pending;
+	/** Das Entfernen stornierter Buchungen ist angefordert und noch nicht gelaufen. */
+	private boolean removalPending;
 
 	/**
-	 * @param editing ob gerade eine Zelle bearbeitet wird
-	 * @param rebuild baut die Tabelle neu auf
+	 * @param editing         ob gerade eine Zelle bearbeitet wird
+	 * @param gesture         ob gerade eine Mausbedienung läuft ({@link MouseGesture}, Spec Abschnitt 14.5)
+	 * @param rebuild         baut die Tabelle neu auf
+	 * @param removeCancelled entfernt die zuletzt geänderten Buchungen, die dadurch storniert sind; hat es eine entfernt,
+	 *                        fordert es selbst den Neuaufbau an ({@link #requestRebuild})
 	 */
-	TicketEdits(BooleanSupplier editing, Runnable rebuild) {
+	TicketEdits(BooleanSupplier editing, BooleanSupplier gesture, Runnable rebuild, Runnable removeCancelled) {
 		this.editing = editing;
+		this.gesture = gesture;
 		this.rebuild = rebuild;
+		this.removeCancelled = removeCancelled;
 	}
 
 	/**
@@ -76,10 +87,23 @@ final class TicketEdits {
 		pinned.add(booking);
 	}
 
-	/** Ein Neuaufbau aus anderem Anlass (fremde Änderung, Suche, Filter, Sortierung): sofort, sonst nach der Bearbeitung. */
+	/**
+	 * Ein Neuaufbau aus anderem Anlass (fremde Änderung, Suche, Filter, Sortierung, Gruppierung): sofort, sonst nach dem
+	 * Ende von Bearbeitung und Mausbedienung.
+	 */
 	void requestRebuild() {
 		pending = true;
 		flush();
+	}
+
+	/**
+	 * Eine geänderte Buchung kann dadurch storniert sein (Name, Kommentar, Zahlung, abgeholt): Entfernt wird nach dem
+	 * laufenden Commit und wie der Neuaufbau erst nach dem Ende von Bearbeitung und Mausbedienung. Bis dahin bleibt sie im
+	 * Modell und in der Tabelle; eine Eingabe ginge sonst in eine Buchung, die es nicht mehr gibt.
+	 */
+	void requestRemoval() {
+		removalPending = true;
+		Platform.runLater(this::flush);
 	}
 
 	/**
@@ -87,7 +111,16 @@ final class TicketEdits {
 	 * nächste, dazwischen steht kurz keine Zelle im Bearbeiten.
 	 */
 	void editingEnded() {
-		if (pending) {
+		idle();
+	}
+
+	/**
+	 * Ende einer Bearbeitung oder Mausbedienung: holt nach, was wartet, erst das Entfernen, dann den Neuaufbau, jeweils nur,
+	 * wenn weder eine Zelle bearbeitet wird noch eine Mausbedienung läuft. Geprüft wird erst danach, nicht mitten im
+	 * Ereignis, das die Bedienung beendet (Fokusverlust beim Öffnen eines Dialogs, Abhängen der Tabelle).
+	 */
+	void idle() {
+		if (pending || removalPending) {
 			Platform.runLater(this::flush);
 		}
 	}
@@ -108,10 +141,16 @@ final class TicketEdits {
 	}
 
 	private void flush() {
-		if (!pending || editing.getAsBoolean()) {
+		if (editing.getAsBoolean() || gesture.getAsBoolean()) {
 			return;
 		}
-		pending = false;
-		rebuild.run();
+		if (removalPending) {
+			removalPending = false;
+			removeCancelled.run();
+		}
+		if (pending) {
+			pending = false;
+			rebuild.run();
+		}
 	}
 }

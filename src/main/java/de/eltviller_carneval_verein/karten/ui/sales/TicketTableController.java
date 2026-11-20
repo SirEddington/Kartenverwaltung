@@ -45,6 +45,7 @@ import de.eltviller_carneval_verein.karten.ui.sales.TicketFilter.FilterValue;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.Severity;
+import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
@@ -52,9 +53,11 @@ import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ChangeListener;
+import javafx.event.EventHandler;
 import javafx.event.EventType;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
@@ -72,6 +75,8 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.HBox;
+import javafx.stage.Window;
+import javafx.util.Duration;
 import javafx.util.StringConverter;
 
 /**
@@ -81,8 +86,9 @@ import javafx.util.StringConverter;
  * "Platz zuweisen…" einem freien Sitz der Bestuhlung zuordnen.
  *
  * <p>Die Tabelle ist eine {@link TreeTableView} (KARV-193): Ihre Bedienung und die Auswahl als Menge von Buchungen liegen
- * in {@link TicketTreeTable}, das Warten auf das Ende einer Bearbeitung und die Ausnahme für selbst geänderte Buchungen
- * in {@link TicketEdits}. Jeder Neuaufbau läuft über {@link #rebuild()}: Buchungen, Suche, Spaltenfilter, Gruppen.
+ * in {@link TicketTreeTable}, das Warten auf das Ende einer Bearbeitung und einer Mausbedienung ({@link MouseGesture}) und
+ * die Ausnahme für selbst geänderte Buchungen in {@link TicketEdits}. Jeder Neuaufbau läuft über {@link #rebuild()}:
+ * Buchungen, Suche, Spaltenfilter, Gruppen.
  */
 public class TicketTableController implements ContentController, SalesStateAware {
 
@@ -114,6 +120,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 	private final ChangeListener<Object> groupingChanges = (obs, before, now) -> followGrouping();
 	private TicketTreeTable treeTable;
 	private TicketEdits edits;
+	/** Die laufende Mausbedienung der Tabelle; solange sie läuft, wartet jeder Neuaufbau ({@link #trackMouseGesture}). */
+	private MouseGesture gesture;
 	private SalesViewState salesState;
 	/** Das Menü zum Sammelverkauf auf den Zeilen ({@link #showSelectionMenu}) und seine Einträge. */
 	private ContextMenu selectionMenu;
@@ -132,6 +140,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
 	// Zuletzt geänderte Buchungen, die dadurch storniert sein können (nach Identität); geprüft, sobald keine Zelle im Bearbeiten ist
+	// und keine Mausbedienung läuft (TicketEdits)
 	private final Set<Booking> cancelCandidates = Collections.newSetFromMap(new IdentityHashMap<>());
 	private final RepositoryListener<Event> foreignChanges = new RepositoryListener<>() {
 		// Ein neu zusammengesetztes Event (anderes Objekt) bindet die Shell mit setEvent neu
@@ -229,7 +238,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 		// 2. Die Baumtabelle (Auswahl als Menge, Tasten, Sortierung) vor TableInput: Ihre Filter laufen vor dessen
 		treeTable = new TicketTreeTable(seatTable, colTree);
-		edits = new TicketEdits(() -> seatTable.getEditingCell() != null, this::rebuild);
+		gesture = new MouseGesture(System::currentTimeMillis, TicketTableController::later, () -> edits.idle());
+		edits = new TicketEdits(() -> seatTable.getEditingCell() != null, gesture::active, this::rebuild, this::removeCancelled);
 		treeTable.setRebuild(edits::requestRebuild);
 		treeTable.setFrozen(this::isDialogOpen);
 		bindGrouping();
@@ -240,8 +250,10 @@ public class TicketTableController implements ContentController, SalesStateAware
 		ColumnMinWidths.install(seatTable, Map.of(colLastName, CONTENT_MIN_WIDTH, colFirstName, CONTENT_MIN_WIDTH, colComment, CONTENT_MIN_WIDTH));
 
 		// 4. Mehrfachauswahl (Strg-/Shift-Klick) setzt TicketTreeTable; bei offenem Dialog erreicht keine Bedienung der Zeilen
-		// die Tabelle, auch nicht TableInput
+		// die Tabelle, auch nicht TableInput. Am selben Elternknoten verwirft die Sperre für längere Doppelklickzeiten den
+		// zweiten Klick auf eine andere Zeile
 		freezeSelectionWhileDialogOpen();
+		treeTable.installMultiClickGuard(seatTable.getParent());
 		TableInput.install(seatTable, BOOKING_ROW);
 		sellItem = new MenuItem();
 		assignItem = new MenuItem(ASSIGN_TEXT);
@@ -269,25 +281,75 @@ public class TicketTableController implements ContentController, SalesStateAware
 			return row;
 		});
 
-		treeTable.selectedBookingsProperty().addListener((obs, before, now) -> updateUnassignedBar());
+		treeTable.selectedBookingsProperty().addListener((obs, before, now) -> updateUnassignedBar(now));
 		updateUnassignedBar();
 
-		// Eine Zelle im Bearbeiten hält ihre Buchung für fremde Änderungen zurück; endet sie, kommt Verpasstes nach
+		// Eine Zelle im Bearbeiten hält ihre Buchung für fremde Änderungen zurück; endet sie, kommt Verpasstes nach (auch
+		// das Entfernen stornierter Buchungen, TicketEdits)
 		EditingUnits.getInstance().watch(seatTable, row -> row instanceof TicketRow.BookingRow booking ? booking.dto().getBooking() : null);
 		seatTable.editingCellProperty().addListener((obs, before, cell) -> {
 			if (cell == null) {
 				edits.editingEnded();
-				if (!cancelCandidates.isEmpty()) {
-					Platform.runLater(this::removeCancelled);
-				}
 			}
 		});
 		// Fremde Änderungen nur, solange die Tabelle zu sehen ist; eine mit der Ansicht verschwundene Zelle gibt ihre Buchung frei
 		// Ebenso eine geänderte Sperrliste: Ein gesperrter Sitz verschwindet aus der Tabelle oder kehrt zurück (KARV-111); wie
-		// eine fremde Änderung erst nach dem Ende einer Bearbeitung
+		// eine fremde Änderung erst nach dem Ende einer Bearbeitung. Die Mausbedienung endet, sobald die Tabelle nicht mehr
+		// zu sehen ist
 		LiveViews.whileShown(seatTable, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges),
-				LockedSeats.whileShown(this::refreshAfterForeignChange),
+				LockedSeats.whileShown(this::refreshAfterForeignChange), trackMouseGesture(),
 				Registration.onDetach(() -> EditingUnits.getInstance().end(seatTable)));
+	}
+
+	/** Plant {@code task} nach {@code delayMillis} auf dem FX-Thread ein (Planer der {@link MouseGesture}). */
+	private static void later(long delayMillis, Runnable task) {
+		PauseTransition pause = new PauseTransition(Duration.millis(delayMillis));
+		pause.setOnFinished(event -> task.run());
+		pause.play();
+	}
+
+	/**
+	 * Meldet der {@link MouseGesture}, was sie braucht (Spec Abschnitt 14.5): Ein Druck in einer Zeile der Tabelle beginnt
+	 * sie, ein Loslassen irgendwo in der Szene beendet sie nach der Nachlaufzeit, ebenso das erste Mausereignis ohne
+	 * gedrückte Taste, falls das Loslassen verloren ging. Verliert das Fenster den Fokus (modaler Dialog) oder ist die
+	 * Tabelle nicht mehr zu sehen, endet sie sofort. Die Filter hängen an der Szene, nicht an der Tabelle, und nur, solange
+	 * die Tabelle zu sehen ist: Die Szene der Shell lebt länger als der Controller.
+	 */
+	private Registration trackMouseGesture() {
+		EventHandler<MouseEvent> pressed = event -> {
+			if (isRowArea(event.getTarget()) && isInTable(event.getTarget())) {
+				gesture.pressed();
+			}
+		};
+		EventHandler<MouseEvent> released = event -> gesture.released();
+		EventHandler<MouseEvent> withoutButton = event -> {
+			if (!event.isPrimaryButtonDown() && !event.isSecondaryButtonDown() && !event.isMiddleButtonDown()) {
+				gesture.mouseWithoutButton();
+			}
+		};
+		ChangeListener<Boolean> focus = (obs, before, focused) -> {
+			if (!focused) {
+				gesture.focusLost();
+			}
+		};
+		Scene[] scene = new Scene[1];
+		Window[] window = new Window[1];
+		return new Registration(() -> {
+			scene[0] = seatTable.getScene();
+			window[0] = scene[0].getWindow();
+			scene[0].addEventFilter(MouseEvent.MOUSE_PRESSED, pressed);
+			scene[0].addEventFilter(MouseEvent.MOUSE_RELEASED, released);
+			scene[0].addEventFilter(MouseEvent.MOUSE_MOVED, withoutButton);
+			scene[0].addEventFilter(MouseEvent.MOUSE_ENTERED_TARGET, withoutButton);
+			window[0].focusedProperty().addListener(focus);
+		}, () -> {
+			scene[0].removeEventFilter(MouseEvent.MOUSE_PRESSED, pressed);
+			scene[0].removeEventFilter(MouseEvent.MOUSE_RELEASED, released);
+			scene[0].removeEventFilter(MouseEvent.MOUSE_MOVED, withoutButton);
+			scene[0].removeEventFilter(MouseEvent.MOUSE_ENTERED_TARGET, withoutButton);
+			window[0].focusedProperty().removeListener(focus);
+			gesture.detached();
+		});
 	}
 
 	/**
@@ -527,18 +589,22 @@ public class TicketTableController implements ContentController, SalesStateAware
 		StatusMessage.getInstance().show(Severity.SUCCESS, "Buchung von bisher " + before + " auf " + booking.getPlaceLabel() + " zugewiesen");
 	}
 
+	/** Wie {@link #updateUnassignedBar(List)} mit der zuletzt gemeldeten Auswahl der Tabelle. */
+	private void updateUnassignedBar() {
+		updateUnassignedBar(treeTable.selectedBookingsProperty().get());
+	}
+
 	/**
 	 * Die Leiste "Ohne Platz" erscheint nur mit solchen Buchungen (gezählt ohne Suche und Filter, beim Neuaufbau); der
-	 * Knopf gilt für genau eine gewählte davon. "(oben in der Tabelle)" stimmt nur, solange weder gruppiert noch sortiert
-	 * ist.
+	 * Knopf gilt für genau eine gewählte davon ({@code selected}, die gemeldete Auswahl). "(oben in der Tabelle)" stimmt
+	 * nur, solange die Tabelle weder gruppiert zeigt (Gruppierung des letzten Neuaufbaus) noch sortiert ist.
 	 */
-	private void updateUnassignedBar() {
+	private void updateUnassignedBar(List<Booking> selected) {
 		boolean visible = unassignedCount > 0;
 		unassignedBar.setVisible(visible);
 		unassignedBar.setManaged(visible);
-		String where = grouping.isEmpty() && seatTable.getSortOrder().isEmpty() ? " (oben in der Tabelle)" : "";
+		String where = !treeTable.groupedProperty().get() && seatTable.getSortOrder().isEmpty() ? " (oben in der Tabelle)" : "";
 		lblUnassigned.setText((unassignedCount == 1 ? "1 Buchung ohne Platz" : unassignedCount + " Buchungen ohne Platz") + where);
-		List<Booking> selected = treeTable.selectedBookings();
 		boolean oneUnassigned = selected.size() == 1 && selected.get(0).isUnassigned();
 		btnAssign.setDisable(!editMode || !oneUnassigned);
 	}
@@ -785,24 +851,23 @@ public class TicketTableController implements ContentController, SalesStateAware
 	 */
 	private void removeIfCancelledAfterCommit(Booking booking) {
 		cancelCandidates.add(booking);
-		Platform.runLater(this::removeCancelled);
+		edits.requestRemoval();
 	}
 
 	/**
-	 * Entfernt die zuletzt geänderten Buchungen, die dadurch storniert sind. Bearbeitet schon eine Zelle (Tab aus dem
-	 * geleerten Namen), erst nach deren Ende: Sonst ginge eine Eingabe in eine Buchung, die es nicht mehr gibt.
+	 * Entfernt die zuletzt geänderten Buchungen, die dadurch storniert sind. {@link TicketEdits} ruft das erst, wenn keine
+	 * Zelle mehr bearbeitet wird (Tab aus dem geleerten Namen) und keine Mausbedienung läuft: Sonst ginge eine Eingabe in
+	 * eine Buchung, die es nicht mehr gibt, oder eine Zeile rückte unter den zweiten Klick eines Doppelklicks. Hat die
+	 * Kassenkraft die Buchung inzwischen wieder gefüllt, prüft {@link BookingSync#removeIfCancelled} das selbst.
 	 */
 	private void removeCancelled() {
-		if (seatTable.getEditingCell() != null || cancelCandidates.isEmpty()) {
-			return;
-		}
 		boolean removed = false;
 		for (Booking booking : List.copyOf(cancelCandidates)) {
 			removed |= BookingSync.removeIfCancelled(booking);
 		}
 		cancelCandidates.clear();
 		if (removed) {
-			rebuild();
+			edits.requestRebuild(); // läuft gleich, und ein schon angeforderter Neuaufbau nicht noch einmal
 		}
 	}
 
@@ -858,12 +923,21 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	/**
 	 * Meldet die Auswahl der Tabelle (die Menge der Buchungen, nur nach abgeschlossenen Schritten) als ausgewählte Buchungen,
-	 * auch ohne Bearbeitungsmodus, und die gezeigten Buchungen als Treffer.
+	 * auch ohne Bearbeitungsmodus, und die gezeigten Buchungen als Treffer. Die Auswahl nur, solange die Tabelle zu sehen
+	 * ist (Spec Abschnitt 14.5): Nach dem Wechsel zur Saalansicht laufen nachgeschobene Aufgaben dieses Controllers noch
+	 * (etwa das Entfernen stornierter Buchungen) und dürfen die Auswahl dort nicht ändern. Beim Anmelden meldet er nichts
+	 * von selbst; die Auswahl kommt über {@link #restoreSelection}. Die Treffer prüft {@link SalesViewState} selbst nach der
+	 * aktiven Ansicht.
 	 */
 	@Override
 	public void setSalesState(SalesViewState state) {
+		boolean first = salesState == null;
 		salesState = state;
-		treeTable.selectedBookingsProperty().addListener((obs, before, now) -> state.replaceSelection(now));
+		if (first) {
+			ChangeListener<List<Booking>> reportSelection = (obs, before, now) -> salesState.replaceSelection(now);
+			LiveViews.whileShown(seatTable, () -> treeTable.selectedBookingsProperty().addListener(reportSelection),
+					() -> treeTable.selectedBookingsProperty().removeListener(reportSelection));
+		}
 		state.showSearchHits(this, treeTable.allBookings());
 	}
 

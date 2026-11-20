@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.input;
 import java.util.Arrays;
 import java.util.List;
 
+import javafx.beans.property.BooleanProperty;
 import javafx.scene.Node;
 import javafx.scene.control.Control;
 import javafx.scene.control.IndexedCell;
@@ -20,7 +21,8 @@ interface TableAccess {
 
 	boolean isEditable();
 
-	void setEditable(boolean editable);
+	/** Die Property „bearbeitbar“ der Tabelle ({@link TableGestures#suspendEditing}). */
+	BooleanProperty editableProperty();
 
 	/** Ob gerade eine Zelle bearbeitet wird. */
 	boolean isEditing();

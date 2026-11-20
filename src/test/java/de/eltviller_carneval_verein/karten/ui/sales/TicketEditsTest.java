@@ -121,7 +121,8 @@ class TicketEditsTest {
 	@Test
 	void fremdeAenderungWaehrendBearbeitungKommtDanach() throws Exception {
 		boolean[] editing = { true };
-		edits = new TicketEdits(() -> editing[0], () -> rebuilds++);
+		edits = new TicketEdits(() -> editing[0], () -> false, () -> rebuilds++, () -> {
+		});
 
 		run(() -> edits.requestRebuild());
 		assertEquals(0, rebuilds, "kein Neuaufbau, solange eine Zelle bearbeitet wird");
@@ -136,9 +137,146 @@ class TicketEditsTest {
 		assertEquals(1, rebuilds, "ohne wartende Änderung kein weiterer");
 	}
 
+	// ---- Mausbedienung (Spec Abschnitt 14.5) ----
+
+	/** Gestellte Uhr und Planer für {@link MouseGesture}: {@link #advance} führt fällige Prüfungen aus. */
+	private long now;
+	private final List<long[]> dueTimes = new ArrayList<>();
+	private final List<Runnable> dueTasks = new ArrayList<>();
+	private int removals;
+
+	private MouseGesture gesture(Runnable ended) {
+		return new MouseGesture(() -> now, (delay, task) -> {
+			dueTimes.add(new long[] { now + delay });
+			dueTasks.add(task);
+		}, ended);
+	}
+
+	private void advance(long millis) throws Exception {
+		run(() -> {
+			now += millis;
+			for (int i = 0; i < dueTasks.size(); i++) {
+				if (dueTimes.get(i)[0] <= now) {
+					Runnable task = dueTasks.remove(i);
+					dueTimes.remove(i);
+					i--;
+					task.run();
+				}
+			}
+		});
+	}
+
+	@Test
+	void keinNeuaufbauWaehrendMausbedienung() throws Exception {
+		MouseGesture[] mouse = new MouseGesture[1];
+		edits = new TicketEdits(() -> false, () -> mouse[0].active(), () -> rebuilds++, () -> removals++);
+		mouse[0] = gesture(() -> edits.idle());
+
+		run(() -> mouse[0].pressed());
+		run(() -> edits.requestRebuild()); // fremde Änderung zwischen Druck und Loslassen
+		run(() -> edits.changed(m1, true)); // Commit, den der Druck auslöst
+		assertEquals(0, rebuilds, "kein Neuaufbau zwischen Druck und Loslassen");
+
+		run(() -> mouse[0].released());
+		advance(MouseGesture.AFTERGLOW_MILLIS - 1);
+		assertEquals(0, rebuilds, "auch nicht in der Nachlaufzeit");
+
+		advance(1);
+		assertEquals(1, rebuilds, "danach genau einer");
+		assertEquals(0, removals, "nichts zu entfernen angefordert");
+	}
+
+	@Test
+	void entfernenWartetAufBearbeitungUndMaus() throws Exception {
+		boolean[] editing = { true };
+		MouseGesture[] mouse = new MouseGesture[1];
+		edits = new TicketEdits(() -> editing[0], () -> mouse[0].active(), () -> rebuilds++, () -> removals++);
+		mouse[0] = gesture(() -> edits.idle());
+
+		run(() -> mouse[0].pressed());
+		run(() -> edits.requestRemoval());
+		assertEquals(0, removals, "nicht während Bearbeitung und Mausbedienung");
+
+		run(() -> {
+			editing[0] = false;
+			edits.editingEnded();
+		});
+		assertEquals(0, removals, "die Mausbedienung läuft noch");
+
+		run(() -> mouse[0].detached()); // Wechsel zur Saalansicht
+		assertEquals(1, removals, "das Abhängen beendet die Mausbedienung, danach wird entfernt");
+
+		run(() -> edits.idle());
+		run(() -> edits.editingEnded());
+		assertEquals(1, removals, "genau einmal");
+		assertEquals(0, rebuilds, "ohne angeforderten Neuaufbau keiner");
+	}
+
+	@Test
+	void entfernenWartetAufBearbeitung() throws Exception {
+		boolean[] editing = { true };
+		edits = new TicketEdits(() -> editing[0], () -> false, () -> rebuilds++, () -> removals++);
+
+		run(() -> edits.requestRemoval());
+		assertEquals(0, removals, "nicht während einer Bearbeitung (Tab aus dem geleerten Namen)");
+
+		run(() -> {
+			editing[0] = false;
+			edits.editingEnded();
+		});
+		assertEquals(1, removals, "nach dem Ende der Bearbeitung");
+	}
+
+	@Test
+	void entfernenVorDemNeuaufbau() throws Exception {
+		List<String> order = new ArrayList<>();
+		boolean[] busy = { true };
+		edits = new TicketEdits(() -> false, () -> busy[0], () -> order.add("Neuaufbau"), () -> {
+			order.add("Entfernen");
+			edits.requestRebuild(); // wie der Controller, wenn eine Buchung entfernt wurde
+		});
+
+		run(() -> {
+			edits.changed(m1, true);
+			edits.requestRemoval();
+		});
+		assertEquals(List.of(), order);
+
+		run(() -> {
+			busy[0] = false;
+			edits.idle();
+		});
+		assertEquals(List.of("Entfernen", "Neuaufbau"), order, "erst entfernen, dann ein Neuaufbau");
+	}
+
+	@Test
+	void nachIdleGenauEinNeuaufbau() throws Exception {
+		boolean[] busy = { true };
+		edits = new TicketEdits(() -> false, () -> busy[0], () -> rebuilds++, () -> removals++);
+
+		run(() -> {
+			edits.requestRebuild();
+			edits.requestRebuild();
+			edits.changed(m1, true);
+		});
+		assertEquals(0, rebuilds);
+
+		run(() -> {
+			busy[0] = false;
+			edits.idle();
+			edits.idle();
+		});
+		assertEquals(1, rebuilds, "alle wartenden Anlässe ergeben einen Neuaufbau");
+
+		run(() -> edits.idle());
+		assertEquals(1, rebuilds, "ohne wartenden Anlass keiner");
+		assertEquals(0, removals);
+	}
+
 	@Test
 	void selbstGeaenderteBleibtTrotzSucheSichtbar() throws Exception {
-		edits = new TicketEdits(() -> false, () -> rebuilds++);
+		edits = new TicketEdits(() -> false, () -> false, () -> rebuilds++, () -> {
+		});
 		List<BookingDTO> rows = rows();
 
 		run(() -> {
@@ -155,7 +293,8 @@ class TicketEditsTest {
 
 	@Test
 	void commitOhneAenderungPinntNicht() throws Exception {
-		edits = new TicketEdits(() -> false, () -> rebuilds++);
+		edits = new TicketEdits(() -> false, () -> false, () -> rebuilds++, () -> {
+		});
 
 		run(() -> edits.changed(m1, false));
 
@@ -166,7 +305,8 @@ class TicketEditsTest {
 
 	@Test
 	void endPinningBeiSuchaenderung() throws Exception {
-		edits = new TicketEdits(() -> false, () -> rebuilds++);
+		edits = new TicketEdits(() -> false, () -> false, () -> rebuilds++, () -> {
+		});
 		run(() -> edits.changed(m1, true));
 
 		edits.endPinning();
@@ -177,7 +317,8 @@ class TicketEditsTest {
 
 	@Test
 	void pinBautNichtNeuAuf() throws Exception {
-		edits = new TicketEdits(() -> false, () -> rebuilds++);
+		edits = new TicketEdits(() -> false, () -> false, () -> rebuilds++, () -> {
+		});
 
 		run(() -> edits.pin(m1));
 
@@ -249,9 +390,10 @@ class TicketEditsTest {
 			onCommit(colFirst, Booking::getFirstName, Booking::setFirstName);
 			table.getColumns().setAll(List.of(colTree, colLast, colFirst));
 			tree = new TicketTreeTable(table, colTree);
-			edits = new TicketEdits(() -> table.getEditingCell() != null, () -> {
+			edits = new TicketEdits(() -> table.getEditingCell() != null, () -> false, () -> {
 				rebuilds++;
 				tree.show(nodes());
+			}, () -> {
 			});
 			tree.setRebuild(edits::requestRebuild);
 			TableInput.install(table, row -> row instanceof TicketRow.BookingRow);

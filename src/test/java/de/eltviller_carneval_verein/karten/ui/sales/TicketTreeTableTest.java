@@ -40,6 +40,7 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.PickResult;
+import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
 
 /**
@@ -175,8 +176,11 @@ class TicketTreeTableTest {
 			});
 			TableInput.install(table, row -> row instanceof TicketRow.BookingRow);
 			showNodes();
+			// wie im FXML: Die Tabelle hat einen Elternknoten, an dem die Doppelklick-Sperre hängt
+			StackPane area = new StackPane(table);
+			tree.installMultiClickGuard(area);
 			stage = new Stage();
-			stage.setScene(new Scene(table, 700, 500));
+			stage.setScene(new Scene(area, 700, 500));
 			stage.show();
 			table.applyCss();
 			table.layout();
@@ -750,11 +754,68 @@ class TicketTreeTableTest {
 
 	/**
 	 * Verdrahtet die Tabelle wie der Controller mit {@link TicketEdits}: Ein Commit im Nachnamen ändert die Buchung, der
-	 * Neuaufbau wartet bis nach dem Ende der Bearbeitung.
+	 * Neuaufbau wartet bis nach dem Ende der Bearbeitung. Ohne Mausbedienung: wie bei einer Doppelklickzeit über 500 ms,
+	 * der Neuaufbau kann zwischen die Klicks fallen.
 	 */
 	private void wireEditsLikeController() throws Exception {
+		wireEdits(() -> false);
+	}
+
+	/** Die gestellte Uhr der Mausbedienung und ihre geplanten Prüfungen (Fälligkeit, Aufgabe). */
+	private long now;
+	private final List<Long> dueTimes = new ArrayList<>();
+	private final List<Runnable> dueTasks = new ArrayList<>();
+
+	/**
+	 * Wie {@link #wireEditsLikeController}, dazu die Mausbedienung wie im Controller: Filter an der Szene, ein Druck in
+	 * einer Zeile beginnt sie, ein Loslassen irgendwo beendet sie nach der Nachlaufzeit ({@link #advance}).
+	 */
+	private void wireEditsWithMouseGesture() throws Exception {
+		MouseGesture[] gesture = new MouseGesture[1];
+		TicketEdits edits = wireEdits(() -> gesture[0].active());
 		run(() -> {
-			TicketEdits edits = new TicketEdits(() -> table.getEditingCell() != null, this::showNodes);
+			gesture[0] = new MouseGesture(() -> now, (delay, task) -> {
+				dueTimes.add(now + delay);
+				dueTasks.add(task);
+			}, edits::idle);
+			Scene scene = table.getScene();
+			scene.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
+				if (event.getTarget() instanceof Node node && inRow(node)) {
+					gesture[0].pressed();
+				}
+			});
+			scene.addEventFilter(MouseEvent.MOUSE_RELEASED, event -> gesture[0].released());
+		});
+	}
+
+	private static boolean inRow(Node node) {
+		for (Node at = node; at != null; at = at.getParent()) {
+			if (at instanceof TreeTableRow<?>) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Stellt die Uhr der Mausbedienung vor und führt aus, was bis dahin fällig ist. */
+	private void advance(long millis) throws Exception {
+		run(() -> {
+			now += millis;
+			for (int i = 0; i < dueTasks.size(); i++) {
+				if (dueTimes.get(i) <= now) {
+					dueTimes.remove(i);
+					Runnable task = dueTasks.remove(i);
+					i--;
+					task.run();
+				}
+			}
+		});
+	}
+
+	private TicketEdits wireEdits(java.util.function.BooleanSupplier gesture) throws Exception {
+		return onFx(() -> {
+			TicketEdits edits = new TicketEdits(() -> table.getEditingCell() != null, gesture, this::showNodes, () -> {
+			});
 			tree.setRebuild(edits::requestRebuild);
 			table.editingCellProperty().addListener((obs, before, editing) -> {
 				if (editing == null) {
@@ -768,6 +829,7 @@ class TicketTreeTableTest {
 				booking.setLastName(commit.getNewValue());
 				edits.changed(booking, true);
 			});
+			return edits;
 		});
 	}
 
@@ -802,10 +864,115 @@ class TicketTreeTableTest {
 	}
 
 	/**
-	 * Doppelklick direkt nach einer Bearbeitung (Abschlussreview, Important 2): Der erste Druck beendet das Bearbeiten,
-	 * der Neuaufbau läuft vor dem Loslassen und schiebt m2 unter den Zeiger. Ohne Schutz begänne JavaFX das Bearbeiten von
-	 * m2 beim zweiten Druck (Klickzahl 2, Zeile nicht gewählt); die Tabelle holte sich im selben Druck den Fokus zurück, und
-	 * die Zelle beendete das Bearbeiten gleich wieder ohne Änderung. Mit Schutz geht m2 gar nicht erst ins Bearbeiten.
+	 * Abnahme 23 (Spec Abschnitt 14.5): Der erste Druck eines Doppelklicks übernimmt den neuen Nachnamen, der Neuaufbau ist
+	 * angefordert, wartet aber auf das Ende der Mausbedienung. Unter dem zweiten Druck liegt so dieselbe Buchung; bearbeitet
+	 * wird nur m1, und erst nach Nachlaufzeit und Ende der Bearbeitung zieht sie an ihre neue Stelle.
+	 */
+	@Test
+	void doppelklickNachNeuaufbauBearbeitetDieselbeBuchung() throws Exception {
+		show();
+		wireEditsWithMouseGesture();
+		editLastName(1, "Zimmer");
+		advance(1000); // die Klicks zum Bearbeiten sind lange vorbei
+		double[] at = centerOf(1, FIRST);
+		List<Booking> started = recordEditStarts();
+
+		mouse(MouseEvent.MOUSE_PRESSED, 1, FIRST, at, 1);
+		assertEquals("Zimmer", m1.getLastName(), "der erste Druck übernimmt die Eingabe");
+		assertSame(m1, bookingInRow(1), "der Neuaufbau wartet auf das Ende der Mausbedienung");
+		mouse(MouseEvent.MOUSE_RELEASED, 1, FIRST, at, 1);
+		mouse(MouseEvent.MOUSE_CLICKED, 1, FIRST, at, 1);
+		advance(200);
+		assertSame(m1, bookingInRow(1), "auch in der Nachlaufzeit");
+		mouse(MouseEvent.MOUSE_PRESSED, 1, FIRST, at, 2);
+		mouse(MouseEvent.MOUSE_RELEASED, 1, FIRST, at, 2);
+		mouse(MouseEvent.MOUSE_CLICKED, 1, FIRST, at, 2);
+
+		assertEquals(1, editingRow(), "der Doppelklick bearbeitet die Buchung, in der er begann");
+		assertSame(m1, bookingInRow(1));
+		assertFalse(started.isEmpty());
+		assertTrue(started.stream().allMatch(booking -> booking == m1), "nur m1 geht ins Bearbeiten: " + started);
+		assertEquals(List.of(m1), selected());
+
+		advance(MouseGesture.AFTERGLOW_MILLIS);
+		assertSame(m1, bookingInRow(1), "nach der Mausbedienung wartet der Neuaufbau auf das Ende der Bearbeitung");
+
+		stopEditing();
+		// 0 Müller (1), 1 m2, 2 Schmidt, 3 s1, 4 Weber, 5 w1, 6 w2, 7 Zimmer, 8 m1
+		assertSame(m1, bookingInRow(8), "erst danach zieht m1 an ihre neue Stelle");
+		assertEquals("Bernd", m2.getFirstName());
+		assertEquals(List.of(m1), selected());
+	}
+
+	/**
+	 * Sperre für längere Doppelklickzeiten (Spec Abschnitt 14.5): Der Neuaufbau fällt zwischen die Klicks und schiebt eine
+	 * andere Buchung bzw. einen Gruppenkopf unter den Zeiger. Druck und Loslassen mit Klickzahl 2 werden verworfen: kein
+	 * Bearbeiten, kein Klappen, die Auswahl bleibt.
+	 */
+	@Test
+	void zweiterKlickAufAndereZeileWirdVerworfen() throws Exception {
+		show();
+		List<Booking> started = recordEditStarts();
+
+		// Buchung: erster Klick auf m1, dann zieht m1 nach „Zimmer“ um, und m2 rückt in Zeile 1
+		double[] at = centerOf(1, FIRST);
+		mouse(MouseEvent.MOUSE_PRESSED, 1, FIRST, at, 1);
+		mouse(MouseEvent.MOUSE_RELEASED, 1, FIRST, at, 1);
+		mouse(MouseEvent.MOUSE_CLICKED, 1, FIRST, at, 1);
+		assertEquals(List.of(m1), selected());
+		m1.setLastName("Zimmer");
+		rebuild();
+		// 0 Müller (1), 1 m2, 2 Schmidt (1), 3 s1, 4 Weber, 5 w1, 6 w2, 7 Zimmer, 8 m1
+		assertSame(m2, bookingInRow(1));
+		mouse(MouseEvent.MOUSE_PRESSED, 1, FIRST, at, 2);
+		mouse(MouseEvent.MOUSE_RELEASED, 1, FIRST, at, 2);
+		mouse(MouseEvent.MOUSE_CLICKED, 1, FIRST, at, 2);
+
+		assertEquals(List.of(), started, "keine Buchung geht ins Bearbeiten");
+		assertEquals(-1, editingRow());
+		assertEquals(List.of(m1), selected(), "die Auswahl bleibt");
+
+		// Gruppenkopf: erster Klick auf w1, dann zieht m2 nach „Zimmer“ um, und der Kopf „Zimmer“ rückt in Zeile 5
+		double[] at5 = centerOf(5, FIRST);
+		mouse(MouseEvent.MOUSE_PRESSED, 5, FIRST, at5, 1);
+		mouse(MouseEvent.MOUSE_RELEASED, 5, FIRST, at5, 1);
+		mouse(MouseEvent.MOUSE_CLICKED, 5, FIRST, at5, 1);
+		assertEquals(List.of(w1), selected());
+		m2.setLastName("Zimmer");
+		rebuild();
+		// 0 Schmidt (1), 1 s1, 2 Weber (2), 3 w1, 4 w2, 5 Zimmer (2), 6 m1, 7 m2
+		TreeItem<TicketRow> header = item(5);
+		assertTrue(header.getValue() instanceof TicketRow.GroupRow, "unter dem Zeiger steht ein Gruppenkopf");
+		mouse(MouseEvent.MOUSE_PRESSED, 5, FIRST, at5, 2);
+		mouse(MouseEvent.MOUSE_RELEASED, 5, FIRST, at5, 2);
+		mouse(MouseEvent.MOUSE_CLICKED, 5, FIRST, at5, 2);
+
+		assertTrue(onFx(header::isExpanded), "der Gruppenkopf klappt nicht zu");
+		assertEquals(List.of(w1), selected(), "die Auswahl bleibt");
+		assertFalse(groupSelected(5));
+		assertEquals(List.of(), started);
+	}
+
+	/** Ohne Neuaufbau zwischen den Klicks klappt ein Doppelklick auf einen Gruppenkopf wie bisher. */
+	@Test
+	void doppelklickAufGruppenkopfKlappt() throws Exception {
+		show();
+		double[] at = centerOf(3, FIRST);
+		for (int clicks = 1; clicks <= 2; clicks++) {
+			mouse(MouseEvent.MOUSE_PRESSED, 3, FIRST, at, clicks);
+			mouse(MouseEvent.MOUSE_RELEASED, 3, FIRST, at, clicks);
+			mouse(MouseEvent.MOUSE_CLICKED, 3, FIRST, at, clicks);
+		}
+
+		assertFalse(onFx(() -> table.getTreeItem(3).isExpanded()), "derselbe Kopf unter beiden Klicks: er klappt");
+	}
+
+	/**
+	 * Doppelklick direkt nach einer Bearbeitung bei einer Doppelklickzeit über 500 ms (Abschlussreview, Important 2; Spec
+	 * Abschnitt 14.5): Der erste Druck beendet das Bearbeiten, der Neuaufbau läuft vor dem Loslassen und schiebt m2 unter
+	 * den Zeiger. Ohne Sperre begänne JavaFX das Bearbeiten von m2 beim zweiten Druck (Klickzahl 2, Zeile nicht gewählt).
+	 * Die Sperre am Elternknoten verwirft Druck und Loslassen mit Klickzahl 2: m2 geht nicht ins Bearbeiten und wird nicht
+	 * gewählt.
 	 */
 	@Test
 	void doppelklickNachNeuaufbauBearbeitetKeineAndereBuchung() throws Exception {
@@ -829,7 +996,7 @@ class TicketTreeTableTest {
 		assertEquals(List.of(), started, "m2 geht nicht ins Bearbeiten, auch nicht für die Dauer des Drucks");
 		assertEquals(-1, editingRow());
 		assertEquals("Bernd", m2.getFirstName());
-		assertEquals(List.of(m2), selected(), "der zweite Druck wählt m2 wie ein einfacher Klick");
+		assertEquals(List.of(m1), selected(), "der verworfene zweite Druck ändert die Auswahl nicht");
 	}
 
 	@Test

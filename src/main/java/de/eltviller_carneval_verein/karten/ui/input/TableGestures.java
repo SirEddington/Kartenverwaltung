@@ -1,10 +1,11 @@
 package de.eltviller_carneval_verein.karten.ui.input;
 
-import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.function.Predicate;
 
 import javafx.application.Platform;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.value.ChangeListener;
 import javafx.scene.Node;
 import javafx.scene.control.ButtonBase;
 import javafx.scene.control.ComboBoxBase;
@@ -73,11 +74,22 @@ public final class TableGestures {
 
 	/**
 	 * Die Tabelle ist für die Dauer des laufenden Ereignisses nicht bearbeitbar: Die Zelle fragt beim Start des
-	 * Bearbeitens danach. {@code setEditable} ist das {@code setEditable} der Tabelle.
+	 * Bearbeitens danach. {@code editable} ist die Property „bearbeitbar“ der Tabelle; sie ist beim Aufruf wahr. Danach
+	 * wird sie nur wieder wahr, wenn sie während der Sperre niemand sonst geändert hat (etwa ein Wechsel in den
+	 * Anzeigemodus): Was von außen gesetzt wurde, gilt.
 	 */
-	public static void suspendEditing(Consumer<Boolean> setEditable) {
-		setEditable.accept(false);
+	public static void suspendEditing(BooleanProperty editable) {
+		boolean[] changedOutside = { false };
+		// ein ChangeListener, kein InvalidationListener: Er liest den Wert und erfährt so jede weitere Änderung
+		ChangeListener<Boolean> outside = (observable, before, now) -> changedOutside[0] = true;
+		editable.set(false);
+		editable.addListener(outside);
 		// Das Ereignis ist verarbeitet, sobald es durch ist
-		Platform.runLater(() -> setEditable.accept(true));
+		Platform.runLater(() -> {
+			editable.removeListener(outside);
+			if (!changedOutside[0]) {
+				editable.set(true);
+			}
+		});
 	}
 }
