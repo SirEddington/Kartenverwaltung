@@ -746,7 +746,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		String query = searchQuery;
 		List<BookingDTO> shown = edits.visible(allRows, dto -> BookingSearch.matches(dto.getBooking(), query) && columnFilter.passes(dto));
 		treeTable.setGrouping(grouping);
-		treeTable.show(TicketGrouping.group(shown, grouping, groupOrder, treeTable.sortComparator(), shownPresentations()));
+		treeTable.show(TicketGrouping.group(shown, grouping, groupOrder, true, treeTable.sortComparator(), shownPresentations()));
 		if (salesState != null) {
 			salesState.showSearchHits(this, treeTable.allBookings());
 		}

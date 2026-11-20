@@ -111,7 +111,7 @@ final class TicketTreeBuilder {
 					return false;
 				}
 			} else if (left instanceof TicketRow.GroupRow x && right instanceof TicketRow.GroupRow y) {
-				if (x.column() != y.column() || !x.path().equals(y.path()) || !x.text().equals(y.text()) || x.count() != y.count()
+				if (!x.columns().equals(y.columns()) || !x.path().equals(y.path()) || !x.text().equals(y.text()) || x.count() != y.count()
 						|| !sameStructure(a.get(i).children(), b.get(i).children())) {
 					return false;
 				}

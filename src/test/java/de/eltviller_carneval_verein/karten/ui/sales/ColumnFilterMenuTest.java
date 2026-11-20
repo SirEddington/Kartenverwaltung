@@ -121,7 +121,7 @@ class ColumnFilterMenuTest {
 
 	private void rebuild() {
 		List<BookingDTO> shown = rows().stream().filter(filter::passes).toList();
-		tree.show(TicketGrouping.group(shown, List.of(), GroupOrder.VALUE, tree.sortComparator(), event.getPresentations()));
+		tree.show(TicketGrouping.group(shown, List.of(), GroupOrder.VALUE, true, tree.sortComparator(), event.getPresentations()));
 	}
 
 	private static TreeTableColumn<TicketRow, String> column(String title, Function<Booking, String> value) {

@@ -35,7 +35,7 @@ class TicketSelectionTest {
 	}
 
 	private static TicketNode group(String key, TicketNode... children) {
-		return new TicketNode(new TicketRow.GroupRow(TicketColumn.CATEGORY, key, children.length, List.of(key)),
+		return new TicketNode(new TicketRow.GroupRow(List.of(TicketColumn.CATEGORY), key, children.length, List.of(key)),
 				List.of(children));
 	}
 
@@ -170,7 +170,7 @@ class TicketSelectionTest {
 	@Test
 	void verschachtelteZugeklappteGruppenWerdenAufgeklappt() {
 		TicketNode inner = new TicketNode(
-				new TicketRow.GroupRow(TicketColumn.PRESENTATION, "Freitag", 2,List.of("A", "Freitag")),
+				new TicketRow.GroupRow(List.of(TicketColumn.PRESENTATION), "Freitag", 2,List.of("A", "Freitag")),
 				List.of(leaf(a1), leaf(a2)));
 		List<TicketNode> tree = List.of(group("A", inner), group("B", leaf(b1)));
 		selection.select(inner);

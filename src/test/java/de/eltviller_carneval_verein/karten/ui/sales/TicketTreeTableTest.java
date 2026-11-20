@@ -131,7 +131,7 @@ class TicketTreeTableTest {
 
 	private List<TicketNode> nodes() {
 		List<BookingDTO> rows = bookings.stream().map(b -> new BookingDTO(event, presentation, b)).filter(filter::passes).toList();
-		return TicketGrouping.group(rows, grouping, GroupOrder.VALUE, tree.sortComparator(), event.getPresentations());
+		return TicketGrouping.group(rows, grouping, GroupOrder.VALUE, true, tree.sortComparator(), event.getPresentations());
 	}
 
 	private static TreeTableColumn<TicketRow, String> column(String title, java.util.function.Function<TicketRow, String> value) {

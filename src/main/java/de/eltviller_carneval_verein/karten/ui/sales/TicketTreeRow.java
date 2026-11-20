@@ -34,7 +34,7 @@ public final class TicketTreeRow extends TreeTableRow<TicketRow> {
 
 	/** Der Kopf einer Gruppe, etwa „Nachname: Müller (4)“. */
 	static String headerText(TicketRow.GroupRow group) {
-		return group.column().header() + ": " + group.text() + " (" + group.count() + ")";
+		return group.columnsText() + ": " + group.text() + " (" + group.count() + ")";
 	}
 
 	@Override

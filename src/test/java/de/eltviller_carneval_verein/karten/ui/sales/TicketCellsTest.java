@@ -109,7 +109,7 @@ class TicketCellsTest {
 
 	private List<TicketNode> nodes() {
 		List<BookingDTO> rows = bookings.stream().map(b -> new BookingDTO(event, presentation, b)).toList();
-		return TicketGrouping.group(rows, List.of(TicketColumn.LAST_NAME), GroupOrder.VALUE, tree.sortComparator(), event.getPresentations());
+		return TicketGrouping.group(rows, List.of(TicketColumn.LAST_NAME), GroupOrder.VALUE, true, tree.sortComparator(), event.getPresentations());
 	}
 
 	/** Zeilen mit Gruppierung nach Nachname: 0 Müller (2), 1 m1, 2 m2, 3 Schmidt (1), 4 s1. */

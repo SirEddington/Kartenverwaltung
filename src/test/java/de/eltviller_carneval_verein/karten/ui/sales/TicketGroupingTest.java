@@ -33,7 +33,71 @@ class TicketGroupingTest {
 	}
 
 	private List<TicketNode> group(List<BookingDTO> rows, List<TicketColumn> grouping, GroupOrder order, Comparator<BookingDTO> sort) {
-		return TicketGrouping.group(rows, grouping, order, sort, presentations);
+		return TicketGrouping.group(rows, grouping, order, true, sort, presentations);
+	}
+
+	private List<TicketNode> flat(List<BookingDTO> rows, List<TicketColumn> grouping, GroupOrder order) {
+		return TicketGrouping.group(rows, grouping, order, false, null, presentations);
+	}
+
+	private BookingDTO named(int seat, String lastName, String firstName) {
+		BookingDTO dto = row(first, 1, seat, "A");
+		dto.getBooking().setLastName(lastName);
+		dto.getBooking().setFirstName(firstName);
+		return dto;
+	}
+
+	private static TicketRow.GroupRow groupOf(TicketNode node) {
+		return (TicketRow.GroupRow) node.row();
+	}
+
+	@Test
+	void eineEbeneJeKombination() {
+		List<TicketColumn> columns = List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME);
+		List<TicketNode> nodes = flat(inBaseOrder(named(1, "Hulbert", "Sedrick"), named(2, "Hulbert", "Silas"), named(3, "Hulbert", "Sedrick")),
+				columns, GroupOrder.VALUE);
+		assertEquals(List.of("Hulbert, Sedrick", "Hulbert, Silas"), texts(nodes));
+		assertEquals(2, groupOf(nodes.get(0)).count());
+		assertEquals(1, groupOf(nodes.get(1)).count());
+		assertEquals(columns, groupOf(nodes.get(0)).columns());
+		assertEquals(1, groupOf(nodes.get(0)).path().size());
+		assertEquals(2, nodes.get(0).children().size());
+		assertTrue(nodes.get(0).children().get(0).row() instanceof TicketRow.BookingRow);
+		assertEquals("Nachname, Vorname", groupOf(nodes.get(0)).columnsText());
+	}
+
+	@Test
+	void eineEbeneLeererWertAlsLeer() {
+		List<TicketNode> nodes = flat(inBaseOrder(named(1, "Hulbert", null)), List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME), GroupOrder.VALUE);
+		assertEquals(List.of("Hulbert, (leer)"), texts(nodes));
+	}
+
+	@Test
+	void eineEbeneNachWertSpalteFuerSpalte() {
+		List<BookingDTO> rows = inBaseOrder(named(1, "Meier", "Anna"), named(2, "Abel", "Zoe"), named(3, "Abel", "Ben"), named(4, "Meier", null));
+		assertEquals(List.of("Abel, Ben", "Abel, Zoe", "Meier, Anna", "Meier, (leer)"),
+				texts(flat(rows, List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME), GroupOrder.VALUE)));
+	}
+
+	@Test
+	void eineEbeneNachGroesse() {
+		List<BookingDTO> rows = inBaseOrder(named(1, "Abel", "Zoe"), named(2, "Meier", "Anna"), named(3, "Meier", "Anna"), named(4, "Abel", "Ben"),
+				named(5, "Cord", "Eva"), named(6, "Cord", "Eva"));
+		assertEquals(List.of("Cord, Eva", "Meier, Anna", "Abel, Ben", "Abel, Zoe"),
+				texts(flat(rows, List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME), GroupOrder.SIZE)));
+	}
+
+	@Test
+	void eineSpalteGleichWieVerschachtelt() {
+		List<BookingDTO> rows = inBaseOrder(row(first, 1, 1, "A"), row(first, 1, 2, "B"), row(first, 1, 3, "A"));
+		List<TicketNode> nested = group(rows, List.of(TicketColumn.CATEGORY), GroupOrder.VALUE, null);
+		List<TicketNode> single = flat(rows, List.of(TicketColumn.CATEGORY), GroupOrder.VALUE);
+		assertEquals(texts(nested), texts(single));
+		for (int i = 0; i < nested.size(); i++) {
+			assertEquals(groupOf(nested.get(i)), groupOf(single.get(i)));
+			assertEquals(List.of(groupOf(single.get(i)).key()), groupOf(single.get(i)).path());
+			assertEquals(nested.get(i).children().size(), single.get(i).children().size());
+		}
 	}
 
 	private static List<String> texts(List<TicketNode> nodes) {
@@ -61,7 +125,7 @@ class TicketGroupingTest {
 		assertEquals(List.of("A", "B"), texts(nodes));
 		assertEquals(List.of(a1, a2), dtos(nodes.get(0).children()));
 		TicketRow.GroupRow groupA = (TicketRow.GroupRow) nodes.get(0).row();
-		assertEquals(TicketColumn.CATEGORY, groupA.column());
+		assertEquals(List.of(TicketColumn.CATEGORY), groupA.columns());
 		assertEquals(2, groupA.count());
 		assertEquals(1, ((TicketRow.GroupRow) nodes.get(1).row()).count());
 	}

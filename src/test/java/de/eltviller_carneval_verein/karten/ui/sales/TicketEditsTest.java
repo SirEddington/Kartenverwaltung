@@ -211,7 +211,7 @@ class TicketEditsTest {
 	// Zeilen mit Gruppierung nach Nachname: 0 Müller (2), 1 m1, 2 m2, 3 Schmidt (1), 4 s1
 
 	private List<TicketNode> nodes() {
-		return TicketGrouping.group(rows(), List.of(TicketColumn.LAST_NAME), GroupOrder.VALUE, tree.sortComparator(), event.getPresentations());
+		return TicketGrouping.group(rows(), List.of(TicketColumn.LAST_NAME), GroupOrder.VALUE, true, tree.sortComparator(), event.getPresentations());
 	}
 
 	private static TreeTableColumn<TicketRow, String> column(String title, Function<Booking, String> value) {
