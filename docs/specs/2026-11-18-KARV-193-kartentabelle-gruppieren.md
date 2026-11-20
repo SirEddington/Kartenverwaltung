@@ -1,6 +1,7 @@
 # Kartentabelle nach Spalten gruppieren (KARV-193)
 
-Stand: Entscheidung vom 18.11.2026, freigegeben vom Maintainer am 19.11.2026. Ein Spec ist eine Momentaufnahme und wird nach dem Merge nicht gepflegt; was
+Stand: Entscheidung vom 18.11.2026, freigegeben vom Maintainer am 19.11.2026. Nachtrag nach dem Handtest vom 20.11.2026
+(Abschnitt 14), noch nicht freigegeben. Ein Spec ist eine Momentaufnahme und wird nach dem Merge nicht gepflegt; was
 dauerhaft gilt, steht in `docs/decisions.md` und der übrigen Dokumentation.
 
 ## Anlass und Ziel
@@ -559,7 +560,7 @@ Commit ohne Änderung (Enter auf dem alten Text) löst die Ausnahme nicht aus. I
 Buchung trotzdem um. Das ist eine bewusste Änderung: Heute verschwindet eine solche Buchung bei der nächsten fremden
 Änderung, denn `showRows()` wendet die Suche dann neu an (Zeilen 639–642). Mitten im Verkauf soll eine gerade
 bearbeitete Buchung aber nicht wegen eines anderen Rechners verschwinden. Stornierte Buchungen ohne Platz verschwinden
-wie heute sofort (`removeCancelled`).
+wie heute sofort (`removeCancelled`), sobald weder eine Zelle bearbeitet wird noch eine Mausbedienung läuft (14.5).
 
 ### 12. Tests
 
@@ -617,6 +618,206 @@ Die bestehenden Tests der Event-Verwaltung und von `ParsingTextFieldTableCell` b
   `ui.input`.
 - Patchnotes 1.2.0: vorläufiger Eintrag.
 
+### 14. Nachtrag nach dem Handtest (20.11.2026)
+
+Der Maintainer hat die gebaute Kartentabelle (Stand `e8fb3a5`) von Hand geprüft und fünf Wünsche genannt; dazu kommen
+drei Befunde aus `/code-review` mit Wirkung auf das Verhalten. Dieser Abschnitt ergänzt die Abschnitte 3, 4, 6, 7, 10, 11
+und 12;
+wo er ihnen widerspricht, gilt er. Was dort steht und hier nicht berührt wird, bleibt.
+
+**Ausgangslage im Code (Stand `e8fb3a5`):**
+
+- Der Gruppenkopf ist ein überlagertes `Label` in `TicketTreeRow.layoutChildren`, so breit wie sein Text, mit dem
+  Hintergrund der Zeile nur hinter dem Text. Es beginnt rechts vom Pfeil und wird mit der ganzen Zeilenhöhe platziert
+  (`resizeRelocate(left, 0, …, getHeight())`); der Pfeil sitzt dort, wo `TreeTableRowSkin` ihn hinlegt. Im Handtest
+  stand der Text tiefer als der Pfeil. Der Text lautet „<Überschrift>: <Text> (<Anzahl>)“ (`TicketTreeRow.headerText`).
+- Die Leiste „Gruppieren“ besteht aus dem `MenuButton` `btnGrouping` und dem `Label` `lblGrouping` mit „Gruppiert
+  nach: Nachname › Vorname“ (`GroupingMenu.showGrouping`). Die Reihenfolge der Ebenen folgt der Reihenfolge des
+  Anhakens; ändern lässt sie sich nur durch Ab- und erneutes Anhaken.
+- Auf- und Zuklappen geht je Gruppe: Pfeil, Doppelklick, Links/Rechts, +, − und * (Abschnitt 6). „Alle“ gibt es nicht.
+- Das Menü „Anzeige“ der Verkaufsansicht füllt `TicketShellController` (Zeilen 117–122) mit den Beschriftungen des
+  Plans, „Barrierefreie Sitzdarstellung“, dem Hinweis am Mauszeiger und der Lage der Kaufzusammenfassung; die Werte
+  liegen in `DisplayPreferences` und `DisplaySettings`.
+- Ein Neuaufbau läuft, sobald keine Zelle mehr bearbeitet wird (`TicketEdits.flush`), auch zwischen Druck und
+  Loslassen der Maus und zwischen den Klicks eines Doppelklicks. `TicketTreeTable.guardMultiClick` verhindert nur, dass
+  dabei eine andere Buchung ins Bearbeiten kommt; ein Gruppenkopf, der so unter den Zeiger rückt, klappt beim
+  Doppelklick trotzdem.
+- `TicketTableController.setSalesState` meldet jede Änderung der Auswahl an den Verkaufszustand, auch wenn die
+  Tabelle nicht mehr zu sehen ist (der Controller lebt bis zur nächsten Speicherbereinigung weiter, und
+  nachgeschobene Aufgaben wie `removeCancelled` laufen noch).
+
+#### 14.1 Alle Gruppen auf- und zuklappen
+
+- **Leiste „Gruppieren“:** zwei Knöpfe „Alle aufklappen“ und „Alle zuklappen“ rechts neben der Gruppierung. Sie sind
+  nur zu sehen und nehmen nur Platz ein, solange die Tabelle gruppiert zeigt (die Gruppierung des letzten Neuaufbaus,
+  nicht die schon gewählte, auf die der Neuaufbau noch wartet). Sie gehen auch im Anzeigemodus und sind gesperrt,
+  solange der Verkaufsdialog offen ist.
+- **Kontextmenü eines Gruppenkopfs:** unter den bisherigen Einträgen ein Trenner, „Alle aufklappen“ und „Alle
+  zuklappen“. Auf einer Buchungszeile erscheinen sie nicht.
+- **Tasten:** Strg+Plus klappt alle auf, Strg+Minus alle zu, jeweils mit der Taste des Ziffernblocks und der des
+  Hauptfelds. Sie wirken nur, wenn die Tabelle den Tastaturfokus hat (wie die übrigen Tasten aus Abschnitt 6), nicht
+  im Suchfeld, in der Leiste oder auf den Bausteinen, und nicht während eine Zelle bearbeitet wird. Ohne Gruppierung tun
+  sie nichts und werden nicht verbraucht. Erkannt werden auf dem Hauptfeld und dem Ziffernblock die Codes `PLUS`/`ADD`
+  bzw. `MINUS`/`SUBTRACT`; liefert eine Tastatur andere Codes, entscheidet der getippte Text „+“ bzw. „-“ (die Umsetzung
+  prüft das auf einer deutschen Tastatur).
+- Knöpfe, Einträge und Tasten gehen auch im Anzeigemodus; sie ändern keine Daten. Knöpfe und Einträge beenden eine
+  laufende Bearbeitung zuerst (die Zelle übernimmt ihre Eingabe, wie bei `cancelSelection`), bevor sie klappen.
+- **Wirkung „Alle aufklappen“:** jede Gruppe auf jeder Ebene ist aufgeklappt, die Menge der zugeklappten Pfade
+  (Abschnitt 4) ist leer. Auswahl und Fokus bleiben.
+- **Wirkung „Alle zuklappen“:** jede Gruppe auf jeder Ebene ist zugeklappt, auch die inneren; klappt man danach eine
+  oberste Gruppe auf, sind ihre Untergruppen zu. Die Regel zum Zuklappen (Abschnitt 6) gilt für das Ganze als einen
+  Schritt: Gewählt bleiben genau die Buchungen, deren oberste Gruppe ganz gewählt war; alle übrigen fallen aus der
+  Auswahl. Fokus und Anker gehen auf die oberste Gruppe der bisher fokussierten Zeile. Die Auswahl wird einmal
+  gemeldet, nicht je Gruppe.
+- „Alle zuklappen“ wirkt auf die Gruppen, die gerade im Baum stehen. Gruppen, die erst später erscheinen (nach dem
+  Leeren der Suche, einem Filter oder einer fremden Änderung), sind wie bisher aufgeklappt (Abschnitt 4); das ist
+  gewollt.
+- Bei offenem Verkaufsdialog ändert keiner der drei Wege etwas (wie Abschnitt 6, „Den Pfeil sperrt der Dialog dafür
+  mit“).
+
+#### 14.2 Reihenfolge der Gruppierung: Bausteine in der Leiste
+
+- Statt des Texts „Gruppiert nach: Nachname › Vorname“ zeigt die Leiste „Gruppiert nach:“ und je Spalte der Gruppierung
+  einen **Baustein** mit der Überschrift der Spalte und einem kleinen „×“, in der Reihenfolge der Ebenen, getrennt durch
+  „›“. Ohne Gruppierung steht dort nichts.
+- **Ziehen:** Ein Baustein lässt sich mit gedrückter linker Maustaste innerhalb der Leiste an eine andere Stelle
+  ziehen. Während des Ziehens zeigt eine Einfügemarke, wo er landet (vor dem Baustein unter dem Zeiger, wenn der Zeiger
+  in dessen linker Hälfte steht, sonst dahinter). Loslassen außerhalb der Bausteine oder Esc lässt die Reihenfolge
+  gleich. Ein Druck ohne Ziehen ändert nichts.
+- **×** nimmt die Spalte aus der Gruppierung, wie Abhaken im Menü.
+- **Tastatur:** Die Bausteine lassen sich mit Tab fokussieren; Strg+Links und Strg+Rechts verschieben den Baustein im
+  Fokus um eine Stelle, Entf nimmt ihn heraus. Der Fokus bleibt auf dem verschobenen Baustein.
+- Jede Änderung setzt die Gruppierung in `DisplayPreferences` (wie das Menü) und baut die Tabelle neu auf, also erst
+  nach dem Ende einer laufenden Bearbeitung (Abschnitt 11). Eine neue Reihenfolge ist eine andere Gruppierung: Die
+  zugeklappten Pfade werden vergessen (Abschnitt 4).
+- Das Menü „Gruppieren“ bleibt: Anhaken hängt weiter als unterste Ebene an. Die Häkchen folgen den Bausteinen.
+
+#### 14.3 Der Gruppenkopf
+
+Ersetzt den Punkt „Gruppenkopf“ in Abschnitt 4:
+
+- Der Kopf zeigt drei Teile in einer Zeile: die **Überschrift der Spalte** in grauer, kleinerer Schrift, den **Wert**
+  fett und die **Zahl** als „n Karten“ (bei 1 „1 Karte“) in grauer Schrift, mit festem Abstand dazwischen. Beispiel:
+  „Nachname   **Hulbert**   4 Karten“.
+- Pfeil und Text stehen auf einer Höhe: Der Text ist in der Zeile senkrecht zentriert wie der Pfeil.
+- Die **ganze Gruppenzeile** hat einen eigenen Hintergrund, der sich von Buchungszeilen und ihrer Zebrafärbung abhebt;
+  ihre Zellen zeigen keine Spaltenlinien. Eine gewählte Gruppe hat über die ganze Breite die Farben einer gewählten
+  Zeile; der blaue rechte Rand gewählter Zellen (heute in `style.css` auch für `:group-selected`) entfällt für
+  Gruppenzeilen, weil sie keine Spalten mehr zeigen.
+- Der Text beginnt rechts vom Pfeil, ist eingerückt nach Ebene und nicht auf eine Spalte beschnitten. Reicht die
+  Breite der Zeile nicht für alle drei Teile, wird zuerst die graue Überschrift mit „…“ am Ende gekürzt, bis sie ganz
+  entfällt; dann der Wert mit „…“ am Ende. Die Zahl bleibt immer ganz stehen, direkt hinter dem (gekürzten) Wert.
+- Der Text wird bei jedem Neuaufbau neu bestimmt (wie bisher). Der Strukturvergleich in Abschnitt 11 vergleicht die drei
+  Teile.
+
+#### 14.4 Option „Gruppen verschachteln“ (Menü „Anzeige“)
+
+- Das Menü „Anzeige“ der Verkaufsansicht bekommt am Ende einen Trenner und den Eintrag zum Anhaken „Gruppen
+  verschachteln“. Standard: angehakt (Verhalten wie bisher).
+- **Abgehakt** entsteht aus der Gruppierung c₁ … cₙ nur **eine** Ebene: Je Kombination der Schlüssel (k₁ … kₙ), die
+  unter den Buchungen vorkommt, gibt es eine Gruppe. Es gibt keine leeren Gruppen.
+  - Kopf: Überschrift „c₁, …, cₙ“ (die Überschriften mit Komma), Wert „Text₁, …, Textₙ“ (die Texte der Schlüssel nach
+    Abschnitt 1 mit Komma, etwa „Hulbert, Sedrick“; ein fehlender Wert als „(leer)“), Zahl wie in 14.3.
+  - Gruppenordnung `VALUE`: nach k₁ in der Ordnung von c₁, bei Gleichstand nach k₂ in der Ordnung von c₂ usw.; `SIZE`:
+    nach Anzahl absteigend, bei Gleichstand wie `VALUE`.
+  - Pfad der Gruppe: die Liste (k₁ … kₙ) als ein Element, also ein Pfad der Länge 1. Damit gelten Zuklappen, Regel 3
+    und der Strukturvergleich unverändert.
+  - Bei einer einzigen Gruppierspalte gilt die Einstellung nicht: Es entsteht genau der verschachtelte Baum, mit Pfad
+    [k₁] wie bisher. Deshalb vergisst ein Umschalten bei nur einer Gruppierspalte auch keine zugeklappten Gruppen.
+  - Die Spalte für Pfeil und Einrückung ist so breit wie für eine Ebene.
+- Das Umschalten bei zwei oder mehr Gruppierspalten ist eine andere Gruppierung: Die zugeklappten Pfade werden
+  vergessen, die Tabelle wird neu aufgebaut (nach dem Ende einer Bearbeitung). Die Auswahl bleibt nach Abschnitt 6
+  (Menge von Buchungen).
+- Der Hinweis `DisplaySection.RESTORE_HINT` zählt die Einträge des Menüs „Anzeige“ auf und sagt, sie gälten für
+  Saalansicht, Kundenfenster und Hallen-Editor. Er nennt künftig „Gruppen verschachteln“ zusammen mit der Gruppierung
+  der Kartentabelle (die nur dort gilt), nicht in der Aufzählung für die drei Ansichten. Kein Test prüft den Text.
+- Der Wert gilt app-weit wie die übrigen Einträge des Menüs: `DisplaySettings` bekommt `ticketGroupingNested`
+  (boolean, Standard `true`), `DisplayPreferences` eine Property dazu. Übernommen beim Start nur bei `restoreAtStart`,
+  geschrieben bei jeder Änderung per `saveOnly`, wie in Abschnitt 10. Eine Datei ohne das Feld gilt als `true`; eine
+  ältere Version ignoriert es. Die Kartentabelle folgt der Property wie der Gruppierung (nur solange sie zu sehen ist,
+  14.5).
+- Das Menü „Gruppieren“ und die Bausteine ändern sich nicht; auch abgehakt gibt die Reihenfolge der Bausteine die
+  Reihenfolge der Teile im Kopf und in der Ordnung vor.
+- `TicketGrouping` (ohne JavaFX) bekommt die Einstellung als Parameter; `GroupRow` trägt dafür statt einer Spalte die
+  Liste der Spalten der Ebene (bei Verschachtelung eine).
+
+#### 14.5 Befunde aus `/code-review` mit Wirkung auf das Verhalten
+
+- **Kein Neuaufbau mitten in einer Mausbedienung.** Eine *Mausbedienung* der Kartentabelle beginnt mit einem Druck in
+  einer Zeile und endet nach dem Loslassen plus einer Nachlaufzeit von 500 ms (die übliche Doppelklickzeit von
+  Windows, als feste Größe). Als Loslassen zählt auch ein Loslassen irgendwo in der Szene der Tabelle (Filter an der
+  Szene, nicht an der Tabelle) und, falls das Loslassen verloren ging, das erste Mausereignis in der Szene ohne
+  gedrückte Taste, solange die Taste noch als gedrückt gilt. Verliert das Fenster den Fokus (etwa durch einen modalen
+  Dialog wie `NameRemovalDialog`), endet die Mausbedienung sofort, ohne Nachlaufzeit; ebenso, wenn die Tabelle nicht
+  mehr zu sehen ist (Wechsel zur Saalansicht). Filter an der Szene und Listener auf den Fokus des Fensters werden über
+  `LiveViews.whileShown` an- und abgemeldet, denn die Szene der Shell lebt länger als der Controller. Ein neuer Druck
+  innerhalb der Nachlaufzeit beginnt eine neue Mausbedienung.
+- Während einer Mausbedienung warten wie während einer Bearbeitung (Abschnitt 11):
+  - jeder Neuaufbau über `TicketEdits` (eigene oder fremde Änderung, Suche, Filter, Sortierung, Gruppierung, Alle
+    auf/zu ausgenommen, denn das baut nicht neu auf), und
+  - `removeCancelled`: Die stornierte Buchung ohne Platz bleibt bis dahin im Modell und in der Tabelle. Bearbeitet die
+    Kassenkraft sie in dieser Zeit (etwa einen neuen Namen), ist sie nicht mehr storniert; `BookingSync.removeIfCancelled`
+    prüft das ohnehin erneut. Das ist dasselbe wie heute während einer Tab-Folge. Das Warten läuft über dieselbe Stelle
+    wie der Neuaufbau (`TicketEdits` oder eine Klasse daneben, ohne Controller testbar), die das Entfernen am Ende von
+    Bearbeitung und Mausbedienung neu anstößt.
+  Abschließend ausgenommen sind diese Neuaufbauten; sie laufen sofort: Stornieren (`cancelSelection`), Storno aus
+  `NameRemovalDialog` (`CANCEL_BOOKINGS`), „Platz zuweisen…“ (`assignPlace`) und `loadBookings` (anderes Event, andere
+  Vorstellung, auch ein neu zusammengesetztes Event nach einer fremden Änderung über `setEvent`). Alles andere wartet,
+  auch die Änderungen aus dem Sitz-Dialog und „Abbrechen“ bzw. „Nur Namen“ im `NameRemovalDialog`. Fällt einer der
+  sofortigen Neuaufbauten doch in eine Mausbedienung (selten, etwa `setEvent`), fängt die Sperre unten die Folgen ab.
+- Beginnt in der Nachlaufzeit eine Bearbeitung, wartet der Neuaufbau bis zu deren Ende. Bei der üblichen
+  Doppelklickzeit liegt so unter dem zweiten Klick eines Doppelklicks dieselbe Zeile wie unter dem ersten: Bearbeitet
+  wird die Buchung, in der der Doppelklick begann, und kein Gruppenkopf rückt unter den Zeiger.
+- **Schutz für längere Doppelklickzeiten:** Hat jemand die Doppelklickzeit des Systems über 500 ms gestellt, kann der
+  Neuaufbau doch zwischen die Klicks fallen. Dafür bleibt eine Sperre: Trifft ein Druck oder Loslassen mit Klickzahl ab
+  2 eine andere Zeile (andere Buchung bzw. anderer Gruppenpfad) als der erste Klick, wird das Ereignis verworfen
+  (verbraucht): kein Bearbeiten, kein Auf- oder Zuklappen, keine Änderung der Auswahl. Die Sperre sitzt wie das
+  Einfrieren bei offenem Dialog am Elternknoten der Tabelle (`freezeSelectionWhileDialogOpen`), denn am selben Knoten
+  liefen die Filter von `TableInput` trotz Verbrauch weiter. Das ersetzt das heutige `guardMultiClick`, das nur das
+  Bearbeiten sperrt. `TableGestures.suspendEditing` bleibt, denn `TableInput.suppressClickEdit` nutzt es weiter
+  (anderer Zweck).
+- **Nur die gezeigte Tabelle meldet ihre Auswahl:** Der Listener, der die Auswahl an den Verkaufszustand meldet
+  (`setSalesState` → `replaceSelection`), hängt nur, solange die Kartentabelle zu sehen ist (`LiveViews.whileShown`,
+  wie die Listener der Gruppierung). Beim Anmelden meldet er nichts von selbst; die Auswahl übernimmt die Tabelle wie
+  bisher über `restoreSelection` von der Saalansicht, und beim ersten Laden ist sie leer. Die Meldung der **Treffer**
+  (`showSearchHits`) bleibt unverändert: `SalesViewState` prüft dort schon selbst, welche Ansicht aktiv ist, und die
+  Shell lädt die Tabelle, bevor sie in einem Fenster steht.
+
+#### 14.6 Tests
+
+Zusätzlich zu Abschnitt 12, ohne FXML und ohne Controller:
+
+- `TicketGrouping`: eine Ebene bei `nested=false` (Kombinationen, Texte mit Komma, „(leer)“ als Teil, Ordnung nach
+  Wert Spalte für Spalte, nach Größe, Pfad der Länge 1); bei einer Spalte gleiches Ergebnis wie verschachtelt.
+- `TicketSelection` bzw. `TicketTreeTable`: „Alle zuklappen“ behält genau die ganz gewählten obersten Gruppen und
+  meldet einmal; „Alle aufklappen“ ändert die Auswahl nicht; bei gesperrter Tabelle (Dialog) keine Wirkung;
+  Strg+Plus/Strg+Minus nur mit Gruppierung und nicht im Bearbeiten.
+- Bausteine (eigene Klasse der Leiste): Ziehen vor und hinter einen Baustein, Ziehen ohne Ziel und Esc ändern nichts,
+  ×, Strg+Links/Rechts, Entf; die Gruppierung in der Property stimmt danach.
+- Gruppenkopf: Text der drei Teile, „1 Karte“/„n Karten“, senkrechte Mitte von Text und Pfeil gleich (auf ±1 px),
+  Breite über die Spalten.
+- `TicketEdits` bzw. die Mausbedienung (mit einstellbarer Uhr statt echter 500 ms): kein Neuaufbau zwischen Druck und
+  Loslassen und in der Nachlaufzeit, danach genau einer; Loslassen außerhalb der Tabelle, verlorenes Loslassen
+  (Mausereignis ohne Taste) und Fokusverlust beenden sie; ein neuer Druck verlängert sie.
+- Abnahme 23 als Test in `TicketTreeTableTest`: Commit durch Druck, angeforderter Neuaufbau, zweiter Druck mit
+  Klickzahl 2 trifft dieselbe Buchung. Dazu die Sperre für längere Doppelklickzeiten: Neuaufbau zwischen den Klicks
+  erzwungen, der zweite Klick trifft eine andere Buchung bzw. einen Gruppenkopf und bewirkt nichts (kein Bearbeiten,
+  kein Klappen, Auswahl gleich).
+- Das Warten des Entfernens stornierter Buchungen an derselben Stelle: kein Entfernen während Bearbeitung und
+  Mausbedienung, danach genau einmal; Ende der Mausbedienung durch Abhängen der Tabelle.
+- Abnahme 24 ist nur im Handtest prüfbar: Kein Test lädt den Controller (Abschnitt 12).
+- Die Strukturprüfung von `TicketTreeBuilder` vergleicht statt einer Spalte die Spaltenliste des Kopfs.
+- `DisplaySettings`/`DisplayPreferences`: `ticketGroupingNested` mit Standard `true`, fehlendes Feld, Übernahme nur
+  bei `restoreAtStart`, Schreiben bei Änderung.
+
+#### 14.7 Dokumentation
+
+`docs/usage.md` (Bausteine, Alle auf/zu samt Tasten, „Gruppen verschachteln“), `docs/structure.md` (neues Feld von
+`DisplaySettings`, neue Klasse der Leiste), `docs/decisions.md` (Eintrag „Ticket table as tree table“: Neuaufbau wartet
+auf die Mausbedienung, Sperre für längere Doppelklickzeiten; Eintrag zu KARV-76: „Gruppen verschachteln“ als weiterer
+Inhalt von `DisplayPreferences`, der nur für die Kartentabelle gilt), der Hinweis `RESTORE_HINT` (14.4), Patchnotes 1.2.0 (der Eintrag folgt nach dem Versionssprung auf 1.2.0, weil
+`PatchNotesBundledTest` die oberste Version der Patchnotes gleich der Version der `pom.xml` verlangt).
+
 ## Der Umsetzung überlassen
 
 - Namen und genaue Signaturen der neuen Klassen und der Schnittstelle in `ui.input`.
@@ -638,8 +839,9 @@ Die bestehenden Tests der Event-Verwaltung und von `ParsingTextFieldTableCell` b
    verhalten sich wie vorher, mit den gewollten Änderungen aus den Zielen: Eine geänderte Buchung zieht in einer
    sortierten Tabelle nach dem Ende der Bearbeitung an ihre neue Stelle, Spaltenfilter gelten nach einer fremden
    Änderung neu, und eine selbst geänderte Buchung bleibt trotz Suche und Filter sichtbar (Abschnitt 11).
-2. Gruppieren nach „Nachname“, dann „Vorname“ zeigt zwei Ebenen. Jeder Kopf hat die Form „Nachname: Müller (6)“ bzw.
-   „Vorname: Hans (4)“, und die Zahl stimmt mit den Buchungen darunter überein.
+2. Gruppieren nach „Nachname“, dann „Vorname“ zeigt zwei Ebenen. Jeder Kopf zeigt Spalte, Wert und Zahl wie in
+   Abschnitt 14.3 („Nachname“ grau, „Müller“ fett, „6 Karten“ grau), und die Zahl stimmt mit den Buchungen darunter
+   überein.
 3. Mit „Gruppen nach Größe ordnen“ stehen die Gruppen mit den meisten Buchungen oben, bei Gleichstand nach Wert.
 4. Ein Klick auf einen Gruppenkopf wählt die Gruppe. Das Kontextmenü zeigt „n Karten verkaufen“ mit n gleich der
    Anzahl der Gruppe, auch wenn sie zugeklappt ist. Bei einer gewählten Vorstellung (nicht „Alle Vorstellungen“, dort
@@ -668,9 +870,34 @@ Die bestehenden Tests der Event-Verwaltung und von `ParsingTextFieldTableCell` b
 15. Die Gruppierung und die Gruppenordnung gelten nach dem Wechsel zur Saalansicht und zurück und, mit „Anzeige beim
     Start wiederherstellen“, nach einem Neustart. Ohne den Schalter beginnt die Tabelle ungruppiert.
 16. Die Event-Verwaltung verhält sich unverändert (Bearbeiten, Tab, ControlsFX-Filter).
-17. `./mvnw test` ist grün, die neuen Tests aus Entwurf, Abschnitt 12, sind vorhanden.
+17. `./mvnw test` ist grün, die neuen Tests aus Entwurf, Abschnitte 12 und 14.6, sind vorhanden.
 18. Am gemeinsamen Ordner ändert sich nichts: `FormatGuardTest`, `JsonKeysTest` und `FormatSamplesTest` laufen
     unverändert durch.
+
+Zum Nachtrag (Abschnitt 14):
+
+19. „Alle zuklappen“ in der Leiste, im Kontextmenü eines Gruppenkopfs und mit Strg+Minus klappt jede Gruppe auf jeder
+    Ebene zu; danach sind genau die Buchungen gewählt, deren oberste Gruppe vorher ganz gewählt war. „Alle aufklappen“
+    (Leiste, Kontextmenü, Strg+Plus) klappt jede Gruppe auf und lässt die Auswahl gleich. Bei offenem Verkaufsdialog
+    geht beides nicht. Ohne Gruppierung gibt es die Knöpfe nicht, und die Tasten tun nichts.
+20. Bei Gruppierung nach „Nachname“, dann „Vorname“ zieht die Kassenkraft den Baustein „Vorname“ vor „Nachname“: Die
+    Tabelle gruppiert danach zuerst nach Vorname. Das × eines Bausteins nimmt die Spalte heraus. Mit der Tastatur
+    verschiebt Strg+Links bzw. Strg+Rechts den Baustein im Fokus, Entf nimmt ihn heraus. Die Häkchen im Menü
+    „Gruppieren“ folgen.
+21. Pfeil und Text eines Gruppenkopfs stehen auf einer Höhe. Der Kopf zeigt die Spalte grau, den Wert fett und „4
+    Karten“ bzw. „1 Karte“ grau; die ganze Zeile hat den Hintergrund des Kopfs, ohne Spaltenlinien.
+22. Mit abgehaktem „Gruppen verschachteln“ (Menü „Anzeige“) und Gruppierung nach „Nachname“, dann „Vorname“ gibt es
+    eine Ebene mit Köpfen wie grau „Nachname, Vorname“, fett „Hulbert, Sedrick“, grau „2 Karten“; „Hulbert, Silas“ ist eine eigene
+    Gruppe daneben. Nach Wert ordnet nach Nachname, dann Vorname; nach Größe die größten oben. Angehakt sieht die
+    Tabelle aus wie in Abnahme 2. Die Wahl gilt nach dem Wechsel zur Saalansicht und, mit „Anzeige beim Start
+    wiederherstellen“, nach einem Neustart.
+23. In einer nach Nachname sortierten oder gruppierten Tabelle ändert die Kassenkraft einen Nachnamen und doppelklickt
+    gleich danach in eine Zelle derselben Zeile: Bei der üblichen Doppelklickzeit wird diese Buchung bearbeitet, und
+    sie zieht erst danach an ihre neue Stelle. In keinem Fall wird eine andere Buchung bearbeitet oder klappt ein
+    Gruppenkopf auf oder zu. Dasselbe gilt, wenn sie den Namen einer Buchung ohne Platz und ohne weitere Daten leert
+    (die Buchung verschwindet erst nach dem Doppelklick).
+24. Die Kassenkraft leert den Namen einer Buchung ohne Platz und wechselt sofort zur Saalansicht: Die Auswahl dort
+    ändert sich dadurch nicht.
 
 ## Prüfvermerk
 
@@ -790,3 +1017,43 @@ Nicht belegt: ob der Gruppenkopf über die ganze Zeile in `TreeTableRowSkin` (Ja
 regelt „Der Umsetzung überlassen“ das Vorgehen. Die Lösung mit `colTree` ist aus den Quellen abgeleitet, nicht
 ausprobiert. Ebenso nicht ausprobiert: wie stark das Angleichen der Auswahl den Anker für Umschalt-Klick und den Fokus
 für `TableInput` stört.
+
+**Nachtrag (Abschnitt 14), Runde 1, 20.11.2026.** Umsetzer: 0 kritisch, 1 groß, 5 klein. Gegenprüfer: 0 kritisch, 4 groß,
+5 klein. Die Ausgangslage des Nachtrags hat der Gegenprüfer am Code bestätigt.
+
+Behoben:
+
+- Neuaufbauten an `TicketEdits` vorbei, vor allem `removeCancelled` (beide Prüfer, groß): 14.5 nennt jetzt, was
+  während einer Mausbedienung wartet (Neuaufbau über `TicketEdits` und `removeCancelled`, die Buchung bleibt bis dahin
+  im Modell) und was sofort läuft (Aktionen aus Kontextmenü, Knopf oder Dialog). Abschnitt 11 verweist darauf.
+- Verlorenes Loslassen (beide Prüfer, Gegenprüfer groß): 14.5 regelt Loslassen in der Szene, das erste Mausereignis
+  ohne gedrückte Taste und den Fokusverlust des Fensters.
+- Doppelklickzeit über 500 ms (Gegenprüfer, groß): Die Sperre bleibt als Schutz und wird schärfer: Ein zweiter Klick
+  auf eine andere Zeile wird verworfen (kein Bearbeiten, kein Klappen, keine Auswahl). Abnahme 23 und 14.6 angepasst.
+- Meldung der Treffer (Gegenprüfer, groß): Nur die Meldung der Auswahl hängt an `whileShown`; die Treffer bleiben,
+  weil `SalesViewState` die aktive Ansicht selbst prüft und die Shell die Tabelle vor dem Fenster lädt.
+- Klein, übernommen: Pfad und Verhalten bei nur einer Gruppierspalte (14.4); Kürzen des Kopfs in fester Reihenfolge
+  (14.3); Reichweite der Tasten, Anker, Anzeigemodus und später erscheinende Gruppen bei „Alle zuklappen“ (14.1);
+  `RESTORE_HINT` und KARV-76 in 14.4 und 14.7; Abnahme 24 und die Wartezeit von `removeCancelled` nur im Handtest
+  (14.6).
+
+Nicht belegt: ob JavaFX das Loslassen bei einem modalen Dialog während des Drucks zustellt (die Regel in 14.5 deckt
+beide Fälle); welche Tastencodes Strg+Plus und Strg+Minus auf einer deutschen Tastatur liefern; ob der Kopf in drei
+Teilen mit Hintergrund über die ganze Zeile in `TreeTableRowSkin` sauber baubar ist (wie bisher regelt das „Der
+Umsetzung überlassen“).
+
+**Nachtrag, Runde 2, 20.11.2026.** Umsetzer: 0 kritisch, 0 groß, 5 klein. Gegenprüfer: 0 kritisch, 0 groß, 5 klein.
+**Damit ist die Prüfung des Nachtrags beendet.** Die Ausgangslage hat der Gegenprüfer erneut am Code bestätigt.
+
+Klein, übernommen: Ende der Mausbedienung beim Abhängen der Tabelle und Anmelden der Szenenfilter über `whileShown`
+(beide Prüfer); abschließende Liste der sofortigen Neuaufbauten samt `setEvent` nach fremder Änderung (beide); die
+Sperre für längere Doppelklickzeiten sitzt am Elternknoten, `suspendEditing` bleibt für `suppressClickEdit`; das Warten
+von `removeCancelled` läuft über `TicketEdits` oder daneben und ist so testbar; Knöpfe und Einträge „Alle“ beenden eine
+Bearbeitung zuerst; Sichtbarkeit der Knöpfe nach der gezeigten Gruppierung; Abnahme 23 auf Buchungen ohne weitere
+Daten beschränkt; Einleitung von 14 nennt auch Abschnitte 3 und 12, Abnahme 17 die Tests aus 14.6; Tastencodes mit
+Rückfall auf den getippten Text.
+
+Nicht belegt: ob ein Kontextmenü unter Linux (GTK, öffnet beim Druck) das Loslassen an die Szene der Tabelle zustellt;
+sonst endet die Mausbedienung erst mit dem nächsten Mausereignis über dem Hauptfenster. Ob JavaFX eine laufende
+Bearbeitung beendet, wenn ihre Zeile durch Zuklappen verschwindet, ist durch „Knöpfe und Einträge beenden eine
+Bearbeitung zuerst“ und das Verbot für die Tasten im Bearbeiten umgangen.
