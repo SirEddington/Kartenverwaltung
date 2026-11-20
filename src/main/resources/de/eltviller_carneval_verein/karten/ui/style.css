@@ -511,28 +511,45 @@
      -fx-cell-size: 30px;
  }
 
- /* Kartentabelle (KARV-193): Eine Gruppenzeile steht nie im Auswahlmodell; sind alle ihre Buchungen gewählt, sieht sie
-    aus wie eine gewählte Zeile (Pseudoklasse aus TicketTreeTable). */
- .ticket-table .tree-table-row-cell:group-selected {
+ /* Kartentabelle (KARV-193): Eine Gruppenzeile (Pseudoklasse aus TicketTreeRow) hat über die ganze Breite einen eigenen
+    Hintergrund, abgehoben von Buchungszeilen und ihrer Zebrafärbung. Ihre Zellen sind leer und zeigen keine
+    Spaltenlinien, auch gewählt nicht (kein blauer rechter Rand wie bei gewählten Buchungszeilen). */
+ .ticket-table .tree-table-row-cell:group {
+     -fx-background-color: #DDE0F0;
+ }
+
+ .ticket-table .tree-table-row-cell:group:hover {
+     -fx-background-color: #CFD3EA;
+ }
+
+ .ticket-table .tree-table-row-cell:group .tree-table-cell {
+     -fx-border-color: transparent;
+ }
+
+ /* Eine Gruppenzeile steht nie im Auswahlmodell; sind alle ihre Buchungen gewählt, hat sie die Farben einer gewählten
+    Zeile (Pseudoklasse aus TicketTreeTable). */
+ .ticket-table .tree-table-row-cell:group-selected,
+ .ticket-table .tree-table-row-cell:group-selected:hover {
      -fx-background-color: -fx-ecv-yellow;
  }
 
- .ticket-table .tree-table-row-cell:group-selected .tree-table-cell {
-     -fx-text-fill: -fx-ecv-blue;
-     -fx-border-color: transparent -fx-ecv-blue transparent transparent;
-     -fx-border-width: 1px;
+ /* Kopf einer Gruppenzeile (TicketTreeRow): ab dem Pfeil über die Spalten hinweg die Überschrift der Spalte (grau,
+    kleiner), der Wert (fett) und die Zahl (grau). */
+ .ticket-table .tree-table-row-cell > .group-header > .group-header-column {
+     -fx-font-size: 0.85em;
+     -fx-text-fill: #555555;
  }
 
- /* Kopf einer Gruppenzeile (TicketTreeRow): fett, ab dem Pfeil über so viele Spalten wie nötig. Der Hintergrund der
-    Zeile verdeckt die Spaltenlinien hinter dem Text. */
- .ticket-table .tree-table-row-cell > .group-header {
-     -fx-background-color: inherit;
+ .ticket-table .tree-table-row-cell > .group-header > .group-header-value {
      -fx-font-weight: bold;
-     -fx-padding: 0 8px 0 2px;
-     -fx-text-fill: -fx-text-background-color;
+     -fx-text-fill: -fx-text-dark;
  }
 
- .ticket-table .tree-table-row-cell:group-selected > .group-header {
+ .ticket-table .tree-table-row-cell > .group-header > .group-header-count {
+     -fx-text-fill: #555555;
+ }
+
+ .ticket-table .tree-table-row-cell:group-selected > .group-header > .label {
      -fx-text-fill: -fx-ecv-blue;
  }
 

@@ -1066,88 +1066,17 @@ class TicketTreeTableTest {
 		assertEquals(4, focusedRow());
 	}
 
-	// ---- Gruppenkopf und Spalte für Pfeil und Einrückung ----
+	// ---- Spalte für Pfeil und Einrückung (den Gruppenkopf prüft TicketTreeRowTest) ----
 
-	/** Der Kopf einer Gruppenzeile; {@code null}, wenn die Zeile keinen zeigt. */
-	private javafx.scene.control.Label header(int row) {
-		for (Node node : rowNode(row).getChildrenUnmodifiable()) {
-			if (node instanceof javafx.scene.control.Label label && label.getStyleClass().contains(TicketTreeRow.HEADER_STYLE_CLASS)) {
-				return label.isVisible() ? label : null;
-			}
-		}
-		return null;
-	}
-
-	private String headerText(int row) throws Exception {
-		return onFx(() -> {
-			javafx.scene.control.Label label = header(row);
-			return label == null ? null : label.getText();
-		});
+	/** Ob die Zeile den Kopf einer Gruppe zeigt. */
+	private boolean showsHeader(int row) throws Exception {
+		return onFx(() -> rowNode(row).getChildrenUnmodifiable().stream()
+				.anyMatch(node -> node.isVisible() && node.getStyleClass().contains(TicketTreeRow.HEADER_STYLE_CLASS)));
 	}
 
 	/** Die Spalte für Pfeil und Einrückung; nur auf dem FX-Thread. */
 	private TreeTableColumn<TicketRow, ?> treeColumn() {
 		return table.getColumns().get(TREE);
-	}
-
-	@Test
-	void kopftextMitAnzahl() throws Exception {
-		booking("Müller", "Carl");
-		booking("Müller", "Dirk");
-		show();
-
-		// 0 Müller (4), 1–4 Buchungen, 5 Schmidt (1), 6 s1, 7 Weber (2)
-		assertEquals("Nachname: Müller (4)", headerText(0));
-		assertEquals("Nachname: Schmidt (1)", headerText(5));
-		assertNull(headerText(1), "eine Buchungszeile zeigt keinen Kopf");
-
-		double[] bounds = onFx(() -> {
-			TreeTableRow<?> row = rowNode(0);
-			javafx.scene.control.Label label = header(0);
-			Bounds arrow = row.getDisclosureNode().getBoundsInParent();
-			return new double[] { label.getBoundsInParent().getMinX(), label.getBoundsInParent().getMaxX(), arrow.getMaxX(), label.getWidth(),
-					table.getColumns().get(TREE).getWidth(), label.prefWidth(-1) };
-		});
-		assertTrue(bounds[0] >= bounds[2] - 0.5, "der Kopf beginnt hinter dem Pfeil");
-		assertTrue(bounds[0] < bounds[4], "der Kopf beginnt noch in der Spalte des Pfeils");
-		assertTrue(bounds[1] > bounds[4], "der Kopf reicht über die Spalte des Pfeils hinaus");
-		assertEquals(bounds[5], bounds[3], 0.5, "der Kopf ist nicht auf eine Spalte beschnitten, sondern so breit wie sein Text");
-	}
-
-	@Test
-	void kopfFolgtNeuaufbau() throws Exception {
-		show();
-		assertEquals("Nachname: Müller (2)", headerText(0));
-
-		booking("Müller", "Carl");
-		rebuild();
-
-		assertEquals("Nachname: Müller (3)", headerText(0));
-	}
-
-	@Test
-	void tiefereEbeneRuecktKopfEinUndPfeilBleibtSichtbar() throws Exception {
-		grouping = List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME);
-		show();
-		// 0 Müller, 1 Anna, 2 m1, ...
-		assertEquals("Vorname: Anna (1)", headerText(1));
-
-		double[] result = onFx(() -> {
-			Node top = rowNode(0).getDisclosureNode();
-			Node deep = rowNode(1).getDisclosureNode();
-			return new double[] { header(0).getBoundsInParent().getMinX(), header(1).getBoundsInParent().getMinX(), deep.isVisible() ? 1 : 0,
-					deep.getOpacity(), top.getOpacity() };
-		});
-		assertTrue(result[1] > result[0], "der Kopf der zweiten Ebene steht weiter rechts");
-		assertEquals(1, result[2]);
-		assertEquals(1.0, result[3], 0.01, "die Spalte ist breit genug für den Pfeil der tiefsten Ebene");
-		assertEquals(1.0, result[4], 0.01);
-		double twoLevels = onFx(() -> treeColumn().getMinWidth());
-
-		grouping = List.of(TicketColumn.LAST_NAME);
-		rebuild();
-		double oneLevel = onFx(() -> treeColumn().getMinWidth());
-		assertTrue(twoLevels > oneLevel, "die Mindestbreite richtet sich nach der Zahl der Ebenen: " + twoLevels + " / " + oneLevel);
 	}
 
 	@Test
@@ -1171,7 +1100,7 @@ class TicketTreeTableTest {
 		assertEquals(result[1], result[0], 0.5, "die erste Datenspalte ist nicht eingerückt");
 		assertEquals(0, result[2], "kein Pfeil");
 		assertEquals(0, result[3], 0.5, "die erste Datenspalte steht ganz links");
-		assertNull(headerText(0));
+		assertFalse(showsHeader(0), "kein Gruppenkopf");
 	}
 
 	@Test
