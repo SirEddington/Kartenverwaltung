@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -15,7 +16,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import javafx.application.Platform;
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.event.Event;
 import javafx.event.EventType;
@@ -41,6 +44,10 @@ class GroupingBarTest {
 	private static final TicketColumn C = TicketColumn.TABLE;
 
 	private final ObjectProperty<List<TicketColumn>> grouping = new SimpleObjectProperty<>(List.of());
+	/** Ob das Fenster den Fokus hat, wie die Leiste es sieht (ein echter Fensterwechsel ist im Test nicht verlässlich). */
+	private final BooleanProperty windowFocused = new SimpleBooleanProperty(true);
+	/** Tasten, die bis zur Leiste durchkamen, also von keinem Filter verbraucht wurden. */
+	private final List<KeyCode> arrived = new ArrayList<>();
 	private HBox chips;
 	private GroupingBar bar;
 	private Stage stage;
@@ -87,7 +94,8 @@ class GroupingBarTest {
 		grouping.set(List.of(initial));
 		run(() -> {
 			chips = new HBox(6);
-			bar = new GroupingBar(chips, grouping);
+			bar = new GroupingBar(chips, grouping, window -> windowFocused);
+			chips.addEventHandler(KeyEvent.KEY_PRESSED, event -> arrived.add(event.getCode()));
 			stage = new Stage();
 			stage.setScene(new Scene(chips, 600, 80));
 			stage.show();
@@ -124,16 +132,24 @@ class GroupingBarTest {
 		});
 	}
 
+	/** Ein Mausereignis mit der linken Taste; gedrückt ist sie bei Druck und Ziehen, beim Bewegen ist keine Taste im Spiel. */
 	private void mouse(Node target, EventType<MouseEvent> type, double[] at) throws Exception {
+		boolean moving = type == MouseEvent.MOUSE_MOVED;
+		boolean down = type == MouseEvent.MOUSE_PRESSED || type == MouseEvent.MOUSE_DRAGGED;
 		run(() -> {
 			PickResult pick = new PickResult(target, at[0], at[1]);
-			Event.fireEvent(target, new MouseEvent(this, target, type, at[0], at[1], at[0], at[1], MouseButton.PRIMARY, 1, false, false, false,
-					false, type != MouseEvent.MOUSE_RELEASED, false, false, false, false, false, false, false, pick));
+			Event.fireEvent(target, new MouseEvent(this, target, type, at[0], at[1], at[0], at[1], moving ? MouseButton.NONE : MouseButton.PRIMARY,
+					moving ? 0 : 1, false, false, false, false, down, false, false, false, false, false, false, false, pick));
 		});
 	}
 
-	private void key(Node target, KeyCode code, boolean ctrl) throws Exception {
-		run(() -> Event.fireEvent(target, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, ctrl, false, false)));
+	/** Drückt die Taste auf dem Knoten; liefert, ob sie bis zur Leiste durchkam (von keinem Filter verbraucht). */
+	private boolean key(Node target, KeyCode code, boolean ctrl) throws Exception {
+		return onFx(() -> {
+			arrived.clear();
+			Event.fireEvent(target, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, ctrl, false, false));
+			return arrived.contains(code);
+		});
 	}
 
 	/** Drückt auf {@code dragged}, zieht in zwei Schritten nach {@code to} und lässt dort los. */
@@ -255,13 +271,108 @@ class GroupingBarTest {
 		mouse(chip, MouseEvent.MOUSE_PRESSED, at(A, 0.5));
 		mouse(chip, MouseEvent.MOUSE_DRAGGED, at(C, 0.75));
 		assertTrue(onFx(() -> bar.marker().isVisible()));
-		key(chip, KeyCode.ESCAPE, false);
+		assertFalse(key(chip, KeyCode.ESCAPE, false), "nach dem Ziehen gehört Esc dem Ziehen");
 		assertFalse(onFx(() -> bar.marker().isVisible()), "Esc bricht das Ziehen ab");
 		mouse(chip, MouseEvent.MOUSE_DRAGGED, at(C, 0.75));
 		mouse(chip, MouseEvent.MOUSE_RELEASED, at(C, 0.75));
 
 		assertEquals(List.of(A, B, C), grouping.get());
 		assertEquals(-1, onFx(() -> bar.dropIndex()));
+		assertTrue(key(chip, KeyCode.ESCAPE, false), "ohne Ziehen geht Esc durch");
+	}
+
+	/**
+	 * Ein Druck, dessen Loslassen nie ankommt (beim Druck öffnete die Bearbeitung einen modalen Dialog, oder das Fenster
+	 * wurde gewechselt), verbraucht kein Esc: Eine bearbeitete Zelle verwirft damit weiter ihre Eingabe.
+	 */
+	@Test
+	void escOhneBewegungWirdNichtVerbraucht() throws Exception {
+		create(A, B, C);
+		Region chip = chip(A);
+
+		mouse(chip, MouseEvent.MOUSE_PRESSED, at(A, 0.5));
+		mouse(chip, MouseEvent.MOUSE_DRAGGED, at(A, 0.52)); // unter der Schwelle: noch kein Ziehen
+
+		assertTrue(key(chip, KeyCode.ESCAPE, false), "Esc geht durch");
+		assertTrue(key(chip, KeyCode.ESCAPE, false), "auch beim zweiten Mal");
+		mouse(chip, MouseEvent.MOUSE_DRAGGED, at(C, 0.75));
+		assertFalse(onFx(() -> bar.marker().isVisible()), "Esc hat den Druck beendet");
+		mouse(chip, MouseEvent.MOUSE_RELEASED, at(C, 0.75));
+		assertEquals(List.of(A, B, C), grouping.get());
+	}
+
+	@Test
+	void haengendesZiehenEndetBeiMausOhneTaste() throws Exception {
+		create(A, B, C);
+		Region chip = chip(A);
+
+		// gezogen, dann ging das Loslassen verloren; die Maus bewegt sich danach ohne Taste über die Leiste
+		mouse(chip, MouseEvent.MOUSE_PRESSED, at(A, 0.5));
+		mouse(chip, MouseEvent.MOUSE_DRAGGED, at(C, 0.75));
+		assertEquals(3, onFx(() -> bar.dropIndex()));
+		mouse(chip(B), MouseEvent.MOUSE_MOVED, at(B, 0.5));
+
+		assertEquals(-1, onFx(() -> bar.dropIndex()), "ein Mausereignis ohne Taste beendet das Ziehen");
+		assertFalse(onFx(() -> bar.marker().isVisible()));
+		assertTrue(key(chip, KeyCode.ESCAPE, false), "danach geht Esc wieder durch");
+		mouse(chip, MouseEvent.MOUSE_DRAGGED, at(C, 0.75));
+		mouse(chip, MouseEvent.MOUSE_RELEASED, at(C, 0.75));
+		assertEquals(List.of(A, B, C), grouping.get(), "ein spätes Loslassen legt nichts mehr ab");
+
+		// nur gedrückt, nicht gezogen: ebenso
+		mouse(chip, MouseEvent.MOUSE_PRESSED, at(A, 0.5));
+		mouse(chips, MouseEvent.MOUSE_MOVED, new double[] { 590, 40 });
+		assertTrue(key(chip, KeyCode.ESCAPE, false));
+		mouse(chip, MouseEvent.MOUSE_RELEASED, at(C, 0.75));
+		assertEquals(List.of(A, B, C), grouping.get());
+	}
+
+	@Test
+	void fokusverlustBeendetZiehen() throws Exception {
+		create(A, B, C);
+		Region chip = chip(A);
+
+		mouse(chip, MouseEvent.MOUSE_PRESSED, at(A, 0.5));
+		mouse(chip, MouseEvent.MOUSE_DRAGGED, at(C, 0.75));
+		assertTrue(onFx(() -> bar.marker().isVisible()));
+		run(() -> windowFocused.set(false)); // Alt+Tab oder ein modaler Dialog
+
+		assertEquals(-1, onFx(() -> bar.dropIndex()));
+		assertFalse(onFx(() -> bar.marker().isVisible()));
+		run(() -> windowFocused.set(true));
+		assertTrue(key(chip, KeyCode.ESCAPE, false), "Esc geht wieder durch");
+		mouse(chip, MouseEvent.MOUSE_DRAGGED, at(C, 0.75));
+		mouse(chip, MouseEvent.MOUSE_RELEASED, at(C, 0.75));
+		assertEquals(List.of(A, B, C), grouping.get());
+
+		// das nächste Ziehen geht wieder, und der alte Wächter stört es nicht
+		run(() -> windowFocused.set(false));
+		run(() -> windowFocused.set(true));
+		drag(A, at(C, 0.75));
+		assertEquals(List.of(B, C, A), grouping.get());
+	}
+
+	@Test
+	void loslassenZaehltWoLosgelassen() throws Exception {
+		create(A, B, C);
+		Region chip = chip(A);
+
+		// zuletzt über der linken Hälfte von B gezogen (dort bliebe A), losgelassen über der rechten Hälfte von C
+		mouse(chip, MouseEvent.MOUSE_PRESSED, at(A, 0.5));
+		mouse(chip, MouseEvent.MOUSE_DRAGGED, at(B, 0.25));
+		assertEquals(1, onFx(() -> bar.dropIndex()));
+		mouse(chip, MouseEvent.MOUSE_RELEASED, at(C, 0.75));
+		assertEquals(List.of(B, C, A), grouping.get());
+
+		// über einem Ziel gezogen, außerhalb losgelassen
+		Region chipB = chip(B);
+		mouse(chipB, MouseEvent.MOUSE_PRESSED, at(B, 0.5));
+		mouse(chipB, MouseEvent.MOUSE_DRAGGED, at(A, 0.75));
+		assertEquals(3, onFx(() -> bar.dropIndex()));
+		double[] below = at(A, 0.75);
+		below[1] += 100;
+		mouse(chipB, MouseEvent.MOUSE_RELEASED, below);
+		assertEquals(List.of(B, C, A), grouping.get());
 	}
 
 	@Test

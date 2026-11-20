@@ -3,9 +3,11 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableBooleanValue;
 import javafx.beans.value.WeakChangeListener;
 import javafx.event.EventHandler;
 import javafx.geometry.Bounds;
@@ -22,6 +24,7 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
+import javafx.stage.Window;
 
 /**
  * Die Bausteine der Leiste "Gruppieren" (KARV-193, Spec Abschnitt 14.2): vorn "Gruppiert nach:", dann je Spalte der
@@ -32,7 +35,9 @@ import javafx.scene.layout.Region;
  * landet: vor dem Baustein unter dem Zeiger, wenn der Zeiger in dessen linker Hälfte steht, sonst dahinter. Loslassen
  * außerhalb der Bausteine oder Esc lässt die Reihenfolge gleich, ebenso ein Druck ohne Ziehen. Gezogen wird mit den
  * gewöhnlichen Mausereignissen, nicht mit dem Drag-and-drop des Systems: Der gedrückte Baustein bekommt alle Ereignisse
- * bis zum Loslassen, und Tests kommen mit synthetischen Ereignissen aus. Mit der Tastatur: Tab fokussiert die Bausteine,
+ * bis zum Loslassen, und Tests kommen mit synthetischen Ereignissen aus. Geht das Loslassen verloren (modaler Dialog,
+ * Fensterwechsel), endet das Ziehen ohne Wirkung beim nächsten Mausereignis ohne gedrückte linke Taste oder wenn das
+ * Fenster den Fokus verliert; Esc wird nur verbraucht, wenn schon gezogen wurde. Mit der Tastatur: Tab fokussiert die Bausteine,
  * Strg+Links und Strg+Rechts verschieben den Baustein im Fokus um eine Stelle, Entf nimmt ihn heraus; der Fokus bleibt
  * auf dem verschobenen Baustein.
  *
@@ -53,22 +58,55 @@ final class GroupingBar {
 	/** Die Einfügemarke: nicht vom Layout der Leiste gesetzt, damit die Bausteine beim Ziehen nicht springen. */
 	private final Region marker = new Region();
 	private final ChangeListener<List<TicketColumn>> follow = (obs, before, now) -> show();
-	/** Esc während des Ziehens, wo immer der Fokus steht; nur so lange angemeldet. */
-	private final EventHandler<KeyEvent> escape = event -> {
-		if (event.getCode() == KeyCode.ESCAPE) {
-			endDrag();
-			event.consume();
-		}
-	};
 	/** Das laufende Ziehen, sonst {@code null}. */
 	private Drag drag;
+	/** Liefert die Property "Fenster hat den Fokus"; in der App {@link Window#focusedProperty}, in Tests steuerbar. */
+	private final Function<Window, ObservableBooleanValue> windowFocus;
+	/**
+	 * Esc während des Ziehens, wo immer der Fokus steht: beendet es und wird nur verbraucht, wenn schon gezogen wurde.
+	 * Sonst erreicht Esc etwa eine bearbeitete Zelle, die ihre Eingabe verwirft.
+	 */
+	private final EventHandler<KeyEvent> escape = event -> {
+		if (event.getCode() == KeyCode.ESCAPE && drag != null) {
+			boolean moved = drag.moved;
+			endDrag();
+			if (moved) {
+				event.consume();
+			}
+		}
+	};
+	/**
+	 * Alle Mausereignisse der Szene während des Ziehens: Das Loslassen der linken Taste legt ab, wo immer es ankommt. Ein
+	 * neuer Druck oder ein Ereignis ohne gedrückte linke Taste beendet ein Ziehen, dessen Loslassen verloren ging (etwa
+	 * weil beim Druck ein modaler Dialog aufging oder das Fenster gewechselt wurde).
+	 */
+	private final EventHandler<MouseEvent> mouseWatch = event -> {
+		if (drag == null) {
+			return;
+		}
+		if (event.getEventType() == MouseEvent.MOUSE_RELEASED && event.getButton() == MouseButton.PRIMARY) {
+			drop(event);
+		} else if (event.getEventType() == MouseEvent.MOUSE_PRESSED || !event.isPrimaryButtonDown()) {
+			endDrag();
+		}
+	};
+	/** Verliert das Fenster den Fokus, endet das Ziehen ohne Wirkung. */
+	private final ChangeListener<Boolean> focusWatch = (obs, before, focused) -> {
+		if (!focused) {
+			endDrag();
+		}
+	};
 
-	/** Ein Ziehen von seinem Druck bis zum Loslassen; {@code target} ist die Einfügestelle oder -1 ohne Ziel. */
+	/**
+	 * Ein Ziehen von seinem Druck bis zum Loslassen; {@code target} ist die Einfügestelle unter dem letzten Ziehen oder -1
+	 * ohne Ziel. {@code scene} und {@code focus} tragen die Wächter, die nur so lange angemeldet sind.
+	 */
 	private static final class Drag {
 		final TicketColumn column;
 		final double startX;
 		final double startY;
 		Scene scene;
+		ObservableBooleanValue focus;
 		boolean moved;
 		int target = -1;
 
@@ -80,8 +118,14 @@ final class GroupingBar {
 	}
 
 	GroupingBar(HBox chips, ObjectProperty<List<TicketColumn>> grouping) {
+		this(chips, grouping, Window::focusedProperty);
+	}
+
+	/** Wie oben; {@code windowFocus} liefert je Fenster, ob es den Fokus hat (für Tests ohne echten Fensterwechsel). */
+	GroupingBar(HBox chips, ObjectProperty<List<TicketColumn>> grouping, Function<Window, ObservableBooleanValue> windowFocus) {
 		this.chips = chips;
 		this.grouping = grouping;
+		this.windowFocus = windowFocus;
 		chips.getStyleClass().add("grouping-chips");
 		marker.getStyleClass().add("grouping-drop-marker");
 		marker.setManaged(false);
@@ -182,7 +226,6 @@ final class GroupingBar {
 		chip.addEventHandler(KeyEvent.KEY_PRESSED, event -> keyPressed(column, event));
 		chip.addEventHandler(MouseEvent.MOUSE_PRESSED, event -> pressed(column, chip, event));
 		chip.addEventHandler(MouseEvent.MOUSE_DRAGGED, this::dragged);
-		chip.addEventHandler(MouseEvent.MOUSE_RELEASED, this::released);
 		return chip;
 	}
 
@@ -221,6 +264,11 @@ final class GroupingBar {
 		drag.scene = chips.getScene();
 		if (drag.scene != null) {
 			drag.scene.addEventFilter(KeyEvent.KEY_PRESSED, escape);
+			drag.scene.addEventFilter(MouseEvent.ANY, mouseWatch);
+			if (drag.scene.getWindow() != null) {
+				drag.focus = windowFocus.apply(drag.scene.getWindow());
+				drag.focus.addListener(focusWatch);
+			}
 		}
 		event.consume();
 	}
@@ -238,23 +286,27 @@ final class GroupingBar {
 		event.consume();
 	}
 
-	private void released(MouseEvent event) {
-		if (drag == null || event.getButton() != MouseButton.PRIMARY) {
-			return;
-		}
+	/** Loslassen der linken Taste: Nach einem Ziehen landet der Baustein an der Einfügestelle unter dem Loslassen. */
+	private void drop(MouseEvent event) {
 		Drag done = drag;
 		endDrag();
-		event.consume();
-		if (done.moved && done.target >= 0) {
+		int target = done.moved ? dropIndexAt(event.getSceneX(), event.getSceneY()) : -1;
+		if (target >= 0) {
 			int from = current().indexOf(done.column);
-			move(from, done.target > from ? done.target - 1 : done.target);
+			move(from, target > from ? target - 1 : target);
 		}
 	}
 
-	/** Beendet ein laufendes Ziehen ohne Wirkung. */
+	/** Beendet ein laufendes Ziehen ohne Wirkung und meldet seine Wächter ab. */
 	private void endDrag() {
-		if (drag != null && drag.scene != null) {
-			drag.scene.removeEventFilter(KeyEvent.KEY_PRESSED, escape);
+		if (drag != null) {
+			if (drag.scene != null) {
+				drag.scene.removeEventFilter(KeyEvent.KEY_PRESSED, escape);
+				drag.scene.removeEventFilter(MouseEvent.ANY, mouseWatch);
+			}
+			if (drag.focus != null) {
+				drag.focus.removeListener(focusWatch);
+			}
 		}
 		drag = null;
 		marker.setVisible(false);
