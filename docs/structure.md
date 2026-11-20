@@ -109,7 +109,7 @@ user-facing technical messages (`StoreMessages`, SYS-005…SYS-013).
 `AppSettings` (`sharedDir`, `saveBookingsImmediately`, `checkCloudServer`, `recentOperators`, `display`,
 `patchNotesSeen`), `DisplaySettings` (the "Anzeige" menu: rows, tables, seat numbers, hall objects, `seatPatterns`,
 `selectionHint`, `selectionHintPlacement` and `summaryPlacement` as text, `selectionHintAvoidEdges`,
-`ticketGrouping` as a list of column names and `ticketGroupOrder` as text, `restoreAtStart`) and `SettingsStore` (`<AppData>/settings.json`, `saveOnly` for partial
+`ticketGrouping` as a list of column names, `ticketGroupOrder` as text and `ticketGroupingNested` (default `true`), `restoreAtStart`) and `SettingsStore` (`<AppData>/settings.json`, `saveOnly` for partial
 saves, `existedAtLoad()`). Always read through `SettingsStore.getInstance().current()`.
 
 ### `update`
@@ -133,7 +133,7 @@ Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
 | Subpackage | Content |
 |---|---|
 | `menu` | Main menu (Abrechnung, Kartenverkauf, Verwaltung, Einstellungen) and management menu |
-| `sales` | Ticket sales shell, ticket table, hall overview (`HallPlanPane`, `HallViewport`), customer display, `SeatLook` (accessible seat display), bulk edit, search, cancel, assign place, purchase summary placement. The ticket table (KARV-193) is split into JavaFX-free decisions and the tree table: `TicketColumn` (columns as values: heading, group key, text, order), `TicketFilter` (column filters), `TicketGrouping` with `TicketNode` and `GroupOrder` (groups and counts), `TicketSelection` (selection as a set of bookings) and `TicketRow` (row type: booking or group); and the JavaFX side: `TicketTreeTable` (the `TreeTableView`) with `TicketTreeBuilder` (the `TreeItem`s), `TicketTreeRow`, `TicketCells`, `TicketEdits` (when to rebuild, which bookings stay visible), `ColumnFilterMenu` and `GroupingMenu` |
+| `sales` | Ticket sales shell, ticket table, hall overview (`HallPlanPane`, `HallViewport`), customer display, `SeatLook` (accessible seat display), bulk edit, search, cancel, assign place, purchase summary placement. The ticket table (KARV-193) is split into JavaFX-free decisions and the tree table: `TicketColumn` (columns as values: heading, group key, text, order), `TicketFilter` (column filters), `TicketGrouping` with `TicketNode` and `GroupOrder` (groups and counts), `TicketSelection` (selection as a set of bookings) and `TicketRow` (row type: booking or group); and the JavaFX side: `TicketTreeTable` (the `TreeTableView`) with `TicketTreeBuilder` (the `TreeItem`s), `TicketTreeRow`, `TicketCells`, `TicketEdits` (when to rebuild, which bookings stay visible), `MouseGesture` (a mouse operation, which holds rebuilds back; no JavaFX), `ColumnFilterMenu`, `GroupingMenu` and `GroupingBar` (the draggable chips of the grouping order) |
 | `accounting` | Accounting shell, cash reconciliation, statistics, `Exportable` (CSV/PDF), locked bookings notice |
 | `event` | Event overview, create/edit, presentations, templates (copies), seating plan switch, locked entry guard |
 | `hall` | Hall management and editor, hall plan and seating plan drawing (`SeatingPlanDrawing`, `PlanNodeFactory`), seat layout (`SeatingPlanLayout`), labels (`PlanText`, `PlanLabels`, `PlanLabelOptions`), row fill dialog, bulk edits of rows (`TableRowBulkEdit`) |

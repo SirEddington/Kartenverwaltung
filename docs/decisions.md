@@ -703,7 +703,7 @@ through to the seat. The cross is white because a dark one swallowed the black s
 ## One "Anzeige" choice for all plan views, restored at start (KARV-76)
 
 **Decision:** Sales view, customer display and hall editor share one app-wide `DisplayPreferences` (rows, tables, seat
-numbers, hall objects, seat patterns, selection hint at the pointer (KARV-194) and its placement above or below, with or without avoiding edges (KARV-197), purchase summary placement, and since KARV-193 the grouping of the ticket table with its group order). It is installed in `MainApp` at start and written to
+numbers, hall objects, seat patterns, selection hint at the pointer (KARV-194) and its placement above or below, with or without avoiding edges (KARV-197), purchase summary placement, and since KARV-193 the grouping of the ticket table with its group order and the option "Gruppen verschachteln"; the last two apply to the ticket table only, not to the plan views). It is installed in `MainApp` at start and written to
 `settings.json` (`display`) on every change as a partial save. With "Anzeige beim Start wiederherstellen" (on by
 default) the next start uses the stored choice; off, every start shows everything with the placement "Automatisch".
 
@@ -754,6 +754,23 @@ the ticket went from 1.1.1 to 1.2.
   before). A booking the operator changed moves to its new place and stays visible despite search and filter until
   these change or another presentation is shown. Before, a changed booking stayed where it was, because the lists of
   ControlsFX do not re-sort without a list change; with groups, headers and counts would be wrong.
+- **No rebuild during a mouse operation (hand test, 20.11.2026):** The first press of a double click commits the edit
+  and asks for a rebuild; if it ran before the second click, another booking or a group header could sit under the
+  pointer (the header then collapsed on the double click). So a rebuild also waits for the end of a mouse operation
+  (`MouseGesture`): from the press in a row until 500 ms after the release, the usual Windows double-click time as a
+  fixed value. The same wait holds back removing cancelled bookings without a seat. Cancelling, the storno from
+  `NameRemovalDialog`, "Platz zuweisen…" and `loadBookings` still rebuild at once. Because the system double-click
+  time can be longer, `TicketTreeTable` also consumes a press or release with click count 2 or more on another row
+  (booking or group path) than the first click. It sits on the parent node of the table, because filters on the
+  table itself kept running after a consume. The listeners and scene filters of the controller exist only while the
+  table is shown, so a controller left behind reports no selection to `SalesViewState`.
+- **Grouping order as chips, "Gruppen verschachteln", expand/collapse all (hand test, 20.11.2026):** The order of
+  levels used to follow the order of ticking, so changing it meant unticking and ticking again; the chips of
+  `GroupingBar` can be dragged (ordinary mouse events, not system drag and drop, so tests need no toolkit gestures).
+  With "Gruppen verschachteln" off, several columns form one level with one group per combination (path of length 1,
+  so closing, selection rules and structure comparison are unchanged); with one column the setting is ignored, so
+  switching it does not forget closed groups. "Alle zuklappen" closes inner groups too and keeps the selection of
+  fully selected top-level groups as one step.
 - **Input helpers once for both table kinds:** `TableInput` works against `TableAccess`
   (`TableViewAccess`, `TreeTableViewAccess`), the parsing text cells share `ParsingEditing`. Group rows are never
   editable, and Tab skips them.
