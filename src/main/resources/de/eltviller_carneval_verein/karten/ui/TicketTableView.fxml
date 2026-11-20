@@ -1,18 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<?import javafx.geometry.Insets?>
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
 <?import org.controlsfx.control.CheckComboBox?>
 
 
-<VBox spacing="15.0" prefWidth="900.0" prefHeight="600.0"
+<!-- Ohne eigenen Rand: Den Abstand zu Header und Footer gibt die Hülle (TicketShellView); so steht die Tabelle bündig
+     mit Header und Footer und verliert keinen Platz -->
+<VBox spacing="8.0" prefWidth="900.0" prefHeight="600.0"
 	xmlns="http://javafx.com/javafx/17"
     xmlns:fx="http://javafx.com/fxml/1"
 	fx:controller="de.eltviller_carneval_verein.karten.ui.sales.TicketTableController">
-    <padding>
-        <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
-    </padding>
 
     <!-- Gruppieren (KARV-193): Menü mit den Spalten und der Gruppenordnung, daneben die aktive Gruppierung als Bausteine
          (GroupingBar) und, solange die Tabelle gruppiert zeigt, "Alle aufklappen" und "Alle zuklappen" -->
