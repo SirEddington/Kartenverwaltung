@@ -70,6 +70,8 @@ public final class TicketTreeTable {
 	private List<TicketNode> nodes = List.of();
 	private final TicketTreeBuilder tree = new TicketTreeBuilder();
 	private List<TicketColumn> grouping = List.of();
+	// Ob die Gruppen wirklich verschachtelt sind; mit weniger als zwei Spalten immer (es gibt nur eine Ebene)
+	private boolean groupsNested = true;
 	/** Bis zur ersten Messung die Werte von Modena bei 13 px (Einrückung 1em, Pfeil mit Innenabstand). */
 	private double indentPerLevel = 13;
 	private double arrowWidth = 20;
@@ -289,10 +291,13 @@ public final class TicketTreeTable {
 	 * JavaFX blendet den Pfeil sonst aus. Ausgeblendet rückt sie keine Datenspalte ein, denn sie bleibt die
 	 * {@code treeColumn} der Tabelle (Spec Abschnitt 4).
 	 */
-	public void setGrouping(List<TicketColumn> columns) {
+	public void setGrouping(List<TicketColumn> columns, boolean nested) {
 		List<TicketColumn> next = List.copyOf(columns);
-		if (!next.equals(grouping)) {
+		// Mit weniger als zwei Spalten gibt es nichts zu verschachteln: Dann ändert das Umschalten die Gruppen nicht
+		boolean nextNested = nested || next.size() < 2;
+		if (!next.equals(grouping) || nextNested != groupsNested) {
 			grouping = next;
+			groupsNested = nextNested;
 			clearCollapsed();
 		}
 		treeColumn.setVisible(!grouping.isEmpty());
@@ -313,7 +318,8 @@ public final class TicketTreeTable {
 
 	private void updateTreeColumnFloor() {
 		if (!grouping.isEmpty()) {
-			ColumnMinWidths.setFloor(treeColumn, indentPerLevel * (grouping.size() - 1) + arrowWidth + TREE_COLUMN_SPACE);
+			int levels = groupsNested ? grouping.size() : 1;
+			ColumnMinWidths.setFloor(treeColumn, indentPerLevel * (levels - 1) + arrowWidth + TREE_COLUMN_SPACE);
 		}
 	}
 

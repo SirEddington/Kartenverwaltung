@@ -70,6 +70,7 @@ public final class DisplayPreferences {
 	};
 	// Wie die Lage des Hinweises: Eine unbekannte Ordnung gilt als VALUE und bleibt in der Datei, bis eine andere gewählt wird
 	private final TolerantEnum<GroupOrder> fileGroupOrder = new TolerantEnum<>(GroupOrder.class, GroupOrder.VALUE, GroupOrder.VALUE);
+	private final BooleanProperty ticketGroupingNested = new SimpleBooleanProperty(true);
 	private final Consumer<Consumer<AppSettings>> saveOnly;
 
 	/**
@@ -93,6 +94,7 @@ public final class DisplayPreferences {
 			summaryPlacement.set(filePlacement.get());
 			ticketGrouping.set(readColumns(saved.getTicketGrouping()));
 			ticketGroupOrder.set(fileGroupOrder.get());
+			ticketGroupingNested.set(saved.isTicketGroupingNested());
 		}
 		// Erst nach dem Übernehmen, damit der Start nichts schreibt
 		planLabels.addListener((obs, oldValue, newValue) -> write());
@@ -103,6 +105,7 @@ public final class DisplayPreferences {
 		summaryPlacement.addListener((obs, oldValue, newValue) -> write());
 		ticketGrouping.addListener((obs, oldValue, newValue) -> write());
 		ticketGroupOrder.addListener((obs, oldValue, newValue) -> write());
+		ticketGroupingNested.addListener((obs, oldValue, newValue) -> write());
 	}
 
 	/** Liest die Spaltennamen der Datei; unbekannte und doppelte Namen werden übersprungen. */
@@ -186,6 +189,14 @@ public final class DisplayPreferences {
 		return ticketGroupOrder;
 	}
 
+	/**
+	 * Ob die Gruppen der Kartentabelle bei mehreren Spalten ineinander verschachtelt sind; sonst stehen sie auf einer Ebene
+	 * (KARV-193). Standard an.
+	 */
+	public BooleanProperty ticketGroupingNestedProperty() {
+		return ticketGroupingNested;
+	}
+
 	private void write() {
 		try {
 			PlanLabels labels = planLabels.snapshot();
@@ -200,6 +211,7 @@ public final class DisplayPreferences {
 			List<String> grouping = ticketGrouping.get().stream().map(TicketColumn::name).toList();
 			fileGroupOrder.set(ticketGroupOrder.get());
 			String groupOrder = fileGroupOrder.toJson();
+			boolean nested = ticketGroupingNested.get();
 			saveOnly.accept(settings -> {
 				DisplaySettings display = settings.getDisplay();
 				display.setRows(labels.rows());
@@ -213,6 +225,7 @@ public final class DisplayPreferences {
 				display.setSummaryPlacement(placement);
 				display.setTicketGrouping(grouping);
 				display.setTicketGroupOrder(groupOrder);
+				display.setTicketGroupingNested(nested);
 			});
 		} catch (RuntimeException e) {
 			LOG.log(Level.WARNING, "Die Auswahl im Menü \"Anzeige\" ließ sich nicht speichern", e);

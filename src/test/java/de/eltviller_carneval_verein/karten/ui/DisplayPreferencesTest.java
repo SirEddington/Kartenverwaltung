@@ -71,6 +71,24 @@ class DisplayPreferencesTest {
 	}
 
 	@Test
+	void ticketGroupingNestedAppliesAtStartOnlyWithRestoreAndChangesAreWritten() {
+		DisplaySettings saved = saved(true);
+		saved.setTicketGroupingNested(false);
+		DisplayPreferences prefs = load(saved);
+		assertFalse(prefs.ticketGroupingNestedProperty().get());
+		assertEquals(0, writes, "der Start schreibt nichts");
+
+		prefs.ticketGroupingNestedProperty().set(true);
+		assertEquals(1, writes);
+		assertTrue(file.isTicketGroupingNested());
+
+		DisplaySettings ignored = saved(false);
+		ignored.setTicketGroupingNested(false);
+		assertTrue(load(ignored).ticketGroupingNestedProperty().get(), "ohne Wiederherstellen gilt der Standard");
+		assertTrue(DisplayPreferences.unsaved().ticketGroupingNestedProperty().get());
+	}
+
+	@Test
 	void withoutRestoreTheTicketTableIsUngrouped() {
 		DisplaySettings saved = saved(false);
 		saved.setTicketGrouping(List.of("LAST_NAME"));

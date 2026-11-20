@@ -35,6 +35,7 @@ public class DisplaySettings {
 	private String summaryPlacement = DEFAULT_SUMMARY_PLACEMENT;
 	private List<String> ticketGrouping = List.of();
 	private String ticketGroupOrder = DEFAULT_TICKET_GROUP_ORDER;
+	private boolean ticketGroupingNested = true;
 
 	public DisplaySettings() {
 	}
@@ -164,5 +165,17 @@ public class DisplaySettings {
 	/** {@code null} gilt als {@link #DEFAULT_TICKET_GROUP_ORDER}. */
 	public void setTicketGroupOrder(String ticketGroupOrder) {
 		this.ticketGroupOrder = ticketGroupOrder == null ? DEFAULT_TICKET_GROUP_ORDER : ticketGroupOrder;
+	}
+
+	/**
+	 * Ob die Gruppen der Kartentabelle bei mehreren Spalten ineinander verschachtelt sind (KARV-193); sonst stehen sie auf
+	 * einer Ebene. Fehlt das Feld, ist es an.
+	 */
+	public boolean isTicketGroupingNested() {
+		return ticketGroupingNested;
+	}
+
+	public void setTicketGroupingNested(boolean ticketGroupingNested) {
+		this.ticketGroupingNested = ticketGroupingNested;
 	}
 }

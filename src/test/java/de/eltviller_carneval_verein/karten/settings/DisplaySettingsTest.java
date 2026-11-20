@@ -38,6 +38,19 @@ class DisplaySettingsTest {
 		assertEquals("AUTO", display.getSummaryPlacement());
 		assertTrue(display.getTicketGrouping().isEmpty());
 		assertEquals("VALUE", display.getTicketGroupOrder());
+		assertTrue(display.isTicketGroupingNested());
+	}
+
+	@Test
+	void ticketGroupingNestedDefaultsToTrueAndSurvivesSaveAndReload(@TempDir File dir) throws IOException {
+		write(dir, "{\"display\": {\"restoreAtStart\": true}}");
+		assertTrue(new SettingsStore(dir).current().getDisplay().isTicketGroupingNested(), "fehlendes Feld: verschachtelt");
+
+		SettingsStore store = new SettingsStore(dir);
+		store.current().getDisplay().setTicketGroupingNested(false);
+		store.save();
+
+		assertFalse(new SettingsStore(dir).current().getDisplay().isTicketGroupingNested());
 	}
 
 	@Test

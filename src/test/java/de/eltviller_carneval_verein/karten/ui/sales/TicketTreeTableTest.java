@@ -65,6 +65,7 @@ class TicketTreeTableTest {
 	private final Booking w2 = booking("Weber", "Emil");
 
 	private List<TicketColumn> grouping = List.of(TicketColumn.LAST_NAME);
+	private boolean nested = true;
 	private final TicketFilter filter = new TicketFilter();
 	private Stage stage;
 	private TreeTableView<TicketRow> table;
@@ -131,7 +132,7 @@ class TicketTreeTableTest {
 
 	private List<TicketNode> nodes() {
 		List<BookingDTO> rows = bookings.stream().map(b -> new BookingDTO(event, presentation, b)).filter(filter::passes).toList();
-		return TicketGrouping.group(rows, grouping, GroupOrder.VALUE, true, tree.sortComparator(), event.getPresentations());
+		return TicketGrouping.group(rows, grouping, GroupOrder.VALUE, nested, tree.sortComparator(), event.getPresentations());
 	}
 
 	private static TreeTableColumn<TicketRow, String> column(String title, java.util.function.Function<TicketRow, String> value) {
@@ -185,7 +186,7 @@ class TicketTreeTableTest {
 
 	/** Neuaufbau wie im Controller: erst die Gruppierung (eine Kopie, wie aus den Einstellungen), dann der Baum. */
 	private void showNodes() {
-		tree.setGrouping(List.copyOf(grouping));
+		tree.setGrouping(List.copyOf(grouping), nested);
 		tree.show(nodes());
 	}
 
@@ -1192,6 +1193,34 @@ class TicketTreeTableTest {
 
 		assertTrue(onFx(() -> table.getTreeItem(7).isExpanded()), "eine andere Gruppierung vergisst die zugeklappten Gruppen");
 		assertEquals(10, onFx(() -> table.getExpandedItemCount()));
+	}
+
+	@Test
+	void umschaltenBeiEinerSpalteVergisstNichts() throws Exception {
+		show();
+		setExpanded(5, false); // Weber
+
+		nested = false; // eine Spalte: es gibt nichts zu verschachteln
+		rebuild();
+
+		assertFalse(onFx(() -> table.getTreeItem(5).isExpanded()), "die zugeklappte Gruppe bleibt zu");
+	}
+
+	@Test
+	void umschaltenBeiZweiSpaltenKlapptAllesAuf() throws Exception {
+		grouping = List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME);
+		show();
+		setExpanded(0, false); // Müller
+		assertFalse(onFx(() -> table.getTreeItem(0).isExpanded()));
+
+		nested = false;
+		rebuild();
+
+		assertTrue(onFx(() -> table.getTreeItem(0).isExpanded()), "andere Gruppen: alles ist wieder aufgeklappt");
+		double flat = onFx(() -> treeColumn().getMinWidth());
+		nested = true;
+		rebuild();
+		assertTrue(onFx(() -> treeColumn().getMinWidth()) > flat, "ohne Verschachtelung genügt eine Ebene für Pfeil und Einrückung");
 	}
 
 	@Test

@@ -107,6 +107,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 	/** Gruppierung und Gruppenordnung aus {@link DisplayPreferences} (Menü "Gruppieren"), Stand der letzten Änderung. */
 	private List<TicketColumn> grouping = List.of();
 	private GroupOrder groupOrder = GroupOrder.VALUE;
+	private boolean groupingNested = true;
 	// Angemeldet nur, solange die Tabelle zu sehen ist (bindGrouping). Der Neuaufbau wartet wie jeder andere, bis
 	// keine Zelle mehr bearbeitet wird; erst er übernimmt die Gruppierung in die Tabelle.
 	private final ChangeListener<Object> groupingChanges = (obs, before, now) -> followGrouping();
@@ -287,13 +288,16 @@ public class TicketTableController implements ContentController, SalesStateAware
 		DisplayPreferences preferences = DisplayPreferences.instance();
 		grouping = preferences.ticketGroupingProperty().get();
 		groupOrder = preferences.ticketGroupOrderProperty().get();
+		groupingNested = preferences.ticketGroupingNestedProperty().get();
 		LiveViews.whileShown(seatTable, () -> {
 			preferences.ticketGroupingProperty().addListener(groupingChanges);
 			preferences.ticketGroupOrderProperty().addListener(groupingChanges);
+			preferences.ticketGroupingNestedProperty().addListener(groupingChanges);
 			followGrouping();
 		}, () -> {
 			preferences.ticketGroupingProperty().removeListener(groupingChanges);
 			preferences.ticketGroupOrderProperty().removeListener(groupingChanges);
+			preferences.ticketGroupingNestedProperty().removeListener(groupingChanges);
 		});
 		new GroupingMenu(btnGrouping, lblGrouping, preferences.ticketGroupingProperty(), preferences.ticketGroupOrderProperty());
 	}
@@ -303,9 +307,11 @@ public class TicketTableController implements ContentController, SalesStateAware
 		DisplayPreferences preferences = DisplayPreferences.instance();
 		List<TicketColumn> nowGrouping = preferences.ticketGroupingProperty().get();
 		GroupOrder nowOrder = preferences.ticketGroupOrderProperty().get();
-		if (!nowGrouping.equals(grouping) || nowOrder != groupOrder) {
+		boolean nowNested = preferences.ticketGroupingNestedProperty().get();
+		if (!nowGrouping.equals(grouping) || nowOrder != groupOrder || nowNested != groupingNested) {
 			grouping = nowGrouping;
 			groupOrder = nowOrder;
+			groupingNested = nowNested;
 			edits.requestRebuild();
 		}
 	}
@@ -745,8 +751,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 		unassignedCount = allRows.stream().filter(dto -> dto.getBooking().isUnassigned()).count();
 		String query = searchQuery;
 		List<BookingDTO> shown = edits.visible(allRows, dto -> BookingSearch.matches(dto.getBooking(), query) && columnFilter.passes(dto));
-		treeTable.setGrouping(grouping);
-		treeTable.show(TicketGrouping.group(shown, grouping, groupOrder, true, treeTable.sortComparator(), shownPresentations()));
+		treeTable.setGrouping(grouping, groupingNested);
+		treeTable.show(TicketGrouping.group(shown, grouping, groupOrder, groupingNested,treeTable.sortComparator(), shownPresentations()));
 		if (salesState != null) {
 			salesState.showSearchHits(this, treeTable.allBookings());
 		}
