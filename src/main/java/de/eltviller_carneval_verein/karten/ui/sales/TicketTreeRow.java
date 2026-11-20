@@ -1,6 +1,5 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
-import javafx.css.PseudoClass;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.control.TreeTableRow;
@@ -14,13 +13,11 @@ import javafx.scene.control.skin.TreeTableRowSkin;
  * keine Maus an; Klicks treffen weiter die Zellen, wie {@link TicketTreeTable} und JavaFX (Doppelklick klappt) sie
  * erwarten.
  *
- * <p>Die Zeile setzt die Pseudoklassen {@link #GROUP} und {@link TicketTreeTable#GROUP_SELECTED} beim Wechsel ihres
- * Inhalts; Zeilen werden beim Scrollen wiederverwendet. Buchungen ohne Platz sind kursiv.
+ * <p>Die Zeile setzt die Pseudoklasse {@link TicketTreeTable#GROUP_SELECTED} beim Wechsel ihres Inhalts; Zeilen werden
+ * beim Scrollen wiederverwendet. Buchungen ohne Platz sind kursiv.
  */
 public final class TicketTreeRow extends TreeTableRow<TicketRow> {
 
-	/** Pseudoklasse jeder Gruppenzeile. */
-	public static final PseudoClass GROUP = PseudoClass.getPseudoClass("group");
 	/** Style-Klasse des Kopfs einer Gruppenzeile. */
 	public static final String HEADER_STYLE_CLASS = "group-header";
 
@@ -46,7 +43,6 @@ public final class TicketTreeRow extends TreeTableRow<TicketRow> {
 		TicketRow.GroupRow group = !empty && item instanceof TicketRow.GroupRow g ? g : null;
 		header.setText(group == null ? null : headerText(group));
 		header.setVisible(group != null);
-		pseudoClassStateChanged(GROUP, group != null);
 		pseudoClassStateChanged(TicketTreeTable.GROUP_SELECTED, group != null && owner.isGroupSelected(getTreeItem()));
 		// Buchungen ohne Platz kursiv: Sie haben keinen Sitz in der Bestuhlung
 		boolean unassigned = !empty && item instanceof TicketRow.BookingRow booking && booking.dto().getBooking().isUnassigned();
@@ -63,11 +59,14 @@ public final class TicketTreeRow extends TreeTableRow<TicketRow> {
 	@Override
 	protected void layoutChildren() {
 		super.layoutChildren();
+		boolean attached = header.getParent() == this;
 		if (!header.isVisible()) {
-			getChildren().remove(header);
+			if (attached) {
+				getChildren().remove(header);
+			}
 			return;
 		}
-		if (!getChildren().contains(header)) {
+		if (!attached) {
 			getChildren().add(header);
 			header.applyCss(); // die fette Schrift, bevor die Breite gemessen wird
 		}

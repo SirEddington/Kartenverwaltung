@@ -64,15 +64,8 @@ public final class TicketFilter {
 	/**
 	 * Die Werteliste der Spalte: die Schlüssel aller Buchungen aus {@code afterSearch}, die die Filter der anderen Spalten
 	 * bestehen, mit Text und Anzahl, in der Ordnung der Spalte. Abgewählte Schlüssel bleiben darin, solange Buchungen sie
-	 * tragen.
-	 */
-	public List<FilterValue> values(TicketColumn column, List<BookingDTO> afterSearch, List<Presentation> order) {
-		return values(column, afterSearch, row -> false, order);
-	}
-
-	/**
-	 * Wie {@link #values(TicketColumn, List, List)}; Buchungen, für die {@code exempt} gilt (selbst geänderte, Spec
-	 * Abschnitt 11), zählen auch, wenn sie die Filter der anderen Spalten nicht bestehen.
+	 * tragen. Buchungen, für die {@code exempt} gilt (selbst geänderte, Spec Abschnitt 11), zählen auch, wenn sie die
+	 * Filter der anderen Spalten nicht bestehen.
 	 */
 	public List<FilterValue> values(TicketColumn column, List<BookingDTO> afterSearch, Predicate<BookingDTO> exempt,
 			List<Presentation> order) {

@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import javafx.beans.value.ObservableValue;
@@ -24,7 +25,6 @@ import javafx.scene.control.TreeTableColumn;
 final class TicketTreeBuilder {
 
 	private final Map<TreeItem<?>, TicketNode> nodeOf = new IdentityHashMap<>();
-	private final Map<TreeItem<?>, TreeItem<TicketRow>> typed = new IdentityHashMap<>();
 	private final Map<Booking, TreeItem<TicketRow>> itemOfBooking = new IdentityHashMap<>();
 	private final Map<List<Object>, TreeItem<TicketRow>> itemOfPath = new HashMap<>();
 
@@ -34,7 +34,6 @@ final class TicketTreeBuilder {
 	 */
 	List<TreeItem<TicketRow>> build(List<TicketNode> nodes, Set<List<Object>> collapsed, BiConsumer<TreeItem<TicketRow>, Boolean> onToggle) {
 		nodeOf.clear();
-		typed.clear();
 		itemOfBooking.clear();
 		itemOfPath.clear();
 		return items(nodes, collapsed, onToggle);
@@ -45,7 +44,6 @@ final class TicketTreeBuilder {
 		for (TicketNode node : list) {
 			TreeItem<TicketRow> item = new TreeItem<>(node.row());
 			nodeOf.put(item, node);
-			typed.put(item, item);
 			if (node.row() instanceof TicketRow.GroupRow group) {
 				item.getChildren().setAll(items(node.children(), collapsed, onToggle));
 				// vor dem Listener: Das Klappen beim Aufbau ist keine Bedienung
@@ -66,8 +64,9 @@ final class TicketTreeBuilder {
 	}
 
 	/** Das Element mit seinem Typ, wenn es zu diesem Baum gehört, sonst {@code null}. */
+	@SuppressWarnings("unchecked")
 	TreeItem<TicketRow> typed(Object item) {
-		return item == null ? null : typed.get(item);
+		return item != null && nodeOf.containsKey(item) ? (TreeItem<TicketRow>) item : null;
 	}
 
 	TreeItem<TicketRow> item(Booking booking) {
@@ -125,7 +124,8 @@ final class TicketTreeBuilder {
 
 	/**
 	 * Ordnet Buchungen nach den Spalten {@code order}: Zellwert über die Wert-Fabrik der Spalte, Comparator und Richtung
-	 * der Spalte; Gleichstand bleibt dem Aufrufer (Grundordnung). {@code null} ohne Spalten.
+	 * der Spalte; Gleichstand bleibt dem Aufrufer (Grundordnung). {@code null} ohne Spalten. Der Comparator liest den Wert
+	 * jeder Buchung je Spalte nur einmal; er gilt deshalb nur für einen Neuaufbau.
 	 */
 	static Comparator<BookingDTO> sortComparator(List<TreeTableColumn<TicketRow, ?>> order) {
 		if (order.isEmpty()) {
@@ -143,7 +143,14 @@ final class TicketTreeBuilder {
 	@SuppressWarnings("unchecked")
 	private static <T> Comparator<BookingDTO> byColumn(TreeTableColumn<TicketRow, T> column, Map<BookingDTO, TreeItem<TicketRow>> items) {
 		Comparator<T> comparator = column.getComparator() != null ? column.getComparator() : (Comparator<T>) TableColumnBase.DEFAULT_COMPARATOR;
-		Comparator<BookingDTO> byValue = (a, b) -> comparator.compare(cellValue(column, a, items), cellValue(column, b, items));
+		Map<BookingDTO, T> values = new IdentityHashMap<>();
+		Function<BookingDTO, T> valueOf = dto -> {
+			if (!values.containsKey(dto)) { // auch ein fehlender Wert (null) wird nur einmal gelesen
+				values.put(dto, cellValue(column, dto, items));
+			}
+			return values.get(dto);
+		};
+		Comparator<BookingDTO> byValue = (a, b) -> comparator.compare(valueOf.apply(a), valueOf.apply(b));
 		return column.getSortType() == TreeTableColumn.SortType.DESCENDING ? byValue.reversed() : byValue;
 	}
 

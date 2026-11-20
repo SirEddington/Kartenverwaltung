@@ -50,12 +50,12 @@ class TicketFilterTest {
 		List<BookingDTO> all = List.of(a, b, c);
 		filter.setDeselected(TicketColumn.PRESENTATION, Set.of(TicketColumn.PRESENTATION.keyOf(a)));
 
-		List<FilterValue> names = filter.values(TicketColumn.LAST_NAME, all, order());
+		List<FilterValue> names = filter.values(TicketColumn.LAST_NAME, all, row -> false, order());
 		assertEquals(List.of("Abel", "Bode"), names.stream().map(FilterValue::text).toList());
 		assertEquals(List.of(1, 1), names.stream().map(FilterValue::count).toList());
 
 		// der Filter der eigenen Spalte zählt nicht: beide Vorstellungen bleiben in der Liste
-		List<FilterValue> presentations = filter.values(TicketColumn.PRESENTATION, all, order());
+		List<FilterValue> presentations = filter.values(TicketColumn.PRESENTATION, all, row -> false, order());
 		assertEquals(List.of("Freitag", "Samstag"), presentations.stream().map(FilterValue::text).toList());
 		assertEquals(List.of(1, 2), presentations.stream().map(FilterValue::count).toList());
 	}
@@ -73,7 +73,7 @@ class TicketFilterTest {
 		BookingDTO a = row(first, 1, "Abel");
 		BookingDTO b = row(first, 2, "Bode");
 		filter.setDeselected(TicketColumn.LAST_NAME, Set.of(TicketColumn.LAST_NAME.keyOf(a)));
-		assertEquals(1, filter.values(TicketColumn.LAST_NAME, List.of(b), order()).size());
+		assertEquals(1, filter.values(TicketColumn.LAST_NAME, List.of(b), row -> false, order()).size());
 		assertEquals(Set.of(TicketColumn.LAST_NAME.keyOf(a)), filter.deselected(TicketColumn.LAST_NAME));
 		assertFalse(filter.passes(a));
 	}
@@ -108,6 +108,6 @@ class TicketFilterTest {
 		// a ist selbst geändert (Spec Abschnitt 11): Es zählt in der Werteliste, obwohl der Filter der Vorstellung es ausschließt
 		List<FilterValue> names = filter.values(TicketColumn.LAST_NAME, List.of(a, b), row -> row == a, order());
 		assertEquals(List.of("Abel", "Bode"), names.stream().map(FilterValue::text).toList());
-		assertEquals(List.of("Bode"), filter.values(TicketColumn.LAST_NAME, List.of(a, b), order()).stream().map(FilterValue::text).toList());
+		assertEquals(List.of("Bode"), filter.values(TicketColumn.LAST_NAME, List.of(a, b), row -> false, order()).stream().map(FilterValue::text).toList());
 	}
 }

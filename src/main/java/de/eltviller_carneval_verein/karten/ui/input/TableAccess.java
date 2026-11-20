@@ -1,12 +1,13 @@
 package de.eltviller_carneval_verein.karten.ui.input;
 
+import java.util.Arrays;
 import java.util.List;
 
 import javafx.scene.Node;
 import javafx.scene.control.Control;
 import javafx.scene.control.IndexedCell;
-import javafx.scene.control.ScrollBar;
 import javafx.scene.control.TableColumnBase;
+import javafx.scene.control.TableSelectionModel;
 
 /**
  * Was {@link TableInput} von einer Tabelle braucht, unabhängig von der Tabellenart: Zeilen als Index der sichtbaren
@@ -34,16 +35,29 @@ interface TableAccess {
 
 	void focus(int row, TableColumnBase<?, ?> column);
 
-	List<Integer> selectedIndices();
+	/** Das Auswahlmodell der Tabelle; Zeilen darin wie hier als Index der sichtbaren Zeilen. */
+	TableSelectionModel<?> selectionModel();
 
-	int selectedIndex();
+	default List<Integer> selectedIndices() {
+		return selectionModel().getSelectedIndices();
+	}
 
-	void clearAndSelect(int row);
+	default int selectedIndex() {
+		return selectionModel().getSelectedIndex();
+	}
 
-	void clearSelection();
+	default void clearAndSelect(int row) {
+		selectionModel().clearAndSelect(row);
+	}
+
+	default void clearSelection() {
+		selectionModel().clearSelection();
+	}
 
 	/** Wählt die Zeilen zusätzlich aus; {@code rows} ist nicht leer. */
-	void selectIndices(int[] rows);
+	default void selectIndices(int[] rows) {
+		selectionModel().selectIndices(rows[0], Arrays.copyOfRange(rows, 1, rows.length));
+	}
 
 	List<? extends TableColumnBase<?, ?>> visibleLeafColumns();
 
@@ -81,25 +95,13 @@ interface TableAccess {
 
 	/** Die Zeile, in der das Ereignisziel liegt; {@code null} außerhalb der Zeilen (auch auf einer Bildlaufleiste). */
 	default IndexedCell<?> rowOf(Object target) {
-		for (Node node = target instanceof Node n ? n : null; node != null; node = node.getParent()) {
-			if (isRow(node)) {
-				return (IndexedCell<?>) node;
-			}
-			if (node instanceof ScrollBar) {
-				return null;
-			}
-		}
-		return null;
+		return (IndexedCell<?>) TableGestures.rowOf(target, this::isRow);
 	}
 
 	/** Die Zelle, in der das Ereignisziel liegt, {@code null}: keine. */
 	default IndexedCell<?> cellOf(Object target) {
-		for (Node node = target instanceof Node n ? n : null; node != null; node = node.getParent()) {
-			if (node instanceof IndexedCell<?> cell && node.getStyleClass().contains(cellStyleClass())) {
-				return cell;
-			}
-		}
-		return null;
+		return (IndexedCell<?>) TableGestures.ancestor(target,
+				node -> node instanceof IndexedCell<?> && node.getStyleClass().contains(cellStyleClass()));
 	}
 
 	default boolean isRow(Node node) {

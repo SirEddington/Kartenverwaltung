@@ -10,9 +10,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.ObjIntConsumer;
+import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.ui.CoalescedAction;
 import de.eltviller_carneval_verein.karten.ui.ColumnMinWidths;
+import de.eltviller_carneval_verein.karten.ui.input.TableGestures;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
@@ -21,11 +25,7 @@ import javafx.css.PseudoClass;
 import javafx.event.EventType;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
-import javafx.scene.control.ButtonBase;
-import javafx.scene.control.ComboBoxBase;
-import javafx.scene.control.ScrollBar;
 import javafx.scene.control.SelectionMode;
-import javafx.scene.control.TextInputControl;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
@@ -56,8 +56,6 @@ public final class TicketTreeTable {
 	/** Pseudoklasse einer Gruppenzeile, deren Buchungen alle gewählt sind (Regel 2). */
 	public static final PseudoClass GROUP_SELECTED = PseudoClass.getPseudoClass("group-selected");
 
-	/** Ab dieser Strecke ist ein Druck ein Ziehen, wie in {@code TableInput}. */
-	private static final double DRAG_THRESHOLD = 4;
 	/** Rand rechts vom Pfeil der tiefsten Ebene in seiner Spalte. */
 	private static final double TREE_COLUMN_SPACE = 4;
 
@@ -94,7 +92,8 @@ public final class TicketTreeTable {
 	private Press adoptDrag;
 	/** Die letzte Taste war Tab: {@code TableInput} wählt die Zeile im neuen Fokus allein. */
 	private boolean replaceOnAdopt;
-	private boolean resyncPending;
+	/** Gleicht bei offenem Verkaufsdialog die Anzeige nach einer abgefangenen Bedienung wieder an, einmal je Takt. */
+	private final CoalescedAction resync = new CoalescedAction(Platform::runLater, this::adjust);
 	/** Zählt die Schritte des Angleichens; ein nachgeschobener Fokus gilt nur für den letzten. */
 	private int focusGeneration;
 
@@ -109,13 +108,13 @@ public final class TicketTreeTable {
 		final double sceneX;
 		final double sceneY;
 		final TreeItem<TicketRow> focusBefore;
-		/** Die Menge vor dem Druck, für Ziehen mit Strg. */
+		/** Die Menge vor dem Druck, für Ziehen mit Strg; sonst leer (nur die linke Taste zieht). */
 		final List<Booking> before;
 		boolean applied;
 		boolean dragging;
 
 		Press(TreeItem<TicketRow> item, TreeTableColumn<TicketRow, ?> column, MouseEvent event, TreeItem<TicketRow> focusBefore,
-				List<Booking> before) {
+				Supplier<List<Booking>> before) {
 			this.item = item;
 			this.column = column;
 			this.button = event.getButton();
@@ -124,7 +123,7 @@ public final class TicketTreeTable {
 			this.sceneX = event.getSceneX();
 			this.sceneY = event.getSceneY();
 			this.focusBefore = focusBefore;
-			this.before = before;
+			this.before = ctrl && button == MouseButton.PRIMARY ? before.get() : List.of();
 		}
 	}
 
@@ -319,7 +318,7 @@ public final class TicketTreeTable {
 	}
 
 	/** Vergisst die zugeklappten Gruppen und klappt alle auf (andere oder keine Gruppierung). */
-	public void clearCollapsed() {
+	void clearCollapsed() {
 		collapsed.clear();
 		quiet++;
 		try {
@@ -332,25 +331,19 @@ public final class TicketTreeTable {
 
 	/** Alle Buchungen des Baums in Reihenfolge der Tabelle, auch die in zugeklappten Gruppen. */
 	public List<Booking> allBookings() {
-		List<Booking> result = new ArrayList<>();
-		collect(nodes, result);
-		return result;
+		return TicketSelection.bookings(nodes);
 	}
 
-	private static void collect(List<TicketNode> list, List<Booking> result) {
-		for (TicketNode node : list) {
-			if (node.row() instanceof TicketRow.BookingRow booking) {
-				result.add(booking.dto().getBooking());
-			} else {
-				collect(node.children(), result);
-			}
-		}
+	/** Die Buchungen einer Zeile: die eine Buchung bzw. alle Buchungen unter der Gruppe, auch in zugeklappten Gruppen. */
+	public List<Booking> bookingsUnder(TreeItem<TicketRow> item) {
+		TicketNode node = tree.node(item);
+		return node == null ? List.of() : TicketSelection.bookings(List.of(node));
 	}
 
 	/** Regel 2: ob die Zeile eine Gruppe ist, deren Buchungen alle gewählt sind. */
-	public boolean isGroupSelected(TreeItem<TicketRow> item) {
-		TicketNode node = item == null ? null : tree.node(item);
-		return node != null && node.row() instanceof TicketRow.GroupRow && selection.fullySelected(node);
+	public boolean isGroupSelected(TreeItem<?> item) {
+		TicketNode node = tree.node(item);
+		return node != null && node.isGroup() && selection.fullySelected(node);
 	}
 
 	private void publish() {
@@ -387,13 +380,11 @@ public final class TicketTreeTable {
 				}
 			}
 			List<Integer> wanted = new ArrayList<>();
-			int count = table.getExpandedItemCount();
-			for (int row = 0; row < count; row++) {
-				TicketNode node = tree.node(table.getTreeItem(row));
-				if (node != null && node.row() instanceof TicketRow.BookingRow && selection.fullySelected(node)) {
+			forEachShown(0, Integer.MAX_VALUE, (node, row) -> {
+				if (node.isBooking() && selection.fullySelected(node)) {
 					wanted.add(row);
 				}
-			}
+			});
 			List<Integer> current = new ArrayList<>(table.getSelectionModel().getSelectedIndices());
 			Collections.sort(current);
 			if (!wanted.equals(current)) {
@@ -408,8 +399,15 @@ public final class TicketTreeTable {
 			quiet--;
 		}
 		markGroups();
-		// Nach dem Ersetzen von Kindern und dem Klappen verschiebt JavaFX den Fokus erst später (Platform.runLater im
-		// TreeTableViewFocusModel); dieser Aufruf kommt danach und setzt ihn wieder auf die gemeinte Zeile
+		applyFocusLater(focus, column);
+	}
+
+	/**
+	 * Nach dem Ersetzen von Kindern und dem Klappen verschiebt JavaFX den Fokus erst später (Platform.runLater im
+	 * TreeTableViewFocusModel); dieser Aufruf kommt danach und setzt ihn wieder auf die gemeinte Zeile, nur für das letzte
+	 * Angleichen.
+	 */
+	private void applyFocusLater(TreeItem<TicketRow> focus, TreeTableColumn<TicketRow, ?> column) {
 		int generation = ++focusGeneration;
 		Platform.runLater(() -> {
 			if (generation == focusGeneration) {
@@ -439,9 +437,7 @@ public final class TicketTreeTable {
 	private void markGroups() {
 		for (Node node : table.lookupAll(".tree-table-row-cell")) {
 			if (node instanceof TreeTableRow<?> row) {
-				TicketNode group = tree.node(row.getTreeItem());
-				row.pseudoClassStateChanged(GROUP_SELECTED,
-						group != null && group.row() instanceof TicketRow.GroupRow && selection.fullySelected(group));
+				row.pseudoClassStateChanged(GROUP_SELECTED, isGroupSelected(row.getTreeItem()));
 			}
 		}
 	}
@@ -451,7 +447,7 @@ public final class TicketTreeTable {
 	/** Läuft, bevor JavaFX beim Klappen das Auswahlmodell ändert; {@link #toggled} beendet den Schritt. */
 	private void beforeToggle(TreeItem<TicketRow> item, boolean expanding) {
 		TicketNode node = tree.node(item);
-		if (node == null || !(node.row() instanceof TicketRow.GroupRow)) {
+		if (node == null || !node.isGroup()) {
 			return;
 		}
 		boolean byUser = quiet == 0;
@@ -479,7 +475,7 @@ public final class TicketTreeTable {
 	}
 
 	private void expandAll(TreeItem<TicketRow> item) {
-		if (tree.node(item) instanceof TicketNode node && node.row() instanceof TicketRow.GroupRow) {
+		if (tree.node(item) instanceof TicketNode node && node.isGroup()) {
 			item.setExpanded(true);
 			item.getChildren().forEach(this::expandAll);
 		}
@@ -492,7 +488,7 @@ public final class TicketTreeTable {
 			return;
 		}
 		if (frozen.getAsBoolean()) {
-			scheduleResync();
+			resync.request();
 			return;
 		}
 		if (press != null && !press.dragging) {
@@ -543,10 +539,8 @@ public final class TicketTreeTable {
 			anchor = focusedItem();
 		} else {
 			List<Booking> removed = new ArrayList<>();
-			int count = table.getExpandedItemCount();
-			for (int row = 0; row < count; row++) {
-				TicketNode node = tree.node(table.getTreeItem(row));
-				if (node != null && node.row() instanceof TicketRow.BookingRow booking) {
+			forEachShown(0, Integer.MAX_VALUE, (node, row) -> {
+				if (node.row() instanceof TicketRow.BookingRow booking) {
 					Booking shown = booking.dto().getBooking();
 					if (inModel.contains(shown)) {
 						selection.add(node);
@@ -554,7 +548,7 @@ public final class TicketTreeTable {
 						removed.add(shown);
 					}
 				}
-			}
+			});
 			selection.remove(removed);
 		}
 		replaceOnAdopt = false;
@@ -562,25 +556,15 @@ public final class TicketTreeTable {
 		publish();
 	}
 
-	private void scheduleResync() {
-		if (!resyncPending) {
-			resyncPending = true;
-			Platform.runLater(() -> {
-				resyncPending = false;
-				adjust();
-			});
-		}
-	}
-
 	// ---- Maus ----
 
 	private void mouseFilter(MouseEvent event) {
 		EventType<? extends MouseEvent> type = event.getEventType();
-		TreeTableRow<?> row = rowOf(event.getTarget());
+		TreeTableRow<?> row = (TreeTableRow<?>) TableGestures.rowOf(event.getTarget(), TreeTableRow.class::isInstance);
 		if (frozen.getAsBoolean()) {
 			if (row != null) {
 				event.consume();
-				scheduleResync(); // Filter auf derselben Tabelle (Ziehen in TableInput) laufen trotzdem
+				resync.request(); // Filter auf derselben Tabelle (Ziehen in TableInput) laufen trotzdem
 			}
 			return;
 		}
@@ -591,7 +575,7 @@ public final class TicketTreeTable {
 			onPress(event, row);
 		} else if (type == MouseEvent.MOUSE_DRAGGED) {
 			if (press != null && !press.dragging && press.button == MouseButton.PRIMARY
-					&& Math.hypot(event.getSceneX() - press.sceneX, event.getSceneY() - press.sceneY) >= DRAG_THRESHOLD) {
+					&& Math.hypot(event.getSceneX() - press.sceneX, event.getSceneY() - press.sceneY) >= TableGestures.DRAG_THRESHOLD) {
 				press.dragging = true;
 			}
 		} else if (type == MouseEvent.MOUSE_RELEASED && press != null) {
@@ -615,8 +599,8 @@ public final class TicketTreeTable {
 	 * Ein Doppelklick bearbeitet nur die Zeile seines ersten Klicks. Ein Neuaufbau zwischen den Klicks (etwa nach dem Commit,
 	 * den der erste Druck auslöst) kann eine andere Buchung unter den Zeiger schieben; JavaFX begänne beim zweiten Druck
 	 * oder, ist die Zeile dort schon gewählt, beim Loslassen ihr Bearbeiten. Trifft ein Druck oder Loslassen mit Klickzahl
-	 * ab 2 eine andere Zeile, ist die Tabelle für die Dauer dieses Ereignisses nicht bearbeitbar, wie in
-	 * {@code TableInput.suppressClickEdit}. Nicht, solange eine Zelle bearbeitet wird: Deren Ende
+	 * ab 2 eine andere Zeile, ist die Tabelle für die Dauer dieses Ereignisses nicht bearbeitbar
+	 * ({@link TableGestures#suspendEditing}). Nicht, solange eine Zelle bearbeitet wird: Deren Ende
 	 * ({@code table.edit(-1, null)}) bliebe sonst ohne Wirkung.
 	 */
 	private void guardMultiClick(MouseEvent event, TreeTableRow<?> row) {
@@ -629,9 +613,7 @@ public final class TicketTreeTable {
 				clickKey = key;
 			}
 		} else if (!Objects.equals(key, clickKey) && table.isEditable() && table.getEditingCell() == null) {
-			table.setEditable(false);
-			// Das Ereignis ist verarbeitet, sobald es durch ist
-			Platform.runLater(() -> table.setEditable(true));
+			TableGestures.suspendEditing(table::setEditable);
 		}
 	}
 
@@ -643,10 +625,11 @@ public final class TicketTreeTable {
 			return; // Kopf, Scroll-Balken
 		}
 		TreeItem<TicketRow> item = row.isEmpty() ? null : tree.typed(row.getTreeItem());
-		if (item != null && (insideControl(event.getTarget(), row) || onDisclosure(event, row))) {
+		// Eine Checkbox, Auswahlliste oder ein Textfeld behält den Druck für sich; die Auswahl ändert sich nicht
+		if (item != null && (TableGestures.insideControl(event.getTarget(), node -> node == row) || onDisclosure(event, row))) {
 			item = null;
 		}
-		press = new Press(item, columnOf(event.getTarget()), event, focusedItem(), selectedBookings());
+		press = new Press(item, columnOf(event.getTarget()), event, focusedItem(), this::selectedBookings);
 	}
 
 	/** Nach der Auswertung durch JavaFX: Die Menge folgt der gemeinten Zeile (Spec Abschnitt 6). */
@@ -694,36 +677,11 @@ public final class TicketTreeTable {
 		publish();
 	}
 
-	private static TreeTableRow<?> rowOf(Object target) {
-		for (Node node = target instanceof Node n ? n : null; node != null; node = node.getParent()) {
-			if (node instanceof ScrollBar) {
-				return null;
-			}
-			if (node instanceof TreeTableRow<?> row) {
-				return row;
-			}
-		}
-		return null;
-	}
-
 	@SuppressWarnings("unchecked")
 	private static TreeTableColumn<TicketRow, ?> columnOf(Object target) {
-		for (Node node = target instanceof Node n ? n : null; node != null; node = node.getParent()) {
-			if (node instanceof TreeTableCell<?, ?> cell) {
-				return (TreeTableColumn<TicketRow, ?>) cell.getTableColumn();
-			}
-		}
-		return null;
-	}
-
-	/** Eine Checkbox, Auswahlliste oder ein Textfeld behält den Druck für sich; die Auswahl ändert sich nicht. */
-	private static boolean insideControl(Object target, TreeTableRow<?> row) {
-		for (Node node = target instanceof Node n ? n : null; node != null && node != row; node = node.getParent()) {
-			if (node instanceof ButtonBase || node instanceof ComboBoxBase<?> || node instanceof TextInputControl) {
-				return true;
-			}
-		}
-		return false;
+		return TableGestures.ancestor(target, TreeTableCell.class::isInstance) instanceof TreeTableCell<?, ?> cell
+				? (TreeTableColumn<TicketRow, ?>) cell.getTableColumn()
+				: null;
 	}
 
 	/** Wie JavaFX ({@code TreeTableCellBehavior.handleDisclosureNode}): ein Druck in der Baumspalte links vom Pfeilende. */
@@ -732,10 +690,8 @@ public final class TicketTreeTable {
 		if (arrow == null || !arrow.isVisible()) {
 			return false;
 		}
-		for (Node node = event.getTarget() instanceof Node n ? n : null; node != null && node != row; node = node.getParent()) {
-			if (node == arrow) {
-				return true;
-			}
+		if (TableGestures.ancestor(event.getTarget(), node -> node == arrow || node == row) == arrow) {
+			return true;
 		}
 		if (columnOf(event.getTarget()) != treeColumn) {
 			return false;
@@ -750,7 +706,7 @@ public final class TicketTreeTable {
 	private void keyFilter(KeyEvent event) {
 		if (frozen.getAsBoolean()) {
 			event.consume();
-			scheduleResync();
+			resync.request();
 			return;
 		}
 		if (event.getEventType() != KeyEvent.KEY_PRESSED) {
@@ -765,8 +721,8 @@ public final class TicketTreeTable {
 		boolean ctrl = event.isShortcutDown();
 		TreeItem<TicketRow> item = focusedItem();
 		int focus = item == null ? table.getFocusModel().getFocusedIndex() : table.getRow(item);
-		TicketNode node = item == null ? null : tree.node(item);
-		boolean group = node != null && node.row() instanceof TicketRow.GroupRow;
+		TicketNode node = tree.node(item);
+		boolean group = node != null && node.isGroup();
 		switch (event.getCode()) {
 		case UP, KP_UP -> navigate(focus - 1, shift, ctrl);
 		case DOWN, KP_DOWN -> navigate(focus + 1, shift, ctrl);
@@ -781,11 +737,7 @@ public final class TicketTreeTable {
 				return;
 			}
 			if (group) {
-				switch (event.getCode()) {
-				case ADD -> item.setExpanded(true);
-				case SUBTRACT -> item.setExpanded(false);
-				default -> expandAll(item);
-				}
+				expandKey(event.getCode(), item);
 			}
 		}
 		case SPACE -> {
@@ -814,6 +766,15 @@ public final class TicketTreeTable {
 		event.consume();
 	}
 
+	/** +, − und * auf einem Gruppenkopf: aufklappen, zuklappen, mit allen Untergruppen aufklappen. */
+	private void expandKey(KeyCode code, TreeItem<TicketRow> group) {
+		switch (code) {
+		case ADD -> group.setExpanded(true);
+		case SUBTRACT -> group.setExpanded(false);
+		default -> expandAll(group);
+		}
+	}
+
 	/** Pfeil auf/ab, Pos1, Ende, Bild: ohne Umschalt Menge = Zeile im Fokus, mit Strg nur der Fokus, mit Umschalt Bereich. */
 	private void navigate(int target, boolean shift, boolean ctrl) {
 		int count = table.getExpandedItemCount();
@@ -839,7 +800,7 @@ public final class TicketTreeTable {
 		if (node == null) {
 			return;
 		}
-		if (node.row() instanceof TicketRow.GroupRow) {
+		if (node.isGroup()) {
 			if (modified) {
 				return;
 			}
@@ -881,14 +842,14 @@ public final class TicketTreeTable {
 		TreeTableColumn<TicketRow, ?> column = focusedColumn();
 		adjust(item, column);
 		publish();
-		if (!shift && !ctrl && node.row() instanceof TicketRow.BookingRow && table.isEditable() && column != null && column.isEditable()) {
+		if (!shift && !ctrl && node.isBooking() && table.isEditable() && column != null && column.isEditable()) {
 			table.edit(table.getRow(item), column);
 		}
 	}
 
 	private int pageTarget(int focus, boolean down) {
-		if (table.lookup(".virtual-flow") instanceof VirtualFlow<?> flow && flow.getFirstVisibleCell() != null
-				&& flow.getLastVisibleCell() != null) {
+		VirtualFlow<?> flow = TableGestures.flowOf(table);
+		if (flow != null && flow.getFirstVisibleCell() != null && flow.getLastVisibleCell() != null) {
 			int first = flow.getFirstVisibleCell().getIndex();
 			int last = flow.getLastVisibleCell().getIndex();
 			int page = Math.max(1, last - first);
@@ -901,13 +862,8 @@ public final class TicketTreeTable {
 	}
 
 	private void scrollTo(int row) {
-		if (row < 0) {
-			return;
-		}
-		if (table.lookup(".virtual-flow") instanceof VirtualFlow<?> flow) {
-			flow.scrollTo(row); // nur so weit wie nötig, wie TableInput
-		} else {
-			table.scrollTo(row);
+		if (row >= 0) {
+			TableGestures.scrollIntoView(table, row, table::scrollTo);
 		}
 	}
 
@@ -937,12 +893,18 @@ public final class TicketTreeTable {
 		int start = from < 0 ? to : Math.min(from, to);
 		int end = from < 0 ? to : Math.max(from, to);
 		List<TicketNode> rows = new ArrayList<>();
-		for (int row = Math.max(0, start); row <= end && row < table.getExpandedItemCount(); row++) {
+		forEachShown(start, end, (node, row) -> rows.add(node));
+		return rows;
+	}
+
+	/** Für jede sichtbare Zeile von {@code from} bis {@code to} einschließlich, die zu diesem Baum gehört: Knoten und Zeile. */
+	private void forEachShown(int from, int to, ObjIntConsumer<TicketNode> action) {
+		int end = Math.min(to, table.getExpandedItemCount() - 1);
+		for (int row = Math.max(0, from); row <= end; row++) {
 			TicketNode node = tree.node(table.getTreeItem(row));
 			if (node != null) {
-				rows.add(node);
+				action.accept(node, row);
 			}
 		}
-		return rows;
 	}
 }

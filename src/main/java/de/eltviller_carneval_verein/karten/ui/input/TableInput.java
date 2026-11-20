@@ -6,19 +6,15 @@ import java.util.TreeSet;
 import java.util.function.Predicate;
 
 import javafx.animation.KeyFrame;
-import javafx.application.Platform;
 import javafx.animation.Timeline;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
-import javafx.scene.control.ButtonBase;
-import javafx.scene.control.ComboBoxBase;
 import javafx.scene.control.Control;
 import javafx.scene.control.IndexedCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableColumnBase;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
-import javafx.scene.control.TextInputControl;
 import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableView;
 import javafx.scene.control.skin.VirtualFlow;
@@ -51,7 +47,6 @@ import javafx.util.Duration;
  */
 public final class TableInput {
 
-	private static final double DRAG_THRESHOLD = 4;
 	private static final double MAX_SCROLL_STEP = 30;
 
 	private TableInput() {
@@ -123,9 +118,7 @@ public final class TableInput {
 				|| !(access.cellOf(event.getTarget()) instanceof ParsingCell) || !access.isEditable()) {
 			return;
 		}
-		access.setEditable(false);
-		// Das Loslassen ist verarbeitet, sobald dieses Ereignis durch ist
-		Platform.runLater(() -> access.setEditable(true));
+		TableGestures.suspendEditing(access::setEditable);
 	}
 
 	private static void onKeyTyped(TableAccess access, KeyEvent event) {
@@ -229,13 +222,8 @@ public final class TableInput {
 		}
 		access.clearAndSelect(nextRow);
 		access.focus(nextRow, columns.get(nextColumn));
-		// Nur so weit scrollen, dass die Zeile ganz zu sehen ist: TableView.scrollTo setzte sie an den oberen Rand, und die
-		// Zeile sprang bei jedem Tab nach oben
-		if (access.control().lookup(".virtual-flow") instanceof VirtualFlow<?> flow) {
-			flow.scrollTo(nextRow);
-		} else {
-			access.scrollTo(nextRow);
-		}
+		// Nur so weit scrollen, dass die Zeile ganz zu sehen ist: Sonst sprang die Zeile bei jedem Tab nach oben
+		TableGestures.scrollIntoView(access.control(), nextRow, access::scrollTo);
 		access.control().requestFocus();
 		return true;
 	}
@@ -277,15 +265,7 @@ public final class TableInput {
 
 	/** Eine Zelle mit eigenem Bedienelement (Checkbox, Auswahlliste, Textfeld) startet kein Ziehen. */
 	private static boolean insideControl(TableAccess access, Object target) {
-		for (Node node = target instanceof Node n ? n : null; node != null; node = node.getParent()) {
-			if (node instanceof ButtonBase || node instanceof ComboBoxBase<?> || node instanceof TextInputControl) {
-				return true;
-			}
-			if (access.isRow(node)) {
-				return false;
-			}
-		}
-		return false;
+		return TableGestures.insideControl(target, access::isRow);
 	}
 
 	/** Auswahl durch Drücken und Ziehen über mehrere Zeilen. */
@@ -331,7 +311,7 @@ public final class TableInput {
 			if (anchor < 0) {
 				return;
 			}
-			if (!dragging && Math.hypot(event.getSceneX() - pressX, event.getSceneY() - pressY) < DRAG_THRESHOLD) {
+			if (!dragging && Math.hypot(event.getSceneX() - pressX, event.getSceneY() - pressY) < TableGestures.DRAG_THRESHOLD) {
 				return;
 			}
 			dragging = true;
@@ -407,7 +387,8 @@ public final class TableInput {
 				autoScroll.stop();
 				return;
 			}
-			if (access.control().lookup(".virtual-flow") instanceof VirtualFlow<?> flow) {
+			VirtualFlow<?> flow = TableGestures.flowOf(access.control());
+			if (flow != null) {
 				flow.scrollPixels(delta);
 			}
 			lastCurrent = -1; // nach dem Scrollen steht eine andere Zeile unter dem Mauszeiger

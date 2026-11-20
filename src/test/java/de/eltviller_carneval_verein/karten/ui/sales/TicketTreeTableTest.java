@@ -1111,8 +1111,6 @@ class TicketTreeTableTest {
 		assertTrue(bounds[0] < bounds[4], "der Kopf beginnt noch in der Spalte des Pfeils");
 		assertTrue(bounds[1] > bounds[4], "der Kopf reicht über die Spalte des Pfeils hinaus");
 		assertEquals(bounds[5], bounds[3], 0.5, "der Kopf ist nicht auf eine Spalte beschnitten, sondern so breit wie sein Text");
-		assertTrue(onFx(() -> rowNode(0).getPseudoClassStates().contains(TicketTreeRow.GROUP)));
-		assertFalse(onFx(() -> rowNode(1).getPseudoClassStates().contains(TicketTreeRow.GROUP)));
 	}
 
 	@Test

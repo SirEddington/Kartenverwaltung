@@ -47,18 +47,17 @@ public enum TicketColumn {
 	WHEELCHAIR("Rollstuhl", row -> row.getBooking().isWheelchairAccessible(), (key, first) -> yesNo(key), yesBeforeNo()),
 	COMMENT("Kommentar", row -> textKey(row.getBooking().getComment()), text(Booking::getComment), textOrder());
 
-	/** Text eines fehlenden Werts. */
-	private static final String EMPTY_TEXT = "(leer)";
-
 	/** Schlüssel für einen fehlenden Wert (kein Text, keine Zahl, kein Datum); steht in jeder Ordnung zuletzt. */
 	public static final Object EMPTY = Missing.VALUE;
 
 	/** Hält den Schlüssel, damit die Konstanten oben ihn schon beim Anlegen kennen (kein Vorwärtsbezug auf ein Feld des Enums). */
 	private static final class Missing {
+		/** Text eines fehlenden Werts. */
+		static final String TEXT = "(leer)";
 		static final Object VALUE = new Object() {
 			@Override
 			public String toString() {
-				return "(leer)";
+				return TEXT;
 			}
 		};
 	}
@@ -93,7 +92,7 @@ public enum TicketColumn {
 	 * {@link #baseOrder Grundordnung}; Textspalten zeigen ihren Text ohne Rand.
 	 */
 	public String textOf(Object key, BookingDTO first) {
-		return key == EMPTY ? EMPTY_TEXT : textFunction.apply(key, first);
+		return key == EMPTY ? Missing.TEXT : textFunction.apply(key, first);
 	}
 
 	/** Die Ordnung der Schlüssel dieser Spalte, {@link #EMPTY} zuletzt. */

@@ -190,10 +190,5 @@ public class ParsingTextFieldTableCell<S, T> extends TextFieldTableCell<S, T> im
 		void showValue(T value) {
 			updateItem(value, false);
 		}
-
-		@Override
-		void markEditing(boolean on) {
-			pseudoClassStateChanged(ParsingEditing.EDITING, on);
-		}
 	}
 }

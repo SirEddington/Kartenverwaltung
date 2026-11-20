@@ -18,7 +18,7 @@ import de.eltviller_carneval_verein.karten.model.Booking;
  */
 final class TicketSelection {
 
-	private final Set<Booking> selected = Collections.newSetFromMap(new IdentityHashMap<>());
+	private final Set<Booking> selected = identitySet(List.of());
 
 	/** Die gewählten Buchungen in Reihenfolge der Tabelle, auch die in zugeklappten Gruppen. */
 	List<Booking> selected(List<TicketNode> tree) {
@@ -91,8 +91,23 @@ final class TicketSelection {
 	 * Buchungen nie. Für eine Buchungszeile: ob die Buchung gewählt ist.
 	 */
 	boolean fullySelected(TicketNode node) {
-		List<Booking> under = bookings(node);
-		return !under.isEmpty() && selected.containsAll(under);
+		return selectedCount(node) > 0;
+	}
+
+	/** Die Zahl der Buchungen unter dem Knoten, wenn alle gewählt sind; {@code -1} bei der ersten nicht gewählten. */
+	private int selectedCount(TicketNode node) {
+		if (node.row() instanceof TicketRow.BookingRow row) {
+			return selected.contains(row.dto().getBooking()) ? 1 : -1;
+		}
+		int count = 0;
+		for (TicketNode child : node.children()) {
+			int under = selectedCount(child);
+			if (under < 0) {
+				return -1;
+			}
+			count += under;
+		}
+		return count;
 	}
 
 	/**
@@ -150,8 +165,8 @@ final class TicketSelection {
 		return bookings(List.of(node));
 	}
 
-	/** Alle Buchungen unter den Knoten in Reihenfolge der Tabelle. */
-	private static List<Booking> bookings(List<TicketNode> nodes) {
+	/** Alle Buchungen unter den Knoten in Reihenfolge der Tabelle, auch die in zugeklappten Gruppen. */
+	static List<Booking> bookings(List<TicketNode> nodes) {
 		List<Booking> result = new ArrayList<>();
 		collect(nodes, result);
 		return result;

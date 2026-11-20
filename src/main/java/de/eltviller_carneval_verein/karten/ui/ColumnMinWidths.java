@@ -117,6 +117,9 @@ public final class ColumnMinWidths {
 	 * der Zahl der Ebenen (KARV-193). Die Mindestbreite bleibt mindestens so breit wie die Überschrift.
 	 */
 	public static void setFloor(TableColumnBase<?, ?> column, double floor) {
+		if (column.getProperties().get(FLOOR) instanceof Double current && current == floor) {
+			return; // die Mindestbreite gilt schon; der Kopf rechnet bei jeder Änderung selbst neu
+		}
 		column.getProperties().put(FLOOR, floor);
 		if (column.getProperties().get(UPDATE) instanceof Runnable update) {
 			update.run();

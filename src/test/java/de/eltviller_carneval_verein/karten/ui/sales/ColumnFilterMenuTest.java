@@ -146,9 +146,9 @@ class ColumnFilterMenuTest {
 				rebuild();
 			};
 			ColumnFilterMenu.install(colLast, TicketColumn.LAST_NAME, filter,
-					() -> filter.values(TicketColumn.LAST_NAME, rows(), event.getPresentations()), onApplied);
+					() -> filter.values(TicketColumn.LAST_NAME, rows(), row -> false, event.getPresentations()), onApplied);
 			ColumnFilterMenu.install(colFirst, TicketColumn.FIRST_NAME, filter,
-					() -> filter.values(TicketColumn.FIRST_NAME, rows(), event.getPresentations()), onApplied);
+					() -> filter.values(TicketColumn.FIRST_NAME, rows(), row -> false, event.getPresentations()), onApplied);
 			rebuild();
 			stage = new Stage();
 			stage.setScene(new Scene(table, 600, 400));

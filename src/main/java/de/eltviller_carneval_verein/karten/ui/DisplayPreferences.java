@@ -61,7 +61,13 @@ public final class DisplayPreferences {
 			super.set(newValue == null ? List.of() : List.copyOf(newValue));
 		}
 	};
-	private final ObjectProperty<GroupOrder> ticketGroupOrder = new SimpleObjectProperty<>(GroupOrder.VALUE);
+	// null gilt als VALUE
+	private final ObjectProperty<GroupOrder> ticketGroupOrder = new SimpleObjectProperty<>(GroupOrder.VALUE) {
+		@Override
+		public void set(GroupOrder newValue) {
+			super.set(Objects.requireNonNullElse(newValue, GroupOrder.VALUE));
+		}
+	};
 	// Wie die Lage des Hinweises: Eine unbekannte Ordnung gilt als VALUE und bleibt in der Datei, bis eine andere gewählt wird
 	private final TolerantEnum<GroupOrder> fileGroupOrder = new TolerantEnum<>(GroupOrder.class, GroupOrder.VALUE, GroupOrder.VALUE);
 	private final Consumer<Consumer<AppSettings>> saveOnly;
@@ -172,7 +178,10 @@ public final class DisplayPreferences {
 		return ticketGrouping;
 	}
 
-	/** Wie die Gruppen der Kartentabelle unter einem gemeinsamen Elternknoten geordnet sind (KARV-193). Standard nach Wert. */
+	/**
+	 * Wie die Gruppen der Kartentabelle unter einem gemeinsamen Elternknoten geordnet sind (KARV-193). Standard nach Wert;
+	 * nie {@code null}.
+	 */
 	public ObjectProperty<GroupOrder> ticketGroupOrderProperty() {
 		return ticketGroupOrder;
 	}
@@ -189,7 +198,7 @@ public final class DisplayPreferences {
 			filePlacement.set(current == null ? SummaryPlacement.AUTO : current);
 			String placement = filePlacement.toJson();
 			List<String> grouping = ticketGrouping.get().stream().map(TicketColumn::name).toList();
-			fileGroupOrder.set(Objects.requireNonNullElse(ticketGroupOrder.get(), GroupOrder.VALUE));
+			fileGroupOrder.set(ticketGroupOrder.get());
 			String groupOrder = fileGroupOrder.toJson();
 			saveOnly.accept(settings -> {
 				DisplaySettings display = settings.getDisplay();

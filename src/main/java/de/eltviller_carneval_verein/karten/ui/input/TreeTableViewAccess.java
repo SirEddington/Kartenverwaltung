@@ -1,12 +1,12 @@
 package de.eltviller_carneval_verein.karten.ui.input;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.function.Predicate;
 
 import javafx.scene.control.Control;
 import javafx.scene.control.IndexedCell;
 import javafx.scene.control.TableColumnBase;
+import javafx.scene.control.TableSelectionModel;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
@@ -70,28 +70,8 @@ final class TreeTableViewAccess<S> implements TableAccess {
 	}
 
 	@Override
-	public List<Integer> selectedIndices() {
-		return table.getSelectionModel().getSelectedIndices();
-	}
-
-	@Override
-	public int selectedIndex() {
-		return table.getSelectionModel().getSelectedIndex();
-	}
-
-	@Override
-	public void clearAndSelect(int row) {
-		table.getSelectionModel().clearAndSelect(row);
-	}
-
-	@Override
-	public void clearSelection() {
-		table.getSelectionModel().clearSelection();
-	}
-
-	@Override
-	public void selectIndices(int[] rows) {
-		table.getSelectionModel().selectIndices(rows[0], Arrays.copyOfRange(rows, 1, rows.length));
+	public TableSelectionModel<?> selectionModel() {
+		return table.getSelectionModel();
 	}
 
 	@Override

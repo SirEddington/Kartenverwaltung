@@ -42,10 +42,13 @@ final class ColumnFilterMenu {
 	static final class Entry {
 		private final FilterValue value;
 		private final BooleanProperty checked;
+		/** Der Text klein geschrieben, für die Suche. */
+		private final String searchText;
 
 		Entry(FilterValue value, boolean checked) {
 			this.value = value;
 			this.checked = new SimpleBooleanProperty(checked);
+			this.searchText = value.text().toLowerCase(Locale.ROOT);
 		}
 
 		FilterValue value() {
@@ -71,6 +74,8 @@ final class ColumnFilterMenu {
 	private final TextField search = new TextField();
 	private final ObservableList<Entry> entries = FXCollections.observableArrayList();
 	private final FilteredList<Entry> visible = new FilteredList<>(entries);
+	/** Das Filtersymbol im Kopf, solange der Filter aktiv ist. */
+	private final SVGPath funnel = new SVGPath();
 
 	private ColumnFilterMenu(TreeTableColumn<TicketRow, ?> column, TicketColumn key, TicketFilter filter, Supplier<List<FilterValue>> values,
 			Runnable applied) {
@@ -97,10 +102,12 @@ final class ColumnFilterMenu {
 	}
 
 	private void build() {
+		funnel.setContent(FUNNEL);
+		funnel.getStyleClass().add("filter-symbol");
 		search.setPromptText("Suchen…");
 		search.textProperty().addListener((obs, before, text) -> {
 			String needle = text == null ? "" : text.strip().toLowerCase(Locale.ROOT);
-			visible.setPredicate(entry -> entry.value().text().toLowerCase(Locale.ROOT).contains(needle));
+			visible.setPredicate(entry -> entry.searchText.contains(needle));
 		});
 
 		ListView<Entry> list = new ListView<>(visible);
@@ -181,13 +188,6 @@ final class ColumnFilterMenu {
 	}
 
 	private void updateSymbol() {
-		if (!filter.isActive(key)) {
-			column.setGraphic(null);
-			return;
-		}
-		SVGPath funnel = new SVGPath();
-		funnel.setContent(FUNNEL);
-		funnel.getStyleClass().add("filter-symbol");
-		column.setGraphic(funnel);
+		column.setGraphic(filter.isActive(key) ? funnel : null);
 	}
 }

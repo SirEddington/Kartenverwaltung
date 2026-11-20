@@ -34,7 +34,7 @@ final class GroupingMenu {
 	private final List<CheckBox> columns = new ArrayList<>();
 	private final ToggleGroup orders = new ToggleGroup();
 	private final ChangeListener<List<TicketColumn>> followGrouping = (obs, before, now) -> showGrouping();
-	private final ChangeListener<GroupOrder> followOrder = (obs, before, now) -> RadioMenus.select(orders, orderOrDefault(now));
+	private final ChangeListener<GroupOrder> followOrder = (obs, before, now) -> RadioMenus.select(orders, now);
 
 	GroupingMenu(MenuButton button, Label summary, ObjectProperty<List<TicketColumn>> grouping, ObjectProperty<GroupOrder> order) {
 		this.summary = summary;
@@ -57,7 +57,7 @@ final class GroupingMenu {
 		});
 		button.getItems().add(clear);
 
-		RadioMenus.select(orders, orderOrDefault(order.get()));
+		RadioMenus.select(orders, order.get());
 		showGrouping();
 		grouping.addListener(new WeakChangeListener<>(followGrouping));
 		order.addListener(new WeakChangeListener<>(followOrder));
@@ -70,10 +70,6 @@ final class GroupingMenu {
 		radio.setToggleGroup(orders);
 		radio.setOnAction(event -> order.set(value));
 		return new CustomMenuItem(radio, false);
-	}
-
-	private static GroupOrder orderOrDefault(GroupOrder order) {
-		return order == null ? GroupOrder.VALUE : order;
 	}
 
 	private void toggle(TicketColumn column, boolean selected) {

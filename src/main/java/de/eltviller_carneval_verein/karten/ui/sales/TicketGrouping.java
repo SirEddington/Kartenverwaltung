@@ -57,7 +57,7 @@ public final class TicketGrouping {
 			path.add(entry.getKey());
 			List<BookingDTO> members = entry.getValue();
 			String text = column.textOf(entry.getKey(), members.get(0));
-			TicketRow.GroupRow row = new TicketRow.GroupRow(column, entry.getKey(), text, members.size(), List.copyOf(path));
+			TicketRow.GroupRow row = new TicketRow.GroupRow(column, text, members.size(), List.copyOf(path));
 			nodes.add(new TicketNode(row, build(members, grouping, keyOrders, level + 1, path, order, sort)));
 		}
 		Comparator<Object> keyOrder = keyOrders.get(level);

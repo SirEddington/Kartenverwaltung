@@ -308,7 +308,9 @@ Notable 1.2 pieces:
   `TableAccess` with the implementations `TableViewAccess` and `TreeTableViewAccess`; `install(TableView)` and
   `install(TreeTableView, rowEditable)` exist. The logic of the parsing text cells is in `ParsingEditing`, used by
   `ParsingTextFieldTableCell` and `ParsingTextFieldTreeTableCell`; rows can be excluded by a condition (group rows
-  are never editable). `EditingUnits.watch` and `ColumnMinWidths.install` have variants for `TreeTableView`.
+  are never editable). `TableGestures` holds the mouse and scroll helpers that `TableInput` and `TicketTreeTable`
+  share (row, cell and control under the pointer, drag threshold, scrolling only as far as needed, suspending edits
+  for one event). `EditingUnits.watch` and `ColumnMinWidths.install` have variants for `TreeTableView`.
 - **Grouping is a display choice**: `ticketGrouping` and `ticketGroupOrder` belong to `DisplayPreferences` and
   `settings.json` (see the KARV-76 decision). The menu follows them with weak listeners (`GroupingMenu`); the ticket
   table listens only while it is shown (`LiveViews.whileShown`), so a controller left behind after a switch to the

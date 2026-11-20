@@ -210,10 +210,5 @@ public class ParsingTextFieldTreeTableCell<S, T> extends TextFieldTreeTableCell<
 		void showValue(T value) {
 			updateItem(value, false);
 		}
-
-		@Override
-		void markEditing(boolean on) {
-			pseudoClassStateChanged(ParsingEditing.EDITING, on);
-		}
 	}
 }

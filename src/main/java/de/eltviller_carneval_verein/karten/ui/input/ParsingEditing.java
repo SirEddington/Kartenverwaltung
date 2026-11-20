@@ -111,10 +111,12 @@ abstract class ParsingEditing<S, T> {
 	/** Zeigt den Wert, bis die Tabelle die Zelle neu zeichnet ({@code updateItem(value, false)}). */
 	abstract void showValue(T value);
 
-	/** Setzt die Pseudoklasse {@link #EDITING}. */
-	abstract void markEditing(boolean editing);
-
 	// ---- gemeinsame Logik ----
+
+	/** Setzt die Pseudoklasse {@link #EDITING}. */
+	private void markEditing(boolean editing) {
+		cell().pseudoClassStateChanged(EDITING, editing);
+	}
 
 	/** Ob die Zeile der Zelle sich bearbeiten lässt (ohne Zeilenbedingung immer); Tabelle und Spalte prüft JavaFX selbst. */
 	final boolean canEdit() {

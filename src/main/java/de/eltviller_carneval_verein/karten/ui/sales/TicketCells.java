@@ -5,7 +5,6 @@ import java.util.function.Function;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ObservableValue;
-import javafx.scene.control.IndexedCell;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
@@ -90,9 +89,21 @@ final class TicketCells {
 		}
 	}
 
-	private static void hide(IndexedCell<?> cell) {
-		cell.setText(null);
-		cell.setGraphic(null);
+	/** Nach {@code updateItem}: In einer Gruppenzeile zeigt die Zelle nichts. */
+	private static void hideInGroupRow(TreeTableCell<TicketRow, ?> cell, boolean empty) {
+		if (!empty && dtoAt(cell) == null) {
+			cell.setText(null);
+			cell.setGraphic(null);
+		}
+	}
+
+	/** Vor {@code startEdit}: In einer Gruppenzeile beginnt kein Bearbeiten; {@code true}, wenn es abgelehnt ist. */
+	private static boolean refusedInGroupRow(TreeTableCell<TicketRow, ?> cell) {
+		if (dtoAt(cell) != null) {
+			return false;
+		}
+		refuseEdit(cell);
+		return true;
 	}
 
 	/** {@link CheckBoxTreeTableCell}, die in Gruppenzeilen nichts zeigt. */
@@ -110,18 +121,14 @@ final class TicketCells {
 		@Override
 		public void updateItem(Boolean item, boolean empty) {
 			super.updateItem(item, empty);
-			if (!empty && dtoAt(this) == null) {
-				hide(this);
-			}
+			hideInGroupRow(this, empty);
 		}
 
 		@Override
 		public void startEdit() {
-			if (dtoAt(this) == null) {
-				refuseEdit(this);
-				return;
+			if (!refusedInGroupRow(this)) {
+				super.startEdit();
 			}
-			super.startEdit();
 		}
 	}
 
@@ -136,18 +143,14 @@ final class TicketCells {
 		@Override
 		public void updateItem(T item, boolean empty) {
 			super.updateItem(item, empty);
-			if (!empty && dtoAt(this) == null) {
-				hide(this);
-			}
+			hideInGroupRow(this, empty);
 		}
 
 		@Override
 		public void startEdit() {
-			if (dtoAt(this) == null) {
-				refuseEdit(this);
-				return;
+			if (!refusedInGroupRow(this)) {
+				super.startEdit();
 			}
-			super.startEdit();
 		}
 	}
 }
