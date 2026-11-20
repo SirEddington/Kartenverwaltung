@@ -18,6 +18,8 @@ import de.eltviller_carneval_verein.karten.ui.CoalescedAction;
 import de.eltviller_carneval_verein.karten.ui.ColumnMinWidths;
 import de.eltviller_carneval_verein.karten.ui.input.TableGestures;
 import javafx.application.Platform;
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.collections.ListChangeListener;
@@ -70,6 +72,8 @@ public final class TicketTreeTable {
 	private List<TicketNode> nodes = List.of();
 	private final TicketTreeBuilder tree = new TicketTreeBuilder();
 	private List<TicketColumn> grouping = List.of();
+	/** Ob die Tabelle gruppiert zeigt: Stand des letzten {@link #setGrouping}. */
+	private final ReadOnlyBooleanWrapper grouped = new ReadOnlyBooleanWrapper(this, "grouped", false);
 	// Ob die Gruppen wirklich verschachtelt sind; mit weniger als zwei Spalten immer (es gibt nur eine Ebene)
 	private boolean groupsNested = true;
 	/** Bis zur ersten Messung die Werte von Modena bei 13 px (Einrückung 1em, Pfeil mit Innenabstand). */
@@ -300,8 +304,14 @@ public final class TicketTreeTable {
 			groupsNested = nextNested;
 			clearCollapsed();
 		}
-		treeColumn.setVisible(!grouping.isEmpty());
+		grouped.set(!grouping.isEmpty());
+		treeColumn.setVisible(grouped.get());
 		updateTreeColumnFloor();
+	}
+
+	/** Ob die Tabelle gruppiert zeigt, nach der Gruppierung des letzten {@link #setGrouping}, nicht nach der schon gewählten. */
+	public ReadOnlyBooleanProperty groupedProperty() {
+		return grouped.getReadOnlyProperty();
 	}
 
 	/**
@@ -480,11 +490,64 @@ public final class TicketTreeTable {
 		}
 	}
 
-	private void expandAll(TreeItem<TicketRow> item) {
+	private void expandWithSubgroups(TreeItem<TicketRow> item) {
 		if (tree.node(item) instanceof TicketNode node && node.isGroup()) {
 			item.setExpanded(true);
-			item.getChildren().forEach(this::expandAll);
+			item.getChildren().forEach(this::expandWithSubgroups);
 		}
+	}
+
+	/**
+	 * „Alle aufklappen“ (Spec 14.1): jede Gruppe auf jeder Ebene auf, die zugeklappten Pfade vergessen; Auswahl und Fokus
+	 * bleiben. Ohne Wirkung bei offenem Verkaufsdialog und ohne Gruppierung. Eine laufende Bearbeitung beendet der Aufrufer.
+	 */
+	public void expandAll() {
+		if (frozen.getAsBoolean() || !grouped.get()) {
+			return;
+		}
+		flushAdopt();
+		clearCollapsed();
+		publish();
+	}
+
+	/**
+	 * „Alle zuklappen“ (Spec 14.1): jede Gruppe auf jeder Ebene zu, auch die inneren. Die Regel zum Zuklappen gilt einmal
+	 * für das Ganze ({@link TicketSelection#collapsingAll}), nicht je Gruppe; danach eine Meldung. Fokus und Anker gehen auf
+	 * die oberste Gruppe der bisher fokussierten Zeile. Ohne Wirkung bei offenem Verkaufsdialog und ohne Gruppierung. Eine
+	 * laufende Bearbeitung beendet der Aufrufer.
+	 */
+	public void collapseAll() {
+		if (frozen.getAsBoolean() || !grouped.get()) {
+			return;
+		}
+		flushAdopt();
+		TreeItem<TicketRow> top = topLevel(focusedItem());
+		TreeTableColumn<TicketRow, ?> column = focusedColumn();
+		selection.collapsingAll(nodes);
+		quiet++; // beforeToggle und toggled wenden die Regel so nicht je Gruppe an und gleichen nicht je Gruppe an
+		try {
+			// wie beim Neuaufbau: sonst räumt JavaFX bei jeder Gruppe die Auswahl Zeile für Zeile um
+			if (!table.getSelectionModel().isEmpty()) {
+				table.getSelectionModel().clearSelection();
+			}
+			for (TreeItem<TicketRow> item : tree.groupItems()) {
+				item.setExpanded(false); // toggled merkt den Pfad in collapsed
+			}
+		} finally {
+			quiet--;
+		}
+		anchor = top;
+		adjust(top, column);
+		publish();
+	}
+
+	/** Die oberste Gruppe über der Zeile (bzw. die Zeile selbst, steht sie oben); {@code null} ohne Zeile. */
+	private TreeItem<TicketRow> topLevel(TreeItem<TicketRow> item) {
+		TreeItem<TicketRow> top = item;
+		while (top != null && top.getParent() != null && top.getParent() != root) {
+			top = top.getParent();
+		}
+		return top;
 	}
 
 	// ---- Fremde Änderungen am Auswahlmodell ----
@@ -725,6 +788,19 @@ public final class TicketTreeTable {
 		}
 		boolean shift = event.isShiftDown();
 		boolean ctrl = event.isShortcutDown();
+		int all = ctrl ? expandAllKey(event) : 0;
+		if (all != 0) {
+			if (!grouped.get()) {
+				return; // ohne Gruppierung tun Strg+Plus und Strg+Minus nichts und bleiben unverbraucht
+			}
+			if (all > 0) {
+				expandAll();
+			} else {
+				collapseAll();
+			}
+			event.consume();
+			return;
+		}
 		TreeItem<TicketRow> item = focusedItem();
 		int focus = item == null ? table.getFocusModel().getFocusedIndex() : table.getRow(item);
 		TicketNode node = tree.node(item);
@@ -777,8 +853,24 @@ public final class TicketTreeTable {
 		switch (code) {
 		case ADD -> group.setExpanded(true);
 		case SUBTRACT -> group.setExpanded(false);
-		default -> expandAll(group);
+		default -> expandWithSubgroups(group);
 		}
+	}
+
+	/**
+	 * Strg+Plus bzw. Strg+Minus, mit der Taste des Hauptfelds oder des Ziffernblocks: {@code 1} für „Alle aufklappen“,
+	 * {@code -1} für „Alle zuklappen“, sonst {@code 0}. Liefert eine Tastatur andere Codes, entscheidet der getippte Text.
+	 */
+	private static int expandAllKey(KeyEvent event) {
+		return switch (event.getCode()) {
+		case PLUS, ADD -> 1;
+		case MINUS, SUBTRACT -> -1;
+		default -> switch (event.getText()) {
+		case "+" -> 1;
+		case "-" -> -1;
+		default -> 0;
+		};
+		};
 	}
 
 	/** Pfeil auf/ab, Pos1, Ende, Bild: ohne Umschalt Menge = Zeile im Fokus, mit Strg nur der Fokus, mit Umschalt Bereich. */

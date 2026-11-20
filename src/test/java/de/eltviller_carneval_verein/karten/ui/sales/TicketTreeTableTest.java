@@ -1051,6 +1051,188 @@ class TicketTreeTableTest {
 		assertEquals(List.of(w1, w2), selected());
 	}
 
+	// ---- Alle auf- und zuklappen (Spec 14.1) ----
+	// Zeilen mit Gruppierung nach Nachname und Vorname, alles aufgeklappt:
+	// 0 Müller, 1 Anna, 2 m1, 3 Bernd, 4 m2, 5 Schmidt, 6 Clara, 7 s1, 8 Weber, 9 Dora, 10 w1, 11 Emil, 12 w2
+
+	private boolean expanded(int row) throws Exception {
+		return onFx(() -> table.getTreeItem(row).isExpanded());
+	}
+
+	private int rowCount() throws Exception {
+		return onFx(() -> table.getExpandedItemCount());
+	}
+
+	/** Eine Taste mit Strg und dem getippten Text {@code text}, wie sie eine Tastatur mit anderen Codes liefert. */
+	private void pressCtrl(KeyCode code, String text) throws Exception {
+		run(() -> javafx.event.Event.fireEvent(table,
+				new KeyEvent(this, table, KeyEvent.KEY_PRESSED, KeyEvent.CHAR_UNDEFINED, text, code, false, true, false, false)));
+	}
+
+	/** Die Tasten, die die Tabelle unverbraucht erreichen. */
+	private List<KeyCode> recordUnconsumedKeys() throws Exception {
+		List<KeyCode> reached = new ArrayList<>();
+		run(() -> table.addEventHandler(KeyEvent.KEY_PRESSED, event -> reached.add(event.getCode())));
+		return reached;
+	}
+
+	@Test
+	void alleZuklappenKlapptJedeEbene() throws Exception {
+		grouping = List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME);
+		show();
+
+		run(() -> tree.collapseAll());
+
+		assertEquals(3, rowCount(), "nur die obersten Gruppen sind zu sehen");
+		assertFalse(expanded(0));
+		assertFalse(expanded(1));
+		assertFalse(expanded(2));
+		setExpanded(0, true); // Müller auf
+		// 0 Müller, 1 Anna, 2 Bernd, 3 Schmidt, 4 Weber
+		assertEquals(5, rowCount());
+		assertFalse(expanded(1), "die Untergruppen bleiben zu");
+		assertFalse(expanded(2));
+
+		booking("Albers", "Gerd"); // fremde Änderung: andere Struktur, dieselbe Gruppierung
+		rebuild();
+		// 0 Albers, 1 Gerd, 2 a, 3 Müller, 4 Anna, 5 Bernd, 6 Schmidt, 7 Weber
+		assertEquals(8, rowCount(), "die zugeklappten Pfade bleiben gemerkt; die neue Gruppe ist auf");
+		assertFalse(expanded(4));
+		assertFalse(expanded(6));
+	}
+
+	@Test
+	void alleZuklappenMeldetEinmal() throws Exception {
+		show();
+		click(1); // m1
+		ctrlClick(5); // Weber ganz
+		assertEquals(List.of(m1, w1, w2), selected());
+		List<List<Booking>> reports = new ArrayList<>();
+		run(() -> tree.selectedBookingsProperty().addListener(obs -> reports.add(List.copyOf(tree.selectedBookingsProperty().get()))));
+
+		run(() -> tree.collapseAll());
+
+		// 0 Müller, 1 Schmidt, 2 Weber
+		assertEquals(List.of(w1, w2), selected(), "Müller war nur teilweise gewählt, Weber ganz");
+		assertEquals(List.of(List.of(w1, w2)), reports, "eine Meldung für den ganzen Schritt");
+		assertEquals(List.of(), modelRows());
+		assertTrue(groupSelected(2));
+		assertFalse(groupSelected(0));
+	}
+
+	@Test
+	void alleZuklappenFokusAufOberste() throws Exception {
+		grouping = List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME);
+		show();
+		click(12); // w2
+
+		run(() -> tree.collapseAll());
+
+		// 0 Müller, 1 Schmidt, 2 Weber
+		assertEquals(2, focusedRow());
+		setExpanded(2, true); // Weber auf: 3 Dora, 4 Emil
+		assertEquals(2, focusedRow(), "der Fokus steht auf der obersten Gruppe, nicht auf der Untergruppe von w2");
+
+		setExpanded(4, true); // Emil: 5 w2
+		setExpanded(3, true); // Dora: 4 w1, 5 Emil, 6 w2
+		run(() -> table.getFocusModel().focus(0, table.getColumns().get(LAST))); // nur der Fokus wandert
+		shiftClick(4);
+		assertEquals(List.of(w1), selected(), "der Anker steht auf Weber, nicht mehr auf w2");
+	}
+
+	@Test
+	void alleAufklappenLaesstAuswahl() throws Exception {
+		grouping = List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME);
+		show();
+		click(0); // Müller
+		setExpanded(8, false); // Weber
+		setExpanded(3, false); // Bernd
+		// 0 Müller, 1 Anna, 2 m1, 3 Bernd, 4 Schmidt, 5 Clara, 6 s1, 7 Weber
+		ctrlClick(6); // s1
+		assertEquals(List.of(m1, m2, s1), selected());
+		List<List<Booking>> reports = new ArrayList<>();
+		run(() -> tree.selectedBookingsProperty().addListener(obs -> reports.add(List.copyOf(tree.selectedBookingsProperty().get()))));
+
+		run(() -> tree.expandAll());
+
+		assertEquals(13, rowCount(), "jede Gruppe auf jeder Ebene ist auf");
+		assertEquals(List.of(m1, m2, s1), selected());
+		assertEquals(List.of(2, 4, 7), modelRows());
+		assertEquals(7, focusedRow());
+		assertSame(s1, focusedBooking());
+		assertEquals(List.of(), reports, "die Auswahl ändert sich nicht");
+
+		booking("Albers", "Gerd");
+		rebuild();
+		assertEquals(16, rowCount(), "die zugeklappten Pfade sind vergessen");
+	}
+
+	@Test
+	void alleKlappenBeiGesperrterTabelleNicht() throws Exception {
+		show();
+		click(1);
+		setExpanded(5, false); // Weber
+		run(() -> tree.setFrozen(() -> true));
+
+		run(() -> tree.collapseAll());
+		assertTrue(expanded(0));
+		assertEquals(List.of(m1), selected());
+
+		run(() -> tree.expandAll());
+		assertFalse(expanded(5));
+
+		press(KeyCode.SUBTRACT, false, true);
+		press(KeyCode.ADD, false, true);
+		assertTrue(expanded(0));
+		assertFalse(expanded(5));
+		assertEquals(List.of(m1), selected());
+	}
+
+	@Test
+	void strgPlusMinusNurMitGruppierung() throws Exception {
+		show();
+		assertTrue(onFx(() -> tree.groupedProperty().get()));
+		List<KeyCode> reached = recordUnconsumedKeys();
+
+		press(KeyCode.SUBTRACT, false, true);
+		assertEquals(3, rowCount(), "Strg+Minus des Ziffernblocks klappt alle zu");
+		press(KeyCode.ADD, false, true);
+		assertEquals(8, rowCount(), "Strg+Plus des Ziffernblocks klappt alle auf");
+		press(KeyCode.MINUS, false, true);
+		assertEquals(3, rowCount(), "Strg+Minus des Hauptfelds");
+		press(KeyCode.PLUS, false, true);
+		assertEquals(8, rowCount(), "Strg+Plus des Hauptfelds");
+		pressCtrl(KeyCode.UNDEFINED, "-");
+		assertEquals(3, rowCount(), "andere Codes: der getippte Text entscheidet");
+		pressCtrl(KeyCode.UNDEFINED, "+");
+		assertEquals(8, rowCount());
+		assertEquals(List.of(), reached, "mit Gruppierung werden die Tasten verbraucht");
+
+		grouping = List.of();
+		rebuild();
+		assertFalse(onFx(() -> tree.groupedProperty().get()));
+		press(KeyCode.SUBTRACT, false, true);
+		press(KeyCode.PLUS, false, true);
+		assertEquals(List.of(KeyCode.SUBTRACT, KeyCode.PLUS), reached, "ohne Gruppierung tun sie nichts und werden nicht verbraucht");
+		assertEquals(5, rowCount());
+	}
+
+	@Test
+	void strgPlusMinusNichtImBearbeiten() throws Exception {
+		show();
+		click(1);
+		click(1, LAST);
+		assertEquals(1, editingRow());
+
+		press(KeyCode.SUBTRACT, false, true);
+		press(KeyCode.MINUS, false, true);
+
+		assertTrue(expanded(0), "während eine Zelle bearbeitet wird, klappt nichts");
+		assertEquals(8, rowCount());
+		assertEquals(1, editingRow());
+		stopEditing();
+	}
+
 	@Test
 	void tabAusBuchungWaehltNaechsteBuchung() throws Exception {
 		show();

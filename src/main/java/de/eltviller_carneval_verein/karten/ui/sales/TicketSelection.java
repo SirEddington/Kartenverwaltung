@@ -148,6 +148,20 @@ final class TicketSelection {
 	}
 
 	/**
+	 * „Alle zuklappen“: die Regel zum Zuklappen als ein Schritt für den ganzen Baum. Gewählt bleiben nur die Buchungen
+	 * unter einer ganz gewählten obersten Gruppe; eine ganz gewählte innere Gruppe in einer nur teilweise gewählten
+	 * obersten zählt nicht, denn zu sehen bleibt nur die oberste. Buchungen ohne Gruppe (ohne Gruppierung) bleiben, wie
+	 * sie sind.
+	 */
+	void collapsingAll(List<TicketNode> tree) {
+		for (TicketNode node : tree) {
+			if (node.isGroup()) {
+				collapsing(node);
+			}
+		}
+	}
+
+	/**
 	 * Neuaufbau: Die Menge bleibt, nur Buchungen, die nicht mehr im Baum stehen, fallen heraus. Neu hinzugekommene
 	 * Buchungen sind nicht gewählt; eine gewählte Gruppe wächst also nie von selbst.
 	 */

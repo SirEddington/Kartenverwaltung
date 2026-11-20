@@ -180,6 +180,26 @@ class TicketSelectionTest {
 	}
 
 	@Test
+	void alleZuklappenBehaeltNurGanzGewaehlteObersteGruppen() {
+		TicketNode anna = new TicketNode(new TicketRow.GroupRow(List.of(TicketColumn.FIRST_NAME), "Anna", 1, List.of("A", "Anna")),
+				List.of(leaf(a1)));
+		TicketNode bernd = new TicketNode(new TicketRow.GroupRow(List.of(TicketColumn.FIRST_NAME), "Bernd", 1, List.of("A", "Bernd")),
+				List.of(leaf(a2)));
+		List<TicketNode> tree = List.of(group("A", anna, bernd), group("B", leaf(b1), leaf(b2)));
+		selection.select(anna); // die innere Gruppe ist ganz gewählt, die oberste nicht
+		selection.add(tree.get(1));
+
+		selection.collapsingAll(tree);
+
+		assertEquals(List.of(b1, b2), selection.selected(tree), "gewählt bleibt nur, was unter einer ganz gewählten obersten Gruppe steht");
+		assertEquals(Set.of(), selection.pathsToExpand(tree, Set.of(List.of("A"), List.of("A", "Anna"), List.of("A", "Bernd"), List.of("B"))));
+
+		selection.selectAll(tree);
+		selection.collapsingAll(tree);
+		assertEquals(List.of(a1, a2, b1, b2), selection.selected(tree), "ganz gewählt bleibt alles");
+	}
+
+	@Test
 	void restoreNimmtNurBuchungenImBaum() {
 		List<TicketNode> tree = tree();
 		selection.select(tree.get(0));
