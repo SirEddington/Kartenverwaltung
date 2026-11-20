@@ -5,10 +5,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 
+import de.eltviller_carneval_verein.karten.ui.LiveViews;
+import de.eltviller_carneval_verein.karten.ui.input.TableGestures;
+
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableBooleanValue;
-import javafx.beans.value.WeakChangeListener;
 import javafx.event.EventHandler;
 import javafx.geometry.Bounds;
 import javafx.geometry.Point2D;
@@ -47,8 +49,6 @@ import javafx.stage.Window;
  */
 final class GroupingBar {
 
-	/** Ab dieser Strecke in Pixeln wird aus einem Druck ein Ziehen. */
-	private static final double DRAG_THRESHOLD = 3;
 	/** Breite der Einfügemarke und ihr Abstand zum Baustein, vor oder hinter dem sie steht. */
 	private static final double MARKER_WIDTH = 2;
 	private static final double MARKER_GAP = 2;
@@ -57,7 +57,6 @@ final class GroupingBar {
 	private final ObjectProperty<List<TicketColumn>> grouping;
 	/** Die Einfügemarke: nicht vom Layout der Leiste gesetzt, damit die Bausteine beim Ziehen nicht springen. */
 	private final Region marker = new Region();
-	private final ChangeListener<List<TicketColumn>> follow = (obs, before, now) -> show();
 	/** Das laufende Ziehen, sonst {@code null}. */
 	private Drag drag;
 	/** Liefert die Property "Fenster hat den Fokus"; in der App {@link Window#focusedProperty}, in Tests steuerbar. */
@@ -132,8 +131,7 @@ final class GroupingBar {
 		marker.setVisible(false);
 		marker.setMouseTransparent(true);
 		show();
-		grouping.addListener(new WeakChangeListener<>(follow));
-		chips.getProperties().put(GroupingBar.class, this);
+		LiveViews.follow(chips, grouping, this::show);
 	}
 
 	/** Die Spalten der Bausteine in ihrer Reihenfolge, wie die Leiste sie zeigt. */
@@ -277,7 +275,7 @@ final class GroupingBar {
 		if (drag == null || !event.isPrimaryButtonDown()) {
 			return;
 		}
-		if (!drag.moved && Math.hypot(event.getSceneX() - drag.startX, event.getSceneY() - drag.startY) < DRAG_THRESHOLD) {
+		if (!drag.moved && Math.hypot(event.getSceneX() - drag.startX, event.getSceneY() - drag.startY) < TableGestures.DRAG_THRESHOLD) {
 			return;
 		}
 		drag.moved = true;
@@ -340,11 +338,6 @@ final class GroupingBar {
 
 	/** Ob das Ziel ein Knopf im Baustein ist (das "×"): Dort beginnt kein Ziehen. */
 	private static boolean onButton(Object target, Node chip) {
-		for (Node node = target instanceof Node n ? n : null; node != null && node != chip; node = node.getParent()) {
-			if (node instanceof ButtonBase) {
-				return true;
-			}
-		}
-		return false;
+		return TableGestures.ancestor(target, node -> node instanceof ButtonBase || node == chip) instanceof ButtonBase;
 	}
 }

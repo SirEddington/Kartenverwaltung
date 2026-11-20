@@ -107,17 +107,10 @@ final class TicketEdits {
 	}
 
 	/**
-	 * Keine Zelle wird mehr bearbeitet. Geprüft wird erst danach: Tab übernimmt eine Zelle und bearbeitet gleich die
-	 * nächste, dazwischen steht kurz keine Zelle im Bearbeiten.
-	 */
-	void editingEnded() {
-		idle();
-	}
-
-	/**
 	 * Ende einer Bearbeitung oder Mausbedienung: holt nach, was wartet, erst das Entfernen, dann den Neuaufbau, jeweils nur,
 	 * wenn weder eine Zelle bearbeitet wird noch eine Mausbedienung läuft. Geprüft wird erst danach, nicht mitten im
-	 * Ereignis, das die Bedienung beendet (Fokusverlust beim Öffnen eines Dialogs, Abhängen der Tabelle).
+	 * Ereignis, das die Bedienung beendet: Tab übernimmt eine Zelle und bearbeitet gleich die nächste, dazwischen steht kurz
+	 * keine Zelle im Bearbeiten; ebenso Fokusverlust beim Öffnen eines Dialogs oder Abhängen der Tabelle.
 	 */
 	void idle() {
 		if (pending || removalPending) {

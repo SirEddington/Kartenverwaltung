@@ -129,11 +129,11 @@ class TicketEditsTest {
 
 		run(() -> {
 			editing[0] = false;
-			edits.editingEnded();
+			edits.idle();
 		});
 		assertEquals(1, rebuilds, "nach dem Ende der Bearbeitung kommt der Neuaufbau nach");
 
-		run(() -> edits.editingEnded());
+		run(() -> edits.idle());
 		assertEquals(1, rebuilds, "ohne wartende Änderung kein weiterer");
 	}
 
@@ -199,7 +199,7 @@ class TicketEditsTest {
 
 		run(() -> {
 			editing[0] = false;
-			edits.editingEnded();
+			edits.idle();
 		});
 		assertEquals(0, removals, "die Mausbedienung läuft noch");
 
@@ -207,7 +207,7 @@ class TicketEditsTest {
 		assertEquals(1, removals, "das Abhängen beendet die Mausbedienung, danach wird entfernt");
 
 		run(() -> edits.idle());
-		run(() -> edits.editingEnded());
+		run(() -> edits.idle());
 		assertEquals(1, removals, "genau einmal");
 		assertEquals(0, rebuilds, "ohne angeforderten Neuaufbau keiner");
 	}
@@ -222,7 +222,7 @@ class TicketEditsTest {
 
 		run(() -> {
 			editing[0] = false;
-			edits.editingEnded();
+			edits.idle();
 		});
 		assertEquals(1, removals, "nach dem Ende der Bearbeitung");
 	}
@@ -399,7 +399,7 @@ class TicketEditsTest {
 			TableInput.install(table, row -> row instanceof TicketRow.BookingRow);
 			table.editingCellProperty().addListener((property, before, now) -> {
 				if (now == null) {
-					edits.editingEnded();
+					edits.idle();
 				}
 			});
 			tree.show(nodes());

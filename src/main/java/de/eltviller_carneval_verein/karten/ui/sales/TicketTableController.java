@@ -264,8 +264,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 		selectionMenu = new ContextMenu(sellItem, assignItem, cancelItem, allSeparator, expandAllItem, collapseAllItem);
 		sellItem.setOnAction(event -> sellSelection());
 		cancelItem.setOnAction(event -> cancelSelection());
-		expandAllItem.setOnAction(event -> expandAll());
-		collapseAllItem.setOnAction(event -> collapseAll());
+		expandAllItem.setOnAction(event -> afterEditing(treeTable::expandAll));
+		collapseAllItem.setOnAction(event -> afterEditing(treeTable::collapseAll));
 		// Das Menü schließt bei jeder Bedienung der Tabelle (wie in der Hallenübersicht). JavaFX schließt ein Menü nur bei
 		// einem unverarbeiteten Ereignis daneben; die Tabelle verarbeitet Klick und Mausrad selbst (Auswahl, Bearbeiten),
 		// deshalb blieb es sonst neben der bearbeiteten Zelle stehen. Der Rechtsklick schließt zuerst und öffnet danach neu.
@@ -281,7 +281,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 			return row;
 		});
 
-		treeTable.selectedBookingsProperty().addListener((obs, before, now) -> updateUnassignedBar(now));
+		treeTable.selectedBookingsProperty().addListener((obs, before, now) -> updateUnassignedBar());
 		updateUnassignedBar();
 
 		// Eine Zelle im Bearbeiten hält ihre Buchung für fremde Änderungen zurück; endet sie, kommt Verpasstes nach (auch
@@ -289,7 +289,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		EditingUnits.getInstance().watch(seatTable, row -> row instanceof TicketRow.BookingRow booking ? booking.dto().getBooking() : null);
 		seatTable.editingCellProperty().addListener((obs, before, cell) -> {
 			if (cell == null) {
-				edits.editingEnded();
+				edits.idle();
 			}
 		});
 		// Fremde Änderungen nur, solange die Tabelle zu sehen ist; eine mit der Ansicht verschwundene Zelle gibt ihre Buchung frei
@@ -393,20 +393,17 @@ public class TicketTableController implements ContentController, SalesStateAware
 			button.managedProperty().bind(treeTable.groupedProperty());
 			button.disableProperty().bind(dialogOpen);
 		}
-		btnExpandAll.setOnAction(event -> expandAll());
-		btnCollapseAll.setOnAction(event -> collapseAll());
+		btnExpandAll.setOnAction(event -> afterEditing(treeTable::expandAll));
+		btnCollapseAll.setOnAction(event -> afterEditing(treeTable::collapseAll));
 	}
 
-	/** "Alle aufklappen" aus Leiste oder Kontextmenü: Eine laufende Bearbeitung endet zuerst (die Zelle übernimmt ihre Eingabe). */
-	private void expandAll() {
+	/**
+	 * "Alle aufklappen" und "Alle zuklappen" aus Leiste oder Kontextmenü: Eine laufende Bearbeitung endet zuerst (die Zelle
+	 * übernimmt ihre Eingabe).
+	 */
+	private void afterEditing(Runnable action) {
 		seatTable.edit(-1, null);
-		treeTable.expandAll();
-	}
-
-	/** "Alle zuklappen" aus Leiste oder Kontextmenü: Eine laufende Bearbeitung endet zuerst (die Zelle übernimmt ihre Eingabe). */
-	private void collapseAll() {
-		seatTable.edit(-1, null);
-		treeTable.collapseAll();
+		action.run();
 	}
 
 	/** Übernimmt Gruppierung und Gruppenordnung aus den Einstellungen; weicht eine ab, wird neu aufgebaut. */
@@ -589,17 +586,13 @@ public class TicketTableController implements ContentController, SalesStateAware
 		StatusMessage.getInstance().show(Severity.SUCCESS, "Buchung von bisher " + before + " auf " + booking.getPlaceLabel() + " zugewiesen");
 	}
 
-	/** Wie {@link #updateUnassignedBar(List)} mit der zuletzt gemeldeten Auswahl der Tabelle. */
-	private void updateUnassignedBar() {
-		updateUnassignedBar(treeTable.selectedBookingsProperty().get());
-	}
-
 	/**
 	 * Die Leiste "Ohne Platz" erscheint nur mit solchen Buchungen (gezählt ohne Suche und Filter, beim Neuaufbau); der
-	 * Knopf gilt für genau eine gewählte davon ({@code selected}, die gemeldete Auswahl). "(oben in der Tabelle)" stimmt
+	 * Knopf gilt für genau eine gewählte davon (die zuletzt gemeldete Auswahl der Tabelle). "(oben in der Tabelle)" stimmt
 	 * nur, solange die Tabelle weder gruppiert zeigt (Gruppierung des letzten Neuaufbaus) noch sortiert ist.
 	 */
-	private void updateUnassignedBar(List<Booking> selected) {
+	private void updateUnassignedBar() {
+		List<Booking> selected = treeTable.selectedBookingsProperty().get();
 		boolean visible = unassignedCount > 0;
 		unassignedBar.setVisible(visible);
 		unassignedBar.setManaged(visible);

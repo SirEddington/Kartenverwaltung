@@ -819,7 +819,7 @@ class TicketTreeTableTest {
 			tree.setRebuild(edits::requestRebuild);
 			table.editingCellProperty().addListener((obs, before, editing) -> {
 				if (editing == null) {
-					edits.editingEnded();
+					edits.idle();
 				}
 			});
 			@SuppressWarnings("unchecked")
