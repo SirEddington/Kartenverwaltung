@@ -1,7 +1,7 @@
 # Kartentabelle nach Spalten gruppieren (KARV-193)
 
 Stand: Entscheidung vom 18.11.2026, freigegeben vom Maintainer am 19.11.2026. Nachtrag nach dem Handtest vom 20.11.2026
-(Abschnitt 14), noch nicht freigegeben. Ein Spec ist eine Momentaufnahme und wird nach dem Merge nicht gepflegt; was
+(Abschnitt 14), freigegeben vom Maintainer am 20.11.2026. Ein Spec ist eine Momentaufnahme und wird nach dem Merge nicht gepflegt; was
 dauerhaft gilt, steht in `docs/decisions.md` und der übrigen Dokumentation.
 
 ## Anlass und Ziel
