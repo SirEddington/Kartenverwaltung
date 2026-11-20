@@ -14,10 +14,13 @@
         <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
     </padding>
 
-    <!-- Gruppieren (KARV-193): Menü mit den Spalten und der Gruppenordnung, daneben die aktive Gruppierung -->
+    <!-- Gruppieren (KARV-193): Menü mit den Spalten und der Gruppenordnung, daneben die aktive Gruppierung als Bausteine
+         (GroupingBar) und, solange die Tabelle gruppiert zeigt, "Alle aufklappen" und "Alle zuklappen" -->
     <HBox spacing="10.0" alignment="CENTER_LEFT">
         <MenuButton fx:id="btnGrouping" text="Gruppieren" styleClass="button-secondary" minWidth="-Infinity" />
-        <Label fx:id="lblGrouping" />
+        <HBox fx:id="groupingChips" spacing="6.0" alignment="CENTER_LEFT" />
+        <Button fx:id="btnExpandAll" text="Alle aufklappen" styleClass="button-secondary" minWidth="-Infinity" visible="false" managed="false" />
+        <Button fx:id="btnCollapseAll" text="Alle zuklappen" styleClass="button-secondary" minWidth="-Infinity" visible="false" managed="false" />
     </HBox>
 
     <!-- Buchungen ohne Platz (nach einem Bestuhlungswechsel): nur sichtbar, wenn es welche gibt -->

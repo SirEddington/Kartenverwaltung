@@ -553,6 +553,52 @@
      -fx-text-fill: -fx-ecv-blue;
  }
 
+ /* Leiste "Gruppieren" der Kartentabelle (KARV-193, GroupingBar): je Spalte der Gruppierung ein Baustein im Ton der
+    Gruppenzeilen mit einem kleinen "×"; im Fokus ein blauer Rand (als zweite Hintergrundebene, damit er nicht wächst).
+    Die Einfügemarke beim Ziehen ist ein blauer Strich. */
+ .grouping-chip {
+     -fx-background-color: #DDE0F0;
+     -fx-background-radius: 10px;
+     -fx-padding: 2px 2px 2px 10px;
+     -fx-spacing: 2px;
+ }
+
+ .grouping-chip:focused {
+     -fx-background-color: -fx-ecv-blue, #DDE0F0;
+     -fx-background-insets: 0, 2px;
+     -fx-background-radius: 10px, 8px;
+ }
+
+ .grouping-chip > .label {
+     -fx-text-fill: -fx-ecv-blue;
+ }
+
+ .grouping-chip > .button.grouping-chip-remove {
+     -fx-background-color: transparent;
+     -fx-background-radius: 8px;
+     -fx-border-width: 0px;
+     -fx-padding: 0px 5px;
+     -fx-font-weight: normal;
+     -fx-text-fill: #555555;
+ }
+
+ .grouping-chip > .button.grouping-chip-remove:hover {
+     -fx-background-color: #CFD3EA;
+     -fx-text-fill: -fx-ecv-red;
+ }
+
+ .grouping-chip > .button.grouping-chip-remove:pressed {
+     -fx-background-color: #BFC4E2;
+ }
+
+ .grouping-chips > .grouping-separator {
+     -fx-text-fill: #555555;
+ }
+
+ .grouping-drop-marker {
+     -fx-background-color: -fx-ecv-blue;
+ }
+
  /* Kartentabelle (KARV-193): Filtersymbol im Kopf einer Spalte mit aktivem Filter (ColumnFilterMenu), gelb auf dem
     blauen Kopf. */
  .ticket-table .column-header .filter-symbol {

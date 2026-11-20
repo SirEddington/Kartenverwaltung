@@ -2,14 +2,12 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.CustomMenuItem;
-import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.RadioButton;
@@ -19,7 +17,8 @@ import javafx.scene.control.ToggleGroup;
 /**
  * Das Menü "Gruppieren" der Kartentabelle (KARV-193, Spec Abschnitt 7): je Spalte ein Eintrag zum Anhaken, in
  * Spaltenreihenfolge; Anhaken hängt die Spalte als unterste Ebene an, Abhaken nimmt sie heraus. Darunter die
- * Gruppenordnung und "Gruppierung aufheben". Neben dem Knopf steht die aktive Gruppierung als Text.
+ * Gruppenordnung und "Gruppierung aufheben". Neben dem Knopf zeigt {@link GroupingBar} die aktive Gruppierung als
+ * Bausteine; die Häkchen folgen ihnen.
  *
  * <p>Die Einträge zum Anhaken und zur Ordnung lassen das Menü offen: {@code CheckMenuItem} und {@code RadioMenuItem}
  * schlössen es nach jedem Klick, deshalb {@link CustomMenuItem} mit {@code hideOnClick=false} und einer
@@ -29,15 +28,13 @@ import javafx.scene.control.ToggleGroup;
  */
 final class GroupingMenu {
 
-	private final Label summary;
 	private final ObjectProperty<List<TicketColumn>> grouping;
 	private final List<CheckBox> columns = new ArrayList<>();
 	private final ToggleGroup orders = new ToggleGroup();
 	private final ChangeListener<List<TicketColumn>> followGrouping = (obs, before, now) -> showGrouping();
 	private final ChangeListener<GroupOrder> followOrder = (obs, before, now) -> RadioMenus.select(orders, now);
 
-	GroupingMenu(MenuButton button, Label summary, ObjectProperty<List<TicketColumn>> grouping, ObjectProperty<GroupOrder> order) {
-		this.summary = summary;
+	GroupingMenu(MenuButton button, ObjectProperty<List<TicketColumn>> grouping, ObjectProperty<GroupOrder> order) {
 		this.grouping = grouping;
 		for (TicketColumn column : TicketColumn.values()) {
 			CheckBox box = new CheckBox(column.header());
@@ -81,11 +78,10 @@ final class GroupingMenu {
 		grouping.set(List.copyOf(next));
 	}
 
-	/** Häkchen und Text folgen der Gruppierung, auch einer Änderung von außen (etwa beim Start). */
+	/** Die Häkchen folgen der Gruppierung, auch einer Änderung von außen (etwa beim Start oder über die Bausteine). */
 	private void showGrouping() {
 		List<TicketColumn> current = grouping.get() == null ? List.of() : grouping.get();
 		// setSelected löst kein onAction aus, also kein Anhaken
 		columns.forEach(box -> box.setSelected(current.contains(box.getUserData())));
-		summary.setText(current.isEmpty() ? "" : "Gruppiert nach: " + current.stream().map(TicketColumn::header).collect(Collectors.joining(" › ")));
 	}
 }

@@ -61,6 +61,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollBar;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
@@ -119,7 +120,13 @@ public class TicketTableController implements ContentController, SalesStateAware
 	private MenuItem sellItem;
 	private MenuItem assignItem;
 	private MenuItem cancelItem;
+	/** "Alle aufklappen" und "Alle zuklappen" mit ihrem Trenner, nur auf einem Gruppenkopf (Spec Abschnitt 14.1). */
+	private SeparatorMenuItem allSeparator;
+	private MenuItem expandAllItem;
+	private MenuItem collapseAllItem;
 	private SeatDetailPopup activeDialog;
+	/** Ob der Verkaufsdialog offen ist; sperrt "Alle aufklappen" und "Alle zuklappen" der Leiste ({@link #trackDialog}). */
+	private final SimpleBooleanProperty dialogOpen = new SimpleBooleanProperty(this, "dialogOpen", false);
 	/** Buchungen ohne Platz unter {@link #allRows}, Stand des letzten Neuaufbaus. */
 	private long unassignedCount;
 
@@ -180,11 +187,15 @@ public class TicketTableController implements ContentController, SalesStateAware
 	@FXML
 	private TreeTableColumn<TicketRow, LocalDate> colCollectedOn;
 
-	// Leiste "Gruppieren" über der Tabelle
+	// Leiste "Gruppieren" über der Tabelle: Menü, Bausteine der Gruppierung, "Alle aufklappen" und "Alle zuklappen"
 	@FXML
 	private MenuButton btnGrouping;
 	@FXML
-	private Label lblGrouping;
+	private HBox groupingChips;
+	@FXML
+	private Button btnExpandAll;
+	@FXML
+	private Button btnCollapseAll;
 
 	// Leiste über der Tabelle, solange Buchungen ohne Platz da sind
 	@FXML
@@ -235,9 +246,14 @@ public class TicketTableController implements ContentController, SalesStateAware
 		sellItem = new MenuItem();
 		assignItem = new MenuItem(ASSIGN_TEXT);
 		cancelItem = new MenuItem();
-		selectionMenu = new ContextMenu(sellItem, assignItem, cancelItem);
+		allSeparator = new SeparatorMenuItem();
+		expandAllItem = new MenuItem("Alle aufklappen");
+		collapseAllItem = new MenuItem("Alle zuklappen");
+		selectionMenu = new ContextMenu(sellItem, assignItem, cancelItem, allSeparator, expandAllItem, collapseAllItem);
 		sellItem.setOnAction(event -> sellSelection());
 		cancelItem.setOnAction(event -> cancelSelection());
+		expandAllItem.setOnAction(event -> expandAll());
+		collapseAllItem.setOnAction(event -> collapseAll());
 		// Das Menü schließt bei jeder Bedienung der Tabelle (wie in der Hallenübersicht). JavaFX schließt ein Menü nur bei
 		// einem unverarbeiteten Ereignis daneben; die Tabelle verarbeitet Klick und Mausrad selbst (Auswahl, Bearbeiten),
 		// deshalb blieb es sonst neben der bearbeiteten Zelle stehen. Der Rechtsklick schließt zuerst und öffnet danach neu.
@@ -276,8 +292,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 	/**
 	 * Gruppierung und Gruppenordnung kommen aus {@link DisplayPreferences} (beim Start nur mit "Anzeige beim Start
-	 * wiederherstellen") und gelten so auch nach dem Wechsel zur Saalansicht und zurück. Das Menü "Gruppieren" ändert sie
-	 * dort; jede Änderung baut die Tabelle neu auf.
+	 * wiederherstellen") und gelten so auch nach dem Wechsel zur Saalansicht und zurück. Das Menü "Gruppieren" und die
+	 * Bausteine der Leiste ({@link GroupingBar}) ändern sie dort; jede Änderung baut die Tabelle neu auf.
 	 *
 	 * <p>Die Listener hängen nur, solange die Tabelle zu sehen ist ({@link LiveViews#whileShown}): Der Controller entsteht
 	 * bei jedem Wechsel zur Saalansicht und zurück neu, die Einstellungen leben mit der App. Ein abgehängter Controller baut
@@ -299,7 +315,36 @@ public class TicketTableController implements ContentController, SalesStateAware
 			preferences.ticketGroupOrderProperty().removeListener(groupingChanges);
 			preferences.ticketGroupingNestedProperty().removeListener(groupingChanges);
 		});
-		new GroupingMenu(btnGrouping, lblGrouping, preferences.ticketGroupingProperty(), preferences.ticketGroupOrderProperty());
+		new GroupingMenu(btnGrouping, preferences.ticketGroupingProperty(), preferences.ticketGroupOrderProperty());
+		new GroupingBar(groupingChips, preferences.ticketGroupingProperty());
+		bindExpandButtons();
+	}
+
+	/**
+	 * "Alle aufklappen" und "Alle zuklappen" der Leiste (Spec Abschnitt 14.1): zu sehen und im Layout nur, solange die
+	 * Tabelle gruppiert zeigt (Gruppierung des letzten Neuaufbaus), gesperrt bei offenem Verkaufsdialog, auch im
+	 * Anzeigemodus bedienbar.
+	 */
+	private void bindExpandButtons() {
+		for (Button button : List.of(btnExpandAll, btnCollapseAll)) {
+			button.visibleProperty().bind(treeTable.groupedProperty());
+			button.managedProperty().bind(treeTable.groupedProperty());
+			button.disableProperty().bind(dialogOpen);
+		}
+		btnExpandAll.setOnAction(event -> expandAll());
+		btnCollapseAll.setOnAction(event -> collapseAll());
+	}
+
+	/** "Alle aufklappen" aus Leiste oder Kontextmenü: Eine laufende Bearbeitung endet zuerst (die Zelle übernimmt ihre Eingabe). */
+	private void expandAll() {
+		seatTable.edit(-1, null);
+		treeTable.expandAll();
+	}
+
+	/** "Alle zuklappen" aus Leiste oder Kontextmenü: Eine laufende Bearbeitung endet zuerst (die Zelle übernimmt ihre Eingabe). */
+	private void collapseAll() {
+		seatTable.edit(-1, null);
+		treeTable.collapseAll();
 	}
 
 	/** Übernimmt Gruppierung und Gruppenordnung aus den Einstellungen; weicht eine ab, wird neu aufgebaut. */
@@ -362,6 +407,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 	 * nicht markierten Zeile gilt das Menü nur für diese Zeile (bei einer Gruppe für ihre Buchungen), auf einer markierten
 	 * für die ganze Auswahl, wie im Explorer. "Platz zuweisen…" gibt es nur auf einer Buchung ohne Platz und gilt nur für
 	 * sie. "Stornieren" gilt wie der Sammelverkauf für die Auswahl und ist gesperrt, wenn keine gewählte Buchung Daten trägt.
+	 * Auf einem Gruppenkopf folgen ein Trenner, "Alle aufklappen" und "Alle zuklappen" (Spec Abschnitt 14.1), auch im
+	 * Anzeigemodus.
 	 */
 	private void showSelectionMenu(TreeTableRow<TicketRow> row, ContextMenuEvent event) {
 		TreeItem<TicketRow> clicked = row.getTreeItem();
@@ -380,6 +427,10 @@ public class TicketTableController implements ContentController, SalesStateAware
 		assignItem.setVisible(dto != null && dto.getBooking().isUnassigned());
 		assignItem.setDisable(!editMode);
 		assignItem.setOnAction(action -> assignPlace(dto));
+		boolean groupHeader = clicked.getValue() instanceof TicketRow.GroupRow;
+		allSeparator.setVisible(groupHeader);
+		expandAllItem.setVisible(groupHeader);
+		collapseAllItem.setVisible(groupHeader);
 		selectionMenu.show(row, event.getScreenX(), event.getScreenY());
 	}
 
@@ -413,6 +464,20 @@ public class TicketTableController implements ContentController, SalesStateAware
 			bookings.forEach(booking -> edits.changed(booking, !before.get(booking).equals(TicketEdits.Values.of(booking))));
 			bookings.forEach(this::removeIfCancelledAfterCommit);
 		}, treeTable::deselect);
+		trackDialog();
+	}
+
+	/**
+	 * {@link #dialogOpen} folgt dem gerade geöffneten Verkaufsdialog, bis er sich schließt (auch über "Anwenden",
+	 * "Abbrechen" oder {@link #closeDialog}); ohne Dialog ist er falsch.
+	 */
+	private void trackDialog() {
+		if (activeDialog == null) {
+			dialogOpen.unbind();
+			dialogOpen.set(false);
+		} else {
+			dialogOpen.bind(activeDialog.popup().showingProperty());
+		}
 	}
 
 	/** Knopf "Platz zuweisen…" der Leiste: für die eine gewählte Buchung ohne Platz. */
@@ -532,6 +597,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		if (activeDialog != null) {
 			activeDialog.popup().hide();
 			activeDialog = null;
+			trackDialog();
 		}
 	}
 

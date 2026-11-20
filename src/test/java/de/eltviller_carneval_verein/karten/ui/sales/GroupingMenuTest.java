@@ -20,7 +20,6 @@ import javafx.beans.property.SimpleObjectProperty;
 import javafx.scene.Scene;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.CustomMenuItem;
-import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.RadioButton;
@@ -34,7 +33,6 @@ class GroupingMenuTest {
 	private final ObjectProperty<List<TicketColumn>> grouping = new SimpleObjectProperty<>(List.of());
 	private final ObjectProperty<GroupOrder> order = new SimpleObjectProperty<>(GroupOrder.VALUE);
 	private MenuButton button;
-	private Label summary;
 	private GroupingMenu menu;
 	private Stage stage;
 
@@ -81,8 +79,7 @@ class GroupingMenuTest {
 	private void create() throws Exception {
 		run(() -> {
 			button = new MenuButton("Gruppieren");
-			summary = new Label();
-			menu = new GroupingMenu(button, summary, grouping, order);
+			menu = new GroupingMenu(button, grouping, order);
 		});
 	}
 
@@ -90,7 +87,7 @@ class GroupingMenuTest {
 	private void open() throws Exception {
 		run(() -> {
 			stage = new Stage();
-			stage.setScene(new Scene(new HBox(button, summary), 400, 100));
+			stage.setScene(new Scene(new HBox(button), 400, 100));
 			stage.show();
 			button.show();
 		});
@@ -216,22 +213,24 @@ class GroupingMenuTest {
 		assertEquals(GroupOrder.SIZE, order.get(), "die Gruppenordnung bleibt");
 	}
 
+	/** Die Häkchen folgen der Gruppierung, auch einer Änderung von außen (Start, Bausteine der Leiste). */
 	@Test
-	void zusammenfassungstext() throws Exception {
+	void haekchenFolgenAenderungVonAussen() throws Exception {
 		create();
-		assertEquals("", onFx(() -> summary.getText()), "ohne Gruppierung steht dort nichts");
 
-		fire(checkBox(TicketColumn.LAST_NAME));
-		fire(checkBox(TicketColumn.FIRST_NAME));
-		assertEquals("Gruppiert nach: Nachname › Vorname", onFx(() -> summary.getText()));
-
-		run(() -> grouping.set(List.of(TicketColumn.TABLE))); // von außen, etwa beim Start
-		assertEquals("Gruppiert nach: Tisch", onFx(() -> summary.getText()));
+		run(() -> grouping.set(List.of(TicketColumn.TABLE, TicketColumn.LAST_NAME)));
 		assertTrue(onFx(() -> checkBoxSelected(TicketColumn.TABLE)));
-		assertFalse(onFx(() -> checkBoxSelected(TicketColumn.LAST_NAME)));
+		assertTrue(onFx(() -> checkBoxSelected(TicketColumn.LAST_NAME)));
+		assertFalse(onFx(() -> checkBoxSelected(TicketColumn.FIRST_NAME)));
+
+		run(() -> grouping.set(List.of(TicketColumn.LAST_NAME))); // etwa „×“ auf dem Baustein „Tisch“
+		assertFalse(onFx(() -> checkBoxSelected(TicketColumn.TABLE)));
+
+		fire(checkBox(TicketColumn.FIRST_NAME));
+		assertEquals(List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME), grouping.get(), "Anhaken hängt weiter unten an");
 
 		run(() -> grouping.set(List.of()));
-		assertEquals("", onFx(() -> summary.getText()));
+		assertFalse(onFx(() -> checkBoxSelected(TicketColumn.LAST_NAME)));
 	}
 
 	@Test
