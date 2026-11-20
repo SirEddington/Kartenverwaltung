@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 
@@ -86,6 +87,8 @@ public final class TicketTreeTable {
 	private TreeItem<TicketRow> anchor;
 	/** Der laufende Mausdruck bis zum Loslassen. */
 	private Press press;
+	/** Die Zeile des ersten Klicks eines Doppelklicks ({@link TicketTreeBuilder#keyOf}), {@code null} außerhalb der Zeilen. */
+	private Object clickKey;
 	/** Eine fremde Änderung am Auswahlmodell wartet auf ihre Übernahme ({@link #adoptModel}). */
 	private boolean adoptPending;
 	private Press adoptDrag;
@@ -195,6 +198,11 @@ public final class TicketTreeTable {
 		quiet++;
 		try {
 			nodes = List.copyOf(newNodes);
+			// Ersetzt JavaFX die Kinder, während viele Zeilen gewählt sind, räumt es die Auswahl Zeile für Zeile um (gemessen
+			// mit 3000 gewählten Buchungen rund 75 bis 120 ms); das Angleichen wählt danach ohnehin neu
+			if (!table.getSelectionModel().isEmpty()) {
+				table.getSelectionModel().clearSelection();
+			}
 			root.getChildren().setAll(tree.build(nodes, collapsed, this::toggled));
 			selection.rebuilt(nodes);
 		} finally {
@@ -366,7 +374,8 @@ public final class TicketTreeTable {
 
 	/**
 	 * Regel 3 (teilweise gewählte, zugeklappte Gruppen aufklappen), Auswahlmodell = sichtbare Buchungszeilen der Menge,
-	 * Markierung der Gruppenzeilen nach Regel 2, Fokus auf {@code focus} (auf keiner Zeile, wenn sie nicht zu sehen ist).
+	 * Markierung der Gruppenzeilen nach Regel 2, Fokus auf {@code focus}; steckt die Zeile in einer zugeklappten Gruppe, auf
+	 * der nächsten sichtbaren Gruppe darüber, und auf keiner Zeile, wenn sie nicht mehr im Baum steht ({@link #applyFocus}).
 	 */
 	private void adjust(TreeItem<TicketRow> focus, TreeTableColumn<TicketRow, ?> column) {
 		quiet++;
@@ -575,6 +584,9 @@ public final class TicketTreeTable {
 			}
 			return;
 		}
+		if (type == MouseEvent.MOUSE_PRESSED || type == MouseEvent.MOUSE_RELEASED) {
+			guardMultiClick(event, row);
+		}
 		if (type == MouseEvent.MOUSE_PRESSED) {
 			onPress(event, row);
 		} else if (type == MouseEvent.MOUSE_DRAGGED) {
@@ -596,6 +608,30 @@ public final class TicketTreeTable {
 					}
 				});
 			}
+		}
+	}
+
+	/**
+	 * Ein Doppelklick bearbeitet nur die Zeile seines ersten Klicks. Ein Neuaufbau zwischen den Klicks (etwa nach dem Commit,
+	 * den der erste Druck auslöst) kann eine andere Buchung unter den Zeiger schieben; JavaFX begänne beim zweiten Druck
+	 * oder, ist die Zeile dort schon gewählt, beim Loslassen ihr Bearbeiten. Trifft ein Druck oder Loslassen mit Klickzahl
+	 * ab 2 eine andere Zeile, ist die Tabelle für die Dauer dieses Ereignisses nicht bearbeitbar, wie in
+	 * {@code TableInput.suppressClickEdit}. Nicht, solange eine Zelle bearbeitet wird: Deren Ende
+	 * ({@code table.edit(-1, null)}) bliebe sonst ohne Wirkung.
+	 */
+	private void guardMultiClick(MouseEvent event, TreeTableRow<?> row) {
+		if (event.getButton() != MouseButton.PRIMARY) {
+			return;
+		}
+		Object key = row == null || row.isEmpty() ? null : tree.keyOf(row.getTreeItem());
+		if (event.getClickCount() < 2) {
+			if (event.getEventType() == MouseEvent.MOUSE_PRESSED) {
+				clickKey = key;
+			}
+		} else if (!Objects.equals(key, clickKey) && table.isEditable() && table.getEditingCell() == null) {
+			table.setEditable(false);
+			// Das Ereignis ist verarbeitet, sobald es durch ist
+			Platform.runLater(() -> table.setEditable(true));
 		}
 	}
 
@@ -752,7 +788,12 @@ public final class TicketTreeTable {
 				}
 			}
 		}
-		case SPACE -> space(item, node, shift, ctrl);
+		case SPACE -> {
+			if (node == null) {
+				return; // ohne Zeile im Fokus tut die Leertaste nichts
+			}
+			space(item, node, shift, ctrl);
+		}
 		case ENTER, F2 -> {
 			if (!group) {
 				return; // Bearbeiten über TableInput bzw. JavaFX
@@ -827,9 +868,6 @@ public final class TicketTreeTable {
 
 	/** Leertaste: hinein (in einer Buchungszeile danach Bearbeiten wie bei JavaFX), Strg: umschalten, Umschalt: Bereich. */
 	private void space(TreeItem<TicketRow> item, TicketNode node, boolean shift, boolean ctrl) {
-		if (node == null) {
-			return;
-		}
 		if (shift) {
 			selection.range(rowsBetween(anchorRow(item), table.getRow(item)), ctrl);
 		} else {

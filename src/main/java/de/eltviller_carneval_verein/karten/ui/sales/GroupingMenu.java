@@ -68,11 +68,7 @@ final class GroupingMenu {
 		RadioButton radio = new RadioButton(text);
 		radio.setUserData(value);
 		radio.setToggleGroup(orders);
-		// ein zweiter Klick auf die gewählte Ordnung wählt sie nicht ab (die ToggleGroup ließe das zu)
-		radio.setOnAction(event -> {
-			radio.setSelected(true);
-			order.set(value);
-		});
+		radio.setOnAction(event -> order.set(value));
 		return new CustomMenuItem(radio, false);
 	}
 

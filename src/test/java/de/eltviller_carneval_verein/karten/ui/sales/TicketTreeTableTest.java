@@ -716,6 +716,21 @@ class TicketTreeTableTest {
 	}
 
 	@Test
+	void leertasteOhneFokuszeileBleibtUnverbraucht() throws Exception {
+		show();
+		List<KeyCode> reached = new ArrayList<>();
+		run(() -> {
+			table.getFocusModel().focus(-1);
+			table.addEventHandler(KeyEvent.KEY_PRESSED, event -> reached.add(event.getCode()));
+		});
+
+		press(KeyCode.SPACE);
+
+		assertEquals(List.of(KeyCode.SPACE), reached, "ohne Zeile im Fokus tut die Baumtabelle nichts und verbraucht nichts");
+		assertEquals(List.of(), selected());
+	}
+
+	@Test
 	void einzelneBuchungAlleinInGruppeBearbeitbarNachKlick() throws Exception {
 		show();
 		click(3);
@@ -726,6 +741,154 @@ class TicketTreeTableTest {
 		assertEquals(4, editingRow(), "der nächste Klick auf die Buchung startet das Bearbeiten");
 		stopEditing();
 	}
+
+	/** Ein einzelnes Mausereignis auf die Zelle, die gerade in Zeile {@code row} steht, an der Stelle {@code at}. */
+	private void mouse(javafx.event.EventType<MouseEvent> type, int row, int column, double[] at, int clicks) throws Exception {
+		run(() -> fireMouse(cell(row, column), type, at[0], at[1], clicks, false, false));
+	}
+
+	/**
+	 * Verdrahtet die Tabelle wie der Controller mit {@link TicketEdits}: Ein Commit im Nachnamen ändert die Buchung, der
+	 * Neuaufbau wartet bis nach dem Ende der Bearbeitung.
+	 */
+	private void wireEditsLikeController() throws Exception {
+		run(() -> {
+			TicketEdits edits = new TicketEdits(() -> table.getEditingCell() != null, this::showNodes);
+			tree.setRebuild(edits::requestRebuild);
+			table.editingCellProperty().addListener((obs, before, editing) -> {
+				if (editing == null) {
+					edits.editingEnded();
+				}
+			});
+			@SuppressWarnings("unchecked")
+			TreeTableColumn<TicketRow, String> colLast = (TreeTableColumn<TicketRow, String>) table.getColumns().get(LAST);
+			colLast.setOnEditCommit(commit -> {
+				Booking booking = ((TicketRow.BookingRow) commit.getRowValue().getValue()).dto().getBooking();
+				booking.setLastName(commit.getNewValue());
+				edits.changed(booking, true);
+			});
+		});
+	}
+
+	/** Startet die Bearbeitung des Nachnamens in Zeile {@code row} und tippt {@code text}, ohne zu übernehmen. */
+	private void editLastName(int row, String text) throws Exception {
+		click(row);
+		click(row, LAST);
+		assertEquals(row, editingRow());
+		run(() -> ((TextField) cell(row, LAST).getGraphic()).setText(text));
+	}
+
+	private double[] centerOf(int row, int column) throws Exception {
+		return onFx(() -> {
+			Bounds bounds = cell(row, column).localToScene(cell(row, column).getBoundsInLocal());
+			return new double[] { (bounds.getMinX() + bounds.getMaxX()) / 2, (bounds.getMinY() + bounds.getMaxY()) / 2 };
+		});
+	}
+
+	/** Die Buchungen, deren Zellen ab jetzt ins Bearbeiten gehen, in Reihenfolge. */
+	private List<Booking> recordEditStarts() throws Exception {
+		List<Booking> started = new ArrayList<>();
+		run(() -> table.editingCellProperty().addListener((obs, before, editing) -> {
+			if (editing != null && editing.getTreeItem().getValue() instanceof TicketRow.BookingRow row) {
+				started.add(row.dto().getBooking());
+			}
+		}));
+		return started;
+	}
+
+	private Booking bookingInRow(int row) throws Exception {
+		return onFx(() -> table.getTreeItem(row).getValue() instanceof TicketRow.BookingRow booking ? booking.dto().getBooking() : null);
+	}
+
+	/**
+	 * Doppelklick direkt nach einer Bearbeitung (Abschlussreview, Important 2): Der erste Druck beendet das Bearbeiten,
+	 * der Neuaufbau läuft vor dem Loslassen und schiebt m2 unter den Zeiger. Ohne Schutz begänne JavaFX das Bearbeiten von
+	 * m2 beim zweiten Druck (Klickzahl 2, Zeile nicht gewählt); die Tabelle holte sich im selben Druck den Fokus zurück, und
+	 * die Zelle beendete das Bearbeiten gleich wieder ohne Änderung. Mit Schutz geht m2 gar nicht erst ins Bearbeiten.
+	 */
+	@Test
+	void doppelklickNachNeuaufbauBearbeitetKeineAndereBuchung() throws Exception {
+		show();
+		wireEditsLikeController();
+		editLastName(1, "Zimmer");
+		double[] at = centerOf(1, FIRST);
+		List<Booking> started = recordEditStarts();
+
+		// Doppelklick auf den Vornamen derselben Zeile; zwischen den Ereignissen läuft, was nachgeschoben ist
+		mouse(MouseEvent.MOUSE_PRESSED, 1, FIRST, at, 1);
+		assertEquals("Zimmer", m1.getLastName(), "der erste Druck übernimmt die Eingabe");
+		// 0 Müller (1), 1 m2, 2 Schmidt, 3 s1, 4 Weber, 5 w1, 6 w2, 7 Zimmer, 8 m1
+		assertSame(m2, bookingInRow(1), "der Neuaufbau lief vor dem Loslassen: unter dem Zeiger steht m2");
+		mouse(MouseEvent.MOUSE_RELEASED, 1, FIRST, at, 1);
+		mouse(MouseEvent.MOUSE_CLICKED, 1, FIRST, at, 1);
+		mouse(MouseEvent.MOUSE_PRESSED, 1, FIRST, at, 2);
+		mouse(MouseEvent.MOUSE_RELEASED, 1, FIRST, at, 2);
+		mouse(MouseEvent.MOUSE_CLICKED, 1, FIRST, at, 2);
+
+		assertEquals(List.of(), started, "m2 geht nicht ins Bearbeiten, auch nicht für die Dauer des Drucks");
+		assertEquals(-1, editingRow());
+		assertEquals("Bernd", m2.getFirstName());
+		assertEquals(List.of(m2), selected(), "der zweite Druck wählt m2 wie ein einfacher Klick");
+	}
+
+	@Test
+	void doppelklickAufEineBuchungBearbeitetSie() throws Exception {
+		show();
+		double[] at = centerOf(4, FIRST);
+
+		for (int clicks = 1; clicks <= 2; clicks++) {
+			mouse(MouseEvent.MOUSE_PRESSED, 4, FIRST, at, clicks);
+			mouse(MouseEvent.MOUSE_RELEASED, 4, FIRST, at, clicks);
+			mouse(MouseEvent.MOUSE_CLICKED, 4, FIRST, at, clicks);
+		}
+
+		assertEquals(4, editingRow());
+		assertEquals(List.of(s1), selected());
+		stopEditing();
+	}
+
+	/**
+	 * Wie {@link #doppelklickNachNeuaufbauBearbeitetKeineAndereBuchung}, aber das erste Loslassen kommt vor dem Neuaufbau
+	 * (schneller Klick): Es beginnt das Bearbeiten des Vornamens von m1 (Klick auf die einzige gewählte Zeile), der
+	 * Neuaufbau wartet darauf. Der zweite Druck trifft die Zelle am Rand neben dem Feld: Die Tabelle holt sich den Fokus,
+	 * das Bearbeiten endet ohne Änderung, und der Neuaufbau läuft vor dem Loslassen und schiebt m2 unter den Zeiger. JavaFX
+	 * wertet den Klick auf die beim Druck gewählte Zeile erst beim Loslassen aus (Klickzahl 2) und begänne damit das
+	 * Bearbeiten von m2, das dann bestehen bliebe.
+	 */
+	@Test
+	void doppelklickMitLoslassenVorDemNeuaufbauBearbeitetKeineAndereBuchung() throws Exception {
+		show();
+		wireEditsLikeController();
+		editLastName(1, "Zimmer");
+		double[] at = onFx(() -> {
+			Bounds bounds = cell(1, FIRST).localToScene(cell(1, FIRST).getBoundsInLocal());
+			return new double[] { bounds.getMinX() + 1, (bounds.getMinY() + bounds.getMaxY()) / 2 };
+		});
+
+		run(() -> {
+			Node target = cell(1, FIRST);
+			fireMouse(target, MouseEvent.MOUSE_PRESSED, at[0], at[1], 1, false, false);
+			fireMouse(target, MouseEvent.MOUSE_RELEASED, at[0], at[1], 1, false, false);
+			fireMouse(target, MouseEvent.MOUSE_CLICKED, at[0], at[1], 1, false, false);
+		});
+		assertEquals("Zimmer", m1.getLastName());
+		assertEquals(1, editingRow(), "der Vorname von m1 wird bearbeitet");
+		assertSame(m1, bookingInRow(1), "der Neuaufbau wartet auf das Ende der Bearbeitung");
+		assertFalse(onFx(() -> {
+			Node field = cell(1, FIRST).getGraphic();
+			return field.localToScene(field.getBoundsInLocal()).contains(at[0], at[1]);
+		}), "die Stelle liegt neben dem Feld: Der Druck trifft die Zelle");
+		List<Booking> started = recordEditStarts();
+		mouse(MouseEvent.MOUSE_PRESSED, 1, FIRST, at, 2);
+		assertSame(m2, bookingInRow(1), "der Neuaufbau lief vor dem Loslassen: unter dem Zeiger steht m2");
+		mouse(MouseEvent.MOUSE_RELEASED, 1, FIRST, at, 2);
+		mouse(MouseEvent.MOUSE_CLICKED, 1, FIRST, at, 2);
+
+		assertEquals(List.of(), started, "m2 geht nicht ins Bearbeiten");
+		assertEquals(-1, editingRow());
+		assertEquals("Bernd", m2.getFirstName());
+	}
+
 
 	@Test
 	void keineRueckkopplungBeimZuklappen() throws Exception {

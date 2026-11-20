@@ -291,7 +291,10 @@ Notable 1.2 pieces:
   `TicketTreeBuilder` builds the `TreeItem`s. The tree is rebuilt only when its structure (paths, bookings per
   group, order, header texts) differs, otherwise the table is only redrawn; the root is set once, because a new root
   clears the sort order. Every rebuild waits until no cell is being edited (`TicketEdits`), and a booking the
-  operator changed stays visible despite search and filter until those change.
+  operator changed stays visible despite search and filter until those change. Because a rebuild can move another
+  booking under the pointer between the two clicks of a double click (the first press commits the edit), a double
+  click edits only the row of its first click: a press or release with click count 2 or more on another row makes
+  the table not editable for that event.
 - **Selection as a set of bookings** (`TicketSelection`): the selection lives in the controller as a set of bookings
   by identity. The selection model of the `TreeTableView` only displays it and contains booking rows only; a group
   row is shown as selected (pseudo-class `group-selected`) when all its bookings are selected. Clicks and keys are
@@ -307,7 +310,9 @@ Notable 1.2 pieces:
   `ParsingTextFieldTableCell` and `ParsingTextFieldTreeTableCell`; rows can be excluded by a condition (group rows
   are never editable). `EditingUnits.watch` and `ColumnMinWidths.install` have variants for `TreeTableView`.
 - **Grouping is a display choice**: `ticketGrouping` and `ticketGroupOrder` belong to `DisplayPreferences` and
-  `settings.json` (see the KARV-76 decision); the ticket table follows them with weak listeners (`GroupingMenu`).
+  `settings.json` (see the KARV-76 decision). The menu follows them with weak listeners (`GroupingMenu`); the ticket
+  table listens only while it is shown (`LiveViews.whileShown`), so a controller left behind after a switch to the
+  hall view no longer rebuilds or reports a selection.
 
 ## Data flow
 

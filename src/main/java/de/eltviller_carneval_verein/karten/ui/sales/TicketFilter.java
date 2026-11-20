@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -93,7 +94,8 @@ public final class TicketFilter {
 		for (Map.Entry<Object, BookingDTO> entry : firsts.entrySet()) {
 			values.add(new FilterValue(entry.getKey(), column.textOf(entry.getKey(), entry.getValue()), counts.get(entry.getKey())));
 		}
-		values.sort((a, b) -> column.keyOrder(order).compare(a.key(), b.key()));
+		Comparator<Object> keyOrder = column.keyOrder(order);
+		values.sort((a, b) -> keyOrder.compare(a.key(), b.key()));
 		return values;
 	}
 

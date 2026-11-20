@@ -52,7 +52,6 @@ import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ChangeListener;
-import javafx.beans.value.WeakChangeListener;
 import javafx.event.EventType;
 import javafx.fxml.FXML;
 import javafx.scene.Node;
@@ -107,17 +106,10 @@ public class TicketTableController implements ContentController, SalesStateAware
 	/** Gruppierung und Gruppenordnung aus {@link DisplayPreferences} (Menü "Gruppieren"), Stand der letzten Änderung. */
 	private List<TicketColumn> grouping = List.of();
 	private GroupOrder groupOrder = GroupOrder.VALUE;
-	// Schwach angemeldet (KARV-76): Der Controller entsteht bei jedem Wechsel zur Saalansicht und zurück neu, die
-	// Einstellungen leben mit der App. Die Felder halten die Listener, solange die Tabelle lebt. Der Neuaufbau wartet wie
-	// jeder andere, bis keine Zelle mehr bearbeitet wird; erst er übernimmt die Gruppierung in die Tabelle.
-	private final ChangeListener<List<TicketColumn>> groupingChanges = (obs, before, now) -> {
-		grouping = now;
-		this.edits.requestRebuild();
-	};
-	private final ChangeListener<GroupOrder> groupOrderChanges = (obs, before, now) -> {
-		groupOrder = now == null ? GroupOrder.VALUE : now;
-		this.edits.requestRebuild();
-	};
+	// Angemeldet nur, solange die Tabelle zu sehen ist (bindGrouping). Der Neuaufbau wartet wie jeder andere, bis
+	// keine Zelle mehr bearbeitet wird; erst er übernimmt die Gruppierung in die Tabelle.
+	private final ChangeListener<List<TicketColumn>> groupingChanges = (obs, before, now) -> followGrouping();
+	private final ChangeListener<GroupOrder> groupOrderChanges = (obs, before, now) -> followGrouping();
 	private TicketTreeTable treeTable;
 	private TicketEdits edits;
 	private SalesViewState salesState;
@@ -300,14 +292,37 @@ public class TicketTableController implements ContentController, SalesStateAware
 	 * Gruppierung und Gruppenordnung kommen aus {@link DisplayPreferences} (beim Start nur mit "Anzeige beim Start
 	 * wiederherstellen") und gelten so auch nach dem Wechsel zur Saalansicht und zurück. Das Menü "Gruppieren" ändert sie
 	 * dort; jede Änderung baut die Tabelle neu auf.
+	 *
+	 * <p>Die Listener hängen nur, solange die Tabelle zu sehen ist ({@link LiveViews#whileShown}): Der Controller entsteht
+	 * bei jedem Wechsel zur Saalansicht und zurück neu, die Einstellungen leben mit der App. Ein abgehängter Controller baut
+	 * so nicht mehr neu auf und meldet keine alte Auswahl ({@link #setSalesState}). Beim Anmelden holt er nach, was sich
+	 * geändert hat, während die Tabelle nicht zu sehen war.
 	 */
 	private void bindGrouping() {
 		DisplayPreferences preferences = DisplayPreferences.instance();
 		grouping = preferences.ticketGroupingProperty().get();
 		groupOrder = Objects.requireNonNullElse(preferences.ticketGroupOrderProperty().get(), GroupOrder.VALUE);
-		preferences.ticketGroupingProperty().addListener(new WeakChangeListener<>(groupingChanges));
-		preferences.ticketGroupOrderProperty().addListener(new WeakChangeListener<>(groupOrderChanges));
+		LiveViews.whileShown(seatTable, () -> {
+			preferences.ticketGroupingProperty().addListener(groupingChanges);
+			preferences.ticketGroupOrderProperty().addListener(groupOrderChanges);
+			followGrouping();
+		}, () -> {
+			preferences.ticketGroupingProperty().removeListener(groupingChanges);
+			preferences.ticketGroupOrderProperty().removeListener(groupOrderChanges);
+		});
 		new GroupingMenu(btnGrouping, lblGrouping, preferences.ticketGroupingProperty(), preferences.ticketGroupOrderProperty());
+	}
+
+	/** Übernimmt Gruppierung und Gruppenordnung aus den Einstellungen; weicht eine ab, wird neu aufgebaut. */
+	private void followGrouping() {
+		DisplayPreferences preferences = DisplayPreferences.instance();
+		List<TicketColumn> nowGrouping = preferences.ticketGroupingProperty().get();
+		GroupOrder nowOrder = Objects.requireNonNullElse(preferences.ticketGroupOrderProperty().get(), GroupOrder.VALUE);
+		if (!nowGrouping.equals(grouping) || nowOrder != groupOrder) {
+			grouping = nowGrouping;
+			groupOrder = nowOrder;
+			edits.requestRebuild();
+		}
 	}
 
 	/**
