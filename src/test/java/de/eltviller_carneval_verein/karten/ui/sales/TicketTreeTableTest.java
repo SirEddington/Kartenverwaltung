@@ -953,6 +953,37 @@ class TicketTreeTableTest {
 		assertEquals(List.of(), started);
 	}
 
+	/**
+	 * Wurde der zweite Druck verworfen, wird es auch sein Loslassen, selbst nach einem Ziehen (Code-Review des Nachtrags):
+	 * Weder die Tabelle noch {@code TableInput} bekommen ein Loslassen ohne den Druck davor.
+	 */
+	@Test
+	void loslassenNachVerworfenemDruckWirdAuchNachZiehenVerworfen() throws Exception {
+		show();
+		List<Booking> started = recordEditStarts();
+		List<MouseEvent> releases = new ArrayList<>();
+		run(() -> table.addEventFilter(MouseEvent.MOUSE_RELEASED, releases::add));
+
+		double[] at = centerOf(1, FIRST);
+		mouse(MouseEvent.MOUSE_PRESSED, 1, FIRST, at, 1);
+		mouse(MouseEvent.MOUSE_RELEASED, 1, FIRST, at, 1);
+		m1.setLastName("Zimmer");
+		rebuild();
+		assertSame(m2, bookingInRow(1));
+		releases.clear();
+		mouse(MouseEvent.MOUSE_PRESSED, 1, FIRST, at, 2);
+		double[] moved = centerOf(3, FIRST);
+		run(() -> {
+			Node target = cell(3, FIRST);
+			javafx.event.Event.fireEvent(target, new MouseEvent(this, target, MouseEvent.MOUSE_RELEASED, moved[0], moved[1], moved[0], moved[1],
+					MouseButton.PRIMARY, 2, false, false, false, false, false, false, false, false, false, false, new PickResult(target, moved[0], moved[1])));
+		});
+
+		assertEquals(List.of(), releases, "das Loslassen erreicht die Tabelle nicht");
+		assertEquals(List.of(), started);
+		assertEquals(List.of(m1), selected(), "die Auswahl bleibt");
+	}
+
 	/** Ohne Neuaufbau zwischen den Klicks klappt ein Doppelklick auf einen Gruppenkopf wie bisher. */
 	@Test
 	void doppelklickAufGruppenkopfKlappt() throws Exception {

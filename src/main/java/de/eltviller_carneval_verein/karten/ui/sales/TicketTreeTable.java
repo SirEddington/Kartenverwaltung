@@ -93,6 +93,8 @@ public final class TicketTreeTable {
 	private Press press;
 	/** Die Zeile des ersten Klicks eines Doppelklicks ({@link TicketTreeBuilder#keyOf}), {@code null} außerhalb der Zeilen. */
 	private Object clickKey;
+	/** Die Sperre hat den letzten Druck verworfen; sein Loslassen wird es auch ({@link #guardMultiClick}). */
+	private boolean pressSwallowed;
 	/** Eine fremde Änderung am Auswahlmodell wartet auf ihre Übernahme ({@link #adoptModel}). */
 	private boolean adoptPending;
 	private Press adoptDrag;
@@ -675,7 +677,8 @@ public final class TicketTreeTable {
 	 * Systems aber länger als deren Nachlaufzeit, kann er zwischen die Klicks fallen und eine andere Buchung oder einen
 	 * Gruppenkopf unter den Zeiger schieben. Trifft ein Druck oder Loslassen mit Klickzahl ab 2 eine andere Zeile (andere
 	 * Buchung bzw. anderer Gruppenpfad, {@link TicketTreeBuilder#keyOf}) als der erste Klick, wird es verworfen: kein
-	 * Bearbeiten, kein Auf- oder Zuklappen, keine Änderung der Auswahl.
+	 * Bearbeiten, kein Auf- oder Zuklappen, keine Änderung der Auswahl. Das Loslassen eines verworfenen Drucks wird
+	 * ebenfalls verworfen, auch nach einem Ziehen. Nicht, solange eine Zelle bearbeitet wird: Der Druck beendet sie.
 	 *
 	 * <p>Die Filter hängen am Elternknoten {@code area} der Tabelle wie das Einfrieren bei offenem Dialog: Was dort
 	 * verbraucht wird, erreicht weder die Filter dieser Klasse noch {@code TableInput} noch das Verhalten von JavaFX (auf
@@ -694,15 +697,27 @@ public final class TicketTreeTable {
 		TreeTableRow<?> row = (TreeTableRow<?>) TableGestures.rowOf(event.getTarget(), TreeTableRow.class::isInstance);
 		Object key = row == null || row.isEmpty() ? null : tree.keyOf(row.getTreeItem());
 		boolean released = event.getEventType() == MouseEvent.MOUSE_RELEASED;
+		if (released && pressSwallowed) {
+			// Sein Druck wurde verworfen: Auch nach einem Ziehen bekommt niemand ein Loslassen ohne den Druck davor
+			pressSwallowed = false;
+			event.consume();
+			return;
+		}
+		if (!released) {
+			pressSwallowed = false;
+		}
 		if (event.getClickCount() < 2) {
 			if (!released) {
 				clickKey = key;
 			}
-		} else if (!Objects.equals(key, clickKey) && (!released || event.isStillSincePress())) {
-			// Ein Loslassen nach einem Ziehen ist kein Klick: Es beendet das Ziehen und bleibt
+		} else if (!Objects.equals(key, clickKey) && table.getEditingCell() == null && (!released || event.isStillSincePress())) {
+			// Nicht während einer Bearbeitung: Der Druck beendet sie. Ein Loslassen nach einem Ziehen ist kein Klick: Es
+			// beendet das Ziehen und bleibt
 			event.consume();
 			if (released) {
 				finishPress(); // der Druck davor kam durch; ohne Loslassen bliebe er offen
+			} else {
+				pressSwallowed = true;
 			}
 		}
 	}
