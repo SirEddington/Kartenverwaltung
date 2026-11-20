@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 /** Eine Zeile der Kartentabelle: eine Buchung oder eine Gruppe von Buchungen. */
 public sealed interface TicketRow permits TicketRow.BookingRow, TicketRow.GroupRow {
@@ -19,10 +20,13 @@ public sealed interface TicketRow permits TicketRow.BookingRow, TicketRow.GroupR
 
 		/** Die Überschriften der Spalten, mit Komma verbunden. */
 		public String columnsText() {
-			return columns.stream().map(TicketColumn::header).collect(java.util.stream.Collectors.joining(", "));
+			return columns.stream().map(TicketColumn::header).collect(Collectors.joining(", "));
 		}
 
-		/** Der Schlüssel dieser Gruppe in ihrer Spalte, der letzte des Pfads. */
+		/**
+		 * Der Schlüssel dieser Gruppe in ihrer Spalte, der letzte des Pfads; auf einer Ebene (nicht verschachtelt) die
+		 * Liste der Spaltenschlüssel.
+		 */
 		public Object key() {
 			return path.get(path.size() - 1);
 		}

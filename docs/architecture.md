@@ -298,7 +298,8 @@ Notable 1.2 pieces:
   feeds it through scene filters registered with `LiveViews.whileShown`. Thus the second click of a double click
   finds the row of the first click (the first press commits the edit and wants a rebuild). For longer system
   double-click times a guard remains: a press or release with click count 2 or more on another row (booking or group
-  path) than the first click is consumed (`TicketTreeTable.installMultiClickGuard`, on the parent node of the table).
+  path) than the first click is consumed (`TicketTreeTable.installMultiClickGuard`, on the parent node of the table; a release after a drag is
+  let through).
   With the option "Gruppen verschachteln" off, `TicketGrouping` builds one level whose groups are the combinations
   of keys (path of length 1, `GroupRow` carries the list of columns); with a single grouped column the option has no
   effect. A group row draws its header (column grey, value bold, "n Karten" grey) as one node in `TicketTreeRow`, and

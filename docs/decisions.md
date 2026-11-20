@@ -761,7 +761,7 @@ the ticket went from 1.1.1 to 1.2.
   fixed value. The same wait holds back removing cancelled bookings without a seat. Cancelling, the storno from
   `NameRemovalDialog`, "Platz zuweisen…" and `loadBookings` still rebuild at once. Because the system double-click
   time can be longer, `TicketTreeTable` also consumes a press or release with click count 2 or more on another row
-  (booking or group path) than the first click. It sits on the parent node of the table, because filters on the
+  (booking or group path) than the first click (a release after a drag is let through). It sits on the parent node of the table, because filters on the
   table itself kept running after a consume. The listeners and scene filters of the controller exist only while the
   table is shown, so a controller left behind reports no selection to `SalesViewState`.
 - **Grouping order as chips, "Gruppen verschachteln", expand/collapse all (hand test, 20.11.2026):** The order of

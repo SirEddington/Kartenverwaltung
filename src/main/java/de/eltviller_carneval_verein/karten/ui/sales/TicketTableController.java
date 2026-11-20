@@ -238,7 +238,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 
 		// 2. Die Baumtabelle (Auswahl als Menge, Tasten, Sortierung) vor TableInput: Ihre Filter laufen vor dessen
 		treeTable = new TicketTreeTable(seatTable, colTree);
-		gesture = new MouseGesture(System::currentTimeMillis, TicketTableController::later, () -> edits.idle());
+		gesture = new MouseGesture(() -> System.nanoTime() / 1_000_000, TicketTableController::later, () -> edits.idle());
 		edits = new TicketEdits(() -> seatTable.getEditingCell() != null, gesture::active, this::rebuild, this::removeCancelled);
 		treeTable.setRebuild(edits::requestRebuild);
 		treeTable.setFrozen(this::isDialogOpen);
@@ -883,7 +883,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		String query = searchQuery;
 		List<BookingDTO> shown = edits.visible(allRows, dto -> BookingSearch.matches(dto.getBooking(), query) && columnFilter.passes(dto));
 		treeTable.setGrouping(grouping, groupingNested);
-		treeTable.show(TicketGrouping.group(shown, grouping, groupOrder, groupingNested,treeTable.sortComparator(), shownPresentations()));
+		treeTable.show(TicketGrouping.group(shown, grouping, groupOrder, groupingNested, treeTable.sortComparator(), shownPresentations()));
 		if (salesState != null) {
 			salesState.showSearchHits(this, treeTable.allBookings());
 		}

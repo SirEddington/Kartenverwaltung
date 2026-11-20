@@ -30,7 +30,7 @@ final class MouseGesture {
 	private int generation;
 
 	/**
-	 * @param clockMillis die Uhr in Millisekunden (in der App {@code System::currentTimeMillis})
+	 * @param clockMillis die Uhr in Millisekunden, muss monoton sein (in der App {@code System.nanoTime() / 1_000_000})
 	 * @param schedule    führt die Aufgabe nach der Wartezeit in Millisekunden aus, auf dem FX-Thread
 	 * @param ended       läuft genau einmal je beendeter Bedienung
 	 */

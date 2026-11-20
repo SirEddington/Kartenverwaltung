@@ -7,11 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -19,8 +14,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
-
-import javax.imageio.ImageIO;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -39,8 +32,6 @@ import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableRow;
 import javafx.scene.control.TreeTableView;
-import javafx.scene.image.PixelFormat;
-import javafx.scene.image.WritableImage;
 import javafx.scene.layout.BackgroundFill;
 import javafx.scene.layout.BorderStroke;
 import javafx.scene.layout.Region;
@@ -59,8 +50,6 @@ class TicketTreeRowTest {
 
 	private static final String STYLESHEET = TicketTreeRowTest.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css")
 			.toExternalForm();
-	/** Hier legt der Test Bilder zur Kontrolle ab, wenn es den Ordner gibt (nur auf dem Rechner des Entwicklers). */
-	private static final Path PICTURES = Path.of(".local", "tmp");
 
 	/** Spalten der Tabelle: 0 Pfeil und Einrückung, 1 Nachname, 2 Vorname. */
 	private static final int TREE = 0;
@@ -459,33 +448,5 @@ class TicketTreeRowTest {
 		assertTrue((boolean) result[4], "die gewählte Buchungszeile behält ihn");
 		assertEquals(Color.web("#2C2F88"), result[5], "der Text in Blau wie in einer gewählten Zeile");
 		assertEquals(Color.web("#2C2F88"), result[6]);
-	}
-
-	/** Legt Bilder des Kopfs zur Kontrolle ab, ungewählt und gewählt; nur wenn es den Ordner gibt. */
-	@Test
-	void bildZurKontrolle() throws Exception {
-		if (!Files.isDirectory(PICTURES)) {
-			return;
-		}
-		grouping = List.of(TicketColumn.LAST_NAME, TicketColumn.FIRST_NAME);
-		show();
-		save("task3-kopf.png");
-		run(() -> tree.restoreSelection(List.of(h1, h2, h3, h4, w1, w2)));
-		save("task3-kopf-gewaehlt.png");
-	}
-
-	private void save(String name) throws Exception {
-		WritableImage image = onFx(() -> table.snapshot(null, null));
-		int width = (int) image.getWidth();
-		int height = (int) image.getHeight();
-		int[] pixels = new int[width * height];
-		image.getPixelReader().getPixels(0, 0, width, height, PixelFormat.getIntArgbInstance(), pixels, 0, width);
-		BufferedImage picture = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-		picture.setRGB(0, 0, width, height, pixels, 0, width);
-		try {
-			ImageIO.write(picture, "png", PICTURES.resolve(name).toFile());
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
 	}
 }
