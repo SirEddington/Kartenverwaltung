@@ -3,7 +3,13 @@
 ## 1.1.2
 
 ### Behoben
-- Fehlerbehebungen für Version 1.1.1.
+- Verkaufen zwei Kassen denselben Platz, bevor der Abgleich den ersten Verkauf gebracht hat,
+  bleiben jetzt immer beide Buchungen erhalten: Eine behält den Platz, die andere steht unter
+  „Ohne Platz“, und ihre Kasse bekommt einen Hinweis. Bisher verschwand die zweite Buchung ohne
+  Hinweis, wenn der Platz vorher schon einmal gebucht war, etwa weil beide Kassen ihn storniert und
+  neu verkauft haben oder weil er noch einen alten Kommentar trug.
+- Bitte alle Kassen am gemeinsamen Ordner aktualisieren: Eine Kasse mit einer älteren Version kann
+  eine solche Buchung weiterhin verlieren.
 
 ## 1.1.1
 

@@ -1505,6 +1505,183 @@ class BookingPolicyTest {
 		assertEquals(s1, parked.marks().movedFrom());
 	}
 
+	/**
+	 * Die Welt zu KARV-201: s1 trägt x, die andere Seite hat x durch t ersetzt (gilt), diese durch m (verloren). Mit der
+	 * Basis x gibt es eine Spur, und beide Seiten haben x storniert (E1).
+	 */
+	private static final class BothReplaced {
+		final TrailFixture world = new TrailFixture();
+		final UnitKey s1 = TrailFixture.seat("s1");
+		final UnitKey parkedUnit = TrailFixture.unassigned("m");
+		final Version base = world.claim(s1, world.version(TrailFixture.THIRD, null, TrailFixture.booking("x", "s1")));
+		final Version theirs;
+		final Version mine;
+
+		BothReplaced(boolean theirsLocked, boolean mineLocked) {
+			theirs = world.claim(s1, world.version(TrailFixture.OTHER, base, TrailFixture.booking("t", "s1"))
+					.withNewerContent(theirsLocked));
+			mine = world.beside(s1, world.version(TrailFixture.OWN, base, TrailFixture.booking("m", "s1"))
+					.withNewerContent(mineLocked));
+		}
+
+		Resolution resolve(Map<UnitKey, Sibling> siblings) {
+			return new BookingPolicy().resolve(world.input(s1, base, List.of(mine), siblings));
+		}
+	}
+
+	/** KARV-201: Zwei neue Verkäufe auf dem Sitz sind auch mit Spur ein Doppelverkauf; "Meine" weicht nach {@code _m}. */
+	@Test
+	void bothReplacedWithDifferentBookingsIsADoubleSaleWithATrail() {
+		BothReplaced given = new BothReplaced(false, false);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertFalse(resolution.deleted());
+		assertEquals(given.theirs.payload(), resolution.payload());
+		assertEquals(1, resolution.extra().size(), resolution.extra().toString());
+		Change parked = extraAt(resolution, given.parkedUnit);
+		assertEquals(BookingPolicy.withoutPlace(given.mine.payload()), parked.payload());
+		assertEquals(List.of(), parked.parents());
+		assertEquals(given.s1, parked.marks().movedFrom());
+		ConflictNote note = resolution.note();
+		assertEquals(Kind.DOUBLE_SALE, note.kind());
+		assertEquals(TrailFixture.OWN, note.affected());
+		assertEquals(party(given.theirs), note.other());
+		assertEquals(given.parkedUnit, note.moved());
+		assertEquals(given.mine.id(), note.dropped());
+	}
+
+	/** KARV-201: Lebt {@code _m} schon, entsteht keine zweite Fassung; der Vermerk bleibt. */
+	@Test
+	void bothReplacedWithATrailAndAnAliveUnassignedCopyCreatesNoSecondUnit() {
+		BothReplaced given = new BothReplaced(false, false);
+		Version alive = version(OTHER, TrailFixture.withoutPlace("m", b -> {
+		}));
+
+		Resolution resolution = given.resolve(siblings(Map.entry(given.parkedUnit, alive)));
+
+		assertEquals(given.theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
+		assertEquals(given.parkedUnit, resolution.note().moved());
+	}
+
+	/** KARV-201: Ist {@code _m} gelöscht, lebt sie als Nachfolger der Löschung wieder auf. */
+	@Test
+	void bothReplacedWithATrailRevivesADeletedUnassignedUnit() {
+		BothReplaced given = new BothReplaced(false, false);
+		Version gone = deletion(OTHER);
+
+		Resolution resolution = given.resolve(siblings(Map.entry(given.parkedUnit, gone)));
+
+		Change parked = extraAt(resolution, given.parkedUnit);
+		assertEquals(List.of(gone.id()), parked.parents());
+		assertFalse(parked.deleted());
+		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
+	}
+
+	/** KARV-201, K1: Ein inhaltlich zu neues "Deren" bleibt unangetastet, "Meine" weicht trotzdem aus. */
+	@Test
+	void bothReplacedWithATrailAndLockedTheirsIsADoubleSale() {
+		BothReplaced given = new BothReplaced(true, false);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertSame(given.theirs.payload(), resolution.payload());
+		assertEquals(given.s1, extraAt(resolution, given.parkedUnit).marks().movedFrom());
+		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
+	}
+
+	/** KARV-201: Eine unlesbare "Meine" lässt sich nicht parken; "Deren" bleibt, der Vermerk UNMERGED sagt es. */
+	@Test
+	void bothReplacedWithATrailAndUnreadableMineIsUnmerged() {
+		BothReplaced given = new BothReplaced(false, true);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertEquals(given.theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertEquals(Kind.UNMERGED, resolution.note().kind());
+		assertEquals(TrailFixture.OWN, resolution.note().affected());
+		assertEquals(given.mine.id(), resolution.note().dropped());
+	}
+
+	/**
+	 * KARV-201: Die verlorene Strecke ist eine Auflösung, die den Sitz der anderen Seite ließ (a) und b parkte; die andere
+	 * Seite hat a inzwischen storniert und den Sitz an a2 verkauft. Die Auflösung trägt a nur als deren Inhalt: kein
+	 * Verkauf dieses Rechners, a lebt nicht "ohne Platz" wieder auf.
+	 */
+	@Test
+	void lostResolutionCarryingTheirCancelledBookingIsNoSale() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		Version base = world.claim(s1, world.version(TrailFixture.THIRD, null, TrailFixture.booking("x", "s1")));
+		Version sold = world.claim(s1, world.version(TrailFixture.OTHER, base, TrailFixture.booking("a", "s1")));
+		Version lost = world.beside(s1, world.version(TrailFixture.OWN, base, TrailFixture.booking("b", "s1")));
+		Version merged = world.beside(s1,
+				world.merge(TrailFixture.OWN, "save-r", List.of(sold, lost), TrailFixture.booking("a", "s1")));
+		Version resold = world.claim(s1, world.version(TrailFixture.OTHER, sold, TrailFixture.booking("a2", "s1")));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, base, List.of(merged)));
+
+		assertEquals(resold.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertNull(resolution.note());
+	}
+
+	/**
+	 * KARV-201: Die verlorene Strecke ist eine Auflösung, die den eigenen Verkauf m auf den stornierten Sitz setzte; die
+	 * andere Seite hat ihn inzwischen an a2 verkauft. m ist ein Verkauf dieses Rechners: Doppelverkauf.
+	 */
+	@Test
+	void lostResolutionCarryingTheOwnSaleIsADoubleSale() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		Version base = world.claim(s1, world.version(TrailFixture.THIRD, null, TrailFixture.booking("x", "s1")));
+		Version cancelled = world.claim(s1, world.version(TrailFixture.OTHER, base, null));
+		Version sale = world.beside(s1, world.version(TrailFixture.OWN, base, TrailFixture.booking("m", "s1")));
+		Version merged = world.beside(s1,
+				world.merge(TrailFixture.OWN, "save-r", List.of(cancelled, sale), TrailFixture.booking("m", "s1")));
+		Version resold = world.claim(s1, world.version(TrailFixture.OTHER, cancelled, TrailFixture.booking("a2", "s1")));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, base, List.of(merged)));
+
+		assertEquals(resold.payload(), resolution.payload());
+		assertEquals(s1, extraAt(resolution, TrailFixture.unassigned("m")).marks().movedFrom());
+		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
+		assertEquals(merged.id(), resolution.note().dropped());
+	}
+
+	/**
+	 * KARV-201 neben einer Zeile der Tabelle: Die andere Seite zieht x nach s3 und verkauft s1 an t, diese storniert x und
+	 * verkauft s1 an m. E3 gilt unverändert (x fällt an s3 weg, Vermerk DELETE_WINS an die andere Seite), dazu weicht m
+	 * nach {@code _m} aus. Eine Version trägt nur einen Vermerk: Der der Tabelle bleibt, der Doppelverkauf hat keinen.
+	 */
+	@Test
+	void doubleSaleNextToACancellationAgainstAMoveKeepsTheRowOfTheTable() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		UnitKey s3 = TrailFixture.seat("s3");
+		Version base = world.claim(s1, world.version(TrailFixture.THIRD, null, TrailFixture.booking("x", "s1")));
+		Version theirs = world.claim(s1, world.version(TrailFixture.OTHER, "save-b", base, TrailFixture.booking("t", "s1"),
+				TrailFixture.to(s3)));
+		Version arrived = world.claim(s3, world.version(TrailFixture.OTHER, "save-b", null, TrailFixture.booking("x", "s3"),
+				TrailFixture.from(s1)));
+		Version mine = world.beside(s1, world.version(TrailFixture.OWN, base, TrailFixture.booking("m", "s1")));
+
+		Resolution resolution = new BookingPolicy()
+				.resolve(world.input(s1, base, List.of(mine), siblings(Map.entry(s3, arrived))));
+
+		assertEquals(theirs.payload(), resolution.payload());
+		assertEquals(2, resolution.extra().size(), resolution.extra().toString());
+		assertEquals(deletionOf(s3, arrived), extraAt(resolution, s3));
+		Change parked = extraAt(resolution, TrailFixture.unassigned("m"));
+		assertEquals(BookingPolicy.withoutPlace(mine.payload()), parked.payload());
+		assertEquals(s1, parked.marks().movedFrom());
+		assertEquals(Kind.DELETE_WINS, resolution.note().kind());
+		assertEquals(TrailFixture.OTHER, resolution.note().affected());
+	}
+
 	/** E11: Bs Umzug von s3 nach s1 scheitert an t, die andere Seite ist unberührt; m parkt mit Quelle s3. */
 	@Test
 	void aloneFailedParksWithMovedFromTheSource() {
