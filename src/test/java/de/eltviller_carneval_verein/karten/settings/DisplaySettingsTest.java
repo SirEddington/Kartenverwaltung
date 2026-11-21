@@ -9,6 +9,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -35,6 +36,62 @@ class DisplaySettingsTest {
 		assertEquals("ABOVE", display.getSelectionHintPlacement());
 		assertTrue(display.isSelectionHintAvoidEdges());
 		assertEquals("AUTO", display.getSummaryPlacement());
+		assertTrue(display.getTicketGrouping().isEmpty());
+		assertEquals("VALUE", display.getTicketGroupOrder());
+		assertTrue(display.isTicketGroupingNested());
+	}
+
+	@Test
+	void ticketGroupingNestedDefaultsToTrueAndSurvivesSaveAndReload(@TempDir File dir) throws IOException {
+		write(dir, "{\"display\": {\"restoreAtStart\": true}}");
+		assertTrue(new SettingsStore(dir).current().getDisplay().isTicketGroupingNested(), "fehlendes Feld: verschachtelt");
+
+		SettingsStore store = new SettingsStore(dir);
+		store.current().getDisplay().setTicketGroupingNested(false);
+		store.save();
+
+		assertFalse(new SettingsStore(dir).current().getDisplay().isTicketGroupingNested());
+	}
+
+	@Test
+	void settingsWithoutTheTicketGroupingAreUngrouped(@TempDir File dir) throws IOException {
+		// KARV-193: Die Gruppierung kam nach der Platzierung; ein Block ohne sie lässt die Kartentabelle ungruppiert
+		write(dir, "{\"display\": {\"restoreAtStart\": true, \"summaryPlacement\": \"LEFT\"}}");
+
+		DisplaySettings display = new SettingsStore(dir).current().getDisplay();
+
+		assertTrue(display.getTicketGrouping().isEmpty());
+		assertEquals("VALUE", display.getTicketGroupOrder());
+	}
+
+	@Test
+	void ticketGroupingNullGetsTheDefaults(@TempDir File dir) throws IOException {
+		write(dir, "{\"display\": {\"ticketGrouping\": null, \"ticketGroupOrder\": null}}");
+		DisplaySettings display = new SettingsStore(dir).current().getDisplay();
+		assertTrue(display.getTicketGrouping().isEmpty());
+		assertEquals("VALUE", display.getTicketGroupOrder());
+
+		DisplaySettings bean = new DisplaySettings();
+		bean.setTicketGrouping(List.of("LAST_NAME"));
+		bean.setTicketGrouping(null);
+		assertTrue(bean.getTicketGrouping().isEmpty());
+		bean.setTicketGroupOrder("SIZE");
+		bean.setTicketGroupOrder(null);
+		assertEquals(DisplaySettings.DEFAULT_TICKET_GROUP_ORDER, bean.getTicketGroupOrder());
+		assertEquals("VALUE", DisplaySettings.DEFAULT_TICKET_GROUP_ORDER);
+	}
+
+	@Test
+	void ticketGroupingSurvivesSaveAndReload(@TempDir File dir) {
+		SettingsStore store = new SettingsStore(dir);
+		store.current().getDisplay().setTicketGrouping(List.of("PRESENTATION", "LAST_NAME"));
+		store.current().getDisplay().setTicketGroupOrder("SIZE");
+		store.save();
+
+		DisplaySettings reloaded = new SettingsStore(dir).current().getDisplay();
+
+		assertEquals(List.of("PRESENTATION", "LAST_NAME"), reloaded.getTicketGrouping());
+		assertEquals("SIZE", reloaded.getTicketGroupOrder());
 	}
 
 	@Test

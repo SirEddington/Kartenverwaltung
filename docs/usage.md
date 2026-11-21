@@ -100,6 +100,66 @@ Selling:
    Reservation, payment and collection dates and the paid amount are filled in automatically.
 4. **"Stornieren"** cancels the selected bookings after a confirmation.
 
+**Grouping the table (*Gruppieren*):** the button **"Gruppieren"** above the table lists every column with a tick.
+Ticking a column groups the bookings by it, as the next level below the columns ticked before; unticking takes it
+out again. The menu stays open after a click. Below the ticks, **"Gruppen nach Wert ordnen"** (the default) sorts
+the groups of each level by the order of their column, **"Gruppen nach Größe ordnen"** puts the largest group first,
+and **"Gruppierung aufheben"** removes the grouping. Next to the button, "Gruppiert nach:" is followed by one chip per
+grouped column, in the order of the levels and separated by "›" (e.g. "Nachname › Vorname"). Grouping also works in
+display mode, it changes no data.
+
+- **Chips:** drag a chip with the left mouse button to another place in the bar to change the order of the levels; a
+  marker shows where it lands (before the chip under the pointer when the pointer is in its left half, otherwise
+  after it). Releasing outside the chips or pressing **Esc** leaves the order as it was. The "×" on a chip takes the
+  column out of the grouping. With the keyboard, **Tab** focuses the chips, **Ctrl+Left** / **Ctrl+Right** move the
+  focused chip by one place and **Delete** takes it out. A new order is a different grouping, so the groups you
+  closed are forgotten.
+- **Open or close all groups:** the buttons **"Alle aufklappen"** and **"Alle zuklappen"** on the right of the bar are
+  shown only while the table is grouped. The context menu of a group header has the same two entries (not on a
+  booking), and **Ctrl+Plus** / **Ctrl+Minus** (main keyboard or number pad) do the same while the table has the
+  keyboard focus and no cell is being edited. They work in display mode too and do nothing while the sales dialog is
+  open. Closing all groups also closes the inner ones; of the selection only the bookings of top-level groups that were
+  selected as a whole remain.
+- Each group has a header with three parts on one line: the column in grey, the value in bold and the number as
+  "n Karten" (or "1 Karte") in grey, e.g. "Nachname   **Müller**   4 Karten", indented by level. The whole group row
+  has its own background and no column lines. A booking without a value in the column falls into the group "(leer)",
+  which always comes last. If the row is too narrow, the grey column name is shortened first (and dropped), then the
+  value; the number always stays.
+- **"Gruppen verschachteln"** in the *Anzeige* menu of the sales view (ticked by default): unticked, several grouped
+  columns do not form levels but one level with one group per combination of values that occurs, e.g. "Nachname,
+  Vorname   **Müller, Anna**   2 Karten". The order of the chips is the order of the parts in the header and of the
+  groups. With only one grouped column the option has no effect. Switching it with two or more grouped columns is a
+  different grouping, so the closed groups are forgotten.
+- The arrow at the left (or **Left** / **Right** on a group header, **+** / **-** / **\*** on the number pad) opens and
+  closes a group; double-clicking the header does the same. Groups are open by default; which ones you closed is
+  remembered until you leave the table, not beyond that. Groups that appear later (after a filter or a change at
+  another workstation) are open.
+- **Clicking a group header selects the whole group**, also a closed one, and a selected group counts as all its
+  bookings for "n Karten verkaufen", "Stornieren", the customer display, the hall view and the note at the pointer.
+  Because a closed group hides what it contains, check the number in the context menu before you sell or cancel.
+  Closing a group keeps its selection if all of its bookings were selected and drops the selected ones otherwise.
+- Clicking a column heading sorts the bookings within the lowest group as before (several columns with Shift); the
+  groups themselves follow only "Gruppen nach Wert/Größe ordnen". **Tab** skips group headers and closed groups.
+- Without grouping the table looks and works as before. A booking you changed moves to its new place (group and
+  sort position) once the editing has ended, and stays visible after that even if it no longer matches the search or
+  a column filter, until you change the search text or the filter or show another presentation.
+- While you hold the mouse button in the table, and for half a second after you let go, the table does not rebuild
+  itself (after a change, search, filter or sort). So the second click of a double-click lands on the same row as the
+  first one and edits that booking. If the system double-click time is set longer and the table changes in between,
+  the second click on another row is ignored.
+- With *Einstellungen → Anzeige → "Anzeige beim Start wiederherstellen"* the grouping, the group order and "Gruppen
+  verschachteln" are kept for the next start of this workstation; the choice of closed groups and the column filters
+  are not.
+
+**Column filter:** a right-click on a column heading opens the filter of that column: a search field ("Suchen…"), the
+values with a tick, their text and their number, and the buttons **"Anwenden"**, **"Keine"**, **"Alle"** and **"Alle
+Filter zurücksetzen"**. "Keine" and "Alle" tick or untick the values currently listed; the table only changes with
+"Anwenden", closing the filter any other way discards the ticks. "Alle Filter zurücksetzen" clears the filters of all
+columns at once. A column with an active filter shows a filter symbol in its heading. Group counts, selection and the
+"n Treffer" figure follow the filtered table. The values are merged by the same rule as the groups (upper and lower
+case and surrounding blanks do not matter). The filters apply as long as the table is open and start empty after
+switching to the hall view and back.
+
 **Search** ("Suche") matches every word against first name, last name and comment together, case-insensitive and in
 any order (e.g. `ns wurs` finds "Hans Wurst"). Above the field, **"n Treffer"** counts what the view currently shows
 as a hit — the table rows (after search and column filters) or the seats in the hall view that are not dimmed — also

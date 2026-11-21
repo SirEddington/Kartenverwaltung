@@ -499,14 +499,124 @@
  /* Tabellen haben eine feste Zeilenhöhe (30 px, siehe unten): Ein senkrechter Innenabstand von 6 px ließ den Text 3 px
     über der Mitte sitzen (gemessen: Textmitte 12 statt 15 px) und machte die Zeile höher, sobald eine Zelle mehr als Text
     enthält (z. B. die Zahlungs-ComboBox: 42 statt 30 px). Ohne ihn sitzt der Text mittig. */
- .table-view .table-cell {
+ .table-view .table-cell,
+ .ticket-table .tree-table-cell {
      -fx-padding: 0 8px;
  }
 
  /* Feste Zeilenhöhe: Bisher bestimmten die Checkbox-Zellen mit ihrem Zellenabstand die Höhe (30 px). Ohne ihren Abstand
     (siehe .check-box-table-cell) bliebe es sonst bei 28 px. */
- .table-view .table-row-cell {
+ .table-view .table-row-cell,
+ .ticket-table .tree-table-row-cell {
      -fx-cell-size: 30px;
+ }
+
+ /* Kartentabelle (KARV-193): Eine Gruppenzeile (Pseudoklasse aus TicketTreeRow) hat über die ganze Breite einen eigenen
+    Hintergrund, abgehoben von Buchungszeilen und ihrer Zebrafärbung. Ihre Zellen sind leer und zeigen keine
+    Spaltenlinien, auch gewählt nicht (kein blauer rechter Rand wie bei gewählten Buchungszeilen). */
+ .ticket-table .tree-table-row-cell:group {
+     -fx-background-color: #DDE0F0;
+ }
+
+ .ticket-table .tree-table-row-cell:group:hover {
+     -fx-background-color: #CFD3EA;
+ }
+
+ .ticket-table .tree-table-row-cell:group .tree-table-cell {
+     -fx-border-color: transparent;
+ }
+
+ /* Eine Gruppenzeile steht nie im Auswahlmodell; sind alle ihre Buchungen gewählt, hat sie die Farben einer gewählten
+    Zeile (Pseudoklasse aus TicketTreeTable). */
+ .ticket-table .tree-table-row-cell:group-selected,
+ .ticket-table .tree-table-row-cell:group-selected:hover {
+     -fx-background-color: -fx-ecv-yellow;
+ }
+
+ /* Kopf einer Gruppenzeile (TicketTreeRow): ab dem Pfeil über die Spalten hinweg die Überschrift der Spalte (grau,
+    kleiner), der Wert (fett) und die Zahl (grau). */
+ .ticket-table .tree-table-row-cell > .group-header > .group-header-column {
+     -fx-font-size: 0.85em;
+     -fx-text-fill: #555555;
+ }
+
+ .ticket-table .tree-table-row-cell > .group-header > .group-header-value {
+     -fx-font-weight: bold;
+     -fx-text-fill: -fx-text-dark;
+ }
+
+ .ticket-table .tree-table-row-cell > .group-header > .group-header-count {
+     -fx-text-fill: #555555;
+ }
+
+ .ticket-table .tree-table-row-cell:group-selected > .group-header > .label {
+     -fx-text-fill: -fx-ecv-blue;
+ }
+
+ /* Leiste "Gruppieren" der Kartentabelle (KARV-193, GroupingBar): je Spalte der Gruppierung ein Baustein im Ton der
+    Gruppenzeilen mit einem kleinen "×"; im Fokus ein blauer Rand (als zweite Hintergrundebene, damit er nicht wächst).
+    Die Einfügemarke beim Ziehen ist ein blauer Strich. */
+ .grouping-chip {
+     -fx-background-color: #DDE0F0;
+     -fx-background-radius: 10px;
+     -fx-padding: 2px 2px 2px 10px;
+     -fx-spacing: 2px;
+ }
+
+ .grouping-chip:focused {
+     -fx-background-color: -fx-ecv-blue, #DDE0F0;
+     -fx-background-insets: 0, 2px;
+     -fx-background-radius: 10px, 8px;
+ }
+
+ .grouping-chip > .label {
+     -fx-text-fill: -fx-ecv-blue;
+ }
+
+ .grouping-chip > .button.grouping-chip-remove {
+     -fx-background-color: transparent;
+     -fx-background-radius: 8px;
+     -fx-border-width: 0px;
+     -fx-padding: 0px 5px;
+     -fx-font-weight: normal;
+     -fx-text-fill: #555555;
+ }
+
+ .grouping-chip > .button.grouping-chip-remove:hover {
+     -fx-background-color: #CFD3EA;
+     -fx-text-fill: -fx-ecv-red;
+ }
+
+ .grouping-chip > .button.grouping-chip-remove:pressed {
+     -fx-background-color: #BFC4E2;
+ }
+
+ .grouping-chips > .grouping-separator {
+     -fx-text-fill: #555555;
+ }
+
+ .grouping-drop-marker {
+     -fx-background-color: -fx-ecv-blue;
+ }
+
+ /* Kartentabelle (KARV-193): Filtersymbol im Kopf einer Spalte mit aktivem Filter (ColumnFilterMenu), gelb auf dem
+    blauen Kopf. */
+ .ticket-table .column-header .filter-symbol {
+     -fx-fill: -fx-ecv-yellow;
+ }
+
+ /* Der Spaltenfilter ist ein Kontextmenü mit einem einzigen Eintrag (Suchfeld, Werteliste, Knöpfe). Er färbt sich nicht
+    gelb wie ein Menüeintrag unter der Maus; das Menü liegt in einem eigenen Fenster außerhalb von .ticket-table und
+    trägt deshalb eine eigene Klasse. */
+ .column-filter-menu .custom-menu-item,
+ .column-filter-menu .custom-menu-item:hover,
+ .column-filter-menu .custom-menu-item:focused,
+ .column-filter-menu .custom-menu-item:armed {
+     -fx-background-color: transparent;
+ }
+
+ .column-filter-menu .column-filter {
+     -fx-padding: 4px;
  }
 
  /* Bearbeitete Zelle: Die Zeile bleibt gleich hoch und die Spalte gleich breit. Das Eingabefeld erbt sonst die Maße
@@ -523,7 +633,8 @@
 
  /* Zahlungs-ComboBox in der Zelle: 28 px hoch, damit die Zeile beim Wählen bei 30 px bleibt (ohne die Regel wurde sie
     42 px hoch und der Text der übrigen Zellen rutschte nach oben). */
- .table-view .combo-box-table-cell > .combo-box {
+ .table-view .combo-box-table-cell > .combo-box,
+ .ticket-table .combo-box-tree-table-cell > .combo-box {
      -fx-pref-height: 28px;
      -fx-min-height: 28px;
      -fx-max-height: 28px;
@@ -617,7 +728,8 @@
  }
 
  /* Checkbox in einer Tabellenzelle: mittig, waagerecht und senkrecht (ohne den Zellenabstand saß das Kästchen oben) */
- .table-view .check-box-table-cell {
+ .table-view .check-box-table-cell,
+ .ticket-table .check-box-tree-table-cell {
      -fx-alignment: center;
      -fx-padding: 0;
  }
@@ -972,7 +1084,9 @@
 .table-cell.input-error,
 .tree-table-cell.input-error,
 .table-row-cell:filled .table-cell.input-error,
-.table-row-cell:filled:selected .table-cell.input-error {
+.table-row-cell:filled:selected .table-cell.input-error,
+.ticket-table .tree-table-row-cell:filled .tree-table-cell.input-error,
+.ticket-table .tree-table-row-cell:filled:selected .tree-table-cell.input-error {
     -fx-background-color: -fx-ecv-red;
     -fx-border-color: -fx-ecv-red;
     -fx-border-width: 1.5px;

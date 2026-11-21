@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -12,8 +13,10 @@ import org.junit.jupiter.api.Test;
 import de.eltviller_carneval_verein.karten.settings.AppSettings;
 import de.eltviller_carneval_verein.karten.settings.DisplaySettings;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabels;
+import de.eltviller_carneval_verein.karten.ui.sales.GroupOrder;
 import de.eltviller_carneval_verein.karten.ui.sales.SelectionHintPlacement;
 import de.eltviller_carneval_verein.karten.ui.sales.SummaryPlacement;
+import de.eltviller_carneval_verein.karten.ui.sales.TicketColumn;
 
 class DisplayPreferencesTest {
 
@@ -52,6 +55,96 @@ class DisplayPreferencesTest {
 		assertEquals(SelectionHintPlacement.BELOW, prefs.selectionHintPlacementProperty().get());
 		assertFalse(prefs.selectionHintAvoidEdgesProperty().get());
 		assertEquals(SummaryPlacement.LEFT, prefs.summaryPlacementProperty().get());
+	}
+
+	@Test
+	void ticketGroupingAppliesAtStartWithRestore() {
+		DisplaySettings saved = saved(true);
+		saved.setTicketGrouping(List.of("PRESENTATION", "LAST_NAME"));
+		saved.setTicketGroupOrder("SIZE");
+
+		DisplayPreferences prefs = load(saved);
+
+		assertEquals(List.of(TicketColumn.PRESENTATION, TicketColumn.LAST_NAME), prefs.ticketGroupingProperty().get());
+		assertEquals(GroupOrder.SIZE, prefs.ticketGroupOrderProperty().get());
+		assertEquals(0, writes, "der Start schreibt nichts");
+	}
+
+	@Test
+	void ticketGroupingNestedAppliesAtStartOnlyWithRestoreAndChangesAreWritten() {
+		DisplaySettings saved = saved(true);
+		saved.setTicketGroupingNested(false);
+		DisplayPreferences prefs = load(saved);
+		assertFalse(prefs.ticketGroupingNestedProperty().get());
+		assertEquals(0, writes, "der Start schreibt nichts");
+
+		prefs.ticketGroupingNestedProperty().set(true);
+		assertEquals(1, writes);
+		assertTrue(file.isTicketGroupingNested());
+
+		DisplaySettings ignored = saved(false);
+		ignored.setTicketGroupingNested(false);
+		assertTrue(load(ignored).ticketGroupingNestedProperty().get(), "ohne Wiederherstellen gilt der Standard");
+		assertTrue(DisplayPreferences.unsaved().ticketGroupingNestedProperty().get());
+	}
+
+	@Test
+	void withoutRestoreTheTicketTableIsUngrouped() {
+		DisplaySettings saved = saved(false);
+		saved.setTicketGrouping(List.of("LAST_NAME"));
+		saved.setTicketGroupOrder("SIZE");
+
+		DisplayPreferences prefs = load(saved);
+
+		assertTrue(prefs.ticketGroupingProperty().get().isEmpty());
+		assertEquals(GroupOrder.VALUE, prefs.ticketGroupOrderProperty().get());
+	}
+
+	@Test
+	void changingTheTicketGroupingIsWrittenAndTheListIsUnmodifiable() {
+		DisplayPreferences prefs = load(saved(true));
+		assertTrue(prefs.ticketGroupingProperty().get().isEmpty());
+
+		prefs.ticketGroupingProperty().set(new ArrayList<>(List.of(TicketColumn.CATEGORY, TicketColumn.SEAT)));
+		assertEquals(1, writes);
+		assertEquals(List.of("CATEGORY", "SEAT"), file.getTicketGrouping());
+		assertEquals("BELOW", file.getSelectionHintPlacement(), "die übrige Auswahl wird mitgeschrieben");
+		assertThrows(UnsupportedOperationException.class, () -> prefs.ticketGroupingProperty().get().add(TicketColumn.TABLE));
+
+		prefs.ticketGroupOrderProperty().set(GroupOrder.SIZE);
+		assertEquals("SIZE", file.getTicketGroupOrder());
+		assertEquals(List.of("CATEGORY", "SEAT"), file.getTicketGrouping(), "eine andere Änderung schreibt die Gruppierung mit");
+
+		prefs.ticketGroupingProperty().set(null);
+		assertTrue(file.getTicketGrouping().isEmpty());
+	}
+
+	@Test
+	void unknownAndDuplicateColumnsAreSkippedWhenReading() {
+		DisplaySettings saved = saved(true);
+		saved.setTicketGrouping(List.of("LAST_NAME", "ZUKUNFT", "TABLE", "LAST_NAME", "ZUKUNFT"));
+
+		DisplayPreferences prefs = load(saved);
+
+		assertEquals(List.of(TicketColumn.LAST_NAME, TicketColumn.TABLE), prefs.ticketGroupingProperty().get());
+		prefs.ticketGroupOrderProperty().set(GroupOrder.SIZE);
+		assertEquals(List.of("LAST_NAME", "TABLE"), file.getTicketGrouping(), "unbekannte Namen verschwinden beim nächsten Schreiben");
+	}
+
+	@Test
+	void anUnknownGroupOrderIsValueAndWrittenBackUntilAnotherIsChosen() {
+		DisplaySettings saved = saved(true);
+		saved.setTicketGroupOrder("ALPHABET");
+		DisplayPreferences prefs = load(saved);
+
+		assertEquals(GroupOrder.VALUE, prefs.ticketGroupOrderProperty().get());
+		prefs.selectionHintProperty().set(true);
+		assertEquals("ALPHABET", file.getTicketGroupOrder(), "eine neuere Version findet ihre Wahl wieder");
+
+		prefs.ticketGroupOrderProperty().set(GroupOrder.SIZE);
+		assertEquals("SIZE", file.getTicketGroupOrder());
+		prefs.ticketGroupOrderProperty().set(GroupOrder.VALUE);
+		assertEquals("VALUE", file.getTicketGroupOrder());
 	}
 
 	@Test

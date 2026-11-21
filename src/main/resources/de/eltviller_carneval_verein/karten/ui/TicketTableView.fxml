@@ -1,18 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<?import javafx.geometry.Insets?>
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
 <?import org.controlsfx.control.CheckComboBox?>
 
 
-<VBox spacing="15.0" prefWidth="900.0" prefHeight="600.0"
+<!-- Ohne eigenen Rand: Den Abstand zu Header und Footer gibt die Hülle (TicketShellView); so steht die Tabelle bündig
+     mit Header und Footer und verliert keinen Platz -->
+<VBox spacing="8.0" prefWidth="900.0" prefHeight="600.0"
 	xmlns="http://javafx.com/javafx/17"
     xmlns:fx="http://javafx.com/fxml/1"
 	fx:controller="de.eltviller_carneval_verein.karten.ui.sales.TicketTableController">
-    <padding>
-        <Insets top="20.0" right="20.0" bottom="20.0" left="20.0" />
-    </padding>
+
+    <!-- Gruppieren (KARV-193): Menü mit den Spalten und der Gruppenordnung, daneben die aktive Gruppierung als Bausteine
+         (GroupingBar) und, solange die Tabelle gruppiert zeigt, "Alle aufklappen" und "Alle zuklappen" -->
+    <HBox spacing="10.0" alignment="CENTER_LEFT">
+        <MenuButton fx:id="btnGrouping" text="Gruppieren" styleClass="button-secondary" minWidth="-Infinity" />
+        <HBox fx:id="groupingChips" spacing="6.0" alignment="CENTER_LEFT" />
+        <Button fx:id="btnExpandAll" text="Alle aufklappen" styleClass="button-secondary" minWidth="-Infinity" visible="false" managed="false" />
+        <Button fx:id="btnCollapseAll" text="Alle zuklappen" styleClass="button-secondary" minWidth="-Infinity" visible="false" managed="false" />
+    </HBox>
 
     <!-- Buchungen ohne Platz (nach einem Bestuhlungswechsel): nur sichtbar, wenn es welche gibt -->
     <HBox fx:id="unassignedBar" spacing="10.0" alignment="CENTER_LEFT" visible="false" managed="false">
@@ -22,30 +29,33 @@
 
     <!-- Mittlerer Bereich: Buchungs-Tabelle -->
     	<StackPane VBox.vgrow="ALWAYS">
-        	<TableView fx:id="seatTable" BorderPane.alignment="CENTER">
+        	<!-- Baumtabelle (KARV-193); ohne Gruppierung flach und ohne Pfeile -->
+        	<TreeTableView fx:id="seatTable" showRoot="false" styleClass="ticket-table" BorderPane.alignment="CENTER">
             	<columns>
-                	<TableColumn fx:id="colPresentation" prefWidth="100.0" text="Vorstellung" />
+                	<!-- Pfeil und Einrückung der Gruppen: ganz links, nur bei aktiver Gruppierung sichtbar -->
+                	<TreeTableColumn fx:id="colTree" prefWidth="30.0" text="" visible="false" sortable="false" reorderable="false" editable="false" />
+                	<TreeTableColumn fx:id="colPresentation" prefWidth="100.0" text="Vorstellung" />
                 	<!-- breit genug für "Ohne Platz (bisher A3)" -->
-                	<TableColumn fx:id="colTable" prefWidth="95.0" text="Tisch" />
-                	<TableColumn fx:id="colCategory" prefWidth="75.0" text="Kategorie" />
-                	<TableColumn fx:id="colSeatNumber" prefWidth="40.0" text="Sitz" />
-                	<TableColumn fx:id="colLastName" prefWidth="95.0" text="Nachname" />
-                	<TableColumn fx:id="colFirstName" prefWidth="95.0" text="Vorname" />
-                	<TableColumn fx:id="colReserved" prefWidth="80.0" text="Reserviert" />
-                	<TableColumn fx:id="colReservedOn" prefWidth="100.0" text="Reserviert am" />
-                	<TableColumn fx:id="colPrice" prefWidth="65.0" text="Preis (€)" />
-                	<TableColumn fx:id="colPaidAmount" prefWidth="75.0" text="Bezahlt (€)" />
-                	<TableColumn fx:id="colPaymentStatus" prefWidth="110.0" text="Zahlungsstatus" />
-                	<TableColumn fx:id="colPaidOn" prefWidth="90.0" text="Bezahlt am" />
-                	<TableColumn fx:id="colCollected" prefWidth="75.0" text="Abgeholt" />
-                	<TableColumn fx:id="colCollectedOn" prefWidth="95.0" text="Abgeholt am" />
-                	<TableColumn fx:id="colWheelchair" prefWidth="70.0" text="Rollstuhl" />
-                	<TableColumn fx:id="colComment" prefWidth="100.0" text="Kommentar" />
+                	<TreeTableColumn fx:id="colTable" prefWidth="95.0" text="Tisch" />
+                	<TreeTableColumn fx:id="colCategory" prefWidth="75.0" text="Kategorie" />
+                	<TreeTableColumn fx:id="colSeatNumber" prefWidth="40.0" text="Sitz" />
+                	<TreeTableColumn fx:id="colLastName" prefWidth="95.0" text="Nachname" />
+                	<TreeTableColumn fx:id="colFirstName" prefWidth="95.0" text="Vorname" />
+                	<TreeTableColumn fx:id="colReserved" prefWidth="80.0" text="Reserviert" />
+                	<TreeTableColumn fx:id="colReservedOn" prefWidth="100.0" text="Reserviert am" />
+                	<TreeTableColumn fx:id="colPrice" prefWidth="65.0" text="Preis (€)" />
+                	<TreeTableColumn fx:id="colPaidAmount" prefWidth="75.0" text="Bezahlt (€)" />
+                	<TreeTableColumn fx:id="colPaymentStatus" prefWidth="110.0" text="Zahlungsstatus" />
+                	<TreeTableColumn fx:id="colPaidOn" prefWidth="90.0" text="Bezahlt am" />
+                	<TreeTableColumn fx:id="colCollected" prefWidth="75.0" text="Abgeholt" />
+                	<TreeTableColumn fx:id="colCollectedOn" prefWidth="95.0" text="Abgeholt am" />
+                	<TreeTableColumn fx:id="colWheelchair" prefWidth="70.0" text="Rollstuhl" />
+                	<TreeTableColumn fx:id="colComment" prefWidth="100.0" text="Kommentar" />
             	</columns>
     			<columnResizePolicy>
-	        		<TableView fx:constant="CONSTRAINED_RESIZE_POLICY" />
+	        		<TreeTableView fx:constant="CONSTRAINED_RESIZE_POLICY" />
     			</columnResizePolicy>
-        	</TableView>
+        	</TreeTableView>
     	</StackPane>
 
 </VBox>

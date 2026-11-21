@@ -1,5 +1,8 @@
 package de.eltviller_carneval_verein.karten.settings;
 
+import java.util.List;
+import java.util.Objects;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /**
@@ -17,6 +20,8 @@ public class DisplaySettings {
 	public static final String DEFAULT_SUMMARY_PLACEMENT = "AUTO";
 	/** Die Lage des Hinweises am Mauszeiger, wenn keine oder eine unbekannte gespeichert ist. */
 	public static final String DEFAULT_SELECTION_HINT_PLACEMENT = "ABOVE";
+	/** Die Ordnung der Gruppen in der Kartentabelle, wenn keine oder eine unbekannte gespeichert ist. */
+	public static final String DEFAULT_TICKET_GROUP_ORDER = "VALUE";
 
 	private boolean restoreAtStart = true;
 	private boolean rows = true;
@@ -28,6 +33,9 @@ public class DisplaySettings {
 	private String selectionHintPlacement = DEFAULT_SELECTION_HINT_PLACEMENT;
 	private boolean selectionHintAvoidEdges = true;
 	private String summaryPlacement = DEFAULT_SUMMARY_PLACEMENT;
+	private List<String> ticketGrouping = List.of();
+	private String ticketGroupOrder = DEFAULT_TICKET_GROUP_ORDER;
+	private boolean ticketGroupingNested = true;
 
 	public DisplaySettings() {
 	}
@@ -130,5 +138,44 @@ public class DisplaySettings {
 	/** {@code null} gilt als {@link #DEFAULT_SUMMARY_PLACEMENT}. */
 	public void setSummaryPlacement(String summaryPlacement) {
 		this.summaryPlacement = summaryPlacement == null ? DEFAULT_SUMMARY_PLACEMENT : summaryPlacement;
+	}
+
+	/**
+	 * Die Namen der Spalten, nach denen die Kartentabelle gruppiert ist, von außen nach innen (KARV-193); nie {@code null},
+	 * ohne Gruppierung leer. Die Namen stehen als Text darin, damit dieses Paket die Oberfläche nicht kennt; ein
+	 * unbekannter Name aus einer neueren Version bleibt hier stehen, bis {@code DisplayPreferences} die Liste neu schreibt.
+	 */
+	public List<String> getTicketGrouping() {
+		return ticketGrouping;
+	}
+
+	/** {@code null} gilt als keine Gruppierung; die Liste wird kopiert, {@code null}-Einträge (aus einer Hand-Änderung) entfallen. */
+	public void setTicketGrouping(List<String> ticketGrouping) {
+		this.ticketGrouping = ticketGrouping == null ? List.of() : ticketGrouping.stream().filter(Objects::nonNull).toList();
+	}
+
+	/**
+	 * Der Name der Ordnung der Gruppen (z. B. {@code "SIZE"}, KARV-193); nie {@code null}, kann aber aus einer neueren
+	 * Version unbekannt sein. Fehlt das Feld, gilt {@link #DEFAULT_TICKET_GROUP_ORDER}.
+	 */
+	public String getTicketGroupOrder() {
+		return ticketGroupOrder;
+	}
+
+	/** {@code null} gilt als {@link #DEFAULT_TICKET_GROUP_ORDER}. */
+	public void setTicketGroupOrder(String ticketGroupOrder) {
+		this.ticketGroupOrder = ticketGroupOrder == null ? DEFAULT_TICKET_GROUP_ORDER : ticketGroupOrder;
+	}
+
+	/**
+	 * Ob die Gruppen der Kartentabelle bei mehreren Spalten ineinander verschachtelt sind (KARV-193); sonst stehen sie auf
+	 * einer Ebene. Fehlt das Feld, ist es an.
+	 */
+	public boolean isTicketGroupingNested() {
+		return ticketGroupingNested;
+	}
+
+	public void setTicketGroupingNested(boolean ticketGroupingNested) {
+		this.ticketGroupingNested = ticketGroupingNested;
 	}
 }

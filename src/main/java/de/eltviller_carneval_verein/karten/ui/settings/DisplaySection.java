@@ -12,8 +12,9 @@ final class DisplaySection {
 	static final String RESTORE = "Anzeige beim Start wiederherstellen";
 	static final String RESTORE_HINT = "Die Auswahl im Menü „Anzeige“ (Reihen, Tische, Sitznummern, Hallenobjekte, barrierefreie"
 			+ " Sitzdarstellung, Auswahl am Mauszeiger und die Kaufzusammenfassung im Kundenfenster) gilt beim nächsten Start wieder. Sie ist für"
-			+ " Saalansicht, Kundenfenster und Hallen-Editor dieselbe. Ausgeschaltet zeigt jeder Start alles an, mit"
-			+ " barrierefreier Sitzdarstellung.";
+			+ " Saalansicht, Kundenfenster und Hallen-Editor dieselbe. Ebenso gilt die Gruppierung der Kartentabelle wieder, die in deren eigener Leiste steht,"
+			+ " mit „Gruppen verschachteln“ aus dem Menü „Anzeige“."
+			+ " Ausgeschaltet zeigt jeder Start alles an, mit barrierefreier Sitzdarstellung und ungruppierter Kartentabelle.";
 
 	private DisplaySection() {
 	}

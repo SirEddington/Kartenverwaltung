@@ -1,6 +1,9 @@
 package de.eltviller_carneval_verein.karten.ui;
 
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -11,8 +14,10 @@ import de.eltviller_carneval_verein.karten.settings.DisplaySettings;
 import de.eltviller_carneval_verein.karten.settings.SettingsStore;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabels;
+import de.eltviller_carneval_verein.karten.ui.sales.GroupOrder;
 import de.eltviller_carneval_verein.karten.ui.sales.SelectionHintPlacement;
 import de.eltviller_carneval_verein.karten.ui.sales.SummaryPlacement;
+import de.eltviller_carneval_verein.karten.ui.sales.TicketColumn;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -49,6 +54,23 @@ public final class DisplayPreferences {
 	// wird unverändert zurückgeschrieben, bis jemand eine andere als "Automatisch" wählt
 	private final TolerantEnum<SummaryPlacement> filePlacement = new TolerantEnum<>(SummaryPlacement.class, SummaryPlacement.AUTO,
 			SummaryPlacement.AUTO);
+	// Die Gruppierung der Kartentabelle (KARV-193); die Liste ist immer unveränderlich, null gilt als leer
+	private final ObjectProperty<List<TicketColumn>> ticketGrouping = new SimpleObjectProperty<>(List.of()) {
+		@Override
+		public void set(List<TicketColumn> newValue) {
+			super.set(newValue == null ? List.of() : List.copyOf(newValue));
+		}
+	};
+	// null gilt als VALUE
+	private final ObjectProperty<GroupOrder> ticketGroupOrder = new SimpleObjectProperty<>(GroupOrder.VALUE) {
+		@Override
+		public void set(GroupOrder newValue) {
+			super.set(Objects.requireNonNullElse(newValue, GroupOrder.VALUE));
+		}
+	};
+	// Wie die Lage des Hinweises: Eine unbekannte Ordnung gilt als VALUE und bleibt in der Datei, bis eine andere gewählt wird
+	private final TolerantEnum<GroupOrder> fileGroupOrder = new TolerantEnum<>(GroupOrder.class, GroupOrder.VALUE, GroupOrder.VALUE);
+	private final BooleanProperty ticketGroupingNested = new SimpleBooleanProperty(true);
 	private final Consumer<Consumer<AppSettings>> saveOnly;
 
 	/**
@@ -59,6 +81,7 @@ public final class DisplayPreferences {
 		this.saveOnly = saveOnly;
 		filePlacement.fromJson(saved.getSummaryPlacement());
 		fileHintPlacement.fromJson(saved.getSelectionHintPlacement());
+		fileGroupOrder.fromJson(saved.getTicketGroupOrder());
 		if (saved.isRestoreAtStart()) {
 			planLabels.rowsProperty().set(saved.isRows());
 			planLabels.tablesProperty().set(saved.isTables());
@@ -69,6 +92,9 @@ public final class DisplayPreferences {
 			selectionHintPlacement.set(fileHintPlacement.get());
 			selectionHintAvoidEdges.set(saved.isSelectionHintAvoidEdges());
 			summaryPlacement.set(filePlacement.get());
+			ticketGrouping.set(readColumns(saved.getTicketGrouping()));
+			ticketGroupOrder.set(fileGroupOrder.get());
+			ticketGroupingNested.set(saved.isTicketGroupingNested());
 		}
 		// Erst nach dem Übernehmen, damit der Start nichts schreibt
 		planLabels.addListener((obs, oldValue, newValue) -> write());
@@ -77,6 +103,22 @@ public final class DisplayPreferences {
 		selectionHintPlacement.addListener((obs, oldValue, newValue) -> write());
 		selectionHintAvoidEdges.addListener((obs, oldValue, newValue) -> write());
 		summaryPlacement.addListener((obs, oldValue, newValue) -> write());
+		ticketGrouping.addListener((obs, oldValue, newValue) -> write());
+		ticketGroupOrder.addListener((obs, oldValue, newValue) -> write());
+		ticketGroupingNested.addListener((obs, oldValue, newValue) -> write());
+	}
+
+	/** Liest die Spaltennamen der Datei; unbekannte und doppelte Namen werden übersprungen. */
+	private static List<TicketColumn> readColumns(List<String> names) {
+		Set<TicketColumn> columns = new LinkedHashSet<>();
+		for (String name : names) {
+			try {
+				columns.add(TicketColumn.valueOf(name));
+			} catch (IllegalArgumentException e) {
+				LOG.log(Level.FINE, "Unbekannte Spalte \"{0}\" der Gruppierung wird übersprungen", name);
+			}
+		}
+		return List.copyOf(columns);
 	}
 
 	/** Richtet die Instanz der App aus den geladenen Einstellungen ein (beim Start, bevor eine Ansicht sie braucht). */
@@ -134,6 +176,27 @@ public final class DisplayPreferences {
 		return summaryPlacement;
 	}
 
+	/** Nach welchen Spalten die Kartentabelle gruppiert ist, von außen nach innen (KARV-193); unveränderlich, ohne Gruppierung leer. */
+	public ObjectProperty<List<TicketColumn>> ticketGroupingProperty() {
+		return ticketGrouping;
+	}
+
+	/**
+	 * Wie die Gruppen der Kartentabelle unter einem gemeinsamen Elternknoten geordnet sind (KARV-193). Standard nach Wert;
+	 * nie {@code null}.
+	 */
+	public ObjectProperty<GroupOrder> ticketGroupOrderProperty() {
+		return ticketGroupOrder;
+	}
+
+	/**
+	 * Ob die Gruppen der Kartentabelle bei mehreren Spalten ineinander verschachtelt sind; sonst stehen sie auf einer Ebene
+	 * (KARV-193). Standard an.
+	 */
+	public BooleanProperty ticketGroupingNestedProperty() {
+		return ticketGroupingNested;
+	}
+
 	private void write() {
 		try {
 			PlanLabels labels = planLabels.snapshot();
@@ -145,6 +208,10 @@ public final class DisplayPreferences {
 			SummaryPlacement current = summaryPlacement.get();
 			filePlacement.set(current == null ? SummaryPlacement.AUTO : current);
 			String placement = filePlacement.toJson();
+			List<String> grouping = ticketGrouping.get().stream().map(TicketColumn::name).toList();
+			fileGroupOrder.set(ticketGroupOrder.get());
+			String groupOrder = fileGroupOrder.toJson();
+			boolean nested = ticketGroupingNested.get();
 			saveOnly.accept(settings -> {
 				DisplaySettings display = settings.getDisplay();
 				display.setRows(labels.rows());
@@ -156,6 +223,9 @@ public final class DisplayPreferences {
 				display.setSelectionHintPlacement(hintPlacement);
 				display.setSelectionHintAvoidEdges(avoidEdges);
 				display.setSummaryPlacement(placement);
+				display.setTicketGrouping(grouping);
+				display.setTicketGroupOrder(groupOrder);
+				display.setTicketGroupingNested(nested);
 			});
 		} catch (RuntimeException e) {
 			LOG.log(Level.WARNING, "Die Auswahl im Menü \"Anzeige\" ließ sich nicht speichern", e);

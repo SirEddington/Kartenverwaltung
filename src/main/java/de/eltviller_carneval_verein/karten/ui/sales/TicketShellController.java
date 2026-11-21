@@ -120,6 +120,9 @@ public class TicketShellController {
 				SelectionHintMenu.create(state.selectionHintProperty(), state.selectionHintPlacementProperty(),
 						state.selectionHintAvoidEdgesProperty()));
 		SummaryPlacementMenu.append(menuDisplay, state.summaryPlacementProperty());
+		// Gehört zur Kartentabelle, steht aber wie die übrigen Einstellungen im Menü "Anzeige" (KARV-193)
+		menuDisplay.getItems().addAll(new SeparatorMenuItem(),
+				PlanLabelsMenu.item("Gruppen verschachteln", DisplayPreferences.instance().ticketGroupingNestedProperty()));
 		// Vor der ersten Ansicht (showTicketTableView unten): loadContentView legt den Hinweis über jede Ansicht
 		selectionHint = new SelectionHint(contentArea, state.selectedBookings(), state.selectionHintProperty(),
 				state.selectionHintPlacementProperty(), state.selectionHintAvoidEdgesProperty());

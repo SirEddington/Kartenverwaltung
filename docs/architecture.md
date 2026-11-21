@@ -280,6 +280,53 @@ Notable 1.1 pieces:
   when the main window loses focus (modal dialogs) and while a non-tooltip popup of the window is open (seat popup,
   context menu, drop-downs). Window listeners are attached only while the shell is shown.
 
+Notable 1.2 pieces:
+
+- **Ticket table as tree table** (`ui.sales.TicketTreeTable`, KARV-193): the ticket table is a
+  `TreeTableView<TicketRow>`, so that bookings can be grouped by columns (`TicketRow` is a `BookingRow` or a
+  `GroupRow`). Everything that decides is free of JavaFX and tested directly: `TicketColumn` (a column as a value:
+  group key, text and order of its keys), `TicketFilter` (column filters), `TicketGrouping` (levels, counts, group
+  order `GroupOrder.VALUE` or `SIZE`) and `TicketSelection` (selection rules). Data flow: bookings of the shown
+  presentations, then search (`BookingSearch`), then column filter, then `TicketGrouping`, then
+  `TicketTreeBuilder` builds the `TreeItem`s. The tree is rebuilt only when its structure (paths, bookings per
+  group, order, header texts) differs, otherwise the table is only redrawn; the root is set once, because a new root
+  clears the sort order. Every rebuild waits until no cell is being edited and no mouse operation is running
+  (`TicketEdits`), and a booking the operator changed stays visible despite search and filter until those change. A
+  mouse operation (`MouseGesture`, free of JavaFX, with an injectable clock) starts with a press in a row and ends
+  500 ms after the release (the usual Windows double-click time); a release anywhere in the scene, a lost release
+  (first mouse event without a pressed button), focus loss of the window or hiding the table ends it. The controller
+  feeds it through scene filters registered with `LiveViews.whileShown`. Thus the second click of a double click
+  finds the row of the first click (the first press commits the edit and wants a rebuild). For longer system
+  double-click times a guard remains: a press or release with click count 2 or more on another row (booking or group
+  path) than the first click is consumed (`TicketTreeTable.installMultiClickGuard`, on the parent node of the table; a release after a drag is
+  let through).
+  With the option "Gruppen verschachteln" off, `TicketGrouping` builds one level whose groups are the combinations
+  of keys (path of length 1, `GroupRow` carries the list of columns); with a single grouped column the option has no
+  effect. A group row draws its header (column grey, value bold, "n Karten" grey) as one node in `TicketTreeRow`, and
+  "expand all" / "collapse all" (bar buttons, context menu of a group header, Ctrl+Plus / Ctrl+Minus) act on the
+  tree and the set of closed paths in `TicketTreeTable`.
+- **Selection as a set of bookings** (`TicketSelection`): the selection lives in the controller as a set of bookings
+  by identity. The selection model of the `TreeTableView` only displays it and contains booking rows only; a group
+  row is shown as selected (pseudo-class `group-selected`) when all its bookings are selected. Clicks and keys are
+  translated by the row they mean, then the display is adjusted. This is why `SalesViewState`, the customer display
+  and the context menu see a selected closed group as all its bookings. The sort policy of the table is its own: it
+  orders only the bookings within the lowest group and starts the rebuild.
+- **Own column filter** (`ColumnFilterMenu`): ControlsFX has no filter for `TreeTableView`, so the right-click menu on
+  the heading is rebuilt with the same operation (search field, values with count, "Anwenden", "Keine", "Alle",
+  "Alle Filter zurücksetzen"). ControlsFX `TableFilter` remains only in the event editor (`ui.event`).
+- **Input helpers for both table kinds** (`ui.input`): `TableInput` (click, type, Enter, Tab, drag) works against
+  `TableAccess` with the implementations `TableViewAccess` and `TreeTableViewAccess`; `install(TableView)` and
+  `install(TreeTableView, rowEditable)` exist. The logic of the parsing text cells is in `ParsingEditing`, used by
+  `ParsingTextFieldTableCell` and `ParsingTextFieldTreeTableCell`; rows can be excluded by a condition (group rows
+  are never editable). `TableGestures` holds the mouse and scroll helpers that `TableInput` and `TicketTreeTable`
+  share (row, cell and control under the pointer, drag threshold, scrolling only as far as needed, suspending edits
+  for one event). `EditingUnits.watch` and `ColumnMinWidths.install` have variants for `TreeTableView`.
+- **Grouping is a display choice**: `ticketGrouping`, `ticketGroupOrder` and `ticketGroupingNested` belong to
+  `DisplayPreferences` and `settings.json` (see the KARV-76 decision). The menu and the chips of the bar
+  (`GroupingMenu`, `GroupingBar`) follow them with weak listeners; the ticket table listens only while it is shown
+  (`LiveViews.whileShown`), so a controller left behind after a switch to the hall view no longer rebuilds, and its
+  selection is reported to `SalesViewState` only while the table is shown.
+
 ## Data flow
 
 **Saving a sale (shared mode):**
