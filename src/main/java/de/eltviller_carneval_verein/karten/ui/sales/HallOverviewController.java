@@ -81,7 +81,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	// Einpassen auf die Halle erfolgt nur, wenn sich die Halle ändert (Zoom bleibt beim Vorstellungswechsel)
 	private String fittedHallId = null;
 
-	// Bündelt die Anforderungen eines Vorgangs zu einem Planaufbau (renderHall)
+	// Bündelt die Anforderungen eines Vorgangs (renderHall) zu einem Planaufbau (drawHall)
 	private final CoalescedAction redraw = new CoalescedAction(Platform::runLater, this::drawHall);
 	// Zieht einen angeforderten Planaufbau vor das nächste Bild; hängt an der Szene, solange die Ansicht zu sehen ist
 	private final Runnable drawBeforeFrame = redraw::flush;
@@ -144,7 +144,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		rubberBand.setStroke(HallPlanPane.SELECTION_COLOR);
 		viewportPane.getChildren().add(rubberBand);
 		legendSlot.getChildren().setAll(SeatLook.legend());
-		// Sichtbar erst, wenn ein Plan gezeichnet ist (renderHall)
+		// Sichtbar erst, wenn ein Plan gezeichnet ist (drawHall)
 		legendSlot.setVisible(false);
 		legendSlot.setManaged(false);
 		updateHint();
@@ -166,17 +166,15 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	 * eingepasst, bevor die Legende ihren Platz belegt (KARV-108).
 	 */
 	private void drawBeforeFrames() {
+		// LiveViews.whileShown meldet erst an, wenn die Ansicht in einem gezeigten Fenster steht: Die Szene ist da
 		pulseScene = viewportPane.getScene();
-		if (pulseScene != null) {
-			pulseScene.addPreLayoutPulseListener(drawBeforeFrame);
-		}
+		pulseScene.addPreLayoutPulseListener(drawBeforeFrame);
 	}
 
+	/** Die Szene ist beim Abmelden schon gewechselt oder weg; abgemeldet wird bei der gemerkten. */
 	private void stopDrawingBeforeFrames() {
-		if (pulseScene != null) {
-			pulseScene.removePreLayoutPulseListener(drawBeforeFrame);
-			pulseScene = null;
-		}
+		pulseScene.removePreLayoutPulseListener(drawBeforeFrame);
+		pulseScene = null;
 	}
 
 	/** Zeichnet die Halle der gezeigten Vorstellung neu (eine ersetzte Halle hat dieselbe ID, {@link #hallOf} sucht nach ihr). */

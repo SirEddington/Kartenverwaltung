@@ -202,12 +202,12 @@ public class HallPlanPane extends StackPane {
 		contentPane.getChildren().setAll(nodes);
 	}
 
-	/** Die Knoten des Plans von unten nach oben: Hallenumriss, Hallenobjekte, dann die Bestuhlung ({@link #drawPlan}). */
+	/** Die Knoten des Plans von unten nach oben: Hallenumriss, Hallenobjekte, dann die Bestuhlung ({@link #addPlanNodes}). */
 	private List<Node> planNodes(Hall hall, SeatingPlan plan, Presentation presentation, PlanLabels labels, Decorator decorator) {
-		List<Node> nodes = new ArrayList<>();
 		if (presentation == null) {
-			return nodes;
+			return List.of();
 		}
+		List<Node> nodes = new ArrayList<>();
 		if (hall != null) {
 			Rectangle2D hallRect = HallViewport.hallRect(hall);
 			if (hallRect != null) {
@@ -223,16 +223,16 @@ public class HallPlanPane extends StackPane {
 			}
 		}
 		if (plan != null) {
-			drawPlan(plan, presentation, labels, decorator, nodes);
+			addPlanNodes(nodes, plan, presentation, labels, decorator);
 		}
 		return nodes;
 	}
 
 	/**
 	 * Reihen (falls gewünscht), dann Tische, dann Sitze (oben, damit sie anklickbar bleiben). Reihen und Tische nehmen
-	 * keine Klicks. Die Knoten kommen in dieser Reihenfolge nach {@code nodes}.
+	 * keine Klicks.
 	 */
-	private void drawPlan(SeatingPlan plan, Presentation presentation, PlanLabels labels, Decorator decorator, List<Node> nodes) {
+	private void addPlanNodes(List<Node> nodes, SeatingPlan plan, Presentation presentation, PlanLabels labels, Decorator decorator) {
 		if (labels.rows()) {
 			for (TableRow row : plan.getRows()) {
 				if (plan.getTablesOf(row).isEmpty()) {

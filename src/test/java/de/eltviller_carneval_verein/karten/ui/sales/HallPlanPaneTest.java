@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -164,12 +165,9 @@ class HallPlanPaneTest {
 		List<Node> children = onFx(() -> {
 			HallPlanPane pane = new HallPlanPane();
 			pane.render(null, plan, presentation, PlanLabels.ALL, new Marking());
-			try {
-				pane.render(null, plan, presentation, PlanLabels.ALL, failing);
-			} catch (IllegalStateException expected) {
-				return List.copyOf(pane.contentPane().getChildren());
-			}
-			throw new AssertionError("der Fehler des Aufbaus geht weiter");
+			assertThrows(IllegalStateException.class, () -> pane.render(null, plan, presentation, PlanLabels.ALL, failing),
+					"der Fehler des Aufbaus geht weiter");
+			return List.copyOf(pane.contentPane().getChildren());
 		});
 
 		assertTrue(children.isEmpty(), "der alte Plan wirkte sonst gültig: " + children);
