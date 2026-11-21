@@ -1,6 +1,8 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
@@ -185,14 +187,27 @@ public class HallPlanPane extends StackPane {
 	 *                     bleiben; Tischnamen, Sitznummern und Namen der Hallenobjekte lassen sich einzeln ausblenden
 	 */
 	public void render(Hall hall, SeatingPlan plan, Presentation presentation, PlanLabels labels, Decorator decorator) {
-		contentPane.getChildren().clear();
 		String hint = SalesPlan.hint(presentation, plan);
 		planHint.setText(hint);
 		planHint.setVisible(hint != null);
-		if (presentation == null) {
-			return;
+		// Erst sammeln, dann in einem Schritt tauschen: Einzeln eingehängt meldet die Fläche jeden der Knoten für sich (KARV-108)
+		List<Node> nodes;
+		try {
+			nodes = planNodes(hall, plan, presentation, labels, decorator);
+		} catch (RuntimeException e) {
+			// Scheitert der Aufbau, bleibt nicht der alte Plan stehen, als wäre er gültig: Die Fläche ist leer, der Fehler geht weiter
+			contentPane.getChildren().clear();
+			throw e;
 		}
+		contentPane.getChildren().setAll(nodes);
+	}
 
+	/** Die Knoten des Plans von unten nach oben: Hallenumriss, Hallenobjekte, dann die Bestuhlung ({@link #drawPlan}). */
+	private List<Node> planNodes(Hall hall, SeatingPlan plan, Presentation presentation, PlanLabels labels, Decorator decorator) {
+		List<Node> nodes = new ArrayList<>();
+		if (presentation == null) {
+			return nodes;
+		}
 		if (hall != null) {
 			Rectangle2D hallRect = HallViewport.hallRect(hall);
 			if (hallRect != null) {
@@ -201,23 +216,23 @@ public class HallPlanPane extends StackPane {
 				outline.setStroke(Color.GRAY);
 				outline.getStrokeDashArray().addAll(8.0, 6.0);
 				outline.setMouseTransparent(true);
-				contentPane.getChildren().add(outline);
+				nodes.add(outline);
 			}
 			for (HallObject hallObject : hall.getHallObjects()) {
-				contentPane.getChildren().add(createHallObjectNode(hallObject, labels.hallObjects()));
+				nodes.add(createHallObjectNode(hallObject, labels.hallObjects()));
 			}
 		}
-
 		if (plan != null) {
-			drawPlan(plan, presentation, labels, decorator);
+			drawPlan(plan, presentation, labels, decorator, nodes);
 		}
+		return nodes;
 	}
 
 	/**
 	 * Reihen (falls gewünscht), dann Tische, dann Sitze (oben, damit sie anklickbar bleiben). Reihen und Tische nehmen
-	 * keine Klicks.
+	 * keine Klicks. Die Knoten kommen in dieser Reihenfolge nach {@code nodes}.
 	 */
-	private void drawPlan(SeatingPlan plan, Presentation presentation, PlanLabels labels, Decorator decorator) {
+	private void drawPlan(SeatingPlan plan, Presentation presentation, PlanLabels labels, Decorator decorator, List<Node> nodes) {
 		if (labels.rows()) {
 			for (TableRow row : plan.getRows()) {
 				if (plan.getTablesOf(row).isEmpty()) {
@@ -225,13 +240,13 @@ public class HallPlanPane extends StackPane {
 				}
 				Node rowNode = PlanNodeFactory.rowNode(row, SeatingPlanLayout.rowLength(plan, row), false);
 				rowNode.setMouseTransparent(true);
-				contentPane.getChildren().add(rowNode);
+				nodes.add(rowNode);
 			}
 		}
 		for (Table table : plan.getTables()) {
 			Node tableNode = PlanNodeFactory.tableNode(table, false, labels.tables());
 			tableNode.setMouseTransparent(true);
-			contentPane.getChildren().add(tableNode);
+			nodes.add(tableNode);
 		}
 		Map<String, Booking> bookingBySeat = bookingsBySeat(presentation);
 		for (Seat seat : plan.getSeats()) {
@@ -247,18 +262,18 @@ public class HallPlanPane extends StackPane {
 				seatNode.setMouseTransparent(true);
 			}
 			if (Boolean.TRUE.equals(seatNode.getProperties().get(SELECTED_KEY))) {
-				contentPane.getChildren().add(PlanNodeFactory.seatHalo(seat));
+				nodes.add(PlanNodeFactory.seatHalo(seat));
 			}
-			contentPane.getChildren().add(seatNode);
+			nodes.add(seatNode);
 			if (mark != null) {
 				mark.setMouseTransparent(true);
 				mark.opacityProperty().bind(seatNode.opacityProperty());
-				contentPane.getChildren().add(mark);
+				nodes.add(mark);
 			}
 			if (labels.seatNumbers()) {
 				Text number = PlanNodeFactory.seatNumberText(seat, contentPane.scaleXProperty());
 				number.opacityProperty().bind(seatNode.opacityProperty());
-				contentPane.getChildren().add(number);
+				nodes.add(number);
 			}
 		}
 	}

@@ -1280,6 +1280,21 @@ public class MainApp extends Application {
 		return MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 	}
 
+	/** Das Wappen im Hintergrund der Ansichten, siehe {@link #backgroundImage()}. */
+	private static Image backgroundImage;
+
+	/**
+	 * Das Wappen wird einmal geladen und von allen Ansichten geteilt: Es bei jedem Ansichtswechsel neu zu entpacken, hielt
+	 * die Oberfläche jedes Mal etwa 50 ms auf (KARV-108). Geladen wird über die Adresse der Ressource; so öffnet und
+	 * schließt {@link Image} den Datenstrom selbst.
+	 */
+	private static Image backgroundImage() {
+		if (backgroundImage == null) {
+			backgroundImage = new Image(MainApp.class.getResource("/de/eltviller_carneval_verein/karten/ui/images/wappen.png").toExternalForm());
+		}
+		return backgroundImage;
+	}
+
 	/**
 	 * Legt das ECV-Wappen groß und dezent transparent hinter den eigentlichen
 	 * Bildschirminhalt, damit es auf jedem Screen einheitlich im Hintergrund
@@ -1291,7 +1306,7 @@ public class MainApp extends Application {
 	 * damit der Inhalt bei einer Meldung nicht springt.
 	 */
 	private static Parent wrapWithBackground(Parent content, boolean conflictHint) {
-		ImageView background = new ImageView(new Image(MainApp.class.getResourceAsStream("/de/eltviller_carneval_verein/karten/ui/images/wappen.png")));
+		ImageView background = new ImageView(backgroundImage());
 		background.setPreserveRatio(true);
 		background.setOpacity(0.12);
 		background.setMouseTransparent(true);
