@@ -1,5 +1,10 @@
 # Patchnotes
 
+## 1.1.2
+
+### Behoben
+- Fehlerbehebungen für Version 1.1.1.
+
 ## 1.1.1
 
 ### Neu
