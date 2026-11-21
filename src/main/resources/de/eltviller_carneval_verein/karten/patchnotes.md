@@ -1,5 +1,10 @@
 # Patchnotes
 
+## 1.2.0
+
+### Neu
+- Die Abrechnung wird ausgebaut, mit Kassen am Event, Kassensturz je Kasse und Bilanz.
+
 ## 1.1.1
 
 ### Neu
