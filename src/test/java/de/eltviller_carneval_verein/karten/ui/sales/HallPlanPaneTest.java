@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -25,7 +26,7 @@ import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Text;
 
-/** Die Markierung über einem Sitz (KARV-26: das Kreuz des gesperrten Sitzes). */
+/** Der gezeichnete Plan: die Markierung über einem Sitz (KARV-26: das Kreuz des gesperrten Sitzes) und der Neuaufbau (KARV-108). */
 class HallPlanPaneTest {
 
 	@BeforeAll
@@ -124,6 +125,52 @@ class HallPlanPaneTest {
 
 		int seatIndex = indexOf(children, Circle.class);
 		assertEquals(seatIndex + 1, indexOf(children, Text.class), "die Nummer folgt direkt auf den Sitz");
+	}
+
+	@Test
+	void aNewRenderReplacesTheOldPlan() throws Exception {
+		List<List<Node>> renders = onFx(() -> {
+			HallPlanPane pane = new HallPlanPane();
+			pane.render(null, plan, presentation, PlanLabels.ALL, new Marking());
+			List<Node> first = List.copyOf(pane.contentPane().getChildren());
+			pane.render(null, plan, presentation, PlanLabels.ALL, new Marking());
+			return List.of(first, List.copyOf(pane.contentPane().getChildren()));
+		});
+
+		assertEquals(renders.get(0).size(), renders.get(1).size(), "derselbe Plan hat gleich viele Knoten");
+		assertTrue(renders.get(1).stream().noneMatch(renders.get(0)::contains), "vom alten Plan bleibt kein Knoten stehen");
+	}
+
+	@Test
+	void withoutPresentationThePlanIsEmptied() throws Exception {
+		List<Node> children = onFx(() -> {
+			HallPlanPane pane = new HallPlanPane();
+			pane.render(null, plan, presentation, PlanLabels.ALL, new Marking());
+			pane.render(null, null, null, PlanLabels.ALL, new Marking());
+			return List.copyOf(pane.contentPane().getChildren());
+		});
+
+		assertTrue(children.isEmpty(), "ohne Vorstellung bleibt die Fläche leer: " + children);
+	}
+
+	@Test
+	void aFailedRenderLeavesNoOldPlanBehind() throws Exception {
+		HallPlanPane.Decorator failing = new HallPlanPane.Decorator() {
+			@Override
+			public void decorateSeat(Booking booking, Seat seat, Node node) {
+				throw new IllegalStateException("Sitz lässt sich nicht zeichnen");
+			}
+		};
+
+		List<Node> children = onFx(() -> {
+			HallPlanPane pane = new HallPlanPane();
+			pane.render(null, plan, presentation, PlanLabels.ALL, new Marking());
+			assertThrows(IllegalStateException.class, () -> pane.render(null, plan, presentation, PlanLabels.ALL, failing),
+					"der Fehler des Aufbaus geht weiter");
+			return List.copyOf(pane.contentPane().getChildren());
+		});
+
+		assertTrue(children.isEmpty(), "der alte Plan wirkte sonst gültig: " + children);
 	}
 
 	private static int indexOf(List<Node> children, Class<?> type) {

@@ -5,6 +5,10 @@
 ### Neu
 - Die Abrechnung wird ausgebaut, mit Kassen am Event, Kassensturz je Kasse und Bilanz.
 
+### Verbessert
+- Die Saalansicht öffnet schneller, auch beim ersten Mal nach dem Start. Auch der Wechsel zwischen
+  den Ansichten des Programms geht etwas zügiger.
+
 ## 1.1.1
 
 ### Neu

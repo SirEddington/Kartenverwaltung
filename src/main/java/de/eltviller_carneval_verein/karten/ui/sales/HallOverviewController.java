@@ -18,11 +18,13 @@ import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.ui.CoalescedAction;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
+import javafx.application.Platform;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.fxml.FXML;
@@ -31,6 +33,7 @@ import javafx.geometry.Bounds;
 import javafx.geometry.Point2D;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
@@ -77,6 +80,12 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	// Einpassen auf die Halle erfolgt nur, wenn sich die Halle ändert (Zoom bleibt beim Vorstellungswechsel)
 	private String fittedHallId = null;
+
+	// Bündelt die Anforderungen eines Vorgangs (renderHall) zu einem Planaufbau (drawHall)
+	private final CoalescedAction redraw = new CoalescedAction(Platform::runLater, this::drawHall);
+	// Zieht einen angeforderten Planaufbau vor das nächste Bild; hängt an der Szene, solange die Ansicht zu sehen ist
+	private final Runnable drawBeforeFrame = redraw::flush;
+	private Scene pulseScene;
 
 	// Fremde Änderungen am gezeigten Event oder an der Halle der gezeigten Vorstellung: Der Plan wird neu gezeichnet
 	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
@@ -135,7 +144,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		rubberBand.setStroke(HallPlanPane.SELECTION_COLOR);
 		viewportPane.getChildren().add(rubberBand);
 		legendSlot.getChildren().setAll(SeatLook.legend());
-		// Sichtbar erst, wenn ein Plan gezeichnet ist (renderHall)
+		// Sichtbar erst, wenn ein Plan gezeichnet ist (drawHall)
 		legendSlot.setVisible(false);
 		legendSlot.setManaged(false);
 		updateHint();
@@ -148,7 +157,24 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 				LockedSeats.whileShown(() -> {
 					LockedSeats.dropFrom(selectedBookings);
 					renderIfShown();
-				}));
+				}), new Registration(this::drawBeforeFrames, this::stopDrawingBeforeFrames));
+	}
+
+	/**
+	 * Ein angeforderter Planaufbau läuft spätestens vor dem nächsten Bild der Szene. Ohne das kann ein schon eingereihter
+	 * Puls dem eingeplanten Aufbau zuvorkommen: Die Ansicht erschiene nach dem Wechsel kurz leer, und die Halle würde
+	 * eingepasst, bevor die Legende ihren Platz belegt (KARV-108).
+	 */
+	private void drawBeforeFrames() {
+		// LiveViews.whileShown meldet erst an, wenn die Ansicht in einem gezeigten Fenster steht: Die Szene ist da
+		pulseScene = viewportPane.getScene();
+		pulseScene.addPreLayoutPulseListener(drawBeforeFrame);
+	}
+
+	/** Die Szene ist beim Abmelden schon gewechselt oder weg; abgemeldet wird bei der gemerkten. */
+	private void stopDrawingBeforeFrames() {
+		pulseScene.removePreLayoutPulseListener(drawBeforeFrame);
+		pulseScene = null;
 	}
 
 	/** Zeichnet die Halle der gezeigten Vorstellung neu (eine ersetzte Halle hat dieselbe ID, {@link #hallOf} sucht nach ihr). */
@@ -318,7 +344,17 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		}
 	}
 
+	/**
+	 * Fordert an, den Plan neu zu zeichnen. Gezeichnet wird einmal, nachdem der laufende Vorgang fertig ist, gleich wie oft
+	 * er das anfordert: Der Wechsel zur Saalansicht setzt Vorstellung, Modus, Suchfilter und Auswahl nacheinander und baute
+	 * den Plan sonst viermal auf (KARV-108). Bis dahin zeigen Plan und {@link #seatNodes} noch den alten Stand; spätestens
+	 * vor dem nächsten Bild ist der neue da ({@link #drawBeforeFrames}).
+	 */
 	public void renderHall() {
+		redraw.request();
+	}
+
+	private void drawHall() {
 		seatNodes.clear();
 		Hall hall = hallOf(selectedPres);
 		SeatingPlan plan = SalesPlan.of(selectedPres, hall);

@@ -52,4 +52,35 @@ class CoalescedActionTest {
 		runScheduled();
 		assertEquals(2, runs);
 	}
+
+	@Test
+	void flushRunsARequestedActionAtOnceAndTheScheduledRunDoesNothing() {
+		action.request();
+		action.request();
+
+		action.flush();
+		assertEquals(1, runs);
+
+		runScheduled();
+		assertEquals(1, runs);
+	}
+
+	@Test
+	void flushWithoutARequestDoesNothing() {
+		action.flush();
+
+		assertEquals(0, runs);
+		assertEquals(0, scheduled.size());
+	}
+
+	@Test
+	void aRequestAfterAFlushRunsTheActionAgain() {
+		action.request();
+		action.flush();
+
+		action.request();
+		runScheduled();
+
+		assertEquals(2, runs);
+	}
 }

@@ -28,9 +28,19 @@ public final class CoalescedAction {
 			return;
 		}
 		scheduled = true;
-		scheduler.accept(() -> {
-			scheduled = false;
-			action.run();
-		});
+		scheduler.accept(this::flush);
+	}
+
+	/**
+	 * Führt eine angeforderte, noch nicht gelaufene Aktion sofort aus; ohne Anforderung geschieht nichts. So lässt sie sich
+	 * vorziehen, etwa vor das nächste Bild einer Ansicht. Die schon eingeplante Ausführung tut danach nichts mehr, es sei
+	 * denn, inzwischen wurde neu angefordert.
+	 */
+	public void flush() {
+		if (!scheduled) {
+			return;
+		}
+		scheduled = false;
+		action.run();
 	}
 }
