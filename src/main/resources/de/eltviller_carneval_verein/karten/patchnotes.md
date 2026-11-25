@@ -2,6 +2,10 @@
 
 ## 1.1.2
 
+### Verbessert
+- Eine Karte für 0 € gilt als bezahlt, weil nichts zu bezahlen ist. Die Warnung „… ist als bezahlt
+  markiert, der Preis beträgt aber 0,00 €“ (SEA-006) erscheint deshalb nicht mehr.
+
 ### Behoben
 - Verkaufen zwei Kassen denselben Platz, bevor der Abgleich den ersten Verkauf gebracht hat,
   bleiben jetzt immer beide Buchungen erhalten: Eine behält den Platz, die andere steht unter
