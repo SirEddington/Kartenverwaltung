@@ -122,6 +122,23 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 				: trail;
 	}
 
+	/**
+	 * Ob dieser Rechner die Buchung auf der Einheit der Auflösung selbst hingesetzt hat (KARV-201): Eine seiner
+	 * Nutzer-Versionen trägt sie, ihr erster Vorgänger nicht. Trägt die Spitze der verlorenen Strecke sie nur, weil eine
+	 * Auflösung dort den Inhalt der anderen Seite übernahm, hat er das nicht.
+	 */
+	static boolean placedByOwn(ConflictInput input, String bookingId) {
+		TrailUnit unit = input.trail().get(input.unit());
+		Map<VersionId, Version> known = byId(unit == null ? input.stretch() : known(input, unit));
+		for (Version version : sideVersions(input, known.values(), input.unit(), null, true)) {
+			Version parent = version.firstParent() == null ? null : known.get(version.firstParent());
+			if (carries(version, bookingId) && (parent == null || !carries(parent, bookingId))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** Die Einheit "ohne Platz" der Buchung in der Vorstellung der Quelle. */
 	static UnitKey parkedUnit(UnitKey source, String bookingId) {
 		return UnitKey.unassignedBooking(source.eventId(), source.presentationId(), bookingId);

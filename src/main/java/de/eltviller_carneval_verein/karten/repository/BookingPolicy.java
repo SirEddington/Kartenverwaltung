@@ -106,11 +106,13 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * fehlt:
 	 * <ul>
 	 * <li>Die Fassung der Einheit ist der Inhalt des Ergebnisses, wenn sie der Träger ist; sonst die Buchung, die eine Seite
-	 * hier neu hingesetzt hat (zuerst "Deren"); sonst eine Löschung.</li>
+	 * hier neu hingesetzt hat (zuerst "Deren"); sonst eine Löschung. Haben beide Seiten je eine andere hingesetzt, ist das
+	 * ein Doppelverkauf ({@link #newSales}, KARV-201): "Meine" weicht "ohne Platz" aus, statt zu verschwinden.</li>
 	 * <li>Ein anderer Träger bekommt den Inhalt als Zusatz-Änderung, wenn sein Stand ihn nicht schon hat; Träger auf der
 	 * Spur, die die Buchung nicht mehr tragen dürfen, eine Löschung.</li>
 	 * <li>Den Vermerk schreibt die Einheit, die das Ergebnis dafür nennt; einem Vermerk ohne Gegenseite (am Ziel eines
-	 * gescheiterten Umzugs) gibt sie die Version, die den Inhalt hier eingebracht hat.</li>
+	 * gescheiterten Umzugs) gibt sie die Version, die den Inhalt hier eingebracht hat. Eine Version trägt nur einen
+	 * Vermerk: Fallen mehrere an, bleibt der erste, die der Tabelle vor dem des Doppelverkaufs.</li>
 	 * </ul>
 	 *
 	 * @return die Auflösung, oder {@code null}, wenn keine Buchung zu entscheiden ist (oder beide Seiten dieselbe Buchung
@@ -167,8 +169,10 @@ public final class BookingPolicy implements ConflictPolicy {
 				}
 			}
 		}
+		Resolution sales = null;
 		if (payload == null) {
-			payload = newcomer(input, fates.keySet());
+			sales = newSales(input, fates.keySet());
+			payload = sales != null ? sales.payload() : newcomer(input, fates.keySet());
 		}
 		List<Change> extra = new ArrayList<>();
 		for (Map.Entry<String, BookingFate> entry : fates.entrySet()) {
@@ -191,15 +195,45 @@ public final class BookingPolicy implements ConflictPolicy {
 			}
 			for (BookingFate.Placed placed : fate.notes()) {
 				if (unit.equals(placed.writtenAt())) {
-					if (note == null) {
-						note = withOther(input, placed.note());
-					} else {
-						LOGGER.warning("Zwei Vermerke an " + unit.relativePath() + "; nur der erste wird geschrieben.");
-					}
+					note = firstNote(unit, note, withOther(input, placed.note()));
 				}
 			}
 		}
+		if (sales != null) {
+			// die Vermerke der Tabelle zuerst: Ihre Zeilen ändert der Doppelverkauf daneben nicht
+			extra.addAll(sales.extra());
+			note = firstNote(unit, note, sales.note());
+		}
 		return new Resolution(payload, payload == null, extra, note);
+	}
+
+	/** Eine Version trägt nur einen Vermerk: Der erste bleibt, ein weiterer wird nur gemeldet. */
+	private static ConflictNote firstNote(UnitKey unit, ConflictNote first, ConflictNote next) {
+		if (first == null) {
+			return next;
+		}
+		LOGGER.warning("Zwei Vermerke an " + unit.relativePath() + "; nur der erste wird geschrieben.");
+		return first;
+	}
+
+	/**
+	 * Zwei neue Verkäufe auf der Einheit neben den entschiedenen Buchungen (KARV-201): Beide Seiten haben je eine andere,
+	 * nicht entschiedene Buchung hingesetzt, etwa weil beide die Buchung der Basis storniert und den Sitz neu verkauft
+	 * haben (E1). Die Spur sagt dazu nichts; es gilt Regel 3 wie ohne sie: {@link #doubleSale Doppelverkauf}, mit einer
+	 * unlesbaren "Meine" UNMERGED. Nur für eine Buchung, die dieser Rechner hier selbst hingesetzt hat
+	 * ({@link BookingTrail#placedByOwn}): Ist "Meine" eine verlorene Auflösung, trägt sie sonst die Buchung der anderen
+	 * Seite, und die lebte "ohne Platz" wieder auf, obwohl jene sie inzwischen ersetzt hat.
+	 *
+	 * @return die Auflösung der beiden Verkäufe, oder {@code null}, wenn nicht jede Seite eine solche Buchung trägt
+	 */
+	private static Resolution newSales(ConflictInput input, Set<String> decided) {
+		String mineId = idOf(input.mine());
+		String theirsId = idOf(input.theirs());
+		if (mineId == null || theirsId == null || mineId.equals(theirsId) || decided.contains(mineId)
+				|| decided.contains(theirsId) || !BookingTrail.placedByOwn(input, mineId)) {
+			return null;
+		}
+		return PolicyRules.isReadable(input, input.mine()) ? doubleSale(input, mineId) : PolicyRules.unmerged(input);
 	}
 
 	/**
@@ -652,7 +686,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * Löschung auf; eine Erstversion übersprünge die Auflösung, weil die Einheit schon Versionen hat. Lebt {@code _<ID>}
 	 * schon, entsteht keine zweite Fassung darauf (der eigene Inhalt steht nur noch in "Meine"). Ein Umzug der Buchung
 	 * hierher kommt hier nicht an: Ihn entscheidet {@link #moves} (KARV-93); hierher gelangen nur zwei verschiedene neue
-	 * Verkäufe auf demselben Sitz.
+	 * Verkäufe auf demselben Sitz, mit Spur über {@link #newSales}.
 	 * <p>
 	 * Ist die Einheit selbst schon {@code _<ID>}, kann die Buchung nicht weiter ausweichen: "Deren" bleibt, Vermerk UNMERGED.
 	 */
