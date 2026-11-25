@@ -12,6 +12,12 @@
   fehlt die Kennung der Buchung), bleibt jetzt stehen, was die andere Kasse gespeichert hat: Die
   eigene Buchung steht unter „Ohne Platz“, oder die Kasse bekommt einen Hinweis. Bisher konnte die
   eigene Buchung den Platz der anderen überschreiben oder selbst ohne Hinweis wegfallen.
+- Fehlt der Fassung einer Kasse die Kennung der Buchung, gilt das beim Abgleich nicht mehr als
+  Storno: Eine Buchung, die die andere Kasse geändert oder auf einen anderen Platz verschoben hat,
+  bleibt erhalten. Bisher konnte sie ohne Hinweis wegfallen.
+- Stammt die eigene Fassung eines Platzes aus einer neueren Programmversion und hat die andere Kasse
+  die Buchung dort storniert oder geändert, belegt der Abgleich den Platz nicht mehr mit dieser
+  Fassung; die Kasse bekommt stattdessen einen Hinweis.
 
 ## 1.1.1
 

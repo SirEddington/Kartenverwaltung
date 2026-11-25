@@ -112,7 +112,9 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * Spur, die die Buchung nicht mehr tragen dürfen, eine Löschung.</li>
 	 * <li>Den Vermerk schreibt die Einheit, die das Ergebnis dafür nennt; einem Vermerk ohne Gegenseite (am Ziel eines
 	 * gescheiterten Umzugs) gibt sie die Version, die den Inhalt hier eingebracht hat. Eine Version trägt nur einen
-	 * Vermerk: Fallen mehrere an, bleibt der erste, die der Tabelle vor dem des Doppelverkaufs.</li>
+	 * Vermerk: Fallen mehrere an, bleibt der erste, die der Tabelle vor dem des Doppelverkaufs. Nur UNMERGED geht dem der
+	 * Tabelle vor (KARV-210): Die eigene Fassung fiele sonst ohne Hinweis weg, ein Vermerk der Tabelle daneben betrifft
+	 * nur eine Änderung an der Buchung, die dieser Rechner storniert hat.</li>
 	 * </ul>
 	 *
 	 * @return die Auflösung, oder {@code null}, wenn keine Buchung zu entscheiden ist (oder beide Seiten dieselbe Buchung
@@ -196,18 +198,17 @@ public final class BookingPolicy implements ConflictPolicy {
 				}
 			}
 		}
-		// die Vermerke der Tabelle zuerst: Ihre Zeilen ändert der Doppelverkauf daneben nicht
+		// die Vermerke der Tabelle zuerst: Ihre Zeilen ändert der Doppelverkauf daneben nicht; UNMERGED geht vor (KARV-210)
 		extra.addAll(here.extra());
-		if (here.note() != null) {
-			note = firstNote(unit, note, here.note());
-		}
+		note = here.note() != null && here.note().kind() == ConflictNote.Kind.UNMERGED ? firstNote(unit, here.note(), note)
+				: firstNote(unit, note, here.note());
 		return new Resolution(here.payload(), here.deleted(), extra, note);
 	}
 
 	/** Eine Version trägt nur einen Vermerk: Der erste bleibt, ein weiterer wird nur gemeldet. */
 	private static ConflictNote firstNote(UnitKey unit, ConflictNote first, ConflictNote next) {
-		if (first == null) {
-			return next;
+		if (first == null || next == null) {
+			return first == null ? next : first;
 		}
 		LOGGER.warning("Zwei Vermerke an " + unit.relativePath() + "; nur der erste wird geschrieben.");
 		return first;
@@ -222,7 +223,9 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * ohne "Meine", der Vermerk UNMERGED sagt es diesem Rechner; ohne Vermerk, wenn "Deren" denselben Inhalt trägt. Das
 	 * gilt auch auf dem geräumten Sitz: Anders als {@link #saleOnCancelledSeat} ohne Spur setzt die Auflösung hier keinen
 	 * Inhalt ohne Kennung als neuen Verkauf hin.</li>
-	 * <li>Nur "Meine" hat etwas hingesetzt: ein neuer Verkauf auf dem geräumten Sitz, er gilt.</li>
+	 * <li>Nur "Meine" hat etwas hingesetzt: ein neuer Verkauf auf dem geräumten Sitz, er gilt. Ist "Meine" unlesbar
+	 * (KARV-210), bleibt es wie ohne "Meine", mit dem Vermerk UNMERGED; so auch ohne Spur ({@link #saleOnCancelledSeat}).
+	 * Er geht einem Vermerk der Tabelle vor (etwa DELETE_WINS an die andere Seite, die die Buchung geändert hat).</li>
 	 * <li>Beide Seiten haben je etwas anderes hingesetzt (KARV-201), etwa weil beide die Buchung der Basis storniert und
 	 * den Sitz neu verkauft haben (E1): Regel 3 wie ohne Spur, {@link #doubleSale Doppelverkauf}, mit einer unlesbaren
 	 * "Meine" UNMERGED. Nur für eine Buchung, die dieser Rechner hier selbst hingesetzt hat
@@ -240,17 +243,26 @@ public final class BookingPolicy implements ConflictPolicy {
 		}
 		String mineId = idOf(mine);
 		if (mineId == null) {
-			return PolicyRules.sameContent(mine, theirs) ? withoutMine
-					: new Resolution(withoutMine.payload(), withoutMine.deleted(), List.of(),
-							PolicyRules.unmerged(input).note());
+			return PolicyRules.sameContent(mine, theirs) ? withoutMine : unmergedWithout(input, withoutMine);
 		}
 		if (!theirsPlaced) {
-			return new Resolution(mine.payload(), false, List.of(), null);
+			// eine unlesbare "Meine" (KARV-210) setzt die Auflösung nicht hin; das Ergebnis der Tabelle bleibt
+			return PolicyRules.isReadable(input, mine) ? new Resolution(mine.payload(), false, List.of(), null)
+					: unmergedWithout(input, withoutMine);
 		}
 		if (mineId.equals(idOf(theirs)) || !BookingTrail.placedByOwn(input, mineId)) {
 			return withoutMine;
 		}
-		return PolicyRules.isReadable(input, mine) ? doubleSale(input, mineId) : PolicyRules.unmerged(input);
+		return PolicyRules.isReadable(input, mine) ? doubleSale(input, mineId) : unmergedWithout(input, withoutMine);
+	}
+
+	/**
+	 * Das Ergebnis ohne "Meine" mit dem Vermerk UNMERGED an diesen Rechner. Anders als {@link PolicyRules#unmerged} bleibt
+	 * nicht unbedingt "Deren", sondern was ohne "Meine" gilt: Trägt "Deren" eine entschiedene Buchung, lebte sie sonst
+	 * wieder auf.
+	 */
+	private static Resolution unmergedWithout(ConflictInput input, Resolution withoutMine) {
+		return new Resolution(withoutMine.payload(), withoutMine.deleted(), List.of(), PolicyRules.unmerged(input).note());
 	}
 
 	/**
@@ -313,10 +325,17 @@ public final class BookingPolicy implements ConflictPolicy {
 		return mergeBooking(withPlaceOf(base.payload(), theirs.payload()), mine.payload(), theirs.payload());
 	}
 
-	/** Die Entscheidung für eine Buchung an ihrer Quelle, oder {@code null}, wenn keine Seite sie weggenommen hat. */
+	/**
+	 * Die Entscheidung für eine Buchung an ihrer Quelle, oder {@code null}, wenn keine Seite sie weggenommen hat. Inhalt
+	 * ohne Kennung zählt nur neben einem Storno der anderen Seite als Storno ({@link BookingTrail#against}, KARV-209):
+	 * Dann ist die Buchung ohnehin weg, und {@link #undecided} sagt diesem Rechner, was aus dem Inhalt wird. Hat die andere
+	 * Seite die Buchung behalten oder umgezogen, nimmt ihn die Spur nicht als Storno; es entscheiden die Regeln ohne Spur.
+	 */
 	private static BookingFate fateAt(ConflictInput input, String bookingId, UnitKey source, Version base) {
-		BookingTrail own = BookingTrail.of(input, bookingId, source, base.id(), true);
-		BookingTrail foreign = BookingTrail.of(input, bookingId, source, base.id(), false);
+		BookingTrail ownRead = BookingTrail.of(input, bookingId, source, base.id(), true);
+		BookingTrail foreignRead = BookingTrail.of(input, bookingId, source, base.id(), false);
+		BookingTrail own = ownRead.against(foreignRead);
+		BookingTrail foreign = foreignRead.against(ownRead);
 		if (!removed(own) && !removed(foreign)) {
 			return null;
 		}
