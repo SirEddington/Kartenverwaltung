@@ -33,7 +33,13 @@
         </VBox>
 
         <VBox spacing="2.0" HBox.hgrow="SOMETIMES">
-            <Label text="Vorstellung" styleClass="field-caption" />
+            <!-- Rechts die freien Karten (KARV-215), gebaut wie die Trefferzahl über der Suche: Die Zeile hebt weder Mindest-
+                 noch Vorzugsbreite des Felds; bei Platzmangel kürzt "Vorstellung", die Zahl bleibt lesbar. -->
+            <HBox minWidth="0.0" prefWidth="0.0">
+                <Label text="Vorstellung" styleClass="field-caption" minWidth="0.0" />
+                <Region HBox.hgrow="ALWAYS" minWidth="4.0" />
+                <Label fx:id="lblFreeSeats" styleClass="field-caption" minWidth="-Infinity" />
+            </HBox>
             <ComboBox fx:id="presComboBox" prefWidth="160.0" minWidth="100.0" maxWidth="Infinity" />
         </VBox>
 

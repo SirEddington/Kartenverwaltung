@@ -106,6 +106,11 @@ as a hit — the table rows (after search and column filters) or the seats in th
 with an empty search, where it includes free seats. Its tooltip breaks the hits down by name (at most 15 names) and,
 with "Alle Vorstellungen", by presentation.
 
+**Free tickets:** above the "Vorstellung" box, **"frei: n von m"** shows how many seats of the selected presentation
+can still be sold (n) out of the free and taken seats (m); with "Alle Vorstellungen" both are sums. Locked seats and
+bookings without a place are not counted, and the search does not change the number. The tooltip lists every counted
+presentation and, if there are any, the number of locked seats.
+
 **"Buchungen sofort speichern"** (setting, on by default): every booking change is saved immediately; the popup's
 button is then called "Speichern" instead of "Anwenden". With the setting off, use "Speichern"; leaving the screen
 with unsaved changes asks *Speichern / Nicht speichern / Abbrechen*.
