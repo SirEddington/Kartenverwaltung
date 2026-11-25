@@ -228,20 +228,16 @@ class BookingValidatorTest {
 		assertTrue(BookingValidator.validate(booking).isEmpty());
 	}
 
+	/** KARV-216: Eine Karte für 0 € ist bezahlt, weil nichts zu bezahlen ist; das frühere {@code SEA-006} entfällt. */
 	@Test
-	void paidWithoutPriceIsAWarningAndUsesTheEffectivePrice() {
+	void paidWithZeroPriceIsNoWarning() {
 		Booking booking = booking();
 		booking.setPaymentStatus(PaymentStatus.CASH);
 		booking.setLastName("Muster");
 		datedForActions(booking);
-		assertTrue(BookingValidator.validate(booking).isEmpty(), "Standardpreis 12,50 € zählt");
-
 		booking.setPrice(0);
-		ValidationIssue issue = only(BookingValidator.validate(booking));
 
-		assertEquals("SEA-006", issue.code());
-		assertEquals(Severity.WARNING, issue.severity());
-		assertEquals("Prunksitzung, Tisch A3, Sitz 2 ist als bezahlt markiert, der Preis beträgt aber 0,00 €.", issue.message());
+		assertTrue(BookingValidator.validate(booking).isEmpty());
 	}
 
 	@Test
