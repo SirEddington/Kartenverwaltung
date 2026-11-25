@@ -8,6 +8,10 @@
   „Ohne Platz“, und ihre Kasse bekommt einen Hinweis. Bisher verschwand die zweite Buchung ohne
   Hinweis, wenn der Platz vorher schon einmal gebucht war, etwa weil beide Kassen ihn storniert und
   neu verkauft haben oder weil er noch einen alten Kommentar trug.
+- Haben zwei Kassen denselben Platz neu belegt und ist eine der beiden Fassungen beschädigt (ihr
+  fehlt die Kennung der Buchung), bleibt jetzt stehen, was die andere Kasse gespeichert hat: Die
+  eigene Buchung steht unter „Ohne Platz“, oder die Kasse bekommt einen Hinweis. Bisher konnte die
+  eigene Buchung den Platz der anderen überschreiben oder selbst ohne Hinweis wegfallen.
 
 ## 1.1.1
 

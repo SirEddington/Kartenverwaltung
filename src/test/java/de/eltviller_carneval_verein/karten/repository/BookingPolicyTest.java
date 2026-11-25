@@ -1518,10 +1518,20 @@ class BookingPolicyTest {
 		final Version mine;
 
 		BothReplaced(boolean theirsLocked, boolean mineLocked) {
-			theirs = world.claim(s1, world.version(TrailFixture.OTHER, base, TrailFixture.booking("t", "s1"))
-					.withNewerContent(theirsLocked));
-			mine = world.beside(s1, world.version(TrailFixture.OWN, base, TrailFixture.booking("m", "s1"))
-					.withNewerContent(mineLocked));
+			this(TrailFixture.booking("t", "s1"), theirsLocked, TrailFixture.booking("m", "s1"), mineLocked);
+		}
+
+		/** Mit diesen Inhalten statt t und m; ohne Inhalt eine Löschung. */
+		BothReplaced(ObjectNode theirsPayload, boolean theirsLocked, ObjectNode minePayload, boolean mineLocked) {
+			theirs = world.claim(s1, world.version(TrailFixture.OTHER, base, theirsPayload).withNewerContent(theirsLocked));
+			mine = world.beside(s1, world.version(TrailFixture.OWN, base, minePayload).withNewerContent(mineLocked));
+		}
+
+		/** Eine Buchung auf s1 ohne Kennung: Inhalt, wie ihn dieses Programm nicht schreibt (beschädigt oder fremd). */
+		static ObjectNode withoutId(String lastName) {
+			ObjectNode payload = TrailFixture.booking("ohne", "s1", b -> b.setLastName(lastName));
+			payload.remove(ConflictInput.BOOKING_ID);
+			return payload;
 		}
 
 		Resolution resolve(Map<UnitKey, Sibling> siblings) {
@@ -1600,6 +1610,154 @@ class BookingPolicyTest {
 		Resolution resolution = given.resolve(Map.of());
 
 		assertEquals(given.theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertEquals(Kind.UNMERGED, resolution.note().kind());
+		assertEquals(TrailFixture.OWN, resolution.note().affected());
+		assertEquals(given.mine.id(), resolution.note().dropped());
+	}
+
+	/** KARV-205: Ein lebendes "Deren" ohne Kennung bleibt auch mit Spur stehen; "Meine" weicht nach {@code _m}. */
+	@Test
+	void bothReplacedWithATrailAndTheirsWithoutAnIdIsADoubleSale() {
+		BothReplaced given = new BothReplaced(BothReplaced.withoutId("Fremd"), false, TrailFixture.booking("m", "s1"),
+				false);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertFalse(resolution.deleted());
+		assertEquals(given.theirs.payload(), resolution.payload());
+		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
+		assertEquals(given.s1, extraAt(resolution, given.parkedUnit).marks().movedFrom());
+		assertEquals(given.mine.id(), resolution.note().dropped());
+	}
+
+	/** KARV-205: Ebenso, wenn "Deren" inhaltlich zu neu ist und seine Kennung sich nicht lesen lässt. */
+	@Test
+	void bothReplacedWithATrailAndLockedTheirsWithoutAnIdIsADoubleSale() {
+		BothReplaced given = new BothReplaced(BothReplaced.withoutId("Fremd"), true, TrailFixture.booking("m", "s1"),
+				false);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertFalse(resolution.deleted());
+		assertSame(given.theirs.payload(), resolution.payload());
+		assertEquals(Kind.DOUBLE_SALE, resolution.note().kind());
+		assertEquals(given.s1, extraAt(resolution, given.parkedUnit).marks().movedFrom());
+	}
+
+	/** KARV-205: Hat "Meine" die Buchung der Basis nur storniert, bleibt ein lebendes "Deren" ohne Kennung stehen. */
+	@Test
+	void bothReplacedWithATrailAndMyCancellationKeepsTheirsWithoutAnId() {
+		BothReplaced given = new BothReplaced(BothReplaced.withoutId("Fremd"), false, null, false);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertFalse(resolution.deleted());
+		assertEquals(given.theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertNull(resolution.note());
+	}
+
+	/**
+	 * KARV-205: Hat "Meine" die Buchung der Basis nur geändert, gilt das Storno der anderen Seite (E2), und ihr Inhalt ohne
+	 * Kennung bleibt auf dem Sitz.
+	 */
+	@Test
+	void myEditAgainstTheirsWithoutAnIdKeepsTheirsAndIsDeleteWins() {
+		BothReplaced given = new BothReplaced(BothReplaced.withoutId("Fremd"), false,
+				TrailFixture.booking("x", "s1", b -> b.setComment("Rollstuhl")), false);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertFalse(resolution.deleted());
+		assertEquals(given.theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertEquals(Kind.DELETE_WINS, resolution.note().kind());
+		assertEquals(TrailFixture.OWN, resolution.note().affected());
+		assertEquals(given.mine.id(), resolution.note().dropped());
+	}
+
+	/** KARV-205, E11: Scheitert der eigene Umzug an einem Inhalt ohne Kennung, bleibt der stehen; m parkt. */
+	@Test
+	void aloneFailedAgainstTheirsWithoutAnIdKeepsTheirs() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		UnitKey s3 = TrailFixture.seat("s3");
+		Version seated = world.claim(s3, world.version(TrailFixture.THIRD, null, TrailFixture.booking("m", "s3")));
+		world.claim(s3, world.version(TrailFixture.OWN, "save-b", seated, null, TrailFixture.to(s1)));
+		Version theirs = world.claim(s1, world.version(TrailFixture.OTHER, null, BothReplaced.withoutId("Fremd")));
+		Version arrival = world.beside(s1, world.version(TrailFixture.OWN, "save-b", null, TrailFixture.booking("m", "s1"),
+				TrailFixture.from(s3)));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, null, List.of(arrival)));
+
+		assertFalse(resolution.deleted());
+		assertEquals(theirs.payload(), resolution.payload());
+		assertEquals(s3, extraAt(resolution, TrailFixture.unassigned("m")).marks().movedFrom());
+	}
+
+	/**
+	 * KARV-205: Die verlorene Strecke ist eine Auflösung, die nur den Inhalt der anderen Seite trägt (a); die hat den Sitz
+	 * inzwischen mit einem Inhalt ohne Kennung überschrieben. Kein Verkauf dieses Rechners: "Deren" bleibt ohne Vermerk.
+	 */
+	@Test
+	void lostResolutionCarryingTheirBookingKeepsTheirsWithoutAnId() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		Version base = world.claim(s1, world.version(TrailFixture.THIRD, null, TrailFixture.booking("x", "s1")));
+		Version sold = world.claim(s1, world.version(TrailFixture.OTHER, base, TrailFixture.booking("a", "s1")));
+		Version lost = world.beside(s1, world.version(TrailFixture.OWN, base, TrailFixture.booking("b", "s1")));
+		Version merged = world.beside(s1,
+				world.merge(TrailFixture.OWN, "save-r", List.of(sold, lost), TrailFixture.booking("a", "s1")));
+		Version overwritten = world.claim(s1, world.version(TrailFixture.OTHER, sold, BothReplaced.withoutId("Fremd")));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, base, List.of(merged)));
+
+		assertFalse(resolution.deleted());
+		assertEquals(overwritten.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertNull(resolution.note());
+	}
+
+	/** KARV-205, KARV-206: Tragen beide Seiten denselben Inhalt ohne Kennung, bleibt er stehen, ohne Vermerk. */
+	@Test
+	void bothReplacedWithATrailAndTheSameContentWithoutAnIdKeepsIt() {
+		BothReplaced given = new BothReplaced(BothReplaced.withoutId("Gleich"), false, BothReplaced.withoutId("Gleich"),
+				false);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertFalse(resolution.deleted());
+		assertEquals(given.theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertNull(resolution.note());
+	}
+
+	/** KARV-206: Eine "Meine" mit Inhalt, aber ohne Kennung, weicht "Deren" nicht still: Vermerk UNMERGED. */
+	@Test
+	void bothReplacedWithATrailAndMineWithoutAnIdIsUnmerged() {
+		BothReplaced given = new BothReplaced(TrailFixture.booking("t", "s1"), false, BothReplaced.withoutId("Eigen"),
+				false);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertFalse(resolution.deleted());
+		assertEquals(given.theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertEquals(Kind.UNMERGED, resolution.note().kind());
+		assertEquals(TrailFixture.OWN, resolution.note().affected());
+		assertEquals(given.mine.id(), resolution.note().dropped());
+	}
+
+	/** KARV-206: Ebenso gegen eine Löschung: Die Einheit bleibt gelöscht, aber dieser Rechner erfährt es. */
+	@Test
+	void bothReplacedWithATrailAndMineWithoutAnIdAgainstADeletionIsUnmerged() {
+		BothReplaced given = new BothReplaced(null, false, BothReplaced.withoutId("Eigen"), false);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertTrue(resolution.deleted());
+		assertNull(resolution.payload());
 		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
 		assertEquals(Kind.UNMERGED, resolution.note().kind());
 		assertEquals(TrailFixture.OWN, resolution.note().affected());
