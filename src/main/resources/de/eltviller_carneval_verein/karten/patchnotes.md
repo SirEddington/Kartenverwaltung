@@ -9,25 +9,19 @@
   zählen nicht mit.
 
 ### Verbessert
-- Eine Karte für 0 € gilt als bezahlt, weil nichts zu bezahlen ist. Die Warnung „… ist als bezahlt
-  markiert, der Preis beträgt aber 0,00 €“ (SEA-006) erscheint deshalb nicht mehr.
+- Ist eine Karte für 0 € als bezahlt markiert, erscheint die Warnung „… ist als bezahlt markiert,
+  der Preis beträgt aber 0,00 €“ (SEA-006) nicht mehr: Bei 0 € ist nichts zu bezahlen.
 
 ### Behoben
 - Verkaufen zwei Kassen denselben Platz, bevor der Abgleich den ersten Verkauf gebracht hat,
-  bleiben jetzt immer beide Buchungen erhalten: Eine behält den Platz, die andere steht unter
-  „Ohne Platz“, und ihre Kasse bekommt einen Hinweis. Bisher verschwand die zweite Buchung ohne
-  Hinweis, wenn der Platz vorher schon einmal gebucht war, etwa weil beide Kassen ihn storniert und
-  neu verkauft haben oder weil er noch einen alten Kommentar trug.
-- Haben zwei Kassen denselben Platz neu belegt und ist eine der beiden Fassungen beschädigt (ihr
-  fehlt die Kennung der Buchung), bleibt jetzt stehen, was die andere Kasse gespeichert hat: Die
-  eigene Buchung steht unter „Ohne Platz“, oder die Kasse bekommt einen Hinweis. Bisher konnte die
-  eigene Buchung den Platz der anderen überschreiben oder selbst ohne Hinweis wegfallen.
-- Fehlt der Fassung einer Kasse die Kennung der Buchung, gilt das beim Abgleich nicht mehr als
-  Storno: Eine Buchung, die die andere Kasse geändert oder auf einen anderen Platz verschoben hat,
-  bleibt erhalten. Bisher konnte sie ohne Hinweis wegfallen.
-- Stammt die eigene Fassung eines Platzes aus einer neueren Programmversion und hat die andere Kasse
-  die Buchung dort storniert oder geändert, belegt der Abgleich den Platz nicht mehr mit dieser
-  Fassung; die Kasse bekommt stattdessen einen Hinweis.
+  bleiben jetzt auch dann beide Buchungen erhalten, wenn der Platz vorher schon einmal gebucht war,
+  etwa weil beide Kassen ihn storniert und neu verkauft haben oder weil er noch einen alten
+  Kommentar trug: Eine behält den Platz, die andere steht unter „Ohne Platz“, und ihre Kasse
+  bekommt einen Hinweis. Bisher verschwand die zweite Buchung in diesem Fall ohne Hinweis.
+- In seltenen Fällen konnte beim Abgleich zweier Kassen eine Buchung ohne Hinweis wegfallen oder
+  überschrieben werden: wenn die gespeicherten Daten eines Platzes beschädigt waren oder aus einer
+  neueren Programmversion stammten. Jetzt bleibt die Buchung in diesen Fällen erhalten, oder die
+  betroffene Kasse bekommt einen Hinweis.
 
 ## 1.1.1
 
