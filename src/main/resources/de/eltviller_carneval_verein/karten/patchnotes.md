@@ -2,6 +2,12 @@
 
 ## 1.1.2
 
+### Neu
+- Im Kartenverkauf steht über dem Auswahlfeld „Vorstellung“ jetzt immer, wie viele Karten noch frei
+  sind, zum Beispiel „frei: 42 von 180“. Bei „Alle Vorstellungen“ ist es die Summe; fährt man mit
+  der Maus darüber, steht dort die Zahl je Vorstellung. Gesperrte Plätze und Buchungen ohne Platz
+  zählen nicht mit.
+
 ### Behoben
 - Verkaufen zwei Kassen denselben Platz, bevor der Abgleich den ersten Verkauf gebracht hat,
   bleiben jetzt immer beide Buchungen erhalten: Eine behält den Platz, die andere steht unter

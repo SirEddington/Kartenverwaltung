@@ -335,3 +335,18 @@ Nicht belegt:
   5 prüft es im Handtest.
 - Ob eine Vorstellung, deren Kopf ein Rechner mit neuerer Programmversion gespeichert hat, im Modell bleibt und
   ihre Sitze dann als frei zählen.
+
+**Nachtrag aus der Umsetzung (25.11.2026, Handtest unter Windows mit dem Treiber):**
+
+- Breiten gemessen: Bei 1250 px Fensterbreite bleiben „Event“, „Vorstellung“ und „Suche“ je 160 px breit.
+  „Vorstellung“ braucht 51 px, „frei: 999 von 999“ 76 px, „frei: 1234 von 2400“ 87 px, „frei: 12345 von 23456“
+  98 px (Calibri 11). Auch fünfstellige Summen stehen also ungekürzt neben der Beschriftung, und bei der
+  Mindestbreite des Feldes (100 px) passt eine vierstellige Summe in die Zeile. Linux bleibt ungemessen.
+- Strg+S aus einer offenen Tabellenzelle: Ohne den Auslöser 4 blieb die Zahl nach einer Reservierung stehen, mit ihm
+  folgt sie sofort.
+- Eine Vorstellung, deren Kopf als „mit einer neueren Version gespeichert“ gesperrt ist (SYS-009), fehlt im Modell:
+  Sie steht nicht im Auswahlfeld und zählt nirgends mit.
+- Nicht nachgestellt: Änderungen eines zweiten Rechners (Buchung, Bestuhlung), das Entsperren und „Buchungen sofort
+  speichern“ auf Nein.
+- Aus dem Code-Review: Die Anbindung der Auslöser in der Shell hat keinen automatischen Test, wie im Entwurf
+  vorgesehen; nur die Zählung (`FreeSeatsTest`) ist gedeckt.

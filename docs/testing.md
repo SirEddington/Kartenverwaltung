@@ -53,7 +53,7 @@ the production code.
 | `tracking` | `ChangeTrackerTest`, `StateRestorerTest` | Unit |
 | `update` | `AppVersionTest`, `InstallationTest`, `UpdateInfoTest`, `GrundTest`, `UpdateStateTest`, `UpdateCheckerTest` (fake scheduler), `HttpUpdateSourceTest` (small `ServerSocket` server; the module does not read `jdk.httpserver`), `FolderUpdatesTest`, `FolderDecisionTest`, `FolderDownloaderTest`, `FolderWatchTest`, `StationRegistryTest`, `MsixManifestTest`, `PatchNotesTest`, `PatchNotesMarkdownTest`, `PatchNotesOnStartTest`, `PatchNotesExportTest`, `PatchNotesBundledTest` | Unit |
 | `ui.hall` | `SeatingPlanLayoutTest` (equal sections, distance by diameter), `PlanTextTest`, `PlanLabelOptionsTest`, `TableRowBulkEditTest`, `LayoutChecksTest` (arranged plans report nothing) | Unit |
-| `ui.sales` | `SeatLookTest` (four states distinguishable in grayscale and under simulated red-green deficiency), `TableLabelTest`, `CustomerDisplayTextTest`, `SeatBulkEdit`, `BookingSearch`, `SearchHitsTest`, `PlaceAssignment`, `MoneyConsistencyTest`, … | Unit |
+| `ui.sales` | `SeatLookTest` (four states distinguishable in grayscale and under simulated red-green deficiency), `TableLabelTest`, `CustomerDisplayTextTest`, `SeatBulkEdit`, `BookingSearch`, `SearchHitsTest`, `FreeSeatsTest`, `PlaceAssignment`, `MoneyConsistencyTest`, … | Unit |
 | other `ui` logic | savers, `LeaveGuard`, `LiveUpdates`, `DisplayPreferencesTest`, `shared` (`ConnectFlowTest`, `SharedFolderStartTest`, `SyncStatusTest`, …), `backup`, `input` | Unit |
 | `ui` end to end | `PlanEditsEndToEndTest` (edit seating plan, save, reload, delete plan — no booking with data lost, no cent changed) | Integration |
 
