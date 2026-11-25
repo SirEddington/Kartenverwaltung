@@ -1765,6 +1765,113 @@ class BookingPolicyTest {
 	}
 
 	/**
+	 * KARV-209: Hat "Deren" die Buchung der Basis nur geändert und hat "Meine" Inhalt ohne Kennung, ist "Meine" kein Storno:
+	 * Wie ohne Spur bleibt "Deren" mit x, der Vermerk UNMERGED sagt es diesem Rechner.
+	 */
+	@Test
+	void theirEditAgainstMineWithoutAnIdKeepsTheirsAndIsUnmerged() {
+		BothReplaced given = new BothReplaced(TrailFixture.booking("x", "s1", b -> b.setComment("Rollstuhl")), false,
+				BothReplaced.withoutId("Eigen"), false);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertFalse(resolution.deleted());
+		assertEquals(given.theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertEquals(Kind.UNMERGED, resolution.note().kind());
+		assertEquals(TrailFixture.OWN, resolution.note().affected());
+		assertEquals(given.mine.id(), resolution.note().dropped());
+	}
+
+	/**
+	 * KARV-209, Spiegelfall mit Umzug: Hat "Meine" x nach s2 verschoben und "Deren" nur Inhalt ohne Kennung auf s1, ist
+	 * "Deren" kein Storno, das den Umzug zurücknimmt: Der Inhalt bleibt auf s1, x in s2, ohne Vermerk.
+	 */
+	@Test
+	void myMoveAgainstTheirsWithoutAnIdKeepsBoth() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		UnitKey s2 = TrailFixture.seat("s2");
+		Version base = world.claim(s1, world.version(TrailFixture.THIRD, null, TrailFixture.booking("x", "s1")));
+		Version theirs = world.claim(s1, world.version(TrailFixture.OTHER, base, BothReplaced.withoutId("Fremd")));
+		Version moved = world.beside(s1, world.version(TrailFixture.OWN, "save-m", base, null, TrailFixture.to(s2)));
+		world.claim(s2, world.version(TrailFixture.OWN, "save-m", null, TrailFixture.booking("x", "s2"),
+				TrailFixture.from(s1)));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, base, List.of(moved)));
+
+		assertFalse(resolution.deleted());
+		assertEquals(theirs.payload(), resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertNull(resolution.note());
+	}
+
+	/**
+	 * KARV-209 mit zwei anderen Rechnern: Der eine hat auf s1 nur Inhalt ohne Kennung, der andere hat x nach s2 verschoben.
+	 * Der Inhalt ohne Kennung verdrängt den Umzug nicht, gleich in welcher Reihenfolge die Rechner gelesen werden: Die
+	 * eigene Änderung an x folgt ihm nach s2, s1 behält den Inhalt.
+	 */
+	@Test
+	void foreignMoveIsNotHiddenByAnotherMachinesContentWithoutAnId() {
+		TrailFixture world = new TrailFixture();
+		UnitKey s1 = TrailFixture.seat("s1");
+		UnitKey s2 = TrailFixture.seat("s2");
+		Version base = world.claim(s1, world.version(TrailFixture.OWN, null, TrailFixture.booking("x", "s1")));
+		Version theirs = world.claim(s1, world.version(TrailFixture.OTHER, base, BothReplaced.withoutId("Fremd")));
+		world.beside(s1, world.version(TrailFixture.THIRD, "save-t", base, null, TrailFixture.to(s2)));
+		world.claim(s2, world.version(TrailFixture.THIRD, "save-t", null, TrailFixture.booking("x", "s2"),
+				TrailFixture.from(s1)));
+		Version mine = world.beside(s1, world.version(TrailFixture.OWN, base,
+				TrailFixture.booking("x", "s1", b -> b.setComment("Rollstuhl"))));
+
+		Resolution resolution = new BookingPolicy().resolve(world.input(s1, base, List.of(mine)));
+
+		assertFalse(resolution.deleted());
+		assertEquals(theirs.payload(), resolution.payload());
+		assertEquals("Rollstuhl", extraAt(resolution, s2).payload().get("comment").asText());
+		assertNull(resolution.note());
+	}
+
+	/**
+	 * KARV-210: Hat "Deren" die Buchung der Basis storniert und "Meine" sie durch eine inhaltlich zu neue Fassung ersetzt,
+	 * setzt die Auflösung die nicht hin: Wie ohne Spur ({@code saleOnCancelledSeat}) bleibt die Löschung, Vermerk UNMERGED.
+	 */
+	@Test
+	void myUnreadableSaleAgainstTheirCancellationIsUnmerged() {
+		BothReplaced given = new BothReplaced(null, false, TrailFixture.booking("m", "s1"), true);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertTrue(resolution.deleted());
+		assertNull(resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertEquals(Kind.UNMERGED, resolution.note().kind());
+		assertEquals(TrailFixture.OWN, resolution.note().affected());
+		assertEquals(given.mine.id(), resolution.note().dropped());
+	}
+
+	/**
+	 * KARV-210: Hat "Deren" die Buchung der Basis nur geändert, gilt das eigene Storno (E2), auch wenn die neue Fassung von
+	 * "Meine" inhaltlich zu neu ist: Der Sitz wird geleert, nicht mit ihr belegt, und x lebt nicht wieder auf. Eine Version
+	 * trägt nur einen Vermerk: UNMERGED an diesen Rechner geht dem DELETE_WINS der Tabelle an die andere Seite vor, denn
+	 * sonst fiele der eigene Verkauf ohne Hinweis weg.
+	 */
+	@Test
+	void myUnreadableSaleAgainstTheirEditClearsTheSeatAndIsUnmerged() {
+		BothReplaced given = new BothReplaced(TrailFixture.booking("x", "s1", b -> b.setComment("Rollstuhl")), false,
+				TrailFixture.booking("m", "s1"), true);
+
+		Resolution resolution = given.resolve(Map.of());
+
+		assertTrue(resolution.deleted());
+		assertNull(resolution.payload());
+		assertTrue(resolution.extra().isEmpty(), resolution.extra().toString());
+		assertEquals(Kind.UNMERGED, resolution.note().kind());
+		assertEquals(TrailFixture.OWN, resolution.note().affected());
+		assertEquals(given.mine.id(), resolution.note().dropped());
+	}
+
+	/**
 	 * KARV-201: Die verlorene Strecke ist eine Auflösung, die den Sitz der anderen Seite ließ (a) und b parkte; die andere
 	 * Seite hat a inzwischen storniert und den Sitz an a2 verkauft. Die Auflösung trägt a nur als deren Inhalt: kein
 	 * Verkauf dieses Rechners, a lebt nicht "ohne Platz" wieder auf.

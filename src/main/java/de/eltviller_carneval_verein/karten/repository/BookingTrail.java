@@ -73,6 +73,22 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 	private static final BookingTrail UNTOUCHED = new BookingTrail(Kind.UNTOUCHED, null, null, null);
 
 	/**
+	 * Diese Absicht neben der der anderen Seite (KARV-209): Fiel die Buchung an der Quelle nur durch Inhalt ohne Kennung
+	 * weg, lässt sich nicht sagen, ob die Seite storniert hat. Das zählt als Storno nur neben einem Storno der anderen
+	 * Seite (dann ist die Buchung ohnehin weg); sonst hat die Seite die Buchung nicht angefasst. Fällt sie erst am Ziel
+	 * eines Umzugs so weg, bleibt es beim Storno: Die Buchung lebte sonst an der Quelle wieder auf.
+	 */
+	BookingTrail against(BookingTrail other) {
+		return cancelledByContentWithoutId() && other.kind != Kind.CANCELLED ? UNTOUCHED : this;
+	}
+
+	/** Ob die Buchung an der Quelle durch eine lebende Version ohne Kennung und ohne Umzug wegfiel. */
+	private boolean cancelledByContentWithoutId() {
+		return kind == Kind.CANCELLED && !removal.deleted() && BookingPolicy.idOf(removal) == null
+				&& removal.marks().movedTo() == null;
+	}
+
+	/**
 	 * Die Absicht einer Seite.
 	 *
 	 * @param input     die Eingabe mit der Spur
@@ -228,16 +244,22 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 	private static BookingTrail foreignIntent(ConflictInput input, String bookingId, List<Version> side, TrailUnit unit,
 			Map<VersionId, Version> known) {
 		UnitKey source = unit.unit();
-		// mehrere andere Rechner: je Rechner eine Absicht; ein Storno gewinnt gegen alles, sonst gilt die der Kette
+		// mehrere andere Rechner: je Rechner eine Absicht; ein Storno gewinnt gegen alles, sonst gilt die der Kette. Inhalt
+		// ohne Kennung (KARV-209) ist kein sicheres Storno: Er gilt nur, wenn kein anderer Rechner etwas getan hat
 		Set<VersionId> inChain = new HashSet<>();
 		unit.chain().forEach(link -> inChain.add(link.id()));
 		Map<String, List<Version>> byMachine = new TreeMap<>();
 		side.forEach(version -> byMachine.computeIfAbsent(version.machine(), key -> new ArrayList<>()).add(version));
 		BookingTrail chosen = UNTOUCHED;
+		BookingTrail withoutId = null;
 		boolean chosenInChain = false;
 		for (List<Version> versions : byMachine.values()) {
 			BookingTrail trail = of(input, bookingId, source, versions, known);
 			boolean standsInChain = versions.stream().anyMatch(version -> inChain.contains(version.id()));
+			if (trail.cancelledByContentWithoutId()) {
+				withoutId = withoutId == null ? trail : withoutId;
+				continue;
+			}
 			if (trail.kind() == Kind.CANCELLED) {
 				return trail;
 			}
@@ -246,7 +268,7 @@ record BookingTrail(Kind kind, Version removal, Version last, UnitKey end, Versi
 				chosenInChain = standsInChain;
 			}
 		}
-		return chosen;
+		return chosen.kind() == Kind.UNTOUCHED && withoutId != null ? withoutId : chosen;
 	}
 
 	/**
