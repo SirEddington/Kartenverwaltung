@@ -105,9 +105,9 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * die Strecke mit {@code movedFrom} hereingeholt hat (die Einheit ist ihr Ziel). Die Auflösung schreibt davon, was noch
 	 * fehlt:
 	 * <ul>
-	 * <li>Die Fassung der Einheit ist der Inhalt des Ergebnisses, wenn sie der Träger ist; sonst die Buchung, die eine Seite
-	 * hier neu hingesetzt hat (zuerst "Deren"); sonst eine Löschung. Haben beide Seiten je eine andere hingesetzt, ist das
-	 * ein Doppelverkauf ({@link #newSales}, KARV-201): "Meine" weicht "ohne Platz" aus, statt zu verschwinden.</li>
+	 * <li>Die Fassung der Einheit ist der Inhalt des Ergebnisses, wenn sie der Träger ist; sonst, was eine Seite hier neu
+	 * hingesetzt hat; sonst eine Löschung ({@link #undecided}). Haben beide Seiten je etwas anderes hingesetzt, ist das ein
+	 * Doppelverkauf (KARV-201): "Meine" weicht "ohne Platz" aus, statt zu verschwinden.</li>
 	 * <li>Ein anderer Träger bekommt den Inhalt als Zusatz-Änderung, wenn sein Stand ihn nicht schon hat; Träger auf der
 	 * Spur, die die Buchung nicht mehr tragen dürfen, eine Löschung.</li>
 	 * <li>Den Vermerk schreibt die Einheit, die das Ergebnis dafür nennt; einem Vermerk ohne Gegenseite (am Ziel eines
@@ -169,11 +169,8 @@ public final class BookingPolicy implements ConflictPolicy {
 				}
 			}
 		}
-		Resolution sales = null;
-		if (payload == null) {
-			sales = newSales(input, fates.keySet());
-			payload = sales != null ? sales.payload() : newcomer(input, fates.keySet());
-		}
+		Resolution here = payload != null ? new Resolution(payload, false, List.of(), null)
+				: undecided(input, fates.keySet());
 		List<Change> extra = new ArrayList<>();
 		for (Map.Entry<String, BookingFate> entry : fates.entrySet()) {
 			BookingFate fate = entry.getValue();
@@ -199,12 +196,12 @@ public final class BookingPolicy implements ConflictPolicy {
 				}
 			}
 		}
-		if (sales != null) {
-			// die Vermerke der Tabelle zuerst: Ihre Zeilen ändert der Doppelverkauf daneben nicht
-			extra.addAll(sales.extra());
-			note = firstNote(unit, note, sales.note());
+		// die Vermerke der Tabelle zuerst: Ihre Zeilen ändert der Doppelverkauf daneben nicht
+		extra.addAll(here.extra());
+		if (here.note() != null) {
+			note = firstNote(unit, note, here.note());
 		}
-		return new Resolution(payload, payload == null, extra, note);
+		return new Resolution(here.payload(), here.deleted(), extra, note);
 	}
 
 	/** Eine Version trägt nur einen Vermerk: Der erste bleibt, ein weiterer wird nur gemeldet. */
@@ -217,23 +214,53 @@ public final class BookingPolicy implements ConflictPolicy {
 	}
 
 	/**
-	 * Zwei neue Verkäufe auf der Einheit neben den entschiedenen Buchungen (KARV-201): Beide Seiten haben je eine andere,
-	 * nicht entschiedene Buchung hingesetzt, etwa weil beide die Buchung der Basis storniert und den Sitz neu verkauft
-	 * haben (E1). Die Spur sagt dazu nichts; es gilt Regel 3 wie ohne sie: {@link #doubleSale Doppelverkauf}, mit einer
-	 * unlesbaren "Meine" UNMERGED. Nur für eine Buchung, die dieser Rechner hier selbst hingesetzt hat
+	 * Was auf der Einheit neben den entschiedenen Buchungen steht; die Spur sagt dazu nichts.
+	 * <ul>
+	 * <li>Hat "Meine" hier nichts hingesetzt ({@link #placed}): "Deren", wenn sie etwas hingesetzt hat, sonst wird die
+	 * Einheit gelöscht.</li>
+	 * <li>"Meine" hat Inhalt ohne Kennung (KARV-206): Er lässt sich keiner Buchung zuordnen und nicht parken. Es bleibt wie
+	 * ohne "Meine", der Vermerk UNMERGED sagt es diesem Rechner; ohne Vermerk, wenn "Deren" denselben Inhalt trägt. Das
+	 * gilt auch auf dem geräumten Sitz: Anders als {@link #saleOnCancelledSeat} ohne Spur setzt die Auflösung hier keinen
+	 * Inhalt ohne Kennung als neuen Verkauf hin.</li>
+	 * <li>Nur "Meine" hat etwas hingesetzt: ein neuer Verkauf auf dem geräumten Sitz, er gilt.</li>
+	 * <li>Beide Seiten haben je etwas anderes hingesetzt (KARV-201), etwa weil beide die Buchung der Basis storniert und
+	 * den Sitz neu verkauft haben (E1): Regel 3 wie ohne Spur, {@link #doubleSale Doppelverkauf}, mit einer unlesbaren
+	 * "Meine" UNMERGED. Nur für eine Buchung, die dieser Rechner hier selbst hingesetzt hat
 	 * ({@link BookingTrail#placedByOwn}): Ist "Meine" eine verlorene Auflösung, trägt sie sonst die Buchung der anderen
-	 * Seite, und die lebte "ohne Platz" wieder auf, obwohl jene sie inzwischen ersetzt hat.
-	 *
-	 * @return die Auflösung der beiden Verkäufe, oder {@code null}, wenn nicht jede Seite eine solche Buchung trägt
+	 * Seite, und die lebte "ohne Platz" wieder auf, obwohl jene sie inzwischen ersetzt hat; dann bleibt "Deren".</li>
+	 * </ul>
 	 */
-	private static Resolution newSales(ConflictInput input, Set<String> decided) {
-		String mineId = idOf(input.mine());
-		String theirsId = idOf(input.theirs());
-		if (mineId == null || theirsId == null || mineId.equals(theirsId) || decided.contains(mineId)
-				|| decided.contains(theirsId) || !BookingTrail.placedByOwn(input, mineId)) {
-			return null;
+	private static Resolution undecided(ConflictInput input, Set<String> decided) {
+		Version mine = input.mine();
+		Version theirs = input.theirs();
+		boolean theirsPlaced = placed(theirs, decided);
+		Resolution withoutMine = new Resolution(theirsPlaced ? theirs.payload() : null, !theirsPlaced, List.of(), null);
+		if (!placed(mine, decided)) {
+			return withoutMine;
 		}
-		return PolicyRules.isReadable(input, input.mine()) ? doubleSale(input, mineId) : PolicyRules.unmerged(input);
+		String mineId = idOf(mine);
+		if (mineId == null) {
+			return PolicyRules.sameContent(mine, theirs) ? withoutMine
+					: new Resolution(withoutMine.payload(), withoutMine.deleted(), List.of(),
+							PolicyRules.unmerged(input).note());
+		}
+		if (!theirsPlaced) {
+			return new Resolution(mine.payload(), false, List.of(), null);
+		}
+		if (mineId.equals(idOf(theirs)) || !BookingTrail.placedByOwn(input, mineId)) {
+			return withoutMine;
+		}
+		return PolicyRules.isReadable(input, mine) ? doubleSale(input, mineId) : PolicyRules.unmerged(input);
+	}
+
+	/**
+	 * Ob die Seite auf der Einheit etwas hingesetzt hat, das die Spur nicht entschieden hat: Inhalt, der keine der
+	 * entschiedenen Buchungen ist. Inhalt ohne lesbare Kennung zählt dazu (KARV-205): Er ist keine von ihnen, und eine
+	 * Seite, die ihn trägt, hat den Sitz nicht geräumt.
+	 */
+	private static boolean placed(Version side, Set<String> decided) {
+		String id = idOf(side);
+		return !side.deleted() && (id == null || !decided.contains(id));
 	}
 
 	/**
@@ -325,20 +352,6 @@ public final class BookingPolicy implements ConflictPolicy {
 	private static boolean removed(BookingTrail trail) {
 		return trail.kind() == BookingTrail.Kind.CANCELLED || trail.kind() == BookingTrail.Kind.ARRIVED
 				|| trail.kind() == BookingTrail.Kind.FAILED;
-	}
-
-	/**
-	 * Was eine Seite auf die Einheit neu hingesetzt hat, ohne die entschiedenen Buchungen: zuerst "Deren", dann "Meine";
-	 * {@code null}, wenn keine (die Einheit wird gelöscht).
-	 */
-	private static ObjectNode newcomer(ConflictInput input, Set<String> decided) {
-		for (Version side : List.of(input.theirs(), input.mine())) {
-			String id = idOf(side);
-			if (id != null && !decided.contains(id)) {
-				return side.payload();
-			}
-		}
-		return null;
 	}
 
 	/**
@@ -686,7 +699,7 @@ public final class BookingPolicy implements ConflictPolicy {
 	 * Löschung auf; eine Erstversion übersprünge die Auflösung, weil die Einheit schon Versionen hat. Lebt {@code _<ID>}
 	 * schon, entsteht keine zweite Fassung darauf (der eigene Inhalt steht nur noch in "Meine"). Ein Umzug der Buchung
 	 * hierher kommt hier nicht an: Ihn entscheidet {@link #moves} (KARV-93); hierher gelangen nur zwei verschiedene neue
-	 * Verkäufe auf demselben Sitz, mit Spur über {@link #newSales}.
+	 * Verkäufe auf demselben Sitz, mit Spur über {@link #undecided}.
 	 * <p>
 	 * Ist die Einheit selbst schon {@code _<ID>}, kann die Buchung nicht weiter ausweichen: "Deren" bleibt, Vermerk UNMERGED.
 	 */
