@@ -646,7 +646,11 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			}
 			event.consume();
 			if (moveTargets != null) {
-				clickMoveTarget(seat.getId()); // Zielwahl: keine Karte, die Auswahl bleibt
+				// Zielwahl: keine Karte, die Auswahl bleibt. Nur der erste Klick zählt: Der zweite eines Doppelklicks wählte
+				// das Ziel gleich wieder ab
+				if (event.getClickCount() == 1) {
+					clickMoveTarget(seat.getId());
+				}
 				return;
 			}
 			if (editMode && isDialogOpen()) {

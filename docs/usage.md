@@ -109,7 +109,9 @@ are chosen; it reopens the confirmation after cancelling it) and **"Abbrechen"**
 cancels as well.
 Clicking a chosen target again removes it. In the table, the context menu has the same entry; it opens a list of the
 seats with a tick for each target and **"Weiter"**. A target that is taken makes it a swap: that booking moves to the
-place that becomes free. Several bookings move in one go, paired with the targets in seat order (row, table, seat).
+place that becomes free. To swap two bookings, select only one of them and choose the other's seat as target; with
+both selected and each other's seats as targets nothing moves. Several bookings move in one go, paired with the
+targets in seat order (row, table, seat).
 A dialog lists every move (e.g. "Anna Müller: Tisch A3, Sitz 2 → Tisch B1, Sitz 4") before anything changes; if a
 moved booking is collected, the tick **"Markierung „Abgeholt“ behalten"** decides whether it stays collected.
 Blocked seats ("Gesperrte Einträge") can be neither moved nor chosen as target, and a move across several

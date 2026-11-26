@@ -622,7 +622,9 @@ public class TicketTableController implements ContentController, SalesStateAware
 			return;
 		}
 		Window owner = seatTable.getScene().getWindow();
-		MoveTargetDialog.show(presentation, plan, sources, locked, targets -> moveTo(presentation, plan, sources, targets, owner), owner);
+		// Die Rückfrage gehört zur offenen Liste, nicht zum Hauptfenster: Nach "Abbrechen" kehrt der Fokus zur Liste zurück
+		MoveTargetDialog.show(presentation, plan, sources, locked,
+				(targets, listWindow) -> moveTo(presentation, plan, sources, targets, listWindow), owner);
 	}
 
 	/**

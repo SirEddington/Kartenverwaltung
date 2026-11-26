@@ -3,7 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.BookingMove;
@@ -67,13 +67,14 @@ final class MoveTargetDialog {
 	 * Zeigt die Liste und wartet auf das Schließen. Ein Klick auf eine Zeile (oder die Leertaste) wählt sie oder wählt sie
 	 * ab, ohne Strg. "Weiter" ist nur mit genau so vielen gewählten Plätzen aktiv, wie es Quellen gibt.
 	 *
-	 * @param onNext bei "Weiter" mit den gewählten Sitzkennungen in Platzreihenfolge gerufen; liefert einen Text, wenn die
+	 * @param onNext bei "Weiter" mit den gewählten Sitzkennungen in Platzreihenfolge und dem Fenster dieser Liste gerufen
+	 *               (als Besitzer für einen Dialog darüber, damit der Fokus danach zur Liste zurückkehrt); liefert einen Text, wenn die
 	 *               Liste offen bleiben und ihn über den Knöpfen zeigen soll, "" wenn sie ohne Text offen bleiben soll,
 	 *               {@code null} wenn sie schließen soll
 	 * @param owner  Fenster, über dem der Dialog erscheint; {@code null} für das Standardverhalten
 	 */
 	static void show(Presentation presentation, SeatingPlan plan, List<BookingMove.Source> sources,
-			Set<String> lockedSeatIds, Function<List<String>, String> onNext, Window owner) {
+			Set<String> lockedSeatIds, BiFunction<List<String>, Window, String> onNext, Window owner) {
 		int needed = sources.size();
 		ObservableSet<String> chosen = FXCollections.observableSet();
 		ListView<Row> list = new ListView<>();
@@ -117,7 +118,7 @@ final class MoveTargetDialog {
 		// "Weiter" schließt nicht von selbst: Liefert onNext einen Text, bleibt die Liste mit ihrer Wahl offen
 		nextButton.addEventFilter(ActionEvent.ACTION, event -> {
 			List<String> targets = list.getItems().stream().map(Row::seatId).filter(chosen::contains).toList();
-			String text = onNext.apply(targets);
+			String text = onNext.apply(targets, dialog.getDialogPane().getScene().getWindow());
 			if (text != null) {
 				event.consume();
 				message.setText(text);
@@ -145,8 +146,13 @@ final class MoveTargetDialog {
 			box.setFocusTraversable(false);
 			chosen.addListener((SetChangeListener<String>) change -> updateBox());
 			setOnMouseClicked(event -> {
-				if (event.getButton() == MouseButton.PRIMARY && !isEmpty() && getItem() != null) {
+				// Nur der erste Klick: Der zweite eines Doppelklicks wählte die Zeile gleich wieder ab
+				if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 1 && !isEmpty() && getItem() != null) {
 					toggle(chosen, getItem().seatId());
+				}
+				// Gewählt ist, was ein Häkchen hat: Die Markierung der Liste bliebe sonst auf einer abgewählten Zeile stehen
+				if (getListView() != null) {
+					getListView().getSelectionModel().clearSelection();
 				}
 			});
 		}
