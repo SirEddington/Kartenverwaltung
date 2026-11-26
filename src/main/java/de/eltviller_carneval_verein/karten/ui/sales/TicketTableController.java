@@ -17,6 +17,7 @@ import java.util.function.Predicate;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingCancellation;
+import de.eltviller_carneval_verein.karten.model.BookingMove;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
@@ -127,6 +128,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 	private ContextMenu selectionMenu;
 	private MenuItem sellItem;
 	private MenuItem assignItem;
+	private MenuItem moveItem;
 	private MenuItem cancelItem;
 	/** "Alle aufklappen" und "Alle zuklappen" mit ihrem Trenner, nur auf einem Gruppenkopf (Spec Abschnitt 14.1). */
 	private SeparatorMenuItem allSeparator;
@@ -257,12 +259,14 @@ public class TicketTableController implements ContentController, SalesStateAware
 		TableInput.install(seatTable, BOOKING_ROW);
 		sellItem = new MenuItem();
 		assignItem = new MenuItem(ASSIGN_TEXT);
+		moveItem = new MenuItem();
 		cancelItem = new MenuItem();
 		allSeparator = new SeparatorMenuItem();
 		expandAllItem = new MenuItem("Alle aufklappen");
 		collapseAllItem = new MenuItem("Alle zuklappen");
-		selectionMenu = new ContextMenu(sellItem, assignItem, cancelItem, allSeparator, expandAllItem, collapseAllItem);
+		selectionMenu = new ContextMenu(sellItem, assignItem, moveItem, cancelItem, allSeparator, expandAllItem, collapseAllItem);
 		sellItem.setOnAction(event -> sellSelection());
+		moveItem.setOnAction(event -> moveSelection());
 		cancelItem.setOnAction(event -> cancelSelection());
 		expandAllItem.setOnAction(event -> afterEditing(treeTable::expandAll));
 		collapseAllItem.setOnAction(event -> afterEditing(treeTable::collapseAll));
@@ -465,7 +469,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 	 * würde sonst samt Eingaben ersetzt). Im Anzeigemodus sind die Einträge sichtbar, aber nicht ausführbar. Auf einer
 	 * nicht markierten Zeile gilt das Menü nur für diese Zeile (bei einer Gruppe für ihre Buchungen), auf einer markierten
 	 * für die ganze Auswahl, wie im Explorer. "Platz zuweisen…" gibt es nur auf einer Buchung ohne Platz und gilt nur für
-	 * sie. "Stornieren" gilt wie der Sammelverkauf für die Auswahl und ist gesperrt, wenn keine gewählte Buchung Daten trägt.
+	 * sie. "Buchung verschieben…" gilt für die belegenden Buchungen der Auswahl mit Platz ({@link #moveSelection}).
+	 * "Stornieren" gilt wie der Sammelverkauf für die Auswahl und ist gesperrt, wenn keine gewählte Buchung Daten trägt.
 	 * Auf einem Gruppenkopf folgen ein Trenner, "Alle aufklappen" und "Alle zuklappen" (Spec Abschnitt 14.1), auch im
 	 * Anzeigemodus.
 	 */
@@ -482,6 +487,7 @@ public class TicketTableController implements ContentController, SalesStateAware
 		sellItem.setDisable(!editMode);
 		sellItem.setText(SeatSelectionEditor.menuText(selected.size()));
 		CancelAction.prepare(cancelItem, selected, editMode);
+		MoveAction.prepare(moveItem, selected, editMode);
 		BookingDTO dto = TicketCells.dtoOf(clicked);
 		assignItem.setVisible(dto != null && dto.getBooking().isUnassigned());
 		assignItem.setDisable(!editMode);
@@ -584,6 +590,113 @@ public class TicketTableController implements ContentController, SalesStateAware
 		rebuild();
 		treeTable.selectAndReveal(booking);
 		StatusMessage.getInstance().show(Severity.SUCCESS, "Buchung von bisher " + before + " auf " + booking.getPlaceLabel() + " zugewiesen");
+	}
+
+	/**
+	 * Verschiebt die belegenden Buchungen der Auswahl auf Plätze aus einer Liste (KARV-140, {@link MoveTargetDialog}). Die
+	 * Quellen müssen zu einer Vorstellung mit Bestuhlung gehören, und keiner ihrer Sitze darf gesperrt sein; sonst nennt die
+	 * Fußzeile den Grund, und es öffnet sich keine Liste. Was danach geschieht, steht in {@link #moveTo}.
+	 */
+	private void moveSelection() {
+		closeDialog();
+		seatTable.edit(-1, null);
+		List<Booking> movable = MoveTexts.movable(treeTable.selectedBookings());
+		if (!editMode || movable.isEmpty()) {
+			return; // der Eintrag ist dann gesperrt
+		}
+		Presentation presentation = movable.get(0).getParent();
+		if (movable.stream().anyMatch(booking -> booking.getParent() != presentation)) {
+			StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.MULTIPLE_PRESENTATIONS);
+			return;
+		}
+		SeatingPlan plan = planOf(presentation);
+		if (plan == null) {
+			StatusMessage.getInstance().show(Severity.ERROR, PlaceAssignment.noPlanText(presentation));
+			return;
+		}
+		List<BookingMove.Source> sources = movable.stream().map(BookingMove.Source::of).toList();
+		Set<String> locked = LockedSeats.lockedSeatIds(presentation);
+		for (BookingMove.Source source : sources) {
+			Seat seat = plan.findSeat(source.seatId());
+			if (seat != null && locked.contains(seat.getId())) {
+				StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.locked(seat));
+				return;
+			}
+		}
+		Window owner = seatTable.getScene().getWindow();
+		MoveTargetDialog.show(presentation, plan, sources, locked, targets -> moveTo(presentation, plan, sources, targets, owner), owner);
+	}
+
+	/**
+	 * "Weiter" in der Platzliste: plant den Vorgang und fragt nach ({@link MoveAction#run}). "Nichts zu tun" und "Platz
+	 * gesperrt" zeigt die Liste selbst und bleibt mit ihrer Wahl offen, "Abbrechen" im Bestätigungsdialog ebenso. Jede
+	 * veraltete Auswahl schließt sie mit der Meldung in der Fußzeile, ebenso eine Tabelle, die während der Liste ein anderes
+	 * Modell bekommen hat (neu zusammengesetztes Event, ersetzte Bestuhlung). Nach dem Ausführen gelten alle umgezogenen
+	 * Buchungen als selbst geändert, und die Quellen sind die Auswahl.
+	 *
+	 * @param plan die Bestuhlung beim Öffnen der Liste
+	 * @return wie {@code onNext} von {@link MoveTargetDialog#show}: ein Text für die Liste, "" ohne Text, {@code null} zum
+	 *         Schließen
+	 */
+	private String moveTo(Presentation presentation, SeatingPlan plan, List<BookingMove.Source> sources, List<String> targets,
+			Window owner) {
+		if (!showsMoveModel(presentation, plan)) {
+			moveStale();
+			return null;
+		}
+		BookingMove.Plan shown = BookingMove.plan(presentation, plan, sources, targets, LockedSeats.lockedSeatIds(presentation));
+		if (shown.refused()) {
+			switch (shown.refusal()) {
+			case NOTHING_TO_DO, LOCKED -> {
+				return MoveTexts.refusal(shown, presentation);
+			}
+			case STALE, COUNT, NO_PLAN -> {
+				moveStale();
+				return null;
+			}
+			}
+		}
+		// Meldungen nach dem Ausführen und bei veralteter Auswahl zeigt MoveAction selbst. Ausgeführt wird nur, solange die
+		// Tabelle dieses Modell zeigt: Ein neu zusammengesetztes Event hängt das alte ab (es würde nie gespeichert), und auf
+		// einer ersetzten Bestuhlung läge die Buchung womöglich auf einem Sitz, den es nicht mehr gibt
+		switch (MoveAction.run(presentation, plan, sources, targets, shown, () -> showsMoveModel(presentation, plan), owner)) {
+		case CANCELLED -> {
+			return "";
+		}
+		case STALE -> rebuild();
+		case DONE -> {
+			// Das Speichern kann fremde Änderungen einarbeiten; die Tabelle zeigt dann womöglich schon ein anderes Modell
+			if (showsMoveModel(presentation, plan)) {
+				shown.steps().forEach(step -> edits.pin(step.booking()));
+				rebuild();
+				treeTable.restoreSelection(sources.stream().map(BookingMove.Source::booking).toList());
+			} else {
+				rebuild();
+			}
+		}
+		}
+		return null;
+	}
+
+	/** Die Auswahl ist veraltet: Meldung in der Fußzeile, die Tabelle zeigt den neuen Stand. */
+	private void moveStale() {
+		StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.STALE);
+		rebuild();
+	}
+
+	/**
+	 * Ob die Tabelle noch die Vorstellung zeigt (dasselbe Objekt im gezeigten Event) und ihre Bestuhlung im Modell noch
+	 * {@code plan} ist.
+	 */
+	private boolean showsMoveModel(Presentation presentation, SeatingPlan plan) {
+		boolean inEvent = selectedEvent != null && selectedEvent.getPresentations() != null
+				&& selectedEvent.getPresentations().stream().anyMatch(p -> p == presentation);
+		return inEvent && shownPresentations().stream().anyMatch(p -> p == presentation) && planOf(presentation) == plan;
+	}
+
+	/** Die Bestuhlung der Vorstellung, wie sie gerade im Modell steht. */
+	private SeatingPlan planOf(Presentation presentation) {
+		return SalesPlan.of(presentation, hallRepository.findById(presentation.getHallId()));
 	}
 
 	/**
