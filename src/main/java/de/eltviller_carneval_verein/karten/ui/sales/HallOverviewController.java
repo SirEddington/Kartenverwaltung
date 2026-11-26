@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingMove;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -23,10 +24,13 @@ import de.eltviller_carneval_verein.karten.ui.ContentController;
 import de.eltviller_carneval_verein.karten.ui.EventSaver;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
+import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.ui.hall.PlanLabelOptions;
+import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.application.Platform;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.geometry.BoundingBox;
 import javafx.geometry.Bounds;
@@ -34,14 +38,17 @@ import javafx.geometry.Point2D;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.input.ZoomEvent;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
@@ -53,7 +60,8 @@ import javafx.stage.Window;
  * Die Saalübersicht der Verkaufsansicht: zeichnet die Bestuhlung der gewählten Vorstellung (nur lesend, angeordnet wird
  * im Hallen-Editor) und verkauft über die Sitze. Ein Klick auf einen Sitz öffnet das Buchungs-Popup; im
  * Bearbeitungsmodus wählen Strg-Klick und ein aufgezogener Rahmen mehrere Sitze für den Sammelverkauf. "Reihen
- * anzeigen" blendet die Reihen (Linie mit Buchstabe) aus, Tische und Sitze bleiben; das Kundenfenster folgt.
+ * anzeigen" blendet die Reihen (Linie mit Buchstabe) aus, Tische und Sitze bleiben; das Kundenfenster folgt. Beim
+ * Verschieben von Buchungen (KARV-140) wählt ein Klick die Zielplätze, siehe {@link #startMove}.
  */
 public class HallOverviewController implements ContentController, SalesStateAware {
 
@@ -94,6 +102,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		private final RepositoryListener<Event> refreshing = LiveViews.onFxThread(
 				units -> LiveViews.touches(units, selectedEvent, selectedPres), () -> {
 					dropGoneBookingsFromSelection();
+					checkMove();
 					renderHall();
 				});
 
@@ -108,7 +117,10 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		}
 	};
 	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(
-			units -> LiveViews.touchesHall(units, selectedPres == null ? null : selectedPres.getHallId()), this::renderIfShown);
+			units -> LiveViews.touchesHall(units, selectedPres == null ? null : selectedPres.getHallId()), () -> {
+				checkMove();
+				renderIfShown();
+			});
 
 	@FXML
 	private HallPlanPane viewportPane;
@@ -119,6 +131,14 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	// Unter dem Plan: welcher Sitz was bedeutet; nur mit barrierefreier Darstellung zu sehen (KARV-26)
 	@FXML
 	private StackPane legendSlot;
+
+	// Leiste über dem Plan, solange die Zielwahl beim Verschieben läuft (KARV-140)
+	@FXML
+	private HBox moveBar;
+	@FXML
+	private Label lblMove;
+	@FXML
+	private Button btnMoveGo;
 
 	// Menü "Anzeige" der Shell: Mit gesetztem Verkaufszustand sind es dessen Einstellungen (so folgt das Kundenfenster)
 	private PlanLabelOptions labelOptions = new PlanLabelOptions();
@@ -152,10 +172,13 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		// Fremde Änderungen nur, solange der Plan zu sehen ist (danach hielten die Repositories diese Ansicht am Leben)
 		// Ebenso eine geänderte Sperrliste: Ein gesperrter Sitz wird grau oder wieder normal und verlässt die Auswahl, sonst
 		// schlösse "Verkaufen" ihn ein und scheiterte an ihm (KARV-111)
-		LiveViews.whileShown(viewportPane, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignEventChanges),
+		// Wer die Ansicht verlässt, beendet die Zielwahl beim Verschieben
+		LiveViews.whileShown(viewportPane, Registration.onDetach(() -> endMove(false)),
+				Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignEventChanges),
 				Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges),
 				LockedSeats.whileShown(() -> {
 					LockedSeats.dropFrom(selectedBookings);
+					checkMove();
 					renderIfShown();
 				}), new Registration(this::drawBeforeFrames, this::stopDrawingBeforeFrames));
 	}
@@ -197,8 +220,9 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		if (event.getButton() != MouseButton.PRIMARY) {
 			return;
 		}
-		// Bei offenem Dialog bleibt die Auswahl unberührt: Ein Rahmen würde den Dialog samt Eingaben schließen
-		bandPressed = editMode && !isDialogOpen();
+		// Bei offenem Dialog bleibt die Auswahl unberührt: Ein Rahmen würde den Dialog samt Eingaben schließen. In der
+		// Zielwahl gibt es keinen Rahmen, und ein Klick ins Leere ändert die Auswahl nicht
+		bandPressed = editMode && !isDialogOpen() && moveTargets == null;
 		bandActive = false;
 		bandAdditive = event.isShortcutDown();
 		bandStartSceneX = event.getSceneX();
@@ -221,8 +245,8 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 				selectedBookings.clear();
 				renderHall();
 			}
-		} else if (event.getButton() == MouseButton.SECONDARY && event.isStillSincePress()) {
-			showSelectionMenu(event);
+		} else if (event.getButton() == MouseButton.SECONDARY && event.isStillSincePress() && moveTargets == null) {
+			showSelectionMenu(event); // in der Zielwahl kein Menü
 		}
 	}
 
@@ -313,11 +337,16 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		}
 		MenuItem sellItem = new MenuItem(SeatSelectionEditor.menuText(selectedBookings.contains(booking) ? selectedBookings.size() : 1));
 		sellItem.setDisable(!editMode);
+		List<Booking> menuSelection = selectedBookings.contains(booking) ? List.copyOf(selectedBookings) : List.of(booking);
+		// Verschieben gilt für dieselbe Auswahl; gesperrt, wenn keine gewählte Buchung ihren Sitz belegt (KARV-140)
+		MenuItem moveItem = new MenuItem();
+		MoveAction.prepare(moveItem, menuSelection, editMode);
 		// Stornieren gilt für dieselbe Auswahl wie der Verkauf (KARV-121); gesperrt, wenn keine gewählte Buchung Daten trägt
 		MenuItem cancelItem = new MenuItem();
-		CancelAction.prepare(cancelItem, selectedBookings.contains(booking) ? List.copyOf(selectedBookings) : List.of(booking), editMode);
-		selectionMenu = new ContextMenu(sellItem, cancelItem);
+		CancelAction.prepare(cancelItem, menuSelection, editMode);
+		selectionMenu = new ContextMenu(sellItem, moveItem, cancelItem);
 		sellItem.setOnAction(action -> sellSelection(selectionMenu.getAnchorX(), selectionMenu.getAnchorY()));
+		moveItem.setOnAction(action -> startMove(menuSelection));
 		cancelItem.setOnAction(action -> cancelSelection());
 		selectionMenu.show(viewportPane, event.getScreenX(), event.getScreenY());
 	}
@@ -343,6 +372,182 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			renderHall();
 		}
 	}
+
+	// ---- Zielwahl beim Verschieben von Buchungen (KARV-140) ----
+	// Solange moveTargets gesetzt ist, wählt ein Linksklick auf einen Sitz ein Ziel (styleSeatNode); Rahmen, Kontextmenü
+	// und Karte gibt es nicht, und die Auswahl bleibt, wie sie beim Start war (Suche und Klick ins Leere ändern sie nicht).
+	// Die Quellen hält moveTargets selbst. Ohne Zielwahl ist die Bedienung unverändert.
+
+	private MoveTargets moveTargets;
+	// Esc bricht die Zielwahl ab: Der Plan bekommt nie den Tastaturfokus, deshalb an der Szene (gemerkt fürs Abmelden)
+	private final EventHandler<KeyEvent> moveEscape = event -> {
+		if (event.getCode() == KeyCode.ESCAPE && moveTargets != null && !isDialogOpen()) {
+			event.consume();
+			endMove(false);
+		}
+	};
+	private Scene moveScene;
+
+	/**
+	 * Beginnt die Zielwahl für die belegenden Buchungen der Auswahl. Liegt der Sitz einer Quelle auf einer gesperrten
+	 * Einheit, nennt die Fußzeile ihn, und es beginnt keine Zielwahl.
+	 */
+	private void startMove(List<Booking> selection) {
+		SeatingPlan plan = currentPlan();
+		List<BookingMove.Source> sources = MoveTexts.movable(selection).stream().map(BookingMove.Source::of).toList();
+		if (sources.isEmpty() || plan == null) {
+			return; // der Eintrag ist dann gesperrt oder der Sitz gar nicht gezeichnet
+		}
+		Set<String> locked = LockedSeats.lockedSeatIds(selectedPres);
+		for (BookingMove.Source source : sources) {
+			Seat seat = plan.findSeat(source.seatId());
+			if (seat != null && locked.contains(seat.getId())) {
+				StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.locked(seat));
+				return;
+			}
+		}
+		closePopup();
+		moveTargets = new MoveTargets(selectedPres, sources);
+		moveScene = viewportPane.getScene();
+		moveScene.addEventFilter(KeyEvent.KEY_PRESSED, moveEscape);
+		moveBar.setVisible(true);
+		moveBar.setManaged(true);
+		updateMoveBar();
+		renderHall();
+	}
+
+	/** Linksklick auf einen Sitz in der Zielwahl: wählt ihn als Ziel oder wieder ab; mit dem letzten Ziel geht es weiter. */
+	private void clickMoveTarget(String seatId) {
+		SeatingPlan plan = currentPlan();
+		Seat seat = plan == null ? null : plan.findSeat(seatId);
+		if (seat == null) {
+			return; // nach einer fremden Änderung kein Sitz der Bestuhlung mehr; der Plan wird gleich neu gezeichnet
+		}
+		switch (moveTargets.toggle(seatId, LockedSeats.lockedSeatIds(selectedPres))) {
+		case LOCKED -> StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.locked(seat));
+		case FULL -> StatusMessage.getInstance().show(Severity.INFO, MoveTexts.tooMany(moveTargets.sources().size()));
+		case ADDED, REMOVED -> {
+			renderHall();
+			updateMoveBar();
+			if (moveTargets.complete()) {
+				tryMove();
+			}
+		}
+		}
+	}
+
+	@FXML
+	private void handleMoveGo() {
+		if (moveTargets != null && moveTargets.complete()) {
+			tryMove();
+		}
+	}
+
+	@FXML
+	private void handleMoveCancel() {
+		endMove(false);
+	}
+
+	/**
+	 * Plant den Vorgang und fragt nach. "Nichts zu tun" und "Platz gesperrt" lassen die Zielwahl mit ihren Zielen stehen,
+	 * damit die Kasse eines abwählen kann; "Abbrechen" im Dialog ebenso. Jede veraltete Auswahl beendet sie.
+	 */
+	private void tryMove() {
+		MoveTargets move = moveTargets;
+		Presentation presentation = move.presentation();
+		SeatingPlan plan = currentPlan();
+		List<String> targets = move.targets();
+		BookingMove.Plan shown = BookingMove.plan(presentation, plan, move.sources(), targets, LockedSeats.lockedSeatIds(presentation));
+		if (shown.refused()) {
+			String text = MoveTexts.refusal(shown, presentation);
+			switch (shown.refusal()) {
+			case NOTHING_TO_DO -> StatusMessage.getInstance().show(Severity.INFO, text);
+			case LOCKED -> StatusMessage.getInstance().show(Severity.ERROR, text);
+			case STALE, COUNT, NO_PLAN -> {
+				StatusMessage.getInstance().show(Severity.ERROR, text);
+				endMove(true);
+			}
+			}
+			return;
+		}
+		// Meldungen nach dem Ausführen und bei veralteter Auswahl zeigt MoveAction selbst
+		MoveAction.Outcome outcome = MoveAction.run(presentation, plan, move.sources(), targets, shown, viewportPane.getScene().getWindow());
+		if (moveTargets != move) {
+			// Während der Rückfrage beendet (etwa nach einer fremden Änderung): nur den neuen Stand zeigen
+			renderHall();
+			return;
+		}
+		switch (outcome) {
+		case DONE -> {
+			// Die Quellen an ihren neuen Plätzen sind die Auswahl; was die Suche ausblendet, wie sonst nicht
+			List<Booking> moved = move.sources().stream().map(BookingMove.Source::booking).filter(this::matchesQuery).toList();
+			stopMove();
+			selectedBookings.clear();
+			selectedBookings.addAll(moved);
+			renderHall();
+		}
+		case CANCELLED -> {
+			// zurück in die Zielwahl, die Ziele bleiben
+		}
+		case STALE -> endMove(true);
+		}
+	}
+
+	/**
+	 * Nach einer fremden Änderung: Ist eine Quelle veraltet, endet die Zielwahl mit der Meldung; sonst fallen Ziele heraus,
+	 * die gesperrt sind oder nicht mehr zur Bestuhlung gehören, und die Zielwahl läuft weiter.
+	 */
+	private void checkMove() {
+		if (moveTargets == null) {
+			return;
+		}
+		SeatingPlan plan = currentPlan();
+		if (!moveTargets.sourcesCurrent(plan)) {
+			StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.STALE);
+			endMove(true);
+			return;
+		}
+		moveTargets.dropGoneTargets(plan, LockedSeats.lockedSeatIds(selectedPres));
+		updateMoveBar();
+	}
+
+	/**
+	 * Beendet eine laufende Zielwahl. Bei {@code stale} ist die Auswahl danach leer (die Meldung zeigt der Aufrufer), sonst
+	 * die vom Start ohne das, was die Suche inzwischen ausblendet.
+	 */
+	private void endMove(boolean stale) {
+		if (moveTargets == null) {
+			return;
+		}
+		stopMove();
+		if (stale) {
+			selectedBookings.clear();
+		} else {
+			selectedBookings.removeIf(booking -> !matchesQuery(booking));
+		}
+		renderHall();
+	}
+
+	/** Leiste weg, Esc ab, keine Zielwahl mehr; die Auswahl setzt der Aufrufer. */
+	private void stopMove() {
+		moveTargets = null;
+		moveBar.setVisible(false);
+		moveBar.setManaged(false);
+		moveScene.removeEventFilter(KeyEvent.KEY_PRESSED, moveEscape);
+		moveScene = null;
+	}
+
+	private void updateMoveBar() {
+		lblMove.setText(moveTargets.barText());
+		btnMoveGo.setDisable(!moveTargets.complete());
+	}
+
+	/** Die Bestuhlung der gezeigten Vorstellung, wie sie gerade im Modell steht (nicht wie zuletzt gezeichnet). */
+	private SeatingPlan currentPlan() {
+		return SalesPlan.of(selectedPres, hallOf(selectedPres));
+	}
+
+	// ---- Ende der Zielwahl ----
 
 	/**
 	 * Fordert an, den Plan neu zu zeichnen. Gezeichnet wird einmal, nachdem der laufende Vorgang fertig ist, gleich wie oft
@@ -384,11 +589,14 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	private final HallPlanPane.Decorator planDecorator = new HallPlanPane.Decorator() {
 		@Override
 		public void decorateSeat(Booking booking, Seat seat, Node seatNode) {
-			styleSeatNode(booking, seatNode);
+			styleSeatNode(booking, seat, seatNode);
 		}
 
 		@Override
 		public Node seatMark(Booking booking, Seat seat) {
+			if (moveTargets != null && moveTargets.isTarget(seat.getId())) {
+				return SeatLook.targetMark(seat.getPosX(), seat.getPosY(), seat.radius());
+			}
 			return SeatLook.hasCross(statusOf(booking), seatPatterns.get())
 					? SeatLook.cross(seat.getPosX(), seat.getPosY(), seat.radius())
 					: null;
@@ -400,9 +608,11 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		return LockedSeats.isLocked(booking) ? SeatStatus.BLOCKED : booking.getStatus();
 	}
 
-	private void styleSeatNode(Booking booking, Node seatNode) {
-		boolean matchesQuery = matchesQuery(booking);
-		boolean selected = selectedBookings.contains(booking);
+	private void styleSeatNode(Booking booking, Seat seat, Node seatNode) {
+		// In der Zielwahl tragen die Quellen das Halo, unabhängig von der Suche; Ziele werden nicht abgeblendet
+		boolean target = moveTargets != null && moveTargets.isTarget(seat.getId());
+		boolean undimmed = matchesQuery(booking) || target;
+		boolean selected = moveTargets != null ? moveTargets.isSource(booking) : selectedBookings.contains(booking);
 		// Ein gesperrter Sitz ist grau und öffnet die gesperrten Einträge statt der Buchungskarte
 		boolean locked = LockedSeats.isLocked(booking);
 		SeatStatus status = locked ? SeatStatus.BLOCKED : booking.getStatus();
@@ -417,7 +627,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		if (selected) {
 			seatNode.getProperties().put(HallPlanPane.SELECTED_KEY, Boolean.TRUE);
 		}
-		seatNode.setOpacity(matchesQuery ? 1.0 : 0.25);
+		seatNode.setOpacity(undimmed ? 1.0 : 0.25);
 		seatNodes.put(seatNode, booking);
 
 		// Kein Tooltip mit Platz und Status: Er läge unter dem Zeiger, wo der Hinweis zur Auswahl stehen kann (KARV-197)
@@ -426,6 +636,10 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 				return;
 			}
 			event.consume();
+			if (moveTargets != null) {
+				clickMoveTarget(seat.getId()); // Zielwahl: keine Karte, die Auswahl bleibt
+				return;
+			}
 			if (editMode && isDialogOpen()) {
 				return; // Ein zweiter Dialog würde den offenen samt Eingaben ersetzen: erst Anwenden oder Abbrechen
 			}
@@ -482,6 +696,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	static final String APP_STYLESHEET = HallOverviewController.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 
 	private void applyEditMode() {
+		endMove(false);
 		closePopup();
 		selectedBookings.clear(); // Die Mehrfachauswahl gibt es nur im Bearbeitungsmodus
 		renderHall();
@@ -511,6 +726,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	 */
 	@Override
 	public void restoreSelection(java.util.Collection<Booking> bookings) {
+		endMove(false);
 		selectedBookings.clear();
 		if (editMode && selectedPres != null) {
 			bookings.stream().filter(booking -> booking.getParent() == selectedPres && !booking.isUnassigned()).forEach(selectedBookings::add);
@@ -522,6 +738,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	@Override
 	public void setEvent(Event event) {
+		endMove(false);
 		closePopup();
 		selectedBookings.clear();
 		this.selectedEvent = event;
@@ -532,6 +749,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	@Override
 	public void setPresentation(Presentation presentation) {
+		endMove(false);
 		closePopup();
 		selectedBookings.clear();
 		this.selectedPres = presentation;
@@ -566,7 +784,10 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	@Override
 	public void filter(String query) {
 		this.currentQuery = (query == null) ? "" : query.toLowerCase().trim();
-		selectedBookings.removeIf(booking -> !matchesQuery(booking)); // Ausgeblendete Sitze bleiben nicht ausgewählt
+		if (moveTargets == null) {
+			// Ausgeblendete Sitze bleiben nicht ausgewählt; in der Zielwahl bleibt die Auswahl bis zu ihrem Ende
+			selectedBookings.removeIf(booking -> !matchesQuery(booking));
+		}
 		renderHall();
 	}
 

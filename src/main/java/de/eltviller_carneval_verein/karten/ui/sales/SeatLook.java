@@ -26,7 +26,8 @@ import javafx.scene.shape.StrokeLineCap;
  * bei Rot-Grün-Schwäche und in Graustufen unterscheidbar. Ohne sie sind es die vier vollen Farben wie bis 1.1.0.
  * <p>
  * Ring und Streifen sind Verläufe mit harten Übergängen, also reine Füllung: Sie bleiben beim Zoomen scharf und
- * brauchen keinen eigenen Knoten. Nur das Kreuz ist ein eigener Knoten ({@link #cross}); in der Saalansicht legt die
+ * brauchen keinen eigenen Knoten. Nur das Kreuz ist ein eigener Knoten ({@link #cross}, ebenso die Marke eines Ziels beim
+ * Verschieben, {@link #targetMark}); in der Saalansicht legt die
  * {@link HallPlanPane} es über den Sitz und lässt Klicks zum Sitz durch.
  */
 public final class SeatLook {
@@ -44,6 +45,9 @@ public final class SeatLook {
 	private static final double CROSS_WIDTH = 0.16;
 	/** Weiß: hebt sich vom Grau ab, und die schwarze Sitznummer darüber bleibt lesbar (ein dunkles Kreuz verschluckte sie). */
 	static final Color CROSS = Color.WHITE;
+	/** Die Marke eines Ziels beim Verschieben: Radius des Rings und Strichstärke als Anteil des Sitzradius. */
+	private static final double TARGET_RING = 0.72;
+	private static final double TARGET_WIDTH = 0.16;
 
 	private static final RadialGradient FREE_RING = new RadialGradient(0, 0, 0.5, 0.5, 0.5, true, CycleMethod.NO_CYCLE,
 			new Stop(0, Color.WHITE), new Stop(FREE_INNER, Color.WHITE), new Stop(FREE_INNER, UiColors.SEAT_FREE.getFxColor()),
@@ -93,6 +97,24 @@ public final class SeatLook {
 		cross.setStrokeWidth(radius * CROSS_WIDTH);
 		cross.setStrokeLineCap(StrokeLineCap.BUTT);
 		return cross;
+	}
+
+	/**
+	 * Die Marke eines gewählten Ziels beim Verschieben (KARV-140): ein dunkler Ring mit hellem Rand nah am Sitzrand. Sie
+	 * hängt nicht an der Farbe (KARV-26), hebt sich von jeder Füllung ab und lässt die Sitznummer in der Mitte frei.
+	 *
+	 * @param centerX Mittelpunkt des Sitzes
+	 * @param centerY Mittelpunkt des Sitzes
+	 * @param radius  Radius des Sitzes
+	 */
+	public static Group targetMark(double centerX, double centerY, double radius) {
+		Circle light = new Circle(centerX, centerY, radius * TARGET_RING, null);
+		light.setStroke(Color.WHITE);
+		light.setStrokeWidth(radius * TARGET_WIDTH * 2);
+		Circle dark = new Circle(centerX, centerY, radius * TARGET_RING, null);
+		dark.setStroke(Color.BLACK);
+		dark.setStrokeWidth(radius * TARGET_WIDTH);
+		return new Group(light, dark);
 	}
 
 	/** Die Legende unter der Saalübersicht: je Status ein Muster-Sitz mit Namen, in der Reihenfolge von {@link SeatStatus}. */

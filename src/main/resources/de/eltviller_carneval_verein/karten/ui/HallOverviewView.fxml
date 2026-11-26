@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
+<?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
 <?import de.eltviller_carneval_verein.karten.ui.sales.HallPlanPane?>
@@ -9,6 +12,14 @@
 <VBox spacing="8.0" xmlns="http://javafx.com/javafx/17"
       xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="de.eltviller_carneval_verein.karten.ui.sales.HallOverviewController">
+
+    <!-- Zielwahl beim Verschieben (KARV-140): nur sichtbar, solange sie läuft; Text und Knöpfe setzt der Controller -->
+    <HBox fx:id="moveBar" spacing="10.0" alignment="CENTER_LEFT" visible="false" managed="false">
+        <Label fx:id="lblMove" />
+        <Region HBox.hgrow="ALWAYS" />
+        <Button fx:id="btnMoveGo" styleClass="button-primary" text="Verschieben…" onAction="#handleMoveGo" />
+        <Button fx:id="btnMoveCancel" styleClass="button-default" text="Abbrechen" onAction="#handleMoveCancel" />
+    </HBox>
 
     <!-- Zoom (Mausrad) & Verschieben (Ziehen mit der rechten Maustaste) übernimmt die HallPlanPane -->
     <HallPlanPane fx:id="viewportPane" VBox.vgrow="ALWAYS"
