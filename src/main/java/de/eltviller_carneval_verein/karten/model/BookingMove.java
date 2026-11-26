@@ -21,7 +21,7 @@ import java.util.Set;
  * (Kettenanfang), zu einem Ziel, das nicht Sitz einer Quelle ist (Kettenende). Trägt das Kettenende eine belegende
  * Buchung, zieht sie auf den Kettenanfang (Gegenzug); sonst wird die Buchung des Kettenendes entfernt, und der
  * Kettenanfang bekommt einen leeren Platzhalter. Weil beide Seiten nach derselben Ordnung gepaart werden, schließt sich
- * keine Kette zum Kreis.
+ * keine Kette zum Kreis. {@link #apply} führt einen bestätigten Plan aus, wenn er beim erneuten Berechnen derselbe ist.
  * <p>
  * Die Klasse hat nur statische Methoden.
  */
@@ -230,6 +230,54 @@ public final class BookingMove {
 		return new Plan(steps, emptied, emptiedWithData, vacated, null, null);
 	}
 
+	/**
+	 * Berechnet den Plan aus denselben Eingaben wie {@link #plan} neu, vergleicht ihn mit {@code shown}
+	 * ({@link Plan#sameAs}) und führt ihn nur bei Gleichheit und ohne Ablehnung aus, sonst ändert sich nichts.
+	 * Ausführen heißt: An jedem Kettenende ohne Gegenzug werden die Buchungen entfernt, die auf dem Sitz liegen; jede
+	 * Buchung eines Zugs bekommt mit {@link Booking#takeSnapshot} ihren neuen Sitz; jeder Kettenanfang ohne Gegenzug
+	 * bekommt einen neuen leeren Platzhalter. Gespeichert wird nicht.
+	 *
+	 * @param shown der Plan, den die Kasse bestätigt hat
+	 * @return ob ausgeführt wurde
+	 */
+	public static boolean apply(Presentation presentation, SeatingPlan plan, List<Source> sources,
+			List<String> targetSeatIds, Set<String> lockedSeatIds, Plan shown) {
+		Plan current = plan(presentation, plan, sources, targetSeatIds, lockedSeatIds);
+		if (current.refused() || !current.sameAs(shown)) {
+			return false;
+		}
+		for (Seat end : current.emptied()) {
+			presentation.getBookings()
+					.removeIf(b -> liesOn(b, end) && current.steps().stream().noneMatch(step -> step.booking() == b));
+		}
+		for (Step step : current.steps()) {
+			step.booking().takeSnapshot(step.to().getParent(), step.to());
+		}
+		for (Seat start : current.vacated()) {
+			presentation.addBooking().takeSnapshot(start.getParent(), start);
+		}
+		return true;
+	}
+
+	/**
+	 * Nimmt bei jeder abgeholten Buchung der Züge "abgeholt" und das Abholdatum zurück, über {@link SaleDates#change}.
+	 */
+	public static void clearCollected(Plan executed) {
+		for (Step step : executed.steps()) {
+			if (step.booking().isCollected()) {
+				SaleDates.change(step.booking(), b -> {
+					b.setCollected(false);
+					b.setCollectionDate(null);
+				});
+			}
+		}
+	}
+
+	/** Wie viele Buchungen der Züge (Quellen und Gegenzüge) abgeholt sind. */
+	public static int collectedCount(Plan plan) {
+		return (int) plan.steps().stream().filter(step -> step.booking().isCollected()).count();
+	}
+
 	/** Der erste gesperrte Sitz unter den Sitzen der Quellen und den Zielen in der Reihenfolge der Plätze. */
 	private static Seat firstLocked(Set<Seat> sourceSeats, List<Seat> targets, Set<String> lockedSeatIds) {
 		Set<Seat> touched = new HashSet<>(sourceSeats);
@@ -237,14 +285,19 @@ public final class BookingMove {
 		return touched.stream().filter(seat -> lockedSeatIds.contains(seat.getId())).min(SEAT_ORDER).orElse(null);
 	}
 
+	/** Ob die Buchung auf dem Sitz liegt: Sie zeigt auf ihn und ist nicht „ohne Platz“. */
+	private static boolean liesOn(Booking booking, Seat seat) {
+		return seat.getId().equals(booking.getSeatId()) && !booking.isUnassigned();
+	}
+
 	/** Die belegende Buchung der Vorstellung auf dem Sitz, sonst {@code null}. */
 	private static Booking occupantOf(Presentation presentation, Seat seat) {
-		return presentation.getBookings().stream().filter(b -> seat.getId().equals(b.getSeatId()) && b.isTaken())
-				.findFirst().orElse(null);
+		return presentation.getBookings().stream().filter(b -> liesOn(b, seat) && b.isTaken()).findFirst()
+				.orElse(null);
 	}
 
 	/** Ob eine Buchung der Vorstellung auf dem Sitz Daten trägt. */
 	private static boolean hasDataOn(Presentation presentation, Seat seat) {
-		return presentation.getBookings().stream().anyMatch(b -> seat.getId().equals(b.getSeatId()) && b.hasData());
+		return presentation.getBookings().stream().anyMatch(b -> liesOn(b, seat) && b.hasData());
 	}
 }

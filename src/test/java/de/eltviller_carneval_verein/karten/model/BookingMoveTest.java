@@ -6,11 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+
+import com.fasterxml.jackson.databind.node.TextNode;
 
 import de.eltviller_carneval_verein.karten.model.BookingMove.Plan;
 import de.eltviller_carneval_verein.karten.model.BookingMove.Refusal;
@@ -255,21 +258,51 @@ class BookingMoveTest {
 		return replaced;
 	}
 
+	/**
+	 * Drei Quellen tragen dieselbe Platzangabe, drei Ziele eine andere: Gepaart wird nach der Kennung des Sitzes. Die
+	 * Kennungen sind so gewählt, dass die Reihenfolge einer {@code HashMap} der Quellsitze ({@code quelle-3, quelle-2,
+	 * quelle-1}) und die der Eingabe nicht zufällig die richtige Zuordnung ergeben.
+	 */
 	@Test
 	void equalPlacesAreOrderedBySeatId() {
-		seat2.setSeatNumber(1); // Sitz 1 und 2 tragen beide „A1, Sitz 1“
-		Seat lower = seat1.getId().compareTo(seat2.getId()) < 0 ? seat1 : seat2;
-		Seat higher = lower == seat1 ? seat2 : seat1;
-		Booking onLower = reserve(lower, "unten");
-		Booking onHigher = reserve(higher, "oben");
+		SeatingPlan tied = new Hall().addSeatingPlan();
+		TableRow row = tied.addRow();
+		row.setLabel("A");
+		Table table = tied.addTable(row);
+		for (String id : List.of("quelle-1", "quelle-2", "quelle-3")) {
+			addSeat(table, id, 1);
+		}
+		for (String id : List.of("ziel-1", "ziel-2", "ziel-3")) {
+			addSeat(table, id, 2);
+		}
+		Presentation tiedPresentation = newPresentation(tied);
+		Syncs.sync(tiedPresentation, tied);
+		Booking[] onSource = new Booking[3];
+		for (int i = 0; i < 3; i++) {
+			onSource[i] = bookingOf(tiedPresentation, tied.findSeat("quelle-" + (i + 1)));
+			onSource[i].setLastName("Q" + (i + 1));
+		}
 
-		Plan first = plan(sources(onLower, onHigher), ids(seat3, seat4));
-		Plan second = plan(sources(onHigher, onLower), ids(seat4, seat3));
+		Plan first = BookingMove.plan(tiedPresentation, tied, sources(onSource[2], onSource[0], onSource[1]),
+				List.of("ziel-1", "ziel-2", "ziel-3"), Set.of());
+		Plan second = BookingMove.plan(tiedPresentation, tied, sources(onSource[1], onSource[2], onSource[0]),
+				List.of("ziel-3", "ziel-1", "ziel-2"), Set.of());
 
-		assertStep(first.steps().get(0), onLower, lower, seat3, false);
-		assertStep(first.steps().get(1), onHigher, higher, seat4, false);
+		for (Plan result : List.of(first, second)) {
+			assertEquals(3, result.steps().size());
+			for (int i = 0; i < 3; i++) {
+				assertStep(result.steps().get(i), onSource[i], tied.findSeat("quelle-" + (i + 1)),
+						tied.findSeat("ziel-" + (i + 1)), false);
+			}
+		}
 		assertTrue(first.sameAs(second));
-		assertTrue(second.sameAs(first));
+	}
+
+	private static void addSeat(Table table, String id, int seatNumber) {
+		Seat seat = new Seat(id);
+		seat.setParent(table);
+		seat.setSeatNumber(seatNumber);
+		table.getSeats().add(seat);
 	}
 
 	@Test
@@ -420,6 +453,15 @@ class BookingMoveTest {
 	}
 
 	@Test
+	void twoObjectsWithTheSameBookingIdAreADuplicateSource() {
+		Booking a = reserve(seat1, "A");
+		Booking b = reserve(seat2, "B");
+		b.setId(a.getId());
+
+		assertRefused(plan(sources(a, b), ids(seat3, seat4)), Refusal.COUNT);
+	}
+
+	@Test
 	void noSourceIsRefused() {
 		assertRefused(plan(List.of(), List.of()), Refusal.COUNT);
 	}
@@ -464,5 +506,268 @@ class BookingMoveTest {
 
 		assertRefused(result, Refusal.STALE);
 		assertNull(result.lockedSeat());
+	}
+
+	// Buchungen „ohne Platz“
+
+	@Test
+	void unassignedBookingOnATargetIsNeitherOccupantNorRemoved() {
+		Booking a = reserve(seat1, "A");
+		Booking withoutPlace = presentation.addBooking();
+		withoutPlace.takeSnapshot(seat3.getParent(), seat3);
+		withoutPlace.setLastName("Ohne Platz");
+		withoutPlace.setUnassigned(true);
+		List<Source> sources = sources(a);
+
+		Plan shown = plan(sources, ids(seat3));
+
+		assertEquals(1, shown.steps().size(), "kein Gegenzug für eine Buchung ohne Platz");
+		assertStep(shown.steps().get(0), a, seat1, seat3, false);
+		assertEquals(List.of(seat3), shown.emptied());
+		assertTrue(shown.emptiedWithData().isEmpty(), "eine Buchung ohne Platz ist kein Rest des Sitzes");
+
+		assertTrue(apply(sources, ids(seat3), shown));
+
+		assertTrue(presentation.getBookings().contains(withoutPlace));
+		assertEquals(seat3.getId(), withoutPlace.getSeatId());
+		assertTrue(withoutPlace.isUnassigned());
+		assertEquals(seat3.getId(), a.getSeatId());
+	}
+
+	// Ausführen
+
+	private boolean apply(List<Source> sources, List<String> targetSeatIds, Plan shown) {
+		return BookingMove.apply(presentation, plan, sources, targetSeatIds, Set.of(), shown);
+	}
+
+	/** Auf jeden Sitz der Bestuhlung zeigt genau eine Buchung, und ein Abgleich hat nichts zu tun. */
+	private void assertOneBookingPerSeat() {
+		for (Seat seat : plan.getSeats()) {
+			long count = presentation.getBookings().stream().filter(b -> seat.getId().equals(b.getSeatId())).count();
+			assertEquals(1, count, "Buchungen auf Sitz " + seat.getSeatNumber());
+		}
+		BookingSync.Report report = Syncs.sync(presentation, plan);
+		assertEquals(0, report.created());
+		assertEquals(0, report.removedEmpty());
+		assertEquals(0, report.unassigned());
+	}
+
+	/** Die Buchungsliste und alle Sitzkennungen sind wie vorher. */
+	private void assertUnchanged(List<Booking> bookingsBefore, List<String> seatIdsBefore) {
+		assertEquals(bookingsBefore, presentation.getBookings());
+		assertEquals(seatIdsBefore, presentation.getBookings().stream().map(Booking::getSeatId).toList());
+	}
+
+	@Test
+	void applyMovesAndLeavesAPlaceholder() {
+		Booking a = reserve(seat1, "A");
+		Booking oldOnTarget = bookingOf(presentation, seat3);
+		List<Source> sources = sources(a);
+		Plan shown = plan(sources, ids(seat3));
+
+		assertTrue(apply(sources, ids(seat3), shown));
+
+		assertEquals(seat3.getId(), a.getSeatId());
+		assertFalse(a.isUnassigned());
+		assertFalse(presentation.getBookings().contains(oldOnTarget));
+		Booking placeholder = bookingOf(presentation, seat1);
+		assertFalse(placeholder.isTaken());
+		assertFalse(placeholder.hasData());
+		assertEquals(1, placeholder.getSeatNumber());
+		assertOneBookingPerSeat();
+	}
+
+	@Test
+	void applySwaps() {
+		Booking a = reserve(seat1, "A");
+		Booking c = reserve(seat3, "C");
+		List<Source> sources = sources(a);
+		Plan shown = plan(sources, ids(seat3));
+
+		assertTrue(apply(sources, ids(seat3), shown));
+
+		assertEquals(seat3.getId(), a.getSeatId());
+		assertEquals(seat1.getId(), c.getSeatId());
+		assertEquals(1, c.getSeatNumber());
+		assertOneBookingPerSeat();
+	}
+
+	@Test
+	void applyChainWithCounterMove() {
+		Booking a = reserve(seat1, "A");
+		Booking b = reserve(seat2, "B");
+		Booking c = reserve(seat3, "C");
+		List<Source> sources = sources(a, b);
+		Plan shown = plan(sources, ids(seat2, seat3));
+
+		assertTrue(apply(sources, ids(seat2, seat3), shown));
+
+		assertEquals(seat2.getId(), a.getSeatId());
+		assertEquals(seat3.getId(), b.getSeatId());
+		assertEquals(seat1.getId(), c.getSeatId());
+		assertOneBookingPerSeat();
+	}
+
+	@Test
+	void applyKeepsIdentityAndData() {
+		Booking a = reserve(seat1, "Meier");
+		a.setFirstName("Anna");
+		a.setEMail("anna@example.org");
+		a.setPaymentStatus(PaymentStatus.CARD);
+		a.setPrice(1500);
+		a.setPaidAmount(1400);
+		a.setCollected(true);
+		a.setReservationDate(LocalDate.of(2026, 11, 1));
+		a.setPaymentDate(LocalDate.of(2026, 11, 2));
+		a.setCollectionDate(LocalDate.of(2026, 11, 3));
+		a.setComment("Fensterplatz");
+		a.getUnknown().put("x-test-feld", TextNode.valueOf("wert"));
+		seat3.getParent().setCategory("Loge");
+		seat3.setWheelchairAccessible(true);
+		a.setRowLabel("Z"); // eine veraltete Momentaufnahme: der neue Sitz zählt
+		a.setTableNumber(9);
+		Booking before = a.copy();
+		List<Source> sources = sources(a);
+		Plan shown = plan(sources, ids(seat3));
+
+		assertTrue(apply(sources, ids(seat3), shown));
+
+		assertEquals(before.getId(), a.getId());
+		assertEquals("Meier", a.getLastName());
+		assertEquals("Anna", a.getFirstName());
+		assertEquals("anna@example.org", a.getEMail());
+		assertEquals(PaymentStatus.CARD, a.getPaymentStatus());
+		assertEquals(1400, a.getPaidAmount());
+		assertEquals(1500, a.getPrice());
+		assertTrue(a.isCollected());
+		assertEquals(LocalDate.of(2026, 11, 1), a.getReservationDate());
+		assertEquals(LocalDate.of(2026, 11, 2), a.getPaymentDate());
+		assertEquals(LocalDate.of(2026, 11, 3), a.getCollectionDate());
+		assertEquals("Fensterplatz", a.getComment());
+		assertEquals(before.getUnknown().asMap(), a.getUnknown().asMap());
+		assertEquals("A", a.getRowLabel());
+		assertEquals(1, a.getTableNumber());
+		assertEquals(3, a.getSeatNumber());
+		assertEquals("Loge", a.getCategory());
+		assertTrue(a.isWheelchairAccessible());
+	}
+
+	@Test
+	void applyDropsLeftoversOfAFreeTarget() {
+		Booking a = reserve(seat1, "A");
+		Booking leftover = bookingOf(presentation, seat3);
+		leftover.setComment("alter Kommentar");
+		List<Source> sources = sources(a);
+		Plan shown = plan(sources, ids(seat3));
+
+		assertTrue(apply(sources, ids(seat3), shown));
+
+		assertFalse(presentation.getBookings().contains(leftover));
+		assertSame(a, bookingOf(presentation, seat3));
+		assertOneBookingPerSeat();
+	}
+
+	@Test
+	void applyRefusesWhenAFreeTargetGotTaken() {
+		Booking a = reserve(seat1, "A");
+		List<Source> sources = sources(a);
+		Plan shown = plan(sources, ids(seat3));
+		reserve(seat3, "Fremd");
+		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
+		List<String> seatIdsBefore = bookingsBefore.stream().map(Booking::getSeatId).toList();
+
+		assertFalse(apply(sources, ids(seat3), shown));
+
+		assertUnchanged(bookingsBefore, seatIdsBefore);
+	}
+
+	@Test
+	void applyRefusesWhenAFreeTargetGotLeftovers() {
+		Booking a = reserve(seat1, "A");
+		List<Source> sources = sources(a);
+		Plan shown = plan(sources, ids(seat3));
+		bookingOf(presentation, seat3).setComment("Rest");
+		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
+		List<String> seatIdsBefore = bookingsBefore.stream().map(Booking::getSeatId).toList();
+
+		assertFalse(apply(sources, ids(seat3), shown));
+
+		assertUnchanged(bookingsBefore, seatIdsBefore);
+	}
+
+	@Test
+	void applyRefusesWhenASourceCarriesAnotherId() {
+		Booking a = reserve(seat1, "A");
+		reserve(seat3, "C");
+		List<Source> sources = sources(a);
+		Plan shown = plan(sources, ids(seat3));
+		a.setId("fremde-Kennung"); // eine fremde Änderung legt eine andere Buchung in dasselbe Objekt
+		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
+		List<String> seatIdsBefore = bookingsBefore.stream().map(Booking::getSeatId).toList();
+
+		assertFalse(apply(sources, ids(seat3), shown));
+
+		assertUnchanged(bookingsBefore, seatIdsBefore);
+	}
+
+	@Test
+	void applyIgnoresChangedDataOfAMovedBooking() {
+		Booking a = reserve(seat1, "A");
+		Booking c = reserve(seat3, "C");
+		List<Source> sources = sources(a);
+		Plan shown = plan(sources, ids(seat3));
+		c.setLastName("Anders"); // eine andere Kasse ändert den Namen der Gegenzug-Buchung
+
+		assertTrue(apply(sources, ids(seat3), shown));
+
+		assertEquals(seat1.getId(), c.getSeatId());
+		assertEquals("Anders", c.getLastName());
+		assertEquals(seat3.getId(), a.getSeatId());
+	}
+
+	// Abholmarkierung
+
+	private static void collect(Booking booking) {
+		booking.setCollected(true);
+		booking.setCollectionDate(LocalDate.of(2026, 11, 20));
+	}
+
+	@Test
+	void clearCollectedRemovesMarkAndDate() {
+		Booking a = reserve(seat1, "A");
+		Booking b = reserve(seat2, "B");
+		Booking c = reserve(seat3, "C");
+		Booking d = reserve(seat4, "D");
+		collect(a);
+		collect(c);
+		collect(d); // nicht am Vorgang beteiligt
+		List<Source> sources = sources(a, b);
+		Plan shown = plan(sources, ids(seat2, seat3)); // A 1→2, B 2→3, C 3→1 (Gegenzug)
+		assertTrue(apply(sources, ids(seat2, seat3), shown));
+
+		BookingMove.clearCollected(shown);
+
+		for (Booking cleared : List.of(a, c)) {
+			assertFalse(cleared.isCollected());
+			assertNull(cleared.getCollectionDate());
+		}
+		assertFalse(b.isCollected());
+		assertTrue(d.isCollected());
+		assertEquals(LocalDate.of(2026, 11, 20), d.getCollectionDate());
+	}
+
+	@Test
+	void collectedCountCountsSourcesAndCounterMoves() {
+		Booking a = reserve(seat1, "A");
+		reserve(seat2, "B");
+		Booking c = reserve(seat3, "C");
+		collect(a);
+		collect(c);
+
+		Plan result = plan(sources(a, bookingOf(presentation, seat2)), ids(seat3, seat4)); // A 1→3, B 2→4, C 3→1
+
+		assertEquals(3, result.steps().size());
+		assertEquals(2, BookingMove.collectedCount(result));
+		assertEquals(0, BookingMove.collectedCount(plan(sources(bookingOf(presentation, seat2)), ids(seat4))));
 	}
 }
