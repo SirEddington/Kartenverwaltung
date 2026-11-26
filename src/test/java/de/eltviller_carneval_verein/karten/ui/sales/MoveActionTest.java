@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDate;
@@ -24,6 +25,7 @@ import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.Table;
 import de.eltviller_carneval_verein.karten.model.TableRow;
+import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.ui.sales.MoveAction.Outcome;
 
 /** Der Kern des Verschiebens ohne Oberfläche: Antwort, Ausführen, Abholmarkierung (KARV-140). */
@@ -75,6 +77,28 @@ class MoveActionTest {
 		List<BookingMove.Source> sources = List.of(BookingMove.Source.of(source));
 		List<String> targets = List.of(target.getId());
 		return MoveAction.execute(presentation, plan, sources, targets, planFor(sources, targets), stillCurrent, answer);
+	}
+
+	@Test
+	void lockedSourceSeatIsTheFirstLockedSeatOfASource() {
+		Booking anna = reserve(seat1, "Müller");
+		Booking bert = reserve(seat2, "Schmidt");
+		List<BookingMove.Source> sources = List.of(BookingMove.Source.of(anna), BookingMove.Source.of(bert));
+
+		assertNull(MoveAction.lockedSourceSeat(plan, sources, Set.of()));
+		assertNull(MoveAction.lockedSourceSeat(plan, sources, Set.of(seat3.getId())), "ein gesperrtes Ziel zählt nicht");
+		assertSame(seat2, MoveAction.lockedSourceSeat(plan, sources, Set.of(seat2.getId(), seat3.getId())));
+		assertSame(seat1, MoveAction.lockedSourceSeat(plan, sources, Set.of(seat2.getId(), seat1.getId())),
+				"der erste in der Reihenfolge der Quellen");
+	}
+
+	@Test
+	void lockedSourceSeatIgnoresASeatNoLongerInThePlan() {
+		Booking anna = reserve(seat1, "Müller");
+		List<BookingMove.Source> sources = List.of(BookingMove.Source.of(anna));
+		seat1.getParent().deleteSeat(seat1);
+
+		assertNull(MoveAction.lockedSourceSeat(plan, sources, Set.of(seat1.getId())));
 	}
 
 	@Test
@@ -135,6 +159,26 @@ class MoveActionTest {
 		assertEquals(Outcome.STALE, outcome);
 		assertEquals(seat1.getId(), anna.getSeatId());
 		assertEquals("Schmidt", bookingOn(seat3).getLastName());
+	}
+
+	@Test
+	void staleWhenASeatGotLockedWhileAsking() {
+		Booking anna = reserve(seat1, "Müller");
+		Booking free = bookingOn(seat3);
+		UnitKey target = UnitKey.booking(presentation.getParent().getId(), presentation.getId(), seat3.getId());
+
+		Outcome outcome = execute(anna, seat3, () -> {
+			// die Einheit des Ziels kommt in die Liste der gesperrten Einträge, während der Dialog offen ist
+			LockedSeats.install(() -> Set.of(target), () -> {
+			});
+			return Optional.of(true);
+		});
+
+		assertEquals(Outcome.STALE, outcome);
+		assertEquals(seat1.getId(), anna.getSeatId());
+		assertEquals(anna, bookingOn(seat1));
+		assertEquals(free, bookingOn(seat3));
+		assertFalse(free.isTaken());
 	}
 
 	@Test

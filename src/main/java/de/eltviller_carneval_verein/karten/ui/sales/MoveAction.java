@@ -2,12 +2,14 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingMove;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.ui.StatusMessage;
 import de.eltviller_carneval_verein.karten.validation.Severity;
@@ -41,13 +43,29 @@ final class MoveAction {
 	}
 
 	/**
+	 * Die Vorprüfung vor der Zielwahl: der erste Sitz einer Quelle in der Reihenfolge der Quellen, der in
+	 * {@code lockedSeatIds} steht, sonst {@code null}. Ein Sitz, den die Bestuhlung nicht mehr hat, zählt nicht.
+	 */
+	static Seat lockedSourceSeat(SeatingPlan plan, List<BookingMove.Source> sources, Set<String> lockedSeatIds) {
+		for (BookingMove.Source source : sources) {
+			Seat seat = plan.findSeat(source.seatId());
+			if (seat != null && lockedSeatIds.contains(seat.getId())) {
+				return seat;
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * Kern ohne Meldung und ohne Speichern: Antwort holen, ausführen, gegebenenfalls "abgeholt" zurücknehmen.
 	 *
 	 * @param shown        der Plan, den die Kasse bestätigt
-	 * @param stillCurrent nach der Antwort gefragt: ob die Ansicht noch dieses Modell zeigt. Sie kann während der
-	 *                     Rückfrage auf ein anderes Event oder eine andere Vorstellung gewechselt haben; das alte Modell
-	 *                     ist dann abgehängt und würde nie gespeichert. Bei {@code false} ändert sich nichts
-	 *                     ({@link Outcome#STALE}).
+	 * @param stillCurrent nach der Antwort gefragt: ob die Ansicht noch dieses Modell zeigt. Der Aufrufer liefert nur
+	 *                     dann {@code true}, wenn sie noch dieselbe Vorstellung im selben Event zeigt und die Bestuhlung
+	 *                     noch dasselbe Objekt ist, mit dem der Plan berechnet wurde (eine ersetzte Halle hat neue
+	 *                     Objekte); wo die Ansicht die Ziele hält, auch, dass sie unverändert sind. Während der Rückfrage
+	 *                     kann die Ansicht gewechselt haben; das alte Modell ist dann abgehängt und würde nie
+	 *                     gespeichert. Bei {@code false} ändert sich nichts ({@link Outcome#STALE}).
 	 * @param answer       die Antwort auf die Rückfrage: leer bei "Abbrechen", sonst ob "Abgeholt" bleibt
 	 */
 	static Outcome execute(Presentation presentation, SeatingPlan plan, List<BookingMove.Source> sources,

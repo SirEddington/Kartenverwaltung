@@ -616,12 +616,10 @@ public class TicketTableController implements ContentController, SalesStateAware
 		}
 		List<BookingMove.Source> sources = movable.stream().map(BookingMove.Source::of).toList();
 		Set<String> locked = LockedSeats.lockedSeatIds(presentation);
-		for (BookingMove.Source source : sources) {
-			Seat seat = plan.findSeat(source.seatId());
-			if (seat != null && locked.contains(seat.getId())) {
-				StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.locked(seat));
-				return;
-			}
+		Seat lockedSeat = MoveAction.lockedSourceSeat(plan, sources, locked);
+		if (lockedSeat != null) {
+			StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.locked(lockedSeat));
+			return;
 		}
 		Window owner = seatTable.getScene().getWindow();
 		MoveTargetDialog.show(presentation, plan, sources, locked, targets -> moveTo(presentation, plan, sources, targets, owner), owner);

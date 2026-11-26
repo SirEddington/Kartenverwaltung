@@ -1,16 +1,13 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 
 import de.eltviller_carneval_verein.karten.MainApp;
-import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingMove;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
@@ -45,16 +42,13 @@ final class MoveTargetDialog {
 	record Row(String seatId, String text) {
 	}
 
-	/** Reihenfolge der Plätze wie in {@link PlaceAssignment#freeSeats}, bei Gleichstand nach der Kennung des Sitzes. */
-	private static final Comparator<Seat> PLACE_ORDER = Comparator
-			.comparing((Seat seat) -> seat.getParent().getRowLabel(), Booking.ROW_LABEL_ORDER)
-			.thenComparingInt(seat -> seat.getParent().getTableNumber()).thenComparingInt(Seat::getSeatNumber)
-			.thenComparing(Seat::getId);
-
 	private MoveTargetDialog() {
 	}
 
-	/** Alle nicht gesperrten Sitze der Bestuhlung in Platzreihenfolge, mit {@link MoveTexts#targetRow}; ohne Bestuhlung leer. */
+	/**
+	 * Alle nicht gesperrten Sitze der Bestuhlung in der Platzreihenfolge des Plans ({@link BookingMove#SEAT_ORDER}), mit
+	 * {@link MoveTexts#targetRow}; ohne Bestuhlung leer.
+	 */
 	static List<Row> rows(Presentation presentation, SeatingPlan plan, List<BookingMove.Source> sources,
 			Set<String> lockedSeatIds) {
 		if (plan == null) {
@@ -62,16 +56,11 @@ final class MoveTargetDialog {
 		}
 		Set<String> sourceSeats = new HashSet<>();
 		sources.forEach(source -> sourceSeats.add(source.seatId()));
-		List<Booking> bookings = presentation.getBookings() == null ? List.of() : presentation.getBookings();
-		return plan.getSeats().stream().filter(seat -> !lockedSeatIds.contains(seat.getId())).sorted(PLACE_ORDER)
-				.map(seat -> new Row(seat.getId(), MoveTexts.targetRow(seat, occupant(bookings, seat), sourceSeats.contains(seat.getId()))))
+		return plan.getSeats().stream().filter(seat -> !lockedSeatIds.contains(seat.getId()))
+				.sorted(BookingMove.SEAT_ORDER)
+				.map(seat -> new Row(seat.getId(), MoveTexts.targetRow(seat, BookingMove.occupantOf(presentation, seat),
+						sourceSeats.contains(seat.getId()))))
 				.toList();
-	}
-
-	/** Die belegende Buchung des Sitzes; {@code null}, wenn er frei ist (auch mit Resten). */
-	private static Booking occupant(List<Booking> bookings, Seat seat) {
-		return bookings.stream().filter(b -> seat.getId().equals(b.getSeatId()) && !b.isUnassigned() && b.isTaken())
-				.findFirst().orElse(null);
 	}
 
 	/** Für wen gewählt wird: wie die Leiste der Saalansicht ({@link MoveTexts#barText}), ohne die Zahl der gewählten Plätze. */

@@ -6,7 +6,7 @@
 - Die Abrechnung wird ausgebaut, mit Kassen am Event, Kassensturz je Kasse und Bilanz.
 - Buchungen lassen sich im Bearbeitungsmodus auf andere Plätze derselben Vorstellung verschieben
   oder mit anderen tauschen, auch mehrere auf einmal: Rechtsklick auf die Buchung, dann
-  „Verschieben…“.
+  „Buchung verschieben…“.
 
 ### Verbessert
 - Die Saalansicht öffnet schneller, auch beim ersten Mal nach dem Start. Auch der Wechsel zwischen

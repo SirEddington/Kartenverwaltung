@@ -120,8 +120,11 @@ public final class BookingMove {
 		}
 	}
 
-	/** Reihenfolge der Plätze nach dem Sitz der Bestuhlung, bei Gleichstand nach seiner Kennung. */
-	private static final Comparator<Seat> SEAT_ORDER = Comparator
+	/**
+	 * Reihenfolge der Plätze nach dem Sitz der Bestuhlung, bei Gleichstand nach seiner Kennung. Die Platzliste der
+	 * Kartentabelle ordnet ebenso, damit sie die Zuordnung zeigt, die {@link #plan} bildet.
+	 */
+	public static final Comparator<Seat> SEAT_ORDER = Comparator
 			.comparing((Seat seat) -> seat.getParent().getRowLabel(), Booking.ROW_LABEL_ORDER)
 			.thenComparingInt(seat -> seat.getParent().getTableNumber()).thenComparingInt(Seat::getSeatNumber)
 			.thenComparing(Seat::getId);
@@ -296,10 +299,16 @@ public final class BookingMove {
 		return seat.getId().equals(booking.getSeatId()) && !booking.isUnassigned();
 	}
 
-	/** Die belegende Buchung der Vorstellung auf dem Sitz, sonst {@code null}. */
-	private static Booking occupantOf(Presentation presentation, Seat seat) {
-		return presentation.getBookings().stream().filter(b -> liesOn(b, seat) && b.isTaken()).findFirst()
-				.orElse(null);
+	/**
+	 * Die belegende Buchung der Vorstellung auf dem Sitz, sonst {@code null} (auch, wenn dort nur Reste liegen oder die
+	 * Vorstellung keine Buchungsliste hat).
+	 */
+	public static Booking occupantOf(Presentation presentation, Seat seat) {
+		List<Booking> bookings = presentation.getBookings();
+		if (bookings == null) {
+			return null;
+		}
+		return bookings.stream().filter(b -> liesOn(b, seat) && b.isTaken()).findFirst().orElse(null);
 	}
 
 	/** Ob eine Buchung der Vorstellung auf dem Sitz Daten trägt. */

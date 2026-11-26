@@ -398,13 +398,10 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		if (sources.isEmpty() || plan == null) {
 			return; // der Eintrag ist dann gesperrt oder der Sitz gar nicht gezeichnet
 		}
-		Set<String> locked = LockedSeats.lockedSeatIds(selectedPres);
-		for (BookingMove.Source source : sources) {
-			Seat seat = plan.findSeat(source.seatId());
-			if (seat != null && locked.contains(seat.getId())) {
-				StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.locked(seat));
-				return;
-			}
+		Seat lockedSeat = MoveAction.lockedSourceSeat(plan, sources, LockedSeats.lockedSeatIds(selectedPres));
+		if (lockedSeat != null) {
+			StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.locked(lockedSeat));
+			return;
 		}
 		closePopup();
 		moveTargets = new MoveTargets(selectedPres, sources);
