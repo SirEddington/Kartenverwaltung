@@ -100,6 +100,19 @@ Selling:
    Reservation, payment and collection dates and the paid amount are filled in automatically.
 4. **"Stornieren"** cancels the selected bookings after a confirmation.
 
+**Moving and swapping (edit mode):** bookings can be moved to other seats of the same presentation, from both views.
+In the hall view, right-click the seat and choose **"Buchung verschieben…"** (with several seats selected
+**"Ausgewählte Buchungen verschieben… (n)"**; free seats in the selection are skipped), then click the target seats
+in the plan. A bar above the plan says for whom to choose and how many seats are chosen; **"Verschieben…"** (active
+once as many targets as bookings are chosen) and **"Abbrechen"** are on its right, and **Esc** cancels as well.
+Clicking a chosen target again removes it. In the table, the context menu has the same entry; it opens a list of the
+seats with a tick for each target and **"Weiter"**. A target that is taken makes it a swap: that booking moves to the
+place that becomes free. Several bookings move in one go, paired with the targets in seat order (row, table, seat).
+A dialog lists every move (e.g. "Anna Müller: Tisch A3, Sitz 2 → Tisch B1, Sitz 4") before anything changes; if a
+moved booking is collected, the tick **"Markierung „Abgeholt“ behalten"** decides whether it stays collected.
+Blocked seats ("Gesperrte Einträge") can be neither moved nor chosen as target, and a move across several
+presentations is not possible. The booking keeps its data and price; only the seat changes.
+
 **Grouping the table (*Gruppieren*):** the button **"Gruppieren"** above the table lists every column with a tick.
 Ticking a column groups the bookings by it, as the next level below the columns ticked before; unticking takes it
 out again. The menu stays open after a click. Below the ticks, **"Gruppen nach Wert ordnen"** (the default) sorts
