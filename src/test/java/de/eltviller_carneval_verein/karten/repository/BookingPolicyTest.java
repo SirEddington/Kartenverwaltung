@@ -826,6 +826,172 @@ class BookingPolicyTest {
 		assertEquals(List.of(), world.notes);
 	}
 
+	// Tausch und Kette aus einem Speichervorgang (KARV-140, Spec Abschnitt 8) -->
+
+	/**
+	 * „Muss gelten“ im Kleinen: Die Buchung lebt genau einmal. Auf einem Sitz nennt ihr Inhalt diesen Sitz; ohne Sitz steht
+	 * sie in ihrer Einheit „ohne Platz“ ({@code _<id>}).
+	 *
+	 * @return die Einheit, die sie trägt
+	 */
+	private static UnitKey assertLivesOnce(World world, String bookingId) {
+		List<UnitKey> carriers = world.carriers(bookingId);
+		assertEquals(1, carriers.size(), bookingId + " lebt genau einmal: " + carriers);
+		UnitKey carrier = carriers.get(0);
+		ObjectNode payload = world.head(carrier).payload();
+		if (carrier.isUnassigned()) {
+			assertEquals(UnitKey.unassignedBooking(EVENT, PRESENTATION, bookingId), carrier);
+			assertTrue(payload.path("unassigned").asBoolean(), bookingId + " ohne Platz");
+		} else {
+			assertEquals(carrier.bookingDir(), payload.path("seatId").asText(), bookingId + " nennt ihren Sitz");
+			assertFalse(payload.path("unassigned").asBoolean(), bookingId + " hat einen Platz");
+		}
+		return carrier;
+	}
+
+	private static UnitKey unassignedUnit(String bookingId) {
+		return UnitKey.unassignedBooking(EVENT, PRESENTATION, bookingId);
+	}
+
+	/** Die Welt hat genau einen Vermerk: von dieser Art und an diesen Rechner; bei FIELDS nennt er nur die Gruppe „Platz“. */
+	private static ConflictNote assertOnlyNote(World world, Kind kind, String affected) {
+		assertEquals(1, world.notes.size(), world.notes.toString());
+		ConflictNote note = world.notes.get(0);
+		assertEquals(kind, note.kind(), note.toString());
+		assertEquals(affected, note.affected(), note.toString());
+		if (kind == Kind.FIELDS) {
+			assertEquals(List.of("place"), note.fields().stream().map(ConflictNote.FieldConflict::group).toList());
+		}
+		return note;
+	}
+
+	/**
+	 * Tausch gegen Storno: B tauscht m (s1) und n (s2); A storniert m auf s1. Das Storno gilt für beide Gewinner, B bekommt
+	 * den Vermerk „Gelöscht“ mit s2 als Ort zum Wiederherstellen, und n lebt genau einmal.
+	 * <p>
+	 * Festgehaltener Stand, der offen bleiben darf: Gewinnt A s1, steht n „ohne Platz“, obwohl s1 und s2 frei sind, und
+	 * dafür gibt es keinen eigenen Vermerk (eine Version trägt nur einen).
+	 */
+	@ParameterizedTest(name = "B gewinnt s1: {0}")
+	@ValueSource(booleans = { false, true })
+	void swapAgainstCancellationKeepsTheOtherBookingOnce(boolean ownWinsSeat) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		Version n = version(THIRD, "save-0", booking("n", "s2"));
+		world.claim(S1, m);
+		world.claim(S2, n);
+		Version nOnS1 = child(OWN, "save-t", m, booking("n", "s1"), new VersionMarks(S2, S2, false));
+		Version cancelled = child(OTHER, "save-c", m, null);
+		world.claim(S2, child(OWN, "save-t", n, booking("m", "s2"), new VersionMarks(S1, S1, false)));
+		world.claim(S1, ownWinsSeat ? nOnS1 : cancelled);
+		world.lose(S1, ownWinsSeat ? cancelled : nOnS1);
+
+		world.resolve(S1, ownWinsSeat ? OTHER : OWN);
+
+		assertTrue(world.settled());
+		assertEquals(List.of(), world.carriers("m"), "das Storno gilt");
+		assertEquals(ownWinsSeat ? S1 : unassignedUnit("n"), assertLivesOnce(world, "n"));
+		assertNull(idOf(world.head(S2)), "s2 ist geräumt");
+		assertEquals(S2, assertOnlyNote(world, Kind.DELETE_WINS, OWN).moved());
+	}
+
+	/**
+	 * Tausch gegen weiteren Umzug: B tauscht m (s1) und n (s2); A setzt m von s1 auf den freien s3. m lebt genau einmal, am
+	 * Ziel des Gewinners von s1 (A: s3, B: s2); der Verlierer bekommt den Vermerk „Platz“. n lebt genau einmal.
+	 * <p>
+	 * Festgehaltener Stand, der offen bleiben darf: Gewinnt A s1, steht n „ohne Platz“, obwohl s1 und s2 frei sind, und
+	 * dafür gibt es keinen eigenen Vermerk.
+	 */
+	@ParameterizedTest(name = "B gewinnt s1: {0}")
+	@ValueSource(booleans = { false, true })
+	void swapAgainstFurtherMoveKeepsBothBookingsOnce(boolean ownWinsSeat) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		Version n = version(THIRD, "save-0", booking("n", "s2"));
+		world.claim(S1, m);
+		world.claim(S2, n);
+		Version nOnS1 = child(OWN, "save-t", m, booking("n", "s1"), new VersionMarks(S2, S2, false));
+		Version movedAway = child(OTHER, "save-v", m, null, VersionMarks.NONE.withMovedTo(S3));
+		world.claim(S2, child(OWN, "save-t", n, booking("m", "s2"), new VersionMarks(S1, S1, false)));
+		world.claim(S3, version(OTHER, "save-v", booking("m", "s3"), VersionMarks.NONE.withMovedFrom(S1)));
+		world.claim(S1, ownWinsSeat ? nOnS1 : movedAway);
+		world.lose(S1, ownWinsSeat ? movedAway : nOnS1);
+
+		world.resolve(S1, ownWinsSeat ? OTHER : OWN);
+
+		assertTrue(world.settled());
+		assertEquals(ownWinsSeat ? S2 : S3, assertLivesOnce(world, "m"));
+		assertEquals(ownWinsSeat ? S1 : unassignedUnit("n"), assertLivesOnce(world, "n"));
+		assertOnlyNote(world, Kind.FIELDS, ownWinsSeat ? OTHER : OWN);
+	}
+
+	/**
+	 * Kette gegen Feldänderung: B setzt m von s1 auf s2 und n von s2 auf den freien s3; A ändert n auf s2, dem mittleren
+	 * Glied. Für beide Gewinner gilt die Kette, A's Änderung folgt n nach s3, und es gibt keinen Vermerk.
+	 */
+	@ParameterizedTest(name = "B gewinnt s2: {0}")
+	@ValueSource(booleans = { false, true })
+	void chainAgainstEditKeepsEveryBookingOnce(boolean ownWinsSeat) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		Version n = version(THIRD, "save-0", booking("n", "s2"));
+		world.claim(S1, m);
+		world.claim(S2, n);
+		Version mOnS2 = child(OWN, "save-k", n, booking("m", "s2"), new VersionMarks(S3, S1, false));
+		Version edited = child(OTHER, "save-e", n, booking("n", "s2", b -> b.setPaymentStatus(PaymentStatus.CARD)));
+		world.claim(S1, child(OWN, "save-k", m, null, VersionMarks.NONE.withMovedTo(S2)));
+		world.claim(S3, version(OWN, "save-k", booking("n", "s3"), VersionMarks.NONE.withMovedFrom(S2)));
+		world.claim(S2, ownWinsSeat ? mOnS2 : edited);
+		world.lose(S2, ownWinsSeat ? edited : mOnS2);
+
+		world.resolve(S2, ownWinsSeat ? OTHER : OWN);
+
+		assertTrue(world.settled());
+		assertEquals(S2, assertLivesOnce(world, "m"));
+		assertEquals(S3, assertLivesOnce(world, "n"));
+		assertEquals("CARD", world.head(S3).payload().path("paymentStatus").asText(), "A's Änderung bleibt");
+		assertNull(idOf(world.head(S1)), "s1 ist geräumt");
+		assertEquals(List.of(), world.notes);
+	}
+
+	/**
+	 * Überlappende Täusche: B tauscht m (s1) und n (s2), A tauscht n (s2) und o (s3). Strittig ist nur s2; n steht davor
+	 * bei B auf s1 und bei A auf s3. Der Tausch des Gewinners von s2 gilt ganz, und jede der drei Buchungen lebt genau
+	 * einmal: Die Buchung, die der Verlierer nach s2 gesetzt hat, steht „ohne Platz“, und der Verlierer bekommt den Vermerk
+	 * „Platz“ zu n.
+	 * <p>
+	 * Festgehaltener Stand, der offen bleiben darf: Der Sitz, von dem die geparkte Buchung kam (s1 oder s3), ist frei, und
+	 * das Parken hat keinen eigenen Vermerk.
+	 */
+	@ParameterizedTest(name = "B gewinnt s2: {0}")
+	@ValueSource(booleans = { false, true })
+	void overlappingSwapsKeepEveryBookingOnce(boolean ownWinsSeat) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		Version n = version(THIRD, "save-0", booking("n", "s2"));
+		Version o = version(THIRD, "save-0", booking("o", "s3"));
+		world.claim(S1, m);
+		world.claim(S2, n);
+		world.claim(S3, o);
+		Version mOnS2 = child(OWN, "save-t", n, booking("m", "s2"), new VersionMarks(S1, S1, false));
+		Version oOnS2 = child(OTHER, "save-u", n, booking("o", "s2"), new VersionMarks(S3, S3, false));
+		world.claim(S1, child(OWN, "save-t", m, booking("n", "s1"), new VersionMarks(S2, S2, false)));
+		world.claim(S3, child(OTHER, "save-u", o, booking("n", "s3"), new VersionMarks(S2, S2, false)));
+		world.claim(S2, ownWinsSeat ? mOnS2 : oOnS2);
+		world.lose(S2, ownWinsSeat ? oOnS2 : mOnS2);
+
+		world.resolve(S2, ownWinsSeat ? OTHER : OWN);
+
+		assertTrue(world.settled());
+		assertEquals(ownWinsSeat ? S2 : unassignedUnit("m"), assertLivesOnce(world, "m"));
+		assertEquals(ownWinsSeat ? S1 : S3, assertLivesOnce(world, "n"));
+		assertEquals(ownWinsSeat ? unassignedUnit("o") : S2, assertLivesOnce(world, "o"));
+		assertNull(idOf(world.head(ownWinsSeat ? S3 : S1)), "der Sitz der geparkten Buchung ist frei");
+		assertOnlyNote(world, Kind.FIELDS, ownWinsSeat ? OTHER : OWN);
+	}
+
+	// <-- Tausch und Kette aus einem Speichervorgang
+
 	/**
 	 * Beide setzen y von s9 auf s1 und ziehen m an verschiedene Ziele (A nach s2, B nach s3): s1 ist inhaltlich gleich,
 	 * trotzdem lebt m danach einmal, am Ziel des Gewinners von s1 (E7 vor der Regel "Gleich").
