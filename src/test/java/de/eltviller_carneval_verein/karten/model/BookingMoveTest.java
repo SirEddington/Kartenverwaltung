@@ -94,6 +94,7 @@ class BookingMoveTest {
 
 	private static void assertStep(Step step, Booking booking, Seat from, Seat to, boolean counterMove) {
 		assertSame(booking, step.booking());
+		assertEquals(booking.getId(), step.bookingId());
 		assertSame(from, step.from());
 		assertSame(to, step.to());
 		assertEquals(counterMove, step.counterMove());
@@ -340,6 +341,25 @@ class BookingMoveTest {
 		Plan before = plan(sources(a), ids(seat3));
 
 		bookingOf(presentation, seat3).setComment("Rest");
+
+		assertFalse(before.sameAs(plan(sources(a), ids(seat3))));
+	}
+
+	/** Eine andere belegende Buchung am selben Sitz, wie sie eine fremde Änderung in das Objekt kopiert. */
+	private static Booking otherBookingOnTheSameSeat(Booking booking, String lastName) {
+		Booking other = booking.copy();
+		other.setId("fremde-Buchung");
+		other.setLastName(lastName);
+		return other;
+	}
+
+	@Test
+	void sameAsIsFalseWhenACounterMoveCarriesAnotherId() {
+		Booking a = reserve(seat1, "A");
+		Booking c = reserve(seat3, "C");
+		Plan before = plan(sources(a), ids(seat3));
+
+		c.copyFrom(otherBookingOnTheSameSeat(c, "Hans")); // Storno und Neuverkauf an einer anderen Kasse
 
 		assertFalse(before.sameAs(plan(sources(a), ids(seat3))));
 	}
@@ -702,6 +722,21 @@ class BookingMoveTest {
 		List<Source> sources = sources(a);
 		Plan shown = plan(sources, ids(seat3));
 		a.setId("fremde-Kennung"); // eine fremde Änderung legt eine andere Buchung in dasselbe Objekt
+		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
+		List<String> seatIdsBefore = bookingsBefore.stream().map(Booking::getSeatId).toList();
+
+		assertFalse(apply(sources, ids(seat3), shown));
+
+		assertUnchanged(bookingsBefore, seatIdsBefore);
+	}
+
+	@Test
+	void applyRefusesWhenTheCounterMoveBookingWasReplaced() {
+		Booking a = reserve(seat1, "A");
+		Booking c = reserve(seat3, "C");
+		List<Source> sources = sources(a);
+		Plan shown = plan(sources, ids(seat3));
+		c.copyFrom(otherBookingOnTheSameSeat(c, "Hans")); // Storno und Neuverkauf an einer anderen Kasse
 		List<Booking> bookingsBefore = new ArrayList<>(presentation.getBookings());
 		List<String> seatIdsBefore = bookingsBefore.stream().map(Booking::getSeatId).toList();
 

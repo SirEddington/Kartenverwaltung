@@ -61,8 +61,12 @@ public final class BookingMove {
 		}
 	}
 
-	/** Ein Zug: die Buchung zieht von {@code from} nach {@code to}; {@code counterMove} bei einem Gegenzug. */
-	public record Step(Booking booking, Seat from, Seat to, boolean counterMove) {
+	/**
+	 * Ein Zug: die Buchung zieht von {@code from} nach {@code to}; {@code counterMove} bei einem Gegenzug.
+	 * {@code bookingId} ist die Kennung der Buchung zum Zeitpunkt des Plans: Nach einer fremden Änderung kann dasselbe
+	 * Objekt eine andere Buchung tragen.
+	 */
+	public record Step(Booking booking, String bookingId, Seat from, Seat to, boolean counterMove) {
 	}
 
 	/**
@@ -94,8 +98,9 @@ public final class BookingMove {
 		}
 
 		/**
-		 * Gleiche Ablehnung und gleiche Züge (Kennung der Buchung, Sitzkennungen, Gegenzug) und emptiedWithData. Die
-		 * Daten der Buchungen zählen nicht: Verschoben wird die Buchung, nicht ihr Inhalt.
+		 * Gleiche Ablehnung und gleiche Züge (dasselbe Objekt mit derselben Kennung zum Zeitpunkt des Plans,
+		 * Sitzkennungen, Gegenzug) und emptiedWithData. Die Daten der Buchungen zählen nicht: Verschoben wird die
+		 * Buchung, nicht ihr Inhalt.
 		 */
 		public boolean sameAs(Plan other) {
 			if (other == null || refusal != other.refusal || steps.size() != other.steps.size()
@@ -105,7 +110,7 @@ public final class BookingMove {
 			for (int i = 0; i < steps.size(); i++) {
 				Step mine = steps.get(i);
 				Step theirs = other.steps.get(i);
-				if (!mine.booking().getId().equals(theirs.booking().getId())
+				if (mine.booking() != theirs.booking() || !Objects.equals(mine.bookingId(), theirs.bookingId())
 						|| !mine.from().getId().equals(theirs.from().getId())
 						|| !mine.to().getId().equals(theirs.to().getId()) || mine.counterMove() != theirs.counterMove()) {
 					return false;
@@ -168,9 +173,9 @@ public final class BookingMove {
 			return Plan.refusedFor(Refusal.COUNT, null);
 		}
 
-		Map<Seat, Booking> moving = new HashMap<>();
+		Map<Seat, Source> moving = new HashMap<>();
 		for (Source source : sources) {
-			moving.put(plan.findSeat(source.seatId()), source.booking());
+			moving.put(plan.findSeat(source.seatId()), source);
 		}
 		Seat lockedSeat = firstLocked(moving.keySet(), targets, lockedSeatIds);
 		if (lockedSeat != null) {
@@ -190,7 +195,8 @@ public final class BookingMove {
 			if (!from.equals(to)) {
 				moves.put(from, to);
 				arrivals.put(to, from);
-				steps.add(new Step(moving.get(from), from, to, false));
+				Source source = moving.get(from);
+				steps.add(new Step(source.booking(), source.bookingId(), from, to, false));
 			}
 		}
 		if (steps.isEmpty()) {
@@ -216,7 +222,7 @@ public final class BookingMove {
 			}
 			Booking occupant = occupantOf(presentation, end);
 			if (occupant != null) {
-				counterMoves.add(new Step(occupant, end, start, true));
+				counterMoves.add(new Step(occupant, occupant.getId(), end, start, true));
 			} else {
 				emptied.add(end);
 				if (hasDataOn(presentation, end)) {
