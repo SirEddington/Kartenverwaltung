@@ -990,6 +990,39 @@ class BookingPolicyTest {
 		assertOnlyNote(world, Kind.FIELDS, ownWinsSeat ? OTHER : OWN);
 	}
 
+	/**
+	 * Tausch gegen Storno und Neuverkauf des Zielsitzes: B tauscht m (s1) und n (s2); A storniert n und verkauft s2 an x,
+	 * in einem Speichervorgang. Strittig ist s2, dort treffen m und x aufeinander. Das Storno von n gilt für beide
+	 * Gewinner, auch auf s1, wohin B sie getauscht hat. Wer s2 gewinnt, behält den Sitz; die andere Buchung lebt genau
+	 * einmal „ohne Platz“. B bekommt den Vermerk „Gelöscht“ mit s1 als Ort zum Wiederherstellen.
+	 * <p>
+	 * Festgehaltener Stand, der offen bleiben darf: Der Vermerk „Doppelverkauf“ zur geparkten Buchung fehlt für beide
+	 * Gewinner (eine Version trägt nur einen), und sie steht „ohne Platz“, obwohl s1 frei ist.
+	 */
+	@ParameterizedTest(name = "B gewinnt s2: {0}")
+	@ValueSource(booleans = { false, true })
+	void swapAgainstCancelAndResellKeepsEveryBookingOnce(boolean ownWinsSeat) {
+		World world = new World();
+		Version m = version(THIRD, "save-0", booking("m", "s1"));
+		Version n = version(THIRD, "save-0", booking("n", "s2"));
+		world.claim(S1, m);
+		world.claim(S2, n);
+		Version mOnS2 = child(OWN, "save-t", n, booking("m", "s2"), new VersionMarks(S1, S1, false));
+		Version resold = child(OTHER, "save-r", n, booking("x", "s2"));
+		world.claim(S1, child(OWN, "save-t", m, booking("n", "s1"), new VersionMarks(S2, S2, false)));
+		world.claim(S2, ownWinsSeat ? mOnS2 : resold);
+		world.lose(S2, ownWinsSeat ? resold : mOnS2);
+
+		world.resolve(S2, ownWinsSeat ? OTHER : OWN);
+
+		assertTrue(world.settled());
+		assertEquals(List.of(), world.carriers("n"), "das Storno gilt");
+		assertEquals(ownWinsSeat ? S2 : unassignedUnit("m"), assertLivesOnce(world, "m"));
+		assertEquals(ownWinsSeat ? unassignedUnit("x") : S2, assertLivesOnce(world, "x"));
+		assertNull(idOf(world.head(S1)), "s1 ist frei");
+		assertEquals(S1, assertOnlyNote(world, Kind.DELETE_WINS, OWN).moved());
+	}
+
 	// <-- Tausch und Kette aus einem Speichervorgang
 
 	/**
