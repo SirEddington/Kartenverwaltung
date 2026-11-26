@@ -466,8 +466,8 @@ entscheidet, ob er in diesem Ticket oder in einem eigenen behoben wird. Gemergt 
 unten grün sind.
 
 Ein Rechner ohne den Fix (1.1.x vor der Behebung) löst einen solchen Konflikt weiter mit Verlust auf, gleich wer
-getauscht hat. Das gilt schon heute ohne KARV-140 und gehört in die Patchnotes der Version, die den Fix bringt („alle
-Kassen aktualisieren“).
+getauscht hat. Das gilt schon heute ohne KARV-140. Eine Bitte, alle Kassen zu aktualisieren, kommt dafür nicht in die
+Patchnotes; darauf weist die Fußzeile hin, sobald eine Kasse eine neuere Version nutzt.
 
 **Darf offen bleiben:** ob in jedem dieser Fälle ein Vermerk im Konflikt-Dialog erscheint und ob eine Buchung auf
 einem frei gewordenen Sitz landen könnte statt unter „Ohne Platz“. Belegt ist ein Fall: Beim Tausch gegen Storno und
@@ -602,3 +602,21 @@ Nicht belegt:
   Einheiten), ist nicht geprüft; Abschnitt 7 nimmt den Rest hin.
 - Das Verhalten eines modalen Dialogs während einer fremden Änderung und das Zeichnen der Zielmarke sind nicht
   ausprobiert.
+
+## Nachtrag vom 26.11.2026
+
+Freigegeben vom Maintainer am 26.11.2026 im Gespräch. Seit der Prüfung hat sich der Bestand geändert; der Text oben
+ist bis auf einen Satz zu den Patchnotes (Abschnitt 8) unverändert geblieben.
+
+- **Die Abhängigkeit ist erfüllt.** KARV-201 ist behoben und mit 1.1.2 veröffentlicht; der Vorwärts-Merge
+  (`b155b57`, Pull Request 70) hat ihn nach `release/1.2.0` gebracht, zusammen mit KARV-205 und KARV-209 an denselben
+  Konfliktregeln. Der Arbeits-Branch steht auf diesem Stand.
+- **Ausgangslage 16 und 18 beschreiben den Stand vom 21.11.2026.** `BookingPolicy` und `BookingTrail` sind seitdem
+  geändert, die Zeilenangaben dort stimmen nicht mehr. `ConflictScenarioTest` enthält jetzt
+  `bothCancelAndResellIsADoubleSale`, `doubleSaleOnASeatWithLeftoversKeepsBothBookings` und
+  `swapAgainstCancelAndResellKeepsBothBookingsOnce` (der Tausch dort von Hand gebaut). Die Tests aus Abschnitt 8
+  kommen daneben und nutzen `BookingMove`; die Forderung „vor dem Fix rot“ entfällt für die Fälle, die diese Tests
+  schon abdecken.
+- **Weiter offen:** `BookingPolicy` schreibt je Einheit nur einen Vermerk (heute `repository/BookingPolicy.java:213`).
+- **Neu im Verkauf:** KARV-215 zeigt die Zahl der freien Karten (`ui/sales/FreeSeats`). Ein Vorgang dieses Specs
+  ändert die Zahl der freien Plätze nicht.
