@@ -471,10 +471,13 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			return;
 		}
 		// Meldungen nach dem Ausführen und bei veralteter Auswahl zeigt MoveAction selbst. Ausgeführt wird nur, solange
-		// genau diese Zielwahl läuft und die Ansicht dieselbe Vorstellung zeigt: Ein Wechsel während der Rückfrage hängt das
-		// alte Modell ab, es würde nie gespeichert
+		// genau diese Zielwahl läuft, die Ansicht dieselbe Vorstellung zeigt, die Bestuhlung nicht ersetzt ist und die Ziele
+		// unverändert sind: Ein Wechsel während der Rückfrage hängt das alte Modell ab (es würde nie gespeichert), und auf
+		// einer ersetzten Bestuhlung läge die Buchung womöglich auf einem Sitz, den es nicht mehr gibt
 		MoveAction.Outcome outcome = MoveAction.run(presentation, plan, move.sources(), targets, shown,
-				() -> moveTargets == move && selectedPres == move.presentation(), viewportPane.getScene().getWindow());
+				() -> moveTargets == move && selectedPres == move.presentation() && currentPlan() == plan
+						&& move.targets().equals(targets),
+				viewportPane.getScene().getWindow());
 		if (moveTargets != move) {
 			// Während der Rückfrage beendet (Wechsel der Ansicht, fremde Änderung): nur den neuen Stand zeigen; die
 			// Zielwahl, die jetzt vielleicht läuft, gehört nicht zu diesem Vorgang
@@ -493,7 +496,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		case CANCELLED -> {
 			// zurück in die Zielwahl, die Ziele bleiben
 		}
-		case STALE -> endMove(true);
+		case STALE -> endMove(true); // die Meldung hat MoveAction schon gezeigt
 		}
 	}
 
