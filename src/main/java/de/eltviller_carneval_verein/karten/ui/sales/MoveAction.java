@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.ui.sales;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
@@ -42,14 +43,22 @@ final class MoveAction {
 	/**
 	 * Kern ohne Meldung und ohne Speichern: Antwort holen, ausführen, gegebenenfalls "abgeholt" zurücknehmen.
 	 *
-	 * @param shown  der Plan, den die Kasse bestätigt
-	 * @param answer die Antwort auf die Rückfrage: leer bei "Abbrechen", sonst ob "Abgeholt" bleibt
+	 * @param shown        der Plan, den die Kasse bestätigt
+	 * @param stillCurrent nach der Antwort gefragt: ob die Ansicht noch dieses Modell zeigt. Sie kann während der
+	 *                     Rückfrage auf ein anderes Event oder eine andere Vorstellung gewechselt haben; das alte Modell
+	 *                     ist dann abgehängt und würde nie gespeichert. Bei {@code false} ändert sich nichts
+	 *                     ({@link Outcome#STALE}).
+	 * @param answer       die Antwort auf die Rückfrage: leer bei "Abbrechen", sonst ob "Abgeholt" bleibt
 	 */
 	static Outcome execute(Presentation presentation, SeatingPlan plan, List<BookingMove.Source> sources,
-			List<String> targetSeatIds, BookingMove.Plan shown, Supplier<Optional<Boolean>> answer) {
+			List<String> targetSeatIds, BookingMove.Plan shown, BooleanSupplier stillCurrent,
+			Supplier<Optional<Boolean>> answer) {
 		Optional<Boolean> keepCollected = answer.get();
 		if (keepCollected.isEmpty()) {
 			return Outcome.CANCELLED;
+		}
+		if (!stillCurrent.getAsBoolean()) {
+			return Outcome.STALE;
 		}
 		if (!BookingMove.apply(presentation, plan, sources, targetSeatIds, LockedSeats.lockedSeatIds(presentation),
 				shown)) {
@@ -65,10 +74,12 @@ final class MoveAction {
 	 * Fragt mit dem Dialog nach, führt aus, meldet in der Fußzeile und speichert bei "Buchungen sofort speichern". Die
 	 * Erfolgsmeldung kommt vor dem Speichern, damit eine Meldung des Speichers sie ersetzt und ein "Nicht gespeichert"
 	 * sichtbar bleibt.
+	 *
+	 * @param stillCurrent ob die Ansicht nach der Rückfrage noch dieses Modell zeigt (siehe {@link #execute})
 	 */
 	static Outcome run(Presentation presentation, SeatingPlan plan, List<BookingMove.Source> sources,
-			List<String> targetSeatIds, BookingMove.Plan shown, Window owner) {
-		Outcome outcome = execute(presentation, plan, sources, targetSeatIds, shown,
+			List<String> targetSeatIds, BookingMove.Plan shown, BooleanSupplier stillCurrent, Window owner) {
+		Outcome outcome = execute(presentation, plan, sources, targetSeatIds, shown, stillCurrent,
 				() -> MoveConfirmDialog.ask(shown, owner));
 		if (outcome == Outcome.STALE) {
 			StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.STALE);

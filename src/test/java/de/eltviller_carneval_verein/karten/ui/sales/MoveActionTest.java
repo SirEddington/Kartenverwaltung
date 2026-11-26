@@ -9,6 +9,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -66,9 +67,14 @@ class MoveActionTest {
 	}
 
 	private Outcome execute(Booking source, Seat target, java.util.function.Supplier<Optional<Boolean>> answer) {
+		return execute(source, target, () -> true, answer);
+	}
+
+	private Outcome execute(Booking source, Seat target, BooleanSupplier stillCurrent,
+			java.util.function.Supplier<Optional<Boolean>> answer) {
 		List<BookingMove.Source> sources = List.of(BookingMove.Source.of(source));
 		List<String> targets = List.of(target.getId());
-		return MoveAction.execute(presentation, plan, sources, targets, planFor(sources, targets), answer);
+		return MoveAction.execute(presentation, plan, sources, targets, planFor(sources, targets), stillCurrent, answer);
 	}
 
 	@Test
@@ -129,5 +135,19 @@ class MoveActionTest {
 		assertEquals(Outcome.STALE, outcome);
 		assertEquals(seat1.getId(), anna.getSeatId());
 		assertEquals("Schmidt", bookingOn(seat3).getLastName());
+	}
+
+	@Test
+	void staleWhenTheViewMovedOnWhileAsking() {
+		Booking anna = reserve(seat1, "Müller");
+		Booking free = bookingOn(seat3);
+
+		// Die Ansicht hat während der Rückfrage auf ein anderes Event oder eine andere Vorstellung gewechselt
+		assertEquals(Outcome.STALE, execute(anna, seat3, () -> false, () -> Optional.of(true)));
+
+		assertEquals(seat1.getId(), anna.getSeatId());
+		assertEquals(anna, bookingOn(seat1));
+		assertEquals(free, bookingOn(seat3));
+		assertFalse(free.isTaken());
 	}
 }

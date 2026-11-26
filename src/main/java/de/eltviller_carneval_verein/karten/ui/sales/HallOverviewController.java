@@ -470,10 +470,14 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			}
 			return;
 		}
-		// Meldungen nach dem Ausführen und bei veralteter Auswahl zeigt MoveAction selbst
-		MoveAction.Outcome outcome = MoveAction.run(presentation, plan, move.sources(), targets, shown, viewportPane.getScene().getWindow());
+		// Meldungen nach dem Ausführen und bei veralteter Auswahl zeigt MoveAction selbst. Ausgeführt wird nur, solange
+		// genau diese Zielwahl läuft und die Ansicht dieselbe Vorstellung zeigt: Ein Wechsel während der Rückfrage hängt das
+		// alte Modell ab, es würde nie gespeichert
+		MoveAction.Outcome outcome = MoveAction.run(presentation, plan, move.sources(), targets, shown,
+				() -> moveTargets == move && selectedPres == move.presentation(), viewportPane.getScene().getWindow());
 		if (moveTargets != move) {
-			// Während der Rückfrage beendet (etwa nach einer fremden Änderung): nur den neuen Stand zeigen
+			// Während der Rückfrage beendet (Wechsel der Ansicht, fremde Änderung): nur den neuen Stand zeigen; die
+			// Zielwahl, die jetzt vielleicht läuft, gehört nicht zu diesem Vorgang
 			renderHall();
 			return;
 		}
