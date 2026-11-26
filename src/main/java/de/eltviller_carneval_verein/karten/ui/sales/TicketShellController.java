@@ -9,9 +9,11 @@ import java.util.logging.Logger;
 import de.eltviller_carneval_verein.karten.MainApp;
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
+import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.RepositoryListener;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
+import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.BookingSyncService;
 import de.eltviller_carneval_verein.karten.ui.ContentController;
@@ -54,6 +56,7 @@ public class TicketShellController {
 	private static final String ALL_PRESENTATIONS = "Alle Vorstellungen";
 
 	private final StoreEventRepository eventRepository = StoreEventRepository.getInstance();
+	private final StoreHallRepository hallRepository = StoreHallRepository.getInstance();
 	// Gemeinsamer Zustand mit dem Kundenfenster: Die Shell und ihre Inhalte schreiben ihn, das Kundenfenster liest ihn.
 	// Das Menü "Anzeige" teilt er mit dem Hallen-Editor (KARV-76).
 	private final SalesViewState state = new SalesViewState(DisplayPreferences.instance());
@@ -62,6 +65,8 @@ public class TicketShellController {
 	private ComboBox<Event> eventComboBox;
 	@FXML
 	private ComboBox<Presentation> presComboBox;
+	@FXML
+	private Label lblFreeSeats;
 	@FXML
 	private TextField searchField;
 	@FXML
@@ -89,8 +94,25 @@ public class TicketShellController {
 	private boolean updatingPresentations = false;
 	// Führt die Boxen nach Änderungen anderer Rechner nach; entsteht in initialize, wenn die Boxen da sind
 	private EventSelectionSync selectionSync;
-	// Fremde Änderungen an Events: Die Liste und die Auswahl folgen dem Cache
-	private final RepositoryListener<Event> foreignChanges = LiveViews.onFxThread(LiveViews.ALL_UNITS, () -> selectionSync.sync());
+	// Fremde Änderungen an Events: Die Liste und die Auswahl folgen dem Cache, danach die freien Karten
+	private final RepositoryListener<Event> foreignChanges = LiveViews.onFxThread(LiveViews.ALL_UNITS, () -> {
+		selectionSync.sync();
+		refreshFreeSeats();
+	});
+	// "frei: n von m" (KARV-215) folgt außerdem eigenen Änderungen am gezeigten Event. Der Tracker meldet sie nach dem
+	// Vergleich des ChangeTrigger; wird vorher gespeichert (Strg+S aus einer offenen Zelle), meldet er nichts mehr, dann
+	// meldet das Repository das Speichern.
+	private final ChangeTracker.Listener<Event> ownChanges = (changed, before, after) -> refreshFreeSeatsOf(changed);
+	private final RepositoryListener<Event> ownSaves = new RepositoryListener<>() {
+		@Override
+		public void saved(Event saved) {
+			refreshFreeSeatsOf(saved);
+		}
+	};
+	// Eine fremd geänderte Bestuhlung gleicht LiveUpdates still mit den Buchungen ab: Weder Tracker noch Event-Repository
+	// melden das. Der gebündelte Lauf kommt nach dem Abgleich.
+	private final RepositoryListener<Hall> foreignHallChanges = LiveViews.onFxThread(LiveViews.ALL_UNITS, this::refreshFreeSeats);
+	private final Tooltip freeSeatsTooltip = new Tooltip();
 	private String searchText = "";
 	// Auswahl der verlassenen Ansicht, bis die neue sie zurückbekommt (restorePendingSelection)
 	private List<Booking> pendingSelection = List.of();
@@ -153,7 +175,11 @@ public class TicketShellController {
 		// Fremde Änderungen an Events nur, solange die Shell zu sehen ist (danach hielte das Repository sie am Leben)
 		// Ebenso das sofortige Speichern: nach dem Verlassen der Ansicht hört es nicht mehr am Tracker zu
 		LiveViews.whileShown(contentArea, Registration.of(eventRepository::addListener, eventRepository::removeListener, foreignChanges),
-				new Registration(() -> autoSave.setActive(true), () -> autoSave.setActive(false)));
+				new Registration(() -> autoSave.setActive(true), () -> autoSave.setActive(false)),
+				new Registration(() -> ChangeTracker.events().addListener(ownChanges), () -> ChangeTracker.events().removeListener(ownChanges)),
+				Registration.of(eventRepository::addListener, eventRepository::removeListener, ownSaves),
+				Registration.of(hallRepository::addListener, hallRepository::removeListener, foreignHallChanges),
+				LockedSeats.whileShown(this::refreshFreeSeats));
 
 		// "Alle Vorstellungen" ist als echter (null-)Eintrag Teil der Liste, wie in der Abrechnung: So lässt sich die
 		// Auswahl einer Vorstellung wieder aufheben.
@@ -196,6 +222,7 @@ public class TicketShellController {
 		});
 
 		bindSearchHits();
+		bindFreeSeats();
 
 		viewToggleGroup.selectedToggleProperty().addListener((obs, oldToggle, newToggle) -> {
 			if (newToggle == btnTableView) {
@@ -242,6 +269,37 @@ public class TicketShellController {
 		tooltip.setText(SearchHits.tooltipText(state.searchHits(), presentations, state.presentationProperty().get() == null));
 	}
 
+	/**
+	 * "frei: n von m" über dem Auswahlfeld "Vorstellung" (KARV-215), siehe {@link FreeSeats}. Hier hängt nur der Wechsel der
+	 * Vorstellung; die übrigen Auslöser stehen an den Feldern oben und am Ende von {@link #applyEventSelection}.
+	 */
+	private void bindFreeSeats() {
+		freeSeatsTooltip.setOnShowing(event -> refreshFreeSeats());
+		state.presentationProperty().addListener((obs, oldPresentation, newPresentation) -> refreshFreeSeats());
+		refreshFreeSeats();
+	}
+
+	/** Die Meldungen von Tracker und Repository gelten für alle Events; neu gerechnet wird nur für das gezeigte. */
+	private void refreshFreeSeatsOf(Event changed) {
+		if (changed.equals(state.eventProperty().get())) {
+			refreshFreeSeats();
+		}
+	}
+
+	/** Zahl und Tooltip aus dem aktuellen Stand; ohne Event steht nichts da. */
+	private void refreshFreeSeats() {
+		Event event = state.eventProperty().get();
+		if (event == null) {
+			lblFreeSeats.setText("");
+			lblFreeSeats.setTooltip(null);
+			return;
+		}
+		List<Presentation> counted = FreeSeats.counted(event, state.presentationProperty().get());
+		lblFreeSeats.setText(FreeSeats.labelText(FreeSeats.count(counted)));
+		freeSeatsTooltip.setText(FreeSeats.tooltipText(counted));
+		lblFreeSeats.setTooltip(freeSeatsTooltip);
+	}
+
 	/** Das gewählte Event gilt für die Shell und den Inhalt; die Vorstellung steht danach auf "Alle Vorstellungen". */
 	private void applyEventSelection(Event selectedEvent) {
 		state.eventProperty().set(selectedEvent);
@@ -266,6 +324,8 @@ public class TicketShellController {
 		if (activeContentController != null) {
 			activeContentController.setEvent(selectedEvent);
 		}
+		// Erst jetzt: Vor dem Abgleich oben fehlen den Sitzen ohne Buchung noch ihre leeren Buchungen (KARV-215)
+		refreshFreeSeats();
 	}
 
 	@FXML

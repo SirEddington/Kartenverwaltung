@@ -1,5 +1,28 @@
 # Patchnotes
 
+## 1.1.2
+
+### Neu
+- Im Kartenverkauf steht über dem Auswahlfeld „Vorstellung“ jetzt immer, wie viele Karten noch frei
+  sind, zum Beispiel „frei: 42 von 180“. Bei „Alle Vorstellungen“ ist es die Summe; fährt man mit
+  der Maus darüber, steht dort die Zahl je Vorstellung. Gesperrte Plätze und Buchungen ohne Platz
+  zählen nicht mit.
+
+### Verbessert
+- Ist eine Karte für 0 € als bezahlt markiert, erscheint die Warnung „… ist als bezahlt markiert,
+  der Preis beträgt aber 0,00 €“ (SEA-006) nicht mehr: Bei 0 € ist nichts zu bezahlen.
+
+### Behoben
+- Verkaufen zwei Kassen denselben Platz, bevor der Abgleich den ersten Verkauf gebracht hat,
+  bleiben jetzt auch dann beide Buchungen erhalten, wenn der Platz vorher schon einmal gebucht war,
+  etwa weil beide Kassen ihn storniert und neu verkauft haben oder weil er noch einen alten
+  Kommentar trug: Eine behält den Platz, die andere steht unter „Ohne Platz“, und ihre Kasse
+  bekommt einen Hinweis. Bisher verschwand die zweite Buchung in diesem Fall ohne Hinweis.
+- In seltenen Fällen konnte beim Abgleich zweier Kassen eine Buchung ohne Hinweis wegfallen oder
+  überschrieben werden: wenn die gespeicherten Daten eines Platzes beschädigt waren oder aus einer
+  neueren Programmversion stammten. Jetzt bleibt die Buchung in diesen Fällen erhalten, oder die
+  betroffene Kasse bekommt einen Hinweis.
+
 ## 1.1.1
 
 ### Neu

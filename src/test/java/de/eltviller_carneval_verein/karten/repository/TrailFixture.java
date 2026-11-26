@@ -149,10 +149,15 @@ final class TrailFixture {
 	 * Spur über alle Ordner.
 	 */
 	ConflictInput input(UnitKey unit, Version base, List<Version> stretch) {
+		return input(unit, base, stretch, Map.of());
+	}
+
+	/** Wie {@link #input(UnitKey, Version, List)}, mit diesen Geschwister-Einheiten. */
+	ConflictInput input(UnitKey unit, Version base, List<Version> stretch, Map<UnitKey, ConflictInput.Sibling> siblings) {
 		List<Version> chain = chain(unit);
 		int at = base == null ? -1 : chain.indexOf(base);
 		List<Version> since = chain.subList(at + 1, chain.size());
 		return new ConflictInput(unit, base, stretch.get(stretch.size() - 1), chain.get(chain.size() - 1), since, OWN,
-				Map.of(), stretch, trail(unit, base, stretch));
+				siblings, stretch, trail(unit, base, stretch));
 	}
 }

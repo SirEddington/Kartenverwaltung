@@ -9,7 +9,7 @@ import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 
 /**
  * Plausibilitätsprüfungen für eine Buchung (Kürzel SEA, siehe {@link SeatIssue}): die Verkaufsregeln (Preis, abgeholt,
- * E-Mail, bezahlt ohne Preis oder Namen, gezahlter Betrag weicht ab) und die Zuordnung zu einem Platz. Die Meldungen nennen die Buchung
+ * E-Mail, bezahlt ohne Namen, gezahlter Betrag weicht ab) und die Zuordnung zu einem Platz. Die Meldungen nennen die Buchung
  * ({@link EntityLabels#booking}). Aufbau wie bei {@link SeatValidator}.
  */
 public final class BookingValidator {
@@ -47,7 +47,6 @@ public final class BookingValidator {
 		validatePrice();
 		validateCollectedWithoutPayment();
 		validateEmail();
-		validatePaidWithoutPrice();
 		validatePaidAmount();
 		validatePaidWithoutName();
 		validateDates();
@@ -124,12 +123,6 @@ public final class BookingValidator {
 		String email = booking.getEMail();
 		if (email != null && !email.isBlank() && !EMAIL.matcher(email.trim()).matches()) {
 			result.add(SeatIssue.EMAIL_INVALID.toIssue(EntityLabels.booking(booking), email.trim()));
-		}
-	}
-
-	private void validatePaidWithoutPrice() {
-		if (booking.isPaid() && booking.getEffectivePrice() == 0) {
-			result.add(SeatIssue.PAID_WITHOUT_PRICE.toIssue(EntityLabels.booking(booking), MoneyFormat.formatCents(0)));
 		}
 	}
 
