@@ -668,7 +668,13 @@ public class TicketTableController implements ContentController, SalesStateAware
 			}
 			rebuild();
 			if (sameModel) {
-				treeTable.restoreSelection(sources.stream().map(BookingMove.Source::booking).toList());
+				// Eine einzelne Buchung rückt wie nach "Platz zuweisen…" in den sichtbaren Bereich; bei mehreren bleibt die
+				// Tabelle stehen, wo sie ist
+				if (sources.size() == 1) {
+					treeTable.selectAndReveal(sources.get(0).booking());
+				} else {
+					treeTable.restoreSelection(sources.stream().map(BookingMove.Source::booking).toList());
+				}
 			}
 		}
 		}

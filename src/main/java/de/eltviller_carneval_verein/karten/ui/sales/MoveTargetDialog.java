@@ -27,6 +27,7 @@ import javafx.scene.control.ListView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.Window;
 
@@ -95,6 +96,10 @@ final class MoveTargetDialog {
 		message.setWrapText(true);
 		message.setMaxWidth(380);
 		message.managedProperty().bind(message.textProperty().isEmpty().not());
+		// Ein umbrochener Text bekäme sonst nur eine Zeile Höhe, wenn die Liste den Platz hält
+		message.setMinHeight(Region.USE_PREF_SIZE);
+		// Die Meldung gilt für die Wahl, zu der sie kam: Mit jeder Änderung der Wahl verschwindet sie
+		chosen.addListener((SetChangeListener<String>) change -> message.setText(""));
 		Label header = new Label(MoveTexts.chooseHeader(sources));
 		header.setWrapText(true);
 		header.setMaxWidth(380);
@@ -122,6 +127,7 @@ final class MoveTargetDialog {
 			if (text != null) {
 				event.consume();
 				message.setText(text);
+				dialog.getDialogPane().getScene().getWindow().sizeToScene(); // Platz für die Meldung, auch zweizeilig
 			}
 		});
 
