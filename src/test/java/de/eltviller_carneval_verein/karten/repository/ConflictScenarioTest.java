@@ -524,6 +524,143 @@ class ConflictScenarioTest {
 	}
 
 	/**
+	 * KARV-201: Sitz 1 trägt Nora. Beide Rechner stornieren sie und verkaufen den Sitz neu, je in einem Speichervorgang:
+	 * ein Doppelverkauf, auch wenn der Sitz eine Vorgeschichte hat.
+	 */
+	@ParameterizedTest(name = "zuerst hochgeladen: {0}")
+	@ValueSource(strings = { "a", "b" })
+	void bothCancelAndResellIsADoubleSale(String first) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String noraId = a.sell(1, "Nora").getId();
+		untilQuiet(a, b);
+		assertEquals(noraId, b.seat(1).getId(), "B kennt Nora auf Sitz 1");
+
+		a.seat(1).clearCustomerData();
+		String xaverId = a.sell(1, "Xaver").getId();
+		b.seat(1).clearCustomerData();
+		String yvonneId = b.sell(1, "Yvonne").getId();
+		assertNotEquals(noraId, xaverId, "ein neuer Verkauf hat eine neue Kennung");
+		assertNotEquals(noraId, yvonneId, "ein neuer Verkauf hat eine neue Kennung");
+
+		assertDoubleSaleInUploadOrder(a, b, first, xaverId, yvonneId);
+	}
+
+	/**
+	 * KARV-201: Sitz 1 ist frei, seine Buchung trägt aber einen Rest (einen alten Kommentar, KARV-121) und hat deshalb eine
+	 * Einheit. Beide Rechner verkaufen den Sitz: ein Doppelverkauf wie auf einem ganz freien Sitz.
+	 */
+	@ParameterizedTest(name = "zuerst hochgeladen: {0}")
+	@ValueSource(strings = { "a", "b" })
+	void doubleSaleOnASeatWithLeftoversKeepsBothBookings(String first) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		a.seat(1).setComment("alter Kommentar");
+		a.repository.saveEvent(a.event);
+		String leftoverId = a.seat(1).getId();
+		untilQuiet(a, b);
+		assertFalse(a.eventState().get(seatUnit(a, 1)).deleted(), "der Sitz mit Rest hat eine Einheit");
+		assertTrue(b.seat(1).hasLeftovers(), "B kennt den Rest");
+		assertEquals(leftoverId, b.seat(1).getId());
+
+		a.seat(1).clearLeftovers();
+		String xaverId = a.sell(1, "Xaver").getId();
+		b.seat(1).clearLeftovers();
+		String yvonneId = b.sell(1, "Yvonne").getId();
+		assertNotEquals(leftoverId, xaverId, "ein neuer Verkauf hat eine neue Kennung");
+		assertNotEquals(leftoverId, yvonneId, "ein neuer Verkauf hat eine neue Kennung");
+
+		assertDoubleSaleInUploadOrder(a, b, first, xaverId, yvonneId);
+	}
+
+	/**
+	 * A hat Sitz 1 an Xaver verkauft, B an Yvonne; {@code first} lädt zuerst hoch. Seine Buchung behält den Sitz. Die des
+	 * anderen lebt genau einmal, "ohne Platz" mit dem Sitz als Herkunft; sein Rechner hat den Vermerk, und beide Rechner
+	 * laufen zusammen.
+	 */
+	private void assertDoubleSaleInUploadOrder(Machine a, Machine b, String first, String xaverId, String yvonneId)
+			throws IOException {
+		Machine winner = "a".equals(first) ? a : b;
+		Machine loser = winner == a ? b : a;
+		String winnerName = winner == a ? "Xaver" : "Yvonne";
+		String loserName = winner == a ? "Yvonne" : "Xaver";
+		String winnerId = winner == a ? xaverId : yvonneId;
+		String loserId = winner == a ? yvonneId : xaverId;
+		winner.tick();
+		loser.tick();
+
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		UnitKey seat = seatUnit(a, 1);
+		UnitKey moved = unassignedUnit(a, loserId);
+		assertEquals(winnerName, lastName(a.eventState().get(seat)));
+		assertEquals(Set.of(seat), carriers(a, winnerId));
+		assertEquals(Set.of(moved), carriers(a, loserId));
+		assertEquals(Set.of(moved), unassigned(a).keySet());
+		assertWithoutPlace(unassigned(a).get(moved), loserName);
+		assertEquals(seat, a.sync.unitState(moved).current().marks().movedFrom(), "das Parken nennt den Sitz");
+		assertDoubleSale(loser, moved, seat);
+		assertTrue(winner.open().isEmpty(), "der Gewinner hat keinen Konflikt: " + winner.open());
+		assertModelShowsDoubleSale(a, 1, winnerName, loserId, loserName);
+		assertModelShowsDoubleSale(b, 1, winnerName, loserId, loserName);
+	}
+
+	/**
+	 * KARV-201 neben einem Umzug: Müller sitzt auf Sitz 0, Nora auf Sitz 1. B tauscht die beiden, A storniert Nora und
+	 * verkauft Sitz 1 an Xaver, je in einem Speichervorgang. Das Storno gilt (E3); auf Sitz 1 treffen danach Müller und
+	 * Xaver aufeinander. Wer zuerst hochlädt, behält den Sitz, die andere Buchung lebt genau einmal "ohne Platz".
+	 * <p>
+	 * Die Vermerke prüft der Test nicht: An Sitz 1 fallen zwei an (das Storno gegen den Umzug und der Doppelverkauf), eine
+	 * Version trägt aber nur einen.
+	 */
+	@ParameterizedTest(name = "zuerst hochgeladen: {0}")
+	@ValueSource(strings = { "a", "b" })
+	void swapAgainstCancelAndResellKeepsBothBookingsOnce(String first) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String muellerId = a.seat(0).getId();
+		String noraId = a.sell(1, "Nora").getId();
+		untilQuiet(a, b);
+		assertEquals(noraId, b.seat(1).getId(), "B kennt Nora auf Sitz 1");
+
+		Booking mueller = b.seat(0);
+		Booking nora = b.seat(1);
+		List<Seat> seats = b.plan().getSeats();
+		mueller.takeSnapshot(seats.get(1).getParent(), seats.get(1));
+		nora.takeSnapshot(seats.get(0).getParent(), seats.get(0));
+		b.repository.saveEvent(b.event);
+		assertEquals(muellerId, b.seat(1).getId(), "B: Müller auf Sitz 1");
+		a.seat(1).clearCustomerData();
+		String xaverId = a.sell(1, "Xaver").getId();
+		Machine winner = "a".equals(first) ? a : b;
+		winner.tick();
+		(winner == a ? b : a).tick();
+
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		UnitKey seat = seatUnit(a, 1);
+		String winnerId = winner == a ? xaverId : muellerId;
+		String loserId = winner == a ? muellerId : xaverId;
+		for (Machine machine : m) {
+			assertEquals(Set.of(seat), carriers(machine, winnerId), machine.name);
+			assertEquals(Set.of(unassignedUnit(a, loserId)), carriers(machine, loserId), machine.name);
+			assertEquals(Set.of(), carriers(machine, noraId), machine.name + ": das Storno gilt");
+			assertEquals(Set.of(seat.bookingDir()), carriersInModel(machine, winnerId), machine.name);
+			assertEquals(Set.of("null"), carriersInModel(machine, loserId), machine.name);
+			assertEquals(Set.of(), carriersInModel(machine, noraId), machine.name);
+		}
+		assertSettled(m);
+	}
+
+	/**
 	 * B verkauft zwei Plätze in einem Speichervorgang, A hat beide schon verkauft: Jede Zusammenführung hat ihren eigenen
 	 * Speichervorgang, die Vermerke nennen aber B's verlorenen, und der Dialog zeigt beide Zeilen in einer Gruppe.
 	 */
@@ -1496,6 +1633,51 @@ class ConflictScenarioTest {
 			assertEquals(ConflictNote.Kind.DOUBLE_SALE, byId.get(parent).conflict().kind());
 		}
 		assertEquals(2, notes(a, seat));
+	}
+
+	/**
+	 * KARV-201 mit drei Rechnern: Sitz 1 trägt Nora, alle drei stornieren sie und verkaufen den Sitz neu. A lädt zuerst
+	 * hoch und behält ihn; die Buchungen von B und C leben je genau einmal "ohne Platz", jede mit ihrem Vermerk. Die
+	 * Zusammenführungen der beiden Verlierer gabeln und werden gegeneinander aufgelöst, ohne dass eine Buchung dazukommt.
+	 */
+	@Test
+	void threeMachinesResellingOneSeatKeepAllBookings() throws IOException {
+		Machine[] m = machines("a", "b", "c");
+		Machine a = m[0];
+		Machine b = m[1];
+		Machine c = m[2];
+		setUp(a, b, c);
+		a.sell(1, "Nora");
+		untilQuiet(a, b, c);
+		Map<Machine, String> sold = new LinkedHashMap<>();
+		for (Machine machine : m) {
+			machine.seat(1).clearCustomerData();
+			sold.put(machine, machine.sell(1, "Kunde " + machine.name).getId());
+		}
+		a.tick();
+		b.tick();
+		c.tick();
+
+		untilQuiet(a, b, c);
+
+		assertConverged(a, b, c);
+		UnitKey seat = seatUnit(a, 1);
+		UnitKey bMoved = unassignedUnit(a, sold.get(b));
+		UnitKey cMoved = unassignedUnit(a, sold.get(c));
+		assertEquals("Kunde a", lastName(a.eventState().get(seat)));
+		Map<UnitKey, UnitSnapshot> withoutPlace = unassigned(a);
+		assertEquals(Set.of(bMoved, cMoved), withoutPlace.keySet());
+		assertWithoutPlace(withoutPlace.get(bMoved), "Kunde b");
+		assertWithoutPlace(withoutPlace.get(cMoved), "Kunde c");
+		assertDoubleSale(b, bMoved, seat);
+		assertDoubleSale(c, cMoved, seat);
+		assertTrue(a.open().isEmpty(), "der Gewinner hat keinen Konflikt: " + a.open());
+		for (Machine machine : m) {
+			assertEquals(Set.of(String.valueOf(seat.bookingDir())), carriersInModel(machine, sold.get(a)), machine.name);
+			assertEquals(Set.of("null"), carriersInModel(machine, sold.get(b)), machine.name);
+			assertEquals(Set.of("null"), carriersInModel(machine, sold.get(c)), machine.name);
+		}
+		assertSettled(m);
 	}
 
 	/**

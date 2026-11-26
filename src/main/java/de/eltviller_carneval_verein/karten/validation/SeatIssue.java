@@ -6,13 +6,16 @@ package de.eltviller_carneval_verein.karten.validation;
  *
  * <p>Die Layoutregeln ({@code SEA-008}, {@code SEA-009}) prüft der {@link SeatValidator} am Sitz der Bestuhlung, dort
  * steht {@code &1} für die Beschreibung des Sitzes (siehe {@link EntityLabels#seat}). Die Verkaufsregeln
- * ({@code SEA-001}, {@code SEA-003} bis {@code SEA-007}, {@code SEA-010}, {@code SEA-011}, {@code SEA-012} bis
- * {@code SEA-019}) prüfen
+ * ({@code SEA-001}, {@code SEA-003} bis {@code SEA-005}, {@code SEA-007}, {@code SEA-010}, {@code SEA-011},
+ * {@code SEA-012} bis {@code SEA-020}) prüfen
  * {@link BookingValidator} und {@link PresentationValidator} an der Buchung, dort steht {@code &1} für deren
  * Beschreibung (siehe {@link EntityLabels#booking}).
  *
  * <p>{@code SEA-002} war für "Preis ist keine Zahl" vorgesehen, wurde nie ausgegeben und bleibt unvergeben: Nicht
  * lesbare Eingaben meldet {@code INP-001} (siehe {@code ui.input.InputIssue}).
+ *
+ * <p>{@code SEA-006} ("bezahlt, der Preis beträgt aber 0 €") gab es bis 1.1.1 und bleibt unvergeben: Eine Karte für
+ * 0 € ist bezahlt, weil nichts zu bezahlen ist (KARV-216).
  */
 public enum SeatIssue implements Issue {
 	/** &1 = Buchung. */
@@ -23,8 +26,6 @@ public enum SeatIssue implements Issue {
 	COLLECTED_NOT_PAID("SEA-004", Severity.WARNING, "&1 ist als abgeholt markiert, aber nicht bezahlt."),
 	/** &1 = Buchung, &2 = eingegebene E-Mail-Adresse. */
 	EMAIL_INVALID("SEA-005", Severity.WARNING, "Die E-Mail-Adresse &2 bei &1 ist nicht gültig."),
-	/** &1 = Buchung, &2 = Preis. */
-	PAID_WITHOUT_PRICE("SEA-006", Severity.WARNING, "&1 ist als bezahlt markiert, der Preis beträgt aber &2."),
 	/** &1 = Buchung. */
 	PAID_WITHOUT_NAME("SEA-007", Severity.WARNING, "&1 ist als bezahlt markiert, es ist aber kein Nachname eingetragen."),
 	/** &1 = Sitz (mit der ungültigen Nummer). */

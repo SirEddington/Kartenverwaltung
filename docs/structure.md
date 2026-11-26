@@ -42,8 +42,8 @@ Kartenverwaltung/
     │   │   ├── update/       (40 classes)
     │   │   ├── util/         (4 classes)
     │   │   └── ui/           (33 classes in the root package)
-    │   │       ├── accounting/ (6)  backup/ (6)   event/ (8)    hall/ (17)   input/ (17)
-    │   │       └── menu/ (2)        sales/ (50)   settings/ (9) shared/ (30)
+    │   │       ├── accounting/ (6)  backup/ (6)   event/ (8)    hall/ (17)   input/ (18)
+    │   │       └── menu/ (2)        sales/ (53)   settings/ (9) shared/ (30)
     │   └── resources/de/eltviller_carneval_verein/karten/
     │       ├── patchnotes.md     Patch notes of every version (KARV-125), newest first
     │       └── ui/

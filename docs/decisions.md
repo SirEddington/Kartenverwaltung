@@ -777,6 +777,28 @@ the ticket went from 1.1.1 to 1.2.
 - **Local only:** The grouping is not part of the shared folder. An older version (1.1.x) ignores the new fields and
   loses them when it writes `settings.json`; that is acceptable, only the remembered grouping is lost.
 
+## Free seats in the sales view (KARV-215)
+
+**Decision:** Above the "Vorstellung" box the sales view shows "frei: n von m". n counts the seats that can be sold
+now, m the free and taken seats. A locked seat (`LockedSeats.isLocked`) and a booking without a place count in
+neither; a booking with leftovers but no last name is free, as in the hall view. With "Alle Vorstellungen" both are
+sums, and the tooltip lists every presentation.
+
+**Why:** The box office has to tell a customer at once how many tickets are left. "n Treffer" cannot answer that: it
+counts what the view shows, taken seats included, and changes with the search.
+
+**How:** The shell counts over the bookings in the model (`FreeSeats`), not over what a view shows, so search, column
+filters and the choice between table and hall view do not change the number. After the reconciliation with the seating
+plan every seat has exactly one booking, which makes the bookings the seats.
+
+- m is deliberately smaller than "gesamt" in the event overview and the statistics (`BookingTotals`), which include
+  bookings without a place and locked seats.
+- The number is recalculated on a change of event or presentation, on own changes (reported by the `ChangeTracker`),
+  on a save of the shown event, on foreign changes to events and halls, and when locks change. The save is a trigger
+  of its own because a change saved before the `ChangeTrigger` has compared never reaches the tracker's listeners
+  (Ctrl+S out of an open table cell).
+- No field of the header changes its width. With long numbers the caption "Vorstellung" is shortened, never the number.
+
 ## OpenPDF 1.3.x
 
 The PDF export uses OpenPDF 1.3.43 on purpose: from 2.x on, ICU4J (~15 MB) is a mandatory dependency, and the
