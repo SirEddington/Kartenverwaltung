@@ -379,9 +379,10 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	// Die Quellen hält moveTargets selbst. Ohne Zielwahl ist die Bedienung unverändert.
 
 	private MoveTargets moveTargets;
-	// Esc bricht die Zielwahl ab: Der Plan bekommt nie den Tastaturfokus, deshalb an der Szene (gemerkt fürs Abmelden)
+	// Esc bricht die Zielwahl ab: Der Plan bekommt nie den Tastaturfokus, deshalb an der Szene (gemerkt fürs Abmelden).
+	// Eine Karte ist in der Zielwahl nie offen, und den Bestätigungsdialog schützt seine Modalität vor diesem Filter
 	private final EventHandler<KeyEvent> moveEscape = event -> {
-		if (event.getCode() == KeyCode.ESCAPE && moveTargets != null && !isDialogOpen()) {
+		if (event.getCode() == KeyCode.ESCAPE && moveTargets != null) {
 			event.consume();
 			endMove(false);
 		}
@@ -394,11 +395,11 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	 */
 	private void startMove(List<Booking> selection) {
 		SeatingPlan plan = currentPlan();
-		List<BookingMove.Source> sources = MoveTexts.movable(selection).stream().map(BookingMove.Source::of).toList();
+		List<BookingMove.Source> sources = MoveTexts.sourcesOf(selection);
 		if (sources.isEmpty() || plan == null) {
 			return; // der Eintrag ist dann gesperrt oder der Sitz gar nicht gezeichnet
 		}
-		Seat lockedSeat = MoveAction.lockedSourceSeat(plan, sources, LockedSeats.lockedSeatIds(selectedPres));
+		Seat lockedSeat = MoveAction.lockedSourceSeat(plan, sources, LockedSeats.lockedUnitSeatIds(selectedPres));
 		if (lockedSeat != null) {
 			StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.locked(lockedSeat));
 			return;
@@ -420,7 +421,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		if (seat == null) {
 			return; // nach einer fremden Änderung kein Sitz der Bestuhlung mehr; der Plan wird gleich neu gezeichnet
 		}
-		switch (moveTargets.toggle(seatId, LockedSeats.lockedSeatIds(selectedPres))) {
+		switch (moveTargets.toggle(seatId, LockedSeats.lockedUnitSeatIds(selectedPres))) {
 		case LOCKED -> StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.locked(seat));
 		case FULL -> StatusMessage.getInstance().show(Severity.INFO, MoveTexts.tooMany(moveTargets.sources().size()));
 		case ADDED, REMOVED -> {
@@ -454,16 +455,14 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		Presentation presentation = move.presentation();
 		SeatingPlan plan = currentPlan();
 		List<String> targets = move.targets();
-		BookingMove.Plan shown = BookingMove.plan(presentation, plan, move.sources(), targets, LockedSeats.lockedSeatIds(presentation));
+		BookingMove.Plan shown = BookingMove.plan(presentation, plan, move.sources(), targets, LockedSeats.lockedUnitSeatIds(presentation));
 		if (shown.refused()) {
 			String text = MoveTexts.refusal(shown, presentation);
-			switch (shown.refusal()) {
-			case NOTHING_TO_DO -> StatusMessage.getInstance().show(Severity.INFO, text);
-			case LOCKED -> StatusMessage.getInstance().show(Severity.ERROR, text);
-			case STALE, COUNT, NO_PLAN -> {
+			if (MoveTexts.keepsChoiceOpen(shown)) {
+				StatusMessage.getInstance().show(shown.refusal() == BookingMove.Refusal.NOTHING_TO_DO ? Severity.INFO : Severity.ERROR, text);
+			} else {
 				StatusMessage.getInstance().show(Severity.ERROR, text);
 				endMove(true);
-			}
 			}
 			return;
 		}
@@ -511,7 +510,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 			endMove(true);
 			return;
 		}
-		moveTargets.dropGoneTargets(plan, LockedSeats.lockedSeatIds(selectedPres));
+		moveTargets.dropGoneTargets(plan, LockedSeats.lockedUnitSeatIds(selectedPres));
 		updateMoveBar();
 	}
 
@@ -532,8 +531,14 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 		renderHall();
 	}
 
-	/** Leiste weg, Esc ab, keine Zielwahl mehr; die Auswahl setzt der Aufrufer. */
+	/**
+	 * Leiste weg, Esc ab, keine Zielwahl mehr; ohne laufende Zielwahl nichts. Die Auswahl setzt und das Neuzeichnen
+	 * fordert der Aufrufer an.
+	 */
 	private void stopMove() {
+		if (moveTargets == null) {
+			return;
+		}
 		moveTargets = null;
 		moveBar.setVisible(false);
 		moveBar.setManaged(false);
@@ -700,7 +705,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	static final String APP_STYLESHEET = HallOverviewController.class.getResource("/de/eltviller_carneval_verein/karten/ui/style.css").toExternalForm();
 
 	private void applyEditMode() {
-		endMove(false);
+		stopMove();
 		closePopup();
 		selectedBookings.clear(); // Die Mehrfachauswahl gibt es nur im Bearbeitungsmodus
 		renderHall();
@@ -730,7 +735,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 	 */
 	@Override
 	public void restoreSelection(java.util.Collection<Booking> bookings) {
-		endMove(false);
+		stopMove();
 		selectedBookings.clear();
 		if (editMode && selectedPres != null) {
 			bookings.stream().filter(booking -> booking.getParent() == selectedPres && !booking.isUnassigned()).forEach(selectedBookings::add);
@@ -742,7 +747,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	@Override
 	public void setEvent(Event event) {
-		endMove(false);
+		stopMove();
 		closePopup();
 		selectedBookings.clear();
 		this.selectedEvent = event;
@@ -753,7 +758,7 @@ public class HallOverviewController implements ContentController, SalesStateAwar
 
 	@Override
 	public void setPresentation(Presentation presentation) {
-		endMove(false);
+		stopMove();
 		closePopup();
 		selectedBookings.clear();
 		this.selectedPres = presentation;

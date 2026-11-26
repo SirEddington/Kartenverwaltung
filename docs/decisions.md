@@ -818,7 +818,7 @@ conflict dialog apply. Prices stay as they were because the booking is not sold 
   not the seat of a source (end). If the end holds a booking, it moves to the start (counter move; with one source this
   is a swap). Otherwise the booking at the end is removed with its leftovers, as in `BookingSync.assign`, and the start
   gets an empty placeholder. Both sides are paired by the same order, so a chain never closes into a ring.
-- **Blocked seats:** `LockedSeats.lockedSeatIds` names every seat whose unit is on the list of locked entries, also
+- **Blocked seats:** `LockedSeats.lockedUnitSeatIds` names every seat whose unit is on the list of locked entries, also
   when the model still shows an older booking there. A plan that touches such a seat is refused, otherwise the store
   would reject the whole save and the moved state would stay unsaved.
 - **Stale views:** The view keeps id and seat of each source as chosen. If the plan, the seating plan or the view

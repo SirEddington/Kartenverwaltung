@@ -614,8 +614,8 @@ public class TicketTableController implements ContentController, SalesStateAware
 			StatusMessage.getInstance().show(Severity.ERROR, PlaceAssignment.noPlanText(presentation));
 			return;
 		}
-		List<BookingMove.Source> sources = movable.stream().map(BookingMove.Source::of).toList();
-		Set<String> locked = LockedSeats.lockedSeatIds(presentation);
+		List<BookingMove.Source> sources = MoveTexts.sourcesOf(movable);
+		Set<String> locked = LockedSeats.lockedUnitSeatIds(presentation);
 		Seat lockedSeat = MoveAction.lockedSourceSeat(plan, sources, locked);
 		if (lockedSeat != null) {
 			StatusMessage.getInstance().show(Severity.ERROR, MoveTexts.locked(lockedSeat));
@@ -642,17 +642,13 @@ public class TicketTableController implements ContentController, SalesStateAware
 			moveStale();
 			return null;
 		}
-		BookingMove.Plan shown = BookingMove.plan(presentation, plan, sources, targets, LockedSeats.lockedSeatIds(presentation));
+		BookingMove.Plan shown = BookingMove.plan(presentation, plan, sources, targets, LockedSeats.lockedUnitSeatIds(presentation));
 		if (shown.refused()) {
-			switch (shown.refusal()) {
-			case NOTHING_TO_DO, LOCKED -> {
+			if (MoveTexts.keepsChoiceOpen(shown)) {
 				return MoveTexts.refusal(shown, presentation);
 			}
-			case STALE, COUNT, NO_PLAN -> {
-				moveStale();
-				return null;
-			}
-			}
+			moveStale();
+			return null;
 		}
 		// Meldungen nach dem Ausführen und bei veralteter Auswahl zeigt MoveAction selbst. Ausgeführt wird nur, solange die
 		// Tabelle dieses Modell zeigt: Ein neu zusammengesetztes Event hängt das alte ab (es würde nie gespeichert), und auf
@@ -664,12 +660,13 @@ public class TicketTableController implements ContentController, SalesStateAware
 		case STALE -> rebuild();
 		case DONE -> {
 			// Das Speichern kann fremde Änderungen einarbeiten; die Tabelle zeigt dann womöglich schon ein anderes Modell
-			if (showsMoveModel(presentation, plan)) {
+			boolean sameModel = showsMoveModel(presentation, plan);
+			if (sameModel) {
 				shown.steps().forEach(step -> edits.pin(step.booking()));
-				rebuild();
+			}
+			rebuild();
+			if (sameModel) {
 				treeTable.restoreSelection(sources.stream().map(BookingMove.Source::booking).toList());
-			} else {
-				rebuild();
 			}
 		}
 		}

@@ -29,6 +29,11 @@ final class MoveTexts {
 				.sorted(Booking.PLACE_ORDER).toList();
 	}
 
+	/** Die Quellen zu den belegenden Buchungen mit Platz ({@link #movable}), in Platzreihenfolge. */
+	static List<BookingMove.Source> sourcesOf(List<Booking> selection) {
+		return movable(selection).stream().map(BookingMove.Source::of).toList();
+	}
+
 	/** "Buchung verschieben…", bei mehreren belegenden Buchungen "Ausgewählte Buchungen verschieben… (n)". */
 	static String menuText(List<Booking> selection) {
 		int count = movable(selection).size();
@@ -40,14 +45,27 @@ final class MoveTexts {
 		return !editMode || movable(selection).isEmpty();
 	}
 
-	/** Text der Leiste (und der Platzliste) für die Quellen und die Zahl der gewählten Ziele. */
+	/** Text der Leiste der Saalansicht für die Quellen und die Zahl der gewählten Ziele. */
 	static String barText(List<BookingMove.Source> sources, int chosen) {
+		String header = chooseHeader(sources);
+		return sources.size() == 1 ? header : header + ": " + chosenCount(chosen, sources.size()) + ".";
+	}
+
+	/**
+	 * Für wen gewählt wird: bei einer Quelle mit Kunde, Platz und "Platz anklicken.", sonst "Ziele wählen für n
+	 * Buchungen" (Kopf der Platzliste, Anfang der Leiste).
+	 */
+	static String chooseHeader(List<BookingMove.Source> sources) {
 		if (sources.size() == 1) {
 			Booking booking = sources.get(0).booking();
 			return "Ziel wählen für " + customerOf(booking) + " (" + booking.getPlaceLabel() + "): Platz anklicken.";
 		}
-		return "Ziele wählen für " + sources.size() + " Buchungen: " + chosen + " von " + sources.size()
-				+ " Plätzen gewählt.";
+		return "Ziele wählen für " + sources.size() + " Buchungen";
+	}
+
+	/** "k von n Plätzen gewählt" (Zähler der Platzliste, Ende der Leiste). */
+	static String chosenCount(int chosen, int count) {
+		return chosen + " von " + count + " Plätzen gewählt";
 	}
 
 	static String tooMany(int n) {
@@ -113,6 +131,22 @@ final class MoveTexts {
 		case STALE, COUNT -> STALE;
 		case LOCKED -> locked(plan.lockedSeat());
 		case NOTHING_TO_DO -> NOTHING_TO_DO;
+		};
+	}
+
+	/**
+	 * Ob die Zielwahl nach der Ablehnung mit ihren Zielen offen bleibt, damit die Kasse eines abwählen kann ("Nichts zu
+	 * tun", "Platz gesperrt"); jede veraltete Auswahl beendet sie.
+	 *
+	 * @throws IllegalArgumentException bei einem ausführbaren Plan
+	 */
+	static boolean keepsChoiceOpen(BookingMove.Plan plan) {
+		if (!plan.refused()) {
+			throw new IllegalArgumentException("Der Plan ist ausführbar.");
+		}
+		return switch (plan.refusal()) {
+		case NOTHING_TO_DO, LOCKED -> true;
+		case STALE, COUNT, NO_PLAN -> false;
 		};
 	}
 

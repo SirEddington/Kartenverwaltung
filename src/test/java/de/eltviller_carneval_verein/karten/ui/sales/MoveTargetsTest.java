@@ -11,52 +11,38 @@ import org.junit.jupiter.api.Test;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingMove.Source;
-import de.eltviller_carneval_verein.karten.model.Event;
-import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
-import de.eltviller_carneval_verein.karten.model.Syncs;
 import de.eltviller_carneval_verein.karten.model.Table;
-import de.eltviller_carneval_verein.karten.model.TableRow;
 import de.eltviller_carneval_verein.karten.ui.sales.MoveTargets.Click;
 
 /** Zustand der Zielwahl beim Verschieben von Buchungen (KARV-140). */
 class MoveTargetsTest {
 
-	private final SeatingPlan plan = new Hall().addSeatingPlan();
-	private final Presentation presentation = new Event().addPresentation("Prunksitzung");
+	private final MoveFixture fixture = new MoveFixture("Prunksitzung");
+	private final SeatingPlan plan = fixture.plan;
+	private final Presentation presentation = fixture.presentation;
 	private final Seat a3s1;
 	private final Seat a3s2;
 	private final Seat a3s3;
 	private final Seat a3s4;
 
 	MoveTargetsTest() {
-		TableRow rowA = plan.addRow();
-		rowA.setLabel("A");
-		Table a3 = plan.addTable(rowA);
-		a3.setTableNumber(3);
+		Table a3 = fixture.table("A", 3);
 		a3s1 = a3.addSeat(1);
 		a3s2 = a3.addSeat(2);
 		a3s3 = a3.addSeat(3);
 		a3s4 = a3.addSeat(4);
-		presentation.setSeatingPlanId(plan.getId());
-		Syncs.sync(presentation, plan);
-	}
-
-	private Booking person(Seat seat, String lastName) {
-		Booking booking = presentation.getBookings().stream().filter(b -> seat.getId().equals(b.getSeatId())).findFirst()
-				.orElseThrow();
-		booking.setLastName(lastName);
-		return booking;
+		fixture.sync();
 	}
 
 	private MoveTargets forOne() {
-		return new MoveTargets(presentation, List.of(Source.of(person(a3s1, "A"))));
+		return new MoveTargets(presentation, List.of(Source.of(fixture.reserve(a3s1, "A"))));
 	}
 
 	private MoveTargets forTwo() {
-		return new MoveTargets(presentation, List.of(Source.of(person(a3s1, "A")), Source.of(person(a3s2, "B"))));
+		return new MoveTargets(presentation, List.of(Source.of(fixture.reserve(a3s1, "A")), Source.of(fixture.reserve(a3s2, "B"))));
 	}
 
 	@Test
@@ -115,11 +101,11 @@ class MoveTargetsTest {
 
 	@Test
 	void sourcesCurrentTurnsFalseWhenASourceWasCancelled() {
-		Booking anna = person(a3s1, "A");
+		Booking anna = fixture.reserve(a3s1, "A");
 		MoveTargets targets = new MoveTargets(presentation, List.of(Source.of(anna)));
 		assertTrue(targets.sourcesCurrent(plan));
 		assertTrue(targets.isSource(anna));
-		assertFalse(targets.isSource(person(a3s2, "B")));
+		assertFalse(targets.isSource(fixture.reserve(a3s2, "B")));
 
 		anna.setUnassigned(true);
 
@@ -129,8 +115,8 @@ class MoveTargetsTest {
 
 	@Test
 	void dropGoneTargetsRemovesLockedAndMissingSeats() {
-		MoveTargets targets = new MoveTargets(presentation, List.of(Source.of(person(a3s1, "A")),
-				Source.of(person(a3s2, "B")), Source.of(person(a3s3, "C"))));
+		MoveTargets targets = new MoveTargets(presentation, List.of(Source.of(fixture.reserve(a3s1, "A")),
+				Source.of(fixture.reserve(a3s2, "B")), Source.of(fixture.reserve(a3s3, "C"))));
 		targets.toggle(a3s4.getId(), Set.of());
 		targets.toggle(a3s3.getId(), Set.of());
 		targets.toggle("gibt-es-nicht", Set.of());

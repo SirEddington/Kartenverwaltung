@@ -78,7 +78,7 @@ final class MoveAction {
 		if (!stillCurrent.getAsBoolean()) {
 			return Outcome.STALE;
 		}
-		if (!BookingMove.apply(presentation, plan, sources, targetSeatIds, LockedSeats.lockedSeatIds(presentation),
+		if (!BookingMove.apply(presentation, plan, sources, targetSeatIds, LockedSeats.lockedUnitSeatIds(presentation),
 				shown)) {
 			return Outcome.STALE;
 		}

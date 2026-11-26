@@ -84,7 +84,7 @@ public final class LockedSeats {
 	 * Modell noch einen belegten Stand zeigt (KARV-140). Anders als {@link #isLocked} fragt sie die Einheiten, nicht die
 	 * Buchungen. Ohne Einrichtung und ohne Event leer.
 	 */
-	public static Set<String> lockedSeatIds(Presentation presentation) {
+	public static Set<String> lockedUnitSeatIds(Presentation presentation) {
 		Event event = presentation == null ? null : presentation.getParent();
 		if (event == null) {
 			return Set.of();

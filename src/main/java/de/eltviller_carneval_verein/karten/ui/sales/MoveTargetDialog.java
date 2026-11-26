@@ -63,11 +63,6 @@ final class MoveTargetDialog {
 				.toList();
 	}
 
-	/** Für wen gewählt wird: wie die Leiste der Saalansicht ({@link MoveTexts#barText}), ohne die Zahl der gewählten Plätze. */
-	static String header(List<BookingMove.Source> sources) {
-		return sources.size() == 1 ? MoveTexts.barText(sources, 0) : "Ziele wählen für " + sources.size() + " Buchungen";
-	}
-
 	/**
 	 * Zeigt die Liste und wartet auf das Schließen. Ein Klick auf eine Zeile (oder die Leertaste) wählt sie oder wählt sie
 	 * ab, ohne Strg. "Weiter" ist nur mit genau so vielen gewählten Plätzen aktiv, wie es Quellen gibt.
@@ -94,12 +89,12 @@ final class MoveTargetDialog {
 		});
 
 		Label count = new Label();
-		count.textProperty().bind(Bindings.createStringBinding(() -> chosen.size() + " von " + needed + " Plätzen gewählt", chosen));
+		count.textProperty().bind(Bindings.createStringBinding(() -> MoveTexts.chosenCount(chosen.size(), needed), chosen));
 		Label message = new Label();
 		message.setWrapText(true);
 		message.setMaxWidth(380);
 		message.managedProperty().bind(message.textProperty().isEmpty().not());
-		Label header = new Label(header(sources));
+		Label header = new Label(MoveTexts.chooseHeader(sources));
 		header.setWrapText(true);
 		header.setMaxWidth(380);
 		VBox content = new VBox(8, header, list, count, message);

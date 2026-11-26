@@ -1,6 +1,8 @@
 package de.eltviller_carneval_verein.karten.ui.sales;
 
-import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -22,11 +24,14 @@ final class MoveTargets {
 
 	private final Presentation presentation;
 	private final List<BookingMove.Source> sources;
-	private final List<String> targets = new ArrayList<>();
+	// Die Buchungen der Quellen nach Identität: isSource läuft je gezeichnetem Sitz
+	private final Set<Booking> sourceBookings = Collections.newSetFromMap(new IdentityHashMap<>());
+	private final Set<String> targets = new LinkedHashSet<>(); // in der Reihenfolge der Wahl
 
 	MoveTargets(Presentation presentation, List<BookingMove.Source> sources) {
 		this.presentation = presentation;
 		this.sources = List.copyOf(sources);
+		this.sources.forEach(source -> sourceBookings.add(source.booking()));
 	}
 
 	Presentation presentation() {
@@ -47,7 +52,7 @@ final class MoveTargets {
 	}
 
 	boolean isSource(Booking booking) {
-		return sources.stream().anyMatch(s -> s.booking() == booking);
+		return sourceBookings.contains(booking);
 	}
 
 	boolean complete() {

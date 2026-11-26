@@ -237,17 +237,17 @@ class LockedSeatsTest {
 
 	/** Auch ein Sitz, dessen Buchung im Modell noch belegt wirkt (älterer Stand), gilt als gesperrt. */
 	@Test
-	void lockedSeatIdsNamesTakenBookingOnALockedUnit() {
+	void lockedUnitSeatIdsNamesTakenBookingOnALockedUnit() {
 		Booking booking = bookingOf(seat);
 		booking.setLastName("Meier");
 		lock(seat);
 
-		assertEquals(Set.of(seat.getId()), LockedSeats.lockedSeatIds(presentation));
+		assertEquals(Set.of(seat.getId()), LockedSeats.lockedUnitSeatIds(presentation));
 		assertFalse(LockedSeats.isLocked(booking), "isLocked bleibt bei der Regel von KARV-111");
 	}
 
 	@Test
-	void lockedSeatIdsSkipsOtherPresentations() {
+	void lockedUnitSeatIdsSkipsOtherPresentations() {
 		Presentation otherPresentation = event.addPresentation("Sonntag");
 		Event otherEvent = new Event();
 		Presentation foreign = otherEvent.addPresentation("Samstag");
@@ -258,13 +258,13 @@ class LockedSeatsTest {
 				UnitKey.presentation(event.getId(), presentation.getId())), () -> {
 				});
 
-		assertEquals(Set.of(seat.getId()), LockedSeats.lockedSeatIds(presentation));
+		assertEquals(Set.of(seat.getId()), LockedSeats.lockedUnitSeatIds(presentation));
 	}
 
 	@Test
-	void lockedSeatIdsIsEmptyWithoutInstall() {
-		assertEquals(Set.of(), LockedSeats.lockedSeatIds(presentation));
-		assertEquals(Set.of(), LockedSeats.lockedSeatIds(new Presentation()), "ohne Event");
+	void lockedUnitSeatIdsIsEmptyWithoutInstall() {
+		assertEquals(Set.of(), LockedSeats.lockedUnitSeatIds(presentation));
+		assertEquals(Set.of(), LockedSeats.lockedUnitSeatIds(new Presentation()), "ohne Event");
 	}
 
 	@Test

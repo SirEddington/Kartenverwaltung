@@ -164,10 +164,11 @@ public final class BookingMove {
 			}
 		}
 
-		Set<String> sourceSeatIds = new HashSet<>();
+		Map<Seat, Source> moving = new HashMap<>(); // bisheriger Sitz -> Quelle
 		Set<String> sourceBookingIds = new HashSet<>();
 		for (Source source : sources) {
-			if (!sourceSeatIds.add(source.seatId()) || !sourceBookingIds.add(source.bookingId())) {
+			if (moving.put(plan.findSeat(source.seatId()), source) != null
+					|| !sourceBookingIds.add(source.bookingId())) {
 				return Plan.refusedFor(Refusal.COUNT, null);
 			}
 		}
@@ -176,10 +177,6 @@ public final class BookingMove {
 			return Plan.refusedFor(Refusal.COUNT, null);
 		}
 
-		Map<Seat, Source> moving = new HashMap<>();
-		for (Source source : sources) {
-			moving.put(plan.findSeat(source.seatId()), source);
-		}
 		Seat lockedSeat = firstLocked(moving.keySet(), targets, lockedSeatIds);
 		if (lockedSeat != null) {
 			return Plan.refusedFor(Refusal.LOCKED, lockedSeat);
@@ -256,8 +253,7 @@ public final class BookingMove {
 			return false;
 		}
 		for (Seat end : current.emptied()) {
-			presentation.getBookings()
-					.removeIf(b -> liesOn(b, end) && current.steps().stream().noneMatch(step -> step.booking() == b));
+			presentation.getBookings().removeIf(b -> liesOn(b, end));
 		}
 		for (Step step : current.steps()) {
 			step.booking().takeSnapshot(step.to().getParent(), step.to());
