@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -66,6 +67,9 @@ public class StoreEventRepository implements EventRepository {
 	private static final List<String> CHILD_LISTS = List.of(UnitMapper.PRESENTATIONS, UnitMapper.CASH_REGISTERS,
 			UnitMapper.BOOKINGS);
 
+	/** Der Hinweis, solange für ein Event „Kassen noch nicht abgeglichen" gilt ({@link #cashRegistersPending}). */
+	public static final String CASH_PENDING = "Die Kassen dieses Events werden noch abgeglichen.";
+
 	private static StoreEventRepository instance;
 
 	private final SyncService sync;
@@ -117,6 +121,9 @@ public class StoreEventRepository implements EventRepository {
 	 * den Cache, gilt das nicht mehr; das Wiederherstellen schreibt über {@link #write} und ist davon nicht betroffen.
 	 */
 	private final Set<String> removedByOthers = new HashSet<>();
+
+	/** Ob {@link #cashRegistersSettled} das Ende von „Kassen noch nicht abgeglichen" schon gemeldet hat. */
+	private boolean cashSettled;
 
 	/** Ob für das Modellobjekt einer Einheit gerade eine Eingabe offen ist (siehe {@link #setEditingCheck}). */
 	private Predicate<Object> inEditing = model -> false;
@@ -757,6 +764,148 @@ public class StoreEventRepository implements EventRepository {
 		requireEventRoot(presentationOrHead);
 		UnitMapper.requireNothingLockedBelow(presentationOrHead, name, sync.eventSnapshots(presentationOrHead.eventId()));
 	}
+
+	// Kassen (KARV-144) -->
+
+	/**
+	 * Die Kassen-Einheiten des Events, die sich nicht ändern lassen: gesperrt ({@link UnitMapper#lockOf}: beschädigt, neueres
+	 * Format oder inhaltlich zu neu, SYS-008 bzw. SYS-009) oder wartend auf eine Datei aus dem gemeinsamen Ordner; die
+	 * Event-Verwaltung behandelt eine wartende wie eine gesperrte. Gefragt wird wie bei {@link #lockedUnder} der Stand des
+	 * Versionsspeichers ({@link SyncService#cashRegisterSnapshots}, ohne Datei-Ein-/Ausgabe), nicht der Vergleichsstand:
+	 * So zählen auch Kassen, die im Modell fehlen.
+	 *
+	 * @return je Kennung der Kasse, nach Kennung geordnet; leer, wenn keine gesperrt ist oder wartet
+	 */
+	public Map<String, LockedCashRegister> lockedCashRegisters(String eventId) {
+		Map<String, LockedCashRegister> locked = new TreeMap<>();
+		for (UnitSnapshot state : sync.cashRegisterSnapshots(eventId).values()) {
+			UnitState.Status lock = UnitMapper.lockOf(state);
+			if (lock == null && state.status() == UnitState.Status.WAITING) {
+				lock = UnitState.Status.WAITING;
+			}
+			if (lock != null) {
+				String id = state.unit().cashRegisterId();
+				locked.put(id, new LockedCashRegister(id, lock, UnitMapper.isReadable(state)));
+			}
+		}
+		return locked;
+	}
+
+	/**
+	 * Ob für das Event „Kassen noch nicht abgeglichen" gilt (KARV-144): Ein gemeinsamer Ordner ist verbunden, auch wenn er
+	 * gerade nicht erreichbar ist; seit dem Programmstart lief noch kein Vollabgleich bis zum Ende
+	 * ({@link SyncService#fullSyncCompletedSinceStart}, im Einzelbetrieb nie); der Versionsspeicher kennt keine
+	 * Kassen-Einheit des Events, auch keine gelöschte; und der Kopf trägt das Merkmal der Kassen, ein gelöschter Kopf in
+	 * seinem letzten nicht gelöschten Stand. Dann können Kassen noch unterwegs sein, die dieser Rechner unter 1.1
+	 * übersprungen hat. Endet der Zustand mit dem Vollabgleich, meldet {@link #cashRegistersSettled} das.
+	 */
+	public boolean cashRegistersPending(String eventId) {
+		return !sync.fullSyncCompletedSinceStart() && !cashRegisterKnown(eventId) && headCarriesRequires(eventId);
+	}
+
+	/**
+	 * Ob der Versionsspeicher eine Kassen-Einheit des Events kennt: mit einer Version (auch einer Löschung) oder mit einem
+	 * Zustand, der auf eine wartet oder sie sperrt. Ein Ordner ohne Version mit Zustand {@code OK} ist keine.
+	 */
+	private boolean cashRegisterKnown(String eventId) {
+		return sync.cashRegisterSnapshots(eventId).values().stream()
+				.anyMatch(state -> state.version() != null || state.status() != UnitState.Status.OK);
+	}
+
+	/**
+	 * Ob der Kopf des Events im Versionsspeicher das Merkmal der Kassen trägt ({@link HeadRequires#carries}); bei einem
+	 * gelöschten Kopf sein letzter nicht gelöschter Stand. Nur dafür wird die Kette gelesen (selten: beim Wiederherstellen);
+	 * lässt sie sich nicht lesen, gilt das Merkmal als gesetzt (die vorsichtige Richtung).
+	 */
+	private boolean headCarriesRequires(String eventId) {
+		UnitKey head = UnitKey.event(eventId);
+		UnitSnapshot state = sync.snapshots(List.of(head)).get(head);
+		if (state == null || state.version() == null) {
+			return false;
+		}
+		if (!state.deleted()) {
+			return HeadRequires.carries(state.payload());
+		}
+		try {
+			// die eigenen ausstehenden Versionen bauen auf dem Ende der Kette auf
+			UnitState resolved = sync.unitState(head);
+			List<Version> versions = new ArrayList<>(resolved.chain());
+			versions.addAll(resolved.pending());
+			for (int i = versions.size() - 1; i >= 0; i--) {
+				if (!versions.get(i).deleted()) {
+					return HeadRequires.carries(versions.get(i).payload());
+				}
+			}
+			return false;
+		} catch (IOException e) {
+			LOG.log(Level.WARNING, "Der letzte Stand von " + head.relativePath() + " ließ sich nicht lesen", e);
+			return true;
+		}
+	}
+
+	/**
+	 * Ob die Vorstellung im Versionsspeicher lebt, aber im Modell fehlt (gesperrt oder unlesbar): Eine verwaiste Kasse zeigt
+	 * dann „– (Vorstellung nicht verfügbar)" statt „– (Vorstellung gelöscht)". {@code false}, wenn die Vorstellung im Modell
+	 * steht, gelöscht ist oder es sie nie gab.
+	 */
+	public boolean presentationUnavailable(String eventId, String presentationId) {
+		Event event = findEvent(eventId);
+		if (event != null && event.findPresentation(presentationId) != null) {
+			return false;
+		}
+		UnitKey unit = UnitKey.presentation(eventId, presentationId);
+		UnitSnapshot state = sync.snapshots(List.of(unit)).get(unit);
+		return state != null && !UnitMapper.isAbsent(state);
+	}
+
+	/**
+	 * Lehnt ab, wenn die Kasse der Vorstellung gesperrt ist oder wartet ({@link #lockedCashRegisters}) oder für das Event
+	 * „Kassen noch nicht abgeglichen" gilt ({@link #cashRegistersPending}): Die Vorstellung zu löschen, nähme sonst einen
+	 * Ist-Betrag mit, den dieses Programm nicht sieht, oder eine später eintreffende Kasse stünde ohne ihre Vorstellung da.
+	 * Aufzurufen, bevor das Modell sich ändert.
+	 *
+	 * @param name wie die Meldung die Vorstellung nennt
+	 * @throws LockedUnitException bei einer Sperre mit {@link StoreMessages#lockedBelow} (wie
+	 *                             {@link #requireNothingLockedUnder}), sonst mit {@link #CASH_PENDING}
+	 */
+	public void requireCashRegisterWritable(String eventId, String presentationId, String name) {
+		LockedCashRegister locked = lockedCashRegisters(eventId).get(presentationId);
+		if (locked != null) {
+			throw new LockedUnitException(locked.status() == UnitState.Status.WAITING
+					? "\"" + name + "\": Die Kasse wartet noch auf eine Datei aus dem gemeinsamen Ordner. Löschen ist erst "
+							+ "möglich, wenn sie angekommen ist."
+					: StoreMessages.lockedBelow(name, locked.status()));
+		}
+		if (cashRegistersPending(eventId)) {
+			throw new LockedUnitException(CASH_PENDING);
+		}
+	}
+
+	/**
+	 * Nach einem Vollabgleich (in der App über {@code LiveUpdates} bei {@code fullSyncCompleted}): Für jedes Event im Cache,
+	 * dessen Zustand „Kassen noch nicht abgeglichen" damit endete, ohne dass eine Kasse eintraf, kommt an die Listener eine
+	 * fremde Änderung am Kopf ({@link RepositoryListener#changingByOthers}, dann {@link RepositoryListener#changedByOthers}
+	 * ohne etwas nachzuspielen), damit offene Ansichten die Sperre aufheben. Das geschieht einmal im Programmlauf: Danach
+	 * kann der Zustand nicht wiederkehren. Vor dem ersten Vollabgleich geschieht nichts. Nur im JavaFX-Thread aufrufen.
+	 */
+	public void cashRegistersSettled() {
+		if (cashSettled || !sync.fullSyncCompletedSinceStart()) {
+			return;
+		}
+		cashSettled = true;
+		if (cachedEvents == null) {
+			return;
+		}
+		for (Event event : List.copyOf(cachedEvents)) {
+			if (!cashRegisterKnown(event.getId()) && headCarriesRequires(event.getId())) {
+				listeners.notifyChangingByOthers(event);
+				listeners.notifyChangedByOthers(event, new ForeignBatch<>(Set.of(UnitKey.event(event.getId())), copy -> {
+				}));
+			}
+		}
+	}
+
+	// <-- Kassen
 
 	/**
 	 * Die Schlüssel der Buchungen mit Daten in der Vorstellung (was das Modell anzeigt), nach derselben Regel wie

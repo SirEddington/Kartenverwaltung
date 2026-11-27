@@ -13,7 +13,7 @@ import de.eltviller_carneval_verein.karten.validation.Severity;
 
 /**
  * Lehnt Aktionen an einer Vorstellung ab, unter der gesperrte Einträge liegen (KARV-135): den Wechsel von Halle oder
- * Bestuhlung und das Löschen. Geprüft wird am Stand des Versionsspeichers
+ * Bestuhlung und das Löschen; das Löschen auch an ihrer gesperrten Kasse (KARV-144). Geprüft wird am Stand des Versionsspeichers
  * ({@link StoreEventRepository#requireNothingLockedUnder}), nicht an „Gesperrte Einträge“, und bevor sich das Modell
  * ändert: Sonst stünde im Modell eine Änderung, die sich nicht speichern lässt. Die Meldung geht wie die übrigen
  * Ablehnungen gesperrter Einheiten in die Fußzeile ({@link StatusMessage}, ohne Fußzeile als Dialog).
@@ -70,16 +70,33 @@ final class LockedEntryGuard {
 
 	/**
 	 * Entfernt die Vorstellung aus ihrem Event (nur im Modell, gespeichert wird beim Aufrufer), außer es liegen gesperrte
-	 * Einträge darunter ({@link #rejects}).
+	 * Einträge darunter ({@link #rejects}), ihre Kasse ist gesperrt oder wartet, oder für das Event gilt „Kassen noch nicht
+	 * abgeglichen" ({@link StoreEventRepository#requireCashRegisterWritable}, KARV-144).
 	 *
 	 * @return ob sie entfernt wurde
 	 */
 	static boolean deletePresentation(Presentation presentation, StoreEventRepository repository, Consumer<String> show) {
-		if (rejects(presentation, repository, show)) {
+		if (rejects(presentation, repository, show) || rejectsCashRegister(presentation, repository, show)) {
 			return false;
 		}
 		presentation.getParent().deletePresentation(presentation);
 		return true;
+	}
+
+	/** Ob das Löschen an der Kasse der Vorstellung scheitert; dann ist die Meldung schon gezeigt. Den Hallenwechsel betrifft das nicht. */
+	private static boolean rejectsCashRegister(Presentation presentation, StoreEventRepository repository,
+			Consumer<String> show) {
+		if (presentation.getParent() == null) {
+			return false;
+		}
+		try {
+			repository.requireCashRegisterWritable(presentation.getParent().getId(), presentation.getId(),
+					EntityLabels.nameOrPlaceholder(presentation.getName()));
+			return false;
+		} catch (LockedUnitException e) {
+			show.accept(e.getMessage());
+			return true;
+		}
 	}
 
 	/** Zeigt die Ablehnung in der Fußzeile (ohne Fußzeile als Dialog). */

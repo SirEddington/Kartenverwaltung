@@ -169,6 +169,12 @@ public final class LiveUpdates {
 				StatusMessage.getInstance().show(Severity.ERROR, message);
 			}
 
+			// endet damit „Kassen noch nicht abgeglichen", heben offene Ansichten die Sperre auf (KARV-144)
+			@Override
+			public void fullSyncCompleted() {
+				events.cashRegistersSettled();
+			}
+
 			@Override
 			public void lost(UnitKey unit, List<VersionId> mine, VersionId winner) {
 				LOG.info("Eigene Versionen " + mine + " von " + unit.relativePath() + " unterlegen gegen " + winner

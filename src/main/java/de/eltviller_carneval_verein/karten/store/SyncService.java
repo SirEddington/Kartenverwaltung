@@ -490,6 +490,11 @@ public final class SyncService implements ConnectionControl {
 	 * unter {@code workLock} benutzt.
 	 */
 	private boolean interruptAfterTick;
+	/**
+	 * Ob seit dem Programmstart ein Vollabgleich bis zum Ende lief, mit welcher Verbindung auch immer
+	 * ({@link #fullSyncCompletedSinceStart()}); wird nie zurückgesetzt.
+	 */
+	private volatile boolean fullSyncSinceStart;
 
 	// Alles Folgende wird unter lock gelesen und geschrieben; Dateizugriffe geschehen nie darunter.
 	private final Object lock = new Object();
@@ -743,6 +748,17 @@ public final class SyncService implements ConnectionControl {
 	 */
 	public ReadOnlyBooleanProperty connectionComplete() {
 		return notifier.connectionCompleteProperty();
+	}
+
+	/**
+	 * Ob seit dem Programmstart ein Vollabgleich bis zum Ende lief, auch wenn er einzelne Einheiten übersprungen hat
+	 * (KARV-144, „Kassen noch nicht abgeglichen"); im Einzelbetrieb immer {@code true}. Ein verbundener Ordner, der gerade
+	 * nicht erreichbar ist, zählt als verbunden: Dann bleibt es {@code false} bis zum ersten Lauf nach der Rückkehr. Das
+	 * Ende eines Laufs meldet {@link SyncListener#fullSyncCompleted}. Ohne Datei-Ein-/Ausgabe, nimmt nur kurz
+	 * {@code lock}; auf jedem Thread aufrufbar.
+	 */
+	public boolean fullSyncCompletedSinceStart() {
+		return fullSyncSinceStart || currentLink() == null;
 	}
 
 	/**
@@ -3030,13 +3046,18 @@ public final class SyncService implements ConnectionControl {
 	 * Hat der Lauf beim Mitnehmen Einheiten übersprungen, kommt das Ergebnis trotzdem, aber {@link #connectionComplete()}
 	 * bleibt {@code false}, bis ein späterer Lauf sie mitgenommen hat ({@link Link#owedMerge}); erst dann ist
 	 * {@code completes}. Zurückgestellt bleibt, wo dieser Lauf übersprungen hat ({@link Link#skippedTrees}).
+	 * <p>
+	 * Gehört der Lauf zur aktuellen Verbindung, gilt danach {@link #fullSyncCompletedSinceStart()}, und
+	 * {@link SyncListener#fullSyncCompleted} kommt, auch wenn er Einheiten übersprungen hat.
 	 */
 	private void endRun(Link current, Round round, boolean completes) {
 		current.owedMerge = Set.copyOf(current.owedMergeInRun);
 		current.owedMergeInRun = new HashSet<>();
 		current.skippedTrees = current.run.skippedTrees();
+		boolean ofCurrentLink;
 		synchronized (lock) {
-			if (link == current) {
+			ofCurrentLink = link == current;
+			if (ofCurrentLink) {
 				skippedLastRun.clear();
 				skippedLastRun.putAll(skippedInRun);
 				skippedInRun.clear();
@@ -3062,6 +3083,11 @@ public final class SyncService implements ConnectionControl {
 			notifier.setConnectionComplete(true);
 		}
 		publishProgress(current, null);
+		if (ofCurrentLink) {
+			// ob der Lauf Teile übersprungen hat, zählt nicht (KARV-144)
+			fullSyncSinceStart = true;
+			notifier.fullSyncCompleted();
+		}
 	}
 
 	/** Meldet den Fortschritt des Vollabgleichs, solange die Verbindung noch die aktuelle ist. */
