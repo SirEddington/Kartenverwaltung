@@ -13,10 +13,14 @@ public final class ConflictPolicies {
 	private ConflictPolicies() {
 	}
 
-	/** Setzt {@link EventHeadPolicy}, {@link PresentationPolicy}, {@link BookingPolicy} und {@link HallPolicy}. */
+	/**
+	 * Setzt {@link EventHeadPolicy}, {@link PresentationPolicy}, {@link CashRegisterPolicy}, {@link BookingPolicy} und
+	 * {@link HallPolicy}.
+	 */
 	public static void install(SyncService sync) {
 		sync.setConflictPolicy(UnitType.EVENT, new EventHeadPolicy());
 		sync.setConflictPolicy(UnitType.PRESENTATION, new PresentationPolicy());
+		sync.setConflictPolicy(UnitType.CASH_REGISTER, new CashRegisterPolicy());
 		sync.setConflictPolicy(UnitType.BOOKING, new BookingPolicy());
 		sync.setConflictPolicy(UnitType.HALL, new HallPolicy());
 	}

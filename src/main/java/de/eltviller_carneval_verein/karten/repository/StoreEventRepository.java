@@ -18,6 +18,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JavaType;
@@ -252,9 +253,18 @@ public class StoreEventRepository implements EventRepository {
 		}
 	}
 
+	/**
+	 * Ob der Vergleichsstand die Einheit lebend kennt: der Maßstab, an dem {@link UnitMapper#decompose} entscheidet, ob
+	 * eine Vorstellungskasse ohne eigene Daten eine Einheit des Events ist.
+	 */
+	private boolean liveInBaseline(UnitKey unit) {
+		UnitSnapshot known = baseline.known(unit);
+		return known != null && known.isLive();
+	}
+
 	/** Schreibt das Event, ohne zu prüfen, ob es das Objekt im Cache ist (das Wiederherstellen setzt den Cache selbst). */
 	private void write(Event event) {
-		baseline.save(event.getId(), event.getName(), UnitMapper.decompose(event));
+		baseline.save(event.getId(), event.getName(), UnitMapper.decompose(event, this::liveInBaseline));
 		forgetDerived(event.getId());
 
 		// Cache aktualisieren, falls das Event dort noch nicht enthalten ist
@@ -333,7 +343,10 @@ public class StoreEventRepository implements EventRepository {
 		ensureLoaded();
 		Event target = plan.target();
 		List<String> notes = adjust.apply(target);
-		refreshFromStore(plan.ownerId(), plan.states(), UnitMapper.payloads(target).keySet());
+		// Maßstab für eine Vorstellungskasse ohne eigene Daten ist der frisch gelesene Stand, der gleich Vergleichsstand wird
+		Set<UnitKey> live = plan.states().stream().map(UnitSnapshot::of).filter(UnitSnapshot::isLive)
+				.map(UnitSnapshot::unit).collect(Collectors.toSet());
+		refreshFromStore(plan.ownerId(), plan.states(), UnitMapper.payloads(target, live::contains).keySet());
 		write(target);
 		replaceCachedEvent(target);
 		return new Restored<>(target, notes);
@@ -497,7 +510,7 @@ public class StoreEventRepository implements EventRepository {
 	 */
 	public Map<UnitKey, ObjectNode> payloadsOf(String eventId) {
 		Event event = findEvent(eventId);
-		return event == null ? null : UnitMapper.payloads(event);
+		return event == null ? null : UnitMapper.payloads(event, this::liveInBaseline);
 	}
 
 	/**
@@ -931,7 +944,7 @@ public class StoreEventRepository implements EventRepository {
 	private LocalChanges localChanges(Event event) {
 		Map<UnitKey, ObjectNode> model;
 		try {
-			model = UnitMapper.payloads(event);
+			model = UnitMapper.payloads(event, this::liveInBaseline);
 		} catch (IllegalStateException e) {
 			return new LocalChanges(Set.of(), true, null, Map.of(), Set.of());
 		}
@@ -1120,7 +1133,7 @@ public class StoreEventRepository implements EventRepository {
 	private void noteDerived(Event event, Map<UnitKey, ObjectNode> before, Set<UnitKey> skip, Set<UnitKey> resynced) {
 		Map<UnitKey, ObjectNode> after;
 		try {
-			after = UnitMapper.payloads(event);
+			after = UnitMapper.payloads(event, this::liveInBaseline);
 		} catch (IllegalStateException e) {
 			return;
 		}
@@ -1157,7 +1170,7 @@ public class StoreEventRepository implements EventRepository {
 		}
 		Map<UnitKey, ObjectNode> after;
 		try {
-			after = UnitMapper.payloads(event);
+			after = UnitMapper.payloads(event, this::liveInBaseline);
 		} catch (IllegalStateException e) {
 			return;
 		}

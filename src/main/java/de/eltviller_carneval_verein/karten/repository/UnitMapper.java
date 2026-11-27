@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -24,9 +25,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
+import de.eltviller_carneval_verein.karten.model.Requires;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.ContentGate;
@@ -41,9 +45,10 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 /**
  * Zerlegt Events und Hallen in die Einheiten des Versionsspeichers und setzt sie wieder zusammen.
  * <p>
- * Einheiten sind der Event-Kopf ({@link Event} ohne {@code presentations}), die Vorstellung ({@link Presentation} ohne
- * {@code bookings}), die Buchung und die ganze {@link Hall}. Leere Buchungen ({@link Booking#hasData()} falsch)
- * werden nie geschrieben; {@code BookingSync} legt sie beim Laden aus der Bestuhlung wieder an. Gelöscht wird nur am
+ * Einheiten sind der Event-Kopf ({@link Event} ohne {@code presentations} und {@code cashRegisters}), die Kasse
+ * ({@link CashRegister}), die Vorstellung ({@link Presentation} ohne {@code bookings}), die Buchung und die ganze
+ * {@link Hall}. Leere Buchungen ({@link Booking#hasData()} falsch) werden nie geschrieben; {@code BookingSync} legt sie
+ * beim Laden aus der Bestuhlung wieder an. Gelöscht wird nur am
  * Kopf: Kinder gelöschter Einheiten bleiben liegen und sind unsichtbar.
  */
 final class UnitMapper {
@@ -54,6 +59,7 @@ final class UnitMapper {
 	private static final ObjectMapper MAPPER = JsonMapperFactory.createCompact();
 
 	static final String PRESENTATIONS = "presentations";
+	static final String CASH_REGISTERS = "cashRegisters";
 	static final String BOOKINGS = "bookings";
 
 	/** Vorstellungen: Datum, Uhrzeit (je {@code null} zuletzt), Name ohne Groß-/Kleinschreibung ({@code null} zuletzt), ID. */
@@ -84,7 +90,7 @@ final class UnitMapper {
 	/**
 	 * Das Ergebnis des Zusammensetzens: die lesbaren Objekte, die Warnungen für den Nutzer, die gesperrten Einheiten, die
 	 * dabei geladen wurden, und die Einheiten, die tatsächlich in die Objekte eingegangen sind ({@code shown}: Kopf,
-	 * Vorstellungen, Buchungen bzw. Hallen).
+	 * Kassen, Vorstellungen, Buchungen bzw. Hallen).
 	 *
 	 * @param warnings Texte zu unlesbaren Einheiten, ohne die gesperrten
 	 * @param locked   die geladenen Einheiten, deren Kette gesperrt ist (beschädigt oder neueres Format), mit ihrem Zustand
@@ -115,19 +121,27 @@ final class UnitMapper {
 	}
 
 	/**
-	 * Zerlegt das Event in Kopf, Vorstellungen und Buchungen mit Daten, in der Reihenfolge: Kopf, dann je Vorstellung
-	 * sie selbst und ihre Buchungen. Das Event bleibt unverändert.
+	 * Zerlegt das Event in Kopf, Kassen, Vorstellungen und Buchungen mit Daten, in der Reihenfolge: Kopf, Kassen nach
+	 * Kennung, dann je Vorstellung sie selbst und ihre Buchungen. Der Kopf enthält weder Vorstellungen noch Kassen. Jede
+	 * Kasse der Liste ergibt eine Einheit, außer einer Vorstellungskasse ohne eigene Daten
+	 * ({@link CashRegisters#hasOwnData}): Für sie wird keine Einheit neu angelegt, nur eine gespeicherte weitergeschrieben
+	 * (ein auf 0 gesetzter Ist-Betrag ist eine Feldänderung, keine Löschung). Das Event bleibt unverändert.
 	 *
-	 * @throws IllegalStateException wenn zwei Buchungen denselben Schlüssel haben
+	 * @param liveInBaseline ob der Vergleichsstand die Einheit lebend kennt; gefragt wird nur nach Vorstellungskassen
+	 *                       ohne eigene Daten
+	 * @throws IllegalStateException wenn zwei Buchungen denselben Schlüssel haben oder zwei Vorstellungen bzw. zwei Kassen
+	 *                               dieselbe Kennung
 	 */
-	static List<UnitPayload> decompose(Event event) {
-		// Ein Durchlauf: Kopf, Vorstellungen und Buchungen sind Teilbäume desselben Baums
+	static List<UnitPayload> decompose(Event event, Predicate<UnitKey> liveInBaseline) {
+		// Ein Durchlauf: Kopf, Kassen, Vorstellungen und Buchungen sind Teilbäume desselben Baums
 		ObjectNode head = normalize(event);
 		JsonNode presentationNodes = head.remove(PRESENTATIONS);
+		JsonNode registerNodes = head.remove(CASH_REGISTERS);
 		List<Presentation> presentations = event.getPresentations() != null ? event.getPresentations() : List.of();
 
 		List<UnitPayload> parts = new ArrayList<>();
 		parts.add(new UnitPayload(UnitKey.event(event.getId()), head));
+		parts.addAll(cashRegisterParts(event, registerNodes, liveInBaseline));
 		Set<String> presentationIds = new HashSet<>();
 		for (int i = 0; i < presentations.size(); i++) {
 			Presentation presentation = presentations.get(i);
@@ -158,15 +172,37 @@ final class UnitMapper {
 		return parts;
 	}
 
+	/** Die Kassen-Einheiten des Events nach Kennung, nach den Regeln von {@link #decompose(Event, Predicate)}. */
+	private static List<UnitPayload> cashRegisterParts(Event event, JsonNode registerNodes,
+			Predicate<UnitKey> liveInBaseline) {
+		List<CashRegister> registers = event.getCashRegisters() != null ? event.getCashRegisters() : List.of();
+		List<UnitPayload> parts = new ArrayList<>();
+		Set<String> ids = new HashSet<>();
+		for (int i = 0; i < registers.size(); i++) {
+			CashRegister register = registers.get(i);
+			if (!ids.add(register.getId())) {
+				throw new IllegalStateException("Zwei Kassen haben dieselbe Kennung (" + register.getId()
+						+ ") im Event \"" + event.getName() + "\". Es wurde nichts gespeichert.");
+			}
+			UnitKey key = UnitKey.cashRegister(event.getId(), register.getId());
+			if (CashRegisters.hasOwnData(event, register) || liveInBaseline.test(key)) {
+				parts.add(new UnitPayload(key, (ObjectNode) registerNodes.get(i)));
+			}
+		}
+		// die Liste ist im Modell nach Kennung geordnet; hier gesichert, weil die Reihenfolge das Schreiben bestimmt
+		parts.sort(Comparator.comparing(part -> part.unit().cashRegisterId()));
+		return parts;
+	}
+
 	/**
-	 * Die Inhalte der Einheiten des Events je Schlüssel, wie {@link #decompose(Event)} sie bildet (Kopf, Vorstellungen,
-	 * Buchungen mit Daten): der Inhalt der Einheit im Modell, für den Vergleich "lokal verändert".
+	 * Die Inhalte der Einheiten des Events je Schlüssel, wie {@link #decompose(Event, Predicate)} sie bildet (Kopf, Kassen,
+	 * Vorstellungen, Buchungen mit Daten): der Inhalt der Einheit im Modell, für den Vergleich "lokal verändert".
 	 *
-	 * @throws IllegalStateException wie {@link #decompose(Event)}
+	 * @throws IllegalStateException wie {@link #decompose(Event, Predicate)}
 	 */
-	static Map<UnitKey, ObjectNode> payloads(Event event) {
+	static Map<UnitKey, ObjectNode> payloads(Event event, Predicate<UnitKey> liveInBaseline) {
 		Map<UnitKey, ObjectNode> payloads = new LinkedHashMap<>();
-		for (UnitPayload part : decompose(event)) {
+		for (UnitPayload part : decompose(event, liveInBaseline)) {
 			payloads.put(part.unit(), part.payload());
 		}
 		return payloads;
@@ -194,7 +230,7 @@ final class UnitMapper {
 	 * anders als der Stand, wie dieses Programm ihn aus der Datei macht ({@link #sameAsModel}); Zusatzfelder, fehlende
 	 * und verworfene Felder machen eine Einheit nicht zur geänderten (KARV-133).</li>
 	 * <li>Einheit nur im Bestand: Löschung, aber nur wenn sie angezeigt wurde ({@code shown}), ihre Eltern-Einheit
-	 * (Vorstellung: der Kopf, Buchung: ihre Vorstellung) in {@code units} steht und sie eine Version hat und nicht
+	 * (Vorstellung und Kasse: der Kopf, Buchung: ihre Vorstellung) in {@code units} steht und sie eine Version hat und nicht
 	 * schon gelöscht ist. Sonst bleibt sie unberührt, denn gelöscht wird nur am Kopf. Ein Event-Kopf oder eine Halle
 	 * hat keine Eltern-Einheit und wird nie hier gelöscht, nur mit {@link #deletion}.</li>
 	 * <li>Reihenfolge beim Wiederbeleben: Ist eine übergeordnete Einheit (Kopf, Vorstellung) der gelöschten Einheit im
@@ -667,8 +703,9 @@ final class UnitMapper {
 
 	/**
 	 * Setzt die Events aus den Ständen der Einheiten zusammen. Die Payloads der Stände bleiben unverändert (der Index
-	 * teilt sie sich). Events nach Name sortiert, ihre Vorstellungen nach Datum, Uhrzeit, Name und ID, die
-	 * Buchungen in der Reihenfolge der Plätze.
+	 * teilt sie sich). Events nach Name sortiert, ihre Vorstellungen nach Datum, Uhrzeit, Name und ID, ihre Kassen nach
+	 * Kennung, die Buchungen in der Reihenfolge der Plätze. Kinder eines gelöschten Kopfs (auch Kassen) sind unsichtbar,
+	 * Kinder ohne lesbaren Kopf zählen zu den übergangenen Einheiten.
 	 */
 	static Assembly<Event> assembleEvents(Collection<UnitSnapshot> snapshots) {
 		List<String> warnings = new ArrayList<>();
@@ -725,6 +762,29 @@ final class UnitMapper {
 			}
 		}
 
+		Map<UnitKey, List<CashRegister>> registersOfEvent = new HashMap<>();
+		for (UnitSnapshot snapshot : snapshots) {
+			UnitKey unit = snapshot.unit();
+			if (unit.type() != UnitType.CASH_REGISTER) {
+				continue;
+			}
+			UnitKey eventKey = UnitKey.event(unit.eventId());
+			Event event = events.get(eventKey);
+			if (event == null) {
+				if (!hidden.contains(eventKey)) {
+					orphans++;
+				}
+				continue;
+			}
+			CashRegister register = read(snapshot, CashRegister.class, warnings, locked,
+					unreadableCashRegister(unit.cashRegisterId(), event.getName()),
+					idMismatch(unit.cashRegisterId(), CashRegister::getId));
+			if (register != null) {
+				shown.add(unit);
+				registersOfEvent.computeIfAbsent(eventKey, k -> new ArrayList<>()).add(register);
+			}
+		}
+
 		Map<UnitKey, List<Booking>> bookingsOfPresentation = new HashMap<>();
 		for (UnitSnapshot snapshot : snapshots) {
 			UnitKey unit = snapshot.unit();
@@ -755,6 +815,8 @@ final class UnitMapper {
 			entry.getValue().sort(PRESENTATION_ORDER);
 			events.get(entry.getKey()).setPresentations(entry.getValue());
 		}
+		// setCashRegisters ordnet nach Kennung
+		registersOfEvent.forEach((eventKey, registers) -> events.get(eventKey).setCashRegisters(registers));
 		if (orphans > 0) {
 			LOG.info(orphans + " Einheiten ohne sichtbare Eltern-Einheit wurden übergangen.");
 		}
@@ -801,6 +863,11 @@ final class UnitMapper {
 	/** Die Warnung für eine Vorstellung, die sich nicht lesen lässt. */
 	static String unreadablePresentation(String presentationId, String eventName) {
 		return "Die Vorstellung " + presentationId + " von \"" + eventName + "\" konnte nicht gelesen werden und fehlt.";
+	}
+
+	/** Die Warnung für eine Kasse, die sich nicht lesen lässt. */
+	static String unreadableCashRegister(String cashRegisterId, String eventName) {
+		return "Die Kasse " + cashRegisterId + " von \"" + eventName + "\" konnte nicht gelesen werden und fehlt.";
 	}
 
 	/** Die Warnung für eine Buchung, die sich nicht lesen lässt. */
@@ -934,9 +1001,10 @@ final class UnitMapper {
 
 	/**
 	 * Der Stand einer Einheit, wie dieses Programm ihn aus der Datei macht (Rundlauf): gelesen ({@link #readUnit}) und
-	 * geformt wie in {@link #decompose}: der Event-Kopf ohne Vorstellungen, die Vorstellung ohne Buchungen, Buchung und Halle
-	 * normalisiert. Felder, die das Modell beim Lesen verwirft (etwa aus einer anderen Programmversion), fehlen darin, Felder,
-	 * die der Datei fehlen, stehen darin mit dem Wert des Modells, und unbekannte Felder und Rückfall-Enums sind erhalten
+	 * geformt wie in {@link #decompose}: der Event-Kopf ohne Vorstellungen, Kassen und {@code requires}, die Vorstellung
+	 * ohne Buchungen, Kasse, Buchung und Halle normalisiert. Felder, die das Modell beim Lesen verwirft (etwa aus einer
+	 * anderen Programmversion), fehlen darin, Felder, die der Datei fehlen, stehen darin mit dem Wert des Modells, und
+	 * unbekannte Felder und Rückfall-Enums sind erhalten
 	 * (KARV-128, KARV-133). Nur so ist ein unverändert geladenes Objekt gleich seinem Stand. Gilt für jeden Snapshot, auch
 	 * für fremde.
 	 *
@@ -949,9 +1017,10 @@ final class UnitMapper {
 		}
 		ObjectNode node = normalize(value);
 		switch (snapshot.unit().type()) {
-		case EVENT -> node.remove(PRESENTATIONS);
+		// requires leitet das Speichern ab; allein macht es den Kopf nicht zum veränderten
+		case EVENT -> node.remove(List.of(PRESENTATIONS, CASH_REGISTERS, Requires.KEY));
 		case PRESENTATION -> node.remove(BOOKINGS);
-		case BOOKING, HALL -> {
+		case BOOKING, HALL, CASH_REGISTER -> {
 		}
 		}
 		return node;
@@ -969,7 +1038,7 @@ final class UnitMapper {
 	 * Liest eine einzelne Einheit nach den Regeln des Zusammensetzens ({@link #read}, ID-Prüfung eingeschlossen), aber
 	 * ohne Warnung. Der Payload bleibt unverändert.
 	 *
-	 * @param type die Modellklasse zur Art der Einheit (Event, Presentation, Booking oder Hall)
+	 * @param type die Modellklasse zur Art der Einheit (Event, Presentation, Booking, Hall oder CashRegister)
 	 * @return ein neues Objekt, oder {@code null}, wenn die Einheit gelöscht ist, keine Version hat, sich nicht lesen
 	 *         lässt oder ihr aktueller Stand inhaltlich zu neu ist ({@link UnitSnapshot#contentLocked}, KARV-135: Laden
 	 *         und Einarbeiten nehmen sie damit heraus)
@@ -982,7 +1051,7 @@ final class UnitMapper {
 		case PRESENTATION -> idMismatch(unit.presentationId(), Presentation::getId);
 		case BOOKING -> (Booking b) -> bookingMismatch(unit, b);
 		case HALL -> idMismatch(unit.hallId(), Hall::getId);
-		case CASH_REGISTER -> throw new UnsupportedOperationException("Kassen-Modell folgt (KARV-144)");
+		case CASH_REGISTER -> idMismatch(unit.cashRegisterId(), CashRegister::getId);
 		};
 		if (type != modelClass(unit.type())) {
 			throw new IllegalArgumentException(type.getSimpleName() + " passt nicht zu " + unit.relativePath());
@@ -1001,7 +1070,7 @@ final class UnitMapper {
 		case PRESENTATION -> Presentation.class;
 		case BOOKING -> Booking.class;
 		case HALL -> Hall.class;
-		case CASH_REGISTER -> throw new UnsupportedOperationException("Kassen-Modell folgt (KARV-144)");
+		case CASH_REGISTER -> CashRegister.class;
 		};
 	}
 

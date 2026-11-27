@@ -92,7 +92,7 @@ class EventMergeTest {
 
 	/** Der Stand einer Einheit, wie ihn ein anderer Rechner geschrieben hat: genau der Inhalt des Zerlegens. */
 	private UnitSnapshot foreign(Event state, UnitKey unit) {
-		return Snapshots.snapshot(unit, nextVersion(), Status.OK, false, UnitMapper.payloads(state).get(unit));
+		return Snapshots.snapshot(unit, nextVersion(), Status.OK, false, UnitMapper.payloads(state, unit::equals).get(unit));
 	}
 
 	private UnitSnapshot deleted(UnitKey unit) {
@@ -380,7 +380,7 @@ class EventMergeTest {
 		UnitKey unit = UnitKey.booking(event.getId(), "fehlt", "s1");
 		Event state = copyOfUnchecked(event);
 		UnitSnapshot snapshot = Snapshots.snapshot(unit, nextVersion(), Status.OK, false,
-				UnitMapper.payloads(state).get(seat(event, "s1")));
+				UnitMapper.payloads(state, key -> false).get(seat(event, "s1")));
 		Recording sink = new Recording();
 
 		EventMerge.apply(event, plan(List.of(snapshot), List.of()), sink);
@@ -396,7 +396,7 @@ class EventMergeTest {
 		UnitKey unit = UnitKey.booking(event.getId(), "fehlt", "s1");
 		Event state = copyOfUnchecked(event);
 		UnitSnapshot snapshot = Snapshots.snapshot(unit, nextVersion(), Status.OK, false,
-				UnitMapper.payloads(state).get(seat(event, "s1")));
+				UnitMapper.payloads(state, key -> false).get(seat(event, "s1")));
 		Recording sink = new Recording();
 		// die Vorstellung ist gelöscht oder unlesbar: Auf einen Platz wartet nichts
 		UnitKey presentation = UnitKey.presentation(event.getId(), "fehlt");
@@ -843,7 +843,7 @@ class EventMergeTest {
 		EventMerge.apply(event, plan, EventMerge.NONE);
 		EventMerge.apply(copy, plan, EventMerge.NONE);
 
-		assertEquals(UnitMapper.payloads(event), UnitMapper.payloads(copy));
+		assertEquals(UnitMapper.payloads(event, key -> false), UnitMapper.payloads(copy, key -> false));
 	}
 
 	private static Function<String, Hall> lookup(Hall... halls) {
