@@ -90,6 +90,28 @@ class BackupRestoreDialogTest {
 		Entry entry = new Entry("1", "Alpha", false);
 
 		assertEquals("Event \"Alpha\" auf den Stand vom 26.10.2026 14:30:12 zurücksetzen?\n\nWarnung. Der aktuelle Stand bleibt als Speicherstand erhalten.",
-				BackupRestoreDialog.confirmText("Event", entry, point, "Warnung.", ZONE));
+				BackupRestoreDialog.confirmText("Event", entry, point, "Warnung.", List.of(), ZONE));
+	}
+
+	@Test
+	void confirmTextListsCashDetailsBelowWarning() {
+		SavePoint point = point("a", "2026-10-26T12:30:12Z", "Anna", 1);
+		Entry entry = new Entry("1", "Alpha", false);
+		List<String> details = List.of("Seit diesem Stand gezählt:", "• Kasse 1. Sitzung: 1.250,00 €",
+				"Zeigt der Kassenabgleich danach eine Differenz, sind Verkäufe nachzutragen.");
+
+		assertEquals("Event \"Alpha\" auf den Stand vom 26.10.2026 14:30:12 zurücksetzen?\n\nWarnung. Der aktuelle Stand bleibt als Speicherstand erhalten.\n\n"
+				+ "Seit diesem Stand gezählt:\n• Kasse 1. Sitzung: 1.250,00 €\n"
+				+ "Zeigt der Kassenabgleich danach eine Differenz, sind Verkäufe nachzutragen.",
+				BackupRestoreDialog.confirmText("Event", entry, point, "Warnung.", details, ZONE));
+	}
+
+	@Test
+	void notesAfterRestoreAddCashDetails() {
+		List<String> details = List.of("Seit diesem Stand gezählt:", "• Kasse 1. Sitzung: 1.250,00 €");
+
+		assertEquals(List.of("Halle entfernt.", "Kassen wurden nicht zurückgesetzt.", "Seit diesem Stand gezählt:",
+				"• Kasse 1. Sitzung: 1.250,00 €"), BackupRestoreDialog.notesAfterRestore(List.of("Halle entfernt."), details));
+		assertEquals(List.of("Halle entfernt."), BackupRestoreDialog.notesAfterRestore(List.of("Halle entfernt."), List.of()));
 	}
 }

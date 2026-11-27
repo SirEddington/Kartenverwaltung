@@ -17,6 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -239,8 +240,26 @@ class EventBackupCatalogTest {
 	}
 
 	@Test
-	void restoreWarningNamesSalesAndOtherMachines() {
-		assertEquals("Spätere Änderungen und Verkäufe, auch die anderer Rechner, werden mit zurückgesetzt.", catalog().restoreWarning());
+	void restoreWarningMentionsCash() {
+		assertEquals("Spätere Änderungen und Verkäufe, auch die anderer Rechner, werden mit zurückgesetzt. Kassen bleiben, "
+				+ "wie sie sind: Was gezählt wurde, bleibt gezählt.", catalog().restoreWarning());
+	}
+
+	@Test
+	void restoreDetailsFormat() throws IOException {
+		Event event = event("Alpha");
+		Presentation first = event.addPresentation("1. Sitzung");
+		events.saveEvent(event);
+		SavePoint before = newestSavePoint(event);
+		Entry entry = new Entry(event.getId(), "Alpha", false);
+		assertEquals(List.of(), catalog().restoreDetails(entry, before), "ohne Abweichung nichts");
+		clock.advance(10);
+		CashRegisters.setActualCash(event, first, 125_000);
+		events.saveEvent(event);
+
+		assertEquals(List.of("Seit diesem Stand gezählt:", "• Kasse 1. Sitzung: 1.250,00 €",
+				"Zeigt der Kassenabgleich danach eine Differenz, sind Verkäufe nachzutragen."),
+				catalog().restoreDetails(entry, before));
 	}
 
 	@Test

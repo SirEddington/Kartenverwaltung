@@ -22,6 +22,7 @@ import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
+import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
 
 /**
@@ -107,6 +108,9 @@ final class RestorePlanner {
 	 * Zielstand bleibt (dort gelöscht oder ohne Glied): Das Programm zeigt sie nie, und das Wiederherstellen fasst sie nicht
 	 * an. Bringt es den Vorfahren zurück, scheitert es hier, schon bei der Planung; ebenso, wenn es einen jetzt lebenden
 	 * Vorfahren löschte (wie das Löschen einer Vorstellung mit gesperrten Einträgen).
+	 * <p>
+	 * Kassen-Einheiten werden übergangen (KARV-144): Das Wiederherstellen schreibt keine gesperrte, unlesbare oder wartende
+	 * Kasse und lässt sich von ihr nicht aufhalten ({@link CashRestore#keepCashRegisters}).
 	 *
 	 * @param states die Zustände der Einheiten des Events bzw. der Halle; die Vorfahren werden unter ihnen gesucht
 	 * @param target der Zielstand je Einheit ({@link #targetsAt}); eine Einheit ohne Ziel fehlt darin
@@ -120,6 +124,9 @@ final class RestorePlanner {
 		}
 		for (UnitState state : states) {
 			UnitKey unit = state.unit();
+			if (unit.type() == UnitType.CASH_REGISTER) {
+				continue;
+			}
 			if (staysHidden(unit, snapshots, target)) {
 				if (!UnitMapper.isLocked(state.status())) {
 					// eine wartende Einheit lehnt weiter ab, wie bisher
@@ -150,13 +157,20 @@ final class RestorePlanner {
 
 	/**
 	 * Das eine Event bzw. die eine Halle aus dem zusammengesetzten Zielstand. Enthält der Zielstand unlesbare Teile, wird
-	 * er nicht wiederhergestellt: Sonst würden diese Teile beim Speichern wie vom Nutzer entfernt behandelt.
+	 * er nicht wiederhergestellt: Sonst würden diese Teile beim Speichern wie vom Nutzer entfernt behandelt. Gesperrte
+	 * Kassen-Einheiten zählen nicht (KARV-144): Sie stehen mit ihrem heutigen lesbaren Stand im Ziel und werden nicht
+	 * geschrieben; unlesbare nimmt {@link CashRestore#keepCashRegisters} gar nicht erst auf.
 	 *
 	 * @param deletedText die Meldung, wenn zu diesem Speicherstand nichts da war (gelöscht)
 	 * @throws LockedUnitException wenn der Zielstand unlesbare Teile enthält oder das Gesuchte fehlt
 	 */
 	static <T> T single(UnitMapper.Assembly<T> target, String deletedText) {
-		List<String> warnings = target.allWarnings();
+		List<String> warnings = new ArrayList<>(target.warnings());
+		target.locked().forEach((unit, status) -> {
+			if (unit.type() != UnitType.CASH_REGISTER) {
+				warnings.add(UnitMapper.lockMessage(unit, status));
+			}
+		});
 		if (!warnings.isEmpty()) {
 			throw new LockedUnitException("Der Speicherstand enthält unlesbare Teile und wird nicht wiederhergestellt: "
 					+ String.join(" ", warnings));

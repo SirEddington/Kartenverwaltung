@@ -320,4 +320,35 @@ class RestorePlannerTest {
 	}
 
 	// <-- Gesperrte Einheiten nach dem Zielstand
+
+	// Kassen (KARV-144) -->
+
+	/** Eine gesperrte, wartende oder inhaltlich zu neue Kassen-Einheit verhindert das Wiederherstellen nicht. */
+	@Test
+	void lockedOrWaitingCashRegisterDoesNotBlockRestore() {
+		Version version = version(1, "s1", at(1), false);
+		Version newer = version(2, "s2", at(2), false).withNewerContent(true);
+		UnitKey shared = UnitKey.cashRegister("e1", "_event");
+		UnitKey presentationCash = UnitKey.cashRegister("e1", "p1");
+		UnitKey contentCash = UnitKey.cashRegister("e1", "p2");
+		List<UnitState> states = List.of(ok(EVENT, version), state(shared, Status.LOCKED_DAMAGED, version),
+				state(presentationCash, Status.WAITING, version), ok(contentCash, newer));
+
+		requireRestorable(states, at(1));
+		requireRestorable(states);
+	}
+
+	/** Gesperrte Kassen im zusammengesetzten Zielstand lassen ihn nicht ablehnen; eine gesperrte Vorstellung weiter. */
+	@Test
+	void singlePassesOverLockedCashRegisters() {
+		UnitMapper.Assembly<String> cashOnly = new UnitMapper.Assembly<>(List.of("Event"), List.of(),
+				Map.of(UnitKey.cashRegister("e1", "p1"), Status.LOCKED_DAMAGED), Set.of());
+		UnitMapper.Assembly<String> withPresentation = new UnitMapper.Assembly<>(List.of("Event"), List.of(),
+				Map.of(PRESENTATION, Status.LOCKED_DAMAGED), Set.of());
+
+		assertEquals("Event", RestorePlanner.single(cashOnly, "gelöscht"));
+		assertThrows(LockedUnitException.class, () -> RestorePlanner.single(withPresentation, "gelöscht"));
+	}
+
+	// <-- Kassen (KARV-144)
 }

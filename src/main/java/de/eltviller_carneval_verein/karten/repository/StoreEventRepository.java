@@ -303,10 +303,14 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Die Speicherstände des Events (Kopf, Vorstellungen, Buchungen), neueste zuerst. Sie entstehen aus den Ketten im
-	 * Start-Index, ohne eine Versionsdatei zu lesen.
+	 * Start-Index, ohne eine Versionsdatei zu lesen. Die Ketten der Kassen zählen nicht (KARV-144): Das Wiederherstellen
+	 * setzt Kassen nicht zurück; ein Speichervorgang, der nur Kassen schrieb, erscheint nicht, und bei den anderen zählen
+	 * Kassen nicht in die Zahl der Änderungen.
 	 */
 	public List<SavePoint> savePoints(String eventId) throws IOException {
-		return RestorePlanner.savePoints(sync.chains(sync.eventUnits(eventId)).values());
+		List<UnitKey> units = sync.eventUnits(eventId).stream().filter(unit -> unit.type() != UnitType.CASH_REGISTER)
+				.toList();
+		return RestorePlanner.savePoints(sync.chains(units).values());
 	}
 
 	/**
@@ -320,9 +324,10 @@ public class StoreEventRepository implements EventRepository {
 	 * Scheitert das Speichern, bleibt im Cache der frisch gelesene Stand, passend zum Vergleichsstand. Wird das
 	 * Wiederherstellen abgelehnt, bleiben Cache und Vergleichsstand unberührt.
 	 *
-	 * @throws LockedUnitException wenn eine Einheit des Events gesperrt ist oder noch auf eine Datei wartet, wenn das Event
-	 *                             zu diesem Speicherstand gelöscht war oder der Zielstand unlesbare Teile enthält; es
-	 *                             wurde nichts gespeichert
+	 * @throws LockedUnitException wenn eine Einheit des Events gesperrt ist oder noch auf eine Datei wartet (außer einer
+	 *                             Kassen-Einheit: Kassen bleiben, wie sie sind), wenn das Event zu diesem Speicherstand
+	 *                             gelöscht war, der Zielstand unlesbare Teile enthält oder „Kassen noch nicht
+	 *                             abgeglichen" gilt; es wurde nichts gespeichert
 	 * @throws RuntimeException    wenn das Schreiben scheitert
 	 */
 	public Restored<Event> restoreEvent(String eventId, SavePoint point, Function<Event, List<String>> adjust)
@@ -336,9 +341,14 @@ public class StoreEventRepository implements EventRepository {
 	 * noch Vergleichsstand noch Listener und schreibt nichts. Den Änderungszähler des Vergleichsstands liest es zuerst, damit
 	 * {@link #commitRestore} jede Änderung seither bemerkt.
 	 *
-	 * @throws LockedUnitException wie {@link #restoreEvent}; es wurde nichts verändert
+	 * @throws LockedUnitException wie {@link #restoreEvent}, außerdem mit {@link #CASH_PENDING}, solange für das Event
+	 *                             „Kassen noch nicht abgeglichen" gilt (eine später eintreffende Kasse stünde sonst ohne
+	 *                             ihre Vorstellung da); es wurde nichts verändert
 	 */
 	public RestorePlan<Event> prepareRestoreEvent(String eventId, SavePoint point) throws IOException {
+		if (cashRegistersPending(eventId)) {
+			throw new LockedUnitException(CASH_PENDING);
+		}
 		long changes = baseline.changes(eventId);
 		List<UnitState> states = statesOf(eventId);
 		return new RestorePlan<>(eventId, states, targetOf(states, point), changes);
@@ -368,6 +378,30 @@ public class StoreEventRepository implements EventRepository {
 		return new Restored<>(target, notes);
 	}
 
+	/**
+	 * Die sichtbaren Kassen des Events, deren wirksamer Ist-Betrag heute von dem zum Speicherstand abweicht, mit dem
+	 * heutigen Betrag (KARV-144): Das Wiederherstellen setzt sie nicht zurück, die Rückfrage nennt sie. "Heute" ist der
+	 * frisch gelesene Stand der Einheiten, auch unter einem gelöschten Kopf (dann mit dem Kopf zum Speicherstand). Liest
+	 * die Einheiten des Events und gehört deshalb auf einen Hintergrund-Thread; berührt weder Cache noch Vergleichsstand.
+	 *
+	 * @return in der Reihenfolge der sichtbaren Kassen; leer, wenn nichts abweicht oder sich eines der beiden Events nicht
+	 *         zusammensetzen lässt (dann lehnt das Wiederherstellen ohnehin ab)
+	 */
+	public List<CountedCash> countedSince(String eventId, SavePoint point) throws IOException {
+		List<UnitState> states = statesOf(eventId);
+		Map<UnitKey, UnitSnapshot> then = RestorePlanner.targetsAt(states, point.at());
+		Map<UnitKey, UnitSnapshot> today = new LinkedHashMap<>();
+		states.forEach(state -> today.put(state.unit(), UnitSnapshot.of(state)));
+		UnitKey head = UnitKey.event(eventId);
+		UnitSnapshot headToday = today.get(head);
+		if ((headToday == null || !UnitMapper.isReadable(headToday)) && then.containsKey(head)) {
+			today.put(head, then.get(head));
+		}
+		List<Event> now = UnitMapper.assembleEvents(today.values()).items();
+		List<Event> earlier = UnitMapper.assembleEvents(then.values()).items();
+		return now.isEmpty() || earlier.isEmpty() ? List.of() : CashRestore.countedSince(now.get(0), earlier.get(0));
+	}
+
 	/** Der Änderungszähler des Vergleichsstands des Events (nur für Tests). */
 	long baselineChanges(String eventId) {
 		return baseline.changes(eventId);
@@ -383,15 +417,20 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Der Zielstand des Events zum Speicherstand, nachdem {@link RestorePlanner#requireRestorable} die Einheiten gegen ihn
-	 * geprüft hat.
+	 * geprüft hat. Kassen bleiben, wie sie sind (KARV-144): Jede lesbare Kassen-Einheit steht mit ihrem heutigen Stand
+	 * darin ({@link CashRestore#keepCashRegisters}), und {@link CashRestore#adjust} gleicht alte Felder und entfallende
+	 * Vorstellungen an den heutigen Stand an.
 	 *
 	 * @throws LockedUnitException wie {@link #restoreEvent}
 	 */
 	private Event targetOf(List<UnitState> states, SavePoint point) {
-		Map<UnitKey, UnitSnapshot> targets = RestorePlanner.targetsAt(states, point.at());
+		Map<UnitKey, UnitSnapshot> targets = CashRestore.keepCashRegisters(states,
+				RestorePlanner.targetsAt(states, point.at()));
 		RestorePlanner.requireRestorable(states, targets);
-		return RestorePlanner.single(UnitMapper.assembleEvents(targets.values()),
+		Event target = RestorePlanner.single(UnitMapper.assembleEvents(targets.values()),
 				"Zu diesem Speicherstand war das Event gelöscht.");
+		CashRestore.adjust(target, states);
+		return target;
 	}
 
 	/**

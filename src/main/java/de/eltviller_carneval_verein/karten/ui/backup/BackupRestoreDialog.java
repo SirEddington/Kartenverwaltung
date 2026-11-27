@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.backup;
 
+import java.io.IOException;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -48,6 +49,7 @@ public final class BackupRestoreDialog {
 	private static final DateTimeFormatter DAY_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 	private static final DateTimeFormatter CLOCK_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
 	static final String BUSY_TEXT = "Wird wiederhergestellt …";
+	static final String CASH_NOT_RESET = "Kassen wurden nicht zurückgesetzt.";
 
 	private BackupRestoreDialog() {
 	}
@@ -85,10 +87,22 @@ public final class BackupRestoreDialog {
 		return text.append(" · ").append(point.unitCount()).append(point.unitCount() == 1 ? " Änderung" : " Änderungen").toString();
 	}
 
-	/** Die Rückfrage vor dem Wiederherstellen. */
-	static String confirmText(String label, Entry entry, SavePoint point, String restoreWarning, ZoneId zone) {
-		return label + " \"" + entry.name() + "\" auf den Stand vom " + AbstractBackupCatalog.timeText(point.at(), zone) + " zurücksetzen?\n\n"
+	/** Die Rückfrage vor dem Wiederherstellen; die Zeilen {@code details} ({@link BackupCatalog#restoreDetails}) unter der Warnung. */
+	static String confirmText(String label, Entry entry, SavePoint point, String restoreWarning, List<String> details, ZoneId zone) {
+		String text = label + " \"" + entry.name() + "\" auf den Stand vom " + AbstractBackupCatalog.timeText(point.at(), zone) + " zurücksetzen?\n\n"
 				+ restoreWarning + " Der aktuelle Stand bleibt als Speicherstand erhalten.";
+		return details.isEmpty() ? text : text + "\n\n" + String.join("\n", details);
+	}
+
+	/** Die Hinweise nach dem Wiederherstellen: die des Ergebnisses, dann die Zeilen {@code details}, eingeleitet mit {@value #CASH_NOT_RESET}. */
+	static List<String> notesAfterRestore(List<String> notes, List<String> details) {
+		if (details.isEmpty()) {
+			return notes;
+		}
+		List<String> all = new ArrayList<>(notes);
+		all.add(CASH_NOT_RESET);
+		all.addAll(details);
+		return all;
 	}
 
 	/** Eine Zellfabrik, die jeden Eintrag nur als Text anzeigt. */
@@ -208,9 +222,7 @@ public final class BackupRestoreDialog {
 				pane.showText("Speicherstände konnten nicht geladen werden: " + messageOf(task.getException()));
 			}
 		});
-		Thread thread = new Thread(task, "savepoint-loader");
-		thread.setDaemon(true);
-		thread.start();
+		startInBackground(task, "savepoint-loader");
 	}
 
 	private static String messageOf(Throwable failure) {
@@ -273,38 +285,56 @@ public final class BackupRestoreDialog {
 			event.consume();
 			Entry entry = entryList.getSelectionModel().getSelectedItem();
 			SavePoint point = savePoints.selectedSavePoint();
-			if (entry == null || point == null || !confirm(dialog, catalog, entry, point, zone)) {
+			if (entry == null || point == null) {
 				return;
 			}
 			setRestoring(true, restoring, entryList, savePoints, closeButton);
-			// Lesen und Zusammensetzen im Hintergrund, Übernehmen (Cache, Speichern, Listener) auf dem Oberflächen-Thread
-			Task<BackupCatalog.Prepared> task = new Task<>() {
+			// Vor der Rückfrage im Hintergrund: die Zeilen zu den Kassen, unabhängig vom Plan des Wiederherstellens
+			Task<List<String>> details = new Task<>() {
 				@Override
-				protected BackupCatalog.Prepared call() {
-					return catalog.prepare(entry, point);
+				protected List<String> call() throws IOException {
+					return catalog.restoreDetails(entry, point);
 				}
 			};
-			task.setOnSucceeded(finished -> {
-				RestoreResult result;
-				try {
-					result = catalog.commit(task.getValue());
-				} finally {
-					setRestoring(false, restoring, entryList, savePoints, closeButton);
-				}
-				if (result.success()) {
-					done[0] = result;
-					dialog.close();
-				} else {
-					MainApp.showAlert("Wiederherstellen fehlgeschlagen", result.message(), AlertType.ERROR);
-				}
-			});
-			task.setOnFailed(finished -> {
+			details.setOnSucceeded(read -> {
 				setRestoring(false, restoring, entryList, savePoints, closeButton);
-				MainApp.showAlert("Wiederherstellen fehlgeschlagen", messageOf(task.getException()), AlertType.ERROR);
+				List<String> lines = details.getValue();
+				if (!confirm(dialog, catalog, entry, point, lines, zone)) {
+					return;
+				}
+				setRestoring(true, restoring, entryList, savePoints, closeButton);
+				// Lesen und Zusammensetzen im Hintergrund, Übernehmen (Cache, Speichern, Listener) auf dem Oberflächen-Thread
+				Task<BackupCatalog.Prepared> task = new Task<>() {
+					@Override
+					protected BackupCatalog.Prepared call() {
+						return catalog.prepare(entry, point);
+					}
+				};
+				task.setOnSucceeded(finished -> {
+					RestoreResult result;
+					try {
+						result = catalog.commit(task.getValue());
+					} finally {
+						setRestoring(false, restoring, entryList, savePoints, closeButton);
+					}
+					if (result.success()) {
+						done[0] = RestoreResult.success(result.message(), notesAfterRestore(result.notes(), lines));
+						dialog.close();
+					} else {
+						MainApp.showAlert("Wiederherstellen fehlgeschlagen", result.message(), AlertType.ERROR);
+					}
+				});
+				task.setOnFailed(finished -> {
+					setRestoring(false, restoring, entryList, savePoints, closeButton);
+					MainApp.showAlert("Wiederherstellen fehlgeschlagen", messageOf(task.getException()), AlertType.ERROR);
+				});
+				startInBackground(task, "restore");
 			});
-			Thread thread = new Thread(task, "restore");
-			thread.setDaemon(true);
-			thread.start();
+			details.setOnFailed(read -> {
+				setRestoring(false, restoring, entryList, savePoints, closeButton);
+				MainApp.showAlert("Wiederherstellen fehlgeschlagen", messageOf(details.getException()), AlertType.ERROR);
+			});
+			startInBackground(details, "restore-details");
 		});
 
 		dialog.showAndWait();
@@ -326,9 +356,20 @@ public final class BackupRestoreDialog {
 		pane.setBusy(restoring);
 	}
 
-	/** Die Rückfrage mit dem Hinweis, was mit zurückgesetzt wird und dass der aktuelle Stand erhalten bleibt; Fokus auf "Abbrechen". */
-	private static boolean confirm(Alert parent, BackupCatalog catalog, Entry entry, SavePoint point, ZoneId zone) {
-		String message = confirmText(catalog.entityLabel(), entry, point, catalog.restoreWarning(), zone);
+	/** Startet die Aufgabe auf einem eigenen Hintergrund-Thread. */
+	private static void startInBackground(Task<?> task, String name) {
+		Thread thread = new Thread(task, name);
+		thread.setDaemon(true);
+		thread.start();
+	}
+
+	/**
+	 * Die Rückfrage mit dem Hinweis, was mit zurückgesetzt wird, den Zeilen {@code details} und dass der aktuelle Stand
+	 * erhalten bleibt; Fokus auf "Abbrechen".
+	 */
+	private static boolean confirm(Alert parent, BackupCatalog catalog, Entry entry, SavePoint point, List<String> details,
+			ZoneId zone) {
+		String message = confirmText(catalog.entityLabel(), entry, point, catalog.restoreWarning(), details, zone);
 		return ConfirmDialog.confirm("Wiederherstellen", message, "Wiederherstellen", "button-primary", parent.getDialogPane().getScene().getWindow());
 	}
 }
