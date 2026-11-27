@@ -33,17 +33,17 @@ Kartenverwaltung/
     │   │   ├── AppPaths.java             Data directory resolution
     │   │   ├── AppLogging.java           Rotating log file
     │   │   ├── GlobalErrorHandler.java   Uncaught exception dialog (SYS-001)
-    │   │   ├── model/        (22 classes)
-    │   │   ├── validation/   (26 classes)
-    │   │   ├── repository/   (32 classes)
-    │   │   ├── store/        (73 classes)
+    │   │   ├── model/        (25 classes)
+    │   │   ├── validation/   (29 classes)
+    │   │   ├── repository/   (37 classes)
+    │   │   ├── store/        (74 classes)
     │   │   ├── tracking/     (2 classes)
     │   │   ├── settings/     (3 classes)
     │   │   ├── update/       (40 classes)
     │   │   ├── util/         (4 classes)
     │   │   └── ui/           (33 classes in the root package)
-    │   │       ├── accounting/ (6)  backup/ (6)   event/ (8)    hall/ (17)   input/ (18)
-    │   │       └── menu/ (2)        sales/ (53)   settings/ (9) shared/ (30)
+    │   │       ├── accounting/ (7)  backup/ (6)   event/ (10)   hall/ (17)   input/ (18)
+    │   │       └── menu/ (2)        sales/ (58)   settings/ (9) shared/ (30)
     │   └── resources/de/eltviller_carneval_verein/karten/
     │       ├── patchnotes.md     Patch notes of every version (KARV-125), newest first
     │       └── ui/
@@ -52,7 +52,7 @@ Kartenverwaltung/
     │           ├── fonts/        Yanone Kaffeesatz (OFL)
     │           └── images/       harlekin_logo.png (app icon), wappen.png
     └── test/
-        ├── java/de/eltviller_carneval_verein/karten/   (same packages as main, 230 test classes)
+        ├── java/de/eltviller_carneval_verein/karten/   (same packages as main, 269 test classes)
         └── resources/
             ├── de/…/karten/update/   AppxManifest.xml, ecv-karten-fx132.appinstaller (update fixtures)
             └── format-samples/<version>/data.zip + README.md   Data of each release (1.0.1, 1.1.0)
@@ -71,14 +71,15 @@ Bootstrapping only. `MainApp` owns the primary stage and the global UI singleton
 units, update state). `AppPaths.appDataDir()` is the single source for the data directory.
 
 ### `model`
-Domain entities (`Event`, `Presentation`, `Booking`, `Hall`, `HallObject`, `SeatingPlan`, `TableRow`, `Table`,
-`Seat`), enums (`PaymentStatus`, `SeatStatus`, `Shape`, `TextAlignH`, `TextAlignV`), labels (`Labeled`,
+Domain entities (`Event`, `Presentation`, `CashRegister`, `Booking`, `Hall`, `HallObject`, `SeatingPlan`, `TableRow`,
+`Table`, `Seat`), enums (`PaymentStatus`, `SeatStatus`, `Shape`, `TextAlignH`, `TextAlignV`), labels (`Labeled`,
 `TextSettings`), domain operations that must be applied the same way everywhere (`BookingSync`, `SaleDates`,
-`BookingCancellation`, `BookingMove`) and the forward-compatibility helpers (`UnknownFields`, `TolerantEnum`, `Requires`).
+`BookingCancellation`, `BookingMove`, `CashRegisters`) and the forward-compatibility helpers (`UnknownFields`, `TolerantEnum`, `Requires`).
 **Not here:** validation rules (setters accept any value), persistence, JavaFX views.
 
 ### `validation`
-One `*Validator` and one `*Issue` enum per entity, plus `ValidationResult`, `ValidationIssue`, `Severity`,
+One `*Validator` and one `*Issue` enum per entity (including `CashRegisterValidator` and `CashRegisterIssue`, code
+prefix `KAS`), plus `ValidationResult`, `ValidationIssue`, `Severity`,
 `MessageTemplate`, `RangeCheck`, `DuplicateNames`, `EntityLabels` and `Footprint` (geometry of the layout checks).
 New issue enums must be registered in `IssueConventionsTest`.
 **Not here:** technical errors (those are `SYS-` messages in `store.StoreMessages` and `GlobalErrorHandler`).
@@ -87,8 +88,10 @@ New issue enums must be registered in `IssueConventionsTest`.
 `EventRepository`/`HallRepository` interfaces with `Store*Repository` implementations, unit mapping (`UnitMapper`,
 `UnitBaseline`), merging foreign versions into the cache (`EventMerge`, `ForeignBacklog`, `ForeignBatch`,
 `ForeignDecision`, `ForeignResult`, `Deferral`), conflict policies (`*Policy`, `ConflictPolicies`, `FieldMerge`,
-`FieldGroups`, `PolicyRules`, `BookingTrail`, `BookingFate`), content rules for the store's gate (`ContentRules`),
-restore planning (`RestorePlanner`, `RestorePlan`, `SavePoint`, `Restored`), `LockedUnitException`, listeners, and
+`FieldGroups`, `PolicyRules`, `BookingTrail`, `BookingFate`, `CashRegisterPolicy`), content rules for the store's gate
+(`ContentRules`), the lock for 1.1 on the event head (`HeadRequires`), restore planning (`RestorePlanner`,
+`RestorePlan`, `SavePoint`, `Restored`) with the rule that registers stay (`CashRestore`, `CountedCash`), locked cash
+register units (`LockedCashRegister`), `LockedUnitException`, listeners, and
 `JsonMapperFactory` (the only `ObjectMapper` configuration).
 **Not here:** file paths or file formats — that is the store's job.
 
@@ -134,8 +137,8 @@ Small pure helpers: `MoneyFormat`, `BookingTotals`, `NumberText`, `Angles`.
 |---|---|
 | `menu` | Main menu (Abrechnung, Kartenverkauf, Verwaltung, Einstellungen) and management menu |
 | `sales` | Ticket sales shell, ticket table, hall overview (`HallPlanPane`, `HallViewport`), customer display, `SeatLook` (accessible seat display), bulk edit, search, cancel, assign place, moving bookings (KARV-140: `MoveAction`, `MoveConfirmDialog`, `MoveTargetDialog`; without JavaFX `MoveTexts` for texts and `MoveTargets` for the state of the target choice), purchase summary placement. The ticket table (KARV-193) is split into JavaFX-free decisions and the tree table: `TicketColumn` (columns as values: heading, group key, text, order), `TicketFilter` (column filters), `TicketGrouping` with `TicketNode` and `GroupOrder` (groups and counts), `TicketSelection` (selection as a set of bookings) and `TicketRow` (row type: booking or group); and the JavaFX side: `TicketTreeTable` (the `TreeTableView`) with `TicketTreeBuilder` (the `TreeItem`s), `TicketTreeRow`, `TicketCells`, `TicketEdits` (when to rebuild, which bookings stay visible), `MouseGesture` (a mouse operation, which holds rebuilds back; no JavaFX), `ColumnFilterMenu`, `GroupingMenu` and `GroupingBar` (the draggable chips of the grouping order) |
-| `accounting` | Accounting shell, cash reconciliation, statistics, `Exportable` (CSV/PDF), locked bookings notice |
-| `event` | Event overview, create/edit, presentations, templates (copies), seating plan switch, locked entry guard |
+| `accounting` | Accounting shell, cash reconciliation (with `CashFigures`: what the fields of the count show and allow, no JavaFX), statistics, `Exportable` (CSV/PDF), locked bookings notice |
+| `event` | Event overview, create/edit, presentations, cash registers (KARV-144: `CashRegisterSection` for rows, texts and rules without JavaFX, `CashRegisterTable` for the table), templates (copies), seating plan switch, locked entry guard |
 | `hall` | Hall management and editor, hall plan and seating plan drawing (`SeatingPlanDrawing`, `PlanNodeFactory`), seat layout (`SeatingPlanLayout`), labels (`PlanText`, `PlanLabels`, `PlanLabelOptions`), row fill dialog, bulk edits of rows (`TableRowBulkEdit`) |
 | `settings` | Searchable settings screen with the sections "Gemeinsamer Ordner", "Anzeige" and "Info und Updates"; `PatchNoteActions` |
 | `shared` | Shared-folder start/connect flow, sync indicator and info window, operator dialog, locked units, data reload, update flow, footer hints, start prompt, `PatchNotesWindow` ("Was ist neu"), `DialogConfirmation` |

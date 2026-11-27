@@ -67,8 +67,9 @@ Plain mutable Java objects serialized by Jackson:
 
 | Class | Content |
 |---|---|
-| `Event` | name, description, `archived`, list of `Presentation` |
-| `Presentation` | date, time, `hallId`, `seatingPlanId`, default `price` (cents), `actualCashAmount`, bookings |
+| `Event` | name, description, `archived`, list of `Presentation`, list of `CashRegister` (sorted by id) |
+| `Presentation` | date, time, `hallId`, `seatingPlanId`, default `price` (cents), bookings; `actualCashAmount` and `cashDifferenceComment` are the *old fields* of the cash register (since 1.2) |
+| `CashRegister` | id (tells the kind: presentation id, `_event`, `_<uuid>`), `name` (`null` = default name), `allPresentations`, `presentationIds`, `actualCashAmount` (cents), `cashDifferenceComment` |
 | `Booking` | `seatId` plus a snapshot of the seat (row label, table/seat number, category, wheelchair), price override, `PaymentStatus` (`NONE`, `CASH`, `CARD`, `TRANSFER`), `paidAmount`, collected flag, reservation/payment/collection dates, customer name, e-mail, comment, `unassigned` |
 | `Hall` | dimensions, `HallObject`s (shapes with text), `SeatingPlan`s |
 | `SeatingPlan` | default table/seat sizes (50 × 320 cm, seat 45 cm), `TableRow`s (position, angle, gaps, aisle), `Table`s with text settings, each with `Seat`s |
@@ -84,6 +85,12 @@ Money is always `int` cents. Rules that every UI path must apply the same way li
 - `BookingMove` (KARV-140) plans and runs the move of bookings to other seats of a presentation. A booking keeps its id,
   chains of moves and swaps are resolved by a fixed rule, and a plan that no longer matches is not run
   ([decisions.md](decisions.md#moving-bookings-keeps-the-booking-id-karv-140)).
+- `CashRegisters` (KARV-144) holds every rule for cash registers: the effective state of a presentation's register
+  (the register object, else the old fields of the presentation), fetching a register for editing, the visible
+  registers and their default names, the shared register, free registers, the second amount, and what happens to a
+  register when its presentation goes away
+  ([decisions.md](decisions.md#cash-registers-as-units-karv-144)). A presentation's register exists as an object only
+  once it has data of its own.
 
 **Labels.** `HallObject` and `Table` implement `Labeled`: five text fields (auto, size, horizontal/vertical alignment,
 rotation) stored individually, bundled as the value type `TextSettings` for drawing and editing (never stored).
@@ -96,10 +103,10 @@ unit. Removed field names are listed per class in `@JsonIgnoreProperties`. Rules
 
 ### `validation` – plausibility and layout checks
 
-One validator per entity (`EventValidator`, `PresentationValidator`, `HallValidator`, `HallObjectValidator`,
+One validator per entity (`EventValidator`, `PresentationValidator`, `CashRegisterValidator`, `HallValidator`, `HallObjectValidator`,
 `SeatingPlanValidator`, `TableRowValidator`, `TableValidator`, `SeatValidator`, `BookingValidator`). Validators never
 throw; they return a `ValidationResult` of `ValidationIssue`s. Each issue comes from an enum implementing `Issue`: a
-stable code (`EVT-`, `PRS-`, `HLL-`, `HOB-`, `SPL-`, `ROW-`, `TBL-`, `SEA-`), a `Severity`, and a message template with
+stable code (`EVT-`, `PRS-`, `KAS-`, `HLL-`, `HOB-`, `SPL-`, `ROW-`, `TBL-`, `SEA-`), a `Severity`, and a message template with
 SAP-style placeholders `&1`–`&9` (`MessageTemplate`). Errors block saving; warnings are shown after saving.
 
 **Layout checks (KARV-60).** `Footprint` turns a table (plate plus seat circles) or a hall object into rotated
@@ -113,9 +120,10 @@ lying fully inside another does not count, and tables without a valid row take n
 `StoreEventRepository` and `StoreHallRepository` hold the in-memory cache of all events and halls and are the only
 bridge between model and store.
 
-- **Unit mapping** (`UnitMapper`): an event is split into an *event head* (without presentations), one
-  *presentation* unit each (without bookings) and one *booking* unit per seat (or `_<bookingId>` for unassigned
-  bookings). A hall is a single unit. Empty bookings are never written; `BookingSync` recreates them on load.
+- **Unit mapping** (`UnitMapper`): an event is split into an *event head* (without presentations and cash registers),
+  one *presentation* unit each (without bookings), one *cash register* unit each and one *booking* unit per seat (or
+  `_<bookingId>` for unassigned bookings). A hall is a single unit. Empty bookings are never written; `BookingSync`
+  recreates them on load. No unit is created for a presentation's cash register without data of its own.
   `UnitMapper.readUnit` is the only way a payload enters the model; it leaves out locked content
   (`ArchitectureGuardTest`).
 - **Delta writes** (`UnitBaseline`): on save only the units that differ from the loaded state are appended. "Locally
@@ -123,19 +131,25 @@ bridge between model and store.
 - **Foreign changes** (`EventMerge`, `ForeignBacklog`, `ForeignBatch`, `ForeignDecision`): versions written by other
   workstations are merged into the existing model objects so that open screens keep their object identity. Units the
   user is editing are *deferred* (shown in the footer); bookings whose seat is not in the model yet are *held*.
-- **Conflict policies** (`EventHeadPolicy`, `PresentationPolicy`, `BookingPolicy`, `HallPolicy`): per unit type, a
+- **Conflict policies** (`EventHeadPolicy`, `PresentationPolicy`, `CashRegisterPolicy`, `BookingPolicy`,
+  `HallPolicy`): per unit type, a
   three-way merge (`FieldMerge`, per `FieldGroups`) of *base*, *mine* and *theirs*. `BookingPolicy` additionally
   tracks booking moves and cancellations (`BookingTrail`, `BookingFate`) and turns a double sale into "mine moves to
   *unassigned*" instead of losing a sale.
 - **Content rules** (`ContentRules`): what the store's `ContentGate` treats as too new in content (`requires`, an
   unknown `paymentStatus`).
-- **Restore** (`RestorePlanner`): computes save points from the valid chains of an event's or hall's units; the
-  restore itself is a normal save of the target state.
+- **Lock for 1.1** (`HeadRequires`, KARV-144): the save derives `requires: ["cashRegisters"]` on the event head from the
+  cash register units in the version store, writes the head along when the feature changes and orders the changes of a
+  save so that a break-off never leaves 1.1 an event with emptied old fields.
+- **Restore** (`RestorePlanner`, `CashRestore`): computes save points from the valid chains of an event's or hall's
+  units; the restore itself is a normal save of the target state. Cash registers stay as they are: the target state
+  takes their current state, and only presentations and bookings go back (`CashRestore`). Chains of cash register units
+  do not count for the save points.
 
 ### `store` – the version store and sync
 
 The store knows nothing about events or halls; it versions opaque JSON payloads per `UnitKey`
-(`EVENT`, `PRESENTATION`, `BOOKING`, `HALL`).
+(`EVENT`, `PRESENTATION`, `BOOKING`, `HALL`, `CASH_REGISTER`).
 
 **On-disk model** (identical locally under `<AppData>/data` and in `<shared folder>/data`):
 
@@ -144,6 +158,7 @@ data/
 ├── events/<eventId>/
 │   ├── <VersionId>.json                     event head versions
 │   ├── claims/root.json, claims/<VersionId>.json
+│   ├── cashRegisters/<id>/                  <presentationId> | _event | _<uuid>, with <VersionId>.json, claims/…
 │   └── presentations/<presentationId>/
 │       ├── <VersionId>.json, claims/…
 │       └── bookings/<seatId>/ | bookings/_<bookingId>/
@@ -329,6 +344,14 @@ Notable 1.2 pieces:
   (`GroupingMenu`, `GroupingBar`) follow them with weak listeners; the ticket table listens only while it is shown
   (`LiveViews.whileShown`), so a controller left behind after a switch to the hall view no longer rebuilds, and its
   selection is reported to `SalesViewState` only while the table is shown.
+- **Cash registers in the UI** (KARV-144): the section "Kassen" of the event editor is `ui.event.CashRegisterSection`
+  (rows, texts, what is editable, changes to name and "gilt für"; no JavaFX) with `CashRegisterTable` as its thin
+  JavaFX part. The cash reconciliation takes amount, comment, hint and second amount from `ui.accounting.CashFigures`
+  (no JavaFX); `CashReconciliationController` only shows them. Locked register units come from
+  `StoreEventRepository.lockedCashRegisters` (record `LockedCashRegister`) and are checked before a change enters the
+  model, like `LockedEntryGuard` does for presentations. The state "registers not yet reconciled" comes from the
+  repository per event. The restore dialog reads the registers first and lists the amounts counted since the chosen
+  state (`StoreEventRepository.countedSince`, `CountedCash`, text in `EventBackupCatalog`).
 
 ## Data flow
 

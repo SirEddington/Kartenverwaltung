@@ -4,6 +4,18 @@
 
 ### Neu
 - Die Abrechnung wird ausgebaut, mit Kassen am Event, Kassensturz je Kasse und Bilanz.
+- In der Event-Verwaltung gibt es unter den Tabellen den Abschnitt „Kassen“. Wie bisher hat jede
+  Vorstellung ihre eigene Kasse. Stattdessen lässt sich eine gemeinsame Kasse für alle
+  Vorstellungen wählen, und mit „+ Kasse hinzufügen“ kommen weitere Kassen mit eigenem Namen
+  dazu, etwa ein Vorverkauf. Kassen lassen sich umbenennen; freie Kassen lassen sich auch wieder
+  löschen, solange nichts gezählt ist. Der Kassenabgleich zeigt weiter dieselben Beträge wie bisher.
+  Gezählt wird vorerst nur die Kasse einer Vorstellung; für die gemeinsame Kasse folgt der
+  Kassensturz in einer späteren Version.
+- Beim Wiederherstellen eines Events bleiben die Kassen, wie sie sind: Was gezählt wurde, bleibt
+  gezählt. Die Rückfrage nennt die Beträge, die seit dem gewählten Stand gezählt wurden; zeigt der
+  Kassenabgleich danach eine Differenz, sind Verkäufe nachzutragen.
+- Ein Event, in dem eine Kasse gespeichert ist, lässt sich an Rechnern mit Version 1.1 nicht mehr
+  öffnen. Am selben gemeinsamen Ordner darf kein Rechner mehr mit Version 1.0.x arbeiten.
 - Buchungen lassen sich im Bearbeitungsmodus auf andere Plätze derselben Vorstellung verschieben
   oder mit anderen tauschen, auch mehrere auf einmal: Rechtsklick auf die Buchung, dann
   „Buchung verschieben…“.

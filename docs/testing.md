@@ -37,7 +37,7 @@ release workflow runs the tests again before building the JARs.
 
 ## What is covered
 
-About 3,500 test methods (`@Test`, plus 21 parameterized tests) in 230 test classes, organized in the same packages as
+About 4,100 test methods (`@Test`, plus 41 parameterized tests) in 269 test classes, organized in the same packages as
 the production code.
 
 | Area | Examples | Kind |
@@ -48,6 +48,7 @@ the production code.
 | `store` | `VersionStoreTest`, `ChainResolverTest`, `UploaderTest`, `FeedReaderTest`/`FeedWriterTest`, `FullSyncTest`, `DamageRepairTest`, `UnitIndexTest`, `InstanceLockTest`, `DurableWriteTest`, `CloudFoldersTest`, `SyncServiceTest` | Unit / integration on temp dirs |
 | `store` scenarios | `CloudScenarioTest` (several services behind a simulated Nextcloud), `ConnectFlowStoreTest` | Integration |
 | `repository` | `StoreEventRepositoryTest`, `StoreHallRepository*Test`, `UnitMapperTest`, `EventMergeTest`, `FieldMergeTest`, `BookingPolicyTest`, `BookingTrailTest`, `RestorePlannerTest` | Unit / integration |
+| cash registers (KARV-144) | `CashRegisterTest`, `CashRegistersTest`, `EventCashRegistersTest` (model rules), `CashRegisterPolicyTest` (conflicts), `HeadRequiresTest` (lock for 1.1 and order of a save), `CashRegisterStateTest`, `StoreEventRepositoryCashTest` and `StoreEventRepositoryForeignCashTest` (save, load, foreign states, locked and not yet reconciled registers), `StoreEventRepositoryRestoreCashTest` (restore keeps registers), `CashRegisterValidatorTest` (`KAS-001` … `KAS-005`), `CashRegisterSectionTest` (rows and rules of the section "Kassen"), `CashFiguresTest` (cash reconciliation) | Unit / integration |
 | `repository` scenarios | `ConflictScenarioTest` (conflicts end to end across two or three machines; also a simulated newer-version machine) | Integration |
 | data format guards | `FormatGuardTest`, `JsonKeysTest`, `ArchitectureGuardTest`, `FormatSamplesTest`, `StoreCodecTest` | Unit / integration |
 | `tracking` | `ChangeTrackerTest`, `StateRestorerTest` | Unit |
@@ -88,7 +89,9 @@ controls such as table cells, column widths and paints; this is why CI needs `xv
   - `StoreCodecTest.envelopeKeysAreUnchanged` pins the keys of a version file's envelope (`StoreCodec.FORMAT` stays 1).
   - `FormatSamplesTest` loads every sample under `src/test/resources/format-samples/<version>/data.zip` (one per
     release, created with `FormatSampleGenerator`, see [installation.md](installation.md#releasing)): nothing counts as
-    changed, and saving without a change writes nothing. It also builds the folder of a "1.2 machine" with
+    changed, and saving without a change writes nothing. `FormatSampleGenerator` also writes the cash registers of 1.2
+    (one of each kind, a presentation with its counted amount only in the old fields, the head with `requires`); the
+    sample for 1.2 is created at release time. It also builds the folder of a "1.2 machine" with
     `FutureWriter` and checks that extra fields survive and exactly the unsafe content is locked.
   - `ConflictScenarioTest` runs the same newer-version machine (`FutureWriter`, its own service with a permissive
     gate) against a 1.1 machine over the shared folder: extra fields survive edits, an unknown payment status locks the

@@ -25,6 +25,8 @@ Decisions added or changed in 1.2:
 | Decision | Ticket |
 |---|---|
 | [Ticket table as tree table](#ticket-table-as-tree-table-karv-193) | KARV-193 |
+| [Cash registers as units](#cash-registers-as-units-karv-144) | KARV-144 |
+| [Forward-compatible data format](#forward-compatible-data-format): first known `requires` feature, new kind of unit | KARV-144 |
 
 ## Desktop app with local data, no server
 
@@ -243,6 +245,11 @@ a list.
   unknown field but no longer maintains it; older versions see the default for objects of the new version and an
   outdated value for objects the new version edited. If it should disappear from the files, put it on the ignore
   list (the name is then burned, see below).
+- Add a new kind of unit in a folder that older versions do not scan (`events/<id>/cashRegisters/<id>`, KARV-144),
+  without changing an existing unit. Older versions skip the folder (`UnitKey.parse`, `VersionStore.eventUnits`), so
+  the new units stay out of sight; to keep them from working on a stale picture of the event, a `requires` feature on
+  the head (below) locks the event for them as soon as such a unit exists. Without that lock the new kind of unit
+  would not be allowed.
 
 ### Rules for new fields
 
@@ -265,9 +272,12 @@ a list.
   version changes `price` and carries the new field back unchanged, so the newer version would read the old amount
   and lose the change. While older versions write the old field, **the old field wins**: the new version writes both,
   notices when they do not match on reading, and derives the new one from the old one. If that is impossible, change
-  the format or use `requires` on the unit.
+  the format or use `requires` on the unit. `requires` may also sit on the head above the unit if the head decides
+  whether an older version may touch the unit at all: an older version saves nothing below a head it considers too
+  new, so the old field cannot be written there either (cash registers: the head of the event, the old fields on the
+  presentation; see "Cash registers as units").
 - **A format change is needed** to rename a field, change the type or meaning of a field or value, or restructure
-  units.
+  existing units. A new kind of unit beside the existing ones is no restructuring (see above).
 
 ### Burned names and `requires`
 
@@ -281,17 +291,27 @@ Removed fields are never reused. The lists are per class and live in the `@JsonI
 | `Seat` | `height`, `price`, `paymentStatus`, `collected`, `lastName`, `firstName`, `email`, `comment` |
 
 `requires` is reserved. No model class has a property of that name, and the unit classes never write it from a freshly
-built model. A version that uses it **derives it when writing** from the state of the model ("this presentation
-carries the new lock flag"), removes it from the collected fields when reading, **never keeps it and never copies it
-into another unit**, not even on JSON level (resolver, `FieldMerge`/`transfer`). Otherwise a unit would never unlock
-and copies would be locked for no reason. Inside the same unit the payload stays as it is, so raw comparisons do not
-write a version because of a removed `"requires": []`. `requires` works at the top of a unit only; inside a nested
-object (a hall object in a hall) it is only kept. To make part of a hall strict, set `requires` on the hall.
+built model. A version that uses it **derives it when writing**, removes it from the collected fields when reading,
+**never keeps it from the model and never copies it into another unit**, not even on JSON level (resolver,
+`FieldMerge`/`transfer`). Otherwise a unit would never unlock and copies would be locked for no reason. Inside the same
+unit the payload stays as it is, so raw comparisons do not write a version because of a removed `"requires": []`.
+`requires` works at the top of a unit only; inside a nested object (a hall object in a hall) it is only kept. To make
+part of a hall strict, set `requires` on the hall.
+
+**What the derivation looks at.** The first rule was to derive it from the state of the model and never to keep it.
+That works if the model holds everything the feature stands for. It does not for `cashRegisters` (KARV-144): a
+workstation right after the update knows the head but not yet the cash registers, and deriving from its model would
+remove the lock. So the feature on the head follows the **units in the version store** (`HeadRequires`), and a stored
+feature **stays until a save deletes the last cash register** of the event. The cost, accepted: a head can keep the
+feature although every cash register is deleted (or there never was one), and the event then stays locked for 1.1.
 
 The gate (`ContentGate`) calls a version too new if `requires` is present, not `null`, and not an array of texts the
-program knows (1.1 knows none; absent, `null` and `[]` mean "nothing required"), or if a booking has a `paymentStatus`
-that is not `null` and not the name of a `PaymentStatus` (a number counts as unknown). `rulesId()` is computed from
-these inputs, so a new `PaymentStatus` value changes it, and the startup index then resolves the units again.
+program knows (`Requires.KNOWN`: `cashRegisters` since 1.2; absent, `null` and `[]` mean "nothing required"), or if a
+booking has a `paymentStatus` that is not `null` and not the name of a `PaymentStatus` (a number counts as unknown).
+`rulesId()` is computed from these inputs, so a new `PaymentStatus` value or a new known feature changes it, and the
+startup index then resolves the units again. `EventHeadPolicy` keeps `requires` out of the group-wise comparison and
+sets the feature in the result if either side carries it, without a conflict note. Comparisons for "changed locally"
+ignore `requires` on the head, so a head never counts as changed by the user because of it.
 
 ### Boundary to 1.0.x
 
@@ -302,7 +322,8 @@ against tag `1.0.1`):
   `OK`): the seat looks free and can be sold twice.
 - `HallObject` has no `ignoreUnknown` in 1.0.x, and `shape`/alignment are strict there: a new field on a hall object
   or a new shape or alignment value makes the whole hall unreadable on 1.0.x, and its presentations freeze.
-- 1.0.x does not know `requires` and drops it on save.
+- 1.0.x does not know `requires` and drops it on save. Since 1.2 uses it (`cashRegisters`), no workstation at the same
+  folder may run 1.0.x any more.
 - A hall saved by 1.1 counts as changed on 1.0.x, and its next hall save there drops the keys only 1.1 knows (text
   and alignment on tables).
 - If a downgrade keeps the index folder of 1.1, 1.0.1 warns "Unbekanntes Format des Index: 5" and rebuilds the index
@@ -337,6 +358,9 @@ For every release, create the sample for the new version from the final release 
    exceed the Windows path limit.
 3. `FormatSamplesTest` picks up every folder automatically: every version must load all samples, nothing counts as
    changed, and saving without a change writes nothing. Samples are immutable; the tests copy them first.
+
+The generator also writes the cash registers of 1.2: a presentation whose counted amount sits only in the old fields,
+one cash register of each kind, and the head with `requires`. The sample for 1.2 is created at release time, as above.
 
 ## One instance per machine, random machine id
 
@@ -824,6 +848,78 @@ conflict dialog apply. Prices stay as they were because the booking is not sold 
 - **Stale views:** The view keeps id and seat of each source as chosen. If the plan, the seating plan or the view
   (event, presentation) changed during the confirmation, nothing is moved and the footer says so.
 - **Collected tick:** The confirmation asks whether "Abgeholt" stays; removing it also clears the collection date.
+
+## Cash registers as units (KARV-144)
+
+**Decision:** A cash register is a unit of its own below the event, `events/<eventId>/cashRegisters/<id>`
+(`UnitType.CASH_REGISTER`, `model/CashRegister`, the list `Event.cashRegisters`). Three kinds, told apart by the id and
+not stored: the register of a presentation (id = id of the presentation), the shared register (`_event`) and free
+registers (`_` + UUID). The default is one register per presentation. A register holds name, "applies to", the counted
+amount in cents (`actualCashAmount`) and the comment on the difference. All rules live in `model/CashRegisters`
+(static, no JavaFX).
+
+**Why:** The counted amount used to be two fields on the presentation, so the club was tied to exactly one register per
+presentation, and the further work of 1.2 (payment carries the register, cash count per register, accounting close) had
+nothing to hang on. A list in the head of the event would be merged per field: two workstations at different registers
+would conflict over the whole list. A unit below the event is merged by the existing field groups (`name`, `scope`,
+`cash`), and one workstation never touches another one's register.
+
+**How:**
+- **The register of a presentation is only imagined until it has data.** Nothing is created on load, so loading an
+  event from 1.1 writes nothing and the event does not count as changed. The effective state of a presentation's
+  register is the register object if the event has one, else the old fields of the presentation
+  (`CashRegisters.effective`); the same numbers show before and after the update. Changing amount, comment or name first
+  fetches the register for editing (`forEdit`): it creates the object from the old fields and clears them. No unit is
+  *created* for a presentation register without data of its own; once saved, a unit is rewritten like any other, so an
+  amount set back to 0 is a field change, not a deletion. A unit is deleted only when its object leaves the list: a free
+  or the shared register by hand, a presentation register by the rule below.
+- **A presentation that goes away** (by hand or by a restore) leaves its register behind as an orphan if the effective
+  state has an amount or a comment: the register is fetched for editing and named after its default name. A register
+  without amount and comment is removed.
+- **A second amount.** If the register object exists but the old fields still hold an amount or comment (a 1.1
+  workstation wrote after the first save, or a save broke off), the register wins. `KAS-005` and the cash
+  reconciliation name the second amount until someone changes amount or comment or discards it; only that clears the old
+  fields.
+- **Lock for 1.1 through `requires` on the head**, feature `cashRegisters` (`Requires.KNOWN`, see "Forward-compatible
+  data format"). `HeadRequires` derives it from the version store: it is set when a save creates or changes a register
+  unit, or the store already knows a living one; it is removed only by a save that itself deletes a register unit and
+  leaves none alive. A save writes the head along, even if nothing else changed on it. Order within one save
+  (`HeadRequires`): created or changed register units stand before every presentation and before the deletions that
+  revive a head; a living head that keeps or gains the feature stands before the registers, a head that loses it after
+  the deletions of the registers. A break-off then leaves at most a head with the feature and no register, a second
+  amount in the old fields, or a head that keeps the feature; 1.1 never opens an event with emptied old fields. Why not stay open for 1.1: payments without a register would fall into the register of
+  the presentation, there is no rule "old field wins" for a shared register, and 1.1 would show stale amounts.
+- **"Registers not yet reconciled".** On a workstation right after the update the head carries the feature but the
+  registers have not arrived (1.1 skipped their list entries). If a shared folder is connected, no full sync has
+  finished since the start (`SyncService.fullSyncCompletedSinceStart`, `SyncListener.fullSyncCompleted`) and the store
+  knows no register unit of the event, the registers of that event cannot be edited, nor can a presentation be deleted or
+  the event restored, and the overall balance shows "–". The state ends with the first register unit or the first
+  finished full sync; there is none in single mode.
+- **Conflicts** (`CashRegisterPolicy`): "equal" and "unreadable" as for the presentation, then "delete wins" with one
+  exception: if the other side counted (group `cash` changed, or without a base an amount or comment), the side that
+  did not delete wins. Only an empty register is ever deleted, so a count of another workstation is not lost.
+  If "mine" is the deletion, "theirs" wins with the note `UNMERGED`; no new kind of note.
+- **Restore keeps registers.** A restore resets presentations and bookings; registers stay as they are
+  (`CashRestore`). The target state takes the current state of every readable register unit, also those that did not
+  exist at the chosen time or sit below a deleted head. The old fields of a presentation that is still alive get their
+  current value; for a presentation the restore brings back they are cleared if its register lives, else they take the
+  value of the last non-deleted state of the unit. Presentations the restore removes follow the rule above. The only
+  register units a restore writes are those two cases. Locked, unreadable or waiting register units do not stop a
+  restore. Their chains do not count for the restore points, so a save that wrote only registers is not listed. The
+  confirmation says that registers stay and lists the amounts counted since then (`CountedCash`).
+- **Sales are never blocked by a locked register**: a locked register unit stops editing it, and saving the event with
+  an own change to it fails, but a booking saves as before.
+- **Not copied:** "Use as template" copies no registers; the copy starts with one register per presentation.
+- **Checks `KAS-001` to `KAS-005`** (`CashRegisterIssue`, `CashRegisterValidator`; name comparison in `EventValidator`).
+  `PRS-005` stays reserved and is no longer emitted. Duplicate register names only warn, as duplicate presentation
+  names do: they arise without anyone's doing, and an error would block every save, also in the sales view.
+- **No amount for shared and free registers yet.** Only the register of a presentation can be counted, in the cash
+  reconciliation. The cash count per register (KARV-146) needs the target per register, hence payments with a register
+  (KARV-145). An orphan register with an amount cannot be emptied or deleted before that; it stays in the list and in
+  the overall balance.
+
+**Consequence:** An event with a saved register no longer opens on 1.1, and no workstation at the same folder may run
+1.0.x (it drops `requires`). The patch notes of 1.2.0 say so.
 
 ## OpenPDF 1.3.x
 

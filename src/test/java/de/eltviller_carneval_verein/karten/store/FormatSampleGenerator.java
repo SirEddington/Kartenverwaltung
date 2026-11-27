@@ -16,6 +16,8 @@ import java.util.zip.ZipOutputStream;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.HallObject;
@@ -43,6 +45,9 @@ import de.eltviller_carneval_verein.karten.repository.TestRepositories;
  * {@code CARD} (Schmitz) und {@code TRANSFER} (Becker);</li>
  * <li>„Schulz“ ({@code CASH}) auf einem vierten Sitz an Tisch 2, der danach im Plan gelöscht wird: Beim Öffnen gleicht
  * die App ab, und Schulz ist ohne Platz. Reihe/Tisch/Nummer (A/2/4) passen zu keinem Sitz.</li>
+ * <li>Ab 1.2 (KARV-144): die Vorstellung „Samstag“ mit Ist-Betrag nur in den alten Feldern, je eine Kasse der drei
+ * Arten (Vorstellungskasse „Freitag“, gemeinsame Kasse, freie Kasse „Vorverkauf Rathaus“) und im Kopf des Events
+ * {@code requires: ["cashRegisters"]}. Ein Ordner mit diesem Inhalt lädt nur 1.2 oder neuer.</li>
  * </ul>
  * Aufruf mit dem Zielordner, etwa {@code src/test/resources/format-samples/<version>}: Das Beispiel entsteht in einem
  * temporären Datenordner (nie im echten der App), sein Unterordner {@code data} kommt unverändert als {@code data.zip}
@@ -191,6 +196,20 @@ public final class FormatSampleGenerator {
 		if (!schulz.isUnassigned()) {
 			throw new IllegalStateException("Schulz ist nicht ohne Platz");
 		}
+		events.saveEvent(event);
+
+		// Kassen (ab 1.2): die zweite Vorstellung hat ihren Ist-Betrag nur in den alten Feldern (Stand von 1.1); die
+		// Kasse der ersten, die gemeinsame und eine freie Kasse stehen als eigene Einheiten, der Kopf trägt "requires"
+		Presentation saturday = event.addPresentation("Samstag");
+		saturday.setDate(LocalDate.of(2027, 2, 6));
+		saturday.setTime(LocalTime.of(19, 11));
+		saturday.setPrice(2500);
+		saturday.setActualCashAmount(12_500);
+		saturday.setCashDifferenceComment("alter Betrag");
+		CashRegisters.setActualCash(event, friday, 5_000);
+		CashRegisters.selectShared(event, true);
+		CashRegister free = CashRegisters.addFree(event);
+		free.setName("Vorverkauf Rathaus");
 		events.saveEvent(event);
 		return new Sample(hall, event);
 	}
