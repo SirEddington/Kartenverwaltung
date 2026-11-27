@@ -263,6 +263,16 @@ final class CashRegisterSection {
 		return true;
 	}
 
+	/** Die Stelle der Zeile mit der Kennung (die Auswahl nach einem Neuaufbau); -1, wenn es keine gibt. */
+	static int indexOf(List<Row> rows, String id) {
+		for (int i = 0; i < rows.size(); i++) {
+			if (rows.get(i).id().equals(id)) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
 	/** Der Name der Kasse ({@link CashRegisters#displayName}); eine gedachte Kasse heißt wie ein Objekt ohne eigenen Namen. */
 	static String displayName(Event event, String id) {
 		CashRegister register = event.findCashRegister(id);

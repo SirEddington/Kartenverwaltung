@@ -386,6 +386,7 @@ public class EventEditController {
 		foreignChangePending = false;
 		String eventId = currentEvent == null ? null : currentEvent.getId();
 		String presentationId = currentPres == null ? null : currentPres.getId();
+		String cashRegisterId = cashRegisters.selectedId();
 		Item shownTable = tableTable.getSelectionModel().getSelectedItem();
 		String tableLabel = shownTable == null ? null : shownTable.label();
 		List<Booking> selectedSeats = new ArrayList<>(seatTable.getSelectionModel().getSelectedItems());
@@ -402,6 +403,8 @@ public class EventEditController {
 		eventTable.getSelectionModel().select(event);
 		Presentation presentation = event.findPresentation(presentationId);
 		refreshPresentationTable(event, presentation);
+		// das Abwählen oben hat die Kassen schon ohne Event gezeigt: die Auswahl über die Kennung zurückgeben
+		cashRegisters.select(cashRegisterId);
 
 		masterTableData.stream().filter(item -> item.label().equals(tableLabel)).findFirst().ifPresent(item -> tableTable.getSelectionModel().select(item));
 		selectedSeats.stream().filter(masterSeatData::contains).forEach(booking -> seatTable.getSelectionModel().select(booking));

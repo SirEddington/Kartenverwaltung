@@ -240,6 +240,21 @@ class CashRegisterSectionTest {
 	}
 
 	@Test
+	void selectionFollowsIdAfterRebuild() {
+		CashRegister free = CashRegisters.addFree(event);
+		List<Row> before = rows();
+		String chosen = before.get(2).id();
+		CashRegisters.selectShared(event, true);
+
+		List<Row> after = rows();
+
+		assertEquals(free.getId(), chosen);
+		assertEquals(1, CashRegisterSection.indexOf(after, chosen));
+		assertEquals(-1, CashRegisterSection.indexOf(after, first.getId()));
+		assertEquals(-1, CashRegisterSection.indexOf(after, null));
+	}
+
+	@Test
 	void modelOfRowIsRegisterOrPresentation() {
 		CashRegister free = CashRegisters.addFree(event);
 

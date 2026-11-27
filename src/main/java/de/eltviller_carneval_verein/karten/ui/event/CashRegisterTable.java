@@ -135,9 +135,8 @@ final class CashRegisterTable {
 	 * einer offenen Eingabe in dieser Tabelle aufrufen.
 	 */
 	void show(Event shownEvent) {
-		Row selected = table.getSelectionModel().getSelectedItem();
 		boolean sameEvent = shownEvent != null && event != null && shownEvent.getId().equals(event.getId());
-		String selectedId = selected != null && sameEvent ? selected.id() : null;
+		String selectedId = sameEvent ? selectedId() : null;
 		event = shownEvent;
 		refreshAfterEdit = false;
 		Map<String, LockedCashRegister> locked = event == null ? Map.of() : repository.lockedCashRegisters(event.getId());
@@ -177,7 +176,17 @@ final class CashRegisterTable {
 		}
 	}
 
-	private void select(String id) {
+	/** Die Kennung der gewählten Kasse; {@code null} ohne Auswahl. */
+	String selectedId() {
+		Row selected = table.getSelectionModel().getSelectedItem();
+		return selected == null ? null : selected.id();
+	}
+
+	/**
+	 * Wählt die Kasse mit der Kennung, sonst keine. Der Controller gibt so die Auswahl über einen Neuaufbau ohne Event
+	 * hinweg weiter (fremde Änderungen wählen das Event erst ab), wie bei der Vorstellung.
+	 */
+	void select(String id) {
 		table.getSelectionModel().clearSelection();
 		int index = indexOf(id);
 		if (index >= 0) {
@@ -186,12 +195,7 @@ final class CashRegisterTable {
 	}
 
 	private int indexOf(String id) {
-		for (int i = 0; i < rows.size(); i++) {
-			if (rows.get(i).id().equals(id)) {
-				return i;
-			}
-		}
-		return -1;
+		return CashRegisterSection.indexOf(rows, id);
 	}
 
 	/** Ob die Kasse sich jetzt nicht ändern lässt ({@link CashRegisterSection#refusal}); dann steht die Meldung in der Fußzeile. */
