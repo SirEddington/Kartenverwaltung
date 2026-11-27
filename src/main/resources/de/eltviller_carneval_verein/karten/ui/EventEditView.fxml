@@ -59,6 +59,34 @@
 
     <Separator />
 
+<!-- Kassen des gewählten Events (KARV-144): Schalter, freie Kassen hinzufügen, Name und "gilt für" in der Tabelle -->
+    <VBox spacing="5.0">
+        <fx:define>
+            <ToggleGroup fx:id="cashModeGroup" />
+        </fx:define>
+        <HBox alignment="CENTER_LEFT" spacing="15.0">
+            <Label text="Kassen" style="-fx-font-weight: bold;" />
+            <RadioButton fx:id="rbCashPerPresentation" text="je Vorstellung eine Kasse" toggleGroup="$cashModeGroup" />
+            <RadioButton fx:id="rbCashShared" text="eine gemeinsame Kasse" toggleGroup="$cashModeGroup" />
+            <Region HBox.hgrow="ALWAYS" />
+            <Button fx:id="btnAddCashRegister" text="+ Kasse hinzufügen" styleClass="button-secondary" minWidth="-Infinity" />
+        </HBox>
+        <Label fx:id="lblCashHint" visible="false" managed="false" />
+        <StackPane style="-fx-border-color: #ccc; -fx-border-style: dashed; -fx-border-radius: 5;">
+            <TableView fx:id="cashTable">
+                <columns>
+                    <TableColumn fx:id="colCashName" prefWidth="200.0" text="Name" />
+                    <TableColumn fx:id="colCashScope" prefWidth="250.0" text="gilt für" />
+                </columns>
+                <columnResizePolicy>
+                    <TableView fx:constant="CONSTRAINED_RESIZE_POLICY" />
+                </columnResizePolicy>
+            </TableView>
+        </StackPane>
+    </VBox>
+
+    <Separator />
+
 <!-- Halle, Bestuhlung und Standardpreis der gewählten Vorstellung (Name, Datum, Zeit, Beschreibung stehen in der Tabelle) -->
     <Label fx:id="lblPresDetails" text="Vorstellung" />
     <GridPane fx:id="presDetails" hgap="8.0" vgap="10.0">
