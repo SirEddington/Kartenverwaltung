@@ -1,7 +1,7 @@
 # Kassen am Event anlegen und verwalten (KARV-144)
 
-Stand: Entscheidung vom 26.11.2026. Ein Spec ist eine Momentaufnahme und wird nach dem Merge nicht gepflegt; was
-dauerhaft gilt, steht in `docs/decisions.md` und der übrigen Dokumentation.
+Stand: Entscheidung vom 26.11.2026, vom Maintainer freigegeben am 27.11.2026. Ein Spec ist eine Momentaufnahme und
+wird nach dem Merge nicht gepflegt; was dauerhaft gilt, steht in `docs/decisions.md` und der übrigen Dokumentation.
 
 Das Spec deckt die Story KARV-144 mit ihren Sub-Tasks KARV-156 (Modell und Speicherung), KARV-157 (Übernahme des
 Bestands), KARV-158 (Oberfläche) und KARV-159 (Prüfungen) ab und entscheidet KARV-153 (Mischbetrieb mit v1.1).
@@ -949,3 +949,5 @@ gesperrte Kassen (Runde 4).
 - Ob sich der Abschnitt „Kassen" in JavaFX wie beschrieben bedienen lässt (Eingabe in der Zelle, Auswahl für
   „gilt für").
 - Verhalten von 1.0.x gegenüber Kassen; es ist nach `docs/decisions.md` ohnehin ausgeschlossen.
+
+**Freigabe:** vom Maintainer im Gespräch am 27.11.2026 erteilt (`.github/CONTRIBUTING.md`, „Freigabe").
