@@ -131,6 +131,21 @@ class ConflictListTest {
 	}
 
 	@Test
+	void cashRegisterGroupsHaveTheirTexts() {
+		ObjectNode empty = JsonNodeFactory.instance.objectNode();
+		ConflictNote note = new ConflictNote(Kind.FIELDS, "me", party("Kasse 1", null),
+				List.of(new FieldConflict("name", empty, empty), new FieldConflict("scope", empty, empty),
+						new FieldConflict("cash", empty, empty)),
+				null, null, nextId());
+		source.add(conflict(UnitKey.cashRegister("ev", "_frei"), "a", note));
+
+		Row row = list.rows().get(0);
+
+		assertEquals(List.of("Name", "gilt für", "Kasse"), row.fields().stream().map(ConflictList.FieldRow::label).toList());
+		assertEquals(Action.TAKE_MY_VALUE, row.action());
+	}
+
+	@Test
 	void counterpartNamesMachineAndOperator() {
 		source.add(conflict(seat("s1"), "a", note(Kind.DOUBLE_SALE, party("Kasse 1", "Anna"))));
 		source.add(conflict(seat("s2"), "b", note(Kind.DOUBLE_SALE, party("Kasse 2", null))));

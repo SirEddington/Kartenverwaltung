@@ -92,7 +92,7 @@ public final class ConflictList {
 			Map.entry("price", "Preis"), Map.entry("reservation", "Reservierung"), Map.entry("comment", "Kommentar"),
 			Map.entry("id", "Kennung"), Map.entry("hall", "Halle"), Map.entry("schedule", "Termin"),
 			Map.entry("cash", "Kasse"), Map.entry("name", "Name"), Map.entry("description", "Beschreibung"),
-			Map.entry("archived", "Archiviert"));
+			Map.entry("archived", "Archiviert"), Map.entry("scope", "gilt für"));
 
 	private final Supplier<List<OpenConflict>> source;
 	private final Function<UnitKey, String> labelOf;
