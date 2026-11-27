@@ -22,6 +22,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -115,6 +117,22 @@ class EventTemplatesTest {
 		assertEquals(2, copy.getPresentations().size());
 		assertEquals(2, event.getPresentations().size(), "Das Original bleibt unverändert");
 		assertSame(copy, copy.getPresentations().get(0).getParent());
+	}
+
+	@Test
+	void copiedEventStartsWithoutCashRegisters() {
+		Event event = new Event();
+		event.setName("Kampagne");
+		Presentation original = presentation(event);
+		original.setActualCashAmount(5000);
+		CashRegisters.selectShared(event, true);
+		event.findCashRegister(CashRegister.SHARED_ID).setActualCashAmount(5000);
+
+		Event copy = EventTemplates.copyEvent(event, List.of("Kampagne"), halls);
+
+		assertTrue(copy.getCashRegisters().isEmpty());
+		assertEquals(1, copy.getPresentations().size());
+		assertEquals(0, CashRegisters.effective(copy, copy.getPresentations().get(0)).actualCashAmount());
 	}
 
 	@Test

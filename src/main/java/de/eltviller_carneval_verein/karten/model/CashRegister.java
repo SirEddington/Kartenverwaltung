@@ -101,7 +101,7 @@ public class CashRegister {
 
 	@JsonSetter(nulls = Nulls.AS_EMPTY) // "presentationIds": null in einer Datei lädt als leere Liste
 	public void setPresentationIds(List<String> presentationIds) {
-		this.presentationIds = presentationIds;
+		this.presentationIds = presentationIds != null ? presentationIds : new ArrayList<>();
 	}
 
 	public int getActualCashAmount() {
