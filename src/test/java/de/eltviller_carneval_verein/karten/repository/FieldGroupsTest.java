@@ -106,6 +106,7 @@ class FieldGroupsTest {
 	void everyStoredEventHeadFieldBelongsToAGroup() {
 		ObjectNode stored = UnitMapper.normalize(fullEvent());
 		stored.remove("presentations");
+		stored.remove("cashRegisters");
 
 		Set<String> missing = new HashSet<>(names(stored));
 		missing.removeAll(grouped(FieldGroups.eventHead()));
@@ -118,6 +119,7 @@ class FieldGroupsTest {
 		presentation.remove("bookings");
 		ObjectNode head = UnitMapper.normalize(fullEvent());
 		head.remove("presentations");
+		head.remove("cashRegisters");
 
 		assertEquals(names(UnitMapper.normalize(fullBooking())), grouped(FieldGroups.booking()));
 		assertEquals(names(presentation), grouped(FieldGroups.presentation()));
