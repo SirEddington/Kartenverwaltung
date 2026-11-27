@@ -96,8 +96,10 @@ Geprüft am 26.11.2026 auf `release/1.2.0` (b155b57). Pfade ohne Verzeichnis lie
   333) und gruppiert alles außer Hallen nach Event (`groupOf`, Zeile 1187–1189). `store/VersionStore.java` zählt in
   `eventUnits` dagegen feste Ordner auf: Kopf, je Vorstellung sie selbst und ihre Buchungen (Zeile 288–297, Ordner
   `presentations` und `bookings`, Zeile 40–42). Darauf bauen Wiederherstellen
-  (`repository/StoreEventRepository.java` Zeile 283 und 415–421) und der Vollabgleich (`store/FullSyncRun.java`
-  Zeile 136–143: je Event ein Abschnitt für den Kopf, dann Abschnitte je Vorstellung).
+  (`repository/StoreEventRepository.java` Zeile 283 und 415–421) und der Neuaufbau des Index aus dem lokalen
+  Bestand (`store/SyncService.java` Zeile 2221, über `allUnits`). Der Vollabgleich bildet seine Abschnitte selbst
+  aus beiden Beständen (`store/FullSyncRun.java` Zeile 136–157, über `FullSync.childrenOfBoth` mit dem Ordner
+  `presentations`): je Event ein Abschnitt für den Kopf, dann Abschnitte je Vorstellung.
 - `repository/UnitMapper.java`: `decompose` (Zeile 123–159) bildet aus dem JSON des Events den Kopf (ohne
   `presentations`), je Vorstellung eine Einheit (ohne `bookings`) und je Buchung mit Daten eine Einheit; leere
   Buchungen werden nie geschrieben (Klassenbeschreibung, Zeile 44–47). `assembleEvents` (Zeile 673–765) setzt in
@@ -285,7 +287,8 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
 - **Eigene Daten** hat eine Vorstellungskasse, wenn ihr Ist-Betrag nicht 0 oder ihr Kommentar nicht leer ist, oder
   wenn ihr Name gesetzt ist und das Event ihre Vorstellung enthält. Die gemeinsame Kasse und freie Kassen haben immer
   eigene Daten.
-- **Gemeinsame Kasse gewählt** ist genau dann, wenn die Liste die Kasse `_event` enthält.
+- **Gemeinsame Kasse gewählt** ist, wenn die Liste die Kasse `_event` enthält. Die Oberfläche behandelt eine
+  gesperrte Einheit `_event`, die im Modell fehlt, ebenso (siehe „Gesperrte Kassen" in der Event-Verwaltung).
 - **Sichtbare Kassen** eines Events, in dieser Reihenfolge: die gemeinsame Kasse; je Vorstellung (in der Reihenfolge
   der Vorstellungen) ihre Kasse, wenn keine gemeinsame Kasse gewählt ist oder der wirksame Stand einen Ist-Betrag
   ungleich 0, einen Kommentar oder einen Namen hat; freie Kassen nach Name; verwaiste Vorstellungskassen mit
@@ -300,8 +303,8 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
 - **Zweiter Ist-Betrag:** Gibt es die Vorstellungskasse als Objekt und steht in den alten Feldern der Vorstellung
   trotzdem ein Ist-Betrag ungleich 0 oder ein Kommentar (ein Rechner mit v1.1 hat nach der ersten Speicherung der
   Kasse noch geschrieben, oder ein Speichervorgang brach nach der Kasse ab), gilt die Kasse. Die Prüfung `KAS-005`
-  und der Kassenabgleich nennen den zweiten Betrag, bis jemand dort Ist-Betrag oder Kommentar ändert; erst das leert
-  die alten Felder.
+  und der Kassenabgleich nennen den zweiten Betrag, bis jemand dort Ist-Betrag oder Kommentar ändert oder den
+  zweiten Betrag verwirft; erst das leert die alten Felder.
 
 ### Speicherung
 
@@ -309,8 +312,9 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
   `events/<eventId>/cashRegisters/<Kennung>`. `UnitKey` bekommt eine Komponente für den Ordnernamen der Kasse und
   eine Fabrik; zulässig ist eine Kennung nach dem bestehenden Muster, wahlweise mit führendem Unterstrich.
   `parent` ist der Event-Kopf. `VersionStore.eventUnits` zählt die Kassen eines Events mit auf; damit erfassen
-  Vollabgleich, Index-Neuaufbau und Wiederherstellen sie. Im Vollabgleich gehören sie in einen Abschnitt des Events
-  (`FullSyncRun`). `StoreCodec.FORMAT` und `INDEX_FORMAT` bleiben unverändert.
+  Index-Neuaufbau und Wiederherstellen sie. Der Vollabgleich bildet seine Abschnitte selbst: `FullSyncRun.begin`
+  bekommt je Event einen Abschnitt für die Kassen, gebildet wie die der Vorstellungen über `FullSync.childrenOfBoth`
+  mit dem Ordner `cashRegisters`. `StoreCodec.FORMAT` und `INDEX_FORMAT` bleiben unverändert.
 - **Zerlegen und Schreiben** (`UnitMapper.decompose`, `UnitMapper.changes`): Der Kopf enthält weder `presentations`
   noch `cashRegisters`. Jede Kasse der Liste ergibt eine Einheit, mit einer Ausnahme: Für eine Vorstellungskasse
   ohne eigene Daten wird keine Einheit **neu angelegt**. Ist ihre Einheit schon gespeichert, wird sie mit ihrem
@@ -325,11 +329,17 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
   Dasselbe gilt für die öffentlichen `StoreEventRepository.payloadOf` und `payloadsOf` (genutzt von
   `ui/ConflictActions`); beim Wiederherstellen ist der Maßstab der frisch gelesene Stand.
 - **Reihenfolge im Speichervorgang:** `SyncService.append` schreibt die Änderungen nacheinander, und nach einem
-  Fehler bleiben die schon geschriebenen liegen. Deshalb steht eine Kassen-Einheit, die angelegt oder geändert wird,
-  vor jeder Vorstellung desselben Vorgangs und vor dem Kopf, wenn der Kopf schon einen Stand hat. Bricht der Vorgang
-  nach der Kasse ab, bleiben nur Zustände, die sich selbst zeigen und heilen: ein zweiter Ist-Betrag in den alten
-  Feldern (`KAS-005`) oder ein Kopf, der das Merkmal beim nächsten Speichern bekommt. Ein Kopf ohne Stand (neues
-  Event) steht wie bisher zuerst.
+  Fehler bleiben die schon geschriebenen liegen. Deshalb gilt:
+  1. Löschungen, die `UnitMapper.changes` beim Wiederbeleben eines Kopfs voranstellt, bleiben vorn.
+  2. Der Kopf steht vor den Kassen, wenn er das Merkmal bekommt oder behält. Verliert er es, steht er nach den
+     Löschungen der Kassen.
+  3. Kassen-Einheiten, die angelegt oder geändert werden, stehen vor jeder Vorstellung.
+
+  Bricht der Vorgang ab, bleibt höchstens einer dieser Zustände: ein Kopf mit Merkmal ohne Kasse (die alten Felder
+  gelten weiter, „Kassen noch nicht abgeglichen" endet mit dem Vollabgleich); ein zweiter Ist-Betrag in den alten
+  Feldern (`KAS-005`); ein Kopf, der das Merkmal noch trägt, obwohl die letzte Kasse gelöscht ist (bekannte Grenze).
+  Außer bei einem Kopf, der sich nicht schreiben lässt (bekannte Grenzen), öffnet v1.1 damit nie ein Event, dessen
+  alte Felder geleert sind.
 - Die `switch`-Anweisungen über die Art in `EventMerge.apply` und `UnitMapper.comparable` übersetzen auch ohne den
   neuen Zweig; der Compiler meldet ihn dort nicht.
 - **Zusammensetzen** (`UnitMapper.assembleEvents`): ein weiterer Durchlauf für Kassen. Eine Kasse unter einem
@@ -380,9 +390,13 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
   gewöhnliche Zustand eines Rechners direkt nach dem Update von 1.1: Solange er 1.1 fuhr, hat er Listeneinträge zu
   Kassen übersprungen, und die Einheiten kommen erst mit dem ersten Vollabgleich. In diesem Zustand sind für das
   Event der Abschnitt „Kassen" der Event-Verwaltung und Ist-Betrag und Kommentar im Kassenabgleich nicht
-  bearbeitbar, mit dem Hinweis „Die Kassen dieses Events werden noch abgeglichen." Das Repository gibt den Zustand
-  je Event an. Er endet, sobald eine Kassen-Einheit eintrifft oder der erste Vollabgleich seit dem Start
-  abgeschlossen ist; im Einzelbetrieb gibt es ihn nie. Ein Kopf mit Merkmal ohne Kassen-Einheit gilt danach als
+  bearbeitbar, mit dem Hinweis „Die Kassen dieses Events werden noch abgeglichen." Ebenso lehnen das Löschen einer
+  Vorstellung des Events und das Wiederherstellen des Events mit diesem Hinweis ab; eine später eintreffende Kasse
+  stünde sonst ohne ihre Vorstellung da. Das Repository gibt den Zustand je Event an. Er endet, sobald eine
+  Kassen-Einheit des Events eintrifft oder der erste Vollabgleich seit dem Start abgeschlossen ist, der das Event
+  nicht übersprungen hat; im Einzelbetrieb gibt es ihn nie. Endet er, ohne dass eine Einheit eintrifft, meldet das
+  Repository das seinen Listenern wie eine fremde Änderung am Kopf des Events, damit offene Ansichten die Sperre
+  aufheben. Ein Kopf mit Merkmal ohne Kassen-Einheit gilt danach als
   Event ohne gespeicherte Kassen (etwa nach einem abgebrochenen ersten Speichern eines neuen Events); das Merkmal
   bleibt stehen.
 - **Vergleichen:** Für „lokal verändert" (`StoreEventRepository.localChanges`, `UnitMapper.sameAsModel`,
@@ -431,7 +445,9 @@ Die Regeln gelten damit ebenso, wenn ein gelöschtes Event wiederhergestellt wir
   das Wiederherstellen nie.
 - **Alte Felder:** Für jede Vorstellung des Zielstands, die heute lebt und lesbar ist, bekommen die alten Felder
   ihren heutigen Wert. Für eine Vorstellung, die das Wiederherstellen zurückbringt, werden sie geleert, wenn die
-  Einheit ihrer Kasse heute lebt; sonst behalten sie den Wert aus dem Zielstand.
+  Einheit ihrer Kasse heute lebt; sonst bekommen sie den Wert aus dem letzten nicht gelöschten Stand ihrer Einheit,
+  nicht den aus dem Zielstand. Der Zielstand kann eine Zählung zeigen, die in 1.2 vor dem Löschen schon
+  zurückgenommen war.
 - **Vorstellungen, die das Wiederherstellen entfernt** (heute lebend, im Zielstand nicht enthalten): Für jede gilt
   die Regel „Eine Vorstellung entfällt" am heutigen Stand. Hat ihre Kasse einen Ist-Betrag oder Kommentar, steht sie
   danach als verwaiste Kasse mit ihrem Vorgabenamen im Ziel-Event. Das sind die einzigen Fälle, in denen ein
@@ -490,6 +506,17 @@ Kassen     (•) je Vorstellung eine Kasse   ( ) eine gemeinsame Kasse      [+ K
 - Eine verwaiste Kasse zeigt unter „gilt für" „– (Vorstellung gelöscht)", wenn die Einheit ihrer Vorstellung
   gelöscht ist oder es sie nie gab, und „– (Vorstellung nicht verfügbar)", wenn die Vorstellung nur im Modell fehlt
   (gesperrt oder unlesbar). Das Repository gibt an, welcher Fall vorliegt.
+- **Gesperrte Kassen:** Das Repository nennt je Event die gesperrten Kassen-Einheiten (SYS-008, SYS-009), am Stand
+  des Versionsspeichers wie `requireNothingLockedUnder`. Geprüft wird vor jeder Änderung am Modell, wie bei
+  `LockedEntryGuard`: Gelangt eine Änderung an einer gesperrten Einheit ins Modell, scheitert danach jedes Speichern
+  des Events, auch im Kartenverkauf.
+  - Eine gesperrte Kasse mit lesbarem Stand steht als Zeile da, mit „(gesperrt)" hinter dem Namen. Eine ohne
+    lesbaren Stand steht als Zeile „Gesperrte Kasse" mit „–" unter „gilt für" und zählt nicht in die Gesamtbilanz.
+  - An einer gesperrten Kasse lassen sich Name und „gilt für" nicht ändern, und „Kasse löschen" fehlt.
+  - Ist die gemeinsame Kasse gesperrt, gilt sie als gewählt, auch wenn sie im Modell fehlt; der Schalter ist nicht
+    bedienbar, und der Kassenabgleich verhält sich wie bei gewählter gemeinsamer Kasse.
+  - Ist die Kasse einer Vorstellung gesperrt, lässt sich ihr Name nicht ändern; zu Ist-Betrag, Kommentar und
+    Löschen der Vorstellung siehe „Kassenabgleich".
 - **Name:** im Bearbeiten-Modus in der Zelle änderbar. Ein leerer Name setzt bei Vorstellungskasse und gemeinsamer
   Kasse den Vorgabenamen zurück (`name` = `null`).
 - **gilt für:** nur bei freien Kassen änderbar, zwischen „alle Vorstellungen" und einer Auswahl aus den
@@ -514,18 +541,23 @@ Kassen     (•) je Vorstellung eine Kasse   ( ) eine gemeinsame Kasse      [+ K
   Kasse zum Ändern und setzt den Wert dort.
 - Ist eine gemeinsame Kasse gewählt, sind Ist-Betrag und Kommentar auch bei gewählter Vorstellung gesperrt, und der
   Hinweis unter dem Feld lautet „Für dieses Event gilt eine gemeinsame Kasse. Der Kassensturz je Kasse folgt."
-  (vorläufig bis KARV-146).
+  (vorläufig bis KARV-146). Ist-Betrag und Differenz der Vorstellung zeigen dann „–" statt 0 und eines
+  Fehlbetrags; CSV und PDF lassen beide leer.
 - Ist die Kassen-Einheit der gewählten Vorstellung gesperrt (SYS-008 oder SYS-009), sind Ist-Betrag und Kommentar
   gesperrt, und der Hinweis nennt die Meldung der Sperre. Ohne diesen Schutz fiele die Anzeige auf die alten Felder
   zurück, und eine Eingabe ließe das Speichern des ganzen Events scheitern. Aus demselben Grund lehnt
   `LockedEntryGuard` das Löschen einer Vorstellung ab, deren Kassen-Einheit gesperrt ist.
 - Liegt ein zweiter Ist-Betrag vor (Regel im Modell), steht unter dem Feld „Zweiter Ist-Betrag aus einer älteren
-  Programmversion: <Betrag>", bei einem Kommentar mit diesem dahinter. Der Hinweis verschwindet mit der nächsten
+  Programmversion: <Betrag>", bei einem Kommentar mit diesem dahinter. Daneben steht im Bearbeiten-Modus
+  „Verwerfen"; das leert die alten Felder. Hinweis und Knopf erscheinen auch, wenn eine gemeinsame Kasse gilt und
+  das Feld gesperrt ist, damit sich `KAS-005` immer beheben lässt. Der Hinweis verschwindet auch mit der nächsten
   Änderung an Ist-Betrag oder Kommentar.
 - „Gesamtbilanz": Der Ist-Betrag ist die Summe über alle sichtbaren Kassen des Events, der Hinweis unter dem Feld
   lautet „Summe der Ist-Beträge aller Kassen des Events, hier nicht direkt bearbeitbar." Hat das Event keine
   Vorstellung, aber eine sichtbare Kasse, zeigt die Gesamtbilanz deren Summe mit einem Soll von 0, statt die
-  Ansicht zu leeren. CSV und PDF behalten ihren Aufbau.
+  Ansicht zu leeren. CSV und PDF behalten ihren Aufbau und nehmen Ist-Betrag und Kommentar aus dem wirksamen Stand;
+  heute lesen sie den Kommentar aus dem alten Feld (`CashReconciliationController` Zeile 311 und 362), das nach der
+  ersten Zählung in 1.2 leer ist.
 - Solange im Kassenabgleich eine Vorstellung in Bearbeitung ist, gilt auch die Einheit ihrer Kasse als in
   Bearbeitung: Ein fremder Stand für sie wird zurückgestellt wie einer für die Vorstellung, auch wenn es die Kasse
   noch nicht als Objekt gibt.
@@ -602,7 +634,18 @@ Bezeichnung der Kasse, dann Betrag, Minimum und Maximum.
 - Abgebrochener Speichervorgang (`FaultyFileLayer`): Fehler nach der Kassen-Einheit bei der ersten Zählung eines
   Bestands aus v1.1; nach dem Neuladen gilt die Kasse, und `KAS-005` nennt den Betrag der alten Felder.
 - „Kassen noch nicht abgeglichen": gemeldet bei Kopf mit Merkmal ohne Kassen-Einheit vor dem ersten Vollabgleich;
-  nicht im Einzelbetrieb; endet mit dem ersten abgeschlossenen Vollabgleich und mit dem Eintreffen einer Kasse.
+  nicht im Einzelbetrieb; endet mit dem ersten abgeschlossenen Vollabgleich (mit Meldung an die Listener) und mit
+  dem Eintreffen einer Kasse; Löschen einer Vorstellung und Wiederherstellen werden solange abgelehnt.
+- Reihenfolge: Bei der ersten Zählung eines Bestands aus v1.1 steht der Kopf vor der Kasse und die Kasse vor der
+  Vorstellung; beim Löschen der letzten Kasse steht der Kopf nach ihr. Abbruch nach jeder Stelle ergibt einen der
+  im Entwurf genannten Zustände.
+- Gesperrte Kassen in der Event-Verwaltung: Umbenennen, „gilt für" und Löschen werden vor der Änderung am Modell
+  abgelehnt; eine gesperrte gemeinsame Kasse gilt als gewählt; das Event bleibt speicherbar.
+- Wiederherstellen einer Vorstellung, deren Ist-Betrag in 1.2 auf 0 gesetzt und die danach gelöscht wurde: Die
+  alten Felder kommen mit 0 zurück, nicht mit dem Betrag des Zielstands.
+- `FormatSampleGenerator` (`src/test/.../store/`) erzeugt für das Formatmuster 1.2 auch Kassen: je eine der drei
+  Arten, eine Vorstellung mit Ist-Betrag nur in den alten Feldern und den Kopf mit `requires`. Sonst deckt das
+  Muster, das nach `docs/decisions.md`, „Release steps", damit entsteht, die neue Einheit nicht ab.
 - Oberfläche, soweit ohne Toolkit prüfbar: Zeilen und Texte des Abschnitts „Kassen", Regeln für Schalter und
   Löschen.
 
@@ -672,6 +715,8 @@ Bezeichnung der Kasse, dann Betrag, Minimum und Maximum.
 - Wiederherstellen auf einen Stand, in dem eine inzwischen angelegte und gezählte Vorstellung fehlt: Ihre Kasse
   steht danach mit Betrag und Namen in der Liste, mit „– (Vorstellung gelöscht)".
 - Ein Bestand mit zwei gleichnamigen Vorstellungen lässt sich in 1.2 speichern; `KAS-002` erscheint als Warnung.
+- Eine gesperrte Kasse lässt sich in der Event-Verwaltung weder umbenennen noch löschen, und das Event bleibt
+  speicherbar, auch im Kartenverkauf.
 - `KAS-001` bis `KAS-005` erscheinen in den beschriebenen Fällen; `PRS-005` erscheint nicht mehr.
 - `./mvnw test` ist grün; die unter „Tests" genannten Fälle sind vorhanden.
 - Die unter „Dokumentation und Patchnotes" genannten Stellen sind nachgezogen.
@@ -729,11 +774,29 @@ klein. Die Ausgangslage hielt vollständig. Danach geändert, **von keinem Prüf
   `cashRegisters`; „Setzen" ohne Löschungen; weitere bekannte Grenzen; `payloadOf`/`payloadsOf`,
   `PresentationAndTableValidatorTest`, Aufwand der Abfrage beim Speichern.
 
-**Ergebnis.** Nach drei Runden meldete jede Runde noch Großes; die Prüfung endet damit nach
-`.github/CONTRIBUTING.md`, „Spec-Prüfung", ohne eine Runde ohne kritischen oder großen Befund, und der Maintainer
-entscheidet. Kein Befund ist strittig: Alle kritischen und großen Befunde sind im Text behoben, keiner wurde
-abgelehnt oder herabgestuft. Offen ist allein, dass die Änderungen nach Runde 3 ungeprüft sind. Alle großen Befunde
-der Runden 2 und 3 lagen im selben Teil: Sperre für v1.1 über `requires` und Übergang der alten Felder.
+**Nach Runde 3.** Jede Runde meldete noch Großes; die Prüfung endete damit nach `.github/CONTRIBUTING.md`,
+„Spec-Prüfung", und der Maintainer entschied am 27.11.2026 für eine vierte Runde, damit die Änderungen nach Runde 3
+gelesen werden.
+
+**Runde 4, 27.11.2026** (neues Paar). Umsetzer: 0 kritisch, 1 groß, 4 klein. Gegenprüfer: 0 kritisch, 0 groß, 5
+klein; er hat die Änderungen nach Runde 3 am Code nachgeprüft und hält sie für tragfähig. Danach geändert, **von
+keinem Prüfer mehr gelesen**:
+
+- Groß (Umsetzer): In der Event-Verwaltung fehlte der Schutz für gesperrte Kassen; eine Umbenennung oder das
+  Abschalten einer gesperrten gemeinsamen Kasse hätte jedes Speichern des Events scheitern lassen, auch im
+  Kartenverkauf. Neu: Abschnitt „Gesperrte Kassen" in der Event-Verwaltung, geprüft vor der Änderung am Modell; eine
+  gesperrte gemeinsame Kasse gilt als gewählt.
+- Klein (beide), eingearbeitet: Reihenfolge im Speichervorgang neu (Kopf vor Kasse, Kasse vor Vorstellung; beim
+  Entfernen des Merkmals Kopf zuletzt), weil nach der Fassung aus Runde 3 ein Abbruch nach der Kasse v1.1 ein Event
+  mit altem Ist-Betrag öffnen ließ; „Kassen noch nicht abgeglichen" meldet sein Ende und sperrt auch Löschen einer
+  Vorstellung und Wiederherstellen; alte Felder einer zurückgeholten Vorstellung aus ihrem letzten lebenden Stand;
+  zweiter Ist-Betrag lässt sich verwerfen, auch bei gemeinsamer Kasse; Exporte aus dem wirksamen Stand, „–" bei
+  gemeinsamer Kasse; Ausgangslage zum Vollabgleich berichtigt; `FormatSampleGenerator`.
+
+**Ergebnis.** Kein Befund ist strittig: Alle kritischen und großen Befunde der vier Runden sind im Text behoben,
+keiner wurde abgelehnt oder herabgestuft. Offen ist, dass die Änderungen nach Runde 4 ungeprüft sind. Die großen
+Befunde der Runden 2 bis 4 lagen in zwei Teilen: Sperre für v1.1 mit dem Übergang der alten Felder (Runden 2 und 3)
+und gesperrte Kassen (Runde 4).
 
 **Nicht belegt:**
 
