@@ -43,12 +43,16 @@ final class FieldGroups {
 
 	/** Die Gruppe der Kasse mit Ist-Betrag und Kommentar; an ihr hängt die Ausnahme der {@link CashRegisterPolicy}. */
 	static final String CASH = "cash";
+	/** Das Feld des Ist-Betrags der Kasse (Gruppe {@link #CASH}). */
+	static final String CASH_AMOUNT = "actualCashAmount";
+	/** Das Feld des Kommentars der Kasse (Gruppe {@link #CASH}). */
+	static final String CASH_COMMENT = "cashDifferenceComment";
 
 	/** Ist-Betrag und Kommentar gehören zusammen wie bei der Vorstellung, ebenso die beiden Felder von "gilt für". */
 	private static final Map<String, List<String>> CASH_REGISTER = ordered(
 			group("name", "name"),
 			group("scope", "allPresentations", "presentationIds"),
-			group(CASH, "actualCashAmount", "cashDifferenceComment"),
+			group(CASH, CASH_AMOUNT, CASH_COMMENT),
 			group("id", "id"));
 
 	private FieldGroups() {

@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import de.eltviller_carneval_verein.karten.repository.UnitMapper.UnitPayload;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
@@ -92,10 +91,8 @@ class HeadRequiresTest {
 		Map<UnitKey, UnitSnapshot> baseline = states(live(HEAD, HEAD_V1, headPayload()),
 				live(FRIDAY, FRIDAY_V1, json("{\"id\":\"p1\"}")));
 		Change friday = new Change(FRIDAY, List.of(FRIDAY_V1), json("{\"id\":\"p1\",\"name\":\"Freitag\"}"), false);
-		List<UnitPayload> units = List.of(new UnitPayload(HEAD, headPayload()),
-				new UnitPayload(FRIDAY, friday.payload()));
 
-		List<Change> adjusted = HeadRequires.adjust("e1", List.of(friday), baseline, units,
+		List<Change> adjusted = HeadRequires.adjust("e1", List.of(friday), baseline, headPayload(),
 				states(live(CASH, CASH_V1, json("{\"id\":\"_kasse\"}"))));
 
 		assertEquals(List.of(HEAD, FRIDAY), units(adjusted));
@@ -110,9 +107,8 @@ class HeadRequiresTest {
 			Map<UnitKey, UnitSnapshot> baseline = states(
 					new UnitSnapshot(HEAD, HEAD_V1, status, false, headPayload(), false));
 			Change cash = new Change(CASH, List.of(), json("{\"id\":\"_kasse\"}"), false);
-			List<UnitPayload> units = List.of(new UnitPayload(HEAD, headPayload()), new UnitPayload(CASH, cash.payload()));
 
-			List<Change> adjusted = HeadRequires.adjust("e1", List.of(cash), baseline, units, Map.of());
+			List<Change> adjusted = HeadRequires.adjust("e1", List.of(cash), baseline, headPayload(), Map.of());
 
 			assertEquals(List.of(CASH), units(adjusted), status.name());
 		}
@@ -129,9 +125,8 @@ class HeadRequiresTest {
 		Change cleanup = UnitMapper.deletion(baseline.get(FRIDAY));
 		Change head = new Change(HEAD, List.of(HEAD_V1), headPayload(), false);
 		Change cash = new Change(CASH, List.of(CASH_V1), json("{\"id\":\"_kasse\",\"actualCashAmount\":500}"), false);
-		List<UnitPayload> units = List.of(new UnitPayload(HEAD, headPayload()), new UnitPayload(CASH, cash.payload()));
 
-		List<Change> adjusted = HeadRequires.adjust("e1", List.of(cleanup, head, cash), baseline, units,
+		List<Change> adjusted = HeadRequires.adjust("e1", List.of(cleanup, head, cash), baseline, headPayload(),
 				states(baseline.get(CASH)));
 
 		assertEquals(List.of(CASH, FRIDAY, HEAD), units(adjusted));
@@ -145,9 +140,8 @@ class HeadRequiresTest {
 		Map<UnitKey, UnitSnapshot> baseline = states(live(HEAD, HEAD_V1, stored),
 				live(CASH, CASH_V1, json("{\"id\":\"_kasse\"}")));
 		Change deletion = UnitMapper.deletion(baseline.get(CASH));
-		List<UnitPayload> units = List.of(new UnitPayload(HEAD, headPayload()));
 
-		List<Change> adjusted = HeadRequires.adjust("e1", List.of(deletion), baseline, units, states(baseline.get(CASH)));
+		List<Change> adjusted = HeadRequires.adjust("e1", List.of(deletion), baseline, headPayload(), states(baseline.get(CASH)));
 
 		assertEquals(List.of(CASH, HEAD), units(adjusted));
 		assertFalse(adjusted.get(1).payload().has("requires"));
@@ -160,10 +154,9 @@ class HeadRequiresTest {
 		Map<UnitKey, UnitSnapshot> baseline = states(live(HEAD, HEAD_V1, stored),
 				live(CASH, CASH_V1, json("{\"id\":\"_kasse\"}")));
 		Change deletion = UnitMapper.deletion(baseline.get(CASH));
-		List<UnitPayload> units = List.of(new UnitPayload(HEAD, headPayload()));
 		UnitSnapshot locked = new UnitSnapshot(OTHER_CASH, null, Status.LOCKED_DAMAGED, false, null, false);
 
-		List<Change> adjusted = HeadRequires.adjust("e1", List.of(deletion), baseline, units,
+		List<Change> adjusted = HeadRequires.adjust("e1", List.of(deletion), baseline, headPayload(),
 				states(baseline.get(CASH), locked));
 
 		assertEquals(List.of(CASH), units(adjusted));
@@ -177,8 +170,7 @@ class HeadRequiresTest {
 		ObjectNode renamed = headPayload().put("name", "Kappensitzung");
 		Change head = new Change(HEAD, List.of(HEAD_V1), renamed, false);
 
-		List<Change> adjusted = HeadRequires.adjust("e1", List.of(head), baseline,
-				List.of(new UnitPayload(HEAD, renamed)), Map.of());
+		List<Change> adjusted = HeadRequires.adjust("e1", List.of(head), baseline, renamed, Map.of());
 
 		assertEquals(List.of(HEAD), units(adjusted));
 		assertEquals(HeadRequires.with(renamed, true), adjusted.get(0).payload(), "das gespeicherte Merkmal bleibt");

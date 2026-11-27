@@ -98,19 +98,19 @@ final class CashRestore {
 		if (today.isLive()) {
 			Presentation now = UnitMapper.readUnit(today, Presentation.class);
 			if (now != null) {
-				copyOldFields(now, presentation);
+				CashRegisters.copyOldFields(now, presentation);
 			}
 			return;
 		}
 		UnitState cash = byUnit.get(UnitKey.cashRegister(target.getId(), presentation.getId()));
 		if (cash != null && !UnitMapper.isAbsent(UnitSnapshot.of(cash))) {
-			presentation.setActualCashAmount(0);
-			presentation.setCashDifferenceComment(null);
+			// die alten Felder leeren
+			CashRegisters.discardSecondAmount(presentation);
 			return;
 		}
 		Presentation last = lastLive(state);
 		if (last != null) {
-			copyOldFields(last, presentation);
+			CashRegisters.copyOldFields(last, presentation);
 		}
 	}
 
@@ -119,32 +119,21 @@ final class CashRestore {
 	 * der Kette auf. {@code null}, wenn er sich nicht lesen lässt; dann bleiben die alten Felder des Ziels.
 	 */
 	private static Presentation lastLive(UnitState state) {
-		List<Version> versions = new ArrayList<>(state.chain());
-		versions.addAll(state.pending());
-		for (int i = versions.size() - 1; i >= 0; i--) {
-			if (!versions.get(i).deleted()) {
-				return UnitMapper.readUnit(UnitSnapshot.of(state.unit(), versions.get(i)), Presentation.class);
-			}
-		}
-		return null;
-	}
-
-	private static void copyOldFields(Presentation from, Presentation to) {
-		to.setActualCashAmount(from.getActualCashAmount());
-		to.setCashDifferenceComment(from.getCashDifferenceComment());
+		Version last = state.lastLive();
+		return last == null ? null : UnitMapper.readUnit(UnitSnapshot.of(state.unit(), last), Presentation.class);
 	}
 
 	/**
-	 * Ob die Kassen-Einheit heute lebt, sich aber nicht schreiben lässt: gesperrt ({@link UnitMapper#lockOf}), wartend
-	 * oder unlesbar. Das Wiederherstellen schreibt eine solche Einheit nicht.
+	 * Ob die Kassen-Einheit heute lebt, sich aber nicht schreiben lässt: gesperrt oder wartend
+	 * ({@link UnitMapper#blockedStatus}) oder unlesbar. Das Wiederherstellen schreibt eine solche Einheit nicht.
 	 */
 	private static boolean blocked(UnitState cash) {
 		if (cash == null) {
 			return false;
 		}
 		UnitSnapshot snapshot = UnitSnapshot.of(cash);
-		return !UnitMapper.isAbsent(snapshot) && (UnitMapper.lockOf(snapshot) != null
-				|| snapshot.status() == UnitState.Status.WAITING || !UnitMapper.isReadable(snapshot));
+		return !UnitMapper.isAbsent(snapshot)
+				&& (UnitMapper.blockedStatus(snapshot) != null || !UnitMapper.isReadable(snapshot));
 	}
 
 	/**
@@ -164,11 +153,11 @@ final class CashRestore {
 	}
 
 	private static int amountAt(Event then, String id) {
-		CashRegister register = then.findCashRegister(id);
-		if (register != null) {
-			return register.getActualCashAmount();
-		}
 		Presentation presentation = then.findPresentation(id);
-		return presentation != null ? presentation.getActualCashAmount() : 0;
+		if (presentation != null) {
+			return CashRegisters.effective(then, presentation).actualCashAmount();
+		}
+		CashRegister register = then.findCashRegister(id);
+		return register != null ? register.getActualCashAmount() : 0;
 	}
 }

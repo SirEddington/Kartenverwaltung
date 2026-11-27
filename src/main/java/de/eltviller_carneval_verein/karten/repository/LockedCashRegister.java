@@ -28,4 +28,17 @@ public record LockedCashRegister(String id, UnitState.Status status, boolean rea
 	public String message(String label) {
 		return status == UnitState.Status.WAITING ? MessageTemplate.format(WAITING_TEXT, label) : StoreMessages.locked(label, status);
 	}
+
+	/**
+	 * Warum sich die Vorstellung wegen ihrer Kasse nicht löschen lässt: {@link StoreMessages#lockedBelow} oder, wenn die
+	 * Kasse wartet, dass sie noch auf eine Datei wartet ({@link StoreEventRepository#requireCashRegisterWritable}).
+	 *
+	 * @param name wie die Meldung die Vorstellung nennt
+	 */
+	public String deletionMessage(String name) {
+		return status == UnitState.Status.WAITING
+				? "\"" + name + "\": Die Kasse wartet noch auf eine Datei aus dem gemeinsamen Ordner. Löschen ist erst "
+						+ "möglich, wenn sie angekommen ist."
+				: StoreMessages.lockedBelow(name, status);
+	}
 }

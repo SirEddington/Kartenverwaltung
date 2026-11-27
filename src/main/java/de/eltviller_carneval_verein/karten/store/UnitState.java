@@ -76,6 +76,24 @@ public record UnitState(UnitKey unit, Status status, List<Version> chain, List<V
 		return current != null && current.newerContent();
 	}
 
+	/**
+	 * Die letzte nicht gelöschte Version aus Kette und ausstehenden Versionen (diese bauen auf dem Ende der Kette auf),
+	 * oder {@code null}, wenn es keine gibt.
+	 */
+	public Version lastLive() {
+		for (int i = pending.size() - 1; i >= 0; i--) {
+			if (!pending.get(i).deleted()) {
+				return pending.get(i);
+			}
+		}
+		for (int i = chain.size() - 1; i >= 0; i--) {
+			if (!chain.get(i).deleted()) {
+				return chain.get(i);
+			}
+		}
+		return null;
+	}
+
 	/** Ob der aktuelle Stand vorläufig ist, also eigene Versionen noch auf ihren Anspruch warten. */
 	public boolean provisional() {
 		return !pending.isEmpty();

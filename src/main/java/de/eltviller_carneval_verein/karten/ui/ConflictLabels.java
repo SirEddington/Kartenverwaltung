@@ -115,7 +115,7 @@ public final class ConflictLabels {
 			return former;
 		}
 		Event owner = event != null ? event : new Event(unit.eventId());
-		return CashRegisters.displayName(owner, new CashRegister(unit.cashRegisterId()));
+		return CashRegisters.displayName(owner, unit.cashRegisterId());
 	}
 
 	/**

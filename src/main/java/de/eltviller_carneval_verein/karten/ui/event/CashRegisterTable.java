@@ -7,7 +7,6 @@ import java.util.function.BooleanSupplier;
 
 import de.eltviller_carneval_verein.karten.model.CashRegister;
 import de.eltviller_carneval_verein.karten.model.CashRegisters;
-import de.eltviller_carneval_verein.karten.model.CashRegisters.CashState;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.LockedCashRegister;
@@ -267,7 +266,7 @@ final class CashRegisterTable {
 			return;
 		}
 		String name = CashRegisterSection.displayName(event, row.id());
-		if (!new CashState(register.getActualCashAmount(), register.getCashDifferenceComment()).isEmpty()) {
+		if (CashRegisters.hasCash(register)) {
 			LockedEntryGuard.showError(CashRegisterSection.deleteRefused(name));
 			return;
 		}

@@ -178,16 +178,6 @@ public class Presentation {
 		this.actualCashAmount = actualCashAmount;
 	}
 
-	@JsonIgnore
-	public double getActualCashAmountDouble() {
-		return actualCashAmount / 100.0;
-	}
-
-	@JsonIgnore
-	public void setActualCashAmountDouble(double actualCashAmount) {
-		this.actualCashAmount = (int) Math.round(actualCashAmount * 100);
-	}
-
 	public String getCashDifferenceComment() {
 		return cashDifferenceComment;
 	}

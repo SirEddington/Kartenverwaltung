@@ -865,9 +865,10 @@ final class EventMerge {
 	}
 
 	/**
-	 * Was das Einarbeiten einer Einheit am Modell ändern kann: Kopf, Liste der Vorstellungen, Liste der Kassen samt den
-	 * Feldern jeder Kasse und die betroffene Vorstellung samt Buchungsliste und den Feldern der Buchungen, die es ändern
-	 * kann (bei einer Vorstellung alle, die der Abgleich anfasst, bei einer Buchung die auf ihrem Platz). Scheitert es
+	 * Was das Einarbeiten einer Einheit am Modell ändern kann: Kopf, Liste der Vorstellungen, bei Kopf und Kasse die Liste
+	 * der Kassen samt den Feldern jeder Kasse, sonst die betroffene Vorstellung samt Buchungsliste und den Feldern der
+	 * Buchungen, die es ändern kann (bei einer Vorstellung alle, die der Abgleich anfasst, bei einer Buchung die auf ihrem
+	 * Platz). Scheitert es
 	 * mittendrin, stellt {@link #restore} das wieder her: Ein halb übernommener fremder Stand gälte sonst als Änderung des
 	 * Nutzers, und das nächste Speichern schriebe ihn.
 	 */
@@ -890,14 +891,17 @@ final class EventMerge {
 			head = new Event(event.getId());
 			head.copyFrom(event);
 			presentations = event.getPresentations() == null ? null : new ArrayList<>(event.getPresentations());
-			cashRegisters = new ArrayList<>(event.getCashRegisters());
-			for (CashRegister register : cashRegisters) {
-				CashRegister fields = new CashRegister(register.getId());
-				fields.copyFrom(register);
-				cashStates.put(register, fields);
+			boolean atEvent = unit.type() == UnitType.EVENT || unit.type() == UnitType.CASH_REGISTER;
+			// nur Kopf und Kasse fassen die Kassen an; Vorstellung und Buchung lassen sie stehen
+			cashRegisters = atEvent ? new ArrayList<>(event.getCashRegisters()) : null;
+			if (atEvent) {
+				for (CashRegister register : cashRegisters) {
+					CashRegister fields = new CashRegister(register.getId());
+					fields.copyFrom(register);
+					cashStates.put(register, fields);
+				}
 			}
-			presentation = unit.type() == UnitType.EVENT || unit.type() == UnitType.CASH_REGISTER ? null
-					: presentation(event, unit.presentationId());
+			presentation = atEvent ? null : presentation(event, unit.presentationId());
 			if (presentation == null) {
 				fields = null;
 				planMissing = false;
@@ -938,9 +942,11 @@ final class EventMerge {
 			} else {
 				event.setPresentations(presentations == null ? null : new ArrayList<>(presentations));
 			}
-			event.getCashRegisters().clear();
-			event.getCashRegisters().addAll(cashRegisters);
-			cashStates.forEach(CashRegister::copyFrom);
+			if (cashRegisters != null) {
+				event.getCashRegisters().clear();
+				event.getCashRegisters().addAll(cashRegisters);
+				cashStates.forEach(CashRegister::copyFrom);
+			}
 			if (presentation == null) {
 				return;
 			}

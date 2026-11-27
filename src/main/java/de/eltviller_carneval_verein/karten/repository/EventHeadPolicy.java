@@ -24,7 +24,7 @@ public final class EventHeadPolicy implements ConflictPolicy {
 		// Es macht das Ergebnis inhaltlich zu neu, und die Auflösung wartet (ConflictResolver), statt es zu verlieren.
 		for (Version version : new Version[] { input.base(), input.mine(), input.theirs() }) {
 			if (version != null && version.payload() != null && Requires.satisfied(version.payload().get(Requires.KEY))) {
-				version.payload().remove(Requires.KEY);
+				HeadRequires.withoutRequires(version.payload());
 			}
 		}
 		Resolution resolution = PolicyRules.mergeFields(input, FieldGroups.eventHead());

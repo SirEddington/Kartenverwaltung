@@ -30,7 +30,6 @@ import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
-import de.eltviller_carneval_verein.karten.model.Requires;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
 import de.eltviller_carneval_verein.karten.store.ContentGate;
@@ -61,6 +60,9 @@ final class UnitMapper {
 	static final String PRESENTATIONS = "presentations";
 	static final String CASH_REGISTERS = "cashRegisters";
 	static final String BOOKINGS = "bookings";
+
+	/** Die Felder des Events, die nicht im Kopf stehen: Vorstellungen und Kassen sind eigene Einheiten. */
+	private static final List<String> NOT_IN_HEAD = List.of(PRESENTATIONS, CASH_REGISTERS);
 
 	/** Vorstellungen: Datum, Uhrzeit (je {@code null} zuletzt), Name ohne Groß-/Kleinschreibung ({@code null} zuletzt), ID. */
 	static final Comparator<Presentation> PRESENTATION_ORDER = Comparator
@@ -326,7 +328,7 @@ final class UnitMapper {
 		for (UnitPayload part : units) {
 			if (part.unit().type() == UnitType.EVENT) {
 				String eventId = part.unit().eventId();
-				changes = HeadRequires.adjust(eventId, changes, baseline, units, cashRegisterStates.apply(eventId));
+				changes = HeadRequires.adjust(eventId, changes, baseline, part.payload(), cashRegisterStates.apply(eventId));
 				break;
 			}
 		}
@@ -650,11 +652,22 @@ final class UnitMapper {
 	 * @throws LockedUnitException wenn die Einheit gesperrt ist oder noch auf eine Datei wartet
 	 */
 	static void requireWritable(UnitSnapshot known) {
-		Status lock = lockOf(known);
-		if (lock != null) {
-			throw new LockedUnitException(lockMessage(known.unit(), lock));
+		Status blocked = blockedStatus(known);
+		if (blocked != null) {
+			requireWritable(known.unit(), blocked);
 		}
-		requireWritable(known.unit(), known.status());
+	}
+
+	/**
+	 * Warum sich die Einheit nicht ändern lässt: ihre Sperre ({@link #lockOf}), sonst {@code WAITING}, wenn sie noch auf
+	 * eine Datei wartet; {@code null}, wenn nichts dagegen spricht (die Regel von {@link #requireWritable(UnitSnapshot)}).
+	 */
+	static Status blockedStatus(UnitSnapshot state) {
+		Status lock = lockOf(state);
+		if (lock == null && state.status() == Status.WAITING) {
+			lock = Status.WAITING;
+		}
+		return lock;
 	}
 
 	/** Wie {@link #requireWritable(UnitSnapshot)}, für eine Einheit, von der nur der Zustand der Kette zählt. */
@@ -1033,7 +1046,7 @@ final class UnitMapper {
 		ObjectNode node = normalize(value);
 		switch (snapshot.unit().type()) {
 		// requires leitet das Speichern ab; allein macht es den Kopf nicht zum veränderten
-		case EVENT -> node.remove(List.of(PRESENTATIONS, CASH_REGISTERS, Requires.KEY));
+		case EVENT -> HeadRequires.withoutRequires(node).remove(NOT_IN_HEAD);
 		case PRESENTATION -> node.remove(BOOKINGS);
 		case BOOKING, HALL, CASH_REGISTER -> {
 		}

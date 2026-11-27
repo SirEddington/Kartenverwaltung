@@ -103,7 +103,7 @@ public final class CashRegisterValidator {
 	}
 
 	private void addSecondAmount(Presentation presentation, CashState old) {
-		String label = EntityLabels.cashRegister(CashRegisters.displayName(event, event.findCashRegister(presentation.getId())));
+		String label = EntityLabels.cashRegister(CashRegisters.displayName(event, presentation.getId()));
 		result.add(CashRegisterIssue.SECOND_AMOUNT.toIssue(label, MoneyFormat.formatCents(old.actualCashAmount())));
 	}
 }

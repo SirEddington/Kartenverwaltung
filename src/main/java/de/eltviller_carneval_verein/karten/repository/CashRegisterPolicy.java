@@ -1,9 +1,7 @@
 package de.eltviller_carneval_verein.karten.repository;
 
 import java.util.List;
-import java.util.Objects;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.store.ConflictInput;
@@ -23,9 +21,6 @@ import de.eltviller_carneval_verein.karten.store.Version;
  * noch Repository.
  */
 public final class CashRegisterPolicy implements ConflictPolicy {
-
-	private static final String AMOUNT = "actualCashAmount";
-	private static final String COMMENT = "cashDifferenceComment";
 
 	@Override
 	public Resolution resolve(ConflictInput input) {
@@ -59,16 +54,9 @@ public final class CashRegisterPolicy implements ConflictPolicy {
 	 */
 	private static boolean cashChanged(ObjectNode base, ObjectNode side) {
 		if (base == null) {
-			String comment = side.path(COMMENT).textValue();
-			return side.path(AMOUNT).asLong(0) != 0 || (comment != null && !comment.isBlank());
+			String comment = side.path(FieldGroups.CASH_COMMENT).textValue();
+			return side.path(FieldGroups.CASH_AMOUNT).asLong(0) != 0 || (comment != null && !comment.isBlank());
 		}
-		return FieldGroups.cashRegister().get(FieldGroups.CASH).stream()
-				.anyMatch(field -> !Objects.equals(valueOf(base, field), valueOf(side, field)));
-	}
-
-	/** Der Wert des Feldes; fehlt es oder ist es {@code null}, {@code null}. */
-	private static JsonNode valueOf(ObjectNode node, String field) {
-		JsonNode value = node.get(field);
-		return value == null || value.isNull() ? null : value;
+		return !FieldMerge.same(base, side, FieldGroups.cashRegister().get(FieldGroups.CASH));
 	}
 }

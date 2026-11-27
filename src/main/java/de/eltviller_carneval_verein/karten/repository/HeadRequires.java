@@ -6,15 +6,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Requires;
-import de.eltviller_carneval_verein.karten.repository.UnitMapper.UnitPayload;
 import de.eltviller_carneval_verein.karten.store.Change;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitSnapshot;
-import de.eltviller_carneval_verein.karten.store.UnitState.Status;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 
 /**
@@ -42,27 +39,21 @@ final class HeadRequires {
 
 	/** Ob {@code requires} im Inhalt des Kopfs das Merkmal enthält; fehlend, {@code null} und {@code []} heißen nein. */
 	static boolean carries(ObjectNode headPayload) {
-		JsonNode value = headPayload == null ? null : headPayload.get(Requires.KEY);
-		if (value == null || !value.isArray()) {
-			return false;
-		}
-		for (JsonNode feature : value) {
-			if (Requires.CASH_REGISTERS.equals(feature.textValue())) {
-				return true;
-			}
-		}
-		return false;
+		return headPayload != null && Requires.contains(headPayload.get(Requires.KEY), Requires.CASH_REGISTERS);
 	}
 
 	/** Eine Kopie des Inhalts mit {@code "requires": ["cashRegisters"]} bzw. ohne das Feld. */
 	static ObjectNode with(ObjectNode headPayload, boolean required) {
-		ObjectNode copy = headPayload.deepCopy();
-		if (required) {
-			copy.putArray(Requires.KEY).add(Requires.CASH_REGISTERS);
-		} else {
-			copy.remove(Requires.KEY);
-		}
-		return copy;
+		return Requires.with(headPayload, Requires.CASH_REGISTERS, required);
+	}
+
+	/**
+	 * Der Inhalt des Kopfs ohne {@code requires}: entfernt das Feld an Ort und Stelle und gibt denselben Inhalt zurück (für
+	 * Vergleiche und das Zusammenführen, in denen das Merkmal nicht zählt).
+	 */
+	static ObjectNode withoutRequires(ObjectNode headPayload) {
+		headPayload.remove(Requires.KEY);
+		return headPayload;
 	}
 
 	/**
@@ -79,21 +70,15 @@ final class HeadRequires {
 	 * @param changes          die Änderungen, wie {@link UnitMapper#changes} sie bildet; der Kopf steht darin, wenn er
 	 *                         anders ist als sein Stand ({@link UnitMapper#sameAsModel}, ohne {@code requires})
 	 * @param baseline         der Vergleichsstand des Events
-	 * @param units            die Einheiten des Events im Modell, mit dem Kopf (ohne {@code requires})
+	 * @param model            der Inhalt des Kopfs im Modell (ohne {@code requires}), wie {@link UnitMapper#changes} ihn
+	 *                         unter den Einheiten findet
 	 * @param storeEventStates die Stände der Kassen-Einheiten des Events im Versionsspeicher; andere Einheiten darin zählen
 	 *                         nicht
-	 * @return die Änderungen in der neuen Reihenfolge; ohne Kopf in {@code units} oder mit einem unbekannten Merkmal an
-	 *         ihm unverändert
+	 * @return die Änderungen in der neuen Reihenfolge; ohne Kopf oder mit einem unbekannten Merkmal an ihm unverändert
 	 */
 	static List<Change> adjust(String eventId, List<Change> changes, Map<UnitKey, UnitSnapshot> baseline,
-			List<UnitPayload> units, Map<UnitKey, UnitSnapshot> storeEventStates) {
+			ObjectNode model, Map<UnitKey, UnitSnapshot> storeEventStates) {
 		UnitKey head = UnitKey.event(eventId);
-		ObjectNode model = null;
-		for (UnitPayload part : units) {
-			if (part.unit().equals(head)) {
-				model = part.payload();
-			}
-		}
 		// ein unbekanntes Merkmal im Modell bliebe sonst nicht stehen; die Prüfung des eigenen Inhalts lehnt es danach ab
 		if (model == null || !Requires.satisfied(model.get(Requires.KEY))) {
 			return changes;
@@ -121,19 +106,12 @@ final class HeadRequires {
 		if (headChange != null) {
 			headChange = new Change(head, headChange.parents(), payload, false, headChange.note(), headChange.seen(),
 					headChange.marks());
-		} else if (stored != required && writable(known)) {
-			// sonst gleich (sameAsModel), nur das Merkmal weicht ab: mitschreiben auf der bekannten Version
+		} else if (stored != required && UnitMapper.blockedStatus(known) == null) {
+			// sonst gleich (sameAsModel), nur das Merkmal weicht ab: mitschreiben auf der bekannten Version, wenn der Kopf
+			// weder gesperrt ist noch wartet (wie UnitMapper.requireWritable)
 			headChange = new Change(head, List.of(known.version()), payload, false);
 		}
 		return ordered(changes, headChange, revived, stored && !required, baseline);
-	}
-
-	/**
-	 * Ob sich der Kopf mitschreiben lässt: nicht gesperrt und nicht wartend, wie {@link UnitMapper#requireWritable}
-	 * prüft. Nur für einen lebenden Kopf gefragt.
-	 */
-	private static boolean writable(UnitSnapshot known) {
-		return UnitMapper.lockOf(known) == null && known.status() != Status.WAITING;
 	}
 
 	/** Die Reihenfolge von {@link #adjust}. */

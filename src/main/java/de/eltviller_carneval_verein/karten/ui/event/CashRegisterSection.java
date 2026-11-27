@@ -42,8 +42,6 @@ final class CashRegisterSection {
 	static final String PRESENTATION_UNAVAILABLE = "– (Vorstellung nicht verfügbar)";
 
 	private static final String LOCKED_SUFFIX = " (gesperrt)";
-	private static final String LOCKED_SHARED = "Gemeinsame Kasse" + LOCKED_SUFFIX;
-	private static final String LOCKED_ORPHAN = "Kasse ohne Vorstellung" + LOCKED_SUFFIX;
 	private static final String LOCKED_FREE = "Gesperrte Kasse";
 
 	/**
@@ -136,16 +134,17 @@ final class CashRegisterSection {
 
 	/** Die Ersatzzeile einer gesperrten Kasse ohne lesbaren Stand; ihr Inhalt ist unbekannt, sie lässt sich nicht ändern. */
 	private static Row replacementRow(Event event, String id, BiPredicate<String, String> presentationUnavailable) {
-		return switch (CashRegister.kindOf(id)) {
-		case SHARED -> new Row(id, LOCKED_SHARED, ALL_PRESENTATIONS, false, false, false);
-		case FREE -> new Row(id, LOCKED_FREE, NO_SCOPE, false, false, false);
+		CashRegister.Kind kind = CashRegister.kindOf(id);
+		String name = kind == CashRegister.Kind.FREE ? LOCKED_FREE : CashRegisters.defaultName(event, id) + LOCKED_SUFFIX;
+		String scope = switch (kind) {
+		case SHARED -> ALL_PRESENTATIONS;
+		case FREE -> NO_SCOPE;
 		case PRESENTATION -> {
 			Presentation presentation = event.findPresentation(id);
-			yield presentation != null
-					? new Row(id, "Kasse " + presentationName(presentation) + LOCKED_SUFFIX, presentationName(presentation), false, false, false)
-					: new Row(id, LOCKED_ORPHAN, orphanScope(presentationUnavailable.test(event.getId(), id)), false, false, false);
+			yield presentation != null ? presentationName(presentation) : orphanScope(presentationUnavailable.test(event.getId(), id));
 		}
 		};
+		return new Row(id, name, scope, false, false, false);
 	}
 
 	/**
@@ -188,7 +187,7 @@ final class CashRegisterSection {
 
 	/** Ob der Schalter „eine gemeinsame Kasse" gewählt steht: die Kasse im Modell oder gesperrt. */
 	static boolean sharedSelected(Event event, Map<String, LockedCashRegister> locked) {
-		return CashRegisters.sharedSelected(event) || locked.containsKey(CashRegister.SHARED_ID);
+		return CashRegisters.sharedSelected(event, locked.containsKey(CashRegister.SHARED_ID));
 	}
 
 	/** Ob der Schalter bedienbar ist: im Bearbeiten-Modus, nicht „noch nicht abgeglichen", gemeinsame Kasse nicht gesperrt. */
@@ -275,8 +274,7 @@ final class CashRegisterSection {
 
 	/** Der Name der Kasse ({@link CashRegisters#displayName}); eine gedachte Kasse heißt wie ein Objekt ohne eigenen Namen. */
 	static String displayName(Event event, String id) {
-		CashRegister register = event.findCashRegister(id);
-		return CashRegisters.displayName(event, register != null ? register : new CashRegister(id));
+		return CashRegisters.displayName(event, id);
 	}
 
 	/**

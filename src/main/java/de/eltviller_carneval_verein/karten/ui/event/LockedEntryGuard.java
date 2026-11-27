@@ -1,6 +1,7 @@
 package de.eltviller_carneval_verein.karten.ui.event;
 
 import java.util.Objects;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -35,17 +36,8 @@ final class LockedEntryGuard {
 	 * @param show zeigt die Meldung
 	 */
 	static boolean rejects(Presentation presentation, StoreEventRepository repository, Consumer<String> show) {
-		if (presentation.getParent() == null) {
-			return false;
-		}
-		try {
-			repository.requireNothingLockedUnder(UnitKey.presentation(presentation.getParent().getId(), presentation.getId()),
-					EntityLabels.nameOrPlaceholder(presentation.getName()));
-			return false;
-		} catch (LockedUnitException e) {
-			show.accept(e.getMessage());
-			return true;
-		}
+		return rejected(presentation, show, (eventId, label) -> repository
+				.requireNothingLockedUnder(UnitKey.presentation(eventId, presentation.getId()), label));
 	}
 
 	/** Wie {@link #rejectsHallChange(Presentation, String, StoreEventRepository, Consumer)} mit dem Repository und der Fußzeile der App. */
@@ -86,12 +78,22 @@ final class LockedEntryGuard {
 	/** Ob das Löschen an der Kasse der Vorstellung scheitert; dann ist die Meldung schon gezeigt. Den Hallenwechsel betrifft das nicht. */
 	private static boolean rejectsCashRegister(Presentation presentation, StoreEventRepository repository,
 			Consumer<String> show) {
+		return rejected(presentation, show,
+				(eventId, label) -> repository.requireCashRegisterWritable(eventId, presentation.getId(), label));
+	}
+
+	/**
+	 * Ob die Prüfung die Vorstellung ablehnt; dann ist ihre Meldung schon gezeigt. Eine Vorstellung ohne Event war nie
+	 * gespeichert und wird nicht geprüft.
+	 *
+	 * @param check bekommt die Kennung des Events und den Namen der Vorstellung und lehnt mit {@link LockedUnitException} ab
+	 */
+	private static boolean rejected(Presentation presentation, Consumer<String> show, BiConsumer<String, String> check) {
 		if (presentation.getParent() == null) {
 			return false;
 		}
 		try {
-			repository.requireCashRegisterWritable(presentation.getParent().getId(), presentation.getId(),
-					EntityLabels.nameOrPlaceholder(presentation.getName()));
+			check.accept(presentation.getParent().getId(), EntityLabels.nameOrPlaceholder(presentation.getName()));
 			return false;
 		} catch (LockedUnitException e) {
 			show.accept(e.getMessage());

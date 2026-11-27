@@ -71,10 +71,10 @@ final class CashFigures {
 		Figures unknown = new Figures(null, null, false, null, second, discardable);
 		LockedCashRegister lock = locked.get(presentation.getId());
 		if (lock != null) {
-			String hint = lock.message(EntityLabels.cashRegister(displayName(event, presentation)));
+			String hint = lock.message(EntityLabels.cashRegister(CashRegisters.displayName(event, presentation.getId())));
 			return withHint(lock.readable() ? shown : unknown, hint);
 		}
-		if (sharedSelected(event, locked)) {
+		if (CashRegisters.sharedSelected(event, locked.containsKey(CashRegister.SHARED_ID))) {
 			// Eine vorher gezählte Vorstellungskasse zeigt ihren Stand, gesperrt
 			return withHint(state.isEmpty() ? unknown : shown, SHARED_HINT);
 		}
@@ -96,19 +96,6 @@ final class CashFigures {
 			}
 		}
 		return sum;
-	}
-
-	/**
-	 * Wie in der Event-Verwaltung ({@code CashRegisterSection.sharedSelected}): Die gemeinsame Kasse gilt als gewählt, wenn
-	 * sie im Modell steht oder gesperrt ist.
-	 */
-	private static boolean sharedSelected(Event event, Map<String, LockedCashRegister> locked) {
-		return CashRegisters.sharedSelected(event) || locked.containsKey(CashRegister.SHARED_ID);
-	}
-
-	private static String displayName(Event event, Presentation presentation) {
-		CashRegister register = event.findCashRegister(presentation.getId());
-		return CashRegisters.displayName(event, register != null ? register : new CashRegister(presentation.getId()));
 	}
 
 	/** „Zweiter Ist-Betrag aus einer älteren Programmversion: <Betrag>", mit Kommentar dahinter; {@code null}, wenn keiner. */

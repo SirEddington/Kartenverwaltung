@@ -14,10 +14,10 @@ import java.util.Optional;
 public final class CashRegisters {
 
 	/**
-	 * Der Platzhalter für einen fehlenden Namen; derselbe Text wie {@code validation.EntityLabels.NAME_PLACEHOLDER}
-	 * ({@code model} darf nicht von {@code validation} abhängen, deshalb steht er hier bewusst ein zweites Mal).
+	 * Der Platzhalter für einen fehlenden Namen in Anzeigen; {@code validation.EntityLabels.NAME_PLACEHOLDER} verweist
+	 * hierher ({@code model} darf nicht von {@code validation} abhängen).
 	 */
-	private static final String NAME_PLACEHOLDER = "(ohne Name)";
+	public static final String NAME_PLACEHOLDER = "(ohne Name)";
 	private static final String NEW_FREE_NAME = "Neue Kasse";
 	private static final String SHARED_NAME = "Gemeinsame Kasse";
 	private static final String ORPHAN_NAME = "Kasse ohne Vorstellung";
@@ -49,6 +49,11 @@ public final class CashRegisters {
 
 	private static CashState stateOf(CashRegister register) {
 		return new CashState(register.getActualCashAmount(), register.getCashDifferenceComment());
+	}
+
+	/** Hat die Kasse einen Ist-Betrag ungleich 0 oder einen Kommentar? */
+	public static boolean hasCash(CashRegister register) {
+		return !stateOf(register).isEmpty();
 	}
 
 	private static CashState oldFieldsOf(Presentation presentation) {
@@ -128,6 +133,12 @@ public final class CashRegisters {
 		clearOldFields(presentation);
 	}
 
+	/** Übernimmt die alten Felder (Ist-Betrag und Kommentar) einer Vorstellung in eine andere. */
+	public static void copyOldFields(Presentation from, Presentation to) {
+		to.setActualCashAmount(from.getActualCashAmount());
+		to.setCashDifferenceComment(from.getCashDifferenceComment());
+	}
+
 	/**
 	 * Hat die Kasse eigene Daten? Eine Vorstellungskasse, wenn ihr Ist-Betrag nicht 0 ist, ihr Kommentar nicht leer ist
 	 * oder ihr Name gesetzt ist und das Event ihre Vorstellung enthält. Gemeinsame und freie Kassen immer.
@@ -136,12 +147,21 @@ public final class CashRegisters {
 		if (register.kind() != CashRegister.Kind.PRESENTATION) {
 			return true;
 		}
-		return !stateOf(register).isEmpty() || (!isBlank(register.getName()) && event.findPresentation(register.getId()) != null);
+		return hasCash(register) || (!isBlank(register.getName()) && event.findPresentation(register.getId()) != null);
 	}
 
 	/** Ist die gemeinsame Kasse gewählt, enthält die Liste also die Kasse {@code _event}? */
 	public static boolean sharedSelected(Event event) {
 		return event.findCashRegister(CashRegister.SHARED_ID) != null;
+	}
+
+	/**
+	 * Gilt die gemeinsame Kasse als gewählt: sie steht im Modell, oder sie ist gesperrt (auch wenn sie im Modell fehlt).
+	 *
+	 * @param sharedLocked ob die Einheit der gemeinsamen Kasse gesperrt ist oder wartet
+	 */
+	public static boolean sharedSelected(Event event, boolean sharedLocked) {
+		return sharedSelected(event) || sharedLocked;
 	}
 
 	/**
@@ -159,7 +179,7 @@ public final class CashRegisters {
 		if (register == null) {
 			return true;
 		}
-		if (!stateOf(register).isEmpty()) {
+		if (hasCash(register)) {
 			return false;
 		}
 		event.removeCashRegister(CashRegister.SHARED_ID);
@@ -191,7 +211,7 @@ public final class CashRegisters {
 	/** Entfernt eine freie Kasse; {@code false}, wenn sie Ist-Betrag ungleich 0 oder Kommentar hat oder es sie nicht gibt. */
 	public static boolean removeFree(Event event, String id) {
 		CashRegister register = event.findCashRegister(id);
-		if (register == null || register.kind() != CashRegister.Kind.FREE || !stateOf(register).isEmpty()) {
+		if (register == null || register.kind() != CashRegister.Kind.FREE || hasCash(register)) {
 			return false;
 		}
 		return event.removeCashRegister(id);
@@ -199,13 +219,25 @@ public final class CashRegisters {
 
 	/** Der Name der Kasse: ihr eigener, sonst der Vorgabename. */
 	public static String displayName(Event event, CashRegister register) {
-		if (!isBlank(register.getName())) {
-			return register.getName();
-		}
-		return switch (register.kind()) {
+		return isBlank(register.getName()) ? defaultName(event, register.getId()) : register.getName();
+	}
+
+	/** Der Name der Kasse mit der Kennung ({@link #displayName(Event, CashRegister)}); ohne Objekt ihr Vorgabename. */
+	public static String displayName(Event event, String id) {
+		CashRegister register = event.findCashRegister(id);
+		return register != null ? displayName(event, register) : defaultName(event, id);
+	}
+
+	/**
+	 * Der Vorgabename der Kasse mit der Kennung: "Gemeinsame Kasse", bei einer Vorstellungskasse "Kasse " und der Name der
+	 * Vorstellung, ohne Vorstellung im Event "Kasse ohne Vorstellung"; eine freie Kasse hat keinen und heißt
+	 * {@value #NAME_PLACEHOLDER}.
+	 */
+	public static String defaultName(Event event, String id) {
+		return switch (CashRegister.kindOf(id)) {
 		case SHARED -> SHARED_NAME;
 		case FREE -> NAME_PLACEHOLDER;
-		case PRESENTATION -> presentationDefaultName(event.findPresentation(register.getId()));
+		case PRESENTATION -> presentationDefaultName(event.findPresentation(id));
 		};
 	}
 
@@ -223,18 +255,18 @@ public final class CashRegisters {
 	 */
 	public static List<VisibleCashRegister> visible(Event event) {
 		List<VisibleCashRegister> result = new ArrayList<>();
-		boolean shared = sharedSelected(event);
 		CashRegister sharedRegister = event.findCashRegister(CashRegister.SHARED_ID);
-		if (sharedRegister != null) {
+		boolean shared = sharedRegister != null;
+		if (shared) {
 			result.add(line(event, sharedRegister, false));
 		}
 		for (Presentation presentation : event.getPresentations()) {
 			CashRegister register = event.findCashRegister(presentation.getId());
 			boolean named = register != null && !isBlank(register.getName());
-			if (!shared || !effective(event, presentation).isEmpty() || named) {
+			CashState cash = effective(event, presentation);
+			if (!shared || !cash.isEmpty() || named) {
 				result.add(new VisibleCashRegister(presentation.getId(), CashRegister.Kind.PRESENTATION, register, presentation,
-						register != null ? displayName(event, register) : presentationDefaultName(presentation), false,
-						effective(event, presentation)));
+						displayName(event, presentation.getId()), false, cash));
 			}
 		}
 		result.addAll(sortedByName(event.getCashRegisters().stream().filter(r -> r.kind() == CashRegister.Kind.FREE)
@@ -242,7 +274,7 @@ public final class CashRegisters {
 		result.addAll(sortedByName(
 				event.getCashRegisters().stream()
 						.filter(r -> r.kind() == CashRegister.Kind.PRESENTATION && event.findPresentation(r.getId()) == null
-								&& !stateOf(r).isEmpty())
+								&& hasCash(r))
 						.map(r -> line(event, r, true)).toList()));
 		return result;
 	}

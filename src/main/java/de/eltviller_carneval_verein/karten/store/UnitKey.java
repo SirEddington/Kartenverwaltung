@@ -70,7 +70,7 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 			throw new IllegalArgumentException("Die Kassenkennung passt nicht zur Art " + type + ".");
 		}
 		if (needsBooking) {
-			if (bookingDir == null || !isValidBookingDir(bookingDir)) {
+			if (bookingDir == null || !isValidPrefixedId(bookingDir)) {
 				throw new IllegalArgumentException("Ungültiger Buchungsordner: " + bookingDir);
 			}
 		} else if (bookingDir != null) {
@@ -94,10 +94,6 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 
 	private static boolean isValidId(String value) {
 		return value != null && ID.matcher(value).matches();
-	}
-
-	private static boolean isValidBookingDir(String dir) {
-		return isValidPrefixedId(dir);
 	}
 
 	/** Ob der Name eine ID ist, mit oder ohne einen führenden Unterstrich. */

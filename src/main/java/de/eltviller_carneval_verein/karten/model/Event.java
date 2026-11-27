@@ -202,11 +202,13 @@ public class Event {
 	}
 	
 	public boolean deletePresentation(Presentation presentation) {
-		if (!presentations.contains(presentation)) {
+		int index = presentations.indexOf(presentation);
+		if (index < 0) {
 			return false;
 		}
 		CashRegisters.presentationRemoved(this, presentation);
-		return presentations.remove(presentation);
+		presentations.remove(index);
+		return true;
 	}
 
 	/**

@@ -388,7 +388,8 @@ public class StoreEventRepository implements EventRepository {
 	 *         zusammensetzen lässt (dann lehnt das Wiederherstellen ohnehin ab)
 	 */
 	public List<CountedCash> countedSince(String eventId, SavePoint point) throws IOException {
-		List<UnitState> states = statesOf(eventId);
+		// die Kassen hängen nicht an Buchungen: nur Kopf, Vorstellungen und Kassen lesen und zusammensetzen
+		List<UnitState> states = statesOf(eventId, unit -> unit.type() != UnitType.BOOKING);
 		Map<UnitKey, UnitSnapshot> then = RestorePlanner.targetsAt(states, point.at());
 		Map<UnitKey, UnitSnapshot> today = new LinkedHashMap<>();
 		states.forEach(state -> today.put(state.unit(), UnitSnapshot.of(state)));
@@ -481,9 +482,16 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	private List<UnitState> statesOf(String eventId) throws IOException {
+		return statesOf(eventId, unit -> true);
+	}
+
+	/** Wie {@link #statesOf(String)}, nur für die Einheiten, die {@code wanted} erfüllen. */
+	private List<UnitState> statesOf(String eventId, Predicate<UnitKey> wanted) throws IOException {
 		List<UnitState> states = new ArrayList<>();
 		for (UnitKey unit : sync.eventUnits(eventId)) {
-			states.add(sync.unitState(unit));
+			if (wanted.test(unit)) {
+				states.add(sync.unitState(unit));
+			}
 		}
 		return states;
 	}
@@ -818,10 +826,7 @@ public class StoreEventRepository implements EventRepository {
 	public Map<String, LockedCashRegister> lockedCashRegisters(String eventId) {
 		Map<String, LockedCashRegister> locked = new TreeMap<>();
 		for (UnitSnapshot state : sync.cashRegisterSnapshots(eventId).values()) {
-			UnitState.Status lock = UnitMapper.lockOf(state);
-			if (lock == null && state.status() == UnitState.Status.WAITING) {
-				lock = UnitState.Status.WAITING;
-			}
+			UnitState.Status lock = UnitMapper.blockedStatus(state);
 			if (lock != null) {
 				String id = state.unit().cashRegisterId();
 				locked.put(id, new LockedCashRegister(id, lock, UnitMapper.isReadable(state)));
@@ -866,16 +871,8 @@ public class StoreEventRepository implements EventRepository {
 			return HeadRequires.carries(state.payload());
 		}
 		try {
-			// die eigenen ausstehenden Versionen bauen auf dem Ende der Kette auf
-			UnitState resolved = sync.unitState(head);
-			List<Version> versions = new ArrayList<>(resolved.chain());
-			versions.addAll(resolved.pending());
-			for (int i = versions.size() - 1; i >= 0; i--) {
-				if (!versions.get(i).deleted()) {
-					return HeadRequires.carries(versions.get(i).payload());
-				}
-			}
-			return false;
+			Version last = sync.unitState(head).lastLive();
+			return last != null && HeadRequires.carries(last.payload());
 		} catch (IOException e) {
 			LOG.log(Level.WARNING, "Der letzte Stand von " + head.relativePath() + " ließ sich nicht lesen", e);
 			return true;
@@ -910,10 +907,7 @@ public class StoreEventRepository implements EventRepository {
 	public void requireCashRegisterWritable(String eventId, String presentationId, String name) {
 		LockedCashRegister locked = lockedCashRegisters(eventId).get(presentationId);
 		if (locked != null) {
-			throw new LockedUnitException(locked.status() == UnitState.Status.WAITING
-					? "\"" + name + "\": Die Kasse wartet noch auf eine Datei aus dem gemeinsamen Ordner. Löschen ist erst "
-							+ "möglich, wenn sie angekommen ist."
-					: StoreMessages.lockedBelow(name, locked.status()));
+			throw new LockedUnitException(locked.deletionMessage(name));
 		}
 		if (cashRegistersPending(eventId)) {
 			throw new LockedUnitException(CASH_PENDING);
