@@ -301,7 +301,9 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
   Kommentar, wird die Kasse vorher zum Ändern geholt und bekommt, wenn sie keinen eigenen Namen hat, ihren
   Vorgabenamen als Namen; sie bleibt danach als verwaiste Kasse sichtbar. Hat sie beides nicht, wird ein vorhandenes
   Kassen-Objekt aus der Liste genommen. Die Regel gilt beim Löschen von Hand (`Event.deletePresentation`) und für
-  jede Vorstellung, die ein Wiederherstellen entfernt (siehe „Wiederherstellen").
+  jede Vorstellung, die ein Wiederherstellen entfernt (siehe „Wiederherstellen"). Ein zweiter Ist-Betrag in den
+  alten Feldern (siehe unten) geht dabei bewusst ohne Hinweis mit der Vorstellung: Für ihn galt schon vorher die
+  Kasse, und er bleibt im letzten Stand der Vorstellung erhalten.
 - **Zweiter Ist-Betrag:** Gibt es die Vorstellungskasse als Objekt und steht in den alten Feldern der Vorstellung
   trotzdem ein Ist-Betrag ungleich 0 oder ein Kommentar (ein Rechner mit v1.1 hat nach der ersten Speicherung der
   Kasse noch geschrieben, oder ein Speichervorgang brach nach der Kasse ab), gilt die Kasse. Die Prüfung `KAS-005`
@@ -406,12 +408,12 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
   wenn sich sonst nichts an ihm geändert hat. Lässt er sich nicht schreiben (gesperrt oder wartend), unterbleibt
   nur dieses Mitschreiben; der übrige Speichervorgang läuft wie heute, und der nächste holt es nach. Fehlend,
   `null` und `[]` gelten beim Vergleich als „kein Merkmal".
-- **Konflikte:** Führt die Konfliktregel zwei Stände des Kopfs zusammen, kann `requires` als eigene Feldgruppe im
-  Vermerk FIELDS stehen. Die Konfliktliste zeigt diese Gruppe nicht und bietet für sie keine Aktion an; ist sie die
-  einzige strittige Gruppe, entfällt der Eintrag ganz. Das Merkmal ergibt sich beim nächsten Speichern nach den
-  Regeln oben.
+- **Konflikte:** `EventHeadPolicy` nimmt `requires` aus dem Vergleich je Feldgruppe heraus und setzt im Ergebnis
+  das Merkmal, wenn eine der beiden Seiten es trägt. Ein Vermerk entsteht dafür nicht; die Konfliktliste und die
+  Zahl der offenen Konflikte in der Fußzeile kennen keine Gruppe `requires`.
 - **Kassen noch nicht abgeglichen:** Dieser Zustand gilt für ein Event, wenn alles Folgende zutrifft: Ein
-  gemeinsamer Ordner ist verbunden; seit dem Programmstart ist noch kein Vollabgleich bis zum Ende gelaufen (ob er
+  gemeinsamer Ordner ist verbunden, auch wenn er gerade nicht erreichbar ist (dann bleibt der Zustand bewusst bis
+  zum ersten Vollabgleich nach der Rückkehr); seit dem Programmstart ist noch kein Vollabgleich bis zum Ende gelaufen (ob er
   dabei einzelne Teile übersprungen hat, zählt nicht); der Kopf trägt das Merkmal, bei einem gelöschten Kopf sein
   letzter nicht gelöschter Stand; der Versionsspeicher dieses Rechners kennt keine Kassen-Einheit des Events, auch
   keine gelöschte. Das ist der
@@ -426,9 +428,11 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
   fremde Änderung am Kopf des Events, damit offene Ansichten die Sperre aufheben. Ein Kopf mit Merkmal ohne
   Kassen-Einheit gilt danach als Event ohne gespeicherte Kassen (etwa nach einem abgebrochenen ersten Speichern
   eines neuen Events); das Merkmal bleibt.
-- **Vergleichen:** Für „lokal verändert" (`StoreEventRepository.localChanges`, `UnitMapper.sameAsModel`,
-  `comparable`) wird der Kopf auf beiden Seiten ohne `requires` verglichen. Ein Kopf gilt also nie allein wegen
-  `requires` als vom Nutzer geändert. Beim Lesen ins Modell wird `requires` weiter verworfen
+- **Vergleichen:** Für „lokal verändert" (`StoreEventRepository.localChanges` und die Vergleiche, die es nutzt)
+  wird der Kopf auf beiden Seiten ohne `requires` verglichen. Ein Kopf gilt also nie allein wegen `requires` als vom
+  Nutzer geändert. Beim Schreiben in `UnitMapper.changes` ist das anders: Dort entscheidet `sameAsModel`, ob der
+  Kopf geschrieben wird, und vergleicht den Kopf mit dem abgeleiteten Merkmal; weicht nur `requires` ab, wird er
+  geschrieben (siehe „Schreiben"). Beim Lesen ins Modell wird `requires` weiter verworfen
   (`UnknownFields.putUnitField`), und es wird nie in eine andere Einheit kopiert.
 - Folge: Mit der ersten gespeicherten Kasse wird im selben Speichervorgang der Kopf geschrieben, und Rechner mit
   v1.1 sperren das Event (SYS-009). Löscht ein Speichervorgang die letzte lebende Kassen-Einheit, verliert der Kopf
@@ -442,9 +446,8 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
     geleert, entscheidet die Konfliktregel der Vorstellung mit Vermerk. Waren sie schon 0, gewinnt der Wert von
     v1.1 ohne Vermerk in den alten Feldern; es gilt trotzdem die Kasse, und `KAS-005` macht den zweiten Betrag
     sichtbar.
-  - Der Kopf kann vorübergehend ohne `requires` sein, obwohl Kassen gespeichert sind: nach einer Zusammenführung
-    zweier Kopf-Stände (ein Feld ohne Gruppe wird als eigene Gruppe zusammengeführt), oder wenn ein Rechner die
-    letzte Kasse löscht, während ein anderer eine anlegt und den Kopf deshalb nicht schreibt. Der nächste
+  - Der Kopf kann vorübergehend ohne `requires` sein, obwohl Kassen gespeichert sind, wenn ein Rechner die letzte
+    Kasse löscht, während ein anderer eine anlegt und den Kopf deshalb nicht schreibt. Der nächste
     Speichervorgang eines Rechners mit 1.2 in diesem Event, der die Kasse im Versionsspeicher kennt, setzt das
     Merkmal wieder. Bis dahin kann ein Rechner mit v1.1 das Event öffnen; er sieht die Kassen nicht. Derselbe
     Zustand entsteht, wenn ein beschädigter Kopf (SYS-008) über „Zurücksetzen" roh auf einen lesbaren Stand vor der
@@ -460,7 +463,12 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
   - Kommen die Kassen eines Events nach dem Update nur zum Teil an (der Vollabgleich läuft über mehrere Takte),
     greift „Kassen noch nicht abgeglichen" nicht mehr, und eine noch fehlende Vorstellungskasse zeigt kurz 0. Eine
     Zählung in diesem Fenster trifft später auf die fremde Einheit und wird nach der Konfliktregel der Kasse
-    aufgelöst, mit Vermerk.
+    aufgelöst, mit Vermerk. Dasselbe gilt, wenn sich im ersten Vollabgleich der Ordner `cashRegisters` eines Events
+    nicht auflisten lässt.
+  - Ein Rechner mit v1.1 sieht ein gesperrtes Event nicht. Seine Prüfung „Halle wird noch verwendet" findet dessen
+    Vorstellungen deshalb nicht, und er kann eine Halle löschen, die das Event in 1.2 benutzt. Das ist eine
+    allgemeine Folge von `requires`, hier zum ersten Mal wirksam; die Patchnotes zum gemeinsamen Umstieg decken es
+    ab.
   - Lässt sich der Kopf nicht schreiben (beschädigt-gesperrt oder wartend), wird die erste Kasse ohne das Merkmal
     gespeichert. Bis der Kopf wieder schreibbar ist und das nächste Speichern es nachholt, kann ein Rechner mit v1.1
     das Event öffnen und zeigt im Kassenabgleich die geleerten alten Felder.
@@ -557,8 +565,9 @@ Kassen     (•) je Vorstellung eine Kasse   ( ) eine gemeinsame Kasse      [+ K
 - Eine verwaiste Kasse zeigt unter „gilt für" „– (Vorstellung gelöscht)", wenn die Einheit ihrer Vorstellung
   gelöscht ist oder es sie nie gab, und „– (Vorstellung nicht verfügbar)", wenn die Vorstellung nur im Modell fehlt
   (gesperrt oder unlesbar). Das Repository gibt an, welcher Fall vorliegt.
-- **Gesperrte Kassen:** Das Repository nennt je Event die gesperrten Kassen-Einheiten (SYS-008, SYS-009), am Stand
-  des Versionsspeichers wie `requireNothingLockedUnder`. Geprüft wird vor jeder Änderung am Modell, wie bei
+- **Gesperrte Kassen:** Das Repository nennt je Event die gesperrten Kassen-Einheiten (SYS-008, SYS-009) und die,
+  die noch auf eine Datei warten, am Stand des Versionsspeichers wie `requireNothingLockedUnder`; eine wartende
+  Kasse wird hier wie eine gesperrte behandelt. Geprüft wird vor jeder Änderung am Modell, wie bei
   `LockedEntryGuard`: Gelangt eine Änderung an einer gesperrten Einheit ins Modell, scheitert danach jedes Speichern
   des Events, auch im Kartenverkauf.
   - Eine gesperrte Kasse mit lesbarem Stand steht als Zeile da, mit „(gesperrt)" hinter dem Namen.
@@ -600,8 +609,9 @@ Kassen     (•) je Vorstellung eine Kasse   ( ) eine gemeinsame Kasse      [+ K
   Hinweis unter dem Feld lautet „Für dieses Event gilt eine gemeinsame Kasse. Der Kassensturz je Kasse folgt."
   (vorläufig bis KARV-146). Ist-Betrag und Differenz der Vorstellung zeigen dann „–" statt 0 und eines
   Fehlbetrags; CSV und PDF lassen beide leer. Eine Vorstellungskasse, die vor dem Umschalten gezählt wurde, bleibt
-  in der Liste und zählt in die Gesamtbilanz; ändern lässt sie sich bewusst erst wieder nach dem Zurückschalten
-  oder mit dem Kassensturz je Kasse (KARV-146).
+  in der Liste und zählt in die Gesamtbilanz; bei ihrer Vorstellung zeigen Ist-Betrag, Kommentar und Differenz
+  ihren Stand, gesperrt, statt „–". Ändern lässt sie sich bewusst erst wieder nach dem Zurückschalten oder mit dem
+  Kassensturz je Kasse (KARV-146).
 - Ist die Kassen-Einheit der gewählten Vorstellung gesperrt (SYS-008 oder SYS-009) oder wartet sie noch auf eine
   Datei, sind Ist-Betrag und Kommentar
   gesperrt, und der Hinweis nennt die Meldung der Sperre. Hat sie keinen lesbaren Stand, zeigen Ist-Betrag und
@@ -912,10 +922,22 @@ klein. Behoben:
   `KAS-004` und `KAS-005` übergehen Kassen ohne lesbaren Stand; Differenz „–" in der Gesamtbilanz im Zustand
   „Kassen noch nicht abgeglichen".
 
-**Ergebnis.** Kein Befund ist strittig: Alle kritischen und großen Befunde der sieben Runden sind im Text behoben
-oder, beim großen Befund der Runde 5, wie vom Prüfer vorgeschlagen als bekannte Grenze benannt; keiner wurde
-abgelehnt oder herabgestuft. Die großen Befunde der Runden 2 bis 7 lagen in zwei Teilen: Sperre für v1.1 mit dem
-Übergang der alten Felder (Runden 2, 3, 5, 6 und 7) und gesperrte Kassen (Runde 4).
+**Runde 8, 27.11.2026** (neues Paar). Umsetzer: 0 kritisch, 0 groß, 4 klein. Gegenprüfer: 0 kritisch, 0 groß, 5
+klein; er hat die Ausgangslage am Code nachgeprüft und keine Abweichung gefunden (`release/1.2.0` steht inzwischen
+auf 26fd213 mit KARV-140; das berührt keine Stelle, die das Spec nennt). **Erste Runde ohne kritischen oder großen
+Befund; die Prüfung ist damit beendet.** Danach eingearbeitet, nur kleine Befunde und von keinem Prüfer mehr
+gelesen: `sameAsModel` beim Schreiben vom Vergleich für „lokal verändert" getrennt; `EventHeadPolicy` nimmt
+`requires` aus dem Feldvergleich und setzt es, wenn eine Seite es trägt (vorher ein Vermerk, den die Fußzeile ohne
+Eintrag gezählt hätte); Offline-Betrieb und gescheitertes Auflisten der Kassen bei „Kassen noch nicht
+abgeglichen"; Löschen einer Halle an v1.1 als bekannte Grenze; wartende Kassen in der Event-Verwaltung wie
+gesperrte; gezählte Vorstellungskasse bei gemeinsamer Kasse zeigt ihren Stand gesperrt; zweiter Ist-Betrag beim
+Löschen einer Vorstellung ausdrücklich hingenommen.
+
+**Ergebnis.** Acht Runden; die achte meldete nichts Kritisches oder Großes. Kein Befund ist strittig: Alle
+kritischen und großen Befunde sind im Text behoben oder, beim großen Befund der Runde 5, wie vom Prüfer
+vorgeschlagen als bekannte Grenze benannt; keiner wurde abgelehnt oder herabgestuft. Die großen Befunde der Runden
+2 bis 7 lagen in zwei Teilen: Sperre für v1.1 mit dem Übergang der alten Felder (Runden 2, 3, 5, 6 und 7) und
+gesperrte Kassen (Runde 4).
 
 **Nicht belegt:**
 
