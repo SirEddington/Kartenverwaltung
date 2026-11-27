@@ -16,8 +16,6 @@ import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.repository.LockedCashRegister;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
-import de.eltviller_carneval_verein.karten.store.StoreMessages;
-import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import de.eltviller_carneval_verein.karten.validation.MessageTemplate;
 
@@ -47,8 +45,6 @@ final class CashRegisterSection {
 	private static final String LOCKED_SHARED = "Gemeinsame Kasse" + LOCKED_SUFFIX;
 	private static final String LOCKED_ORPHAN = "Kasse ohne Vorstellung" + LOCKED_SUFFIX;
 	private static final String LOCKED_FREE = "Gesperrte Kasse";
-	private static final String WAITING_TEXT = "&1 wartet noch auf eine Datei aus dem gemeinsamen Ordner. Ändern ist erst "
-			+ "möglich, wenn sie angekommen ist.";
 
 	/**
 	 * Eine Zeile der Tabelle.
@@ -305,9 +301,7 @@ final class CashRegisterSection {
 		if (locked == null) {
 			return null;
 		}
-		String label = EntityLabels.cashRegister(name);
-		return locked.status() == UnitState.Status.WAITING ? MessageTemplate.format(WAITING_TEXT, label)
-				: StoreMessages.locked(label, locked.status());
+		return locked.message(EntityLabels.cashRegister(name));
 	}
 
 	/** {@link #DELETE_REFUSED} mit dem Namen der Kasse. */

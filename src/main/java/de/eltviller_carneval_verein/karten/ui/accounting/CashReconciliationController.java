@@ -19,6 +19,7 @@ import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -34,12 +35,16 @@ import de.eltviller_carneval_verein.karten.ui.LiveViews;
 import de.eltviller_carneval_verein.karten.ui.LiveViews.Registration;
 import de.eltviller_carneval_verein.karten.util.MoneyFormat;
 import de.eltviller_carneval_verein.karten.ui.UiColors;
+import de.eltviller_carneval_verein.karten.ui.accounting.CashFigures.Figures;
 import de.eltviller_carneval_verein.karten.ui.input.SpinnerInput;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 import javafx.fxml.FXML;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.Spinner;
+import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextArea;
+import javafx.scene.layout.HBox;
 
 public class CashReconciliationController implements ContentController, Exportable {
 
@@ -72,6 +77,11 @@ public class CashReconciliationController implements ContentController, Exportab
 		}
 	};
 
+	/** Ohne Ist-Betrag: im Spinner und als Differenz. */
+	private static final String NO_AMOUNT = "–";
+	/** Nichts zu zeigen (kein Event, oder eines ohne Vorstellung und ohne sichtbare Kasse). */
+	private static final Figures NO_FIGURES = new Figures(null, null, false, null, null, false);
+
 	// Zuletzt in refresh() berechnete Rohwerte (Cent/Anzahl), damit der Export
 	// dieselben Zahlen nutzt wie die Anzeige, ohne formatierte Label-Strings
 	// zurückparsen zu müssen.
@@ -81,7 +91,8 @@ public class CashReconciliationController implements ContentController, Exportab
 	private int countCash;
 	private int countCard;
 	private int countTransfer;
-	private long istCentsCache;
+	// Ist-Betrag, Kommentar, Hinweise und Bearbeitbarkeit am wirksamen Stand der Kassen (KARV-144)
+	private Figures figures = NO_FIGURES;
 
 	@FXML
 	private Label lblScopeHeader;
@@ -109,26 +120,33 @@ public class CashReconciliationController implements ContentController, Exportab
 	private Label lblIstHint;
 	@FXML
 	private TextArea txtDifferenceComment;
+	@FXML
+	private HBox secondAmountBox;
+	@FXML
+	private Label lblSecondAmount;
+	@FXML
+	private Button btnDiscardSecondAmount;
 
 	@FXML
 	public void initialize() {
 		actualCashSpinner.setValueFactory(SpinnerInput.doubleFactory(0.0, 5));
 		actualCashSpinner.setEditable(true);
 		SpinnerInput.install(actualCashSpinner, "Ist-Betrag", () -> selectedPres == null ? null : EntityLabels.presentation(selectedPres));
+		// Eine Eingabe holt die Kasse der Vorstellung zum Ändern und setzt den Wert dort (KARV-144)
 		actualCashSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
 			if (updatingFromModel || selectedPres == null || newVal == null) {
 				return;
 			}
-			selectedPres.setActualCashAmountDouble(newVal);
-			istCentsCache = Math.round(newVal * 100.0);
-			updateDifference(istCentsCache);
+			CashRegisters.setActualCash(selectedEvent, selectedPres, MoneyFormat.toCents(newVal));
+			updateFigures();
 		});
 
 		txtDifferenceComment.textProperty().addListener((obs, oldVal, newVal) -> {
 			if (updatingFromModel || selectedPres == null) {
 				return;
 			}
-			selectedPres.setCashDifferenceComment(newVal);
+			CashRegisters.setComment(selectedEvent, selectedPres, newVal);
+			updateFigures();
 		});
 
 		applyEditMode();
@@ -146,33 +164,43 @@ public class CashReconciliationController implements ContentController, Exportab
 	/**
 	 * Im Bearbeitungsmodus (und nur in einem gezeigten Fenster) ist die gewählte Vorstellung in Bearbeitung: Ein fremder Stand
 	 * für sie wird zurückgestellt und kommt, sobald der Bearbeitungsmodus, die Vorstellung oder die Ansicht verlassen ist. Die
-	 * Meldung endet auf jedem Weg hinaus, sonst bliebe die Vorstellung für fremde Stände gesperrt.
+	 * Meldung endet auf jedem Weg hinaus, sonst bliebe die Vorstellung für fremde Stände gesperrt. Die Kasse der Vorstellung
+	 * gilt damit ebenfalls als in Bearbeitung, auch ohne eigenes Objekt ({@code StoreEventRepository.touchedByUser}).
 	 */
 	private void reportEditing() {
 		EditingUnits.getInstance().report(this, shown && editMode, selectedPres);
 	}
 
 	/**
-	 * Ohne gewählte Vorstellung wird über alle Vorstellungen des Events
-	 * aggregiert (Gesamtbilanz); mit gewählter Vorstellung nur über deren
-	 * eigene Sitze.
+	 * Ist-Betrag und Kommentar am wirksamen Stand der Kassen ({@link CashFigures}); ohne etwas zu zeigen ({@link CashFigures#shown})
+	 * nichts.
 	 */
-	private List<Presentation> resolvePresentations() {
-		if (selectedPres != null) {
-			return List.of(selectedPres);
+	private Figures currentFigures() {
+		if (!CashFigures.shown(selectedEvent)) {
+			return NO_FIGURES;
 		}
-		if (selectedEvent != null) {
-			return selectedEvent.getPresentations();
-		}
-		return List.of();
+		String eventId = selectedEvent.getId();
+		return CashFigures.of(selectedEvent, selectedPres, eventRepository.lockedCashRegisters(eventId),
+				eventRepository.cashRegistersPending(eventId), editMode);
+	}
+
+	/**
+	 * Rechnet Ist-Betrag und Kommentar neu und zeigt Differenz, Hinweise und Bearbeitbarkeit, ohne die Felder neu zu setzen
+	 * (nach einer Eingabe, „Verwerfen" und einem Wechsel des Bearbeiten-Modus).
+	 */
+	private void updateFigures() {
+		figures = currentFigures();
+		updateEditableControlsState();
+		updateDifference();
 	}
 
 	private void refresh() {
-		List<Presentation> presentations = resolvePresentations();
-		if (presentations.isEmpty()) {
+		// Leer nur ohne Vorstellung und ohne sichtbare Kasse; mit einer Kasse zeigt die Gesamtbilanz ein Soll von 0
+		if (!CashFigures.shown(selectedEvent)) {
 			clear();
 			return;
 		}
+		List<Presentation> presentations = CashFigures.scope(selectedEvent, selectedPres);
 
 		sollCashCents = 0;
 		sollCardCents = 0;
@@ -180,11 +208,8 @@ public class CashReconciliationController implements ContentController, Exportab
 		countCash = 0;
 		countCard = 0;
 		countTransfer = 0;
-		long istCents = 0;
 
 		for (Presentation pres : presentations) {
-			istCents += Math.round(pres.getActualCashAmountDouble() * 100.0);
-
 			// Buchungen ohne Platz sind echte Verkäufe und zählen mit
 			List<Booking> bookings = pres.getBookings() != null ? pres.getBookings() : List.of();
 			sollCashCents += BookingTotals.paidCents(bookings, PaymentStatus.CASH);
@@ -194,15 +219,13 @@ public class CashReconciliationController implements ContentController, Exportab
 			sollTransferCents += BookingTotals.paidCents(bookings, PaymentStatus.TRANSFER);
 			countTransfer += BookingTotals.paidCount(bookings, PaymentStatus.TRANSFER);
 		}
-		istCentsCache = istCents;
+		figures = currentFigures();
 
 		if (selectedPres != null) {
 			lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart – " + EntityLabels.nameOrPlaceholder(selectedPres.getName()));
-			lblIstHint.setText("");
 		} else {
 			int count = presentations.size();
 			lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart – Gesamtbilanz (" + count + " Vorstellung" + (count == 1 ? "" : "en") + ")");
-			lblIstHint.setText("Summe der Kasseninhalte der einzelnen Vorstellungen, hier nicht direkt bearbeitbar.");
 		}
 
 		lblCountCash.setText(String.valueOf(countCash));
@@ -215,8 +238,8 @@ public class CashReconciliationController implements ContentController, Exportab
 		lblSollTotal.setText(formatCents(sollCashCents + sollCardCents + sollTransferCents));
 
 		updatingFromModel = true;
-		actualCashSpinner.getValueFactory().setValue(istCents / 100.0);
-		String comment = selectedPres != null && selectedPres.getCashDifferenceComment() != null ? selectedPres.getCashDifferenceComment() : "";
+		showActualCash(figures.actualCents());
+		String comment = figures.comment() != null ? figures.comment() : "";
 		// Nur bei anderem Text: Eine fremde Änderung an einer Buchung darf nicht den Cursor in einem getippten Kommentar verrücken
 		if (!comment.equals(txtDifferenceComment.getText())) {
 			txtDifferenceComment.setText(comment);
@@ -224,10 +247,32 @@ public class CashReconciliationController implements ContentController, Exportab
 		updatingFromModel = false;
 
 		updateEditableControlsState();
-		updateDifference(istCents);
+		updateDifference();
 	}
 
-	private void updateDifference(long istCents) {
+	/**
+	 * Setzt den Ist-Betrag in den Spinner; ohne Betrag steht dort „–". Der Text wird sonst nur gesetzt, wenn sich der Wert
+	 * ändert oder vorher „–" dastand: Eine fremde Änderung an einer Buchung darf eine getippte Eingabe nicht überschreiben.
+	 */
+	private void showActualCash(Long cents) {
+		SpinnerValueFactory<Double> factory = actualCashSpinner.getValueFactory();
+		boolean wasDash = NO_AMOUNT.equals(actualCashSpinner.getEditor().getText());
+		factory.setValue(cents == null ? 0.0 : cents / 100.0);
+		if (cents == null) {
+			actualCashSpinner.getEditor().setText(NO_AMOUNT);
+		} else if (wasDash) {
+			actualCashSpinner.getEditor().setText(factory.getConverter().toString(factory.getValue()));
+		}
+	}
+
+	/** Die Differenz des Ist-Betrags ({@link CashFigures}) zum Bar-Soll; ohne Ist-Betrag „–". */
+	private void updateDifference() {
+		Long istCents = figures.actualCents();
+		if (istCents == null) {
+			lblDifference.setText(NO_AMOUNT);
+			lblDifference.setTextFill(UiColors.TEXT_DARK.getFxColor());
+			return;
+		}
 		long diffCents = istCents - sollCashCents;
 
 		lblDifference.setText((diffCents > 0 ? "+" : "") + formatCents(diffCents));
@@ -236,7 +281,6 @@ public class CashReconciliationController implements ContentController, Exportab
 
 	private void clear() {
 		lblScopeHeader.setText("Soll-Einnahmen nach Zahlungsart");
-		lblIstHint.setText("");
 		lblCountCash.setText("0");
 		lblSollCash.setText(formatCents(0));
 		lblCountCard.setText("0");
@@ -246,8 +290,9 @@ public class CashReconciliationController implements ContentController, Exportab
 		lblCountTotal.setText("0");
 		lblSollTotal.setText(formatCents(0));
 
+		figures = NO_FIGURES;
 		updatingFromModel = true;
-		actualCashSpinner.getValueFactory().setValue(0.0);
+		showActualCash(0L);
 		txtDifferenceComment.setText("");
 		updatingFromModel = false;
 
@@ -257,8 +302,7 @@ public class CashReconciliationController implements ContentController, Exportab
 		countCash = 0;
 		countCard = 0;
 		countTransfer = 0;
-		istCentsCache = 0;
-		lblDifference.setText("–");
+		lblDifference.setText(NO_AMOUNT);
 		lblDifference.setTextFill(UiColors.TEXT_DARK.getFxColor());
 		updateEditableControlsState();
 	}
@@ -268,17 +312,34 @@ public class CashReconciliationController implements ContentController, Exportab
 	}
 
 	/**
-	 * Ist-Kasseninhalt und Differenz-Kommentar lassen sich nur für eine
-	 * konkrete Vorstellung eintragen, nicht für die Gesamtbilanz.
+	 * Ist-Kasseninhalt und Differenz-Kommentar lassen sich nur für eine konkrete Vorstellung eintragen, nicht für die
+	 * Gesamtbilanz, und nur, wenn ihre Kasse nicht gesperrt ist und keine gemeinsame Kasse gilt ({@link CashFigures}). Darunter
+	 * stehen der Hinweis, der zweite Ist-Betrag und im Bearbeiten-Modus „Verwerfen".
 	 */
 	private void updateEditableControlsState() {
-		boolean fieldsEditable = editMode && selectedPres != null;
-		actualCashSpinner.setDisable(!fieldsEditable);
-		txtDifferenceComment.setDisable(!fieldsEditable);
+		actualCashSpinner.setDisable(!figures.editable());
+		txtDifferenceComment.setDisable(!figures.editable());
+		lblIstHint.setText(figures.hint() != null ? figures.hint() : "");
+		boolean second = figures.secondAmountHint() != null;
+		lblSecondAmount.setText(second ? figures.secondAmountHint() : "");
+		secondAmountBox.setVisible(second);
+		secondAmountBox.setManaged(second);
+		btnDiscardSecondAmount.setVisible(figures.discardable());
+		btnDiscardSecondAmount.setManaged(figures.discardable());
+	}
+
+	/** „Verwerfen": leert die alten Felder der Vorstellung; danach gilt nur noch die Kasse (behebt KAS-005). */
+	@FXML
+	private void discardSecondAmount() {
+		if (selectedPres == null) {
+			return;
+		}
+		CashRegisters.discardSecondAmount(selectedPres);
+		updateFigures();
 	}
 
 	private void applyEditMode() {
-		updateEditableControlsState();
+		updateFigures();
 	}
 
 	@Override
@@ -306,9 +367,9 @@ public class CashReconciliationController implements ContentController, Exportab
 
 		if (selectedPres != null) {
 			csv.append('\n');
-			csv.append("Tatsächlicher Kasseninhalt (Bar);;").append(formatCents(istCentsCache)).append('\n');
-			csv.append("Differenz zum Bar-Soll;;").append(formatCents(istCentsCache - sollCashCents)).append('\n');
-			String comment = selectedPres.getCashDifferenceComment();
+			csv.append("Tatsächlicher Kasseninhalt (Bar);;").append(exportedActualCash()).append('\n');
+			csv.append("Differenz zum Bar-Soll;;").append(exportedDifference()).append('\n');
+			String comment = figures.comment();
 			csv.append("Kommentar;;").append(comment != null ? comment.replace(';', ',').replace("\n", " ") : "").append('\n');
 		}
 
@@ -356,10 +417,10 @@ public class CashReconciliationController implements ContentController, Exportab
 				spacer.setSpacingAfter(12f);
 				document.add(spacer);
 
-				document.add(new Paragraph("Tatsächlicher Kasseninhalt (Bar): " + formatCents(istCentsCache), cellFont));
-				document.add(new Paragraph("Differenz zum Bar-Soll: " + formatCents(istCentsCache - sollCashCents), cellFont));
+				document.add(new Paragraph("Tatsächlicher Kasseninhalt (Bar): " + exportedActualCash(), cellFont));
+				document.add(new Paragraph("Differenz zum Bar-Soll: " + exportedDifference(), cellFont));
 
-				String comment = selectedPres.getCashDifferenceComment();
+				String comment = figures.comment();
 				if (comment != null && !comment.isBlank()) {
 					Paragraph commentParagraph = new Paragraph("Kommentar: " + comment, cellFont);
 					commentParagraph.setSpacingBefore(8f);
@@ -369,6 +430,18 @@ public class CashReconciliationController implements ContentController, Exportab
 		} finally {
 			document.close();
 		}
+	}
+
+	/** Der Ist-Betrag für CSV und PDF, am wirksamen Stand wie in der Anzeige; ohne Ist-Betrag („–") leer. */
+	private String exportedActualCash() {
+		Long istCents = figures.actualCents();
+		return istCents == null ? "" : formatCents(istCents);
+	}
+
+	/** Die Differenz zum Bar-Soll für CSV und PDF; ohne Ist-Betrag („–") leer. */
+	private String exportedDifference() {
+		Long istCents = figures.actualCents();
+		return istCents == null ? "" : formatCents(istCents - sollCashCents);
 	}
 
 	private void addRow(PdfPTable table, String label, String count, String soll, Font font) {
