@@ -799,6 +799,32 @@ plan every seat has exactly one booking, which makes the bookings the seats.
   (Ctrl+S out of an open table cell).
 - No field of the header changes its width. With long numbers the caption "Vorstellung" is shortened, never the number.
 
+## Moving bookings keeps the booking id (KARV-140)
+
+**Decision:** When the box office moves bookings to other seats of the same presentation, each booking keeps its id and
+all its data; only `seatId` and the seat snapshot change (`BookingMove`, no JavaFX). A move is a plan first (`plan`),
+which the user confirms, and then runs only if recomputing it gives the same plan (`apply`). One operation is one
+save. No price changes, and nothing outside one presentation.
+
+**Why:** The store tells a move from a sale by the booking id. Copying the data to a new booking would look like a
+cancellation plus a new sale, and the conflict rules would no longer follow the booking: a swap against a change by
+another workstation could lose one of the two. With the id kept, the rules that already handle the move out of the
+conflict dialog apply. Prices stay as they were because the booking is not sold again.
+
+**Detail:**
+- **Pairing:** Sources and targets are sorted by the same order of the seating plan (row, table, seat, then seat id; a
+  source counts with its old seat), and the i-th source gets the i-th target. A seat may be source and target at once.
+- **Chains and counter moves:** The moves form chains from a seat that nobody takes over (start) to a target that is
+  not the seat of a source (end). If the end holds a booking, it moves to the start (counter move; with one source this
+  is a swap). Otherwise the booking at the end is removed with its leftovers, as in `BookingSync.assign`, and the start
+  gets an empty placeholder. Both sides are paired by the same order, so a chain never closes into a ring.
+- **Blocked seats:** `LockedSeats.lockedUnitSeatIds` names every seat whose unit is on the list of locked entries, also
+  when the model still shows an older booking there. A plan that touches such a seat is refused, otherwise the store
+  would reject the whole save and the moved state would stay unsaved.
+- **Stale views:** The view keeps id and seat of each source as chosen. If the plan, the seating plan or the view
+  (event, presentation) changed during the confirmation, nothing is moved and the footer says so.
+- **Collected tick:** The confirmation asks whether "Abgeholt" stays; removing it also clears the collection date.
+
 ## OpenPDF 1.3.x
 
 The PDF export uses OpenPDF 1.3.43 on purpose: from 2.x on, ICU4J (~15 MB) is a mandatory dependency, and the

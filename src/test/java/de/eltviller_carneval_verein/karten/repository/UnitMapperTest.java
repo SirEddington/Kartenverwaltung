@@ -1990,6 +1990,53 @@ class UnitMapperTest {
 		assertEquals(new VersionMarks(a1, a1, false), marksOf(changes, a3));
 	}
 
+	/** Verkauft den leeren Sitz a2 der ersten Vorstellung an "Schulz": das mittlere Glied von Kette und Ring (KARV-140). */
+	private static void sellMiddleSeat(Event event) {
+		event.getPresentations().get(0).getBookings().stream().filter(booking -> "seat-a2".equals(booking.getSeatId()))
+				.findFirst().orElseThrow().setLastName("Schulz");
+	}
+
+	/** KARV-140, Kette: Müller a1→a2, Schulz a2→a3 (frei). Das mittlere Glied trägt beide Vermerke, die Enden je einen. */
+	@Test
+	void chainMarksEveryLink() {
+		Event event = simpleEvent();
+		sellMiddleSeat(event);
+		event.getPresentations().get(0).getBookings().remove(named(event, 0, "Meier"));
+		List<Change> changes = changesAfter(event, () -> {
+			named(event, 0, "Müller").setSeatId("seat-a2");
+			named(event, 0, "Schulz").setSeatId("seat-a3");
+		});
+
+		UnitKey a1 = bookingKey(event, 0, "seat-a1");
+		UnitKey a2 = bookingKey(event, 0, "seat-a2");
+		UnitKey a3 = bookingKey(event, 0, "seat-a3");
+		assertEquals(new VersionMarks(a2, null, false), marksOf(changes, a1));
+		assertEquals(new VersionMarks(a3, a1, false), marksOf(changes, a2));
+		assertEquals(new VersionMarks(null, a2, false), marksOf(changes, a3));
+	}
+
+	/**
+	 * KARV-140, Ring: Müller a1→a2, Schulz a2→a3, Meier a3→a1. Jede Einheit nennt, wohin ihre Buchung ging und woher die
+	 * neue kam.
+	 */
+	@Test
+	void ringOverThreeSeatsMarksEveryUnitBothWays() {
+		Event event = simpleEvent();
+		sellMiddleSeat(event);
+		List<Change> changes = changesAfter(event, () -> {
+			named(event, 0, "Müller").setSeatId("seat-a2");
+			named(event, 0, "Schulz").setSeatId("seat-a3");
+			named(event, 0, "Meier").setSeatId("seat-a1");
+		});
+
+		UnitKey a1 = bookingKey(event, 0, "seat-a1");
+		UnitKey a2 = bookingKey(event, 0, "seat-a2");
+		UnitKey a3 = bookingKey(event, 0, "seat-a3");
+		assertEquals(new VersionMarks(a2, a3, false), marksOf(changes, a1));
+		assertEquals(new VersionMarks(a3, a1, false), marksOf(changes, a2));
+		assertEquals(new VersionMarks(a1, a2, false), marksOf(changes, a3));
+	}
+
 	@Test
 	void cancellationHasNoMarks() {
 		Event event = simpleEvent();

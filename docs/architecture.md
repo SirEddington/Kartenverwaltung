@@ -81,6 +81,9 @@ Money is always `int` cents. Rules that every UI path must apply the same way li
 - `SaleDates.change` sets reservation/payment/collection dates and the paid amount when a booking's state changes.
   The setters stay dumb because Jackson calls them while loading.
 - `BookingCancellation` turns a seat booking into an empty placeholder with a new id.
+- `BookingMove` (KARV-140) plans and runs the move of bookings to other seats of a presentation. A booking keeps its id,
+  chains of moves and swaps are resolved by a fixed rule, and a plan that no longer matches is not run
+  ([decisions.md](decisions.md#moving-bookings-keeps-the-booking-id-karv-140)).
 
 **Labels.** `HallObject` and `Table` implement `Labeled`: five text fields (auto, size, horizontal/vertical alignment,
 rotation) stored individually, bundled as the value type `TextSettings` for drawing and editing (never stored).

@@ -7,11 +7,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
+import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.ui.LiveViews;
 
 /**
@@ -75,6 +77,22 @@ public final class LockedSeats {
 			return false;
 		}
 		return units.contains(unit);
+	}
+
+	/**
+	 * Die Sitze der Vorstellung, deren Buchungs-Einheit die Liste der gesperrten Einträge führt, auch wenn die Buchung im
+	 * Modell noch einen belegten Stand zeigt (KARV-140). Anders als {@link #isLocked} fragt sie die Einheiten, nicht die
+	 * Buchungen. Ohne Einrichtung und ohne Event leer.
+	 */
+	public static Set<String> lockedUnitSeatIds(Presentation presentation) {
+		Event event = presentation == null ? null : presentation.getParent();
+		if (event == null) {
+			return Set.of();
+		}
+		return locked.get().stream()
+				.filter(unit -> unit.type() == UnitType.BOOKING && !unit.isUnassigned()
+						&& event.getId().equals(unit.eventId()) && presentation.getId().equals(unit.presentationId()))
+				.map(UnitKey::bookingDir).collect(Collectors.toUnmodifiableSet());
 	}
 
 	/** Nimmt die gesperrten Sitze aus einer Auswahl: Sie lassen sich weder verkaufen noch stornieren. */

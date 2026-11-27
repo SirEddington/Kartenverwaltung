@@ -45,6 +45,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.BookingMove;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
@@ -73,6 +74,7 @@ import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
+import de.eltviller_carneval_verein.karten.store.VersionMarks;
 import de.eltviller_carneval_verein.karten.tracking.ChangeTracker;
 import de.eltviller_carneval_verein.karten.ui.ConflictActions;
 import de.eltviller_carneval_verein.karten.ui.ConflictList;
@@ -659,6 +661,336 @@ class ConflictScenarioTest {
 		}
 		assertSettled(m);
 	}
+
+	// Verschieben mit BookingMove: Tausch und Kette aus einem Speichervorgang (KARV-140, Spec Abschnitt 8) -->
+
+	/** A verkauft Sitz 1 an Nora, und B kennt sie dort; Müller sitzt seit {@link #setUp} auf Sitz 0, Sitz 2 ist frei. */
+	private String noraOnSeatOne(Machine a, Machine b) throws IOException {
+		String noraId = a.sell(1, "Nora").getId();
+		untilQuiet(a, b);
+		assertEquals(noraId, b.seat(1).getId(), "B kennt Nora auf Sitz 1");
+		return noraId;
+	}
+
+	/**
+	 * {@code first} lädt zuerst hoch, dann der andere; danach takten beide, bis Ruhe herrscht.
+	 *
+	 * @return der Rechner, der zuerst hochgeladen hat
+	 */
+	private Machine uploadInOrder(String first, Machine a, Machine b) throws IOException {
+		Machine winner = "a".equals(first) ? a : b;
+		winner.tick();
+		(winner == a ? b : a).tick();
+		untilQuiet(a, b);
+		return winner;
+	}
+
+	/**
+	 * „Muss gelten“ für eine Buchung (KARV-140, Spec Abschnitt 8): Auf jedem Rechner lebt sie genau einmal, im Speicher in
+	 * der Einheit {@code unit} und im Modell an deren Platz, also auf dem Sitz der Einheit oder „ohne Platz“.
+	 */
+	private static void assertLivesOnceAt(UnitKey unit, String bookingId, Machine... machines) {
+		for (Machine machine : machines) {
+			assertEquals(Set.of(unit), carriers(machine, bookingId), machine.name);
+			ObjectNode payload = machine.eventState().get(unit).payload();
+			assertEquals(unit.isUnassigned(), payload.get("unassigned").asBoolean(), machine.name);
+			assertEquals(unit.isUnassigned() ? "null" : unit.bookingDir(), payload.get("seatId").asText(), machine.name);
+			assertEquals(Set.of(unit.isUnassigned() ? "null" : unit.bookingDir()), carriersInModel(machine, bookingId),
+					machine.name);
+		}
+	}
+
+	/** Die Buchung lebt auf keinem Rechner mehr, weder im Speicher noch im Modell. */
+	private static void assertGone(String bookingId, Machine... machines) {
+		for (Machine machine : machines) {
+			assertEquals(Set.of(), carriers(machine, bookingId), machine.name);
+			assertEquals(Set.of(), carriersInModel(machine, bookingId), machine.name);
+		}
+	}
+
+	/** „Muss gelten“: Im Modell keines Rechners teilen sich zwei Buchungen mit Daten einen Sitz. */
+	private static void assertNoSeatCarriesTwoBookings(Machine... machines) {
+		for (Machine machine : machines) {
+			Map<String, Long> perSeat = machine.friday().getBookings().stream()
+					.filter(x -> x.hasData() && !x.isUnassigned())
+					.collect(Collectors.groupingBy(Booking::getSeatId, Collectors.counting()));
+			perSeat.forEach((seatId, count) -> assertEquals(1, count, machine.name + ": Sitz " + seatId));
+		}
+	}
+
+	/** Die Vermerke im Verlauf aller Einheiten des Events, wie der Rechner sie kennt. */
+	private static long noteCount(Machine machine) throws IOException {
+		long count = 0;
+		for (UnitKey unit : machine.eventState().keySet()) {
+			count += notes(machine, unit);
+		}
+		return count;
+	}
+
+	/** Kein Rechner hat einen offenen Konflikt, und keine Einheit des Events trägt einen Vermerk. */
+	private static void assertNoNotes(Machine... machines) throws IOException {
+		for (Machine machine : machines) {
+			assertEquals(List.of(), machine.open(), machine.name);
+			assertEquals(0, noteCount(machine), machine.name);
+		}
+	}
+
+	/** Der einzige offene Konflikt des Rechners: ein Vermerk dieser Art an dieser Einheit. */
+	private static ConflictNote assertOnlyOpen(Machine machine, ConflictNote.Kind kind, UnitKey unit) {
+		List<OpenConflict> open = machine.open();
+		assertEquals(1, open.size(), machine.name + ": " + open);
+		assertNotNull(open.get(0).note(), open.toString());
+		assertEquals(kind, open.get(0).note().kind(), open.toString());
+		assertEquals(unit, open.get(0).unit(), open.toString());
+		return open.get(0).note();
+	}
+
+	/** Die Umzugsangaben am Stand der Einheit, wie der Rechner sie kennt. */
+	private static VersionMarks marks(Machine machine, UnitKey unit) throws IOException {
+		return machine.sync.unitState(unit).current().marks();
+	}
+
+	/**
+	 * B tauscht Müller (Sitz 0) und Nora (Sitz 1) in einem Speichervorgang, A hat nichts geändert: A übernimmt den Tausch
+	 * ohne Vermerk. Beide Einheiten nennen den Umzug in beide Richtungen.
+	 */
+	@Test
+	void swapByBookingMoveIsAdoptedWithoutConflict() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String muellerId = a.seat(0).getId();
+		String noraId = noraOnSeatOne(a, b);
+
+		moveWith(b, List.of(0), List.of(1));
+		b.tick();
+
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		UnitKey seat0 = seatUnit(a, 0);
+		UnitKey seat1 = seatUnit(a, 1);
+		assertLivesOnceAt(seat1, muellerId, a, b);
+		assertLivesOnceAt(seat0, noraId, a, b);
+		assertEquals(new VersionMarks(seat1, seat1, false), marks(a, seat0));
+		assertEquals(new VersionMarks(seat0, seat0, false), marks(a, seat1));
+		assertNoNotes(a, b);
+		assertNoSeatCarriesTwoBookings(a, b);
+		assertSettled(m);
+	}
+
+	/**
+	 * B setzt Müller von Sitz 0 auf Sitz 1 und Nora von Sitz 1 auf den freien Sitz 2, in einem Speichervorgang; A hat nichts
+	 * geändert und übernimmt die Kette ohne Vermerk. Sitz 0 ist danach frei, jedes Glied nennt seinen Umzug.
+	 */
+	@Test
+	void chainByBookingMoveIsAdoptedWithoutConflict() throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String muellerId = a.seat(0).getId();
+		String noraId = noraOnSeatOne(a, b);
+
+		moveWith(b, List.of(0, 1), List.of(1, 2));
+		b.tick();
+
+		untilQuiet(a, b);
+
+		assertConverged(a, b);
+		UnitKey seat0 = seatUnit(a, 0);
+		UnitKey seat1 = seatUnit(a, 1);
+		UnitKey seat2 = seatUnit(a, 2);
+		assertLivesOnceAt(seat1, muellerId, a, b);
+		assertLivesOnceAt(seat2, noraId, a, b);
+		assertTrue(a.eventState().get(seat0).deleted(), "Sitz 0 ist frei");
+		assertEquals(new VersionMarks(seat1, null, false), marks(a, seat0));
+		assertEquals(new VersionMarks(seat2, seat0, false), marks(a, seat1));
+		assertEquals(new VersionMarks(null, seat1, false), marks(a, seat2));
+		assertNoNotes(a, b);
+		assertNoSeatCarriesTwoBookings(a, b);
+		assertSettled(m);
+	}
+
+	/**
+	 * B tauscht Müller (Sitz 0) und Nora (Sitz 1), A ändert gleichzeitig Noras Kommentar auf Sitz 1. In beiden
+	 * Reihenfolgen gilt der Tausch, A's Änderung folgt Nora auf Sitz 0, und niemand bekommt einen Vermerk.
+	 */
+	@ParameterizedTest(name = "zuerst hochgeladen: {0}")
+	@ValueSource(strings = { "a", "b" })
+	void swapAgainstEditKeepsBothAndTheEdit(String first) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String muellerId = a.seat(0).getId();
+		String noraId = noraOnSeatOne(a, b);
+
+		moveWith(b, List.of(0), List.of(1));
+		a.seat(1).setComment("Fenster");
+		a.repository.saveEvent(a.event);
+		uploadInOrder(first, a, b);
+
+		assertConverged(a, b);
+		assertLivesOnceAt(seatUnit(a, 1), muellerId, a, b);
+		assertLivesOnceAt(seatUnit(a, 0), noraId, a, b);
+		for (Machine machine : m) {
+			assertEquals("Fenster", machine.eventState().get(seatUnit(a, 0)).payload().get("comment").asText(),
+					machine.name + ": A's Änderung bleibt");
+			assertEquals("Fenster", booking(machine, noraId).getComment(), machine.name);
+		}
+		assertNoNotes(a, b);
+		assertNoSeatCarriesTwoBookings(a, b);
+		assertSettled(m);
+	}
+
+	/**
+	 * B tauscht Müller (Sitz 0) und Nora (Sitz 1), A storniert gleichzeitig Nora. In beiden Reihenfolgen gilt das Storno,
+	 * Müller lebt genau einmal, und B hat den Vermerk „Gelöscht“ an Sitz 1 mit Sitz 0 als Ort zum Wiederherstellen.
+	 * <p>
+	 * Festgehaltener Stand, der offen bleiben darf (Spec Abschnitt 8): Lädt A zuerst hoch, steht Müller „ohne Platz“,
+	 * obwohl beide Sitze frei sind, und für das Parken gibt es keinen eigenen Vermerk (eine Version trägt nur einen). Lädt
+	 * B zuerst hoch, sitzt Müller auf Sitz 1.
+	 */
+	@ParameterizedTest(name = "zuerst hochgeladen: {0}")
+	@ValueSource(strings = { "a", "b" })
+	void swapAgainstCancellationConverges(String first) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String muellerId = a.seat(0).getId();
+		String noraId = noraOnSeatOne(a, b);
+
+		moveWith(b, List.of(0), List.of(1));
+		a.seat(1).clearCustomerData();
+		a.repository.saveEvent(a.event);
+		Machine winner = uploadInOrder(first, a, b);
+
+		assertConverged(a, b);
+		UnitKey seat0 = seatUnit(a, 0);
+		UnitKey seat1 = seatUnit(a, 1);
+		assertGone(noraId, a, b);
+		UnitKey mueller = winner == a ? unassignedUnit(a, muellerId) : seat1;
+		assertLivesOnceAt(mueller, muellerId, a, b);
+		assertTrue(a.eventState().get(seat0).deleted(), "Sitz 0 ist frei");
+		if (winner == a) {
+			assertTrue(a.eventState().get(seat1).deleted(), "Sitz 1 ist frei");
+			assertEquals(seat0, marks(a, mueller).movedFrom(), "das Parken nennt Müllers Sitz vor dem Tausch");
+		}
+		assertEquals(List.of(), a.open(), "A");
+		assertEquals(seat0, assertOnlyOpen(b, ConflictNote.Kind.DELETE_WINS, seat1).moved());
+		for (Machine machine : m) {
+			assertEquals(1, noteCount(machine), machine.name + ": nur der Vermerk zum Storno");
+		}
+		assertNoSeatCarriesTwoBookings(a, b);
+		assertSettled(m);
+	}
+
+	/**
+	 * Wie {@link #swapAgainstCancelAndResellKeepsBothBookingsOnce}, der Tausch aber mit {@link BookingMove}: B tauscht Müller
+	 * (Sitz 0) und Nora (Sitz 1), A storniert Nora und verkauft Sitz 1 an Xaver. Das Storno gilt; wer zuerst hochlädt,
+	 * behält Sitz 1, die andere Buchung lebt genau einmal „ohne Platz“.
+	 * <p>
+	 * Festgehaltener Stand, der offen bleiben darf (Spec Abschnitt 8): In beiden Reihenfolgen gibt es nur B's Vermerk
+	 * „Gelöscht“ zu Nora; der Vermerk „Doppelverkauf“ für die geparkte Buchung fehlt (eine Version trägt nur einen), auch
+	 * bei A, wenn Xaver parkt. Sitz 0 ist frei, die geparkte Buchung landet trotzdem „ohne Platz“.
+	 */
+	@ParameterizedTest(name = "zuerst hochgeladen: {0}")
+	@ValueSource(strings = { "a", "b" })
+	void swapByBookingMoveAgainstCancelAndResellKeepsBothBookingsOnce(String first) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String muellerId = a.seat(0).getId();
+		String noraId = noraOnSeatOne(a, b);
+
+		moveWith(b, List.of(0), List.of(1));
+		assertEquals(muellerId, b.seat(1).getId(), "B: Müller auf Sitz 1");
+		a.seat(1).clearCustomerData();
+		String xaverId = a.sell(1, "Xaver").getId();
+		Machine winner = uploadInOrder(first, a, b);
+
+		assertConverged(a, b);
+		UnitKey seat0 = seatUnit(a, 0);
+		UnitKey seat1 = seatUnit(a, 1);
+		String winnerId = winner == a ? xaverId : muellerId;
+		String loserId = winner == a ? muellerId : xaverId;
+		UnitKey parked = unassignedUnit(a, loserId);
+		assertGone(noraId, a, b);
+		assertLivesOnceAt(seat1, winnerId, a, b);
+		assertLivesOnceAt(parked, loserId, a, b);
+		assertEquals(Set.of(parked), unassigned(a).keySet());
+		assertTrue(a.eventState().get(seat0).deleted(), "Sitz 0 ist frei");
+		assertEquals(winner == a ? seat0 : seat1, marks(a, parked).movedFrom(),
+				"das Parken nennt Müllers Sitz vor dem Tausch oder Xavers Sitz");
+		assertEquals(List.of(), a.open(), "A");
+		assertEquals(seat0, assertOnlyOpen(b, ConflictNote.Kind.DELETE_WINS, seat1).moved());
+		for (Machine machine : m) {
+			assertEquals(1, noteCount(machine), machine.name + ": nur der Vermerk zum Storno");
+			assertModelShowsDoubleSale(machine, 1, winner == a ? "Xaver" : "Müller", loserId,
+					winner == a ? "Müller" : "Xaver");
+		}
+		assertNoSeatCarriesTwoBookings(a, b);
+	}
+
+	/**
+	 * Sitz 1 ist frei, seine Buchung trägt aber einen Rest (einen alten Kommentar, KARV-121). B verschiebt Müller mit
+	 * {@link BookingMove} von Sitz 0 dorthin, A verkauft den Sitz gleichzeitig an Xaver: ein Doppelverkauf. Wer zuerst
+	 * hochlädt, behält Sitz 1; die andere Buchung lebt genau einmal „ohne Platz“, und ihr Rechner hat den Vermerk.
+	 * <p>
+	 * Festgehaltener Stand, der offen bleiben darf (Spec Abschnitt 8): Lädt A zuerst hoch, steht Müller „ohne Platz“,
+	 * obwohl sein alter Sitz 0 frei ist; das Parken nennt Sitz 0 als Herkunft.
+	 */
+	@ParameterizedTest(name = "zuerst hochgeladen: {0}")
+	@ValueSource(strings = { "a", "b" })
+	void moveOntoSeatWithLeftoversAgainstSaleOfThatSeatKeepsBothBookings(String first) throws IOException {
+		Machine[] m = machines("a", "b");
+		Machine a = m[0];
+		Machine b = m[1];
+		setUp(a, b);
+		String muellerId = a.seat(0).getId();
+		a.seat(1).setComment("alter Kommentar");
+		a.repository.saveEvent(a.event);
+		String leftoverId = a.seat(1).getId();
+		untilQuiet(a, b);
+		assertFalse(a.eventState().get(seatUnit(a, 1)).deleted(), "der Sitz mit Rest hat eine Einheit");
+		assertTrue(b.seat(1).hasLeftovers(), "B kennt den Rest");
+
+		moveWith(b, List.of(0), List.of(1));
+		assertEquals(muellerId, b.seat(1).getId(), "B: Müller auf Sitz 1");
+		a.seat(1).clearLeftovers();
+		String xaverId = a.sell(1, "Xaver").getId();
+		assertNotEquals(leftoverId, xaverId, "ein neuer Verkauf hat eine neue Kennung");
+		Machine winner = uploadInOrder(first, a, b);
+
+		assertConverged(a, b);
+		Machine loser = winner == a ? b : a;
+		UnitKey seat0 = seatUnit(a, 0);
+		UnitKey seat1 = seatUnit(a, 1);
+		String winnerId = winner == a ? xaverId : muellerId;
+		String loserId = winner == a ? muellerId : xaverId;
+		UnitKey parked = unassignedUnit(a, loserId);
+		assertGone(leftoverId, a, b);
+		assertLivesOnceAt(seat1, winnerId, a, b);
+		assertLivesOnceAt(parked, loserId, a, b);
+		assertEquals(Set.of(parked), unassigned(a).keySet());
+		assertTrue(a.eventState().get(seat0).deleted(), "Sitz 0 ist frei");
+		assertEquals(winner == a ? seat0 : seat1, marks(a, parked).movedFrom(),
+				"das Parken nennt Müllers Sitz vor dem Umzug oder Xavers Sitz");
+		assertDoubleSale(loser, parked, seat1);
+		assertTrue(winner.open().isEmpty(), "der Gewinner hat keinen Konflikt: " + winner.open());
+		for (Machine machine : m) {
+			assertEquals(1, noteCount(machine), machine.name + ": nur der Doppelverkauf");
+			assertModelShowsDoubleSale(machine, 1, winner == a ? "Xaver" : "Müller", loserId,
+					winner == a ? "Müller" : "Xaver");
+		}
+		assertNoSeatCarriesTwoBookings(a, b);
+	}
+
+	// <-- Verschieben mit BookingMove
 
 	/**
 	 * B verkauft zwei Plätze in einem Speichervorgang, A hat beide schon verkauft: Jede Zusammenführung hat ihren eigenen
@@ -1868,6 +2200,21 @@ class ConflictScenarioTest {
 		Syncs.sync(machine.friday(), machine.plan());
 		machine.repository.saveEvent(machine.event);
 		return booking;
+	}
+
+	/**
+	 * Verschiebt die Buchungen der Sitze {@code fromSeats} mit {@link BookingMove} auf die Sitze {@code toSeats}, wie die
+	 * Oberfläche (KARV-140): Zuordnung nach der Reihenfolge der Plätze, eine belegende Buchung am Ziel zieht im Gegenzug
+	 * um. Danach wird in einem Speichervorgang gespeichert.
+	 */
+	private static void moveWith(Machine machine, List<Integer> fromSeats, List<Integer> toSeats) {
+		List<BookingMove.Source> sources = fromSeats.stream().map(n -> BookingMove.Source.of(machine.seat(n))).toList();
+		List<String> targets = toSeats.stream().map(n -> machine.plan().getSeats().get(n).getId()).toList();
+		BookingMove.Plan plan = BookingMove.plan(machine.friday(), machine.plan(), sources, targets, Set.of());
+		assertNull(plan.refusal(), "der Plan ist ausführbar");
+		assertTrue(BookingMove.apply(machine.friday(), machine.plan(), sources, targets, Set.of(), plan));
+		Syncs.sync(machine.friday(), machine.plan());
+		machine.repository.saveEvent(machine.event);
 	}
 
 	/** Die neueste Änderungsliste des Rechners im gemeinsamen Ordner. */
