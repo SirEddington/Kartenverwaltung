@@ -27,6 +27,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
+import de.eltviller_carneval_verein.karten.model.CashRegister.Kind;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -56,6 +58,13 @@ public class StoreEventRepository implements EventRepository {
 
 	/** Die Eigenschaftsnamen, die Jackson je Modellklasse kennt (siehe {@link #knownProperties}). */
 	private static final Map<Class<?>, Set<String>> KNOWN_PROPERTIES = new ConcurrentHashMap<>();
+
+	/**
+	 * Die Listen der Kind-Einheiten im Inhalt eines Modellobjekts: Sie gehören zu eigenen Einheiten, die Wege der
+	 * Konfliktaktionen ({@link #applyFields}, {@link #restoreFields}) lassen sie außen vor.
+	 */
+	private static final List<String> CHILD_LISTS = List.of(UnitMapper.PRESENTATIONS, UnitMapper.CASH_REGISTERS,
+			UnitMapper.BOOKINGS);
 
 	private static StoreEventRepository instance;
 
@@ -475,7 +484,7 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
-	 * Das Objekt im Modell zur Einheit (Event, Presentation oder Booking), sonst {@code null}. Bei einer Buchung auf einem
+	 * Das Objekt im Modell zur Einheit (Event, Presentation, CashRegister oder Booking), sonst {@code null}. Bei einer Buchung auf einem
 	 * Sitz ist es auch der leere Platzhalter, wenn der Sitz frei ist (siehe {@link Booking#hasData()}).
 	 */
 	public Object modelObject(UnitKey unit) {
@@ -531,8 +540,7 @@ public class StoreEventRepository implements EventRepository {
 	public void applyFields(UnitKey unit, ObjectNode fields) {
 		Object model = requireEventModel(unit);
 		ObjectNode merged = UnitMapper.normalize(model);
-		merged.remove(UnitMapper.PRESENTATIONS);
-		merged.remove(UnitMapper.BOOKINGS);
+		merged.remove(CHILD_LISTS);
 		Set<String> known = knownProperties(model.getClass());
 		fields.fields().forEachRemaining(field -> {
 			if (field.getValue().isNull() && !known.contains(field.getKey())) {
@@ -556,8 +564,8 @@ public class StoreEventRepository implements EventRepository {
 							lockedSeatIds(unit.eventId(), presentation));
 				}
 			}
+			case CASH_REGISTER -> ((CashRegister) model).copyFrom(MAPPER.treeToValue(merged, CashRegister.class));
 			case HALL -> throw new IllegalStateException("Eine Halle ist keine Einheit eines Events.");
-			case CASH_REGISTER -> throw new UnsupportedOperationException("Kassen-Speicherung folgt (KARV-144)");
 			}
 		} catch (JsonProcessingException e) {
 			throw new IllegalStateException("Der Inhalt von " + unit.relativePath() + " lässt sich nicht lesen: "
@@ -577,8 +585,8 @@ public class StoreEventRepository implements EventRepository {
 		case BOOKING -> FieldGroups.booking();
 		case PRESENTATION -> FieldGroups.presentation();
 		case EVENT -> FieldGroups.eventHead();
+		case CASH_REGISTER -> FieldGroups.cashRegister();
 		case HALL -> throw new IllegalArgumentException("Eine Halle hat keine Feldgruppen im Event.");
-		case CASH_REGISTER -> throw new UnsupportedOperationException("Kassen-Feldgruppen folgen (KARV-144)");
 		};
 		ObjectNode fields = values.deepCopy();
 		for (String field : groups.getOrDefault(group, List.of(group))) {
@@ -602,7 +610,7 @@ public class StoreEventRepository implements EventRepository {
 		Object model = requireEventModel(unit);
 		ObjectNode fields = before.deepCopy();
 		UnitMapper.normalize(model).fieldNames().forEachRemaining(name -> {
-			if (!fields.has(name) && !UnitMapper.PRESENTATIONS.equals(name) && !UnitMapper.BOOKINGS.equals(name)) {
+			if (!fields.has(name) && !CHILD_LISTS.contains(name)) {
 				fields.putNull(name);
 			}
 		});
@@ -1507,13 +1515,24 @@ public class StoreEventRepository implements EventRepository {
 		return changes.movedCarriers(bookingId, unit).stream().anyMatch(carrier -> touchedByUser(event, changes, carrier));
 	}
 
-	/** Ob der Nutzer die Einheit ungespeichert geändert hat oder ihr Objekt im Modell gerade bearbeitet. */
+	/**
+	 * Ob der Nutzer die Einheit ungespeichert geändert hat oder ihr Objekt im Modell gerade bearbeitet. Eine
+	 * Vorstellungskasse gilt auch als bearbeitet, solange ihre Vorstellung es ist, mit oder ohne eigenes Objekt
+	 * (Kassenabgleich, KARV-144): Eine Eingabe dort holt die Kasse erst zum Ändern.
+	 */
 	private boolean touchedByUser(Event event, LocalChanges changes, UnitKey unit) {
 		if (changes.units().contains(unit)) {
 			return true;
 		}
 		Object model = EventMerge.modelObject(event, unit);
-		return model != null && inEditing.test(model);
+		if (model != null && inEditing.test(model)) {
+			return true;
+		}
+		if (unit.type() != UnitType.CASH_REGISTER || CashRegister.kindOf(unit.cashRegisterId()) != Kind.PRESENTATION) {
+			return false;
+		}
+		Presentation presentation = event.findPresentation(unit.cashRegisterId());
+		return presentation != null && inEditing.test(presentation);
 	}
 
 	/**
@@ -1855,6 +1874,7 @@ public class StoreEventRepository implements EventRepository {
 					Event rebuilt = MAPPER.readValue(state, Event.class);
 					copy.copyFrom(rebuilt);
 					copy.setPresentations(rebuilt.getPresentations());
+					copy.setCashRegisters(rebuilt.getCashRegisters());
 				} catch (IOException e) {
 					throw new UncheckedIOException(e);
 				}

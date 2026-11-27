@@ -32,6 +32,13 @@ class EntityLabelsTest {
 	}
 
 	@Test
+	void cashRegisterLabelQuotesTheDisplayName() {
+		assertEquals("Kasse \"Gemeinsame Kasse\"", EntityLabels.cashRegister("Gemeinsame Kasse"));
+		assertEquals("Kasse \"Kasse Freitag\"", EntityLabels.cashRegister("Kasse Freitag"));
+		assertEquals("Kasse ohne Namen", EntityLabels.cashRegister(" "));
+	}
+
+	@Test
 	void seatWithoutParentsIsDescribedByNumberOnly() {
 		Seat seat = new Seat();
 		seat.setSeatNumber(7);

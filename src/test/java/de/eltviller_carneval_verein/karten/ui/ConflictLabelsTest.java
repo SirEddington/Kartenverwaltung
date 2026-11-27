@@ -15,6 +15,8 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -74,6 +76,24 @@ class ConflictLabelsTest {
 	void eventAndPresentationAreNamed() {
 		assertEquals("Prunksitzung", labels().apply(UnitKey.event(event.getId())));
 		assertEquals("Prunksitzung › Freitag", labels().apply(UnitKey.presentation(event.getId(), friday.getId())));
+	}
+
+	@Test
+	void cashRegisterLabel() {
+		CashRegisters.selectShared(event, true);
+		CashRegister free = CashRegisters.addFree(event);
+		Function<UnitKey, String> labels = ConflictLabels.of(id -> event.getId().equals(id) ? event : null,
+				unit -> unit.type() == UnitType.CASH_REGISTER ? event.findCashRegister(unit.cashRegisterId()) : null,
+				id -> null, unit -> "_weg".equals(unit.cashRegisterId()) ? "Abendkasse" : null);
+
+		assertEquals("Prunksitzung › Gemeinsame Kasse", labels.apply(UnitKey.cashRegister(event.getId(), CashRegister.SHARED_ID)));
+		assertEquals("Prunksitzung › Neue Kasse", labels.apply(UnitKey.cashRegister(event.getId(), free.getId())));
+		// ohne Objekt: der Vorgabename, ohne Vorstellung ohne Ausnahme
+		assertEquals("Prunksitzung › Kasse Freitag", labels.apply(UnitKey.cashRegister(event.getId(), friday.getId())));
+		assertEquals("Prunksitzung › Abendkasse", labels.apply(UnitKey.cashRegister(event.getId(), "_weg")),
+				"eine Kasse, die es im Modell nicht mehr gibt, heißt wie in ihrer letzten Version");
+		assertEquals("Prunksitzung › Kasse ohne Vorstellung", labels().apply(UnitKey.cashRegister(event.getId(), "weg")));
+		assertNull(labels().apply(UnitKey.cashRegister("gone", "weg")));
 	}
 
 	@Test

@@ -58,6 +58,16 @@ public final class EntityLabels {
 		return named("Vorstellung", presentation.getName());
 	}
 
+	/**
+	 * z. B. {@code Kasse "Gemeinsame Kasse"} (KARV-144); der Anzeigename steht in Anführungszeichen, weil er selbst mit
+	 * "Kasse" beginnen kann. Ohne Namen "Kasse ohne Namen".
+	 *
+	 * @param displayName der Anzeigename der Kasse ({@code CashRegisters.displayName})
+	 */
+	public static String cashRegister(String displayName) {
+		return (displayName == null || displayName.isBlank()) ? named("Kasse", null) : "Kasse \"" + displayName + "\"";
+	}
+
 	/** "<Art> <Name>", ohne Namen "<Art> ohne Namen". */
 	private static String named(String kind, String name) {
 		return (name == null || name.isBlank()) ? kind + " ohne Namen" : kind + " " + name;

@@ -124,6 +124,11 @@ public class CashRegister {
 	/** Die Art der Kasse nach der Kennung: {@code _event} gemeinsam, {@code _…} frei, sonst Vorstellungskasse. */
 	@JsonIgnore
 	public Kind kind() {
+		return kindOf(id);
+	}
+
+	/** Die Art einer Kasse mit dieser Kennung, auch ohne Objekt (etwa für eine Einheit im Versionsspeicher). */
+	public static Kind kindOf(String id) {
 		if (SHARED_ID.equals(id)) {
 			return Kind.SHARED;
 		}

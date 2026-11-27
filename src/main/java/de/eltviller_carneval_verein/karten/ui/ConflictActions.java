@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -1026,10 +1027,15 @@ public final class ConflictActions {
 
 	// <-- Gegenstand der Aktionen
 
-	/** Ob das Event ungespeicherte Änderungen hat oder darin etwas bearbeitet wird. */
+	/** Ob das Event ungespeicherte Änderungen hat oder darin etwas bearbeitet wird (auch eine Kasse, KARV-144). */
 	private boolean inUse(Event event) {
 		if (eventTracker.isDirty(event) || editing.isEditing(event)) {
 			return true;
+		}
+		for (CashRegister register : event.getCashRegisters()) {
+			if (editing.isEditing(register)) {
+				return true;
+			}
 		}
 		if (event.getPresentations() == null) {
 			return false;

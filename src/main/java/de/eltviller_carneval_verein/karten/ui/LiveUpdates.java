@@ -17,6 +17,8 @@ import java.util.logging.Logger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -354,7 +356,7 @@ public final class LiveUpdates {
 
 	// Hinweise -->
 
-	private static String deferralText(Deferral deferral) {
+	private String deferralText(Deferral deferral) {
 		return "„" + label(deferral.model()) + "“ wurde auf " + onMachine(deferral.machineName()) + " geändert. Deine Änderung"
 				+ " daran ist noch nicht gespeichert; speichere sie, dann erscheint ein Konflikt, falls sich etwas widerspricht.";
 	}
@@ -370,15 +372,29 @@ public final class LiveUpdates {
 		return machineName.matches("(?iu)rechner\\b.*") ? machineName : "Rechner " + machineName;
 	}
 
-	/** Der Eintrag, den der Hinweis nennt: Buchung über {@link EntityLabels#booking}, sonst der Name. */
-	private static String label(Object model) {
+	/**
+	 * Der Eintrag, den der Hinweis nennt: Buchung über {@link EntityLabels#booking}, Kasse mit ihrem Anzeigenamen
+	 * ({@link CashRegisters#displayName}), sonst der Name.
+	 */
+	private String label(Object model) {
 		return switch (model) {
 		case Booking booking -> EntityLabels.booking(booking);
 		case Event event -> EntityLabels.nameOrPlaceholder(event.getName());
 		case Presentation presentation -> EntityLabels.nameOrPlaceholder(presentation.getName());
+		case CashRegister register -> cashRegisterLabel(register);
 		case Hall hall -> EntityLabels.nameOrPlaceholder(hall.getName());
 		case null, default -> EntityLabels.NAME_PLACEHOLDER;
 		};
+	}
+
+	/** Der Anzeigename der Kasse; ihr Vorgabename braucht das Event, zu dessen Liste sie gehört. */
+	private String cashRegisterLabel(CashRegister register) {
+		for (Event event : events.loadEvents()) {
+			if (event.getCashRegisters().contains(register)) {
+				return CashRegisters.displayName(event, register);
+			}
+		}
+		return EntityLabels.nameOrPlaceholder(register.getName());
 	}
 
 	// <-- Hinweise

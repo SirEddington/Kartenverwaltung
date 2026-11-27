@@ -46,7 +46,7 @@ class ArchitectureGuardTest {
 			"repository/StoreEventRepository.java#readBooking", 1,
 			"repository/StoreHallRepository.java#readHall", 1,
 			// Felder aus dem Konflikt-Dialog in den eigenen Stand mischen; ein gesperrter Inhalt scheitert beim Speichern am Gate
-			"repository/StoreEventRepository.java#applyFields", 3,
+			"repository/StoreEventRepository.java#applyFields", 4,
 			// liest die eigenen Bytes eines Events, das über readUnit zusammengesetzt wurde
 			"repository/StoreEventRepository.java#rebuild", 1,
 			// gemerkte Zustände des eigenen Modells (Rückgängig, Einarbeiten, Validierung)
