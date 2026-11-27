@@ -374,6 +374,38 @@ class CashRegistersTest {
 	}
 
 	@Test
+	void freeRegisterWithoutNameShowsPlaceholder() {
+		CashRegister free = CashRegisters.addFree(event);
+		CashRegisters.setName(event, free.getId(), "");
+
+		assertNull(free.getName());
+		assertEquals("(ohne Name)", CashRegisters.displayName(event, free));
+		assertEquals("(ohne Name)", CashRegisters.visible(event).get(0).displayName());
+	}
+
+	@Test
+	void presentationWithoutNameGetsPlaceholderInDefaultName() {
+		Presentation p = presentation(null);
+
+		assertEquals("Kasse (ohne Name)", CashRegisters.visible(event).get(0).displayName());
+
+		p.setActualCashAmount(500);
+		CashRegisters.presentationRemoved(event, p);
+		assertEquals("Kasse (ohne Name)", event.findCashRegister(p.getId()).getName());
+	}
+
+	@Test
+	void setCommentBlankBecomesNull() {
+		Presentation p = presentation("Sitzung 1");
+		CashRegisters.setComment(event, p, "k");
+		CashRegisters.setComment(event, p, "  ");
+
+		assertNull(event.findCashRegister(p.getId()).getCashDifferenceComment());
+		CashRegisters.setComment(event, p, "");
+		assertNull(event.findCashRegister(p.getId()).getCashDifferenceComment());
+	}
+
+	@Test
 	void setPresentationIdsNullBecomesEmptyList() {
 		CashRegister register = new CashRegister();
 		register.setPresentationIds(null);

@@ -240,6 +240,18 @@ class CashRegisterSectionTest {
 	}
 
 	@Test
+	void renameFreeRegisterComparesStoredName() {
+		CashRegister free = CashRegisters.addFree(event);
+		assertTrue(CashRegisterSection.rename(event, free.getId(), ""));
+		assertNull(free.getName());
+		assertEquals("(ohne Name)", CashRegisterSection.displayName(event, free.getId()));
+
+		assertTrue(CashRegisterSection.rename(event, free.getId(), "Neue Kasse"));
+		assertEquals("Neue Kasse", free.getName());
+		assertFalse(CashRegisterSection.rename(event, free.getId(), "Neue Kasse"));
+	}
+
+	@Test
 	void selectionFollowsIdAfterRebuild() {
 		CashRegister free = CashRegisters.addFree(event);
 		List<Row> before = rows();

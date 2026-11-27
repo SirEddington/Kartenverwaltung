@@ -251,7 +251,11 @@ final class CashRegisterSection {
 		if (register == null && presentation == null) {
 			return false;
 		}
-		boolean unchanged = wanted.isEmpty() ? register == null || isBlank(register.getName()) : wanted.equals(displayName(event, id));
+		// Eine freie Kasse hat keinen Vorgabenamen: Sie wird mit ihrem gespeicherten Namen verglichen, sonst bliebe ein
+		// gelöschter Name bei der Eingabe des Platzhalters ohne Namen.
+		boolean free = register != null && register.kind() == CashRegister.Kind.FREE;
+		boolean unchanged = wanted.isEmpty() ? register == null || isBlank(register.getName())
+				: wanted.equals(free ? register.getName() : displayName(event, id));
 		if (unchanged) {
 			return false;
 		}

@@ -311,7 +311,8 @@ public final class VersionStore {
 	 * Die Namen der Unterordner von {@code <parent>/<folder>}, die eine Einheit bezeichnen (gültiger Name), sortiert;
 	 * leer, wenn der Ordner fehlt.
 	 *
-	 * @param folder {@code presentations} unter einem Event oder {@code bookings} unter einem Auftritt
+	 * @param folder {@code presentations} oder {@code cashRegisters} unter einem Event oder {@code bookings} unter einem
+	 *               Auftritt
 	 */
 	public List<String> childNames(UnitKey parent, String folder) throws IOException {
 		Path childDir = unitDir(parent).resolve(folder);

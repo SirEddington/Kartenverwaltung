@@ -936,10 +936,14 @@ public class StoreEventRepository implements EventRepository {
 			return;
 		}
 		for (Event event : List.copyOf(cachedEvents)) {
-			if (!cashRegisterKnown(event.getId()) && headCarriesRequires(event.getId())) {
-				listeners.notifyChangingByOthers(event);
-				listeners.notifyChangedByOthers(event, new ForeignBatch<>(Set.of(UnitKey.event(event.getId())), copy -> {
-				}));
+			try {
+				if (!cashRegisterKnown(event.getId()) && headCarriesRequires(event.getId())) {
+					listeners.notifyChangingByOthers(event);
+					listeners.notifyChangedByOthers(event, new ForeignBatch<>(Set.of(UnitKey.event(event.getId())), copy -> {
+					}));
+				}
+			} catch (RuntimeException e) {
+				LOG.log(Level.SEVERE, "Das Ende von \"Kassen noch nicht abgeglichen\" konnte nicht gemeldet werden: " + event, e);
 			}
 		}
 	}

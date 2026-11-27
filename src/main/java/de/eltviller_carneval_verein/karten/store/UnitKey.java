@@ -190,7 +190,7 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 
 	/**
 	 * Die Umkehrung von {@link #relativePath()}: erkennt aus einem relativen Ordnerpfad (mit {@code /}) die
-	 * Einheit. Alles, was nicht genau einem der fünf Muster entspricht (fremde Ordner, Unterordner, leere oder
+	 * Einheit. Alles, was nicht genau einem der sechs Muster entspricht (fremde Ordner, Unterordner, leere oder
 	 * unzulässige Namen), ergibt {@link Optional#empty()}.
 	 */
 	public static Optional<UnitKey> parse(String relativePath) {

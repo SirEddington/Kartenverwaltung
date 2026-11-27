@@ -13,6 +13,11 @@ import java.util.Optional;
  */
 public final class CashRegisters {
 
+	/**
+	 * Der Platzhalter für einen fehlenden Namen; derselbe Text wie {@code validation.EntityLabels.NAME_PLACEHOLDER}
+	 * ({@code model} darf nicht von {@code validation} abhängen, deshalb steht er hier bewusst ein zweites Mal).
+	 */
+	private static final String NAME_PLACEHOLDER = "(ohne Name)";
 	private static final String NEW_FREE_NAME = "Neue Kasse";
 	private static final String SHARED_NAME = "Gemeinsame Kasse";
 	private static final String ORPHAN_NAME = "Kasse ohne Vorstellung";
@@ -86,7 +91,7 @@ public final class CashRegisters {
 
 	/** Setzt den Kommentar der Kasse der Vorstellung; leert die alten Felder (auch den zweiten Ist-Betrag). */
 	public static void setComment(Event event, Presentation presentation, String comment) {
-		forEdit(event, presentation).setCashDifferenceComment(comment);
+		forEdit(event, presentation).setCashDifferenceComment(isBlank(comment) ? null : comment);
 		clearOldFields(presentation);
 	}
 
@@ -199,13 +204,16 @@ public final class CashRegisters {
 		}
 		return switch (register.kind()) {
 		case SHARED -> SHARED_NAME;
-		case FREE -> NEW_FREE_NAME;
+		case FREE -> NAME_PLACEHOLDER;
 		case PRESENTATION -> presentationDefaultName(event.findPresentation(register.getId()));
 		};
 	}
 
 	private static String presentationDefaultName(Presentation presentation) {
-		return presentation != null ? PRESENTATION_NAME_PREFIX + presentation.getName() : ORPHAN_NAME;
+		if (presentation == null) {
+			return ORPHAN_NAME;
+		}
+		return PRESENTATION_NAME_PREFIX + (isBlank(presentation.getName()) ? NAME_PLACEHOLDER : presentation.getName());
 	}
 
 	/**

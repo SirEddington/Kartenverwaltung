@@ -19,7 +19,8 @@ import java.util.logging.Logger;
  * das tut die {@link Work}, die der Aufrufer {@link #step} mitgibt.
  * <p>
  * Die Abschnitte, in dieser Reihenfolge: die Hallen in Bündeln zu {@link #HALL_BUNDLE}; dann je Event (sortiert) ein
- * Abschnitt "Kopf" mit nur der Event-Einheit und je Vorstellung (sortiert) ein Abschnitt "Vorstellung". Ein Abschnitt
+ * Abschnitt "Kopf" mit nur der Event-Einheit, je Vorstellung (sortiert) ein Abschnitt "Vorstellung" und, wenn es welche
+ * gibt, zuletzt ein Abschnitt "Kassen" mit den Kassen-Einheiten des Events. Ein Abschnitt
  * "Vorstellung" besteht aus Blöcken: der erste hat die Vorstellung und bis zu {@link #BOOKING_BLOCK} Buchungen, jeder
  * weitere bis zu {@link #BOOKING_BLOCK}. Die Buchungen werden bei jedem Block neu aufgelistet; ein Block nimmt die,
  * die größer sind als der Zeiger, den letzten bearbeiteten Buchungsordner. Was während des Laufs hinter dem Zeiger
@@ -29,9 +30,9 @@ import java.util.logging.Logger;
  */
 final class FullSyncRun {
 
-	/** Wie viele Hallen ein Abschnitt zusammenfasst. */
 	private static final Logger LOGGER = Logger.getLogger(FullSyncRun.class.getName());
 
+	/** Wie viele Hallen ein Abschnitt zusammenfasst. */
 	static final int HALL_BUNDLE = 50;
 	/**
 	 * Wie viele Buchungen ein Block höchstens enthält. Ein Takt beginnt einen weiteren Block nur, wenn der Block, gemessen

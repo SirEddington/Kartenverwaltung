@@ -170,6 +170,34 @@ class CashRegisterStateTest {
 	}
 
 	@Test
+	void settledNotifiesEveryEventDespiteThrowingListener() throws IOException {
+		shared();
+		Event first = saved("Prunksitzung", "Freitag");
+		Event second = saved("Herrensitzung", "Samstag");
+		markHead(first);
+		markHead(second);
+		repository.addListener(new RepositoryListener<Event>() {
+			@Override
+			public void changingByOthers(Event event) {
+				throw new IllegalStateException("Test");
+			}
+		});
+		Recorder recorder = new Recorder();
+		repository.addListener(recorder);
+		sync.setListener(new SyncListener() {
+			@Override
+			public void fullSyncCompleted() {
+				repository.cashRegistersSettled();
+			}
+		});
+
+		reachable.set(true);
+		untilFullSync();
+
+		assertEquals(2, recorder.calls.stream().filter(call -> call.startsWith("changed ")).count());
+	}
+
+	@Test
 	void neverPendingInSingleMode() throws IOException {
 		single();
 		Event event = saved("Prunksitzung", "Freitag");
