@@ -92,6 +92,11 @@ class UnknownFieldsTest {
 	}
 
 	@Test
+	void cashRegister_keepsUnknownFieldThroughReadAndWrite() throws Exception {
+		assertKeepsUnknownField(CashRegister.class, "{\"id\":\"_x\"," + UNKNOWN_FIELD_JSON + "}");
+	}
+
+	@Test
 	void booking_keepsUnknownFieldThroughReadAndWrite() throws Exception {
 		assertKeepsUnknownField(Booking.class, "{\"id\":\"b1\"," + UNKNOWN_FIELD_JSON + "}");
 	}
@@ -167,7 +172,7 @@ class UnknownFieldsTest {
 	@Test
 	void unitClassDropsSatisfiedRequires() throws Exception {
 		for (String value : List.of("null", "[]")) {
-			for (Class<?> type : List.of(Hall.class, Event.class, Presentation.class, Booking.class)) {
+			for (Class<?> type : List.of(Hall.class, Event.class, Presentation.class, Booking.class, CashRegister.class)) {
 				Object model = mapper.readValue("{\"id\":\"x1\",\"requires\":" + value + "}", type);
 				JsonNode written = mapper.valueToTree(model);
 				assertFalse(written.has("requires"), type.getSimpleName() + " behält requires " + value + ": " + written);
@@ -182,7 +187,7 @@ class UnknownFieldsTest {
 
 	@Test
 	void unitClassKeepsUnsatisfiedRequires() throws Exception {
-		for (Class<?> type : List.of(Hall.class, Event.class, Presentation.class, Booking.class)) {
+		for (Class<?> type : List.of(Hall.class, Event.class, Presentation.class, Booking.class, CashRegister.class)) {
 			Object model = mapper.readValue("{\"id\":\"x1\",\"requires\":[\"x-test-merkmal\"]}", type);
 			UnknownFields unknown = (UnknownFields) unknownOf(model);
 			assertTrue(unknown.has("requires"), type.getSimpleName());

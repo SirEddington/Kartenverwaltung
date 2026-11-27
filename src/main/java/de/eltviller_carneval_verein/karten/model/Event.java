@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.model;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -29,6 +30,10 @@ public class Event {
 	// Den Elternverweis setzt setPresentations; keine @JsonManagedReference, denn Jackson 2.17 verträgt sie nicht mit
 	// @JsonSetter(nulls = AS_EMPTY) ("Should never try to reset delegate")
 	private List<Presentation> presentations = new ArrayList<>(); // get,set
+
+	/** Die Kassen des Events, nach Kennung sortiert (String-Ordnung). */
+	private static final Comparator<CashRegister> CASH_REGISTER_ORDER = Comparator.comparing(CashRegister::getId);
+	private List<CashRegister> cashRegisters = new ArrayList<>(); // get,set
 
 	// Konstuktoren -->
 	public Event() {
@@ -97,7 +102,40 @@ public class Event {
 			presentations.forEach(p -> p.setParent(this));
 		}
 	}
+
+	public List<CashRegister> getCashRegisters() {
+		return cashRegisters;
+	}
+
+	@JsonSetter(nulls = Nulls.AS_EMPTY) // "cashRegisters": null in einer Datei lädt als leere Liste
+	public void setCashRegisters(List<CashRegister> cashRegisters) {
+		List<CashRegister> sorted = new ArrayList<>(cashRegisters != null ? cashRegisters : List.of());
+		sorted.sort(CASH_REGISTER_ORDER);
+		this.cashRegisters = sorted;
+	}
 	// <-- Getter und Setter
+
+	/** Die Kasse mit dieser Kennung; {@code null} bei unbekannter oder fehlender Kennung. */
+	public CashRegister findCashRegister(String id) {
+		for (CashRegister register : cashRegisters) {
+			if (register.getId().equals(id)) {
+				return register;
+			}
+		}
+		return null;
+	}
+
+	/** Fügt die Kasse nach Kennung sortiert ein; eine Kasse mit gleicher Kennung wird ersetzt. */
+	public void putCashRegister(CashRegister register) {
+		removeCashRegister(register.getId());
+		cashRegisters.add(register);
+		cashRegisters.sort(CASH_REGISTER_ORDER);
+	}
+
+	/** Entfernt die Kasse mit dieser Kennung; {@code false}, wenn es keine gab. */
+	public boolean removeCashRegister(String id) {
+		return cashRegisters.removeIf(register -> register.getId().equals(id));
+	}
 
 	/** Die Vorstellung mit dieser ID; {@code null} bei unbekannter oder fehlender ID. */
 	public Presentation findPresentation(String id) {
@@ -119,7 +157,7 @@ public class Event {
 
 	/**
 	 * Übernimmt die gespeicherten Felder eines anderen Stands (Name, Beschreibung, archiviert). Nicht kopiert werden
-	 * die Kennung (unveränderlich) und die Vorstellungen: Die Liste samt ihren Objekten bleibt, wie sie ist.
+	 * die Kennung (unveränderlich), die Vorstellungen und die Kassen: Die Listen samt ihren Objekten bleiben, wie sie sind.
 	 */
 	public void copyFrom(Event source) {
 		setName(source.getName());
