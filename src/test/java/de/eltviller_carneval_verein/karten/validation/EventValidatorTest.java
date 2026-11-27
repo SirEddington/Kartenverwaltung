@@ -94,8 +94,9 @@ class EventValidatorTest {
 
 		List<String> codes = EventValidator.validate(event).getIssues().stream().map(ValidationIssue::code).toList();
 
-		assertEquals(4, codes.size(), codes.toString());
-		assertTrue(codes.containsAll(List.of("EVT-001", "PRS-003", "SEA-011", "SEA-001")));
+		// KAS-002: Die beiden gleichnamigen Vorstellungen haben auch gleichnamige Kassen
+		assertEquals(5, codes.size(), codes.toString());
+		assertTrue(codes.containsAll(List.of("EVT-001", "PRS-003", "SEA-011", "SEA-001", "KAS-002")));
 	}
 
 	@Test
@@ -126,10 +127,12 @@ class EventValidatorTest {
 
 		ValidationResult result = EventValidator.validate(event);
 
-		assertEquals(1, result.getIssues().size(), result.getIssues().toString());
+		// zusätzlich KAS-002 einmal für den Kassennamen
+		assertEquals(2, result.getIssues().size(), result.getIssues().toString());
 		assertEquals("EVT-001", result.getIssues().get(0).code());
 		assertEquals(Severity.WARNING, result.getIssues().get(0).severity());
 		assertEquals("Es gibt mehrere Vorstellungen mit dem Namen Prunksitzung.", result.getIssues().get(0).message());
+		assertEquals("KAS-002", result.getIssues().get(1).code());
 		assertTrue(result.isValid(), "Warnungen blockieren nicht");
 	}
 

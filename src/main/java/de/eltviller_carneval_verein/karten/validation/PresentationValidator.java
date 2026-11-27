@@ -46,12 +46,8 @@ public final class PresentationValidator {
 		hallLocks = lockTextOfHall != null ? lockTextOfHall : NO_HALL_LOCKS;
 	}
 
-	/** Größter erlaubter Ist-Betrag im Kassensturz in Cent: 1.000.000 € (wie bisher die Grenze des Spinners). */
-	static final long MAX_CASH_CENTS = 100_000_000L;
-
 	private ValidationResult run() {
 		validateName();
-		validateActualCash();
 		validateDateAndTime();
 		validateHall();
 		validateSeatingPlan();
@@ -127,11 +123,6 @@ public final class PresentationValidator {
 				result.add(SeatIssue.SEAT_DOUBLE.toIssue(EntityLabels.booking(firstBookings.get(seatId))));
 			}
 		});
-	}
-
-	private void validateActualCash() {
-		RangeCheck.checkCents(result, PresentationIssue.CASH_OUT_OF_RANGE, "Ist-Betrag", EntityLabels.presentation(presentation),
-				presentation.getActualCashAmount(), 0, MAX_CASH_CENTS);
 	}
 
 	private void validateName() {

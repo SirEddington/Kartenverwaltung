@@ -16,6 +16,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
@@ -24,6 +25,7 @@ import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.SeatingPlan;
 import de.eltviller_carneval_verein.karten.repository.ConflictPolicies;
 import de.eltviller_carneval_verein.karten.repository.ContentRules;
+import de.eltviller_carneval_verein.karten.repository.LockedCashRegister;
 import de.eltviller_carneval_verein.karten.repository.LockedUnitException;
 import de.eltviller_carneval_verein.karten.repository.StoreEventRepository;
 import de.eltviller_carneval_verein.karten.repository.StoreHallRepository;
@@ -102,6 +104,7 @@ import de.eltviller_carneval_verein.karten.update.StationRegistry;
 import de.eltviller_carneval_verein.karten.update.UpdateChecker;
 import de.eltviller_carneval_verein.karten.update.UpdateSource;
 import de.eltviller_carneval_verein.karten.update.UpdateState;
+import de.eltviller_carneval_verein.karten.validation.CashRegisterValidator;
 import de.eltviller_carneval_verein.karten.validation.PresentationValidator;
 import de.eltviller_carneval_verein.karten.validation.Severity;
 import javafx.animation.Animation;
@@ -585,6 +588,9 @@ public class MainApp extends Application {
 		LockedUnitException.useLabels(labels);
 		// Eine inhaltlich gesperrte Halle friert ihre Vorstellungen ein: Die Prüfung nennt die Sperre statt PRS-007 (KARV-135)
 		PresentationValidator.useHallLocks(halls::lockTextOfHall);
+		// Kassen ohne lesbaren Stand (gesperrt oder wartend) nehmen an KAS-004 und KAS-005 nicht teil (KARV-144)
+		CashRegisterValidator.useUnreadableCashRegisters(id -> repository.lockedCashRegisters(id).values().stream()
+				.filter(locked -> !locked.readable()).map(LockedCashRegister::id).collect(Collectors.toSet()));
 		// der Dialog nennt auch die eigenen Änderungen, die auf eine Sperre warten (KARV-135; der Hinweis zählt sie nur)
 		conflictList = new ConflictList(sync::openConflicts, labels, conflictActions::isAdopted, halls::findById,
 				sync::waitingChanges);
