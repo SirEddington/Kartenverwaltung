@@ -982,6 +982,7 @@ final class UnitMapper {
 		case PRESENTATION -> idMismatch(unit.presentationId(), Presentation::getId);
 		case BOOKING -> (Booking b) -> bookingMismatch(unit, b);
 		case HALL -> idMismatch(unit.hallId(), Hall::getId);
+		case CASH_REGISTER -> throw new UnsupportedOperationException("Kassen-Modell folgt (KARV-144)");
 		};
 		if (type != modelClass(unit.type())) {
 			throw new IllegalArgumentException(type.getSimpleName() + " passt nicht zu " + unit.relativePath());
@@ -1000,6 +1001,7 @@ final class UnitMapper {
 		case PRESENTATION -> Presentation.class;
 		case BOOKING -> Booking.class;
 		case HALL -> Hall.class;
+		case CASH_REGISTER -> throw new UnsupportedOperationException("Kassen-Modell folgt (KARV-144)");
 		};
 	}
 

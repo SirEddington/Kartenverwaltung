@@ -248,6 +248,20 @@ class VersionStoreTest {
 	}
 
 	@Test
+	void eventUnitsListsCashRegisters() throws IOException {
+		VersionStore store = store();
+		byte[] bytes = versionBytes(V1);
+		store.writeVersion(UnitKey.event("e1"), V1, bytes);
+		store.writeVersion(UnitKey.cashRegister("e1", "p1"), V1, bytes);
+		store.writeVersion(UnitKey.cashRegister("e1", "_event"), V1, bytes);
+		store.writeVersion(UnitKey.booking("e1", "p1", "s1"), V1, bytes);
+		store.writeVersion(UnitKey.presentation("e1", "p1"), V1, bytes);
+
+		assertEquals(List.of(UnitKey.event("e1"), UnitKey.presentation("e1", "p1"), UnitKey.booking("e1", "p1", "s1"),
+				UnitKey.cashRegister("e1", "_event"), UnitKey.cashRegister("e1", "p1")), store.eventUnits("e1"));
+	}
+
+	@Test
 	void idsAndAllUnits() throws IOException {
 		VersionStore store = store();
 		assertEquals(List.of(), store.eventIds());

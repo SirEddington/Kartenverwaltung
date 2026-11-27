@@ -40,6 +40,8 @@ public final class VersionStore {
 	static final String PRESENTATIONS = "presentations";
 	/** Der Ordner der Buchungen unter einem Auftritt (siehe {@link #childNames}). */
 	static final String BOOKINGS = "bookings";
+	/** Der Ordner der Kassen unter einem Event (siehe {@link #childNames}). */
+	static final String CASH_REGISTERS = "cashRegisters";
 
 	private static final Logger LOGGER = Logger.getLogger(VersionStore.class.getName());
 
@@ -282,8 +284,8 @@ public final class VersionStore {
 	}
 
 	/**
-	 * Alle Einheiten eines Events: zuerst das Event, dann jeder Auftritt gefolgt von seinen Buchungen. Auftritte und
-	 * Buchungen stehen nach Ordnernamen sortiert; es zählen nur Ordner mit gültigem Namen.
+	 * Alle Einheiten eines Events: zuerst das Event, dann jeder Auftritt gefolgt von seinen Buchungen, zuletzt die
+	 * Kassen. Auftritte, Buchungen und Kassen stehen nach Ordnernamen sortiert; es zählen nur Ordner mit gültigem Namen.
 	 */
 	public List<UnitKey> eventUnits(String eventId) throws IOException {
 		UnitKey event = UnitKey.event(eventId);
@@ -293,6 +295,7 @@ public final class VersionStore {
 			units.add(presentation);
 			units.addAll(childUnits(presentation, BOOKINGS));
 		}
+		units.addAll(childUnits(event, CASH_REGISTERS));
 		return units;
 	}
 

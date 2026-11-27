@@ -544,6 +544,7 @@ public class StoreEventRepository implements EventRepository {
 				}
 			}
 			case HALL -> throw new IllegalStateException("Eine Halle ist keine Einheit eines Events.");
+			case CASH_REGISTER -> throw new UnsupportedOperationException("Kassen-Speicherung folgt (KARV-144)");
 			}
 		} catch (JsonProcessingException e) {
 			throw new IllegalStateException("Der Inhalt von " + unit.relativePath() + " lässt sich nicht lesen: "
@@ -564,6 +565,7 @@ public class StoreEventRepository implements EventRepository {
 		case PRESENTATION -> FieldGroups.presentation();
 		case EVENT -> FieldGroups.eventHead();
 		case HALL -> throw new IllegalArgumentException("Eine Halle hat keine Feldgruppen im Event.");
+		case CASH_REGISTER -> throw new UnsupportedOperationException("Kassen-Feldgruppen folgen (KARV-144)");
 		};
 		ObjectNode fields = values.deepCopy();
 		for (String field : groups.getOrDefault(group, List.of(group))) {

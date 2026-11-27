@@ -275,6 +275,7 @@ final class EventMerge {
 		case PRESENTATION -> 1;
 		case BOOKING -> 2;
 		case HALL -> throw new IllegalArgumentException("Eine Halle gehört zu keinem Event.");
+		case CASH_REGISTER -> throw new UnsupportedOperationException("Kassen-Einarbeitung folgt (KARV-144)");
 		};
 	}
 
@@ -328,6 +329,7 @@ final class EventMerge {
 				}
 				case BOOKING -> mergeBooking(event, snapshot, plan, sink, undo);
 				case HALL -> throw new IllegalArgumentException("Eine Halle gehört zu keinem Event.");
+				case CASH_REGISTER -> throw new UnsupportedOperationException("Kassen-Einarbeitung folgt (KARV-144)");
 				}
 			} catch (RuntimeException e) {
 				undo.restore();
@@ -961,7 +963,7 @@ final class EventMerge {
 			Presentation presentation = presentation(event, unit.presentationId());
 			yield presentation == null ? null : bookingAt(presentation, unit);
 		}
-		case HALL -> null;
+		case HALL, CASH_REGISTER -> null;
 		};
 	}
 
@@ -994,7 +996,7 @@ final class EventMerge {
 			Presentation state = UnitMapper.readUnit(snapshot, Presentation.class);
 			yield existing != null && (state == null || changesPlan(existing, state));
 		}
-		case BOOKING, HALL -> false;
+		case BOOKING, HALL, CASH_REGISTER -> false;
 		};
 	}
 
@@ -1004,7 +1006,7 @@ final class EventMerge {
 		case EVENT -> unit.type() != UnitType.HALL && root.eventId().equals(unit.eventId());
 		case PRESENTATION -> unit.type() != UnitType.HALL && unit.type() != UnitType.EVENT
 				&& root.eventId().equals(unit.eventId()) && root.presentationId().equals(unit.presentationId());
-		case BOOKING, HALL -> root.equals(unit);
+		case BOOKING, HALL, CASH_REGISTER -> root.equals(unit);
 		};
 	}
 

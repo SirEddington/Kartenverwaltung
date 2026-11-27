@@ -10,6 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Der Plan eines Vollabgleichs in Stücken: Er teilt die Einheiten beider Bestände in Abschnitte und Blöcke und merkt
@@ -28,6 +30,8 @@ import java.util.Set;
 final class FullSyncRun {
 
 	/** Wie viele Hallen ein Abschnitt zusammenfasst. */
+	private static final Logger LOGGER = Logger.getLogger(FullSyncRun.class.getName());
+
 	static final int HALL_BUNDLE = 50;
 	/**
 	 * Wie viele Buchungen ein Block höchstens enthält. Ein Takt beginnt einen weiteren Block nur, wenn der Block, gemessen
@@ -140,6 +144,15 @@ final class FullSyncRun {
 				planned.addAll(presentationSections(event));
 			} catch (IOException | RuntimeException e) {
 				planned.add(Section.presentationsOf(event));
+			}
+			try {
+				List<UnitKey> cashRegisters = FullSync.childrenOfBoth(local, shared, event,
+						VersionStore.CASH_REGISTERS);
+				if (!cashRegisters.isEmpty()) {
+					planned.add(Section.of(cashRegisters));
+				}
+			} catch (IOException | RuntimeException e) {
+				LOGGER.log(Level.WARNING, "Die Kassen von Event " + eventId + " lassen sich nicht auflisten.", e);
 			}
 		}
 		sections = planned;
