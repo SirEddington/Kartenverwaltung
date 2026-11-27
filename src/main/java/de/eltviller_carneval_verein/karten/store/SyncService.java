@@ -1825,6 +1825,16 @@ public final class SyncService implements ConnectionControl {
 	}
 
 	/**
+	 * Die Stände der Kassen-Einheiten eines Events aus dem Start-Index, auch der gelöschten und gesperrten, ohne Dateizugriff
+	 * und ohne den Index zu durchlaufen: Jeder Speichervorgang eines Events fragt danach (KARV-144).
+	 *
+	 * @return eine unveränderliche Kopie; leer, wenn der Index zu diesem Event keine Kasse kennt
+	 */
+	public Map<UnitKey, UnitSnapshot> cashRegisterSnapshots(String eventId) {
+		return index.cashRegisterSnapshots(eventId);
+	}
+
+	/**
 	 * Die gültigen Ketten der genannten Einheiten ohne Inhalt (Rechner, Bediener, Zeitpunkt, Speichervorgang), ältestes Glied
 	 * zuerst: der Verlauf eines Events, ohne eine Datei zu lesen. Sie stammen aus dem Start-Index; nur eine Einheit ohne
 	 * Eintrag wird aus den Dateien aufgelöst ({@link #resolveLocal}) und dabei in den Index übernommen. Eine Einheit ohne

@@ -396,6 +396,53 @@ class HeadPresentationHallPolicyTest {
 		assertEquals(OTHER, won.note().affected());
 	}
 
+	/**
+	 * {@code requires} steht außerhalb des Vergleichs je Feldgruppe: Das Ergebnis trägt das Merkmal, wenn eine Seite es
+	 * trägt, ohne Vermerk dafür (KARV-144).
+	 */
+	@Test
+	void requiresIsUnionWithoutNote() {
+		String flag = ",\"requires\":[\"cashRegisters\"]";
+		Version base = version(THIRD, "{\"id\":\"event-1\",\"name\":\"Session\",\"archived\":false}");
+		Version mine = version(OWN, "{\"id\":\"event-1\",\"name\":\"Session 2027\",\"archived\":false" + flag + "}");
+		Version theirs = version(OTHER, "{\"id\":\"event-1\",\"name\":\"Session\",\"archived\":true}");
+
+		Resolution onlyMine = HEAD_POLICY.resolve(input(HEAD, base, mine, theirs, theirs));
+
+		assertEquals(json("{\"id\":\"event-1\",\"name\":\"Session 2027\",\"archived\":true" + flag + "}"),
+				onlyMine.payload());
+		assertNull(onlyMine.note());
+
+		// "Deren" trägt es, "Meine" ist sonst gleich der Basis ("Gleich")
+		Version unchanged = version(OWN, "{\"id\":\"event-1\",\"name\":\"Session\",\"archived\":false,\"requires\":[]}");
+		Version flagged = version(OTHER, "{\"id\":\"event-1\",\"name\":\"Session\",\"archived\":false" + flag + "}");
+		Resolution onlyTheirs = HEAD_POLICY.resolve(input(HEAD, base, unchanged, flagged, flagged));
+		assertEquals(json("{\"id\":\"event-1\",\"name\":\"Session\",\"archived\":false" + flag + "}"),
+				onlyTheirs.payload());
+		assertNull(onlyTheirs.note());
+
+		// die Basis trägt es, keine Seite mehr: Es entfällt, ohne Vermerk
+		Version flaggedBase = version(THIRD, "{\"id\":\"event-1\",\"name\":\"Session\",\"archived\":false" + flag + "}");
+		Version renamed = version(OWN, "{\"id\":\"event-1\",\"name\":\"Neu\",\"archived\":false}");
+		Version archived = version(OTHER, "{\"id\":\"event-1\",\"name\":\"Session\",\"archived\":true,\"requires\":[]}");
+		Resolution neither = HEAD_POLICY.resolve(input(HEAD, flaggedBase, renamed, archived, archived));
+		assertEquals(json("{\"id\":\"event-1\",\"name\":\"Neu\",\"archived\":true}"), neither.payload());
+		assertNull(neither.note());
+
+		// ein strittiges Feld bekommt seinen Vermerk, requires nie
+		Version mineName = version(OWN, "{\"id\":\"event-1\",\"name\":\"Mein Name\",\"archived\":false" + flag + "}");
+		Version theirName = version(OTHER, "{\"id\":\"event-1\",\"name\":\"Dein Name\",\"archived\":false}");
+		Resolution conflict = HEAD_POLICY.resolve(input(HEAD, base, mineName, theirName, theirName));
+		assertEquals(json("{\"id\":\"event-1\",\"name\":\"Dein Name\",\"archived\":false" + flag + "}"),
+				conflict.payload());
+		assertEquals(List.of("name"), conflict.note().fields().stream().map(ConflictNote.FieldConflict::group).toList());
+
+		// eine Löschung bleibt eine Löschung
+		Version theirDeletion = deletion(OTHER);
+		Resolution deleted = HEAD_POLICY.resolve(input(HEAD, base, mine, theirDeletion, theirDeletion));
+		assertTrue(deleted.deleted());
+	}
+
 	// <-- Event-Kopf
 
 	// Halle -->

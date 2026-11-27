@@ -232,7 +232,7 @@ public class FormatGuardTest {
 
 	@Test
 	void rulesIdMatchesTheStrictEnum() {
-		assertEquals("gate-1;payment=CARD,CASH,NONE,TRANSFER;requires=", ContentRules.GATE.rulesId(), RULES);
+		assertEquals("gate-1;payment=CARD,CASH,NONE,TRANSFER;requires=cashRegisters", ContentRules.GATE.rulesId(), RULES);
 	}
 
 	private static Set<String> names(Set<Class<?>> types) {

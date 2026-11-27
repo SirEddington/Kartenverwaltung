@@ -1133,6 +1133,45 @@ class UnitIndexTest {
 		assertEquals(3, refresh(index(), local).resolved());
 	}
 
+	/**
+	 * Die Kassen eines Events kommen ohne Durchlauf über den ganzen Index (KARV-144); die Abfrage folgt jedem Weg, auf dem
+	 * Einträge entstehen und entfallen: Auflösen, Laden der Index-Datei, Laden mit sauberer Marke, Wegfall, Leeren.
+	 */
+	@Test
+	void cashRegisterSnapshotsFollowTheEntries() throws IOException {
+		UnitKey cash = UnitKey.cashRegister("e1", "_kasse");
+		UnitKey otherEvent = UnitKey.cashRegister("e2", "_kasse");
+		saveTwice(EVENT, "event");
+		saveTwice(PRESENTATION, "presentation");
+		saveTwice(cash, "kasse");
+		saveTwice(otherEvent, "andere");
+		UnitIndex first = index();
+		refresh(first, local);
+
+		assertEquals(Set.of(cash), first.cashRegisterSnapshots("e1").keySet());
+		assertEquals("kasse-2", first.cashRegisterSnapshots("e1").get(cash).payload().get("name").asText());
+		assertEquals(Set.of(otherEvent), first.cashRegisterSnapshots("e2").keySet());
+		assertEquals(Map.of(), first.cashRegisterSnapshots("e3"));
+		first.flush();
+
+		UnitIndex fromFile = index();
+		assertEquals(0, refresh(fromFile, local).resolved());
+		assertEquals(Set.of(cash), fromFile.cashRegisterSnapshots("e1").keySet());
+		fromFile.flush();
+		assertTrue(fromFile.writeCleanMarker());
+		UnitIndex clean = index();
+		assertTrue(clean.loadIfClean());
+		assertEquals(Set.of(cash), clean.cashRegisterSnapshots("e1").keySet());
+
+		Path registers = local.dataRoot().resolve("events/e1/cashRegisters");
+		Files.move(registers.resolve("_kasse"), registers.resolve("_ kasse"));
+		refresh(fromFile, local);
+		assertEquals(Map.of(), fromFile.cashRegisterSnapshots("e1"));
+		assertEquals(Set.of(otherEvent), fromFile.cashRegisterSnapshots("e2").keySet());
+		fromFile.clear();
+		assertEquals(Map.of(), fromFile.cashRegisterSnapshots("e2"));
+	}
+
 	@Test
 	void entriesCopyIsUnmodifiable() throws IOException {
 		saveTwice(EVENT, "event");

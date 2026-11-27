@@ -207,6 +207,12 @@ final class UnitIndex {
 
 	private final Map<UnitKey, Entry> entries = new HashMap<>();
 	/**
+	 * Die Schlüssel der Kassen-Einheiten in {@link #entries} je Event-ID: Jeder Speichervorgang eines Events fragt nach
+	 * ihnen ({@link #cashRegisterSnapshots}), und das soll nicht den ganzen Index durchlaufen. Folgt jedem Eintrag, der
+	 * entsteht oder entfällt ({@link #putEntry}, {@link #putEntryIfAbsent}, {@link #removeEntry}, {@link #clear}).
+	 */
+	private final Map<String, Set<UnitKey>> cashRegistersOfEvent = new HashMap<>();
+	/**
 	 * Fremde Versionen, die über eine Änderungsliste kamen, bevor ihre Einheit einen Eintrag hat ({@link #markListed});
 	 * {@link #update} übernimmt sie in den Eintrag. Nur im Speicher.
 	 */
@@ -338,7 +344,7 @@ final class UnitIndex {
 		groups.forEach(this::load);
 		for (UnitKey gone : new ArrayList<>(entries.keySet())) {
 			if (!units.containsKey(gone)) {
-				entries.remove(gone);
+				removeEntry(gone);
 				unlistedYet.remove(gone);
 				ownListedYet.remove(gone);
 				markChanged(groupOf(gone));
@@ -420,7 +426,7 @@ final class UnitIndex {
 		Version current = state.current();
 		Set<VersionId> chainIds = state.chain().stream().map(Version::id).collect(Collectors.toSet());
 		Set<VersionId> absorbed = absorbedOf(unitFiles, current, chainIds);
-		entries.put(unit, new Entry(UnitSnapshot.of(state), fingerprint(unitFiles), !state.pending().isEmpty(),
+		putEntry(unit, new Entry(UnitSnapshot.of(state), fingerprint(unitFiles), !state.pending().isEmpty(),
 				!state.lost().isEmpty(), state.chain().stream().map(ChainStep::of).toList(), absorbed,
 				notesOf(unitFiles, state, absorbed), seenOf(unit, current), ownSeqOf(previous, unit, current, chainIds, absorbed),
 				listedOf(previous, unit, unitFiles, state, chainIds, absorbed)));
@@ -580,6 +586,43 @@ final class UnitIndex {
 			}
 		}
 		return Collections.unmodifiableMap(snapshots);
+	}
+
+	/**
+	 * Die Stände der Kassen-Einheiten eines Events, auch der gelöschten und gesperrten. Greift nur auf deren Einträge zu,
+	 * ohne den Index zu durchlaufen.
+	 */
+	synchronized Map<UnitKey, UnitSnapshot> cashRegisterSnapshots(String eventId) {
+		return snapshots(cashRegistersOfEvent.getOrDefault(eventId, Set.of()));
+	}
+
+	/**
+	 * Trägt den Eintrag ein oder ersetzt ihn, samt {@link #cashRegistersOfEvent}. Neue Schlüssel entstehen nur hier und in
+	 * {@link #putEntryIfAbsent}; die übrigen Stellen ersetzen einen vorhandenen Eintrag.
+	 */
+	private void putEntry(UnitKey unit, Entry entry) {
+		entries.put(unit, entry);
+		trackCashRegister(unit);
+	}
+
+	private void putEntryIfAbsent(UnitKey unit, Entry entry) {
+		if (entries.putIfAbsent(unit, entry) == null) {
+			trackCashRegister(unit);
+		}
+	}
+
+	private void trackCashRegister(UnitKey unit) {
+		if (unit.type() == UnitType.CASH_REGISTER) {
+			cashRegistersOfEvent.computeIfAbsent(unit.eventId(), id -> new HashSet<>()).add(unit);
+		}
+	}
+
+	private void removeEntry(UnitKey unit) {
+		entries.remove(unit);
+		Set<UnitKey> registers = unit.type() == UnitType.CASH_REGISTER ? cashRegistersOfEvent.get(unit.eventId()) : null;
+		if (registers != null && registers.remove(unit) && registers.isEmpty()) {
+			cashRegistersOfEvent.remove(unit.eventId());
+		}
 	}
 
 	/**
@@ -805,6 +848,7 @@ final class UnitIndex {
 			LOGGER.log(Level.WARNING, "Der Index-Ordner " + indexDir + " ließ sich nicht auflisten", e);
 		}
 		entries.clear();
+		cashRegistersOfEvent.clear();
 		unlistedYet.clear();
 		ownListedYet.clear();
 		loaded.addAll(groups);
@@ -1145,7 +1189,7 @@ final class UnitIndex {
 		}
 		read.forEach((group, list) -> {
 			loaded.add(group);
-			list.forEach(entry -> entries.putIfAbsent(entry.snapshot().unit(), entry));
+			list.forEach(entry -> putEntryIfAbsent(entry.snapshot().unit(), entry));
 		});
 		return true;
 	}
@@ -1234,7 +1278,7 @@ final class UnitIndex {
 						entry = entry.withOwnSeq(null);
 						zeroReset = true;
 					}
-					entries.putIfAbsent(entry.snapshot().unit(), entry);
+					putEntryIfAbsent(entry.snapshot().unit(), entry);
 				}
 				if (zeroReset) {
 					markChanged(group);

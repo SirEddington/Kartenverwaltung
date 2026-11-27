@@ -1242,7 +1242,7 @@ class UnitMapperTest {
 	 */
 	private static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, Set<UnitKey> shown, List<UnitPayload> units,
 			Map<UnitKey, UnitSnapshot> store) {
-		return UnitMapper.changes(baseline, shown, units, storeStates(store), eventStates(store));
+		return UnitMapper.changes(baseline, shown, units, storeStates(store), eventStates(store), cashRegisterStates(store));
 	}
 
 	/** Wie {@link #changes(Map, Set, List, Map)}, der Versionsspeicher kennt genau den Vergleichsstand (nichts zurückgestellt). */
@@ -1267,6 +1267,13 @@ class UnitMapperTest {
 	private static Function<String, Map<UnitKey, UnitSnapshot>> eventStates(Map<UnitKey, UnitSnapshot> store) {
 		return eventId -> store.entrySet().stream()
 				.filter(entry -> entry.getKey().type() != UnitType.HALL && eventId.equals(entry.getKey().eventId()))
+				.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+	}
+
+	/** Die Stände der Kassen eines Events aus {@code store}, wie {@code SyncService.cashRegisterSnapshots(eventId)}. */
+	private static Function<String, Map<UnitKey, UnitSnapshot>> cashRegisterStates(Map<UnitKey, UnitSnapshot> store) {
+		return eventId -> store.entrySet().stream()
+				.filter(entry -> entry.getKey().type() == UnitType.CASH_REGISTER && eventId.equals(entry.getKey().eventId()))
 				.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 	}
 
@@ -1887,7 +1894,7 @@ class UnitMapperTest {
 		IllegalStateException e;
 		try {
 			e = assertThrows(IllegalStateException.class, () -> UnitMapper.changes(baseline, shown(baseline),
-					decompose(event), storeStates(baseline), eventStates(baseline), throwing));
+					decompose(event), storeStates(baseline), eventStates(baseline), cashRegisterStates(baseline), throwing));
 		} finally {
 			logger.removeHandler(handler);
 			logger.setUseParentHandlers(parentHandlers);

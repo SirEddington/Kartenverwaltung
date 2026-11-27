@@ -105,9 +105,16 @@ class ContentRulesTest {
 		assertFalse(newer(BOOKING, "{\"requires\":[],\"paymentStatus\":\"CASH\"}"));
 	}
 
+	/** Das Merkmal der Kassen (KARV-144) kennt diese Version; ein weiteres, unbekanntes daneben sperrt weiter. */
+	@Test
+	void headWithRequiresIsNewerWithoutFeature() throws Exception {
+		assertFalse(newer(HEAD, "{\"requires\":[\"cashRegisters\"]}"));
+		assertTrue(newer(HEAD, "{\"requires\":[\"cashRegisters\",\"x-unbekannt\"]}"));
+	}
+
 	@Test
 	void rulesIdIsComputedFromItsInputs() {
-		assertEquals("gate-1;payment=CARD,CASH,NONE,TRANSFER;requires=", ContentRules.GATE.rulesId());
+		assertEquals("gate-1;payment=CARD,CASH,NONE,TRANSFER;requires=cashRegisters", ContentRules.GATE.rulesId());
 		assertEquals(Set.of("Booking.paymentStatus"), ContentRules.STRICT_FIELDS);
 	}
 }

@@ -238,6 +238,10 @@ final class UnitMapper {
 	 * Änderungen, also vor der neuen Version des Kopfs. Scheitert das Speichern danach, sieht der Wiederholversuch den Kopf
 	 * noch gelöscht und räumt erneut, ohne Schon-Gelöschtes zu wiederholen; lebte der Kopf zuerst, wären die alten Kinder
 	 * nach einem Fehler sofort wieder sichtbar.</li>
+	 * <li>Event-Kopf und {@code requires} (KARV-144): Der Kopf bekommt das Merkmal der Kassen, wie {@link HeadRequires#adjust}
+	 * es aus dem Stand des Versionsspeichers ableitet, und wird dafür auch ohne andere Änderung geschrieben; der Vergleich
+	 * mit {@link #sameAsModel} gilt damit dem Kopf samt abgeleitetem Merkmal. Dieselbe Stelle ordnet die Kassen und den Kopf
+	 * in die Reihenfolge des Speichervorgangs ein.</li>
 	 * </ul>
 	 * Gesperrte Inhalte fasst das Speichern nicht an (KARV-135); geprüft wird dafür am Stand des Versionsspeichers, nicht
 	 * nur am Vergleichsstand (der kennt eine fremde, zurückgestellte Sperre nicht):
@@ -260,6 +264,8 @@ final class UnitMapper {
 	 *                    werden nur die Vorfahren der geänderten Einheiten
 	 * @param eventStates die Stände aller Einheiten eines Events im Versionsspeicher (Index); nur gefragt, wenn eine
 	 *                    Vorstellung gelöscht wird
+	 * @param cashRegisterStates die Stände der Kassen-Einheiten eines Events im Versionsspeicher (Index); gefragt bei jedem
+	 *                    Speichern eines Events, für {@link HeadRequires#adjust}
 	 * @throws LockedUnitException   wenn eine betroffene Einheit gesperrt ist oder noch auf eine Datei wartet, unter einem
 	 *                               inhaltlich zu neuen Vorfahren liegt, eine gelöschte Vorstellung gesperrte Einheiten hat
 	 *                               oder ein eigener Inhalt inhaltlich zu neu ist; dann wird nichts gespeichert
@@ -267,14 +273,16 @@ final class UnitMapper {
 	 */
 	static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, Set<UnitKey> shown, List<UnitPayload> units,
 			Function<Collection<UnitKey>, Map<UnitKey, UnitSnapshot>> storeStates,
-			Function<String, Map<UnitKey, UnitSnapshot>> eventStates) {
-		return changes(baseline, shown, units, storeStates, eventStates, ContentRules.GATE);
+			Function<String, Map<UnitKey, UnitSnapshot>> eventStates,
+			Function<String, Map<UnitKey, UnitSnapshot>> cashRegisterStates) {
+		return changes(baseline, shown, units, storeStates, eventStates, cashRegisterStates, ContentRules.GATE);
 	}
 
-	/** Wie {@link #changes(Map, Set, List, Function, Function)}, mit der Inhaltsprüfung {@code gate} (für Tests). */
+	/** Wie {@link #changes(Map, Set, List, Function, Function, Function)}, mit der Inhaltsprüfung {@code gate} (für Tests). */
 	static List<Change> changes(Map<UnitKey, UnitSnapshot> baseline, Set<UnitKey> shown, List<UnitPayload> units,
 			Function<Collection<UnitKey>, Map<UnitKey, UnitSnapshot>> storeStates,
-			Function<String, Map<UnitKey, UnitSnapshot>> eventStates, ContentGate gate) {
+			Function<String, Map<UnitKey, UnitSnapshot>> eventStates,
+			Function<String, Map<UnitKey, UnitSnapshot>> cashRegisterStates, ContentGate gate) {
 		Set<UnitKey> present = new HashSet<>();
 		for (UnitPayload part : units) {
 			present.add(part.unit());
@@ -315,6 +323,13 @@ final class UnitMapper {
 			}
 		}
 		changes.addAll(0, cleanup);
+		for (UnitPayload part : units) {
+			if (part.unit().type() == UnitType.EVENT) {
+				String eventId = part.unit().eventId();
+				changes = HeadRequires.adjust(eventId, changes, baseline, units, cashRegisterStates.apply(eventId));
+				break;
+			}
+		}
 
 		for (Change change : changes) {
 			UnitSnapshot known = baseline.get(change.unit());
@@ -611,7 +626,7 @@ final class UnitMapper {
 	 * Ob eine übergeordnete Einheit (Eltern-Einheit, deren Eltern-Einheit …) im Bestand gelöscht ist und mit diesem Speichern
 	 * wiederbelebt wird, weil die Einheit unter ihr noch zu räumen ist (siehe {@link #changes}).
 	 */
-	private static boolean revivesParent(Map<UnitKey, UnitSnapshot> baseline, UnitKey unit) {
+	static boolean revivesParent(Map<UnitKey, UnitSnapshot> baseline, UnitKey unit) {
 		for (UnitKey ancestor : unit.ancestors()) {
 			UnitSnapshot known = baseline.get(ancestor);
 			if (known != null && known.deleted()) {
