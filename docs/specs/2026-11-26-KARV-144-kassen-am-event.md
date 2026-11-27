@@ -238,7 +238,7 @@ nachgetragen.
 - **`requires` wird nicht allein aus dem Modell abgeleitet und bleibt stehen.** Dort heißt es „derives it when
   writing from the state of the model" und „never keeps it". Hier richtet sich das Merkmal am Kopf nach den
   Kassen-Einheiten im Versionsspeicher, und ein gespeichertes Merkmal bleibt, bis ein Speichervorgang die letzte
-  Kasse löscht oder feststeht, dass es nie eine Kasse gab (siehe „Entfernen"). Grund: Ein Rechner direkt nach dem
+  Kasse löscht oder im Einzelbetrieb feststeht, dass es nie eine Kasse gab (siehe „Entfernen"). Grund: Ein Rechner direkt nach dem
   Update kennt den Kopf, aber noch keine Kasse; aus seinem Modell abgeleitet, würde er die Sperre entfernen. Die
   Folge, die die Regel dort verhindern will (eine Einheit entsperrt sich nie), wird hingenommen: Ein Kopf kann das
   Merkmal behalten, obwohl alle Kassen gelöscht sind; das Event bleibt dann für v1.1 gesperrt, für 1.2 ändert sich
@@ -316,8 +316,11 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
   eine Fabrik; zulässig ist eine Kennung nach dem bestehenden Muster, wahlweise mit führendem Unterstrich.
   `parent` ist der Event-Kopf. `VersionStore.eventUnits` zählt die Kassen eines Events mit auf; damit erfassen
   Index-Neuaufbau und Wiederherstellen sie. Der Vollabgleich bildet seine Abschnitte selbst: `FullSyncRun.begin`
-  bekommt je Event einen Abschnitt für die Kassen, gebildet wie die der Vorstellungen über `FullSync.childrenOfBoth`
-  mit dem Ordner `cashRegisters`. `StoreCodec.FORMAT` und `INDEX_FORMAT` bleiben unverändert.
+  bekommt je Event einen Abschnitt für die Kassen, deren Kennungen wie die der Vorstellungen über
+  `FullSync.childrenOfBoth` mit dem Ordner `cashRegisters` gefunden werden. Der Abschnitt wird ohne Teilbaum
+  abgeglichen, wie der des Kopfs (`FullSyncRun.sync` mit `tree = null`): Scheitert er, kommt das Event nicht in
+  `skippedTrees`, und die Auflösung seiner Vorstellungen und Buchungen wird nicht zurückgestellt.
+  `StoreCodec.FORMAT` und `INDEX_FORMAT` bleiben unverändert.
 - **Zerlegen und Schreiben** (`UnitMapper.decompose`, `UnitMapper.changes`): Der Kopf enthält weder `presentations`
   noch `cashRegisters`. Jede Kasse der Liste ergibt eine Einheit, mit einer Ausnahme: Für eine Vorstellungskasse
   ohne eigene Daten wird keine Einheit **neu angelegt**. Ist ihre Einheit schon gespeichert, wird sie mit ihrem
@@ -348,8 +351,11 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
   Feldern (`KAS-005`); ein Kopf, der das Merkmal noch trägt, obwohl die letzte Kasse gelöscht ist (bekannte Grenze).
   Außer bei einem Kopf, der sich nicht schreiben lässt (bekannte Grenzen), öffnet v1.1 damit nie ein Event, dessen
   alte Felder geleert sind.
-- Die `switch`-Anweisungen über die Art in `EventMerge.apply` und `UnitMapper.comparable` übersetzen auch ohne den
-  neuen Zweig; der Compiler meldet ihn dort nicht.
+- Die `switch`-Anweisungen über die Art in `EventMerge.apply`, `EventMerge.subtree` und `UnitMapper.comparable`
+  übersetzen auch ohne den neuen Zweig; der Compiler meldet ihn dort nicht. `EventMerge.subtree` nimmt für den Kopf
+  die Kassen mit auf, und `ui/ConflictActions.inUse` prüft auch Kassen in Bearbeitung; sonst bliebe eine Kasse,
+  deren Name gerade bearbeitet wird, bei einer fremden Löschung des Kopfs und bei den Konfliktaktionen
+  unberücksichtigt.
 - **Zusammensetzen** (`UnitMapper.assembleEvents`): ein weiterer Durchlauf für Kassen. Eine Kasse unter einem
   gelöschten Kopf ist unsichtbar, eine ohne lesbaren Kopf zählt zu den übergangenen Einheiten. Die Kennung im Inhalt
   muss zum Ordner passen, wie bei den anderen Arten. `comparable`, `readUnit` und `modelClass` bekommen ihren Zweig.
@@ -387,34 +393,41 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
   bekommt ihn schon als `eventStates`), nicht der Vergleichsstand: So zählen auch Kassen, die nicht im Modell stehen
   (gesperrt, unlesbar, zurückgestellt).
 - **Entfernen:** Der Kopf verliert das Merkmal in einem Speichervorgang, der selbst eine Kassen-Einheit löscht und
-  nach dem im Versionsspeicher keine lebende Kassen-Einheit des Events mehr steht, und nach der Regel „Entfernen
-  ohne Kasse" weiter unten. Sonst bleibt ein gespeichertes Merkmal stehen, auch wenn dieser Rechner keine Kasse des
-  Events kennt.
+  nach dem im Versionsspeicher keine lebende Kassen-Einheit des Events mehr steht, und im Einzelbetrieb nach der
+  Regel „Entfernen ohne Kasse" weiter unten. Sonst bleibt ein gespeichertes Merkmal stehen, auch wenn dieser Rechner
+  keine Kasse des Events kennt: Am gemeinsamen Ordner kann eine Kasse noch unterwegs sein (ein Cloud-Ordner
+  überträgt Dateien einzeln, ein Anspruch kann fehlen), und ein Rechner, der sie noch nicht hat, darf die Sperre
+  nicht entfernen.
 - **Schreiben:** Die Ableitung geschieht dort, wo Modell und Stand des Versionsspeichers zusammenkommen
   (`UnitBaseline.save` mit `UnitMapper.changes`), nicht in `decompose`. Der Kopf wird dafür mitgeschrieben, auch
   wenn sich sonst nichts an ihm geändert hat. Lässt er sich nicht schreiben (gesperrt oder wartend), unterbleibt
   nur dieses Mitschreiben; der übrige Speichervorgang läuft wie heute, und der nächste holt es nach. Fehlend,
   `null` und `[]` gelten beim Vergleich als „kein Merkmal".
+- **Konflikte:** Führt die Konfliktregel zwei Stände des Kopfs zusammen, kann `requires` als eigene Feldgruppe im
+  Vermerk FIELDS stehen. Die Konfliktliste zeigt diese Gruppe nicht und bietet für sie keine Aktion an; das Merkmal
+  ergibt sich beim nächsten Speichern nach den Regeln oben.
 - **Kassen noch nicht abgeglichen:** Dieser Zustand gilt für ein Event, wenn alles Folgende zutrifft: Ein
-  gemeinsamer Ordner ist verbunden; seit dem Programmstart hat kein Vollabgleich das Event vollständig abgeglichen
-  (abgeschlossen, ohne das Event zu überspringen; der Abschnitt der Kassen meldet ein Scheitern dafür mit dem Event
-  wie die Abschnitte der Vorstellungen); der gespeicherte Kopf trägt das Merkmal; der Versionsspeicher dieses
-  Rechners kennt keine Kassen-Einheit des Events, auch keine gelöschte. Das ist der
+  gemeinsamer Ordner ist verbunden; seit dem Programmstart ist noch kein Vollabgleich bis zum Ende gelaufen (ob er
+  dabei einzelne Teile übersprungen hat, zählt nicht); der Kopf trägt das Merkmal, bei einem gelöschten Kopf sein
+  letzter nicht gelöschter Stand; der Versionsspeicher dieses Rechners kennt keine Kassen-Einheit des Events, auch
+  keine gelöschte. Das ist der
   gewöhnliche Zustand eines Rechners direkt nach dem Update von 1.1: Solange er 1.1 fuhr, hat er Listeneinträge zu
   Kassen übersprungen, und die Einheiten kommen erst mit dem ersten Vollabgleich. In diesem Zustand sind für das
   Event der Abschnitt „Kassen" der Event-Verwaltung und Ist-Betrag und Kommentar im Kassenabgleich nicht
   bearbeitbar, mit dem Hinweis „Die Kassen dieses Events werden noch abgeglichen." Ebenso lehnen das Löschen einer
   Vorstellung des Events und das Wiederherstellen des Events mit diesem Hinweis ab; eine später eintreffende Kasse
-  stünde sonst ohne ihre Vorstellung da. Das Repository gibt den Zustand je Event an. Er endet, sobald eine
-  Kassen-Einheit des Events eintrifft oder ein Vollabgleich das Event vollständig abgeglichen hat; im Einzelbetrieb
-  gibt es ihn nie. Endet er, ohne dass eine Einheit eintrifft, meldet das Repository das seinen Listenern wie eine
+  stünde sonst ohne ihre Vorstellung da. Die Gesamtbilanz zeigt für das Event als Ist-Betrag „–" mit demselben
+  Hinweis. Das Repository gibt den Zustand je Event an. Er endet, sobald eine Kassen-Einheit des Events eintrifft
+  oder der erste Vollabgleich seit dem Start bis zum Ende gelaufen ist; im Einzelbetrieb gibt es ihn nie. Endet er, ohne dass eine Einheit eintrifft, meldet das Repository das seinen Listenern wie eine
   fremde Änderung am Kopf des Events, damit offene Ansichten die Sperre aufheben. Ein Kopf mit Merkmal ohne
   Kassen-Einheit gilt danach als Event ohne gespeicherte Kassen (etwa nach einem abgebrochenen ersten Speichern
   eines neuen Events).
-- **Entfernen ohne Kasse:** Kennt der Versionsspeicher keine Kassen-Einheit des Events, auch keine gelöschte, und
-  hat seit dem Start ein Vollabgleich das Event vollständig abgeglichen (im Einzelbetrieb: immer), entfernt der
-  nächste Speichervorgang des Events das Merkmal. Dann gab es nie eine Kasse, und der Zustand „Kassen noch nicht
-  abgeglichen" kehrt nach dem nächsten Start nicht wieder.
+- **Entfernen ohne Kasse (nur Einzelbetrieb):** Ist kein gemeinsamer Ordner verbunden und kennt der
+  Versionsspeicher nach dem Speichervorgang keine Kassen-Einheit des Events, auch keine gelöschte, entfernt der
+  Vorgang das Merkmal. Ohne gemeinsamen Ordner gibt es keine Kasse, die noch unterwegs sein könnte. Am gemeinsamen
+  Ordner gilt die Regel nicht; ein Kopf mit Merkmal ohne Kasse (etwa nach einem abgebrochenen ersten Speichern
+  eines neuen Events) behält es dort, und „Kassen noch nicht abgeglichen" tritt nach jedem Start bis zum ersten
+  Vollabgleich wieder ein (bekannte Grenze).
 - **Vergleichen:** Für „lokal verändert" (`StoreEventRepository.localChanges`, `UnitMapper.sameAsModel`,
   `comparable`) wird der Kopf auf beiden Seiten ohne `requires` verglichen. Ein Kopf gilt also nie allein wegen
   `requires` als vom Nutzer geändert. Beim Lesen ins Modell wird `requires` weiter verworfen
@@ -435,7 +448,11 @@ Alle Regeln stehen an einer Stelle im Modell (Vorschlag: `model/CashRegisters`, 
     zweier Kopf-Stände (ein Feld ohne Gruppe wird als eigene Gruppe zusammengeführt), oder wenn ein Rechner die
     letzte Kasse löscht, während ein anderer eine anlegt und den Kopf deshalb nicht schreibt. Der nächste
     Speichervorgang eines Rechners mit 1.2 in diesem Event, der die Kasse im Versionsspeicher kennt, setzt das
-    Merkmal wieder. Bis dahin kann ein Rechner mit v1.1 das Event öffnen; er sieht die Kassen nicht.
+    Merkmal wieder. Bis dahin kann ein Rechner mit v1.1 das Event öffnen; er sieht die Kassen nicht. Derselbe
+    Zustand entsteht, wenn ein beschädigter Kopf (SYS-008) über „Zurücksetzen" roh auf einen lesbaren Stand vor der
+    ersten Kasse zurückgesetzt wird (`SyncService.resetToLastReadable`, nicht über das gewöhnliche Speichern).
+  - Ein Kopf mit Merkmal ohne Kasse behält das Merkmal am gemeinsamen Ordner, und auf jedem Rechner gilt nach jedem
+    Start bis zum ersten Vollabgleich „Kassen noch nicht abgeglichen" (siehe „Entfernen ohne Kasse").
   - Kommen die Kassen eines Events nach dem Update nur zum Teil an (der Vollabgleich läuft über mehrere Takte),
     greift „Kassen noch nicht abgeglichen" nicht mehr, und eine noch fehlende Vorstellungskasse zeigt kurz 0. Eine
     Zählung in diesem Fenster trifft später auf die fremde Einheit und wird nach der Konfliktregel der Kasse
@@ -474,7 +491,7 @@ Die Regeln gelten damit ebenso, wenn ein gelöschtes Event wiederhergestellt wir
   das Wiederherstellen nie.
 - **Alte Felder:** Für jede Vorstellung des Zielstands, die heute lebt und lesbar ist, bekommen die alten Felder
   ihren heutigen Wert. Für eine Vorstellung, die das Wiederherstellen zurückbringt, werden sie geleert, wenn die
-  Einheit ihrer Kasse heute lebt; sonst bekommen sie den Wert aus dem letzten nicht gelöschten Stand ihrer Einheit,
+  Einheit ihrer Kasse heute lebt (nicht gelöscht; eine gesperrte oder unlesbare Einheit lebt); sonst bekommen sie den Wert aus dem letzten nicht gelöschten Stand ihrer Einheit,
   nicht den aus dem Zielstand. Der Zielstand kann eine Zählung zeigen, die in 1.2 vor dem Löschen schon
   zurückgenommen war.
 - **Vorstellungen, die das Wiederherstellen entfernt** (heute lebend, im Zielstand nicht enthalten): Für jede gilt
@@ -542,7 +559,8 @@ Kassen     (•) je Vorstellung eine Kasse   ( ) eine gemeinsame Kasse      [+ K
   des Events, auch im Kartenverkauf.
   - Eine gesperrte Kasse mit lesbarem Stand steht als Zeile da, mit „(gesperrt)" hinter dem Namen.
   - Eine gesperrte Kasse ohne lesbaren Stand ersetzt die Zeile, die es sonst für sie gäbe: bei einer
-    Vorstellungskasse „Kasse <Name der Vorstellung> (gesperrt)" mit der Vorstellung unter „gilt für", bei der
+    Vorstellungskasse „Kasse <Name der Vorstellung> (gesperrt)" mit der Vorstellung unter „gilt für" (fehlt die
+    Vorstellung im Modell: „Kasse ohne Vorstellung (gesperrt)" mit dem Text für verwaiste Kassen), bei der
     gemeinsamen Kasse „Gemeinsame Kasse (gesperrt)", bei einer freien Kasse „Gesperrte Kasse" mit „–". Sie zählt
     nicht in die Gesamtbilanz, auch nicht mit den alten Feldern ihrer Vorstellung; der Hinweis unter dem Feld nennt
     dann die Sperre.
@@ -576,7 +594,9 @@ Kassen     (•) je Vorstellung eine Kasse   ( ) eine gemeinsame Kasse      [+ K
 - Ist eine gemeinsame Kasse gewählt, sind Ist-Betrag und Kommentar auch bei gewählter Vorstellung gesperrt, und der
   Hinweis unter dem Feld lautet „Für dieses Event gilt eine gemeinsame Kasse. Der Kassensturz je Kasse folgt."
   (vorläufig bis KARV-146). Ist-Betrag und Differenz der Vorstellung zeigen dann „–" statt 0 und eines
-  Fehlbetrags; CSV und PDF lassen beide leer.
+  Fehlbetrags; CSV und PDF lassen beide leer. Eine Vorstellungskasse, die vor dem Umschalten gezählt wurde, bleibt
+  in der Liste und zählt in die Gesamtbilanz; ändern lässt sie sich bewusst erst wieder nach dem Zurückschalten
+  oder mit dem Kassensturz je Kasse (KARV-146).
 - Ist die Kassen-Einheit der gewählten Vorstellung gesperrt (SYS-008 oder SYS-009), sind Ist-Betrag und Kommentar
   gesperrt, und der Hinweis nennt die Meldung der Sperre. Hat sie keinen lesbaren Stand, zeigen Ist-Betrag und
   Differenz „–", und CSV und PDF lassen beide leer; ebenso im Zustand „Kassen noch nicht abgeglichen". Ohne diesen
@@ -673,7 +693,11 @@ Bezeichnung der Kasse, dann Betrag, Minimum und Maximum.
   Bestands aus v1.1; nach dem Neuladen gilt die Kasse, und `KAS-005` nennt den Betrag der alten Felder.
 - „Kassen noch nicht abgeglichen": gemeldet bei Kopf mit Merkmal ohne Kassen-Einheit vor dem ersten Vollabgleich;
   nicht im Einzelbetrieb; endet mit dem ersten abgeschlossenen Vollabgleich (mit Meldung an die Listener) und mit
-  dem Eintreffen einer Kasse; Löschen einer Vorstellung und Wiederherstellen werden solange abgelehnt.
+  dem Eintreffen einer Kasse; Löschen einer Vorstellung und Wiederherstellen werden solange abgelehnt, auch für
+  ein gelöschtes Event, dessen letzter lebender Kopf das Merkmal trug; ein scheiternder Abschnitt der Kassen im
+  Vollabgleich stellt die Auflösung der übrigen Einheiten des Events nicht zurück.
+- „Entfernen ohne Kasse": entfernt das Merkmal im Einzelbetrieb; am gemeinsamen Ordner bleibt es, auch wenn der
+  Kopf vor der Kasse eintrifft.
 - Reihenfolge: Bei der ersten Zählung eines Bestands aus v1.1 steht der Kopf vor der Kasse und die Kasse vor der
   Vorstellung; beim Löschen der letzten Kasse steht der Kopf nach ihr. Abbruch nach jeder Stelle ergibt einen der
   im Entwurf genannten Zustände.
@@ -848,11 +872,26 @@ Danach geändert, **von keinem Prüfer mehr gelesen**:
   zum Ändern geholt; „in Bearbeitung" für Kassen ohne Objekt über die Vorstellung; eine gesperrte Kasse verhindert
   das Löschen des Events; Übertragung in anderer Reihenfolge als bekannte Grenze.
 
-**Ergebnis.** Kein Befund ist strittig: Alle kritischen und großen Befunde der fünf Runden sind im Text behoben oder,
+**Runde 6, 27.11.2026** (neues Paar; der Maintainer hat verlangt, Runden zu wiederholen, bis keine mehr Kritisches
+oder Großes findet). Umsetzer: 0 kritisch, 1 groß, 4 klein. Gegenprüfer: 0 kritisch, 1 groß, 5 klein. Behoben:
+
+- Groß (Umsetzer): Die in Runde 5 neue Regel „Entfernen ohne Kasse" hätte am gemeinsamen Ordner die Sperre entfernt,
+  wenn der Kopf vor der Kasse ankommt. Neu: Die Regel gilt nur im Einzelbetrieb; am gemeinsamen Ordner bleibt das
+  Merkmal, und der wiederkehrende Zustand nach einem abgebrochenen ersten Speichern ist eine bekannte Grenze.
+- Groß (Gegenprüfer): „Event vollständig abgeglichen" hätte das Event in `skippedTrees` gebracht und die Auflösung
+  aller seiner Einheiten zurückgestellt. Neu: Der Abschnitt der Kassen läuft ohne Teilbaum wie der des Kopfs, und
+  der Zustand „Kassen noch nicht abgeglichen" endet mit dem ersten Vollabgleich, der bis zum Ende gelaufen ist.
+- Klein, eingearbeitet: Bedingung für „Kassen noch nicht abgeglichen" am letzten lebenden Stand eines gelöschten
+  Kopfs, damit auch das Wiederherstellen gelöschter Events gesperrt ist; Gesamtbilanz zeigt in diesem Zustand „–";
+  `EventMerge.subtree` und `ConflictActions.inUse` kennen Kassen; die Gruppe `requires` erscheint nicht in der
+  Konfliktliste; Rücksetzen eines beschädigten Kopfs als weiterer Weg zum Verlust des Merkmals; „lebt" bei
+  gesperrten Kassen-Einheiten; Text für eine gesperrte verwaiste Kasse; gezählte Vorstellungskassen nach dem
+  Umschalten auf die gemeinsame Kasse.
+
+**Ergebnis.** Kein Befund ist strittig: Alle kritischen und großen Befunde der sechs Runden sind im Text behoben oder,
 beim großen Befund der Runde 5, wie vom Prüfer vorgeschlagen als bekannte Grenze benannt; keiner wurde abgelehnt
-oder herabgestuft. Offen ist, dass die Änderungen nach Runde 5 ungeprüft sind. Die großen Befunde der Runden 2 bis 5
-lagen in zwei Teilen: Sperre für v1.1 mit dem Übergang der alten Felder (Runden 2, 3 und 5) und gesperrte Kassen
-(Runde 4).
+oder herabgestuft. Die großen Befunde der Runden 2 bis 6 lagen in zwei Teilen: Sperre für v1.1 mit dem Übergang der
+alten Felder (Runden 2, 3, 5 und 6) und gesperrte Kassen (Runde 4).
 
 **Nicht belegt:**
 
