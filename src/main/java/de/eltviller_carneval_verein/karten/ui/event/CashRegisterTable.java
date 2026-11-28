@@ -157,7 +157,10 @@ final class CashRegisterTable {
 		hint.setVisible(pending);
 		hint.setManaged(pending);
 		table.setEditable(editMode && !pending);
-		table.setPrefHeight(HEADER_HEIGHT + ROW_HEIGHT * Math.clamp(rows.size(), MIN_ROWS, MAX_ROWS) + 2);
+		// auch als Mindesthöhe: Sonst drückt die Ansicht die Tabelle in einem niedrigen Fenster auf ihre Kopfzeile zusammen
+		double height = HEADER_HEIGHT + ROW_HEIGHT * Math.clamp(rows.size(), MIN_ROWS, MAX_ROWS) + 2;
+		table.setPrefHeight(height);
+		table.setMinHeight(height);
 	}
 
 	/**

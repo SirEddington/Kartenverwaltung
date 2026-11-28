@@ -289,6 +289,11 @@ class CashRegisterStateTest {
 		assertFalse(fresh.presentationUnavailable(event.getId(), saturday.getId()), "im Modell");
 		assertFalse(fresh.presentationUnavailable(event.getId(), sunday.getId()), "gelöscht");
 		assertFalse(fresh.presentationUnavailable(event.getId(), UUID.randomUUID().toString()), "gab es nie");
+
+		// nur im Modell gelöscht, noch nicht gespeichert: gelöscht, nicht „nicht verfügbar"
+		Event shown = fresh.findEvent(event.getId());
+		shown.deletePresentation(shown.findPresentation(saturday.getId()));
+		assertFalse(fresh.presentationUnavailable(event.getId(), saturday.getId()), "ungespeichert gelöscht");
 	}
 
 	@Test

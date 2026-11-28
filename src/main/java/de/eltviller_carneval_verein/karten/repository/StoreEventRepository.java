@@ -882,7 +882,7 @@ public class StoreEventRepository implements EventRepository {
 	/**
 	 * Ob die Vorstellung im Versionsspeicher lebt, aber im Modell fehlt (gesperrt oder unlesbar): Eine verwaiste Kasse zeigt
 	 * dann „– (Vorstellung nicht verfügbar)" statt „– (Vorstellung gelöscht)". {@code false}, wenn die Vorstellung im Modell
-	 * steht, gelöscht ist oder es sie nie gab.
+	 * steht, gelöscht ist (auch nur im Modell, noch nicht gespeichert) oder es sie nie gab.
 	 */
 	public boolean presentationUnavailable(String eventId, String presentationId) {
 		Event event = findEvent(eventId);
@@ -891,7 +891,9 @@ public class StoreEventRepository implements EventRepository {
 		}
 		UnitKey unit = UnitKey.presentation(eventId, presentationId);
 		UnitSnapshot state = sync.snapshots(List.of(unit)).get(unit);
-		return state != null && !UnitMapper.isAbsent(state);
+		// lebt sie lesbar und ungesperrt im Versionsspeicher, hat der Nutzer sie nur im Modell gelöscht
+		return state != null && !UnitMapper.isAbsent(state)
+				&& (UnitMapper.blockedStatus(state) != null || !UnitMapper.isReadable(state));
 	}
 
 	/**
